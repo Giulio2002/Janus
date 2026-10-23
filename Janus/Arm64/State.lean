@@ -1,0 +1,113 @@
+/-!
+# Machine state for the AArch64 user-mode model
+
+This file is the shared contract between the ISA model (`Decode`, `Exec`), the program
+loader (`Janus.Program`), the Go calling convention (`Janus.GoABI`) and the oracle.
+
+* General-purpose registers `X0`–`X30` are indexed by `Nat`; only `0..30` are meaningful.
+  Register number 31 is never stored here: instructions read it as `XZR` or `SP`
+  depending on the encoding, which `readZR` / `readSP` make explicit.
+* Memory is byte-addressed by `Nat` (addresses are `< 2^64`) and carries the list of
+  allocations the caller owns. Every access is checked against these regions; an access
+  that is not fully inside one region is a fault, never undefined behaviour.
+-/
+
+namespace Janus.Arm64
+
+abbrev W64 := BitVec 64
+abbrev W32 := BitVec 32
+abbrev Byte := BitVec 8
+
+structure Flags where
+  n : Bool
+  z : Bool
+  c : Bool
+  v : Bool
+deriving Repr, DecidableEq, Inhabited
+
+structure Region where
+  base : Nat
+  size : Nat
+  writable : Bool
+deriving Repr, DecidableEq, Inhabited
+
+structure Memory where
+  bytes : Nat → Byte
+  regions : List Region
+
+instance : Inhabited Memory := ⟨⟨fun _ => 0, []⟩⟩
+
+structure State where
+  regs : Nat → W64
+  sp : W64
+  pc : W64
+  flags : Flags
+  mem : Memory
+
+instance : Inhabited State := ⟨⟨fun _ => 0, 0, 0, ⟨false, false, false, false⟩, default⟩⟩
+
+/-- Reasons execution stops without a defined architectural result. -/
+inductive Fault where
+  /-- The word at `pc` is outside the supported, decoded subset. -/
+  | undecodable (pc : Nat) (word : Nat)
+  /-- `pc` does not point into any loaded code segment or known stub. -/
+  | noCode (pc : Nat)
+  /-- A memory access of `size` bytes at `addr` is not inside one allocation. -/
+  | outsideAllocation (addr : Nat) (size : Nat)
+  /-- A store targeted a read-only allocation. -/
+  | readOnly (addr : Nat) (size : Nat)
+  /-- An access used `SP` as base while `SP` was not 16-byte aligned (SCTLR_EL1.SA0). -/
+  | spMisaligned (sp : Nat)
+  /-- A branch to a misaligned (non multiple of 4) target. -/
+  | pcMisaligned (pc : Nat)
+  /-- Fuel ran out before the call returned. -/
+  | outOfFuel
+deriving Repr, DecidableEq, Inhabited
+
+namespace State
+
+/-- Read register `r` where encoding 31 means the zero register. -/
+def readZR (s : State) (r : Nat) : W64 := if r = 31 then 0 else s.regs r
+
+/-- Read register `r` where encoding 31 means the stack pointer. -/
+def readSP (s : State) (r : Nat) : W64 := if r = 31 then s.sp else s.regs r
+
+/-- Write register `r` where encoding 31 discards the value (`XZR`). -/
+def writeZR (s : State) (r : Nat) (v : W64) : State :=
+  if r = 31 then s else { s with regs := fun i => if i = r then v else s.regs i }
+
+/-- Write register `r` where encoding 31 sets the stack pointer. -/
+def writeSP (s : State) (r : Nat) (v : W64) : State :=
+  if r = 31 then { s with sp := v } else { s with regs := fun i => if i = r then v else s.regs i }
+
+end State
+
+namespace Memory
+
+/-- `size` bytes at `addr` lie inside a single region (writable if `write`). -/
+def accessible (m : Memory) (addr size : Nat) (write : Bool) : Bool :=
+  m.regions.any fun r => r.base ≤ addr && addr + size ≤ r.base + r.size && (!write || r.writable)
+
+/-- Little-endian read of `n` bytes as a natural number. -/
+def readLE (m : Memory) (addr : Nat) : Nat → Nat
+  | 0 => 0
+  | n + 1 => (m.bytes addr).toNat + 256 * m.readLE (addr + 1) n
+
+/-- Little-endian write of the low `n` bytes of `v`. -/
+def writeLE (m : Memory) (addr n v : Nat) : Memory :=
+  { m with bytes := fun a =>
+      if addr ≤ a ∧ a < addr + n then BitVec.ofNat 8 (v / 256 ^ (a - addr)) else m.bytes a }
+
+end Memory
+
+/-- Checked load of `n ∈ {1,2,4,8,16}` bytes. -/
+def load (m : Memory) (addr n : Nat) : Except Fault Nat :=
+  if m.accessible addr n false then .ok (m.readLE addr n) else .error (.outsideAllocation addr n)
+
+/-- Checked store of the low `n` bytes of `v`. -/
+def store (m : Memory) (addr n v : Nat) : Except Fault Memory :=
+  if m.accessible addr n false then
+    if m.accessible addr n true then .ok (m.writeLE addr n v) else .error (.readOnly addr n)
+  else .error (.outsideAllocation addr n)
+
+end Janus.Arm64

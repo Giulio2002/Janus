@@ -1,0 +1,4 @@
+.lake/
+/artifacts/
+/bin/
+*.olean
