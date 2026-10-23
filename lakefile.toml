@@ -4,3 +4,10 @@ defaultTargets = ["Janus"]
 
 [[lean_lib]]
 name = "Janus"
+
+[[lean_lib]]
+name = "JanusTests"
+
+[[lean_exe]]
+name = "janus-oracle"
+root = "Oracle.Main"
