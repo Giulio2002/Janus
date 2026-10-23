@@ -26,8 +26,10 @@ Modelling decisions (user mode, Linux):
   4-aligned targets when `pc` is aligned. All address arithmetic wraps modulo 2^64.
 * Top-byte-ignore (Linux enables TBI0 for EL0) is not modelled: addresses use all 64 bits,
   so an access through a tagged pointer lies outside every allocation, and an indirect
-  branch to a tagged address leaves the tag in `pc`, which matches no loaded code. Both end
-  in a fault, so this is conservative (hardware would proceed).
+  branch to a target with a non-zero top byte faults (`noCode`) at the branch. Whether
+  hardware strips the tag from a branch target depends on TCR_EL1.TBID0 (set by Linux when
+  pointer authentication is enabled), so the model refuses both readings. Both are
+  conservative: the model faults where hardware might proceed.
 * The model is single-threaded with no caches, so DMB/DSB/ISB and the accepted hints
   (NOP, YIELD, SEV, SEVL, DGH, CSDB, BTI) only advance `pc`.
 -/
@@ -306,9 +308,10 @@ def execCls (N : Nat) (s : State) (rn rd : Nat) : State :=
 /-- `SignExtend(imm, 64)` of a `width`-bit field value `imm`. -/
 def sext64 (width imm : Nat) : W64 := (BitVec.ofNat width imm).signExtend 64
 
-/-- An indirect branch: fault unless the target is 4-byte aligned. -/
+/-- An indirect branch: fault unless the target is untagged and 4-byte aligned. -/
 def branchReg (s : State) (target : W64) : Except Fault State :=
-  if target.toNat % 4 = 0 then .ok { s with pc := target }
+  if target.toNat ≥ 2 ^ 56 then .error (.noCode target.toNat)
+  else if target.toNat % 4 = 0 then .ok { s with pc := target }
   else .error (.pcMisaligned target.toNat)
 
 /-! ## Loads and stores -/

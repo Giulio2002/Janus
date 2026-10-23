@@ -1,0 +1,159 @@
+package main
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	L "github.com/Giulio2002/Janus/oracle/layout"
+)
+
+// Verdicts.
+const (
+	Agree      = "agree"       // both succeeded with identical state, or both faulted
+	Gap        = "model-gap"   // hardware succeeded, the model faulted (conservative)
+	Mismatch   = "MISMATCH"    // the model succeeded with a result hardware does not produce
+	Unobserved = "unobserved"  // the native run could not observe a clean outcome
+	ModelError = "model-error" // janus-oracle could not parse the case
+)
+
+// Verdict is the comparison of one case.
+type Verdict struct {
+	ID      int      `json:"id"`
+	Class   string   `json:"class"`
+	Word    string   `json:"word"`
+	Asm     string   `json:"asm,omitempty"`
+	Verdict string   `json:"verdict"`
+	Kind    string   `json:"kind"` // sub-category (fault kinds, diff kind)
+	Diffs   []string `json:"diffs,omitempty"`
+}
+
+func hexv(s string) uint64 {
+	v, _ := strconv.ParseUint(strings.TrimPrefix(s, "0x"), 16, 64)
+	return v
+}
+
+func faultName(h *L.HW) string {
+	switch h.Sig {
+	case 4:
+		return "SIGILL"
+	case 5:
+		return "SIGTRAP"
+	case 7:
+		return "SIGBUS"
+	case 8:
+		return "SIGFPE"
+	case 11:
+		return "SIGSEGV"
+	}
+	return fmt.Sprintf("sig%d", h.Sig)
+}
+
+func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
+	v := Verdict{ID: c.ID, Class: c.Class, Word: c.Word}
+	if h == nil || (h.Status != "ok" && h.Status != "fault" && h.Status != "selfloop") {
+		v.Verdict = Unobserved
+		if h != nil {
+			v.Kind = h.Status
+		} else {
+			v.Kind = "no-native-result"
+		}
+		return v
+	}
+	if m == nil || (m.Status != "ok" && m.Status != "fault") {
+		v.Verdict, v.Kind = ModelError, "no-model-result"
+		return v
+	}
+	hwFault := h.Status == "fault"
+	hwPC := hexv(h.PC)
+	// A branch to a misaligned target completes on hardware and faults on the next fetch
+	// (PC alignment fault); the model may report that as pcMisaligned at the branch.
+	hwMisalignedBranch := !hwFault && hwPC%4 != 0
+	switch {
+	case hwFault && m.Status == "fault":
+		v.Verdict, v.Kind = Agree, "fault/"+faultName(h)+"/"+m.Fault
+		return v
+	case hwFault:
+		v.Verdict, v.Kind = Mismatch, "model-ok-hw-fault/"+faultName(h)
+		v.Diffs = []string{fmt.Sprintf("hardware %s (si_addr %s, code %d) but model succeeded (pc %s)", faultName(h), h.Addr, h.Code, m.PC)}
+		return v
+	case m.Status == "fault":
+		if hwMisalignedBranch && m.Fault == "pcMisaligned" {
+			v.Verdict, v.Kind = Agree, "fault/pcMisaligned"
+			return v
+		}
+		v.Verdict, v.Kind = Gap, m.Fault
+		return v
+	}
+	// Both succeeded: compare everything.
+	for i := 0; i < 31; i++ {
+		if hexv(h.X[i]) != hexv(m.X[i]) {
+			v.Diffs = append(v.Diffs, fmt.Sprintf("x%d: hw %s model %s (in %s)", i, h.X[i], m.X[i], c.X[i]))
+		}
+	}
+	if hexv(h.SP) != hexv(m.SP) {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("sp: hw %s model %s (in %s)", h.SP, m.SP, c.SP))
+	}
+	if h.NZCV != m.NZCV {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("nzcv: hw %04b model %04b (in %04b)", h.NZCV, m.NZCV, c.NZCV))
+	}
+	if hwPC != hexv(m.PC) {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("pc: hw %s (pc+%d) model %s (pc+%d)", h.PC,
+			int64(hwPC-L.TestPC), m.PC, int64(hexv(m.PC)-L.TestPC)))
+	}
+	hm := map[int]int{}
+	for _, e := range h.Mem {
+		hm[e[0]] = e[1]
+	}
+	mm := map[int]int{}
+	for _, e := range m.Mem {
+		mm[e[0]] = e[1]
+	}
+	var memd []string
+	for off, b := range hm {
+		if mb, ok := mm[off]; !ok || mb != b {
+			memd = append(memd, fmt.Sprintf("mem[+%d]: hw %#02x model %s", off, b, show(mm, off, c.Seed)))
+		}
+	}
+	for off, b := range mm {
+		if _, ok := hm[off]; !ok {
+			memd = append(memd, fmt.Sprintf("mem[+%d]: hw %#02x (unchanged) model %#02x", off, L.Pattern(c.Seed, uint64(off)), b))
+		}
+	}
+	if len(memd) > 0 {
+		sortStrings(memd)
+		if len(memd) > 8 {
+			memd = append(memd[:8], fmt.Sprintf("... %d more bytes", len(memd)-8))
+		}
+		v.Diffs = append(v.Diffs, memd...)
+	}
+	if len(v.Diffs) == 0 {
+		v.Verdict = Agree
+		if hwMisalignedBranch {
+			v.Kind = "ok/misaligned-branch"
+		} else {
+			v.Kind = "ok"
+		}
+		return v
+	}
+	v.Verdict = Mismatch
+	var kinds []string
+	for _, d := range v.Diffs {
+		k := d[:strings.IndexAny(d, ":[")]
+		if strings.HasPrefix(k, "x") {
+			k = "reg"
+		}
+		if len(kinds) == 0 || kinds[len(kinds)-1] != k {
+			kinds = append(kinds, k)
+		}
+	}
+	v.Kind = "state/" + strings.Join(kinds, "+")
+	return v
+}
+
+func show(mm map[int]int, off int, seed uint64) string {
+	if b, ok := mm[off]; ok {
+		return fmt.Sprintf("%#02x", b)
+	}
+	return fmt.Sprintf("%#02x (unchanged)", L.Pattern(seed, uint64(off)))
+}
