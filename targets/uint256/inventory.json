@@ -1,0 +1,6292 @@
+{
+ "binary": "bin/uint256-arm64",
+ "sha256": "d70d4a6d3db7a0408eeb9d45918ddbdd02d004a462b4b980b4620fc323c5925f",
+ "go": "go1.26.0",
+ "functions": {
+  "(*Int).fromHex": {
+   "symbol": "github.com/holiman/uint256.(*Int).fromHex",
+   "addr": "0xa7310",
+   "size": 464,
+   "instructions": 113,
+   "reachable_instructions": 112,
+   "mnemonics": [
+    "add",
+    "adrp",
+    "b",
+    "b.cond",
+    "bl",
+    "cbnz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "ldrb",
+    "ldur",
+    "lsl",
+    "mov",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "stur",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "runtime.panicBounds": {
+     "kind": "panic",
+     "sites": [
+      "0xa74b0"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa74c4"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa74c4": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.panicBounds": {
+     "0xa74b0": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 16,
+   "stack_growth_prologue": true,
+   "args": [],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -24,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-24, 32)"
+    },
+    "global": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa7338",
+      "0xa7370",
+      "0xa7390",
+      "0xa73b4",
+      "0xa73f0",
+      "0xa7470",
+      "0xa74a0"
+     ]
+    },
+    "data": {
+     "read": true,
+     "write": true,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa7348",
+      "0xa7354",
+      "0xa73a0",
+      "0xa73d4",
+      "0xa73d8",
+      "0xa743c",
+      "0xa7444",
+      "0xa744c",
+      "0xa7464"
+     ]
+    }
+   },
+   "g_reads": [
+    "0xa7310"
+   ],
+   "memory_outside_args_and_stack": [
+    "data",
+    "global"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [
+    {
+     "from": "0xa7458",
+     "to": "0xa7414"
+    },
+    {
+     "from": "0xa747c",
+     "to": "0xa743c"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)",
+   "transitive_callees": [],
+   "transitive_stubs": [
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds"
+   ]
+  },
+  "(*Int).SetBytes32": {
+   "symbol": "github.com/holiman/uint256.(*Int).SetBytes32",
+   "addr": "0xa74e0",
+   "size": 144,
+   "instructions": 33,
+   "reachable_instructions": 32,
+   "mnemonics": [
+    "b",
+    "b.cond",
+    "bl",
+    "cmp",
+    "ldp",
+    "ldr",
+    "ldur",
+    "mov",
+    "nop",
+    "ret",
+    "rev",
+    "stp",
+    "str",
+    "stur",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "runtime.panicBounds": {
+     "kind": "panic",
+     "sites": [
+      "0xa7540"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa7554"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa7554": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "in.ptr@0"
+      ],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.panicBounds": {
+     "0xa7540": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "in.ptr@0"
+      ],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 16,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "in.ptr",
+    "#in.len",
+    "#in.cap"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -24,
+     "max": 40,
+     "unknown_offset_at": [],
+     "range": "[-24, 40)"
+    },
+    "in.ptr": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa74e0"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [
+    "z==in.ptr: read in.ptr@16 at 0xa751c after write z@16",
+    "z==in.ptr: read in.ptr@24 at 0xa7528 after write z@24"
+   ],
+   "transitive_callees": [],
+   "transitive_stubs": [
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds"
+   ]
+  },
+  "(*Int).Hex": {
+   "symbol": "github.com/holiman/uint256.(*Int).Hex",
+   "addr": "0xa7570",
+   "size": 960,
+   "instructions": 237,
+   "reachable_instructions": 236,
+   "mnemonics": [
+    "add",
+    "adrp",
+    "and",
+    "asr",
+    "b",
+    "b.cond",
+    "bl",
+    "cbnz",
+    "cbz",
+    "clz",
+    "cmp",
+    "ldr",
+    "ldrb",
+    "ldur",
+    "lsl",
+    "lsr",
+    "mov",
+    "neg",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "strb",
+    "stur",
+    "sub",
+    "tbnz",
+    "ubfx"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "runtime.slicebytetostring": {
+     "kind": "runtime",
+     "sites": [
+      "0xa7868"
+     ]
+    },
+    "runtime.panicBounds": {
+     "kind": "panic",
+     "sites": [
+      "0xa787c",
+      "0xa7884",
+      "0xa788c",
+      "0xa7894",
+      "0xa789c",
+      "0xa78a4",
+      "0xa78ac",
+      "0xa78b4",
+      "0xa78bc",
+      "0xa78c4",
+      "0xa78cc",
+      "0xa78d4",
+      "0xa78dc",
+      "0xa78e4",
+      "0xa78ec",
+      "0xa78f4",
+      "0xa78fc",
+      "0xa7904",
+      "0xa7908"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa7918"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa7918": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.panicBounds": {
+     "0xa7884": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa787c": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa7908": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa7904": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78fc": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78f4": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78ec": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78e4": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78dc": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78d4": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78cc": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78c4": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78bc": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78b4": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78ac": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa78a4": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa789c": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa7894": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa788c": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.slicebytetostring": {
+     "0xa7868": {
+      "x0": [],
+      "x1": [
+       "sp@None"
+      ],
+      "x2": [],
+      "x3": [
+       "sp@-74"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 112,
+   "stack_growth_prologue": true,
+   "args": [],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -120,
+     "max": 16,
+     "unknown_offset_at": [
+      "0xa7638",
+      "0xa767c",
+      "0xa7698",
+      "0xa76b4",
+      "0xa76d0",
+      "0xa76ec",
+      "0xa7708",
+      "0xa7724",
+      "0xa7740",
+      "0xa775c",
+      "0xa7778",
+      "0xa7794",
+      "0xa77b0",
+      "0xa77cc",
+      "0xa77e8",
+      "0xa7804",
+      "0xa7838",
+      "0xa7850"
+     ],
+     "range": "[-120, 16)"
+    },
+    "data": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa75a0",
+      "0xa75bc",
+      "0xa75d8",
+      "0xa75f4",
+      "0xa765c",
+      "0xa7684",
+      "0xa76a0",
+      "0xa76bc",
+      "0xa76d8",
+      "0xa76f4",
+      "0xa7710",
+      "0xa772c",
+      "0xa7748",
+      "0xa7764",
+      "0xa7780",
+      "0xa779c",
+      "0xa77b8",
+      "0xa77d4",
+      "0xa77f0",
+      "0xa780c"
+     ]
+    },
+    "global": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa7670",
+      "0xa768c",
+      "0xa76a8",
+      "0xa76c4",
+      "0xa76e0",
+      "0xa76fc",
+      "0xa7718",
+      "0xa7734",
+      "0xa7750",
+      "0xa776c",
+      "0xa7788",
+      "0xa77a4",
+      "0xa77c0",
+      "0xa77dc",
+      "0xa77f8",
+      "0xa7814"
+     ]
+    }
+   },
+   "g_reads": [
+    "0xa7570"
+   ],
+   "memory_outside_args_and_stack": [
+    "data",
+    "global"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [
+    {
+     "from": "0xa781c",
+     "to": "0xa7638"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)",
+   "transitive_callees": [
+    "runtime.mallocgc",
+    "runtime.memmove",
+    "runtime.slicebytetostring"
+   ],
+   "transitive_stubs": [
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicunsafestringlen",
+    "runtime.panicunsafestringnilptr"
+   ]
+  },
+  "Reciprocal": {
+   "symbol": "github.com/holiman/uint256.Reciprocal",
+   "addr": "0xa7930",
+   "size": 2032,
+   "instructions": 507,
+   "reachable_instructions": 506,
+   "mnemonics": [
+    "adcs",
+    "add",
+    "adds",
+    "adrp",
+    "and",
+    "b",
+    "b.cond",
+    "bl",
+    "cbz",
+    "clz",
+    "cmp",
+    "csel",
+    "ldp",
+    "ldr",
+    "lsl",
+    "lsr",
+    "mov",
+    "mul",
+    "neg",
+    "ngc",
+    "nop",
+    "orr",
+    "ret",
+    "sbcs",
+    "stp",
+    "str",
+    "sub",
+    "subs",
+    "udiv",
+    "umulh"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.(*Int).Lsh": {
+     "kind": "uint256",
+     "sites": [
+      "0xa79b4"
+     ]
+    },
+    "runtime.panicdivide": {
+     "kind": "panic",
+     "sites": [
+      "0xa80e4"
+     ]
+    },
+    "runtime.gopanic": {
+     "kind": "panic",
+     "sites": [
+      "0xa8100"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa8110"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa8110": {
+      "x0": [
+       "m@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).Lsh": {
+     "0xa79b4": {
+      "x0": [
+       "sp@-240"
+      ],
+      "x1": [
+       "m@0"
+      ],
+      "x2": [],
+      "x3": [
+       "sp@-240"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.panicdivide": {
+     "0xa80e4": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.gopanic": {
+     "0xa8100": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 272,
+   "stack_growth_prologue": true,
+   "args": [
+    "m"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -280,
+     "max": 56,
+     "unknown_offset_at": [],
+     "range": "[-280, 56)"
+    },
+    "m": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "global": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa80f0"
+     ]
+    },
+    "data": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa80f8"
+     ]
+    }
+   },
+   "g_reads": [
+    "0xa7930"
+   ],
+   "memory_outside_args_and_stack": [
+    "data",
+    "global"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "github.com/holiman/uint256.(*Int).Lsh"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicdivide"
+   ]
+  },
+  "(*Int).reduce4": {
+   "symbol": "github.com/holiman/uint256.(*Int).reduce4",
+   "addr": "0xa8120",
+   "size": 848,
+   "instructions": 210,
+   "reachable_instructions": 210,
+   "mnemonics": [
+    "adcs",
+    "add",
+    "adds",
+    "b",
+    "b.cond",
+    "bl",
+    "cbz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "madd",
+    "mov",
+    "mul",
+    "neg",
+    "ngc",
+    "ret",
+    "sbcs",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "subs",
+    "umulh"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa8458"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa8458": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [
+       "m@0"
+      ],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 160,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "x",
+    "m",
+    "mu"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -168,
+     "max": 40,
+     "unknown_offset_at": [],
+     "range": "[-168, 40)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 64,
+     "unknown_offset_at": [],
+     "range": "[0, 64)"
+    },
+    "mu": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 40,
+     "unknown_offset_at": [],
+     "range": "[0, 40)"
+    },
+    "m": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa8120"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": false,
+   "loops": [
+    {
+     "from": "0xa8430",
+     "to": "0xa8404"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)",
+   "transitive_callees": [],
+   "transitive_stubs": [
+    "runtime.morestack_noctxt.abi0"
+   ]
+  },
+  "(*Int).Bytes32": {
+   "symbol": "github.com/holiman/uint256.(*Int).Bytes32",
+   "addr": "0xa8470",
+   "size": 112,
+   "instructions": 28,
+   "reachable_instructions": 28,
+   "mnemonics": [
+    "add",
+    "ldp",
+    "ldr",
+    "ret",
+    "rev",
+    "stp",
+    "str",
+    "stur",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 48,
+   "stack_growth_prologue": false,
+   "args": [
+    "z"
+   ],
+   "memory_footprint": {
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -56,
+     "max": 40,
+     "unknown_offset_at": [],
+     "range": "[-56, 40)"
+    },
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Clone": {
+   "symbol": "github.com/holiman/uint256.(*Int).Clone",
+   "addr": "0xa84e0",
+   "size": 112,
+   "instructions": 27,
+   "reachable_instructions": 27,
+   "mnemonics": [
+    "add",
+    "adrp",
+    "b",
+    "b.cond",
+    "bl",
+    "cmp",
+    "ldr",
+    "ldur",
+    "mov",
+    "ret",
+    "str",
+    "stur",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "runtime.newobject": {
+     "kind": "runtime",
+     "sites": [
+      "0xa8504"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa8540"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa8540": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.newobject": {
+     "0xa8504": {
+      "x0": [
+       "global@None"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 48,
+   "stack_growth_prologue": true,
+   "args": [
+    "z"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -56,
+     "max": 16,
+     "unknown_offset_at": [],
+     "range": "[-56, 16)"
+    },
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "heap": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa84e0"
+   ],
+   "memory_outside_args_and_stack": [
+    "heap"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "runtime.mallocgc",
+    "runtime.newobject"
+   ],
+   "transitive_stubs": [
+    "runtime.morestack_noctxt.abi0"
+   ]
+  },
+  "(*Int).Add": {
+   "symbol": "github.com/holiman/uint256.(*Int).Add",
+   "addr": "0xa8550",
+   "size": 80,
+   "instructions": 17,
+   "reachable_instructions": 17,
+   "mnemonics": [
+    "adcs",
+    "adds",
+    "ldr",
+    "ret",
+    "str"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).AddOverflow": {
+   "symbol": "github.com/holiman/uint256.(*Int).AddOverflow",
+   "addr": "0xa85a0",
+   "size": 80,
+   "instructions": 20,
+   "reachable_instructions": 20,
+   "mnemonics": [
+    "adc",
+    "adcs",
+    "adds",
+    "cmp",
+    "cset",
+    "ldr",
+    "ret",
+    "str"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).AddMod": {
+   "symbol": "github.com/holiman/uint256.(*Int).AddMod",
+   "addr": "0xa85f0",
+   "size": 864,
+   "instructions": 216,
+   "reachable_instructions": 216,
+   "mnemonics": [
+    "adc",
+    "adcs",
+    "add",
+    "adds",
+    "adrp",
+    "b",
+    "b.cond",
+    "bl",
+    "cbnz",
+    "cbz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "mov",
+    "neg",
+    "ngc",
+    "orr",
+    "ret",
+    "sbcs",
+    "stp",
+    "str",
+    "sub",
+    "subs"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.udivrem": {
+     "kind": "uint256",
+     "sites": [
+      "0xa88e4"
+     ]
+    },
+    "github.com/holiman/uint256.(*Int).Mod": {
+     "kind": "uint256",
+     "sites": [
+      "0xa8910"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa8940"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa8940": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [
+       "y@0"
+      ],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).Mod": {
+     "0xa8910": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "z@0"
+      ],
+      "x2": [
+       "m@0",
+       "sp@-40"
+      ],
+      "x3": [
+       "m@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.udivrem": {
+     "0xa88e4": {
+      "x0": [
+       "sp@-120"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-224"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "m@0",
+       "sp@-40"
+      ],
+      "x7": [
+       "sp@-152"
+      ]
+     }
+    }
+   },
+   "stack_frame_bytes": 368,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "x",
+    "y",
+    "m"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -376,
+     "max": 40,
+     "unknown_offset_at": [],
+     "range": "[-376, 40)"
+    },
+    "m": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "global": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa8858",
+      "0xa8864"
+     ]
+    }
+   },
+   "g_reads": [
+    "0xa85f0"
+   ],
+   "memory_outside_args_and_stack": [
+    "global"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "github.com/holiman/uint256.(*Int).Mod",
+    "github.com/holiman/uint256.udivrem",
+    "github.com/holiman/uint256.udivremBy1",
+    "github.com/holiman/uint256.udivremKnuth",
+    "math/bits.Div64",
+    "runtime.memmove"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "(*Int).SubOverflow": {
+   "symbol": "github.com/holiman/uint256.(*Int).SubOverflow",
+   "addr": "0xa8950",
+   "size": 96,
+   "instructions": 21,
+   "reachable_instructions": 21,
+   "mnemonics": [
+    "cmp",
+    "cset",
+    "ldr",
+    "neg",
+    "ngc",
+    "ret",
+    "sbcs",
+    "str",
+    "subs"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Sub": {
+   "symbol": "github.com/holiman/uint256.(*Int).Sub",
+   "addr": "0xa89b0",
+   "size": 80,
+   "instructions": 17,
+   "reachable_instructions": 17,
+   "mnemonics": [
+    "ldr",
+    "ret",
+    "sbcs",
+    "str",
+    "subs"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "umul": {
+   "symbol": "github.com/holiman/uint256.umul",
+   "addr": "0xa8a00",
+   "size": 448,
+   "instructions": 109,
+   "reachable_instructions": 109,
+   "mnemonics": [
+    "adcs",
+    "adds",
+    "ldp",
+    "ldr",
+    "mov",
+    "mul",
+    "nop",
+    "ret",
+    "stp",
+    "str",
+    "umulh"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "x",
+    "y",
+    "res"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "res": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 64,
+     "unknown_offset_at": [],
+     "range": "[0, 64)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [
+    "res==x: read x@0 at 0xa8a1c after write res@0",
+    "res==x: read x@0 at 0xa8a74 after write res@0",
+    "res==x: read x@0 at 0xa8a74 after write res@8",
+    "res==x: read x@0 at 0xa8ae0 after write res@0",
+    "res==x: read x@0 at 0xa8ae0 after write res@8",
+    "res==x: read x@16 at 0xa8ad8 after write res@16",
+    "res==x: read x@16 at 0xa8b68 after write res@16",
+    "res==x: read x@24 at 0xa8b8c after write res@24",
+    "res==x: read x@8 at 0xa8b44 after write res@8",
+    "res==y: read y@0 at 0xa8a14 after write res@0",
+    "res==y: read y@16 at 0xa8adc after write res@16",
+    "res==y: read y@24 at 0xa8b48 after write res@24",
+    "res==y: read y@24 at 0xa8b6c after write res@24",
+    "res==y: read y@24 at 0xa8b90 after write res@24",
+    "res==y: read y@8 at 0xa8a6c after write res@8"
+   ],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Mul": {
+   "symbol": "github.com/holiman/uint256.(*Int).Mul",
+   "addr": "0xa8bc0",
+   "size": 176,
+   "instructions": 43,
+   "reachable_instructions": 43,
+   "mnemonics": [
+    "adcs",
+    "add",
+    "adds",
+    "ldp",
+    "madd",
+    "mov",
+    "mul",
+    "nop",
+    "ret",
+    "stp",
+    "str",
+    "umulh"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).MulOverflow": {
+   "symbol": "github.com/holiman/uint256.(*Int).MulOverflow",
+   "addr": "0xa8c70",
+   "size": 176,
+   "instructions": 42,
+   "reachable_instructions": 42,
+   "mnemonics": [
+    "add",
+    "b",
+    "b.cond",
+    "bl",
+    "cmp",
+    "cset",
+    "ldp",
+    "ldr",
+    "ldrsb",
+    "ldur",
+    "mov",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "stur",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.umul": {
+     "kind": "uint256",
+     "sites": [
+      "0xa8cac"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa8d08"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa8d08": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [
+       "y@0"
+      ],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.umul": {
+     "0xa8cac": {
+      "x0": [
+       "x@0"
+      ],
+      "x1": [
+       "y@0"
+      ],
+      "x2": [
+       "sp@-72"
+      ],
+      "x3": [
+       "sp@-72"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 112,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -120,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-120, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa8c70"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "github.com/holiman/uint256.umul"
+   ],
+   "transitive_stubs": [
+    "runtime.morestack_noctxt.abi0"
+   ]
+  },
+  "(*Int).squared": {
+   "symbol": "github.com/holiman/uint256.(*Int).squared",
+   "addr": "0xa8d20",
+   "size": 144,
+   "instructions": 36,
+   "reachable_instructions": 36,
+   "mnemonics": [
+    "adcs",
+    "add",
+    "adds",
+    "ldp",
+    "madd",
+    "mov",
+    "mul",
+    "nop",
+    "ret",
+    "stp",
+    "umulh"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "udivremBy1": {
+   "symbol": "github.com/holiman/uint256.udivremBy1",
+   "addr": "0xa8db0",
+   "size": 288,
+   "instructions": 71,
+   "reachable_instructions": 70,
+   "mnemonics": [
+    "adcs",
+    "add",
+    "adds",
+    "b",
+    "b.cond",
+    "bl",
+    "cinc",
+    "cmp",
+    "csel",
+    "ldp",
+    "ldr",
+    "ldur",
+    "mov",
+    "msub",
+    "mul",
+    "mvn",
+    "nop",
+    "ret",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "tbnz",
+    "umulh"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "math/bits.Div64": {
+     "kind": "other",
+     "sites": [
+      "0xa8df4"
+     ]
+    },
+    "runtime.panicBounds": {
+     "kind": "panic",
+     "sites": [
+      "0xa8e94",
+      "0xa8e98"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa8eb4"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa8eb4": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "math/bits.Div64": {
+     "0xa8df4": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.panicBounds": {
+     "0xa8e98": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa8e94": {
+      "x0": [],
+      "x1": [
+       "u.ptr@0"
+      ],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [
+       "quot.ptr@0"
+      ],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 48,
+   "stack_growth_prologue": true,
+   "args": [
+    "quot.ptr",
+    "#quot.len",
+    "#quot.cap",
+    "u.ptr",
+    "#u.len",
+    "#u.cap",
+    "#d"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -56,
+     "max": 64,
+     "unknown_offset_at": [],
+     "range": "[-56, 64)"
+    },
+    "u.ptr": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa8e0c",
+      "0xa8e44"
+     ]
+    },
+    "quot.ptr": {
+     "read": false,
+     "write": true,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa8e34"
+     ]
+    }
+   },
+   "g_reads": [
+    "0xa8db0"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [
+    {
+     "from": "0xa8e7c",
+     "to": "0xa8e24"
+    },
+    {
+     "from": "0xa8ec8",
+     "to": "0xa8db0"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)",
+   "transitive_callees": [
+    "math/bits.Div64"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "udivremKnuth": {
+   "symbol": "github.com/holiman/uint256.udivremKnuth",
+   "addr": "0xa8ed0",
+   "size": 640,
+   "instructions": 158,
+   "reachable_instructions": 157,
+   "mnemonics": [
+    "adc",
+    "adcs",
+    "add",
+    "adds",
+    "and",
+    "b",
+    "b.cond",
+    "bl",
+    "cinc",
+    "cmp",
+    "csel",
+    "ldp",
+    "ldr",
+    "ldur",
+    "mov",
+    "msub",
+    "mul",
+    "mvn",
+    "ngc",
+    "nop",
+    "ret",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "subs",
+    "tbnz",
+    "umulh"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "math/bits.Div64": {
+     "kind": "other",
+     "sites": [
+      "0xa8f50"
+     ]
+    },
+    "runtime.panicBounds": {
+     "kind": "panic",
+     "sites": [
+      "0xa90b8",
+      "0xa90fc",
+      "0xa9100",
+      "0xa9104",
+      "0xa9108",
+      "0xa910c"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa912c"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa912c": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d.ptr@0"
+      ],
+      "x7": []
+     }
+    },
+    "runtime.panicBounds": {
+     "0xa910c": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "u.ptr@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d.ptr@0"
+      ],
+      "x7": []
+     },
+     "0xa9108": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "u.ptr@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d.ptr@0"
+      ],
+      "x7": []
+     },
+     "0xa9104": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d.ptr@0"
+      ],
+      "x7": []
+     },
+     "0xa9100": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d.ptr@0"
+      ],
+      "x7": []
+     },
+     "0xa90fc": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d.ptr@0"
+      ],
+      "x7": []
+     },
+     "0xa90b8": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d.ptr@0"
+      ],
+      "x7": []
+     }
+    },
+    "math/bits.Div64": {
+     "0xa8f50": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d.ptr@0"
+      ],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 80,
+   "stack_growth_prologue": true,
+   "args": [
+    "quot.ptr",
+    "#quot.len",
+    "#quot.cap",
+    "u.ptr",
+    "#u.len",
+    "#u.cap",
+    "d.ptr",
+    "#d.len",
+    "#d.cap"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -88,
+     "max": 80,
+     "unknown_offset_at": [],
+     "range": "[-88, 80)"
+    },
+    "d.ptr": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa8f04",
+      "0xa8f40",
+      "0xa9048",
+      "0xa90c0"
+     ]
+    },
+    "u.ptr": {
+     "read": true,
+     "write": true,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa8fa4",
+      "0xa8fa8",
+      "0xa8fb4",
+      "0xa9044",
+      "0xa9064",
+      "0xa9084",
+      "0xa90bc",
+      "0xa90d4",
+      "0xa90e8",
+      "0xa90f0"
+     ]
+    },
+    "quot.ptr": {
+     "read": false,
+     "write": true,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xa8f84"
+     ]
+    }
+   },
+   "g_reads": [
+    "0xa8ed0"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [
+    {
+     "from": "0xa907c",
+     "to": "0xa9044"
+    },
+    {
+     "from": "0xa90a4",
+     "to": "0xa8f80"
+    },
+    {
+     "from": "0xa90e4",
+     "to": "0xa90bc"
+    },
+    {
+     "from": "0xa90f8",
+     "to": "0xa909c"
+    },
+    {
+     "from": "0xa9144",
+     "to": "0xa8ed0"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)",
+   "transitive_callees": [
+    "math/bits.Div64"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "udivrem": {
+   "symbol": "github.com/holiman/uint256.udivrem",
+   "addr": "0xa9150",
+   "size": 816,
+   "instructions": 203,
+   "reachable_instructions": 202,
+   "mnemonics": [
+    "add",
+    "b",
+    "b.cond",
+    "bl",
+    "cbz",
+    "clz",
+    "cmp",
+    "csel",
+    "ldp",
+    "ldr",
+    "ldrsb",
+    "ldur",
+    "lsl",
+    "lsr",
+    "mov",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "tbnz"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "runtime.memmove": {
+     "kind": "runtime",
+     "sites": [
+      "0xa92cc"
+     ]
+    },
+    "github.com/holiman/uint256.udivremKnuth": {
+     "kind": "uint256",
+     "sites": [
+      "0xa935c"
+     ]
+    },
+    "github.com/holiman/uint256.udivremBy1": {
+     "kind": "uint256",
+     "sites": [
+      "0xa9390"
+     ]
+    },
+    "runtime.panicBounds": {
+     "kind": "panic",
+     "sites": [
+      "0xa9430",
+      "0xa9434",
+      "0xa943c",
+      "0xa9440",
+      "0xa9444",
+      "0xa9448"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa9464"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa9464": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d@0"
+      ],
+      "x7": [
+       "rem@0"
+      ]
+     }
+    },
+    "runtime.panicBounds": {
+     "0xa9448": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "u.ptr@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d@0"
+      ],
+      "x7": [
+       "rem@0"
+      ]
+     },
+     "0xa9444": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "u.ptr@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d@0"
+      ],
+      "x7": [
+       "rem@0"
+      ]
+     },
+     "0xa9440": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "u.ptr@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d@0"
+      ],
+      "x7": [
+       "rem@0"
+      ]
+     },
+     "0xa943c": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "u.ptr@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d@0"
+      ],
+      "x7": [
+       "rem@0"
+      ]
+     },
+     "0xa9434": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "u.ptr@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d@0"
+      ],
+      "x7": [
+       "rem@0"
+      ]
+     },
+     "0xa9430": {
+      "x0": [
+       "rem@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "sp@-144"
+      ],
+      "x7": []
+     }
+    },
+    "runtime.memmove": {
+     "0xa92cc": {
+      "x0": [
+       "rem@0"
+      ],
+      "x1": [
+       "u.ptr@0"
+      ],
+      "x2": [],
+      "x3": [
+       "u.ptr@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "d@0"
+      ],
+      "x7": [
+       "rem@0"
+      ]
+     }
+    },
+    "github.com/holiman/uint256.udivremBy1": {
+     "0xa9390": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-144"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": [
+       "rem@0"
+      ]
+     }
+    },
+    "github.com/holiman/uint256.udivremKnuth": {
+     "0xa935c": {
+      "x0": [
+       "quot.ptr@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-144"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "sp@-64"
+      ],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 224,
+   "stack_growth_prologue": true,
+   "args": [
+    "quot.ptr",
+    "#quot.len",
+    "#quot.cap",
+    "u.ptr",
+    "#u.len",
+    "#u.cap",
+    "d",
+    "rem"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -232,
+     "max": 72,
+     "unknown_offset_at": [
+      "0xa91fc",
+      "0xa92a0",
+      "0xa9304",
+      "0xa93d4",
+      "0xa93fc",
+      "0xa9418"
+     ],
+     "range": "[-232, 72)"
+    },
+    "d": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 8,
+     "unknown_offset_at": [
+      "0xa9188",
+      "0xa91ac",
+      "0xa91cc",
+      "0xa91e0"
+     ],
+     "range": "[0, 8)"
+    },
+    "u.ptr": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 8,
+     "unknown_offset_at": [
+      "0xa9234",
+      "0xa9280",
+      "0xa92dc",
+      "0xa92f0"
+     ],
+     "range": "[0, 8)"
+    },
+    "rem": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [
+      "0xa93e8",
+      "0xa9428"
+     ],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa9150"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": false,
+   "loops": [
+    {
+     "from": "0xa918c",
+     "to": "0xa917c"
+    },
+    {
+     "from": "0xa9208",
+     "to": "0xa91cc"
+    },
+    {
+     "from": "0xa9238",
+     "to": "0xa922c"
+    },
+    {
+     "from": "0xa9310",
+     "to": "0xa92dc"
+    },
+    {
+     "from": "0xa940c",
+     "to": "0xa93cc"
+    },
+    {
+     "from": "0xa942c",
+     "to": "0xa93c0"
+    },
+    {
+     "from": "0xa9478",
+     "to": "0xa9150"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)",
+   "transitive_callees": [
+    "github.com/holiman/uint256.udivremBy1",
+    "github.com/holiman/uint256.udivremKnuth",
+    "math/bits.Div64",
+    "runtime.memmove"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "(*Int).Div": {
+   "symbol": "github.com/holiman/uint256.(*Int).Div",
+   "addr": "0xa9480",
+   "size": 320,
+   "instructions": 80,
+   "reachable_instructions": 79,
+   "mnemonics": [
+    "add",
+    "b",
+    "b.cond",
+    "bl",
+    "cbnz",
+    "cbz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "ldur",
+    "mov",
+    "neg",
+    "ngc",
+    "nop",
+    "orr",
+    "ret",
+    "sbcs",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "subs",
+    "udiv"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.udivrem": {
+     "kind": "uint256",
+     "sites": [
+      "0xa9578"
+     ]
+    },
+    "runtime.panicdivide": {
+     "kind": "panic",
+     "sites": [
+      "0xa959c"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa95b0"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa95b0": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [
+       "y@0"
+      ],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.udivrem": {
+     "0xa9578": {
+      "x0": [
+       "sp@-40"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "x@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "y@0"
+      ],
+      "x7": []
+     }
+    },
+    "runtime.panicdivide": {
+     "0xa959c": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [
+       "y@0"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 112,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -120,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-120, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa9480"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "github.com/holiman/uint256.udivrem",
+    "github.com/holiman/uint256.udivremBy1",
+    "github.com/holiman/uint256.udivremKnuth",
+    "math/bits.Div64",
+    "runtime.memmove"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "(*Int).Mod": {
+   "symbol": "github.com/holiman/uint256.(*Int).Mod",
+   "addr": "0xa95c0",
+   "size": 352,
+   "instructions": 86,
+   "reachable_instructions": 85,
+   "mnemonics": [
+    "add",
+    "b",
+    "b.cond",
+    "bl",
+    "cbnz",
+    "cbz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "ldur",
+    "mov",
+    "msub",
+    "neg",
+    "ngc",
+    "nop",
+    "orr",
+    "ret",
+    "sbcs",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "subs",
+    "udiv"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.udivrem": {
+     "kind": "uint256",
+     "sites": [
+      "0xa96bc"
+     ]
+    },
+    "runtime.panicdivide": {
+     "kind": "panic",
+     "sites": [
+      "0xa96f4"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa9708"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa9708": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [
+       "y@0"
+      ],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.udivrem": {
+     "0xa96bc": {
+      "x0": [
+       "sp@-40"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "x@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "y@0"
+      ],
+      "x7": [
+       "sp@-72"
+      ]
+     }
+    },
+    "runtime.panicdivide": {
+     "0xa96f4": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [
+       "y@0"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 144,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -152,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-152, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa95c0"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "github.com/holiman/uint256.udivrem",
+    "github.com/holiman/uint256.udivremBy1",
+    "github.com/holiman/uint256.udivremKnuth",
+    "math/bits.Div64",
+    "runtime.memmove"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "(*Int).SMod": {
+   "symbol": "github.com/holiman/uint256.(*Int).SMod",
+   "addr": "0xa9720",
+   "size": 448,
+   "instructions": 111,
+   "reachable_instructions": 111,
+   "mnemonics": [
+    "add",
+    "b",
+    "b.cond",
+    "bl",
+    "cbnz",
+    "cmn",
+    "cmp",
+    "ldp",
+    "ldr",
+    "ldur",
+    "mov",
+    "nop",
+    "orr",
+    "ret",
+    "sbcs",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "subs"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.(*Int).Mod": {
+     "kind": "uint256",
+     "sites": [
+      "0xa9860"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa98cc"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa98cc": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [
+       "y@0"
+      ],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).Mod": {
+     "0xa9860": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "sp@-40",
+       "x@0"
+      ],
+      "x2": [
+       "sp@-72",
+       "y@0"
+      ],
+      "x3": [
+       "sp@-72",
+       "y@0"
+      ],
+      "x4": [],
+      "x5": [
+       "sp@-40",
+       "x@0"
+      ],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 112,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -120,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-120, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa9720"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "github.com/holiman/uint256.(*Int).Mod",
+    "github.com/holiman/uint256.udivrem",
+    "github.com/holiman/uint256.udivremBy1",
+    "github.com/holiman/uint256.udivremKnuth",
+    "math/bits.Div64",
+    "runtime.memmove"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "(*Int).MulMod": {
+   "symbol": "github.com/holiman/uint256.(*Int).MulMod",
+   "addr": "0xa98e0",
+   "size": 448,
+   "instructions": 109,
+   "reachable_instructions": 109,
+   "mnemonics": [
+    "add",
+    "b",
+    "b.cond",
+    "bl",
+    "cbnz",
+    "cbz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "mov",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.umul": {
+     "kind": "uint256",
+     "sites": [
+      "0xa9984"
+     ]
+    },
+    "github.com/holiman/uint256.(*Int).Mod": {
+     "kind": "uint256",
+     "sites": [
+      "0xa99d0"
+     ]
+    },
+    "github.com/holiman/uint256.udivrem": {
+     "kind": "uint256",
+     "sites": [
+      "0xa9a14"
+     ]
+    },
+    "github.com/holiman/uint256.Reciprocal": {
+     "kind": "uint256",
+     "sites": [
+      "0xa9a3c"
+     ]
+    },
+    "github.com/holiman/uint256.(*Int).reduce4": {
+     "kind": "uint256",
+     "sites": [
+      "0xa9a68"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa9a84"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa9a84": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [
+       "y@0"
+      ],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.umul": {
+     "0xa9984": {
+      "x0": [
+       "x@0"
+      ],
+      "x1": [
+       "y@0"
+      ],
+      "x2": [
+       "sp@-112"
+      ],
+      "x3": [
+       "sp@-112"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.Reciprocal": {
+     "0xa9a3c": {
+      "x0": [
+       "m@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "m@0"
+      ],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).reduce4": {
+     "0xa9a68": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "sp@-112"
+      ],
+      "x2": [
+       "m@0"
+      ],
+      "x3": [
+       "sp@-48"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.udivrem": {
+     "0xa9a14": {
+      "x0": [
+       "sp@-208"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "sp@-112"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "m@0"
+      ],
+      "x7": [
+       "sp@-240"
+      ]
+     }
+    },
+    "github.com/holiman/uint256.(*Int).Mod": {
+     "0xa99d0": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "sp@-144"
+      ],
+      "x2": [
+       "m@0"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "m@0"
+      ],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 320,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "x",
+    "y",
+    "m"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -328,
+     "max": 40,
+     "unknown_offset_at": [],
+     "range": "[-328, 40)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "m": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa98e0"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "github.com/holiman/uint256.(*Int).Lsh",
+    "github.com/holiman/uint256.(*Int).Mod",
+    "github.com/holiman/uint256.(*Int).reduce4",
+    "github.com/holiman/uint256.Reciprocal",
+    "github.com/holiman/uint256.udivrem",
+    "github.com/holiman/uint256.udivremBy1",
+    "github.com/holiman/uint256.udivremKnuth",
+    "github.com/holiman/uint256.umul",
+    "math/bits.Div64",
+    "runtime.memmove"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "(*Int).Neg": {
+   "symbol": "github.com/holiman/uint256.(*Int).Neg",
+   "addr": "0xa9aa0",
+   "size": 64,
+   "instructions": 15,
+   "reachable_instructions": 15,
+   "mnemonics": [
+    "ldr",
+    "mov",
+    "nop",
+    "ret",
+    "sbcs",
+    "str",
+    "subs"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).SDiv": {
+   "symbol": "github.com/holiman/uint256.(*Int).SDiv",
+   "addr": "0xa9ae0",
+   "size": 736,
+   "instructions": 181,
+   "reachable_instructions": 181,
+   "mnemonics": [
+    "add",
+    "b",
+    "b.cond",
+    "bl",
+    "cbnz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "ldur",
+    "mov",
+    "nop",
+    "orr",
+    "ret",
+    "sbcs",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "subs",
+    "tbz"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.(*Int).Div": {
+     "kind": "uint256",
+     "sites": [
+      "0xa9b80",
+      "0xa9bdc",
+      "0xa9cf0",
+      "0xa9d4c"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xa9da4"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xa9da4": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "n@0"
+      ],
+      "x2": [
+       "d@0"
+      ],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).Div": {
+     "0xa9d4c": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "sp@-136"
+      ],
+      "x2": [
+       "d@0"
+      ],
+      "x3": [
+       "sp@-136"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa9cf0": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "sp@-72"
+      ],
+      "x2": [
+       "sp@-104"
+      ],
+      "x3": [
+       "sp@-72"
+      ],
+      "x4": [
+       "sp@-104"
+      ],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa9bdc": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "n@0"
+      ],
+      "x2": [
+       "sp@-40"
+      ],
+      "x3": [
+       "sp@-40"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xa9b80": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "n@0"
+      ],
+      "x2": [
+       "d@0"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 176,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "n",
+    "d"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -184,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-184, 32)"
+    },
+    "n": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "d": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xa9ae0"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "github.com/holiman/uint256.(*Int).Div",
+    "github.com/holiman/uint256.udivrem",
+    "github.com/holiman/uint256.udivremBy1",
+    "github.com/holiman/uint256.udivremKnuth",
+    "math/bits.Div64",
+    "runtime.memmove"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "(*Int).BitLen": {
+   "symbol": "github.com/holiman/uint256.(*Int).BitLen",
+   "addr": "0xa9dc0",
+   "size": 112,
+   "instructions": 26,
+   "reachable_instructions": 26,
+   "mnemonics": [
+    "add",
+    "cbnz",
+    "cbz",
+    "clz",
+    "ldr",
+    "orr",
+    "ret",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Not": {
+   "symbol": "github.com/holiman/uint256.(*Int).Not",
+   "addr": "0xa9e30",
+   "size": 48,
+   "instructions": 9,
+   "reachable_instructions": 9,
+   "mnemonics": [
+    "ldp",
+    "mvn",
+    "ret",
+    "stp"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Gt": {
+   "symbol": "github.com/holiman/uint256.(*Int).Gt",
+   "addr": "0xa9e60",
+   "size": 64,
+   "instructions": 14,
+   "reachable_instructions": 14,
+   "mnemonics": [
+    "cmp",
+    "cset",
+    "ldp",
+    "neg",
+    "ngc",
+    "nop",
+    "ret",
+    "sbcs",
+    "subs"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Slt": {
+   "symbol": "github.com/holiman/uint256.(*Int).Slt",
+   "addr": "0xa9ea0",
+   "size": 192,
+   "instructions": 47,
+   "reachable_instructions": 47,
+   "mnemonics": [
+    "b",
+    "b.cond",
+    "cbnz",
+    "cmp",
+    "cset",
+    "ldp",
+    "mov",
+    "neg",
+    "ngc",
+    "nop",
+    "orr",
+    "ret",
+    "sbcs",
+    "subs",
+    "tbnz",
+    "tbz"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Sgt": {
+   "symbol": "github.com/holiman/uint256.(*Int).Sgt",
+   "addr": "0xa9f60",
+   "size": 192,
+   "instructions": 48,
+   "reachable_instructions": 48,
+   "mnemonics": [
+    "b",
+    "b.cond",
+    "cbnz",
+    "cmp",
+    "cset",
+    "ldp",
+    "mov",
+    "neg",
+    "ngc",
+    "nop",
+    "orr",
+    "ret",
+    "sbcs",
+    "subs",
+    "tbnz",
+    "tbz"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Lt": {
+   "symbol": "github.com/holiman/uint256.(*Int).Lt",
+   "addr": "0xaa020",
+   "size": 64,
+   "instructions": 13,
+   "reachable_instructions": 13,
+   "mnemonics": [
+    "cmp",
+    "cset",
+    "ldp",
+    "neg",
+    "ngc",
+    "ret",
+    "sbcs",
+    "subs"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).SetUint64": {
+   "symbol": "github.com/holiman/uint256.(*Int).SetUint64",
+   "addr": "0xaa060",
+   "size": 16,
+   "instructions": 3,
+   "reachable_instructions": 3,
+   "mnemonics": [
+    "ret",
+    "stp"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "#val"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Eq": {
+   "symbol": "github.com/holiman/uint256.(*Int).Eq",
+   "addr": "0xaa070",
+   "size": 80,
+   "instructions": 20,
+   "reachable_instructions": 20,
+   "mnemonics": [
+    "b",
+    "b.cond",
+    "cmp",
+    "cset",
+    "ldr",
+    "mov",
+    "ret"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Cmp": {
+   "symbol": "github.com/holiman/uint256.(*Int).Cmp",
+   "addr": "0xaa0c0",
+   "size": 96,
+   "instructions": 22,
+   "reachable_instructions": 22,
+   "mnemonics": [
+    "b.cond",
+    "cbnz",
+    "cmp",
+    "ldp",
+    "mov",
+    "neg",
+    "ngc",
+    "orr",
+    "ret",
+    "sbcs",
+    "subs"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).IsUint64": {
+   "symbol": "github.com/holiman/uint256.(*Int).IsUint64",
+   "addr": "0xaa120",
+   "size": 32,
+   "instructions": 7,
+   "reachable_instructions": 7,
+   "mnemonics": [
+    "cmp",
+    "cset",
+    "ldp",
+    "ldr",
+    "orr",
+    "ret"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 8,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[8, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).IsZero": {
+   "symbol": "github.com/holiman/uint256.(*Int).IsZero",
+   "addr": "0xaa140",
+   "size": 32,
+   "instructions": 8,
+   "reachable_instructions": 8,
+   "mnemonics": [
+    "cmp",
+    "cset",
+    "ldp",
+    "orr",
+    "ret"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Clear": {
+   "symbol": "github.com/holiman/uint256.(*Int).Clear",
+   "addr": "0xaa160",
+   "size": 16,
+   "instructions": 3,
+   "reachable_instructions": 3,
+   "mnemonics": [
+    "ret",
+    "stp"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z"
+   ],
+   "memory_footprint": {
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Lsh": {
+   "symbol": "github.com/holiman/uint256.(*Int).Lsh",
+   "addr": "0xaa170",
+   "size": 320,
+   "instructions": 77,
+   "reachable_instructions": 77,
+   "mnemonics": [
+    "b.cond",
+    "cbz",
+    "cmp",
+    "csel",
+    "ldp",
+    "ldr",
+    "lsl",
+    "lsr",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "#n"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Rsh": {
+   "symbol": "github.com/holiman/uint256.(*Int).Rsh",
+   "addr": "0xaa2b0",
+   "size": 304,
+   "instructions": 74,
+   "reachable_instructions": 74,
+   "mnemonics": [
+    "b.cond",
+    "cbz",
+    "cmp",
+    "csel",
+    "ldp",
+    "ldr",
+    "lsl",
+    "lsr",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "#n"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).SRsh": {
+   "symbol": "github.com/holiman/uint256.(*Int).SRsh",
+   "addr": "0xaa3e0",
+   "size": 464,
+   "instructions": 116,
+   "reachable_instructions": 116,
+   "mnemonics": [
+    "and",
+    "b",
+    "b.cond",
+    "bl",
+    "cbz",
+    "cmp",
+    "csel",
+    "ldp",
+    "ldr",
+    "ldur",
+    "lsl",
+    "lsr",
+    "mov",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "tbz"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.(*Int).Rsh": {
+     "kind": "uint256",
+     "sites": [
+      "0xaa584"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xaa5a0"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xaa5a0": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).Rsh": {
+     "0xaa584": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 48,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "x",
+    "#n"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -56,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-56, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xaa3e0"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [
+    "github.com/holiman/uint256.(*Int).Rsh"
+   ],
+   "transitive_stubs": [
+    "runtime.morestack_noctxt.abi0"
+   ]
+  },
+  "(*Int).Set": {
+   "symbol": "github.com/holiman/uint256.(*Int).Set",
+   "addr": "0xaa5b0",
+   "size": 32,
+   "instructions": 5,
+   "reachable_instructions": 5,
+   "mnemonics": [
+    "ldp",
+    "ret",
+    "stp"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Or": {
+   "symbol": "github.com/holiman/uint256.(*Int).Or",
+   "addr": "0xaa5d0",
+   "size": 80,
+   "instructions": 17,
+   "reachable_instructions": 17,
+   "mnemonics": [
+    "ldr",
+    "orr",
+    "ret",
+    "str"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).And": {
+   "symbol": "github.com/holiman/uint256.(*Int).And",
+   "addr": "0xaa620",
+   "size": 80,
+   "instructions": 17,
+   "reachable_instructions": 17,
+   "mnemonics": [
+    "and",
+    "ldr",
+    "ret",
+    "str"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Xor": {
+   "symbol": "github.com/holiman/uint256.(*Int).Xor",
+   "addr": "0xaa670",
+   "size": 80,
+   "instructions": 17,
+   "reachable_instructions": 17,
+   "mnemonics": [
+    "eor",
+    "ldr",
+    "ret",
+    "str"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "y"
+   ],
+   "memory_footprint": {
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "y": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Byte": {
+   "symbol": "github.com/holiman/uint256.(*Int).Byte",
+   "addr": "0xaa6c0",
+   "size": 96,
+   "instructions": 24,
+   "reachable_instructions": 24,
+   "mnemonics": [
+    "and",
+    "b.cond",
+    "cbnz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "lsr",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "n"
+   ],
+   "memory_footprint": {
+    "n": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [
+      "0xaa6f8"
+     ],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": false,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Exp": {
+   "symbol": "github.com/holiman/uint256.(*Int).Exp",
+   "addr": "0xaa720",
+   "size": 688,
+   "instructions": 172,
+   "reachable_instructions": 172,
+   "mnemonics": [
+    "add",
+    "adrp",
+    "b",
+    "b.cond",
+    "bl",
+    "cbz",
+    "clz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "ldur",
+    "lsr",
+    "mov",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "tbnz",
+    "tbz"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.(*Int).squared": {
+     "kind": "uint256",
+     "sites": [
+      "0xaa814",
+      "0xaa894",
+      "0xaa8f0",
+      "0xaa94c"
+     ]
+    },
+    "github.com/holiman/uint256.(*Int).Mul": {
+     "kind": "uint256",
+     "sites": [
+      "0xaa860",
+      "0xaa8dc",
+      "0xaa938",
+      "0xaa990"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xaa9c0"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xaa9c0": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "base@0"
+      ],
+      "x2": [
+       "exponent@0"
+      ],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).squared": {
+     "0xaa94c": {
+      "x0": [
+       "sp@-72"
+      ],
+      "x1": [],
+      "x2": [
+       "exponent@0"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xaa8f0": {
+      "x0": [
+       "sp@-72"
+      ],
+      "x1": [],
+      "x2": [
+       "exponent@0"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xaa894": {
+      "x0": [
+       "sp@-72"
+      ],
+      "x1": [],
+      "x2": [
+       "exponent@0"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xaa814": {
+      "x0": [
+       "sp@-72"
+      ],
+      "x1": [],
+      "x2": [
+       "exponent@0"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).Mul": {
+     "0xaa990": {
+      "x0": [
+       "sp@-104"
+      ],
+      "x1": [
+       "sp@-104"
+      ],
+      "x2": [
+       "sp@-72"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xaa938": {
+      "x0": [
+       "sp@-104"
+      ],
+      "x1": [
+       "sp@-104"
+      ],
+      "x2": [
+       "sp@-72"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xaa8dc": {
+      "x0": [
+       "sp@-104"
+      ],
+      "x1": [
+       "sp@-104"
+      ],
+      "x2": [
+       "sp@-72"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0xaa860": {
+      "x0": [
+       "sp@-104"
+      ],
+      "x1": [
+       "sp@-104"
+      ],
+      "x2": [
+       "sp@-72"
+      ],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 160,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "base",
+    "exponent"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -168,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-168, 32)"
+    },
+    "global": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0xaa744",
+      "0xaa750"
+     ]
+    },
+    "base": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "exponent": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xaa720"
+   ],
+   "memory_outside_args_and_stack": [
+    "global"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [
+    {
+     "from": "0xaa850",
+     "to": "0xaa810"
+    },
+    {
+     "from": "0xaa864",
+     "to": "0xaa810"
+    },
+    {
+     "from": "0xaa8cc",
+     "to": "0xaa890"
+    },
+    {
+     "from": "0xaa8e0",
+     "to": "0xaa890"
+    },
+    {
+     "from": "0xaa928",
+     "to": "0xaa8ec"
+    },
+    {
+     "from": "0xaa93c",
+     "to": "0xaa8ec"
+    },
+    {
+     "from": "0xaa980",
+     "to": "0xaa948"
+    },
+    {
+     "from": "0xaa994",
+     "to": "0xaa948"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)",
+   "transitive_callees": [
+    "github.com/holiman/uint256.(*Int).Mul",
+    "github.com/holiman/uint256.(*Int).squared"
+   ],
+   "transitive_stubs": [
+    "runtime.morestack_noctxt.abi0"
+   ]
+  },
+  "(*Int).ExtendSign": {
+   "symbol": "github.com/holiman/uint256.(*Int).ExtendSign",
+   "addr": "0xaa9d0",
+   "size": 176,
+   "instructions": 44,
+   "reachable_instructions": 44,
+   "mnemonics": [
+    "asr",
+    "b.cond",
+    "bic",
+    "cbz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "lsl",
+    "lsr",
+    "mov",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "sxtb",
+    "ubfiz"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [
+    "z",
+    "x",
+    "byteNum"
+   ],
+   "memory_footprint": {
+    "byteNum": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": true,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [
+      "0xaaa2c",
+      "0xaaa44"
+     ],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": false,
+   "loops": [],
+   "alias_hazards": [],
+   "transitive_callees": [],
+   "transitive_stubs": []
+  },
+  "(*Int).Sqrt": {
+   "symbol": "github.com/holiman/uint256.(*Int).Sqrt",
+   "addr": "0xaaa80",
+   "size": 688,
+   "instructions": 172,
+   "reachable_instructions": 171,
+   "mnemonics": [
+    "adcs",
+    "add",
+    "adds",
+    "b",
+    "b.cond",
+    "bl",
+    "cbnz",
+    "cbz",
+    "clz",
+    "cmp",
+    "extr",
+    "ldp",
+    "ldr",
+    "ldur",
+    "lsl",
+    "lsr",
+    "mov",
+    "neg",
+    "ngc",
+    "nop",
+    "orr",
+    "ret",
+    "sbcs",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "subs",
+    "udiv"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "github.com/holiman/uint256.(*Int).Lsh": {
+     "kind": "uint256",
+     "sites": [
+      "0xaab98"
+     ]
+    },
+    "github.com/holiman/uint256.(*Int).Rsh": {
+     "kind": "uint256",
+     "sites": [
+      "0xaac10"
+     ]
+    },
+    "github.com/holiman/uint256.udivrem": {
+     "kind": "uint256",
+     "sites": [
+      "0xaac50"
+     ]
+    },
+    "runtime.panicdivide": {
+     "kind": "panic",
+     "sites": [
+      "0xaad14"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0xaad24"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0xaad24": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).Lsh": {
+     "0xaab98": {
+      "x0": [
+       "sp@-40"
+      ],
+      "x1": [
+       "sp@-40"
+      ],
+      "x2": [],
+      "x3": [
+       "sp@-40"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.(*Int).Rsh": {
+     "0xaac10": {
+      "x0": [
+       "sp@-72"
+      ],
+      "x1": [
+       "x@0"
+      ],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "github.com/holiman/uint256.udivrem": {
+     "0xaac50": {
+      "x0": [
+       "sp@-72"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "x@0"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [
+       "sp@-40"
+      ],
+      "x7": []
+     }
+    },
+    "runtime.panicdivide": {
+     "0xaad14": {
+      "x0": [
+       "z@0"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 144,
+   "stack_growth_prologue": true,
+   "args": [
+    "z",
+    "x"
+   ],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -152,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[-152, 24)"
+    },
+    "x": {
+     "read": true,
+     "write": false,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    },
+    "z": {
+     "read": false,
+     "write": true,
+     "min": 0,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[0, 32)"
+    }
+   },
+   "g_reads": [
+    "0xaaa80"
+   ],
+   "memory_outside_args_and_stack": [],
+   "memory_only_via_pointer_args_and_stack": true,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [
+    {
+     "from": "0xaaccc",
+     "to": "0xaac18"
+    },
+    {
+     "from": "0xaacfc",
+     "to": "0xaace8"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)",
+   "transitive_callees": [
+    "github.com/holiman/uint256.(*Int).Lsh",
+    "github.com/holiman/uint256.(*Int).Rsh",
+    "github.com/holiman/uint256.udivrem",
+    "github.com/holiman/uint256.udivremBy1",
+    "github.com/holiman/uint256.udivremKnuth",
+    "math/bits.Div64",
+    "runtime.memmove"
+   ],
+   "transitive_stubs": [
+    "runtime.gopanic",
+    "runtime.morestack_noctxt.abi0",
+    "runtime.panicBounds",
+    "runtime.panicdivide"
+   ]
+  },
+  "runtime.memmove": {
+   "symbol": "runtime.memmove",
+   "addr": "0x8a420",
+   "size": 624,
+   "instructions": 154,
+   "reachable_instructions": 154,
+   "mnemonics": [
+    "add",
+    "adrp",
+    "and",
+    "b",
+    "b.cond",
+    "cbnz",
+    "cbz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "ldrb",
+    "ldrh",
+    "ldur",
+    "ldurh",
+    "mov",
+    "ret",
+    "stp",
+    "str",
+    "strb",
+    "strh",
+    "stur",
+    "sturh",
+    "sub",
+    "subs",
+    "tbz"
+   ],
+   "outside_integer_subset": [],
+   "callees": {},
+   "call_arg_pointers": {},
+   "stack_frame_bytes": 0,
+   "stack_growth_prologue": false,
+   "args": [],
+   "memory_footprint": {
+    "data": {
+     "read": true,
+     "write": true,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0x8a43c",
+      "0x8a444",
+      "0x8a448",
+      "0x8a450",
+      "0x8a468",
+      "0x8a46c",
+      "0x8a470",
+      "0x8a474",
+      "0x8a480",
+      "0x8a484",
+      "0x8a488",
+      "0x8a48c",
+      "0x8a498",
+      "0x8a49c",
+      "0x8a4a0",
+      "0x8a4a4",
+      "0x8a4ac",
+      "0x8a4b0",
+      "0x8a4c0",
+      "0x8a4c4",
+      "0x8a4c8",
+      "0x8a4cc",
+      "0x8a4d8",
+      "0x8a4dc",
+      "0x8a4e0",
+      "0x8a4e4",
+      "0x8a4ec",
+      "0x8a4f0",
+      "0x8a4fc",
+      "0x8a500",
+      "0x8a504",
+      "0x8a508",
+      "0x8a50c",
+      "0x8a510",
+      "0x8a514",
+      "0x8a518",
+      "0x8a51c",
+      "0x8a520",
+      "0x8a570",
+      "0x8a584",
+      "0x8a588",
+      "0x8a58c",
+      "0x8a590",
+      "0x8a594",
+      "0x8a5a0",
+      "0x8a5a4",
+      "0x8a5a8",
+      "0x8a5ac",
+      "0x8a5b0",
+      "0x8a5b4",
+      "0x8a5b8",
+      "0x8a5bc",
+      "0x8a5c8",
+      "0x8a5cc",
+      "0x8a5d0",
+      "0x8a5d4",
+      "0x8a5d8",
+      "0x8a5dc",
+      "0x8a5e0",
+      "0x8a5e4",
+      "0x8a5e8",
+      "0x8a5ec",
+      "0x8a5f0",
+      "0x8a5f4",
+      "0x8a5fc",
+      "0x8a60c",
+      "0x8a610",
+      "0x8a614",
+      "0x8a618",
+      "0x8a61c",
+      "0x8a62c",
+      "0x8a630",
+      "0x8a634",
+      "0x8a638",
+      "0x8a63c",
+      "0x8a640",
+      "0x8a644",
+      "0x8a648",
+      "0x8a654",
+      "0x8a658",
+      "0x8a65c",
+      "0x8a660",
+      "0x8a664",
+      "0x8a668",
+      "0x8a66c",
+      "0x8a670",
+      "0x8a674",
+      "0x8a678",
+      "0x8a67c",
+      "0x8a680"
+     ]
+    },
+    "global": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0x8a544"
+     ]
+    }
+   },
+   "g_reads": [],
+   "memory_outside_args_and_stack": [
+    "data",
+    "global"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [
+    {
+     "from": "0x8a564",
+     "to": "0x8a4b4"
+    },
+    {
+     "from": "0x8a5c4",
+     "to": "0x8a5a0"
+    },
+    {
+     "from": "0x8a650",
+     "to": "0x8a62c"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)"
+  },
+  "math/bits.Div64": {
+   "symbol": "math/bits.Div64",
+   "addr": "0x8c5e0",
+   "size": 368,
+   "instructions": 89,
+   "reachable_instructions": 88,
+   "mnemonics": [
+    "add",
+    "adrp",
+    "and",
+    "b",
+    "b.cond",
+    "bl",
+    "cbz",
+    "clz",
+    "cmp",
+    "csel",
+    "extr",
+    "ldp",
+    "ldr",
+    "ldur",
+    "lsl",
+    "lsr",
+    "mov",
+    "msub",
+    "mul",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "udiv"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "runtime.panicdivide": {
+     "kind": "panic",
+     "sites": [
+      "0x8c6e8"
+     ]
+    },
+    "runtime.gopanic": {
+     "kind": "panic",
+     "sites": [
+      "0x8c704",
+      "0x8c720"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0x8c734"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0x8c734": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.gopanic": {
+     "0x8c720": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0x8c704": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.panicdivide": {
+     "0x8c6e8": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 32,
+   "stack_growth_prologue": true,
+   "args": [],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -40,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-40, 32)"
+    },
+    "global": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0x8c6f4",
+      "0x8c710"
+     ]
+    },
+    "data": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0x8c6fc",
+      "0x8c718"
+     ]
+    }
+   },
+   "g_reads": [
+    "0x8c5e0"
+   ],
+   "memory_outside_args_and_stack": [
+    "data",
+    "global"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [
+    {
+     "from": "0x8c68c",
+     "to": "0x8c664"
+    },
+    {
+     "from": "0x8c6c8",
+     "to": "0x8c6a4"
+    }
+   ],
+   "alias_hazards": "not analysed (has loops)"
+  },
+  "runtime.newobject": {
+   "symbol": "runtime.newobject",
+   "addr": "0x2a110",
+   "size": 80,
+   "instructions": 19,
+   "reachable_instructions": 19,
+   "mnemonics": [
+    "b",
+    "b.cond",
+    "bl",
+    "cmp",
+    "ldr",
+    "ldur",
+    "mov",
+    "orr",
+    "ret",
+    "str",
+    "stur",
+    "sub"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "runtime.mallocgc": {
+     "kind": "runtime",
+     "sites": [
+      "0x2a138"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0x2a150"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0x2a150": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.mallocgc": {
+     "0x2a138": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 48,
+   "stack_growth_prologue": true,
+   "args": [],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -56,
+     "max": 16,
+     "unknown_offset_at": [],
+     "range": "[-56, 16)"
+    },
+    "data": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0x2a128"
+     ]
+    }
+   },
+   "g_reads": [
+    "0x2a110"
+   ],
+   "memory_outside_args_and_stack": [
+    "data"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": []
+  },
+  "runtime.slicebytetostring": {
+   "symbol": "runtime.slicebytetostring",
+   "addr": "0x6ee80",
+   "size": 256,
+   "instructions": 63,
+   "reachable_instructions": 62,
+   "mnemonics": [
+    "add",
+    "adrp",
+    "b",
+    "b.cond",
+    "bl",
+    "cbz",
+    "cmp",
+    "ldp",
+    "ldr",
+    "ldrb",
+    "ldur",
+    "mov",
+    "neg",
+    "nop",
+    "orr",
+    "ret",
+    "stp",
+    "str",
+    "stur",
+    "sub",
+    "tbnz"
+   ],
+   "outside_integer_subset": [],
+   "callees": {
+    "runtime.mallocgc": {
+     "kind": "runtime",
+     "sites": [
+      "0x6eef0"
+     ]
+    },
+    "runtime.memmove": {
+     "kind": "runtime",
+     "sites": [
+      "0x6ef00"
+     ]
+    },
+    "runtime.panicunsafestringlen": {
+     "kind": "panic",
+     "sites": [
+      "0x6ef4c",
+      "0x6ef54",
+      "0x6ef58"
+     ]
+    },
+    "runtime.panicunsafestringnilptr": {
+     "kind": "panic",
+     "sites": [
+      "0x6ef50"
+     ]
+    },
+    "runtime.morestack_noctxt.abi0": {
+     "kind": "morestack",
+     "sites": [
+      "0x6ef6c"
+     ]
+    }
+   },
+   "call_arg_pointers": {
+    "runtime.morestack_noctxt.abi0": {
+     "0x6ef6c": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "retaddr@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.mallocgc": {
+     "0x6eef0": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.memmove": {
+     "0x6ef00": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.panicunsafestringlen": {
+     "0x6ef54": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0x6ef4c": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     },
+     "0x6ef58": {
+      "x0": [
+       "global@None"
+      ],
+      "x1": [],
+      "x2": [],
+      "x3": [
+       "global@None"
+      ],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    },
+    "runtime.panicunsafestringnilptr": {
+     "0x6ef50": {
+      "x0": [],
+      "x1": [],
+      "x2": [],
+      "x3": [],
+      "x4": [],
+      "x5": [],
+      "x6": [],
+      "x7": []
+     }
+    }
+   },
+   "stack_frame_bytes": 48,
+   "stack_growth_prologue": true,
+   "args": [],
+   "memory_footprint": {
+    "g": {
+     "read": true,
+     "write": false,
+     "min": 16,
+     "max": 24,
+     "unknown_offset_at": [],
+     "range": "[16, 24)"
+    },
+    "sp": {
+     "read": true,
+     "write": true,
+     "min": -56,
+     "max": 32,
+     "unknown_offset_at": [],
+     "range": "[-56, 32)"
+    },
+    "data": {
+     "read": true,
+     "write": false,
+     "min": null,
+     "max": null,
+     "unknown_offset_at": [
+      "0x6eea4"
+     ]
+    }
+   },
+   "g_reads": [
+    "0x6ee80"
+   ],
+   "memory_outside_args_and_stack": [
+    "data"
+   ],
+   "memory_only_via_pointer_args_and_stack": false,
+   "int_arg_accesses_within_32_bytes": true,
+   "loops": [],
+   "alias_hazards": []
+  }
+ }
+}
