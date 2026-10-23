@@ -1152,7 +1152,7 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
     let args : Array Term := #[⟨mkIdent set⟩] ++ cfg.args
     let sargs : Array (TSyntax `Lean.Parser.Tactic.simpLemma) ← args.mapM fun t =>
       `(Lean.Parser.Tactic.simpLemma| $t:term)
-    let stx ← `(tactic| simp (disch := janus64_disch) only [$sargs,*])
+    let stx ← `(tactic| simp (config := { maxSteps := 2000000 }) (disch := janus64_disch) only [$sargs,*])
     let r ← mkSimpContext stx (eraseLocal := false)
     let mut ctx := r.ctx
     let mut thms := ctx.simpTheorems
@@ -1220,7 +1220,9 @@ def cleanOutcome (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := g.withConte
   setGoals [g]
   withExecSimp cfg (set := `janus64_post) fun ctx simprocs d? => do
     -- no progress is not an error here: the goal is returned as it is
-    match ← (try simpGoal g ctx simprocs d? catch _ => pure (some (#[], g), {})) with
+    match ← (try simpGoal g ctx simprocs d? catch e => do
+        if (← e.toMessageData.toString).contains "made no progress" then pure (some (#[], g), {})
+        else throw e) with
     | (none, _) => return []
     | (some (_, g'), _) =>
       let t ← instantiateMVars (← g'.getType)
