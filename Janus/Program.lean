@@ -35,11 +35,21 @@ structure Stub where
   kind : StubKind
 deriving Repr, Inhabited
 
+/-- Read-only data copied from the binary (e.g. `.rodata` constants the code loads). It is
+not executable; a call's precondition states that memory holds these bytes read-only
+(`Program.DataLoaded`). -/
+structure DataSegment where
+  name : String
+  base : Nat
+  bytes : List Nat
+deriving Repr, Inhabited
+
 structure Program where
   segments : List Segment
   stubs : List Stub
   /-- Return address planted in `X30` by the caller; reaching it means the call returned. -/
   exitAddr : Nat
+  data : List DataSegment := []
 deriving Repr, Inhabited
 
 /-- How a run ends when it does not fault. -/
@@ -61,6 +71,12 @@ def fetchIn : List Segment → Nat → Option Nat
 
 /-- The instruction word at `pc`, if it lies inside a loaded segment. -/
 def fetch (p : Program) (pc : Nat) : Option Nat := fetchIn p.segments pc
+
+/-- Memory `m` holds every data segment of `p` at its address, in a read-only region. -/
+def DataLoaded (p : Program) (m : Arm64.Memory) : Prop :=
+  ∀ d ∈ p.data, (m.regions.any fun r => r.base ≤ d.base && d.base + d.bytes.length ≤ r.base + r.size
+      && !r.writable) = true ∧
+    ∀ i (h : i < d.bytes.length), (m.bytes (d.base + i)).toNat = d.bytes[i]
 
 def stubAt (p : Program) (pc : Nat) : Option Stub := p.stubs.find? (·.addr = pc)
 
