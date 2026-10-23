@@ -15,6 +15,15 @@ loader (`Janus.Program`), the Go calling convention (`Janus.GoABI`) and the orac
   hardware with top-byte-ignore would alias to an untagged one) always faults. A store also
   faults if any byte it touches lies in a read-only region, even when a writable region covers
   it too (hardware permissions are per byte, not per allocation).
+* `dczid` is the 5 meaningful bits of the read-only system register DCZID_EL0 (`BS` in bits 3:0,
+  the log2 of the DC ZVA block size in 4-byte words; `DZP` in bit 4, DC ZVA prohibited). It is
+  IMPLEMENTATION DEFINED (qemu `-cpu max` reports 7, the Sail Armv9.4 model 8, Neoverse cores
+  4), so it is part of the state: execution never changes it, and a theorem about arbitrary
+  initial states quantifies over every value. The default `0x10` (DC ZVA prohibited) only fills
+  in concrete states built in tests and witnesses.
+* There are no SIMD/FP (`V0`–`V31`) registers: no supported instruction reads or writes them
+  (Go 1.26 `runtime.memmove`/`memclrNoHeapPointers` and the compiler's inline copies and
+  zeroing use general-purpose `LDP`/`STP` only; see `docs/SOUNDNESS.md`).
 -/
 
 namespace Janus.Arm64
@@ -48,8 +57,11 @@ structure State where
   pc : W64
   flags : Flags
   mem : Memory
+  /-- DCZID_EL0 bits 4:0 (`DZP:BS`); constant during execution. -/
+  dczid : BitVec 5 := 0x10
 
-instance : Inhabited State := ⟨⟨fun _ => 0, 0, 0, ⟨false, false, false, false⟩, default⟩⟩
+instance : Inhabited State :=
+  ⟨{ regs := fun _ => 0, sp := 0, pc := 0, flags := ⟨false, false, false, false⟩, mem := default }⟩
 
 /-- Reasons execution stops without a defined architectural result. -/
 inductive Fault where
@@ -65,6 +77,12 @@ inductive Fault where
   | spMisaligned (sp : Nat)
   /-- A branch to a misaligned (non multiple of 4) target. -/
   | pcMisaligned (pc : Nat)
+  /-- An ordered, exclusive or atomic access of `size` bytes at `addr` that is not naturally
+  aligned (the model requires natural alignment for these, see `Exec`). -/
+  | unaligned (addr : Nat) (size : Nat)
+  /-- The instruction at `pc` is disabled by the system configuration (DC ZVA while
+  `DCZID_EL0.DZP = 1`); on Linux a `SIGILL`. -/
+  | trapped (pc : Nat)
   /-- Fuel ran out before the call returned. -/
   | outOfFuel
 deriving Repr, DecidableEq, Inhabited

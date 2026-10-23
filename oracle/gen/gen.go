@@ -7,6 +7,10 @@ import (
 	L "github.com/Giulio2002/Janus/oracle/layout"
 )
 
+// DCZID is the DCZID_EL0 value written into every case: the reference machine's own (the
+// runner prints it with -dczid; qemu -cpu max reports 7). Set from the gen/harvest flag.
+var DCZID = 7
+
 // State is the initial machine state of one case.
 type State struct {
 	X    [31]uint64
@@ -171,6 +175,10 @@ func Setup(r *rand.Rand, w uint32) State {
 		} else {
 			setBase(ea - sext(uint64(bits(w, 21, 15)), 7)<<scale)
 		}
+	case "sys.sys":
+		if rt != 31 {
+			s.X[rt] = pickEA(r, 1)
+		}
 	case "ls.excl", "ls.atomic":
 		size := uint64(1) << bits(w, 31, 30)
 		pair := Classify(w) == "ls.excl" && bits(w, 23, 23) == 0 && bits(w, 21, 21) == 1
@@ -199,7 +207,7 @@ func Setup(r *rand.Rand, w uint32) State {
 // Case renders a state into a layout.Case.
 func Case(id int, class string, w uint32, s State) L.Case {
 	c := L.Case{ID: id, Class: class, Word: fmt.Sprintf("0x%08x", w), PC: fmt.Sprintf("%#x", L.TestPC),
-		SP: fmt.Sprintf("%#x", s.SP), NZCV: s.NZCV, Seed: s.Seed}
+		SP: fmt.Sprintf("%#x", s.SP), NZCV: s.NZCV, Seed: s.Seed, DCZID: DCZID}
 	for i, v := range s.X {
 		c.X[i] = fmt.Sprintf("%#x", v)
 	}
@@ -378,10 +386,41 @@ var Targeted = map[string]func(r *rand.Rand) uint32{
 		return 0x18000000 | u(r, 2)<<30 | imm<<5 | reg(r)
 	},
 	"ls.excl": func(r *rand.Rand) uint32 {
-		return 0x08000000 | u(r, 2)<<30 | u(r, 1)<<23 | u(r, 1)<<22 | u(r, 1)<<21 | reg(r)<<16 | u(r, 1)<<15 | mostly(r, 31, 5)<<10 | reg(r)<<5 | reg(r)
+		o2, l, o1 := u(r, 1), u(r, 1), u(r, 1)
+		// Rs is a register operand of CAS/CASP and of the store-exclusives (status) and a
+		// should-be-one field otherwise: mostly 31 there.
+		rs := reg(r)
+		if !(o1 == 1 || o2 == 0 && l == 0) {
+			rs = mostly(r, 31, 5)
+		}
+		size := u(r, 2)
+		if o2 == 0 && o1 == 1 && size < 2 && r.IntN(4) != 0 { // CASP: even registers
+			rs &^= 1
+			return 0x08000000 | size<<30 | l<<22 | 1<<21 | rs<<16 | u(r, 1)<<15 | mostly(r, 31, 5)<<10 | reg(r)<<5 | reg(r)&^1
+		}
+		return 0x08000000 | size<<30 | o2<<23 | l<<22 | o1<<21 | rs<<16 | mostly(r, 1, 1)<<15 | mostly(r, 31, 5)<<10 | reg(r)<<5 | reg(r)
 	},
 	"ls.atomic": func(r *rand.Rand) uint32 {
-		return 0x38200000 | u(r, 2)<<30 | u(r, 2)<<22 | reg(r)<<16 | mostly(r, 0, 1)<<15 | u(r, 3)<<12 | reg(r)<<5 | reg(r)
+		o3opc := mostly(r, pick(r, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 8, 12), 4)
+		ar := u(r, 2)
+		rs := reg(r)
+		if o3opc == 12 && r.IntN(4) != 0 { // LDAPR: A = 1, R = 0, Rs = 11111
+			ar, rs = 2, 31
+		}
+		return 0x38200000 | u(r, 2)<<30 | ar<<22 | rs<<16 | o3opc<<12 | reg(r)<<5 | reg(r)
+	},
+	"sys.mrs": func(r *rand.Rand) uint32 {
+		if r.IntN(2) == 0 {
+			return 0xD53B00E0 | reg(r) // MRS Xt, DCZID_EL0
+		}
+		return 0xD5300000 | u(r, 20) // any system register read
+	},
+	"sys.sys": func(r *rand.Rand) uint32 {
+		if r.IntN(2) == 0 {
+			return 0xD50B7420 | reg(r) // DC ZVA, Xt
+		}
+		// SYS #op1, C7, Cm, #op2, Xt with op1 = 3 (EL0-accessible DC/IC ops) or 0
+		return 0xD5087000 | pick(r, 3, 3, 3, 0)<<16 | u(r, 4)<<8 | u(r, 3)<<5 | reg(r)
 	},
 }
 

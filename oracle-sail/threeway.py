@@ -6,7 +6,7 @@ usage: threeway.py DIR
 DIR (written by scripts/oracle-sail.sh) holds
   cases.jsonl               the corpus (layout.Case)
   qemu.jsonl                qemu runner results (layout.HW)
-  janus.jsonl               janus-oracle results (layout.Model)
+  janus.jsonl               janus-oracle results (layout.Model), with Sail's DCZID_EL0
   sail.jsonl                janus-oracle-sail results (layout.HW + esr/far/ec)
   janus-vs-sail/verdicts.jsonl   `oracle run` verdicts, hardware := Sail, model := Janus
   qemu-vs-sail/verdicts.jsonl    `oracle run` verdicts, hardware := qemu, model := Sail
@@ -93,6 +93,23 @@ def pauth(w):
     return False
 
 
+def dczid_dependent(w):
+    """MRS Xt, DCZID_EL0 and DC ZVA: the result depends on the IMPLEMENTATION DEFINED
+    DCZID_EL0, which differs between qemu (7) and Sail (8); Janus is run with each
+    reference's own value, so only qemu vs Sail can differ."""
+    if (w & 0xFFFFFFE0) in (0xD53B00E0, 0xD50B7420):
+        return True
+    # DC GVA / DC GZVA (FEAT_MTE): the same DCZID_EL0-sized block (Janus rejects them).
+    return (w & 0xFFFFFFE0) in (0xD50B7460, 0xD50B7480)
+
+
+def other_sysreg_read(w):
+    """MRS of any register but DCZID_EL0: Linux emulates EL0 reads of the ID registers and
+    qemu-user has its own policy; Sail follows the ASL for this EL0 configuration. Janus
+    rejects every such MRS, so only qemu vs Sail can differ."""
+    return (w & 0xFFF00000) == 0xD5300000 and (w & 0xFFFFFFE0) != 0xD53B00E0
+
+
 def tag(cid):
     c = cases[cid]
     w = int(c["word"], 16)
@@ -115,6 +132,10 @@ def tag(cid):
         t.append("sbo-unpredictable")
     if store_exclusive(w):
         t.append("sail-monitor-stub")
+    if dczid_dependent(w):
+        t.append("impdef-dczid")
+    if other_sysreg_read(w):
+        t.append("sysreg-read")
     if s.get("status") == "error":
         t.append("sail-error")
     return t

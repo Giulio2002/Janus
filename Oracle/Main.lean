@@ -7,7 +7,8 @@ import Lean.Data.Json
 Reads one JSON test case per line on stdin (the format written by `oracle gen`, see
 `oracle/layout/layout.go` and `docs/ORACLE.md`) and prints one JSON result per line:
 
-* the initial `State` has `X0..X30`, `SP`, `NZCV` and `pc` from the case;
+* the initial `State` has `X0..X30`, `SP`, `NZCV`, `pc` and `dczid` (the reference machine's
+  DCZID_EL0, field `dczid`) from the case;
 * `mem.regions` is exactly the native runner's data buffer `[DataBase, DataBase + DataSize)`
   (writable), and its bytes follow `pattern seed`; every other byte reads as 0 but lies
   outside every region, so any access to it must fault;
@@ -52,6 +53,8 @@ def faultJson : Fault → String × Json
   | .readOnly a n => ("readOnly", Json.mkObj [("addr", hex a), ("size", n)])
   | .spMisaligned sp => ("spMisaligned", Json.mkObj [("sp", hex sp)])
   | .pcMisaligned pc => ("pcMisaligned", Json.mkObj [("pc", hex pc)])
+  | .unaligned a n => ("unaligned", Json.mkObj [("addr", hex a), ("size", n)])
+  | .trapped pc => ("trapped", Json.mkObj [("pc", hex pc)])
   | .outOfFuel => ("outOfFuel", Json.null)
 
 structure Case where
@@ -62,6 +65,8 @@ structure Case where
   sp : Nat
   nzcv : Nat
   seed : Nat
+  /-- DCZID_EL0 of the reference machine (`State.dczid`). Absent in old corpora: `0x10`. -/
+  dczid : Nat
 
 def hexField (j : Json) (k : String) : Except String Nat := do
   parseHex (← j.getObjValAs? String k)
@@ -77,7 +82,8 @@ def parseCase (line : String) : Except String Case := do
   let sp ← hexField j "sp"
   let nzcv ← j.getObjValAs? Nat "nzcv"
   let seed ← j.getObjValAs? Nat "seed"
-  pure { id, word, pc, x, sp, nzcv, seed }
+  let dczid ← (j.getObjValAs? Nat "dczid" <|> pure 0x10)
+  pure { id, word, pc, x, sp, nzcv, seed, dczid }
 
 def initState (c : Case) : State :=
   { regs := fun i => if i < 31 then BitVec.ofNat 64 c.x[i]! else 0
@@ -88,7 +94,8 @@ def initState (c : Case) : State :=
       { bytes := fun a =>
           if dataBase ≤ a ∧ a < dataBase + dataSize then BitVec.ofNat 8 (pattern c.seed (a - dataBase))
           else 0
-        regions := [{ base := dataBase, size := dataSize, writable := true }] } }
+        regions := [{ base := dataBase, size := dataSize, writable := true }] }
+    dczid := BitVec.ofNat 5 c.dczid }
 
 def nzcvOf (f : Flags) : Nat :=
   (if f.n then 8 else 0) + (if f.z then 4 else 0) + (if f.c then 2 else 0) + (if f.v then 1 else 0)

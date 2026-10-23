@@ -28,9 +28,13 @@ echo "== build"
   go build -o "$bin/oracle" ./cmd/oracle)
 (cd "$root" && lake build janus-oracle)
 common=(-qemu "$QEMU" -runner "$bin/runner")
+# DCZID_EL0 is IMPLEMENTATION DEFINED: every case carries the reference CPU's own value (the
+# Lean side uses it as State.dczid; the runner refuses a case with a different one).
+DCZID="$(GODEBUG=asyncpreemptoff=1 ${QEMU:+"$QEMU"} "$bin/runner" -dczid)"
+echo "== reference DCZID_EL0 = $DCZID"
 
 echo "== harness self-test"
-"$bin/oracle" selftest "${common[@]}" > "$bin/selftest.log" || { cat "$bin/selftest.log"; exit 1; }
+"$bin/oracle" selftest "${common[@]}" -dczid "$DCZID" > "$bin/selftest.log" || { cat "$bin/selftest.log"; exit 1; }
 tail -1 "$bin/selftest.log"
 [ "$mode" = selftest ] && exit 0
 
@@ -42,7 +46,7 @@ case "$mode" in
   *) echo "usage: $0 selftest|quick|full" >&2; exit 2 ;;
 esac
 echo "== generate ($N words per class)"
-"$bin/oracle" gen -n "$N" -group "$((N * 2))" -seed "$SEED" -o "$OUT/gen.jsonl"
+"$bin/oracle" gen -dczid "$DCZID" -n "$N" -group "$((N * 2))" -seed "$SEED" -o "$OUT/gen.jsonl"
 cases+=("$OUT/gen.jsonl")
 
 if [ "$mode" = full ]; then
@@ -51,12 +55,12 @@ if [ "$mode" = full ]; then
   mkdir -p "$corpus"
   (cd "$root/oracle" &&
     CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$corpus/bigprog" ./harvest/bigprog &&
-    for p in math/big strconv sort crypto/sha256 bytes strings; do
+    for p in math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime; do
       CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
   extra=()
   for f in "$root"/artifacts/*-arm64; do [ -f "$f" ] && extra+=("$f"); done
-  "$bin/oracle" harvest -k "$K" -per-class "$PER_CLASS" -seed "$((SEED + 1))" -o "$OUT/harvest.jsonl" "$corpus"/* "${extra[@]}"
+  "$bin/oracle" harvest -dczid "$DCZID" -k "$K" -per-class "$PER_CLASS" -seed "$((SEED + 1))" -o "$OUT/harvest.jsonl" "$corpus"/* "${extra[@]}"
   cases+=("$OUT/harvest.jsonl")
 fi
 

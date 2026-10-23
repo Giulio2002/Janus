@@ -301,6 +301,30 @@ then split on the index:
   all_goals janus_simp [hexDigit]
 ```
 
+### Atomics, writable globals and runtime memory routines (`AtomicAdd`, `AtomicMax`, `CopyBlock`, `ClearWords`)
+
+`Janus/Tactic/Atomic.lean` adds the `exec` equations for the ordered, exclusive and LSE atomic
+instructions, `PRFM`, `CLREX`, `MRS DCZID_EL0` and `DC ZVA` (see `docs/SOUNDNESS.md` for their
+model). An alignment check of an atomic access is a branch (`p.toNat % 8 = 0`), pruned by a
+precondition.
+
+* **Writable globals named by the code.** `sync/atomic` tests `runtime.arm64HasATOMICS` and
+  memclr caches the `DC ZVA` block size in `block_size`. The extractor does not copy writable
+  data, so the precondition states the bytes at the address the code computes.
+  `Spec.adrpLdTarget pc w1 w2 scale` recomputes that address from the extracted `ADRP` and
+  `LDR` words (`segWord p name i`), so the statement contains no hand-copied literal.
+  `janus_eval_nat h : c` evaluates such a closed constant and adds `h : c = <numeral>`, proved by
+  `decide`. Rewrite with it before `janus_run`, so that `omega` sees the same literal the
+  executor computes.
+* **LSE vs LL/SC.** Preconditions select the LSE path (`readLE hasAtomics 1 % 2 = 1`). The
+  store-exclusive fallback is undecodable, so it must be unreachable from `pre`.
+* **Implementation-defined parameters.** `ClearWords` holds for every `State.dczid`. It splits
+  on the 32 values with one theorem per value (`CaseStmt k`), so that Lean elaborates them in
+  parallel, and it combines them with `janus_cases`. Long hardware loops (32 `DC ZVA`s of 4-byte
+  blocks) go through an induction lemma (`zva_loop`) instead of straight-line execution. Zeroed
+  ranges are tracked with interval lemmas (`ZeroOn`, `zeroOn_writeLE_zero`) rather than byte by
+  byte.
+
 ### Counterexamples (`WrongAdd`)
 
 `scripts/break-demo.sh` changes `x + y` to `x - y` in a copy of the Go source, rebuilds,

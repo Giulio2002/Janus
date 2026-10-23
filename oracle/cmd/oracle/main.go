@@ -113,6 +113,7 @@ func cmdGen(args []string) {
 	seed := fs.Uint64("seed", 1, "random seed")
 	out := fs.String("o", "gen.jsonl", "output")
 	first := fs.Int("first-id", 1_000_000, "first case id")
+	fs.IntVar(&gen.DCZID, "dczid", gen.DCZID, "DCZID_EL0 of the reference machine (runner -dczid)")
 	fs.Parse(args)
 	r := rand.New(rand.NewPCG(*seed, 0x6a616e7573))
 	cw := newCaseWriter(*out, *first)
@@ -193,6 +194,7 @@ func cmdHarvest(args []string) {
 	out := fs.String("o", "harvest.jsonl", "output")
 	perClass := fs.Int("per-class", 6000, "keep at most this many distinct words per class (0 = all), sampled uniformly")
 	first := fs.Int("first-id", 1, "first case id")
+	fs.IntVar(&gen.DCZID, "dczid", gen.DCZID, "DCZID_EL0 of the reference machine (runner -dczid)")
 	fs.Parse(args)
 	seen := map[uint32]bool{}
 	var words []uint32

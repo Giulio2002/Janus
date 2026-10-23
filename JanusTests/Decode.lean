@@ -176,16 +176,28 @@ example : decode 0x98ffff80 = some (.ldrLit 2 0x7fffc 0) := by decide
 
 example : decode 0x00000000 = none := by decide   -- udf #0
 example : decode 0xd4000001 = none := by decide   -- svc #0
-example : decode 0xc85ffc01 = none := by decide   -- ldaxr x1, [x0]
-example : decode 0xc89ffc01 = none := by decide   -- stlr x1, [x0]
-example : decode 0xf8e00001 = none := by decide   -- ldaddal x0, x1, [x0]
+example : decode 0xc85ffc01 = some (.ldExcl 3 true 0 1) := by decide   -- ldaxr x1, [x0]
+example : decode 0xc81ffc01 = none := by decide   -- stlxr w31, x1, [x0]: store-exclusives are rejected
+example : decode 0xc81bfc02 = none := by decide   -- stlxr w27, x2, [x0]
+example : decode 0xc89ffc01 = some (.ldstOrdered 3 false false 0 1) := by decide   -- stlr x1, [x0]
+example : decode 0xc89f7c01 = none := by decide   -- stllr x1, [x0] (FEAT_LOR)
+example : decode 0xc89efc01 = none := by decide   -- stlr with Rs != 11111 (CONSTRAINED UNPREDICTABLE)
+example : decode 0xf8e00001 = some (.atomic 3 true true 0 .add 0 1) := by decide   -- ldaddal x0, x1, [x0]
+example : decode 0xc8fbfc01 = some (.cas 3 true true 27 0 1) := by decide   -- casal x27, x1, [x0]
+example : decode 0x48207c82 = some (.casp true false false 0 4 2) := by decide   -- casp x0, x1, x2, x3, [x4]
+example : decode 0x48217c82 = none := by decide   -- casp with odd Rs
+example : decode 0xf8bfc020 = some (.ldstOrdered 3 true true 1 0) := by decide   -- ldapr x0, [x1]
+example : decode 0xb8e18002 = some (.atomic 2 true true 1 .swp 0 2) := by decide   -- swpal w1, w2, [x0]
 example : decode 0xd53b4200 = none := by decide   -- mrs x0, nzcv
+example : decode 0xd53b00e3 = some (.mrsDczid 3) := by decide   -- mrs x3, dczid_el0
+example : decode 0xd50b7420 = some (.dcZva 0) := by decide   -- dc zva, x0
+example : decode 0xd50b7520 = none := by decide   -- ic ivau, x0
 example : decode 0x1e602000 = none := by decide   -- fcmp d0, d0
 example : decode 0xfd400400 = none := by decide   -- ldr d0, [x0, #8]
-example : decode 0xf9800000 = none := by decide   -- prfm pldl1keep, [x0]
-example : decode 0xd8000000 = none := by decide   -- prfm (literal)
+example : decode 0xf9800000 = some (.prefetch 0) := by decide   -- prfm pldl1keep, [x0]
+example : decode 0xd8000000 = some (.prefetch 0) := by decide   -- prfm (literal)
 example : decode 0xa8400000 = none := by decide   -- ldnp x0, x0, [x0]: LDNP not supported
-example : decode 0xd503305f = none := by decide   -- clrex
+example : decode 0xd503305f = some (.clrex 0) := by decide   -- clrex
 example : decode 0xd503233f = none := by decide   -- paciasp
 example : decode 0xd50323bf = none := by decide   -- autiasp
 example : decode 0xd503207f = none := by decide   -- wfi
@@ -244,6 +256,6 @@ example : decode 0xa9400000 = none := by decide   -- ldp x0, x0, [x0] (Rt = Rt2)
 example : decode 0x29000000 = some (.ldstPair 0 .offset false 0 0 0 0) := by decide  -- stp w0, w0 ok
 example : decode 0x69000000 = none := by decide   -- stgp (opc = 01, L = 0)
 example : decode 0xe9400000 = none := by decide   -- pair opc = 11
-example : decode 0xd8000000 = none := by decide   -- literal opc = 11 (PRFM)
+example : decode 0xd8000000 = some (.prefetch 0) := by decide   -- literal opc = 11 (PRFM)
 
 end JanusTests.Decode

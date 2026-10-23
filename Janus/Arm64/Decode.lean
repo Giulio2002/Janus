@@ -13,7 +13,8 @@ the ARM ARM decode pseudocode of a supported instruction is checked.
 
 The structure follows the ARM ARM top-level decode table (`op0 = w<28:25>`) and then the
 class tables. Only `Nat` arithmetic and `if` are used, so `decide`, `rfl` and
-`simp [decode, decodeDPImm, decodeBranchSys, decodeLdSt, decodeDPReg, bits, bit, ...]`
+`simp [decode, decodeDPImm, decodeBranchSys, decodeLdSt, decodeExclusive, decodeAtomic,
+decodeDPReg, bits, bit, ...]`
 evaluate the decoder on literal words.
 -/
 
@@ -128,8 +129,11 @@ def decodeBranchSys (w : Nat) : Option Instr :=
     -- Barriers: 1101010100 0 00 011 0011 CRm op2 11111.
     -- op2 = 100 DSB, 101 DMB, 110 ISB (every CRm value is a valid or "execute as SY" option);
     -- CLREX, SB, DSB nXS, TCOMMIT, ... are rejected.
+    -- op2 = 010 CLREX (every CRm value is allowed: the immediate is ignored).
     let op2 := bits w 7 5
-    if op2 = 4 || op2 = 5 || op2 = 6 then some (.barrier (bits w 11 8) op2) else none
+    if op2 = 4 || op2 = 5 || op2 = 6 then some (.barrier (bits w 11 8) op2)
+    else if op2 = 2 then some (.clrex (bits w 11 8))
+    else none
   else if w &&& 0xFFFFFC1F = 0xD61F0000 then
     -- Unconditional branch (register): 1101011 opc op2=11111 op3=000000 Rn op4=00000
     some (.br (bits w 9 5))
@@ -137,6 +141,14 @@ def decodeBranchSys (w : Nat) : Option Instr :=
     some (.blr (bits w 9 5))
   else if w &&& 0xFFFFFC1F = 0xD65F0000 then
     some (.ret (bits w 9 5))
+  else if w &&& 0xFFFFFFE0 = 0xD53B00E0 then
+    -- MRS Xt, DCZID_EL0: 1101010100 1 1 op0=11 op1=011 CRn=0000 CRm=0000 op2=111 Rt.
+    -- No other system register is readable in this model.
+    some (.mrsDczid (bits w 4 0))
+  else if w &&& 0xFFFFFFE0 = 0xD50B7420 then
+    -- DC ZVA, Xt = SYS #3, C7, C4, #1, Xt: 1101010100 0 01 011 0111 0100 001 Rt.
+    -- No other cache-maintenance or SYS operation is accepted.
+    some (.dcZva (bits w 4 0))
   else none
 
 /-- Valid `(size, opc)` combinations of the single-register integer load/store classes:
@@ -146,17 +158,71 @@ other combinations are unallocated. -/
 def validSizeOpc (size opc : Nat) : Bool :=
   opc ≤ 1 || (opc = 2 && size ≤ 2) || (opc = 3 && size ≤ 1)
 
+/-- LSE atomic memory operations by `opc` (bits 14:12) with `o3 = 0`. -/
+def AtomicOp.ofBits (n : Nat) : AtomicOp :=
+  if n = 0 then .add else if n = 1 then .clr else if n = 2 then .eor else if n = 3 then .set
+  else if n = 4 then .smax else if n = 5 then .smin else if n = 6 then .umax else .umin
+
+/-- Load/store exclusive, ordered, and compare-and-swap (`size 001000 o2 L o1 Rs o0 Rt2 Rn Rt`).
+
+* `o2 o1 = 1 1`: CAS{A}{L}{B,H} (`Rt2 = 11111`; other values are unallocated).
+* `o2 o1 = 1 0`: LDAR/STLR (`o0 = 1`, `Rs` and `Rt2` should-be-one; any other value is
+  CONSTRAINED UNPREDICTABLE and rejected). `o0 = 0` is LDLAR/STLLR (FEAT_LOR), rejected.
+* `o2 o1 = 0 1`: CASP{A}{L} for `size = 0x` (`Rt2 = 11111`, `Rs` and `Rt` even, else
+  UNDEFINED); LDXP/STXP/... for `size = 1x`, rejected.
+* `o2 o1 = 0 0`: LDXR/LDAXR (`L = 1`, `Rs` and `Rt2` should-be-one). STXR/STLXR (`L = 0`) are
+  **rejected**: a store-exclusive may fail spuriously on hardware, and a deterministic model
+  of it would be unsound (see `docs/SOUNDNESS.md`). -/
+def decodeExclusive (w : Nat) : Option Instr :=
+  let rt := bits w 4 0
+  let rn := bits w 9 5
+  let size := bits w 31 30
+  let o2 := bit w 23
+  let L := bit w 22
+  let o1 := bit w 21
+  let rs := bits w 20 16
+  let o0 := bit w 15
+  if bits w 14 10 ≠ 31 then none else
+  if o2 && o1 then some (.cas size L o0 rs rn rt)
+  else if o2 then
+    if !o0 || rs ≠ 31 then none else some (.ldstOrdered size L false rn rt)
+  else if o1 then
+    if size ≥ 2 then none else
+    if rs % 2 = 1 || rt % 2 = 1 then none else
+    some (.casp (size = 1) L o0 rs rn rt)
+  else
+    if !L || rs ≠ 31 then none else some (.ldExcl size o0 rn rt)
+
+/-- Atomic memory operations (`size 111 0 00 A R 1 Rs o3 opc 00 Rn Rt`): LD<op>{A}{L}
+(`o3 = 0`, every `opc`), SWP{A}{L} (`o3 = 1, opc = 000`) and LDAPR (`o3 = 1, opc = 100`,
+`A = 1, R = 0`, `Rs` should-be-one). Everything else (ST64B*, LD64B, RCW*, ...) is rejected. -/
+def decodeAtomic (w : Nat) : Option Instr :=
+  let rt := bits w 4 0
+  let rn := bits w 9 5
+  let size := bits w 31 30
+  let A := bit w 23
+  let R := bit w 22
+  let rs := bits w 20 16
+  let opc := bits w 14 12
+  if !bit w 15 then some (.atomic size A R rs (AtomicOp.ofBits opc) rn rt)
+  else if opc = 0 then some (.atomic size A R rs .swp rn rt)
+  else if opc = 4 && A && !R && rs == 31 then some (.ldstOrdered size true true rn rt)
+  else none
+
 /-- Loads and stores (`op0 = x1x0`), integer (`V = 0`) forms only. -/
 def decodeLdSt (w : Nat) : Option Instr :=
   let rt := bits w 4 0
   let rn := bits w 9 5
   if bit w 26 then none else  -- V = 1: SIMD&FP
   let cls := bits w 29 27
-  if cls = 0b011 then
+  if cls = 0b001 then
+    -- Exclusive / ordered / compare-and-swap: size 001000 ... (w<24> = 1: other classes)
+    if bit w 24 then none else decodeExclusive w
+  else if cls = 0b011 then
     -- Load register (literal): opc 011 V 0 0 imm19 Rt (w<24> = 1 is another class)
     if bit w 24 then none else
     let opc := bits w 31 30
-    if opc = 3 then none else  -- PRFM (literal)
+    if opc = 3 then some (.prefetch rt) else  -- PRFM (literal)
     some (.ldrLit opc (bits w 23 5) rt)
   else if cls = 0b101 then
     -- Load/store register pair: opc 101 V 0 idx L imm7 Rt2 Rn Rt
@@ -176,13 +242,18 @@ def decodeLdSt (w : Nat) : Option Instr :=
   else if cls = 0b111 then
     let size := bits w 31 30
     let opc := bits w 23 22
-    if !validSizeOpc size opc then none else
+    -- `size = 11, opc = 10` is PRFM (immediate, register) / PRFUM: a hint with no effect.
+    let prfm := size = 3 && opc = 2
     if bit w 24 then
       -- Load/store register (unsigned immediate): size 111 V 01 opc imm12 Rn Rt
+      if prfm then some (.prefetch rt) else
+      if !validSizeOpc size opc then none else
       some (.ldstUImm size opc (bits w 21 10) rn rt)
     else if !bit w 21 then
       -- size 111 V 00 opc 0 imm9 op4 Rn Rt; op4: 00 unscaled, 01 post, 10 unprivileged, 11 pre
       let op4 := bits w 11 10
+      if prfm then (if op4 = 0 then some (.prefetch rt) else none) else  -- PRFUM
+      if !validSizeOpc size opc then none else
       if op4 = 2 then none else
       let mode := if op4 = 0 then Imm9Mode.unscaled else if op4 = 1 then .post else .pre
       -- `if wback && n == t && n != 31 then CONSTRAINED UNPREDICTABLE` (loads and stores)
@@ -192,9 +263,14 @@ def decodeLdSt (w : Nat) : Option Instr :=
       -- Load/store register (register offset): size 111 V 00 opc 1 Rm option S 10 Rn Rt
       let option := bits w 15 13
       if option / 2 % 2 = 0 then none else  -- `if option<1> == '0' then UNDEFINED`
+      if prfm then some (.prefetch rt) else
+      if !validSizeOpc size opc then none else
       some (.ldstReg size opc (bits w 20 16) (ExtendType.ofBits option) (bit w 12) rn rt)
-    else none  -- atomics, LDRAA/LDRAB, ...
-  else none  -- exclusives, ordered, LDAPR, MOPS, tags, ...
+    else if bits w 11 10 = 0 then
+      -- Atomic memory operations: size 111 V 00 A R 1 Rs o3 opc 00 Rn Rt
+      decodeAtomic w
+    else none  -- LDRAA/LDRAB, ...
+  else none  -- MOPS, tags, RCpc unscaled, ...
 
 /-- Data processing -- register (`op0 = x101`). -/
 def decodeDPReg (w : Nat) : Option Instr :=

@@ -125,10 +125,24 @@ do_run() {
   JANUS_SAIL_JOBS="$JOBS" "$sail_bin" < "$OUT/cases.jsonl" > "$OUT/sail.jsonl"
   "$sail_bin" --to-model < "$OUT/sail.jsonl" > "$OUT/sail-model.jsonl"
 
-  echo "== Janus vs Sail (hardware := Sail)"
+  # DCZID_EL0 is IMPLEMENTATION DEFINED (qemu -cpu max: 7, the Sail model: 8). The corpus
+  # carries qemu's value; Janus is checked against each reference with that reference's own
+  # value (State.dczid is a free parameter of every theorem), read here with one MRS.
+  sail_dczid="$(python3 -I -c 'import json; print(json.dumps({"id": 0, "class": "probe", "word": "0xd53b00e0", "pc": "0x1000000800", "x": ["0x0"] * 31, "sp": "0x1000040800", "nzcv": 0, "seed": 0, "dczid": 0}))' |
+    "$sail_bin" -j 1 | python3 -I -c 'import json, sys; print(int(json.loads(sys.stdin.readline())["x"][0], 16))')"
+  echo "== Sail DCZID_EL0 = $sail_dczid (corpus/qemu: $(head -1 "$OUT/cases.jsonl" | python3 -I -c 'import json,sys; print(json.loads(sys.stdin.readline()).get("dczid"))'))"
+  python3 -I -c '
+import json, sys
+v = int(sys.argv[1])
+for line in sys.stdin:
+    if line.strip():
+        c = json.loads(line); c["dczid"] = v; sys.stdout.write(json.dumps(c, separators=(",", ":")) + "\n")
+' "$sail_dczid" < "$OUT/cases.jsonl" > "$OUT/cases.sail-dczid.jsonl"
+
+  echo "== Janus vs Sail (hardware := Sail, State.dczid := Sail's)"
   cp "$OUT/sail.jsonl" "$OUT/janus-vs-sail/hw.jsonl"
   "$oracle_bin" run -reuse-native -model "$janus_bin" -j "$JOBS" \
-    -cases "$OUT/cases.jsonl" -out "$OUT/janus-vs-sail" > /dev/null
+    -cases "$OUT/cases.sail-dczid.jsonl" -out "$OUT/janus-vs-sail" > /dev/null
   cp "$OUT/janus-vs-sail/model.jsonl" "$OUT/janus.jsonl"
 
   echo "== qemu vs Sail (hardware := qemu, model := Sail)"
@@ -138,11 +152,9 @@ do_run() {
   "$oracle_bin" run -reuse-native -model "$OUT/qemu-vs-sail/sail-as-model.sh" -j 1 -shard 100000000 \
     -cases "$OUT/cases.jsonl" -out "$OUT/qemu-vs-sail" > /dev/null
 
-  echo "== Janus vs qemu (same corpus, same Janus build)"
+  echo "== Janus vs qemu (same corpus, same Janus build, State.dczid := qemu's)"
   cp "$OUT/qemu.jsonl" "$OUT/janus-vs-qemu/hw.jsonl"
-  printf '#!/bin/sh\nexec python3 -I %s %s\n' "$here/replay.py" "$OUT/janus.jsonl" > "$OUT/janus-vs-qemu/janus-replay.sh"
-  chmod +x "$OUT/janus-vs-qemu/janus-replay.sh"
-  "$oracle_bin" run -reuse-native -model "$OUT/janus-vs-qemu/janus-replay.sh" -j 1 -shard 100000000 \
+  "$oracle_bin" run -reuse-native -model "$janus_bin" -j "$JOBS" \
     -cases "$OUT/cases.jsonl" -out "$OUT/janus-vs-qemu" > /dev/null
 
   if grep -q '"verdict":"MISMATCH"' "$OUT/janus-vs-sail/verdicts.jsonl"; then
@@ -153,7 +165,7 @@ do_run() {
   fi
   echo "== Sail-only: SP-based accesses with a misaligned SP (qemu does not check SP alignment)"
   mkdir -p "$OUT/spalign"
-  python3 -I "$here/spalign.py" "$OUT/cases.jsonl" > "$OUT/spalign/cases.in.jsonl"
+  python3 -I "$here/spalign.py" "$OUT/cases.sail-dczid.jsonl" > "$OUT/spalign/cases.in.jsonl"
   JANUS_SAIL_JOBS=1 "$oracle_bin" run -qemu "" -runner "$sail_bin" -model "$janus_bin" -j "$JOBS" \
     -cases "$OUT/spalign/cases.in.jsonl" -out "$OUT/spalign" > /dev/null
   sed -n 5p "$OUT/spalign/summary.md"

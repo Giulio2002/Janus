@@ -62,6 +62,10 @@ type Case struct {
 	SP    string     `json:"sp"`
 	NZCV  int        `json:"nzcv"` // N=8 Z=4 C=2 V=1
 	Seed  uint64     `json:"seed"`
+	// DCZID is the reference machine's DCZID_EL0 (bits 4:0: DZP, BS), an IMPLEMENTATION
+	// DEFINED constant that MRS DCZID_EL0 and DC ZVA depend on. The Lean side uses it as
+	// `State.dczid`; the native runner refuses a case whose value differs from its CPU's.
+	DCZID int `json:"dczid"`
 }
 
 // HW is what the native runner observed.

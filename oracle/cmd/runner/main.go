@@ -45,6 +45,11 @@ import (
 
 func callPage(entry uintptr)
 
+func readDCZID() uint64
+
+// dczid is this CPU's DCZID_EL0; every case must carry the same value (layout.Case.DCZID).
+var dczid = readDCZID() & 0x1f
+
 const (
 	sigILL  = 4
 	sigTRAP = 5
@@ -218,6 +223,10 @@ func runCase(c *L.Case, seq int64) L.HW {
 		r.Status, r.Note = "error", "pc must be layout.TestPC"
 		return r
 	}
+	if uint64(c.DCZID) != dczid {
+		r.Status, r.Note = "error", fmt.Sprintf("case dczid %#x differs from this CPU's DCZID_EL0 %#x (regenerate with -dczid)", c.DCZID, dczid)
+		return r
+	}
 	clear(code)
 	binary.LittleEndian.PutUint32(code[L.TestPC-L.CodePage:], uint32(word))
 	for i := range data {
@@ -281,7 +290,12 @@ func runCase(c *L.Case, seq int64) L.HW {
 func main() {
 	dump := flag.Bool("dump-trampoline", false, "write the trampoline words (raw little-endian) to stdout and exit")
 	limit := flag.Duration("timeout", time.Second, "watchdog limit for one case (branch-to-self)")
+	printDCZID := flag.Bool("dczid", false, "print this CPU's DCZID_EL0 (decimal) and exit")
 	flag.Parse()
+	if *printDCZID {
+		fmt.Println(dczid)
+		return
+	}
 
 	words := buildTrampoline()
 	if *dump {

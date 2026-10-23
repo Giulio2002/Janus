@@ -116,7 +116,11 @@ about executions outside it.
 
 * **Single-threaded.** Memory changes only through the function's own stores. There are no
   other goroutines or OS threads, no concurrent writes and no weak-memory effects. Atomics and
-  barriers mean only their sequential semantics.
+  barriers mean only their sequential semantics: a load-acquire (`LDAR`, `LDAPR`, `LDAXR`) is
+  an ordinary load, a store-release (`STLR`) an ordinary store, and the acquire/release
+  variants of the LSE atomics behave like the plain ones. With one thread and no other
+  observer these are equivalent; a theorem says nothing about what another thread would see.
+  See "Atomics, exclusives and system registers" below.
 * **No signals, no asynchronous preemption, no interrupts.** Go's signal-based async
   preemption, profiling signals and injected calls (`sigpanic`) are not modelled.
 * **No runtime interaction.** No GC (write barriers, stack scanning, moving stacks), no
@@ -125,7 +129,8 @@ about executions outside it.
   extracted and their code is in the supported subset. They then run in the same idealised
   model. Functions with a stack-check prologue need `GoABI.StackGuardOK s k` (g readable,
   `stackguard0 + k < SP`) for the prologue to fall through.
-* **User mode only (EL0).** There are no system registers beyond NZCV, no exceptions and no
+* **User mode only (EL0).** There are no system registers beyond NZCV and the read-only
+  `DCZID_EL0` (`State.dczid`, see below), no exceptions and no
   page tables. `SP` alignment checking (SCTLR_EL1.SA0, as Linux configures it) is modelled as a
   fault. Other alignment faults are not modelled, except where the instruction model says so.
 * **Memory outside the listed regions faults.** Every load and store must lie entirely inside
@@ -169,6 +174,83 @@ about executions outside it.
 * **Fixed binary.** A theorem is about one binary, identified by SHA-256. Rebuilding with
   another compiler version, other flags or another linker layout invalidates it. `janus check`
   detects this.
+
+## Atomics, exclusives and system registers
+
+`sync/atomic` and the runtime compile to load-acquire/store-release, LSE atomics and
+load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after reading
+`DCZID_EL0`. The model covers them as follows (`Janus/Arm64/Decode.lean`, `Exec.lean`).
+
+* **Ordered accesses** (`LDAR`, `LDAPR`, `STLR`, all sizes) are ordinary loads and stores in
+  the single-threaded model. `LDLAR`/`STLLR` (FEAT_LOR) are rejected.
+* **LSE atomics** (`LD<op>` for ADD, CLR, EOR, SET, SMAX, SMIN, UMAX, UMIN; `SWP`; `CAS`;
+  `CASP`; every size and A/L variant; the `ST<op>` aliases) are one-instruction
+  read-modify-writes. Single-threaded, they are deterministic and are modelled exactly: read
+  the old value, write the new one, put the old one in the destination register. The access
+  needs write permission even when `CAS` does not store. `CASP` with an odd register is
+  rejected (UNDEFINED).
+* **Alignment.** Ordered, exclusive and atomic accesses fault (`Fault.unaligned`) unless naturally
+  aligned (`CASP`: to the pair). Hardware without FEAT_LSE2 always faults there; with FEAT_LSE2
+  some of them succeed when they stay inside 16 bytes. The model is conservative for both.
+* **Feature assumptions.** Accepting an instruction means assuming the CPU implements it: the
+  model is of a CPU with FEAT_LSE (`LD<op>`, `SWP`, `CAS`, `CASP`) and FEAT_LRCPC (`LDAPR`).
+  On an Armv8.0 CPU they are UNDEFINED (`SIGILL`). Go code does not depend on this blindly: it
+  runs LSE instructions only after testing `runtime.arm64HasATOMICS`, a byte the runtime sets
+  at start-up from the CPU's capabilities (or, built with `GOARM64=v8.1`, it refuses to start
+  without LSE). A proof through such a test assumes the flag in its precondition, as
+  `examples/proofs/AtomicAdd.lean` does, and on a CPU without LSE that precondition is false,
+  so the theorem is vacuous there rather than wrong. A proof about code that uses LSE
+  unconditionally is a statement about LSE-capable CPUs.
+* **Store-exclusives are rejected.** `STXR`, `STLXR`, `STXP` and `STLXP` decode to nothing
+  (`undecodable`), so any run that reaches one faults. Reasoning: on real hardware a
+  store-exclusive may fail *spuriously* (status 1, nothing stored) even with no other thread:
+  an interrupt, a context switch, a cache eviction or an implementation-defined event clears
+  the exclusive monitor. A deterministic "always succeeds" model would therefore claim
+  behaviour hardware does not guarantee; it is sound only for code whose result does not
+  depend on the number of failures (a correct retry loop), which is a property of the
+  surrounding program, not of the instruction, and the model checks instructions one at a
+  time. An "always fails" model is unsound in the other direction (the first attempt can
+  succeed). A sound alternative would make the outcome an explicit nondeterministic input
+  (an oracle stream in the state that theorems quantify over, plus a fairness assumption for
+  termination); it is not needed for Go's LSE paths, so it is not implemented. The
+  consequence is conservative: the `LDAXR`/`STLXR` fallback of `sync/atomic` (taken only when
+  the CPU lacks LSE) cannot be proved, and a theorem through it is unprovable, never wrong.
+* **Load-exclusives** (`LDXR`, `LDAXR`) are modelled as ordinary (aligned) loads. The exclusive
+  monitor they would arm is observable only by a store-exclusive, which faults, so it is not
+  part of the state; `CLREX` is a no-op for the same reason. Exclusive pairs (`LDXP`,
+  `LDAXP`) are rejected.
+* **PRFM/PRFUM** (all forms and prefetch operations) only advance `pc`: a prefetch never faults
+  and has no architectural effect.
+* **`DCZID_EL0` is a parameter, not a constant.** `MRS Xt, DCZID_EL0` (the only accepted system
+  register read) returns `State.dczid`, the five meaningful bits (`DZP`, `BS`). The value is
+  IMPLEMENTATION DEFINED (qemu `-cpu max` reports 7, i.e. 512-byte blocks; the Sail Armv9.4
+  model 8; many Neoverse cores 4), so it lives in the state, execution never changes it, and a
+  theorem about arbitrary initial states quantifies over all 32 values. A proof may restrict
+  it by a visible precondition. `DC ZVA, Xt` zeroes the naturally aligned block of
+  `4 << BS` bytes containing `Xt` (checked as a store of that many bytes) and faults
+  (`Fault.trapped`, `SIGILL` on Linux) when `DZP = 1`. Other `DC`/`IC`/`SYS` operations are
+  rejected. `examples/proofs/ClearWords.lean` proves `runtime.memclrNoHeapPointers` (through its
+  `DC ZVA` path) for every value of `DCZID_EL0`.
+* **No SIMD/FP registers.** `State` has no `V0`–`V31`. Go 1.26's `runtime.memmove` and
+  `runtime.memclrNoHeapPointers` on arm64, and the compiler's inline copies and zeroing of
+  fixed-size values, use general-purpose `LDP`/`STP` only (checked on the Go 1.26.0 binary: no
+  `Q`/`D` loads or stores, `LD1`/`ST1`, `MOVI` or `DUP` in either routine), so no vector state
+  is needed for them. The runtime routines that do use SIMD (`memequal`, `indexbyte`, `count`,
+  the AES hash) also compute with it, which is outside this model.
+
+**Coverage effect** (`janus blockers` on Go 1.26.0 `go test -c` binaries, every `T` symbol of
+the package plus `runtime.memmove` and `runtime.memclrNoHeapPointers`, `--max-functions 3000`):
+
+| binary (symbols) | fully decoded before | after | distinct rejected words before → after |
+|---|---:|---:|---:|
+| `sync/atomic` + `internal/runtime/atomic` (20) | 3 | 9 (+3 whose only rejected words are the LL/SC fallback `STLXR`) | 677 → 399 |
+| `bytes` (61) | 26 | 27 | 681 → 406 |
+| `strings` (70) | 15 | 16 | 694 → 414 |
+
+`runtime.memmove` was already fully decoded; `runtime.memclrNoHeapPointers` now is. What still
+blocks most `bytes`/`strings` functions is SIMD computation (`memequal`, `indexbyte`, `count`:
+`LD1`, `CMEQ`, `ADDP`, `UADDLV`, ...), `MRS TPIDR_EL0`/`CNTVCT_EL0` and FP/AES code reached
+through `mallocgc`.
 
 ## What the theorem does not say
 

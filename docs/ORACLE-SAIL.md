@@ -44,7 +44,7 @@ Exit criterion: `soundness.jsonl` is empty, i.e. `janus-vs-sail` has 0 `MISMATCH
 | single-step oracle around it | [yufengzjj/sail-aarch64-oracle](https://github.com/yufengzjj/sail-aarch64-oracle): Sail's C++ backend output of the model plus a harness (`step(opcode)` = `__DecodeExecute` + exception path, register/memory accessors) as a Rust crate with the generated model vendored |
 | test cases, layout, result formats | the qemu oracle (`oracle/layout/layout.go`): `Case` in, `HW` out (plus extra fields Go ignores) |
 | comparator, report, minimiser | the qemu oracle's `oracle run` / `oracle minimize` (`oracle/cmd/oracle`), run unchanged. The Sail driver is a drop-in `-runner`, or its results are replayed through `-reuse-native` / `-model` |
-| Lean side | `janus-oracle` (`Oracle/Main.lean`), unchanged |
+| Lean side | `janus-oracle` (`Oracle/Main.lean`); `State.dczid` comes from the case |
 
 New code lives under `oracle-sail/` and in `scripts/oracle-sail.sh`. No file of the qemu oracle and
 no Lean file is modified.
@@ -188,6 +188,12 @@ and must not be read as "the architecture says so":
 * **`mops-impdef`**: `CPY*`/`SET*`. The crate fixes the IMPLEMENTATION DEFINED options
   (option A; the prologue processes 0 bytes), and qemu chooses differently. Only the final
   memory state is comparable.
+* **`impdef-dczid`**: `MRS Xt, DCZID_EL0`, `DC ZVA`, `DC GVA`, `DC GZVA`. `DCZID_EL0` is
+  IMPLEMENTATION DEFINED (qemu `-cpu max` 7, the Sail model 8), so qemu and Sail legitimately
+  differ. Janus is compared with each one using that reference's own value.
+* **`sysreg-read`**: `MRS` of other system registers at EL0. Linux and qemu-user emulate reads
+  of the ID registers; Sail applies the ASL trap rules for this EL0 configuration. Janus rejects
+  these reads.
 * **`pauth-keys`**: PAC/AUT/XPAC/PACGA/LDRA*/BRA*. The results depend on the keys (the model's reset
   values, random per process in qemu-user) and on FEAT_FPAC, which Sail implements: a
   failed `AUT*` faults (SIGILL/ILL_ILLOPN) where qemu returns a poisoned pointer.
@@ -207,7 +213,55 @@ and must not be read as "the architecture says so":
 None of these can hide a Janus soundness bug as an "agree". They only produce `model-gap`
 or MISMATCH noise between qemu and Sail, or `error` cases, which are excluded.
 
-## Results (2026-10-23, corpus of `scripts/oracle.sh full`: 427,845 cases)
+## Results with the atomics / DC ZVA extension (2026-10-23, 486,463 cases)
+
+Corpus of `scripts/oracle.sh full` after the single-threaded atomics model was added (harvest
+now includes `go test -c` of `sync/atomic` and `runtime`, and the classes `sys.mrs` and `sys.sys`).
+`DCZID_EL0` is IMPLEMENTATION DEFINED and differs between the references (qemu 7, Sail 8):
+`scripts/oracle-sail.sh` reads Sail's value with one `MRS` and runs Janus against Sail with
+`State.dczid` = 8 (`cases.sail-dczid.jsonl`), and against qemu with 7.
+
+| pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
+|---|---:|---:|---:|---:|---:|
+| **Sail vs Janus** | 475,993 | **0** | 10,456 | 14 | 0 |
+| qemu vs Sail | 480,628 | 4,815 | 1,005 | 1 | 14 |
+| qemu vs Janus | 475,022 | 0 | 11,440 | 1 | 0 |
+| Sail vs Janus, `spalign` (Sail-only) | 102,455 | **0** | 0 | 5 | 0 |
+
+* **Soundness: 0 cases** (`soundness.jsonl` is empty). Janus's 10,456 gaps against Sail are
+  9,935 `undecodable`, 385 `unaligned` (Sail implements FEAT_LSE2: misaligned ordered/atomic
+  accesses inside 16 bytes succeed), 107 `noCode`, 29 `outsideAllocation`.
+* The new instructions against Sail (same grouping as in `docs/ORACLE.md`):
+
+| instruction | cases | harvest | agree-ok | agree-fault | model-gap | MISMATCH | unobserved | distinct words |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| CAS | 1554 | 273 | 1017 | 480 | 57 | 0 | 0 | 1370 |
+| CASP | 548 | 0 | 289 | 250 | 9 | 0 | 0 | 544 |
+| CLREX | 498 | 0 | 498 | 0 | 0 | 0 | 0 | 16 |
+| DC ZVA | 2047 | 3 | 1705 | 342 | 0 | 0 | 0 | 32 |
+| LD<op> | 3134 | 531 | 2682 | 325 | 127 | 0 | 0 | 2778 |
+| LDAPR | 336 | 0 | 209 | 115 | 12 | 0 | 0 | 328 |
+| LDAR/STLR | 2005 | 885 | 1457 | 454 | 94 | 0 | 0 | 1339 |
+| LDLAR/STLLR | 203 | 0 | 0 | 161 | 42 | 0 | 0 | 203 |
+| LDXP/STXP | 583 | 0 | 0 | 320 | 263 | 0 | 0 | 582 |
+| LDXR/LDAXR | 1083 | 396 | 710 | 328 | 45 | 0 | 0 | 785 |
+| MRS DCZID_EL0 | 1988 | 3 | 1988 | 0 | 0 | 0 | 0 | 32 |
+| PRFM (literal) | 1169 | 0 | 1169 | 0 | 0 | 0 | 0 | 1153 |
+| PRFM/PRFUM | 855 | 0 | 602 | 253 | 0 | 0 | 0 | 854 |
+| STXR/STLXR | 1072 | 471 | 0 | 257 | 815 | 0 | 0 | 756 |
+| SWP | 1051 | 78 | 898 | 112 | 41 | 0 | 0 | 999 |
+| **total** | 18126 | 2640 | 13224 | 3397 | 1505 | 0 | 0 | 11771 |
+
+  `MRS DCZID_EL0` and `DC ZVA` agree on every successful case with Sail's 1 KiB blocks, as they
+  do with qemu's 512-byte blocks. Store-exclusives succeed in Sail (`sail-monitor-stub`) and
+  fail on qemu; Janus rejects them, so both are gaps.
+* **qemu vs Sail**: every non-agreement carries a tag. New ones: `impdef-dczid` (3,519: `MRS
+  DCZID_EL0` returns 7 vs 8, and `DC ZVA`/`DC GVA`/`DC GZVA` zero 512 vs 1024 bytes) and
+  `sysreg-read` (15: `MRS` of other registers, which Linux/qemu-user emulate and Sail traps; Janus
+  rejects them all). The rest as before: `sail-monitor-stub`, `sbo-unpredictable`, `pauth-keys`,
+  `qemu-process-memory`, `qemu-lacks-feature`, `mops-impdef`.
+
+## Earlier results (2026-10-23, corpus of `scripts/oracle.sh full`: 427,845 cases)
 
 Janus = `janus-oracle` built 13:55 (git `665fb69` + working tree); qemu = `artifacts/oracle/hw.jsonl`
 (qemu 10.2.1, `-cpu max`); Sail = vendored model, instrumented.

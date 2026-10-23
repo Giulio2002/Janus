@@ -16,6 +16,7 @@ func cmdSelftest(args []string) {
 	var o runOpts
 	fs.StringVar(&o.qemu, "qemu", "/usr/bin/qemu-aarch64", "qemu-aarch64 (empty: run natively)")
 	fs.StringVar(&o.runner, "runner", "oracle/bin/runner", "native runner")
+	fs.IntVar(&gen.DCZID, "dczid", gen.DCZID, "DCZID_EL0 of the reference machine (runner -dczid)")
 	fs.Parse(args)
 
 	type tc struct {

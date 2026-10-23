@@ -42,8 +42,12 @@ oracle/bin/oracle minimize -out DIR                     # shrink mismatches to r
 ## What a case is
 
 A case (`oracle/layout/layout.go`, `Case`) is one 32-bit instruction word plus a complete
-initial state: `X0`–`X30`, `SP`, `NZCV`, and a seed for the contents of a 4 KiB data
-buffer. Everything is at fixed addresses, so a case is closed and deterministic:
+initial state: `X0`–`X30`, `SP`, `NZCV`, a seed for the contents of a 4 KiB data
+buffer, and `dczid`, the reference CPU's `DCZID_EL0`. That register is IMPLEMENTATION DEFINED
+and read-only, so it cannot be set per case: `scripts/oracle.sh` asks the runner for its CPU's
+value (`runner -dczid`; qemu `-cpu max` reports 7) and writes it into every case
+(`oracle gen/harvest/selftest -dczid N`), the runner refuses a case whose value differs from its
+own, and the Lean side uses it as `State.dczid`. Everything is at fixed addresses, so a case is closed and deterministic:
 
 | address | what |
 |---|---|
@@ -52,8 +56,9 @@ buffer. Everything is at fixed addresses, so a case is closed and deterministic:
 | `0xF_F810_0000` / `0xF_F810_1000` | trampoline code / context page (127 MiB below, out of the way) |
 
 everything else nearby is unmapped. The Lean side (`janus-oracle`) builds a `State` with
-these registers, `pc = TestPC`, and `mem.regions = [⟨DataBase, 4096, writable⟩]` — exactly
-the buffer, nothing else — and runs `Janus.Arm64.step word state`.
+these registers, `pc = TestPC`, `dczid` from the case, and
+`mem.regions = [⟨DataBase, 4096, writable⟩]` — exactly the buffer, nothing else — and runs
+`Janus.Arm64.step word state`.
 
 ## How the native side observes one instruction
 
@@ -89,11 +94,18 @@ handler with a foreign `g` register.
 * **Harvested** (`harvest/<class>`): every distinct word of the executable sections of real Go
   arm64 binaries — a program using `math/big`, `crypto/sha256`, `sort`, `encoding/json`,
   `regexp`, `compress/flate`, ... (`oracle/harvest/bigprog`), `go test -c` binaries of
-  `math/big strconv sort crypto/sha256 bytes strings`, and any `artifacts/*-arm64` — minus
-  SIMD/FP and system encodings, capped per class (`PER_CLASS`) by uniform sampling, each under
-  `K` random states.
+  `math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime` (the last two bring
+  the atomics, `LDAR`/`STLR`, exclusives, `PRFM`, `MRS DCZID_EL0` and `DC ZVA` the runtime
+  uses), and any `artifacts/*-arm64` — minus SIMD/FP and system encodings other than `MRS` and
+  the C7 cache-maintenance `SYS` space, capped per class (`PER_CLASS`) by uniform sampling, each
+  under `K` random states.
 * **Targeted** (`gen/<class>`): random encodings per class with fixed opcode bits and fields
   biased towards allocated encodings, plus a share of unallocated variants.
+  `ls.excl` mixes CAS/CASP (even registers), LDAR/STLR and LDXR/LDAXR (should-be-one fields
+  mostly all ones, so most words are allocated) and store-exclusives; `ls.atomic` covers every
+  `LD<op>`, `SWP` and `LDAPR`; `sys.mrs` is half `MRS Xt, DCZID_EL0`, half random system
+  register reads; `sys.sys` is half `DC ZVA, Xt` (with `Xt` mostly in the buffer), half random
+  `SYS #op1, C7, Cm, #op2` operations.
 * **Group-random** (`rand/<class>`): fully random words inside each top-level encoding group
   (data-processing immediate / register, branches, loads/stores) — tests that the decoder
   rejects what it does not understand.
@@ -129,6 +141,46 @@ MISMATCH is the headline number: a proof about Go code is only sound if the mode
 a successful step that differs from the machine. Model gaps only cost coverage (a proof
 would get stuck on a fault), never soundness.
 
+## Results (2026-10-23, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
+
+486,463 cases (172,000 generated, 314,463 harvested): **0 MISMATCH**, 475,022 agree, 11,440
+model-gap (10,902 `undecodable`, 385 `unaligned`, 107 `noCode`, 46 `outsideAllocation`), 1
+unobserved. The previous run, before the atomics/`DC ZVA` extension, had 427,845 cases, 0
+MISMATCH and 19,725 model-gaps.
+
+The instructions added with the single-threaded atomics model (`agree-ok`: both sides succeeded
+with identical registers, flags, pc and memory; `agree-fault`: both faulted). Rows for encodings
+the model still rejects (`LDLAR/STLLR`, `LDXP/STXP`, `STXR/STLXR`) show that hardware
+successes there are only model-gaps:
+
+| instruction | cases | harvest | agree-ok | agree-fault | model-gap | MISMATCH | unobserved | distinct words |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| CAS | 1554 | 273 | 1017 | 480 | 57 | 0 | 0 | 1370 |
+| CASP | 548 | 0 | 289 | 250 | 9 | 0 | 0 | 544 |
+| CLREX | 498 | 0 | 498 | 0 | 0 | 0 | 0 | 16 |
+| DC ZVA | 2047 | 3 | 1705 | 342 | 0 | 0 | 0 | 32 |
+| LD<op> | 3134 | 531 | 2682 | 325 | 127 | 0 | 0 | 2778 |
+| LDAPR | 336 | 0 | 209 | 115 | 12 | 0 | 0 | 328 |
+| LDAR/STLR | 2005 | 885 | 1457 | 454 | 94 | 0 | 0 | 1339 |
+| LDLAR/STLLR | 203 | 0 | 0 | 161 | 42 | 0 | 0 | 203 |
+| LDXP/STXP | 583 | 0 | 0 | 52 | 531 | 0 | 0 | 582 |
+| LDXR/LDAXR | 1083 | 396 | 710 | 117 | 256 | 0 | 0 | 785 |
+| MRS DCZID_EL0 | 1988 | 3 | 1988 | 0 | 0 | 0 | 0 | 32 |
+| PRFM (literal) | 1169 | 0 | 1169 | 0 | 0 | 0 | 0 | 1153 |
+| PRFM/PRFUM | 855 | 0 | 602 | 253 | 0 | 0 | 0 | 854 |
+| STXR/STLXR | 1072 | 471 | 0 | 1 | 1071 | 0 | 0 | 756 |
+| SWP | 1051 | 78 | 898 | 112 | 41 | 0 | 0 | 999 |
+| **total** | 18126 | 2640 | 13224 | 2662 | 2240 | 0 | 0 | 11771 |
+
+`unaligned` gaps are qemu's FEAT_LSE2 behaviour (a misaligned ordered/atomic access inside 16
+bytes succeeds; the model requires natural alignment). The other gaps of the accepted
+classes are encodings the model rejects and qemu executes anyway: should-be-one `Rs`/`Rt2`
+fields that are not all ones (CONSTRAINED UNPREDICTABLE; qemu ignores the fields) and odd
+`CASP` registers. The rows are grouped by encoding
+fields, so they also count unallocated neighbours (e.g. `PRFUM` with a writeback mode, which
+both sides reject: `agree-fault`). The 24 `prfm` words of the Go runtime are not in the
+harvest sample (`ls.uimm` is capped at `PER_CLASS`); the generated ones cover every `prfop`.
+
 ## Known limits of the reference
 
 * **qemu, not silicon.** qemu's AArch64 user-mode emulation is the reference; with the default
@@ -143,7 +195,12 @@ would get stuck on a fault), never soundness.
   non-zero top byte sets `PC` to the address with bits 63:56 replaced by bit 55
   (`AArch64.BranchAddr`); qemu does the same.
 * **Exclusive monitor.** Each case starts with the monitor open (`CLREX`), so on hardware a
-  single `STXR` always fails (status 1, no store).
+  single `STXR` always fails (status 1, no store). The model rejects every store-exclusive
+  (see `docs/SOUNDNESS.md`), so these are model-gaps.
+* **Alignment of atomics.** qemu `-cpu max` implements FEAT_LSE2: an `LDAR`/`STLR`/LSE atomic
+  that is misaligned but stays inside 16 bytes succeeds. The model requires natural alignment
+  (`Fault.unaligned`), so these are model-gaps (`unaligned`); misaligned accesses that cross 16
+  bytes fault on both sides.
 * **Memory outside the buffer.** The model only knows the buffer; the native process also has
   the code page and the Go runtime mapped. An access that lands on mapped non-buffer memory
   succeeds natively and faults in the model (model-gap), never the other way round.

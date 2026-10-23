@@ -62,6 +62,12 @@ inductive PairMode where
   | post | offset | pre
 deriving Repr, DecidableEq, Inhabited
 
+/-- LSE atomic memory operation (`o3:opc`, bits 15:12): 0000 LDADD, 0001 LDCLR, 0010 LDEOR,
+0011 LDSET, 0100 LDSMAX, 0101 LDSMIN, 0110 LDUMAX, 0111 LDUMIN, 1000 SWP. -/
+inductive AtomicOp where
+  | add | clr | eor | set | smax | smin | umax | umin | swp
+deriving Repr, DecidableEq, Inhabited
+
 inductive Instr where
   -- Data processing: immediate
   /-- ADR (`op = false`) / ADRP (`op = true`). `rd`: ZR. -/
@@ -97,6 +103,15 @@ inductive Instr where
   | hint (crm op2 : Nat)
   /-- DSB (`op2 = 4`) / DMB (`op2 = 5`) / ISB (`op2 = 6`) with option `CRm`. -/
   | barrier (crm op2 : Nat)
+  /-- CLREX #`CRm`: clears the local exclusive monitor. The monitor is not modelled (no
+  store-exclusive is accepted, see `Decode`), so this only advances `pc`. -/
+  | clrex (crm : Nat)
+  /-- MRS `Xt`, DCZID_EL0 (the only system register read accepted). `rt`: ZR. The value is
+  `State.dczid`, an implementation-defined constant that theorems quantify over. -/
+  | mrsDczid (rt : Nat)
+  /-- DC ZVA, `Xt`: zero the naturally aligned block of `4 << DCZID_EL0.BS` bytes containing
+  `X[t]`. `rt`: ZR. -/
+  | dcZva (rt : Nat)
   -- Loads and stores (general-purpose registers only, `V = 0`)
   /-- LDR (literal): `opc` 00 = LDR Wt, 01 = LDR Xt, 10 = LDRSW Xt. `rt`: ZR. -/
   | ldrLit (opc imm19 rt : Nat)
@@ -113,6 +128,24 @@ inductive Instr where
   /-- LDP/STP/LDPSW: `opc` 00 = 32-bit, 01 = LDPSW (`L = true` only), 10 = 64-bit; `L` = load.
   `rn`: SP. `rt`, `rt2`: ZR. -/
   | ldstPair (opc : Nat) (mode : PairMode) (L : Bool) (imm7 rt2 rn rt : Nat)
+  /-- PRFM/PRFUM (immediate, unscaled, register and literal forms): a prefetch hint. It never
+  faults and has no architectural effect, so only `pc` advances. `prfop` is the raw `Rt`
+  field. -/
+  | prefetch (prfop : Nat)
+  -- Ordered, exclusive and atomic accesses (single-threaded model: see `Exec`)
+  /-- LDAR/STLR (`L` = load) of `2^size` bytes; LDAPR when `rcpc`. `rn`: SP. `rt`: ZR. -/
+  | ldstOrdered (size : Nat) (L rcpc : Bool) (rn rt : Nat)
+  /-- LDXR (`o0 = false`) / LDAXR (`o0 = true`) of `2^size` bytes (store-exclusives are not
+  decoded). `rn`: SP. `rt`: ZR. -/
+  | ldExcl (size : Nat) (o0 : Bool) (rn rt : Nat)
+  /-- LSE atomic `LD<op>{A}{L}` / `SWP{A}{L}` of `2^size` bytes: `A` = acquire, `R` = release.
+  The ST<op> aliases are `rt = 31`. `rn`: SP. `rs`, `rt`: ZR. -/
+  | atomic (size : Nat) (A R : Bool) (rs : Nat) (op : AtomicOp) (rn rt : Nat)
+  /-- CAS{A}{L}{B,H} of `2^size` bytes: `L` = acquire, `o0` = release. `rn`: SP. `rs`, `rt`: ZR. -/
+  | cas (size : Nat) (L o0 : Bool) (rs rn rt : Nat)
+  /-- CASP{A}{L} of a register pair, 32-bit (`sz = false`) or 64-bit (`sz = true`) halves;
+  `rs`, `rt` even. `rn`: SP. `rs`, `rs+1`, `rt`, `rt+1`: ZR. -/
+  | casp (sz L o0 : Bool) (rs rn rt : Nat)
   -- Data processing: register
   /-- AND/BIC/ORR/ORN/EOR/EON/ANDS/BICS (shifted register); `N` inverts the second operand.
   All registers: ZR. -/

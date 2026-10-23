@@ -14,7 +14,7 @@ var Classes = []string{
 	"dpr.logical", "dpr.addsub", "dpr.addsubext", "dpr.adc", "dpr.ccmp", "dpr.csel",
 	"dpr.dp1", "dpr.dp2", "dpr.dp3", "dpr.other",
 	"ls.uimm", "ls.imm9", "ls.regoff", "ls.pair", "ls.literal", "ls.excl", "ls.atomic", "ls.other",
-	"sys.hint", "sys.barrier", "system", "simd", "reserved",
+	"sys.hint", "sys.barrier", "sys.mrs", "sys.sys", "system", "simd", "reserved",
 }
 
 // Classify returns the encoding class of w.
@@ -54,6 +54,10 @@ func Classify(w uint32) string {
 			return "sys.hint"
 		case w&0xFFFFF01F == 0xD503301F: // CLREX, DSB, DMB, ISB, SB
 			return "sys.barrier"
+		case w&0xFFF00000 == 0xD5300000: // MRS (system register reads, e.g. DCZID_EL0)
+			return "sys.mrs"
+		case w&0xFFF8F000 == 0xD5087000: // SYS #op1, C7, Cm, #op2: cache maintenance (DC ZVA, ...)
+			return "sys.sys"
 		case w&0xFE000000 == 0xD4000000: // exception generation, other system
 			return "system"
 		}
@@ -107,7 +111,8 @@ func Classify(w uint32) string {
 	return "reserved"
 }
 
-// Tested reports whether the class is in scope (not SIMD/FP, not system).
+// Tested reports whether the class is in scope (not SIMD/FP, not system other than MRS and
+// the C7 cache-maintenance SYS space).
 func Tested(class string) bool {
 	return class != "simd" && class != "system"
 }

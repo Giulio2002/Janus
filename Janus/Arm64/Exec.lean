@@ -31,7 +31,30 @@ Modelling decisions (user mode, Linux):
   pointer authentication is enabled), so the model refuses both readings. Both are
   conservative: the model faults where hardware might proceed.
 * The model is single-threaded with no caches, so DMB/DSB/ISB and the accepted hints
-  (NOP, YIELD, SEV, SEVL, DGH, CSDB, BTI) only advance `pc`.
+  (NOP, YIELD, SEV, SEVL, DGH, CSDB, BTI) only advance `pc`. So do PRFM/PRFUM (prefetch: never
+  faults, no architectural effect) and CLREX (the exclusive monitor is not modelled, because
+  no store-exclusive is decoded).
+* **Ordering is not modelled.** With one thread and no other observer, a load-acquire
+  (LDAR, LDAPR, LDAXR) is an ordinary load and a store-release (STLR) an ordinary store, and the
+  A/L (acquire/release) bits of the LSE atomics change nothing. LDXR/LDAXR are plain loads: the
+  monitor they would arm is only observable by a store-exclusive, which faults (undecodable).
+* **LSE atomics** (LD<op>, SWP, CAS, CASP) are single-instruction read-modify-writes and are
+  modelled exactly: read the old value, write the new one, return the old one. Their memory
+  access is a write access even when CAS does not store (permission faults are taken
+  regardless of the comparison), so read-only memory faults.
+* **Alignment.** Ordered, exclusive and atomic accesses must be naturally aligned (CASP: to
+  the pair size), otherwise `unaligned`. Hardware without FEAT_LSE2 always faults there; with
+  FEAT_LSE2 some misaligned accesses inside 16 bytes succeed. Faulting is the conservative
+  choice for both.
+* **Feature assumptions.** The model is of a CPU implementing FEAT_LSE (LD<op>, SWP, CAS,
+  CASP) and FEAT_LRCPC (LDAPR). On an Armv8.0 CPU these are UNDEFINED. Go only executes LSE
+  instructions after testing `internal/cpu.ARM64.HasATOMICS` (or, for `GOARM64=v8.1`, refuses
+  to start without it), so a proof through such code assumes that flag (see
+  `docs/SOUNDNESS.md`).
+* **DCZID_EL0 / DC ZVA.** `MRS Xt, DCZID_EL0` returns `State.dczid`, an implementation-defined
+  constant of the state (never a fixed value). DC ZVA zeroes the aligned block of
+  `4 << BS` bytes containing `X[t]` (checked as a store of that many bytes), and faults
+  (`trapped`) when `DZP = 1`.
 -/
 
 namespace Janus.Arm64
@@ -386,6 +409,115 @@ def memIndexed (s : State) (rn : Nat) (offset : W64) (postindex wback : Bool)
     | .error e => .error e
     | .ok s' => .ok (if wback then s'.writeSP rn (base + offset) else s')
 
+/-! ## Ordered, exclusive and atomic accesses
+
+The base address is `X[n]` or `SP` (after `CheckSPAlignment()`, `baseAddr`) and must be a
+multiple of the access size, otherwise the access faults (`unaligned`). -/
+
+/-- The LSE read-modify-write operations on the old memory value `old` and the register
+operand `v` (ARM ARM `MemAtomicOp`). -/
+def atomicOp {N : Nat} (op : AtomicOp) (old v : BitVec N) : BitVec N :=
+  match op with
+  | .add => old + v
+  | .clr => old &&& ~~~v
+  | .eor => old ^^^ v
+  | .set => old ||| v
+  | .smax => if old.toInt < v.toInt then v else old
+  | .smin => if v.toInt < old.toInt then v else old
+  | .umax => if old.toNat < v.toNat then v else old
+  | .umin => if v.toNat < old.toNat then v else old
+  | .swp => v
+
+/-- LDAR/LDAPR (`L`) or STLR of `2^size` bytes: an ordinary, naturally aligned access. -/
+def execOrdered (s : State) (size : Nat) (L : Bool) (rn rt : Nat) : Except Fault State :=
+  match baseAddr s rn with
+  | .error e => .error e
+  | .ok base =>
+    let n := 2 ^ size
+    let a := base.toNat
+    if a % n ≠ 0 then .error (.unaligned a n) else
+    if L then
+      match load s.mem a n with
+      | .error e => .error e
+      | .ok v => .ok (s.writeZR rt (BitVec.ofNat 64 v)).next
+    else
+      match store s.mem a n (s.readZR rt).toNat with
+      | .error e => .error e
+      | .ok m => .ok { s with mem := m }.next
+
+/-- LD<op>/SWP of `2^size` bytes:
+```
+data = X[s, datasize]; old = Mem[address]; Mem[address] = op(old, data);
+if t != 31 then X[t] = ZeroExtend(old)
+```
+-/
+def execAtomic (s : State) (size : Nat) (op : AtomicOp) (rs rn rt : Nat) : Except Fault State :=
+  match baseAddr s rn with
+  | .error e => .error e
+  | .ok base =>
+    let n := 2 ^ size
+    let a := base.toNat
+    if a % n ≠ 0 then .error (.unaligned a n) else
+    match load s.mem a n with
+    | .error e => .error e
+    | .ok old =>
+      let new := atomicOp op (BitVec.ofNat (8 * n) old) (s.getX (8 * n) rs)
+      match store s.mem a n new.toNat with
+      | .error e => .error e
+      | .ok m => .ok ({ s with mem := m }.writeZR rt (BitVec.ofNat 64 old)).next
+
+/-- CAS of `2^size` bytes: `X[s]` is the expected value, `X[t]` the new one; memory is written
+only on equality, but the access needs write permission either way. `X[s]` receives the old
+value (zero-extended). -/
+def execCas (s : State) (size : Nat) (rs rn rt : Nat) : Except Fault State :=
+  match baseAddr s rn with
+  | .error e => .error e
+  | .ok base =>
+    let n := 2 ^ size
+    let a := base.toNat
+    if a % n ≠ 0 then .error (.unaligned a n) else
+    match load s.mem a n with
+    | .error e => .error e
+    | .ok old =>
+      if old = (s.getX (8 * n) rs).toNat then
+        match store s.mem a n (s.readZR rt).toNat with
+        | .error e => .error e
+        | .ok m => .ok ({ s with mem := m }.writeZR rs (BitVec.ofNat 64 old)).next
+      else if s.mem.accessible a n true then .ok (s.writeZR rs (BitVec.ofNat 64 old)).next
+      else .error (.readOnly a n)
+
+/-- CASP with `eb`-byte halves (`eb = 4` or `8`), little-endian: the expected value is
+`X[s+1]:X[s]`, the new one `X[t+1]:X[t]`; afterwards `X[s] = old<8eb-1:0>`,
+`X[s+1] = old<16eb-1:8eb>`. -/
+def execCasp (s : State) (eb : Nat) (rs rn rt : Nat) : Except Fault State :=
+  let pair (r : Nat) : Nat := (s.getX (8 * eb) r).toNat + 2 ^ (8 * eb) * (s.getX (8 * eb) (r + 1)).toNat
+  match baseAddr s rn with
+  | .error e => .error e
+  | .ok base =>
+    let a := base.toNat
+    if a % (2 * eb) ≠ 0 then .error (.unaligned a (2 * eb)) else
+    match load s.mem a (2 * eb) with
+    | .error e => .error e
+    | .ok old =>
+      let res (s' : State) : State :=
+        ((s'.writeZR rs (BitVec.ofNat 64 (old % 2 ^ (8 * eb)))).writeZR (rs + 1)
+          (BitVec.ofNat 64 (old / 2 ^ (8 * eb)))).next
+      if old = pair rs then
+        match store s.mem a (2 * eb) (pair rt) with
+        | .error e => .error e
+        | .ok m => .ok (res { s with mem := m })
+      else if s.mem.accessible a (2 * eb) true then .ok (res s)
+      else .error (.readOnly a (2 * eb))
+
+/-- DC ZVA: zero the `4 << BS`-byte block containing `X[t]`, unless `DZP` prohibits it. -/
+def execDcZva (s : State) (rt : Nat) : Except Fault State :=
+  if s.dczid.getLsbD 4 then .error (.trapped s.pc.toNat) else
+  let bs := 4 * 2 ^ (s.dczid.toNat % 16)
+  let a := (s.readZR rt).toNat / bs * bs
+  match store s.mem a bs 0 with
+  | .error e => .error e
+  | .ok m => .ok { s with mem := m }.next
+
 /-! ## The executor -/
 
 /-- Execute a decoded instruction. Only specified on the output of `decode`. -/
@@ -434,6 +566,15 @@ def exec (i : Instr) (s : State) : Except Fault State :=
   | .ret rn => branchReg s (s.readZR rn)
   | .hint _ _ => .ok s.next
   | .barrier _ _ => .ok s.next
+  | .clrex _ => .ok s.next
+  | .mrsDczid rt => .ok (s.writeZR rt (s.dczid.setWidth 64)).next
+  | .dcZva rt => execDcZva s rt
+  | .prefetch _ => .ok s.next
+  | .ldstOrdered size L _ rn rt => execOrdered s size L rn rt
+  | .ldExcl size _ rn rt => execOrdered s size true rn rt
+  | .atomic size _ _ rs op rn rt => execAtomic s size op rs rn rt
+  | .cas size _ _ rs rn rt => execCas s size rs rn rt
+  | .casp sz _ _ rs rn rt => execCasp s (if sz then 8 else 4) rs rn rt
   -- Loads and stores
   | .ldrLit opc imm19 rt =>
     let addr := s.pc + sext64 21 (imm19 * 4)

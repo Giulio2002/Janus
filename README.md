@@ -174,8 +174,9 @@ negation* of the `Add` specification on the broken binary, by running one concre
 
 ## What is proved in the examples
 
-Every function in [`examples/basic`](examples/basic/basic.go) has an amd64 theorem, and 14 of them
-an arm64 one too. Each is verified end to end by `janus verify` (kernel check, axiom audit,
+Every function in [`examples/basic/basic.go`](examples/basic/basic.go) has an amd64 theorem, and 14 of
+them an arm64 one too; the atomics and memory-routine examples in
+[`examples/basic/memory.go`](examples/basic/memory.go) have arm64 theorems. Each is verified end to end by `janus verify` (kernel check, axiom audit,
 `leanchecker` replay) against the `GOARCH=arm64` or `GOARCH=amd64` build of the same source with
 Go 1.26.0. Proofs:
 [`examples/proofs/`](examples/proofs) (arm64), [`examples/proofs-amd64/`](examples/proofs-amd64) (amd64).
@@ -199,6 +200,10 @@ Go 1.26.0. Proofs:
 | `Table` | `t[i & 7]` of a constant `.rodata` table | | ✓ |
 | `GlobalTable` | `tbl[i & 7]` of a writable global, provided by the precondition | | ✓ |
 | `Bump` | `counter += d` on a writable global, returns the new value | | ✓ |
+| `AtomicAdd` | `atomic.AddUint64(p, d)`: `*p += d`, returns the new value (LSE `LDADDAL` path, given `runtime.arm64HasATOMICS`) | ✓ | |
+| `AtomicMax` | `LDAR` + `CASAL` retry loop: returns the old `*p` and sets `*p = max(old, v)`; the loop runs once | ✓ | |
+| `CopyBlock` | `copy(dst[:], src[:])` of a 128-byte array through `runtime.memmove` | ✓ | |
+| `ClearWords` | `clear(b)` of a 16-word, 128-byte-aligned slice through `runtime.memclrNoHeapPointers` (its `DC ZVA` path), for every `DCZID_EL0` | ✓ | |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
@@ -220,9 +225,9 @@ succeeds) only costs coverage.
 
 | Reference | What runs | Cases | MISMATCH | Details |
 |---|---|---:|---:|---|
-| qemu-aarch64 10.2.1 user mode (`-cpu max`) | arm64 model vs qemu, one instruction per case | 427,845 | **0** | [ORACLE.md](docs/ORACLE.md) |
-| Sail `arm-v9.4-a` (Arm's official ASL, translated) | arm64 model vs Arm's specification, same corpus | 427,845 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
-| Sail, misaligned-SP corpus | SP-alignment rule, which qemu cannot check | 90,450 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
+| qemu-aarch64 10.2.1 user mode (`-cpu max`) | arm64 model vs qemu, one instruction per case | 486,463 | **0** | [ORACLE.md](docs/ORACLE.md) |
+| Sail `arm-v9.4-a` (Arm's official ASL, translated) | arm64 model vs Arm's specification, same corpus | 486,463 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
+| Sail, misaligned-SP corpus | SP-alignment rule, which qemu cannot check | 102,460 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
 | Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds (incl. atomics, `REP` string ops, SSE moves) | 1,187,981 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
 | Sail/ACL2 X86isa | amd64 undefined-flag sets, sampled | 20,000 | 0 flags undefined there but defined by Janus | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md#formal-x86-model-third-reference) |
 
