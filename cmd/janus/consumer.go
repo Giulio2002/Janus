@@ -456,6 +456,34 @@ type consumerWS struct {
 	lock                *fileLock
 	temp                bool
 	janusFiles          map[string][]byte // what janus/ must contain: framework + Extracted
+	// pins are the SHA-256 of every module-data file of janus/.lake/build/lib/lean (the trusted
+	// framework build copied from the base, plus the trusted Extracted and JanusTrusted),
+	// recorded before any untrusted code runs in the workspace.
+	pins      *pinnedLib
+	framework pins     // the trusted base's framework pins (Janus.* modules with a framework source)
+	prepBuilt []string // modules the trusted Extracted build compiled
+	// replayCache: reuse cached passing kernel replays (off with --fresh or without a
+	// sandbox); replayFresh: also replay each theorem module with leanchecker --fresh.
+	replayCache, replayFresh bool
+}
+
+// janusLib is the workspace's framework library directory.
+func (ws *consumerWS) janusLib() string {
+	return filepath.Join(ws.JanusDir, ".lake", "build", "lib", "lean")
+}
+
+// protected are the workspace trees untrusted (and trusted) sandboxed processes must not
+// write: the trusted framework package, always; with readOnlyBuilds, the consumer and
+// dependency packages too (after their build, for the audit and the replay).
+func (ws *consumerWS) protected(readOnlyBuilds bool) []string {
+	dirs := []string{ws.JanusDir}
+	if readOnlyBuilds {
+		dirs = append(dirs, ws.Root)
+		if _, err := os.Stat(ws.DepsDir); err == nil {
+			dirs = append(dirs, ws.DepsDir)
+		}
+	}
+	return dirs
 }
 
 // workspaceFamily groups the workspaces of one consumer package and framework; members
@@ -471,7 +499,7 @@ func wsDiag(err error) error {
 }
 
 func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool, lake string, sb *sandbox, tc *toolchain, progress io.Writer) (*consumerWS, error) {
-	ws := &consumerWS{lake: lake, sb: sb, tc: tc}
+	ws := &consumerWS{lake: lake, sb: sb, tc: tc, replayCache: sb.mode != "none" && !fresh}
 	family := workspaceFamily(fw, pkg)
 	if fresh {
 		parent := filepath.Join(cacheRoot(), "v1", "tmp")
@@ -497,20 +525,48 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	ws.Root, ws.JanusDir, ws.DepsDir = filepath.Join(ws.Dir, "root"), filepath.Join(ws.Dir, "janus"), filepath.Join(ws.Dir, "deps")
 	fail := func(err error) (*consumerWS, error) { ws.close(); return nil, err }
 
-	if !fresh {
-		// Seed the build directories: the framework library from the framework base, the
-		// consumer modules from the most recently used sibling workspace.
-		janusBuild := filepath.Join(ws.JanusDir, ".lake", "build")
-		if _, err := os.Stat(janusBuild); err != nil {
-			base, err := fw.frameworkBase(lake, progress)
-			if err != nil {
-				return fail(err)
-			}
-			_ = os.RemoveAll(janusBuild)
-			if err := copyTree(filepath.Join(base, ".lake", "build"), janusBuild); err != nil {
-				return fail(wsDiag(err))
-			}
+	// The framework library comes from the trusted framework build (the cached base, or one
+	// built from scratch for --fresh), never from a build in the workspace: the workspace's copy
+	// is replaced whenever its framework modules differ from the base's in any byte, or it holds
+	// any module that is not the framework's, Extracted or JanusTrusted.
+	var base string
+	var err error
+	if fresh {
+		base, err = fw.freshBase(lake, progress)
+		if err == nil {
+			defer os.RemoveAll(base)
 		}
+	} else {
+		base, err = fw.frameworkBase(lake, progress)
+	}
+	if err != nil {
+		return fail(err)
+	}
+	basePins, err := frameworkPins(filepath.Join(base, ".lake", "build", "lib", "lean"), fw.Files)
+	if err != nil || len(basePins.want) == 0 {
+		return fail(wsDiag(fmt.Errorf("cannot read the framework build in %s: %v", base, err)))
+	}
+	janusBuild := filepath.Join(ws.JanusDir, ".lake", "build")
+	notExtracted := func(m string) bool { return m != "Extracted" && m != "JanusTrusted" }
+	tampered := false
+	if got, err := pinLib(ws.janusLib(), notExtracted); err != nil || len(diffPins(basePins.want, got)) > 0 {
+		if _, err := os.Stat(janusBuild); err == nil {
+			// A previous run's framework build differed from the trusted one: the consumer and
+			// dependency modules built in this workspace may have been compiled against it, and
+			// Lake's traces would not notice. Rebuild them too (the kernel replay would reject
+			// them otherwise).
+			tampered = true
+			_ = os.RemoveAll(filepath.Join(ws.Root, ".lake", "build"))
+			_ = os.RemoveAll(ws.DepsDir)
+		}
+		_ = os.RemoveAll(janusBuild)
+		if err := copyTree(filepath.Join(base, ".lake", "build"), janusBuild); err != nil {
+			return fail(wsDiag(err))
+		}
+	}
+
+	if !fresh && !tampered {
+		// Seed the consumer modules from the most recently used sibling workspace.
 		rootBuild := filepath.Join(ws.Root, ".lake", "build")
 		sib := ""
 		if _, err := os.Stat(rootBuild); err != nil {
@@ -590,6 +646,36 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	if err := os.WriteFile(filepath.Join(ws.Root, ".lake", "package-overrides.json"), override, 0o644); err != nil {
 		return fail(wsDiag(err))
 	}
+	// Trusted build of Extracted (Lake on our lakefile and sources only, unsandboxed: no
+	// consumer code is involved) and of the independently named JanusTrusted copy, before any
+	// untrusted code runs in the workspace. From here on janus/ is read-only to every
+	// sandboxed process, and its compiled modules are pinned.
+	lr := &leanRunner{lake: lake, root: ws.JanusDir}
+	out, err := lr.run("build", "--no-ansi", "Extracted")
+	if err != nil {
+		return fail(&diag{Invalid: true, Msg: "Lean rejected the extracted program.\n" + summarizeLeanErrors(out, 2000), Stage: "extraction elaboration",
+			Next: "Check that the Janus framework matches this extractor version.", Details: out})
+	}
+	for _, m := range builtModules(out) {
+		if notExtracted(m) {
+			continue
+		}
+		ws.prepBuilt = append(ws.prepBuilt, m)
+	}
+	if out, err := runLean(&sandbox{mode: "none"}, tc, ws.JanusDir, nil, tc.leanPathEnv(ws.janusLib()), tc.lean, "--root="+ws.JanusDir,
+		filepath.Join(ws.JanusDir, "JanusTrusted.lean"), "-o", filepath.Join(ws.janusLib(), "JanusTrusted.olean")); err != nil {
+		return fail(&diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
+			Stage: "extraction elaboration", Details: out})
+	}
+	if !samePins(basePins, ws.janusLib()) {
+		return fail(&diag{Invalid: true, Stage: "framework integrity",
+			Msg:  "Building Extracted changed the framework modules copied from the trusted framework build.",
+			Next: "Rerun with --fresh; if it persists, the framework build is not reproducible."})
+	}
+	ws.framework = basePins.want
+	if ws.pins, err = newPinnedLib("the Janus framework build", ws.janusLib(), nil); err != nil {
+		return fail(wsDiag(err))
+	}
 	now := time.Now()
 	_ = os.Chtimes(ws.Dir, now, now)
 	return ws, nil
@@ -647,7 +733,7 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 			env = append(env, e)
 		}
 	}
-	cmd := ws.sb.command(ws.Root, []string{ws.Dir}, append([]string{ws.lake}, args...), env)
+	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, nil, ws.protected(false), append([]string{ws.lake}, args...), env)
 	var out bytes.Buffer
 	all := &lockedBuffer{}
 	cmd.Stdout = io.MultiWriter(&out, all)
@@ -657,9 +743,12 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 }
 
 // runLeanDirect runs a lean/leanchecker binary (not lake) under the sandbox with an explicit
-// LEAN_PATH, used for the trusted JanusTrusted compile, the janus-audit script and leanchecker.
+// LEAN_PATH, used for the janus-audit script and leanchecker. Only the audit directory is
+// writable; the framework, consumer and dependency builds are read-only.
 func (ws *consumerWS) runLeanDirect(leanPath string, argv ...string) (string, error) {
-	return runLean(ws.sb, ws.tc, ws.Root, []string{ws.Dir}, leanPath, argv...)
+	auditDir := filepath.Join(ws.Dir, "audit")
+	_ = os.MkdirAll(auditDir, 0o755)
+	return runLeanProtected(ws.sb, ws.tc, auditDir, nil, ws.protected(true), leanPath, argv...)
 }
 
 // lockedBuffer is written by the stdout and stderr copiers of one command concurrently.
@@ -799,6 +888,7 @@ func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*v
 		return nil, err
 	}
 	defer ws.close()
+	ws.replayFresh = opts["replay-fresh"] != ""
 	verifyGroup(fw, pkg, ws, []*consumerRequest{req})
 	evictStale()
 	return req.Report, req.Err
@@ -828,16 +918,22 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		targets = append(targets, r.rel)
 	}
 	_, buildOut, _ := ws.run(targets...)
-	rebuilt := builtModules(buildOut)
+	rebuilt := append(builtModules(buildOut), ws.prepBuilt...)
 	if strings.Contains(buildOut, "manifest out of date") || strings.Contains(buildOut, "not in manifest") {
 		failAll(&diag{Invalid: true, Msg: "lake-manifest.json does not match the lakefile.", Stage: "consumer manifest",
 			Next: "Run lake update in " + displayPath(pkg.Root) + ".", Details: mapPaths(buildOut)})
 		return
 	}
+	// The framework build (with the trusted Extracted/JanusTrusted) must be exactly as pinned
+	// before the untrusted build: no module replaced, corrupted, removed or added (R1).
+	pinned := pinSet{ws.pins}
+	if err := pinned.check("the consumer's Lake build"); err != nil {
+		failAll(err)
+		return
+	}
 
 	libDir := filepath.Join(ws.Root, ".lake", "build", "lib", "lean")
-	janusLib := filepath.Join(ws.JanusDir, ".lake", "build", "lib", "lean")
-	extractedOlean := filepath.Join(janusLib, "Extracted.olean")
+	janusLib := ws.janusLib()
 	depLibs := map[string]string{}
 	searchDirs := []string{janusLib, libDir}
 	for _, d := range pkg.Deps {
@@ -847,14 +943,6 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}
 	leanPath := ws.tc.leanPathEnv(searchDirs...)
 
-	// Independently compile the trusted copy JanusTrusted (our bytes, not the Lake build) so
-	// the audit can check the imported Extracted is definitionally equal to it (C1).
-	if out, err := ws.runLeanDirect(leanPath, ws.tc.lean, "--root="+ws.JanusDir,
-		filepath.Join(ws.JanusDir, "JanusTrusted.lean"), "-o", filepath.Join(janusLib, "JanusTrusted.olean")); err != nil {
-		failAll(&diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(mapPaths(out), 2000),
-			Stage: "extraction elaboration", Details: out})
-		return
-	}
 	// C1 defence in depth: no stray Extracted/JanusTrusted olean on the search path.
 	if err := noForeignModule(map[string]string{"Extracted": janusLib, "JanusTrusted": janusLib},
 		append(append([]string{}, searchDirs...), ws.tc.libDir)); err != nil {
@@ -862,7 +950,8 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		return
 	}
 
-	// Per request: its module (and, when it failed, its own diagnostics).
+	// Per request: its module (and, when it failed, its own diagnostics). lake query runs the
+	// untrusted lakefile again, so the pins are re-checked after it.
 	for _, r := range reqs {
 		out, all, err := ws.run("query", "--no-ansi", r.rel+":olean")
 		rebuilt = append(rebuilt, builtModules(all)...)
@@ -883,8 +972,10 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		}
 		r.module = strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(rel), ".olean"), "/", ".")
 	}
-	extractedHash := fileSha(extractedOlean)
-	trustedHash := fileSha(filepath.Join(janusLib, "JanusTrusted.olean"))
+	if err := pinned.check("the consumer's Lake build"); err != nil {
+		failAll(err)
+		return
+	}
 
 	// Module identity across the framework, the consumer and its dependencies (deps.go); the
 	// dependency module roots tell the auditor which constants come from declared dependencies.
@@ -893,10 +984,24 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		failAll(err)
 		return
 	}
-	isDepModule := map[string]bool{}
-	for _, r := range depRoots {
-		isDepModule[r] = true
+	// The untrusted build outputs are final now (no untrusted code runs after this point):
+	// pin them so the audit and the replay see the same bytes.
+	untrusted := []*pinnedLib{}
+	if l, err := newPinnedLib("the consumer package build", libDir, nil); err == nil {
+		untrusted = append(untrusted, l)
+	} else {
+		failAll(wsDiag(err))
+		return
 	}
+	for _, n := range sortedKeys(depLibs) {
+		l, err := newPinnedLib("the build of dependency "+n, depLibs[n], nil)
+		if err != nil {
+			failAll(wsDiag(err))
+			return
+		}
+		untrusted = append(untrusted, l)
+	}
+	pinned = append(pinned, untrusted...)
 
 	// Theorem, axiom and statement audit by the trusted janus-audit (no proof code runs):
 	// the generated Audit.lean imports only Janus.Tools.Audit, never the proof.
@@ -913,26 +1018,44 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			continue
 		}
 		out, _ := ws.runLeanDirect(leanPath, ws.tc.lean, "--root="+auditDir, af)
+		if err := pinned.check("the audit"); err != nil {
+			failAll(err)
+			return
+		}
 		ar, aerr := parseAuditRecord(mapPaths(out), marker)
 		if aerr != nil {
 			r.Err = aerr
 			continue
 		}
 		r.audit = ar
-		for _, m := range ar.Modules {
-			if _, err := os.Stat(filepath.Join(libDir, filepath.FromSlash(strings.ReplaceAll(m, ".", "/"))+".olean")); err == nil {
-				r.closure = append(r.closure, m)
-			} else if isDepModule[moduleRoot(m)] {
-				// dependency modules are untrusted build outputs too: replay them
-				r.closure = append(r.closure, m)
-			}
-		}
 	}
 
-	// Kernel replay: the framework, Extracted and every consumer module the passing requests
-	// import, in one leanchecker run; on failure, each request's own closure separately.
-	replayAvailable := ws.tc.hasChecker
-	checker := ws.tc.leanchecker
+	// Kernel replay of every non-core module of each passing theorem's import closure (the
+	// framework, Extracted, JanusTrusted, every consumer and dependency module), after checking
+	// that each comes from its home: one leanchecker pass over the union, reusing cached passing
+	// replays; on failure, each request's own closure separately.
+	allDirs := append(append([]string{}, searchDirs...), ws.tc.libDir)
+	homes := map[string]string{"Extracted": janusLib, "JanusTrusted": janusLib}
+	union := map[string]string{}
+	graph := map[string][]string{}
+	for _, r := range reqs {
+		if r.Err != nil {
+			continue
+		}
+		resolved, err := closureCheck(r.audit.Modules, allDirs, ws.tc.libDir, &pinnedLib{dir: janusLib, want: ws.framework}, homes)
+		if err != nil {
+			r.Err = err
+			continue
+		}
+		for m, f := range resolved {
+			union[m] = f
+			r.closure = append(r.closure, m)
+		}
+		sort.Strings(r.closure)
+		for m, imps := range importGraph(r.audit.Imports) {
+			graph[m] = imps
+		}
+	}
 	replayed := map[*consumerRequest]kernelReplay{}
 	var passing []*consumerRequest
 	for _, r := range reqs {
@@ -940,50 +1063,50 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			passing = append(passing, r)
 		}
 	}
-	modsOf := func(rs []*consumerRequest) []string {
-		set := map[string]bool{}
-		var mods []string
-		for _, r := range rs {
-			for _, m := range r.closure {
-				if !set[m] {
-					set[m] = true
-					mods = append(mods, m)
-				}
-			}
-		}
-		sort.Strings(mods)
-		return append([]string{"Janus", "Extracted"}, mods...)
-	}
 	if len(passing) > 0 {
-		if !replayAvailable {
+		if !ws.tc.hasChecker {
 			for _, r := range passing {
 				replayed[r] = kernelReplay{Tool: "leanchecker", Status: "unavailable", Modules: []string{}, Note: "leanchecker not found in the Lean toolchain"}
 			}
+		} else if plan, err := planReplay(union, graph, ws.tc.version, ws.replayCache); err != nil {
+			failAll(err)
+			return
 		} else {
-			union := modsOf(passing)
-			if _, err := ws.runLeanDirect(leanPath, append([]string{checker}, union...)...); err == nil {
-				for _, r := range passing {
-					replayed[r] = kernelReplay{Tool: "leanchecker", Status: "passed", Modules: modsOf([]*consumerRequest{r})}
-				}
-			} else {
-				for _, r := range passing {
-					mods := modsOf([]*consumerRequest{r})
-					if out, err := ws.runLeanDirect(leanPath, append([]string{checker}, mods...)...); err != nil {
-						r.Err = &diag{Invalid: true, Msg: "Kernel replay rejected the environment:\n  " + strings.ReplaceAll(strings.TrimSpace(mapPaths(out)), "\n", "\n  "),
-							Stage: "kernel replay", Next: "A module manipulates the environment (e.g. debug.skipKernelTC or addDecl without checking); remove that."}
+			run := func(argv ...string) (string, error) { return ws.runLeanDirect(leanPath, argv...) }
+			var all []string
+			for m := range union {
+				all = append(all, m)
+			}
+			sort.Strings(all)
+			_, unionErr := plan.replay(ws.tc.leanchecker, run, all)
+			for _, r := range passing {
+				if unionErr != nil {
+					if out, err := plan.replay(ws.tc.leanchecker, run, r.closure); err != nil {
+						r.Err = replayDiag(mapPaths(out))
 						continue
 					}
-					replayed[r] = kernelReplay{Tool: "leanchecker", Status: "passed", Modules: mods}
 				}
+				fresh := ""
+				if ws.replayFresh {
+					if out, err := plan.replayFresh(ws.tc.leanchecker, run, r.module); err != nil {
+						r.Err = replayDiag(mapPaths(out))
+						continue
+					}
+					fresh = r.module
+				}
+				replayed[r] = plan.report(r.closure, fresh)
 			}
 		}
+	}
+	if err := pinned.check("the kernel replay"); err != nil {
+		failAll(err)
+		return
 	}
 
 	// Inputs must still be the ones that were checked.
 	staleErr := func() error {
-		if fileSha(extractedOlean) != extractedHash || fileSha(filepath.Join(janusLib, "JanusTrusted.olean")) != trustedHash {
-			return &diag{Invalid: true, Msg: "A compiled framework module changed while the proofs were being checked.", Stage: "proof build integrity",
-				Next: "Proofs and Lake scripts must not write files. Remove any IO and rerun."}
+		if err := pinned.check("the verification"); err != nil {
+			return err
 		}
 		now := &consumerPkg{Root: pkg.Root, excluded: pkg.excluded}
 		if err := now.snapshot(); err != nil || now.Sha256 != pkg.Sha256 {

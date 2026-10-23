@@ -129,6 +129,12 @@ func noForeignModule(paths map[string]string, dirs []string) error {
 
 // runLean runs a lean/leanchecker command under the sandbox, returning combined output.
 func runLean(sb *sandbox, tc *toolchain, workDir string, roWritableExtra []string, leanPath string, argv ...string) (string, error) {
+	return runLeanProtected(sb, tc, workDir, roWritableExtra, nil, leanPath, argv...)
+}
+
+// runLeanProtected is runLean with protected directories kept read-only even inside the
+// writable ones (see sandbox.commandOverlay).
+func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, leanPath string, argv ...string) (string, error) {
 	// Expose the LEAN_PATH directories read-only: bubblewrap's private /tmp would otherwise
 	// hide a --janus-root (or any search directory) that lives under /tmp.
 	var ro []string
@@ -137,7 +143,7 @@ func runLean(sb *sandbox, tc *toolchain, workDir string, roWritableExtra []strin
 			ro = append(ro, d)
 		}
 	}
-	cmd := sb.commandRO(workDir, roWritableExtra, ro, argv, tc.jobEnv(leanPath))
+	cmd := sb.commandOverlay(workDir, roWritableExtra, ro, protected, argv, tc.jobEnv(leanPath))
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

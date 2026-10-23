@@ -97,7 +97,7 @@ func explain(w io.Writer, outdir, reportPath string, r *verifiedReport) {
 	}
 	p("  Axioms used: %s (allowed: %s)", ax, strings.Join(r.AllowedAxioms, ", "))
 	if r.KernelReplay.Status == "passed" {
-		p("  Kernel replay: %s re-checked %s", r.KernelReplay.Tool, moduleList(r.KernelReplay.Modules))
+		p("  Kernel replay: %s re-checked %s", r.KernelReplay.Tool, replaySummary(r.KernelReplay))
 	} else {
 		p("  Kernel replay: not performed (%s)", r.KernelReplay.Note)
 	}

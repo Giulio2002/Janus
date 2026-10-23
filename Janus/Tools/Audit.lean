@@ -59,7 +59,28 @@ structure Record where
   definitions : Array String  -- "<name> : <type> := <value>" for each allowed proof-local def
   modules     : Array String
   external    : Array String  -- "<name> (<kind>, <module>)" for each dependency constant used
+  /-- The import graph of every module outside the toolchain core (`Init`, `Std`, `Lean`,
+  `Lake`): `[module, direct import, …]`. The Go side kernel-replays each of these modules and
+  keys its replay cache on the module's bytes and those of its imports. -/
+  imports     : Array (Array String)
   deriving ToJson
+
+/-- A module shipped with the Lean toolchain (trusted, never replayed by `janus verify`). -/
+def coreModule (mod : Name) : Bool :=
+  let root := mod.getRoot
+  root == `Init || root == `Std || root == `Lean || root == `Lake
+
+/-- The direct imports of every non-core module of `env`, for `Record.imports`. -/
+def importGraph (env : Environment) : Array (Array String) := Id.run do
+  let mut out := #[]
+  for h : i in [0:env.header.moduleNames.size] do
+    let m := env.header.moduleNames[i]
+    if coreModule m then continue
+    let imps := match env.header.moduleData[i]? with
+      | some d => d.imports.map (·.module.toString)
+      | none => #[]
+    out := out.push (#[m.toString] ++ imps)
+  return out
 
 /-- Where a module comes from: the trusted framework/core, a declared dependency package, or the
 consumer package / proof. -/
@@ -357,6 +378,7 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
     let (statement, defs) ← cleanEnvAndPrint cx thmN ci.type localDefs stubs
     return Record.mk thm kind modName.toString (axs.map (·.toString)) statement defs
       (envA.header.moduleNames.map (·.toString)) (externalNames.filterMap external.get?)
+      (importGraph envA)
   ).run
   match result with
   | .ok rec => IO.println (marker ++ (toJson rec).compress)
