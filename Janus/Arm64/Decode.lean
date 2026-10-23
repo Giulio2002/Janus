@@ -1,0 +1,291 @@
+import Janus.Arm64.Instr
+import Janus.Arm64.Bits
+
+/-!
+# A64 decoder for the supported subset
+
+`decode w` maps a 32-bit instruction word to an `Instr`, or `none` when the word is outside
+the subset **or** is a reserved / unallocated / UNDEFINED / CONSTRAINED UNPREDICTABLE encoding
+within it. Rejecting is always safe (execution stops with `Fault.undecodable`); accepting an
+encoding the hardware treats differently would be unsound, so every fixed field, every
+should-be-one/zero field we know of, and every "UNDEFINED" / "UNPREDICTABLE" condition in
+the ARM ARM decode pseudocode of a supported instruction is checked.
+
+The structure follows the ARM ARM top-level decode table (`op0 = w<28:25>`) and then the
+class tables. Only `Nat` arithmetic and `if` are used, so `decide`, `rfl` and
+`simp [decode, decodeDPImm, decodeBranchSys, decodeLdSt, decodeDPReg, bits, bit, ...]`
+evaluate the decoder on literal words.
+-/
+
+namespace Janus.Arm64
+
+namespace ShiftType
+/-- The 2-bit `shift` field. -/
+def ofBits (n : Nat) : ShiftType :=
+  if n = 0 then .lsl else if n = 1 then .lsr else if n = 2 then .asr else .ror
+end ShiftType
+
+namespace ExtendType
+/-- The 3-bit `option` field. -/
+def ofBits (n : Nat) : ExtendType :=
+  if n = 0 then .uxtb else if n = 1 then .uxth else if n = 2 then .uxtw else
+  if n = 3 then .uxtx else if n = 4 then .sxtb else if n = 5 then .sxth else
+  if n = 6 then .sxtw else .sxtx
+end ExtendType
+
+namespace LogicOp
+/-- The 2-bit `opc` field of the logical instructions. -/
+def ofBits (n : Nat) : LogicOp :=
+  if n = 0 then .and else if n = 1 then .orr else if n = 2 then .eor else .ands
+end LogicOp
+
+/-- Data processing -- immediate (`op0 = 100x`); class selected by `w<25:23>`. -/
+def decodeDPImm (w : Nat) : Option Instr :=
+  let sf := bit w 31
+  let rd := bits w 4 0
+  let rn := bits w 9 5
+  let op := bits w 25 23
+  if op / 2 = 0 then
+    -- PC-rel addressing: op<31> immlo<30:29> 10000 immhi<23:5> Rd
+    some (.adr (bit w 31) (bits w 30 29) (bits w 23 5) rd)
+  else if op = 0b010 then
+    -- Add/subtract (immediate): sf op S 100010 sh imm12 Rn Rd
+    some (.addSubImm sf (bit w 30) (bit w 29) (bit w 22) (bits w 21 10) rn rd)
+  else if op = 0b100 then
+    -- Logical (immediate): sf opc 100100 N immr imms Rn Rd
+    let N := bit w 22
+    let immr := bits w 21 16
+    let imms := bits w 15 10
+    if !sf && N then none else
+    match decodeBitMasks N imms immr true (if sf then 64 else 32) with
+    | none => none
+    | some _ => some (.logicalImm sf (LogicOp.ofBits (bits w 30 29)) N immr imms rn rd)
+  else if op = 0b101 then
+    -- Move wide (immediate): sf opc 100101 hw imm16 Rd
+    let opc := bits w 30 29
+    let hw := bits w 22 21
+    if opc = 1 then none else
+    if !sf && hw ≥ 2 then none else
+    let mop := if opc = 0 then MoveWideOp.movn else if opc = 2 then .movz else .movk
+    some (.moveWide sf mop hw (bits w 20 5) rd)
+  else if op = 0b110 then
+    -- Bitfield: sf opc 100110 N immr imms Rn Rd
+    let opc := bits w 30 29
+    let N := bit w 22
+    let immr := bits w 21 16
+    let imms := bits w 15 10
+    if opc = 3 then none else
+    -- `if sf == '1' && N != '1' then UNDEFINED;`
+    -- `if sf == '0' && (N != '0' || immr<5> != '0' || imms<5> != '0') then UNDEFINED;`
+    if sf != N then none else
+    if !sf && (immr ≥ 32 || imms ≥ 32) then none else
+    match decodeBitMasks N imms immr false (if sf then 64 else 32) with
+    | none => none
+    | some _ =>
+      let bop := if opc = 0 then BitfieldOp.sbfm else if opc = 1 then .bfm else .ubfm
+      some (.bitfield sf bop N immr imms rn rd)
+  else if op = 0b111 then
+    -- Extract: sf op21 100111 N o0 Rm imms Rn Rd; only op21 = 00, o0 = 0 is EXTR.
+    let N := bit w 22
+    let imms := bits w 15 10
+    if bits w 30 29 ≠ 0 || bit w 21 then none else
+    if sf != N then none else
+    if !sf && imms ≥ 32 then none else
+    some (.extr sf N (bits w 20 16) imms rn rd)
+  else
+    -- 011: add/subtract (immediate, with tags), min/max (immediate): not supported.
+    none
+
+/-- Hints executed as no-ops in this model, by `CRm:op2`. Everything else in the hint space
+is rejected: the pointer-authentication hints (PACIASP, AUTIASP, XPACLRI, ...) and
+CHKFEAT modify registers when the feature is implemented, ESB/PSB/TSB/GCSB/CLRBHB/... are
+feature-dependent, WFE/WFI may block, and unallocated hints may be allocated by future
+features. Accepted: NOP (0), YIELD (1), SEV (4), SEVL (5), DGH (6), CSDB (0b0010100), and
+BTI / BTI c / BTI j / BTI jc (0b0100xx0; branch-target enforcement needs PROT_BTI pages,
+which Go binaries do not use). -/
+def noOpHint (crmOp2 : Nat) : Bool :=
+  crmOp2 = 0 || crmOp2 = 1 || crmOp2 = 4 || crmOp2 = 5 || crmOp2 = 6 || crmOp2 = 0b0010100 ||
+  crmOp2 = 0b0100000 || crmOp2 = 0b0100010 || crmOp2 = 0b0100100 || crmOp2 = 0b0100110
+
+/-- Branches, exception generating and system instructions (`op0 = 101x`). -/
+def decodeBranchSys (w : Nat) : Option Instr :=
+  if bits w 30 26 = 0b00101 then
+    -- Unconditional branch (immediate): op 00101 imm26
+    some (.b (bit w 31) (bits w 25 0))
+  else if bits w 30 25 = 0b011010 then
+    -- Compare and branch: sf 011010 op imm19 Rt
+    some (.cb (bit w 31) (bit w 24) (bits w 23 5) (bits w 4 0))
+  else if bits w 30 25 = 0b011011 then
+    -- Test and branch: b5 011011 op b40 imm14 Rt
+    some (.tb (bit w 31) (bit w 24) (bits w 23 19) (bits w 18 5) (bits w 4 0))
+  else if bits w 31 24 = 0b01010100 then
+    -- Conditional branch: 0101010 o1=0 imm19 o0 cond. o0 = 1 is BC.cond (FEAT_HBC): rejected.
+    if bit w 4 then none else some (.bcond (bits w 23 5) (bits w 3 0))
+  else if w &&& 0xFFFFF01F = 0xD503201F then
+    -- HINT: 1101010100 0 00 011 0010 CRm op2 11111
+    if noOpHint (bits w 11 5) then some (.hint (bits w 11 8) (bits w 7 5)) else none
+  else if w &&& 0xFFFFF01F = 0xD503301F then
+    -- Barriers: 1101010100 0 00 011 0011 CRm op2 11111.
+    -- op2 = 100 DSB, 101 DMB, 110 ISB (every CRm value is a valid or "execute as SY" option);
+    -- CLREX, SB, DSB nXS, TCOMMIT, ... are rejected.
+    let op2 := bits w 7 5
+    if op2 = 4 || op2 = 5 || op2 = 6 then some (.barrier (bits w 11 8) op2) else none
+  else if w &&& 0xFFFFFC1F = 0xD61F0000 then
+    -- Unconditional branch (register): 1101011 opc op2=11111 op3=000000 Rn op4=00000
+    some (.br (bits w 9 5))
+  else if w &&& 0xFFFFFC1F = 0xD63F0000 then
+    some (.blr (bits w 9 5))
+  else if w &&& 0xFFFFFC1F = 0xD65F0000 then
+    some (.ret (bits w 9 5))
+  else none
+
+/-- Valid `(size, opc)` combinations of the single-register integer load/store classes:
+opc 00 store / 01 load for every size; 10 (signed to 64) for B/H/W (LDRSB/LDRSH/LDRSW);
+11 (signed to 32) for B/H. `size = 11, opc = 10` is PRFM/PRFUM (or unallocated) and the
+other combinations are unallocated. -/
+def validSizeOpc (size opc : Nat) : Bool :=
+  opc ≤ 1 || (opc = 2 && size ≤ 2) || (opc = 3 && size ≤ 1)
+
+/-- Loads and stores (`op0 = x1x0`), integer (`V = 0`) forms only. -/
+def decodeLdSt (w : Nat) : Option Instr :=
+  let rt := bits w 4 0
+  let rn := bits w 9 5
+  if bit w 26 then none else  -- V = 1: SIMD&FP
+  let cls := bits w 29 27
+  if cls = 0b011 then
+    -- Load register (literal): opc 011 V 0 0 imm19 Rt (w<24> = 1 is another class)
+    if bit w 24 then none else
+    let opc := bits w 31 30
+    if opc = 3 then none else  -- PRFM (literal)
+    some (.ldrLit opc (bits w 23 5) rt)
+  else if cls = 0b101 then
+    -- Load/store register pair: opc 101 V 0 idx L imm7 Rt2 Rn Rt
+    let opc := bits w 31 30
+    let L := bit w 22
+    let rt2 := bits w 14 10
+    let idx := bits w 24 23
+    if idx = 0 then none else  -- LDNP/STNP: not supported
+    let mode := if idx = 1 then PairMode.post else if idx = 2 then .offset else .pre
+    if opc = 3 then none else
+    if opc = 1 && !L then none else  -- STGP (FEAT_MTE)
+    -- `if memop == MemOp_LOAD && t == t2 then CONSTRAINED UNPREDICTABLE`
+    if L && rt == rt2 then none else
+    -- `if wback && (t == n || t2 == n) && n != 31 then CONSTRAINED UNPREDICTABLE`
+    if idx ≠ 2 && (rt == rn || rt2 == rn) && rn ≠ 31 then none else
+    some (.ldstPair opc mode L (bits w 21 15) rt2 rn rt)
+  else if cls = 0b111 then
+    let size := bits w 31 30
+    let opc := bits w 23 22
+    if !validSizeOpc size opc then none else
+    if bit w 24 then
+      -- Load/store register (unsigned immediate): size 111 V 01 opc imm12 Rn Rt
+      some (.ldstUImm size opc (bits w 21 10) rn rt)
+    else if !bit w 21 then
+      -- size 111 V 00 opc 0 imm9 op4 Rn Rt; op4: 00 unscaled, 01 post, 10 unprivileged, 11 pre
+      let op4 := bits w 11 10
+      if op4 = 2 then none else
+      let mode := if op4 = 0 then Imm9Mode.unscaled else if op4 = 1 then .post else .pre
+      -- `if wback && n == t && n != 31 then CONSTRAINED UNPREDICTABLE` (loads and stores)
+      if op4 ≠ 0 && rn == rt && rn ≠ 31 then none else
+      some (.ldstImm9 size opc mode (bits w 20 12) rn rt)
+    else if bits w 11 10 = 2 then
+      -- Load/store register (register offset): size 111 V 00 opc 1 Rm option S 10 Rn Rt
+      let option := bits w 15 13
+      if option / 2 % 2 = 0 then none else  -- `if option<1> == '0' then UNDEFINED`
+      some (.ldstReg size opc (bits w 20 16) (ExtendType.ofBits option) (bit w 12) rn rt)
+    else none  -- atomics, LDRAA/LDRAB, ...
+  else none  -- exclusives, ordered, LDAPR, MOPS, tags, ...
+
+/-- Data processing -- register (`op0 = x101`). -/
+def decodeDPReg (w : Nat) : Option Instr :=
+  let sf := bit w 31
+  let rd := bits w 4 0
+  let rn := bits w 9 5
+  let rm := bits w 20 16
+  if !bit w 28 then
+    if !bit w 24 then
+      -- Logical (shifted register): sf opc 01010 shift N Rm imm6 Rn Rd
+      let imm6 := bits w 15 10
+      if !sf && imm6 ≥ 32 then none else
+      some (.logicalShifted sf (LogicOp.ofBits (bits w 30 29)) (ShiftType.ofBits (bits w 23 22))
+        (bit w 21) rm imm6 rn rd)
+    else if !bit w 21 then
+      -- Add/subtract (shifted register): sf op S 01011 shift 0 Rm imm6 Rn Rd
+      let shift := bits w 23 22
+      let imm6 := bits w 15 10
+      if shift = 3 then none else
+      if !sf && imm6 ≥ 32 then none else
+      some (.addSubShifted sf (bit w 30) (bit w 29) (ShiftType.ofBits shift) rm imm6 rn rd)
+    else
+      -- Add/subtract (extended register): sf op S 01011 opt=00 1 Rm option imm3 Rn Rd
+      let imm3 := bits w 12 10
+      if bits w 23 22 ≠ 0 then none else
+      if imm3 > 4 then none else
+      some (.addSubExt sf (bit w 30) (bit w 29) rm (ExtendType.ofBits (bits w 15 13)) imm3 rn rd)
+  else
+    let op2 := bits w 24 21
+    if op2 = 0b0000 then
+      -- Add/subtract (with carry): sf op S 11010000 Rm 000000 Rn Rd
+      if bits w 15 10 ≠ 0 then none else
+      some (.addSubCarry sf (bit w 30) (bit w 29) rm rn rd)
+    else if op2 = 0b0010 then
+      -- Conditional compare: sf op S=1 11010010 Rm|imm5 cond imm o2=0 Rn o3=0 nzcv
+      if !bit w 29 || bit w 10 || bit w 4 then none else
+      if bit w 11 then
+        some (.condCmpImm sf (bit w 30) rm (bits w 15 12) rn (bits w 3 0))
+      else
+        some (.condCmpReg sf (bit w 30) rm (bits w 15 12) rn (bits w 3 0))
+    else if op2 = 0b0100 then
+      -- Conditional select: sf op S=0 11010100 Rm cond op2 Rn Rd, op2 = 0x
+      if bit w 29 || bit w 11 then none else
+      some (.condSel sf (bit w 30) rm (bits w 15 12) (bit w 10) rn rd)
+    else if op2 = 0b0110 then
+      if bit w 29 then none else  -- S = 1: unallocated
+      if !bit w 30 then
+        -- Data-processing (2 source): sf 0 0 11010110 Rm opcode Rn Rd
+        let opcode := bits w 15 10
+        if opcode = 0b000010 then some (.div sf false rm rn rd)
+        else if opcode = 0b000011 then some (.div sf true rm rn rd)
+        else if opcode = 0b001000 then some (.shiftV sf .lsl rm rn rd)
+        else if opcode = 0b001001 then some (.shiftV sf .lsr rm rn rd)
+        else if opcode = 0b001010 then some (.shiftV sf .asr rm rn rd)
+        else if opcode = 0b001011 then some (.shiftV sf .ror rm rn rd)
+        else none  -- CRC32, PAC, MTE, ...
+      else
+        -- Data-processing (1 source): sf 1 0 11010110 opcode2 opcode Rn Rd
+        let opcode := bits w 15 10
+        if bits w 20 16 ≠ 0 then none
+        else if opcode = 0 then some (.rbit sf rn rd)
+        else if opcode = 1 then some (.rev sf 1 rn rd)
+        else if opcode = 2 then some (.rev sf 2 rn rd)
+        else if opcode = 3 then (if sf then some (.rev sf 3 rn rd) else none)
+        else if opcode = 4 then some (.clz sf rn rd)
+        else if opcode = 5 then some (.cls sf rn rd)
+        else none  -- CTZ/CNT/ABS (FEAT_CSSC), PAC, ...
+    else if op2 / 8 = 1 then
+      -- Data-processing (3 source): sf op54=00 11011 op31 Rm o0 Ra Rn Rd
+      if bits w 30 29 ≠ 0 then none else
+      let op31 := bits w 23 21
+      let o0 := bit w 15
+      let ra := bits w 14 10
+      if op31 = 0 then some (.madd sf o0 rm ra rn rd)
+      else if !sf then none
+      else if op31 = 0b001 then some (.maddl false o0 rm ra rn rd)
+      else if op31 = 0b101 then some (.maddl true o0 rm ra rn rd)
+      -- SMULH/UMULH: o0 = 0 and Ra is a should-be-one field (11111).
+      else if op31 = 0b010 && !o0 && ra == 31 then some (.mulh false rm rn rd)
+      else if op31 = 0b110 && !o0 && ra == 31 then some (.mulh true rm rn rd)
+      else none
+    else none
+
+/-- Decode a 32-bit A64 instruction word. Words `≥ 2^32` are rejected. -/
+def decode (w : Nat) : Option Instr :=
+  if w ≥ 2 ^ 32 then none else
+  let op0 := bits w 28 25
+  if op0 / 2 = 0b100 then decodeDPImm w            -- 100x
+  else if op0 / 2 = 0b101 then decodeBranchSys w   -- 101x
+  else if op0 % 2 = 0 && op0 / 4 % 2 = 1 then decodeLdSt w   -- x1x0
+  else if op0 % 8 = 0b101 then decodeDPReg w       -- x101
+  else none                                        -- SME, SVE, SIMD&FP, unallocated
+
+end Janus.Arm64
