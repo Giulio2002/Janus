@@ -4,9 +4,12 @@
 #define CTX $0xFFFF00000
 
 // func callPage()
-// Saves the host's callee state in the context page, loads XMM0-15 and every GPR of the case,
-// and enters the instruction under test with IRETQ (frame at CtxFrame: rip, cs, rflags with
-// TF set, rsp, ss), so that exactly one instruction executes before the single-step trap.
+// Saves the host's callee state and FS base in the context page, sets the case's FS base,
+// loads YMM0-15 (XMM halves with MOVUPS, then bits 255:128 with VINSERTI128) and every GPR of
+// the case, and enters the instruction under test with IRETQ (frame at CtxFrame: rip, cs,
+// rflags with TF set, rsp, ss), so that exactly one instruction executes before the
+// single-step trap. From WRFSBASE until ·resume restores the host FS base nothing here may
+// touch the Go runtime's TLS (no Go code runs in between).
 // Control comes back through ·resume, which the signal handler plants as the saved RIP.
 TEXT ·callPage(SB),NOSPLIT,$0-0
 	MOVQ	CTX, AX
@@ -17,6 +20,10 @@ TEXT ·callPage(SB),NOSPLIT,$0-0
 	MOVQ	R14, 64(AX)
 	MOVQ	R15, 72(AX)
 	MOVQ	SP, 80(AX)
+	RDFSBASEQ	BX
+	MOVQ	BX, 2056(AX)
+	MOVQ	2064(AX), BX
+	WRFSBASEQ	BX
 	MOVQ	AX, R15
 	MOVUPS	232(R15), X0
 	MOVUPS	248(R15), X1
@@ -34,6 +41,22 @@ TEXT ·callPage(SB),NOSPLIT,$0-0
 	MOVUPS	440(R15), X13
 	MOVUPS	456(R15), X14
 	MOVUPS	472(R15), X15
+	VINSERTI128	$1, 1536(R15), Y0, Y0
+	VINSERTI128	$1, 1552(R15), Y1, Y1
+	VINSERTI128	$1, 1568(R15), Y2, Y2
+	VINSERTI128	$1, 1584(R15), Y3, Y3
+	VINSERTI128	$1, 1600(R15), Y4, Y4
+	VINSERTI128	$1, 1616(R15), Y5, Y5
+	VINSERTI128	$1, 1632(R15), Y6, Y6
+	VINSERTI128	$1, 1648(R15), Y7, Y7
+	VINSERTI128	$1, 1664(R15), Y8, Y8
+	VINSERTI128	$1, 1680(R15), Y9, Y9
+	VINSERTI128	$1, 1696(R15), Y10, Y10
+	VINSERTI128	$1, 1712(R15), Y11, Y11
+	VINSERTI128	$1, 1728(R15), Y12, Y12
+	VINSERTI128	$1, 1744(R15), Y13, Y13
+	VINSERTI128	$1, 1760(R15), Y14, Y14
+	VINSERTI128	$1, 1776(R15), Y15, Y15
 	MOVQ	104(R15), AX
 	MOVQ	112(R15), CX
 	MOVQ	120(R15), DX
@@ -92,6 +115,25 @@ xloop:
 	ADDQ	$8, DI
 	DECQ	CX
 	JNZ	xloop
+	// YMM bits 255:128: the YMM_Hi128 component of the XSAVE area (standard format, offset
+	// layout.XsaveYMMHOffset), if the frame has one (sw_reserved.magic1 = FP_XSTATE_MAGIC1)
+	MOVQ	$-1, 2048(AX)
+	MOVL	464(SI), BX
+	CMPL	BX, $0x46505853
+	JNE	noxsave
+	MOVQ	512(SI), BX     // XSTATE_BV
+	MOVQ	BX, 2048(AX)
+	LEAQ	576(SI), R8
+	LEAQ	1792(AX), DI
+	MOVQ	$32, CX
+yloop:
+	MOVQ	(R8), BX
+	MOVQ	BX, (DI)
+	ADDQ	$8, R8
+	ADDQ	$8, DI
+	DECQ	CX
+	JNZ	yloop
+noxsave:
 	MOVW	$0x37F, 0(SI)   // FCW: default
 	MOVW	$0, 2(SI)       // FSW
 	MOVW	$0, 4(SI)       // abridged FTW: x87 stack empty
@@ -118,9 +160,12 @@ TEXT ·restorer(SB),NOSPLIT|NOFRAME,$0
 	SYSCALL
 	INT	$3
 
-// Resume after the signal: restore the host state saved by callPage and return to its caller.
+// Resume after the signal: restore the host FS base and the state saved by callPage and
+// return to its caller (with clean upper YMM state).
 TEXT ·resume(SB),NOSPLIT|NOFRAME,$0
 	MOVQ	CTX, AX
+	MOVQ	2056(AX), BX
+	WRFSBASEQ	BX
 	MOVQ	80(AX), SP
 	MOVQ	32(AX), BX
 	MOVQ	40(AX), BP
@@ -129,6 +174,7 @@ TEXT ·resume(SB),NOSPLIT|NOFRAME,$0
 	MOVQ	64(AX), R14
 	MOVQ	72(AX), R15
 	CLD
+	VZEROUPPER
 	XORPS	X15, X15
 	RET
 
@@ -138,4 +184,15 @@ TEXT ·addrs(SB),NOSPLIT,$0-16
 	MOVQ	AX, handler+0(FP)
 	LEAQ	·restorer(SB), AX
 	MOVQ	AX, restorer+8(FP)
+	RET
+
+// func cpuid(eax, ecx uint32) (a, b, c, d uint32)
+TEXT ·cpuid(SB),NOSPLIT,$0-24
+	MOVL	eax+0(FP), AX
+	MOVL	ecx+4(FP), CX
+	CPUID
+	MOVL	AX, a+8(FP)
+	MOVL	BX, b+12(FP)
+	MOVL	CX, c+16(FP)
+	MOVL	DX, d+20(FP)
 	RET

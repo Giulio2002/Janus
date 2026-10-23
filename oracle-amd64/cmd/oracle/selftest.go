@@ -116,7 +116,7 @@ func cmdSelftest(args []string) {
 					return fmt.Sprintf("%s changed: %s -> %s", regNames[i], c.Regs[i], h.Regs[i])
 				}
 			}
-			if !skip["flags"] && h.RFlags != c.RFlags {
+			if !skip["flags"] && h.RFlags != c.RFlags&L.StatusFlags {
 				return fmt.Sprintf("rflags changed %s -> %s", flagString(c.RFlags), flagString(h.RFlags))
 			}
 			if !skip["xmm"] {
@@ -236,6 +236,95 @@ func cmdSelftest(args []string) {
 				return mem(m)(c, h)
 			})},
 	}
+	ymmh := func(i int, v string) check {
+		return func(c *L.Case, h *L.HW) string {
+			if len(h.YMMH) != 16 || hexBig(h.YMMH[i]).Cmp(hexBig(v)) != 0 {
+				return fmt.Sprintf("ymmh%d = %v, want %s", i, h.YMMH, v)
+			}
+			return ""
+		}
+	}
+	ymmhKept := func(c *L.Case, h *L.HW) string {
+		for i := 0; i < 16; i++ {
+			want := "0x0"
+			if len(c.YMMH) == 16 {
+				want = c.YMMH[i]
+			}
+			if e := ymmh(i, want)(c, h); e != "" {
+				return e
+			}
+		}
+		return ""
+	}
+	setY := func(s *gen.State) {
+		for i := range s.YMMH {
+			s.YMMH[i] = [2]uint64{0x1111111111111111 * uint64(i+1), ^uint64(i)}
+		}
+	}
+	patV := func(seed uint64, off, n int) string {
+		v := ""
+		for k := n - 1; k >= 0; k-- {
+			v += fmt.Sprintf("%02x", L.Pattern(seed, uint64(off+k)))
+		}
+		return "0x" + v
+	}
+	tests = append(tests,
+		tc{"nop keeps ymm upper halves", "90", setY, and(expect("ok", T+1), preserved(), ymmhKept)},
+		tc{"movups xmm0, [rbx] keeps ymm0 upper (legacy SSE)", "0f1003", func(s *gen.State) { setY(s); s.Regs[3], s.Seed = D+16, 0 },
+			and(expect("ok", T+3), ymmhKept, xmm(0, patV(0, 16, 16)))},
+		tc{"vzeroupper", "c5f877", setY, and(expect("ok", T+3), preserved(), func(c *L.Case, h *L.HW) string {
+			for i := 0; i < 16; i++ {
+				if e := ymmh(i, "0x0")(c, h); e != "" {
+					return e
+				}
+			}
+			return ""
+		})},
+		tc{"vmovdqu ymm2, [rsi]", "c5fe6f16", func(s *gen.State) { setY(s); s.Regs[6], s.Seed = D+64, 0 },
+			and(expect("ok", T+4), xmm(2, patV(0, 64, 16)), ymmh(2, patV(0, 80, 16)), ymmh(3, "0xfffffffffffffffc4444444444444444"))},
+		tc{"vmovdqu xmm2, [rsi] zeroes ymm2 upper (VEX.128)", "c5fa6f16", func(s *gen.State) { setY(s); s.Regs[6], s.Seed = D+64, 0 },
+			and(expect("ok", T+4), xmm(2, patV(0, 64, 16)), ymmh(2, "0x0"))},
+		tc{"vmovdqu [rdi], ymm0", "c5fe7f07", func(s *gen.State) {
+			s.Regs[7], s.Seed = D+256, 0
+			s.XMM[0], s.YMMH[0] = [2]uint64{0x0807060504030201, 0x100f0e0d0c0b0a09}, [2]uint64{0x1817161514131211, 0x201f1e1d1c1b1a19}
+		}, and(expect("ok", T+4), func(c *L.Case, h *L.HW) string {
+			m := map[int]int{}
+			for k := 0; k < 32; k++ {
+				m[256+k] = k + 1
+			}
+			return mem(m)(c, h)
+		})},
+		tc{"vmovdqa ymm0, [rsi+16] (misaligned: #GP)", "c5fd6f4610", func(s *gen.State) { s.Regs[6] = D + 64 }, and(fault(11), preserved())},
+		tc{"mov r14, fs:[-8]", "644c8b3425f8ffffff", func(s *gen.State) { s.FSBase, s.Seed = D+72, 0 },
+			and(expect("ok", T+9), r(14, hexv(patV(0, 64, 8))), preserved("r14"))},
+		tc{"mov fs:[-8], r14", "644c893425f8ffffff", func(s *gen.State) { s.FSBase, s.Regs[14], s.Seed = D+72, 0x0123456789abcdef, 0 },
+			and(expect("ok", T+9), preserved("mem"), mem(le(64, 0x0123456789abcdef, 8)))},
+		tc{"mov rax, fs:[rbx] (fs base + rbx)", "64488b03", func(s *gen.State) { s.FSBase, s.Regs[3], s.Seed = D+64, 24, 0 },
+			and(expect("ok", T+4), r(0, hexv(patV(0, 88, 8))), preserved("rax"))},
+		tc{"mov r14, fs:[-8] (fs base 0: unmapped)", "644c8b3425f8ffffff", nil, and(fault(11), preserved())},
+		tc{"std", "fd", nil, and(expect("ok", T+1), preserved(), func(c *L.Case, h *L.HW) string {
+			if !h.DF {
+				return "DF not set"
+			}
+			return ""
+		})},
+		tc{"cld (DF set on entry)", "fc", func(s *gen.State) { s.RFlags |= L.FlagDF }, and(expect("ok", T+1), func(c *L.Case, h *L.HW) string {
+			if h.DF {
+				return "DF still set"
+			}
+			return ""
+		})},
+		tc{"std; rep movsb (3 bytes backward)", "f3a4", func(s *gen.State) {
+			s.RFlags |= L.FlagDF
+			s.Regs[1], s.Regs[6], s.Regs[7], s.Seed = 3, D+102, D+202, 0
+		}, and(expect("ok", T+2), r(1, 0), r(6, D+99), r(7, D+199), func(c *L.Case, h *L.HW) string {
+			m := map[int]int{}
+			for k := 0; k < 3; k++ {
+				m[200+k] = int(L.Pattern(0, uint64(100+k)))
+			}
+			return mem(m)(c, h)
+		})},
+	)
 	for f := 0; f < 64; f++ {
 		f := f
 		tests = append(tests, tc{fmt.Sprintf("nop flags=%s", flagString(gen.FlagCombo(f))), "90", func(s *gen.State) {

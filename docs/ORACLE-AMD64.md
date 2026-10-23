@@ -11,29 +11,58 @@ Linux with 5-level paging, Go 1.26.0:
 
 | run | cases | agree | of which both fault | model-gap | **MISMATCH** | unobserved |
 |---|---:|---:|---:|---:|---:|---:|
-| `full`, `SEED=1` | 593,848 | 525,065 | 146,404 | 68,783 | **0** | 0 |
-| `full`, `SEED=7` | 594,133 | 525,989 | 147,116 | 68,144 | **0** | 0 |
-| **total** | **1,187,981** | 1,051,054 | | 136,927 | **0** | 0 |
+| `full`, `SEED=1`, `N=1200 GROUP=60000 K=6 PER_CLASS=6000` | 1,384,074 | 1,210,212 | 358,487 | 173,861 | **0** | 1 |
+| `full`, `SEED=7`, same knobs | 1,384,116 | 1,212,897 | 358,151 | 171,219 | **0** | 0 |
+| targeted harvest, `K=200`, every distinct real encoding of the new and changed classes (VEX, SSE packed integer, `MOVSS/MOVSD`, `RCL/RCR`, hints, `CLD/STD`, `MOVS/STOS`, `XCHG/XADD/CMPXCHG`, `BSF/BSR`) and every `FS`-prefixed one | 652,400 | 578,353 | 387,855 | 74,047 | **0** | 0 |
+| **total** | **3,420,590** | 3,001,462 | | 419,127 | **0** | 1 |
 
-These runs include the atomics and string-instruction coverage (below). The model before
-that, without them, ran 1,011,430 cases with 0 mismatches.
+The one unobserved case is an `XBEGIN` (TSX) that left the code page. These runs cover `FS`,
+YMM/AVX, the SSE packed-integer instructions, `MOVSS/MOVSD`, `RCL/RCR`, the hints, the
+direction flag and the split-lock rule (below). Earlier models: 1,187,981 cases (atomics, string
+instructions, SSE moves) and 1,011,430, both with 0 mismatches. Quick runs during development
+(`SEED=2..4`, about 270,000 cases each) also had 0.
 
 `SEED=1`, broken down by case source:
 
 | source | cases | agree | model-gap | MISMATCH |
 |---|---:|---:|---:|---:|
-| `harvest/*`: distinct instructions of real Go amd64 code, modelled classes | 156,564 | 156,555 | 9 | 0 |
-| `harvest-other/*`: a sample of real instructions outside the subset (SSE arithmetic, AVX, AES, FS loads, ...) | 3,684 | 1,298 | 2,386 | 0 |
-| `gen/*`: targeted random encodings, about 120 classes | 325,200 | 273,486 | 51,714 | 0 |
-| `edge/*`: hand-picked edge families (see below) | 68,400 | 63,387 | 5,013 | 0 |
-| `rand/*`: random prefix/opcode/tail strings | 40,000 | 30,339 | 9,661 | 0 |
+| `harvest/*`: distinct instructions of real Go amd64 code, modelled classes | 422,736 | 421,461 | 1,275 | 0 |
+| `harvest-other/*`: a sample of real instructions outside the subset (SSE arithmetic, AVX-512, AES, ...) | 5,346 | 1,784 | 3,562 | 0 |
+| `gen/*`: targeted random encodings, about 150 classes plus 25 VEX families | 809,192 | 663,324 | 145,868 | 0 |
+| `edge/*`: hand-picked edge families (see below) | 86,800 | 78,995 | 7,805 | 0 |
+| `rand/*`: random prefix/opcode/tail strings | 60,000 | 44,648 | 15,351 | 0 |
 
-Model gaps by fault kind (`SEED=1`): `undecodable` 66,824 (encodings outside the subset, see below),
-`undefinedResult` 1,119 (BSF/BSR of 0 at 16/32 bits, 16-bit SHLD/SHRD by more than 16),
-`outsideAllocation` 665 (accesses the hardware served from mapped memory outside the buffer,
-e.g. RIP-relative loads from the code page), `badTarget` 175 (branches to addresses `≥ 2^47`,
-which are canonical on this 5-level-paging host). The per-class tables are in
-`artifacts/oracle-amd64/summary.md` (and `summary-seed7.md`).
+Model gaps by fault kind (`SEED=1`): `undecodable` 152,082 (encodings outside the subset),
+`misaligned` 19,062 (locked accesses that are not naturally aligned: the split-lock rule; this
+host runs `split_lock_detect=warn`, so they complete natively), `undefinedResult` 1,727
+(BSF/BSR of 0, 16-bit SHLD/SHRD by more than 16), `outsideAllocation` 685 (accesses the
+hardware served from mapped memory outside the buffer, e.g. RIP-relative loads from the code
+page), `badTarget` 305 (branches to addresses `≥ 2^47`, which are canonical on this
+5-level-paging host).
+
+**New and changed classes** (`SEED=1`; `SEED=7` is within a few percent; the targeted
+harvest in parentheses). `VEX` is every case starting with `C4`/`C5`, `FS` every case with a `64`
+prefix; `MOVS/STOS` are split by the direction flag on entry (the generator sets `DF` in a
+quarter of all cases, and half of the `edge/string` ones).
+
+| group | cases | agree | of which both fault | model-gap | MISMATCH |
+|---|---:|---:|---:|---:|---:|
+| VEX (`VMOVDQU/A`, `VMOVNTDQ`, `VPXOR/VPAND/VPOR/VPCMPEQB`, `VPMOVMSKB`, `VPTEST`, `VPBROADCASTB`, `VZEROUPPER`, near misses, real AVX outside the subset) | 62,682 (+93,000) | 58,773 (+69,288) | 30,018 (+44,030) | 3,909 (+23,712) | 0 |
+| SSE packed integer (`PCMPEQB PAND POR PMOVMSKB PSHUFD PSHUFLW PUNPCKLBW`, `edge/vec-cmp`) | 24,237 (+11,800) | 19,986 (+11,800) | 4,042 (+149) | 4,251 | 0 |
+| `MOVSS`/`MOVSD` | 21,572 (+394,400) | 20,321 (+394,400) | 10,242 (+309,691) | 1,251 | 0 |
+| `RCL`/`RCR` | 57,919 (+4,800) | 32,307 (+4,800) | 10,687 | 25,612 (8/16-bit forms) | 0 |
+| `PREFETCHh` | 2,526 (+1,400) | 2,198 (+1,400) | 39 | 328 (reserved hint NOPs, prefixed forms) | 0 |
+| `CLD`/`STD` | 2,642 (+400) | 2,043 (+400) | 52 | 599 (prefixed forms) | 0 |
+| `MOVS`/`STOS`, `DF = 0` on entry | 13,097 (+454) | 12,560 (+454) | 4,912 (+191) | 537 | 0 |
+| `MOVS`/`STOS`, `DF = 1` on entry (backward) | 5,411 (+146) | 5,219 (+146) | 1,648 (+62) | 192 | 0 |
+| locked accesses (`LOCK` forms, `XCHG` with memory, `XADD`, `CMPXCHG*`) | 143,773 (+96,600) | 120,379 (+56,089) | 72,753 (+17,790) | 23,394 (19,062 + 40,511 `misaligned`) | 0 |
+| `BSF`/`BSR` | 9,069 (+21,800) | 6,162 (+21,561) | 432 | 2,907 (1,647 + 239 `undefinedResult`: zero source) | 0 |
+| `FS`-prefixed (`gen`, `edge/tls`, `rand`, harvest) | 42,797 (+2,400) | 33,147 (+2,400) | 20,156 (+327) | 9,650 (`LEA`, string, SSE and other forms the decoder refuses) | 0 |
+
+Every case also compares the upper YMM halves (`YMMH`, captured from the signal frame's XSAVE
+area) and the direction flag: most cases start with random nonzero upper halves, so a
+legacy-SSE instruction that cleared them, or a VEX.128 one that kept them, would be a mismatch,
+and so would a `CLD`/`STD`/string instruction that left `DF` differently from the model.
 
 **Atomics, string instructions and 128-bit moves** (`SEED=1`; `SEED=7` is within a few
 percent, also with 0 mismatches):
@@ -100,10 +129,42 @@ non-AVX paths execute when the feature flags are stated (`docs/AMD64.md`). The l
 remaining blocker is the FS-relative TLS load `MOVQ FS:-8, R14` (about 530 occurrences per
 binary), then AES, SSE floating point and SSE compares.
 
+**FS, YMM/AVX and the next blockers.** Before and after `FS`, the VEX instructions, YMM state,
+the SSE packed-integer compares, `MOVSS`/`MOVSD`, `PSHUFLW`, 32/64-bit `RCL`/`RCR`, the
+prefetch hints and `CLD`/`STD` (same binaries, Go 1.26.0, `GOAMD64=v1`; "before" is the model at
+`faa8833`, measured with the same, corrected sweep: `x86asm` decodes `VZEROUPPER` one or two
+bytes too long, which desynchronised the linear sweep after every `VZEROUPPER`; `gen.Decode`
+now fixes its length):
+
+| binary | Go-compiled functions | fully decodable before | after | assembly functions | before | after | occurrences accepted before | after |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `sync/atomic.test` | 3,416 | 3,044 (89.1%) | **3,344 (97.9%)** | 202 | 53 | **108** | 98.80% | 99.27% |
+| `bytes.test` | 4,666 | 4,251 (91.1%) | **4,576 (98.1%)** | 202 | 53 | **108** | 99.10% | 99.46% |
+| `strings.test` | 4,640 | 4,234 (91.2%) | **4,552 (98.1%)** | 202 | 53 | **108** | 99.10% | 99.46% |
+| `artifacts/examples-amd64` | 1,629 | 1,341 (82.3%) | **1,579 (96.9%)** | 175 | 47 | **101** | 98.39% | 99.17% |
+
+By package, after: `bytes` 59 of 59 and `strings` 69 of 69 fully decodable (were 52 and 67);
+`internal/bytealg` 16 of 16 (14); `runtime` 1,413 of 1,503 in `bytes.test` (1,142). Among the
+assembly functions `memeqbody`, `cmpbody`, `countbody`, `indexbytebody` and
+`runtime.memclrNoHeapPointers` and `runtime.memmove` (its backward copy's `STD`/`CLD` now set
+the modelled direction flag) decode completely; `indexbody` is blocked only by `PCMPESTRI`.
+
+`oracle coverage` now also reports, per instruction class, the number of functions in which it
+is the **only** rejected class (accepting it would make them fully decodable), and `-show
+PREFIX,...` (`-show-enc`) lists the rejected classes (encodings) of matching functions. That is
+how the follow-up instructions were chosen. Before this round the sole-blocker ranking in
+`bytes.test` was `fs:mov` 324 functions, `syscall` 31, `movsd_xmm` 10, `ucomisd` 6, `rcr` 4,
+`prefetcht0` 4, `pmovmskb` 2, ...; after `FS` and the vector instructions it was `syscall` 32,
+`pshuflw` 22 (the Swiss-table group match in `internal/runtime/maps` and `runtime.mapaccess*`),
+`ucomisd` 14, `cvtss2sd` 6, `rcr` 5 (`RCRQ $1` in the compiler's division-by-constant
+sequences); `PSHUFLW` and `RCL`/`RCR` were added. What remains is not a move or a compare:
+`SYSCALL`, scalar floating point (`UCOMISD`, `CVT*`, arithmetic; MXCSR is not modelled), `CRC32`,
+AES/SHA, AVX-512 (`VMOVDQU64`, `VPERMB`, ...), `CPUID`/`XGETBV` and `PCMPESTRI`.
+
 ## Running it
 
 ```
-scripts/oracle-amd64.sh selftest   # build, check the native harness on known answers (98 checks)
+scripts/oracle-amd64.sh selftest   # build, check the native harness on known answers (109 checks)
 scripts/oracle-amd64.sh quick      # generated cases only (~100k)
 scripts/oracle-amd64.sh full       # generated + edge + harvested from real Go binaries (default)
 ```
@@ -115,6 +176,9 @@ pipeline without Lean). After a model change the native side can be reused:
 `oracle-amd64/bin/oracle run -reuse-native -runner oracle-amd64/bin/runner -model .lake/build/bin/janus-oracle-amd64 -cases A,B -out DIR`.
 `oracle minimize -out DIR` shrinks mismatching cases into `repro.md`/`repro.jsonl`. A full run
 takes about 90 s, including the corpus build.
+`oracle harvest -only REGEX` keeps only the harvested instructions whose class matches (with a
+large `-k`, e.g. `-k 200 -per-class 0 -only '^(v.*|pcmpeqb|pand|...)$'` for the vector run
+above), and `-fs` only the `FS`-prefixed ones.
 
 Pieces: `oracle-amd64/` (a separate Go module: `layout/` is the contract, `cmd/runner` the
 native executor, `cmd/oracle` the gen/harvest/run/compare/minimize/selftest driver, `gen/` the
@@ -123,9 +187,11 @@ generators) and `Oracle/Amd64Main.lean` (the `janus-oracle-amd64` executable).
 ## What a case is
 
 A case (`layout.Case`) holds the instruction bytes (1 to 15, hex) and a complete initial state:
-the 16 GPRs, the six status flags, `XMM0`–`XMM15`, a seed for the 4 KiB data buffer, and
-optional `init` byte overrides (used to plant return addresses and popped values). The
-addresses are fixed:
+the 16 GPRs, the six status flags, `XMM0`–`XMM15`, optionally bits 255:128 of `YMM0`–`YMM15`
+(`ymmh`, absent = 0) and the `FS` base (`fsbase`, absent = 0), a seed for the 4 KiB data
+buffer, and optional `init` byte overrides (used to plant return addresses and popped values).
+The generator gives most cases random nonzero upper YMM halves and an `FS` base near the buffer
+(steered so that an `FS`-relative operand mostly lands in it). The addresses are fixed:
 
 | address | what |
 |---|---|
@@ -143,8 +209,11 @@ an encoding is longer than the bytes a random case supplies.
 
 `oracle-amd64/cmd/runner` (Go, `GOARCH=amd64`) runs all cases of a shard in one process:
 
-1. The trampoline (`trampoline_amd64.s`) saves the host's callee state in the context page,
-   loads `XMM0`–`XMM15` and the 16 GPRs, and enters `TestPC` with `IRETQ`. The `IRETQ` frame
+1. The trampoline (`trampoline_amd64.s`) saves the host's callee state and its own `FS` base
+   (`RDFSBASE`) in the context page, sets the case's `FS` base (`WRFSBASE`; the runner checks
+   at start-up that the kernel enables FSGSBASE), loads `XMM0`–`XMM15` (`MOVUPS`) and their
+   upper halves (`VINSERTI128`), the 16 GPRs, and enters `TestPC` with `IRETQ`. Nothing between
+   `WRFSBASE` and the resume sequence touches the Go runtime's TLS. The `IRETQ` frame
    sets `RSP` and `RFLAGS` (the case's status flags plus **TF**) atomically with `RIP`.
 2. With TF set, the CPU raises a single-step debug trap after **exactly one instruction**. That
    trap is a SIGTRAP with `si_code = TRAP_TRACE` and saved `RIP` = the next instruction:
@@ -157,24 +226,32 @@ an encoding is longer than the bytes a random case supplies.
    §18.3.1.4): the runner re-enters it from the captured registers, flags and XMM state (the
    buffer is kept) until `RIP` moves on or it faults, and reports the number of re-entries.
 3. A raw signal handler is installed with `rt_sigaction`, bypassing the Go runtime, and runs
-   on the thread's sigaltstack. It copies `uc_mcontext` (GPRs, `RIP`, `RFLAGS`) and the XMM
-   registers from the signal frame's fxsave area into the context page. It then resets the
+   on the thread's sigaltstack. It copies `uc_mcontext` (GPRs, `RIP`, `RFLAGS`), the XMM
+   registers from the signal frame's fxsave area and, when the frame has an XSAVE area
+   (`FP_XSTATE_MAGIC1`), `XSTATE_BV` and the `YMM_Hi128` component (offset 576, checked against
+   `CPUID.(EAX=0DH,ECX=2)` at start-up) into the context page. With `XSTATE_BV` bit 2 clear the
+   upper halves are in their initial state and reported as 0. It then resets the
    frame's x87/SSE control state, clears TF/DF/AC and redirects the saved `RIP` to a resume
-   sequence. That sequence restores the host registers (and `X15 = 0`, `R14 = g`) and returns
-   into Go.
+   sequence. That sequence restores the host `FS` base and registers (and `X15 = 0`, `R14 = g`,
+   `VZEROUPPER`) and returns into Go.
 
 The runner reports `ok`, with every GPR, the status bits of `RFLAGS`, the XMM registers, `pc`
 and the changed buffer bytes, or `fault`, or `escaped`/`error`. `oracle selftest` checks the
 machinery against hand-computed answers: ALU flags, loads and stores, push/pop/call/ret,
 branches, faults, `#DE`, `UD2`, self loops, SSE moves, `LOCK XADD`, `LOCK CMPXCHG` (equal and
-not), `MFENCE`, `REP MOVSB` (5 iterations), `REP STOSQ` (counts 0 and 2), and flag and register
-preservation under all 64 combinations of the six status flags (98 checks).
+not), `MFENCE`, `REP MOVSB` (5 iterations), `REP STOSQ` (counts 0 and 2), upper YMM halves
+kept by `NOP` and a legacy `MOVUPS` and zeroed by `VZEROUPPER` and a VEX.128 load, a 256-bit
+`VMOVDQU` load and store, a misaligned `VMOVDQA` (`#GP`), `FS:-8` loads and stores, an
+`FS:[RBX]` load and a fault with `FS` base 0, and flag and register preservation under all 64
+combinations of the six status flags (109 checks).
 
 **Safety.** Random encodings run natively on a shared host, so the runner refuses case bytes
 that contain system-call, segment-load, FP-environment-load or other system encodings
 (`layout.Forbidden`: `SYSCALL`, `SYSENTER`, `INT n`, `MOV Sreg`, `POP FS/GS`, `LSS/LFS/LGS`,
-`0F AE` except the unprefixed `LFENCE`/`MFENCE`/`SFENCE`, `0F 01`, `POPF`, `IRET`, `0F 00`, `0F 35`), and also every FS/GS-prefixed
-instruction, because stores through FS corrupt the Go runtime's TLS. A seccomp-BPF filter on
+`0F AE` except the unprefixed `LFENCE`/`MFENCE`/`SFENCE`, `0F 01`, `POPF`, `IRET`, `0F 00`, `0F 35`), and also every GS-prefixed
+instruction. FS-prefixed ones run: the FS base is the case's for exactly the duration of the
+case, so they cannot reach the runtime's TLS. VEX/EVEX instructions run; the one that loads
+control state, `VLDMXCSR`, is undone by the handler's MXCSR reset. A seccomp-BPF filter on
 all threads makes every system call issued from the code page fail with `EPERM`, and outside
 the code page only a short allow list is permitted. This was tested by injecting `getpid` and
 `kill(1, 9)` through a test-only bypass of the byte filter: both returned `-EPERM` and did
@@ -214,7 +291,18 @@ restarted after the failing case, which is recorded as `error`.
   half of the time (`cmpxchg-xadd`); `CMPXCHG8B/16B`, aligned or not, equal or not
   (`cmpxchg-dbl`); `MOVS`/`STOS` at every width with counts 0..200 over disjoint,
   overlapping and buffer-leaving ranges (`string`); `LOCK` where it is `#UD` (`lock-ud`); and
-  `MOVDQU`/`MOVUPS` in memmove's `-disp(DI)(BX*1)` form near the buffer ends (`sse-memmove`).
+  `MOVDQU`/`MOVUPS` in memmove's `-disp(DI)(BX*1)` form near the buffer ends (`sse-memmove`);
+  the TLS slot `MOVQ FS:-8, R14` (load and store, other registers and offsets, `FS:[RAX]`, and
+  `LEA` with `FS`, which must be rejected) with `FS:-8` inside, at the ends of and outside the
+  buffer (`tls`); `PCMPEQB`/`PAND`/`POR`/`PMOVMSKB`/`PSHUFD`/`PUNPCKLBW` and their VEX
+  counterparts, `VPTEST`, `VPBROADCASTB`, `VZEROUPPER` and `VEX.128`/`VEX.256` moves on
+  registers that are all copies of one value with a few bytes changed, so that equal and
+  unequal lanes both occur (`vec-cmp`); and `VMOVDQA`/`VMOVNTDQ`/`MOVDQA` at 16/32-byte
+  (mis)alignments and `VMOVDQU` across the buffer ends (`vec-align`).
+* **VEX** (`gen/v*`): 2- and 3-byte VEX encodings of each modelled opcode (and of near misses:
+  `VPANDN`, `VPCMPEQW`, `VPBROADCASTW`, `VPALIGNR`, `MULX`, the no-prefix and `F2` forms of
+  `6F`), with random `R X B W L` bits, `VEX.vvvv` mostly `1111` and sometimes random, an
+  occasional wrong map or `pp`, and an occasional stray prefix before `C4`/`C5`.
 * **Random** (`rand/*`): random prefix sequences (`66 67 F2 F3 F0 2E 3E 26 36 64 65`, REX),
   random one- and two-byte opcodes and random tails. These test that the decoder rejects what
   it does not understand and agrees on what it accepts, including instruction length.
@@ -225,7 +313,7 @@ The comparator is `oracle-amd64/cmd/oracle/compare.go`.
 
 | hardware | model | verdict |
 |---|---|---|
-| ok | ok, identical GPRs, defined status flags, `pc`, `XMM0`–`XMM15` and buffer bytes, and `DF` clear on hardware | **agree** |
+| ok | ok, identical GPRs, defined status flags, `pc`, `XMM0`–`XMM15`, bits 255:128 of `YMM0`–`YMM15` and buffer bytes, and `DF` clear on hardware | **agree** |
 | fault | fault (any `Fault`) | **agree** (fault kinds are not compared) |
 | ok | fault | **model-gap**: the model is conservative (`undecodable`, `undefinedResult`, `badTarget`, or an access outside the buffer that hardware served from other mapped memory) |
 | ok | ok, any difference | **MISMATCH** |
@@ -257,16 +345,22 @@ something a single CPU can confirm. See "Limits".
   On a CPU without BMI1/LZCNT, `F3 0F BC/BD` executes as BSF/BSR. Theorems that use them assume
   an x86-64-v3-class CPU (see `docs/AMD64.md`). `GOAMD64=v1` code only reaches them behind
   run-time CPU checks.
-* **FS/GS** are never executed natively (they would corrupt the runner's TLS). The decoder
-  rejects `64`/`65` prefixes, and that rejection is checked only by `JanusTests/Amd64.lean`.
+* **GS** is never executed natively (it would reach the runner's own state); the decoder
+  rejects `65`, which only `JanusTests/Amd64.lean` checks. `FS` runs with the case's base.
+* **Split locks.** This host runs `split_lock_detect=warn`: a locked access that straddles a
+  cache line completes (with a kernel warning), so the model's `misaligned` fault for a locked
+  access that is not naturally aligned is a model gap here. Under `fatal` the hardware side would
+  be `SIGBUS` and the cases would agree.
+* **AVX-512 state.** VEX instructions zero `ZMM` bits 511:256 on this host; neither side
+  compares them (the model does not have them, and no modelled instruction reads them).
 * **Canonical addresses.** This host has 5-level paging, so `2^47..2^56` is canonical: a jump
   there is a fetch fault (hw ok) and the model's `badTarget` is a gap. Non-canonical targets
   `#GP` at the branch itself, with `RSP` unchanged, and the model faults too.
 * **Memory outside the buffer.** The model knows only the buffer. The native process also has
   the code page and its own mappings, so an access there succeeds natively and faults in the
   model (gap), never the other way round. Only the 4 KiB buffer is compared byte by byte.
-* **No system state.** `RFLAGS` system bits, segment registers, MXCSR status bits, x87 state
-  and YMM/ZMM upper halves are neither modelled nor compared.
+* **No system state.** `RFLAGS` system bits, segment registers other than the `FS` base,
+  MXCSR status bits, x87 state and `ZMM` bits 511:256 are neither modelled nor compared.
 
 ## Formal x86 model (third reference)
 
@@ -310,6 +404,37 @@ cases:
   (so `RCX = 0` copies one element and wraps `RCX` to `2^64 - 1`), and it ends an `F3`
   repetition on `ZF`, which only `CMPS`/`SCAS` should do. Its `REP` results are therefore
   not comparable; the single-element forms agree exactly.
+
+**FS, YMM and the new instructions.** `build.sh` now also lets the driver set the `FS` base
+(`-C fsbase=`, which in 64-bit mode the formal model takes from `IA32_FS_BASE`) and the low 256
+bits of `ZMM0`–`ZMM15` (`-C ymm{i}q{j}=`, quadword `j`), and prints them back; `compare.py`
+passes the case's `fsbase`, `xmm` and `ymmh`, compares YMM registers too, no longer skips the
+SSE classes, and takes `--fs 1` (only `64`-prefixed cases). On every case of the new and
+newly comparable classes in the final `SEED=1` run that our model executes (`gen`, `edge`,
+`harvest`):
+
+| classes | cases | formal model faults or lacks it | both succeed | identical | differ |
+|---|---:|---:|---:|---:|---:|
+| `FS`-prefixed (`--fs 1`: `MOV`, `MOVZX/MOVSX/MOVSXD`, ALU, `CMP`, `TEST`, `edge/tls`) | 12,907 | 0 | 12,907 | **12,907** | 0 |
+| `RCL`/`RCR`, `MOVSS`/`MOVSD`, legacy SSE moves (`MOVUPS MOVAPS MOVUPD MOVAPD MOVDQU`, `edge/sse-*`), `CLD`, `MOVD`/`MOVQ` | 54,312 | — | 54,312 | 53,318 | 994 |
+| VEX (all 11), `PCMPEQB PAND POR PMOVMSKB PSHUFD PSHUFLW PUNPCKLBW PXOR XORPS`, `PREFETCHh`, `MOVDQA`, some `MOVQ` forms | 46,701 | 46,701 | 0 | | |
+
+* **Flags undefined in the formal model but defined in ours: 0.** The other direction: 2,064
+  `RCL`/`RCR` cases with a masked count of 0, where ours makes `OF` undefined (the SDM
+  pseudocode) and the formal model leaves every flag unchanged (the prose); the conservative
+  side, as for `ROL`/`ROR`. For counts 1 and above both agree on which flags are defined and on
+  their values.
+* **Legacy SSE preserves YMM bits 255:128 in the formal model too**, in every case that writes
+  an XMM register (about 2,900 of them with nonzero upper halves in the earlier quick run that
+  was inspected per case), and `MOVSS`/`MOVSD` zero bits 127:32/127:64 on a load, merge on a
+  register move, and store 4/8 bytes, exactly as ours.
+* **The 994 differences are a formal-model bug**: all are `MOVD`/`MOVQ xmm, r/m`
+  (`66 [REX.W] 0F 6E`), where the formal model (`x86_movd_movq_to_xmm` writes only the operand
+  size) keeps bits 127:32/127:64 of the destination; the SDM, the hardware (same case ids in
+  `hw.jsonl`) and our model zero-extend to 128 bits. E.g. `660f6edb` (`movd xmm3, ebx`).
+* **The formal model implements no VEX instruction** (every VEX branch of its dispatch is
+  guarded by `& false`, so they end in `#UD` or "unimplemented") and none of the packed-integer
+  instructions or prefetches; those classes are checked by the native oracle alone.
 
 Neither ACL2 X86isa itself, nor Remill or the K semantics, was tried: the Sail model ran on the
 first attempt and exposes the undefined-flag masks directly. The bit-scan, population-count,

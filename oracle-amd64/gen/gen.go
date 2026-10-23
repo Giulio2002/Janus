@@ -19,6 +19,8 @@ type State struct {
 	Regs   [16]uint64
 	RFlags int
 	XMM    [16][2]uint64 // lo, hi
+	YMMH   [16][2]uint64 // bits 255:128 of YMMn (lo, hi)
+	FSBase uint64
 	Seed   uint64
 	Init   [][2]int // buffer byte overrides (offset, value)
 }
@@ -34,10 +36,23 @@ func hex128(lo, hi uint64) string {
 
 // Case renders a test case.
 func Case(id int, class string, b []byte, s State) L.Case {
-	c := L.Case{ID: id, Class: class, Bytes: hex.EncodeToString(b), RFlags: s.RFlags & L.StatusFlags, Seed: s.Seed, Init: s.Init}
+	c := L.Case{ID: id, Class: class, Bytes: hex.EncodeToString(b), RFlags: s.RFlags & (L.StatusFlags | L.FlagDF), Seed: s.Seed, Init: s.Init}
 	for i := 0; i < 16; i++ {
 		c.Regs[i] = hex64(s.Regs[i])
 		c.XMM[i] = hex128(s.XMM[i][0], s.XMM[i][1])
+	}
+	nz := false
+	for i := 0; i < 16; i++ {
+		nz = nz || s.YMMH[i] != [2]uint64{}
+	}
+	if nz {
+		c.YMMH = make([]string, 16)
+		for i := 0; i < 16; i++ {
+			c.YMMH[i] = hex128(s.YMMH[i][0], s.YMMH[i][1])
+		}
+	}
+	if s.FSBase != 0 {
+		c.FSBase = hex64(s.FSBase)
 	}
 	return c
 }
@@ -45,6 +60,16 @@ func Case(id int, class string, b []byte, s State) L.Case {
 // Decode decodes b in 64-bit mode.
 func Decode(b []byte) (x86asm.Inst, bool) {
 	inst, err := x86asm.Decode(b, 64)
+	// x86asm decodes VZEROUPPER/VZEROALL (VEX 0F 77, which has no ModRM) as if it had a
+	// ModRM byte and so one or two bytes too long, which desynchronises a linear sweep
+	if err == nil && (inst.Op == x86asm.VZEROUPPER || inst.Op == x86asm.VZEROALL) {
+		switch {
+		case len(b) >= 3 && b[0] == 0xC5 && b[2] == 0x77:
+			inst.Len = 3
+		case len(b) >= 4 && b[0] == 0xC4 && b[3] == 0x77:
+			inst.Len = 4
+		}
+	}
 	// x86asm reports a prefix followed by an undecodable opcode as a 1-byte Op(0).
 	return inst, err == nil && inst.Op != 0
 }
@@ -89,7 +114,10 @@ func init() {
 		setcc cmovcc jcc jmp call ret push pop nop xchg cbw cwde cdqe cwd cdq cqo clc stc cmc leave
 		movups movupd movaps movapd movdqu movdqa xorps xorpd pxor movd movq ud2 int3 int
 		xadd cmpxchg cmpxchg8b cmpxchg16b movsb movsw movsd movsq stosb stosw stosd stosq
-		lfence mfence sfence pause`) {
+		lfence mfence sfence pause
+		pand por pcmpeqb punpcklbw pmovmskb pshufd movsd_xmm movss prefetchnta prefetcht0
+		prefetcht1 prefetcht2 cld vmovdqu vmovdqa vmovntdq vpxor vpand vpor vpcmpeqb vpmovmskb
+		vptest vpbroadcastb vzeroupper pshuflw rcl rcr std`) {
 		Modeled[m] = true
 	}
 }
@@ -205,6 +233,23 @@ func Setup(r *rand.Rand, b []byte) State {
 			s.XMM[i] = [2]uint64{r.Uint64(), r.Uint64()}
 		}
 	}
+	// upper YMM halves: mostly random (so that legacy SSE preserving them and VEX.128 zeroing
+	// them are both visible), sometimes all zero (the initial AVX state)
+	if r.IntN(8) != 0 {
+		for i := range s.YMMH {
+			if r.IntN(6) != 0 {
+				s.YMMH[i] = [2]uint64{r.Uint64(), r.Uint64()}
+			}
+		}
+	}
+	// FS base: mostly inside the buffer (so FS:-8 and small FS offsets are in it)
+	switch r.IntN(6) {
+	case 0:
+	case 1:
+		s.FSBase = uint64(r.Int64N(1 << 47))
+	default:
+		s.FSBase = L.DataBase + uint64(r.IntN(L.DataSize+16))
+	}
 	// RSP: mostly an 8-aligned pointer into the middle of the buffer.
 	switch r.IntN(10) {
 	case 0:
@@ -215,6 +260,10 @@ func Setup(r *rand.Rand, b []byte) State {
 		s.Regs[4] = L.DataBase + 1024 + 8*uint64(r.IntN(256))
 	}
 	s.RFlags = RandFlags(r)
+	// the direction flag: set in a quarter of the cases (string instructions step backward)
+	if r.IntN(4) == 0 {
+		s.RFlags |= L.FlagDF
+	}
 	s.Seed = uint64(r.IntN(1 << 20))
 	inst, ok := Decode(b)
 	if !ok {
@@ -292,8 +341,15 @@ func codeTarget(r *rand.Rand) uint64 {
 // steerMem sets the base (or index) register so the effective address mostly lands inside
 // the buffer, sometimes straddles one of its ends, sometimes is wild.
 func steerMem(r *rand.Rand, s *State, inst x86asm.Inst, m x86asm.Mem) {
-	if m.Base == x86asm.RIP || m.Segment == x86asm.FS || m.Segment == x86asm.GS {
+	if m.Base == x86asm.RIP || m.Segment == x86asm.GS {
 		return
+	}
+	// x86asm keeps the FS override in the prefixes, not in Mem.Segment
+	fs := m.Segment == x86asm.FS
+	for _, p := range inst.Prefix {
+		if p&0xFF == x86asm.PrefixFS {
+			fs = true
+		}
 	}
 	size := inst.MemBytes
 	if size <= 0 {
@@ -318,6 +374,24 @@ func steerMem(r *rand.Rand, s *State, inst x86asm.Inst, m x86asm.Mem) {
 		}
 	default:
 		return
+	}
+	if fs {
+		_, _, bok := regNum(m.Base)
+		_, _, iok := regNum(m.Index)
+		if !bok && !iok {
+			// FS:disp (the TLS slot form): steer the FS base; x86asm reports the 32-bit
+			// displacement of the no-base SIB form unsigned, the CPU sign-extends it
+			if b := target - uint64(int64(int32(m.Disp))); b < 1<<47 {
+				s.FSBase = b
+			}
+			return
+		}
+		// FS:[base + index*scale + disp]: a small FS base, registers steered to the rest
+		s.FSBase = L.DataBase + uint64(r.IntN(L.DataSize))
+		if r.IntN(3) == 0 {
+			s.FSBase = uint64(r.IntN(1 << 12))
+		}
+		target -= s.FSBase
 	}
 	scale := uint64(m.Scale)
 	if scale == 0 {

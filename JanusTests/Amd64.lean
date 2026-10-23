@@ -23,23 +23,23 @@ example : decode [0x48, 0x11, 0xc8] = some (.alu .adc 64 (.reg 0) (.loc (.reg 1)
 example : decode [0xc3] = some (.ret 0, 1) := by decide
 -- cmp rsp, QWORD PTR [r14+0x10]
 example : decode [0x49, 0x3b, 0x66, 0x10] =
-    some (.alu .cmp 64 (.reg 4) (.loc (.mem ⟨some 14, none, 0, 16, false⟩)), 4) := by decide
+    some (.alu .cmp 64 (.reg 4) (.loc (.mem ⟨some 14, none, 0, 16, false, false⟩)), 4) := by decide
 -- add rdx, QWORD PTR [rax+rcx*8]
 example : decode [0x48, 0x03, 0x14, 0xc8] =
-    some (.alu .add 64 (.reg 2) (.loc (.mem ⟨some 0, some 1, 3, 0, false⟩)), 4) := by decide
+    some (.alu .add 64 (.reg 2) (.loc (.mem ⟨some 0, some 1, 3, 0, false, false⟩)), 4) := by decide
 -- jg -0xc
 example : decode [0x7f, 0xf4] = some (.jcc 15 (2 ^ 64 - 12), 2) := by decide
 -- call rel32 (backwards)
 example : decode [0xe8, 0xc8, 0xfe, 0xff, 0xff] = some (.call (2 ^ 64 - 0x138), 5) := by decide
 -- lea rcx, [rip+0x22790]
 example : decode [0x48, 0x8d, 0x0d, 0x90, 0x27, 0x02, 0x00] =
-    some (.lea 64 1 ⟨none, none, 0, 0x22790, true⟩, 7) := by decide
+    some (.lea 64 1 ⟨none, none, 0, 0x22790, true, false⟩, 7) := by decide
 -- movzx eax, BYTE PTR [rcx+rax*1]
 example : decode [0x0f, 0xb6, 0x04, 0x01] =
-    some (.movx false 32 8 0 (.mem ⟨some 1, some 0, 0, 0, false⟩), 4) := by decide
+    some (.movx false 32 8 0 (.mem ⟨some 1, some 0, 0, 0, false, false⟩), 4) := by decide
 -- movups xmm14, XMMWORD PTR [rdx]
 example : decode [0x44, 0x0f, 0x10, 0x32] =
-    some (.sseMov false (.xmm 14) (.mem ⟨some 2, none, 0, 0, false⟩), 4) := by decide
+    some (.sseMov false (.xmm 14) (.mem ⟨some 2, none, 0, 0, false, false⟩), 4) := by decide
 -- nop DWORD PTR [rax]
 example : decode [0x0f, 0x1f, 0x00] = some (.nop, 3) := by decide
 -- xchg ax, ax (66 90) is a NOP; 41 90 is xchg r8d, eax
@@ -57,12 +57,35 @@ example : decode [0x0f, 0x0b] = none := by decide
 example : decode [0x0f, 0x05] = none := by decide
 -- lock add eax, eax (register destination: #UD) ; fs: mov rax, [rax] ; addr32 mov eax, [eax]
 example : decode [0xf0, 0x01, 0xc0] = none := by decide
-example : decode [0x64, 0x48, 0x8b, 0x00] = none := by decide
+-- FS-relative load (TLS): mov r14, fs:[-8]
+example : decode [0x64, 0x4c, 0x8b, 0x34, 0x25, 0xf8, 0xff, 0xff, 0xff] =
+    some (.mov 64 (.reg 14) (.loc (.mem ⟨none, none, 0, 0xfffffffffffffff8, false, true⟩)), 9) := by decide
+example : decode [0x64, 0x48, 0x8b, 0x00] =
+    some (.mov 64 (.reg 0) (.loc (.mem ⟨some 0, none, 0, 0, false, true⟩)), 4) := by decide
+-- FS on LEA (segments are ignored), on a register form, and GS are rejected
+example : decode [0x64, 0x48, 0x8d, 0x00] = none := by decide
+example : decode [0x64, 0x48, 0x89, 0xc0] = none := by decide
+example : decode [0x65, 0x48, 0x8b, 0x00] = none := by decide
+-- VEX: vmovdqu ymm0, [rsi]; vpcmpeqb ymm4, ymm0, ymm1; vpmovmskb edx, ymm6; vzeroupper
+example : decode [0xc5, 0xfe, 0x6f, 0x06] =
+    some (.vmov false 256 (.xmm 0) (.mem ⟨some 6, none, 0, 0, false, false⟩), 4) := by decide
+example : decode [0xc5, 0xfd, 0x74, 0xe1] = some (.vop .pcmpeqb 256 4 0 (.xmm 1), 4) := by decide
+example : decode [0xc5, 0xfd, 0xd7, 0xd6] = some (.pmovmskb 256 2 6, 4) := by decide
+example : decode [0xc5, 0xf8, 0x77] = some (.vzeroupper, 3) := by decide
+-- vmovdqu ymm4, [r10] (3-byte VEX with VEX.B)
+example : decode [0xc4, 0xc1, 0x7e, 0x7f, 0x22] =
+    some (.vmov false 256 (.mem ⟨some 10, none, 0, 0, false, false⟩) (.xmm 4), 5) := by decide
+-- VEX after a prefix, vvvv ≠ 1111 on a two-operand form, and VZEROALL are rejected
+example : decode [0x66, 0xc5, 0xfe, 0x6f, 0x06] = none := by decide
+example : decode [0xc5, 0xf6, 0x6f, 0x06] = none := by decide
+example : decode [0xc5, 0xfc, 0x77] = none := by decide
 example : decode [0x67, 0x8b, 0x00] = none := by decide
 -- REX followed by a legacy prefix (the REX is ignored by hardware)
 example : decode [0x48, 0x66, 0x01, 0xd8] = none := by decide
--- rcl eax, 1 (not modelled)
-example : decode [0xd1, 0xd0] = none := by decide
+-- rcl eax, 1; rcr rbx, 1; rcl al, 1 (8/16-bit RCL/RCR not modelled)
+example : decode [0xd1, 0xd0] = some (.rcx true 32 (.reg 0) (.imm 1), 2) := by decide
+example : decode [0x48, 0xd1, 0xdb] = some (.rcx false 64 (.reg 3) (.imm 1), 3) := by decide
+example : decode [0xd0, 0xd0] = none := by decide
 -- VEX (mulx)
 example : decode [0xc4, 0xe2, 0xfb, 0xf6, 0xc3] = none := by decide
 -- truncated: add rax, [rip+disp32] with only two displacement bytes
@@ -104,23 +127,32 @@ example : (step [0xc1, 0xe0, 0x00] { s0 with regs := fun _ => 0xFFFFFFFF00000001
 /-! ## Atomics and string instructions -/
 
 -- lock xadd [rax], ebx ; lock cmpxchg [rcx], rdx ; rep movsb ; rep stosq ; mfence
-example : decode [0xf0, 0x0f, 0xc1, 0x18] = some (.xadd 32 (.mem ⟨some 0, none, 0, 0, false⟩) (.reg 3), 4) := by decide
-example : decode [0xf0, 0x48, 0x0f, 0xb1, 0x11] = some (.cmpxchg 64 (.mem ⟨some 1, none, 0, 0, false⟩) (.reg 2), 5) := by decide
+example : decode [0xf0, 0x0f, 0xc1, 0x18] = some (.locked (.xadd 32 (.mem ⟨some 0, none, 0, 0, false, false⟩) (.reg 3))
+    ⟨some 0, none, 0, 0, false, false⟩ 4, 4) := by decide
+example : decode [0xf0, 0x48, 0x0f, 0xb1, 0x11] = some (.locked (.cmpxchg 64 (.mem ⟨some 1, none, 0, 0, false, false⟩) (.reg 2))
+    ⟨some 1, none, 0, 0, false, false⟩ 8, 5) := by decide
 example : decode [0xf3, 0xa4] = some (.movs true 8, 2) := by decide
 example : decode [0xf3, 0x48, 0xab] = some (.stos true 64, 3) := by decide
 example : decode [0x0f, 0xae, 0xf0] = some (.nop, 3) := by decide
--- lock or [rax], ecx is the unlocked or
-example : (decode [0xf0, 0x09, 0x08]).map (·.1) = (decode [0x09, 0x08]).map (·.1) := by decide
+-- lock or [rax], ecx is the unlocked or, with the alignment check of a locked access
+example : (decode [0xf0, 0x09, 0x08]).map (·.1) =
+    (decode [0x09, 0x08]).map (fun x => Instr.locked x.1 ⟨some 0, none, 0, 0, false, false⟩ 4) := by decide
+-- xchg [rax], ecx is locked implicitly
+example : decode [0x87, 0x08] = some (.locked (.xchg 32 (.mem ⟨some 0, none, 0, 0, false, false⟩) (.reg 1))
+    ⟨some 0, none, 0, 0, false, false⟩ 4, 2) := by decide
 -- LOCK where it is #UD: register destination, CMP, MOV, a non-RMW string op; LOCK with F3
 example : decode [0xf0, 0x48, 0x01, 0xc8] = none := by decide
 example : decode [0xf0, 0x48, 0x39, 0x08] = none := by decide
 example : decode [0xf0, 0x89, 0x08] = none := by decide
 example : decode [0xf0, 0xa5] = none := by decide
 example : decode [0xf0, 0xf3, 0x01, 0x08] = none := by decide
--- register-destination XADD/CMPXCHG are not modelled; REPNE MOVS, STD and TPAUSE rejected
+-- register-destination XADD/CMPXCHG are not modelled; REPNE MOVS and TPAUSE rejected
 example : decode [0x0f, 0xc1, 0xd8] = none := by decide
 example : decode [0xf2, 0xa4] = none := by decide
-example : decode [0xfd] = none := by decide
+-- STD / CLD write the direction flag
+example : decode [0xfd] = some (.setDF true, 1) := by decide
+example : decode [0xfc] = some (.setDF false, 1) := by decide
+example : decode [0x66, 0xfd] = none := by decide
 example : decode [0x66, 0x0f, 0xae, 0xf0] = none := by decide
 
 /-- A state with 64 writable bytes at `0x100` (byte `a` initially `a`). -/
@@ -183,5 +215,80 @@ example (ret : Nat) (s : State) (hs : CallSetup (retProg.withExit ret) 0x1000 []
   simp [exec, load, Janus.Arm64.Memory.accessible, hm]
 
 end Spec
+
+
+/-! ## Vector and FS execution -/
+
+-- rcr rbx, 1 with CF = 1: 0x8000…0002 (rbx = 4 in s0, so 4 >> 1 with CF in the top bit)
+example : (step [0x48, 0xd1, 0xdb] { s0 with flags := { s0.flags with cf := some true } }).toOption.map
+    (fun s => (s.regs 3, s.flags.cf)) = some (0x8000000000000002, some false) := by decide
+-- vzeroupper clears the upper halves
+example : (step [0xc5, 0xf8, 0x77] { s0 with ymmHi := fun _ => 7 }).toOption.map
+    (fun s => (s.ymmHi 3).toNat) = some 0 := by decide
+-- vpxor xmm0, xmm0, xmm0 (VEX.128) zeroes ymm0 entirely; pxor xmm0, xmm0 keeps the upper half
+example : (step [0xc5, 0xf9, 0xef, 0xc0] { s0 with ymmHi := fun _ => 7, xmm := fun _ => 5 }).toOption.map
+    (fun s => (s.xmm 0, s.ymmHi 0)) = some (0, 0) := by decide
+example : (step [0x66, 0x0f, 0xef, 0xc0] { s0 with ymmHi := fun _ => 7, xmm := fun _ => 5 }).toOption.map
+    (fun s => (s.xmm 0, s.ymmHi 0)) = some (0, 7) := by decide
+-- pcmpeqb xmm0, xmm1 then pmovmskb edx, xmm0: equal registers give 0xffff
+example : ((step [0x66, 0x0f, 0x74, 0xc1] { s0 with xmm := fun _ => 0x1234 }).bind
+    (fun s => step [0x66, 0x0f, 0xd7, 0xd0] s)).toOption.map (fun s => s.regs 2) = some 0xffff := by decide
+-- vpmovmskb of a 256-bit value with only byte 31's top bit set
+example : (step [0xc5, 0xfd, 0xd7, 0xd6] { s0 with ymmHi := fun _ => BitVec.ofNat 128 (2 ^ 127) }).toOption.map
+    (fun s => s.regs 2) = some 0x80000000 := by decide
+-- mov r14, fs:[-8] reads the TLS slot at fsBase - 8
+def sTls : State :=
+  { s0 with fsBase := 0x2008,
+            mem := { bytes := fun a => if a = 0x2000 then 0x2a else 0, regions := [⟨0x2000, 8, false⟩] } }
+example : (step [0x64, 0x4c, 0x8b, 0x34, 0x25, 0xf8, 0xff, 0xff, 0xff] sTls).toOption.map
+    (fun s => s.regs 14) = some 0x2a := by decide
+example : faultOf (step [0x64, 0x4c, 0x8b, 0x34, 0x25, 0xf8, 0xff, 0xff, 0xff] { sTls with fsBase := 0 }) =
+    some (.outsideAllocation 0xfffffffffffffff8 8) := by decide
+
+/-! ## Direction flag, split locks, BSF of zero (audit round 2) -/
+
+/-- Audit round 2, MEDIUM-1 regression: `REP MOVSQ` with `RCX = 2` right after `STD`
+(memmove's backward path). The words go to `RDI`, `RDI - 8` from `RSI`, `RSI - 8`, and both
+pointers step down by 16, as on hardware; the forward claim of
+`DFRepro.memmove_backward_rep_copies_forward` is false for every state with `df = true`. -/
+def dfMem : Memory :=
+  ⟨fun a => if a = 0x3000 then 0x11 else if a = 0x3008 then 0x22 else if a = 0x3010 then 0x33 else 0,
+   [⟨0x2000, 0x40, true⟩, ⟨0x3000, 0x40, false⟩]⟩
+
+def dfState : State :=
+  { regs := fun i => if i = 1 then 2 else if i = 6 then 0x3008 else if i = 7 then 0x2008 else 0,
+    rip := 0x47d6e9, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := dfMem, df := true }
+
+example : (step [0xf3, 0x48, 0xa5] dfState).toOption.map (fun t =>
+    (t.regs 6, t.regs 7, t.regs 1, t.mem.readLE 0x2008 8, t.mem.readLE 0x2000 8, t.mem.readLE 0x2010 8)) =
+    some (0x2ff8, 0x1ff8, 0, 0x22, 0x11, 0) := by decide
+
+/-- The forward-copy claim of the round-2 repro does not hold with `DF = 1`. -/
+theorem df_backward_not_forward : ¬ ∃ t', step [0xf3, 0x48, 0xa5] dfState = .ok t' ∧
+    t'.regs 6 = 0x3018 ∧ t'.regs 7 = 0x2018 := by
+  rintro ⟨t', h, h6, -⟩
+  have : (step [0xf3, 0x48, 0xa5] dfState).toOption.map (fun t => t.regs 6) = some 0x2ff8 := by decide
+  rw [h] at this
+  obtain ⟨a, ha, ha6⟩ := Option.map_eq_some_iff.1 this
+  simp only [Except.toOption, Option.some.injEq] at ha
+  subst ha
+  rw [h6] at ha6
+  exact absurd ha6 (by decide)
+
+-- STD then STOSB stores at RDI and steps down
+example : ((step [0xfd] { sm with df := false }).bind (fun s => step [0xaa] s)).toOption.map
+    (fun t => (t.df, t.regs 7)) = some (true, 0x11f) := by
+  decide
+
+-- LOCK XADD on a misaligned qword faults; aligned it runs (split-lock policy)
+example : faultOf (step [0xf0, 0x48, 0x0f, 0xc1, 0x07] { sm with regs := fun i => if i = 7 then 0x104 else 0 }) =
+    some (.misaligned 0x104) := by decide
+example : faultOf (step [0xf0, 0x48, 0x0f, 0xc1, 0x07] { sm with regs := fun i => if i = 7 then 0x108 else 0 }) =
+    none := by decide
+
+-- 64-bit BSF of zero: undefined destination, fault (vendor-neutral)
+example : faultOf (step [0x48, 0x0f, 0xbc, 0xc1] { s0 with regs := fun _ => 0 }) =
+    some (.undefinedResult 0x1000) := by decide
 
 end JanusTests.Amd64

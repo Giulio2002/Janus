@@ -176,7 +176,8 @@ negation* of the `Add` specification on the broken binary, by running one concre
 
 Every function in [`examples/basic/basic.go`](examples/basic/basic.go) has an amd64 theorem, and 14 of
 them an arm64 one too; the atomics and memory-routine examples in
-[`examples/basic/memory.go`](examples/basic/memory.go) have arm64 theorems. Each is verified end to end by `janus verify` (kernel check, axiom audit,
+[`examples/basic/memory.go`](examples/basic/memory.go) have arm64 theorems, and the vector-path examples in
+[`examples/basic/simd.go`](examples/basic/simd.go) amd64 ones. Each is verified end to end by `janus verify` (kernel check, axiom audit,
 `leanchecker` replay) against the `GOARCH=arm64` or `GOARCH=amd64` build of the same source with
 Go 1.26.0. Proofs:
 [`examples/proofs/`](examples/proofs) (arm64), [`examples/proofs-amd64/`](examples/proofs-amd64) (amd64).
@@ -204,6 +205,8 @@ Go 1.26.0. Proofs:
 | `AtomicMax` | `LDAR` + `CASAL` retry loop: returns the old `*p` and sets `*p = max(old, v)`; the loop runs once | ✓ | |
 | `CopyBlock` | `copy(dst[:], src[:])` of a 128-byte array through `runtime.memmove` | ✓ | |
 | `ClearWords` | `clear(b)` of a 16-word, 128-byte-aligned slice through `runtime.memclrNoHeapPointers` (its `DC ZVA` path), for every `DCZID_EL0` | ✓ | |
+| `Equal64` | `bytes.Equal` of two `[64]byte` through `runtime.memequal`: true iff the bytes are equal, for every value of `internal/cpu.X86.HasAVX2` (the AVX2 `VPCMPEQB`/`VPMOVMSKB` loop and the SSE one) | | ✓ |
+| `CopyBlock512` | `copy` of a 512-byte array through `runtime.memmove`'s AVX path (`VMOVDQU`/`VMOVDQA`, any `dst` alignment), given `memmoveBits & avxSupported` | | ✓ |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
@@ -228,8 +231,8 @@ succeeds) only costs coverage.
 | qemu-aarch64 10.2.1 user mode (`-cpu max`) | arm64 model vs qemu, one instruction per case | 486,463 | **0** | [ORACLE.md](docs/ORACLE.md) |
 | Sail `arm-v9.4-a` (Arm's official ASL, translated) | arm64 model vs Arm's specification, same corpus | 486,463 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
 | Sail, misaligned-SP corpus | SP-alignment rule, which qemu cannot check | 102,460 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
-| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds (incl. atomics, `REP` string ops, SSE moves) | 1,187,981 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
-| Sail/ACL2 X86isa | amd64 undefined-flag sets, sampled | 20,000 | 0 flags undefined there but defined by Janus | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md#formal-x86-model-third-reference) |
+| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds plus a vector harvest (incl. atomics, `REP` string ops in both directions, `FS`, YMM/AVX2, SSE) | 3,420,590 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
+| Sail/ACL2 X86isa | amd64 undefined-flag sets (sampled), and the `FS`/YMM/SSE-move/`RCL`/`RCR` classes it implements | 20,000 + 113,920 | 0 flags undefined there but defined by Janus | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md#formal-x86-model-third-reference) |
 
 Cases come from every distinct instruction word in real Go binaries (`math/big`, `crypto/sha256`,
 `encoding/json`, `regexp`, …), targeted random encodings per instruction class, and fully random

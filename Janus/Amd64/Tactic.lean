@@ -778,7 +778,8 @@ def stateHyps : MetaM (Array Expr) := do
     let some (_, lhs, _) := ty.eq? | continue
     if lhs.isAppOfArity ``State.rip 1 || lhs.isAppOfArity ``State.flags 1 ||
         lhs.isAppOfArity ``State.mem 1 || lhs.isAppOfArity ``State.regs 2 ||
-        lhs.isAppOfArity ``State.xmm 2 || lhs.isAppOfArity ``Janus.Arm64.Memory.readLE 3 then
+        lhs.isAppOfArity ``State.xmm 2 || lhs.isAppOfArity ``State.df 1 ||
+        lhs.isAppOfArity ``Janus.Arm64.Memory.readLE 3 then
       out := out.push d.toExpr
   return out
 
@@ -887,7 +888,7 @@ def statePC (ctx : Simp.Context) (simprocs : Simp.SimprocsArray) (d? : Option Si
     (s : Expr) : MetaM (Option (Nat × Expr) × Expr × Expr) := do
   let pcE ← mkAppM ``State.rip #[s]
   let sw ← instantiateMVars s
-  if sw.isAppOfArity ``State.mk 5 then
+  if sw.isAppOfArity ``State.mk 8 then
     let pc := sw.getArg! 1
     if let some c ← bv64Value? pc then
       let ty ← mkEq pcE (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) (mkNatLit c))
@@ -1128,7 +1129,7 @@ elab "janus64_run" args:janus64Args stops:janus64Until : tactic => do
 elab "janus64_step" args:janus64Args : tactic => do
   runJanus { args := parseArgs args } true
 
-/-- From `hs : CallSetup p entry [a₀, …] s` add `h_rip`, `h_ret`, `h_x15` and `h_a<i>`. For
+/-- From `hs : CallSetup p entry [a₀, …] s` add `h_rip`, `h_ret`, `h_x15`, `h_df` and `h_a<i>`. For
 `p = Program.withExit p₀ ret` (with `hret : RetAddr p₀ ret` in the context) `h_ret` is
 `s.mem.readLE (s.regs 4).toNat 8 = ret`. -/
 elab "janus64_intro " h:ident : tactic => withMainContext do
@@ -1166,6 +1167,11 @@ elab "janus64_intro " h:ident : tactic => withMainContext do
     let zTy ← mkEq lhs (← mkAppOptM ``OfNat.ofNat #[mkApp (mkConst ``BitVec) (mkNatLit 128), mkNatLit 0, none])
     let zPf ← mkExpectedTypeHint (← mkAppM ``GoABI.CallSetup.zero #[hE]) zTy
     let (_, g') ← (← g.assert `h_x15 zTy zPf).intro1P
+    return g'
+  g ← g.withContext do
+    let dfTy ← mkEq (← mkAppM ``State.df #[s]) (mkConst ``Bool.false)
+    let dfPf ← mkExpectedTypeHint (← mkAppM ``GoABI.CallSetup.df #[hE]) dfTy
+    let (_, g') ← (← g.assert `h_df dfTy dfPf).intro1P
     return g'
   for i in [0:elems.size] do
     g ← g.withContext do
