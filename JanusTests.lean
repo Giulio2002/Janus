@@ -10,3 +10,4 @@ import JanusTests.Simp
 import JanusTests.Tactic
 import JanusTests.Amd64
 import JanusTests.Diagnostics
+import JanusTests.Audit

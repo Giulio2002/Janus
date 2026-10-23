@@ -15,7 +15,10 @@ for a false or misleading claim. The "Status after fixes" column has the per-row
 writable by the untrusted consumer build, and not bound to the framework sources) was found
 after F1–F6 and is fixed by F7; see [R1](#r1-critical-follow-up-compiled-framework-modules-were-not-bound-to-the-framework). `audit/run-all.sh` exits non-zero if
 any row regresses to BROKEN, and CI runs it. The rest of this document is the original audit
-of the pre-fix code (commit `665fb69`), kept as written.
+of the pre-fix code (commit `665fb69`), kept as written. A second audit round found that an
+instance written inline in the statement could still make the printed statement lie (fixed: the
+printed statement must round-trip and instance arguments must be registered instances) and that
+the `unshare` fallback left non-root mounts writable (fixed); see [Round 2](#round-2-2026-10-23).
 
 Result (pre-fix): **the claim did not hold.** A proof file can (a) execute arbitrary code during
 verification and forge the audit result outright (a `False` theorem proved with `sorry` is
@@ -530,6 +533,65 @@ lakefiles a new hash so every row exercises its attack.
 copy, which is the build the pins are taken from (and the old prefix replay caught it as well).
 All earlier rows of `audit/run-all.sh` still print their expected result.
 
+## Round 2 (2026-10-23)
+
+A second, independent adversarial review attacked the auditor's constant/instance rules, the
+dependency/replay/sandbox machinery and the newest model semantics. The full report is
+[docs/AUDIT-ROUND2.md](AUDIT-ROUND2.md); its attack files are in `audit/round2/`
+(`attacks/`, `controls/`, `model/`, `amd64/`) and `audit/round2/run-round2.sh` reproduces the
+verifier findings and exits 1 if a fixed one regresses. The CRITICAL-1 and U1 rows are also in
+`audit/run-all.sh` (`R2.*`).
+
+| # | Finding | Severity | Status |
+|---|---|---|---|
+| CRITICAL-1 | An instance written inline in the statement (`@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y`) is hidden by the default pretty-printer: against `example.com/basic.Add` the statement printed `… = x * y` (S1c) or `x - y` (S1) and verified, every constant being Lean core. | critical | **fixed** (below). `run-round2.sh` and run-all `R2.S1*`: `Invalid`, `Stage: statement identity` |
+| U1 | The `unshare` fallback remounted only `/` read-only: `/tmp`, `/dev/shm`, `/boot`, `/run/user/…` stayed writable on the host (the trusted cache was already safe). | low (confinement) | **fixed**: every mount is remounted read-only (keeping its locked flags), `/tmp` and `/dev/shm` are private tmpfs mounts, binds under the host `/tmp` are re-exposed from the hidden original; if a mount cannot be made read-only the fallback is refused (install bubblewrap). The self-test checks `/tmp` and `/dev/shm` are private. `JANUS_SANDBOX=unshare` forces the fallback; run-all `R2.U1*` and `TestUnshareFallback*` |
+| M1, deps, replay cache, verify-batch, audit marker | Module-system proof, dependency pinning, cache poisoning, cross-request influence, record spoofing | n/a | blocked (no change) |
+| LOW-3 | arm64 feature list missing FP/AdvSIMD; the `arm64HasATOMICS` precondition trusts the kernel's HWCAP report | low (docs) | **documented** in [SOUNDNESS.md](SOUNDNESS.md) ("Atomics, exclusives and system registers") |
+| LOW-4 | `DCZID_EL0` assumed identical on all cores | low (docs) | **documented** in SOUNDNESS.md |
+| Residual | the auditor and `leanchecker` load untrusted `.olean` bytes; the loader does not validate them | TCB | **documented** in SOUNDNESS.md (trusted computing base, item 4) |
+| MEDIUM-1 | amd64: the direction flag is not in the state; a verified *mid-function* theorem says memmove's backward `REP MOVSQ` copies forward (call theorems unaffected) | medium | open (amd64 model) |
+| LOW-1 | amd64: LOCK accesses that straddle a cache line (SIGBUS with `split_lock_detect=fatal`) | low–medium | open (amd64 model/preconditions) |
+| LOW-2 | amd64: 64-bit BSF/BSR of zero follows AMD | low | open (amd64 model) |
+
+**Fix for CRITICAL-1 (`Janus/Tools/Audit.lean`), in depth.** The guarantee is the printed
+statement, so the auditor now checks that the text means what the kernel proved:
+
+1. **Instance arguments** (`checkInstArgs`): the statement's type is walked; at every
+   application, the head's binder info (`getFunInfoNArgs`) gives the instance-implicit
+   positions, and each argument there must be, up to unfolding reducible definitions and
+   `whnfCore`, an application of a registered instance of the clean trusted environment (core,
+   `Janus`, `Extracted`; plus `scoped` instances declared in trusted modules) — the head is
+   tested before unfolding, since instances themselves unfold to structure literals — or a
+   local variable bound by an instance binder of the theorem. Structure-instance literals,
+   anonymous constructors, lambdas, `let`-bound values, `dite` terms and proof-local or
+   dependency definitions are rejected ("inline instance"). Dependencies contribute no
+   instances (their instances are not allowed in statements at all).
+2. **Round-trip** (`printFaithful`/`roundTrip`): the printed signature is parsed back
+   (`ident declSig`) and elaborated in the same clean environment with the same options
+   (`autoImplicit` off, `errToSorry` off, a heartbeat budget); any parse or elaboration error,
+   remaining metavariable or `sorry` rejects. The result must be structurally equal to the
+   checked type, or definitionally equal by the elaborator at **default** transparency *and*
+   by the kernel's `isDefEq`. Default transparency is sound here: definitionally equal
+   propositions are the same proposition to the kernel, so the printed text, read with the
+   canonical instances, states exactly what was proved; a planted instance makes the canonical
+   reading (real `*`) differ from the checked term (really `+`) and the check fails. To keep
+   honest statements printable, coercions are printed with their target type
+   (`pp.coercions.types`, `(↑n : Int)`), and if the plain print still reads back differently
+   only because of a numeral's type, the statement is printed with `pp.numericTypes`
+   (`(5 : BitVec 64)`); a statement that round-trips neither way is rejected ("does not
+   round-trip").
+3. **Inspection**: `verified.json` has `statementExplicit`, the statement printed with
+   `pp.explicit` (every implicit and instance argument shown).
+
+Either check alone rejects every S1 variant (`JanusTests/Audit.lean` tests each separately, and
+each accepts honest statements with canonical instances, numerals, `if`, `<`, coercions and
+instance binders). All 20 arm64 example theorems (including the SIMD `A64Equal64`/`A64IndexByte`) and the 23 amd64 ones, the consumer examples and the
+deps tests still verify (no arm64 example statement needed the coercion or numeral annotations); A2 and A4 stay **verified-honest** (their
+clean prints round-trip). Tests: `cmd/janus/round2_test.go` (`TestInlineInstanceRejected`,
+`TestRoundTripRejectsAmbiguousPrint`, `TestUnshareFallbackConfinement`,
+`TestUnshareFallbackVerifies`).
+
 ## Files
 
 * `audit/run-all.sh`: reproduces every row (`BROKEN` rows print `Verified`, blocked rows `Invalid`), extracting its own `audit/work/{Add,Add256,Get}`; it marks a row `<-- BROKEN` and exits 1 if a blocked row verifies or a control does not.
@@ -540,3 +602,4 @@ All earlier rows of `audit/run-all.sh` still print their expected result.
 * `audit/probe/`: `P.lean` and `Q.lean` (shows that `initialize` and `#eval` run).
 * `audit/bin/`: `janus` (rebuilt by `run-all.sh` from the current tree), `janus-head` (working tree with the `verify.go` rewrite).
 * `audit/work/`: scratch artifact copies (regenerated by `run-all.sh`).
+* `audit/round2/`: the round-2 attacks (`attacks/S1*` inline instances, `M1_module_system`, `U1*` unshare fallback), positive controls, arm64/amd64 model probes and `run-round2.sh`; see [AUDIT-ROUND2.md](AUDIT-ROUND2.md).
