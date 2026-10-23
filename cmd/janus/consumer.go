@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -33,12 +34,21 @@ type dependencyInfo struct {
 	URL      string `json:"url,omitempty"`
 	Rev      string `json:"rev,omitempty"`
 	InputRev string `json:"inputRev,omitempty"`
-	Dir      string `json:"dir"` // the checkout that was compared with the framework
+	Dir      string `json:"dir"` // the checkout that was compared with the framework (janus) or copied (others)
+	// Extra dependencies only:
+	SubDir    string `json:"subDir,omitempty"`
+	Inherited bool   `json:"inherited,omitempty"` // required by another dependency, not by the consumer
+	Sha256    string `json:"sha256,omitempty"`    // tree hash of the files copied into the workspace
+	Files     int    `json:"files,omitempty"`     // number of files copied
 }
 
 func (d dependencyInfo) describe() string {
 	if d.Type == "git" {
-		return "git " + d.URL + " @ " + d.Rev
+		s := "git " + d.URL + " @ " + d.Rev
+		if d.SubDir != "" {
+			s += " (subDir " + d.SubDir + ")"
+		}
+		return s
 	}
 	return "path " + d.Dir
 }
@@ -51,8 +61,12 @@ type consumerInfo struct {
 	SnapshotSha256 string         `json:"snapshotSha256"`
 	Files          []fileHash     `json:"files"`
 	Dependency     dependencyInfo `json:"dependency"`
-	Workspace      string         `json:"workspace"`
-	Rebuilt        []string       `json:"rebuilt"`
+	// Dependencies are the package's other Lake dependencies (transitively), each pinned and
+	// copied as recorded; empty for a janus-only package.
+	Dependencies  []dependencyInfo `json:"dependencies"`
+	AllowPathDeps bool             `json:"allowPathDeps,omitempty"`
+	Workspace     string           `json:"workspace"`
+	Rebuilt       []string         `json:"rebuilt"`
 }
 
 type lakeManifest struct {
@@ -64,13 +78,14 @@ type lakeManifest struct {
 }
 
 type lakeEntry struct {
-	Type     string  `json:"type"`
-	Name     string  `json:"name"`
-	URL      string  `json:"url"`
-	Rev      string  `json:"rev"`
-	InputRev *string `json:"inputRev"`
-	SubDir   *string `json:"subDir"`
-	Dir      string  `json:"dir"`
+	Type      string  `json:"type"`
+	Name      string  `json:"name"`
+	URL       string  `json:"url"`
+	Rev       string  `json:"rev"`
+	InputRev  *string `json:"inputRev"`
+	SubDir    *string `json:"subDir"`
+	Dir       string  `json:"dir"`
+	Inherited bool    `json:"inherited"`
 }
 
 // consumerPkg is a validated consumer package and the snapshot of its sources.
@@ -78,9 +93,19 @@ type consumerPkg struct {
 	Root     string
 	Lakefile string
 	Dep      dependencyInfo
+	Deps     []*extraDep       // other dependencies, in manifest order
 	Files    map[string][]byte // snapshot: slash path relative to Root -> bytes
 	Sha256   string
 	excluded []string // absolute directories left out of the snapshot
+	opts     loadOpts
+}
+
+func (pkg *consumerPkg) depInfos() []dependencyInfo {
+	out := []dependencyInfo{}
+	for _, d := range pkg.Deps {
+		out = append(out, d.Info)
+	}
+	return out
 }
 
 var fullRevRE = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -96,10 +121,11 @@ func pkgDiag(stage, msg, next string) error {
 	return &diag{Invalid: true, Msg: msg, Stage: stage, Next: next}
 }
 
-// loadConsumer checks that root is a resolved Lake package depending on exactly the
-// framework fw, with fw's toolchain, and takes a snapshot of its sources. Directories in
-// exclude (artifact outputs) are left out of the snapshot.
-func loadConsumer(root string, fw *framework, exclude []string) (*consumerPkg, error) {
+// loadConsumer checks that root is a resolved Lake package depending on the framework fw (and
+// on other packages only as permitted, see deps.go), with fw's toolchain, and takes a snapshot
+// of its sources and of every other dependency. Directories in exclude (artifact outputs) are
+// left out of the snapshot.
+func loadConsumer(root string, fw *framework, exclude []string, lo loadOpts) (*consumerPkg, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -112,7 +138,7 @@ func loadConsumer(root string, fw *framework, exclude []string) (*consumerPkg, e
 		return nil, pkgDiag("consumer package", fmt.Sprintf("%s is not a directory.", displayPath(root)),
 			"Pass --proof-root pointing at the Lake package that contains the proof (janus init creates one).")
 	}
-	pkg := &consumerPkg{Root: abs}
+	pkg := &consumerPkg{Root: abs, opts: lo}
 	for _, e := range exclude {
 		if a, err := filepath.Abs(e); err == nil {
 			if r, err := filepath.EvalSymlinks(a); err == nil {
@@ -149,7 +175,7 @@ func loadConsumer(root string, fw *framework, exclude []string) (*consumerPkg, e
 			fmt.Sprintf("Set lean-toolchain to %s (the toolchain of the janus dependency) and rerun lake update.", fw.Toolchain))
 	}
 
-	// Manifest: resolved, janus only, pinned.
+	// Manifest: resolved, janus pinned; any other dependency pinned and clean (deps.go).
 	mpath := filepath.Join(abs, "lake-manifest.json")
 	mb, err := os.ReadFile(mpath)
 	if err != nil {
@@ -161,12 +187,25 @@ func loadConsumer(root string, fw *framework, exclude []string) (*consumerPkg, e
 		return nil, pkgDiag("consumer manifest", fmt.Sprintf("Cannot parse %s: %v", displayPath(mpath), err), "Run lake update in "+displayPath(abs)+".")
 	}
 	var dep *lakeEntry
+	var others []lakeEntry
+	seen := map[string]bool{}
 	for i, e := range man.Packages {
+		if seen[e.Name] {
+			return nil, pkgDiag("consumer manifest", fmt.Sprintf("lake-manifest.json lists %s twice.", e.Name), "Run lake update in "+displayPath(abs)+".")
+		}
+		seen[e.Name] = true
 		if e.Name != "janus" {
-			return nil, pkgDiag("consumer manifest", fmt.Sprintf("The package depends on %s; consumer packages may depend only on janus.", e.Name),
-				"Remove the dependency (Janus replays every consumer module, and supports no other packages yet).")
+			others = append(others, e)
+			continue
 		}
 		dep = &man.Packages[i]
+	}
+	pkgsDir := man.PackagesDir
+	if pkgsDir == "" {
+		pkgsDir = ".lake/packages"
+	}
+	if filepath.IsAbs(pkgsDir) || strings.HasPrefix(path.Clean(filepath.ToSlash(pkgsDir)), "..") {
+		return nil, pkgDiag("consumer manifest", fmt.Sprintf("lake-manifest.json has packagesDir %q outside the package.", pkgsDir), "Use the default .lake/packages.")
 	}
 	if dep == nil {
 		return nil, pkgDiag("consumer manifest", fmt.Sprintf("%s does not list janus; the package does not depend on the Janus library.", displayPath(mpath)),
@@ -189,10 +228,6 @@ func loadConsumer(root string, fw *framework, exclude []string) (*consumerPkg, e
 		}
 		if dep.SubDir != nil && *dep.SubDir != "" {
 			return nil, pkgDiag("consumer manifest", "The janus dependency uses a subDir; the framework is the repository root.", "Require janus without subDir.")
-		}
-		pkgsDir := man.PackagesDir
-		if pkgsDir == "" {
-			pkgsDir = ".lake/packages"
 		}
 		info.Dir = filepath.Join(abs, filepath.FromSlash(pkgsDir), "janus")
 		if _, err := os.Stat(info.Dir); err != nil {
@@ -223,6 +258,18 @@ func loadConsumer(root string, fw *framework, exclude []string) (*consumerPkg, e
 	}
 	if rel, err := filepath.Rel(abs, info.Dir); err == nil && !strings.HasPrefix(rel, "..") {
 		pkg.excluded = append(pkg.excluded, info.Dir)
+	}
+
+	// Every other dependency: pinned, clean and snapshotted (deps.go).
+	for _, e := range others {
+		d, err := loadExtraDep(abs, pkgsDir, e, lo)
+		if err != nil {
+			return nil, err
+		}
+		pkg.Deps = append(pkg.Deps, d)
+		if rel, err := filepath.Rel(abs, d.pkgDir); err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
+			pkg.excluded = append(pkg.excluded, d.pkgDir)
+		}
 	}
 
 	if err := pkg.snapshot(); err != nil {
@@ -290,12 +337,24 @@ func compareFramework(dir string, fw *framework) error {
 
 // snapshot reads the package's Lean sources, Lake configuration, JSON and toolchain files.
 func (pkg *consumerPkg) snapshot() error {
+	files, err := snapshotDir(pkg.Root, pkg.excluded)
+	if err != nil {
+		return err
+	}
+	pkg.Files = files
+	pkg.Sha256 = treeSha(files)
+	return nil
+}
+
+// snapshotDir reads the Lean sources, Lake configuration, JSON and toolchain files under root,
+// skipping build/VCS/artifact directories, dotfiles and the excluded directories.
+func snapshotDir(root string, excluded []string) (map[string][]byte, error) {
 	files := map[string][]byte{}
-	err := filepath.WalkDir(pkg.Root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if p == pkg.Root {
+		if p == root {
 			return nil
 		}
 		name := d.Name()
@@ -303,14 +362,14 @@ func (pkg *consumerPkg) snapshot() error {
 			if skippedDirs[name] || strings.HasPrefix(name, ".") {
 				return fs.SkipDir
 			}
-			for _, e := range pkg.excluded {
+			for _, e := range excluded {
 				if p == e {
 					return fs.SkipDir
 				}
 			}
 			return nil
 		}
-		rel, _ := filepath.Rel(pkg.Root, p)
+		rel, _ := filepath.Rel(root, p)
 		rel = filepath.ToSlash(rel)
 		if d.Type()&fs.ModeSymlink != 0 {
 			if isSourceFile(name) {
@@ -335,13 +394,11 @@ func (pkg *consumerPkg) snapshot() error {
 	})
 	if err != nil {
 		if _, ok := err.(*diag); ok {
-			return err
+			return nil, err
 		}
-		return pkgDiag("consumer package", "Cannot read the consumer package: "+err.Error(), "")
+		return nil, pkgDiag("consumer package", "Cannot read the consumer package: "+err.Error(), "")
 	}
-	pkg.Files = files
-	pkg.Sha256 = treeSha(files)
-	return nil
+	return files, nil
 }
 
 func treeSha(files map[string][]byte) string {
@@ -392,6 +449,7 @@ func (pkg *consumerPkg) proofRel(proof string) (string, error) {
 // so Lake only rebuilds modules whose inputs changed.
 type consumerWS struct {
 	Dir, Root, JanusDir string
+	DepsDir             string // deps/<name>: the copied extra dependencies
 	lake                string
 	sb                  *sandbox
 	tc                  *toolchain
@@ -436,7 +494,7 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 		}
 		ws.lock = lk
 	}
-	ws.Root, ws.JanusDir = filepath.Join(ws.Dir, "root"), filepath.Join(ws.Dir, "janus")
+	ws.Root, ws.JanusDir, ws.DepsDir = filepath.Join(ws.Dir, "root"), filepath.Join(ws.Dir, "janus"), filepath.Join(ws.Dir, "deps")
 	fail := func(err error) (*consumerWS, error) { ws.close(); return nil, err }
 
 	if !fresh {
@@ -454,11 +512,31 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 			}
 		}
 		rootBuild := filepath.Join(ws.Root, ".lake", "build")
+		sib := ""
 		if _, err := os.Stat(rootBuild); err != nil {
-			if sib := newestSibling(family, ws.Dir); sib != "" {
+			if sib = newestSibling(family, ws.Dir); sib != "" {
 				_ = os.RemoveAll(rootBuild)
 				if err := copyTree(filepath.Join(sib, "root", ".lake", "build"), rootBuild); err != nil {
 					_ = os.RemoveAll(rootBuild)
+				}
+			}
+		}
+		// Dependency builds too (they are as untrusted as the consumer's own; the kernel
+		// replay covers every dependency module the theorem imports).
+		for _, d := range pkg.Deps {
+			depBuild := filepath.Join(ws.DepsDir, d.Info.Name, ".lake", "build")
+			if _, err := os.Stat(depBuild); err == nil {
+				continue
+			}
+			if sib == "" {
+				sib = newestSibling(family, ws.Dir)
+			}
+			if sib == "" {
+				break
+			}
+			if _, err := os.Stat(filepath.Join(sib, "deps", d.Info.Name, ".lake", "build")); err == nil {
+				if err := copyTree(filepath.Join(sib, "deps", d.Info.Name, ".lake", "build"), depBuild); err != nil {
+					_ = os.RemoveAll(depBuild)
 				}
 			}
 		}
@@ -483,10 +561,28 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	if err := syncTree(ws.Root, pkg.Files, keepLake); err != nil {
 		return fail(wsDiag(err))
 	}
+	// Extra dependencies: exactly the pinned files, as path packages overriding the manifest.
+	overrides := []map[string]any{{"type": "path", "scope": "", "name": "janus", "manifestFile": "lake-manifest.json",
+		"inherited": false, "dir": ws.JanusDir, "configFile": "lakefile.toml"}}
+	keep := map[string]bool{}
+	for _, d := range pkg.Deps {
+		keep[d.Info.Name] = true
+		if err := syncTree(filepath.Join(ws.DepsDir, d.Info.Name), d.Files, keepLake); err != nil {
+			return fail(wsDiag(err))
+		}
+		overrides = append(overrides, map[string]any{"type": "path", "scope": "", "name": d.Info.Name, "manifestFile": "lake-manifest.json",
+			"inherited": d.Info.Inherited, "dir": filepath.Join(ws.DepsDir, d.Info.Name), "configFile": d.Config})
+	}
+	if ents, err := os.ReadDir(ws.DepsDir); err == nil {
+		for _, e := range ents {
+			if !keep[e.Name()] {
+				_ = os.RemoveAll(filepath.Join(ws.DepsDir, e.Name()))
+			}
+		}
+	}
 	override, _ := json.Marshal(map[string]any{
 		"schemaVersion": "1.2.0",
-		"packages": []map[string]any{{"type": "path", "scope": "", "name": "janus", "manifestFile": "lake-manifest.json",
-			"inherited": false, "dir": ws.JanusDir, "configFile": "lakefile.toml"}},
+		"packages":      overrides,
 	})
 	if err := os.MkdirAll(filepath.Join(ws.Root, ".lake"), 0o755); err != nil {
 		return fail(wsDiag(err))
@@ -589,6 +685,9 @@ func (ws *consumerWS) mapper(pkg *consumerPkg, extracted string) func(string) st
 	mapAbs := func(s string) string {
 		s = strings.ReplaceAll(s, filepath.Join(ws.JanusDir, "Extracted.lean"), displayPath(extracted))
 		s = strings.ReplaceAll(s, ws.Root+string(filepath.Separator), pkg.Root+string(filepath.Separator))
+		for _, d := range pkg.Deps {
+			s = strings.ReplaceAll(s, filepath.Join(ws.DepsDir, d.Info.Name)+string(filepath.Separator), d.pkgDir+string(filepath.Separator))
+		}
 		return s
 	}
 	return func(s string) string {
@@ -685,7 +784,7 @@ func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*v
 	if err != nil {
 		return nil, err
 	}
-	pkg, err := loadConsumer(opts["proof-root"], fw, []string{outdir})
+	pkg, err := loadConsumer(opts["proof-root"], fw, []string{outdir}, loadOpts{AllowPathDeps: opts["allow-path-deps"] != "", SB: sb})
 	if err != nil {
 		return nil, err
 	}
@@ -739,7 +838,14 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	libDir := filepath.Join(ws.Root, ".lake", "build", "lib", "lean")
 	janusLib := filepath.Join(ws.JanusDir, ".lake", "build", "lib", "lean")
 	extractedOlean := filepath.Join(janusLib, "Extracted.olean")
-	leanPath := ws.tc.leanPathEnv(janusLib, libDir)
+	depLibs := map[string]string{}
+	searchDirs := []string{janusLib, libDir}
+	for _, d := range pkg.Deps {
+		dl := filepath.Join(ws.DepsDir, d.Info.Name, ".lake", "build", "lib", "lean")
+		depLibs[d.Info.Name] = dl
+		searchDirs = append(searchDirs, dl)
+	}
+	leanPath := ws.tc.leanPathEnv(searchDirs...)
 
 	// Independently compile the trusted copy JanusTrusted (our bytes, not the Lake build) so
 	// the audit can check the imported Extracted is definitionally equal to it (C1).
@@ -751,7 +857,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	}
 	// C1 defence in depth: no stray Extracted/JanusTrusted olean on the search path.
 	if err := noForeignModule(map[string]string{"Extracted": janusLib, "JanusTrusted": janusLib},
-		[]string{janusLib, libDir, ws.tc.libDir}); err != nil {
+		append(append([]string{}, searchDirs...), ws.tc.libDir)); err != nil {
 		failAll(err)
 		return
 	}
@@ -780,6 +886,18 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	extractedHash := fileSha(extractedOlean)
 	trustedHash := fileSha(filepath.Join(janusLib, "JanusTrusted.olean"))
 
+	// Module identity across the framework, the consumer and its dependencies (deps.go); the
+	// dependency module roots tell the auditor which constants come from declared dependencies.
+	depRoots, err := checkModuleLayout(janusLib, ws.janusFiles, libDir, depLibs, ws.tc.libDir)
+	if err != nil {
+		failAll(err)
+		return
+	}
+	isDepModule := map[string]bool{}
+	for _, r := range depRoots {
+		isDepModule[r] = true
+	}
+
 	// Theorem, axiom and statement audit by the trusted janus-audit (no proof code runs):
 	// the generated Audit.lean imports only Janus.Tools.Audit, never the proof.
 	auditDir := filepath.Join(ws.Dir, "audit")
@@ -790,7 +908,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		}
 		marker := "janus-audit-" + newNonce() + ": "
 		af := filepath.Join(auditDir, fmt.Sprintf("Audit%d.lean", i))
-		if err := os.WriteFile(af, []byte(auditScript(r.Theorem, r.module, marker)), 0o644); err != nil {
+		if err := os.WriteFile(af, []byte(auditScript(r.Theorem, r.module, marker, depRoots...)), 0o644); err != nil {
 			r.Err = &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
 			continue
 		}
@@ -803,6 +921,9 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		r.audit = ar
 		for _, m := range ar.Modules {
 			if _, err := os.Stat(filepath.Join(libDir, filepath.FromSlash(strings.ReplaceAll(m, ".", "/"))+".olean")); err == nil {
+				r.closure = append(r.closure, m)
+			} else if isDepModule[moduleRoot(m)] {
+				// dependency modules are untrusted build outputs too: replay them
 				r.closure = append(r.closure, m)
 			}
 		}
@@ -874,6 +995,14 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			d.Stage = "stale input"
 			return d
 		}
+		for _, dep := range pkg.Deps {
+			if err := dep.recheck(pkg.opts.SB); err != nil {
+				d := err.(*diag)
+				d.Msg = "A dependency changed during verification: " + d.Msg
+				d.Stage = "stale input"
+				return d
+			}
+		}
 		for p, b := range ws.janusFiles {
 			if got, err := os.ReadFile(filepath.Join(ws.JanusDir, filepath.FromSlash(p))); err != nil || !bytes.Equal(got, b) {
 				return &diag{Invalid: true, Msg: "The framework sources in the workspace changed during verification.", Stage: "stale input", Next: "Rerun janus verify."}
@@ -942,9 +1071,11 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			Framework:        fi,
 			Sandbox:          ws.sb.info(),
 			Definitions:      r.audit.Definitions,
+			DependencyConsts: r.audit.External,
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,
-				Files: pkg.fileHashes(), Dependency: pkg.Dep, Workspace: wsRef, Rebuilt: nonNil(rebuilt),
+				Files: pkg.fileHashes(), Dependency: pkg.Dep, Dependencies: pkg.depInfos(), AllowPathDeps: pkg.opts.AllowPathDeps,
+				Workspace: wsRef, Rebuilt: nonNil(rebuilt),
 			},
 		}
 	}

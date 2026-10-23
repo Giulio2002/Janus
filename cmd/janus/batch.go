@@ -60,7 +60,7 @@ type batchResults struct {
 }
 
 func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox")
+	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox", "allow-path-deps")
 	pos, opts, err := parseArgs(args, "results", "janus-root")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -68,7 +68,7 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 	if len(pos) != 1 {
 		return jsonFailure(stdout, flags["json"], usageErr("verify-batch takes exactly one requests file"))
 	}
-	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["json"], stdout, stderr)
+	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["allow-path-deps"], flags["json"], stdout, stderr)
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
@@ -91,7 +91,7 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, quiet bool, stdout, stderr io.Writer) (*batchResults, error) {
+func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, quiet bool, stdout, stderr io.Writer) (*batchResults, error) {
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read %s: %v", displayPath(manifestPath), err), Stage: "batch requests",
@@ -237,7 +237,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, quiet bool, stdo
 			continue
 		}
 		// One snapshot of the package for all its requests.
-		pkg, err := loadConsumer(root, fw, outdirs)
+		pkg, err := loadConsumer(root, fw, outdirs, loadOpts{AllowPathDeps: allowPathDeps, SB: sb})
 		if err != nil {
 			for _, i := range live {
 				reqs[i].Err = err

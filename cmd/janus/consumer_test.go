@@ -222,9 +222,10 @@ func TestLoadConsumerRejects(t *testing.T) {
 		{"no janus", func(m map[string]string) {
 			m["lake-manifest.json"] = `{"version": "1.2.0", "packagesDir": ".lake/packages", "packages": [], "name": "c"}`
 		}, "consumer manifest", "does not list janus", nil},
-		{"other dependency", func(m map[string]string) {
-			m["lake-manifest.json"] = strings.Replace(pathManifest("c", janusDir), `"name": "janus"`, `"name": "mathlib"`, 1)
-		}, "consumer manifest", "may depend only on janus", nil},
+		{"other path dependency", func(m map[string]string) {
+			m["lake-manifest.json"] = manifestWith("c", janusDir, map[string]any{"type": "path", "scope": "", "name": "mathlib",
+				"manifestFile": "lake-manifest.json", "inherited": false, "dir": janusDir, "configFile": "lakefile.toml"})
+		}, "consumer manifest", "only janus may be a path dependency", nil},
 		{"branch pin", func(m map[string]string) { m["lake-manifest.json"] = gitManifest("main") }, "consumer manifest", "not pinned to a full revision", nil},
 		{"git not checked out", func(m map[string]string) { m["lake-manifest.json"] = gitManifest(rev) }, "consumer manifest", "not checked out", nil},
 		{"different framework", func(m map[string]string) {}, "framework identity", "differs Janus/Run.lean", func(t *testing.T, root string) {
@@ -249,7 +250,7 @@ func TestLoadConsumerRejects(t *testing.T) {
 			if c.before != nil {
 				c.before(t, root)
 			}
-			_, err := loadConsumer(root, fw, nil)
+			_, err := loadConsumer(root, fw, nil, loadOpts{})
 			d, ok := err.(*diag)
 			if !ok || !d.Invalid || d.Stage != c.stage || !strings.Contains(d.Msg, c.want) || d.Next == "" {
 				t.Fatalf("want stage %q and %q, got %#v", c.stage, c.want, err)
@@ -264,7 +265,7 @@ func TestLoadConsumerRejects(t *testing.T) {
 		writeFile(t, filepath.Join(root, ".lake", "build", "x.lean"), "")
 		writeFile(t, filepath.Join(root, "artifacts", "Add", "Extracted.lean"), "")
 		writeFile(t, filepath.Join(root, "notes.txt"), "")
-		pkg, err := loadConsumer(root, fw, nil)
+		pkg, err := loadConsumer(root, fw, nil, loadOpts{})
 		if err != nil {
 			t.Fatal(err)
 		}

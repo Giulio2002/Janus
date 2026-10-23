@@ -97,7 +97,7 @@ func explain(w io.Writer, outdir, reportPath string, r *verifiedReport) {
 	}
 	p("  Axioms used: %s (allowed: %s)", ax, strings.Join(r.AllowedAxioms, ", "))
 	if r.KernelReplay.Status == "passed" {
-		p("  Kernel replay: %s re-checked %s", r.KernelReplay.Tool, strings.Join(r.KernelReplay.Modules, ", "))
+		p("  Kernel replay: %s re-checked %s", r.KernelReplay.Tool, moduleList(r.KernelReplay.Modules))
 	} else {
 		p("  Kernel replay: not performed (%s)", r.KernelReplay.Note)
 	}
@@ -116,6 +116,25 @@ func explain(w io.Writer, outdir, reportPath string, r *verifiedReport) {
 	if c := r.Consumer; c != nil {
 		p("  Consumer package: %s (%s), module %s, %d source file(s), snapshot SHA-256 %s", displayPath(c.Root), c.Lakefile, c.Module, len(c.Files), c.SnapshotSha256)
 		p("  janus dependency: %s", c.Dependency.describe())
+		if len(c.Dependencies) > 0 {
+			p("  Other dependencies (%d), each pinned and copied as recorded:", len(c.Dependencies))
+			for _, d := range c.Dependencies {
+				extra := ""
+				if d.Inherited {
+					extra = ", required by another dependency"
+				}
+				if d.Type == "path" {
+					extra += ", PATH DEPENDENCY accepted with --allow-path-deps (not pinned)"
+				}
+				p("    %-18s %s (%d files, SHA-256 %s%s)", d.Name, d.describe(), d.Files, d.Sha256, extra)
+			}
+		}
+	}
+	if len(r.DependencyConsts) > 0 {
+		p("  Dependency constants in the statement (their meaning is the pinned dependency's):")
+		for _, c := range r.DependencyConsts {
+			p("    %s", c)
+		}
 	}
 	p("  Verified at: %s", r.Timestamp)
 	p("")
