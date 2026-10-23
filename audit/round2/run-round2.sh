@@ -42,7 +42,8 @@ echo "  AtomicAdd_witness.lean: see audit/round2/controls/ (run under lake env l
 
 echo
 echo "== U1 / U1b (fixed): unshare fallback, forced with JANUS_SANDBOX=unshare =="
-echo "Expected: the honest theorems verify, and nothing the sandboxed proof writes reaches the host"
+echo "Expected: U1 Invalid (its write to the read-only cache throws), U1b Verified (it catches its failed"
+echo "writes); in both, nothing the sandboxed proof writes reaches the host"
 echo "(trusted cache on the /tmp mount, /tmp, /dev/shm, /boot, /run/user/0, /run)."
 markers=(/tmp/janus-u1b-marker /dev/shm/janus-u1b-marker /boot/janus-u1b-marker /run/user/0/janus-u1b-marker /run/janus-u1b-marker)
 for a in U1_unshare_cache_write U1b_unshare_mounts; do

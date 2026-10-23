@@ -70,22 +70,24 @@ done
 # /tmp mount) now makes every mount read-only with private tmpfs /tmp and /dev/shm. The honest
 # theorems verify; neither the trusted-cache plant (U1) nor any host /tmp, /dev/shm, /boot or
 # /run marker (U1b) may appear.
-u1() { # u1 NAME ATTACK MARKER…: Verified with no marker on the host, else BROKEN
-  local name=$1 attack=$2; shift 2
+u1() { # u1 NAME EXPECT ATTACK MARKER…: no marker may reach the host; EXPECT is the verdict row
+  local name=$1 expect=$2 attack=$3; shift 3
   local c; c=$(mktemp -d /tmp/janus-u1-cache.XXXXXX)
   rm -f "$@"
   local res; res=$(JANUS_SANDBOX=unshare JANUS_CACHE_DIR="$c" "$J" verify --janus-root "$root" --proof "$attack" $W/Add 2>&1)
-  local first; first=$(head -1 <<<"$res")
+  local verdict; verdict="$(grep -m1 -E '^(Verified|Invalid)' <<<"$res" | cut -c1-80) [$(grep -m1 'Stage:' <<<"$res" | sed 's/.*Stage: //')]"
   local leaked=""
   for m in "$@" "$c/v1/replay/00/planted-by-sandboxed-proof"; do [ -e "$m" ] && leaked="$leaked $m"; done
   rm -f "$@"; rm -rf "$c"
   if grep -q "Stage: sandbox" <<<"$res"; then
     printf '%-28s %-8s %s\n' "$name" skipped "unshare fallback refused here: $(grep -m1 'No sandbox' <<<"$res" | cut -c1-90)"
   elif [ -n "$leaked" ]; then row "$name" blocked "accepted: written to the host:$leaked"
-  else row "$name" mitigated "$first"; fi
+  else row "$name" "$expect" "$verdict"; fi
 }
-u1 R2.U1_unshare_cache_write audit/round2/attacks/U1_unshare_cache_write.lean
-u1 R2.U1b_unshare_mounts audit/round2/attacks/U1b_unshare_mounts.lean \
+# U1: the plant into the read-only cache throws, so the proof does not compile (blocked).
+# U1b: the proof catches its failed writes, so the honest theorem verifies (mitigated).
+u1 R2.U1_unshare_cache_write blocked audit/round2/attacks/U1_unshare_cache_write.lean
+u1 R2.U1b_unshare_mounts mitigated audit/round2/attacks/U1b_unshare_mounts.lean \
   /tmp/janus-u1b-marker /dev/shm/janus-u1b-marker /boot/janus-u1b-marker /run/user/0/janus-u1b-marker /run/janus-u1b-marker
 for t in t1 t3 t4; do
   row "A8_classic.$t" blocked "$(v --theorem Proof.$t --proof audit/attacks/A8_classic.lean $W/Add)"
