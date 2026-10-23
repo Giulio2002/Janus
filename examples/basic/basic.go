@@ -43,3 +43,11 @@ func Add256(z, x, y *[4]uint64) {
 	z[2], c = bits.Add64(x[2], y[2], c)
 	z[3], _ = bits.Add64(x[3], y[3], c)
 }
+
+//go:noinline
+func Div(x, y uint64) uint64 { return x / y }
+
+// AddThree calls Add twice, so its extraction contains a second function.
+//
+//go:noinline
+func AddThree(x, y, z uint64) uint64 { return Add(Add(x, y), z) }

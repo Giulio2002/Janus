@@ -1,0 +1,214 @@
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"debug/buildinfo"
+	"debug/elf"
+	"debug/gosym"
+	"encoding/binary"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+)
+
+// Func is one function of the binary's text, from the ELF symbol table or the pclntab.
+type Func struct {
+	Name string
+	Addr uint64
+	Size uint64
+}
+
+func (f Func) End() uint64 { return f.Addr + f.Size }
+
+// Binary is a validated linux/arm64 Go ELF executable.
+type Binary struct {
+	Path       string
+	Sha256     string
+	GoVersion  string
+	MainModule string
+	GOOS       string
+	GOARCH     string
+	// SymbolSource is "symtab" or "pclntab".
+	SymbolSource string
+	Funcs        []Func // sorted by address
+
+	text     []byte
+	textAddr uint64
+}
+
+// loadBinary reads and validates path. Failures are diagnostics (*diag).
+func loadBinary(path string) (*Binary, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, &diag{
+			Msg:   fmt.Sprintf("Cannot read binary %s: %v", path, err),
+			Stage: "binary identity",
+			Next:  "Pass the path of the Go executable (build it with scripts/build-examples.sh for the examples).",
+		}
+	}
+	sum := sha256.Sum256(data)
+	b := &Binary{Path: path, Sha256: hex.EncodeToString(sum[:])}
+
+	f, err := elf.NewFile(bytes.NewReader(data))
+	if err != nil {
+		return nil, &diag{
+			Msg:   fmt.Sprintf("%s is not an ELF file: %v", path, err),
+			Stage: "binary validation",
+			Next:  "Build the Go program with GOOS=linux GOARCH=arm64.",
+		}
+	}
+	if f.Class != elf.ELFCLASS64 || f.Machine != elf.EM_AARCH64 || f.ByteOrder != binary.LittleEndian {
+		return nil, &diag{
+			Msg:   fmt.Sprintf("%s is a %s %s %s ELF, not a 64-bit little-endian AArch64 one", path, f.Class, f.Data, f.Machine),
+			Stage: "binary validation",
+			Next:  "Build the Go program with GOOS=linux GOARCH=arm64.",
+		}
+	}
+	bi, err := buildinfo.Read(bytes.NewReader(data))
+	if err != nil {
+		return nil, &diag{
+			Msg:   fmt.Sprintf("%s has no Go build information: %v", path, err),
+			Stage: "binary validation",
+			Next:  "Janus extracts from executables built by the Go toolchain (go build).",
+		}
+	}
+	b.GoVersion = bi.GoVersion
+	b.MainModule = bi.Main.Path
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "GOOS":
+			b.GOOS = s.Value
+		case "GOARCH":
+			b.GOARCH = s.Value
+		}
+	}
+	if b.GOOS != "linux" || b.GOARCH != "arm64" {
+		return nil, &diag{
+			Msg:   fmt.Sprintf("%s was built for GOOS=%s GOARCH=%s, not linux/arm64", path, b.GOOS, b.GOARCH),
+			Stage: "binary validation",
+			Next:  "Rebuild with GOOS=linux GOARCH=arm64.",
+		}
+	}
+
+	text := f.Section(".text")
+	if text == nil || text.Type != elf.SHT_PROGBITS {
+		return nil, &diag{Msg: path + " has no .text section", Stage: "binary validation",
+			Next: "Use an unmodified executable produced by go build."}
+	}
+	if b.text, err = text.Data(); err != nil {
+		return nil, &diag{Msg: fmt.Sprintf("cannot read .text of %s: %v", path, err), Stage: "binary validation",
+			Next: "Use an unmodified executable produced by go build."}
+	}
+	b.textAddr = text.Addr
+
+	if syms, err := f.Symbols(); err == nil && len(syms) > 0 {
+		b.SymbolSource = "symtab"
+		textIdx := -1
+		for i, s := range f.Sections {
+			if s == text {
+				textIdx = i
+			}
+		}
+		for _, s := range syms {
+			if elf.ST_TYPE(s.Info) != elf.STT_FUNC || int(s.Section) != textIdx {
+				continue
+			}
+			b.Funcs = append(b.Funcs, Func{Name: s.Name, Addr: s.Value, Size: s.Size})
+		}
+	} else if pcln := f.Section(".gopclntab"); pcln != nil {
+		b.SymbolSource = "pclntab"
+		pdata, err := pcln.Data()
+		if err == nil {
+			var tab *gosym.Table
+			tab, err = gosym.NewTable(nil, gosym.NewLineTable(pdata, text.Addr))
+			if err == nil {
+				for _, fn := range tab.Funcs {
+					b.Funcs = append(b.Funcs, Func{Name: fn.Name, Addr: fn.Entry, Size: fn.End - fn.Entry})
+				}
+			}
+		}
+		if err != nil {
+			return nil, &diag{Msg: fmt.Sprintf("cannot read .gopclntab of %s: %v", path, err), Stage: "binary validation",
+				Next: "Build without stripping the symbol table (no -ldflags=-s)."}
+		}
+	} else {
+		return nil, &diag{Msg: path + " has neither a .symtab nor a .gopclntab", Stage: "binary validation",
+			Next: "Build without stripping the symbol table (no -ldflags=-s)."}
+	}
+	sort.SliceStable(b.Funcs, func(i, j int) bool { return b.Funcs[i].Addr < b.Funcs[j].Addr })
+	// Symbols without a size (some assembly functions) extend to the next symbol.
+	for i := range b.Funcs {
+		if b.Funcs[i].Size == 0 {
+			end := b.textAddr + uint64(len(b.text))
+			if i+1 < len(b.Funcs) {
+				end = b.Funcs[i+1].Addr
+			}
+			b.Funcs[i].Size = end - b.Funcs[i].Addr
+		}
+	}
+	return b, nil
+}
+
+// lookup finds the function named sym.
+func (b *Binary) lookup(sym string) (Func, error) {
+	var found []Func
+	for _, f := range b.Funcs {
+		if f.Name == sym {
+			found = append(found, f)
+		}
+	}
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+		var near []string
+		short := sym[strings.LastIndex(sym, ".")+1:]
+		for _, f := range b.Funcs {
+			if strings.HasSuffix(f.Name, "."+short) && len(near) < 8 {
+				near = append(near, f.Name)
+			}
+		}
+		msg := fmt.Sprintf("No function %q in %s", sym, b.Path)
+		if len(near) > 0 {
+			msg += "\n  Similar: " + strings.Join(near, ", ")
+		}
+		return Func{}, &diag{Msg: msg, Stage: "function selection",
+			Next: "Run janus list on the binary and copy the exact symbol name. Unused functions are removed by the linker; keep them alive from main."}
+	default:
+		var addrs []string
+		for _, f := range found {
+			addrs = append(addrs, fmt.Sprintf("0x%x", f.Addr))
+		}
+		return Func{}, &diag{Msg: fmt.Sprintf("Symbol %q is ambiguous: %d functions at %s", sym, len(found), strings.Join(addrs, ", ")),
+			Stage: "function selection", Next: "Select a function with a unique symbol name."}
+	}
+}
+
+// containing returns the function whose [Addr, End) contains addr.
+func (b *Binary) containing(addr uint64) (Func, bool) {
+	i := sort.Search(len(b.Funcs), func(i int) bool { return b.Funcs[i].Addr > addr }) - 1
+	if i >= 0 && addr < b.Funcs[i].End() {
+		return b.Funcs[i], true
+	}
+	return Func{}, false
+}
+
+// words returns the instruction words of f with trailing zero (padding) words removed.
+func (b *Binary) words(f Func) ([]uint32, error) {
+	if f.Addr < b.textAddr || f.End() > b.textAddr+uint64(len(b.text)) || f.Addr%4 != 0 || f.Size%4 != 0 {
+		return nil, fmt.Errorf("function %s [0x%x, 0x%x) is not a word-aligned range inside .text", f.Name, f.Addr, f.End())
+	}
+	raw := b.text[f.Addr-b.textAddr : f.End()-b.textAddr]
+	ws := make([]uint32, len(raw)/4)
+	for i := range ws {
+		ws[i] = binary.LittleEndian.Uint32(raw[4*i:])
+	}
+	n := len(ws)
+	for n > 0 && ws[n-1] == 0 {
+		n--
+	}
+	return ws[:n], nil
+}

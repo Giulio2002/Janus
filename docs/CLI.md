@@ -1,0 +1,321 @@
+# Command-line reference
+
+`janus` extracts the arm64 machine code of a Go function from a linux/arm64 ELF binary into
+Lean, checks that extraction artifacts still match the binary, and verifies Lean proofs about
+the extracted program.
+
+All commands exit with `0` on success and `1` on failure. Diagnostics go to standard error.
+Rejected artifacts and proofs print `Invalid:`; other failures (bad arguments, unreadable
+binaries) print `Error:`. Both are followed by the failing stage and what to do next:
+
+```text
+Invalid: artifacts/Get/Extracted.lean was modified after extraction: SHA-256 6ab6…, identity.json records dc0c….
+  Stage: extraction integrity
+  Next: Rerun janus extract artifacts/examples-arm64 "example.com/basic.Get" artifacts/Get with the intended binary, then rerun this command.
+```
+
+Paths under the working directory are shown relative to it.
+
+## Build
+
+```sh
+export PATH=/usr/local/go/bin:$PATH          # Go 1.26
+go build -o bin/janus ./cmd/janus            # from the repository root
+scripts/build-examples.sh                    # builds artifacts/examples-arm64
+```
+
+The CLI is a Go module (`github.com/Giulio2002/Janus`, `go.mod` at the repository root). Its
+only dependency is `golang.org/x/arch` (pinned in `go.mod`/`go.sum`), used to find branch
+targets during reachability. `verify` also needs Lean and Lake (via elan); the version comes from
+`lean-toolchain`.
+
+## Examples
+
+`examples/basic` is a separate Go module (`example.com/basic`) with functions marked
+`//go:noinline`: `Add`, `Max`, `Add128` (a `bits.Add64` chain), `Mul64` (`bits.Mul64`), `Sum`
+over a slice, `Get(xs, i)` (bounds check), `Add256(z, x, y *[4]uint64)`, `Div(x, y)` (divide
+check) and `AddThree` (calls `Add`, so its extraction has two functions).
+`examples/basic/cmd` is a `main` package that keeps every function alive: the Go linker removes
+functions nothing references, so each one is stored in a package-level `[]any` and also called
+on inputs derived from `os.Args`. `scripts/build-examples.sh` builds it with
+`CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath` into `artifacts/examples-arm64`.
+
+`examples/proofs/Trivial.lean` (accepted) and `examples/proofs/Sorry.lean` (rejected by the axiom
+audit) exercise `verify` end to end.
+
+## List
+
+```sh
+janus list artifacts/examples-arm64 [--filter basic.]
+```
+
+```text
+# artifacts/examples-arm64: example.com/basic, go1.26.0, linux/arm64, functions from symtab
+ADDRESS                SIZE  NAME
+0x00000000000930c0       16  example.com/basic.Add
+0x00000000000930d0       32  example.com/basic.Max
+...
+```
+
+Functions come from the ELF `.symtab` (`STT_FUNC` symbols in `.text`). If the binary was
+stripped, they come from the Go `.gopclntab` (`debug/gosym`) instead; the header says which.
+`SIZE` is the symbol size and includes the linker's zero padding.
+
+## Extract
+
+```sh
+janus extract <binary> <symbol> <outdir> [--max-functions N]
+janus extract artifacts/examples-arm64 example.com/basic.Get artifacts/Get
+```
+
+```text
+Extracted example.com/basic.Get: 1 function(s), 22 word(s), 2 stub(s) into artifacts/Get/Extracted.lean
+  code  0x93140   22 words  example.com/basic.Get
+  stub  0x87ef0 panic      runtime.panicBounds
+  stub  0x85d20 morestack  runtime.morestack_noctxt.abi0
+```
+
+Extraction:
+
+1. Validates the binary: 64-bit little-endian AArch64 ELF, Go build information present
+   (`debug/buildinfo`), `GOOS=linux`, `GOARCH=arm64`.
+2. Finds the symbol (exact, case-sensitive name as printed by `list`; ambiguous names fail).
+3. Copies the function's raw 32-bit little-endian words from `.text`. Words are never
+   translated. Trailing zero words (the linker's `udf #0` padding up to the next function) are
+   trimmed; nothing inside the function is.
+4. Computes the transitive set of **direct-branch callees**: every `BL`, `B`, `B.cond`,
+   `CBZ`/`CBNZ` and `TBZ`/`TBNZ` whose target lies outside the current function. Targets are
+   found with `golang.org/x/arch/arm64/arm64asm`. This decoding is untrusted: it only chooses
+   which code to copy. A missed target is simply absent and the Lean model faults with `noCode`
+   if execution reaches it, which is sound. Indirect branches (`BR`, `BLR`) are not followed for
+   the same reason. Branches into no known function are reported as warnings and recorded in
+   `identity.json` under `unresolvedBranches`.
+5. Records known runtime stubs instead of copying them:
+   * `.panic`: any `runtime.panic*` or `runtime.goPanic*` function and `runtime.gopanic`
+     (e.g. `runtime.panicIndex`, `runtime.panicBounds`, `runtime.panicSlice*`,
+     `runtime.panicdivide`, `runtime.panicshift`, `runtime.panicmem`, `runtime.panicwrap`);
+   * `.morestack`: `runtime.morestack*` (the stack-growth path of every function prologue).
+
+   A `.abi0` suffix is ignored when classifying.
+6. Copies every other reachable function, runtime or not. `--max-functions N` (default 64)
+   fails the extraction when more are reachable, listing them. For example `main.main` of the
+   example binary reaches 416 functions through `println` and the allocator.
+
+Outputs, written into `<outdir>` (created if needed); any old `verified.json` there is removed:
+
+### `Extracted.lean`
+
+```lean
+import Janus
+
+/-! Generated by `janus extract` 0.1.0 from `example.com/basic.Get` (example.com/basic, go1.26.0).
+Do not edit: … -/
+
+namespace Extracted
+open Janus
+
+def segments : List Segment := [
+  { name := "example.com/basic.Get", base := 0x93140, words := [
+      0xf9400b90, 0xeb3063ff, 0x540001a9, 0xf81f0ffe, 0xf81f83fd, 0xd10023fd, 0xf9000fe0, 0xeb01007f,
+      … ] } ]
+
+def stubs : List Stub := [
+  { name := "runtime.panicBounds", addr := 0x87ef0, kind := .panic },
+  { name := "runtime.morestack_noctxt.abi0", addr := 0x85d20, kind := .morestack } ]
+
+def exitAddr : Nat := 0
+
+def program : Program := { segments := segments, stubs := stubs, exitAddr := exitAddr }
+
+def entry : Nat := 0x93140
+
+end Extracted
+```
+
+* The entry function is the first segment; callees follow in breadth-first discovery order.
+* `entry` is the entry function's address. A caller sets `pc := entry` and `X30 := exitAddr`.
+* **`exitAddr` is a non-code sentinel**, always `0`. Nothing is loaded at address 0 in a
+  linux/arm64 Go binary (text starts far above it), and `Program.run` checks for `exitAddr`
+  before fetching, so a `RET` to the planted return address ends the run with `.returned`
+  instead of executing anything there.
+* Word lists with more than 8 words wrap, 8 words per line.
+* **Large programs.** Lean elaborates one big list literal with deep recursion; around 3000 words
+  in one definition exceed the default `maxRecDepth`. When the program has more than 2048 words in
+  total, each segment becomes its own definition and `segments` lists them:
+
+  ```lean
+  def seg0 : Segment :=
+    { name := "main.main", base := 0x93290, words := [ … ] }
+  …
+  set_option maxRecDepth 100000 in     -- only for segments over 1024 words
+  def seg12 : Segment := …
+
+  def segments : List Segment := [
+    seg0, seg1, …, seg415 ]
+  ```
+
+  Everything else (`stubs`, `exitAddr`, `program`, `entry`) is unchanged. Proofs that unfold
+  `Extracted.segments` by name should also unfold `Extracted.seg<i>` in this form; kernel
+  reduction (`decide`, `rfl`) is unaffected. The 416-function `main.main` extraction (37,200
+  words) elaborates in about 15 s.
+
+### `identity.json`
+
+```json
+{
+  "schema": 1,
+  "extractorVersion": "0.1.0",
+  "binary": "../examples-arm64",
+  "binarySha256": "3c9bc1e9…",
+  "goVersion": "go1.26.0",
+  "mainModule": "example.com/basic",
+  "goos": "linux",
+  "goarch": "arm64",
+  "symbolSource": "symtab",
+  "symbol": "example.com/basic.Get",
+  "address": "0x93140",
+  "size": 96,
+  "maxFunctions": 64,
+  "functions": [ { "name": "example.com/basic.Get", "address": "0x93140", "size": 96, "words": 22 } ],
+  "stubs": [ { "name": "runtime.panicBounds", "address": "0x87ef0", "kind": "panic" }, … ],
+  "unresolvedBranches": [],
+  "extracted": "Extracted.lean",
+  "extractedSha256": "dc0c105a…"
+}
+```
+
+`binary` is relative to the artifact directory when both are under the same top-level
+directory, otherwise absolute. `size` is the symbol size (with padding); `words` is the number of
+copied words after trimming.
+
+## Check
+
+```sh
+janus check <outdir> [--binary PATH]
+```
+
+```text
+Valid: extraction artifacts match the binary and recorded settings.
+  Binary: artifacts/examples-arm64
+  Module: example.com/basic (go1.26.0, linux/arm64)
+  Entry: example.com/basic.Get at 0x93140
+  Functions: 1, stubs: 2
+  Code: artifacts/Get/Extracted.lean
+  Manifest: artifacts/Get/identity.json
+  Matched: binary SHA-256, extractor version, Extracted.lean SHA-256 and regenerated words.
+```
+
+`check` reads `identity.json`, re-runs the extraction in memory with the recorded symbol and
+`--max-functions`, and byte-compares it with the saved files without writing anything. If the
+binary moved, `--binary` names its new location; its SHA-256 must still match.
+
+| Failure | Stage |
+|---|---|
+| `identity.json` missing or malformed | `artifact layout` |
+| written by another extractor version or schema | `extractor version` |
+| binary missing or not a linux/arm64 Go ELF | `binary identity` / `binary validation` |
+| `Binary changed since extraction: … has SHA-256 X, identity.json records Y.` | `binary identity` |
+| `Extracted.lean was modified after extraction` (hash differs from `identity.json`) | `extraction integrity` |
+| `Extracted.lean differs from the regenerated extraction` (hash matches but content does not regenerate, e.g. both files edited) | `extraction integrity` |
+| `identity.json differs from the regenerated identity` | `extraction integrity` |
+
+## Verify
+
+```sh
+janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
+janus verify artifacts/Get --proof examples/proofs/Trivial.lean
+```
+
+```text
+Verified: Proof.correctness
+  Module: example.com/basic (go1.26.0)
+  Entry: example.com/basic.Get at 0x93140
+  Binary: artifacts/examples-arm64 (SHA-256 3c9bc1e9…)
+  Proof: examples/proofs/Trivial.lean
+  Axioms: (none)
+  Kernel replay: leanchecker passed (Janus, Extracted, Proof)
+  Lean: Lean (version 4.34.1, …)
+  Report: artifacts/Get/verified.json
+  Statement:
+    Proof.correctness : Extracted.entry = Extracted.entry
+```
+
+Defaults: `--proof <outdir>/Proof.lean`, `--theorem Proof.correctness`. The Janus Lean project is
+`--janus-root`, else `$JANUS_ROOT`, else the repository containing the `janus` executable or the
+working directory (a directory whose `lakefile.toml` has `name = "janus"`).
+
+Steps; any failure prints `Invalid:` with its stage and exits `1`:
+
+1. **Withdraw** any previous `<outdir>/verified.json`. Only a successful run writes a new one.
+2. **Check** the artifacts exactly as `janus check` does.
+3. **Build Janus** with `lake build Janus` in the Janus root (`Janus library build`).
+4. **Compile** in a fresh scratch directory `<outdir>/.janus-build/`: the checked bytes of
+   `Extracted.lean` as module `Extracted`, then the proof as module `Proof`, each with
+   `lake env lean --root=<build> -o <module>.olean` and the build directory on `LEAN_PATH` (Lake
+   puts Janus's own paths first). Errors are summarised as `Lean errors (N):` with paths mapped
+   back to the original files; the full output follows under `Details:` (`extraction
+   elaboration`, `proof checking`). The proof may import `Extracted`, `Janus`, and Lean/Std
+   modules. `Extracted.olean` must be unchanged after the proof is compiled.
+5. **Audit** with a generated `Audit.lean` that imports both modules, runs `#print axioms` and
+   `#check @<theorem>`, and reports through a nonce-tagged line: the declaration kind, its module,
+   its transitive axioms (`collectAxioms`) and its signature. The declaration must be a
+   `theorem` declared in module `Proof` (`theorem audit`). Only `propext`, `Quot.sound` and
+   `Classical.choice` are allowed; anything else, including `sorryAx`, `Lean.ofReduceBool`,
+   `Lean.trustCompiler` and user axioms, is rejected (`axiom audit`). `--theorem` must be a plain
+   dotted Lean name.
+6. **Kernel replay**: `leanchecker` (shipped with the Lean toolchain since it absorbed
+   lean4checker) replays `Janus`, `Extracted` and `Proof` through the kernel, which catches
+   environment hacking such as `set_option debug.skipKernelTC` with `addDecl` (`kernel replay`). If
+   the toolchain has no `leanchecker`, this step is skipped and `verified.json` records
+   `"status": "unavailable"`.
+7. **Re-check** the artifacts and the proof file; they must be unchanged since step 2 (`stale
+   input`).
+8. Write `verified.json`:
+
+```json
+{
+  "schema": 1,
+  "theorem": "Proof.correctness",
+  "kind": "theorem",
+  "module": "Proof",
+  "statement": "Proof.correctness : Extracted.entry = Extracted.entry",
+  "axioms": [],
+  "allowedAxioms": ["propext", "Quot.sound", "Classical.choice"],
+  "kernelReplay": { "tool": "leanchecker", "status": "passed", "modules": ["Janus", "Extracted", "Proof"] },
+  "proof": "../../examples/proofs/Trivial.lean",
+  "proofSha256": "…",
+  "extracted": "Extracted.lean",
+  "extractedSha256": "…",
+  "identitySha256": "…",
+  "binary": "../examples-arm64",
+  "binarySha256": "…",
+  "symbol": "example.com/basic.Get",
+  "address": "0x93140",
+  "goVersion": "go1.26.0",
+  "mainModule": "example.com/basic",
+  "leanVersion": "Lean (version 4.34.1, …)",
+  "janusRoot": "/srv/janus",
+  "janusCommit": "<git HEAD>[+dirty]",
+  "extractorVersion": "0.1.0",
+  "timestamp": "2026-10-23T09:56:16Z"
+}
+```
+
+A verification establishes exactly the printed statement, with its hypotheses and quantifiers,
+about the definitions in `Extracted`. A warning is printed when the statement mentions no
+`Extracted.` definition. Running `verify` compiles and runs the proof file with Lean, so only
+verify proofs you are willing to execute.
+
+## Tests
+
+```sh
+go test ./cmd/...           # includes Lean verification (about 25 s)
+go test -short ./cmd/...    # extraction and check only
+```
+
+The tests build the example binary, extract every example function, cross-check every copied
+word and every direct-branch target against `aarch64-linux-gnu-objdump -d` (skipped when it is
+not installed), check that only zero words were trimmed, exercise `check` on edited, forged and
+moved artifacts and on a changed binary, and run `verify` on accepted proofs and on proofs that
+must be rejected: `sorry`, `native_decide`, a user axiom, a type error, a missing theorem, a
+`def`, a theorem from another module, and a `skipKernelTC` forgery caught by `leanchecker`.
