@@ -26,6 +26,9 @@ var Keep = []any{
 	basic.SetOne256,
 	basic.GlobalTable,
 	basic.Bump,
+	basic.AddLimbs,
+	basic.CopyWords,
+	basic.SumSquares,
 }
 
 func main() {
@@ -44,5 +47,9 @@ func main() {
 	r := basic.Add(n, 2) ^ basic.Max(n, 4) ^ basic.Sum(xs) ^ basic.Get(xs, int(n)) ^
 		basic.Div(100, n) ^ basic.AddThree(n, 1, 2) ^ hi ^ lo ^ mh ^ ml ^ z[0] ^ z[1] ^
 		basic.Table(n) ^ uint64(basic.HexDigit(n)) ^ basic.GlobalTable(n) ^ basic.Bump(n) ^ one[0]
+	var w [4]uint64
+	basic.AddLimbs(&w, &x, &y)
+	ys := make([]uint64, n)
+	r ^= w[0] ^ uint64(basic.CopyWords(ys, xs)) ^ basic.SumSquares(n, n+1)
 	println(r, len(Keep))
 }

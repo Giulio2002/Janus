@@ -94,3 +94,37 @@ func Bump(d uint64) uint64 {
 	counter += d
 	return counter
 }
+
+// The functions below exercise loops over memory and calls (proof showcase).
+
+// AddLimbs sets z = x + y modulo 2^256 with a carry loop over the four limbs.
+//
+//go:noinline
+func AddLimbs(z, x, y *[4]uint64) {
+	var c uint64
+	for i := 0; i < 4; i++ {
+		z[i], c = bits.Add64(x[i], y[i], c)
+	}
+}
+
+// CopyWords copies min(len(dst), len(src)) words from src to dst and returns the count.
+//
+//go:noinline
+func CopyWords(dst, src []uint64) int {
+	n := len(src)
+	if len(dst) < n {
+		n = len(dst)
+	}
+	for i := 0; i < n; i++ {
+		dst[i] = src[i]
+	}
+	return n
+}
+
+//go:noinline
+func square(x uint64) uint64 { return x * x }
+
+// SumSquares returns x*x + y*y (mod 2^64), calling the helper square twice.
+//
+//go:noinline
+func SumSquares(x, y uint64) uint64 { return square(x) + square(y) }

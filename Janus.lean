@@ -7,3 +7,5 @@ import Janus.Program
 import Janus.Arm64.MemoryLemmas
 import Janus.Run
 import Janus.GoABI
+import Janus.Tactic
+import Janus.Spec.Basic
