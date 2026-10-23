@@ -62,6 +62,8 @@ const (
 
 	ucRegs = 184 // offsetof(ucontext_t, uc_mcontext.regs) on arm64
 	ucPC   = 440 // offsetof(ucontext_t, uc_mcontext.pc)
+	// offsetof(ucontext_t, uc_mcontext.__reserved): the first record is fpsimd_context.
+	ucReserved = 464
 )
 
 var (
@@ -89,6 +91,13 @@ func buildTrampoline() []uint32 {
 	}
 	a.addImm(17, 31, 0) // mov x17, sp
 	a.str(17, 16, L.CtxHostSP)
+	a.mrsTPIDR(17) // host TPIDR_EL0, restored by the resume sequence
+	a.str(17, 16, L.CtxHostTPID)
+	a.ldr(17, 16, L.CtxInTPIDR)
+	a.msrTPIDR(17)
+	for r := 0; r < 32; r++ {
+		a.ldrq(r, 16, L.CtxInV+16*r)
+	}
 	a.ldr(17, 16, L.CtxInNZCV)
 	a.msrNZCV(17)
 	a.ldr(17, 16, L.CtxInSP)
@@ -125,6 +134,17 @@ func buildTrampoline() []uint32 {
 	a.strPost8(9, 7)
 	a.subsImm(8, 8, 1)
 	a.bcond(1 /* ne */, loop)
+	// The fpsimd_context record (first in uc_mcontext.__reserved): magic, size, fpsr, fpcr,
+	// vregs[32].
+	loop2 := &label{}
+	a.addImm(6, 2, ucReserved)
+	a.addImm(7, 3, L.CtxOutFP)
+	a.movz(8, 66)
+	a.bind(loop2)
+	a.ldrPost8(9, 6)
+	a.strPost8(9, 7)
+	a.subsImm(8, 8, 1)
+	a.bcond(1 /* ne */, loop2)
 	resumeAdrIdx := len(a.words)
 	a.emit(0) // adr x9, resume (patched below)
 	a.str(9, 2, ucPC)
@@ -145,6 +165,8 @@ func buildTrampoline() []uint32 {
 
 	a.bind(resume)
 	a.adr(16, L.CtxPage)
+	a.ldr(17, 16, L.CtxHostTPID)
+	a.msrTPIDR(17)
 	a.ldr(17, 16, L.CtxHostSP)
 	a.addImm(31, 17, 0)
 	for r := 19; r <= 30; r++ {
@@ -189,6 +211,32 @@ func parseHex(s string) (uint64, error) {
 }
 
 func hex(v uint64) string { return "0x" + strconv.FormatUint(v, 16) }
+
+// hex128 renders hi:lo as one hex number without leading zeros.
+func hex128(lo, hi uint64) string {
+	if hi == 0 {
+		return hex(lo)
+	}
+	return fmt.Sprintf("0x%x%016x", hi, lo)
+}
+
+// parseHex128 parses a hex number of up to 128 bits into (low, high) 64-bit halves.
+func parseHex128(s string) (uint64, uint64, error) {
+	t := strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+	if t == "" || len(t) > 32 {
+		return 0, 0, fmt.Errorf("bad 128-bit hex %q", s)
+	}
+	var hi uint64
+	if len(t) > 16 {
+		var err error
+		if hi, err = strconv.ParseUint(t[:len(t)-16], 16, 64); err != nil {
+			return 0, 0, err
+		}
+		t = t[len(t)-16:]
+	}
+	lo, err := strconv.ParseUint(t, 16, 64)
+	return lo, hi, err
+}
 
 var (
 	busy atomic.Int64 // case sequence number currently executing, 0 when idle
@@ -246,6 +294,32 @@ func runCase(c *L.Case, seq int64) L.HW {
 		return r
 	}
 	put64(ctx, L.CtxInSP, sp)
+	for i := 0; i < 32; i++ {
+		lo, hi := uint64(0), uint64(0)
+		if len(c.V) == 32 {
+			var err error
+			if lo, hi, err = parseHex128(c.V[i]); err != nil {
+				r.Status, r.Note = "error", "bad v"
+				return r
+			}
+		} else if len(c.V) != 0 {
+			r.Status, r.Note = "error", "v must have 32 entries"
+			return r
+		}
+		put64(ctx, L.CtxInV+16*i, lo)
+		put64(ctx, L.CtxInV+16*i+8, hi)
+	}
+	tp := uint64(0)
+	if c.TPIDR != "" {
+		if tp, err = parseHex(c.TPIDR); err != nil {
+			r.Status, r.Note = "error", "bad tpidr"
+			return r
+		}
+	}
+	put64(ctx, L.CtxInTPIDR, tp)
+	for i := L.CtxOutFP; i < L.CtxOutFP+528; i++ {
+		ctx[i] = 0
+	}
 	put64(ctx, L.CtxInNZCV, uint64(c.NZCV&15)<<28)
 	put64(ctx, L.CtxSig, 0)
 	put64(ctx, L.CtxInflight, 1)
@@ -266,6 +340,14 @@ func runCase(c *L.Case, seq int64) L.HW {
 	}
 	r.SP = hex(get64(ctx, L.CtxOut+8*31))
 	r.NZCV = int(get64(ctx, L.CtxOut+8*33)>>28) & 15
+	if binary.LittleEndian.Uint32(ctx[L.CtxOutFP:]) != L.FPSIMDMagic {
+		r.Status, r.Note = "error", "signal frame has no fpsimd_context first"
+		return r
+	}
+	r.V = make([]string, 32)
+	for i := 0; i < 32; i++ {
+		r.V[i] = hex128(get64(ctx, L.CtxOutFP+16+16*i), get64(ctx, L.CtxOutFP+16+16*i+8))
+	}
 	for i := range data {
 		if data[i] != L.Pattern(c.Seed, uint64(i)) {
 			r.Mem = append(r.Mem, [2]int{i, int(data[i])})

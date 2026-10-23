@@ -27,7 +27,8 @@ the other at the machine code that runs. Janus is the Go counterpart of
 [LeanCIL](https://github.com/NethermindEth/LeanCIL), which does the same for .NET.
 
 > **Status:** early work in progress. The model covers the user-mode integer subset that Go
-> emits; anything else faults rather than being guessed (see [limits](#what-a-verified-theorem-does-and-does-not-mean)).
+> emits (on arm64 also the Advanced SIMD integer, move and AES instructions of the runtime's
+> `memequal`/`IndexByte`/`Count`/hash routines); anything else faults rather than being guessed (see [limits](#what-a-verified-theorem-does-and-does-not-mean)).
 
 ---
 
@@ -176,7 +177,8 @@ negation* of the `Add` specification on the broken binary, by running one concre
 
 Every function in [`examples/basic/basic.go`](examples/basic/basic.go) has an amd64 theorem, and 14 of
 them an arm64 one too; the atomics and memory-routine examples in
-[`examples/basic/memory.go`](examples/basic/memory.go) have arm64 theorems. Each is verified end to end by `janus verify` (kernel check, axiom audit,
+[`examples/basic/memory.go`](examples/basic/memory.go) and the SIMD examples in
+[`examples/basic/simd_arm64ex.go`](examples/basic/simd_arm64ex.go) have arm64 theorems. Each is verified end to end by `janus verify` (kernel check, axiom audit,
 `leanchecker` replay) against the `GOARCH=arm64` or `GOARCH=amd64` build of the same source with
 Go 1.26.0. Proofs:
 [`examples/proofs/`](examples/proofs) (arm64), [`examples/proofs-amd64/`](examples/proofs-amd64) (amd64).
@@ -198,6 +200,8 @@ Go 1.26.0. Proofs:
 | `SetOne256` | `*z = 1`, from a 32-byte `.rodata` constant | ✓ | ✓ |
 | `HexDigit` | byte `i & 15` of a `.rodata` string | ✓ | ✓ |
 | `Table` | `t[i & 7]` of a constant `.rodata` table | | ✓ |
+| `A64Equal64` | `bytes.Equal` of two 64-byte arrays, through `runtime.memequal`'s SIMD loop (`LD1`, `CMEQ`, `AND`, `UMOV`) | ✓ | |
+| `A64IndexByte` | `bytes.IndexByte` on a 32-byte-aligned 64-byte slice: the first index of `c`, or `-1`, through `internal/bytealg`'s SIMD scan | ✓ | |
 | `GlobalTable` | `tbl[i & 7]` of a writable global, provided by the precondition | | ✓ |
 | `Bump` | `counter += d` on a writable global, returns the new value | | ✓ |
 | `AtomicAdd` | `atomic.AddUint64(p, d)`: `*p += d`, returns the new value (LSE `LDADDAL` path, given `runtime.arm64HasATOMICS`) | ✓ | |
@@ -266,7 +270,7 @@ what you meant**: read the statement.
 | Every memory access stays inside the regions the precondition grants | That an access outside them would trap on hardware (it may hit another mapping) |
 | `NeverPanics`: no panic stub **and** no fault (a nil dereference is a fault, as on hardware it is a `SIGSEGV` that Go turns into a panic) | Anything about timing, side channels, caches or speculation |
 | Callee-saved state (`SP`, `g`, frame pointer, …) is restored per Go ABIInternal | Concurrency: the model is single-threaded, with no signals, preemption, GC or scheduler |
-| | Floating point, SIMD arithmetic, atomics with `LOCK`, string instructions: these fault as `undecodable` |
+| | Floating point, and SIMD arithmetic outside the modelled subset (on arm64 the Advanced SIMD integer and move instructions, see [docs/SOUNDNESS.md](docs/SOUNDNESS.md#advanced-simd)): these fault as `undecodable` |
 
 The full list is in [docs/SOUNDNESS.md](docs/SOUNDNESS.md) (and [docs/AMD64.md](docs/AMD64.md) for the
 x86-64 differences).

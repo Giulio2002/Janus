@@ -54,6 +54,17 @@ func (a *asm) subsImm(rd, rn, imm int) {
 	a.emit(0xF1000000 | uint32(imm)<<10 | uint32(rn)<<5 | uint32(rd))
 }
 
+// ldrq: ldr qt, [xn, #off] (unsigned offset, multiple of 16)
+func (a *asm) ldrq(rt, rn, off int) {
+	if off%16 != 0 || off < 0 || off >= 65536 {
+		panic("ldrq offset")
+	}
+	a.emit(0x3DC00000 | uint32(off/16)<<10 | uint32(rn)<<5 | uint32(rt))
+}
+
+func (a *asm) mrsTPIDR(rt int) { a.emit(0xD53BD040 | uint32(rt)) }
+func (a *asm) msrTPIDR(rt int) { a.emit(0xD51BD040 | uint32(rt)) }
+
 func (a *asm) movz(rd int, imm uint16) { a.emit(0xD2800000 | uint32(imm)<<5 | uint32(rd)) }
 func (a *asm) msrNZCV(rt int)          { a.emit(0xD51B4200 | uint32(rt)) }
 func (a *asm) svc0()                   { a.emit(0xD4000001) }

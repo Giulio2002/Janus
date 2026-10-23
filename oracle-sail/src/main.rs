@@ -77,6 +77,12 @@ struct Case {
     sp: String,
     nzcv: u32,
     seed: u64,
+    /// V0..V31 as 128-bit hex (absent: all zero).
+    #[serde(default)]
+    v: Vec<String>,
+    /// TPIDR_EL0 (absent: 0).
+    #[serde(default)]
+    tpidr: String,
 }
 
 #[derive(Serialize, Default)]
@@ -100,6 +106,9 @@ struct Hw {
     mem: Vec<[i64; 2]>,
     #[serde(skip_serializing_if = "String::is_empty")]
     note: String,
+    /// V0..V31 after the instruction (the low 128 bits of Z0..Z31).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    v: Vec<String>,
     // Sail-only extras.
     #[serde(skip_serializing_if = "String::is_empty")]
     esr: String,
@@ -124,6 +133,17 @@ fn hex(v: u64) -> String {
 fn parse_hex(s: &str) -> Result<u64, String> {
     let t = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
     u64::from_str_radix(t, 16).map_err(|e| format!("bad hex '{s}': {e}"))
+}
+
+/// A hex number of up to 128 bits as (low, high) halves.
+fn parse_hex128(s: &str) -> Result<(u64, u64), String> {
+    let t = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+    let v = u128::from_str_radix(t, 16).map_err(|e| format!("bad hex '{s}': {e}"))?;
+    Ok((v as u64, (v >> 64) as u64))
+}
+
+fn hex128(lo: u64, hi: u64) -> String {
+    format!("0x{:x}", (u128::from(hi) << 64) | u128::from(lo))
 }
 
 // ---- system-register access encodings ----
@@ -396,10 +416,47 @@ impl Cpu {
         let data: Vec<u8> = (0..DATA_SIZE).map(|i| pattern(c.seed, i)).collect();
         self.o.write_mem(DATA_BASE, &data);
 
+        let mut vregs = [(0u64, 0u64); 32];
+        if !c.v.is_empty() {
+            if c.v.len() != 32 {
+                err(&mut r, "v must have 32 entries".into());
+                return r;
+            }
+            for i in 0..32 {
+                match parse_hex128(&c.v[i]) {
+                    Ok(p) => vregs[i] = p,
+                    Err(e) => {
+                        err(&mut r, e);
+                        return r;
+                    }
+                }
+            }
+        }
+        let tpidr = if c.tpidr.is_empty() {
+            0
+        } else {
+            match parse_hex(&c.tpidr) {
+                Ok(v) => v,
+                Err(e) => {
+                    err(&mut r, e);
+                    return r;
+                }
+            }
+        };
+
         // EL0 state.
         for (i, v) in x.iter().enumerate() {
             self.o.set_x(i as u32, *v);
         }
+        // V0..V31 are the low 128 bits of Z0..Z31 (the upper bits stay zero, as after any
+        // Advanced SIMD write on hardware).
+        for (n, (lo, hi)) in vregs.iter().enumerate() {
+            let mut z = [0u64; Z_CHUNKS];
+            z[0] = *lo;
+            z[1] = *hi;
+            self.o.set_z(n as u32, &z);
+        }
+        self.o.set_tpidr_el0(tpidr);
         self.o.set_sp(sp); // SP_EL0 (PSTATE.EL = 0)
         self.o.set_nzcv(c.nzcv & 15);
         self.o.set_pc(TEST_PC);
@@ -439,6 +496,10 @@ impl Cpu {
                 r.pc = hex(npc);
                 r.sp = hex(self.o.get_sp());
                 r.nzcv = snap.nzcv;
+                r.v = (0..32).map(|n| {
+                    let z = self.o.get_z(n);
+                    hex128(z[0], z[1])
+                }).collect();
                 // What the qemu runner would see next: the fetch at the new PC faults.
                 let (status, sig, code, note) = next_fetch(npc);
                 r.status = status.into();
@@ -471,6 +532,10 @@ impl Cpu {
                     r.addr = hex(npc);
                     r.pc = hex(npc);
                     r.note = "WFI trapped to EL1 and skipped (Linux wfi_handler)".into();
+                    r.v = (0..32).map(|n| {
+                        let z = self.o.get_z(n);
+                        hex128(z[0], z[1])
+                    }).collect();
                     return r;
                 }
                 let (sig, code, addr, note) = linux_signal(esr, far, elr, sp0);
@@ -705,7 +770,7 @@ fn to_model(line: &str) -> String {
     match st {
         "ok" | "selfloop" | "escaped" => {
             m.insert("status".into(), json!("ok"));
-            for k in ["pc", "x", "sp", "nzcv", "mem"] {
+            for k in ["pc", "x", "sp", "nzcv", "mem", "v"] {
                 if let Some(x) = v.get(k) {
                     m.insert(k.into(), x.clone());
                 }
