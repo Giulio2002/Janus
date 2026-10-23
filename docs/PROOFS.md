@@ -92,16 +92,27 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 | `janus_intro hs` | From `hs : CallSetup p entry [a₀, …] s`: `h_pc`, `h_lr`, `h_x<i> : s.regs i = aᵢ` (literal addresses; `h_lr : s.regs 30 = BitVec.ofNat 64 ret` for `p = p₀.withExit ret`). |
 | `janus_run [lemmas]` | Symbolic execution until every branch reaches the exit address (goal: the postcondition), a stub (goal: `Q` of the stub outcome, e.g. `False` for `Returns`), or the return address (`ReachesRet`). Works on `Returns`, `Panics`, `GrowsStack`, `Reaches`, `ReachesRet`. Extra `lemmas` are added to the simp set of every step. |
 | `janus_run until [a, …]` | Stop (without executing) when a branch arrives at one of the addresses. The starting state is always stepped. Used at loop heads. |
-| `janus_run calls [h, …]` | Use callee summaries `h : Summary p entry pre post` at calls to `entry` instead of executing the callee. |
-| `janus_step [lemmas]` | Exactly one instruction. |
+| `janus_run calls [h, …]` | Use callee summaries `h : Summary p entry pre post` at calls to `entry` instead of executing the callee. Also inside a callee's own proof (`ReachesRet` goals), so summaries compose through call chains. |
+| `janus_run (budget := N)` | Limit the run to `N` thousand heartbeats (the unit of `maxHeartbeats`), counted from its start. However the run ends, a timeout is reported as an error naming the pc, the instruction and the phase (see Troubleshooting). `(budget := N)` may also come first: `janus_run (budget := N) until [...]`. |
+| `janus_step [lemmas]` | Exactly one instruction (`calls`/`budget` as for `janus_run`). |
 | `janus_simp [lemmas]` | The post-processing simp set `janus_post` plus the state hypotheses and `lemmas`. Closes invariant side goals (`S'.regs 2 = i + 1`, …). |
 | `janus_arith` | `omega` after adding `readLE m a n < 256^n` for every memory read, and normalising carry terms. For the arithmetic left after execution. Does nothing if there is no goal. |
 | `janus_data hd` | From `hd : p.DataLoaded m`: readability of each `.rodata` object, and a rewrite rule that evaluates loads from it at literal addresses. |
 | `janus_cases h` | From `h : k < N` (`N` a literal): `N` goals with `k` replaced by `0, …, N-1`. For table lookups at a symbolic index. |
+| `janus_frame` | Proves `MemFrame m₀ m rs` (the memory part of a callee summary, see Calls): peels the stores of `m`, goes through the `MemFrame` hypotheses of called summaries, side conditions by `omega`. |
+| `janus_eval% t` | A term: the closed natural number `t` (e.g. `segAddr Extracted.program "f" + 8`) evaluated to a numeral at elaboration time, for a lemma argument that must be a literal. |
 | `janus_disch` | The discharger used inside every simp call (see below). |
 
-`set_option trace.janus true in janus_run` prints every step (pc, decoded instruction, simp time),
-every branch condition, and the time spent on final goals.
+`set_option trace.janus true in janus_run` prints every step (pc, the instruction disassembled,
+simp time), every branch condition, and the time spent on final goals. The disassembler
+(`Janus.Arm64.Disasm.disasm`, `Janus.Amd64.Disasm.disasm`) prints GNU/Intel syntax with branch
+targets resolved; constructors it does not know (new instructions) print as their `Repr`.
+
+**Addresses.** Proofs never contain addresses copied from a disassembly: they name everything
+relative to the extraction, so adding a function to the Go package does not break them. Use
+`Extracted.entry + off` for a loop head (`off` from `objdump`, relative to the function, so it
+only changes when the function's own code changes) and `segAddr Extracted.program "pkg.f"` for a
+callee's entry; `janus_run until [...]` and the state equations evaluate such closed terms.
 
 ### Return addresses
 
@@ -147,10 +158,14 @@ is dropped immediately: preconditions like `y ≠ 0` or `i < len` prune the pani
 
 **Side conditions** of the simp lemmas are proved by `janus_disch`:
 
-* closed goals (`3 ≠ 31`, literal comparisons) by kernel evaluation (`decide +kernel`) only;
+* closed goals (`3 ≠ 31`, `Nat.blt c 2^64 = true`, literal comparisons) by evaluating the
+  literals at tactic time (proof `of_decide_eq_true rfl`, checked by the kernel with the rest of
+  the proof), and anything else closed by `decide +kernel`; a closed goal that is false is
+  never proved from the hypotheses;
 * `m.accessible a n w = true` from a hypothesis `m.accessible b k w' = true` about the same
-  memory (after stripping writes, and anything tagged `janus_acc`), with `b ≤ a`,
-  `a + n ≤ b + k` by `omega`;
+  memory (after stripping writes, callee frames `MemFrame`, and anything tagged `janus_acc`),
+  with `b ≤ a`, `a + n ≤ b + k` by `omega`;
+* `Outside a n rs` (the side condition of a `MemFrame` read) by unfolding the ranges and `omega`;
 * everything else by `omega` (which knows `x.toNat < 2^64` for every 64-bit `x`), after an
   arithmetic normalisation if needed.
 
@@ -159,18 +174,8 @@ about regions**, stated with `toNat` on the argument variables. Destructure the 
 (`Ptr`, `StackOK`, `GuardOK`, `Disjoint`, …) into hypotheses before `janus_run`
 (`intro s hs ⟨⟨hz, hz'⟩, …⟩`, `simp only [Disjoint] at *`).
 
-**When a step gets stuck**, `janus_run` stops with
-
-```text
-janus: could not evaluate the instruction to `.ok s'` or a branch (…); stuck at
-  match load s.mem ((x.toNat + 8) % 18446744073709551616) 8 with …
-```
-
-The printed term shows what is missing. Here, `x.toNat + 8 < 2^64` could not be proved, so the
-precondition lacks `x.toNat + 32 ≤ 2^48` (part of `Ptr`).
-A `load`/`store` that stays unevaluated means an
-`accessible` fact is missing. A `readLE (writeLE …)` means the aliasing of two addresses is
-unknown.
+**When a step gets stuck**, `janus_run` stops with an error that says where and why; see
+[Troubleshooting](#troubleshooting) for the messages and what to do about each.
 
 ## Specification vocabulary (`Janus.Spec`)
 
@@ -281,10 +286,36 @@ theorem add_summary :
 ```
 
 and use it with `janus_run calls [add_summary]`. At a `bl` to the callee, `janus_run` proves the
-precondition for the current state, substitutes the postcondition if it is an equation
-`s' = …` (otherwise it splits it into hypotheses) and continues after the call. The return
-address must be well formed (`ret` checks it). Without `calls`, `janus_run` executes the callee
-inline, which also works.
+precondition for the current state (it splits conjunctions, unfolds named predicates such as
+`GuardOK`/`StackOK` and structures such as `StackGuardOK`, simplifies each part with the state
+hypotheses and closes it by `rfl`, an assumption, `omega` or `janus_disch`; what is left is
+reported), then destructures the postcondition: conjunctions and existentials become
+hypotheses, and an equation `s' = …` is substituted, so the run continues from a state literal.
+Without `calls`, `janus_run` executes the callee inline, which also works.
+
+**Callers of callers.** A summary can itself be proved with `janus_run calls [...]` (the goal
+of a summary is `ReachesRet`), so a call chain is proved bottom-up, each function once
+(`bench/proofs-arm64/Chain1.lean`: five levels). What a non-leaf summary must say:
+
+* the registers it clobbers, as existentials: `∃ v1 v16 f m, s' = { s with regs :=
+  setReg (setReg (setReg s.regs 0 r) 1 v1) 16 v16, pc := s.regs 30, flags := f, mem := m } ∧ …`;
+  callee-saved registers reloaded from the stack disappear from the register chain
+  (`setReg f r (s.regs r)` simplifies to `f`), so `X29`/`X30` need no mention;
+* which memory it may change: `MemFrame s.mem m rs` with `rs` the list of byte ranges
+  `[(lo, hi), …]` it writes (its frame record and, for a function that spills its arguments, the
+  slots in its caller's frame). In the caller, `hf : MemFrame m₀ m rs` is used as two rewrite
+  rules (`hf.readLE` for reads outside `rs`, `hf.accessible`), so the caller's own stack slots
+  are still read through the callee. Prove it with `janus_frame`:
+
+  ```lean
+  janus_run calls [chain4]
+  exact ⟨_, _, _, _, rfl, by janus_frame⟩
+  ```
+
+* the stack it needs: `StackOK s below above` with `below` covering the frames of every deeper
+  level, `GuardOK s adj` with `adj` the extra depth of the deeper stack-guard checks, and the
+  guard slot `[X28 + 16, +8)` disjoint from the stack window. The ranges are easy to get wrong;
+  the stuck message names the store that is outside them.
 
 ### Read-only data (`SetOne256`, `HexDigit`)
 
@@ -336,23 +367,140 @@ admissible by `RetAddr.of_check (by decide)`) and comparing its result with what
 
 ## Performance
 
-Each instruction costs one `simp` call on the instruction and the current state (10 to 50 ms) plus
-one kernel evaluation. Measured on the examples:
+Each instruction costs one `simp` call on the instruction and the current state plus one kernel
+check of the program fact `stepOK`. `scripts/bench.sh` measures the elaboration time (CPU) of
+every example and of the benchmarks in `bench/`; `bench/RESULTS.md` has the numbers, and the
+before/after comparison of the optimisations below.
 
-| Proof | Instructions executed | Time |
-|---|---|---|
-| `JanusTests.Tactic.straight_spec` | 51 | 2.6 s (`lean` on the test file) |
-| `examples/proofs/Add256.lean` | 17 in each of 5 aliasing cases | 6 s (`lean`), 20 s (`janus verify`) |
-| `examples/proofs/AddLimbs.lean` | 72 in each of 5 aliasing cases | 21 s (`lean`), 33 s (`janus verify`) |
+What the executor does to keep a step cheap:
 
-(`janus verify` adds about 10 s for building, the axiom audit and `leanchecker`, more on a loaded
-machine.) Tips:
+* **No re-simplification of the state.** A symbolic state is mostly values that earlier steps
+  already simplified. The `simp` cache is kept between the steps of a run (per local context,
+  so a new branch hypothesis starts a fresh cache), and so is the simp context. Without this,
+  the cost of a step grew with the length of the run (11 ms to 100 ms per step in `AddLimbs`).
+* **No `whnf` of the goal.** `MVarId.apply` puts the goal in weak head normal form to count
+  arguments; on `ExecThen p (if c then … else …) Q` that evaluates the decision procedure of
+  the symbolic condition (5 s for one stack-guard branch on amd64). The step lemmas are applied
+  by unification only (`Common.applyFast`), and goal shapes are recognised syntactically.
+* **Closed side conditions evaluated, not kernel-checked one by one** (see the discharger).
+* **Each pc is decoded and its `stepOK` fact proved once per run** (loops and branches revisit
+  pcs).
+* **Reducible transparency only** when a callee precondition is closed by `rfl`/`assumption`:
+  unfolding `Memory.accessible`/`readLE` of a symbolic memory took seconds.
+
+Tips:
 
 * Keep facts about the initial state as equations on `s.regs i`, `s.pc`, `s.sp`, `s.mem`; they are
   the rewrite rules.
 * Split cases (aliasing, table indices) as late as possible. Each case re-executes the code.
 * Large extractions (the `seg<i>` form) cost nothing extra. The program is evaluated once per
   `janus_run`, and fetches are checked by the kernel.
+* Long runs are not the problem; post-processing often is. In `bench/proofs-arm64/BigFrame.lean`
+  the 400-instruction run takes 20 s and the 64 index cases after it 50 s, most of it checking
+  `omega` proofs of the disjointness of stack slots. Prefer a spec that avoids the case split
+  when you can.
+* Each of `N` aliasing cases re-runs the code; `omega` side conditions see every disjunctive
+  hypothesis in the context, so split them into atomic facts (`rcases`) before running.
+
+## Troubleshooting
+
+When symbolic execution cannot proceed, `janus_run` (and `janus64_run`) stops with an error that
+names the pc (with `function+offset`), the instruction (disassembled), what failed and which
+hypotheses would make it go through. It never ends in a bare `(deterministic) timeout`. The
+messages below are real; they come from `JanusTests/Diagnostics.lean` (which checks them) and
+from proofs with a hypothesis removed.
+
+**A memory access that is not known to be allowed.** `examples/proofs/Get.lean` without the
+`Ptr` fact about the slice:
+
+```text
+janus_run: stuck at pc 0x93164 (example.com/basic.Get+0x24): ldr x0, [x0, x3, lsl #3]
+• cannot prove that the 8-byte read at `ptr.toNat + 8 * i.toNat` is allowed (the memory is `s.mem` after 3 stores, which do not change what is accessible):
+  s.mem.accessible (ptr.toNat + 8 * i.toNat) 8 false = true
+The `accessible` hypotheses about `s.mem`:
+  hg2 : `s.mem.accessible (BitVec.toNat (s.regs 28) + 16) 8 false = true`
+      `BitVec.toNat (s.regs 28) + 16 ≤ ptr.toNat + 8 * i.toNat` is not provable by omega; `ptr.toNat + 8 * i.toNat + 8 ≤ BitVec.toNat (s.regs 28) + 16 + 8` is not provable by omega
+  hw : `s.mem.accessible (BitVec.toNat s.sp - 24) (24 + 16) true = true`
+      `BitVec.toNat s.sp - 24 ≤ ptr.toNat + 8 * i.toNat` is not provable by omega; `ptr.toNat + 8 * i.toNat + 8 ≤ BitVec.toNat s.sp - 24 + (24 + 16)` is not provable by omega
+It is discharged by a hypothesis `s.mem.accessible b k w = true` with `b ≤ ptr.toNat + 8 * i.toNat` and `ptr.toNat + 8 * i.toNat + 8 ≤ b + k` provable by omega: state the region in the precondition (`Ptr`, `Buffer`, `StackOK`, `StackWritable`) together with the arithmetic facts that bound the address (e.g. `i.toNat < len.toNat`).
+```
+
+For each `accessible` fact about the same memory the message says which of the two range
+inequalities `omega` could not prove (here: the slice is in neither region). A fact that is
+too short shows up as `` `p.toNat + 8 ≤ p.toNat + 4` is not provable by omega ``.
+
+**An address that may wrap.** A stack store below the window `StackOK` grants
+(`bench/proofs-arm64/Chain1.lean` with `StackOK s 32 0` where the frame needs 40 bytes):
+
+```text
+janus_run: stuck at pc 0x93820 (example.com/bench.Chain4+0x10): stur x29, [sp, #-0x8]
+• cannot prove that the 8-byte write at `(18446744073709551576 + BitVec.toNat s.sp) % 18446744073709551616` is allowed (…)
+…
+The address is `BitVec.toNat s.sp` - 40 computed modulo 2^64: it could not be shown not to wrap below zero. This needs `40 ≤ BitVec.toNat s.sp` (for the stack: a larger `below` in `StackOK`/`StackWritable`, which covers `[SP - below, SP)`).
+```
+
+**A read over a store whose aliasing is unknown.** This does not stop the run (the read stays
+as `(m.writeLE a n v).readLE b k` in the value), so the run reports it as information when the
+remaining goals contain such a read (`set_option janus.aliasInfo false` turns this off).
+`examples/proofs-amd64/Add256` without `Disjoint z 32 y 32`:
+
+```text
+janus64_run: the remaining goals contain reads over earlier stores whose aliasing is unknown (they stay as `(m.writeLE a n v).readLE b k` and usually make the goal unprovable):
+• at pc 0x4892d0 (example.com/basic.Add256+0x10): mov rsi, qword ptr [rcx + 0x8]: an 8-byte read at `y.toNat + 8` follows an 8-byte store at `z.toNat`, and it is unknown whether they overlap. omega needs either
+  `y.toNat + 8 + 8 ≤ z.toNat ∨ z.toNat + 8 ≤ y.toNat + 8`   (disjoint), or
+  `z.toNat = y.toNat + 8`   (the same address).
+Add `Disjoint`/aliasing facts to the precondition, or split on the aliasing before running (`rcases h with rfl | h`).
+```
+
+**A fault on a path that was not pruned.** The message lists the branch conditions of the path,
+so you can see which fact would refute it (`br x5` with nothing known about `x5`):
+
+```text
+janus_run: the instruction at pc 0x10000 (indirect): br x5 faults:
+  Fault.noCode (BitVec.toNat (s.regs 5))
+(the branch target is not code; a register target at or above 2^56 (a tagged pointer, not modelled) also ends here: add a bound on the target register)
+This path was taken under the branch conditions (most recent first):
+  hbr : `72057594037927936 ≤ BitVec.toNat (s.regs 5)`
+A path is pruned when omega refutes its branch condition from the hypotheses: add the fact that excludes it.
+```
+
+**A pc that is not concrete, or outside the code.**
+
+```text
+janus_run: stuck after 1 instructions: the pc of the current state is not a concrete address:
+  s.regs 5
+This is an indirect branch (`br`, `blr`, `ret`) to an address the hypotheses do not determine. For the return of the function being proved, run `p.withExit ret` with `hret : RetAddr p ret` in the context (`intro ret hret …`) and keep `h_lr`; for a callee, prove it as a `Summary` and pass it with `calls [...]`; otherwise add an equation `… = BitVec.ofNat 64 addr` for the target register.
+
+janus_run: stuck after 1 instructions: pc 0x10100 is not in the extracted code (segments: nocode [0x10000, 0x10004)) and is no known stub.
+If this is a call, extract the callee too or give its `Summary` with `calls [...]`; if it is the return, `X30` does not hold the return address of `p.withExit ret`.
+```
+
+**An instruction outside the model.**
+
+```text
+janus_run: stuck at pc 0x10004 (undec+0x4): the word 0x0 does not decode to a modelled instruction (see docs/SOUNDNESS.md for the supported subset). No proof can execute past it.
+janus64_run: stuck at rip 0x1003 (undec+0x3): the bytes [0xf, 0x5] do not decode to a modelled instruction (see docs/AMD64.md, 'Supported instructions'). No proof can execute past it.
+```
+
+**A callee precondition that does not hold at the call site.**
+
+```text
+janus_run: at pc 0x50014, the entry of f+0x14: the precondition of its summary could not be proved. Remaining goals (after simplification):
+  BitVec.toNat x = 0
+Add the facts they need to the context, or weaken the summary's precondition.
+```
+
+**A heartbeat budget exceeded.** With `janus_run (budget := N)` the budget covers the run only;
+without it, the declaration's `maxHeartbeats` (the message is logged before Lean's own timeout
+error, which may follow because the declaration has no heartbeats left):
+
+```text
+janus_run: heartbeat budget exceeded at pc 0x933b4 (example.com/basic.AddLimbs+0x24): movn x8, #0 while evaluating the instruction (simp with the janus_exec set), after 11 instructions.
+The limit was `maxHeartbeats` (2000), which covers the whole declaration: raise it with `set_option maxHeartbeats N in` before the theorem (or give this run its own budget with `janus_run (budget := N)`), or stop earlier (`until [...]`, a callee `Summary`) and split the proof.
+```
+
+Any other failure inside a step (`simp` running out of steps, an error in a user lemma) is
+reported with the same location prefix (`janus_run: failed at pc … while …`).
 
 ## Extending the automation
 
@@ -363,3 +511,7 @@ machine.) Tips:
   symbolic state); see `setReg_comm`.
 * Do not let the kernel evaluate `BitVec.signExtend` or `&&&` on projections of a literal state by
   `rfl`. State them as `Nat` arithmetic (see `sext64_eq`, `exec_adr`).
+* The ISA-independent machinery (status and budget, stuck analysis, the simp cache,
+  `applyFast`, callee preconditions and postconditions, `MemFrame`/`janus_frame`, `janus_cases`)
+  is in `Janus/Tactic/Common.lean` and shared by both executors; the disassemblers are
+  `Janus/Tactic/Disasm.lean` and `Janus/Amd64/Disasm.lean`.
