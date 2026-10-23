@@ -136,7 +136,7 @@ func cmdGen(args []string) {
 			cw.add(r, "gen/"+gen.Classify(w), w, 1)
 		}
 	}
-	groups := []string{"br", "dpi", "dpr", "ls"}
+	groups := []string{"br", "dpi", "dpr", "ls", "simd", "vls"}
 	for _, name := range groups {
 		for i := 0; i < *ng; i++ {
 			w := gen.Groups[name](r)

@@ -42,7 +42,8 @@ oracle/bin/oracle minimize -out DIR                     # shrink mismatches to r
 ## What a case is
 
 A case (`oracle/layout/layout.go`, `Case`) is one 32-bit instruction word plus a complete
-initial state: `X0`–`X30`, `SP`, `NZCV`, a seed for the contents of a 4 KiB data
+initial state: `X0`–`X30`, `SP`, `NZCV`, `V0`–`V31` (field `v`, 128-bit hex; absent = zero),
+`TPIDR_EL0` (field `tpidr`), a seed for the contents of a 4 KiB data
 buffer, and `dczid`, the reference CPU's `DCZID_EL0`. That register is IMPLEMENTATION DEFINED
 and read-only, so it cannot be set per case: `scripts/oracle.sh` asks the runner for its CPU's
 value (`runner -dczid`; qemu `-cpu max` reports 7) and writes it into every case
@@ -56,7 +57,7 @@ own, and the Lean side uses it as `State.dczid`. Everything is at fixed addresse
 | `0xF_F810_0000` / `0xF_F810_1000` | trampoline code / context page (127 MiB below, out of the way) |
 
 everything else nearby is unmapped. The Lean side (`janus-oracle`) builds a `State` with
-these registers, `pc = TestPC`, `dczid` from the case, and
+these registers (`State.vregs`, `State.tpidr`), `pc = TestPC`, `dczid` from the case, and
 `mem.regions = [⟨DataBase, 4096, writable⟩]` — exactly the buffer, nothing else — and runs
 `Janus.Arm64.step word state`.
 
@@ -66,8 +67,9 @@ these registers, `pc = TestPC`, `dczid` from the case, and
 landing pads or per-case subprocesses:
 
 1. It writes the word at `TestPC`, refills the buffer, and calls a hand-assembled entry
-   sequence that saves the host's callee-saved registers and SP, executes `CLREX`, loads
-   `NZCV`, `SP`, `X0`–`X30` from the case and branches to `TestPC`.
+   sequence that saves the host's callee-saved registers, SP and `TPIDR_EL0`, writes the case's
+   `TPIDR_EL0` (`MSR`, allowed at EL0), loads `V0`–`V31` (`LDR Q`), `NZCV`, `SP`, `X0`–`X30`,
+   executes `CLREX` and branches to `TestPC`.
 2. Whatever the instruction does, the *next* thing that happens is a signal: falling
    through hits the `UDF` at `TestPC+4` (SIGILL); a branch lands on a `UDF` of the code page
    (SIGILL) or on an unmapped or non-executable page (SIGSEGV with `si_addr == pc`); a
@@ -75,15 +77,17 @@ landing pads or per-case subprocesses:
    itself faults raises SIGILL/SIGSEGV/SIGBUS/SIGTRAP with `pc == TestPC`; a branch to itself
    spins until a watchdog thread sends SIGALRM (reported as `selfloop`, state = post-state).
 3. A raw signal handler, installed with `rt_sigaction` (bypassing the Go runtime) and running
-   on the thread's sigaltstack, copies `uc_mcontext` (`X0`–`X30`, `SP`, `PC`, `PSTATE`) into
+   on the thread's sigaltstack, copies `uc_mcontext` (`X0`–`X30`, `SP`, `PC`, `PSTATE`) and the
+   `fpsimd_context` record of the signal frame (`V0`–`V31`; the runner checks its magic) into
    the context page and rewrites the saved PC to a resume sequence that restores the host
-   registers and returns into Go.
+   registers and `TPIDR_EL0` and returns into Go.
 
 So the captured state is precisely the architectural state after one instruction, and the
 captured PC is where it went (fall-through, any branch target, or the instruction itself if
-it faulted). The runner then reports registers, SP, NZCV, PC and the list of buffer bytes that
-changed. `oracle selftest` checks this machinery against hand-computed answers (register and
-flag preservation under all 16 NZCV values, loads, stores, guard faults, branches, self loops).
+it faulted). The runner then reports registers, SP, NZCV, PC, `V0`–`V31` and the list of buffer
+bytes that changed. `oracle selftest` checks this machinery against hand-computed answers (register and
+flag preservation under all 16 NZCV values, loads, stores, guard faults, branches, self loops,
+vector-register and `TPIDR_EL0` round trips, `LDR Q`, `UMOV`, `DUP`, `MRS TPIDR_EL0`).
 
 `GODEBUG=asyncpreemptoff=1` is required (the runner refuses to start without it): an
 asynchronous-preemption signal arriving while the test instruction runs would enter the Go
@@ -96,8 +100,9 @@ handler with a foreign `g` register.
   `regexp`, `compress/flate`, ... (`oracle/harvest/bigprog`), `go test -c` binaries of
   `math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime` (the last two bring
   the atomics, `LDAR`/`STLR`, exclusives, `PRFM`, `MRS DCZID_EL0` and `DC ZVA` the runtime
-  uses), and any `artifacts/*-arm64` — minus SIMD/FP and system encodings other than `MRS` and
-  the C7 cache-maintenance `SYS` space, capped per class (`PER_CLASS`) by uniform sampling, each
+  uses), and any `artifacts/*-arm64` — minus system encodings other than `MRS` and the C7
+  cache-maintenance `SYS` space (SIMD&FP words are included, also the floating-point ones the
+  model rejects), capped per class (`PER_CLASS`) by uniform sampling, each
   under `K` random states.
 * **Targeted** (`gen/<class>`): random encodings per class with fixed opcode bits and fields
   biased towards allocated encodings, plus a share of unallocated variants.
@@ -106,9 +111,17 @@ handler with a foreign `g` register.
   `LD<op>`, `SWP` and `LDAPR`; `sys.mrs` is half `MRS Xt, DCZID_EL0`, half random system
   register reads; `sys.sys` is half `DC ZVA, Xt` (with `Xt` mostly in the buffer), half random
   `SYS #op1, C7, Cm, #op2` operations.
+  The SIMD classes: `vls.multi` (LD1–LD4/ST1–ST4 multiple structures), `vls.single`
+  (single structure and replicate), `vls.uimm`/`imm9`/`regoff`/`pair`/`literal` (SIMD&FP
+  registers), `simd.3same`, `simd.s3same`, `simd.copy`, `simd.across`, `simd.2misc`,
+  `simd.shift`, `simd.modimm`, `simd.ext`, `simd.tbl`, `simd.aes`, `simd.fmovgen`, each mostly
+  over the opcodes the model covers plus random neighbours; `sys.mrs` also reads `TPIDR_EL0`.
+  Vector register values are random, edge values, bytes from a small alphabet, or copies of
+  another register with a few bytes changed (so element compares hit both outcomes); `TBL`
+  indices are mostly in range; SIMD&FP memory accesses land in the buffer like the integer ones.
 * **Group-random** (`rand/<class>`): fully random words inside each top-level encoding group
-  (data-processing immediate / register, branches, loads/stores) — tests that the decoder
-  rejects what it does not understand.
+  (data-processing immediate / register, branches, loads/stores, SIMD&FP data processing,
+  SIMD&FP loads/stores) — tests that the decoder rejects what it does not understand.
 
 The class is assigned by `oracle/gen/classify.go` from the fixed opcode bits of the
 top-level A64 tables; it only groups results and steers state generation, it never decides
@@ -129,7 +142,7 @@ For each case the comparator (`oracle/cmd/oracle/compare.go`) produces one verdi
 
 | hardware | model | verdict |
 |---|---|---|
-| succeeds | succeeds, identical `X0`–`X30`, `SP`, `NZCV`, `pc`, buffer bytes | **agree** |
+| succeeds | succeeds, identical `X0`–`X30`, `SP`, `NZCV`, `pc`, `V0`–`V31`, buffer bytes | **agree** |
 | faults (any signal at `TestPC`) | faults (any `Fault`) | **agree** (fault kinds are not compared: `undecodable` vs SIGILL, `outsideAllocation` vs SIGSEGV, ...) |
 | branches to a misaligned address | `pcMisaligned` | **agree** |
 | succeeds | faults | **model-gap**: the model is conservative here. Fine when it is `undecodable` (not in the supported subset yet) or `outsideAllocation` for an access that hardware served from mapped non-buffer memory (e.g. a literal load from the code page) |
@@ -141,7 +154,44 @@ MISMATCH is the headline number: a proof about Go code is only sound if the mode
 a successful step that differs from the machine. Model gaps only cost coverage (a proof
 would get stuck on a fault), never soundness.
 
-## Results (2026-10-23, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
+## Results with Advanced SIMD (2026-10-23, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
+
+584,412 cases (260,000 generated, 324,412 harvested): **0 MISMATCH**, 568,770 agree, 15,639
+model-gap (15,175 `undecodable`, 334 `unaligned`, 87 `noCode`, 43 `outsideAllocation`), 3
+unobserved. Every case now carries `V0`–`V31` and `TPIDR_EL0`, and every successful case
+compares all 32 vector registers.
+
+The SIMD&FP classes and `MRS TPIDR_EL0` (grouped by encoding class, so a row also counts the
+unmodelled neighbours inside the class: `LDNP`/`STNP`, `LD2`–`LD4` multiple, half-precision
+`FMOV`, saturating and rounding shifts, ..., which are the model-gaps; the floating-point words
+of `simd.other`/`vls.other` are not in the table):
+
+| class | cases | harvest | agree-ok | agree-fault | model-gap | MISMATCH | unobserved | distinct words |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| simd.2misc | 4055 | 51 | 2218 | 1556 | 281 | 0 | 0 | 3962 |
+| simd.3same | 4780 | 507 | 3490 | 945 | 345 | 0 | 0 | 4441 |
+| simd.across | 4015 | 6 | 2004 | 2000 | 11 | 0 | 0 | 3910 |
+| simd.aes | 4063 | 561 | 4063 | 0 | 0 | 0 | 0 | 2485 |
+| simd.copy | 4152 | 117 | 2717 | 1435 | 0 | 0 | 0 | 4053 |
+| simd.ext | 4076 | 57 | 3049 | 1027 | 0 | 0 | 0 | 4030 |
+| simd.fmovgen | 4562 | 558 | 3586 | 445 | 531 | 0 | 0 | 3291 |
+| simd.modimm | 4013 | 0 | 3778 | 230 | 5 | 0 | 0 | 4005 |
+| simd.s3same | 4115 | 3 | 3385 | 596 | 134 | 0 | 0 | 4092 |
+| simd.shift | 4302 | 48 | 2086 | 1917 | 299 | 0 | 0 | 4269 |
+| simd.tbl | 4027 | 18 | 4027 | 0 | 0 | 0 | 0 | 3996 |
+| sys.mrs `mrs tpidr_el0` | 1354 | 3 | 1354 | 0 | 0 | 0 | 0 | 32 |
+| vls.imm9 | 4538 | 6 | 1968 | 2570 | 0 | 0 | 0 | 4533 |
+| vls.literal | 4973 | 0 | 3526 | 1447 | 0 | 0 | 0 | 4909 |
+| vls.multi | 4517 | 369 | 3769 | 665 | 83 | 0 | 0 | 4227 |
+| vls.pair | 6911 | 990 | 5292 | 1246 | 373 | 0 | 0 | 6251 |
+| vls.regoff | 4419 | 306 | 2435 | 1984 | 0 | 0 | 0 | 4212 |
+| vls.single | 4303 | 33 | 2324 | 1978 | 1 | 0 | 0 | 4268 |
+| vls.uimm | 9265 | 4224 | 7138 | 2126 | 1 | 0 | 0 | 6447 |
+| **total** | 86440 | 7857 | 62209 | 22167 | 2064 | 0 | 0 | 77413 |
+
+Before the extension (486,463 cases) the SIMD&FP words were not tested at all.
+
+## Earlier results: atomics (2026-10-23, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
 
 486,463 cases (172,000 generated, 314,463 harvested): **0 MISMATCH**, 475,022 agree, 11,440
 model-gap (10,902 `undecodable`, 385 `unaligned`, 107 `noCode`, 46 `outsideAllocation`), 1
