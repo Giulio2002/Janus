@@ -25,19 +25,17 @@ jobs:
       - name: No sorry / native_decide / bv_decide / admit
         run: scripts/ci-axiom-guard.sh
 
-  lean-go:
-    name: Lean build, Go vet/test, examples, oracle
+  go-test:
+    name: Lean build, go vet, go test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: |
-            go.sum
-            oracle/go.sum
+          cache-dependency-path: go.sum
 
       - name: Install qemu-user, aarch64 binutils and bubblewrap
         run: |
@@ -93,16 +91,74 @@ jobs:
       - name: Build examples
         run: scripts/build-examples.sh
 
+      # The Lean-running tests take longer than go test's default 10-minute timeout.
       - name: go test ./cmd/...
-        run: go test ./cmd/...
+        run: go test -timeout 40m ./cmd/...
 
-      - name: Verify example proofs
+  # The arm64 example proofs, decoder coverage, the qemu oracle and the docs/AUDIT.md attacks.
+  arm64:
+    name: arm64 example proofs, oracle, soundness audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: Install qemu-user, aarch64 binutils and bubblewrap
         run: |
-          if [ -x scripts/verify-examples.sh ]; then
-            scripts/verify-examples.sh
-          else
-            echo "scripts/verify-examples.sh not present; skipping"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user binutils-aarch64-linux-gnu bubblewrap
+
+      # janus verify sandboxes the proof under bubblewrap, which needs an unprivileged user
+      # namespace. GitHub's Ubuntu 24.04 runners restrict those via AppArmor; lift the restriction
+      # so the sandbox self-test passes. (Verification refuses to run without a sandbox unless
+      # --unsafe-no-sandbox is passed.)
+      - name: Allow unprivileged user namespaces (for the verify sandbox)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          bwrap --ro-bind / / --unshare-all --dev /dev --proc /proc --tmpfs /tmp true \
+            && echo "bubblewrap works" || echo "WARNING: bubblewrap self-test failed"
+
+      # elan installs the toolchain pinned in lean-toolchain on first use.
+      - name: Cache elan toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
+
+      - name: Install elan
+        run: |
+          if [ ! -x "$HOME/.elan/bin/lake" ]; then
+            curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o elan-init.sh
+            sh elan-init.sh -y --default-toolchain none
+            rm elan-init.sh
           fi
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Lean toolchain
+        run: |
+          lean --version
+          lake --version
+
+      - name: Cache Lake build
+        uses: actions/cache@v4
+        with:
+          path: .lake
+          key: lake-arm64-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-${{ hashFiles('**/*.lean') }}
+          restore-keys: |
+            lake-arm64-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-
+
+      - name: lake build Janus JanusTests
+        run: lake build Janus JanusTests
+
+      # Builds and extracts the examples itself (scripts/build-examples.sh).
+      - name: Verify example proofs
+        run: scripts/verify-examples.sh
 
       - name: Decoder coverage of the examples (janus blockers)
         run: |
@@ -130,4 +186,99 @@ jobs:
         with:
           name: oracle-quick
           path: ${{ runner.temp }}/oracle/*.md
+          if-no-files-found: ignore
+
+      # Every "blocked" row must be rejected and every Verified / Verified-honest / mitigated
+      # control must verify; run-all.sh marks a regression BROKEN and exits non-zero.
+      - name: Soundness audit attacks (audit/run-all.sh)
+        run: audit/run-all.sh
+
+  # The amd64 backend: Lean model + oracle executable, the amd64 example proofs, and the native
+  # differential oracle. Runs in parallel with the other jobs.
+  amd64:
+    name: amd64 Lean targets, example proofs, native oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            oracle-amd64/go.sum
+
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+
+      # janus verify sandboxes the proof under bubblewrap, which needs an unprivileged user
+      # namespace. GitHub's Ubuntu 24.04 runners restrict those via AppArmor; lift the restriction
+      # so the sandbox self-test passes. (Verification refuses to run without a sandbox unless
+      # --unsafe-no-sandbox is passed.)
+      - name: Allow unprivileged user namespaces (for the verify sandbox)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          bwrap --ro-bind / / --unshare-all --dev /dev --proc /proc --tmpfs /tmp true \
+            && echo "bubblewrap works" || echo "WARNING: bubblewrap self-test failed"
+
+      # elan installs the toolchain pinned in lean-toolchain on first use.
+      - name: Cache elan toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
+
+      - name: Install elan
+        run: |
+          if [ ! -x "$HOME/.elan/bin/lake" ]; then
+            curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o elan-init.sh
+            sh elan-init.sh -y --default-toolchain none
+            rm elan-init.sh
+          fi
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Lean toolchain
+        run: |
+          lean --version
+          lake --version
+
+      - name: Cache Lake build
+        uses: actions/cache@v4
+        with:
+          path: .lake
+          key: lake-amd64-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-${{ hashFiles('**/*.lean') }}
+          restore-keys: |
+            lake-amd64-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-
+
+      - name: lake build Janus JanusTests janus-oracle-amd64
+        run: lake build Janus JanusTests janus-oracle-amd64
+
+      # verify-amd64-examples.sh first runs scripts/build-examples-amd64.sh (build the linux/amd64
+      # examples binary and extract every function into artifacts/amd64/).
+      - name: Build, extract and verify the amd64 example proofs
+        run: scripts/verify-amd64-examples.sh
+
+      # The native oracle single-steps each case in-process with RFLAGS.TF and a raw SIGTRAP
+      # handler, behind a seccomp-BPF filter (no ptrace, no privileges, no perf counters), so it
+      # runs on GitHub's x86-64 VMs. Only flags and results the model claims are compared, and
+      # the model leaves vendor-dependent flags undefined, so an AMD EPYC runner is as valid a
+      # reference as the Intel development host. The script exits non-zero on any MISMATCH.
+      - name: Differential oracle vs native x86-64 (quick)
+        env:
+          OUT: ${{ runner.temp }}/oracle-amd64
+          JOBS: "4"
+        run: |
+          grep -m1 'model name' /proc/cpuinfo || true
+          scripts/oracle-amd64.sh quick
+
+      - name: Upload amd64 oracle report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-amd64-quick
+          path: ${{ runner.temp }}/oracle-amd64/*.md
           if-no-files-found: ignore

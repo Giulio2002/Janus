@@ -11,7 +11,7 @@ theorem correctness (z y : BitVec 64) (s : State)
     (hs : CallSetup Extracted.program Extracted.entry [z, 0, y] s) (hm : s.mem.regions = []) :
     NeverPanics Extracted.program s := by
   intro fuel name s'
-  have hpc : s.pc.toNat = 0x931a0 := hs.pc_toNat (by decide)
+  have hpc : s.pc.toNat = Extracted.entry := hs.pc_toNat (by decide)
   have hx1 : s.regs 1 = 0 := hs.reg (i := 1) (by simp)
   cases fuel with
   | zero => simp

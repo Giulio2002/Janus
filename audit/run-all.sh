@@ -6,7 +6,7 @@
 # refutation). No row should print "Verified" for a false or misleading claim.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$root"
+cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 J="$root/audit/bin/janus"
 go build -o "$J" ./cmd/janus || exit 1
@@ -16,11 +16,29 @@ lake build Janus >/dev/null || { echo "lake build Janus failed (fix the Lean lib
 W=audit/work
 mkdir -p $W
 cp artifacts/examples-arm64 $W/examples-arm64
+# Fresh extractions of the attacked functions (independent of scripts/verify-examples.sh).
 for n in Add Add256 Get; do
-  rm -rf $W/$n; mkdir -p $W/$n; cp artifacts/$n/Extracted.lean artifacts/$n/identity.json $W/$n/
+  rm -rf "${W:?}/$n" "$W/extract-$n"
+  "$J" extract $W/examples-arm64 "example.com/basic.$n" $W/extract-$n >/dev/null || { echo "extract $n failed"; exit 1; }
+  mkdir -p $W/$n; cp $W/extract-$n/Extracted.lean $W/extract-$n/identity.json $W/$n/
+  rm -rf $W/extract-$n
 done
 
-row() { printf '%-28s %-8s %s\n' "$1" "$2" "$3"; }
+# row NAME EXPECT RESULT prints a row and records a regression ("BROKEN"): a "blocked" row
+# must not print Verified; a Verified/Verified-honest/mitigated row must print Verified; an
+# "ok" row (a refutation compiled with lake env lean) must print its axioms.
+broken=()
+row() {
+  local status=""
+  case "$2" in
+    blocked) case "$3" in Verified*|accepted*) status=BROKEN ;; esac ;;
+    Verified|Verified-honest|mitigated) case "$3" in Verified*) ;; *) status=BROKEN ;; esac ;;
+    ok) case "$3" in *"depends on axioms"*) ;; *) status=BROKEN ;; esac ;;
+  esac
+  printf '%-28s %-8s %s%s\n' "$1" "$2" "$3" "${status:+   <-- BROKEN}"
+  [ -n "$status" ] && broken+=("$1")
+  return 0
+}
 v() { "$J" verify --janus-root "$root" "$@" 2>&1 | head -1; }
 
 echo "attack                       expect   result"
@@ -71,5 +89,12 @@ echo "model controls (audit/model/Model.lean):"
 if lake env lean audit/model/Model.lean >/dev/null 2>&1; then
   echo "  Model.lean: all decide controls pass, including M1-M3 now faulting (blocked by F5)"
 else
-  echo "  Model.lean: FAILED"
+  echo "  Model.lean: FAILED   <-- BROKEN"
+  broken+=(model)
 fi
+
+if [ ${#broken[@]} -gt 0 ]; then
+  echo "BROKEN: ${#broken[@]} row(s) regressed: ${broken[*]}"
+  exit 1
+fi
+echo "All rows as expected (no BROKEN row)."
