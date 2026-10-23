@@ -5,6 +5,18 @@ copied out of the ELF binary, run by the Lean AArch64 model. The Lean kernel che
 nobody checks that the *statement* says what you meant. The guarantee is exactly the printed
 statement, including its preconditions and quantifiers.
 
+**The printed statement is the checked one.** `janus verify` prints the statement in a clean
+environment (only `Janus` and `Extracted`, never the proof, so no proof-side notation,
+unexpander or instance applies), and then checks that the text means what the kernel proved:
+every argument in an instance-implicit position must be a registered instance of that trusted
+environment or an instance binder of the theorem (no inline `⟨fun a b => a + b⟩` passed as the
+`HMul` instance, which the default printer would show as `x * y`), and the printed text is
+re-parsed and re-elaborated there and must be definitionally equal to the checked type (checked
+by the elaborator at default transparency and confirmed by the kernel; definitionally equal
+propositions are the same proposition, so the printed text, read with the canonical instances,
+is exactly what was proved). `verified.json` also has `statementExplicit`, the statement with
+every implicit and instance argument shown. See CRITICAL-1 in [AUDIT-ROUND2.md](AUDIT-ROUND2.md).
+
 ## Trusted computing base
 
 These are trusted, not proved.
@@ -28,7 +40,12 @@ These are trusted, not proved.
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
    dereference is a `SIGSEGV`, turned into a panic by `runtime.sigpanic`) are not stub calls:
    the model reports them as faults, and `NeverPanics` excludes faults too.
-4. **The Lean kernel**, plus the verifier's hashing, process execution and axiom audit. The
+4. **The Lean kernel**, plus the verifier's hashing, process execution, axiom audit and
+   statement audit (`Janus/Tools/Audit.lean`, including Lean's parser, elaborator and
+   pretty-printer as used by the round-trip check above). The auditor and `leanchecker` load
+   `.olean` files written by the sandboxed (untrusted) compile; Lean's `.olean` loader does not
+   validate the structure of the compacted region it maps, so its robustness against a
+   malformed `.olean` is part of the trusted base too. The
    audit allows only `propext`, `Quot.sound` and `Classical.choice`. It rejects `sorryAx`,
    `Lean.ofReduceBool` and `Lean.trustCompiler`, so `native_decide` and `bv_decide` cannot be
    used. `leanchecker` independently replays the environment (below).
@@ -237,6 +254,19 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   `examples/proofs/AtomicAdd.lean` does, and on a CPU without LSE that precondition is false,
   so the theorem is vacuous there rather than wrong. A proof about code that uses LSE
   unconditionally is a statement about LSE-capable CPUs.
+* **The `arm64HasATOMICS` precondition trusts the kernel.** The runtime sets the flag from the
+  `HWCAP_ATOMICS` bit Linux reports in the auxiliary vector, so the precondition is "the kernel
+  says every core has LSE". A kernel that over-reports a feature on a heterogeneous
+  (big.LITTLE) system — as happened with atomics, Go issue 28431 — makes the precondition true
+  on a CPU where an LSE instruction can trap; the theorem is then about a machine that is not
+  the one running. The same holds for any other HWCAP-derived flag a proof assumes.
+* **FP/AdvSIMD.** FEAT_FP and FEAT_AdvSIMD are formally optional in Armv8-A. The model in this
+  tree decodes no SIMD&FP instruction (they fault), so no theorem depends on them; a model that
+  accepts them (the vector extension `Janus/Arm64/Vector.lean` on the arm64 coverage branch, used
+  by `memequal`/`indexbyte`) assumes the CPU implements both, as every system that runs Go's
+  arm64 port does (the AArch64 procedure-call standard passes floating-point values in SIMD&FP
+  registers). FEAT_AES, FEAT_LRCPC and FEAT_LSE are assumed in the same way where their
+  instructions are accepted.
 * **Store-exclusives are rejected.** `STXR`, `STLXR`, `STXP` and `STLXP` decode to nothing
   (`undecodable`), so any run that reaches one faults. Reasoning: on real hardware a
   store-exclusive may fail *spuriously* (status 1, nothing stored) even with no other thread:
@@ -267,6 +297,12 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   (`Fault.trapped`, `SIGILL` on Linux) when `DZP = 1`. Other `DC`/`IC`/`SYS` operations are
   rejected. `examples/proofs/ClearWords.lean` proves `runtime.memclrNoHeapPointers` (through its
   `DC ZVA` path) for every value of `DCZID_EL0`.
+* **`DCZID_EL0` is assumed uniform across cores.** `State.dczid` is one value for the whole run,
+  but the register is IMPLEMENTATION DEFINED *per core*. Go reads it once and caches the block
+  size; a thread that migrates to a core with a different `BS` between that read and `DC ZVA`
+  zeroes a different block size than the code planned for. A theorem that reads `DCZID_EL0`
+  (ClearWords) is therefore about systems whose cores all report the same value; no shipping
+  heterogeneous system is known to differ, but the architecture does not forbid it.
 * **No SIMD/FP registers.** `State` has no `V0`–`V31`. Go 1.26's `runtime.memmove` and
   `runtime.memclrNoHeapPointers` on arm64, and the compiler's inline copies and zeroing of
   fixed-size values, use general-purpose `LDP`/`STP` only (checked on the Go 1.26.0 binary: no

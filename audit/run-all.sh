@@ -49,11 +49,44 @@ for a in A1_instance A3_initialize A6_eval_io A9_namespace_shadow A5_skipkernel 
   row "$a" blocked "$(v --proof audit/attacks/$a.lean $W/Add)"
 done
 # A2/A4 still verify, but the printed statement is now honest (the proof's unexpanders are
-# inactive in the clean print environment), so the attack no longer misleads. Verify prints
-# "Verified"; inspect the statement with `janus explain`.
+# inactive in the clean print environment), so the attack no longer misleads. Since round 2 the
+# printed statement must also round-trip (re-elaborate to the checked type) and pass the
+# instance-argument check: A2 prints `… fun x_1 s' => Shown (BitVec.toNat (s'.regs 0) =
+# x.toNat * y.toNat) True` (with `Shown`'s body in the report's definitions) and A4 `… fun x
+# x_1 => True`; both round-trip, so both stay Verified-honest. Inspect with `janus explain`.
 for a in A2_unexpander A4_unexpand_janus; do
   row "$a" Verified-honest "$(v --proof audit/attacks/$a.lean $W/Add)"
 done
+# Round 2, CRITICAL-1 (docs/AUDIT-ROUND2.md): an instance written inline in the statement
+# (`@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y`, printed `x * y`) used to verify against Add. Now
+# rejected (statement identity) by the instance-argument check and, independently, by the
+# round-trip of the printed statement. Variants: HSub, HMul, an OfNat literal instance, a
+# Decidable `dite` in an `if`, LT meaning ≤, an inline NatCast coercion, an inline Coe, and a
+# literal behind a beta-redex.
+for a in S1_inline_instance S1c_mul S1d_ofnat S1e_decidable_if S1f_lt S1g_coe S1h_coe_inline S1i_beta; do
+  row "R2.$a" blocked "$(v --proof audit/round2/attacks/$a.lean $W/Add | cut -c1-120)"
+done
+# Round 2, U1: the unshare fallback (forced with JANUS_SANDBOX=unshare, cache on the separate
+# /tmp mount) now makes every mount read-only with private tmpfs /tmp and /dev/shm. The honest
+# theorems verify; neither the trusted-cache plant (U1) nor any host /tmp, /dev/shm, /boot or
+# /run marker (U1b) may appear.
+u1() { # u1 NAME ATTACK MARKER…: Verified with no marker on the host, else BROKEN
+  local name=$1 attack=$2; shift 2
+  local c; c=$(mktemp -d /tmp/janus-u1-cache.XXXXXX)
+  rm -f "$@"
+  local res; res=$(JANUS_SANDBOX=unshare JANUS_CACHE_DIR="$c" "$J" verify --janus-root "$root" --proof "$attack" $W/Add 2>&1)
+  local first; first=$(head -1 <<<"$res")
+  local leaked=""
+  for m in "$@" "$c/v1/replay/00/planted-by-sandboxed-proof"; do [ -e "$m" ] && leaked="$leaked $m"; done
+  rm -f "$@"; rm -rf "$c"
+  if grep -q "Stage: sandbox" <<<"$res"; then
+    printf '%-28s %-8s %s\n' "$name" skipped "unshare fallback refused here: $(grep -m1 'No sandbox' <<<"$res" | cut -c1-90)"
+  elif [ -n "$leaked" ]; then row "$name" blocked "accepted: written to the host:$leaked"
+  else row "$name" mitigated "$first"; fi
+}
+u1 R2.U1_unshare_cache_write audit/round2/attacks/U1_unshare_cache_write.lean
+u1 R2.U1b_unshare_mounts audit/round2/attacks/U1b_unshare_mounts.lean \
+  /tmp/janus-u1b-marker /dev/shm/janus-u1b-marker /boot/janus-u1b-marker /run/user/0/janus-u1b-marker /run/janus-u1b-marker
 for t in t1 t3 t4; do
   row "A8_classic.$t" blocked "$(v --theorem Proof.$t --proof audit/attacks/A8_classic.lean $W/Add)"
 done

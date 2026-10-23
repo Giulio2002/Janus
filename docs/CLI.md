@@ -347,9 +347,13 @@ printed statement is the one the kernel checked. To make that true, verification
 * runs **every Lean process that loads the proof inside a sandbox** (bubblewrap, else an
   `unshare` namespace): no network; the filesystem — including the Janus sources, the
   `~/.cache/janus` build and the `janus` binary — is read-only except one fresh, private build
-  directory; a private `/tmp`, PID and user namespace, killed with the parent. Without a sandbox
-  verification refuses (`Stage: sandbox`) unless you pass `--unsafe-no-sandbox`. Install
-  bubblewrap with `apt-get install -y bubblewrap`; the mode used is recorded in `verified.json`.
+  directory; a private `/tmp`, PID and user namespace, killed with the parent. The `unshare`
+  fallback remounts **every** mount read-only (not only `/`) and mounts private tmpfs `/tmp`
+  and `/dev/shm`; if some mount cannot be made read-only it refuses, and you should install
+  bubblewrap. `JANUS_SANDBOX=unshare` forces the fallback (for testing it), `JANUS_SANDBOX=bwrap`
+  forbids it. Without a sandbox verification refuses (`Stage: sandbox`) unless you pass
+  `--unsafe-no-sandbox`. Install bubblewrap with `apt-get install -y bubblewrap`; the mode used
+  is recorded in `verified.json`.
 * audits the theorem with a **trusted compiled routine (`janus-audit`)** that imports the
   proof's compiled module *as data* and never runs its initializers, so the proof cannot forge
   the audit result or run code during it;
@@ -359,6 +363,16 @@ printed statement is the one the kernel checked. To make that true, verification
 * **prints the statement in a clean environment** that imports only `Janus` and `Extracted`,
   never the proof, so the proof's unexpanders, notations, delaborators and instances cannot make
   the printed statement differ from the checked one;
+* requires the **printed statement to mean what was checked** (round 2, CRITICAL-1): every
+  argument in an instance-implicit position must be a registered instance of the trusted
+  environment (or an instance binder `[inst : C]` of the theorem), so an inline instance such as
+  `@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y` (printed `x * y`) is rejected, and the printed
+  statement is **re-parsed and re-elaborated** in the clean environment and must be
+  definitionally equal to the checked type (`Stage: statement identity`, "does not
+  round-trip"). Coercions are printed with their target type (`(↑n : Int)`), and numerals with
+  theirs (`(5 : BitVec 64)`) when the plain print would read back at another type. The report
+  also carries `statementExplicit`, the statement printed with `pp.explicit` (every implicit and
+  instance argument shown);
 * requires the statement to mention `Extracted.program`/`Extracted.entry` and to be built only
   from Lean/Std core, `Janus.*`, `Extracted.*` and plain proof-local `def`s (whose bodies are
   disclosed in the report); a proof-local instance, class value, `opaque`, axiom or a name that
@@ -398,8 +412,9 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
 6. **Audit** with `janus-audit` (sandboxed): it imports `Extracted`, `JanusTrusted` and `Proof`
    without running their initializers, checks the theorem is a `theorem` in the proof module,
    checks `Extracted.program`/`entry` are defeq to `JanusTrusted`, enforces the statement rules
-   above, collects transitive axioms (`collectAxioms`) and pretty-prints the statement in the
-   clean environment. Only `propext`, `Quot.sound` and `Classical.choice` are allowed; anything
+   above, collects transitive axioms (`collectAxioms`), pretty-prints the statement in the
+   clean environment, checks its instance arguments and that the printed text re-elaborates to
+   the checked type (`statement identity`), and prints it once more with `pp.explicit`. Only `propext`, `Quot.sound` and `Classical.choice` are allowed; anything
    else, including `sorryAx`, `Lean.ofReduceBool`, `Lean.trustCompiler` and user axioms, is
    rejected (`axiom audit`). `--theorem` must be a plain **ASCII** dotted Lean name.
 7. **Kernel replay**: `leanchecker` (shipped with the Lean toolchain) replays through the
@@ -427,6 +442,7 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
   "kind": "theorem",
   "module": "Proof",
   "statement": "Proof.correctness : Extracted.entry = Extracted.entry",
+  "statementExplicit": "Proof.correctness : @Eq Nat Extracted.entry Extracted.entry",
   "axioms": [],
   "allowedAxioms": ["propext", "Quot.sound", "Classical.choice"],
   "kernelReplay": { "tool": "leanchecker", "status": "passed",
