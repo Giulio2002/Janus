@@ -97,6 +97,19 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 	if h.NZCV != m.NZCV {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("nzcv: hw %04b model %04b (in %04b)", h.NZCV, m.NZCV, c.NZCV))
 	}
+	if len(h.V) == 32 && len(m.V) == 32 {
+		for i := 0; i < 32; i++ {
+			if norm128(h.V[i]) != norm128(m.V[i]) {
+				in := "0"
+				if len(c.V) == 32 {
+					in = c.V[i]
+				}
+				v.Diffs = append(v.Diffs, fmt.Sprintf("v%d: hw %s model %s (in %s)", i, h.V[i], m.V[i], in))
+			}
+		}
+	} else if (len(h.V) == 32) != (len(m.V) == 32) {
+		v.Diffs = append(v.Diffs, "v: vector registers reported by one side only")
+	}
 	if hwPC != hexv(m.PC) {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("pc: hw %s (pc+%d) model %s (pc+%d)", h.PC,
 			int64(hwPC-L.TestPC), m.PC, int64(hexv(m.PC)-L.TestPC)))
@@ -146,12 +159,24 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 		if strings.HasPrefix(k, "x") {
 			k = "reg"
 		}
+		if strings.HasPrefix(k, "v") {
+			k = "vreg"
+		}
 		if len(kinds) == 0 || kinds[len(kinds)-1] != k {
 			kinds = append(kinds, k)
 		}
 	}
 	v.Kind = "state/" + strings.Join(kinds, "+")
 	return v
+}
+
+// norm128 normalises a hex number of up to 128 bits (lower case, no prefix, no leading zeros).
+func norm128(s string) string {
+	t := strings.TrimLeft(strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")), "0")
+	if t == "" {
+		return "0"
+	}
+	return t
 }
 
 func show(mm map[int]int, off int, seed uint64) string {

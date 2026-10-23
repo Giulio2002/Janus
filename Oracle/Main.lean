@@ -7,13 +7,14 @@ import Lean.Data.Json
 Reads one JSON test case per line on stdin (the format written by `oracle gen`, see
 `oracle/layout/layout.go` and `docs/ORACLE.md`) and prints one JSON result per line:
 
-* the initial `State` has `X0..X30`, `SP`, `NZCV`, `pc` and `dczid` (the reference machine's
-  DCZID_EL0, field `dczid`) from the case;
+* the initial `State` has `X0..X30`, `SP`, `NZCV`, `pc`, `V0..V31` (field `v`, absent = 0),
+  `tpidr` (TPIDR_EL0, absent = 0) and `dczid` (the reference machine's DCZID_EL0, field
+  `dczid`) from the case;
 * `mem.regions` is exactly the native runner's data buffer `[DataBase, DataBase + DataSize)`
   (writable), and its bytes follow `pattern seed`; every other byte reads as 0 but lies
   outside every region, so any access to it must fault;
-* the result is either the fault, or the successor state: registers, SP, NZCV, pc and the
-  list of buffer bytes that differ from the initial pattern.
+* the result is either the fault, or the successor state: registers, SP, NZCV, pc, `V0..V31`
+  and the list of buffer bytes that differ from the initial pattern.
 
 The constants below must match `oracle/layout/layout.go`.
 -/
@@ -67,6 +68,10 @@ structure Case where
   seed : Nat
   /-- DCZID_EL0 of the reference machine (`State.dczid`). Absent in old corpora: `0x10`. -/
   dczid : Nat
+  /-- V0..V31 (absent in old corpora: zero). -/
+  v : Array Nat
+  /-- TPIDR_EL0 (absent: 0). -/
+  tpidr : Nat
 
 def hexField (j : Json) (k : String) : Except String Nat := do
   parseHex (← j.getObjValAs? String k)
@@ -83,7 +88,12 @@ def parseCase (line : String) : Except String Case := do
   let nzcv ← j.getObjValAs? Nat "nzcv"
   let seed ← j.getObjValAs? Nat "seed"
   let dczid ← (j.getObjValAs? Nat "dczid" <|> pure 0x10)
-  pure { id, word, pc, x, sp, nzcv, seed, dczid }
+  let vs ← (j.getObjValAs? (Array String) "v" <|> pure #[])
+  if vs.size ≠ 0 && vs.size ≠ 32 then throw "v must have 32 entries"
+  let v ← vs.mapM parseHex
+  if v.any (· ≥ 2 ^ 128) then throw "v entries must be below 2^128"
+  let tpidr ← (hexField j "tpidr" <|> pure 0)
+  pure { id, word, pc, x, sp, nzcv, seed, dczid, v, tpidr }
 
 def initState (c : Case) : State :=
   { regs := fun i => if i < 31 then BitVec.ofNat 64 c.x[i]! else 0
@@ -95,7 +105,9 @@ def initState (c : Case) : State :=
           if dataBase ≤ a ∧ a < dataBase + dataSize then BitVec.ofNat 8 (pattern c.seed (a - dataBase))
           else 0
         regions := [{ base := dataBase, size := dataSize, writable := true }] }
-    dczid := BitVec.ofNat 5 c.dczid }
+    dczid := BitVec.ofNat 5 c.dczid
+    vregs := fun i => if i < c.v.size then BitVec.ofNat 128 c.v[i]! else 0
+    tpidr := BitVec.ofNat 64 c.tpidr }
 
 def nzcvOf (f : Flags) : Nat :=
   (if f.n then 8 else 0) + (if f.z then 4 else 0) + (if f.c then 2 else 0) + (if f.v then 1 else 0)
@@ -112,6 +124,7 @@ def runCase (c : Case) : Json :=
     Json.mkObj [("id", c.id), ("status", "ok"), ("pc", hex s.pc.toNat),
       ("x", Json.arr ((List.range 31).map fun i => Json.str (hex (s.regs i).toNat)).toArray),
       ("sp", hex s.sp.toNat), ("nzcv", nzcvOf s.flags),
+      ("v", Json.arr ((List.range 32).map fun i => Json.str (hex (s.vregs i).toNat)).toArray),
       ("mem", Json.arr mem.toArray)]
 
 end Oracle

@@ -15,7 +15,11 @@ base instructions), carrying the raw encoding fields, not a "cleaned up" meaning
   scaling happen in `Exec`, following the ARM ARM pseudocode.
 
 Aliases (MOV, CMP, CMN, TST, NEG, MVN, LSL/LSR/ASR #imm, UBFX, SXTW, ROR #imm, ...) are not
-separate constructors: they are the underlying encodings.
+separate constructors: they are the underlying encodings (so are the SIMD aliases: `MOV Vd, Vn`
+is ORR, `MOV Xd, Vn.D[i]` is UMOV, `MOV Vd.T[i], ...` is INS, `MVN` is NOT, `SXTL`/`UXTL` are
+SSHLL/USHLL #0). Advanced SIMD classes carry their raw `Q`, `U`, `size` and `opcode` fields; the
+operation they select is computed in `Janus.Arm64.Vector`. SIMD&FP register fields (`Vt`, `Vn`,
+...) are plain numbers `0..31` (there is no zero register or SP among them).
 
 `decode` (see `Janus.Arm64.Decode`) only produces values of this type that correspond to a
 valid, allocated encoding of the subset; `exec` is only specified on such values.
@@ -112,6 +116,8 @@ inductive Instr where
   /-- DC ZVA, `Xt`: zero the naturally aligned block of `4 << DCZID_EL0.BS` bytes containing
   `X[t]`. `rt`: ZR. -/
   | dcZva (rt : Nat)
+  /-- MRS `Xt`, TPIDR_EL0 (the EL0 thread pointer). `rt`: ZR. The value is `State.tpidr`. -/
+  | mrsTpidr (rt : Nat)
   -- Loads and stores (general-purpose registers only, `V = 0`)
   /-- LDR (literal): `opc` 00 = LDR Wt, 01 = LDR Xt, 10 = LDRSW Xt. `rt`: ZR. -/
   | ldrLit (opc imm19 rt : Nat)
@@ -146,6 +152,56 @@ inductive Instr where
   /-- CASP{A}{L} of a register pair, 32-bit (`sz = false`) or 64-bit (`sz = true`) halves;
   `rs`, `rt` even. `rn`: SP. `rs`, `rs+1`, `rt`, `rt+1`: ZR. -/
   | casp (sz L o0 : Bool) (rs rn rt : Nat)
+  -- SIMD&FP loads and stores (`V = 1`): the transfer register `rt`/`rt2` is a V register.
+  /-- LD1/ST1 (multiple structures, `L` = load) of `rpt` = 1–4 consecutive registers
+  (`opcode` 0111/1010/0110/0010), `Q` = 128-bit registers, `size` the element size (it does not
+  change the bytes transferred). `post`: post-index by `X[m]`, or by the transfer size for
+  `rm = 31`. `rn`: SP. -/
+  | vldstMulti (Q L : Bool) (opcode size : Nat) (post : Bool) (rm rn rt : Nat)
+  /-- LD1–LD4 / ST1–ST4 (single structure: one lane of `selem = opcode<0>:R + 1` consecutive
+  registers) and LD1R–LD4R (load and replicate, `opcode = 11x`). Lane and element size from
+  `Q:S:size` as in the decode pseudocode (`vSingleLayout`). `post`: post-index by `X[m]`, or by
+  the transfer size for `rm = 31`. `rn`: SP. -/
+  | vldstSingle (Q L R : Bool) (opcode : Nat) (S : Bool) (size : Nat) (post : Bool) (rm rn rt : Nat)
+  /-- LDR St/Dt/Qt (literal): `opc` 00 = 4 bytes, 01 = 8, 10 = 16. -/
+  | vldrLit (opc imm19 rt : Nat)
+  /-- LDR/STR B/H/S/D/Q, unsigned scaled offset; access size `2^(opc<1>:size)` bytes,
+  `opc<0>` = load. `rn`: SP. -/
+  | vldstUImm (size opc imm12 rn rt : Nat)
+  /-- LDUR/STUR and pre/post-indexed LDR/STR of B/H/S/D/Q. `rn`: SP. -/
+  | vldstImm9 (size opc : Nat) (mode : Imm9Mode) (imm9 rn rt : Nat)
+  /-- LDR/STR B/H/S/D/Q, register offset. `rn`: SP. `rm`: ZR. -/
+  | vldstReg (size opc rm : Nat) (option : ExtendType) (S : Bool) (rn rt : Nat)
+  /-- LDP/STP of S/D/Q registers: `opc` 00 = 4 bytes, 01 = 8, 10 = 16. `rn`: SP. -/
+  | vldstPair (opc : Nat) (mode : PairMode) (L : Bool) (imm7 rt2 rn rt : Nat)
+  -- Advanced SIMD data processing (integer and move instructions only)
+  /-- Three same (vector), integer subset: `opcode = w<15:11>` (see `threeSameOp`). -/
+  | vThreeSame (Q U : Bool) (size rm opcode rn rd : Nat)
+  /-- Scalar three same on D registers (`size = 11`): ADD/SUB, CMTST/CMEQ, CMGT/CMHI,
+  CMGE/CMHS. -/
+  | vScalarThreeSame (U : Bool) (size rm opcode rn rd : Nat)
+  /-- Copy: DUP (element, `imm4 = 0000`), DUP (general, `0001`; `rn`: ZR), INS (general, `0011`;
+  `rn`: ZR), SMOV (`0101`; `rd`: ZR), UMOV (`0111`; `rd`: ZR); INS (element) for `op = 1`. -/
+  | vCopy (Q op : Bool) (imm5 imm4 rn rd : Nat)
+  /-- Across lanes: SADDLV/UADDLV, SMAXV/UMAXV, SMINV/UMINV, ADDV (`opcode = w<16:12>`). -/
+  | vAcross (Q U : Bool) (size opcode rn rd : Nat)
+  /-- Two-register miscellaneous, integer subset (`opcode = w<16:12>`, see `twoMiscOp`; XTN is
+  `opcode = 10010`). -/
+  | vTwoMisc (Q U : Bool) (size opcode rn rd : Nat)
+  /-- Shift by immediate (`immh ≠ 0`): SSHR/USHR, SSRA/USRA, SHL, SLI, SRI, SHRN, SSHLL/USHLL. -/
+  | vShiftImm (Q U : Bool) (immh immb opcode rn rd : Nat)
+  /-- Modified immediate: MOVI/MVNI/ORR/BIC (vector, immediate) and FMOV (vector, immediate);
+  `imm8 = a:b:c:d:e:f:g:h`. -/
+  | vModImm (Q op : Bool) (cmode imm8 rd : Nat)
+  /-- EXT: bytes `imm4 ..` of `V[m]:V[n]`. -/
+  | vExt (Q : Bool) (rm imm4 rn rd : Nat)
+  /-- TBL (`op = false`) / TBX of `len + 1` table registers starting at `V[n]`. -/
+  | vTbl (Q : Bool) (rm len : Nat) (op : Bool) (rn rd : Nat)
+  /-- AESE (`opcode = 00100`), AESD (`00101`), AESMC (`00110`), AESIMC (`00111`) (FEAT_AES). -/
+  | vAes (opcode rn rd : Nat)
+  /-- FMOV between a general and a SIMD&FP register (bit moves only): `sf`, `ftype`, `rmode`,
+  `opcode` as encoded (`opcode = 110`: to general, `111`: to SIMD&FP). General register: ZR. -/
+  | fmovGen (sf : Bool) (ftype rmode opcode rn rd : Nat)
   -- Data processing: register
   /-- AND/BIC/ORR/ORN/EOR/EON/ANDS/BICS (shifted register); `N` inverts the second operand.
   All registers: ZR. -/
