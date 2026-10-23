@@ -55,8 +55,8 @@ example : decode [0x40, 0xb4, 0x01] = some (.mov 8 (.reg 4) (.imm 1), 3) := by d
 example : decode [0xcc] = none := by decide
 example : decode [0x0f, 0x0b] = none := by decide
 example : decode [0x0f, 0x05] = none := by decide
--- lock add [rax], eax ; fs: mov rax, [rax] ; addr32 mov eax, [eax]
-example : decode [0xf0, 0x01, 0x00] = none := by decide
+-- lock add eax, eax (register destination: #UD) ; fs: mov rax, [rax] ; addr32 mov eax, [eax]
+example : decode [0xf0, 0x01, 0xc0] = none := by decide
 example : decode [0x64, 0x48, 0x8b, 0x00] = none := by decide
 example : decode [0x67, 0x8b, 0x00] = none := by decide
 -- REX followed by a legacy prefix (the REX is ignored by hardware)
@@ -100,6 +100,58 @@ example : faultOf (step [0xc3] s0) = some (.outsideAllocation 5 8) := by decide
 -- 32-bit shift by 0 still zero-extends (found by the oracle)
 example : (step [0xc1, 0xe0, 0x00] { s0 with regs := fun _ => 0xFFFFFFFF00000001 }).toOption.map
     (fun s => s.regs 0) = some 1 := by decide
+
+/-! ## Atomics and string instructions -/
+
+-- lock xadd [rax], ebx ; lock cmpxchg [rcx], rdx ; rep movsb ; rep stosq ; mfence
+example : decode [0xf0, 0x0f, 0xc1, 0x18] = some (.xadd 32 (.mem ⟨some 0, none, 0, 0, false⟩) (.reg 3), 4) := by decide
+example : decode [0xf0, 0x48, 0x0f, 0xb1, 0x11] = some (.cmpxchg 64 (.mem ⟨some 1, none, 0, 0, false⟩) (.reg 2), 5) := by decide
+example : decode [0xf3, 0xa4] = some (.movs true 8, 2) := by decide
+example : decode [0xf3, 0x48, 0xab] = some (.stos true 64, 3) := by decide
+example : decode [0x0f, 0xae, 0xf0] = some (.nop, 3) := by decide
+-- lock or [rax], ecx is the unlocked or
+example : (decode [0xf0, 0x09, 0x08]).map (·.1) = (decode [0x09, 0x08]).map (·.1) := by decide
+-- LOCK where it is #UD: register destination, CMP, MOV, a non-RMW string op; LOCK with F3
+example : decode [0xf0, 0x48, 0x01, 0xc8] = none := by decide
+example : decode [0xf0, 0x48, 0x39, 0x08] = none := by decide
+example : decode [0xf0, 0x89, 0x08] = none := by decide
+example : decode [0xf0, 0xa5] = none := by decide
+example : decode [0xf0, 0xf3, 0x01, 0x08] = none := by decide
+-- register-destination XADD/CMPXCHG are not modelled; REPNE MOVS, STD and TPAUSE rejected
+example : decode [0x0f, 0xc1, 0xd8] = none := by decide
+example : decode [0xf2, 0xa4] = none := by decide
+example : decode [0xfd] = none := by decide
+example : decode [0x66, 0x0f, 0xae, 0xf0] = none := by decide
+
+/-- A state with 64 writable bytes at `0x100` (byte `a` initially `a`). -/
+def sm : State :=
+  { s0 with mem := ⟨fun a => BitVec.ofNat 8 a, [⟨0x100, 64, true⟩]⟩,
+            regs := fun i => if i = 0 then 0x0302 else if i = 1 then 3 else if i = 6 then 0x100
+              else if i = 7 then 0x120 else BitVec.ofNat 64 (0x100 + i) }
+
+-- lock cmpxchg [rsi], ax: AX = 0x0302 = [0x100..0x102) = 0x0100? no: unequal, AX ← 0x0100
+example : (step [0xf0, 0x66, 0x0f, 0xb1, 0x06] sm).toOption.map (fun s => (s.regs 0, s.flags.zf)) =
+    some (0x0100, some false) := by decide
+-- equal: [0x102..0x104) = 0x0302 = AX, so it is replaced by CX = 3
+example : (step [0xf0, 0x66, 0x0f, 0xb1, 0x4e, 0x02] sm).toOption.map
+    (fun s => (s.mem.readLE 0x102 2, s.flags.zf, s.regs 0)) = some (3, some true, 0x0302) := by decide
+-- lock xadd [rsi], cl: [0x100] = 0 → 3, CL ← 0
+example : (step [0xf0, 0x0f, 0xc0, 0x0e] sm).toOption.map (fun s => (s.mem.readLE 0x100 1, s.regs 1)) =
+    some (3, 0) := by decide
+-- rep movsb with RCX = 3 copies 0x100..0x102 to 0x120..0x122 and leaves RCX = 0
+example : (step [0xf3, 0xa4] sm).toOption.map (fun s => (s.mem.readLE 0x120 4, s.regs 1, s.regs 6, s.regs 7)) =
+    some (0x23020100, 0, 0x103, 0x123) := by decide
+-- movsb without REP: one byte, RCX unchanged
+example : (step [0xa4] sm).toOption.map (fun s => (s.mem.readLE 0x120 2, s.regs 1)) =
+    some (0x2100, 3) := by decide
+-- rep stosw stores AX three times
+example : (step [0xf3, 0x66, 0xab] sm).toOption.map (fun s => (s.mem.readLE 0x120 6, s.regs 7)) =
+    some (0x030203020302, 0x126) := by decide
+-- a REP run that leaves the region faults
+example : faultOf (step [0xf3, 0xa4] { sm with regs := fun i => if i = 1 then 100 else sm.regs i }) =
+    some (.outsideAllocation 0x140 1) := by decide
+-- cmpxchg16b needs a 16-aligned operand
+example : faultOf (step [0x48, 0x0f, 0xc7, 0x4e, 0x01] sm) = some (.misaligned 0x101) := by decide
 
 /-! ## Specifications: return addresses and faults -/
 

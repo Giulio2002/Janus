@@ -11,7 +11,7 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 def digits : Janus.DataSegment := Extracted.data[0]
 
 /-- `digits.base`, the address of the string bytes in this binary. -/
-def digitsBase : Nat := 0x4abbfa
+def digitsBase : Nat := 0x4abe84
 
 theorem digits_base : digits.base = digitsBase := by decide
 

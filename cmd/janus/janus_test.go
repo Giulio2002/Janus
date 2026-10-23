@@ -23,6 +23,10 @@ var exampleFuncs = []string{"Add", "Max", "Add128", "Mul64", "Sum", "Get", "Add2
 	"Table", "HexDigit", "SetOne256", "GlobalTable", "Bump"}
 
 func TestMain(m *testing.M) {
+	// Build the example binaries with the same pinned Go release as scripts/build-examples*.sh.
+	if os.Getenv("GOTOOLCHAIN") == "" {
+		os.Setenv("GOTOOLCHAIN", "go1.26.0")
+	}
 	wd, _ := os.Getwd()
 	repoRoot = filepath.Clean(filepath.Join(wd, "..", ".."))
 	dir, err := os.MkdirTemp("", "janus-test-")

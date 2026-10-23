@@ -124,6 +124,56 @@ func specs() []Spec {
 	add("sse/movq", b(0x66), b(0x0F, 0x7E), -1, 0)
 	add("sse/movq", b(0xF3), b(0x0F, 0x7E), -1, 0)
 	add("sse/movq", b(0x66), b(0x0F, 0xD6), -1, 0)
+	// atomics: LOCK-prefixed read-modify-write forms (memory destination forced, and random
+	// ModRM to hit the #UD register forms), XADD, CMPXCHG, CMPXCHG8B/16B, and fences
+	lk := b(0xF0)
+	for i, n := range alu {
+		o := byte(i * 8)
+		add("lock/"+n, lk, b(o), -1, 2)
+		add("lock/"+n, lk, b(o+1), -1, 2)
+		add("lock/"+n, lk, b(o+1), -1, 0)
+		add("lock/"+n, lk, b(0x83), i, 2)
+		add("lock/"+n, lk, b(0x81), i, 0)
+		add("lock/"+n, lk, b(0x80), i, 2)
+	}
+	for r := 0; r < 2; r++ {
+		add("lock/incdec", lk, b(0xFF), r, 2)
+		add("lock/incdec", lk, b(0xFE), r, 0)
+	}
+	for r := 2; r < 4; r++ {
+		add("lock/notneg", lk, b(0xF7), r, 2)
+		add("lock/notneg", lk, b(0xF6), r, 0)
+	}
+	for r := 4; r < 8; r++ {
+		add("lock/bt", lk, b(0x0F, 0xBA), r, 2)
+	}
+	add("lock/bt", lk, b(0x0F, 0xAB), -1, 2)
+	add("lock/xchg", lk, b(0x87), -1, 0)
+	add("lock/xchg", lk, b(0x86), -1, 2)
+	add("lock/mov", lk, b(0x89), -1, 2)
+	add("lock/test", lk, b(0x85), -1, 2)
+	for _, o := range []byte{0xC0, 0xC1, 0xB0, 0xB1} {
+		add("atomic", lk, b(0x0F, o), -1, 2)
+		add("atomic", lk, b(0x0F, o), -1, 2)
+		add("atomic", nil, b(0x0F, o), -1, 0)
+	}
+	add("atomic", lk, b(0x0F, 0xC7), 1, 2)
+	add("atomic", nil, b(0x0F, 0xC7), 1, 0)
+	add("atomic", lk, b(0x0F, 0xC7), -1, 0)
+	for r := 5; r < 8; r++ {
+		add("fence", nil, b(0x0F, 0xAE), r, 1)
+	}
+	add("fence", b(0xF3), b(0x90), -1, 0)
+	// string instructions, with and without REP (the state is steered to small counts)
+	for _, o := range []byte{0xA4, 0xA5, 0xAA, 0xAB} {
+		add("string", b(0xF3), b(o), -1, 0)
+		add("string", b(0xF3), b(o), -1, 0)
+		add("string", nil, b(o), -1, 0)
+	}
+	for _, o := range []byte{0xA6, 0xA7, 0xAC, 0xAD, 0xAE, 0xAF} {
+		add("string", b(0xF3), b(o), -1, 0)
+		add("string", b(0xF2), b(o), -1, 0)
+	}
 	add("ud", nil, b(0x0F, 0x0B), -1, 0)
 	add("ud", nil, b(0xCC), -1, 0)
 	return s

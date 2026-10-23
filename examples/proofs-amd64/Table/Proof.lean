@@ -16,7 +16,7 @@ def table : List (BitVec 64) :=
 def lit : Janus.DataSegment := Extracted.data[0]
 
 /-- `lit.base`, the address of the table literal in this binary. -/
-def litBase : Nat := 0x4b6c00
+def litBase : Nat := 0x4b6ee0
 
 theorem lit_base : lit.base = litBase := by decide
 

@@ -8,6 +8,7 @@
 //	oracle report   -out DIR                                   re-render DIR/summary.md
 //	oracle minimize -out DIR                                   shrink mismatching cases to repro.md
 //	oracle selftest                                            check the native harness itself
+//	oracle coverage -model M -pkgs bytes.,strings. BIN...     decoder coverage of real Go functions
 package main
 
 import (
@@ -32,7 +33,7 @@ func die(f string, a ...any) {
 
 func main() {
 	if len(os.Args) < 2 {
-		die("usage: oracle gen|harvest|run|report|minimize|selftest [flags]")
+		die("usage: oracle gen|harvest|run|report|minimize|selftest|coverage [flags]")
 	}
 	switch os.Args[1] {
 	case "gen":
@@ -47,6 +48,8 @@ func main() {
 		cmdSelftest(os.Args[2:])
 	case "minimize":
 		cmdMinimize(os.Args[2:])
+	case "coverage":
+		cmdCoverage(os.Args[2:])
 	default:
 		die("unknown command %q", os.Args[1])
 	}

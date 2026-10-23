@@ -13,6 +13,9 @@
 # MODEL (default .lake/build/bin/janus-oracle-amd64; e.g. MODEL=oracle-amd64/bin/fakemodel
 # to exercise the pipeline without the Lean model).
 set -euo pipefail
+# Example binaries (and so every address a proof depends on) are built with exactly this Go
+# release, whatever Go is installed; the go command downloads it on first use.
+export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mode="${1:-full}"
 export PATH="$PATH:/usr/local/go/bin"
@@ -56,7 +59,7 @@ if [ "$mode" = full ]; then
   mkdir -p "$corpus"
   (cd "$root/oracle-amd64" &&
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -o "$corpus/bigprog" ./harvest/bigprog &&
-    for p in math/big strconv sort crypto/sha256 bytes strings math/bits encoding/binary; do
+    for p in math/big strconv sort crypto/sha256 bytes strings math/bits encoding/binary sync/atomic; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
   if [ ! -f "$root/artifacts/examples-amd64" ]; then

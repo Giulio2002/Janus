@@ -42,6 +42,7 @@ const (
 	FlagZF = 1 << 6
 	FlagSF = 1 << 7
 	FlagOF = 1 << 11
+	FlagDF = 1 << 10
 
 	StatusFlags = FlagCF | FlagPF | FlagAF | FlagZF | FlagSF | FlagOF
 )
@@ -78,9 +79,16 @@ type HW struct {
 	PC     string   `json:"pc,omitempty"` // for ok: the address control went to
 	Regs   []string `json:"regs,omitempty"`
 	RFlags int      `json:"rflags"` // status bits only
-	XMM    []string `json:"xmm,omitempty"`
-	Mem    [][2]int `json:"mem,omitempty"` // (offset, new byte) for every changed byte
-	Note   string   `json:"note,omitempty"`
+	// DF is RFLAGS.DF after the instruction. The model has no DF (it is clear in every state
+	// the model reaches, see docs/AMD64.md), so an ok run that sets it is a mismatch.
+	DF   bool     `json:"df,omitempty"`
+	XMM  []string `json:"xmm,omitempty"`
+	Mem  [][2]int `json:"mem,omitempty"` // (offset, new byte) for every changed byte
+	Note string   `json:"note,omitempty"`
+	// Iters is the number of times the runner re-entered a REP string instruction (one
+	// single-step trap per iteration with RIP still at TestPC, see IsRepString): the
+	// iteration count minus one; 0 for every other instruction.
+	Iters int `json:"iters,omitempty"`
 }
 
 // Model is what `janus-oracle-amd64` (Janus.Amd64.step) produced.
@@ -125,9 +133,47 @@ const (
 	SIKernel  = 0x80 // si_code of an INT3 SIGTRAP
 )
 
+// prefixLen is the number of legacy and REX prefix bytes at the start of b.
+func prefixLen(b []byte) int {
+	i := 0
+	for i < len(b) {
+		switch x := b[i]; {
+		case x == 0x66 || x == 0x67 || x == 0xF2 || x == 0xF3 || x == 0xF0 ||
+			x == 0x2E || x == 0x3E || x == 0x26 || x == 0x36 || x == 0x64 || x == 0x65 ||
+			x >= 0x40 && x <= 0x4F:
+			i++
+			continue
+		}
+		break
+	}
+	return i
+}
+
+// IsRepString reports whether b is a string instruction (MOVS, CMPS, STOS, LODS, SCAS, INS,
+// OUTS) with an F2/F3 repeat prefix. Single-stepping traps after every iteration of such an
+// instruction with RIP still at the instruction, so the runner re-enters it until RIP moves.
+func IsRepString(b []byte) bool {
+	i := prefixLen(b)
+	if i >= len(b) {
+		return false
+	}
+	rep := false
+	for _, x := range b[:i] {
+		if x == 0xF2 || x == 0xF3 {
+			rep = true
+		}
+	}
+	switch b[i] {
+	case 0xA4, 0xA5, 0xA6, 0xA7, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0x6C, 0x6D, 0x6E, 0x6F:
+		return rep
+	}
+	return false
+}
+
 // Forbidden reports whether the instruction encoded by b is one the native runner refuses to
 // execute: INT n, MOV to a segment register, POPF, IRET, and the 0F-map SYSCALL, SYSENTER,
-// SYSRET, SYSEXIT, POP FS/GS, LSS/LFS/LGS, group 15 (FXRSTOR/LDMXCSR/XRSTOR/WRFSBASE/fences),
+// SYSRET, SYSEXIT, POP FS/GS, LSS/LFS/LGS, group 15 (FXRSTOR/LDMXCSR/XRSTOR/WRFSBASE; the
+// unprefixed fences LFENCE/MFENCE/SFENCE are allowed),
 // and the system groups 0F 00 / 0F 01, plus any instruction with an FS or GS segment prefix
 // (the Go runtime's TLS lives at FS: a store through it corrupts the runner). Only the opcode after the legacy and REX prefixes
 // matters: the runner single-steps exactly one instruction, so later bytes are operands.
@@ -156,6 +202,11 @@ func Forbidden(b []byte) bool {
 		return true
 	case 0x0F:
 		if i+1 >= len(b) {
+			return false
+		}
+		// LFENCE, MFENCE, SFENCE without any prefix are harmless (group 15 with mod = 11);
+		// every other group-15 form stays refused
+		if i == 0 && b[1] == 0xAE && len(b) >= 3 && (b[2] == 0xE8 || b[2] == 0xF0 || b[2] == 0xF8) {
 			return false
 		}
 		switch b[i+1] {

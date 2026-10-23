@@ -20,7 +20,7 @@ namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
 /-- The loop head (`CMPQ CX, SI`) in this binary. -/
-def loopHead : Nat := 0x4894c0
+def loopHead : Nat := 0x489640
 
 theorem loop (d s n : Nat) (hn : n < 2 ^ 63) (ret : Nat) (hret : RetAddr Extracted.program ret)
     (m0 : Memory) (hdw : d + 8 * n ≤ 2 ^ 48) (hsw : s + 8 * n ≤ 2 ^ 48)

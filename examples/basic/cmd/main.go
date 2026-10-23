@@ -53,3 +53,8 @@ func main() {
 	r ^= w[0] ^ uint64(basic.CopyWords(ys, xs)) ^ basic.SumSquares(n, n+1)
 	println(r, len(Keep))
 }
+
+// The sync/atomic and memory-routine examples: kept alive through Keep, which main prints.
+func init() {
+	Keep = append(Keep, basic.AtomicAdd, basic.AtomicMax, basic.CopyBlock, basic.ClearWords)
+}

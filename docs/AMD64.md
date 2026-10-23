@@ -13,7 +13,7 @@ proofs.
 | semantics | `Janus/Amd64/Exec.lean` |
 | programs, runner, run lemmas | `Janus/Amd64/Program.lean`, `Janus/Amd64/Run.lean` |
 | Go ABIInternal on amd64, specs | `Janus/Amd64/GoABI.lean` |
-| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean` |
+| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills) |
 | extractor | `cmd/janus/amd64.go` (plus small dispatch edits) |
 | differential oracle | `oracle-amd64/`, `Oracle/Amd64Main.lean`, `docs/ORACLE-AMD64.md` |
 | tests | `JanusTests/Amd64.lean`, `cmd/janus/amd64_test.go` |
@@ -41,11 +41,15 @@ structurally recursive helpers, so `decide` and the kernel evaluate it on litera
 handles legacy prefixes, REX, the one- and two-byte opcode maps, ModRM, SIB, RIP-relative and
 `disp8`/`disp32` addressing, immediates, and the 15-byte limit. It is strict and rejects:
 
-* `LOCK`, `FS`/`GS` and address-size prefixes;
+* `LOCK` except on the lockable read-modify-write forms with a memory destination (`ADD ADC
+  AND BTC BTR BTS CMPXCHG CMPXCHG8B/16B DEC INC NEG NOT OR SBB SUB XOR XADD XCHG`), and
+  `LOCK` together with `F2`/`F3` (the HLE hints);
+* `FS`/`GS` and address-size prefixes;
 * duplicate prefix groups (except `66`), and a REX that is not immediately before the opcode
   (hardware ignores such a REX);
 * `66` on branches, `CALL`, `RET`, `PUSH`, `POP` and `LEAVE` (Intel and AMD differ);
-* `F2`/`F3` except where they select an instruction;
+* `F2`/`F3` except where they select an instruction (`F3` is `REP` on `MOVS`/`STOS`; `F2`
+  and segment overrides on string instructions are rejected);
 * segment overrides on branches (hints and CET `NOTRACK`);
 * VEX, EVEX and XOP;
 * `RCL`/`RCR` and the `SAL /6` alias;
@@ -59,13 +63,16 @@ handles legacy prefixes, REX, the one- and two-byte opcode maps, ModRM, SIB, RIP
 `ROL ROR SHL SHR SAR` (imm, 1, CL), `SHLD SHRD`, `BT BTS BTR BTC`, `BSF BSR TZCNT LZCNT POPCNT`,
 `BSWAP`, `SETcc`, `CMOVcc`, `Jcc` (rel8/rel32), `JMP` (rel, r/m), `CALL` (rel, r/m),
 `RET` / `RET imm16`, `PUSH` (r, r/m, imm), `POP r`, `LEAVE`, `NOP` / multi-byte `NOP` / `PAUSE`,
-`XCHG`, `CBW/CWDE/CDQE`, `CWD/CDQ/CQO`, `CLC STC CMC`, and the SSE moves Go uses: `MOVUPS MOVUPD
+`XCHG`, `CBW/CWDE/CDQE`, `CWD/CDQ/CQO`, `CLC STC CMC`, the SSE moves Go uses: `MOVUPS MOVUPD
 MOVDQU` (unaligned) and `MOVAPS MOVAPD MOVDQA` (fault unless 16-aligned), `XORPS XORPD PXOR`,
-`MOVD/MOVQ` between GPRs and XMM, and `MOVQ xmm/m64`. `MULX`, `ADCX` and `ADOX` are not
+`MOVD/MOVQ` between GPRs and XMM, and `MOVQ xmm/m64`; the atomics: `LOCK`-prefixed
+read-modify-write forms, `XADD` and `CMPXCHG` (memory destination, locked or not),
+`CMPXCHG8B`/`CMPXCHG16B`, `LFENCE MFENCE SFENCE`; and the string instructions `MOVS` and
+`STOS` (all widths) with and without `REP`. `MULX`, `ADCX` and `ADOX` are not
 modelled: Go does not emit them at `GOAMD64=v1` (the default). Over the Go-compiled code of
 the standard-library packages measured in `docs/ORACLE-AMD64.md`, the decoder accepts 99.6% of
-instruction occurrences. The rest is floating point, TLS loads through FS, string
-instructions and atomics.
+instruction occurrences. The rest is floating point, TLS loads through FS, AVX, and a few
+system instructions.
 
 **Semantics** follow the SDM *Operation* and *Flags Affected* sections:
 
@@ -84,6 +91,36 @@ instructions and atomics.
 * Branch targets `≥ 2^47` fault (`badTarget`). This is conservative: on hardware those
   targets are either non-canonical, which is `#GP`, or kernel/5-level addresses, which fault
   at fetch.
+* **Atomics.** The model is single-threaded (one goroutine, no other agent writes memory), so
+  `LOCK` changes nothing: a locked instruction has exactly the semantics of the unlocked one,
+  with all flags, and the fences are `NOP`s. `XADD`: `TEMP ← DEST + SRC; SRC ← DEST; DEST ←
+  TEMP`, flags of the `ADD`. `CMPXCHG`: flags of `CMP accumulator, DEST`; equal: `DEST ← SRC`
+  (a 32-bit success leaves the upper half of `RAX` alone); not equal: `rAX ← DEST`
+  (zero-extending at 32 bits) and `DEST` is written back unchanged, so it must be writable
+  either way. `CMPXCHG8B/16B` change only `ZF`; `CMPXCHG16B` faults (`misaligned`) unless its
+  operand is 16-aligned. Register destinations of `XADD`/`CMPXCHG` are not modelled (Go
+  never emits them). Theorems about atomics therefore say nothing about concurrent
+  executions: they are the sequential semantics of the code.
+* **String instructions.** `MOVS`/`STOS` move or store one element of `w/8` bytes at
+  `[RSI]`/`[RDI]` and advance the pointers; `REP` repeats this `RCX` times and leaves `RCX = 0`
+  (64-bit address size: `67` is rejected). A `REP` instruction is the sequential repetition of
+  its element step, which is its architectural result also with fast strings (SDM Vol. 1
+  §7.3.9.3). The direction flag is not in the state: Go ABIInternal keeps `DF = 0` at calls
+  (`abi-internal.md`: "The direction flag (D) is always cleared (set to the 'forward'
+  direction) at a call."), `GoABI.CallSetup` describes such a call state, and no modelled
+  instruction sets `DF` (`STD`, `POPF`, `IRET` are not modelled), so `DF = 0` in every state
+  the model reaches and the string instructions always step forward. The native oracle checks
+  this: an executed case that leaves `DF` set is a mismatch. The one place Go sets `DF` is the
+  overlapping backward copy in `runtime.memmove` (`STD; REP MOVSQ; CLD`); `STD` is rejected, so
+  a proof cannot take that path (it needs `dst` above and overlapping `src`, and more than
+  256 bytes).
+* **CPU-feature globals.** `runtime.memmove` reads `runtime.memmoveBits` and
+  `runtime.memclrNoHeapPointers` reads `internal/cpu.X86.HasERMS`/`HasAVX2`, which Go sets at
+  start-up from `CPUID`. They live in `.noptrbss`, so the extractor does not copy them; a
+  theorem that reaches them states them in its precondition (readable, and the value it
+  assumes), or quantifies over them. The AVX paths are VEX code, which is not modelled, so
+  theorems that can reach them assume the feature bit is off (`HasAVX2 ≠ 1`, `memmoveBits &
+  1 = 0`); everything else (`HasERMS`, `repmovsPreferred`) is quantified.
 * `RIP` arithmetic is done on naturals. This is equal to the `BitVec` sum, and it keeps proof
   terms kernel-friendly: `BitVec.reduceAdd` proofs on large literals send the kernel into deep
   recursion.
@@ -133,7 +170,10 @@ stitched together from two segments. `Program.run`, `Outcome`, `Steps` and the r
 * **CPU assumptions.** The theorems describe an x86-64 CPU in 64-bit user mode under Linux:
   - `RFLAGS.AC` is clear, so there are no alignment checks except where an instruction
     demands one;
-  - `DF` is clear (the Go ABI guarantees it, and no modelled instruction depends on it);
+  - `DF` is clear (the Go ABI guarantees it at calls, and no modelled instruction sets it;
+    `MOVS`/`STOS` depend on it, see "String instructions");
+  - the CPU implements `CMPXCHG16B` (every x86-64-v2 CPU; Go's `GOAMD64=v1` code does not
+    emit it, it is modelled for completeness);
   - the CPU implements `POPCNT`, `LZCNT` and `TZCNT` (BMI1): on older CPUs `F3 0F BC/BD`
     execute as `BSF`/`BSR`. Any x86-64-v3 CPU qualifies; `GOAMD64=v1` code uses them only
     behind run-time feature checks.
@@ -144,7 +184,8 @@ stitched together from two segments. `Program.run`, `Outcome`, `Steps` and the r
   - x87/MMX/AVX state and the upper YMM/ZMM halves;
   - MXCSR;
   - segment registers;
-  - `LOCK`ed atomics and string instructions;
+  - concurrency (other threads, memory ordering), `STD`/the direction flag, string
+    instructions other than `MOVS`/`STOS`;
   - every other system feature.
   Code that uses them faults (`undecodable`) and cannot be proved to return.
 
@@ -178,6 +219,23 @@ stitched together from two segments. `Program.run`, `Outcome`, `Steps` and the r
   contradictory context), memory accessibility from local `accessible` facts, and `omega`.
 * `GoABI.DataLoaded.readLE` turns reads of copied `.rodata` into literals, through `listLE`
   of the data bytes, evaluated by `decide`.
+* `Janus.Amd64.TacticExt` (imported by `Janus`) extends the simp sets and adds the pieces the
+  atomics and memory routines need, all proved from the model:
+  - `REP STOS`/`REP MOVS` with a symbolic count: stop in front of the instruction
+    (`janus64_run until [addr]`) and apply `Reaches.repStos`/`Reaches.repMovs`, which take
+    the addresses and the count explicitly and continue from the closed form (`fillLE`,
+    `copyLE`; `stosIter_ok`, `movsIter_ok`);
+  - block copies: `copy_first`/`copy_step` turn a chain of chunk stores of loaded values into
+    `readLE dst n = readLE src n`; `readLE_writeLE_last` splits a read at its last write;
+  - zero fills: `Zeroed M M' d n` (`[d, d + n)` zeroed, nothing else changed) with
+    `Zeroed.trans`, `Zeroed.readLE`, `Zeroed.readLE_outside`, `zeroed_fillLE`, and the
+    `zeroed_writes` tactic for a chain of overlapping zero stores;
+  - `bv_add_add_neg`: negative displacements in indexed addresses (`-16(DI)(BX*1)`) are folded
+    with the literal on the left. The generic folding produced `n + (2^64 - k)`, whose kernel
+    check unfolded `Nat.add` along the literal (minutes, then deep recursion);
+  - `setWidth8_merge`/`setWidth16_merge` (a `SETcc` byte read back by `TEST`),
+    `bv8_sub_eq_zero` (`CMPB m8, $c` on a feature byte as a `Nat` equation), and `bvn`, which
+    closes `register = BitVec.ofNat 64 k` goals by `omega`.
 
 ## Proved (verified end to end by `janus verify`)
 
@@ -207,11 +265,18 @@ one `def` at the top of the file. Adding functions to `examples/basic` can move 
 | `AddLimbs` | `*z = (*x + *y) mod 2^256` by the 4-iteration carry loop (unrolled; carries through `SBB`/`NEG`) |
 | `CopyWords` | returns `n = min(len(dst), len(src))` and `dst[j] = src[j]` for `j < n` (a loop writing memory, by induction; slices disjoint from each other and the frame) |
 | `SumSquares` | `square(x) + square(y)`: the stack-check prologue and two calls |
+| `AtomicAdd` | `LOCK XADDQ`: `*p = old + d` and returns `old + d` |
+| `AtomicMax` | the `LOCK CMPXCHGQ` retry loop: returns `old` and leaves `*p = max(old, v)` (single-threaded: the CAS succeeds the first time; the retry edge is proved infeasible) |
+| `CopyBlock` | `copy(dst[:], src[:])` of `[16]uint64` through the real `runtime.memmove` (its 65–128-byte SSE path): the 128 bytes at `dst` equal the old 128 bytes at `src`, for any overlap |
+| `ClearWords` | `clear(b)` through the real `runtime.memclrNoHeapPointers`, for **every** length: all `len(b)` words are 0 and no other byte outside the frame changes. Covers the straight-line cases, the 256-byte `MOVDQU` loop and the `REP STOSQ` path; quantifies over `internal/cpu.X86.HasERMS` and assumes `HasAVX2 ≠ 1` |
 
 ## Known gaps
 
-* `RCL`/`RCR`, `LOCK`ed atomics (`XADD`, `CMPXCHG`, `LOCK OR`), `REP MOVS/STOS`, `MULX`,
-  `ADCX`/`ADOX`, VEX/AVX, and all floating point are not modelled. Their encodings fault.
+* `RCL`/`RCR`, `MULX`, `ADCX`/`ADOX`, VEX/AVX, `STD`/`CLD`, `CMPS`/`SCAS`/`LODS`, FS/GS-relative
+  accesses (the TLS load `MOVQ FS:-8, R14` of ABI wrappers), and all floating point are not
+  modelled. Their encodings fault. FS was left out on purpose: none of the target routines
+  (the inlined atomics, `memmove`, `memclrNoHeapPointers`) uses it; it would need the FS base
+  as a state parameter.
 * `SETcc` is accepted only with `ModRM.reg = 0`, and `66`-prefixed branches, `PUSH` and `POP`
   are rejected. These are model gaps in the oracle, conservative by design.
 * The undefined-flag sets of BSF/BSR/TZCNT/LZCNT/POPCNT/BSWAP/BTS/BTR/BTC are not

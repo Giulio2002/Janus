@@ -17,7 +17,7 @@ namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
 /-- The loop head (`CMPQ BX, CX`) in this binary. -/
-def loopHead : Nat := 0x489292
+def loopHead : Nat := 0x489412
 
 /-- `Σ_{j<n} word(a + 8 (k + j))`. -/
 def sumFrom (m : Memory) (a k : Nat) : Nat → Nat

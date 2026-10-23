@@ -236,6 +236,30 @@ func runCase(c *L.Case, seq int64) L.HW {
 	put64(ctx, L.CtxInflight, 1)
 	busy.Store(seq)
 	callPage()
+	g := func(i int) uint64 { return get64(ctx, L.CtxOutGRegs+8*i) }
+	// A REP string instruction traps after every iteration with RIP still at TestPC (SDM
+	// Vol. 3 §18.3.1.4): re-enter it from the captured state until RIP moves on or it faults.
+	if L.IsRepString(b) {
+		for int(get64(ctx, L.CtxSig)) == sigTRAP && int(int32(get64(ctx, L.CtxCode))) == L.TrapTrace &&
+			g(gRIP) == L.TestPC && r.Iters < 1<<16 {
+			r.Iters++
+			for i := 0; i < 16; i++ {
+				put64(ctx, L.CtxInRegs+8*i, g(gregOf[i]))
+			}
+			if get64(ctx, L.CtxOutHasFP) == 1 {
+				copy(ctx[L.CtxInXMM:L.CtxInXMM+256], ctx[L.CtxOutXMM:L.CtxOutXMM+256])
+			}
+			efl := g(gEFL)
+			put64(ctx, L.CtxFrame, L.TestPC)
+			put64(ctx, L.CtxFrame+8, userCS)
+			put64(ctx, L.CtxFrame+16, efl&(L.StatusFlags|L.FlagDF)|0x202|tf)
+			put64(ctx, L.CtxFrame+24, g(gRSP))
+			put64(ctx, L.CtxFrame+32, userSS)
+			put64(ctx, L.CtxSig, 0)
+			put64(ctx, L.CtxInflight, 1)
+			callPage()
+		}
+	}
 	busy.Store(0)
 
 	sig := int(get64(ctx, L.CtxSig))
@@ -243,7 +267,6 @@ func runCase(c *L.Case, seq int64) L.HW {
 	r.Code = int(int32(get64(ctx, L.CtxCode)))
 	addr := get64(ctx, L.CtxAddr)
 	r.Addr = hex64(addr)
-	g := func(i int) uint64 { return get64(ctx, L.CtxOutGRegs+8*i) }
 	pc := g(gRIP)
 	r.PC = hex64(pc)
 	r.Regs = make([]string, 16)
@@ -251,6 +274,7 @@ func runCase(c *L.Case, seq int64) L.HW {
 		r.Regs[i] = hex64(g(gregOf[i]))
 	}
 	r.RFlags = int(g(gEFL)) & L.StatusFlags
+	r.DF = g(gEFL)&L.FlagDF != 0
 	if get64(ctx, L.CtxOutHasFP) == 1 {
 		r.XMM = make([]string, 16)
 		for i := 0; i < 16; i++ {

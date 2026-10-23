@@ -128,3 +128,23 @@ integer subset it implements. It found no case where our model defines a flag or
 that is undefined in both the SDM and the formal model, except SAR CF with an over-wide
 count (finding 2). The native single-step oracle remains the reference for concrete values;
 the formal model has its own bugs (finding 4).
+
+## Atomics and string instructions
+
+`compare.py --classes REGEX` restricts the run to case classes matching `REGEX`. `REP` string
+instructions are run to completion: the formal model executes one iteration per step and
+leaves `RIP` at the instruction, so the driver feeds registers, flags and the buffer back
+(at most `RCX + 2` steps). On the `SEED=1` cases of the new classes that our model executes:
+
+* `LOCK`-prefixed `ADD ADC SUB SBB AND OR XOR INC DEC NEG NOT XCHG`: 19,906 cases, all identical.
+* `MOVS`/`STOS` without `REP`: 2,238 cases, all identical.
+* `CMPXCHG`: 3,338 cases; registers, memory and `RIP` identical in all, flags differ in 2,592
+  because the formal model computes them from `DEST - accumulator` instead of
+  `accumulator - DEST` (the hardware sides with ours).
+* `REP MOVS`/`REP STOS`: not comparable. The formal model does one iteration before testing
+  the count (`RCX = 0` copies an element and wraps `RCX`), and ends an `F3` repetition on `ZF`
+  as if it were `REPE`.
+* `XADD`, `LOCK BTS/BTR/BTC`, `CMPXCHG8B/16B` and the fences are not implemented by the formal
+  model.
+
+No case has a flag the formal model leaves undefined and ours defines.

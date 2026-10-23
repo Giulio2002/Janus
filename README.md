@@ -223,7 +223,7 @@ succeeds) only costs coverage.
 | qemu-aarch64 10.2.1 user mode (`-cpu max`) | arm64 model vs qemu, one instruction per case | 427,845 | **0** | [ORACLE.md](docs/ORACLE.md) |
 | Sail `arm-v9.4-a` (Arm's official ASL, translated) | arm64 model vs Arm's specification, same corpus | 427,845 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
 | Sail, misaligned-SP corpus | SP-alignment rule, which qemu cannot check | 90,450 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
-| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds | 1,011,430 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
+| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds (incl. atomics, `REP` string ops, SSE moves) | 1,187,981 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
 | Sail/ACL2 X86isa | amd64 undefined-flag sets, sampled | 20,000 | 0 flags undefined there but defined by Janus | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md#formal-x86-model-third-reference) |
 
 Cases come from every distinct instruction word in real Go binaries (`math/big`, `crypto/sha256`,

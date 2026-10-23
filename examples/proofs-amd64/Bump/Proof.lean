@@ -8,7 +8,7 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
 /-- Address of `example.com/basic.counter` (`.noptrbss`) in this binary, as reported in
 `identity.json` (`skippedData`). -/
-def counter : Nat := 0x576178
+def counter : Nat := 0x576258
 
 theorem correctness (d : BitVec 64) :
     Ensures Extracted.program Extracted.entry [d]

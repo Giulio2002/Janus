@@ -6,7 +6,9 @@ Each case runs twice, with the model's undefined-value source (`undef_read`) ret
 then 1; a status flag that differs between the two runs is one the formal model treats as
 undefined. See README.md.
 
-usage: compare.py EMULATOR ORACLE_DIR OUT_JSON [--sample N] [--jobs J] [--seed S]
+usage: compare.py EMULATOR ORACLE_DIR OUT_JSON [--sample N] [--jobs J] [--seed S] [--classes REGEX]
+
+--classes keeps only the case classes matching REGEX (e.g. the atomics and string classes).
 """
 import json, os, random, subprocess, sys, tempfile, collections
 from multiprocessing import Pool
@@ -29,6 +31,41 @@ def init(emu):
     global EMU, TMP
     EMU = emu
     TMP = tempfile.mkdtemp(prefix="sailx86-")
+
+def is_rep_string(code):
+    """A string instruction with an F2/F3 prefix (layout.IsRepString)."""
+    i = 0
+    while i < len(code) and (code[i] in (0x66, 0x67, 0xF2, 0xF3, 0xF0, 0x2E, 0x3E, 0x26, 0x36, 0x64, 0x65) or 0x40 <= code[i] <= 0x4F):
+        i += 1
+    return i < len(code) and any(b in (0xF2, 0xF3) for b in code[:i]) and code[i] in (
+        0xA4, 0xA5, 0xA6, 0xA7, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF)
+
+def run_rep(case, undef, code_path, data_path, buf):
+    """Run a REP string instruction to completion: the formal model executes one iteration
+    per step and leaves RIP at the instruction until the count is exhausted, so the state
+    (registers, flags, buffer) is fed back until RIP moves (at most RCX + 2 steps)."""
+    c = dict(case)
+    mem = bytearray(buf)
+    writes = []
+    dp = data_path + ".rep"
+    r = None
+    for _ in range(min(int(case["regs"][1], 16) + 2, 5000)):
+        open(dp, "wb").write(bytes(mem))
+        r = run_once(c, undef, code_path, dp)
+        if r["status"] != "ok":
+            return r
+        for addr, size, val in r["writes"]:
+            writes.append((addr, size, val))
+            for k in range(size):
+                a = addr + k
+                if DATA_BASE <= a < DATA_BASE + DATA_SIZE:
+                    mem[a - DATA_BASE] = (val >> (8 * k)) & 0xFF
+        if r["regs"]["rip"] != TEST_PC:
+            break
+        c["regs"] = [hex(r["regs"][n]) for n in REGN]
+        c["rflags"] = r["regs"]["rflags"]
+    r["writes"] = writes
+    return r
 
 def run_once(case, undef, code_path, data_path):
     args = [EMU, "-b", f"{TEST_PC:#x},{code_path}", "-b", f"{DATA_BASE:#x},{data_path}",
@@ -66,8 +103,12 @@ def work(item):
         buf[off] = b
     cp = os.path.join(TMP, f"c{os.getpid()}.bin"); dp = os.path.join(TMP, f"d{os.getpid()}.bin")
     open(cp, "wb").write(code); open(dp, "wb").write(bytes(buf))
-    r0 = run_once(case, 0, cp, dp)
-    r1 = run_once(case, 1, cp, dp)
+    if is_rep_string(bytes.fromhex(case["bytes"])):
+        r0 = run_rep(case, 0, cp, dp, buf)
+        r1 = run_rep(case, 1, cp, dp, buf)
+    else:
+        r0 = run_once(case, 0, cp, dp)
+        r1 = run_once(case, 1, cp, dp)
     res = {"id": case["id"], "class": case["class"], "bytes": case["bytes"]}
     if r0["status"] != "ok" or r1["status"] != "ok":
         res["sail"] = "fault"
@@ -94,6 +135,8 @@ def main():
     emu, odir, out = sys.argv[1], sys.argv[2], sys.argv[3]
     opts = dict(zip(sys.argv[4::2], sys.argv[5::2]))
     n = int(opts.get("--sample", 20000)); jobs = int(opts.get("--jobs", 16))
+    import re
+    only = re.compile(opts["--classes"]) if "--classes" in opts else None
     random.seed(int(opts.get("--seed", 1)))
     model = {}
     for line in open(os.path.join(odir, "model.jsonl")):
@@ -109,6 +152,8 @@ def main():
         if not (cl.startswith("gen/") or cl.startswith("edge/") or cl.startswith("harvest/")):
             continue
         name = cl.split("/", 1)[1]
+        if only is not None and not only.search(cl):
+            continue
         if any(name.startswith(p) for p in ("movups", "movaps", "movupd", "movapd", "movdq", "movq", "movd", "xorp", "pxor", "movss", "movsd")) or name == "sse-align":
             continue  # XMM state cannot be initialised in the Sail driver
         if model.get(c["id"], {}).get("status") != "ok":

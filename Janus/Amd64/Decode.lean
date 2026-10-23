@@ -13,10 +13,13 @@ tables 2-1..2-3) and the opcode maps of appendix A, cross-checked against
 
 Prefix policy (strict):
 * Legacy prefixes `66` (operand size), `F2`/`F3` (only where they select an instruction:
-  `PAUSE`, `POPCNT`, `TZCNT`, `LZCNT`, `MOVDQU`, `MOVQ`), and the null segment overrides
+  `PAUSE`, `POPCNT`, `TZCNT`, `LZCNT`, `MOVDQU`, `MOVQ`, and `F3` = `REP` on `MOVS`/`STOS`), and the null segment overrides
   `26`/`2E`/`36`/`3E` (ignored in 64-bit mode; not accepted on branches, where they are hints
   or CET `NOTRACK`). At most one of each group (`66` may repeat).
-* `F0` (`LOCK`), `64`/`65` (`FS`/`GS`), `67` (address size) are rejected.
+* `F0` (`LOCK`) only on the lockable read-modify-write forms with a memory destination
+  (`Decode.lockable`); elsewhere it is `#UD` and rejected. It is in group 1 with `F2`/`F3`,
+  so `F0` together with `F2`/`F3` (the HLE hints) is rejected.
+* `64`/`65` (`FS`/`GS`), `67` (address size) are rejected.
 * `REX` (`40`–`4F`) must immediately precede the opcode; a `REX` followed by another prefix
   (which hardware silently ignores) is rejected, as is a second `REX`.
 * `VEX`/`EVEX`/`XOP` (`C4`, `C5`, `62`, `8F` with `reg ≠ 0`) are rejected.
@@ -52,6 +55,8 @@ structure Prefixes where
   rep : Nat := 0
   /-- A null segment override (`26`/`2E`/`36`/`3E`) seen. -/
   seg : Bool := false
+  /-- `F0` (`LOCK`) seen. It shares prefix group 1 with `F2`/`F3`. -/
+  lock : Bool := false
   /-- The low nibble `WRXB` of the REX prefix, if any. -/
   rex : Option Nat := none
 deriving Repr, DecidableEq, Inhabited
@@ -64,7 +69,11 @@ def parsePrefixes : List Nat → Prefixes → Nat → Option (Prefixes × List N
     if b = 0x66 then
       if p.rex.isSome then none else parsePrefixes rest { p with opsize := true } (n + 1)
     else if b = 0xF2 ∨ b = 0xF3 then
-      if p.rep ≠ 0 ∨ p.rex.isSome then none else parsePrefixes rest { p with rep := b } (n + 1)
+      if p.rep ≠ 0 ∨ p.lock ∨ p.rex.isSome then none
+      else parsePrefixes rest { p with rep := b } (n + 1)
+    else if b = 0xF0 then
+      if p.rep ≠ 0 ∨ p.lock ∨ p.rex.isSome then none
+      else parsePrefixes rest { p with lock := true } (n + 1)
     else if b = 0x26 ∨ b = 0x2E ∨ b = 0x36 ∨ b = 0x3E then
       if p.seg ∨ p.rex.isSome then none else parsePrefixes rest { p with seg := true } (n + 1)
     else if 0x40 ≤ b ∧ b < 0x50 then
@@ -297,6 +306,13 @@ def oneByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
     finish p .int (.xchg osz (.reg 0) (.reg (op - 0x90 + 8 * rexB))) (n + 1)
   else if op = 0x98 then finish p .int (.cbw osz) (n + 1)
   else if op = 0x99 then finish p .int (.cwd osz) (n + 1)
+  else if op = 0xA4 ∨ op = 0xA5 ∨ op = 0xAA ∨ op = 0xAB then
+    -- MOVS (A4/A5), STOS (AA/AB); `F3` = REP. `F2` (REPNE, which hardware treats as REP
+    -- here) and segment overrides are rejected; the address size is always 64.
+    if p.rep = 0xF2 ∨ p.seg then none else
+    let w := if op % 2 = 0 then 8 else osz
+    let rp := p.rep = 0xF3
+    finish p .own (if op < 0xA8 then .movs rp w else .stos rp w) (n + 1)
   else if op = 0xA8 then
     match immU8 bs with
     | some (v, _, c) => finish p .int (.test 8 (.reg 0) (.imm v)) (n + 1 + c)
@@ -427,6 +443,31 @@ def twoByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
   else if op = 0xD6 then
     if sel ≠ 1 then none else
     withModRM fun m _ len => fin (.movq (rmX m.rm) (.xmm m.reg)) len
+  else if op = 0xB0 ∨ op = 0xB1 ∨ op = 0xC0 ∨ op = 0xC1 then
+    -- CMPXCHG (B0/B1) and XADD (C0/C1) with a memory destination (the register forms are
+    -- not modelled: Go never emits them)
+    let w := if op % 2 = 0 then 8 else osz
+    withModRM fun m _ len =>
+      match m.rm with
+      | .m a =>
+        let i := if op < 0xC0 then Instr.cmpxchg w (.mem a) (regLoc rexP w m.reg)
+          else .xadd w (.mem a) (regLoc rexP w m.reg)
+        finish p .int i len
+      | .r _ => none
+  else if op = 0xC7 then
+    -- CMPXCHG8B / CMPXCHG16B (REX.W) m: `/1`, memory only (`mod = 11` is RDRAND/RDSEED)
+    if p.opsize then none else
+    withModRM fun m _ len =>
+      match m.rm with
+      | .m a => if m.ext = 1 then finish p .int (.cmpxchgDbl (if rexW then 128 else 64) a) len else none
+      | .r _ => none
+  else if op = 0xAE then
+    -- LFENCE (E8), MFENCE (F0), SFENCE (F8): exactly these bytes, without any prefix (other
+    -- `0F AE` forms, and these with `66`/`F2`/`F3`, are other instructions)
+    match bs with
+    | m :: _ =>
+      if (m = 0xE8 ∨ m = 0xF0 ∨ m = 0xF8) ∧ p = {} then some (.nop, n + 2) else none
+    | [] => none
   else if op = 0x1F then
     -- NOP r/m (`/0`), no memory access
     if sel > 1 then none else
@@ -485,6 +526,23 @@ def twoByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
 
 end Decode
 
+namespace Decode
+
+/-- Instructions that accept a `LOCK` prefix (SDM Vol. 2, `LOCK`): the read-modify-write
+forms of `ADD ADC AND BTC BTR BTS CMPXCHG CMPXCHG8B/16B DEC INC NEG NOT OR SBB SUB XOR XADD
+XCHG` with a memory destination. Anything else with `LOCK` is `#UD`. -/
+def lockable : Instr → Bool
+  | .alu op _ (.mem _) _ => op != .cmp
+  | .unary _ _ (.mem _) => true
+  | .bit op _ (.mem _) _ => op != .bt
+  | .xchg _ (.mem _) _ => true
+  | .xadd _ (.mem _) _ => true
+  | .cmpxchg _ (.mem _) _ => true
+  | .cmpxchgDbl _ _ => true
+  | _ => false
+
+end Decode
+
 open Decode in
 /-- Decode the instruction at the start of `bytes`: the instruction and its length in bytes.
 `none` for anything outside the supported subset (see the module documentation). -/
@@ -492,13 +550,20 @@ def decode (bytes : List Nat) : Option (Instr × Nat) :=
   match parsePrefixes bytes {} 0 with
   | none => none
   | some (p, ops, n) =>
-    match ops with
-    | [] => none
-    | op :: rest =>
-      if op = 0x0F then
-        match rest with
-        | [] => none
-        | op2 :: rest2 => twoByte p op2 rest2 (n + 1)
-      else oneByte p op rest n
+    let r := match ops with
+      | [] => none
+      | op :: rest =>
+        if op = 0x0F then
+          match rest with
+          | [] => none
+          | op2 :: rest2 => twoByte p op2 rest2 (n + 1)
+        else oneByte p op rest n
+    -- `LOCK` is accepted exactly on the lockable memory forms; the model is single-threaded,
+    -- so a locked instruction has the semantics of the unlocked one.
+    if p.lock then
+      match r with
+      | some (i, len) => if lockable i then some (i, len) else none
+      | none => none
+    else r
 
 end Janus.Amd64

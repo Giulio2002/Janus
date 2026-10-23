@@ -468,6 +468,39 @@ def execCount (s : State) (next : W64) (op : CntOp) (w dst : Nat) (src : Loc) : 
         { cf := some false, pf := some false, af := some false, zf := some (decide (n = 0)),
           sf := some false, ovf := some false }
 
+/-! ## String instructions (`DF = 0`)
+
+The direction flag is not part of the state: it is clear at every Go call (Go ABIInternal:
+"The direction flag (D) is always cleared (set to the forward direction) at a call"), and no modelled instruction sets it
+(`STD`, `POPF` and `IRET` are not modelled), so it is clear in every state the model reaches.
+`MOVS`/`STOS` therefore always step forward. The address size is 64 bits (the `67` prefix is
+rejected), so `RSI`, `RDI` and `RCX` are used in full. A `REP` string instruction is the
+sequential repetition of its element step, which is also its architectural result on hardware
+with fast strings (SDM Vol. 1 §7.3.9.3); a fault in iteration `k` stops the run. -/
+
+/-- `k` element steps of `MOVS` with element size `sz` bytes: load `sz` bytes at `RSI`, store
+them at `RDI`, add `sz` to `RSI` and `RDI`. -/
+def movsIter (sz : Nat) : Nat → State → Except Fault State
+  | 0, s => .ok s
+  | k + 1, s =>
+    match load s.mem (s.regs 6).toNat sz with
+    | .error e => .error e
+    | .ok v =>
+      match store s.mem (s.regs 7).toNat sz v with
+      | .error e => .error e
+      | .ok m =>
+        movsIter sz k (({ s with mem := m }.setReg 6 (s.regs 6 + BitVec.ofNat 64 sz)).setReg 7
+          (s.regs 7 + BitVec.ofNat 64 sz))
+
+/-- `k` element steps of `STOS` with element size `sz` bytes storing `v` (`< 2^(8 sz)`): store
+at `RDI`, add `sz` to `RDI`. -/
+def stosIter (sz v : Nat) : Nat → State → Except Fault State
+  | 0, s => .ok s
+  | k + 1, s =>
+    match store s.mem (s.regs 7).toNat sz v with
+    | .error e => .error e
+    | .ok m => stosIter sz v k ({ s with mem := m }.setReg 7 (s.regs 7 + BitVec.ofNat 64 sz))
+
 /-! ## The executor -/
 
 /-- Execute a decoded instruction of length `len` at `s.rip`. Only specified on the output
@@ -632,6 +665,67 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
         match store s.mem (ea s next a).toNat 8 v.toNat with
         | .ok m => .ok ({ s with mem := m }.setRip next)
         | .error e => .error e
+
+  | .xadd w dst src =>
+    -- `TEMP ← SRC + DEST; SRC ← DEST; DEST ← TEMP` (the address is computed once, before)
+    match readLocRW s next w dst with
+    | .error e => .error e
+    | .ok x =>
+      match readLoc s next w src with
+      | .error e => .error e
+      | .ok y =>
+        let r := addFlags x y false
+        match writeLoc s next w dst r.1 with
+        | .error e => .error e
+        | .ok s1 =>
+          match writeLoc s1 next w src x with
+          | .error e => .error e
+          | .ok s2 => .ok ((s2.setFlags r.2).setRip next)
+  | .cmpxchg w dst src =>
+    -- `TEMP ← DEST; IF accumulator = TEMP THEN DEST ← SRC ELSE accumulator ← TEMP;
+    -- DEST ← TEMP` (memory `DEST` is always written); flags of `CMP accumulator, TEMP`
+    match readLocRW s next w dst with
+    | .error e => .error e
+    | .ok x =>
+      match readLoc s next w src with
+      | .error e => .error e
+      | .ok y =>
+        let acc := s.getReg w 0
+        let f := (subFlags acc x false).2
+        if acc = x then
+          match writeLoc s next w dst y with
+          | .error e => .error e
+          | .ok s1 => .ok ((s1.setFlags f).setRip next)
+        else
+          match writeLoc s next w dst x with
+          | .error e => .error e
+          | .ok s1 => .ok (((s1.putReg w 0 x).setFlags f).setRip next)
+  | .cmpxchgDbl w a =>
+    let addr := (ea s next a).toNat
+    let h := w / 2
+    if w = 128 ∧ addr % 16 ≠ 0 then .error (.misaligned addr) else
+    match loadRW s.mem addr (w / 8) with
+    | .error e => .error e
+    | .ok v =>
+      let cmp := (s.getReg h 2).toNat * 2 ^ h + (s.getReg h 0).toNat
+      if v = cmp then
+        match store s.mem addr (w / 8) ((s.getReg h 1).toNat * 2 ^ h + (s.getReg h 3).toNat) with
+        | .error e => .error e
+        | .ok m => .ok (({ s with mem := m }.setFlags { s.flags with zf := some true }).setRip next)
+      else
+        match store s.mem addr (w / 8) v with
+        | .error e => .error e
+        | .ok m =>
+          .ok (((({ s with mem := m }.putReg h 0 (BitVec.ofNat h v)).putReg h 2
+            (BitVec.ofNat h (v / 2 ^ h))).setFlags { s.flags with zf := some false }).setRip next)
+  | .movs rep w =>
+    match movsIter (w / 8) (if rep then (s.regs 1).toNat else 1) s with
+    | .error e => .error e
+    | .ok s' => .ok ((if rep then s'.setReg 1 0 else s').setRip next)
+  | .stos rep w =>
+    match stosIter (w / 8) (s.getReg w 0).toNat (if rep then (s.regs 1).toNat else 1) s with
+    | .error e => .error e
+    | .ok s' => .ok ((if rep then s'.setReg 1 0 else s').setRip next)
 
 /-- Decode and execute the instruction at the start of `bytes` (the code at `s.rip`). -/
 def step (bytes : List Nat) (s : State) : Except Fault State :=

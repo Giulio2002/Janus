@@ -14,8 +14,9 @@ The shared contract between the ISA model (`Decode`, `Exec`), the program loader
   (architecturally **undefined**, e.g. `SF` after `MUL`, everything after `DIV`). An
   instruction that reads an undefined flag (`Jcc`, `SETcc`, `CMOVcc`, `ADC`, `SBB`, `CMC`)
   faults with `undefinedFlag`; the model never invents a value for it. The direction flag is
-  always clear in Go code (ABI) and no modelled instruction depends on it; the system flags are
-  not modelled.
+  not in the state: it is clear at every Go call (ABI) and no modelled instruction sets it
+  (`STD`/`POPF` are not modelled), so it is clear in every reachable state and `MOVS`/`STOS`
+  step forward (see `Janus.Amd64.Exec`). The system flags are not modelled.
 * The 128-bit SSE registers `XMM0`–`XMM15` are modelled because Go uses them to move and zero
   memory (`MOVUPS`, and `X15 = 0` in ABIInternal). Their upper YMM/ZMM halves are not modelled
   (no modelled instruction touches them).

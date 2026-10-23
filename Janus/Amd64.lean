@@ -6,3 +6,4 @@ import Janus.Amd64.Program
 import Janus.Amd64.Run
 import Janus.Amd64.GoABI
 import Janus.Amd64.Tactic
+import Janus.Amd64.TacticExt

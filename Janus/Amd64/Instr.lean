@@ -136,7 +136,8 @@ inductive Instr where
   | pop (dst : Nat)
   /-- `LEAVE` (64-bit). -/
   | leave
-  /-- `NOP`, `PAUSE`, multi-byte `NOP r/m` (no memory access). -/
+  /-- `NOP`, `PAUSE`, multi-byte `NOP r/m` (no memory access), and the fences `LFENCE`,
+  `MFENCE`, `SFENCE` (ordering only: the model is single-threaded). -/
   | nop
   /-- `XCHG a, b` (`b` is a register location). -/
   | xchg (w : Nat) (a b : Loc)
@@ -157,6 +158,25 @@ inductive Instr where
   /-- `MOVQ` (`F3 0F 7E` / `66 0F D6`): the low 64 bits of `src` to `dst`; a register
   destination has its upper 64 bits cleared. -/
   | movq (dst src : XLoc)
+  /-- `XADD dst, src` (`0F C0`/`0F C1`, memory `dst` only, optionally `LOCK`ed):
+  `TEMP ← dst + src; src ← dst; dst ← TEMP`, flags as `ADD`. `src` is a register location. -/
+  | xadd (w : Nat) (dst : Loc) (src : Loc)
+  /-- `CMPXCHG dst, src` (`0F B0`/`0F B1`, memory `dst` only, optionally `LOCK`ed): flags of
+  `CMP rAX, dst`; if equal `dst ← src`, else `rAX ← dst` (and `dst` is written back
+  unchanged). -/
+  | cmpxchg (w : Nat) (dst : Loc) (src : Loc)
+  /-- `CMPXCHG8B m64` (`w = 64`) / `CMPXCHG16B m128` (`w = 128`, `REX.W`; `#GP` unless
+  16-aligned): compare `rDX:rAX` with the memory operand; if equal `ZF ← 1` and
+  `m ← rCX:rBX`, else `ZF ← 0` and `rDX:rAX ← m` (written back unchanged). Other flags are
+  unaffected. -/
+  | cmpxchgDbl (w : Nat) (a : Addr)
+  /-- `MOVS` (`A4`/`A5`) at width `w`: copy `w/8` bytes from `[RSI]` to `[RDI]` and advance
+  both (`DF = 0`, see `docs/AMD64.md`). With `rep` (`F3`), repeat `RCX` times and leave
+  `RCX = 0`. -/
+  | movs (rep : Bool) (w : Nat)
+  /-- `STOS` (`AA`/`AB`) at width `w`: store the low `w` bits of `RAX` at `[RDI]` and advance
+  `RDI` (`DF = 0`). With `rep` (`F3`), repeat `RCX` times and leave `RCX = 0`. -/
+  | stos (rep : Bool) (w : Nat)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Amd64

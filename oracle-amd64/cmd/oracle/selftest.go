@@ -208,6 +208,33 @@ func cmdSelftest(args []string) {
 			}
 			return mem(m)(c, h)
 		})},
+		{"lock xadd [rbx], rax", "f0480fc103", func(s *gen.State) { s.Regs[0], s.Regs[3] = 5, D+64; plant(s, 64, 10) },
+			and(expect("ok", T+5), r(0, 10), flags(L.FlagPF), preserved("rax", "flags", "mem"), mem(le(64, 15, 8)))},
+		{"lock cmpxchg [rbx], rcx (equal)", "f0480fb10b", func(s *gen.State) { s.Regs[0], s.Regs[1], s.Regs[3] = 7, 9, D+64; plant(s, 64, 7) },
+			and(expect("ok", T+5), flags(L.FlagZF|L.FlagPF), preserved("flags", "mem"), mem(le(64, 9, 8)))},
+		{"lock cmpxchg [rbx], rcx (not equal)", "f0480fb10b", func(s *gen.State) { s.Regs[0], s.Regs[1], s.Regs[3] = 7, 9, D+64; plant(s, 64, 8) },
+			and(expect("ok", T+5), r(0, 8), preserved("rax", "flags"))},
+		{"mfence", "0faef0", nil, and(expect("ok", T+3), preserved())},
+		{"rep movsb (5 bytes, 5 iterations)", "f3a4", func(s *gen.State) { s.Regs[1], s.Regs[6], s.Regs[7], s.Seed = 5, D+100, D+200, 0 },
+			and(expect("ok", T+2), r(1, 0), r(6, D+105), r(7, D+205), preserved("rcx", "rsi", "rdi", "mem"), func(c *L.Case, h *L.HW) string {
+				if h.Iters != 4 {
+					return fmt.Sprintf("re-entries %d, want 4", h.Iters)
+				}
+				m := map[int]int{}
+				for k := 0; k < 5; k++ {
+					m[200+k] = int(L.Pattern(0, uint64(100+k)))
+				}
+				return mem(m)(c, h)
+			})},
+		{"rep stosq (rcx = 0)", "f348ab", func(s *gen.State) { s.Regs[1], s.Regs[7] = 0, D+64 }, and(expect("ok", T+3), preserved())},
+		{"rep stosq (2 qwords)", "f348ab", func(s *gen.State) { s.Regs[0], s.Regs[1], s.Regs[7] = 0x1122334455667788, 2, D+64 },
+			and(expect("ok", T+3), r(1, 0), r(7, D+80), preserved("rcx", "rdi", "mem"), func(c *L.Case, h *L.HW) string {
+				m := le(64, 0x1122334455667788, 8)
+				for k, v := range le(72, 0x1122334455667788, 8) {
+					m[k] = v
+				}
+				return mem(m)(c, h)
+			})},
 	}
 	for f := 0; f < 64; f++ {
 		f := f

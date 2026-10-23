@@ -87,7 +87,9 @@ func init() {
 	for _, m := range strings.Fields(`add or adc sbb and sub xor cmp test mov movzx movsx movsxd lea inc dec not neg
 		mul imul div idiv rol ror shl shr sar shld shrd bt bts btr btc bsf bsr tzcnt lzcnt popcnt bswap
 		setcc cmovcc jcc jmp call ret push pop nop xchg cbw cwde cdqe cwd cdq cqo clc stc cmc leave
-		movups movupd movaps movapd movdqu movdqa xorps xorpd pxor movd movq ud2 int3 int`) {
+		movups movupd movaps movapd movdqu movdqa xorps xorpd pxor movd movq ud2 int3 int
+		xadd cmpxchg cmpxchg8b cmpxchg16b movsb movsw movsd movsq stosb stosw stosd stosq
+		lfence mfence sfence pause`) {
 		Modeled[m] = true
 	}
 }
@@ -239,6 +241,17 @@ func Setup(r *rand.Rand, b []byte) State {
 		}
 	}
 	switch cls {
+	case "movsb", "movsw", "movsd", "movsq", "stosb", "stosw", "stosd", "stosq",
+		"cmpsb", "cmpsw", "cmpsd", "cmpsq", "lodsb", "lodsw", "lodsd", "lodsq",
+		"scasb", "scasw", "scasd", "scasq":
+		// REP counts: mostly small, so that the run stays inside the buffer
+		if r.IntN(10) < 8 {
+			s.Regs[1] = []uint64{0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 64, 100, 255}[r.IntN(16)]
+		}
+		if r.IntN(4) == 0 {
+			// overlapping copies: RDI just above or below RSI
+			s.Regs[7] = s.Regs[6] + uint64(int64(r.IntN(33)-16))
+		}
 	case "ret", "pop", "leave":
 		// put a plausible return address / value at the top of the stack
 		if r.IntN(10) < 7 {

@@ -250,6 +250,122 @@ func Edges(r *rand.Rand, n int) []EdgeCase {
 			s.Regs[base] = L.DataBase + uint64(r.IntN(L.DataSize-8))
 			emit("xchg-mem", b, s)
 		}
+		// (i) CMPXCHG / XADD on memory, locked or not, with the accumulator equal to the
+		// memory operand half of the time; source or base aliasing RAX sometimes
+		for _, w := range []int{8, 16, 32, 64} {
+			for _, op := range []byte{0xB0, 0xC0} {
+				reg, base := randReg(r, false), randReg(r, true)
+				if base&7 == 5 {
+					base = 6
+				}
+				if r.IntN(6) == 0 {
+					reg = 0
+				}
+				if r.IntN(8) == 0 {
+					base = 0
+				}
+				o := op
+				if w > 8 {
+					o++
+				}
+				var lock []byte
+				if r.IntN(3) != 0 {
+					lock = []byte{0xF0}
+				}
+				b := cat(lock, sizePrefix(w), rexFor(w, reg, 0, base, w == 8 && r.IntN(2) == 0), []byte{0x0F, o, byte(reg&7)<<3 | byte(base&7)})
+				s := Setup(r, b)
+				off := uint64(r.IntN(L.DataSize - 8))
+				if r.IntN(10) == 0 {
+					off = uint64(L.DataSize - 1 - r.IntN(4))
+				}
+				s.Regs[base] = L.DataBase + off
+				if r.IntN(2) == 0 && off+uint64(w/8) <= L.DataSize {
+					for k := 0; k < w/8; k++ {
+						s.Init = append(s.Init, [2]int{int(off) + k, int(s.Regs[0] >> (8 * k) & 0xff)})
+					}
+				}
+				emit("cmpxchg-xadd", b, s)
+			}
+		}
+		// (j) CMPXCHG8B / CMPXCHG16B: aligned or not, equal half of the time
+		for _, w := range []int{64, 128} {
+			base := randReg(r, true)
+			if base&7 == 5 || base == 0 || base == 1 || base == 2 || base == 3 {
+				base = 6 + r.IntN(2)
+			}
+			var lock []byte
+			if r.IntN(3) != 0 {
+				lock = []byte{0xF0}
+			}
+			b := cat(lock, rexFor(w/2, 0, 0, base, false), []byte{0x0F, 0xC7, 1<<3 | byte(base&7)})
+			s := Setup(r, b)
+			off := 16 * uint64(r.IntN(L.DataSize/16-1))
+			if r.IntN(4) == 0 {
+				off += []uint64{1, 4, 8, 12}[r.IntN(4)]
+			}
+			s.Regs[base] = L.DataBase + off
+			if r.IntN(2) == 0 {
+				lo, hi := s.Regs[0], s.Regs[2]
+				n := w / 16
+				for k := 0; k < n; k++ {
+					s.Init = append(s.Init, [2]int{int(off) + k, int(lo >> (8 * k) & 0xff)})
+					s.Init = append(s.Init, [2]int{int(off) + n + k, int(hi >> (8 * k) & 0xff)})
+				}
+			}
+			emit("cmpxchg-dbl", b, s)
+		}
+		// (k) MOVS / STOS with and without REP: small counts, overlapping and disjoint
+		// buffers, runs that leave the buffer part-way
+		for _, w := range []int{8, 16, 32, 64} {
+			for _, op := range []byte{0xA4, 0xAA} {
+				o := op
+				if w > 8 {
+					o++
+				}
+				var rp []byte
+				if r.IntN(4) != 0 {
+					rp = []byte{0xF3}
+				}
+				b := cat(rp, sizePrefix(w), rexFor(w, 0, 0, 0, false), []byte{o})
+				s := Setup(r, b)
+				s.Regs[1] = []uint64{0, 1, 2, 3, 5, 8, 13, 16, 31, 64, 200}[r.IntN(11)]
+				src := uint64(r.IntN(L.DataSize))
+				dst := uint64(r.IntN(L.DataSize))
+				switch r.IntN(4) {
+				case 0:
+					dst = src + uint64(r.IntN(9))
+				case 1:
+					dst = src - uint64(r.IntN(9))
+				}
+				s.Regs[6], s.Regs[7] = L.DataBase+src, L.DataBase+dst
+				emit("string", b, s)
+			}
+		}
+		// (l) LOCK on forms that do not accept it (#UD): CMP/TEST/MOV to memory, register
+		// destinations
+		for _, b := range [][]byte{{0xF0, 0x48, 0x39, 0x06}, {0xF0, 0x85, 0x06}, {0xF0, 0x89, 0x06}, {0xF0, 0x48, 0x01, 0xC6},
+			{0xF0, 0x0F, 0xC1, 0xC6}, {0xF0, 0x0F, 0xB1, 0xC6}, {0xF0, 0x87, 0xC6}, {0xF0, 0x0F, 0xBA, 0x26, 3},
+			{0xF0, 0xF3, 0x01, 0x06}, {0xF2, 0xF0, 0x01, 0x06}, {0xF0, 0xF0, 0x01, 0x06}, {0xF0, 0xA5}, {0xF0, 0x90}, {0xF0, 0x0F, 0xAE, 0xF0}} {
+			s := Setup(r, b)
+			s.Regs[6] = L.DataBase + uint64(r.IntN(L.DataSize-8))
+			emit("lock-ud", b, s)
+		}
+		// (m) unaligned 128-bit loads and stores in Go's memmove/memclr forms
+		// (MOVDQU X, disp(DI)(BX*1) and friends), straddling the buffer ends sometimes
+		for _, op := range [][]byte{{0xF3, 0x0F, 0x6F}, {0xF3, 0x0F, 0x7F}, {0x0F, 0x10}, {0x0F, 0x11}} {
+			x := r.IntN(16)
+			pre, opc := []byte(nil), op
+			if op[0] == 0xF3 {
+				pre, opc = op[:1], op[1:]
+			}
+			disp := byte(0xF0 - 16*r.IntN(8))
+			b := cat(pre, rexFor(32, x, 0, 0, false), opc, []byte{0x44 | byte(x&7)<<3, 0x1F, disp})
+			s := Setup(r, b)
+			n := uint64(r.IntN(300))
+			s.Regs[3] = n
+			s.Regs[7] = L.DataBase + uint64(r.IntN(L.DataSize)) - n + 0x80
+			emit("sse-memmove", b, s)
+		}
 		// (h) push/pop/call/ret/leave with RSP in the buffer, at and across its ends
 		for _, b := range [][]byte{{0x50}, {0x41, 0x57}, {0x66, 0x50}, {0x58}, {0x41, 0x5C}, {0x66, 0x58}, {0x6A, 0x80}, {0x68, 1, 2, 3, 0x84},
 			{0xFF, 0x30}, {0x8F, 0x00}, {0xE8, 0x10, 0, 0, 0}, {0xFF, 0xD0}, {0xC3}, {0xC2, 8, 0}, {0xC9}, {0x5C}, {0x54}} {

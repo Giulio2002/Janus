@@ -12,7 +12,7 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 def one : Janus.DataSegment := Extracted.data[0]
 
 /-- `one.base`, the address of the constant in this binary. -/
-def oneBase : Nat := 0x4b4560
+def oneBase : Nat := 0x4b4840
 
 theorem one_base : one.base = oneBase := by decide
 

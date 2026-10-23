@@ -116,6 +116,9 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("rflags: hw %s model %s defined %s (in %s)",
 			flagString(h.RFlags), flagString(m.RFlags), flagString(mask), flagString(c.RFlags)))
 	}
+	if h.DF {
+		v.Diffs = append(v.Diffs, "rflags: hw sets DF, which the model keeps clear")
+	}
 	if hexv(h.PC) != hexv(m.PC) {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("pc: hw %s (pc%+d) model %s (pc%+d)", h.PC,
 			int64(hexv(h.PC)-L.TestPC), m.PC, int64(hexv(m.PC)-L.TestPC)))
