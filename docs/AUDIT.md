@@ -8,7 +8,14 @@ The claim under attack: *if `janus verify` prints `Verified` for a theorem, that
 for the actual bytes of this binary under the stated semantics, and the printed statement is
 that theorem.*
 
-Result: **the claim does not hold today.** A proof file can (a) execute arbitrary code during
+**Post-fix status (re-run 2026-10-23 on `agent/deps-ci`, `audit/run-all.sh`):** every row of
+the table below is now blocked, verified-honest, mitigated or fixed; no row prints `Verified`
+for a false or misleading claim. The "Status after fixes" column has the per-row result and
+[Fixes applied](#fixes-applied) maps F1–F6 to the code. `audit/run-all.sh` exits non-zero if
+any row regresses to BROKEN, and CI runs it. The rest of this document is the original audit
+of the pre-fix code (commit `665fb69`), kept as written.
+
+Result (pre-fix): **the claim did not hold.** A proof file can (a) execute arbitrary code during
 verification and forge the audit result outright (a `False` theorem proved with `sorry` is
 reported as Verified with no axioms), (b) make the printed statement differ from the checked
 one with plain Lean features (instances, unexpanders), and (c) substitute a different
@@ -27,23 +34,23 @@ record).
 
 ## Severity-ranked summary
 
-| # | Severity | Finding | Status |
-|---|----------|---------|--------|
-| A3 | **Critical** | `initialize` in the proof runs inside the audit process: it reads the nonce from `Audit.lean`, prints a forged audit record and exits 0. `theorem correctness : False := sorry` is reported as Verified, axioms "(none)". | **BROKEN** |
-| A6 | **Critical** | `#eval` (also `run_cmd`, `elab`, …) runs arbitrary IO with the verifier's privileges while the proof compiles. That is enough to plant C1 permanently or start C2. | **BROKEN** |
-| C1 | **Critical** | The `Extracted` that the proof, the audit and leanchecker import is never confirmed to be the checked one. Lake's library dir precedes `.janus-build` on `LEAN_PATH`, so an `Extracted.olean` planted there wins: the statement reads exactly `Extracted.program`, the binary SHA matches, and the program is fake. | **BROKEN** |
-| C2 | **High** | TOCTOU on `.janus-build`: swapping `Extracted.olean`+`Proof.olean` after the proof-compile integrity check (when `Audit.lean` appears) makes the report show a different statement while recording the **honest** proof's path and SHA-256. | **BROKEN** |
-| A1 | **High** | A proof-local `instance (priority := high) : HMul Nat Nat Nat := ⟨Nat.add⟩` makes a printed `x.toNat * y.toNat` mean `+`. "Add returns x*y" verifies. | **BROKEN** |
-| A2 | **High** | A proof-local `@[app_unexpander]` prints `Shown P Q` (meaning `Q`) as `P`. | **BROKEN** |
-| A4 | **High** | Same with an unexpander for the *Janus* constant `Ensures`: the statement uses only Janus/Extracted constants, the post is `True`, and it prints as "x0 = x * y". | **BROKEN** |
-| B1 | **High** | `NeverPanics` counts faults as "no panic". Go nil dereferences are hardware faults (SIGSEGV → `sigpanic`), not stub calls, so "Add256(z, nil, y) never panics" verifies although real Go panics. | **BROKEN** (spec) |
-| A9 | Medium | `Proof.Extracted.program` (a fake program) is what `Extracted.program` resolves to inside `namespace Proof`. It prints qualified, but the "does not mention Extracted" warning stays silent. | **BROKEN** (weak) |
-| B2 | Medium | `exitAddr = 0` is a computable value: any computed branch to 0 (`BR X0` with X0 = 0, a zero code pointer loaded from a supplied region) counts as `Returns`. On hardware it is SIGSEGV. | **BROKEN** (design) |
-| M2 | Low–Med | Model: no top-byte-ignore. Regions at `x` and `x + 2^56` are distinct in the model but alias on Linux EL0, so `Disjoint` does not imply non-aliasing on hardware. | mismatch |
-| M1 | Low | Model: an access crossing 2^64 is `.ok` and touches nonexistent bytes ≥ 2^64 (hardware wraps or faults). Needs a region that extends past 2^64. | mismatch |
-| M3 | Low | Model: overlapping RO and RW regions let a store succeed on "read-only" (`DataLoaded`) bytes. | mismatch |
-| E1 | Low | PIE (`ET_DYN`) binaries are accepted. The model uses link-time vaddrs, while real calls run at base + vaddr, and no translation-invariance argument covers that. No relocations target copied (read-only) ranges in Go PIE today. | informational |
-| E2 | Info | `--theorem` accepts any Unicode letters (`\p{L}`), so lookalike names are possible. | informational |
+| # | Severity | Finding | Status (audit, pre-fix) | Status after fixes |
+|---|----------|---------|--------|--------------------|
+| A3 | **Critical** | `initialize` in the proof runs inside the audit process: it reads the nonce from `Audit.lean`, prints a forged audit record and exits 0. `theorem correctness : False := sorry` is reported as Verified, axioms "(none)". | **BROKEN** | **blocked**: janus-audit loads the proof with `importModules` and never enables initializers, so the `initialize` never runs; run-all: `Invalid` (statement does not mention Extracted) |
+| A6 | **Critical** | `#eval` (also `run_cmd`, `elab`, …) runs arbitrary IO with the verifier's privileges while the proof compiles. That is enough to plant C1 permanently or start C2. | **BROKEN** | **blocked**: the proof compiles under bubblewrap (no network, read-only filesystem except a private work dir); run-all: `Invalid` (`read-only file system`) |
+| C1 | **Critical** | The `Extracted` that the proof, the audit and leanchecker import is never confirmed to be the checked one. Lake's library dir precedes `.janus-build` on `LEAN_PATH`, so an `Extracted.olean` planted there wins: the statement reads exactly `Extracted.program`, the binary SHA matches, and the program is fake. | **BROKEN** | **blocked**: Extracted is compiled into a private trusted dir first on `LEAN_PATH`, a stray `Extracted.olean` elsewhere is rejected, and the audit checks `Extracted` is defeq to an independent `JanusTrusted` copy; run-all: `Invalid` (module identity) |
+| C2 | **High** | TOCTOU on `.janus-build`: swapping `Extracted.olean`+`Proof.olean` after the proof-compile integrity check (when `Audit.lean` appears) makes the report show a different statement while recording the **honest** proof's path and SHA-256. | **BROKEN** | **mitigated**: fresh private work dir per run, sandbox with `--die-with-parent` in a new PID namespace, every olean hash-bound and re-checked; run-all: honest proof `Verified` |
+| A1 | **High** | A proof-local `instance (priority := high) : HMul Nat Nat Nat := ⟨Nat.add⟩` makes a printed `x.toNat * y.toNat` mean `+`. "Add returns x*y" verifies. | **BROKEN** | **blocked**: proof-local class-valued defs and instances are rejected in the statement; run-all: `Invalid` (disguised instance `HMul`) |
+| A2 | **High** | A proof-local `@[app_unexpander]` prints `Shown P Q` (meaning `Q`) as `P`. | **BROKEN** | **verified-honest**: still verifies, but the statement is printed in a clean environment without the proof's unexpander, so it shows `Shown (… = x.toNat * y.toNat) True` |
+| A4 | **High** | Same with an unexpander for the *Janus* constant `Ensures`: the statement uses only Janus/Extracted constants, the post is `True`, and it prints as "x0 = x * y". | **BROKEN** | **verified-honest**: still verifies; the clean print shows the real post `fun x x_1 => True` |
+| B1 | **High** | `NeverPanics` counts faults as "no panic". Go nil dereferences are hardware faults (SIGSEGV → `sigpanic`), not stub calls, so "Add256(z, nil, y) never panics" verifies although real Go panics. | **BROKEN** (spec) | **blocked** (spec fixed, F3): the attack no longer compiles (`NeverPanics` now also requires no fault); its negation `B1_refuted` verifies |
+| A9 | Medium | `Proof.Extracted.program` (a fake program) is what `Extracted.program` resolves to inside `namespace Proof`. It prints qualified, but the "does not mention Extracted" warning stays silent. | **BROKEN** (weak) | **blocked**: a non-trusted module may not declare a name with an `Extracted` component, and the statement must mention `Extracted.program`/`entry`; run-all: `Invalid` |
+| B2 | Medium | `exitAddr = 0` is a computable value: any computed branch to 0 (`BR X0` with X0 = 0, a zero code pointer loaded from a supplied region) counts as `Returns`. On hardware it is SIGSEGV. | **BROKEN** (design) | **blocked** (design fixed, F4): `Ensures` quantifies over every admissible return address (`RetAddr`); the attack does not compile, `B2_refuted` proves the 0-sentinel claim false |
+| M2 | Low–Med | Model: no top-byte-ignore. Regions at `x` and `x + 2^56` are distinct in the model but alias on Linux EL0, so `Disjoint` does not imply non-aliasing on hardware. | mismatch | **fixed** (F5): accesses must end at or below `2^48`, so tagged addresses fault; `Model.lean` control faults |
+| M1 | Low | Model: an access crossing 2^64 is `.ok` and touches nonexistent bytes ≥ 2^64 (hardware wraps or faults). Needs a region that extends past 2^64. | mismatch | **fixed** (F5): the `2^48` bound excludes accesses crossing `2^64`; `Model.lean` control faults |
+| M3 | Low | Model: overlapping RO and RW regions let a store succeed on "read-only" (`DataLoaded`) bytes. | mismatch | **fixed** (F5): a store faults if any read-only region overlaps it; `Model.lean` control faults |
+| E1 | Low | PIE (`ET_DYN`) binaries are accepted. The model uses link-time vaddrs, while real calls run at base + vaddr, and no translation-invariance argument covers that. No relocations target copied (read-only) ranges in Go PIE today. | informational | **fixed** (F6): `ET_DYN` is rejected at binary validation (checked: `janus list` on an arm64 `-buildmode=pie` build fails) |
+| E2 | Info | `--theorem` accepts any Unicode letters (`\p{L}`), so lookalike names are possible. | informational | **fixed**: `theoremNameRE` is ASCII-only (checked: a Cyrillic-`е` name is rejected) |
 
 Blocked (with mechanism): A5 `debug.skipKernelTC`+`addDecl`, A7 private shadowing, A8 renamed
 axiom / sorry / `partial` / `opaque`, A10 `#exit`, theorem in another namespace or module,
@@ -377,9 +384,46 @@ In `loadBinary`, reject `f.Type == elf.ET_DYN` ("PIE binaries are not supported:
 link-time addresses"). Alternatively accept it, state in SOUNDNESS.md that addresses are
 link-time, and in `collectData` refuse any copied range that a `.rela*` entry targets.
 
+## Fixes applied
+
+All six proposed fixes are implemented. `audit/run-all.sh` output on `agent/deps-ci`:
+
+```
+A1_instance                  blocked  Invalid: The audit rejected the proof: the statement uses the proof-local evilMul, whose type is the class HMul (a disguised instance)
+A3_initialize                blocked  Invalid: The audit rejected the proof: the statement does not mention Extracted.program or Extracted.entry, so it says nothing about the extracted code
+A6_eval_io                   blocked  Invalid: Lean rejected the proof audit/attacks/A6_eval_io.lean.   (read-only file system)
+A9_namespace_shadow          blocked  Invalid: The audit rejected the proof: a non-trusted module declares Proof.Extracted.program._closed_0, whose name shadows the Extracted namespace
+A5_skipkernel                blocked  Invalid: The audit rejected the proof: the statement does not mention Extracted.program or Extracted.entry, so it says nothing about the extracted code
+A7_private_shadow            blocked  Invalid: Lean rejected the proof audit/attacks/A7_private_shadow.lean.
+A10_exit                     blocked  Invalid: the proof does not define Proof.correctness
+A2_unexpander                Verified-honest Verified: Proof.correctness
+A4_unexpand_janus            Verified-honest Verified: Proof.correctness
+A8_classic.t1/t3/t4          blocked  Invalid: The audit rejected the proof: the statement does not mention Extracted.program or Extracted.entry, …
+B1_neverpanics_fault         blocked  Invalid: Lean rejected the proof audit/specs/B1_neverpanics_fault.lean.
+B1_refuted                   Verified Verified: Proof.correctness
+B2_exit_sentinel             blocked  rejected (does not compile)
+B2_refuted                   ok       'br_zero_not_ensures' depends on axioms: [propext, Quot.sound]
+control:Add/Add256/Get_witness Verified Verified: Proof.correctness
+C1_shadow_library            blocked  Invalid: a second Extracted.olean is on the search path (…), which could shadow the checked one.
+C2_toctou_swap               mitigated Verified: Proof.correctness
+Model.lean: all decide controls pass, including M1-M3 now faulting (blocked by F5)
+```
+
+| Fix | Findings | Implemented in |
+|-----|----------|----------------|
+| F1 | A3, A6, C1, C2 | `cmd/janus/sandbox.go` (bubblewrap/unshare sandbox, refusal without one unless `--unsafe-no-sandbox`, mode recorded in `verified.json`); `cmd/janus/leanjob.go` (direct `lean` with a private, ordered `LEAN_PATH`, `noForeignModule`, `JanusTrusted` copy, nonce marker, `auditScript`); `cmd/janus/verify.go` (private trusted and work dirs under the cache run base, olean hash-binding and re-checks, sandboxed leanchecker replay, stale-input checks); `Janus/Tools/Audit.lean` (`importModules` without initializers, `checkIdentity` of `Extracted` against `JanusTrusted`); `cmd/janus/consumer.go` (the same for `--proof-root` packages) |
+| F2 | A1, A2, A4, A9 | `Janus/Tools/Audit.lean` (trusted-module constant rule, plain proof-local defs only, class-valued defs rejected, no `Extracted`-component names, statement must mention `Extracted.program`/`entry`, clean-environment `pp.fullNames` print with disclosed `definitions`); `cmd/janus/verify.go` (`theoremNameRE` ASCII-only, E2) |
+| F3 | B1 | `Janus/GoABI.lean` (`NeverPanics` also requires every non-fuel error to be absent) |
+| F4 | B2 | `Janus/GoABI.lean` (`Ensures` over every `RetAddr`), `Janus/Program.lean` (`withExit`) |
+| F5 | M1, M2, M3 | `Janus/Arm64/State.lean` (`Memory.accessible`: region end ≤ `2^48`, no read-only overlap for stores) |
+| F6 | E1 | `cmd/janus/binary.go` (`ET_DYN` rejected; test `TestRejectPIE` in `cmd/janus/hardening_test.go`) |
+
+`audit/specs/B1_neverpanics_fault.lean` and `B1_refuted.lean` now take the entry address from
+`Extracted.entry` instead of a literal, so they stay valid when the example binary changes.
+
 ## Files
 
-* `audit/run-all.sh`: reproduces every row (`BROKEN` rows print `Verified`, blocked rows `Invalid`).
+* `audit/run-all.sh`: reproduces every row (`BROKEN` rows print `Verified`, blocked rows `Invalid`), extracting its own `audit/work/{Add,Add256,Get}`; it marks a row `<-- BROKEN` and exits 1 if a blocked row verifies or a control does not.
 * `audit/attacks/`: A1–A10, C1 (`C1_fake_Extracted.lean`, `C1_proof.lean`), C2 (`C2_toctou_swap.sh`).
 * `audit/specs/`: B1 (`B1_neverpanics_fault.lean`, verify against Add256), B2 (`B2_exit_sentinel.lean`, `lake env lean`).
 * `audit/controls/`: Add, Add256 and Get witnesses (verify against the respective artifact).
