@@ -181,7 +181,13 @@ func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, ar
 				a = append(a, "--ro-bind", base, base)
 			}
 		}
+	ro:
 		for _, r := range readOnly {
+			for _, w := range writable {
+				if r == w || strings.HasPrefix(r, w+string(filepath.Separator)) {
+					continue ro // stays writable, as before
+				}
+			}
 			if _, err := os.Stat(r); err == nil {
 				a = append(a, "--ro-bind", r, r)
 			}
