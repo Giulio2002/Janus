@@ -586,7 +586,7 @@ statement, so the auditor now checks that the text means what the kernel proved:
 
 Either check alone rejects every S1 variant (`JanusTests/Audit.lean` tests each separately, and
 each accepts honest statements with canonical instances, numerals, `if`, `<`, coercions and
-instance binders). All 18 arm64 and 23 amd64 example theorems, the consumer examples and the
+instance binders). All 20 arm64 example theorems (including the SIMD `A64Equal64`/`A64IndexByte`) and the 23 amd64 ones, the consumer examples and the
 deps tests still verify (no arm64 example statement needed the coercion or numeral annotations); A2 and A4 stay **verified-honest** (their
 clean prints round-trip). Tests: `cmd/janus/round2_test.go` (`TestInlineInstanceRejected`,
 `TestRoundTripRejectsAmbiguousPrint`, `TestUnshareFallbackConfinement`,

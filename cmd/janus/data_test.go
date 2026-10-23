@@ -434,13 +434,14 @@ func TestBlockers(t *testing.T) {
 	if _, err := os.Stat(jsonOut); err != nil {
 		t.Error(err)
 	}
-	// The decoder itself: a SIMD word is rejected, ADD and RET are accepted.
+	// The decoder itself: a floating-point word (FADD D0, D1, D2; Advanced SIMD is decoded since
+	// the SIMD merge, FP arithmetic is not) is rejected, ADD and RET are accepted.
 	root, _ := findJanusRoot(repoRoot)
-	ok, err := leanDecode(filepath.Join(root, ".lake", "build", "bin", "janus-decode"), []uint32{0x8b010000, 0xd65f03c0, 0x4cdf2c00})
+	ok, err := leanDecode(filepath.Join(root, ".lake", "build", "bin", "janus-decode"), []uint32{0x8b010000, 0xd65f03c0, 0x1e622820})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok[0x8b010000] || !ok[0xd65f03c0] || ok[0x4cdf2c00] {
+	if !ok[0x8b010000] || !ok[0xd65f03c0] || ok[0x1e622820] {
 		t.Errorf("janus-decode verdicts: %v", ok)
 	}
 }
