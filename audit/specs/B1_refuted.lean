@@ -18,7 +18,7 @@ theorem correctness : ¬ ∀ (ret : Nat), RetAddr Extracted.program ret →
   have hm : s.mem.regions = [] := rfl
   clear_value s
   have hn := h 0x1000 hret 0 0 s hs hm
-  have hpc : s.pc.toNat = 0x931a0 := hs.pc_toNat (by decide)
+  have hpc : s.pc.toNat = Extracted.entry := hs.pc_toNat (by decide)
   have hx1 : s.regs 1 = 0 := hs.reg (i := 1) (by simp)
   have hst : Arm64.step 0xf9400023 s = .error (.outsideAllocation 0 8) := by
     rw [Arm64.step_of_decode (i := .ldstUImm 3 1 0 1 3) (by decide)]

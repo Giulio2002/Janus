@@ -302,8 +302,8 @@ binary moved, `--binary` names its new location; its SHA-256 must still match.
 ## Verify
 
 ```sh
-janus verify <outdir> [--proof FILE] [--theorem NAME] [--proof-root PKG] [--json] [--fresh]
-             [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox]
+janus verify <outdir> [--proof FILE] [--theorem NAME] [--proof-root PKG [--allow-path-deps]] [--json]
+             [--fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox]
 janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 ```
 
@@ -327,8 +327,13 @@ Defaults: `--proof <outdir>/Proof.lean`, `--theorem Proof.correctness`. The Janu
 is the copy **embedded in the `janus` binary** (see [the framework](#framework), [install
 story](#install)), or a checkout named by `--janus-root` / `$JANUS_ROOT` (a directory whose
 `lakefile.toml` has `name = "janus"`). `--proof-root` verifies a module of your own Lake package
-(see [docs/CONSUMERS.md](CONSUMERS.md)). `--json` prints the report as JSON; `--fresh` rebuilds
-the framework/caches from scratch.
+(see [docs/CONSUMERS.md](CONSUMERS.md)); that package may have **extra dependencies** (a spec
+library, Mathlib) when every one of them, transitively, is a git dependency pinned to a full
+40-hex revision and checked out at exactly that revision with no local modifications
+([details](CONSUMERS.md#extra-dependencies)). `--allow-path-deps` additionally accepts local
+path dependencies other than janus, copied as they are and recorded as `"type": "path"` (not
+pinned). `--json` prints the report as JSON; `--fresh` rebuilds the framework/caches from
+scratch.
 
 ### Threat model: the proof is untrusted code
 
@@ -355,7 +360,13 @@ printed statement is the one the kernel checked. To make that true, verification
 * requires the statement to mention `Extracted.program`/`Extracted.entry` and to be built only
   from Lean/Std core, `Janus.*`, `Extracted.*` and plain proof-local `def`s (whose bodies are
   disclosed in the report); a proof-local instance, class value, `opaque`, axiom or a name that
-  shadows the `Extracted` namespace is rejected;
+  shadows the `Extracted` namespace is rejected. With extra consumer dependencies, the
+  statement may also use a dependency's plain `def`s, theorems and inductive types/structures
+  (with their constructors and recursors), listed in the report's `dependencyConstants`; a
+  dependency's instances, classes, class-valued defs, `opaque`s and axioms are rejected. Instance
+  and class information is read from the modules' raw extension data, so no dependency code runs
+  in the auditor, and dependency constants are printed from type-only copies in the clean
+  environment (the dependency's own notation does not apply);
 * hashes every compiled `.olean` and re-checks the hashes after the audit and the replay, so a
   mid-run swap of a build output is caught.
 
@@ -382,7 +393,8 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
    else, including `sorryAx`, `Lean.ofReduceBool`, `Lean.trustCompiler` and user axioms, is
    rejected (`axiom audit`). `--theorem` must be a plain **ASCII** dotted Lean name.
 7. **Kernel replay**: `leanchecker` (shipped with the Lean toolchain) replays `Janus`,
-   `Extracted` and `Proof` through the kernel, catching environment hacking such as
+   `Extracted` and `Proof` (for a consumer package: every consumer module and every dependency
+   module the theorem's environment imports) through the kernel, catching environment hacking such as
    `set_option debug.skipKernelTC` with `addDecl` (`kernel replay`). If the toolchain has no
    `leanchecker`, this step is skipped and `verified.json` records `"status": "unavailable"`.
 8. **Re-check** the olean hashes, the artifacts and the proof; they must be unchanged (`stale
@@ -423,7 +435,11 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
 
 A verification establishes exactly the printed statement, with its hypotheses and quantifiers,
 about the definitions in `Extracted`. `definitions` lists the body of each plain proof-local
-`def` the statement uses. `janus explain <verified.json>` prints a human-readable account of
+`def` the statement uses. For a consumer package, `consumer.dependency` records janus and
+`consumer.dependencies` every other dependency (name, type, URL, rev, inputRev, whether it is
+inherited from another dependency, the number and tree SHA-256 of the files copied), and
+`dependencyConstants` the dependency constants the statement uses, as `"<name> (<kind>,
+<module>)"`; their meaning is that of the pinned dependency. `janus explain <verified.json>` prints a human-readable account of
 what was proved.
 
 ### Framework
@@ -454,7 +470,8 @@ janus explain <verified.json | outdir>
 ```
 
 Prints the theorem and its statement, which function and address it is about, the binary and
-Go module, the axioms and kernel replay, the framework, the consumer package (if any) and every
+Go module, the axioms and kernel replay, the framework, the consumer package and its
+dependencies with their pinned revisions (if any), the dependency constants used and every
 recorded hash together with whether the file on disk still matches it.
 
 ## Blockers

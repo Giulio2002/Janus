@@ -60,6 +60,9 @@ type verifiedReport struct {
 	Consumer         *consumerInfo  `json:"consumer,omitempty"`
 	Sandbox          sandboxInfo    `json:"sandbox"`
 	Definitions      []string       `json:"definitions,omitempty"`
+	// DependencyConsts are the constants from declared extra dependencies that the statement
+	// (or a proof-local def it uses) mentions: "<name> (<kind>, <module>)".
+	DependencyConsts []string `json:"dependencyConstants,omitempty"`
 }
 
 type auditResult struct {
@@ -70,6 +73,7 @@ type auditResult struct {
 	Statement   string   `json:"statement"`
 	Definitions []string `json:"definitions"` // proof-local defs the statement uses, with bodies
 	Modules     []string `json:"modules"`     // every module in the audited environment
+	External    []string `json:"external"`    // dependency constants the statement uses
 }
 
 // findJanusRoot locates the Lean project: --janus-root, else $JANUS_ROOT (a Janus checkout,
@@ -184,7 +188,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox")
+	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox", "allow-path-deps")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -197,6 +201,12 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	if flags["unsafe-no-sandbox"] {
 		opts["unsafe-no-sandbox"] = "true"
+	}
+	if flags["allow-path-deps"] {
+		if opts["proof-root"] == "" {
+			return jsonFailure(stdout, flags["json"], usageErr("--allow-path-deps applies only with --proof-root"))
+		}
+		opts["allow-path-deps"] = "true"
 	}
 	outdir := pos[0]
 	r, err := verifyAndReport(outdir, opts, stderr)
@@ -258,10 +268,16 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	if c := r.Consumer; c != nil {
 		fmt.Fprintf(stdout, "  Consumer: %s (%s, module %s, %d source file(s), janus %s)\n", displayPath(c.Root), c.Lakefile, c.Module,
 			len(c.Files), c.Dependency.describe())
+		for _, d := range c.Dependencies {
+			fmt.Fprintf(stdout, "  Dependency: %s %s\n", d.Name, d.describe())
+		}
+		if len(r.DependencyConsts) > 0 {
+			fmt.Fprintf(stdout, "  Dependency constants in the statement: %s\n", strings.Join(r.DependencyConsts, ", "))
+		}
 		if len(c.Rebuilt) == 0 {
 			fmt.Fprintln(stdout, "  Build: every module reused from the support cache")
 		} else {
-			fmt.Fprintf(stdout, "  Build: rebuilt %s\n", strings.Join(c.Rebuilt, ", "))
+			fmt.Fprintf(stdout, "  Build: rebuilt %s\n", moduleList(c.Rebuilt))
 		}
 	}
 	if f := r.Framework; f != nil {
@@ -281,7 +297,7 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	}
 	fmt.Fprintf(stdout, "  Axioms: %s\n", ax)
 	if r.KernelReplay.Status == "passed" {
-		fmt.Fprintf(stdout, "  Kernel replay: %s passed (%s)\n", r.KernelReplay.Tool, strings.Join(r.KernelReplay.Modules, ", "))
+		fmt.Fprintf(stdout, "  Kernel replay: %s passed (%s)\n", r.KernelReplay.Tool, moduleList(r.KernelReplay.Modules))
 	} else {
 		fmt.Fprintf(stdout, "  Kernel replay: skipped (%s)\n", r.KernelReplay.Note)
 	}
@@ -289,6 +305,14 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(filepath.Join(outdir, "verified.json")))
 	fmt.Fprintln(stdout, "  Statement:")
 	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(r.Statement, "\n", "\n    "))
+}
+
+// moduleList joins module names, abbreviating long lists (a Mathlib closure has thousands).
+func moduleList(mods []string) string {
+	if len(mods) <= 12 {
+		return strings.Join(mods, ", ")
+	}
+	return fmt.Sprintf("%s, … and %d more; %d modules", strings.Join(mods[:10], ", "), len(mods)-10, len(mods))
 }
 
 func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedReport, error) {
@@ -566,6 +590,9 @@ func classifyAuditError(msg, full string) error {
 	case strings.Contains(msg, "does not mention Extracted"):
 		d.Stage = "statement identity"
 		d.Next = "State the theorem about Extracted.program or Extracted.entry."
+	case strings.Contains(msg, "declared in dependency module"):
+		d.Stage = "statement identity"
+		d.Next = "A statement may use a dependency's plain defs, theorems and structures, not its instances, classes, opaques or axioms; name the operation (e.g. UInt256.add a b, not a + b)."
 	case strings.Contains(msg, "disguised instance") || strings.Contains(msg, "is not a plain def"):
 		d.Stage = "statement identity"
 		d.Next = "Remove proof-local instances/class values from the statement; use the model's own operations."

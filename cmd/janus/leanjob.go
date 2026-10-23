@@ -67,9 +67,14 @@ func newNonce() string {
 // auditScript is the trusted Audit.lean run under the full lean frontend. It imports only the
 // trusted Janus.Tools.Audit module (never the proof) and calls the auditor, which loads the
 // proof's compiled module as data without running its initializers.
-func auditScript(thm, proofModule, marker string) string {
-	return fmt.Sprintf("import Janus.Tools.Audit\n#eval JanusAudit.run %s %s %s %s\n",
-		leanString(thm), leanString(proofModule), leanString(marker), leanString("JanusTrusted"))
+// depRoots are the module roots of declared extra dependencies (consumer packages only).
+func auditScript(thm, proofModule, marker string, depRoots ...string) string {
+	var roots []string
+	for _, r := range depRoots {
+		roots = append(roots, leanString(r))
+	}
+	return fmt.Sprintf("import Janus.Tools.Audit\n#eval JanusAudit.run %s %s %s %s #[%s]\n",
+		leanString(thm), leanString(proofModule), leanString(marker), leanString("JanusTrusted"), strings.Join(roots, ", "))
 }
 
 // leanPathEnv builds a LEAN_PATH with dirs in order (first wins), plus the toolchain lib.
@@ -124,7 +129,15 @@ func noForeignModule(paths map[string]string, dirs []string) error {
 
 // runLean runs a lean/leanchecker command under the sandbox, returning combined output.
 func runLean(sb *sandbox, tc *toolchain, workDir string, roWritableExtra []string, leanPath string, argv ...string) (string, error) {
-	cmd := sb.command(workDir, roWritableExtra, argv, tc.jobEnv(leanPath))
+	// Expose the LEAN_PATH directories read-only: bubblewrap's private /tmp would otherwise
+	// hide a --janus-root (or any search directory) that lives under /tmp.
+	var ro []string
+	for _, d := range filepath.SplitList(leanPath) {
+		if d != "" {
+			ro = append(ro, d)
+		}
+	}
+	cmd := sb.commandRO(workDir, roWritableExtra, ro, argv, tc.jobEnv(leanPath))
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

@@ -159,6 +159,12 @@ func janusRunBase() (string, error) {
 // command builds the sandboxed exec.Cmd: argv runs with the given env and cwd workDir, with
 // workDir (and any extra dirs) writable and everything else read-only, no network.
 func (s *sandbox) command(workDir string, extraWritable []string, argv []string, env []string) *exec.Cmd {
+	return s.commandRO(workDir, extraWritable, nil, argv, env)
+}
+
+// commandRO is command with additional host directories exposed read-only (bubblewrap's
+// private /tmp would otherwise hide those under /tmp).
+func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, argv []string, env []string) *exec.Cmd {
 	writable := append([]string{workDir}, extraWritable...)
 	switch s.mode {
 	case "bwrap":
@@ -173,6 +179,17 @@ func (s *sandbox) command(workDir string, extraWritable []string, argv []string,
 		if base := cacheRoot(); base != "" {
 			if _, err := os.Stat(base); err == nil {
 				a = append(a, "--ro-bind", base, base)
+			}
+		}
+	ro:
+		for _, r := range readOnly {
+			for _, w := range writable {
+				if r == w || strings.HasPrefix(r, w+string(filepath.Separator)) {
+					continue ro // stays writable, as before
+				}
+			}
+			if _, err := os.Stat(r); err == nil {
+				a = append(a, "--ro-bind", r, r)
 			}
 		}
 		for _, w := range writable {
