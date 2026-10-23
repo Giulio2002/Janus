@@ -10,10 +10,11 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 /-- The digit table, as copied from the binary. -/
 def digits : Janus.DataSegment := Extracted.data[0]
 
-/-- `digits.base`, the address of the string bytes in this binary. -/
-def digitsBase : Nat := 0x4abe84
+/-- `digits.base`, the address of the only data object the function loads (layout-independent:
+read off `Extracted.data`). -/
+def digitsBase : Nat := dataBase Extracted.program 0
 
-theorem digits_base : digits.base = digitsBase := by decide
+theorem digits_base : digits.base = digitsBase := rfl
 
 theorem digits_mem : digits ∈ Extracted.program.data := List.mem_cons_self
 
@@ -29,12 +30,12 @@ theorem correctness (i : BitVec 64) :
   have hlen : digits.bytes.length = 256 := by
     set_option maxRecDepth 100000 in decide
   have hbase := digits_base
-  simp only [digitsBase] at hbase
+  simp only [digitsBase, reduceDataBase] at hbase
   rw [hlen, hbase] at hrd
   have hbyte := DataLoaded.byte hdl digits_mem (i.toNat % 16) (by rw [hlen]; omega)
   rw [hbase] at hbyte
   have hlt := Janus.Arm64.Memory.readLE_lt s.mem (digitsBase + i.toNat % 16) 1
-  simp only [digitsBase] at hlt
+  simp only [digitsBase, reduceDataBase] at hlt
   janus64_run
   have hk : i.toNat % 16 < digits.bytes.length := by rw [hlen]; omega
   rw [getElem!_pos digits.bytes (i.toNat % 16) hk]

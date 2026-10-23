@@ -15,10 +15,11 @@ def table : List (BitVec 64) :=
 
 def lit : Janus.DataSegment := Extracted.data[0]
 
-/-- `lit.base`, the address of the table literal in this binary. -/
-def litBase : Nat := 0x4b6ee0
+/-- `lit.base`, the address of the only data object the function loads (layout-independent:
+read off `Extracted.data`). -/
+def litBase : Nat := dataBase Extracted.program 0
 
-theorem lit_base : lit.base = litBase := by decide
+theorem lit_base : lit.base = litBase := rfl
 
 theorem lit_mem : lit ∈ Extracted.program.data := List.mem_cons_self
 
@@ -28,21 +29,21 @@ theorem correctness (i : BitVec 64) :
         Disjoint (s.regs regSP - 72) 80 (BitVec.ofNat 64 litBase) 64)
       (fun _ s' => results 1 s' = [table[i.toNat % 8]!]) := by
   intro ret hret s hs hpre
-  simp only [litBase] at *
+  simp only [litBase, reduceDataBase] at *
   janus64_intro hs
   obtain ⟨⟨hle, hnw, hacc⟩, hdl, hdd⟩ := hpre
   simp only [regSP] at hacc hle hnw hdd
   have h72 : (72 : BitVec 64).toNat = 72 := rfl
   simp only [Disjoint, BitVec.toNat_sub, h72, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at hdd
   have hdd' : (s.regs 4).toNat - 72 + 80 ≤ litBase ∨ litBase + 64 ≤ (s.regs 4).toNat - 72 := by
-    simp only [litBase]
+    simp only [litBase, reduceDataBase]
     have := (s.regs 4).isLt; omega
   clear hdd
   have hrd := DataLoaded.accessible hdl lit_mem
   have hlen : lit.bytes.length = 64 := by decide
   have hbase := lit_base
   rw [hlen, hbase] at hrd
-  simp only [litBase] at hrd hdd' hbase
+  simp only [litBase, reduceDataBase] at hrd hdd' hbase
   have h0 := DataLoaded.readLE hdl lit_mem 0 16 (by rw [hlen]; omega)
   rw [hbase, show listLE (lit.bytes.drop 0) 16 = 25387941959461950912960554715935082707 by decide] at h0
   have h1 := DataLoaded.readLE hdl lit_mem 16 16 (by rw [hlen]; omega)

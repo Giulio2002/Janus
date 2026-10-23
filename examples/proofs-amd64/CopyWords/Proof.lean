@@ -19,8 +19,9 @@ source words are untouched. -/
 namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
-/-- The loop head (`CMPQ CX, SI`) in this binary. -/
-def loopHead : Nat := 0x489640
+/-- The loop head (`CMPQ CX, SI`), 0x20 bytes into the function (layout-independent: derived
+from `Extracted.entry`). -/
+def loopHead : Nat := Extracted.entry + 0x20
 
 theorem loop (d s n : Nat) (hn : n < 2 ^ 63) (ret : Nat) (hret : RetAddr Extracted.program ret)
     (m0 : Memory) (hdw : d + 8 * n ≤ 2 ^ 48) (hsw : s + 8 * n ≤ 2 ^ 48)
@@ -56,7 +57,7 @@ theorem loop (d s n : Nat) (hn : n < 2 ^ 63) (ret : Nat) (hret : RetAddr Extract
     have hkn : k < n := by omega
     have hw := fun j (hj : j < n) => Janus.Arm64.Memory.readLE_writeLE_of_disjoint M
       (M.readLE (s + k * 8) 8) (a := d + k * 8) (n := 8) (b := s + 8 * j) (k := 8) (by omega)
-    refine Reaches.mono (ih (k + 1) _ _ (by omega) (by simp [loopHead]) (by simp [setRegF, h0])
+    refine Reaches.mono (ih (k + 1) _ _ (by omega) (by simp only [loopHead]; rfl) (by simp [setRegF, h0])
       (by simp [setRegF, h7]) (by simp [setRegF, h6]) (by simp [setRegF]) rfl
       (by simpa using hda) (by simpa using hsa) (by simpa (config := { decide := true }) [setRegF] using hsp)
       (by simpa (config := { decide := true }) [setRegF] using hspd)
@@ -104,7 +105,7 @@ theorem correctness (dst dlen dcap src slen scap : BitVec 64)
       (a := (s.regs 4).toNat + 32) (n := 8) (b := a) (k := k) (by omega)
   refine Reaches.mono (loop dst.toNat src.toNat (min dlen.toNat slen.toNat) (by omega) ret hret s.mem
     (by omega) (by omega) (by omega) (min dlen.toNat slen.toNat) 0 _ _ (by omega)
-    (by simp [loopHead]) (by simp [setRegF, h_a0]) (by simp [setRegF, h_a3])
+    (by simp only [loopHead]; rfl) (by simp [setRegF, h_a0]) (by simp [setRegF, h_a3])
     ?_ (by simp [setRegF]) rfl ?_ ?_ ?_ ?_ ?_ ?_ (fun j hj => absurd hj (Nat.not_lt_zero _))) ?_
   · simp (config := { decide := true }) only [↓reduceIte, setRegF]
     by_cases h : (dlen.toNat : Int) < slen.toNat

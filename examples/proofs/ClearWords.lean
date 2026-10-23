@@ -128,6 +128,10 @@ theorem bytes_last (m : Memory) (p B i a x : Nat) (ha : a = p + B * i) (hx : x <
     ((zeroBlocks m p B i).writeLE a B 0).bytes x = m.bytes x := by
   subst ha; exact bytes_zeroBlocks_outside m p B (i + 1) x hx
 
+/-- The `DC ZVA` loop head of `memclrNoHeapPointers` (`dc zva, x0`), 0x190 bytes into the
+function (layout-independent: derived from the extracted segment). -/
+abbrev zvaLoop : Nat := segAddr Extracted.program "runtime.memclrNoHeapPointers" + 0x190
+
 /-- `ClearWords`'s return address from `memclrNoHeapPointers` (the instruction after its `BL`). -/
 def retPC : Nat := Extracted.entry + 0x28
 
@@ -147,7 +151,7 @@ theorem zva_loop (s : State) (p : BitVec 64) (ret : Nat) (hret : RetAddr Extract
     (hc : s.mem.readLE bsAddr 4 = cval) :
     let B := 4 * 2 ^ bs
     ∀ k (S : State) (i : Nat), i + 1 + k = 128 / B →
-      S.pc = 0x88220#64 → S.regs 0 = p + BitVec.ofNat 64 (B * i) →
+      S.pc = BitVec.ofNat 64 zvaLoop → S.regs 0 = p + BitVec.ofNat 64 (B * i) →
       S.regs 1 = BitVec.ofNat 64 (128 - B - B * i) → S.regs 5 = BitVec.ofNat 64 B →
       S.regs 6 = BitVec.ofNat 64 (B - 1) → S.regs 30 = BitVec.ofNat 64 retPC →
       S.sp = s.sp - 32#64 → S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 →
@@ -175,7 +179,7 @@ theorem zva_loop (s : State) (p : BitVec 64) (ret : Nat) (hret : RetAddr Extract
       simp (disch := omega) only [Memory.bytes_writeLE_outside]
     | succ k ih =>
       intro S i hk hpc h0 h1 h5 h6 h30 hsp h28 h18 hz hm
-      janus_run [accessible_zeroBlocks, hz] until [0x88220]
+      janus_run [accessible_zeroBlocks, hz] until [zvaLoop]
       apply ih _ (i + 1)
       all_goals try janus_simp [zeroBlocks]
       all_goals first
@@ -195,7 +199,7 @@ theorem zva_start (s : State) (p : BitVec 64) (ret : Nat) (hret : RetAddr Extrac
     (hd2 : p.toNat + 128 ≤ bsAddr ∨ bsAddr + 4 ≤ p.toNat)
     (hd3 : bsAddr + 4 ≤ s.sp.toNat - 40 ∨ s.sp.toNat - 40 + 56 ≤ bsAddr)
     (hc : s.mem.readLE bsAddr 4 = cval) (S : State)
-    (hpc : S.pc = 0x88220#64) (h0 : S.regs 0 = p)
+    (hpc : S.pc = BitVec.ofNat 64 zvaLoop) (h0 : S.regs 0 = p)
     (h1 : S.regs 1 = BitVec.ofNat 64 (128 - 4 * 2 ^ bs)) (h5 : S.regs 5 = BitVec.ofNat 64 (4 * 2 ^ bs))
     (h6 : S.regs 6 = BitVec.ofNat 64 (4 * 2 ^ bs - 1))
     (h30 : S.regs 30 = BitVec.ofNat 64 retPC)
@@ -243,7 +247,7 @@ macro "clear_case" : tactic => `(tactic| (
   rcases hcache with hc | hc
   all_goals first
     | (have _ : 0 < s.mem.readLE blockSize 4 ∧ s.mem.readLE blockSize 4 < 64 := by rw [h_bs]; omega
-       janus_run [hz, hc] until [0x88220]
+       janus_run [hz, hc] until [zvaLoop]
        refine zva_start s p ret hret _ (by decide) hz _ _ hp hp' hpal hal hb ha hw hd1 hd2 hd3 hc _
          ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
        all_goals (janus_eval_nat h_rp : retPC; janus_simp [h_rp]))

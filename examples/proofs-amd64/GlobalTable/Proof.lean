@@ -7,8 +7,9 @@ import Extracted
 namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
-/-- Address of `example.com/basic.tbl` in this binary (`identity.json`, `skippedData`). -/
-def tbl : Nat := 0x54d7e0
+/-- Address of `example.com/basic.tbl`: the RIP-relative operand of the `LEAQ tbl(SB), CX` at
+offset 3, read off the extracted code (layout-independent). -/
+def tbl : Nat := ripTarget Extracted.program (Extracted.entry + 3)
 
 theorem correctness (i : BitVec 64) :
     Ensures Extracted.program Extracted.entry [i]
@@ -16,6 +17,7 @@ theorem correctness (i : BitVec 64) :
       (fun s s' => results 1 s' = [BitVec.ofNat 64 (s.mem.readLE (tbl + i.toNat % 8 * 8) 8)]) := by
   intro ret hret s hs hpre
   simp only [tbl] at *
+  janus64_addrs
   janus64_intro hs
   obtain ⟨⟨-, hnw, hacc⟩, ht⟩ := hpre
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw

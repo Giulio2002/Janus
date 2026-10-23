@@ -11,10 +11,11 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
 def one : Janus.DataSegment := Extracted.data[0]
 
-/-- `one.base`, the address of the constant in this binary. -/
-def oneBase : Nat := 0x4b4840
+/-- `one.base`, the address of the only data object the function loads (layout-independent:
+read off `Extracted.data`). -/
+def oneBase : Nat := dataBase Extracted.program 0
 
-theorem one_base : one.base = oneBase := by decide
+theorem one_base : one.base = oneBase := rfl
 
 theorem one_mem : one ∈ Extracted.program.data := List.mem_cons_self
 
@@ -35,7 +36,7 @@ theorem correctness (z : BitVec 64) :
   have hrd := DataLoaded.accessible hdl one_mem
   have hlen : one.bytes.length = 32 := by decide
   have hbase := one_base
-  simp only [oneBase] at *
+  simp only [oneBase, reduceDataBase] at *
   rw [hlen, hbase] at hrd
   have h0 := DataLoaded.readLE hdl one_mem 0 16 (by rw [hlen]; omega)
   have h1 := DataLoaded.readLE hdl one_mem 16 16 (by rw [hlen]; omega)
