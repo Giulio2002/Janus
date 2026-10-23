@@ -7,7 +7,7 @@ import Extracted
 `example.com/basic.SumSquares` (`x` in `X0`, `y` in `X1`) in which the stack-growth prologue falls
 through (`GuardOK s 0`) and `SP` is aligned with `[SP-40, SP+56)` writable (`StackOK s 40 56`:
 its frame, the saved frame pointer, and the spill slot of `y` in the caller's frame), the call
-returns, obeys the ABI, and `X0 = (x·x + y·y) mod 2^64`.
+returns (never faulting or panicking), obeys the ABI, and `X0 = (x·x + y·y) mod 2^64`.
 
 **How.** `square` is proved once as a callee `Summary` (from any state at its entry it returns
 to `X30` with `X0 := X0 · X0`), and the proof of `SumSquares` uses it at both call sites; the
@@ -30,7 +30,7 @@ theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y]
       (fun s => GuardOK s 0 ∧ StackOK s 40 56)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat * x.toNat + y.toNat * y.toNat) % 2 ^ 64) := by
-  intro s hs ⟨⟨hg1, hg2, hg3⟩, hal, hb, ha, hw⟩
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, hal, hb, ha, hw⟩
   janus_intro hs
   janus_run calls [square_summary]
   janus_arith

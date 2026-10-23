@@ -36,6 +36,28 @@ example : load m0 0x2000 8 = .ok 0 := rfl
 example : store m0 0x2000 8 5 = .error (.readOnly 0x2000 8) := rfl
 example : store m0 0x0ff8 8 5 = .error (.outsideAllocation 0x0ff8 8) := rfl
 
+/-! Address-space bound and per-byte permissions. -/
+
+/-- A region that extends past `2^48` (here past `2^64`) is not usable: accesses inside it fault,
+so no access wraps around `2^64`. -/
+def mWrap : Memory := ⟨fun _ => 0, [⟨2 ^ 64 - 4, 8, true⟩]⟩
+example : load mWrap (2 ^ 64 - 4) 8 = .error (.outsideAllocation (2 ^ 64 - 4) 8) := rfl
+/-- A tagged address (top byte `1`) never has accessible memory, so it cannot alias. -/
+def mTag : Memory := ⟨fun _ => 0, [⟨0x1000, 8, true⟩, ⟨2 ^ 56 + 0x1000, 8, true⟩]⟩
+example : mTag.accessible 0x1000 8 true = true := by decide
+example : mTag.accessible (2 ^ 56 + 0x1000) 8 false = false := by decide
+/-- The last bytes below `2^48` are fine; one byte more is not. -/
+def mTop : Memory := ⟨fun _ => 0, [⟨2 ^ 48 - 16, 16, true⟩, ⟨2 ^ 48 - 16, 17, true⟩]⟩
+example : mTop.accessible (2 ^ 48 - 8) 8 true = true := by decide
+example : mTop.accessible (2 ^ 48 - 8) 9 false = false := by decide
+/-- A writable region overlapping a read-only one does not make the read-only bytes writable. -/
+def mRO : Memory := ⟨fun _ => 0, [⟨0x2000, 8, false⟩, ⟨0x2000, 16, true⟩]⟩
+example : store mRO 0x2000 8 7 = .error (.readOnly 0x2000 8) := rfl
+example : store mRO 0x2004 8 7 = .error (.readOnly 0x2004 8) := rfl
+example : mRO.accessible 0x2008 8 true = true := by decide
+example (m : Memory) (a n : Nat) (w : Bool) (h : m.accessible a n w = true) : a + n ≤ 2 ^ 48 :=
+  m.accessible_bound h
+
 /-! Memory: symbolic. -/
 
 example (m : Memory) (a v : Nat) : (m.writeLE a 8 v).readLE a 8 = v % 2 ^ 64 :=

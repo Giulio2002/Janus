@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "proofRoot": ".",
+  "requests": [
+    { "outdir": "../../artifacts/Add", "proof": "ConsumerExample/Add.lean", "theorem": "ConsumerExample.Add.correctness" },
+    { "outdir": "../../artifacts/Max", "proof": "ConsumerExample/Max.lean", "theorem": "ConsumerExample.Max.correctness" }
+  ]
+}

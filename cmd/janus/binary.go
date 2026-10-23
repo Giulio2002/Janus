@@ -31,6 +31,7 @@ type Binary struct {
 	MainModule string
 	GOOS       string
 	GOARCH     string
+	GOAMD64    string // amd64 only: the GOAMD64 build setting, if recorded
 	// SymbolSource is "symtab" or "pclntab".
 	SymbolSource string
 	Funcs        []Func // sorted by address
@@ -76,11 +77,28 @@ func loadBinary(path string) (*Binary, error) {
 			Next:  "Build the Go program with GOOS=linux GOARCH=arm64.",
 		}
 	}
-	if f.Class != elf.ELFCLASS64 || f.Machine != elf.EM_AARCH64 || f.ByteOrder != binary.LittleEndian {
+	if f.Class != elf.ELFCLASS64 || (f.Machine != elf.EM_AARCH64 && f.Machine != elf.EM_X86_64) || f.ByteOrder != binary.LittleEndian {
 		return nil, &diag{
-			Msg:   fmt.Sprintf("%s is a %s %s %s ELF, not a 64-bit little-endian AArch64 one", path, f.Class, f.Data, f.Machine),
+			Msg:   fmt.Sprintf("%s is a %s %s %s ELF, not a 64-bit little-endian AArch64 or x86-64 one", path, f.Class, f.Data, f.Machine),
 			Stage: "binary validation",
 			Next:  "Build the Go program with GOOS=linux GOARCH=arm64.",
+		}
+	}
+	// Reject PIE (ET_DYN). The extracted program records link-time virtual addresses, while a
+	// position-independent executable is loaded at base+vaddr chosen at runtime, so the model's
+	// addresses would not be the ones the code runs at. Only ET_EXEC is sound. (F6 in docs/AUDIT.md.)
+	if f.Type == elf.ET_DYN {
+		return nil, &diag{
+			Msg:   fmt.Sprintf("%s is a position-independent executable (ET_DYN); Janus supports only non-PIE executables (ET_EXEC).", path),
+			Stage: "binary validation",
+			Next:  "Rebuild without PIE: go build -buildmode=exe (or set CGO_ENABLED=0), so the binary uses link-time addresses.",
+		}
+	}
+	if f.Type != elf.ET_EXEC {
+		return nil, &diag{
+			Msg:   fmt.Sprintf("%s is an ELF of type %s, not an executable (ET_EXEC).", path, f.Type),
+			Stage: "binary validation",
+			Next:  "Extract from a linked Go executable built with go build.",
 		}
 	}
 	bi, err := buildinfo.Read(bytes.NewReader(data))
@@ -99,13 +117,15 @@ func loadBinary(path string) (*Binary, error) {
 			b.GOOS = s.Value
 		case "GOARCH":
 			b.GOARCH = s.Value
+		case "GOAMD64":
+			b.GOAMD64 = s.Value
 		}
 	}
-	if b.GOOS != "linux" || b.GOARCH != "arm64" {
+	if b.GOOS != "linux" || (b.GOARCH != "arm64" && b.GOARCH != "amd64") || (b.GOARCH == "amd64") != (f.Machine == elf.EM_X86_64) {
 		return nil, &diag{
-			Msg:   fmt.Sprintf("%s was built for GOOS=%s GOARCH=%s, not linux/arm64", path, b.GOOS, b.GOARCH),
+			Msg:   fmt.Sprintf("%s was built for GOOS=%s GOARCH=%s, not linux/arm64 or linux/amd64", path, b.GOOS, b.GOARCH),
 			Stage: "binary validation",
-			Next:  "Rebuild with GOOS=linux GOARCH=arm64.",
+			Next:  "Rebuild with GOOS=linux GOARCH=arm64 (or GOARCH=amd64).",
 		}
 	}
 

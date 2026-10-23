@@ -6,3 +6,4 @@ import JanusTests.Decode
 import JanusTests.Exec
 import JanusTests.Simp
 import JanusTests.Tactic
+import JanusTests.Amd64

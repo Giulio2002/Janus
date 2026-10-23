@@ -15,3 +15,7 @@ root = "Oracle.Main"
 [[lean_exe]]
 name = "janus-decode"
 root = "Janus.Tools.Decode"
+
+[[lean_exe]]
+name = "janus-oracle-amd64"
+root = "Oracle.Amd64Main"

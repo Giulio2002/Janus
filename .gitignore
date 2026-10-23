@@ -3,3 +3,6 @@
 /bin/
 *.olean
 .janus-build/
+audit/bin/
+audit/work/
+examples/consumer/.lake/

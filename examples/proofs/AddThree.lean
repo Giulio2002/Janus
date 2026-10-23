@@ -7,7 +7,7 @@ import Extracted
 `example.com/basic.AddThree` (arguments in `X0`–`X2`) in which the stack-growth prologue falls
 through (`GuardOK s 0`) and `SP` is aligned with `[SP-40, SP+32)` writable (`StackOK s 40 32`:
 its 32-byte frame, the saved frame pointer, and the spill slot of `z` in the caller's frame),
-the call returns, obeys the ABI, and `X0 = (x + y + z) mod 2^64`.
+the call returns (never faulting or panicking), obeys the ABI, and `X0 = (x + y + z) mod 2^64`.
 
 **How.** The callee `Add` (extracted with `AddThree`) is proved once, from *any* state at its
 entry, as a `Summary`: it returns to `X30` with `X0 := X0 + X1` and nothing else changed. The
@@ -33,7 +33,7 @@ theorem correctness (x y z : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y, z]
       (fun s => GuardOK s 0 ∧ StackOK s 40 32)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat + z.toNat) % 2 ^ 64) := by
-  intro s hs ⟨⟨hg1, hg2, hg3⟩, hal, hb, ha, hw⟩
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, hal, hb, ha, hw⟩
   janus_intro hs
   janus_run calls [add_summary]
   janus_arith

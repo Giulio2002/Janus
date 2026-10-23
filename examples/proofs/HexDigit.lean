@@ -5,7 +5,7 @@ import Extracted
 
 **Guarantee.** For every 64-bit `i` and every Go call state `s` of `example.com/basic.HexDigit`
 (`i` in `X0`) in which memory holds the program's read-only data (`Program.DataLoaded`, which
-includes the string constant), the call returns, obeys the ABI, and `X0` is the ASCII code of
+includes the string constant), the call returns (never faulting or panicking), obeys the ABI, and `X0` is the ASCII code of
 the hexadecimal digit of `i mod 16`.
 -/
 
@@ -20,7 +20,7 @@ theorem correctness (i : BitVec 64) :
     Ensures Extracted.program Extracted.entry [i]
       (fun s => Extracted.program.DataLoaded s.mem)
       (fun _ s' => (s'.regs 0).toNat = hexDigit (i.toNat % 16)) := by
-  intro s hs hd
+  intro ret hret s hs hd
   janus_intro hs
   janus_data hd
   janus_run

@@ -25,7 +25,9 @@ These are trusted, not proved.
    `runtime.goPanic*` and `runtime.gopanic` as `panic` stubs and `runtime.morestack*` as
    `morestack` stubs. Reaching a stub address ends the run with that outcome. This only affects
    theorems that mention stub outcomes (`Panics`, `NeverPanics`, `GrowsStack`). `Returns`
-   cannot be established through a stub.
+   cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
+   dereference is a `SIGSEGV`, turned into a panic by `runtime.sigpanic`) are not stub calls:
+   the model reports them as faults, and `NeverPanics` excludes faults too.
 4. **The Lean kernel**, plus the verifier's hashing, process execution and axiom audit. The
    audit allows only `propext`, `Quot.sound` and `Classical.choice`. It rejects `sorryAx`,
    `Lean.ofReduceBool` and `Lean.trustCompiler`, so `native_decide` and `bv_decide` cannot be
@@ -44,9 +46,11 @@ These are trusted, not proved.
 
 ## What a theorem about `Returns` / `Ensures` says
 
-`GoABI.Ensures p entry args pre post` means: for **every** state `s` with `pc = entry`,
-`R30 = p.exitAddr`, `Ri = args[i]`, and `pre s` (all other registers, flags, `SP` and memory
-arbitrary), there exist a finite fuel and a state `s'` such that `p.run fuel s` returns `s'`,
+`GoABI.Ensures p entry args pre post` means: for **every** admissible return address `ret`
+(`GoABI.RetAddr p ret`: `ret` is 4-aligned, below `2^48`, outside every extracted code segment
+and not a stub address) and **every** state `s` with `pc = entry`, `R30 = ret`, `Ri = args[i]`,
+and `pre s` (all other registers, flags, `SP` and memory arbitrary), there exist a finite fuel
+and a state `s'` such that `(p.withExit ret).run fuel s` returns `s'` (reaches `pc = ret`),
 `s'` restores `SP`, `R28` (g), `R29` (FP) and `R18`, and `post s s'` holds. This is total
 correctness: termination is part of the claim. Running out of fuel is not success, and neither
 is any fault.
@@ -55,6 +59,55 @@ is any fault.
 `Fault`. So `Returns` also rules out out-of-bounds or read-only memory accesses, misaligned
 `SP`-based accesses, branches to code outside the extracted program, and unsupported
 instructions on the paths taken from states satisfying `pre`.
+
+### Outcome predicates
+
+| Predicate | Meaning |
+|---|---|
+| `Returns p s post` | the run reaches `p.exitAddr` (for a call: `ret`) in a state satisfying `post` |
+| `Panics p s` | the run reaches a Go panic stub (bounds check, divide by zero, explicit `panic`) |
+| `Faults p s` | the run stops with a fault other than `outOfFuel` (a nil or out-of-bounds access, a read-only store, misaligned `SP`, a jump outside the code, an unsupported instruction) |
+| `NeverPanics p s` | for every fuel: no panic stub **and** no fault; only `outOfFuel` is allowed (`neverPanics_iff : NeverPanics ↔ ¬ Panics ∧ ¬ Faults`) |
+| `GrowsStack p s` | the run reaches `runtime.morestack*` |
+
+On real hardware every model fault is a crash or a Go panic: a memory fault is `SIGSEGV`, which
+Go turns into `panic: runtime error: invalid memory address or nil pointer dereference`. So "never
+panics" must exclude faults, and it does. `Returns` implies `NeverPanics`
+(`Returns.neverPanics`), and `Faults`, `Panics` and `Returns` exclude each other.
+
+`Faults` and `Panics` are positive claims about the model. A model fault means the code left the
+memory, code and instruction subset the theorem grants; on hardware that access may hit another
+mapping (memory the caller did not grant) rather than trap. Read `Faults` as "the function
+needs more than the precondition provides", not as a guarantee of a hardware trap.
+
+### The return address
+
+A computed branch must never be mistaken for a return. The model ends a run when `pc` equals
+`p.exitAddr`, and the extractor renders `exitAddr := 0`. If specifications used that fixed value,
+any branch to 0 (a `BR` through a zero code pointer loaded from caller memory, a nil closure)
+would "return", while on hardware it is a `SIGSEGV`. So specifications never use the extracted
+value. `Ensures` (and every direct `Returns`/`Panics`/`NeverPanics` theorem in the examples)
+quantifies over all `ret` with `RetAddr p ret` and runs `p.withExit ret` (`{ p with exitAddr :=
+ret }`; the extracted `Program` itself is unchanged). The argument that this is sound:
+
+* A real call is `BL entry` from a caller outside the extracted code. Its return address is the
+  instruction after the `BL`, in the caller: 4-aligned, a user address below `2^48`, not inside
+  an extracted segment, and not a runtime stub. So it satisfies `RetAddr`, and the theorem
+  applies to it.
+* The theorem holds for every such `ret`, with memory and registers otherwise as in `pre`. A
+  path that reaches `ret` other than through the value the caller put in `X30` (a branch to a
+  constant, or to a word loaded from memory that `pre` does not tie to `X30`) reaches it only for
+  some values of `ret` and faults (`noCode`) for the others, so the theorem is not provable.
+* Excluding the code ranges matters: if `ret` could be an address in the function, reaching that
+  instruction in the normal course of execution would count as a return. Excluding stubs keeps
+  `Panics` meaningful. The bound and the alignment are what `RET` itself needs (the model
+  faults on misaligned or tagged branch targets).
+
+Calls whose return address lies inside the extracted code (recursion, or a caller that was
+extracted together with the callee) are not covered by the callee's theorem; they are covered by
+the theorem about the outer function, which executes or summarises the inner call. Callee
+summaries (`Tactic.Summary`) are stated on the extracted program and moved to `p.withExit ret`
+by `Summary.withExit`, because their steps never touch `ret` (there is no code there).
 
 ## Assumptions and limits
 
@@ -76,7 +129,18 @@ about executions outside it.
   page tables. `SP` alignment checking (SCTLR_EL1.SA0, as Linux configures it) is modelled as a
   fault. Other alignment faults are not modelled, except where the instruction model says so.
 * **Memory outside the listed regions faults.** Every load and store must lie entirely inside
-  one `Region` of `s.mem.regions` (and a writable one, for stores). Otherwise the run faults.
+  one `Region` of `s.mem.regions` that ends at or below `2^48` (and a writable one, for stores).
+  A store also faults if any byte it touches lies in a read-only region, even if a writable
+  region covers it too: permissions are per byte on hardware, so overlapping regions cannot
+  make read-only data (`DataLoaded`) writable. Otherwise the run faults.
+  The `2^48` bound is the Linux arm64 user address limit (48-bit VA; a kernel with 52-bit VA
+  only hands out higher addresses to `mmap` calls that ask for them, which Go does not). Every
+  real call state has its memory below it, so it is representable. In exchange no successful
+  access wraps around `2^64`, and no tagged address (top byte non-zero) is accessible, so the
+  top-byte-ignore aliasing of Linux EL0 (`x` and `x + 2^56` naming the same byte) cannot occur
+  in a proof: two accessible ranges that are `Disjoint` as numbers are disjoint in hardware. The
+  same bound is used for amd64, where it is also sound (user addresses are below `2^47`, and
+  `[2^47, 2^48)` is non-canonical; see `docs/AMD64.md`).
   A theorem therefore holds only for callers whose memory layout satisfies the regions stated
   in its precondition: the stack window (`StackWritable`), the argument/spill area above `SP`,
   the `g` struct, and every heap object the function touches. Real memory can have more mapped
@@ -89,19 +153,19 @@ about executions outside it.
   `.bss`, `.noptrdata`, `.noptrbss`) are never copied, because their contents are not fixed
   by the binary: a proof that touches one must list it as an ordinary region in its
   precondition. Self-modifying code is not modelled, and stores never change the fetched code.
-* **The return sentinel.** The call "returns" when `pc` reaches `p.exitAddr`, the value
-  planted in `R30` (the extractor currently renders `exitAddr := 0`). Reaching that address
-  by *any* branch counts, not only `RET`. A real caller passes its own return address, not the
-  sentinel. Transferring a theorem to a real call site assumes that the function treats `R30`
-  opaquely (saves, restores and returns through it, but never computes with it). Go-generated
-  code does this, but Janus does not prove it.
+* **The return address.** Specifications quantify over every admissible return address (see
+  "The return address" above), so the extracted placeholder `exitAddr := 0` never matters. A
+  theorem stated directly on `Extracted.program` (without `withExit` and a universally
+  quantified `ret`) uses the placeholder and counts any branch to `0` as a return; such a
+  statement says much less, and is visible as such in the printed statement.
 * **ABIInternal only.** `GoABI` covers integer arguments and results in `R0`–`R15` and
   stack-assigned words from `8(RSP)`. There are no floating-point or SIMD registers
   (`F0`–`F15`) and no FPCR/FPSR. A function whose arguments use them is outside the model.
   "`R29` is preserved" relies on Go's frame-pointer convention (`GoABI.FPConvention`:
   `R29 = SP - 8` at the call), because Go 1.26 leaf functions restore `R29` arithmetically.
 * **64-bit addresses as naturals.** Addresses are `Nat` values below `2^64`, produced by the
-  instruction model's wrap-around arithmetic. Region bounds are compared in `Nat`.
+  instruction model's wrap-around arithmetic. Region bounds are compared in `Nat`, and every
+  accessible byte is below `2^48`.
 * **Fixed binary.** A theorem is about one binary, identified by SHA-256. Rebuilding with
   another compiler version, other flags or another linker layout invalidates it. `janus check`
   detects this.
@@ -113,6 +177,8 @@ about executions outside it.
   shown satisfiable (`GoABI.setup_callSetup` builds a call state from any state).
 * Nothing about timing, side channels, power, caches or speculative execution.
 * Nothing about `NeverPanics` unless it is stated. `Returns` implies it
-  (`GoABI.Returns.neverPanics`) only for the same initial state.
+  (`GoABI.Returns.neverPanics`) only for the same initial state. `Panics` is only about panic
+  stubs: a nil dereference is a `Fault`, and "never panics" means `NeverPanics` (no stub and no
+  fault).
 * Nothing about the Go source. If the compiler miscompiled it, the theorem is about the
   miscompiled code, which is the point.

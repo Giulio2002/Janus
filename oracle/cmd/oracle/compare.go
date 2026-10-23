@@ -123,7 +123,7 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 	if len(memd) > 0 {
 		sortStrings(memd)
 		if len(memd) > 8 {
-			memd = append(memd[:8], fmt.Sprintf("... %d more bytes", len(memd)-8))
+			memd = append(memd[:8], fmt.Sprintf("mem: ... %d more bytes", len(memd)-8))
 		}
 		v.Diffs = append(v.Diffs, memd...)
 	}
@@ -139,7 +139,10 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 	v.Verdict = Mismatch
 	var kinds []string
 	for _, d := range v.Diffs {
-		k := d[:strings.IndexAny(d, ":[")]
+		k := d
+		if j := strings.IndexAny(d, ":["); j >= 0 {
+			k = d[:j]
+		}
 		if strings.HasPrefix(k, "x") {
 			k = "reg"
 		}

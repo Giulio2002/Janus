@@ -1,0 +1,326 @@
+//go:build amd64
+
+// Command runner executes single x86-64 instructions natively on the host and reports the
+// resulting architectural state. It reads layout.Case JSON lines on stdin and writes
+// layout.HW JSON lines.
+//
+// Mechanism (no per-case subprocess):
+//
+//   - The instruction bytes are written at layout.TestPC in an RWX page whose every other
+//     byte is 0xCC (INT3).
+//   - callPage (trampoline_amd64.s) saves the host callee state in the context page, loads
+//     XMM0-15 and the 16 GPRs of the case and enters TestPC with IRETQ, whose frame sets
+//     RSP and RFLAGS (the case's status flags, plus TF) atomically with RIP.
+//   - With TF set, the CPU raises a single-step debug trap after exactly one instruction:
+//     SIGTRAP with si_code TRAP_TRACE and saved RIP = the next instruction (TestPC + len on
+//     fall-through, the branch target on a taken branch, mapped or not). An instruction that
+//     itself faults raises SIGSEGV/SIGBUS/SIGILL/SIGFPE (or SIGTRAP for INT3/INT1) with the
+//     saved RIP at (or, for INT3, just after) TestPC.
+//   - A raw signal handler (rt_sigaction, bypassing the Go runtime, on the thread's
+//     sigaltstack) copies uc_mcontext and the XMM registers into the context page, resets the
+//     x87/SSE control state in the frame, clears TF/DF/AC and redirects the saved RIP to a
+//     resume sequence that restores the host registers and returns into Go.
+//
+// Safety: case bytes containing system-call, segment-load, FP-environment-load or other
+// system encodings are refused (layout.Forbidden), and a seccomp filter makes every system
+// call from the code page, and every call outside a short allow list, fail with EPERM.
+package main
+
+import (
+	"bufio"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"math/big"
+	"os"
+	"runtime"
+	"runtime/debug"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"time"
+	"unsafe"
+
+	L "github.com/Giulio2002/Janus/oracle-amd64/layout"
+)
+
+func callPage()
+func handler()
+func restorer()
+func resume()
+func addrs() (handler, restorer uintptr)
+
+const (
+	sigILL  = 4
+	sigTRAP = 5
+	sigBUS  = 7
+	sigFPE  = 8
+	sigSEGV = 11
+	sigALRM = 14
+
+	mapFixedNoreplace = 0x100000
+
+	userCS = 0x33
+	userSS = 0x2b
+	tf     = 0x100
+)
+
+// Linux uc_mcontext.gregs indices.
+const (
+	gR8 = iota
+	gR9
+	gR10
+	gR11
+	gR12
+	gR13
+	gR14
+	gR15
+	gRDI
+	gRSI
+	gRBP
+	gRBX
+	gRDX
+	gRAX
+	gRCX
+	gRSP
+	gRIP
+	gEFL
+)
+
+// encoding order RAX RCX RDX RBX RSP RBP RSI RDI R8..R15 -> gregs index
+var gregOf = [16]int{gRAX, gRCX, gRDX, gRBX, gRSP, gRBP, gRSI, gRDI, gR8, gR9, gR10, gR11, gR12, gR13, gR14, gR15}
+
+var ctx, code, data []byte
+
+func mmapFixed(addr uint64, size int, prot int) []byte {
+	p, _, errno := syscall.Syscall6(syscall.SYS_MMAP, uintptr(addr), uintptr(size), uintptr(prot),
+		uintptr(syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS|mapFixedNoreplace), ^uintptr(0), 0)
+	if errno != 0 || uint64(p) != addr {
+		fmt.Fprintf(os.Stderr, "runner: mmap %#x failed: %v (got %#x)\n", addr, errno, p)
+		os.Exit(2)
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(p)), size)
+}
+
+type sigactiont struct {
+	handler  uint64
+	flags    uint64
+	restorer uint64
+	mask     uint64
+}
+
+func installHandlers() {
+	h, r := addrs()
+	const saSiginfo, saOnstack, saRestorer = 0x4, 0x08000000, 0x04000000
+	for _, s := range []int{sigILL, sigTRAP, sigBUS, sigFPE, sigSEGV, sigALRM} {
+		act := sigactiont{handler: uint64(h), flags: saSiginfo | saOnstack | saRestorer,
+			restorer: uint64(r), mask: ^uint64(0) &^ (1<<(sigILL-1) | 1<<(sigSEGV-1) | 1<<(sigBUS-1) | 1<<(sigFPE-1) | 1<<(sigTRAP-1))}
+		_, _, errno := syscall.RawSyscall6(syscall.SYS_RT_SIGACTION, uintptr(s),
+			uintptr(unsafe.Pointer(&act)), 0, 8, 0, 0)
+		if errno != 0 {
+			fmt.Fprintf(os.Stderr, "runner: rt_sigaction(%d): %v\n", s, errno)
+			os.Exit(2)
+		}
+	}
+}
+
+func put64(b []byte, off int, v uint64) { binary.LittleEndian.PutUint64(b[off:], v) }
+func get64(b []byte, off int) uint64    { return binary.LittleEndian.Uint64(b[off:]) }
+
+func parseHex(s string) (uint64, error) {
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+	return strconv.ParseUint(s, 16, 64)
+}
+
+// parseHex128 returns the little-endian 16 bytes of a hex 128-bit value.
+func parseHex128(s string) ([16]byte, error) {
+	var out [16]byte
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+	v, ok := new(big.Int).SetString(s, 16)
+	if !ok || v.Sign() < 0 || v.BitLen() > 128 {
+		return out, fmt.Errorf("bad xmm %q", s)
+	}
+	b := v.FillBytes(make([]byte, 16)) // big-endian
+	for i := 0; i < 16; i++ {
+		out[i] = b[15-i]
+	}
+	return out, nil
+}
+
+func hex64(v uint64) string { return "0x" + strconv.FormatUint(v, 16) }
+
+func hex128(b []byte) string {
+	be := make([]byte, 16)
+	for i := 0; i < 16; i++ {
+		be[i] = b[15-i]
+	}
+	return "0x" + new(big.Int).SetBytes(be).Text(16)
+}
+
+var busy atomic.Int64
+
+func watchdog(tid int, limit time.Duration) {
+	pid := os.Getpid()
+	var last int64
+	var since time.Time
+	for {
+		time.Sleep(limit / 4)
+		cur := busy.Load()
+		if cur == 0 || cur != last {
+			last, since = cur, time.Now()
+			continue
+		}
+		if time.Since(since) >= limit {
+			syscall.Tgkill(pid, tid, syscall.SIGALRM)
+			since = time.Now()
+		}
+	}
+}
+
+var allowForbidden bool
+
+func runCase(c *L.Case, seq int64) L.HW {
+	r := L.HW{ID: c.ID}
+	b, err := hex.DecodeString(strings.TrimPrefix(c.Bytes, "0x"))
+	if err != nil || len(b) == 0 || len(b) > 15 {
+		r.Status, r.Note = "error", "bad bytes"
+		return r
+	}
+	if L.Forbidden(b) && !allowForbidden {
+		r.Status, r.Note = "error", "forbidden encoding (refused)"
+		return r
+	}
+	for i := range code {
+		code[i] = 0xCC
+	}
+	copy(code[L.TestPC-L.CodePage:], b)
+	for i := range data {
+		data[i] = L.Pattern(c.Seed, uint64(i))
+	}
+	for _, e := range c.Init {
+		if e[0] < 0 || e[0] >= L.DataSize || e[1] < 0 || e[1] > 255 {
+			r.Status, r.Note = "error", "bad init"
+			return r
+		}
+		data[e[0]] = byte(e[1])
+	}
+	initial := make([]byte, len(data))
+	copy(initial, data)
+	var regs [16]uint64
+	for i := 0; i < 16; i++ {
+		v, err := parseHex(c.Regs[i])
+		if err != nil {
+			r.Status, r.Note = "error", "bad reg"
+			return r
+		}
+		regs[i] = v
+		put64(ctx, L.CtxInRegs+8*i, v)
+	}
+	for i := 0; i < 16; i++ {
+		x, err := parseHex128(c.XMM[i])
+		if err != nil {
+			r.Status, r.Note = "error", err.Error()
+			return r
+		}
+		copy(ctx[L.CtxInXMM+16*i:], x[:])
+	}
+	put64(ctx, L.CtxFrame, L.TestPC)
+	put64(ctx, L.CtxFrame+8, userCS)
+	put64(ctx, L.CtxFrame+16, uint64(c.RFlags&L.StatusFlags)|0x202|tf)
+	put64(ctx, L.CtxFrame+24, regs[4])
+	put64(ctx, L.CtxFrame+32, userSS)
+	put64(ctx, L.CtxSig, 0)
+	put64(ctx, L.CtxInflight, 1)
+	busy.Store(seq)
+	callPage()
+	busy.Store(0)
+
+	sig := int(get64(ctx, L.CtxSig))
+	r.Sig = sig
+	r.Code = int(int32(get64(ctx, L.CtxCode)))
+	addr := get64(ctx, L.CtxAddr)
+	r.Addr = hex64(addr)
+	g := func(i int) uint64 { return get64(ctx, L.CtxOutGRegs+8*i) }
+	pc := g(gRIP)
+	r.PC = hex64(pc)
+	r.Regs = make([]string, 16)
+	for i := 0; i < 16; i++ {
+		r.Regs[i] = hex64(g(gregOf[i]))
+	}
+	r.RFlags = int(g(gEFL)) & L.StatusFlags
+	if get64(ctx, L.CtxOutHasFP) == 1 {
+		r.XMM = make([]string, 16)
+		for i := 0; i < 16; i++ {
+			r.XMM[i] = hex128(ctx[L.CtxOutXMM+16*i : L.CtxOutXMM+16*i+16])
+		}
+	}
+	for i := range data {
+		if data[i] != initial[i] {
+			r.Mem = append(r.Mem, [2]int{i, int(data[i])})
+		}
+	}
+	switch {
+	case sig == sigALRM:
+		r.Status = "selfloop"
+	case sig == sigTRAP && r.Code == L.TrapTrace:
+		r.Status = "ok"
+	case pc == L.TestPC:
+		r.Status = "fault"
+	case sig == sigTRAP && pc > L.TestPC && pc <= L.TestPC+16:
+		// INT3 / INT1 (possibly prefixed): with TF set, only the instruction under test can
+		// have executed, so this is that instruction trapping.
+		r.Status, r.Note = "fault", "int3/int1 at TestPC"
+	default:
+		r.Status = "escaped"
+		r.Note = fmt.Sprintf("unexpected signal %d code %d at %#x", sig, r.Code, pc)
+	}
+	return r
+}
+
+func main() {
+	limit := flag.Duration("timeout", time.Second, "watchdog limit for one case")
+	flag.BoolVar(&allowForbidden, "unsafe-allow-forbidden", false, "test only: run forbidden encodings (to check the seccomp filter)")
+	flag.Parse()
+
+	if !strings.Contains(os.Getenv("GODEBUG"), "asyncpreemptoff=1") {
+		fmt.Fprintln(os.Stderr, "runner: GODEBUG=asyncpreemptoff=1 is required")
+		os.Exit(2)
+	}
+	runtime.LockOSThread()
+	debug.SetGCPercent(-1)
+	runtime.GOMAXPROCS(2)
+
+	const rwx = syscall.PROT_READ | syscall.PROT_WRITE | syscall.PROT_EXEC
+	ctx = mmapFixed(L.CtxPage, L.PageSize, syscall.PROT_READ|syscall.PROT_WRITE)
+	code = mmapFixed(L.CodePage, L.PageSize, rwx)
+	data = mmapFixed(L.DataBase, L.DataSize, syscall.PROT_READ|syscall.PROT_WRITE)
+	installHandlers()
+	go watchdog(syscall.Gettid(), *limit)
+	time.Sleep(10 * time.Millisecond) // let the runtime start its threads and timers
+	installSeccomp()
+
+	in := bufio.NewScanner(os.Stdin)
+	in.Buffer(make([]byte, 1<<20), 1<<20)
+	out := bufio.NewWriterSize(os.Stdout, 1<<16)
+	enc := json.NewEncoder(out)
+	var seq int64
+	for in.Scan() {
+		line := in.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var c L.Case
+		if err := json.Unmarshal(line, &c); err != nil {
+			fmt.Fprintf(os.Stderr, "runner: bad case: %v\n", err)
+			os.Exit(2)
+		}
+		seq++
+		r := runCase(&c, seq)
+		enc.Encode(&r)
+		out.Flush()
+	}
+	out.Flush()
+}

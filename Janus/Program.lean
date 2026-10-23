@@ -47,7 +47,10 @@ deriving Repr, Inhabited
 structure Program where
   segments : List Segment
   stubs : List Stub
-  /-- Return address planted in `X30` by the caller; reaching it means the call returned. -/
+  /-- Return address planted in `X30` by the caller; reaching it means the call returned.
+  The extractor renders a placeholder (`0`). Specifications never use it: they quantify over
+  every admissible return address `ret` and run `p.withExit ret` (`GoABI.RetAddr`,
+  `GoABI.Ensures`), so a computed branch to a fixed value is never mistaken for a return. -/
   exitAddr : Nat
   data : List DataSegment := []
 deriving Repr, Inhabited
@@ -72,13 +75,19 @@ def fetchIn : List Segment → Nat → Option Nat
 /-- The instruction word at `pc`, if it lies inside a loaded segment. -/
 def fetch (p : Program) (pc : Nat) : Option Nat := fetchIn p.segments pc
 
-/-- Memory `m` holds every data segment of `p` at its address, in a read-only region. -/
+/-- Memory `m` holds every data segment of `p` at its address, in a well-formed (below `2^48`)
+read-only region. Since a store faults on any byte of a read-only region, the data cannot be
+overwritten even if a writable region overlaps it. -/
 def DataLoaded (p : Program) (m : Arm64.Memory) : Prop :=
   ∀ d ∈ p.data, (m.regions.any fun r => r.base ≤ d.base && d.base + d.bytes.length ≤ r.base + r.size
-      && !r.writable) = true ∧
+      && r.base + r.size ≤ 2 ^ 48 && !r.writable) = true ∧
     ∀ i (h : i < d.bytes.length), (m.bytes (d.base + i)).toNat = d.bytes[i]
 
 def stubAt (p : Program) (pc : Nat) : Option Stub := p.stubs.find? (·.addr = pc)
+
+/-- `p` called with return address `ret`: the same code, stubs and data, with the run ending
+when `pc` reaches `ret`. -/
+def withExit (p : Program) (ret : Nat) : Program := { p with exitAddr := ret }
 
 /-- Run for at most `fuel` instructions. -/
 def run (p : Program) : Nat → State → Except Fault Outcome

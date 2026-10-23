@@ -7,9 +7,14 @@ loader (`Janus.Program`), the Go calling convention (`Janus.GoABI`) and the orac
 * General-purpose registers `X0`–`X30` are indexed by `Nat`; only `0..30` are meaningful.
   Register number 31 is never stored here: instructions read it as `XZR` or `SP`
   depending on the encoding, which `readZR` / `readSP` make explicit.
-* Memory is byte-addressed by `Nat` (addresses are `< 2^64`) and carries the list of
-  allocations the caller owns. Every access is checked against these regions; an access
-  that is not fully inside one region is a fault, never undefined behaviour.
+* Memory is byte-addressed by `Nat` and carries the list of allocations the caller owns.
+  Every access is checked against these regions; an access that is not fully inside one
+  well-formed region is a fault, never undefined behaviour. A region is well-formed when it
+  lies below `2^48`, the Linux arm64 user virtual-address limit, so every successful access is
+  below `2^48`: it never wraps around `2^64`, and a tagged address (top byte non-zero, which
+  hardware with top-byte-ignore would alias to an untagged one) always faults. A store also
+  faults if any byte it touches lies in a read-only region, even when a writable region covers
+  it too (hardware permissions are per byte, not per allocation).
 -/
 
 namespace Janus.Arm64
@@ -52,9 +57,9 @@ inductive Fault where
   | undecodable (pc : Nat) (word : Nat)
   /-- `pc` does not point into any loaded code segment or known stub. -/
   | noCode (pc : Nat)
-  /-- A memory access of `size` bytes at `addr` is not inside one allocation. -/
+  /-- A memory access of `size` bytes at `addr` is not inside one (well-formed) allocation. -/
   | outsideAllocation (addr : Nat) (size : Nat)
-  /-- A store targeted a read-only allocation. -/
+  /-- A store touched a read-only allocation. -/
   | readOnly (addr : Nat) (size : Nat)
   /-- An access used `SP` as base while `SP` was not 16-byte aligned (SCTLR_EL1.SA0). -/
   | spMisaligned (sp : Nat)
@@ -84,9 +89,13 @@ end State
 
 namespace Memory
 
-/-- `size` bytes at `addr` lie inside a single region (writable if `write`). -/
+/-- `size` bytes at `addr` lie inside a single region that ends at or below `2^48` (the Linux
+arm64 user address limit), writable if `write`; and, for a write, no read-only region overlaps
+`[addr, addr + size)`. -/
 def accessible (m : Memory) (addr size : Nat) (write : Bool) : Bool :=
-  m.regions.any fun r => r.base ≤ addr && addr + size ≤ r.base + r.size && (!write || r.writable)
+  m.regions.any (fun r => r.base ≤ addr && addr + size ≤ r.base + r.size &&
+      r.base + r.size ≤ 2 ^ 48 && (!write || r.writable)) &&
+    (!write || m.regions.all fun r => r.writable || addr + size ≤ r.base || r.base + r.size ≤ addr)
 
 /-- Little-endian read of `n` bytes as a natural number. -/
 def readLE (m : Memory) (addr : Nat) : Nat → Nat
@@ -104,7 +113,8 @@ end Memory
 def load (m : Memory) (addr n : Nat) : Except Fault Nat :=
   if m.accessible addr n false then .ok (m.readLE addr n) else .error (.outsideAllocation addr n)
 
-/-- Checked store of the low `n` bytes of `v`. -/
+/-- Checked store of the low `n` bytes of `v`: `outsideAllocation` unless the bytes are readable,
+`readOnly` unless they lie in one writable region and no read-only region overlaps them. -/
 def store (m : Memory) (addr n v : Nat) : Except Fault Memory :=
   if m.accessible addr n false then
     if m.accessible addr n true then .ok (m.writeLE addr n v) else .error (.readOnly addr n)

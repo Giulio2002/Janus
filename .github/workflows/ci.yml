@@ -39,10 +39,21 @@ jobs:
             go.sum
             oracle/go.sum
 
-      - name: Install qemu-user and aarch64 binutils
+      - name: Install qemu-user, aarch64 binutils and bubblewrap
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-user binutils-aarch64-linux-gnu
+          sudo apt-get install -y -qq qemu-user binutils-aarch64-linux-gnu bubblewrap
+
+      # janus verify sandboxes the proof under bubblewrap, which needs an unprivileged user
+      # namespace. GitHub's Ubuntu 24.04 runners restrict those via AppArmor; lift the restriction
+      # so the sandbox self-test passes. (Verification refuses to run without a sandbox unless
+      # --unsafe-no-sandbox is passed.)
+      - name: Allow unprivileged user namespaces (for the verify sandbox)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          bwrap --ro-bind / / --unshare-all --dev /dev --proc /proc --tmpfs /tmp true \
+            && echo "bubblewrap works" || echo "WARNING: bubblewrap self-test failed"
 
       # elan installs the toolchain pinned in lean-toolchain on first use.
       - name: Cache elan toolchain

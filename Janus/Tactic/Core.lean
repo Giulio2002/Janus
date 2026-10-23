@@ -29,6 +29,12 @@ How one step works (`stepGoal`):
    initial state (all local equations `x.pc = _`, `x.regs i = _`, `x.sp = _`, `x.flags = _`,
    `x.mem = _` are used automatically) and the user's lemmas; the result must be `.ok s'`, a
    branch `if c then … else …`, or the step reports what it could not evaluate.
+
+A call with a symbolic return address is a goal on `Program.withExit p ret` with
+`hret : GoABI.RetAddr p ret` in the context: the program facts are still evaluated on the
+closed `p`, `pc ≠ ret` comes from `hret` (no code or stub at `ret`, `Reaches.step_withExit`),
+facts about `ret` enter the simp set as rewrite rules (`RetAddr.toNat_ofNat`, …), and the
+return is recognised when the pc is `BitVec.ofNat 64 ret` (`Reaches.exit_withExit`).
 -/
 
 namespace Janus.Tactic
@@ -181,6 +187,12 @@ def stateHyps : MetaM (Array Expr) := do
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
+    -- facts about a symbolic return address (`RetAddr p ret`), as rewrite rules
+    if ty.isAppOfArity ``GoABI.RetAddr 2 then
+      for n in [``GoABI.RetAddr.toNat_ofNat, ``GoABI.RetAddr.mod64, ``GoABI.RetAddr.aligned_eq,
+          ``GoABI.RetAddr.untagged_eq] do
+        out := out.push (← mkAppM n #[d.toExpr])
+      continue
     -- branch conditions introduced by `janus_run`
     if d.userName.eraseMacroScopes == `hbr && (← isProp ty) then
       out := out.push d.toExpr; continue
@@ -304,9 +316,10 @@ def cleanOutcome (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := g.withConte
         saved.restore
       return [g']
 
-/-- The pc of state `s` as a literal, with a proof of `s.pc = BitVec.ofNat 64 c`. -/
+/-- The pc of state `s` as a literal, with a proof of `s.pc = BitVec.ofNat 64 c`; otherwise the
+simplified pc with a proof of `s.pc = pc`. -/
 def statePC (ctx : Simp.Context) (simprocs : Simp.SimprocsArray) (d? : Option Simp.Discharge)
-    (s : Expr) : MetaM (Option (Nat × Expr) × Expr) := do
+    (s : Expr) : MetaM (Option (Nat × Expr) × Expr × Expr) := do
   let pcE ← mkAppM ``State.pc #[s]
   -- fast path: the normal form `State.mk _ _ pc _ _` with a literal pc
   let sw ← instantiateMVars s
@@ -314,12 +327,41 @@ def statePC (ctx : Simp.Context) (simprocs : Simp.SimprocsArray) (d? : Option Si
     let pc := sw.getArg! 2
     if let some c ← bv64Value? pc then
       let ty ← mkEq pcE (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) (mkNatLit c))
-      return (some (c, ← mkExpectedTypeHint (← mkEqRefl pcE) ty), pc)
+      return (some (c, ← mkExpectedTypeHint (← mkEqRefl pcE) ty), pc, ← mkEqRefl pcE)
   let r ← simpExpr ctx simprocs d? pcE
+  let pf ← resultProof pcE r
   if let some c ← bv64Value? r.expr then
     let ty ← mkEq pcE (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) (mkNatLit c))
-    return (some (c, ← mkExpectedTypeHint (← resultProof pcE r) ty), r.expr)
-  return (none, r.expr)
+    return (some (c, ← mkExpectedTypeHint pf ty), r.expr, pf)
+  return (none, r.expr, pf)
+
+/-- A program of the form `Program.withExit p ret` (a call with return address `ret`): `(p, ret)`. -/
+def exitMode (p : Expr) : MetaM (Option (Expr × Expr)) := do
+  let p := (← instantiateMVars p).consumeMData
+  match p.getAppFnArgs with
+  | (``Program.withExit, #[base, ret]) => return some (base, ret)
+  | _ => return none
+
+/-- The hypothesis `RetAddr p ret` from the local context. -/
+def findRetAddr (base ret : Expr) : MetaM Expr := do
+  let want ← mkAppM ``GoABI.RetAddr #[base, ret]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if ty.isAppOfArity ``GoABI.RetAddr 2 then
+      if ← withReducible (isDefEq ty want) then return d.toExpr
+  throwError "janus: the program is{indentExpr (← mkAppM ``Program.withExit #[base, ret])}\nbut there is no hypothesis{indentExpr want}\nin the context (introduce it with `intro ret hret …`)"
+
+/-- `pc` is syntactically `BitVec.ofNat 64 ret`. -/
+def isRetPC (pc ret : Expr) : MetaM Bool := do
+  let pc ← instantiateMVars pc
+  let ret ← instantiateMVars ret
+  match pc.getAppFnArgs with
+  | (``BitVec.ofNat, #[w, r]) =>
+    if (← evalNat w) != some 64 then return false
+    if r == ret then return true
+    withReducible (isDefEq r ret)
+  | _ => return false
 
 structure StepResult where
   goals : List MVarId
@@ -439,8 +481,16 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       | .reaches p s _ => pure (p, s, none)
       | .reachesRet p ret s _ => pure (p, s, some ret)
       | _ => throwError "janus: goal is not `Reaches p s Q`"
-    let (pc?, pcE) ← statePC ctx simprocs d? s
+    let (pc?, pcE, pcPf) ← statePC ctx simprocs d? s
     trace[janus] "state pc: {pcE}, ret: {ret?}"
+    -- a call with a symbolic return address: `p = Program.withExit base retE`
+    let mode ← exitMode p
+    if mode.isSome && ret?.isSome then
+      throwError "janus: `ReachesRet` on a program with a return address (`Program.withExit`) is not supported; prove the callee as a `Summary` of the extracted program"
+    let hret? ← match mode with
+      | some (base, retE) => pure (some (← findRetAddr base retE))
+      | none => pure none
+    let progE := match mode with | some (base, _) => base | none => p
     -- return address reached (`ReachesRet`)
     if let some ret := ret? then
       if ← isDefEq pcE ret then
@@ -451,15 +501,29 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
         let hpc ← mkExpectedTypeHint hpc (← mkEq pcEq ret)
         let gs ← g.apply (mkAppN (mkConst ``ReachesRet.done) #[p, ret, s, Q, hpc])
         return some gs
+    -- the return address reached (`Program.withExit`)
+    if let (some (base, retE), some hret) := (mode, hret?) then
+      let atRet ← match pc? with
+        | none => isRetPC pcE retE
+        | some (c, _) => pure ((← evalNat retE) == some c)
+      if atRet then
+        let Q := match ← goalKind g with | .reaches _ _ Q => Q | _ => default
+        let hpc ← mkExpectedTypeHint pcPf
+          (← mkEq (← mkAppM ``State.pc #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) retE))
+        let gs ← g.apply (mkAppN (mkConst ``Reaches.exit_withExit) #[base, retE, s, Q, hret, hpc])
+        return some gs
     let some (c, hpc) := pc? |
       throwError "janus: the pc of the current state is not a concrete address:{indentExpr pcE}"
     if !allowStop && cfg.stops.contains c then return none
     -- a call to a function with a summary
     if let some (_, hsum) := cfg.calls.find? (·.1 == c) then
+      let hsum ← match hret? with
+        | some hret => mkAppM ``Summary.withExit #[hsum, hret]
+        | none => pure hsum
       return some (← applySummary cfg g p s ret? hsum hpc)
-    let (exitA, segs, stubs) ← getProgData p
+    let (exitA, segs, stubs) ← getProgData progE
     let cE := mkNatLit c
-    if c == exitA then
+    if mode.isNone && c == exitA then
       if ret?.isSome then throwError "janus: reached the exit address inside a callee"
       let hok ← kernelDecide (mkApp2 (mkConst ``exitOK) p cE)
       let Q := match ← goalKind g with | .reaches _ _ Q => Q | _ => default
@@ -468,9 +532,14 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
     if let some (_, name, isPanic) := stubs.find? (·.1 == c) then
       if ret?.isSome then throwError "janus: reached stub {name} inside a callee"
       let kind := if isPanic then mkConst ``StubKind.panic else mkConst ``StubKind.morestack
-      let hok ← kernelDecide (mkApp4 (mkConst ``stubOK) p cE (toExpr name) kind)
+      let hok ← kernelDecide (mkApp4 (mkConst ``stubOK) progE cE (toExpr name) kind)
       let Q := match ← goalKind g with | .reaches _ _ Q => Q | _ => default
-      let gs ← g.apply (mkAppN (mkConst ``Reaches.stub) #[p, s, Q, cE, toExpr name, kind, hpc, hok])
+      let lem := match mode, hret? with
+        | some (base, retE), some hret =>
+          mkAppN (mkConst ``Reaches.stub_withExit) #[base, retE, s, Q, cE, toExpr name, kind, hret,
+            hpc, hok]
+        | _, _ => mkAppN (mkConst ``Reaches.stub) #[p, s, Q, cE, toExpr name, kind, hpc, hok]
+      let gs ← g.apply lem
       return some gs
     let some w := fetchWord segs c |
       throwError "janus: no code at pc {c} (0x{String.ofList (Nat.toDigits 16 c)})"
@@ -478,7 +547,7 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       throwError "janus: undecodable word 0x{String.ofList (Nat.toDigits 16 w)} at pc 0x{String.ofList (Nat.toDigits 16 c)}"
     let iE := toExpr i
     trace[janus] "pc 0x{String.ofList (Nat.toDigits 16 c)}: {repr i}"
-    let hok ← kernelDecide (mkApp4 (mkConst ``stepOK) p cE (mkNatLit w) iE)
+    let hok ← kernelDecide (mkApp4 (mkConst ``stepOK) progE cE (mkNatLit w) iE)
     let execE := mkApp2 (mkConst ``exec) iE s
     let t0 ← IO.monoMsNow
     let r ← simpExpr ctx simprocs d? execE
@@ -489,7 +558,11 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       | .reachesRet _ ret _ Q =>
         mkAppN (mkConst ``ReachesRet.step) #[p, ret, s, Q, cE, mkNatLit w, iE, r.expr, hpc, hok, he]
       | .reaches _ _ Q =>
-        mkAppN (mkConst ``Reaches.step) #[p, s, Q, cE, mkNatLit w, iE, r.expr, hpc, hok, he]
+        match mode, hret? with
+        | some (base, retE), some hret =>
+          mkAppN (mkConst ``Reaches.step_withExit)
+            #[base, retE, s, Q, cE, mkNatLit w, iE, r.expr, hret, hpc, hok, he]
+        | _, _ => mkAppN (mkConst ``Reaches.step) #[p, s, Q, cE, mkNatLit w, iE, r.expr, hpc, hok, he]
       | _ => default
     let gs ← g.apply lemE
     let mut out := []
@@ -550,14 +623,8 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := do
 
 theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
     (h : m.accessible b k w' = true) (hw : (w = false ∨ w' = true)) (h1 : b ≤ a)
-    (h2 : a + n ≤ b + k) : m.accessible a n w = true := by
-  obtain ⟨r, hr, h3, h4, h5⟩ := (Memory.accessible_iff m b k w').1 h
-  refine (Memory.accessible_iff m a n w).2 ⟨r, hr, by omega, by omega, ?_⟩
-  rcases hw with hw | hw
-  · exact Or.inl hw
-  · rcases h5 with h5 | h5
-    · subst hw; cases h5
-    · exact Or.inr h5
+    (h2 : a + n ≤ b + k) : m.accessible a n w = true :=
+  Memory.accessible_sub m h hw h1 h2
 
 /-- Prove `m.accessible a n w = true` from a hypothesis about the same memory. -/
 def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
@@ -782,7 +849,9 @@ elab "janus_cases " h:ident : tactic => withMainContext do
   replaceMainGoal res
 
 /-- From `hs : CallSetup p entry [a₀, …] s`, add `h_pc : s.pc = BitVec.ofNat 64 entry`,
-`h_lr : s.regs 30 = BitVec.ofNat 64 p.exitAddr` and `h_x<i> : s.regs i = aᵢ`. -/
+`h_lr : s.regs 30 = BitVec.ofNat 64 p.exitAddr` and `h_x<i> : s.regs i = aᵢ`. For a call with a
+symbolic return address (`p = Program.withExit p₀ ret`, with `hret : RetAddr p₀ ret` in the
+context) `h_lr` is `s.regs 30 = BitVec.ofNat 64 ret`; `janus_run` uses `hret` itself. -/
 elab "janus_intro " h:ident : tactic => withMainContext do
   let hE ← elabTerm h none
   let ty ← whnfR (← instantiateMVars (← inferType hE))
@@ -794,18 +863,28 @@ elab "janus_intro " h:ident : tactic => withMainContext do
   let mut g ← getMainGoal
   let (``GoABI.CallSetup, #[prog, entry, _, _]) := ty.getAppFnArgs | unreachable!
   let some entryN ← evalNat entry | throwError "janus_intro: cannot evaluate the entry address"
-  let some exitN ← evalNat (← mkAppM ``Program.exitAddr #[prog]) |
-    throwError "janus_intro: cannot evaluate the exit address"
+  let mode ← exitMode prog
   let bv (n : Nat) : Expr := mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) (mkNatLit n)
+  -- the return address: `ret` for `Program.withExit p ret`, else the literal exit address
+  let exitE ← match mode with
+    | some (_, retE) => pure retE
+    | none =>
+      let some exitN ← evalNat (← mkAppM ``Program.exitAddr #[prog]) |
+        throwError "janus_intro: cannot evaluate the exit address"
+      pure (mkNatLit exitN)
   let pcTy ← mkEq (← mkAppM ``State.pc #[s]) (bv entryN)
   let pcPf ← mkExpectedTypeHint (← mkAppM ``GoABI.CallSetup.pc #[hE]) pcTy
   let (_, g') ← (← g.assert `h_pc pcTy pcPf).intro1P
   g := g'
   g ← g.withContext do
-    let lrTy ← mkEq (mkApp (← mkAppM ``State.regs #[s]) (mkNatLit 30)) (bv exitN)
+    let lrTy ← mkEq (mkApp (← mkAppM ``State.regs #[s]) (mkNatLit 30))
+      (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) exitE)
     let lrPf ← mkExpectedTypeHint (← mkAppM ``GoABI.CallSetup.lr #[hE]) lrTy
     let (_, g') ← (← g.assert `h_lr lrTy lrPf).intro1P
     return g'
+  -- a symbolic return address needs its `RetAddr` hypothesis (used by `janus_run`)
+  if let some (base, retE) := mode then
+    discard <| g.withContext (findRetAddr base retE)
   for i in [0:elems.size] do
     g ← g.withContext do
       let regs ← mkAppM ``State.regs #[s]

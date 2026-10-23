@@ -122,6 +122,10 @@ func cmdBlockers(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if b.GOARCH != "arm64" {
+		return &diag{Msg: fmt.Sprintf("janus blockers supports arm64 binaries only; %s is %s", pos[0], b.GOARCH),
+			Stage: "binary validation", Next: "Run janus blockers on a GOARCH=arm64 build."}
+	}
 	root, err := findJanusRoot(opts["janus-root"])
 	if err != nil {
 		return err

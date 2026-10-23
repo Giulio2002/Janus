@@ -18,6 +18,7 @@ type identityFunc struct {
 	Address string `json:"address"`
 	Size    uint64 `json:"size"`
 	Words   int    `json:"words"`
+	Bytes   int    `json:"bytes,omitempty"` // amd64
 }
 
 type identityStub struct {
@@ -64,6 +65,7 @@ type Identity struct {
 	MainModule       string            `json:"mainModule"`
 	GOOS             string            `json:"goos"`
 	GOARCH           string            `json:"goarch"`
+	GOAMD64          string            `json:"goamd64,omitempty"`
 	SymbolSource     string            `json:"symbolSource"`
 	Symbol           string            `json:"symbol"`
 	Address          string            `json:"address"`
@@ -119,6 +121,7 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 		MainModule:       x.Bin.MainModule,
 		GOOS:             x.Bin.GOOS,
 		GOARCH:           x.Bin.GOARCH,
+		GOAMD64:          x.Bin.GOAMD64,
 		SymbolSource:     x.Bin.SymbolSource,
 		Symbol:           x.Entry.Name,
 		Address:          hex0x(x.Entry.Addr),
@@ -134,7 +137,7 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 		ExtractedSha256:  sha256Hex(x.Lean),
 	}
 	for _, s := range x.Segments {
-		id.Functions = append(id.Functions, identityFunc{s.Name, hex0x(s.Base), s.Size, len(s.Words)})
+		id.Functions = append(id.Functions, identityFunc{s.Name, hex0x(s.Base), s.Size, len(s.Words), len(s.Bytes)})
 	}
 	for _, s := range x.Stubs {
 		id.Stubs = append(id.Stubs, identityStub{s.Name, hex0x(s.Addr), string(s.Kind)})

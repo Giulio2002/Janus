@@ -90,9 +90,24 @@ def prologueAdj (frameSize : Nat) : Nat := frameSize - stackSmall
 
 /-! ## Calls -/
 
+/-- `ret` is an admissible return address for a call into `p` from outside the extracted code:
+4-aligned, a user-space address (below `2^48`, untagged), not inside any extracted code segment
+and not a stub address. A real caller's return address is the instruction after its `BL`, in
+the caller's own code. Specifications quantify over **every** such `ret` and run
+`p.withExit ret`, so the only way to "return" is to branch to the value the caller passed in
+`X30`; a branch to any fixed address (such as `p.exitAddr`, or `0` loaded from memory) cannot
+reach every admissible `ret`. -/
+structure RetAddr (p : Program) (ret : Nat) : Prop where
+  aligned : ret % 4 = 0
+  user : ret < 2 ^ 48
+  notCode : ∀ seg ∈ p.segments, ret < seg.base ∨ seg.base + 4 * seg.words.length ≤ ret
+  notStub : ∀ st ∈ p.stubs, st.addr ≠ ret
+
 /-- `s` is a state in which `entry` has just been called with integer register
 arguments `args`, returning to `p.exitAddr`. Everything else (other registers, flags, SP,
-memory) is arbitrary; specifications quantify over all such states. -/
+memory) is arbitrary; specifications quantify over all such states. Specifications use it with
+`p.withExit ret` for a universally quantified admissible `ret` (`RetAddr`), never with the
+extracted placeholder `p.exitAddr`. -/
 structure CallSetup (p : Program) (entry : Nat) (args : List W64) (s : State) : Prop where
   pc : s.pc = BitVec.ofNat 64 entry
   lr : s.regs regLR = BitVec.ofNat 64 p.exitAddr
@@ -135,7 +150,7 @@ def stackguard0 (s : State) : Nat := s.mem.readLE ((s.regs regG).toNat + stackgu
 /-- The stack-growth prologue with adjustment `adj` (see `prologueAdj`) falls through:
 `g.stackguard0` is readable and below `SP - adj`. -/
 structure StackGuardOK (s : State) (adj : Nat) : Prop where
-  noWrap : (s.regs regG).toNat + stackguard0Offset + 8 ≤ 2 ^ 64
+  noWrap : (s.regs regG).toNat + stackguard0Offset + 8 ≤ 2 ^ 48
   readable : s.mem.accessible ((s.regs regG).toNat + stackguard0Offset) 8 false = true
   below : stackguard0 s + adj < s.sp.toNat
 
@@ -149,30 +164,48 @@ structure ABIReturn (s₀ s₁ : State) : Prop where
   fp : s₁.regs regFP = s₀.regs regFP
   platform : s₁.regs regPlatform = s₀.regs regPlatform
 
-/-! ## Specifications (total correctness with finite fuel) -/
+/-! ## Specifications (total correctness with finite fuel)
+
+The outcome predicates take a program and a state. For a call they are applied to
+`p.withExit ret` with `ret` universally quantified (`RetAddr`); `Ensures` does this itself.
+A fault (nil or out-of-bounds access, a read-only store, misaligned `SP`, a jump outside the
+extracted code, an unsupported instruction) is a crash or a Go panic on real hardware (a
+memory fault becomes `runtime.sigpanic`), so it is never "success": `Returns` excludes it, and
+`NeverPanics` counts it as a panic. -/
 
 /-- The call returns (reaches `p.exitAddr`) after finitely many steps, in a state
-satisfying `post`. -/
+satisfying `post`. Excludes faults, panics, stack growth and non-termination. -/
 def Returns (p : Program) (s : State) (post : State → Prop) : Prop :=
   ∃ fuel s', p.run fuel s = .ok (.returned s') ∧ post s'
 
-/-- Execution reaches a Go panic stub. -/
+/-- Execution reaches a Go panic stub (`runtime.panic*`: bounds checks, divide by zero,
+explicit `panic`). A nil dereference is not a stub call but a hardware fault: see `Faults`. -/
 def Panics (p : Program) (s : State) : Prop :=
   ∃ fuel name s', p.run fuel s = .ok (.stub name .panic s')
 
-/-- Execution never reaches a Go panic stub, for any fuel. -/
+/-- Execution stops with a fault: a memory access outside the caller's regions (e.g. a nil
+dereference) or to read-only memory, a misaligned `SP`, a jump outside the extracted code or
+an unsupported instruction. Running out of fuel is not a fault. -/
+def Faults (p : Program) (s : State) : Prop :=
+  ∃ fuel e, p.run fuel s = .error e ∧ e ≠ .outOfFuel
+
+/-- Execution never faults and never reaches a Go panic stub, for any fuel. It may return,
+reach `morestack`, or run forever (only running out of fuel is allowed as an error). -/
 def NeverPanics (p : Program) (s : State) : Prop :=
-  ∀ fuel name s', p.run fuel s ≠ .ok (.stub name .panic s')
+  ∀ fuel, (∀ name s', p.run fuel s ≠ .ok (.stub name .panic s')) ∧
+    (∀ e, p.run fuel s = .error e → e = .outOfFuel)
 
 /-- Execution reaches `runtime.morestack*`. -/
 def GrowsStack (p : Program) (s : State) : Prop :=
   ∃ fuel name s', p.run fuel s = .ok (.stub name .morestack s')
 
-/-- Go function contract: from **every** call state with these arguments satisfying `pre`,
-the call returns, obeys the ABI return rules, and satisfies `post s₀ s₁`. -/
+/-- Go function contract: for **every** admissible return address `ret` (`RetAddr`) and
+**every** call state with these arguments and `X30 = ret` satisfying `pre`, the call returns to
+`ret` (never faults or panics), obeys the ABI return rules, and satisfies `post s₀ s₁`. -/
 def Ensures (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop)
     (post : State → State → Prop) : Prop :=
-  ∀ s, CallSetup p entry args s → pre s → Returns p s (fun s' => ABIReturn s s' ∧ post s s')
+  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →
+    Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')
 
 /-- `Ensures` stated on the first `nres` integer result registers. -/
 def EnsuresResults (p : Program) (entry : Nat) (args : List W64) (nres : Nat)
@@ -291,11 +324,52 @@ theorem Returns.run_of_le {P : State → Prop} (h : Returns p s P) :
 
 theorem Returns.neverPanics {P : State → Prop} (h : Returns p s P) : NeverPanics p s := by
   obtain ⟨n, s', hr, _⟩ := h
-  intro m name s'' hm
-  cases Program.run_ok_unique hr hm
+  intro m
+  refine ⟨fun name s'' hm => ?_, fun e he => ?_⟩
+  · cases Program.run_ok_unique hr hm
+  · by_cases he' : e = .outOfFuel
+    · exact he'
+    · exact (Program.run_ok_not_error hr he he').elim
 
 theorem Returns.not_panics {P : State → Prop} (h : Returns p s P) : ¬ Panics p s := by
-  rintro ⟨m, name, s'', hm⟩; exact h.neverPanics m name s'' hm
+  rintro ⟨m, name, s'', hm⟩; exact (h.neverPanics m).1 name s'' hm
+
+theorem Returns.not_faults {P : State → Prop} (h : Returns p s P) : ¬ Faults p s := by
+  rintro ⟨m, e, hm, he⟩; exact he ((h.neverPanics m).2 e hm)
+
+theorem NeverPanics.not_panics (h : NeverPanics p s) : ¬ Panics p s := by
+  rintro ⟨m, name, s'', hm⟩; exact (h m).1 name s'' hm
+
+theorem NeverPanics.not_faults (h : NeverPanics p s) : ¬ Faults p s := by
+  rintro ⟨m, e, hm, he⟩; exact he ((h m).2 e hm)
+
+/-- "Never panics" is exactly "no panic stub and no fault". -/
+theorem neverPanics_iff : NeverPanics p s ↔ ¬ Panics p s ∧ ¬ Faults p s := by
+  refine ⟨fun h => ⟨h.not_panics, h.not_faults⟩, fun ⟨hp, hf⟩ m => ⟨?_, fun e he => ?_⟩⟩
+  · intro name s'' hm; exact hp ⟨m, name, s'', hm⟩
+  · by_cases he' : e = .outOfFuel
+    · exact he'
+    · exact (hf ⟨m, e, he, he'⟩).elim
+
+theorem Faults.not_returns {P : State → Prop} (h : Faults p s) : ¬ Returns p s P :=
+  fun hr => hr.not_faults h
+
+theorem Faults.not_panics (h : Faults p s) : ¬ Panics p s := by
+  rintro ⟨m, name, s'', hm⟩
+  obtain ⟨n, e, hn, he⟩ := h
+  exact Program.run_ok_not_error hm hn he
+
+/-- Steps reaching a faulting instruction establish `Faults`. -/
+theorem faults_of_steps {k w : Nat} {e : Fault} (hs : Program.Steps p s k s')
+    (hx : s'.pc.toNat ≠ p.exitAddr) (hst : p.stubAt s'.pc.toNat = none)
+    (hf : p.fetch s'.pc.toNat = some w) (he : Arm64.step w s' = .error e) (he' : e ≠ .outOfFuel) :
+    Faults p s :=
+  ⟨k + 1, e, by rw [Program.run_steps hs 1, Program.run_succ_fault hx hst hf he], he'⟩
+
+theorem Faults.of_steps {k : Nat} (hs : Program.Steps p s k s') (h : Faults p s') :
+    Faults p s := by
+  obtain ⟨n, e, hr, he⟩ := h
+  exact ⟨k + n, e, by rw [Program.run_steps hs, hr], he⟩
 
 theorem Returns.not_growsStack {P : State → Prop} (h : Returns p s P) : ¬ GrowsStack p s := by
   obtain ⟨n, s', hr, _⟩ := h
@@ -329,23 +403,62 @@ theorem Panics.of_steps {k : Nat} (hs : Program.Steps p s k s') (h : Panics p s'
 
 theorem NeverPanics.of_steps {k : Nat} (hs : Program.Steps p s k s') (h : NeverPanics p s) :
     NeverPanics p s' := by
-  intro n name s'' hr
-  exact h (k + n) name s'' (by rw [Program.run_steps hs, hr])
+  intro n
+  have := h (k + n)
+  rw [Program.run_steps hs] at this
+  exact this
 
 /-! ### `Ensures` -/
 
-theorem Ensures.returns {pre : State → Prop} {post : State → State → Prop}
-    (h : Ensures p entry args pre post) (hs : CallSetup p entry args s) (hpre : pre s) :
-    Returns p s (fun s' => ABIReturn s s' ∧ post s s') := h s hs hpre
+theorem Ensures.returns {pre : State → Prop} {post : State → State → Prop} {ret : Nat}
+    (h : Ensures p entry args pre post) (hret : RetAddr p ret)
+    (hs : CallSetup (p.withExit ret) entry args s) (hpre : pre s) :
+    Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s') := h ret hret s hs hpre
 
-theorem Ensures.neverPanics {pre : State → Prop} {post : State → State → Prop}
-    (h : Ensures p entry args pre post) (hs : CallSetup p entry args s) (hpre : pre s) :
-    NeverPanics p s := (h s hs hpre).neverPanics
+theorem Ensures.neverPanics {pre : State → Prop} {post : State → State → Prop} {ret : Nat}
+    (h : Ensures p entry args pre post) (hret : RetAddr p ret)
+    (hs : CallSetup (p.withExit ret) entry args s) (hpre : pre s) :
+    NeverPanics (p.withExit ret) s := (h ret hret s hs hpre).neverPanics
 
 theorem Ensures.mono {pre pre' : State → Prop} {post post' : State → State → Prop}
     (h : Ensures p entry args pre post) (hpre : ∀ s, pre' s → pre s)
     (hpost : ∀ s s', pre' s → post s s' → post' s s') : Ensures p entry args pre' post' :=
-  fun s hs hp => (h s hs (hpre s hp)).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ hp hq⟩
+  fun ret hret s hs hp => (h ret hret s hs (hpre s hp)).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ hp hq⟩
+
+/-! ### Return addresses -/
+
+/-- There is no code at an admissible return address. -/
+theorem RetAddr.fetch_none {ret : Nat} (h : RetAddr p ret) : p.fetch ret = none :=
+  Program.fetchIn_eq_none h.notCode
+
+/-- No stub sits at an admissible return address. -/
+theorem RetAddr.stubAt_none {ret : Nat} (h : RetAddr p ret) : p.stubAt ret = none :=
+  Program.stubAt_eq_none h.notStub
+
+theorem RetAddr.lt64 {ret : Nat} (h : RetAddr p ret) : ret < 2 ^ 64 := by
+  have := h.user; omega
+
+/-- An address that holds code is not the return address. -/
+theorem RetAddr.ne_of_fetch {ret pc w : Nat} (h : RetAddr p ret) (hf : p.fetch pc = some w) :
+    pc ≠ ret := by
+  rintro rfl; rw [h.fetch_none] at hf; cases hf
+
+/-- A stub address is not the return address. -/
+theorem RetAddr.ne_of_stubAt {ret pc : Nat} {st : Stub} (h : RetAddr p ret)
+    (hs : p.stubAt pc = some st) : pc ≠ ret := by
+  rintro rfl; rw [h.stubAt_none] at hs; cases hs
+
+/-- Decide `RetAddr` on a concrete program: `retAddrCheck p ret = true` by `decide`/`rfl`. -/
+def retAddrCheck (p : Program) (ret : Nat) : Bool :=
+  ret % 4 == 0 && decide (ret < 2 ^ 48) &&
+    p.segments.all (fun seg => decide (ret < seg.base ∨ seg.base + 4 * seg.words.length ≤ ret)) &&
+    p.stubs.all (fun st => st.addr != ret)
+
+theorem RetAddr.of_check {ret : Nat} (h : retAddrCheck p ret = true) : RetAddr p ret := by
+  simp only [retAddrCheck, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq, List.all_eq_true,
+    bne_iff_ne, ne_eq] at h
+  obtain ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩ := h
+  exact ⟨h1, h2, h3, h4⟩
 
 end Lemmas
 

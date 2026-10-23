@@ -1,0 +1,255 @@
+# The Sail (Arm ASL) oracle
+
+`docs/ORACLE.md` tests `Janus.Arm64.step` against `qemu-aarch64`. qemu is an implementation,
+not a specification. This second oracle runs the **same cases** on the **Sail arm-v9.4-a
+model**, which rems-project translated automatically from Arm's official ASL (the 2023-03
+Armv9.4-A release). It then reports three-way agreement: Janus vs Sail, qemu vs Sail, Janus vs qemu.
+
+Nothing here re-implements the architecture. The instruction semantics, the EL0 state set-up
+(each system register is written by stepping a real `MSR` in the model), the exception entry
+and the page-table walk all come from Arm's pseudocode.
+
+## Running it
+
+```
+scripts/oracle.sh full           # the qemu oracle: builds the corpus + qemu results (artifacts/oracle)
+scripts/oracle-sail.sh run       # Sail driver + three-way report (artifacts/oracle-sail)
+scripts/oracle-sail.sh smoke     # 18 hand-checked cases only
+scripts/oracle-sail.sh regen     # regenerate the Sail model from pinned sources (provenance)
+scripts/oracle-sail.sh crosscheck  # regenerated model vs vendored model on the whole corpus
+```
+
+`run` copies `artifacts/oracle/{cases,hw}.jsonl`, runs the Sail model on every case (about 20 s
+for 430k cases on 48 cores) and then uses the qemu oracle's own comparator three times. The whole
+run takes about 2.5 minutes. The first build takes about 30 minutes, because the model is one 170 MB
+C++ translation unit; later builds are incremental.
+
+| file in `artifacts/oracle-sail/` | contents |
+|---|---|
+| `threeway.md` | pairwise tables, joint verdicts, **soundness section**, qemu-vs-Sail disagreements, fault-signal agreement |
+| `soundness.jsonl` | every case where Janus succeeded with a result Sail does not produce (expected: empty) |
+| `janus-vs-sail/` | `oracle run` output with hardware := Sail, model := Janus (`summary.md`, `verdicts.jsonl`, `repro.md` if any mismatch) |
+| `qemu-vs-sail/` | hardware := qemu, model := Sail |
+| `janus-vs-qemu/` | hardware := qemu, model := Janus (same corpus and Janus build, for the joint table) |
+| `spalign/` | Sail-only corpus: SP-based loads/stores with a misaligned SP (qemu cannot check that) |
+| `cases.jsonl`, `qemu.jsonl`, `janus.jsonl`, `sail.jsonl` | the frozen inputs and every side's raw results |
+
+Exit criterion: `soundness.jsonl` is empty, i.e. `janus-vs-sail` has 0 `MISMATCH`.
+
+## What is reused
+
+| piece | origin |
+|---|---|
+| ISA semantics | [rems-project/sail-arm](https://github.com/rems-project/sail-arm) `arm-v9.4-a`, Arm ASL translated to Sail (BSD-3-Clause-Clear) |
+| single-step oracle around it | [yufengzjj/sail-aarch64-oracle](https://github.com/yufengzjj/sail-aarch64-oracle): Sail's C++ backend output of the model plus a harness (`step(opcode)` = `__DecodeExecute` + exception path, register/memory accessors) as a Rust crate with the generated model vendored |
+| test cases, layout, result formats | the qemu oracle (`oracle/layout/layout.go`): `Case` in, `HW` out (plus extra fields Go ignores) |
+| comparator, report, minimiser | the qemu oracle's `oracle run` / `oracle minimize` (`oracle/cmd/oracle`), run unchanged. The Sail driver is a drop-in `-runner`, or its results are replayed through `-reuse-native` / `-model` |
+| Lean side | `janus-oracle` (`Oracle/Main.lean`), unchanged |
+
+New code lives under `oracle-sail/` and in `scripts/oracle-sail.sh`. No file of the qemu oracle and
+no Lean file is modified.
+
+* `oracle-sail/src/main.rs`: the driver `janus-oracle-sail`. Supervisor plus worker processes; a
+  Sail runtime assertion aborts only that case, which is reported as `status: error` with the
+  assertion text.
+* `oracle-sail/instrument_model.py`: adds two counters to the generated C++ (see
+  "UNPREDICTABLE" below). It changes nothing else.
+* `oracle-sail/threeway.py`: joins the three verdict files and tags known non-authoritative
+  cases. `replay.py` serves precomputed results to `oracle run`. `smoke.py` holds the
+  hand-checked cases. `spalign.py` generates the SP-misalignment corpus.
+
+### Why this route
+
+* **sail-aarch64-oracle** (chosen): it does exactly what is needed. It takes the full Sail
+  arm-v9.4-a model and lets the caller set X0–X30/SP/PC/NZCV/PSTATE/memory, step one injected
+  32-bit opcode through the model's own decoder, and read everything back, including the
+  architectural exception path. It is self-contained (vendored model, patched Sail runtime), so
+  it needs only Rust and a C++20 compiler. Execution is fast: about 20k cases/s on 48 cores.
+* sail-arm's own C emulator (`elfmain.sail`) boots ELF images. It has no state-injection
+  interface, so single-instruction cases would need a hand-written boot stub per case.
+* **isla** executes the same Sail model, symbolically as well, but it is built for
+  concurrency/litmus and symbolic traces. Concrete differential runs from an arbitrary
+  register/memory state would need isla's snapshot build of the model plus a trace parser,
+  which is more machinery with no extra authority. It stays the natural next step for
+  *symbolic* checks: proving the Lean semantics of an instruction equal to the ASL for all
+  inputs.
+
+## Pinned versions
+
+| dependency | pin |
+|---|---|
+| sail-aarch64-oracle | git `2dffc81de96705d087b72a57047dd4589c6fb548` (crate 0.2.0; `oracle-sail/Cargo.toml`, `Cargo.lock`) |
+| vendored model | `vendor/model.cpp.gz` sha256 `64e3a929…a6ae5` (checked by the script); unpacked `model.cpp` sha256 `06e9a6e1…cdbc`, `model.h` `4f7cda2c…a5`, `model_missing.cpp` `88ad0c13…26`. The crate generated it with Sail 0.20.1 from sail-arm master (2026-06) |
+| sail-arm (for `regen`) | `f5bf6c3a2b5df8c7f6f9d3572825ff074e0c6b7c`, the last `arm-v9.4-a` source change before the crate vendored its model. The only later source change (`7d05816`, `prelude.sail`) is a Lean-extraction annotation |
+| Sail (for `regen`) | opam `sail.0.20.1`, OCaml `ocaml-base-compiler.5.2.1`, opam 2.5.0, z3 4.13.3 |
+| Rust deps | `serde =1.0.228`, `serde_json =1.0.145`; full graph in `oracle-sail/Cargo.lock` (`cargo build --locked`) |
+| toolchain used | rustc/cargo 1.99.0, g++ 15.2.0, libgmp 6.3.0 (`system-gmp` feature), Go 1.26.0, Lean 4.34.1; qemu reference 10.2.1 |
+
+All external sources go to `DEPS` (default `/srv/janus-sail-deps`): the crate clone, the
+sail-arm worktree, the opam root, and the unpacked and instrumented model copies.
+
+## How to rebuild
+
+```
+scripts/oracle-sail.sh build                       # vendored model (default)
+scripts/oracle-sail.sh regen && SAIL_MODEL=regen scripts/oracle-sail.sh build   # from source
+```
+
+`build` unpacks `vendor/model.cpp.gz` once to a stable path, instruments it, and builds with
+`AARCH64_ORACLE_SAIL_MODEL_C` pointing there. The crate's default path re-unpacks the model
+into `OUT_DIR` on every build-script run, and its `rerun-if-changed` on that fresh file makes
+cargo recompile the 170 MB unit on every build. `regen` installs opam + Sail 0.20.1, checks out
+sail-arm at the pin and runs the crate's README Step 2 command. It passes `--c-preserve` for *every*
+function in `harness.sail`; the README lists only 8, but all of them are needed. It then runs
+the crate's mandatory `fix_cpp_model.py`. `crosscheck` builds a second driver on the
+regenerated model and diffs its results on the whole corpus.
+
+Provenance status: the regenerated C++ is **not byte-identical** to the vendored copy. It is
+244 MB vs 173 MB, the function count differs by 14, and some trivial bodies are emitted
+differently, so the crate author's Sail build differed in detail. Semantic equality is checked
+by `crosscheck` instead (result below).
+
+## The EL0 state
+
+Every case starts from the crate's reset state (EL3, AArch64). The driver steps `MSR`s through
+the model, so their side effects are Arm's own, and then an `ERET` into EL0t at `TestPC`:
+
+| register | value | why |
+|---|---|---|
+| `SCR_EL3` | NS, RW, APK, API, ATA, EnSCXT, HXEn, EnTP2; SMD = 0, HCE = 0, FGTEn = 0 | Non-secure, AArch64 below, PAuth/MTE/MOPS usable as on a Linux host. HVC is UNDEFINED. SMC is used to get back to EL3 between cases |
+| `HCR_EL2` | RW, APK, API | EL1 AArch64, no stage 2, no traps (Linux not under a hypervisor) |
+| `HCRX_EL2` | MSCEn | FEAT_MOPS usable at EL0 |
+| `CPTR_EL2`, `MDCR_EL2`, `HSTR_EL2` | no traps | |
+| `SCTLR_EL1` | Linux `INIT_SCTLR_EL1_MMU_ON` (M C SA **SA0** SED EOS I DZE UCT nTWE TSCXT IESB EIS SPAN UCI nTLSMD LSMAOE ITFSB EPAN), + EnIA/EnIB/EnDA/EnDB, ATA0, MSCEn; **A = 0**, nAA = 0, nTWI = 0 | Linux alignment rules: no general alignment checking, SP alignment checked at EL0, LSE2 16-byte rule for atomics/exclusives |
+| `TCR_EL1` | T0SZ = T1SZ = 16, 4K granules, WBWA inner-shareable walks, IPS 48-bit, **TBI0 = 1**, TBI1 = 0, EPD1 = 1 | Linux 48-bit VA with top-byte-ignore for user addresses |
+| `MAIR_EL1` | Attr0 = 0xFF (Normal WB) | |
+| `TTBR0_EL1` | 4-level identity map of exactly two pages | see below |
+| `CPACR_EL1` | FPEN = ZEN = SMEN = 3 | Linux enables FP/SVE/SME lazily, invisibly to the program |
+| `ZCR_EL1.LEN` = 3, `SMCR_EL1.LEN` = 1 | VL 512, SVL 256 | Linux/qemu-user default vector lengths |
+| `SPSR_EL3` | 0 (EL0t, DAIF clear) | |
+| local monitor | `CLREX` | as the qemu runner does |
+
+The MMU is **on**. With stage 1 off, EL0 data accesses are Device-nGnRnE and every unaligned
+access faults, which is not what Linux user code sees. The identity map has the code page
+(user RWX, as the runner's `mmap`) holding the word at `TestPC` with `UDF #0` everywhere else,
+and the data buffer (user RW, UXN) holding `Pattern(seed, i)`. Nothing else is mapped.
+Instruction fetch is not modelled: the crate injects the opcode.
+
+A synchronous exception is taken to EL1 (vector base 0). The driver reads `ESR_EL1`, `FAR_EL1`,
+`ELR_EL1`, `SPSR_EL1` and `SP_EL0` with `MRS` and maps them to the signal Linux would deliver,
+which is what the qemu runner observes:
+
+| ESR | signal / si_code / si_addr |
+|---|---|
+| EC 0x00 (UNDEFINED), 0x0E, 0x18, 0x0D (BTI), 0x0A (LS64), 0x27 (MOPS) | SIGILL / ILL_ILLOPC / pc |
+| EC 0x1C (FPAC) | SIGILL / ILL_ILLOPN / pc |
+| EC 0x24 translation / address-size | SIGSEGV / SEGV_MAPERR / untagged FAR |
+| EC 0x24 access-flag / permission | SIGSEGV / SEGV_ACCERR / FAR |
+| EC 0x24 alignment (DFSC 0x21) | SIGBUS / BUS_ADRALN / FAR |
+| EC 0x26 SP alignment | SIGBUS / BUS_ADRALN / SP |
+| EC 0x3C BRK | SIGTRAP / TRAP_BRKPT / pc |
+| EC 0x01 WFI | not a fault: Linux's `wfi_handler` skips it, so status ok, pc + 4 |
+
+Without an exception, the status is decided by the *next* fetch, exactly as in the runner:
+`selfloop` (pc = `TestPC`), SIGILL in the code page, SIGBUS for a misaligned pc, otherwise
+SIGSEGV at pc. Between cases the driver steps `SVC` (EL0 to EL1) and `SMC` (EL1 to EL3) and
+re-runs the whole set-up. It zeroes FPCR/FPSR/TPIDR*/Z/P/FFR. A fresh model instance per case
+(`SAIL_FRESH=1`) gives byte-identical results.
+
+## What Sail does *not* settle (tags in `threeway.md`)
+
+Some outcomes in the model are stubs or implementation choices, not Arm's ASL. They are tagged
+and must not be read as "the architecture says so":
+
+* **`sail-monitor-stub`**: sail-arm implements `IsExclusiveLocal/Global` as `true` and
+  `ClearExclusiveLocal` as a no-op, so every store-exclusive *succeeds* (status 0, memory
+  written). After `CLREX`, real hardware and qemu fail it (status 1, no store). For the same
+  reason the model always performs the access, so alignment and translation faults on
+  `STXR/STLXR/STXP` appear where qemu reports a failed store. The ASL order (alignment check
+  first) is Arm's; whether aborts are detected before the monitor check is IMPLEMENTATION
+  DEFINED.
+* **`sail-unpredictable`**: sail-arm stubs `ConstrainUnpredictable*()` with
+  `__UNKNOWN_*()`, which is deterministically the first enum value (`Constraint_NONE`), and the
+  crate's `step_a64` turns `Error_Unpredictable` into UNDEFINED. `instrument_model.py` counts
+  calls to `ConstrainUnpredictable{,Bits,Integer}` and `Error_Unpredictable` constructions while the
+  instruction under test runs, and the driver emits `"unpredictable": n`. The Bool/Procedure
+  variants are inlined by Sail's optimiser and cannot be counted; in A64 they occur only in
+  SVE, debug and translation code. After such a case the instance is discarded.
+* **uncaught model exceptions** (`status: error`): `Error_ConstrainedUnpredictable`,
+  `Error_ImplementationDefined`, `Error_ReservedEncoding` and `Error_SError` are caught by no
+  handler on the A64 path, so the step returns half-done. A second counter detects this. The
+  case is reported as an error, never as a result, and the instance is discarded. Sail runtime
+  assertions abort the worker (MOPS size stubs at `instrs64.sail:9007`/`9719`; `LDRAA` with
+  writeback and `Rn == Rt`). Such a case is likewise an error.
+* **`sbo-unpredictable`**: load/store-exclusive and ordered encodings whose "(1)"
+  (should-be-one) Rs/Rt2 fields are not all ones. Arm: CONSTRAINED UNPREDICTABLE. sail-arm's
+  decode patterns hard-code the ones, so these are UNDEFINED there (one permitted choice); qemu
+  ignores the fields.
+* **`mops-impdef`**: `CPY*`/`SET*`. The crate fixes the IMPLEMENTATION DEFINED options
+  (option A; the prologue processes 0 bytes), and qemu chooses differently. Only the final
+  memory state is comparable.
+* **`pauth-keys`**: PAC/AUT/XPAC/PACGA/LDRA*/BRA*. The results depend on the keys (the model's reset
+  values, random per process in qemu-user) and on FEAT_FPAC, which Sail implements: a
+  failed `AUT*` faults (SIGILL/ILL_ILLOPN) where qemu returns a poisoned pointer.
+* **`qemu-lacks-feature`**: Sail implements all of v9.4 (for example FEAT_THE `RCW*`,
+  FEAT_LRCPC3 `LDIAPP`), while qemu 10.2's `max` CPU raises SIGILL on these.
+* **`qemu-process-memory`**: the address is mapped in the qemu runner process (for example
+  `0x10000`, the runner's text), so qemu loads from it. Sail maps only the two test pages.
+* Fault *addresses*: Sail reports the exact faulting address (FAR, then Linux's
+  `untagged_addr`: bits 63:56 := bit 55). qemu-user rounds si_addr down (for example
+  `0x1000041003` becomes `0x1000041000`) and reports 0 for addresses outside its guest space.
+  The comparator does not compare fault kinds or addresses; `threeway.md` lists the
+  signal/si_code pairs separately.
+* Not modelled: instruction fetch (so no instruction aborts and no BTI landing checks), the
+  kernel half of the address space (EPD1), interrupts, and the global monitor. RNDR is
+  nondeterministic.
+
+None of these can hide a Janus soundness bug as an "agree". They only produce `model-gap`
+or MISMATCH noise between qemu and Sail, or `error` cases, which are excluded.
+
+## Results (2026-10-23, corpus of `scripts/oracle.sh full`: 427,845 cases)
+
+Janus = `janus-oracle` built 13:55 (git `665fb69` + working tree); qemu = `artifacts/oracle/hw.jsonl`
+(qemu 10.2.1, `-cpu max`); Sail = vendored model, instrumented.
+
+| pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
+|---|---:|---:|---:|---:|---:|
+| **Sail vs Janus** | 409,378 | **0** | 18,460 | 7 | 0 |
+| qemu vs Sail | 425,255 | 1,285 | 1,297 | 1 | 7 |
+| qemu vs Janus | 408,119 | 0 | 19,725 | 1 | 0 |
+| Sail vs Janus, `spalign` (Sail-only) | 90,190 | **0** | 260 | 0 | 0 |
+
+* **Soundness: 0 cases** where Janus succeeds with a state Sail does not produce, over
+  427,845 corpus cases and 90,450 misaligned-SP cases. Every one of Janus's 18,460 gaps is a
+  conservative fault: 18,319 `undecodable`, 109 `noCode`, 32 `outsideAllocation`.
+* **SP alignment is now confirmed, not just conservative**: in 83,200 `spalign` cases Sail
+  takes an SP alignment fault (SIGBUS) exactly where Janus reports `spMisaligned`, and in none
+  does Janus fault where Sail succeeds.
+* **Joint verdicts**: 408,080 cases agree three ways. In 1,297, Janus and Sail both fault where
+  qemu succeeds (should-be-one exclusives, PAC `AUT*` under FPAC, accesses to qemu process
+  memory). In 1,285, Sail differs from qemu while Janus is conservative. No case has Janus and
+  qemu agreeing on a success that Sail contradicts.
+* **qemu vs Sail**: all 2,582 non-agreements carry a tag from the list above:
+  `sail-monitor-stub` 1,334, `sbo-unpredictable` 824, `pauth-keys` 385, `qemu-lacks-feature` 17,
+  `mops-impdef` 19, `qemu-process-memory` 10. The 7 model-errors are Sail assertion aborts
+  (MOPS stubs, `LDRAA` writeback). The 1 unobserved is a qemu `escaped`. Signals agree on 40,378
+  of 40,629 cases where both fault. The rest are the same tags (FPAC ILL_ILLOPN vs ILL_ILLOPC,
+  SBO UNDEF vs qemu's alignment/translation fault, RCW alignment fault vs qemu SIGILL,
+  qemu's read-only runner text giving SEGV_ACCERR vs MAPERR).
+* **Provenance**: `crosscheck` gives byte-identical `sail.jsonl` from the model regenerated
+  from sail-arm `f5bf6c3` with Sail 0.20.1 and from the crate's vendored model, on all 427,845
+  cases.
+
+## Found on the way
+
+* qemu oracle comparator (`oracle/cmd/oracle/compare.go:142`): `d[:strings.IndexAny(d, ":[")]`
+  panics on the `"... N more bytes"` line that is appended when more than 8 memory bytes
+  differ. It never fires on Janus-vs-qemu, but does on qemu-vs-Sail. `scripts/oracle-sail.sh`
+  builds the CLI from the unmodified sources with a `go build -overlay` replacement of that one
+  line, applied only while the line is present. The proper fix belongs in `compare.go`.
+* sail-aarch64-oracle: (1) the README's regeneration command preserves only 8 of the harness
+  functions; (2) `build.rs` rebuilds the 170 MB model on every cargo invocation unless
+  `AARCH64_ORACLE_SAIL_MODEL_C` is set; (3) `step_a64` does not catch
+  `Error_ConstrainedUnpredictable` (301 throw sites in sail-arm), so such steps return
+  half-executed with `have_exception` set; (4) `TCR_EL1.T1SZ = 0` (the reset value) makes
+  `XPAC*` hit a model assertion. The EL0 set-up above avoids (4), and the driver detects (3).

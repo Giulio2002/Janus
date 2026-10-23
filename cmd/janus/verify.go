@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,9 +20,9 @@ const defaultTheorem = "Proof.correctness"
 
 var allowedAxioms = []string{"propext", "Quot.sound", "Classical.choice"}
 
-// A dotted Lean name of plain identifier components. Deliberately strict: the name is
-// spliced into a generated Lean file.
-var theoremNameRE = regexp.MustCompile(`^[\p{L}_][\p{L}\p{N}_'!?]*(\.[\p{L}_][\p{L}\p{N}_'!?]*)*$`)
+// A dotted Lean name of plain ASCII identifier components. Deliberately strict: the name is
+// spliced into a generated Lean file, and ASCII-only rules out lookalike/Unicode names (E2).
+var theoremNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_'!?]*(\.[A-Za-z_][A-Za-z0-9_'!?]*)*$`)
 
 type kernelReplay struct {
 	Tool    string   `json:"tool"`
@@ -34,83 +32,62 @@ type kernelReplay struct {
 }
 
 type verifiedReport struct {
-	Schema           int          `json:"schema"`
-	Theorem          string       `json:"theorem"`
-	Kind             string       `json:"kind"`
-	Module           string       `json:"module"`
-	Statement        string       `json:"statement"`
-	Axioms           []string     `json:"axioms"`
-	AllowedAxioms    []string     `json:"allowedAxioms"`
-	KernelReplay     kernelReplay `json:"kernelReplay"`
-	Proof            string       `json:"proof"`
-	ProofSha256      string       `json:"proofSha256"`
-	Extracted        string       `json:"extracted"`
-	ExtractedSha256  string       `json:"extractedSha256"`
-	IdentitySha256   string       `json:"identitySha256"`
-	Binary           string       `json:"binary"`
-	BinarySha256     string       `json:"binarySha256"`
-	Symbol           string       `json:"symbol"`
-	Address          string       `json:"address"`
-	GoVersion        string       `json:"goVersion"`
-	MainModule       string       `json:"mainModule"`
-	LeanVersion      string       `json:"leanVersion"`
-	JanusRoot        string       `json:"janusRoot"`
-	JanusCommit      string       `json:"janusCommit,omitempty"`
-	ExtractorVersion string       `json:"extractorVersion"`
-	Timestamp        string       `json:"timestamp"`
+	Schema           int            `json:"schema"`
+	Theorem          string         `json:"theorem"`
+	Kind             string         `json:"kind"`
+	Module           string         `json:"module"`
+	Statement        string         `json:"statement"`
+	Axioms           []string       `json:"axioms"`
+	AllowedAxioms    []string       `json:"allowedAxioms"`
+	KernelReplay     kernelReplay   `json:"kernelReplay"`
+	Proof            string         `json:"proof"`
+	ProofSha256      string         `json:"proofSha256"`
+	Extracted        string         `json:"extracted"`
+	ExtractedSha256  string         `json:"extractedSha256"`
+	IdentitySha256   string         `json:"identitySha256"`
+	Binary           string         `json:"binary"`
+	BinarySha256     string         `json:"binarySha256"`
+	Symbol           string         `json:"symbol"`
+	Address          string         `json:"address"`
+	GoVersion        string         `json:"goVersion"`
+	MainModule       string         `json:"mainModule"`
+	LeanVersion      string         `json:"leanVersion"`
+	JanusRoot        string         `json:"janusRoot"`
+	JanusCommit      string         `json:"janusCommit,omitempty"`
+	ExtractorVersion string         `json:"extractorVersion"`
+	Timestamp        string         `json:"timestamp"`
+	Framework        *frameworkInfo `json:"framework,omitempty"`
+	Consumer         *consumerInfo  `json:"consumer,omitempty"`
+	Sandbox          sandboxInfo    `json:"sandbox"`
+	Definitions      []string       `json:"definitions,omitempty"`
 }
 
 type auditResult struct {
-	Name      string   `json:"name"`
-	Kind      string   `json:"kind"`
-	Module    string   `json:"module"`
-	Axioms    []string `json:"axioms"`
-	Statement string   `json:"statement"`
+	Name        string   `json:"name"`
+	Kind        string   `json:"kind"`
+	Module      string   `json:"module"`
+	Axioms      []string `json:"axioms"`
+	Statement   string   `json:"statement"`
+	Definitions []string `json:"definitions"` // proof-local defs the statement uses, with bodies
+	Modules     []string `json:"modules"`     // every module in the audited environment
 }
 
-// findJanusRoot locates the Lean project: --janus-root, $JANUS_ROOT, then the repository
-// containing the executable, then the one containing the working directory.
+// findJanusRoot locates the Lean project: --janus-root, else $JANUS_ROOT (a Janus checkout,
+// built in place), else the framework embedded in this binary, materialized and built once in
+// the local cache (see frameworkBase).
 func findJanusRoot(flag string) (string, error) {
-	isRoot := func(dir string) bool {
-		b, err := os.ReadFile(filepath.Join(dir, "lakefile.toml"))
-		return err == nil && regexp.MustCompile(`(?m)^name\s*=\s*"janus"\s*$`).Match(b)
+	fw, err := loadFramework(flag)
+	if err != nil {
+		return "", err
 	}
-	explicit := flag
-	if explicit == "" {
-		explicit = os.Getenv("JANUS_ROOT")
+	if fw.Source == "directory" {
+		return fw.Dir, nil
 	}
-	if explicit != "" {
-		abs, err := filepath.Abs(explicit)
-		if err == nil && isRoot(abs) {
-			return abs, nil
-		}
-		return "", &diag{Invalid: true, Msg: fmt.Sprintf("%s is not the Janus Lean project (no lakefile.toml with name = \"janus\").", explicit),
-			Stage: "toolchain", Next: "Pass --janus-root pointing at the Janus repository (or set JANUS_ROOT)."}
+	lake, err := findLake()
+	if err != nil {
+		return "", err
 	}
-	var starts []string
-	if exe, err := os.Executable(); err == nil {
-		if r, err := filepath.EvalSymlinks(exe); err == nil {
-			exe = r
-		}
-		starts = append(starts, filepath.Dir(exe))
-	}
-	if wd, err := os.Getwd(); err == nil {
-		starts = append(starts, wd)
-	}
-	for _, d := range starts {
-		for {
-			if isRoot(d) {
-				return d, nil
-			}
-			parent := filepath.Dir(d)
-			if parent == d {
-				break
-			}
-			d = parent
-		}
-	}
-	return "", &diag{Invalid: true, Msg: "Cannot find the Janus Lean project.", Stage: "toolchain",
-		Next: "Pass --janus-root pointing at the Janus repository (or set JANUS_ROOT)."}
+	return fw.frameworkBase(lake, os.Stderr)
 }
 
 func findLake() (string, error) {
@@ -207,34 +184,97 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary")
+	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox")
+	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root")
 	if err != nil {
-		return usageErr("%v", err)
+		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
 	}
 	if len(pos) != 1 {
-		return usageErr("verify takes exactly one artifact directory")
+		return jsonFailure(stdout, flags["json"], usageErr("verify takes exactly one artifact directory"))
+	}
+	if flags["fresh"] {
+		opts["fresh"] = "true"
+	}
+	if flags["unsafe-no-sandbox"] {
+		opts["unsafe-no-sandbox"] = "true"
 	}
 	outdir := pos[0]
+	r, err := verifyAndReport(outdir, opts, stderr)
+	if err != nil {
+		return jsonFailure(stdout, flags["json"], err)
+	}
+	if flags["json"] {
+		b, _ := json.MarshalIndent(r, "", "  ")
+		fmt.Fprintf(stdout, "%s\n", b)
+	} else {
+		printVerified(stdout, outdir, r)
+	}
+	if !strings.Contains(r.Statement, "Extracted.") {
+		fmt.Fprintln(stderr, "Warning: the statement does not mention any Extracted definition; it says nothing about the extracted code.")
+	}
+	return nil
+}
+
+// verifyAndReport withdraws <outdir>/verified.json, verifies (a single proof file, or a
+// module of a consumer package with --proof-root) and writes the new report on success.
+func verifyAndReport(outdir string, opts map[string]string, stderr io.Writer) (*verifiedReport, error) {
 	reportPath := filepath.Join(outdir, "verified.json")
 	// Every attempt starts by withdrawing the previous report; only success writes a new one.
 	if err := os.Remove(reportPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return &diag{Invalid: true, Msg: fmt.Sprintf("Cannot remove stale %s: %v", displayPath(reportPath), err), Stage: "writing report"}
+		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot remove stale %s: %v", displayPath(reportPath), err), Stage: "writing report"}
 	}
-	r, err := verify(outdir, opts, stderr)
+	var r *verifiedReport
+	var err error
+	if opts["proof-root"] != "" {
+		r, err = verifyConsumer(outdir, opts, stderr)
+	} else {
+		r, err = verify(outdir, opts, stderr)
+	}
 	if err != nil {
 		_ = os.Remove(reportPath)
-		return err
+		return nil, err
 	}
+	if err := writeReport(reportPath, r); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func writeReport(reportPath string, r *verifiedReport) error {
 	b, _ := json.MarshalIndent(r, "", "  ")
 	if err := os.WriteFile(reportPath, append(b, '\n'), 0o644); err != nil {
 		_ = os.Remove(reportPath)
 		return &diag{Invalid: true, Msg: fmt.Sprintf("Cannot write %s: %v", displayPath(reportPath), err), Stage: "writing report"}
 	}
+	return nil
+}
+
+func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	fmt.Fprintf(stdout, "Verified: %s\n", r.Theorem)
 	fmt.Fprintf(stdout, "  Module: %s (%s)\n", r.MainModule, r.GoVersion)
 	fmt.Fprintf(stdout, "  Entry: %s at %s\n", r.Symbol, r.Address)
 	fmt.Fprintf(stdout, "  Binary: %s (SHA-256 %s)\n", displayPath(resolveBinary(outdir, r.Binary)), r.BinarySha256)
 	fmt.Fprintf(stdout, "  Proof: %s\n", displayPath(resolveBinary(outdir, r.Proof)))
+	if c := r.Consumer; c != nil {
+		fmt.Fprintf(stdout, "  Consumer: %s (%s, module %s, %d source file(s), janus %s)\n", displayPath(c.Root), c.Lakefile, c.Module,
+			len(c.Files), c.Dependency.describe())
+		if len(c.Rebuilt) == 0 {
+			fmt.Fprintln(stdout, "  Build: every module reused from the support cache")
+		} else {
+			fmt.Fprintf(stdout, "  Build: rebuilt %s\n", strings.Join(c.Rebuilt, ", "))
+		}
+	}
+	if f := r.Framework; f != nil {
+		fmt.Fprintf(stdout, "  Framework: %s (SHA-256 %s, %d files, %s)\n", f.Source, f.Sha256, f.Files, f.Toolchain)
+	}
+	switch r.Sandbox.Mode {
+	case "none":
+		fmt.Fprintln(stdout, "  Sandbox: NONE (--unsafe-no-sandbox: the proof ran unconfined)")
+	case "bwrap":
+		fmt.Fprintln(stdout, "  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)")
+	default:
+		fmt.Fprintf(stdout, "  Sandbox: %s (no network, read-only filesystem, private build dir)\n", r.Sandbox.Mode)
+	}
 	ax := strings.Join(r.Axioms, ", ")
 	if ax == "" {
 		ax = "(none)"
@@ -246,13 +286,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "  Kernel replay: skipped (%s)\n", r.KernelReplay.Note)
 	}
 	fmt.Fprintf(stdout, "  Lean: %s\n", r.LeanVersion)
-	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(reportPath))
+	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(filepath.Join(outdir, "verified.json")))
 	fmt.Fprintln(stdout, "  Statement:")
 	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(r.Statement, "\n", "\n    "))
-	if !strings.Contains(r.Statement, "Extracted.") {
-		fmt.Fprintln(stderr, "Warning: the statement does not mention any Extracted definition; it says nothing about the extracted code.")
-	}
-	return nil
 }
 
 func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedReport, error) {
@@ -280,8 +316,8 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 			Stage: "proof selection", Next: "Pass --proof path/to/Proof.lean (default: <outdir>/Proof.lean)."}
 	}
 
-	// 2. Toolchain and Janus library.
-	root, err := findJanusRoot(opts["janus-root"])
+	// 2. Toolchain, sandbox and the trusted Janus library build.
+	fw, err := loadFramework(opts["janus-root"])
 	if err != nil {
 		return nil, err
 	}
@@ -289,50 +325,80 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	if err != nil {
 		return nil, err
 	}
-	absOut, _ := filepath.Abs(outdir)
-	buildDir := filepath.Join(absOut, ".janus-build")
-	lr := &leanRunner{lake: lake, root: root, stderr: stderr}
-	if out, err := lr.run("build", "Janus"); err != nil {
-		return nil, &diag{Invalid: true, Msg: "Building the Janus Lean library failed: " + err.Error(), Stage: "Janus library build",
-			Next: "Run lake build in " + root + " and fix the reported errors.", Details: out}
-	}
-	leanVersion, err := lr.run("env", "lean", "--version")
+	sb, err := detectSandbox(opts["unsafe-no-sandbox"] != "")
 	if err != nil {
-		return nil, &diag{Invalid: true, Msg: "lean --version failed: " + err.Error(), Stage: "toolchain", Details: leanVersion}
+		return nil, err
 	}
-	leanVersion = strings.TrimSpace(leanVersion)
+	root, cleanup, err := fw.libraryRoot(lake, opts["fresh"] != "", stderr)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	tc, err := findToolchain(lake, root)
+	if err != nil {
+		return nil, err
+	}
+	janusLibDir := filepath.Join(root, ".lake", "build", "lib", "lean")
 
-	// 3. Scratch build directory with exactly the checked bytes.
-	if err := os.RemoveAll(buildDir); err != nil {
+	// 3. Trusted directory: our Extracted and an independently renamed JanusTrusted copy,
+	// compiled by us (no proof code), kept read-only for the untrusted steps.
+	runBase, err := janusRunBase()
+	if err != nil {
 		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+	trustedDir, err := os.MkdirTemp(runBase, "trusted-")
+	if err != nil {
 		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
-	lr.buildDir = buildDir
-	if err := os.WriteFile(filepath.Join(buildDir, "Extracted.lean"), cr.Lean, 0o644); err != nil {
+	defer os.RemoveAll(trustedDir)
+	if err := os.WriteFile(filepath.Join(trustedDir, "Extracted.lean"), cr.Lean, 0o644); err != nil {
 		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
-	if err := os.WriteFile(filepath.Join(buildDir, "Proof.lean"), proofSrc, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(trustedDir, "JanusTrusted.lean"), janusTrustedSource(cr.Lean), 0o644); err != nil {
 		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+	}
+	trustedPath := tc.leanPathEnv(trustedDir, janusLibDir)
+	compileTrusted := func(mod string) (string, error) {
+		return runLean(&sandbox{mode: "none"}, tc, trustedDir, nil, trustedPath,
+			tc.lean, "--root="+trustedDir, filepath.Join(trustedDir, mod+".lean"), "-o", filepath.Join(trustedDir, mod+".olean"))
+	}
+	if out, err := compileTrusted("Extracted"); err != nil {
+		return nil, &diag{Invalid: true, Msg: "Lean rejected the extracted program " + displayPath(cr.Extracted) + ".\n" + summarizeLeanErrors(out, 2000),
+			Stage: "extraction elaboration", Next: "Check that the Janus library matches this extractor version.", Details: out}
+	}
+	if out, err := compileTrusted("JanusTrusted"); err != nil {
+		return nil, &diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
+			Stage: "extraction elaboration", Details: out}
+	}
+	hExtracted := fileSha(filepath.Join(trustedDir, "Extracted.olean"))
+	hTrusted := fileSha(filepath.Join(trustedDir, "JanusTrusted.olean"))
+
+	// 4. Work directory: the proof and the audit script, the only writable place for the
+	// sandboxed, untrusted lean processes.
+	workDir, err := os.MkdirTemp(runBase, "work-")
+	if err != nil {
+		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+	}
+	defer os.RemoveAll(workDir)
+	_ = os.Chmod(workDir, 0o700)
+	if err := os.WriteFile(filepath.Join(workDir, "Proof.lean"), proofSrc, 0o644); err != nil {
+		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+	}
+	proofPathEnv := tc.leanPathEnv(trustedDir, janusLibDir, workDir)
+	searchDirs := []string{trustedDir, janusLibDir, workDir, tc.libDir}
+	if err := noForeignModule(map[string]string{
+		"Extracted": trustedDir, "JanusTrusted": trustedDir, "Proof": workDir,
+	}, searchDirs); err != nil {
+		return nil, err
 	}
 	mapPaths := func(s string) string {
-		s = strings.ReplaceAll(s, filepath.Join(buildDir, "Proof.lean"), displayPath(proofPath))
-		return strings.ReplaceAll(s, filepath.Join(buildDir, "Extracted.lean"), displayPath(cr.Extracted))
+		s = strings.ReplaceAll(s, filepath.Join(workDir, "Proof.lean"), displayPath(proofPath))
+		return strings.ReplaceAll(s, filepath.Join(trustedDir, "Extracted.lean"), displayPath(cr.Extracted))
 	}
 
-	if out, err := lr.compile("Extracted"); err != nil {
-		out = mapPaths(out)
-		return nil, &diag{Invalid: true, Msg: "Lean rejected the extracted program " + displayPath(cr.Extracted) + ".\n" + summarizeLeanErrors(out, 2000),
-			Stage: "extraction elaboration", Next: "Check that the Janus library (" + root + ") matches this extractor version.", Details: out}
-	}
-	extractedOlean, err := os.ReadFile(filepath.Join(buildDir, "Extracted.olean"))
-	if err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "extraction elaboration"}
-	}
-
-	// 4. The proof.
-	if out, err := lr.compile("Proof"); err != nil {
+	// Compile the proof, sandboxed. It imports the trusted Extracted; its output is Proof.olean.
+	if out, err := runLean(sb, tc, workDir, nil, proofPathEnv,
+		tc.lean, "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "Proof.olean")); err != nil {
 		out = mapPaths(out)
 		msg := "Lean rejected the proof " + displayPath(proofPath) + "."
 		if s := summarizeLeanErrors(out, 2000); s != "" {
@@ -341,73 +407,115 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		return nil, &diag{Invalid: true, Msg: msg, Stage: "proof checking",
 			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + thm + ".", Details: out}
 	}
-	if again, err := os.ReadFile(filepath.Join(buildDir, "Extracted.olean")); err != nil || !bytes.Equal(again, extractedOlean) {
-		return nil, &diag{Invalid: true, Msg: "Extracted.olean changed while the proof was being checked.", Stage: "proof build integrity",
-			Next: "The proof must not write files. Remove any IO from it and rerun."}
+	hProof := fileSha(filepath.Join(workDir, "Proof.olean"))
+	checkOleans := func(stage string) error {
+		if fileSha(filepath.Join(trustedDir, "Extracted.olean")) != hExtracted ||
+			fileSha(filepath.Join(trustedDir, "JanusTrusted.olean")) != hTrusted ||
+			fileSha(filepath.Join(workDir, "Proof.olean")) != hProof {
+			return &diag{Invalid: true, Msg: "A compiled module changed during verification.", Stage: stage,
+				Next: "A process modified the build outputs mid-run. Rerun janus verify."}
+		}
+		return nil
+	}
+	if err := checkOleans("proof build integrity"); err != nil {
+		return nil, err
 	}
 
-	// 5. Theorem and axiom audit, in a fresh file importing both modules.
-	nonceBytes := make([]byte, 8)
-	_, _ = rand.Read(nonceBytes)
-	marker := "janus-audit-" + hex.EncodeToString(nonceBytes) + ": "
-	audit := fmt.Sprintf(`import Lean
-import Extracted
-import Proof
-
-open Lean Elab Command in
-#eval show CommandElabM Unit from do
-  let n := %s.toName
-  let env ← getEnv
-  let some ci := env.find? n | throwError "janus-audit: unknown constant {n}"
-  let kind := match ci with
-    | .thmInfo _ => "theorem" | .defnInfo _ => "definition" | .axiomInfo _ => "axiom"
-    | .opaqueInfo _ => "opaque" | _ => "other"
-  let axs ← liftCoreM (collectAxioms n)
-  let mod := match env.getModuleIdxFor? n with
-    | some i => (env.header.moduleNames[i.toNat]?).getD .anonymous
-    | none => .anonymous
-  let sig ← liftTermElabM do return toString (← PrettyPrinter.ppSignature n).fmt
-  let j := Json.mkObj [("name", toJson n.toString), ("kind", toJson kind),
-    ("module", toJson mod.toString), ("axioms", toJson (axs.map (·.toString))),
-    ("statement", toJson sig)]
-  logInfo m!"%s{j.compress}"
-
-#print axioms %s
-#check @%s
-`, leanString(thm), marker, thm, thm)
-	auditPath := filepath.Join(buildDir, "Audit.lean")
-	if err := os.WriteFile(auditPath, []byte(audit), 0o644); err != nil {
+	// 5. Theorem, axiom and statement audit by the trusted janus-audit (no proof code runs).
+	marker := "janus-audit-" + newNonce() + ": "
+	if err := os.WriteFile(filepath.Join(workDir, "Audit.lean"), []byte(auditScript(thm, "Proof", marker)), 0o644); err != nil {
 		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
 	}
-	out, err := lr.run("env", "lean", "--root="+buildDir, auditPath)
-	out = mapPaths(out)
-	var ar *auditResult
-	for _, line := range strings.Split(out, "\n") {
-		if i := strings.Index(line, marker); i >= 0 {
-			if ar != nil {
-				return nil, &diag{Invalid: true, Msg: "The audit printed more than one result.", Stage: "theorem audit", Details: out}
-			}
-			ar = &auditResult{}
-			if jerr := json.Unmarshal([]byte(line[i+len(marker):]), ar); jerr != nil {
-				return nil, &diag{Invalid: true, Msg: "Cannot parse the audit result: " + jerr.Error(), Stage: "theorem audit", Details: out}
-			}
-		}
+	auditOut, _ := runLean(sb, tc, workDir, nil, proofPathEnv,
+		tc.lean, "--root="+workDir, filepath.Join(workDir, "Audit.lean"))
+	ar, err := parseAuditRecord(mapPaths(auditOut), marker)
+	if err != nil {
+		return nil, err
 	}
-	if err != nil || ar == nil {
-		msg := fmt.Sprintf("The theorem audit for %s failed.", thm)
-		if strings.Contains(out, "unknown constant") || strings.Contains(out, "unknown identifier") {
-			msg = fmt.Sprintf("The proof does not define %s.", thm)
+	if err := checkOleans("proof build integrity"); err != nil {
+		return nil, err
+	}
+
+	// 6. Independent kernel replay (leanchecker), sandboxed.
+	kr := kernelReplay{Tool: "leanchecker", Modules: []string{"Janus", "Extracted", "Proof"}}
+	if !tc.hasChecker {
+		kr.Status = "unavailable"
+		kr.Note = "leanchecker not found in the Lean toolchain"
+		kr.Modules = []string{}
+	} else {
+		if out, err := runLean(sb, tc, workDir, nil, proofPathEnv,
+			tc.leanchecker, "Janus", "Extracted", "Proof"); err != nil {
+			return nil, &diag{Invalid: true, Msg: "Kernel replay rejected the environment:\n  " + strings.ReplaceAll(strings.TrimSpace(mapPaths(out)), "\n", "\n  "),
+				Stage: "kernel replay", Next: "The proof manipulates the environment (e.g. debug.skipKernelTC or addDecl without checking); remove that."}
 		}
-		return nil, &diag{Invalid: true, Msg: msg, Stage: "theorem audit",
-			Next: "Name the theorem with --theorem Namespace.name (default " + defaultTheorem + ").", Details: out}
+		kr.Status = "passed"
+	}
+	if err := checkOleans("kernel replay"); err != nil {
+		return nil, err
+	}
+
+	// 7. Inputs must still be the ones that were checked.
+	cr2, err := check(outdir, opts["binary"])
+	if err != nil {
+		d := err.(*diag)
+		d.Msg = "Artifacts changed during verification: " + d.Msg
+		return nil, d
+	}
+	proofNow, err := os.ReadFile(proofPath)
+	if err != nil || !bytes.Equal(proofNow, proofSrc) || !bytes.Equal(cr2.Lean, cr.Lean) {
+		return nil, &diag{Invalid: true, Msg: "The proof or Extracted.lean changed during verification.", Stage: "stale input",
+			Next: "Rerun janus verify."}
+	}
+
+	idBytes, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
+	fi := fw.info()
+	commit := fi.Revision
+	if fi.Modified {
+		commit += "+dirty"
+	}
+	return &verifiedReport{
+		Schema:           1,
+		Theorem:          ar.Name,
+		Kind:             ar.Kind,
+		Module:           ar.Module,
+		Statement:        ar.Statement,
+		Axioms:           ar.Axioms,
+		AllowedAxioms:    allowedAxioms,
+		KernelReplay:     kr,
+		Proof:            binaryRef(outdir, proofPath),
+		ProofSha256:      sha256Hex(proofSrc),
+		Extracted:        "Extracted.lean",
+		ExtractedSha256:  sha256Hex(cr.Lean),
+		IdentitySha256:   sha256Hex(idBytes),
+		Binary:           binaryRef(outdir, cr.BinPath),
+		BinarySha256:     cr.Identity.BinarySha256,
+		Symbol:           cr.Identity.Symbol,
+		Address:          cr.Identity.Address,
+		GoVersion:        cr.Identity.GoVersion,
+		MainModule:       cr.Identity.MainModule,
+		LeanVersion:      tc.version,
+		JanusRoot:        root,
+		JanusCommit:      commit,
+		ExtractorVersion: extractorVersion,
+		Timestamp:        time.Now().UTC().Format(time.RFC3339),
+		Framework:        fi,
+		Sandbox:          sb.info(),
+		Definitions:      ar.Definitions,
+	}, nil
+}
+
+// parseAuditJSON parses the auditor's record and enforces the axiom allow-list. The auditor
+// has already enforced the theorem kind and module, the Extracted identity, the trusted-only
+// constant rule and that the statement mentions Extracted; this is the one remaining policy
+// check (which axioms are permitted) plus marshalling.
+func parseAuditJSON(line, full string) (*auditResult, error) {
+	ar := &auditResult{}
+	if jerr := json.Unmarshal([]byte(line), ar); jerr != nil {
+		return nil, &diag{Invalid: true, Msg: "Cannot parse the audit result: " + jerr.Error(), Stage: "theorem audit", Details: full}
 	}
 	if ar.Kind != "theorem" {
-		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("%s is a %s, not a theorem.", thm, ar.Kind), Stage: "theorem audit",
-			Next: "Select a theorem declared in the proof file."}
-	}
-	if ar.Module != "Proof" {
-		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("%s is declared in module %s, not in the proof file.", thm, ar.Module),
-			Stage: "theorem audit", Next: "Select a theorem declared in the proof file."}
+		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("%s is a %s, not a theorem.", ar.Name, ar.Kind), Stage: "theorem audit",
+			Next: "Select a theorem."}
 	}
 	allowed := map[string]bool{}
 	for _, a := range allowedAxioms {
@@ -430,75 +538,40 @@ open Lean Elab Command in
 				next = "native_decide and other compiler-trusting tactics are not permitted; use decide or a kernel proof."
 			}
 		}
-		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("%s depends on disallowed axioms: %s.", thm, strings.Join(bad, ", ")),
+		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("%s depends on disallowed axioms: %s.", ar.Name, strings.Join(bad, ", ")),
 			Stage: "axiom audit", Next: next}
-	}
-
-	// 6. Independent kernel replay of the imported environment (leanchecker ships with Lean).
-	kr := kernelReplay{Tool: "leanchecker", Modules: []string{"Janus", "Extracted", "Proof"}}
-	prefix, perr := lr.run("env", "lean", "--print-prefix")
-	checker := filepath.Join(strings.TrimSpace(prefix), "bin", "leanchecker")
-	if _, serr := os.Stat(checker); perr != nil || serr != nil {
-		kr.Status = "unavailable"
-		kr.Note = "leanchecker not found in the Lean toolchain"
-		kr.Modules = []string{}
-	} else {
-		out, err := lr.run(append([]string{"env", checker}, kr.Modules...)...)
-		if err != nil {
-			return nil, &diag{Invalid: true, Msg: "Kernel replay rejected the environment:\n  " + strings.ReplaceAll(strings.TrimSpace(mapPaths(out)), "\n", "\n  "),
-				Stage: "kernel replay", Next: "The proof manipulates the environment (e.g. debug.skipKernelTC or addDecl without checking); remove that."}
-		}
-		kr.Status = "passed"
-	}
-
-	// 7. Inputs must still be the ones that were checked.
-	cr2, err := check(outdir, opts["binary"])
-	if err != nil {
-		d := err.(*diag)
-		d.Msg = "Artifacts changed during verification: " + d.Msg
-		return nil, d
-	}
-	proofNow, err := os.ReadFile(proofPath)
-	if err != nil || !bytes.Equal(proofNow, proofSrc) || !bytes.Equal(cr2.Lean, cr.Lean) {
-		return nil, &diag{Invalid: true, Msg: "The proof or Extracted.lean changed during verification.", Stage: "stale input",
-			Next: "Rerun janus verify."}
-	}
-
-	idBytes, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
-	commit := ""
-	if c, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output(); err == nil {
-		commit = strings.TrimSpace(string(c))
-		if st, err := exec.Command("git", "-C", root, "status", "--porcelain", "--", "Janus", "Janus.lean").Output(); err == nil && len(bytes.TrimSpace(st)) > 0 {
-			commit += "+dirty"
-		}
 	}
 	if ar.Axioms == nil {
 		ar.Axioms = []string{}
 	}
-	return &verifiedReport{
-		Schema:           1,
-		Theorem:          ar.Name,
-		Kind:             ar.Kind,
-		Module:           ar.Module,
-		Statement:        ar.Statement,
-		Axioms:           ar.Axioms,
-		AllowedAxioms:    allowedAxioms,
-		KernelReplay:     kr,
-		Proof:            binaryRef(outdir, proofPath),
-		ProofSha256:      sha256Hex(proofSrc),
-		Extracted:        "Extracted.lean",
-		ExtractedSha256:  sha256Hex(cr.Lean),
-		IdentitySha256:   sha256Hex(idBytes),
-		Binary:           binaryRef(outdir, cr.BinPath),
-		BinarySha256:     cr.Identity.BinarySha256,
-		Symbol:           cr.Identity.Symbol,
-		Address:          cr.Identity.Address,
-		GoVersion:        cr.Identity.GoVersion,
-		MainModule:       cr.Identity.MainModule,
-		LeanVersion:      leanVersion,
-		JanusRoot:        root,
-		JanusCommit:      commit,
-		ExtractorVersion: extractorVersion,
-		Timestamp:        time.Now().UTC().Format(time.RFC3339),
-	}, nil
+	if ar.Definitions == nil {
+		ar.Definitions = []string{}
+	}
+	return ar, nil
+}
+
+// classifyAuditError maps the auditor's own ERROR message to a stage and Next hint.
+func classifyAuditError(msg, full string) error {
+	d := &diag{Invalid: true, Msg: "The audit rejected the proof: " + msg, Stage: "theorem audit", Details: full}
+	switch {
+	case strings.Contains(msg, "does not define"):
+		d.Msg = msg
+		d.Next = "Name the theorem with --theorem Namespace.name (default " + defaultTheorem + ")."
+	case strings.Contains(msg, "not the checked one"):
+		d.Stage = "extraction identity"
+		d.Next = "Extracted was shadowed or planted; the imported program is not the one checked from the binary. Rerun in a clean checkout."
+	case strings.Contains(msg, "shadows the Extracted namespace"):
+		d.Stage = "statement identity"
+		d.Next = "Do not declare names under an Extracted namespace in the proof."
+	case strings.Contains(msg, "does not mention Extracted"):
+		d.Stage = "statement identity"
+		d.Next = "State the theorem about Extracted.program or Extracted.entry."
+	case strings.Contains(msg, "disguised instance") || strings.Contains(msg, "is not a plain def"):
+		d.Stage = "statement identity"
+		d.Next = "Remove proof-local instances/class values from the statement; use the model's own operations."
+	case strings.Contains(msg, "which is not Lean/Std core"):
+		d.Stage = "statement identity"
+		d.Next = "The statement may mention only core, Janus, Extracted and plain proof-local definitions."
+	}
+	return d
 }

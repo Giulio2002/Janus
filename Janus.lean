@@ -9,3 +9,4 @@ import Janus.Run
 import Janus.GoABI
 import Janus.Tactic
 import Janus.Spec.Basic
+import Janus.Amd64

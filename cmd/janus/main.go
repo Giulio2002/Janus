@@ -75,7 +75,7 @@ const usage = `Usage:
   janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
   janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
   janus version
-
+` + extraUsage + `
 See docs/CLI.md.
 `
 
@@ -119,6 +119,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 1
+	}
+	if code, ok := runExtra(args, stdout, stderr); ok {
+		return code
 	}
 	var err error
 	switch args[0] {
@@ -199,15 +202,23 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	}
 	words := 0
 	for _, s := range x.Segments {
-		words += len(s.Words)
+		words += len(s.Words) + len(s.Bytes)
+	}
+	unit := "word(s)"
+	if x.Bin.GOARCH == "amd64" {
+		unit = "code byte(s)"
 	}
 	dataBytes := 0
 	for _, d := range x.Data {
 		dataBytes += len(d.Bytes)
 	}
-	fmt.Fprintf(stdout, "Extracted %s: %d function(s), %d word(s), %d stub(s), %d data object(s) (%d bytes) into %s\n",
-		x.Entry.Name, len(x.Segments), words, len(x.Stubs), len(x.Data), dataBytes, displayPath(filepath.Join(outdir, "Extracted.lean")))
+	fmt.Fprintf(stdout, "Extracted %s: %d function(s), %d %s, %d stub(s), %d data object(s) (%d bytes) into %s\n",
+		x.Entry.Name, len(x.Segments), words, unit, len(x.Stubs), len(x.Data), dataBytes, displayPath(filepath.Join(outdir, "Extracted.lean")))
 	for _, s := range x.Segments {
+		if x.Bin.GOARCH == "amd64" {
+			fmt.Fprintf(stdout, "  code  0x%x %4d bytes  %s\n", s.Base, len(s.Bytes), s.Name)
+			continue
+		}
 		fmt.Fprintf(stdout, "  code  0x%x %4d words  %s\n", s.Base, len(s.Words), s.Name)
 	}
 	for _, s := range x.Stubs {

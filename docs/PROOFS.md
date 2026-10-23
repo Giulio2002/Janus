@@ -46,27 +46,30 @@ namespace Proof
 theorem correctness (x y : BitVec 64) :
     Ensures Extracted.program Extracted.entry [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
-  intro s hs _
+  intro ret hret s hs _
   janus_intro hs
   janus_run
 
 end Proof
 ```
 
-**The statement.** `GoABI.Ensures p entry args pre post` says: for every machine state `s` that
-is a Go call of `entry` with integer arguments `args` in `X0, X1, …` (`GoABI.CallSetup`) and
-satisfies `pre s`, the program returns (reaches the planted return address) after finitely many
-instructions, restores `SP`, `X18`, `X28` and `X29` (`GoABI.ABIReturn`), and `post s s'` holds
-of the final state `s'`. Everything not mentioned (other registers, flags, `SP`, all of memory)
-is arbitrary. Faults (an undecodable word, a memory access outside the caller's regions, a jump
-outside the extracted code) and panics are not returns, so `Ensures` rules them out.
+**The statement.** `GoABI.Ensures p entry args pre post` says: for every admissible return
+address `ret` (`GoABI.RetAddr p ret`: 4-aligned, below `2^48`, outside the extracted code and
+the stubs) and every machine state `s` that is a Go call of `entry` with integer arguments
+`args` in `X0, X1, …` and `ret` in `X30` (`GoABI.CallSetup (p.withExit ret)`) and satisfies
+`pre s`, the program returns to `ret` after finitely many instructions, restores `SP`, `X18`,
+`X28` and `X29` (`GoABI.ABIReturn`), and `post s s'` holds of the final state `s'`. Everything
+not mentioned (other registers, flags, `SP`, all of memory) is arbitrary. Faults (an
+undecodable word, a memory access outside the caller's regions, a jump outside the extracted
+code) and panics are not returns, so `Ensures` rules them out. Quantifying over `ret` means
+that only a branch to the caller's `X30` counts as a return (see SOUNDNESS.md).
 
 **The proof.**
 
-1. `intro s hs _` takes an arbitrary call state `s`, the `CallSetup` hypothesis and the
-   precondition.
+1. `intro ret hret s hs _` takes an arbitrary return address `ret` with `hret : RetAddr p ret`,
+   an arbitrary call state `s`, the `CallSetup` hypothesis and the precondition.
 2. `janus_intro hs` turns `hs` into rewrite rules the executor uses:
-   `h_pc : s.pc = 602304#64`, `h_lr : s.regs 30 = 0#64` (the return sentinel) and
+   `h_pc : s.pc = 602304#64`, `h_lr : s.regs 30 = BitVec.ofNat 64 ret` and
    `h_x0 : s.regs 0 = x`, `h_x1 : s.regs 1 = y`.
 3. `janus_run` turns `Ensures`/`Returns` into the goal `Reaches p s Q` and executes:
    * at `pc = 0x930c0` it fetches the word `0x8b010000`, decodes it (`add x0, x0, x1`) and
@@ -74,9 +77,9 @@ outside the extracted code) and panics are not returns, so `Ensures` rules them 
      instruction" as one Boolean fact checked by the kernel;
    * it simplifies `exec (add …) s` to the next symbolic state
      `{ regs := setReg s.regs 0 (x + y), pc := 602308#64, … }`;
-   * `ret` jumps to `s.regs 30 = 0`, the exit address, and the goal becomes the
-     postcondition of the final state, which `janus_run` simplifies with the `janus_post` simp
-     set. Here that closes it: `ABIReturn` holds because `SP`, `X18`, `X28`, `X29` are untouched,
+   * `ret` jumps to `s.regs 30 = BitVec.ofNat 64 ret`. The executor sees that the symbolic pc is
+     the return address and the goal becomes the postcondition of the final state, which
+     `janus_run` simplifies with the `janus_post` simp set. Here that closes it: `ABIReturn` holds because `SP`, `X18`, `X28`, `X29` are untouched,
      and `(x + y).toNat = (x.toNat + y.toNat) % 2^64`.
 
 That is the whole proof. Most straight-line functions need nothing more, or a final
@@ -86,7 +89,7 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 
 | Tactic | What it does |
 |---|---|
-| `janus_intro hs` | From `hs : CallSetup p entry [a₀, …] s`: `h_pc`, `h_lr`, `h_x<i> : s.regs i = aᵢ` (literal addresses). |
+| `janus_intro hs` | From `hs : CallSetup p entry [a₀, …] s`: `h_pc`, `h_lr`, `h_x<i> : s.regs i = aᵢ` (literal addresses; `h_lr : s.regs 30 = BitVec.ofNat 64 ret` for `p = p₀.withExit ret`). |
 | `janus_run [lemmas]` | Symbolic execution until every branch reaches the exit address (goal: the postcondition), a stub (goal: `Q` of the stub outcome, e.g. `False` for `Returns`), or the return address (`ReachesRet`). Works on `Returns`, `Panics`, `GrowsStack`, `Reaches`, `ReachesRet`. Extra `lemmas` are added to the simp set of every step. |
 | `janus_run until [a, …]` | Stop (without executing) when a branch arrives at one of the addresses. The starting state is always stepped. Used at loop heads. |
 | `janus_run calls [h, …]` | Use callee summaries `h : Summary p entry pre post` at calls to `entry` instead of executing the callee. |
@@ -99,6 +102,25 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 
 `set_option trace.janus true in janus_run` prints every step (pc, decoded instruction, simp time),
 every branch condition, and the time spent on final goals.
+
+### Return addresses
+
+Goals about a call are stated on `p.withExit ret` with `ret` a variable, and the context must
+contain `hret : RetAddr p ret` (it comes from `intro ret hret …`, or is a hypothesis of a loop
+lemma). The executor then
+
+* evaluates the program facts (`stepOK`, `stubOK`) on the closed program `p`, as before, and
+  derives `pc ≠ ret` from `hret` (`RetAddr.ne_of_fetch`: there is no code at `ret`;
+  `RetAddr.ne_of_stubAt`: no stub). No arithmetic is involved, so this costs nothing per step;
+* installs the rewrite rules `(BitVec.ofNat 64 ret).toNat = ret`, `ret % 2^64 = ret`,
+  `(ret % 4 = 0) = True` and `(2^56 ≤ ret) = False`, which evaluate the checks of `ret`
+  (`branchReg`) on the return address. They are rewrite rules rather than hypotheses so that
+  `omega` does not see an extra `%` term in every side condition;
+* recognises the return when the symbolic pc is `BitVec.ofNat 64 ret` (or a literal equal to a
+  concrete `ret`).
+
+Callee summaries are proved on the extracted program and moved to `p.withExit ret` by
+`Summary.withExit` automatically.
 
 ### How a step works, and what the goals look like
 
@@ -145,7 +167,8 @@ janus: could not evaluate the instruction to `.ok s'` or a branch (…); stuck a
 ```
 
 The printed term shows what is missing. Here, `x.toNat + 8 < 2^64` could not be proved, so the
-precondition lacks `x.toNat + 32 ≤ 2^64`. A `load`/`store` that stays unevaluated means an
+precondition lacks `x.toNat + 32 ≤ 2^48` (part of `Ptr`).
+A `load`/`store` that stays unevaluated means an
 `accessible` fact is missing. A `readLE (writeLE …)` means the aliasing of two addresses is
 unknown.
 
@@ -153,7 +176,7 @@ unknown.
 
 | Name | Meaning |
 |---|---|
-| `Ptr m p n w` | `n` bytes at `p` lie in one region of `m` (writable if `w`), and `p + n ≤ 2^64`. `Ptr32` for `n = 32`. |
+| `Ptr m p n w` | `n` bytes at `p` lie in one region of `m` (writable if `w`, then overlapping no read-only region), and `p + n ≤ 2^48`. `Ptr32` for `n = 32`. |
 | `Disjoint p n q k`, `Disjoint32 p q` | The byte ranges do not overlap. |
 | `Aliasing p q` | `p = q ∨ Disjoint32 p.toNat q.toNat`: what two Go `*[4]uint64` can be. |
 | `OnlyWrites m m' p n` | `m'` equals `m` outside `[p, p+n)`, same regions. `Unchanged m m'`. |
@@ -161,8 +184,13 @@ unknown.
 | `toInt256`, `ofInt256` | Two's complement. |
 | `sumWords m p n` | Sum of the `n` words at `p`. |
 | `copyWords m dst src i` | `m` after copying the first `i` words (a copy loop's memory). |
-| `StackOK s below above` | `SP` 16-aligned, `[SP-below, SP+above)` writable, no wrap. |
+| `StackOK s below above` | `SP` 16-aligned, `[SP-below, SP+above)` writable, below `2^48`. |
 | `GuardOK s adj` | The stack-growth prologue falls through (`= GoABI.StackGuardOK`). |
+
+The outcome predicates (`Janus.GoABI`): `Returns`, `Panics` (a panic stub), `Faults` (a fault
+other than running out of fuel), `NeverPanics` (no panic stub and no fault), `GrowsStack`; the
+contract `Ensures` / `EnsuresResults`; `RetAddr p ret` (an admissible return address;
+`RetAddr.of_check (by decide)` proves it for a concrete `ret`).
 
 The goal predicates (`Janus.Tactic`): `Reaches p s Q` (the run ends in an outcome satisfying
 `Q`; `IsReturn post`, `IsPanic`, `IsMorestack`), `ReachesRet p ret s Q` (ordinary steps reach
@@ -195,8 +223,11 @@ through: its `b.ls` branch is pruned. Read the stack footprint off the disassemb
 `str x0, [sp, #24]` (after the push) touch the caller's frame above `SP`. Then require
 `StackOK s 24 16` or the like. Buffers the function reads must be disjoint from that window.
 
-For panics, prove `Panics p s` with `janus_run` (the path ends at the stub), and combine
-"panics iff" from both directions with `Returns.not_panics`:
+A theorem that is not an `Ensures` states the return address itself: take `(ret : Nat)
+(hret : RetAddr Extracted.program ret)` and `hs : CallSetup (Extracted.program.withExit ret) …`,
+and conclude `Returns (Extracted.program.withExit ret) s …` or `Panics (…withExit ret) s` (see
+`Div.lean`, `Get.lean`). For panics, prove `Panics p s` with `janus_run` (the path ends at the
+stub), and combine "panics iff" from both directions with `Returns.not_panics`:
 
 ```lean
   refine ⟨⟨fun hp => ?_, hpan⟩, hret⟩
@@ -216,9 +247,12 @@ For panics, prove `Panics p s` with `janus_run` (the path ends at the stub), and
    theorem loop … : ∀ n (S : State) (i acc : BitVec 64), i.toNat + n = len.toNat →
        S.pc = BitVec.ofNat 64 head → S.regs 2 = i → S.regs 3 = acc →
        acc.toNat = sumWords s.mem ptr.toNat i.toNat % 2 ^ 64 → … →
+       S.regs 30 = BitVec.ofNat 64 ret → …
        S.mem = s.mem.writeLE (s.sp.toNat + 8) 8 ptr.toNat →
-       Reaches Extracted.program S (IsReturn fun s' => ABIReturn s s' ∧ post)
+       Reaches (Extracted.program.withExit ret) S (IsReturn fun s' => ABIReturn s s' ∧ post)
    ```
+
+   with `(ret : Nat) (hret : RetAddr Extracted.program ret)` among the lemma's parameters.
 
    Equations `S.regs k = v`, `S.pc = …`, `S.sp = …`, `S.mem = …` are used as rewrite rules by
    `janus_run`, so executing from the opaque `S` works like executing from the call state. Give
@@ -272,7 +306,8 @@ then split on the index:
 `scripts/break-demo.sh` changes `x + y` to `x - y` in a copy of the Go source, rebuilds,
 re-extracts, and checks that `examples/proofs/Add.lean` is now **rejected**. It then verifies
 `examples/proofs/WrongAdd.lean` on the broken binary: the negation of the spec, proved by running
-one concrete call (built with `GoABI.setup`) and comparing its result with what the spec claims
+one concrete call (built with `GoABI.setup`, with the concrete return address `0x1000`, shown
+admissible by `RetAddr.of_check (by decide)`) and comparing its result with what the spec claims
 (`Returns.unique`).
 
 ## Performance
@@ -284,7 +319,7 @@ one kernel evaluation. Measured on the examples:
 |---|---|---|
 | `JanusTests.Tactic.straight_spec` | 51 | 2.6 s (`lean` on the test file) |
 | `examples/proofs/Add256.lean` | 17 in each of 5 aliasing cases | 6 s (`lean`), 20 s (`janus verify`) |
-| `examples/proofs/AddLimbs.lean` | 72 in each of 5 aliasing cases | 19 s (`lean`), 57 s (`janus verify`) |
+| `examples/proofs/AddLimbs.lean` | 72 in each of 5 aliasing cases | 21 s (`lean`), 33 s (`janus verify`) |
 
 (`janus verify` adds about 10 s for building, the axiom audit and `leanchecker`, more on a loaded
 machine.) Tips:

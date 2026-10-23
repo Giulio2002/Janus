@@ -158,6 +158,74 @@ theorem ite_state {c : Prop} [Decidable c] {s₁ s₂ : State} (h₁ : c → Rea
 
 end Reaches
 
+/-! ### Calls with a symbolic return address
+
+Specifications run `p.withExit ret` for a universally quantified `ret` with `RetAddr p ret`.
+The program facts (`stepOK`, `stubOK`) are still evaluated by the kernel on the closed program
+`p`; that `pc ≠ ret` follows from `RetAddr` (there is no code and no stub at `ret`), and the
+return itself is recognised when the symbolic `pc` is `BitVec.ofNat 64 ret`. -/
+
+namespace Reaches
+
+variable {p : Program} {ret : Nat} {s : State} {Q : Outcome → Prop}
+
+/-! Rewrite rules about `ret` that the executor installs for every `RetAddr` hypothesis (instead
+of arithmetic hypotheses, which would slow down every `omega` call): they evaluate the checks of
+`RET`/`BR` (`branchReg`: no tag, 4-aligned) on the target `BitVec.ofNat 64 ret`. -/
+
+theorem _root_.Janus.GoABI.RetAddr.toNat_ofNat (hret : RetAddr p ret) :
+    (BitVec.ofNat 64 ret).toNat = ret := by
+  rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt hret.lt64]
+theorem _root_.Janus.GoABI.RetAddr.mod64 (hret : RetAddr p ret) :
+    ret % 18446744073709551616 = ret := Nat.mod_eq_of_lt hret.lt64
+theorem _root_.Janus.GoABI.RetAddr.aligned_eq (hret : RetAddr p ret) : (ret % 4 = 0) = True :=
+  eq_true hret.aligned
+theorem _root_.Janus.GoABI.RetAddr.untagged_eq (hret : RetAddr p ret) :
+    (72057594037927936 ≤ ret) = False := eq_false (by have := hret.user; omega)
+
+/-- One ordinary instruction of `p.withExit ret`. -/
+theorem step_withExit {c w : Nat} {i : Instr} {r : Except Fault State} (hret : RetAddr p ret)
+    (hpc : s.pc = BitVec.ofNat 64 c) (hok : stepOK p c w i = true) (he : exec i s = r)
+    (h : ExecThen (p.withExit ret) r Q) : Reaches (p.withExit ret) s Q := by
+  simp only [stepOK, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne,
+    Option.isNone_iff_eq_none, beq_iff_eq] at hok
+  obtain ⟨⟨⟨⟨hc, _⟩, hs⟩, hf⟩, hd⟩ := hok
+  have hpc' := pc_toNat_of hpc hc
+  cases r with
+  | error e => exact h.elim
+  | ok s' =>
+    obtain ⟨n, o, hr, hq⟩ := h
+    refine ⟨n + 1, o, ?_, hq⟩
+    rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hret.ne_of_fetch hf)
+      (by rw [hpc']; exact hs) (by rw [hpc']; exact hf) (by rw [step_of_decode hd]; exact he)]
+    exact hr
+
+/-- `pc` is the return address: the call has returned. -/
+theorem exit_withExit (hret : RetAddr p ret) (hpc : s.pc = BitVec.ofNat 64 ret)
+    (hq : Q (.returned s)) : Reaches (p.withExit ret) s Q :=
+  ⟨1, _, Program.run_succ_exit (by rw [hpc, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hret.lt64]; rfl),
+    hq⟩
+
+/-- A stub of `p.withExit ret`. -/
+theorem stub_withExit {c : Nat} {name : String} {kind : StubKind} (hret : RetAddr p ret)
+    (hpc : s.pc = BitVec.ofNat 64 c) (hok : stubOK p c name kind = true)
+    (hq : Q (.stub name kind s)) : Reaches (p.withExit ret) s Q := by
+  unfold stubOK at hok
+  simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', beq_eq_false_iff_ne] at hok
+  obtain ⟨⟨hc, _⟩, hst⟩ := hok
+  have hpc' := pc_toNat_of hpc hc
+  cases hfind : p.stubAt c with
+  | none => rw [hfind] at hst; cases hst
+  | some st =>
+    rw [hfind] at hst
+    simp only [Bool.and_eq_true, beq_iff_eq] at hst
+    obtain ⟨h1, h2⟩ := hst
+    refine ⟨1, _, Program.run_succ_stub (p := p.withExit ret)
+      (by rw [hpc']; exact hret.ne_of_stubAt hfind) (by rw [hpc']; exact hfind), ?_⟩
+    rw [h1, h2]; exact hq
+
+end Reaches
+
 namespace ExecThen
 
 variable {p : Program} {Q : Outcome → Prop}
@@ -282,6 +350,14 @@ theorem ReachesRet.call {p : Program} {entry : Nat} {pre : State → Prop}
   obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc hpre
   obtain ⟨k', s'', hst', hr', hq'⟩ := h s' hr hq
   exact ⟨k + k', s'', hst.trans hst', hr', hq'⟩
+
+/-- A summary of `p` holds in `p.withExit ret` when there is no code at `ret`. -/
+theorem Summary.withExit {p : Program} {entry ret : Nat} {pre : State → Prop}
+    {post : State → State → Prop} (hsum : Summary p entry pre post) (hret : RetAddr p ret) :
+    Summary (p.withExit ret) entry pre post := by
+  intro s hpc hpre
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc hpre
+  exact ⟨k, s', hst.withExit hret.fetch_none, hr, hq⟩
 
 /-! ## Register file normal form -/
 

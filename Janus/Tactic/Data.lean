@@ -87,8 +87,8 @@ theorem accessible_of_dataRead {p : Program} {m : Memory} (h : p.DataLoaded m) {
     obtain ⟨hmem, h1, h2⟩ := dataSegAt_spec hd
     obtain ⟨hreg, _⟩ := h d hmem
     simp only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hreg
-    obtain ⟨r, hr, ⟨⟨hb, he⟩, _⟩⟩ := hreg
-    exact Memory.accessible_of_mem m hr (by omega) (by omega) (Or.inl rfl)
+    obtain ⟨r, hr, ⟨⟨⟨hb, he⟩, hw⟩, _⟩⟩ := hreg
+    exact Memory.accessible_of_mem m hr (by omega) (by omega) hw
 
 /-- The rewrite rule `janus_data` installs. -/
 theorem readLE_dataReadD {p : Program} {m : Memory} (h : p.DataLoaded m) (a n : Nat)
@@ -103,7 +103,7 @@ theorem accessible_of_dataLoaded {p : Program} {m : Memory} (h : p.DataLoaded m)
     m.accessible (p.data[k]).base (p.data[k]).bytes.length false = true := by
   obtain ⟨hreg, _⟩ := h _ (List.getElem_mem hk)
   simp only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hreg
-  obtain ⟨r, hr, ⟨⟨hb, he⟩, _⟩⟩ := hreg
-  exact Memory.accessible_of_mem m hr hb he (Or.inl rfl)
+  obtain ⟨r, hr, ⟨⟨⟨hb, he⟩, hw⟩, _⟩⟩ := hreg
+  exact Memory.accessible_of_mem m hr hb he hw
 
 end Janus.Tactic

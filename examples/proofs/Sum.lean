@@ -6,7 +6,7 @@ import Extracted
 **Guarantee.** For every slice header `(ptr, len, cap)` in `X0`–`X2` and every Go call state `s`
 of `example.com/basic.Sum` such that `SP` is aligned and `[SP+8, SP+16)` is writable (the spill
 slot the function stores `ptr` into), `len < 2^63` (Go lengths are non-negative `int`s), the
-`8·len` bytes at `ptr` are readable and do not overlap that spill slot, the call returns, obeys
+`8·len` bytes at `ptr` are readable and do not overlap that spill slot, the call returns (never faulting or panicking), obeys
 the ABI, and `X0 = (xs[0] + … + xs[len-1]) mod 2^64` where `xs[k]` is the 64-bit word at
 `ptr + 8k` before the call. This holds for every length, so the loop terminates and has no
 out-of-bounds access.
@@ -24,16 +24,18 @@ namespace Proof
 /-- Address of the loop head `cmp x1, x2`. -/
 abbrev head : Nat := Extracted.entry + 0x1c
 
-theorem loop (ptr len : BitVec 64) (s : State) (hlen : len.toNat < 2 ^ 63)
+theorem loop (ptr len : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program ret) (s : State)
+    (hlen : len.toNat < 2 ^ 63)
     (hp : s.mem.accessible ptr.toNat (8 * len.toNat) false = true)
-    (hp' : ptr.toNat + 8 * len.toNat ≤ 2 ^ 64)
+    (hp' : ptr.toNat + 8 * len.toNat ≤ 2 ^ 48)
     (hd : ptr.toNat + 8 * len.toNat ≤ s.sp.toNat + 8 ∨ s.sp.toNat + 16 ≤ ptr.toNat) :
     ∀ n (S : State) (i acc : BitVec 64), i.toNat + n = len.toNat →
       S.pc = BitVec.ofNat 64 head → S.regs 0 = ptr → S.regs 1 = len → S.regs 2 = i →
       S.regs 3 = acc → acc.toNat = sumWords s.mem ptr.toNat i.toNat % 2 ^ 64 →
-      S.regs 30 = 0#64 → S.sp = s.sp → S.regs 28 = s.regs 28 → S.regs 29 = s.regs 29 →
-      S.regs 18 = s.regs 18 → S.mem = s.mem.writeLE (s.sp.toNat + 8) 8 ptr.toNat →
-      Reaches Extracted.program S (IsReturn fun s' => ABIReturn s s' ∧
+      S.regs 30 = BitVec.ofNat 64 ret → S.sp = s.sp → S.regs 28 = s.regs 28 →
+      S.regs 29 = s.regs 29 → S.regs 18 = s.regs 18 →
+      S.mem = s.mem.writeLE (s.sp.toNat + 8) 8 ptr.toNat →
+      Reaches (Extracted.program.withExit ret) S (IsReturn fun s' => ABIReturn s s' ∧
         (s'.regs 0).toNat = sumWords s.mem ptr.toNat len.toNat % 2 ^ 64) := by
   intro n
   induction n with
@@ -53,12 +55,13 @@ theorem correctness (ptr len cap : BitVec 64) :
       (fun s => StackOK s 0 16 ∧ len.toNat < 2 ^ 63 ∧ Ptr s.mem ptr (8 * len.toNat) false ∧
         Disjoint ptr.toNat (8 * len.toNat) (s.sp.toNat + 8) 8)
       (fun s s' => (s'.regs 0).toNat = sumWords s.mem ptr.toNat len.toNat % 2 ^ 64) := by
-  intro s hs ⟨⟨hal, hb, ha, hst⟩, hlen, ⟨hp, hp'⟩, hd⟩
+  intro ret hret s hs ⟨⟨hal, hb, ha, hst⟩, hlen, ⟨hp, hp'⟩, hd⟩
   janus_intro hs
   simp only [Disjoint] at hd
   janus_run until [head]
-  exact loop ptr len s hlen hp hp' hd len.toNat _ 0#64 0#64 (by simp) (by janus_simp)
-    (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by simp) (by janus_simp)
+  exact loop ptr len ret hret s hlen hp hp' hd len.toNat _ 0#64 0#64 (by simp)
+    (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by simp)
+    (by janus_simp)
     (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp)
 
 end Proof

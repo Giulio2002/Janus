@@ -1,50 +1,83 @@
-import Janus.GoABI
+import Janus
 
-/-! Tests for the Go ABIInternal layer and the specification vocabulary. These use only
-ISA-independent facts (exit address and stubs), so they do not depend on `step`. -/
+/-! Tests for the Go ABIInternal layer and the specification vocabulary: return addresses
+(`RetAddr`, `Program.withExit`), the outcome predicates (`Returns`, `Panics`, `Faults`,
+`NeverPanics`) and the stack predicates. -/
 
 namespace JanusTests.GoABI
 
-open Janus Janus.Arm64 Janus.GoABI
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
 
-/-- A degenerate program whose entry is its exit address: the call returns immediately. -/
-def idProg : Program := { segments := [], stubs := [], exitAddr := 0x1000 }
+/-- A function that is a single `ret` (`0xd65f03c0`) at `0x1000`. -/
+def retProg : Program := { segments := [⟨"f", 0x1000, [0xd65f03c0]⟩], stubs := [], exitAddr := 0 }
 
-/-- Every call state with any arguments returns at once, obeys the ABI, and leaves the
-argument registers as results. Quantifies over all call states, not one zeroed state. -/
+/-- Every call state with any arguments and any admissible return address returns at once,
+obeys the ABI, and leaves the argument registers as results. -/
 example (x y : W64) :
-    EnsuresResults idProg 0x1000 [x, y] 2 (fun _ => True) (fun r => r = [x, y]) := by
-  intro s hs _
-  refine returns_of_steps (.refl s) ?_ ⟨ABIReturn.refl s, ?_⟩
-  · rw [hs.pc_toNat (by decide)]; rfl
-  · simp [results_two, hs.reg (i := 0) (by simp), hs.reg (i := 1) (by simp)]
+    EnsuresResults retProg 0x1000 [x, y] 2 (fun _ => True) (fun r => r = [x, y]) := by
+  intro ret hret s hs _
+  janus_intro hs
+  janus_run
+  simp [results_two, h_x0, h_x1]
+
+/-- Admissible return addresses: decided on a concrete program. -/
+example : RetAddr retProg 0x2000 := RetAddr.of_check (by decide)
+example : RetAddr retProg 0 := RetAddr.of_check (by decide)
+example : ¬ RetAddr retProg 0x1000 := fun h => h.ne_of_fetch (pc := 0x1000) (w := 0xd65f03c0) rfl rfl
+example : ¬ RetAddr retProg 0x1002 := fun h => by have := h.aligned; omega
+example : ¬ RetAddr retProg (2 ^ 56) := fun h => by have := h.user; omega
 
 /-- A program whose entry is a panic stub. -/
 def panicProg : Program :=
   { segments := [], stubs := [{ name := "runtime.panicIndex", addr := 0x2000, kind := .panic }],
     exitAddr := 0x1000 }
 
-example (s : State) (hs : CallSetup panicProg 0x2000 [] s) : Panics panicProg s := by
-  refine panics_of_steps (st := panicProg.stubs[0]) (.refl s) ?_ ?_ rfl <;>
-    rw [hs.pc_toNat (by decide)] <;> first | decide | rfl
+example (ret : Nat) (hret : RetAddr panicProg ret) (s : State)
+    (hs : CallSetup (panicProg.withExit ret) 0x2000 [] s) : Panics (panicProg.withExit ret) s := by
+  janus_intro hs
+  janus_run
 
-example (s : State) (hs : CallSetup panicProg 0x2000 [] s) : ¬ Returns panicProg s (fun _ => True) :=
-  Panics.not_returns (by
-    refine panics_of_steps (st := panicProg.stubs[0]) (.refl s) ?_ ?_ rfl <;>
-      rw [hs.pc_toNat (by decide)] <;> first | decide | rfl)
+example (ret : Nat) (hret : RetAddr panicProg ret) (s : State)
+    (hs : CallSetup (panicProg.withExit ret) 0x2000 [] s) :
+    ¬ Returns (panicProg.withExit ret) s (fun _ => True) :=
+  Panics.not_returns (by janus_intro hs; janus_run)
 
 /-- `Ensures` implies `NeverPanics`. -/
-example (x : W64) (s : State) (hs : CallSetup idProg 0x1000 [x] s) : NeverPanics idProg s := by
-  have h : Ensures idProg 0x1000 [x] (fun _ => True) (fun _ _ => True) := fun s hs _ =>
-    returns_of_steps (.refl s) (by rw [hs.pc_toNat (by decide)]; rfl) ⟨ABIReturn.refl s, trivial⟩
-  exact h.neverPanics hs trivial
+example (x : W64) (ret : Nat) (hret : RetAddr retProg ret) (s : State)
+    (hs : CallSetup (retProg.withExit ret) 0x1000 [x] s) : NeverPanics (retProg.withExit ret) s := by
+  have h : Ensures retProg 0x1000 [x] (fun _ => True) (fun _ _ => True) := by
+    intro ret hret s hs _; janus_intro hs; janus_run
+  exact h.neverPanics hret hs trivial
 
-/-- `CallSetup` is satisfiable from any state. -/
-example (s : State) (a b c : W64) : CallSetup idProg 0x84500 [a, b, c] (setup idProg 0x84500 [a, b, c] s) :=
+/-! Faults are not "never panics": `ldr x3, [x1]` (`0xf9400023`) with `x1 = 0` (a nil pointer)
+and no memory faults, which Go reports as a nil-dereference panic. -/
+
+def nilProg : Program where
+  segments := [⟨"f", 0x1000, [0xf9400023, 0xd65f03c0]⟩]
+  stubs := []
+  exitAddr := 0
+
+theorem nil_faults (ret : Nat) (s : State) (hs : CallSetup (nilProg.withExit ret) 0x1000 [0, 0] s)
+    (hm : s.mem.regions = []) (hr : ret ≠ 0x1000) : Faults (nilProg.withExit ret) s := by
+  have hpc : s.pc.toNat = 0x1000 := hs.pc_toNat (by decide)
+  have hx1 : s.regs 1 = 0 := hs.reg (i := 1) (by simp)
+  refine faults_of_steps (w := 0xf9400023) (e := .outsideAllocation 0 8) (.refl s) (by rw [hpc]; exact hr.symm)
+    (by rw [hpc]; rfl) (by rw [hpc]; rfl) ?_ (by decide)
+  rw [Arm64.step_of_decode (i := .ldstUImm 3 1 0 1 3) (by decide)]
+  simp [Arm64.exec, Arm64.memIndexed, Arm64.baseAddr, Arm64.memSingle, Arm64.load,
+    Memory.accessible, hm, hx1]
+
+example (ret : Nat) (s : State) (hs : CallSetup (nilProg.withExit ret) 0x1000 [0, 0] s)
+    (hm : s.mem.regions = []) (hr : ret ≠ 0x1000) : ¬ NeverPanics (nilProg.withExit ret) s :=
+  fun h => h.not_faults (nil_faults ret s hs hm hr)
+
+/-- `CallSetup` is satisfiable from any state, for any return address. -/
+example (s : State) (a b c : W64) (ret : Nat) :
+    CallSetup (retProg.withExit ret) 0x84500 [a, b, c] (setup (retProg.withExit ret) 0x84500 [a, b, c] s) :=
   setup_callSetup s (by simp [numIntRegs])
 
-example (s : State) (a b : W64) (hs : CallSetup idProg 0x84500 [a, b] s) :
-    s.regs 1 = b ∧ (s.regs 30).toNat = 0x1000 :=
+example (s : State) (a b : W64) (hs : CallSetup (retProg.withExit 0x2000) 0x84500 [a, b] s) :
+    s.regs 1 = b ∧ (s.regs 30).toNat = 0x2000 :=
   ⟨hs.reg (by simp), hs.lr_toNat (by decide)⟩
 
 /-! Results. -/

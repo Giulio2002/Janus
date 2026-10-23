@@ -6,11 +6,11 @@ import Extracted
 **Guarantee.** For all pointers `z`, `x`, `y` and every Go call state of
 `example.com/basic.AddLimbs` with the pointers in `X0`–`X2` such that
 * the 32 bytes at `z` are writable and those at `x` and `y` readable (each inside one memory
-  region of the caller, not wrapping around `2^64`), and
+  region of the caller, below `2^48`; a written range overlaps no read-only region), and
 * every pair of the three pointers is either **equal** or **disjoint** (so `z.Add256(z, z)`,
   `z = x`, `z = y`, `x = y` are all covered; only partial overlap is excluded),
 
-the compiled code returns, obeys the ABI, the 256-bit little-endian value at `z` afterwards is
+the compiled code returns (never faulting or panicking), obeys the ABI, the 256-bit little-endian value at `z` afterwards is
 `(X + Y) mod 2^256`, where `X` and `Y` are the values at `x` and `y` **before** the call, and no
 byte outside `z[0..32)` changes (nor the region list).
 
@@ -35,7 +35,7 @@ theorem correctness (z x y : BitVec 64) :
       (fun s s' =>
         val256 s'.mem z.toNat = (val256 s.mem x.toNat + val256 s.mem y.toNat) % 2 ^ 256 ∧
         OnlyWrites s.mem s'.mem z.toNat 32) := by
-  intro s hs ⟨⟨hz, hz'⟩, ⟨hx, hx'⟩, ⟨hy, hy'⟩, hzx, hzy, hxy⟩
+  intro ret hret s hs ⟨⟨hz, hz'⟩, ⟨hx, hx'⟩, ⟨hy, hy'⟩, hzx, hzy, hxy⟩
   janus_intro hs
   -- one symbolic run per aliasing pattern
   rcases hzx with rfl | hzx <;> rcases hzy with rfl | hzy <;> rcases hxy with h | hxy

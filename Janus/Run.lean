@@ -12,6 +12,9 @@ ISA-independent facts about `Program.run`: they hold for any `Arm64.step`.
   fault), `run_ok_unique` (two successful runs agree).
 * Composition: `Steps p s k s'` is `k` ordinary instruction steps from `s` to `s'` (never at
   the exit address or a stub). `run_steps` turns it into `p.run (k + n) s = p.run n s'`.
+* Return address: `p.withExit ret` has the code, stubs and data of `p` (`fetch_withExit`,
+  `stubAt_withExit`); `Steps.withExit` moves ordinary steps of `p` to `p.withExit ret` when there
+  is no code at `ret`.
 * Code lookup: `fetchIn_cons_hit` / `fetchIn_cons_miss` and `stubAt` lemmas. On a concrete
   segment list `p.fetch pc = some w` is closed by `decide` or `rfl`, and by
   `simp [Program.fetch, Program.fetchIn]`.
@@ -235,6 +238,41 @@ theorem stubAt_eq_none {pc : Nat} (h : ∀ st ∈ p.stubs, st.addr ≠ pc) : p.s
 theorem stubAt_some {pc : Nat} {st : Stub} (h : p.stubAt pc = some st) : st.addr = pc := by
   rw [stubAt_eq] at h
   simpa using List.find?_some h
+
+/-! ## Return address -/
+
+@[simp] theorem exitAddr_withExit (p : Program) (ret : Nat) : (p.withExit ret).exitAddr = ret := rfl
+@[simp] theorem fetch_withExit (p : Program) (ret pc : Nat) : (p.withExit ret).fetch pc = p.fetch pc :=
+  rfl
+@[simp] theorem stubAt_withExit (p : Program) (ret pc : Nat) :
+    (p.withExit ret).stubAt pc = p.stubAt pc := rfl
+@[simp] theorem segments_withExit (p : Program) (ret : Nat) :
+    (p.withExit ret).segments = p.segments := rfl
+@[simp] theorem stubs_withExit (p : Program) (ret : Nat) : (p.withExit ret).stubs = p.stubs := rfl
+@[simp] theorem data_withExit (p : Program) (ret : Nat) : (p.withExit ret).data = p.data := rfl
+
+/-- No segment covers `pc`: there is no code there. -/
+theorem fetchIn_eq_none {segs : List Segment} {pc : Nat}
+    (h : ∀ seg ∈ segs, pc < seg.base ∨ seg.base + 4 * seg.words.length ≤ pc) :
+    fetchIn segs pc = none := by
+  induction segs with
+  | nil => rfl
+  | cons seg rest ih =>
+    rw [fetchIn_cons_miss (by have := h seg (List.mem_cons_self ..); omega)]
+    exact ih fun seg' hs => h seg' (List.mem_cons_of_mem _ hs)
+
+/-- Ordinary steps of `p` are ordinary steps of `p.withExit ret` when there is no code at
+`ret` (every step fetches an instruction, so it is never at `ret`). -/
+theorem Steps.withExit {ret k : Nat} (h : Steps p s k s') (hret : p.fetch ret = none) :
+    Steps (p.withExit ret) s k s' := by
+  induction h with
+  | refl => exact .refl _
+  | step _ hs hf hst _ ih =>
+    refine .step ?_ hs hf hst ih
+    intro heq
+    rw [exitAddr_withExit] at heq
+    rw [heq, hret] at hf
+    cases hf
 
 end Program
 end Janus

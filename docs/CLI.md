@@ -82,8 +82,11 @@ Extracted example.com/basic.Get: 1 function(s), 22 word(s), 2 stub(s), 0 data ob
 
 Extraction:
 
-1. Validates the binary: 64-bit little-endian AArch64 ELF, Go build information present
-   (`debug/buildinfo`), `GOOS=linux`, `GOARCH=arm64`.
+1. Validates the binary: 64-bit little-endian AArch64 ELF, **a non-PIE executable** (`ET_EXEC`,
+   not `ET_DYN`), Go build information present (`debug/buildinfo`), `GOOS=linux`, `GOARCH=arm64`.
+   A position-independent executable is rejected (`Stage: binary validation`): the model records
+   link-time addresses, which a PIE does not run at. Build with `go build` (non-PIE; e.g.
+   `CGO_ENABLED=0`), not `-buildmode=pie`.
 2. Finds the symbol (exact, case-sensitive name as printed by `list`; ambiguous names fail).
 3. Copies the function's raw 32-bit little-endian words from `.text`. Words are never
    translated. Trailing zero words (the linker's `udf #0` padding up to the next function) are
@@ -299,7 +302,8 @@ binary moved, `--binary` names its new location; its SHA-256 must still match.
 ## Verify
 
 ```sh
-janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
+janus verify <outdir> [--proof FILE] [--theorem NAME] [--proof-root PKG] [--json] [--fresh]
+             [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox]
 janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 ```
 
@@ -309,6 +313,8 @@ Verified: Proof.correctness
   Entry: example.com/basic.Get at 0x93140
   Binary: artifacts/examples-arm64 (SHA-256 257b83ed…)
   Proof: cmd/janus/testdata/Trivial.lean
+  Framework: embedded (SHA-256 1c26c3bb…, 30 files, leanprover/lean4:v4.34.1)
+  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
   Axioms: (none)
   Kernel replay: leanchecker passed (Janus, Extracted, Proof)
   Lean: Lean (version 4.34.1, …)
@@ -317,37 +323,71 @@ Verified: Proof.correctness
     Proof.correctness : Extracted.entry = Extracted.entry
 ```
 
-Defaults: `--proof <outdir>/Proof.lean`, `--theorem Proof.correctness`. The Janus Lean project is
-`--janus-root`, else `$JANUS_ROOT`, else the repository containing the `janus` executable or the
-working directory (a directory whose `lakefile.toml` has `name = "janus"`).
+Defaults: `--proof <outdir>/Proof.lean`, `--theorem Proof.correctness`. The Janus Lean framework
+is the copy **embedded in the `janus` binary** (see [the framework](#framework), [install
+story](#install)), or a checkout named by `--janus-root` / `$JANUS_ROOT` (a directory whose
+`lakefile.toml` has `name = "janus"`). `--proof-root` verifies a module of your own Lake package
+(see [docs/CONSUMERS.md](CONSUMERS.md)). `--json` prints the report as JSON; `--fresh` rebuilds
+the framework/caches from scratch.
+
+### Threat model: the proof is untrusted code
+
+A proof file is arbitrary Lean that `janus` elaborates and runs (`#eval`, `initialize`, macros,
+tactics are all code). It is treated as **untrusted**, and the guarantee holds even if the proof
+is hostile: a `Verified` line means the printed statement holds for the extracted bytes, and the
+printed statement is the one the kernel checked. To make that true, verification:
+
+* runs **every Lean process that loads the proof inside a sandbox** (bubblewrap, else an
+  `unshare` namespace): no network; the filesystem — including the Janus sources, the
+  `~/.cache/janus` build and the `janus` binary — is read-only except one fresh, private build
+  directory; a private `/tmp`, PID and user namespace, killed with the parent. Without a sandbox
+  verification refuses (`Stage: sandbox`) unless you pass `--unsafe-no-sandbox`. Install
+  bubblewrap with `apt-get install -y bubblewrap`; the mode used is recorded in `verified.json`.
+* audits the theorem with a **trusted compiled routine (`janus-audit`)** that imports the
+  proof's compiled module *as data* and never runs its initializers, so the proof cannot forge
+  the audit result or run code during it;
+* checks the imported `Extracted` program is **definitionally the one extracted from the binary**
+  (compared against an independently elaborated trusted copy), and puts that copy's directory
+  first on an otherwise private `LEAN_PATH`, so a planted or shadowing `Extracted` is rejected;
+* **prints the statement in a clean environment** that imports only `Janus` and `Extracted`,
+  never the proof, so the proof's unexpanders, notations, delaborators and instances cannot make
+  the printed statement differ from the checked one;
+* requires the statement to mention `Extracted.program`/`Extracted.entry` and to be built only
+  from Lean/Std core, `Janus.*`, `Extracted.*` and plain proof-local `def`s (whose bodies are
+  disclosed in the report); a proof-local instance, class value, `opaque`, axiom or a name that
+  shadows the `Extracted` namespace is rejected;
+* hashes every compiled `.olean` and re-checks the hashes after the audit and the replay, so a
+  mid-run swap of a build output is caught.
+
+See [docs/AUDIT.md](AUDIT.md) for the attacks these defend against.
 
 Steps; any failure prints `Invalid:` with its stage and exits `1`:
 
 1. **Withdraw** any previous `<outdir>/verified.json`. Only a successful run writes a new one.
 2. **Check** the artifacts exactly as `janus check` does.
-3. **Build Janus** with `lake build Janus` in the Janus root (`Janus library build`).
-4. **Compile** in a fresh scratch directory `<outdir>/.janus-build/`: the checked bytes of
-   `Extracted.lean` as module `Extracted`, then the proof as module `Proof`, each with
-   `lake env lean --root=<build> -o <module>.olean` and the build directory on `LEAN_PATH` (Lake
-   puts Janus's own paths first). Errors are summarised as `Lean errors (N):` with paths mapped
-   back to the original files; the full output follows under `Details:` (`extraction
-   elaboration`, `proof checking`). The proof may import `Extracted`, `Janus`, and Lean/Std
-   modules. `Extracted.olean` must be unchanged after the proof is compiled.
-5. **Audit** with a generated `Audit.lean` that imports both modules, runs `#print axioms` and
-   `#check @<theorem>`, and reports through a nonce-tagged line: the declaration kind, its module,
-   its transitive axioms (`collectAxioms`) and its signature. The declaration must be a
-   `theorem` declared in module `Proof` (`theorem audit`). Only `propext`, `Quot.sound` and
-   `Classical.choice` are allowed; anything else, including `sorryAx`, `Lean.ofReduceBool`,
-   `Lean.trustCompiler` and user axioms, is rejected (`axiom audit`). `--theorem` must be a plain
-   dotted Lean name.
-6. **Kernel replay**: `leanchecker` (shipped with the Lean toolchain since it absorbed
-   lean4checker) replays `Janus`, `Extracted` and `Proof` through the kernel, which catches
-   environment hacking such as `set_option debug.skipKernelTC` with `addDecl` (`kernel replay`). If
-   the toolchain has no `leanchecker`, this step is skipped and `verified.json` records
-   `"status": "unavailable"`.
-7. **Re-check** the artifacts and the proof file; they must be unchanged since step 2 (`stale
-   input`).
-8. Write `verified.json`:
+3. **Build the framework and `janus-audit`** (`lake build Janus Janus.Tools.Audit`) once in the
+   cache (`Janus library build`).
+4. **Compile the trusted copies**: the checked `Extracted.lean` as module `Extracted`, and a
+   namespace-renamed copy as `JanusTrusted`, into a private read-only directory — no proof code
+   involved.
+5. **Compile the proof** as module `Proof` in a sandboxed, private work directory, with the
+   trusted directory first on `LEAN_PATH`. Errors are summarised as `Lean errors (N):` with paths
+   mapped back to the original files; the full output follows under `Details:` (`proof
+   checking`). The proof may import `Extracted`, `Janus` and Lean/Std modules.
+6. **Audit** with `janus-audit` (sandboxed): it imports `Extracted`, `JanusTrusted` and `Proof`
+   without running their initializers, checks the theorem is a `theorem` in the proof module,
+   checks `Extracted.program`/`entry` are defeq to `JanusTrusted`, enforces the statement rules
+   above, collects transitive axioms (`collectAxioms`) and pretty-prints the statement in the
+   clean environment. Only `propext`, `Quot.sound` and `Classical.choice` are allowed; anything
+   else, including `sorryAx`, `Lean.ofReduceBool`, `Lean.trustCompiler` and user axioms, is
+   rejected (`axiom audit`). `--theorem` must be a plain **ASCII** dotted Lean name.
+7. **Kernel replay**: `leanchecker` (shipped with the Lean toolchain) replays `Janus`,
+   `Extracted` and `Proof` through the kernel, catching environment hacking such as
+   `set_option debug.skipKernelTC` with `addDecl` (`kernel replay`). If the toolchain has no
+   `leanchecker`, this step is skipped and `verified.json` records `"status": "unavailable"`.
+8. **Re-check** the olean hashes, the artifacts and the proof; they must be unchanged (`stale
+   input`, `proof build integrity`).
+9. Write `verified.json`:
 
 ```json
 {
@@ -359,6 +399,8 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
   "axioms": [],
   "allowedAxioms": ["propext", "Quot.sound", "Classical.choice"],
   "kernelReplay": { "tool": "leanchecker", "status": "passed", "modules": ["Janus", "Extracted", "Proof"] },
+  "sandbox": { "mode": "bwrap", "tool": "/usr/bin/bwrap" },
+  "definitions": [],
   "proof": "../../cmd/janus/testdata/Trivial.lean",
   "proofSha256": "…",
   "extracted": "Extracted.lean",
@@ -371,7 +413,8 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
   "goVersion": "go1.26.0",
   "mainModule": "example.com/basic",
   "leanVersion": "Lean (version 4.34.1, …)",
-  "janusRoot": "/srv/janus",
+  "framework": { "source": "embedded", "sha256": "1c26c3bb…", "files": 30, "toolchain": "leanprover/lean4:v4.34.1", "revision": "<commit>" },
+  "janusRoot": "/root/.cache/janus/v1/framework/…",
   "janusCommit": "<git HEAD>[+dirty]",
   "extractorVersion": "0.2.0",
   "timestamp": "2026-10-23T09:56:16Z"
@@ -379,9 +422,40 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
 ```
 
 A verification establishes exactly the printed statement, with its hypotheses and quantifiers,
-about the definitions in `Extracted`. A warning is printed when the statement mentions no
-`Extracted.` definition. Running `verify` compiles and runs the proof file with Lean, so only
-verify proofs you are willing to execute.
+about the definitions in `Extracted`. `definitions` lists the body of each plain proof-local
+`def` the statement uses. `janus explain <verified.json>` prints a human-readable account of
+what was proved.
+
+### Framework
+
+`janus framework [--json]` prints which Janus Lean framework the binary carries: its source
+(`embedded` or a `--janus-root` directory), the SHA-256 over its sources, the toolchain and the
+revision it was built from. This is the revision a consumer package pins its `janus` dependency
+to; `janus init` writes it for you.
+
+<a name="install"></a>
+### Install
+
+```sh
+go install github.com/Giulio2002/Janus/cmd/janus@latest
+```
+
+The Janus Lean sources are embedded in the binary with `go:embed`, so the installed `janus`
+needs no checkout: the framework it verifies against is exactly what it carries (the cleanest
+identity story — the bundled sources and the version string move together). It is materialized
+and built once under `~/.cache/janus` (override with `$JANUS_CACHE_DIR`). `--janus-root` /
+`$JANUS_ROOT` override it with a checkout, for framework development. `janus` also needs Lean and
+Lake (via elan), and bubblewrap for the sandbox.
+
+### explain
+
+```sh
+janus explain <verified.json | outdir>
+```
+
+Prints the theorem and its statement, which function and address it is about, the binary and
+Go module, the axioms and kernel replay, the framework, the consumer package (if any) and every
+recorded hash together with whether the file on disk still matches it.
 
 ## Blockers
 
@@ -445,9 +519,21 @@ Differences from arm64:
 ## Tests
 
 ```sh
-go test ./cmd/...           # includes Lean verification (about a minute)
-go test -short ./cmd/...    # extraction and check only
+go test ./cmd/...           # includes Lean verification (several minutes; needs bubblewrap)
+go test -short ./cmd/...    # extraction, check and package validation only
+audit/run-all.sh            # every attack in docs/AUDIT.md: each row blocked or honest
 ```
+
+The Lean tests need a working sandbox (bubblewrap, or unprivileged user namespaces); on Ubuntu
+24.04 runners that restrict them via AppArmor, CI runs
+`sysctl kernel.apparmor_restrict_unprivileged_userns=0` first. `hardening_test.go` has one
+regression test per audit attack: a disguised proof-local instance (A1), an unexpander that
+would rewrite the printed statement (A2/A4), a forging `initialize` (A3), `#eval` IO trying to
+write outside the sandbox (A6), `skipKernelTC` (A5), private and namespace shadows of
+`Extracted` (A7, A9), `#exit` (A10), a stray `Extracted.olean` on the search path (C1), PIE
+binaries (E1/F6), and the sandbox mode recorded in the report. `consumer_test.go` covers
+consumer packages (`lakefile.toml` and `lakefile.lean`, path and git dependencies), batches,
+`init`, `explain` and an install built outside the repository.
 
 The tests build the example binary, extract every example function, cross-check every copied
 word and every direct-branch target against `aarch64-linux-gnu-objdump -d` (skipped when it is

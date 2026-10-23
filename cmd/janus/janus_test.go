@@ -462,10 +462,12 @@ func TestVerify(t *testing.T) {
 		{"Def.lean", "import Extracted\nnamespace Proof\ndef correctness : Nat := Extracted.entry\nend Proof\n",
 			"", "is a definition, not a theorem", "theorem audit"},
 		{"Foreign.lean", "import Extracted\nnamespace Proof\ntheorem x : True := trivial\nend Proof\n",
-			"Nat.add_comm", "not in the proof file", "theorem audit"},
+			"Nat.add_comm", "not in the proof module", "theorem audit"},
 		{"Evil.lean", "import Extracted\nimport Lean\nset_option debug.skipKernelTC true in\n" +
 			"run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {\n" +
-			"  name := `Proof.correctness, levelParams := [], type := Lean.mkConst ``False, value := Lean.mkConst ``True.intro })\n",
+			"  name := `Proof.correctness, levelParams := [],\n" +
+			"  type := Lean.mkApp3 (Lean.mkConst ``Eq [1]) (Lean.mkConst ``Nat) (Lean.mkConst `Extracted.entry) (Lean.mkNatLit 0),\n" +
+			"  value := Lean.mkConst ``True.intro })\n",
 			"", "Kernel replay rejected", "kernel replay"},
 	}
 	for _, c := range rejected {

@@ -27,7 +27,7 @@ theorem straight_spec (x y : W64) :
     Ensures straight 0x10000 [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + 24 * y.toNat) % 2 ^ 64 ∧
         (s'.regs 4).toNat = (x.toNat + 23 * y.toNat) % 2 ^ 64) := by
-  intro s hs _
+  intro ret hret s hs _
   janus_intro hs
   janus_run
   all_goals janus_arith
@@ -803,7 +803,7 @@ def large : Program := { segments := [seg0, seg2, seg1], stubs := [], exitAddr :
 theorem large_spec (x y : W64) :
     Ensures large 0x10000 [x, y] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + 24 * y.toNat) % 2 ^ 64) := by
-  intro s hs _
+  intro ret hret s hs _
   janus_intro hs
   janus_run
   janus_arith
@@ -820,12 +820,13 @@ def divp : Program where
 theorem div_returns (x y : W64) :
     Ensures divp 0x20000 [x, y] (fun _ => y.toNat ≠ 0)
       (fun _ s' => (s'.regs 0).toNat = x.toNat / y.toNat) := by
-  intro s hs hy
+  intro ret hret s hs hy
   janus_intro hs
   janus_run [hy]
 
-theorem div_panics (x : W64) (s : State) (hs : CallSetup divp 0x20000 [x, 0#64] s) :
-    Panics divp s := by
+theorem div_panics (x : W64) (ret : Nat) (hret : RetAddr divp ret) (s : State)
+    (hs : CallSetup (divp.withExit ret) 0x20000 [x, 0#64] s) :
+    Panics (divp.withExit ret) s := by
   janus_intro hs
   janus_run
 
@@ -844,7 +845,7 @@ theorem swap_spec (p q : W64) :
       (fun s => Ptr s.mem p 8 true ∧ Ptr s.mem q 8 true ∧ (p = q ∨ Disjoint p.toNat 8 q.toNat 8))
       (fun s s' => s'.mem.readLE p.toNat 8 = s.mem.readLE q.toNat 8 ∧
         s'.mem.readLE q.toNat 8 = s.mem.readLE p.toNat 8) := by
-  intro s hs ⟨⟨hp, hp'⟩, ⟨hq, hq'⟩, hpq⟩
+  intro ret hret s hs ⟨⟨hp, hp'⟩, ⟨hq, hq'⟩, hpq⟩
   janus_intro hs
   rcases hpq with rfl | hpq
   · janus_run
@@ -866,7 +867,7 @@ def tablep : Program where
 theorem table_spec (i : W64) :
     Ensures tablep 0x40000 [i] (fun s => tablep.DataLoaded s.mem)
       (fun _ s' => (s'.regs 0).toNat = [1, 2, 3, 255][i.toNat % 4]!) := by
-  intro s hs hd
+  intro ret hret s hs hd
   janus_intro hs
   janus_data hd
   janus_run
@@ -893,7 +894,7 @@ theorem g_summary :
 theorem call_spec (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + 2) % 2 ^ 64) := by
-  intro s hs ⟨hal, hb, ha, hw⟩
+  intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run calls [g_summary]
   all_goals janus_arith
@@ -902,7 +903,7 @@ theorem call_spec (x : W64) :
 theorem call_spec_inline (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0)
       (fun _ s' => (s'.regs 0).toNat = (x.toNat + 2) % 2 ^ 64) := by
-  intro s hs ⟨hal, hb, ha, hw⟩
+  intro ret hret s hs ⟨hal, hb, ha, hw⟩
   janus_intro hs
   janus_run
   all_goals janus_arith
@@ -918,11 +919,13 @@ def loopp : Program where
   exitAddr := 0
 
 /-- Invariant at the loop body `L` (0x60008): `x0 = n > 0` iterations left, `x1 = 2·(N - n)`. -/
-theorem loop_inv (N : Nat) (hN : N < 2 ^ 62) (s : State) :
+theorem loop_inv (N : Nat) (hN : N < 2 ^ 62) (ret : Nat) (hret : RetAddr loopp ret)
+    (s : State) :
     ∀ n (S : State) (cnt acc : W64), 0 < n → n ≤ N → cnt.toNat = n → acc.toNat = 2 * (N - n) →
-      S.pc = 0x60008#64 → S.regs 0 = cnt → S.regs 1 = acc → S.regs 30 = 0#64 → S.sp = s.sp →
-      S.regs 28 = s.regs 28 → S.regs 29 = s.regs 29 → S.regs 18 = s.regs 18 →
-      Reaches loopp S (IsReturn fun s' => ABIReturn s s' ∧ (s'.regs 0).toNat = 2 * N) := by
+      S.pc = 0x60008#64 → S.regs 0 = cnt → S.regs 1 = acc → S.regs 30 = BitVec.ofNat 64 ret →
+      S.sp = s.sp → S.regs 28 = s.regs 28 → S.regs 29 = s.regs 29 → S.regs 18 = s.regs 18 →
+      Reaches (loopp.withExit ret) S
+        (IsReturn fun s' => ABIReturn s s' ∧ (s'.regs 0).toNat = 2 * N) := by
   intro n
   induction n with
   | zero => intro _ _ _ h; omega
@@ -938,13 +941,14 @@ theorem loop_inv (N : Nat) (hN : N < 2 ^ 62) (s : State) :
 theorem loop_spec (x : W64) (hx : x.toNat < 2 ^ 62) :
     Ensures loopp 0x60000 [x] (fun _ => True)
       (fun _ s' => (s'.regs 0).toNat = 2 * x.toNat) := by
-  intro s hs _
+  intro ret hret s hs _
   janus_intro hs
   janus_run until [0x60008]
   -- `x = 0` goes straight to `done`; otherwise we are at the loop body with the invariant
   all_goals first
     | omega
-    | exact loop_inv x.toNat hx s x.toNat _ x 0#64 (by omega) (Nat.le_refl _) rfl (by simp)
+    | exact loop_inv x.toNat hx ret hret s x.toNat _ x 0#64 (by omega)
+        (Nat.le_refl _) rfl (by simp)
         (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp)
         (by janus_simp) (by janus_simp) (by janus_simp)
 

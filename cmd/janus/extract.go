@@ -17,6 +17,7 @@ type Segment struct {
 	Base  uint64
 	Size  uint64 // symbol size, including padding
 	Words []uint32
+	Bytes []byte // amd64: the raw bytes of [Base, Base+Size) (Words is empty)
 }
 
 // StubKind mirrors Janus.StubKind.
@@ -80,6 +81,9 @@ func extractFrom(b *Binary, sym string, maxFunctions int) (*Extraction, error) {
 	if _, ok := stubKind(entry.Name); ok {
 		return nil, &diag{Msg: fmt.Sprintf("%s is a runtime stub, not a function Janus extracts", entry.Name),
 			Stage: "function selection", Next: "Select a Go function that calls the stub instead."}
+	}
+	if b.GOARCH == "amd64" {
+		return extractAmd64(b, entry, maxFunctions)
 	}
 	x := &Extraction{Bin: b, Entry: entry}
 	seen := map[uint64]bool{entry.Addr: true}

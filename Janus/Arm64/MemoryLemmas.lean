@@ -265,31 +265,78 @@ theorem writeLE_mod (a n v : Nat) : m.writeLE a n (v % 256 ^ n) = m.writeLE a n 
 
 /-! ### Accessibility -/
 
+/-- `accessible` as a proposition: the range lies in one well-formed region (writable for a
+write) and, for a write, overlaps no read-only region. -/
 theorem accessible_iff (a n : Nat) (w : Bool) :
     m.accessible a n w = true ↔
-      ∃ r ∈ m.regions, r.base ≤ a ∧ a + n ≤ r.base + r.size ∧ (w = false ∨ r.writable = true) := by
+      (∃ r ∈ m.regions, r.base ≤ a ∧ a + n ≤ r.base + r.size ∧ r.base + r.size ≤ 2 ^ 48 ∧
+        (w = false ∨ r.writable = true)) ∧
+      (w = true → ∀ r ∈ m.regions, r.writable = true ∨ a + n ≤ r.base ∨ r.base + r.size ≤ a) := by
   unfold accessible
-  simp only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true,
-    Bool.not_eq_true']
+  simp only [Bool.and_eq_true, List.any_eq_true, List.all_eq_true, decide_eq_true_eq,
+    Bool.or_eq_true, Bool.not_eq_true', or_assoc]
   constructor
-  · rintro ⟨r, hr, ⟨h1, h2⟩, h3⟩; exact ⟨r, hr, h1, h2, h3⟩
-  · rintro ⟨r, hr, h1, h2, h3⟩; exact ⟨r, hr, ⟨h1, h2⟩, h3⟩
+  · rintro ⟨⟨r, hr, ⟨⟨h1, h2⟩, h4⟩, h3⟩, hall⟩
+    refine ⟨⟨r, hr, h1, h2, h4, h3⟩, fun hw => ?_⟩
+    subst hw
+    rcases hall with h | h
+    · cases h
+    · exact h
+  · rintro ⟨⟨r, hr, h1, h2, h4, h3⟩, hall⟩
+    refine ⟨⟨r, hr, ⟨⟨h1, h2⟩, h4⟩, h3⟩, ?_⟩
+    cases w
+    · exact Or.inl rfl
+    · exact Or.inr (hall rfl)
 
-theorem accessible_of_mem {r : Region} {a n : Nat} {w : Bool} (hr : r ∈ m.regions)
-    (h1 : r.base ≤ a) (h2 : a + n ≤ r.base + r.size) (h3 : w = false ∨ r.writable = true) :
-    m.accessible a n w = true :=
-  (accessible_iff m a n w).2 ⟨r, hr, h1, h2, h3⟩
+/-- Every accessible range lies below `2^48` (so it never wraps around `2^64`). -/
+theorem accessible_bound {a n : Nat} {w : Bool} (h : m.accessible a n w = true) :
+    a + n ≤ 2 ^ 48 := by
+  obtain ⟨⟨r, _, _, h2, h3, _⟩, _⟩ := (accessible_iff m a n w).1 h
+  omega
+
+/-- A read inside a well-formed region is accessible. -/
+theorem accessible_of_mem {r : Region} {a n : Nat} (hr : r ∈ m.regions)
+    (h1 : r.base ≤ a) (h2 : a + n ≤ r.base + r.size) (h3 : r.base + r.size ≤ 2 ^ 48) :
+    m.accessible a n false = true :=
+  (accessible_iff m a n false).2 ⟨⟨r, hr, h1, h2, h3, Or.inl rfl⟩, fun h => nomatch h⟩
+
+/-- A write inside a well-formed writable region that no read-only region overlaps. -/
+theorem accessible_write_of_mem {r : Region} {a n : Nat} (hr : r ∈ m.regions)
+    (h1 : r.base ≤ a) (h2 : a + n ≤ r.base + r.size) (h3 : r.base + r.size ≤ 2 ^ 48)
+    (hw : r.writable = true)
+    (hro : ∀ r' ∈ m.regions, r'.writable = true ∨ a + n ≤ r'.base ∨ r'.base + r'.size ≤ a) :
+    m.accessible a n true = true :=
+  (accessible_iff m a n true).2 ⟨⟨r, hr, h1, h2, h3, Or.inr hw⟩, fun _ => hro⟩
 
 theorem accessible_read_of_write {a n : Nat} (h : m.accessible a n true = true) :
     m.accessible a n false = true := by
-  obtain ⟨r, hr, h1, h2, _⟩ := (accessible_iff m a n true).1 h
-  exact accessible_of_mem m hr h1 h2 (Or.inl rfl)
+  obtain ⟨⟨r, hr, h1, h2, h3, _⟩, _⟩ := (accessible_iff m a n true).1 h
+  exact accessible_of_mem m hr h1 h2 h3
 
 /-- A sub-range of an accessible range is accessible. -/
 theorem accessible_mono {a n b k : Nat} {w : Bool} (h : m.accessible a n w = true)
     (h1 : a ≤ b) (h2 : b + k ≤ a + n) : m.accessible b k w = true := by
-  obtain ⟨r, hr, h3, h4, h5⟩ := (accessible_iff m a n w).1 h
-  exact accessible_of_mem m hr (by omega) (by omega) h5
+  obtain ⟨⟨r, hr, h3, h4, h5, h6⟩, hall⟩ := (accessible_iff m a n w).1 h
+  refine (accessible_iff m b k w).2 ⟨⟨r, hr, by omega, by omega, h5, h6⟩, fun hw r' hr' => ?_⟩
+  rcases hall hw r' hr' with h7 | h7 | h7
+  · exact Or.inl h7
+  · exact Or.inr (Or.inl (by omega))
+  · exact Or.inr (Or.inr (by omega))
+
+/-- A sub-range of an accessible range is accessible, for reading or (if the range is
+writable) writing. -/
+theorem accessible_sub {a n b k : Nat} {w w' : Bool} (h : m.accessible b k w' = true)
+    (hw : w = false ∨ w' = true) (h1 : b ≤ a) (h2 : a + n ≤ b + k) :
+    m.accessible a n w = true := by
+  rcases hw with hw | hw
+  · subst hw
+    cases w'
+    · exact accessible_mono m h h1 h2
+    · exact accessible_mono m (accessible_read_of_write m h) h1 h2
+  · subst hw
+    cases w
+    · exact accessible_mono m (accessible_read_of_write m h) h1 h2
+    · exact accessible_mono m h h1 h2
 
 theorem accessible_weaken {a n : Nat} {w : Bool} (h : m.accessible a n w = true) :
     m.accessible a n false = true := by

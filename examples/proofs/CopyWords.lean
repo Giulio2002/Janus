@@ -9,7 +9,7 @@ import Extracted
 * `dl, sl < 2^63` (Go lengths), the `8·dl` bytes at `d` are writable, the `8·sl` bytes at `r` are
   readable, and the two buffers and the spill area are pairwise disjoint,
 
-the call returns, obeys the ABI, returns `n = min dl sl` in `X0`, word `j < n` of `dst` afterwards
+the call returns (never faulting or panicking), obeys the ABI, returns `n = min dl sl` in `X0`, word `j < n` of `dst` afterwards
 equals word `j` of `src` before the call, and nothing outside `dst[0..n)` and the two spill slots
 changes. There are no out-of-bounds accesses and the loop terminates for every length.
 
@@ -29,19 +29,20 @@ abbrev head : Nat := Extracted.entry + 0x24
 def M₀ (s : State) (d r : BitVec 64) : Memory :=
   (s.mem.writeLE (s.sp.toNat + 8) 8 d.toNat).writeLE (s.sp.toNat + 32) 8 r.toNat
 
-theorem loop (d r : BitVec 64) (dl sl : Nat) (s : State) (hn : dl < 2 ^ 63) (hsl : sl < 2 ^ 63)
-    (hd : s.mem.accessible d.toNat (8 * dl) true = true) (hd' : d.toNat + 8 * dl ≤ 2 ^ 64)
-    (hr : s.mem.accessible r.toNat (8 * sl) false = true) (hr' : r.toNat + 8 * sl ≤ 2 ^ 64)
+theorem loop (d r : BitVec 64) (dl sl : Nat) (ret : Nat) (hret : RetAddr Extracted.program ret)
+    (s : State) (hn : dl < 2 ^ 63) (hsl : sl < 2 ^ 63)
+    (hd : s.mem.accessible d.toNat (8 * dl) true = true) (hd' : d.toNat + 8 * dl ≤ 2 ^ 48)
+    (hr : s.mem.accessible r.toNat (8 * sl) false = true) (hr' : r.toNat + 8 * sl ≤ 2 ^ 48)
     (hdr : d.toNat + 8 * dl ≤ r.toNat ∨ r.toNat + 8 * sl ≤ d.toNat)
     (hds : d.toNat + 8 * dl ≤ s.sp.toNat + 8 ∨ s.sp.toNat + 40 ≤ d.toNat)
     (hrs : r.toNat + 8 * sl ≤ s.sp.toNat + 8 ∨ s.sp.toNat + 40 ≤ r.toNat)
     (nb : BitVec 64) (hnb : nb.toNat ≤ dl ∧ nb.toNat ≤ sl) :
     ∀ k (S : State) (i : BitVec 64), i.toNat + k = nb.toNat →
       S.pc = BitVec.ofNat 64 head → S.regs 0 = d → S.regs 1 = nb → S.regs 2 = i →
-      S.regs 3 = r → S.regs 30 = 0#64 → S.sp = s.sp → S.regs 28 = s.regs 28 →
+      S.regs 3 = r → S.regs 30 = BitVec.ofNat 64 ret → S.sp = s.sp → S.regs 28 = s.regs 28 →
       S.regs 29 = s.regs 29 → S.regs 18 = s.regs 18 →
       S.mem = copyWords (M₀ s d r) d.toNat r.toNat i.toNat →
-      Reaches Extracted.program S (IsReturn fun s' => ABIReturn s s' ∧
+      Reaches (Extracted.program.withExit ret) S (IsReturn fun s' => ABIReturn s s' ∧
         s'.regs 0 = nb ∧ s'.mem = copyWords (M₀ s d r) d.toNat r.toNat nb.toNat) := by
   unfold M₀
   intro k
@@ -66,14 +67,15 @@ theorem model (d dl dc r sl sc : BitVec 64) :
         Disjoint r.toNat (8 * sl.toNat) (s.sp.toNat + 8) 32)
       (fun s s' => (s'.regs 0).toNat = min dl.toNat sl.toNat ∧
         s'.mem = copyWords (M₀ s d r) d.toNat r.toNat (min dl.toNat sl.toNat)) := by
-  intro s hs ⟨⟨hal, hb, ha, hst⟩, hdl, hsl, ⟨hd, hd'⟩, ⟨hr, hr'⟩, hdr, hds, hrs⟩
+  intro ret hret s hs ⟨⟨hal, hb, ha, hst⟩, hdl, hsl, ⟨hd, hd'⟩, ⟨hr, hr'⟩, hdr, hds, hrs⟩
   janus_intro hs
   simp only [Disjoint] at hdr hds hrs
   janus_run until [head]
   -- `csel` computed the length as a signed comparison; it is `min dl sl`
   have hnb : (if (dl.toNat : Int) < sl.toNat then dl else sl).toNat = min dl.toNat sl.toNat := by
     split <;> omega
-  refine Reaches.mono (loop d r dl.toNat sl.toNat s hdl hsl hd hd' hr hr' hdr hds hrs
+  refine Reaches.mono (loop d r dl.toNat sl.toNat ret hret s hdl hsl hd hd' hr hr'
+    hdr hds hrs
     (if (dl.toNat : Int) < sl.toNat then dl else sl) (by omega)
     (if (dl.toNat : Int) < sl.toNat then dl else sl).toNat _ 0#64 (by simp)
     (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp)

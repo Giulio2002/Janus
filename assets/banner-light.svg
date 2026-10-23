@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-labelledby="t d">
+  <title id="t">Janus</title>
+  <desc id="d">A doorway with a two-faced keystone. On the left, the Go source of Add; on the right, the arm64 and amd64 machine code the Go compiler emitted for it. Inside the door, the turnstile of a checked proof.</desc>
+  <defs>
+    <clipPath id="door"><path d="M530,350 V200 A110,110 0 0 1 750,200 V350 Z"/></clipPath>
+    <linearGradient id="gl" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="#007d9c" stop-opacity="0.04"/><stop offset="1" stop-color="#007d9c" stop-opacity="0.26"/></linearGradient>
+    <linearGradient id="gr" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="#b35900" stop-opacity="0.26"/><stop offset="1" stop-color="#b35900" stop-opacity="0.04"/></linearGradient>
+  </defs>
+  <rect x="1" y="1" width="1278" height="438" rx="24" fill="#ffffff" stroke="#d0d7de" stroke-width="2"/>
+
+  <!-- the doorway: one face on the source, one on the machine code -->
+  <g clip-path="url(#door)">
+    <rect x="530" y="80" width="110" height="280" fill="url(#gl)"/>
+    <rect x="640" y="80" width="110" height="280" fill="url(#gr)"/>
+  </g>
+  <line x1="640" y1="134" x2="640" y2="208" stroke="#424a53" stroke-width="2" stroke-dasharray="4 8" opacity="0.6"/>
+  <path d="M530,350 V200 A110,110 0 0 1 750,200 V350" fill="none" stroke="#424a53" stroke-width="10" stroke-linejoin="round"/>
+  <line x1="470" y1="352" x2="810" y2="352" stroke="#424a53" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- two-faced keystone -->
+  <g>
+    <path d="M640,52 A38,38 0 0 0 640,128 Z" fill="#007d9c"/>
+    <path d="M640,52 A38,38 0 0 1 640,128 Z" fill="#b35900"/>
+    <path d="M604,88 L595,100 L606,103 Z" fill="#007d9c"/>
+    <path d="M676,88 L685,100 L674,103 Z" fill="#b35900"/>
+    <circle cx="620" cy="82" r="5" fill="#ffffff"/>
+    <circle cx="660" cy="82" r="5" fill="#ffffff"/>
+    <line x1="640" y1="50" x2="640" y2="130" stroke="#ffffff" stroke-width="3"/>
+  </g>
+
+  <text x="640" y="282" text-anchor="middle" font-family="'DejaVu Sans', 'Segoe UI Symbol', 'Noto Sans Math', sans-serif" font-size="76" fill="#1f2328">&#x22A2;</text>
+  <text x="640" y="326" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="15" letter-spacing="1" fill="#59636e">kernel-checked</text>
+
+  <!-- left face: the Go program -->
+  <text x="490" y="168" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="15" letter-spacing="2" fill="#59636e">THE GO YOU WROTE</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="21">
+    <text x="108" y="212" fill="#59636e">//go:noinline</text>
+    <text x="108" y="244" fill="#1f2328"><tspan fill="#007d9c">func</tspan> Add(x, y <tspan fill="#007d9c">uint64</tspan>) <tspan fill="#007d9c">uint64</tspan> {</text>
+    <text x="158" y="276" fill="#1f2328"><tspan fill="#007d9c">return</tspan> x + y</text>
+    <text x="108" y="308" fill="#1f2328">}</text>
+  </g>
+
+  <!-- right face: the bytes in the ELF -->
+  <text x="790" y="168" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="15" letter-spacing="2" fill="#59636e">THE BYTES THAT RUN</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20">
+    <text y="212"><tspan x="790" fill="#59636e">arm64</tspan><tspan x="868" fill="#b35900">8b010000</tspan><tspan x="984" fill="#1f2328">add x0, x0, x1</tspan></text>
+    <text y="240"><tspan x="868" fill="#b35900">d65f03c0</tspan><tspan x="984" fill="#1f2328">ret</tspan></text>
+    <text y="280"><tspan x="790" fill="#59636e">amd64</tspan><tspan x="868" fill="#b35900">48 01 d8</tspan><tspan x="984" fill="#1f2328">add rax, rbx</tspan></text>
+    <text y="308"><tspan x="868" fill="#b35900">c3</tspan><tspan x="984" fill="#1f2328">ret</tspan></text>
+  </g>
+
+  <text x="640" y="404" text-anchor="middle" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="14" fill="#1f2328">JANUS</text>
+</svg>
