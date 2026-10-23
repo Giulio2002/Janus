@@ -21,9 +21,16 @@ loader (`Janus.Program`), the Go calling convention (`Janus.GoABI`) and the orac
   4), so it is part of the state: execution never changes it, and a theorem about arbitrary
   initial states quantifies over every value. The default `0x10` (DC ZVA prohibited) only fills
   in concrete states built in tests and witnesses.
-* There are no SIMD/FP (`V0`–`V31`) registers: no supported instruction reads or writes them
-  (Go 1.26 `runtime.memmove`/`memclrNoHeapPointers` and the compiler's inline copies and
-  zeroing use general-purpose `LDP`/`STP` only; see `docs/SOUNDNESS.md`).
+* `vregs` holds the 32 SIMD&FP registers `V0`–`V31`, 128 bits each (`Q`/`D`/`S`/`H`/`B` views are
+  their low bits). Only Advanced SIMD integer and move instructions and SIMD&FP loads and stores
+  use them (see `Exec`); there is no floating-point arithmetic, so FPCR/FPSR are not part of the
+  state (no supported instruction reads or writes them). With SVE the `Z` registers extend `V`;
+  SVE is not modelled, and an Advanced SIMD write zeroes the upper `Z` bits on hardware, which
+  is invisible here. Theorems about arbitrary initial states quantify over `vregs`; the default
+  (all zero) only fills in concrete states built in tests.
+* `tpidr` is TPIDR_EL0, the EL0 thread pointer (`MRS Xt, TPIDR_EL0`). Linux gives each thread
+  its own value; it is read-only in the model (no supported instruction writes it), so it lives
+  in the state and theorems quantify over it, like `dczid`. The default 0 is for tests.
 -/
 
 namespace Janus.Arm64
@@ -59,6 +66,10 @@ structure State where
   mem : Memory
   /-- DCZID_EL0 bits 4:0 (`DZP:BS`); constant during execution. -/
   dczid : BitVec 5 := 0x10
+  /-- SIMD&FP registers `V0`–`V31`. -/
+  vregs : Nat → BitVec 128 := fun _ => 0
+  /-- TPIDR_EL0 (read by `MRS Xt, TPIDR_EL0`); constant during execution. -/
+  tpidr : W64 := 0
 
 instance : Inhabited State :=
   ⟨{ regs := fun _ => 0, sp := 0, pc := 0, flags := ⟨false, false, false, false⟩, mem := default }⟩

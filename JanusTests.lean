@@ -5,6 +5,7 @@ import JanusTests.GoABI
 import JanusTests.Decode
 import JanusTests.Exec
 import JanusTests.Atomic
+import JanusTests.Vector
 import JanusTests.Simp
 import JanusTests.Tactic
 import JanusTests.Amd64

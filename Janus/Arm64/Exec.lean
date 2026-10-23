@@ -2,6 +2,7 @@ import Janus.Arm64.State
 import Janus.Arm64.Instr
 import Janus.Arm64.Bits
 import Janus.Arm64.Decode
+import Janus.Arm64.Vector
 
 /-!
 # AArch64 execution semantics for the supported subset
@@ -55,6 +56,19 @@ Modelling decisions (user mode, Linux):
   constant of the state (never a fixed value). DC ZVA zeroes the aligned block of
   `4 << BS` bytes containing `X[t]` (checked as a store of that many bytes), and faults
   (`trapped`) when `DZP = 1`.
+* **TPIDR_EL0.** `MRS Xt, TPIDR_EL0` returns `State.tpidr`, a field of the state that no
+  supported instruction writes (`MSR TPIDR_EL0` is not decoded).
+* **Advanced SIMD and SIMD&FP loads/stores** (`State.vregs`, see `Janus.Arm64.Vector`): only
+  integer and move instructions. Floating-point arithmetic and conversions are not decoded, so
+  FPCR/FPSR are not part of the state: no accepted instruction reads or writes them (FMOV between
+  general and SIMD&FP registers reads FPCR in the ASL only for its conversion forms, which are
+  rejected). `V[d, n] = x` zero-extends to 128 bits (on an SVE CPU the hardware also zeroes the
+  upper bits of `Z[d]`, which the model does not have). SIMD&FP loads and stores need no
+  alignment (Linux runs EL0 with SCTLR_EL1.A = 0) except the SP check. A multi-register
+  LD1/ST1, LDP/STP or single-structure access is checked per register or element as in the
+  pseudocode; an access that faults in the middle faults as a whole (hardware may have written
+  part of it, which is irrelevant since the run stops). AES (`AESE`, `AESD`, `AESMC`,
+  `AESIMC`) assumes FEAT_AES, which Go tests before using it (`useAeshash`).
 -/
 
 namespace Janus.Arm64
@@ -518,6 +532,185 @@ def execDcZva (s : State) (rt : Nat) : Except Fault State :=
   | .error e => .error e
   | .ok m => .ok { s with mem := m }.next
 
+/-! ## Advanced SIMD and SIMD&FP loads and stores
+
+The operations are in `Janus.Arm64.Vector`. Here: operand reads (`V[n, datasize]`), result
+writes (`V[d, datasize] = result`, which zero-extends) and the memory accesses. -/
+
+/-- `datasize` of a vector operation: 128 bits for `Q = 1`, else 64. -/
+def qsize (Q : Bool) : Nat := if Q then 128 else 64
+
+/-- Three same: `V[d] = op(V[n], V[m])`; only BSL/BIT/BIF (`U = 1`, logical) also read `V[d]`
+(passed as 0 otherwise, where `threeSameOp` ignores it). -/
+def execVThreeSame (s : State) (Q U : Bool) (size rm opcode rn rd : Nat) : State :=
+  let ds := qsize Q
+  let d := if U && opcode = 0b00011 then s.getV rd ds else 0
+  s.setV rd ds (threeSameOp U size opcode ds (s.getV rn ds) (s.getV rm ds) d)
+
+/-- `Vpart[d, 1] = r` for a 64-bit `r`: the upper half is written, the lower half kept. -/
+def setVHigh (s : State) (d r : Nat) : State := s.setV d 128 (s.getV d 64 + 2 ^ 64 * (r % 2 ^ 64))
+
+/-- DUP/INS/SMOV/UMOV (`Instr.vCopy`). `size = LowestSetBit(imm5)`,
+`index = UInt(imm5<4:size+1>)`. -/
+def execVCopy (s : State) (Q op : Bool) (imm5 imm4 rn rd : Nat) : State :=
+  let sz := lowestSetBit5 imm5
+  let e := 8 * 2 ^ sz
+  let idx := imm5 / 2 ^ (sz + 1)
+  let ds := qsize Q
+  let src := elem (s.getV rn 128) e idx
+  if op then
+    -- INS (element): Elem[V[d], index, esize] = Elem[V[n], imm4<3:size>, esize]
+    let el := elem (s.getV rn 128) e (imm4 / 2 ^ sz)
+    s.setV rd 128 (ofElems e (128 / e) fun i => if i = idx then el else elem (s.getV rd 128) e i)
+  else if imm4 = 0 then s.setV rd ds (ofElems e (ds / e) fun _ => src)               -- DUP (element)
+  else if imm4 = 1 then s.setV rd ds (ofElems e (ds / e) fun _ => (s.readZR rn).toNat)  -- DUP (general)
+  else if imm4 = 3 then                                                              -- INS (general)
+    s.setV rd 128 (ofElems e (128 / e) fun i => if i = idx then (s.readZR rn).toNat else elem (s.getV rd 128) e i)
+  else if imm4 = 5 then s.writeZR rd (BitVec.ofNat 64 (truncInt (qsize Q / 2) (sint e src)))  -- SMOV
+  else s.writeZR rd (BitVec.ofNat 64 src)                                                -- UMOV
+
+def execVAcross (s : State) (Q U : Bool) (size opcode rn rd : Nat) : State :=
+  let r := acrossOp U size opcode (qsize Q) (s.getV rn (qsize Q))
+  s.setV rd r.2 r.1
+
+def execVTwoMisc (s : State) (Q U : Bool) (size opcode rn rd : Nat) : State :=
+  if opcode = 0b10010 then
+    -- XTN{2}: Vpart[d, part] = result
+    let r := xtnOp size (s.getV rn 128)
+    if Q then setVHigh s rd r else s.setV rd 64 r
+  else s.setV rd (qsize Q) (twoMiscOp U size opcode (qsize Q) (s.getV rn (qsize Q)))
+
+def execVShiftImm (s : State) (Q U : Bool) (immh immb opcode rn rd : Nat) : State :=
+  let esize := 8 * 2 ^ highestSetBit4 immh
+  let immhb := immh * 8 + immb
+  if opcode = 0b10000 then
+    -- SHRN{2}: shift = 2 * esize - UInt(immh:immb); Vpart[d, part] = result
+    let r := shrnOp esize (2 * esize - immhb) (s.getV rn 128)
+    if Q then setVHigh s rd r else s.setV rd 64 r
+  else if opcode = 0b10100 then
+    -- SSHLL{2}/USHLL{2}: operand = Vpart[n, part]; shift = UInt(immh:immb) - esize
+    let x := if Q then s.getV rn 128 / 2 ^ 64 else s.getV rn 64
+    s.setV rd 128 (shllOp U esize (immhb - esize) x)
+  else
+    let ds := qsize Q
+    s.setV rd ds (shiftImmOp U esize opcode ds immhb (s.getV rn ds) (s.getV rd ds))
+
+/-- FMOV between general and SIMD&FP registers. `opcode = 110`: `X[d] = V[n]` (`rmode = 01`:
+`V[n]<127:64>`); `111`: `V[d] = X[n]` (`rmode = 01`: only `V[d]<127:64>` is written). -/
+def execFmovGen (s : State) (sf : Bool) (rmode opcode rn rd : Nat) : State :=
+  let w := if sf then 64 else 32
+  if opcode = 6 then
+    s.writeZR rd (BitVec.ofNat 64 (if rmode = 1 then s.getV rn 128 / 2 ^ 64 else s.getV rn w))
+  else if rmode = 1 then setVHigh s rd (s.readZR rn).toNat
+  else s.setV rd w (s.readZR rn).toNat
+
+/-- A SIMD&FP single-register access of `nbytes` bytes at `addr` (`L` = load):
+`V[t] = ZeroExtend(Mem[address, nbytes])`, or `Mem[address, nbytes] = V[t, 8 * nbytes]`. -/
+def memV (s : State) (L : Bool) (nbytes rt : Nat) (addr : W64) : Except Fault State :=
+  if L then
+    match load s.mem addr.toNat nbytes with
+    | .error e => .error e
+    | .ok v => .ok (s.setV rt (8 * nbytes) v)
+  else
+    match store s.mem addr.toNat nbytes (s.getV rt (8 * nbytes)) with
+    | .error e => .error e
+    | .ok m => .ok { s with mem := m }
+
+/-- LDP/STP of SIMD&FP registers at `addr` and `addr + nbytes`. -/
+def memVPair (s : State) (L : Bool) (nbytes rt rt2 : Nat) (addr : W64) : Except Fault State :=
+  let addr2 := addr + BitVec.ofNat 64 nbytes
+  if L then
+    match load s.mem addr.toNat nbytes with
+    | .error e => .error e
+    | .ok v1 =>
+      match load s.mem addr2.toNat nbytes with
+      | .error e => .error e
+      | .ok v2 => .ok ((s.setV rt (8 * nbytes) v1).setV rt2 (8 * nbytes) v2)
+  else
+    match store s.mem addr.toNat nbytes (s.getV rt (8 * nbytes)) with
+    | .error e => .error e
+    | .ok m1 =>
+      match store m1 addr2.toNat nbytes (s.getV rt2 (8 * nbytes)) with
+      | .error e => .error e
+      | .ok m2 => .ok { s with mem := m2 }
+
+/-- LD1 (multiple structures) of `k` registers: register `V[(t + r) MOD 32]` is loaded from the
+`rbytes` bytes at `addr + r * rbytes`. -/
+def ldMulti (s : State) (rt rbytes : Nat) (addr : W64) : Nat → Except Fault State
+  | 0 => .ok s
+  | k + 1 =>
+    match ldMulti s rt rbytes addr k with
+    | .error e => .error e
+    | .ok s' =>
+      match load s.mem (addr + BitVec.ofNat 64 (rbytes * k)).toNat rbytes with
+      | .error e => .error e
+      | .ok v => .ok (s'.setV ((rt + k) % 32) (8 * rbytes) v)
+
+/-- ST1 (multiple structures) of `k` registers, in register order. -/
+def stMulti (s : State) (rt rbytes : Nat) (addr : W64) : Nat → Except Fault State
+  | 0 => .ok s
+  | k + 1 =>
+    match stMulti s rt rbytes addr k with
+    | .error e => .error e
+    | .ok s' =>
+      match store s'.mem (addr + BitVec.ofNat 64 (rbytes * k)).toNat rbytes
+          (s.getV ((rt + k) % 32) (8 * rbytes)) with
+      | .error e => .error e
+      | .ok m => .ok { s' with mem := m }
+
+/-- LD1–LD4 (single structure) / LD1R–LD4R of `k` registers: register `V[(t + j) MOD 32]` gets
+the `eb`-byte element at `addr + j * eb`, replicated (`V[t, datasize] = Replicate(element)`) or
+into lane `idx` (the rest of the 128-bit register is kept). -/
+def ldSingle (s : State) (rt eb idx : Nat) (rep : Bool) (ds : Nat) (addr : W64) :
+    Nat → Except Fault State
+  | 0 => .ok s
+  | k + 1 =>
+    match ldSingle s rt eb idx rep ds addr k with
+    | .error e => .error e
+    | .ok s' =>
+      match load s.mem (addr + BitVec.ofNat 64 (eb * k)).toNat eb with
+      | .error e => .error e
+      | .ok v =>
+        let r := (rt + k) % 32
+        .ok (if rep then s'.setV r ds (ofElems (8 * eb) (ds / (8 * eb)) fun _ => v)
+             else s'.setV r 128 (ofElems (8 * eb) (16 / eb) fun i =>
+               if i = idx then v else elem (s'.getV r 128) (8 * eb) i))
+
+/-- ST1–ST4 (single structure): lane `idx` of `V[(t + j) MOD 32]` to `addr + j * eb`. -/
+def stSingle (s : State) (rt eb idx : Nat) (addr : W64) : Nat → Except Fault State
+  | 0 => .ok s
+  | k + 1 =>
+    match stSingle s rt eb idx addr k with
+    | .error e => .error e
+    | .ok s' =>
+      match store s'.mem (addr + BitVec.ofNat 64 (eb * k)).toNat eb
+          (elem (s.getV ((rt + k) % 32) 128) (8 * eb) idx) with
+      | .error e => .error e
+      | .ok m => .ok { s' with mem := m }
+
+/-- LD1–LD4/ST1–ST4 (single structure) and LD1R–LD4R; `selem = opcode<0>:R + 1` registers. -/
+def execVLdStSingle (s : State) (Q L R : Bool) (opcode : Nat) (S : Bool) (size : Nat) (post : Bool)
+    (rm rn rt : Nat) :
+    Except Fault State :=
+  let selem := opcode % 2 * 2 + R.toNat + 1
+  let (eb, idx, rep) := (vSingleLayout Q opcode S size L).getD (1, 0, false)
+  let offset : W64 := if rm = 31 then BitVec.ofNat 64 (selem * eb) else s.regs rm
+  memIndexed s rn offset true post fun s a =>
+    if L then ldSingle s rt eb idx rep (qsize Q) a selem else stSingle s rt eb idx a selem
+
+/-- The number of registers of LD1/ST1 (multiple structures) by `opcode`. -/
+def multiRegs (opcode : Nat) : Nat :=
+  if opcode = 0b0111 then 1 else if opcode = 0b1010 then 2 else if opcode = 0b0110 then 3 else 4
+
+/-- LD1/ST1 (multiple structures). The post-index offset is `X[m]`, or the number of bytes
+transferred for `m = 31`. -/
+def execVLdStMulti (s : State) (Q L : Bool) (opcode : Nat) (post : Bool) (rm rn rt : Nat) :
+    Except Fault State :=
+  let rbytes := qsize Q / 8
+  let k := multiRegs opcode
+  let offset : W64 := if rm = 31 then BitVec.ofNat 64 (k * rbytes) else s.regs rm
+  memIndexed s rn offset true post fun s a => if L then ldMulti s rt rbytes a k else stMulti s rt rbytes a k
+
 /-! ## The executor -/
 
 /-- Execute a decoded instruction. Only specified on the output of `decode`. -/
@@ -568,6 +761,7 @@ def exec (i : Instr) (s : State) : Except Fault State :=
   | .barrier _ _ => .ok s.next
   | .clrex _ => .ok s.next
   | .mrsDczid rt => .ok (s.writeZR rt (s.dczid.setWidth 64)).next
+  | .mrsTpidr rt => .ok (s.writeZR rt s.tpidr).next
   | .dcZva rt => execDcZva s rt
   | .prefetch _ => .ok s.next
   | .ldstOrdered size L _ rn rt => execOrdered s size L rn rt
@@ -610,6 +804,64 @@ def exec (i : Instr) (s : State) : Except Fault State :=
     match memIndexed s rn offset postindex wback (fun s a => memPair s opc L rt rt2 a) with
     | .error e => .error e
     | .ok s' => .ok s'.next
+  -- SIMD&FP loads and stores
+  | .vldstMulti Q L opcode _ post rm rn rt =>
+    match execVLdStMulti s Q L opcode post rm rn rt with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .vldstSingle Q L R opcode S size post rm rn rt =>
+    match execVLdStSingle s Q L R opcode S size post rm rn rt with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .vldrLit opc imm19 rt =>
+    match memV s true (4 * 2 ^ opc) rt (s.pc + sext64 21 (imm19 * 4)) with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .vldstUImm size opc imm12 rn rt =>
+    let scale := opc / 2 * 4 + size
+    match memIndexed s rn (BitVec.ofNat 64 (imm12 * 2 ^ scale)) false false
+        (fun s a => memV s (opc % 2 = 1) (2 ^ scale) rt a) with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .vldstImm9 size opc mode imm9 rn rt =>
+    let scale := opc / 2 * 4 + size
+    let postindex := match mode with | .post => true | _ => false
+    let wback := match mode with | .unscaled => false | _ => true
+    match memIndexed s rn (sext64 9 imm9) postindex wback
+        (fun s a => memV s (opc % 2 = 1) (2 ^ scale) rt a) with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .vldstReg size opc rm option S rn rt =>
+    let scale := opc / 2 * 4 + size
+    let offset := extendReg 64 (s.readZR rm) option (if S then scale else 0)
+    match memIndexed s rn offset false false (fun s a => memV s (opc % 2 = 1) (2 ^ scale) rt a) with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .vldstPair opc mode L imm7 rt2 rn rt =>
+    let postindex := match mode with | .post => true | _ => false
+    let wback := match mode with | .offset => false | _ => true
+    -- `scale = 2 + UInt(opc); offset = LSL(SignExtend(imm7, 64), scale)`
+    let offset := (BitVec.ofNat 7 imm7).signExtend 64 <<< (2 + opc)
+    match memIndexed s rn offset postindex wback (fun s a => memVPair s L (4 * 2 ^ opc) rt rt2 a) with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  -- Advanced SIMD data processing
+  | .vThreeSame Q U size rm opcode rn rd => .ok (execVThreeSame s Q U size rm opcode rn rd).next
+  | .vScalarThreeSame U size rm opcode rn rd =>
+    .ok (s.setV rd 64 (threeSameOp U size opcode 64 (s.getV rn 64) (s.getV rm 64) (s.getV rd 64))).next
+  | .vCopy Q op imm5 imm4 rn rd => .ok (execVCopy s Q op imm5 imm4 rn rd).next
+  | .vAcross Q U size opcode rn rd => .ok (execVAcross s Q U size opcode rn rd).next
+  | .vTwoMisc Q U size opcode rn rd => .ok (execVTwoMisc s Q U size opcode rn rd).next
+  | .vShiftImm Q U immh immb opcode rn rd => .ok (execVShiftImm s Q U immh immb opcode rn rd).next
+  | .vModImm Q op cmode imm8 rd =>
+    .ok (s.setV rd (qsize Q) (modImmOp op cmode imm8 (qsize Q) (s.getV rd (qsize Q)))).next
+  | .vExt Q rm imm4 rn rd =>
+    .ok (s.setV rd (qsize Q) (extOp (qsize Q) imm4 (s.getV rn (qsize Q)) (s.getV rm (qsize Q)))).next
+  | .vTbl Q rm len op rn rd =>
+    .ok (s.setV rd (qsize Q) (tblOp op (len + 1) (qsize Q) (tableOf s.vregs rn (len + 1))
+      (s.getV rm (qsize Q)) (s.getV rd (qsize Q)))).next
+  | .vAes opcode rn rd => .ok (s.setV rd 128 (aesOp opcode (s.getV rd 128) (s.getV rn 128))).next
+  | .fmovGen sf _ rmode opcode rn rd => .ok (execFmovGen s sf rmode opcode rn rd).next
   -- Data processing: register
   | .logicalShifted sf opc shift N rm imm6 rn rd =>
     .ok (if sf then execLogicalShifted 64 s opc shift N rm imm6 rn rd

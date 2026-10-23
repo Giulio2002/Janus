@@ -142,7 +142,8 @@ Callee summaries are proved on the extracted program and moved to `p.withExit re
 * `pc` a literal `602308#64`;
 * `flags` the flags of the last flag-setting instruction, e.g. `(addSub x y true).snd` after
   `cmp x, y`, kept opaque;
-* `mem` a chain `(s.mem.writeLE a 8 v).writeLE b 8 w` of stores.
+* `mem` a chain `(s.mem.writeLE a 8 v).writeLE b 8 w` of stores;
+* `vregs` (the SIMD&FP registers) a chain `setVReg (setVReg s.vregs 0 v₀) 4 v₄`, like `regs`.
 
 **Values** are `BitVec 64` terms over the initial registers (rewritten to your argument names) and
 memory reads `BitVec.ofNat 64 (s.mem.readLE a 8)`. **Addresses** are normalised to `Nat`:
@@ -355,6 +356,33 @@ precondition.
   blocks) go through an induction lemma (`zva_loop`) instead of straight-line execution. Zeroed
   ranges are tracked with interval lemmas (`ZeroOn`, `zeroOn_writeLE_zero`) rather than byte by
   byte.
+
+### SIMD code (`A64Equal64`, `A64IndexByte`)
+
+`Janus/Tactic/Vector.lean` adds the `exec` equations of the Advanced SIMD and SIMD&FP load/store
+instructions, the V register normal form (`setVReg`, sorted like `setReg`) and element lemmas.
+The vector operations themselves (`threeSameOp`, `acrossOp`, `twoMiscOp`, `ofElems`, `elem`, ...)
+are **not** unfolded: after `ld1 {v0.2d-v3.2d}, [x0]` and `cmeq v8.2d, v4.2d, v0.2d`, register
+`V8` holds `threeSameOp true 3 17 128 (readLE (b + 0) 16) (readLE a 16) 0`. What the code reads
+back is evaluated by element lemmas tagged `janus_exec`: `elem_cmeq` (a CMEQ lane is all ones iff
+the lanes are equal), `elem_and`/`elem_or`, `elem_readLE_64`/`elem_readLE_8` (a lane of a load is a
+smaller load), `elem_ofElems`, `elem_mod_2_128`. So `umov x4, v8.d[0]` followed by `cbz x4`
+branches on `readLE (b + 48) 8 = readLE (a + 48) 8 ∧ … ∧ readLE b 8 = readLE a 8` directly
+(`A64Equal64.lean`; `readLE_64_eq_iff` turns the eight words back into the 64-byte
+comparison).
+
+When the code computes something less direct, state the fact once as a lemma whose left side is
+the term the executor produces, and rewrite the branch hypotheses and the final goal with it.
+`A64IndexByte.lean` does this for `internal/bytealg.IndexByteString`: `loopTest` (the
+`ORR`/`ADDP .2D`/`UMOV` test is zero iff no byte of the 32-byte block matches) and `syndrome`
+(`AND` with `0x40100401` and two `ADDP .16B` give `Σ 4^i·[byte i = c]`), proved by expanding
+every lane to its bytes (`elem_64_bytes`), pushing the masks into `if`s (`ite_land_nat`,
+`ite_add_ite_mod`, `ite4_mod`), turning each `if p then k else 0` into `k * (decide p).toNat`
+(`ite_eq_mul_toNat`) and closing the linear identity with `omega`. The byte-mask arithmetic is in
+`Janus.Tactic.Vector`: `synd`/`ctzN_synd`/`clzNat_rbitNat` (RBIT + CLZ find the first match),
+`maskSum_add_mod` (two vectors of `0x00`/`0xFF` bytes add to `0 mod 2^64` only if both are zero),
+`firstTrue`. Name the branch hypotheses (`rename_i`) instead of `‹_›`: an anonymous assumption
+with metavariables is unified against every hypothesis, and these are large.
 
 ### Counterexamples (`WrongAdd`)
 

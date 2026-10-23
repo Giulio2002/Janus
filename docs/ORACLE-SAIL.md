@@ -153,7 +153,9 @@ which is what the qemu runner observes:
 Without an exception, the status is decided by the *next* fetch, exactly as in the runner:
 `selfloop` (pc = `TestPC`), SIGILL in the code page, SIGBUS for a misaligned pc, otherwise
 SIGSEGV at pc. Between cases the driver steps `SVC` (EL0 to EL1) and `SMC` (EL1 to EL3) and
-re-runs the whole set-up. It zeroes FPCR/FPSR/TPIDR*/Z/P/FFR. A fresh model instance per case
+re-runs the whole set-up. It zeroes FPCR/FPSR/TPIDR*/Z/P/FFR, then writes the case's `V0`–`V31`
+into the low 128 bits of `Z0`–`Z31` (the rest stays zero, as after any Advanced SIMD write) and
+its `TPIDR_EL0`, and reports `V0`–`V31` (the low 128 bits of `Z0`–`Z31`) after the step. A fresh model instance per case
 (`SAIL_FRESH=1`) gives byte-identical results.
 
 ## What Sail does *not* settle (tags in `threeway.md`)
@@ -212,6 +214,53 @@ and must not be read as "the architecture says so":
 
 None of these can hide a Janus soundness bug as an "agree". They only produce `model-gap`
 or MISMATCH noise between qemu and Sail, or `error` cases, which are excluded.
+
+## Results with Advanced SIMD (2026-10-23, 584,412 cases)
+
+Corpus of `scripts/oracle.sh full` after the Advanced SIMD extension (cases carry `V0`–`V31` and
+`TPIDR_EL0`; harvest includes the SIMD&FP words; new classes `vls.*`, `simd.*`). Janus against
+Sail uses `State.dczid` = 8 as before.
+
+| pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
+|---|---:|---:|---:|---:|---:|
+| **Sail vs Janus** | 569,721 | **0** | 14,686 | 5 | 0 |
+| qemu vs Sail | 579,343 | 4,071 | 990 | 3 | 5 |
+| qemu vs Janus | 568,770 | 0 | 15,639 | 3 | 0 |
+| Sail vs Janus, `spalign` (Sail-only) | 103,000 | **0** | 0 | 0 | 0 |
+
+* **Soundness: 0 cases** (`soundness.jsonl` is empty). Janus's gaps against Sail: 14,235
+  `undecodable`, 334 `unaligned`, 87 `noCode`, 30 `outsideAllocation`.
+* The SIMD&FP classes against Sail (same grouping as in `docs/ORACLE.md`):
+
+| class | cases | harvest | agree-ok | agree-fault | model-gap | MISMATCH | unobserved | distinct words |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| simd.2misc | 4055 | 51 | 2218 | 1556 | 281 | 0 | 0 | 3962 |
+| simd.3same | 4780 | 507 | 3490 | 945 | 345 | 0 | 0 | 4441 |
+| simd.across | 4015 | 6 | 2004 | 2000 | 11 | 0 | 0 | 3910 |
+| simd.aes | 4063 | 561 | 4063 | 0 | 0 | 0 | 0 | 2485 |
+| simd.copy | 4152 | 117 | 2717 | 1435 | 0 | 0 | 0 | 4053 |
+| simd.ext | 4076 | 57 | 3049 | 1027 | 0 | 0 | 0 | 4030 |
+| simd.fmovgen | 4562 | 558 | 3586 | 445 | 531 | 0 | 0 | 3291 |
+| simd.modimm | 4013 | 0 | 3778 | 230 | 5 | 0 | 0 | 4005 |
+| simd.s3same | 4115 | 3 | 3385 | 596 | 134 | 0 | 0 | 4092 |
+| simd.shift | 4302 | 48 | 2086 | 1917 | 299 | 0 | 0 | 4269 |
+| simd.tbl | 4027 | 18 | 4027 | 0 | 0 | 0 | 0 | 3996 |
+| sys.mrs `mrs tpidr_el0` | 1354 | 3 | 1354 | 0 | 0 | 0 | 0 | 32 |
+| vls.imm9 | 4538 | 6 | 1968 | 2570 | 0 | 0 | 0 | 4533 |
+| vls.literal | 4973 | 0 | 3526 | 1447 | 0 | 0 | 0 | 4909 |
+| vls.multi | 4517 | 369 | 3769 | 666 | 82 | 0 | 0 | 4227 |
+| vls.pair | 6911 | 990 | 5292 | 1246 | 373 | 0 | 0 | 6251 |
+| vls.regoff | 4419 | 306 | 2435 | 1984 | 0 | 0 | 0 | 4212 |
+| vls.single | 4303 | 33 | 2324 | 1979 | 0 | 0 | 0 | 4268 |
+| vls.uimm | 9265 | 4224 | 7138 | 2127 | 0 | 0 | 0 | 6447 |
+| **total** | 86440 | 7857 | 62209 | 22170 | 2061 | 0 | 0 | 77413 |
+
+* **qemu vs Sail**: every non-agreement carries one of the existing tags. In the modelled SIMD&FP
+  classes the only non-agreements are 3 model-gaps (an `LD1`/`LDR` that qemu served from its own
+  process memory); the rest are unmodelled `vls.other` words (`STLUR`/`LDAPUR` SIMD&FP, MOPS)
+  under the existing tags. A first run
+  showed 34 `WFI` cases where the driver did not report the vector registers on its "WFI
+  trapped and skipped" path; fixed in `oracle-sail/src/main.rs`.
 
 ## Results with the atomics / DC ZVA extension (2026-10-23, 486,463 cases)
 

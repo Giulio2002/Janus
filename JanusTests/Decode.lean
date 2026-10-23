@@ -193,7 +193,7 @@ example : decode 0xd53b00e3 = some (.mrsDczid 3) := by decide   -- mrs x3, dczid
 example : decode 0xd50b7420 = some (.dcZva 0) := by decide   -- dc zva, x0
 example : decode 0xd50b7520 = none := by decide   -- ic ivau, x0
 example : decode 0x1e602000 = none := by decide   -- fcmp d0, d0
-example : decode 0xfd400400 = none := by decide   -- ldr d0, [x0, #8]
+example : decode 0xfd400400 = some (.vldstUImm 3 1 1 0 0) := by decide   -- ldr d0, [x0, #8]
 example : decode 0xf9800000 = some (.prefetch 0) := by decide   -- prfm pldl1keep, [x0]
 example : decode 0xd8000000 = some (.prefetch 0) := by decide   -- prfm (literal)
 example : decode 0xa8400000 = none := by decide   -- ldnp x0, x0, [x0]: LDNP not supported
