@@ -5,6 +5,7 @@
 //	janus extract <binary> <symbol> <outdir> [--max-functions N]
 //	janus check <outdir> [--binary PATH]
 //	janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
+//	janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
 //
 // Exit code 0 on success, 1 on failure; diagnostics go to standard error.
 package main
@@ -72,6 +73,7 @@ const usage = `Usage:
   janus extract <binary> <symbol> <outdir> [--max-functions N]
   janus check <outdir> [--binary PATH]
   janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
+  janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
   janus version
 
 See docs/CLI.md.
@@ -128,6 +130,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = cmdCheck(args[1:], stdout)
 	case "verify":
 		err = cmdVerify(args[1:], stdout, stderr)
+	case "blockers":
+		err = cmdBlockers(args[1:], stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "janus %s\n", extractorVersion)
 	case "help", "-h", "--help":
@@ -197,18 +201,51 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	for _, s := range x.Segments {
 		words += len(s.Words)
 	}
-	fmt.Fprintf(stdout, "Extracted %s: %d function(s), %d word(s), %d stub(s) into %s\n",
-		x.Entry.Name, len(x.Segments), words, len(x.Stubs), displayPath(filepath.Join(outdir, "Extracted.lean")))
+	dataBytes := 0
+	for _, d := range x.Data {
+		dataBytes += len(d.Bytes)
+	}
+	fmt.Fprintf(stdout, "Extracted %s: %d function(s), %d word(s), %d stub(s), %d data object(s) (%d bytes) into %s\n",
+		x.Entry.Name, len(x.Segments), words, len(x.Stubs), len(x.Data), dataBytes, displayPath(filepath.Join(outdir, "Extracted.lean")))
 	for _, s := range x.Segments {
 		fmt.Fprintf(stdout, "  code  0x%x %4d words  %s\n", s.Base, len(s.Words), s.Name)
 	}
 	for _, s := range x.Stubs {
 		fmt.Fprintf(stdout, "  stub  0x%x %-10s %s\n", s.Addr, s.Kind, s.Name)
 	}
+	for _, d := range x.Data {
+		fmt.Fprintf(stdout, "  data  0x%x %4d bytes  %s (%s)\n", d.Base, len(d.Bytes), d.Name, d.Section)
+	}
+	printSkipped(stderr, x.Skipped)
 	for _, u := range x.Unresolved {
 		fmt.Fprintf(stderr, "Warning: branch at 0x%x targets 0x%x, which is in no known function; it is not extracted (Lean faults with noCode there).\n", u.From, u.Target)
 	}
 	return nil
+}
+
+// printSkipped warns about data references whose bytes are not copied, one line per target.
+func printSkipped(w io.Writer, skipped []SkippedData) {
+	seen := map[uint64]bool{}
+	for _, s := range skipped {
+		if seen[s.Target] {
+			continue
+		}
+		seen[s.Target] = true
+		what := fmt.Sprintf("0x%x", s.Target)
+		if s.Symbol != "" {
+			what += " (" + s.Symbol + ")"
+		}
+		switch s.Reason {
+		case "writable":
+			fmt.Fprintf(w, "Warning: code at 0x%x references %s in writable section %s; its content is not fixed by the binary, so it is not copied (accesses fault unless a precondition provides that memory).\n", s.From, what, s.Section)
+		case "gopclntab":
+			fmt.Fprintf(w, "Warning: code at 0x%x references %s in .gopclntab; runtime metadata is not copied.\n", s.From, what)
+		case "code":
+			fmt.Fprintf(w, "Note: code at 0x%x computes the code address %s in %s; code is not copied as data.\n", s.From, what, s.Section)
+		default:
+			fmt.Fprintf(w, "Warning: code at 0x%x references %s, which is in no allocated section; nothing is copied.\n", s.From, what)
+		}
+	}
 }
 
 func cmdCheck(args []string, stdout io.Writer) error {
@@ -228,9 +265,9 @@ func cmdCheck(args []string, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "  Binary: %s\n", displayPath(r.BinPath))
 	fmt.Fprintf(stdout, "  Module: %s (%s, %s/%s)\n", id.MainModule, id.GoVersion, id.GOOS, id.GOARCH)
 	fmt.Fprintf(stdout, "  Entry: %s at %s\n", id.Symbol, id.Address)
-	fmt.Fprintf(stdout, "  Functions: %d, stubs: %d\n", len(id.Functions), len(id.Stubs))
+	fmt.Fprintf(stdout, "  Functions: %d, stubs: %d, data objects: %d\n", len(id.Functions), len(id.Stubs), len(id.Data))
 	fmt.Fprintf(stdout, "  Code: %s\n", displayPath(r.Extracted))
 	fmt.Fprintf(stdout, "  Manifest: %s\n", displayPath(filepath.Join(r.Outdir, "identity.json")))
-	fmt.Fprintln(stdout, "  Matched: binary SHA-256, extractor version, Extracted.lean SHA-256 and regenerated words.")
+	fmt.Fprintln(stdout, "  Matched: binary SHA-256, extractor version, Extracted.lean SHA-256, regenerated words and data.")
 	return nil
 }

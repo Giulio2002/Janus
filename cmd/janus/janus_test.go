@@ -437,6 +437,13 @@ func TestVerify(t *testing.T) {
 	if code, out, stderr := verify(good, "--theorem", "Proof.segs"); code != 0 || !strings.Contains(out, "Verified: Proof.segs") {
 		t.Fatalf("decide proof: %d %s %s", code, out, stderr)
 	}
+	// The checked-in fixtures (cmd/janus/testdata, also used in docs/CLI.md).
+	if code, out, stderr := verify(filepath.Join("testdata", "Trivial.lean")); code != 0 || !strings.HasPrefix(out, "Verified: Proof.correctness\n") {
+		t.Fatalf("testdata/Trivial.lean: %d %s %s", code, out, stderr)
+	}
+	if code, _, stderr := verify(filepath.Join("testdata", "Sorry.lean")); code != 1 || !strings.Contains(stderr, "disallowed axioms: sorryAx") {
+		t.Fatalf("testdata/Sorry.lean: %d %s", code, stderr)
+	}
 
 	rejected := []struct {
 		name, body, extra, want, stage string

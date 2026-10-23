@@ -70,3 +70,7 @@ if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
 fi
 sed -n '1,6p' "$OUT/summary.md"
 echo "report: $OUT/summary.md  (per-case verdicts: $OUT/verdicts.jsonl)"
+if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
+  echo "FAIL: model disagrees with hardware (see $OUT/repro.md)" >&2
+  exit 1
+fi

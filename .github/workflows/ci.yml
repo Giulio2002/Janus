@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26.0"
+
+jobs:
+  guard:
+    name: Axiom/sorry guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: No sorry / native_decide / bv_decide / admit
+        run: scripts/ci-axiom-guard.sh
+
+  lean-go:
+    name: Lean build, Go vet/test, examples, oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            targets/*/go.sum
+            oracle/go.sum
+
+      - name: Install qemu-user and aarch64 binutils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user binutils-aarch64-linux-gnu
+
+      # elan installs the toolchain pinned in lean-toolchain on first use.
+      - name: Cache elan toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
+
+      - name: Install elan
+        run: |
+          if [ ! -x "$HOME/.elan/bin/lake" ]; then
+            curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o elan-init.sh
+            sh elan-init.sh -y --default-toolchain none
+            rm elan-init.sh
+          fi
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Lean toolchain
+        run: |
+          lean --version
+          lake --version
+
+      - name: Cache Lake build
+        uses: actions/cache@v4
+        with:
+          path: .lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-${{ hashFiles('**/*.lean') }}
+          restore-keys: |
+            lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.toml', 'lake-manifest.json') }}-
+
+      - name: lake build Janus JanusTests
+        run: lake build Janus JanusTests
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build examples and targets (reproducible SHA-256 check)
+        run: |
+          scripts/build-examples.sh
+          scripts/ci-targets.sh
+
+      - name: go test ./cmd/...
+        run: go test ./cmd/...
+
+      - name: Verify example proofs
+        run: |
+          if [ -x scripts/verify-examples.sh ]; then
+            scripts/verify-examples.sh
+          else
+            echo "scripts/verify-examples.sh not present; skipping"
+          fi
+
+      - name: Decoder coverage of the geth opcodes (janus blockers)
+        run: |
+          go build -o bin/janus ./cmd/janus
+          syms=()
+          for op in opAdd opSub opMul opLt opGt opEq opIszero opAnd opOr opXor opNot opByte opSHL opSHR opSAR \
+                    opSignExtend opSlt opSgt opDiv opSdiv opMod opSmod opAddmod opMulmod opExp; do
+            syms+=("github.com/ethereum/go-ethereum/core/vm.$op")
+          done
+          bin/janus blockers targets/geth/bin/geth-vm-arm64 "${syms[@]}" | tee blockers.txt
+          grep -q 'Summary: 25 symbol(s): 25 fully decoded' blockers.txt
+
+      - name: Differential oracle vs qemu (quick)
+        env:
+          OUT: ${{ runner.temp }}/oracle
+        run: |
+          scripts/oracle.sh quick
+          # oracle.sh reports mismatches but exits 0; fail the job on any soundness mismatch.
+          if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
+            cat "$OUT/repro.md" || true
+            exit 1
+          fi
+
+      - name: Upload oracle report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-quick
+          path: ${{ runner.temp }}/oracle/*.md
+          if-no-files-found: ignore

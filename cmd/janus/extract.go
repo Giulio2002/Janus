@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const extractorVersion = "0.1.0"
+const extractorVersion = "0.2.0"
 
 const defaultMaxFunctions = 64
 
@@ -45,6 +45,9 @@ type Extraction struct {
 	Segments   []Segment // entry first, then breadth-first discovery order
 	Stubs      []Stub    // discovery order
 	Unresolved []Unresolved
+	Data       []DataSeg     // read-only objects the code references, sorted by address
+	DataRefs   []DataRef     // detected references, in code order
+	Skipped    []SkippedData // references whose target is not copied (writable, code, ...)
 	Lean       []byte
 }
 
@@ -132,6 +135,10 @@ func extractFrom(b *Binary, sym string, maxFunctions int) (*Extraction, error) {
 			}
 		}
 	}
+	for _, s := range x.Segments {
+		x.DataRefs = append(x.DataRefs, dataRefs(s.Words, s.Base)...)
+	}
+	x.Data, x.Skipped = collectData(b, x.DataRefs)
 	x.Lean = renderLean(x)
 	return x, nil
 }
@@ -163,6 +170,26 @@ const (
 	inlineWordLimit  = 2048
 	segmentWordLimit = 1024 // above this, a segment definition raises maxRecDepth
 )
+
+const bytesPerLine = 16
+
+func writeDataSegment(sb *strings.Builder, d DataSeg, indent string) {
+	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, bytes := [", leanString(d.Name), d.Base)
+	multi := len(d.Bytes) > bytesPerLine
+	for j, v := range d.Bytes {
+		if j > 0 {
+			sb.WriteString(",")
+			if !(multi && j%bytesPerLine == 0) {
+				sb.WriteString(" ")
+			}
+		}
+		if multi && j%bytesPerLine == 0 {
+			sb.WriteString("\n" + indent + "    ")
+		}
+		fmt.Fprintf(sb, "0x%02x", v)
+	}
+	sb.WriteString("] }")
+}
 
 func writeSegment(sb *strings.Builder, s Segment, indent string) {
 	fmt.Fprintf(sb, "{ name := %s, base := 0x%x, words := [", leanString(s.Name), s.Base)
@@ -241,10 +268,58 @@ func renderLean(x *Extraction) []byte {
 	}
 	sb.WriteString("]\n\n")
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
-	sb.WriteString("def program : Program := { segments := segments, stubs := stubs, exitAddr := exitAddr }\n\n")
+	if len(x.Data) == 0 {
+		sb.WriteString("def program : Program := { segments := segments, stubs := stubs, exitAddr := exitAddr }\n\n")
+	} else {
+		writeData(&sb, x.Data)
+		sb.WriteString("def program : Program :=\n  { segments := segments, stubs := stubs, exitAddr := exitAddr, data := data }\n\n")
+	}
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())
+}
+
+// writeData renders `def data`, inline when small, else one definition per object (like
+// large code segments).
+func writeData(sb *strings.Builder, data []DataSeg) {
+	total := 0
+	for _, d := range data {
+		total += len(d.Bytes)
+	}
+	if total <= inlineWordLimit {
+		sb.WriteString("def data : List DataSegment := [")
+		for i, d := range data {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString("\n  ")
+			writeDataSegment(sb, d, "  ")
+		}
+		sb.WriteString(" ]\n\n")
+		return
+	}
+	for i, d := range data {
+		if len(d.Bytes) > segmentWordLimit {
+			sb.WriteString("set_option maxRecDepth 100000 in\n")
+		}
+		fmt.Fprintf(sb, "def data%d : DataSegment :=\n  ", i)
+		writeDataSegment(sb, d, "  ")
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("def data : List DataSegment := [")
+	for i := range data {
+		if i > 0 {
+			sb.WriteString(",")
+			if i%wordsPerLine != 0 {
+				sb.WriteString(" ")
+			}
+		}
+		if i%wordsPerLine == 0 {
+			sb.WriteString("\n  ")
+		}
+		fmt.Fprintf(sb, "data%d", i)
+	}
+	sb.WriteString(" ]\n\n")
 }
 
 func sha256Hex(b []byte) string {

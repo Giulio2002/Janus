@@ -37,7 +37,23 @@ type Binary struct {
 
 	text     []byte
 	textAddr uint64
+
+	sections []section // allocated sections (in memory at run time), sorted by address
+	dataSyms []Func    // non-function symbols with a size (data objects), sorted by address
 }
+
+// section is an allocated ELF section. data is nil for SHT_NOBITS (.bss, .noptrbss).
+type section struct {
+	Name     string
+	Addr     uint64
+	Size     uint64
+	Writable bool
+	Exec     bool
+	NoBits   bool
+	data     []byte
+}
+
+func (s section) End() uint64 { return s.Addr + s.Size }
 
 // loadBinary reads and validates path. Failures are diagnostics (*diag).
 func loadBinary(path string) (*Binary, error) {
@@ -104,6 +120,22 @@ func loadBinary(path string) (*Binary, error) {
 	}
 	b.textAddr = text.Addr
 
+	for _, s := range f.Sections {
+		if s.Flags&elf.SHF_ALLOC == 0 || s.Size == 0 {
+			continue
+		}
+		sec := section{Name: s.Name, Addr: s.Addr, Size: s.Size, Writable: s.Flags&elf.SHF_WRITE != 0,
+			Exec: s.Flags&elf.SHF_EXECINSTR != 0, NoBits: s.Type == elf.SHT_NOBITS}
+		if !sec.NoBits {
+			if sec.data, err = s.Data(); err != nil || uint64(len(sec.data)) != s.Size {
+				return nil, &diag{Msg: fmt.Sprintf("cannot read section %s of %s: %v", s.Name, path, err), Stage: "binary validation",
+					Next: "Use an unmodified executable produced by go build."}
+			}
+		}
+		b.sections = append(b.sections, sec)
+	}
+	sort.SliceStable(b.sections, func(i, j int) bool { return b.sections[i].Addr < b.sections[j].Addr })
+
 	if syms, err := f.Symbols(); err == nil && len(syms) > 0 {
 		b.SymbolSource = "symtab"
 		textIdx := -1
@@ -113,6 +145,10 @@ func loadBinary(path string) (*Binary, error) {
 			}
 		}
 		for _, s := range syms {
+			if t := elf.ST_TYPE(s.Info); (t == elf.STT_OBJECT || t == elf.STT_NOTYPE) && s.Size > 0 &&
+				s.Section != elf.SHN_UNDEF && s.Section < elf.SHN_LORESERVE {
+				b.dataSyms = append(b.dataSyms, Func{Name: s.Name, Addr: s.Value, Size: s.Size})
+			}
 			if elf.ST_TYPE(s.Info) != elf.STT_FUNC || int(s.Section) != textIdx {
 				continue
 			}
@@ -139,6 +175,7 @@ func loadBinary(path string) (*Binary, error) {
 			Next: "Build without stripping the symbol table (no -ldflags=-s)."}
 	}
 	sort.SliceStable(b.Funcs, func(i, j int) bool { return b.Funcs[i].Addr < b.Funcs[j].Addr })
+	sort.SliceStable(b.dataSyms, func(i, j int) bool { return b.dataSyms[i].Addr < b.dataSyms[j].Addr })
 	// Symbols without a size (some assembly functions) extend to the next symbol.
 	for i := range b.Funcs {
 		if b.Funcs[i].Size == 0 {

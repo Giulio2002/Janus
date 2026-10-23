@@ -11,3 +11,7 @@ name = "JanusTests"
 [[lean_exe]]
 name = "janus-oracle"
 root = "Oracle.Main"
+
+[[lean_exe]]
+name = "janus-decode"
+root = "Janus.Tools.Decode"

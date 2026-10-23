@@ -83,8 +83,12 @@ about executions outside it.
   pages than the model allows, so the model is conservative. A program that reads an unlisted
   but mapped address on real hardware cannot be proved to return.
 * **Code is not memory.** Instructions are fetched from the extracted segments, not from
-  `s.mem`. Self-modifying code and loads from `.text`/`.rodata` are not modelled unless the
-  precondition lists a region holding those bytes. Stores never change the fetched code.
+  `s.mem`. Read-only constants the code loads (`.rodata`, literal pools) are copied by the
+  extractor into `Program.data`; a theorem that needs them assumes `Program.DataLoaded`
+  (memory holds exactly those bytes in a read-only region). Writable globals (`.data`,
+  `.bss`, `.noptrdata`, `.noptrbss`) are never copied, because their contents are not fixed
+  by the binary: a proof that touches one must list it as an ordinary region in its
+  precondition. Self-modifying code is not modelled, and stores never change the fetched code.
 * **The return sentinel.** The call "returns" when `pc` reaches `p.exitAddr`, the value
   planted in `R30` (the extractor currently renders `exitAddr := 0`). Reaching that address
   by *any* branch counts, not only `RET`. A real caller passes its own return address, not the

@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const identitySchema = 1
+const identitySchema = 2
 
 type identityFunc struct {
 	Name    string `json:"name"`
@@ -31,26 +31,52 @@ type identityBranch struct {
 	Target string `json:"target"`
 }
 
+type identityData struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Size    int    `json:"size"`
+	Section string `json:"section"`
+	Sha256  string `json:"sha256"`
+}
+
+type identityDataRef struct {
+	From   string `json:"from"`
+	Target string `json:"target"`
+	Kind   string `json:"kind"`
+}
+
+type identitySkipped struct {
+	From    string `json:"from"`
+	Target  string `json:"target"`
+	Kind    string `json:"kind"`
+	Section string `json:"section"`
+	Symbol  string `json:"symbol"`
+	Reason  string `json:"reason"`
+}
+
 // Identity is identity.json: what was extracted, from which bytes, by which extractor.
 type Identity struct {
-	Schema           int              `json:"schema"`
-	ExtractorVersion string           `json:"extractorVersion"`
-	Binary           string           `json:"binary"`
-	BinarySha256     string           `json:"binarySha256"`
-	GoVersion        string           `json:"goVersion"`
-	MainModule       string           `json:"mainModule"`
-	GOOS             string           `json:"goos"`
-	GOARCH           string           `json:"goarch"`
-	SymbolSource     string           `json:"symbolSource"`
-	Symbol           string           `json:"symbol"`
-	Address          string           `json:"address"`
-	Size             uint64           `json:"size"`
-	MaxFunctions     int              `json:"maxFunctions"`
-	Functions        []identityFunc   `json:"functions"`
-	Stubs            []identityStub   `json:"stubs"`
-	Unresolved       []identityBranch `json:"unresolvedBranches"`
-	Extracted        string           `json:"extracted"`
-	ExtractedSha256  string           `json:"extractedSha256"`
+	Schema           int               `json:"schema"`
+	ExtractorVersion string            `json:"extractorVersion"`
+	Binary           string            `json:"binary"`
+	BinarySha256     string            `json:"binarySha256"`
+	GoVersion        string            `json:"goVersion"`
+	MainModule       string            `json:"mainModule"`
+	GOOS             string            `json:"goos"`
+	GOARCH           string            `json:"goarch"`
+	SymbolSource     string            `json:"symbolSource"`
+	Symbol           string            `json:"symbol"`
+	Address          string            `json:"address"`
+	Size             uint64            `json:"size"`
+	MaxFunctions     int               `json:"maxFunctions"`
+	Functions        []identityFunc    `json:"functions"`
+	Stubs            []identityStub    `json:"stubs"`
+	Unresolved       []identityBranch  `json:"unresolvedBranches"`
+	Data             []identityData    `json:"data"`
+	DataRefs         []identityDataRef `json:"dataReferences"`
+	SkippedData      []identitySkipped `json:"skippedData"`
+	Extracted        string            `json:"extracted"`
+	ExtractedSha256  string            `json:"extractedSha256"`
 }
 
 func hex0x(v uint64) string { return fmt.Sprintf("0x%x", v) }
@@ -101,6 +127,9 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 		Functions:        []identityFunc{},
 		Stubs:            []identityStub{},
 		Unresolved:       []identityBranch{},
+		Data:             []identityData{},
+		DataRefs:         []identityDataRef{},
+		SkippedData:      []identitySkipped{},
 		Extracted:        "Extracted.lean",
 		ExtractedSha256:  sha256Hex(x.Lean),
 	}
@@ -112,6 +141,15 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 	}
 	for _, u := range x.Unresolved {
 		id.Unresolved = append(id.Unresolved, identityBranch{hex0x(u.From), hex0x(u.Target)})
+	}
+	for _, d := range x.Data {
+		id.Data = append(id.Data, identityData{d.Name, hex0x(d.Base), len(d.Bytes), d.Section, sha256Hex(d.Bytes)})
+	}
+	for _, r := range x.DataRefs {
+		id.DataRefs = append(id.DataRefs, identityDataRef{hex0x(r.From), hex0x(r.Target), r.Kind})
+	}
+	for _, s := range x.Skipped {
+		id.SkippedData = append(id.SkippedData, identitySkipped{hex0x(s.From), hex0x(s.Target), s.Kind, s.Section, s.Symbol, s.Reason})
 	}
 	return id
 }
