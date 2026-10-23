@@ -36,13 +36,14 @@ open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
 attribute [local irreducible] Janus.Arm64.Memory.readLE
 
-/-- `runtime.memmoveBits` (`.noptrbss`) in this binary. -/
-def memmoveBits : Nat := 0x578ab0
+/-- `runtime.memmoveBits` (`.noptrbss`): the byte `MOVB runtime·memmoveBits(SB), AX` (at
+`memmove + 0x74`) reads, taken from the extracted code. -/
+def memmoveBits : Nat := ripTarget Extracted.program (segAddr Extracted.program "runtime.memmove" + 0x74)
 
 /-- `memmove`: `avxUnaligned`, the AVX path. -/
-def avxEntry : Nat := 0x47d9aa
+def avxEntry : Nat := segAddr Extracted.program "runtime.memmove" + 0x3ca
 /-- `CopyBlock512`: the instruction after `CALL runtime.memmove`. -/
-def retSite : Nat := 0x4899c5
+def retSite : Nat := segAddr Extracted.program "example.com/basic.CopyBlock512" + 0x25
 
 set_option maxHeartbeats 8000000 in
 set_option maxRecDepth 100000 in
@@ -65,7 +66,9 @@ theorem avx_copy (ret : Nat) (hret : RetAddr Extracted.program ret) (Q : Outcome
       (∀ x, x < d ∨ d + 512 ≤ x → t'.mem.bytes x = t.mem.bytes x) →
       Reaches (Extracted.program.withExit ret) t' Q) :
     Reaches (Extracted.program.withExit ret) t Q := by
-  simp only [avxEntry, retSite] at *
+  unfold avxEntry at h_rip
+  unfold retSite at hra hk
+  simp only [reduceSegAddr, Nat.reduceAdd] at h_rip hra hk
   have hR' := (t.regs 4).isLt
   have hand : BitVec.ofNat 64 d &&& 18446744073709551584#64 = BitVec.ofNat 64 (d - d % 32) := by
     apply BitVec.eq_of_toNat_eq
@@ -74,7 +77,7 @@ theorem avx_copy (ret : Nat) (hret : RetAddr Extracted.program ret) (Q : Outcome
     omega
   have hsub : ∀ x y : Nat, y ≤ x → x < 2 ^ 64 → BitVec.ofNat 64 x - BitVec.ofNat 64 y = BitVec.ofNat 64 (x - y) :=
     fun x y h1 h2 => BitVec.ofNat_sub_ofNat_of_le x y (by omega) h1
-  janus64_run [hand, BitVec.ofNat_add_ofNat, hsub, Bool.or_eq_false_iff, decide_eq_false_iff_not, Bool.not_eq_false, Bool.or_eq_true, decide_eq_true_eq] until [4757957]
+  janus64_run [hand, BitVec.ofNat_add_ofNat, hsub, Bool.or_eq_false_iff, decide_eq_false_iff_not, Bool.not_eq_false, Bool.or_eq_true, decide_eq_true_eq] until [retSite]
   refine hk _ rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setXmmF])
     ?_ (by simp only [Janus.Arm64.Memory.regions_writeLE]) ?_
   · apply readLE_of_bytes
@@ -110,14 +113,15 @@ theorem correctness (dst src : BitVec 64) :
   have hnw2 := hg.noWrap
   have hgr := hg.readable
   simp only [regSP, regG, stackguard0Offset, stackguard0] at hacc hle hnw hgl hgb hnw2 hgr hdd hsd
-  simp only [memmoveBits, regSP, Disjoint] at hmb hmb1 hmbd hmbd' hds
+  unfold memmoveBits at hmb hmb1 hmbd hmbd'
+  simp only [regSP, Disjoint, reduceSegAddr, reduceRipTarget, Nat.reduceAdd] at hmb hmb1 hmbd hmbd' hds
   simp only [valueAt]
   have hdl := dst.isLt
   have hsl := src.isLt
   have hsp := (s.regs 4).isLt
   have e40 : (s.regs 4 - 40#64).toNat = (s.regs 4).toNat - 40 := by
     rw [BitVec.toNat_sub]; simp only [BitVec.toNat_ofNat]; omega
-  janus64_run until [0x47d9aa]
+  janus64_run until [avxEntry]
   all_goals
     refine avx_copy ret hret _ _ dst.toNat src.toNat rfl (by simp [setRegF]) (by simp [setRegF])
       (by simp [setRegF]) (by omega) (by omega) (by omega) ?_ ?_ ?_ ?_ ?_ ?_
@@ -134,7 +138,8 @@ theorem correctness (dst src : BitVec 64) :
   all_goals
     -- back in `CopyBlock512` after the call: `ADDQ $0x18, SP ; POPQ BP ; RET`
     intro t' hrip h4' h5' h14' hx' hcp hreg hout
-    simp only [retSite] at hrip
+    unfold retSite at hrip
+    simp only [reduceSegAddr, Nat.reduceAdd] at hrip
     have hbp : t'.mem.readLE ((s.regs 4).toNat - 8) 8 = (s.regs 5).toNat := by
       rw [Janus.Arm64.Memory.readLE_congr (m' := _) (fun i hi => hout _ (by omega)),
         readLE_writeLE_disjoint _ _ (by omega), Janus.Arm64.Memory.readLE_writeLE_self,

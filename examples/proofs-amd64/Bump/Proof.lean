@@ -6,9 +6,10 @@ import Extracted
 namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
-/-- Address of `example.com/basic.counter` (`.noptrbss`) in this binary, as reported in
-`identity.json` (`skippedData`). -/
-def counter : Nat := 0x576258
+/-- Address of `example.com/basic.counter` (`.noptrbss`): the RIP-relative operand of the first
+instruction (`MOVQ counter(SB), CX`), read off the extracted code, so the proof does not
+depend on where the linker put the global. -/
+def counter : Nat := ripTarget Extracted.program Extracted.entry
 
 theorem correctness (d : BitVec 64) :
     Ensures Extracted.program Extracted.entry [d]
@@ -18,6 +19,7 @@ theorem correctness (d : BitVec 64) :
         s'.mem.readLE counter 8 = (s'.regs 0).toNat) := by
   intro ret hret s hs hpre
   simp only [counter] at *
+  janus64_addrs
   janus64_intro hs
   obtain ⟨⟨-, hnw, hacc⟩, hc, hd⟩ := hpre
   simp only [Disjoint, regSP, Nat.sub_zero, Nat.zero_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at hacc hd hnw

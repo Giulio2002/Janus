@@ -1,11 +1,13 @@
 import Lean
 import Janus.Tactic.Basic
 import Janus.Tactic.Data
+import Janus.Tactic.Common
+import Janus.Tactic.Disasm
 
 /-!
 # Symbolic execution tactics
 
-* `janus_run [lemmas] (until [pc, ...])? (steps := n)?` steps a goal of the form
+* `janus_run [lemmas] (until [pc, ...])? (calls [h, ...])? ((budget := N))?` steps a goal of the form
   `Reaches p s Q`, `ReachesRet p ret s Q`, `Returns p s post`, `Panics p s` or `GrowsStack p s`
   instruction by instruction until every branch has reached the exit address, a stub, the
   return address (for `ReachesRet`), a `until` address, or the step budget. Branches split
@@ -41,6 +43,7 @@ namespace Janus.Tactic
 
 open Lean Meta Elab Tactic
 open Janus Janus.Arm64
+open Janus.Tactic.Common (Status StepCache hex)
 
 deriving instance ToExpr for ShiftType
 deriving instance ToExpr for ExtendType
@@ -76,17 +79,36 @@ unsafe def evalNatImpl (e : Expr) : MetaM Nat := evalExpr Nat (mkConst ``Nat) e
 @[implemented_by evalNatImpl]
 opaque evalNatCore (e : Expr) : MetaM Nat
 
-initialize progCache : IO.Ref (Std.HashMap Expr ProgData) ← IO.mkRef {}
+/-- Segment names and ranges (bytes), for messages. -/
+def progSyms (p : Program) : List (String × Nat × Nat) :=
+  p.segments.map fun seg => (seg.name, seg.base, 4 * seg.words.length)
 
-def getProgData (p : Expr) : MetaM ProgData := do
+unsafe def evalProgSymsImpl (p : Expr) : MetaM (List (String × Nat × Nat)) := do
+  let e := mkApp (mkConst ``progSyms) p
+  evalExpr (List (String × Nat × Nat)) (← inferType e) e
+
+@[implemented_by evalProgSymsImpl]
+opaque evalProgSymsCore (p : Expr) : MetaM (List (String × Nat × Nat))
+
+initialize progCache : IO.Ref (Std.HashMap Expr (ProgData × List (String × Nat × Nat))) ←
+  IO.mkRef {}
+
+def getProgData (p : Expr) : MetaM (ProgData × List (String × Nat × Nat)) := do
   let p ← instantiateMVars p
   if let some d := (← progCache.get).get? p then return d
   if p.hasFVar || p.hasMVar then
-    throwError "janus: the program must be a closed term (e.g. `Extracted.program`), got{indentExpr p}"
+    throwError "janus_run: the program must be a closed term (e.g. `Extracted.program`), got{indentExpr p}"
   let d ← try evalProgDataCore p catch e =>
-    throwError "janus: cannot evaluate the program{indentExpr p}\n{e.toMessageData}"
-  progCache.modify (·.insert p d)
-  return d
+    throwError "janus_run: cannot evaluate the program{indentExpr p}\n{e.toMessageData}"
+  let syms ← try evalProgSymsCore p catch _ => pure []
+  progCache.modify (·.insert p (d, syms))
+  return (d, syms)
+
+/-- The name of the tactic, in messages. -/
+def tacName : String := "janus_run"
+
+/-- The checked memory operations of the model (`fn m addr size …`), for diagnostics. -/
+def accessFns : List (Name × Bool) := [(``Janus.Arm64.load, false), (``Janus.Arm64.store, true)]
 
 def fetchWord (segs : List (Nat × List Nat)) (pc : Nat) : Option Nat :=
   match segs with
@@ -179,6 +201,18 @@ simproc_decl reduceRev (revContainersNat _ _ _) := fun e => do
   | some r => return .done r
   | none => return .continue
 
+/-- Writing back the old value of a register leaves the register file unchanged. -/
+theorem setReg_restore (f : Nat → W64) (r : Nat) (v : W64) (h : f r = v) : setReg f r v = f := by
+  funext i; simp only [setReg]; split
+  · next he => subst he; exact h.symm
+  · rfl
+
+/-- `setReg f r (s.regs r)` with `f` a chain over `s.regs` that does not write `r` is `f` (a
+callee-saved register restored from the stack). -/
+simproc_decl reduceSetRegRestore (setReg _ _ _) := fun e => do
+  let some (f, r, v, h) ← Common.restoredReg? ``setReg ``State.regs e | return .continue
+  return .done { expr := f, proof? := mkAppN (mkConst ``setReg_restore) #[f, r, v, h] }
+
 /-! ## The simp context -/
 
 /-- Hypotheses describing the initial state(s): equations whose left-hand side is a state
@@ -194,6 +228,9 @@ def stateHyps : MetaM (Array Expr) := do
           ``GoABI.RetAddr.untagged_eq] do
         out := out.push (← mkAppM n #[d.toExpr])
       continue
+    -- callee memory frames: their `readLE`/`accessible` rewrite rules
+    if ty.isAppOfArity ``Janus.MemFrame 3 then
+      out := out ++ (← Common.frameRules d ty); continue
     -- branch conditions introduced by `janus_run`
     if d.userName.eraseMacroScopes == `hbr && (← isProp ty) then
       out := out.push d.toExpr; continue
@@ -217,6 +254,14 @@ def stateHyps : MetaM (Array Expr) := do
       out := out.push d.toExpr
   return out
 
+/-- What the executor knows about one pc: the word, the decoded instruction and the kernel proof
+of `stepOK` (computed once per run). -/
+structure FetchFact where
+  prog : Expr
+  word : Nat
+  instr : Instr
+  hok : Expr
+
 structure Cfg where
   /-- Extra simp arguments (syntax). -/
   args : Array Term := #[]
@@ -226,16 +271,28 @@ structure Cfg where
   maxSteps : Nat := 100000
   /-- Callee summaries `(entry, proof of Summary p entry pre post)`. -/
   calls : Array (Nat × Expr) := #[]
+  /-- Heartbeat budget of the run, in thousands (`janus_run (budget := N)`). -/
+  budget : Option Nat := none
+  status : IO.Ref Status
+  cache : IO.Ref StepCache
+  facts : IO.Ref (Std.HashMap Nat FetchFact)
 
-/-- Build the `janus_exec` simp context (plus state hypotheses and user arguments) and run `k`
+def Cfg.new (args : Array Term := #[]) (stops : List Nat := []) (calls : Array (Nat × Expr) := #[])
+    (budget : Option Nat := none) : IO Cfg := do
+  return { args, stops, calls, budget, status := ← IO.mkRef {}, cache := ← IO.mkRef {},
+           facts := ← IO.mkRef {} }
+
+/-- Build the `set` simp context (plus state hypotheses and user arguments) for the current
+local context, or reuse the one of an earlier step with the same local context, and run `k`
 with it and its discharger. -/
 def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option Simp.Discharge →
     TacticM α) (set : Name := `janus_exec) : TacticM α := do
+  Common.withCachedCtx cfg.cache set (k := k) do
   let hyps ← stateHyps
   let args : Array Term := #[⟨mkIdent set⟩] ++ cfg.args
   let sargs : Array (TSyntax `Lean.Parser.Tactic.simpLemma) ← args.mapM fun t =>
     `(Lean.Parser.Tactic.simpLemma| $t:term)
-  let stx ← `(tactic| simp (disch := janus_disch) only [$sargs,*])
+  let stx ← `(tactic| simp (config := { maxSteps := 2000000 }) (disch := janus_disch) only [$sargs,*])
   let r ← mkSimpContext stx (eraseLocal := false)
   -- the state hypotheses are added as proof terms (also inaccessible ones)
   let mut ctx := r.ctx
@@ -246,11 +303,11 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
   ctx := ctx.setSimpTheorems thms
   let mut simprocs := r.simprocs.push (← Simp.getSimprocs)
   let mut extra : Simp.Simprocs := {}
-  for n in [``reduceDataReadD, ``reduceBitMaskFst, ``reduceBitMaskSnd, ``reduceClz, ``reduceRbit,
+  for n in [``reduceSetRegRestore, ``reduceDataReadD, ``reduceBitMaskFst, ``reduceBitMaskSnd, ``reduceClz, ``reduceRbit,
       ``reduceRev] do
     extra ← extra.add n (post := true)
   simprocs := simprocs.push extra
-  r.dischargeWrapper.with fun d? => k ctx simprocs d?
+  return (ctx, simprocs, r.dischargeWrapper)
 
 def simpExpr (ctx : Simp.Context) (simprocs : Simp.SimprocsArray) (d? : Option Simp.Discharge)
     (e : Expr) : MetaM Simp.Result := do
@@ -303,7 +360,10 @@ def tryPrune (g : MVarId) : TacticM Bool := withoutRecover do
 def cleanOutcome (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := g.withContext do
   setGoals [g]
   withExecSimp cfg (set := `janus_post) fun ctx simprocs d? => do
-    match ← simpGoal g ctx simprocs d? with
+    -- no progress is not an error here: the goal is returned as it is
+    match ← (try simpGoal g ctx simprocs d? catch e => do
+        if (← e.toMessageData.toString).contains "made no progress" then pure (some (#[], g), {})
+        else throw e) with
     | (none, _) => return []
     | (some (_, g'), _) =>
       let t ← instantiateMVars (← g'.getType)
@@ -322,13 +382,15 @@ simplified pc with a proof of `s.pc = pc`. -/
 def statePC (ctx : Simp.Context) (simprocs : Simp.SimprocsArray) (d? : Option Simp.Discharge)
     (s : Expr) : MetaM (Option (Nat × Expr) × Expr × Expr) := do
   let pcE ← mkAppM ``State.pc #[s]
-  -- fast path: the normal form `State.mk _ _ pc _ _` with a literal pc
+  -- fast path: a state literal `State.mk … pc …` with a literal pc (robust to the number of
+  -- fields of `State`)
   let sw ← instantiateMVars s
-  if sw.isAppOfArity ``Janus.Arm64.State.mk 5 then
-    let pc := sw.getArg! 2
-    if let some c ← bv64Value? pc then
-      let ty ← mkEq pcE (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) (mkNatLit c))
-      return (some (c, ← mkExpectedTypeHint (← mkEqRefl pcE) ty), pc, ← mkEqRefl pcE)
+  if let some (nf, idx) ← Common.fieldIndex ``Janus.Arm64.State `pc then
+    if sw.isAppOfArity ``Janus.Arm64.State.mk nf then
+      let pc := sw.getArg! idx
+      if let some c ← bv64Value? pc then
+        let ty ← mkEq pcE (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) (mkNatLit c))
+        return (some (c, ← mkExpectedTypeHint (← mkEqRefl pcE) ty), pc, ← mkEqRefl pcE)
   let r ← simpExpr ctx simprocs d? pcE
   let pf ← resultProof pcE r
   if let some c ← bv64Value? r.expr then
@@ -369,8 +431,25 @@ structure StepResult where
   /-- goals that are finished with symbolic execution (outcome reached) -/
   done : List MVarId := []
 
+/-- What a fault means, and what usually rules it out. -/
+def explainFault (f : Expr) : MessageData :=
+  match f.getAppFn.constName? with
+  | some ``Fault.spMisaligned =>
+    m!"the stack pointer is used as a base register while not 16-byte aligned (add \
+      `s.sp.toNat % 16 = 0`, part of `StackOK`)"
+  | some ``Fault.pcMisaligned =>
+    m!"the branch target is not 4-byte aligned (or tagged); for a `RET`, `X30` must hold an \
+      admissible return address (`h_lr`, `RetAddr`)"
+  | some ``Fault.noCode =>
+    m!"the branch target is not code; a register target at or above 2^56 (a tagged pointer, \
+      not modelled) also ends here: add a bound on the target register"
+  | some ``Fault.outsideAllocation | some ``Fault.readOnly =>
+    m!"the access is outside the allocations (or writes read-only memory) according to the \
+      hypotheses"
+  | _ => m!"the model has no defined result here"
+
 /-- Split `ExecThen` / `ite` structure after `exec` was simplified. -/
-partial def afterExec (g : MVarId) : TacticM (List MVarId) := do
+partial def afterExec (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := do
   match ← goalKind g with
   | .execThen _ r _ | .execThenRet _ _ r _ =>
     let isRet := match ← goalKind g with | .execThenRet .. => true | _ => false
@@ -378,41 +457,26 @@ partial def afterExec (g : MVarId) : TacticM (List MVarId) := do
     match r.getAppFnArgs with
     | (``Except.ok, #[_, _, _]) =>
       let lem := if isRet then ``ReachesRet.ok else ``ExecThen.ok
-      let gs ← g.apply (← mkConstWithFreshMVarLevels lem)
+      let gs ← Common.applyFast g (← mkConstWithFreshMVarLevels lem)
       afterExecList gs
     | (``ite, #[_, _, _, _, _]) =>
       let lem := if isRet then ``ReachesRet.ite else ``ExecThen.ite
-      let gs ← g.apply (← mkConstWithFreshMVarLevels lem)
-      let mut out := []
-      for g' in gs do
-        if (← g'.isAssigned) then continue
-        let t ← g'.getType
-        if t.isForall then
-          let (_, g'') ← g'.intro `hbr
-          if ← tryPrune g'' then continue
-          out := out ++ (← afterExec g'')
-        else out := out ++ [g']
-      return out
-    | (``Except.error, _) =>
-      throwError "janus: the instruction faults:{indentExpr r}"
+      let gs ← Common.applyFast g (← mkConstWithFreshMVarLevels lem)
+      branches gs
+    | (``Except.error, #[_, _, f]) =>
+      let st ← cfg.status.get
+      throwError "{tacName}: the instruction {st.where_} faults:{indentExpr f}\n({explainFault f})\
+        {← g.withContext Common.branchConds}"
     | _ =>
-      throwError "janus: could not evaluate the instruction to `.ok s'` or a branch ({r.ctorName} {r.getAppFn}); stuck at{indentExpr r}\n(a memory access whose `accessible` condition could not be proved, an address that could not be normalised, or a read-over-write whose aliasing is unknown)"
+      let st ← cfg.status.get
+      throwError (← g.withContext (Common.explainStuck tacName st accessFns r))
   | .reaches _ s _ | .reachesRet _ _ s _ =>
     let s ← instantiateMVars s
     if s.isAppOfArity ``ite 5 then
       let isRet := match ← goalKind g with | .reachesRet .. => true | _ => false
       let lem := if isRet then ``ReachesRet.ite_state else ``Reaches.ite_state
-      let gs ← g.apply (← mkConstWithFreshMVarLevels lem)
-      let mut out := []
-      for g' in gs do
-        if (← g'.isAssigned) then continue
-        let t ← g'.getType
-        if t.isForall then
-          let (_, g'') ← g'.intro `hbr
-          if ← tryPrune g'' then continue
-          out := out ++ (← afterExec g'')
-        else out := out ++ [g']
-      return out
+      let gs ← Common.applyFast g (← mkConstWithFreshMVarLevels lem)
+      return ← branches gs
     return [g]
   | .other => return [g]
 where
@@ -420,157 +484,204 @@ where
     let mut out := []
     for g in gs do
       if ← g.isAssigned then continue
-      out := out ++ (← afterExec g)
+      out := out ++ (← afterExec cfg g)
+    return out
+  branches (gs : List MVarId) : TacticM (List MVarId) := do
+    let mut out := []
+    for g' in gs do
+      if (← g'.isAssigned) then continue
+      let t ← g'.getType
+      if t.isForall then
+        let (_, g'') ← g'.intro `hbr
+        Common.setPhase cfg.status "pruning a branch (omega on the branch condition)"
+        if ← tryPrune g'' then continue
+        out := out ++ (← afterExec cfg g'')
+      else out := out ++ [g']
     return out
 
 /-- Prove a callee precondition `pre s` with the post simp set, `omega` and assumptions. -/
-def provePre (cfg : Cfg) (g : MVarId) : TacticM Unit := do
-  let t ← instantiateMVars (← g.getType)
-  g.setType t.headBeta
-  let gs ← cleanOutcome cfg g
-  for g in gs do
-    let rest ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
-      (repeat' constructor) <;> first | rfl | assumption | omega | janus_disch)))
-    unless rest.isEmpty do
-      throwError "janus: cannot prove the callee precondition{indentExpr (← g.getType)}"
+def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
+  -- reducible transparency only in the closers: unfolding `Memory.accessible`/`readLE` of a
+  -- symbolic memory to compare it with a hypothesis can take seconds
+  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | omega | janus_disch)
+  let left ← Common.provePreCore (cleanOutcome cfg) closer g
+  unless left.isEmpty do
+    let st ← cfg.status.get
+    throwError "{tacName}: at pc {(st.pc.map hex).getD "?"}, the entry of {callee}: the \
+      precondition of its summary could not be proved. Remaining goals (after simplification):\
+      {MessageData.joinSep (left.toList.map indentExpr) "\n"}\nAdd the facts they need to the \
+      context, or weaken the summary's precondition."
 
 /-- Apply a callee summary at a call site: the goal continues from the callee's return state.
-A postcondition of the form `s' = e` is substituted; conjunctions are split. -/
-def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (ret? : Option Expr) (hsum hpc : Expr) :
+The postcondition is split into hypotheses (conjunctions, existentials); an equation `s' = e`
+is substituted. -/
+def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee : String) :
     TacticM (List MVarId) := g.withContext do
   let sty ← instantiateMVars (← inferType hsum)
   let (``Summary, #[_, entry, pre, post]) := sty.getAppFnArgs |
-    throwError "janus: not a `Summary`:{indentExpr sty}"
+    throwError "{tacName}: not a `Summary`:{indentExpr sty}"
   let hpc ← mkExpectedTypeHint hpc
     (← mkEq (← mkAppM ``State.pc #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) entry))
   let hpreM ← mkFreshExprSyntheticOpaqueMVar (mkApp pre s).headBeta
-  let lem := match ← goalKind g, ret? with
-    | .reachesRet _ ret _ Q, _ =>
-      mkAppN (mkConst ``ReachesRet.call) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
-    | .reaches _ _ Q, _ =>
-      mkAppN (mkConst ``Reaches.call) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
-    | _, _ => default
-  let gs ← g.apply lem
-  provePre cfg hpreM.mvarId!
+  let lem ← match ← goalKind g with
+    | .reachesRet _ ret _ Q =>
+      pure <| mkAppN (mkConst ``ReachesRet.call) #[p, entry, pre, post, s, ret, Q, hsum, hpc, hpreM]
+    | .reaches _ _ Q =>
+      pure <| mkAppN (mkConst ``Reaches.call) #[p, entry, pre, post, s, Q, hsum, hpc, hpreM]
+    | _ => throwError "{tacName}: unexpected goal at a call"
+  let gs ← Common.applyFast g lem
+  Common.setPhase cfg.status s!"proving the precondition of the summary of {callee}"
+  provePre cfg hpreM.mvarId! callee
   let mut out := []
   for g' in gs do
     if ← g'.isAssigned then continue
     let (fv, g'') ← g'.introNP 3
-    let g'' ← g''.withContext do
-      let hpost := fv[2]!
-      let t ← instantiateMVars (← hpost.getType)
-      let t := t.headBeta
-      let g ← g''.replaceLocalDeclDefEq hpost t
-      if let some (_, lhs, _) := t.eq? then
-        if lhs.isFVar && lhs.fvarId! == fv[0]! then
-          let g ← g.clear fv[1]!
-          return (← substCore g hpost (symm := false) (tryToSkip := true)).2
-      -- split conjunctions into separate hypotheses
-      g.casesAnd
-    out := out ++ [g'']
+    let g'' ← Common.destructPost g'' fv[0]! fv[1]! fv[2]!
+    out := out ++ [← normFrames cfg g'']
   return out
+where
+  /-- Simplify the callee's `MemFrame` hypotheses (their ranges mention the call-site state
+  literal), so that `omega` sees the addresses in normal form. -/
+  normFrames (cfg : Cfg) (g : MVarId) : TacticM MVarId := g.withContext do
+    let mut ids := #[]
+    for d in ← getLCtx do
+      if d.isImplementationDetail then continue
+      if (← instantiateMVars d.type).isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
+    if ids.isEmpty then return g
+    setGoals [g]
+    withExecSimp cfg (set := `janus_post) fun ctx simprocs d? => do
+      match ← (try simpGoal g ctx simprocs d? (fvarIdsToSimp := ids) (simplifyTarget := false)
+          catch _ => pure (some (#[], g), {})) with
+      | (some (_, g'), _) => return g'
+      | (none, _) => return g
 
-/-- Perform one step on `g` (a `Reaches`/`ReachesRet` goal). Returns the new goals and whether
-the goal reached an outcome (exit, stub, return address). -/
+/-- Perform one step on `g` (a `Reaches`/`ReachesRet` goal). `none`: stopped at an `until`
+address. -/
 def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List MVarId)) :=
   g.withContext do
   setGoals [g]
+  cfg.status.modify fun st =>
+    { st with pc := none, sym := none, instr := none, phase := "computing the pc of the state" }
   let t0 ← IO.monoMsNow
   withExecSimp cfg fun ctx simprocs d? => do
     trace[janus] "simp context: {(← IO.monoMsNow) - t0} ms"
-    let (p, s, ret?) ← match ← goalKind g with
-      | .reaches p s _ => pure (p, s, none)
-      | .reachesRet p ret s _ => pure (p, s, some ret)
-      | _ => throwError "janus: goal is not `Reaches p s Q`"
+    let (p, s, ret?, Q) ← match ← goalKind g with
+      | .reaches p s Q => pure (p, s, none, Q)
+      | .reachesRet p ret s Q => pure (p, s, some ret, Q)
+      | _ => throwError "{tacName}: the goal is not `Reaches p s Q` or `ReachesRet p ret s Q`:{indentExpr (← g.getType)}"
     let (pc?, pcE, pcPf) ← statePC ctx simprocs d? s
     trace[janus] "state pc: {pcE}, ret: {ret?}"
     -- a call with a symbolic return address: `p = Program.withExit base retE`
     let mode ← exitMode p
     if mode.isSome && ret?.isSome then
-      throwError "janus: `ReachesRet` on a program with a return address (`Program.withExit`) is not supported; prove the callee as a `Summary` of the extracted program"
+      throwError "{tacName}: `ReachesRet` on a program with a return address (`Program.withExit`) is not supported; prove the callee as a `Summary` of the extracted program"
     let hret? ← match mode with
       | some (base, retE) => pure (some (← findRetAddr base retE))
       | none => pure none
     let progE := match mode with | some (base, _) => base | none => p
-    -- return address reached (`ReachesRet`)
+    -- the return address of a callee (`ReachesRet`): compare with the normal form of `ret`
     if let some ret := ret? then
-      if ← isDefEq pcE ret then
-        let pcEq ← mkAppM ``State.pc #[s]
-        let r ← simpExpr ctx simprocs d? pcEq
-        let hpc ← resultProof pcEq r
-        let Q := match ← goalKind g with | .reachesRet _ _ _ Q => Q | _ => default
-        let hpc ← mkExpectedTypeHint hpc (← mkEq pcEq ret)
-        let gs ← g.apply (mkAppN (mkConst ``ReachesRet.done) #[p, ret, s, Q, hpc])
-        return some gs
+      let rr ← simpExpr ctx simprocs d? ret
+      if pcE == rr.expr || (← withReducible (isDefEq pcE rr.expr)) then
+        let hpc ← mkEqTrans pcPf (← mkEqSymm (← resultProof ret rr))
+        let hpc ← mkExpectedTypeHint hpc (← mkEq (← mkAppM ``State.pc #[s]) ret)
+        return some (← Common.applyFast g (mkAppN (mkConst ``ReachesRet.done) #[p, ret, s, Q, hpc]))
     -- the return address reached (`Program.withExit`)
     if let (some (base, retE), some hret) := (mode, hret?) then
       let atRet ← match pc? with
         | none => isRetPC pcE retE
         | some (c, _) => pure ((← evalNat retE) == some c)
       if atRet then
-        let Q := match ← goalKind g with | .reaches _ _ Q => Q | _ => default
         let hpc ← mkExpectedTypeHint pcPf
           (← mkEq (← mkAppM ``State.pc #[s]) (mkApp2 (mkConst ``BitVec.ofNat) (mkNatLit 64) retE))
-        let gs ← g.apply (mkAppN (mkConst ``Reaches.exit_withExit) #[base, retE, s, Q, hret, hpc])
-        return some gs
+        return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit_withExit) #[base, retE, s, Q, hret, hpc]))
     let some (c, hpc) := pc? |
-      throwError "janus: the pc of the current state is not a concrete address:{indentExpr pcE}"
+      throwError "{tacName}: stuck after {(← cfg.status.get).steps} instructions: the pc of the \
+        current state is not a concrete address:{indentExpr pcE}\n\
+        This is an indirect branch (`br`, `blr`, `ret`) to an address the hypotheses do not \
+        determine. For the return of the function being proved, run `p.withExit ret` with \
+        `hret : RetAddr p ret` in the context (`intro ret hret …`) and keep `h_lr`; for a callee, \
+        prove it as a `Summary` and pass it with `calls [...]`; otherwise add an equation \
+        `… = BitVec.ofNat 64 addr` for the target register."
+    let ((exitA, segs, stubs), syms) ← getProgData progE
+    cfg.status.modify fun st => { st with pc := some c, sym := Common.symOf syms c }
     if !allowStop && cfg.stops.contains c then return none
     -- a call to a function with a summary
     if let some (_, hsum) := cfg.calls.find? (·.1 == c) then
       let hsum ← match hret? with
         | some hret => mkAppM ``Summary.withExit #[hsum, hret]
         | none => pure hsum
-      return some (← applySummary cfg g p s ret? hsum hpc)
-    let (exitA, segs, stubs) ← getProgData progE
+      let callee := (Common.symOf syms c).getD (hex c)
+      cfg.status.modify fun st => { st with instr := some s!"(entry of {callee}, by its summary)" }
+      return some (← applySummary cfg g p s hsum hpc callee)
     let cE := mkNatLit c
     if mode.isNone && c == exitA then
-      if ret?.isSome then throwError "janus: reached the exit address inside a callee"
+      if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
       let hok ← kernelDecide (mkApp2 (mkConst ``exitOK) p cE)
-      let Q := match ← goalKind g with | .reaches _ _ Q => Q | _ => default
-      let gs ← g.apply (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok])
-      return some gs
+      return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
     if let some (_, name, isPanic) := stubs.find? (·.1 == c) then
-      if ret?.isSome then throwError "janus: reached stub {name} inside a callee"
+      if ret?.isSome then
+        throwError "{tacName}: the callee reaches the runtime stub {name} at {hex c}; a \
+          `Summary` only covers runs that return. Add the precondition that excludes this path \
+          (e.g. `GuardOK` for `morestack`, a bound for a panic)."
       let kind := if isPanic then mkConst ``StubKind.panic else mkConst ``StubKind.morestack
       let hok ← kernelDecide (mkApp4 (mkConst ``stubOK) progE cE (toExpr name) kind)
-      let Q := match ← goalKind g with | .reaches _ _ Q => Q | _ => default
       let lem := match mode, hret? with
         | some (base, retE), some hret =>
           mkAppN (mkConst ``Reaches.stub_withExit) #[base, retE, s, Q, cE, toExpr name, kind, hret,
             hpc, hok]
         | _, _ => mkAppN (mkConst ``Reaches.stub) #[p, s, Q, cE, toExpr name, kind, hpc, hok]
-      let gs ← g.apply lem
-      return some gs
-    let some w := fetchWord segs c |
-      throwError "janus: no code at pc {c} (0x{String.ofList (Nat.toDigits 16 c)})"
-    let some i := decode w |
-      throwError "janus: undecodable word 0x{String.ofList (Nat.toDigits 16 w)} at pc 0x{String.ofList (Nat.toDigits 16 c)}"
-    let iE := toExpr i
-    trace[janus] "pc 0x{String.ofList (Nat.toDigits 16 c)}: {repr i}"
-    let hok ← kernelDecide (mkApp4 (mkConst ``stepOK) progE cE (mkNatLit w) iE)
+      return some (← Common.applyFast g lem)
+    -- the instruction at `c` (decoded and checked once per run)
+    let fact ← match (← cfg.facts.get).get? c with
+      | some f => if f.prog == progE then pure f else mkFact progE segs syms c
+      | none => mkFact progE segs syms c
+    let iE := toExpr fact.instr
+    let ins := Janus.Arm64.Disasm.disasm (some c) fact.instr
+    cfg.status.modify fun st => { st with
+      instr := some ins, phase := "evaluating the instruction (simp with the janus_exec set)" }
+    trace[janus] "pc {hex c}: {ins}"
     let execE := mkApp2 (mkConst ``exec) iE s
     let t0 ← IO.monoMsNow
-    let r ← simpExpr ctx simprocs d? execE
+    let r ← Common.simpCached cfg.cache ctx simprocs d? execE
     trace[janus] "simp exec: {(← IO.monoMsNow) - t0} ms"
-
     let he ← resultProof execE r
-    let lemE := match ← goalKind g with
-      | .reachesRet _ ret _ Q =>
-        mkAppN (mkConst ``ReachesRet.step) #[p, ret, s, Q, cE, mkNatLit w, iE, r.expr, hpc, hok, he]
-      | .reaches _ _ Q =>
-        match mode, hret? with
+    Common.noteAliases cfg.status r.expr
+    let lemE := match ret? with
+      | some ret =>
+        mkAppN (mkConst ``ReachesRet.step) #[p, ret, s, Q, cE, mkNatLit fact.word, iE, r.expr, hpc,
+          fact.hok, he]
+      | none => match mode, hret? with
         | some (base, retE), some hret =>
           mkAppN (mkConst ``Reaches.step_withExit)
-            #[base, retE, s, Q, cE, mkNatLit w, iE, r.expr, hret, hpc, hok, he]
-        | _, _ => mkAppN (mkConst ``Reaches.step) #[p, s, Q, cE, mkNatLit w, iE, r.expr, hpc, hok, he]
-      | _ => default
-    let gs ← g.apply lemE
+            #[base, retE, s, Q, cE, mkNatLit fact.word, iE, r.expr, hret, hpc, fact.hok, he]
+        | _, _ => mkAppN (mkConst ``Reaches.step)
+            #[p, s, Q, cE, mkNatLit fact.word, iE, r.expr, hpc, fact.hok, he]
+    let gs ← Common.applyFast g lemE
+    Common.setPhase cfg.status "splitting the result (branches)"
     let mut out := []
     for g' in gs do
       if ← g'.isAssigned then continue
-      out := out ++ (← afterExec g')
+      out := out ++ (← afterExec cfg g')
     return some out
+where
+  mkFact (progE : Expr) (segs : List (Nat × List Nat)) (syms : List (String × Nat × Nat)) (c : Nat) :
+      TacticM FetchFact := do
+    let some w := fetchWord segs c |
+      throwError "{tacName}: stuck after {(← cfg.status.get).steps} instructions: pc {hex c} is \
+        not in the extracted code (segments: {MessageData.joinSep (syms.map fun (n, b, sz) =>
+          m!"{n} [{hex b}, {hex (b + sz)})") ", "}) and is no known stub.\nIf this is a call, \
+        extract the callee too or give its `Summary` with `calls [...]`; if it is the return, `X30` \
+        does not hold the return address of `p.withExit ret`."
+    let symS := match Common.symOf syms c with | some s => s!" ({s})" | none => ""
+    let some i := decode w |
+      throwError "{tacName}: stuck at pc {hex c}{symS}: the word {hex w} does not decode to a \
+        modelled instruction (see docs/SOUNDNESS.md for the supported subset). No proof can \
+        execute past it."
+    let hok ← kernelDecide (mkApp4 (mkConst ``stepOK) progE (mkNatLit c) (mkNatLit w) (toExpr i))
+    let f : FetchFact := { prog := progE, word := w, instr := i, hok }
+    cfg.facts.modify (·.insert c f)
+    return f
 
 /-- Turn `Returns`/`Panics`/`GrowsStack` goals into `Reaches`. -/
 def prepGoal (g : MVarId) : MetaM MVarId := do
@@ -592,8 +703,8 @@ def isStepGoal (g : MVarId) : MetaM Bool := do
   | .reaches .. | .reachesRet .. => return true
   | _ => return false
 
-/-- Run symbolic execution on the main goal. -/
-def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := do
+/-- Run symbolic execution on the main goal (`single`: one step only). -/
+def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg.budget do
   let g ← getMainGoal
   let g ← prepGoal g
   let mut todo : List (MVarId × Bool) := [(g, true)]
@@ -605,19 +716,22 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := do
     if ← g.isAssigned then continue
     if !(← isStepGoal g) then
       let t0 ← IO.monoMsNow
-      finished := finished ++ (← cleanOutcome cfg g)
+      Common.setPhase cfg.status "simplifying a final goal (janus_post)"
+      finished := finished ++ (← Common.guardStep tacName cfg.status cfg.budget (cleanOutcome cfg g))
       trace[janus] "clean-up of a final goal: {(← IO.monoMsNow) - t0} ms"
       continue
     if steps ≥ cfg.maxSteps || (single && !first) then
       finished := finished ++ [g]; continue
+    cfg.status.modify fun st => { st with steps }
     let t0 ← IO.monoMsNow
-    let res ← stepGoal cfg g first
+    let res ← Common.guardStep tacName cfg.status cfg.budget (stepGoal cfg g first)
     trace[janus] "step total: {(← IO.monoMsNow) - t0} ms"
     match res with
     | none => finished := finished ++ [g]
     | some gs =>
       steps := steps + 1
       todo := gs.map (·, false) ++ todo
+  Common.reportAliases tacName cfg.status finished
   replaceMainGoal finished
 
 /-! ## Discharger -/
@@ -629,6 +743,8 @@ theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
 
 /-- Prove `m.accessible a n w = true` from a hypothesis about the same memory. -/
 def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withContext do
+  -- through stores and callee frames (`MemFrame`)
+  let g ← Common.reduceAccessible g
   -- strip writes: `accessible_writeLE`
   let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
     try simp only [janus_acc, State.mem] )))
@@ -666,6 +782,11 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
       if d.isImplementationDetail then pure acc else pure (acc.push m!"{d.userName} : {d.type}")
     trace[janus.disch] "goal {t}\n{MessageData.joinSep hs.toList "\n"}"
   if !t.hasFVar && !t.hasMVar then
+    -- literal comparisons: evaluated here (no auxiliary declaration per side condition)
+    match ← Common.closeByEval? g with
+    | some true => return
+    | some false => throwError "janus_disch: closed goal is false:{indentExpr t}"
+    | none => pure ()
     let saved ← saveState
     let gs ← try Tactic.run g <| withoutRecover (evalTactic (← `(tactic| decide +kernel))) catch _ => saved.restore; pure [g]
     if gs.isEmpty then return
@@ -673,6 +794,9 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
     -- hypotheses: simp enters `if` branches with the branch condition as a hypothesis, and
     -- proving e.g. `29 < 16` there would make the register-sorting lemma loop.
     throwError "janus_disch: closed goal is false:{indentExpr t}"
+  if t.isAppOfArity ``Janus.Outside 3 then
+    if ← Common.dischargeOutside g then return
+    throwError "janus_disch: cannot prove{indentExpr t}"
   if let some (_, lhs, _) := t.eq? then
     if lhs.isAppOfArity ``Memory.accessible 4 then
       if ← dischargeAccessible g then return
@@ -690,40 +814,10 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
 
 /-! ## Arithmetic -/
 
-partial def collectReadLE (e : Expr) (acc : Array Expr) : Array Expr :=
-  if e.isAppOfArity ``Memory.readLE 3 then acc.push e else
-  match e with
-  | .app f a => collectReadLE a (collectReadLE f acc)
-  | .lam _ t b _ | .forallE _ t b _ => collectReadLE b (collectReadLE t acc)
-  | .letE _ t v b _ => collectReadLE b (collectReadLE v (collectReadLE t acc))
-  | .mdata _ b => collectReadLE b acc
-  | .proj _ _ b => collectReadLE b acc
-  | _ => acc
-
-/-- Add `Memory.readLE m a n < 256^n` (as a literal bound) for every `readLE` with a literal
-width in the goal and the hypotheses. -/
-def addReadLEBounds : TacticM Unit := withMainContext do
-  let mut seen : Std.HashSet Expr := {}
-  let mut tys := #[← instantiateMVars (← getMainTarget)]
-  for d in ← getLCtx do
-    if !d.isImplementationDetail then tys := tys.push (← instantiateMVars d.type)
-  for t in tys do
-    for e in collectReadLE t #[] do
-      if seen.contains e then continue
-      seen := seen.insert e
-      if e.hasLooseBVars then continue
-      let some n := (e.getArg! 2).nat? | continue
-      let g ← getMainGoal
-      let bound := mkNatLit (256 ^ n)
-      let ty ← mkAppM ``LT.lt #[e, bound]
-      let pf ← mkExpectedTypeHint (← mkAppM ``Memory.readLE_lt #[e.getArg! 0, e.getArg! 1, e.getArg! 2]) ty
-      let (_, g') ← (← g.assert `h_rd ty pf).intro1P
-      replaceMainGoal [g']
-
 /-- `omega` with the range facts of every memory read (`readLE … < 256^n`). -/
 elab "janus_arith" : tactic => do
   if (← getUnsolvedGoals).isEmpty then return
-  addReadLEBounds
+  Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus_arith_norm]))
   evalTactic (← `(tactic| omega))
 
@@ -732,6 +826,7 @@ elab "janus_arith" : tactic => do
 syntax janusArgs := (" [" term,* "]")?
 syntax janusUntil := (" until " "[" term,* "]")?
 syntax janusCalls := (" calls " "[" term,* "]")?
+syntax janusBudget := (" (" &"budget" " := " num ")")?
 
 def parseArgs (stx : Syntax) : Array Term :=
   if stx[0].isNone then #[] else stx[0][1].getSepArgs.map (⟨·⟩)
@@ -741,6 +836,8 @@ def parseUntil (stx : Syntax) : TacticM (List Nat) := do
   let ts := stx[0][2].getSepArgs
   ts.toList.mapM fun t => do
     let e ← Term.elabTerm t (some (mkConst ``Nat))
+    Term.synthesizeSyntheticMVarsNoPostponing
+    let e ← instantiateMVars e
     let some n ← evalNat e | throwError "janus_run until: not a numeral: {t}"
     return n
 
@@ -757,20 +854,29 @@ def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) := do
     let some n ← evalNat entry | throwError "janus_run calls: cannot evaluate the entry of {t}"
     return (n, e)
 
-/-- Symbolically execute until every branch reaches an outcome (see module doc). -/
-elab "janus_run" args:janusArgs stops:janusUntil calls:janusCalls : tactic => withMainContext do
-  runJanus { args := parseArgs args, stops := ← parseUntil stops, calls := ← parseCalls calls } false
+def parseBudget (stx : Syntax) : Option Nat :=
+  if stx[0].isNone then none else stx[0][3].isNatLit?
+
+/-- Symbolically execute until every branch reaches an outcome (see module doc). `calls [h, …]`
+uses callee summaries instead of executing the callees; `(budget := N)` limits the run to `N`
+thousand heartbeats (a run that exceeds its budget, or `maxHeartbeats`, stops with a message
+naming the pc, the instruction and what it was doing). -/
+elab "janus_run" bud0:janusBudget args:janusArgs stops:janusUntil cs:janusCalls bud:janusBudget : tactic =>
+    withMainContext do
+  let cfg ← Cfg.new (parseArgs args) (← parseUntil stops) (← parseCalls cs)
+    ((parseBudget bud).orElse fun _ => parseBudget bud0)
+  runJanus cfg false
 
 /-- Simplify the goal with the `janus_post` simp set, the state hypotheses and the given lemmas
 (arithmetic side conditions by `janus_disch`). Fails if no progress is made. -/
 elab "janus_simp" args:janusArgs : tactic => withMainContext do
   let g ← getMainGoal
-  let gs ← cleanOutcome { args := parseArgs args } g
+  let gs ← cleanOutcome (← Cfg.new (parseArgs args)) g
   replaceMainGoal gs
 
 /-- One symbolic execution step. -/
-elab "janus_step" args:janusArgs : tactic => do
-  runJanus { args := parseArgs args } true
+elab "janus_step" args:janusArgs cs:janusCalls bud:janusBudget : tactic => withMainContext do
+  runJanus (← Cfg.new (parseArgs args) [] (← parseCalls cs) (parseBudget bud)) true
 
 /-- From `h : p.DataLoaded m`, add `h_data<k> : m.accessible base len false = true` for every data
 segment `k` of `p` (literal bounds), and `h_rodata : ∀ a n, (dataRead p a n).isSome = true →
@@ -805,49 +911,7 @@ elab "janus_data " h:ident : tactic => withMainContext do
 /-- `janus_cases h` with `h : k < N` (or `k ≤ N`), `N` a literal: one goal per value of `k`,
 with `k` replaced by the literal everywhere (if `k` is a variable; otherwise as a hypothesis
 `hk : k = i`). Used for loads at a symbolic index from a small constant table. -/
-elab "janus_cases " h:ident : tactic => withMainContext do
-  let hE ← elabTerm h none
-  let ty ← instantiateMVars (← inferType hE)
-  let (k, n) ← match ty.getAppFnArgs with
-    | (``LT.lt, #[_, _, k, n]) => pure (k, ← evalNat n)
-    | (``LE.le, #[_, _, k, n]) => pure (k, (← evalNat n).map (· + 1))
-    | _ => throwError "janus_cases: expected `k < N` or `k ≤ N`"
-  let some n := n | throwError "janus_cases: the bound must be a literal"
-  if n == 0 then
-    evalTactic (← `(tactic| exact absurd $h (by omega)))
-    return
-  let kStx ← Term.exprToSyntax k
-  let alts : List Term ← (List.range n).mapM fun i => `($kStx = $(Syntax.mkNumLit (toString i)))
-  let disj ← match alts.reverse with
-    | [] => unreachable!
-    | a :: rest => rest.foldlM (fun acc t => `($t ∨ $acc)) a
-  evalTactic (← `(tactic| rcases (show $disj from by omega) with $(mkIdent `h_case):ident))
-  -- split the disjunction
-  let mut goals ← getGoals
-  let mut out := []
-  for _ in [0:n] do
-    match goals with
-    | [] => break
-    | g :: rest =>
-      goals := rest
-      let gs ← Tactic.run g <| withoutRecover do
-        let some d := (← getLCtx).findFromUserName? `h_case | return
-        let t ← instantiateMVars d.type
-        if t.isAppOfArity ``Or 2 then
-          evalTactic (← `(tactic| rcases $(mkIdent `h_case):ident with $(mkIdent `h_case):ident | $(mkIdent `h_case):ident))
-      match gs with
-      | [g1, g2] => out := out ++ [g1]; goals := g2 :: goals
-      | gs => out := out ++ gs
-  -- substitute
-  let mut res := []
-  for g in out do
-    let gs ← Tactic.run g <| withoutRecover do
-      if k.isFVar then
-        evalTactic (← `(tactic| subst $(mkIdent `h_case):ident))
-      else
-        evalTactic (← `(tactic| try simp only [$(mkIdent `h_case):ident] at *))
-    res := res ++ gs
-  replaceMainGoal res
+elab "janus_cases " h:ident : tactic => Common.casesBound "janus_cases" h
 
 /-- From `hs : CallSetup p entry [a₀, …] s`, add `h_pc : s.pc = BitVec.ofNat 64 entry`,
 `h_lr : s.regs 30 = BitVec.ofNat 64 p.exitAddr` and `h_x<i> : s.regs i = aᵢ`. For a call with a

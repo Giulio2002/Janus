@@ -36,8 +36,10 @@ namespace Proof
 attribute [local irreducible] Janus.Amd64.msbBytes Janus.Amd64.cmpeqBytes
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
-/-- `internal/cpu.X86.HasAVX2` (`internal/cpu.X86+68`, `.noptrbss`) in this binary. -/
-def hasAVX2 : Nat := 0x579264
+/-- `internal/cpu.X86.HasAVX2` (`internal/cpu.X86+68`, `.noptrbss`): the byte that
+`memeqbody`'s `CMPB internal∕cpu·X86+const_offsetX86HasAVX2(SB), $1` (at offset `0x14`)
+reads, taken from the extracted code. -/
+def hasAVX2 : Nat := ripTarget Extracted.program (segAddr Extracted.program "memeqbody" + 0x14)
 
 /-- `leftover` compares the last 8 bytes again; they are equal when the last 16 are. -/
 theorem last8 (m : Memory) (a b : Nat) (h : m.readLE (a + 48) 16 = m.readLE (b + 48) 16) :
@@ -73,7 +75,7 @@ theorem correctness (a b : BitVec 64) :
   have hnw2 := hg.noWrap
   have hgr := hg.readable
   simp only [regSP, regG, stackguard0Offset, stackguard0] at hacc hle hnw hgl hgb hnw2 hgr hda hdb
-  simp only [hasAVX2, regSP] at hav hdav
+  simp only [hasAVX2, regSP, reduceSegAddr, reduceRipTarget, Nat.reduceAdd] at hav hdav
   simp only [valueAt]
   have ha' := a.isLt
   have hb' := b.isLt

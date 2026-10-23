@@ -26,9 +26,15 @@ var theoremNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_'!?]*(\.[A-Za-z_][A
 
 type kernelReplay struct {
 	Tool    string   `json:"tool"`
-	Status  string   `json:"status"` // "passed" or "unavailable"
-	Modules []string `json:"modules"`
-	Note    string   `json:"note,omitempty"`
+	Status  string   `json:"status"`  // "passed" or "unavailable"
+	Modules []string `json:"modules"` // every non-core module of the theorem's import closure
+	// Cached are the modules whose passing replay was reused from the replay cache (keyed by the
+	// SHA-256 of the module and, recursively, of its imports); the rest were replayed in this run.
+	Cached []string `json:"cached,omitempty"`
+	// Fresh is the module replayed with `leanchecker --fresh` (--replay-fresh): its whole
+	// environment, Lean core included, re-checked from an empty environment.
+	Fresh string `json:"fresh,omitempty"`
+	Note  string `json:"note,omitempty"`
 }
 
 type verifiedReport struct {
@@ -66,14 +72,15 @@ type verifiedReport struct {
 }
 
 type auditResult struct {
-	Name        string   `json:"name"`
-	Kind        string   `json:"kind"`
-	Module      string   `json:"module"`
-	Axioms      []string `json:"axioms"`
-	Statement   string   `json:"statement"`
-	Definitions []string `json:"definitions"` // proof-local defs the statement uses, with bodies
-	Modules     []string `json:"modules"`     // every module in the audited environment
-	External    []string `json:"external"`    // dependency constants the statement uses
+	Name        string     `json:"name"`
+	Kind        string     `json:"kind"`
+	Module      string     `json:"module"`
+	Axioms      []string   `json:"axioms"`
+	Statement   string     `json:"statement"`
+	Definitions []string   `json:"definitions"` // proof-local defs the statement uses, with bodies
+	Modules     []string   `json:"modules"`     // every module in the audited environment
+	External    []string   `json:"external"`    // dependency constants the statement uses
+	Imports     [][]string `json:"imports"`     // [module, direct imports…] for every non-core module
 }
 
 // findJanusRoot locates the Lean project: --janus-root, else $JANUS_ROOT (a Janus checkout,
@@ -188,7 +195,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox", "allow-path-deps")
+	args, flags := takeBoolFlags(args, "json", "fresh", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -201,6 +208,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	if flags["unsafe-no-sandbox"] {
 		opts["unsafe-no-sandbox"] = "true"
+	}
+	if flags["replay-fresh"] {
+		opts["replay-fresh"] = "true"
 	}
 	if flags["allow-path-deps"] {
 		if opts["proof-root"] == "" {
@@ -297,7 +307,7 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	}
 	fmt.Fprintf(stdout, "  Axioms: %s\n", ax)
 	if r.KernelReplay.Status == "passed" {
-		fmt.Fprintf(stdout, "  Kernel replay: %s passed (%s)\n", r.KernelReplay.Tool, moduleList(r.KernelReplay.Modules))
+		fmt.Fprintf(stdout, "  Kernel replay: %s passed (%s)\n", r.KernelReplay.Tool, replaySummary(r.KernelReplay))
 	} else {
 		fmt.Fprintf(stdout, "  Kernel replay: skipped (%s)\n", r.KernelReplay.Note)
 	}
@@ -363,6 +373,13 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		return nil, err
 	}
 	janusLibDir := filepath.Join(root, ".lake", "build", "lib", "lean")
+	// Pin the trusted framework build: every Janus.* module-data file, hashed now and
+	// re-verified after every untrusted step, the audit and the replay (R1).
+	fwPins, err := frameworkPins(janusLibDir, fw.Files)
+	if err != nil || len(fwPins.want) == 0 {
+		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read the framework build %s: %v", displayPath(janusLibDir), err), Stage: "Janus library build"}
+	}
+	pinned := pinSet{fwPins}
 
 	// 3. Trusted directory: our Extracted and an independently renamed JanusTrusted copy,
 	// compiled by us (no proof code), kept read-only for the untrusted steps.
@@ -394,8 +411,14 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		return nil, &diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
 			Stage: "extraction elaboration", Details: out}
 	}
-	hExtracted := fileSha(filepath.Join(trustedDir, "Extracted.olean"))
-	hTrusted := fileSha(filepath.Join(trustedDir, "JanusTrusted.olean"))
+	trustedPins, err := newPinnedLib("the trusted Extracted/JanusTrusted build", trustedDir, nil)
+	if err != nil {
+		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+	}
+	pinned = append(pinned, trustedPins)
+	if err := pinned.check("the trusted compile"); err != nil {
+		return nil, err
+	}
 
 	// 4. Work directory: the proof and the audit script, the only writable place for the
 	// sandboxed, untrusted lean processes.
@@ -419,10 +442,15 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		s = strings.ReplaceAll(s, filepath.Join(workDir, "Proof.lean"), displayPath(proofPath))
 		return strings.ReplaceAll(s, filepath.Join(trustedDir, "Extracted.lean"), displayPath(cr.Extracted))
 	}
+	// The framework and trusted builds stay read-only to every sandboxed step, even if they sit
+	// below a writable directory.
+	protected := []string{trustedDir, janusLibDir}
+	sandboxed := func(argv ...string) (string, error) {
+		return runLeanProtected(sb, tc, workDir, nil, protected, proofPathEnv, argv...)
+	}
 
 	// Compile the proof, sandboxed. It imports the trusted Extracted; its output is Proof.olean.
-	if out, err := runLean(sb, tc, workDir, nil, proofPathEnv,
-		tc.lean, "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "Proof.olean")); err != nil {
+	if out, err := sandboxed(tc.lean, "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "Proof.olean")); err != nil {
 		out = mapPaths(out)
 		msg := "Lean rejected the proof " + displayPath(proofPath) + "."
 		if s := summarizeLeanErrors(out, 2000); s != "" {
@@ -431,50 +459,72 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		return nil, &diag{Invalid: true, Msg: msg, Stage: "proof checking",
 			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + thm + ".", Details: out}
 	}
-	hProof := fileSha(filepath.Join(workDir, "Proof.olean"))
-	checkOleans := func(stage string) error {
-		if fileSha(filepath.Join(trustedDir, "Extracted.olean")) != hExtracted ||
-			fileSha(filepath.Join(trustedDir, "JanusTrusted.olean")) != hTrusted ||
-			fileSha(filepath.Join(workDir, "Proof.olean")) != hProof {
-			return &diag{Invalid: true, Msg: "A compiled module changed during verification.", Stage: stage,
-				Next: "A process modified the build outputs mid-run. Rerun janus verify."}
-		}
-		return nil
-	}
-	if err := checkOleans("proof build integrity"); err != nil {
+	if err := pinned.check("the proof compile"); err != nil {
 		return nil, err
+	}
+	// The proof's outputs (Proof.olean and anything else the compile left in the work dir) are
+	// pinned from here on: the audit and the replay must see the same bytes.
+	proofPins, err := newPinnedLib("the proof build", workDir, nil)
+	if err != nil {
+		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+	}
+	pinned = append(pinned, proofPins)
+	if _, ok := proofPins.want["Proof.olean"]; !ok {
+		return nil, &diag{Invalid: true, Msg: "The proof compile produced no Proof.olean.", Stage: "proof build integrity"}
 	}
 
 	// 5. Theorem, axiom and statement audit by the trusted janus-audit (no proof code runs).
 	marker := "janus-audit-" + newNonce() + ": "
-	if err := os.WriteFile(filepath.Join(workDir, "Audit.lean"), []byte(auditScript(thm, "Proof", marker)), 0o644); err != nil {
+	auditDir, err := os.MkdirTemp(runBase, "audit-")
+	if err != nil {
 		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
 	}
-	auditOut, _ := runLean(sb, tc, workDir, nil, proofPathEnv,
-		tc.lean, "--root="+workDir, filepath.Join(workDir, "Audit.lean"))
+	defer os.RemoveAll(auditDir)
+	if err := os.WriteFile(filepath.Join(auditDir, "Audit.lean"), []byte(auditScript(thm, "Proof", marker)), 0o644); err != nil {
+		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
+	}
+	auditOut, _ := runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv,
+		tc.lean, "--root="+auditDir, filepath.Join(auditDir, "Audit.lean"))
+	if err := pinned.check("the audit"); err != nil {
+		return nil, err
+	}
 	ar, err := parseAuditRecord(mapPaths(auditOut), marker)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkOleans("proof build integrity"); err != nil {
+
+	// 6. Independent kernel replay (leanchecker), sandboxed, of every non-core module of the
+	// theorem's import closure; the closure's modules must come from their trusted homes.
+	resolved, err := closureCheck(ar.Modules, searchDirs, tc.libDir, fwPins,
+		map[string]string{"Extracted": trustedDir, "JanusTrusted": trustedDir, "Proof": workDir})
+	if err != nil {
 		return nil, err
 	}
-
-	// 6. Independent kernel replay (leanchecker), sandboxed.
-	kr := kernelReplay{Tool: "leanchecker", Modules: []string{"Janus", "Extracted", "Proof"}}
+	kr := kernelReplay{Tool: "leanchecker", Modules: []string{}}
 	if !tc.hasChecker {
 		kr.Status = "unavailable"
 		kr.Note = "leanchecker not found in the Lean toolchain"
-		kr.Modules = []string{}
 	} else {
-		if out, err := runLean(sb, tc, workDir, nil, proofPathEnv,
-			tc.leanchecker, "Janus", "Extracted", "Proof"); err != nil {
-			return nil, &diag{Invalid: true, Msg: "Kernel replay rejected the environment:\n  " + strings.ReplaceAll(strings.TrimSpace(mapPaths(out)), "\n", "\n  "),
-				Stage: "kernel replay", Next: "The proof manipulates the environment (e.g. debug.skipKernelTC or addDecl without checking); remove that."}
+		plan, err := planReplay(resolved, importGraph(ar.Imports), tc.version, replayCacheOK(sb, opts))
+		if err != nil {
+			return nil, err
 		}
-		kr.Status = "passed"
+		replayRun := func(argv ...string) (string, error) {
+			return runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv, argv...)
+		}
+		if out, err := plan.replay(tc.leanchecker, replayRun, plan.modules); err != nil {
+			return nil, replayDiag(mapPaths(out))
+		}
+		fresh := ""
+		if opts["replay-fresh"] != "" {
+			if out, err := plan.replayFresh(tc.leanchecker, replayRun, "Proof"); err != nil {
+				return nil, replayDiag(mapPaths(out))
+			}
+			fresh = "Proof"
+		}
+		kr = plan.report(plan.modules, fresh)
 	}
-	if err := checkOleans("kernel replay"); err != nil {
+	if err := pinned.check("the kernel replay"); err != nil {
 		return nil, err
 	}
 

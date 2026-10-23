@@ -277,7 +277,8 @@ stitched together from two segments. `Program.run`, `Outcome`, `Steps` and the r
   discharged by `janus64_disch`: `decide` on closed goals (never `omega` from a possibly
   contradictory context), memory accessibility from local `accessible` facts, and `omega`.
 * `GoABI.DataLoaded.readLE` turns reads of copied `.rodata` into literals, through `listLE`
-  of the data bytes, evaluated by `decide`.
+  of the data bytes, evaluated by `decide`; `janus64_data hd` does the same as `janus_data`
+  (readability of each data segment and a rewrite rule evaluating loads at literal addresses).
 * `Janus.Amd64.TacticExt` (imported by `Janus`) extends the simp sets and adds the pieces the
   atomics and memory routines need, all proved from the model:
   - `REP STOS`/`REP MOVS` with a symbolic count: stop in front of the instruction
@@ -310,13 +311,69 @@ stitched together from two segments. `Program.run`, `Outcome`, `Steps` and the r
     stores of `M`'s bytes in any order, overlapping, byte by byte (`cb_step`, `cb_skip`);
     `readLE_of_bytes` turns that into a `readLE` equality.
 
+It has the same interface as the arm64 automation (`docs/PROOFS.md`, *Tactics*):
+
+| arm64 | amd64 | notes |
+|---|---|---|
+| `janus_run [l] until [..] calls [..] (budget := N)` | `janus64_run [l] until [..] calls [..] (budget := N)` | |
+| `janus_step`, `janus_simp [l]`, `janus_arith`, `janus_data h`, `janus_cases h` | `janus64_step`, `janus64_simp [l]`, `janus64_arith`, `janus64_data h`, `janus64_cases h` | `janus64_arith` turns `SBB`/`ADC` carries `(decide (2^64 ≤ t)).toNat` into `t / 2^64` (`janus64_arith_norm`) |
+| `janus_frame` | `janus_frame` | shared (memory is the same type) |
+| `segAddr p "f"` | `segAddr p "f"`, `dataBase p i`, `ripTarget p pc`, `janus64_addrs` | layout-independent addresses, see below |
+
+**Callee summaries.** `Summary p entry pre post` says: from any state at `entry` satisfying
+`pre`, ordinary steps reach a state whose `RIP` is the return address the caller's `CALL`
+pushed, `retAddrOf s` (the word at `[RSP]` on entry), satisfying `post s`. Prove it with
+`janus64_run` on the `ReachesRet` goal (also with `calls [...]` for its own callees), and use it
+with `janus64_run calls [h, …]`: at the callee's entry (after the `CALL` instruction) the
+precondition is proved for the current state and the postcondition is destructured
+(existentials, conjunctions, `s' = …` substituted). A leaf callee:
+
+```lean
+theorem square_summary :
+    Summary Extracted.program (segAddr Extracted.program "example.com/basic.square")
+      (fun s => s.mem.accessible (s.regs 4).toNat 8 false = true ∧
+        s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47)
+      (fun s s' => ∃ f, s' = { s with regs := setRegF (setRegF s.regs 0 (s.regs 0 * s.regs 0)) 4
+                                         (s.regs 4 + 8), rip := retAddrOf s, flags := f }) := by
+  intro s hpc ⟨h1, h2⟩
+  janus64_run
+  exact ⟨_, rfl⟩
+```
+
+The precondition must provide the return-address slot (`RET` reads it and checks it is below
+`2^47`). A non-leaf callee's postcondition also says which memory it may change,
+`MemFrame s.mem m [(rsp - frame, rsp), …]` (its saved `RBP`, the return addresses of its own
+calls, spills into its caller's frame), proved by `janus_frame`; `POP RBP` restoring the
+caller's `RBP` disappears from the register chain. `examples/proofs-amd64/AddThree` and
+`SumSquares` use summaries; `bench/proofs-amd64/Chain1.lean` is a five-level chain.
+
+**Layout independence.** No proof contains an address copied from a disassembly, so adding
+functions to `examples/basic` (which moves code, data and globals) does not break them:
+
+* loop heads are `Extracted.entry + off` (the offset within the function);
+* callee entries are `segAddr Extracted.program "pkg.f"`;
+* `.rodata` objects are `dataBase Extracted.program i` (the base of the `i`-th copied data
+  segment; the extractor names segments by offset, so the index is the stable handle);
+* writable globals, which the extractor does not copy, are `ripTarget Extracted.program pc`:
+  the address the RIP-relative operand of the instruction at `pc` (e.g. `Extracted.entry`)
+  refers to, read off the extracted code.
+
+`janus64_addrs` (or `simp only [reduceSegAddr, reduceDataBase, reduceRipTarget] at h`) evaluates
+these terms to literals, each by a kernel-checked `rfl` lemma, so that `omega` sees the same
+numbers as the executor; the executor evaluates them itself in `until [...]`, `calls [...]` and
+state equations.
+
+**Stuck diagnostics** are the same as on arm64 (`docs/PROOFS.md`, *Troubleshooting*), with the
+instruction printed in Intel syntax (`Janus.Amd64.Disasm.disasm`), and fault explanations for
+`#DE`, undefined flags, misaligned SSE operands and bad branch targets.
+
 ## Proved (verified end to end by `janus verify`)
 
 Run `scripts/build-examples-amd64.sh`, then `scripts/verify-amd64-examples.sh`. All of these
 are about `artifacts/examples-amd64` (`examples/basic`, `GOAMD64=v1`, Go 1.26.0, built
-`-trimpath -buildvcs=false`, so the binary does not depend on the git state). Each proof that
-mentions a binary-specific address (a loop head, a `.rodata` constant or a global) keeps it in
-one `def` at the top of the file. Adding functions to `examples/basic` can move them. They use only `propext`, `Quot.sound` and
+`-trimpath -buildvcs=false`, so the binary does not depend on the git state). No proof contains
+a hard-coded address (see *Layout independence* above), so adding functions to
+`examples/basic` does not break them. They use only `propext`, `Quot.sound` and
 `Classical.choice`, and `leanchecker` replays each one.
 
 | function | theorem |
@@ -329,7 +386,7 @@ one `def` at the top of the file. Adding functions to `examples/basic` can move 
 | `Div` | returns `[x / y]` for `y ≠ 0`; `Proof.panics`: panics (`runtime.panicdivide`) for `y = 0` |
 | `Get` | returns `xs[i]` when `i < len` (slice disjoint from the frame); `Proof.panics`: `runtime.panicBounds` when `i ≥ len` |
 | `Sum` | returns `Σ xs[j] mod 2^64` (a loop, by induction; spill slot disjoint from the slice) |
-| `AddThree` | `Add(Add(x, y), z)`: through the stack-check prologue and two calls |
+| `AddThree` | `Add(Add(x, y), z)`: through the stack-check prologue and two calls, with a callee `Summary` of `Add` |
 | `Table` | `t[i & 7]` of the constant table (64 bytes of `.rodata` copied through `X14`) |
 | `HexDigit` | byte `i & 15` of the `.rodata` string |
 | `SetOne256` | `*z = 1` (32 bytes of `.rodata` through `X14`) |
@@ -337,7 +394,7 @@ one `def` at the top of the file. Adding functions to `examples/basic` can move 
 | `Bump` | `counter += d` on the writable global, returning the new value |
 | `AddLimbs` | `*z = (*x + *y) mod 2^256` by the 4-iteration carry loop (unrolled; carries through `SBB`/`NEG`) |
 | `CopyWords` | returns `n = min(len(dst), len(src))` and `dst[j] = src[j]` for `j < n` (a loop writing memory, by induction; slices disjoint from each other and the frame) |
-| `SumSquares` | `square(x) + square(y)`: the stack-check prologue and two calls |
+| `SumSquares` | `square(x) + square(y)`: the stack-check prologue and two calls, with a callee `Summary` of `square` |
 | `AtomicAdd` | `LOCK XADDQ`: `*p = old + d` and returns `old + d` (`p` 8-aligned: no split lock) |
 | `AtomicMax` | the `LOCK CMPXCHGQ` retry loop: returns `old` and leaves `*p = max(old, v)` (single-threaded: the CAS succeeds the first time; the retry edge is proved infeasible; `p` 8-aligned) |
 | `CopyBlock` | `copy(dst[:], src[:])` of `[16]uint64` through the real `runtime.memmove` (its 65–128-byte SSE path): the 128 bytes at `dst` equal the old 128 bytes at `src`, for any overlap |
@@ -351,9 +408,11 @@ one `def` at the top of the file. Adding functions to `examples/basic` can move 
   EVEX (AVX-512), `CMPS`/`SCAS`/`LODS`, `PCMPESTRI`, AES/SHA/CRC32, `GS`-relative accesses and
   all floating point are not modelled. Their encodings fault.
 * Proofs whose loop invariants describe intermediate states and step a string instruction must
-  carry `t.df = false` in the invariant (`Reaches.repStos`/`repMovs` take it as `hdf`).
-  `examples/proofs-amd64/ClearWords` (already failing on this tree for its pinned addresses)
-  needs that added to `Inv`.
+  carry `t.df = false` in the invariant (`Reaches.repStos`/`repMovs` take it as `hdf`), as
+  `examples/proofs-amd64/ClearWords`' `Inv` does.
+* `simp only [d]` on a definition `d := segAddr Extracted.program "f" + k` can hit the
+  recursion limit on a large extraction (`memmove`); `unfold d at h` and then
+  `simp only [reduceSegAddr, Nat.reduceAdd] at h` does not (`examples/proofs-amd64/CopyBlock512`).
 * `Janus.Amd64.TacticAVX` normalises register arithmetic of the AVX loop only when the proof
   passes `BitVec.ofNat_add_ofNat` and a `BitVec.ofNat` subtraction rule to `janus64_run`
   (`examples/proofs-amd64/CopyBlock512`); without them the symbolic registers of a 3-iteration
@@ -364,8 +423,8 @@ one `def` at the top of the file. Adding functions to `examples/basic` can move 
   are rejected. These are model gaps in the oracle, conservative by design.
 * The undefined-flag sets of BSF/BSR/TZCNT/LZCNT/POPCNT/BSWAP/BTS/BTR/BTC are not
   cross-checked: the formal model does not implement those instructions.
-* The tactic has no callee-summary (`Summary`) support yet: calls are stepped through inline,
-  which is fine for the examples. When an address or aliasing fact is missing it usually
-  fails with a "stuck at" message, but it can also time out when an aliasing side condition
-  is phrased with unnormalised literals (`(0x5751b8#64).toNat`). Normalise preconditions with
-  `BitVec.toNat_ofNat` first, as `examples/proofs-amd64/Bump` does.
+* Side conditions are discharged by `omega`, which needs addresses as `Nat` terms; normalise
+  preconditions phrased with BitVec literals (`(0x5751b8#64).toNat`) with
+  `BitVec.toNat_ofNat`/`janus64_addrs` first, as `examples/proofs-amd64/Bump` does. If a
+  discharger call is expensive the run now reports a heartbeat diagnostic instead of timing out
+  silently.

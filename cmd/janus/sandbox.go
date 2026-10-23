@@ -165,6 +165,15 @@ func (s *sandbox) command(workDir string, extraWritable []string, argv []string,
 // commandRO is command with additional host directories exposed read-only (bubblewrap's
 // private /tmp would otherwise hide those under /tmp).
 func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, argv []string, env []string) *exec.Cmd {
+	return s.commandOverlay(workDir, extraWritable, readOnly, nil, argv, env)
+}
+
+// commandOverlay is commandRO with protected directories re-mounted read-only on top of the
+// writable ones (mounted last, so they win): the trusted framework build inside a consumer
+// workspace stays read-only to the untrusted Lake build that runs in that workspace. A
+// mount point cannot be renamed or removed from inside the sandbox, so the protected tree
+// cannot be swapped out either. In mode "none" nothing is enforced; the olean pins still are.
+func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protected []string, argv []string, env []string) *exec.Cmd {
 	writable := append([]string{workDir}, extraWritable...)
 	switch s.mode {
 	case "bwrap":
@@ -195,6 +204,9 @@ func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, ar
 		for _, w := range writable {
 			a = append(a, "--bind", w, w)
 		}
+		for _, p := range protected {
+			a = append(a, "--ro-bind", p, p)
+		}
 		a = append(a, "--chdir", workDir, "--")
 		a = append(a, argv...)
 		cmd := exec.Command(s.bwrap, a...)
@@ -211,6 +223,12 @@ func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, ar
 			q := shQuote(w)
 			sb.WriteString("mount --bind " + q + " " + q + " 2>/dev/null || true\n")
 			sb.WriteString("mount -o remount,rw,bind " + q + " " + q + " 2>/dev/null || true\n")
+		}
+		for _, p := range protected {
+			// Protected trees must end up read-only: no "|| true" (set -e aborts otherwise).
+			q := shQuote(p)
+			sb.WriteString("mount --bind " + q + " " + q + "\n")
+			sb.WriteString("mount -o remount,ro,bind " + q + " " + q + "\n")
 		}
 		sb.WriteString("cd " + shQuote(workDir) + "\n")
 		sb.WriteString(`exec "$@"` + "\n")

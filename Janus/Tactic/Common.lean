@@ -1,0 +1,940 @@
+import Lean
+import Janus.Arm64.MemoryLemmas
+
+/-!
+# ISA-independent parts of the proof automation
+
+Shared by `janus_run` (arm64, `Janus.Tactic.Core`) and `janus64_run` (amd64,
+`Janus.Amd64.Tactic`). Nothing here is part of the trusted base: these are tactic-time helpers.
+
+* **Status and budget.** Each run keeps a `Status` (the pc, instruction and phase of the step in
+  progress) in an `IO.Ref`. `guardStep` turns a heartbeat timeout, `simp`'s step limit or any
+  other failure inside a step into an error that names the pc, the instruction and the phase,
+  so a run never fails with a bare "deterministic timeout". `withBudget` limits the heartbeats
+  of a whole run (`janus_run (budget := N)`, `N` in thousands, like `maxHeartbeats`).
+* **Stuck diagnostics.** `explainStuck` analyses the term an instruction could not be evaluated
+  past: memory accesses whose `accessible` side condition failed (with the `accessible` facts
+  about the same memory and which of the two range inequalities `omega` could not prove),
+  reads over writes whose aliasing is unknown, addresses that may wrap around `2^64`, and
+  `match`es on values that are not constructors (e.g. undefined or unknown flags).
+* **Simp cache.** `StepCache` keeps the `simp` cache and the simp context between the steps of
+  one run, keyed by the local context: a symbolic state is mostly made of values that earlier
+  steps already simplified, and re-simplifying them on every step made the cost of a step grow
+  with the length of the run.
+* `casesBound` (`janus_cases`, `janus64_cases`) and `addReadLEBounds` (`janus_arith`,
+  `janus64_arith`).
+-/
+
+namespace Janus
+
+/-- `[a, a+n)` lies outside every range `[lo, hi)` of `rs`. -/
+def Outside (a n : Nat) : List (Nat × Nat) → Prop
+  | [] => True
+  | (lo, hi) :: rs => (a + n ≤ lo ∨ hi ≤ a) ∧ Outside a n rs
+
+@[simp] theorem outside_nil (a n : Nat) : Outside a n [] = True := rfl
+@[simp] theorem outside_cons (a n lo hi : Nat) (rs : List (Nat × Nat)) :
+    Outside a n ((lo, hi) :: rs) = ((a + n ≤ lo ∨ hi ≤ a) ∧ Outside a n rs) := rfl
+
+/-- `m'` is `m` changed at most inside the ranges `rs` (`[lo, hi)` each): every read outside
+them agrees, and the regions (what is accessible) are the same. This is the memory part of a
+callee `Summary` whose callee writes its stack frame, e.g.
+`MemFrame s.mem m [(s.sp.toNat - 40, s.sp.toNat - 24)]` for a frame push of `X29`/`X30`
+(several ranges when the callee also spills into its caller's frame). In the caller,
+`janus_run`/`janus64_run` use a hypothesis `hf : MemFrame m₀ m rs` as the rewrite rules
+`hf.readLE` (a read whose range is outside `rs`, side condition by `omega`) and
+`hf.accessible`. -/
+structure MemFrame (m m' : Janus.Arm64.Memory) (rs : List (Nat × Nat)) : Prop where
+  readLE : ∀ a n, Outside a n rs → m'.readLE a n = m.readLE a n
+  accessible : ∀ a n w, m'.accessible a n w = m.accessible a n w
+
+namespace MemFrame
+
+variable {m m' m'' : Janus.Arm64.Memory} {rs : List (Nat × Nat)}
+
+theorem refl (m : Janus.Arm64.Memory) (rs : List (Nat × Nat)) : MemFrame m m rs :=
+  ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩
+
+theorem outside_mem {a n : Nat} {rs : List (Nat × Nat)} (h : Outside a n rs) {r : Nat × Nat}
+    (hr : r ∈ rs) : a + n ≤ r.1 ∨ r.2 ≤ a := by
+  induction rs with
+  | nil => cases hr
+  | cons r' rs ih =>
+    obtain ⟨lo, hi⟩ := r'
+    simp only [outside_cons] at h
+    rcases List.mem_cons.mp hr with rfl | hr
+    · exact h.1
+    · exact ih h.2 hr
+
+/-- A store inside one of the ranges keeps the frame. -/
+theorem writeLE (h : MemFrame m m' rs) {a k : Nat} (v : Nat) {r : Nat × Nat} (hr : r ∈ rs)
+    (h1 : r.1 ≤ a) (h2 : a + k ≤ r.2) : MemFrame m (m'.writeLE a k v) rs :=
+  ⟨fun b n hb => by
+    have := outside_mem hb hr
+    rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega)]; exact h.readLE b n hb,
+   fun b n w => by rw [Janus.Arm64.Memory.accessible_writeLE]; exact h.accessible b n w⟩
+
+/-- `m.writeLE a k v` is a frame of `m` when the store is inside one of the ranges. -/
+theorem of_writeLE (m : Janus.Arm64.Memory) {a k : Nat} (v : Nat) {r : Nat × Nat} (hr : r ∈ rs)
+    (h1 : r.1 ≤ a) (h2 : a + k ≤ r.2) : MemFrame m (m.writeLE a k v) rs :=
+  (refl m rs).writeLE v hr h1 h2
+
+/-- Compose two frames: the result's ranges must cover both (`sub`). -/
+theorem trans {rs' rs'' : List (Nat × Nat)} (h : MemFrame m m' rs) (h' : MemFrame m' m'' rs')
+    (sub : ∀ a n, Outside a n rs'' → Outside a n rs ∧ Outside a n rs') : MemFrame m m'' rs'' :=
+  ⟨fun b n hb => by rw [h'.readLE b n (sub b n hb).2, h.readLE b n (sub b n hb).1],
+   fun b n w => by rw [h'.accessible, h.accessible]⟩
+
+/-- Change the ranges (the new ones must cover the old ones). -/
+theorem mono {rs' : List (Nat × Nat)} (h : MemFrame m m' rs)
+    (sub : ∀ a n, Outside a n rs' → Outside a n rs) : MemFrame m m' rs' :=
+  ⟨fun b n hb => h.readLE b n (sub b n hb), h.accessible⟩
+
+end MemFrame
+end Janus
+
+namespace Janus.Tactic.Common
+
+open Lean Meta Elab Tactic
+
+register_option janus.aliasInfo : Bool := {
+  defValue := true
+  descr := "janus_run/janus64_run: report reads over stores whose aliasing is unknown when \
+    they are left in the remaining goals (an information message)"
+}
+
+/-- `0x…` -/
+def hex (n : Nat) : String := "0x" ++ String.ofList (Nat.toDigits 16 n)
+
+/-! ## Status of the step in progress -/
+
+structure Status where
+  /-- The pc of the step in progress. -/
+  pc : Option Nat := none
+  /-- `function+0xoff` of the pc. -/
+  sym : Option String := none
+  /-- The instruction at the pc, disassembled. -/
+  instr : Option String := none
+  /-- What the step is doing. -/
+  phase : String := "starting"
+  /-- Number of instructions executed so far by this run. -/
+  steps : Nat := 0
+  /-- Reads over stores whose aliasing `simp` could not resolve, with where they appeared. -/
+  aliases : Array (Expr × MessageData) := #[]
+  deriving Inhabited
+
+/-- The location of a step, for messages: `pc 0x… (f+0x…): instr`. -/
+def Status.where_ (st : Status) : MessageData :=
+  match st.pc with
+  | none => m!"before the first instruction"
+  | some pc =>
+    let sym := match st.sym with | some s => s!" ({s})" | none => ""
+    let ins := match st.instr with | some i => s!": {i}" | none => ""
+    m!"at pc {hex pc}{sym}{ins}"
+
+def setPhase (ref : IO.Ref Status) (phase : String) : MetaM Unit :=
+  ref.modify fun st => { st with phase }
+
+/-- The symbol `name+0xoff` of `pc` given the segments `(name, base, size)`. -/
+def symOf (segs : List (String × Nat × Nat)) (pc : Nat) : Option String :=
+  segs.findSome? fun (n, b, sz) =>
+    if b ≤ pc ∧ pc < b + sz then some (if pc = b then n else s!"{n}+{hex (pc - b)}") else none
+
+/-- Heartbeats used since the start of the current budget. -/
+def heartbeatsUsed : CoreM Nat := do
+  return (← IO.getNumHeartbeats) - (← read).initHeartbeats
+
+/-- Run `k` with a budget of `n * 1000` heartbeats counted from now (`none`: the ambient
+`maxHeartbeats`). -/
+def withBudget (n? : Option Nat) (k : TacticM α) : TacticM α := do
+  match n? with
+  | none => k
+  | some n =>
+    withCurrHeartbeats <|
+      withTheReader Core.Context (fun c => { c with maxHeartbeats := n * 1000 }) k
+
+/-- Run one step of `tac`; turn a heartbeat timeout or any other exception into an error that
+says where execution was and what it was doing. Errors that are already diagnostics (they start
+with `tac`) are passed through. -/
+def guardStep (tac : String) (ref : IO.Ref Status) (budget? : Option Nat) (k : TacticM α) :
+    TacticM α := do
+  tryCatchRuntimeEx k fun ex => do
+    let st ← ref.get
+    if ex.isMaxHeartbeat then
+      let lim := (← Lean.getMaxHeartbeats) / 1000
+      let how := match budget? with
+        | some n => m!"The limit was the budget of this run, `{tac} (budget := {n})` (thousands of \
+            heartbeats): raise it"
+        | none => m!"The limit was `maxHeartbeats` ({lim}), which covers the whole declaration: \
+            raise it with `set_option maxHeartbeats N in` before the theorem (or give this run \
+            its own budget with `{tac} (budget := N)`)"
+      let msg := m!"{tac}: heartbeat budget exceeded {st.where_} while {st.phase}, after \
+        {st.steps} instructions.\n{how}, or stop earlier (`until [...]`, a callee `Summary`) and \
+        split the proof."
+      if budget?.isSome then throwError msg
+      -- the declaration's own limit is used up: anything after this point would fail with a
+      -- bare timeout, so report the diagnostic now
+      logError msg
+      throwAbortTactic
+    if ex.isInterrupt || ex.isRuntime then throw ex
+    let msg ← ex.toMessageData.toString
+    if msg.startsWith tac then throw ex
+    throwError m!"{tac}: failed {st.where_} while {st.phase}:\n{ex.toMessageData}"
+
+/-! ## Stuck diagnostics -/
+
+/-- What prevented an instruction from evaluating. -/
+inductive Obstacle where
+  /-- `fn m a n …`: a checked access of `n` bytes at `a` (`write`: needs a writable region). -/
+  | access (fn : Name) (m a n : Expr) (write : Bool)
+  /-- `(m.writeLE a n v).readLE b k`: overlap of the read with the write is unknown. -/
+  | alias (m a n b k : Expr)
+  /-- A `match` (or `if`) on a value that is not a constructor. -/
+  | stuckMatch (fn : Name) (discrs : Array Expr)
+  deriving Inhabited
+
+/-- Collect the obstacles in `e`. `accessFns` lists the checked memory operations of the ISA as
+`(name, isWrite)`, each of the form `fn m addr size …`. -/
+partial def obstacles (accessFns : List (Name × Bool)) (e : Expr) : MetaM (Array Obstacle) := do
+  let env ← getEnv
+  let rec go (e : Expr) (acc : Array Obstacle) : MetaM (Array Obstacle) := do
+    let acc ← match e with
+      | .app .. =>
+        let fn := e.getAppFn
+        let args := e.getAppArgs
+        let mut acc := acc
+        if let some c := fn.constName? then
+          if let some (_, w) := accessFns.find? (·.1 == c) then
+            if args.size ≥ 3 then acc := acc.push (.access c args[0]! args[1]! args[2]! w)
+          if c == ``Janus.Arm64.Memory.readLE && args.size == 3 then
+            let m := args[0]!
+            if m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 then
+              acc := acc.push (.alias (m.getArg! 0) (m.getArg! 1) (m.getArg! 2) args[1]! args[2]!)
+          if let some info := isMatcherAppCore? env e then
+            let discrs := args.extract info.getFirstDiscrPos (info.getFirstDiscrPos + info.numDiscrs)
+            let mut ctor := true
+            for d in discrs do
+              if (← isConstructorApp? d.consumeMData).isNone && !d.isRawNatLit && d.nat?.isNone then
+                ctor := false
+            unless ctor do acc := acc.push (.stuckMatch c discrs)
+        for a in args do acc ← go a acc
+        pure acc
+      | .mdata _ b => go b acc
+      | .lam _ t b _ | .forallE _ t b _ => do go b (← go t acc)
+      | .letE _ t v b _ => do go b (← go v (← go t acc))
+      | .proj _ _ b => go b acc
+      | _ => pure acc
+    return acc
+  go e #[]
+
+/-- Try to prove the proposition `p` by `omega` (restoring the state). -/
+def omegaProves (p : Expr) : TacticM Bool := do
+  let saved ← saveState
+  try
+    let g ← mkFreshExprMVar p
+    let gs ← Tactic.run g.mvarId! (evalTactic (← `(tactic| omega)))
+    saved.restore
+    return gs.isEmpty
+  catch _ => saved.restore; return false
+
+/-- Strip `writeLE`s off a memory term (they do not change accessibility). -/
+partial def stripWrites (m : Expr) : Expr :=
+  if m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 then stripWrites (m.getArg! 0) else m
+
+/-- A natural-number term that contains `x % 2^64` (an address that may wrap). -/
+partial def findWrap (e : Expr) : Option Expr :=
+  if e.isAppOfArity ``HMod.hMod 6 && (e.getArg! 5).nat? == some 18446744073709551616 then
+    some (e.getArg! 4)
+  else match e with
+    | .app f a => (findWrap f).orElse fun _ => findWrap a
+    | .mdata _ b => findWrap b
+    | _ => none
+
+/-- `e` on one line, in backticks (for messages). -/
+def inlS (e : Expr) : MetaM String := do
+  let f ← ppExpr (← instantiateMVars e)
+  return " ".intercalate ((f.pretty 100000).splitOn "\n" |>.map String.trimAscii |>.map toString)
+
+/-- `e` on one line, in backticks (for messages). -/
+def inl (e : Expr) : MetaM MessageData := do
+  return m!"`{← inlS e}`"
+
+/-- "a"/"an" before a number of bytes. -/
+def art (n : Expr) : String :=
+  match n.nat? <|> n.rawNatLit? with
+  | some k => if (toString k).startsWith "8" || k == 11 || k == 18 then "an" else "a"
+  | none => "a"
+
+/-- Number of `writeLE`s on top of a memory term. -/
+partial def countWrites (m : Expr) : Nat :=
+  if m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 then countWrites (m.getArg! 0) + 1 else 0
+
+/-- Explain one obstacle: the failing side condition and the hypotheses that would discharge
+it. -/
+def explainObstacle (o : Obstacle) : TacticM MessageData := do
+  match o with
+  | .access fn m a n w =>
+    let m0 := stripWrites m
+    let goal ← mkEq (mkAppN (mkConst ``Janus.Arm64.Memory.accessible) #[m0, a, n, toExpr w])
+      (mkConst ``Bool.true)
+    let kind := if w then "write" else "read"
+    let nw := countWrites m
+    let mut facts : Array MessageData := #[]
+    for d in ← getLCtx do
+      if d.isImplementationDetail then continue
+      let ty ← instantiateMVars d.type
+      let some (_, l, _) := ty.eq? | continue
+      unless l.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do continue
+      unless ← withReducible (isDefEq (stripWrites (l.getArg! 0)) m0) do continue
+      let b := l.getArg! 1
+      let k := l.getArg! 2
+      let w' := l.getArg! 3
+      let lo ← mkAppM ``LE.le #[b, a]
+      let hi ← mkAppM ``LE.le #[← mkAppM ``HAdd.hAdd #[a, n], ← mkAppM ``HAdd.hAdd #[b, k]]
+      let okLo ← omegaProves lo
+      let okHi ← omegaProves hi
+      let okW := !w || w'.isConstOf ``Bool.true
+      let mut why : Array MessageData := #[]
+      unless okLo do why := why.push m!"{← inl lo} is not provable by omega"
+      unless okHi do why := why.push m!"{← inl hi} is not provable by omega"
+      unless okW do why := why.push m!"the region is only known to be readable"
+      let status := if why.isEmpty then m!"covers the access" else MessageData.joinSep why.toList "; "
+      facts := facts.push m!"  {d.userName} : {← inl ty}\n      {status}"
+    let wrap ← match findWrap a with
+      | some x =>
+        -- `(2^64 - k) + y` is `y - k`: it does not wrap when `k ≤ y`
+        let neg? : Option (Nat × Expr) := match x.getAppFnArgs with
+          | (``HAdd.hAdd, #[_, _, _, _, c, y]) =>
+            match c.nat? with
+            | some c => if c ≥ 2 ^ 63 && c < 2 ^ 64 then some (2 ^ 64 - c, y) else none
+            | none => none
+          | _ => none
+        match neg? with
+        | some (k, y) =>
+          pure m!"\nThe address is {← inl y} - {k} computed modulo 2^64: it could not be shown \
+            not to wrap below zero. This needs `{k} ≤ {← inlS y}` (for the stack: a larger \
+            `below` in `StackOK`/`StackWritable`, which covers `[SP - below, SP)`)."
+        | none =>
+          pure m!"\nThe address contains {← inl x} modulo 2^64: it could not be shown not to wrap \
+            around. Add a bound such as `{← inlS x} < 2^64` (`Ptr`, `Buffer`, `StackOK` and \
+            `StackWritable` give `… ≤ 2^48`)."
+      | none => pure m!""
+    let m0S ← inl m0
+    let factsMsg := if facts.isEmpty then
+        m!"There is no `accessible` hypothesis about {m0S} in the context."
+      else m!"The `accessible` hypotheses about {m0S}:\n{MessageData.joinSep facts.toList "\n"}"
+    let writes := if nw = 0 then m!"" else m!" (the memory is {m0S} after {nw} stores, which do \
+      not change what is accessible)"
+    let aS ← inlS a
+    return m!"cannot prove that the {n}-byte {kind} at {← inl a} is allowed{writes}:\
+      {indentExpr goal}\n{factsMsg}{wrap}\nIt is discharged by a hypothesis \
+      `{← inlS m0}.accessible b k w = true` with `b ≤ {aS}` and `{aS} + {n} ≤ b + k` provable by \
+      omega{if w then " and `w = true`" else ""}: \
+      state the region in the precondition (`Ptr`, `Buffer`, `StackOK`, `StackWritable`) together \
+      with the arithmetic facts that bound the address (e.g. `i.toNat < len.toNat`)."
+  | .alias _ a n b k =>
+    let disj ← mkAppM ``Or #[← mkAppM ``LE.le #[← mkAppM ``HAdd.hAdd #[b, k], a],
+      ← mkAppM ``LE.le #[← mkAppM ``HAdd.hAdd #[a, n], b]]
+    return m!"{art k} {k}-byte read at {← inl b} follows {art n} {n}-byte store at {← inl a}, and it is \
+      unknown whether they overlap. omega needs either\n  {← inl disj}   (disjoint), or\n  \
+      {← inl (← mkEq a b)}   (the same address){if n != k then m!" with the same width" else m!""}.\n\
+      Add `Disjoint`/aliasing facts to the precondition, or split on the aliasing before running \
+      (`rcases h with rfl | h`)."
+  | .stuckMatch fn discrs =>
+    let ds ← discrs.toList.mapM fun d => (inl d : MetaM MessageData)
+    return m!"a case split ({fn}) on {MessageData.joinSep ds ", "} cannot be decided: the value \
+      is not a constructor. If it is a flag or a condition, the flags are unknown at this point \
+      (add an equation for them, or keep the comparison that sets them in the same run); on \
+      amd64 a `none` flag is architecturally undefined and reading it faults."
+
+/-- The message for an instruction that `simp` could not evaluate to `.ok s'` or a branch. -/
+def explainStuck (tac : String) (st : Status) (accessFns : List (Name × Bool)) (r : Expr) :
+    TacticM MessageData := do
+  let obs ← obstacles accessFns r
+  -- report each access/alias once (simp leaves several copies in `match` arms)
+  let mut seen : Array Obstacle := #[]
+  for o in obs do
+    let dup ← seen.anyM fun o' => match o, o' with
+      | .access _ _ a n _, .access _ _ a' n' _ => pure (a == a' && n == n')
+      | .alias _ a n b k, .alias _ a' n' b' k' => pure (a == a' && n == n' && b == b' && k == k')
+      | .stuckMatch f _, .stuckMatch f' _ => pure (f == f')
+      | _, _ => pure false
+    unless dup do seen := seen.push o
+  -- accesses first: an unresolved access usually also leaves a `match` on its result
+  let accs := seen.filter fun | .access .. | .alias .. => true | _ => false
+  let shown := if accs.isEmpty then seen else accs
+  let expl ← shown.mapM explainObstacle
+  if expl.isEmpty then
+    return m!"{tac}: stuck {st.where_}: the instruction did not evaluate to `.ok s'` or a \
+      branch; the unevaluated term is{indentExpr r}"
+  return m!"{tac}: stuck {st.where_}\n{MessageData.joinSep (expl.toList.map fun e => m!"• {e}") "\n"}\n\
+    (`set_option trace.{if tac.startsWith "janus64" then "janus64" else "janus"} true` shows every step.)"
+
+/-- The branch conditions (`hbr`) of the current path, most recent first, for messages. -/
+def branchConds : MetaM MessageData := do
+  let mut hs : Array MessageData := #[]
+  for d in (← getLCtx) do
+    if d.isImplementationDetail then continue
+    if d.userName.eraseMacroScopes == `hbr then
+      hs := #[m!"  hbr : {← inl d.type}"] ++ hs
+  if hs.isEmpty then return m!""
+  return m!"\nThis path was taken under the branch conditions (most recent first):\n\
+    {MessageData.joinSep (hs.toList.take 4) "\n"}\nA path is pruned when omega refutes its \
+    branch condition from the hypotheses: add the fact that excludes it."
+
+/-- Record the reads over stores in `e` that `simp` left unresolved (once each, with the
+location of the step that produced them). -/
+def noteAliases (ref : IO.Ref Status) (e : Expr) : MetaM Unit := do
+  let acc ← IO.mkRef (#[] : Array Expr)
+  e.forEachWhere (fun t => t.isAppOfArity ``Janus.Arm64.Memory.readLE 3 &&
+      (t.getArg! 0).isAppOfArity ``Janus.Arm64.Memory.writeLE 4)
+    (fun t => acc.modify (·.push t))
+  let ts ← acc.get
+  if ts.isEmpty then return
+  let st ← ref.get
+  let mut al := st.aliases
+  for t in ts do
+    if al.size ≥ 64 then break
+    if al.any (·.1 == t) then continue
+    al := al.push (t, st.where_)
+  ref.set { st with aliases := al }
+
+/-- After a run: if the remaining goals mention reads over stores whose aliasing was unknown,
+say where they come from and what would resolve them (as an information message: the run
+itself succeeded). -/
+def reportAliases (tac : String) (ref : IO.Ref Status) (goals : List MVarId) : TacticM Unit := do
+  unless janus.aliasInfo.get (← getOptions) do return
+  let st ← ref.get
+  if st.aliases.isEmpty || goals.isEmpty then return
+  let mut msgs : Array MessageData := #[]
+  for (t, loc) in st.aliases do
+    if msgs.size ≥ 4 then break
+    let hit ← goals.anyM fun g => do
+      let ty ← instantiateMVars (← g.getType)
+      return (ty.find? (· == t)).isSome
+    unless hit do continue
+    let m := t.getArg! 0
+    let e ← explainObstacle (.alias (m.getArg! 0) (m.getArg! 1) (m.getArg! 2) (t.getArg! 1) (t.getArg! 2))
+    msgs := msgs.push m!"• {loc}: {e}"
+  unless msgs.isEmpty do
+    logInfo m!"{tac}: the remaining goals contain reads over earlier stores whose aliasing is \
+      unknown (they stay as `(m.writeLE a n v).readLE b k` and usually make the goal \
+      unprovable):\n{MessageData.joinSep msgs.toList "\n"}"
+
+/-! ## A `simp` cache and context per local context -/
+
+/-- A fingerprint of the local context: the free variables in order. -/
+def lctxKey : MetaM UInt64 := do
+  let mut h : UInt64 := 7
+  for d in ← getLCtx do
+    h := mixHash h (hash d.fvarId)
+  return h
+
+structure StepCache where
+  /-- `(lctx key, simp set name, its simp context, simprocs and discharger)` -/
+  ctxs : Array (UInt64 × Name × Simp.Context × Simp.SimprocsArray × Simp.DischargeWrapper) := #[]
+  /-- `(lctx key, simp cache)` of the `exec` simplifications. -/
+  caches : Array (UInt64 × Simp.Cache) := #[]
+
+/-- `simp e` with the methods of `simp (disch := d)` and the cache stored for the current local
+context (updated afterwards). -/
+def simpCached (cref : IO.Ref StepCache) (ctx : Simp.Context) (simprocs : Simp.SimprocsArray)
+    (d? : Option Simp.Discharge) (e : Expr) : MetaM Simp.Result := do
+  let key ← lctxKey
+  let c := ((← cref.get).caches.find? (·.1 == key)).map (·.2) |>.getD {}
+  let (r, s) ← simpCore e ctx simprocs d? { cache := c }
+  cref.modify fun sc =>
+    let caches := sc.caches.filter (·.1 != key)
+    -- keep a few: branches of the same run alternate between local contexts
+    let caches := if caches.size ≥ 8 then caches.extract 1 caches.size else caches
+    { sc with caches := caches.push (key, s.cache) }
+  return r
+
+/-- Look up or build (with `mk`) the simp context of simp set `set` for the current local
+context, and run `k` with it. -/
+def withCachedCtx (cref : IO.Ref StepCache) (set : Name)
+    (mk : TacticM (Simp.Context × Simp.SimprocsArray × Simp.DischargeWrapper))
+    (k : Simp.Context → Simp.SimprocsArray → Option Simp.Discharge → TacticM α) : TacticM α := do
+  let key ← lctxKey
+  let (ctx, simprocs, dw) ← match (← cref.get).ctxs.find? (fun e => e.1 == key && e.2.1 == set) with
+    | some (_, _, c, sp, dw) => pure (c, sp, dw)
+    | none =>
+      let (c, sp, dw) ← mk
+      cref.modify fun sc =>
+        let ctxs := if sc.ctxs.size ≥ 16 then sc.ctxs.extract 1 sc.ctxs.size else sc.ctxs
+        { sc with ctxs := ctxs.push (key, set, c, sp, dw) }
+      pure (c, sp, dw)
+  dw.with fun d? => k ctx simprocs d?
+
+/-! ## Closed side conditions
+
+Most side conditions of the simp sets are closed comparisons of literals (`4 < 3`, `0 ≠ 31`,
+`(Nat.ble c 2^63 && Nat.blt c 2^64) = true`, `(5#64).toNat < 2^63`). `evalClosedProp?` decides
+them by evaluating the literals at tactic time; the proof is `of_decide_eq_true rfl`, checked by
+the kernel with the rest of the proof. This avoids adding one auxiliary declaration (and a kernel
+check) per side condition, and fails fast on the false ones. Anything it does not recognise is
+left to `decide`. -/
+
+partial def evalClosedNat? (e : Expr) : Option Nat :=
+  let e := e.consumeMData
+  if let some n := e.rawNatLit? then some n else
+  if let some n := e.nat? then some n else
+  match e.getAppFnArgs with
+  | (``HAdd.hAdd, #[_, _, _, _, a, b]) => do return (← evalClosedNat? a) + (← evalClosedNat? b)
+  | (``HSub.hSub, #[_, _, _, _, a, b]) => do return (← evalClosedNat? a) - (← evalClosedNat? b)
+  | (``HMul.hMul, #[_, _, _, _, a, b]) => do return (← evalClosedNat? a) * (← evalClosedNat? b)
+  | (``HDiv.hDiv, #[_, _, _, _, a, b]) => do return (← evalClosedNat? a) / (← evalClosedNat? b)
+  | (``HMod.hMod, #[_, _, _, _, a, b]) => do return (← evalClosedNat? a) % (← evalClosedNat? b)
+  | (``HPow.hPow, #[_, _, _, _, a, b]) => do
+    let b ← evalClosedNat? b
+    if b > 4096 then none else return (← evalClosedNat? a) ^ b
+  | (``Nat.add, #[a, b]) => do return (← evalClosedNat? a) + (← evalClosedNat? b)
+  | (``Nat.sub, #[a, b]) => do return (← evalClosedNat? a) - (← evalClosedNat? b)
+  | (``Nat.mul, #[a, b]) => do return (← evalClosedNat? a) * (← evalClosedNat? b)
+  | (``Nat.succ, #[a]) => do return (← evalClosedNat? a) + 1
+  | (``BitVec.toNat, #[w, x]) => do
+    let w ← evalClosedNat? w
+    match x.consumeMData.getAppFnArgs with
+    | (``BitVec.ofNat, #[_, n]) => return (← evalClosedNat? n) % 2 ^ w
+    | (``OfNat.ofNat, #[_, n, _]) => return (← evalClosedNat? n) % 2 ^ w
+    | _ => none
+  | _ => none
+
+partial def evalClosedBool? (e : Expr) : Option Bool :=
+  let e := e.consumeMData
+  if e.isConstOf ``Bool.true then some true else
+  if e.isConstOf ``Bool.false then some false else
+  match e.getAppFnArgs with
+  | (``Nat.ble, #[a, b]) => do return decide ((← evalClosedNat? a) ≤ (← evalClosedNat? b))
+  | (``Nat.blt, #[a, b]) => do return decide ((← evalClosedNat? a) < (← evalClosedNat? b))
+  | (``Nat.beq, #[a, b]) => do return (← evalClosedNat? a) == (← evalClosedNat? b)
+  | (``and, #[a, b]) => do return (← evalClosedBool? a) && (← evalClosedBool? b)
+  | (``or, #[a, b]) => do return (← evalClosedBool? a) || (← evalClosedBool? b)
+  | (``not, #[a]) => do return !(← evalClosedBool? a)
+  | (``Decidable.decide, #[p, _]) => evalClosedProp? p
+  | _ => none
+where
+  evalClosedProp? (p : Expr) : Option Bool :=
+    let p := p.consumeMData
+    match p.getAppFnArgs with
+    | (``Not, #[a]) => do return !(← evalClosedProp? a)
+    | (``And, #[a, b]) => do return (← evalClosedProp? a) && (← evalClosedProp? b)
+    | (``Or, #[a, b]) => do return (← evalClosedProp? a) || (← evalClosedProp? b)
+    | (``LT.lt, #[ty, _, a, b]) =>
+      if ty.isConstOf ``Nat then do return decide ((← evalClosedNat? a) < (← evalClosedNat? b))
+      else none
+    | (``LE.le, #[ty, _, a, b]) =>
+      if ty.isConstOf ``Nat then do return decide ((← evalClosedNat? a) ≤ (← evalClosedNat? b))
+      else none
+    | (``GT.gt, #[ty, _, a, b]) =>
+      if ty.isConstOf ``Nat then do return decide ((← evalClosedNat? b) < (← evalClosedNat? a))
+      else none
+    | (``GE.ge, #[ty, _, a, b]) =>
+      if ty.isConstOf ``Nat then do return decide ((← evalClosedNat? b) ≤ (← evalClosedNat? a))
+      else none
+    | (``Ne, #[ty, a, b]) =>
+      if ty.isConstOf ``Nat then do return (← evalClosedNat? a) != (← evalClosedNat? b)
+      else none
+    | (``Eq, #[ty, a, b]) =>
+      if ty.isConstOf ``Nat then do return (← evalClosedNat? a) == (← evalClosedNat? b)
+      else if ty.isConstOf ``Bool then do return (← evalClosedBool? a) == (← evalClosedBool? b)
+      else none
+    | _ => none
+
+/-- Decide a closed proposition built from literal arithmetic and comparisons (see above):
+`some true` / `some false`, or `none` if it is not of that form. -/
+def evalClosedProp? (p : Expr) : Option Bool := evalClosedBool?.evalClosedProp? p
+
+/-- Close the goal `g` if it is a closed literal comparison that evaluates to `true`; `false` if
+it evaluates to `false`; `none` if it is not of that form. -/
+def closeByEval? (g : MVarId) : MetaM (Option Bool) := do
+  let t ← instantiateMVars (← g.getType)
+  match evalClosedProp? t with
+  | some true =>
+    g.assign (← mkDecideProof t)
+    return some true
+  | r => return r
+
+/-! ## Applying the step lemmas -/
+
+/-- `g.apply e` for a lemma `e` whose conclusion matches the goal syntactically, without the
+`whnf` of the goal that `MVarId.apply` performs to count arguments: on a goal like
+`ExecThen p (if c then … else …) Q` that `whnf` unfolds `ExecThen` and evaluates the
+decision procedure of the symbolic condition `c`, which can take seconds. Instance arguments
+are taken from the unification, never re-synthesised. Returns the unassigned arguments as new
+goals, in order. -/
+def applyFast (g : MVarId) (e : Expr) : MetaM (List MVarId) := g.withContext do
+  let ty ← instantiateMVars (← inferType e)
+  let (ms, _, concl) ← forallMetaTelescope ty
+  let tgt ← instantiateMVars (← g.getType)
+  unless ← isDefEq concl tgt do
+    throwError "janus: internal error: cannot apply{indentExpr e}
+of type{indentExpr ty}
+to the goal{indentExpr tgt}"
+  g.assign (mkAppN e ms)
+  let mut out := []
+  for m in ms do
+    let mv := m.mvarId!
+    if ← mv.isAssigned then continue
+    mv.setKind .syntheticOpaque
+    out := out ++ [mv]
+  return out
+
+/-! ## Callee preconditions -/
+
+/-- Heads that are not unfolded when proving a precondition. -/
+def basicProps : List Name :=
+  [``Eq, ``Ne, ``LE.le, ``LT.lt, ``GE.ge, ``GT.gt, ``Not, ``And, ``Or, ``Iff, ``True, ``False,
+   ``Exists]
+
+/-- Prove a callee precondition: split conjunctions, simplify each part with `clean` (the
+post simp set with the state hypotheses), close it with `closer`, and unfold named
+predicates (`GuardOK`, `StackOK`, …) up to `depth` times when that fails. Returns the parts
+that could not be proved. -/
+partial def provePreCore (clean : MVarId → TacticM (List MVarId)) (closer : TSyntax `tactic)
+    (g : MVarId) (depth : Nat := 4) : TacticM (Array Expr) := g.withContext do
+  if ← g.isAssigned then return #[]
+  let t ← whnfR (← instantiateMVars (← g.getType)).headBeta
+  let g ← g.replaceTargetDefEq t
+  if t.isAppOfArity ``And 2 then
+    let gs ← applyFast g (← mkConstWithFreshMVarLevels ``And.intro)
+    let mut left := #[]
+    for g' in gs do left := left ++ (← provePreCore clean closer g' depth)
+    return left
+  let gs ← clean g
+  let some g := gs.head? | return #[]
+  let t ← instantiateMVars (← g.getType)
+  if t.isAppOfArity ``And 2 then return ← provePreCore clean closer g depth
+  let saved ← saveState
+  let ok ← try
+      let rest ← Tactic.run g <| withoutRecover (evalTactic closer)
+      pure rest.isEmpty
+    catch _ => pure false
+  if ok then return #[]
+  saved.restore
+  if depth > 0 then
+    if let some c := t.getAppFn.constName? then
+      unless basicProps.contains c do
+        -- a structure (`StackGuardOK`): prove its fields
+        if isStructure (← getEnv) c then
+          do
+            let ctor := getStructureCtor (← getEnv) c
+            let gs ← try applyFast g (← mkConstWithFreshMVarLevels ctor.name) catch _ => pure []
+            unless gs.isEmpty do
+              let mut left := #[]
+              for g' in gs do left := left ++ (← provePreCore clean closer g' (depth - 1))
+              return left
+        if let some t' ← g.withContext (unfoldDefinition? t) then
+          let g ← g.replaceTargetDefEq t'
+          return ← provePreCore clean closer g (depth - 1)
+  return #[t]
+
+/-! ## Callee postconditions -/
+
+/-- After a callee summary: `hpost : post s s'` (with `hpc : s'.pc = …`). Split conjunctions
+and existentials into hypotheses, and substitute `s'` if the postcondition contains an equation
+`s' = e` (then `hpc` is cleared: it is implied). -/
+partial def destructPost (g : MVarId) (s' hpc hpost : FVarId) : MetaM MVarId := do
+  let rec go (g : MVarId) (hs : List FVarId) (substituted : Bool) : MetaM MVarId := do
+    match hs with
+    | [] => return g
+    | h :: rest =>
+      g.withContext do
+      -- `whnfR`: also unfold reducible abbreviations of the postcondition
+      let t ← whnfR (← instantiateMVars (← h.getType)).headBeta
+      let g ← g.replaceLocalDeclDefEq h t
+      if t.isAppOfArity ``And 2 then
+        let gs ← g.cases h
+        let some sg := gs[0]? | return g
+        let fs := sg.fields.toList.filterMap fun e => if e.isFVar then some e.fvarId! else none
+        go sg.mvarId (fs ++ rest) substituted
+      else if t.isAppOfArity ``Exists 2 then
+        let gs ← g.cases h
+        let some sg := gs[0]? | return g
+        let fs := sg.fields.toList.filterMap fun e => if e.isFVar then some e.fvarId! else none
+        -- the witness is a value, the second field the property
+        go sg.mvarId (fs.drop 1 ++ rest) substituted
+      else if let some (_, lhs, _) := t.eq? then
+        if !substituted && lhs.isFVar && lhs.fvarId! == s' then
+          let g ← (try g.clear hpc catch _ => pure g)
+          let (_, g) ← substCore g h (symm := false) (tryToSkip := true)
+          go g rest true
+        else go g rest substituted
+      else go g rest substituted
+  go g [hpost] false
+
+/-! ## Restored registers -/
+
+/-- For a register-file chain `setR (… (setR (x.regs) r₁ v₁) …) rₖ vₖ` (with `setR` the ISA's
+`setReg`): the base `x.regs` and the literal indices written, if it has that shape. -/
+partial def regChain (setR regs : Name) (f : Expr) (acc : List Nat := []) :
+    Option (Expr × List Nat) :=
+  if f.isAppOfArity setR 3 then
+    match (f.getArg! 1).nat? <|> (f.getArg! 1).rawNatLit? with
+    | some r => regChain setR regs (f.getArg! 0) (r :: acc)
+    | none => none
+  else if f.isAppOfArity regs 1 then some (f, acc)
+  else none
+
+/-- `setR f r (x.regs r)` where `f` is a chain over `x.regs` that does not write `r`: the write
+restores the old value (a callee-saved register reloaded from the stack), so the result is `f`.
+Returns `f` and the proof of `f r = x.regs r` (by `rfl`: the chain lookup reduces on literal
+indices). -/
+def restoredReg? (setR regs : Name) (e : Expr) : MetaM (Option (Expr × Expr × Expr × Expr)) := do
+  unless e.isAppOfArity setR 3 do return none
+  let f := e.getArg! 0
+  let r := e.getArg! 1
+  let v := e.getArg! 2
+  let some rn := r.nat? <|> r.rawNatLit? | return none
+  unless v.isAppOfArity regs 2 do return none
+  unless (v.getArg! 1).nat? == some rn || (v.getArg! 1).rawNatLit? == some rn do return none
+  let some (base, written) := regChain setR regs f | return none
+  unless base.getArg! 0 == v.getArg! 0 do return none
+  if written.contains rn then return none
+  let pf ← mkEqRefl v
+  return some (f, r, v, pf)
+
+/-! ## Memory frames of callees -/
+
+/-- The rewrite rules of a `MemFrame` hypothesis (`readLE`, `accessible`), for the state simp
+set. -/
+def frameRules (d : LocalDecl) (ty : Expr) : MetaM (Array Expr) := do
+  unless ty.isAppOfArity ``Janus.MemFrame 3 do return #[]
+  return #[← mkAppM ``Janus.MemFrame.readLE #[d.toExpr], ← mkAppM ``Janus.MemFrame.accessible #[d.toExpr]]
+
+/-- Reduce a goal `m.accessible a n w = true` to one about the underlying memory: strip stores
+(`accessible_writeLE` holds by `rfl`) and go through `MemFrame` hypotheses (`hf.accessible`). -/
+partial def reduceAccessible (g : MVarId) (fuel : Nat := 64) : MetaM MVarId := g.withContext do
+  if fuel = 0 then return g
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, rhs) := t.eq? | return g
+  unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do return g
+  let m := lhs.getArg! 0
+  let m0 := stripWrites m
+  let mkGoal (m' : Expr) : MetaM Expr := do
+    mkEq (mkAppN (mkConst ``Janus.Arm64.Memory.accessible)
+      #[m', lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]) rhs
+  let g ← if m0 != m then g.replaceTargetDefEq (← mkGoal m0) else pure g
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.MemFrame 3 do continue
+    unless ← withReducible (isDefEq (ty.getArg! 1) m0) do continue
+    let base := ty.getArg! 0
+    let t' ← mkGoal base
+    let g' ← mkFreshExprSyntheticOpaqueMVar t'
+    let eqv ← mkAppM ``Janus.MemFrame.accessible #[d.toExpr, lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]
+    -- `(m0.accessible … = true) = (base.accessible … = true)`
+    let eqT ← mkCongrArg (← mkFunOfEq rhs) eqv
+    g.assign (← mkEqMPR eqT g')
+    return ← reduceAccessible g'.mvarId! (fuel - 1)
+  return g
+where
+  mkFunOfEq (rhs : Expr) : MetaM Expr := do
+    return .lam `x (mkConst ``Bool) (mkApp3 (mkConst ``Eq [1]) (mkConst ``Bool) (.bvar 0) rhs) .default
+
+/-- A side condition `Outside a n rs` (of a `MemFrame` read rule): unfold the literal list and
+prove each range condition by `omega`. -/
+def dischargeOutside (g : MVarId) : TacticM Bool := do
+  let t ← instantiateMVars (← g.getType)
+  unless t.isAppOfArity ``Janus.Outside 3 do return false
+  let saved ← saveState
+  try
+    let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
+      (simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
+        BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod]; omega))))
+    if gs.isEmpty then return true
+    saved.restore; return false
+  catch _ => saved.restore; return false
+
+/-- `rs[i] ∈ rs` for a list literal `rs = [e₀, …]`. -/
+def memProof (ty : Expr) (elems : List Expr) (i : Nat) : MetaM Expr := do
+  match elems, i with
+  | e :: rest, 0 => mkAppOptM ``List.mem_cons_self #[ty, e, ← mkListLit ty rest]
+  | e :: rest, i + 1 =>
+    let h ← memProof ty rest i
+    mkAppOptM ``List.mem_cons_of_mem #[ty, e, none, none, h]
+  | [], _ => throwError "janus_frame: index out of range"
+
+/-- The arithmetic closer of `janus_frame`'s side goals. -/
+def frameArith (g : MVarId) : TacticM Bool := do
+  let saved ← saveState
+  try
+    let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
+      ((try simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
+          BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *); omega))))
+    if gs.isEmpty then return true
+    saved.restore; return false
+  catch _ => saved.restore; return false
+
+/-- Prove `MemFrame m₀ m rs`: peel the stores of `m` (each must fall inside one of the ranges),
+go through `MemFrame` hypotheses of the context (their ranges must be covered by `rs`), and end
+with `MemFrame.refl` when the memory is `m₀`. -/
+partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.withContext do
+  if fuel = 0 then throwError "janus_frame: too deep"
+  let t ← whnfR (← instantiateMVars (← g.getType))
+  unless t.isAppOfArity ``Janus.MemFrame 3 do
+    throwError "janus_frame: the goal is not `MemFrame m₀ m rs`:{indentExpr t}"
+  let m0 ← whnfR (t.getArg! 0)
+  let m ← whnfR (t.getArg! 1)
+  let rs := t.getArg! 2
+  if ← withReducible (isDefEq m m0) then
+    g.assign (← mkAppM ``Janus.MemFrame.refl #[m0, rs]); return
+  if m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 then
+    let some (pty, elems) := (← instantiateMVars rs).listLit? |
+      throwError "janus_frame: the ranges must be a list literal{indentExpr rs}"
+    for i in [0:elems.length] do
+      let saved ← saveState
+      let hm ← mkFreshExprSyntheticOpaqueMVar
+        (← mkAppM ``Janus.MemFrame #[m0, m.getArg! 0, rs])
+      let hr ← memProof pty elems i
+      let e := elems[i]!
+      let a := m.getArg! 1
+      let k := m.getArg! 2
+      let h1 ← mkFreshExprSyntheticOpaqueMVar (← mkAppM ``LE.le #[← mkAppM ``Prod.fst #[e], a])
+      let h2 ← mkFreshExprSyntheticOpaqueMVar
+        (← mkAppM ``LE.le #[← mkAppM ``HAdd.hAdd #[a, k], ← mkAppM ``Prod.snd #[e]])
+      if (← frameArith h1.mvarId!) && (← frameArith h2.mvarId!) then
+        let pf ← mkAppOptM ``Janus.MemFrame.writeLE
+          #[m0, m.getArg! 0, rs, hm, a, k, m.getArg! 3, e, hr, h1, h2]
+        g.assign pf
+        return ← proveFrame hm.mvarId! (fuel - 1)
+      saved.restore
+    throwError "janus_frame: the store of{indentExpr (m.getArg! 2)}\nbytes at{indentExpr (m.getArg! 1)}\nis in none of the ranges{indentExpr rs}"
+  -- a callee's frame: `hf : MemFrame m₁ m rs₁`
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.MemFrame 3 do continue
+    unless ← withReducible (isDefEq (← whnfR (ty.getArg! 1)) m) do continue
+    let m1 := ty.getArg! 0
+    let saved ← saveState
+    let hm ← mkFreshExprSyntheticOpaqueMVar (← mkAppM ``Janus.MemFrame #[m0, m1, rs])
+    -- `∀ a n, Outside a n rs → Outside a n rs ∧ Outside a n rs₁`
+    let subTy ← withLocalDeclD `a (mkConst ``Nat) fun a => withLocalDeclD `n (mkConst ``Nat) fun n => do
+      let o (r : Expr) := mkAppN (mkConst ``Janus.Outside) #[a, n, r]
+      mkForallFVars #[a, n] (← mkArrow (o rs) (mkAnd (o rs) (o (ty.getArg! 2))))
+    let sub ← mkFreshExprSyntheticOpaqueMVar subTy
+    let (_, sg) ← sub.mvarId!.introN 3
+    let ok ← try
+        let gs ← Tactic.run sg <| withoutRecover (evalTactic (← `(tactic|
+          (refine ⟨by assumption, ?_⟩
+           simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
+             BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *
+           omega))))
+        pure gs.isEmpty
+      catch _ => pure false
+    unless ok do saved.restore; continue
+    g.assign (← mkAppM ``Janus.MemFrame.trans #[hm, d.toExpr, sub])
+    return ← proveFrame hm.mvarId! (fuel - 1)
+  throwError "janus_frame: cannot relate the memory{indentExpr m}\nto{indentExpr m0}\n(no store to peel, and no `MemFrame` hypothesis about it whose ranges are covered)"
+
+/-- Prove a goal `MemFrame m₀ m rs` (the memory part of a callee summary). -/
+elab "janus_frame" : tactic => do proveFrame (← getMainGoal); replaceMainGoal []
+
+/-- `janus_eval% t`: the closed natural number `t` (e.g. `segAddr Extracted.program "f" + 8`),
+evaluated at elaboration time and inserted as a numeral. For arguments that must be literals
+(a lemma whose `rfl` side conditions are checked against them), without copying the number
+into the proof. -/
+elab "janus_eval% " t:term : term => do
+  let e ← Term.elabTerm t (some (mkConst ``Nat))
+  Term.synthesizeSyntheticMVarsNoPostponing
+  let e ← instantiateMVars e
+  if e.hasFVar || e.hasMVar then throwError "janus_eval%: not a closed term{indentExpr e}"
+  let v ← unsafe evalExpr Nat (mkConst ``Nat) e
+  return mkNatLit v
+
+/-! ## `janus_cases` -/
+
+/-- `h : k < N` (or `k ≤ N`) with `N` a literal: one goal per value of `k` (substituted if `k` is
+a variable, else rewritten with `h_case : k = i`). -/
+def casesBound (tac : String) (h : TSyntax `ident) : TacticM Unit := withMainContext do
+  let hE ← elabTerm h none
+  let ty ← instantiateMVars (← inferType hE)
+  let evalLit (e : Expr) : MetaM (Option Nat) := do
+    let e ← instantiateMVars e
+    if let some n := e.nat? then return some n
+    if let some n := e.rawNatLit? then return some n
+    let e' ← whnfR e
+    return e'.nat? <|> e'.rawNatLit?
+  let (k, n) ← match ty.getAppFnArgs with
+    | (``LT.lt, #[_, _, k, n]) => pure (k, ← evalLit n)
+    | (``LE.le, #[_, _, k, n]) => pure (k, (← evalLit n).map (· + 1))
+    | _ => throwError "{tac}: expected `k < N` or `k ≤ N`, got{indentExpr ty}"
+  let some n := n | throwError "{tac}: the bound must be a literal{indentExpr ty}"
+  if n == 0 then
+    evalTactic (← `(tactic| exact absurd $h (by omega)))
+    return
+  let kStx ← Term.exprToSyntax k
+  let alts : List Term ← (List.range n).mapM fun i => `($kStx = $(Syntax.mkNumLit (toString i)))
+  let disj ← match alts.reverse with
+    | [] => unreachable!
+    | a :: rest => rest.foldlM (fun acc t => `($t ∨ $acc)) a
+  evalTactic (← `(tactic| rcases (show $disj from by omega) with $(mkIdent `h_case):ident))
+  let mut goals ← getGoals
+  let mut out := []
+  for _ in [0:n] do
+    match goals with
+    | [] => break
+    | g :: rest =>
+      goals := rest
+      let gs ← Tactic.run g <| withoutRecover do
+        let some d := (← getLCtx).findFromUserName? `h_case | return
+        let t ← instantiateMVars d.type
+        if t.isAppOfArity ``Or 2 then
+          evalTactic (← `(tactic| rcases $(mkIdent `h_case):ident with $(mkIdent `h_case):ident | $(mkIdent `h_case):ident))
+      match gs with
+      | [g1, g2] => out := out ++ [g1]; goals := g2 :: goals
+      | gs => out := out ++ gs
+  let mut res := []
+  for g in out do
+    let gs ← Tactic.run g <| withoutRecover do
+      if k.isFVar then
+        evalTactic (← `(tactic| subst $(mkIdent `h_case):ident))
+      else
+        evalTactic (← `(tactic| try simp only [$(mkIdent `h_case):ident] at *))
+    res := res ++ gs
+  replaceMainGoal (res ++ goals)
+
+/-! ## Range facts of memory reads -/
+
+partial def collectReadLE (e : Expr) (acc : Array Expr) : Array Expr :=
+  if e.isAppOfArity ``Janus.Arm64.Memory.readLE 3 then acc.push e else
+  match e with
+  | .app f a => collectReadLE a (collectReadLE f acc)
+  | .lam _ t b _ | .forallE _ t b _ => collectReadLE b (collectReadLE t acc)
+  | .letE _ t v b _ => collectReadLE b (collectReadLE v (collectReadLE t acc))
+  | .mdata _ b => collectReadLE b acc
+  | .proj _ _ b => collectReadLE b acc
+  | _ => acc
+
+/-- Add `Memory.readLE m a n < 256^n` (as a literal bound) for every `readLE` with a literal
+width in the goal and the hypotheses. -/
+def addReadLEBounds : TacticM Unit := withMainContext do
+  let mut seen : Std.HashSet Expr := {}
+  let mut tys := #[← instantiateMVars (← getMainTarget)]
+  for d in ← getLCtx do
+    if !d.isImplementationDetail then tys := tys.push (← instantiateMVars d.type)
+  for t in tys do
+    for e in collectReadLE t #[] do
+      if seen.contains e then continue
+      seen := seen.insert e
+      if e.hasLooseBVars then continue
+      let some n := (e.getArg! 2).nat? | continue
+      let g ← getMainGoal
+      let bound := mkNatLit (256 ^ n)
+      let ty ← mkAppM ``LT.lt #[e, bound]
+      let pf ← mkExpectedTypeHint
+        (← mkAppM ``Janus.Arm64.Memory.readLE_lt #[e.getArg! 0, e.getArg! 1, e.getArg! 2]) ty
+      let (_, g') ← (← g.assert `h_rd ty pf).intro1P
+      replaceMainGoal [g']
+
+/-! ## Robustness to the shape of `State` -/
+
+/-- For a structure `S` with field `f`: `(number of fields, index of f)`. Used to read the pc
+of a state literal `S.mk …` without depending on how many fields the structure has. -/
+def fieldIndex (S f : Name) : MetaM (Option (Nat × Nat)) := do
+  let fields := getStructureFields (← getEnv) S
+  return (fields.idxOf? f).map (fields.size, ·)
+
+end Janus.Tactic.Common

@@ -16,8 +16,9 @@ The loop is proved by induction on the remaining iterations from the loop head (
 namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
-/-- The loop head (`CMPQ BX, CX`) in this binary. -/
-def loopHead : Nat := 0x489412
+/-- The loop head (`CMPQ BX, CX`), 0x12 bytes into the function (layout-independent: derived
+from `Extracted.entry`). -/
+def loopHead : Nat := Extracted.entry + 0x12
 
 /-- `Σ_{j<n} word(a + 8 (k + j))`. -/
 def sumFrom (m : Memory) (a k : Nat) : Nat → Nat
