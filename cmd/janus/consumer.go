@@ -548,14 +548,24 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	}
 	janusBuild := filepath.Join(ws.JanusDir, ".lake", "build")
 	notExtracted := func(m string) bool { return m != "Extracted" && m != "JanusTrusted" }
+	tampered := false
 	if got, err := pinLib(ws.janusLib(), notExtracted); err != nil || len(diffPins(basePins.want, got)) > 0 {
+		if _, err := os.Stat(janusBuild); err == nil {
+			// A previous run's framework build differed from the trusted one: the consumer and
+			// dependency modules built in this workspace may have been compiled against it, and
+			// Lake's traces would not notice. Rebuild them too (the kernel replay would reject
+			// them otherwise).
+			tampered = true
+			_ = os.RemoveAll(filepath.Join(ws.Root, ".lake", "build"))
+			_ = os.RemoveAll(ws.DepsDir)
+		}
 		_ = os.RemoveAll(janusBuild)
 		if err := copyTree(filepath.Join(base, ".lake", "build"), janusBuild); err != nil {
 			return fail(wsDiag(err))
 		}
 	}
 
-	if !fresh {
+	if !fresh && !tampered {
 		// Seed the consumer modules from the most recently used sibling workspace.
 		rootBuild := filepath.Join(ws.Root, ".lake", "build")
 		sib := ""

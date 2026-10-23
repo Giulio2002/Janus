@@ -355,3 +355,13 @@ func TestR1ForgedFrameworkLemma(t *testing.T) {
 		t.Fatalf("got %d\n%s\n%s", code, out, stderr)
 	}
 }
+
+func TestReplayTargets(t *testing.T) {
+	targets, covers := replayTargets([]string{"Janus.GoABI", "Proof", "Janus", "Janus.Arm64.State", "JanusTrusted", "Extracted", "Proof.Lemmas"})
+	if strings.Join(targets, ",") != "Extracted,Janus,JanusTrusted,Proof" {
+		t.Fatalf("targets %v", targets)
+	}
+	if strings.Join(covers["Janus"], ",") != "Janus,Janus.Arm64.State,Janus.GoABI" || strings.Join(covers["Proof"], ",") != "Proof,Proof.Lemmas" {
+		t.Fatalf("covers %v", covers)
+	}
+}

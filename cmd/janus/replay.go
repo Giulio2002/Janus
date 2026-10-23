@@ -346,7 +346,7 @@ func importGraph(rows [][]string) map[string][]string {
 // replayChunk bounds how many modules one leanchecker process replays: it replays its targets
 // in parallel tasks, each importing that module's whole environment, so an unbounded batch (a
 // Mathlib closure) would hold thousands of environments at once.
-const replayChunk = 16
+const replayChunk = 32
 
 // pending is the subset of mods without a cached (or already recorded) passing replay.
 func (p *replayPlan) pending(mods []string) []string {
@@ -369,28 +369,58 @@ func (p *replayPlan) passed(m string) bool {
 	return p.done[m]
 }
 
-// replay kernel-replays mods (those not yet passed) with leanchecker, in chunks, through run
-// (the sandboxed runner with the verification's LEAN_PATH). Passing chunks are recorded in the
-// replay cache. It returns leanchecker's output on the first failure.
-func (p *replayPlan) replay(checker string, run func(argv ...string) (string, error), mods []string) (string, error) {
-	todo := p.pending(mods)
-	for len(todo) > 0 {
-		n := len(todo)
-		if n > replayChunk {
-			n = replayChunk
+// isNamePrefix: a is a proper name-component prefix of m (Janus of Janus.GoABI).
+func isNamePrefix(a, m string) bool { return strings.HasPrefix(m, a+".") }
+
+// replayTargets groups modules for leanchecker, whose (non --fresh) targets are name prefixes:
+// `leanchecker Janus` replays Janus and every Janus.* module on the search path. Passing a
+// module whose ancestor is also being replayed would only make leanchecker scan the search
+// path once more (the scan per target dominates a cached run's cost), so each group is led by a
+// module none of whose ancestors is in mods, and lists the modules it covers. leanchecker also
+// replays any other descendant it finds on the search path; that only adds checking.
+func replayTargets(mods []string) (targets []string, covers map[string][]string) {
+	sorted := append([]string{}, mods...)
+	sort.Strings(sorted)
+	covers = map[string][]string{}
+	for _, m := range sorted {
+		lead := ""
+		for _, t := range targets {
+			if isNamePrefix(t, m) {
+				lead = t
+				break
+			}
 		}
-		chunk := todo[:n]
-		todo = todo[n:]
+		if lead == "" {
+			targets = append(targets, m)
+			lead = m
+		}
+		covers[lead] = append(covers[lead], m)
+	}
+	return targets, covers
+}
+
+// replay kernel-replays mods (those not yet passed) with leanchecker through run (the sandboxed
+// runner with the verification's LEAN_PATH), at most replayChunk modules per process. Passing
+// chunks are recorded in the replay cache. It returns leanchecker's output on the first failure.
+func (p *replayPlan) replay(checker string, run func(argv ...string) (string, error), mods []string) (string, error) {
+	targets, covers := replayTargets(p.pending(mods))
+	for len(targets) > 0 {
+		var chunk, covered []string
+		for len(targets) > 0 && (len(chunk) == 0 || len(covered)+len(covers[targets[0]]) <= replayChunk) {
+			chunk = append(chunk, targets[0])
+			covered = append(covered, covers[targets[0]]...)
+			targets = targets[1:]
+		}
 		if out, err := run(append([]string{checker}, chunk...)...); err != nil {
 			return out, err
 		}
 		if p.done == nil {
 			p.done = map[string]bool{}
 		}
-		for _, m := range chunk {
+		for _, m := range covered {
 			p.done[m] = true
 		}
-		p.record(chunk)
+		p.record(covered)
 	}
 	return "", nil
 }

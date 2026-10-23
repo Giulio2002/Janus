@@ -94,8 +94,9 @@ rm -f $W/A6-written-during-verify.txt
 # genuine auditor rejects it); unsandboxed, the framework pins reject the changed build.
 R1=$W/R1
 rm -rf "$R1"; mkdir -p "$R1"
+nonce=$(date +%s%N)
 r1pkg() { # r1pkg DIR [dep]: a copy of audit/attacks/R1_pkg requiring janus from this checkout
-  local d=$1 req="" pk=""
+  local d=$1 req="" pk="" dep=${2:-}
   cp -r audit/attacks/R1_pkg "$d"
   if [ "${2:-}" = dep ]; then
     cp -r audit/attacks/R1_dep "$d-dep"
@@ -103,6 +104,8 @@ r1pkg() { # r1pkg DIR [dep]: a copy of audit/attacks/R1_pkg requiring janus from
     pk=',{"type":"path","scope":"","name":"r1dep","manifestFile":"lake-manifest.json","inherited":false,"dir":"'"$root/$d-dep"'","configFile":"lakefile.lean"}'
   fi
   sed -i "s|@JANUS@|$root|; s|-- @EXTRA_REQUIRE@|$req|" "$d/lakefile.lean"
+  # A new lakefile hash per run, so Lake elaborates (and runs) it again in a reused workspace.
+  echo "-- run $nonce" >> "$d/lakefile.lean"; [ -z "$dep" ] || echo "-- run $nonce" >> "$d-dep/lakefile.lean"
   printf '{"version":"1.2.0","packagesDir":".lake/packages","name":"r1","lakeDir":".lake","fixedToolchain":false,"packages":[{"type":"path","scope":"","name":"janus","manifestFile":"lake-manifest.json","inherited":false,"dir":"%s","configFile":"lakefile.toml"}%s]}\n' "$root" "$pk" > "$d/lake-manifest.json"
 }
 # r1 NAME MODE PROOF THEOREM [dep] [flags…]: prints the verdict line and its stage
