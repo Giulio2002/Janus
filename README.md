@@ -60,7 +60,7 @@ Verified: Proof.correctness
   Framework: embedded (SHA-256 e9be8cd3d7116073ba456dd933bd277edd8d3ce37bf8acb842c28f43decccbba, 30 files, leanprover/lean4:v4.34.1)
   Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
   Axioms: Classical.choice, Quot.sound, propext
-  Kernel replay: leanchecker passed (Janus, Extracted, Proof)
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Decode, Janus.Amd64.Exec, Janus.Amd64.GoABI, Janus.Amd64.Instr, Janus.Amd64.Program, Janus.Amd64.Run, Janus.Amd64.State, … and 19 more; 29 modules; 26 reused from the replay cache)
   Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
   Report: artifacts/Add/verified.json
   Statement:
@@ -74,8 +74,9 @@ binary return to the caller after finitely many steps, never fault or panic, pre
 callee-saved state, and leave `(x + y) mod 2^64` in `X0`. The printed statement is the one the kernel
 checked, printed in an environment the proof cannot influence.
 
-The run above took 29 s on a warm cache (framework already built); most of it is the sandboxed Lean
-build, the audit and the `leanchecker` replay.
+The run above takes about 17 s on a warm cache (framework built, its kernel replay cached); most of it
+is the sandboxed Lean build of the proof and the audit. The first verification per framework version
+also replays every framework module (about 10 s more).
 
 ## How it works
 
@@ -137,7 +138,7 @@ examples/proofs/Add.lean:25:72: error: unsolved goals
 == verifying the counterexample examples/proofs/WrongAdd.lean on the subtracting binary:
 Verified: Proof.correctness
   Axioms: Classical.choice, Quot.sound, propext
-  Kernel replay: leanchecker passed (Janus, Extracted, Proof)
+  Kernel replay: leanchecker passed (Extracted, Janus, …, Proof; 29 modules; 26 reused from the replay cache)
 break-demo: ok
 ```
 
@@ -284,8 +285,13 @@ statement holds. `janus verify`:
 * **prints the statement in a clean environment** that imports only `Janus` and `Extracted`, so the
   proof's notations, unexpanders and instances cannot make it read differently;
 * allows only the axioms `propext`, `Quot.sound`, `Classical.choice` (so no `sorry`, `native_decide`
-  or `bv_decide`), and replays the environment with `leanchecker`;
-* hashes every compiled `.olean` and re-checks them after the audit and the replay.
+  or `bv_decide`), and replays with `leanchecker` every module of the theorem's import closure
+  outside Lean core (every `Janus.*` module, `Extracted`, consumer and dependency modules), caching
+  passing replays by content hash;
+* pins the SHA-256 of every compiled framework `.olean` after the trusted build and re-checks it
+  after every untrusted step, the audit and the replay (in a consumer workspace the framework build
+  is also read-only to the sandboxed Lake build), and hashes every other compiled `.olean` once it is
+  final.
 
 These defences answer an internal red-team audit, [docs/AUDIT.md](docs/AUDIT.md), which records the
 attacks as found (a forged audit via `initialize`, IO from `#eval`, a shadowed `Extracted`, misleading

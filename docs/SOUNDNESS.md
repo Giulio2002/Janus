@@ -31,7 +31,43 @@ These are trusted, not proved.
 4. **The Lean kernel**, plus the verifier's hashing, process execution and axiom audit. The
    audit allows only `propext`, `Quot.sound` and `Classical.choice`. It rejects `sorryAx`,
    `Lean.ofReduceBool` and `Lean.trustCompiler`, so `native_decide` and `bv_decide` cannot be
-   used. `leanchecker` independently replays the environment.
+   used. `leanchecker` independently replays the environment (below).
+5. **The Lean toolchain's own library** (`Init`, `Std`, `Lean`, `Lake`, shipped with the
+   toolchain and read-only to every sandboxed process) and the **trusted framework build**: the
+   framework's `.olean` files compiled by `janus` itself from the framework sources it carries,
+   outside the sandbox, once per framework version (`janus verify --fresh` rebuilds them).
+
+**What the kernel replay covers.** After the audit, `leanchecker` (shipped with the toolchain)
+replays, through the kernel, **every module of the theorem's import closure that is not Lean
+core**: every `Janus.*` framework module the theorem's environment imports, `Extracted`, the
+independent `JanusTrusted` copy, every consumer module and every dependency module. Each module
+is replayed against its imports as loaded from their `.olean` files, and since every non-core
+import is itself replayed, no non-core declaration is taken on trust. Lean core is not replayed
+by default; `--replay-fresh` additionally runs `leanchecker --fresh` on the theorem's module,
+which re-adds every constant of its environment, core included, to an empty environment
+(minutes: about 140 s for a closure that imports `Lean`). Passing replays are cached in the
+trusted cache (`v1/replay`, never writable by a sandboxed process) under a key covering the
+toolchain version, the module's `.olean` bytes (with its `.server`/`.private` parts) and,
+recursively, the keys of its imports, so an unchanged framework module is not replayed again
+while any byte change to it or to anything below it is. The cache is off with `--fresh` and
+without a sandbox. Before replaying, every module of the closure must resolve from its home:
+core modules from the toolchain library, `Janus.*` modules from the trusted framework build and
+only modules the framework has a source for, `Extracted`/`JanusTrusted` from the trusted
+directory.
+
+**What the replay does not cover, and what does.** A replay checks that a module is
+*well-typed*, not that it is the module its source describes: an `.olean` compiled from a
+modified framework source (say `Ensures := True`) replays fine. That is why the framework
+build is also **pinned**: the SHA-256 of every framework `.olean` (and of the trusted
+`Extracted`/`JanusTrusted`) is recorded right after the trusted build and re-verified after
+every untrusted step (the proof compile, the consumer's Lake build and `lake query`), after the
+audit and after the replay; untrusted build outputs (consumer and dependency modules, the proof)
+are pinned once they are final, so the replay checks exactly the bytes the audit read. In a
+consumer workspace the framework package is additionally **mounted read-only** for every
+sandboxed process (a mount point cannot be renamed or removed from inside), and the
+workspace's framework build is replaced from the trusted cache whenever it differs from the
+pins. A changed, corrupted, missing or extra framework module is rejected (`framework
+integrity`). See finding R1 in [docs/AUDIT.md](AUDIT.md).
 
 **Not trusted:**
 
