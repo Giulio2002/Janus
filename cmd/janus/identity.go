@@ -89,7 +89,7 @@ func binaryRef(outdir, binPath string) string {
 		return binPath
 	}
 	// Relative when both live under the same top-level directory (e.g. one repository
-	// checkout), so the artifact directory can move together with the binary.
+	// checkout), so the artifact directory can move along with the binary.
 	top := func(p string) string {
 		return strings.SplitN(strings.TrimPrefix(p, string(filepath.Separator)), string(filepath.Separator), 2)[0]
 	}

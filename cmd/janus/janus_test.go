@@ -19,7 +19,8 @@ var (
 	exampleBin string
 )
 
-var exampleFuncs = []string{"Add", "Max", "Add128", "Mul64", "Sum", "Get", "Add256", "Div", "AddThree"}
+var exampleFuncs = []string{"Add", "Max", "Add128", "Mul64", "Sum", "Get", "Add256", "Div", "AddThree",
+	"Table", "HexDigit", "SetOne256", "GlobalTable", "Bump"}
 
 func TestMain(m *testing.M) {
 	wd, _ := os.Getwd()

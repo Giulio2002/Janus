@@ -34,7 +34,11 @@ targets during reachability. `verify` also needs Lean and Lake (via elan); the v
 `examples/basic` is a separate Go module (`example.com/basic`) with functions marked
 `//go:noinline`: `Add`, `Max`, `Add128` (a `bits.Add64` chain), `Mul64` (`bits.Mul64`), `Sum`
 over a slice, `Get(xs, i)` (bounds check), `Add256(z, x, y *[4]uint64)`, `Div(x, y)` (divide
-check) and `AddThree` (calls `Add`, so its extraction has two functions).
+check) and `AddThree` (calls `Add`, so its extraction has two functions). Five more load data
+(see [Read-only data](#read-only-data)): `Table` (an `[8]uint64` literal), `HexDigit` (indexes a
+string constant) and `SetOne256` (the 32-byte constant 1) read `.rodata`; `GlobalTable` reads an
+initialised package-level `var` (`.noptrdata`) and `Bump` updates a zero-initialised one
+(`.noptrbss`), both writable.
 `examples/basic/cmd` is a `main` package that keeps every function alive: the Go linker removes
 functions nothing references, so each one is stored in a package-level `[]any` and also called
 on inputs derived from `os.Args`. `scripts/build-examples.sh` builds it with
@@ -42,8 +46,7 @@ on inputs derived from `os.Args`. `scripts/build-examples.sh` builds it with
 
 The CLI test fixtures `cmd/janus/testdata/Trivial.lean` (accepted; a placeholder statement that
 says nothing about the code) and `cmd/janus/testdata/Sorry.lean` (rejected by the axiom audit)
-exercise `verify` end to end. They are not proofs; real theorems live in `examples/proofs/` and
-`targets/*/proofs/`.
+exercise `verify` end to end. They are not proofs; real theorems live in `examples/proofs/`.
 
 ## List
 
@@ -101,7 +104,7 @@ Extraction:
    A `.abi0` suffix is ignored when classifying.
 6. Copies every other reachable function, runtime or not. `--max-functions N` (default 64)
    fails the extraction when more are reachable, listing them. For example `main.main` of the
-   example binary reaches 416 functions through `println` and the allocator.
+   example binary reaches 421 functions through `println` and the allocator.
 7. Copies the **read-only data** the copied code references (see [Read-only data](#read-only-data)).
 
 Outputs, written into `<outdir>` (created if needed); any old `verified.json` there is removed:
@@ -148,19 +151,19 @@ end Extracted
 
   ```lean
   def seg0 : Segment :=
-    { name := "main.main", base := 0x93290, words := [ … ] }
+    { name := "main.main", base := 0x93390, words := [ … ] }
   …
   set_option maxRecDepth 100000 in     -- only for segments over 1024 words
   def seg12 : Segment := …
 
   def segments : List Segment := [
-    seg0, seg1, …, seg415 ]
+    seg0, seg1, …, seg420 ]
   ```
 
   Everything else (`stubs`, `exitAddr`, `program`, `entry`) is unchanged. Proofs that unfold
   `Extracted.segments` by name should also unfold `Extracted.seg<i>` in this form; kernel
-  reduction (`decide`, `rfl`) is unaffected. The 416-function `main.main` extraction (37,200
-  words) elaborates in about 15 s.
+  reduction (`decide`, `rfl`) is unaffected. The 421-function `main.main` extraction (37,276
+  words, 81 data objects) elaborates in about 35 s.
 
 ### `identity.json`
 
@@ -169,7 +172,7 @@ end Extracted
   "schema": 2,
   "extractorVersion": "0.2.0",
   "binary": "../examples-arm64",
-  "binarySha256": "3c9bc1e9…",
+  "binarySha256": "257b83ed…",
   "goVersion": "go1.26.0",
   "mainModule": "example.com/basic",
   "goos": "linux",
@@ -193,12 +196,12 @@ end Extracted
 `binary` is relative to the artifact directory when both are under the same top-level
 directory, otherwise absolute. `size` is the symbol size (with padding); `words` is the number of
 copied words after trimming. `data`, `dataReferences` and `skippedData` are described under
-[Read-only data](#read-only-data); for `(*Int).Exp` of the uint256 target:
+[Read-only data](#read-only-data); for `example.com/basic.SetOne256`:
 
 ```json
-  "data": [ { "name": ".rodata+0x32b40", "address": "0xe2b40", "size": 32, "section": ".rodata", "sha256": "01d0fabd…" } ],
-  "dataReferences": [ { "from": "0xaa740", "target": "0xe2b40", "kind": "adrp+add" },
-                      { "from": "0xaa744", "target": "0xe2b40", "kind": "adrp+ldst" }, … ],
+  "data": [ { "name": ".rodata+0x2a3a0", "address": "0xca3a0", "size": 32, "section": ".rodata", "sha256": "01d0fabd…" } ],
+  "dataReferences": [ { "from": "0x93324", "target": "0xca3a0", "kind": "adrp+add" },
+                      { "from": "0x93328", "target": "0xca3a0", "kind": "adrp+ldst" }, … ],
   "skippedData": []
 ```
 
@@ -206,10 +209,11 @@ copied words after trimming. `data`, `dataReferences` and `skippedData` are desc
 
 Go code loads constants with `ADRP`+`ADD` (`MOVD $sym(SB), R`), `ADRP`+`LDR`/`LDP`
 (`MOVD sym(SB), R`), and occasionally `ADR` or a PC-relative literal `LDR`. For example
-`uint256.(*Int).Exp` starts from `Int{1, 0, 0, 0}`, loaded from `.rodata`:
+`SetOne256` (`*z = [4]uint64{1, 0, 0, 0}`) loads the 32-byte constant from `.rodata`:
 
 ```text
-aa73c: adrp x27, e2000 ; aa740: add x27, x27, #0xb40 ; aa744: ldp x3, x4, [x27]
+93320: adrp x27, ca000 ; 93324: add x27, x27, #0x3a0 ; 93328: ldp x1, x2, [x27]
+9332c: adrp x27, ca000 ; 93330: add x27, x27, #0x3b0 ; 93334: ldp x3, x4, [x27]
 ```
 
 The extractor finds these address computations in every copied function with
@@ -234,7 +238,11 @@ For each referenced address:
   binary does not fix its run-time content. It is recorded in `skippedData` with
   `"reason": "writable"` and `extract` prints a warning. Go's `.noptrdata` holds initialised
   `var`s and is mapped read-write, so it is treated as writable; a theorem that needs such a
-  global must add its region and contents to the precondition explicitly.
+  global must add its region and contents to the precondition explicitly. For `GlobalTable`:
+
+  ```text
+  Warning: code at 0x93358 references 0x160840 (example.com/basic.tbl) in writable section .noptrdata; its content is not fixed by the binary, so it is not copied (accesses fault unless a precondition provides that memory).
+  ```
 * In `.gopclntab` (`"gopclntab"`), in code without a literal load (`"code"`, e.g. a function
   address for a closure), or in no section (`"unmapped"`): not copied, recorded in `skippedData`.
 
@@ -243,7 +251,7 @@ keeps exactly the shape shown above. With data:
 
 ```lean
 def data : List DataSegment := [
-  { name := ".rodata+0x32b40", base := 0xe2b40, bytes := [
+  { name := ".rodata+0x2a3a0", base := 0xca3a0, bytes := [
       0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] } ]
 
@@ -254,7 +262,7 @@ def program : Program :=
 Above 2048 bytes in total, each object becomes `def data<i> : DataSegment` (with
 `set_option maxRecDepth 100000` above 1024 bytes) and `data` lists them, as for code segments.
 A proof about such a program assumes `Program.DataLoaded Extracted.program s.mem` (the bytes are
-in memory, inside a non-writable region). `check` regenerates the data together with the words, so
+in memory, inside a non-writable region). `check` regenerates the data along with the words, so
 an edited byte or a dropped object is rejected.
 
 ## Check
@@ -299,7 +307,7 @@ janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 Verified: Proof.correctness
   Module: example.com/basic (go1.26.0)
   Entry: example.com/basic.Get at 0x93140
-  Binary: artifacts/examples-arm64 (SHA-256 3c9bc1e9…)
+  Binary: artifacts/examples-arm64 (SHA-256 257b83ed…)
   Proof: cmd/janus/testdata/Trivial.lean
   Axioms: (none)
   Kernel replay: leanchecker passed (Janus, Extracted, Proof)
@@ -379,16 +387,21 @@ verify proofs you are willing to execute.
 
 ```sh
 janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
-janus blockers targets/geth/bin/geth-vm-arm64 github.com/ethereum/go-ethereum/core/vm.opAdd …
+janus blockers artifacts/examples-arm64 example.com/basic.Get example.com/basic.Bump main.main --max-functions 1000
 ```
 
 ```text
-github.com/ethereum/go-ethereum/core/vm.opAdd: 1 function(s), 59 word(s) (55 distinct), 0 data object(s): all decoded
-github.com/holiman/uint256.(*Int).Hex: 407 function(s), 37209 word(s) (14368 distinct), 82 data object(s): 674 rejected word(s)
-  0x128b8  0x4cdf2c00  ld1 {v0.2d-v3.2d}, [x0],#64          runtime.memequal
+example.com/basic.Get: 1 function(s), 22 word(s) (22 distinct), 0 data object(s): all decoded
+example.com/basic.Bump: 1 function(s), 6 word(s) (5 distinct), 0 data object(s): all decoded
+  writable data referenced (not copied): example.com/basic.counter (.noptrbss)
+main.main: 421 function(s), 37276 word(s) (14355 distinct), 81 data object(s): 674 rejected word(s)
+  0x11de8  0x4cdf2c00  ld1 {v0.2d-v3.2d}, [x0],#64          runtime.memequal
   …
-Summary: 2 symbol(s): 1 fully decoded, 1 with rejected words, 0 extraction failed (decoder: Janus.Arm64.decode via janus-decode, 14390 distinct words).
+Summary: 3 symbol(s): 2 fully decoded, 1 with rejected words, 0 extraction failed (decoder: Janus.Arm64.decode via janus-decode, 14355 distinct words).
 ```
+
+CI runs `blockers` on every `example.com/basic` function and requires all of them to be fully
+decoded.
 
 For each symbol, `blockers` computes the extraction exactly as `extract` does (nothing is
 written) and runs every distinct copied word through **the trusted Lean decoder**: the
@@ -402,10 +415,37 @@ references is listed too. Symbols whose extraction fails (unknown, or more than
 `--max-functions`) are reported and skipped. `--json FILE` writes the full report, with every site.
 The exit code is `0` whenever the report was produced, including when words are rejected.
 
+## amd64 (x86-64) binaries
+
+`list`, `extract` and `check` (and therefore `verify`) also accept linux/amd64 Go ELF binaries
+(`EM_X86_64`, build setting `GOARCH=amd64`); `blockers` is arm64-only and refuses them.
+
+```
+scripts/build-examples-amd64.sh     # builds artifacts/examples-amd64, extracts artifacts/amd64/<Name>
+janus extract artifacts/examples-amd64 example.com/basic.Add artifacts/amd64/Add
+```
+
+Differences from arm64:
+
+* A segment is the raw bytes of the symbol's `[addr, addr+size)` in `.text`, copied as is (no
+  alignment, nothing trimmed); Lean decodes the variable-length instructions from them.
+  `Extracted.lean` defines `segments : List Amd64.Segment` (`{ name, base, bytes }`, 16 bytes
+  per line) and `program : Amd64.Program`; `Stub`, `DataSegment`, `exitAddr` and `entry` are as
+  for arm64. Above 8192 code bytes, segments get one definition each (`maxRecDepth` raised above
+  4096 bytes).
+* Reachability is a linear sweep with `golang.org/x/arch/x86/x86asm` following direct
+  `JMP`/`Jcc`/`CALL`/`LOOP`/`JRCXZ` targets (undecodable bytes are skipped one at a time). Like
+  the arm64 analysis it is untrusted and only selects what to copy.
+* Read-only data references are the RIP-relative operands: `LEA r, [rip+d]` (kind `rip-lea`)
+  and loads/stores through `[rip+d]` (`rip-mem`), with target = next instruction + `d`.
+* `identity.json` records `goarch: "amd64"`, `goamd64` (the `GOAMD64` build setting) and, per
+  function, `bytes` (the copied byte count; `words` is 0). These fields are omitted for arm64,
+  whose artifacts are unchanged.
+
 ## Tests
 
 ```sh
-go test ./cmd/...           # includes Lean verification (about 25 s)
+go test ./cmd/...           # includes Lean verification (about a minute)
 go test -short ./cmd/...    # extraction and check only
 ```
 
@@ -415,8 +455,11 @@ not installed), check that only zero words were trimmed, exercise `check` on edi
 moved artifacts and on a changed binary, and run `verify` on accepted proofs and on proofs that
 must be rejected: `sorry`, `native_decide`, a user axiom, a type error, a missing theorem, a
 `def`, a theorem from another module, and a `skipKernelTC` forgery caught by `leanchecker`.
-The data tests (`data_test.go`) use `targets/uint256/bin/uint256-arm64` (or build it): the
-references found in `(*Int).Exp` and `(*Int).AddMod` are cross-checked against the `adrp` pairs in
-`objdump -d`, the copied bytes against `objdump -s`, writable references must be reported and not
-copied, and `check` must reject an edited data byte or a dropped data record. `TestBlockers` runs
+The data tests (`data_test.go`) use the data examples: the references found in `Table`,
+`HexDigit`, `SetOne256`, `GlobalTable` and `Bump` are cross-checked against the `adrp` pairs in
+`objdump -d` and the copied bytes byte for byte against `objdump -s`; the writable globals of
+`GlobalTable` and `Bump` must be reported and not copied; and `check` must reject an edited data
+byte or a dropped data record. `main.main` (about 80 objects, 40 KB) covers the rendering with
+one definition per object: it is cross-checked against objdump the same way, passes `check`,
+rejects an edited byte and, without `-short`, verifies a proof about `Extracted.program.data`. `TestBlockers` runs
 `janus-decode`.

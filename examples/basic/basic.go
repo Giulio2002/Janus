@@ -51,3 +51,46 @@ func Div(x, y uint64) uint64 { return x / y }
 //
 //go:noinline
 func AddThree(x, y, z uint64) uint64 { return Add(Add(x, y), z) }
+
+// The functions below load data. They exercise the extractor's read-only data copy
+// (`Program.data`) and its reporting of writable globals.
+
+// Table returns entry i&7 of a constant table. The array literal is a read-only static that
+// the compiler places in .rodata and loads with ADRP+ADD and LDP.
+//
+//go:noinline
+func Table(i uint64) uint64 {
+	t := [8]uint64{0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89,
+		0x452821e638d01377, 0xbe5466cf34e90c6c, 0xc0ac29b7c97c50dd, 0x3f84d5b5b5470917}
+	return t[i&7]
+}
+
+// HexDigit indexes a string constant, which lives in .rodata.
+//
+//go:noinline
+func HexDigit(i uint64) byte { return "0123456789abcdef"[i&15] }
+
+// SetOne256 sets z to the 256-bit value 1: a 32-byte constant loaded from .rodata.
+//
+//go:noinline
+func SetOne256(z *[4]uint64) { *z = [4]uint64{1, 0, 0, 0} }
+
+// tbl is an initialised package-level variable. Go puts it in .noptrdata, which is
+// writable, so the extractor reports the reference instead of copying the bytes.
+var tbl = [8]uint64{0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 0x082efa98ec4e6c89,
+	0x452821e638d01377, 0xbe5466cf34e90c6c, 0xc0ac29b7c97c50dd, 0x3f84d5b5b5470917}
+
+// GlobalTable returns tbl[i&7] (ADRP+ADD into .noptrdata).
+//
+//go:noinline
+func GlobalTable(i uint64) uint64 { return tbl[i&7] }
+
+var counter uint64
+
+// Bump adds d to a zero-initialised global (in .noptrbss; ADRP+LDR, ADRP+STR).
+//
+//go:noinline
+func Bump(d uint64) uint64 {
+	counter += d
+	return counter
+}

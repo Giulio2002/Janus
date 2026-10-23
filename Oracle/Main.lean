@@ -63,18 +63,18 @@ structure Case where
   nzcv : Nat
   seed : Nat
 
-def getHex (j : Json) (k : String) : Except String Nat := do
+def hexField (j : Json) (k : String) : Except String Nat := do
   parseHex (← j.getObjValAs? String k)
 
 def parseCase (line : String) : Except String Case := do
   let j ← Json.parse line
   let id ← j.getObjValAs? Nat "id"
-  let word ← getHex j "word"
-  let pc ← (getHex j "pc" <|> pure testPC)
+  let word ← hexField j "word"
+  let pc ← (hexField j "pc" <|> pure testPC)
   let xs ← j.getObjValAs? (Array String) "x"
   if xs.size ≠ 31 then throw "x must have 31 entries"
   let x ← xs.mapM parseHex
-  let sp ← getHex j "sp"
+  let sp ← hexField j "sp"
   let nzcv ← j.getObjValAs? Nat "nzcv"
   let seed ← j.getObjValAs? Nat "seed"
   pure { id, word, pc, x, sp, nzcv, seed }

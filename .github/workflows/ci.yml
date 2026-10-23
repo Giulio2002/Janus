@@ -37,7 +37,6 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
             go.sum
-            targets/*/go.sum
             oracle/go.sum
 
       - name: Install qemu-user and aarch64 binutils
@@ -80,10 +79,8 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - name: Build examples and targets (reproducible SHA-256 check)
-        run: |
-          scripts/build-examples.sh
-          scripts/ci-targets.sh
+      - name: Build examples
+        run: scripts/build-examples.sh
 
       - name: go test ./cmd/...
         run: go test ./cmd/...
@@ -96,16 +93,14 @@ jobs:
             echo "scripts/verify-examples.sh not present; skipping"
           fi
 
-      - name: Decoder coverage of the geth opcodes (janus blockers)
+      - name: Decoder coverage of the examples (janus blockers)
         run: |
           go build -o bin/janus ./cmd/janus
-          syms=()
-          for op in opAdd opSub opMul opLt opGt opEq opIszero opAnd opOr opXor opNot opByte opSHL opSHR opSAR \
-                    opSignExtend opSlt opSgt opDiv opSdiv opMod opSmod opAddmod opMulmod opExp; do
-            syms+=("github.com/ethereum/go-ethereum/core/vm.$op")
-          done
-          bin/janus blockers targets/geth/bin/geth-vm-arm64 "${syms[@]}" | tee blockers.txt
-          grep -q 'Summary: 25 symbol(s): 25 fully decoded' blockers.txt
+          mapfile -t syms < <(bin/janus list artifacts/examples-arm64 --filter example.com/basic. | awk 'NR > 2 { print $3 }')
+          n=${#syms[@]}
+          [ "$n" -gt 0 ] || { echo "no example functions found" >&2; exit 1; }
+          bin/janus blockers artifacts/examples-arm64 "${syms[@]}" | tee blockers.txt
+          grep -q "Summary: $n symbol(s): $n fully decoded" blockers.txt
 
       - name: Differential oracle vs qemu (quick)
         env:
