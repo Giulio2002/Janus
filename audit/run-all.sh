@@ -10,7 +10,7 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 J="$root/audit/bin/janus"
 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus >/dev/null || { echo "lake build Janus failed (fix the Lean library first)"; exit 1; }
+lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build Janus failed (fix the Lean library first)"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 
 W=audit/work
@@ -84,6 +84,70 @@ rm -rf $C
 # The honest proof verifies; there is no window to swap a fake pair into.
 row C2_toctou_swap mitigated "$(v --proof examples/proofs/Add.lean $W/Add)"
 rm -f $W/A6-written-during-verify.txt
+
+# R1: the compiled framework is pinned and read-only to untrusted builds, and the kernel replay
+# covers the theorem's whole non-core import closure. Before the fix a consumer lakefile could
+# rewrite the workspace's framework build: `ensures` (GoABI.olean recompiled with
+# Ensures := True, "Add returns 42") and `auditor` (a forged Janus.Tools.Audit) both printed
+# Verified. Each variant runs in its own package copy (Lake caches an elaborated lakefile).
+# Sandboxed, the write fails (read-only framework; the false claim no longer compiles or the
+# genuine auditor rejects it); unsandboxed, the framework pins reject the changed build.
+R1=$W/R1
+rm -rf "$R1"; mkdir -p "$R1"
+r1pkg() { # r1pkg DIR [dep]: a copy of audit/attacks/R1_pkg requiring janus from this checkout
+  local d=$1 req="" pk=""
+  cp -r audit/attacks/R1_pkg "$d"
+  if [ "${2:-}" = dep ]; then
+    cp -r audit/attacks/R1_dep "$d-dep"
+    req="require r1dep from \"$root/$d-dep\""
+    pk=',{"type":"path","scope":"","name":"r1dep","manifestFile":"lake-manifest.json","inherited":false,"dir":"'"$root/$d-dep"'","configFile":"lakefile.lean"}'
+  fi
+  sed -i "s|@JANUS@|$root|; s|-- @EXTRA_REQUIRE@|$req|" "$d/lakefile.lean"
+  printf '{"version":"1.2.0","packagesDir":".lake/packages","name":"r1","lakeDir":".lake","fixedToolchain":false,"packages":[{"type":"path","scope":"","name":"janus","manifestFile":"lake-manifest.json","inherited":false,"dir":"%s","configFile":"lakefile.toml"}%s]}\n' "$root" "$pk" > "$d/lake-manifest.json"
+}
+# r1 NAME MODE PROOF THEOREM [dep] [flags…]: prints the verdict line and its stage
+r1() {
+  local name=$1 mode=$2 proof=$3 thm=$4; shift 4
+  local dep=""; [ "${1:-}" = dep ] && { dep=dep; shift; }
+  r1pkg "$R1/$name" $dep
+  local out; out=$(JANUS_R1_MODE=$mode "$J" verify --janus-root "$root" $W/Add --proof "$R1/$name/R1/$proof.lean" \
+    --proof-root "$R1/$name" --theorem "$thm" "$@" 2>&1)
+  local what; what=$(grep -m1 -E '^  (modified|unexpected|missing) ' <<<"$out" | sed 's/^  //; s/ (pinned.*//')
+  printf '%s%s [%s]' "$(grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-90)" "${what:+ … $what}" "$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')"
+}
+row R1a_ensures blocked "$(r1 ensures ensures Ensures R1.Ensures.claim)"
+row R1a_ensures_nosandbox blocked "$(r1 ensures-ns ensures Ensures R1.Ensures.claim --unsafe-no-sandbox)"
+row R1a_auditor blocked "$(r1 auditor auditor False R1.False.claim)"
+row R1a_auditor_nosandbox blocked "$(r1 auditor-ns auditor False R1.False.claim --unsafe-no-sandbox)"
+row R1b_corrupt blocked "$(r1 corrupt corrupt Ensures R1.Ensures.claim)"
+row R1b_corrupt_nosandbox blocked "$(r1 corrupt-ns corrupt Ensures R1.Ensures.claim --unsafe-no-sandbox)"
+row R1c_inject blocked "$(r1 inject inject Inject R1.Inject.claim)"
+row R1c_inject_nosandbox blocked "$(r1 inject-ns inject Inject R1.Inject.claim --unsafe-no-sandbox)"
+row R1c_inject_dep blocked "$(r1 inject-dep none Plain R1.Plain.claim dep --allow-path-deps)"
+row R1c_inject_dep_nosandbox blocked "$(r1 inject-dep-ns none Plain R1.Plain.claim dep --allow-path-deps --unsafe-no-sandbox)"
+# R1b forged lemma: a --janus-root copy whose Janus/GoABI.olean (sources untouched) carries a
+# `False` lemma added with debug.skipKernelTC. The olean is well-formed and it is the build the
+# pins are taken from, so only the kernel replay of the framework module catches it.
+F=$W/janus-root-forged
+rm -rf $F; mkdir -p $F/.lake $F/forge/Janus
+cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle $F/
+cp -a .lake/build $F/.lake/
+{ echo "import Lean"; cat Janus/GoABI.lean audit/attacks/R1_forged_lemma.lean; } > $F/forge/Janus/GoABI.lean
+(cd $F && lake env lean --root=forge -o .lake/build/lib/lean/Janus/GoABI.olean forge/Janus/GoABI.lean >/dev/null && rm -rf forge)
+row R1b_forged_lemma blocked "$("$J" verify --janus-root $F --proof audit/attacks/R1_forged_proof.lean $W/Add 2>&1 | head -1)"
+rm -rf $F
+# R1 proof-overwrite: a proof whose #eval corrupts the framework build on LEAN_PATH (a throwaway
+# --janus-root copy). Sandboxed the write fails and the honest theorem verifies; unsandboxed
+# the framework pins reject the run.
+O=$W/janus-root-overwrite
+for ns in "" --unsafe-no-sandbox; do
+  rm -rf $O; mkdir -p $O/.lake
+  cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle $O/
+  cp -a .lake/build $O/.lake/
+  res="$("$J" verify --janus-root $O --proof audit/attacks/R1_proof_overwrite.lean $W/Add $ns 2>&1 | head -1)"
+  if [ -z "$ns" ]; then row R1_proof_overwrite mitigated "$res"; else row R1_proof_overwrite_nosandbox blocked "$res"; fi
+done
+rm -rf $O
 
 echo "model controls (audit/model/Model.lean):"
 if lake env lean audit/model/Model.lean >/dev/null 2>&1; then
