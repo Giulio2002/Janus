@@ -17,7 +17,8 @@ done: MOVQ CX, AX; RET
 
 **Guarantee.** For every binary64 encoding `x` whose value truncated toward zero is an
 integer `i` with `0 ≤ i < 2^64` (`Janus.Float.truncInt`), and every Go call state with `x` in
-the low 64 bits of `X0`, `MXCSR = 0x1F80`, the constant loaded (`DataLoaded`) and 8 writable
+the low 64 bits of `X0`, an `MXCSR` with Go's default control bits and any status flags
+(`GoMXCSR`), the constant loaded (`DataLoaded`) and 8 writable
 bytes at `RSP`, the call returns, obeys the ABI, and returns `i` in `RAX`: the same result as
 arm64. The proof shows that the subtraction is exact on the second path (every binary64 in
 `[2^63, 2^64)` is `2^63 + fr·2^11`).
@@ -211,7 +212,7 @@ theorem correctness (x : BitVec 64) (i : Int) (hi : truncInt binary64 x.toNat = 
     (h0 : 0 ≤ i) (h1 : i < 2 ^ 64) :
     Ensures Extracted.program Extracted.entry []
       (fun s => StackWritable s 0 8 ∧ Extracted.program.DataLoaded s.mem ∧
-        (s.xmm 0).toNat % 2 ^ 64 = x.toNat ∧ s.mxcsr = 0x1F80)
+        (s.xmm 0).toNat % 2 ^ 64 = x.toNat ∧ GoMXCSR s)
       (fun _ s' => (results 1 s').map BitVec.toNat = [i.toNat]) := by
   intro ret hret s hs ⟨hst, hdl, hx, hm⟩
   janus64_intro hs
@@ -224,7 +225,7 @@ theorem correctness (x : BitVec 64) (i : Int) (hi : truncInt binary64 x.toNat = 
   rw [hlen, hb] at hrd
   have hc := DataLoaded.readLE hdl lit_mem 0 8 (by rw [hlen]; omega)
   rw [hb, show listLE (lit.bytes.drop 0) 8 = 0x43e0000000000000 by decide] at hc
-  janus64_run [hx, hm]
+  janus64_run [hx, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm]
   all_goals first
     | (rw [branch_small x.toNat i hi h0 (by assumption)]; simp; omega)
     | skip
