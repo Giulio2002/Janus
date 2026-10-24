@@ -100,12 +100,17 @@ Extraction:
    function are reported as warnings and recorded in `identity.json` under
    `unresolvedBranches`. Calls of `runtime.deferreturn` are not followed (see step 8).
 5. Records known runtime stubs instead of copying them:
-   * `.panic`: any `runtime.panic*` or `runtime.goPanic*` function and `runtime.gopanic`
-     (e.g. `runtime.panicIndex`, `runtime.panicBounds`, `runtime.panicSlice*`,
-     `runtime.panicdivide`, `runtime.panicshift`, `runtime.panicmem`, `runtime.panicwrap`);
-   * `.morestack`: `runtime.morestack*` (the stack-growth path of every function prologue).
+   * `.panic`: the go1.26 runtime's panic functions, by exact linked name (`runtime.gopanic`,
+     `runtime.goPanic*`, `runtime.panicBounds`, `runtime.panicdivide`, `runtime.panicshift`,
+     `runtime.panicmem`, `runtime.panicwrap`, …; the list is `runtimePanicStubs` in
+     `cmd/janus/extract.go`);
+   * `.morestack`: `runtime.morestack.abi0` and `runtime.morestack_noctxt.abi0` (the
+     stack-growth path of every function prologue).
 
-   A `.abi0` suffix is ignored when classifying.
+   Names are matched exactly; no suffix is stripped. A listed name counts only in a go1.26
+   binary with an ELF symbol table, when no other function has the same name (any package can
+   name an assembly function or a `//go:linkname` push `runtime.panicX`;
+   docs/AUDIT-ROUND7.md G1). Otherwise extraction stops with an error.
 6. Records **runtime contracts** instead of copying them: `--contract SYM` (repeatable; a glob
    where `*` matches any run of characters including `.` and `/` and `?` one character; a name
    matches with or without its `.abi0`/`.abiinternal` suffix) names functions whose direct

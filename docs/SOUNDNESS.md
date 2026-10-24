@@ -37,10 +37,13 @@ These are trusted, not proved.
    zero padding words are dropped). `janus verify` re-runs this copy against the binary
    (checked by SHA-256) and compares it byte for byte with `Extracted.lean`, so a stale or
    edited extraction is rejected. The copy itself and the symbol table lookup are trusted.
-3. **Stub classification**: the extractor names runtime functions `runtime.panic*`,
-   `runtime.goPanic*` and `runtime.gopanic` as `panic` stubs and `runtime.morestack*` as
-   `morestack` stubs, only in package `runtime` itself (no `/` in the symbol: an import path
-   such as `runtime.panicky/lib` is not runtime, docs/AUDIT-ROUND6.md F3). Reaching a stub
+3. **Stub classification**: the extractor treats as `panic` stubs the go1.26 runtime's panic
+   functions and as `morestack` stubs `runtime.morestack.abi0`/`runtime.morestack_noctxt.abi0`,
+   by exact ELF symbol name, only in a go1.26 binary with a symbol table and only when the name
+   is unique (docs/AUDIT-ROUND6.md F3, docs/AUDIT-ROUND7.md G1: any package can define an
+   assembly function or push a `//go:linkname` named `runtime.panicX`; the runtime's own
+   definition makes a same-ABI copy a link error and an other-ABI copy a mangled name). The Go
+   version is read from build info, which `-ldflags=-X` can rewrite. Reaching a stub
    address ends the run with that outcome. This only affects
    theorems that mention stub outcomes (`Panics`, `NeverPanics`, `GrowsStack`). `Returns`
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
@@ -137,7 +140,7 @@ base. What it relies on:
 * **Threats out of scope.** Anyone who can write the user's cache directory directly can also
   replace the framework build and the replay cache; the cache does not defend against them.
 
-`audit/round7/run-round7.sh` attacks the cache: a proof and a lakefile that look for the key and
+`audit/round7/run-cache.sh` (run by `audit/round7/run-round7.sh`) attacks the cache: a proof and a lakefile that look for the key and
 the entries and try to plant one (bubblewrap and unshare), a tampered entry, an entry recorded
 with a different framework (a source change), `--fresh` and `--unsafe-no-sandbox`. Every row
 must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
