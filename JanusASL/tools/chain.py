@@ -156,6 +156,13 @@ def main():
     print("    (%s pc (BitVec.ofNat 32 w)).run s =" % fn_name)
     print("      %s.run (s.set .SEE %d) := by" % (body, see))
     names = []
+    seen = set()
+    uniq = []
+    for nm, cj, val in haves:
+        if (cj, val) not in seen:
+            seen.add((cj, val))
+            uniq.append((nm, cj, val))
+    haves = uniq
     for nm, (hi, lo, c, width), val in haves:
         if width == -32:
             print("  have %s : (BitVec.ofNat 32 w == (%d#32 : BitVec 32)) = %s := by"
