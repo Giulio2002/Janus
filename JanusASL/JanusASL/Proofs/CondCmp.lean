@@ -473,7 +473,7 @@ theorem asl_ccmp_reg {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b11
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execCondCmp js (fld w 30 1 == 1#1) (js.getX (if fld w 31 1 == 1#1 then 64 else 32) (fld w 5 5).toNat)
         (js.getX (if fld w 31 1 == 1#1 then 64 else 32) (fld w 16 5).toNat) (fld w 12 4).toNat (fld w 0 4).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPReg hw (by omega)]
   rcases (show (w / 2 ^ 30) % 2 = 0 ∨ (w / 2 ^ 30) % 2 = 1 by omega) with hk | hk
   · rw [run_DataProcReg_ccmp_0 hw h1 h2 h3 h4 hk (see_entry _ _), run_decode_ccmn_reg]
@@ -483,7 +483,7 @@ theorem asl_ccmp_reg {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b11
       exact hspe
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_ccmp_reg (h.entry (BitVec.ofNat 32 w) 119) hspe1 (width_cases w)
       (fld w 16 5).toNat (fld_lt w 16 5) (fld_lt w 5 5) (fld w 12 4) (fld w 0 4) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_ccmp_1 hw h1 h2 h3 h4 hk (see_entry _ _), run_decode_ccmp_reg]
     have hspe1 : ((stepEntry s (BitVec.ofNat 32 w)).set .SEE 120).regs.get? .SPESampleInFlight = some false := by
       rw [get?_set_ne _ (r := .SEE) _ (by decide)]; simp only [stepEntry]
@@ -491,7 +491,7 @@ theorem asl_ccmp_reg {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b11
       exact hspe
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_ccmp_reg (h.entry (BitVec.ofNat 32 w) 120) hspe1 (width_cases w)
       (fld w 16 5).toNat (fld_lt w 16 5) (fld_lt w 5 5) (fld w 12 4) (fld w 0 4) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **condCmpReg (CCMN/CCMP)**: for every word of the encoding class and every related pair of states
 (with statistical profiling not sampling), Janus' `step` and the generated ASL agree. -/
@@ -499,7 +499,7 @@ theorem condCmpReg_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 
     (h2 : (w / 2 ^ 10) % 2 = 0) (h3 : (w / 2 ^ 4) % 2 = 0) (h4 : (w / 2 ^ 11) % 2 = 0)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hspe : s.regs.get? .SPESampleInFlight = some false) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   have hspec : ∀ N, (Janus.Arm64.execCondCmp js (fld w 30 1 == 1#1) (js.getX N (fld w 5 5).toNat)
       (js.getX N (fld w 16 5).toNat) (fld w 12 4).toNat (fld w 0 4).toNat).pc = js.pc := by
     intro N; unfold Janus.Arm64.execCondCmp; split <;> simp [Janus.Arm64.State.setFlags]
@@ -523,7 +523,7 @@ theorem asl_ccmp_imm {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b11
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execCondCmp js (fld w 30 1 == 1#1) (js.getX (if fld w 31 1 == 1#1 then 64 else 32) (fld w 5 5).toNat)
         (Sail.BitVec.zeroExtend (fld w 16 5) (if fld w 31 1 == 1#1 then 64 else 32)) (fld w 12 4).toNat (fld w 0 4).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPReg hw (by omega)]
   rcases (show (w / 2 ^ 30) % 2 = 0 ∨ (w / 2 ^ 30) % 2 = 1 by omega) with hk | hk
   · rw [run_DataProcReg_ccmp_2 hw h1 h2 h3 h4 hk (see_entry _ _), run_decode_ccmn_imm]
@@ -534,7 +534,7 @@ theorem asl_ccmp_imm {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b11
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_ccmp_imm (h.entry (BitVec.ofNat 32 w) 121) hspe1 (width_cases w)
       (Sail.BitVec.zeroExtend (fld w 16 5) (if fld w 31 1 == 1#1 then 64 else 32)) (fld_lt w 5 5) (fld w 12 4)
       (fld w 0 4) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_ccmp_3 hw h1 h2 h3 h4 hk (see_entry _ _), run_decode_ccmp_imm]
     have hspe1 : ((stepEntry s (BitVec.ofNat 32 w)).set .SEE 122).regs.get? .SPESampleInFlight = some false := by
       rw [get?_set_ne _ (r := .SEE) _ (by decide)]; simp only [stepEntry]
@@ -543,7 +543,7 @@ theorem asl_ccmp_imm {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b11
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_ccmp_imm (h.entry (BitVec.ofNat 32 w) 122) hspe1 (width_cases w)
       (Sail.BitVec.zeroExtend (fld w 16 5) (if fld w 31 1 == 1#1 then 64 else 32)) (fld_lt w 5 5) (fld w 12 4)
       (fld w 0 4) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **condCmpImm (CCMN/CCMP)**: for every word of the encoding class and every related pair of states
 (with statistical profiling not sampling), Janus' `step` and the generated ASL agree. -/
@@ -551,7 +551,7 @@ theorem condCmpImm_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 
     (h2 : (w / 2 ^ 10) % 2 = 0) (h3 : (w / 2 ^ 4) % 2 = 0) (h4 : (w / 2 ^ 11) % 2 = 1)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hspe : s.regs.get? .SPESampleInFlight = some false) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   have hspec : ∀ N, (Janus.Arm64.execCondCmp js (fld w 30 1 == 1#1) (js.getX N (fld w 5 5).toNat)
       (Sail.BitVec.zeroExtend (fld w 16 5) N) (fld w 12 4).toNat (fld w 0 4).toNat).pc = js.pc := by
     intro N; unfold Janus.Arm64.execCondCmp; split <;> simp [Janus.Arm64.State.setFlags]
