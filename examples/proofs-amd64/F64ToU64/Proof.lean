@@ -193,7 +193,7 @@ theorem big_shape (x : Nat) (hx : x < 2 ^ 64) (i : Int) (hi : truncInt binary64 
       · have := hulp.1 hk; omega
     · simp only [hsx, ite_true] at hvx
       rw [hvx] at hge
-      simp only [Val.eq, Val.lt, align, decide_eq_true_eq, beq_iff_eq] at hge
+      simp only [Val.eq, Val.lt, align, beq_iff_eq] at hge
       have hp : (0 : Int) ≤ (mantOf binary64 x : Int) *
           2 ^ (ulpExpOf binary64 x - min (((1086 : Nat) : Int) - 1075) (ulpExpOf binary64 x)).toNat :=
         Int.mul_nonneg (Int.natCast_nonneg _) (Int.pow_nonneg (by decide))
@@ -219,7 +219,8 @@ theorem correctness (x : BitVec 64) (i : Int) (hi : truncInt binary64 x.toNat = 
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
   have hrd := DataLoaded.accessible hdl lit_mem
   have hlen : lit.bytes.length = 8 := by decide
-  have hb : lit.base = 0x4b5ef0 := rfl
+  have hb : lit.base = dataBase Extracted.program 0 := rfl
+  simp only [reduceDataBase] at hb
   rw [hlen, hb] at hrd
   have hc := DataLoaded.readLE hdl lit_mem 0 8 (by rw [hlen]; omega)
   rw [hb, show listLE (lit.bytes.drop 0) 8 = 0x43e0000000000000 by decide] at hc
