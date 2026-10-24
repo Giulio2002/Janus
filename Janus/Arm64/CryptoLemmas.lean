@@ -329,4 +329,49 @@ theorem crc32Op_eq_update (C : Bool) (m : Memory) (sz acc p : Nat) (hacc : acc <
   cases C <;> simp only [rbitNat_crc32_poly, rbitNat_crc32c_poly, ite_true, ite_false,
     Bool.false_eq_true]
 
+namespace CRC
+
+theorem update_add (R : Nat) (m : Memory) (c p a b : Nat) :
+    update R m c p (a + b) = update R m (update R m c p a) (p + a) b := by
+  induction a generalizing c p with
+  | zero => rw [Nat.zero_add, Nat.add_zero]; rfl
+  | succ a ih =>
+    rw [show a + 1 + b = (a + b) + 1 by omega]
+    show update R m (updateByte R c (m.bytes p).toNat) (p + 1) (a + b) = _
+    rw [ih]
+    show _ = update R m (update R m (updateByte R c (m.bytes p).toNat) (p + 1) a) (p + (a + 1)) b
+    rw [show p + 1 + a = p + (a + 1) by omega]
+
+theorem shiftN_lt {R : Nat} (hR : R < 2 ^ 32) : ∀ k c, c < 2 ^ 32 → shiftN R k c < 2 ^ 32
+  | 0, _, hc => hc
+  | k + 1, _, hc => shiftN_lt hR k _ (shift1_lt hR hc)
+
+theorem update_lt {R : Nat} (hR : R < 2 ^ 32) (m : Memory) :
+    ∀ n c p, c < 2 ^ 32 → update R m c p n < 2 ^ 32
+  | 0, _, _, hc => hc
+  | n + 1, c, p, hc => by
+    show update R m (updateByte R c (m.bytes p).toNat) (p + 1) n < 2 ^ 32
+    have hb : (m.bytes p).toNat < 2 ^ 32 :=
+      Nat.lt_of_lt_of_le (m.bytes p).isLt (Nat.pow_le_pow_right (by decide) (by decide))
+    exact update_lt hR m n _ _ (shiftN_lt hR 8 _ (Nat.xor_lt_two_pow hc hb))
+
+end CRC
+
+theorem crc32Op_lt (C : Bool) (size acc val : Nat) : crc32Op C size acc val < 2 ^ 32 := by
+  unfold crc32Op; exact rbitNat_lt_two_pow 32 _
+
+/-- `crc32Op_eq_update` for the four sizes, as `janus_run` leaves them (`size` evaluated). -/
+theorem crc32Op_64 (C : Bool) (m : Memory) (acc p : Nat) (hacc : acc < 2 ^ 32) :
+    crc32Op C 64 acc (m.readLE p 8) = CRC.update (if C then 0x82F63B78 else 0xEDB88320) m acc p 8 :=
+  crc32Op_eq_update C m 3 acc p hacc
+theorem crc32Op_32 (C : Bool) (m : Memory) (acc p : Nat) (hacc : acc < 2 ^ 32) :
+    crc32Op C 32 acc (m.readLE p 4) = CRC.update (if C then 0x82F63B78 else 0xEDB88320) m acc p 4 :=
+  crc32Op_eq_update C m 2 acc p hacc
+theorem crc32Op_16 (C : Bool) (m : Memory) (acc p : Nat) (hacc : acc < 2 ^ 32) :
+    crc32Op C 16 acc (m.readLE p 2) = CRC.update (if C then 0x82F63B78 else 0xEDB88320) m acc p 2 :=
+  crc32Op_eq_update C m 1 acc p hacc
+theorem crc32Op_8 (C : Bool) (m : Memory) (acc p : Nat) (hacc : acc < 2 ^ 32) :
+    crc32Op C 8 acc (m.readLE p 1) = CRC.update (if C then 0x82F63B78 else 0xEDB88320) m acc p 1 :=
+  crc32Op_eq_update C m 0 acc p hacc
+
 end Janus.Arm64
