@@ -29,3 +29,4 @@ import Janus.Amd64
 import Janus.Contracts.MapAmd64
 import Janus.Spec.Type
 import Janus.Contracts.Iface
+import Janus.Contracts.IfaceAmd64
