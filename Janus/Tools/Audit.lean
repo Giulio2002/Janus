@@ -1,11 +1,12 @@
-import Janus
 import Lean
 
 /-!
 # `janus-audit`: the trusted theorem and statement auditor
 
-`janus verify` runs this compiled executable instead of elaborating an audit `.lean` file, so
-**no code from the proof ever runs** (A3, A6 in `docs/AUDIT.md`): it imports the proof's compiled
+`janus verify` runs this logic as the compiled executable `janus-audit` (root
+`Janus.Tools.AuditMain`, built with the framework and pinned like its modules); consumer-package
+verification runs it through a trusted `#eval` script (`run`). Either way **no code from the
+proof ever runs** (A3, A6 in `docs/AUDIT.md`): it imports the proof's compiled
 module with `importModules` and never calls `enableInitializersExecution`, which means the
 proof's `initialize` blocks, `#eval`s and macros do not execute here. Importing an `.olean`
 only loads declarations.
@@ -42,6 +43,10 @@ Given the theorem name, the proof module name and a marker, it
 
 Output: one line `<marker>{json}` on stdout (the record), or `<marker>ERROR <message>`.
 Everything else on stderr. The marker is an argument, not read from any file.
+
+This module imports only `Lean` (it reads `Janus` and `Extracted` as data, through
+`importModules`), so the executable links no framework code and its imports are mapped once:
+an environment imported by this process shares no file with the process's own image.
 -/
 
 open Lean

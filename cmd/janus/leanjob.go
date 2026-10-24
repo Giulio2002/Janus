@@ -27,13 +27,21 @@ type toolchain struct {
 
 func findToolchain(lake, root string) (*toolchain, error) {
 	lr := &leanRunner{lake: lake, root: root}
+	// The two queries are independent; run them at once.
+	var version string
+	var verErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		version, verErr = lr.run("env", "lean", "--version")
+	}()
 	prefix, err := lr.run("env", "lean", "--print-prefix")
+	<-done
 	if err != nil {
 		return nil, &diag{Invalid: true, Msg: "lean --print-prefix failed: " + err.Error(), Stage: "toolchain", Details: prefix}
 	}
 	pfx := strings.TrimSpace(prefix)
-	version, err := lr.run("env", "lean", "--version")
-	if err != nil {
+	if err := verErr; err != nil {
 		return nil, &diag{Invalid: true, Msg: "lean --version failed: " + err.Error(), Stage: "toolchain", Details: version}
 	}
 	tc := &toolchain{
