@@ -539,7 +539,12 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 			defer os.RemoveAll(base)
 		}
 	} else {
-		base, err = fw.frameworkBase(lake, progress)
+		// The base stays in use (shared lock) until its build has been copied and compared.
+		var lease *frameworkLease
+		if lease, err = fw.frameworkBase(lake, progress); err == nil {
+			base = lease.dir
+			defer lease.release()
+		}
 	}
 	if err != nil {
 		return fail(err)
@@ -572,11 +577,13 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 		rootBuild := filepath.Join(ws.Root, ".lake", "build")
 		sib := ""
 		if _, err := os.Stat(rootBuild); err != nil {
-			if sib = newestSibling(family, ws.Dir); sib != "" {
+			var sibLock *fileLock
+			if sib, sibLock = newestSibling(family, ws.Dir); sib != "" {
 				_ = os.RemoveAll(rootBuild)
 				if err := copyTree(filepath.Join(sib, "root", ".lake", "build"), rootBuild); err != nil {
 					_ = os.RemoveAll(rootBuild)
 				}
+				sibLock.unlock()
 			}
 		}
 		// Dependency builds too (they are as untrusted as the consumer's own; the kernel
@@ -587,16 +594,25 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 				continue
 			}
 			if sib == "" {
-				sib = newestSibling(family, ws.Dir)
+				var sibLock *fileLock
+				if sib, sibLock = newestSibling(family, ws.Dir); sib != "" {
+					sibLock.unlock()
+				}
 			}
 			if sib == "" {
 				break
+			}
+			// Copy only while the sibling is not in use (its lock held), never a build in progress.
+			sibLock, err := lockFile(sib+".lock", false)
+			if err != nil {
+				continue
 			}
 			if _, err := os.Stat(filepath.Join(sib, "deps", d.Info.Name, ".lake", "build")); err == nil {
 				if err := copyTree(filepath.Join(sib, "deps", d.Info.Name, ".lake", "build"), depBuild); err != nil {
 					_ = os.RemoveAll(depBuild)
 				}
 			}
+			sibLock.unlock()
 		}
 	}
 
@@ -684,11 +700,12 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 }
 
 // newestSibling is the most recently used other workspace of the family with a consumer
-// build that is not being used right now.
-func newestSibling(family, self string) string {
+// build that is not being used right now. It is returned locked (the caller copies from it and
+// then unlocks), so no verification can write to it during the copy.
+func newestSibling(family, self string) (string, *fileLock) {
 	entries, err := os.ReadDir(family)
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	best, bestTime := "", time.Time{}
 	for _, e := range entries {
@@ -704,13 +721,12 @@ func newestSibling(family, self string) string {
 		}
 	}
 	if best == "" {
-		return ""
+		return "", nil
 	}
 	if lk, err := lockFile(best+".lock", false); err == nil {
-		lk.unlock()
-		return best
+		return best, lk
 	}
-	return ""
+	return "", nil
 }
 
 func (ws *consumerWS) close() {
@@ -867,11 +883,12 @@ func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*v
 	if err != nil {
 		return nil, err
 	}
-	base, err := fw.frameworkBase(lake, stderr)
+	lease, err := fw.frameworkBase(lake, stderr)
 	if err != nil {
 		return nil, err
 	}
-	tc, err := findToolchain(lake, base)
+	tc, err := findToolchain(lake, lease.dir)
+	lease.release()
 	if err != nil {
 		return nil, err
 	}
@@ -1309,8 +1326,11 @@ func evictStale() {
 		if err != nil || !fi.IsDir() || fi.ModTime().After(cutoff) {
 			continue
 		}
+		// A framework build in use is share-locked, so the exclusive try fails and it is kept.
+		// Removing the lock file under the lock is safe: lockFileMode re-checks the inode.
 		if lk, err := lockFile(d+".lock", false); err == nil {
 			os.RemoveAll(d)
+			os.Remove(d + ".ready")
 			os.Remove(d + ".lock")
 			lk.unlock()
 		}

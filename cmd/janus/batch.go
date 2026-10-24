@@ -202,11 +202,14 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 	if err != nil {
 		return nil, err
 	}
-	fwBase, err := fw.frameworkBase(lake, stderr)
+	fwLease, err := fw.frameworkBase(lake, stderr)
 	if err != nil {
 		return nil, err
 	}
-	tc, err := findToolchain(lake, fwBase)
+	// Only the toolchain is read here; each workspace (and single-file verification) takes the
+	// framework build again for as long as it uses it.
+	tc, err := findToolchain(lake, fwLease.dir)
+	fwLease.release()
 	if err != nil {
 		return nil, err
 	}

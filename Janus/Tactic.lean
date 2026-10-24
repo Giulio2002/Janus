@@ -4,6 +4,9 @@ import Janus.Tactic.Data
 import Janus.Tactic.Core
 import Janus.Tactic.Common
 import Janus.Tactic.Disasm
+import Janus.Tactic.Ring
+import Janus.Tactic.Carry
+import Janus.Tactic.RingTac
 
 /-!
 # Janus proof automation

@@ -88,71 +88,19 @@ func amd64DataRefs(insts []amd64Inst) []DataRef {
 	return refs
 }
 
-// extractAmd64 is extractFrom for amd64 binaries: entry plus every function reachable by
-// direct branches, breadth first.
-func extractAmd64(b *Binary, entry Func, maxFunctions int) (*Extraction, error) {
-	x := &Extraction{Bin: b, Entry: entry}
-	seen := map[uint64]bool{entry.Addr: true}
-	stubSeen := map[uint64]bool{}
-	queue := []Func{entry}
-	var sweeps [][]amd64Inst
-	for len(queue) > 0 {
-		f := queue[0]
-		queue = queue[1:]
-		code, err := b.codeBytes(f)
-		if err != nil {
-			return nil, &diag{Msg: err.Error(), Stage: "code extraction", Next: "Report this binary layout to the Janus maintainers."}
-		}
-		x.Segments = append(x.Segments, Segment{Name: f.Name, Base: f.Addr, Size: f.Size, Bytes: code})
-		insts := sweepAmd64(code, f.Addr)
-		sweeps = append(sweeps, insts)
-		for _, in := range insts {
-			t, ok := amd64BranchTarget(in)
-			if !ok || (t >= f.Addr && t < f.End()) {
-				continue
-			}
-			g, ok := b.containing(t)
-			if !ok {
-				x.Unresolved = append(x.Unresolved, Unresolved{From: in.PC, Target: t})
-				continue
-			}
-			if k, ok := stubKind(g.Name); ok {
-				if !stubSeen[g.Addr] {
-					stubSeen[g.Addr] = true
-					x.Stubs = append(x.Stubs, Stub{Name: g.Name, Addr: g.Addr, Kind: k})
-				}
-				continue
-			}
-			if !seen[g.Addr] {
-				seen[g.Addr] = true
-				queue = append(queue, g)
-			}
-		}
-		if len(x.Segments)+len(queue) > maxFunctions {
-			var names []string
-			for _, s := range x.Segments {
-				names = append(names, s.Name)
-			}
-			for _, q := range queue {
-				names = append(names, q.Name)
-			}
-			if len(names) > 20 {
-				names = append(names[:20], fmt.Sprintf("... and %d more", len(names)-20))
-			}
-			return nil, &diag{
-				Msg: fmt.Sprintf("%s reaches more than %d functions by direct branches:\n    %s",
-					entry.Name, maxFunctions, strings.Join(names, "\n    ")),
-				Stage: "code extraction",
-				Next:  "Raise the limit with --max-functions N if this is intended, or extract a smaller function.",
-			}
+// extractAmd64Func copies one amd64 function and lists its direct branches.
+func extractAmd64Func(b *Binary, f Func) (Segment, []Unresolved, error) {
+	code, err := b.codeBytes(f)
+	if err != nil {
+		return Segment{}, nil, err
+	}
+	var brs []Unresolved
+	for _, in := range sweepAmd64(code, f.Addr) {
+		if t, ok := amd64BranchTarget(in); ok {
+			brs = append(brs, Unresolved{From: in.PC, Target: t})
 		}
 	}
-	for _, insts := range sweeps {
-		x.DataRefs = append(x.DataRefs, amd64DataRefs(insts)...)
-	}
-	x.Data, x.Skipped = collectData(b, x.DataRefs)
-	x.Lean = renderLeanAmd64(x)
-	return x, nil
+	return Segment{Name: f.Name, Base: f.Addr, Size: f.Size, Bytes: code}, brs, nil
 }
 
 // Thresholds for splitting the rendered program, as for arm64 words (see renderLean).

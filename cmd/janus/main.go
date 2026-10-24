@@ -2,7 +2,7 @@
 // checks extraction artifacts against the binary, and verifies Lean proofs about them.
 //
 //	janus list <binary> [--filter SUBSTR]
-//	janus extract <binary> <symbol> <outdir> [--max-functions N]
+//	janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...]
 //	janus check <outdir> [--binary PATH]
 //	janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH] [--asl]
 //	janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
@@ -70,7 +70,7 @@ func displayPath(p string) string {
 
 const usage = `Usage:
   janus list <binary> [--filter SUBSTR]
-  janus extract <binary> <symbol> <outdir> [--max-functions N]
+  janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...]
   janus check <outdir> [--binary PATH]
   janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH] [--asl]
   janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
@@ -178,7 +178,7 @@ func cmdList(args []string, stdout io.Writer) error {
 }
 
 func cmdExtract(args []string, stdout, stderr io.Writer) error {
-	pos, opts, err := parseArgs(args, "max-functions")
+	pos, opts, err := parseArgs(args, "max-functions", "targets")
 	if err != nil {
 		return usageErr("%v", err)
 	}
@@ -192,7 +192,11 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	binPath, sym, outdir := pos[0], pos[1], pos[2]
-	x, err := extract(binPath, sym, maxF)
+	b, err := loadBinary(binPath)
+	if err != nil {
+		return err
+	}
+	x, err := extractWith(b, sym, maxF, parseTargets(opts["targets"]))
 	if err != nil {
 		return err
 	}
@@ -227,6 +231,14 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	for _, d := range x.Data {
 		fmt.Fprintf(stdout, "  data  0x%x %4d bytes  %s (%s)\n", d.Base, len(d.Bytes), d.Name, d.Section)
 	}
+	for _, t := range x.Dynamic {
+		how := map[string]string{"targets": "named by --targets", "itab": "method of " + t.From,
+			"funcval": "function of " + t.From, "code-address": "address computed at " + t.From}[t.Via]
+		fmt.Fprintf(stdout, "  dynamic target 0x%x  %s (%s)\n", t.Addr, t.Name, how)
+	}
+	for _, o := range x.Omitted {
+		fmt.Fprintf(stdout, "  omitted call at 0x%x to %s: %s; not extracted (the model faults with noCode there)\n", o.From, o.Name, o.Reason)
+	}
 	printSkipped(stderr, x.Skipped)
 	for _, u := range x.Unresolved {
 		fmt.Fprintf(stderr, "Warning: branch at 0x%x targets 0x%x, which is in no known function; it is not extracted (Lean faults with noCode there).\n", u.From, u.Target)
@@ -252,7 +264,7 @@ func printSkipped(w io.Writer, skipped []SkippedData) {
 		case "gopclntab":
 			fmt.Fprintf(w, "Warning: code at 0x%x references %s in .gopclntab; runtime metadata is not copied.\n", s.From, what)
 		case "code":
-			fmt.Fprintf(w, "Note: code at 0x%x computes the code address %s in %s; code is not copied as data.\n", s.From, what, s.Section)
+			fmt.Fprintf(w, "Note: code at 0x%x computes the code address %s in %s; code is not copied as data (a function entry is copied as code, see the dynamic targets).\n", s.From, what, s.Section)
 		default:
 			fmt.Fprintf(w, "Warning: code at 0x%x references %s, which is in no allocated section; nothing is copied.\n", s.From, what)
 		}
