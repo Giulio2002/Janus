@@ -676,26 +676,26 @@ theorem asl_maddl {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b10011
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execMaddl js (fld w 23 1 == 1#1) (fld w 15 1 == 1#1)
         (fld w 16 5).toNat (fld w 10 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPReg hw (by omega)]
   rcases (show (w / 2 ^ 23) % 2 = 0 ∨ (w / 2 ^ 23) % 2 = 1 by omega) with hu | hu <;>
   rcases (show (w / 2 ^ 15) % 2 = 0 ∨ (w / 2 ^ 15) % 2 = 1 by omega) with ho | ho
   · rw [run_DataProcReg_maddl_00 hw hc h2 hu ho (see_entry _ _), run_decode_smaddl_ml]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_maddl (h.entry (BitVec.ofNat 32 w) 828)
       (fld_lt w 10 5) (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 15 1 == 1#1) (fld w 23 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_maddl_01 hw hc h2 hu ho (see_entry _ _), run_decode_smsubl_ml]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_maddl (h.entry (BitVec.ofNat 32 w) 829)
       (fld_lt w 10 5) (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 15 1 == 1#1) (fld w 23 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_maddl_10 hw hc h2 hu ho (see_entry _ _), run_decode_umaddl_ml]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_maddl (h.entry (BitVec.ofNat 32 w) 830)
       (fld_lt w 10 5) (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 15 1 == 1#1) (fld w 23 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_maddl_11 hw hc h2 hu ho (see_entry _ _), run_decode_umsubl_ml]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_maddl (h.entry (BitVec.ofNat 32 w) 831)
       (fld_lt w 10 5) (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 15 1 == 1#1) (fld w 23 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **SMADDL/SMSUBL/UMADDL/UMSUBL**: for every word of the encoding class (bits 31:24 =
 `10011011`, bits 22:21 = `01`) and every related pair of states, Janus' `step` and the generated
@@ -703,7 +703,7 @@ ASL agree. -/
 theorem maddl_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b10011011)
     (h2 : (w / 2 ^ 21) % 4 = 1) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   obtain ⟨s2, hrun, hrel, hbt⟩ := asl_maddl hw hc h2 h (js.pc.toNat : Int)
   have hpc : ∀ u o rm ra rn rd, (Janus.Arm64.execMaddl js u o rm ra rn rd).pc = js.pc := by
     intro u o rm ra rn rd

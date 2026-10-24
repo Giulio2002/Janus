@@ -266,7 +266,7 @@ theorem asl_moveWide {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execMoveWide (if fld w 31 1 == 1#1 then 64 else 32) js (mwOp w)
         (fld w 21 2).toNat (fld w 5 16).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPImm hw (by omega)]
   have hok : (fld w 31 1 == 0#1 && (Sail.BitVec.access (fld w 21 2) 1 == 1#1)) = false := by
     rcases hsf with e | e
@@ -283,19 +283,19 @@ theorem asl_moveWide {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_movewide (h.entry (BitVec.ofNat 32 w) 697) (width_cases w)
       (fld_lt w 0 5) (fld w 5 16) .MoveWideOp_N _ hp
     have e : mwOp w = .movn := by simp [mwOp, hk]
-    exact ⟨s2, hrun, e ▸ hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, e ▸ hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcImm_mw_2 hw hc hk (see_entry _ _), fld_eq_of hw (show (w / 2 ^ 29) % 2 ^ 2 = 2 by omega),
       run_decode_movz_mw _ _ _ _ hok]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_movewide (h.entry (BitVec.ofNat 32 w) 698) (width_cases w)
       (fld_lt w 0 5) (fld w 5 16) .MoveWideOp_Z _ hp
     have e : mwOp w = .movz := by simp [mwOp, hk]
-    exact ⟨s2, hrun, e ▸ hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, e ▸ hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcImm_mw_3 hw hc hk (see_entry _ _), fld_eq_of hw (show (w / 2 ^ 29) % 2 ^ 2 = 3 by omega),
       run_decode_movk_mw _ _ _ _ hok]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_movewide (h.entry (BitVec.ofNat 32 w) 696) (width_cases w)
       (fld_lt w 0 5) (fld w 5 16) .MoveWideOp_K _ hp
     have e : mwOp w = .movk := by simp [mwOp, hk]
-    exact ⟨s2, hrun, e ▸ hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, e ▸ hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **MOVN/MOVZ/MOVK**: for every word of the encoding class (bits 28:23 = `100101`, `opc ≠ 01`,
 `hw<1> = 0` when `sf = 0`) and every related pair of states, Janus' `step` and the generated ASL
@@ -304,7 +304,7 @@ theorem moveWide_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b1
     (hop : (w / 2 ^ 29) % 4 ≠ 1) (hsf : (w / 2 ^ 31) % 2 = 1 ∨ (w / 2 ^ 22) % 2 = 0)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execMoveWide N js (mwOp w)
     (fld w 21 2).toNat (fld w 5 16).toNat (fld w 0 5).toNat
   have hspec : ∀ N, (F N).pc = js.pc := by

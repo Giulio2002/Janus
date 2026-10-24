@@ -685,6 +685,9 @@ func classifyAuditError(msg, full string) error {
 	case strings.Contains(msg, "inline instance"):
 		d.Stage = "statement identity"
 		d.Next = "Instance arguments in the statement must be registered instances: write the operation with its canonical instance (x * y), or name the function (BitVec.add x y). See docs/AUDIT-ROUND2.md CRITICAL-1."
+	case strings.Contains(msg, "binds the instance"):
+		d.Stage = "statement identity"
+		d.Next = "Do not bind instances inside the statement (∃/∀/fun with an [inst : C] binder): state the operation with its canonical instance, or name the function. See docs/AUDIT-ROUND5.md E5."
 	case strings.Contains(msg, "does not round-trip"):
 		d.Stage = "statement identity"
 		d.Next = "The printed statement must elaborate back to the checked one. Add type ascriptions where the printed text is ambiguous (numerals, coercions, implicit arguments), and do not hide instances or notation."

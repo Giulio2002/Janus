@@ -316,14 +316,43 @@ partial def instArgOk (cx : Ctx) (e : Expr) : MetaM Bool := do
     let e' ← Meta.whnfCore e
     if e' == e then return false else instArgOk cx e'
 
+/-- Is `ty` a class (possibly behind `∀` binders and reducible definitions)? A local of such a type
+is a local instance whatever its binder info. -/
+def isClassType (ty : Expr) : MetaM Bool := do
+  try return (← Meta.isClass? ty).isSome catch _ => return false
+
+/-- Round 5 (E5e): a term used as a value (not applied further) whose type, up to `whnf`, still
+takes a parameter of class type: `@Proof.isProd x y r : [HMul …] → Prop` passed to `Exists`.
+Whoever consumes it (`Exists`, `Subtype`, …) supplies that instance, so the operators inside refer
+to a quantified instance, not the canonical one, although no binder appears in the statement. -/
+def unappliedInstParam (e : Expr) : MetaM (Option String) := do
+  let ty ← try Meta.inferType e catch _ => return none
+  let bad ← try
+      Meta.forallTelescopeReducing ty fun xs _ => xs.anyM fun x => do
+        return (← x.fvarId!.getBinderInfo).isInstImplicit || (← isClassType (← Meta.inferType x))
+    catch _ => pure false
+  if bad then
+    return some s!"the statement binds the instance of `{(← Meta.ppExpr e).pretty 10000}` (of type `{(← Meta.ppExpr ty).pretty 10000}`) through whatever consumes it: it is used without its instance argument, so a quantifier (`Exists`, …) chooses the instance and operators inside do not mean the canonical operation. Apply it to its instance, or name the operation"
+  return none
+
 /-- Walk `e` and fail on the first instance-implicit argument that is not a registered
 instance or a local instance binder (a structure-instance literal, anonymous constructor,
-lambda, `let`-bound value, proof-local def, …). -/
-partial def checkInstArgs (cx : Ctx) (e : Expr) : MetaM (Option String) := do
+lambda, `let`-bound value, proof-local def, …).
+
+Round 5 (E5): an instance binder (instance-implicit, or of class type: a local of class type is
+a local instance whatever its binder info) is accepted only in the *leading* binder telescope of
+the checked term (`top`): the theorem's own `[inst : C]` parameters, or a proof-local def's
+parameters. An instance-implicit binder anywhere else (`Exists fun [_ : HMul …] => r = x * y`,
+a nested `∀ [_ : C], …`, an inner `fun [_ : C] => …`) makes every operator under it refer to
+the *bound* instance, so `∃ [_ : HMul …], r = x * y` is true for every `r` while it prints and
+round-trips as `… r = x * y`. Such binders are rejected, and so is a term that still takes an
+instance parameter but is passed unapplied (`unappliedInstParam`: `Exists (@isProd x y r)`). -/
+partial def checkInstArgs (cx : Ctx) (e : Expr) (top : Bool := true) : MetaM (Option String) := do
   match e with
   | .app .. =>
     let fn := e.getAppFn
     let args := e.getAppArgs
+    if let some m ← unappliedInstParam e then return some m
     let finfo ← Meta.getFunInfoNArgs fn args.size
     for h : i in [0:args.size] do
       let a := args[i]
@@ -334,19 +363,26 @@ partial def checkInstArgs (cx : Ctx) (e : Expr) : MetaM (Option String) := do
               | some c => s!"{c}"
               | none => "a function"
             return some s!"the statement passes the inline instance `{(← Meta.ppExpr a).pretty 10000}` as the instance argument {i + 1} of {fnName}; instance arguments must be registered instances (an inline instance can make the printed statement say something else: write the operation with its canonical instance, or name the function)"
-    if let some m ← checkInstArgs cx fn then return some m
+    -- the head is applied: its own instance parameters are the arguments checked above
+    unless fn.isConst || fn.isFVar do
+      if let some m ← checkInstArgs cx fn false then return some m
     for a in args do
-      if let some m ← checkInstArgs cx a then return some m
+      if let some m ← checkInstArgs cx a false then return some m
     return none
   | .lam n d b bi | .forallE n d b bi =>
-    if let some m ← checkInstArgs cx d then return some m
-    Meta.withLocalDecl n bi d fun x => checkInstArgs cx (b.instantiate1 x)
+    if !top && (bi.isInstImplicit || (← isClassType d)) then
+      return some s!"the statement binds the instance `[{n} : {(← Meta.ppExpr d).pretty 10000}]` inside a term (an `∃`, `∀` or `fun` binder that is instance-implicit or of class type, hence a local instance); operators under it refer to that bound instance, not the canonical one (`∃ [_ : HMul …], r = x * y` holds for every r). Instance binders are allowed only as parameters of the theorem or of a proof-local definition"
+    if let some m ← checkInstArgs cx d false then return some m
+    Meta.withLocalDecl n bi d fun x => checkInstArgs cx (b.instantiate1 x) top
   | .letE n t v b _ =>
-    if let some m ← checkInstArgs cx t then return some m
-    if let some m ← checkInstArgs cx v then return some m
-    Meta.withLetDecl n t v fun x => checkInstArgs cx (b.instantiate1 x)
-  | .mdata _ b => checkInstArgs cx b
-  | .proj _ _ s => checkInstArgs cx s
+    if let some m ← checkInstArgs cx t false then return some m
+    if let some m ← checkInstArgs cx v false then return some m
+    Meta.withLetDecl n t v fun x => checkInstArgs cx (b.instantiate1 x) false
+  | .mdata _ b => checkInstArgs cx b top
+  | .proj _ _ s =>
+    if let some m ← unappliedInstParam e then return some m
+    checkInstArgs cx s false
+  | .const .. | .fvar _ => if top then return none else unappliedInstParam e
   | _ => return none
 
 /-- The shape `ppSignature` prints: the declaration name followed by a `declSig`. -/
@@ -503,8 +539,8 @@ def discloseDef (ci : ConstantInfo) : MetaM String := do
     let withO {α} (x : MetaM α) : MetaM α := withOptions (fun o => if ann then annotate o else o) x
     let tyStr := (← withO (Meta.ppExpr ci.type)).pretty 10000
     let isThm := ci matches .thmInfo _
-    let valStr ← match ci.value? with
-      | some v => if isThm then pure "<proof>" else pure ((← withO (Meta.ppExpr v)).pretty 10000)
+    let valStr ← if isThm then pure "<proof>" else match ci.value? with
+      | some v => pure ((← withO (Meta.ppExpr v)).pretty 10000)
       | none => pure "<opaque>"
     lastTy := tyStr; lastVal := valStr
     if !ci.levelParams.isEmpty then continue

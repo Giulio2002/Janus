@@ -404,17 +404,17 @@ theorem asl_div {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b001101
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execDiv (if fld w 31 1 == 1#1 then 64 else 32) js (!(fld w 10 1 == 0#1))
         (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPReg hw (by omega)]
   rcases (show (w / 2 ^ 10) % 2 = 0 ∨ (w / 2 ^ 10) % 2 = 1 by omega) with ho | ho
   · rw [run_DataProcReg_div_0 hw h1 h2 ho (see_entry _ _), run_decode_udiv_dv]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_div (h.entry (BitVec.ofNat 32 w) 782) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 10 1 == 0#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_div_1 hw h1 h2 ho (see_entry _ _), run_decode_sdiv_dv]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_div (h.entry (BitVec.ofNat 32 w) 781) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 10 1 == 0#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 theorem not_fld_eq0 (w i : Nat) (hw : w < 2 ^ 32) : (!(fld w i 1 == 0#1)) = Janus.Arm64.bit w i := by
   rw [← fld_bit w i hw]
@@ -427,7 +427,7 @@ theorem not_fld_eq0 (w i : Nat) (hw : w < 2 ^ 32) : (!(fld w i 1 == 0#1)) = Janu
 theorem div_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011010110)
     (h2 : (w / 2 ^ 11) % 32 = 1) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   obtain ⟨s2, hrun, hrel, hbt⟩ := asl_div hw h1 h2 h (js.pc.toNat : Int)
   have hpc : ∀ N sg rm rn rd, (Janus.Arm64.execDiv N js sg rm rn rd).pc = js.pc := by
     intro N sg rm rn rd

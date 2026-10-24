@@ -1,5 +1,6 @@
 import ArmASL
 import Janus
+import JanusASL.Proofs.Config
 import Lean.Data.Json
 
 /-!
@@ -165,7 +166,9 @@ inductive AslResult where
 
 def excName (e : ArmASL.Exception) : String := (repr e).pretty
 
-def runAsl (base : SState) (c : Case) : AslResult := Id.run do
+/-- The ASL step of a case, and whether `LinuxEL0Config` (`JanusASL.Proofs.cfgOk`) holds on its
+pre-state and (if it completes) its post-state: the configuration the branch theorems assume. -/
+def runAsl (base : SState) (c : Case) : AslResult × Bool := Id.run do
   let mem0 := (List.range dataSize).foldl
     (fun m i => m.insert (dataBase + i) (BitVec.ofNat 8 (pattern c.seed i))) base.mem
   let mem0 := (List.range 4).foldl
@@ -181,11 +184,13 @@ def runAsl (base : SState) (c : Case) : AslResult := Id.run do
       janus_set_v (BitVec.ofNat 5 i) (BitVec.ofNat 128 c.v[i]!)
     janus_set_tpidr (BitVec.ofNat 64 c.tpidr)
   match runM setup s0 with
-  | .error e => return .error s!"setup: {e}"
+  | .error e => return (.error s!"setup: {e}", false)
   | .ok ((), s1) =>
+  let pre := JanusASL.Proofs.cfgOk s1
   match runM (janus_step (BitVec.ofNat 32 c.word)) s1 with
-  | .error e => return .error e
+  | .error e => return (.error e, pre)
   | .ok (r, s2) =>
+  let cfg := pre && JanusASL.Proofs.cfgOk s2
   match r with
   | .Janus_OK =>
     let readBack : SailM (Array Nat × Nat × Nat × Nat × Array Nat) := do
@@ -197,7 +202,7 @@ def runAsl (base : SState) (c : Case) : AslResult := Id.run do
         vs := vs.push (← janus_get_v (BitVec.ofNat 5 i)).toNat
       pure (xs, (← janus_get_sp ()).toNat, (← janus_get_pc ()).toNat, (← janus_get_nzcv ()).toNat, vs)
     match runM readBack s2 with
-    | .error e => return .error s!"readback: {e}"
+    | .error e => return (.error s!"readback: {e}", cfg)
     | .ok ((xs, sp, pc, nzcv, vs), _) =>
       let mem := (List.range dataSize).filterMap fun i =>
         let b := (s2.mem.getD (dataBase + i) 0).toNat
@@ -206,21 +211,21 @@ def runAsl (base : SState) (c : Case) : AslResult := Id.run do
       let stray := baseKeys.filterMap fun a =>
         if s2.mem.get? a = mem0.get? a then none else some a
       let stray := if s2.mem.size = mem0.size then stray else stray ++ [0]
-      return .ok xs sp pc nzcv mem stray vs
+      return (.ok xs sp pc nzcv mem stray vs, cfg)
   | .Janus_Exception =>
     let rd : SailM (ArmASL.Exception × BitVec 25 × BitVec 64) := do
       pure (← readReg Register.__janus_exc_type, ← readReg Register.__janus_exc_syndrome, ← readReg Register.__janus_exc_vaddress)
     match runM rd s2 with
-    | .ok ((e, syn, va), _) => return .exception e syn.toNat va.toNat
-    | .error e => return .error e
-  | .Janus_Undefined => return .undefined
-  | .Janus_Unpredictable => return .unpredictable
+    | .ok ((e, syn, va), _) => return (.exception e syn.toNat va.toNat, cfg)
+    | .error e => return (.error e, cfg)
+  | .Janus_Undefined => return (.undefined, cfg)
+  | .Janus_Unpredictable => return (.unpredictable, cfg)
   | .Janus_ImpDef =>
     match runM (readReg Register.__janus_impdef) s2 with
-    | .ok (s, _) => return .impdef s
-    | .error e => return .error e
-  | .Janus_See => return .other "SEE"
-  | .Janus_Other => return .other "ReservedEncoding/SError"
+    | .ok (s, _) => return (.impdef s, cfg)
+    | .error e => return (.error e, cfg)
+  | .Janus_See => return (.other "SEE", cfg)
+  | .Janus_Other => return (.other "ReservedEncoding/SError", cfg)
 
 /-! ## The Janus side (as `Oracle/Main.lean`) -/
 
@@ -325,6 +330,69 @@ def main (args : List String) : IO UInt32 := do
     | .ok (v, _) =>
       IO.println s!"FeatureImpl true at: {(List.range 259).filter (fun i => v.toArray.getD i false)}"
     | .error e => IO.println s!"FeatureImpl: {e}"
+    match runM (readReg Register.BRBFCR_EL1) base with
+    | .ok (v, _) => IO.println s!"BRBFCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"BRBFCR_EL1: {e}"
+    match runM (readReg Register.BRBCR_EL1) base with
+    | .ok (v, _) => IO.println s!"BRBCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"BRBCR_EL1: {e}"
+    match runM (readReg Register.BRBCR_EL2) base with
+    | .ok (v, _) => IO.println s!"BRBCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"BRBCR_EL2: {e}"
+    match runM (readReg Register.PMSIDR_EL1) base with
+    | .ok (v, _) => IO.println s!"PMSIDR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"PMSIDR_EL1: {e}"
+    match runM (readReg Register.PMSCR_EL1) base with
+    | .ok (v, _) => IO.println s!"PMSCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"PMSCR_EL1: {e}"
+    match runM (readReg Register.PMSCR_EL2) base with
+    | .ok (v, _) => IO.println s!"PMSCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"PMSCR_EL2: {e}"
+    match runM (readReg Register.PMBLIMITR_EL1) base with
+    | .ok (v, _) => IO.println s!"PMBLIMITR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"PMBLIMITR_EL1: {e}"
+    match runM (readReg Register.PMBSR_EL1) base with
+    | .ok (v, _) => IO.println s!"PMBSR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"PMBSR_EL1: {e}"
+    match runM (readReg Register.GCSCRE0_EL1) base with
+    | .ok (v, _) => IO.println s!"GCSCRE0_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"GCSCRE0_EL1: {e}"
+    match runM (readReg Register.GCSCR_EL1) base with
+    | .ok (v, _) => IO.println s!"GCSCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"GCSCR_EL1: {e}"
+    match runM (readReg Register.HCRX_EL2) base with
+    | .ok (v, _) => IO.println s!"HCRX_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"HCRX_EL2: {e}"
+    match runM (readReg Register.TCR_EL2) base with
+    | .ok (v, _) => IO.println s!"TCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"TCR_EL2: {e}"
+    match runM (readReg Register.SCTLR_EL2) base with
+    | .ok (v, _) => IO.println s!"SCTLR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"SCTLR_EL2: {e}"
+    match runM (readReg Register.SCTLR_EL3) base with
+    | .ok (v, _) => IO.println s!"SCTLR_EL3 = {hex v.toNat}"
+    | .error e => IO.println s!"SCTLR_EL3: {e}"
+    match runM (readReg Register.CPTR_EL3) base with
+    | .ok (v, _) => IO.println s!"CPTR_EL3 = {hex v.toNat}"
+    | .error e => IO.println s!"CPTR_EL3: {e}"
+    match runM (readReg Register.CPTR_EL2) base with
+    | .ok (v, _) => IO.println s!"CPTR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"CPTR_EL2: {e}"
+    match runM (readReg Register.CPACR_EL1) base with
+    | .ok (v, _) => IO.println s!"CPACR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"CPACR_EL1: {e}"
+    match runM (readReg Register.MDSCR_EL1) base with
+    | .ok (v, _) => IO.println s!"MDSCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"MDSCR_EL1: {e}"
+    match runM (readReg Register.SPESampleInFlight) base with
+    | .ok (v, _) => IO.println s!"SPESampleInFlight = {v}"
+    | .error e => IO.println s!"SPESampleInFlight: {e}"
+    match runM (readReg Register.InGuardedPage) base with
+    | .ok (v, _) => IO.println s!"InGuardedPage = {v}"
+    | .error e => IO.println s!"InGuardedPage: {e}"
+    match runM (readReg Register.SCR) base with
+    | .ok (v, _) => IO.println s!"SCR = {hex v.toNat}"
+    | .error e => IO.println s!"SCR: {e}"
     match runM (readReg Register.SCR_EL3) base with
     | .ok (v, _) => IO.println s!"SCR_EL3 = {hex v.toNat}"
     | .error e => IO.println s!"SCR_EL3: {e}"
@@ -343,18 +411,20 @@ def main (args : List String) : IO UInt32 := do
     match runM (readReg Register.MDCR_EL2) base with
     | .ok (v, _) => IO.println s!"MDCR_EL2 = {hex v.toNat}"
     | .error e => IO.println s!"MDCR_EL2: {e}"
-    match runM (readReg Register.PMSCR_EL1) base with
-    | .ok (v, _) => IO.println s!"PMSCR_EL1 = {hex v.toNat}"
-    | .error e => IO.println s!"PMSCR_EL1: {e}"
-    match runM (readReg Register.CPACR_EL1) base with
-    | .ok (v, _) => IO.println s!"CPACR_EL1 = {hex v.toNat}"
-    | .error e => IO.println s!"CPACR_EL1: {e}"
-    match runM (readReg Register.SCR) base with
-    | .ok (v, _) => IO.println s!"SCR = {hex v.toNat}"
-    | .error e => IO.println s!"SCR: {e}"
-    match runM (readReg Register.InGuardedPage) base with
-    | .ok (v, _) => IO.println s!"InGuardedPage = {v}"
-    | .error e => IO.println s!"InGuardedPage: {e}"
+    match runM (CreateAccDescGPR MemOp.MemOp_LOAD false false true) base with
+    | .ok (acc, _) => IO.println s!"accdesc load: {repr acc}"
+    | .error e => IO.println s!"accdesc: {e}"
+    -- translation of a data-buffer address, as a load and as a store
+    for (nm, op) in [("load", MemOp.MemOp_LOAD), ("store", MemOp.MemOp_STORE)] do
+      let tr : SailM (AddressDescriptor × Bool) := do
+        let acc ← CreateAccDescGPR op false false true
+        let tc ← AArch64_AccessIsTagChecked (BitVec.ofNat 64 (dataBase + 8)) acc
+        let d ← AArch64_TranslateAddress (BitVec.ofNat 64 (dataBase + 8)) acc true 8
+        pure (d, tc)
+      match runM tr base with
+      | .ok ((d, tc), _) =>
+        IO.println s!"{nm}: fault {repr d.fault.statuscode} pa {hex d.paddress.address.toNat} {repr d.paddress.paspace} memtype {repr d.memattrs.memtype} inner {d.memattrs.inner.attrs} outer {d.memattrs.outer.attrs} tags {repr d.memattrs.tags} tagchecked {tc}"
+      | .error e => IO.println s!"{nm}: {e}"
     return 0
   let lines := (← IO.FS.lines path).filter (·.trimAscii.toString != "")
   let cases ← lines.mapM fun l => match parseCase l with
@@ -364,14 +434,20 @@ def main (args : List String) : IO UInt32 := do
   let chunk := (cases.size + jobs - 1) / jobs
   let tasks := (List.range jobs).map fun k =>
     Task.spawn (prio := .dedicated) fun _ =>
-      (cases.extract (k * chunk) ((k + 1) * chunk)).map fun c => (c, compare dczid c (runAsl base c))
+      (cases.extract (k * chunk) ((k + 1) * chunk)).map fun c =>
+        let (r, cfg) := runAsl base c
+        (c, compare dczid c r, cfg)
   let results := tasks.foldl (fun acc t => acc ++ t.get) #[]
+  -- LinuxEL0Config (the branch theorems' assumption) on the base state and every case's pre-state
+  -- and post-state.
+  let baseCfg := JanusASL.Proofs.cfgOk base
+  let cfgBad := (results.filter fun (_, _, cfg) => !cfg).size
   let mut agree := 0
   let mut gap := 0
   let mut mism := 0
   let mut kinds : Std.HashMap String Nat := {}
   let h ← IO.FS.Handle.mk out .write
-  for (c, v) in results do
+  for (c, v, _) in results do
     h.putStrLn (verdictJson c v).compress
     match v with
     | .agree k => agree := agree + 1; kinds := kinds.insert ("agree " ++ k) (kinds.getD ("agree " ++ k) 0 + 1)
@@ -383,4 +459,5 @@ def main (args : List String) : IO UInt32 := do
   for (k, n) in kinds.toList.mergeSort (fun a b => a.2 ≥ b.2) do
     IO.println s!"{n}\t{k}"
   IO.println s!"cases {results.size}  agree {agree}  gap {gap}  MISMATCH {mism}"
-  return if mism = 0 then 0 else 1
+  IO.println s!"LinuxEL0Config: base {baseCfg}, cases violating it (pre- or post-state) {cfgBad}"
+  return if mism = 0 && baseCfg && cfgBad = 0 then 0 else 1
