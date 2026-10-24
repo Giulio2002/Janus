@@ -62,10 +62,10 @@ def calleeStack64 (s : State) (stack nargs : Nat) : List (Nat × Nat) :=
    ((s.regs 4).toNat + 8, (s.regs 4).toNat + 8 + 8 * nargs)]
 
 /-- The ABI part of every contract precondition (amd64): the return address at `[RSP]` is below
-`2^48`, `RSP` is 8-aligned, and `[RSP - stack, RSP + 8 + 8·nargs)` is writable and below
+`2^47` (a canonical user address: `RET` faults otherwise), `RSP` is 8-aligned, and `[RSP - stack, RSP + 8 + 8·nargs)` is writable and below
 `2^48`. -/
 def CallOK64 (s : State) (stack nargs : Nat) : Prop :=
-  s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 48 ∧ (s.regs 4).toNat % 8 = 0 ∧
+  s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47 ∧ (s.regs 4).toNat % 8 = 0 ∧
     stack ≤ (s.regs 4).toNat ∧ (s.regs 4).toNat + 8 + 8 * nargs ≤ 2 ^ 48 ∧
     s.mem.accessible ((s.regs 4).toNat - stack) (stack + 8 + 8 * nargs) true = true
 

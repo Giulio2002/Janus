@@ -1723,7 +1723,7 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
       if ← dischargeAccessible g then return
       throwError "janus64_disch: cannot prove{indentExpr t}"
-  evalTactic (← `(tactic| omega))
+  evalTactic (← `(tactic| first | omega | janus_apart))
 
 /-! ## Syntax -/
 

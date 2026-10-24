@@ -65,6 +65,15 @@ theorem Outside.of_sub {b k a n : Nat} {rs : List (Nat × Nat)} (h : Outside b k
     simp only [outside_cons] at h ⊢
     exact ⟨by omega, ih h.2⟩
 
+/-- `[a, a+n)` and `[b, b+k)` do not overlap. The same as `Spec.Disjoint`, but a separate
+definition that `omega` does not unfold: a precondition with many disjointness facts states
+them as `Apart`, so that `omega` does not case-split on all of them in every side condition;
+the dischargers use them one at a time (`janus_apart`). -/
+def Apart (a n b k : Nat) : Prop := a + n ≤ b ∨ b + k ≤ a
+
+theorem Apart.symm {a n b k : Nat} (h : Apart a n b k) : Apart b k a n := by
+  unfold Apart at *; omega
+
 /-- `[a, a+n)` lies inside one of the ranges `[lo, hi)` of `rs`. -/
 def InRanges (a n : Nat) (rs : List (Nat × Nat)) : Prop := ∃ r ∈ rs, r.1 ≤ a ∧ a + n ≤ r.2
 
@@ -148,6 +157,44 @@ register_option janus.aliasInfo : Bool := {
 /-- Every identifier inside a syntax tree, in order. -/
 partial def collectIdents (stx : Syntax) : Array Syntax :=
   if stx.isIdent then #[stx] else stx.getArgs.foldl (fun acc a => acc ++ collectIdents a) #[]
+
+/-- Close an arithmetic goal by `omega` using one `Apart` hypothesis at a time: for each
+`h : Apart a n b k` of the context, `omega` in both cases of `h`. -/
+partial def arithAtoms (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
+  let e := e.consumeMData
+  if e.isAppOfArity ``HAdd.hAdd 6 || e.isAppOfArity ``HSub.hSub 6 || e.isAppOfArity ``HMul.hMul 6 ||
+      e.isAppOfArity ``HDiv.hDiv 6 || e.isAppOfArity ``HMod.hMod 6 then
+    arithAtoms (e.getArg! 5) (arithAtoms (e.getArg! 4) acc)
+  else if e.isAppOfArity ``OfNat.ofNat 3 || e.isRawNatLit then acc
+  else if e.isAppOfArity ``LE.le 4 || e.isAppOfArity ``LT.lt 4 || e.isAppOfArity ``Eq 3 then
+    arithAtoms (e.getArg! (e.getAppNumArgs - 1)) (arithAtoms (e.getArg! (e.getAppNumArgs - 2)) acc)
+  else if e.isAppOfArity ``Or 2 || e.isAppOfArity ``And 2 then
+    arithAtoms (e.getArg! 1) (arithAtoms (e.getArg! 0) acc)
+  else if acc.contains e then acc else acc.push e
+
+def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
+  let gty ← instantiateMVars (← g.getType)
+  -- only disjunctions (the read-over-write and frame side conditions) are worth it
+  unless gty.consumeMData.isAppOfArity ``Or 2 do return false
+  let goalAtoms := arithAtoms gty
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.Apart 4 do continue
+    -- relevant facts only: every atom of the two ranges occurs in the goal
+    let hAtoms := arithAtoms (ty.getArg! 2) (arithAtoms (ty.getArg! 0))
+    unless hAtoms.all goalAtoms.contains do continue
+    let saved ← saveState
+    try
+      let h ← Term.exprToSyntax d.toExpr
+      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
+        (have h' : _ := $h
+         unfold Janus.Apart at h'
+         rcases h' with h' | h' <;> omega))))
+      if gs.isEmpty then return true
+      saved.restore
+    catch _ => saved.restore
+  return false
 
 /-- `0x…` -/
 def hex (n : Nat) : String := "0x" ++ String.ofList (Nat.toDigits 16 n)
@@ -820,8 +867,8 @@ where
     try
       let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| omega)))
       if gs.isEmpty then return true
-      saved.restore; return false
-    catch _ => saved.restore; return false
+      saved.restore; omegaApart g
+    catch _ => saved.restore; omegaApart g
 
 /-- `rs[i] ∈ rs` for a list literal `rs = [e₀, …]`. -/
 def memProof (ty : Expr) (elems : List Expr) (i : Nat) : MetaM Expr := do
@@ -840,8 +887,8 @@ def frameArith (g : MVarId) : TacticM Bool := do
       ((try simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
           BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *); omega))))
     if gs.isEmpty then return true
-    saved.restore; return false
-  catch _ => saved.restore; return false
+    saved.restore; omegaApart g
+  catch _ => saved.restore; omegaApart g
 
 /-- Peel the store `m = m'.writeLE a k v` of a `MemFrame m₀ m rs` goal using a hypothesis
 `InRanges b k' rs'` (with `rs'` contained in `rs`, e.g. `rs = rs' ++ …`, and `[a, a+k) ⊆ [b, b+k')`
@@ -950,6 +997,12 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
     g.assign (← mkAppM ``Janus.MemFrame.trans #[hm, d.toExpr, sub])
     return ← proveFrame hm.mvarId! (fuel - 1)
   throwError "janus_frame: cannot relate the memory{indentExpr m}\nto{indentExpr m0}\n(no store to peel, and no `MemFrame` hypothesis about it whose ranges are covered)"
+
+/-- `janus_apart`: `omega` with the `Apart` hypotheses of the context, one at a time. -/
+elab "janus_apart" : tactic => do
+  let g ← getMainGoal
+  unless ← omegaApart g do throwError "janus_apart: no `Apart` hypothesis makes omega succeed"
+  replaceMainGoal []
 
 /-- Prove a goal `MemFrame m₀ m rs` (the memory part of a callee summary). -/
 elab "janus_frame" : tactic => do proveFrame (← getMainGoal); replaceMainGoal []
