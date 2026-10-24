@@ -17,8 +17,15 @@
 #   HW       hardware results of the corpus (default: hw.jsonl next to CASES)
 #   OUT      output dir for the check (default artifacts/x86formal)
 #   JOBS     parallel tasks for the check (default nproc)
+#   JANUS_LAKE_JOB_MEM  per-lake-job memory budget (default 3G): lake runs with
+#            LEAN_NUM_THREADS = budget / this (scripts/lib/memguard.sh). Measured peaks
+#            (scripts/peak-mem.sh, one job): X86Sail/Part12 2.6 GB RSS, the proof files <= 1.9 GB.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
+export JANUS_LAKE_JOB_MEM="${JANUS_LAKE_JOB_MEM:-3G}"
 mode="${1:-check}"
 DEPS="${DEPS:-/srv/janus-asl-deps}"
 X86DEPS="${X86DEPS:-/srv/janus-x86-deps}"
@@ -97,19 +104,19 @@ unpack() {
 
 do_build() {
   unpack
-  (cd "$pkg" && lake build X86Sail JanusX86 janus-x86-check)
+  (cd "$pkg" && memguard_lake build X86Sail JanusX86 janus-x86-check)
 }
 
 do_check() {
   do_build
   if [ ! -f "$CASES" ]; then "$root/scripts/oracle-amd64.sh" full; fi
   mkdir -p "$OUT"
-  (cd "$pkg" && lake exe janus-x86-check "$CASES" "$HW" "$OUT/verdicts.jsonl" "$JOBS") | tee "$OUT/summary.txt"
+  (cd "$pkg" && memguard_run -n janus-x86-check -- lake exe janus-x86-check "$CASES" "$HW" "$OUT/verdicts.jsonl" "$JOBS") | tee "$OUT/summary.txt"
 }
 
 do_prove() {
   unpack
-  (cd "$pkg" && lake build JanusX86 && lake env lean JanusX86/Audit.lean)
+  (cd "$pkg" && memguard_lake build JanusX86 && memguard_run -n audit -- lake env lean JanusX86/Audit.lean)
 }
 
 case "$mode" in
