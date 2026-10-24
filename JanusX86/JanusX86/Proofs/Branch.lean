@@ -195,7 +195,7 @@ theorem decode_jcc8 {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat
       by_cases hl : 15 < n + 2 <;> by_cases hrp : p.rep = 0 <;> cases hf : p.fs <;> cases hk : p.lock <;>
         cases hos : p.opsize <;> cases hsg : p.seg <;>
         simp (config := {decide := true}) [hf, hk, hl, hrp, hos, hsg, lockable, withFS] at hd ⊢
-      all_goals (obtain ⟨rfl, rfl⟩ := hd; first | exact ⟨v, r, rfl, rfl, by omega, rfl⟩ | exact ⟨rfl, by omega, rfl⟩ | (simp; omega))
+      all_goals first | (simp at hd; done) | (obtain ⟨rfl, rfl⟩ := hd; first | exact ⟨v, r, rfl, rfl, by omega, rfl⟩ | exact ⟨rfl, by omega, rfl⟩ | (simp; omega))
 
 set_option maxRecDepth 100000 in
 theorem run_one_byte_jcc (opc : Nat) (hopc : 0x70 ≤ opc ∧ opc < 0x80)
@@ -272,5 +272,176 @@ theorem jcc8_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Co
     · simp only [Except.ok.injEq] at hstep; subst hstep
       rwa [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (show js.rip.toNat + n + 1 + 1 < 2 ^ 64 by omega)]
     · simp at hstep
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+/-- The signed value of a `k`-byte displacement `v`. -/
+def relI (k v : Nat) : Int := if 2 ^ (8 * k - 1) ≤ v then (v : Int) - 2 ^ (8 * k) else v
+
+theorem rel_toInt48 (k : Nat) (hk : k = 1 ∨ k = 4) (v : Nat) (hv : v < 2 ^ (8 * k)) :
+    (Sail.BitVec.signExtend (Sail.BitVec.truncate (BitVec.ofNat 64 (Janus.Amd64.Decode.sext (8 * k) 64 v)) 32) 48).toInt =
+      relI k v := by
+  have e : Sail.BitVec.truncate (BitVec.ofNat 64 (Janus.Amd64.Decode.sext (8 * k) 64 v)) 32 =
+      BitVec.ofNat 32 (Janus.Amd64.Decode.sext (8 * k) 32 v) := by
+    apply BitVec.eq_of_toNat_eq
+    rcases hk with rfl | rfl <;> simp [Sail.BitVec.truncate, Janus.Amd64.Decode.sext] at hv ⊢ <;> split <;> omega
+  rw [e]
+  simp only [Sail.BitVec.signExtend]
+  rw [BitVec.toInt_signExtend_of_le (by decide)]
+  simp only [BitVec.toInt, BitVec.toNat_ofNat, relI, Janus.Amd64.Decode.sext]
+  rcases hk with rfl | rfl <;> simp at hv ⊢ <;> split <;> split <;> omega
+
+theorem rel_sext (k : Nat) (hk : k = 1 ∨ k = 4) (v : Nat) (hv : v < 2 ^ (8 * k)) :
+    (Janus.Amd64.Decode.sext (8 * k) 64 v : Int) = relI k v ∨
+      (Janus.Amd64.Decode.sext (8 * k) 64 v : Int) = relI k v + 2 ^ 64 := by
+  unfold relI Janus.Amd64.Decode.sext
+  rcases hk with rfl | rfl <;> simp at hv ⊢ <;> split <;> omega
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+set_option maxHeartbeats 2000000 in
+theorem run_jmp_d {js : Janus.Amd64.State} {s : SState} (h : Rel js s) (hc : X86Config s)
+    {p : Janus.Amd64.Decode.Prefixes} {x : BitVec 52} {rex : BitVec 8} (hp : PfxRel p x rex)
+    (opc : Nat) (hopc : opc = 0xEB ∨ opc = 0xE9) {k : Nat} (hk : k = if opc = 0xEB then 1 else 4)
+    (m sib : BitVec 8) (tr : Nat) {ds : List Nat} (hds : CodeAt s tr ds) {v : Nat}
+    {r : List Nat} (hle : Janus.Amd64.Decode.readLE k ds = some (v, r)) (sr : Nat) (hl1 : sr ≤ tr + k)
+    (hl2 : tr + k ≤ sr + 15) (htr : tr + k < 2 ^ 47)
+    (hT : ((tr + k) + Janus.Amd64.Decode.sext (8 * k) 64 v) % 2 ^ 64 < 2 ^ 47) :
+    ∃ s', (x86_near_jmp_op_en_d .Mode_64bit (BitVec.ofNat 48 sr) (BitVec.ofNat 48 tr) x rex (BitVec.ofNat 8 opc) m sib).run s =
+      .ok () s' ∧
+      Rel (js.setRip (BitVec.ofNat 64 (((tr + k) + Janus.Amd64.Decode.sext (8 * k) 64 v) % 2 ^ 64))) s' ∧
+      X86Config s' := by
+  have hk14 : k = 1 ∨ k = 4 := by rcases hopc with rfl | rfl <;> simp [hk]
+  have hrip := h.rip
+  have hsel := run_select_address_size x (by rw [hp.adr]; decide) s
+  have hb : (BitVec.ofNat 8 opc == 0xEB#8) = decide (opc = 0xEB) := by rcases hopc with rfl | rfl <;> decide
+  have hsz : (if decide (opc = 0xEB) = true then (1 : Int) else 4) = ((k : Nat) : Int) := by
+    rcases hopc with rfl | rfl <;> simp [hk]
+  have hcr : (check_range 0 4 ((k : Nat) : Int)).run s = .ok ((k : Nat) : Int) s := by
+    have hb : ((0 ≤b ((k : Nat) : Int)) && (((k : Nat) : Int) ≤b 4)) = true := by
+      simp only [Bool.and_eq_true, decide_eq_true_eq]; omega
+    simp only [check_range, run_bind, run_sail_assert_of hb, run_pure]
+  obtain ⟨-, hvv, -⟩ := readLE_sumLE _ ds hle
+  have hvl : v < 2 ^ (8 * k) := by
+    rw [hvv, Nat.pow_mul]
+    exact sumLE_lt _ (fun j => by
+      by_cases hj : j < ds.length
+      · rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hj]; exact hds.1 _ (List.getElem_mem _)
+      · rw [List.getD_eq_getElem?_getD, List.getElem?_eq_none (by omega)]; decide) _
+  have hrime := run_rime_size_disp hc hrip 8 hds hk14 hle (by omega)
+  have hadd1 : (add_to_iptr .Mode_64bit (BitVec.ofNat 48 tr) (bits_of_int ((k : Nat) : Int) 48)).run s =
+      .ok (BitVec.ofNat 48 (tr + k)) s := by
+    have ez : (bits_of_int ((k : Nat) : Int) 48).toNat = k := by
+      rw [bits_of_int_natCast_toNat]; exact Nat.mod_eq_of_lt (by omega)
+    rw [run_add_to_iptr _ _ (by rw [ez]; simp; omega), ez]
+    congr 2; simp; omega
+  have hlen := check_len_ok sr (tr + k) hl1 hl2 htr
+  have hTe := target_eq (tr + k) (Janus.Amd64.Decode.sext (8 * k) 64 v) (relI k v) (rel_sext k hk14 v hvl)
+    (by omega) (by unfold relI; rcases hk14 with rfl | rfl <;> simp at hvl ⊢ <;> split <;> omega) hT
+  have hoff := rel_toInt48 k hk14 v hvl
+  have htr48 := toInt_ofNat48 (tr + k) (by omega)
+  simp only [x86_near_jmp_op_en_d, select_operand_size, in_64bit_mode, ↓reduceIte, Bool.not_true, Bool.and_false,
+    Bool.false_eq_true, hb, run_bind, ite_pure, run_pure, hsz, hcr, hsel, show (8 : Int).toNat = 8 from rfl, Int.toNat_natCast,
+    hrime, hadd1, hlen, is_some]
+  rw [run_add_to_iptr_int _ _ (by rw [htr48, hoff]; omega) (by rw [htr48, hoff]; omega)]
+  have hk2 : (((k : Nat) : Int) == 2) = false := by rcases hk14 with rfl | rfl <;> rfl
+  simp only [run_pure, hk2, Bool.false_eq_true, ↓reduceIte]
+  rw [htr48, hoff, hTe.2.2]
+  exact ⟨_, run_write_iptr hc.log _ hT, h.setRipR _, hc.set (by decide) _⟩
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem decode_jmp {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: rest, n)) (ho : o = 0xEB ∨ o = 0xE9)
+    {k : Nat} (hk : k = if o = 0xEB then 1 else 4)
+    {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
+    p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ p.opsize = false ∧ ∃ v r, readLE k rest = some (v, r) ∧
+      len = n + 1 + k ∧ len ≤ 15 ∧ i = .jmp (sext (8 * k) 64 v) := by
+  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  cases hr : readLE k rest with
+  | none =>
+    exfalso
+    rcases ho with rfl | rfl <;> subst hk <;> (try simp (config := {decide := true}) only [↓reduceIte] at hr) <;>
+      simp (config := {decide := true}) [oneByte, hr] at hd
+  | some vr =>
+    obtain ⟨v, r⟩ := vr
+    rcases ho with rfl | rfl <;> subst hk <;> (try simp (config := {decide := true}) only [↓reduceIte] at hr ⊢)
+    all_goals
+      simp (config := {decide := true}) only [↓reduceIte, oneByte, hr, finish, true_and, and_true,
+        false_and, and_false, or_false, false_or] at hd
+      by_cases hl : 15 < n + 2 <;> by_cases hl5 : 15 < n + 5 <;> by_cases hrp : p.rep = 0 <;> cases hf : p.fs <;>
+        cases hk : p.lock <;> cases hos : p.opsize <;> cases hsg : p.seg <;>
+        simp (config := {decide := true}) [hf, hk, hl, hl5, hrp, hos, hsg, lockable, withFS] at hd ⊢
+      all_goals first | (simp at hd; done) | (obtain ⟨rfl, rfl⟩ := hd; first | exact ⟨v, r, rfl, rfl, by omega, rfl⟩ | exact ⟨rfl, by omega, rfl⟩ | (simp; omega))
+
+set_option maxRecDepth 100000 in
+theorem run_one_byte_jmp (opc : Nat) (hopc : opc = 0xEB ∨ opc = 0xE9)
+    (sr tr : BitVec 48) (x : BitVec 52) (hl : _get_prefixes_lck x = 0#8) (rex m sib : BitVec 8) (s : SState) :
+    (one_byte_opcode_execute .Mode_64bit sr tr x rex (BitVec.ofNat 8 opc) m sib).run s =
+      (x86_near_jmp_op_en_d .Mode_64bit sr tr x rex (BitVec.ofNat 8 opc) m sib).run s := by
+  rcases hopc with rfl | rfl <;>
+  simp (config := {decide := true}) only [one_byte_opcode_execute, ext_one_byte_opcode_execute, eq_bits_nat,
+    ↓reduceIte, Bool.false_eq_true, hl, Bool.and_false, run_bind, run_pure,
+    show (240#8 == 0#8) = false from rfl] <;> rfl
+
+set_option maxHeartbeats 1000000 in
+open Janus.Amd64 Janus.Amd64.Decode in
+/-- **JMP rel8/rel32** (`EB/E9`). -/
+theorem jmp_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
+    {bytes : List Nat} (hcode : CodeAt s js.rip.toNat bytes) (hlim : js.rip.toNat + 17 < 2 ^ 47)
+    {p : Prefixes} {o : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: rest, n)) (ho : o = 0xEB ∨ o = 0xE9)
+    (hstep : step bytes js = .ok js') :
+    ∃ s', (janus_x86_step ()).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ X86Config s' := by
+  cases hd : decode bytes with
+  | none => simp [step, hd] at hstep
+  | some il =>
+  obtain ⟨i, len⟩ := il
+  generalize hk : (if o = 0xEB then 1 else 4) = k
+  obtain ⟨hlk, hfs, hrep, hos, v, r, hr, rfl, hlen, rfl⟩ := decode_jmp hpp ho hk.symm hd
+  rw [step_of_decode hd] at hstep
+  have hk14 : k = 1 ∨ k = 4 := by rcases ho with rfl | rfl <;> simp [← hk]
+  have hdrop : bytes.drop n = o :: rest := by simpa using parsePrefixes_drop _ _ _ hpp
+  have hrip : s.regs.get? .rip = some (BitVec.ofNat 64 js.rip.toNat) := by
+    rw [BitVec.ofNat_toNat, BitVec.setWidth_eq]; exact hrel.rip
+  have hpg : prefixGroup o = 0 := by
+    unfold prefixGroup; split <;> (try split) <;> (try split) <;> (try split) <;> omega
+  have hmp : modrmP1 o = false := by rcases ho with rfl | rfl <;> decide
+  have hcs : CodeAt s (js.rip.toNat + n + 1) rest := by
+    have h2 : (bytes.drop n).drop 1 = rest := by rw [hdrop]; rfl
+    have := hcode.drop (n + 1)
+    rw [show bytes.drop (n + 1) = rest by simpa [List.drop_drop, Nat.add_comm] using h2] at this
+    rwa [show js.rip.toNat + (n + 1) = js.rip.toNat + n + 1 by omega] at this
+  obtain ⟨x, rex, hpr, hnx, hf⟩ := run_fetch_one hcfg hrip hcode hpp (by omega) hlim hpg (by omega)
+    ⟨by omega, by omega, by omega⟩ (by rw [hmp]; simp [modrmSib])
+  rw [hmp] at hf
+  simp only [modrmSib, Bool.false_eq_true, ↓reduceIte, Nat.add_zero] at hf
+  have hl0 : _get_prefixes_lck x = 0#8 := by have := hpr.lck; rw [hlk] at this; simpa using this
+  rw [run_one_byte_jmp o ho _ _ x hl0] at hf
+  simp only [exec, branchTo] at hstep
+  rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (show js.rip.toNat + (n + 1 + k) < 2 ^ 64 by omega),
+    Nat.mod_mod_of_dvd _ (by decide : 2 ^ 64 ∣ 2 ^ 64)] at hstep
+  split at hstep
+  · rename_i hT
+    simp only [Except.ok.injEq] at hstep; subst hstep
+    have hnk : (BitVec.ofNat 64 (js.rip.toNat + (n + 1 + k))).toNat = js.rip.toNat + n + 1 + k := by
+      rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by omega)]; omega
+    rw [hnk] at hT ⊢
+    have hT' : ((js.rip.toNat + n + 1 + k) + sext (8 * k) 64 v) % 2 ^ 64 < 2 ^ 47 := hT
+    obtain ⟨s', hs', hrel', hcfg'⟩ := run_jmp_d hrel hcfg hpr o ho hk.symm 0#8 0#8 (js.rip.toNat + n + 1) hcs hr
+      js.rip.toNat (by omega) (by omega) (by omega) hT'
+    exact ⟨s', run_janus_x86_step (by rw [hf, hs']), hrel', hcfg'⟩
+  · simp at hstep
 
 end JanusX86.Proofs
