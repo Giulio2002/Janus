@@ -454,6 +454,69 @@ def printFaithful (thm : Name) (thmType : Expr) : MetaM (Except String String) :
     | some m => if firstErr.isNone then firstErr := some m
   return .error (firstErr.getD "the printed statement does not round-trip")
 
+/-- Round 4 (D1): re-parse a printed term `str` and elaborate it (as a type when `expected` is
+`none`, otherwise against `expected`), returning whether the result is kernel-defeq to `target`.
+Any parse/elaboration error, metavariable or `sorry` counts as "does not round-trip". -/
+def termRoundTrips (str : String) (expected : Option Expr) (target : Expr) : MetaM Bool := do
+  let env ← getEnv
+  let stx ← match Parser.runParserCategory env `term str "<disclosed definition>" with
+    | .ok s => pure s
+    | .error _ => return false
+  let saved ← Core.getMessageLog
+  Core.resetMessageLog
+  let res ← try
+      let t ← withTheReader Core.Context
+          (fun c => { c with maxHeartbeats := roundTripHeartbeats * 1000 }) <| withCurrHeartbeats do
+        Elab.Term.TermElabM.run' (ctx := { errToSorry := false }) do
+          let t ← match expected with
+            | none => Elab.Term.elabType stx
+            | some ty => Elab.Term.elabTermEnsuringType stx (some ty)
+          Elab.Term.synthesizeSyntheticMVarsNoPostponing
+          instantiateMVars t
+      pure (some t)
+    catch _ => pure none
+  let log ← Core.getMessageLog
+  Core.setMessageLog saved
+  let some t := res | return false
+  if log.hasErrors || t.hasMVar || t.hasSorry then return false
+  if t == target then return true
+  let metaEq ← try
+      withTheReader Core.Context
+          (fun c => { c with maxHeartbeats := roundTripHeartbeats * 1000 }) <| withCurrHeartbeats <|
+        Meta.withTransparency .default (Meta.isDefEq t target)
+    catch _ => pure false
+  return metaEq && (match Kernel.isDefEq env {} t target with
+    | .ok b => b
+    | .error _ => false)
+
+/-- Round 4 (D1): disclose a proof-local def or theorem so the disclosure means what it says.
+The plain print is used if its type (and, for a def, its value) re-elaborate to the real ones;
+otherwise the same with `pp.numericTypes`/`pp.funBinderTypes` (a numeral such as `256 ≠ 0` at
+`BitVec 8` reads back at `Nat` without them). If neither round-trips (compiled recursion,
+`match` auxiliaries, universe polymorphism), the annotated print is disclosed and tagged
+`[not round-tripped]`, so the report never presents an unconfirmed reading as confirmed. -/
+def discloseDef (ci : ConstantInfo) : MetaM String := do
+  let annotate := fun (o : Options) => o.setBool `pp.numericTypes true |>.setBool `pp.funBinderTypes true
+  let mut lastTy := ""
+  let mut lastVal := ""
+  for ann in [false, true] do
+    let withO {α} (x : MetaM α) : MetaM α := withOptions (fun o => if ann then annotate o else o) x
+    let tyStr := (← withO (Meta.ppExpr ci.type)).pretty 10000
+    let isThm := ci matches .thmInfo _
+    let valStr ← match ci.value? with
+      | some v => if isThm then pure "<proof>" else pure ((← withO (Meta.ppExpr v)).pretty 10000)
+      | none => pure "<opaque>"
+    lastTy := tyStr; lastVal := valStr
+    if !ci.levelParams.isEmpty then continue
+    unless ← termRoundTrips tyStr none ci.type do continue
+    if isThm then return s!"{ci.name} : {tyStr} := {valStr}"
+    match ci.value? with
+    | some v =>
+      if ← termRoundTrips valStr (some ci.type) v then
+        return s!"{ci.name} : {tyStr} := {valStr}"
+    | none => pure ()
+  return s!"{ci.name} : {lastTy} := {lastVal}  [not round-tripped: read with care]"
+
 /-- Build the clean environment: import only `Janus` and `Extracted`, with initializers so pp
 works, then add type-only stubs for the dependency constants the statement reaches, re-add the
 allowed proof-local defs and an axiom with the theorem's type. Reject a proof-local def whose
@@ -522,11 +585,8 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
       if let some v := ci.value? then
         if let some m ← checkInstArgs cx v then
           throwError s!"the proof-local definition {ci.name} used in the statement {m}"
-      let tyFmt ← Meta.ppExpr ci.type
-      let valFmt ← match ci.value? with
-        | some v => Meta.ppExpr v
-        | none => pure (Std.Format.text "<opaque>")
-      defs := defs.push s!"{ci.name} : {tyFmt.pretty 10000} := {valFmt.pretty 10000}"
+      -- round 4 D1: the disclosure itself must round-trip (numerals, binder types)
+      defs := defs.push (← discloseDef ci)
     return (sigStr, explicit.fmt.pretty 10000, defs)
   match ← (Core.CoreM.toIO' (Meta.MetaM.run' printAll) { mkCoreCtx with options := opts } { env }).toBaseIO with
   | .ok a => return a
