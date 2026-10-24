@@ -28,6 +28,9 @@ loader (`Janus.Program`), the Go calling convention (`Janus.GoABI`) and the orac
   SVE is not modelled, and an Advanced SIMD write zeroes the upper `Z` bits on hardware, which
   is invisible here. Theorems about arbitrary initial states quantify over `vregs`; the default
   (all zero) only fills in concrete states built in tests.
+* `excl` is the local exclusive monitor and `exclPass` the stream of store-exclusive outcomes
+  (see the fields). Together they make the store-exclusive nondeterministic in the only sound
+  way for a deterministic `step`: the outcome is an input of the run that theorems quantify over.
 * `tpidr` is TPIDR_EL0, the EL0 thread pointer (`MRS Xt, TPIDR_EL0`). Linux gives each thread
   its own value; it is read-only in the model (no supported instruction writes it), so it lives
   in the state and theorems quantify over it, like `dczid`. The default 0 is for tests.
@@ -79,6 +82,23 @@ structure State where
   `OFC` 2, `UFC` 3, `IXC` 4, `IDC` 7 (and `QC` 27, which no accepted instruction writes). A
   floating-point instruction ORs the exceptions it raises into it. -/
   fpsr : BitVec 32 := 0
+  /-- The local exclusive monitor (Arm ARM B2.9, `MarkExclusiveLocal`/`ClearExclusiveLocal`):
+  `some (addr, size)` in the Exclusive Access state, marking the `size` bytes at `addr` of the
+  last load-exclusive; `none` in the Open Access state. A store-exclusive can pass only to the
+  marked bytes, and whether it then passes is `exclPass` (below). Theorems about
+  arbitrary initial states quantify over it (the monitor a caller leaves behind is unknown). -/
+  excl : Option (Nat × Nat) := none
+  /-- The environment's choices for store-exclusives (`STXR`, `STLXR`, `STXP`, `STLXP`, all
+  sizes). A store-exclusive to the bytes `excl` marks passes iff `exclPass 0`, and the stream
+  then advances by one (`exclPass k` decides the `k+1`-th such store-exclusive from now). It is
+  never read in the Open Access state, where every store-exclusive fails. Hardware may
+  fail a store-exclusive for reasons the model does not see (an interrupt, a context switch, an
+  eviction, the global monitor, an IMPLEMENTATION DEFINED event), so the model never assumes a
+  pass: a theorem about arbitrary initial states holds for every stream, i.e. for every
+  sequence of outcomes, and a retry loop terminates only under a stated hypothesis on the
+  stream (docs/SOUNDNESS.md, "Atomics, exclusives and system registers"). Execution reads it
+  but never chooses it; the default (always fail) only fills in concrete test states. -/
+  exclPass : Nat → Bool := fun _ => false
 
 instance : Inhabited State :=
   ⟨{ regs := fun _ => 0, sp := 0, pc := 0, flags := ⟨false, false, false, false⟩, mem := default }⟩
@@ -107,6 +127,11 @@ inductive Fault where
   `FPCR` (`IOE`/`DZE`/`OFE`/`UFE`/`IXE`/`IDE`). On a CPU that supports trapping this is a
   `SIGFPE`; on one that does not, the enable bits read as zero and the state cannot occur. -/
   | fpTrapped (pc : Nat)
+  /-- The instruction at `pc` reached a CONSTRAINED UNPREDICTABLE or IMPLEMENTATION DEFINED
+  situation that the model does not resolve: a store-exclusive to other bytes than the ones the
+  exclusive monitor marks (see `Exec`, "The exclusive monitor"). The run stops, so no theorem
+  depends on what hardware does there. -/
+  | unpredictable (pc : Nat)
   /-- Fuel ran out before the call returned. -/
   | outOfFuel
 deriving Repr, DecidableEq, Inhabited

@@ -19,7 +19,7 @@ example : decode 0x48227c03 = none := by decide   -- CASP, Rt odd: UNDEFINED
 example : decode 0x48207802 = none := by decide   -- CASP, Rt2 field != 11111
 example : (decode 0x48207c02).isSome := by decide -- CASP x0, x1, x2, x3, [x0]
 example : decode 0xc85f7c1b = .some (.ldExcl 3 false 0 27) := by decide  -- LDXR x27, [x0]
-example : decode 0xc81bfc01 = none := by decide   -- STLXR (store-exclusive: rejected by design)
+example : decode 0xc81bfc01 = .some (.stExcl 3 true 27 0 1) := by decide   -- STLXR w27, x1, [x0] (modelled: exclusive monitor + environment choice)
 -- LDAPR (`size 111000 1 0 1 11111 1100 00 Rn Rt`)
 example : (decode 0xf8bfc002).isSome := by decide -- LDAPR x2, [x0]
 example : decode 0xf8ffc000 = none := by decide   -- R = 1

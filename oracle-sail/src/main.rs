@@ -88,6 +88,10 @@ struct Case {
     fpcr: String,
     #[serde(default)]
     fpsr: String,
+    /// Sequence mode (docs/ORACLE.md): a block laid out from TestPC, run until the PC leaves
+    /// it; `word` is then ignored.
+    #[serde(default)]
+    words: Vec<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -421,10 +425,31 @@ impl Cpu {
             }
         };
 
-        // Memory: code page = word at TestPC, zeros (UDF #0) elsewhere; data = pattern.
+        // Memory: code page = word (or the block) at TestPC, zeros (UDF #0) elsewhere;
+        // data = pattern.
+        let mut block: Vec<u32> = Vec::new();
+        for w in &c.words {
+            match parse_hex(w) {
+                Ok(v) if v <= 0xffff_ffff => block.push(v as u32),
+                _ => {
+                    err(&mut r, "bad words entry".into());
+                    return r;
+                }
+            }
+        }
         let mut code = vec![0u8; PAGE as usize];
         let off = (TEST_PC - CODE_PAGE) as usize;
-        code[off..off + 4].copy_from_slice(&word.to_le_bytes());
+        if block.is_empty() {
+            code[off..off + 4].copy_from_slice(&word.to_le_bytes());
+        } else {
+            if block.len() > 0x180 {
+                err(&mut r, "words too long".into());
+                return r;
+            }
+            for (i, w) in block.iter().enumerate() {
+                code[off + 4 * i..off + 4 * i + 4].copy_from_slice(&w.to_le_bytes());
+            }
+        }
         self.o.write_mem(CODE_PAGE, &code);
         let data: Vec<u8> = (0..DATA_SIZE).map(|i| pattern(c.seed, i)).collect();
         self.o.write_mem(DATA_BASE, &data);
@@ -495,7 +520,24 @@ impl Cpu {
         self.o.set_pc(TEST_PC);
 
         let (cu0, un0) = (unpredictable_count(), uncaught_count());
-        self.o.step(word);
+        if block.is_empty() {
+            self.o.step(word);
+        } else {
+            // Step the block until the PC leaves it (falling through to the UDF after it, a
+            // branch out, or an exception to EL1), at most 4·n+1 instructions (the Lean side's
+            // fuel, Oracle.runSeq).
+            let end = TEST_PC + 4 * block.len() as u64;
+            for _ in 0..4 * block.len() + 1 {
+                let pc = self.o.get_pc();
+                if self.el() != 0 || pc < TEST_PC || pc >= end || pc % 4 != 0 {
+                    break;
+                }
+                self.o.step(block[((pc - TEST_PC) / 4) as usize]);
+                if uncaught_count() != un0 {
+                    break;
+                }
+            }
+        }
         r.unpredictable = (unpredictable_count() - cu0) as i64;
         if uncaught_count() != un0 {
             self.poisoned = true;

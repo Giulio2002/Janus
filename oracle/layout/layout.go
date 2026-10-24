@@ -93,6 +93,8 @@ type Case struct {
 	// uses them as `State.fpcr` / `State.fpsr`.
 	FPCR string `json:"fpcr,omitempty"`
 	FPSR string `json:"fpsr,omitempty"`
+	// Words (audit/rt-model): a straight-line block laid out from TestPC; Word ignored when set.
+	Words []string `json:"words,omitempty"`
 }
 
 // HW is what the native runner observed.
@@ -127,4 +129,9 @@ type Model struct {
 	V      []string `json:"v,omitempty"`
 	FPCR   string   `json:"fpcr,omitempty"` // State.fpcr / State.fpsr after the step (hex)
 	FPSR   string   `json:"fpsr,omitempty"`
+	// Nondeterministic cases (a store-exclusive, whose outcome is the environment's): the
+	// fields above are the outcome of the all-fail stream, Alts every other distinct outcome
+	// over the Choices enumerated environment choices. Hardware must produce one of them.
+	Choices int     `json:"choices,omitempty"`
+	Alts    []Model `json:"alts,omitempty"`
 }

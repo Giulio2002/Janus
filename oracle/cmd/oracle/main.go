@@ -117,6 +117,7 @@ func cmdGen(args []string) {
 	fs.IntVar(&gen.DCZID, "dczid", gen.DCZID, "DCZID_EL0 of the reference machine (runner -dczid)")
 	only := fs.String("only", "", "regexp: generate only the targeted classes whose name matches (and no random groups unless -group is given explicitly)")
 	fpk := fs.Int("fp-k", 4, "states (FPCR/FPSR/register draws) per generated word of the fp.* classes")
+	exclSeq := fs.Int("excl-seq", 0, "exclusive-monitor blocks (class gen/seq.excl, sequence mode)")
 	fs.Parse(args)
 	groupSet := false
 	fs.Visit(func(f *flag.Flag) { groupSet = groupSet || f.Name == "group" })
@@ -154,6 +155,16 @@ func cmdGen(args []string) {
 			}
 			cw.add(r, "gen/"+gen.Classify(w), w, k)
 		}
+	}
+	for i := 0; i < *exclSeq; i++ {
+		ws, st := gen.ExclSeq(r)
+		c := gen.Case(cw.id, "gen/seq.excl", ws[0], st)
+		for _, w := range ws {
+			c.Words = append(c.Words, fmt.Sprintf("0x%08x", w))
+		}
+		cw.enc.Encode(&c)
+		cw.id++
+		cw.n["gen/seq.excl"]++
 	}
 	groups := []string{"br", "dpi", "dpr", "ls", "simd", "vls"}
 	for _, name := range groups {
@@ -216,6 +227,7 @@ func cmdHarvest(args []string) {
 	fs.IntVar(&gen.DCZID, "dczid", gen.DCZID, "DCZID_EL0 of the reference machine (runner -dczid)")
 	fpk := fs.Int("fp-k", 0, "states per harvested word of the fp.* classes (0: same as -k)")
 	only := fs.String("only", "", "regexp: keep only harvested words whose class matches")
+	loopK := fs.Int("excl-loops", 0, "states per LL/SC retry loop found in the binaries (class harvest/seq.excl, sequence mode; 0 = none)")
 	fs.Parse(args)
 	var onlyRe *regexp.Regexp
 	if *only != "" {
@@ -223,9 +235,20 @@ func cmdHarvest(args []string) {
 	}
 	seen := map[uint32]bool{}
 	var words []uint32
+	var loops [][]uint32
+	loopSeen := map[string]bool{}
 	total, skipped := 0, map[string]int{}
 	for _, p := range fs.Args() {
-		for _, w := range textWords(p) {
+		tw := textWords(p)
+		if *loopK > 0 {
+			for _, l := range gen.ExclLoops(tw) {
+				if k := fmt.Sprint(l); !loopSeen[k] {
+					loopSeen[k] = true
+					loops = append(loops, l)
+				}
+			}
+		}
+		for _, w := range tw {
 			total++
 			if seen[w] {
 				continue
@@ -267,6 +290,20 @@ func cmdHarvest(args []string) {
 			kk = 1
 		}
 		cw.add(r, cls, w, kk)
+	}
+	if *loopK > 0 {
+		fmt.Fprintf(os.Stderr, "harvest: %d distinct LL/SC retry loops\n", len(loops))
+	}
+	for _, l := range loops {
+		for j := 0; j < *loopK; j++ {
+			c := gen.Case(cw.id, "harvest/seq.excl", l[0], gen.LoopState(r, l))
+			for _, w := range l {
+				c.Words = append(c.Words, fmt.Sprintf("0x%08x", w))
+			}
+			cw.enc.Encode(&c)
+			cw.id++
+			cw.n["harvest/seq.excl"]++
+		}
 	}
 	cw.close()
 }

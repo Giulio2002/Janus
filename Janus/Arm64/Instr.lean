@@ -107,8 +107,7 @@ inductive Instr where
   | hint (crm op2 : Nat)
   /-- DSB (`op2 = 4`) / DMB (`op2 = 5`) / ISB (`op2 = 6`) with option `CRm`. -/
   | barrier (crm op2 : Nat)
-  /-- CLREX #`CRm`: clears the local exclusive monitor. The monitor is not modelled (no
-  store-exclusive is accepted, see `Decode`), so this only advances `pc`. -/
+  /-- CLREX #`CRm`: clears the local exclusive monitor (`State.excl := none`). -/
   | clrex (crm : Nat)
   /-- MRS `Xt`, DCZID_EL0 (the only system register read accepted). `rt`: ZR. The value is
   `State.dczid`, an implementation-defined constant that theorems quantify over. -/
@@ -141,9 +140,19 @@ inductive Instr where
   -- Ordered, exclusive and atomic accesses (single-threaded model: see `Exec`)
   /-- LDAR/STLR (`L` = load) of `2^size` bytes; LDAPR when `rcpc`. `rn`: SP. `rt`: ZR. -/
   | ldstOrdered (size : Nat) (L rcpc : Bool) (rn rt : Nat)
-  /-- LDXR (`o0 = false`) / LDAXR (`o0 = true`) of `2^size` bytes (store-exclusives are not
-  decoded). `rn`: SP. `rt`: ZR. -/
+  /-- LDXR (`o0 = false`) / LDAXR (`o0 = true`) of `2^size` bytes: a load that also marks the
+  local exclusive monitor. `rn`: SP. `rt`: ZR. -/
   | ldExcl (size : Nat) (o0 : Bool) (rn rt : Nat)
+  /-- STXR (`o0 = false`) / STLXR (`o0 = true`) of `2^size` bytes; `rs` receives the status
+  (0 = passed, 1 = failed). The outcome is the environment's (`State.exclPass`), see `Exec`.
+  `rn`: SP. `rs`, `rt`: ZR; `rs ≠ rt` and `rs ≠ rn` unless `rn = 31` (decoder). -/
+  | stExcl (size : Nat) (o0 : Bool) (rs rn rt : Nat)
+  /-- LDXP (`o0 = false`) / LDAXP (`o0 = true`) of two 32-bit (`sz = false`) or 64-bit
+  (`sz = true`) registers. `rn`: SP. `rt`, `rt2`: ZR; `rt ≠ rt2` (decoder). -/
+  | ldExclPair (sz o0 : Bool) (rt2 rn rt : Nat)
+  /-- STXP (`o0 = false`) / STLXP (`o0 = true`) of two 32-bit or 64-bit registers, status in
+  `rs`. `rn`: SP. `rs`, `rt`, `rt2`: ZR; `rs ∉ {rt, rt2}` and `rs ≠ rn` unless `rn = 31`. -/
+  | stExclPair (sz o0 : Bool) (rs rt2 rn rt : Nat)
   /-- LSE atomic `LD<op>{A}{L}` / `SWP{A}{L}` of `2^size` bytes: `A` = acquire, `R` = release.
   The ST<op> aliases are `rt = 31`. `rn`: SP. `rs`, `rt`: ZR. -/
   | atomic (size : Nat) (A R : Bool) (rs : Nat) (op : AtomicOp) (rn rt : Nat)

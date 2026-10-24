@@ -12,7 +12,9 @@
 # class, default 4000 for full / 1500 for quick), K (states per harvested word, default 3),
 # PER_CLASS (harvested distinct words per class, default 8000), SEED (default 1), FP_K (states
 # per generated fp.* word, default 4), FP_HARVEST_K (states per harvested fp.* word in fp mode, 40),
-# QEMU (default /usr/bin/qemu-aarch64; set QEMU= to run natively on an arm64 Linux host).
+# QEMU (default /usr/bin/qemu-aarch64; set QEMU= to run natively on an arm64 Linux host),
+# EXCL_SEQ (generated exclusive-monitor blocks, default 5·N), EXCL_LOOPS_K (states per harvested
+# LL/SC retry loop, default 8).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
@@ -57,7 +59,8 @@ echo "== generate ($N words per class)"
 if [ "$mode" = fp ]; then
   "$bin/oracle" gen -dczid "$DCZID" -n "$N" -only '^fp\.' -fp-k "$FP_K" -seed "$SEED" -o "$OUT/gen.jsonl"
 else
-  "$bin/oracle" gen -dczid "$DCZID" -n "$N" -group "$((N * 2))" -seed "$SEED" -o "$OUT/gen.jsonl"
+  # gen/seq.excl: exclusive-monitor blocks in sequence mode (EXCL_SEQ, default 5 per class word)
+  "$bin/oracle" gen -dczid "$DCZID" -n "$N" -group "$((N * 2))" -excl-seq "${EXCL_SEQ:-$((N * 5))}" -seed "$SEED" -o "$OUT/gen.jsonl"
 fi
 cases+=("$OUT/gen.jsonl")
 
@@ -67,13 +70,17 @@ if [ "$mode" = full ] || [ "$mode" = fp ]; then
   mkdir -p "$corpus"
   (cd "$root/oracle" &&
     CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$corpus/bigprog" ./harvest/bigprog &&
-    for p in math math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime; do
+    for p in math math/big strconv sort crypto/sha256 bytes strings sync/atomic sync runtime; do
       CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
   extra=()
   for f in "$root"/artifacts/*-arm64; do [ -f "$f" ] && extra+=("$f"); done
   hargs=()
-  [ "$mode" = fp ] && hargs=(-only '^fp\.' -per-class 0 -fp-k "${FP_HARVEST_K:-40}")
+  if [ "$mode" = fp ]; then
+    hargs=(-only '^fp\.' -per-class 0 -fp-k "${FP_HARVEST_K:-40}")
+  else
+    hargs=(-excl-loops "${EXCL_LOOPS_K:-8}")  # harvest/seq.excl: the binaries' LL/SC retry loops
+  fi
   "$bin/oracle" harvest -dczid "$DCZID" -k "$K" -per-class "$PER_CLASS" "${hargs[@]}" -seed "$((SEED + 1))" -o "$OUT/harvest.jsonl" "$corpus"/* "${extra[@]}"
   cases+=("$OUT/harvest.jsonl")
 fi

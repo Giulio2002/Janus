@@ -173,29 +173,45 @@ def AtomicOp.ofBits (n : Nat) : AtomicOp :=
 * `o2 o1 = 1 0`: LDAR/STLR (`o0 = 1`, `Rs` and `Rt2` should-be-one; any other value is
   CONSTRAINED UNPREDICTABLE and rejected). `o0 = 0` is LDLAR/STLLR (FEAT_LOR), rejected.
 * `o2 o1 = 0 1`: CASP{A}{L} for `size = 0x` (`Rt2 = 11111`, `Rs` and `Rt` even, else
-  UNDEFINED); LDXP/STXP/... for `size = 1x`, rejected.
-* `o2 o1 = 0 0`: LDXR/LDAXR (`L = 1`, `Rs` and `Rt2` should-be-one). STXR/STLXR (`L = 0`) are
-  **rejected**: a store-exclusive may fail spuriously on hardware, and a deterministic model
-  of it would be unsound (see `docs/SOUNDNESS.md`). -/
+  UNDEFINED); for `size = 1x` LDXP/LDAXP (`L = 1`, `Rs` should-be-one) and STXP/STLXP
+  (`L = 0`), 32-bit (`size = 10`) or 64-bit (`size = 11`) registers.
+* `o2 o1 = 0 0`: LDXR/LDAXR (`L = 1`, `Rs` and `Rt2` should-be-one) and STXR/STLXR (`L = 0`,
+  `Rt2` should-be-one), every size.
+
+The CONSTRAINED UNPREDICTABLE register overlaps of the exclusives are rejected
+(`Unpredictable_LDPOVERLAP`: LDXP with `t = t2`; `Unpredictable_DATAOVERLAP`: a store-exclusive
+whose status register `s` is `t` or `t2`; `Unpredictable_BASEOVERLAP`: `s = n` with `n ≠ 31`). -/
 def decodeExclusive (w : Nat) : Option Instr :=
   let rt := bits w 4 0
   let rn := bits w 9 5
+  let rt2 := bits w 14 10
   let size := bits w 31 30
   let o2 := bit w 23
   let L := bit w 22
   let o1 := bit w 21
   let rs := bits w 20 16
   let o0 := bit w 15
-  if bits w 14 10 ≠ 31 then none else
-  if o2 && o1 then some (.cas size L o0 rs rn rt)
+  -- `s == n && n != 31`: the status register overlaps the base (store-exclusives only)
+  let baseOverlap : Bool := rs == rn && rn != 31
+  if o2 && o1 then
+    if rt2 ≠ 31 then none else some (.cas size L o0 rs rn rt)
   else if o2 then
-    if !o0 || rs ≠ 31 then none else some (.ldstOrdered size L false rn rt)
+    if rt2 ≠ 31 || !o0 || rs ≠ 31 then none else some (.ldstOrdered size L false rn rt)
   else if o1 then
-    if size ≥ 2 then none else
-    if rs % 2 = 1 || rt % 2 = 1 then none else
-    some (.casp (size = 1) L o0 rs rn rt)
+    if size < 2 then
+      if rt2 ≠ 31 then none else
+      if rs % 2 = 1 || rt % 2 = 1 then none else
+      some (.casp (size = 1) L o0 rs rn rt)
+    else if L then
+      if rs ≠ 31 || rt == rt2 then none else some (.ldExclPair (size = 3) o0 rt2 rn rt)
+    else
+      if rs == rt || rs == rt2 || baseOverlap then none
+      else some (.stExclPair (size = 3) o0 rs rt2 rn rt)
   else
-    if !L || rs ≠ 31 then none else some (.ldExcl size o0 rn rt)
+    if rt2 ≠ 31 then none
+    else if L then (if rs ≠ 31 then none else some (.ldExcl size o0 rn rt))
+    else if rs == rt || baseOverlap then none
+    else some (.stExcl size o0 rs rn rt)
 
 /-- Atomic memory operations (`size 111 0 00 A R 1 Rs o3 opc 00 Rn Rt`): LD<op>{A}{L}
 (`o3 = 0`, every `opc`), SWP{A}{L} (`o3 = 1, opc = 000`) and LDAPR (`o3 = 1, opc = 100`,

@@ -5,7 +5,8 @@ import Janus.Tactic.Common
 # Symbolic execution of the ordered, exclusive, atomic and DC ZVA instructions
 
 `exec` equations (by `rfl`) and helper unfoldings for the instructions added with the
-single-threaded atomics model (`Instr.ldstOrdered`, `ldExcl`, `atomic`, `cas`, `casp`, `clrex`,
+single-threaded atomics model (`Instr.ldstOrdered`, `ldExcl`, `stExcl`, `ldExclPair`,
+`stExclPair`, `atomic`, `cas`, `casp`, `clrex`,
 `prefetch`, `mrsDczid`, `dcZva`), registered in the `janus_exec` simp set. Kept in a file of
 its own so the core automation (`Janus.Tactic.Basic`, `Core`) is untouched. Nothing here is
 trusted.
@@ -19,7 +20,7 @@ section ExecEqns
 
 variable (s : State)
 
-@[janus_exec] theorem exec_clrex (crm : Nat) : exec (.clrex crm) s = .ok s.next := rfl
+@[janus_exec] theorem exec_clrex (crm : Nat) : exec (.clrex crm) s = .ok { s with excl := none }.next := rfl
 @[janus_exec] theorem exec_prefetch (prfop : Nat) : exec (.prefetch prfop) s = .ok s.next := rfl
 @[janus_exec] theorem exec_mrsDczid (rt : Nat) :
     exec (.mrsDczid rt) s = .ok (s.writeZR rt (s.dczid.setWidth 64)).next := rfl
@@ -27,7 +28,13 @@ variable (s : State)
 @[janus_exec] theorem exec_ldstOrdered (size : Nat) (L rcpc : Bool) (rn rt : Nat) :
     exec (.ldstOrdered size L rcpc rn rt) s = execOrdered s size L rn rt := rfl
 @[janus_exec] theorem exec_ldExcl (size : Nat) (o0 : Bool) (rn rt : Nat) :
-    exec (.ldExcl size o0 rn rt) s = execOrdered s size true rn rt := rfl
+    exec (.ldExcl size o0 rn rt) s = execLdExcl s size rn rt := rfl
+@[janus_exec] theorem exec_stExcl (size : Nat) (o0 : Bool) (rs rn rt : Nat) :
+    exec (.stExcl size o0 rs rn rt) s = execStExcl s size rs rn rt := rfl
+@[janus_exec] theorem exec_ldExclPair (sz o0 : Bool) (rt2 rn rt : Nat) :
+    exec (.ldExclPair sz o0 rt2 rn rt) s = execLdExclPair s (if sz then 8 else 4) rt2 rn rt := rfl
+@[janus_exec] theorem exec_stExclPair (sz o0 : Bool) (rs rt2 rn rt : Nat) :
+    exec (.stExclPair sz o0 rs rt2 rn rt) s = execStExclPair s (if sz then 8 else 4) rs rt2 rn rt := rfl
 @[janus_exec] theorem exec_atomic (size : Nat) (A R : Bool) (rs : Nat) (op : AtomicOp) (rn rt : Nat) :
     exec (.atomic size A R rs op rn rt) s = execAtomic s size op rs rn rt := rfl
 @[janus_exec] theorem exec_cas (size : Nat) (L o0 : Bool) (rs rn rt : Nat) :
@@ -37,7 +44,8 @@ variable (s : State)
 
 end ExecEqns
 
-attribute [janus_exec] execOrdered execAtomic execCas execCasp execDcZva atomicOp
+attribute [janus_exec] execOrdered execAtomic execCas execCasp execDcZva atomicOp execLdExcl
+  execLdExclPair execStExclData execStExcl execStExclPair
 
 /-- The value of a byte flag read with `ldrb` and tested with `tbz/tbnz #0`. -/
 @[janus_exec, janus_post] theorem getLsbD_zero_ofNat_readLE_1 (m : Memory) (a : Nat) :

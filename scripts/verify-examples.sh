@@ -71,7 +71,7 @@ verify_one() {
     printf '%-9s ok  %6.1fs\n' "$n" "$t" | tee "$lines/$n"
     # further theorems of the same proof file (F64ToU64's `exact` and `saturation`, ...)
     local thm
-    for thm in $(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}'); do
+    for thm in $(grep -oE '^theorem (exact|saturation|anyCPU)' "examples/proofs/$n.lean" | awk '{print $2}'); do
       if bin/janus verify "$out" --proof "examples/proofs/$n.lean" --theorem "Proof.$thm" \
           ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
         printf '%-9s ok  (Proof.%s)\n' "$n" "$thm" | tee -a "$lines/$n"

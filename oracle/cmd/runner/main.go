@@ -292,7 +292,25 @@ func runCase(c *L.Case, seq int64) L.HW {
 		return r
 	}
 	clear(code)
-	binary.LittleEndian.PutUint32(code[L.TestPC-L.CodePage:], uint32(word))
+	if len(c.Words) > 0 {
+		// audit/rt-model straight-line block: lay the words out from TestPC; the rest of the
+		// page stays 0 (UDF #0), so a non-branching block falls through to a UDF after its last
+		// instruction and the captured state is the state after the whole block.
+		if len(c.Words) > 0x180 {
+			r.Status, r.Note = "error", "words too long"
+			return r
+		}
+		for i, hw := range c.Words {
+			wv, err := parseHex(hw)
+			if err != nil || wv > 0xffffffff {
+				r.Status, r.Note = "error", "bad words entry"
+				return r
+			}
+			binary.LittleEndian.PutUint32(code[L.TestPC-L.CodePage+4*i:], uint32(wv))
+		}
+	} else {
+		binary.LittleEndian.PutUint32(code[L.TestPC-L.CodePage:], uint32(word))
+	}
 	for i := range data {
 		data[i] = L.Pattern(c.Seed, uint64(i))
 	}
@@ -395,6 +413,10 @@ func runCase(c *L.Case, seq int64) L.HW {
 	case sig == sigALRM:
 		r.Status = "selfloop"
 	case pc == L.TestPC:
+		r.Status = "fault"
+	case len(c.Words) > 0 && pc > L.TestPC && pc < L.TestPC+4*uint64(len(c.Words)) && !(sig == sigSEGV && addr == pc):
+		// Sequence mode: an instruction of the block itself faulted (a fetch fault at a block
+		// address cannot happen: the code page is mapped).
 		r.Status = "fault"
 	case sig == sigSEGV && addr == pc,
 		sig == sigILL && pc >= L.CodePage && pc < L.CodePage+L.PageSize,
