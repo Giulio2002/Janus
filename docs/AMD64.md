@@ -183,6 +183,11 @@ end of its segment. An instruction that would cross a segment end is undecodable
 stitched together from two segments. `Program.run`, `Outcome`, `Steps` and the run lemmas in
 `Janus/Amd64/Run.lean` mirror the arm64 ones.
 
+**C code.** gcc-compiled C (cgo, [FFI.md](FFI.md)) adds one instruction to the decoder, `ENDBR64`
+(`F3 0F 1E FA` exactly, a NOP; the CET landing pad at every function entry under
+`-fcf-protection`). Every other `F3 0F 1E` encoding and prefix combination is rejected. `janus
+blockers` works on amd64 binaries, judging each x86asm-found instruction with `Janus.Amd64.decode`.
+
 ## What a theorem means on amd64
 
 `docs/SOUNDNESS.md` applies, with these differences:

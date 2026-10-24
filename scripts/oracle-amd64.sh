@@ -62,6 +62,13 @@ if [ "$mode" = full ]; then
     for p in math/big strconv sort crypto/sha256 bytes strings math/bits encoding/binary sync/atomic; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
+  # gcc-compiled C (the cgo examples and the model-coverage corpus examples/cgo/ccover.c)
+  if command -v gcc >/dev/null; then
+    printf 'int main(void){return 0;}\n' > "$corpus/cmain.c"
+    gcc -g -O2 -o "$corpus/ccover-c" "$root/examples/cgo/ccover.c" "$root/examples/cgo/cfuncs.c" \
+      "$corpus/cmain.c" -I"$root/examples/cgo"
+    rm -f "$corpus/cmain.c"
+  fi
   if [ ! -f "$root/artifacts/examples-amd64" ]; then
     (cd "$root/examples/basic" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$root/artifacts/examples-amd64" ./cmd)
   fi
