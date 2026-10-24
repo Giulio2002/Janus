@@ -15,6 +15,7 @@ instance check and kernel replay still runs with the same strength.
 | soundness audit | `audit/run-all.sh [-j N]`, `audit/round{2,3,4,5,7}/run-round*.sh [-j N]`, `audit/round6/run-round6.sh` | every documented attack is rejected, every control verifies (round 7: the result cache) |
 | Go tests | `go test -timeout 50m ./cmd/...` (`-short`: no Lake builds) | the CLI, the extractor, the verifier end to end |
 | JanusASL | `scripts/asl.sh prove` | the Arm-ASL equivalence theorems (39) and their axiom audit |
+| ASL build cache | `JanusASL/tools/test_asl_cache.sh [--e2e CACHE]` | the `ASL_CACHE` key ignores lakefile edits that cannot reach the ArmASL build and changes on every input that can (31 cases, seconds); with `--e2e`, a restore into a copy with an edited JanusASL lakefile leaves `lake build ArmASL` nothing to do (docs/ASL.md "Build cache") |
 
 `-j N` runs up to `N` independent rows/proofs at once (`scripts/lib/parallel.sh`); output is
 printed in the original order, and a failure in any block fails the run. The default is
@@ -247,8 +248,8 @@ pass).
 
 `scripts/asl.sh` therefore gets a **shared build cache** (`ASL_CACHE=<dir>`): the ArmASL build
 and the lean-sail package are copied from `<dir>/<key>` before building and stored there after a
-build (key: SHA-256 of the vendored tarball, `lean-toolchain`, JanusASL's lakefile and manifest
-and the splitter). Entries carry a SHA-256 manifest that is checked after every copy and are
+build (key: SHA-256 of the vendored tarball, the toolchain, the lean-sail manifest entry, the
+splitter and the lakefile settings that reach ArmASL's modules; docs/ASL.md "Build cache"). Entries carry a SHA-256 manifest that is checked after every copy and are
 published atomically under a lock; `ASL_CACHE_READONLY=1` only reads. With an entry,
 `scripts/asl.sh prove` takes 3 min 56 s (Lake replays the copied modules; only the proofs
 build) instead of ~54 min; "audited 39 theorems: only propext, Classical.choice, Quot.sound".
