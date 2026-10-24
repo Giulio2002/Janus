@@ -89,7 +89,7 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 64 ≤ s.sp.toNat) (hsp2 : s.sp.
     intro i S hn hpc h1 h2 h3 h4 h18 h28 h30 hsp hmem hv hdz htp hfc hfs
     rw [maskFrom_ge _ _ _ (by omega)] at h3
     janus_run
-    exact ⟨(janus_eval% zeroVal), ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp, hfc, hfs⟩,
+    exact ⟨(janus_eval% zeroVal), ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp, by simp [hfc], by simp [hfs]⟩,
       .inl ⟨lookupFrom_ge _ _ _ _ (by omega), rfl⟩⟩
   | succ n ih =>
     intro i S hn hpc h1 h2 h3 h4 h18 h28 h30 hsp hmem hv hdz htp hfc hfs
@@ -97,16 +97,16 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 64 ≤ s.sp.toNat) (hsp2 : s.sp.
       have := maskFrom_lt s.mem g (n+1) i hn
       exact Nat.lt_of_lt_of_le this (Nat.pow_le_pow_right (by decide) (by omega))
     janus_run [sw32_ofNat_eq_zero, maskFrom_bit7 _ _ _ (show i < 8 by omega), lsr8_ofNat _ hml] until [Extracted.entry + 0x1dc]
-    · exact ⟨(janus_eval% zeroVal), ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp, hfc, hfs⟩,
+    · exact ⟨(janus_eval% zeroVal), ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp, by simp [hfc], by simp [hfs]⟩,
         .inl ⟨lookupFrom_of_mask_zero _ _ _ (n + 1) i hn ‹_›, rfl⟩⟩
     · rename_i _ _ hc _
-      refine ⟨g + 16 + 16 * i, ⟨by simp [setReg, ofNat_add8]; exact congrArg _ (by omega), rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp, hfc, hfs⟩,
+      refine ⟨g + 16 + 16 * i, ⟨by simp [setReg, ofNat_add8]; exact congrArg _ (by omega), rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp, by simp [hfc], by simp [hfs]⟩,
         .inr ⟨i, ?_, rfl⟩⟩
       rw [lookupFrom_eq _ _ _ _ (by omega)]
       simp [hc, slotKey]
     all_goals
       refine rr_mono (ih (i + 1) _ (by omega) rfl (by simp [setReg, ofNat_add8]; exact congrArg _ (by omega)) (by simp [setReg, h2]) ?_ (by simp [setReg, h4])
-        (by simp [setReg, h18]) (by simp [setReg, h28]) (by simp [setReg, h30]) rfl rfl hv hdz htp hfc hfs) ?_
+        (by simp [setReg, h18]) (by simp [setReg, h28]) (by simp [setReg, h30]) rfl rfl hv hdz htp (by simp [hfc]) (by simp [hfs])) ?_
       · simp [setReg]
         exact congrArg _ (by rw [maskFrom_eq _ _ _ (by omega)]; have := fullBit_le (ctrl s.mem g i); omega)
       · rintro s' ⟨p, hr, hl⟩

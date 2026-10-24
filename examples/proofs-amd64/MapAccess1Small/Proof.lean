@@ -131,17 +131,17 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 32 ≤ (s.regs 4).toNat) (hsp2 :
     rw [fullMask_ge _ _ _ (by omega)] at h3
     janus64_run
     exact ⟨(janus_eval% zeroVal), ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF],
-      by simp [setRegF, h14], hx, hfs, rfl, hmx⟩, .inl ⟨lookupFrom_ge _ _ _ _ (by omega), rfl⟩⟩
+      by simp [setRegF, h14], hx, hfs, rfl, by simp [hmx]⟩, .inl ⟨lookupFrom_ge _ _ _ _ (by omega), rfl⟩⟩
   | succ n ih =>
     intro i S hn hpc h2 h1 h3 h6 h4 h5 h14 hmem hx hfs hdf hmx
     have hml := fullMask_lt64 s.mem g i (by omega)
     janus64_run [fullMask_bit0 _ _ _ (show i < 8 by omega), shr1_ofNat _ hml] until [Extracted.entry + 0x1ad]
     · exact ⟨(janus_eval% zeroVal), ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF],
-        by simp [setRegF, h14], hx, hfs, rfl, hmx⟩,
+        by simp [setRegF, h14], hx, hfs, rfl, by simp [hmx]⟩,
         .inl ⟨lookupFrom_of_fullMask_zero _ _ _ (n + 1) i hn ‹_›, rfl⟩⟩
     · rename_i hmask hkey
       refine ⟨g + 16 + 16 * i, ⟨by simp [setRegF, ofNat_add]; exact congrArg _ (by omega),
-        by simp [setRegF], rfl, rfl, by simp [setRegF], by simp [setRegF, h14], hx, hfs, rfl, hmx⟩,
+        by simp [setRegF], rfl, rfl, by simp [setRegF], by simp [setRegF, h14], hx, hfs, rfl, by simp [hmx]⟩,
         .inr ⟨i, ?_, rfl⟩⟩
       rw [lookupFrom_eq _ _ _ _ (by omega)]
       have := Arm64.Memory.readLE_lt s.mem (g + 8 + 16 * i) 8
@@ -149,7 +149,7 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 32 ≤ (s.regs 4).toNat) (hsp2 :
     all_goals
       refine rr_mono (ih (i + 1) _ (by omega) rfl (by simp [setRegF, ofNat_add]; exact congrArg _ (by omega))
         (by simp [setRegF, h1]) ?_ (by simp [setRegF, h6]) (by simp [setRegF, h4]) (by simp [setRegF, h5])
-        (by simp [setRegF, h14]) rfl hx hfs rfl hmx) ?_
+        (by simp [setRegF, h14]) rfl hx hfs rfl (by simp [hmx])) ?_
       · simp only [setRegF]; simp only [reduceIte, Nat.reduceEqDiff]
         exact congrArg _ (by rw [fullMask_eq _ _ _ (by omega)]; have := fullBit_le (ctrl s.mem g i); omega)
       · rintro s' ⟨p, hr, hl⟩
