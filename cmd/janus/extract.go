@@ -52,24 +52,119 @@ type Extraction struct {
 	Lean       []byte
 }
 
-// stubKind classifies runtime functions that end execution with a named outcome.
-func stubKind(name string) (StubKind, bool) {
-	n := strings.TrimSuffix(strings.TrimSuffix(name, ".abi0"), ".abiinternal")
-	// Round 6 F3: only package `runtime` itself. A Go symbol is "<import path>.<name>", and an
-	// import path such as `runtime.panicky/lib` (a legal module path) gives the ordinary
-	// function `runtime.panicky/lib.Zero`, which a bare prefix test took for a panic stub. The
-	// path of package runtime has no '/', and any other import path whose symbols start with
-	// "runtime." has one (a dot in the last path element is escaped as %2e by the linker).
-	if strings.Contains(n, "/") || strings.Contains(n, "%") {
-		return "", false
+// Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)
+// names. A name alone does not identify package runtime: any package may define a Go-assembly
+// TEXT symbol `runtime·panicX` or push one with `//go:linkname f runtime.panicX` (neither needs
+// -checklinkname=0), and round 6 classified every `runtime.panic*`/`runtime.morestack*` name
+// without '/' as a stub, so an ordinary function that returns (or panics) was taken for a panic
+// (or morestack) stub. The lists below are exactly the functions of that kind that the go1.26
+// runtime defines for linux/arm64 and linux/amd64 (`go tool nm` on the runtime archive of
+// go1.26.0 and go1.26.10, both architectures; minus panicCheck1/2, which return, and
+// morestackc, a fatal throw that only runtime code calls). Because the runtime itself defines
+// each of them, another definition with the same name and ABI is a link error ("duplicated
+// definition of symbol"), and one with the other ABI is linked under a mangled name
+// (`runtime.panicdivide.abi0`), which is not on the list. That argument needs the go1.26
+// runtime, the ELF symbol table (the pclntab does not record the ABI, so names there are not
+// mangled), and a name that occurs once (`//go:linkname f runtime.morestack_noctxt.abi0`
+// gives a second symbol with exactly that name). `classifyStub` checks all three.
+var (
+	runtimePanicStubs = map[string]bool{
+		"runtime.gopanic": true, "runtime.goPanicIndex": true, "runtime.goPanicIndexU": true,
+		"runtime.goPanicSlice3Acap": true, "runtime.goPanicSlice3AcapU": true,
+		"runtime.goPanicSlice3Alen": true, "runtime.goPanicSlice3AlenU": true,
+		"runtime.goPanicSlice3B": true, "runtime.goPanicSlice3BU": true,
+		"runtime.goPanicSlice3C": true, "runtime.goPanicSlice3CU": true,
+		"runtime.goPanicSliceAcap": true, "runtime.goPanicSliceAcapU": true,
+		"runtime.goPanicSliceAlen": true, "runtime.goPanicSliceAlenU": true,
+		"runtime.goPanicSliceB": true, "runtime.goPanicSliceBU": true,
+		"runtime.goPanicSliceConvert": true,
+		"runtime.panicBounds": true, "runtime.panicBounds32": true, "runtime.panicBounds32X": true,
+		"runtime.panicBounds64": true, "runtime.panicdivide": true, "runtime.panicdottypeE": true,
+		"runtime.panicdottypeI": true, "runtime.panicfloat": true, "runtime.panicmakeslicecap": true,
+		"runtime.panicmakeslicelen": true, "runtime.panicmem": true, "runtime.panicmemAddr": true,
+		"runtime.panicnildottype": true, "runtime.panicoverflow": true,
+		"runtime.panicrangestate": true, "runtime.panicshift": true, "runtime.panicSimdImm": true,
+		"runtime.panicunsafeslicelen": true, "runtime.panicunsafeslicelen1": true,
+		"runtime.panicunsafeslicenilptr": true, "runtime.panicunsafeslicenilptr1": true,
+		"runtime.panicunsafestringlen": true, "runtime.panicunsafestringnilptr": true,
+		"runtime.panicwrap": true,
 	}
+	// morestack and morestack_noctxt are ABI0 assembly; the linker names them with ".abi0".
+	runtimeMorestackStubs = map[string]bool{
+		"runtime.morestack.abi0": true, "runtime.morestack_noctxt.abi0": true,
+	}
+)
+
+// stubGoVersion is the Go release whose runtime the stub lists are taken from.
+const stubGoVersion = "go1.26"
+
+// stubKind classifies a linked symbol name as a runtime stub (name only; see classifyStub for
+// the checks that make the name trustworthy).
+func stubKind(name string) (StubKind, bool) {
 	switch {
-	case strings.HasPrefix(n, "runtime.morestack"):
+	case runtimeMorestackStubs[name]:
 		return stubMorestack, true
-	case strings.HasPrefix(n, "runtime.panic"), strings.HasPrefix(n, "runtime.goPanic"), n == "runtime.gopanic":
+	case runtimePanicStubs[name]:
 		return stubPanic, true
 	}
 	return "", false
+}
+
+// stubLike reports whether name looks like a runtime stub under any ABI suffix (used only to
+// give a useful diagnostic when classifyStub cannot authenticate one).
+func stubLike(name string) bool {
+	n := strings.TrimSuffix(name, ".abi0")
+	_, ok1 := stubKind(n)
+	_, ok2 := stubKind(n + ".abi0")
+	return ok1 || ok2
+}
+
+// classifyStub decides whether the function g, the target of a direct branch, is a runtime
+// stub. It is one only if its name is on the go1.26 lists, the binary was linked with a go1.26
+// runtime, its names come from the ELF symbol table, and no other function has the same name
+// (round 7 G1). A listed name that fails one of the other checks is an error: extracting the
+// runtime function as code would give a different, much larger program.
+func (b *Binary) classifyStub(g Func) (StubKind, bool, error) {
+	k, ok := stubKind(g.Name)
+	if !ok {
+		if b.SymbolSource != "symtab" && stubLike(g.Name) {
+			return "", false, &diag{
+				Msg:   fmt.Sprintf("the code calls %s, but %s has no ELF symbol table, and function names from the pclntab do not record the ABI, so Janus cannot tell the runtime's %s from a function of another package that only has that name (round 7 G1)", g.Name, b.Path, g.Name),
+				Stage: "code extraction",
+				Next:  "Rebuild without stripping the symbol table (no -ldflags=-s).",
+			}
+		}
+		return "", false, nil
+	}
+	if b.SymbolSource != "symtab" {
+		return "", false, &diag{
+			Msg:   fmt.Sprintf("the code calls %s, but %s has no ELF symbol table, so Janus cannot confirm it is the runtime's (round 7 G1)", g.Name, b.Path),
+			Stage: "code extraction",
+			Next:  "Rebuild without stripping the symbol table (no -ldflags=-s).",
+		}
+	}
+	if b.GoVersion != stubGoVersion && !strings.HasPrefix(b.GoVersion, stubGoVersion+".") &&
+		!strings.HasPrefix(b.GoVersion, stubGoVersion+"rc") {
+		return "", false, &diag{
+			Msg:   fmt.Sprintf("the code calls %s, but %s was built with %s, and Janus's list of runtime stubs (which runtime functions panic, which grow the stack) is taken from the %s runtime (round 7 G1)", g.Name, b.Path, b.GoVersion, stubGoVersion),
+			Stage: "code extraction",
+			Next:  "Build the binary with a " + stubGoVersion + " toolchain (GOTOOLCHAIN=go1.26.0).",
+		}
+	}
+	n := 0
+	for _, f := range b.Funcs {
+		if f.Name == g.Name {
+			n++
+		}
+	}
+	if n != 1 {
+		return "", false, &diag{
+			Msg:   fmt.Sprintf("the code calls %s, but %s defines %d functions with that name, so the runtime's cannot be told from the others (round 7 G1: //go:linkname can push a second symbol with a runtime stub's name)", g.Name, b.Path, n),
+			Stage: "code extraction",
+			Next:  "Remove the //go:linkname or assembly definition that reuses a runtime function's name.",
+		}
+	}
+	return k, true, nil
 }
 
 // extract copies sym and every function reachable from it by direct branches.
@@ -86,7 +181,7 @@ func extractFrom(b *Binary, sym string, maxFunctions int) (*Extraction, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := stubKind(entry.Name); ok {
+	if stubLike(entry.Name) {
 		return nil, &diag{Msg: fmt.Sprintf("%s is a runtime stub, not a function Janus extracts", entry.Name),
 			Stage: "function selection", Next: "Select a Go function that calls the stub instead."}
 	}
@@ -116,7 +211,11 @@ func extractFrom(b *Binary, sym string, maxFunctions int) (*Extraction, error) {
 				x.Unresolved = append(x.Unresolved, Unresolved{From: pc, Target: t})
 				continue
 			}
-			if k, ok := stubKind(g.Name); ok {
+			k, ok, err := b.classifyStub(g)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
 				if !stubSeen[g.Addr] {
 					stubSeen[g.Addr] = true
 					x.Stubs = append(x.Stubs, Stub{Name: g.Name, Addr: g.Addr, Kind: k})

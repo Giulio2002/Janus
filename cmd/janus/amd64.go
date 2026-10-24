@@ -116,7 +116,11 @@ func extractAmd64(b *Binary, entry Func, maxFunctions int) (*Extraction, error) 
 				x.Unresolved = append(x.Unresolved, Unresolved{From: in.PC, Target: t})
 				continue
 			}
-			if k, ok := stubKind(g.Name); ok {
+			k, ok, err := b.classifyStub(g)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
 				if !stubSeen[g.Addr] {
 					stubSeen[g.Addr] = true
 					x.Stubs = append(x.Stubs, Stub{Name: g.Name, Addr: g.Addr, Kind: k})

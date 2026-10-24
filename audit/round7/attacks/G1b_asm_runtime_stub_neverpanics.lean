@@ -10,7 +10,7 @@ prints `panic: boom`). -/
 namespace Proof
 theorem growsStack (x : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program ret)
     (s : State) (hs : CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s)
-    (hg : GuardOK s 0) (hst : StackOK s 64 64) :
+    (hg : GuardOK s 0) (hst : StackOK s 256 256) :
     GrowsStack (Extracted.program.withExit ret) s := by
   obtain ⟨hg1, hg2, hg3⟩ := hg
   obtain ⟨hal, hb, ha, hw⟩ := hst
@@ -19,7 +19,7 @@ theorem growsStack (x : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program
 
 theorem correctness (x : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program ret)
     (s : State) (hs : CallSetup (Extracted.program.withExit ret) Extracted.entry [x] s)
-    (hg : GuardOK s 0) (hst : StackOK s 64 64) :
+    (hg : GuardOK s 0) (hst : StackOK s 256 256) :
     NeverPanics (Extracted.program.withExit ret) s := by
   obtain ⟨m, name, s₁, hm⟩ := growsStack x ret hret s hs hg hst
   intro n
