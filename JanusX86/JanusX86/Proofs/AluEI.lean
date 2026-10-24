@@ -78,7 +78,7 @@ theorem run_alu_e_i {js : Janus.Amd64.State} {s : SState} (h : Rel js s) (hc : X
         (BitVec.ofNat 3 (m % 8)) (BitVec.ofNat 2 (m / 64)) sib (BitVec.ofNat 3 k)).run s =
         .ok ((V.setWidth 64).setWidth 128, (inc : Int), eaddr) s)
     (J : BitVec w → Janus.Amd64.State)
-    (hWr : ∀ sg, (sg = 4 ↔ p.fs = true) → sg ≠ 5 → ∀ y : BitVec w, ∃ s1,
+    (hWr : ¬ (operation = 8 ∨ operation = 7) → ∀ sg, (sg = 4 ↔ p.fs = true) → sg ≠ 5 → ∀ y : BitVec w, ∃ s1,
       (x86_operand_to_reg_mem .Mode_64bit (w / 8) true false ((y.setWidth 64).setWidth 128) sg eaddr x rex
         (BitVec.ofNat 3 (m % 8)) (BitVec.ofNat 2 (m / 64)) sib).run s = .ok () s1 ∧
       Rel (J y) s1 ∧ X86Config s1 ∧ (J y).df = js.df ∧ s1.regs.get? .rflags = s.regs.get? .rflags ∧
@@ -182,7 +182,7 @@ theorem run_alu_e_i {js : Janus.Amd64.State} {s : SState} (h : Rel js s) (hc : X
     · exact (hc.set (by decide) _).set (by decide) _
   · have hb : (operation == 8 || operation == 7) = false := by simp; omega
     simp only [hb, hnw, Bool.false_eq_true, ↓reduceIte]
-    obtain ⟨s1, hs1, hrel1, hcfg1, hdf1, hr1, hu1⟩ := hWr sg hsg4 hsg5 R.1
+    obtain ⟨s1, hs1, hrel1, hcfg1, hdf1, hr1, hu1⟩ := hWr hnw sg hsg4 hsg5 R.1
     simp only [Sail.BitVec.zeroExtend, BitVec.zeroExtend_eq_setWidth, hs1]
     have e1 : s1.regs.get? .rflags = some rf := by rw [hr1]; exact hr
     have e2 : s1.regs.get? .janus_undef = some u := by rw [hu1]; exact hu
@@ -408,5 +408,299 @@ theorem decode_ei {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List Nat
       | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨rfl, by omega, rfl, fun _ h => by cases h⟩)
       | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨rfl, by omega, rfl, fun _ _ => rfl⟩)
       | omega
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+theorem immEI_eq {o w v : Nat} (ho : o = 0x80 ∨ o = 0x81 ∨ o = 0x83 ∨ o = 0xF6 ∨ o = 0xF7)
+    {p : Janus.Amd64.Decode.Prefixes} (hw : w = if o = 0x80 ∨ o = 0xF6 then 8 else osz p)
+    {k : Nat} (hk : k = if o = 0x81 ∨ o = 0xF7 then immBytes w else 1) (hv : v < 2 ^ (8 * k)) :
+    BitVec.ofNat w (immEI o w v) = BitVec.ofNat w (Janus.Amd64.Decode.sext (8 * k) w v) := by
+  subst hk hw
+  rcases osz_cases p with e | e | e <;>
+  rcases ho with rfl | rfl | rfl | rfl | rfl <;> simp (config := {decide := true}) [e, immEI, immBytes] at hv ⊢ <;>
+  simp [Janus.Amd64.Decode.sext] <;> split <;> simp <;> omega
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem disp_drop {md : Nat} {bs : List Nat} {d : Nat} {r : List Nat} {k : Nat} (h : disp md bs = some (d, r, k)) :
+    r = bs.drop k := by
+  unfold disp at h
+  split at h
+  · split at h
+    · rename_i _ _ e; simp at h; obtain ⟨-, rfl, rfl⟩ := h; exact (readLE_sumLE _ _ e).2.2
+    · simp at h
+  · split at h
+    · split at h
+      · rename_i _ _ e; simp at h; obtain ⟨-, rfl, rfl⟩ := h; exact (readLE_sumLE _ _ e).2.2
+      · simp at h
+    · simp at h; obtain ⟨-, rfl, rfl⟩ := h; simp
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem modrm_drop {rx m : Nat} {rest : List Nat} {mm : ModRM} {r3 : List Nat} {c : Nat}
+    (h : modrm rx (m :: rest) = some (mm, r3, c)) : r3 = rest.drop (c - 1) := by
+  revert h
+  unfold modrm
+  simp only
+  repeat' split
+  all_goals intro h
+  all_goals first
+    | (simp at h; done)
+    | (simp only [Option.some.injEq, Prod.mk.injEq] at h; obtain ⟨-, rfl, rfl⟩ := h; simp; done)
+    | (simp only [Option.some.injEq, Prod.mk.injEq] at h; obtain ⟨-, rfl, rfl⟩ := h
+       first
+         | (obtain ⟨-, -, e⟩ := readLE_sumLE 4 _ ‹readLE 4 _ = some (_, _)›; simp only [e]; simp [List.drop_drop]; done)
+         | (have e := disp_drop ‹disp _ _ = some (_, _, _)›; rw [e]
+            simp only [show ∀ k, 2 + k - 1 = k + 1 from fun k => by omega,
+              show ∀ k, 1 + k - 1 = k from fun k => by omega, List.drop_succ_cons])
+         | exact (readLE_sumLE 4 _ ‹_›).2.2)
+
+open Janus.Amd64 in
+theorem exec_ei {js js' : State} {len o w : Nat} {D : Loc} {I : Nat} {Y : BitVec w} (hY : BitVec.ofNat w I = Y)
+    (op : AluOp) (hop : (o = 0xF6 ∨ o = 0xF7) → op = .and)
+    (hstep : exec (if o = 0xF6 ∨ o = 0xF7 then .test w D (.imm I) else .alu op w D (.imm I)) len js = .ok js') :
+    ∃ X c, (((o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp) →
+        readLoc js (BitVec.ofNat 64 ((js.rip.toNat + len) % 2 ^ 64)) w D = .ok X) ∧
+      (¬ ((o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp) →
+        readLocRW js (BitVec.ofNat 64 ((js.rip.toNat + len) % 2 ^ 64)) w D = .ok X) ∧
+      ((op = .adc ∨ op = .sbb) → js.flags.cf = some c) ∧
+      (((o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp) →
+        js' = (js.setFlags (aluRes op X Y c).2).setRip (BitVec.ofNat 64 ((js.rip.toNat + len) % 2 ^ 64))) ∧
+      (¬ ((o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp) → ∃ j2,
+        writeLoc js (BitVec.ofNat 64 ((js.rip.toNat + len) % 2 ^ 64)) w D (aluRes op X Y c).1 = .ok j2 ∧
+        js' = (j2.setFlags (aluRes op X Y c).2).setRip (BitVec.ofNat 64 ((js.rip.toNat + len) % 2 ^ 64))) := by
+  generalize hNX : BitVec.ofNat 64 ((js.rip.toNat + len) % 2 ^ 64) = NX
+  by_cases ht : o = 0xF6 ∨ o = 0xF7
+  · have hop' := hop ht; subst hop'
+    simp only [ht, ↓reduceIte, exec] at hstep
+    rw [hNX] at hstep
+    cases hr : readLoc js NX w D with
+    | error e => simp [hr] at hstep
+    | ok X =>
+      simp only [hr, readSrc, hY, Except.ok.injEq] at hstep
+      exact ⟨X, false, fun _ => rfl, fun h => absurd (Or.inl ht) h, by simp, fun _ => by simp [← hstep, aluRes],
+        fun h => absurd (Or.inl ht) h⟩
+  · simp only [ht, ↓reduceIte, exec] at hstep
+    rw [hNX] at hstep
+    obtain ⟨X, c, h1, h2, h3, h4, h5⟩ := execAlu_any (Y := Y) (by simp [readSrc, hY]) hstep
+    refine ⟨X, c, fun h => h1 (by simpa [ht] using h), fun h => h2 (by simpa [ht] using h), h3,
+      fun h => h4 (by simpa [ht] using h), fun h => h5 (by simpa [ht] using h)⟩
+
+theorem modrmP1_ei : ∀ o, (o = 0x80 ∨ o = 0x81 ∨ o = 0x83 ∨ o = 0xF6 ∨ o = 0xF7) → modrmP1 o = true := by
+  intro o h; rcases h with rfl | rfl | rfl | rfl | rfl <;> decide
+
+set_option maxHeartbeats 2000000 in
+open Janus.Amd64 Janus.Amd64.Decode in
+/-- **ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m, imm** (`80/81/83 /0..7`) and **TEST r/m, imm**
+(`F6/F7 /0`): every ModRM form (register, or memory with every addressing form incl. SIB,
+RIP- and FS-relative), every width and prefix sequence Janus accepts without `LOCK`. -/
+theorem alu_ei_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
+    {bytes : List Nat} (hcode : CodeAt s js.rip.toNat bytes) (hlim : js.rip.toNat + 17 < 2 ^ 47)
+    {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n))
+    (ho : o = 0x80 ∨ o = 0x81 ∨ o = 0x83 ∨ o = 0xF6 ∨ o = 0xF7)
+    (hext : (o = 0xF6 ∨ o = 0xF7) → m / 8 % 8 = 0) (hlk : p.lock = false)
+    (hstep : step bytes js = .ok js') :
+    ∃ s', (janus_x86_step ()).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ X86Config s' := by
+  cases hd : decode bytes with
+  | none => simp [step, hd] at hstep
+  | some il =>
+  obtain ⟨i, len⟩ := il
+  cases hmd : modrm (p.rex.getD 0) (m :: rest) with
+  | none =>
+    exfalso
+    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    rcases ho with rfl | rfl | rfl | rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
+  | some mrc =>
+  obtain ⟨mm, r3, c⟩ := mrc
+  generalize hw : (if o = 0x80 ∨ o = 0xF6 then 8 else osz p) = w
+  generalize hk : (if o = 0x81 ∨ o = 0xF7 then immBytes w else 1) = k
+  obtain ⟨hrep, v, r4, hr, rfl, hlen, rfl, hfs⟩ := decode_ei hpp ho hext hmd hlk hw.symm hk.symm hd
+  rw [step_of_decode hd] at hstep
+  have hdrop : bytes.drop n = o :: m :: rest := by simpa using parsePrefixes_drop _ _ _ hpp
+  have hm256 : m < 256 := hcode.1 m (by
+    have : m ∈ bytes.drop n := by rw [hdrop]; simp
+    exact List.mem_of_mem_drop this)
+  have hrv : ∀ r, p.rex = some r → r < 16 := parsePrefixes_rexv _ _ _ (by simp) hpp
+  have hrip : s.regs.get? .rip = some (BitVec.ofNat 64 js.rip.toNat) := by
+    rw [BitVec.ofNat_toNat, BitVec.setWidth_eq]; exact hrel.rip
+  have ho256 : o < 256 := by omega
+  have hpg : prefixGroup o = 0 := by
+    unfold prefixGroup; split <;> (try split) <;> (try split) <;> (try split) <;> omega
+  have hmp : modrmP1 o = true := modrmP1_ei o ho
+  have hcs : CodeAt s (js.rip.toNat + n + 1 + 1) rest := by
+    have h2 : (bytes.drop n).drop 2 = rest := by rw [hdrop]; rfl
+    have := hcode.drop (n + 2); rw [show bytes.drop (n + 2) = rest by simpa [List.drop_drop, Nat.add_comm] using h2] at this
+    rwa [show js.rip.toNat + (n + 2) = js.rip.toNat + n + 1 + 1 by omega] at this
+  have hk4 : k = 1 ∨ k = 2 ∨ k = 4 := by
+    rw [← hk]; unfold immBytes; split <;> (try split) <;> (try split) <;> simp
+  have hW : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64 := by
+    rw [← hw]; split
+    · simp
+    · rcases osz_cases p with e | e | e <;> simp [e]
+  have hnext : BitVec.ofNat 64 ((BitVec.toNat js.rip + (n + 1 + c + k)) % 2 ^ 64) =
+      BitVec.ofNat 64 (js.rip.toNat + n + 1 + c + k) := by
+    rw [Nat.mod_eq_of_lt (by omega)]; congr 1; omega
+  have hrexP := rex_hrex hrv
+  -- the immediate bytes
+  have hmdc := modrm_drop hmd
+  have hvl : v < 2 ^ (8 * k) := by
+    obtain ⟨-, hvv, -⟩ := readLE_sumLE _ _ hr
+    have hc3 : CodeAt s (js.rip.toNat + n + 1 + 1 + (c - 1)) r3 := by rw [hmdc]; exact hcs.drop (c - 1)
+    rw [hvv, Nat.pow_mul]
+    exact sumLE_lt _ (fun j => by
+      by_cases hj : j < r3.length
+      · rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hj]; exact hc3.1 _ (List.getElem_mem _)
+      · rw [List.getD_eq_getElem?_getD, List.getElem?_eq_none (by omega)]; decide) _
+  have hY := immEI_eq ho hw.symm hk.symm hvl
+  generalize hYd : BitVec.ofNat w (Janus.Amd64.Decode.sext (8 * k) w v) = Y at hY
+  -- the operation
+  generalize hop : (if o = 0xF6 ∨ o = 0xF7 then AluOp.and else aluOp (m / 8 % 8)) = op
+  have hstep' : exec (if o = 0xF6 ∨ o = 0xF7 then .test w (rmDst p w mm.rm) (.imm (immEI o w v))
+      else .alu op w (rmDst p w mm.rm) (.imm (immEI o w v))) (n + 1 + c + k) js = .ok js' := by
+    rw [← hop]; split <;> simpa [*] using hstep
+  obtain ⟨X, c0, hX1, hX2, hcf, hJ1, hJ2⟩ := exec_ei hY op (fun h => by rw [← hop]; simp [h]) hstep'
+  rw [hnext] at hX1 hX2 hJ1 hJ2
+  generalize hoper : (if o = 0xF6 ∨ o = 0xF7 then 7 else sailOp op) = operation
+  have hope : operation = sailOp op ∨ (operation = 7 ∧ op = .and) := by
+    rw [← hoper, ← hop]; split
+    · exact Or.inr ⟨rfl, rfl⟩
+    · exact Or.inl rfl
+  have hnw : (operation = 8 ∨ operation = 7) ↔ ((o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp) := by
+    rw [← hoper]; split
+    · simp_all
+    · rename_i h; simp only [h, false_or]
+      rw [show (sailOp op = 8 ∨ sailOp op = 7) = (sailOp op = 8 ∨ sailOp op = 7) from rfl, sailOp_cmp]
+  -- the model up to the (E, I) arm
+  obtain ⟨md, rg, ext, rm⟩ := mm
+  have hm4 : modrmSib (modrmP1 o) (m :: rest) = (BitVec.ofNat 8 m, (if sibP m then BitVec.ofNat 8 (rest.getD 0 0) else 0#8),
+      1 + (if sibP m then 1 else 0)) := by rw [hmp, modrmSib_eq]
+  have hsl : (1 + (if sibP m then 1 else 0)) ≤ (m :: rest).length := by
+    cases rest with
+    | cons _ _ => simp; split <;> omega
+    | nil =>
+      cases hs : sibP m
+      · simp
+      · exfalso
+        unfold sibP at hs; simp at hs
+        unfold modrm at hmd; simp [hs.1, hs.2] at hmd
+  obtain ⟨x, rex, hpr, hnx, hf⟩ := run_fetch_one hcfg hrip hcode hpp (by omega) hlim hpg (by omega)
+    ⟨by omega, by omega, by omega⟩ (by rw [hm4]; simp at hsl ⊢; omega)
+  rw [hm4] at hf
+  simp only at hf
+  have hrexb : rex = BitVec.ofNat 8 (rexByte p) := by rw [hpr.rexb]; rfl
+  have hrex : (rex == 0#8) = !p.rex.isSome := by rw [hrexb]; exact rex_hrex hrv
+  have hl0 : _get_prefixes_lck x = 0#8 := by have := hpr.lck; rw [hlk] at this; simpa using this
+  obtain ⟨hf1, hf2, hf3⟩ := modrm_fields m hm256
+  have hdisp : (one_byte_opcode_execute .Mode_64bit (BitVec.ofNat 48 js.rip.toNat)
+      (BitVec.ofNat 48 (js.rip.toNat + n + 1 + (1 + (if sibP m then 1 else 0)))) x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m)
+      (if sibP m then BitVec.ofNat 8 (rest.getD 0 0) else 0#8)).run s =
+      (x86_add_adc_sub_sbb_or_and_xor_cmp_test_e_i operation .Mode_64bit (BitVec.ofNat 48 js.rip.toNat)
+      (BitVec.ofNat 48 (js.rip.toNat + n + 1 + 1 + (if sibP m then 1 else 0))) x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m)
+      (if sibP m then BitVec.ofNat 8 (rest.getD 0 0) else 0#8)).run s := by
+    rw [show js.rip.toNat + n + 1 + (1 + (if sibP m then 1 else 0)) = js.rip.toNat + n + 1 + 1 + (if sibP m then 1 else 0)
+      by omega]
+    rw [← hoper, ← hop]
+    by_cases ht : o = 0xF6 ∨ o = 0xF7
+    · simp only [ht, ↓reduceIte]
+      rw [run_one_byte_test_e_i o ht _ _ x hl0 _ _ _ (by rw [hf2, hext ht]) s]
+    · simp only [ht, ↓reduceIte]
+      have h80 : o = 0x80 ∨ o = 0x81 ∨ o = 0x83 := by
+        rcases ho with h | h | h | h | h
+        · exact Or.inl h
+        · exact Or.inr (Or.inl h)
+        · exact Or.inr (Or.inr h)
+        · exact absurd (Or.inl h) ht
+        · exact absurd (Or.inr h) ht
+      have hh := run_one_byte_e_i o h80 (m / 8 % 8) (Nat.mod_lt _ (by decide)) (BitVec.ofNat 48 js.rip.toNat)
+        (BitVec.ofNat 48 (js.rip.toNat + n + 1 + 1 + (if sibP m then 1 else 0))) x hl0 rex (BitVec.ofNat 8 m)
+        (if sibP m then BitVec.ofNat 8 (rest.getD 0 0) else 0#8) hf2 s
+      exact hh
+  rw [hdisp] at hf
+  have hk3 : k < 8 := by omega
+  cases rm with
+  | r k' =>
+    obtain ⟨h3, rfl, rfl, -⟩ := modrm_r hmd
+    have hfs' := hfs _ rfl
+    have hsib : sibP m = false := sibP_reg m h3
+    simp only [hsib, Bool.false_eq_true, ↓reduceIte, Nat.add_zero] at hf
+    have hD : rmDst p w (.r (m % 8 + 8 * (p.rex.getD 0 % 2))) = regLocOf p.rex.isSome w (rmNum p m) := rfl
+    rw [hD] at hX1 hX2 hJ2
+    have hXv : X = regVal js w (regLocOf p.rex.isSome w (rmNum p m)) := by
+      by_cases hh : (o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp
+      · have := hX1 hh; rw [readLoc_regLocOf] at this; simp at this; exact this.symm
+      · have := hX2 hh; rw [readLocRW_regLocOf] at this; simp at this; exact this.symm
+    subst hXv
+    have hcs3 : CodeAt s (js.rip.toNat + n + 1 + 1) r3 := by rw [hmdc]; simpa using hcs
+    obtain ⟨s', hs', hrel', hcfg'⟩ := run_alu_e_i hrel hcfg hpr hrv operation op hope o ho hw.symm hk.symm m hm256 0#8
+      (js.rip.toNat + n + 1 + 1) (js.rip.toNat + n + 1 + 1) (regVal js w (regLocOf p.rex.isSome w (rmNum p m))) 0 0#64
+      (fun sg _ _ => by
+        rw [h3]
+        exact run_operand_from_reg hrel hW _ rex hrex (rmNum_lt p m) (rmNum_8 p m) _
+          (by rw [hrexb]; exact hidx_rm hrv m) true false sg x _ 0#8 _)
+      (regWrite js w (regLocOf p.rex.isSome w (rmNum p m)))
+      (fun _ sg _ _ y => by
+        rw [h3]
+        exact dstW_reg hrel hcfg hW _ rex hrex (rmNum_lt p m) (rmNum_8 p m) _ (by rw [hrexb]; exact hidx_rm hrv m)
+          sg 0#64 x 0#8 y)
+      rfl hcs3 hr js.rip.toNat (by omega) (by omega) (by omega) c0 hcf
+    refine ⟨s', run_janus_x86_step (by rw [hf, hs']), ?_, hcfg'⟩
+    rw [hYd] at hrel'
+    by_cases hh : (o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp
+    · rw [hJ1 hh]; simp only [hnw.2 hh, ↓reduceIte] at hrel'
+      exact hrel'
+    · obtain ⟨j2, hj2, rfl⟩ := hJ2 hh
+      rw [writeLoc_regLocOf] at hj2; simp only [Except.ok.injEq] at hj2; subst hj2
+      have : ¬ (operation = 8 ∨ operation = 7) := fun e => hh (hnw.1 e)
+      simp only [this, ↓reduceIte] at hrel'
+      exact hrel'
+  | m a =>
+    obtain ⟨hc1, hc6, hmd3⟩ := modrm_c_ge hmd
+    have hD : rmDst p w (.m a) = .mem (if p.fs then { a with fs := true } else a) := rfl
+    rw [hD] at hX1 hX2 hJ2
+    generalize hNX : BitVec.ofNat 64 (js.rip.toNat + n + 1 + c + k) = NX at hX1 hX2 hJ1 hJ2
+    have hXv : ∃ wr, js.mem.accessible (ea js NX (if p.fs then { a with fs := true } else a)).toNat (w / 8) wr = true ∧
+        (¬ ((o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp) → wr = true) ∧
+        X = BitVec.ofNat w (js.mem.readLE (ea js NX (if p.fs then { a with fs := true } else a)).toNat (w / 8)) := by
+      by_cases hh : (o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp
+      · obtain ⟨h1, h2⟩ := readLoc_mem (hX1 hh); exact ⟨false, h1, fun h => absurd hh h, h2⟩
+      · obtain ⟨h1, h2⟩ := readLocRW_mem (hX2 hh); exact ⟨true, h1, fun _ => rfl, h2⟩
+    obtain ⟨wr, hacc, hwr, rfl⟩ := hXv
+    have hcs3 : CodeAt s (js.rip.toNat + n + 1 + c) r3 := by
+      rw [hmdc]; have := hcs.drop (c - 1)
+      rwa [show js.rip.toNat + n + 1 + 1 + (c - 1) = js.rip.toNat + n + 1 + c by omega] at this
+    have hafs := (run_x86_effective_addr hrel hcfg hrel.rip hpr hrv hcs hm256 hmd (nimm := k) hk3 (by omega)).2.1
+    obtain ⟨s', hs', hrel', hcfg'⟩ := run_alu_e_i hrel hcfg hpr hrv operation op hope o ho hw.symm hk.symm m hm256
+      (if sibP m then BitVec.ofNat 8 (rest.getD 0 0) else 0#8)
+      (js.rip.toNat + n + 1 + 1 + (if sibP m then 1 else 0)) (js.rip.toNat + n + 1 + c)
+      (BitVec.ofNat w (js.mem.readLE (ea js NX (if p.fs then { a with fs := true } else a)).toNat (w / 8)))
+      (c - 1 - (if sibP m then 1 else 0)) (eaOff js NX a)
+      (fun sg hsg4 hsg5 => by
+        have := run_operand_from_mem hrel hcfg hpr hrv hcs hm256 hmd (nimm := k) hk3 (by omega) hW hsg4 hsg5
+          true false (wr := wr) (by rw [show js.rip.toNat + n + 1 + c + k = js.rip.toNat + n + 1 + c + k from rfl, hNX]; exact hacc)
+        rw [hNX] at this
+        simpa using this)
+      (memWrite js (ea js NX (if p.fs then { a with fs := true } else a)).toNat (w / 8) ∘ BitVec.toNat)
+      (fun hnw' sg hsg4 hsg5 y => by
+        have hw' := hwr (fun e => hnw' (hnw.2 e)); subst hw'
+        exact dstW_mem hrel hcfg hpr hW hsg4 hsg5 a hafs NX _ (by rw [beq2_3 _ (by omega)]; simpa using hmd3) _ hacc y)
+      (by omega) hcs3 hr js.rip.toNat (by omega) (by omega) (by omega) c0 hcf
+    refine ⟨s', run_janus_x86_step (by rw [hf, hs']), ?_, hcfg'⟩
+    rw [hYd, show js.rip.toNat + n + 1 + c + k = js.rip.toNat + n + 1 + c + k from rfl, hNX] at hrel'
+    by_cases hh : (o = 0xF6 ∨ o = 0xF7) ∨ op = .cmp
+    · rw [hJ1 hh]; simp only [hnw.2 hh, ↓reduceIte] at hrel'; exact hrel'
+    · obtain ⟨j2, hj2, rfl⟩ := hJ2 hh
+      have hw' := hwr hh; subst hw'
+      rw [writeLoc_mem _ hacc] at hj2; simp only [Except.ok.injEq] at hj2; subst hj2
+      have : ¬ (operation = 8 ∨ operation = 7) := fun e => hh (hnw.1 e)
+      simp only [this, ↓reduceIte, Function.comp] at hrel'
+      exact hrel'
 
 end JanusX86.Proofs
