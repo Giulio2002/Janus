@@ -29,8 +29,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // coreRoots are the module roots shipped with the Lean toolchain: trusted, never replayed.
@@ -68,9 +70,11 @@ func moduleOfRel(rel string) string {
 // pins maps a library-relative slash path of a module-data file to its SHA-256.
 type pins map[string]string
 
-// pinLib hashes the module-data files under dir whose module keep accepts (nil: all).
+// pinLib hashes the module-data files under dir whose module keep accepts (nil: all). The
+// files are hashed in parallel (the framework build alone is ~70 MB, re-hashed after every step).
 func pinLib(dir string, keep func(mod string) bool) (pins, error) {
 	p := pins{}
+	var files []string // regular files to hash, as rel paths
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if path == dir && os.IsNotExist(err) {
@@ -90,14 +94,46 @@ func pinLib(dir string, keep func(mod string) bool) (pins, error) {
 			p[rel] = "not-a-regular-file"
 			return nil
 		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		p[rel] = sha256Hex(b)
+		files = append(files, rel)
 		return nil
 	})
-	return p, err
+	if err != nil {
+		return p, err
+	}
+	sums := make([]string, len(files))
+	errs := make([]error, len(files))
+	workers := runtime.NumCPU()
+	if workers > 16 {
+		workers = 16
+	}
+	var wg sync.WaitGroup
+	next := make(chan int)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(files[i])))
+				if err != nil {
+					errs[i] = err
+					continue
+				}
+				sums[i] = sha256Hex(b)
+			}
+		}()
+	}
+	for i := range files {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	for i, rel := range files {
+		if errs[i] != nil {
+			return p, errs[i]
+		}
+		p[rel] = sums[i]
+	}
+	return p, nil
 }
 
 // pinnedLib is a library directory with the pins its module-data files must match.
@@ -343,10 +379,19 @@ func importGraph(rows [][]string) map[string][]string {
 	return g
 }
 
-// replayChunk bounds how many modules one leanchecker process replays: it replays its targets
-// in parallel tasks, each importing that module's whole environment, so an unbounded batch (a
-// Mathlib closure) would hold thousands of environments at once.
-const replayChunk = 32
+// replayParallel bounds how many leanchecker processes one replay runs at once. Each process
+// replays one target (a module and its name-prefix descendants): leanchecker imports a separate
+// environment per target, and inside one process every import after the first copies the
+// already-mapped .olean files instead of mapping them, so one process per target is faster and
+// holds one environment at a time. A large closure (a Mathlib import) is still one process per
+// root, as before. At most two run at once (memory: each holds up to LEAN_NUM_THREADS environments).
+func replayParallel() int {
+	n := runtime.NumCPU()
+	if n > 2 {
+		n = 2
+	}
+	return n
+}
 
 // pending is the subset of mods without a cached (or already recorded) passing replay.
 func (p *replayPlan) pending(mods []string) []string {
@@ -400,29 +445,97 @@ func replayTargets(mods []string) (targets []string, covers map[string][]string)
 }
 
 // replay kernel-replays mods (those not yet passed) with leanchecker through run (the sandboxed
-// runner with the verification's LEAN_PATH), at most replayChunk modules per process. Passing
-// chunks are recorded in the replay cache. It returns leanchecker's output on the first failure.
+// runner with the verification's LEAN_PATH): one process per replay target (replayTargets),
+// at most replayParallel at once. Each target's replay holds a lock in the replay cache, so
+// concurrent verifications replaying the same modules (a fresh framework build) replay them
+// once; a target whose modules all became cached while waiting is not replayed again. Passing
+// targets are recorded in the replay cache. It returns leanchecker's output on the first failure
+// (in target order).
 func (p *replayPlan) replay(checker string, run func(argv ...string) (string, error), mods []string) (string, error) {
 	targets, covers := replayTargets(p.pending(mods))
-	for len(targets) > 0 {
-		var chunk, covered []string
-		for len(targets) > 0 && (len(chunk) == 0 || len(covered)+len(covers[targets[0]]) <= replayChunk) {
-			chunk = append(chunk, targets[0])
-			covered = append(covered, covers[targets[0]]...)
-			targets = targets[1:]
+	if len(targets) == 0 {
+		return "", nil
+	}
+	outs := make([]string, len(targets))
+	errs := make([]error, len(targets))
+	sem := make(chan struct{}, replayParallel())
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i, t := range targets {
+		wg.Add(1)
+		go func(i int, t string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			covered := covers[t]
+			unlock := p.lockTarget(covered)
+			defer unlock()
+			if p.allCachedNow(covered) {
+				mu.Lock()
+				p.cached = append(p.cached, covered...)
+				mu.Unlock()
+				return
+			}
+			if out, err := run(checker, t); err != nil {
+				outs[i], errs[i] = out, err
+				return
+			}
+			mu.Lock()
+			if p.done == nil {
+				p.done = map[string]bool{}
+			}
+			for _, m := range covered {
+				p.done[m] = true
+			}
+			mu.Unlock()
+			p.record(covered)
+		}(i, t)
+	}
+	wg.Wait()
+	sort.Strings(p.cached)
+	for i := range targets {
+		if errs[i] != nil {
+			return outs[i], errs[i]
 		}
-		if out, err := run(append([]string{checker}, chunk...)...); err != nil {
-			return out, err
-		}
-		if p.done == nil {
-			p.done = map[string]bool{}
-		}
-		for _, m := range covered {
-			p.done[m] = true
-		}
-		p.record(covered)
 	}
 	return "", nil
+}
+
+// lockTarget takes an exclusive lock named by the cache keys of mods (with the cache on), so
+// only one janus process replays a given set of module bytes at a time. It returns the unlock.
+func (p *replayPlan) lockTarget(mods []string) func() {
+	if !p.cacheOn {
+		return func() {}
+	}
+	h := sha256.New()
+	for _, m := range mods {
+		fmt.Fprintf(h, "%s %s\n", m, p.keys[m])
+	}
+	k := hex.EncodeToString(h.Sum(nil))
+	d := filepath.Join(replayCacheDir(), "locks")
+	if os.MkdirAll(d, 0o755) != nil {
+		return func() {}
+	}
+	lk, err := lockFile(filepath.Join(d, k[:32]+".lock"), true)
+	if err != nil {
+		return func() {}
+	}
+	return lk.unlock
+}
+
+// allCachedNow reports whether every module of mods has a passing replay in the cache now
+// (recorded by another janus process while this one waited for the target's lock).
+func (p *replayPlan) allCachedNow(mods []string) bool {
+	if !p.cacheOn || len(mods) == 0 {
+		return false
+	}
+	for _, m := range mods {
+		k := p.keys[m]
+		if _, err := os.Stat(filepath.Join(replayCacheDir(), k[:2], k)); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // replayFresh additionally replays module m with `leanchecker --fresh`: every constant of its

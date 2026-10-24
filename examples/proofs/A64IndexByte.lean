@@ -206,6 +206,16 @@ theorem blk_split (x1 x2 c : Nat) :
       · have := (h (i - 24) (by omega)).2.2
         rw [show 8 + (i - 24) = i - 16 by omega] at this; simpa using this
 
+/-- `maskSum f 8` written out the way `loopTest`'s hypothesis has it (each mask scaled by its
+byte position), so the quick test's sum is matched by rewriting instead of by `omega` over the
+unfolded sums (which took about 45 s of this file's check). -/
+theorem maskSum_eight (f : Nat → Bool) :
+    maskSum f 8 = 255 * (f 0).toNat + 256 * (255 * (f 1).toNat) + 65536 * (255 * (f 2).toNat) +
+      16777216 * (255 * (f 3).toNat) + 4294967296 * (255 * (f 4).toNat) +
+      1099511627776 * (255 * (f 5).toNat) + 281474976710656 * (255 * (f 6).toNat) +
+      72057594037927936 * (255 * (f 7).toNat) := by
+  simp only [maskSum, Nat.reduceAdd]; omega
+
 set_option maxHeartbeats 4000000 in
 /-- **The quick test.** `ORR` of the two `CMEQ` masks, `ADDP .2D` and `UMOV` give a value that is
 zero iff no byte of the 32-byte block `x1:x2` equals `c` (adding the two 64-bit halves cannot
@@ -226,15 +236,15 @@ theorem loopTest (x1 x2 c : Nat) :
   · intro h
     have := maskSum_add_mod (fun k => decide (elem x1 8 k = c % 256 ∨ elem x2 8 k = c % 256))
       (fun k => decide (elem x1 8 (8 + k) = c % 256 ∨ elem x2 8 (8 + k) = c % 256)) 8 (by
-        simp only [maskSum, Nat.reduceAdd, Nat.reducePow]; omega)
+        simp only [maskSum_eight, Nat.reduceAdd, Nat.reducePow]; exact h)
     exact this
   · intro h
     have h1 := maskSum_eq_zero (fun k => decide (elem x1 8 k = c % 256 ∨ elem x2 8 k = c % 256)) 8
       (fun k hk => (h k hk).1)
     have h2 := maskSum_eq_zero (fun k => decide (elem x1 8 (8 + k) = c % 256 ∨ elem x2 8 (8 + k) = c % 256)) 8
       (fun k hk => (h k hk).2)
-    simp only [maskSum, Nat.reduceAdd] at h1 h2
-    omega
+    simp only [maskSum_eight, Nat.reduceAdd] at h1 h2
+    rw [h1, h2]
 
 
 /-- The block predicate on loaded memory is the byte comparison. -/

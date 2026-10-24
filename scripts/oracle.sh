@@ -12,6 +12,9 @@
 # QEMU (default /usr/bin/qemu-aarch64; set QEMU= to run natively on an arm64 Linux host).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 mode="${1:-full}"
 export PATH="$PATH:/usr/local/go/bin"
 OUT="${OUT:-$root/artifacts/oracle}"
@@ -26,7 +29,7 @@ echo "== build"
 (cd "$root/oracle" &&
   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$bin/runner" ./cmd/runner &&
   go build -o "$bin/oracle" ./cmd/oracle)
-(cd "$root" && lake build janus-oracle)
+(cd "$root" && memguard_lake build janus-oracle)
 common=(-qemu "$QEMU" -runner "$bin/runner")
 # DCZID_EL0 is IMPLEMENTATION DEFINED: every case carries the reference CPU's own value (the
 # Lean side uses it as State.dczid; the runner refuses a case with a different one).

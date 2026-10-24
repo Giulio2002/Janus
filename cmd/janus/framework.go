@@ -268,12 +268,23 @@ func syncTree(dir string, files map[string][]byte, keep func(top string) bool) e
 }
 
 // copyTree copies the regular files and directories of src into dst (which must not exist).
-func copyTree(src, dst string) error {
+func copyTree(src, dst string) error { return copyTreeSkipTop(src, dst) }
+
+// copyTreeSkipTop is copyTree without the top-level entries of src named in skip.
+func copyTreeSkipTop(src, dst string, skip ...string) error {
 	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		rel, _ := filepath.Rel(src, p)
+		for _, s := range skip {
+			if rel == s {
+				if d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+		}
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
@@ -286,7 +297,12 @@ func copyTree(src, dst string) error {
 			return err
 		}
 		defer in.Close()
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		// keep the permission bits (an executable such as the compiled auditor stays one)
+		mode := os.FileMode(0o644)
+		if info, err := d.Info(); err == nil {
+			mode = info.Mode().Perm()
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 		if err != nil {
 			return err
 		}
@@ -309,8 +325,34 @@ func copyTree(src, dst string) error {
 // verifications never wait for each other, and any other change to the build still fails the
 // pins ("framework integrity").
 
-// baseTargets are the Lake targets every framework build has.
-var baseTargets = []string{"Janus", "Janus.Tools.Audit"}
+// baseTargets are the Lake targets every framework build has: the library, the auditor module
+// (for the consumer path's Audit.lean) and the compiled auditor executable janus verify runs.
+var baseTargets = []string{"Janus", "Janus.Tools.Audit", auditExeTarget}
+
+// auditExeTarget is the Lake target of the compiled auditor (Janus/Tools/AuditMain.lean).
+const auditExeTarget = "janus-audit"
+
+// auditExePath is the compiled auditor in the framework build dir.
+func auditExePath(dir string) string {
+	return filepath.Join(dir, ".lake", "build", "bin", auditExeTarget)
+}
+
+// regularFileSha is the SHA-256 of a regular file ("" if it cannot be read).
+func regularFileSha(p string) string {
+	f, err := os.Open(p)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return ""
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
 
 // frameworkStamp is the ready stamp of a framework build.
 type frameworkStamp struct {
@@ -318,6 +360,22 @@ type frameworkStamp struct {
 	Manifest string   `json:"manifest"` // SHA-256 of their lake-manifest.json (not in Sha256)
 	Targets  []string `json:"targets"`  // the Lake targets built
 	Pins     pins     `json:"pins"`     // the framework modules' data files as built
+	AuditExe string   `json:"auditExe"` // SHA-256 of the compiled auditor as built
+}
+
+// stampedAuditExe is the auditor executable's SHA-256 recorded in the ready stamp of the build
+// in dir ("" if there is none). The caller holds the build's lease, so the stamp is stable.
+func (fw *framework) stampedAuditExe(dir string) string {
+	_, stampPath := fw.buildPaths(dir)
+	b, err := os.ReadFile(stampPath)
+	if err != nil {
+		return ""
+	}
+	var st frameworkStamp
+	if json.Unmarshal(b, &st) != nil {
+		return ""
+	}
+	return st.AuditExe
 }
 
 // frameworkLease is a framework build in use: release ends the use (drops the shared lock).
@@ -370,8 +428,11 @@ func (fw *framework) ready(dir string, targets []string) bool {
 	if err != nil || len(p.want) == 0 || len(diffPins(st.Pins, p.want)) > 0 {
 		return false
 	}
-	_, ok := p.want["Janus.olean"]
-	return ok
+	if _, ok := p.want["Janus.olean"]; !ok {
+		return false
+	}
+	// The compiled auditor must be the one the stamped build produced.
+	return st.AuditExe != "" && regularFileSha(auditExePath(dir)) == st.AuditExe
 }
 
 // acquire returns the framework build in dir, built for targets, under a shared lock. If it is
@@ -440,9 +501,15 @@ func (fw *framework) build(dir, lake string, targets []string, stampPath string,
 			}
 		}
 	}
+	// Likewise an auditor executable that is not the stamped one: remove it and Lake's records
+	// of it, so that Lake links it again.
+	if exe := auditExePath(dir); old.AuditExe != "" && regularFileSha(exe) != old.AuditExe {
+		for _, ext := range []string{"", ".hash", ".trace", ".rsp"} {
+			_ = os.Remove(exe + ext)
+		}
+	}
 	// A copy (the cached base of the embedded framework, or of a --janus-root checkout for a
-	// consumer workspace) gets the framework's sources first; a checkout is built in place
-	// (cherry-picked from c386fa7).
+	// consumer workspace) gets the framework's sources first; a checkout is built in place.
 	if dir != fw.Dir {
 		if err := syncTree(dir, fw.Files, func(top string) bool { return top == ".lake" }); err != nil {
 			return &diag{Invalid: true, Msg: "Cannot write the Janus framework to the cache: " + err.Error(), Stage: "Janus library build",
@@ -474,7 +541,12 @@ func (fw *framework) build(dir, lake string, targets []string, stampPath string,
 	if err != nil {
 		return &diag{Invalid: true, Msg: "Cannot read the framework build: " + err.Error(), Stage: "Janus library build"}
 	}
-	st := frameworkStamp{Sha256: fw.Sha256, Manifest: sha256Hex(fw.Files["lake-manifest.json"]), Targets: all, Pins: p.want}
+	exeSha := regularFileSha(auditExePath(dir))
+	if exeSha == "" {
+		return &diag{Invalid: true, Msg: "The framework build has no auditor executable " + displayPath(auditExePath(dir)) + ".", Stage: "Janus library build",
+			Next: "Run lake build " + auditExeTarget + " in " + dir + " and fix the reported errors."}
+	}
+	st := frameworkStamp{Sha256: fw.Sha256, Manifest: sha256Hex(fw.Files["lake-manifest.json"]), Targets: all, Pins: p.want, AuditExe: exeSha}
 	b, _ := json.Marshal(st)
 	if err := writeFileAtomic(stampPath, b); err != nil {
 		return &diag{Invalid: true, Msg: "Cannot write the framework build stamp: " + err.Error(), Stage: "Janus library build"}
@@ -637,7 +709,7 @@ func (fw *framework) freshBase(lake string, progress io.Writer) (string, error) 
 		fmt.Fprintf(progress, "Building the Janus framework from scratch (--fresh) in %s.\n", displayPath(tmp))
 	}
 	lr := &leanRunner{lake: lake, root: tmp}
-	if out, err := lr.run("build", "Janus", "Janus.Tools.Audit"); err != nil {
+	if out, err := lr.run(append([]string{"build"}, baseTargets...)...); err != nil {
 		os.RemoveAll(tmp)
 		return "", &diag{Invalid: true, Msg: "Building the Janus Lean library failed: " + err.Error(), Stage: "Janus library build", Details: out}
 	}

@@ -21,6 +21,9 @@
 #   SAIL_MODEL  vendored | regen  (which model.cpp to build against; default vendored)
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 mode="${1:-run}"
 export PATH="$PATH:/usr/local/go/bin:$HOME/.cargo/bin"
 QEMU_OUT="${QEMU_OUT:-$root/artifacts/oracle}"
@@ -99,7 +102,7 @@ if bad in s:
 json.dump({"Replace": rep}, open(os.path.join(d, "overlay.json"), "w"))
 PY
   (cd "$root/oracle" && go build -overlay "$here/go-overlay/overlay.json" -o "$here/bin/oracle" ./cmd/oracle)
-  (cd "$root" && lake build janus-oracle >/dev/null) ||
+  (cd "$root" && memguard_lake build janus-oracle >/dev/null) ||
     echo "warning: lake build janus-oracle failed; using the existing $root/.lake/build/bin/janus-oracle" >&2
 }
 

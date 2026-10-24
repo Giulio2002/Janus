@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Round-7 regression rows (docs/AUDIT-ROUND7.md). Exits 1 if a blocked attack prints Verified, a
 # control stops verifying or prints something else, or a stub fixture is misclassified.
-# Writes only under audit/round7/work/ and audit/round7/bin/.
+# Every attack verification passes --fresh (no result or replay cache: the cold path); the cache
+# itself is attacked by audit/round7/run-cache.sh, which this script runs last.
+# Writes only under audit/round7/work/ and audit/round7/bin/ (run-cache.sh: a temporary cache).
 # Usage: audit/round7/run-round7.sh
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -9,7 +11,7 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 J="$root/audit/round7/bin/janus"; mkdir -p "$(dirname "$J")"
 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
+lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 W=audit/round7/work; rm -rf "$W"; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
@@ -33,7 +35,7 @@ row() {
   [ -n "$status" ] && broken+=("$name")
   return 0
 }
-v() { out="$("$J" verify --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
+v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
 gob() { ( cd audit/round7/asmstub && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
     go build -trimpath -buildvcs=false "$@" ) ; }
 
@@ -70,22 +72,26 @@ v H1b_binder_greek_honest;        row H1b_binder_greek_honest Verified "(α β :
 
 echo "== K1: notes on standard operations that read unexpectedly"
 v K1a_misleading_ops; row K1a_misleading_ops Verified "Notes (standard Lean meaning" "\`^\` wraps at" "division by zero is total at Nat" "Nat subtraction truncates at 0"
-out="$("$J" verify --janus-root "$root" --proof examples/proofs/Add.lean $W/Add 2>&1)"; row K1b_honest_add_no_notes Verified
+out="$("$J" verify --fresh --janus-root "$root" --proof examples/proofs/Add.lean $W/Add 2>&1)"; row K1b_honest_add_no_notes Verified
 grep -q "Notes (" <<<"$out" && { echo "  K1b: the honest Add proof got notes   <-- BROKEN"; broken+=(K1b-notes); }
 out="$("$J" explain $W/Add/verified.json 2>&1)"
 row_e() { grep -q "Read with care" <<<"$out" && echo "  K1b explain: unexpected notes   <-- BROKEN" && broken+=(K1b-explain); }; row_e
-"$J" verify --janus-root "$root" --proof $A/K1a_misleading_ops.lean $W/Add >/dev/null 2>&1
+"$J" verify --fresh --janus-root "$root" --proof $A/K1a_misleading_ops.lean $W/Add >/dev/null 2>&1
 out="$("$J" explain $W/Add/verified.json 2>&1)"
 if grep -q "Read with care" <<<"$out"; then echo "  K1a explain                          ok       notes shown"; else echo "  K1a explain: no notes   <-- BROKEN"; broken+=(K1a-explain); fi
 
 echo "== J1: dependency definitions are disclosed with their bodies"
 dep="$(audit/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; broken+=(dep-setup); }
-out="$("$J" verify $W/Add --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --theorem R7Proofs.misnamed 2>&1)"
+out="$("$J" verify --fresh $W/Add --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --theorem R7Proofs.misnamed 2>&1)"
 row J1a_misnamed_dependency_def Verified "Dependency definitions used by the statement" "MisLib.mul : BitVec (64 : Nat) → BitVec (64 : Nat) → BitVec (64 : Nat) := fun (a b : BitVec (64 : Nat)) => a + b"
 
 echo "== unit rows (go test)"
 (cd cmd/janus && go test -timeout 30m -run 'TestStubKind|TestClassifyStub|TestTermSafe' . >/dev/null 2>&1) ||
   { echo "  >>> TestStubKind/TestClassifyStub/TestTermSafe failed"; broken+=(gotest); }
+
+echo "== result cache (audit/round7/run-cache.sh)"
+audit/round7/run-cache.sh | sed 's/^/  /'
+[ "${PIPESTATUS[0]}" = 0 ] || broken+=(cache-rows)
 
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
 echo; echo "All round-7 rows as expected."

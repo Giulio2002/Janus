@@ -217,9 +217,9 @@ residual).
   unique name too. Assembly TEXT sizes are computed by the assembler. A function with size 0
   extends to the next symbol, which only makes its segment longer, and those bytes are real code.
 
-## 6. Review of agent/memguard (50d8561): the result cache, the compiled audit and the memory guard
+## 6. Review of main 1d0b147 (testinfra + memguard): the result cache, the compiled audit and the memory guard
 
-This is a code review against the merged base. agent/memguard already ships live rows for the cache
+This is a code review, now of the merged tree (main 1d0b147). agent/memguard already ships live rows for the cache
 (RC1–RC6 in its own `docs/AUDIT-ROUND7.md`: proof and lakefile probes, a tampered entry, a
 stale framework, `--fresh`, `--unsafe-no-sandbox`). This review does not repeat them. It found
 **no BROKEN item**.
@@ -254,14 +254,42 @@ stale framework, `--fresh`, `--unsafe-no-sandbox`). This review does not repeat 
   `memOutcome` also turns *any* kill recorded during the run into the resource-limit
   diagnostic, even if a later step passed. `Verified` is printed only after `memOutcome`.
   The prlimit text heuristic can at most relabel a failure as a resource failure.
-* **Merge note.** agent/memguard adds `docs/AUDIT-ROUND7.md` and `audit/round7/run-round7.sh`
-  with its own content, and so does this branch. When the two land, the cache rows (RC*) can
-  become a section of this document and rows of this runner. Alternatively, the cache audit can be
-  renamed (for example `AUDIT-CACHE.md`).
-* **Main bug fixed here.** After merging main 6956fd4, consumer (`--proof-root`) runs with a
-  `--janus-root` checkout failed with "no default toolchain configured". The cached base got no
-  sources. memguard's c386fa7 fixes this, and its three `dir != fw.Dir` edits are applied on this
-  branch.
+* **Merge note.** agent/memguard also brought a `docs/AUDIT-ROUND7.md` and
+  `audit/round7/run-round7.sh` (the cache rows). After merging main 1d0b147, those rows are
+  §7 below, and their runner is `audit/round7/run-cache.sh`, which `run-round7.sh` runs last.
+  Every other round-7 row passes `--fresh`, so it takes the cold path.
+* **Interim main bug (now moot).** Between the two merges, consumer (`--proof-root`) runs with
+  a `--janus-root` checkout failed with "no default toolchain configured". The cached base got
+  no sources. c386fa7 fixed this, and main 1d0b147 contains it.
+
+## 7. The verification-result cache (agent/testinfra rows, merged)
+
+`janus verify` records the result of a successful sandboxed verification and prints it again,
+marked `Cached:`, when every input is the same (docs/SOUNDNESS.md, "Verification-result cache").
+That makes the cache a trusted component: a forged or stale entry would print `Verified` for a
+proof that was never checked. This round attacks it. Runner: `audit/round7/run-cache.sh`, run by `audit/round7/run-round7.sh`
+(attack files in `audit/round7/attacks/`, the lakefile attack is the `resultcache` mode of
+`audit/attacks/R1_pkg`).
+
+| Row | Attack | Expected | Result |
+|---|---|---|---|
+| RC1_proof_probe_bwrap | a proof's `#eval` reads `$JANUS_CACHE_DIR/v1/result/.key`, lists the entries, writes `planted-by-proof` (bubblewrap) | blocked: the directory is an empty tmpfs inside the sandbox (the proof compiles and verifies, sees nothing), nothing reaches the host | blocked |
+| RC1_proof_probe_unshare | the same under the unshare fallback | blocked (the script mounts the same tmpfs, strictly) | blocked |
+| RC2_lakefile_probe | a consumer lakefile does the same while Lake elaborates it | blocked: Lake runs sandboxed, sees an empty directory | blocked |
+| RC3_tampered_entry | a recorded entry is edited on disk so its statement reads `x * y` | blocked: the HMAC does not verify, the entry is ignored, the verification runs and prints `x + y` | blocked |
+| RC4_stale_framework | an entry recorded with a `--janus-root` framework is looked up after a framework source changes | blocked: the framework's hash (and its rebuilt pins) are part of the key | blocked |
+| RC5_fresh_bypasses | `--fresh` | never uses the cache | blocked |
+| RC6_unsandboxed_bypasses | `--unsafe-no-sandbox` | never uses the cache | blocked |
+
+`TestResultCache` (cmd/janus) checks the same properties in `go test`: a hit prints exactly the
+fresh output plus `Cached:`, an edited proof misses, a tampered entry is ignored, `--fresh` and
+`--unsafe-no-sandbox` bypass the cache.
+
+Not attacked here, because they are outside the threat model (docs/SOUNDNESS.md): a user who
+can write `~/.cache/janus` directly (they can equally replace the framework build), and a proof
+run with `--unsafe-no-sandbox` (it runs with the user's privileges).
+
+There is no verification daemon, so there is no row for one (docs/TESTING.md explains why).
 
 ## Residual risks (honest list)
 
