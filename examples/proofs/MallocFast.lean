@@ -29,9 +29,9 @@ zeroed: **exactly what the contract `MallocgcContract` promises** for such a req
 (`fresh_of_fastPost`).
 
 **What is executed and what is not.** `runtime.mallocgc` and `runtime.mallocgcSmallNoscan` with
-the inlined `acquirem`, `getMCache`, `nextFreeFast` and `releasem` (281 instructions; 433 steps
-over the six paths: `needzero` set or not, `m.locks` and pending preemption) are executed from the
-binary. Every slow path is a contract (`janus extract --contract`, see
+the inlined `acquirem`, `getMCache`, `nextFreeFast` and `releasem` (281 instructions) are executed
+from the binary: 12 paths (`nextFreeFast`'s two ways past the refill test, `needzero` set or
+not, `m.locks` and pending preemption), merged where they rejoin (`janus.merge`), so 167 steps. Every slow path is a contract (`janus extract --contract`, see
 `scripts/example-contracts.sh`) that `MCacheOK` makes unreachable, so the statement assumes
 nothing about them: `mallocgcTiny`, `mallocgcSmallScan*`, `mallocgcLarge`, `(*mcache).nextFree`
 (refill from `mcentral`/`mheap`), `memclrNoHeapPointers`, `gcmarknewobject`, `profilealloc`,
@@ -223,6 +223,20 @@ theorem spanClass_toNat (x : Nat) (h : x < 2 ^ 63) :
 theorem spanClass_mod (x : Nat) (h : x < 68) : (x * 2 + 1) % 256 = 2 * x + 1 := by omega
 theorem spanClass_mod' (x : Nat) (h : x < 68) : (2 * x + 1) % 256 = 2 * x + 1 := by omega
 
+/-- The sign extension of a 32-bit value (`ldrsw`), then 64- and 32-bit truncation: the low 32
+bits only depend on the low 32 bits (`m.locks` is loaded with `ldrsw`, incremented and stored
+back as a word). -/
+theorem sx_add_mod64_mod32 (p : Prop) [Decidable p] (a c : Nat) :
+    ((if p then a else a + 18446744069414584320) + c) % 18446744073709551616 % 4294967296 =
+      (a + c) % 4294967296 := by
+  split <;> omega
+theorem sx_add_mod32 (p : Prop) [Decidable p] (a c : Nat) :
+    ((if p then a else a + 18446744069414584320) + c) % 4294967296 = (a + c) % 4294967296 := by
+  split <;> omega
+theorem mod64_add_sx_mod32 (y : Nat) :
+    (y % 18446744073709551616 + 18446744069414584320) % 4294967296 = y % 4294967296 := by omega
+theorem mod64_mod32 (y : Nat) : y % 18446744073709551616 % 4294967296 = y % 4294967296 := by omega
+
 /-- What the fast path does: it returns the slot `nextFreeFast` takes, still zero, and changes
 exactly the span's `allocCache`, `freeindex`, `freeIndexForScan` and `allocCount`, the mcache's
 `nextSample`, `m.mallocing` (back to 0) and `m.locks` (back to its value), possibly
@@ -320,13 +334,18 @@ theorem fast_path (sz typ nz : BitVec 64) :
   generalize h_rdac : s.mem.readLE (spv + 96) 2 = acv at *
   generalize h_rdns : s.mem.readLE cv 8 = nsv at *
   generalize h_rdlk : s.mem.readLE (mv + 264) 4 = lkv at *
-
+  have hlk32 : lkv % 4294967296 = lkv := Nat.mod_eq_of_lt hlkb
+  -- the paths rejoin after `nextFreeFast`'s refill test, after the `needzero` test and after
+  -- `releasem`'s preemption check: merge them there (`janus.merge`), so that the rest of the
+  -- run is executed once per join instead of once per path (12 paths, 2 after merging)
+  set_option janus.merge true in
   janus_run [BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, spanClass_toNat, spanClass_mod, spanClass_mod',
     clzNat_rbitNat, toNat_ofNat_ctzN, rotateRight_zero', or_one_two_mul,
     toInt_ofNat_ctzN, readLE8_mod, rbit64_mod,
     BitVec.setWidth_ofNat_of_le, BitVec.ofNat_add_ofNat, ofNat_and_65535,
     Bool.and_eq_true, Bool.not_eq_true', decide_eq_true_eq, decide_eq_false_iff_not,
-    BitVec.toNat_mul, mod65536_of_lt, mod256_of_lt, sign_sub, readLE2_mod, and63_eq_zero]
+    BitVec.toNat_mul, mod65536_of_lt, mod256_of_lt, sign_sub, readLE2_mod, and63_eq_zero,
+    hlk32, sx_add_mod64_mod32, sx_add_mod32, mod64_add_sx_mod32, mod64_mod32, ite_self]
   all_goals (repeat' apply And.intro)
   all_goals first
     | omega

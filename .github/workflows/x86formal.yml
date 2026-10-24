@@ -1,0 +1,64 @@
+name: x86 formal (Sail x86)
+
+# Builds the Lean translation of the Sail x86 model (sail-x86-from-acl2, sliced to the opcodes
+# Janus decodes; vendored, JanusX86/vendor/X86Sail.tar.gz), the kernel-checked class theorems
+# between it and the Janus amd64 model, and audits their axioms (docs/X86FORMAL.md). Weekly, on
+# demand, and when the amd64 model or JanusX86 changes.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 3 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "Janus/Amd64/**"
+      - "JanusX86/**"
+      - "scripts/x86formal.sh"
+      - ".github/workflows/x86formal.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  x86formal:
+    name: Build X86Sail and audit the class theorems
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan (toolchain from lean-toolchain)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh |
+            sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      # Memory guard (as in asl.yml): every Lean job runs inside a cgroup v2 limit through
+      # `systemd-run --user --scope`. One job at a time here; the X86Sail build peaks at about
+      # 2.6 GiB per lake job, so 12G and the 3G per-job budget give 4 parallel jobs.
+      - name: Memory guard (cgroup v2 limit for every Lean job)
+        run: |
+          uid=$(id -u)
+          sudo loginctl enable-linger "$(id -un)" || true
+          for _ in $(seq 30); do [ -S "/run/user/$uid/bus" ] && break; sleep 1; done
+          echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
+          echo "JANUS_MEM_MAX=12G" >> "$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
+          echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
+          bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+
+      - name: Cache the X86Sail build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            JanusX86/.lake
+          key: x86formal-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'JanusX86/vendor/X86Sail.tar.gz', 'JanusX86/lakefile*', 'JanusX86/lake-manifest.json') }}
+
+      - name: Build X86Sail, JanusX86 and janus-x86-check
+        run: scripts/x86formal.sh build
+
+      - name: Audit the class theorems (only propext, Classical.choice, Quot.sound)
+        run: |
+          scripts/x86formal.sh prove | tee audit.txt
+          grep -q "only propext, Classical.choice, Quot.sound" audit.txt

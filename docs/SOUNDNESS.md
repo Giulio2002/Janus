@@ -95,6 +95,10 @@ These are trusted, not proved.
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
    dereference is a `SIGSEGV`, turned into a panic by `runtime.sigpanic`) are not stub calls:
    the model reports them as faults, and `NeverPanics` excludes faults too.
+   The extractor also classifies `runtime.cgocall`, `_cgo_topofstack` and `runtime.cgoUse` as
+   `external` stubs (the cgo boundary): a run ends there too, and only the contract semantics of
+   `Janus.FFI` (`ReturnsC`, with the contract named in the statement) continues past them; see
+   "FFI (cgo)" below.
 4. **The Lean kernel**, plus the verifier's hashing, process execution, axiom audit and
    statement audit (`Janus/Tools/Audit.lean`, including Lean's parser, elaborator and
    pretty-printer as used by the round-trip check above). The auditor and `leanchecker` load
@@ -203,6 +207,29 @@ explains why it would not pay for the trusted state it would add.
   when control reaches it. A missed callee can make a theorem unprovable. It cannot make a
   false theorem provable.
 
+## The ASL corollary (`janus verify --asl`)
+
+`--asl` adds a second, separate guarantee: the verified `Ensures` theorem, transferred to Arm's
+ASL as translated to Lean (the JanusASL package, [docs/ASL.md](ASL.md)). Its statement is recorded
+under `asl` in `verified.json`; it says that from every ASL state related to the Go call state
+(`Rel`) under the Linux EL0 configuration (`LinuxEL0Config`), the ASL run of the extracted words
+returns to the caller in a state related to one satisfying the ABI and the postcondition.
+
+It is a corollary, not a new proof obligation: `Ensures.toASL` (kernel-checked, in JanusASL)
+applied to the verified theorem, with its three facts about the program (every word `StepOK`,
+untagged code and stubs) obtained from `JanusASL.Classify.covered Extracted.program = true`, which
+the kernel decides by evaluation on the identity-checked program. The trusted auditor checks the
+corollary's type is exactly that derivation from the verified theorem; no untrusted module may
+declare a JanusASL, ArmASL, Sail or generated-module name; the corollary's whole closure,
+the ArmASL model included, is kernel-replayed and its compiled modules are pinned.
+
+It additionally trusts what [docs/ASL.md](ASL.md#trust-story) lists: Arm's ASL to Sail
+(sail-arm), Sail's Lean backend with JanusASL's patches (checked against qemu and the C++ build
+of the same Sail on a 583,756-case corpus, not proved), the slice and splices, the `janus_step`
+harness and lean-sail. The ASL run fetches instructions with the program's own `fetch`, not the
+ASL's translated fetch, and only returning runs are transferred. Neither the trusted base nor the
+meaning of the main theorem changes: the ASL stage runs after it and cannot alter its result.
+
 ## What a theorem about `Returns` / `Ensures` says
 
 `GoABI.Ensures p entry args pre post` means: for **every** admissible return address `ret`
@@ -283,7 +310,8 @@ about executions outside it.
 * **No signals, no asynchronous preemption, no interrupts.** Go's signal-based async
   preemption, profiling signals and injected calls (`sigpanic`) are not modelled.
 * **No runtime interaction.** No GC (write barriers, stack scanning, moving stacks), no
-  scheduler, no stack growth. Reaching `runtime.morestack*` ends the run as a `morestack`
+  scheduler, no stack growth (calls into the runtime can be assumed as contracts instead of
+  executed: see "Runtime contracts" below). Reaching `runtime.morestack*` ends the run as a `morestack`
   outcome, and it is not a return. Calls into other runtime functions only work if they were
   extracted and their code is in the supported subset. They then run in the same idealised
   model. Functions with a stack-check prologue need `GoABI.StackGuardOK s k` (g readable,
@@ -582,6 +610,65 @@ proved, not trusted.
 arm64, the host CPU on amd64, and Berkeley TestFloat/SoftFloat (`scripts/testfloat.sh`); see
 `docs/ORACLE.md`, `docs/ORACLE-SAIL.md` and `docs/ORACLE-AMD64.md`.
 
+## Runtime contracts
+
+A theorem can rely on a runtime function it does not execute by stating the function's
+behaviour as a hypothesis (docs/RUNTIME-CONTRACTS.md). The mechanism adds nothing to the trusted
+base:
+
+* `janus extract --contract SYM` leaves the function out and records it in
+  `Extracted.program.contracts`. The list is part of the byte-compared extraction (`janus check`
+  regenerates it from the recorded patterns) and does not change the run: there is no code at a
+  contract address, so reaching it is `noCode`. Leaving out a function can only make a theorem
+  unprovable, never a false one provable.
+* The theorem is stated about `Extracted.program.link impl` for **every** `impl : List Segment`
+  satisfying the contract hypotheses, which are ordinary `Summary` propositions printed as part
+  of the statement and audited like the rest of it. The real binary is one such `impl` (its
+  runtime code at those addresses, run by the same model), so the theorem holds of it exactly
+  when the real runtime meets the contracts. A contract on `Extracted.program` itself would be
+  false (no code there) and is never used.
+* `p.link impl` fetches `p`'s word wherever `p` has code (`Program.fetch_link`), so the proof
+  learns nothing about `impl` except through the hypotheses.
+
+**What a contract hypothesis assumes about the runtime** (in the model, which is single-threaded:
+no concurrent GC, no preemption):
+
+* **Allocation** (`Janus/Contracts/Alloc.lean`, `AllocAmd64.lean`). `mallocgc`, `newobject`,
+  `makeslice` and `growslice` return a fresh, aligned, writable object (zeroed as Go specifies)
+  inside the caller-declared runtime-owned ranges `rt`, change memory only inside `rt` and their
+  stack window, and preserve the ABI's callee-saved registers. Caveats that are assumptions of
+  every such theorem: (1) *runtime-owned memory* is a visible parameter `rt`; the caller's data
+  must be outside it (stated in the precondition); (2) the object's memory is a region already in
+  the state (instructions cannot add regions; Go reserves arenas up front) — a theorem says nothing
+  about states where it is not; (3) one allocation per `rt`: the contracts do not record that an
+  allocated object leaves `rt`; (4) the runtime uses at most `stack` bytes below `SP` (4096 in the
+  examples) and **the goroutine stack does not move**: Go may grow and copy the stack inside a
+  slow path (`morestack`), relocating the caller's frame, which the contracts exclude; (5) the
+  GC's concurrent work (marking, sweeping, assists, finalizers) is outside the model; Go's
+  collector does not move objects, so a returned pointer stays valid.
+* **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
+  `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
+  `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)
+  makes it unreachable. The precondition states the flag `runtime.writeBarrier.enabled` (as the
+  word the code reads), and the barrier's field offsets are read off its code.
+* **The allocator fast path is proved, not assumed** (arm64, `examples/proofs/MallocFast.lean`):
+  for a pointer-free request of 16 to 1016 bytes, `runtime.mallocgc` and the inlined
+  `nextFreeFast`/`getMCache`/`acquirem`/`releasem` paths of `runtime.mallocgcSmallNoscan` are
+  executed from the binary's machine code under `MCacheOK` (a well-formed `g`/`m`/`p`/`mcache`/
+  `mspan` state for the request's size class with a free slot in the span's `allocCache`, the
+  slot zero and `span.needzero = 0`, the runtime globals readable, every object separate).
+  Everything else of `mallocgc` stays trusted, and is not even assumed by that theorem, because
+  `MCacheOK` makes it unreachable: the tiny allocator (`mallocgcTiny`), pointerful objects
+  (`mallocgcSmallScan*`), large objects (`mallocgcLarge`, `mheap`, `mmap`), span refill
+  (`(*mcache).nextFree` → `mcentral`/`mheap`), clearing a dirty slot (`memclrNoHeapPointers`
+  when `span.needzero`), GC assist (`deductAssistCredit`, `gcBlackenEnabled ≠ 0`), allocate-black
+  during GC (`gcmarknewobject`, write barrier on), heap profiling (`profilealloc`), the GC trigger
+  (`gcTrigger.test`, `gcStart`) and the debug hooks (`debug.malloc`). Contracts that rely on
+  these paths (the allocation contracts above, used by `NewPair` & co.) remain assumptions.
+* **amd64**: every amd64 contract requires the return address at `[RSP]` below `2^47` (a
+  canonical user address); without it no code could return and the contract would be
+  unsatisfiable.
+
 ## Dynamic calls, closures and `defer`
 
 An indirect call (`BLR`/`BR`; amd64 `CALL`/`JMP` through a register or memory) jumps to the value
@@ -618,6 +705,53 @@ the register holds, in the model as on hardware. Nothing about Go's type system 
   (in loops, or more than 8 in a function) allocate defer records with `runtime.deferproc*` and
   call `runtime.deferreturn` at every exit; they are unsupported (the exit faults). Heap-allocated
   closures (`runtime.newobject`) are runtime calls like any other allocation.
+
+## FFI (cgo)
+
+A theorem about Go code that calls C (see [FFI.md](FFI.md)) is stated with `EnsuresC p C …`,
+where `C` is a `Contract` for the external stubs, and it is written in the statement:
+
+* Under `CgoSpec fn G E`, the theorem *assumes* a behaviour of the C call. It is a conditional
+  statement, and the assumption is visible in the printed statement.
+* Under `CgoCall p`, the theorem assumes only the trusted contract of the cgo boundary. Every
+  instruction of the Go code, the cgo wrappers and the C code is executed by the model from the
+  binary's bytes. The C code runs inside the contract, on `p`.
+
+**What `CgoCall` trusts** (listed in full in [RUNTIME-CONTRACTS.md](RUNTIME-CONTRACTS.md),
+"FFI (cgo)"):
+
+* the stack switch: `asmcgocall` makes a C call of the wrapper on a system stack of at least 4096
+  free bytes that is not Go memory, with the Go memory otherwise unchanged;
+* the scheduler: `entersyscall`/`exitsyscall` change only the goroutine stack below `SP`,
+  `cgocall`'s spill slots, the `g` struct and the TLS `g` slot, and the goroutine may resume on
+  another thread;
+* the return: `cgocall` returns to its caller with `SP`, `g` and `FP` restored (amd64: also
+  `X15 = 0`, `DF` clear and the TLS `g` slot);
+* `_cgo_topofstack` returns one value throughout a cgo call and preserves everything else.
+
+The granted memory must contain no runtime-internal memory (`m`, `p`, the scheduler, the `g0`
+stack). For an execution whose granted regions overlap those, the theorem says nothing.
+
+**Consequences.**
+
+* *`X18` on arm64.* `EnsuresC` uses `ABIReturnC` (`SP`, `g`, `FP`) instead of `ABIReturn`: C code
+  may use `X18` (a temporary in AAPCS64 on Linux) and `cgocall` does not restore it. Go code never
+  reads it.
+* *Callbacks.* C calling back into Go (`crosscall2`, exported functions) is not covered: that
+  code is not extracted, so a run reaching it faults (`noCode`) and cannot be proved.
+* *Safe by construction.* A contract stub is only passed with its `safe` predicate proved, and a
+  `ReturnsC` proof covers *every* result its `next` relation allows. `CgoCall` requires the C run
+  to terminate with the callee-saved registers restored for every admissible C call state.
+* *Why not a `Summary` hypothesis.* A `Summary` about the extracted program at `cgocall`'s
+  address (where no code is copied) is false, so a theorem assuming one would be vacuous. The
+  contract semantics avoids this: the only way to discharge `CgoSpec` is the refinement theorem
+  `CgoCall.refines`.
+
+**The C calling conventions** (`Janus.CABI`, `Janus.Amd64.CABI`, the `CEnsures` vocabulary) are
+specification definitions like `GoABI`. A `CEnsures` theorem is about a call that follows the
+convention (`CCall`). It promises what the convention requires of the callee (`CReturn`) and
+nothing about callers that violate the convention. The callee-saved SIMD/FP state (`V8`–`V15` on
+arm64; the x87/`MXCSR` control words on amd64) is outside the model.
 
 ## What the theorem does not say
 

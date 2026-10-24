@@ -305,9 +305,10 @@ func cmdFramework(args []string, stdout, stderr io.Writer) error {
 	}
 	fi := fw.info()
 	_, _, version := buildRevision()
+	asl := aslFrameworkInfo(fw)
 	if flags["json"] {
 		b, _ := json.MarshalIndent(map[string]any{"framework": fi, "goVersion": version, "cache": cacheRoot(),
-			"repository": janusRepoURL, "extractorVersion": extractorVersion}, "", "  ")
+			"repository": janusRepoURL, "extractorVersion": extractorVersion, "asl": asl}, "", "  ")
 		fmt.Fprintf(stdout, "%s\n", b)
 		return nil
 	}
@@ -329,6 +330,14 @@ func cmdFramework(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "  Module version: %s\n", version)
 	}
 	fmt.Fprintf(stdout, "  Cache: %s\n", displayPath(cacheRoot()))
+	if asl != nil {
+		built := "not built yet: the first janus verify --asl builds it (about an hour)"
+		if asl.Built {
+			built = "built"
+		}
+		fmt.Fprintf(stdout, "  JanusASL (--asl): %s, SHA-256 %s, ArmASL model %s; build %s (%s)\n", asl.Source, asl.JanusASLSha256, asl.ArmASLSha256,
+			displayPath(asl.CacheDir), built)
+	}
 	fmt.Fprintf(stdout, "  Require it with: [[require]] name = \"janus\", git = %q, rev = <the revision>\n", janusRepoURL)
 	return nil
 }
