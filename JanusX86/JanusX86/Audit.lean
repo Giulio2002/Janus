@@ -42,7 +42,10 @@ def janusX86Audited : List Name := [
     `JanusX86.Proofs.call_ind_agree,
     `JanusX86.Proofs.bt_ba_agree,
     `JanusX86.Proofs.imul2_agree,
-    `JanusX86.Proofs.imul3_agree]
+    `JanusX86.Proofs.imul3_agree,
+    `JanusX86.Proofs.alu_eg_mem_lock_agree,
+    `JanusX86.Proofs.nop_agree,
+    `JanusX86.Proofs.nop1f_agree]
 
 elab "#janus_x86_audit" : command => do
   let env ← getEnv
