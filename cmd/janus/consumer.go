@@ -756,12 +756,15 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 			env = append(env, e)
 		}
 	}
+	if len(args) > 0 && args[0] == "build" {
+		env = lakeBuildEnv(env)
+	}
 	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, nil, ws.protected(false), append([]string{ws.lake}, args...), env)
 	var out bytes.Buffer
 	all := &lockedBuffer{}
 	cmd.Stdout = io.MultiWriter(&out, all)
 	cmd.Stderr = all
-	err := cmd.Run()
+	err := guardRun(cmd)
 	return out.String(), all.String(), err
 }
 

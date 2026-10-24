@@ -178,7 +178,7 @@ func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtr
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := cmd.Run()
+	err := guardRun(cmd)
 	return out.String(), err
 }
 

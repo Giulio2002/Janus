@@ -68,6 +68,7 @@ type verifiedReport struct {
 	Framework         *frameworkInfo `json:"framework,omitempty"`
 	Consumer          *consumerInfo  `json:"consumer,omitempty"`
 	Sandbox           sandboxInfo    `json:"sandbox"`
+	MemoryGuard       *memGuardInfo  `json:"memoryGuard,omitempty"`
 	Definitions       []string       `json:"definitions,omitempty"`
 	// DependencyConsts are the constants from declared extra dependencies that the statement
 	// (or a proof-local def it uses) mentions: "<name> (<kind>, <module>)".
@@ -149,11 +150,14 @@ func (r *leanRunner) run(args ...string) (string, error) {
 	if r.buildDir != "" {
 		env = append(env, "LEAN_PATH="+r.buildDir)
 	}
+	if len(args) > 0 && args[0] == "build" {
+		env = lakeBuildEnv(env)
+	}
 	cmd.Env = env
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := cmd.Run()
+	err := guardRun(cmd)
 	return out.String(), err
 }
 
@@ -258,13 +262,19 @@ func verifyAndReport(outdir string, opts map[string]string, stderr io.Writer) (*
 	if err := os.Remove(reportPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot remove stale %s: %v", displayPath(reportPath), err), Stage: "writing report"}
 	}
+	if err := memGuardConfigErr(); err != nil {
+		return nil, err
+	}
+	logMemGuard(stderr)
 	var r *verifiedReport
 	var err error
+	mark := memMark()
 	if opts["proof-root"] != "" {
 		r, err = verifyConsumer(outdir, opts, stderr)
 	} else {
 		r, err = verify(outdir, opts, stderr)
 	}
+	r, err = memOutcome(mark, r, err)
 	if err != nil {
 		_ = os.Remove(reportPath)
 		return nil, err
