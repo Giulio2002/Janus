@@ -27,7 +27,19 @@ inductive StubKind where
   | panic
   /-- Stack growth (`runtime.morestack*`); outside the modelled behaviour. -/
   | morestack
+  /-- A function outside the extracted code whose effect a theorem states as an explicit
+  assumption, a *contract* (`runtime.cgocall`, the boundary from Go to C: see `Janus.FFI`).
+  The run ends here like at any stub; `Returns` cannot be established through it. Only the
+  contract semantics of `Janus.FFI` (`ReturnsC`) continues past it, and only with the contract
+  the theorem names. -/
+  | external
 deriving Repr, DecidableEq, Inhabited
+
+/-- A number for each stub kind (used by the proof automation to read stubs off a program). -/
+def StubKind.code : StubKind → Nat
+  | .panic => 0
+  | .morestack => 1
+  | .external => 2
 
 structure Stub where
   name : String

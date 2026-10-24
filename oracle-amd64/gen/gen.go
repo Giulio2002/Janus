@@ -87,6 +87,11 @@ func Decode(b []byte) (x86asm.Inst, bool) {
 			inst.Len = 4
 		}
 	}
+	// ENDBR64 (F3 0F 1E FA), at the entry of gcc-compiled functions: this x86asm version
+	// does not know it (and the CET hint space around it)
+	if len(b) >= 4 && b[0] == 0xF3 && b[1] == 0x0F && b[2] == 0x1E && b[3] == 0xFA {
+		return x86asm.Inst{Op: x86asm.NOP, Len: 4}, true
+	}
 	// x86asm reports a prefix followed by an undecodable opcode as a 1-byte Op(0).
 	return inst, err == nil && inst.Op != 0
 }

@@ -76,6 +76,10 @@ type Case struct {
 	// The runner loads it with LDMXCSR right before entering TestPC; the Lean side uses it as
 	// `State.mxcsr`.
 	MXCSR string `json:"mxcsr,omitempty"`
+	// Seq (audit/rt-model): a straight-line sequence of instructions (hex each) laid out
+	// one after another at TestPC; Bytes is ignored when Seq is set. The runner single-steps
+	// through all of them; the model threads its own state through them.
+	Seq []string `json:"seq,omitempty"`
 }
 
 // DefaultMXCSR is the MXCSR value Linux gives a new process (all exceptions masked, round to

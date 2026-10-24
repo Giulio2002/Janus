@@ -1,4 +1,5 @@
 import JanusASL.Proofs
+import JanusASL.Verify
 import Lean
 
 /-! # A stricter audit of the JanusASL theorems (docs/AUDIT-ASL.md, finding A6)
@@ -36,9 +37,9 @@ def expected : List Name := [
   -- assembly and whole runs
   ``JanusASL.Proofs.step_agree, ``JanusASL.Proofs.run_agree, ``JanusASL.Proofs.Ensures.toASL,
   ``JanusASL.Proofs.StepOK.of_agree,
-  -- example transfers
-  ``JanusASL.Examples.Add.correctness_asl, ``JanusASL.Examples.Max.correctness_asl,
-  ``JanusASL.Examples.Mul64.correctness_asl, ``JanusASL.Examples.Add128.correctness_asl]
+  -- `janus verify --asl` (the four example transfers are derived from the artifacts per run,
+  -- `scripts/asl.sh verify`): the soundness of its kernel-evaluated coverage check
+  ``JanusASL.Verify.classify_sound]
 
 elab "#janus_asl_audit_strict" : command => do
   let env ← getEnv

@@ -12,6 +12,8 @@
 #   scripts/asl.sh check   build + `lake exe janus-asl-check` on the oracle corpus (default)
 #   scripts/asl.sh prove   build the proofs (JanusASL.Proofs) and audit their axioms
 #   scripts/asl.sh replay  kernel-replay every JanusASL module with leanchecker, in batches
+#   scripts/asl.sh verify  build + `janus verify --asl` on the shipped Add, Max, Mul64 and Add128
+#                          proofs: their ASL corollaries, derived from the artifacts (docs/ASL.md)
 #
 # Environment:
 #   DEPS     pinned external sources/toolchains (default /srv/janus-asl-deps)
@@ -35,6 +37,7 @@
 #   ASL_JOBS     Lean processes Lake runs at once (default ASL_MEM_GB / ASL_JOB_GB, at least 1)
 #   ASL_JOB_GB   peak of the largest single Lean process of the build (default 8, docs/ASL.md "Memory")
 #   REPLAY_BATCH modules per leanchecker process in `replay` (default 4)
+#   ASL_EXAMPLES  examples for `verify` (default "Add Max Mul64 Add128")
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
@@ -311,6 +314,36 @@ PY
   echo "replay: leanchecker passed on all ${#mods[@]} modules of JanusASL.Proofs (LEAN_NUM_THREADS=${JANUS_REPLAY_THREADS:-4}, $batch per process)"
 }
 
+# janus verify --asl builds JanusASL in its own cache (`janus framework --json` .asl.cacheDir). Seed
+# that build from the in-tree one (Lake reuses modules by content hash), so the model is built
+# once, then verify each example with --asl from a fresh extraction.
+do_verify() {
+  do_build
+  export PATH=/usr/local/go/bin:$PATH
+  (cd "$root" && go build -o bin/janus ./cmd/janus)
+  "$root/scripts/build-examples.sh" >/dev/null
+  local d
+  d=$("$root/bin/janus" framework --janus-root "$root" --json |
+    python3 -I -c 'import json, sys; print(json.load(sys.stdin)["asl"]["cacheDir"])')
+  if [ ! -d "$d/.lake" ] && [ -d "$pkg/.lake" ]; then
+    echo "verify: seeding $d from $pkg/.lake"
+    mkdir -p "$d" && cp -a "$pkg/.lake" "$d/.lake" && rm -f "$d/.lake/package-overrides.json"
+  fi
+  local fail=0 n
+  mkdir -p "$OUT"
+  for n in ${ASL_EXAMPLES:-Add Max Mul64 Add128}; do
+    "$root/bin/janus" extract "$root/artifacts/examples-arm64" "example.com/basic.$n" "$root/artifacts/$n" >/dev/null
+    if "$root/bin/janus" verify "$root/artifacts/$n" --proof "$root/examples/proofs/$n.lean" --janus-root "$root" --asl \
+         > "$OUT/verify-$n.log" 2>&1 && grep -q '^ASL corollary: Verified: JanusASLCorollary.correctness_asl' "$OUT/verify-$n.log"; then
+      echo "$n: ASL corollary verified"
+      sed -n '/^ASL corollary/,/^  Assumptions/p' "$OUT/verify-$n.log" | grep -A1 '^  Statement:' | tail -1
+    else
+      echo "$n: FAILED (see $OUT/verify-$n.log)"; tail -20 "$OUT/verify-$n.log"; fail=1
+    fi
+  done
+  return $fail
+}
+
 case "$mode" in
   deps) do_deps ;;
   gen) do_gen ;;
@@ -320,5 +353,6 @@ case "$mode" in
   check) do_check ;;
   prove) do_prove ;;
   replay) do_replay ;;
-  *) echo "usage: $0 deps|gen|restore|model|build|check|prove|replay" >&2; exit 2 ;;
+  verify) do_verify ;;
+  *) echo "usage: $0 deps|gen|restore|model|build|check|prove|replay|verify" >&2; exit 2 ;;
 esac

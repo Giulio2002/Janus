@@ -233,6 +233,16 @@ addend's, whereas Arm's `FPProcessNaNs3` takes the addend first (which qemu and 
 and SoftFloat does not model `FPCR.AH = 1`'s NaN rules (no `IOC` for `0 × ∞ + qNaN`). Every
 other vector matches bit for bit, flags included.
 
+## gcc-compiled C (2026-10-24)
+
+Every distinct word of gcc 15.2 `-O2` arm64 code (`examples/cgo/ccover.c` + `cfuncs.c` linked
+with the C runtime: 205 words, `K=200`, 37,136 cases) is in the decoded subset already. Under qemu:
+36,720 agree, 416 model-gap, **0 MISMATCH**. The gaps are `paciasp`/`autiasp` from the C start
+files (not in compiled functions) and branches leaving the code page. In the Sail three-way run
+on the same cases, Janus never produced a result that Sail does not (0 soundness cases).
+`scripts/oracle.sh full` now adds this corpus to the harvest when `aarch64-linux-gnu-gcc` is
+installed.
+
 ## Results with Advanced SIMD (2026-10-23, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
 
 584,412 cases (260,000 generated, 324,412 harvested): **0 MISMATCH**, 568,770 agree, 15,639

@@ -599,6 +599,15 @@ def twoByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
     | m :: _ =>
       if (m = 0xE8 ∨ m = 0xF0 ∨ m = 0xF8) ∧ p = {} then some (.nop, n + 2) else none
     | [] => none
+  else if op = 0x1E then
+    -- ENDBR64 (`F3 0F 1E FA`), exactly these bytes and no other prefix: the CET indirect-branch
+    -- landing pad that C compilers put at every function entry (`-fcf-protection`). Executed,
+    -- it is a NOP, with or without CET; the IBT check it satisfies belongs to the indirect
+    -- branch that targets it, and Linux does not enable IBT for user space. Every other
+    -- `F3 0F 1E` form (`ENDBR32`, `RDSSP`) and every other prefix combination is rejected.
+    match bs with
+    | m :: _ => if m = 0xFA ∧ p = { rep := 0xF3 } then some (.nop, n + 2) else none
+    | [] => none
   else if op = 0x1F then
     -- NOP r/m (`/0`), no memory access
     if sel > 1 then none else

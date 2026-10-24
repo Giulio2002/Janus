@@ -154,6 +154,12 @@ register_option janus.aliasInfo : Bool := {
     they are left in the remaining goals (an information message)"
 }
 
+register_option janus.merge : Bool := {
+  defValue := false
+  descr := "janus_run/janus64_run: merge paths that reach the same pc with the same state \
+    (the branch conditions they do not share are dropped; see `Common.pickMerged`)"
+}
+
 /-- Every identifier inside a syntax tree, in order. -/
 partial def collectIdents (stx : Syntax) : Array Syntax :=
   if stx.isIdent then #[stx] else stx.getArgs.foldl (fun acc a => acc ++ collectIdents a) #[]
@@ -1494,5 +1500,198 @@ elab "janus_rfl_eqns " id:ident " [" attr:ident "]" : command => do
     return out
   for nm in names do
     elabCommand (← `(attribute [$attr:ident] $(mkIdent nm):ident))
+
+/-! ## Path merging (`set_option janus.merge true`)
+
+A branch whose two sides rejoin (`if c { x++ }; …`, a `&&` condition, a lock count that is
+or is not 1) doubles the work of every later instruction: each path is executed to the end on
+its own. With `janus.merge`, the run steps the pending path with the smallest pc first, so that
+the paths of a forward diamond wait for each other at the join. Two pending goals at the same
+pc whose targets are the same expression (the same state, the same postcondition) and whose
+local contexts differ only in branch hypotheses (`hbr`) are merged: the branch hypotheses that
+are not common to both are cleared and one goal is assigned to the other, so the rest of the
+run is executed once. Clearing hypotheses is always sound; it loses the facts of the branches
+taken, which is why merging is opt-in (a later branch decided by an earlier condition becomes
+two paths again, and a proof may need the dropped fact). -/
+
+/-- The branch hypotheses (`hbr`) of a local context and the other declarations. -/
+def splitBranchHyps (lctx : LocalContext) : Array FVarId × Array FVarId := Id.run do
+  let mut hb := #[]
+  let mut rest := #[]
+  for d in lctx do
+    if d.isImplementationDetail then continue
+    if d.userName.eraseMacroScopes == `hbr then hb := hb.push d.fvarId
+    else rest := rest.push d.fvarId
+  return (hb, rest)
+
+/-- What path merging needs to know about an ISA's state: the memory type (never
+generalised), the register-file chains `setR (… (x.regs) …) r v` (`(setR, regs)`) and the
+simprocs that remove a write-back of a register's own value (`setR f r (x.regs r) = f`). -/
+structure MergeSpec where
+  memTypes : List Name
+  regChains : List (Name × Name) := []
+  restore : List Name := []
+
+/-- A register-file chain `setR (… (setR base r₁ v₁) …) rₖ vₖ`, innermost first: the base and the
+writes `(index, literal, value)`. -/
+partial def regWrites (setR regs : Name) (f : Expr) (acc : List (Expr × Nat × Expr) := []) :
+    Option (Expr × List (Expr × Nat × Expr)) :=
+  if f.isAppOfArity setR 3 then
+    match (f.getArg! 1).nat? <|> (f.getArg! 1).rawNatLit? with
+    | some r => regWrites setR regs (f.getArg! 0) ((f.getArg! 1, r, f.getArg! 2) :: acc)
+    | none => none
+  else if f.isAppOfArity regs 1 then some (f, acc)
+  else none
+
+/-- Anti-unification of two goal targets: the common term, with every maximal pair of
+differing subterms replaced by a fresh free variable (`vars`: the variable, its type and the two
+subterms; the same pair, the same variable). A subterm is only generalised if it has no loose
+bound variables, both sides have the same type and that type is not a memory (a memory is never
+generalised: the run needs its stores; differing memories make the goals unmergeable). Two
+register-file chains over the same base are aligned by register: a register written on one side
+only gets a variable whose other value is the base's (`x.regs r`, removed again by the
+`restore` simprocs when the merged goal is instantiated). -/
+partial def antiUnify (spec : MergeSpec) (a b : Expr) :
+    StateRefT (Array (FVarId × Expr × Expr × Expr)) MetaM Expr := do
+  if a == b then return a
+  let fresh (ta a b : Expr) : StateRefT (Array (FVarId × Expr × Expr × Expr)) MetaM Expr := do
+    for (v, _, a', b') in ← get do
+      if a' == a && b' == b then return mkFVar v
+    let v ← mkFreshFVarId
+    modify (·.push (v, ta, a, b))
+    return mkFVar v
+  for (setR, regs) in spec.regChains do
+    if let (some (baseA, wa), some (baseB, wb)) := (regWrites setR regs a, regWrites setR regs b) then
+      if baseA == baseB && (wa.map (·.2.1) != wb.map (·.2.1)) then
+        let idx := (wa.map (·.2.1) ++ wb.map (·.2.1)).eraseDups.mergeSort
+        let wty ← instantiateMVars (← inferType (baseA.beta #[mkNatLit 0]))
+        let mut acc := baseA
+        for r in idx do
+          let va := wa.find? (·.2.1 == r)
+          let vb := wb.find? (·.2.1 == r)
+          let (ie, v) ← match va, vb with
+            | some (ie, _, x), some (_, _, y) => pure (ie, ← antiUnify spec x y)
+            | some (ie, _, x), none => pure (ie, ← fresh wty x (mkApp baseA ie))
+            | none, some (ie, _, y) => pure (ie, ← fresh wty (mkApp baseA ie) y)
+            | none, none => unreachable!
+          acc := mkApp3 (mkConst setR) acc ie v
+        return acc
+  let fa := a.getAppFn
+  let fb := b.getAppFn
+  if a.isApp && b.isApp && fa == fb && a.getAppNumArgs == b.getAppNumArgs && !fa.isMVar then
+    let xs := a.getAppArgs
+    let ys := b.getAppArgs
+    let mut out := #[]
+    for x in xs, y in ys do
+      out := out.push (← antiUnify spec x y)
+    return mkAppN fa out
+  if a.hasLooseBVars || b.hasLooseBVars || a.hasMVar || b.hasMVar then
+    throwError "antiUnify: bound variables{indentExpr a}\nvs{indentExpr b}"
+  let ta ← instantiateMVars (← inferType a)
+  if ta.getAppFn.constName?.any (spec.memTypes.contains ·) then
+    throwError "the memories differ{indentExpr a}\nvs{indentExpr b}"
+  if (← isProp ta) || ta.isSort then throwError "antiUnify: proposition or type"
+  unless ← withReducible (isDefEq ta (← inferType b)) do throwError "antiUnify: types"
+  fresh ta a b
+
+/-- `e` with the register write-backs `setR f r (x.regs r)` removed (the `restore` simprocs). -/
+def restoreRegs (spec : MergeSpec) (e : Expr) : MetaM Simp.Result := do
+  if spec.restore.isEmpty then return { expr := e }
+  let cfg : Simp.Config := { zeta := false, iota := false, proj := false, decide := false, beta := false, eta := false }
+  let ctx ← Simp.mkContext (config := cfg)
+    (simpTheorems := #[]) (congrTheorems := ← getSimpCongrTheorems)
+  let mut sp : Simp.Simprocs := {}
+  for n in spec.restore do sp ← sp.add n (post := true)
+  let (r, _) ← simp e ctx #[sp] none
+  return r
+
+/-- Merge `h` into `g` (same pc): `some g'` (the goal that remains; both `g` and `h` are
+assigned through it) if their contexts differ only in branch hypotheses and their targets differ
+in at most `maxVars` non-memory subterms (registers, flags), which the merged goal quantifies
+over (`∀ jv…`; e.g. a scratch register or the flags that the two sides of a diamond left
+differently, and that the code after the join overwrites). -/
+def tryMerge (spec : MergeSpec) (g h : MVarId) (maxVars : Nat := 8) : MetaM (Option MVarId) := do
+  let (hbG, restG) := splitBranchHyps (← g.getDecl).lctx
+  let (hbH, restH) := splitBranchHyps (← h.getDecl).lctx
+  unless restG == restH do
+    trace[janus] "not merged: the local contexts differ beyond branch hypotheses"
+    return none
+  let tg ← instantiateMVars (← g.getType)
+  let th ← instantiateMVars (← h.getType)
+  let some (tmpl, vars) ← g.withContext (try some <$> (antiUnify spec tg th).run #[]
+      catch e => do
+        trace[janus] "not merged: {e.toMessageData}"
+        pure none) | return none
+  if vars.size > maxVars then
+    trace[janus] "not merged: {vars.size} differing subterms, e.g.{MessageData.joinSep ((vars.toList.take 4).map fun (_, _, a, b) => m!"{indentExpr a}\nvs{indentExpr b}") "\n"}"
+    return none
+  let dropG := hbG.filter (!hbH.contains ·)
+  let dropH := hbH.filter (!hbG.contains ·)
+  let saved ← saveState
+  let g' ← g.tryClearMany dropG
+  let h' ← h.tryClearMany dropH
+  let idsG := (← g'.getDecl).lctx.getFVarIds
+  let idsH := (← h'.getDecl).lctx.getFVarIds
+  if idsG != idsH then saved.restore; return none
+  if vars.isEmpty then
+    h'.assign (mkMVar g')
+    return some g'
+  -- `∀ jv…, tmpl`, instantiated with each side's subterms
+  let fvs := vars.map (mkFVar ·.1)
+  let body := tmpl.abstract fvs
+  let mut ty := body
+  for i in [0:vars.size] do
+    let j := vars.size - 1 - i
+    ty := .forallE (Name.mkSimple s!"jv{j}") ((vars[j]!.2.1).abstractRange j fvs) ty .default
+  let ok ← g'.withContext do try Meta.check ty; pure true catch _ => pure false
+  unless ok do saved.restore; return none
+  let m ← g'.withContext (mkFreshExprSyntheticOpaqueMVar ty (← g'.getTag))
+  -- each side: the merged goal at its values, up to the register write-backs
+  let inst (side : MVarId) (vals : Array Expr) (target : Expr) : MetaM Bool := side.withContext do
+    let pf := mkAppN m vals
+    let r ← restoreRegs spec (body.instantiateRev vals)
+    unless r.expr == target do
+      unless ← withReducible (isDefEq r.expr target) do return false
+    match r.proof? with
+    | none => side.assign pf
+    | some eq => side.assign (← mkEqMP eq pf)
+    return true
+  unless ← inst g' (vars.map (·.2.2.1)) tg do
+    trace[janus] "not merged: the merged goal does not instantiate to the first one"
+    saved.restore; return none
+  unless ← inst h' (vars.map (·.2.2.2)) th do
+    trace[janus] "not merged: the merged goal does not instantiate to the second one"
+    saved.restore; return none
+  let (_, g'') ← m.mvarId!.introNP vars.size
+  return some g''
+
+/-- Pick the pending goal to step next when merging: the one with the smallest pc (goals
+without a literal pc, e.g. outcomes, first), after merging into it every other pending goal
+at the same pc that `tryMerge` accepts. -/
+def pickMerged (spec : MergeSpec) (pcOf : MVarId → MetaM (Option Nat))
+    (todo : List (MVarId × Bool)) :
+    MetaM (List (MVarId × Bool)) := do
+  let mut pend : Array (MVarId × Bool × Option Nat) := #[]
+  for (g, f) in todo do
+    if ← g.isAssigned then continue
+    pend := pend.push (g, f, ← pcOf g)
+  if pend.isEmpty then return []
+  let key (o : Option Nat) : Nat := match o with | none => 0 | some c => c + 1
+  let mut best := 0
+  for i in [1:pend.size] do
+    if key pend[i]!.2.2 < key pend[best]!.2.2 then best := i
+  let (g0, f0, pc0) := pend[best]!
+  let mut g := g0
+  let mut rest := #[]
+  for i in [0:pend.size] do
+    if i == best then continue
+    let (h, fh, pch) := pend[i]!
+    if pc0.isSome && pch == pc0 then
+      if let some g' ← tryMerge spec g h then
+        trace[janus] "merged two paths at pc {hex pc0.get!}"
+        g := g'
+        continue
+    rest := rest.push (h, fh)
+  return (g, f0) :: rest.toList
 
 end Janus.Tactic.Common
