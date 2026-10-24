@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -26,6 +27,9 @@ type StubKind string
 const (
 	stubPanic     StubKind = "panic"
 	stubMorestack StubKind = "morestack"
+	// stubExternal: a function outside the extracted code whose effect a theorem states as an
+	// explicit contract (Janus.StubKind.external, see Janus/FFI.lean): the cgo boundary.
+	stubExternal StubKind = "external"
 )
 
 type Stub struct {
@@ -56,6 +60,17 @@ type Extraction struct {
 func stubKind(name string) (StubKind, bool) {
 	n := strings.TrimSuffix(strings.TrimSuffix(name, ".abi0"), ".abiinternal")
 	switch {
+	case n == "runtime.cgocall":
+		// the Go -> C call boundary: stack switch to g0, entersyscall/exitsyscall, the C call
+		// itself through asmcgocall; its effect is the trusted contract of Janus.FFI
+		return stubExternal, true
+	case n == "_cgo_topofstack":
+		// Go assembly called from the C side of a cgo call (runtime/asm_*.s); its effect is
+		// the trusted TopOfStack contract of Janus.FFI
+		return stubExternal, true
+	case n == "runtime.cgoUse":
+		// only reached on the dead `if _Cgo_always_false` branch of cgo wrappers; it throws
+		return stubExternal, true
 	case strings.HasPrefix(n, "runtime.morestack"):
 		return stubMorestack, true
 	case strings.HasPrefix(n, "runtime.panic"), strings.HasPrefix(n, "runtime.goPanic"), n == "runtime.gopanic":
@@ -73,17 +88,44 @@ func extract(binPath, sym string, maxFunctions int) (*Extraction, error) {
 	return extractFrom(b, sym, maxFunctions)
 }
 
+// cgoFnVarRE matches the Go variable cgo generates for each C function a package calls
+// (`var _cgo_<hash>_Cfunc_<name> = unsafe.Pointer(&__cgofn__cgo_<hash>_Cfunc_<name>)`): it holds
+// the address of the C wrapper of the same name, which runtime.cgocall calls.
+var cgoFnVarRE = regexp.MustCompile(`(?:^|\.)(_cgo_[0-9a-f]+_Cfunc_[A-Za-z0-9_]+)$`)
+
+// cgoWrapperRoots returns the C wrappers whose function-pointer variables the code at refs
+// loads. Following them is reachability (untrusted, like branch following): it only decides
+// that the C code is copied too, so that a theorem can run it.
+func cgoWrapperRoots(b *Binary, refs []DataRef) []Func {
+	var out []Func
+	for _, r := range refs {
+		sym, ok, _ := b.dataSymbolAt(r.Target)
+		if !ok {
+			continue
+		}
+		m := cgoFnVarRE.FindStringSubmatch(sym.Name)
+		if m == nil {
+			continue
+		}
+		if f, err := b.lookup(m[1]); err == nil {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 func extractFrom(b *Binary, sym string, maxFunctions int) (*Extraction, error) {
 	entry, err := b.lookup(sym)
 	if err != nil {
 		return nil, err
 	}
+	kindOf := stubKind
 	if _, ok := stubKind(entry.Name); ok {
 		return nil, &diag{Msg: fmt.Sprintf("%s is a runtime stub, not a function Janus extracts", entry.Name),
 			Stage: "function selection", Next: "Select a Go function that calls the stub instead."}
 	}
 	if b.GOARCH == "amd64" {
-		return extractAmd64(b, entry, maxFunctions)
+		return extractAmd64(b, entry, maxFunctions, kindOf)
 	}
 	x := &Extraction{Bin: b, Entry: entry}
 	seen := map[uint64]bool{entry.Addr: true}
@@ -108,7 +150,7 @@ func extractFrom(b *Binary, sym string, maxFunctions int) (*Extraction, error) {
 				x.Unresolved = append(x.Unresolved, Unresolved{From: pc, Target: t})
 				continue
 			}
-			if k, ok := stubKind(g.Name); ok {
+			if k, ok := kindOf(g.Name); ok {
 				if !stubSeen[g.Addr] {
 					stubSeen[g.Addr] = true
 					x.Stubs = append(x.Stubs, Stub{Name: g.Name, Addr: g.Addr, Kind: k})
@@ -116,6 +158,12 @@ func extractFrom(b *Binary, sym string, maxFunctions int) (*Extraction, error) {
 				continue
 			}
 			if !seen[g.Addr] {
+				seen[g.Addr] = true
+				queue = append(queue, g)
+			}
+		}
+		for _, g := range cgoWrapperRoots(b, dataRefs(ws, f.Addr)) {
+			if _, isStub := kindOf(g.Name); !isStub && !seen[g.Addr] {
 				seen[g.Addr] = true
 				queue = append(queue, g)
 			}

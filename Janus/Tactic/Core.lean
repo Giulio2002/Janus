@@ -64,7 +64,7 @@ initialize registerTraceClass `janus.disch
 
 /-! ## Program data, evaluated once per program -/
 
-abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Bool)
+abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Nat)
 
 unsafe def evalProgDataImpl (p : Expr) : MetaM ProgData := do
   let e := mkApp (mkConst ``progData) p
@@ -619,12 +619,15 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
       let hok ← kernelDecide (mkApp2 (mkConst ``exitOK) p cE)
       return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
-    if let some (_, name, isPanic) := stubs.find? (·.1 == c) then
+    if let some (_, name, kindCode) := stubs.find? (·.1 == c) then
       if ret?.isSome then
         throwError "{tacName}: the callee reaches the runtime stub {name} at {hex c}; a \
           `Summary` only covers runs that return. Add the precondition that excludes this path \
           (e.g. `GuardOK` for `morestack`, a bound for a panic)."
-      let kind := if isPanic then mkConst ``StubKind.panic else mkConst ``StubKind.morestack
+      let kind := match kindCode with
+        | 0 => mkConst ``StubKind.panic
+        | 1 => mkConst ``StubKind.morestack
+        | _ => mkConst ``StubKind.external
       let hok ← kernelDecide (mkApp4 (mkConst ``stubOK) progE cE (toExpr name) kind)
       let lem := match mode, hret? with
         | some (base, retE), some hret =>

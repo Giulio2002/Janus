@@ -70,6 +70,10 @@ def IsMorestack : Outcome → Prop
     IsMorestack (.stub n .panic s) = False := rfl
 @[simp, janus64_post] theorem isMorestack_morestack (n : String) (s : State) :
     IsMorestack (.stub n .morestack s) = True := rfl
+@[simp, janus64_post] theorem isPanic_external (n : String) (s : State) :
+    IsPanic (.stub n .external s) = False := rfl
+@[simp, janus64_post] theorem isMorestack_external (n : String) (s : State) :
+    IsMorestack (.stub n .external s) = False := rfl
 
 /-- `pc` is an ordinary instruction: not the exit address, not a stub, inside the code with
 bytes `bs`, which decode to `i` of length `len`. Closed by kernel evaluation. -/
@@ -86,9 +90,9 @@ def stubOK (p : Program) (pc : Nat) (name : String) (kind : StubKind) : Bool :=
     | none => false
 
 /-- The data the tactic reads off a program (re-checked by the kernel on every use). -/
-def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Bool) :=
+def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Nat) :=
   (p.exitAddr, p.segments.map (fun seg => (seg.base, seg.bytes)),
-    p.stubs.map (fun st => (st.addr, st.name, st.kind == .panic)))
+    p.stubs.map (fun st => (st.addr, st.name, st.kind.code)))
 
 private theorem rip_toNat_of {s : State} {c : Nat} (hpc : s.rip = BitVec.ofNat 64 c)
     (hc : c < 2 ^ 64) : s.rip.toNat = c := by
@@ -240,6 +244,7 @@ theorem panics_of_reaches {p : Program} {s : State} (h : Reaches p s IsPanic) : 
     cases kind with
     | panic => exact ⟨n, name, s', hr⟩
     | morestack => exact hq.elim
+    | external => exact hq.elim
 
 theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMorestack) :
     GrowsStack p s := by
@@ -250,6 +255,7 @@ theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMores
     cases kind with
     | panic => exact hq.elim
     | morestack => exact ⟨n, name, s', hr⟩
+    | external => exact hq.elim
 
 /-! ## Callee summaries
 
@@ -968,7 +974,7 @@ def tacName : String := "janus64_run"
 def accessFns : List (Name × Bool) :=
   [(``Janus.Amd64.load, false), (``Janus.Amd64.loadRW, true), (``Janus.Amd64.store, true)]
 
-abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Bool)
+abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Nat)
 
 /-- Segment names and ranges, for messages. -/
 def progSyms (p : Program) : List (String × Nat × Nat) :=
@@ -1472,12 +1478,15 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
       let hok ← kernelDecide (mkApp2 (mkConst ``exitOK) p cE)
       return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
-    if let some (_, name, isPanic) := stubs.find? (·.1 == c) then
+    if let some (_, name, kindCode) := stubs.find? (·.1 == c) then
       if ret?.isSome then
         throwError "{tacName}: the callee reaches the runtime stub {name} at {hex c}; a \
           `Summary` only covers runs that return. Add the precondition that excludes this path \
           (e.g. `StackGuardOK` for `morestack`)."
-      let kind := if isPanic then mkConst ``StubKind.panic else mkConst ``StubKind.morestack
+      let kind := match kindCode with
+        | 0 => mkConst ``StubKind.panic
+        | 1 => mkConst ``StubKind.morestack
+        | _ => mkConst ``StubKind.external
       let hok ← kernelDecide (mkApp4 (mkConst ``stubOK) progE cE (toExpr name) kind)
       let lem := match mode, hret? with
         | some (base, retE), some hret =>

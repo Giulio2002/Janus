@@ -39,6 +39,13 @@ type amd64Inst struct {
 func sweepAmd64(code []byte, base uint64) []amd64Inst {
 	var out []amd64Inst
 	for off := 0; off < len(code); {
+		// ENDBR64 (F3 0F 1E FA), which C compilers emit at function entries; this x86asm
+		// version decodes it as a 3-byte REP-prefixed instruction followed by CLI.
+		if off+4 <= len(code) && code[off] == 0xF3 && code[off+1] == 0x0F && code[off+2] == 0x1E && code[off+3] == 0xFA {
+			out = append(out, amd64Inst{PC: base + uint64(off), Inst: x86asm.Inst{Op: x86asm.NOP, Len: 4}})
+			off += 4
+			continue
+		}
 		inst, err := x86asm.Decode(code[off:], 64)
 		if err != nil || inst.Len == 0 {
 			off++
@@ -90,7 +97,7 @@ func amd64DataRefs(insts []amd64Inst) []DataRef {
 
 // extractAmd64 is extractFrom for amd64 binaries: entry plus every function reachable by
 // direct branches, breadth first.
-func extractAmd64(b *Binary, entry Func, maxFunctions int) (*Extraction, error) {
+func extractAmd64(b *Binary, entry Func, maxFunctions int, kindOf func(string) (StubKind, bool)) (*Extraction, error) {
 	x := &Extraction{Bin: b, Entry: entry}
 	seen := map[uint64]bool{entry.Addr: true}
 	stubSeen := map[uint64]bool{}
@@ -116,7 +123,7 @@ func extractAmd64(b *Binary, entry Func, maxFunctions int) (*Extraction, error) 
 				x.Unresolved = append(x.Unresolved, Unresolved{From: in.PC, Target: t})
 				continue
 			}
-			if k, ok := stubKind(g.Name); ok {
+			if k, ok := kindOf(g.Name); ok {
 				if !stubSeen[g.Addr] {
 					stubSeen[g.Addr] = true
 					x.Stubs = append(x.Stubs, Stub{Name: g.Name, Addr: g.Addr, Kind: k})
@@ -124,6 +131,12 @@ func extractAmd64(b *Binary, entry Func, maxFunctions int) (*Extraction, error) 
 				continue
 			}
 			if !seen[g.Addr] {
+				seen[g.Addr] = true
+				queue = append(queue, g)
+			}
+		}
+		for _, g := range cgoWrapperRoots(b, amd64DataRefs(insts)) {
+			if _, isStub := kindOf(g.Name); !isStub && !seen[g.Addr] {
 				seen[g.Addr] = true
 				queue = append(queue, g)
 			}

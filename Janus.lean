@@ -7,6 +7,8 @@ import Janus.Program
 import Janus.Arm64.MemoryLemmas
 import Janus.Run
 import Janus.GoABI
+import Janus.CABI
+import Janus.FFI
 import Janus.Tactic
 import Janus.Tactic.Atomic
 import Janus.Tactic.Vector
