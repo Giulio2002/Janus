@@ -15,6 +15,7 @@ var Keep = []any{
 	bench.Chain1,
 	bench.Alias4,
 	bench.BigFrame,
+	bench.Mul256,
 }
 
 func main() {
@@ -29,5 +30,9 @@ func main() {
 	a, b, c, d := n, n+1, n+2, n+3
 	bench.Alias4(&a, &b, &c, &d)
 	r ^= a ^ b ^ c ^ d ^ bench.BigFrame(n, n+5)
+	var m, u, v [4]uint64
+	u[0], v[1] = n, n+3
+	bench.Mul256(&m, &u, &v)
+	r ^= m[1]
 	println(r, len(Keep))
 }

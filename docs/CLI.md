@@ -69,7 +69,7 @@ stripped, they come from the Go `.gopclntab` (`debug/gosym`) instead; the header
 ## Extract
 
 ```sh
-janus extract <binary> <symbol> <outdir> [--max-functions N]
+janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...]
 janus extract artifacts/examples-arm64 example.com/basic.Get artifacts/Get
 ```
 
@@ -95,9 +95,10 @@ Extraction:
    `CBZ`/`CBNZ` and `TBZ`/`TBNZ` whose target lies outside the current function. Targets are
    found with `golang.org/x/arch/arm64/arm64asm`. This decoding is untrusted: it only chooses
    which code to copy. A missed target is simply absent and the Lean model faults with `noCode`
-   if execution reaches it, which is sound. Indirect branches (`BR`, `BLR`) are not followed for
-   the same reason. Branches into no known function are reported as warnings and recorded in
-   `identity.json` under `unresolvedBranches`.
+   if execution reaches it, which is sound. Indirect branches (`BR`, `BLR`) cannot be followed;
+   their possible targets are added as **dynamic targets** (step 8). Branches into no known
+   function are reported as warnings and recorded in `identity.json` under
+   `unresolvedBranches`. Calls of `runtime.deferreturn` are not followed (see step 8).
 5. Records known runtime stubs instead of copying them:
    * `.panic`: the go1.26 runtime's panic functions, by exact linked name (`runtime.gopanic`,
      `runtime.goPanic*`, `runtime.panicBounds`, `runtime.panicdivide`, `runtime.panicshift`,
@@ -114,6 +115,22 @@ Extraction:
    fails the extraction when more are reachable, listing them. For example `main.main` of the
    example binary reaches 421 functions through `println` and the allocator.
 7. Copies the **read-only data** the copied code references (see [Read-only data](#read-only-data)).
+8. Adds **dynamic targets**, the code an indirect call may reach (interface methods, closures,
+   method values, deferred closures; see [docs/RUNTIME-CONTRACTS.md](RUNTIME-CONTRACTS.md#dynamic-calls)),
+   and everything they reach in turn:
+   * `--targets SYM,...` names them: a function, a static itab `go:itab.*T,I` (its `Fun[k]`
+     methods are copied, and the itab itself becomes a data object named after its symbol, which
+     `Janus.Spec.ItabIs` refers to), or a static funcval `…·f` (its function). An itab name
+     contains a comma of its own and is kept together:
+     `--targets 'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher,example.com/basic.F.func1'`;
+   * inferred, from functions outside the standard library (package `main`, or a path whose
+     first element contains a dot): a function entry the code computes (`ADRP`+`ADD`, `LEA`:
+     a closure or method-value wrapper it builds), and the itabs and funcvals it loads from
+     `.rodata`.
+
+   Like reachability this is untrusted: a missing target faults (`noCode`) when called.
+   `runtime.deferreturn` is never followed: functions with open-coded defers call it only after a
+   recovered panic (out of scope); it is recorded under `omittedCalls`.
 
 Outputs, written into `<outdir>` (created if needed); any old `verified.json` there is removed:
 
@@ -203,7 +220,21 @@ end Extracted
 
 `binary` is relative to the artifact directory when both are under the same top-level
 directory, otherwise absolute. `size` is the symbol size (with padding); `words` is the number of
-copied words after trimming. `data`, `dataReferences` and `skippedData` are described under
+copied words after trimming. Extractions with dynamic targets also record `targets` (the
+`--targets` list, which `janus check` re-applies), `dynamicTargets` (each added function with
+`via` = `targets`, `itab`, `funcval` or `code-address` and `from`, the itab/funcval symbol or the
+instruction computing the address) and `omittedCalls` (direct calls not followed, with the
+reason); these fields are absent when empty. For `HashWith` extracted with both itabs:
+
+```json
+  "targets": [ "go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher",
+               "go:itab.*example.com/basic.RotHasher,example.com/basic.Hasher" ],
+  "dynamicTargets": [
+    { "name": "example.com/basic.(*MulHasher).Hash", "address": "0x8d070", "via": "itab",
+      "from": "go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher" }, … ],
+```
+
+`data`, `dataReferences` and `skippedData` are described under
 [Read-only data](#read-only-data); for `example.com/basic.SetOne256`:
 
 ```json

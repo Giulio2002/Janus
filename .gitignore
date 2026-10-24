@@ -14,3 +14,4 @@ audit/round5/bin/
 audit/round5/work/
 audit/*/bin/
 audit/*/work/
+/cmd/janus/janus

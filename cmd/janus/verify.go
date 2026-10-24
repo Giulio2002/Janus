@@ -98,20 +98,27 @@ type auditResult struct {
 
 // findJanusRoot locates the Lean project: --janus-root, else $JANUS_ROOT (a Janus checkout,
 // built in place), else the framework embedded in this binary, materialized and built once in
-// the local cache (see frameworkBase).
-func findJanusRoot(flag string) (string, error) {
+// the local cache (see frameworkBase). The build includes targets and stays in use (shared
+// lock) until release: nothing else writes to it meanwhile.
+func findJanusRoot(flag string, targets ...string) (string, func(), error) {
 	fw, err := loadFramework(flag)
 	if err != nil {
-		return "", err
-	}
-	if fw.Source == "directory" {
-		return fw.Dir, nil
+		return "", func() {}, err
 	}
 	lake, err := findLake()
 	if err != nil {
-		return "", err
+		return "", func() {}, err
 	}
-	return fw.frameworkBase(lake, os.Stderr)
+	var lease *frameworkLease
+	if fw.Source == "directory" {
+		lease, err = fw.acquire(fw.Dir, lake, targets, os.Stderr)
+	} else {
+		lease, err = fw.frameworkBase(lake, os.Stderr, targets...)
+	}
+	if err != nil {
+		return "", func() {}, err
+	}
+	return lease.dir, lease.release, nil
 }
 
 func findLake() (string, error) {
