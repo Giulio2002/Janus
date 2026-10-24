@@ -32,7 +32,7 @@ The build runs as many Lean processes at once as fit a 24 GiB budget (see "Memor
 |---|---|
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
 | `janus-asl-check` | **562,288 agree, 21,468 gap, 0 MISMATCH**; `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 7 min on 48 cores |
-| proofs | **47 audited theorems** (an explicit list in JanusASL/Audit.lean, with every statement printed): 39 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree` and 4 example transfers (`*.correctness_asl`), no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
+| proofs | **59 audited theorems** (an explicit list in JanusASL/Audit.lean and audit/rt-asl/AuditStrict.lean, with every statement printed): 48 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`) and 4 example transfers (`*.correctness_asl`), no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
 
 Agreement by corpus class (`agree` / `gap`):
 
@@ -115,7 +115,9 @@ retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to
 | LDAR/STLR (B/H/W/X) | all valid | **proved**³ | `ldstOrdered_agree` (LdStOrd) |
 | LDAPR (B/H/W/X) | all valid | **proved**³ | `ldapr_agree` (LdStExcl) |
 | LDXR/LDAXR (B/H/W/X) | all valid | **proved**³ | `ldExcl_agree` (LdStExcl) |
-| LSE atomics (LD<op>, SWP, CAS, CASP), PRFM | | tested | |
+| LD<op>{A}{L}{B,H}, op = ADD, CLR, EOR, SET, SMAX, SMIN, UMAX, UMIN (and the ST<op> aliases, `Rt = 11111`) | all valid | **proved**³ | `ldadd_agree`, `ldclr_agree`, `ldeor_agree`, `ldset_agree`, `ldsmax_agree`, `ldsmin_agree`, `ldumax_agree`, `ldumin_agree` (LdStAtomicCls; LdStAtomic, MemAtomic) |
+| SWP{A}{L}{B,H} | all valid | **proved**³ | `swp_agree` (LdStAtomicCls) |
+| CAS, CASP, PRFM | | tested | |
 | AdvSIMD/FP, AES, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
 
 "All valid" means all words of the group that Janus decodes. The theorems carry the decode
@@ -160,18 +162,33 @@ before its accesses (`TFrame`: only GPRs, SP, the step-entry registers and regio
 differ), `AArch64_TranslateAddress` maps every byte of `m`'s regions (as an EL0 load, and as a
 store for writable regions) to the identity physical address, Normal write-back, without fault
 and without changing the state; and no region byte lies in the model's GIC/UART windows. It covers the descriptors of ordinary
-accesses (`gprAcc`) and of ordered and exclusive ones (`OrdAcc`: `acqRelAcc`, `acqPCAcc`,
-`exclAcc`, with the exclusive monitor's own translation). The
+accesses (`gprAcc`) and of ordered, exclusive and atomic ones (`OrdAcc`: `acqRelAcc`, `acqPCAcc`,
+`exclAcc`, with the exclusive monitor's own translation, and `atomAcc op a r` for the LSE
+read-modify-writes, as a store). The
 `TFrame` part is justified statically: the call graph of `AArch64_TranslateAddress` (1,067
 generated functions) reads none of the registers `TFrame` lets change, and the regions do not hold
 page tables. `janus-asl-check` evaluates the hypothesis on its tables: every byte of the data
 buffer, as load and store, aligned and unaligned, sizes 1–16, on the base state (comparing every
 register the translation code can write), and three bytes on every case's pre-state.
 
-These theorems are per instruction; `UserMapped` is not yet carried through `run_agree`. Since
-`UserMapped` is evaluated, not proved, there is no kernel-checked non-vacuity witness with non-empty
-regions (only the trivial one, no regions, where every Janus access faults): that it holds for the
-check's tables is the evaluated fact above.
+The LSE atomics go through `MemAtomic` (MemAtomic.lean): for a naturally aligned access the ASL
+translates once (as a store, with the atomic descriptor), reads the old value with one physical
+access, computes the new value (`aslAtomicNew`, shown equal to Janus' `atomicOp` for all nine
+operations) and writes it with one physical access; the comparison of CAS is not used by LD<op>/SWP.
+
+These theorems are per instruction; `UserMapped` is not yet carried through `run_agree`.
+
+**Witness (Witness.lean).** `witnessState` is an explicit Sail state and `witnessJs` a Janus state
+with one writable 16-byte region at the check's data buffer address `0x10_0004_0000` and `X1` its
+base. `witness_hyps` proves (kernel-checked) `Rel`, `MemRel` and `LinuxEL0Config` for them, with a
+non-empty region list, so these hypotheses are jointly satisfiable with real memory.
+`witness_ldr_asl` and `witness_str_asl` instantiate `ldstUImm_agree` at `LDR X0, [X1]`
+(`0xF9400020`) and `STR X0, [X1]` (`0xF9000020`): Janus steps them and the ASL step agrees.
+`UserMapped` remains a hypothesis of these two instances. **`UserMapped`'s non-vacuity is evidenced
+by the evaluated check only** (`janus-asl-check` evaluates it on the check's translation tables,
+above), until the proof of the stage-1 walk for those tables lands; there is no kernel-checked
+state with non-empty regions satisfying `UserMapped` yet (only the trivial one, no regions, where
+every Janus access faults).
 
 ### `LinuxEL0Config` (Config.lean)
 

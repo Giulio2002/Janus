@@ -30,9 +30,16 @@ def expected : List Name := [
   ``JanusASL.Proofs.rev16_agree, ``JanusASL.Proofs.rev32_agree, ``JanusASL.Proofs.rev64_agree,
   ``JanusASL.Proofs.b_agree, ``JanusASL.Proofs.bcond_agree, ``JanusASL.Proofs.cb_agree, ``JanusASL.Proofs.tb_agree,
   ``JanusASL.Proofs.br_agree, ``JanusASL.Proofs.blr_agree, ``JanusASL.Proofs.ret_agree,
-  -- 5 load/store encoding classes
+  -- 5 load/store encoding classes (plain)
   ``JanusASL.Proofs.ldstUImm_agree, ``JanusASL.Proofs.ldstImm9_agree, ``JanusASL.Proofs.ldstReg_agree,
   ``JanusASL.Proofs.ldrLit_agree, ``JanusASL.Proofs.ldstPair_agree,
+  -- ordered, exclusive and atomic loads/stores (LDAR/STLR, LDXR, LDAPR, LD<op>, SWP)
+  ``JanusASL.Proofs.ldstOrdered_agree, ``JanusASL.Proofs.ldExcl_agree, ``JanusASL.Proofs.ldapr_agree,
+  ``JanusASL.Proofs.ldadd_agree, ``JanusASL.Proofs.ldclr_agree, ``JanusASL.Proofs.ldeor_agree,
+  ``JanusASL.Proofs.ldset_agree, ``JanusASL.Proofs.ldsmax_agree, ``JanusASL.Proofs.ldsmin_agree,
+  ``JanusASL.Proofs.ldumax_agree, ``JanusASL.Proofs.ldumin_agree, ``JanusASL.Proofs.swp_agree,
+  -- a concrete state satisfying Rel, MemRel and LinuxEL0Config, with LDR/STR instantiated on it
+  ``JanusASL.Proofs.witness_hyps, ``JanusASL.Proofs.witness_ldr_asl, ``JanusASL.Proofs.witness_str_asl,
   -- assembly and whole runs
   ``JanusASL.Proofs.step_agree, ``JanusASL.Proofs.run_agree, ``JanusASL.Proofs.Ensures.toASL,
   ``JanusASL.Proofs.StepOK.of_agree,
