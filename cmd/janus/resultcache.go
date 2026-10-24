@@ -93,7 +93,7 @@ func (in *resultInputs) key() string {
 	h := sha256.New()
 	fmt.Fprintf(h, "janus-result-v1\nexe %s\n", exe)
 	fmt.Fprintf(h, "framework %s %s %s\npins %s\nauditor %s\n", in.fw.Source, in.fw.Sha256, in.root, pinsDigest(in.fwPins.want), in.auditExeSha)
-	fmt.Fprintf(h, "toolchain %q %s %s\nsandbox %s %s\n", in.tc.version, in.tc.lean, in.tc.leanchecker, in.sb.mode, in.sb.bwrap)
+	fmt.Fprintf(h, "toolchain %q %s %s\nsandbox %s %s\n", in.tc.cacheID(), in.tc.lean, in.tc.leanchecker, in.sb.mode, in.sb.bwrap)
 	fmt.Fprintf(h, "theorem %s\nreplay-fresh %q\nbinary-opt %q\n", in.thm, in.opts["replay-fresh"], in.opts["binary"])
 	fmt.Fprintf(h, "outdir %s\nproof %s\nbinary %s %s\n", outAbs, proofAbs, binAbs, in.binarySha)
 	fmt.Fprintf(h, "extracted %s\nidentity %s\nproof-src %s\n", sha256Hex(in.extracted), sha256Hex(in.identity), sha256Hex(in.proofSrc))
@@ -110,11 +110,35 @@ func resultCacheOK(sb *sandbox, opts map[string]string) bool {
 // resultKey returns the per-cache HMAC key, creating it (32 random bytes, mode 0600) on first use.
 func resultHMACKey() ([]byte, error) {
 	dir := resultCacheDir()
+	// round 8 C1: the key authenticates every entry (results and trusted compiles); it must be
+	// ours alone. The root is checked before anything is created under it.
+	if err := checkCacheRoot(); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
+	if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() || fi.Mode().Perm()&0o077 != 0 {
+		mode := "missing"
+		if err == nil {
+			mode = fmt.Sprintf("mode %o", fi.Mode().Perm())
+		}
+		return nil, keyDiag(fmt.Sprintf("the result cache directory %s is not private to this user (%s; it must be a directory of mode 0700)", displayPath(dir), mode))
+	}
 	p := filepath.Join(dir, ".key")
-	if b, err := os.ReadFile(p); err == nil && len(b) == 32 {
+	if fi, err := os.Lstat(p); err == nil {
+		b, err := readPrivateFile(p, true)
+		if err != nil || len(b) != 32 {
+			why := "it is not a private regular file of this user"
+			if fi.Mode()&os.ModeSymlink != 0 {
+				why = "it is a symbolic link"
+			} else if fi.Mode().IsRegular() && fi.Mode().Perm()&0o077 != 0 {
+				why = fmt.Sprintf("its mode is %04o, readable or writable by group or others (it must be 0600)", fi.Mode().Perm())
+			} else if err == nil {
+				why = fmt.Sprintf("it has %d bytes, not 32", len(b))
+			}
+			return nil, keyDiag(fmt.Sprintf("the result cache key %s is unsafe: %s", displayPath(p), why))
+		}
 		return b, nil
 	}
 	k := make([]byte, 32)
@@ -135,13 +159,21 @@ func resultHMACKey() ([]byte, error) {
 	// Another process may have created it meanwhile: keep the first one.
 	if err := os.Link(f.Name(), p); err != nil {
 		os.Remove(f.Name())
-		if b, err := os.ReadFile(p); err == nil && len(b) == 32 {
+		if b, err := readPrivateFile(p, true); err == nil && len(b) == 32 {
 			return b, nil
 		}
 		return nil, fmt.Errorf("cannot create the result cache key")
 	}
 	os.Remove(f.Name())
 	return k, nil
+}
+
+// keyDiag reports an unsafe result-cache key (round 8 C1). Anyone who could read the key can
+// forge cached results, so janus stops instead of silently ignoring the cache.
+func keyDiag(msg string) error {
+	return &diag{Invalid: true, Stage: "cache safety",
+		Msg:  "The Janus cache is not safe to use: " + msg + ", so another user could have read it and forged cached results (round 8 C1).",
+		Next: "Remove the result cache directory (janus creates a new private key) or set JANUS_CACHE_DIR to a directory only you can write."}
 }
 
 type resultEntry struct {
@@ -164,7 +196,7 @@ func lookupResult(key string) *verifiedReport {
 	if key == "" {
 		return nil
 	}
-	b, err := os.ReadFile(resultPath(key))
+	b, err := readPrivateFile(resultPath(key), false)
 	if err != nil {
 		return nil
 	}

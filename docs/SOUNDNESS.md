@@ -43,7 +43,9 @@ These are trusted, not proved.
    is unique (docs/AUDIT-ROUND6.md F3, docs/AUDIT-ROUND7.md G1: any package can define an
    assembly function or push a `//go:linkname` named `runtime.panicX`; the runtime's own
    definition makes a same-ABI copy a link error and an other-ABI copy a mangled name). The Go
-   version is read from build info, which `-ldflags=-X` can rewrite. Reaching a stub
+   version is read from build info, which `-ldflags=-X` can rewrite: a binary linked by go1.25
+   and labelled go1.26 can define a go1.26-only stub name itself (docs/AUDIT-ROUND8.md G3, open;
+   the fix, pinning stubs to the runtime's own code, is on agent/stubpin). Reaching a stub
    address ends the run with that outcome. This only affects
    theorems that mention stub outcomes (`Panics`, `NeverPanics`, `GrowsStack`). `Returns`
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
@@ -73,7 +75,7 @@ by default; `--replay-fresh` additionally runs `leanchecker --fresh` on the theo
 which re-adds every constant of its environment, core included, to an empty environment
 (minutes: about 140 s for a closure that imports `Lean`). Passing replays are cached in the
 trusted cache (`v1/replay`, never writable by a sandboxed process) under a key covering the
-toolchain version, the module's `.olean` bytes (with its `.server`/`.private` parts) and,
+toolchain's identity (see "Toolchain identity" below), the module's `.olean` bytes (with its `.server`/`.private` parts) and,
 recursively, the keys of its imports, so an unchanged framework module is not replayed again
 while any byte change to it or to anything below it is. The cache is off with `--fresh` and
 without a sandbox. Before replaying, every module of the closure must resolve from its home:
@@ -104,9 +106,38 @@ running between that check and its start. The Lean compiler that produced it is 
 toolchain (item 5).
 
 **The trusted-compile cache** (`v1/trusted`) holds compiled `Extracted`/`JanusTrusted` modules
-keyed by the toolchain, the framework build's pins and the two sources; entries carry a SHA-256
-manifest that is checked on use. Like the replay cache it is written only by janus outside the
-sandbox, is read-only to sandboxed processes, and is off with `--fresh` and without a sandbox.
+keyed by the toolchain's identity, the framework build's pins and the two sources. Each entry has
+a manifest with the SHA-256 of every file, checked on use, and an HMAC-SHA256 of the key and
+those hashes under the result cache's private key (below). An entry whose manifest has no MAC or
+a wrong one (planted, copied from another cache, or recorded before round 8) is a miss, and the
+next compile replaces it (round 8 M1). Like the replay cache it is written only by janus outside
+the sandbox, is read-only to sandboxed processes, and is off with `--fresh` and without a
+sandbox.
+
+**Toolchain identity.** Every cache key (replay, early replay, trusted compile, result) names
+the toolchain by `cacheID`: its version string, the SHA-256 of `bin/lean` and `bin/leanchecker`,
+and the path, size, modification and change times, inode, device and mode of every file under
+the toolchain's `bin/` and `lib/lean/` (a symbolic link also by its target and the file it
+names). `bin/lean` is a small launcher; the elaborator and the kernel are in
+`lib/lean/libleanshared.so` and the core `.olean` files, so a toolchain rebuilt or patched in
+place under the same version changes every key. Stat data, not content hashes, is used for the
+library (about 15 000 files, 233 MB for `libleanshared.so` alone); a rewrite changes the change
+time, which the writer cannot set back. A toolchain that cannot be walked gets a random identity,
+so its caches always miss (round 8 L1).
+
+**The cache root must be private** (round 8 C1). Before the cache is used, janus requires that
+the cache root (`JANUS_CACHE_DIR`, else the user cache directory's `janus`), after resolving
+symbolic links, is a directory owned by the current user and not writable by group or others,
+and that each of its directories janus uses (`v1`, `v1/result`, `v1/trusted`, `v1/replay`,
+`v1/framework`, `v1/consumer`, `v1/tmp`, `v1/run`) is a real directory (not a symbolic link)
+with the same owner and mode restriction. Every ancestor of the root must be owned by the user
+or by root, and not group- or other-writable unless it has the sticky bit (as `/tmp` has: others
+cannot rename or remove our entries there). The result directory must be 0700 and its key
+(`v1/result/.key`) a regular file owned by the user, of mode 0600 or stricter, not a link.
+Cache files (entries, manifests, the key) are opened with `O_NOFOLLOW`. A violation stops
+`janus verify` with an `Invalid` diagnostic (stage `cache safety`) naming the path and what is
+wrong, never a silent miss: another user who can write the root could choose the key and forge a
+`Cached: Verified` report, or plant a framework build or a trusted compile.
 
 ### Verification-result cache
 
@@ -118,7 +149,9 @@ base. What it relies on:
 * **Key.** The SHA-256 of every input the outcome depends on: the janus executable itself (all
   verifier logic and the embedded framework), the framework (its sources' hash and source,
   the build directory, the SHA-256 of every compiled framework module and of the compiled
-  auditor), the toolchain version and binaries, the sandbox mode, the theorem and options, the
+  auditor), the toolchain's identity (version, the SHA-256 of `lean` and `leanchecker`, and
+  the metadata of every file under `bin/` and `lib/lean/`, `libleanshared.so` included: see
+  "Toolchain identity" above), the sandbox mode, the theorem and options, the
   artifact, proof and binary paths, the bytes of `Extracted.lean` and `identity.json`, the
   binary's SHA-256 (verified against the binary by the same extraction check every run starts
   with) and the proof's bytes. A single-file proof can import only `Extracted`, the framework and
@@ -127,8 +160,9 @@ base. What it relies on:
   sources, pins, auditor); after a hit the inputs are read again and must be unchanged.
 * **Authenticity.** Entries are written only by janus, outside the sandbox, after a successful,
   sandboxed, non-`--fresh` run, and each is authenticated with HMAC-SHA256 under a random 32-byte
-  key created on first use (mode 0600, in the result directory). An entry whose report or key does
-  not verify is ignored: the verification runs.
+  key created on first use (mode 0600, in the result directory, which must be private: see
+  "The cache root must be private" above). The same key authenticates the trusted-compile
+  manifests. An entry whose report or key does not verify is ignored: the verification runs.
 * **Isolation.** The result directory, key included, is not visible to sandboxed code at all:
   bubblewrap and the unshare fallback mount an empty tmpfs over it (the unshare script stops if
   it cannot), on top of the read-only cache. A proof or a lakefile can neither read the key nor
@@ -137,13 +171,19 @@ base. What it relies on:
   write the cache. Without a sandbox the proof runs unconfined with the user's privileges, and
   anything it does to the cache (or to the replay and trusted-compile caches) is outside the
   threat model, as before; rerun with `--fresh` after running an untrusted proof unsandboxed.
-* **Threats out of scope.** Anyone who can write the user's cache directory directly can also
-  replace the framework build and the replay cache; the cache does not defend against them.
+* **Other users.** A cache root another user can write (a shared or group-writable directory,
+  one created by someone else, a symbolic link among its directories) or a key others can read is
+  refused (round 8 C1), so another account cannot plant entries or learn the key.
+* **Threats out of scope.** Anything running as the same user outside the sandbox (an
+  unsandboxed proof, other software of that user) can write the cache directly, and can also
+  replace the framework build and the replay cache; the cache does not defend against it.
 
 `audit/round7/run-cache.sh` (run by `audit/round7/run-round7.sh`) attacks the cache: a proof and a lakefile that look for the key and
 the entries and try to plant one (bubblewrap and unshare), a tampered entry, an entry recorded
-with a different framework (a source change), `--fresh` and `--unsafe-no-sandbox`. Every row
-must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
+with a different framework (a source change), `--fresh` and `--unsafe-no-sandbox`.
+`audit/round8/run-round8.sh` adds trusted-compile manifests with a missing or bad MAC, a
+group-writable cache root, a symbolic link among the cache directories and a 0644 key, and runs
+the unit rows for the toolchain identity. Every row must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
 explains why it would not pay for the trusted state it would add.
 
 **Not trusted:**
@@ -532,6 +572,15 @@ the register holds, in the model as on hardware. Nothing about Go's type system 
   and re-checked by `janus check`. Dynamically built itabs (`runtime.getitab`, for type
   assertions to interfaces the compiler did not see) are heap objects, not covered by
   `ItabIs`; state their memory directly if needed.
+* **Object names must resolve** (round 8 I1). `ItabIs`, `dataNamed`, `dataAddr`, `dataLen`,
+  `dataWord`, `itabFun`, `segWord`, `segAddr` (arm64 and amd64) and amd64 `dataBase` look an
+  object up by name (or index) and fall back to `False` or `0` when there is none, so a misspelt,
+  absent or lookalike name (`MulHаsher` with a Cyrillic `а`) makes a statement vacuous or about
+  address 0 while it reads as a claim about that object. The auditor therefore requires, in the
+  statement (after proof-local definitions are expanded) and in every dependency definition it
+  uses, that each such name is a string literal (an index: a numeral) naming an object of
+  `Extracted.program` (an `ItabIs` name must be a static itab, `go:itab.…`), and that the
+  program or data argument is `Extracted.program` (`.data`).
 * **Targets are untrusted extraction choices.** `janus extract --targets` and the extractor's
   inference (code addresses computed by user code, itabs and funcvals it loads) only decide
   which code is copied, like reachability. A target that is not copied makes the call fault
