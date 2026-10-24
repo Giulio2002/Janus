@@ -1120,8 +1120,12 @@ def addrDisch (g : MVarId) : MetaM (Option Bool) := g.withContext do
     else if let some (P, Q) := ty.consumeMData.app2? ``Or then
       if (← leParts? P).isSome && (← leParts? Q).isSome then ors := ors.push (d.toExpr, P, Q)
   match ← proveAddr hs t with
-  | some (some pf) => g.assign (← mkExpectedTypeHint pf t); return some true
-  | some none => return some false
+  | some (some pf) =>
+    trace[janus.addr] "proved {t}"
+    g.assign (← mkExpectedTypeHint pf t); return some true
+  | some none =>
+    trace[janus.addr] "refuted {t}"
+    return some false
   | none => pure ()
   -- one case split on a disjunctive fact
   for (h, P, Q) in ors do
@@ -1144,6 +1148,8 @@ def addrDisch (g : MVarId) : MetaM (Option Bool) := g.withContext do
 /-- The local hypotheses, those whose free variables overlap with those of the address of
 the `accessible` goal `lhs` first (the region a pointer's access lies in is almost always
 stated about that pointer; trying the others first costs failed `omega` calls). -/
+initialize registerTraceClass `janus.addr
+
 def accessibleOrder (lhs : Expr) : MetaM (Array LocalDecl) := do
   let addrFVars := (collectFVars {} (← instantiateMVars (lhs.getArg! 1))).fvarSet
   let mut first : Array LocalDecl := #[]

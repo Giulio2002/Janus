@@ -268,7 +268,7 @@ def proveEq (g : MVarId) (maxNodes : Nat := 0) : MetaM Bool := g.withContext do
   let ubs := bounds.toList.map (·.map (·.1))
   let (tbl, ivs) := build ubs [ta, tb]
   let ok := if rel == 0 then check ubs tbl ivs ta tb else checkLe ubs tbl ivs ta tb
-  trace[janus.carry] "{st.atoms.size} atoms, {st.cache.size} nodes, {tbl.length} quotient atoms, accepted: {ok}, {(← IO.monoMsNow) - t0} ms"
+  trace[janus.carry] "{st.atoms.size} atoms, {st.cache.size} nodes, {tbl.length} quotient atoms, accepted: {ok}, {(← IO.monoMsNow) - t0} ms: {t}"
   unless ok do
     if (← isTracingEnabledFor `janus.carry) then
       let c : Ctx := { n := ubs.length, tbl := tbl, ivs := ivs }
@@ -335,7 +335,11 @@ partial def omegaAtoms (e : Expr) (acc : Array Expr) : Array Expr :=
 read, a product, a carry flag, or the value of a compound bit-vector term. -/
 def opaqueAtom (e : Expr) : Bool :=
   e.isAppOf ``Janus.Arm64.Memory.readLE || e.isAppOf ``HMul.hMul || e.isAppOf ``Bool.toNat ||
-    (e.isAppOfArity ``BitVec.toNat 2 && !(e.getArg! 1).consumeMData.isFVar)
+    (e.isAppOfArity ``BitVec.toNat 2 &&
+      -- the value of a bit-vector operation (not a variable, a register or a state field, which
+      -- hypotheses talk about, possibly up to unfolding)
+      let x := (e.getArg! 1).consumeMData
+      x.isAppOf ``HMul.hMul || x.isAppOf ``Prod.fst || x.isAppOf ``Prod.snd)
 
 /-- No hypothesis mentions an `omega` atom of `a` or `b` (`omegaAtoms`) other than a plain
 variable's `toNat`: then `omega` knows nothing about them beyond their ranges, which
@@ -360,15 +364,23 @@ def dischCarry (g : MVarId) : MetaM (Option Bool) := do
   let some (rel, a, b) := goalRel? t.cleanupAnnotations | return none
   unless janus.carry.disch.get (← getOptions) do return none
   -- carry terms, or bounds on opaque atoms (`readLE … + (x * y).toNat < 2^64`)
-  unless hasCarryOps a || hasCarryOps b ||
+  let carry := hasCarryOps a || hasCarryOps b
+  unless carry ||
       (rel != 0 && (omegaAtoms b (omegaAtoms a #[])).all opaqueAtom &&
         !(omegaAtoms b (omegaAtoms a #[])).isEmpty) do return none
   let saved ← saveState
   try
-    if janus.carry.dischProve.get (← getOptions) then
+    -- bounds over opaque atoms without carry terms are only refuted here, never proved: their
+    -- simplification (`readLE … % 2^64`) is the business of the simp sets
+    if carry && janus.carry.dischProve.get (← getOptions) then
       if ← proveEq g (janus.carry.dischMaxNodes.get (← getOptions)) then return some true
+    if !carry then
+      -- a true bound (`readLE … < 2^64`) is left to the simp sets and `omega`
+      if ← proveEq g then saved.restore; return none
     saved.restore
-    if ← atomsUnconstrained g a b then return some false
+    if ← atomsUnconstrained g a b then
+      trace[janus.carry] "rejected without omega: {t}"
+      return some false
     return none
   catch _ => saved.restore; return none
 
