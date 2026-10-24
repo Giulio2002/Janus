@@ -1,6 +1,19 @@
 import Janus
 import Extracted
 
+/-!
+# `MakeSlice(n int) []uint64` on amd64: a fresh zeroed slice of `n` words
+
+**Guarantee.** For every `n ≤ 2^45`, every `rt` and **every** implementation of
+`runtime.makeslice` satisfying `MakesliceContract64`, and every Go call state in which the
+prologue falls through, `RSP` is 8-aligned, `[RSP-4136, RSP+16)` is writable and outside `rt`, and
+the read-only data is loaded: the call returns, obeys the ABI, `RBX = RCX = n` (length and
+capacity), and for `n > 0` the array `[RAX, RAX+8n)` lies inside `rt` (fresh), is writable,
+8-byte aligned and all zero. Memory outside `rt` and the stack window is unchanged.
+
+**What is assumed.** Only the contract hypothesis `hmk` (docs/RUNTIME-CONTRACTS.md).
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts
 
 namespace Proof
