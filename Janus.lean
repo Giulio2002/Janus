@@ -13,4 +13,7 @@ import Janus.Tactic.Vector
 import Janus.Arm64.Vector
 import Janus.Spec.Basic
 import Janus.Contracts.Alloc
+import Janus.Spec.Map
+import Janus.Spec.SwissMap
+import Janus.Contracts.Map
 import Janus.Amd64
