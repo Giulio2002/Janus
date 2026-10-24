@@ -937,4 +937,318 @@ def fieldIndex (S f : Name) : MetaM (Option (Nat × Nat)) := do
   let fields := getStructureFields (← getEnv) S
   return (fields.idxOf? f).map (fields.size, ·)
 
+/-! ## Address arithmetic without `omega`
+
+Most side conditions of a memory step are linear facts about addresses of the form
+`base + offset` with literal offsets: "the 8-byte read at `x + 16` is disjoint from the store
+at `x + 8`" (same base: a comparison of literals), "… from the store at `z + 8`" (different
+bases: one case split on the aliasing fact `z + 64 ≤ x ∨ x + 64 ≤ z`), "the read is at the
+address of the store" (`x + 8 = x + 8`). `omega` proves each of them, but a call (and the
+kernel check of its proof) costs 10-40 ms, and a straight-line run asks for thousands. `addrDisch`
+decides them directly, with proofs built from the lemmas below and `Nat.ble`/`Nat.beq` on
+literals; anything else is left to `omega`. -/
+
+theorem addr_le_same {x a b : Nat} (h : Nat.ble a b = true) : x + a ≤ x + b :=
+  Nat.add_le_add_left (Nat.le_of_ble_eq_true h) x
+
+theorem addr_eq_same {x a b : Nat} (h : Nat.beq a b = true) : x + a = x + b := by
+  rw [Nat.eq_of_beq_eq_true h]
+
+theorem addr_le_hyp {x y A B a b : Nat} (hd : x + A ≤ y + B) (h : Nat.ble (a + B) (A + b) = true) :
+    x + a ≤ y + b := by
+  have := Nat.le_of_ble_eq_true h; omega
+
+theorem addr_le_congr {L R l r : Nat} (pL : L = l) (pR : R = r) (h : l ≤ r) : L ≤ R := pL ▸ pR ▸ h
+theorem addr_eq_congr {L R l r : Nat} (pL : L = l) (pR : R = r) (h : l = r) : L = R := pL ▸ pR ▸ h
+theorem addr_le_of_congr {L R l r : Nat} (pL : L = l) (pR : R = r) (h : L ≤ R) : l ≤ r := pL ▸ pR ▸ h
+
+theorem addr_lin_add {a b B c : Nat} (pa : a = B + c) : a + b = B + (c + b) := by
+  rw [pa, Nat.add_assoc]
+theorem addr_lin_add' {a b B c : Nat} (pb : b = B + c) : a + b = B + (c + a) := by
+  rw [pb]; omega
+
+/-- A linear address: `base + c` (`base = none`: the literal `c`), with a proof of
+`e = base + c` (resp. `e = c`). Offsets are literals; the base is any other term. -/
+partial def linAddr (e : Expr) : MetaM (Option Expr × Nat × Expr) := do
+  let e := e.consumeMData
+  if let some n := evalClosedNat? e then
+    let ty ← mkEq e (mkRawNatLit n)
+    return (none, n, ← mkExpectedTypeHint (← mkEqRefl e) ty)
+  match e.getAppFnArgs with
+  | (``HAdd.hAdd, #[t, _, _, _, a, b]) =>
+    if t.isConstOf ``Nat then
+      if let some k := evalClosedNat? b then
+        let (B, c, pa) ← linAddr a
+        match B with
+        | some B =>
+          let pf := mkAppN (mkConst ``addr_lin_add) #[a, b, B, mkRawNatLit c, pa]
+          let ty ← mkEq e (← mkAdd B (mkRawNatLit (c + k)))
+          return (some B, c + k, ← mkExpectedTypeHint pf ty)
+        | none =>
+          let ty ← mkEq e (mkRawNatLit (c + k))
+          return (none, c + k, ← mkExpectedTypeHint (← mkEqRefl e) ty)
+      if let some k := evalClosedNat? a then
+        let (B, c, pb) ← linAddr b
+        if let some B := B then
+          let pf := mkAppN (mkConst ``addr_lin_add') #[a, b, B, mkRawNatLit c, pb]
+          let ty ← mkEq e (← mkAdd B (mkRawNatLit (c + k)))
+          return (some B, c + k, ← mkExpectedTypeHint pf ty)
+  | _ => pure ()
+  let ty ← mkEq e (← mkAdd e (mkRawNatLit 0))
+  return (some e, 0, ← mkExpectedTypeHint (← mkEqRefl e) ty)
+
+/-- `base + c` as an expression. -/
+def linExpr : Option Expr × Nat → MetaM Expr
+  | (some B, c) => mkAdd B (mkRawNatLit c)
+  | (none, c) => pure (mkRawNatLit c)
+
+/-- An atomic fact `l ≤ r` in linear form, with its proof. -/
+structure LinLe where
+  l : Option Expr × Nat
+  r : Option Expr × Nat
+  pf : Expr
+
+/-- `L ≤ R` or `L < R` (as `L + 1 ≤ R`) between natural numbers. -/
+def leParts? (t : Expr) : MetaM (Option (Expr × Expr)) := do
+  let t := t.consumeMData
+  match t.getAppFnArgs with
+  | (``LE.le, #[ty, _, a, b]) => return if ty.isConstOf ``Nat then some (a, b) else none
+  | (``LT.lt, #[ty, _, a, b]) =>
+    if ty.isConstOf ``Nat then return some (← mkAdd a (mkRawNatLit 1), b) else return none
+  | (``GE.ge, #[ty, _, a, b]) => return if ty.isConstOf ``Nat then some (b, a) else none
+  | (``GT.gt, #[ty, _, a, b]) =>
+    if ty.isConstOf ``Nat then return some (← mkAdd b (mkRawNatLit 1), a) else return none
+  | _ => return none
+
+/-- The linear form of a hypothesis `h : L ≤ R`. -/
+def linHyp (h : Expr) (L R : Expr) : MetaM LinLe := do
+  let (bl, cl, pl) ← linAddr L
+  let (br, cr, pr) ← linAddr R
+  let pf := mkAppN (mkConst ``addr_le_of_congr)
+    #[L, R, ← linExpr (bl, cl), ← linExpr (br, cr), pl, pr, h]
+  return ⟨(bl, cl), (br, cr), pf⟩
+
+def sameBase : Option Expr → Option Expr → Bool
+  | some a, some b => a == b
+  | none, none => true
+  | _, _ => false
+
+/-- Prove `l ≤ r` (linear forms) from the atomic facts `hs`: `some (some pf)` proved,
+`some none` refuted (same base, offsets in the wrong order), `none` unknown. -/
+def proveLinLe (hs : Array LinLe) (l r : Option Expr × Nat) : MetaM (Option (Option Expr)) := do
+  if sameBase l.1 r.1 then
+    if l.2 ≤ r.2 then
+      let h ← mkEqRefl (mkConst ``Bool.true)
+      match l.1 with
+      | some x =>
+        return some (some (mkAppN (mkConst ``addr_le_same) #[x, mkRawNatLit l.2, mkRawNatLit r.2, h]))
+      | none =>
+        return some (some (mkAppN (mkConst ``Nat.le_of_ble_eq_true) #[mkRawNatLit l.2, mkRawNatLit r.2, h]))
+    return some none
+  -- `x + A ≤ y + B` gives `x + a ≤ y + b` when `a + B ≤ A + b`
+  let (some x, a) := l | return none
+  let (some y, b) := r | return none
+  for h in hs do
+    let (some x', A) := h.l | continue
+    let (some y', B) := h.r | continue
+    unless x' == x && y' == y do continue
+    if a + B ≤ A + b then
+      let hb ← mkEqRefl (mkConst ``Bool.true)
+      return some (some (mkAppN (mkConst ``addr_le_hyp)
+        #[x, y, mkRawNatLit A, mkRawNatLit B, mkRawNatLit a, mkRawNatLit b, h.pf, hb]))
+  return none
+
+/-- Prove an atomic goal `L ≤ R` / `L < R` / `L = R`, or a disjunction of them, from the
+atomic facts `hs` (and, at the top, one case split on a disjunctive fact of `ors`).
+`some (some pf)`: proved; `some none`: refuted (every disjunct contradicts its own offsets);
+`none`: unknown. -/
+partial def proveAddr (hs : Array LinLe) (t : Expr) : MetaM (Option (Option Expr)) := do
+  let t := t.consumeMData
+  if let some (P, Q) := t.app2? ``Or then
+    let rp ← proveAddr hs P
+    if let some (some pf) := rp then return some (some (mkApp3 (mkConst ``Or.inl) P Q pf))
+    let rq ← proveAddr hs Q
+    if let some (some pf) := rq then return some (some (mkApp3 (mkConst ``Or.inr) P Q pf))
+    if rp == some none && rq == some none then return some none
+    return none
+  if let some (ty, L, R) := t.eq? then
+    unless ty.isConstOf ``Nat do return none
+    let (bl, cl, pl) ← linAddr L
+    let (br, cr, pr) ← linAddr R
+    unless sameBase bl br do return none
+    unless cl == cr do return some none
+    let h ← mkEqRefl (mkConst ``Bool.true)
+    let core := match bl with
+      | some x => mkAppN (mkConst ``addr_eq_same) #[x, mkRawNatLit cl, mkRawNatLit cr, h]
+      | none => mkApp2 (mkConst ``Eq.refl [1]) (mkConst ``Nat) (mkRawNatLit cl)
+    return some (some (mkAppN (mkConst ``addr_eq_congr)
+      #[L, R, ← linExpr (bl, cl), ← linExpr (br, cr), pl, pr, core]))
+  let some (L, R) ← leParts? t | return none
+  let (bl, cl, pl) ← linAddr L
+  let (br, cr, pr) ← linAddr R
+  match ← proveLinLe hs (bl, cl) (br, cr) with
+  | some (some core) =>
+    return some (some (mkAppN (mkConst ``addr_le_congr)
+      #[L, R, ← linExpr (bl, cl), ← linExpr (br, cr), pl, pr, core]))
+  | r => return r.map fun _ => none
+
+/-- `≤`/`<`/`=`, or a disjunction of them. -/
+partial def addrShape (t : Expr) : Bool :=
+  match t.consumeMData.app2? ``Or with
+  | some (P, Q) => addrShape P && addrShape Q
+  | none =>
+    let t := t.consumeMData
+    t.isAppOfArity ``LE.le 4 || t.isAppOfArity ``LT.lt 4 || t.isAppOfArity ``Eq 3
+
+/-- Decide a linear address side condition (see above). `some true`: closed; `some false`:
+refuted by its own offsets (so `omega` need not try); `none`: not decided here. -/
+def addrDisch (g : MVarId) : MetaM (Option Bool) := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  -- only goals about addresses: `≤`/`<`/`=` on `Nat`, or disjunctions of them
+  unless addrShape t do return none
+  -- atomic facts, and the disjunctive ones for one case split
+  let mut hs : Array LinLe := #[]
+  let mut ors : Array (Expr × Expr × Expr) := #[]
+  let goalFVars := (collectFVars {} t).fvarSet
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    let fv := (collectFVars {} ty).fvarSet
+    unless fv.toList.any goalFVars.contains do continue
+    if let some (L, R) ← leParts? ty then
+      hs := hs.push (← linHyp d.toExpr L R)
+    else if let some (P, Q) := ty.consumeMData.app2? ``Or then
+      if (← leParts? P).isSome && (← leParts? Q).isSome then ors := ors.push (d.toExpr, P, Q)
+  match ← proveAddr hs t with
+  | some (some pf) =>
+    trace[janus.addr] "proved {t}"
+    g.assign (← mkExpectedTypeHint pf t); return some true
+  | some none =>
+    trace[janus.addr] "refuted {t}"
+    return some false
+  | none => pure ()
+  -- one case split on a disjunctive fact
+  for (h, P, Q) in ors do
+    let some (LP, RP) ← leParts? P | continue
+    let some (LQ, RQ) ← leParts? Q | continue
+    let r ← withLocalDeclD `hp P fun hp => do
+      let rp ← proveAddr (hs.push (← linHyp hp LP RP)) t
+      let some (some pp) := rp | return none
+      withLocalDeclD `hq Q fun hq => do
+        let rq ← proveAddr (hs.push (← linHyp hq LQ RQ)) t
+        let some (some pq) := rq | return none
+        let motive := t
+        return some (mkAppN (mkConst ``Or.elim) #[P, Q, motive, h,
+          ← mkLambdaFVars #[hp] pp, ← mkLambdaFVars #[hq] pq])
+    if let some pf := r then
+      g.assign (← mkExpectedTypeHint pf t)
+      return some true
+  return none
+
+/-- The local hypotheses, those whose free variables overlap with those of the address of
+the `accessible` goal `lhs` first (the region a pointer's access lies in is almost always
+stated about that pointer; trying the others first costs failed `omega` calls). -/
+initialize registerTraceClass `janus.addr
+
+def accessibleOrder (lhs : Expr) : MetaM (Array LocalDecl) := do
+  let addrFVars := (collectFVars {} (← instantiateMVars (lhs.getArg! 1))).fvarSet
+  let mut first : Array LocalDecl := #[]
+  let mut rest : Array LocalDecl := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let fv := (collectFVars {} (← instantiateMVars d.type)).fvarSet
+    if fv.toList.any addrFVars.contains then first := first.push d else rest := rest.push d
+  return first ++ rest
+
+/-! ## Focused `omega`
+
+Side conditions (address disjointness, no-wrap facts) are usually consequences of the few
+hypotheses that talk about the same variables. `omega` on the full context also sees every
+other fact, in particular the disjunctions of the aliasing preconditions, which it splits:
+with six `Disjoint` facts, a disjointness side condition cost 100-400 ms. `omegaFocused` first
+runs `omega` in the context restricted to the propositions whose free variables all occur in
+the goal; only if that fails is the full context used. -/
+
+/-- `omega` on `g` in the context restricted to the hypotheses that only mention free
+variables of the goal. `true` if it closed the goal. -/
+def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let goalFVars := (collectFVars {} t).fvarSet
+  if goalFVars.isEmpty then return false
+  let lctx ← getLCtx
+  let mut lctx' := lctx
+  let mut dropped := 0
+  for d in lctx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ← isProp ty do continue
+    let fv := (collectFVars {} ty).fvarSet
+    unless fv.toList.all goalFVars.contains do
+      lctx' := lctx'.erase d.fvarId
+      dropped := dropped + 1
+  if dropped == 0 then return false
+  let m ← mkFreshExprMVarAt lctx' (← getLocalInstances) t
+  let saved ← saveState
+  try
+    let gs ← Tactic.run m.mvarId! (evalTactic (← `(tactic| omega)))
+    if gs.isEmpty then
+      g.assign m
+      return true
+    saved.restore
+    return false
+  catch _ =>
+    saved.restore
+    return false
+
+/-- `omega` for side conditions: linear address facts by `addrDisch`, then `omega` in the focused
+context (`omegaFocused`), then in the full one. -/
+initialize registerTraceClass `janus.omega
+
+elab "janus_omega" : tactic => do
+  let g ← getMainGoal
+  match ← addrDisch g with
+  | some true => replaceMainGoal []; return
+  | some false => throwError "janus_omega: the address fact contradicts its own offsets"
+  | none => pure ()
+  let t0 ← IO.monoNanosNow
+  if ← omegaFocused g then
+    trace[janus.omega] "focused {((← IO.monoNanosNow) - t0) / 1000000} ms: {← g.getType}"
+    replaceMainGoal []
+  else
+    let t1 ← IO.monoNanosNow
+    try evalTactic (← `(tactic| omega))
+    finally
+      trace[janus.omega] "full {((← IO.monoNanosNow) - t1) / 1000000} ms (focused {(t1 - t0) / 1000000} ms): {← g.getType}"
+
+/-! ## `rfl` equations for structurally recursive definitions
+
+`simp [f]` unfolds a non-recursive definition by delta reduction: no proof term. A recursive `f`
+is unfolded with its equation lemmas `f.eq_<k>` instead, and Lean does not tag those `@[defeq]`
+(they need `f` unfolded, beyond the transparency `dsimp` works at), so every unfolding becomes a
+propositional rewrite whose proof (`Eq.mpr`/`congrArg` over the instantiated right-hand side) is
+part of the step proof. `janus_rfl_eqns f [attr]` restates each `f.eq_<k>` as `f.rfl_<k>` with
+the proof `Eq.refl` (checked by the kernel when it is added, so nothing is trusted), tags it
+`@[defeq]` and adds it to the simp set `attr`. `simp` then applies them as definitional
+rewrites, exactly as it unfolds a non-recursive definition. Only for structural recursion
+(where the equations hold by `rfl`); for anything else `addDecl` rejects the proof. -/
+
+open Command in
+elab "janus_rfl_eqns " id:ident " [" attr:ident "]" : command => do
+  let names ← liftTermElabM do
+    let n ← realizeGlobalConstNoOverloadWithInfo id
+    let some eqs ← getEqnsFor? n | throwError "janus_rfl_eqns: no equation lemmas for {n}"
+    let mut out := #[]
+    for e in eqs, k in [0:eqs.size] do
+      let ci ← getConstInfo e
+      let val ← forallTelescope ci.type fun xs t => do
+        let some (_, lhs, _) := t.eq? | throwError "janus_rfl_eqns: {e} is not an equation"
+        mkLambdaFVars xs (← mkEqRefl lhs)
+      let nm := n ++ Name.mkSimple s!"rfl_{k+1}"
+      addDecl (.thmDecl { name := nm, levelParams := ci.levelParams, type := ci.type, value := val })
+      defeqAttr.setTag nm
+      out := out.push nm
+    return out
+  for nm in names do
+    elabCommand (← `(attribute [$attr:ident] $(mkIdent nm):ident))
+
 end Janus.Tactic.Common

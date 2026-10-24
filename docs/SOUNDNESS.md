@@ -39,7 +39,9 @@ These are trusted, not proved.
    edited extraction is rejected. The copy itself and the symbol table lookup are trusted.
 3. **Stub classification**: the extractor names runtime functions `runtime.panic*`,
    `runtime.goPanic*` and `runtime.gopanic` as `panic` stubs and `runtime.morestack*` as
-   `morestack` stubs. Reaching a stub address ends the run with that outcome. This only affects
+   `morestack` stubs, only in package `runtime` itself (no `/` in the symbol: an import path
+   such as `runtime.panicky/lib` is not runtime, docs/AUDIT-ROUND6.md F3). Reaching a stub
+   address ends the run with that outcome. This only affects
    theorems that mention stub outcomes (`Panics`, `NeverPanics`, `GrowsStack`). `Returns`
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
    dereference is a `SIGSEGV`, turned into a panic by `runtime.sigpanic`) are not stub calls:
@@ -377,6 +379,43 @@ pacer and heap profiling reached through `mallocgc`), a store-exclusive (`STLXR`
 fallbacks), `SVC` (system calls) or `MRS CNTVCT_EL0`/`CNTFRQ_EL0` (the generic timer in
 `runtime.procyieldAsm`; the counter is not a constant, so it needs a nondeterministic model).
 The other functions of `bytes`/`strings` reach `runtime.mallocgc` and stay blocked by these.
+
+## Dynamic calls, closures and `defer`
+
+An indirect call (`BLR`/`BR`; amd64 `CALL`/`JMP` through a register or memory) jumps to the value
+the register holds, in the model as on hardware. Nothing about Go's type system is assumed:
+
+* **Which code a dynamic call reaches is a hypothesis of the theorem when it is not computed
+  by the code being proved.** `Janus.Spec.ItabIs ds m tab name` (the interface's itab word is the
+  address of the static itab `name` of the extracted data, and memory holds its bytes
+  read-only), `FuncvalIs m fv fn` (a funcval's code word) and `ClosureCtx m fv vars` (the captured
+  variables after it) are ordinary propositions about the call state's memory and appear in the
+  printed statement; the auditor treats them like any other part of the statement. A theorem
+  says nothing about calls whose interface or func value is not the one stated. If the stated
+  itab or funcval cannot be in memory as described, the theorem is vacuous for those callers,
+  like any unsatisfiable precondition.
+* **Itab contents come from the binary.** `ItabIs` names a data object of
+  `Extracted.program.data`, copied byte for byte from `.rodata` (a static itab `go:itab.*T,I`)
+  and re-checked by `janus check`. Dynamically built itabs (`runtime.getitab`, for type
+  assertions to interfaces the compiler did not see) are heap objects, not covered by
+  `ItabIs`; state their memory directly if needed.
+* **Targets are untrusted extraction choices.** `janus extract --targets` and the extractor's
+  inference (code addresses computed by user code, itabs and funcvals it loads) only decide
+  which code is copied, like reachability. A target that is not copied makes the call fault
+  (`noCode`), so no theorem through it can be proved; extra targets add code no theorem has to
+  mention. What was added and why is recorded in `identity.json` (`targets`,
+  `dynamicTargets`).
+* **Open-coded defers are modelled as the code that implements them**: the deferred closure is
+  an ordinary stack-allocated funcval called at each exit. `runtime.deferreturn`, which an
+  open-coded function calls only from the block the runtime resumes at after a *recovered*
+  panic, is not extracted (`omittedCalls` in `identity.json`): if a run reached it, it would
+  fault, so a theorem that returns shows it is not reached.
+* **Out of scope:** `recover`, and panics that unwind through deferred calls (a panic is a stub
+  outcome: the run ends at `runtime.gopanic`/`runtime.panic*`, and the deferred calls the
+  runtime would run while unwinding are not executed). Defers the compiler does not open-code
+  (in loops, or more than 8 in a function) allocate defer records with `runtime.deferproc*` and
+  call `runtime.deferreturn` at every exit; they are unsupported (the exit faults). Heap-allocated
+  closures (`runtime.newobject`) are runtime calls like any other allocation.
 
 ## What the theorem does not say
 
