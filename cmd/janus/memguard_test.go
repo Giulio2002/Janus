@@ -178,13 +178,22 @@ func TestMemGuardKillsHungryProof(t *testing.T) {
 	})
 }
 
-// TestMemGuardNormalVerify: an honest proof verifies under the default limit, and verified.json
+// TestMemGuardNormalVerify: honest proofs verify under the default limit, and verified.json
 // records the guard and the measured peak.
 func TestMemGuardNormalVerify(t *testing.T) {
 	needLean(t)
 	bin := buildJanusBinary(t)
-	env := envWith("JANUS_MEM_MAX=", "JANUS_MEMGUARD=", "JANUS_MEMGUARD_CGROUP=")
+	// The configured limit (JANUS_MEM_MAX, as CI sets it on small runners) or the default.
+	env := envWith("JANUS_MEMGUARD=", "JANUS_MEMGUARD_CGROUP=")
 	mech := guardedMech(t, bin, env)
+	want := defaultMemLimit()
+	if v := os.Getenv("JANUS_MEM_MAX"); v != "" {
+		n, err := parseMemSize(v)
+		if err != nil {
+			t.Skipf("JANUS_MEM_MAX=%q", v)
+		}
+		want = n
+	}
 	for _, ex := range []string{"Add", "Max"} {
 		dir := mustExtract(t, "example.com/basic."+ex)
 		proof := filepath.Join(repoRoot, "examples", "proofs", ex+".lean")
@@ -203,7 +212,7 @@ func TestMemGuardNormalVerify(t *testing.T) {
 			t.Fatalf("%s: verified.json: %v", ex, err)
 		}
 		mg := r.MemoryGuard
-		if mg == nil || mg.Mechanism != mech || mg.LimitBytes != defaultMemLimit() || mg.Jobs == 0 ||
+		if mg == nil || mg.Mechanism != mech || mg.LimitBytes != want || mg.Jobs == 0 ||
 			mg.PeakBytes <= 0 || mg.PeakBytes >= mg.LimitBytes {
 			t.Fatalf("%s: memoryGuard %+v", ex, mg)
 		}

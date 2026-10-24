@@ -135,8 +135,8 @@ func (g *memGuard) describe() string {
 	}
 	s := fmt.Sprintf("%s, limit %s per job (%s), no swap", g.mech, fmtBytes(g.limit), g.source)
 	if g.mech == "prlimit" {
-		s = fmt.Sprintf("prlimit (weaker: per-process virtual-memory limit %s = %s + %s reservation slack; no cgroup available: %s)",
-			fmtBytes(g.limit+prlimitSlack), fmtBytes(g.limit), fmtBytes(prlimitSlack), g.note)
+		s = fmt.Sprintf("prlimit (weaker: per-process virtual-memory limit %s = %s + %s reservation slack; no cgroup mechanism available, run `janus memguard` for why)",
+			fmtBytes(g.limit+prlimitSlack), fmtBytes(g.limit), fmtBytes(prlimitSlack))
 	}
 	if g.mech == "cgroup" {
 		s += ", under " + g.parent

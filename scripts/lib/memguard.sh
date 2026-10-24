@@ -97,8 +97,12 @@ _mg_systemd_ok() {
 memguard_mechanism() { _mg_detect; echo "$_MG_MECH"; }
 
 # _mg_detect sets _MG_MECH (and _MG_PARENT for "cgroup") once; call it outside $(…).
+# The result is cached for the current JANUS_MEMGUARD_CGROUP: a copied shell environment (a
+# `declare -p` prelude) cannot carry a stale parent into a nested guard.
 _mg_detect() {
-  [ -n "${_MG_MECH:-}" ] && return 0
+  [ -n "${_MG_MECH:-}" ] && [ "${_MG_FOR-unset}" = "${JANUS_MEMGUARD_CGROUP:-}" ] && return 0
+  _MG_FOR="${JANUS_MEMGUARD_CGROUP:-}"
+  _MG_LOGGED=""
   local force="${JANUS_MEMGUARD:-}" own
   _MG_MECH=none
   _MG_PARENT=""
@@ -189,7 +193,7 @@ _mg_cgroup_run() {
   ( echo 0 > "$d/leader/cgroup.procs" || exit 125
     # shellcheck disable=SC2030
     export JANUS_MEMGUARD_CGROUP="$d"
-    unset _MG_MECH _MG_PARENT
+    unset _MG_MECH _MG_PARENT _MG_FOR
     exec "$@" )
   rc=$?
   peak=$(cat "$d/memory.peak" 2>/dev/null || echo 0)
@@ -214,7 +218,7 @@ _mg_scope_inner() {
     return $?
   fi
   # No delegation: the command shares the scope with this shell; read the scope's counters.
-  ( unset _MG_MECH _MG_PARENT; exec "$@" )
+  ( unset _MG_MECH _MG_PARENT _MG_FOR; exec "$@" )
   rc=$?
   peak=$(cat "$cg/memory.peak" 2>/dev/null || echo 0)
   _mg_killed "$cg" && killed=1
@@ -287,7 +291,8 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case "${1:-}" in
     __scope) shift; _mg_scope_inner "$@"; exit $? ;;
     run) shift; memguard_run "$@"; exit $? ;;
+    lake) shift; memguard_lake "$@"; exit $? ;;
     mechanism) memguard_mechanism; exit 0 ;;
-    *) echo "usage: memguard.sh run [-l LIMIT] [-n LABEL] -- CMD... | mechanism" >&2; exit 2 ;;
+    *) echo "usage: memguard.sh run [-l LIMIT] [-n LABEL] -- CMD... | lake ARGS... | mechanism" >&2; exit 2 ;;
   esac
 fi
