@@ -54,6 +54,22 @@ theorem Rel.setReg {js : Janus.Amd64.State} {s : SState} (h : Rel js s) {r : Nat
   · rw [get?_setGpr_of_not s v hr (by rfl)]; exact hm
   · intro a ha; rw [setGpr_mem]; exact h.mem a ha
 
+theorem X86Config.set {s : SState} (h : X86Config s) {r : Register}
+    (hr : r ∉ [Register.ms_reg, .fault_reg, .app_view, .log_register_writes, .janus_undef, .msrs,
+      .seg_hidden_attrs, .seg_visibles, .ctrs]) (v : RegisterType r) : X86Config (s.set r v) := by
+  obtain ⟨u, hu⟩ := h.undef
+  obtain ⟨a, ha, ha'⟩ := h.efer
+  obtain ⟨b, hb, hb'⟩ := h.csl
+  obtain ⟨c, hc, hc'⟩ := h.cpl
+  obtain ⟨d, hd, hd'⟩ := h.ctrs
+  simp only [List.mem_cons, List.not_mem_nil, or_false, not_or] at hr
+  obtain ⟨r1, r2, r3, r4, r5, r6, r7, r8, r9⟩ := hr
+  exact ⟨by rw [get?_set_ne _ _ r1]; exact h.ms, by rw [get?_set_ne _ _ r2]; exact h.fault,
+    by rw [get?_set_ne _ _ r3]; exact h.app, by rw [get?_set_ne _ _ r4]; exact h.log,
+    ⟨u, by rw [get?_set_ne _ _ r5]; exact hu⟩, ⟨a, by rw [get?_set_ne _ _ r6]; exact ha, ha'⟩,
+    ⟨b, by rw [get?_set_ne _ _ r7]; exact hb, hb'⟩, ⟨c, by rw [get?_set_ne _ _ r8]; exact hc, hc'⟩,
+    ⟨d, by rw [get?_set_ne _ _ r9]; exact hd, hd'⟩⟩
+
 theorem X86Config.setGpr {s : SState} (h : X86Config s) {r : Nat} (hr : r < 16) (v : BitVec 64) :
     X86Config (setGpr s v r) := by
   obtain ⟨u, hu⟩ := h.undef
