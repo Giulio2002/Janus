@@ -110,6 +110,14 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 	} else if (len(h.V) == 32) != (len(m.V) == 32) {
 		v.Diffs = append(v.Diffs, "v: vector registers reported by one side only")
 	}
+	// FPCR/FPSR: absent means 0 on either side (cases and results predating them).
+	if hexv(h.FPSR) != hexv(m.FPSR) {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("fpsr: hw %s model %s (in %s) [%s]", h.FPSR, m.FPSR, orZero(c.FPSR),
+			fpsrDiff(hexv(h.FPSR), hexv(m.FPSR))))
+	}
+	if hexv(h.FPCR) != hexv(m.FPCR) {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("fpcr: hw %s model %s (in %s)", h.FPCR, m.FPCR, orZero(c.FPCR)))
+	}
 	if hwPC != hexv(m.PC) {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("pc: hw %s (pc+%d) model %s (pc+%d)", h.PC,
 			int64(hwPC-L.TestPC), m.PC, int64(hexv(m.PC)-L.TestPC)))
@@ -155,6 +163,8 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 		k := d
 		if j := strings.IndexAny(d, ":["); j >= 0 {
 			k = d[:j]
+		} else if j := strings.IndexByte(d, ' '); j >= 0 {
+			k = d[:j] // e.g. "mem: ... N more bytes" has no field separator before the text
 		}
 		if strings.HasPrefix(k, "x") {
 			k = "reg"
@@ -184,4 +194,33 @@ func show(mm map[int]int, off int, seed uint64) string {
 		return fmt.Sprintf("%#02x", b)
 	}
 	return fmt.Sprintf("%#02x (unchanged)", L.Pattern(seed, uint64(off)))
+}
+
+func orZero(s string) string {
+	if s == "" {
+		return "0"
+	}
+	return s
+}
+
+// fpsrDiff names the cumulative flags only one side set.
+func fpsrDiff(hw, model uint64) string {
+	names := map[int]string{0: "IOC", 1: "DZC", 2: "OFC", 3: "UFC", 4: "IXC", 7: "IDC", 27: "QC"}
+	var out []string
+	for b := 0; b < 32; b++ {
+		hb, mb := hw>>b&1, model>>b&1
+		if hb == mb {
+			continue
+		}
+		n, ok := names[b]
+		if !ok {
+			n = fmt.Sprintf("bit%d", b)
+		}
+		if hb == 1 {
+			out = append(out, "hw-only "+n)
+		} else {
+			out = append(out, "model-only "+n)
+		}
+	}
+	return strings.Join(out, ", ")
 }

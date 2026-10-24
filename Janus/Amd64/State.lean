@@ -69,6 +69,13 @@ structure State where
   fsBase : W64 := 0
   /-- The direction flag `RFLAGS.DF` (`true` = string instructions step backward). -/
   df : Bool := false
+  /-- `MXCSR`, the SSE control and status register: the exception flags `IE DE ZE OE UE PE`
+  (bits 0–5), `DAZ` (6), the exception masks `IM DM ZM OM UM PM` (7–12), the rounding control
+  `RC` (14:13) and `FTZ` (15). Read by the SSE floating-point instructions, which OR the flags
+  of the exceptions they raise into it; no accepted instruction writes the control bits
+  (`LDMXCSR` is not decoded). `0x1F80` (all masked, round to nearest) is the value Linux gives
+  a new process and the Go ABI assumes. -/
+  mxcsr : BitVec 32 := 0x1F80
 
 instance : Inhabited State :=
   ⟨{ regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩,
@@ -101,6 +108,9 @@ inductive Fault where
   | misaligned (addr : Nat)
   /-- A branch to `target`, which is not a canonical lower-half (user) address `< 2^47`. -/
   | badTarget (target : Nat)
+  /-- `#XM`: the SSE floating-point instruction at `pc` raised an exception that is unmasked
+  in `MXCSR` (Linux delivers `SIGFPE`). -/
+  | simdFPException (pc : Nat)
   /-- Fuel ran out before the call returned. -/
   | outOfFuel
 deriving Repr, DecidableEq, Inhabited

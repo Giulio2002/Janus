@@ -8,14 +8,14 @@ Reads one JSON test case per line on stdin (`oracle-amd64/layout/layout.go`, `Ca
 prints one JSON result per line (`Model`):
 
 * the initial `State` has the 16 GPRs, the six status flags (all defined), `XMM0`–`XMM15`,
-  the upper halves of `YMM0`–`YMM15` (`ymmh`, default 0), the `FS` base (`fsbase`, default 0)
-  from the case and `rip = TestPC`;
+  the upper halves of `YMM0`–`YMM15` (`ymmh`, default 0), the `FS` base (`fsbase`, default 0),
+  `MXCSR` (`mxcsr`, default `0x1F80`) from the case and `rip = TestPC`;
 * `mem.regions` is exactly the native runner's data buffer `[DataBase, DataBase + DataSize)`
   (writable), with bytes `pattern seed` overridden by the case's `init` entries; every other byte lies outside every region;
 * the instruction bytes are those of the native code page: the case bytes at `TestPC`
   followed by `0xCC` up to the end of the page;
 * the result is the fault, or the successor state: registers, `rip`, the status flags with the
-  mask of the defined ones, the XMM registers, the upper YMM halves and the buffer bytes that
+  mask of the defined ones, the XMM registers, the upper YMM halves, `MXCSR` and the buffer bytes that
   differ from the initial pattern.
 
 The constants below must match `oracle-amd64/layout/layout.go`.
@@ -71,6 +71,7 @@ def faultJson : Fault → String × Json
   | .divideError pc => ("divideError", Json.mkObj [("pc", hex pc)])
   | .misaligned a => ("misaligned", Json.mkObj [("addr", hex a)])
   | .badTarget t => ("badTarget", Json.mkObj [("target", hex t)])
+  | .simdFPException pc => ("simdFPException", Json.mkObj [("pc", hex pc)])
   | .outOfFuel => ("outOfFuel", Json.null)
 
 structure Case where
@@ -84,6 +85,8 @@ structure Case where
   seed : Nat
   /-- buffer overrides `(offset, byte)` applied after the pattern, in order -/
   init : List (Nat × Nat)
+  /-- `MXCSR` (absent: `0x1F80`, the Linux/Go default) -/
+  mxcsr : Nat
 
 def parseCase (line : String) : Except String Case := do
   let j ← Json.parse line
@@ -106,7 +109,11 @@ def parseCase (line : String) : Except String Case := do
   let init : Array (Array Nat) := (j.getObjValAs? (Array (Array Nat)) "init").toOption.getD #[]
   let init ← init.toList.mapM fun a =>
     if a.size = 2 ∧ a[0]! < dataSize ∧ a[1]! < 256 then pure (a[0]!, a[1]!) else throw "bad init entry"
-  pure { id, bytes, regs, rflags, xmm, ymmh, fsBase, seed, init }
+  let mxcsr ← match (j.getObjValAs? String "mxcsr").toOption with
+    | some m => parseHex m
+    | none => pure 0x1F80
+  if mxcsr ≥ 2 ^ 16 then throw "mxcsr: reserved bits set"
+  pure { id, bytes, regs, rflags, xmm, ymmh, fsBase, seed, init, mxcsr }
 
 /-- Initial byte at buffer offset `i`: the last override for `i`, else the pattern. -/
 def initByte (c : Case) (i : Nat) : Nat :=
@@ -124,6 +131,7 @@ def initState (c : Case) (initArr : Array Nat) : State :=
     ymmHi := fun i => if i < c.ymmh.size then BitVec.ofNat 128 c.ymmh[i]! else 0
     fsBase := BitVec.ofNat 64 c.fsBase
     df := bitSet c.rflags 10
+    mxcsr := BitVec.ofNat 32 c.mxcsr
     mem :=
       { bytes := fun a =>
           if dataBase ≤ a ∧ a < dataBase + dataSize then BitVec.ofNat 8 (initArr[a - dataBase]!)
@@ -163,6 +171,7 @@ def runCase (c : Case) : Json :=
       ("rflags", fl), ("defined", def_), ("df", s.df),
       ("xmm", Json.arr ((List.range 16).map fun i => Json.str (hex (s.xmm i).toNat)).toArray),
       ("ymmh", Json.arr ((List.range 16).map fun i => Json.str (hex (s.ymmHi i).toNat)).toArray),
+      ("mxcsr", hex s.mxcsr.toNat),
       ("mem", Json.arr mem.toArray)]
 
 end OracleAmd64

@@ -52,6 +52,14 @@ const (
 	CtxOutFP = 1600
 	// FPSIMDMagic is the fpsimd_context record magic (Linux and qemu-user put it first).
 	FPSIMDMagic = 0x46508001
+	// FPCR/FPSR of the case (written with MSR by the entry sequence, low 32 bits), the host's
+	// values (saved by the entry sequence, restored by the resume sequence), and FPCR as read
+	// back right after the MSR (the runner refuses a case whose FPCR the CPU does not keep).
+	CtxInFPCR   = 2176
+	CtxInFPSR   = 2184
+	CtxHostFPCR = 2192
+	CtxHostFPSR = 2200
+	CtxFPCRBack = 2208
 )
 
 // Pattern is the initial content of byte i of the data buffer for a given seed. The Lean
@@ -79,6 +87,12 @@ type Case struct {
 	// `State.tpidr`.
 	V     []string `json:"v,omitempty"`
 	TPIDR string   `json:"tpidr,omitempty"`
+	// FPCR and FPSR (hex, absent: 0). The runner writes them with MSR before the case and
+	// refuses the case (status error) if FPCR does not read back as written (a reference
+	// CPU RAZs the bits it does not implement, e.g. the trap enables on qemu); the Lean side
+	// uses them as `State.fpcr` / `State.fpsr`.
+	FPCR string `json:"fpcr,omitempty"`
+	FPSR string `json:"fpsr,omitempty"`
 }
 
 // HW is what the native runner observed.
@@ -94,7 +108,9 @@ type HW struct {
 	NZCV   int      `json:"nzcv"`
 	Mem    [][2]int `json:"mem,omitempty"` // (offset, new byte) for every changed byte
 	Note   string   `json:"note,omitempty"`
-	V      []string `json:"v,omitempty"` // V0..V31 after the instruction (128-bit hex)
+	V      []string `json:"v,omitempty"`    // V0..V31 after the instruction (128-bit hex)
+	FPCR   string   `json:"fpcr,omitempty"` // FPCR / FPSR after the instruction (hex)
+	FPSR   string   `json:"fpsr,omitempty"`
 }
 
 // Model is what `janus-oracle` (Janus.Arm64.step) produced.
@@ -109,4 +125,6 @@ type Model struct {
 	NZCV   int      `json:"nzcv"`
 	Mem    [][2]int `json:"mem,omitempty"`
 	V      []string `json:"v,omitempty"`
+	FPCR   string   `json:"fpcr,omitempty"` // State.fpcr / State.fpsr after the step (hex)
+	FPSR   string   `json:"fpsr,omitempty"`
 }

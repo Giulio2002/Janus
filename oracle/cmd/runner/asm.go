@@ -62,6 +62,12 @@ func (a *asm) ldrq(rt, rn, off int) {
 	a.emit(0x3DC00000 | uint32(off/16)<<10 | uint32(rn)<<5 | uint32(rt))
 }
 
+// FPCR (op0=3 op1=3 CRn=4 CRm=4 op2=0) and FPSR (op2=1).
+func (a *asm) mrsFPCR(rt int) { a.emit(0xD53B4400 | uint32(rt)) }
+func (a *asm) msrFPCR(rt int) { a.emit(0xD51B4400 | uint32(rt)) }
+func (a *asm) mrsFPSR(rt int) { a.emit(0xD53B4420 | uint32(rt)) }
+func (a *asm) msrFPSR(rt int) { a.emit(0xD51B4420 | uint32(rt)) }
+
 func (a *asm) mrsTPIDR(rt int) { a.emit(0xD53BD040 | uint32(rt)) }
 func (a *asm) msrTPIDR(rt int) { a.emit(0xD51BD040 | uint32(rt)) }
 

@@ -8,13 +8,13 @@ Reads one JSON test case per line on stdin (the format written by `oracle gen`, 
 `oracle/layout/layout.go` and `docs/ORACLE.md`) and prints one JSON result per line:
 
 * the initial `State` has `X0..X30`, `SP`, `NZCV`, `pc`, `V0..V31` (field `v`, absent = 0),
-  `tpidr` (TPIDR_EL0, absent = 0) and `dczid` (the reference machine's DCZID_EL0, field
+  `tpidr` (TPIDR_EL0, absent = 0), `fpcr`/`fpsr` (absent = 0) and `dczid` (the reference machine's DCZID_EL0, field
   `dczid`) from the case;
 * `mem.regions` is exactly the native runner's data buffer `[DataBase, DataBase + DataSize)`
   (writable), and its bytes follow `pattern seed`; every other byte reads as 0 but lies
   outside every region, so any access to it must fault;
-* the result is either the fault, or the successor state: registers, SP, NZCV, pc, `V0..V31`
-  and the list of buffer bytes that differ from the initial pattern.
+* the result is either the fault, or the successor state: registers, SP, NZCV, pc, `V0..V31`,
+  FPCR, FPSR and the list of buffer bytes that differ from the initial pattern.
 
 The constants below must match `oracle/layout/layout.go`.
 -/
@@ -56,6 +56,7 @@ def faultJson : Fault → String × Json
   | .pcMisaligned pc => ("pcMisaligned", Json.mkObj [("pc", hex pc)])
   | .unaligned a n => ("unaligned", Json.mkObj [("addr", hex a), ("size", n)])
   | .trapped pc => ("trapped", Json.mkObj [("pc", hex pc)])
+  | .fpTrapped pc => ("fpTrapped", Json.mkObj [("pc", hex pc)])
   | .outOfFuel => ("outOfFuel", Json.null)
 
 structure Case where
@@ -72,6 +73,9 @@ structure Case where
   v : Array Nat
   /-- TPIDR_EL0 (absent: 0). -/
   tpidr : Nat
+  /-- FPCR and FPSR (absent: 0). -/
+  fpcr : Nat
+  fpsr : Nat
 
 def hexField (j : Json) (k : String) : Except String Nat := do
   parseHex (← j.getObjValAs? String k)
@@ -93,7 +97,10 @@ def parseCase (line : String) : Except String Case := do
   let v ← vs.mapM parseHex
   if v.any (· ≥ 2 ^ 128) then throw "v entries must be below 2^128"
   let tpidr ← (hexField j "tpidr" <|> pure 0)
-  pure { id, word, pc, x, sp, nzcv, seed, dczid, v, tpidr }
+  let fpcr ← (hexField j "fpcr" <|> pure 0)
+  let fpsr ← (hexField j "fpsr" <|> pure 0)
+  if fpcr ≥ 2 ^ 32 ∨ fpsr ≥ 2 ^ 32 then throw "fpcr/fpsr must be below 2^32"
+  pure { id, word, pc, x, sp, nzcv, seed, dczid, v, tpidr, fpcr, fpsr }
 
 def initState (c : Case) : State :=
   { regs := fun i => if i < 31 then BitVec.ofNat 64 c.x[i]! else 0
@@ -107,7 +114,9 @@ def initState (c : Case) : State :=
         regions := [{ base := dataBase, size := dataSize, writable := true }] }
     dczid := BitVec.ofNat 5 c.dczid
     vregs := fun i => if i < c.v.size then BitVec.ofNat 128 c.v[i]! else 0
-    tpidr := BitVec.ofNat 64 c.tpidr }
+    tpidr := BitVec.ofNat 64 c.tpidr
+    fpcr := BitVec.ofNat 32 c.fpcr
+    fpsr := BitVec.ofNat 32 c.fpsr }
 
 def nzcvOf (f : Flags) : Nat :=
   (if f.n then 8 else 0) + (if f.z then 4 else 0) + (if f.c then 2 else 0) + (if f.v then 1 else 0)
@@ -125,6 +134,7 @@ def runCase (c : Case) : Json :=
       ("x", Json.arr ((List.range 31).map fun i => Json.str (hex (s.regs i).toNat)).toArray),
       ("sp", hex s.sp.toNat), ("nzcv", nzcvOf s.flags),
       ("v", Json.arr ((List.range 32).map fun i => Json.str (hex (s.vregs i).toNat)).toArray),
+      ("fpcr", hex s.fpcr.toNat), ("fpsr", hex s.fpsr.toNat),
       ("mem", Json.arr mem.toArray)]
 
 end Oracle

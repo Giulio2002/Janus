@@ -17,6 +17,7 @@ var Classes = []string{
 	"vls.multi", "vls.single", "vls.uimm", "vls.imm9", "vls.regoff", "vls.pair", "vls.literal", "vls.other",
 	"simd.aes", "simd.3same", "simd.s3same", "simd.copy", "simd.across", "simd.2misc", "simd.shift",
 	"simd.modimm", "simd.ext", "simd.tbl", "simd.fmovgen", "simd.other",
+	"fp.dp1", "fp.dp2", "fp.dp3", "fp.cmp", "fp.ccmp", "fp.csel", "fp.imm", "fp.cvtint", "fp.cvtfix",
 	"sys.hint", "sys.barrier", "sys.mrs", "sys.sys", "system", "reserved",
 }
 
@@ -109,8 +110,11 @@ func Classify(w uint32) string {
 			return "simd.ext"
 		case w&0xBFE08C00 == 0x0E000000:
 			return "simd.tbl"
-		case w&0x7F20FC00 == 0x1E200000:
+		case w&0x7F20FC00 == 0x1E200000 && bits(w, 18, 17) == 3:
 			return "simd.fmovgen"
+		}
+		if c := classifyFP(w); c != "" {
+			return c
 		}
 		return "simd.other"
 	case w&0x0A000000 == 0x08000000: // op0 = x1x0: loads and stores
@@ -159,7 +163,7 @@ func Tested(class string) bool {
 // run under all 16 flag combinations.
 func Conditional(class string) bool {
 	switch class {
-	case "br.cond", "dpr.ccmp", "dpr.csel", "dpr.adc":
+	case "br.cond", "dpr.ccmp", "dpr.csel", "dpr.adc", "fp.ccmp", "fp.csel":
 		return true
 	}
 	return false

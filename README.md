@@ -28,7 +28,8 @@ the other at the machine code that runs. Janus is the Go counterpart of
 
 > **Status:** early work in progress. The model covers the user-mode integer subset that Go
 > emits (on arm64 also the Advanced SIMD integer, move and AES instructions of the runtime's
-> `memequal`/`IndexByte`/`Count`/hash routines); anything else faults rather than being guessed (see [limits](#what-a-verified-theorem-does-and-does-not-mean)).
+> `memequal`/`IndexByte`/`Count`/hash routines), and the scalar `float32`/`float64` instructions
+> on both ISAs, bit-exact on a shared IEEE 754 core; anything else faults rather than being guessed (see [limits](#what-a-verified-theorem-does-and-does-not-mean)).
 
 ---
 
@@ -181,7 +182,8 @@ them an arm64 one too; the dynamic-call examples in [`examples/basic/dynamic.go`
 (interface method, method value, closure in a loop, open-coded `defer`) have both; the atomics and memory-routine examples in
 [`examples/basic/memory.go`](examples/basic/memory.go) and the SIMD examples in
 [`examples/basic/simd_arm64ex.go`](examples/basic/simd_arm64ex.go) have arm64 theorems, and the
-vector-path examples in [`examples/basic/simd.go`](examples/basic/simd.go) amd64 ones. Each is verified end to end by `janus verify` (kernel check, axiom audit,
+vector-path examples in [`examples/basic/simd.go`](examples/basic/simd.go) amd64 ones; the
+floating-point examples in [`examples/basic/float.go`](examples/basic/float.go) have both. Each is verified end to end by `janus verify` (kernel check, axiom audit,
 `leanchecker` replay) against the `GOARCH=arm64` or `GOARCH=amd64` build of the same source with
 Go 1.26.0. Proofs:
 [`examples/proofs/`](examples/proofs) (arm64), [`examples/proofs-amd64/`](examples/proofs-amd64) (amd64).
@@ -213,6 +215,10 @@ Go 1.26.0. Proofs:
 | `ClearWords` | `clear(b)` of a 16-word, 128-byte-aligned slice through `runtime.memclrNoHeapPointers` (its `DC ZVA` path), for every `DCZID_EL0` | ✓ | |
 | `Equal64` | `bytes.Equal` of two `[64]byte` through `runtime.memequal`: true iff the bytes are equal, for every value of `internal/cpu.X86.HasAVX2` (the AVX2 `VPCMPEQB`/`VPMOVMSKB` loop and the SSE one) | | ✓ |
 | `CopyBlock512` | `copy` of a 512-byte array through `runtime.memmove`'s AVX path (`VMOVDQU`/`VMOVDQA`, any `dst` alignment), given `memmoveBits & avxSupported` | | ✓ |
+| `AddF64` | the IEEE 754 sum `a + b` rounded to nearest (or a NaN when that is a NaN), under the default `FPCR`/`MXCSR`; on arm64 also exactly Arm's `FPAdd` (and its `FPSR` flags) for every `FPCR` without trap enables | ✓ | ✓ |
+| `Dot3` | `a0*b0 + a1*b1 + a2*b2`: on arm64 Go fuses it, `fma(a2, b2, fma(a1, b1, a0·b0))`; on amd64 (no FMA at `GOAMD64=v1`) `(a0·b0 + a1·b1) + a2·b2` with every operation rounded | ✓ | ✓ |
+| `F64ToU64` | `uint64(x)` is the truncation of `x` whenever that is in `[0, 2^64)` (amd64: through the `UCOMISD`/`SUBSD`/`CVTTSD2SQ`/`BTSQ` sequence, `SUBSD` shown exact); arm64 also: saturation (`0` below, `2^64-1` above, `0` for NaN) and the exact `FPToFixed` for every `FPCR` | ✓ | ✓ |
+| `Abs` | `x` with its sign bit cleared, for every encoding including NaNs (integer and move instructions only) | ✓ | ✓ |
 | `HashWith` | an interface call `h.Hash(x)`: `x·K` when `h`'s itab is `*MulHasher`'s, `rotl(x, 13) + K` when it is `*RotHasher`'s (the itab is a hypothesis) | ✓ | ✓ |
 | `HashTwice` | `ApplyTwice(h.Hash, x)` through a method value: `x·K·K` | ✓ | ✓ |
 | `MapSum` | a closure capturing `a`, `b` called in a loop: `Σ (a·xs[j] + b) mod 2^64` | ✓ | ✓ |
@@ -238,10 +244,11 @@ succeeds) only costs coverage.
 
 | Reference | What runs | Cases | MISMATCH | Details |
 |---|---|---:|---:|---|
-| qemu-aarch64 10.2.1 user mode (`-cpu max`) | arm64 model vs qemu, one instruction per case | 486,463 | **0** | [ORACLE.md](docs/ORACLE.md) |
-| Sail `arm-v9.4-a` (Arm's official ASL, translated) | arm64 model vs Arm's specification, same corpus | 486,463 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
+| qemu-aarch64 10.2.1 user mode (`-cpu max`) | arm64 model vs qemu, one instruction per case (whole ISA, plus a 1.13M-case scalar floating-point corpus with random `FPCR`/`FPSR`) | 766,650 + 1,131,099 | **0** | [ORACLE.md](docs/ORACLE.md) |
+| Sail `arm-v9.4-a` (Arm's official ASL, translated) | arm64 model vs Arm's specification, same corpora | 766,650 + 1,131,099 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
 | Sail, misaligned-SP corpus | SP-alignment rule, which qemu cannot check | 102,460 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
-| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds plus a vector harvest (incl. atomics, `REP` string ops in both directions, `FS`, YMM/AVX2, SSE) | 3,420,590 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
+| Berkeley TestFloat 3e / SoftFloat 3e | the IEEE core and both floating-point wrappers vs SoftFloat (`ARM-VFPv2`, `-defaultNaN`, `8086-SSE`), every operation and rounding mode | 1,018,014,672 | **0** | [ORACLE.md](docs/ORACLE.md#testfloat-berkeley-testfloat-3e--softfloat-3e) |
+| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds plus a vector harvest (incl. atomics, `REP` string ops in both directions, `FS`, YMM/AVX2, SSE, and 1.08M SSE scalar floating-point cases with random `MXCSR`) | 6,525,052 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
 | Sail/ACL2 X86isa | amd64 undefined-flag sets (sampled), and the `FS`/YMM/SSE-move/`RCL`/`RCR` classes it implements | 20,000 + 113,920 | 0 flags undefined there but defined by Janus | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md#formal-x86-model-third-reference) |
 
 Cases come from every distinct instruction word in real Go binaries (`math/big`, `crypto/sha256`,
@@ -279,7 +286,7 @@ what you meant**: read the statement.
 | Every memory access stays inside the regions the precondition grants | That an access outside them would trap on hardware (it may hit another mapping) |
 | `NeverPanics`: no panic stub **and** no fault (a nil dereference is a fault, as on hardware it is a `SIGSEGV` that Go turns into a panic) | Anything about timing, side channels, caches or speculation |
 | Callee-saved state (`SP`, `g`, frame pointer, …) is restored per Go ABIInternal | Concurrency: the model is single-threaded, with no signals, preemption, GC or scheduler |
-| | Floating point, and SIMD arithmetic outside the modelled subset (on arm64 the Advanced SIMD integer and move instructions, see [docs/SOUNDNESS.md](docs/SOUNDNESS.md#advanced-simd)): these fault as `undecodable` |
+| | Vector floating point, half precision, and SIMD arithmetic outside the modelled subset (on arm64 the Advanced SIMD integer and move instructions, see [docs/SOUNDNESS.md](docs/SOUNDNESS.md#advanced-simd); scalar floating point is modelled, see [docs/SOUNDNESS.md](docs/SOUNDNESS.md#floating-point)): these fault as `undecodable` |
 
 The full list is in [docs/SOUNDNESS.md](docs/SOUNDNESS.md) (and [docs/AMD64.md](docs/AMD64.md) for the
 x86-64 differences).
