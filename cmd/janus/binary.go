@@ -39,6 +39,9 @@ type Binary struct {
 
 	text     []byte
 	textAddr uint64
+	// goText is the address of runtime.text, the base of the pclntab's function offsets: the
+	// start of .text, except in an externally linked (cgo) binary, where C code comes first.
+	goText uint64
 
 	sections []section // allocated sections (in memory at run time), sorted by address
 	dataSyms []Func    // non-function symbols with a size (data objects), sorted by address
@@ -217,6 +220,7 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 			Next: "Use an unmodified executable produced by go build."}
 	}
 	b.textAddr = text.Addr
+	b.goText = text.Addr
 
 	for _, s := range f.Sections {
 		if s.Flags&elf.SHF_ALLOC == 0 || s.Size == 0 {
@@ -243,6 +247,9 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 			}
 		}
 		for _, s := range syms {
+			if s.Name == "runtime.text" && s.Section != elf.SHN_UNDEF {
+				b.goText = s.Value
+			}
 			if t := elf.ST_TYPE(s.Info); (t == elf.STT_OBJECT || t == elf.STT_NOTYPE) && s.Size > 0 &&
 				s.Section != elf.SHN_UNDEF && s.Section < elf.SHN_LORESERVE {
 				b.dataSyms = append(b.dataSyms, Func{Name: s.Name, Addr: s.Value, Size: s.Size})

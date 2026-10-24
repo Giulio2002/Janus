@@ -66,6 +66,10 @@ def IsMorestack : Outcome → Prop
     IsMorestack (.stub n .panic s) = False := rfl
 @[simp, janus_post] theorem isMorestack_morestack (n : String) (s : State) :
     IsMorestack (.stub n .morestack s) = True := rfl
+@[simp, janus_post] theorem isPanic_external (n : String) (s : State) :
+    IsPanic (.stub n .external s) = False := rfl
+@[simp, janus_post] theorem isMorestack_external (n : String) (s : State) :
+    IsMorestack (.stub n .external s) = False := rfl
 
 /-- The address `pc` is an ordinary instruction `w`, decoding to `i`: not the exit address, not
 a stub, inside the code. Evaluated by the kernel (`decide +kernel`). -/
@@ -101,10 +105,10 @@ theorem stubOK_link {p : Program} (impl : List Segment) {pc : Nat} {name : Strin
 
 /-- The data the tactic reads off a program (evaluated at tactic run time; every use is
 re-checked by the kernel through `stepOK`/`exitOK`/`stubOK`): exit address, segments
-`(base, words)` and stubs `(addr, name, isPanic)`. -/
-def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Bool) :=
+`(base, words)` and stubs `(addr, name, StubKind.code)`. -/
+def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Nat) :=
   (p.exitAddr, p.segments.map (fun seg => (seg.base, seg.words)),
-    p.stubs.map (fun st => (st.addr, st.name, st.kind == .panic)))
+    p.stubs.map (fun st => (st.addr, st.name, st.kind.code)))
 
 private theorem pc_toNat_of {s : State} {c : Nat} (hpc : s.pc = BitVec.ofNat 64 c)
     (hc : c < 2 ^ 64) : s.pc.toNat = c := by
@@ -273,6 +277,7 @@ theorem panics_of_reaches {p : Program} {s : State} (h : Reaches p s IsPanic) : 
     cases kind with
     | panic => exact ⟨n, name, s', hr⟩
     | morestack => exact hq.elim
+    | external => exact hq.elim
 
 theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMorestack) :
     GrowsStack p s := by
@@ -283,6 +288,7 @@ theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMores
     cases kind with
     | panic => exact hq.elim
     | morestack => exact ⟨n, name, s', hr⟩
+    | external => exact hq.elim
 
 theorem reaches_of_returns {p : Program} {s : State} {post : State → Prop}
     (h : Returns p s post) : Reaches p s (IsReturn post) := by
