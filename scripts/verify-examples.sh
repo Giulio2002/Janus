@@ -15,7 +15,7 @@ cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 
 all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimbs CopyWords SumSquares
-     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte)
+     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte AddF64 Dot3 F64ToU64 Abs)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
@@ -44,6 +44,14 @@ for n in "${names[@]}"; do
   if bin/janus verify "$out" --proof "examples/proofs/$n.lean" "${extra[@]}" > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-9s ok  %6.1fs\n' "$n" "$t" | tee -a "$summary"
+    # further theorems of the same proof file (e.g. F64ToU64's `exact` and `saturation`)
+    for thm in $(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}'); do
+      if bin/janus verify "$out" --proof "examples/proofs/$n.lean" --theorem "Proof.$thm" "${extra[@]}" >> "$out/verify.log" 2>&1; then
+        printf '%-9s ok  (Proof.%s)\n' "$n" "$thm" | tee -a "$summary"
+      else
+        printf '%-9s FAILED Proof.%s (see %s/verify.log)\n' "$n" "$thm" "$out" | tee -a "$summary"; fail=1
+      fi
+    done
   else
     printf '%-9s FAILED (see %s/verify.log)\n' "$n" "$out" | tee -a "$summary"
     tail -30 "$out/verify.log"
