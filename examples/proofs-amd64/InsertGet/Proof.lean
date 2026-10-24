@@ -44,7 +44,8 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
   janus64_run until [Extracted.program.contractAddr "runtime.mapassign_fast64"]
   refine Reaches.call (Summary.withExit (hasn f) hret) rfl
     ⟨RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp40]) (by simp [setRegF])
-      (by simpa using hs.zero) (by simpa using hs.df) (by decide) (by decide),
+      (by simpa using hs.zero) (by simpa using hs.df) (by simp [setRegF, keepABI, hsp40, Arm64.Memory.readLE_writeLE_self])
+        (by decide) (by decide),
      by simpa [setRegF] using hty, by simpa [setRegF] using hm0, ?_⟩ ?_
   · simp only [setRegF]; simp only [reduceIte, Nat.reduceEqDiff]
     exact hl.rep_frame _ _ _ _ hmap (Agrees.of_window (lo := (s.regs 4).toNat - (M.depth + 40))
@@ -69,7 +70,8 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
               exact ⟨hgo, by omega, by omega⟩)]
             repeat rw [Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega)])
         (by simp [setRegF, keepABI, hsp40]) (by simp [setRegF, keepABI]) (by simp [keepX15, hs.zero])
-        (by simpa using hs.df) (by decide) (by decide),
+        (by simpa using hs.df) (by simp [setRegF, keepABI, hsp40, Arm64.Memory.readLE_writeLE_self])
+        (by decide) (by decide),
        by simpa [setRegF] using hty, ?_⟩ ?_
     · simp only [setRegF, keepABI_apply]; simp only [reduceIte, Nat.reduceEqDiff]
       exact (isMap_of_ne hm0).2 (by rw [hl.rep_writeLE _ _ _ ho40]; exact (hset v).1)

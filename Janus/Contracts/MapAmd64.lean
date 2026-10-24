@@ -41,12 +41,13 @@ def calleeStack (s : State) (stack nargs : Nat) : List (Nat × Nat) :=
 /-- What every map runtime call with `nargs` register arguments needs (amd64): the runtime
 environment (`M.Env`, with the goroutine in `R14`), the stack guard at least `M.depth` bytes
 below `RSP`, an 8-aligned `RSP`, the window `[RSP - M.depth, RSP + 8 + 8·nargs)` writable, below
-`2^48` and outside the private memory, `X15 = 0` and the direction flag clear. -/
+`2^48` and outside the private memory, `X15 = 0`, the direction flag clear, and a canonical
+return address (below `2^47`) at `[RSP]`. -/
 def RTPre {K V : Type} (M : MapModel K V) (nargs : Nat) (s : State) : Prop :=
   M.Env s.mem (s.regs 14) ∧ StackGuardOK s M.depth ∧ (s.regs 4).toNat % 8 = 0 ∧
     M.depth ≤ (s.regs 4).toNat ∧ (s.regs 4).toNat + 8 + 8 * nargs ≤ 2 ^ 48 ∧
     s.mem.accessible ((s.regs 4).toNat - M.depth) (M.depth + 8 + 8 * nargs) true = true ∧
-    s.xmm 15 = 0 ∧ s.df = false ∧
+    s.xmm 15 = 0 ∧ s.df = false ∧ s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47 ∧
     Outside ((s.regs 4).toNat - M.depth) (M.depth + 8 + 8 * nargs) M.priv
 
 /-- What a caller needs to call the map runtime (amd64) with `RSP` at `frame` bytes below its
@@ -70,11 +71,11 @@ theorem RTPre.of_parts {K V : Type} {M : MapModel K V} {s S : State} {frame abov
     (hacc : ∀ a n w, S.mem.accessible a n w = s.mem.accessible a n w)
     (hguard : S.mem.readLE ((s.regs 14).toNat + 16) 8 = s.mem.readLE ((s.regs 14).toNat + 16) 8)
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg : S.regs 14 = s.regs 14)
-    (hx : S.xmm 15 = 0) (hdf : S.df = false) (hfr : frame % 8 = 0)
-    (hn : 8 + 8 * nargs ≤ frame + above) : RTPre M nargs S := by
+    (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
+    (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame + above) : RTPre M nargs S := by
   obtain ⟨-, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, -, -⟩ := hc
   simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
-  refine ⟨by rw [hg]; exact henv, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, hx, hdf, ?_⟩
+  refine ⟨by rw [hg]; exact henv, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, hx, hdf, hra, ?_⟩
   · simp only [regG, stackguard0Offset, hg]; omega
   · simp only [regG, stackguard0Offset, hg, hacc]; exact hg2
   · simp only [stackguard0, regG, regSP, stackguard0Offset, hg, hguard, hsp]; omega
@@ -90,14 +91,14 @@ theorem RTPre.of_caller {K V : Type} {M : MapModel K V} (hl : M.Laws) {s S : Sta
     {frame above nargs : Nat} (hc : CallerOK M s frame above)
     (hf : MemFrame s.mem S.mem [((s.regs 4).toNat - (M.depth + frame), (s.regs 4).toNat + above)])
     (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg : S.regs 14 = s.regs 14)
-    (hx : S.xmm 15 = 0) (hdf : S.df = false) (hfr : frame % 8 = 0)
-    (hn : 8 + 8 * nargs ≤ frame + above) : RTPre M nargs S := by
+    (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
+    (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame + above) : RTPre M nargs S := by
   have hc' := hc
   obtain ⟨henv, ⟨hg1, -, -⟩, -, -, -, -, hout, hgd, -⟩ := hc'
   simp only [regG, stackguard0Offset, Spec.Disjoint] at hg1 hgd
   refine RTPre.of_parts hc (hl.env_frame _ _ _ henv
     (Agrees.of_window hf (Outside.of_sub hout (by omega) (by omega)))) hf.accessible
-    (hf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)) hsp hg hx hdf hfr hn
+    (hf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)) hsp hg hx hdf hra hfr hn
 
 /-- The ranges a map runtime call may write at call state `s`. -/
 def rtWrites {K V : Type} (M : MapModel K V) (s : State) (nargs : Nat) : List (Nat × Nat) :=

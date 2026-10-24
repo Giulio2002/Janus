@@ -38,7 +38,8 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
   janus64_run until [Extracted.program.contractAddr "runtime.makemap_small"]
   refine Reaches.call (Summary.withExit hmk hret) rfl
     (RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp16]) (by simp [setRegF])
-      (by simpa using hs.zero) (by simpa using hs.df) (by decide) (by decide)) ?_
+      (by simpa using hs.zero) (by simpa using hs.df) (by simp [setRegF, keepABI, hsp16, Arm64.Memory.readLE_writeLE_self])
+        (by decide) (by decide)) ?_
   · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hnz, hrep, hfresh⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.append_nil, setRegF, reduceIte, Nat.reduceEqDiff, hsp16] at hfr

@@ -301,4 +301,43 @@ theorem maskFrom_lt64 (mem : Memory) (g i : Nat) (hi : i ≤ 8) : maskFrom mem g
   Nat.lt_of_lt_of_le (maskFrom_lt mem g (8 - i) i (by omega))
     (Nat.pow_le_pow_right (by decide) (by omega))
 
+/-! ### The one-bit-per-slot mask (amd64: `PMOVMSKB`, `NOT`, `MOVZX`) -/
+
+/-- Bit `j - i` is set iff slot `j ≥ i` is full: what the amd64 small-map lookup computes from
+the control word (`PMOVMSKB` of the bytes' top bits, inverted, low byte) shifted right by `i`. -/
+def fullMask (mem : Memory) (g : Nat) (i : Nat) : Nat :=
+  if h : 8 ≤ i then 0 else fullBit (ctrl mem g i) + 2 * fullMask mem g (i + 1)
+termination_by 8 - i
+
+theorem fullMask_eq (mem : Memory) (g i : Nat) (h : i < 8) :
+    fullMask mem g i = fullBit (ctrl mem g i) + 2 * fullMask mem g (i + 1) := by
+  rw [fullMask]; simp [show ¬ 8 ≤ i by omega]
+
+theorem fullMask_ge (mem : Memory) (g i : Nat) (h : 8 ≤ i) : fullMask mem g i = 0 := by
+  rw [fullMask]; simp [h]
+
+theorem fullMask_lt (mem : Memory) (g : Nat) : ∀ n i, i + n = 8 → fullMask mem g i < 2 ^ n
+  | 0, i, h => by rw [fullMask_ge _ _ _ (by omega)]; decide
+  | n + 1, i, h => by
+    rw [fullMask_eq _ _ _ (by omega)]
+    have := fullMask_lt mem g n (i + 1) (by omega)
+    have := fullBit_le (ctrl mem g i)
+    rw [Nat.pow_succ]
+    omega
+
+theorem fullMask_lt64 (mem : Memory) (g i : Nat) (hi : i ≤ 8) : fullMask mem g i < 2 ^ 64 :=
+  Nat.lt_of_lt_of_le (fullMask_lt mem g (8 - i) i (by omega))
+    (Nat.pow_le_pow_right (by decide) (by omega))
+
+theorem lookupFrom_of_fullMask_zero (mem : Memory) (g k : Nat) :
+    ∀ n i, i + n = 8 → fullMask mem g i = 0 → lookupFrom mem g k i = none
+  | 0, i, h, _ => lookupFrom_ge _ _ _ _ (by omega)
+  | n + 1, i, h, hm => by
+    rw [fullMask_eq _ _ _ (by omega)] at hm
+    rw [lookupFrom_eq _ _ _ _ (by omega)]
+    have h1 : fullBit (ctrl mem g i) = 0 := by omega
+    have h2 : ¬ ctrl mem g i < 128 := by unfold fullBit at h1; split at h1 <;> omega
+    rw [if_neg (by omega)]
+    exact lookupFrom_of_fullMask_zero mem g k n (i + 1) (by omega) (by omega)
+
 end Janus.Spec.Swiss
