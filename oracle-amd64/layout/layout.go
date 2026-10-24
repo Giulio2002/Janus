@@ -59,11 +59,15 @@ func Pattern(seed uint64, i uint64) byte {
 type Case struct {
 	ID     int        `json:"id"`
 	Class  string     `json:"class"`
-	Bytes  string     `json:"bytes"` // hex, 1..15 bytes, no separators ("4801d8")
-	Regs   [16]string `json:"regs"`  // hex 64-bit
-	RFlags int        `json:"rflags"`
-	XMM    [16]string `json:"xmm"` // hex 128-bit
-	Seed   uint64     `json:"seed"`
+	Bytes  string     `json:"bytes"`  // hex, 1..15 bytes, no separators ("4801d8")
+	Regs   [16]string `json:"regs"`   // hex 64-bit
+	RFlags int        `json:"rflags"` // status flags, plus FlagDF (the direction flag)
+	XMM    [16]string `json:"xmm"`    // hex 128-bit
+	// YMMH are bits 255:128 of YMM0-15 (hex 128-bit); absent = all zero.
+	YMMH []string `json:"ymmh,omitempty"`
+	// FSBase is the FS segment base (hex, canonical, below 2^47); absent = 0.
+	FSBase string `json:"fsbase,omitempty"`
+	Seed   uint64 `json:"seed"`
 	// Init overrides buffer bytes after the pattern is applied: (offset, value) pairs, in
 	// order. Used to plant return addresses / popped values. Absent = pattern only.
 	Init [][2]int `json:"init,omitempty"`
@@ -79,10 +83,13 @@ type HW struct {
 	PC     string   `json:"pc,omitempty"` // for ok: the address control went to
 	Regs   []string `json:"regs,omitempty"`
 	RFlags int      `json:"rflags"` // status bits only
-	// DF is RFLAGS.DF after the instruction. The model has no DF (it is clear in every state
-	// the model reaches, see docs/AMD64.md), so an ok run that sets it is a mismatch.
-	DF   bool     `json:"df,omitempty"`
-	XMM  []string `json:"xmm,omitempty"`
+	// DF is RFLAGS.DF after the instruction (compared with the model's direction flag).
+	DF  bool     `json:"df,omitempty"`
+	XMM []string `json:"xmm,omitempty"`
+	// YMMH are bits 255:128 of YMM0-15 from the signal frame's XSAVE area (zero when the
+	// frame says the AVX state is in its initial configuration); absent if the frame has no
+	// XSAVE area.
+	YMMH []string `json:"ymmh,omitempty"`
 	Mem  [][2]int `json:"mem,omitempty"` // (offset, new byte) for every changed byte
 	Note string   `json:"note,omitempty"`
 	// Iters is the number of times the runner re-entered a REP string instruction (one
@@ -105,7 +112,9 @@ type Model struct {
 	// others are architecturally undefined (reading them faults in the model) and are not
 	// compared.
 	Defined int      `json:"defined"`
+	DF      bool     `json:"df,omitempty"` // the direction flag after the instruction
 	XMM     []string `json:"xmm,omitempty"`
+	YMMH    []string `json:"ymmh,omitempty"`
 	Mem     [][2]int `json:"mem,omitempty"`
 }
 
@@ -113,16 +122,26 @@ type Model struct {
 const (
 	CtxInflight = 0
 	CtxSig      = 8
-	CtxAddr     = 16  // si_addr
-	CtxCode     = 24  // si_code
-	CtxHost     = 32  // rbx, rbp, r12, r13, r14, r15, rsp (7 words)
-	CtxInRegs   = 104 // rax..r15 in encoding order (16 words); the RSP slot is unused (see CtxFrame)
-	CtxInXMM    = 232 // xmm0..xmm15, 16 bytes each, little-endian
-	CtxOutGRegs = 512 // copy of uc_mcontext.gregs[23] (Linux order: r8..r15 rdi rsi rbp rbx rdx rax rcx rsp rip eflags ...)
-	CtxOutXMM   = 704 // xmm0..xmm15 from the signal frame's fxsave area
-	CtxOutHasFP = 960 // 1 if the signal frame had an fpstate
+	CtxAddr     = 16   // si_addr
+	CtxCode     = 24   // si_code
+	CtxHost     = 32   // rbx, rbp, r12, r13, r14, r15, rsp (7 words)
+	CtxInRegs   = 104  // rax..r15 in encoding order (16 words); the RSP slot is unused (see CtxFrame)
+	CtxInXMM    = 232  // xmm0..xmm15, 16 bytes each, little-endian
+	CtxOutGRegs = 512  // copy of uc_mcontext.gregs[23] (Linux order: r8..r15 rdi rsi rbp rbx rdx rax rcx rsp rip eflags ...)
+	CtxOutXMM   = 704  // xmm0..xmm15 from the signal frame's fxsave area
+	CtxOutHasFP = 960  // 1 if the signal frame had an fpstate
 	CtxFrame    = 1024 // IRETQ frame: rip, cs, rflags, rsp, ss
+	CtxInYMMH   = 1536 // bits 255:128 of ymm0..ymm15 (16 bytes each), loaded with VINSERTI128
+	CtxOutYMMH  = 1792 // bits 255:128 of ymm0..ymm15 from the signal frame's XSAVE area
+	CtxOutXBV   = 2048 // XSTATE_BV of the signal frame (bit 2: AVX state not initial); ^0 = no XSAVE area
+	CtxHostFS   = 2056 // the runner's own FS base (RDFSBASE), restored on resume
+	CtxInFS     = 2064 // the case's FS base (WRFSBASE before entry)
 )
+
+// XsaveYMMHOffset is the offset of the YMM_Hi128 component in the standard (non-compacted)
+// XSAVE layout that Linux uses for signal frames (CPUID.(EAX=0DH,ECX=2).EBX; checked by the
+// runner at start-up).
+const XsaveYMMHOffset = 576
 
 // Single-step entry: the runner enters the instruction with IRETQ and RFLAGS.TF = 1, so the
 // CPU raises a debug trap (SIGTRAP, si_code TRAP_TRACE) after exactly one instruction, with
@@ -174,8 +193,11 @@ func IsRepString(b []byte) bool {
 // execute: INT n, MOV to a segment register, POPF, IRET, and the 0F-map SYSCALL, SYSENTER,
 // SYSRET, SYSEXIT, POP FS/GS, LSS/LFS/LGS, group 15 (FXRSTOR/LDMXCSR/XRSTOR/WRFSBASE; the
 // unprefixed fences LFENCE/MFENCE/SFENCE are allowed),
-// and the system groups 0F 00 / 0F 01, plus any instruction with an FS or GS segment prefix
-// (the Go runtime's TLS lives at FS: a store through it corrupts the runner). Only the opcode after the legacy and REX prefixes
+// and the system groups 0F 00 / 0F 01, plus any instruction with a GS segment prefix. FS is
+// allowed: the runner points the FS base at the case's FSBase (WRFSBASE) for the duration of
+// the case, so FS-relative accesses hit the case's own memory, never the runtime's TLS. VEX
+// (C4/C5) and EVEX (62) instructions are user-mode vector instructions and are allowed.
+// Only the opcode after the legacy and REX prefixes
 // matters: the runner single-steps exactly one instruction, so later bytes are operands.
 func Forbidden(b []byte) bool {
 	i := 0
@@ -190,7 +212,7 @@ func Forbidden(b []byte) bool {
 		break
 	}
 	for _, x := range b[:i] {
-		if x == 0x64 || x == 0x65 {
+		if x == 0x65 {
 			return true
 		}
 	}

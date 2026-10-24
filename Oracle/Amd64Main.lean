@@ -7,15 +7,16 @@ import Lean.Data.Json
 Reads one JSON test case per line on stdin (`oracle-amd64/layout/layout.go`, `Case`) and
 prints one JSON result per line (`Model`):
 
-* the initial `State` has the 16 GPRs, the six status flags (all defined), `XMM0`–`XMM15`
+* the initial `State` has the 16 GPRs, the six status flags (all defined), `XMM0`–`XMM15`,
+  the upper halves of `YMM0`–`YMM15` (`ymmh`, default 0), the `FS` base (`fsbase`, default 0)
   from the case and `rip = TestPC`;
 * `mem.regions` is exactly the native runner's data buffer `[DataBase, DataBase + DataSize)`
   (writable), with bytes `pattern seed` overridden by the case's `init` entries; every other byte lies outside every region;
 * the instruction bytes are those of the native code page: the case bytes at `TestPC`
   followed by `0xCC` up to the end of the page;
 * the result is the fault, or the successor state: registers, `rip`, the status flags with the
-  mask of the defined ones, the XMM registers and the buffer bytes that differ from the
-  initial pattern.
+  mask of the defined ones, the XMM registers, the upper YMM halves and the buffer bytes that
+  differ from the initial pattern.
 
 The constants below must match `oracle-amd64/layout/layout.go`.
 -/
@@ -78,6 +79,8 @@ structure Case where
   regs : Array Nat
   rflags : Nat
   xmm : Array Nat
+  ymmh : Array Nat
+  fsBase : Nat
   seed : Nat
   /-- buffer overrides `(offset, byte)` applied after the pattern, in order -/
   init : List (Nat × Nat)
@@ -93,11 +96,17 @@ def parseCase (line : String) : Except String Case := do
   let xs ← j.getObjValAs? (Array String) "xmm"
   if xs.size ≠ 16 then throw "xmm must have 16 entries"
   let xmm ← xs.mapM parseHex
+  let ys : Array String := (j.getObjValAs? (Array String) "ymmh").toOption.getD #[]
+  if ys.size ≠ 0 ∧ ys.size ≠ 16 then throw "ymmh must have 16 entries"
+  let ymmh ← ys.mapM parseHex
+  let fsBase ← match (j.getObjValAs? String "fsbase").toOption with
+    | some f => parseHex f
+    | none => pure 0
   let seed ← j.getObjValAs? Nat "seed"
   let init : Array (Array Nat) := (j.getObjValAs? (Array (Array Nat)) "init").toOption.getD #[]
   let init ← init.toList.mapM fun a =>
     if a.size = 2 ∧ a[0]! < dataSize ∧ a[1]! < 256 then pure (a[0]!, a[1]!) else throw "bad init entry"
-  pure { id, bytes, regs, rflags, xmm, seed, init }
+  pure { id, bytes, regs, rflags, xmm, ymmh, fsBase, seed, init }
 
 /-- Initial byte at buffer offset `i`: the last override for `i`, else the pattern. -/
 def initByte (c : Case) (i : Nat) : Nat :=
@@ -112,6 +121,9 @@ def initState (c : Case) (initArr : Array Nat) : State :=
                af := some (bitSet c.rflags 4), zf := some (bitSet c.rflags 6),
                sf := some (bitSet c.rflags 7), ovf := some (bitSet c.rflags 11) }
     xmm := fun i => if i < 16 then BitVec.ofNat 128 c.xmm[i]! else 0
+    ymmHi := fun i => if i < c.ymmh.size then BitVec.ofNat 128 c.ymmh[i]! else 0
+    fsBase := BitVec.ofNat 64 c.fsBase
+    df := bitSet c.rflags 10
     mem :=
       { bytes := fun a =>
           if dataBase ≤ a ∧ a < dataBase + dataSize then BitVec.ofNat 8 (initArr[a - dataBase]!)
@@ -148,8 +160,9 @@ def runCase (c : Case) : Json :=
     let (fl, def_) := flagBits s.flags
     Json.mkObj [("id", c.id), ("status", "ok"), ("len", len), ("pc", hex s.rip.toNat),
       ("regs", Json.arr ((List.range 16).map fun i => Json.str (hex (s.regs i).toNat)).toArray),
-      ("rflags", fl), ("defined", def_),
+      ("rflags", fl), ("defined", def_), ("df", s.df),
       ("xmm", Json.arr ((List.range 16).map fun i => Json.str (hex (s.xmm i).toNat)).toArray),
+      ("ymmh", Json.arr ((List.range 16).map fun i => Json.str (hex (s.ymmHi i).toNat)).toArray),
       ("mem", Json.arr mem.toArray)]
 
 end OracleAmd64

@@ -22,15 +22,18 @@ namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
 /-- `AtomicMax(p, v)` returns the old value of `*p` and leaves `*p = max(old, v)` (unsigned).
-The word must be writable and must not overlap the return-address slot. -/
+The word must be writable, 8-byte aligned (as Go aligns every `*uint64`; a locked access
+that splits a cache line faults in the model, see `docs/AMD64.md`) and must not overlap the
+return-address slot. -/
 theorem correctness (p v : BitVec 64) :
     Ensures Extracted.program Extracted.entry [p, v]
-      (fun s => StackWritable s 0 8 ∧ Buffer s p 8 true ∧ Disjoint p 8 (s.regs regSP) 8)
+      (fun s => StackWritable s 0 8 ∧ Buffer s p 8 true ∧ p.toNat % 8 = 0 ∧
+        Disjoint p 8 (s.regs regSP) 8)
       (fun s s' => s'.regs 0 = BitVec.ofNat 64 (s.mem.readLE p.toNat 8) ∧
         s'.mem.readLE p.toNat 8 = max (s.mem.readLE p.toNat 8) v.toNat) := by
   intro ret hret s hs hpre
   janus64_intro hs
-  obtain ⟨⟨-, hnw, hacc⟩, ⟨hpw, hp⟩, hd⟩ := hpre
+  obtain ⟨⟨-, hnw, hacc⟩, ⟨hpw, hp⟩, hal, hd⟩ := hpre
   simp only [Disjoint, regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw hd
   janus64_run
   all_goals omega

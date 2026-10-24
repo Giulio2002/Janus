@@ -58,7 +58,7 @@ of the memory `M0`: `DI = d`, `BX = m` bytes are left, `[d0, d)` is already zero
 def Inv (M0 : Memory) (d0 n : Nat) (R B G : BitVec 64) (t : State) (d m : Nat) : Prop :=
   t.regs 7 = BitVec.ofNat 64 d ∧ t.regs 3 = BitVec.ofNat 64 m ∧ t.regs 0 = 0 ∧ t.xmm 15 = 0 ∧
     t.regs 4 = R ∧ t.regs 5 = B ∧ t.regs 14 = G ∧ d0 ≤ d ∧ d + m = d0 + n ∧
-    Zeroed M0 t.mem d0 (d - d0)
+    Zeroed M0 t.mem d0 (d - d0) ∧ t.df = false
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 100000 in
@@ -89,7 +89,7 @@ theorem clear_loop (ret : Nat) (hret : RetAddr Extracted.program ret) (Q : Outco
       t.mem.readLE R.toNat 8 = retSite ∧ t.mem.accessible hasAVX2 1 false = true ∧
       t.mem.readLE hasAVX2 1 ≠ 1 ∧ t.mem.accessible hasERMS 1 false = true := by
     simp only [retSite, hasAVX2, hasERMS, mc, reduceSegAddr, reduceRipTarget, Nat.reduceAdd]
-    intro t d ⟨_, _, _, _, _, _, _, hd0, hdm, hz⟩
+    intro t d ⟨_, _, _, _, _, _, _, hd0, hdm, hz, _⟩
     refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
     · rw [hz.accessible]; exact accessible_sub hacc (by decide) (by omega) (by omega)
     · rw [hz.accessible]; exact hR
@@ -103,19 +103,19 @@ theorem clear_loop (ret : Nat) (hret : RetAddr Extracted.program ret) (Q : Outco
     obtain ⟨hacc', hR'', hra', hav', hav1', her'⟩ := facts t d hinv
     simp only [retSite, hasAVX2, hasERMS, mc, reduceSegAddr, reduceRipTarget, Nat.reduceAdd]
       at hra' hav' hav1' her'
-    obtain ⟨h7, h3, h0, hx, h4, h5, h14, hd0, hdm, hz⟩ := hinv
+    obtain ⟨h7, h3, h0, hx, h4, h5, h14, hd0, hdm, hz, hdf⟩ := hinv
     have hm64 : m < 2 ^ 64 := by omega
     janus64_run until [top, sseLoop]
     -- 512 or more left: once more round the loop; less: back to the head
     all_goals first
       | (refine (ih (m - 256) (by omega)).1 _ (d + 256) rfl (by omega) ⟨by bvn, by bvn,
           by simp [setRegF, h0], hx, by simp [setRegF, h4], by simp [setRegF, h5],
-          by simp [setRegF, h14], by omega, by omega, ?_⟩
+          by simp [setRegF, h14], by omega, by omega, ?_, by simpa using hdf⟩
          refine Zeroed.congr (hz.trans (j := 256) ?_) rfl (by omega)
          zeroed_writes)
       | (refine (ih (m - 256) (by omega)).2 _ (d + 256) rfl ⟨by bvn, by bvn,
           by simp [setRegF, h0], hx, by simp [setRegF, h4], by simp [setRegF, h5],
-          by simp [setRegF, h14], by omega, by omega, ?_⟩
+          by simp [setRegF, h14], by omega, by omega, ?_, by simpa using hdf⟩
          refine Zeroed.congr (hz.trans (j := 256) ?_) rfl (by omega)
          zeroed_writes)
   refine ⟨fun t d h => hsse t d (h.trans (by addr_rfl)), ?_⟩
@@ -124,7 +124,7 @@ theorem clear_loop (ret : Nat) (hret : RetAddr Extracted.program ret) (Q : Outco
   simp only [retSite, hasAVX2, hasERMS, mc, reduceSegAddr, reduceRipTarget, Nat.reduceAdd]
     at hra' hav' hav1' her'
   have hinv' := hinv
-  obtain ⟨h7, h3, h0, hx, h4, h5, h14, hd0, hdm, hz⟩ := hinv
+  obtain ⟨h7, h3, h0, hx, h4, h5, h14, hd0, hdm, hz, hdf⟩ := hinv
   have hm64 : m < 2 ^ 64 := by omega
   janus64_run until [top, sseLoop, repSite, retSite]
   all_goals first
@@ -134,9 +134,9 @@ theorem clear_loop (ret : Nat) (hret : RetAddr Extracted.program ret) (Q : Outco
        refine Zeroed.congr (hz.trans (j := m) ?_) rfl (by omega)
        zeroed_writes)
     | -- `m > 256`: the 256-byte loop, with the same `m`
-      (exact hsse _ d (by addr_rfl) (by omega) hinv')
+      (exact hsse _ d (by addr_rfl) (by omega) ⟨h7, h3, h0, hx, h4, h5, h14, hd0, hdm, hz, rfl⟩)
     | -- `m ≥ 2048` with ERMS: `REP STOSQ` of `m / 8` words, then back to the head
-      (refine Reaches.repStos hret (c := janus_eval% repSite) (len := 3) (w := 64) rfl rfl d (m / 8)
+      (refine Reaches.repStos hret (c := janus_eval% repSite) (len := 3) (w := 64) rfl rfl d (m / 8) (by simpa using hdf)
         (by simp [setRegF, h7]) (by simp [setRegF, bv_ushiftRight_ofNat m 3 hm64]) (by omega)
         (by exact accessible_sub hacc' (by decide) (by omega) (by omega))
         (by omega) ?_
@@ -144,13 +144,13 @@ theorem clear_loop (ret : Nat) (hret : RetAddr Extracted.program ret) (Q : Outco
        refine (ih (m % 8) (by omega)).2 _ (d + 8 * (m / 8)) rfl ⟨by bvn,
          by bvn, by simp [setRegF, h0],
          by simpa using hx, by simp [setRegF, h4], by simp [setRegF, h5], by simp [setRegF, h14],
-         by omega, by omega, ?_⟩
+         by omega, by omega, ?_, by simpa using hdf⟩
        refine Zeroed.congr (hz.trans (j := 8 * (m / 8)) ?_) rfl (by omega)
        exact (zeroed_fillLE t.mem d 8 (m / 8)).congr (by omega) rfl)
 
 /-- `clear_loop` entered at `top` from the call: nothing is zeroed yet. -/
 theorem clear_from_top (ret : Nat) (hret : RetAddr Extracted.program ret) (Q : Outcome → Prop)
-    (t : State) (d n : Nat) (h_rip : t.rip = BitVec.ofNat 64 top)
+    (t : State) (d n : Nat) (h_rip : t.rip = BitVec.ofNat 64 top) (hdf : t.df = false)
     (h7 : t.regs 7 = BitVec.ofNat 64 d) (h3 : t.regs 3 = BitVec.ofNat 64 n) (h0 : t.regs 0 = 0)
     (hx : t.xmm 15 = 0) (hn : d + n ≤ 2 ^ 48) (hacc : t.mem.accessible d n true = true)
     (hR : t.mem.accessible (t.regs 4).toNat 8 false = true)
@@ -164,7 +164,7 @@ theorem clear_from_top (ret : Nat) (hret : RetAddr Extracted.program ret) (Q : O
     Reaches (Extracted.program.withExit ret) t Q :=
   (clear_loop ret hret Q t.mem d n (t.regs 4) (t.regs 5) (t.regs 14) hn hacc hR hRd hra hav hav1
     her hfd hk n).2 t d h_rip
-    ⟨h7, h3, h0, hx, rfl, rfl, rfl, Nat.le_refl _, rfl, (Zeroed.refl t.mem d).congr rfl (by omega)⟩
+    ⟨h7, h3, h0, hx, rfl, rfl, rfl, Nat.le_refl _, rfl, (Zeroed.refl t.mem d).congr rfl (by omega), hdf⟩
 
 /-- `ClearWords(b)` zeroes the `len(b)` words of `b` and changes no other memory outside its
 own stack frame (`[RSP - 32, RSP + 16)`: the saved frame pointer, the return address of the
@@ -204,7 +204,7 @@ theorem correctness (b len cap : BitVec 64) :
     refine ⟨fun j hj => absurd hj (by omega), fun x h1 h2 => ?_⟩
     rw [Janus.Arm64.Memory.bytes_writeLE_outside _ (by omega),
       Janus.Arm64.Memory.bytes_writeLE_outside _ (by omega)]
-  · refine clear_from_top ret hret _ _ b.toNat (8 * len.toNat) rfl (by simp [setRegF]) (by bvn)
+  · refine clear_from_top ret hret _ _ b.toNat (8 * len.toNat) rfl (by simpa using h_df) (by simp [setRegF]) (by bvn)
       (by simp [setRegF]) (by simpa using h_x15) (by omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ (by addrs; omega) ?_
     all_goals
       simp (config := { decide := true }) only [setRegF, ↓reduceIte, e32, hasAVX2, hasERMS,

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -88,7 +89,7 @@ func (cw *caseWriter) add(r *rand.Rand, class string, b []byte, k int) {
 		if gen.Conditional(gen.Classify(b)) {
 			perm := r.Perm(64)
 			for f := 0; f < cw.condK; f++ {
-				s.RFlags = gen.FlagCombo(perm[f])
+				s.RFlags = gen.FlagCombo(perm[f]) | s.RFlags&L.FlagDF
 				cw.emit(class, b, s)
 			}
 			continue
@@ -138,6 +139,15 @@ func cmdGen(args []string) {
 			b := gen.Targeted(r, sp)
 			for !gen.OK(b) {
 				b = gen.Targeted(r, sp)
+			}
+			cw.add(r, "gen/"+gen.Classify(b), b, 1)
+		}
+	}
+	for _, sp := range gen.VexSpecs {
+		for i := 0; i < *n; i++ {
+			b := gen.VexTargeted(r, sp)
+			for !gen.OK(b) {
+				b = gen.VexTargeted(r, sp)
 			}
 			cw.add(r, "gen/"+gen.Classify(b), b, 1)
 		}
@@ -225,7 +235,13 @@ func cmdHarvest(args []string) {
 	perClass := fs.Int("per-class", 4000, "keep at most this many distinct instructions per modeled class (0 = all)")
 	perOther := fs.Int("per-other", 40, "keep at most this many distinct instructions per unmodeled class (tagged harvest-other/)")
 	first := fs.Int("first-id", 1, "first case id")
+	only := fs.String("only", "", "keep only instructions whose class matches this regular expression (e.g. the vector classes, with a large -k)")
+	fsOnly := fs.Bool("fs", false, "keep only FS-prefixed instructions")
 	fs.Parse(args)
+	var onlyRe *regexp.Regexp
+	if *only != "" {
+		onlyRe = regexp.MustCompile(*only)
+	}
 	seen := map[string]bool{}
 	var insts [][]byte
 	total, forbidden := 0, 0
@@ -239,6 +255,12 @@ func cmdHarvest(args []string) {
 			seen[key] = true
 			if !gen.OK(b) {
 				forbidden++
+				continue
+			}
+			if onlyRe != nil && !onlyRe.MatchString(gen.Classify(b)) {
+				continue
+			}
+			if *fsOnly && !hasFSPrefix(b) {
 				continue
 			}
 			insts = append(insts, b)
@@ -310,3 +332,18 @@ func writeJSONL[T any](path string, xs []T) {
 }
 
 var _ = L.TestPC
+
+// hasFSPrefix reports whether b has a 64 (FS) byte among its legacy prefixes.
+func hasFSPrefix(b []byte) bool {
+	for _, x := range b {
+		switch {
+		case x == 0x64:
+			return true
+		case x == 0x66 || x == 0x67 || x == 0xF2 || x == 0xF3 || x == 0xF0 || x == 0x2E || x == 0x3E ||
+			x == 0x26 || x == 0x36 || x == 0x65 || x >= 0x40 && x <= 0x4F:
+			continue
+		}
+		return false
+	}
+	return false
+}

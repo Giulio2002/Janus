@@ -571,41 +571,65 @@ def main (args : List String) : IO UInt32 := do
         IO.println s!"{nm}: fault {repr d.fault.statuscode} pa {hex d.paddress.address.toNat} {repr d.paddress.paspace} memtype {repr d.memattrs.memtype} inner {d.memattrs.inner.attrs} outer {d.memattrs.outer.attrs} tags {repr d.memattrs.tags} tagchecked {tc}"
       | .error e => IO.println s!"{nm}: {e}"
     return 0
-  let lines := (← IO.FS.lines path).filter (·.trimAscii.toString != "")
-  let cases ← lines.mapM fun l => match parseCase l with
-    | .ok c => pure c
-    | .error e => throw (IO.userError s!"bad case: {e}")
-  IO.eprintln s!"janus-asl-check: {cases.size} cases, {jobs} tasks"
-  let chunk := (cases.size + jobs - 1) / jobs
-  let tasks := (List.range jobs).map fun k =>
-    Task.spawn (prio := .dedicated) fun _ =>
-      (cases.extract (k * chunk) ((k + 1) * chunk)).map fun c =>
-        let (r, cfg, um) := runAsl base c
-        (c, compare dczid c r, cfg, um)
-  let results := tasks.foldl (fun acc t => acc ++ t.get) #[]
-  -- LinuxEL0Config (the branch theorems' assumption) on the base state and every case's pre-state
-  -- and post-state.
+  -- The corpus (about 1 GB of JSON lines) is streamed: cases are read, run and written in
+  -- batches of `jobs * 256`, one batch running while the next is read, so memory is bounded by
+  -- two batches whatever the corpus size. Verdicts are written in corpus order, as before.
+  let hin ← IO.FS.Handle.mk path .read
+  let h ← IO.FS.Handle.mk out .write
+  IO.eprintln s!"janus-asl-check: streaming {path}, {jobs} tasks"
+  let batch := jobs * 256
   let baseCfg := JanusASL.Proofs.cfgOk base
-  let cfgBad := (results.filter fun (_, _, cfg, _) => !cfg).size
   let umBase := userMappedBase base
-  let umBad := (results.filter fun (_, _, _, um) => !um).size
+  let spawn (cases : Array Case) : List (Task (Array (Case × Verdict × Bool × Bool))) :=
+    let chunk := (cases.size + jobs - 1) / jobs
+    (List.range jobs).map fun k =>
+      Task.spawn (prio := .dedicated) fun _ =>
+        (cases.extract (k * chunk) ((k + 1) * chunk)).map fun c =>
+          let (r, cfg, um) := runAsl base c
+          (c, compare dczid c r, cfg, um)
+  let mut total := 0
+  let mut cfgBad := 0
+  let mut umBad := 0
   let mut agree := 0
   let mut gap := 0
   let mut mism := 0
   let mut kinds : Std.HashMap String Nat := {}
-  let h ← IO.FS.Handle.mk out .write
-  for (c, v, _, _) in results do
-    h.putStrLn (verdictJson c v).compress
-    match v with
-    | .agree k => agree := agree + 1; kinds := kinds.insert ("agree " ++ k) (kinds.getD ("agree " ++ k) 0 + 1)
-    | .gap k =>
-      gap := gap + 1
-      let k := k.takeWhile (· != ' ')
-      kinds := kinds.insert ("gap " ++ k) (kinds.getD ("gap " ++ k) 0 + 1)
-    | .mismatch _ => mism := mism + 1
+  let mut pending : List (Task (Array (Case × Verdict × Bool × Bool))) := []
+  let mut eof := false
+  while !eof || !pending.isEmpty do
+    -- read the next batch (while the pending one runs)
+    let mut cases : Array Case := #[]
+    while !eof && cases.size < batch do
+      let l ← hin.getLine
+      if l.isEmpty then
+        eof := true
+      else
+        let l := l.trimAscii.toString
+        if l != "" then
+          match parseCase l with
+          | .ok c => cases := cases.push c
+          | .error e => throw (IO.userError s!"bad case: {e}")
+    let next := if cases.isEmpty then [] else spawn cases
+    -- write the pending batch's verdicts, in order
+    for t in pending do
+      for (c, v, cfg, um) in t.get do
+        total := total + 1
+        -- LinuxEL0Config (the branch theorems' assumption) on every case's pre- and post-state
+        if !cfg then cfgBad := cfgBad + 1
+        if !um then umBad := umBad + 1
+        h.putStrLn (verdictJson c v).compress
+        match v with
+        | .agree k => agree := agree + 1; kinds := kinds.insert ("agree " ++ k) (kinds.getD ("agree " ++ k) 0 + 1)
+        | .gap k =>
+          gap := gap + 1
+          let k := k.takeWhile (· != ' ')
+          kinds := kinds.insert ("gap " ++ k) (kinds.getD ("gap " ++ k) 0 + 1)
+        | .mismatch _ => mism := mism + 1
+    pending := next
+  IO.eprintln s!"janus-asl-check: {total} cases"
   for (k, n) in kinds.toList.mergeSort (fun a b => a.2 ≥ b.2) do
     IO.println s!"{n}\t{k}"
-  IO.println s!"cases {results.size}  agree {agree}  gap {gap}  MISMATCH {mism}"
+  IO.println s!"cases {total}  agree {agree}  gap {gap}  MISMATCH {mism}"
   IO.println s!"LinuxEL0Config: base {baseCfg}, cases violating it (pre- or post-state) {cfgBad}"
   IO.println s!"UserMapped (data buffer): base sweep {umBase}, cases violating it (pre-state points) {umBad}"
   return if mism = 0 && baseCfg && cfgBad = 0 && umBase && umBad = 0 then 0 else 1

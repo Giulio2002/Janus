@@ -8,3 +8,4 @@ import Janus.Amd64.GoABI
 import Janus.Amd64.Disasm
 import Janus.Amd64.Tactic
 import Janus.Amd64.TacticExt
+import Janus.Amd64.TacticAVX

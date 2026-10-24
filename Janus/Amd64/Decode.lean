@@ -13,16 +13,27 @@ tables 2-1..2-3) and the opcode maps of appendix A, cross-checked against
 
 Prefix policy (strict):
 * Legacy prefixes `66` (operand size), `F2`/`F3` (only where they select an instruction:
-  `PAUSE`, `POPCNT`, `TZCNT`, `LZCNT`, `MOVDQU`, `MOVQ`, and `F3` = `REP` on `MOVS`/`STOS`), and the null segment overrides
-  `26`/`2E`/`36`/`3E` (ignored in 64-bit mode; not accepted on branches, where they are hints
-  or CET `NOTRACK`). At most one of each group (`66` may repeat).
+  `PAUSE`, `POPCNT`, `TZCNT`, `LZCNT`, `MOVDQU`, `MOVQ`, `MOVSD`, `MOVSS`, and `F3` = `REP` on
+  `MOVS`/`STOS`), and the null segment overrides `26`/`2E`/`36`/`3E` (ignored in 64-bit mode;
+  not accepted on branches, where they are hints or CET `NOTRACK`). At most one of each group
+  (`66` may repeat).
+* `64` (`FS`) only on the integer forms whose ModRM memory operand it relocates (`MOV`, the
+  ALU group, `TEST`, `MOVZX`/`MOVSX`/`MOVSXD`, `CMP`; `Decode.withFS`): their address becomes
+  `FS.base + ea`. Everywhere else (`LEA`, which ignores segments, string instructions, whose
+  `RDI` operand cannot be overridden, register-only forms, SSE/AVX, branches) it is rejected.
 * `F0` (`LOCK`) only on the lockable read-modify-write forms with a memory destination
   (`Decode.lockable`); elsewhere it is `#UD` and rejected. It is in group 1 with `F2`/`F3`,
   so `F0` together with `F2`/`F3` (the HLE hints) is rejected.
-* `64`/`65` (`FS`/`GS`), `67` (address size) are rejected.
+* `65` (`GS`) and `67` (address size) are rejected.
 * `REX` (`40`–`4F`) must immediately precede the opcode; a `REX` followed by another prefix
   (which hardware silently ignores) is rejected, as is a second `REX`.
-* `VEX`/`EVEX`/`XOP` (`C4`, `C5`, `62`, `8F` with `reg ≠ 0`) are rejected.
+* `VEX` (`C4`/`C5`) is decoded for exactly the AVX/AVX2 instructions Go's runtime and
+  `internal/bytealg` use (`Decode.vexOp`): `VMOVDQU VMOVDQA VMOVNTDQ VPXOR VPAND VPOR VPCMPEQB
+  VPMOVMSKB VPTEST VPBROADCASTB VZEROUPPER`, with every field the SDM reserves checked
+  (`VEX.vvvv = 1111` where it is unused, `VEX.W0` for `VPBROADCASTB`, `VEX.L0` for
+  `VZEROUPPER`, the register-only and memory-only forms). A VEX prefix preceded by any other
+  prefix (`66 F2 F3 F0` or `REX` are `#UD`; segment overrides are rejected too) is rejected.
+  `EVEX` (`62`) and `XOP` (`8F` with `reg ≠ 0`) are rejected.
 * Instructions longer than 15 bytes are rejected (`#GP` on hardware).
 * `66` on near branches, `CALL`, `RET`, `PUSH`, `POP`, `LEAVE` is rejected (it changes the
   operand size differently on Intel and AMD).
@@ -57,6 +68,8 @@ structure Prefixes where
   seg : Bool := false
   /-- `F0` (`LOCK`) seen. It shares prefix group 1 with `F2`/`F3`. -/
   lock : Bool := false
+  /-- `64` (`FS`) seen. It shares prefix group 2 with the null segment overrides. -/
+  fs : Bool := false
   /-- The low nibble `WRXB` of the REX prefix, if any. -/
   rex : Option Nat := none
 deriving Repr, DecidableEq, Inhabited
@@ -75,7 +88,9 @@ def parsePrefixes : List Nat → Prefixes → Nat → Option (Prefixes × List N
       if p.rep ≠ 0 ∨ p.lock ∨ p.rex.isSome then none
       else parsePrefixes rest { p with lock := true } (n + 1)
     else if b = 0x26 ∨ b = 0x2E ∨ b = 0x36 ∨ b = 0x3E then
-      if p.seg ∨ p.rex.isSome then none else parsePrefixes rest { p with seg := true } (n + 1)
+      if p.seg ∨ p.fs ∨ p.rex.isSome then none else parsePrefixes rest { p with seg := true } (n + 1)
+    else if b = 0x64 then
+      if p.seg ∨ p.fs ∨ p.rex.isSome then none else parsePrefixes rest { p with fs := true } (n + 1)
     else if 0x40 ≤ b ∧ b < 0x50 then
       if p.rex.isSome then none else parsePrefixes rest { p with rex := some (b - 0x40) } (n + 1)
     else some (p, b :: rest, n)
@@ -135,20 +150,20 @@ def modrm (rex : Nat) : List Nat → Option (ModRM × List Nat × Nat)
         if bs = 5 ∧ md = 0 then
           match readLE 4 rest2 with
           | some (d, r3) =>
-            some (⟨md, reg, ext, .m ⟨none, index, sc, sext 32 64 d, false⟩⟩, r3, 6)
+            some (⟨md, reg, ext, .m ⟨none, index, sc, sext 32 64 d, false, false⟩⟩, r3, 6)
           | none => none
         else
           match disp md rest2 with
           | some (d, r3, k) =>
-            some (⟨md, reg, ext, .m ⟨some (bs + 8 * rexB), index, sc, d, false⟩⟩, r3, 2 + k)
+            some (⟨md, reg, ext, .m ⟨some (bs + 8 * rexB), index, sc, d, false, false⟩⟩, r3, 2 + k)
           | none => none
     else if rm = 5 ∧ md = 0 then
       match readLE 4 rest with
-      | some (d, r3) => some (⟨md, reg, ext, .m ⟨none, none, 0, sext 32 64 d, true⟩⟩, r3, 5)
+      | some (d, r3) => some (⟨md, reg, ext, .m ⟨none, none, 0, sext 32 64 d, true, false⟩⟩, r3, 5)
       | none => none
     else
       match disp md rest with
-      | some (d, r3, k) => some (⟨md, reg, ext, .m ⟨some (rm + 8 * rexB), none, 0, d, false⟩⟩, r3, 1 + k)
+      | some (d, r3, k) => some (⟨md, reg, ext, .m ⟨some (rm + 8 * rexB), none, 0, d, false, false⟩⟩, r3, 1 + k)
       | none => none
 
 /-- An 8-bit register operand: without a REX prefix, numbers 4–7 are `AH CH DH BH`. -/
@@ -213,7 +228,7 @@ def finish (p : Prefixes) (cls : PrefixClass) (i : Instr) (len : Nat) : Option (
   if len > 15 then none else
   match cls with
   | .int => if p.rep = 0 then some (i, len) else none
-  | .fixed => if p.rep = 0 ∧ !p.opsize ∧ !p.seg then some (i, len) else none
+  | .fixed => if p.rep = 0 ∧ !p.opsize ∧ !p.seg ∧ !p.fs then some (i, len) else none
   | .own => some (i, len)
 
 /-- One-byte opcode map (no `0F` escape). `n` is the number of bytes before the opcode. -/
@@ -333,6 +348,18 @@ def oneByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
   else if op = 0xC0 ∨ op = 0xC1 ∨ (0xD0 ≤ op ∧ op ≤ 0xD3) then
     let w := if op % 2 = 0 then 8 else osz
     withModRM fun m r len =>
+      -- RCL (/2) and RCR (/3) at 32/64 bits
+      let rc : Option Bool := if (m.ext = 2 ∨ m.ext = 3) ∧ (w = 32 ∨ w = 64) then some (m.ext = 2) else none
+      match rc with
+      | some left =>
+        let dst := rmLoc rexP w m.rm
+        if op = 0xC0 ∨ op = 0xC1 then
+          match immU8 r with
+          | some (v, _, c) => finish p .int (.rcx left w dst (.imm v)) (len + c)
+          | none => none
+        else if op = 0xD0 ∨ op = 0xD1 then finish p .int (.rcx left w dst (.imm 1)) len
+        else finish p .int (.rcx left w dst (.loc (.reg 1))) len
+      | none =>
       match shOp m.ext with
       | none => none
       | some s =>
@@ -366,6 +393,8 @@ def oneByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
     | some (v, _) => finish p .fixed (.jmp (sext 8 64 v)) (n + 2)
     | none => none
   else if op = 0xF5 then finish p .int (.flagOp .cmc) (n + 1)
+  else if op = 0xFC then finish p .fixed (.setDF false) (n + 1)
+  else if op = 0xFD then finish p .fixed (.setDF true) (n + 1)
   else if op = 0xF8 then finish p .int (.flagOp .clc) (n + 1)
   else if op = 0xF9 then finish p .int (.flagOp .stc) (n + 1)
   else if op = 0xF6 ∨ op = 0xF7 then
@@ -413,7 +442,13 @@ def twoByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
   let sel := if p.opsize ∧ p.rep ≠ 0 then 4 else if p.opsize then 1 else if p.rep = 0xF3 then 2
     else if p.rep = 0xF2 then 3 else 0
   let fin (i : Instr) (len : Nat) : Option (Instr × Nat) := finish p .own i len
-  if op = 0x10 ∨ op = 0x11 ∨ op = 0x28 ∨ op = 0x29 then
+  if (op = 0x10 ∨ op = 0x11) ∧ (sel = 2 ∨ sel = 3) then
+    -- MOVSS (F3 0F 10/11), MOVSD (F2 0F 10/11)
+    withModRM fun m _ len =>
+      let w := if sel = 3 then 64 else 32
+      if op = 0x10 then fin (.movsd w (.xmm m.reg) (rmX m.rm)) len
+      else fin (.movsd w (rmX m.rm) (.xmm m.reg)) len
+  else if op = 0x10 ∨ op = 0x11 ∨ op = 0x28 ∨ op = 0x29 then
     -- MOVUPS/MOVUPD (10/11), MOVAPS/MOVAPD (28/29)
     if sel > 1 then none else
     withModRM fun m _ len =>
@@ -431,6 +466,36 @@ def twoByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
     -- XORPS (0F 57), XORPD (66 0F 57), PXOR (66 0F EF; 0F EF is MMX)
     if sel > 1 ∨ (op = 0xEF ∧ sel ≠ 1) then none else
     withModRM fun m _ len => fin (.sseOp .xor m.reg (rmX m.rm)) len
+  else if op = 0xDB ∨ op = 0xEB ∨ op = 0x74 ∨ op = 0x60 then
+    -- PAND (66 0F DB), POR (66 0F EB), PCMPEQB (66 0F 74), PUNPCKLBW (66 0F 60); without 66
+    -- these are MMX
+    if sel ≠ 1 then none else
+    let o := if op = 0xDB then SseOp.and else if op = 0xEB then .or else if op = 0x74 then .pcmpeqb
+      else .punpcklbw
+    withModRM fun m _ len => fin (.sseOp o m.reg (rmX m.rm)) len
+  else if op = 0xD7 then
+    -- PMOVMSKB r32/r64, xmm (66 0F D7, register source only)
+    if sel ≠ 1 then none else
+    withModRM fun m _ len =>
+      match m.rm with
+      | .r r => fin (.pmovmskb 128 m.reg r) len
+      | .m _ => none
+  else if op = 0x70 then
+    -- PSHUFD xmm, xmm/m128, imm8 (66 0F 70), PSHUFLW (F2 0F 70)
+    if sel ≠ 1 ∧ sel ≠ 3 then none else
+    withModRM fun m r len =>
+      match immU8 r with
+      | some (v, _, c) =>
+        fin (if sel = 1 then .pshufd m.reg (rmX m.rm) v else .pshuflw m.reg (rmX m.rm) v) (len + c)
+      | none => none
+  else if op = 0x18 then
+    -- PREFETCHNTA/T0/T1/T2 m8 (0F 18 /0../3, memory form, no prefix); /4../7 and the
+    -- register forms are reserved NOPs, rejected
+    if sel ≠ 0 then none else
+    withModRM fun m _ len =>
+      match m.rm with
+      | .m _ => if m.ext < 4 then finish p .int .nop len else none
+      | .r _ => none
   else if op = 0x6E then
     if sel ≠ 1 then none else
     withModRM fun m _ len => fin (.movdq (if rexW then 64 else 32) true m.reg (rmLoc rexP 64 m.rm)) len
@@ -541,12 +606,121 @@ def lockable : Instr → Bool
   | .cmpxchgDbl _ _ => true
   | _ => false
 
+/-- The memory operand (address, size in bytes) of a locked access: the `LOCK`able forms and
+`XCHG` with memory. -/
+def lockMem : Instr → Option (Addr × Nat)
+  | .alu _ w (.mem a) _ => some (a, w / 8)
+  | .unary _ w (.mem a) => some (a, w / 8)
+  | .bit _ w (.mem a) _ => some (a, w / 8)
+  | .xchg w (.mem a) _ => some (a, w / 8)
+  | .xadd w (.mem a) _ => some (a, w / 8)
+  | .cmpxchg w (.mem a) _ => some (a, w / 8)
+  | .cmpxchgDbl w a => some (a, w / 8)
+  | _ => none
+
+/-- Wrap a locked access in `Instr.locked` (alignment check at execution). -/
+def wrapLocked (i : Instr) : Instr :=
+  match lockMem i with
+  | some (a, sz) => .locked i a sz
+  | none => i
+
+end Decode
+
+namespace Decode
+
+/-- The `FS`-relative form of an instruction decoded after a `64` prefix: its ModRM memory
+operand gets `fs := true`. Only the integer forms Go uses with `FS` (the TLS load and store
+`MOVQ FS:-8, R14` / `MOVQ R14, FS:-8`, and the ALU/`TEST`/`MOVZX` forms with the same operand
+shape) are accepted; anything else (including a register-only form, where `64` would be
+ignored) is rejected. -/
+def withFS : Instr → Option Instr
+  | .mov w (.mem a) src => some (.mov w (.mem { a with fs := true }) src)
+  | .mov w dst (.loc (.mem a)) => some (.mov w dst (.loc (.mem { a with fs := true })))
+  | .alu op w (.mem a) src => some (.alu op w (.mem { a with fs := true }) src)
+  | .alu op w dst (.loc (.mem a)) => some (.alu op w dst (.loc (.mem { a with fs := true })))
+  | .test w (.mem a) src => some (.test w (.mem { a with fs := true }) src)
+  | .movx sg dw sw d (.mem a) => some (.movx sg dw sw d (.mem { a with fs := true }))
+  | _ => none
+
+/-- The VEX-encoded instructions (SDM Vol. 2 §2.3). `rex` holds `W R X B` (already
+un-inverted), `v` the un-inverted `VEX.vvvv`, `l` the vector length (128/256), `pp` the
+implied prefix (0 none, 1 `66`, 2 `F3`, 3 `F2`), `mp` the opcode map (1 `0F`, 2 `0F38`,
+3 `0F3A`), `op` the opcode, `bs` the bytes after it and `n` the bytes before it. Only the
+forms listed in the module doc are accepted. -/
+def vexOp (rex v l pp mp op : Nat) (bs : List Nat) (n : Nat) : Option (Instr × Nat) :=
+  let withModRM (k : ModRM → List Nat → Nat → Option (Instr × Nat)) : Option (Instr × Nat) :=
+    match modrm rex bs with
+    | some (m, r, c) => k m r (n + 1 + c)
+    | none => none
+  let fin (i : Instr) (len : Nat) : Option (Instr × Nat) := if len > 15 then none else some (i, len)
+  if mp = 1 then
+    if (op = 0x6F ∨ op = 0x7F) ∧ (pp = 1 ∨ pp = 2) then
+      -- VMOVDQA (66) / VMOVDQU (F3) load (6F) and store (7F)
+      if v ≠ 0 then none else
+      withModRM fun m _ len =>
+        if op = 0x6F then fin (.vmov (pp = 1) l (.xmm m.reg) (rmX m.rm)) len
+        else fin (.vmov (pp = 1) l (rmX m.rm) (.xmm m.reg)) len
+    else if op = 0xE7 ∧ pp = 1 then
+      -- VMOVNTDQ m, xmm/ymm (memory destination only)
+      if v ≠ 0 then none else
+      withModRM fun m _ len =>
+        match m.rm with
+        | .m a => fin (.vmov true l (.mem a) (.xmm m.reg)) len
+        | .r _ => none
+    else if (op = 0xEF ∨ op = 0xDB ∨ op = 0xEB ∨ op = 0x74) ∧ pp = 1 then
+      -- VPXOR, VPAND, VPOR, VPCMPEQB
+      let o := if op = 0xEF then SseOp.xor else if op = 0xDB then .and else if op = 0xEB then .or
+        else .pcmpeqb
+      withModRM fun m _ len => fin (.vop o l m.reg v (rmX m.rm)) len
+    else if op = 0xD7 ∧ pp = 1 then
+      -- VPMOVMSKB r, xmm/ymm (register source only)
+      if v ≠ 0 then none else
+      withModRM fun m _ len =>
+        match m.rm with
+        | .r r => fin (.pmovmskb l m.reg r) len
+        | .m _ => none
+    else if op = 0x77 ∧ pp = 0 ∧ l = 128 ∧ v = 0 then
+      -- VZEROUPPER (VEX.L1 is VZEROALL, not modelled); no ModRM
+      fin .vzeroupper (n + 1)
+    else none
+  else if mp = 2 ∧ pp = 1 then
+    if op = 0x17 then
+      -- VPTEST
+      if v ≠ 0 then none else
+      withModRM fun m _ len => fin (.vptest l m.reg (rmX m.rm)) len
+    else if op = 0x78 then
+      -- VPBROADCASTB xmm/ymm, xmm/m8 (VEX.W0)
+      if v ≠ 0 ∨ rex / 8 = 1 then none else
+      withModRM fun m _ len => fin (.vpbroadcastb l m.reg (rmX m.rm)) len
+    else none
+  else none
+
+/-- Decode a VEX instruction: `b0 = C5` (2-byte form: `R̄ v̄v̄v̄v̄ L pp`) or `C4` (3-byte form:
+`R̄ X̄ B̄ m-mmmm`, `W v̄v̄v̄v̄ L pp`), at the very start of the instruction (no prefix). -/
+def vex (b0 : Nat) (bs : List Nat) : Option (Instr × Nat) :=
+  if b0 = 0xC5 then
+    match bs with
+    | b1 :: op :: rest =>
+      let r := 1 - b1 / 128
+      vexOp (4 * r) (15 - (b1 / 8) % 16) (if (b1 / 4) % 2 = 1 then 256 else 128) (b1 % 4) 1 op rest 2
+    | _ => none
+  else
+    match bs with
+    | b1 :: b2 :: op :: rest =>
+      let r := 1 - b1 / 128
+      let x := 1 - (b1 / 64) % 2
+      let b := 1 - (b1 / 32) % 2
+      let w := b2 / 128
+      vexOp (8 * w + 4 * r + 2 * x + b) (15 - (b2 / 8) % 16) (if (b2 / 4) % 2 = 1 then 256 else 128)
+        (b2 % 4) (b1 % 32) op rest 3
+    | _ => none
+
 end Decode
 
 open Decode in
-/-- Decode the instruction at the start of `bytes`: the instruction and its length in bytes.
-`none` for anything outside the supported subset (see the module documentation). -/
-def decode (bytes : List Nat) : Option (Instr × Nat) :=
+/-- Decode a legacy-encoded instruction (prefixes, `REX`, the one- and two-byte maps). A VEX
+byte (`C4`/`C5`) after a prefix is not an opcode here and is rejected. -/
+def Decode.decodeLegacy (bytes : List Nat) : Option (Instr × Nat) :=
   match parsePrefixes bytes {} 0 with
   | none => none
   | some (p, ops, n) =>
@@ -560,10 +734,33 @@ def decode (bytes : List Nat) : Option (Instr × Nat) :=
         else oneByte p op rest n
     -- `LOCK` is accepted exactly on the lockable memory forms; the model is single-threaded,
     -- so a locked instruction has the semantics of the unlocked one.
-    if p.lock then
+    -- a locked access (`LOCK`, or `XCHG` with memory, which is always locked) must be
+    -- naturally aligned (`Instr.locked`)
+    let r := if p.lock then
       match r with
-      | some (i, len) => if lockable i then some (i, len) else none
+      | some (i, len) => if lockable i then some (wrapLocked i, len) else none
+      | none => none
+    else
+      match r with
+      | some (.xchg w (.mem a) b, len) => some (wrapLocked (.xchg w (.mem a) b), len)
+      | r => r
+    -- `FS` relocates the memory operand of the forms `withFS` accepts
+    if p.fs then
+      match r with
+      | some (i, len) =>
+        match withFS i with
+        | some i' => some (i', len)
+        | none => none
       | none => none
     else r
+
+open Decode in
+/-- Decode the instruction at the start of `bytes`: the instruction and its length in bytes.
+`none` for anything outside the supported subset (see the module documentation). -/
+def decode (bytes : List Nat) : Option (Instr × Nat) :=
+  match bytes with
+  | b0 :: rest0 =>
+    if b0 = 0xC4 ∨ b0 = 0xC5 then vex b0 rest0 else decodeLegacy bytes
+  | [] => none
 
 end Janus.Amd64

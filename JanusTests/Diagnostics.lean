@@ -31,10 +31,12 @@ open Janus.Amd64
 
 #guard Disasm.disasm none 3 (.alu .add 64 (.reg 0) (.loc (.reg 3))) == "add rax, rbx"
 #guard Disasm.disasm (some 0x1000) 5 (.call 0x10) == "call 0x1015"
-#guard Disasm.disasm none 4 (.alu .cmp 64 (.reg 4) (.loc (.mem ⟨some 14, none, 0, 16, false⟩))) ==
+#guard Disasm.disasm none 4 (.alu .cmp 64 (.reg 4) (.loc (.mem ⟨some 14, none, 0, 16, false, false⟩))) ==
   "cmp rsp, qword ptr [r14 + 0x10]"
-#guard Disasm.disasm none 4 (.mov 64 (.mem ⟨some 4, some 1, 3, 0, false⟩) (.loc (.reg 2))) ==
+#guard Disasm.disasm none 4 (.mov 64 (.mem ⟨some 4, some 1, 3, 0, false, false⟩) (.loc (.reg 2))) ==
   "mov qword ptr [rsp + rcx*8], rdx"
+#guard Disasm.disasm none 9 (.mov 64 (.reg 14) (.loc (.mem ⟨none, none, 0, 0xfffffffffffffff8, false, true⟩))) ==
+  "mov r14, qword ptr fs:[-0x8]"
 end Disasm64
 
 /-! ## arm64 -/

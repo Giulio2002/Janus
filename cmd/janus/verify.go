@@ -38,49 +38,53 @@ type kernelReplay struct {
 }
 
 type verifiedReport struct {
-	Schema           int            `json:"schema"`
-	Theorem          string         `json:"theorem"`
-	Kind             string         `json:"kind"`
-	Module           string         `json:"module"`
-	Statement        string         `json:"statement"`
-	Axioms           []string       `json:"axioms"`
-	AllowedAxioms    []string       `json:"allowedAxioms"`
-	KernelReplay     kernelReplay   `json:"kernelReplay"`
-	Proof            string         `json:"proof"`
-	ProofSha256      string         `json:"proofSha256"`
-	Extracted        string         `json:"extracted"`
-	ExtractedSha256  string         `json:"extractedSha256"`
-	IdentitySha256   string         `json:"identitySha256"`
-	Binary           string         `json:"binary"`
-	BinarySha256     string         `json:"binarySha256"`
-	Symbol           string         `json:"symbol"`
-	Address          string         `json:"address"`
-	GoVersion        string         `json:"goVersion"`
-	MainModule       string         `json:"mainModule"`
-	LeanVersion      string         `json:"leanVersion"`
-	JanusRoot        string         `json:"janusRoot"`
-	JanusCommit      string         `json:"janusCommit,omitempty"`
-	ExtractorVersion string         `json:"extractorVersion"`
-	Timestamp        string         `json:"timestamp"`
-	Framework        *frameworkInfo `json:"framework,omitempty"`
-	Consumer         *consumerInfo  `json:"consumer,omitempty"`
-	Sandbox          sandboxInfo    `json:"sandbox"`
-	Definitions      []string       `json:"definitions,omitempty"`
+	Schema    int    `json:"schema"`
+	Theorem   string `json:"theorem"`
+	Kind      string `json:"kind"`
+	Module    string `json:"module"`
+	Statement string `json:"statement"`
+	// StatementExplicit is the same statement printed with pp.explicit (every implicit and
+	// instance argument shown), for human inspection of what the notation stands for.
+	StatementExplicit string         `json:"statementExplicit"`
+	Axioms            []string       `json:"axioms"`
+	AllowedAxioms     []string       `json:"allowedAxioms"`
+	KernelReplay      kernelReplay   `json:"kernelReplay"`
+	Proof             string         `json:"proof"`
+	ProofSha256       string         `json:"proofSha256"`
+	Extracted         string         `json:"extracted"`
+	ExtractedSha256   string         `json:"extractedSha256"`
+	IdentitySha256    string         `json:"identitySha256"`
+	Binary            string         `json:"binary"`
+	BinarySha256      string         `json:"binarySha256"`
+	Symbol            string         `json:"symbol"`
+	Address           string         `json:"address"`
+	GoVersion         string         `json:"goVersion"`
+	MainModule        string         `json:"mainModule"`
+	LeanVersion       string         `json:"leanVersion"`
+	JanusRoot         string         `json:"janusRoot"`
+	JanusCommit       string         `json:"janusCommit,omitempty"`
+	ExtractorVersion  string         `json:"extractorVersion"`
+	Timestamp         string         `json:"timestamp"`
+	Framework         *frameworkInfo `json:"framework,omitempty"`
+	Consumer          *consumerInfo  `json:"consumer,omitempty"`
+	Sandbox           sandboxInfo    `json:"sandbox"`
+	Definitions       []string       `json:"definitions,omitempty"`
 	// DependencyConsts are the constants from declared extra dependencies that the statement
 	// (or a proof-local def it uses) mentions: "<name> (<kind>, <module>)".
 	DependencyConsts []string `json:"dependencyConstants,omitempty"`
 }
 
 type auditResult struct {
-	Name        string     `json:"name"`
-	Kind        string     `json:"kind"`
-	Module      string     `json:"module"`
-	Axioms      []string   `json:"axioms"`
-	Statement   string     `json:"statement"`
-	Definitions []string   `json:"definitions"` // proof-local defs the statement uses, with bodies
-	Modules     []string   `json:"modules"`     // every module in the audited environment
-	External    []string   `json:"external"`    // dependency constants the statement uses
-	Imports     [][]string `json:"imports"`     // [module, direct imports…] for every non-core module
+	Name              string     `json:"name"`
+	Kind              string     `json:"kind"`
+	Module            string     `json:"module"`
+	Axioms            []string   `json:"axioms"`
+	Statement         string     `json:"statement"`
+	StatementExplicit string     `json:"statementExplicit"` // the statement printed with pp.explicit
+	Definitions       []string   `json:"definitions"`       // proof-local defs the statement uses, with bodies
+	Modules           []string   `json:"modules"`           // every module in the audited environment
+	External          []string   `json:"external"`          // dependency constants the statement uses
+	Imports           [][]string `json:"imports"`           // [module, direct imports…] for every non-core module
 }
 
 // findJanusRoot locates the Lean project: --janus-root, else $JANUS_ROOT (a Janus checkout,
@@ -270,7 +274,7 @@ func writeReport(reportPath string, r *verifiedReport) error {
 }
 
 func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
-	fmt.Fprintf(stdout, "Verified: %s\n", r.Theorem)
+	fmt.Fprintf(stdout, "Verified: %s\n", termSafe(r.Theorem))
 	fmt.Fprintf(stdout, "  Module: %s (%s)\n", r.MainModule, r.GoVersion)
 	fmt.Fprintf(stdout, "  Entry: %s at %s\n", r.Symbol, r.Address)
 	fmt.Fprintf(stdout, "  Binary: %s (SHA-256 %s)\n", displayPath(resolveBinary(outdir, r.Binary)), r.BinarySha256)
@@ -314,7 +318,38 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	fmt.Fprintf(stdout, "  Lean: %s\n", r.LeanVersion)
 	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(filepath.Join(outdir, "verified.json")))
 	fmt.Fprintln(stdout, "  Statement:")
-	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(r.Statement, "\n", "\n    "))
+	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(termSafe(r.Statement), "\n", "\n    "))
+	printDefinitions(stdout, r.Definitions)
+}
+
+// printDefinitions shows the proof-local definitions the statement names (round 4, D2): the
+// statement's meaning depends on them, so they are part of what is reported, not only of
+// verified.json.
+func printDefinitions(w io.Writer, defs []string) {
+	if len(defs) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  Proof-local definitions used by the statement (part of its meaning):")
+	for _, d := range defs {
+		fmt.Fprintf(w, "    %s\n", strings.ReplaceAll(termSafe(d), "\n", "\n      "))
+	}
+}
+
+// termSafe neutralizes control characters (ANSI escapes, carriage returns, …) other than
+// newline and tab in report text before it reaches a terminal (round 4, D3): Lean names written
+// with «…» may contain them, and they could make the terminal show something other than the
+// report.
+func termSafe(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f && !(r >= 0x80 && r < 0xa0)) &&
+			r != 0x202e && r != 0x202d && r != 0x2066 && r != 0x2067 && r != 0x2068 && r != 0x2069 {
+			b.WriteRune(r)
+			continue
+		}
+		fmt.Fprintf(&b, "\\u{%x}", r)
+	}
+	return b.String()
 }
 
 // moduleList joins module names, abbreviating long lists (a Mathlib closure has thousands).
@@ -548,33 +583,34 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		commit += "+dirty"
 	}
 	return &verifiedReport{
-		Schema:           1,
-		Theorem:          ar.Name,
-		Kind:             ar.Kind,
-		Module:           ar.Module,
-		Statement:        ar.Statement,
-		Axioms:           ar.Axioms,
-		AllowedAxioms:    allowedAxioms,
-		KernelReplay:     kr,
-		Proof:            binaryRef(outdir, proofPath),
-		ProofSha256:      sha256Hex(proofSrc),
-		Extracted:        "Extracted.lean",
-		ExtractedSha256:  sha256Hex(cr.Lean),
-		IdentitySha256:   sha256Hex(idBytes),
-		Binary:           binaryRef(outdir, cr.BinPath),
-		BinarySha256:     cr.Identity.BinarySha256,
-		Symbol:           cr.Identity.Symbol,
-		Address:          cr.Identity.Address,
-		GoVersion:        cr.Identity.GoVersion,
-		MainModule:       cr.Identity.MainModule,
-		LeanVersion:      tc.version,
-		JanusRoot:        root,
-		JanusCommit:      commit,
-		ExtractorVersion: extractorVersion,
-		Timestamp:        time.Now().UTC().Format(time.RFC3339),
-		Framework:        fi,
-		Sandbox:          sb.info(),
-		Definitions:      ar.Definitions,
+		Schema:            1,
+		Theorem:           ar.Name,
+		Kind:              ar.Kind,
+		Module:            ar.Module,
+		Statement:         ar.Statement,
+		StatementExplicit: ar.StatementExplicit,
+		Axioms:            ar.Axioms,
+		AllowedAxioms:     allowedAxioms,
+		KernelReplay:      kr,
+		Proof:             binaryRef(outdir, proofPath),
+		ProofSha256:       sha256Hex(proofSrc),
+		Extracted:         "Extracted.lean",
+		ExtractedSha256:   sha256Hex(cr.Lean),
+		IdentitySha256:    sha256Hex(idBytes),
+		Binary:            binaryRef(outdir, cr.BinPath),
+		BinarySha256:      cr.Identity.BinarySha256,
+		Symbol:            cr.Identity.Symbol,
+		Address:           cr.Identity.Address,
+		GoVersion:         cr.Identity.GoVersion,
+		MainModule:        cr.Identity.MainModule,
+		LeanVersion:       tc.version,
+		JanusRoot:         root,
+		JanusCommit:       commit,
+		ExtractorVersion:  extractorVersion,
+		Timestamp:         time.Now().UTC().Format(time.RFC3339),
+		Framework:         fi,
+		Sandbox:           sb.info(),
+		Definitions:       ar.Definitions,
 	}, nil
 }
 
@@ -646,6 +682,21 @@ func classifyAuditError(msg, full string) error {
 	case strings.Contains(msg, "disguised instance") || strings.Contains(msg, "is not a plain def"):
 		d.Stage = "statement identity"
 		d.Next = "Remove proof-local instances/class values from the statement; use the model's own operations."
+	case strings.Contains(msg, "inline instance"):
+		d.Stage = "statement identity"
+		d.Next = "Instance arguments in the statement must be registered instances: write the operation with its canonical instance (x * y), or name the function (BitVec.add x y). See docs/AUDIT-ROUND2.md CRITICAL-1."
+	case strings.Contains(msg, "binds the instance"):
+		d.Stage = "statement identity"
+		d.Next = "Do not bind instances inside the statement (∃/∀/fun with an [inst : C] binder): state the operation with its canonical instance, or name the function. See docs/AUDIT-ROUND5.md E5."
+	case strings.Contains(msg, "out-of-range numeral"):
+		d.Stage = "statement identity"
+		d.Next = "Write numerals in range for their type (0 rather than 18446744073709551616 at BitVec 64): an out-of-range literal wraps and does not mean what it reads. See docs/AUDIT-ROUND6.md F2."
+	case strings.Contains(msg, "lookalike letters"):
+		d.Stage = "statement identity"
+		d.Next = "Rename the definition with ASCII letters, digits, _ ' ! ? (and subscripts): a lookalike letter makes it print like a trusted constant. See docs/AUDIT-ROUND6.md F1."
+	case strings.Contains(msg, "does not round-trip"):
+		d.Stage = "statement identity"
+		d.Next = "The printed statement must elaborate back to the checked one. Add type ascriptions where the printed text is ambiguous (numerals, coercions, implicit arguments), and do not hide instances or notation."
 	case strings.Contains(msg, "which is not Lean/Std core"):
 		d.Stage = "statement identity"
 		d.Next = "The statement may mention only core, Janus, Extracted and plain proof-local definitions."

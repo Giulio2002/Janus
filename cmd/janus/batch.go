@@ -158,7 +158,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 			f := toFailureJSON(r.Err)
 			br.Status, br.Failure = "failed", &f
 			res.Failed++
-			fmt.Fprintf(out, "FAIL %s %s\n  %s\n  Stage: %s\n", displayPath(r.Outdir), theoremOrDefault(br.Theorem), strings.ReplaceAll(f.Message, "\n", "\n  "), f.Stage)
+			fmt.Fprintf(out, "FAIL %s %s\n  %s\n  Stage: %s\n", displayPath(r.Outdir), termSafe(theoremOrDefault(br.Theorem)), strings.ReplaceAll(termSafe(f.Message), "\n", "\n  "), f.Stage)
 			if f.Next != "" {
 				fmt.Fprintf(out, "  Next: %s\n", f.Next)
 			}
@@ -168,7 +168,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 		br.Module = r.Report.Module
 		br.Report = filepath.ToSlash(filepath.Join(br.Outdir, "verified.json"))
 		res.Passed++
-		fmt.Fprintf(out, "PASS %s %s (module %s)\n", displayPath(r.Outdir), r.Report.Theorem, r.Report.Module)
+		fmt.Fprintf(out, "PASS %s %s (module %s)\n", displayPath(r.Outdir), termSafe(r.Report.Theorem), termSafe(r.Report.Module))
 	}
 
 	fw, err := loadFramework(janusRoot)

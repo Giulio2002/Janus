@@ -45,7 +45,7 @@ def ptrName : Nat → String
   | 128 => "xmmword ptr " | _ => ""
 
 /-- `[base + index*scale + disp]`; RIP-relative operands are resolved when `next` is known. -/
-def addr (next : Option Nat) (a : Addr) : String :=
+def addrOff (next : Option Nat) (a : Addr) : String :=
   if a.rip then
     match next with
     | some n => s!"[rip {if sval a.disp < 0 then "-" else "+"} {hex (sval a.disp).natAbs}] ; {hex ((((n : Int) + sval a.disp) % 2 ^ 64).toNat)}"
@@ -59,9 +59,19 @@ def addr (next : Option Nat) (a : Addr) : String :=
     let d := sval a.disp
     let body := " + ".intercalate parts
     let dispS := if d = 0 then (if parts.isEmpty then "0" else "")
-      else if parts.isEmpty then hex d.natAbs
+      else if parts.isEmpty then (if d < 0 then "-" else "") ++ hex d.natAbs
       else if d < 0 then s!" - {hex d.natAbs}" else s!" + {hex d.toNat}"
     s!"[{body}{dispS}]"
+
+/-- An address with its `fs:` segment prefix, if any. -/
+def addr (next : Option Nat) (a : Addr) : String :=
+  (if a.fs then "fs:" else "") ++ addrOff next a
+
+def ymmName (l n : Nat) : String := if l = 256 then s!"ymm{n}" else s!"xmm{n}"
+
+def sseName : SseOp → String
+  | .xor => "pxor" | .and => "pand" | .or => "por" | .pcmpeqb => "pcmpeqb"
+  | .punpcklbw => "punpcklbw"
 
 def loc (next : Option Nat) (w : Nat) : Loc → String
   | .reg r => regW w r
@@ -91,8 +101,8 @@ def target (next : Option Nat) (rel : Nat) : String :=
   | some n => hex ((n + rel) % 2 ^ 64)
   | none => s!"rip{if sval rel < 0 then "-" else "+"}{hex (sval rel).natAbs}"
 
-/-- Disassemble `i` at `pc` with length `len` (both optional). -/
-def disasm (pc : Option Nat) (len : Nat) (i : Instr) : String :=
+/-- `disasm` without the `LOCK` wrapper. -/
+def disasm0 (pc : Option Nat) (len : Nat) (i : Instr) : String :=
   let next := pc.map (· + len)
   match (some i : Option Instr) with
   | some (.alu op w dst s) => s!"{aluName op} {loc next w dst}, {src next w s}"
@@ -143,7 +153,18 @@ def disasm (pc : Option Nat) (len : Nat) (i : Instr) : String :=
   | some (.flagOp op) => match op with | .clc => "clc" | .stc => "stc" | .cmc => "cmc"
   | some (.sseMov aligned d s) =>
     s!"{if aligned then "movaps" else "movups"} {xloc next d}, {xloc next s}"
-  | some (.sseOp _ d s) => s!"xorps xmm{d}, {xloc next s}"
+  | some (.sseOp op d s) => s!"{sseName op} xmm{d}, {xloc next s}"
+  | some (.vop op l d s1 s2) =>
+    let s2' := match s2 with | .xmm n => ymmName l n | .mem a => addr next a
+    s!"v{sseName op} {ymmName l d}, {ymmName l s1}, {s2'}"
+  | some (.vmov al l d s) =>
+    let f : XLoc → String := fun | .xmm n => ymmName l n | .mem a => addr next a
+    s!"{if al then "vmovdqa" else "vmovdqu"} {f d}, {f s}"
+  | some (.pmovmskb l d s) => s!"{if l = 256 then "vpmovmskb" else "pmovmskb"} {reg64 d}, {ymmName l s}"
+  | some .vzeroupper => "vzeroupper"
+  | some (.setDF b) => if b then "std" else "cld"
+  | some (.rcx left w dst c) =>
+    s!"{if left then "rcl" else "rcr"} {loc next w dst}, {match c with | .imm v => toString v | .loc _ => "cl"}"
   | some (.movdq w toX x g) =>
     let m := if w = 64 then "movq" else "movd"
     if toX then s!"{m} xmm{x}, {loc next w g}" else s!"{m} {loc next w g}, xmm{x}"
@@ -151,5 +172,11 @@ def disasm (pc : Option Nat) (len : Nat) (i : Instr) : String :=
     let f : XLoc → String := fun | .xmm n => s!"xmm{n}" | .mem a => "qword ptr " ++ addr next a
     s!"movq {f d}, {f s}"
   | _ => toString (repr i)
+
+/-- Disassemble `i` at `pc` with length `len` (both optional). -/
+def disasm (pc : Option Nat) (len : Nat) (i : Instr) : String :=
+  match i with
+  | .locked j _ _ => "lock " ++ disasm0 pc len j
+  | _ => disasm0 pc len i
 
 end Janus.Amd64.Disasm

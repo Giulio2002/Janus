@@ -2,6 +2,7 @@ import Janus.Amd64.State
 import Janus.Amd64.Instr
 import Janus.Amd64.Decode
 import Janus.Arm64.Bits
+import Janus.Amd64.TacticAttr
 
 /-!
 # x86-64 execution semantics for the supported subset
@@ -31,6 +32,13 @@ Each case follows the Intel SDM Vol. 2 `Operation` and `Flags Affected` sections
 * Branch targets must be canonical user addresses `< 2^47`; otherwise the branch faults
   (`badTarget`). On hardware a non-canonical target is `#GP` at the branch and an upper-half
   target faults at the fetch, so this is conservative.
+* Vector registers (`State.xmm` = bits 127:0, `State.ymmHi` = bits 255:128): a legacy-SSE
+  instruction writes only `xmm` (bits 255:128 preserved, SDM Vol. 1 §14.1.3); a VEX.128
+  instruction writes `xmm` and zeroes `ymmHi` of its destination register; a VEX.256 one writes
+  both (`State.setV`). VEX memory operands need no alignment except for `VMOVDQA`/`VMOVNTDQ`
+  (`l/8` bytes, else `misaligned`). Vector values are naturals `< 2^l`, little-endian, so byte
+  `i` is `v / 256^i % 256`.
+* An `FS`-relative memory operand is at `fsBase + ea` (mod `2^64`).
 -/
 
 namespace Janus.Amd64
@@ -68,6 +76,17 @@ def setReg (s : State) (r : Nat) (v : W64) : State :=
 def setXmm (s : State) (n : Nat) (v : W128) : State :=
   { s with xmm := fun i => if i = n then v else s.xmm i }
 
+def setYmmHi (s : State) (n : Nat) (v : W128) : State :=
+  { s with ymmHi := fun i => if i = n then v else s.ymmHi i }
+
+/-- Bits `l-1:0` of `YMMn` (`l ∈ {128, 256}`) as a natural number. -/
+def getV (s : State) (l n : Nat) : Nat := if l = 256 then s.ymm n else (s.xmm n).toNat
+
+/-- A VEX write of the `l`-bit value `v` to `YMMn`: bits 127:0 from `v`, bits 255:128 from `v`
+for `l = 256`, zeroed for `l = 128`. -/
+def setV (s : State) (l n v : Nat) : State :=
+  (s.setXmm n (BitVec.ofNat 128 v)).setYmmHi n (if l = 256 then BitVec.ofNat 128 (v / 2 ^ 128) else 0)
+
 /-- The low `w` bits of register `r`. -/
 def getReg (s : State) (w r : Nat) : BitVec w := (s.regs r).setWidth w
 
@@ -91,8 +110,9 @@ end State
 
 /-! ## Operands -/
 
-/-- The effective address of `a`; `next` is the address of the next instruction. -/
-def ea (s : State) (next : W64) (a : Addr) : W64 :=
+/-- The effective address of `a` within its segment; `next` is the address of the next
+instruction. (In the `janus64_exec` simp set, as `ea` is.) -/
+@[janus64_exec] def eaOff (s : State) (next : W64) (a : Addr) : W64 :=
   if a.rip then BitVec.ofNat 64 ((next.toNat + a.disp) % 2 ^ 64) else
   let base : W64 := match a.base with
     | some b => s.regs b
@@ -101,6 +121,10 @@ def ea (s : State) (next : W64) (a : Addr) : W64 :=
     | some i => s.regs i <<< a.scale
     | none => 0
   base + idx + BitVec.ofNat 64 a.disp
+
+/-- The linear address of `a`: `eaOff`, plus the `FS` base for an `FS`-relative operand. -/
+def ea (s : State) (next : W64) (a : Addr) : W64 :=
+  if a.fs then s.fsBase + eaOff s next a else eaOff s next a
 
 def readLoc (s : State) (next : W64) (w : Nat) : Loc → Except Fault (BitVec w)
   | .reg r => .ok (s.getReg w r)
@@ -151,6 +175,81 @@ def writeX (s : State) (next : W64) (aligned : Bool) (l : XLoc) (v : W128) : Exc
     match store s.mem addr 16 v.toNat with
     | .ok m => .ok { s with mem := m }
     | .error e => .error e
+
+/-- Read an `l`-bit vector operand as a natural number (`aligned`: a memory operand must be
+`l/8`-byte aligned). -/
+def readV (s : State) (next : W64) (l : Nat) (aligned : Bool) : XLoc → Except Fault Nat
+  | .xmm n => .ok (s.getV l n)
+  | .mem a =>
+    let addr := (ea s next a).toNat
+    if aligned ∧ addr % (l / 8) ≠ 0 then .error (.misaligned addr) else
+    load s.mem addr (l / 8)
+
+/-- Write an `l`-bit vector result `v` (`< 2^l`) with VEX semantics (`State.setV`). -/
+def writeV (s : State) (next : W64) (l : Nat) (aligned : Bool) (dst : XLoc) (v : Nat) :
+    Except Fault State :=
+  match dst with
+  | .xmm n => .ok (s.setV l n v)
+  | .mem a =>
+    let addr := (ea s next a).toNat
+    if aligned ∧ addr % (l / 8) ≠ 0 then .error (.misaligned addr) else
+    match store s.mem addr (l / 8) v with
+    | .ok m => .ok { s with mem := m }
+    | .error e => .error e
+
+/-! ## Vector lanes
+
+Byte lanes of naturals (byte `i` of `a` is `a / 256^i % 256`), by structural recursion on the
+lane count so that the kernel and `simp` evaluate them. -/
+
+/-- `PCMPEQB` on `k` byte lanes: `0xFF` where the bytes are equal, `0` elsewhere. -/
+def cmpeqBytes : Nat → Nat → Nat → Nat
+  | 0, _, _ => 0
+  | k + 1, a, b => (if a % 256 = b % 256 then 255 else 0) + 256 * cmpeqBytes k (a / 256) (b / 256)
+
+/-- `PMOVMSKB` of `k` byte lanes: bit `i` is bit 7 of byte `i`. -/
+def msbBytes : Nat → Nat → Nat
+  | 0, _ => 0
+  | k + 1, a => a % 256 / 128 + 2 * msbBytes k (a / 256)
+
+/-- `PUNPCKLBW` of the low `k` bytes: `a₀ b₀ a₁ b₁ …`. -/
+def unpackLoBytes : Nat → Nat → Nat → Nat
+  | 0, _, _ => 0
+  | k + 1, a, b => a % 256 + 256 * (b % 256) + 65536 * unpackLoBytes k (a / 256) (b / 256)
+
+/-- `k` copies of the byte `b` (`< 256`). -/
+def replBytes : Nat → Nat → Nat
+  | 0, _ => 0
+  | k + 1, b => b + 256 * replBytes k b
+
+/-- `PSHUFD`: dword `i` of the result is dword `imm[2i+1:2i]` of `a`. -/
+def pshufdNat (a imm : Nat) : Nat :=
+  let sel (i : Nat) : Nat := a / 2 ^ (32 * (imm / 4 ^ i % 4)) % 2 ^ 32
+  sel 0 + 2 ^ 32 * sel 1 + 2 ^ 64 * sel 2 + 2 ^ 96 * sel 3
+
+/-- A packed vector operation on `l`-bit values `a` (destination / first source) and `b`. -/
+@[janus64_exec] def vecBin (op : SseOp) (l a b : Nat) : Nat :=
+  match op with
+  | .xor => a ^^^ b
+  | .and => a &&& b
+  | .or => a ||| b
+  | .pcmpeqb => cmpeqBytes (l / 8) a b
+  | .punpcklbw => unpackLoBytes (l / 16) a b
+
+/-- The legacy-SSE form on `XMM` values (`xor` stays a `BitVec` operation). -/
+@[janus64_exec] def sseBin (op : SseOp) (x v : W128) : W128 :=
+  match op with
+  | .xor => x ^^^ v
+  | .and => BitVec.ofNat 128 (vecBin .and 128 x.toNat v.toNat)
+  | .or => BitVec.ofNat 128 (vecBin .or 128 x.toNat v.toNat)
+  | .pcmpeqb => BitVec.ofNat 128 (vecBin .pcmpeqb 128 x.toNat v.toNat)
+  | .punpcklbw => BitVec.ofNat 128 (vecBin .punpcklbw 128 x.toNat v.toNat)
+
+/-- `VPTEST a, b` (`l`-bit values): `ZF = (a AND b = 0)`, `CF = (b AND NOT a = 0)`, the
+other four status flags cleared. -/
+@[janus64_exec] def ptestFlags (l x y : Nat) : Flags :=
+  { cf := some (decide (y &&& (x ^^^ (2 ^ l - 1)) = 0)), pf := some false, af := some false,
+    zf := some (decide (x &&& y = 0)), sf := some false, ovf := some false }
 
 /-! ## Flags -/
 
@@ -386,6 +485,39 @@ def execShift (s : State) (next : W64) (op : ShOp) (w : Nat) (dst : Loc) (count 
       | .ok s' => .ok ((s'.setFlags f).setRip next)
       | .error e => .error e
 
+/-- `RCL`/`RCR` at `w ∈ {32, 64}`: rotate `CF:dst` (`w + 1` bits) by the masked count. A
+masked count of 0 changes nothing but `OF`, which becomes undefined (as for `ROL`/`ROR`: the
+SDM pseudocode defines `OF` only for a count of 1) and still writes (zero-extends) a 32-bit
+register; otherwise `CF` must be defined (it is rotated in), `CF` is the last bit rotated out,
+`OF` is defined only for a count of 1 (`RCL`: `MSB(result) XOR CF'`; `RCR`: `MSB(dst) XOR CF`,
+before the rotation) and `SF ZF AF PF` are unaffected. -/
+def execRcx (s : State) (next : W64) (left : Bool) (w : Nat) (dst : Loc) (count : Src) :
+    Except Fault State :=
+  match readSrc s next 8 count with
+  | .error e => .error e
+  | .ok cnt =>
+    match readLocRW s next w dst with
+    | .error e => .error e
+    | .ok x =>
+      let c := cnt.toNat % (if w = 64 then 64 else 32)
+      if c = 0 then
+        match writeLoc s next w dst x with
+        | .ok s' => .ok ((s'.setFlags { s.flags with ovf := none }).setRip next)
+        | .error e => .error e
+      else
+      match s.flags.cf with
+      | none => .error (.undefinedFlag s.rip.toNat)
+      | some cf =>
+        let t := cf.toNat * 2 ^ w + x.toNat
+        let t' := if left then t * 2 ^ c % 2 ^ (w + 1) + t / 2 ^ (w + 1 - c)
+          else t / 2 ^ c + t * 2 ^ (w + 1 - c) % 2 ^ (w + 1)
+        let r : BitVec w := BitVec.ofNat w t'
+        let ncf := decide (t' / 2 ^ w % 2 = 1)
+        let of : Option Bool := if c = 1 then some (if left then r.msb != ncf else x.msb != cf) else none
+        match writeLoc s next w dst r with
+        | .ok s' => .ok ((s'.setFlags { s.flags with cf := some ncf, ovf := of }).setRip next)
+        | .error e => .error e
+
 /-- `SHLD`/`SHRD dst, src, count`: count masked like shifts (0: as for shifts); a count above
 the operand size (16-bit only) has an undefined result. -/
 def execShd (s : State) (next : W64) (left : Bool) (w : Nat) (dst : Loc) (src : Nat) (count : Src) :
@@ -453,9 +585,8 @@ def execCount (s : State) (next : W64) (op : CntOp) (w dst : Nat) (src : Loc) : 
     let fin (r : BitVec w) (f : Flags) : Except Fault State := .ok (((s.putReg w dst r).setFlags f).setRip next)
     match op with
     | .bsf | .bsr =>
-      if n = 0 then
-        let f : Flags := { cf := none, pf := none, af := none, zf := some true, sf := none, ovf := none }
-        if w = 64 then .ok ((s.setFlags f).setRip next) else .error (.undefinedResult s.rip.toNat)
+      -- the destination is undefined for a zero source (Intel; AMD keeps it), at every width
+      if n = 0 then .error (.undefinedResult s.rip.toNat)
       else
         let idx := match op with | .bsf => ctzNat w n | _ => w - 1 - clzNat w n
         fin (BitVec.ofNat w idx) { cf := none, pf := none, af := none, zf := some false, sf := none, ovf := none }
@@ -468,12 +599,12 @@ def execCount (s : State) (next : W64) (op : CntOp) (w dst : Nat) (src : Loc) : 
         { cf := some false, pf := some false, af := some false, zf := some (decide (n = 0)),
           sf := some false, ovf := some false }
 
-/-! ## String instructions (`DF = 0`)
+/-! ## String instructions
 
-The direction flag is not part of the state: it is clear at every Go call (Go ABIInternal:
-"The direction flag (D) is always cleared (set to the forward direction) at a call"), and no modelled instruction sets it
-(`STD`, `POPF` and `IRET` are not modelled), so it is clear in every state the model reaches.
-`MOVS`/`STOS` therefore always step forward. The address size is 64 bits (the `67` prefix is
+The direction flag is `State.df`, written by `CLD`/`STD` (`POPF`/`IRET` are not modelled). It
+is clear at every Go call (Go ABIInternal: "The direction flag (D) is always cleared (set to
+the forward direction) at a call"; `GoABI.CallSetup.df`). `MOVS`/`STOS` step forward with
+`df = false` and backward with `df = true`. The address size is 64 bits (the `67` prefix is
 rejected), so `RSI`, `RDI` and `RCX` are used in full. A `REP` string instruction is the
 sequential repetition of its element step, which is also its architectural result on hardware
 with fast strings (SDM Vol. 1 §7.3.9.3); a fault in iteration `k` stops the run. -/
@@ -491,6 +622,28 @@ def movsIter (sz : Nat) : Nat → State → Except Fault State
       | .ok m =>
         movsIter sz k (({ s with mem := m }.setReg 6 (s.regs 6 + BitVec.ofNat 64 sz)).setReg 7
           (s.regs 7 + BitVec.ofNat 64 sz))
+
+/-- `k` element steps of `MOVS` with `DF = 1`: as `movsIter`, but `RSI` and `RDI` step down by
+`sz` (SDM Vol. 2, `MOVS`: "the registers are decremented if DF = 1"). -/
+def movsIterB (sz : Nat) : Nat → State → Except Fault State
+  | 0, s => .ok s
+  | k + 1, s =>
+    match load s.mem (s.regs 6).toNat sz with
+    | .error e => .error e
+    | .ok v =>
+      match store s.mem (s.regs 7).toNat sz v with
+      | .error e => .error e
+      | .ok m =>
+        movsIterB sz k (({ s with mem := m }.setReg 6 (s.regs 6 - BitVec.ofNat 64 sz)).setReg 7
+          (s.regs 7 - BitVec.ofNat 64 sz))
+
+/-- `k` element steps of `STOS` with `DF = 1` (`RDI` steps down). -/
+def stosIterB (sz v : Nat) : Nat → State → Except Fault State
+  | 0, s => .ok s
+  | k + 1, s =>
+    match store s.mem (s.regs 7).toNat sz v with
+    | .error e => .error e
+    | .ok m => stosIterB sz v k ({ s with mem := m }.setReg 7 (s.regs 7 - BitVec.ofNat 64 sz))
 
 /-- `k` element steps of `STOS` with element size `sz` bytes storing `v` (`< 2^(8 sz)`): store
 at `RDI`, add `sz` to `RDI`. -/
@@ -536,6 +689,7 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
   | .div signed w src => execDiv s next signed w src
   | .shift op w dst count => execShift s next op w dst count
   | .shd left w dst src count => execShd s next left w dst src count
+  | .rcx left w dst count => execRcx s next left w dst count
   | .bit op w dst off => execBit s next op w dst off
   | .count op w dst src => execCount s next op w dst src
   | .bswap w r =>
@@ -635,10 +789,61 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
       match writeX s next al dst v with
       | .ok s' => .ok (s'.setRip next)
       | .error e => .error e
-  | .sseOp .xor dst src =>
+  | .sseOp op dst src =>
     match readX s next true src with
     | .error e => .error e
-    | .ok v => .ok ((s.setXmm dst (s.xmm dst ^^^ v)).setRip next)
+    | .ok v => .ok ((s.setXmm dst (sseBin op (s.xmm dst) v)).setRip next)
+  | .pshufd dst src imm =>
+    match readX s next true src with
+    | .error e => .error e
+    | .ok v => .ok ((s.setXmm dst (BitVec.ofNat 128 (pshufdNat v.toNat imm))).setRip next)
+  | .pshuflw dst src imm =>
+    match readX s next true src with
+    | .error e => .error e
+    | .ok v =>
+      let a := v.toNat
+      let sel (i : Nat) : Nat := a / 2 ^ (16 * (imm / 4 ^ i % 4)) % 2 ^ 16
+      .ok ((s.setXmm dst (BitVec.ofNat 128 (sel 0 + 2 ^ 16 * sel 1 + 2 ^ 32 * sel 2 + 2 ^ 48 * sel 3 +
+        a / 2 ^ 64 * 2 ^ 64))).setRip next)
+  | .movsd w dst src =>
+    match dst, src with
+    | .xmm d, .mem a =>
+      match load s.mem (ea s next a).toNat (w / 8) with
+      | .error e => .error e
+      | .ok v => .ok ((s.setXmm d (BitVec.ofNat 128 v)).setRip next)
+    | .xmm d, .xmm r =>
+      .ok ((s.setXmm d (BitVec.ofNat 128 ((s.xmm d).toNat / 2 ^ w * 2 ^ w + (s.xmm r).toNat % 2 ^ w))).setRip next)
+    | .mem a, .xmm r =>
+      match store s.mem (ea s next a).toNat (w / 8) ((s.xmm r).toNat % 2 ^ w) with
+      | .error e => .error e
+      | .ok m => .ok ({ s with mem := m }.setRip next)
+    | .mem _, .mem _ => .error (.undecodable pc [])
+  | .pmovmskb l dst src =>
+    .ok ((s.setReg dst (BitVec.ofNat 64 (msbBytes (l / 8) (s.getV l src)))).setRip next)
+  | .vmov al l dst src =>
+    match readV s next l al src with
+    | .error e => .error e
+    | .ok v =>
+      match writeV s next l al dst v with
+      | .error e => .error e
+      | .ok s' => .ok (s'.setRip next)
+  | .vop op l dst src1 src2 =>
+    match readV s next l false src2 with
+    | .error e => .error e
+    | .ok b => .ok ((s.setV l dst (vecBin op l (s.getV l src1) b)).setRip next)
+  | .vptest l a b =>
+    match readV s next l false b with
+    | .error e => .error e
+    | .ok y =>
+      .ok ((s.setFlags (ptestFlags l (s.getV l a) y)).setRip next)
+  | .vpbroadcastb l dst src =>
+    let b : Except Fault Nat := match src with
+      | .xmm n => .ok ((s.xmm n).toNat % 256)
+      | .mem a => load s.mem (ea s next a).toNat 1
+    match b with
+    | .error e => .error e
+    | .ok b => .ok ((s.setV l dst (replBytes (l / 8) b)).setRip next)
+  | .vzeroupper => .ok ({ s with ymmHi := fun _ => 0 }.setRip next)
   | .movdq w toX x g =>
     if toX then
       match readLoc s next w g with
@@ -719,13 +924,27 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
           .ok (((({ s with mem := m }.putReg h 0 (BitVec.ofNat h v)).putReg h 2
             (BitVec.ofNat h (v / 2 ^ h))).setFlags { s.flags with zf := some false }).setRip next)
   | .movs rep w =>
+    if s.df then
+      match movsIterB (w / 8) (if rep then (s.regs 1).toNat else 1) s with
+      | .error e => .error e
+      | .ok s' => .ok ((if rep then s'.setReg 1 0 else s').setRip next)
+    else
     match movsIter (w / 8) (if rep then (s.regs 1).toNat else 1) s with
     | .error e => .error e
     | .ok s' => .ok ((if rep then s'.setReg 1 0 else s').setRip next)
   | .stos rep w =>
+    if s.df then
+      match stosIterB (w / 8) (s.getReg w 0).toNat (if rep then (s.regs 1).toNat else 1) s with
+      | .error e => .error e
+      | .ok s' => .ok ((if rep then s'.setReg 1 0 else s').setRip next)
+    else
     match stosIter (w / 8) (s.getReg w 0).toNat (if rep then (s.regs 1).toNat else 1) s with
     | .error e => .error e
     | .ok s' => .ok ((if rep then s'.setReg 1 0 else s').setRip next)
+  | .setDF b => .ok ({ s with df := b }.setRip next)
+  | .locked i a size =>
+    let addr := (ea s next a).toNat
+    if addr % size ≠ 0 then .error (.misaligned addr) else exec i len s
 
 /-- Decode and execute the instruction at the start of `bytes` (the code at `s.rip`). -/
 def step (bytes : List Nat) (s : State) : Except Fault State :=

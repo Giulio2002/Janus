@@ -113,6 +113,8 @@ func cmdCoverage(args []string) {
 	top := fs.Int("top", 15, "rejected encodings to list per binary")
 	jsonOut := fs.String("json", "", "also write the per-binary numbers as JSON here")
 	jobs := fs.Int("j", 16, "model processes")
+	showEnc := fs.Bool("show-enc", false, "with -show: also list the distinct rejected encodings")
+	show := fs.String("show", "", "comma-separated symbol prefixes: list the rejected classes of each matching function")
 	fs.Parse(args)
 	type binRes struct {
 		Binary                   string
@@ -121,6 +123,10 @@ func cmdCoverage(args []string) {
 		Distinct, DistinctOK     int
 		Pkg                      map[string][2]int
 		Blockers                 []string
+		// SoleBlockers: per instruction class (mnemonic, `fs:` marked), the number of
+		// functions in which it is the only rejected class (accepting it would make them
+		// fully decodable), and its rejected occurrences.
+		SoleBlockers []string
 	}
 	var results []binRes
 	for _, path := range fs.Args() {
@@ -171,6 +177,8 @@ func cmdCoverage(args []string) {
 		}
 		rej := map[string]int{}
 		rejFn := map[string]int{}
+		sole := map[string]int{}
+		clsOcc := map[string]int{}
 		for _, f := range fns {
 			full := true
 			for _, b := range f.insts {
@@ -183,9 +191,38 @@ func cmdCoverage(args []string) {
 				}
 			}
 			if !full {
+				cls := map[string]bool{}
 				for _, b := range f.insts {
 					if !ok[string(b)] {
 						rejFn[string(b)]++
+						c := blockClass(b)
+						cls[c] = true
+						clsOcc[c]++
+					}
+				}
+				if len(cls) == 1 {
+					for c := range cls {
+						sole[c]++
+					}
+				}
+				for _, p := range strings.Split(*show, ",") {
+					if p != "" && strings.HasPrefix(f.name, p) {
+						var cs []string
+						for c := range cls {
+							cs = append(cs, c)
+						}
+						sort.Strings(cs)
+						fmt.Printf("  blocked %-50s %s\n", f.name, strings.Join(cs, " "))
+						if *showEnc {
+							seenE := map[string]bool{}
+							for _, b := range f.insts {
+								if !ok[string(b)] && !seenE[string(b)] {
+									seenE[string(b)] = true
+									fmt.Printf("      %-24s %s\n", hex.EncodeToString(b), gen.Asm(b))
+								}
+							}
+						}
+						break
 					}
 				}
 			}
@@ -227,6 +264,25 @@ func cmdCoverage(args []string) {
 			}
 			r.Blockers = append(r.Blockers, fmt.Sprintf("%6d  %-24s %s", rej[k], hex.EncodeToString([]byte(k)), gen.Asm([]byte(k))))
 		}
+		var ck []string
+		for k := range clsOcc {
+			ck = append(ck, k)
+		}
+		sort.Slice(ck, func(i, j int) bool {
+			if sole[ck[i]] != sole[ck[j]] {
+				return sole[ck[i]] > sole[ck[j]]
+			}
+			if clsOcc[ck[i]] != clsOcc[ck[j]] {
+				return clsOcc[ck[i]] > clsOcc[ck[j]]
+			}
+			return ck[i] < ck[j]
+		})
+		for i, k := range ck {
+			if i >= *top {
+				break
+			}
+			r.SoleBlockers = append(r.SoleBlockers, fmt.Sprintf("%5d sole  %6d occ  %s", sole[k], clsOcc[k], k))
+		}
 		results = append(results, r)
 		fmt.Printf("== %s\n", r.Binary)
 		fmt.Printf("functions: Go-compiled %d, fully decodable %d (%.1f%%); assembly %d, fully decodable %d (%.1f%%)\n",
@@ -241,6 +297,10 @@ func cmdCoverage(args []string) {
 		for _, p := range ps {
 			fmt.Printf("  %-16s %5d functions, %5d fully decodable\n", p, r.Pkg[p][0], r.Pkg[p][1])
 		}
+		fmt.Printf("rejected classes (functions where it is the only blocker, occurrences):\n")
+		for _, l := range r.SoleBlockers {
+			fmt.Println("  " + l)
+		}
 		fmt.Printf("top rejected encodings (occurrences):\n")
 		for _, l := range r.Blockers {
 			fmt.Println("  " + l)
@@ -250,6 +310,40 @@ func cmdCoverage(args []string) {
 		b, _ := json.MarshalIndent(results, "", "  ")
 		os.WriteFile(*jsonOut, b, 0o644)
 	}
+}
+
+// blockClass names the instruction class of a rejected encoding: the x86asm mnemonic, with
+// `fs:`/`gs:` for segment-relative accesses, `/vex` and `/evex` for those encodings and the
+// vector length; `(bad)` if x86asm cannot decode it either.
+func blockClass(b []byte) string {
+	inst, ok := gen.Decode(b)
+	if !ok {
+		return "(bad)"
+	}
+	c := strings.ToLower(inst.Op.String())
+	for _, p := range inst.Prefix {
+		switch p &^ 0xF000 {
+		case 0x64:
+			c = "fs:" + c
+		case 0x65:
+			c = "gs:" + c
+		}
+	}
+	i := 0
+	for i < len(b) && (b[i] == 0x66 || b[i] == 0xF2 || b[i] == 0xF3 || b[i] == 0x64 || b[i] == 0x65 || b[i] == 0x67 || (b[i] >= 0x40 && b[i] <= 0x4F)) {
+		i++
+	}
+	if i < len(b) {
+		switch {
+		case b[i] == 0x62:
+			c += "/evex"
+		case b[i] == 0xC5 && i+1 < len(b):
+			c += map[bool]string{true: "/vex256", false: "/vex128"}[b[i+1]&4 != 0]
+		case b[i] == 0xC4 && i+2 < len(b):
+			c += map[bool]string{true: "/vex256", false: "/vex128"}[b[i+2]&4 != 0]
+		}
+	}
+	return c
 }
 
 func pct(a, b int) float64 {

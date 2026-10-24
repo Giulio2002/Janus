@@ -48,10 +48,17 @@ func explain(w io.Writer, outdir, reportPath string, r *verifiedReport) {
 	p("Verification report %s", displayPath(reportPath))
 	p("")
 	p("What was proved")
-	p("  The Lean kernel accepted %s %s, declared in module %s:", r.Kind, r.Theorem, r.Module)
+	p("  The Lean kernel accepted %s %s, declared in module %s:", termSafe(r.Kind), termSafe(r.Theorem), termSafe(r.Module))
 	p("")
-	p("    %s", strings.ReplaceAll(r.Statement, "\n", "\n    "))
+	p("    %s", strings.ReplaceAll(termSafe(r.Statement), "\n", "\n    "))
 	p("")
+	if len(r.Definitions) > 0 {
+		p("  The statement names proof-local definitions; they are part of its meaning:")
+		for _, d := range r.Definitions {
+			p("    %s", strings.ReplaceAll(termSafe(d), "\n", "\n      "))
+		}
+		p("")
+	}
 	p("  The guarantee is exactly this statement, with its hypotheses and quantifiers. Its")
 	p("  Extracted.* names denote the machine code copied from the binary below; nothing else")
 	p("  about the program is claimed.")

@@ -116,8 +116,8 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("rflags: hw %s model %s defined %s (in %s)",
 			flagString(h.RFlags), flagString(m.RFlags), flagString(mask), flagString(c.RFlags)))
 	}
-	if h.DF {
-		v.Diffs = append(v.Diffs, "rflags: hw sets DF, which the model keeps clear")
+	if h.DF != m.DF {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("rflags: DF hw %v model %v (in %v)", h.DF, m.DF, c.RFlags&L.FlagDF != 0))
 	}
 	if hexv(h.PC) != hexv(m.PC) {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("pc: hw %s (pc%+d) model %s (pc%+d)", h.PC,
@@ -133,6 +133,23 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 				v.Diffs = append(v.Diffs, fmt.Sprintf("xmm%d: hw %s model %s (in %s)", i, h.XMM[i], m.XMM[i], c.XMM[i]))
 			}
 		}
+	}
+	if len(h.YMMH) == 16 {
+		for i := 0; i < 16; i++ {
+			mv := "0x0"
+			if len(m.YMMH) == 16 {
+				mv = m.YMMH[i]
+			}
+			if hexBig(h.YMMH[i]).Cmp(hexBig(mv)) != 0 {
+				in := "0x0"
+				if len(c.YMMH) == 16 {
+					in = c.YMMH[i]
+				}
+				v.Diffs = append(v.Diffs, fmt.Sprintf("ymmh%d: hw %s model %s (in %s)", i, h.YMMH[i], mv, in))
+			}
+		}
+	} else if len(h.XMM) == 16 {
+		v.Diffs = append(v.Diffs, "ymmh: not captured by the native runner")
 	}
 	hm := map[int]int{}
 	for _, e := range h.Mem {
@@ -171,6 +188,8 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 		switch {
 		case strings.HasPrefix(k, "xmm"):
 			k = "xmm"
+		case strings.HasPrefix(k, "ymmh"):
+			k = "ymmh"
 		case k != "pc" && k != "rflags" && k != "mem":
 			k = "reg"
 		}
