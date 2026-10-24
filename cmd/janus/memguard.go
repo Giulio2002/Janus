@@ -832,11 +832,27 @@ func lakeJobMem() int64 {
 	return 3 * gib
 }
 
+// leanThreadsMax caps the Lean parallelism of one janus or script job by CPU, so that several
+// concurrent jobs on one host do not each take every core: JANUS_LEAN_THREADS_MAX if set (a
+// positive integer), else max(2, NumCPU/8).
+func leanThreadsMax() int {
+	if v := os.Getenv("JANUS_LEAN_THREADS_MAX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	n := runtime.NumCPU() / 8
+	if n < 2 {
+		n = 2
+	}
+	return n
+}
+
 // lakeJobs is the number of modules a guarded lake build compiles at once: the per-job memory
-// limit divided by the per-module budget, between 1 and the number of CPUs. Lake sizes its
-// job pool from LEAN_NUM_THREADS.
+// limit divided by the per-module budget, between 1 and leanThreadsMax. Lake sizes its job
+// pool from LEAN_NUM_THREADS.
 func lakeJobs() int {
-	n := runtime.NumCPU()
+	n := leanThreadsMax()
 	g := currentGuard()
 	if g.mech == "off" || g.mech == "none" {
 		return n

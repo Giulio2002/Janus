@@ -309,3 +309,17 @@ echo done`
 }
 
 var regexpJobs = regexp.MustCompile(`(?m)^jobs=[1-8]$`)
+
+func TestLeanThreadsMax(t *testing.T) {
+	t.Setenv("JANUS_LEAN_THREADS_MAX", "3")
+	if got := leanThreadsMax(); got != 3 {
+		t.Fatalf("JANUS_LEAN_THREADS_MAX=3: got %d", got)
+	}
+	if got := lakeJobs(); got > 3 {
+		t.Fatalf("lakeJobs exceeds the CPU cap: %d", got)
+	}
+	t.Setenv("JANUS_LEAN_THREADS_MAX", "bogus")
+	if got := leanThreadsMax(); got < 2 {
+		t.Fatalf("default cap below 2: %d", got)
+	}
+}
