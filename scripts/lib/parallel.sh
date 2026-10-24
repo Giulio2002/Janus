@@ -88,8 +88,11 @@ par_run() {
       # The block runs in a child bash under the job's memory limit (scripts/lib/memguard.sh);
       # its `broken` rows come back through a file.
       export PAR_BLOCK="$1" PAR_BROKEN_FILE="$PAR_DIR/$__par_i.inner"
-      # the child bash gets the caller's functions and (non-readonly) variables as they are now
-      PAR_PRELUDE="$(declare -f); $(declare -p 2>/dev/null | grep -vE '^declare -[a-zA-Z]*r')"
+      # The child bash gets the caller's functions and its shell variables as they are now.
+      # Exported variables are not re-declared: they reach the child through its environment,
+      # as memguard_run sets them (e.g. JANUS_MEMGUARD_CGROUP: the slot's cgroup, not the
+      # caller's). Readonly ones cannot be.
+      PAR_PRELUDE="$(declare -f); $(declare -p 2>/dev/null | grep -vE '^declare -[a-zA-Z]*[rx]')"
       memguard_run -l "$PAR_JOB_MEM" -n "slot$__par_i" -- bash -c "$PAR_PRELUDE"'
         broken=(); eval "$PAR_BLOCK"; st=$?
         if [ ${#broken[@]} -gt 0 ]; then printf "%s\n" "${broken[@]}" > "$PAR_BROKEN_FILE"; fi
