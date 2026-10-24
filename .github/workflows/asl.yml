@@ -1,9 +1,11 @@
 name: ASL equivalence
 
 # Builds the Lean translation of Arm's ASL (vendored, JanusASL/vendor/ArmASL.tar.gz) and checks the
-# kernel-checked equivalence theorems between it and the Janus arm64 model (docs/ASL.md). The model
-# build takes about an hour, so this runs weekly, on demand, and when the arm64 model or JanusASL
-# changes, rather than on every push.
+# kernel-checked equivalence theorems between it and the Janus arm64 model (docs/ASL.md), then runs
+# `janus verify --asl` on the shipped Add, Max, Mul64 and Add128 proofs: each one's ASL corollary is
+# derived from its artifacts, audited and kernel-replayed. The model build takes about an hour, so
+# this runs weekly, on demand, and when the arm64 model, JanusASL or the verifier changes, rather
+# than on every push.
 on:
   workflow_dispatch:
   schedule:
@@ -12,7 +14,14 @@ on:
     branches: [main]
     paths:
       - "Janus/Arm64/**"
+      - "Janus/GoABI.lean"
+      - "Janus/Tools/Audit.lean"
       - "JanusASL/**"
+      - "cmd/janus/**"
+      - "examples/proofs/Add.lean"
+      - "examples/proofs/Max.lean"
+      - "examples/proofs/Mul64.lean"
+      - "examples/proofs/Add128.lean"
       - "scripts/asl.sh"
       - ".github/workflows/asl.yml"
 
@@ -24,8 +33,25 @@ jobs:
     name: Build ArmASL and audit the equivalence theorems
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    env:
+      GO_VERSION: "1.26.0"
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      # janus verify sandboxes the proof under bubblewrap (see ci.yml).
+      - name: Install bubblewrap and allow unprivileged user namespaces
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          bwrap --ro-bind / / --unshare-all --dev /dev --proc /proc --tmpfs /tmp true \
+            && echo "bubblewrap works" || echo "WARNING: bubblewrap self-test failed"
 
       - name: Install elan (toolchain from lean-toolchain)
         run: |
@@ -48,3 +74,21 @@ jobs:
         run: |
           scripts/asl.sh prove | tee audit.txt
           grep -q "only propext, Classical.choice, Quot.sound" audit.txt
+
+      # janus verify --asl on the four examples: the corollary of each shipped theorem, derived
+      # from the artifacts (the same Extracted.program that is identity-checked), audited and
+      # kernel-replayed (ArmASL, lean-sail and JanusASL included). The JanusASL build in janus'
+      # cache is seeded from the one above.
+      - name: janus verify --asl (Add, Max, Mul64, Add128)
+        run: |
+          scripts/asl.sh verify | tee verify-asl.txt
+          test "$(grep -c ': ASL corollary verified' verify-asl.txt)" = 4
+
+      - name: Upload the ASL verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asl-verify
+          path: |
+            artifacts/asl/verify-*.log
+            artifacts/*/verified.json

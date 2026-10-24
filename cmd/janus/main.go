@@ -4,7 +4,7 @@
 //	janus list <binary> [--filter SUBSTR]
 //	janus extract <binary> <symbol> <outdir> [--max-functions N]
 //	janus check <outdir> [--binary PATH]
-//	janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
+//	janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH] [--asl]
 //	janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
 //
 // Exit code 0 on success, 1 on failure; diagnostics go to standard error.
@@ -72,7 +72,7 @@ const usage = `Usage:
   janus list <binary> [--filter SUBSTR]
   janus extract <binary> <symbol> <outdir> [--max-functions N]
   janus check <outdir> [--binary PATH]
-  janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
+  janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH] [--asl]
   janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
   janus version
 ` + extraUsage + `
