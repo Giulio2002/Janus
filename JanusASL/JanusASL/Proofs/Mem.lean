@@ -1,4 +1,5 @@
 import JanusASL.Proofs.Config
+import JanusASL.Proofs.Rev
 
 /-! # Loads and stores: memory through the ASL's translation (`UserMapped`) -/
 
@@ -178,13 +179,13 @@ def MemRel (m : Janus.Arm64.Memory) (s : SState) : Prop :=
   ∀ a, InRegion m a false → s.mem.get? a = some (m.bytes a)
 
 /-- The registers `janus_step` writes before decoding (`stepEntry`). -/
-def entryRegs : List Register :=
+def stepEntryRegs : List Register :=
   [.SEE, .__janus_exc_taken, .__BranchTaken, .__ExclusiveMonitorSet, .__ThisInstrEnc, .__ThisInstr, .__currentCond]
 
 /-- What may change between the start of an instruction and one of its memory accesses: the
 general-purpose registers, SP, the step-entry registers, and bytes of the regions. -/
 structure TFrame (m : Janus.Arm64.Memory) (s s' : SState) : Prop where
-  regs : ∀ r, isGprReg r = false → r ≠ .SP_EL0 → r ∉ entryRegs → s'.regs.get? r = s.regs.get? r
+  regs : ∀ r, isGprReg r = false → r ≠ .SP_EL0 → r ∉ stepEntryRegs → s'.regs.get? r = s.regs.get? r
   mem : ∀ a, ¬ InRegion m a false → s'.mem.get? a = s.mem.get? a
   cycle : s'.cycleCount = s.cycleCount
   out : s'.sailOutput = s.sailOutput
@@ -197,6 +198,20 @@ structure TransOK (d : AddressDescriptor) (va : BitVec 64) : Prop where
   inner : d.memattrs.inner.attrs = MemAttr_WB
   outer : d.memattrs.outer.attrs = MemAttr_WB
 
+/-- LDAR/STLR (`CreateAccDescAcqRel`): acquire for loads, release for stores. -/
+def acqRelAcc (w : Bool) : AccessDescriptor := { gprAcc w with acqsc := !w, relsc := w }
+
+/-- LDAPR (`CreateAccDescLDAcqPC`). -/
+def acqPCAcc : AccessDescriptor := { gprAcc false with acqpc := true }
+
+/-- LDXR/LDAXR, STXR/STLXR (`CreateAccDescExLDST`). -/
+def exclAcc (w acqrel : Bool) : AccessDescriptor :=
+  { gprAcc w with exclusive := true, acqsc := acqrel && !w, relsc := acqrel && w }
+
+/-- The access descriptors of ordered and exclusive single-register accesses (tag check cleared). -/
+def OrdAcc (w : Bool) (acc : AccessDescriptor) : Prop :=
+  acc = acqRelAcc w ∨ (w = false ∧ acc = acqPCAcc) ∨ (∃ ar, acc = exclAcc w ar)
+
 /-- **`UserMapped m s`**: in every state an instruction started in `s` can reach before a memory
 access (`TFrame`), the ASL's own `AArch64_TranslateAddress` maps every byte of `m`'s regions
 (as an EL0 load, or as a store for writable regions) to the identity physical address as
@@ -206,6 +221,10 @@ evaluates it on its tables (`janus-asl-check`, docs/ASL.md). -/
 structure UserMapped (m : Janus.Arm64.Memory) (s : SState) : Prop where
   trans : ∀ s', TFrame m s s' → ∀ (va : BitVec 64) (w aligned : Bool) (size : Int), InRegion m va.toNat w →
     ∃ d, (AArch64_TranslateAddress va (gprAcc w) aligned size).run s' = .ok d s' ∧ TransOK d va
+  /-- The same for the access descriptors of the ordered and exclusive accesses (`OrdAcc`). -/
+  trans_ord : ∀ s', TFrame m s s' → ∀ (va : BitVec 64) (w aligned : Bool) (size : Int) (acc : AccessDescriptor),
+    OrdAcc w acc → InRegion m va.toNat w →
+    ∃ d, (AArch64_TranslateAddress va acc aligned size).run s' = .ok d s' ∧ TransOK d va
   nodev : ∀ a, InRegion m a false → a / 2 ^ 16 ≠ 0x2C00 ∧ a / 2 ^ 16 ≠ 0x3C00
 
 theorem InRegion.lt {m : Janus.Arm64.Memory} {a : Nat} {w : Bool} (h : InRegion m a w) : a < 2 ^ 48 := by
@@ -315,6 +334,99 @@ theorem run_MemSingle_read {t : SState} (m : Janus.Arm64.Memory) (hc : LinuxEL0C
     undefined_ErrorState, undefined_Fault, run_internal_pick, hv, CreatePhysMemRetStatus]
   all_goals rw [Nat.mod_eq_of_lt (by rw [show n * 8 = 8 * n from Nat.mul_comm n 8]; exact v.isLt), hvn]
 
+/-! ## Byte loops -/
+theorem updateSubrange'_toNat_low {N : Nat} (x : BitVec N) (lo len : Nat) (y : BitVec len)
+    (hlen : lo + len ≤ N) (hx : x.toNat < 2 ^ lo) :
+    (Sail.BitVec.updateSubrange' x lo len y).toNat = x.toNat + y.toNat * 2 ^ lo := by
+  have hy := y.isLt
+  have hb : x.toNat + y.toNat * 2 ^ lo < 2 ^ N := by
+    have : (y.toNat + 1) * 2 ^ lo ≤ 2 ^ len * 2 ^ lo := Nat.mul_le_mul_right _ hy
+    have : 2 ^ len * 2 ^ lo = 2 ^ (lo + len) := by rw [← Nat.pow_add, Nat.add_comm]
+    have : 2 ^ (lo + len) ≤ 2 ^ N := Nat.pow_le_pow_right (by decide) hlen
+    rw [Nat.add_mul] at *; omega
+  have e : Sail.BitVec.updateSubrange' x lo len y = BitVec.ofNat N (x.toNat + y.toNat * 2 ^ lo) := by
+    apply BitVec.eq_of_getLsbD_eq
+    intro k hk
+    rw [getLsbD_updateSubrange' x lo len y k hlen, BitVec.getLsbD_ofNat]
+    rw [show x.toNat + y.toNat * 2 ^ lo = y.toNat <<< lo ||| x.toNat by
+      rw [← Nat.shiftLeft_add_eq_or_of_lt hx, Nat.shiftLeft_eq, Nat.add_comm]]
+    simp only [Nat.testBit_or, Nat.testBit_shiftLeft, hk, decide_true, Bool.true_and]
+    by_cases h1 : lo ≤ k ∧ k < lo + len
+    · rw [if_pos h1]
+      have : x.toNat.testBit k = false := Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hx (Nat.pow_le_pow_right (by decide) h1.1))
+      simp [h1.1, this, BitVec.getLsbD]
+    · rw [if_neg h1]
+      by_cases h2 : lo ≤ k
+      · have hk2 : lo + len ≤ k := by omega
+        have : y.toNat.testBit (k - lo) = false := Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hy (Nat.pow_le_pow_right (by decide) (by omega)))
+        have : x.toNat.testBit k = false := Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hx (Nat.pow_le_pow_right (by decide) h2))
+        simp [h2, *, BitVec.getLsbD]
+      · simp [h2, BitVec.getLsbD]
+  rw [e, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hb]
+
+theorem readLE_lt (m : Janus.Arm64.Memory) (a n : Nat) : m.readLE a n < 2 ^ (8 * n) := by
+  induction n generalizing a with
+  | zero => simp [Janus.Arm64.Memory.readLE]
+  | succ n ih =>
+    simp only [Janus.Arm64.Memory.readLE]
+    have h1 := ih (a + 1)
+    have h2 := (m.bytes a).isLt
+    rw [show 8 * (n + 1) = 8 + 8 * n by omega, Nat.pow_add]
+    have : 2 ^ 8 = 256 := rfl
+    omega
+
+theorem readLE_succ_high (m : Janus.Arm64.Memory) (a n : Nat) :
+    m.readLE a (n + 1) = m.readLE a n + (m.bytes (a + n)).toNat * 2 ^ (8 * n) := by
+  induction n generalizing a with
+  | zero => simp [Janus.Arm64.Memory.readLE]
+  | succ n ih =>
+    rw [Janus.Arm64.Memory.readLE, ih (a + 1), Janus.Arm64.Memory.readLE]
+    rw [show a + 1 + n = a + (n + 1) by omega, show 8 * (n + 1) = 8 + 8 * n by omega, Nat.pow_add]
+    have : 2 ^ 8 = 256 := rfl
+    rw [this, Nat.mul_add, Nat.mul_left_comm]; omega
+
+theorem updateSubrange_byte_toNat {N : Nat} (b : BitVec N) (hi lo : Nat) (y : BitVec (1 * 8)) (hlo : hi = lo + 7)
+    (hN : lo + 8 ≤ N) (hb : b.toNat < 2 ^ lo) :
+    (Sail.BitVec.updateSubrange b hi lo (BitVec.setWidth (hi - lo + 1) y)).toNat = b.toNat + y.toNat * 2 ^ lo := by
+  subst hlo
+  rw [Sail.BitVec.updateSubrange, updateSubrange'_toNat_low _ _ _ _ (by omega) hb, BitVec.toNat_setWidth,
+    Nat.mod_eq_of_lt (by have := y.isLt; rw [show lo + 7 - lo + 1 = 1 * 8 by omega]; exact this)]
+
+/-- The byte loop of `Mem_read` (an access that crosses a 16-byte boundary): byte `i` of the
+result is the 1-byte read at `address + i`. -/
+theorem run_byteLoop_read {t : SState} (m : Janus.Arm64.Memory) (A : AccessDescriptor) (al : Bool) (va : BitVec 64)
+    (n : Nat) (hn : 1 ≤ n) (hn16 : n ≤ 16)
+    (h1 : ∀ i : Int, 1 ≤ i → i ≤ (n : Int) - 1 → (AArch64_MemSingle_read (Sail.BitVec.addInt va i) 1 A al).run t =
+      .ok (BitVec.ofNat (1 * 8) (m.bytes (va.toNat + i.toNat)).toNat) t)
+    (init : BitVec (n * 8)) (hinit : init.toNat = m.readLE va.toNat 1) :
+    ∃ v, (forIn ({ start := 1, stop := (n : Int) - 1, step_pos := by decide } : IntRange) init
+        (fun i (b : BitVec (n * 8)) =>
+          (fun (x : BitVec (1 * 8)) => ForInStep.yield (Sail.BitVec.updateSubrange b (8 * i + 7).toNat (8 * i).toNat
+            x)) <$>
+          AArch64_MemSingle_read (Sail.BitVec.addInt va i) 1 A al)).run t = .ok v t ∧ v.toNat = m.readLE va.toNat n := by
+  let g : Int → BitVec (n * 8) → BitVec (n * 8) := fun i b =>
+    Sail.BitVec.updateSubrange b (8 * i + 7).toNat (8 * i).toNat
+      (BitVec.ofNat (1 * 8) (m.bytes (va.toNat + i.toNat)).toNat)
+  let P : Int → BitVec (n * 8) → Prop := fun i b => b.toNat = m.readLE va.toNat i.toNat
+  have hstep : ∀ i b, 1 ≤ i → i ≤ (n : Int) - 1 → P i b → P (i + 1) (g i b) := by
+    intro i b hi1 hi2 hp
+    simp only [P, g] at hp ⊢
+    obtain ⟨k, rfl⟩ : ∃ k : Nat, i = k := ⟨i.toNat, by omega⟩
+    simp only [Int.toNat_natCast, show ((k : Int) + 1).toNat = k + 1 by omega] at hp ⊢
+    rw [updateSubrange_byte_toNat _ _ _ _ (by omega) (by omega)
+      (by rw [hp, show (8 * (k : Int)).toNat = 8 * k by omega]; exact readLE_lt m _ _)]
+    rw [readLE_succ_high, hp, show (8 * (k : Int)).toNat = 8 * k by omega]
+    simp
+  have h0 : P 1 init := by simp only [P]; exact hinit
+  refine ⟨intFold g 1 ((n : Int) - 1) init, ?_, ?_⟩
+  · apply run_forIn_inv 1 ((n : Int) - 1) _ init _ g P t h0
+    intro i b hi1 hi2 hp
+    refine ⟨?_, hstep i b hi1 hi2 hp⟩
+    simp only [run_map, h1 i hi1 hi2]; rfl
+  · have := intFold_inv g P 1 ((n : Int) - 1) init (by omega) h0 hstep
+    simp only [P, show ((n : Int) - 1 + 1).toNat = n by omega] at this
+    exact this
+
 theorem accessible_bytes {m : Janus.Arm64.Memory} {a n : Nat} {w : Bool} (h : m.accessible a n w = true) :
     ∀ i < n, InRegion m (a + i) w := by
   intro i hi
@@ -331,27 +443,80 @@ theorem accessible_lt {m : Janus.Arm64.Memory} {a n : Nat} {w : Bool} (h : m.acc
   obtain ⟨⟨r, hr, ⟨⟨h1, h2⟩, h3⟩, h4⟩, _⟩ := h
   omega
 
+theorem addInt_toNat (va : BitVec 64) (i : Nat) (h : va.toNat + i < 2 ^ 64) :
+    (Sail.BitVec.addInt va (i : Int)).toNat = va.toNat + i := by
+  simp only [Sail.BitVec.addInt, BitVec.toNat_add, BitVec.toNat_ofInt]
+  have : ((i : Int) % (2 ^ 64 : Nat)).toNat = i % 2 ^ 64 := by omega
+  rw [this]; omega
+
+/-- A 1-byte read of a region byte (the elements of `Mem_read`'s byte loop). -/
+theorem run_MemSingle_read_byte {s t : SState} {m : Janus.Arm64.Memory} (hU : UserMapped m s) (hf : TFrame m s t)
+    (hc : LinuxEL0Config t) (hM : MemRel m t) (va : BitVec 64) (hr : InRegion m va.toNat false) (tc al : Bool) :
+    (AArch64_MemSingle_read va 1 { gprAcc false with tagchecked := tc } al).run t =
+      .ok (BitVec.ofNat (1 * 8) (m.bytes va.toNat).toNat) t := by
+  obtain ⟨v, hv, hvn⟩ := run_MemSingle_read m hc (n := 1) (Or.inl rfl) (by omega) tc al
+    (hU.trans t hf va false al 1 hr) hr.lt (hU.nodev _ hr) (fun i hi => by
+      rw [show i = 0 by omega, Nat.add_zero]; exact hM _ hr)
+  rw [AArch64_MemSingle_read, hv]
+  congr 1
+  apply BitVec.eq_of_toNat_eq
+  rw [hvn]; simp [Janus.Arm64.Memory.readLE]
+
 theorem run_Mem_read {s t : SState} {m : Janus.Arm64.Memory} (hU : UserMapped m s) (hf : TFrame m s t)
     (hc : LinuxEL0Config t) (hM : MemRel m t) (va : BitVec 64) (n : Nat) (hn : n = 1 ∨ n = 2 ∨ n = 4 ∨ n = 8)
     (hacc : m.accessible va.toNat n false = true) (tc : Bool) :
     ∃ v, (Mem_read va n { gprAcc false with tagchecked := tc }).run t = .ok v t ∧ v.toNat = m.readLE va.toNat n := by
   have hreg := accessible_bytes hacc
   have hlt := accessible_lt hacc
+  have hr0 : InRegion m va.toNat false := by have := hreg 0 (by omega); rwa [Nat.add_zero] at this
   have hb : ∀ i < n, t.mem.get? (va.toNat + i) = some (m.bytes (va.toNat + i)) := fun i hi => hM _ (hreg i hi)
-  have hsz : ((n == 1) || ((n == 2) || ((n == 4) || ((n == 8) || (n == 16))))) = true := by
+  have hsz2 : (n == 1 || n == 2 || n == 4 || n == 8 || n == 16) = true := by
     rcases hn with h | h | h | h <;> subst h <;> rfl
   have hal := isAligned_iff va n (by omega)
   have hai := run_AllInAlignedQuantity t va n (by omega) (by omega) (by omega)
-  have hsz2 : (n == 1 || n == 2 || n == 4 || n == 8 || n == 16) = true := by
-    rcases hn with h | h | h | h <;> subst h <;> rfl
   have hU1 := run_UnalignedAccessFaults_gpr hc false tc va n
   have hat : ({ gprAcc false with tagchecked := tc } : AccessDescriptor).acctype = .AccessType_GPR := rfl
-  unfold Mem_read Mem_read__2
-  generalize ({ gprAcc false with tagchecked := tc } : AccessDescriptor) = A at hU1 hat ⊢
-  simp only [run_bind, run_sail_assert_true, hsz2, run_pure, run_undefined_bitvector, undefined_Constraint,
-    run_internal_pick, hU1, Bool.and_false, andM, toBool, Bool.false_eq_true,
-    ite_false, hat, HaveLSE2Ext, run_IsFeatureImplemented hc, hai, run_BigEndian_gpr hc,
-    show (AccessType.AccessType_GPR == AccessType.AccessType_ASIMD) = false from rfl, Bool.false_and, if_false]
-  done
+  by_cases hq : va.toNat % 16 + n ≤ 16
+  · obtain ⟨v, hv, hvn⟩ := run_MemSingle_read m hc (n := n) (by omega) hq tc (IsAligned__1 va n)
+      (hU.trans t hf va false _ n hr0) hr0.lt (hU.nodev _ hr0) hb
+    rw [decide_eq_true hq] at hai
+    refine ⟨v, ?_, hvn⟩
+    unfold Mem_read Mem_read__2
+    generalize ({ gprAcc false with tagchecked := tc } : AccessDescriptor) = A at hU1 hat hv ⊢
+    cases ha : IsAligned__1 va (n : Int) <;> rw [ha] at hv <;>
+    cfg_simp [hsz2, undefined_Constraint, run_internal_pick, hU1, hat, HaveLSE2Ext, run_IsFeatureImplemented hc, hai,
+      run_BigEndian_gpr hc, ha, hv, show (AccessType.AccessType_GPR == AccessType.AccessType_ASIMD) = false from rfl]
+  · rw [decide_eq_false hq] at hai
+    have hn2 : n = 2 ∨ n = 4 ∨ n = 8 := by omega
+    have hna : IsAligned__1 va (n : Int) = false := by
+      rw [hal]; apply decide_eq_false; intro h0; apply hq
+      rcases hn2 with h | h | h <;> subst h <;> omega
+    have h0 := run_MemSingle_read_byte hU hf hc hM va hr0 tc false
+    have h1 : ∀ i : Int, 1 ≤ i → i ≤ (n : Int) - 1 →
+        (AArch64_MemSingle_read (Sail.BitVec.addInt va i) 1 { gprAcc false with tagchecked := tc } true).run t =
+          .ok (BitVec.ofNat (1 * 8) (m.bytes (va.toNat + i.toNat)).toNat) t := by
+      intro i hi1 hi2
+      obtain ⟨k, rfl⟩ : ∃ k : Nat, i = k := ⟨i.toNat, by omega⟩
+      have ha := addInt_toNat va k (by omega)
+      have hrk := hreg k (by omega)
+      rw [← ha] at hrk
+      rw [run_MemSingle_read_byte hU hf hc hM _ hrk tc true, ha, Int.toNat_natCast]
+    have hinit : (Sail.BitVec.updateSubrange (0#(n * 8)) 7 0 (m.bytes va.toNat)).toNat = m.readLE va.toNat 1 := by
+      rw [Sail.BitVec.updateSubrange, updateSubrange'_toNat_low _ _ _ _ (by omega) (by simp)]
+      simp [Janus.Arm64.Memory.readLE]
+    obtain ⟨v, hv, hvn⟩ := run_byteLoop_read m { gprAcc false with tagchecked := tc } true va n (by omega) (by omega)
+      h1 _ hinit
+    refine ⟨v, ?_, hvn⟩
+    unfold Mem_read Mem_read__2
+    generalize ({ gprAcc false with tagchecked := tc } : AccessDescriptor) = A at hU1 hat h0 h1 hv ⊢
+    rcases hn2 with rfl | rfl | rfl <;> simp only [Int.cast_ofNat_Int, Int.reduceSub, Nat.reduceMul] at hna hai hU1 h1 hv <;>
+    cfg_simp [hsz2, undefined_Constraint, run_internal_pick, hU1, hat, HaveLSE2Ext, run_IsFeatureImplemented hc, hai,
+      run_BigEndian_gpr hc, hna, h0, show (AccessType.AccessType_GPR == AccessType.AccessType_ASIMD) = false from rfl,
+      ConstrainUnpredictable, __UNKNOWN_Constraint, HaveLRCPC3Ext,
+      show Int.ediv 2 2 = 1 from rfl, show Int.ediv 4 2 = 2 from rfl, show Int.ediv 8 2 = 4 from rfl,
+      show (Constraint.Constraint_NONE == Constraint.Constraint_NONE) = true from rfl,
+      show (Constraint.Constraint_NONE == Constraint.Constraint_FAULT) = false from rfl]
+    all_goals erw [hv]
+    all_goals simp only [run_BigEndian_gpr hc, Bool.false_eq_true, ite_false, run_pure]
 
 end JanusASL.Proofs
