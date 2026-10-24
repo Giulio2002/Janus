@@ -363,7 +363,7 @@ func (fw *framework) ready(dir string, targets []string) bool {
 			return false
 		}
 	}
-	if fw.Source != "directory" && !sameTree(dir, fw.Files, func(top string) bool { return top == ".lake" }) {
+	if dir != fw.Dir && !sameTree(dir, fw.Files, func(top string) bool { return top == ".lake" }) {
 		return false
 	}
 	p, err := frameworkPins(filepath.Join(dir, ".lake", "build", "lib", "lean"), fw.Files)
@@ -440,7 +440,10 @@ func (fw *framework) build(dir, lake string, targets []string, stampPath string,
 			}
 		}
 	}
-	if fw.Source != "directory" {
+	// A copy (the cached base of the embedded framework, or of a --janus-root checkout for a
+	// consumer workspace) gets the framework's sources first; a checkout is built in place
+	// (cherry-picked from c386fa7).
+	if dir != fw.Dir {
 		if err := syncTree(dir, fw.Files, func(top string) bool { return top == ".lake" }); err != nil {
 			return &diag{Invalid: true, Msg: "Cannot write the Janus framework to the cache: " + err.Error(), Stage: "Janus library build",
 				Next: "Set JANUS_CACHE_DIR to a writable directory."}
@@ -476,7 +479,7 @@ func (fw *framework) build(dir, lake string, targets []string, stampPath string,
 	if err := writeFileAtomic(stampPath, b); err != nil {
 		return &diag{Invalid: true, Msg: "Cannot write the framework build stamp: " + err.Error(), Stage: "Janus library build"}
 	}
-	if fw.Source != "directory" {
+	if dir != fw.Dir {
 		now := time.Now()
 		_ = os.Chtimes(dir, now, now)
 	}
