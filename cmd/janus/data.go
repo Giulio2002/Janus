@@ -270,15 +270,20 @@ func (b *Binary) dataSymbolAt(addr uint64) (Func, bool, uint64) {
 
 // collectData resolves references into copied read-only objects and skipped references.
 // Overlapping or adjacent objects are merged; the result is sorted by address.
-func collectData(b *Binary, refs []DataRef) ([]DataSeg, []SkippedData) {
+// extra are references not made by the code (dynamic targets named with --targets); they are
+// copied like code references but not reported as such.
+func collectData(b *Binary, refs []DataRef, extra ...DataRef) ([]DataSeg, []SkippedData) {
 	type span struct {
 		name, sec  string
 		start, end uint64
+		// a whole static itab or funcval: kept as its own segment under its symbol name, so a
+		// specification can name it (Janus.Spec.ItabIs, dynamic.go)
+		atomic bool
 	}
 	var spans []span
 	var skipped []SkippedData
 	seenSkip := map[[2]uint64]bool{}
-	for _, r := range refs {
+	for _, r := range append(append([]DataRef(nil), refs...), extra...) {
 		sec, ok := b.sectionOf(r.Target)
 		sym, hasSym, next := b.dataSymbolAt(r.Target)
 		skip := func(reason string) {
@@ -314,13 +319,14 @@ func collectData(b *Binary, refs []DataRef) ([]DataSeg, []SkippedData) {
 		var sp span
 		switch {
 		case sec.Exec: // literal pool word in .text
-			sp = span{fmt.Sprintf("%s+0x%x", sec.Name, r.Target-sec.Addr), sec.Name, r.Target, r.Target + 8}
+			sp = span{fmt.Sprintf("%s+0x%x", sec.Name, r.Target-sec.Addr), sec.Name, r.Target, r.Target + 8, false}
 		case hasSym && sym.Size <= maxDataSymbol:
-			sp = span{sym.Name, sec.Name, sym.Addr, sym.End()}
+			_, _, isCode := b.codeWords(sym)
+			sp = span{sym.Name, sec.Name, sym.Addr, sym.End(), isCode}
 		case hasSym:
-			sp = span{fmt.Sprintf("%s+0x%x", sym.Name, r.Target-sym.Addr), sec.Name, r.Target, min(r.Target+dataWindow, sym.End())}
+			sp = span{fmt.Sprintf("%s+0x%x", sym.Name, r.Target-sym.Addr), sec.Name, r.Target, min(r.Target+dataWindow, sym.End()), false}
 		default:
-			sp = span{fmt.Sprintf("%s+0x%x", sec.Name, r.Target-sec.Addr), sec.Name, r.Target, min(r.Target+dataWindow, next)}
+			sp = span{fmt.Sprintf("%s+0x%x", sec.Name, r.Target-sec.Addr), sec.Name, r.Target, min(r.Target+dataWindow, next), false}
 		}
 		sp.start = max(sp.start, sec.Addr)
 		sp.end = min(sp.end, sec.End())
@@ -336,7 +342,11 @@ func collectData(b *Binary, refs []DataRef) ([]DataSeg, []SkippedData) {
 	})
 	var merged []span
 	for _, sp := range spans {
-		if n := len(merged); n > 0 && sp.start <= merged[n-1].end && sp.sec == merged[n-1].sec {
+		if n := len(merged); n > 0 && merged[n-1].atomic && sp.atomic && sp.start == merged[n-1].start && sp.end == merged[n-1].end {
+			continue
+		}
+		if n := len(merged); n > 0 && sp.start <= merged[n-1].end && sp.sec == merged[n-1].sec &&
+			!((sp.atomic || merged[n-1].atomic) && sp.start >= merged[n-1].end) {
 			merged[n-1].end = max(merged[n-1].end, sp.end)
 			continue
 		}

@@ -98,6 +98,7 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 | `janus_simp [lemmas]` | The post-processing simp set `janus_post` plus the state hypotheses and `lemmas`. Closes invariant side goals (`S'.regs 2 = i + 1`, …). |
 | `janus_arith` | `omega` after adding `readLE m a n < 256^n` for every memory read, and normalising carry terms. For the arithmetic left after execution. Does nothing if there is no goal. |
 | `janus_data hd` | From `hd : p.DataLoaded m`: readability of each `.rodata` object, and a rewrite rule that evaluates loads from it at literal addresses. |
+| `janus_dyn h₁ h₂ …` | From dynamic-call hypotheses (`ItabIs`, `FuncvalIs`, `ClosureCtx`): the itab's literal address and words, the funcval's code word, the captured variables, as equations the executors use (both ISAs). See [Dynamic calls](#dynamic-calls-hashwith-hashtwice-mapsum-deferadd). |
 | `janus_cases h` | From `h : k < N` (`N` a literal): `N` goals with `k` replaced by `0, …, N-1`. For table lookups at a symbolic index. |
 | `janus_frame` | Proves `MemFrame m₀ m rs` (the memory part of a callee summary, see Calls): peels the stores of `m`, goes through the `MemFrame` hypotheses of called summaries, side conditions by `omega`. |
 | `janus_eval% t` | A term: the closed natural number `t` (e.g. `segAddr Extracted.program "f" + 8`) evaluated to a numeral at elaboration time, for a lemma argument that must be a literal. |
@@ -192,6 +193,9 @@ about regions**, stated with `toNat` on the argument variables. Destructure the 
 | `copyWords m dst src i` | `m` after copying the first `i` words (a copy loop's memory). |
 | `StackOK s below above` | `SP` 16-aligned, `[SP-below, SP+above)` writable, below `2^48`. |
 | `GuardOK s adj` | The stack-growth prologue falls through (`= GoABI.StackGuardOK`). |
+| `ItabIs ds m tab name` | `tab` is the static itab `name` (`"go:itab.*T,I"`) of the extracted data `ds`, which `m` holds read-only (`Janus.Spec.Dynamic`). |
+| `FuncvalIs m fv fn` | The funcval at `fv` is readable and its code word is `fn`. |
+| `ClosureCtx m fv vars` | The words after it hold the captured `vars` (`Janus.Spec.ClosureCtx`; `GoABI.ClosureCtx` is the context *register*). |
 
 The outcome predicates (`Janus.GoABI`): `Returns`, `Panics` (a panic stub), `Faults` (a fault
 other than running out of fuel), `NeverPanics` (no panic stub and no fault), `GrowsStack`; the
@@ -317,6 +321,77 @@ of a summary is `ReachesRet`), so a call chain is proved bottom-up, each functio
   level, `GuardOK s adj` with `adj` the extra depth of the deeper stack-guard checks, and the
   guard slot `[X28 + 16, +8)` disjoint from the stack window. The ranges are easy to get wrong;
   the stuck message names the store that is outside them.
+
+### Dynamic calls (`HashWith`, `HashTwice`, `MapSum`, `DeferAdd`)
+
+An interface method call, a call of a func value (closure or method value) and the call of a
+deferred closure are indirect: `ldr x3, [x0, #24]; blr x3` (amd64: `MOVQ 24(AX), DX; CALL DX`)
+jumps to whatever word memory holds. The executor follows such a call as soon as the target
+register is a **literal**, and then treats it like a direct call: a summary passed with
+`calls [...]` is applied at the target's entry, otherwise the target is executed (it must be in
+the extraction). Two situations:
+
+* **The code being proved builds the func value itself** (`HashTwice` passes the method value
+  `h.Hash` to `ApplyTwice`; `DeferAdd` defers a closure). The funcval is a store in the frame,
+  the code word is read back from it, and nothing has to be assumed: `janus_run` simply runs
+  through the call. The extractor copies the target because the code computes its address
+  (`dynamicTargets` with `via: "code-address"` in `identity.json`).
+* **The func value or interface comes from the caller** (`HashWith(h Hasher, …)`,
+  `MapSum(f func…, …)`). Which code it reaches is then a **hypothesis of the theorem**, stated with
+  the vocabulary of `Janus.Spec.Dynamic`, and visible in the printed statement:
+
+  ```lean
+  theorem correctness (tab h x : BitVec 64) :
+      Ensures Extracted.program Extracted.entry [tab, h, x]
+        (fun s => ItabIs Extracted.program.data s.mem tab
+                    "go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher" ∧ …)
+        (fun s s' => s'.regs 0 = x * BitVec.ofNat 64 (s.mem.readLE h.toNat 8)) ∧ …
+  ```
+
+  `ItabIs ds m tab name` says `tab` is the address of the static itab `name` and that memory
+  holds its bytes (copied from `.rodata`) read-only, so `Fun[k]` (offset `24 + 8k`) is the
+  method address in the binary. For a closure, `FuncvalIs m f fn` gives its code word
+  (`segAddr Extracted.program "example.com/basic.AffineSum.func1"`) and `ClosureCtx m f [a, b]`
+  the captured variables after it, which the closure reads through the context register
+  (`X26` on arm64, `RDX` on amd64).
+
+  Extract the possible targets with `janus extract … --targets SYM,…` (an itab copies the itab
+  as a data object named after its symbol, and the code of every method in it; a function or a
+  static funcval `…·f` copies that function). `scripts/example-targets.sh` lists the ones the
+  examples use.
+
+In the proof, destructure the precondition (the stack window first), then `janus_dyn h₁ h₂ …`
+turns the hypotheses into what the executor uses: `h_tab : tab = BitVec.ofNat 64 <addr>`
+(substituted when `tab` is a variable), `h_dyn… : m.readLE <addr+8j> 8 = <word>` for every
+word of the itab, `m.readLE f.toNat 8 = <code address>`, `m.readLE (f.toNat + 8 + 8i) 8 = vᵢ.toNat`,
+the `accessible` facts and bounds, and for an itab its disjointness from every writable range
+in the context (it is read-only, so stack stores cannot change it). Each fact is proved from the
+hypothesis by a lemma of `Janus.Spec.Dynamic`, the literals by kernel-checked evaluations.
+Equations named `h_dyn…` are rewrite rules of every step:
+
+```lean
+  intro ret hret s hs ⟨hi, ⟨hh, hhb⟩, hd, ⟨hg1, hg2, hg3⟩, hal, hb, ha, hw⟩
+  janus_intro hs
+  janus_dyn hi
+  simp only [Disjoint] at hd
+  janus_run calls [mul_summary, rot_summary]
+```
+
+The funcval and the captured variables of a closure argument are ordinary memory: state that
+they are disjoint from the stack window, as for any buffer. A loop that calls a closure
+(`MapSum`) keeps the closure hypotheses as parameters of its invariant lemma and calls
+`janus_dyn` there; the stack slots it rewrites every iteration are described by a `MemFrame`
+over the memory at the loop head (`MemFrame mem0 m [(lo, hi)]`, re-established with
+`MemFrame.writeLE`), so the invariant does not have to spell out the growing store chain.
+
+**`defer`.** Go 1.26 open-codes most defers: the deferred closure's funcval is built in the
+frame, a `deferBits` byte in the frame tracks it, and each exit calls the closure inline
+(`DeferAdd`). Such a function also contains a `bl runtime.deferreturn` block that only the panic
+recovery path reaches; the extractor does not follow it (`omittedCalls` in `identity.json`), so it
+faults if reached and a theorem shows it is not. Defers the compiler cannot open-code (in loops,
+more than 8 per function) allocate defer records through `runtime.deferproc*` and call
+`runtime.deferreturn` on every exit: these are not supported (the call faults), as are `recover`
+and panics that unwind through defers (see SOUNDNESS.md).
 
 ### Read-only data (`SetOne256`, `HexDigit`)
 
