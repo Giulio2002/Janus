@@ -422,9 +422,10 @@ What was changed:
 * **The decode-chain proofs are split** (`JanusASL/tools/split_proofs.py FILE 4`). `LdStDecode`,
   `LdStDecode9`, `LdStDecodeP` and `LdStDecodeR` are now import lists of `<File>/PartNN` modules
   with 4 lemmas each. Each part repeats the header, and the lemmas are copied byte for byte
-  (`split_proofs.py --check FILE` compares against git). As one module, a file keeps every
-  finished proof until it ends, so its peak grew with its length (about 0.4 GiB per lemma). The
-  parts also build in parallel. Split new generated chain files the same way.
+  (`split_proofs.py --check FILE REV` compares them with the file at a git revision). As one
+  module, a file keeps every finished proof until it ends, so its peak grew with its length
+  (about 0.4 GiB per lemma). The parts also build in parallel. Split new generated chain files
+  the same way.
 * **Lake's job count comes from memory.** `scripts/asl.sh build`/`prove`/`replay` run Lake with
   `LEAN_NUM_THREADS=ASL_JOBS`. Lake has no `-j`. Its thread pool bounds the number of Lean
   processes it runs at once, and each Lean process then elaborates with as many threads. The

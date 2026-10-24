@@ -2,7 +2,7 @@
 """Split a large generated proof file of JanusASL.Proofs into smaller modules (docs/ASL.md, "Memory").
 
     split_proofs.py FILE.lean [PER_PART]          split (default 4 top-level commands per part)
-    split_proofs.py --check FILE.lean             verify an existing split against git's FILE.lean
+    split_proofs.py --check FILE.lean REV         verify an existing split against FILE.lean at git REV
 
 The decode-chain files (`LdStDecode*.lean`, made by `tools/chain.py`) are long lists of
 independent lemmas. Elaborated as one module, `lean` holds every finished proof and its info
@@ -91,9 +91,9 @@ def main():
     if check:
         a = a[1:]
     path = a[0]
-    per = int(a[1]) if len(a) > 1 else 4
+    per = int(a[1]) if len(a) > 1 and not check else 4
     if check:
-        orig = subprocess.run(["git", "show", "HEAD:./" + os.path.basename(path)], cwd=os.path.dirname(path) or ".",
+        orig = subprocess.run(["git", "show", a[1] + ":./" + os.path.basename(path)], cwd=os.path.dirname(path) or ".",
                               capture_output=True, text=True, check=True).stdout
         print(verify(path, orig))
         return
