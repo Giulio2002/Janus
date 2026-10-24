@@ -577,9 +577,10 @@ where
       if d.isImplementationDetail then continue
       let ty ← instantiateMVars d.type
       if ty.isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
-      -- (not equations: the executor uses them as rewrite rules, and simplifying one with
-      -- itself would turn it into `True`)
-      else if !before.contains d.fvarId && (← isProp ty) && !ty.isAppOfArity ``Eq 3 then
+      -- (not equations other than `accessible` facts: the executor uses them as rewrite
+      -- rules, and simplifying one with itself would turn it into `True`)
+      else if !before.contains d.fvarId && (← isProp ty) &&
+          (!ty.isAppOfArity ``Eq 3 || (ty.getArg! 1).isAppOfArity ``Memory.accessible 4) then
         ids := ids.push d.fvarId
     if ids.isEmpty then return g
     setGoals [g]
