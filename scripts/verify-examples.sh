@@ -15,7 +15,8 @@ cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 
 all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimbs CopyWords SumSquares
-     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte)
+     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte
+     Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
@@ -40,8 +41,11 @@ for n in "${names[@]}"; do
     continue
   fi
   out="artifacts/$n"
+  sym="example.com/basic.$n"
+  # A runtime function verified on its own (examples/proofs/MapAccess1Small.lean).
+  [ "$n" = MapAccess1Small ] && sym=runtime.mapaccess1_fast64
   # shellcheck disable=SC2046
-  bin/janus extract artifacts/examples-arm64 "example.com/basic.$n" "$out" $(example_contracts "$n") >/dev/null
+  bin/janus extract artifacts/examples-arm64 "$sym" "$out" $(example_contracts "$n") >/dev/null
   start=$(date +%s.%N)
   if bin/janus verify "$out" --proof "examples/proofs/$n.lean" "${extra[@]}" > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)

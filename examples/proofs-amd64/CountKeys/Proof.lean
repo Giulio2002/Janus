@@ -1,6 +1,17 @@
 import Janus
 import Extracted
 
+/-!
+# `CountKeys(m)` returns `len(m)` (amd64)
+
+**Guarantee.** For every representation `M` of maps satisfying the layout laws `M.Laws`, every
+map value `m` holding the abstract map `f` (`IsMap`: nil and empty, or represented by `M`) and `[RSP, RSP + 8)` readable (`RET`)
+and every Go call state, the call returns (never faulting) and its result is the number of keys
+of `f` (the length of any listing of them). No runtime function is called: `len(m)` compiles to
+`0` for a nil map and otherwise a load of the header's first word (`Map.used`), which the law
+`MapModel.Laws.len` says is the number of entries.
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map
 
 namespace Proof

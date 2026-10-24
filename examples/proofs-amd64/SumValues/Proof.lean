@@ -1,6 +1,21 @@
 import Janus
 import Extracted
 
+/-!
+# `SumValues(m)` returns the sum of the values, for every iteration order (amd64)
+
+**Guarantee.** For every map value `m` holding the abstract map `f` (`IsMap`: nil and empty,
+or represented by `M`) and every Go call state satisfying the precondition, the call returns, and for **every** listing `ks` of the keys of `f` (each key once, in any order) the result is the sum of the values over `ks` modulo `2^64`. The iterator contracts promise only that keys come in *some* order, so the proof covers every order Go's randomised iteration may pick; the loop is proved by induction on the keys still to come.
+
+**Assumptions (all in the statement).** `M` is *any* representation of maps in memory satisfying
+the layout laws `M.Laws`, and the runtime code at the contract address(es) `impl` is *any* code
+that behaves as the named contract(s) of `Janus.Contracts.MapAmd64` say (docs/RUNTIME-CONTRACTS.md,
+"Maps"). `CallerOK M s frame above` asks for the runtime environment, `M.depth` bytes of stack
+below the function's own frame (writable, above the stack guard, outside the runtime's private
+memory `M.priv`) and `mapType` is the type descriptor the code passes, recomputed from the
+extracted RIP-relative `LEA`.
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map Janus.Contracts.MapAmd64
 
 namespace Proof

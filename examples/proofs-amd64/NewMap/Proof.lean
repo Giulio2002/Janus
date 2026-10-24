@@ -1,6 +1,21 @@
 import Janus
 import Extracted
 
+/-!
+# `NewMap()` returns a new, empty, non-nil map (amd64)
+
+**Guarantee.** For every map value `m` holding the abstract map `f` (`IsMap`: nil and empty,
+or represented by `M`) and every Go call state satisfying the precondition, the call returns a non-nil header pointer that represents the empty map (through `makemap_small`).
+
+**Assumptions (all in the statement).** `M` is *any* representation of maps in memory satisfying
+the layout laws `M.Laws`, and the runtime code at the contract address(es) `impl` is *any* code
+that behaves as the named contract(s) of `Janus.Contracts.MapAmd64` say (docs/RUNTIME-CONTRACTS.md,
+"Maps"). `CallerOK M s frame above` asks for the runtime environment, `M.depth` bytes of stack
+below the function's own frame (writable, above the stack guard, outside the runtime's private
+memory `M.priv`) and `mapType` is the type descriptor the code passes, recomputed from the
+extracted RIP-relative `LEA`.
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map Janus.Contracts.MapAmd64
 
 namespace Proof

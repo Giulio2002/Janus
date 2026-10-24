@@ -1,5 +1,20 @@
 import Extracted
 
+/-!
+# `InsertGet(m, k, v)` stores `m[k] = v` and reads it back: the result is `v` (arm64)
+
+**Guarantee.** For every map value `m` holding the abstract map `f` (`IsMap`: nil and empty,
+or represented by `M`) and every Go call state satisfying the precondition, for a non-nil map holding `f`, the call returns `v`, and memory represents `f` with `k ↦ v`. It goes through two contracts: `mapassign_fast64` (and the store through the slot it returns), then `mapaccess1_fast64`.
+
+**Assumptions (all in the statement).** `M` is *any* representation of maps in memory satisfying
+the layout laws `M.Laws`, and the runtime code at the contract address(es) `impl` is *any* code
+that behaves as the named contract(s) of `Janus.Contracts.Map` say (docs/RUNTIME-CONTRACTS.md,
+"Maps"). `CallerOK M s frame above` asks for the runtime environment, `M.depth` bytes of stack
+below the function's own frame (writable, above the stack guard, outside the runtime's private
+memory `M.priv`) and `mapType` is the type descriptor the code passes, recomputed from the
+extracted `ADRP`+`ADD` words.
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map
   Janus.Contracts Janus.Contracts.Map
 
