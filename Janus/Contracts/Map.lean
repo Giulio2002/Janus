@@ -69,6 +69,60 @@ slot) and the argument spill slots above `SP`. -/
 def rtWrites {K V : Type} (M : MapModel K V) (s : State) (nargs : Nat) : List (Nat × Nat) :=
   M.priv ++ calleeStack s M.depth nargs
 
+attribute [janus_exec, janus_post] rtWrites
+
+/-- What a caller needs to call the map runtime from inside a frame of `frame` bytes below its
+`SP` (so the runtime runs with `SP - frame`), with `above` bytes of its caller's frame
+(argument spill slots) it may write: the runtime environment, the stack guard at least
+`M.depth + frame` bytes below `SP`, an aligned `SP`, `M.depth ≥ 8` (`CallOK`), the window
+`[SP - M.depth - frame, SP + above)` writable and outside the private memory, and the guard word
+`16(g)` outside that window and outside the private memory (no map operation changes it). -/
+def CallerOK {K V : Type} (M : MapModel K V) (s : State) (frame above : Nat) : Prop :=
+  M.Env s.mem (s.regs 28) ∧ StackGuardOK s (M.depth + frame) ∧ s.sp.toNat % 16 = 0 ∧
+    8 ≤ M.depth ∧ M.depth + frame ≤ s.sp.toNat ∧ s.sp.toNat + above ≤ 2 ^ 48 ∧
+    s.mem.accessible (s.sp.toNat - (M.depth + frame)) (M.depth + frame + above) true = true ∧
+    Outside (s.sp.toNat - (M.depth + frame)) (M.depth + frame + above) M.priv ∧
+    Disjoint ((s.regs 28).toNat + 16) 8 (s.sp.toNat - (M.depth + frame)) (M.depth + frame + above) ∧
+    Outside ((s.regs 28).toNat + 16) 8 M.priv
+
+/-- The contract precondition `RTPre` at a call site `S`, from the caller's `CallerOK` at its
+entry state `s`: `S` is `frame` bytes below the caller's `SP`, keeps `g`, has an admissible
+return address in `X30`, the same accessible ranges and guard word as at entry, and a memory in
+which the runtime environment holds (`henv`). -/
+theorem RTPre.of_parts {K V : Type} {M : MapModel K V} {s S : State} {frame above nargs : Nat}
+    (hc : CallerOK M s frame above) (henv : M.Env S.mem (s.regs 28))
+    (hacc : ∀ a n w, S.mem.accessible a n w = s.mem.accessible a n w)
+    (hguard : S.mem.readLE ((s.regs 28).toNat + 16) 8 = s.mem.readLE ((s.regs 28).toNat + 16) 8)
+    (hsp : S.sp.toNat = s.sp.toNat - frame) (hg : S.regs 28 = s.regs 28)
+    (hlr : (S.regs 30).toNat % 4 = 0) (hlr' : (S.regs 30).toNat < 2 ^ 48) (hfr : frame % 16 = 0)
+    (hn : 8 + 8 * nargs ≤ frame + above) : RTPre M nargs S := by
+  obtain ⟨-, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, -⟩ := hc
+  simp only [regG, stackguard0Offset, stackguard0] at hg1 hg2 hg3
+  refine ⟨by rw [hg]; exact henv, ⟨?_, ?_, ?_⟩, ⟨hlr, hlr', ?_, ?_, hd8, ?_, ?_⟩, ?_⟩
+  · simp only [regG, stackguard0Offset, hg]; omega
+  · simp only [regG, stackguard0Offset, hg, hacc]; exact hg2
+  · simp only [stackguard0, regG, stackguard0Offset, hg, hguard, hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp, hacc]; exact Memory.accessible_mono _ hst (by omega) (by omega)
+  · rw [hsp]; exact Outside.of_sub hout (by omega) (by omega)
+
+/-- `RTPre.of_parts` for a first call: the call state's memory differs from the caller's entry
+memory only inside the caller's window (its frame record and spills). -/
+theorem RTPre.of_caller {K V : Type} {M : MapModel K V} (hl : M.Laws) {s S : State}
+    {frame above nargs : Nat} (hc : CallerOK M s frame above)
+    (hf : MemFrame s.mem S.mem [(s.sp.toNat - (M.depth + frame), s.sp.toNat + above)])
+    (hsp : S.sp.toNat = s.sp.toNat - frame) (hg : S.regs 28 = s.regs 28)
+    (hlr : (S.regs 30).toNat % 4 = 0) (hlr' : (S.regs 30).toNat < 2 ^ 48) (hfr : frame % 16 = 0)
+    (hn : 8 + 8 * nargs ≤ frame + above) : RTPre M nargs S := by
+  have hc' := hc
+  obtain ⟨henv, ⟨hg1, -, -⟩, -, -, -, -, -, hout, hgd⟩ := hc'
+  simp only [regG, stackguard0Offset, Spec.Disjoint] at hg1 hgd
+  refine RTPre.of_parts hc (hl.env_frame _ _ _ henv
+    (Agrees.of_window hf (Outside.of_sub hout (by omega) (by omega)))) hf.accessible
+    (hf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)) hsp hg hlr hlr' hfr hn
+
 /-- Maps other than the one at `except` keep their contents from `m` to `m'`. -/
 def OthersKept {K V : Type} (M : MapModel K V) (m m' : Memory) (except : Nat) : Prop :=
   ∀ mp f, mp ≠ except → M.Rep m mp f → M.Rep m' mp f

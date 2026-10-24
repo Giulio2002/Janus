@@ -17,3 +17,4 @@ import Janus.Spec.Map
 import Janus.Spec.SwissMap
 import Janus.Contracts.Map
 import Janus.Amd64
+import Janus.Contracts.MapAmd64

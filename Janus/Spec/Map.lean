@@ -25,7 +25,7 @@ representation describes it (see docs/RUNTIME-CONTRACTS.md, "Maps").
   runtime's private memory, all map storage included) and `depth` (the stack bytes below `SP`
   a map runtime call may use).
 * `IsMap M mem mp f`: `mp` is a Go map value holding `f`: `nil` with `f` empty, or `Rep`.
-* `Agrees m m' rs`: `m'` has the same regions as `m` and the same bytes inside the ranges `rs`
+* `Agrees m m' rs`: `m'` has the same accessible ranges as `m` and the same bytes inside `rs`
   (so a representation that lives in `rs` is unaffected by the change from `m` to `m'`).
 -/
 
@@ -114,15 +114,18 @@ theorem sumValues_keys {K : Type} {f : AMap K (BitVec 64)} {ks ks' : List K} (h 
 
 /-! ## Memory ranges -/
 
-/-- `m'` has the regions of `m` and the same bytes at every address inside the ranges `rs`. -/
+/-- `m'` has the same accessible ranges as `m` (the regions are, for every access, equivalent)
+and the same bytes at every address inside the ranges `rs`. -/
 def Agrees (m m' : Memory) (rs : List (Nat × Nat)) : Prop :=
-  m'.regions = m.regions ∧ ∀ a, InRanges a 1 rs → m'.bytes a = m.bytes a
+  (∀ a n w, m'.accessible a n w = m.accessible a n w) ∧
+    ∀ a, InRanges a 1 rs → m'.bytes a = m.bytes a
 
-theorem Agrees.refl (m : Memory) (rs : List (Nat × Nat)) : Agrees m m rs := ⟨rfl, fun _ _ => rfl⟩
+theorem Agrees.refl (m : Memory) (rs : List (Nat × Nat)) : Agrees m m rs :=
+  ⟨fun _ _ _ => rfl, fun _ _ => rfl⟩
 
 theorem Agrees.trans {m m' m'' : Memory} {rs : List (Nat × Nat)} (h : Agrees m m' rs)
     (h' : Agrees m' m'' rs) : Agrees m m'' rs :=
-  ⟨h'.1.trans h.1, fun a ha => (h'.2 a ha).trans (h.2 a ha)⟩
+  ⟨fun a n w => (h'.1 a n w).trans (h.1 a n w), fun a ha => (h'.2 a ha).trans (h.2 a ha)⟩
 
 theorem readLE_congr {m m' : Memory} : ∀ (n a : Nat),
     (∀ j, j < n → m'.bytes (a + j) = m.bytes (a + j)) → m'.readLE a n = m.readLE a n
@@ -143,13 +146,12 @@ theorem Agrees.readLE {m m' : Memory} {rs : List (Nat × Nat)} (h : Agrees m m' 
 
 /-- What is accessible agrees (the regions are the same). -/
 theorem Agrees.accessible {m m' : Memory} {rs : List (Nat × Nat)} (h : Agrees m m' rs) (a n : Nat)
-    (w : Bool) : m'.accessible a n w = m.accessible a n w := by
-  unfold Memory.accessible; rw [h.1]
+    (w : Bool) : m'.accessible a n w = m.accessible a n w := h.1 a n w
 
 /-- A store outside the ranges keeps them. -/
 theorem Agrees.writeLE {m m' : Memory} {rs : List (Nat × Nat)} (h : Agrees m m' rs) {a n : Nat}
     (v : Nat) (ho : Outside a n rs) : Agrees m (m'.writeLE a n v) rs := by
-  refine ⟨h.1, fun b hb => ?_⟩
+  refine ⟨fun b k w => by rw [Memory.accessible_writeLE]; exact h.1 b k w, fun b hb => ?_⟩
   have hd : a + n ≤ b ∨ b + 1 ≤ a := by
     obtain ⟨r, hr, h1, h2⟩ := hb; have := MemFrame.outside_mem ho hr; omega
   have hn : ¬ (a ≤ b ∧ b < a + n) := by omega
@@ -162,12 +164,20 @@ theorem agrees_writeLE (m : Memory) {rs : List (Nat × Nat)} {a n : Nat} (v : Na
 /-- A frame that only changes memory outside `rs` (a `MemFrame` whose ranges avoid `rs`) keeps
 `rs`. -/
 theorem Agrees.of_memFrame {m m' : Memory} {rs ws : List (Nat × Nat)} (h : MemFrame m m' ws)
-    (hreg : m'.regions = m.regions) (ho : ∀ a, InRanges a 1 rs → Outside a 1 ws) :
-    Agrees m m' rs := by
-  refine ⟨hreg, fun a ha => ?_⟩
+    (ho : ∀ a, InRanges a 1 rs → Outside a 1 ws) : Agrees m m' rs := by
+  refine ⟨h.accessible, fun a ha => ?_⟩
   have := h.readLE a 1 (ho a ha)
   simp only [Memory.readLE] at this
   exact BitVec.eq_of_toNat_eq (by omega)
+
+/-- A frame confined to one window `[lo, hi)` outside `rs` keeps `rs`. -/
+theorem Agrees.of_window {m m' : Memory} {rs : List (Nat × Nat)} {lo hi : Nat}
+    (h : MemFrame m m' [(lo, hi)]) (ho : Outside lo (hi - lo) rs) : Agrees m m' rs :=
+  Agrees.of_memFrame h fun a ha => by
+    obtain ⟨r, hr, h1, h2⟩ := ha
+    have := MemFrame.outside_mem ho hr
+    simp only [outside_cons, outside_nil, and_true]
+    omega
 
 /-! ## The representation interface -/
 
@@ -233,6 +243,42 @@ structure MapModel.Laws {K V : Type} (M : MapModel K V) : Prop where
   len : ∀ m mp f, M.Rep m mp f → m.accessible mp 8 false = true ∧ mp + 8 ≤ 2 ^ 48 ∧
     ∀ ks, Keys f ks → m.readLE mp 8 = ks.length
   finite : ∀ m mp f, M.Rep m mp f → ∃ ks, Keys f ks
+
+theorem Agrees.symm {m m' : Memory} {rs : List (Nat × Nat)} (h : Agrees m m' rs) : Agrees m' m rs :=
+  ⟨fun a n w => (h.1 a n w).symm, fun a ha => (h.2 a ha).symm⟩
+
+/-! ### Stores outside the private memory, as rewrite rules
+
+With `hl : M.Laws`, `janus_run [hl.env_writeLE, hl.isMap_writeLE, …]` keeps the representation
+facts about the memory of a call state up to date through the caller's own stores (its frame
+record, its spills), which lie outside `M.priv`; `janus_disch` proves the `Outside` side
+condition from the precondition's `Outside … M.priv` fact. -/
+
+theorem MapModel.Laws.env_writeLE {K V : Type} {M : MapModel K V} (hl : M.Laws) {m : Memory}
+    {a n : Nat} (v : Nat) (g : W64) (h : Outside a n M.priv) :
+    M.Env (m.writeLE a n v) g = M.Env m g :=
+  propext ⟨fun he => hl.env_frame _ _ _ he (agrees_writeLE m v h).symm,
+    fun he => hl.env_frame _ _ _ he (agrees_writeLE m v h)⟩
+
+theorem MapModel.Laws.rep_writeLE {K V : Type} {M : MapModel K V} (hl : M.Laws) {m : Memory}
+    {a n : Nat} (v : Nat) (mp : Nat) (f : AMap K V) (h : Outside a n M.priv) :
+    M.Rep (m.writeLE a n v) mp f = M.Rep m mp f :=
+  propext ⟨fun he => hl.rep_frame _ _ _ _ he (agrees_writeLE m v h).symm,
+    fun he => hl.rep_frame _ _ _ _ he (agrees_writeLE m v h)⟩
+
+theorem MapModel.Laws.isMap_writeLE {K V : Type} {M : MapModel K V} (hl : M.Laws) {m : Memory}
+    {a n : Nat} (v : Nat) (mp : Nat) (f : AMap K V) (h : Outside a n M.priv) :
+    IsMap M (m.writeLE a n v) mp f = IsMap M m mp f := by
+  unfold IsMap; split
+  · rfl
+  · exact hl.rep_writeLE v mp f h
+
+theorem MapModel.Laws.iter_writeLE {K V : Type} {M : MapModel K V} (hl : M.Laws) {m : Memory}
+    {a n : Nat} (v : Nat) (it mp : Nat) (f : AMap K V) (ks : List K)
+    (h : Outside a n (M.priv ++ [(it, it + iterSize)])) :
+    M.Iter (m.writeLE a n v) it mp f ks = M.Iter m it mp f ks :=
+  propext ⟨fun he => hl.iter_frame _ _ _ _ _ _ he (agrees_writeLE m v h).symm,
+    fun he => hl.iter_frame _ _ _ _ _ _ he (agrees_writeLE m v h)⟩
 
 theorem isMap_nil {K V : Type} {M : MapModel K V} {mem : Memory} {f : AMap K V} :
     IsMap M mem 0 f ↔ f = AMap.empty := by simp [IsMap]
