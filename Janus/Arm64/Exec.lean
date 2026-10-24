@@ -3,6 +3,7 @@ import Janus.Arm64.Instr
 import Janus.Arm64.Bits
 import Janus.Arm64.Decode
 import Janus.Arm64.Vector
+import Janus.Arm64.ExecFloat
 
 /-!
 # AArch64 execution semantics for the supported subset
@@ -59,16 +60,18 @@ Modelling decisions (user mode, Linux):
 * **TPIDR_EL0.** `MRS Xt, TPIDR_EL0` returns `State.tpidr`, a field of the state that no
   supported instruction writes (`MSR TPIDR_EL0` is not decoded).
 * **Advanced SIMD and SIMD&FP loads/stores** (`State.vregs`, see `Janus.Arm64.Vector`): only
-  integer and move instructions. Floating-point arithmetic and conversions are not decoded, so
-  FPCR/FPSR are not part of the state: no accepted instruction reads or writes them (FMOV between
-  general and SIMD&FP registers reads FPCR in the ASL only for its conversion forms, which are
-  rejected). `V[d, n] = x` zero-extends to 128 bits (on an SVE CPU the hardware also zeroes the
+  integer and move instructions (Advanced SIMD floating point is not decoded). `V[d, n] = x` zero-extends to 128 bits (on an SVE CPU the hardware also zeroes the
   upper bits of `Z[d]`, which the model does not have). SIMD&FP loads and stores need no
   alignment (Linux runs EL0 with SCTLR_EL1.A = 0) except the SP check. A multi-register
   LD1/ST1, LDP/STP or single-structure access is checked per register or element as in the
   pseudocode; an access that faults in the middle faults as a whole (hardware may have written
   part of it, which is irrelevant since the run stops). AES (`AESE`, `AESD`, `AESMC`,
   `AESIMC`) assumes FEAT_AES, which Go tests before using it (`useAeshash`).
+* **Scalar floating point** (`Janus.Arm64.ExecFloat`, `Janus.Arm64.Float`, `Janus.Float`): the
+  ASL of FADD ... FRINT*, FCMP/FCCMP, FCSEL, FCVT and the integer conversions on single and
+  double precision, reading `State.fpcr` (RMode, FZ, DN, FIZ/AH/NEP of FEAT_AFP) and ORing the
+  raised exceptions into `State.fpsr`; an exception whose trap is enabled faults
+  (`fpTrapped`). Half precision and Advanced SIMD floating point are rejected.
 -/
 
 namespace Janus.Arm64
@@ -862,6 +865,33 @@ def exec (i : Instr) (s : State) : Except Fault State :=
       (s.getV rm (qsize Q)) (s.getV rd (qsize Q)))).next
   | .vAes opcode rn rd => .ok (s.setV rd 128 (aesOp opcode (s.getV rd 128) (s.getV rn 128))).next
   | .fmovGen sf _ rmode opcode rn rd => .ok (execFmovGen s sf rmode opcode rn rd).next
+  -- Scalar floating point (`Janus.Arm64.ExecFloat`)
+  | .fpDP1 ftype opcode rn rd =>
+    match execFpDP1 s ftype opcode rn rd with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpDP2 ftype rm opcode rn rd =>
+    match execFpDP2 s ftype rm opcode rn rd with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpDP3 ftype o1 rm o0 ra rn rd =>
+    match execFpDP3 s ftype o1 rm o0 ra rn rd with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpCmp ftype rm opc rn =>
+    match execFpCmp s ftype rm opc rn with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpCcmp ftype rm cond signal rn nzcv =>
+    match execFpCcmp s ftype rm (conditionHolds cond s.flags) signal rn nzcv with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpCsel ftype rm cond rn rd => .ok (execFpCsel s ftype rm (conditionHolds cond s.flags) rn rd).next
+  | .fpImm ftype imm8 rd => .ok (execFpImm s ftype imm8 rd).next
+  | .fpCvtInt sf ftype rmode opcode rn rd =>
+    match execFpCvtInt s sf ftype rmode opcode rn rd with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
   -- Data processing: register
   | .logicalShifted sf opc shift N rm imm6 rn rd =>
     .ok (if sf then execLogicalShifted 64 s opc shift N rm imm6 rn rd

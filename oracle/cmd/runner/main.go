@@ -95,6 +95,18 @@ func buildTrampoline() []uint32 {
 	a.str(17, 16, L.CtxHostTPID)
 	a.ldr(17, 16, L.CtxInTPIDR)
 	a.msrTPIDR(17)
+	// Host FPCR/FPSR (restored by the resume sequence), then the case's. FPCR is read back
+	// so the runner can refuse a case whose control bits the CPU does not keep.
+	a.mrsFPCR(17)
+	a.str(17, 16, L.CtxHostFPCR)
+	a.mrsFPSR(17)
+	a.str(17, 16, L.CtxHostFPSR)
+	a.ldr(17, 16, L.CtxInFPCR)
+	a.msrFPCR(17)
+	a.mrsFPCR(17)
+	a.str(17, 16, L.CtxFPCRBack)
+	a.ldr(17, 16, L.CtxInFPSR)
+	a.msrFPSR(17)
 	for r := 0; r < 32; r++ {
 		a.ldrq(r, 16, L.CtxInV+16*r)
 	}
@@ -167,6 +179,10 @@ func buildTrampoline() []uint32 {
 	a.adr(16, L.CtxPage)
 	a.ldr(17, 16, L.CtxHostTPID)
 	a.msrTPIDR(17)
+	a.ldr(17, 16, L.CtxHostFPCR)
+	a.msrFPCR(17)
+	a.ldr(17, 16, L.CtxHostFPSR)
+	a.msrFPSR(17)
 	a.ldr(17, 16, L.CtxHostSP)
 	a.addImm(31, 17, 0)
 	for r := 19; r <= 30; r++ {
@@ -317,6 +333,22 @@ func runCase(c *L.Case, seq int64) L.HW {
 		}
 	}
 	put64(ctx, L.CtxInTPIDR, tp)
+	var fpcr, fpsr uint64
+	if c.FPCR != "" {
+		if fpcr, err = parseHex(c.FPCR); err != nil || fpcr > 0xffffffff {
+			r.Status, r.Note = "error", "bad fpcr"
+			return r
+		}
+	}
+	if c.FPSR != "" {
+		if fpsr, err = parseHex(c.FPSR); err != nil || fpsr > 0xffffffff {
+			r.Status, r.Note = "error", "bad fpsr"
+			return r
+		}
+	}
+	put64(ctx, L.CtxInFPCR, fpcr)
+	put64(ctx, L.CtxInFPSR, fpsr)
+	put64(ctx, L.CtxFPCRBack, ^uint64(0))
 	for i := L.CtxOutFP; i < L.CtxOutFP+528; i++ {
 		ctx[i] = 0
 	}
@@ -344,6 +376,12 @@ func runCase(c *L.Case, seq int64) L.HW {
 		r.Status, r.Note = "error", "signal frame has no fpsimd_context first"
 		return r
 	}
+	if back := get64(ctx, L.CtxFPCRBack); back != fpcr {
+		r.Status, r.Note = "error", fmt.Sprintf("fpcr %#x does not read back (got %#x): this CPU does not implement those bits", fpcr, back)
+		return r
+	}
+	r.FPSR = hex(uint64(binary.LittleEndian.Uint32(ctx[L.CtxOutFP+8:])))
+	r.FPCR = hex(uint64(binary.LittleEndian.Uint32(ctx[L.CtxOutFP+12:])))
 	r.V = make([]string, 32)
 	for i := 0; i < 32; i++ {
 		r.V[i] = hex128(get64(ctx, L.CtxOutFP+16+16*i), get64(ctx, L.CtxOutFP+16+16*i+8))
