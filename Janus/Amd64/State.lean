@@ -74,7 +74,8 @@ structure State where
   `RC` (14:13) and `FTZ` (15). Read by the SSE floating-point instructions, which OR the flags
   of the exceptions they raise into it; no accepted instruction writes the control bits
   (`LDMXCSR` is not decoded). `0x1F80` (all masked, round to nearest) is the value Linux gives
-  a new process and the Go ABI assumes. -/
+  a new process; the Go ABI fixes only its control bits (`GoABI.GoMXCSR`), and the flags are
+  sticky (a Go program's `main` already sees `PE` set). -/
   mxcsr : BitVec 32 := 0x1F80
 
 instance : Inhabited State :=

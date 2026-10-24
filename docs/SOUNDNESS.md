@@ -472,10 +472,19 @@ bits) are rejected rather than guessed.
 **State and quantification.** `FPCR`, `FPSR` and `MXCSR` are state fields, arbitrary in every
 call state unless a precondition fixes them; no accepted instruction writes the control bits
 (`MSR FPCR`, `LDMXCSR` are not decoded), so a run keeps the caller's values. Linux starts every
-process with `FPCR = 0` and `MXCSR = 0x1F80`, and Go never changes them, so the examples state
-these defaults as preconditions (and, on arm64, an `exact` theorem for every `FPCR` without trap
-enables). The ABI says nothing about `FPSR`/`MXCSR` flags on return; the theorems do not either,
-except where they state them explicitly.
+process with `FPCR = 0` and `MXCSR = 0x1F80`, and Go never changes the *control* bits (Go's
+`abi-internal.md` fixes them at every call). The *status* flags are another matter: they are
+sticky, and Go's own floating point raises them. `MXCSR` holds both, and in a running Go program
+it is already `0x1FA0` (`PE` set) when `main` starts (`audit/rt-fp/probe/mxcsr`). So the amd64
+examples state `GoABI.GoMXCSR s` (the control bits of `0x1F80`, reserved bits zero, **any**
+flags), not `s.mxcsr = 0x1F80`, which no call from initialised Go code satisfies
+(`docs/AUDIT-FP.md`, X64-MXCSR-STICKY). On arm64 the flags live in `FPSR`, which the examples
+leave arbitrary; they state `s.fpcr = 0` (what a Go program sees) and, on arm64, an `exact`
+theorem for every `FPCR` without trap enables. On return, Go's ABI treats `FPSR` as scratch and
+calls the `MXCSR` status bits callee-save, but Go code does not preserve them (an inexact
+`ADDSD` sets `PE`, and nothing restores it; `AddF64` is an example). `ABIReturn` therefore does
+not include them, and "obeys the ABI" in a theorem says nothing about `FPSR` or the `MXCSR`
+flags, except where a theorem states them explicitly.
 
 **Specifications.** `Janus/Float/Spec.lean` states the IEEE operations independently of the
 architectures: `add`, `mul`, `fma` (`none` when the IEEE result is a NaN), `abs`, `truncInt`, and
