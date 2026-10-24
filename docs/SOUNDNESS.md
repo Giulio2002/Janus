@@ -39,7 +39,9 @@ These are trusted, not proved.
    edited extraction is rejected. The copy itself and the symbol table lookup are trusted.
 3. **Stub classification**: the extractor names runtime functions `runtime.panic*`,
    `runtime.goPanic*` and `runtime.gopanic` as `panic` stubs and `runtime.morestack*` as
-   `morestack` stubs. Reaching a stub address ends the run with that outcome. This only affects
+   `morestack` stubs, only in package `runtime` itself (no `/` in the symbol: an import path
+   such as `runtime.panicky/lib` is not runtime, docs/AUDIT-ROUND6.md F3). Reaching a stub
+   address ends the run with that outcome. This only affects
    theorems that mention stub outcomes (`Panics`, `NeverPanics`, `GrowsStack`). `Returns`
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
    dereference is a `SIGSEGV`, turned into a panic by `runtime.sigpanic`) are not stub calls:

@@ -273,7 +273,9 @@ matches hardware):
 * Stub classification by name prefix is trusted. A binary built with `-checklinkname=0` could
   push an ordinary function to `runtime.panicX`, making `Panics` true of code that returns. The
   binary is the subject, not the adversary, so this is outside the threat model. Documented in
-  SOUNDNESS item 3.
+  SOUNDNESS item 3. (Round 6 F3: without any flag, a package whose *import path* starts with
+  `runtime.panic` was also classified as a stub; classification is now limited to package
+  `runtime`.)
 * **E1** PIE: `go build -buildmode=pie` extracts fine (HexDigit plus 256 bytes of `.rodata`).
   `readelf -r` shows 6315 `R_AARCH64_RELATIVE` relocations, none into a non-writable section
   (Go puts relocated data in `.data.rel.ro`, which is `WA` and so skipped). The model states
