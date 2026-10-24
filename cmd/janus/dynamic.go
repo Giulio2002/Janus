@@ -219,6 +219,17 @@ func (r *reacher) drain() error {
 				r.queue = append(r.queue, g)
 			}
 		}
+		// the C wrappers of the cgo function-pointer variables the function loads (FFI)
+		for _, g := range cgoWrapperRoots(r.b, segmentDataRefs(r.b, seg)) {
+			if _, isStub := stubKind(g.Name); isStub || r.seen[g.Addr] {
+				continue
+			}
+			if r.x.contractTarget(r.cm, r.contractSeen, g) {
+				continue
+			}
+			r.seen[g.Addr] = true
+			r.queue = append(r.queue, g)
+		}
 		if len(r.x.Segments)+len(r.queue) > r.maxF {
 			return r.tooMany()
 		}

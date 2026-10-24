@@ -27,6 +27,9 @@ type StubKind string
 const (
 	stubPanic     StubKind = "panic"
 	stubMorestack StubKind = "morestack"
+	// stubExternal: a function outside the extracted code whose effect a theorem states as an
+	// explicit contract (Janus.StubKind.external, see Janus/FFI.lean): the cgo boundary.
+	stubExternal StubKind = "external"
 )
 
 type Stub struct {
@@ -116,6 +119,14 @@ var (
 	runtimeMorestackStubs = map[string]bool{
 		"runtime.morestack.abi0": true, "runtime.morestack_noctxt.abi0": true,
 	}
+	// The cgo boundary (Janus/FFI.lean): runtime.cgocall (the Go -> C call: stack switch to g0,
+	// entersyscall/exitsyscall, the C call through asmcgocall), _cgo_topofstack (Go assembly the
+	// C side of a cgo call calls) and runtime.cgoUse (only on the dead `if _Cgo_always_false`
+	// branch of cgo wrappers). Their effects are the trusted contracts of Janus.FFI.
+	runtimeExternalStubs = map[string]bool{
+		"runtime.cgocall": true, "_cgo_topofstack": true, "_cgo_topofstack.abi0": true,
+		"runtime.cgoUse": true,
+	}
 )
 
 // stubKind classifies a linked symbol name as a runtime stub (name only; see classifyStub for
@@ -126,8 +137,36 @@ func stubKind(name string) (StubKind, bool) {
 		return stubMorestack, true
 	case runtimePanicStubs[name]:
 		return stubPanic, true
+	case runtimeExternalStubs[name]:
+		return stubExternal, true
 	}
 	return "", false
+}
+
+// cgoFnVarRE matches the Go variable cgo generates for each C function a package calls
+// (`var _cgo_<hash>_Cfunc_<name> = unsafe.Pointer(&__cgofn__cgo_<hash>_Cfunc_<name>)`): it holds
+// the address of the C wrapper of the same name, which runtime.cgocall calls.
+var cgoFnVarRE = regexp.MustCompile(`(?:^|\.)(_cgo_[0-9a-f]+_Cfunc_[A-Za-z0-9_]+)$`)
+
+// cgoWrapperRoots returns the C wrappers whose function-pointer variables the code at refs
+// loads. Following them is reachability (untrusted, like branch following): it only decides
+// that the C code is copied too, so that a theorem can run it.
+func cgoWrapperRoots(b *Binary, refs []DataRef) []Func {
+	var out []Func
+	for _, r := range refs {
+		sym, ok, _ := b.dataSymbolAt(r.Target)
+		if !ok {
+			continue
+		}
+		m := cgoFnVarRE.FindStringSubmatch(sym.Name)
+		if m == nil {
+			continue
+		}
+		if f, err := b.lookup(m[1]); err == nil {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // stubLike reports whether name looks like a runtime stub under any ABI suffix (used only to

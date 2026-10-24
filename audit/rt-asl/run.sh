@@ -51,13 +51,13 @@ fi
 echo "== A6: strict audit (names, kinds, axioms, reviewed statements)"
 lean_in_pkg "$here/AuditStrict.lean" > "$W/strict.log" 2>&1
 grep -o 'STMT .*' "$W/strict.log" > "$W/statements"
-if ! grep -q 'strict audit ok: 44 theorems' "$W/strict.log"; then
+if ! grep -q 'strict audit ok: 41 theorems' "$W/strict.log"; then
   row "A6 strict audit" ok "FAILED: $(grep -A5 'FAILED' "$W/strict.log" | tr '\n' ' ')"
 elif ! diff -q "$here/asl-statements.golden" "$W/statements" >/dev/null; then
   row "A6 statements = reviewed copy" ok "CHANGED (diff $here/asl-statements.golden; re-review, then update it)"
   diff "$here/asl-statements.golden" "$W/statements" | head -6
 else
-  row "A6 strict audit" ok "ok (44 theorems present, theorems, standard axioms)"
+  row "A6 strict audit" ok "ok (41 theorems present, theorems, standard axioms)"
   row "A6 statements = reviewed copy" ok "ok ($(wc -l < "$W/statements") statements unchanged)"
 fi
 

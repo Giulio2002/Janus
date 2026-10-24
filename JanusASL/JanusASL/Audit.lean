@@ -1,4 +1,5 @@
 import JanusASL.Proofs
+import JanusASL.Verify
 import Lean
 
 /-! Audit of the JanusASL theorems (`scripts/asl.sh prove`).

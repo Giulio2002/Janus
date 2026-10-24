@@ -53,11 +53,13 @@ open Lean
 
 namespace JanusAudit
 
-/-- Is `mod` a module whose declarations are trusted to appear in a statement's type? -/
-def trustedModule (mod : Name) : Bool :=
+/-- Is `mod` a module whose declarations are trusted to appear in a statement's type? `extra` are
+further trusted module roots: for the ASL corollary (`runASL`), the pinned JanusASL build
+(`JanusASL`, `ArmASL`, `Sail`) and the trusted coverage module `JanusASLWords`. -/
+def trustedModule (mod : Name) (extra : Array Name := #[]) : Bool :=
   let root := mod.getRoot
   root == `Init || root == `Std || root == `Lean || root == `Janus
-    || root == `Extracted || root == `JanusTrusted
+    || root == `Extracted || root == `JanusTrusted || extra.contains root
 
 /-- The analysis result, printed as JSON for the Go side. -/
 structure Record where
@@ -120,9 +122,13 @@ structure Ctx where
   depRoots  : Std.HashSet Name
   instances : Std.HashSet Name
   classes   : Std.HashSet Name
+  /-- Extra trusted module roots (`trustedModule`); empty except for the ASL corollary. -/
+  extra     : Array Name := #[]
+
+def Ctx.trusted (cx : Ctx) (mod : Name) : Bool := trustedModule mod cx.extra
 
 def Ctx.originOfModule (cx : Ctx) (mod : Name) : Origin :=
-  if trustedModule mod then .trusted
+  if cx.trusted mod then .trusted
   else if cx.depRoots.contains mod.getRoot then .dependency
   else .consumer
 
@@ -137,7 +143,7 @@ def Ctx.originOf (cx : Ctx) (c : Name) : Origin :=
 
 /-- Collect instance and class names from every imported module's extension entries. An
 `attribute [instance] foo` in any module counts, as do scoped and local-to-namespace ones. -/
-def mkCtx (env : Environment) (depRoots : Array String) : Ctx := Id.run do
+def mkCtx (env : Environment) (depRoots : Array String) (extra : Array Name := #[]) : Ctx := Id.run do
   let mut instances : Std.HashSet Name := {}
   let mut classes : Std.HashSet Name := {}
   let modNames := env.header.moduleNames
@@ -150,7 +156,7 @@ def mkCtx (env : Environment) (depRoots : Array String) : Ctx := Id.run do
         instances := instances.insert n
     for ce in classExtension.getModuleEntries env i do
       classes := classes.insert ce.name
-  return { env, modNames, instances, classes,
+  return { env, modNames, instances, classes, extra,
            depRoots := depRoots.foldl (fun s r => s.insert r.toName) {} }
 
 /-- Round 6 (F1): characters allowed in a name component of a non-trusted constant that the
@@ -355,7 +361,7 @@ never registered here (dependency instance lists are empty by rule: `checkExtern
 def trustedInstance (cx : Ctx) (c : Name) : MetaM Bool := do
   if ← Meta.isInstance c then return true
   return cx.instances.contains c && (match cx.moduleOf? c with
-    | some m => trustedModule m
+    | some m => cx.trusted m
     | none => false)
 
 /-- An argument in an instance-implicit position is acceptable when, up to unfolding reducible
@@ -972,12 +978,13 @@ allowed proof-local defs and an axiom with the theorem's type. Reject a proof-lo
 type's head is a class (a disguised instance, A1). No proof or dependency module is imported, so
 none of their initializers, notations, unexpanders or delaborators exist here. -/
 unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs : Array ConstantInfo)
-    (stubs : Array ConstantInfo) (extDefs : Array ConstantInfo) (cleanState : ImportState) :
+    (stubs : Array ConstantInfo) (extDefs : Array ConstantInfo) (cleanState : ImportState)
+    (clean : Array Import := cleanImports) :
     AuditM (String × String × Array String × Array String × Array String) := do
   enableInitializersExecution
   -- `importModules (loadExts := true) cleanImports {}`, with the module data already read
   -- (`readImports`): the same `finalizeImport` over the same import state.
-  let env ← (withImporting <| finalizeImport cleanState cleanImports {} (leakEnv := false) (loadExts := true) : IO Environment)
+  let env ← (withImporting <| finalizeImport cleanState clean {} (leakEnv := false) (loadExts := true) : IO Environment)
   let mut env := env
   -- Dependency constants: type-only, unchecked (their types may need dependency definitions'
   -- bodies to check, which a stub does not carry).
@@ -1163,5 +1170,154 @@ proof's compiled module with `importModules (loadExts := false)`, which does not
 initializers. The `@[implemented_by]` wrapper lets the trusted `#eval` call the `unsafe` logic. -/
 @[implemented_by runImpl]
 opaque run (thm proofMod marker trusted : String) (depRoots : Array String) : IO Unit
+
+/-! ## The ASL corollary (`janus verify --asl`, docs/ASL.md#janus-verify---asl)
+
+`janus verify --asl` derives, from the user's verified `Ensures` theorem, the same statement
+about Arm's ASL (JanusASL's `Ensures.toASL`). The derivation is `aslCorollary`: it is used both by
+the `janus_asl_corollary` command that builds the corollary (JanusASL/JanusASL/Verify.lean) and by
+`runASL` here, which audits the result without running any proof code. The JanusASL constants are
+named, not imported: the framework does not depend on JanusASL. -/
+
+/-- The JanusASL transfer theorem and the three facts `covered p = true` gives about `p`. -/
+def aslToASL : Name := `JanusASL.Proofs.Ensures.toASL
+def aslCoveredWords : Name := `JanusASL.Verify.covered_words
+def aslCoveredCode : Name := `JanusASL.Verify.covered_code
+def aslCoveredStubs : Name := `JanusASL.Verify.covered_stubs
+
+/-- Module roots of the trusted JanusASL build and of the trusted coverage module. -/
+def aslTrustedRoots : Array Name := #[`JanusASL, `ArmASL, `Sail, `JanusASLWords]
+
+/-- Open the `∀` binders of `ty`, unfolding the head definition of the body (a consumer's
+`Computes p e spec`, `EnsuresResults`, …) until it is `Janus.GoABI.Ensures …`, and call `k` with
+all the binders and the body. -/
+partial def ensuresTelescope {α} (ty : Expr) (k : Array Expr → Expr → MetaM α) (acc : Array Expr := #[])
+    (fuel : Nat := 64) : MetaM α :=
+  Meta.forallTelescope ty fun xs body => do
+    let acc := acc ++ xs
+    if body.isAppOfArity `Janus.GoABI.Ensures 5 || fuel == 0 then k acc body else
+    match ← Meta.unfoldDefinition? body with
+    | some b => ensuresTelescope b.headBeta k acc (fuel - 1)
+    | none => k acc body
+
+/-- **The ASL corollary of `thm`** (its type and proof): for a theorem
+`∀ xs, Janus.GoABI.Ensures Extracted.program entry args pre post` (after unfolding the definitions
+at the head of its conclusion, `ensuresTelescope`),
+`fun xs => Ensures.toASL (thm xs) (covered_words _ words) (covered_code _ words) (covered_stubs _ words)`,
+where `words : JanusASL.Classify.covered Extracted.program = true`. The type is the inferred type of
+that term, beta-reduced. The program must be the constant `Extracted.program` itself. -/
+def aslCorollary (thm words : Name) : MetaM (Expr × Expr) := do
+  let some ci := (← getEnv).find? thm | throwError "the proof does not define {thm}"
+  unless ci.levelParams.isEmpty do
+    throwError "{thm} is universe polymorphic; --asl transfers monomorphic Ensures theorems only"
+  ensuresTelescope ci.type fun xs body => do
+    unless body.isAppOfArity `Janus.GoABI.Ensures 5 do
+      throwError "the conclusion of {thm} (after its ∀ binders) is not `Janus.GoABI.Ensures …` (arm64), also after unfolding its head definitions; --asl transfers arm64 Ensures specifications only"
+    let args := body.getAppArgs
+    let p := args[0]!
+    unless p == .const `Extracted.program [] do
+      throwError "{thm} is an Ensures statement about {← Meta.ppExpr p}, not about Extracted.program itself"
+    let hc := Expr.const words []
+    let t := mkAppN (.const aslToASL []) (args ++ #[mkAppN (.const thm []) xs,
+      mkApp2 (.const aslCoveredWords []) p hc, mkApp2 (.const aslCoveredCode []) p hc,
+      mkApp2 (.const aslCoveredStubs []) p hc])
+    let ty ← Meta.inferType t
+    let ty ← instantiateMVars (← Meta.mkForallFVars xs ty)
+    let ty ← Core.betaReduce ty
+    let val ← instantiateMVars (← Meta.mkLambdaFVars xs t)
+    return (ty, val)
+
+/-- Audit the ASL corollary `corThm` (module `corMod`, which imports the proof module `proofMod`
+and the trusted coverage module) of the user's `userThm`: a theorem of `corMod` whose type is
+exactly `aslCorollary userThm words`, about the identity-checked `Extracted.program`, with no
+JanusASL, ArmASL, Sail or `JanusASLWords` name declared by any untrusted module (the proof, the
+consumer package, the corollary module itself apart from `corThm`), printed and round-tripped in a
+clean environment that imports `Extracted`, `Janus` and `JanusASL.Verify` only. Same record as
+`run`. -/
+unsafe def runASLImpl (userThm proofMod corThm corMod marker trusted words : String) (depRoots : Array String) :
+    IO Unit := do
+  let result ← (show AuditM Record from do
+    let userN := userThm.toName
+    let corN := corThm.toName
+    let corModN := corMod.toName
+    let proofModN := proofMod.toName
+    let envA ← importModules (loadExts := false)
+      #[{ module := `Extracted }, { module := trusted.toName }, { module := corModN }] {}
+    let aslClean : Array Import := cleanImports.push { module := `JanusASL.Verify }
+    let cleanState ← (withImporting do
+      let (_, st) ← (importModulesCore aslClean).run
+      return st : IO ImportState)
+    let moduleOf := fun (n : Name) => (envA.getModuleIdxFor? n).map fun i => envA.header.moduleNames[i.toNat]!
+    let some uci := envA.find? userN | fail s!"the proof does not define {userThm}"
+    unless uci matches .thmInfo _ do fail s!"{userThm} is not a theorem"
+    unless moduleOf userN == some proofModN do
+      fail s!"{userThm} is not declared in the proof module {proofMod}"
+    let some ci := envA.find? corN | fail s!"the corollary module does not define {corThm}"
+    unless ci matches .thmInfo _ do fail s!"{corThm} is not a theorem"
+    unless moduleOf corN == some corModN do
+      fail s!"{corThm} is declared in {moduleOf corN}, not in the corollary module {corMod}"
+    let some _ := envA.find? words.toName | fail s!"the coverage module does not define {words}"
+    unless (moduleOf words.toName).map (·.getRoot) == some `JanusASLWords do
+      fail s!"{words} is not declared in the trusted coverage module"
+    let axs ← runCore envA (collectAxioms corN)
+    checkIdentity envA `program
+    checkIdentity envA `entry
+    let cx := mkCtx envA depRoots aslTrustedRoots
+    -- reserved namespaces: only the trusted builds may declare Extracted/JanusASL/ArmASL/Sail/
+    -- JanusASLWords names, and the corollary module only the corollary
+    for (n, idx) in envA.const2ModIdx.toList do
+      let m := envA.header.moduleNames[idx.toNat]!
+      if cx.trusted m then continue
+      if n.anyS (· == "Extracted") || imitatesExtracted n then
+        fail s!"a non-trusted module declares {n}, whose name shadows the Extracted namespace"
+      if aslTrustedRoots.contains n.getRoot || n.getRoot == corModN.getRoot then
+        unless m == corModN && n == corN do
+          fail s!"the non-trusted module {m} declares {n}, in a namespace reserved for JanusASL and the ASL corollary (a forged or shadowed ASL name)"
+    -- the type is the derivation from the user's theorem, exactly
+    let (expTy, _) ← runCore envA <| Meta.MetaM.run' <| aslCorollary userN words.toName
+    unless expTy == ci.type do
+      let eq := match Kernel.isDefEq envA {} expTy ci.type with
+        | .ok b => b
+        | .error _ => false
+      unless eq do
+        fail s!"the corollary {corThm} is not the ASL corollary of {userThm} (its type is not Ensures.toASL applied to {userThm})"
+    let used := ci.type.getUsedConstants
+    let mut mentionsExtracted := false
+    let mut localSeed := #[]
+    for c in used do
+      if c == `Extracted.program || c == `Extracted.entry then
+        mentionsExtracted := true
+      match moduleOf c with
+      | some m => if !cx.trusted m then localSeed := localSeed.push c
+      | none => fail s!"the corollary depends on {c}, which is in no imported module"
+    unless mentionsExtracted do
+      fail "the corollary does not mention Extracted.program or Extracted.entry"
+    let (localNames, external) ← collectLocalDefs cx {} {} localSeed.toList
+    let localDefs := localNames.filterMap envA.find?
+    let externalNames := external.toArray.map (·.1) |>.qsort Name.lt
+    for n in localNames ++ externalNames do
+      unless plainName n do
+        fail s!"the corollary uses {n}, whose name has characters other than ASCII letters, digits, _ ' ! ? and subscripts (a name with lookalike letters prints like a different, trusted constant); rename it"
+    let (_, stubs) ← externalStubs cx {} #[] externalNames.toList
+    let extDefs := externalNames.filterMap fun n => match envA.find? n with
+      | some ci@(.defnInfo _) => some ci
+      | _ => none
+    let (statement, statementExplicit, defs, extOut, notes) ←
+      cleanEnvAndPrint cx corN ci.type localDefs stubs extDefs cleanState aslClean
+    return { name := corThm, kind := "theorem", module := corMod, axioms := axs.map (·.toString),
+             statement, statementExplicit, definitions := defs,
+             modules := envA.header.moduleNames.map (·.toString),
+             external := externalNames.filterMap external.get?, externalDefinitions := extOut,
+             notes, imports := importGraph envA }
+  ).run
+  match result with
+  | .ok rec => IO.println (marker ++ (toJson rec).compress)
+  | .error f => IO.println (marker ++ "ERROR " ++ f.msg)
+  (← IO.getStdout).flush
+
+/-- ASL corollary audit entry point (see `runASLImpl`), run like `run` from a generated trusted
+`Audit.lean` that imports only this module. -/
+@[implemented_by runASLImpl]
+opaque runASL (userThm proofMod corThm corMod marker trusted words : String) (depRoots : Array String) : IO Unit
 
 end JanusAudit

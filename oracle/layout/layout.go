@@ -93,6 +93,8 @@ type Case struct {
 	// uses them as `State.fpcr` / `State.fpsr`.
 	FPCR string `json:"fpcr,omitempty"`
 	FPSR string `json:"fpsr,omitempty"`
+	// Words (audit/rt-model): a straight-line block laid out from TestPC; Word ignored when set.
+	Words []string `json:"words,omitempty"`
 }
 
 // HW is what the native runner observed.
