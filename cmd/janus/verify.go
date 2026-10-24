@@ -72,6 +72,10 @@ type verifiedReport struct {
 	// DependencyConsts are the constants from declared extra dependencies that the statement
 	// (or a proof-local def it uses) mentions: "<name> (<kind>, <module>)".
 	DependencyConsts []string `json:"dependencyConstants,omitempty"`
+	// Cached: this report is the recorded result of an earlier verification with exactly the
+	// same inputs (resultcache.go), made at CachedFrom.
+	Cached     bool   `json:"cached,omitempty"`
+	CachedFrom string `json:"cachedFrom,omitempty"`
 }
 
 type auditResult struct {
@@ -312,6 +316,9 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	default:
 		fmt.Fprintf(stdout, "  Sandbox: %s (no network, read-only filesystem, private build dir)\n", r.Sandbox.Mode)
 	}
+	if r.Cached {
+		fmt.Fprintf(stdout, "  Cached: the recorded result of an identical verification at %s (same janus, framework build, toolchain, sandbox, artifact and proof; --fresh re-runs it)\n", r.CachedFrom)
+	}
 	ax := strings.Join(r.Axioms, ", ")
 	if ax == "" {
 		ax = "(none)"
@@ -440,6 +447,30 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	}
 	pinned := pinSet{fwPins}
 	tm.mark("framework pins")
+
+	// The recorded result of an identical earlier verification (resultcache.go), if any.
+	idBytes0, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
+	cacheIn := &resultInputs{fw: fw, root: root, fwPins: fwPins, auditExeSha: auditExeSha, tc: tc, sb: sb,
+		thm: thm, outdir: outdir, proof: proofPath, opts: opts, extracted: cr.Lean, identity: idBytes0,
+		binPath: cr.BinPath, binarySha: cr.Identity.BinarySha256, proofSrc: proofSrc}
+	resultKey := ""
+	if resultCacheOK(sb, opts) {
+		// Created before any sandboxed step, so the sandbox's tmpfs always covers it.
+		if _, err := resultHMACKey(); err == nil {
+			resultKey = cacheIn.key()
+		}
+		if prev := lookupResult(resultKey); prev != nil {
+			// The inputs must still be the ones the key was computed from.
+			cr2, err := check(outdir, opts["binary"])
+			proofNow, perr := os.ReadFile(proofPath)
+			idNow, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
+			if err == nil && perr == nil && bytes.Equal(cr2.Lean, cr.Lean) && bytes.Equal(proofNow, proofSrc) && bytes.Equal(idNow, idBytes0) {
+				tm.mark("result cache hit")
+				return cachedReport(prev, fw, root), nil
+			}
+		}
+		tm.mark("result cache miss")
+	}
 
 	// 3. Trusted directory: our Extracted and an independently renamed JanusTrusted copy,
 	// compiled by us (no proof code), kept read-only for the untrusted steps.
@@ -651,7 +682,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	if fi.Modified {
 		commit += "+dirty"
 	}
-	return &verifiedReport{
+	report := &verifiedReport{
 		Schema:            1,
 		Theorem:           ar.Name,
 		Kind:              ar.Kind,
@@ -680,7 +711,11 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		Framework:         fi,
 		Sandbox:           sb.info(),
 		Definitions:       ar.Definitions,
-	}, nil
+	}
+	if resultKey != "" && bytes.Equal(idBytes, idBytes0) {
+		storeResult(resultKey, report)
+	}
+	return report, nil
 }
 
 // parseAuditJSON parses the auditor's record and enforces the axiom allow-list. The auditor

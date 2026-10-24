@@ -297,7 +297,12 @@ func copyTreeSkipTop(src, dst string, skip ...string) error {
 			return err
 		}
 		defer in.Close()
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		// keep the permission bits (an executable such as the compiled auditor stays one)
+		mode := os.FileMode(0o644)
+		if info, err := d.Info(); err == nil {
+			mode = info.Mode().Perm()
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 		if err != nil {
 			return err
 		}
