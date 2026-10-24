@@ -88,6 +88,10 @@ struct Case {
     fpcr: String,
     #[serde(default)]
     fpsr: String,
+    /// Sequence mode (`layout.Case.Words`): a straight-line block laid out from TestPC; `word`
+    /// is ignored when this is non-empty.
+    #[serde(default)]
+    words: Vec<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -394,6 +398,22 @@ impl Cpu {
                 return r;
             }
         };
+        // Sequence mode: the block laid out from TestPC (at most 0x180 words, as the qemu
+        // runner allows), stepped while the PC stays inside it.
+        let mut block: Vec<u32> = Vec::new();
+        for hw in &c.words {
+            match parse_hex(hw) {
+                Ok(v) if v <= 0xffff_ffff => block.push(v as u32),
+                _ => {
+                    err(&mut r, "bad words entry".into());
+                    return r;
+                }
+            }
+        }
+        if block.len() > 0x180 {
+            err(&mut r, "words too long".into());
+            return r;
+        }
         let pc = if c.pc.is_empty() { Ok(TEST_PC) } else { parse_hex(&c.pc) };
         if pc != Ok(TEST_PC) {
             err(&mut r, "pc must be layout.TestPC".into());
@@ -424,7 +444,13 @@ impl Cpu {
         // Memory: code page = word at TestPC, zeros (UDF #0) elsewhere; data = pattern.
         let mut code = vec![0u8; PAGE as usize];
         let off = (TEST_PC - CODE_PAGE) as usize;
-        code[off..off + 4].copy_from_slice(&word.to_le_bytes());
+        if block.is_empty() {
+            code[off..off + 4].copy_from_slice(&word.to_le_bytes());
+        } else {
+            for (i, w) in block.iter().enumerate() {
+                code[off + 4 * i..off + 4 * i + 4].copy_from_slice(&w.to_le_bytes());
+            }
+        }
         self.o.write_mem(CODE_PAGE, &code);
         let data: Vec<u8> = (0..DATA_SIZE).map(|i| pattern(c.seed, i)).collect();
         self.o.write_mem(DATA_BASE, &data);
@@ -495,7 +521,21 @@ impl Cpu {
         self.o.set_pc(TEST_PC);
 
         let (cu0, un0) = (unpredictable_count(), uncaught_count());
-        self.o.step(word);
+        if block.is_empty() {
+            self.o.step(word);
+        } else {
+            // Inject the word at the PC (the crate has no instruction fetch) until the PC
+            // leaves the block, an exception is taken, or a Sail exception escapes.
+            let end = TEST_PC + 4 * block.len() as u64;
+            for _ in 0..4 * block.len() + 1 {
+                let p = self.o.get_pc();
+                if self.el() != 0 || p < TEST_PC || p >= end || (p - TEST_PC) % 4 != 0
+                    || uncaught_count() != un0 {
+                    break;
+                }
+                self.o.step(block[((p - TEST_PC) / 4) as usize]);
+            }
+        }
         r.unpredictable = (unpredictable_count() - cu0) as i64;
         if uncaught_count() != un0 {
             self.poisoned = true;
