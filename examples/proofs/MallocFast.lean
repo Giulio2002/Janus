@@ -101,13 +101,17 @@ slot; the size class is valid, the span has a free slot in its `allocCache` that
 `nextFreeFast` can take (not the last of a 64-slot block unless it is the span's last), the slot
 is zero (`span.needzero = 0`: the runtime's invariant that such a span's free slots are zero),
 `elemsize` is the class size, and the slow paths are off: no malloc debugging, no GC assist,
-write barrier off, no heap profiling sample due. -/
+write barrier off, no heap profiling sample due. Each global is separate from the objects on its
+own (round 9 M1: one range `[globLo, globHi)` covering all six globals also covers `runtime.m0`,
+in `.bss` between them, so no call made on the main thread's `m` met the old statement). -/
 def MCacheOK (s : State) (size : Nat) : Prop :=
   Obj s (gOf s + 16) 162 true ∧ Obj s (mOf s + 208) 60 true ∧ Obj s (pOf s + 56) 8 false ∧
   pOf s ≠ 0 ∧ Obj s (cOf s) 1136 true ∧ Obj s (spanOf s size + 24) 88 true ∧
   Obj s globLo (globHi - globLo) false ∧ Obj s (slotOf s size) (csOf s size) true ∧
   Spread [(s.sp.toNat - 152, 184), (gOf s + 16, 162), (mOf s + 208, 60), (pOf s + 56, 8),
-    (cOf s, 1136), (spanOf s size + 24, 88), (globLo, globHi - globLo), (slotOf s size, csOf s size)] ∧
+    (cOf s, 1136), (spanOf s size + 24, 88), (slotOf s size, csOf s size), (debugMalloc, 1),
+    (gcBlackenEnabled, 4), (sizeToClass8, 129), (classToSize, 136), (writeBarrier, 1),
+    (memProfileRate, 8)] ∧
   scOf s size < 68 ∧ cacheOf s size ≠ 0 ∧ resOf s size < nelemsOf s size ∧
   ((resOf s size + 1) % 64 ≠ 0 ∨ resOf s size + 1 = nelemsOf s size) ∧
   slotOf s size ≠ 0 ∧ rd s (spanOf s size + 100) 1 = 0 ∧ ZeroBytes s.mem (slotOf s size) (csOf s size) ∧ eszOf s size = csOf s size ∧
@@ -251,9 +255,8 @@ theorem zero_of_run {s s' : State} {size : Nat} (hok : MCacheOK s size) (hr : Fa
   obtain ⟨-, -, -, -, -, -, -, -, hf⟩ := hr
   simp only [spread_cons, spread_nil, List.mem_cons, List.not_mem_nil, or_false,
     forall_eq_or_imp, forall_eq, and_true] at hsp
-  obtain ⟨⟨-, -, -, -, -, -, a07⟩, ⟨-, -, -, -, -, a17⟩, ⟨-, -, -, -, a27⟩, ⟨-, -, -, a37⟩,
-    ⟨-, -, a47⟩, ⟨-, a57⟩, -⟩ := hsp
-  simp only [Apart] at a07 a17 a27 a37 a47 a57
+  obtain ⟨⟨-, -, -, -, -, a0_6, -, -, -, -, -, -⟩, ⟨-, -, -, -, a1_6, -, -, -, -, -, -⟩, ⟨-, -, -, a2_6, -, -, -, -, -, -⟩, ⟨-, -, a3_6, -, -, -, -, -, -⟩, ⟨-, a4_6, -, -, -, -, -, -⟩, ⟨a5_6, -, -, -, -, -, -⟩, ⟨-, -, -, -, -, -⟩, ⟨-, -, -, -, -⟩, ⟨-, -, -, -⟩, ⟨-, -, -⟩, ⟨-, -⟩, -⟩ := hsp
+  simp only [Apart] at a0_6 a1_6 a2_6 a3_6 a4_6 a5_6
   intro i hi
   have := hf.readLE (slotOf s size + i) 1
     (by simp only [Janus.outside_cons, Janus.outside_nil, and_true]; omega)
@@ -285,8 +288,7 @@ theorem fast_path (sz typ nz : BitVec 64) :
     hsp, hsc, hca, hres, hblk, hs0, hnz, hzero, hesz, hdm, hgb, hwb, hns, hmpr⟩ := hok
   simp only [spread_cons, spread_nil, List.mem_cons, List.not_mem_nil, or_false,
     forall_eq_or_imp, forall_eq, and_true, true_and] at hsp
-  obtain ⟨⟨a01, a02, a03, a04, a05, a06, a07⟩, ⟨a12, a13, a14, a15, a16, a17⟩, ⟨a23, a24, a25, a26, a27⟩,
-    ⟨a34, a35, a36, a37⟩, ⟨a45, a46, a47⟩, ⟨a56, a57⟩, a67⟩ := hsp
+  obtain ⟨⟨a0_1, a0_2, a0_3, a0_4, a0_5, a0_6, a0_7, a0_8, a0_9, a0_10, a0_11, a0_12⟩, ⟨a1_2, a1_3, a1_4, a1_5, a1_6, a1_7, a1_8, a1_9, a1_10, a1_11, a1_12⟩, ⟨a2_3, a2_4, a2_5, a2_6, a2_7, a2_8, a2_9, a2_10, a2_11, a2_12⟩, ⟨a3_4, a3_5, a3_6, a3_7, a3_8, a3_9, a3_10, a3_11, a3_12⟩, ⟨a4_5, a4_6, a4_7, a4_8, a4_9, a4_10, a4_11, a4_12⟩, ⟨a5_6, a5_7, a5_8, a5_9, a5_10, a5_11, a5_12⟩, ⟨a6_7, a6_8, a6_9, a6_10, a6_11, a6_12⟩, ⟨a7_8, a7_9, a7_10, a7_11, a7_12⟩, ⟨a8_9, a8_10, a8_11, a8_12⟩, ⟨a9_10, a9_11, a9_12⟩, ⟨a10_11, a10_12⟩, a11_12⟩ := hsp
   simp only [rd, h_dm, h_gb, h_t8, h_ts, h_wb, h_mp, h_glo, h_ghi, gOf, mOf, pOf, cOf, scOf, csOf,
     spanOf, cacheOf, fidxOf, nelemsOf, baseOf, eszOf, resOf, slotOf, FastRun] at *
   have hsc8 := Memory.readLE_lt s.mem ((janus_eval% sizeToClass8) + (sz.toNat + 7) / 8) 1
@@ -382,7 +384,7 @@ theorem fresh_of_fastPost {s s' : State} {size : Nat} {rt : List (Nat × Nat)}
   obtain ⟨⟨hr0, -, -, -, -, -, -, -, hf⟩, hz⟩ := hp
   rw [hbs, hr0]
   have hm8 := mul_mod_of_dvd (b := resOf s size) (show eszOf s size % 8 = 0 by rw [hesz]; exact hc8)
-  refine ⟨hin, hbnd, by rw [hf.accessible]; exact hacc, fun _ => ?_, fun h16' => ?_,
+  refine ⟨hin, hbnd, by rw [hf.accessible]; exact hacc, fun _ => ?_, fun h16' _ => ?_,
     fun _ => fun i hi => hz i (by omega), hle⟩
   · unfold slotOf; omega
   · have hm16 := mul_mod_of_dvd (b := resOf s size)

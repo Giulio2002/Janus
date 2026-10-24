@@ -903,7 +903,8 @@ def dischargeOutside (g : MVarId) : TacticM Bool := do
   let saved ← saveState
   try
     let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
-      (simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true,
+      (simp (config := { failIfUnchanged := false }) only [Janus.outside_cons, Janus.outside_nil,
+        Janus.outside_append, and_true,
         BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod]
        repeat' apply And.intro))))
     for g' in gs do

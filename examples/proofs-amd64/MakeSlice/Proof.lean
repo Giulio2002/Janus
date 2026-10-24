@@ -18,21 +18,29 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts
 
 namespace Proof
 
+/-- The address of `uint64`'s type descriptor, the element type MakeSlice passes to
+`runtime.makeslice` (the `LEA` before the call loads it): the extraction's only data object. -/
+def u64Type : Nat := dataBase Extracted.program 0
+
 set_option maxRecDepth 20000 in
 set_option maxHeartbeats 1000000 in
-theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (n : BitVec 64)
+theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady)
+    (n : BitVec 64)
     (hmk : MakesliceContract64 (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.makeslice") rt 4096) :
+      (Extracted.program.contractAddr "runtime.makeslice") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [n]
       (fun s => StackGuardOK s 0 ∧ StackWritable s 4136 16 ∧ Extracted.program.DataLoaded s.mem ∧
-        Outside ((s.regs 4).toNat - 4136) 4152 rt ∧ (s.regs 4).toNat % 8 = 0 ∧ n.toNat ≤ 2 ^ 45)
+        Outside ((s.regs 4).toNat - 4136) 4152 rt ∧ (s.regs 4).toNat % 8 = 0 ∧ n.toNat ≤ 2 ^ 45 ∧
+        H [u64Type, n.toNat, n.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40) (rtView rt s.mem))
       (fun s s' => s'.regs 3 = n ∧ s'.regs 1 = n ∧
         (0 < n.toNat → InRanges (s'.regs 0).toNat (8 * n.toNat) rt ∧ (s'.regs 0).toNat % 8 = 0 ∧
           s'.mem.accessible (s'.regs 0).toNat (8 * n.toNat) true = true ∧
           ∀ i, i < n.toNat → s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
         MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 16)])) := by
-  intro ret hret s hs ⟨hg, ⟨hb, ha, hw⟩, hd, hout, hal, hn⟩
+  intro ret hret s hs ⟨hg, ⟨hb, ha, hw⟩, hd, hout, hal, hn, hH⟩
   janus64_intro hs
+  janus_eval_nat h_ut : u64Type
+  rw [h_ut] at hH
   have hgl := hg.load
   have hgb := hg.below
   have hnw2 := hg.noWrap

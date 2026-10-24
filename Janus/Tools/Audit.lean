@@ -179,6 +179,7 @@ def latinLookalike (c : Char) : Char :=
   | 0x39a => 'K' | 0x39c => 'M' | 0x39d => 'N' | 0x39f => 'O' | 0x3a1 => 'P' | 0x3a4 => 'T'
   | 0x3a5 => 'Y' | 0x3a7 => 'X' | 0x3b1 => 'a' | 0x3b9 => 'i' | 0x3ba => 'k' | 0x3bd => 'v'
   | 0x3bf => 'o' | 0x3c1 => 'p' | 0x3c4 => 't' | 0x3c5 => 'u' | 0x3c7 => 'x' | 0x3f2 => 'c'
+  | 0x3b3 => 'y' | 0x3c3 => 'o'
   | 0x3f3 => 'j' | 0x2107 => 'E' | 0x210e => 'h' | 0x2113 => 'l' | 0x212e => 'e' | 0x212f => 'e'
   | 0x2130 => 'E' | 0x2134 => 'o' | 0x2139 => 'i'
   | v =>
@@ -493,12 +494,29 @@ def checkNumerals (e : Expr) : MetaM (Option String) := do
             bad.set (some s!"writes the out-of-range numeral {n} at type {tyS}, whose values are below {b}: the literal wraps (to {n % b} for an unsigned type) and does not mean what it reads (round 6 F2). Write the value in range")
   bad.get
 
-/-- Round 7 (H1): characters a bound variable's name may contain. Lean identifier letters
-(ASCII, Greek, Coptic, letterlike, subscripts) as `isLetterLike` defines them, digits and
+/-- Round 9 (H2): the basic Greek letters Lean accepts in identifiers (`α`–`ω` except `λ`,
+`Α`–`Ω` except `Π`, `Σ`). Each looks unlike every other accepted letter once `latinLookalike`
+has folded the Latin-looking ones. Polytonic Greek (U+1F00–U+1FFE: `ό` U+1F79 renders as `ό`
+U+03CC, `ι` U+1FBE as `ι`) and the accented and Coptic letters U+03CA–U+03FB are not. -/
+def greekBinderChar (c : Char) : Bool :=
+  (0x3b1 ≤ c.val && c.val ≤ 0x3c9 && c.val != 0x3bb) ||
+    (0x391 ≤ c.val && c.val ≤ 0x3a9 && c.val != 0x3a0 && c.val != 0x3a3)
+
+/-- Round 9 (H2): the letterlike symbols (U+2100–U+214F) allowed in a bound variable's name: only
+those `latinLookalike` folds (`ℓ`, `ℯ`, `ℎ`, …). The others include exact duplicates of letters
+(`K` U+212A KELVIN SIGN is `K`, `Å` U+212B is `Å`, `Ω` U+2126 is `Ω`). -/
+def letterlikeFolded : List UInt32 :=
+  [0x2107, 0x210e, 0x2113, 0x212e, 0x212f, 0x2130, 0x2134, 0x2139]
+
+/-- Round 7 (H1), narrowed in round 9 (H2): characters a bound variable's name may contain. ASCII
+letters, subscripts, basic Greek (`greekBinderChar`), the mathematical script, fraktur and
+double-struck letters (folded to Latin by `latinLookalike`), the folded letterlike symbols,
+digits and
 `_ ' ! ?`. A `«…»` binder may otherwise contain zero-width spaces, combining marks or
 lookalike letters from scripts Lean does not accept as identifiers (Cyrillic `х`). -/
 def binderChar (c : Char) : Bool :=
-  plainNameChar c || Lean.isLetterLike c
+  plainNameChar c || greekBinderChar c || (0x1d49c ≤ c.val && c.val ≤ 0x1d59f) ||
+    letterlikeFolded.contains c.val
 
 /-- Round 7 (H1): the bound-variable names of `e` (`∀`, `fun`, `let` binders), with macro
 scopes erased, in traversal order. -/
@@ -523,7 +541,7 @@ def checkBinderNames (e : Expr) : Option String := Id.run do
     if n.isAnonymous then continue
     let str := n.toString (escape := false)
     if !n.components.all (fun | .str _ c => c.all binderChar | _ => true) then
-      return some s!"binds a variable whose name has characters other than identifier letters, digits and _ ' ! ? (zero-width, combining or lookalike characters): {String.quote str}; rename it (round 7 H1)"
+      return some s!"binds a variable whose name has characters other than identifier letters, digits and _ ' ! ? (zero-width, combining or lookalike characters): {String.quote str}; rename it (round 7 H1, round 9 H2)"
     let folded := String.ofList (str.toList.map latinLookalike)
     match seen.get? folded with
     | some other =>
@@ -551,7 +569,7 @@ inductive SymArg where
   deriving BEq
 
 inductive SymKind where
-  | dataName | itabName | segName | dataIndex
+  | dataName | itabName | segName | dataIndex | contractName
   deriving BEq
 
 def symbolFns : List (Name × SymArg × Nat × Nat × SymKind) :=
@@ -564,7 +582,10 @@ def symbolFns : List (Name × SymArg × Nat × Nat × SymKind) :=
    (`Janus.Spec.segWord, .prog, 0, 1, .segName),
    (`Janus.Tactic.segAddr, .prog, 0, 1, .segName),
    (`Janus.Amd64.Tactic.segAddr, .prog, 0, 1, .segName),
-   (`Janus.Amd64.Tactic.dataBase, .prog, 0, 1, .dataIndex)]
+   (`Janus.Amd64.Tactic.dataBase, .prog, 0, 1, .dataIndex),
+   -- round 9 (I1g): a contract address looked up by a name that is not a recorded contract is 0
+   (`Janus.Program.contractAddr, .prog, 0, 1, .contractName),
+   (`Janus.Amd64.Program.contractAddr, .prog, 0, 1, .contractName)]
 
 /-- The elements of a closed list term, by weak-head reduction. -/
 partial def listElems (e : Expr) (acc : Array Expr := #[]) : MetaM (Array Expr) := do
@@ -592,6 +613,7 @@ structure SymTable where
   segs : Expr
   dataNames : Array String
   segNames : Array String
+  contractNames : Array String
 
 def symTable : MetaM SymTable := do
   let prog := mkConst `Extracted.program
@@ -602,7 +624,12 @@ def symTable : MetaM SymTable := do
       match ← strLit? (← Meta.mkProjection d `name) with
       | some s => pure s
       | none => throwError "an object of Extracted.program has no literal name"
-  return { prog, data, segs, dataNames := ← names data, segNames := ← names segs }
+  let contracts ← (← listElems (← Meta.mkProjection prog `contracts)).mapM fun c => do
+    match ← strLit? (← Meta.mkProjection c `fst) with
+    | some s => pure s
+    | none => throwError "a contract of Extracted.program has no literal name"
+  return { prog, data, segs, dataNames := ← names data, segNames := ← names segs,
+           contractNames := contracts }
 
 /-- Expand the proof-local definitions `locals` everywhere in `e` (beta-reducing their
 applications), so a name passed through an `abbrev` or a definition's parameter is seen at its
@@ -651,9 +678,11 @@ partial def checkSymbolRefs (tbl : SymTable) (e : Expr) : MetaM (Option String) 
         else
           let some s ← strLit? nameArg
             | return some s!"uses {c} with the name `{(← Meta.ppExpr nameArg).pretty 10000}`, which is not a string literal (round 8 I1: object names must be literals, so the report shows exactly which object is meant)"
-          let known := if kind == .segName then tbl.segNames else tbl.dataNames
+          let known := if kind == .segName then tbl.segNames
+            else if kind == .contractName then tbl.contractNames else tbl.dataNames
           unless known.contains s do
-            let what := if kind == .segName then "function" else "data object"
+            let what := if kind == .segName then "function"
+              else if kind == .contractName then "runtime contract (`janus extract --contract`)" else "data object"
             return some s!"uses {c} with the name {String.quote s}, but the extracted program has no {what} of that name, so the lookup silently defaults (`False` or `0`) and the statement is vacuous or about another value while it reads as a claim about that object (a misspelt or lookalike name, round 8 I1)"
           if kind == .itabName && !s.startsWith "go:itab." then
             return some s!"uses {c} with the data object {String.quote s}, which is not a static itab (go:itab.*T,I) (round 8 I1)"
