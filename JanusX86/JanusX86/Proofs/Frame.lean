@@ -111,6 +111,7 @@ theorem rm_operand {js : State} {s : SState} (h : Rel js s) (hc : X86Config s)
         (BitVec.ofNat 3 (m % 8)) (BitVec.ofNat 2 (m / 64)) (if sibP m then BitVec.ofNat 8 (rest.getD 0 0) else 0#8)
         (BitVec.ofNat 3 k)).run s = .ok (eaddr, (inc : Int)) s) ∧
       (m / 64 = 3 → inc = 0 ∧ eaddr = 0#64) ∧
+      (∀ a, mm.rm = .m a → eaddr = eaOff js (BitVec.ofNat 64 (q + c + k)) a) ∧
       (∀ iac mp wr, locOK js (BitVec.ofNat 64 (q + c + k)) w (rmDst p w mm.rm) wr → ∀ sg, (sg = 4 ↔ p.fs = true) → sg ≠ 5 →
         (x86_operand_from_modr_m_and_sib_bytes .Mode_64bit 0#1 (w / 8) iac mp sg x
           (BitVec.ofNat 48 (q + 1 + (if sibP m then 1 else 0))) rex (BitVec.ofNat 3 (m % 8)) (BitVec.ofNat 2 (m / 64))
@@ -132,7 +133,7 @@ theorem rm_operand {js : State} {s : SState} (h : Rel js s) (hc : X86Config s)
     obtain ⟨h3, rfl, rfl, -⟩ := modrm_r hmd
     have hsib : sibP m = false := sibP_reg m h3
     simp only [hsib, Bool.false_eq_true, ↓reduceIte, Nat.add_zero]
-    refine ⟨0, 0#64, rfl, by decide, fun h => absurd h3 h, fun _ => ⟨rfl, rfl⟩,
+    refine ⟨0, 0#64, rfl, by decide, fun h => absurd h3 h, fun _ => ⟨rfl, rfl⟩, fun _ h => (by cases h),
       fun iac mp wr _ sg _ _ => ?_, fun iac mp sg _ _ _ js0 s0 h0 hc0 hr0 _ _ y => ?_⟩
     · rw [h3]
       have := run_operand_from_reg h hW _ rex hrex (rmNum_lt p m) (rmNum_8 p m) _
@@ -153,7 +154,7 @@ theorem rm_operand {js : State} {s : SState} (h : Rel js s) (hc : X86Config s)
     have hEA := run_x86_effective_addr h hc h.rip hp hrv hcs hm hmd (nimm := k) hk hq
     have hafs := hEA.2.1
     refine ⟨c - 1 - (if sibP m then 1 else 0), eaOff js (BitVec.ofNat 64 (q + c + k)) a, by omega,
-      by omega, fun _ => hEA.1, fun h => absurd h hmd3, fun iac mp wr hacc sg hsg4 hsg5 => ?_, fun iac mp sg hsg4 hsg5 hacc js0 s0 h0 hc0 hr0 hm0 hf0 y => ?_⟩
+      by omega, fun _ => hEA.1, fun h => absurd h hmd3, fun _ h => (by cases h; rfl), fun iac mp wr hacc sg hsg4 hsg5 => ?_, fun iac mp sg hsg4 hsg5 hacc js0 s0 h0 hc0 hr0 hm0 hf0 y => ?_⟩
     · have := run_operand_from_mem h hc hp hrv hcs hm hmd (nimm := k) hk hq hW hsg4 hsg5 iac mp (wr := wr) hacc
       simpa [rmDst, locVal] using this
     · simp only [rmDst, locOK] at hacc
@@ -204,6 +205,7 @@ theorem rm_frame {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Conf
       (m / 64 ≠ 3 → (x86_effective_addr .Mode_64bit x (BitVec.ofNat 48 tr) rex (BitVec.ofNat 3 (m % 8))
         (BitVec.ofNat 2 (m / 64)) sib (BitVec.ofNat 3 k)).run s = .ok (eaddr, (inc : Int)) s) →
       (m / 64 = 3 → inc = 0 ∧ eaddr = 0#64) →
+      (∀ a, mm.rm = .m a → eaddr = eaOff js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c + k)) a) →
       ∃ s', (arm (BitVec.ofNat 48 js.rip.toNat) (BitVec.ofNat 48 tr) x rex sib).run s = .ok () s' ∧
         Rel js' s' ∧ X86Config s') :
     ∃ s', (janus_x86_step ()).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ X86Config s' := by
@@ -244,12 +246,12 @@ theorem rm_frame {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Conf
   simp only at hf
   have hl0 : _get_prefixes_lck x = 0#8 := by have := hpr.lck; rw [hlk] at this; simpa using this
   rw [hdisp x rex hpr hl0] at hf
-  obtain ⟨inc, eaddr, hinc, hinc8, hEA, hR3, hX, hWr⟩ := rm_operand hrel hcfg hpr hrv (q := js.rip.toNat + n + 1) hcs hm256 hmd hfs hW
+  obtain ⟨inc, eaddr, hinc, hinc8, hEA, hR3, hEo, hX, hWr⟩ := rm_operand hrel hcfg hpr hrv (q := js.rip.toNat + n + 1) hcs hm256 hmd hfs hW
     hk (by omega)
   rw [show js.rip.toNat + n + 1 + (1 + (if sibP m then 1 else 0)) = js.rip.toNat + n + 1 + 1 + (if sibP m then 1 else 0)
     by omega] at hf
   obtain ⟨s', hs', hr', hc'⟩ := hsem x rex hpr hrv (if sibP m then BitVec.ofNat 8 (rest.getD 0 0) else 0#8)
-    (js.rip.toNat + n + 1 + 1 + (if sibP m then 1 else 0)) inc eaddr (by omega) hinc8 hcs3 hX hWr hEA hR3
+    (js.rip.toNat + n + 1 + 1 + (if sibP m then 1 else 0)) inc eaddr (by omega) hinc8 hcs3 hX hWr hEA hR3 hEo
   exact ⟨s', run_janus_x86_step (by rw [hf, hs']), hr', hc'⟩
 
 end JanusX86.Proofs

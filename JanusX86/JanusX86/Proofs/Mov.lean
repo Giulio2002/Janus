@@ -321,7 +321,7 @@ theorem mov_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Con
     (fun sr tr x rex sib => if o < 0x8A then x86_mov_op_en_mr .Mode_64bit sr tr x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib
        else x86_mov_op_en_rm .Mode_64bit sr tr x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib)
     (fun x rex _ hl sr tr sib => run_one_byte_mov o ho sr tr x hl rex _ sib s) ?_
-  intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX hWr hEA hR3
+  intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX hWr hEA hR3 _
   by_cases hmr : o < 0x8A
   · simp only [hmr, ↓reduceIte] at hstep ⊢
     obtain ⟨V, hV, hok, rfl⟩ := exec_mov hstep
@@ -341,5 +341,158 @@ theorem mov_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Con
     refine ⟨s', hs', ?_, hc'⟩
     rw [locWrite_regLocOf]
     rwa [hinc'] at hrel'
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+theorem lea_mask {w : Nat} (hw : w = 16 ∨ w = 32 ∨ w = 64) (e : BitVec 64) :
+    sail_mask 64 (trunc_signed (w / 8) e) = (e.setWidth w).setWidth 64 := by
+  rcases hw with rfl | rfl | rfl <;>
+  apply BitVec.eq_of_getLsbD_eq <;> intro i hi <;>
+  simp [sail_mask, trunc_signed, sail_mask_signed, Sail.BitVec.truncate, Sail.BitVec.zeroExtend, Sail.BitVec.length,
+    BitVec.getLsbD_setWidth] <;> omega
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem decode_lea {bytes : List Nat} {p : Prefixes} {m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, 0x8D :: m :: rest, n))
+    {mm : ModRM} {r3 : List Nat} {c : Nat}
+    (hmd : modrm (p.rex.getD 0) (m :: rest) = some (mm, r3, c))
+    {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
+    p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ len = n + 1 + c ∧ len ≤ 15 ∧
+      ∃ a, mm.rm = .m a ∧ i = .lea (osz p) (regNum p m) a := by
+  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  have hreg : mm.reg = regNum p m := by have := modrm_reg hmd; simpa [regNum] using this
+  have hou : (if p.rex.getD 0 / 8 = 1 then 64 else if p.opsize = true then 16 else 32) = osz p := by
+    simp [osz, rexW]
+  obtain ⟨md, rg, ext, rm⟩ := mm
+  simp only at hreg; subst hreg
+  simp (config := {decide := true}) only [↓reduceIte, oneByte, hmd, hou, true_and, and_true,
+    false_and, and_false, or_false, false_or, finish] at hd ⊢
+  cases rm with
+  | r k => simp at hd
+  | m a =>
+    by_cases hl : 15 < n + 1 + c <;> by_cases hrp : p.rep = 0 <;>
+      cases hf : p.fs <;> cases hk : p.lock <;>
+      simp (config := {decide := true}) [hf, hk, hl, hrp, lockable, withFS] at hd ⊢
+    obtain ⟨rfl, rfl⟩ := hd; exact ⟨rfl, by omega, rfl⟩
+
+set_option maxHeartbeats 2000000 in
+theorem run_lea {js : Janus.Amd64.State} {s : SState} (h : Rel js s) (hc : X86Config s)
+    {p : Janus.Amd64.Decode.Prefixes} {x : BitVec 52} {rex : BitVec 8} (hp : PfxRel p x rex)
+    (hrv : ∀ r, p.rex = some r → r < 16)
+    (m : Nat) (hm : m < 256) (hm3 : m / 64 ≠ 3) (sib : BitVec 8) (tr : Nat) (inc : Nat) (eaddr : BitVec 64)
+    (hEA : (x86_effective_addr .Mode_64bit x (BitVec.ofNat 48 tr) rex (BitVec.ofNat 3 (m % 8))
+        (BitVec.ofNat 2 (m / 64)) sib (BitVec.ofNat 3 0)).run s = .ok (eaddr, (inc : Int)) s)
+    (hinc : inc < 8) (sr : Nat) (hl1 : sr ≤ tr + inc) (hl2 : tr + inc ≤ sr + 15) (htr : tr + inc < 2 ^ 47) :
+    ∃ s', (x86_lea .Mode_64bit (BitVec.ofNat 48 sr) (BitVec.ofNat 48 tr) x rex (BitVec.ofNat 8 0x8D)
+      (BitVec.ofNat 8 m) sib).run s = .ok () s' ∧
+      Rel ((js.putReg (osz p) (regNum p m) (eaddr.setWidth (osz p))).setRip (BitVec.ofNat 64 (tr + inc))) s' ∧
+      X86Config s' := by
+  have hrexb : rex = BitVec.ofNat 8 (rexByte p) := by rw [hp.rexb]; rfl
+  have hrex : (rex == 0#8) = !p.rex.isSome := by rw [hrexb]; exact rex_hrex hrv
+  have hW3 := osz_cases p
+  have hW : osz p = 8 ∨ osz p = 16 ∨ osz p = 32 ∨ osz p = 64 := Or.inr hW3
+  obtain ⟨h1, h2, h3⟩ := modrm_fields m hm
+  have hlen := check_len_ok sr (tr + inc) hl1 hl2 htr
+  have hl := hc.log
+  have hsz : (if rexW p = true then (8 : Int) else if p.opsize = true then 2 else 4) =
+      ((osz p / 8 : Nat) : Int) := by unfold osz; cases rexW p <;> cases p.opsize <;> simp
+  have hcr : (check_range 2 8 ((osz p / 8 : Nat) : Int)).run s = .ok ((osz p / 8 : Nat) : Int) s := by
+    have hb : ((2 ≤b ((osz p / 8 : Nat) : Int)) && (((osz p / 8 : Nat) : Int) ≤b 8)) = true := by
+      simp only [Bool.and_eq_true, decide_eq_true_eq]; rcases hW3 with e | e | e <;> rw [e] <;> decide
+    simp only [check_range, run_bind, run_sail_assert_of hb, run_pure]
+  have hreg8 : regLocOf p.rex.isSome (osz p) (regNum p m) = .reg (regNum p m) := by
+    unfold regLocOf; rw [if_neg (by rcases hW3 with e | e | e <;> omega)]
+  simp only [x86_lea, h1, h2, h3, run_bind, run_select_operand_size hp hrv, hsz, hcr, ← bits3_zero, hEA,
+    run_add_inc tr inc hinc htr, hlen, is_some, Bool.false_eq_true, ↓reduceIte, run_pure, Int.toNat_natCast,
+    nbytes_eq _ hW, lea_mask hW3, show reg_index (BitVec.ofNat 3 (m / 8 % 8)) rex 2#2 =
+      BitVec.ofNat 4 (regNum p m) by rw [hrexb]; exact hidx_reg hrv m,
+    run_write_rgfi_size h hl hW _ rex hrex (regNum_lt p m) (regNum_8 p m) (eaddr.setWidth (osz p))]
+  have hn' := locReg_lt p.rex.isSome (osz p) (regNum p m) (regNum_lt p m)
+  refine ⟨_, run_write_iptr (by rw [get?_setGpr_of_not s _ hn' rfl]; exact hl) _ htr, ?_,
+    (hc.setGpr hn' _).set (by decide) _⟩
+  have := (h.writeReg p.rex.isSome (regNum_lt p m) (eaddr.setWidth (osz p))).setRipR (BitVec.ofNat 64 (tr + inc))
+  rw [hreg8] at this ⊢
+  exact this
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem modrm_afs {rx m : Nat} {rest : List Nat} {md reg ext : Nat} {a : Addr} {r3 : List Nat} {c : Nat}
+    (h : modrm rx (m :: rest) = some (⟨md, reg, ext, .m a⟩, r3, c)) : a.fs = false := by
+  revert h
+  unfold modrm
+  simp only
+  repeat' split
+  all_goals intro h
+  all_goals first
+    | (simp at h; done)
+    | (simp only [Option.some.injEq, Prod.mk.injEq, ModRM.mk.injEq, RM.m.injEq] at h
+       obtain ⟨⟨-, -, -, rfl⟩, -, -⟩ := h; rfl)
+
+set_option maxRecDepth 100000 in
+theorem run_one_byte_lea (sr tr : BitVec 48) (x : BitVec 52) (hl : _get_prefixes_lck x = 0#8) (rex m sib : BitVec 8)
+    (hm : (_get_modr_m_mod m == 3#2) = false) (s : SState) :
+    (one_byte_opcode_execute .Mode_64bit sr tr x rex (BitVec.ofNat 8 0x8D) m sib).run s =
+      (x86_lea .Mode_64bit sr tr x rex (BitVec.ofNat 8 0x8D) m sib).run s := by
+  simp (config := {decide := true}) only [one_byte_opcode_execute, ext_one_byte_opcode_execute, eq_bits_nat,
+    ↓reduceIte, Bool.false_eq_true, hl, hm, Bool.false_or, Bool.or_false, run_bind, run_pure,
+    show (240#8 == 0#8) = false from rfl] <;> rfl
+
+set_option maxHeartbeats 1000000 in
+open Janus.Amd64 Janus.Amd64.Decode in
+/-- **LEA r, m** (`8D`): every addressing form, operand size and prefix sequence Janus accepts. -/
+theorem lea_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
+    {bytes : List Nat} (hcode : CodeAt s js.rip.toNat bytes) (hlim : js.rip.toNat + 17 < 2 ^ 47)
+    {p : Prefixes} {m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, 0x8D :: m :: rest, n))
+    (hstep : step bytes js = .ok js') :
+    ∃ s', (janus_x86_step ()).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ X86Config s' := by
+  cases hd : decode bytes with
+  | none => simp [step, hd] at hstep
+  | some il =>
+  obtain ⟨i, len⟩ := il
+  cases hmd : modrm (p.rex.getD 0) (m :: rest) with
+  | none =>
+    exfalso
+    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    simp (config := {decide := true}) [oneByte, hmd] at hd
+  | some mrc =>
+  obtain ⟨mm, r3, c⟩ := mrc
+  obtain ⟨hlk, hfs, hrep, rfl, hlen, a, hrm, rfl⟩ := decode_lea hpp hmd hd
+  rw [step_of_decode hd] at hstep
+  simp only [exec, Except.ok.injEq] at hstep
+  subst hstep
+  have hm3 : m / 64 ≠ 3 := by
+    obtain ⟨md, rg, ext, rm⟩ := mm; simp only at hrm; subst hrm; exact (modrm_c_ge hmd).2.2
+  have hnext : BitVec.ofNat 64 ((BitVec.toNat js.rip + (n + 1 + c)) % 2 ^ 64) =
+      BitVec.ofNat 64 (js.rip.toNat + n + 1 + c + 0) := by
+    rw [Nat.mod_eq_of_lt (by omega)]; congr 1; omega
+  have hm256 : m < 256 := by
+    have hdrop : bytes.drop n = 0x8D :: m :: rest := by simpa using parsePrefixes_drop _ _ _ hpp
+    exact hcode.1 m (by
+      have : m ∈ bytes.drop n := by rw [hdrop]; simp
+      exact List.mem_of_mem_drop this)
+  have hmod : (_get_modr_m_mod (BitVec.ofNat 8 m) == 3#2) = false := by
+    rw [(modrm_fields m hm256).1, beq2_3 _ (by omega)]; simpa using hm3
+  refine rm_frame hrel hcfg hcode hlim hpp (by unfold prefixGroup; omega) (by omega) (by omega)
+    (by decide) hlk hmd (fun k h => by rw [hrm] at h; cases h) (w := 64) (by decide) (k := 0) (by decide) (by omega)
+    (fun sr tr x rex sib => x86_lea .Mode_64bit sr tr x rex (BitVec.ofNat 8 0x8D) (BitVec.ofNat 8 m) sib)
+    (fun x rex _ hl sr tr sib => run_one_byte_lea sr tr x hl rex _ sib hmod s) ?_
+  intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX hWr hEA hR3 hEo
+  obtain ⟨s', hs', hrel', hc'⟩ := run_lea hrel hcfg hpr hrv m hm256 hm3 sib tr inc eaddr (hEA hm3) hinc8
+    js.rip.toNat (by omega) (by omega) (by omega)
+  refine ⟨s', hs', ?_, hc'⟩
+  rw [hinc', hEo a hrm] at hrel'
+  have hafs : a.fs = false := by
+    obtain ⟨md, rg, ext, rm⟩ := mm; simp only at hrm; subst hrm; exact modrm_afs hmd
+  simpa [ea, hafs, hnext] using hrel'
 
 end JanusX86.Proofs
