@@ -25,7 +25,7 @@ set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
 
 all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimbs CopyWords SumSquares
      AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte
-     HashWith HashTwice MapSum DeferAdd)
+     HashWith HashTwice MapSum DeferAdd AddF64 Dot3 F64ToU64 Abs)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
@@ -67,6 +67,17 @@ verify_one() {
   if bin/janus verify "$out" --proof "examples/proofs/$n.lean" ${extra[@]+"${extra[@]}"} > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-9s ok  %6.1fs\n' "$n" "$t" | tee "$lines/$n"
+    # further theorems of the same proof file (F64ToU64's `exact` and `saturation`, ...)
+    local thm
+    for thm in $(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}'); do
+      if bin/janus verify "$out" --proof "examples/proofs/$n.lean" --theorem "Proof.$thm" \
+          ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
+        printf '%-9s ok  (Proof.%s)\n' "$n" "$thm" | tee -a "$lines/$n"
+      else
+        printf '%-9s FAILED Proof.%s (see %s/verify.log)\n' "$n" "$thm" "$out" | tee -a "$lines/$n"
+        broken+=("$n")
+      fi
+    done
   else
     printf '%-9s FAILED (see %s/verify.log)\n' "$n" "$out" | tee "$lines/$n"
     tail -30 "$out/verify.log"

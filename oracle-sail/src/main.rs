@@ -83,6 +83,11 @@ struct Case {
     /// TPIDR_EL0 (absent: 0).
     #[serde(default)]
     tpidr: String,
+    /// FPCR and FPSR (absent: 0), written by stepping `MSR FPCR/FPSR, Xt` at EL0.
+    #[serde(default)]
+    fpcr: String,
+    #[serde(default)]
+    fpsr: String,
 }
 
 #[derive(Serialize, Default)]
@@ -109,6 +114,11 @@ struct Hw {
     /// V0..V31 after the instruction (the low 128 bits of Z0..Z31).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     v: Vec<String>,
+    /// FPCR and FPSR after the instruction.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    fpcr: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    fpsr: String,
     // Sail-only extras.
     #[serde(skip_serializing_if = "String::is_empty")]
     esr: String,
@@ -184,6 +194,9 @@ const SMCR_EL2: u32 = sysreg(3, 4, 1, 2, 6);
 const SCR_EL3: u32 = sysreg(3, 6, 1, 1, 0);
 const SPSR_EL3: u32 = sysreg(3, 6, 4, 0, 0);
 const ELR_EL3: u32 = sysreg(3, 6, 4, 0, 1);
+
+const FPCR: u32 = sysreg(3, 3, 4, 4, 0);
+const FPSR: u32 = sysreg(3, 3, 4, 4, 1);
 
 const ERET: u32 = 0xD69F_03E0;
 const SVC0: u32 = 0xD400_0001;
@@ -444,7 +457,27 @@ impl Cpu {
             }
         };
 
-        // EL0 state.
+        let fpcr = if c.fpcr.is_empty() { Ok(0) } else { parse_hex(&c.fpcr) };
+        let fpsr = if c.fpsr.is_empty() { Ok(0) } else { parse_hex(&c.fpsr) };
+        let (fpcr, fpsr) = match (fpcr, fpsr) {
+            (Ok(a), Ok(b)) if a <= 0xffff_ffff && b <= 0xffff_ffff => (a, b),
+            _ => {
+                err(&mut r, "bad fpcr/fpsr".into());
+                return r;
+            }
+        };
+
+        // EL0 state. FPCR/FPSR first: they are written by stepping real MSRs at EL0 (which
+        // use X0 and advance the PC; both are set afterwards).
+        self.write_sys(FPCR, fpcr);
+        self.write_sys(FPSR, fpsr);
+        if self.el() != 0 || self.o.get_fpcr() != fpcr || self.o.get_fpsr() != fpsr {
+            self.poisoned = true;
+            err(&mut r, format!(
+                "fpcr {fpcr:#x} / fpsr {fpsr:#x} not kept by the model (got {:#x} / {:#x}, EL{})",
+                self.o.get_fpcr(), self.o.get_fpsr(), self.el()));
+            return r;
+        }
         for (i, v) in x.iter().enumerate() {
             self.o.set_x(i as u32, *v);
         }
@@ -483,6 +516,8 @@ impl Cpu {
         }
         let snap = self.o.snapshot();
         r.x = snap.x.iter().map(|v| hex(*v)).collect();
+        r.fpcr = hex(self.o.get_fpcr());
+        r.fpsr = hex(self.o.get_fpsr());
         let mut after = vec![0u8; DATA_SIZE as usize];
         self.o.read_mem(DATA_BASE, &mut after);
         for i in 0..DATA_SIZE as usize {
@@ -532,6 +567,8 @@ impl Cpu {
                     r.addr = hex(npc);
                     r.pc = hex(npc);
                     r.note = "WFI trapped to EL1 and skipped (Linux wfi_handler)".into();
+                    r.fpcr = hex(self.o.get_fpcr());
+                    r.fpsr = hex(self.o.get_fpsr());
                     r.v = (0..32).map(|n| {
                         let z = self.o.get_z(n);
                         hex128(z[0], z[1])
@@ -597,6 +634,7 @@ fn linux_signal(esr: u64, far: u64, elr: u64, sp: u64) -> (i64, i64, u64, String
         0x22 => (7, 1, far, "PC alignment".into()),
         0x26 => (7, 1, sp, "SP alignment".into()),
         0x27 => (4, 1, elr, "MOPS exception".into()),
+        0x2c => (8, 0, elr, "trapped floating-point exception".into()),
         0x3c => (5, 1, elr, "brk".into()),
         0x24 => {
             let dfsc = esr & 0x3f;
@@ -770,7 +808,7 @@ fn to_model(line: &str) -> String {
     match st {
         "ok" | "selfloop" | "escaped" => {
             m.insert("status".into(), json!("ok"));
-            for k in ["pc", "x", "sp", "nzcv", "mem", "v"] {
+            for k in ["pc", "x", "sp", "nzcv", "mem", "v", "fpcr", "fpsr"] {
                 if let Some(x) = v.get(k) {
                     m.insert(k.into(), x.clone());
                 }
@@ -785,6 +823,7 @@ fn to_model(line: &str) -> String {
                 4 => "SIGILL",
                 5 => "SIGTRAP",
                 7 => "SIGBUS",
+                8 => "SIGFPE",
                 11 => "SIGSEGV",
                 0 => "nosignal",
                 _ => "sig?",
