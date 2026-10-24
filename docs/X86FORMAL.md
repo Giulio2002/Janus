@@ -85,6 +85,16 @@ D5 is a difference of granularity rather than a wrong result (X86isa models one 
 the others are wrong results. The class theorems exclude exactly these encodings (D2 in
 `alu_ai_agree`; D3/D6 when the shift class is proved).
 
+**SSE scalar floating point** (`Decode.sseFp`: `ADD/SUB/MUL/DIV/MIN/MAX/SQRT SS/SD`, `(U)COMIS`,
+`CVT*`, `CMPSS/SD`, `AND(N)/OR PS/PD`, `ROUNDSS/SD`, and `MXCSR`) is not covered by the formal
+model: sail-x86-from-acl2 leaves every one of these two-byte opcodes (`0F 2A 2C–2F 3A 51 54–56
+58–5A 5C–5F C2`) as `"Translation error: two-byte opcode … not translated"` (X86isa's
+floating-point specification was not translated to Sail). The slice keeps their arms verbatim,
+so the check reports them as `gap sail-unimplemented`: on the FP corpus of
+`scripts/oracle-amd64.sh fp` (548,874 cases, native oracle 0 MISMATCH),
+`artifacts/x86formal-fp/summary.txt` has **0 agree, 548,874 gap, 0 MISMATCH**. Janus' FP
+semantics (`Janus/Amd64/Float.lean`) is checked against the hardware only.
+
 X86isa (and so the Sail model) leaves unimplemented: `XORPS` (`0F 57`), `PXOR`, `PAND`, `POR`,
 `PCMPEQB`, `PMOVMSKB`, `BSF`, `BSR`, `TZCNT`, `LZCNT`, `POPCNT`, `BSWAP`, `BTS/BTR/BTC`, `XADD`,
 `CMPXCHG8B/16B`, the fences, and every VEX encoding; these are `gap sail-unimplemented` and are
@@ -131,6 +141,7 @@ that a decidable check of it is sound, and the check verifies it on every case.
 | string instructions | — | tested only (D5) |
 | CMPXCHG | — | tested only (D1) |
 | SSE/AVX moves and logic | — | tested only (D4; most are unimplemented in X86isa) |
+| SSE scalar floating point, `MXCSR` | — | tested only against hardware (not translated in the Sail model) |
 
 ### How the proofs are built
 
