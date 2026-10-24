@@ -183,25 +183,19 @@ func TestStubKind(t *testing.T) {
 	}
 }
 
-// Round 7 G1: a listed stub name is trusted only in a go1.26 binary with an ELF symbol table,
-// when no other function has the same name.
+// Round 7 G1: a listed stub name is trusted only in a binary with an ELF symbol table, when no
+// other function has the same name. Round 8 G3: and only when its code is the runtime's
+// (stubpin_test.go has the content cases on real binaries); the Go version is not read.
 func TestClassifyStub(t *testing.T) {
 	g := Func{Name: "runtime.panicdivide", Addr: 0x1000, Size: 16}
 	mk := func(src, ver string, funcs ...Func) *Binary {
-		return &Binary{Path: "bin", SymbolSource: src, GoVersion: ver, Funcs: funcs}
-	}
-	if k, ok, err := mk("symtab", "go1.26.0", g).classifyStub(g); err != nil || !ok || k != stubPanic {
-		t.Errorf("go1.26.0 symtab: %v %v %v", k, ok, err)
-	}
-	if _, ok, err := mk("symtab", "go1.26.10", g).classifyStub(g); err != nil || !ok {
-		t.Errorf("go1.26.10 symtab: %v %v", ok, err)
+		return &Binary{Path: "bin", SymbolSource: src, GoVersion: ver, GOARCH: "arm64", Funcs: funcs}
 	}
 	for _, b := range []*Binary{
 		mk("pclntab", "go1.26.0", g),
-		mk("symtab", "go1.27.0", g),
-		mk("symtab", "go1.2", g),
-		mk("symtab", "go1.260", g),
 		mk("symtab", "go1.26.0", g, Func{Name: "runtime.panicdivide", Addr: 0x2000, Size: 16}),
+		mk("symtab", "go1.26.0", g), // no code: cannot match the pin
+		mk("symtab", "go1.27.0", g),
 	} {
 		if _, ok, err := b.classifyStub(g); err == nil || ok {
 			t.Errorf("%s %s %d funcs: classified (ok=%v err=%v)", b.SymbolSource, b.GoVersion, len(b.Funcs), ok, err)
