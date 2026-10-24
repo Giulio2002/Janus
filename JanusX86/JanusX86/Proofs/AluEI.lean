@@ -248,3 +248,165 @@ theorem execAlu_any {js js' : State} {next : BitVec 64} {op : AluOp} {w : Nat} {
     · simp at hJ
 
 end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+set_option maxRecDepth 100000 in
+theorem run_one_byte_e_i (opc : Nat) (hopc : opc = 0x80 ∨ opc = 0x81 ∨ opc = 0x83) (e : Nat) (he : e < 8)
+    (sr tr : BitVec 48) (x : BitVec 52) (hl : _get_prefixes_lck x = 0#8) (rex m sib : BitVec 8)
+    (hm : _get_modr_m_reg m = BitVec.ofNat 3 e) (s : SState) :
+    (one_byte_opcode_execute .Mode_64bit sr tr x rex (BitVec.ofNat 8 opc) m sib).run s =
+      (x86_add_adc_sub_sbb_or_and_xor_cmp_test_e_i (sailOp (Janus.Amd64.Decode.aluOp e)) .Mode_64bit sr tr x rex
+        (BitVec.ofNat 8 opc) m sib).run s := by
+  match e, he with
+  | 0, _ | 1, _ | 2, _ | 3, _ | 4, _ | 5, _ | 6, _ | 7, _ =>
+    rcases hopc with rfl | rfl | rfl <;>
+    simp (config := {decide := true}) only [one_byte_opcode_execute, ext_one_byte_opcode_execute, eq_bits_nat,
+      ↓reduceIte, Bool.false_eq_true, Janus.Amd64.Decode.aluOp, sailOp, hl, hm, Bool.and_false, run_bind, run_pure,
+      show (240#8 == 0#8) = false from rfl] <;> rfl
+
+set_option maxRecDepth 100000 in
+theorem run_one_byte_test_e_i (opc : Nat) (hopc : opc = 0xF6 ∨ opc = 0xF7)
+    (sr tr : BitVec 48) (x : BitVec 52) (hl : _get_prefixes_lck x = 0#8) (rex m sib : BitVec 8)
+    (hm : _get_modr_m_reg m = 0#3) (s : SState) :
+    (one_byte_opcode_execute .Mode_64bit sr tr x rex (BitVec.ofNat 8 opc) m sib).run s =
+      (x86_add_adc_sub_sbb_or_and_xor_cmp_test_e_i 7 .Mode_64bit sr tr x rex (BitVec.ofNat 8 opc) m sib).run s := by
+  rcases hopc with rfl | rfl <;>
+  simp (config := {decide := true}) only [one_byte_opcode_execute, ext_one_byte_opcode_execute, eq_bits_nat,
+    ↓reduceIte, Bool.false_eq_true, hl, hm, Bool.and_false, run_bind, run_pure,
+    show (240#8 == 0#8) = false from rfl] <;> rfl
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+theorem regWrite_df (js : Janus.Amd64.State) (w : Nat) (l : Janus.Amd64.Loc) (v : BitVec w) :
+    (regWrite js w l v).df = js.df := by
+  unfold regWrite; split <;> simp [Janus.Amd64.State.putReg, Janus.Amd64.State.putHigh, Janus.Amd64.State.setReg] <;>
+    (try split) <;> rfl
+
+/-- The model's write of a register `r/m` destination is Janus' `regWrite`. -/
+theorem dstW_reg {js : Janus.Amd64.State} {s : SState} (h : Rel js s) (hc : X86Config s) {w : Nat}
+    (hw : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64) (rexP : Bool) (rex : BitVec 8) (hrex : (rex == 0#8) = !rexP)
+    {n : Nat} (hn : n < 16) (hn8 : n < 8 ∨ rexP = true) (a : BitVec 3) (hidx : reg_index a rex 0#2 = BitVec.ofNat 4 n)
+    (sg : Nat) (ad : BitVec 64) (x : BitVec 52) (sib : BitVec 8) (y : BitVec w) :
+    ∃ s1, (x86_operand_to_reg_mem .Mode_64bit (w / 8) true false ((y.setWidth 64).setWidth 128) sg ad x rex a 3#2 sib).run s =
+      .ok () s1 ∧ Rel (regWrite js w (regLocOf rexP w n) y) s1 ∧ X86Config s1 ∧
+      (regWrite js w (regLocOf rexP w n) y).df = js.df ∧ s1.regs.get? .rflags = s.regs.get? .rflags ∧
+      s1.regs.get? .janus_undef = s.regs.get? .janus_undef := by
+  have hn' := locReg_lt rexP w n hn
+  refine ⟨_, run_operand_to_reg h hc.log hw rexP rex hrex hn hn8 a hidx true false sg ad x sib y,
+    h.writeReg rexP hn y, hc.setGpr hn' _, regWrite_df _ _ _ _, get?_setGpr_of_not s _ hn' rfl,
+    get?_setGpr_of_not s _ hn' rfl⟩
+
+open Janus.Amd64 Janus.Amd64.Decode in
+/-- The model's write of a memory `r/m` destination is Janus' store. -/
+theorem dstW_mem {js : State} {s : SState} (h : Rel js s) (hc : X86Config s)
+    {p : Prefixes} {x : BitVec 52} {rex : BitVec 8} (hp : PfxRel p x rex) {w : Nat}
+    (hw : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64) {sg : Nat} (hsg : sg = 4 ↔ p.fs = true) (hsg5 : sg ≠ 5)
+    (a : Addr) (hafs : a.fs = false) (next : BitVec 64) (rm : BitVec 3) {md : BitVec 2}
+    (hmd : (md == 3#2) = false) (sib : BitVec 8)
+    (hacc : js.mem.accessible (ea js next (if p.fs then { a with fs := true } else a)).toNat (w / 8) true = true)
+    (y : BitVec w) :
+    ∃ s1, (x86_operand_to_reg_mem .Mode_64bit (w / 8) true false ((y.setWidth 64).setWidth 128) sg (eaOff js next a)
+      x rex rm md sib).run s = .ok () s1 ∧
+      Rel (memWrite js (ea js next (if p.fs then { a with fs := true } else a)).toNat (w / 8) y.toNat) s1 ∧ X86Config s1 ∧
+      (memWrite js (ea js next (if p.fs then { a with fs := true } else a)).toNat (w / 8) y.toNat).df = js.df ∧
+      s1.regs.get? .rflags = s.regs.get? .rflags ∧ s1.regs.get? .janus_undef = s.regs.get? .janus_undef := by
+  obtain ⟨s1, h1, h2, h3, h4⟩ := run_operand_to_mem h hc hp hw hsg hsg5 true false a hafs next rm hmd sib y hacc
+  exact ⟨s1, h1, h2, h3, rfl, by rw [h4], by rw [h4]⟩
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem modrm_ext {rx m : Nat} {rest : List Nat} {mm : ModRM} {r3 : List Nat} {c : Nat}
+    (h : modrm rx (m :: rest) = some (mm, r3, c)) : mm.ext = m / 8 % 8 := by
+  revert h
+  unfold modrm
+  simp only
+  repeat' split
+  all_goals intro h
+  all_goals first
+    | (simp at h; done)
+    | (simp only [Option.some.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, -, -⟩ := h; rfl)
+
+/-- The `r/m` operand of a decoded ModRM as Janus' location (with `FS` relocation). -/
+def rmDst (p : Janus.Amd64.Decode.Prefixes) (w : Nat) : Janus.Amd64.Decode.RM → Janus.Amd64.Loc
+  | .r k => regLocOf p.rex.isSome w k
+  | .m a => .mem (if p.fs then { a with fs := true } else a)
+
+/-- Janus' immediate of the (E, I) forms, before truncation to the operand size. -/
+def immEI (o w v : Nat) : Nat :=
+  if o = 0x83 then Janus.Amd64.Decode.sext 8 w v else if w = 64 then Janus.Amd64.Decode.sext 32 64 v else v
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem withFS_reg8 (op : AluOp) (w : Nat) (b : Bool) (n : Nat) (v : Nat) :
+    withFS (.alu op w (reg8 b n) (.imm v)) = none := by
+  unfold reg8; split <;> rfl
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem withFS_reg8t (w : Nat) (b : Bool) (n : Nat) (v : Nat) :
+    withFS (.test w (reg8 b n) (.imm v)) = none := by
+  unfold reg8; split <;> rfl
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem decode_ei {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n))
+    (ho : o = 0x80 ∨ o = 0x81 ∨ o = 0x83 ∨ o = 0xF6 ∨ o = 0xF7)
+    (hext : (o = 0xF6 ∨ o = 0xF7) → m / 8 % 8 = 0)
+    {mm : ModRM} {r3 : List Nat} {c : Nat}
+    (hmd : modrm (p.rex.getD 0) (m :: rest) = some (mm, r3, c)) (hlk : p.lock = false)
+    {w : Nat} (hw : w = if o = 0x80 ∨ o = 0xF6 then 8 else osz p)
+    {k : Nat} (hk : k = if o = 0x81 ∨ o = 0xF7 then immBytes w else 1)
+    {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
+    p.rep = 0 ∧ ∃ v r4, readLE k r3 = some (v, r4) ∧ len = n + 1 + c + k ∧ len ≤ 15 ∧
+      i = (if o = 0xF6 ∨ o = 0xF7 then .test w (rmDst p w mm.rm) (.imm (immEI o w v))
+        else .alu (aluOp (m / 8 % 8)) w (rmDst p w mm.rm) (.imm (immEI o w v))) ∧
+      (∀ k', mm.rm = .r k' → p.fs = false) := by
+  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp, hlk, Bool.false_eq_true] at hd
+  have hex := modrm_ext hmd
+  have hou : (if p.rex.getD 0 / 8 = 1 then 64 else if p.opsize = true then 16 else 32) = osz p := by
+    simp [osz, rexW]
+  obtain ⟨md, rg, ext, rm⟩ := mm
+  simp only at hex; subst hex
+  have hib : ∀ q, (if q = 8 then 1 else if q = 16 then 2 else 4) = immBytes q := fun _ => rfl
+  have ho8 : (osz p = 8) = False := by rcases osz_cases p with e | e | e <;> simp [e]
+  have hib2 : (if osz p = 16 then 2 else 4) = immBytes (osz p) := by simp [immBytes, ho8]
+  cases hr : readLE k r3 with
+  | none =>
+    exfalso
+    rcases ho with rfl | rfl | rfl | rfl | rfl
+    all_goals
+      (try simp (config := {decide := true}) only [true_or, or_true, true_implies, forall_const] at hext)
+      simp (config := {decide := true}) only [↓reduceIte, oneByte, hmd, hou, immZ, immU8, immB, true_and, and_true,
+        false_and, and_false, or_false, false_or, hib, hext, ho8, hib2] at hd hw hk
+      subst hw hk
+      simp [hr, hib] at hd
+  | some vr =>
+  obtain ⟨v, r4⟩ := vr
+  rcases ho with rfl | rfl | rfl | rfl | rfl
+  all_goals
+    (try simp (config := {decide := true}) only [true_or, or_true, true_implies, forall_const] at hext)
+    simp (config := {decide := true}) only [↓reduceIte, oneByte, hmd, hou, immZ, immU8, immB, true_and, and_true,
+      false_and, and_false, or_false, false_or, hib, hext, ho8, hib2] at hd hw hk ⊢
+    subst hw hk
+    simp only [hr, finish] at hd
+    refine ⟨?_, v, r4, rfl, ?_⟩
+    all_goals
+      by_cases hl : 15 < n + 1 + c + 1 <;> by_cases hl2 : 15 < n + 1 + c + immBytes (osz p) <;>
+      by_cases hrp : p.rep = 0 <;>
+      cases hf : p.fs <;> cases rm <;> simp (config := {decide := true}) [hf, hl, hl2, hrp, ho8, rmDst, rmLoc, regLocOf,
+        immEI, withFS_reg8, withFS_reg8t] at hd ⊢ <;> (try simp [withFS] at hd ⊢)
+    all_goals first
+      | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨rfl, by omega, rfl⟩)
+      | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨rfl, by omega, rfl, fun _ h => by cases h⟩)
+      | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨rfl, by omega, rfl, fun _ _ => rfl⟩)
+      | omega
+
+end JanusX86.Proofs
