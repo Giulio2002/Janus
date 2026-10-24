@@ -15,8 +15,8 @@ var extraCommands = map[string]func(args []string, stdout, stderr io.Writer) err
 	"framework":    cmdFramework,
 }
 
-const extraUsage = `  janus verify <outdir> --proof FILE --proof-root PKG [--theorem NAME] [--json] [--fresh]
-  janus verify-batch <requests.json> [--results FILE] [--json] [--fresh] [--janus-root DIR]
+const extraUsage = `  janus verify <outdir> --proof FILE --proof-root PKG [--theorem NAME] [--json] [--fresh] [--asl]
+  janus verify-batch <requests.json> [--results FILE] [--json] [--fresh] [--janus-root DIR] [--asl]
   janus init <dir> [--name NAME] [--rev REV | --janus-path DIR] [--no-update]
   janus explain <verified.json | outdir>
   janus framework [--janus-root DIR] [--json]

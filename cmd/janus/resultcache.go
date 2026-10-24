@@ -102,7 +102,9 @@ func (in *resultInputs) key() string {
 
 // resultCacheOK: like the replay cache, only with a sandbox and without --fresh.
 func resultCacheOK(sb *sandbox, opts map[string]string) bool {
-	return sb.mode != "none" && opts["fresh"] == "" && os.Getenv("JANUS_RESULT_CACHE") != "off"
+	// --asl results are not cached: the ASL stage runs (and is itself cached by its replay
+	// cache) every time.
+	return sb.mode != "none" && opts["fresh"] == "" && opts["asl"] == "" && os.Getenv("JANUS_RESULT_CACHE") != "off"
 }
 
 // resultKey returns the per-cache HMAC key, creating it (32 random bytes, mode 0600) on first use.

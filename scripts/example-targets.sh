@@ -21,4 +21,14 @@ case "$1" in
       --contract runtime.throw --contract 'runtime.(*mcache).nextFree' \
       --contract runtime.memclrNoHeapPointers --contract runtime.gcmarknewobject \
       --contract runtime.profilealloc --contract runtime.gcTrigger.test --contract runtime.gcStart ;;
+  # the map examples (examples/basic/maps.go): the Go 1.26 map runtime entry points they call
+  # (Janus/Contracts/Map.lean, Janus/Contracts/MapAmd64.lean)
+  Lookup) printf '%s\n' --contract runtime.mapaccess2_fast64 ;;
+  Insert) printf '%s\n' --contract runtime.mapassign_fast64 ;;
+  InsertGet) printf '%s\n' --contract runtime.mapassign_fast64 --contract runtime.mapaccess1_fast64 ;;
+  Delete) printf '%s\n' --contract runtime.mapdelete_fast64 ;;
+  SumValues) printf '%s\n' --contract runtime.mapIterStart --contract runtime.mapIterNext ;;
+  LookupKey16) printf '%s\n' --contract runtime.mapaccess2 ;;
+  NewMap) printf '%s\n' --contract runtime.makemap_small ;;
+  ClearMap) printf '%s\n' --contract runtime.mapclear ;;
 esac

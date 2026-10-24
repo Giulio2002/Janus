@@ -4,7 +4,8 @@
 # See cmd/janus/stubpin.go and docs/SOUNDNESS.md (stub classification).
 #
 # For every toolchain, architecture and build mode below it builds the example program
-# (examples/basic/cmd), the round-7 assembly fixture (arm64), and scripts/stubpins (which links
+# (examples/basic/cmd), the cgo examples (examples/cgo/cmd, for the cgo boundary stubs), the
+# round-7 assembly fixture (arm64), and scripts/stubpins (which links
 # every listed stub), runs `janus stubpins` on each binary, and writes the union of the
 # measured (name, file, normalized hash) triples. It also prints the stability table: for each
 # architecture, how many names have exactly one hash over all binaries of a toolchain.
@@ -68,6 +69,9 @@ for tc in "${toolchains[@]}"; do
     while IFS='|' read -r mode env flags; do
       progs=("examples/basic|./cmd" "scripts/stubpins|.")
       [ "$arch" = arm64 ] && progs+=("audit/round7/asmstub|./cmd")
+      # the cgo examples: the cgo boundary stubs (_cgo_topofstack is only linked with cgo),
+      # externally linked with the C compiler of scripts/build-examples-cgo.sh (not as PIE)
+      [ "$mode" != pie ] && progs+=("examples/cgo|./cmd")
       for pr in "${progs[@]}"; do
         dir=${pr%%|*}; pkg=${pr#*|}; bin="$tmp/bin-$tc-$arch-$mode-$(basename "$dir")"
         extra=()
@@ -78,7 +82,12 @@ for tc in "${toolchains[@]}"; do
           if [ ${#extra[@]} -gt 0 ]; then extra=(-ldflags="-w -checklinkname=0"); else extra=(-ldflags=-w); fi
         fi
         fl=("${fl[@]//-N_-l/-N -l}")
-        ( cd "$dir" && env GOTOOLCHAIN="$tc" CGO_ENABLED=0 GOOS=linux GOARCH="$arch" GOFLAGS=-mod=mod $env \
+        cgo=(CGO_ENABLED=0)
+        if [ "$dir" = examples/cgo ]; then
+          cc=gcc; [ "$arch" = arm64 ] && cc=aarch64-linux-gnu-gcc
+          cgo=(CGO_ENABLED=1 CC="$cc" CGO_CFLAGS="-g -O2"); extra+=(-buildmode=exe)
+        fi
+        ( cd "$dir" && env GOTOOLCHAIN="$tc" "${cgo[@]}" GOOS=linux GOARCH="$arch" GOFLAGS=-mod=mod $env \
             go build -buildvcs=false "${fl[@]}" "${extra[@]}" -o "$bin" "$pkg" ) >"$tmp/build.log" 2>&1 ||
           { echo "build failed: $tc $arch $mode $dir"; cat "$tmp/build.log"; exit 1; }
         "$tmp/janus" stubpins "$bin" | sed "s|\$| $tc $mode $(basename "$dir")|" >>"$tmp/all"

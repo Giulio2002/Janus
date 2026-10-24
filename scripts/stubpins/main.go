@@ -10,6 +10,12 @@ import (
 	_ "unsafe" // for go:linkname
 )
 
+//go:linkname s_cgocall runtime.cgocall
+func s_cgocall()
+
+//go:linkname s_cgoUse runtime.cgoUse
+func s_cgoUse()
+
 //go:linkname s_gopanic runtime.gopanic
 func s_gopanic()
 
@@ -134,6 +140,8 @@ func s_panicunsafestringnilptr()
 func s_panicwrap()
 
 var keep = []func(){
+	s_cgocall,
+	s_cgoUse,
 	s_gopanic,
 	s_goPanicIndex,
 	s_goPanicIndexU,

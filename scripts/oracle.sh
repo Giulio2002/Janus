@@ -82,6 +82,13 @@ if [ "$mode" = full ] || [ "$mode" = fp ] || [ "$mode" = crypto ]; then
         crypto/sha1 crypto/sha512 crypto/sha3 crypto/cipher hash/crc32 crypto/tls; do
       CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
+  # gcc-compiled C (the cgo examples and the model-coverage corpus examples/cgo/ccover.c)
+  if command -v aarch64-linux-gnu-gcc >/dev/null; then
+    printf 'int main(void){return 0;}\n' > "$corpus/cmain.c"
+    aarch64-linux-gnu-gcc -g -O2 -o "$corpus/ccover-c" "$root/examples/cgo/ccover.c" \
+      "$root/examples/cgo/cfuncs.c" "$corpus/cmain.c" -I"$root/examples/cgo"
+    rm -f "$corpus/cmain.c"
+  fi
   extra=()
   for f in "$root"/artifacts/*-arm64; do [ -f "$f" ] && extra+=("$f"); done
   hargs=()
