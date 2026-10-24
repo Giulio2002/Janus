@@ -183,6 +183,119 @@ theorem sbb_af_spec8_eq (x y : BitVec 8) (c : Bool) :
   rw [this]
   exact bool_to_bits_of _ _ (af_sbb_gen _ _ _)
 
+set_option maxRecDepth 100000 in
+theorem run_gpr_add_spec_1 (x y : BitVec 8) (rin : BitVec 32) (s : SState) :
+    (gpr_add_spec_1 x y rin).run s =
+      .ok ((Janus.Amd64.addFlags x y false).1, outArith rin (Janus.Amd64.addFlags x y false).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [addFlags_fst' (by decide), addFlags_snd' (by decide), outArith_some]
+  have hr := trunc_raw _ _ (raw_add_toNat' x y)
+  have hs := sraw_toInt (by decide) x y 0 (by decide)
+  simp only [Int.add_zero] at hs
+  simp only [gpr_add_spec_1, run_bind, run_cf_spec8, raw_add_toNat', hr, run_pf_spec8, add_af_spec8_eq,
+    zf_spec_eq, sf_spec8_eq, run_of_spec8, hs, run_pure, BitVec.toNat_ofNat,
+    Bool.toNat_false, Nat.add_zero, Nat.reduceSub, Int.natCast_zero, Int.add_zero]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_adc_spec_1 (x y : BitVec 8) (rin : BitVec 32) (c : Bool)
+    (hc : _get_rflagsbits_cf rin = BitVec.ofBool c) (s : SState) :
+    (gpr_adc_spec_1 x y rin).run s =
+      .ok ((Janus.Amd64.addFlags x y c).1, outArith rin (Janus.Amd64.addFlags x y c).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [addFlags_fst' (by decide), addFlags_snd' (by decide), outArith_some]
+  have hr0 := raw_add_toNat x y c.toNat (by cases c <;> decide)
+  have hr := trunc_raw _ _ hr0
+  have hs := sraw_toInt (by decide) x y (c.toNat : Int) (by cases c <;> decide)
+  simp only [gpr_adc_spec_1, hc, toNatInt_ofBool, run_bind, run_cf_spec8, hr0, hr, run_pf_spec8,
+    adc_af_spec8_eq, zf_spec_eq, sf_spec8_eq, run_of_spec8, hs, run_pure,
+    BitVec.toNat_ofNat, Nat.reduceSub]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_sub_spec_1 (x y : BitVec 8) (rin : BitVec 32) (s : SState) :
+    (gpr_sub_spec_1 x y rin).run s =
+      .ok ((Janus.Amd64.subFlags x y false).1, outArith rin (Janus.Amd64.subFlags x y false).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [subFlags_fst' (by decide), subFlags_snd' (by decide), outArith_some]
+  obtain ⟨hx1, hx2⟩ := toInt_bounds (by decide) x
+  obtain ⟨hy1, hy2⟩ := toInt_bounds (by decide) y
+  have hp := pow_succ_int 8
+  have hr : Sail.BitVec.truncate (bits_of_int (x.toInt - y.toInt) (8 + 1)) 8 =
+      BitVec.ofNat 8 (x.toNat + 2 ^ 8 - y.toNat - (false).toNat) := by
+    rw [trunc_bits_ofInt, ofNat_sub3 _ _ _ (by decide)]; simp
+  have hs : (bits_of_int (x.toInt - y.toInt) (8 + 1)).toInt = x.toInt - y.toInt :=
+    bits_of_int_toInt _ _ (by omega) (by omega)
+  have hcf : (Sail.BitVec.toNatInt x <b Sail.BitVec.toNatInt y) = decide (x.toNat < y.toNat + (false).toNat) := by
+    simp [Sail.BitVec.toNatInt]
+  simp only [gpr_sub_spec_1, run_bind, hcf, bool_to_bits_eq, hr, run_pf_spec8, sub_af_spec8_eq, zf_spec_eq,
+    sf_spec8_eq, run_of_spec8, hs, run_pure, BitVec.toNat_ofNat, Nat.reduceSub,
+    Bool.toNat_false, Nat.add_zero, Int.natCast_zero, Int.sub_zero]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_sbb_spec_1 (x y : BitVec 8) (rin : BitVec 32) (c : Bool)
+    (hc : _get_rflagsbits_cf rin = BitVec.ofBool c) (s : SState) :
+    (gpr_sbb_spec_1 x y rin).run s =
+      .ok ((Janus.Amd64.subFlags x y c).1, outArith rin (Janus.Amd64.subFlags x y c).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [subFlags_fst' (by decide), subFlags_snd' (by decide), outArith_some]
+  obtain ⟨hx1, hx2⟩ := toInt_bounds (by decide) x
+  obtain ⟨hy1, hy2⟩ := toInt_bounds (by decide) y
+  have hp := pow_succ_int 8
+  have hp2 := pow_succ_int (8 + 1)
+  have hcb : (c.toNat : Int) ≤ 1 := by cases c <;> decide
+  have hi : (bits_of_int (y.toInt + ((c.toNat : Nat) : Int)) (8 + 1)).toInt = y.toInt + c.toNat :=
+    bits_of_int_toInt _ _ (by omega) (by omega)
+  have hi2 : Sail.BitVec.toNatInt (bits_of_int (((c.toNat : Nat) : Int) + Sail.BitVec.toNatInt y) (8 + 1)) =
+      ((y.toNat + c.toNat : Nat) : Int) := by
+    have := y.isLt
+    rw [show ((c.toNat : Nat) : Int) + Sail.BitVec.toNatInt y = ((y.toNat + c.toNat : Nat) : Int) by
+      simp [Sail.BitVec.toNatInt]; omega]
+    simp only [Sail.BitVec.toNatInt, bits_of_int_natCast_toNat, Int.ofNat_eq_natCast]
+    rw [Nat.mod_eq_of_lt (by rw [Nat.pow_succ]; cases c <;> simp <;> omega)]
+  have hr : Sail.BitVec.truncate (bits_of_int (x.toInt - (y.toInt + c.toNat)) (8 + 2)) 8 =
+      BitVec.ofNat 8 (x.toNat + 2 ^ 8 - y.toNat - c.toNat) := by
+    rw [trunc_bits_ofInt, ofNat_sub3 _ _ _ (by cases c <;> decide), Int.sub_sub]
+  have hs : (Sail.BitVec.truncate (bits_of_int (x.toInt - (y.toInt + c.toNat)) (8 + 1 + 1)) (8 + 1)).toInt =
+      x.toInt - y.toInt - c.toNat := by
+    rw [toInt_bits_small _ _ (by omega) (by omega), Int.sub_sub]
+  have hcf : (Sail.BitVec.toNatInt x <b ((y.toNat + c.toNat : Nat) : Int)) = decide (x.toNat < y.toNat + c.toNat) := by
+    clear hi hs hr hi2
+    generalize hX : Sail.BitVec.toNatInt x = X
+    have : X = x.toNat := by rw [← hX]; rfl
+    subst this
+    (rw [Bool.eq_iff_iff]; simp) <;> omega
+  simp only [gpr_sbb_spec_1, hc, toNatInt_ofBool, hi, hi2, hcf, bool_to_bits_eq, hr, hs, run_bind,
+    run_pf_spec8, sbb_af_spec8_eq, zf_spec_eq, sf_spec8_eq, run_of_spec8, run_pure, BitVec.toNat_ofNat, Nat.reduceSub]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_and_spec_1 (x y : BitVec 8) (rin : BitVec 32) (s : SState) :
+    (gpr_and_spec_1 x y rin).run s =
+      .ok (x &&& y, outLogic rin (Janus.Amd64.logicFlags (x &&& y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_and_spec_1, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec8, zf_spec_eq, sf_spec8_eq, run_pure, Nat.reduceSub]
+  rfl
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_or_spec_1 (x y : BitVec 8) (rin : BitVec 32) (s : SState) :
+    (gpr_or_spec_1 x y rin).run s =
+      .ok (x ||| y, outLogic rin (Janus.Amd64.logicFlags (x ||| y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_or_spec_1, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec8, zf_spec_eq, sf_spec8_eq, run_pure, Nat.reduceSub]
+  rfl
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_xor_spec_1 (x y : BitVec 8) (rin : BitVec 32) (s : SState) :
+    (gpr_xor_spec_1 x y rin).run s =
+      .ok (x ^^^ y, outLogic rin (Janus.Amd64.logicFlags (x ^^^ y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_xor_spec_1, logxor, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec8, zf_spec_eq, sf_spec8_eq, run_pure, Nat.reduceSub]
+  rfl
+
 end JanusX86.Proofs
 namespace JanusX86.Proofs
 open X86Sail X86Sail.Functions
@@ -214,6 +327,119 @@ theorem sbb_af_spec16_eq (x y : BitVec 16) (c : Bool) :
     cases c <;> rfl
   rw [this]
   exact bool_to_bits_of _ _ (af_sbb_gen _ _ _)
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_add_spec_2 (x y : BitVec 16) (rin : BitVec 32) (s : SState) :
+    (gpr_add_spec_2 x y rin).run s =
+      .ok ((Janus.Amd64.addFlags x y false).1, outArith rin (Janus.Amd64.addFlags x y false).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [addFlags_fst' (by decide), addFlags_snd' (by decide), outArith_some]
+  have hr := trunc_raw _ _ (raw_add_toNat' x y)
+  have hs := sraw_toInt (by decide) x y 0 (by decide)
+  simp only [Int.add_zero] at hs
+  simp only [gpr_add_spec_2, run_bind, run_cf_spec16, raw_add_toNat', hr, run_pf_spec16, add_af_spec16_eq,
+    zf_spec_eq, sf_spec16_eq, run_of_spec16, hs, run_pure, BitVec.toNat_ofNat,
+    Bool.toNat_false, Nat.add_zero, Nat.reduceSub, Int.natCast_zero, Int.add_zero]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_adc_spec_2 (x y : BitVec 16) (rin : BitVec 32) (c : Bool)
+    (hc : _get_rflagsbits_cf rin = BitVec.ofBool c) (s : SState) :
+    (gpr_adc_spec_2 x y rin).run s =
+      .ok ((Janus.Amd64.addFlags x y c).1, outArith rin (Janus.Amd64.addFlags x y c).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [addFlags_fst' (by decide), addFlags_snd' (by decide), outArith_some]
+  have hr0 := raw_add_toNat x y c.toNat (by cases c <;> decide)
+  have hr := trunc_raw _ _ hr0
+  have hs := sraw_toInt (by decide) x y (c.toNat : Int) (by cases c <;> decide)
+  simp only [gpr_adc_spec_2, hc, toNatInt_ofBool, run_bind, run_cf_spec16, hr0, hr, run_pf_spec16,
+    adc_af_spec16_eq, zf_spec_eq, sf_spec16_eq, run_of_spec16, hs, run_pure,
+    BitVec.toNat_ofNat, Nat.reduceSub]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_sub_spec_2 (x y : BitVec 16) (rin : BitVec 32) (s : SState) :
+    (gpr_sub_spec_2 x y rin).run s =
+      .ok ((Janus.Amd64.subFlags x y false).1, outArith rin (Janus.Amd64.subFlags x y false).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [subFlags_fst' (by decide), subFlags_snd' (by decide), outArith_some]
+  obtain ⟨hx1, hx2⟩ := toInt_bounds (by decide) x
+  obtain ⟨hy1, hy2⟩ := toInt_bounds (by decide) y
+  have hp := pow_succ_int 16
+  have hr : Sail.BitVec.truncate (bits_of_int (x.toInt - y.toInt) (16 + 1)) 16 =
+      BitVec.ofNat 16 (x.toNat + 2 ^ 16 - y.toNat - (false).toNat) := by
+    rw [trunc_bits_ofInt, ofNat_sub3 _ _ _ (by decide)]; simp
+  have hs : (bits_of_int (x.toInt - y.toInt) (16 + 1)).toInt = x.toInt - y.toInt :=
+    bits_of_int_toInt _ _ (by omega) (by omega)
+  have hcf : (Sail.BitVec.toNatInt x <b Sail.BitVec.toNatInt y) = decide (x.toNat < y.toNat + (false).toNat) := by
+    simp [Sail.BitVec.toNatInt]
+  simp only [gpr_sub_spec_2, run_bind, hcf, bool_to_bits_eq, hr, run_pf_spec16, sub_af_spec16_eq, zf_spec_eq,
+    sf_spec16_eq, run_of_spec16, hs, run_pure, BitVec.toNat_ofNat, Nat.reduceSub,
+    Bool.toNat_false, Nat.add_zero, Int.natCast_zero, Int.sub_zero]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_sbb_spec_2 (x y : BitVec 16) (rin : BitVec 32) (c : Bool)
+    (hc : _get_rflagsbits_cf rin = BitVec.ofBool c) (s : SState) :
+    (gpr_sbb_spec_2 x y rin).run s =
+      .ok ((Janus.Amd64.subFlags x y c).1, outArith rin (Janus.Amd64.subFlags x y c).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [subFlags_fst' (by decide), subFlags_snd' (by decide), outArith_some]
+  obtain ⟨hx1, hx2⟩ := toInt_bounds (by decide) x
+  obtain ⟨hy1, hy2⟩ := toInt_bounds (by decide) y
+  have hp := pow_succ_int 16
+  have hp2 := pow_succ_int (16 + 1)
+  have hcb : (c.toNat : Int) ≤ 1 := by cases c <;> decide
+  have hi : (bits_of_int (y.toInt + ((c.toNat : Nat) : Int)) (16 + 1)).toInt = y.toInt + c.toNat :=
+    bits_of_int_toInt _ _ (by omega) (by omega)
+  have hi2 : Sail.BitVec.toNatInt (bits_of_int (((c.toNat : Nat) : Int) + Sail.BitVec.toNatInt y) (16 + 1)) =
+      ((y.toNat + c.toNat : Nat) : Int) := by
+    have := y.isLt
+    rw [show ((c.toNat : Nat) : Int) + Sail.BitVec.toNatInt y = ((y.toNat + c.toNat : Nat) : Int) by
+      simp [Sail.BitVec.toNatInt]; omega]
+    simp only [Sail.BitVec.toNatInt, bits_of_int_natCast_toNat, Int.ofNat_eq_natCast]
+    rw [Nat.mod_eq_of_lt (by rw [Nat.pow_succ]; cases c <;> simp <;> omega)]
+  have hr : Sail.BitVec.truncate (bits_of_int (x.toInt - (y.toInt + c.toNat)) (16 + 2)) 16 =
+      BitVec.ofNat 16 (x.toNat + 2 ^ 16 - y.toNat - c.toNat) := by
+    rw [trunc_bits_ofInt, ofNat_sub3 _ _ _ (by cases c <;> decide), Int.sub_sub]
+  have hs : (Sail.BitVec.truncate (bits_of_int (x.toInt - (y.toInt + c.toNat)) (16 + 1 + 1)) (16 + 1)).toInt =
+      x.toInt - y.toInt - c.toNat := by
+    rw [toInt_bits_small _ _ (by omega) (by omega), Int.sub_sub]
+  have hcf : (Sail.BitVec.toNatInt x <b ((y.toNat + c.toNat : Nat) : Int)) = decide (x.toNat < y.toNat + c.toNat) := by
+    clear hi hs hr hi2
+    generalize hX : Sail.BitVec.toNatInt x = X
+    have : X = x.toNat := by rw [← hX]; rfl
+    subst this
+    (rw [Bool.eq_iff_iff]; simp) <;> omega
+  simp only [gpr_sbb_spec_2, hc, toNatInt_ofBool, hi, hi2, hcf, bool_to_bits_eq, hr, hs, run_bind,
+    run_pf_spec16, sbb_af_spec16_eq, zf_spec_eq, sf_spec16_eq, run_of_spec16, run_pure, BitVec.toNat_ofNat, Nat.reduceSub]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_and_spec_2 (x y : BitVec 16) (rin : BitVec 32) (s : SState) :
+    (gpr_and_spec_2 x y rin).run s =
+      .ok (x &&& y, outLogic rin (Janus.Amd64.logicFlags (x &&& y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_and_spec_2, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec16, zf_spec_eq, sf_spec16_eq, run_pure, Nat.reduceSub]
+  rfl
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_or_spec_2 (x y : BitVec 16) (rin : BitVec 32) (s : SState) :
+    (gpr_or_spec_2 x y rin).run s =
+      .ok (x ||| y, outLogic rin (Janus.Amd64.logicFlags (x ||| y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_or_spec_2, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec16, zf_spec_eq, sf_spec16_eq, run_pure, Nat.reduceSub]
+  rfl
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_xor_spec_2 (x y : BitVec 16) (rin : BitVec 32) (s : SState) :
+    (gpr_xor_spec_2 x y rin).run s =
+      .ok (x ^^^ y, outLogic rin (Janus.Amd64.logicFlags (x ^^^ y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_xor_spec_2, logxor, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec16, zf_spec_eq, sf_spec16_eq, run_pure, Nat.reduceSub]
+  rfl
 
 end JanusX86.Proofs
 namespace JanusX86.Proofs
@@ -247,6 +473,119 @@ theorem sbb_af_spec32_eq (x y : BitVec 32) (c : Bool) :
   rw [this]
   exact bool_to_bits_of _ _ (af_sbb_gen _ _ _)
 
+set_option maxRecDepth 100000 in
+theorem run_gpr_add_spec_4 (x y : BitVec 32) (rin : BitVec 32) (s : SState) :
+    (gpr_add_spec_4 x y rin).run s =
+      .ok ((Janus.Amd64.addFlags x y false).1, outArith rin (Janus.Amd64.addFlags x y false).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [addFlags_fst' (by decide), addFlags_snd' (by decide), outArith_some]
+  have hr := trunc_raw _ _ (raw_add_toNat' x y)
+  have hs := sraw_toInt (by decide) x y 0 (by decide)
+  simp only [Int.add_zero] at hs
+  simp only [gpr_add_spec_4, run_bind, run_cf_spec32, raw_add_toNat', hr, run_pf_spec32, add_af_spec32_eq,
+    zf_spec_eq, sf_spec32_eq, run_of_spec32, hs, run_pure, BitVec.toNat_ofNat,
+    Bool.toNat_false, Nat.add_zero, Nat.reduceSub, Int.natCast_zero, Int.add_zero]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_adc_spec_4 (x y : BitVec 32) (rin : BitVec 32) (c : Bool)
+    (hc : _get_rflagsbits_cf rin = BitVec.ofBool c) (s : SState) :
+    (gpr_adc_spec_4 x y rin).run s =
+      .ok ((Janus.Amd64.addFlags x y c).1, outArith rin (Janus.Amd64.addFlags x y c).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [addFlags_fst' (by decide), addFlags_snd' (by decide), outArith_some]
+  have hr0 := raw_add_toNat x y c.toNat (by cases c <;> decide)
+  have hr := trunc_raw _ _ hr0
+  have hs := sraw_toInt (by decide) x y (c.toNat : Int) (by cases c <;> decide)
+  simp only [gpr_adc_spec_4, hc, toNatInt_ofBool, run_bind, run_cf_spec32, hr0, hr, run_pf_spec32,
+    adc_af_spec32_eq, zf_spec_eq, sf_spec32_eq, run_of_spec32, hs, run_pure,
+    BitVec.toNat_ofNat, Nat.reduceSub]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_sub_spec_4 (x y : BitVec 32) (rin : BitVec 32) (s : SState) :
+    (gpr_sub_spec_4 x y rin).run s =
+      .ok ((Janus.Amd64.subFlags x y false).1, outArith rin (Janus.Amd64.subFlags x y false).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [subFlags_fst' (by decide), subFlags_snd' (by decide), outArith_some]
+  obtain ⟨hx1, hx2⟩ := toInt_bounds (by decide) x
+  obtain ⟨hy1, hy2⟩ := toInt_bounds (by decide) y
+  have hp := pow_succ_int 32
+  have hr : Sail.BitVec.truncate (bits_of_int (x.toInt - y.toInt) (32 + 1)) 32 =
+      BitVec.ofNat 32 (x.toNat + 2 ^ 32 - y.toNat - (false).toNat) := by
+    rw [trunc_bits_ofInt, ofNat_sub3 _ _ _ (by decide)]; simp
+  have hs : (bits_of_int (x.toInt - y.toInt) (32 + 1)).toInt = x.toInt - y.toInt :=
+    bits_of_int_toInt _ _ (by omega) (by omega)
+  have hcf : (Sail.BitVec.toNatInt x <b Sail.BitVec.toNatInt y) = decide (x.toNat < y.toNat + (false).toNat) := by
+    simp [Sail.BitVec.toNatInt]
+  simp only [gpr_sub_spec_4, run_bind, hcf, bool_to_bits_eq, hr, run_pf_spec32, sub_af_spec32_eq, zf_spec_eq,
+    sf_spec32_eq, run_of_spec32, hs, run_pure, BitVec.toNat_ofNat, Nat.reduceSub,
+    Bool.toNat_false, Nat.add_zero, Int.natCast_zero, Int.sub_zero]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_sbb_spec_4 (x y : BitVec 32) (rin : BitVec 32) (c : Bool)
+    (hc : _get_rflagsbits_cf rin = BitVec.ofBool c) (s : SState) :
+    (gpr_sbb_spec_4 x y rin).run s =
+      .ok ((Janus.Amd64.subFlags x y c).1, outArith rin (Janus.Amd64.subFlags x y c).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [subFlags_fst' (by decide), subFlags_snd' (by decide), outArith_some]
+  obtain ⟨hx1, hx2⟩ := toInt_bounds (by decide) x
+  obtain ⟨hy1, hy2⟩ := toInt_bounds (by decide) y
+  have hp := pow_succ_int 32
+  have hp2 := pow_succ_int (32 + 1)
+  have hcb : (c.toNat : Int) ≤ 1 := by cases c <;> decide
+  have hi : (bits_of_int (y.toInt + ((c.toNat : Nat) : Int)) (32 + 1)).toInt = y.toInt + c.toNat :=
+    bits_of_int_toInt _ _ (by omega) (by omega)
+  have hi2 : Sail.BitVec.toNatInt (bits_of_int (((c.toNat : Nat) : Int) + Sail.BitVec.toNatInt y) (32 + 1)) =
+      ((y.toNat + c.toNat : Nat) : Int) := by
+    have := y.isLt
+    rw [show ((c.toNat : Nat) : Int) + Sail.BitVec.toNatInt y = ((y.toNat + c.toNat : Nat) : Int) by
+      simp [Sail.BitVec.toNatInt]; omega]
+    simp only [Sail.BitVec.toNatInt, bits_of_int_natCast_toNat, Int.ofNat_eq_natCast]
+    rw [Nat.mod_eq_of_lt (by rw [Nat.pow_succ]; cases c <;> simp <;> omega)]
+  have hr : Sail.BitVec.truncate (bits_of_int (x.toInt - (y.toInt + c.toNat)) (32 + 2)) 32 =
+      BitVec.ofNat 32 (x.toNat + 2 ^ 32 - y.toNat - c.toNat) := by
+    rw [trunc_bits_ofInt, ofNat_sub3 _ _ _ (by cases c <;> decide), Int.sub_sub]
+  have hs : (Sail.BitVec.truncate (bits_of_int (x.toInt - (y.toInt + c.toNat)) (32 + 1 + 1)) (32 + 1)).toInt =
+      x.toInt - y.toInt - c.toNat := by
+    rw [toInt_bits_small _ _ (by omega) (by omega), Int.sub_sub]
+  have hcf : (Sail.BitVec.toNatInt x <b ((y.toNat + c.toNat : Nat) : Int)) = decide (x.toNat < y.toNat + c.toNat) := by
+    clear hi hs hr hi2
+    generalize hX : Sail.BitVec.toNatInt x = X
+    have : X = x.toNat := by rw [← hX]; rfl
+    subst this
+    (rw [Bool.eq_iff_iff]; simp) <;> omega
+  simp only [gpr_sbb_spec_4, hc, toNatInt_ofBool, hi, hi2, hcf, bool_to_bits_eq, hr, hs, run_bind,
+    run_pf_spec32, sbb_af_spec32_eq, zf_spec_eq, sf_spec32_eq, run_of_spec32, run_pure, BitVec.toNat_ofNat, Nat.reduceSub]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_and_spec_4 (x y : BitVec 32) (rin : BitVec 32) (s : SState) :
+    (gpr_and_spec_4 x y rin).run s =
+      .ok (x &&& y, outLogic rin (Janus.Amd64.logicFlags (x &&& y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_and_spec_4, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec32, zf_spec_eq, sf_spec32_eq, run_pure, Nat.reduceSub]
+  rfl
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_or_spec_4 (x y : BitVec 32) (rin : BitVec 32) (s : SState) :
+    (gpr_or_spec_4 x y rin).run s =
+      .ok (x ||| y, outLogic rin (Janus.Amd64.logicFlags (x ||| y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_or_spec_4, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec32, zf_spec_eq, sf_spec32_eq, run_pure, Nat.reduceSub]
+  rfl
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_xor_spec_4 (x y : BitVec 32) (rin : BitVec 32) (s : SState) :
+    (gpr_xor_spec_4 x y rin).run s =
+      .ok (x ^^^ y, outLogic rin (Janus.Amd64.logicFlags (x ^^^ y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_xor_spec_4, logxor, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec32, zf_spec_eq, sf_spec32_eq, run_pure, Nat.reduceSub]
+  rfl
+
 end JanusX86.Proofs
 namespace JanusX86.Proofs
 open X86Sail X86Sail.Functions
@@ -278,6 +617,119 @@ theorem sbb_af_spec64_eq (x y : BitVec 64) (c : Bool) :
     cases c <;> rfl
   rw [this]
   exact bool_to_bits_of _ _ (af_sbb_gen _ _ _)
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_add_spec_8 (x y : BitVec 64) (rin : BitVec 32) (s : SState) :
+    (gpr_add_spec_8 x y rin).run s =
+      .ok ((Janus.Amd64.addFlags x y false).1, outArith rin (Janus.Amd64.addFlags x y false).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [addFlags_fst' (by decide), addFlags_snd' (by decide), outArith_some]
+  have hr := trunc_raw _ _ (raw_add_toNat' x y)
+  have hs := sraw_toInt (by decide) x y 0 (by decide)
+  simp only [Int.add_zero] at hs
+  simp only [gpr_add_spec_8, run_bind, run_cf_spec64, raw_add_toNat', hr, run_pf_spec64, add_af_spec64_eq,
+    zf_spec_eq, sf_spec64_eq, run_of_spec64, hs, run_pure, BitVec.toNat_ofNat,
+    Bool.toNat_false, Nat.add_zero, Nat.reduceSub, Int.natCast_zero, Int.add_zero]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_adc_spec_8 (x y : BitVec 64) (rin : BitVec 32) (c : Bool)
+    (hc : _get_rflagsbits_cf rin = BitVec.ofBool c) (s : SState) :
+    (gpr_adc_spec_8 x y rin).run s =
+      .ok ((Janus.Amd64.addFlags x y c).1, outArith rin (Janus.Amd64.addFlags x y c).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [addFlags_fst' (by decide), addFlags_snd' (by decide), outArith_some]
+  have hr0 := raw_add_toNat x y c.toNat (by cases c <;> decide)
+  have hr := trunc_raw _ _ hr0
+  have hs := sraw_toInt (by decide) x y (c.toNat : Int) (by cases c <;> decide)
+  simp only [gpr_adc_spec_8, hc, toNatInt_ofBool, run_bind, run_cf_spec64, hr0, hr, run_pf_spec64,
+    adc_af_spec64_eq, zf_spec_eq, sf_spec64_eq, run_of_spec64, hs, run_pure,
+    BitVec.toNat_ofNat, Nat.reduceSub]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_sub_spec_8 (x y : BitVec 64) (rin : BitVec 32) (s : SState) :
+    (gpr_sub_spec_8 x y rin).run s =
+      .ok ((Janus.Amd64.subFlags x y false).1, outArith rin (Janus.Amd64.subFlags x y false).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [subFlags_fst' (by decide), subFlags_snd' (by decide), outArith_some]
+  obtain ⟨hx1, hx2⟩ := toInt_bounds (by decide) x
+  obtain ⟨hy1, hy2⟩ := toInt_bounds (by decide) y
+  have hp := pow_succ_int 64
+  have hr : Sail.BitVec.truncate (bits_of_int (x.toInt - y.toInt) (64 + 1)) 64 =
+      BitVec.ofNat 64 (x.toNat + 2 ^ 64 - y.toNat - (false).toNat) := by
+    rw [trunc_bits_ofInt, ofNat_sub3 _ _ _ (by decide)]; simp
+  have hs : (bits_of_int (x.toInt - y.toInt) (64 + 1)).toInt = x.toInt - y.toInt :=
+    bits_of_int_toInt _ _ (by omega) (by omega)
+  have hcf : (Sail.BitVec.toNatInt x <b Sail.BitVec.toNatInt y) = decide (x.toNat < y.toNat + (false).toNat) := by
+    simp [Sail.BitVec.toNatInt]
+  simp only [gpr_sub_spec_8, run_bind, hcf, bool_to_bits_eq, hr, run_pf_spec64, sub_af_spec64_eq, zf_spec_eq,
+    sf_spec64_eq, run_of_spec64, hs, run_pure, BitVec.toNat_ofNat, Nat.reduceSub,
+    Bool.toNat_false, Nat.add_zero, Int.natCast_zero, Int.sub_zero]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_sbb_spec_8 (x y : BitVec 64) (rin : BitVec 32) (c : Bool)
+    (hc : _get_rflagsbits_cf rin = BitVec.ofBool c) (s : SState) :
+    (gpr_sbb_spec_8 x y rin).run s =
+      .ok ((Janus.Amd64.subFlags x y c).1, outArith rin (Janus.Amd64.subFlags x y c).2,
+        Mk_rflagsbits 0#32) s := by
+  rw [subFlags_fst' (by decide), subFlags_snd' (by decide), outArith_some]
+  obtain ⟨hx1, hx2⟩ := toInt_bounds (by decide) x
+  obtain ⟨hy1, hy2⟩ := toInt_bounds (by decide) y
+  have hp := pow_succ_int 64
+  have hp2 := pow_succ_int (64 + 1)
+  have hcb : (c.toNat : Int) ≤ 1 := by cases c <;> decide
+  have hi : (bits_of_int (y.toInt + ((c.toNat : Nat) : Int)) (64 + 1)).toInt = y.toInt + c.toNat :=
+    bits_of_int_toInt _ _ (by omega) (by omega)
+  have hi2 : Sail.BitVec.toNatInt (bits_of_int (((c.toNat : Nat) : Int) + Sail.BitVec.toNatInt y) (64 + 1)) =
+      ((y.toNat + c.toNat : Nat) : Int) := by
+    have := y.isLt
+    rw [show ((c.toNat : Nat) : Int) + Sail.BitVec.toNatInt y = ((y.toNat + c.toNat : Nat) : Int) by
+      simp [Sail.BitVec.toNatInt]; omega]
+    simp only [Sail.BitVec.toNatInt, bits_of_int_natCast_toNat, Int.ofNat_eq_natCast]
+    rw [Nat.mod_eq_of_lt (by rw [Nat.pow_succ]; cases c <;> simp <;> omega)]
+  have hr : Sail.BitVec.truncate (bits_of_int (x.toInt - (y.toInt + c.toNat)) (64 + 2)) 64 =
+      BitVec.ofNat 64 (x.toNat + 2 ^ 64 - y.toNat - c.toNat) := by
+    rw [trunc_bits_ofInt, ofNat_sub3 _ _ _ (by cases c <;> decide), Int.sub_sub]
+  have hs : (Sail.BitVec.truncate (bits_of_int (x.toInt - (y.toInt + c.toNat)) (64 + 1 + 1)) (64 + 1)).toInt =
+      x.toInt - y.toInt - c.toNat := by
+    rw [toInt_bits_small _ _ (by omega) (by omega), Int.sub_sub]
+  have hcf : (Sail.BitVec.toNatInt x <b ((y.toNat + c.toNat : Nat) : Int)) = decide (x.toNat < y.toNat + c.toNat) := by
+    clear hi hs hr hi2
+    generalize hX : Sail.BitVec.toNatInt x = X
+    have : X = x.toNat := by rw [← hX]; rfl
+    subst this
+    (rw [Bool.eq_iff_iff]; simp) <;> omega
+  simp only [gpr_sbb_spec_8, hc, toNatInt_ofBool, hi, hi2, hcf, bool_to_bits_eq, hr, hs, run_bind,
+    run_pf_spec64, sbb_af_spec64_eq, zf_spec_eq, sf_spec64_eq, run_of_spec64, run_pure, BitVec.toNat_ofNat, Nat.reduceSub]
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_and_spec_8 (x y : BitVec 64) (rin : BitVec 32) (s : SState) :
+    (gpr_and_spec_8 x y rin).run s =
+      .ok (x &&& y, outLogic rin (Janus.Amd64.logicFlags (x &&& y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_and_spec_8, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec64, zf_spec_eq, sf_spec64_eq, run_pure, Nat.reduceSub]
+  rfl
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_or_spec_8 (x y : BitVec 64) (rin : BitVec 32) (s : SState) :
+    (gpr_or_spec_8 x y rin).run s =
+      .ok (x ||| y, outLogic rin (Janus.Amd64.logicFlags (x ||| y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_or_spec_8, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec64, zf_spec_eq, sf_spec64_eq, run_pure, Nat.reduceSub]
+  rfl
+
+set_option maxRecDepth 100000 in
+theorem run_gpr_xor_spec_8 (x y : BitVec 64) (rin : BitVec 32) (s : SState) :
+    (gpr_xor_spec_8 x y rin).run s =
+      .ok (x ^^^ y, outLogic rin (Janus.Amd64.logicFlags (x ^^^ y)),
+        _update_rflagsbits_af (Mk_rflagsbits 0#32) 1#1) s := by
+  rw [logicFlags_eq, outLogic_some]
+  simp only [gpr_xor_spec_8, logxor, Sail.BitVec.extractLsb, BitVec.extractLsb, BitVec.extractLsb'_eq_self,
+    run_bind, run_pf_spec64, zf_spec_eq, sf_spec64_eq, run_pure, Nat.reduceSub]
+  rfl
 
 end JanusX86.Proofs
 namespace JanusX86.Proofs
