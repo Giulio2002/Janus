@@ -467,6 +467,10 @@ type consumerWS struct {
 	replayCache, replayFresh bool
 	// asl: the trusted JanusASL build, with --asl (each passing request then gets its ASL stage).
 	asl *aslBuild
+	// auditExe is the compiled auditor of the cached framework base and auditExeSha the SHA-256
+	// its build stamp records (re-checked before it runs); empty with --fresh, whose temporary
+	// base is gone by then: the audit then runs the trusted Audit.lean script instead.
+	auditExe, auditExeSha string
 }
 
 // janusLib is the workspace's framework library directory.
@@ -544,6 +548,7 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 		if lease, err = fw.frameworkBase(lake, progress); err == nil {
 			base = lease.dir
 			defer lease.release()
+			ws.auditExe, ws.auditExeSha = auditExePath(base), fw.stampedAuditExe(base)
 		}
 	}
 	if err != nil {
@@ -567,7 +572,9 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 			_ = os.RemoveAll(ws.DepsDir)
 		}
 		_ = os.RemoveAll(janusBuild)
-		if err := copyTree(filepath.Join(base, ".lake", "build"), janusBuild); err != nil {
+		// The library (lib/) is what the workspace builds against; the compiled auditor and its
+		// The compiled auditor (bin/, 230 MB) stays in the base; the workspace never builds it.
+		if err := copyTreeSkipTop(filepath.Join(base, ".lake", "build"), janusBuild, "bin"); err != nil {
 			return fail(wsDiag(err))
 		}
 	}
@@ -751,12 +758,15 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 			env = append(env, e)
 		}
 	}
+	if len(args) > 0 && args[0] == "build" {
+		env = lakeBuildEnv(env)
+	}
 	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, nil, ws.protected(false), append([]string{ws.lake}, args...), env)
 	var out bytes.Buffer
 	all := &lockedBuffer{}
 	cmd.Stdout = io.MultiWriter(&out, all)
 	cmd.Stderr = all
-	err := cmd.Run()
+	err := guardRun(cmd)
 	return out.String(), all.String(), err
 }
 
@@ -1038,12 +1048,25 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			continue
 		}
 		marker := "janus-audit-" + newNonce() + ": "
-		af := filepath.Join(auditDir, fmt.Sprintf("Audit%d.lean", i))
-		if err := os.WriteFile(af, []byte(auditScript(r.Theorem, r.module, marker, depRoots...)), 0o644); err != nil {
-			r.Err = &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
-			continue
+		var out string
+		if ws.auditExe != "" && ws.auditExeSha != "" {
+			// The compiled auditor (the same JanusAudit.runImpl as the script below), if it is still
+			// the one its trusted build recorded.
+			if got := regularFileSha(ws.auditExe); got != ws.auditExeSha {
+				failAll(&diag{Invalid: true, Stage: "framework integrity",
+					Msg:  fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(ws.auditExe), short(ws.auditExeSha), short(got)),
+					Next: "Something other than janus wrote to the framework build; janus rebuilds it on the next run."})
+				return
+			}
+			out, _ = ws.runLeanDirect(leanPath, append([]string{ws.auditExe, r.Theorem, r.module, marker, "JanusTrusted"}, depRoots...)...)
+		} else {
+			af := filepath.Join(auditDir, fmt.Sprintf("Audit%d.lean", i))
+			if err := os.WriteFile(af, []byte(auditScript(r.Theorem, r.module, marker, depRoots...)), 0o644); err != nil {
+				r.Err = &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
+				continue
+			}
+			out, _ = ws.runLeanDirect(leanPath, ws.tc.lean, "--root="+auditDir, af)
 		}
-		out, _ := ws.runLeanDirect(leanPath, ws.tc.lean, "--root="+auditDir, af)
 		if err := pinned.check("the audit"); err != nil {
 			failAll(err)
 			return
@@ -1236,7 +1259,8 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 				trustedDirs: []string{janusLib}, searchDirs: searchDirs, protected: ws.protected(true), pinned: pinned,
 				framework: &pinnedLib{dir: janusLib, want: ws.framework}, homes: homes,
 				theorem: r.audit.Name, proofModule: r.module, depRoots: depRoots,
-				replayCache: ws.replayCache, replayFresh: ws.replayFresh, mapPaths: mapPaths})
+				replayCache: ws.replayCache, replayFresh: ws.replayFresh, mapPaths: mapPaths,
+				auditExe: ws.auditExe, auditExeSha: ws.auditExeSha})
 		}
 	}
 }

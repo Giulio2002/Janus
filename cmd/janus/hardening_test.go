@@ -43,12 +43,12 @@ func writeProof(t *testing.T, body string) string {
 }
 
 func TestHardeningAttacks(t *testing.T) {
+	t.Parallel()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {
 		t.Skipf("no sandbox available: %v", err)
 	}
-	add := mustExtract(t, "example.com/basic.Add")
 
 	// File-based attacks that do not use the Janus tactics (unaffected by the GoABI changes),
 	// each of which must be rejected at the given stage.
@@ -58,8 +58,11 @@ func TestHardeningAttacks(t *testing.T) {
 		{"A7_private_shadow.lean", "Proof.correctness", "", ""},
 		{"A10_exit.lean", "Proof.correctness", "theorem audit", "does not define"},
 	}
+	// Every subtest runs in parallel on its own extraction of Add (its own verified.json).
 	for _, c := range fileRejected {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			add := mustExtract(t, "example.com/basic.Add")
 			code, out, stderr := verifyAttack(t, add, attackPath(t, c.name), c.theorem)
 			if code != 1 || out != "" {
 				t.Fatalf("%s was not rejected: code %d\n%s\n%s", c.name, code, out, stderr)
@@ -78,19 +81,21 @@ func TestHardeningAttacks(t *testing.T) {
 		})
 	}
 
-	verifyProof := func(body, theorem string) (int, string, string) {
+	verifyProof := func(t *testing.T, add, body, theorem string) (int, string, string) {
 		return runJanus(t, "verify", add, "--proof", writeProof(t, body), "--janus-root", repoRoot, "--theorem", theorem)
 	}
 
 	// A1: a proof-local instance occupying an instance position of the statement's type is a
 	// disguised redefinition; it is rejected.
 	t.Run("A1 disguised instance", func(t *testing.T) {
+		t.Parallel()
+		add := mustExtract(t, "example.com/basic.Add")
 		body := "import Extracted\n" +
 			"instance (priority := high) evilMul : HMul Nat Nat Nat := ⟨Nat.add⟩\n" +
 			"namespace Proof\n" +
 			"theorem correctness : Extracted.entry = Extracted.entry ∧ @HMul.hMul Nat Nat Nat evilMul 2 3 = 5 := ⟨rfl, rfl⟩\n" +
 			"end Proof\n"
-		code, _, stderr := verifyProof(body, "Proof.correctness")
+		code, _, stderr := verifyProof(t, add, body, "Proof.correctness")
 		if code != 1 || !strings.Contains(stderr, "disguised instance") || !strings.Contains(stderr, "Stage: statement identity") {
 			t.Fatalf("A1 not rejected as a disguised instance: %d\n%s", code, stderr)
 		}
@@ -99,6 +104,8 @@ func TestHardeningAttacks(t *testing.T) {
 	// A2/A4: a proof-local unexpander must not change the printed statement. The proof verifies,
 	// but the statement is printed in a clean environment without the proof's unexpander.
 	t.Run("unexpander does not change the printed statement", func(t *testing.T) {
+		t.Parallel()
+		add := mustExtract(t, "example.com/basic.Add")
 		body := "import Extracted\n" +
 			"def Shown (a b : Nat) : Prop := a = b\n" +
 			"open Lean PrettyPrinter in\n" +
@@ -106,7 +113,7 @@ func TestHardeningAttacks(t *testing.T) {
 			"namespace Proof\n" +
 			"theorem correctness : Shown Extracted.entry Extracted.entry := rfl\n" +
 			"end Proof\n"
-		code, _, stderr := verifyProof(body, "Proof.correctness")
+		code, _, stderr := verifyProof(t, add, body, "Proof.correctness")
 		if code != 0 {
 			t.Fatalf("unexpander proof should verify with an honest statement: %d\n%s", code, stderr)
 		}
@@ -122,12 +129,14 @@ func TestHardeningAttacks(t *testing.T) {
 
 	// A9: a proof declaring a name under the Extracted namespace (shadowing it) is rejected.
 	t.Run("A9 namespace shadow", func(t *testing.T) {
+		t.Parallel()
+		add := mustExtract(t, "example.com/basic.Add")
 		body := "import Extracted\n" +
 			"namespace Proof\n" +
 			"def Extracted.program : Janus.Program := _root_.Extracted.program\n" +
 			"theorem correctness : Extracted.program.exitAddr = Extracted.program.exitAddr := rfl\n" +
 			"end Proof\n"
-		code, _, stderr := verifyProof(body, "Proof.correctness")
+		code, _, stderr := verifyProof(t, add, body, "Proof.correctness")
 		if code != 1 || !strings.Contains(stderr, "shadows the Extracted namespace") {
 			t.Fatalf("A9 namespace shadow not rejected: %d\n%s", code, stderr)
 		}
@@ -135,6 +144,8 @@ func TestHardeningAttacks(t *testing.T) {
 
 	// A6: a #eval doing IO cannot escape the sandbox to write outside the private build dir.
 	t.Run("A6_eval_io cannot write outside the sandbox", func(t *testing.T) {
+		t.Parallel()
+		add := mustExtract(t, "example.com/basic.Add")
 		target := filepath.Join(repoRoot, "audit", "work", "A6-written-during-verify.txt")
 		_ = os.Remove(target)
 		verifyAttack(t, add, attackPath(t, "A6_eval_io.lean"), "Proof.correctness")
@@ -148,6 +159,7 @@ func TestHardeningAttacks(t *testing.T) {
 // B1: NeverPanics must not be satisfiable by a fault (fixed in GoABI by the hardening agent).
 // The attack proof should now fail to prove its (vacuous) statement.
 func TestHardeningB1(t *testing.T) {
+	t.Parallel()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {
@@ -179,6 +191,7 @@ func TestRejectPIE(t *testing.T) {
 
 // The report records the sandbox mode, and --unsafe-no-sandbox is honoured and flagged.
 func TestSandboxRecorded(t *testing.T) {
+	t.Parallel()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {

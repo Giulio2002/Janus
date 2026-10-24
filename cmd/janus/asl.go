@@ -455,6 +455,9 @@ type aslEnv struct {
 	replayCache bool
 	replayFresh bool
 	mapPaths    func(string) string
+	// auditExe is the compiled auditor (janus-audit) of the framework build and auditExeSha the
+	// SHA-256 its build stamp records; with auditExe "" the trusted Audit.lean script runs instead.
+	auditExe, auditExeSha string
 }
 
 // aslFail records an ASL stage failure.
@@ -580,14 +583,24 @@ func runASLStage(e *aslEnv) *aslReport {
 	for _, d := range e.depRoots {
 		roots = append(roots, leanString(d))
 	}
-	asrc := fmt.Sprintf("import Janus.Tools.Audit\n#eval JanusAudit.runASL %s %s %s %s %s %s %s #[%s]\n",
-		leanString(e.theorem), leanString(e.proofModule), leanString(aslCorollaryName), leanString(aslCorollaryModule),
-		leanString(amarker), leanString("JanusTrusted"), leanString(aslWordsName), strings.Join(roots, ", "))
-	if err := os.WriteFile(filepath.Join(auditDir, "Audit.lean"), []byte(asrc), 0o644); err != nil {
-		return aslFail(r, &diag{Invalid: true, Msg: err.Error(), Stage: "ASL audit"})
-	}
 	readOnly := append(append([]string{}, protected...), corDir)
-	aout, _ := runLeanProtected(e.sb, e.tc, auditDir, nil, readOnly, leanPath, e.tc.lean, "--root="+auditDir, filepath.Join(auditDir, "Audit.lean"))
+	var aout string
+	if e.auditExe != "" {
+		if got := regularFileSha(e.auditExe); got != e.auditExeSha {
+			return aslFail(r, &diag{Invalid: true, Stage: "framework integrity",
+				Msg: fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(e.auditExe), short(e.auditExeSha), short(got))})
+		}
+		aout, _ = runLeanProtected(e.sb, e.tc, auditDir, nil, readOnly, leanPath, append([]string{e.auditExe, "--asl",
+			e.theorem, e.proofModule, aslCorollaryName, aslCorollaryModule, amarker, "JanusTrusted", aslWordsName}, e.depRoots...)...)
+	} else {
+		asrc := fmt.Sprintf("import Janus.Tools.Audit\n#eval JanusAudit.runASL %s %s %s %s %s %s %s #[%s]\n",
+			leanString(e.theorem), leanString(e.proofModule), leanString(aslCorollaryName), leanString(aslCorollaryModule),
+			leanString(amarker), leanString("JanusTrusted"), leanString(aslWordsName), strings.Join(roots, ", "))
+		if err := os.WriteFile(filepath.Join(auditDir, "Audit.lean"), []byte(asrc), 0o644); err != nil {
+			return aslFail(r, &diag{Invalid: true, Msg: err.Error(), Stage: "ASL audit"})
+		}
+		aout, _ = runLeanProtected(e.sb, e.tc, auditDir, nil, readOnly, leanPath, e.tc.lean, "--root="+auditDir, filepath.Join(auditDir, "Audit.lean"))
+	}
 	if err := pinned.check("the ASL audit"); err != nil {
 		return aslFail(r, err)
 	}

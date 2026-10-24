@@ -59,6 +59,24 @@ jobs:
             sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      # Memory guard: janus and scripts/lib/memguard.sh run every Lean job (lean, leanchecker,
+      # lake, go test) inside a cgroup v2 memory limit, through `systemd-run --user --scope`.
+      # GitHub's runners have systemd but no user manager for the runner account until it lingers;
+      # start one and export its runtime dir. Without it the guard degrades to prlimit (or none)
+      # and says so in the log. JANUS_MEM_MAX: the default per-job limit is min(24G, 40% of RAM),
+      # 6.4 GiB on a 16 GiB runner: tight for the ArmASL build (10.7 GiB with 8 lake jobs) and the
+      # ClearWords proof (4.8 GiB). One job runs at a time here, so give it 12G (docs/TESTING.md).
+      - name: Memory guard (cgroup v2 limit for every Lean job)
+        run: |
+          uid=$(id -u)
+          sudo loginctl enable-linger "$(id -un)" || true
+          for _ in $(seq 30); do [ -S "/run/user/$uid/bus" ] && break; sleep 1; done
+          echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
+          echo "JANUS_MEM_MAX=12G" >> "$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
+          echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
+          bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+
       - name: Cache the ArmASL build
         uses: actions/cache@v4
         with:

@@ -1,11 +1,12 @@
-import Janus
 import Lean
 
 /-!
 # `janus-audit`: the trusted theorem and statement auditor
 
-`janus verify` runs this compiled executable instead of elaborating an audit `.lean` file, so
-**no code from the proof ever runs** (A3, A6 in `docs/AUDIT.md`): it imports the proof's compiled
+`janus verify` runs this logic as the compiled executable `janus-audit` (root
+`Janus.Tools.AuditMain`, built with the framework and pinned like its modules); consumer-package
+verification runs it through a trusted `#eval` script (`run`). Either way **no code from the
+proof ever runs** (A3, A6 in `docs/AUDIT.md`): it imports the proof's compiled
 module with `importModules` and never calls `enableInitializersExecution`, which means the
 proof's `initialize` blocks, `#eval`s and macros do not execute here. Importing an `.olean`
 only loads declarations.
@@ -42,6 +43,10 @@ Given the theorem name, the proof module name and a marker, it
 
 Output: one line `<marker>{json}` on stdout (the record), or `<marker>ERROR <message>`.
 Everything else on stderr. The marker is an argument, not read from any file.
+
+This module imports only `Lean` (it reads `Janus` and `Extracted` as data, through
+`importModules`), so the executable links no framework code and its imports are mapped once:
+an environment imported by this process shares no file with the process's own image.
 -/
 
 open Lean
@@ -82,8 +87,9 @@ def coreModule (mod : Name) : Bool :=
 /-- The direct imports of every non-core module of `env`, for `Record.imports`. -/
 def importGraph (env : Environment) : Array (Array String) := Id.run do
   let mut out := #[]
-  for h : i in [0:env.header.moduleNames.size] do
-    let m := env.header.moduleNames[i]
+  let names := env.header.moduleNames
+  for h : i in [0:names.size] do
+    let m := names[i]
     if coreModule m then continue
     let imps := match env.header.moduleData[i]? with
       | some d => d.imports.map (·.module.toString)
@@ -103,6 +109,9 @@ raw extension entries of each imported module (so `importModules (loadExts := fa
 and no imported code runs). -/
 structure Ctx where
   env       : Environment
+  /-- `env.header.moduleNames`, computed once (`EnvironmentHeader.moduleNames` rebuilds the array
+  of every module name on each call). -/
+  modNames  : Array Name
   depRoots  : Std.HashSet Name
   instances : Std.HashSet Name
   classes   : Std.HashSet Name
@@ -118,7 +127,7 @@ def Ctx.originOfModule (cx : Ctx) (mod : Name) : Origin :=
 
 /-- The module that declares `c`, if any. -/
 def Ctx.moduleOf? (cx : Ctx) (c : Name) : Option Name :=
-  (cx.env.getModuleIdxFor? c).map fun idx => cx.env.header.moduleNames[idx.toNat]!
+  (cx.env.getModuleIdxFor? c).map fun idx => cx.modNames[idx.toNat]!
 
 def Ctx.originOf (cx : Ctx) (c : Name) : Origin :=
   match cx.moduleOf? c with
@@ -130,7 +139,8 @@ def Ctx.originOf (cx : Ctx) (c : Name) : Origin :=
 def mkCtx (env : Environment) (depRoots : Array String) (extra : Array Name := #[]) : Ctx := Id.run do
   let mut instances : Std.HashSet Name := {}
   let mut classes : Std.HashSet Name := {}
-  for i in [0:env.header.moduleNames.size] do
+  let modNames := env.header.moduleNames
+  for i in [0:modNames.size] do
     for e in Meta.instanceExtension.ext.getModuleEntries env i do
       let ie := match e with
         | .global ie => ie
@@ -139,7 +149,7 @@ def mkCtx (env : Environment) (depRoots : Array String) (extra : Array Name := #
         instances := instances.insert n
     for ce in classExtension.getModuleEntries env i do
       classes := classes.insert ce.name
-  return { env, instances, classes, extra,
+  return { env, modNames, instances, classes, extra,
            depRoots := depRoots.foldl (fun s r => s.insert r.toName) {} }
 
 /-- Round 6 (F1): characters allowed in a name component of a non-trusted constant that the
@@ -650,16 +660,53 @@ def discloseDef (ci : ConstantInfo) : MetaM String := do
     | none => pure ()
   return s!"{ci.name} : {lastTy} := {lastVal}  [not round-tripped: read with care]"
 
+/-- The clean environment's imports: only `Extracted` and `Janus`, never the proof. -/
+def cleanImports : Array Import := #[{ module := `Extracted }, { module := `Janus }]
+
+/-- Read the module data of the clean environment (`cleanImports`) and of the audited one
+(`auditImports`) from disk, returning the two import states. This only reads `.olean` files (as
+`importModules` does); no environment is built and nothing runs.
+
+Re-reading a module that this process has already mapped is slow (Lean copies and relocates the
+whole file instead of mapping it), and the two environments share every framework and core
+module, so the audited state is grown from the clean one: each shared module is read once. That
+is exactly a fresh import of `auditImports` when the clean closure is part of the audited
+closure, i.e. when `Extracted` imports `Janus` (which the extractor always writes);
+`auditEnv` checks this on the result and otherwise imports the audited environment afresh. -/
+def readImports (auditImports : Array Import) : IO (ImportState × ImportState) := withImporting do
+  let (_, sClean) ← (importModulesCore cleanImports).run
+  let (_, sAudit) ← (importModulesCore auditImports).run sClean
+  return (sClean, sAudit)
+
+/-- The audited environment (`importModules (loadExts := false) auditImports {}`) and the clean
+import state, reading every module once (`readImports`). The shared read is used only if the
+imported `Extracted` directly imports `Janus`, so the clean closure adds no module to the audited
+one and the result is the environment a fresh import builds (same modules, same order: both are
+the same depth-first traversal); otherwise the audited environment is imported separately. -/
+def auditEnv (auditImports : Array Import) : IO (Environment × ImportState) := do
+  let (sClean, sAudit) ← readImports auditImports
+  let env ← withImporting <| finalizeImport sAudit auditImports {} (leakEnv := false) (loadExts := false)
+  let extractedImportsJanus := match env.getModuleIdx? `Extracted with
+    | some i => match env.header.moduleData[i.toNat]? with
+      | some d => d.imports.any (·.module == `Janus)
+      | none => false
+    | none => false
+  if extractedImportsJanus then
+    return (env, sClean)
+  return (← importModules (loadExts := false) auditImports {}, sClean)
+
 /-- Build the clean environment: import only `Janus` and `Extracted`, with initializers so pp
 works, then add type-only stubs for the dependency constants the statement reaches, re-add the
 allowed proof-local defs and an axiom with the theorem's type. Reject a proof-local def whose
 type's head is a class (a disguised instance, A1). No proof or dependency module is imported, so
 none of their initializers, notations, unexpanders or delaborators exist here. -/
 unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs : Array ConstantInfo)
-    (stubs : Array ConstantInfo) (extraImports : Array Name := #[]) : AuditM (String × String × Array String) := do
+    (stubs : Array ConstantInfo) (cleanState : ImportState) (clean : Array Import := cleanImports) :
+    AuditM (String × String × Array String) := do
   enableInitializersExecution
-  let env ← importModules (loadExts := true)
-    (#[{ module := `Extracted }, { module := `Janus }] ++ extraImports.map ({ module := · })) {}
+  -- `importModules (loadExts := true) cleanImports {}`, with the module data already read
+  -- (`readImports`): the same `finalizeImport` over the same import state.
+  let env ← (withImporting <| finalizeImport cleanState clean {} (leakEnv := false) (loadExts := true) : IO Environment)
   let mut env := env
   -- Dependency constants: type-only, unchecked (their types may need dependency definitions'
   -- bodies to check, which a stub does not carry).
@@ -733,15 +780,18 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
   let result ← (show AuditM Record from do
     let thmN := thm.toName
     let proofModN := proofMod.toName
-    let envA ← importModules (loadExts := false)
-      #[{ module := `Extracted }, { module := trusted.toName }, { module := proofModN }] {}
+    let auditImports : Array Import :=
+      #[{ module := `Extracted }, { module := trusted.toName }, { module := proofModN }]
+    let (envA, cleanState) ← (auditEnv auditImports : IO _)
     -- 1. kind and module
     let some ci := envA.find? thmN | fail s!"the proof does not define {thm}"
     let kind := match ci with
       | .thmInfo _ => "theorem" | .defnInfo _ => "definition" | .axiomInfo _ => "axiom"
       | .opaqueInfo _ => "opaque" | _ => "other"
+    -- the module names, computed once (`moduleNames` rebuilds the array on every call)
+    let modNames := envA.header.moduleNames
     let modName ← match envA.getModuleIdxFor? thmN with
-      | some i => pure (envA.header.moduleNames[i.toNat]!)
+      | some i => pure (modNames[i.toNat]!)
       | none => fail s!"{thm} is not declared in an imported module"
     -- the selected declaration must be a theorem declared in the proof module; check this
     -- before anything else so the diagnostic names the real problem
@@ -758,7 +808,7 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
     -- 4. no non-trusted (consumer/proof/dependency) module declares a name with an `Extracted` component
     -- (A7, A9, and the consumer analogue of shadowing Extracted from a shared module)
     for (n, idx) in envA.const2ModIdx.toList do
-      if !trustedModule envA.header.moduleNames[idx.toNat]! && (n.anyS (· == "Extracted") || imitatesExtracted n) then
+      if !trustedModule modNames[idx.toNat]! && (n.anyS (· == "Extracted") || imitatesExtracted n) then
         fail s!"a non-trusted module declares {n}, whose name shadows the Extracted namespace (round 6 F1: lookalike letters and «…» components count)"
     -- 5. type constants: must mention Extracted; every constant is trusted or a non-trusted
     -- plain def collected for the clean-environment print
@@ -770,7 +820,7 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
         mentionsExtracted := true
       match envA.getModuleIdxFor? c with
       | some idx =>
-        if !trustedModule envA.header.moduleNames[idx.toNat]! then
+        if !trustedModule modNames[idx.toNat]! then
           localSeed := localSeed.push c
       | none =>
         fail s!"the statement depends on {c}, which is in no imported module"
@@ -788,9 +838,9 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
         fail s!"the statement uses {n}, whose name has characters other than ASCII letters, digits, _ ' ! ? and subscripts (a name with lookalike letters prints like a different, trusted constant); rename it"
     let (_, stubs) ← externalStubs cx {} #[] externalNames.toList
     -- 6. clean-environment pretty-print
-    let (statement, statementExplicit, defs) ← cleanEnvAndPrint cx thmN ci.type localDefs stubs
+    let (statement, statementExplicit, defs) ← cleanEnvAndPrint cx thmN ci.type localDefs stubs cleanState
     return Record.mk thm kind modName.toString (axs.map (·.toString)) statement statementExplicit defs
-      (envA.header.moduleNames.map (·.toString)) (externalNames.filterMap external.get?)
+      (modNames.map (·.toString)) (externalNames.filterMap external.get?)
       (importGraph envA)
   ).run
   match result with
@@ -831,7 +881,7 @@ partial def ensuresTelescope {α} (ty : Expr) (k : Array Expr → Expr → MetaM
     (fuel : Nat := 64) : MetaM α :=
   Meta.forallTelescope ty fun xs body => do
     let acc := acc ++ xs
-    if body.isAppOfArity ``Janus.GoABI.Ensures 5 || fuel == 0 then k acc body else
+    if body.isAppOfArity `Janus.GoABI.Ensures 5 || fuel == 0 then k acc body else
     match ← Meta.unfoldDefinition? body with
     | some b => ensuresTelescope b.headBeta k acc (fuel - 1)
     | none => k acc body
@@ -847,7 +897,7 @@ def aslCorollary (thm words : Name) : MetaM (Expr × Expr) := do
   unless ci.levelParams.isEmpty do
     throwError "{thm} is universe polymorphic; --asl transfers monomorphic Ensures theorems only"
   ensuresTelescope ci.type fun xs body => do
-    unless body.isAppOfArity ``Janus.GoABI.Ensures 5 do
+    unless body.isAppOfArity `Janus.GoABI.Ensures 5 do
       throwError "the conclusion of {thm} (after its ∀ binders) is not `Janus.GoABI.Ensures …` (arm64), also after unfolding its head definitions; --asl transfers arm64 Ensures specifications only"
     let args := body.getAppArgs
     let p := args[0]!
@@ -879,6 +929,10 @@ unsafe def runASLImpl (userThm proofMod corThm corMod marker trusted words : Str
     let proofModN := proofMod.toName
     let envA ← importModules (loadExts := false)
       #[{ module := `Extracted }, { module := trusted.toName }, { module := corModN }] {}
+    let aslClean : Array Import := cleanImports.push { module := `JanusASL.Verify }
+    let cleanState ← (withImporting do
+      let (_, st) ← (importModulesCore aslClean).run
+      return st : IO ImportState)
     let moduleOf := fun (n : Name) => (envA.getModuleIdxFor? n).map fun i => envA.header.moduleNames[i.toNat]!
     let some uci := envA.find? userN | fail s!"the proof does not define {userThm}"
     unless uci matches .thmInfo _ do fail s!"{userThm} is not a theorem"
@@ -900,7 +954,7 @@ unsafe def runASLImpl (userThm proofMod corThm corMod marker trusted words : Str
     for (n, idx) in envA.const2ModIdx.toList do
       let m := envA.header.moduleNames[idx.toNat]!
       if cx.trusted m then continue
-      if n.anyS (· == "Extracted") then
+      if n.anyS (· == "Extracted") || imitatesExtracted n then
         fail s!"a non-trusted module declares {n}, whose name shadows the Extracted namespace"
       if aslTrustedRoots.contains n.getRoot || n.getRoot == corModN.getRoot then
         unless m == corModN && n == corN do
@@ -927,9 +981,12 @@ unsafe def runASLImpl (userThm proofMod corThm corMod marker trusted words : Str
     let (localNames, external) ← collectLocalDefs cx {} {} localSeed.toList
     let localDefs := localNames.filterMap envA.find?
     let externalNames := external.toArray.map (·.1) |>.qsort Name.lt
+    for n in localNames ++ externalNames do
+      unless plainName n do
+        fail s!"the corollary uses {n}, whose name has characters other than ASCII letters, digits, _ ' ! ? and subscripts (a name with lookalike letters prints like a different, trusted constant); rename it"
     let (_, stubs) ← externalStubs cx {} #[] externalNames.toList
     let (statement, statementExplicit, defs) ←
-      cleanEnvAndPrint cx corN ci.type localDefs stubs #[`JanusASL.Verify]
+      cleanEnvAndPrint cx corN ci.type localDefs stubs cleanState aslClean
     return Record.mk corThm "theorem" corMod (axs.map (·.toString)) statement statementExplicit defs
       (envA.header.moduleNames.map (·.toString)) (externalNames.filterMap external.get?)
       (importGraph envA)

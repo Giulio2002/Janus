@@ -1,4 +1,5 @@
 import Janus.Tactic.Basic
+import Janus.Tactic.Common
 
 /-!
 # Symbolic execution of the ordered, exclusive, atomic and DC ZVA instructions
@@ -93,10 +94,14 @@ namespace Janus.Tactic
 open Lean Elab Tactic Meta in
 /-- `janus_eval_nat h : c` for a closed `Nat` constant `c`: evaluates it and adds
 `h : c = <numeral>`, proved by `decide` (checked by the kernel; the evaluation only finds the
-numeral). -/
+numeral). The constant is evaluated over imported constants when possible
+(`Common.unfoldLocalDefs`), so that the evaluation does not wait for the compiled environment of
+the rest of the file. -/
 elab "janus_eval_nat " h:ident " : " c:ident : tactic => withMainContext do
   let e ← mkConstWithFreshMVarLevels (← realizeGlobalConstNoOverload c)
-  let v ← unsafe evalExpr Nat (mkConst ``Nat) e
+  let e' ← Common.unfoldLocalDefs e
+  let v ← if e' == e then unsafe evalExpr Nat (mkConst ``Nat) e else
+    try unsafe evalExpr Nat (mkConst ``Nat) e' catch _ => unsafe evalExpr Nat (mkConst ``Nat) e
   let eq ← mkEq e (mkNatLit v)
   let pf ← mkDecideProof eq
   let (_, g') ← (← (← getMainGoal).assert h.getId eq pf).intro1P

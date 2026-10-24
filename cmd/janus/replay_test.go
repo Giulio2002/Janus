@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -178,9 +179,11 @@ func TestReplayPlanKeys(t *testing.T) {
 	if _, err := planReplay(resolved, map[string][]string{"A": {}, "B": {"A"}}, "v1", true); err == nil {
 		t.Fatal("missing import record accepted")
 	}
-	// Chunked replay through a fake leanchecker: failures are not recorded.
+	// Replay through a fake leanchecker: one process per replay target (A, B and C are three
+	// targets: none is a name prefix of another), failures are not recorded.
+	var mu sync.Mutex
 	calls := 0
-	ok := func(argv ...string) (string, error) { calls++; return "", nil }
+	ok := func(argv ...string) (string, error) { mu.Lock(); calls++; mu.Unlock(); return "", nil }
 	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
 	p7, _ := planReplay(resolved, graph, "v1", true)
 	if _, err := p7.replay("leanchecker", func(argv ...string) (string, error) { return "bad", fmt.Errorf("exit 1") }, p7.modules); err == nil {
@@ -189,7 +192,7 @@ func TestReplayPlanKeys(t *testing.T) {
 	if p8, _ := planReplay(resolved, graph, "v1", true); len(p8.cached) != 0 {
 		t.Fatal("a failing replay was cached")
 	}
-	if _, err := p7.replay("leanchecker", ok, p7.modules); err != nil || calls != 1 {
+	if _, err := p7.replay("leanchecker", ok, p7.modules); err != nil || calls != 3 {
 		t.Fatalf("replay: %v, %d calls", err, calls)
 	}
 	if p9, _ := planReplay(resolved, graph, "v1", true); len(p9.cached) != 3 {
@@ -272,7 +275,7 @@ func r1Package(t *testing.T, dep bool) string {
 // framework build is read-only (the write fails, so the false theorem does not even compile),
 // and without one the framework pins catch the change.
 func TestR1FrameworkTamper(t *testing.T) {
-	needLean(t)
+	needLeanSlow(t)
 	useTestCache(t)
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bubblewrap not installed")
@@ -322,7 +325,8 @@ func TestR1FrameworkTamper(t *testing.T) {
 // from that build) carrying a lemma the kernel never checked is caught by the kernel replay of
 // the framework module.
 func TestR1ForgedFrameworkLemma(t *testing.T) {
-	needLean(t)
+	t.Parallel()
+	needLeanSlow(t)
 	useTestCache(t)
 	root := filepath.Join(t.TempDir(), "janus")
 	for _, f := range []string{"lakefile.toml", "lake-manifest.json", "lean-toolchain", "Janus.lean"} {
