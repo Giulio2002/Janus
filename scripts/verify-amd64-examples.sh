@@ -3,7 +3,7 @@
 # against its extraction in artifacts/amd64/<Function>, which scripts/build-examples-amd64.sh
 # (run first) builds and extracts.
 # Also verifies the extra `Proof.panics` theorems of Div and Get. Exits non-zero on any failure.
-# Usage: scripts/verify-amd64-examples.sh [-j N]
+# Usage: scripts/verify-amd64-examples.sh [-j N] [Function ...]   (default: every function)
 #   -j N   verify up to N functions at once (default: $JANUS_JOBS, else the number of cores
 #          capped by memory, see scripts/lib/parallel.sh); -j 1 verifies them one by one. The
 #          theorems of one function run one after the other (they share its verified.json).
@@ -14,8 +14,12 @@ cd "$root"
 # shellcheck source=lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
 par_init "$@"
-[ -x bin/janus ] || go build -o bin/janus ./cmd/janus
-bash scripts/build-examples-amd64.sh
+set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
+# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): already built and extracted.
+if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
+  [ -x bin/janus ] || go build -o bin/janus ./cmd/janus
+  bash scripts/build-examples-amd64.sh
+fi
 broken=()
 verify() {
   local f=$1 thm=$2 out
@@ -32,8 +36,11 @@ verify_function() {
   if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then verify "$f" Proof.panics; fi
   return 0
 }
-for d in examples/proofs-amd64/*/; do
-  f=$(basename "$d")
+funcs=("$@")
+if [ ${#funcs[@]} -eq 0 ]; then
+  for d in examples/proofs-amd64/*/; do funcs+=("$(basename "$d")"); done
+fi
+for f in "${funcs[@]}"; do
   par_run 'verify_function "$f"'
 done
 par_wait

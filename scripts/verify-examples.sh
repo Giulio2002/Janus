@@ -25,17 +25,21 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
-go build -o bin/janus ./cmd/janus
-scripts/build-examples.sh >/dev/null
+# JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): bin/janus and the examples binary
+# are already built.
+if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
+  go build -o bin/janus ./cmd/janus
+  scripts/build-examples.sh >/dev/null
+fi
 # The verifier builds the framework it uses itself (the embedded one in the cache, or the
 # JANUS_ROOT checkout in place) under its lock; build a JANUS_ROOT checkout first only so that
 # its build errors show up before any proof runs.
-[ -n "${JANUS_ROOT:-}" ] && (cd "$JANUS_ROOT" && lake build Janus >/dev/null)
+[ -n "${JANUS_ROOT:-}" ] && [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ] && (cd "$JANUS_ROOT" && lake build Janus >/dev/null)
 
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
 
-summary="$root/artifacts/verify-examples.txt"
+summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
 broken=()
