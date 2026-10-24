@@ -4,3 +4,4 @@ import JanusX86.Proofs.AluClassMem
 import JanusX86.Proofs.AluGE
 import JanusX86.Proofs.AluAI
 import JanusX86.Proofs.AluEI
+import JanusX86.Proofs.Frame
