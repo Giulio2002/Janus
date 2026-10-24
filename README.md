@@ -212,6 +212,11 @@ Go 1.26.0. Proofs:
 | `ClearWords` | `clear(b)` of a 16-word, 128-byte-aligned slice through `runtime.memclrNoHeapPointers` (its `DC ZVA` path), for every `DCZID_EL0` | ✓ | |
 | `Equal64` | `bytes.Equal` of two `[64]byte` through `runtime.memequal`: true iff the bytes are equal, for every value of `internal/cpu.X86.HasAVX2` (the AVX2 `VPCMPEQB`/`VPMOVMSKB` loop and the SSE one) | | ✓ |
 | `CopyBlock512` | `copy` of a 512-byte array through `runtime.memmove`'s AVX path (`VMOVDQU`/`VMOVDQA`, any `dst` alignment), given `memmoveBits & avxSupported` | | ✓ |
+| `NewPair` | `&Pair{a, b}`: a fresh 16-aligned heap object holding `a`, `b`, assuming the `runtime.newobject` contract | ✓ | ✓ |
+| `MakeSlice` | `make([]uint64, n)`: length and capacity `n`, a fresh all-zero array, assuming the `runtime.makeslice` contract | ✓ | ✓ |
+| `AppendOne` | `append(s, x)`, in place or through `runtime.growslice` (Go's growth rule, size-class rounding, old elements copied, zero tail), assuming its contract | ✓ | ✓ |
+| `SetNext` | `n.Next = q` through the GC write barrier, whose fast path (buffer append) is executed | ✓ | ✓ |
+| `MallocFast` | `runtime.mallocgc` itself: the small pointer-free fast path returns the free slot of the P's cached span (zeroed) and updates exactly the span/mcache fields, under `MCacheOK` | ✓ | |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
@@ -356,7 +361,7 @@ matters.
 | Command | Purpose |
 |---|---|
 | `janus list <binary>` | List the functions of a Go ELF binary (from `.symtab`, or `.gopclntab` if stripped) |
-| `janus extract <binary> <symbol> <outdir>` | Copy the function, its reachable callees and the read-only data they load into `Extracted.lean` + `identity.json` |
+| `janus extract <binary> <symbol> <outdir>` | Copy the function, its reachable callees and the read-only data they load into `Extracted.lean` + `identity.json`; `--contract SYM` leaves runtime functions out as contracts |
 | `janus check <outdir>` | Re-extract in memory and byte-compare with the saved artifacts, without running Lean |
 | `janus verify <outdir> --proof FILE` | Check, sandboxed build, audit, kernel replay; writes `verified.json` |
 | `janus verify-batch <requests.json>` | Verify many requests against one consumer-package snapshot |
@@ -380,6 +385,7 @@ leaves none.
 | [CLI.md](docs/CLI.md) | Every command, artifact format and diagnostic |
 | [CONSUMERS.md](docs/CONSUMERS.md) | Proofs in your own Lake package, batch verification, caches |
 | [AMD64.md](docs/AMD64.md) | The x86-64 backend: model, ABI, proofs, gaps |
+| [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime functions as contract hypotheses (`janus extract --contract`): allocation, write barriers, … |
 | [ORACLE.md](docs/ORACLE.md), [ORACLE-SAIL.md](docs/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) | The differential oracles and their results |
 | [AUDIT.md](docs/AUDIT.md) | The red-team audit of `janus verify` and its fixes |
 

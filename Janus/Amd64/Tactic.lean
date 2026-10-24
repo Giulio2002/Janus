@@ -1477,7 +1477,10 @@ where
       if d.isImplementationDetail then continue
       let ty ← instantiateMVars d.type
       if ty.isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
-      else if !before.contains d.fvarId && (← isProp ty) then ids := ids.push d.fvarId
+      -- (not equations: the executor uses them as rewrite rules, and simplifying one with
+      -- itself would turn it into `True`)
+      else if !before.contains d.fvarId && (← isProp ty) && !ty.isAppOfArity ``Eq 3 then
+        ids := ids.push d.fvarId
     if ids.isEmpty then return g
     setGoals [g]
     withExecSimp cfg (set := `janus64_post) fun ctx simprocs d? => do
@@ -1723,7 +1726,7 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
       if ← dischargeAccessible g then return
       throwError "janus64_disch: cannot prove{indentExpr t}"
-  evalTactic (← `(tactic| first | omega | janus_apart))
+  evalTactic (← `(tactic| first | janus_apart | omega))
 
 /-! ## Syntax -/
 

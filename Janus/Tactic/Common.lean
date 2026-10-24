@@ -177,23 +177,35 @@ def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
   -- only disjunctions (the read-over-write and frame side conditions) are worth it
   unless gty.consumeMData.isAppOfArity ``Or 2 do return false
   let goalAtoms := arithAtoms gty
+  -- relevant `Apart` facts: every atom of their two ranges occurs in the goal
+  let mut cands := #[]
+  let mut toClear := #[]
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
-    unless ty.isAppOfArity ``Janus.Apart 4 do continue
-    -- relevant facts only: every atom of the two ranges occurs in the goal
-    let hAtoms := arithAtoms (ty.getArg! 2) (arithAtoms (ty.getArg! 0))
-    unless hAtoms.all goalAtoms.contains do continue
-    let saved ← saveState
+    if ty.isAppOfArity ``Janus.Apart 4 then
+      let hAtoms := arithAtoms (ty.getArg! 2) (arithAtoms (ty.getArg! 0))
+      if hAtoms.all goalAtoms.contains then cands := cands.push d.fvarId
+      else toClear := toClear.push d.fvarId
+      continue
+    -- keep only the arithmetic facts about the goal's atoms, so that each `omega` is small
+    if ← isProp ty then
+      unless (arithAtoms ty).all goalAtoms.contains do toClear := toClear.push d.fvarId
+  if cands.isEmpty then return false
+  let saved ← saveState
+  let g' ← try g.tryClearMany toClear catch _ => pure g
+  for fv in cands do
+    let saved' ← saveState
     try
-      let h ← Term.exprToSyntax d.toExpr
-      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
+      let h ← Term.exprToSyntax (mkFVar fv)
+      let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic|
         (have h' : _ := $h
          unfold Janus.Apart at h'
          rcases h' with h' | h' <;> omega))))
       if gs.isEmpty then return true
-      saved.restore
-    catch _ => saved.restore
+      saved'.restore
+    catch _ => saved'.restore
+  saved.restore
   return false
 
 /-- `0x…` -/

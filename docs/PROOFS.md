@@ -384,6 +384,38 @@ every lane to its bytes (`elem_64_bytes`), pushing the masks into `if`s (`ite_la
 `firstTrue`. Name the branch hypotheses (`rename_i`) instead of `‹_›`: an anonymous assumption
 with metavariables is unified against every hypothesis, and these are large.
 
+### Runtime contracts and heap allocation (`NewPair`, `MakeSlice`, `AppendOne`, `SetNext`, `MallocFast`)
+
+Extract with `--contract runtime.newobject` (see `scripts/example-contracts.sh`), state the theorem
+about `Extracted.program.link impl` for every `impl` satisfying a contract hypothesis, and use the
+hypothesis at the call with `calls [hnew.pos]` (docs/RUNTIME-CONTRACTS.md):
+
+```lean
+theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (a b : BitVec 64)
+    (hnew : NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (pre rt) post := by
+  intro ret hret s hs ⟨…, hd, hout⟩
+  janus_intro hs
+  janus_data hd [hw]            -- also: the stack window is disjoint from the read-only data
+  janus_run until [Extracted.entry + 0x34] calls [hnew.pos]
+  have hdj := InRanges.disjoint ‹InRanges _ 16 rt› hout   -- the object is fresh
+  janus_run
+  …
+```
+
+* After the call, the contract's postcondition is split into hypotheses and simplified: the
+  returned pointer is a variable, with `InRanges ptr n rt`, alignment, `accessible` and
+  `ZeroBytes` facts; memory is a `MemFrame` of the call-site memory.
+* `Outside a n rt` side conditions (a read of the caller's stack through the contract's frame)
+  are proved from the precondition's `Outside b k rt`; `janus_frame` peels stores into the fresh
+  object (`InRanges`) and handles frames `rt ++ [ … ]`.
+* Many disjointness facts make `omega` slow (it case-splits on every disjunction in the context).
+  State them as `Apart a n b k` (or a `Spread` list of ranges): `omega` does not unfold `Apart`,
+  and the dischargers try one relevant `Apart` hypothesis at a time (`janus_apart`).
+  `MallocFast` relates eight objects (stack, `g`, `m`, `p`, `mcache`, `mspan`, the runtime
+  globals, the slot) this way.
+
 ### Counterexamples (`WrongAdd`)
 
 `scripts/break-demo.sh` changes `x + y` to `x - y` in a copy of the Go source, rebuilds,
