@@ -13,7 +13,8 @@ faults or panics), obeys the ABI, and leaves in `D0` (the `float64` result) the 
 (a NaN operand or `∞ - ∞`).
 
 `exact` states the result for every `FPCR` without trap enables: `D0` is `FPAdd(a, b, FPCR)`
-of the Arm ASL (`Janus.Arm64.FP.fpAdd`, which honours `RMode`, `FZ`, `DN`, `FIZ`, `AH`).
+of the Arm ASL (`Janus.Arm64.FP.fpAdd`, which honours `RMode`, `FZ`, `DN`, `FIZ`, `AH`), and
+`FPSR` gains exactly the exceptions it raises.
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Float
@@ -38,5 +39,21 @@ theorem correctness (a b : BitVec 64) :
   simp only [State.getV, setVReg_apply, Nat.mod_eq_of_lt hlt', Nat.mod_eq_of_lt h128]
   unfold ResultIs at *
   split at h <;> simp_all [Nat.mod_eq_of_lt hlt']
+
+theorem exact (a b : BitVec 64) :
+    Ensures Extracted.program Extracted.entry []
+      (fun s => s.getV 0 64 = a.toNat ∧ s.getV 1 64 = b.toNat ∧ FP.trapEnables s.fpcr.toNat = 0)
+      (fun s s' => s'.getV 0 64 = (FP.fpAdd binary64 s.fpcr.toNat a.toNat b.toNat).1 % 2 ^ 64 ∧
+        s'.fpsr = s.fpsr ||| BitVec.ofNat 32 ((FP.fpAdd binary64 s.fpcr.toNat a.toNat b.toNat).2.proc |||
+          (FP.fpAdd binary64 s.fpcr.toNat a.toNat b.toNat).2.direct)) := by
+  intro ret hret s hs ⟨ha, hb, ht⟩
+  janus_intro hs
+  simp only [State.getV] at ha hb
+  janus_run [ha, hb, ht]
+  simp only [State.getV, setVReg_apply, ite_true, BitVec.toNat_ofNat]
+  generalize (FP.fpAdd binary64 s.fpcr.toNat a.toNat b.toNat).1 = r
+  generalize (if FP.isMerging s.fpcr.toNat = true then (s.vregs 0).toNat % 340282366920938463463374607431768211456
+    else 0) = q
+  omega
 
 end Proof
