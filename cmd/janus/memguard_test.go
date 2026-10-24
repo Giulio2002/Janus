@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -128,7 +130,7 @@ func checkResourceLimit(t *testing.T, out string, report string) {
 func TestMemGuardKillsHungryProof(t *testing.T) {
 	needLean(t)
 	bin := buildJanusBinary(t)
-	base := envWith("JANUS_MEM_MAX=1G", "JANUS_MEMGUARD=", "JANUS_MEMGUARD_CGROUP=")
+	base := envWith("JANUS_MEM_MAX=1G", "JANUS_MEMGUARD=", "JANUS_MEMGUARD_CGROUP=", "JANUS_MEMGUARD_VERBOSE=1")
 	mech := guardedMech(t, bin, base)
 	dir := mustExtract(t, "example.com/basic.Get")
 	proof := filepath.Join(t.TempDir(), "Hungry.lean")
@@ -252,3 +254,58 @@ func TestMemGuardFailureDiag(t *testing.T) {
 		t.Fatalf("%v %+v", err, r.MemoryGuard)
 	}
 }
+
+// TestMemguardShell exercises scripts/lib/memguard.sh as the runner scripts use it (sourced
+// under set -euo pipefail): a command's status passes through, a command over its limit is
+// OOM-killed (137) with the summary line, nested guards report only their own kills, and no
+// cgroup is left behind. The memory hog is bash holding a 600 MiB string under a 300M limit.
+func TestMemguardShell(t *testing.T) {
+	lib := filepath.Join(repoRoot, "scripts", "lib", "memguard.sh")
+	mech, err := exec.Command("bash", lib, "mechanism").Output()
+	m := strings.TrimSpace(string(mech))
+	if err != nil || (m != "cgroup" && m != "systemd-user" && m != "systemd-system") {
+		t.Skipf("no cgroup mechanism for scripts (%q, %v)", m, err)
+	}
+	hog := `x=$(head -c 629145600 /dev/zero | tr '\0' a); echo ${#x}`
+	script := `set -euo pipefail
+. "$1"
+st=0; memguard_run -l 300M -n ok -- true || st=$?; echo "ok=$st"
+st=0; memguard_run -l 300M -n three -- bash -c 'exit 3' || st=$?; echo "three=$st"
+st=0; memguard_run -l 300M -n hog -- bash -c "$2" || st=$?; echo "hog=$st"
+st=0; memguard_run -l 2G -n outer -- bash "$1" run -l 300M -n inner -- bash -c "$2" || st=$?; echo "nested=$st"
+memguard_run -l 300M -n verbatim -- bash -c 'echo "arg=${#HOME}:$HOME"'
+st=0; memguard_lake --version >/dev/null || st=$?; echo "lake=$st"
+echo "jobs=$(memguard_jobs 3G 8)"
+echo done`
+	cmd := exec.Command("bash", "-c", script, "memguard-test", lib, hog)
+	cmd.Env = envWith("JANUS_MEMGUARD=", "JANUS_MEMGUARD_CGROUP=", "JANUS_MEM_MAX=")
+	out, err := cmd.CombinedOutput()
+	s := string(out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, s)
+	}
+	for _, want := range []string{"ok=0", "three=3", "hog=137", "memguard[hog]: peak ", "/ limit 300 MiB", "OOM-KILLED",
+		"memguard[inner]: ", "memguard[outer]: ", "(a nested guard killed one of its jobs)", "done"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("output lacks %q:\n%s", want, s)
+		}
+	}
+	if !regexp.MustCompile(`memguard\[hog\]: peak .* OOM-KILLED`).MatchString(s) {
+		t.Errorf("the hog's own guard did not report the kill:\n%s", s)
+	}
+	if h := os.Getenv("HOME"); !strings.Contains(s, fmt.Sprintf("arg=%d:%s", len(h), h)) {
+		t.Errorf("arguments were not passed verbatim (systemd-run expansion?):\n%s", s)
+	}
+	if !strings.Contains(s, "nested=137") {
+		t.Errorf("the nested hog's status was not passed through:\n%s", s)
+	}
+	if _, err := findLake(); err == nil && !strings.Contains(s, "lake=0") {
+		t.Errorf("memguard_lake failed:\n%s", s)
+	}
+	if !regexpJobs.MatchString(s) {
+		t.Errorf("memguard_jobs:\n%s", s)
+	}
+	t.Logf("%s", s)
+}
+
+var regexpJobs = regexp.MustCompile(`(?m)^jobs=[1-8]$`)

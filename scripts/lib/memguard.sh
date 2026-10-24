@@ -76,7 +76,7 @@ _mg_cgroup_ok() {
   [ -e "$1/cgroup.subtree_control" ] || return 1
   mkdir "$d" 2>/dev/null || return 1
   if [ -w "$d/memory.max" ] && [ -w "$d/cgroup.procs" ]; then ok=0; fi
-  rmdir "$d" 2>/dev/null
+  rmdir "$d" 2>/dev/null || true
   return $ok
 }
 
@@ -107,7 +107,7 @@ _mg_detect() {
   _MG_MECH=none
   _MG_PARENT=""
   case "${JANUS_MEM_MAX:-}" in [Oo][Ff][Ff]) _MG_MECH=off; return 0 ;; esac
-  own=$(_mg_own_cgroup)
+  own=$(_mg_own_cgroup) || own=""
   if { [ -z "$force" ] || [ "$force" = cgroup ]; } && [ -n "${JANUS_MEMGUARD_CGROUP:-}" ] && _mg_cgroup_ok "$JANUS_MEMGUARD_CGROUP"; then
     _MG_MECH=cgroup; _MG_PARENT="$JANUS_MEMGUARD_CGROUP"
   elif { [ -z "$force" ] || [ "$force" = cgroup ]; } && [ -n "$own" ] && _mg_cgroup_ok "$own"; then
@@ -170,7 +170,7 @@ _mg_nested_kill() { awk '($1 == "oom_kill" || $1 == "oom_group_kill") && $2 > 0 
 _mg_eff_limit() {
   local p="$1" lim="" v
   while [ "${p#/sys/fs/cgroup/}" != "$p" ]; do
-    v=$(cat "$p/memory.max" 2>/dev/null)
+    v=$(cat "$p/memory.max" 2>/dev/null) || v=
     case "$v" in ''|max) ;; *) if [ -z "$lim" ] || [ "$v" -lt "$lim" ]; then lim=$v; fi ;; esac
     p=$(dirname "$p")
   done
@@ -186,7 +186,7 @@ _mg_cgroup_run() {
   d="$parent/mg-$$-$RANDOM$RANDOM"
   if ! { mkdir "$d" && echo "$limit" > "$d/memory.max" && { [ ! -e "$d/memory.swap.max" ] || echo 0 > "$d/memory.swap.max"; } &&
          echo +memory > "$d/cgroup.subtree_control" && mkdir "$d/leader"; } 2>/dev/null; then
-    rmdir "$d/leader" "$d" 2>/dev/null
+    rmdir "$d/leader" "$d" 2>/dev/null || true
     echo "memguard[$label]: cannot set up a child cgroup of $parent" >&2
     return 125
   fi
@@ -194,14 +194,13 @@ _mg_cgroup_run() {
     # shellcheck disable=SC2030
     export JANUS_MEMGUARD_CGROUP="$d"
     unset _MG_MECH _MG_PARENT _MG_FOR
-    exec "$@" )
-  rc=$?
+    exec "$@" ) && rc=0 || rc=$?
   peak=$(cat "$d/memory.peak" 2>/dev/null || echo 0)
   if _mg_killed "$d"; then killed=1; elif _mg_nested_kill "$d"; then killed=2; fi
   lim=$(_mg_eff_limit "$d")
   echo 1 > "$d/cgroup.kill" 2>/dev/null || true
-  find "$d" -depth -type d -exec rmdir {} + 2>/dev/null
-  rmdir "$d" 2>/dev/null
+  find "$d" -depth -type d -exec rmdir {} + 2>/dev/null || true
+  rmdir "$d" 2>/dev/null || true
   _mg_report "$label" "$peak" "$lim" "$killed" "$mech"
   [ "$killed" = 1 ] && return 137
   return "$rc"
@@ -218,8 +217,7 @@ _mg_scope_inner() {
     return $?
   fi
   # No delegation: the command shares the scope with this shell; read the scope's counters.
-  ( unset _MG_MECH _MG_PARENT _MG_FOR; exec "$@" )
-  rc=$?
+  ( unset _MG_MECH _MG_PARENT _MG_FOR; exec "$@" ) && rc=0 || rc=$?
   peak=$(cat "$cg/memory.peak" 2>/dev/null || echo 0)
   _mg_killed "$cg" && killed=1
   _mg_report "$label" "$peak" "$limit" "$killed" "$mech"
@@ -251,19 +249,30 @@ memguard_run() {
     cgroup) _mg_cgroup_run cgroup "$_MG_PARENT" "$limit" "$label" "$@" ;;
     systemd-user|systemd-system)
       [ "$mech" = systemd-user ] && user=--user
-      # shellcheck disable=SC2086
-      systemd-run $user --scope --quiet --collect -p Delegate=yes -p MemoryMax="$limit" -p MemorySwapMax=0 \
-        -p OOMPolicy=continue -- bash "$_MG_SELF" __scope "$limit" "$label" "$mech" "$@" ;;
+      # The scope gets 64 MiB above the limit for the supervising shell, so the command's own
+      # cgroup (exactly LIMIT) is the one that hits it. systemd-run (>= 254) would expand $VARs
+      # in the command line; --expand-environment=no keeps the arguments verbatim.
+      # shellcheck disable=SC2086,SC2046
+      systemd-run $user --scope --quiet --collect $(_mg_sd_noexpand) -p Delegate=yes -p MemoryMax="$((limit + (64 << 20)))" \
+        -p MemorySwapMax=0 -p OOMPolicy=continue -- bash "$_MG_SELF" __scope "$limit" "$label" "$mech" "$@" ;;
     prlimit) prlimit --as=$((limit + _MG_PRLIMIT_SLACK)) -- "$@" ;;
     *) "$@" ;;
   esac
 }
 
+_mg_sd_noexpand() {
+  if [ -z "${_MG_SD_NOEXPAND+set}" ]; then
+    _MG_SD_NOEXPAND=""
+    if systemd-run --help 2>/dev/null | grep -q -- --expand-environment; then _MG_SD_NOEXPAND=--expand-environment=no; fi
+  fi
+  echo "$_MG_SD_NOEXPAND"
+}
+
 memguard_lake() {
   if [ -n "${LEAN_NUM_THREADS:-}" ]; then
-    memguard_run -n "lake $1" -- lake "$@"
+    memguard_run -n "lake ${1:-}" -- lake "$@"
   else
-    memguard_run -n "lake $1" -- env LEAN_NUM_THREADS="$(memguard_jobs "${JANUS_LAKE_JOB_MEM:-3G}")" lake "$@"
+    memguard_run -n "lake ${1:-}" -- env LEAN_NUM_THREADS="$(memguard_jobs "${JANUS_LAKE_JOB_MEM:-3G}")" lake "$@"
   fi
 }
 

@@ -70,6 +70,7 @@ jobs:
           export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
           echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
           bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+          go run ./cmd/janus memguard || true
 
       # elan installs the toolchain pinned in lean-toolchain on first use.
       - name: Cache elan toolchain
@@ -161,6 +162,7 @@ jobs:
           export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
           echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
           bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+          go run ./cmd/janus memguard || true
 
       # elan installs the toolchain pinned in lean-toolchain on first use.
       - name: Cache elan toolchain
@@ -294,6 +296,7 @@ jobs:
           export XDG_RUNTIME_DIR="/run/user/$uid" JANUS_MEM_MAX=12G
           echo "memguard mechanism: $(bash scripts/lib/memguard.sh mechanism)"
           bash scripts/lib/memguard.sh run -l 1G -n ci-probe -- true
+          go run ./cmd/janus memguard || true
 
       # elan installs the toolchain pinned in lean-toolchain on first use.
       - name: Cache elan toolchain

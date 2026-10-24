@@ -72,16 +72,18 @@ type memGuardInfo struct {
 }
 
 type memGuard struct {
-	mech    string // cgroup, systemd-user, systemd-system, prlimit, off, none
-	limit   int64
-	source  string
-	parent  string // cgroup mode: the parent cgroup directory
-	sdrun   string // systemd modes: path to systemd-run
-	prlim   string // prlimit mode: path to prlimit
-	self    string // systemd modes: the janus executable re-run as supervisor
-	sdEnv   []string
-	note    string
-	errText string // a configuration error (bad JANUS_MEM_MAX)
+	mech   string // cgroup, systemd-user, systemd-system, prlimit, off, none
+	limit  int64
+	source string
+	parent string // cgroup mode: the parent cgroup directory
+	sdrun  string // systemd modes: path to systemd-run
+	prlim  string // prlimit mode: path to prlimit
+	self   string // systemd modes: the janus executable re-run as supervisor
+	sdEnv  []string
+	// sdNoExpand: systemd-run understands --expand-environment.
+	sdNoExpand bool
+	note       string
+	errText    string // a configuration error (bad JANUS_MEM_MAX)
 }
 
 // memEvent is one guarded job.
@@ -122,7 +124,9 @@ func logMemGuard(w io.Writer) {
 	}
 	g := currentGuard()
 	guardLogged.Do(func() {
-		if os.Getenv("JANUS_MEMGUARD_QUIET") != "" && g.mech != "none" {
+		// Only a missing guard is worth a line by default (stderr starts with the verdict);
+		// JANUS_MEMGUARD_VERBOSE=1 or JANUS_MEMGUARD_LOG=1 always names the mechanism.
+		if g.mech != "none" && os.Getenv("JANUS_MEMGUARD_VERBOSE") == "" && os.Getenv("JANUS_MEMGUARD_LOG") == "" {
 			return
 		}
 		fmt.Fprintf(w, "janus: memory guard: %s\n", g.describe())
@@ -401,7 +405,12 @@ func (g *memGuard) systemdArgs(user bool, unit string) []string {
 	if user {
 		a = append(a, "--user")
 	}
-	return append(a, "--scope", "--quiet", "--collect", "--unit="+unit,
+	a = append(a, "--scope", "--quiet", "--collect")
+	if g.sdNoExpand {
+		// systemd-run >= 254 expands $VARs in the command line unless told not to.
+		a = append(a, "--expand-environment=no")
+	}
+	return append(a, "--unit="+unit,
 		"-p", "MemoryMax="+strconv.FormatInt(g.limit, 10), "-p", "MemorySwapMax=0", "-p", "OOMPolicy=continue", "--")
 }
 
@@ -428,6 +437,9 @@ func (g *memGuard) probeSystemd(user bool) error {
 		}
 	}
 	g.sdEnv = env
+	if help, err := exec.Command(p, "--help").Output(); err == nil && strings.Contains(string(help), "--expand-environment") {
+		g.sdNoExpand = true
+	}
 	argv := append(g.systemdArgs(user, "janus-probe-"+newNonce()[:12]), self, memguardProbeArg)
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = env

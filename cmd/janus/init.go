@@ -245,7 +245,6 @@ end LIB.Add
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 )

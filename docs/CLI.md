@@ -508,8 +508,9 @@ limit, the largest measured `memory.peak` of its jobs and how many jobs ran.
   manager as root; `prlimit --as` (limit + 16 GiB per process: weak, Lean reserves ~10 GiB of
   address space up front); none, with a warning. `JANUS_MEMGUARD=<mechanism>` forces one.
 * `janus memguard` prints the active mechanism (and why stronger ones were skipped);
-  `janus memguard -- CMD ARGS…` runs a command under it. Verification prints the mechanism once on
-  stderr (`janus: memory guard: …`); `JANUS_MEMGUARD_LOG=1` adds one line per job with its peak.
+  `janus memguard -- CMD ARGS…` runs a command under it. Verification warns on stderr when no
+  mechanism is available; `JANUS_MEMGUARD_VERBOSE=1` makes it always name the mechanism
+  (`janus: memory guard: …`), `JANUS_MEMGUARD_LOG=1` also prints one line per job with its peak.
 
 See docs/TESTING.md (Memory guard) for the measured peaks.
 

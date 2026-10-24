@@ -336,7 +336,9 @@ guard in `verified.json`:
 ```
 
 `janus memguard` prints the mechanism (and why stronger ones were skipped). `janus memguard --
-CMD…` runs any command under it. `JANUS_MEMGUARD_LOG=1` prints each job's label and peak.
+CMD…` runs any command under it. A verification prints `janus: memory guard: …` on stderr only
+when there is no mechanism (a warning) or with `JANUS_MEMGUARD_VERBOSE=1`, because stderr starts
+with the verdict. `JANUS_MEMGUARD_LOG=1` also prints each job's label and peak.
 
 ### Scripts
 
@@ -375,14 +377,15 @@ slot only while MemAvailable ≥ 40 GiB headroom + 20 GiB, so slots × slot limi
 MemAvailable.
 
 Without a user systemd manager (or root) and without a delegated cgroup, both sides fall back to
-prlimit, then to none. Each prints one line naming the mechanism (`janus: memory guard: …`,
-`memguard: …`). Checked as an unprivileged user with no user manager: janus picks `prlimit` and
+prlimit, then to none. `janus memguard` and the scripts' first `memguard: …` line name the
+mechanism, and janus warns on every verification when there is none. Checked as an unprivileged user with no user manager: janus picks `prlimit` and
 lists why `cgroup` (mkdir permission denied), `systemd-user` (no bus) and `systemd-system` (needs
 root) were skipped.
 
 **CI** (`.github/workflows/ci.yml`, `asl.yml`). Each job enables lingering for the runner user
 (`loginctl enable-linger`), which starts its user manager, then exports `XDG_RUNTIME_DIR` and
-`JANUS_MEM_MAX=12G`. It logs `memguard mechanism: …` and runs a 1G probe. The lake builds and
+`JANUS_MEM_MAX=12G`. It logs `memguard mechanism: …` (the scripts' detection) and `janus memguard` (janus's),
+and runs a 1G probe. The lake builds and
 `go test` run under `scripts/lib/memguard.sh`. If the user manager does not come up, the guard
 degrades as above and the log says which mechanism is active.
 
