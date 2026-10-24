@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,10 +24,51 @@ var (
 var exampleFuncs = []string{"Add", "Max", "Add128", "Mul64", "Sum", "Get", "Add256", "Div", "AddThree",
 	"Table", "HexDigit", "SetOne256", "GlobalTable", "Bump"}
 
+// testCacheDir is the janus cache every test uses (JANUS_CACHE_DIR, set for the whole test
+// process by TestMain): the framework is built there once across test runs, and the tests never
+// touch the user's own cache.
+func testCacheDir() string { return filepath.Join(os.TempDir(), "janus-test-cache") }
+
+// defaultTestParallel is the -parallel default for this package (unless -parallel is given):
+// min(GOMAXPROCS / 4, (MemAvailable - 40 GiB) / 20 GiB, 2), at least 1, the budget of
+// scripts/lib/parallel.sh (a test that verifies can hold ~20 GB: a cold kernel replay of the
+// framework, the proof's Lean process and the auditor).
+func defaultTestParallel() int {
+	n := runtime.GOMAXPROCS(0) / 4
+	if n > 2 {
+		n = 2 // at most 2 heavy jobs at once on a shared host
+	}
+	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			if f := strings.Fields(line); len(f) >= 2 && f[0] == "MemAvailable:" {
+				if kb, err := strconv.Atoi(f[1]); err == nil {
+					if m := (kb - 40*1024*1024) / (20 * 1024 * 1024); m < n {
+						n = m
+					}
+				}
+			}
+		}
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
 func TestMain(m *testing.M) {
+	flag.Parse()
 	// Build the example binaries with the same pinned Go release as scripts/build-examples*.sh.
 	if os.Getenv("GOTOOLCHAIN") == "" {
 		os.Setenv("GOTOOLCHAIN", "go1.26.0")
+	}
+	// The test cache and no JANUS_ROOT for the whole process (useTestCache then has nothing to
+	// change, so tests that use it can run in parallel).
+	os.Setenv("JANUS_CACHE_DIR", testCacheDir())
+	os.Setenv("JANUS_ROOT", "")
+	explicit := false
+	flag.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "test.parallel" })
+	if !explicit {
+		_ = flag.Set("test.parallel", strconv.Itoa(defaultTestParallel()))
 	}
 	wd, _ := os.Getwd()
 	repoRoot = filepath.Clean(filepath.Join(wd, "..", ".."))
@@ -406,14 +449,11 @@ func TestCheckAndTamper(t *testing.T) {
 	})
 }
 
-// TestVerify runs Lean. It needs lake on PATH (or ~/.elan/bin) and a built Janus library.
+// TestVerify runs Lean (also with -short). It needs lake on PATH (or ~/.elan/bin); the Janus
+// library of the checkout is built on first use.
 func TestVerify(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs Lean")
-	}
-	if _, err := findLake(); err != nil {
-		t.Skip("lake not installed")
-	}
+	t.Parallel()
+	needLean(t)
 	dir := mustExtract(t, "example.com/basic.Get")
 	proofs := t.TempDir()
 	write := func(name, body string) string {
@@ -478,23 +518,30 @@ func TestVerify(t *testing.T) {
 			"  value := Lean.mkConst ``True.intro })\n",
 			"", "Kernel replay rejected", "kernel replay"},
 	}
-	for _, c := range rejected {
-		t.Run(c.name, func(t *testing.T) {
-			os.WriteFile(report, []byte("{}"), 0o644)
-			extra := []string{}
-			if c.extra != "" {
-				extra = []string{"--theorem", c.extra}
-			}
-			code, out, stderr := verify(write(c.name, c.body), extra...)
-			if code != 1 || out != "" || !strings.HasPrefix(stderr, "Invalid: ") || !strings.Contains(stderr, c.want) ||
-				!strings.Contains(stderr, "Stage: "+c.stage) {
-				t.Fatalf("got %d\nstdout: %s\nstderr: %s", code, out, stderr)
-			}
-			if _, err := os.Stat(report); err == nil {
-				t.Fatal("verified.json not removed")
-			}
-		})
-	}
+	// Each rejection runs in parallel on its own extraction of Get (so each has its own
+	// verified.json to withdraw).
+	t.Run("rejected", func(t *testing.T) {
+		for _, c := range rejected {
+			t.Run(c.name, func(t *testing.T) {
+				t.Parallel()
+				dir := mustExtract(t, "example.com/basic.Get")
+				report := filepath.Join(dir, "verified.json")
+				os.WriteFile(report, []byte("{}"), 0o644)
+				extra := []string{}
+				if c.extra != "" {
+					extra = []string{"--theorem", c.extra}
+				}
+				code, out, stderr := runJanus(t, append([]string{"verify", dir, "--proof", write(c.name, c.body), "--janus-root", repoRoot}, extra...)...)
+				if code != 1 || out != "" || !strings.HasPrefix(stderr, "Invalid: ") || !strings.Contains(stderr, c.want) ||
+					!strings.Contains(stderr, "Stage: "+c.stage) {
+					t.Fatalf("got %d\nstdout: %s\nstderr: %s", code, out, stderr)
+				}
+				if _, err := os.Stat(report); err == nil {
+					t.Fatal("verified.json not removed")
+				}
+			})
+		}
+	})
 	if code, _, stderr := verify(good, "--theorem", "Proof.correctness\n#eval 1"); code != 1 || !strings.Contains(stderr, "not a plain dotted Lean name") {
 		t.Fatalf("theorem injection: %d %s", code, stderr)
 	}

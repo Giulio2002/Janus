@@ -18,6 +18,7 @@ import (
 // the real Add proof but is rejected at the statement-identity stage; the honest Add proof
 // verifies, and its report carries the pp.explicit statement.
 func TestInlineInstanceRejected(t *testing.T) {
+	t.Parallel()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {
@@ -47,6 +48,7 @@ func TestInlineInstanceRejected(t *testing.T) {
 // (`[] = []` at an element type the printer hides, an implicit argument rather than an
 // instance) passes the instance-argument check but is rejected by the round-trip.
 func TestRoundTripRejectsAmbiguousPrint(t *testing.T) {
+	t.Parallel()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {
@@ -179,7 +181,7 @@ func TestUnshareFallbackConfinement(t *testing.T) {
 // under /tmp — the setup that used to leave the cache writable — the honest Add proof
 // verifies and the report records the unshare sandbox.
 func TestUnshareFallbackVerifies(t *testing.T) {
-	needLean(t)
+	needLeanSlow(t)
 	useTestCache(t)
 	t.Setenv("JANUS_SANDBOX", "unshare")
 	if _, err := detectSandbox(false); err != nil {
