@@ -27,3 +27,5 @@ import Janus.Spec.SwissMap
 import Janus.Contracts.Map
 import Janus.Amd64
 import Janus.Contracts.MapAmd64
+import Janus.Spec.Type
+import Janus.Contracts.Iface
