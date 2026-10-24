@@ -62,9 +62,9 @@ else
 fi
 
 echo "== A7: independent kernel replay of the JanusASL modules (leanchecker)"
-# JanusASL.Proofs and every JanusASL.Proofs.* module on the search path (about 75 s; most of it
-# the `decide +kernel` of Bitmask.lean).
-if (cd "$root/JanusASL" && lake env leanchecker JanusASL.Proofs) > "$W/replay.log" 2>&1; then
+# Every module of JanusASL.Proofs, batched by `scripts/asl.sh replay` (one leanchecker over all of
+# JanusASL.Proofs holds several copies of the model's environment at once: ~16 GiB, docs/ASL.md "Memory").
+if "$root/scripts/asl.sh" replay > "$W/replay.log" 2>&1 && grep -q '^replay: leanchecker passed on all' "$W/replay.log"; then
   row "A7 leanchecker JanusASL.Proofs" ok "ok (every proof module replayed by the kernel)"
 else
   row "A7 leanchecker JanusASL.Proofs" ok "FAILED: $(tail -3 "$W/replay.log" | tr '\n' ' ')"

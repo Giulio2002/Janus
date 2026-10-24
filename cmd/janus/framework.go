@@ -671,6 +671,9 @@ func (fw *framework) frameworkBase(lake string, progress io.Writer, targets ...s
 // scratch in a temporary directory that cleanup removes. cleanup also ends the use of a shared
 // build (its shared lock), so it must run only after the last check of the framework pins.
 func (fw *framework) libraryRoot(lake string, fresh bool, progress io.Writer) (string, func(), error) {
+	if err := checkCacheRoot(); err != nil {
+		return "", func() {}, err
+	}
 	if fw.Source == "directory" || !fresh {
 		dir := fw.Dir
 		var lease *frameworkLease
