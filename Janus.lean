@@ -12,4 +12,5 @@ import Janus.Tactic.Atomic
 import Janus.Tactic.Vector
 import Janus.Arm64.Vector
 import Janus.Spec.Basic
+import Janus.Contracts.Alloc
 import Janus.Amd64
