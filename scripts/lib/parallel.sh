@@ -4,8 +4,8 @@
 # `par_run 'shell code'`, and call `par_wait` before the script's verdict.
 #
 #   -j N        run up to N blocks at once. Default: $JANUS_JOBS, else min(cores / 4,
-#               (MemAvailable - 32 GiB) / 20 GiB), at least 1. Before each launch MemAvailable is
-#               checked again: while less than 20 GiB above the 32 GiB headroom is free, the next
+#               (MemAvailable - 40 GiB) / 20 GiB, 2), at least 1. Before each launch MemAvailable is
+#               checked again: while less than 20 GiB above the 40 GiB headroom is free, the next
 #               block waits for a running one to finish (memory, not cores, is what concurrent
 #               janus verifies exhaust).
 #   -j 1        run every block inline, in order, exactly as a plain serial script.
@@ -17,16 +17,19 @@
 # other's side effects; a block that sets up and removes a shared directory does both itself.
 
 # Memory budget: a janus verify can hold ~20 GB (a cold kernel replay of the framework, the
-# proof's Lean process, the auditor), and the host keeps 32 GB of headroom for everything else.
+# proof's Lean process, the auditor), and the host keeps 40 GB of headroom for everything else.
 PAR_JOB_MEM_KB=$((20 * 1024 * 1024))
-PAR_HEADROOM_KB=$((32 * 1024 * 1024))
+PAR_HEADROOM_KB=$((40 * 1024 * 1024))
+# At most this many jobs by default (host rule: at most 2 heavy jobs at once); -j/JANUS_JOBS override.
+PAR_MAX_DEFAULT_JOBS=2
 
 par_mem_available_kb() { awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 0; }
 
-# min(cores / 4, (MemAvailable - 32 GiB) / 20 GiB), at least 1.
+# min(cores / 4, (MemAvailable - 40 GiB) / 20 GiB, 2), at least 1.
 par_default_jobs() {
   local n mem
   n=$(( $(nproc 2>/dev/null || echo 4) / 4 ))
+  [ "$n" -gt "$PAR_MAX_DEFAULT_JOBS" ] && n=$PAR_MAX_DEFAULT_JOBS
   mem=$(( ($(par_mem_available_kb) - PAR_HEADROOM_KB) / PAR_JOB_MEM_KB ))
   [ "$mem" -lt "$n" ] && n=$mem
   [ "$n" -lt 1 ] && n=1
@@ -54,6 +57,15 @@ par_init() {
     trap "rm -rf '$PAR_DIR'" EXIT
   fi
   declare -p broken >/dev/null 2>&1 || broken=()
+  # With scripts/lib/memguard.sh (cgroup v2 memory limits) loaded, every parallel block runs under
+  # a job limit of $JANUS_JOB_MEM (default 20G, the budget above); janus nests its per-process
+  # limits inside it. A block that hits it is OOM-killed inside its cgroup only and counts as
+  # broken. Without memguard the blocks run unguarded (the admission check still applies).
+  PAR_GUARD=""
+  PAR_JOB_MEM="${JANUS_JOB_MEM:-20G}"
+  if [ "$PAR_JOBS" -gt 1 ] && type memguard_run >/dev/null 2>&1; then
+    PAR_GUARD=1
+  fi
 }
 
 # par_run CODE: run the shell code CODE as the next block.
@@ -62,7 +74,7 @@ par_run() {
     eval "$1"
     return 0
   fi
-  local i=$PAR_N
+  local __par_i=$PAR_N
   PAR_N=$((PAR_N + 1))
   while [ "$(jobs -rp | wc -l)" -ge "$PAR_JOBS" ]; do wait -n 2>/dev/null || true; done
   # memory check: with at least one block running, wait until a job's budget is free
@@ -72,11 +84,24 @@ par_run() {
   done
   (
     broken=()
-    eval "$1"
+    if [ -n "$PAR_GUARD" ]; then
+      # The block runs in a child bash under the job's memory limit (scripts/lib/memguard.sh);
+      # its `broken` rows come back through a file.
+      export PAR_BLOCK="$1" PAR_BROKEN_FILE="$PAR_DIR/$__par_i.inner"
+      # the child bash gets the caller's functions and (non-readonly) variables as they are now
+      PAR_PRELUDE="$(declare -f); $(declare -p 2>/dev/null | grep -vE '^declare -[a-zA-Z]*r')"
+      memguard_run -l "$PAR_JOB_MEM" -n "slot$__par_i" -- bash -c "$PAR_PRELUDE"'
+        broken=(); eval "$PAR_BLOCK"; st=$?
+        if [ ${#broken[@]} -gt 0 ]; then printf "%s\n" "${broken[@]}" > "$PAR_BROKEN_FILE"; fi
+        exit $st' || { [ $? -eq 137 ] && broken+=("block-$__par_i-memory-limit"); }
+      if [ -f "$PAR_DIR/$__par_i.inner" ]; then while IFS= read -r b; do broken+=("$b"); done < "$PAR_DIR/$__par_i.inner"; fi
+    else
+      eval "$1"
+    fi
     # one entry per line; entries are row names (no newlines)
-    if [ ${#broken[@]} -gt 0 ]; then printf '%s\n' "${broken[@]}" > "$PAR_DIR/$i.broken"; fi
-    : > "$PAR_DIR/$i.done"
-  ) > "$PAR_DIR/$i.out" 2>&1 &
+    if [ ${#broken[@]} -gt 0 ]; then printf '%s\n' "${broken[@]}" > "$PAR_DIR/$__par_i.broken"; fi
+    : > "$PAR_DIR/$__par_i.done"
+  ) > "$PAR_DIR/$__par_i.out" 2>&1 &
   return 0
 }
 

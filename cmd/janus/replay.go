@@ -384,11 +384,11 @@ func importGraph(rows [][]string) map[string][]string {
 // environment per target, and inside one process every import after the first copies the
 // already-mapped .olean files instead of mapping them, so one process per target is faster and
 // holds one environment at a time. A large closure (a Mathlib import) is still one process per
-// root, as before.
+// root, as before. At most two run at once (memory: each holds up to LEAN_NUM_THREADS environments).
 func replayParallel() int {
 	n := runtime.NumCPU()
-	if n > 4 {
-		n = 4
+	if n > 2 {
+		n = 2
 	}
 	return n
 }

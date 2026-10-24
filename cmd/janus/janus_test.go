@@ -30,16 +30,19 @@ var exampleFuncs = []string{"Add", "Max", "Add128", "Mul64", "Sum", "Get", "Add2
 func testCacheDir() string { return filepath.Join(os.TempDir(), "janus-test-cache") }
 
 // defaultTestParallel is the -parallel default for this package (unless -parallel is given):
-// min(GOMAXPROCS / 4, (MemAvailable - 32 GiB) / 20 GiB), at least 1, the budget of
+// min(GOMAXPROCS / 4, (MemAvailable - 40 GiB) / 20 GiB, 2), at least 1, the budget of
 // scripts/lib/parallel.sh (a test that verifies can hold ~20 GB: a cold kernel replay of the
 // framework, the proof's Lean process and the auditor).
 func defaultTestParallel() int {
 	n := runtime.GOMAXPROCS(0) / 4
+	if n > 2 {
+		n = 2 // at most 2 heavy jobs at once on a shared host
+	}
 	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
 		for _, line := range strings.Split(string(b), "\n") {
 			if f := strings.Fields(line); len(f) >= 2 && f[0] == "MemAvailable:" {
 				if kb, err := strconv.Atoi(f[1]); err == nil {
-					if m := (kb - 32*1024*1024) / (20 * 1024 * 1024); m < n {
+					if m := (kb - 40*1024*1024) / (20 * 1024 * 1024); m < n {
 						n = m
 					}
 				}
