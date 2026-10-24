@@ -5,11 +5,14 @@
 # Usage: audit/round6/run-round6.sh
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../../scripts/lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 J="$root/audit/round6/bin/janus"; mkdir -p "$(dirname "$J")"
 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
+memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 W=audit/round6/work; rm -rf "$W"; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
@@ -61,7 +64,7 @@ if command -v qemu-aarch64 >/dev/null; then
 fi
 
 echo "== unit rows (go test)"
-(cd cmd/janus && go test -timeout 30m -run 'TestStubKind|TestRound6StatementNames' . >/dev/null 2>&1) ||
+(cd cmd/janus && memguard_run -n go-test -- go test -timeout 30m -run 'TestStubKind|TestRound6StatementNames' . >/dev/null 2>&1) ||
   { echo "  >>> TestStubKind/TestRound6StatementNames failed"; broken+=(gotest); }
 
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi

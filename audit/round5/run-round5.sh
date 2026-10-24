@@ -10,10 +10,13 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
+# shellcheck source=../../scripts/lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 par_init "$@"
 J="$root/audit/round5/bin/janus"; mkdir -p "$(dirname "$J")"
 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
+memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 W=audit/round5/work; rm -rf "$W"; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
@@ -94,7 +97,7 @@ d viewRegs; row E3e_dep_structure_regs Verified 'DecLib.View.regs (def, DecLib)'
 }
 e5_gotest_block() {
 echo "== E5 unit row (go test)"
-(cd cmd/janus && go test -timeout 30m -run 'TestBoundInstanceRejected' . >/dev/null 2>&1) || { echo "  >>> TestBoundInstanceRejected failed"; broken+=(E5-gotest); }
+(cd cmd/janus && memguard_run -n go-test -- go test -timeout 30m -run 'TestBoundInstanceRejected' . >/dev/null 2>&1) || { echo "  >>> TestBoundInstanceRejected failed"; broken+=(E5-gotest); }
 }
 model_block() {
 if [ -z "${SKIP_MODEL:-}" ]; then

@@ -492,6 +492,13 @@ func (e *memKillError) Error() string {
 func (e *memKillError) Unwrap() error { return e.err }
 
 func recordMem(ev memEvent) {
+	if os.Getenv("JANUS_MEMGUARD_LOG") != "" {
+		k := ""
+		if ev.Killed {
+			k = " OOM-KILLED"
+		}
+		fmt.Fprintf(os.Stderr, "janus-memguard: %-40s peak %10s / limit %s%s\n", ev.Label, fmtBytes(ev.Peak), fmtBytes(ev.Limit), k)
+	}
 	memMu.Lock()
 	memEvents = append(memEvents, ev)
 	memMu.Unlock()

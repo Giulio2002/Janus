@@ -11,6 +11,9 @@
 # BROKEN and the script exits 1.
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../../scripts/lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 here="$root/audit/rt-asl"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
@@ -92,7 +95,7 @@ if [ -x "$DEPS/opam/sail-0.20.3-janus/bin/sail" ]; then
     cd out/RtProbe &&
     sed -i "s#^git = .*#path = \"$root/JanusASL/.lake/packages/Sail\"#; /^rev = /d" lakefile.toml &&
     cp "$root/JanusASL/lean-toolchain" . && rm -f lake-manifest.json &&
-    cp "$here/sail/Probe.lean" RtProbe/Probe.lean && lake build RtProbe > build.log 2>&1 &&
+    cp "$here/sail/Probe.lean" RtProbe/Probe.lean && memguard_lake build RtProbe > build.log 2>&1 &&
     lake env lean RtProbe/Probe.lean > "$W/lean/out.txt" 2>&1 ) || echo "Lean backend build failed (see $W/lean)"
   cmpk() { diff <(grep "^$1 " "$W/c/out") <(grep "^$1 " "$W/lean/out.txt") >/dev/null 2>&1; }
   if [ -s "$W/c/out" ] && [ -s "$W/lean/out.txt" ]; then
@@ -118,7 +121,7 @@ fi
 
 echo "== C1: concurrent janus verify (cmd/janus/concurrency_test.go)"
 if [ -z "${RT_ASL_SKIP_GO:-}" ]; then
-  if (cd cmd/janus && go test -count=1 -timeout 40m -run 'TestConcurrentVerify|TestForeignFrameworkWriteDetected' .) > "$W/go.log" 2>&1; then
+  if (cd cmd/janus && memguard_run -n go-test -- go test -count=1 -timeout 40m -run 'TestConcurrentVerify|TestForeignFrameworkWriteDetected' .) > "$W/go.log" 2>&1; then
     row "C1 concurrent verifies + blockers" ok "ok (all succeed; foreign write still rejected)"
   else
     row "C1 concurrent verifies + blockers" ok "FAILED: $(grep -m5 -E 'failed|FAIL|unexpected' "$W/go.log" | tr '\n' ' ')"

@@ -10,11 +10,14 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
+# shellcheck source=../../scripts/lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 par_init "$@"
 J="$root/audit/round2/bin/janus"
 mkdir -p "$(dirname "$J")"
 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
+memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 W=audit/round2/work; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1

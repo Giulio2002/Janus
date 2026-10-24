@@ -17,6 +17,9 @@ cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
 
@@ -34,7 +37,7 @@ fi
 # The verifier builds the framework it uses itself (the embedded one in the cache, or the
 # JANUS_ROOT checkout in place) under its lock; build a JANUS_ROOT checkout first only so that
 # its build errors show up before any proof runs.
-[ -n "${JANUS_ROOT:-}" ] && [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ] && (cd "$JANUS_ROOT" && lake build Janus >/dev/null)
+[ -n "${JANUS_ROOT:-}" ] && [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ] && (cd "$JANUS_ROOT" && memguard_lake build Janus >/dev/null)
 
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")

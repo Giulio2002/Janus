@@ -12,10 +12,13 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
+# shellcheck source=../scripts/lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 par_init "$@"
 J="$root/audit/bin/janus"
 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build Janus failed (fix the Lean library first)"; exit 1; }
+memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build Janus failed (fix the Lean library first)"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 
 W=audit/work

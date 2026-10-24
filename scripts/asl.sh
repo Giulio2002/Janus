@@ -27,6 +27,9 @@
 #   ASL_CACHE_READONLY=1   use the cache but never write to it
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 mode="${1:-check}"
 DEPS="${DEPS:-/srv/janus-asl-deps}"
 CASES="${CASES:-$root/artifacts/oracle/cases.jsonl}"
@@ -172,9 +175,9 @@ unpack() {
 do_build() {
   unpack
   cache_restore
-  (cd "$pkg" && lake build ArmASL)
+  (cd "$pkg" && memguard_lake build ArmASL)
   cache_publish
-  (cd "$pkg" && lake build ArmASL JanusASL janus-asl-check)
+  (cd "$pkg" && memguard_lake build ArmASL JanusASL janus-asl-check)
   cache_publish
 }
 
@@ -182,15 +185,15 @@ do_check() {
   do_build
   if [ ! -f "$CASES" ]; then "$root/scripts/oracle.sh" full; fi
   mkdir -p "$OUT"
-  (cd "$pkg" && lake exe janus-asl-check "$CASES" "$OUT/verdicts.jsonl" "$JOBS") | tee "$OUT/summary.txt"
+  (cd "$pkg" && memguard_run -n janus-asl-check -- lake exe janus-asl-check "$CASES" "$OUT/verdicts.jsonl" "$JOBS") | tee "$OUT/summary.txt"
 }
 
 do_prove() {
   unpack
   cache_restore
-  (cd "$pkg" && lake build ArmASL)
+  (cd "$pkg" && memguard_lake build ArmASL)
   cache_publish
-  (cd "$pkg" && lake build JanusASL && lake env lean JanusASL/Audit.lean)
+  (cd "$pkg" && memguard_lake build JanusASL && lake env lean JanusASL/Audit.lean)
 }
 
 case "$mode" in

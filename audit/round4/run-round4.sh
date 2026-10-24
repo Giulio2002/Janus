@@ -7,10 +7,13 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
+# shellcheck source=../../scripts/lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 par_init "$@"
 J="$root/audit/round4/bin/janus"; mkdir -p "$(dirname "$J")"
 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
+memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 W=audit/round4/work; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
@@ -33,7 +36,7 @@ grep -q 'Proof.wide : Prop := (255 : BitVec' <<<"$ex" || { echo "  >>> D2 regres
 }
 d3_block() {
 echo "== D3: control characters in report text are neutralized (unit test) =="
-(cd cmd/janus && go test -run TestTermSafe . >/dev/null 2>&1) || { echo "  >>> D3 regressed"; broken+=(D3); }
+(cd cmd/janus && memguard_run -n go-test -- go test -run TestTermSafe . >/dev/null 2>&1) || { echo "  >>> D3 regressed"; broken+=(D3); }
 }
 par_run d12_block
 par_run d3_block

@@ -8,10 +8,13 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
+# shellcheck source=../../scripts/lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 par_init "$@"
 J="$root/audit/round3/bin/janus"; mkdir -p "$(dirname "$J")"
 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
+memguard_lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -f artifacts/examples-amd64 ] || scripts/build-examples-amd64.sh >/dev/null 2>&1
 W=audit/round3/work; mkdir -p $W

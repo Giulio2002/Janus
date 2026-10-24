@@ -13,6 +13,9 @@ export PATH="$PATH:/usr/local/go/bin"
 cd "$root"
 # shellcheck source=lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
 # JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): already built and extracted.
