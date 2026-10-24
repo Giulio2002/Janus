@@ -20,7 +20,8 @@ module: matchers (`match_N`, `_sparseCasesOn_N`, `splitter`), equation lemmas (`
 def isAux (n : Name) : Bool :=
   n.components.any (fun c => c.toString == "_auxLemma") ||
   match n with
-  | .str _ s => ["match_", "_sparseCasesOn_", "eq_", "proof_", "_proof_"].any (s.startsWith ·) ||
+  | .str _ s => ["match_", "_sparseCasesOn_", "proof_", "_proof_"].any (s.startsWith ·) ||
+      (s.startsWith "eq_" && (s.drop 3).all Char.isDigit) || s == "eq_def" ||
       s == "splitter" || s == "else_eq"
   | _ => false
 

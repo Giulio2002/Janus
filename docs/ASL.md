@@ -18,10 +18,13 @@ neither package uses Mathlib.
 ```
 scripts/asl.sh deps     # pinned toolchain (opam + Sail 0.20.3 + patches, sail-arm, slicing plugin)
 scripts/asl.sh gen      # slice sail-arm, generate Lean, compare with the vendored copy
-scripts/asl.sh build    # unpack the vendored model and build the package (about 40 min, once)
+scripts/asl.sh build    # unpack the vendored model and build the package (about 75 min at 3 jobs, once)
 scripts/asl.sh check    # build + janus-asl-check on artifacts/oracle/cases.jsonl
 scripts/asl.sh prove    # build JanusASL.Proofs and audit their axioms
+scripts/asl.sh replay   # kernel-replay JanusASL.Proofs with leanchecker, in batches
 ```
+
+The build runs as many Lean processes at once as fit a 24 GiB budget (see "Memory" below).
 
 ## Results
 
@@ -278,7 +281,8 @@ evaluates it symbolically with `simp`, using one run lemma per primitive (`Janus
 environment and fails if any `JanusASL.Proofs.*_agree` theorem depends on an axiom other than
 `propext`, `Classical.choice` and `Quot.sound`. This rules out `sorryAx`, and also
 `Lean.ofReduceBool`, so no `native_decide` or `bv_decide`. Once the model is built (`scripts/asl.sh
-build`), the proofs take about 2 min (most of it in Bitmask.lean).
+build`), the proofs take about 80 CPU-minutes, about 30 min at 3 jobs. Most of that is the 22
+decode-chain parts, at 2–5 min each.
 
 ## The pipeline: what is reused, at which versions
 
@@ -289,7 +293,7 @@ build`), the proofs take about 2 min (most of it in Bitmask.lean).
 | [Sail](https://github.com/rems-project/sail) | tag `0.20.3` + `JanusASL/sail/sail-0.20.3-upstream-backports.patch` + `JanusASL/sail/sail-0.20.3-janus-lean-fixes.patch` | Lean backend |
 | OCaml / opam | 5.2.1 / opam 2.x, own root `$DEPS/opam`, switch `sail-0.20.3-janus` | builds Sail |
 | [lean-sail](https://github.com/rems-project/lean-sail) | tag v7, `8fc8e29d7a62` | Lean runtime library of the generated code (v6, Sail 0.20.3's default, does not build on 4.34.1) |
-| generated model | `JanusASL/vendor/ArmASL.tar.gz` (sha256 in `.sha256`), 24 modules, 21 MB | unpacked into `JanusASL/ArmASL*` (ignored by git) |
+| generated model | `JanusASL/vendor/ArmASL.tar.gz` (sha256 in `.sha256`), 50 chained parts plus 4 support modules, 21 MB | unpacked into `JanusASL/ArmASL*` (ignored by git) |
 
 Sail-master cannot be used: it removed `lib/trace.sail`, which sail-arm still includes.
 
@@ -356,7 +360,8 @@ The whole arm-v9.4-a model does not fit in Lean: the full `BranchExcSys` decode 
   standard library, and then runs the normal Lean rewrites and printer.
   `--lean-partial-function Reduce__1` is the only `partial` function. No generated definition
   needs a termination proof, so nothing is `sorry`.
-* **`split_lean.py`** splits the single output file into 24 chained modules, so that Lake
+* **`split_lean.py`** splits the single output file into 50 chained modules of at most 150 kB
+  (a larger declaration gets its own; see "Memory"), so that Lake
   elaborates them with bounded memory.
 
 A janus-excluded clause is reachable only through a word that Janus does not decode. If a word
@@ -371,6 +376,251 @@ map of the code page and the 4 KiB data buffer, built from the same page tables.
 taken from the ASL's DCZID_EL0 (0x8). Each case is one `janus_step`, compared on X0–X30, SP, PC,
 NZCV, V0–V31, memory (the data buffer, and no other ASL byte changed) and the fault class. An
 alignment fault, DFSC 0x21, counts as agreeing with Janus' `unaligned`.
+
+## Memory
+
+Each Lean process of the pipeline must stay under 12 GiB, and `scripts/asl.sh build` followed by
+`scripts/asl.sh prove` must fit in 24 GiB. Every number below is measured with
+`JanusASL/tools/memprof.py`. It samples `/proc` every 0.2 s and reports each process's peak
+resident set (`VmHWM`) and the peak of the whole process tree. With `--cap GB` it also runs the
+command in a systemd scope with `MemoryMax=GB` and no swap, so the kernel kills a runaway build
+instead of the host. `JanusASL/tools/memtable.py` prints the per-process table. All runs are on
+this 48-core host. "Before" is main plus merge/asl3: 44 audited theorems, the 24-part model, and
+the decode-chain files as single modules. "After" is this layout. The summed RSS counts the
+mmapped `.olean` pages once per process, so the scope's `memory.peak` (anonymous memory plus page
+cache) is the better total.
+
+| run | before | after |
+|---|---|---|
+| `scripts/asl.sh build`: largest Lean process | **16.7 GiB** (`LdStDecode9`, 1148 s) | **8.3 GiB** (`ArmASL.Part49` = `__DecodeA64_DataProcFPSIMD` alone, 243 s) |
+| `scripts/asl.sh build`: other processes over 5 GiB | `ArmASL.Part24` 9.0, `Part22` 7.4, `LdStDecodeR` 7.3, `LdStDecodeP` 7.0, `LdStDecode` 6.8, `Bitmask` 5.6, `Part15` 5.3, `Part17` 5.2, `Part19` 5.0 | `Part38` (`AArch64_AutoGen_SysRegWrite`) 6.6, `Bitmask` 5.6, `Part12` (`AArch32_AutoGen_ArchitectureReset`) 5.2 |
+| `scripts/asl.sh build`: decode-chain proofs | 6.8–16.7 GiB per file (4 files) | 3.0–3.7 GiB per part (22 parts) |
+| `scripts/asl.sh build`: whole tree | 48 Lake jobs; summed RSS 34.6 GiB, scope 35.6 GiB; 59 min (Janus library already built) | 3 Lake jobs; summed RSS 11.0 GiB, scope **9.8 GiB** under `MemoryMax=24G`; 75 min (Janus library included) |
+| clang (C of the model, for the check executable) | 2.4 GiB | 2.4 GiB |
+| `scripts/asl.sh prove` (Audit.lean) | 1.8 GiB, 2 s | 1.9 GiB, 2 s (same 44 theorems, same axioms, same statements) |
+| kernel replay | `leanchecker JanusASL.Proofs`, `LEAN_NUM_THREADS=4`: **14.8 GiB**, 362 s | `scripts/asl.sh replay` (4 modules per process, `LEAN_NUM_THREADS=4`): **10.0 GiB**, 406 s |
+| `janus-asl-check` on the 583,756-case corpus | 2.4 GiB, 551 s | **0.45 GiB**, 461 s (same verdicts file, byte for byte) |
+| `scripts/asl.sh gen` (Sail, not Lean) | | 8.2 GiB, 748 s |
+
+So `build` followed by `prove` peaks at 9.8 GiB (scope), and no Lean process exceeds 8.3 GiB.
+On the after layout, the old monolithic `leanchecker JanusASL.Proofs` still takes 16.0 GiB,
+because it imports one environment per module and runs 4 at a time. Use `scripts/asl.sh replay`
+instead.
+
+What was changed:
+
+* **The model is split by size** (`split_lean.py --bytes 150000`, called by `scripts/asl.sh gen`).
+  It now has 50 chained parts of at most 150 kB each, except that a larger declaration gets a
+  part of its own. Elaboration memory follows the largest declarations, not the file size: the
+  981 kB `ImpDefBool` takes 2.2 GiB, while the 157 kB `AArch64_AutoGen_ArchitectureReset` takes
+  4.7 GiB. The old 24-part split, which cut by declaration count, put
+  `__DecodeA64_DataProcFPSIMD`, `__DecodeA64_LoadStore` and the other decoders in one 10 MB part
+  (9.0 GiB). The declarations, their order and their text are unchanged. Joining the 50 parts
+  gives back, byte for byte, the single file that joining the 24 old parts gives, and
+  `scripts/asl.sh gen` regenerates the new tarball byte for byte (sha256
+  `aa1fa24372907b2785607f738191355818a3c193f49efe471faed16ddcfad60f`).
+* **The decode-chain proofs are split** (`JanusASL/tools/split_proofs.py FILE 4`). `LdStDecode`,
+  `LdStDecode9`, `LdStDecodeP` and `LdStDecodeR` are now import lists of `<File>/PartNN` modules
+  with 4 lemmas each. Each part repeats the header, and the lemmas are copied byte for byte
+  (`split_proofs.py --check FILE` compares against git). As one module, a file keeps every
+  finished proof until it ends, so its peak grew with its length (about 0.4 GiB per lemma). The
+  parts also build in parallel. Split new generated chain files the same way.
+* **Lake's job count comes from memory.** `scripts/asl.sh build`/`prove`/`replay` run Lake with
+  `LEAN_NUM_THREADS=ASL_JOBS`. Lake has no `-j`. Its thread pool bounds the number of Lean
+  processes it runs at once, and each Lean process then elaborates with as many threads. The
+  default is `ASL_MEM_GB / ASL_JOB_GB`, with the budget the smaller of 24 GiB and 60% of
+  `MemAvailable`, and 8 GiB per job (the largest process above). That gives 3 jobs on this host.
+  Up to the last model part the build is a chain, so beside `Part49` only a clang compile runs.
+* **`janus-asl-check` streams the corpus.** It reads, runs and writes batches of `48 × 256` cases,
+  with one batch running while the next is read. It no longer holds the 1 GB corpus and every
+  verdict at once.
+* **The replay is batched** (`scripts/asl.sh replay`). It replays every module in the import
+  closure of `JanusASL.Proofs` with `leanchecker`, `REPLAY_BATCH` (default 4) modules per
+  process, one process at a time. Import lists that declare nothing are skipped: leanchecker
+  takes name prefixes, so naming one would pull in all its parts.
+
+Semantics check. `JanusASL/tools/Digest.lean` prints every declaration of the ArmASL and JanusASL
+modules with structural hashes of its type and value. Before and after give the same 15,895
+declarations, all with the same type hashes and the same value hashes. Auxiliary declarations
+(matchers, equation lemmas, `_proof_N`) are hashed by content instead of by name, because Lean
+numbers and shares them per module. The audit output (theorem list, axioms, printed
+statements) is identical, and the check's verdicts file is identical.
+
+<details><summary>Every ArmASL module, before (24 parts)</summary>
+
+| module | size | largest declaration | peak RSS | wall |
+|---|---:|---|---:|---:|
+| `ArmASL.Defs` | 135 kB |  | 3.0 GiB | 59 s |
+| `ArmASL.FakeReal` | 2 kB |  | 1.6 GiB | 1 s |
+| `ArmASL.JanusExtras` | 0 kB |  | 1.6 GiB | 1 s |
+| `ArmASL.Part01` | 77 kB | `InitFeatureImpl` (32 kB) | 2.2 GiB | 44 s |
+| `ArmASL.Part02` | 44 kB | `write_gpr_bits` (2 kB) | 1.8 GiB | 4 s |
+| `ArmASL.Part03` | 1016 kB | `ImpDefBool` (981 kB) | 2.2 GiB | 7 s |
+| `ArmASL.Part04` | 63 kB | `SPEEvent` (14 kB) | 1.8 GiB | 7 s |
+| `ArmASL.Part05` | 50 kB | `ImpDefBits` (15 kB) | 1.8 GiB | 5 s |
+| `ArmASL.Part06` | 100 kB | `ELFromM32` (7 kB) | 1.9 GiB | 20 s |
+| `ArmASL.Part07` | 57 kB | `Hint_WFE` (4 kB) | 1.8 GiB | 9 s |
+| `ArmASL.Part08` | 93 kB | `EncodeLDFSC` (5 kB) | 1.9 GiB | 9 s |
+| `ArmASL.Part09` | 158 kB | `FPRoundBase__1` (14 kB) | 1.9 GiB | 34 s |
+| `ArmASL.Part10` | 168 kB | `CheckTransactionalSystemAccess` (12 kB) | 2.0 GiB | 19 s |
+| `ArmASL.Part11` | 266 kB | `AArch64_S1IndirectBasePermissions` (17 kB) | 2.0 GiB | 22 s |
+| `ArmASL.Part12` | 219 kB | `AArch64_S1Walk` (26 kB) | 2.0 GiB | 20 s |
+| `ArmASL.Part13` | 33 kB | `ICC_CTLR_read` (0 kB) | 1.8 GiB | 10 s |
+| `ArmASL.Part14` | 33 kB | `ICC_IGRPEN1_read` (0 kB) | 1.8 GiB | 10 s |
+| `ArmASL.Part15` | 135 kB | `AArch32_AutoGen_ArchitectureReset` (103 kB) | 5.3 GiB | 223 s |
+| `ArmASL.Part16` | 30 kB | `NMRR_read` (0 kB) | 1.8 GiB | 4 s |
+| `ArmASL.Part17` | 318 kB | `AArch64_AutoGen_ArchitectureReset` (153 kB) | 5.2 GiB | 486 s |
+| `ArmASL.Part18` | 52 kB | `__set_MDSCR_EL1` (3 kB) | 1.8 GiB | 9 s |
+| `ArmASL.Part19` | 400 kB | `AArch64_AutoGen_SysRegRead` (243 kB) | 5.0 GiB | 217 s |
+| `ArmASL.Part20` | 820 kB | `FPSR_SysRegWrite_d0a803d1b7d0c76d` (7 kB) | 2.4 GiB | 96 s |
+| `ArmASL.Part21` | 962 kB | `PMXEVTYPER_EL0_SysRegWrite_1b2a1f5e5253d48b` (9 kB) | 2.5 GiB | 115 s |
+| `ArmASL.Part22` | 5338 kB | `AArch64_AutoGen_SysRegWrite` (4162 kB) | 7.4 GiB | 163 s |
+| `ArmASL.Part23` | 378 kB | `decode_yield_aarch64_instrs_system_hints` (10 kB) | 2.0 GiB | 26 s |
+| `ArmASL.Part24` | 10455 kB | `__DecodeA64_DataProcFPSIMD` (7023 kB) | 9.0 GiB | 546 s |
+| `ArmASL.SpecializationV1` | 4 kB |  | 1.7 GiB | 2 s |
+
+</details>
+
+<details><summary>Every ArmASL module, after (50 parts)</summary>
+
+| module | size | largest declaration | peak RSS | wall |
+|---|---:|---|---:|---:|
+| `ArmASL.Defs` | 135 kB |  | 2.9 GiB | 60 s |
+| `ArmASL.FakeReal` | 2 kB |  | 1.5 GiB | 0 s |
+| `ArmASL.JanusExtras` | 0 kB |  | 1.6 GiB | 0 s |
+| `ArmASL.Part01` | 141 kB | `InitFeatureImpl` (32 kB) | 2.2 GiB | 49 s |
+| `ArmASL.Part02` | 982 kB | `ImpDefBool` (981 kB) | 2.1 GiB | 5 s |
+| `ArmASL.Part03` | 147 kB | `ImpDefBits` (15 kB) | 1.9 GiB | 15 s |
+| `ArmASL.Part04` | 152 kB | `ELFromM32` (7 kB) | 1.9 GiB | 29 s |
+| `ArmASL.Part05` | 152 kB | `AArch64_FaultSyndrome` (7 kB) | 1.9 GiB | 31 s |
+| `ArmASL.Part06` | 147 kB | `FPRoundBase__1` (14 kB) | 1.9 GiB | 13 s |
+| `ArmASL.Part07` | 149 kB | `AArch64_BreakpointValueMatch` (15 kB) | 2.0 GiB | 19 s |
+| `ArmASL.Part08` | 149 kB | `AArch64_S1IndirectBasePermissions` (17 kB) | 1.9 GiB | 12 s |
+| `ArmASL.Part09` | 128 kB | `AArch64_S2Walk` (19 kB) | 1.9 GiB | 10 s |
+| `ArmASL.Part10` | 152 kB | `AArch64_S1Walk` (26 kB) | 1.9 GiB | 18 s |
+| `ArmASL.Part11` | 101 kB | `SDER_write` (0 kB) | 1.9 GiB | 29 s |
+| `ArmASL.Part12` | 138 kB | `AArch32_AutoGen_ArchitectureReset` (103 kB) | 5.2 GiB | 230 s |
+| `ArmASL.Part13` | 36 kB | `AArch32_IMPDEFResets` (23 kB) | 1.9 GiB | 12 s |
+| `ArmASL.Part14` | 157 kB | `AArch64_AutoGen_ArchitectureReset` (153 kB) | 4.7 GiB | 405 s |
+| `ArmASL.Part15` | 154 kB | `AArch64_IMPDEFResets` (76 kB) | 2.8 GiB | 124 s |
+| `ArmASL.Part16` | 73 kB | `TakePendingInterrupts` (8 kB) | 1.8 GiB | 9 s |
+| `ArmASL.Part17` | 244 kB | `AArch64_AutoGen_SysRegRead` (243 kB) | 4.8 GiB | 186 s |
+| `ArmASL.Part18` | 151 kB | `AMAIR2_EL2_SysRegWrite_d6e02923e8c9c534` (4 kB) | 1.9 GiB | 25 s |
+| `ArmASL.Part19` | 152 kB | `CNTP_TVAL_EL0_SysRegWrite_eccdee10d8c7f39e` (7 kB) | 1.9 GiB | 18 s |
+| `ArmASL.Part20` | 148 kB | `DBGBVR_EL1_SysRegWrite_0ffea2b5aaa11a7e` (6 kB) | 1.9 GiB | 21 s |
+| `ArmASL.Part21` | 152 kB | `DBGWCR_EL1_SysRegWrite_3550aa3a97d9acb5` (6 kB) | 1.9 GiB | 21 s |
+| `ArmASL.Part22` | 150 kB | `DBGWVR_EL1_SysRegWrite_c2a564a92621de17` (6 kB) | 1.9 GiB | 20 s |
+| `ArmASL.Part23` | 151 kB | `FPSR_SysRegWrite_d0a803d1b7d0c76d` (7 kB) | 1.9 GiB | 17 s |
+| `ArmASL.Part24` | 152 kB | `ICC_CTLR_EL1_SysRegWrite_6b2222909cfe4181` (6 kB) | 1.9 GiB | 20 s |
+| `ArmASL.Part25` | 151 kB | `MDSELR_EL1_SysRegWrite_96ef452973a846b6` (5 kB) | 1.9 GiB | 19 s |
+| `ArmASL.Part26` | 149 kB | `PMEVCNTR_EL0_SysRegWrite_6fa8164f702c143b` (6 kB) | 1.9 GiB | 16 s |
+| `ArmASL.Part27` | 150 kB | `PMEVTYPER_EL0_SysRegWrite_103d29a45c9a97d5` (7 kB) | 1.9 GiB | 15 s |
+| `ArmASL.Part28` | 152 kB | `PMEVTYPER_EL0_SysRegWrite_c1033a183cde77b2` (7 kB) | 1.9 GiB | 15 s |
+| `ArmASL.Part29` | 150 kB | `PMICFILTR_EL0_SysRegWrite_b4d38d797e58f97d` (9 kB) | 1.9 GiB | 17 s |
+| `ArmASL.Part30` | 150 kB | `PMXEVTYPER_EL0_SysRegWrite_1b2a1f5e5253d48b` (9 kB) | 1.9 GiB | 18 s |
+| `ArmASL.Part31` | 149 kB | `SPMEVCNTR_EL0_SysRegWrite_08629c5414f88eb2` (12 kB) | 1.9 GiB | 13 s |
+| `ArmASL.Part32` | 143 kB | `SPMEVFILT2R_EL0_SysRegWrite_229ceb05708f41b3` (12 kB) | 1.9 GiB | 12 s |
+| `ArmASL.Part33` | 143 kB | `SPMEVFILT2R_EL0_SysRegWrite_a4da6c90289f656a` (12 kB) | 1.9 GiB | 15 s |
+| `ArmASL.Part34` | 150 kB | `SPMEVFILT2R_EL0_SysRegWrite_fc59638a1eed5ceb` (12 kB) | 1.9 GiB | 15 s |
+| `ArmASL.Part35` | 143 kB | `SPMEVTYPER_EL0_SysRegWrite_ccaf15f0e189ded0` (12 kB) | 1.9 GiB | 15 s |
+| `ArmASL.Part36` | 150 kB | `SPMEVTYPER_EL0_SysRegWrite_f79086ccec170944` (12 kB) | 1.9 GiB | 18 s |
+| `ArmASL.Part37` | 98 kB | `AArch64_UnallocatedSysRegAccess` (7 kB) | 1.9 GiB | 12 s |
+| `ArmASL.Part38` | 4163 kB | `AArch64_AutoGen_SysRegWrite` (4162 kB) | 6.6 GiB | 45 s |
+| `ArmASL.Part39` | 151 kB | `AArch64_AutoGen_SysOpsWrite` (58 kB) | 2.0 GiB | 29 s |
+| `ArmASL.Part40` | 141 kB | `decode_sev_aarch64_instrs_system_hints` (10 kB) | 1.9 GiB | 8 s |
+| `ArmASL.Part41` | 151 kB | `decode_yield_aarch64_instrs_system_hints` (10 kB) | 1.9 GiB | 14 s |
+| `ArmASL.Part42` | 149 kB | `execute_aarch64_instrs_memory_exclusive_single` (5 kB) | 1.9 GiB | 10 s |
+| `ArmASL.Part43` | 150 kB | `decode_str_imm_gen_aarch64_instrs_memory_single_general_immediate_unsigned` (4 kB) | 1.9 GiB | 12 s |
+| `ArmASL.Part44` | 152 kB | `decode_strh_reg_aarch64_instrs_memory_single_general_register` (5 kB) | 1.9 GiB | 12 s |
+| `ArmASL.Part45` | 90 kB | `__DecodeA64_DataProcImm` (26 kB) | 1.9 GiB | 5 s |
+| `ArmASL.Part46` | 126 kB | `__DecodeA64_BranchExcSys` (124 kB) | 1.9 GiB | 7 s |
+| `ArmASL.Part47` | 2576 kB | `__DecodeA64_LoadStore` (2574 kB) | 3.4 GiB | 72 s |
+| `ArmASL.Part48` | 189 kB | `__DecodeA64_DataProcReg` (187 kB) | 1.9 GiB | 9 s |
+| `ArmASL.Part49` | 7027 kB | `__DecodeA64_DataProcFPSIMD` (7023 kB) | 8.3 GiB | 243 s |
+| `ArmASL.Part50` | 83 kB | `initialize_registers` (58 kB) | 3.2 GiB | 168 s |
+| `ArmASL.SpecializationV1` | 4 kB |  | 1.6 GiB | 2 s |
+
+</details>
+
+<details><summary>Every JanusASL module, before and after</summary>
+
+| module | before | after |
+|---|---:|---:|
+| `JanusASL.Check` | 2.0 GiB, 41 s | 2.0 GiB, 21 s |
+| `JanusASL.Proofs` | 1.7 GiB, 0 s | 1.8 GiB, 0 s |
+| `JanusASL.Proofs.AddSubCarry` | 1.9 GiB, 13 s | 2.0 GiB, 9 s |
+| `JanusASL.Proofs.AddSubExt` | 2.1 GiB, 57 s | 2.1 GiB, 36 s |
+| `JanusASL.Proofs.AddSubImm` | 1.8 GiB, 4 s | 1.8 GiB, 3 s |
+| `JanusASL.Proofs.AddSubImmClass` | 1.9 GiB, 13 s | 1.9 GiB, 8 s |
+| `JanusASL.Proofs.AddSubShifted` | 2.0 GiB, 18 s | 2.0 GiB, 9 s |
+| `JanusASL.Proofs.Arith` | 1.7 GiB, 1 s | 1.8 GiB, 1 s |
+| `JanusASL.Proofs.Basic` | 1.8 GiB, 1 s | 1.8 GiB, 1 s |
+| `JanusASL.Proofs.Bitfield` | 1.9 GiB, 14 s | 1.9 GiB, 5 s |
+| `JanusASL.Proofs.Bitmask` | 5.6 GiB, 109 s | 5.6 GiB, 78 s |
+| `JanusASL.Proofs.Branch` | 2.3 GiB, 93 s | 2.4 GiB, 23 s |
+| `JanusASL.Proofs.CfgDef` | 1.8 GiB, 2 s | 1.9 GiB, 2 s |
+| `JanusASL.Proofs.Cond` | 1.9 GiB, 3 s | 2.0 GiB, 3 s |
+| `JanusASL.Proofs.CondCmp` | 2.1 GiB, 33 s | 2.2 GiB, 16 s |
+| `JanusASL.Proofs.CondSel` | 2.1 GiB, 37 s | 2.1 GiB, 17 s |
+| `JanusASL.Proofs.Config` | 2.5 GiB, 47 s | 2.6 GiB, 30 s |
+| `JanusASL.Proofs.DP1` | 2.1 GiB, 31 s | 2.2 GiB, 17 s |
+| `JanusASL.Proofs.Div` | 2.0 GiB, 25 s | 2.1 GiB, 14 s |
+| `JanusASL.Proofs.Examples` | 1.8 GiB, 7 s | 1.9 GiB, 2 s |
+| `JanusASL.Proofs.Extr` | 1.9 GiB, 5 s | 1.9 GiB, 4 s |
+| `JanusASL.Proofs.Gpr` | 2.3 GiB, 51 s | 2.3 GiB, 48 s |
+| `JanusASL.Proofs.JanusDecode` | 1.8 GiB, 3 s | 1.8 GiB, 3 s |
+| `JanusASL.Proofs.LdSt` | 2.0 GiB, 101 s | 2.0 GiB, 15 s |
+| `JanusASL.Proofs.LdStDecode` | 6.8 GiB, 747 s | 1.7 GiB, 1 s |
+| `JanusASL.Proofs.LdStDecode9` | 16.7 GiB, 1148 s | 1.7 GiB, 1 s |
+| `JanusASL.Proofs.LdStDecode9.Part01` | – | 3.6 GiB, 191 s |
+| `JanusASL.Proofs.LdStDecode9.Part02` | – | 3.6 GiB, 195 s |
+| `JanusASL.Proofs.LdStDecode9.Part03` | – | 3.6 GiB, 179 s |
+| `JanusASL.Proofs.LdStDecode9.Part04` | – | 3.5 GiB, 179 s |
+| `JanusASL.Proofs.LdStDecode9.Part05` | – | 3.5 GiB, 172 s |
+| `JanusASL.Proofs.LdStDecode9.Part06` | – | 3.5 GiB, 174 s |
+| `JanusASL.Proofs.LdStDecode9.Part07` | – | 3.5 GiB, 179 s |
+| `JanusASL.Proofs.LdStDecode9.Part08` | – | 3.5 GiB, 177 s |
+| `JanusASL.Proofs.LdStDecode9.Part09` | – | 3.5 GiB, 177 s |
+| `JanusASL.Proofs.LdStDecode9.Part10` | – | 3.2 GiB, 164 s |
+| `JanusASL.Proofs.LdStDecode.Part01` | – | 3.4 GiB, 306 s |
+| `JanusASL.Proofs.LdStDecode.Part02` | – | 3.4 GiB, 306 s |
+| `JanusASL.Proofs.LdStDecode.Part03` | – | 3.4 GiB, 285 s |
+| `JanusASL.Proofs.LdStDecode.Part04` | – | 2.3 GiB, 190 s |
+| `JanusASL.Proofs.LdStDecodeP` | 7.0 GiB, 723 s | 1.7 GiB, 1 s |
+| `JanusASL.Proofs.LdStDecodeP.Part01` | – | 3.4 GiB, 143 s |
+| `JanusASL.Proofs.LdStDecodeP.Part02` | – | 3.3 GiB, 140 s |
+| `JanusASL.Proofs.LdStDecodeP.Part03` | – | 3.3 GiB, 144 s |
+| `JanusASL.Proofs.LdStDecodeP.Part04` | – | 3.0 GiB, 134 s |
+| `JanusASL.Proofs.LdStDecodeR` | 7.3 GiB, 784 s | 1.7 GiB, 1 s |
+| `JanusASL.Proofs.LdStDecodeR.Part01` | – | 3.6 GiB, 188 s |
+| `JanusASL.Proofs.LdStDecodeR.Part02` | – | 3.7 GiB, 183 s |
+| `JanusASL.Proofs.LdStDecodeR.Part03` | – | 3.6 GiB, 178 s |
+| `JanusASL.Proofs.LdStDecodeR.Part04` | – | 2.4 GiB, 136 s |
+| `JanusASL.Proofs.LdStImm9` | 2.1 GiB, 4 s | 2.2 GiB, 4 s |
+| `JanusASL.Proofs.LdStLit` | 3.0 GiB, 124 s | 3.1 GiB, 115 s |
+| `JanusASL.Proofs.LdStPair` | 2.3 GiB, 6 s | 2.3 GiB, 6 s |
+| `JanusASL.Proofs.LdStReg` | 2.0 GiB, 3 s | 2.1 GiB, 3 s |
+| `JanusASL.Proofs.LdStUImm` | 1.9 GiB, 2 s | 2.0 GiB, 2 s |
+| `JanusASL.Proofs.LogicalImm` | 1.9 GiB, 22 s | 1.9 GiB, 5 s |
+| `JanusASL.Proofs.LogicalShifted` | 2.1 GiB, 25 s | 2.2 GiB, 16 s |
+| `JanusASL.Proofs.Madd` | 2.0 GiB, 26 s | 2.0 GiB, 12 s |
+| `JanusASL.Proofs.Maddl` | 2.2 GiB, 39 s | 2.3 GiB, 26 s |
+| `JanusASL.Proofs.Mem` | 2.1 GiB, 90 s | 2.1 GiB, 21 s |
+| `JanusASL.Proofs.MemPair` | 2.0 GiB, 58 s | 2.0 GiB, 8 s |
+| `JanusASL.Proofs.MemWrite` | 1.9 GiB, 10 s | 1.9 GiB, 5 s |
+| `JanusASL.Proofs.Monad` | 1.7 GiB, 1 s | 1.7 GiB, 1 s |
+| `JanusASL.Proofs.MoveWide` | 1.9 GiB, 133 s | 2.0 GiB, 88 s |
+| `JanusASL.Proofs.Mulh` | 2.1 GiB, 36 s | 2.1 GiB, 17 s |
+| `JanusASL.Proofs.Ops` | 1.7 GiB, 1 s | 1.7 GiB, 1 s |
+| `JanusASL.Proofs.PcRel` | 1.8 GiB, 9 s | 1.9 GiB, 3 s |
+| `JanusASL.Proofs.Rel` | 2.5 GiB, 24 s | 2.6 GiB, 23 s |
+| `JanusASL.Proofs.Rev` | 2.4 GiB, 48 s | 2.4 GiB, 27 s |
+| `JanusASL.Proofs.Run` | 1.9 GiB, 7 s | 2.0 GiB, 2 s |
+| `JanusASL.Proofs.Shift` | 1.7 GiB, 1 s | 1.7 GiB, 1 s |
+| `JanusASL.Proofs.ShiftV` | 2.0 GiB, 16 s | 2.0 GiB, 11 s |
+| `JanusASL.Proofs.Step` | 1.9 GiB, 3 s | 1.9 GiB, 3 s |
+
+</details>
 
 ## Evidence for the mismatches found during development
 
@@ -455,3 +705,6 @@ in `keep.txt`, and also in `roots.txt` if nothing reaches it. To prove a new cla
 dispatch lemma with
 `python3 JanusASL/tools/chain.py JanusASL/ArmASL __DecodeA64_DataProcReg <name> 'lo:len:val,...'`
 and follow `Madd.lean`.
+A file of many such lemmas (as `LdStDecode*.lean`) should then be split with
+`python3 JanusASL/tools/split_proofs.py JanusASL/JanusASL/Proofs/<File>.lean 4`, which keeps every
+part near 3.5 GiB (see "Memory").
