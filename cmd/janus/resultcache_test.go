@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestResultCache: a repeated identical verification is a cache hit that prints the same report
@@ -25,6 +27,8 @@ func TestResultCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A per-run comment: the shared test cache keeps other runs' entries.
+	src = append(src, fmt.Sprintf("\n-- TestResultCache run %d\n", time.Now().UnixNano())...)
 	if err := os.WriteFile(proof, src, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -77,11 +81,14 @@ func TestResultCache(t *testing.T) {
 	if out, _ := verify(); !isCached(out) {
 		t.Errorf("the edited proof was not recorded")
 	}
-	// A tampered entry (its report altered without the HMAC) is ignored.
+	// A tampered entry (its report altered without the HMAC) is ignored. This proof's entries are
+	// the ones whose report has its SHA-256 (the shared test cache holds other runs' entries).
+	edited, _ := os.ReadFile(proof)
+	wantSha := `"proofSha256":"` + sha256Hex(edited) + `"`
 	var entries []string
 	_ = filepath.WalkDir(resultCacheDir(), func(p string, d os.DirEntry, err error) error {
 		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".json") {
-			if b, err := os.ReadFile(p); err == nil && strings.Contains(string(b), "resultcache-proof") {
+			if b, err := os.ReadFile(p); err == nil && strings.Contains(string(b), wantSha) {
 				entries = append(entries, p)
 			}
 		}
