@@ -66,6 +66,13 @@ structure Record where
   definitions : Array String  -- "<name> : <type> := <value>" for each allowed proof-local def
   modules     : Array String
   external    : Array String  -- "<name> (<kind>, <module>)" for each dependency constant used
+  /-- Round 7 (J1): `<name> : <type> := <value>` for each dependency def the statement reaches,
+  printed in the clean environment (dependency notation does not apply). Not round-tripped. -/
+  externalDefinitions : Array String
+  /-- Round 7 (K1): operations whose standard Lean meaning often reads unexpectedly (truncating
+  `Nat` subtraction, `x / 0 = 0`, wrapping `^`, `xs[i]!`, `Int.toNat`), with the subterm. These
+  are not errors: the statement means exactly what Lean says. -/
+  notes : Array String
   /-- The import graph of every module outside the toolchain core (`Init`, `Std`, `Lean`,
   `Lake`): `[module, direct import, …]`. The Go side kernel-replays each of these modules and
   keys its replay cache on the module's bytes and those of its imports. -/
@@ -515,6 +522,63 @@ def checkBinderNames (e : Expr) : Option String := Id.run do
     | none => seen := seen.insert folded str
   return none
 
+/-- Round 7 (K1): is `ty` (up to reducible unfolding) one of `Nat`, `Int`, or a wrapping
+fixed-width type (`numeralBound`)? Returns a short name for messages. -/
+def divType? (ty : Expr) : MetaM (Option String) := do
+  let ty ← try Meta.whnfR ty catch _ => return none
+  if ty.isConstOf ``Nat then return some "Nat"
+  if ty.isConstOf ``Int then return some "Int"
+  if (← numeralBound ty).isSome then return some (← Meta.ppExpr ty).pretty
+  return none
+
+/-- Round 7 (K1): is `e` syntactically nonzero (so `· / e` cannot divide by 0): a numeral
+other than zero, or a power or product of such? -/
+partial def nonzeroLit (e : Expr) : Bool :=
+  if e.isAppOfArity ``HPow.hPow 6 then nonzeroLit (e.getArg! 4) else
+  if e.isAppOfArity ``HMul.hMul 6 then nonzeroLit (e.getArg! 4) && nonzeroLit (e.getArg! 5) else
+  match e.nat? with
+  | some n => n != 0
+  | none => match e.rawNatLit? with
+    | some n => n != 0
+    | none => (e.isAppOfArity ``OfNat.ofNat 3 && match (e.getArg! 1).rawNatLit? with
+        | some n => n != 0
+        | none => false)
+
+/-- Round 7 (K1): notes on operations in `e` whose standard Lean meaning often surprises a
+reader. Each note names the operation and shows the subterm. They are warnings only. -/
+def hazardNotes (e : Expr) : MetaM (Array String) := do
+  let acc ← IO.mkRef (#[] : Array String)
+  let add (msg : String) (sub : Expr) : MetaM Unit := do
+    if sub.hasLooseBVars then
+      acc.modify (·.push msg)
+    else
+      let t := (← try Meta.ppExpr sub catch _ => pure "?").pretty 10000
+      acc.modify (·.push s!"{msg}: `{t}`")
+  Meta.forEachExpr e fun sub => do
+    if sub.isAppOfArity ``HSub.hSub 6 then
+      if (← try Meta.whnfR (sub.getArg! 0) catch _ => pure (sub.getArg! 0)).isConstOf ``Nat then
+        add "Nat subtraction truncates at 0 (`a - b = 0` whenever `a ≤ b`)" sub
+    else if sub.isAppOfArity ``Nat.sub 2 || sub.isAppOfArity ``Nat.pred 1 then
+      add "Nat subtraction truncates at 0 (`a - b = 0` whenever `a ≤ b`)" sub
+    else if sub.isAppOfArity ``HDiv.hDiv 6 || sub.isAppOfArity ``HMod.hMod 6 then
+      if !nonzeroLit (sub.getArg! 5) then
+        if let some t ← divType? (sub.getArg! 0) then
+          add s!"division by zero is total at {t} (`a / 0 = 0`, `a % 0 = a`)" sub
+    else if sub.isAppOfArity ``HPow.hPow 6 then
+      if (← numeralBound (sub.getArg! 0)).isSome then
+        let tyS := (← try Meta.ppExpr (sub.getArg! 0) catch _ => pure "?").pretty 10000
+        add s!"`^` wraps at {tyS} (for example `(2 : BitVec 64) ^ 64 = 0`)" sub
+    else if sub.isAppOfArity ``GetElem?.getElem! 8 then
+      add "`xs[i]!` is `default` when `i` is out of bounds" sub
+    else if sub.isAppOfArity ``Int.toNat 1 then
+      add "`Int.toNat` maps every negative integer to 0" sub
+  let notes ← acc.get
+  -- dedupe, keep order
+  let mut out := #[]
+  for n in notes do
+    unless out.contains n do out := out.push n
+  return out
+
 /-- The shape `ppSignature` prints: the declaration name followed by a `declSig`. -/
 def sigParser : Parser.Parser :=
   Parser.node `JanusAudit.sig (Parser.ident >> Parser.Command.declSig)
@@ -689,7 +753,8 @@ allowed proof-local defs and an axiom with the theorem's type. Reject a proof-lo
 type's head is a class (a disguised instance, A1). No proof or dependency module is imported, so
 none of their initializers, notations, unexpanders or delaborators exist here. -/
 unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs : Array ConstantInfo)
-    (stubs : Array ConstantInfo) : AuditM (String × String × Array String) := do
+    (stubs : Array ConstantInfo) (extDefs : Array ConstantInfo) :
+    AuditM (String × String × Array String × Array String × Array String) := do
   enableInitializersExecution
   let env ← importModules (loadExts := true)
     #[{ module := `Extracted }, { module := `Janus }] {}
@@ -730,7 +795,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
   -- The same options for printing and for the round-trip re-elaboration (`autoImplicit` only
   -- affects elaboration). No `pp.all`: the printed statement is the human-readable one.
   let opts := printOptions
-  let printAll : MetaM (String × String × Array String) := do
+  let printAll : MetaM (String × String × Array String × Array String × Array String) := do
     -- (b) instance-implicit arguments must be registered instances or local instance binders
     if let some m ← checkInstArgs cx thmType then throwError m
     if let some m ← checkNumerals thmType then throwError s!"the statement {m}"
@@ -760,7 +825,25 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
           throwError s!"the proof-local definition {ci.name} used in the statement {m}"
       -- round 4 D1: the disclosure itself must round-trip (numerals, binder types)
       defs := defs.push (← discloseDef ci)
-    return (sigStr, explicit.fmt.pretty 10000, defs)
+    -- round 7 J1: dependency definitions are disclosed with their bodies too (printed here, in
+    -- the clean environment, so dependency notation does not apply), since their names and
+    -- docstrings need not say what they mean
+    let mut extOut := #[]
+    for ci in extDefs do
+      let annotate := fun (o : Options) => o.setBool `pp.numericTypes true |>.setBool `pp.funBinderTypes true
+      let tyStr := (← withOptions annotate (Meta.ppExpr ci.type)).pretty 10000
+      let valStr ← match ci.value? with
+        | some v => pure ((← withOptions annotate (Meta.ppExpr v)).pretty 10000)
+        | none => pure "<no value>"
+      extOut := extOut.push s!"{ci.name} : {tyStr} := {valStr}"
+    -- round 7 K1: notes on surprising standard operations (statement and disclosed bodies)
+    let mut notes ← hazardNotes thmType
+    for ci in localDefs ++ extDefs do
+      for t in [ci.type] ++ ci.value?.toList do
+        for n in ← hazardNotes t do
+          let n := s!"in {ci.name}: {n}"
+          unless notes.contains n do notes := notes.push n
+    return (sigStr, explicit.fmt.pretty 10000, defs, extOut, notes)
   match ← (Core.CoreM.toIO' (Meta.MetaM.run' printAll) { mkCoreCtx with options := opts } { env }).toBaseIO with
   | .ok a => return a
   | .error e => fail e.toString
@@ -824,10 +907,16 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
         fail s!"the statement uses {n}, whose name has characters other than ASCII letters, digits, _ ' ! ? and subscripts (a name with lookalike letters prints like a different, trusted constant); rename it"
     let (_, stubs) ← externalStubs cx {} #[] externalNames.toList
     -- 6. clean-environment pretty-print
-    let (statement, statementExplicit, defs) ← cleanEnvAndPrint cx thmN ci.type localDefs stubs
-    return Record.mk thm kind modName.toString (axs.map (·.toString)) statement statementExplicit defs
-      (envA.header.moduleNames.map (·.toString)) (externalNames.filterMap external.get?)
-      (importGraph envA)
+    let extDefs := externalNames.filterMap fun n => match envA.find? n with
+      | some ci@(.defnInfo _) => some ci
+      | _ => none
+    let (statement, statementExplicit, defs, extOut, notes) ←
+      cleanEnvAndPrint cx thmN ci.type localDefs stubs extDefs
+    return { name := thm, kind, module := modName.toString, axioms := axs.map (·.toString),
+             statement, statementExplicit, definitions := defs,
+             modules := envA.header.moduleNames.map (·.toString),
+             external := externalNames.filterMap external.get?, externalDefinitions := extOut,
+             notes, imports := importGraph envA }
   ).run
   match result with
   | .ok rec => IO.println (marker ++ (toJson rec).compress)
