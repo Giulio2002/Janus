@@ -16,4 +16,6 @@ import Janus.Arm64.FloatLemmas
 import Janus.Amd64.FloatLemmas
 import Janus.Arm64.Vector
 import Janus.Spec.Basic
+import Janus.Spec.Dynamic
+import Janus.Tactic.Dynamic
 import Janus.Amd64

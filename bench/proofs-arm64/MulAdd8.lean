@@ -5,8 +5,8 @@ import Extracted
 
 `z + x·y + c = z' + 2^512·carry` over 8 little-endian limbs, fully unrolled (92 instructions:
 8 `MUL`/`UMULH` pairs, 16 loads, 8 stores, carry chains through `ADDS`/`ADC`), for disjoint
-`z` and `x`. After the run, the products `y·xᵢ` are named (with their bounds) and `omega`
-checks the carry arithmetic.
+`z` and `x`. After the run, `janus_arith` closes the carry arithmetic by reflection
+(`janus_carry`): no product is named and no bound stated by hand.
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
@@ -38,31 +38,6 @@ theorem correctness (z x y c : BitVec 64) :
   simp only [Disjoint] at hd
   simp only [readLE_64]
   janus_run
-  janus_simp [Nat.mul_add, Nat.mul_left_comm y.toNat]
-  have hb0 : y.toNat * s.mem.readLE x.toNat 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem x.toNat 8; omega)
-  generalize y.toNat * s.mem.readLE x.toNat 8 = p0 at *
-  have hb1 : y.toNat * s.mem.readLE (x.toNat + 8) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 8) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 8) 8 = p1 at *
-  have hb2 : y.toNat * s.mem.readLE (x.toNat + 16) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 16) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 16) 8 = p2 at *
-  have hb3 : y.toNat * s.mem.readLE (x.toNat + 24) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 24) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 24) 8 = p3 at *
-  have hb4 : y.toNat * s.mem.readLE (x.toNat + 32) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 32) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 32) 8 = p4 at *
-  have hb5 : y.toNat * s.mem.readLE (x.toNat + 40) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 40) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 40) 8 = p5 at *
-  have hb6 : y.toNat * s.mem.readLE (x.toNat + 48) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 48) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 48) 8 = p6 at *
-  have hb7 : y.toNat * s.mem.readLE (x.toNat + 56) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 56) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 56) 8 = p7 at *
   janus_arith
 
 end Proof

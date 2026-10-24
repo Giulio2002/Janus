@@ -178,7 +178,8 @@ negation* of the `Add` specification on the broken binary, by running one concre
 ## What is proved in the examples
 
 Every function in [`examples/basic/basic.go`](examples/basic/basic.go) has an amd64 theorem, and 14 of
-them an arm64 one too; the atomics and memory-routine examples in
+them an arm64 one too; the dynamic-call examples in [`examples/basic/dynamic.go`](examples/basic/dynamic.go)
+(interface method, method value, closure in a loop, open-coded `defer`) have both; the atomics and memory-routine examples in
 [`examples/basic/memory.go`](examples/basic/memory.go) and the SIMD examples in
 [`examples/basic/simd_arm64ex.go`](examples/basic/simd_arm64ex.go) have arm64 theorems, and the
 vector-path examples in [`examples/basic/simd.go`](examples/basic/simd.go) amd64 ones; the
@@ -218,6 +219,10 @@ Go 1.26.0. Proofs:
 | `Dot3` | `a0*b0 + a1*b1 + a2*b2`: on arm64 Go fuses it, `fma(a2, b2, fma(a1, b1, a0·b0))`; on amd64 (no FMA at `GOAMD64=v1`) `(a0·b0 + a1·b1) + a2·b2` with every operation rounded | ✓ | ✓ |
 | `F64ToU64` | `uint64(x)` is the truncation of `x` whenever that is in `[0, 2^64)` (amd64: through the `UCOMISD`/`SUBSD`/`CVTTSD2SQ`/`BTSQ` sequence, `SUBSD` shown exact); arm64 also: saturation (`0` below, `2^64-1` above, `0` for NaN) and the exact `FPToFixed` for every `FPCR` | ✓ | ✓ |
 | `Abs` | `x` with its sign bit cleared, for every encoding including NaNs (integer and move instructions only) | ✓ | ✓ |
+| `HashWith` | an interface call `h.Hash(x)`: `x·K` when `h`'s itab is `*MulHasher`'s, `rotl(x, 13) + K` when it is `*RotHasher`'s (the itab is a hypothesis) | ✓ | ✓ |
+| `HashTwice` | `ApplyTwice(h.Hash, x)` through a method value: `x·K·K` | ✓ | ✓ |
+| `MapSum` | a closure capturing `a`, `b` called in a loop: `Σ (a·xs[j] + b) mod 2^64` | ✓ | ✓ |
+| `DeferAdd` | an open-coded `defer` that adds `y` to the named result: returns `x + y` | ✓ | ✓ |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
@@ -386,6 +391,7 @@ leaves none.
 | [SOUNDNESS.md](docs/SOUNDNESS.md) | The trusted base and exactly what a theorem means |
 | [CLI.md](docs/CLI.md) | Every command, artifact format and diagnostic |
 | [CONSUMERS.md](docs/CONSUMERS.md) | Proofs in your own Lake package, batch verification, caches |
+| [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime calls and dynamic calls (interfaces, closures, `defer`) |
 | [AMD64.md](docs/AMD64.md) | The x86-64 backend: model, ABI, proofs, gaps |
 | [ORACLE.md](docs/ORACLE.md), [ORACLE-SAIL.md](docs/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) | The differential oracles and their results |
 | [AUDIT.md](docs/AUDIT.md) | The red-team audit of `janus verify` and its fixes |

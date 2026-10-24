@@ -798,19 +798,19 @@ theorem asl_rev16 {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b1011
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (pc : Int) :
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execRev (if fld w 31 1 == 1#1 then 64 else 32) js 1 (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   have e10 : fld w 10 2 = 1#2 := BitVec.eq_of_toNat_eq (by rw [fld_toNat w 10 2 hw]; simp; omega)
   rw [run_DecodeA64_DPReg hw (by omega), run_DataProcReg_dp1_1 hw h1 h2 h3 (see_entry _ _), e10, run_decode_rev16]
   obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_rev_rel (h.entry (BitVec.ofNat 32 w) 737)
     (N := if fld w 31 1 == 1#1 then 64 else 32) (opc := 1) (by split <;> simp)
     (fld_lt w 0 5) (fld_lt w 5 5)
-  exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+  exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 theorem rev16_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b1011010110)
     (h2 : (w / 2 ^ 16) % 32 = 0) (h3 : (w / 2 ^ 10) % 64 = 1)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execRev N js 1 (fld w 5 5).toNat (fld w 0 5).toNat
   have hspec : ∀ N, (F N).pc = js.pc := by
     intro N; simp [F, Janus.Arm64.execRev, Janus.Arm64.State.setX, Janus.Arm64.State.writeZR]; split <;> rfl
@@ -829,19 +829,19 @@ theorem asl_rev32 {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b1011
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (pc : Int) :
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execRev (if fld w 31 1 == 1#1 then 64 else 32) js 2 (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   have e10 : fld w 10 2 = 2#2 := BitVec.eq_of_toNat_eq (by rw [fld_toNat w 10 2 hw]; simp; omega)
   rw [run_DecodeA64_DPReg hw (by omega), run_DataProcReg_dp1_2 hw h1 h2 h3 (see_entry _ _), e10, run_decode_rev32]
   obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_rev_rel (h.entry (BitVec.ofNat 32 w) 736)
     (N := if fld w 31 1 == 1#1 then 64 else 32) (opc := 2) (by split <;> simp)
     (fld_lt w 0 5) (fld_lt w 5 5)
-  exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+  exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 theorem rev32_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b1011010110)
     (h2 : (w / 2 ^ 16) % 32 = 0) (h3 : (w / 2 ^ 10) % 64 = 2)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execRev N js 2 (fld w 5 5).toNat (fld w 0 5).toNat
   have hspec : ∀ N, (F N).pc = js.pc := by
     intro N; simp [F, Janus.Arm64.execRev, Janus.Arm64.State.setX, Janus.Arm64.State.writeZR]; split <;> rfl
@@ -860,19 +860,19 @@ theorem asl_rev64 {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b1011
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (pc : Int) :
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execRev 64 js 3 (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   have e31 : fld w 31 1 = 1#1 := BitVec.eq_of_toNat_eq (by rw [fld_toNat w 31 1 hw]; simpa using hsf)
   have e10 : fld w 10 2 = 3#2 := BitVec.eq_of_toNat_eq (by rw [fld_toNat w 10 2 hw]; simp; omega)
   rw [run_DecodeA64_DPReg hw (by omega), run_DataProcReg_dp1_3 hw h1 h2 h3 (see_entry _ _), e10, e31, run_decode_rev64]
   obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_rev_rel (h.entry (BitVec.ofNat 32 w) 736) (N := 64) (opc := 3) (by decide)
     (fld_lt w 0 5) (fld_lt w 5 5)
-  exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+  exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 theorem rev64_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b1011010110)
     (h2 : (w / 2 ^ 16) % 32 = 0) (h3 : (w / 2 ^ 10) % 64 = 3) (hsf : (w / 2 ^ 31) % 2 = 1)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   obtain ⟨s2, hrun, hrel, hbt⟩ := asl_rev64 hw h1 h2 h3 hsf h (js.pc.toNat : Int)
   have hpc : (Janus.Arm64.execRev 64 js 3 (fld w 5 5).toNat (fld w 0 5).toNat).pc = js.pc := by
     simp [Janus.Arm64.execRev, Janus.Arm64.State.setX, Janus.Arm64.State.writeZR]; split <;> rfl
