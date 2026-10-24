@@ -338,11 +338,13 @@ def cgoClobber (s : State) : List (Nat × Nat) :=
 /-- How the Go caller resumes after `cgocall` returns: at the return address `X30`, with `SP`,
 `g` (`X28`) and `FP` (`X29`) restored, the same `DCZID_EL0`, and memory `m` (every other
 register, the flags, the SIMD&FP registers and `TPIDR_EL0` arbitrary: `cgocall` is an ordinary
-Go call, and the goroutine may resume on another thread). -/
+Go call, and the goroutine may resume on another thread). `FPCR` is preserved (the C code
+restores it, `CReturn.fpcr`); `FPSR` is arbitrary: its cumulative exception flags are sticky
+and C floating point may set them. -/
 def GoResume (s s' : State) (m : Memory) : Prop :=
-  ∃ regs flags vregs tpidr,
+  ∃ regs flags vregs tpidr fpsr,
     s' = { s with regs := regs, pc := s.regs GoABI.regLR, flags := flags, mem := m,
-                  vregs := vregs, tpidr := tpidr } ∧
+                  vregs := vregs, tpidr := tpidr, fpsr := fpsr } ∧
     regs regG = s.regs regG ∧ regs GoABI.regFP = s.regs GoABI.regFP
 
 /-- The cgo contract a Go-side theorem assumes: `runtime.cgocall` called with `X0 = fn` in a

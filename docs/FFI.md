@@ -37,9 +37,13 @@ satisfies `post`. `CStack s below above` is the C stack window. A C function is 
 prove as a callee `Summary` (usable at the call sites of other C functions, like the cgo wrapper)
 and turned into a `CEnsures` with `FFI.CEnsures.of_summary` (`examples/proofs-cgo/*/CSum.lean`).
 
-The vector registers callee-saved by AAPCS64 (`V8`–`V15` low halves) and the x87/MXCSR control
-state are not in `CReturn`: no supported instruction of integer C code touches them, and the
-model has no floating point.
+The vector registers callee-saved by AAPCS64 (`V8`–`V15` low halves) are not in `CReturn`: no
+supported instruction of integer C code touches them. The floating-point control state is:
+`CReturn` requires `FPCR` (arm64) and the `MXCSR` control bits (amd64, bits 6 and up) to be
+restored, not the sticky status flags (`FPSR`, `MXCSR` bits 0-5). Accordingly `GoResume` keeps
+`FPCR` and the `MXCSR` control bits and leaves `FPSR` and the `MXCSR` flags arbitrary: a Go caller
+in the Go floating-point environment (`GoABI.GoMXCSR`) is still in it after the call
+(`GoResume.goMXCSR`), with no claim about the flags.
 
 ## 2. Extraction
 

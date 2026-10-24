@@ -43,4 +43,31 @@ theorem mx_div (m : Nat) (k : Nat) : m / 2 ^ (6 + k) = m / 64 / 2 ^ k := by
   rw [show (13 : Nat) = 6 + 7 from rfl, show (15 : Nat) = 6 + 9 from rfl,
     show (6 : Nat) = 6 + 0 from rfl, mx_div, mx_div, mx_div, mx_div, mx_div, mx_div, mx_raise_div]
 
+/-! ## `GoABI.GoMXCSR`: default control bits, arbitrary flags
+
+`janus64_run [..., hm.ctl, hm.unmasked, hm.mod]` with `hm : GoABI.GoMXCSR s`: the trap check
+and the controls of every SSE instruction become closed literals, also after earlier
+instructions raised flags (`ctl_raise`, `unmasked_raise`). -/
+
+theorem GoMXCSR.ctl {s : State} (h : GoABI.GoMXCSR s) :
+    FP.ctl s.mxcsr.toNat = ⟨.rne, false, false⟩ := by
+  unfold GoABI.GoMXCSR at h
+  unfold FP.ctl FP.rounding FP.daz FP.ftz FP.mxBit
+  rw [show (13 : Nat) = 6 + 7 from rfl, show (15 : Nat) = 6 + 9 from rfl,
+    show (6 : Nat) = 6 + 0 from rfl, mx_div, mx_div, mx_div, h]
+  decide
+
+theorem GoMXCSR.unmasked {s : State} (h : GoABI.GoMXCSR s) : FP.unmasked s.mxcsr.toNat = 0 := by
+  unfold GoABI.GoMXCSR at h
+  unfold FP.unmasked
+  rw [show (7 : Nat) = 6 + 1 from rfl, mx_div, h]
+
+theorem GoMXCSR.mod {s : State} (_ : GoABI.GoMXCSR s) :
+    s.mxcsr.toNat % 4294967296 = s.mxcsr.toNat := Nat.mod_eq_of_lt s.mxcsr.isLt
+
+/-- Every `MXCSR` value Go code can be called with has the default controls: the flags of
+`0x1FA0` (`PE` set, what `main` sees) are allowed. -/
+example : GoABI.GoMXCSR { (default : State) with mxcsr := 0x1FA0 } := by
+  unfold GoABI.GoMXCSR; decide
+
 end Janus.Amd64.Tactic

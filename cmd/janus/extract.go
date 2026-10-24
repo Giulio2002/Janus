@@ -88,7 +88,11 @@ type Extraction struct {
 // (`runtime.panicdivide.abi0`), which is not on the list. That argument needs the go1.26
 // runtime, the ELF symbol table (the pclntab does not record the ABI, so names there are not
 // mangled), and a name that occurs once (`//go:linkname f runtime.morestack_noctxt.abi0`
-// gives a second symbol with exactly that name). `classifyStub` checks all three.
+// gives a second symbol with exactly that name). Round 8 (G3): "the go1.26 runtime" was read
+// from build info, which `-ldflags=-X runtime.buildVersion=...` sets, and a binary linked by a
+// release whose runtime lacks a listed name can carry an ordinary function under it. So
+// `classifyStub` no longer reads the Go version: it checks the symbol table, uniqueness, and
+// the function's code and pclntab entry against the pins of stubpins_gen.go (stubpin.go).
 var (
 	runtimePanicStubs = map[string]bool{
 		"runtime.gopanic": true, "runtime.goPanicIndex": true, "runtime.goPanicIndexU": true,
@@ -124,9 +128,6 @@ var (
 		"runtime.cgoUse": true,
 	}
 )
-
-// stubGoVersion is the Go release whose runtime the stub lists are taken from.
-const stubGoVersion = "go1.26"
 
 // stubKind classifies a linked symbol name as a runtime stub (name only; see classifyStub for
 // the checks that make the name trustworthy).
@@ -178,10 +179,13 @@ func stubLike(name string) bool {
 }
 
 // classifyStub decides whether the function g, the target of a direct branch, is a runtime
-// stub. It is one only if its name is on the go1.26 lists, the binary was linked with a go1.26
-// runtime, its names come from the ELF symbol table, and no other function has the same name
-// (round 7 G1). A listed name that fails one of the other checks is an error: extracting the
-// runtime function as code would give a different, much larger program.
+// stub. It is one only if its name is on the lists above, its names come from the ELF symbol
+// table, no other function has the same name (round 7 G1), and its code and pclntab entry are
+// those of the runtime function of that name in a pinned toolchain (round 8 G3, stubpin.go).
+// The build-info Go version plays no part. A listed name that fails a check is an error, never
+// a stub and never code: extracting the runtime function as code would give a different, much
+// larger program, and taking another function for a stub would model it by an outcome it does
+// not have.
 func (b *Binary) classifyStub(g Func) (StubKind, bool, error) {
 	k, ok := stubKind(g.Name)
 	if !ok {
@@ -201,14 +205,6 @@ func (b *Binary) classifyStub(g Func) (StubKind, bool, error) {
 			Next:  "Rebuild without stripping the symbol table (no -ldflags=-s).",
 		}
 	}
-	if b.GoVersion != stubGoVersion && !strings.HasPrefix(b.GoVersion, stubGoVersion+".") &&
-		!strings.HasPrefix(b.GoVersion, stubGoVersion+"rc") {
-		return "", false, &diag{
-			Msg:   fmt.Sprintf("the code calls %s, but %s was built with %s, and Janus's list of runtime stubs (which runtime functions panic, which grow the stack) is taken from the %s runtime (round 7 G1)", g.Name, b.Path, b.GoVersion, stubGoVersion),
-			Stage: "code extraction",
-			Next:  "Build the binary with a " + stubGoVersion + " toolchain (GOTOOLCHAIN=go1.26.0).",
-		}
-	}
 	n := 0
 	for _, f := range b.Funcs {
 		if f.Name == g.Name {
@@ -222,7 +218,25 @@ func (b *Binary) classifyStub(g Func) (StubKind, bool, error) {
 			Next:  "Remove the //go:linkname or assembly definition that reuses a runtime function's name.",
 		}
 	}
-	return k, true, nil
+	b.stubMu.Lock()
+	defer b.stubMu.Unlock()
+	if v, ok := b.stubCache[g.Addr]; ok {
+		return v.kind, v.ok, v.err
+	}
+	v := stubVerdict{kind: k, ok: true}
+	if err := b.checkStubPin(g, map[uint64]bool{}); err != nil {
+		v = stubVerdict{err: &diag{
+			Msg: fmt.Sprintf("the code calls %s at 0x%x, a runtime stub's name, but that function is not the Go runtime's %s: %v. Janus models a stub call as its outcome (%s) only when the function's code is the runtime's (round 8 G3), so it neither treats it as a stub nor verifies it as code",
+				g.Name, g.Addr, g.Name, err, k),
+			Stage: "code extraction",
+			Next:  "If the binary was built by a Go toolchain Janus does not pin yet (" + stubPinToolchains + "), add it to scripts/gen-stubpins.sh and regenerate cmd/janus/stubpins_gen.go; otherwise remove the function that reuses a runtime function's name.",
+		}}
+	}
+	if b.stubCache == nil {
+		b.stubCache = map[uint64]stubVerdict{}
+	}
+	b.stubCache[g.Addr] = v
+	return v.kind, v.ok, v.err
 }
 
 // extract copies sym and every function reachable from it by direct branches.

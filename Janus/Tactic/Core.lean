@@ -224,7 +224,7 @@ simproc_decl reduceSetRegRestore (setReg _ _ _) := fun e => do
 /-! ## The simp context -/
 
 /-- Hypotheses describing the initial state(s): equations whose left-hand side is a state
-projection (`s.pc`, `s.sp`, `s.flags`, `s.mem`) or a register `s.regs i`. -/
+projection (`s.pc`, `s.sp`, `s.flags`, `s.mem`, `s.fpcr`, `s.fpsr`) or a register `s.regs i`. -/
 def stateHyps : MetaM (Array Expr) := do
   let mut out := #[]
   for d in ← getLCtx do
@@ -257,7 +257,8 @@ def stateHyps : MetaM (Array Expr) := do
       out := out.push d.toExpr; continue
     let isStateProj (e : Expr) : Bool :=
       e.isAppOfArity ``State.pc 1 || e.isAppOfArity ``State.sp 1 ||
-      e.isAppOfArity ``State.flags 1 || e.isAppOfArity ``State.mem 1
+      e.isAppOfArity ``State.flags 1 || e.isAppOfArity ``State.mem 1 ||
+      e.isAppOfArity ``State.fpcr 1 || e.isAppOfArity ``State.fpsr 1
     if isStateProj lhs || (lhs.isAppOfArity ``State.regs 2) then
       -- `x.pc = BitVec.ofNat 64 e` with `e` closed but not a literal: use the literal value
       if lhs.isAppOfArity ``State.pc 1 then

@@ -1,0 +1,47 @@
+{
+  "schema": 2,
+  "extractorVersion": "0.2.0",
+  "binary": "../govers",
+  "binarySha256": "d42074a59ef4166924556f66db6afa3952db634a2868cd5c198426cd19a242c1",
+  "goVersion": "go1.26.0",
+  "mainModule": "example.com/govers",
+  "goos": "linux",
+  "goarch": "arm64",
+  "symbolSource": "symtab",
+  "symbol": "main.Add",
+  "address": "0xa3350",
+  "size": 96,
+  "maxFunctions": 64,
+  "functions": [
+    {
+      "name": "main.Add",
+      "address": "0xa3350",
+      "size": 96,
+      "words": 22
+    },
+    {
+      "name": "example.com/govers/lib.Zero.abi0",
+      "address": "0xa3320",
+      "size": 48,
+      "words": 10
+    }
+  ],
+  "stubs": [
+    {
+      "name": "runtime.morestack_noctxt.abi0",
+      "address": "0x7fe50",
+      "kind": "morestack"
+    },
+    {
+      "name": "runtime.panicSimdImm",
+      "address": "0xa3310",
+      "kind": "panic"
+    }
+  ],
+  "unresolvedBranches": [],
+  "data": [],
+  "dataReferences": [],
+  "skippedData": [],
+  "extracted": "Extracted.lean",
+  "extractedSha256": "61b90df6e8c02ad32e24c006453c82026b57615fd44b3261dafad4be48f1a560"
+}

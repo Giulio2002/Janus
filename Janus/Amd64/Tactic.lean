@@ -1171,7 +1171,7 @@ simproc_decl reduceSetRegFRestore (setRegF _ _ _) := fun e => do
   return .done { expr := f, proof? := mkAppN (mkConst ``setRegF_restore) #[f, r, v, h] }
 
 /-- The state hypotheses the executor rewrites with: equations `x.rip = _`, `x.flags = _`,
-`x.mem = _`, `x.regs i = _`, `x.xmm i = _` and memory facts `m.readLE a n = _` (also
+`x.mem = _`, `x.regs i = _`, `x.xmm i = _`, `x.df = _`, `x.mxcsr = _` and memory facts `m.readLE a n = _` (also
 `∀`-quantified ones, from `janus64_data`), branch conditions `hbr`, and the rewrite rules of
 every `RetAddr p ret` hypothesis (`RetAddr.toNat_ofNat`, …). -/
 def stateHyps : MetaM (Array Expr) := do
@@ -1202,7 +1202,7 @@ def stateHyps : MetaM (Array Expr) := do
       out := out.push d.toExpr
     else if lhs.isAppOfArity ``State.flags 1 || lhs.isAppOfArity ``State.mem 1 ||
         lhs.isAppOfArity ``State.regs 2 || lhs.isAppOfArity ``State.xmm 2 ||
-        lhs.isAppOfArity ``State.df 1 ||
+        lhs.isAppOfArity ``State.df 1 || lhs.isAppOfArity ``State.mxcsr 1 ||
         lhs.isAppOfArity ``Janus.Arm64.Memory.readLE 3 then
       out := out.push d.toExpr
   return out

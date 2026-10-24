@@ -45,7 +45,7 @@ abbrev SumPost (p n : BitVec 64) (s s' : State) : Prop :=
   s'.sp = s.sp ∧ s'.regs 19 = s.regs 19 ∧ s'.regs 20 = s.regs 20 ∧ s'.regs 21 = s.regs 21 ∧
     s'.regs 22 = s.regs 22 ∧ s'.regs 23 = s.regs 23 ∧ s'.regs 24 = s.regs 24 ∧
     s'.regs 25 = s.regs 25 ∧ s'.regs 26 = s.regs 26 ∧ s'.regs 27 = s.regs 27 ∧
-    s'.regs 28 = s.regs 28 ∧ s'.regs 29 = s.regs 29 ∧ s'.mem = s.mem ∧
+    s'.regs 28 = s.regs 28 ∧ s'.regs 29 = s.regs 29 ∧ s'.fpcr = s.fpcr ∧ s'.mem = s.mem ∧
     s'.regs 0 = BitVec.ofNat 64 (sumWords s.mem p.toNat n.toNat)
 
 /-- The precondition of the summary: the buffer, and a return address `RET` can branch to. -/
@@ -54,13 +54,13 @@ abbrev SumPre (p n : BitVec 64) (s : State) : Prop :=
     s.mem.accessible p.toNat (8 * n.toNat) false = true ∧
     (s.regs 30).toNat % 4 = 0 ∧ (s.regs 30).toNat < 2 ^ 56
 
-/-- `S` agrees with `s` on everything `c_sum` must keep: `SP`, memory, `X19`–`X30`. -/
+/-- `S` agrees with `s` on everything `c_sum` must keep: `SP`, memory, `X19`–`X30`, `FPCR`. -/
 abbrev Kept (s S : State) : Prop :=
   S.sp = s.sp ∧ S.mem = s.mem ∧ S.regs 19 = s.regs 19 ∧ S.regs 20 = s.regs 20 ∧
     S.regs 21 = s.regs 21 ∧ S.regs 22 = s.regs 22 ∧ S.regs 23 = s.regs 23 ∧
     S.regs 24 = s.regs 24 ∧ S.regs 25 = s.regs 25 ∧ S.regs 26 = s.regs 26 ∧
     S.regs 27 = s.regs 27 ∧ S.regs 28 = s.regs 28 ∧ S.regs 29 = s.regs 29 ∧
-    S.regs 30 = s.regs 30
+    S.regs 30 = s.regs 30 ∧ S.fpcr = s.fpcr
 
 /-- The loop invariant at `head`, after `i` of the `n` iterations: `X2 = p + 8i`, `X1 = p + 8n`,
 `X0` the sum of the first `i` words. -/
@@ -75,19 +75,19 @@ theorem csum_loop (p n : BitVec 64) (s : State) (hpre : SumPre p n s) :
   intro k
   induction k with
   | zero =>
-    intro S i acc hk hpc hS0 hS1 hS2 ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30⟩ hs
+    intro S i acc hk hpc hS0 hS1 hS2 ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc⟩ hs
     janus_run
-    janus_simp [SumPost, sumWords_succ, show n.toNat = i.toNat + 1 by omega]
+    janus_simp [SumPost, sumWords_succ, show n.toNat = i.toNat + 1 by omega, hfc]
     apply BitVec.eq_of_toNat_eq
     simp only [BitVec.toNat_add, BitVec.toNat_ofNat, hs]
     omega
   | succ k ih =>
-    intro S i acc hk hpc hS0 hS1 hS2 ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30⟩ hs
+    intro S i acc hk hpc hS0 hS1 hS2 ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc⟩ hs
     janus_run until [head]
     have hi : (i + 1#64).toNat = i.toNat + 1 := by
       rw [BitVec.toNat_add]; simp only [BitVec.toNat_ofNat]; omega
     apply ih _ (i + 1#64) _ (by omega) (by janus_simp) rfl (by janus_simp) ?_
-      (by simp only [Kept]; janus_simp)
+      (by simp only [Kept]; janus_simp [hfc])
       (by janus_simp [sumWords_succ, hi]; omega)
     · janus_simp
       apply BitVec.eq_of_toNat_eq
@@ -244,7 +244,7 @@ theorem go_spec (ptr len cap : BitVec 64) :
     refine ⟨by omega, ⟨?_, by omega, by omega, by omega, by omega⟩, by omega, hpa, by omega, by omega,
       by omega, by omega⟩
     janus_disch
-  rintro s' ⟨-, m, ⟨regs, fl, vr, tp, rfl, hg, hfp⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, vr, tp, fs, rfl, hg, hfp⟩, hmf⟩
   simp only [E, frameP, frameN, cgoClobber, GoABI.regG, GoABI.regFP, cgoStackScratch, gStructSize,
     tlsGOffset, setReg_apply, ↓reduceIte, Nat.reduceEqDiff, h40, h96] at hmf hg hfp
   apply ReturnsC.of_reaches

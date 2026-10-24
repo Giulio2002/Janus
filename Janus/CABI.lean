@@ -21,9 +21,9 @@ as used by GNU/Linux (the `aarch64-linux-gnu` ABI, which gcc and clang implement
 
 `V8`–`V15` (their low 64 bits) are also callee-saved in AAPCS64. No supported instruction of a C
 integer function touches them in the code Janus proves (gcc only uses them for floating point
-and vectorised loops), and the model has no floating point; `CReturn` therefore does not mention
-them, and a proof about a C function that does use them has to state their preservation in its
-own postcondition.
+and vectorised loops); `CReturn` therefore does not mention them, and a proof about a C function
+that does use them has to state their preservation in its own postcondition. `FPCR` is preserved
+(`CReturn.fpcr`), `FPSR` is not (its cumulative exception flags are sticky).
 
 **Red zone.** AAPCS64 has none: memory below `SP` may be clobbered at any time (by a signal
 handler), so C code never keeps live data there. The model has no signals, so this only means
@@ -86,6 +86,9 @@ structure CReturn (s₀ s₁ : State) : Prop where
   x27 : s₁.regs 27 = s₀.regs 27
   x28 : s₁.regs 28 = s₀.regs 28
   fp : s₁.regs 29 = s₀.regs 29
+  /-- `FPCR` (rounding mode, flush-to-zero, default NaN, trap enables) is preserved across a
+  call (AAPCS64); `FPSR`'s cumulative exception flags are not. -/
+  fpcr : s₁.fpcr = s₀.fpcr
 
 /-- The C stack window: `SP` 16-aligned, and `[SP - below, SP + above)` writable and below
 `2^48` (the frames the function and its callees push are below `SP`). -/
@@ -125,22 +128,24 @@ section Lemmas
 variable {p : Program} {s s' : State} {entry : Nat} {args : List W64}
 
 theorem CReturn.refl (s : State) : CReturn s s :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem CReturn.trans {s₀ s₁ s₂ : State} (h₁ : CReturn s₀ s₁) (h₂ : CReturn s₁ s₂) :
     CReturn s₀ s₂ :=
   ⟨h₂.sp.trans h₁.sp, h₂.x19.trans h₁.x19, h₂.x20.trans h₁.x20, h₂.x21.trans h₁.x21,
     h₂.x22.trans h₁.x22, h₂.x23.trans h₁.x23, h₂.x24.trans h₁.x24, h₂.x25.trans h₁.x25,
-    h₂.x26.trans h₁.x26, h₂.x27.trans h₁.x27, h₂.x28.trans h₁.x28, h₂.fp.trans h₁.fp⟩
+    h₂.x26.trans h₁.x26, h₂.x27.trans h₁.x27, h₂.x28.trans h₁.x28, h₂.fp.trans h₁.fp,
+    h₂.fpcr.trans h₁.fpcr⟩
 
 /-- `CReturn` as a conjunction of equations (for the post-processing simp set). -/
 theorem cReturn_iff (s₀ s₁ : State) :
     CReturn s₀ s₁ ↔ s₁.sp = s₀.sp ∧ s₁.regs 19 = s₀.regs 19 ∧ s₁.regs 20 = s₀.regs 20 ∧
       s₁.regs 21 = s₀.regs 21 ∧ s₁.regs 22 = s₀.regs 22 ∧ s₁.regs 23 = s₀.regs 23 ∧
       s₁.regs 24 = s₀.regs 24 ∧ s₁.regs 25 = s₀.regs 25 ∧ s₁.regs 26 = s₀.regs 26 ∧
-      s₁.regs 27 = s₀.regs 27 ∧ s₁.regs 28 = s₀.regs 28 ∧ s₁.regs 29 = s₀.regs 29 :=
-  ⟨fun ⟨a, b, c, d, e, f, g, h, i, j, k, l⟩ => ⟨a, b, c, d, e, f, g, h, i, j, k, l⟩,
-    fun ⟨a, b, c, d, e, f, g, h, i, j, k, l⟩ => ⟨a, b, c, d, e, f, g, h, i, j, k, l⟩⟩
+      s₁.regs 27 = s₀.regs 27 ∧ s₁.regs 28 = s₀.regs 28 ∧ s₁.regs 29 = s₀.regs 29 ∧
+      s₁.fpcr = s₀.fpcr :=
+  ⟨fun ⟨a, b, c, d, e, f, g, h, i, j, k, l, m⟩ => ⟨a, b, c, d, e, f, g, h, i, j, k, l, m⟩,
+    fun ⟨a, b, c, d, e, f, g, h, i, j, k, l, m⟩ => ⟨a, b, c, d, e, f, g, h, i, j, k, l, m⟩⟩
 
 /-- Every callee-saved register is restored. -/
 theorem CReturn.saved {s₀ s₁ : State} (h : CReturn s₀ s₁) {r : Nat} (hr : r ∈ calleeSaved) :

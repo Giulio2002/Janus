@@ -23,8 +23,9 @@ handlers do not modify them, so a leaf function may keep data there without movi
 the model there are no signals; the only consequence is that a C stack precondition (`CStack`)
 must make every byte the code stores writable, including red-zone bytes below `RSP`.
 
-**Not modelled:** the x87 control word and `MXCSR` (callee-saved control bits): no supported
-instruction reads or writes them. A C function using floating point is outside the model.
+**Floating point:** the `MXCSR` control bits (bits 6 and up) are callee-saved
+(`CReturn.mxcsr`), its status flags are not (they are sticky). The x87 control word is not
+modelled (no supported instruction uses x87).
 
 **What differs from Go's ABIInternal** (`Janus.Amd64.GoABI`): different argument registers
 (`RDI RSI RDX RCX R8 R9` instead of `RAX RBX RCX RDI RSI R8 R9 R10 R11`); `RBX`, `R12`–`R15` are
@@ -87,6 +88,9 @@ structure CReturn (s₀ s₁ : State) : Prop where
   r14 : s₁.regs 14 = s₀.regs 14
   r15 : s₁.regs 15 = s₀.regs 15
   df : s₁.df = false
+  /-- The `MXCSR` control bits (rounding, masks, `FTZ`/`DAZ`: bits 6 and up) are callee-saved;
+  the status flags (bits 0-5) are sticky and not. -/
+  mxcsr : s₁.mxcsr.toNat / 64 = s₀.mxcsr.toNat / 64
 
 /-- The C stack window: `RSP ≡ 8 mod 16`, and `[RSP - below, RSP + above)` writable and below
 `2^48`; `above ≥ 8` covers the return address, `below` the frames pushed by the function and its
@@ -131,9 +135,9 @@ theorem CCall.reg (h : CCall p entry args s) {i : Nat} (hi : i < args.length) :
 theorem cReturn_iff (s₀ s₁ : State) :
     CReturn s₀ s₁ ↔ s₁.regs 4 = s₀.regs 4 + 8 ∧ s₁.regs 3 = s₀.regs 3 ∧ s₁.regs 5 = s₀.regs 5 ∧
       s₁.regs 12 = s₀.regs 12 ∧ s₁.regs 13 = s₀.regs 13 ∧ s₁.regs 14 = s₀.regs 14 ∧
-      s₁.regs 15 = s₀.regs 15 ∧ s₁.df = false :=
-  ⟨fun ⟨a, b, c, d, e, f, g, h⟩ => ⟨a, b, c, d, e, f, g, h⟩,
-    fun ⟨a, b, c, d, e, f, g, h⟩ => ⟨a, b, c, d, e, f, g, h⟩⟩
+      s₁.regs 15 = s₀.regs 15 ∧ s₁.df = false ∧ s₁.mxcsr.toNat / 64 = s₀.mxcsr.toNat / 64 :=
+  ⟨fun ⟨a, b, c, d, e, f, g, h, i⟩ => ⟨a, b, c, d, e, f, g, h, i⟩,
+    fun ⟨a, b, c, d, e, f, g, h, i⟩ => ⟨a, b, c, d, e, f, g, h, i⟩⟩
 
 /-- Every callee-saved register is restored. -/
 theorem CReturn.saved {s₀ s₁ : State} (h : CReturn s₀ s₁) {r : Nat} (hr : r ∈ calleeSaved) :

@@ -246,13 +246,22 @@ def cgoClobber (s : State) : List (Nat × Nat) :=
 /-- How the Go caller resumes after `cgocall` returns: at the return address at `[RSP]`, with
 `RSP + 8`, `RBP` and `R14` (`g`) restored, `X15 = 0`, the direction flag clear and memory `m`;
 the goroutine may resume on another thread, so `FS` is arbitrary except that its `g` slot holds
-`g` (`TlsG`); every other register, the flags and the vector registers are arbitrary. -/
+`g` (`TlsG`); every other register, the flags and the vector registers are arbitrary. `MXCSR`
+keeps its control bits (the C code restores them, `CReturn.mxcsr`), its sticky status flags are
+arbitrary: a caller in the Go floating-point environment (`GoABI.GoMXCSR`) is still in it
+(`GoResume.goMXCSR`). -/
 def GoResume (s s' : State) (m : Memory) : Prop :=
-  ∃ regs flags xmm ymmHi fs,
+  ∃ regs flags xmm ymmHi fs mx,
     s' = { s with regs := regs, rip := retAddrOf s, flags := flags, xmm := xmm, ymmHi := ymmHi,
-                  mem := m, fsBase := fs, df := false } ∧
+                  mem := m, fsBase := fs, df := false, mxcsr := mx } ∧
     regs GoABI.regSP = s.regs GoABI.regSP + 8 ∧ regs GoABI.regFP = s.regs GoABI.regFP ∧ regs regG = s.regs regG ∧
-    xmm xmmZero = 0 ∧ TlsG s'
+    xmm xmmZero = 0 ∧ TlsG s' ∧ mx.toNat / 64 = s.mxcsr.toNat / 64
+
+theorem GoResume.goMXCSR {s s' : State} {m : Memory} (h : GoResume s s' m)
+    (hm : GoABI.GoMXCSR s) : GoABI.GoMXCSR s' := by
+  obtain ⟨_, _, _, _, _, mx, rfl, -, -, -, -, -, hmx⟩ := h
+  unfold GoABI.GoMXCSR at hm ⊢
+  exact hmx.trans hm
 
 /-- The cgo contract a Go-side theorem assumes: `runtime.cgocall` called with `RAX = fn` in a
 state satisfying `G` returns (`GoResume`) with memory that agrees with `E s` outside
