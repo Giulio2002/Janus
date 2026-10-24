@@ -137,15 +137,16 @@ func noForeignModule(paths map[string]string, dirs []string) error {
 }
 
 // replayThreads is the number of worker threads of a leanchecker process ($JANUS_REPLAY_THREADS,
-// default 4). leanchecker starts one task per module it replays, each importing that module's
+// default 2). leanchecker starts one task per module it replays, each importing that module's
 // whole environment; with a thread per core, the replay of the framework (one target, every
-// Janus.* module) holds ~48 environments at once (~30 GB). Four threads hold ~7 GB and take about
-// as long. The modules replayed are the same.
+// Janus.* module) held ~48 environments at once (30-37 GB). Measured for the framework replay on
+// a quiet host: 1 thread 19 s / 1.5 GB, 2 threads 15 s / 5.1 GB, 4 threads 11 s / 7.4 GB. The
+// modules replayed are the same.
 func replayThreads() int {
 	if n, err := strconv.Atoi(os.Getenv("JANUS_REPLAY_THREADS")); err == nil && n > 0 {
 		return n
 	}
-	return 4
+	return 2
 }
 
 // runLean runs a lean/leanchecker command under the sandbox, returning combined output.
