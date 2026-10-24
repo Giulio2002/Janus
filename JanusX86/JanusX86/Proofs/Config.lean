@@ -10,7 +10,7 @@ and post-states (docs/X86FORMAL.md).
 
 * no machine-status or fault flag is pending (`ms_reg`, `fault_reg`; `x86_fetch_decode_execute`
   does nothing when one is set), and register-write logging is off (`write_gpr` and `write_rip`
-  read `log_register_writes`);
+  read `log_register_writes`), and the undefined-value source `janus_undef` is set (any value);
 * the application-level memory view (`app_view`: linear address = physical address, no paging
   structures);
 * 64-bit mode: `IA32_EFER.LMA` (bit 10 of `msrs[0]`) and `CS.L` (bit 9 of the hidden CS
@@ -33,6 +33,7 @@ structure X86Config (s : SState) : Prop where
   fault : s.regs.get? .fault_reg = some false
   app : s.regs.get? .app_view = some true
   log : s.regs.get? .log_register_writes = some false
+  undef : ∃ u, s.regs.get? .janus_undef = some u
   efer : ∃ v : Vector (BitVec 64) 7, s.regs.get? .msrs = some v ∧
     _get_ia32_eferbits_lma (Mk_ia32_eferbits (Sail.BitVec.truncate (GetElem?.getElem! v 0) 12)) = 1#1
   csl : ∃ v : Vector (BitVec 16) 6, s.regs.get? .seg_hidden_attrs = some v ∧
@@ -48,6 +49,7 @@ structure X86Config (s : SState) : Prop where
 def cfgOk (s : SState) : Bool :=
   s.regs.get? .ms_reg == some false && s.regs.get? .fault_reg == some false &&
   s.regs.get? .app_view == some true && s.regs.get? .log_register_writes == some false &&
+  (s.regs.get? .janus_undef).isSome &&
   (match s.regs.get? .msrs with
     | some v => _get_ia32_eferbits_lma (Mk_ia32_eferbits (Sail.BitVec.truncate (GetElem?.getElem! v 0) 12)) == 1#1
     | none => false) &&
@@ -65,8 +67,9 @@ def cfgOk (s : SState) : Bool :=
 
 theorem cfgOk_sound {s : SState} (h : cfgOk s = true) : X86Config s := by
   simp only [cfgOk, Bool.and_eq_true, beq_iff_eq] at h
-  obtain ⟨⟨⟨⟨⟨⟨⟨h1, h2⟩, h3⟩, h0⟩, h4⟩, h5⟩, h6⟩, h7⟩ := h
-  refine ⟨h1, h2, h3, h0, ?_, ?_, ?_, ?_⟩
+  obtain ⟨⟨⟨⟨⟨⟨⟨⟨h1, h2⟩, h3⟩, h0⟩, hu⟩, h4⟩, h5⟩, h6⟩, h7⟩ := h
+  refine ⟨h1, h2, h3, h0, ?_, ?_, ?_, ?_, ?_⟩
+  · revert hu; cases s.regs.get? .janus_undef <;> simp
   · revert h4; cases s.regs.get? .msrs <;> simp
   · revert h5; cases s.regs.get? .seg_hidden_attrs <;> simp
   · revert h6; cases s.regs.get? .seg_visibles <;> simp
