@@ -3,6 +3,7 @@ import Janus.Amd64.Instr
 import Janus.Amd64.Decode
 import Janus.Arm64.Bits
 import Janus.Amd64.TacticAttr
+import Janus.Amd64.Float
 
 /-!
 # x86-64 execution semantics for the supported subset
@@ -654,6 +655,47 @@ def stosIter (sz v : Nat) : Nat → State → Except Fault State
     | .error e => .error e
     | .ok m => stosIter sz v k ({ s with mem := m }.setReg 7 (s.regs 7 + BitVec.ofNat 64 sz))
 
+/-! ## SSE scalar floating point
+
+The operations are `Janus.Amd64.FP` (Intel SDM semantics on the IEEE core). Legacy-SSE
+scalar instructions replace the low `w` bits of the destination `XMM` register and preserve
+bits 127:`w` (and `YMM` bits 255:128). A scalar memory operand is `w/8` bytes, without an
+alignment requirement; the packed bitwise forms read 16 aligned bytes. An exception that is
+unmasked in `MXCSR` is `#XM` (`Fault.simdFPException`); otherwise the raised flags are ORed
+into `MXCSR`. -/
+
+/-- The low `w` bits of an SSE operand (`XMMn`, or `w/8` bytes of memory). -/
+def readXs (s : State) (next : W64) (w : Nat) : XLoc → Except Fault Nat
+  | .xmm n => .ok ((s.xmm n).toNat % 2 ^ w)
+  | .mem a => load s.mem (ea s next a).toNat (w / 8)
+
+/-- `XMM[d]` with its low `w` bits replaced by `r`. -/
+def State.setXmmLow (s : State) (d w r : Nat) : State :=
+  s.setXmm d (BitVec.ofNat 128 ((s.xmm d).toNat / 2 ^ w * 2 ^ w + r % 2 ^ w))
+
+/-- `MXCSR` with the flags `fl` raised. -/
+def State.raiseMx (s : State) (fl : Nat) : State := { s with mxcsr := s.mxcsr ||| BitVec.ofNat 32 fl }
+
+/-- Commit a floating-point result: `#XM` when the operation trapped, else `k r` with the
+flags raised and `RIP` advanced. -/
+def fpDone (s : State) (pc : Nat) (next : W64) (o : FP.XR) (k : Nat → State) : Except Fault State :=
+  if o.trap s.mxcsr.toNat then .error (.simdFPException pc) else .ok (((k o.res).raiseMx o.flags).setRip next)
+
+/-- The format of an `SS` (`w = 32`) / `SD` (`w = 64`) instruction. -/
+def fmtOf (w : Nat) : Janus.Float.Fmt := if w = 32 then Janus.Float.binary32 else Janus.Float.binary64
+
+/-- `ADDSD`, ..., `SQRTSD` and the `SS` forms on `a = XMM[dst]` and `b = src`. -/
+def sseArithOp (op : FPArith) (w mx a b : Nat) : FP.XR :=
+  let f := fmtOf w
+  match op with
+  | .add => FP.binop .add f mx a b
+  | .sub => FP.binop .sub f mx a b
+  | .mul => FP.binop .mul f mx a b
+  | .div => FP.binop .div f mx a b
+  | .min => FP.minmax false f mx a b
+  | .max => FP.minmax true f mx a b
+  | .sqrt => FP.sqrt f mx b
+
 /-! ## The executor -/
 
 /-- Execute a decoded instruction of length `len` at `s.rip`. Only specified on the output
@@ -942,6 +984,54 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
     | .error e => .error e
     | .ok s' => .ok ((if rep then s'.setReg 1 0 else s').setRip next)
   | .setDF b => .ok ({ s with df := b }.setRip next)
+  -- SSE scalar floating point
+  | .sseArith op w dst src =>
+    match readXs s next w src with
+    | .error e => .error e
+    | .ok b =>
+      fpDone s pc next (sseArithOp op w s.mxcsr.toNat ((s.xmm dst).toNat % 2 ^ w) b)
+        fun r => s.setXmmLow dst w r
+  | .sseComi signal w a b =>
+    match readXs s next w b with
+    | .error e => .error e
+    | .ok y =>
+      let o := FP.comis signal (fmtOf w) s.mxcsr.toNat ((s.xmm a).toNat % 2 ^ w) y
+      if o.trap s.mxcsr.toNat then .error (.simdFPException pc) else
+      .ok (((s.setFlags ⟨some (o.res % 2 = 1), some (o.res / 2 % 2 = 1), some false,
+        some (o.res / 4 % 2 = 1), some false, some false⟩).raiseMx o.flags).setRip next)
+  | .sseCmp w dst src pred =>
+    match readXs s next w src with
+    | .error e => .error e
+    | .ok b =>
+      fpDone s pc next (FP.cmp (fmtOf w) s.mxcsr.toNat pred ((s.xmm dst).toNat % 2 ^ w) b)
+        fun r => s.setXmmLow dst w r
+  | .cvtsi2f w iw dst src =>
+    match readLoc s next iw src with
+    | .error e => .error e
+    | .ok x => fpDone s pc next (FP.ofInt (fmtOf w) s.mxcsr.toNat iw x.toNat) fun r => s.setXmmLow dst w r
+  | .cvtf2si trunc w iw dst src =>
+    match readXs s next w src with
+    | .error e => .error e
+    | .ok b =>
+      let mx := s.mxcsr.toNat
+      fpDone s pc next (FP.toInt (fmtOf w) mx (if trunc then .rz else FP.rounding mx) iw b)
+        fun r => s.putReg iw dst (BitVec.ofNat iw r)
+  | .cvtff w dst src =>
+    match readXs s next w src with
+    | .error e => .error e
+    | .ok b =>
+      let w' := if w = 64 then 32 else 64
+      fpDone s pc next (FP.convert (fmtOf w) (fmtOf w') s.mxcsr.toNat b) fun r => s.setXmmLow dst w' r
+  | .sseRound w dst src imm =>
+    match readXs s next w src with
+    | .error e => .error e
+    | .ok b => fpDone s pc next (FP.roundInt (fmtOf w) s.mxcsr.toNat imm b) fun r => s.setXmmLow dst w r
+  | .fpLogic op dst src =>
+    match readX s next true src with
+    | .error e => .error e
+    | .ok v =>
+      let d := s.xmm dst
+      .ok ((s.setXmm dst (if op = 0 then d &&& v else if op = 1 then ~~~d &&& v else d ||| v)).setRip next)
   | .locked i a size =>
     let addr := (ea s next a).toNat
     if addr % size ≠ 0 then .error (.misaligned addr) else exec i len s

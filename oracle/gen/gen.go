@@ -19,6 +19,8 @@ type State struct {
 	Seed  uint64
 	V     [32][2]uint64 // V0..V31 as (low, high) 64-bit halves
 	TPIDR uint64
+	FPCR  uint32
+	FPSR  uint32
 }
 
 // vecEdge are edge 64-bit halves for vector registers.
@@ -136,6 +138,13 @@ func Setup(r *rand.Rand, w uint32) State {
 	s.Seed = uint64(r.IntN(1 << 20))
 	setupV(r, &s)
 	s.TPIDR = Value(r)
+	if r.IntN(100) < 15 {
+		s.FPCR, s.FPSR = RandFPCR(r), RandFPSR(r)
+	}
+	if IsFP(Classify(w)) {
+		setupFP(r, w, &s)
+		return s
+	}
 	rt, rn, rm := bits(w, 4, 0), bits(w, 9, 5), bits(w, 20, 16)
 	setBase := func(base uint64) {
 		if rn == 31 {
@@ -349,6 +358,12 @@ func Case(id int, class string, w uint32, s State) L.Case {
 		}
 	}
 	c.TPIDR = fmt.Sprintf("%#x", s.TPIDR)
+	if s.FPCR != 0 {
+		c.FPCR = fmt.Sprintf("%#x", s.FPCR)
+	}
+	if s.FPSR != 0 {
+		c.FPSR = fmt.Sprintf("%#x", s.FPSR)
+	}
 	return c
 }
 

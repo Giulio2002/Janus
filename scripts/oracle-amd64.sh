@@ -5,11 +5,17 @@
 #   scripts/oracle-amd64.sh selftest   build, then check the native harness on known answers
 #   scripts/oracle-amd64.sh quick      generated cases only (~100k)
 #   scripts/oracle-amd64.sh full       generated + harvested from real Go amd64 binaries (default)
+#   scripts/oracle-amd64.sh fp         SSE floating point only: the FP specs and edge families
+#                                      plus every FP instruction harvested from the math,
+#                                      strconv and sort test binaries (K states each, FPK MXCSR
+#                                      settings per state; FP_K states per harvested FP
+#                                      instruction, default 20)
 #
 # Environment: OUT (default artifacts/oracle-amd64), JOBS (default 16, at most 24), N
 # (encodings per targeted spec, default 600 full / 250 quick), GROUP (random byte strings,
 # default 40000 full / 15000 quick), K (states per harvested instruction, default 3),
 # PER_CLASS (harvested distinct instructions per modeled class, default 4000), SEED (default 1),
+# FPK (MXCSR settings per FP state, default 3 gen / 2 harvest),
 # MODEL (default .lake/build/bin/janus-oracle-amd64; e.g. MODEL=oracle-amd64/bin/fakemodel
 # to exercise the pipeline without the Lean model).
 set -euo pipefail
@@ -47,11 +53,32 @@ cases=()
 case "$mode" in
   quick) N="${N:-250}"; GROUP="${GROUP:-15000}" ;;
   full)  N="${N:-600}"; GROUP="${GROUP:-40000}" ;;
-  *) echo "usage: $0 selftest|quick|full" >&2; exit 2 ;;
+  fp)    N="${N:-600}"; GROUP=0 ;;
+  *) echo "usage: $0 selftest|quick|full|fp" >&2; exit 2 ;;
 esac
-echo "== generate ($N encodings per targeted spec, $GROUP random)"
-"$bin/oracle" gen -n "$N" -group "$GROUP" -seed "$SEED" -o "$OUT/gen.jsonl"
+fpk=()
+[ -n "${FPK:-}" ] && fpk=(-fpk "$FPK")
+if [ "$mode" = fp ]; then
+  echo "== generate (SSE floating point: $N encodings per spec, $((N / 2)) edge rounds)"
+  "$bin/oracle" gen -fp-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
+else
+  echo "== generate ($N encodings per targeted spec, $GROUP random)"
+  "$bin/oracle" gen -n "$N" -group "$GROUP" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
+fi
 cases+=("$OUT/gen.jsonl")
+
+if [ "$mode" = fp ]; then
+  echo "== harvest the FP instructions of the math, strconv and sort test binaries"
+  corpus="$bin/corpus-fp"
+  mkdir -p "$corpus"
+  (cd "$root/oracle-amd64" &&
+    for p in math strconv sort; do
+      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
+    done)
+  fpre='^(addsd|subsd|mulsd|divsd|sqrtsd|minsd|maxsd|addss|subss|mulss|divss|sqrtss|minss|maxss|u?comis[sd]|cvt.*|roundsd|roundss|cmpsd_xmm|cmpss|andn?p[sd]|orp[sd]|xorp[sd])$'
+  "$bin/oracle" harvest -k "${FP_K:-20}" -per-class 0 -only "$fpre" -seed "$((SEED + 1))" "${fpk[@]}" -o "$OUT/harvest.jsonl" "$corpus"/*
+  cases+=("$OUT/harvest.jsonl")
+fi
 
 if [ "$mode" = full ]; then
   echo "== harvest corpus (real Go amd64 code)"
@@ -59,13 +86,13 @@ if [ "$mode" = full ]; then
   mkdir -p "$corpus"
   (cd "$root/oracle-amd64" &&
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -o "$corpus/bigprog" ./harvest/bigprog &&
-    for p in math/big strconv sort crypto/sha256 bytes strings math/bits encoding/binary sync/atomic; do
+    for p in math math/big strconv sort crypto/sha256 bytes strings math/bits encoding/binary sync/atomic; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
   if [ ! -f "$root/artifacts/examples-amd64" ]; then
     (cd "$root/examples/basic" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$root/artifacts/examples-amd64" ./cmd)
   fi
-  "$bin/oracle" harvest -k "$K" -per-class "$PER_CLASS" -seed "$((SEED + 1))" -o "$OUT/harvest.jsonl" \
+  "$bin/oracle" harvest -k "$K" -per-class "$PER_CLASS" -seed "$((SEED + 1))" "${fpk[@]}" -o "$OUT/harvest.jsonl" \
     "$corpus"/* "$root/artifacts/examples-amd64"
   cases+=("$OUT/harvest.jsonl")
 fi

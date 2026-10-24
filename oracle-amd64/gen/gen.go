@@ -23,6 +23,20 @@ type State struct {
 	FSBase uint64
 	Seed   uint64
 	Init   [][2]int // buffer byte overrides (offset, value)
+	// MXCSR for the case when MXCSRSet (otherwise layout.DefaultMXCSR, field omitted).
+	MXCSR    uint32
+	MXCSRSet bool
+}
+
+// SetMXCSR sets the case's MXCSR.
+func (s *State) SetMXCSR(v uint32) { s.MXCSR, s.MXCSRSet = v, true }
+
+// MXCSRValue is the MXCSR the case runs with.
+func (s *State) MXCSRValue() uint32 {
+	if s.MXCSRSet {
+		return s.MXCSR
+	}
+	return L.DefaultMXCSR
 }
 
 func hex64(v uint64) string { return fmt.Sprintf("%#x", v) }
@@ -53,6 +67,9 @@ func Case(id int, class string, b []byte, s State) L.Case {
 	}
 	if s.FSBase != 0 {
 		c.FSBase = hex64(s.FSBase)
+	}
+	if s.MXCSRSet && s.MXCSR != L.DefaultMXCSR {
+		c.MXCSR = hex64(uint64(s.MXCSR))
 	}
 	return c
 }
@@ -318,6 +335,12 @@ func Setup(r *rand.Rand, b []byte) State {
 				}
 			}
 		}
+	}
+	if info, ok := fpClasses[cls]; ok {
+		setupFP(r, &s, inst, info)
+	} else if r.IntN(8) == 0 {
+		// a non-default MXCSR now and then: every instruction must preserve it
+		s.SetMXCSR(RandMXCSR(r))
 	}
 	return s
 }

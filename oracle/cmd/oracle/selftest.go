@@ -194,6 +194,54 @@ func cmdSelftest(args []string) {
 			}))},
 		tc{"mrs x0, tpidr_el0", 0xd53bd040, setV, and(expect("ok", T+4), preserved(0), vpreserved(), reg(0, 0x123456789abcdef0))},
 	)
+	// FPCR/FPSR: written by the entry sequence, captured from the signal frame.
+	fpsr := func(want uint64) func(c *L.Case, h *L.HW) string {
+		return func(c *L.Case, h *L.HW) string {
+			if hexv(h.FPSR) != want {
+				return fmt.Sprintf("fpsr = %s, want %#x", h.FPSR, want)
+			}
+			return ""
+		}
+	}
+	fpcrKept := func(c *L.Case, h *L.HW) string {
+		if hexv(h.FPCR) != hexv(c.FPCR) {
+			return fmt.Sprintf("fpcr = %s, want %s", h.FPCR, c.FPCR)
+		}
+		return ""
+	}
+	fp := func(fpcr, fpsrIn uint32, s1, s2 uint64) func(s *gen.State) {
+		return func(s *gen.State) {
+			setV(s)
+			s.FPCR, s.FPSR = fpcr, fpsrIn
+			s.V[1] = [2]uint64{s1, 0xdead}
+			s.V[2] = [2]uint64{s2, 0xbeef}
+		}
+	}
+	const fadds = 0x1e222820 // fadd s0, s1, s2
+	tests = append(tests,
+		tc{"nop (FPCR AH|FIZ|NEP|RMode|FZ|DN, FPSR preserved)", 0xd503201f, fp(0x03c00007, 0x0800009f, 0, 0),
+			and(expect("ok", T+4), preserved(), vpreserved(), fpcrKept, fpsr(0x0800009f))},
+		tc{"fadd s0, s1, s2 (inexact: IXC)", fadds, fp(0, 0, 0x3f800000, 0x30800000),
+			and(expect("ok", T+4), preserved(), vpreserved(0), fpcrKept, fpsr(0x10), vreg(0, func(*L.Case) string { return "0x3f800000" }))},
+		tc{"fadd s0, s1, s2 (FZ, denormal input: IDC, +0)", fadds, fp(1<<24, 0, 1, 0),
+			and(expect("ok", T+4), preserved(), vpreserved(0), fpcrKept, fpsr(0x80), vreg(0, func(*L.Case) string { return "0" }))},
+		tc{"fadd s0, s1, s2 (DN, sNaN: IOC, default NaN)", fadds, fp(1<<25, 0x10, 0x7f800001, 0x3f800000),
+			and(expect("ok", T+4), preserved(), vpreserved(0), fpcrKept, fpsr(0x11), vreg(0, func(*L.Case) string { return "0x7fc00000" }))},
+		tc{"fadd s0, s1, s2 (AH|DN, sNaN: negative default NaN)", fadds, fp(1<<25|2, 0, 0x7f800001, 0x3f800000),
+			and(expect("ok", T+4), preserved(), vpreserved(0), fpcrKept, fpsr(0x1), vreg(0, func(*L.Case) string { return "0xffc00000" }))},
+		tc{"fadd s0, s1, s2 (RMode=+inf rounds up)", fadds, fp(1<<22, 0, 0x3f800000, 0x30800000),
+			and(expect("ok", T+4), preserved(), vpreserved(0), fpcrKept, fpsr(0x10), vreg(0, func(*L.Case) string { return "0x3f800001" }))},
+	)
+	tests = append(tests, tc{"nop (FPCR.IXE: refused unless the CPU keeps it)", 0xd503201f, fp(1<<12, 0, 0, 0),
+		func(c *L.Case, h *L.HW) string {
+			if h.Status == "ok" && hexv(h.FPCR) == 1<<12 { // a CPU that supports FP trapping keeps it
+				return ""
+			}
+			if h.Status != "error" {
+				return "want status error (FPCR trap enable does not read back), got " + h.Status
+			}
+			return ""
+		}})
 	// nop under every NZCV, all registers distinct: the trampoline must preserve everything.
 	for f := 0; f < 16; f++ {
 		f := f

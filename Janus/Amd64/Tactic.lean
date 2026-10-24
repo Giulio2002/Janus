@@ -954,6 +954,7 @@ deriving instance ToExpr for BitOp
 deriving instance ToExpr for CntOp
 deriving instance ToExpr for FlagOp
 deriving instance ToExpr for SseOp
+deriving instance ToExpr for FPArith
 deriving instance ToExpr for Instr
 deriving instance ToExpr for StubKind
 

@@ -1,5 +1,6 @@
 import Janus.Arm64.Instr
 import Janus.Arm64.Bits
+import Janus.Arm64.DecodeFloat
 
 /-!
 # A64 decoder for the supported subset
@@ -536,17 +537,18 @@ def decodeSimdDP (w : Nat) : Option Instr :=
     some (.vTbl Q rm (bits w 14 13) (bit w 12) rn rd)
   else if w &&& 0x7F20FC00 = 0x1E200000 then
     -- Conversion between FP and integer: sf 0 0 11110 ftype 1 rmode opcode 000000 Rn Rd;
-    -- only the FMOV bit moves (opcode 110/111): W<->S, X<->D, X<->V.D[1].
+    -- the FMOV bit moves (opcode 110/111): W<->S, X<->D, X<->V.D[1]; the arithmetic
+    -- conversions are `decodeFpCvtInt` (`Janus.Arm64.DecodeFloat`).
     let sf := bit w 31
     let ftype := bits w 23 22
     let rmode := bits w 20 19
     let opcode := bits w 18 16
-    if opcode ≠ 6 && opcode ≠ 7 then none
+    if opcode ≠ 6 && opcode ≠ 7 then decodeFpCvtInt w
     else if (!sf && ftype = 0 && rmode = 0) || (sf && ftype = 1 && rmode = 0) ||
         (sf && ftype = 2 && rmode = 1) then
       some (.fmovGen sf ftype rmode opcode rn rd)
     else none
-  else none
+  else decodeFloat w  -- scalar floating point (`Janus.Arm64.DecodeFloat`)
 
 /-- Decode a 32-bit A64 instruction word. Words `≥ 2^32` are rejected. -/
 def decode (w : Nat) : Option Instr :=

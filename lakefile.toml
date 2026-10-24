@@ -19,3 +19,7 @@ root = "Janus.Tools.Decode"
 [[lean_exe]]
 name = "janus-oracle-amd64"
 root = "Oracle.Amd64Main"
+
+[[lean_exe]]
+name = "janus-testfloat"
+root = "Oracle.TestFloat"

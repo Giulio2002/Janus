@@ -427,6 +427,72 @@ def oneByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
       else none
   else none
 
+/-- The SSE scalar floating-point encodings of the two-byte map (and `66 0F 3A 0A/0B`,
+`ROUNDSS`/`ROUNDSD`), with their mandatory prefix (`sel`: 1 = `66`, 2 = `F3`, 3 = `F2`):
+`F2/F3 0F 51 58 59 5C 5D 5E 5F` (`SQRT ADD MUL SUB MIN DIV MAX`), `(66) 0F 2E/2F`
+(`UCOMIS`/`COMIS`), `F2/F3 0F 2A` (`CVTSI2SD/SS`, `REX.W` = 64-bit source), `F2/F3 0F 2C/2D`
+(`CVTTSD2SI`, `CVTSD2SI`, ..., `REX.W` = 64-bit destination), `F2/F3 0F 5A`
+(`CVTSD2SS`/`CVTSS2SD`), `F2/F3 0F C2 ib` (`CMPSD/SS`, predicates 0–7), `(66) 0F 54/55/56`
+(`AND(N)PS/PD`, `ORPS/PD`). `REX.W` is rejected where it selects nothing; the packed forms
+(no prefix or `66` on the arithmetic opcodes), the MMX conversions and the reserved
+immediate bits (`CMPSD` `imm8 ≥ 8`, `ROUNDSD` `imm8 ≥ 16`) are rejected. `n` counts the bytes
+before `op`. -/
+def sseFp (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr × Nat) :=
+  let rex := p.rex.getD 0
+  let rexP := p.rex.isSome
+  let rexW := rex / 8 = 1
+  let withModRM (k : ModRM → List Nat → Nat → Option (Instr × Nat)) : Option (Instr × Nat) :=
+    match modrm rex bs with
+    | some (m, r, c) => k m r (n + 1 + c)
+    | none => none
+  let sel := if p.opsize ∧ p.rep ≠ 0 then 4 else if p.opsize then 1 else if p.rep = 0xF3 then 2
+    else if p.rep = 0xF2 then 3 else 0
+  let fin (i : Instr) (len : Nat) : Option (Instr × Nat) := finish p .own i len
+  let scalar := sel = 2 ∨ sel = 3
+  let w := if sel = 3 then 64 else 32
+  if op = 0x51 ∨ op = 0x58 ∨ op = 0x59 ∨ op = 0x5C ∨ op = 0x5D ∨ op = 0x5E ∨ op = 0x5F then
+    if ¬ scalar ∨ rexW then none else
+    let a := if op = 0x51 then FPArith.sqrt else if op = 0x58 then .add else if op = 0x59 then .mul
+      else if op = 0x5C then .sub else if op = 0x5D then .min else if op = 0x5E then .div else .max
+    withModRM fun m _ len => fin (.sseArith a w m.reg (rmX m.rm)) len
+  else if op = 0x2E ∨ op = 0x2F then
+    if sel > 1 ∨ rexW then none else
+    withModRM fun m _ len => fin (.sseComi (op = 0x2F) (if sel = 1 then 64 else 32) m.reg (rmX m.rm)) len
+  else if op = 0x2A then
+    if ¬ scalar then none else
+    let iw := if rexW then 64 else 32
+    withModRM fun m _ len => fin (.cvtsi2f w iw m.reg (rmLoc rexP iw m.rm)) len
+  else if op = 0x2C ∨ op = 0x2D then
+    if ¬ scalar then none else
+    withModRM fun m _ len => fin (.cvtf2si (op = 0x2C) w (if rexW then 64 else 32) m.reg (rmX m.rm)) len
+  else if op = 0x5A then
+    if ¬ scalar ∨ rexW then none else
+    withModRM fun m _ len => fin (.cvtff w m.reg (rmX m.rm)) len
+  else if op = 0xC2 then
+    if ¬ scalar ∨ rexW then none else
+    withModRM fun m r len =>
+      match immU8 r with
+      | some (v, _, c) => if v ≥ 8 then none else fin (.sseCmp w m.reg (rmX m.rm) v) (len + c)
+      | none => none
+  else if op = 0x54 ∨ op = 0x55 ∨ op = 0x56 then
+    if sel > 1 ∨ rexW then none else
+    withModRM fun m _ len => fin (.fpLogic (op - 0x54) m.reg (rmX m.rm)) len
+  else if op = 0x3A then
+    -- 66 0F 3A 0A/0B /r ib: ROUNDSS/ROUNDSD
+    match bs with
+    | op3 :: rest =>
+      if (op3 ≠ 0x0A ∧ op3 ≠ 0x0B) ∨ sel ≠ 1 ∨ rexW then none else
+      match modrm rex rest with
+      | some (m, r, c) =>
+        match immU8 r with
+        | some (v, _, ci) =>
+          if v ≥ 16 then none
+          else fin (.sseRound (if op3 = 0x0B then 64 else 32) m.reg (rmX m.rm) v) (n + 2 + c + ci)
+        | none => none
+      | none => none
+    | [] => none
+  else none
+
 /-- Two-byte opcode map (`0F xx`). `n` counts the bytes before `xx`. -/
 def twoByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr × Nat) :=
   let rex := p.rex.getD 0
@@ -587,7 +653,7 @@ def twoByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
   else if 0xC8 ≤ op ∧ op < 0xD0 then
     if p.opsize then none else
     finish p .int (.bswap (if rexW then 64 else 32) (op - 0xC8 + 8 * rexB)) (n + 1)
-  else none
+  else sseFp p op bs n  -- SSE scalar floating point
 
 end Decode
 

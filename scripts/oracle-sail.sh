@@ -82,23 +82,9 @@ do_build() {
   (cd "$here" &&
     AARCH64_ORACLE_SAIL_MODEL_C="$inst/model.cpp" \
       cargo build --release --locked)
-  # The qemu agent's oracle CLI, built from its unmodified sources plus (only while needed) an
-  # overlay fixing a comparator panic on >8-byte memory diffs (now fixed upstream in compare.go, so
-  # the overlay is empty unless an old checkout is used; see docs/ORACLE-SAIL.md).
-  mkdir -p "$here/bin" "$here/go-overlay"
-  python3 -I - "$root/oracle/cmd/oracle/compare.go" "$here/go-overlay" <<'PY'
-import json, sys, os
-src, d = sys.argv[1], sys.argv[2]
-s = open(src).read()
-bad = '\t\tk := d[:strings.IndexAny(d, ":[")]\n'
-good = '\t\tk := d\n\t\tif j := strings.IndexAny(d, ":["); j >= 0 {\n\t\t\tk = d[:j]\n\t\t}\n'
-rep = {}
-if bad in s:
-    open(os.path.join(d, "compare.go"), "w").write(s.replace(bad, good))
-    rep[src] = os.path.join(d, "compare.go")
-json.dump({"Replace": rep}, open(os.path.join(d, "overlay.json"), "w"))
-PY
-  (cd "$root/oracle" && go build -overlay "$here/go-overlay/overlay.json" -o "$here/bin/oracle" ./cmd/oracle)
+  # The qemu oracle CLI (its comparator is shared).
+  mkdir -p "$here/bin"
+  (cd "$root/oracle" && go build -o "$here/bin/oracle" ./cmd/oracle)
   (cd "$root" && lake build janus-oracle >/dev/null) ||
     echo "warning: lake build janus-oracle failed; using the existing $root/.lake/build/bin/janus-oracle" >&2
 }
@@ -166,9 +152,13 @@ for line in sys.stdin:
   echo "== Sail-only: SP-based accesses with a misaligned SP (qemu does not check SP alignment)"
   mkdir -p "$OUT/spalign"
   python3 -I "$here/spalign.py" "$OUT/cases.sail-dczid.jsonl" > "$OUT/spalign/cases.in.jsonl"
-  JANUS_SAIL_JOBS=1 "$oracle_bin" run -qemu "" -runner "$sail_bin" -model "$janus_bin" -j "$JOBS" \
-    -cases "$OUT/spalign/cases.in.jsonl" -out "$OUT/spalign" > /dev/null
-  sed -n 5p "$OUT/spalign/summary.md"
+  if [ -s "$OUT/spalign/cases.in.jsonl" ]; then
+    JANUS_SAIL_JOBS=1 "$oracle_bin" run -qemu "" -runner "$sail_bin" -model "$janus_bin" -j "$JOBS" \
+      -cases "$OUT/spalign/cases.in.jsonl" -out "$OUT/spalign" > /dev/null
+    sed -n 5p "$OUT/spalign/summary.md"
+  else
+    echo "(no SP-based accesses in this corpus: spalign skipped)"
+  fi
   python3 -I "$here/threeway.py" "$OUT" > /dev/null
   sed -n '1,12p' "$OUT/threeway.md"
   echo "report: $OUT/threeway.md  soundness cases: $OUT/soundness.jsonl"

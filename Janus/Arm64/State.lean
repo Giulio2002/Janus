@@ -70,6 +70,15 @@ structure State where
   vregs : Nat → BitVec 128 := fun _ => 0
   /-- TPIDR_EL0 (read by `MRS Xt, TPIDR_EL0`); constant during execution. -/
   tpidr : W64 := 0
+  /-- FPCR, the floating-point control register (rounding mode `RMode` in bits 23:22, `FZ` 24,
+  `DN` 25, `FIZ` 0, `AH` 1, `NEP` 2, the trap enables in bits 8–12 and 15). Read by the
+  floating-point instructions, written by none of the accepted ones (`MSR FPCR` is not
+  decoded), so it is a constant of the run that theorems quantify over. -/
+  fpcr : BitVec 32 := 0
+  /-- FPSR, the floating-point status register: the cumulative exception flags `IOC` 0, `DZC` 1,
+  `OFC` 2, `UFC` 3, `IXC` 4, `IDC` 7 (and `QC` 27, which no accepted instruction writes). A
+  floating-point instruction ORs the exceptions it raises into it. -/
+  fpsr : BitVec 32 := 0
 
 instance : Inhabited State :=
   ⟨{ regs := fun _ => 0, sp := 0, pc := 0, flags := ⟨false, false, false, false⟩, mem := default }⟩
@@ -94,6 +103,10 @@ inductive Fault where
   /-- The instruction at `pc` is disabled by the system configuration (DC ZVA while
   `DCZID_EL0.DZP = 1`); on Linux a `SIGILL`. -/
   | trapped (pc : Nat)
+  /-- The floating-point instruction at `pc` raised an exception whose trap is enabled in
+  `FPCR` (`IOE`/`DZE`/`OFE`/`UFE`/`IXE`/`IDE`). On a CPU that supports trapping this is a
+  `SIGFPE`; on one that does not, the enable bits read as zero and the state cannot occur. -/
+  | fpTrapped (pc : Nat)
   /-- Fuel ran out before the call returned. -/
   | outOfFuel
 deriving Repr, DecidableEq, Inhabited

@@ -3,6 +3,7 @@ import Janus.Arm64.Instr
 import Janus.Arm64.Bits
 import Janus.Arm64.Decode
 import Janus.Arm64.Vector
+import Janus.Arm64.ExecFloat
 
 /-!
 # AArch64 execution semantics for the supported subset
@@ -862,6 +863,33 @@ def exec (i : Instr) (s : State) : Except Fault State :=
       (s.getV rm (qsize Q)) (s.getV rd (qsize Q)))).next
   | .vAes opcode rn rd => .ok (s.setV rd 128 (aesOp opcode (s.getV rd 128) (s.getV rn 128))).next
   | .fmovGen sf _ rmode opcode rn rd => .ok (execFmovGen s sf rmode opcode rn rd).next
+  -- Scalar floating point (`Janus.Arm64.ExecFloat`)
+  | .fpDP1 ftype opcode rn rd =>
+    match execFpDP1 s ftype opcode rn rd with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpDP2 ftype rm opcode rn rd =>
+    match execFpDP2 s ftype rm opcode rn rd with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpDP3 ftype o1 rm o0 ra rn rd =>
+    match execFpDP3 s ftype o1 rm o0 ra rn rd with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpCmp ftype rm opc rn =>
+    match execFpCmp s ftype rm opc rn with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpCcmp ftype rm cond signal rn nzcv =>
+    match execFpCcmp s ftype rm (conditionHolds cond s.flags) signal rn nzcv with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
+  | .fpCsel ftype rm cond rn rd => .ok (execFpCsel s ftype rm (conditionHolds cond s.flags) rn rd).next
+  | .fpImm ftype imm8 rd => .ok (execFpImm s ftype imm8 rd).next
+  | .fpCvtInt sf ftype rmode opcode rn rd =>
+    match execFpCvtInt s sf ftype rmode opcode rn rd with
+    | .error e => .error e
+    | .ok s' => .ok s'.next
   -- Data processing: register
   | .logicalShifted sf opc shift N rm imm6 rn rd =>
     .ok (if sf then execLogicalShifted 64 s opc shift N rm imm6 rn rd
