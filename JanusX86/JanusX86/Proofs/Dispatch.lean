@@ -54,7 +54,7 @@ open Janus.Amd64.Decode in
 theorem run_fetch_one {s : SState} (h : X86Config s) {base : Nat}
     (hr : s.regs.get? .rip = some (BitVec.ofNat 64 base)) {bs : List Nat} (hc : CodeAt s base bs)
     {p : Prefixes} {op : Nat} {rest : List Nat} {n : Nat}
-    (hp : parsePrefixes bs {} 0 = some (p, op :: rest, n)) (hn : n ≤ 12) (hlim : base + 16 < 2 ^ 47)
+    (hp : parsePrefixes bs {} 0 = some (p, op :: rest, n)) (hn : n ≤ 13) (hlim : base + 17 < 2 ^ 47)
     (hop : prefixGroup op = 0) (hop4 : op / 16 ≠ 4) (hvex : op ≠ 0xC4 ∧ op ≠ 0xC5 ∧ op ≠ 0x62)
     (hlen : (modrmSib (modrmP1 op) rest).2.2 ≤ rest.length) :
     ∃ x rex, PfxRel p x rex ∧ _get_prefixes_nxt x = BitVec.ofNat 8 op ∧
