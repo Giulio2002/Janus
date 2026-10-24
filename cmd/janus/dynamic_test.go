@@ -43,7 +43,7 @@ func TestDynamicTargetsItab(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		x, err := extractWith(b, "example.com/basic.HashWith", defaultMaxFunctions, []string{itabMul, itabRot})
+		x, err := extractWith(b, "example.com/basic.HashWith", defaultMaxFunctions, nil, itabMul, itabRot)
 		if err != nil {
 			t.Fatal(err)
 		}
