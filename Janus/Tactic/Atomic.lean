@@ -44,6 +44,31 @@ variable (s : State)
 
 end ExecEqns
 
+/-- A load-exclusive is the ordered load (`execOrdered … true`) plus the monitor mark: a successful
+`LDXR`/`LDAXR` has the registers, memory and `pc` of the plain aligned load. (For relating it to
+models that do not track the monitor, e.g. the JanusASL `Rel`, which reads only registers, `SP`,
+`pc` and flags.) -/
+theorem _root_.Janus.Arm64.execLdExcl_ok {js js1 : State} {size rn rt : Nat}
+    (h : execLdExcl js size rn rt = .ok js1) :
+    ∃ js0 m, execOrdered js size true rn rt = .ok js0 ∧ js1 = { js0 with excl := some m } := by
+  unfold execLdExcl at h
+  unfold execOrdered
+  split at h
+  · cases h
+  · next base hb =>
+    simp only at h ⊢
+    split at h
+    · cases h
+    · next hal =>
+      simp only [hal, ite_false, ite_true]
+      split at h
+      · cases h
+      · next v hl =>
+        cases h
+        refine ⟨_, (base.toNat, 2 ^ size), rfl, ?_⟩
+        simp only [State.writeZR, State.next]
+        split <;> rfl
+
 attribute [janus_exec] execOrdered execAtomic execCas execCasp execDcZva atomicOp execLdExcl
   execLdExclPair execStExclData execStExcl execStExclPair
 

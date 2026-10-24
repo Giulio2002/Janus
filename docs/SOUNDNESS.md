@@ -278,9 +278,13 @@ about executions outside it.
   an ordinary load, a store-release (`STLR`) an ordinary store, and the acquire/release
   variants of the LSE atomics behave like the plain ones. With one thread and no other
   observer these are equivalent; a theorem says nothing about what another thread would see.
+  The one effect of the outside world a single thread can observe in its own registers, the
+  outcome of a store-exclusive (an interrupt, an eviction or another observer can make it fail),
+  is an input of the run (`State.exclPass`) that theorems quantify over.
   See "Atomics, exclusives and system registers" below.
 * **No signals, no asynchronous preemption, no interrupts.** Go's signal-based async
-  preemption, profiling signals and injected calls (`sigpanic`) are not modelled.
+  preemption, profiling signals and injected calls (`sigpanic`) are not modelled (except that a
+  store-exclusive may fail at any time, which is how an interrupt would show up there).
 * **No runtime interaction.** No GC (write barriers, stack scanning, moving stacks), no
   scheduler, no stack growth. Reaching `runtime.morestack*` ends the run as a `morestack`
   outcome, and it is not a return. Calls into other runtime functions only work if they were
@@ -375,24 +379,68 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   (the AArch64 procedure-call standard passes floating-point values in SIMD&FP registers).
   FEAT_AES, FEAT_LRCPC and FEAT_LSE are assumed in the same way where their instructions are
   accepted.
-* **Store-exclusives are rejected.** `STXR`, `STLXR`, `STXP` and `STLXP` decode to nothing
-  (`undecodable`), so any run that reaches one faults. Reasoning: on real hardware a
-  store-exclusive may fail *spuriously* (status 1, nothing stored) even with no other thread:
-  an interrupt, a context switch, a cache eviction or an implementation-defined event clears
-  the exclusive monitor. A deterministic "always succeeds" model would therefore claim
-  behaviour hardware does not guarantee; it is sound only for code whose result does not
-  depend on the number of failures (a correct retry loop), which is a property of the
-  surrounding program, not of the instruction, and the model checks instructions one at a
-  time. An "always fails" model is unsound in the other direction (the first attempt can
-  succeed). A sound alternative would make the outcome an explicit nondeterministic input
-  (an oracle stream in the state that theorems quantify over, plus a fairness assumption for
-  termination); it is not needed for Go's LSE paths, so it is not implemented. The
-  consequence is conservative: the `LDAXR`/`STLXR` fallback of `sync/atomic` (taken only when
-  the CPU lacks LSE) cannot be proved, and a theorem through it is unprovable, never wrong.
-* **Load-exclusives** (`LDXR`, `LDAXR`) are modelled as ordinary (aligned) loads. The exclusive
-  monitor they would arm is observable only by a store-exclusive, which faults, so it is not
-  part of the state; `CLREX` is a no-op for the same reason. Exclusive pairs (`LDXP`,
-  `LDAXP`) are rejected.
+* **Exclusives: the monitor and the environment's choice.** `LDXR`, `LDAXR`, `LDXP`, `LDAXP`
+  (every size) are aligned loads that mark the *local exclusive monitor*, `State.excl :=
+  some (addr, size)` (Arm ARM B2.9, `AArch64.SetExclusiveMonitors`). `STXR`, `STLXR`, `STXP`,
+  `STLXP` (every size) write their status register as the pseudocode does
+  (`if AArch64.ExclusiveMonitorsPass(address, dbytes) then Mem[address] = data; status = '0'
+  else status = '1'`), with `ExclusiveMonitorsPass` modelled as follows (`Exec.lean`, "The
+  exclusive monitor"):
+  * **Open Access state** (`excl = none`): the store-exclusive **fails**: status 1, nothing is
+    written. This is the one outcome the architecture guarantees (`IsExclusiveLocal` is FALSE
+    when nothing is marked); the monitor is open after `CLREX`, after every store-exclusive to
+    the marked bytes, and (for the oracle) at the start of a case.
+  * **The marked bytes**: the store-exclusive **may** pass, never must. Hardware may clear the
+    monitor at any moment, even with one thread (an interrupt or exception return, a context
+    switch, a cache eviction, the global monitor, a store by this PE to the marked bytes, an
+    IMPLEMENTATION DEFINED event), so a *spurious failure* is always allowed. The outcome is
+    therefore not computed but read from the environment: `State.exclPass 0` (true = pass),
+    after which the stream advances by one and the monitor is open. A theorem about arbitrary
+    initial states quantifies over `exclPass`, so it holds for **every** sequence of outcomes;
+    the model never assumes a pass.
+  * **Other bytes** (a store-exclusive whose address or size differs from the marked ones):
+    whether it passes is IMPLEMENTATION DEFINED (the marked region may be a whole reservation
+    granule) or CONSTRAINED UNPREDICTABLE, and so is whether it clears the monitor. The model
+    does not pick an answer: the run stops with `Fault.unpredictable`. Go's LL/SC loops and the C
+    outline atomics always store to the bytes they loaded, so this costs no coverage.
+  * **Faults first.** The alignment check (always: the model is conservative about FEAT_LSE2, as
+    for the other exclusive and atomic accesses) and the memory permission check of the store
+    come before the monitor. The Arm ARM leaves it IMPLEMENTATION DEFINED whether memory aborts
+    are detected before the monitor check, so on hardware a failing store-exclusive to an
+    inaccessible address may return status 1 instead of faulting; the model faults (it never
+    claims the status-1 result there).
+  * **What is not modelled, and why that is sound.** Ordinary stores do not clear the model's
+    mark (on hardware it is IMPLEMENTATION DEFINED); keeping the mark only permits a pass that
+    hardware might not give, and every pass is the environment's choice anyway. The global
+    monitor, other observers and the ordering effects of the acquire/release forms are outside
+    the single-threaded model, as for every other instruction. `ExclusiveMonitorsStatus()`
+    returns 0 after a passing store (it returns 1 only if the translation of the address changed
+    between the check and the write, which cannot happen within one instruction here).
+  * **Why this covers every hardware run.** Take the model's initial `excl` to be the hardware
+    monitor's state at the call (`none` if open, `some m` if it marks the bytes `m`) and
+    `exclPass` to be the outcomes the hardware's store-exclusives to the marked bytes actually
+    have. Then at every step, `excl = none` implies the hardware monitor is open, and
+    `excl = some m` implies it is open or marks exactly `m` (a load-exclusive marks the same bytes
+    on both; `CLREX` opens both; the hardware may open its monitor at any time, which the model
+    does not need to follow; a store-exclusive to `m` opens it, since `IsExclusiveVA` may return
+    FALSE only outside the marked region and `ClearExclusiveLocal` is then reached). Under this
+    invariant every hardware store-exclusive outcome is the model's (a fail in the Open state, the
+    stream's outcome on `m`), or the model stops (`unpredictable`, a fault). A theorem about
+    arbitrary initial states covers this initial state, hence the hardware run. A theorem whose
+    precondition restricts `s.excl` or `s.exclPass` says so in its printed statement.
+* **Retry loops terminate only under a stated progress hypothesis.** An LL/SC loop
+  (`LDAXR`; compute; `STLXR`; `CBNZ` back) returns once a store-exclusive passes, and under the
+  all-fail stream it never does. Its theorem must therefore assume eventual success explicitly,
+  as a precondition on the initial state: `∃ k, s.exclPass k = true` (the `k+1`-th
+  store-exclusive to the marked bytes passes). This is the forward-progress property the Arm ARM
+  describes for such loops (an exclusive pair with no other explicit memory access, cache
+  maintenance or `CLREX` in between, a few instructions apart); the model does not assume it, the
+  theorem states it. `examples/proofs/AtomicAdd.lean` (`anyCPU`) proves `atomic.AddUint64`
+  through both paths: the LSE `LDADDAL` when `runtime.arm64HasATOMICS` is set, and otherwise the
+  LL/SC loop under this hypothesis (`loop`: by induction on the index of the first pass; a failed
+  attempt returns to the loop head with memory unchanged and the stream advanced). A safety
+  property that needs no hypothesis (the loop never faults, whatever the outcomes) is true but
+  not stated as a theorem there.
 * **PRFM/PRFUM** (all forms and prefetch operations) only advance `pc`: a prefetch never faults
   and has no architectural effect.
 * **`DCZID_EL0` is a parameter, not a constant.** `MRS Xt, DCZID_EL0` (the only accepted system
@@ -481,7 +529,8 @@ Since then the scalar floating-point words are modelled too (see "Floating point
 `blockers` reports, before → after: `math` 1 → **56 of 56** symbols fully decoded (555 → 0
 distinct rejected words), `sort` 59 → 63 of 66 (138 → 68), `strconv` 5 → 5 of 20 (154 → 68).
 Every word still rejected there is a store-exclusive (`STLXR`/`STLXRB`), `MRS` of the generic
-timer or `SVC`.
+timer or `SVC`. The store-exclusives have since been modelled as well (the exclusive monitor
+and the environment's outcome stream, "Atomics, exclusives and system registers" above).
 
 ## Floating point
 
