@@ -169,7 +169,8 @@ The common shape, `RTPre` and `RTReturn`:
 
 * **pre**: `M.Env` with the goroutine (`X28` / `R14`), the stack guard at least `M.depth` bytes
   below `SP`, the stack window `[SP - M.depth, SP + 8 + 8·nargs)` writable and outside `M.priv`,
-  an admissible return address (`X30` 4-aligned below `2^48`; on amd64 `X15 = 0`, `DF` clear), and
+  an admissible return address (`X30` 4-aligned below `2^48`; on amd64 the word at `[RSP]` below
+  `2^47`, which `RET` needs, plus `X15 = 0` and `DF` clear), and
   `M.Typ` for the descriptor in the first argument register;
 * **post**: the call returns to the caller with `SP`, `X18`/`X28`/`X29` (amd64: `RSP + 8`, `RBP`,
   `R14`, `X15`) preserved and everything else arbitrary; memory changes only in `M.priv`, at most
@@ -205,12 +206,15 @@ raised by code the extraction leaves out, not by a panic stub of the extracted p
 **Concurrency.** The runtime's detection of concurrent misuse (`fatal("concurrent map writes")`,
 the `writing` flag) cannot trigger in the single-threaded model and is not part of any contract.
 
-**What is proved rather than assumed.** `examples/proofs/MapAccess1Small.lean` verifies the
-machine code of `runtime.mapaccess1_fast64` (arm64) against `Access1` for the concrete
+**What is proved rather than assumed.** `examples/proofs/MapAccess1Small.lean` (arm64) and
+`examples/proofs-amd64/MapAccess1Small/Proof.lean` (amd64) verify the machine code of
+`runtime.mapaccess1_fast64` against `Access1` for the concrete
 representation `smallModel t zeroVal heap` (`Janus/Spec/SwissMap.lean`): nil maps, and small Swiss
 maps (`SwissSmall`: `dirLen = 0`, `writing = 0`, one group of a control word and 8 key/value slots
 of 16 bytes, control byte `< 0x80` = full, `used` = number of entries, all inside `heap`; the slot
-size `16` at `t + 88` and `runtime.zeroVal` readable and zero). `smallModel_laws` proves the laws
+size `16` at `t + 88` and `runtime.zeroVal` readable and zero). arm64 scans with the
+`MVN`/`AND 0x8080…` byte mask (`maskFrom`, `mask_toNat`), amd64 with `PMOVMSKB`/`NOT` (`fullMask`).
+`smallModel_laws` proves the laws
 for it. So for small maps the `Access1` hypothesis is discharged by the real code. Still trusted:
 every other contract, the large-map path of `mapaccess1_fast64` (hashing through the type's hasher
 by an indirect `BLR`, directory and table probing), and the reading of Go 1.26's layout in
@@ -220,4 +224,5 @@ part of `SwissSmall` because the small-map lookup does not read them.
 **Examples** (`examples/basic/maps.go`; arm64 `examples/proofs/<Name>.lean`, amd64
 `examples/proofs-amd64/<Name>/Proof.lean`): `Lookup`, `Insert`, `InsertGet` (two contracts; the
 read-back returns `v`), `Delete`, `SumValues` (iteration, every order), `CountKeys` (no contract),
-`LookupKey16` (generic `mapaccess2`), `NewMap`, `ClearMap`, and `MapAccess1Small` (arm64 only).
+`LookupKey16` (generic `mapaccess2`), `NewMap`, `ClearMap`, and `MapAccess1Small` (the runtime
+function itself, extracted as `runtime.mapaccess1_fast64`).
