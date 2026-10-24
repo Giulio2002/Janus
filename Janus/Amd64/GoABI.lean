@@ -16,7 +16,7 @@ Source of truth: `$GOROOT/src/cmd/compile/abi-internal.md`, section "amd64 archi
 | `RBP` | frame pointer | same | same |
 | `RSP` | stack pointer (8-byte aligned), `[RSP]` = return address | `RSP + 8` | |
 | `X15` | zero | zero | scratch |
-| `X0`–`X14` | floating-point arguments/results (not modelled by `GoABI`) | | scratch |
+| `X0`–`X14` | floating-point arguments/results (stated by preconditions on `State.xmm`; `CallSetup` has no float arguments) | | scratch |
 
 There are no other callee-saved registers; the status flags are scratch and the direction
 flag is clear at calls (no modelled instruction depends on it). `CALL` pushes the return

@@ -280,9 +280,9 @@ about executions outside it.
 * **ABIInternal only.** `GoABI` covers integer arguments and results in `R0`–`R15` and
   stack-assigned words from `8(RSP)`. The SIMD&FP registers are in the state (`State.vregs`,
   arbitrary in every call state, not preserved by `ABIReturn`: Go's ABIInternal has no
-  callee-saved SIMD&FP registers), but `GoABI` passes no floating-point arguments or results
-  (`F0`–`F15`), and there is no FPCR/FPSR. A function whose arguments use them is outside the
-  model.
+  callee-saved SIMD&FP registers). `CallSetup` passes no floating-point arguments or results
+  (`F0`–`F15`, the low bits of `V0`–`V15`): a theorem about a `float64` function states them as
+  preconditions on `s.getV i 64` and results on `s'.getV 0 64` (see "Floating point" below).
   "`R29` is preserved" relies on Go's frame-pointer convention (`GoABI.FPConvention`:
   `R29 = SP - 8` at the call), because Go 1.26 leaf functions restore `R29` arithmetically.
 * **64-bit addresses as naturals.** Addresses are `Nat` values below `2^64`, produced by the
@@ -400,9 +400,7 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   Accepting them assumes FEAT_AES; Go only runs its AES hash after testing `cpu.ARM64.HasAES`
   (`runtime.useAeshash`), so a proof through it assumes that flag, as for LSE.
 
-Not modelled, and rejected: all floating-point arithmetic, comparison and conversion (and with
-them FPCR/FPSR: no accepted instruction reads or writes them, so they are not in the state),
-saturating, rounding and widening/narrowing arithmetic other than the listed ones, permutes
+Not modelled, and rejected: Advanced SIMD (vector) floating point, saturating, rounding and widening/narrowing arithmetic other than the listed ones, permutes
 (`ZIP`/`UZP`/`TRN`), SHA, polynomial multiply, SVE and SME. An Advanced SIMD write sets the whole
 128-bit register (`V[d, n] = x` zero-extends); on a CPU with SVE the hardware also zeroes the
 upper bits of `Z[d]`, which are not part of the model and not observable by the accepted
@@ -434,6 +432,64 @@ pacer and heap profiling reached through `mallocgc`), a store-exclusive (`STLXR`
 fallbacks), `SVC` (system calls) or `MRS CNTVCT_EL0`/`CNTFRQ_EL0` (the generic timer in
 `runtime.procyieldAsm`; the counter is not a constant, so it needs a nondeterministic model).
 The other functions of `bytes`/`strings` reach `runtime.mallocgc` and stay blocked by these.
+Since then the scalar floating-point words are modelled too (see "Floating point"); in the
+`math`, `strconv` and `sort` test binaries (every `T` symbol of the package, same settings)
+`blockers` reports, before → after: `math` 1 → **56 of 56** symbols fully decoded (555 → 0
+distinct rejected words), `sort` 59 → 63 of 66 (138 → 68), `strconv` 5 → 5 of 20 (154 → 68).
+Every word still rejected there is a store-exclusive (`STLXR`/`STLXRB`), `MRS` of the generic
+timer or `SVC`.
+
+## Floating point
+
+Both models implement the scalar `float32`/`float64` instructions Go emits, bit-exactly, on a
+shared IEEE 754 core (`Janus/Float/Core.lean`: exact values as dyadic rationals, rounding in the
+five directions with tininess before and after rounding, round-to-odd quotients and square
+roots, integer rounding; `Nat`/`Int` only, kernel-reducible on literals with `decide +kernel`).
+What differs between the architectures is in the per-ISA wrappers, which transcribe the vendor
+pseudocode:
+
+| | arm64 (`Janus/Arm64/Float.lean`, ASL) | amd64 (`Janus/Amd64/Float.lean`, Intel SDM) |
+|---|---|---|
+| instructions | `FADD FSUB FMUL FNMUL FDIV FSQRT FNEG FABS FMIN FMAX FMINNM FMAXNM FMADD FMSUB FNMADD FNMSUB FCMP FCMPE FCCMP FCCMPE FCSEL FCVT` (S↔D) `FCVT{N,P,M,Z,A}{S,U} SCVTF UCVTF` (32/64-bit) `FRINT{N,P,M,Z,A,X,I}`, `FMOV` (register, immediate) | `ADD SUB MUL DIV SQRT MIN MAX` `SD`/`SS`, `UCOMISD COMISD UCOMISS COMISS`, `CMPSD`/`CMPSS` (predicates 0–7), `CVTSI2SD/SS`, `CVTTSD2SI CVTSD2SI CVTTSS2SI CVTSS2SI` (32/64-bit), `CVTSD2SS CVTSS2SD`, `ROUNDSD`/`ROUNDSS` (SSE4.1, which Go runs behind a `runtime.x86HasSSE41` test), `ANDPD ANDNPD ORPD ANDPS ANDNPS ORPS` |
+| control state | `State.fpcr`: `RMode`, `FZ`, `DN`, and FEAT_AFP's `FIZ`, `AH`, `NEP` | `State.mxcsr`: `RC`, `FTZ`, `DAZ`, the six masks |
+| flags | `State.fpsr` (`IOC DZC OFC UFC IXC IDC`, cumulative) | `MXCSR` bits 5:0 (`IE DE ZE OE UE PE`, cumulative) |
+| NaN results | the first signalling, else the first quiet operand (for `FMADD`: addend first), quieted; default NaN `0x7FF8…` with `DN = 1`; `AH = 1` has its own rules (default NaN negative, `FMAX` returns the second operand, ...) | the first source operand if it is a NaN, else the second, quieted; invalid operations give the indefinite `0xFFF8…`; `MINSD`/`MAXSD` return the second operand unchanged |
+| tininess | before rounding (`AH = 0`), after rounding (`AH = 1`) | after rounding |
+| flush-to-zero | `FZ`: inputs and outputs (output before rounding, `UFC` only, when `AH = 0`); `FIZ`: inputs | `DAZ`: inputs (no `DE`); `FTZ`: tiny results, exact or not, with `UE PE` |
+| out-of-range to integer | saturates; NaN gives 0 (`IOC`) | the integer indefinite `2^(w-1)` (`IE`) |
+| exceptions | a raised exception whose `FPCR` trap enable is set faults (`fpTrapped`); qemu and most cores have no trapping (the enable bits are RAZ) | an unmasked exception faults (`simdFPException`, `#XM`); an unmasked underflow traps on every tiny result |
+
+**Feature assumptions.** The arm64 model is of a CPU with FEAT_FP and FEAT_AFP. With
+`FPCR.{FIZ, AH, NEP} = 0` the AFP model coincides with Armv8.0's; on a CPU without FEAT_AFP those
+bits are RES0, so a theorem whose precondition allows them set says nothing about such a CPU
+unless they read as zero there. Half precision (FEAT_FP16: `ftype = 11`, `FZ16`, `AHP`), BFloat16,
+`FRINT32*/64*`, `FJCVTZS`, fixed-point conversions and Advanced SIMD floating point are rejected.
+The amd64 model is of SSE2 (and SSE4.1 for `ROUNDSD`, executed by Go only after testing
+`x86HasSSE41`); the VEX/EVEX forms (`VFMADD231SD` behind `x86HasFMA`, ...), x87 and `LDMXCSR` are
+rejected. Encodings whose behaviour the manuals leave open (an `FCMP #0.0` with a non-zero `Rm`
+field, `REX.W` on an SSE instruction that does not use it, reserved `CMPSD`/`ROUNDSD` immediate
+bits) are rejected rather than guessed.
+
+**State and quantification.** `FPCR`, `FPSR` and `MXCSR` are state fields, arbitrary in every
+call state unless a precondition fixes them; no accepted instruction writes the control bits
+(`MSR FPCR`, `LDMXCSR` are not decoded), so a run keeps the caller's values. Linux starts every
+process with `FPCR = 0` and `MXCSR = 0x1F80`, and Go never changes them, so the examples state
+these defaults as preconditions (and, on arm64, an `exact` theorem for every `FPCR` without trap
+enables). The ABI says nothing about `FPSR`/`MXCSR` flags on return; the theorems do not either,
+except where they state them explicitly.
+
+**Specifications.** `Janus/Float/Spec.lean` states the IEEE operations independently of the
+architectures: `add`, `mul`, `fma` (`none` when the IEEE result is a NaN), `abs`, `truncInt`, and
+`ResultIs f spec x` (the delivered encoding `x` is exactly the IEEE result, or some NaN when that
+is a NaN; IEEE 754 does not fix the NaN, so neither does the specification). The bridge lemmas
+`Janus.Arm64.FP.fpAdd_ieee`/`fpMul_ieee`/`fpMulAdd_ieee`/`fpToFixed_rzu_ieee` and
+`Janus.Amd64.FP.binop_add_ieee`/`binop_mul_ieee` prove that the models compute these in IEEE
+mode (no flushing, no default NaN, no alternate handling; any rounding direction); they are
+proved, not trusted.
+
+**Validation.** The core and both wrappers are checked against qemu and the Arm ASL (Sail) on
+arm64, the host CPU on amd64, and Berkeley TestFloat/SoftFloat (`scripts/testfloat.sh`); see
+`docs/ORACLE.md`, `docs/ORACLE-SAIL.md` and `docs/ORACLE-AMD64.md`.
 
 ## Runtime contracts
 

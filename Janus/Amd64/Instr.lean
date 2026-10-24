@@ -94,6 +94,12 @@ inductive SseOp where
   | punpcklbw
 deriving Repr, DecidableEq, Inhabited
 
+/-- SSE scalar floating-point arithmetic (`ADDSD SUBSD MULSD DIVSD MINSD MAXSD SQRTSD` and
+the `SS` forms). -/
+inductive FPArith where
+  | add | sub | mul | div | min | max | sqrt
+deriving Repr, DecidableEq, Inhabited
+
 inductive Instr where
   /-- `ADD/OR/ADC/SBB/AND/SUB/XOR/CMP dst, src`. -/
   | alu (op : AluOp) (w : Nat) (dst : Loc) (src : Src)
@@ -223,6 +229,27 @@ inductive Instr where
   `RDI` (by `+w/8`, or `-w/8` when `DF = 1`). With `rep` (`F3`), repeat `RCX` times and leave
   `RCX = 0`. -/
   | stos (rep : Bool) (w : Nat)
+  -- SSE scalar floating point (`Janus.Amd64.Float`); `w` is 64 (`SD`) or 32 (`SS`).
+  /-- `ADDSD/SUBSD/MULSD/DIVSD/MINSD/MAXSD/SQRTSD xmm, xmm/m64` (`w = 64`) and the `SS` forms
+  (`w = 32`): the low `w` bits of `XMM[dst]` become `XMM[dst] op src` (`SQRT`: `√src`); the
+  other bits are preserved. -/
+  | sseArith (op : FPArith) (w : Nat) (dst : Nat) (src : XLoc)
+  /-- `UCOMISD`/`UCOMISS` (`signal = false`) and `COMISD`/`COMISS` (`signal`): `ZF PF CF` from
+  comparing `XMM[a]` with `b`, `OF AF SF` cleared. -/
+  | sseComi (signal : Bool) (w : Nat) (a : Nat) (b : XLoc)
+  /-- `CMPSD`/`CMPSS xmm, xmm/m, pred` (`pred < 8`): the low `w` bits become all ones or 0. -/
+  | sseCmp (w : Nat) (dst : Nat) (src : XLoc) (pred : Nat)
+  /-- `CVTSI2SD`/`CVTSI2SS xmm, r/m32` (`iw = 32`) or `r/m64` (`iw = 64`, `REX.W`). -/
+  | cvtsi2f (w iw : Nat) (dst : Nat) (src : Loc)
+  /-- `CVTTSD2SI`/`CVTTSS2SI` (`trunc`) and `CVTSD2SI`/`CVTSS2SI r32/r64, xmm/m`. -/
+  | cvtf2si (trunc : Bool) (w iw : Nat) (dst : Nat) (src : XLoc)
+  /-- `CVTSD2SS` (`w = 64`, the source width) / `CVTSS2SD` (`w = 32`). -/
+  | cvtff (w : Nat) (dst : Nat) (src : XLoc)
+  /-- `ROUNDSD`/`ROUNDSS xmm, xmm/m, imm8` (SSE4.1, `imm8 < 16`). -/
+  | sseRound (w : Nat) (dst : Nat) (src : XLoc) (imm : Nat)
+  /-- `ANDPS/ANDPD` (`op = 0`), `ANDNPS/ANDNPD` (`1`: `NOT dst AND src`), `ORPS/ORPD` (`2`) on
+  128 bits (legacy SSE: a memory operand must be 16-byte aligned). -/
+  | fpLogic (op : Nat) (dst : Nat) (src : XLoc)
   /-- A `LOCK`ed read-modify-write, or `XCHG` with a memory operand (locked implicitly):
   executes `i`, but first faults (`misaligned`) unless its memory operand (`size` bytes at `a`)
   is naturally aligned, so that the locked access never splits a cache line (Linux with
