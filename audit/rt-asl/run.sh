@@ -30,9 +30,9 @@ row() { # row NAME EXPECT RESULT  (EXPECT ok|blocked|latent: RESULT must start w
 
 echo "== JanusASL (scripts/asl.sh prove)"
 if scripts/asl.sh prove > "$W/prove.log" 2>&1; then
-  row "asl-prove (41 theorems)" ok "ok ($(grep -o 'audited [0-9]* theorems' "$W/prove.log"))"
+  row "asl-prove (44 theorems)" ok "ok ($(grep -o 'audited [0-9]* theorems' "$W/prove.log"))"
 else
-  row "asl-prove (41 theorems)" ok "FAILED: $(tail -3 "$W/prove.log" | tr '\n' ' ')"
+  row "asl-prove (44 theorems)" ok "FAILED: $(tail -3 "$W/prove.log" | tr '\n' ' ')"
 fi
 
 lean_in_pkg() { (cd "$root/JanusASL" && lake env lean "$@"); }
