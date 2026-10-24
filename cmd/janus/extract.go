@@ -55,6 +55,14 @@ type Extraction struct {
 // stubKind classifies runtime functions that end execution with a named outcome.
 func stubKind(name string) (StubKind, bool) {
 	n := strings.TrimSuffix(strings.TrimSuffix(name, ".abi0"), ".abiinternal")
+	// Round 6 F3: only package `runtime` itself. A Go symbol is "<import path>.<name>", and an
+	// import path such as `runtime.panicky/lib` (a legal module path) gives the ordinary
+	// function `runtime.panicky/lib.Zero`, which a bare prefix test took for a panic stub. The
+	// path of package runtime has no '/', and any other import path whose symbols start with
+	// "runtime." has one (a dot in the last path element is escaped as %2e by the linker).
+	if strings.Contains(n, "/") || strings.Contains(n, "%") {
+		return "", false
+	}
 	switch {
 	case strings.HasPrefix(n, "runtime.morestack"):
 		return stubMorestack, true
