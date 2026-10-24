@@ -25,3 +25,7 @@ root = "Oracle.Amd64Main"
 name = "janus-audit"
 root = "Janus.Tools.AuditMain"
 supportInterpreter = true
+
+[[lean_exe]]
+name = "janus-testfloat"
+root = "Oracle.TestFloat"

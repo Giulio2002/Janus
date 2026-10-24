@@ -29,6 +29,10 @@ var Keep = []any{
 	basic.AddLimbs,
 	basic.CopyWords,
 	basic.SumSquares,
+	basic.AddF64,
+	basic.Dot3,
+	basic.F64ToU64,
+	basic.Abs,
 }
 
 func main() {

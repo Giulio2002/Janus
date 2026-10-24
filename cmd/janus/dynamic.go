@@ -110,6 +110,8 @@ type reacher struct {
 	dynSeen  map[string]bool
 	queue    []Func
 	scan     func(*Binary, Func) (Segment, []Unresolved, error)
+	// err is the first stub-classification error (round 7 G1), reported by drain and extractWith.
+	err error
 }
 
 func (r *reacher) addStub(g Func, k StubKind) {
@@ -131,7 +133,14 @@ func (r *reacher) addTarget(addr uint64, via, from string) bool {
 		r.dynSeen[key] = true
 		r.x.Dynamic = append(r.x.Dynamic, DynTarget{Name: g.Name, Addr: g.Addr, Via: via, From: from})
 	}
-	if k, ok := stubKind(g.Name); ok {
+	k, isStub, err := r.b.classifyStub(g)
+	if err != nil {
+		if r.err == nil {
+			r.err = err
+		}
+		return true
+	}
+	if isStub {
 		r.addStub(g, k)
 		return true
 	}
@@ -163,6 +172,9 @@ func (r *reacher) tooMany() error {
 
 // drain copies every queued function and what it reaches by direct branches.
 func (r *reacher) drain() error {
+	if r.err != nil {
+		return r.err
+	}
 	for len(r.queue) > 0 {
 		f := r.queue[0]
 		r.queue = r.queue[1:]
@@ -181,7 +193,11 @@ func (r *reacher) drain() error {
 				r.x.Unresolved = append(r.x.Unresolved, br)
 				continue
 			}
-			if k, ok := stubKind(g.Name); ok {
+			k, isStub, err := r.b.classifyStub(g)
+			if err != nil {
+				return err
+			}
+			if isStub {
 				r.addStub(g, k)
 				continue
 			}
@@ -216,7 +232,7 @@ func extractWith(b *Binary, sym string, maxFunctions int, targets []string) (*Ex
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := stubKind(entry.Name); ok {
+	if stubLike(entry.Name) {
 		return nil, &diag{Msg: fmt.Sprintf("%s is a runtime stub, not a function Janus extracts", entry.Name),
 			Stage: "function selection", Next: "Select a Go function that calls the stub instead."}
 	}
@@ -295,6 +311,9 @@ func extractWith(b *Binary, sym string, maxFunctions int, targets []string) (*Ex
 		if len(x.Segments)+len(r.queue) > r.maxF {
 			return nil, r.tooMany()
 		}
+	}
+	if r.err != nil {
+		return nil, r.err
 	}
 	if b.GOARCH == "amd64" {
 		x.Lean = renderLeanAmd64(x)
