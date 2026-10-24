@@ -154,9 +154,9 @@ func TestBranchTarget(t *testing.T) {
 
 func TestStubKind(t *testing.T) {
 	cases := map[string]StubKind{
-		"runtime.panicIndex": stubPanic, "runtime.panicBounds": stubPanic, "runtime.panicdivide": stubPanic,
+		"runtime.panicBounds": stubPanic, "runtime.panicdivide": stubPanic, "runtime.panicBounds64": stubPanic,
 		"runtime.panicshift": stubPanic, "runtime.panicmem": stubPanic, "runtime.gopanic": stubPanic,
-		"runtime.panicwrap": stubPanic, "runtime.goPanicIndex": stubPanic, "runtime.panicSliceAlen": stubPanic,
+		"runtime.panicwrap": stubPanic, "runtime.goPanicIndex": stubPanic, "runtime.goPanicSliceAlen": stubPanic,
 		"runtime.morestack.abi0": stubMorestack, "runtime.morestack_noctxt.abi0": stubMorestack,
 	}
 	for name, want := range cases {
@@ -168,10 +168,54 @@ func TestStubKind(t *testing.T) {
 	// package runtime (docs/AUDIT-ROUND6.md).
 	for _, name := range []string{"runtime.mallocgc", "example.com/basic.Add", "main.panicky",
 		"runtime.panicky/lib.Zero", "runtime.panicky/lib.Zero.abi0", "runtime.morestacks.io/x.F",
-		"runtime.gopanic/x.F", "runtime%2epanicky.F"} {
+		"runtime.gopanic/x.F", "runtime%2epanicky.F",
+		// Round 7 G1: exact go1.26 names only. Not runtime functions of go1.26 (an assembly
+		// function or a //go:linkname push of another package can take such a name), the other
+		// ABI of a listed one (linked under a mangled name), and runtime functions that return
+		// (panicCheck1/2) or throw (morestackc).
+		"runtime.panicJanusR7", "runtime.morestackJanusR7", "runtime.panicIndex", "runtime.panicSliceAlen",
+		"runtime.panicdivide.abi0", "runtime.gopanic.abi0", "runtime.morestack_noctxt", "runtime.morestack",
+		"runtime.panicCheck1", "runtime.panicCheck2", "runtime.morestackc", "runtime.morestackc.abi0",
+		"runtime.panicdivide.abiinternal"} {
 		if _, ok := stubKind(name); ok {
 			t.Errorf("%s classified as a stub", name)
 		}
+	}
+}
+
+// Round 7 G1: a listed stub name is trusted only in a go1.26 binary with an ELF symbol table,
+// when no other function has the same name.
+func TestClassifyStub(t *testing.T) {
+	g := Func{Name: "runtime.panicdivide", Addr: 0x1000, Size: 16}
+	mk := func(src, ver string, funcs ...Func) *Binary {
+		return &Binary{Path: "bin", SymbolSource: src, GoVersion: ver, Funcs: funcs}
+	}
+	if k, ok, err := mk("symtab", "go1.26.0", g).classifyStub(g); err != nil || !ok || k != stubPanic {
+		t.Errorf("go1.26.0 symtab: %v %v %v", k, ok, err)
+	}
+	if _, ok, err := mk("symtab", "go1.26.10", g).classifyStub(g); err != nil || !ok {
+		t.Errorf("go1.26.10 symtab: %v %v", ok, err)
+	}
+	for _, b := range []*Binary{
+		mk("pclntab", "go1.26.0", g),
+		mk("symtab", "go1.27.0", g),
+		mk("symtab", "go1.2", g),
+		mk("symtab", "go1.260", g),
+		mk("symtab", "go1.26.0", g, Func{Name: "runtime.panicdivide", Addr: 0x2000, Size: 16}),
+	} {
+		if _, ok, err := b.classifyStub(g); err == nil || ok {
+			t.Errorf("%s %s %d funcs: classified (ok=%v err=%v)", b.SymbolSource, b.GoVersion, len(b.Funcs), ok, err)
+		}
+	}
+	// pclntab names carry no ABI suffix: an unlisted name that looks like a stub is an error
+	h := Func{Name: "runtime.morestack_noctxt", Addr: 0x3000, Size: 16}
+	if _, ok, err := mk("pclntab", "go1.26.0", h).classifyStub(h); err == nil || ok {
+		t.Errorf("pclntab morestack_noctxt: ok=%v err=%v", ok, err)
+	}
+	// an ordinary function is code
+	f := Func{Name: "runtime.panicJanusR7", Addr: 0x4000, Size: 16}
+	if _, ok, err := mk("symtab", "go1.26.0", f).classifyStub(f); err != nil || ok {
+		t.Errorf("panicJanusR7: ok=%v err=%v", ok, err)
 	}
 }
 

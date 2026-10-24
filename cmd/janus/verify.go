@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const defaultTheorem = "Proof.correctness"
@@ -77,6 +78,12 @@ type verifiedReport struct {
 	// functions that were not extracted, whose behaviour the theorem can only use through a
 	// contract hypothesis in its statement.
 	Contracts []string `json:"contracts,omitempty"`
+	// DependencyDefinitions are the dependency defs the statement reaches, with their bodies
+	// (round 7 J1): a dependency def's name and docstring need not say what it means.
+	DependencyDefinitions []string `json:"dependencyDefinitions,omitempty"`
+	// Notes flag operations of the statement (and of the disclosed definitions) whose standard
+	// Lean meaning often reads unexpectedly (round 7 K1). They are not errors.
+	Notes []string `json:"notes,omitempty"`
 	// Cached: this report is the recorded result of an earlier verification with exactly the
 	// same inputs (resultcache.go), made at CachedFrom.
 	Cached     bool   `json:"cached,omitempty"`
@@ -89,11 +96,13 @@ type auditResult struct {
 	Module            string     `json:"module"`
 	Axioms            []string   `json:"axioms"`
 	Statement         string     `json:"statement"`
-	StatementExplicit string     `json:"statementExplicit"` // the statement printed with pp.explicit
-	Definitions       []string   `json:"definitions"`       // proof-local defs the statement uses, with bodies
-	Modules           []string   `json:"modules"`           // every module in the audited environment
-	External          []string   `json:"external"`          // dependency constants the statement uses
-	Imports           [][]string `json:"imports"`           // [module, direct imports…] for every non-core module
+	StatementExplicit string     `json:"statementExplicit"`   // the statement printed with pp.explicit
+	Definitions       []string   `json:"definitions"`         // proof-local defs the statement uses, with bodies
+	Modules           []string   `json:"modules"`             // every module in the audited environment
+	External          []string   `json:"external"`            // dependency constants the statement uses
+	ExternalDefs      []string   `json:"externalDefinitions"` // dependency defs, with bodies (round 7 J1)
+	Notes             []string   `json:"notes"`               // surprising standard operations (round 7 K1)
+	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
 }
 
 // findJanusRoot locates the Lean project: --janus-root, else $JANUS_ROOT (a Janus checkout,
@@ -352,6 +361,31 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	fmt.Fprintln(stdout, "  Statement:")
 	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(termSafe(r.Statement), "\n", "\n    "))
 	printDefinitions(stdout, r.Definitions)
+	printDependencyDefinitions(stdout, r.DependencyDefinitions)
+	printNotes(stdout, r.Notes)
+}
+
+// printDependencyDefinitions shows the dependency definitions the statement names, with their
+// bodies (round 7 J1).
+func printDependencyDefinitions(w io.Writer, defs []string) {
+	if len(defs) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  Dependency definitions used by the statement (pinned source; part of its meaning):")
+	for _, d := range defs {
+		fmt.Fprintf(w, "    %s\n", strings.ReplaceAll(termSafe(d), "\n", "\n      "))
+	}
+}
+
+// printNotes shows the round-7 K1 notes: standard Lean meanings that often surprise readers.
+func printNotes(w io.Writer, notes []string) {
+	if len(notes) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  Notes (standard Lean meaning that may read unexpectedly; not errors):")
+	for _, n := range notes {
+		fmt.Fprintf(w, "    - %s\n", strings.ReplaceAll(termSafe(n), "\n", "\n      "))
+	}
 }
 
 // printDefinitions shows the proof-local definitions the statement names (round 4, D2): the
@@ -374,8 +408,11 @@ func printDefinitions(w io.Writer, defs []string) {
 func termSafe(s string) string {
 	var b strings.Builder
 	for _, r := range s {
+		// Round 7 (H1): every format character (Unicode Cf: all bidi embeddings, overrides,
+		// isolates and marks, zero-width spaces and joiners, …) is escaped, not only the
+		// overrides and isolates.
 		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f && !(r >= 0x80 && r < 0xa0)) &&
-			r != 0x202e && r != 0x202d && r != 0x2066 && r != 0x2067 && r != 0x2068 && r != 0x2069 {
+			!unicode.Is(unicode.Cf, r) {
 			b.WriteRune(r)
 			continue
 		}
@@ -752,6 +789,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		Sandbox:           sb.info(),
 		Definitions:       ar.Definitions,
 		Contracts:         cr.Identity.contractList(),
+		Notes:             ar.Notes,
 	}
 	if resultKey != "" && bytes.Equal(idBytes, idBytes0) {
 		storeResult(resultKey, report)
