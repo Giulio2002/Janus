@@ -19,18 +19,34 @@ import (
 
 func useTestCache(t *testing.T) {
 	t.Helper()
-	t.Setenv("JANUS_CACHE_DIR", filepath.Join(os.TempDir(), "janus-test-cache"))
-	t.Setenv("JANUS_ROOT", "")
+	// TestMain sets both for the whole process; only a test that changed them sets them again
+	// (t.Setenv, which also rules out t.Parallel for that test).
+	if os.Getenv("JANUS_CACHE_DIR") != testCacheDir() {
+		t.Setenv("JANUS_CACHE_DIR", testCacheDir())
+	}
+	if os.Getenv("JANUS_ROOT") != "" {
+		t.Setenv("JANUS_ROOT", "")
+	}
 }
 
+// needLean: the test runs janus verify on single proof files (a few seconds each once the
+// framework is built). These run with -short too, so -short still checks the verifier end to end:
+// the honest proofs, the axiom/kernel/statement rejections and the hardening attacks.
 func needLean(t *testing.T) {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("runs Lean")
-	}
 	if _, err := findLake(); err != nil {
 		t.Skip("lake not installed")
 	}
+}
+
+// needLeanSlow: the test builds consumer packages or dependencies with Lake, copies or rebuilds
+// a framework, or runs many janus processes (tens of seconds to minutes); -short skips it.
+func needLeanSlow(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("runs Lake builds (skipped with -short)")
+	}
+	needLean(t)
 }
 
 func writeFile(t *testing.T, p, body string) {
@@ -381,6 +397,7 @@ func TestExplain(t *testing.T) {
 }
 
 func TestBatchRequestErrors(t *testing.T) {
+	t.Parallel()
 	if _, err := findLake(); err != nil {
 		t.Skip("lake not installed")
 	}
@@ -428,7 +445,8 @@ func TestBatchRequestErrors(t *testing.T) {
 // reused across extractions, an unchanged second run rebuilds nothing, and failures in the
 // package are located in its files.
 func TestConsumerVerify(t *testing.T) {
-	needLean(t)
+	t.Parallel()
+	needLeanSlow(t)
 	useTestCache(t)
 	pkg := consumerCopy(t, "toml")
 	add := mustExtract(t, "example.com/basic.Add")
@@ -531,7 +549,8 @@ func TestConsumerVerify(t *testing.T) {
 
 // TestConsumerLakefileLean: the same package configured with lakefile.lean.
 func TestConsumerLakefileLean(t *testing.T) {
-	needLean(t)
+	t.Parallel()
+	needLeanSlow(t)
 	useTestCache(t)
 	pkg := consumerCopy(t, "lean")
 	max := mustExtract(t, "example.com/basic.Max")
@@ -548,7 +567,8 @@ func TestConsumerLakefileLean(t *testing.T) {
 // TestConsumerGit: janus required from git, pinned to a full revision and resolved with
 // lake update; a checkout that differs from the framework is rejected.
 func TestConsumerGit(t *testing.T) {
-	needLean(t)
+	t.Parallel()
+	needLeanSlow(t)
 	useTestCache(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -607,7 +627,8 @@ func TestConsumerGit(t *testing.T) {
 // TestVerifyBatch: several requests, two extractions, one failing request that fails alone;
 // a second run rebuilds nothing.
 func TestVerifyBatch(t *testing.T) {
-	needLean(t)
+	t.Parallel()
+	needLeanSlow(t)
 	useTestCache(t)
 	pkg := consumerCopy(t, "toml")
 	writeFile(t, filepath.Join(pkg, "ConsumerExample", "Broken.lean"),
@@ -685,7 +706,8 @@ func TestVerifyBatch(t *testing.T) {
 
 // TestInitEndToEnd: janus init, then the README's first verification.
 func TestInitEndToEnd(t *testing.T) {
-	needLean(t)
+	t.Parallel()
+	needLeanSlow(t)
 	useTestCache(t)
 	dir := filepath.Join(t.TempDir(), "hello-proofs")
 	if code, out, stderr := runJanus(t, "init", dir, "--janus-path", repoRoot); code != 0 || !strings.Contains(out, "Resolved dependencies") {
@@ -713,7 +735,8 @@ func TestInitEndToEnd(t *testing.T) {
 // (as go install does) and verifies from a directory outside it with no JANUS_ROOT: the
 // framework comes from the binary.
 func TestInstallOutsideRepo(t *testing.T) {
-	needLean(t)
+	t.Parallel()
+	needLeanSlow(t)
 	useTestCache(t)
 	mod := t.TempDir()
 	writeFile(t, filepath.Join(mod, "go.mod"), fmt.Sprintf("module example.com/install\n\ngo 1.26.0\n\nrequire github.com/Giulio2002/Janus v0.0.0\n\nreplace github.com/Giulio2002/Janus => %s\n", repoRoot))

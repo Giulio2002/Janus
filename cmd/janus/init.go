@@ -3,6 +3,7 @@ package main
 // janus init: scaffold a consumer package.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -94,7 +95,14 @@ func cmdInit(args []string, stdout, stderr io.Writer) error {
 		}
 		cmd := exec.Command(lake, "update")
 		cmd.Dir = abs
-		out, err := cmd.CombinedOutput()
+		var outb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &outb, &outb
+		mark := memMark()
+		err = guardRun(cmd)
+		if _, _, kill := memSince(mark); kill != nil {
+			return memLimitDiag(currentGuard(), *kill, nil)
+		}
+		out := outb.Bytes()
 		if err != nil {
 			return &diag{Invalid: true, Msg: "lake update failed in " + displayPath(abs) + ": " + err.Error(), Stage: "consumer manifest",
 				Next: "Fix the error and run lake update there (the files are written).", Details: string(out)}
