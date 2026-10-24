@@ -8,6 +8,10 @@ case "$1" in
       'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher,go:itab.*example.com/basic.RotHasher,example.com/basic.Hasher' ;;
   MapSum) # the closure AffineSum passes to it
     printf '%s\n' --targets example.com/basic.AffineSum.func1 ;;
+  # the generic shape function total[go.shape.uint64] calls Scale through the instantiation's
+  # dictionary (examples/basic/zconstructs.go)
+  TotalMeters) printf '%s\n' --targets example.com/basic.Meters.Scale ;;
+  TotalFeet) printf '%s\n' --targets example.com/basic.Feet.Scale ;;
   # heap allocation (docs/RUNTIME-CONTRACTS.md): the runtime functions left out as contracts
   NewPair|MakeSlice|AppendOne)
     printf '%s\n' --contract runtime.mallocgc --contract runtime.newobject \
