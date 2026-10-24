@@ -215,6 +215,31 @@ and must not be read as "the architecture says so":
 None of these can hide a Janus soundness bug as an "agree". They only produce `model-gap`
 or MISMATCH noise between qemu and Sail, or `error` cases, which are excluded.
 
+## Results with scalar floating point (2026-10-24, 1,131,099 cases)
+
+The floating-point corpus of `docs/ORACLE.md` (`scripts/oracle.sh fp`, then
+`QEMU_OUT=artifacts/oracle-fp OUT=artifacts/oracle-sail-fp scripts/oracle-sail.sh run`). The
+driver now writes each case's `FPCR` and `FPSR` by stepping real `MSR FPCR`/`MSR FPSR`
+instructions at EL0 (and refuses a case whose `FPCR` does not read back), and reports both after
+the step; the comparator compares them with the registers. The model implements FEAT_AFP
+(`FEAT_AFP_IMPLEMENTED = true`), so `FIZ`, `AH` and `NEP` are live, as on qemu.
+
+| pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
+|---|---:|---:|---:|---:|---:|
+| **Sail vs Janus** | 993,577 | **0** | 137,522 | 0 | 0 |
+| qemu vs Sail | 1,131,099 | 0 | 0 | 0 | 0 |
+| qemu vs Janus | 993,577 | 0 | 137,522 | 0 | 0 |
+
+* **Soundness: 0 cases** (`soundness.jsonl` is empty). Every gap is `undecodable` (half
+  precision, BFCVT, FRINT32/64, FJCVTZS, fixed-point conversions, the CONSTRAINED UNPREDICTABLE
+  forms), and in each of them qemu and Sail agree with each other.
+* **qemu and Sail agree on every case**, results, `NZCV`, `FPSR` and `FPCR` included, in all four
+  rounding modes and with `FZ`, `DN`, `FIZ`, `AH`, `NEP` set and clear, so the Arm floating-point
+  behaviour the model transcribes (NaN selection, `FMADD`'s addend-first NaN rule, `FPCR.AH`
+  tininess and flushing, `FMAX`/`FMIN` with `AH`, saturating conversions, `NEP` merging) is
+  confirmed by both references. The 137,015 cases where both fault agree on the signal
+  (`SIGILL`/`ILL_ILLOPC`).
+
 ## Results with Advanced SIMD (2026-10-23, 584,412 cases)
 
 Corpus of `scripts/oracle.sh full` after the Advanced SIMD extension (cases carry `V0`–`V31` and

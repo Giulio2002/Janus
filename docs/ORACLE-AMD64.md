@@ -161,6 +161,60 @@ sequences); `PSHUFLW` and `RCL`/`RCR` were added. What remains is not a move or 
 `SYSCALL`, scalar floating point (`UCOMISD`, `CVT*`, arithmetic; MXCSR is not modelled), `CRC32`,
 AES/SHA, AVX-512 (`VMOVDQU64`, `VPERMB`, ...), `CPUID`/`XGETBV` and `PCMPESTRI`.
 
+## Results with SSE scalar floating point (2026-10-24)
+
+`OUT=artifacts/oracle-amd64-fp JOBS=16 N=1200 scripts/oracle-amd64.sh fp`: the targeted
+floating-point specs (`ADD SUB MUL DIV SQRT MIN MAX` `SD`/`SS`, `UCOMIS*`/`COMIS*`, `CMPSD`/`CMPSS`
+with every predicate, the `CVT*` conversions with 32/64-bit integers, `CVTSD2SS`/`CVTSS2SD`,
+`ROUNDSD`/`ROUNDSS` with every `imm8` low nibble, the bitwise `AND(N)/OR PS/PD`; register and
+memory operands, `REX` variants, packed and VEX neighbours), the `edge/fp-*` families (each case
+under all 16 combinations of `RC` × `FTZ` × `DAZ` with every exception masked, plus each exception
+unmasked alone), and every distinct floating-point instruction of the `math`, `strconv` and
+`sort` test binaries. Operands come from the IEEE edge-value generator (as on arm64, with the
+x86 indefinite among the NaNs) with random upper bits, and `MXCSR` is random per case (all
+masked about 70% of the time, otherwise random masks; random initial flags). Cases carry
+`mxcsr`; the runner loads it with `LDMXCSR` right before entering the instruction, reads it back
+from the signal frame's `fxsave` area, and restores the host's value.
+
+| source | cases | agree | of which both fault | model-gap | MISMATCH |
+|---|---:|---:|---:|---:|---:|
+| `gen/*` (targeted encodings and neighbours) | 580,034 | 320,371 | 135,427 | 259,663 | 0 |
+| `edge/fp-*` (systematic MXCSR families) | 475,200 | 463,169 | 13,248 | 12,031 | 0 |
+| `harvest/*` (math/strconv/sort FP instructions) | 18,360 | 18,360 | 6,774 | 0 | 0 |
+| **total** | 1,076,394 (incl. 2,800 others) | 804,700 | | 271,694 | **0** |
+
+Over the in-scope instructions 646,234 cases succeeded on both sides with identical registers,
+flags, `XMM`/`YMM` state, memory and `MXCSR`, and 113,299 faulted on both, 39,691 of them with
+`SIGFPE` (`#XM`, an unmasked exception: the model's `simdFPException`). The gaps are encodings the
+decoder refuses on purpose: `REX.W` on instructions that ignore it, `66` together with `F2`/`F3`,
+the packed forms, VEX/EVEX, the MMX conversions, `CMPSD`/`ROUNDSD` immediates with reserved
+bits, and 20 accesses the host served from memory outside the buffer. The first run found 95
+mismatches in 28 encodings, all one bug: under `DAZ`, `MINSD`/`MAXSD` deliver the second operand
+*as read through `DAZ`* (a subnormal comes back as a zero) also when the other operand is a NaN.
+`Janus/Amd64/Float.lean` was fixed (`minmax`), and the run above is of the fixed model.
+
+Probes of the host CPU that the model follows (each also covered by the corpus): `FTZ` flushes
+every tiny result, exact or not (with `UE PE`); tininess is detected after rounding; `DE` is not
+raised when a NaN operand or a division by zero takes precedence, but is for `∞ × subnormal`; an
+unmasked underflow traps on every tiny result; `ROUNDSD` never raises `DE`; `MINSD`/`MAXSD` return
+the second operand for any NaN (a signalling one unquieted) and for mixed-sign zeros; out-of-range
+and NaN conversions give the integer indefinite.
+
+**Coverage effect** (`oracle coverage -pkgs math.,strconv.,sort.` on `go test -c` binaries,
+Go 1.26.0, `GOAMD64=v1`, before → after the floating-point model):
+
+| binary | Go-compiled functions | fully decodable before | after | occurrences accepted before | after |
+|---|---:|---:|---:|---:|---:|
+| `math.test` | 3,362 | 3,146 (93.6%) | **3,357 (99.9%)** | 98.41% | 99.42% |
+| `strconv.test` | 3,298 | 3,208 (97.3%) | **3,298 (100%)** | 99.25% | 99.41% |
+| `sort.test` | 3,574 | 3,479 (97.3%) | **3,574 (100%)** | 99.26% | 99.42% |
+
+By package: `math` 8 → 67 of 68 functions fully decodable (the remaining one is `math.FMA`'s
+`VFMADD231SD` path behind `x86HasFMA`), `sort` 63 → 66 of 66, `strconv` 20 of 20 (14 → 14 in
+`math.test`'s copy). The last floating-point sole blockers were `UCOMISD` (19 functions),
+`CVTSS2SD` (6), `CVTTSD2SI` (5) and the arithmetic; what remains is `SYSCALL`, `CRC32`, AES/SHA,
+AVX-512 and `CPUID`/`XGETBV`.
+
 ## Running it
 
 ```

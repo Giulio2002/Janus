@@ -154,6 +154,73 @@ MISMATCH is the headline number: a proof about Go code is only sound if the mode
 a successful step that differs from the machine. Model gaps only cost coverage (a proof
 would get stuck on a fault), never soundness.
 
+## Results with scalar floating point (2026-10-24, `scripts/oracle.sh fp`, qemu 10.2.1 `-cpu max`)
+
+The FP corpus (`OUT=artifacts/oracle-fp JOBS=16 N=25000 FP_HARVEST_K=40 scripts/oracle.sh fp`):
+every scalar floating-point encoding class of the A64 tables (`fp.dp1` 1-source, `fp.dp2`
+2-source, `fp.dp3` FMADD family, `fp.cmp`, `fp.ccmp` and `fp.csel` under all 16 NZCV values,
+`fp.imm`, `fp.cvtint`, and the rejected fixed-point conversions `fp.cvtfix` as neighbours), plus
+every distinct floating-point word of the `math`, `strconv`, `sort`, `math/big`, ... test binaries
+under 40 states each. States come from an IEEE edge-value generator (±0, the smallest and
+largest subnormal and normal numbers, random subnormals, ±1, ±0.5, values one ulp around
+powers of two, ±∞, quiet and signalling NaNs of both signs with random payloads, integers and
+halfway values around 2^24, 2^31, 2^32, 2^53, 2^63, 2^64, random encodings) with random bits above
+the S/D value, and crafted operand pairs/triples for rounding ties, exact cancellation, and the
+underflow/overflow boundaries; `FPCR` is random per case (`RMode` uniformly, `FZ`, `DN`, `AH`, `FIZ`,
+`NEP` each about 22%), `FPSR` starts with random cumulative flags, and both are compared after
+the step.
+
+1,131,099 cases (1,094,987 generated, 36,112 harvested from 904 distinct words): **0 MISMATCH**,
+993,577 agree (137,015 of them both faulting), 137,522 model-gap, 0 unobserved. Every gap is
+`undecodable`: half precision (`ftype = 11`, FEAT_FP16), BFCVT, FRINT32/64, FJCVTZS,
+fixed-point conversions, and the CONSTRAINED UNPREDICTABLE forms the decoder refuses (an
+`FCMP #0.0` with a non-zero `Rm`, non-zero should-be-zero bits). Every `FPCR` mode was exercised
+(`RMode` 0/1/2/3: 495,322 / 211,527 / 211,352 / 212,898 cases; `FZ` 253,447, `DN` 253,432, `AH`
+253,667, `FIZ` 254,526, `NEP` 255,411).
+
+| class | cases | agree | of which both fault | model-gap | MISMATCH |
+|---|---:|---:|---:|---:|---:|
+| fp.ccmp | 200,000 | 188,992 | 12,032 | 11,008 | 0 |
+| fp.cmp | 100,000 | 86,500 | 20,344 | 13,500 | 0 |
+| fp.csel | 200,000 | 189,952 | 10,752 | 10,048 | 0 |
+| fp.cvtfix | 100,000 | 35,176 | 35,176 | 64,824 | 0 |
+| fp.cvtint | 93,316 | 88,696 | 5,244 | 4,620 | 0 |
+| fp.dp1 | 100,000 | 80,248 | 21,024 | 19,752 | 0 |
+| fp.dp2 | 100,000 | 95,384 | 10,104 | 4,616 | 0 |
+| fp.dp3 | 100,000 | 95,332 | 5,876 | 4,668 | 0 |
+| fp.imm | 100,000 | 95,608 | 15,132 | 4,392 | 0 |
+| simd.fmovgen | 1,671 | 1,577 | 1,331 | 94 | 0 |
+| harvest (`fp.*`, 7 classes) | 36,112 | 36,112 | 0 | 0 | 0 |
+| **total** | 1,131,099 | 993,577 | 137,015 | 137,522 | **0** |
+
+A case now carries `fpcr`/`fpsr` (hex); the runner writes them with `MSR` before the step,
+reads `FPCR` back (a case whose value the reference drops is an `error`; qemu ignores writes to
+the trap-enable bits, so the generator never sets them) and reports both from the signal
+frame's `fpsimd_context`. The comparator treats a difference in `FPSR` or `FPCR` like one in a
+register. The model was right the first time on this corpus.
+
+### TestFloat (Berkeley TestFloat 3e / SoftFloat 3e)
+
+`scripts/testfloat.sh` builds SoftFloat three times, with the specializations that match the
+architectures (`ARM-VFPv2` for `FPCR.DN = 0` with tininess before rounding, `ARM-VFPv2-defaultNaN`
+for `DN = 1`, `8086-SSE` with tininess after rounding), generates TestFloat's level-1 vectors for
+every operation and rounding mode, and runs each through the model (`janus-testfloat`,
+`Oracle/TestFloat.lean`), comparing result bits and the five IEEE flags:
+
+| model | functions × modes | vectors | mismatches | known NaN-rule differences |
+|---|---:|---:|---:|---:|
+| arm64, `FPCR` = `RMode` only (`f32`/`f64` add sub mul div sqrt mulAdd, roundToInt (5 modes, exact and not), conversions S↔D, from and to `i32 ui32 i64 ui64` (5 modes), the six comparisons) | 160 | 51,180,432 | **0** | 52,932 |
+| arm64, `DN = 1` | 44 | 50,189,664 | **0** | 0 |
+| arm64, `AH = 1` (tininess after rounding) | 48 | 50,558,304 | **0** | 288 |
+| x86-64 SSE, all exceptions masked (`MXCSR.RC` from the mode) | 108 | 2,086,272 | **0** | 0 |
+| **total** | 360 | 154,014,672 | **0** | 53,220 |
+
+The "known" rows are NaN results where SoftFloat's specialization differs from the architecture
+and both are NaNs: SoftFloat's `ARM-VFPv2` `mulAdd` propagates a product operand's NaN before the
+addend's, whereas Arm's `FPProcessNaNs3` takes the addend first (which qemu and Sail confirm);
+and SoftFloat does not model `FPCR.AH = 1`'s NaN rules (no `IOC` for `0 × ∞ + qNaN`). Every
+other vector matches bit for bit, flags included.
+
 ## Results with Advanced SIMD (2026-10-23, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
 
 584,412 cases (260,000 generated, 324,412 harvested): **0 MISMATCH**, 568,770 agree, 15,639
