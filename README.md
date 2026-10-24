@@ -228,6 +228,11 @@ Go 1.26.0. Proofs:
 | `AppendOne` | `append(s, x)`, in place or through `runtime.growslice` (Go's growth rule, size-class rounding, old elements copied, zero tail), assuming its contract | ✓ | ✓ |
 | `SetNext` | `n.Next = q` through the GC write barrier, whose fast path (buffer append) is executed | ✓ | ✓ |
 | `MallocFast` | `runtime.mallocgc` itself: the small pointer-free fast path returns the free slot of the P's cached span (zeroed) and updates exactly the span/mcache fields, under `MCacheOK` | ✓ | |
+| `Lookup` | `v, ok := m[k]` on a `map[uint64]uint64`, with `runtime.mapaccess2_fast64` as a stated contract ([RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md), "Maps") | ✓ | ✓ |
+| `Insert`, `InsertGet`, `Delete`, `ClearMap`, `NewMap` | `m[k] = v` (then reading it back gives `v`), `delete`, `clear`, `make`, through their map contracts | ✓ | ✓ |
+| `SumValues` | `for _, v := range m` sums the values, for **every** iteration order | ✓ | ✓ |
+| `CountKeys`, `LookupKey16` | `len(m)` (the number of keys); lookup with `[16]byte` keys (generic `mapaccess2`) | ✓ | ✓ |
+| `MapAccess1Small` | the machine code of `runtime.mapaccess1_fast64` itself meets its contract on small Swiss maps | ✓ | ✓ |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
