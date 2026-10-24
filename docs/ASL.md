@@ -18,6 +18,7 @@ neither package uses Mathlib.
 ```
 scripts/asl.sh deps     # pinned toolchain (opam + Sail 0.20.3 + patches, sail-arm, slicing plugin)
 scripts/asl.sh gen      # slice sail-arm, generate Lean, compare with the vendored copy
+scripts/asl.sh model    # unpack the vendored model and build only ArmASL (ASL_CACHE: restore/publish it)
 scripts/asl.sh build    # unpack the vendored model and build the package (about 75 min at 3 jobs, once)
 scripts/asl.sh check    # build + janus-asl-check on artifacts/oracle/cases.jsonl
 scripts/asl.sh prove    # build JanusASL.Proofs and audit their axioms
@@ -366,6 +367,52 @@ The whole arm-v9.4-a model does not fit in Lean: the full `BranchExcSys` decode 
 
 A janus-excluded clause is reachable only through a word that Janus does not decode. If a word
 Janus decodes reaches one, the check reports a MISMATCH.
+
+### Build cache
+
+`ASL_CACHE=<dir>` (see `scripts/asl.sh`) shares one build of the model between worktrees and
+runners: before building, the ArmASL outputs (oleans, ileans, C, objects, Lake traces) and the
+lean-sail package are copied from `<dir>/<key>`, checked against the entry's SHA-256 manifest;
+after a build they are published there atomically if the entry is missing.
+`scripts/asl.sh model` builds (or restores) only the model.
+
+The key (`JanusASL/tools/asl_cache_key.py`, `--show` prints its inputs) covers exactly what the
+ArmASL outputs are a function of, so a branch that edits only JanusASL's proofs, its other
+targets or their options (agent/aslverify adds roots, a lib and an exe) shares the entry:
+
+* the vendored tarball's SHA-256 (the sources of every ArmASL module), the splitter, both
+  `lean-toolchain` files;
+* the lean-sail entry of `JanusASL/lake-manifest.json` and its `packagesDir` (ArmASL imports
+  only `Sail` and `ArmASL.*`);
+* from the parsed `JanusASL/lakefile.toml`: every package-level setting except metadata, default
+  targets, drivers, release and server-only settings (an unknown setting is keyed), and every
+  `lean_lib`/`lean_exe` that can own an ArmASL module (the `ArmASL` lib, and any target whose
+  name, roots, globs or root is `ArmASL` or `ArmASL.*`), whole and in file order;
+* the janus package's `extraDepTargets`, which Lake mixes into every module trace.
+
+This is a superset of what Lake 4.34 hashes into an ArmASL module's trace
+(`Lake/Build/Module.lean`, `recFetchPreSetup`: extra dependency targets, the imports' traces, the
+dynlib/plugin libraries, the Lean version, the source, the `leanOptions` of package and library,
+`isModule`, the module name, the package name, the package's and library's `moreLeanArgs`), plus
+what reaches an output without being traced (`weakLeanArgs`, `moreLeancArgs`, `weakLeancArgs`,
+`buildType`, `backend`, `srcDir`). The omitted inputs cannot change an ArmASL output: a target's
+options apply only to its own modules, and the modules it imports are built with their own
+library's; the `[[require]]` tables are resolved through the manifest, and nothing in ArmASL
+imports `janus`; metadata, default targets and server options reach no `lean` or `leanc` command
+line; comments and formatting are gone once the file is parsed. A `lakefile.lean` (or a Python
+without `tomllib`) falls back to hashing the whole file. Entries under the previous key (the
+whole lakefile and manifest, a superset of these inputs) are still read and never written, so the
+existing entry is reused and republished under the new key on the first build.
+
+Measured with `JanusASL/tools/test_asl_cache.sh --e2e /srv/janus-asl-cache` (read only): a
+checkout restored from the existing entry and published into a temporary cache; a copy with the
+aslverify lakefile edits (other JanusASL roots, a new lib and a new exe) gets the same key, and its
+restore takes **1.2 s** (695 files, manifest checked), after which `lake build ArmASL --no-build`
+exits 0 ("All targets up-to-date (67 jobs)") and `lake build ArmASL` builds nothing and leaves all
+652 output files byte-identical. As a control, editing ArmASL's `moreLeanArgs` changes the key
+and makes `lake build ArmASL --no-build` exit 3 (a rebuild is needed). Lake's git calls refresh
+the stat cache `packages/Sail/.git/index` after a restore, so the "already matches" shortcut of a
+second restore recopies the entry (about a second); nothing else differs.
 
 ## The check (JanusASL/Check.lean)
 
