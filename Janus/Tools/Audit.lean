@@ -512,6 +512,16 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     let explicit ← withOptions (fun o => o.setBool `pp.explicit true) (PrettyPrinter.ppSignature thm)
     let mut defs := #[]
     for ci in localDefs do
+      -- (b'), round 3 R1: the disclosed body is the reader's definition of the constant the
+      -- statement names, so it is part of the guarantee. Apply the same instance check to the
+      -- def's type and value: an inline non-canonical instance in a body
+      -- (`fun a b => @HMul.hMul _ _ _ ⟨fun a b => a + b⟩ a b`) is printed `fun a b => a * b` by
+      -- the default printer, so without this check a disclosed body reads as `*` while it adds.
+      if let some m ← checkInstArgs cx ci.type then
+        throwError s!"the proof-local definition {ci.name} used in the statement {m}"
+      if let some v := ci.value? then
+        if let some m ← checkInstArgs cx v then
+          throwError s!"the proof-local definition {ci.name} used in the statement {m}"
       let tyFmt ← Meta.ppExpr ci.type
       let valFmt ← match ci.value? with
         | some v => Meta.ppExpr v
