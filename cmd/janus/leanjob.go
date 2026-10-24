@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -135,6 +136,18 @@ func noForeignModule(paths map[string]string, dirs []string) error {
 	return nil
 }
 
+// replayThreads is the number of worker threads of a leanchecker process ($JANUS_REPLAY_THREADS,
+// default 4). leanchecker starts one task per module it replays, each importing that module's
+// whole environment; with a thread per core, the replay of the framework (one target, every
+// Janus.* module) holds ~48 environments at once (~30 GB). Four threads hold ~7 GB and take about
+// as long. The modules replayed are the same.
+func replayThreads() int {
+	if n, err := strconv.Atoi(os.Getenv("JANUS_REPLAY_THREADS")); err == nil && n > 0 {
+		return n
+	}
+	return 4
+}
+
 // runLean runs a lean/leanchecker command under the sandbox, returning combined output.
 func runLean(sb *sandbox, tc *toolchain, workDir string, roWritableExtra []string, leanPath string, argv ...string) (string, error) {
 	return runLeanProtected(sb, tc, workDir, roWritableExtra, nil, leanPath, argv...)
@@ -151,7 +164,11 @@ func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtr
 			ro = append(ro, d)
 		}
 	}
-	cmd := sb.commandOverlay(workDir, roWritableExtra, ro, protected, argv, tc.jobEnv(leanPath))
+	env := tc.jobEnv(leanPath)
+	if len(argv) > 0 && argv[0] == tc.leanchecker {
+		env = append(env, "LEAN_NUM_THREADS="+strconv.Itoa(replayThreads()))
+	}
+	cmd := sb.commandOverlay(workDir, roWritableExtra, ro, protected, argv, env)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

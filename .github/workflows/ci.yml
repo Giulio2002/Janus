@@ -92,7 +92,8 @@ jobs:
         run: scripts/build-examples.sh
 
       # The Lean-running tests take longer than go test's default 10-minute timeout. The
-      # independent ones run in parallel (TestMain caps -parallel by memory: 2 on a 16 GiB runner).
+      # independent ones are marked parallel; TestMain caps -parallel by memory (min(cores/4,
+      # (MemAvailable - 32 GiB)/20 GiB), at least 1), which is 1 on a 4-core 16 GiB runner.
       - name: go test ./cmd/...
         run: go test -timeout 40m ./cmd/...
 
@@ -160,7 +161,7 @@ jobs:
       # Builds and extracts the examples itself (scripts/build-examples.sh). JANUS_ROOT: verify
       # against this checkout's Janus build (made above) instead of building the embedded copy of
       # the same sources a second time in ~/.cache/janus; the checks are the same (the embedded
-      # path is covered by go test). -j: proofs at once (default: cores, capped by memory).
+      # path is covered by go test). Proofs at once: scripts/lib/parallel.sh (memory-bounded).
       - name: Verify example proofs
         env:
           JANUS_ROOT: ${{ github.workspace }}

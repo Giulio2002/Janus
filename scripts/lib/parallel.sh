@@ -3,9 +3,11 @@
 # -j N / --jobs N / -jN from the arguments into PAR_ARGS), wrap each independent block in
 # `par_run 'shell code'`, and call `par_wait` before the script's verdict.
 #
-#   -j N        run up to N blocks at once. Default: $JANUS_JOBS, else the number of cores,
-#               capped at one job per 6 GiB of available memory (a janus verify holds the proof's
-#               Lean process, the auditor and up to three leanchecker processes) and at least 1.
+#   -j N        run up to N blocks at once. Default: $JANUS_JOBS, else min(cores / 4,
+#               (MemAvailable - 32 GiB) / 20 GiB), at least 1. Before each launch MemAvailable is
+#               checked again: while less than 20 GiB above the 32 GiB headroom is free, the next
+#               block waits for a running one to finish (memory, not cores, is what concurrent
+#               janus verifies exhaust).
 #   -j 1        run every block inline, in order, exactly as a plain serial script.
 #
 # A block runs in a subshell: it sees every variable and function defined so far, its stdout and
@@ -14,11 +16,19 @@
 # (it fails under `set -e`, or is killed) is recorded in `broken` too. Blocks must not depend on each
 # other's side effects; a block that sets up and removes a shared directory does both itself.
 
+# Memory budget: a janus verify can hold ~20 GB (a cold kernel replay of the framework, the
+# proof's Lean process, the auditor), and the host keeps 32 GB of headroom for everything else.
+PAR_JOB_MEM_KB=$((20 * 1024 * 1024))
+PAR_HEADROOM_KB=$((32 * 1024 * 1024))
+
+par_mem_available_kb() { awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 0; }
+
+# min(cores / 4, (MemAvailable - 32 GiB) / 20 GiB), at least 1.
 par_default_jobs() {
   local n mem
-  n=$(nproc 2>/dev/null || echo 1)
-  mem=$(awk '/^MemAvailable:/ { printf "%d", $2 / (6 * 1024 * 1024) }' /proc/meminfo 2>/dev/null || echo "$n")
-  [ -n "$mem" ] && [ "$mem" -lt "$n" ] && n=$mem
+  n=$(( $(nproc 2>/dev/null || echo 4) / 4 ))
+  mem=$(( ($(par_mem_available_kb) - PAR_HEADROOM_KB) / PAR_JOB_MEM_KB ))
+  [ "$mem" -lt "$n" ] && n=$mem
   [ "$n" -lt 1 ] && n=1
   echo "$n"
 }
@@ -55,6 +65,11 @@ par_run() {
   local i=$PAR_N
   PAR_N=$((PAR_N + 1))
   while [ "$(jobs -rp | wc -l)" -ge "$PAR_JOBS" ]; do wait -n 2>/dev/null || true; done
+  # memory check: with at least one block running, wait until a job's budget is free
+  while [ "$(jobs -rp | wc -l)" -gt 0 ] &&
+        [ "$(par_mem_available_kb)" -lt $((PAR_HEADROOM_KB + PAR_JOB_MEM_KB)) ]; do
+    wait -n 2>/dev/null || sleep 2
+  done
   (
     broken=()
     eval "$1"
