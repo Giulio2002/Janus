@@ -26,6 +26,30 @@ theorem get?_set_ne (s : SState) {r r' : Register} (v : RegisterType r) (h : r �
   have : (r == r') = false := by simpa using h
   simp [this]
 
+@[simp] theorem set_set (s : SState) (r : Register) (v w : RegisterType r) :
+    (s.set r v).set r w = s.set r w := by
+  simp only [SState.set]
+  congr 1
+  apply Std.ExtDHashMap.ext_get?
+  intro k
+  simp only [Std.ExtDHashMap.get?_insert]
+  split <;> rfl
+
+theorem set_self {s : SState} {r : Register} {v : RegisterType r} (h : s.regs.get? r = some v) :
+    s.set r v = s := by
+  cases s with
+  | mk regs cs mem tags cc out =>
+    simp only [SState.set]
+    congr 1
+    apply Std.ExtDHashMap.ext_get?
+    intro k
+    simp only [Std.ExtDHashMap.get?_insert]
+    split
+    · next he =>
+      have he' : r = k := by simpa using he
+      subst he'; simpa using h.symm
+    · rfl
+
 @[simp] theorem set_mem (s : SState) (r : Register) (v : RegisterType r) : (s.set r v).mem = s.mem := rfl
 
 theorem run_bind {α β} (x : SailM α) (f : α → SailM β) (s : SState) :

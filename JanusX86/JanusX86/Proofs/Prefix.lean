@@ -401,6 +401,25 @@ theorem fin (h : PfxRel p x rex) (v : BitVec 8) (w : BitVec 4) :
 end PfxRel
 
 open Janus.Amd64.Decode in
+theorem parsePrefixes_drop : ∀ (bs : List Nat) (p : Prefixes) (n : Nat) {p' ops n'},
+    parsePrefixes bs p n = some (p', ops, n') → bs.drop (n' - n) = ops
+  | [], _, _, _, _, _, h => by simp [parsePrefixes] at h
+  | b :: bs, p, n, p', ops, n', h => by
+    have hle := parsePrefixes_le _ _ _ h
+    revert h hle
+    unfold parsePrefixes
+    repeat' split
+    all_goals intro h hle
+    all_goals first
+      | (simp at h; done)
+      | (have e := parsePrefixes_drop _ _ _ h
+         have hle2 := parsePrefixes_le _ _ _ h
+         rw [show n' - n = (n' - (n + 1)) + 1 by omega, List.drop_succ_cons]; exact e)
+      | (simp only [Option.some.injEq, Prod.mk.injEq] at h
+         obtain ⟨-, rfl, rfl⟩ := h
+         simp)
+
+open Janus.Amd64.Decode in
 /-- `get_prefixes` simulates Janus' `parsePrefixes` on every prefix sequence Janus accepts, up to an
 opcode byte that is not a prefix for the model either. -/
 theorem run_get_prefixes {s : SState} (h : X86Config s) {r : BitVec 64}
