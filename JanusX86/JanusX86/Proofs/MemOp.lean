@@ -77,11 +77,11 @@ theorem run_store_core {js : Janus.Amd64.State} {s : SState} (h : Rel js s) (hc 
     {n : Nat} (hn : 0 < n) (eff la : BitVec 64) (seg : Nat) (hla : (ea_to_la .Mode_64bit eff seg n).run s = .ok la s)
     (data : BitVec (8 * n)) (mp : Bool) (hacc : js.mem.accessible la.toNat n true = true) :
     ∃ s', (store_bytes_to_ea .Mode_64bit asz n eff none seg data false mp).run s = .ok () s' ∧
-      Rel { js with mem := js.mem.writeLE la.toNat n data.toNat } s' ∧ X86Config s' := by
+      Rel { js with mem := js.mem.writeLE la.toNat n data.toNat } s' ∧ X86Config s' ∧ s'.regs = s.regs := by
   obtain ⟨v, hv, _⟩ := hc.csl
   have hb := h.acc_bound hacc
   obtain ⟨s', hw, hreg, hwr⟩ := run_wb hc.app h.rip hn la hb data ":W"
-  refine ⟨s', ?_, ?_, ?_⟩
+  refine ⟨s', ?_, ?_, ?_, hreg⟩
   · simp only [store_bytes_to_ea, run_bind, run_readReg hv, run_pure, in_64bit_mode, Bool.not_true,
       Bool.false_and, Bool.false_eq_true, ite_false, hla, run_check_linear_memory_access_nochk, hw]
   · obtain ⟨f, hf, hfr⟩ := h.flags
@@ -197,7 +197,7 @@ theorem run_operand_to_mem {js : State} {s : SState} (h : Rel js s) (hc : X86Con
     ∃ s', (x86_operand_to_reg_mem .Mode_64bit (w / 8) iac mp ((v.setWidth 64).setWidth 128) sg (eaOff js next a)
       x rex rm md sib).run s = .ok () s' ∧
       Rel { js with mem := js.mem.writeLE (ea js next (if p.fs then { a with fs := true } else a)).toNat (w / 8) v.toNat } s' ∧
-      X86Config s' := by
+      X86Config s' ∧ s'.regs = s.regs := by
   have hadr : (0x67#8 == _get_prefixes_adr x) = false := by rw [hp.adr]; decide
   have htr : (Sail.BitVec.truncate (BitVec.setWidth 128 (BitVec.setWidth 64 v)) (8 * (w / 8))).toNat = v.toNat := by
     rcases hw with rfl | rfl | rfl | rfl <;> simp [Sail.BitVec.truncate] <;> omega
@@ -211,15 +211,15 @@ theorem run_operand_to_mem {js : State} {s : SState} (h : Rel js s) (hc : X86Con
     have hea' : ea js next a = eaOff js next a := by simp [ea, hafs]
     rw [hea'] at hacc ⊢
     have hb := h.acc_bound hacc
-    obtain ⟨s', h1, h2, h3⟩ := run_store_core h hc _ hn _ _ sg (run_ea_to_la _ ⟨hsg', hsg5⟩ _ (by omega)) _ mp hacc
-    exact ⟨s', h1, by rw [← htr]; exact h2, h3⟩
+    obtain ⟨s', h1, h2, h3, h4⟩ := run_store_core h hc _ hn _ _ sg (run_ea_to_la _ ⟨hsg', hsg5⟩ _ (by omega)) _ mp hacc
+    exact ⟨s', h1, by rw [← htr]; exact h2, h3, h4⟩
   · have hsg4 : sg = 4 := hsg.2 hf
     subst hsg4
     simp only [hf, ↓reduceIte] at hacc ⊢
     have hea' : ea js next { a with fs := true } = js.fsBase + eaOff js next a := by simp only [ea, ↓reduceIte]; rfl
     rw [hea'] at hacc ⊢
     have hb := h.acc_bound hacc
-    obtain ⟨s', h1, h2, h3⟩ := run_store_core h hc _ hn _ _ 4 (run_ea_to_la_fs h _ _ (by omega)) _ mp hacc
-    exact ⟨s', h1, by rw [← htr]; exact h2, h3⟩
+    obtain ⟨s', h1, h2, h3, h4⟩ := run_store_core h hc _ hn _ _ 4 (run_ea_to_la_fs h _ _ (by omega)) _ mp hacc
+    exact ⟨s', h1, by rw [← htr]; exact h2, h3, h4⟩
 
 end JanusX86.Proofs

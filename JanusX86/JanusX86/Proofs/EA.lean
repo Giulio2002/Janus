@@ -486,3 +486,45 @@ theorem run_x86_effective_addr {js : State} {s : SState} (h : Rel js s) (hc : X8
         · omega
 
 end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem disp_k {md : Nat} {bs : List Nat} {d : Nat} {r : List Nat} {k : Nat} (h : disp md bs = some (d, r, k)) :
+    k ≤ 4 := by
+  unfold disp at h
+  split at h
+  · split at h <;> simp at h; omega
+  · split at h
+    · split at h <;> simp at h; omega
+    · simp at h; omega
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem modrm_c_ge {rx m : Nat} {rest : List Nat} {md reg ext : Nat} {a : Addr} {r3 : List Nat} {c : Nat}
+    (hmd : modrm rx (m :: rest) = some (⟨md, reg, ext, .m a⟩, r3, c)) :
+    1 + (if sibP m then 1 else 0) ≤ c ∧ c ≤ 6 ∧ m / 64 ≠ 3 := by
+  unfold modrm at hmd
+  simp only at hmd
+  have hmd3 : ¬ (m / 64 = 3) := by intro e; simp [e] at hmd
+  simp only [hmd3, ↓reduceIte] at hmd
+  suffices H : 1 + (if sibP m then 1 else 0) ≤ c ∧ c ≤ 6 from ⟨H.1, H.2, hmd3⟩
+  by_cases h4 : m % 8 = 4
+  · have hs : sibP m = true := by unfold sibP; simp [h4]; omega
+    simp only [h4, ↓reduceIte] at hmd
+    rw [hs]; simp only [↓reduceIte]
+    cases rest with
+    | nil => simp at hmd
+    | cons sb rest2 =>
+      simp only at hmd
+      split at hmd
+      · cases e : readLE 4 rest2 <;> simp [e] at hmd; omega
+      · cases e : disp (m / 64) rest2 <;> simp [e] at hmd
+        rename_i drk; obtain ⟨d, r, k⟩ := drk; have := disp_k e; simp at hmd; omega
+  · have hs : sibP m = false := by unfold sibP; simp [h4]
+    simp only [h4, ↓reduceIte] at hmd
+    rw [hs]; simp only [Bool.false_eq_true, ↓reduceIte]
+    split at hmd
+    · cases e : readLE 4 rest <;> simp [e] at hmd; omega
+    · cases e : disp (m / 64) rest <;> simp [e] at hmd
+      rename_i drk; obtain ⟨d, r, k⟩ := drk; have := disp_k e; simp at hmd; omega
+
+end JanusX86.Proofs
