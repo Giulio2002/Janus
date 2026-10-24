@@ -19,3 +19,4 @@ import JanusX86.Proofs.Imul1
 import JanusX86.Proofs.Stack
 import JanusX86.Proofs.Shift
 import JanusX86.Proofs.CallInd
+import JanusX86.Proofs.Bt
