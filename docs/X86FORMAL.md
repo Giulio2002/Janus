@@ -80,9 +80,11 @@ Each was found by the check, and in each the hardware result of the case (the na
 | D4 movd-movq-to-xmm-no-zero-extension | 506 | `MOVD/MOVQ xmm, r/m` (`66 0F 6E`) | writes the low 32/64 bits and keeps the rest of the XMM register | zero-extends into the whole XMM register | `66 66 40 0f 6e 6e 00`: bits 32–127 of `xmm5` janus 0, sail kept |
 | D5 rep-string | 4,785 | `REP MOVS/STOS` (`F3 A4/A5/AA/AB`) | executes one iteration per step and leaves `RIP` on the instruction | the whole repetition in one instruction (Janus' `step` semantics) | `f3 a4`: `rcx` janus 0, sail 2 |
 | D6 ror-cf-from-bit-0 | 287 | `ROR` with count ≥ 2 | takes `CF` from bit 0 of the result (`ror_spec_*`, count ≥ 2 branch) | `CF` = the most significant bit of the result (SDM `ROR`) | `4a c0 cb 82`: flags janus 0xc0, sail 0xc1 |
+| D7 ret-noncanonical-rsp (found by proof) | 0 | `RET`/`RET imm16` (`C3/C2`) | `x86_ret` computes the new `RSP` with `add_to_sptr`, which stops with the model error `:NON-CANONICAL-STACK-ADDRESS` when `RSP + 8 + imm16` is not canonical (the value is then kept as 48 bits and sign-extended) | `RSP` takes the 64-bit value `RSP + 8 + imm16`; a non-canonical stack pointer faults only at the next stack access | not in the corpus (needs `RSP` near `2^47`); `ret_agree` assumes `RSP + 8 + 2^16 ≤ 2^47`, where the two agree |
 
 D5 is a difference of granularity rather than a wrong result (X86isa models one iteration);
-the others are wrong results. The class theorems exclude exactly these encodings (D2 in
+the others are wrong results. D7 was found while proving `ret_agree`, not by the corpus: with the
+stack in Janus' regions (below `2^47`) it is unreachable, so the theorem carries that bound. The class theorems exclude exactly these encodings (D2 in
 `alu_ai_agree`; D3/D6 when the shift class is proved).
 
 **SSE scalar floating point** (`Decode.sseFp`: `ADD/SUB/MUL/DIV/MIN/MAX/SQRT SS/SD`, `(U)COMIS`,
@@ -131,13 +133,27 @@ that a decidable check of it is sound, and the check verifies it on every case.
 | … r, r/m (`02/03 … 3A/3B`), register and memory source | `alu_ge_agree` | proved |
 | … AL/AX/EAX/RAX, imm (`04/05 … 3C/3D`) and TEST rAX, imm (`A8/A9`) | `alu_ai_agree` | proved except the byte forms with `REX.W` (D2) |
 | … r/m, imm (`80/81/83 /0..7`) and TEST r/m, imm (`F6/F7 /0`), all destinations, without `LOCK` | `alu_ei_agree` | proved |
+| TEST r/m, r (`84/85`) | `test_eg_agree` | proved |
 | INC/DEC r/m (`FE/FF /0,/1`), NOT/NEG r/m (`F6/F7 /2,/3`), without `LOCK` | `unary_agree` | proved |
+| MUL r/m (`F6/F7 /4`), all widths, CF/OF | `mul_agree` | proved |
+| IMUL r/m one-operand (`F6/F7 /5`), all widths, CF/OF | `imul1_agree` | proved |
+| MOV r/m, r and r, r/m (`88–8B`) | `mov_agree` | proved |
+| MOV r/m, imm (`C6/C7 /0`) | `movi_agree` | proved |
+| MOV r, imm (`B0–BF`, including the 64-bit `imm64` form) | `movoi_agree` | proved |
+| LEA (`8D`), every addressing form and address/operand size | `lea_agree` | proved |
+| MOVZX/MOVSX (`0F B6/B7/BE/BF`) | `movx_agree` | proved |
+| SETcc r/m8 (`0F 90–9F`), every condition | `setcc_agree` | proved |
+| CMOVcc (`0F 40–4F`), every condition and width (including the 32-bit zero-extension when the condition is false) | `cmov_agree` | proved |
+| Jcc rel8 (`70–7F`) | `jcc8_agree` | proved |
+| Jcc rel32 (`0F 80–8F`) | `jcc32_agree` | proved |
+| JMP rel8/rel32 (`EB/E9`) | `jmp_agree` | proved |
+| CALL rel32 (`E8`) | `call_agree` | proved |
+| RET / RET imm16 (`C3/C2`) | `ret_agree` | proved, assuming `RSP + 8 + 2^16 ≤ 2^47` (D7) |
 | `LOCK`ed ALU/unary forms (memory destination) | — | tested only |
-| shifts and rotates | — | tested only (D3, D6) |
-| MUL/IMUL/DIV/IDIV | — | tested only |
-| MOV/MOVZX/MOVSX/MOVSXD/LEA | — | tested only |
-| SETcc/CMOVcc | — | tested only |
-| Jcc/JMP/CALL/RET/PUSH/POP/LEAVE | — | tested only |
+| shifts and rotates (`C0/C1/D0–D3`, SHLD/SHRD) | — | tested only (D3, D6) |
+| DIV/IDIV (`F6/F7 /6,/7`), IMUL two/three-operand (`0F AF`, `69/6B`) | — | tested only |
+| MOVSXD (`63`), CBW/CWDE/CDQE, CWD/CDQ/CQO, XCHG, BT | — | tested only |
+| PUSH/POP/LEAVE, indirect JMP/CALL (`FF /2,/4`) | — | tested only |
 | string instructions | — | tested only (D5) |
 | CMPXCHG | — | tested only (D1) |
 | SSE/AVX moves and logic | — | tested only (D4; most are unimplemented in X86isa) |
@@ -164,6 +180,11 @@ model function returns on a related state. The layers:
   `locWrite`) and `rm_frame`, which reduces a one-byte ModRM instruction to the semantics of its
   dispatch arm. New classes are proved by a decode lemma, a dispatch lemma and a `run_<arm>` lemma
   against abstract operand read/write hypotheses (see `Unary.lean`).
+* `TwoByte`: the `0F` escape: `run_fetch_two` (dispatch up to `two_byte_opcode_execute`, with the
+  mandatory-prefix computation `mpref`) and `rm_frame2`, the two-byte analogue of `rm_frame`, used
+  by `Movx`, `Setcc` and `Jcc32`.
+* Class files: `AluGE`, `AluAI`, `AluEI`, `TestEG`, `Unary`, `Mul`, `Imul1`, `Mov`, `MovOI`,
+  `Movx`, `Setcc`, `Branch` (Jcc rel8, JMP), `Jcc32`, `Call` (CALL, RET).
 
 ## Trust story
 
