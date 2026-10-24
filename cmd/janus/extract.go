@@ -60,15 +60,28 @@ type Extraction struct {
 	Segments         []Segment // entry first, then breadth-first discovery order
 	Stubs            []Stub    // discovery order
 	Unresolved       []Unresolved
-	Data             []DataSeg     // read-only objects the code references, sorted by address
-	DataRefs         []DataRef     // detected references, in code order
-	Skipped          []SkippedData // references whose target is not copied (writable, code, ...)
-	Lean             []byte
+	// Dynamic targets: --targets as given, and every function added because an indirect call
+	// may reach it (see dynamic.go). Omitted: direct calls deliberately not followed.
+	Targets  []string
+	Dynamic  []DynTarget
+	Omitted  []OmittedCall
+	Data     []DataSeg     // read-only objects the code references, sorted by address
+	DataRefs []DataRef     // detected references, in code order
+	Skipped  []SkippedData // references whose target is not copied (writable, code, ...)
+	Lean     []byte
 }
 
 // stubKind classifies runtime functions that end execution with a named outcome.
 func stubKind(name string) (StubKind, bool) {
 	n := strings.TrimSuffix(strings.TrimSuffix(name, ".abi0"), ".abiinternal")
+	// Round 6 F3: only package `runtime` itself. A Go symbol is "<import path>.<name>", and an
+	// import path such as `runtime.panicky/lib` (a legal module path) gives the ordinary
+	// function `runtime.panicky/lib.Zero`, which a bare prefix test took for a panic stub. The
+	// path of package runtime has no '/', and any other import path whose symbols start with
+	// "runtime." has one (a dot in the last path element is escaped as %2e by the linker).
+	if strings.Contains(n, "/") || strings.Contains(n, "%") {
+		return "", false
+	}
 	switch {
 	case strings.HasPrefix(n, "runtime.morestack"):
 		return stubMorestack, true
@@ -149,93 +162,20 @@ func (x *Extraction) contractTarget(m *contractMatcher, seen map[uint64]bool, g 
 	return true
 }
 
-func extractWith(b *Binary, sym string, maxFunctions int, contracts []string) (*Extraction, error) {
-	entry, err := b.lookup(sym)
+// extractArm64Func copies one arm64 function and lists its direct branches.
+func extractArm64Func(b *Binary, f Func) (Segment, []Unresolved, error) {
+	ws, err := b.words(f)
 	if err != nil {
-		return nil, err
+		return Segment{}, nil, err
 	}
-	if _, ok := stubKind(entry.Name); ok {
-		return nil, &diag{Msg: fmt.Sprintf("%s is a runtime stub, not a function Janus extracts", entry.Name),
-			Stage: "function selection", Next: "Select a Go function that calls the stub instead."}
-	}
-	cm, err := newContractMatcher(contracts)
-	if err != nil {
-		return nil, err
-	}
-	if cm.match(entry.Name) {
-		return nil, &diag{Msg: fmt.Sprintf("%s matches a --contract pattern; the entry function cannot be a contract", entry.Name),
-			Stage: "function selection", Next: "Drop the --contract pattern that matches the entry, or extract a caller of it."}
-	}
-	if len(contracts) == 0 {
-		cm = nil
-	}
-	if b.GOARCH == "amd64" {
-		return extractAmd64(b, entry, maxFunctions, cm)
-	}
-	x := &Extraction{Bin: b, Entry: entry, ContractPatterns: contracts}
-	contractSeen := map[uint64]bool{}
-	seen := map[uint64]bool{entry.Addr: true}
-	stubSeen := map[uint64]bool{}
-	queue := []Func{entry}
-	for len(queue) > 0 {
-		f := queue[0]
-		queue = queue[1:]
-		ws, err := b.words(f)
-		if err != nil {
-			return nil, &diag{Msg: err.Error(), Stage: "code extraction", Next: "Report this binary layout to the Janus maintainers."}
-		}
-		x.Segments = append(x.Segments, Segment{Name: f.Name, Base: f.Addr, Size: f.Size, Words: ws})
-		for i, w := range ws {
-			pc := f.Addr + 4*uint64(i)
-			t, ok := branchTarget(w, pc)
-			if !ok || (t >= f.Addr && t < f.End()) {
-				continue
-			}
-			g, ok := b.containing(t)
-			if !ok {
-				x.Unresolved = append(x.Unresolved, Unresolved{From: pc, Target: t})
-				continue
-			}
-			if k, ok := stubKind(g.Name); ok {
-				if !stubSeen[g.Addr] {
-					stubSeen[g.Addr] = true
-					x.Stubs = append(x.Stubs, Stub{Name: g.Name, Addr: g.Addr, Kind: k})
-				}
-				continue
-			}
-			if x.contractTarget(cm, contractSeen, g) {
-				continue
-			}
-			if !seen[g.Addr] {
-				seen[g.Addr] = true
-				queue = append(queue, g)
-			}
-		}
-		if len(x.Segments)+len(queue) > maxFunctions {
-			var names []string
-			for _, s := range x.Segments {
-				names = append(names, s.Name)
-			}
-			for _, q := range queue {
-				names = append(names, q.Name)
-			}
-			if len(names) > 20 {
-				names = append(names[:20], fmt.Sprintf("... and %d more", len(names)-20))
-			}
-			return nil, &diag{
-				Msg: fmt.Sprintf("%s reaches more than %d functions by direct branches:\n    %s",
-					entry.Name, maxFunctions, strings.Join(names, "\n    ")),
-				Stage: "code extraction",
-				Next:  "Raise the limit with --max-functions N if this is intended, or extract a smaller function.",
-			}
+	var brs []Unresolved
+	for i, w := range ws {
+		pc := f.Addr + 4*uint64(i)
+		if t, ok := branchTarget(w, pc); ok {
+			brs = append(brs, Unresolved{From: pc, Target: t})
 		}
 	}
-	for _, s := range x.Segments {
-		x.DataRefs = append(x.DataRefs, dataRefs(s.Words, s.Base)...)
-	}
-	x.Data, x.Skipped = collectData(b, x.DataRefs)
-	x.Lean = renderLean(x)
-	return x, nil
+	return Segment{Name: f.Name, Base: f.Addr, Size: f.Size, Words: ws}, brs, nil
 }
 
 func leanString(s string) string {

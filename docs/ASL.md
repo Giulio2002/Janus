@@ -28,8 +28,8 @@ scripts/asl.sh prove    # build JanusASL.Proofs and audit their axioms
 | | |
 |---|---|
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
-| `janus-asl-check` | **562,288 agree, 21,468 gap, 0 MISMATCH**, about 100 s on 48 cores |
-| proofs | **25 kernel-checked theorems**: 24 encoding-class `*_agree` theorems, plus the assembly lemma `step_agree`, no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
+| `janus-asl-check` | **562,288 agree, 21,468 gap, 0 MISMATCH**; `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 7 min on 48 cores |
+| proofs | **44 audited theorems** (an explicit list in JanusASL/Audit.lean, with every statement printed): 36 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree` and 4 example transfers (`*.correctness_asl`), no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
 
 Agreement by corpus class (`agree` / `gap`):
 
@@ -98,8 +98,18 @@ retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to
 | LSLV/LSRV/ASRV/RORV | 2^18 | **proved** | `shiftV_agree` (ShiftV) |
 | RBIT, CLZ, CLS | 2^11 each | **proved** | `rbit_agree`, `clz_agree`, `cls_agree` (DP1) |
 | REV16, REV32, REV (64) | 2^11 / 2^11 / 2^10 | **proved** | `rev16_agree`, `rev32_agree`, `rev64_agree` (Rev) |
-| branches (B/BL/B.cond/CBZ/TBZ/BR/BLR/RET) | | tested | |
-| loads/stores, atomics, exclusives, PRFM | | tested | |
+| B, BL | 2^27 | **proved**² | `b_agree` (Branch) |
+| B.cond | 2^23 | **proved**² | `bcond_agree` (Branch) |
+| CBZ, CBNZ | 2^26 | **proved**² | `cb_agree` (Branch) |
+| TBZ, TBNZ | 2^26 | **proved**² | `tb_agree` (Branch) |
+| BR, BLR, RET | 2^5 each | **proved**² | `br_agree`, `blr_agree`, `ret_agree` (Branch) |
+| branches to a tagged (≥ 2^56) or, for BR/BLR/RET, misaligned target | | tested (Janus faults, the ASL branches; `gap` verdicts) | |
+| LDR/STR/LDRB/STRB/LDRH/STRH/LDRSB/LDRSH/LDRSW (unsigned immediate) | all valid | **proved**³ | `ldstUImm_agree` (LdStUImm) |
+| LDUR/STUR… and LDR/STR… (pre-/post-index), same size/opc pairs | all valid | **proved**³ | `ldstImm9_agree` (LdStImm9) |
+| LDR/STR… (register offset, all extends, `S` shift) | all valid | **proved**³ | `ldstReg_agree` (LdStReg) |
+| LDR (literal) W/X, LDRSW (literal) | 2^24 each | **proved**³ | `ldrLit_agree` (LdStLit) |
+| LDP/STP (W, X) and LDPSW, post-index / signed offset / pre-index | all valid | **proved**³ | `ldstPair_agree` (LdStPair; paired accesses in MemPair) |
+| atomics, exclusives, ordered (LDAR/STLR), PRFM | | tested | |
 | AdvSIMD/FP, AES, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
 
 "All valid" means all words of the group that Janus decodes. The theorems carry the decode
@@ -111,9 +121,129 @@ checks.
 ASL's `ConditionHolds` records the condition for the Statistical Profiling Extension when a
 sample is in flight. In the check's state it never is.
 
-The other classes are covered by the corpus test. They were not proved for these reasons:
-branches go through `BranchTo`, which takes in BRBE, GCS, SPE and TBI (`AddrTop`). Loads and
-stores go through the full translation table walk, which makes them practical only to test.
+² Under `LinuxEL0Config s`, to an untagged target (and for BR/BLR/RET a 4-byte-aligned one).
+The theorems also conclude `LinuxEL0Config s'`.
+
+³ Under `LinuxEL0Config s`, `MemRel js.mem s` and `UserMapped js.mem s` (below), and for words
+Janus steps successfully (`step w js = .ok js'`): the ASL step completes with `Janus_OK` in a
+state `s'` with `Rel js' s'`, `MemRel js'.mem s'` and `LinuxEL0Config s'`. Where Janus faults
+(outside its allocation, read-only, SP misaligned) nothing is claimed; the check compares those
+cases with the ASL's exceptions.
+
+### Loads and stores (Mem.lean, MemWrite.lean, LdSt*.lean)
+
+The memory side of the relation is `MemRel m s`: every byte of every Janus region holds, in the
+Sail memory, Janus' byte. A memory access in the ASL goes `Mem_read`/`Mem_set` →
+`AArch64_MemSingle_read__1`/`_set__1` (alignment, LSE2 single-copy atomicity, MTE tag check,
+`AArch64_TranslateAddress`, TME, SPE) → `PhysMemRead`/`PhysMemWrite` (GIC/UART windows) →
+`sail_mem_read`/`sail_mem_write`. Everything but the translation is *proved* under the
+configuration: the access descriptor `CreateAccDescGPR` builds (`gprAcc`, with the MPAM default
+info), the alignment checks (SCTLR_EL1.A = 0), little-endian data (SCTLR_EL1.E0E = 0), MTE
+(`AArch64_AccessIsTagChecked` is false: TCR_EL1.TCMA/TBI, SCTLR_EL1.ATA0), and both paths of
+`Mem_read__2`/`Mem_set__2` under FEAT_LSE2: an access inside one 16-byte quantity is one
+physical access, any other (unaligned, crossing) access is the byte loop, proved by a loop
+invariant (`run_byteLoop_read`, `run_byteLoop_store`). LDP/STP go through `Mem_read__1`/`Mem_set__1`
+with `ispair` (one access of `2 × dbytes`): one physical access inside a 16-byte quantity, two
+half accesses when the address is aligned to the half size, the byte loop otherwise (MemPair.lean);
+LDPSW takes the non-LSE2 path of two separate reads. `LinuxEL0Config` gains `_MPAM3_EL3`,
+`MPAM2_EL2` (MPAM disabled) and `TSTATE.depth = 0`.
+
+The translation itself (the stage-1 table walk, permission checks, GPC) is not proved. It is the
+named hypothesis **`UserMapped m s`**: in every state an instruction started in `s` can reach
+before its accesses (`TFrame`: only GPRs, SP, the step-entry registers and region bytes may
+differ), `AArch64_TranslateAddress` maps every byte of `m`'s regions (as an EL0 load, and as a
+store for writable regions) to the identity physical address, Normal write-back, without fault
+and without changing the state; and no region byte lies in the model's GIC/UART windows. The
+`TFrame` part is justified statically: the call graph of `AArch64_TranslateAddress` (1,067
+generated functions) reads none of the registers `TFrame` lets change, and the regions do not hold
+page tables. `janus-asl-check` evaluates the hypothesis on its tables: every byte of the data
+buffer, as load and store, aligned and unaligned, sizes 1–16, on the base state (comparing every
+register the translation code can write), and three bytes on every case's pre-state.
+
+These theorems are per instruction; `UserMapped` is not yet carried through `run_agree`. Since
+`UserMapped` is evaluated, not proved, there is no kernel-checked non-vacuity witness with non-empty
+regions (only the trivial one, no regions, where every Janus access faults): that it holds for the
+check's tables is the evaluated fact above.
+
+### `LinuxEL0Config` (Config.lean)
+
+In this build, the ASL branch path does more than set the PC. `BranchTo` and `BranchNotTaken`
+run the BRBE branch-record path (`BRBEBranch`, `BranchRecordAllowed`), the SPE sampling path
+(`SPEBranch__1`, about 100 lines, including `__IMPDEF_boolean` hooks), the GCS checks
+(`GCSPCREnabled`, `AddGCSRecord` for BL/BLR) and TBI (`AArch64_BranchAddr`, `AddrTop`,
+`EffectiveTBI`). The check's machine implements every feature except 10. `LinuxEL0Config s`
+pins the state that this code reads to the values `janus_init` gives it:
+
+* the FeatureImpl vector (features 1–3, 18, 19, 87, 88, 95, 96 and 258 off);
+* SCR_EL3, SCR, HCR_EL2, HCRX_EL2, TCR_EL1, MDCR_EL3, MDCR_EL2;
+* BRBFCR_EL1, BRBCR_EL1/2, PMSIDR_EL1, PMSCR_EL1/2, PMBLIMITR_EL1, PMBSR_EL1, GCSCRE0_EL1;
+* `SPESampleInFlight = false`, `InGuardedPage = false`, SCTLR_EL1;
+* `_MPAM3_EL3`, `MPAM2_EL2` (MPAM disabled), `TSTATE.depth = 0` (for the load/store access descriptor);
+* PSTATE.EL = 0, PSTATE.nRW = 0, PSTATE.SP = 0.
+
+HCR_EL2 has E2H = TGE = 0, so the configuration is Linux EL0 under an EL1 kernel (nVHE, or a
+guest); a VHE host (E2H = TGE = 1, EL0 translated by TCR_EL2) does not satisfy the predicate.
+
+The values are dumped by `janus-asl-check --cfg`. Under the predicate, Config.lean proves the
+following (`run_BranchTo`, `run_BranchNotTaken`). `BranchTo` to an untagged target sets PC and
+`__BranchTaken`, and writes only bookkeeping registers (`Branchtypetaken`, `__last_branch_valid`,
+`SPESamplePreviousBranchAddressValid`), so GPRs, SP and PSTATE are untouched. `BranchNotTaken`
+changes nothing. The IMPDEF hooks reached under the configuration evaluate to fixed answers in
+the generated `ImpDefBool` and are proved like the rest. The predicate is preserved by every
+branch theorem.
+
+The predicate is also a checked fact. `cfgOk` is a `Bool` version, with
+`cfgOk_sound : cfgOk s = true → LinuxEL0Config s`. `janus-asl-check` evaluates `cfgOk` on its
+base state, and on every case's pre-state and (for completed steps) post-state: base true,
+**0 violations** on 583,756 cases. Every class theorem also proves that the predicate is
+preserved: the data-processing theorems conclude `LinuxEL0Config s → LinuxEL0Config s'`, and
+the branch theorems conclude `LinuxEL0Config s'`. That is what lets the per-class theorems
+compose.
+
+### Whole programs (Run.lean, Examples.lean)
+
+`StepOK w` is the per-word form every proved class gives (`stepOK_<class>`). From states related
+under `LinuxEL0Config`, whenever Janus steps `w` to a state with an untagged PC, the generated
+ASL step completes with `Janus_OK` in a related state that is again `LinuxEL0Config`.
+
+`aslRun p fuel s` iterates `janus_step` on the words that `p.fetch` returns at the ASL's `_PC`.
+Like `Program.run`, it stops at `p.exitAddr` or a stub. Note that the words are fetched with the
+program's own `fetch`, not through the ASL's translated instruction fetch.
+
+**`run_agree`** states the following. Suppose every word of `p` is `StepOK`, and the code,
+stubs and exit address are untagged. Then for every fuel and every related `LinuxEL0Config`
+starting state, the ASL run matches the Janus run. If `p.run fuel js = .ok (.returned js')`,
+then `aslRun p fuel s = .returned s'` with `Rel js' s'` and `LinuxEL0Config s'`. If
+`.ok (.stub name kind js')`, then `aslRun` ends at the same stub, related. PC tracking through
+branches is part of `Rel`.
+
+Not covered: `.error _` outcomes, that is faults and out of fuel. There Janus is conservative
+and the ASL may continue.
+
+**`Ensures.toASL`** turns any Janus `Ensures` specification of such a program into the same
+statement about the ASL. From every ASL state related to the call state, the ASL run returns to
+the caller in a state related to one satisfying the ABI and the postcondition. `Rel` relates only
+X0–X30, SP, PC and NZCV, so this transfers exactly the register part of a postcondition: a
+postcondition about memory, V registers, TPIDR_EL0 or DCZID_EL0 holds of the Janus state, and the
+corollary says nothing about the corresponding ASL state (the four examples are register-only).
+
+It is applied to four shipped examples. In each case the program is copied from
+`artifacts/<name>/Extracted.lean`, the Janus proof is copied verbatim from
+`examples/proofs/<name>.lean`, and every word is shown to be in the proved subset:
+
+| example | instructions | ASL corollary |
+|---|---|---|
+| `Add` | ADD, RET | `JanusASL.Examples.Add.correctness_asl` |
+| `Max` | CMP (SUBS), B.cs, MOV (ORR), RET, both sides of the branch | `JanusASL.Examples.Max.correctness_asl` |
+| `Mul64` | MUL (MADD), UMULH, MOV, RET | `JanusASL.Examples.Mul64.correctness_asl` |
+| `Add128` | ADDS, ADC, RET | `JanusASL.Examples.Add128.correctness_asl` |
+
+So for these programs the shipped guarantee, for example "Add returns x + y", holds of Arm's ASL
+(as translated) under `LinuxEL0Config`.
+
+The other classes are covered by the corpus test. Loads and stores go through the full
+translation table walk (next on the list), and AdvSIMD/AES and the system instructions are
+pending.
 
 ### How the proofs work
 

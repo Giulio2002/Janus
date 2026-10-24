@@ -26,11 +26,6 @@ theorem readLE_64 (m : Memory) (a : Nat) :
     show 16 = 8 + 8 from rfl, h]
   simp only [Nat.add_assoc, Nat.mul_add, ← Nat.mul_assoc, ← Nat.pow_add]
 
-/-- The carry materialised by `SBBQ R, R` (all ones or zero). -/
-theorem ite_allOnes_toNat (P : Prop) [Decidable P] :
-    (if P then 18446744073709551615#64 else 0#64).toNat = 18446744073709551615 * (decide P).toNat := by
-  by_cases h : P <;> simp [h]
-
 set_option maxHeartbeats 4000000 in
 theorem correctness (z x y c : BitVec 64) :
     Ensures Extracted.program Extracted.entry [z, x, y, c]
@@ -44,31 +39,6 @@ theorem correctness (z x y c : BitVec 64) :
   simp only [Disjoint, regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw hd hds
   simp only [readLE_64]
   janus64_run
-  janus64_simp [ite_allOnes_toNat, Nat.mul_add, Nat.mul_left_comm y.toNat]
-  have hb0 : y.toNat * s.mem.readLE x.toNat 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem x.toNat 8; omega)
-  generalize y.toNat * s.mem.readLE x.toNat 8 = p0 at *
-  have hb1 : y.toNat * s.mem.readLE (x.toNat + 8) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 8) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 8) 8 = p1 at *
-  have hb2 : y.toNat * s.mem.readLE (x.toNat + 16) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 16) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 16) 8 = p2 at *
-  have hb3 : y.toNat * s.mem.readLE (x.toNat + 24) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 24) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 24) 8 = p3 at *
-  have hb4 : y.toNat * s.mem.readLE (x.toNat + 32) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 32) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 32) 8 = p4 at *
-  have hb5 : y.toNat * s.mem.readLE (x.toNat + 40) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 40) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 40) 8 = p5 at *
-  have hb6 : y.toNat * s.mem.readLE (x.toNat + 48) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 48) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 48) 8 = p6 at *
-  have hb7 : y.toNat * s.mem.readLE (x.toNat + 56) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 56) 8; omega)
-  generalize y.toNat * s.mem.readLE (x.toNat + 56) 8 = p7 at *
   janus64_arith
 
 end Proof

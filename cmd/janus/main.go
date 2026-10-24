@@ -2,7 +2,7 @@
 // checks extraction artifacts against the binary, and verifies Lean proofs about them.
 //
 //	janus list <binary> [--filter SUBSTR]
-//	janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]...
+//	janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]... [--targets SYM,...]
 //	janus check <outdir> [--binary PATH]
 //	janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
 //	janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
@@ -70,7 +70,7 @@ func displayPath(p string) string {
 
 const usage = `Usage:
   janus list <binary> [--filter SUBSTR]
-  janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]...
+  janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]... [--targets SYM,...]
   janus check <outdir> [--binary PATH]
   janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
   janus blockers <binary> <symbol>... [--max-functions N] [--contract SYM]... [--janus-root DIR] [--json FILE]
@@ -82,7 +82,7 @@ See docs/CLI.md.
 // parseArgs splits args into positionals and --flag value / --flag=value options.
 // repeatableFlags may be given more than once; their values are joined with "\n" (split them
 // with optsList).
-var repeatableFlags = map[string]bool{"contract": true}
+var repeatableFlags = map[string]bool{"contract": true, "targets": true}
 
 // optsList returns the values of a repeatable option.
 func optsList(opts map[string]string, name string) []string {
@@ -197,7 +197,7 @@ func cmdList(args []string, stdout io.Writer) error {
 }
 
 func cmdExtract(args []string, stdout, stderr io.Writer) error {
-	pos, opts, err := parseArgs(args, "max-functions", "contract")
+	pos, opts, err := parseArgs(args, "max-functions", "contract", "targets")
 	if err != nil {
 		return usageErr("%v", err)
 	}
@@ -211,7 +211,15 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	binPath, sym, outdir := pos[0], pos[1], pos[2]
-	x, err := extract(binPath, sym, maxF, optsList(opts, "contract")...)
+	b, err := loadBinary(binPath)
+	if err != nil {
+		return err
+	}
+	var targets []string
+	for _, v := range optsList(opts, "targets") {
+		targets = append(targets, parseTargets(v)...)
+	}
+	x, err := extractWith(b, sym, maxF, optsList(opts, "contract"), targets...)
 	if err != nil {
 		return err
 	}
@@ -249,6 +257,14 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	for _, d := range x.Data {
 		fmt.Fprintf(stdout, "  data  0x%x %4d bytes  %s (%s)\n", d.Base, len(d.Bytes), d.Name, d.Section)
 	}
+	for _, t := range x.Dynamic {
+		how := map[string]string{"targets": "named by --targets", "itab": "method of " + t.From,
+			"funcval": "function of " + t.From, "code-address": "address computed at " + t.From}[t.Via]
+		fmt.Fprintf(stdout, "  dynamic target 0x%x  %s (%s)\n", t.Addr, t.Name, how)
+	}
+	for _, o := range x.Omitted {
+		fmt.Fprintf(stdout, "  omitted call at 0x%x to %s: %s; not extracted (the model faults with noCode there)\n", o.From, o.Name, o.Reason)
+	}
 	for _, pat := range x.ContractPatterns {
 		hit := false
 		cm, _ := newContractMatcher([]string{pat})
@@ -284,7 +300,7 @@ func printSkipped(w io.Writer, skipped []SkippedData) {
 		case "gopclntab":
 			fmt.Fprintf(w, "Warning: code at 0x%x references %s in .gopclntab; runtime metadata is not copied.\n", s.From, what)
 		case "code":
-			fmt.Fprintf(w, "Note: code at 0x%x computes the code address %s in %s; code is not copied as data.\n", s.From, what, s.Section)
+			fmt.Fprintf(w, "Note: code at 0x%x computes the code address %s in %s; code is not copied as data (a function entry is copied as code, see the dynamic targets).\n", s.From, what, s.Section)
 		default:
 			fmt.Fprintf(w, "Warning: code at 0x%x references %s, which is in no allocated section; nothing is copied.\n", s.From, what)
 		}

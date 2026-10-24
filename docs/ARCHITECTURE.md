@@ -240,6 +240,8 @@ imports `Extracted` either way.
 | `Janus.Arm64.MemoryLemmas`, `Janus.Run` | read-over-write, frame and fuel lemmas (proved) | no |
 | `Janus.GoABI` | ABIInternal on arm64: `CallSetup`, `RetAddr`, `ABIReturn`, outcome predicates, `Ensures` | definitions are part of every statement |
 | `Janus.Spec.Basic` | `Ptr`, `Disjoint`, `Aliasing`, `OnlyWrites`, `val256`, `StackOK`, … | definitions are part of every statement |
+| `Janus.Spec.Dynamic` | `ItabIs`, `FuncvalIs`, `ClosureCtx`: which code a dynamic call reaches (both ISAs) | definitions are part of every statement that uses them |
+| `Janus.Tactic.Dynamic` | `janus_dyn` | no |
 | `Janus.Tactic.{Attr,Basic,Core,Data}` | `Reaches`, `Summary`, `janus_run`, `janus_data`, simp sets | no |
 | `Janus.Amd64.{State,Instr,Decode,Exec,Program}` | the x86-64 model | **yes** |
 | `Janus.Amd64.{Run,GoABI,Tactic,TacticAttr}` | amd64 lemmas, ABI, `janus64_run` | ABI definitions as above; tactics no |
@@ -259,6 +261,7 @@ on an ASL-derived check).
 | `extract.go`, `amd64.go` | the byte copy and `Extracted.lean` rendering | **yes** (copy) |
 | `branch.go`, reachability in `amd64.go` | which callees to copy | no |
 | `data.go` | read-only data references (untrusted) and their byte copy (trusted) | partly |
+| `dynamic.go` | dynamic call targets (`--targets`, inferred), the reachability driver for both ISAs | no |
 | `identity.go` | `identity.json`, `janus check` (regenerate and byte-compare) | **yes** |
 | `verify.go`, `leanjob.go` | the verify pipeline: trusted copies, proof build, audit, replay, hashes, report | **yes** |
 | `replay.go` | framework olean pins, the import-closure check, the cached kernel replay of every non-core module | **yes** |

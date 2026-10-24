@@ -37,6 +37,8 @@ def load_fn(parts, name):
 
 COND = re.compile(r"\(if \(\(←\(\(pure (.*?) <&&> \(do\s*\(pure \(\(← readReg SEE\) <b (\d+)\)\)", re.S)
 CONJ = re.compile(r"\(Sail\.BitVec\.extractLsb __opcode (\d+) (\d+)\) == \(((?:0b[01]+)|(?:0x[0-9A-Fa-f]+)|\d+)#(\d+) : \(BitVec \d+\)\)")
+# a whole-opcode comparison `(__opcode == (C#32 : (BitVec 32)))` (hi = 31, lo = 0, marked by width -32)
+CONJW = re.compile(r"\(__opcode == \(((?:0b[01]+)|(?:0x[0-9A-Fa-f]+)|\d+)#32 : \(BitVec 32\)\)\)")
 
 
 def clauses(fn):
@@ -47,6 +49,7 @@ def clauses(fn):
         if not m:
             break
         conj = [(int(a), int(b), int(c, 0), int(d)) for a, b, c, d in CONJ.findall(m.group(1))]
+        conj += [(31, 0, int(c, 0), -32) for c in CONJW.findall(m.group(1))]
         if not conj:
             raise SystemExit("unparsed condition: " + m.group(1)[:200])
         # body: from 'then' to the matching 'else' at the same nesting; we only need the callee
@@ -153,11 +156,23 @@ def main():
     print("    (%s pc (BitVec.ofNat 32 w)).run s =" % fn_name)
     print("      %s.run (s.set .SEE %d) := by" % (body, see))
     names = []
+    seen = set()
+    uniq = []
+    for nm, cj, val in haves:
+        if (cj, val) not in seen:
+            seen.add((cj, val))
+            uniq.append((nm, cj, val))
+    haves = uniq
     for nm, (hi, lo, c, width), val in haves:
-        print("  have %s : (Sail.BitVec.extractLsb (BitVec.ofNat 32 w) %d %d == (%d#%d : BitVec %d)) = %s := by"
-              % (nm, hi, lo, c, width, width, "true" if val else "false"))
-        print("    rw [extractLsb_ofNat32 _ _ _ (by decide) (by decide)]; exact %s (by simp; omega)"
-              % ("ofNat_beq_true" if val else "ofNat_beq_false"))
+        if width == -32:
+            print("  have %s : (BitVec.ofNat 32 w == (%d#32 : BitVec 32)) = %s := by"
+                  % (nm, c, "true" if val else "false"))
+            print("    exact %s (by simp; omega)" % ("ofNat_beq_true" if val else "ofNat_beq_false"))
+        else:
+            print("  have %s : (Sail.BitVec.extractLsb (BitVec.ofNat 32 w) %d %d == (%d#%d : BitVec %d)) = %s := by"
+                  % (nm, hi, lo, c, width, width, "true" if val else "false"))
+            print("    rw [extractLsb_ofNat32 _ _ _ (by decide) (by decide)]; exact %s (by simp; omega)"
+                  % ("ofNat_beq_true" if val else "ofNat_beq_false"))
         names.append(nm)
     for i in sbo:
         print("  have s%d : Sail.BitVec.access (BitVec.ofNat 32 w) %d = 1#1 := access_ofNat32 _ _ (by decide) (by omega)"

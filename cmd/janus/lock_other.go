@@ -5,10 +5,13 @@ package main
 import "os"
 
 // fileLock falls back to an exclusive lock file on platforms without flock. A lock left
-// behind by a killed process must be removed by hand.
+// behind by a killed process must be removed by hand. Shared locks are exclusive here, so
+// concurrent verifications are serialised instead of overlapping.
 type fileLock struct{ path string }
 
-func lockFile(path string, block bool) (*fileLock, error) {
+func lockFile(path string, block bool) (*fileLock, error) { return lockFileMode(path, false, block) }
+
+func lockFileMode(path string, shared, block bool) (*fileLock, error) {
 	for {
 		f, err := os.OpenFile(path+".excl", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
@@ -21,6 +24,8 @@ func lockFile(path string, block bool) (*fileLock, error) {
 		sleepBriefly()
 	}
 }
+
+func (l *fileLock) share() error { return nil }
 
 func (l *fileLock) unlock() {
 	if l != nil && l.path != "" {
