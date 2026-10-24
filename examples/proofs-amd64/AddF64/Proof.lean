@@ -26,11 +26,11 @@ theorem correctness (a b : BitVec 64) :
   obtain ⟨-, hnw, hacc⟩ := hst
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
   janus64_run [ha, hb, hm]
-  have h := FP.binop_add_ieee FP.IEEEMode.default binary64 (Or.inr rfl) a.toNat b.toNat a.isLt b.isLt
-  rw [show FP.rounding 0x1F80 = .rne from by decide] at h
+  have h := FP.binop_add_ieee (c := ⟨.rne, false, false⟩) ⟨rfl, rfl⟩ binary64 (Or.inr rfl)
+    a.toNat b.toNat a.isLt b.isLt
   obtain ⟨hlt, h⟩ := h
-  have hlt' : (FP.binop .add binary64 8064 a.toNat b.toNat).res < 2 ^ 64 := hlt
-  generalize (FP.binop .add binary64 8064 a.toNat b.toNat).res = x at *
+  have hlt' : (FP.binop .add binary64 ⟨.rne, false, false⟩ a.toNat b.toNat).res < 2 ^ 64 := hlt
+  generalize (FP.binop .add binary64 ⟨.rne, false, false⟩ a.toNat b.toNat).res = x at *
   have e : ((s.xmm 0).toNat / 18446744073709551616 * 18446744073709551616 + x % 18446744073709551616) %
       18446744073709551616 = x := by omega
   rw [e]; exact h

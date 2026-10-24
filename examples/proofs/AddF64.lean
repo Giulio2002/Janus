@@ -36,7 +36,7 @@ theorem correctness (a b : BitVec 64) :
   generalize (FP.fpAdd binary64 0 a.toNat b.toNat).1 = x at *
   have h128 : x < 2 ^ 128 := by omega
   simp only [State.getV, setVReg_apply, Nat.mod_eq_of_lt hlt', Nat.mod_eq_of_lt h128]
-  unfold ResultIs
+  unfold ResultIs at *
   split at h <;> simp_all [Nat.mod_eq_of_lt hlt']
 
 end Proof

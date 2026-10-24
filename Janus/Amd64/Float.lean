@@ -30,8 +30,8 @@ written from the Intel SDM (Vol. 1 §4.8.3.5–§4.9 and §11.5, and the Vol. 2 
   unmasked underflow traps on every tiny result (exact or not), while a masked one is flagged
   only for a tiny *inexact* result.
 
-`f` is the format (`binary32` for the `SS` forms, `binary64` for `SD`); `mx` is `MXCSR` as a
-natural number. Operand order follows the SDM: `a` is the first source (the destination
+`f` is the format (`binary32` for the `SS` forms, `binary64` for `SD`); `c` is the `RC`/`DAZ`/`FTZ` part of
+`MXCSR` (`ctl`). Operand order follows the SDM: `a` is the first source (the destination
 register), `b` the second.
 -/
 
@@ -77,22 +77,33 @@ def check (r fl : Nat) : XR := ⟨r, fl, fl⟩
 /-- Whether `o` traps under `MXCSR` `mx`. -/
 def XR.trap (o : XR) (mx : Nat) : Bool := o.traps &&& unmasked mx ≠ 0
 
+/-- The control bits of `MXCSR` the operations read: `RC`, `DAZ`, `FTZ` (the masks only decide
+whether an operation traps, `XR.trap`). -/
+structure Ctl where
+  rc : RM
+  daz : Bool
+  ftz : Bool
+deriving DecidableEq, Repr, Inhabited
+
+/-- The controls of `MXCSR` `mx`. -/
+def ctl (mx : Nat) : Ctl := ⟨rounding mx, daz mx, ftz mx⟩
+
 /-! ## Operands -/
 
 /-- An operand's class after `DAZ`: a subnormal reads as a zero when `MXCSR.DAZ = 1`. -/
-def kindOf (f : Fmt) (mx : Nat) (x : Nat) : Kind :=
+def kindOf (f : Fmt) (c : Ctl) (x : Nat) : Kind :=
   match classify f x with
-  | .subnormal => if daz mx then .zero else .subnormal
+  | .subnormal => if c.daz then .zero else .subnormal
   | k => k
 
 /-- The operand value after `DAZ` (a zero keeps its sign in `signOf`). -/
-def valOf (f : Fmt) (mx : Nat) (x : Nat) : Val :=
-  if kindOf f mx x = .zero then .num 0 0 else valueOf f x
+def valOf (f : Fmt) (c : Ctl) (x : Nat) : Val :=
+  if kindOf f c x = .zero then .num 0 0 else valueOf f x
 
 /-- The operand as delivered by `MINSD`/`MAXSD` (a subnormal read as a zero by `DAZ` is that
 zero). -/
-def dazBits (f : Fmt) (mx : Nat) (x : Nat) : Nat :=
-  if kindOf f mx x = .zero then zero f (signOf f x) else x
+def dazBits (f : Fmt) (c : Ctl) (x : Nat) : Nat :=
+  if kindOf f c x = .zero then zero f (signOf f x) else x
 
 /-- `x` with its quiet bit set. -/
 def quiet (f : Fmt) (x : Nat) : Nat := x ||| f.quietBit
@@ -111,13 +122,13 @@ def nanResult (f : Fmt) (a b : Nat) : Nat × Nat :=
 `pre` already raised (`DE`): overflow (`OE PE`), underflow (tininess after rounding; masked:
 `UE PE` when inexact, flushed to a zero with `UE PE` under `FTZ`; unmasked: a trap for every
 tiny result), inexact (`PE`). -/
-def roundX (f : Fmt) (mx : Nat) (rm : RM) (pre : Nat) (neg : Bool) (m : Nat) (e : Int) :
+def roundX (f : Fmt) (c : Ctl) (rm : RM) (pre : Nat) (neg : Bool) (m : Nat) (e : Int) :
     XR :=
   let r := round f rm neg m e
   if r.overflow then check r.bits (pre ||| OE ||| PE)
   else if r.tinyAfter then
     -- masked response, and `UE` traps (when unmasked) for every tiny result
-    if ftz mx then ⟨zero f neg, pre ||| UE ||| PE, pre ||| UE ||| PE⟩
+    if c.ftz then ⟨zero f neg, pre ||| UE ||| PE, pre ||| UE ||| PE⟩
     else if r.inexact then ⟨r.bits, pre ||| UE ||| PE, pre ||| UE ||| PE⟩
     else ⟨r.bits, pre, pre ||| UE⟩
   else if r.inexact then check r.bits (pre ||| PE)
@@ -131,10 +142,10 @@ inductive BinOp where
 deriving DecidableEq, Repr, Inhabited
 
 /-- `a op b` (`ADDSD`/`SUBSD`/`MULSD`/`DIVSD` and the `SS` forms). -/
-def binop (op : BinOp) (f : Fmt) (mx : Nat) (a b : Nat) : XR :=
-  let rm := rounding mx
-  let ka := kindOf f mx a
-  let kb := kindOf f mx b
+def binop (op : BinOp) (f : Fmt) (c : Ctl) (a b : Nat) : XR :=
+  let rm := c.rc
+  let ka := kindOf f c a
+  let kb := kindOf f c b
   let sa := signOf f a
   -- the subtrahend's sign is flipped, so that `a - b = a + (-b)` in the rules below
   let sb := if op = .sub then !signOf f b else signOf f b
@@ -150,8 +161,8 @@ def binop (op : BinOp) (f : Fmt) (mx : Nat) (a b : Nat) : XR :=
   if invalid then check (indefinite f) IE else
   if op = .div && zB && !infA then check (inf f (sa != sb)) ZE else
   let de := if ka = .subnormal || kb = .subnormal then DE else 0
-  let va := valOf f mx a
-  let vb := valOf f mx b
+  let va := valOf f c a
+  let vb := valOf f c b
   -- `a + nb * 2^vb.e`: the sum of `ADDSD`, and the difference of `SUBSD` with `nb = -vb.n`
   let sum (nb : Int) : XR :=
     if infA then check (inf f sa) de
@@ -160,7 +171,7 @@ def binop (op : BinOp) (f : Fmt) (mx : Nat) (a b : Nat) : XR :=
     else
       match addExact va.n va.e nb vb.e with
       | none => check (zero f (rm = .rmi)) de
-      | some (neg, m, e) => roundX f mx rm de neg m e
+      | some (neg, m, e) => roundX f c rm de neg m e
   match op with
   | .add => sum vb.n
   | .sub => sum (-vb.n)
@@ -169,7 +180,7 @@ def binop (op : BinOp) (f : Fmt) (mx : Nat) (a b : Nat) : XR :=
     else if zA || zB then check (zero f (sa != sb)) de
     else match mulExact va.n va.e vb.n vb.e with
       | none => check (zero f (sa != sb)) de
-      | some (neg, m, e) => roundX f mx rm de neg m e
+      | some (neg, m, e) => roundX f c rm de neg m e
   | .div =>
     if infA then check (inf f (sa != sb)) de
     else if infB || zA then check (zero f (sa != sb)) de
@@ -177,11 +188,11 @@ def binop (op : BinOp) (f : Fmt) (mx : Nat) (a b : Nat) : XR :=
       let (m1, e1) := va.mag
       let (m2, e2) := vb.mag
       let (m, e) := divOdd f.fbits m1 e1 m2 e2
-      roundX f mx rm de (sa != sb) m e
+      roundX f c rm de (sa != sb) m e
 
 /-- `SQRTSD`/`SQRTSS` of `b`. -/
-def sqrt (f : Fmt) (mx : Nat) (b : Nat) : XR :=
-  let kb := kindOf f mx b
+def sqrt (f : Fmt) (c : Ctl) (b : Nat) : XR :=
+  let kb := kindOf f c b
   let s := signOf f b
   if isNaN f b then check (quiet f b) (if isSNaN f b then IE else 0)
   else if kb = .zero then check (zero f s) 0
@@ -189,47 +200,47 @@ def sqrt (f : Fmt) (mx : Nat) (b : Nat) : XR :=
   else if kb = .inf then check (inf f false) 0
   else
     let de := if kb = .subnormal then DE else 0
-    let (m, e) := (valOf f mx b).mag
+    let (m, e) := (valOf f c b).mag
     let (m', e') := sqrtOdd f.fbits m e
-    roundX f mx (rounding mx) de false m' e'
+    roundX f c (c.rc) de false m' e'
 
 /-- `MINSD`/`MAXSD` (`max`) and the `SS` forms: `IF (a = 0.0 and b = 0.0) THEN b ELSE IF a = NaN
 THEN b ELSE IF b = NaN THEN b ELSE IF a < b (a > b) THEN a ELSE b`, `IE` for any NaN operand,
 `DE` for a subnormal one. The operand delivered is the one read through `DAZ` (a subnormal
 second operand comes back as a zero under `DAZ`, also when the other operand is a NaN). -/
-def minmax (max : Bool) (f : Fmt) (mx : Nat) (a b : Nat) : XR :=
-  if isNaN f a || isNaN f b then check (dazBits f mx b) IE else
-  let de := if kindOf f mx a = .subnormal || kindOf f mx b = .subnormal then DE else 0
-  let va := valOf f mx a
-  let vb := valOf f mx b
+def minmax (max : Bool) (f : Fmt) (c : Ctl) (a b : Nat) : XR :=
+  if isNaN f a || isNaN f b then check (dazBits f c b) IE else
+  let de := if kindOf f c a = .subnormal || kindOf f c b = .subnormal then DE else 0
+  let va := valOf f c a
+  let vb := valOf f c b
   let pickA := if max then Val.lt vb va else Val.lt va vb
-  check (if kindOf f mx a = .zero && kindOf f mx b = .zero then dazBits f mx b
-    else if pickA then dazBits f mx a else dazBits f mx b) de
+  check (if kindOf f c a = .zero && kindOf f c b = .zero then dazBits f c b
+    else if pickA then dazBits f c a else dazBits f c b) de
 
 /-! ## Comparisons -/
 
 /-- The relation of `a` and `b`: `none` = unordered, else `some (-1 | 0 | 1)`. -/
-def relation (f : Fmt) (mx : Nat) (a b : Nat) : Option Int :=
+def relation (f : Fmt) (c : Ctl) (a b : Nat) : Option Int :=
   if isNaN f a || isNaN f b then none else
-  let va := valOf f mx a
-  let vb := valOf f mx b
+  let va := valOf f c a
+  let vb := valOf f c b
   some (if Val.eq va vb then 0 else if Val.lt va vb then -1 else 1)
 
 /-- `UCOMISD`/`COMISD` (`signal`) and the `SS` forms: `ZF:PF:CF` as the 3-bit result (`OF AF SF`
 are cleared by the caller): unordered `111`, greater `000`, less `001`, equal `100`. `IE` for a
 signalling NaN (`UCOMIS`) or any NaN (`COMIS`); `DE` for a subnormal operand. -/
-def comis (signal : Bool) (f : Fmt) (mx : Nat) (a b : Nat) : XR :=
-  match relation f mx a b with
+def comis (signal : Bool) (f : Fmt) (c : Ctl) (a b : Nat) : XR :=
+  match relation f c a b with
   | none => check 0b111 (if isSNaN f a || isSNaN f b || signal then IE else 0)
   | some r =>
-    let de := if kindOf f mx a = .subnormal || kindOf f mx b = .subnormal then DE else 0
+    let de := if kindOf f c a = .subnormal || kindOf f c b = .subnormal then DE else 0
     check ((if r = 0 then 4 else 0) + (if r < 0 then 1 else 0)) de
 
 /-- `CMPSD`/`CMPSS` with predicate `p < 8`: `EQ LT LE UNORD NEQ NLT NLE ORD` (`LT LE NLT NLE`
 signal on quiet NaNs): all ones (`2^w - 1`) if the predicate holds, else 0. -/
-def cmp (f : Fmt) (mx : Nat) (p : Nat) (a b : Nat) : XR :=
+def cmp (f : Fmt) (c : Ctl) (p : Nat) (a b : Nat) : XR :=
   let signal := p % 4 = 1 || p % 4 = 2
-  let rel := relation f mx a b
+  let rel := relation f c a b
   let holds : Bool := match rel with
     | none => p = 3 || p = 4 || p = 5 || p = 6
     | some r =>
@@ -241,24 +252,24 @@ def cmp (f : Fmt) (mx : Nat) (p : Nat) (a b : Nat) : XR :=
   | none => check (if holds then ones else 0)
       (if isSNaN f a || isSNaN f b || signal then IE else 0)
   | some _ =>
-    let de := if kindOf f mx a = .subnormal || kindOf f mx b = .subnormal then DE else 0
+    let de := if kindOf f c a = .subnormal || kindOf f c b = .subnormal then DE else 0
     check (if holds then ones else 0) de
 
 /-! ## Conversions -/
 
 /-- `CVTSI2SD`/`CVTSI2SS` of the `iw`-bit integer `x` (two's complement, `x < 2^iw`). -/
-def ofInt (f : Fmt) (mx : Nat) (iw x : Nat) : XR :=
+def ofInt (f : Fmt) (c : Ctl) (iw x : Nat) : XR :=
   let i : Int := if x < 2 ^ (iw - 1) then x else (x : Int) - 2 ^ iw
-  if i = 0 then check (zero f false) 0 else roundX f mx (rounding mx) 0 (decide (i < 0)) i.natAbs 0
+  if i = 0 then check (zero f false) 0 else roundX f c (c.rc) 0 (decide (i < 0)) i.natAbs 0
 
 /-- `CVTTSD2SI` (`rm = .rz`) / `CVTSD2SI` (`rm` from `MXCSR`) and the `SS` forms to an
 `iw`-bit integer (as an `iw`-bit pattern). A NaN or a result outside `[-2^(iw-1), 2^(iw-1))`
 gives the integer indefinite `2^(iw-1)` with `IE`; an inexact one raises `PE`. Subnormal
 inputs follow `DAZ` but never raise `DE`. -/
-def toInt (f : Fmt) (mx : Nat) (rm : RM) (iw : Nat) (b : Nat) : XR :=
+def toInt (f : Fmt) (c : Ctl) (rm : RM) (iw : Nat) (b : Nat) : XR :=
   let indef := 2 ^ (iw - 1)
   if isNaN f b then check indef IE else
-  match valOf f mx b with
+  match valOf f c b with
   | .inf _ => check indef IE
   | .num n e =>
     let (i, inexact) := if n = 0 then ((0 : Int), false) else roundToInt rm (signOf f b) n.natAbs e
@@ -272,29 +283,29 @@ def convertNaN (f g : Fmt) (x : Nat) : Nat :=
   pack g (signOf f x) g.expMax (g.quietBit + frac51 * g.quietBit / 2 ^ 51)
 
 /-- `CVTSD2SS` (`f = binary64`, `g = binary32`) / `CVTSS2SD`. -/
-def convert (f g : Fmt) (mx : Nat) (b : Nat) : XR :=
-  let kb := kindOf f mx b
+def convert (f g : Fmt) (c : Ctl) (b : Nat) : XR :=
+  let kb := kindOf f c b
   let s := signOf f b
   if isNaN f b then check (convertNaN f g b) (if isSNaN f b then IE else 0)
   else if kb = .inf then check (inf g s) 0
   else if kb = .zero then check (zero g s) 0
   else
     let de := if kb = .subnormal then DE else 0
-    let (m, e) := (valOf f mx b).mag
-    roundX g mx (rounding mx) de s m e
+    let (m, e) := (valOf f c b).mag
+    roundX g c (c.rc) de s m e
 
 /-- `ROUNDSD`/`ROUNDSS` of `b` with `imm8`: `imm8<2>` selects `MXCSR.RC`, else `imm8<1:0>`;
 `imm8<3>` suppresses `PE`. A signalling NaN is quieted (`IE`), `DE` is never raised (`DAZ`
 applies). -/
-def roundInt (f : Fmt) (mx : Nat) (imm : Nat) (b : Nat) : XR :=
-  let rm := if imm / 4 % 2 = 1 then rounding mx else decodeRC (imm % 4)
-  let kb := kindOf f mx b
+def roundInt (f : Fmt) (c : Ctl) (imm : Nat) (b : Nat) : XR :=
+  let rm := if imm / 4 % 2 = 1 then c.rc else decodeRC (imm % 4)
+  let kb := kindOf f c b
   let s := signOf f b
   if isNaN f b then check (quiet f b) (if isSNaN f b then IE else 0)
   else if kb = .inf then check b 0
   else if kb = .zero then check (zero f s) 0
   else
-    let (m, e) := (valOf f mx b).mag
+    let (m, e) := (valOf f c b).mag
     let (i, inexact) := roundToInt rm s m e
     let r := if i = 0 then zero f s else (round f .rz s i.natAbs 0).bits
     check r (if inexact && imm / 8 % 2 = 0 then PE else 0)

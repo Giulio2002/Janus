@@ -60,14 +60,12 @@ theorem rne_ne_rmi {rm : RM} : (rm == .rmi) = decide (rm = .rmi) := by cases rm 
 theorem fpAdd_ieee (h : IEEEMode fpcr) (f : Fmt) (hf : f.Std) (a b : Nat)
     (ha : a < 2 ^ f.width) (hb : b < 2 ^ f.width) :
     (fpAdd f fpcr a b).1 < 2 ^ f.width ∧
-    match add f (roundingMode fpcr) a b with
-    | some r => (fpAdd f fpcr a b).1 = r
-    | none => isNaN f (fpAdd f fpcr a b).1 = true := by
+    ResultIs f (add f (roundingMode fpcr) a b) (fpAdd f fpcr a b).1 := by
   have hd := classify_defaultNaN f hf
   have hdl := defaultNaN_lt f hf
   have hdn : dn fpcr = false := h.2.2.2
   have hah : ah fpcr = false := h.2.1
-  simp only [add, fpAdd, unpack_ieee h, processNaNs, processNaN, hah, hdn, defaultNaN_ieee h]
+  simp only [ResultIs, add, fpAdd, unpack_ieee h, processNaNs, processNaN, hah, hdn, defaultNaN_ieee h]
   cases hx : addExact (valueOf f a).n (valueOf f a).e (valueOf f b).n (valueOf f b).e <;>
   cases h1 : classify f a <;> cases h2 : classify f b <;>
     cases hsa : signOf f a <;> cases hsb : signOf f b <;>
@@ -82,14 +80,12 @@ theorem fpAdd_ieee (h : IEEEMode fpcr) (f : Fmt) (hf : f.Std) (a b : Nat)
 theorem fpMul_ieee (h : IEEEMode fpcr) (f : Fmt) (hf : f.Std) (a b : Nat)
     (ha : a < 2 ^ f.width) (hb : b < 2 ^ f.width) :
     (fpMul f fpcr a b).1 < 2 ^ f.width ∧
-    match mul f (roundingMode fpcr) a b with
-    | some r => (fpMul f fpcr a b).1 = r
-    | none => isNaN f (fpMul f fpcr a b).1 = true := by
+    ResultIs f (mul f (roundingMode fpcr) a b) (fpMul f fpcr a b).1 := by
   have hd := classify_defaultNaN f hf
   have hdl := defaultNaN_lt f hf
   have hdn : dn fpcr = false := h.2.2.2
   have hah : ah fpcr = false := h.2.1
-  simp only [mul, fpMul, unpack_ieee h, processNaNs, processNaN, hah, hdn, defaultNaN_ieee h]
+  simp only [ResultIs, mul, fpMul, unpack_ieee h, processNaNs, processNaN, hah, hdn, defaultNaN_ieee h]
   cases hx : mulExact (valueOf f a).n (valueOf f a).e (valueOf f b).n (valueOf f b).e <;>
   cases h1 : classify f a <;> cases h2 : classify f b <;>
     cases hsa : signOf f a <;> cases hsb : signOf f b <;>
@@ -105,14 +101,12 @@ set_option maxHeartbeats 2000000 in
 theorem fpMulAdd_ieee (h : IEEEMode fpcr) (f : Fmt) (hf : f.Std) (c a b : Nat)
     (hc : c < 2 ^ f.width) (ha : a < 2 ^ f.width) (hb : b < 2 ^ f.width) :
     (fpMulAdd f fpcr c a b).1 < 2 ^ f.width ∧
-    match fma f (roundingMode fpcr) a b c with
-    | some r => (fpMulAdd f fpcr c a b).1 = r
-    | none => isNaN f (fpMulAdd f fpcr c a b).1 = true := by
+    ResultIs f (fma f (roundingMode fpcr) a b c) (fpMulAdd f fpcr c a b).1 := by
   have hd := classify_defaultNaN f hf
   have hdl := defaultNaN_lt f hf
   have hdn : dn fpcr = false := h.2.2.2
   have hah : ah fpcr = false := h.2.1
-  simp only [fma, fpMulAdd, unpack_ieee h, processNaNs3, processNaN, hah, hdn, defaultNaN_ieee h]
+  simp only [ResultIs, fma, fpMulAdd, unpack_ieee h, processNaNs3, processNaN, hah, hdn, defaultNaN_ieee h]
   cases hx : fmaExact (valueOf f c).n (valueOf f c).e (valueOf f a).n (valueOf f a).e
       (valueOf f b).n (valueOf f b).e <;>
   cases h0 : classify f c <;> cases h1 : classify f a <;> cases h2 : classify f b <;>

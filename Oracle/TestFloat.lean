@@ -117,18 +117,18 @@ def evalX86 (mx : Nat) (fn : String) (rm : RM) (exact : Bool) (ops : List Nat) :
     if o.trap mx then some (0, 0xFF)  -- a trap with everything masked: never expected
     else some (o.res, x86Flags o.flags)
   match parts, ops with
-  | [f, "add"], [a, b] => res (FP.binop .add (← fmtOfName f) mx a b)
-  | [f, "sub"], [a, b] => res (FP.binop .sub (← fmtOfName f) mx a b)
-  | [f, "mul"], [a, b] => res (FP.binop .mul (← fmtOfName f) mx a b)
-  | [f, "div"], [a, b] => res (FP.binop .div (← fmtOfName f) mx a b)
-  | [f, "sqrt"], [a] => res (FP.sqrt (← fmtOfName f) mx a)
+  | [f, "add"], [a, b] => res (FP.binop .add (← fmtOfName f) (FP.ctl mx) a b)
+  | [f, "sub"], [a, b] => res (FP.binop .sub (← fmtOfName f) (FP.ctl mx) a b)
+  | [f, "mul"], [a, b] => res (FP.binop .mul (← fmtOfName f) (FP.ctl mx) a b)
+  | [f, "div"], [a, b] => res (FP.binop .div (← fmtOfName f) (FP.ctl mx) a b)
+  | [f, "sqrt"], [a] => res (FP.sqrt (← fmtOfName f) (FP.ctl mx) a)
   | [f, "roundToInt"], [a] =>
     let rc ← x86RC rm
-    res (FP.roundInt (← fmtOfName f) mx (rc + (if exact then 0 else 8)) a)
+    res (FP.roundInt (← fmtOfName f) (FP.ctl mx) (rc + (if exact then 0 else 8)) a)
   | [f, cmp], [a, b] | [f, cmp, _], [a, b] =>
     let fmt ← fmtOfName f
     let signal := if parts.length = 3 then parts[2]! = "signaling" else cmp != "eq"
-    let o := FP.comis signal fmt mx a b
+    let o := FP.comis signal fmt (FP.ctl mx) a b
     if o.trap mx then some (0, 0xFF) else
     let zf := o.res / 4 % 2 = 1
     let pf := o.res / 2 % 2 = 1
@@ -138,9 +138,9 @@ def evalX86 (mx : Nat) (fn : String) (rm : RM) (exact : Bool) (ops : List Nat) :
     if cmp = "eq" || cmp = "lt" || cmp = "le" then some (if r then 1 else 0, x86Flags o.flags) else none
   | [x, "to", y], [a] =>
     match fmtOfName x, fmtOfName y, intOfName x, intOfName y with
-    | some f, some g, _, _ => res (FP.convert f g mx a)
-    | _, some g, some (false, w), _ => res (FP.ofInt g mx w a)
-    | some f, _, _, some (false, w) => res (FP.toInt f mx rm w a)
+    | some f, some g, _, _ => res (FP.convert f g (FP.ctl mx) a)
+    | _, some g, some (false, w), _ => res (FP.ofInt g (FP.ctl mx) w a)
+    | some f, _, _, some (false, w) => res (FP.toInt f (FP.ctl mx) rm w a)
     | _, _, _, _ => none
   | _, _ => none
 

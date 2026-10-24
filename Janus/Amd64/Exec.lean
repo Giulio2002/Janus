@@ -673,8 +673,9 @@ def readXs (s : State) (next : W64) (w : Nat) : XLoc → Except Fault Nat
 def State.setXmmLow (s : State) (d w r : Nat) : State :=
   s.setXmm d (BitVec.ofNat 128 ((s.xmm d).toNat / 2 ^ w * 2 ^ w + r % 2 ^ w))
 
-/-- `MXCSR` with the flags `fl` raised. -/
-def State.raiseMx (s : State) (fl : Nat) : State := { s with mxcsr := s.mxcsr ||| BitVec.ofNat 32 fl }
+/-- `MXCSR` with the flags `fl` (bits 5:0) raised. -/
+def State.raiseMx (s : State) (fl : Nat) : State :=
+  { s with mxcsr := BitVec.ofNat 32 (s.mxcsr.toNat ||| (fl &&& 0x3F)) }
 
 /-- Commit a floating-point result: `#XM` when the operation trapped, else `k r` with the
 flags raised and `RIP` advanced. -/
@@ -685,16 +686,16 @@ def fpDone (s : State) (pc : Nat) (next : W64) (o : FP.XR) (k : Nat → State) :
 def fmtOf (w : Nat) : Janus.Float.Fmt := if w = 32 then Janus.Float.binary32 else Janus.Float.binary64
 
 /-- `ADDSD`, ..., `SQRTSD` and the `SS` forms on `a = XMM[dst]` and `b = src`. -/
-def sseArithOp (op : FPArith) (w mx a b : Nat) : FP.XR :=
+def sseArithOp (op : FPArith) (w : Nat) (c : FP.Ctl) (a b : Nat) : FP.XR :=
   let f := fmtOf w
   match op with
-  | .add => FP.binop .add f mx a b
-  | .sub => FP.binop .sub f mx a b
-  | .mul => FP.binop .mul f mx a b
-  | .div => FP.binop .div f mx a b
-  | .min => FP.minmax false f mx a b
-  | .max => FP.minmax true f mx a b
-  | .sqrt => FP.sqrt f mx b
+  | .add => FP.binop .add f c a b
+  | .sub => FP.binop .sub f c a b
+  | .mul => FP.binop .mul f c a b
+  | .div => FP.binop .div f c a b
+  | .min => FP.minmax false f c a b
+  | .max => FP.minmax true f c a b
+  | .sqrt => FP.sqrt f c b
 
 /-! ## The executor -/
 
@@ -989,13 +990,13 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
     match readXs s next w src with
     | .error e => .error e
     | .ok b =>
-      fpDone s pc next (sseArithOp op w s.mxcsr.toNat ((s.xmm dst).toNat % 2 ^ w) b)
+      fpDone s pc next (sseArithOp op w (FP.ctl s.mxcsr.toNat) ((s.xmm dst).toNat % 2 ^ w) b)
         fun r => s.setXmmLow dst w r
   | .sseComi signal w a b =>
     match readXs s next w b with
     | .error e => .error e
     | .ok y =>
-      let o := FP.comis signal (fmtOf w) s.mxcsr.toNat ((s.xmm a).toNat % 2 ^ w) y
+      let o := FP.comis signal (fmtOf w) (FP.ctl s.mxcsr.toNat) ((s.xmm a).toNat % 2 ^ w) y
       if o.trap s.mxcsr.toNat then .error (.simdFPException pc) else
       .ok (((s.setFlags ⟨some (o.res % 2 = 1), some (o.res / 2 % 2 = 1), some false,
         some (o.res / 4 % 2 = 1), some false, some false⟩).raiseMx o.flags).setRip next)
@@ -1003,29 +1004,29 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
     match readXs s next w src with
     | .error e => .error e
     | .ok b =>
-      fpDone s pc next (FP.cmp (fmtOf w) s.mxcsr.toNat pred ((s.xmm dst).toNat % 2 ^ w) b)
+      fpDone s pc next (FP.cmp (fmtOf w) (FP.ctl s.mxcsr.toNat) pred ((s.xmm dst).toNat % 2 ^ w) b)
         fun r => s.setXmmLow dst w r
   | .cvtsi2f w iw dst src =>
     match readLoc s next iw src with
     | .error e => .error e
-    | .ok x => fpDone s pc next (FP.ofInt (fmtOf w) s.mxcsr.toNat iw x.toNat) fun r => s.setXmmLow dst w r
+    | .ok x => fpDone s pc next (FP.ofInt (fmtOf w) (FP.ctl s.mxcsr.toNat) iw x.toNat) fun r => s.setXmmLow dst w r
   | .cvtf2si trunc w iw dst src =>
     match readXs s next w src with
     | .error e => .error e
     | .ok b =>
       let mx := s.mxcsr.toNat
-      fpDone s pc next (FP.toInt (fmtOf w) mx (if trunc then .rz else FP.rounding mx) iw b)
+      fpDone s pc next (FP.toInt (fmtOf w) (FP.ctl mx) (if trunc then .rz else (FP.ctl mx).rc) iw b)
         fun r => s.putReg iw dst (BitVec.ofNat iw r)
   | .cvtff w dst src =>
     match readXs s next w src with
     | .error e => .error e
     | .ok b =>
       let w' := if w = 64 then 32 else 64
-      fpDone s pc next (FP.convert (fmtOf w) (fmtOf w') s.mxcsr.toNat b) fun r => s.setXmmLow dst w' r
+      fpDone s pc next (FP.convert (fmtOf w) (fmtOf w') (FP.ctl s.mxcsr.toNat) b) fun r => s.setXmmLow dst w' r
   | .sseRound w dst src imm =>
     match readXs s next w src with
     | .error e => .error e
-    | .ok b => fpDone s pc next (FP.roundInt (fmtOf w) s.mxcsr.toNat imm b) fun r => s.setXmmLow dst w r
+    | .ok b => fpDone s pc next (FP.roundInt (fmtOf w) (FP.ctl s.mxcsr.toNat) imm b) fun r => s.setXmmLow dst w r
   | .fpLogic op dst src =>
     match readX s next true src with
     | .error e => .error e

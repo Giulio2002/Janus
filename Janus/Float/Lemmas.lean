@@ -107,7 +107,13 @@ theorem mul_comm (f : Fmt) (rm : RM) (a b : Nat) : mul f rm a b = mul f rm b a :
 theorem fma_nan (f : Fmt) (rm : RM) (a b c : Nat) (h : isNaN f c = true) : fma f rm a b c = none := by
   simp [fma, h]
 
-theorem resultIs_bind (f : Fmt) (o : Option Nat) (x : Nat) (k : Nat → Option Nat)
+theorem add_nan_left (f : Fmt) (rm : RM) (a b : Nat) (h : isNaN f a = true) : add f rm a b = none := by
+  simp [add, h]
+
+theorem add_nan_right (f : Fmt) (rm : RM) (a b : Nat) (h : isNaN f b = true) : add f rm a b = none := by
+  simp [add, h]
+
+theorem resultIs_bind (f : Fmt) (o : Option Nat) (x y : Nat) (k : Nat → Option Nat)
     (hk : ∀ y, isNaN f y = true → k y = none) (ho : ResultIs f o x) :
     ResultIs f (o.bind k) y ↔ ResultIs f (k x) y := by
   cases o with
