@@ -12,3 +12,4 @@ import JanusX86.Proofs.MovOI
 import JanusX86.Proofs.Branch
 import JanusX86.Proofs.Call
 import JanusX86.Proofs.Movx
+import JanusX86.Proofs.Setcc
