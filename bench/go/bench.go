@@ -248,3 +248,41 @@ func BigFrame(x, k uint64) uint64 {
 	}
 	return buf[k&63]
 }
+
+// Mul256 stores x*y mod 2^256 in z, over 4 little-endian 64-bit limbs: the schoolbook
+// product of a 256-bit integer library (`uint256.Int.Mul`), keeping only the partial products
+// that reach the low 256 bits. All limbs are loaded before z is written, so z may alias x or y.
+//
+//go:noinline
+func Mul256(z, x, y *[4]uint64) {
+	x0, x1, x2, x3 := x[0], x[1], x[2], x[3]
+	y0, y1, y2, y3 := y[0], y[1], y[2], y[3]
+	var r0, r1, r2, r3, c, h, l, cc uint64
+	// row 0: x * y0
+	c, r0 = bits.Mul64(x0, y0)
+	h, l = bits.Mul64(x1, y0)
+	r1, cc = bits.Add64(l, c, 0)
+	c = h + cc
+	h, l = bits.Mul64(x2, y0)
+	r2, cc = bits.Add64(l, c, 0)
+	c = h + cc
+	r3 = x3*y0 + c
+	// row 1: x * y1, shifted by one limb
+	h, l = bits.Mul64(x0, y1)
+	r1, cc = bits.Add64(r1, l, 0)
+	c = h + cc
+	h, l = bits.Mul64(x1, y1)
+	l, cc = bits.Add64(l, c, 0)
+	h += cc
+	r2, cc = bits.Add64(r2, l, 0)
+	c = h + cc
+	r3 += x2*y1 + c
+	// row 2: x * y2, shifted by two limbs
+	h, l = bits.Mul64(x0, y2)
+	r2, cc = bits.Add64(r2, l, 0)
+	c = h + cc
+	r3 += x1*y2 + c
+	// row 3: x * y3, shifted by three limbs
+	r3 += x0 * y3
+	z[0], z[1], z[2], z[3] = r0, r1, r2, r3
+}

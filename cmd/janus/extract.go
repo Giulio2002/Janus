@@ -46,6 +46,11 @@ type Extraction struct {
 	Segments   []Segment // entry first, then breadth-first discovery order
 	Stubs      []Stub    // discovery order
 	Unresolved []Unresolved
+	// Dynamic targets: --targets as given, and every function added because an indirect call
+	// may reach it (see dynamic.go). Omitted: direct calls deliberately not followed.
+	Targets []string
+	Dynamic []DynTarget
+	Omitted []OmittedCall
 	Data       []DataSeg     // read-only objects the code references, sorted by address
 	DataRefs   []DataRef     // detected references, in code order
 	Skipped    []SkippedData // references whose target is not copied (writable, code, ...)
@@ -82,77 +87,23 @@ func extract(binPath, sym string, maxFunctions int) (*Extraction, error) {
 }
 
 func extractFrom(b *Binary, sym string, maxFunctions int) (*Extraction, error) {
-	entry, err := b.lookup(sym)
+	return extractWith(b, sym, maxFunctions, nil)
+}
+
+// extractArm64Func copies one arm64 function and lists its direct branches.
+func extractArm64Func(b *Binary, f Func) (Segment, []Unresolved, error) {
+	ws, err := b.words(f)
 	if err != nil {
-		return nil, err
+		return Segment{}, nil, err
 	}
-	if _, ok := stubKind(entry.Name); ok {
-		return nil, &diag{Msg: fmt.Sprintf("%s is a runtime stub, not a function Janus extracts", entry.Name),
-			Stage: "function selection", Next: "Select a Go function that calls the stub instead."}
-	}
-	if b.GOARCH == "amd64" {
-		return extractAmd64(b, entry, maxFunctions)
-	}
-	x := &Extraction{Bin: b, Entry: entry}
-	seen := map[uint64]bool{entry.Addr: true}
-	stubSeen := map[uint64]bool{}
-	queue := []Func{entry}
-	for len(queue) > 0 {
-		f := queue[0]
-		queue = queue[1:]
-		ws, err := b.words(f)
-		if err != nil {
-			return nil, &diag{Msg: err.Error(), Stage: "code extraction", Next: "Report this binary layout to the Janus maintainers."}
-		}
-		x.Segments = append(x.Segments, Segment{Name: f.Name, Base: f.Addr, Size: f.Size, Words: ws})
-		for i, w := range ws {
-			pc := f.Addr + 4*uint64(i)
-			t, ok := branchTarget(w, pc)
-			if !ok || (t >= f.Addr && t < f.End()) {
-				continue
-			}
-			g, ok := b.containing(t)
-			if !ok {
-				x.Unresolved = append(x.Unresolved, Unresolved{From: pc, Target: t})
-				continue
-			}
-			if k, ok := stubKind(g.Name); ok {
-				if !stubSeen[g.Addr] {
-					stubSeen[g.Addr] = true
-					x.Stubs = append(x.Stubs, Stub{Name: g.Name, Addr: g.Addr, Kind: k})
-				}
-				continue
-			}
-			if !seen[g.Addr] {
-				seen[g.Addr] = true
-				queue = append(queue, g)
-			}
-		}
-		if len(x.Segments)+len(queue) > maxFunctions {
-			var names []string
-			for _, s := range x.Segments {
-				names = append(names, s.Name)
-			}
-			for _, q := range queue {
-				names = append(names, q.Name)
-			}
-			if len(names) > 20 {
-				names = append(names[:20], fmt.Sprintf("... and %d more", len(names)-20))
-			}
-			return nil, &diag{
-				Msg: fmt.Sprintf("%s reaches more than %d functions by direct branches:\n    %s",
-					entry.Name, maxFunctions, strings.Join(names, "\n    ")),
-				Stage: "code extraction",
-				Next:  "Raise the limit with --max-functions N if this is intended, or extract a smaller function.",
-			}
+	var brs []Unresolved
+	for i, w := range ws {
+		pc := f.Addr + 4*uint64(i)
+		if t, ok := branchTarget(w, pc); ok {
+			brs = append(brs, Unresolved{From: pc, Target: t})
 		}
 	}
-	for _, s := range x.Segments {
-		x.DataRefs = append(x.DataRefs, dataRefs(s.Words, s.Base)...)
-	}
-	x.Data, x.Skipped = collectData(b, x.DataRefs)
-	x.Lean = renderLean(x)
-	return x, nil
+	return Segment{Name: f.Name, Base: f.Addr, Size: f.Size, Words: ws}, brs, nil
 }
 
 func leanString(s string) string {

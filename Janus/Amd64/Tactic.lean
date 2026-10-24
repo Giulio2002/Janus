@@ -3,6 +3,7 @@ import Janus.Amd64.GoABI
 import Janus.Amd64.TacticAttr
 import Janus.Amd64.Disasm
 import Janus.Tactic.Common
+import Janus.Tactic.Carry
 
 /-!
 # Symbolic execution for amd64 programs
@@ -488,7 +489,14 @@ theorem accessible_of_dataLoaded {p : Program} {m : Memory} (h : p.DataLoaded m)
 
 ### Instruction families and operands -/
 
-attribute [janus64_exec] exec execAlu execUnary execMul1 execImul execDiv execShift execShd
+/- `exec` is structurally recursive since a `.locked` prefix re-executes the inner instruction,
+so its unfoldings are definitional rewrites by `exec.rfl_<k>` rather than its equation lemmas
+(see `Common.janus_rfl_eqns`). With the equation lemmas, the proof of each step grew with the
+length of the run and the proof term of a 98-instruction run took seconds to instantiate and
+share (docs/PROOFS.md, *Performance notes*). -/
+janus_rfl_eqns exec [janus64_exec]
+
+attribute [janus64_exec] execAlu execUnary execMul1 execImul execDiv execShift execShd
   execBit execCount readLoc readLocRW readSrc writeLoc readX writeX ea push64 branchTo
   BitVec.and_self BitVec.or_self BitVec.xor_self State.getReg State.getHigh State.putReg State.putHigh State.setFlags State.setRip logicFlags
 
@@ -917,6 +925,20 @@ These keep such carries as `if P then 1 else 0` on the flag condition `P` and fo
 @[janus64_exec, janus64_post] theorem zero_sub_iteP (P : Prop) [Decidable P] :
     (0#64 - if P then 18446744073709551615#64 else 0#64) = if P then 1#64 else 0#64 := by
   by_cases h : P <;> simp [h]
+/-- `SUBQ R, RDX` after `SBBQ R, R` adds the carry back: `x - (-CF) = x + CF`, as one `Nat`
+term (so that carry chains stay linear in size instead of repeating `x` inside the `toNat` of
+every later flag). -/
+@[janus64_exec low, janus64_post low] theorem sub_ite_allOnes64 (P : Prop) [Decidable P] (x : BitVec 64) :
+    (x - if P then 18446744073709551615#64 else 0#64) =
+      BitVec.ofNat 64 (x.toNat + (decide P).toNat) := by
+  apply BitVec.eq_of_toNat_eq
+  have := x.isLt
+  by_cases h : P <;> simp [h, BitVec.toNat_sub] <;> omega
+@[janus64_exec low, janus64_post low] theorem sub_ite_allOnes64' (c : Bool) (x : BitVec 64) :
+    (x - if c then BitVec.allOnes 64 else 0) = BitVec.ofNat 64 (x.toNat + c.toNat) := by
+  apply BitVec.eq_of_toNat_eq
+  have := x.isLt
+  cases c <;> simp [BitVec.toNat_sub] <;> omega
 @[janus64_exec, janus64_post] theorem setWidth32_iteP (P : Prop) [Decidable P] (a b : BitVec 64) :
     BitVec.setWidth 32 (if P then a else b) = if P then a.setWidth 32 else b.setWidth 32 := by
   by_cases h : P <;> simp [h]
@@ -974,22 +996,29 @@ abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Bool)
 def progSyms (p : Program) : List (String × Nat × Nat) :=
   p.segments.map fun seg => (seg.name, seg.base, seg.bytes.length)
 
+/-- `evalExpr` of `e`, over imported constants when possible (`Common.unfoldLocalDefs`: then it
+does not wait for the rest of the file), else of `e` itself. -/
+unsafe def evalExprLocalFree (α) (ty e : Expr) : MetaM α := do
+  let e' ← Common.unfoldLocalDefs e
+  if e' == e then return ← evalExpr α ty e
+  try evalExpr α ty e' catch _ => evalExpr α ty e
+
 unsafe def evalProgDataImpl (p : Expr) : MetaM ProgData := do
   let e := mkApp (mkConst ``progData) p
   let ty ← inferType e
-  evalExpr ProgData ty e
+  evalExprLocalFree ProgData ty e
 
 @[implemented_by evalProgDataImpl]
 opaque evalProgDataCore (p : Expr) : MetaM ProgData
 
 unsafe def evalProgSymsImpl (p : Expr) : MetaM (List (String × Nat × Nat)) := do
   let e := mkApp (mkConst ``progSyms) p
-  evalExpr (List (String × Nat × Nat)) (← inferType e) e
+  evalExprLocalFree (List (String × Nat × Nat)) (← inferType e) e
 
 @[implemented_by evalProgSymsImpl]
 opaque evalProgSymsCore (p : Expr) : MetaM (List (String × Nat × Nat))
 
-unsafe def evalNatImpl (e : Expr) : MetaM Nat := evalExpr Nat (mkConst ``Nat) e
+unsafe def evalNatImpl (e : Expr) : MetaM Nat := evalExprLocalFree Nat (mkConst ``Nat) e
 
 @[implemented_by evalNatImpl]
 opaque evalNatCore (e : Expr) : MetaM Nat
@@ -1230,12 +1259,7 @@ def cleanOutcome (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := g.withConte
       if t.isConstOf ``True then g'.assign (mkConst ``True.intro); return []
       -- a closed goal left over (e.g. `4757666#64 = BitVec.ofNat 64 innerHead`): decide it
       if !t.hasFVar && !t.hasMVar then
-        let saved ← saveState
-        try
-          let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic| decide +kernel)))
-          if gs.isEmpty then return []
-        catch _ => pure ()
-        saved.restore
+        if ← Common.decideClosed g' then return []
       return [g']
 
 /-- The `rip` of `s` as a literal, with a proof of `s.rip = BitVec.ofNat 64 c`; otherwise the
@@ -1599,8 +1623,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
   let some (_, lhs, _) := t.eq? | return false
   unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do return false
   let m := lhs.getArg! 0
-  for d in ← getLCtx do
-    if d.isImplementationDetail then continue
+  for d in ← Common.accessibleOrder lhs do
     let ty ← instantiateMVars d.type
     let some (_, l, _) := ty.eq? | continue
     unless l.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do continue
@@ -1614,7 +1637,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
           let gs ← (← getMainGoal).apply (mkAppN f ms)
           for g' in gs do
             if ← g'.isAssigned then continue
-            let rest ← withoutRecover <| Tactic.run g' (evalTactic (← `(tactic| first | decide | omega)))
+            let rest ← withoutRecover <| Tactic.run g' (evalTactic (← `(tactic| first | decide | janus_omega)))
             unless rest.isEmpty do throwError "janus64_disch: side goal"
           setGoals []
         pure gs.isEmpty
@@ -1643,7 +1666,11 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
       if ← dischargeAccessible g then return
       throwError "janus64_disch: cannot prove{indentExpr t}"
-  evalTactic (← `(tactic| omega))
+  match ← Janus.Carry.dischCarry g with
+  | some true => return
+  | some false => throwError "janus64_disch: carry bound does not hold for all limb values"
+  | none => pure ()
+  evalTactic (← `(tactic| janus_omega))
 
 /-! ## Syntax -/
 
@@ -1711,10 +1738,12 @@ theorem decide_carry_toNat' (a : Nat) (h : a < 2 * 18446744073709551616) :
 attribute [janus64_arith_norm] decide_carry_toNat decide_carry_toNat' addFlags_fst_toNat
   BitVec.toNat_ofNat BitVec.toNat_add Bool.toNat_false
 
-/-- `omega` after adding `readLE m a n < 256^n` for every memory read, and rewriting carries
-(`decide (2^64 ≤ a)).toNat = a / 2^64`). Does nothing if there is no goal. -/
+/-- The carry-chain procedure `janus_carry` first (equations of limb arithmetic, by
+reflection); otherwise `omega` after adding `readLE m a n < 256^n` for every memory read, and
+rewriting carries (`decide (2^64 ≤ a)).toNat = a / 2^64`). Does nothing if there is no goal. -/
 elab "janus64_arith" : tactic => do
   if (← getUnsolvedGoals).isEmpty then return
+  if ← Janus.Carry.tryCarry then return
   Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus64_arith_norm]))
   evalTactic (← `(tactic| omega))

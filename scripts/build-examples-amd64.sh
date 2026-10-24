@@ -8,6 +8,9 @@ set -euo pipefail
 # release, whatever Go is installed; the go command downloads it on first use.
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 export PATH="$PATH:/usr/local/go/bin"
 mkdir -p "$root/artifacts" "$root/bin"
 (cd "$root/examples/basic" &&
@@ -16,5 +19,6 @@ echo "built $root/artifacts/examples-amd64"
 (cd "$root" && go build -o "$root/bin/janus" ./cmd/janus)
 funcs=$(cat "$root"/examples/basic/*.go | grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}')
 for f in $funcs; do
-  "$root/bin/janus" extract "$root/artifacts/examples-amd64" "example.com/basic.$f" "$root/artifacts/amd64/$f"
+  mapfile -t extract_args < <("$root/scripts/example-targets.sh" "$f")
+  "$root/bin/janus" extract "$root/artifacts/examples-amd64" "example.com/basic.$f" "$root/artifacts/amd64/$f" "${extract_args[@]}"
 done

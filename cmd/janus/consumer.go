@@ -465,6 +465,10 @@ type consumerWS struct {
 	// replayCache: reuse cached passing kernel replays (off with --fresh or without a
 	// sandbox); replayFresh: also replay each theorem module with leanchecker --fresh.
 	replayCache, replayFresh bool
+	// auditExe is the compiled auditor of the cached framework base and auditExeSha the SHA-256
+	// its build stamp records (re-checked before it runs); empty with --fresh, whose temporary
+	// base is gone by then: the audit then runs the trusted Audit.lean script instead.
+	auditExe, auditExeSha string
 }
 
 // janusLib is the workspace's framework library directory.
@@ -537,7 +541,13 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 			defer os.RemoveAll(base)
 		}
 	} else {
-		base, err = fw.frameworkBase(lake, progress)
+		// The base stays in use (shared lock) until its build has been copied and compared.
+		var lease *frameworkLease
+		if lease, err = fw.frameworkBase(lake, progress); err == nil {
+			base = lease.dir
+			defer lease.release()
+			ws.auditExe, ws.auditExeSha = auditExePath(base), fw.stampedAuditExe(base)
+		}
 	}
 	if err != nil {
 		return fail(err)
@@ -560,7 +570,9 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 			_ = os.RemoveAll(ws.DepsDir)
 		}
 		_ = os.RemoveAll(janusBuild)
-		if err := copyTree(filepath.Join(base, ".lake", "build"), janusBuild); err != nil {
+		// The library (lib/) is what the workspace builds against; the compiled auditor and its
+		// The compiled auditor (bin/, 230 MB) stays in the base; the workspace never builds it.
+		if err := copyTreeSkipTop(filepath.Join(base, ".lake", "build"), janusBuild, "bin"); err != nil {
 			return fail(wsDiag(err))
 		}
 	}
@@ -570,11 +582,13 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 		rootBuild := filepath.Join(ws.Root, ".lake", "build")
 		sib := ""
 		if _, err := os.Stat(rootBuild); err != nil {
-			if sib = newestSibling(family, ws.Dir); sib != "" {
+			var sibLock *fileLock
+			if sib, sibLock = newestSibling(family, ws.Dir); sib != "" {
 				_ = os.RemoveAll(rootBuild)
 				if err := copyTree(filepath.Join(sib, "root", ".lake", "build"), rootBuild); err != nil {
 					_ = os.RemoveAll(rootBuild)
 				}
+				sibLock.unlock()
 			}
 		}
 		// Dependency builds too (they are as untrusted as the consumer's own; the kernel
@@ -585,16 +599,25 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 				continue
 			}
 			if sib == "" {
-				sib = newestSibling(family, ws.Dir)
+				var sibLock *fileLock
+				if sib, sibLock = newestSibling(family, ws.Dir); sib != "" {
+					sibLock.unlock()
+				}
 			}
 			if sib == "" {
 				break
+			}
+			// Copy only while the sibling is not in use (its lock held), never a build in progress.
+			sibLock, err := lockFile(sib+".lock", false)
+			if err != nil {
+				continue
 			}
 			if _, err := os.Stat(filepath.Join(sib, "deps", d.Info.Name, ".lake", "build")); err == nil {
 				if err := copyTree(filepath.Join(sib, "deps", d.Info.Name, ".lake", "build"), depBuild); err != nil {
 					_ = os.RemoveAll(depBuild)
 				}
 			}
+			sibLock.unlock()
 		}
 	}
 
@@ -682,11 +705,12 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 }
 
 // newestSibling is the most recently used other workspace of the family with a consumer
-// build that is not being used right now.
-func newestSibling(family, self string) string {
+// build that is not being used right now. It is returned locked (the caller copies from it and
+// then unlocks), so no verification can write to it during the copy.
+func newestSibling(family, self string) (string, *fileLock) {
 	entries, err := os.ReadDir(family)
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	best, bestTime := "", time.Time{}
 	for _, e := range entries {
@@ -702,13 +726,12 @@ func newestSibling(family, self string) string {
 		}
 	}
 	if best == "" {
-		return ""
+		return "", nil
 	}
 	if lk, err := lockFile(best+".lock", false); err == nil {
-		lk.unlock()
-		return best
+		return best, lk
 	}
-	return ""
+	return "", nil
 }
 
 func (ws *consumerWS) close() {
@@ -733,12 +756,15 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 			env = append(env, e)
 		}
 	}
+	if len(args) > 0 && args[0] == "build" {
+		env = lakeBuildEnv(env)
+	}
 	cmd := ws.sb.commandOverlay(ws.Root, []string{ws.Dir}, nil, ws.protected(false), append([]string{ws.lake}, args...), env)
 	var out bytes.Buffer
 	all := &lockedBuffer{}
 	cmd.Stdout = io.MultiWriter(&out, all)
 	cmd.Stderr = all
-	err := cmd.Run()
+	err := guardRun(cmd)
 	return out.String(), all.String(), err
 }
 
@@ -865,11 +891,12 @@ func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*v
 	if err != nil {
 		return nil, err
 	}
-	base, err := fw.frameworkBase(lake, stderr)
+	lease, err := fw.frameworkBase(lake, stderr)
 	if err != nil {
 		return nil, err
 	}
-	tc, err := findToolchain(lake, base)
+	tc, err := findToolchain(lake, lease.dir)
+	lease.release()
 	if err != nil {
 		return nil, err
 	}
@@ -1012,12 +1039,25 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			continue
 		}
 		marker := "janus-audit-" + newNonce() + ": "
-		af := filepath.Join(auditDir, fmt.Sprintf("Audit%d.lean", i))
-		if err := os.WriteFile(af, []byte(auditScript(r.Theorem, r.module, marker, depRoots...)), 0o644); err != nil {
-			r.Err = &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
-			continue
+		var out string
+		if ws.auditExe != "" && ws.auditExeSha != "" {
+			// The compiled auditor (the same JanusAudit.runImpl as the script below), if it is still
+			// the one its trusted build recorded.
+			if got := regularFileSha(ws.auditExe); got != ws.auditExeSha {
+				failAll(&diag{Invalid: true, Stage: "framework integrity",
+					Msg:  fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(ws.auditExe), short(ws.auditExeSha), short(got)),
+					Next: "Something other than janus wrote to the framework build; janus rebuilds it on the next run."})
+				return
+			}
+			out, _ = ws.runLeanDirect(leanPath, append([]string{ws.auditExe, r.Theorem, r.module, marker, "JanusTrusted"}, depRoots...)...)
+		} else {
+			af := filepath.Join(auditDir, fmt.Sprintf("Audit%d.lean", i))
+			if err := os.WriteFile(af, []byte(auditScript(r.Theorem, r.module, marker, depRoots...)), 0o644); err != nil {
+				r.Err = &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
+				continue
+			}
+			out, _ = ws.runLeanDirect(leanPath, ws.tc.lean, "--root="+auditDir, af)
 		}
-		out, _ := ws.runLeanDirect(leanPath, ws.tc.lean, "--root="+auditDir, af)
 		if err := pinned.check("the audit"); err != nil {
 			failAll(err)
 			return
@@ -1290,8 +1330,11 @@ func evictStale() {
 		if err != nil || !fi.IsDir() || fi.ModTime().After(cutoff) {
 			continue
 		}
+		// A framework build in use is share-locked, so the exclusive try fails and it is kept.
+		// Removing the lock file under the lock is safe: lockFileMode re-checks the inode.
 		if lk, err := lockFile(d+".lock", false); err == nil {
 			os.RemoveAll(d)
+			os.Remove(d + ".ready")
 			os.Remove(d + ".lock")
 			lk.unlock()
 		}

@@ -92,6 +92,57 @@ workspace's framework build is replaced from the trusted cache whenever it diffe
 pins. A changed, corrupted, missing or extra framework module is rejected (`framework
 integrity`). See finding R1 in [docs/AUDIT.md](AUDIT.md).
 
+**The compiled auditor.** `janus verify` runs the auditor as the executable `janus-audit`
+(`lean_exe`, root `Janus.Tools.AuditMain`): the same `JanusAudit.runImpl` the `Audit.lean` script
+calls, compiled by the Lean toolchain together with the framework build, outside the sandbox. Its
+SHA-256 is part of the framework build's ready stamp (a changed executable makes the build "not
+ready" and it is relinked) and it is hashed again right before it runs, with nothing untrusted
+running between that check and its start. The Lean compiler that produced it is part of the
+toolchain (item 5).
+
+**The trusted-compile cache** (`v1/trusted`) holds compiled `Extracted`/`JanusTrusted` modules
+keyed by the toolchain, the framework build's pins and the two sources; entries carry a SHA-256
+manifest that is checked on use. Like the replay cache it is written only by janus outside the
+sandbox, is read-only to sandboxed processes, and is off with `--fresh` and without a sandbox.
+
+### Verification-result cache
+
+A successful `janus verify` of a single proof file (not `--proof-root`) is recorded in
+`v1/result`, and an identical later verification prints the recorded report, marked `Cached:`,
+instead of compiling, auditing and replaying again. This makes the cache part of the trusted
+base. What it relies on:
+
+* **Key.** The SHA-256 of every input the outcome depends on: the janus executable itself (all
+  verifier logic and the embedded framework), the framework (its sources' hash and source,
+  the build directory, the SHA-256 of every compiled framework module and of the compiled
+  auditor), the toolchain version and binaries, the sandbox mode, the theorem and options, the
+  artifact, proof and binary paths, the bytes of `Extracted.lean` and `identity.json`, the
+  binary's SHA-256 (verified against the binary by the same extraction check every run starts
+  with) and the proof's bytes. A single-file proof can import only `Extracted`, the framework and
+  Lean core, so these bytes are its whole import closure. The key is computed by the trusted
+  process from bytes it reads itself, after the framework build is confirmed ready (stamped
+  sources, pins, auditor); after a hit the inputs are read again and must be unchanged.
+* **Authenticity.** Entries are written only by janus, outside the sandbox, after a successful,
+  sandboxed, non-`--fresh` run, and each is authenticated with HMAC-SHA256 under a random 32-byte
+  key created on first use (mode 0600, in the result directory). An entry whose report or key does
+  not verify is ignored: the verification runs.
+* **Isolation.** The result directory, key included, is not visible to sandboxed code at all:
+  bubblewrap and the unshare fallback mount an empty tmpfs over it (the unshare script stops if
+  it cannot), on top of the read-only cache. A proof or a lakefile can neither read the key nor
+  write an entry.
+* **Bypass.** `--fresh`, `--unsafe-no-sandbox` and `JANUS_RESULT_CACHE=off` neither read nor
+  write the cache. Without a sandbox the proof runs unconfined with the user's privileges, and
+  anything it does to the cache (or to the replay and trusted-compile caches) is outside the
+  threat model, as before; rerun with `--fresh` after running an untrusted proof unsandboxed.
+* **Threats out of scope.** Anyone who can write the user's cache directory directly can also
+  replace the framework build and the replay cache; the cache does not defend against them.
+
+`audit/round7/run-round7.sh` attacks the cache: a proof and a lakefile that look for the key and
+the entries and try to plant one (bubblewrap and unshare), a tampered entry, an entry recorded
+with a different framework (a source change), `--fresh` and `--unsafe-no-sandbox`. Every row
+must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
+explains why it would not pay for the trusted state it would add.
+
 **Not trusted:**
 
 * The Go compiler and linker. We reason about their output.
@@ -379,6 +430,43 @@ pacer and heap profiling reached through `mallocgc`), a store-exclusive (`STLXR`
 fallbacks), `SVC` (system calls) or `MRS CNTVCT_EL0`/`CNTFRQ_EL0` (the generic timer in
 `runtime.procyieldAsm`; the counter is not a constant, so it needs a nondeterministic model).
 The other functions of `bytes`/`strings` reach `runtime.mallocgc` and stay blocked by these.
+
+## Dynamic calls, closures and `defer`
+
+An indirect call (`BLR`/`BR`; amd64 `CALL`/`JMP` through a register or memory) jumps to the value
+the register holds, in the model as on hardware. Nothing about Go's type system is assumed:
+
+* **Which code a dynamic call reaches is a hypothesis of the theorem when it is not computed
+  by the code being proved.** `Janus.Spec.ItabIs ds m tab name` (the interface's itab word is the
+  address of the static itab `name` of the extracted data, and memory holds its bytes
+  read-only), `FuncvalIs m fv fn` (a funcval's code word) and `ClosureCtx m fv vars` (the captured
+  variables after it) are ordinary propositions about the call state's memory and appear in the
+  printed statement; the auditor treats them like any other part of the statement. A theorem
+  says nothing about calls whose interface or func value is not the one stated. If the stated
+  itab or funcval cannot be in memory as described, the theorem is vacuous for those callers,
+  like any unsatisfiable precondition.
+* **Itab contents come from the binary.** `ItabIs` names a data object of
+  `Extracted.program.data`, copied byte for byte from `.rodata` (a static itab `go:itab.*T,I`)
+  and re-checked by `janus check`. Dynamically built itabs (`runtime.getitab`, for type
+  assertions to interfaces the compiler did not see) are heap objects, not covered by
+  `ItabIs`; state their memory directly if needed.
+* **Targets are untrusted extraction choices.** `janus extract --targets` and the extractor's
+  inference (code addresses computed by user code, itabs and funcvals it loads) only decide
+  which code is copied, like reachability. A target that is not copied makes the call fault
+  (`noCode`), so no theorem through it can be proved; extra targets add code no theorem has to
+  mention. What was added and why is recorded in `identity.json` (`targets`,
+  `dynamicTargets`).
+* **Open-coded defers are modelled as the code that implements them**: the deferred closure is
+  an ordinary stack-allocated funcval called at each exit. `runtime.deferreturn`, which an
+  open-coded function calls only from the block the runtime resumes at after a *recovered*
+  panic, is not extracted (`omittedCalls` in `identity.json`): if a run reached it, it would
+  fault, so a theorem that returns shows it is not reached.
+* **Out of scope:** `recover`, and panics that unwind through deferred calls (a panic is a stub
+  outcome: the run ends at `runtime.gopanic`/`runtime.panic*`, and the deferred calls the
+  runtime would run while unwinding are not executed). Defers the compiler does not open-code
+  (in loops, or more than 8 in a function) allocate defer records with `runtime.deferproc*` and
+  call `runtime.deferreturn` at every exit; they are unsupported (the exit faults). Heap-allocated
+  closures (`runtime.newobject`) are runtime calls like any other allocation.
 
 ## What the theorem does not say
 

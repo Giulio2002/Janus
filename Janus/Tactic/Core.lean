@@ -3,6 +3,7 @@ import Janus.Tactic.Basic
 import Janus.Tactic.Data
 import Janus.Tactic.Common
 import Janus.Tactic.Disasm
+import Janus.Tactic.Carry
 
 /-!
 # Symbolic execution tactics
@@ -66,15 +67,22 @@ initialize registerTraceClass `janus.disch
 
 abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Bool)
 
+/-- `evalExpr` of `e`, over imported constants when possible (`Common.unfoldLocalDefs`: then it
+does not wait for the rest of the file), else of `e` itself. -/
+unsafe def evalExprLocalFree (α) (ty e : Expr) : MetaM α := do
+  let e' ← Common.unfoldLocalDefs e
+  if e' == e then return ← evalExpr α ty e
+  try evalExpr α ty e' catch _ => evalExpr α ty e
+
 unsafe def evalProgDataImpl (p : Expr) : MetaM ProgData := do
   let e := mkApp (mkConst ``progData) p
   let ty ← inferType e
-  evalExpr ProgData ty e
+  evalExprLocalFree ProgData ty e
 
 @[implemented_by evalProgDataImpl]
 opaque evalProgDataCore (p : Expr) : MetaM ProgData
 
-unsafe def evalNatImpl (e : Expr) : MetaM Nat := evalExpr Nat (mkConst ``Nat) e
+unsafe def evalNatImpl (e : Expr) : MetaM Nat := evalExprLocalFree Nat (mkConst ``Nat) e
 
 @[implemented_by evalNatImpl]
 opaque evalNatCore (e : Expr) : MetaM Nat
@@ -85,7 +93,7 @@ def progSyms (p : Program) : List (String × Nat × Nat) :=
 
 unsafe def evalProgSymsImpl (p : Expr) : MetaM (List (String × Nat × Nat)) := do
   let e := mkApp (mkConst ``progSyms) p
-  evalExpr (List (String × Nat × Nat)) (← inferType e) e
+  evalExprLocalFree (List (String × Nat × Nat)) (← inferType e) e
 
 @[implemented_by evalProgSymsImpl]
 opaque evalProgSymsCore (p : Expr) : MetaM (List (String × Nat × Nat))
@@ -240,6 +248,10 @@ def stateHyps : MetaM (Array Expr) := do
       if l.isAppOfArity ``Memory.readLE 3 && ty.isForall then
         out := out.push d.toExpr; continue
     let some (_, lhs, rhs) := ty.eq? | continue
+    -- memory facts of the dynamic-call vocabulary, from `janus_dyn` (`Janus.Tactic.Dynamic`)
+    if lhs.isAppOfArity ``Memory.readLE 3 &&
+        "h_dyn".isPrefixOf d.userName.eraseMacroScopes.toString then
+      out := out.push d.toExpr; continue
     let isStateProj (e : Expr) : Bool :=
       e.isAppOfArity ``State.pc 1 || e.isAppOfArity ``State.sp 1 ||
       e.isAppOfArity ``State.flags 1 || e.isAppOfArity ``State.mem 1
@@ -369,12 +381,7 @@ def cleanOutcome (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := g.withConte
       let t ← instantiateMVars (← g'.getType)
       if t.isConstOf ``True then g'.assign (mkConst ``True.intro); return []
       if !t.hasFVar && !t.hasMVar then
-        let saved ← saveState
-        try
-          let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic| decide +kernel)))
-          if gs.isEmpty then return []
-        catch _ => pure ()
-        saved.restore
+        if ← Common.decideClosed g' then return []
       return [g']
 
 /-- The pc of state `s` as a literal, with a proof of `s.pc = BitVec.ofNat 64 c`; otherwise the
@@ -753,8 +760,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withC
   let some (_, lhs, _) := t.eq? | return false
   unless lhs.isAppOfArity ``Memory.accessible 4 do return false
   let m := lhs.getArg! 0
-  for d in ← getLCtx do
-    if d.isImplementationDetail then continue
+  for d in ← Common.accessibleOrder lhs do
     let ty ← instantiateMVars d.type
     let some (_, l, _) := ty.eq? | continue
     unless l.isAppOfArity ``Memory.accessible 4 do continue
@@ -767,7 +773,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withC
               d.toExpr]
           let gs ← (← getMainGoal).apply lemE
           setGoals gs
-          evalTactic (← `(tactic| all_goals first | decide | omega | simp))
+          evalTactic (← `(tactic| all_goals first | decide | janus_omega | simp))
         pure gs.isEmpty
       catch _ => pure false
     if ok then return true
@@ -787,9 +793,7 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
     | some true => return
     | some false => throwError "janus_disch: closed goal is false:{indentExpr t}"
     | none => pure ()
-    let saved ← saveState
-    let gs ← try Tactic.run g <| withoutRecover (evalTactic (← `(tactic| decide +kernel))) catch _ => saved.restore; pure [g]
-    if gs.isEmpty then return
+    if ← Common.decideClosed g then return
     -- A closed goal that `decide` refutes must not be proved from (possibly contradictory)
     -- hypotheses: simp enters `if` branches with the branch condition as a hypothesis, and
     -- proving e.g. `29 < 16` there would make the register-sorting lemma loop.
@@ -807,16 +811,25 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
     if rhs.isConstOf ``Bool.true && (lhs.getAppFn.isConstOf ``Nat.blt ||
         lhs.getAppFn.isConstOf ``Nat.ble || lhs.getAppFn.isConstOf ``and) then
       throwError "janus_disch: literal-only side condition"
+  -- carry-chain bounds and equations (`x / 2^64 < 2^64` for a carry): by reflection, which
+  -- also knows the bounds of products that `omega` does not
+  match ← Janus.Carry.dischCarry g with
+  | some true => return
+  | some false => throwError "janus_disch: carry bound does not hold for all limb values"
+  | none => pure ()
   evalTactic (← `(tactic| first
-    | omega
+    | janus_omega
     | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
         Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
 
 /-! ## Arithmetic -/
 
-/-- `omega` with the range facts of every memory read (`readLE … < 256^n`). -/
+/-- The carry-chain procedure `janus_carry` first (equations of limb arithmetic, by
+reflection); otherwise `omega` with the range facts of every memory read
+(`readLE … < 256^n`) after normalising carry terms. -/
 elab "janus_arith" : tactic => do
   if (← getUnsolvedGoals).isEmpty then return
+  if ← Janus.Carry.tryCarry then return
   Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus_arith_norm]))
   evalTactic (← `(tactic| omega))

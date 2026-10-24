@@ -18,6 +18,9 @@
 # load of the machine.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 cd "$root"
 export PATH="$PATH:/usr/local/go/bin"
 # the same pinned Go release as the example builds (addresses and code depend on it)
@@ -28,7 +31,7 @@ JOBS=${JOBS:-1}
 OUT=${OUT:-$root/artifacts/bench/results.tsv}
 FILTER=${FILTER:-.}
 mkdir -p "$root/artifacts/bench/logs" "$root/bin"
-lake build Janus >/dev/null
+memguard_lake build Janus >/dev/null
 [ -x bin/janus ] || go build -o bin/janus ./cmd/janus
 LP="$(lake env printenv LEAN_PATH)"
 

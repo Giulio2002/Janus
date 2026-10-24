@@ -336,6 +336,7 @@ func TestDataCheckTamper(t *testing.T) {
 // are cross-checked against objdump, `check` accepts the artifacts and rejects an edited byte,
 // and (without -short) the file elaborates and a proof about `data` verifies.
 func TestDataLarge(t *testing.T) {
+	t.Parallel()
 	needObjdump(t)
 	b, err := loadBinary(exampleBin)
 	if err != nil {
@@ -436,7 +437,8 @@ func TestBlockers(t *testing.T) {
 	}
 	// The decoder itself: a floating-point word (FADD D0, D1, D2; Advanced SIMD is decoded since
 	// the SIMD merge, FP arithmetic is not) is rejected, ADD and RET are accepted.
-	root, _ := findJanusRoot(repoRoot)
+	root, release, _ := findJanusRoot(repoRoot, "janus-decode")
+	defer release()
 	ok, err := leanDecode(filepath.Join(root, ".lake", "build", "bin", "janus-decode"), []uint32{0x8b010000, 0xd65f03c0, 0x1e622820})
 	if err != nil {
 		t.Fatal(err)

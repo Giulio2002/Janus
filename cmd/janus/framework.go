@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -267,12 +268,23 @@ func syncTree(dir string, files map[string][]byte, keep func(top string) bool) e
 }
 
 // copyTree copies the regular files and directories of src into dst (which must not exist).
-func copyTree(src, dst string) error {
+func copyTree(src, dst string) error { return copyTreeSkipTop(src, dst) }
+
+// copyTreeSkipTop is copyTree without the top-level entries of src named in skip.
+func copyTreeSkipTop(src, dst string, skip ...string) error {
 	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		rel, _ := filepath.Rel(src, p)
+		for _, s := range skip {
+			if rel == s {
+				if d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+		}
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
@@ -285,7 +297,12 @@ func copyTree(src, dst string) error {
 			return err
 		}
 		defer in.Close()
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		// keep the permission bits (an executable such as the compiled auditor stays one)
+		mode := os.FileMode(0o644)
+		if info, err := d.Info(); err == nil {
+			mode = info.Mode().Perm()
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 		if err != nil {
 			return err
 		}
@@ -297,55 +314,376 @@ func copyTree(src, dst string) error {
 	})
 }
 
-// frameworkBase materializes the framework in the cache (<cache>/v1/framework/<sha>) and
-// builds its Janus library there once. Every use re-synchronises the sources with the
-// framework's bytes first, so a damaged copy is repaired before Lake decides what to rebuild.
-func (fw *framework) frameworkBase(lake string, progress io.Writer) (string, error) {
-	dir := filepath.Join(cacheRoot(), "v1", "framework", fw.Sha256[:24])
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		return "", &diag{Invalid: true, Msg: "Cannot create the Janus cache: " + err.Error(), Stage: "Janus library build",
-			Next: "Set JANUS_CACHE_DIR to a writable directory."}
-	}
-	lk, err := lockFile(dir+".lock", true)
+// The framework build is shared by every janus process on the machine: the cached base
+// (<cache>/v1/framework/<sha>) for the embedded framework, the checkout itself for a directory
+// framework. A verification pins that build's compiled modules and re-checks them after every
+// step, so nothing may write to it while a verification uses it. Every user therefore holds a
+// shared lock on it for as long as it reads it (a verification: until it ends), and every writer
+// (the sync and Lake build below, `janus blockers`' decoder build, cache eviction) holds the
+// exclusive lock. A writer records what it built in a ready stamp; a reader whose sources and
+// compiled modules match the stamp uses the build without writing anything, so concurrent
+// verifications never wait for each other, and any other change to the build still fails the
+// pins ("framework integrity").
+
+// baseTargets are the Lake targets every framework build has: the library, the auditor module
+// (for the consumer path's Audit.lean) and the compiled auditor executable janus verify runs.
+var baseTargets = []string{"Janus", "Janus.Tools.Audit", auditExeTarget}
+
+// auditExeTarget is the Lake target of the compiled auditor (Janus/Tools/AuditMain.lean).
+const auditExeTarget = "janus-audit"
+
+// auditExePath is the compiled auditor in the framework build dir.
+func auditExePath(dir string) string {
+	return filepath.Join(dir, ".lake", "build", "bin", auditExeTarget)
+}
+
+// regularFileSha is the SHA-256 of a regular file ("" if it cannot be read).
+func regularFileSha(p string) string {
+	f, err := os.Open(p)
 	if err != nil {
-		return "", &diag{Invalid: true, Msg: "Cannot lock the Janus cache: " + err.Error(), Stage: "Janus library build"}
+		return ""
 	}
-	defer lk.unlock()
-	if err := syncTree(dir, fw.Files, func(top string) bool { return top == ".lake" }); err != nil {
-		return "", &diag{Invalid: true, Msg: "Cannot write the Janus framework to the cache: " + err.Error(), Stage: "Janus library build",
+	defer f.Close()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return ""
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// frameworkStamp is the ready stamp of a framework build.
+type frameworkStamp struct {
+	Sha256   string   `json:"sha256"`   // frameworkSha of the sources built
+	Manifest string   `json:"manifest"` // SHA-256 of their lake-manifest.json (not in Sha256)
+	Targets  []string `json:"targets"`  // the Lake targets built
+	Pins     pins     `json:"pins"`     // the framework modules' data files as built
+	AuditExe string   `json:"auditExe"` // SHA-256 of the compiled auditor as built
+}
+
+// stampedAuditExe is the auditor executable's SHA-256 recorded in the ready stamp of the build
+// in dir ("" if there is none). The caller holds the build's lease, so the stamp is stable.
+func (fw *framework) stampedAuditExe(dir string) string {
+	_, stampPath := fw.buildPaths(dir)
+	b, err := os.ReadFile(stampPath)
+	if err != nil {
+		return ""
+	}
+	var st frameworkStamp
+	if json.Unmarshal(b, &st) != nil {
+		return ""
+	}
+	return st.AuditExe
+}
+
+// frameworkLease is a framework build in use: release ends the use (drops the shared lock).
+type frameworkLease struct {
+	dir string
+	lk  *fileLock
+}
+
+func (l *frameworkLease) release() {
+	if l != nil {
+		l.lk.unlock()
+	}
+}
+
+// buildPaths are the lock and ready-stamp files of the framework build in dir: next to the
+// cached base, inside .lake/ of a directory framework (the checkout).
+func (fw *framework) buildPaths(dir string) (lockPath, stampPath string) {
+	if fw.Source == "directory" {
+		return filepath.Join(dir, ".lake", "janus-framework.lock"), filepath.Join(dir, ".lake", "janus-framework.ready")
+	}
+	return dir + ".lock", dir + ".ready"
+}
+
+// ready reports whether the build in dir is complete for targets and untouched since its
+// writer stamped it: the sources are exactly the framework's (embedded framework), the stamp is
+// for these sources and targets, and every framework module's data files hash as stamped.
+func (fw *framework) ready(dir string, targets []string) bool {
+	_, stampPath := fw.buildPaths(dir)
+	b, err := os.ReadFile(stampPath)
+	if err != nil {
+		return false
+	}
+	var st frameworkStamp
+	if json.Unmarshal(b, &st) != nil || st.Sha256 != fw.Sha256 || st.Manifest != sha256Hex(fw.Files["lake-manifest.json"]) {
+		return false
+	}
+	have := map[string]bool{}
+	for _, t := range st.Targets {
+		have[t] = true
+	}
+	for _, t := range targets {
+		if !have[t] {
+			return false
+		}
+	}
+	if dir != fw.Dir && !sameTree(dir, fw.Files, func(top string) bool { return top == ".lake" }) {
+		return false
+	}
+	p, err := frameworkPins(filepath.Join(dir, ".lake", "build", "lib", "lean"), fw.Files)
+	if err != nil || len(p.want) == 0 || len(diffPins(st.Pins, p.want)) > 0 {
+		return false
+	}
+	if _, ok := p.want["Janus.olean"]; !ok {
+		return false
+	}
+	// The compiled auditor must be the one the stamped build produced.
+	return st.AuditExe != "" && regularFileSha(auditExePath(dir)) == st.AuditExe
+}
+
+// acquire returns the framework build in dir, built for targets, under a shared lock. If it is
+// not ready it takes the exclusive lock, synchronises the sources (embedded framework), runs
+// Lake, stamps the result and goes back to the shared lock.
+func (fw *framework) acquire(dir, lake string, targets []string, progress io.Writer) (*frameworkLease, error) {
+	lockPath, stampPath := fw.buildPaths(dir)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, &diag{Invalid: true, Msg: "Cannot create the Janus cache: " + err.Error(), Stage: "Janus library build",
 			Next: "Set JANUS_CACHE_DIR to a writable directory."}
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".lake", "build", "lib", "lean", "Janus.olean")); err != nil && progress != nil {
-		fmt.Fprintf(progress, "Building the Janus framework (%s, %s) in %s; this happens once per framework version.\n",
-			fw.Source, fw.Sha256[:12], displayPath(dir))
+	lockErr := func(err error) error {
+		return &diag{Invalid: true, Msg: "Cannot lock the Janus framework build: " + err.Error(), Stage: "Janus library build"}
+	}
+	lk, err := lockFileMode(lockPath, true, true)
+	if err != nil {
+		return nil, lockErr(err)
+	}
+	for attempt := 0; ; attempt++ {
+		if fw.ready(dir, targets) {
+			return &frameworkLease{dir: dir, lk: lk}, nil
+		}
+		if attempt == 3 {
+			lk.unlock()
+			return nil, &diag{Invalid: true, Stage: "Janus library build",
+				Msg:  "The Janus framework build in " + displayPath(dir) + " keeps changing after it is built.",
+				Next: "Another program writes to it; stop it, or set JANUS_CACHE_DIR to a private directory."}
+		}
+		// Writer: drop the shared lock, take the exclusive one, (re)build.
+		lk.unlock()
+		if lk, err = lockFileMode(lockPath, false, true); err != nil {
+			return nil, lockErr(err)
+		}
+		if !fw.ready(dir, targets) {
+			if err := fw.build(dir, lake, targets, stampPath, progress); err != nil {
+				lk.unlock()
+				return nil, err
+			}
+		}
+		if err := lk.share(); err != nil {
+			lk.unlock()
+			return nil, lockErr(err)
+		}
+	}
+}
+
+// build runs with the exclusive lock held: sync the sources (embedded framework), build the
+// stamped targets plus targets with Lake, and write the new stamp.
+func (fw *framework) build(dir, lake string, targets []string, stampPath string, progress io.Writer) error {
+	// Build every target a previous writer built too, so the stamp never shrinks.
+	var old frameworkStamp
+	if b, err := os.ReadFile(stampPath); err == nil {
+		_ = json.Unmarshal(b, &old)
+	}
+	if err := os.Remove(stampPath); err != nil && !os.IsNotExist(err) {
+		return &diag{Invalid: true, Msg: "Cannot reset the framework build stamp: " + err.Error(), Stage: "Janus library build"}
+	}
+	// Lake does not re-hash its outputs, so a framework module whose data files no longer match
+	// the stamp (written by something other than a stamped build) would be left as it is. Remove
+	// such modules' outputs so that Lake compiles them again from the sources.
+	libDir := filepath.Join(dir, ".lake", "build", "lib", "lean")
+	if old.Sha256 == fw.Sha256 && len(old.Pins) > 0 {
+		if now, err := frameworkPins(libDir, fw.Files); err == nil {
+			for _, m := range changedModules(old.Pins, now.want) {
+				removeModuleOutputs(libDir, m)
+			}
+		}
+	}
+	// Likewise an auditor executable that is not the stamped one: remove it and Lake's records
+	// of it, so that Lake links it again.
+	if exe := auditExePath(dir); old.AuditExe != "" && regularFileSha(exe) != old.AuditExe {
+		for _, ext := range []string{"", ".hash", ".trace", ".rsp"} {
+			_ = os.Remove(exe + ext)
+		}
+	}
+	// A copy (the cached base of the embedded framework, or of a --janus-root checkout for a
+	// consumer workspace) gets the framework's sources first; a checkout is built in place.
+	if dir != fw.Dir {
+		if err := syncTree(dir, fw.Files, func(top string) bool { return top == ".lake" }); err != nil {
+			return &diag{Invalid: true, Msg: "Cannot write the Janus framework to the cache: " + err.Error(), Stage: "Janus library build",
+				Next: "Set JANUS_CACHE_DIR to a writable directory."}
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".lake", "build", "lib", "lean", "Janus.olean")); err != nil && progress != nil {
+			fmt.Fprintf(progress, "Building the Janus framework (%s, %s) in %s; this happens once per framework version.\n",
+				fw.Source, fw.Sha256[:12], displayPath(dir))
+		}
+	}
+	all := append([]string{}, baseTargets...)
+	seen := map[string]bool{}
+	for _, t := range all {
+		seen[t] = true
+	}
+	for _, t := range append(old.Targets, targets...) {
+		if !seen[t] {
+			seen[t] = true
+			all = append(all, t)
+		}
 	}
 	lr := &leanRunner{lake: lake, root: dir}
-	if out, err := lr.run("build", "Janus", "Janus.Tools.Audit"); err != nil {
-		return "", &diag{Invalid: true, Msg: "Building the Janus Lean library failed: " + err.Error(), Stage: "Janus library build",
-			Next: "Run lake build Janus in " + dir + " and fix the reported errors.", Details: out}
+	if out, err := lr.run(append([]string{"build"}, all...)...); err != nil {
+		next := "Run lake build " + strings.Join(all, " ") + " in " + dir + " and fix the reported errors."
+		return &diag{Invalid: true, Msg: "Building the Janus Lean library failed: " + err.Error(), Stage: "Janus library build",
+			Next: next, Details: out}
 	}
-	now := time.Now()
-	_ = os.Chtimes(dir, now, now)
-	return dir, nil
+	p, err := frameworkPins(filepath.Join(dir, ".lake", "build", "lib", "lean"), fw.Files)
+	if err != nil {
+		return &diag{Invalid: true, Msg: "Cannot read the framework build: " + err.Error(), Stage: "Janus library build"}
+	}
+	exeSha := regularFileSha(auditExePath(dir))
+	if exeSha == "" {
+		return &diag{Invalid: true, Msg: "The framework build has no auditor executable " + displayPath(auditExePath(dir)) + ".", Stage: "Janus library build",
+			Next: "Run lake build " + auditExeTarget + " in " + dir + " and fix the reported errors."}
+	}
+	st := frameworkStamp{Sha256: fw.Sha256, Manifest: sha256Hex(fw.Files["lake-manifest.json"]), Targets: all, Pins: p.want, AuditExe: exeSha}
+	b, _ := json.Marshal(st)
+	if err := writeFileAtomic(stampPath, b); err != nil {
+		return &diag{Invalid: true, Msg: "Cannot write the framework build stamp: " + err.Error(), Stage: "Janus library build"}
+	}
+	if dir != fw.Dir {
+		now := time.Now()
+		_ = os.Chtimes(dir, now, now)
+	}
+	return nil
+}
+
+// changedModules are the modules with a data file that differs between want and got (modified,
+// missing or extra).
+func changedModules(want, got pins) []string {
+	set := map[string]bool{}
+	for rel, h := range want {
+		if got[rel] != h {
+			set[moduleOfRel(rel)] = true
+		}
+	}
+	for rel := range got {
+		if _, ok := want[rel]; !ok {
+			set[moduleOfRel(rel)] = true
+		}
+	}
+	var ms []string
+	for m := range set {
+		ms = append(ms, m)
+	}
+	sort.Strings(ms)
+	return ms
+}
+
+// removeModuleOutputs removes every build output of module m in libDir (its module data, .ilean,
+// Lake's .trace and .hash files), so the next Lake build compiles it again.
+func removeModuleOutputs(libDir, m string) {
+	base := filepath.Join(libDir, filepath.FromSlash(strings.ReplaceAll(m, ".", "/")))
+	ents, err := os.ReadDir(filepath.Dir(base))
+	if err != nil {
+		return
+	}
+	prefix := filepath.Base(base) + "."
+	for _, e := range ents {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
+			_ = os.Remove(filepath.Join(filepath.Dir(base), e.Name()))
+		}
+	}
+}
+
+// writeFileAtomic writes b to p through a temporary file and a rename.
+func writeFileAtomic(p string, b []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(p), "."+filepath.Base(p)+".tmp-")
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return err
+	}
+	if err := os.Rename(f.Name(), p); err != nil {
+		os.Remove(f.Name())
+		return err
+	}
+	return nil
+}
+
+// sameTree is syncTree's read-only check: dir holds exactly files (plus keep's top-level
+// entries), byte for byte.
+func sameTree(dir string, files map[string][]byte, keep func(top string) bool) bool {
+	n := 0
+	ok := true
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if p == dir {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, p)
+		rel = filepath.ToSlash(rel)
+		if !strings.Contains(rel, "/") && keep != nil && keep(rel) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		want, isFile := files[rel]
+		if !isFile || !d.Type().IsRegular() {
+			ok = false
+			return fs.SkipAll
+		}
+		got, err := os.ReadFile(p)
+		if err != nil || !bytes.Equal(got, want) {
+			ok = false
+			return fs.SkipAll
+		}
+		n++
+		return nil
+	})
+	return err == nil && ok && n == len(files)
+}
+
+// frameworkBase materializes the framework in the cache (<cache>/v1/framework/<sha>), builds
+// its Janus library (and targets) there once, and returns it under a shared lock (see above). A
+// damaged copy (sources or compiled modules not as stamped) is repaired before use.
+func (fw *framework) frameworkBase(lake string, progress io.Writer, targets ...string) (*frameworkLease, error) {
+	dir := filepath.Join(cacheRoot(), "v1", "framework", fw.Sha256[:24])
+	return fw.acquire(dir, lake, targets, progress)
 }
 
 // libraryRoot is the Lake project in which the Janus library is built and proofs are
 // compiled: the checkout for a directory framework (built in place, as before), else the
 // cached copy of the embedded framework. With fresh, the embedded framework is built from
-// scratch in a temporary directory that cleanup removes.
+// scratch in a temporary directory that cleanup removes. cleanup also ends the use of a shared
+// build (its shared lock), so it must run only after the last check of the framework pins.
 func (fw *framework) libraryRoot(lake string, fresh bool, progress io.Writer) (string, func(), error) {
-	if fw.Source == "directory" {
-		// Build the library and the trusted auditor in place (as the old verifier did).
-		lr := &leanRunner{lake: lake, root: fw.Dir}
-		if out, err := lr.run("build", "Janus", "Janus.Tools.Audit"); err != nil {
-			return "", func() {}, &diag{Invalid: true, Msg: "Building the Janus Lean library failed: " + err.Error(),
-				Stage: "Janus library build", Next: "Run lake build Janus Janus.Tools.Audit in " + fw.Dir + ".", Details: out}
+	if fw.Source == "directory" || !fresh {
+		dir := fw.Dir
+		var lease *frameworkLease
+		var err error
+		if fw.Source == "directory" {
+			lease, err = fw.acquire(dir, lake, nil, progress)
+		} else {
+			lease, err = fw.frameworkBase(lake, progress)
 		}
-		return fw.Dir, func() {}, nil
-	}
-	if !fresh {
-		dir, err := fw.frameworkBase(lake, progress)
-		return dir, func() {}, err
+		if err != nil {
+			return "", func() {}, err
+		}
+		return lease.dir, lease.release, nil
 	}
 	tmp, err := fw.freshBase(lake, progress)
 	if err != nil {
@@ -371,7 +709,7 @@ func (fw *framework) freshBase(lake string, progress io.Writer) (string, error) 
 		fmt.Fprintf(progress, "Building the Janus framework from scratch (--fresh) in %s.\n", displayPath(tmp))
 	}
 	lr := &leanRunner{lake: lake, root: tmp}
-	if out, err := lr.run("build", "Janus", "Janus.Tools.Audit"); err != nil {
+	if out, err := lr.run(append([]string{"build"}, baseTargets...)...); err != nil {
 		os.RemoveAll(tmp)
 		return "", &diag{Invalid: true, Msg: "Building the Janus Lean library failed: " + err.Error(), Stage: "Janus library build", Details: out}
 	}

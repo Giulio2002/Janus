@@ -79,7 +79,7 @@ func leanDecode(exe string, words []uint32) (map[uint32]bool, error) {
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
-	if err := cmd.Run(); err != nil {
+	if err := guardRun(cmd); err != nil {
 		return nil, fmt.Errorf("%s: %v\n%s%s", exe, err, out.String(), errb.String())
 	}
 	res := map[uint32]bool{}
@@ -126,19 +126,17 @@ func cmdBlockers(args []string, stdout, stderr io.Writer) error {
 		return &diag{Msg: fmt.Sprintf("janus blockers supports arm64 binaries only; %s is %s", pos[0], b.GOARCH),
 			Stage: "binary validation", Next: "Run janus blockers on a GOARCH=arm64 build."}
 	}
-	root, err := findJanusRoot(opts["janus-root"])
+	// The decoder is built in the shared framework build under its exclusive lock (it adds
+	// Janus.Tools.Decode, which a concurrent verification's pins would otherwise see appear)
+	// and then used under the shared lock.
+	root, release, err := findJanusRoot(opts["janus-root"], "janus-decode")
 	if err != nil {
+		if d, ok := err.(*diag); ok {
+			d.Stage, d.Next = "Lean decoder build", "Fix the Lean build (lake build janus-decode), then rerun."
+		}
 		return err
 	}
-	lake, err := findLake()
-	if err != nil {
-		return err
-	}
-	lr := &leanRunner{lake: lake, root: root}
-	if out, err := lr.run("build", "janus-decode"); err != nil {
-		return &diag{Msg: "lake build janus-decode failed in " + displayPath(root), Stage: "Lean decoder build",
-			Next: "Fix the Lean build (lake build janus-decode), then rerun.", Details: out}
-	}
+	defer release()
 	exe := filepath.Join(root, ".lake", "build", "bin", "janus-decode")
 
 	type site struct {
