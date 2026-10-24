@@ -329,6 +329,21 @@ of a summary is `ReachesRet`), so a call chain is proved bottom-up, each functio
   guard slot `[X28 + 16, +8)` disjoint from the stack window. The ranges are easy to get wrong;
   the stuck message names the store that is outside them.
 
+### Go assembly and ABI0 calls (`examples/asm`)
+
+An assembly function (`f.abi0`) takes its arguments from the caller's frame, so its theorem is
+`GoABI0.Ensures0 p entry [a₀, …] nres pre post` (amd64: `Amd64.GoABI0.Ensures0`): start with
+`intro ret hret s hs hpre; janus_intro0 hs` (`janus64_intro0`), which turns the frame words into
+`h_rd_arg<i>` rewrite rules, then `janus_run` as usual; the result words are `results0 s s' n k`.
+As a callee (a direct ABI0 call from Go, an ABI wrapper) the function is a
+`Summary0 p entry pre Q`: from any state at its entry it returns with every register but the
+reserved ones unspecified and memory satisfying `Q s` — typically
+`MemFrame (s.mem.writeLE resultAddr 8 v) m [(scratch)]`, proved with `MemFrame.writeLE_congr`,
+`MemFrame.writeLE_both` and `janus_frame`. `janus_run calls [h]` uses it; on amd64 the caller's
+re-entry (`XORPS X15, X15; MOVQ FS:-8, R14`) then needs `TlsG s` in the precondition.
+`Ensures0.of_summary0` gives the standalone contract from the summary. See
+[ABI0.md](ABI0.md) and the ten proofs in `examples/asm/proofs/`.
+
 ### Dynamic calls (`HashWith`, `HashTwice`, `MapSum`, `DeferAdd`)
 
 An interface method call, a call of a func value (closure or method value) and the call of a
