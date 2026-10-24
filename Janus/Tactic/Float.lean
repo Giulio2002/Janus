@@ -18,7 +18,7 @@ namespace Janus.Tactic
 open Janus Janus.Arm64 Janus.Arm64.FP
 
 attribute [janus_exec] ftypeFmt ftypeSize execFpDP1 execFpDP2 execFpDP3 execFpCmp execFpCcmp
-  execFpCsel execFpImm execFpCvtInt fpCommit State.setScalar State.mergeBase
+  execFpCsel execFpImm execFpCvtInt fpCommit State.setScalar State.mergeBase FP.decodeRounding
 
 @[janus_exec] theorem trapEnables_zero : trapEnables 0 = 0 := by decide
 @[janus_exec] theorem fp_and_zero (n : Nat) : n &&& 0 = 0 := Nat.and_zero n

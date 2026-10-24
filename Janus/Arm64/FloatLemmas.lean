@@ -149,9 +149,44 @@ theorem fpToFixed_rzu_ieee (h : IEEEMode fpcr) (f : Fmt) (x : Nat) (i : Int)
   all_goals
     rw [natAbs_signed]
     by_cases hm : mantOf f x = 0
-    · simp only [signed_eq_zero, hm, if_true]
+    · simp only [signed_eq_zero, hm, ite_true]
       rw [hm, roundToInt_zero] at hi; subst hi; exact satQ_unsigned 64 0 (by omega) (by omega)
-    · simp only [signed_eq_zero, hm, if_false]
+    · simp only [signed_eq_zero, hm, ite_false]
       rw [hi]; exact satQ_unsigned 64 i h0 h1
+
+/-- `FCVTZU X, D` out of range, in IEEE mode: a truncation below `0` gives `0`, one at or
+above `2^64` gives `2^64 - 1`. -/
+theorem fpToFixed_rzu_sat (h : IEEEMode fpcr) (f : Fmt) (x : Nat) (i : Int)
+    (hi : truncInt f x = some i) :
+    (i < 0 → (fpToFixed f fpcr true .rz 64 x).1 = 0) ∧
+    (2 ^ 64 ≤ i → (fpToFixed f fpcr true .rz 64 x).1 = 2 ^ 64 - 1) := by
+  have hah : ah fpcr = false := h.2.1
+  simp only [fpToFixed, unpack_ieee h, hah]
+  unfold truncInt at hi
+  unfold valueOf
+  have sat : ∀ j : Int, (j < 0 → (satQ 64 true j).1 = 0) ∧ (2 ^ 64 ≤ j → (satQ 64 true j).1 = 2 ^ 64 - 1) := by
+    intro j; constructor <;> intro hj
+    · simp [satQ, hj]
+    · simp [satQ, show ¬ j < 0 by omega, show (18446744073709551616 : Int) ≤ j by omega]
+  cases hc : classify f x <;> simp [hc] at hi ⊢
+  · subst hi; constructor <;> intro hj <;> omega
+  all_goals
+    rw [natAbs_signed]
+    by_cases hm : mantOf f x = 0
+    · simp only [signed_eq_zero, hm, ite_true]
+      rw [hm, roundToInt_zero] at hi; subst hi; constructor <;> intro hj <;> omega
+    · simp only [signed_eq_zero, hm, ite_false]
+      rw [hi]; exact sat i
+
+/-- `FCVTZU X, D` of a NaN, in IEEE mode: `0`; of `+∞`: `2^64 - 1`; of `-∞`: `0`. -/
+theorem fpToFixed_rzu_special (h : IEEEMode fpcr) (f : Fmt) (x : Nat) :
+    (isNaN f x = true → (fpToFixed f fpcr true .rz 64 x).1 = 0) ∧
+    (classify f x = .inf → (fpToFixed f fpcr true .rz 64 x).1 =
+      if signOf f x then 0 else 2 ^ 64 - 1) := by
+  have hah : ah fpcr = false := h.2.1
+  simp only [fpToFixed, unpack_ieee h, hah]
+  unfold valueOf isNaN
+  cases hc : classify f x <;> simp [hc, satQ]
+  cases signOf f x <;> simp
 
 end Janus.Arm64.FP
