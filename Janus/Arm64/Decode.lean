@@ -553,8 +553,8 @@ def decodeSimdDP (w : Nat) : Option Instr :=
     else none
   else decodeFloat w  -- scalar floating point (`Janus.Arm64.DecodeFloat`)
 
-/-- The classes above, by the top-level `op0` field. Words `≥ 2^32` are rejected. -/
-def decodeA64 (w : Nat) : Option Instr :=
+/-- Decode a 32-bit A64 instruction word. Words `≥ 2^32` are rejected. -/
+def decode (w : Nat) : Option Instr :=
   if w ≥ 2 ^ 32 then none else
   let op0 := bits w 28 25
   if op0 / 2 = 0b100 then decodeDPImm w            -- 100x
@@ -564,11 +564,15 @@ def decodeA64 (w : Nat) : Option Instr :=
   else if op0 % 8 = 0b111 then decodeSimdDP w      -- x111
   else none                                        -- SME, SVE, unallocated
 
-/-- Decode a 32-bit A64 instruction word: the classes of `decodeA64`, and for the words they
-reject, the Advanced SIMD classes of `decodeNeon` (`Janus.Arm64.DecodeNeon`). -/
-def decode (w : Nat) : Option Instr :=
-  match decodeA64 w with
+/-- The decoder of the model (`step`): the classes of `decode`, and for the words it rejects, the
+Advanced SIMD classes of `decodeNeon` (`Janus.Arm64.DecodeNeon`). `decode` keeps its own
+definition so that proofs unfolding it class by class are unaffected. -/
+def decodeAll (w : Nat) : Option Instr :=
+  match decode w with
   | some i => some i
   | none => (decodeNeon w).map Instr.neon
+
+theorem decodeAll_of_decode {w : Nat} {i : Instr} (h : decode w = some i) : decodeAll w = some i := by
+  simp [decodeAll, h]
 
 end Janus.Arm64

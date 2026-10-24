@@ -6,7 +6,7 @@ import Janus.Arm64.Bits
 
 `decodeNeon w` maps a 32-bit word to a `NeonInstr`, or `none` when the word is outside the
 supported subset **or** is a reserved / unallocated / UNDEFINED / CONSTRAINED UNPREDICTABLE
-encoding within it. `Janus.Arm64.decode` consults it only for words its own classes reject, so
+encoding within it. `Janus.Arm64.decodeAll` consults it only for words `Janus.Arm64.decode` rejects, so
 the original decoder's results never change.
 
 Every check transcribes the `decode` pseudocode of the instruction (sail-arm `instrs64.sail`,

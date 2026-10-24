@@ -8,7 +8,7 @@ fields and no interpretation: the operation an encoding selects is computed in
 `Janus.Arm64.Neon` / `Janus.Arm64.NeonFP`, and `Janus.Arm64.decodeNeon` (`DecodeNeon.lean`)
 only produces values that are valid, allocated encodings of the supported subset.
 
-`decodeNeon` is consulted only for words the original decoder rejects (`Janus.Arm64.decode`),
+`decodeNeon` is consulted only for words the original decoder rejects (`Janus.Arm64.decodeAll` falls back to it when `decode` fails),
 so a class here may also contain opcodes that `Instr` already covers (vector `ADD`, `CMEQ`, ...);
 `execNeon` implements every opcode the class accepts, whichever decoder produced it.
 

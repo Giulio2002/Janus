@@ -931,15 +931,20 @@ def exec (i : Instr) (s : State) : Except Fault State :=
   -- Advanced SIMD classes of `NeonInstr` (`Janus.Arm64.ExecNeon`)
   | .neon i => execNeon i s
 
-/-- Decode and execute the word `w` fetched at `s.pc`. -/
+/-- Decode and execute the word `w` fetched at `s.pc` (`decodeAll`: the classes of `decode`,
+then the Advanced SIMD classes of `decodeNeon`). -/
 def step (w : Nat) (s : State) : Except Fault State :=
-  match decode w with
+  match decodeAll w with
   | some i => exec i s
   | none => .error (.undecodable s.pc.toNat w)
 
 /-- Rewrite `step` once the decoding of a literal word is known (e.g. by `rfl`/`decide`). -/
-theorem step_of_decode {w : Nat} {i : Instr} (h : decode w = some i) (s : State) :
+theorem step_of_decodeAll {w : Nat} {i : Instr} (h : decodeAll w = some i) (s : State) :
     step w s = exec i s := by
   simp [step, h]
+
+/-- `step_of_decodeAll` for a word of the classes of `decode`. -/
+theorem step_of_decode {w : Nat} {i : Instr} (h : decode w = some i) (s : State) :
+    step w s = exec i s := step_of_decodeAll (decodeAll_of_decode h) s
 
 end Janus.Arm64
