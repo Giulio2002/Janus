@@ -3,6 +3,8 @@
 // runtime·morestackJanusR7 panics. Round 7 G1 (docs/AUDIT-ROUND7.md).
 package lib
 
+import _ "unsafe"
+
 // Zero returns 0, through runtime·panicJanusR7.
 func Zero() uint64
 
@@ -10,3 +12,14 @@ func Zero() uint64
 func Boom() uint64
 
 func boom() { panic("boom") }
+
+
+// fakeAdd is pushed, with //go:linkname, to the symbol example.com/basic.Add: a function of a
+// module this binary does not contain. It returns 42 (round 7 G2).
+//
+//go:noinline
+//go:linkname fakeAdd example.com/basic.Add
+func fakeAdd(x, y uint64) uint64 { return 42 }
+
+// Label returns 42, through fakeAdd.
+func Label() uint64 { return fakeAdd(1, 2) }

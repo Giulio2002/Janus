@@ -476,6 +476,45 @@ def checkNumerals (e : Expr) : MetaM (Option String) := do
             bad.set (some s!"writes the out-of-range numeral {n} at type {tyS}, whose values are below {b}: the literal wraps (to {n % b} for an unsigned type) and does not mean what it reads (round 6 F2). Write the value in range")
   bad.get
 
+/-- Round 7 (H1): characters a bound variable's name may contain. Lean identifier letters
+(ASCII, Greek, Coptic, letterlike, subscripts) as `isLetterLike` defines them, digits and
+`_ ' ! ?`. A `«…»` binder may otherwise contain zero-width spaces, combining marks or
+lookalike letters from scripts Lean does not accept as identifiers (Cyrillic `х`). -/
+def binderChar (c : Char) : Bool :=
+  plainNameChar c || Lean.isLetterLike c
+
+/-- Round 7 (H1): the bound-variable names of `e` (`∀`, `fun`, `let` binders), with macro
+scopes erased, in traversal order. -/
+partial def binderNames (e : Expr) (acc : Array Name := #[]) : Array Name :=
+  match e with
+  | .forallE n d b _ | .lam n d b _ => binderNames b (binderNames d (acc.push n.eraseMacroScopes))
+  | .letE n t v b _ => binderNames b (binderNames v (binderNames t (acc.push n.eraseMacroScopes)))
+  | .app f a => binderNames a (binderNames f acc)
+  | .mdata _ b => binderNames b acc
+  | .proj _ _ b => binderNames b acc
+  | _ => acc
+
+/-- Round 7 (H1): reject bound variables that cannot be told apart. `∀ ο, ο = o` with a Greek
+omicron reads as the triviality `∀ o, o = o` while it says every value equals the parameter
+`o` (a false, hence vacuous, hypothesis). Two distinct binder names of one term that read the
+same once lookalike letters are folded to Latin (`latinLookalike`) are rejected, and so is a
+binder name with characters other than Lean identifier letters, digits and `_ ' ! ?`. -/
+def checkBinderNames (e : Expr) : Option String := Id.run do
+  let names := binderNames e
+  let mut seen : Std.HashMap String String := {}
+  for n in names do
+    if n.isAnonymous then continue
+    let str := n.toString (escape := false)
+    if !n.components.all (fun | .str _ c => c.all binderChar | _ => true) then
+      return some s!"binds a variable whose name has characters other than identifier letters, digits and _ ' ! ? (zero-width, combining or lookalike characters): {String.quote str}; rename it (round 7 H1)"
+    let folded := String.ofList (str.toList.map latinLookalike)
+    match seen.get? folded with
+    | some other =>
+      if other != str then
+        return some s!"binds two variables whose names look alike, {String.quote other} and {String.quote str} (they read the same once lookalike letters are folded), so the printed statement cannot be read reliably; rename one (round 7 H1)"
+    | none => seen := seen.insert folded str
+  return none
+
 /-- The shape `ppSignature` prints: the declaration name followed by a `declSig`. -/
 def sigParser : Parser.Parser :=
   Parser.node `JanusAudit.sig (Parser.ident >> Parser.Command.declSig)
@@ -695,6 +734,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     -- (b) instance-implicit arguments must be registered instances or local instance binders
     if let some m ← checkInstArgs cx thmType then throwError m
     if let some m ← checkNumerals thmType then throwError s!"the statement {m}"
+    if let some m := checkBinderNames thmType then throwError s!"the statement {m}"
     -- (a) the printed statement must elaborate back to the checked type
     let sigStr ← match ← printFaithful thm thmType with
       | .ok s => pure s
@@ -715,6 +755,8 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
           throwError s!"the proof-local definition {ci.name} used in the statement {m}"
       for t in [ci.type] ++ ci.value?.toList do
         if let some m ← checkNumerals t then
+          throwError s!"the proof-local definition {ci.name} used in the statement {m}"
+        if let some m := checkBinderNames t then
           throwError s!"the proof-local definition {ci.name} used in the statement {m}"
       -- round 4 D1: the disclosure itself must round-trip (numerals, binder types)
       defs := defs.push (← discloseDef ci)
