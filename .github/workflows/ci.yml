@@ -91,7 +91,8 @@ jobs:
       - name: Build examples
         run: scripts/build-examples.sh
 
-      # The Lean-running tests take longer than go test's default 10-minute timeout.
+      # The Lean-running tests take longer than go test's default 10-minute timeout. The
+      # independent ones run in parallel (TestMain caps -parallel by memory: 2 on a 16 GiB runner).
       - name: go test ./cmd/...
         run: go test -timeout 40m ./cmd/...
 
@@ -156,8 +157,13 @@ jobs:
       - name: lake build Janus JanusTests
         run: lake build Janus JanusTests
 
-      # Builds and extracts the examples itself (scripts/build-examples.sh).
+      # Builds and extracts the examples itself (scripts/build-examples.sh). JANUS_ROOT: verify
+      # against this checkout's Janus build (made above) instead of building the embedded copy of
+      # the same sources a second time in ~/.cache/janus; the checks are the same (the embedded
+      # path is covered by go test). -j: proofs at once (default: cores, capped by memory).
       - name: Verify example proofs
+        env:
+          JANUS_ROOT: ${{ github.workspace }}
         run: scripts/verify-examples.sh
 
       - name: Decoder coverage of the examples (janus blockers)
@@ -199,7 +205,7 @@ jobs:
 
       # Every "blocked" row must be rejected and every Verified / Verified-honest / mitigated
       # control must verify; run-all.sh marks a regression BROKEN and exits non-zero.
-      - name: Soundness audit attacks (audit/run-all.sh)
+      - name: Soundness audit attacks (audit/run-all.sh, rows in parallel)
         run: audit/run-all.sh
 
   # The amd64 backend: Lean model + oracle executable, the amd64 example proofs, and the native
@@ -269,6 +275,8 @@ jobs:
       # verify-amd64-examples.sh first runs scripts/build-examples-amd64.sh (build the linux/amd64
       # examples binary and extract every function into artifacts/amd64/).
       - name: Build, extract and verify the amd64 example proofs
+        env:
+          JANUS_ROOT: ${{ github.workspace }}
         run: scripts/verify-amd64-examples.sh
 
       # The native oracle single-steps each case in-process with RFLAGS.TF and a raw SIGTRAP

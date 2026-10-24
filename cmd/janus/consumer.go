@@ -465,6 +465,10 @@ type consumerWS struct {
 	// replayCache: reuse cached passing kernel replays (off with --fresh or without a
 	// sandbox); replayFresh: also replay each theorem module with leanchecker --fresh.
 	replayCache, replayFresh bool
+	// auditExe is the compiled auditor of the cached framework base and auditExeSha the SHA-256
+	// its build stamp records (re-checked before it runs); empty with --fresh, whose temporary
+	// base is gone by then: the audit then runs the trusted Audit.lean script instead.
+	auditExe, auditExeSha string
 }
 
 // janusLib is the workspace's framework library directory.
@@ -542,6 +546,7 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 		if lease, err = fw.frameworkBase(lake, progress); err == nil {
 			base = lease.dir
 			defer lease.release()
+			ws.auditExe, ws.auditExeSha = auditExePath(base), fw.stampedAuditExe(base)
 		}
 	}
 	if err != nil {
@@ -1031,12 +1036,25 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			continue
 		}
 		marker := "janus-audit-" + newNonce() + ": "
-		af := filepath.Join(auditDir, fmt.Sprintf("Audit%d.lean", i))
-		if err := os.WriteFile(af, []byte(auditScript(r.Theorem, r.module, marker, depRoots...)), 0o644); err != nil {
-			r.Err = &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
-			continue
+		var out string
+		if ws.auditExe != "" && ws.auditExeSha != "" {
+			// The compiled auditor (the same JanusAudit.runImpl as the script below), if it is still
+			// the one its trusted build recorded.
+			if got := regularFileSha(ws.auditExe); got != ws.auditExeSha {
+				failAll(&diag{Invalid: true, Stage: "framework integrity",
+					Msg:  fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(ws.auditExe), short(ws.auditExeSha), short(got)),
+					Next: "Something other than janus wrote to the framework build; janus rebuilds it on the next run."})
+				return
+			}
+			out, _ = ws.runLeanDirect(leanPath, append([]string{ws.auditExe, r.Theorem, r.module, marker, "JanusTrusted"}, depRoots...)...)
+		} else {
+			af := filepath.Join(auditDir, fmt.Sprintf("Audit%d.lean", i))
+			if err := os.WriteFile(af, []byte(auditScript(r.Theorem, r.module, marker, depRoots...)), 0o644); err != nil {
+				r.Err = &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
+				continue
+			}
+			out, _ = ws.runLeanDirect(leanPath, ws.tc.lean, "--root="+auditDir, af)
 		}
-		out, _ := ws.runLeanDirect(leanPath, ws.tc.lean, "--root="+auditDir, af)
 		if err := pinned.check("the audit"); err != nil {
 			failAll(err)
 			return
