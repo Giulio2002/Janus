@@ -551,6 +551,60 @@ and makes `lake build ArmASL --no-build` exit 3 (a rebuild is needed). Lake's gi
 the stat cache `packages/Sail/.git/index` after a restore, so the "already matches" shortcut of a
 second restore recopies the entry (about a second); nothing else differs.
 
+#### Module cache: the JanusASL proofs and the Janus modules (`ASL_CACHE/mods`)
+
+The same `ASL_CACHE` also holds **one entry per Lean module** of the JanusASL package
+(`JanusASL.*`) and of the janus package (`Janus.*`), so the ~45 min proof build is shared too
+(`JanusASL/tools/asl_mod_cache.py`; `scripts/asl.sh build`, `prove` and `replay` restore before
+`lake build` and publish after it). A module's key is the SHA-256 of exactly the inputs Lake 4.34
+hashes into its trace, each by content (`asl_mod_cache.py show ROOT MODULE` prints them):
+
+* the module's name and its source file's SHA-256;
+* for every direct import, the import's key: a `JanusASL.*` or `Janus.*` module by this same key
+  (so the recursion covers the transitive imports Lake records as `importAllArts`), an `ArmASL`
+  module by the ArmASL entry's key above, a `Sail.*` module by the manifest's lean-sail entry, Lean
+  core by the toolchain;
+* the module's package configuration: its parsed lakefile without metadata, and every
+  `lean_lib`/`lean_exe` table (a superset of the owning library's `leanOptions`, `moreLeanArgs` and
+  `moreLeancArgs`), and both packages' `extraDepTargets`;
+* both `lean-toolchain` files, `lean --version`, the machine, and the scheme version.
+
+An entry, `mods/<key>/`, holds the module's outputs as Lake writes them (`lib/lean/<M>.olean`,
+`.ilean`, `.trace` and `.hash` files, `ir/<M>.c` and its objects; not `.setup.json`, which holds
+absolute paths and is an input Lake regenerates) and a `MANIFEST.sha256`. Restore copies every
+file and checks it against the manifest, and drops the module's outputs if one differs; publish
+stores only the modules of the closure of the targets just built (so they are up to date), writes
+into a temporary directory and renames it into place, one publisher per key (`flock`), never
+replacing an entry. Lake stays the judge: a restored module whose trace does not match what Lake
+computes is rebuilt as usual. Since Lake 4.34 cuts off on unchanged outputs (a dependent's trace
+uses its imports' `.olean` hashes), the key is coarser than Lake: an edit that leaves a module's
+`.olean` unchanged (a comment) makes its dependents miss the cache although Lake does not rebuild
+them here; it never makes a stale entry hit.
+
+The trust story is the ArmASL entry's: the cache must be writable only by users you trust, since a
+restored `.olean` is what later modules (and `janus verify --asl`) are checked against. The
+manifest catches corruption, not a malicious writer; the kernel replay (`scripts/asl.sh replay`,
+and the closure replay of `janus verify --asl`) re-checks every declaration. `janus verify --asl`
+itself does not read `ASL_CACHE`: it builds in its own trusted cache (`<cache>/v1/asl`), seeded from
+a sibling build or, by `scripts/asl.sh verify`, from the in-tree build, which the module cache now
+makes cheap.
+
+Measured (`JanusASL/tools/test_asl_mod_cache.sh --e2e CACHE`, plus the restore steps timed
+separately): building JanusASL at one commit from an empty module cache (the ArmASL entry
+restored) took **44 min 42 s** and published 126 entries (882 files, 1.9 GB; the other 7 keyed
+modules are executables' roots and files no library imports). A fresh copy of the same commit
+then restores the model in 1.1 s and the modules in **2.4 s** (manifests checked), after which
+`lake build JanusASL` takes **0.25 s** ("Build completed successfully (194 jobs)", nothing built):
+**4 s** in all, against 45 min. A second restore finds all 126 current in 1.8 s. Adding a theorem to
+`JanusASL/Proofs/Madd.lean` then makes Lake rebuild exactly that module and its 3 dependents in
+the library (`Proofs.Run`, `Proofs.Examples`, `Proofs`; 11 s), the set the keys predict; the key
+tests also check that the keys do not depend on the checkout's path, that a lakefile comment
+changes none, that editing `Janus/Arm64/State.lean` changes exactly its 109 dependents' keys, and
+that a library option or the toolchain changes them. Repeated after merging main (73cae68), into
+the same cache: the build reused 27 unchanged entries, built and published the other 110 (49 min 54 s
+under a loaded host), and a fresh copy of that commit then restored 137 modules and built JanusASL
+in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
+
 ## The check (JanusASL/Check.lean)
 
 Both sides start from the corpus case's registers, flags, V registers, TPIDR_EL0 and data buffer.
