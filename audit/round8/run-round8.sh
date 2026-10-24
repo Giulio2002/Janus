@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Round-8 regression rows (docs/AUDIT-ROUND8.md). Exits 1 if a blocked attack prints Verified (or
 # is blocked without the expected diagnostic), a control stops verifying, or a cache row
-# regresses. The G3a row is reported as open (its fix is on agent/stubpin) and never fails the run.
+# regresses. G3a (fixed by stub code pins) must be rejected at extraction.
 # Every attack verification passes --fresh (the cold path) and uses a private temporary cache;
 # the M1/C1 rows use their own temporary caches. All are removed at the end.
 # Writes only under audit/round8/work/rows/, audit/round8/bin/ and those temporary caches.
@@ -64,17 +64,16 @@ row I1_ctl_amd64_HexDigit_dataBase Verified
 echo "== N1: native reduction (Lean.reduceBool + implemented_by)"
 v $A/N1a_reducebool_implemented_by.lean $W/Add;  row N1a_reducebool_implemented_by blocked 'Lean.trustCompiler'
 
-echo "== G3: a go1.25 binary labelled go1.26 (audit/round8/govers; fix on agent/stubpin)"
+echo "== G3: a go1.25 binary labelled go1.26 (audit/round8/govers; fixed: stubs pinned by code, cmd/janus/stubpin.go)"
 if ( cd audit/round8/govers && GOTOOLCHAIN=go1.25.5 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-     go build -trimpath -buildvcs=false -ldflags=-X=runtime.buildVersion=go1.26.0 -o "$root/$W/govers" ./cmd ) 2>/dev/null &&
-   "$J" extract $W/govers main.Add $W/GvAdd >/dev/null 2>&1; then
-  v $A/G3a_spoofed_goversion_stub.lean $W/GvAdd
-  case "$(grep -m1 -E '^(Verified|Invalid|Error)' <<<"$out")" in
-    Verified*) printf '  %-36s %-8s %s\n' G3a_spoofed_goversion_stub open "open, fix on agent/stubpin (Verified)" ;;
-    *) printf '  %-36s %-8s %s\n' G3a_spoofed_goversion_stub blocked "$(grep -m1 -E '^(Invalid|Error)' <<<"$out" | cut -c1-110)" ;;
-  esac
+     go build -trimpath -buildvcs=false -ldflags=-X=runtime.buildVersion=go1.26.0 -o "$root/$W/govers" ./cmd ) 2>/dev/null; then
+  if out="$("$J" extract $W/govers main.Add $W/GvAdd 2>&1)"; then
+    printf '  %-36s %-8s %s   <-- BROKEN\n' G3a_spoofed_goversion_stub blocked "extraction ACCEPTED the spoofed stub"; broken+=(G3a)
+  else
+    printf '  %-36s %-8s %s\n' G3a_spoofed_goversion_stub blocked "$(grep -m1 -iE 'stub|pin|pclntab' <<<"$out" | cut -c1-110)"
+  fi
 else
-  printf '  %-36s %-8s %s\n' G3a_spoofed_goversion_stub open "open, fix on agent/stubpin (fixture not built here: go1.25.5 unavailable or extract refused)"
+  printf '  %-36s %-8s %s\n' G3a_spoofed_goversion_stub skipped "fixture not built here (go1.25.5 unavailable); audit/round7 G3a rows cover the committed extraction"
 fi
 
 echo "== L1/M1/C1: unit rows (go test; L1 is covered here: a changed lib/lean file changes every key)"
@@ -137,4 +136,4 @@ chmod 600 "$C/v1/result/.key"
 out="$(JANUS_CACHE_DIR="$C" vc $W/Add --proof examples/proofs/Add.lean)"; row C1_ctl_private_cache Verified
 
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
-echo; echo "All round-8 rows as expected (G3a: open, fix on agent/stubpin)."
+echo; echo "All round-8 rows as expected."

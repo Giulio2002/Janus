@@ -60,6 +60,28 @@ out="$("$J" extract $W/asmdup main.Add $W/DupAdd 2>&1)"; row G1d_linkname_duplic
 gob -ldflags=-s -o "$root/$W/asmstrip" ./cmd || broken+=(G1e-build)
 out="$("$J" extract $W/asmstrip main.Add $W/StripAdd 2>&1)"; row G1e_stripped_binary_stub blocked "has no ELF symbol table"
 
+echo "== G3 (round 8): stubs pinned to their code, not to build info (audit/round8/govers: go1.25.5 labelled go1.26.0)"
+# lib's assembly runtime·panicSimdImm returns 0; the go1.25 runtime has no function of that name
+# and the binary claims go1.26.0 (-X runtime.buildVersion). Built by the round-8 red team.
+G3=audit/round8
+if ( cd $G3/govers && GOTOOLCHAIN=go1.25.5 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+     go build -trimpath -buildvcs=false -ldflags=-X=runtime.buildVersion=go1.26.0 -o "$root/$W/govers" ./cmd ); then
+  gv="$(go version "$W/govers" 2>&1)"
+  case $gv in *": go1.26.0") ;; *) echo "  G3 fixture: build info says '$gv', not go1.26.0   <-- BROKEN"; broken+=(G3-label) ;; esac
+  out="$("$J" extract $W/govers main.Add $W/GvAdd 2>&1)"
+  row G3a_spoofed_goversion_extract blocked "is not the Go runtime's runtime.panicSimdImm" "round 8 G3"
+  [ -e $W/GvAdd/Extracted.lean ] && { echo "  G3a: extraction wrote Extracted.lean   <-- BROKEN"; broken+=(G3a-written); }
+  # the extraction round 7 accepted (stub runtime.panicSimdImm): verify re-extracts and rejects it
+  rm -rf $W/GvAdd; mkdir -p $W/GvAdd; cp $G3/r7-extraction/GvAdd/* $W/GvAdd/
+  out="$("$J" verify --fresh --janus-root "$root" --proof "$G3/attacks/G3a_spoofed_goversion_stub.lean" $W/GvAdd 2>&1)"
+  row G3a_spoofed_goversion_stub blocked "is not the Go runtime's runtime.panicSimdImm"
+  if command -v qemu-aarch64 >/dev/null; then
+    q="$(qemu-aarch64 $W/govers 2>&1)"
+    if [ "$q" = 3 ]; then echo "  G3 hardware (qemu-aarch64)           ok       Add(1, 2) = 3 (returns; no panic)"
+    else echo "  G3 hardware: got '$q'   <-- BROKEN"; broken+=(G3-qemu); fi
+  fi
+else echo "  G3 fixture build failed (needs GOTOOLCHAIN=go1.25.5)   <-- BROKEN"; broken+=(G3-build); fi
+
 echo "== G2: the entry symbol is the binary's label (//go:linkname push to example.com/basic.Add)"
 "$J" extract $W/asmstub example.com/basic.Add $W/Label >/dev/null || broken+=(G2-extract)
 v G2a_pushed_entry_label $W/Label; row G2a_pushed_entry_label Verified "Entry: example.com/basic.Add" "Module: example.com/asmstub"
@@ -86,8 +108,8 @@ out="$("$J" verify --fresh $W/Add --janus-root "$root" --proof "$dep/R7Proofs/Pr
 row J1a_misnamed_dependency_def Verified "Dependency definitions used by the statement" "MisLib.mul : BitVec (64 : Nat) → BitVec (64 : Nat) → BitVec (64 : Nat) := fun (a b : BitVec (64 : Nat)) => a + b"
 
 echo "== unit rows (go test)"
-(cd cmd/janus && go test -timeout 30m -run 'TestStubKind|TestClassifyStub|TestTermSafe' . >/dev/null 2>&1) ||
-  { echo "  >>> TestStubKind/TestClassifyStub/TestTermSafe failed"; broken+=(gotest); }
+(cd cmd/janus && go test -timeout 30m -run 'TestStubKind|TestClassifyStub|TestStubPin|TestTermSafe' . >/dev/null 2>&1) ||
+  { echo "  >>> TestStubKind/TestClassifyStub/TestStubPin*/TestTermSafe failed"; broken+=(gotest); }
 
 echo "== result cache (audit/round7/run-cache.sh)"
 audit/round7/run-cache.sh | sed 's/^/  /'

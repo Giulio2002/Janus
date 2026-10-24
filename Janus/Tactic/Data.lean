@@ -106,4 +106,34 @@ theorem accessible_of_dataLoaded {p : Program} {m : Memory} (h : p.DataLoaded m)
   obtain ⟨r, hr, ⟨⟨⟨hb, he⟩, hw⟩, _⟩⟩ := hreg
   exact Memory.accessible_of_mem m hr hb he hw
 
+/-- A writable range is disjoint from every read-only data object (whose bytes memory holds
+read-only, `Program.DataLoaded`): a write needs every overlapping region to be writable. Used by
+`janus_data hd [hw]`. -/
+theorem disjoint_of_dataLoaded {p : Program} {m : Memory} (h : p.DataLoaded m) (k : Nat)
+    (hk : k < p.data.length) {a n : Nat} (hw : m.accessible a n true = true) :
+    a + n ≤ (p.data[k]).base ∨ (p.data[k]).base + (p.data[k]).bytes.length ≤ a := by
+  obtain ⟨hreg, _⟩ := h _ (List.getElem_mem hk)
+  simp only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hreg
+  obtain ⟨r, hr, ⟨⟨⟨hb, he⟩, _⟩, hro⟩⟩ := hreg
+  simp only [Memory.accessible, Bool.and_eq_true, Bool.not_true, Bool.false_or,
+    List.all_eq_true, Bool.or_eq_true, decide_eq_true_eq] at hw
+  rcases hw.2 r hr with (h1 | h1) | h1
+  · rw [hro] at h1; cases h1
+  · omega
+  · omega
+
+/-- `disjoint_of_dataLoaded` with the object's bounds as literals, checked as Boolean facts (the
+form `janus_data hd [hw]` produces, so the elaborator never unfolds the data list). -/
+theorem disjoint_of_dataLoaded' {p : Program} {m : Memory} (h : p.DataLoaded m) (k : Nat)
+    {base len : Nat}
+    (hbl : (p.data[k]?.map (fun d => (d.base, d.bytes.length)) == some (base, len)) = true)
+    {a n : Nat} (hw : m.accessible a n true = true) : a + n ≤ base ∨ base + len ≤ a := by
+  simp only [beq_iff_eq, Option.map_eq_some_iff, Prod.mk.injEq] at hbl
+  obtain ⟨d, hd, rfl, rfl⟩ := hbl
+  have hk : k < p.data.length := (List.getElem?_eq_some_iff.mp hd).1
+  have hdk : p.data[k] = d := (List.getElem?_eq_some_iff.mp hd).2
+  have := disjoint_of_dataLoaded h k hk hw
+  rw [hdk] at this
+  exact this
+
 end Janus.Tactic

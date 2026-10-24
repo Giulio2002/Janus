@@ -48,6 +48,51 @@ structure MemFrame (m m' : Janus.Arm64.Memory) (rs : List (Nat × Nat)) : Prop w
   readLE : ∀ a n, Outside a n rs → m'.readLE a n = m.readLE a n
   accessible : ∀ a n w, m'.accessible a n w = m.accessible a n w
 
+@[simp] theorem outside_append (a n : Nat) (rs rs' : List (Nat × Nat)) :
+    Outside a n (rs ++ rs') = (Outside a n rs ∧ Outside a n rs') := by
+  induction rs with
+  | nil => simp
+  | cons r rs ih => obtain ⟨lo, hi⟩ := r; simp [ih, and_assoc]
+
+/-- A sub-range of a range outside `rs` is outside `rs` (for a list `rs` that is a variable,
+e.g. a caller-declared list of runtime-owned ranges). -/
+theorem Outside.of_sub {b k a n : Nat} {rs : List (Nat × Nat)} (h : Outside b k rs) (h1 : b ≤ a)
+    (h2 : a + n ≤ b + k) : Outside a n rs := by
+  induction rs with
+  | nil => trivial
+  | cons r rs ih =>
+    obtain ⟨lo, hi⟩ := r
+    simp only [outside_cons] at h ⊢
+    exact ⟨by omega, ih h.2⟩
+
+/-- `[a, a+n)` and `[b, b+k)` do not overlap. The same as `Spec.Disjoint`, but a separate
+definition that `omega` does not unfold: a precondition with many disjointness facts states
+them as `Apart`, so that `omega` does not case-split on all of them in every side condition;
+the dischargers use them one at a time (`janus_apart`). -/
+def Apart (a n b k : Nat) : Prop := a + n ≤ b ∨ b + k ≤ a
+
+theorem Apart.symm {a n b k : Nat} (h : Apart a n b k) : Apart b k a n := by
+  unfold Apart at *; omega
+
+/-- `[a, a+n)` lies inside one of the ranges `[lo, hi)` of `rs`. -/
+def InRanges (a n : Nat) (rs : List (Nat × Nat)) : Prop := ∃ r ∈ rs, r.1 ≤ a ∧ a + n ≤ r.2
+
+theorem InRanges.append_left {a n : Nat} {rs : List (Nat × Nat)} (h : InRanges a n rs)
+    (rs' : List (Nat × Nat)) : InRanges a n (rs ++ rs') := by
+  obtain ⟨r, hr, h1, h2⟩ := h; exact ⟨r, List.mem_append_left _ hr, h1, h2⟩
+
+theorem InRanges.append_right {a n : Nat} {rs' : List (Nat × Nat)} (rs : List (Nat × Nat))
+    (h : InRanges a n rs') : InRanges a n (rs ++ rs') := by
+  obtain ⟨r, hr, h1, h2⟩ := h; exact ⟨r, List.mem_append_right _ hr, h1, h2⟩
+
+theorem InRanges.of_subset {a n : Nat} {rs rs' : List (Nat × Nat)} (h : InRanges a n rs)
+    (sub : ∀ r, r ∈ rs → r ∈ rs') : InRanges a n rs' := by
+  obtain ⟨r, hr, h1, h2⟩ := h; exact ⟨r, sub r hr, h1, h2⟩
+
+theorem InRanges.sub {a n b k : Nat} {rs : List (Nat × Nat)} (h : InRanges b k rs) (h1 : b ≤ a)
+    (h2 : a + n ≤ b + k) : InRanges a n rs := by
+  obtain ⟨r, hr, h3, h4⟩ := h; exact ⟨r, hr, by omega, by omega⟩
+
 namespace MemFrame
 
 variable {m m' m'' : Janus.Arm64.Memory} {rs : List (Nat × Nat)}
@@ -73,6 +118,12 @@ theorem writeLE (h : MemFrame m m' rs) {a k : Nat} (v : Nat) {r : Nat × Nat} (h
     have := outside_mem hb hr
     rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega)]; exact h.readLE b n hb,
    fun b n w => by rw [Janus.Arm64.Memory.accessible_writeLE]; exact h.accessible b n w⟩
+
+/-- A store inside the ranges, known from an `InRanges` fact (e.g. an object a contract placed in
+the runtime-owned ranges), keeps the frame. -/
+theorem writeLE_inRanges (h : MemFrame m m' rs) {a k : Nat} (v : Nat) (hin : InRanges a k rs) :
+    MemFrame m (m'.writeLE a k v) rs := by
+  obtain ⟨r, hr, h1, h2⟩ := hin; exact h.writeLE v hr h1 h2
 
 /-- `m.writeLE a k v` is a frame of `m` when the store is inside one of the ranges. -/
 theorem of_writeLE (m : Janus.Arm64.Memory) {a k : Nat} (v : Nat) {r : Nat × Nat} (hr : r ∈ rs)
@@ -102,6 +153,60 @@ register_option janus.aliasInfo : Bool := {
   descr := "janus_run/janus64_run: report reads over stores whose aliasing is unknown when \
     they are left in the remaining goals (an information message)"
 }
+
+/-- Every identifier inside a syntax tree, in order. -/
+partial def collectIdents (stx : Syntax) : Array Syntax :=
+  if stx.isIdent then #[stx] else stx.getArgs.foldl (fun acc a => acc ++ collectIdents a) #[]
+
+/-- Close an arithmetic goal by `omega` using one `Apart` hypothesis at a time: for each
+`h : Apart a n b k` of the context, `omega` in both cases of `h`. -/
+partial def arithAtoms (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
+  let e := e.consumeMData
+  if e.isAppOfArity ``HAdd.hAdd 6 || e.isAppOfArity ``HSub.hSub 6 || e.isAppOfArity ``HMul.hMul 6 ||
+      e.isAppOfArity ``HDiv.hDiv 6 || e.isAppOfArity ``HMod.hMod 6 then
+    arithAtoms (e.getArg! 5) (arithAtoms (e.getArg! 4) acc)
+  else if e.isAppOfArity ``OfNat.ofNat 3 || e.isRawNatLit then acc
+  else if e.isAppOfArity ``LE.le 4 || e.isAppOfArity ``LT.lt 4 || e.isAppOfArity ``Eq 3 then
+    arithAtoms (e.getArg! (e.getAppNumArgs - 1)) (arithAtoms (e.getArg! (e.getAppNumArgs - 2)) acc)
+  else if e.isAppOfArity ``Or 2 || e.isAppOfArity ``And 2 then
+    arithAtoms (e.getArg! 1) (arithAtoms (e.getArg! 0) acc)
+  else if acc.contains e then acc else acc.push e
+
+def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
+  let gty ← instantiateMVars (← g.getType)
+  -- only disjunctions (the read-over-write and frame side conditions) are worth it
+  unless gty.consumeMData.isAppOfArity ``Or 2 do return false
+  let goalAtoms := arithAtoms gty
+  -- relevant `Apart` facts: every atom of their two ranges occurs in the goal
+  let mut cands := #[]
+  let mut toClear := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if ty.isAppOfArity ``Janus.Apart 4 then
+      let hAtoms := arithAtoms (ty.getArg! 2) (arithAtoms (ty.getArg! 0))
+      if hAtoms.all goalAtoms.contains then cands := cands.push d.fvarId
+      else toClear := toClear.push d.fvarId
+      continue
+    -- keep only the arithmetic facts about the goal's atoms, so that each `omega` is small
+    if ← isProp ty then
+      unless (arithAtoms ty).all goalAtoms.contains do toClear := toClear.push d.fvarId
+  if cands.isEmpty then return false
+  let saved ← saveState
+  let g' ← try g.tryClearMany toClear catch _ => pure g
+  for fv in cands do
+    let saved' ← saveState
+    try
+      let h ← Term.exprToSyntax (mkFVar fv)
+      let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic|
+        (have h' : _ := $h
+         unfold Janus.Apart at h'
+         rcases h' with h' | h' <;> omega))))
+      if gs.isEmpty then return true
+      saved'.restore
+    catch _ => saved'.restore
+  saved.restore
+  return false
 
 /-- `0x…` -/
 def hex (n : Nat) : String := "0x" ++ String.ofList (Nat.toDigits 16 n)
@@ -798,11 +903,41 @@ def dischargeOutside (g : MVarId) : TacticM Bool := do
   let saved ← saveState
   try
     let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
-      (simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
-        BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod]; omega))))
-    if gs.isEmpty then return true
-    saved.restore; return false
+      (simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true,
+        BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod]
+       repeat' apply And.intro))))
+    for g' in gs do
+      unless ← closePart g' do saved.restore; return false
+    return true
   catch _ => saved.restore; return false
+where
+  /-- One conjunct: arithmetic by `omega`, or `Outside a n rs` for a list `rs` that is not a
+  literal (a variable such as the runtime-owned ranges of a contract) from a hypothesis
+  `Outside b k rs` with `[a, a+n) ⊆ [b, b+k)` (`Outside.of_sub`). -/
+  closePart (g : MVarId) : TacticM Bool := g.withContext do
+    let t ← instantiateMVars (← g.getType)
+    if t.isAppOfArity ``Janus.Outside 3 then
+      let rs := t.getArg! 2
+      for d in ← getLCtx do
+        if d.isImplementationDetail then continue
+        let ty ← instantiateMVars d.type
+        unless ty.isAppOfArity ``Janus.Outside 3 do continue
+        unless ← withReducible (isDefEq (ty.getArg! 2) rs) do continue
+        let saved ← saveState
+        try
+          let h ← Term.exprToSyntax d.toExpr
+          let gs ← Tactic.run g <| withoutRecover do
+            evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> omega)))
+          if gs.isEmpty then return true
+          saved.restore
+        catch _ => saved.restore
+      return false
+    let saved ← saveState
+    try
+      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| omega)))
+      if gs.isEmpty then return true
+      saved.restore; omegaApart g
+    catch _ => saved.restore; omegaApart g
 
 /-- `rs[i] ∈ rs` for a list literal `rs = [e₀, …]`. -/
 def memProof (ty : Expr) (elems : List Expr) (i : Nat) : MetaM Expr := do
@@ -821,8 +956,36 @@ def frameArith (g : MVarId) : TacticM Bool := do
       ((try simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
           BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *); omega))))
     if gs.isEmpty then return true
-    saved.restore; return false
-  catch _ => saved.restore; return false
+    saved.restore; omegaApart g
+  catch _ => saved.restore; omegaApart g
+
+/-- Peel the store `m = m'.writeLE a k v` of a `MemFrame m₀ m rs` goal using a hypothesis
+`InRanges b k' rs'` (with `rs'` contained in `rs`, e.g. `rs = rs' ++ …`, and `[a, a+k) ⊆ [b, b+k')`
+by omega); on success the main goal is `MemFrame m₀ m' rs`. -/
+def tryInRanges (g : MVarId) (m0 m rs : Expr) : TacticM Bool := g.withContext do
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.InRanges 3 do continue
+    let saved ← saveState
+    try
+      let hinTy ← mkAppM ``Janus.InRanges #[m.getArg! 1, m.getArg! 2, rs]
+      let hin ← mkFreshExprSyntheticOpaqueMVar hinTy
+      let h ← Term.exprToSyntax d.toExpr
+      let gs ← Tactic.run hin.mvarId! <| withoutRecover (evalTactic (← `(tactic|
+        exact Janus.InRanges.of_subset
+          (Janus.InRanges.sub $h (by first | omega | (simp only [BitVec.toNat_sub,
+              BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *; omega))
+            (by first | omega | (simp only [BitVec.toNat_sub, BitVec.toNat_add,
+              BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *; omega)))
+          (by intro r hr; simp [List.mem_append, hr]))))
+      unless gs.isEmpty do saved.restore; continue
+      let hm ← mkFreshExprSyntheticOpaqueMVar (← mkAppM ``Janus.MemFrame #[m0, m.getArg! 0, rs])
+      g.assign (← mkAppM ``Janus.MemFrame.writeLE_inRanges #[hm, m.getArg! 3, hin])
+      setGoals [hm.mvarId!]
+      return true
+    catch e => trace[janus.disch] "tryInRanges: {e.toMessageData}"; saved.restore
+  return false
 
 /-- Prove `MemFrame m₀ m rs`: peel the stores of `m` (each must fall inside one of the ranges),
 go through `MemFrame` hypotheses of the context (their ranges must be covered by `rs`), and end
@@ -838,13 +1001,25 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
   if ← withReducible (isDefEq m m0) then
     g.assign (← mkAppM ``Janus.MemFrame.refl #[m0, rs]); return
   if m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 then
-    let some (pty, elems) := (← instantiateMVars rs).listLit? |
-      throwError "janus_frame: the ranges must be a list literal{indentExpr rs}"
+    -- a store inside an object known to lie in the ranges (`InRanges b k rs'` with `rs'` a part
+    -- of `rs`, e.g. the runtime-owned ranges of an allocation contract)
+    if ← tryInRanges g m0 m rs then return ← proveFrame (← getMainGoal) (fuel - 1)
+    -- the literal ranges: `rs` itself, or the literal right side of `l ++ [ … ]` (`l` e.g. the
+    -- runtime-owned ranges of a contract)
+    let rsI ← instantiateMVars rs
+    let (lit, pre?) := match rsI.getAppFnArgs with
+      | (``HAppend.hAppend, #[_, _, _, _, l, r]) => (r, some l)
+      | _ => (rsI, none)
+    let some (pty, elems) := lit.listLit? |
+      throwError "janus_frame: the ranges must be a list literal (or `l ++ [ … ]`){indentExpr rs}"
     for i in [0:elems.length] do
       let saved ← saveState
       let hm ← mkFreshExprSyntheticOpaqueMVar
         (← mkAppM ``Janus.MemFrame #[m0, m.getArg! 0, rs])
       let hr ← memProof pty elems i
+      let hr ← match pre? with
+        | some l => mkAppM ``List.mem_append_right #[l, hr]
+        | none => pure hr
       let e := elems[i]!
       let a := m.getArg! 1
       let k := m.getArg! 2
@@ -872,19 +1047,31 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
       let o (r : Expr) := mkAppN (mkConst ``Janus.Outside) #[a, n, r]
       mkForallFVars #[a, n] (← mkArrow (o rs) (mkAnd (o rs) (o (ty.getArg! 2))))
     let sub ← mkFreshExprSyntheticOpaqueMVar subTy
-    let (_, sg) ← sub.mvarId!.introN 3
+    let sg := sub.mvarId!
     let ok ← try
         let gs ← Tactic.run sg <| withoutRecover (evalTactic (← `(tactic|
-          (refine ⟨by assumption, ?_⟩
-           simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
-             BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *
-           omega))))
+          (intro a n h
+           refine ⟨h, ?_⟩
+           revert h
+           simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true,
+             and_imp]
+           intros
+           try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
+             Nat.reduceMod] at *
+           repeat' apply And.intro
+           all_goals first | assumption | omega))))
         pure gs.isEmpty
       catch _ => pure false
     unless ok do saved.restore; continue
     g.assign (← mkAppM ``Janus.MemFrame.trans #[hm, d.toExpr, sub])
     return ← proveFrame hm.mvarId! (fuel - 1)
   throwError "janus_frame: cannot relate the memory{indentExpr m}\nto{indentExpr m0}\n(no store to peel, and no `MemFrame` hypothesis about it whose ranges are covered)"
+
+/-- `janus_apart`: `omega` with the `Apart` hypotheses of the context, one at a time. -/
+elab "janus_apart" : tactic => do
+  let g ← getMainGoal
+  unless ← omegaApart g do throwError "janus_apart: no `Apart` hypothesis makes omega succeed"
+  replaceMainGoal []
 
 /-- Prove a goal `MemFrame m₀ m rs` (the memory part of a callee summary). -/
 elab "janus_frame" : tactic => do proveFrame (← getMainGoal); replaceMainGoal []

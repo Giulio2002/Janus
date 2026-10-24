@@ -23,10 +23,10 @@ prints `Verified`. **Low** means hygiene.
 | L1 | low | **The toolchain part of the cache keys was the version string and the paths of `lean`/`leanchecker`.** The elaborator and the kernel live in `lib/lean/libleanshared.so`; a toolchain rebuilt in place under the same version gave stale hits in every cache. | **fixed** | unit row |
 | M1 | low (hardening) | **Trusted-compile manifests had SHA-256s but no MAC.** A same-user write outside the sandbox could plant an entry. Out of the threat model like the replay cache, but the result cache already had a key. | **hardened** | M1 rows, unit row |
 | N1 | none | `Lean.reduceBool` with `@[implemented_by]` proves `False`. It depends on `Lean.ofReduceBool`/`Lean.trustCompiler`, which the axiom allow-list rejects. | **no issue** (regression row) | N1a |
-| G3 | **high** | **A go1.25 binary labelled go1.26** defines the go1.26-only stub name `runtime.panicSimdImm` itself, and round 7's stub gate (which reads the Go version from build info) takes it for the runtime's panic stub: "every call of Add panics" verifies for an Add that returns `x + y`. | **open, fix on agent/stubpin** | G3a (reported, does not fail the runner) |
+| G3 | **high** | **A go1.25 binary labelled go1.26** defines the go1.26-only stub name `runtime.panicSimdImm` itself, and round 7's stub gate (which reads the Go version from build info) takes it for the runtime's panic stub: "every call of Add panics" verifies for an Add that returns `x + y`. | **fixed**: stubs pinned to the runtime's normalized code plus pclntab package/file (`cmd/janus/stubpin.go`, SOUNDNESS.md item 3) | G3a (must be rejected at extraction); audit/round7 G3a rows |
 
 **This round found one critical readability item (I1) and one high item (C1), both fixed here,
-and one high binary-side item (G3) whose fix lives on agent/stubpin.** L1 and M1 close round 7's
+and one high binary-side item (G3), fixed by pinning stubs to the runtime's code.** L1 and M1 close round 7's
 residuals.
 
 ---
@@ -169,7 +169,7 @@ compiled code), `Lean.ofReduceBool` turns it into `f = true`, and `f = false` by
 `depends on disallowed axioms: Lean.ofReduceBool, Lean.trustCompiler`. Kept as a regression row
 so the reflective tactics (`janus_carry`, `janus_ring`) stay kernel-checked.
 
-## G3 (HIGH, open; fix on agent/stubpin): a go1.25 binary labelled go1.26
+## G3 (HIGH, fixed): a go1.25 binary labelled go1.26
 
 Fixture `audit/round8/govers`: package `lib` defines, in assembly, `TEXT runtime·panicSimdImm(SB)`
 returning 0, and `main.Add` returns `x + y + lib.Zero()` through it (qemu prints 3). Linked by
@@ -180,9 +180,12 @@ runtime's panic stub, and `G3a_spoofed_goversion_stub.lean` (`Panics` for every 
 verifies. This is the residual round 7 recorded under G1 ("Check 2 reads the Go version from
 build info"), now demonstrated.
 
-The fix (pinning each stub to the runtime's own code rather than to a name and a version label)
-is on agent/stubpin. Until it is merged, `run-round8.sh` prints `open, fix on agent/stubpin` for
-this row (or `blocked`, once the fix is in) and never fails on it.
+**Fix.** The build-info version plays no part any more: a listed name is a stub only if its
+normalized code matches a pin measured from the real go1.26.x runtimes and the pclntab places it
+in package `runtime` at the pinned source file (docs/SOUNDNESS.md item 3, `cmd/janus/stubpin.go`,
+`scripts/gen-stubpins.sh`). The fixture's `runtime.panicSimdImm` sits in
+`example.com/govers/lib/zero_arm64.s` and its hash is not pinned, so extraction fails;
+`run-round8.sh` requires that, and audit/round7 has rows for the committed extraction and qemu.
 
 ## Regression status
 
@@ -190,7 +193,7 @@ Run one suite at a time on this branch (host shared with other agents):
 
 | Suite | Result |
 |---|---|
-| `audit/round8/run-round8.sh` | all rows as expected (I1a–f, N1a blocked; controls, M1, C1 and unit rows ok; G3a open), 368 s |
+| `audit/round8/run-round8.sh` | all rows as expected (I1a–f, N1a blocked; controls, M1, C1 and unit rows ok; G3a open at the time; blocked since the stub-pin merge), 368 s |
 | `scripts/verify-all-examples.sh` | all ok: 25 arm64 items (with HashWith, HashTwice, MapSum, DeferAdd) and 27 amd64 functions, 590 s at -j 2 |
 | `audit/run-all.sh` | no BROKEN row, 282 s |
 | `audit/round2…7` | all as expected: 68, 11, 10, 225, 81, 639 s (round 7 with its cache rows) |
@@ -199,10 +202,10 @@ Run one suite at a time on this branch (host shared with other agents):
 ## Reproduce
 
 ```
-audit/round8/run-round8.sh                      # I1, N1, G3 (open), L1/M1/C1
+audit/round8/run-round8.sh                      # I1, N1, G3, L1/M1/C1
 cd cmd/janus && go test -run 'TestRound8' -v .  # the unit rows only
 ```
 
 The runner builds `audit/round8/bin/janus`, writes under `audit/round8/work/rows/` and uses
 private temporary caches under `$TMPDIR` (removed at the end). G3a needs the go1.25.5 toolchain
-(`GOTOOLCHAIN=go1.25.5`); without it the row says so and is still reported as open.
+(`GOTOOLCHAIN=go1.25.5`); without it the row is reported as skipped.
