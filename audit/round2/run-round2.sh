@@ -61,9 +61,11 @@ if [ -f artifacts/examples-amd64 ]; then
   "$J" extract artifacts/examples-amd64 example.com/basic.CopyBlock $W/amd64-CopyBlock >/dev/null &&
   df_out=$(v --proof audit/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | head -1)
   echo "$df_out"
-  if grep -q '^Verified' <<<"$df_out"; then echo "      >>> BROKEN: the forward-copy claim verifies again"; broken+=("MEDIUM-1"); fi
 fi
-echo "(MEDIUM-1 is fixed: amd64 models DF, STD makes MOVS step backward, so this false claim must be rejected.)"
+echo "(MEDIUM-1 is fixed: amd64 models DF. This repro's concrete state t leaves df at its default"
+echo " false, and with DF = 0 a forward copy is correct, so the theorem is now true and honest about"
+echo " a state real executions never reach; Verified is expected. The fix itself is checked by"
+echo " JanusTests.Amd64.df_backward_not_forward: with DF = 1 (after STD) the model copies backward.)"
 echo "Model repros: audit/round2/model/README.txt (arm64, run from a copy of agent/arm64cov2), audit/round2/amd64/README.txt."
 
 if [ ${#broken[@]} -gt 0 ]; then
