@@ -18,6 +18,7 @@ LEVEL="${LEVEL:-1}"
 N="${N:-}"
 SF_COMMIT=f74b1e4   # berkeley-softfloat-3 "Release 3e"
 TF_COMMIT=06b2007   # berkeley-testfloat-3 "Release 3e"
+out="$(realpath -m "${OUT:-$root/artifacts/testfloat}")"
 mkdir -p "$DEPS"
 cd "$DEPS"
 [ -d berkeley-softfloat-3 ] || git clone -q https://github.com/ucb-bar/berkeley-softfloat-3.git
@@ -38,7 +39,6 @@ for spec in 8086-SSE ARM-VFPv2 ARM-VFPv2-defaultNaN; do
 done
 (cd "$root" && lake build janus-testfloat >/dev/null)
 T="$root/.lake/build/bin/janus-testfloat"
-out="${OUT:-$root/artifacts/testfloat}"
 mkdir -p "$out"
 log="$out/results.txt"
 rm -f "$out"/part.*

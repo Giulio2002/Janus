@@ -14,7 +14,9 @@ Linux with 5-level paging, Go 1.26.0:
 | `full`, `SEED=1`, `N=1200 GROUP=60000 K=6 PER_CLASS=6000` | 1,384,074 | 1,210,212 | 358,487 | 173,861 | **0** | 1 |
 | `full`, `SEED=7`, same knobs | 1,384,116 | 1,212,897 | 358,151 | 171,219 | **0** | 0 |
 | targeted harvest, `K=200`, every distinct real encoding of the new and changed classes (VEX, SSE packed integer, `MOVSS/MOVSD`, `RCL/RCR`, hints, `CLD/STD`, `MOVS/STOS`, `XCHG/XADD/CMPXCHG`, `BSF/BSR`) and every `FS`-prefixed one | 652,400 | 578,353 | 387,855 | 74,047 | **0** | 0 |
-| **total** | **3,420,590** | 3,001,462 | | 419,127 | **0** | 1 |
+| `full`, `SEED=1`, same knobs, with the SSE floating-point model, `MXCSR` in every case, and the `math` harvest (2026-10-24) | 2,028,068 | 1,596,644 | | 431,424 | **0** | 0 |
+| `fp` (the floating-point corpus below) | 1,076,394 | 804,700 | 113,299 | 271,694 | **0** | 0 |
+| **total** | **6,525,052** | 5,402,806 | | 1,122,245 | **0** | 1 |
 
 The one unobserved case is an `XBEGIN` (TSX) that left the code page. These runs cover `FS`,
 YMM/AVX, the SSE packed-integer instructions, `MOVSS/MOVSD`, `RCL/RCR`, the hints, the

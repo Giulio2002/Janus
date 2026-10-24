@@ -240,6 +240,19 @@ the step; the comparator compares them with the registers. The model implements 
   confirmed by both references. The 137,015 cases where both fault agree on the signal
   (`SIGILL`/`ILL_ILLOPC`).
 
+The regression corpus of `scripts/oracle.sh full` with the floating-point model (766,650 cases,
+`fp.*` classes included):
+
+| pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
+|---|---:|---:|---:|---:|---:|
+| **Sail vs Janus** | 731,764 | **0** | 34,872 | 14 | 0 |
+| qemu vs Sail | 761,460 | 4,163 | 1,012 | 1 | 14 |
+| qemu vs Janus | 730,803 | 0 | 35,846 | 1 | 0 |
+
+Soundness: 0 cases. Every qemu-vs-Sail non-agreement carries one of the tags below
+(`sail-monitor-stub`, `pauth-keys`, `sbo-unpredictable`, `qemu-process-memory`, `mops-impdef`,
+`impdef-dczid`, ...); none is in an `fp.*` class.
+
 ## Results with Advanced SIMD (2026-10-23, 584,412 cases)
 
 Corpus of `scripts/oracle.sh full` after the Advanced SIMD extension (cases carry `V0`–`V31` and

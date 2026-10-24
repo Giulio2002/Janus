@@ -199,6 +199,12 @@ the trap-enable bits, so the generator never sets them) and reports both from th
 frame's `fpsimd_context`. The comparator treats a difference in `FPSR` or `FPCR` like one in a
 register. The model was right the first time on this corpus.
 
+The whole-ISA regression run with the floating-point model and the new `fp.*` classes
+(`scripts/oracle.sh full`, `SEED=1`, default knobs, harvest now including `math`): 766,650 cases
+(436,177 generated, 330,473 harvested): **0 MISMATCH**, 730,803 agree, 35,846 model-gap
+(35,272 `undecodable`, 416 `unaligned`, 105 `noCode`, 53 `outsideAllocation`), 1 unobserved.
+Together with the FP corpus: 1,897,749 arm64 cases against qemu, 0 MISMATCH.
+
 ### TestFloat (Berkeley TestFloat 3e / SoftFloat 3e)
 
 `scripts/testfloat.sh` builds SoftFloat three times, with the specializations that match the
@@ -214,6 +220,12 @@ every operation and rounding mode, and runs each through the model (`janus-testf
 | arm64, `AH = 1` (tininess after rounding) | 48 | 50,558,304 | **0** | 288 |
 | x86-64 SSE, all exceptions masked (`MXCSR.RC` from the mode) | 108 | 2,086,272 | **0** | 0 |
 | **total** | 360 | 154,014,672 | **0** | 53,220 |
+
+Two larger samplings follow (`LEVEL=1 N=2000000`: 2,000,000 vectors per two-operand
+function and mode, and `LEVEL=2 N=1000000` for the one-operand functions; TestFloat refuses the
+others at these sizes): 672,000,000 and 192,000,000 more vectors, **0 mismatches** (arm64
+304M + 108M, `DN = 1` 72M + 12M, `AH = 1` 80M + 8M, x86 216M + 64M). In all, 1,018,014,672
+TestFloat vectors.
 
 The "known" rows are NaN results where SoftFloat's specialization differs from the architecture
 and both are NaNs: SoftFloat's `ARM-VFPv2` `mulAdd` propagates a product operand's NaN before the
