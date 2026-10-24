@@ -92,8 +92,9 @@ read-modify-write forms, `XADD` and `CMPXCHG` (memory destination, locked or not
 `STOS` (all widths) with and without `REP`. `MULX`, `ADCX` and `ADOX` are not
 modelled: Go does not emit them at `GOAMD64=v1` (the default). In the `sync/atomic`, `bytes`
 and `strings` test binaries 97.9–98.1% of the Go-compiled functions and 53% of the assembly
-functions decode completely (`docs/ORACLE-AMD64.md`); what is left is floating point
-(`UCOMISD`, `CVT*`, arithmetic), `SYSCALL`, AES/SHA/CRC32, AVX-512 and `PCMPESTRI`.
+functions decode completely (`docs/ORACLE-AMD64.md`); with the SSE scalar floating point
+(`UCOMISD`, `CVT*`, arithmetic, `ROUNDSD`) now modelled, what is left is `SYSCALL`,
+AES/SHA/CRC32, AVX-512, `VFMADD231SD` and `PCMPESTRI`.
 
 **Semantics** follow the SDM *Operation* and *Flags Affected* sections:
 
@@ -239,9 +240,10 @@ stitched together from two segments. `Program.run`, `Outcome`, `Steps` and the r
 * **Vendor neutrality.** Where Intel and AMD document different results or flags, the model
   takes the undefined side (fault or `none`). A proof cannot depend on the vendor.
 * **Not modelled:**
-  - floating point;
+  - floating point other than the SSE scalar instructions (`docs/SOUNDNESS.md`, "Floating
+    point"): packed SSE arithmetic, VEX/EVEX floating point, x87;
   - x87/MMX state, AVX-512 state (`ZMM` bits 511:256, `ZMM16`–`31`, masks);
-  - MXCSR;
+  - writes of `MXCSR`'s control bits (`LDMXCSR`; `State.mxcsr` is read and its flags raised);
   - segment registers other than the `FS` base, and the `GS` base;
   - concurrency (other threads, memory ordering), string instructions other than
     `MOVS`/`STOS`;
@@ -406,7 +408,7 @@ a hard-coded address (see *Layout independence* above), so adding functions to
 
 * 8/16-bit `RCL`/`RCR`, `MULX`, `ADCX`/`ADOX`, VEX instructions other than the eleven above,
   EVEX (AVX-512), `CMPS`/`SCAS`/`LODS`, `PCMPESTRI`, AES/SHA/CRC32, `GS`-relative accesses and
-  all floating point are not modelled. Their encodings fault.
+  floating point beyond the SSE scalar instructions are not modelled. Their encodings fault.
 * Proofs whose loop invariants describe intermediate states and step a string instruction must
   carry `t.df = false` in the invariant (`Reaches.repStos`/`repMovs` take it as `hdf`), as
   `examples/proofs-amd64/ClearWords`' `Inv` does.

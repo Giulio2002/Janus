@@ -60,16 +60,18 @@ Modelling decisions (user mode, Linux):
 * **TPIDR_EL0.** `MRS Xt, TPIDR_EL0` returns `State.tpidr`, a field of the state that no
   supported instruction writes (`MSR TPIDR_EL0` is not decoded).
 * **Advanced SIMD and SIMD&FP loads/stores** (`State.vregs`, see `Janus.Arm64.Vector`): only
-  integer and move instructions. Floating-point arithmetic and conversions are not decoded, so
-  FPCR/FPSR are not part of the state: no accepted instruction reads or writes them (FMOV between
-  general and SIMD&FP registers reads FPCR in the ASL only for its conversion forms, which are
-  rejected). `V[d, n] = x` zero-extends to 128 bits (on an SVE CPU the hardware also zeroes the
+  integer and move instructions (Advanced SIMD floating point is not decoded). `V[d, n] = x` zero-extends to 128 bits (on an SVE CPU the hardware also zeroes the
   upper bits of `Z[d]`, which the model does not have). SIMD&FP loads and stores need no
   alignment (Linux runs EL0 with SCTLR_EL1.A = 0) except the SP check. A multi-register
   LD1/ST1, LDP/STP or single-structure access is checked per register or element as in the
   pseudocode; an access that faults in the middle faults as a whole (hardware may have written
   part of it, which is irrelevant since the run stops). AES (`AESE`, `AESD`, `AESMC`,
   `AESIMC`) assumes FEAT_AES, which Go tests before using it (`useAeshash`).
+* **Scalar floating point** (`Janus.Arm64.ExecFloat`, `Janus.Arm64.Float`, `Janus.Float`): the
+  ASL of FADD ... FRINT*, FCMP/FCCMP, FCSEL, FCVT and the integer conversions on single and
+  double precision, reading `State.fpcr` (RMode, FZ, DN, FIZ/AH/NEP of FEAT_AFP) and ORing the
+  raised exceptions into `State.fpsr`; an exception whose trap is enabled faults
+  (`fpTrapped`). Half precision and Advanced SIMD floating point are rejected.
 -/
 
 namespace Janus.Arm64

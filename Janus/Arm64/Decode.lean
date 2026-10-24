@@ -442,8 +442,10 @@ def lowestSetBit5 (v : Nat) : Nat :=
 def highestSetBit4 (v : Nat) : Nat :=
   if v ≥ 8 then 3 else if v ≥ 4 then 2 else if v ≥ 2 then 1 else 0
 
-/-- Scalar floating-point and Advanced SIMD data processing (`op0 = x111`), integer and move
-instructions only (see `Instr`). Floating-point arithmetic, conversions, crypto, saturating,
+/-- Scalar floating-point and Advanced SIMD data processing (`op0 = x111`): the Advanced SIMD
+integer and move instructions (see `Instr`), and the scalar single/double floating-point classes
+(`decodeFloat`, `decodeFpCvtInt` in `Janus.Arm64.DecodeFloat`). Advanced SIMD floating point,
+half precision, conversions to and from fixed point, crypto other than AES, saturating,
 rounding, widening/narrowing arithmetic other than XTN/SHRN/SSHLL/USHLL, permutes, and every
 reserved or unallocated encoding within the accepted classes are rejected. -/
 def decodeSimdDP (w : Nat) : Option Instr :=

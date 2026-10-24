@@ -13,8 +13,8 @@ tables 2-1..2-3) and the opcode maps of appendix A, cross-checked against
 
 Prefix policy (strict):
 * Legacy prefixes `66` (operand size), `F2`/`F3` (only where they select an instruction:
-  `PAUSE`, `POPCNT`, `TZCNT`, `LZCNT`, `MOVDQU`, `MOVQ`, `MOVSD`, `MOVSS`, and `F3` = `REP` on
-  `MOVS`/`STOS`), and the null segment overrides `26`/`2E`/`36`/`3E` (ignored in 64-bit mode;
+  `PAUSE`, `POPCNT`, `TZCNT`, `LZCNT`, `MOVDQU`, `MOVQ`, `MOVSD`, `MOVSS`, the SSE scalar
+  floating-point instructions (`Decode.sseFp`), and `F3` = `REP` on `MOVS`/`STOS`), and the null segment overrides `26`/`2E`/`36`/`3E` (ignored in 64-bit mode;
   not accepted on branches, where they are hints or CET `NOTRACK`). At most one of each group
   (`66` may repeat).
 * `64` (`FS`) only on the integer forms whose ModRM memory operand it relocates (`MOV`, the

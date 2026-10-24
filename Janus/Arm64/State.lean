@@ -22,9 +22,9 @@ loader (`Janus.Program`), the Go calling convention (`Janus.GoABI`) and the orac
   initial states quantifies over every value. The default `0x10` (DC ZVA prohibited) only fills
   in concrete states built in tests and witnesses.
 * `vregs` holds the 32 SIMD&FP registers `V0`–`V31`, 128 bits each (`Q`/`D`/`S`/`H`/`B` views are
-  their low bits). Only Advanced SIMD integer and move instructions and SIMD&FP loads and stores
-  use them (see `Exec`); there is no floating-point arithmetic, so FPCR/FPSR are not part of the
-  state (no supported instruction reads or writes them). With SVE the `Z` registers extend `V`;
+  their low bits). The Advanced SIMD integer and move instructions, the SIMD&FP loads and stores
+  and the scalar floating-point instructions use them (see `Exec`, `ExecFloat`); the latter read
+  `fpcr` and accumulate exceptions in `fpsr` (below). With SVE the `Z` registers extend `V`;
   SVE is not modelled, and an Advanced SIMD write zeroes the upper `Z` bits on hardware, which
   is invisible here. Theorems about arbitrary initial states quantify over `vregs`; the default
   (all zero) only fills in concrete states built in tests.
