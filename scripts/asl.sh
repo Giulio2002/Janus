@@ -161,20 +161,33 @@ do_prove() {
 do_replay() {
   unpack
   lake_asl build JanusASL
-  # leanchecker's targets are name prefixes, so a module with submodules (JanusASL.Proofs itself,
-  # a split file's import list) would pull all of them into one process: pass only the leaves, and
-  # check that the others declare nothing (imports and comments only).
-  local mods=() m batch="${REPLAY_BATCH:-4}" f
-  for f in "$pkg/JanusASL/Proofs.lean" $(cd "$pkg" && find JanusASL/Proofs -name '*.lean' | sort); do
-    f="${f#"$pkg/"}"; m="${f%.lean}"; m="${m//\//.}"
-    if [ -d "$pkg/${f%.lean}" ]; then
-      if grep -vqE '^(import |--|$)' <(awk '!d && /^\/-!/ { if (!/-\/$/) d = 1; next } d { if (/-\/$/) d = 0; next } { print }' "$pkg/$f"); then
-        echo "replay: $m has submodules and declarations; cannot replay it alone" >&2; exit 1
-      fi
-    else
-      mods+=("$m")
-    fi
-  done
+  # The modules: the import closure of JanusASL.Proofs within the package (what
+  # `leanchecker JanusASL.Proofs` replays, less files that nothing imports). leanchecker's targets
+  # are name prefixes, so a module with submodules (JanusASL.Proofs itself, a split file's import
+  # list) would pull all of them into one process: pass only the leaves, after checking that the
+  # others declare nothing (imports and comments only).
+  local mods=() m batch="${REPLAY_BATCH:-4}" list
+  list="$(python3 -I - "$pkg" <<'PY'
+import os, re, sys
+pkg = sys.argv[1]
+path = lambda m: os.path.join(pkg, *m.split(".")) + ".lean"
+seen, todo = set(), ["JanusASL.Proofs"]
+while todo:
+    m = todo.pop()
+    if m in seen:
+        continue
+    seen.add(m)
+    todo += [i for i in re.findall(r"^import (JanusASL\.\S+)", open(path(m)).read(), re.M)]
+for m in sorted(seen):
+    if any(o.startswith(m + ".") for o in seen):
+        txt = re.sub(r"/-!.*?-/", "", open(path(m)).read(), flags=re.S)
+        if any(l.strip() and not l.startswith(("import ", "--")) for l in txt.split("\n")):
+            sys.exit("replay: %s has submodules and declarations; cannot replay it alone" % m)
+    else:
+        print(m)
+PY
+)" || exit 1
+  for m in $list; do mods+=("$m"); done
   local i
   for ((i = 0; i < ${#mods[@]}; i += batch)); do
     (cd "$pkg" && LEAN_NUM_THREADS="${JANUS_REPLAY_THREADS:-4}" lake env leanchecker "${mods[@]:i:batch}") ||
