@@ -161,6 +161,21 @@ sequences); `PSHUFLW` and `RCL`/`RCR` were added. What remains is not a move or 
 `SYSCALL`, scalar floating point (`UCOMISD`, `CVT*`, arithmetic; MXCSR is not modelled), `CRC32`,
 AES/SHA, AVX-512 (`VMOVDQU64`, `VPERMB`, ...), `CPUID`/`XGETBV` and `PCMPESTRI`.
 
+### gcc-compiled C and `ENDBR64` (2026-10-24)
+
+The C code of cgo programs ([FFI.md](FFI.md)) needed one decoder addition, `ENDBR64`
+(`F3 0F 1E FA`, a NOP). Runs on the model with it:
+
+| run | cases | agree | model-gap | **MISMATCH** |
+|---|---:|---:|---:|---:|
+| `quick`, `SEED=1`, including the new `edge/endbr` family (the exact bytes, 21 prefix variants, `ENDBR32`) | 281,243 | 230,833 | 50,410 | **0** |
+| of which `edge/endbr` | 8,800 | 1,200 (400 exact `ENDBR64`, 800 `LOCK` forms that both fault) | 7,600 (every other prefix combination, rejected) | **0** |
+| harvest of every distinct instruction of gcc 15.2 `-O2` code (`examples/cgo/ccover.c` + `cfuncs.c`), `K=200`, `-per-class 0` | 56,200 | 56,161 | 39 (branches leaving the code page, one `BSR` of 0) | **0** |
+
+The harvested classes include `cmov`, `setcc`, `lea`, `imul`, `mul`, `div`/`idiv`,
+`movsx`/`movzx`/`movsxd`, `cqo`/`cdqe`, `bswap`, `bsr`, `ror`, `leave`, `push`/`pop` and the
+`ENDBR64`/`nopw` forms. `scripts/oracle-amd64.sh full` now adds this C corpus to the harvest.
+
 ## Running it
 
 ```
