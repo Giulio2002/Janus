@@ -1,0 +1,59 @@
+# Opcodes whose dispatch arms are kept by slice.py: exactly the opcodes Janus.Amd64.decode
+# can accept (Janus/Amd64/Decode.lean, oneByte / twoByte). Format: `one|two HEX[-HEX]`.
+# Every other arm becomes x86_model_error("janus-excluded: ...").
+# --- one-byte map
+one 00-05   # ADD
+one 08-0D   # OR
+one 0F      # two-byte escape
+one 10-15   # ADC
+one 18-1D   # SBB
+one 20-25   # AND
+one 28-2D   # SUB
+one 30-35   # XOR
+one 38-3D   # CMP
+one 50-5F   # PUSH/POP r64
+one 63      # MOVSXD
+one 68-6B   # PUSH imm, IMUL imm
+one 70-7F   # Jcc rel8
+one 80-81   # group 1
+one 83      # group 1 imm8
+one 84-8B   # TEST, XCHG, MOV
+one 8D      # LEA
+one 8F      # POP r/m
+one 90-99   # NOP/PAUSE, XCHG rAX, CBW/CWD
+one A4-A5   # MOVS
+one A8-AB   # TEST rAX imm, STOS
+one B0-BF   # MOV r, imm
+one C0-C3   # group 2 imm8, RET imm16, RET
+one C6-C7   # MOV r/m, imm
+one C9      # LEAVE
+one D0-D3   # group 2 1/CL
+one E8-E9   # CALL/JMP rel32
+one EB      # JMP rel8
+one F5-F9   # CMC, group 3, CLC, STC
+one FC-FF   # CLD, STD, group 4/5
+# --- two-byte map (0F xx)
+two 10-11   # MOVUPS/MOVUPD/MOVSS/MOVSD
+two 18      # PREFETCHh
+two 1F      # NOP r/m
+two 28-29   # MOVAPS/MOVAPD
+two 40-4F   # CMOVcc
+two 57      # XORPS/XORPD
+two 60      # PUNPCKLBW
+two 6E-70   # MOVD/MOVQ, MOVDQA/MOVDQU, PSHUFD/PSHUFLW
+two 74      # PCMPEQB
+two 7E-7F   # MOVD/MOVQ, MOVDQA/MOVDQU
+two 80-9F   # Jcc rel32, SETcc
+two A3-A5   # BT, SHLD
+two AB-AF   # BTS, SHRD, fences, IMUL
+two B0-B1   # CMPXCHG
+two B3      # BTR
+two B6-B8   # MOVZX, POPCNT
+two BA-BF   # group 8, BTC, BSF/TZCNT, BSR/LZCNT, MOVSX
+two C0-C1   # XADD
+two C7      # CMPXCHG8B/16B
+two C8-CF   # BSWAP
+two D6-D7   # MOVQ, PMOVMSKB
+two DB      # PAND
+two EB      # POR
+two EF      # PXOR
