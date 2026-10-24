@@ -45,7 +45,8 @@ def Res (s s' : State) (p : Nat) : Prop :=
   s'.regs 0 = BitVec.ofNat 64 p ∧ s'.sp = s.sp ∧ s'.pc = s.regs 30 ∧
     s'.mem = (s.mem.writeLE (s.sp.toNat - 48) 8 (s.regs 30).toNat).writeLE (s.sp.toNat - 56) 8 (s.regs 29).toNat ∧
     s'.regs 18 = s.regs 18 ∧ s'.regs 28 = s.regs 28 ∧ s'.regs 29 = s.regs 29 ∧
-    s'.vregs = s.vregs ∧ s'.dczid = s.dczid ∧ s'.tpidr = s.tpidr
+    s'.vregs = s.vregs ∧ s'.dczid = s.dczid ∧ s'.tpidr = s.tpidr ∧ s'.fpcr = s.fpcr ∧
+    s'.fpsr = s.fpsr
 
 theorem rr_mono {p : Program} {ret : BitVec 64} {S : State} {Q Q' : State → Prop}
     (h : ReachesRet p ret S Q) (hQ : ∀ s', Q s' → Q' s') : ReachesRet p ret S Q' := by
@@ -54,6 +55,12 @@ theorem rr_mono {p : Program} {ret : BitVec 64} {S : State} {Q Q' : State → Pr
 theorem ofNat_add8 (a b : Nat) : BitVec.ofNat 64 a + BitVec.ofNat 64 b = BitVec.ofNat 64 (a + b) := by
   apply BitVec.eq_of_toNat_eq; simp
 
+/-- Address of `runtime.zeroVal`, the zero value an access returns for an absent key: the
+`ADRP`+`ADD` pair at `+0xe8`, recomputed from the extracted words. -/
+def zeroVal : Nat :=
+  adrpLdTarget (Extracted.entry + 0xe8) (segWord Extracted.program "runtime.mapaccess1_fast64" 58)
+    (segWord Extracted.program "runtime.mapaccess1_fast64" 59) 0
+
 set_option maxHeartbeats 0 in
 theorem loop (s : State) (g k zv : Nat) (hsp1 : 64 ≤ s.sp.toNat) (hsp2 : s.sp.toNat ≤ 2^48)
     (hal : s.sp.toNat % 16 = 0)
@@ -61,7 +68,7 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 64 ≤ s.sp.toNat) (hsp2 : s.sp.
     (hga : s.mem.accessible g 136 false = true) (hgb : g + 136 ≤ 2^48)
     (hd2 : g + 136 ≤ s.sp.toNat - 64 ∨ s.sp.toNat ≤ g)
     (hlr : BitVec.toNat (s.regs 30) % 4 = 0) (hlr2 : BitVec.toNat (s.regs 30) < 2 ^ 48)
-    (hk : (s.regs 2).toNat = k) (hzv : zv = 1645312) :
+    (hk : (s.regs 2).toNat = k) (hzv : zv = (janus_eval% zeroVal)) :
     ∀ n i (S : State), i + n = 8 →
       S.pc = BitVec.ofNat 64 (Extracted.entry + 0x1dc) →
       S.regs 1 = BitVec.ofNat 64 (g + 8 + 16 * i) →
@@ -72,33 +79,34 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 64 ≤ s.sp.toNat) (hsp2 : s.sp.
       S.regs 30 = s.regs 30 → S.sp = s.sp - BitVec.ofNat 64 48 →
       S.mem = (s.mem.writeLE (s.sp.toNat - 48) 8 (s.regs 30).toNat).writeLE (s.sp.toNat - 56) 8 (s.regs 29).toNat →
       S.vregs = s.vregs → S.dczid = s.dczid → S.tpidr = s.tpidr →
+      S.fpcr = s.fpcr → S.fpsr = s.fpsr →
       ReachesRet Extracted.program (s.regs 30) S (fun s' => ∃ p, Res s s' p ∧
         (lookupFrom s.mem g k i = none ∧ p = zv ∨ ∃ j, lookupFrom s.mem g k i = some j ∧ p = slotVal g j)) := by
   subst hzv hk
   intro n
   induction n with
   | zero =>
-    intro i S hn hpc h1 h2 h3 h4 h18 h28 h30 hsp hmem hv hdz htp
+    intro i S hn hpc h1 h2 h3 h4 h18 h28 h30 hsp hmem hv hdz htp hfc hfs
     rw [maskFrom_ge _ _ _ (by omega)] at h3
     janus_run
-    exact ⟨1645312, ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp⟩,
+    exact ⟨(janus_eval% zeroVal), ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp, hfc, hfs⟩,
       .inl ⟨lookupFrom_ge _ _ _ _ (by omega), rfl⟩⟩
   | succ n ih =>
-    intro i S hn hpc h1 h2 h3 h4 h18 h28 h30 hsp hmem hv hdz htp
+    intro i S hn hpc h1 h2 h3 h4 h18 h28 h30 hsp hmem hv hdz htp hfc hfs
     have hml : maskFrom s.mem g i < 2 ^ 64 := by
       have := maskFrom_lt s.mem g (n+1) i hn
       exact Nat.lt_of_lt_of_le this (Nat.pow_le_pow_right (by decide) (by omega))
     janus_run [sw32_ofNat_eq_zero, maskFrom_bit7 _ _ _ (show i < 8 by omega), lsr8_ofNat _ hml] until [Extracted.entry + 0x1dc]
-    · exact ⟨1645312, ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp⟩,
+    · exact ⟨(janus_eval% zeroVal), ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp, hfc, hfs⟩,
         .inl ⟨lookupFrom_of_mask_zero _ _ _ (n + 1) i hn ‹_›, rfl⟩⟩
     · rename_i _ _ hc _
-      refine ⟨g + 16 + 16 * i, ⟨by simp [setReg, ofNat_add8]; exact congrArg _ (by omega), rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp⟩,
+      refine ⟨g + 16 + 16 * i, ⟨by simp [setReg, ofNat_add8]; exact congrArg _ (by omega), rfl, rfl, rfl, by simp [setReg, h18], by simp [setReg, h28], by simp [setReg], hv, hdz, htp, hfc, hfs⟩,
         .inr ⟨i, ?_, rfl⟩⟩
       rw [lookupFrom_eq _ _ _ _ (by omega)]
       simp [hc, slotKey]
     all_goals
       refine rr_mono (ih (i + 1) _ (by omega) rfl (by simp [setReg, ofNat_add8]; exact congrArg _ (by omega)) (by simp [setReg, h2]) ?_ (by simp [setReg, h4])
-        (by simp [setReg, h18]) (by simp [setReg, h28]) (by simp [setReg, h30]) rfl rfl hv hdz htp) ?_
+        (by simp [setReg, h18]) (by simp [setReg, h28]) (by simp [setReg, h30]) rfl rfl hv hdz htp hfc hfs) ?_
       · simp [setReg]
         exact congrArg _ (by rw [maskFrom_eq _ _ _ (by omega)]; have := fullBit_le (ctrl s.mem g i); omega)
       · rintro s' ⟨p, hr, hl⟩
@@ -107,12 +115,6 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 64 ≤ s.sp.toNat) (hsp2 : s.sp.
         split
         · exfalso; unfold slotKey at *; omega
         · exact hl
-
-/-- Address of `runtime.zeroVal`, the zero value an access returns for an absent key: the
-`ADRP`+`ADD` pair at `+0xe8`, recomputed from the extracted words. -/
-def zeroVal : Nat :=
-  adrpLdTarget (Extracted.entry + 0xe8) (segWord Extracted.program "runtime.mapaccess1_fast64" 58)
-    (segWord Extracted.program "runtime.mapaccess1_fast64" 59) 0
 
 set_option maxHeartbeats 0 in
 theorem run (t : Nat) (heap : Nat × Nat) (f : AMap (BitVec 64) (BitVec 64)) (s : State)
@@ -136,8 +138,8 @@ theorem run (t : Nat) (heap : Nat × Nat) (f : AMap (BitVec 64) (BitVec 64)) (s 
   · simp only [IsMap, h0, ite_true] at hmap
     subst hmap
     janus_run
-    exact ⟨1645312, ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg], by simp [setReg],
-      by simp [setReg], rfl, rfl, rfl⟩, .inl ⟨rfl, rfl⟩⟩
+    exact ⟨(janus_eval% zeroVal), ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg], by simp [setReg],
+      by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩, .inl ⟨rfl, rfl⟩⟩
   · simp only [IsMap, h0, ite_false] at hmap
     obtain ⟨-, hh1, ⟨hh2, hh3⟩, hdl, hwr, hgr, ⟨hgi1, hgi2⟩, hhb, hcont, hused⟩ := hmap
     simp only [group] at hgr hgi1 hgi2 hcont ⊢
@@ -153,17 +155,17 @@ theorem run (t : Nat) (heap : Nat × Nat) (f : AMap (BitVec 64) (BitVec 64)) (s 
         cases hf : f (s.regs 2) with
         | none => rfl
         | some v => exact absurd ((hks.2 (s.regs 2)).2 (by simp [hf])) (by simp)
-      exact ⟨1645312, ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg], by simp [setReg],
-        by simp [setReg], rfl, rfl, rfl⟩, .inl ⟨hnone, rfl⟩⟩
+      exact ⟨(janus_eval% zeroVal), ⟨by simp [setReg], rfl, rfl, rfl, by simp [setReg], by simp [setReg],
+        by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩, .inl ⟨hnone, rfl⟩⟩
     · have hmk : (~~~BitVec.ofNat 64 (s.mem.readLE g 8) &&& 9259542123273814144#64) =
           BitVec.ofNat 64 (maskFrom s.mem g 0) := by
         apply BitVec.eq_of_toNat_eq
         rw [mask_toNat, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (maskFrom_lt64 _ _ _ (by decide))]
       rw [hgdef] at *
-      refine rr_mono (loop s g (s.regs 2).toNat 1645312 hd1 (by omega) hal
+      refine rr_mono (loop s g (s.regs 2).toNat (janus_eval% zeroVal) hd1 (by omega) hal
         (Memory.accessible_mono _ hst (by omega) (by omega)) hgr (by omega) (by omega) hl1 hl2 rfl rfl
         8 0 _ rfl rfl (by simp [setReg, ofNat_add8]) (by simp [setReg]) (by simp [setReg, hmk])
-        (by simp [setReg, ht3]) (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl rfl rfl)
+        (by simp [setReg, ht3]) (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl rfl rfl rfl rfl)
         ?_
       rintro s' ⟨p, hr, hl⟩
       refine ⟨p, hr, ?_⟩
@@ -178,7 +180,7 @@ theorem correctness (t : Nat) (heap : Nat × Nat) :
   have hrun := run t heap f s hpc hpre
   obtain ⟨⟨henv, -, ⟨-, -, -, hd1, -, -, hst⟩, hout⟩, -, hmap⟩ := hpre
   refine rr_mono hrun ?_
-  rintro s' ⟨p, ⟨h0, hsp, hpc', hmem, h18, h28, h29, hv, hdz, htp⟩, hslot⟩
+  rintro s' ⟨p, ⟨h0, hsp, hpc', hmem, h18, h28, h29, hv, hdz, htp, hfc, hfs⟩, hslot⟩
   have hl := smallModel_laws t zeroVal heap
   obtain ⟨lo, hi⟩ := heap
   have hout' := hout
@@ -189,9 +191,9 @@ theorem correctness (t : Nat) (heap : Nat × Nat) :
     exact (agrees_writeLE _ _ (Outside.of_sub hout (by omega) (by omega))).writeLE _
       (Outside.of_sub hout (by omega) (by omega))
   refine ⟨s'.regs, s'.vregs, s'.flags, s'.mem, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · obtain ⟨r, sp, pc, fl, mem, dz, vr, tp⟩ := s'
-    simp only at hsp hpc' hdz htp h18 h28 h29 ⊢
-    subst hsp hpc' hdz htp
+  · obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
+    simp only at hsp hpc' hdz htp hfc hfs h18 h28 h29 ⊢
+    subst hsp hpc' hdz htp hfc hfs
     congr
     funext i
     simp only [keepABI]

@@ -98,7 +98,7 @@ def Res (s s' : State) (p : Nat) : Prop :=
   s'.regs 0 = BitVec.ofNat 64 p ∧ s'.regs 4 = s.regs 4 + 8 ∧ s'.rip = retAddrOf s ∧
     s'.mem = s.mem.writeLE ((s.regs 4).toNat - 8) 8 (s.regs 5).toNat ∧
     s'.regs 5 = s.regs 5 ∧ s'.regs 14 = s.regs 14 ∧ s'.xmm 15 = s.xmm 15 ∧
-    s'.fsBase = s.fsBase ∧ s'.df = s.df
+    s'.fsBase = s.fsBase ∧ s'.df = s.df ∧ s'.mxcsr = s.mxcsr
 
 /-- Address of `runtime.zeroVal`: the RIP-relative `LEA` at `+0xed`. -/
 def zeroVal : Nat := ripTarget Extracted.program (Extracted.entry + 0xed)
@@ -108,7 +108,7 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 32 ≤ (s.regs 4).toNat) (hsp2 :
     (hst : s.mem.accessible ((s.regs 4).toNat - 32) 40 true = true)
     (hga : s.mem.accessible g 136 false = true) (hgb : g + 136 ≤ 2^48)
     (hd2 : g + 136 ≤ (s.regs 4).toNat - 32 ∨ (s.regs 4).toNat + 8 ≤ g)
-    (hra : s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47) (hk : (s.regs 1).toNat = k) (hzv : zv = 5763968) :
+    (hra : s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47) (hk : (s.regs 1).toNat = k) (hzv : zv = (janus_eval% zeroVal)) :
     ∀ n i (S : State), i + n = 8 →
       S.rip = BitVec.ofNat 64 (Extracted.entry + 0x1ad) →
       S.regs 2 = BitVec.ofNat 64 (g + 8 + 16 * i) →
@@ -118,7 +118,7 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 32 ≤ (s.regs 4).toNat) (hsp2 :
       S.regs 4 = s.regs 4 - BitVec.ofNat 64 32 → S.regs 5 = s.regs 4 - BitVec.ofNat 64 8 →
       S.regs 14 = s.regs 14 →
       S.mem = s.mem.writeLE ((s.regs 4).toNat - 8) 8 (s.regs 5).toNat →
-      S.xmm 15 = s.xmm 15 → S.fsBase = s.fsBase → S.df = s.df →
+      S.xmm 15 = s.xmm 15 → S.fsBase = s.fsBase → S.df = s.df → S.mxcsr = s.mxcsr →
       ReachesRet Extracted.program (retAddrOf s) S (fun s' => ∃ p, Res s s' p ∧
         (lookupFrom s.mem g k i = none ∧ p = zv ∨ ∃ j, lookupFrom s.mem g k i = some j ∧ p = slotVal g j)) := by
   subst hzv hk
@@ -127,21 +127,21 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 32 ≤ (s.regs 4).toNat) (hsp2 :
   intro n
   induction n with
   | zero =>
-    intro i S hn hpc h2 h1 h3 h6 h4 h5 h14 hmem hx hfs hdf
+    intro i S hn hpc h2 h1 h3 h6 h4 h5 h14 hmem hx hfs hdf hmx
     rw [fullMask_ge _ _ _ (by omega)] at h3
     janus64_run
-    exact ⟨5763968, ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF],
-      by simp [setRegF, h14], hx, hfs, rfl⟩, .inl ⟨lookupFrom_ge _ _ _ _ (by omega), rfl⟩⟩
+    exact ⟨(janus_eval% zeroVal), ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF],
+      by simp [setRegF, h14], hx, hfs, rfl, hmx⟩, .inl ⟨lookupFrom_ge _ _ _ _ (by omega), rfl⟩⟩
   | succ n ih =>
-    intro i S hn hpc h2 h1 h3 h6 h4 h5 h14 hmem hx hfs hdf
+    intro i S hn hpc h2 h1 h3 h6 h4 h5 h14 hmem hx hfs hdf hmx
     have hml := fullMask_lt64 s.mem g i (by omega)
     janus64_run [fullMask_bit0 _ _ _ (show i < 8 by omega), shr1_ofNat _ hml] until [Extracted.entry + 0x1ad]
-    · exact ⟨5763968, ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF],
-        by simp [setRegF, h14], hx, hfs, rfl⟩,
+    · exact ⟨(janus_eval% zeroVal), ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF],
+        by simp [setRegF, h14], hx, hfs, rfl, hmx⟩,
         .inl ⟨lookupFrom_of_fullMask_zero _ _ _ (n + 1) i hn ‹_›, rfl⟩⟩
     · rename_i hmask hkey
       refine ⟨g + 16 + 16 * i, ⟨by simp [setRegF, ofNat_add]; exact congrArg _ (by omega),
-        by simp [setRegF], rfl, rfl, by simp [setRegF], by simp [setRegF, h14], hx, hfs, rfl⟩,
+        by simp [setRegF], rfl, rfl, by simp [setRegF], by simp [setRegF, h14], hx, hfs, rfl, hmx⟩,
         .inr ⟨i, ?_, rfl⟩⟩
       rw [lookupFrom_eq _ _ _ _ (by omega)]
       have := Arm64.Memory.readLE_lt s.mem (g + 8 + 16 * i) 8
@@ -149,7 +149,7 @@ theorem loop (s : State) (g k zv : Nat) (hsp1 : 32 ≤ (s.regs 4).toNat) (hsp2 :
     all_goals
       refine rr_mono (ih (i + 1) _ (by omega) rfl (by simp [setRegF, ofNat_add]; exact congrArg _ (by omega))
         (by simp [setRegF, h1]) ?_ (by simp [setRegF, h6]) (by simp [setRegF, h4]) (by simp [setRegF, h5])
-        (by simp [setRegF, h14]) rfl hx hfs rfl) ?_
+        (by simp [setRegF, h14]) rfl hx hfs rfl hmx) ?_
       · simp only [setRegF]; simp only [reduceIte, Nat.reduceEqDiff]
         exact congrArg _ (by rw [fullMask_eq _ _ _ (by omega)]; have := fullBit_le (ctrl s.mem g i); omega)
       · rintro s' ⟨p, hr, hl⟩
@@ -185,8 +185,8 @@ theorem run (t : Nat) (heap : Nat × Nat) (f : AMap (BitVec 64) (BitVec 64)) (s 
   · simp only [IsMap, h0, ite_true] at hmap
     subst hmap
     janus64_run
-    exact ⟨5763968, ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF], by simp [setRegF],
-      rfl, rfl, hdf.symm⟩, .inl ⟨rfl, rfl⟩⟩
+    exact ⟨(janus_eval% zeroVal), ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF], by simp [setRegF],
+      rfl, rfl, hdf.symm, rfl⟩, .inl ⟨rfl, rfl⟩⟩
   · simp only [IsMap, h0, ite_false, smallModel_rep] at hmap
     obtain ⟨-, hh1, ⟨hh2, hh3⟩, hdl, hwr, hgr, ⟨hgi1, hgi2⟩, hhb, hcont, hused⟩ := hmap
     simp only [group] at hgr hgi1 hgi2 hcont ⊢
@@ -200,13 +200,13 @@ theorem run (t : Nat) (heap : Nat × Nat) (f : AMap (BitVec 64) (BitVec 64)) (s 
         cases hf : f (s.regs 1) with
         | none => rfl
         | some v => exact absurd ((hks.2 (s.regs 1)).2 (by simp [hf])) (by simp)
-      exact ⟨5763968, ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF], by simp [setRegF],
-        rfl, rfl, hdf.symm⟩, .inl ⟨hnone, rfl⟩⟩
-    · refine rr_mono (loop s g (s.regs 1).toNat 5763968 (by omega) (by omega)
+      exact ⟨(janus_eval% zeroVal), ⟨by simp [setRegF], by simp [setRegF], rfl, rfl, by simp [setRegF], by simp [setRegF],
+        rfl, rfl, hdf.symm, rfl⟩, .inl ⟨hnone, rfl⟩⟩
+    · refine rr_mono (loop s g (s.regs 1).toNat (janus_eval% zeroVal) (by omega) (by omega)
         (Arm64.Memory.accessible_mono _ hst (by omega) (by omega)) hgr (by omega) (by omega) hra rfl rfl
         8 0 _ rfl rfl (by simp [setRegF, ofNat_add]) (by simp [setRegF]) (by simp only [setRegF]; simp only [reduceIte, Nat.reduceEqDiff]; exact msb_fullMask s.mem g)
         (by simp [setRegF, hty']) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) rfl
-        (by simp [setXmmF]) rfl hdf.symm) ?_
+        (by simp [setXmmF]) rfl hdf.symm rfl) ?_
       rintro s' ⟨p, hr, hl⟩
       refine ⟨p, hr, ?_⟩
       rcases hl with ⟨hl, rfl⟩ | ⟨j, hl, rfl⟩
@@ -220,7 +220,7 @@ theorem correctness (t : Nat) (heap : Nat × Nat) :
   have hrun := run t heap f s hpc hpre
   obtain ⟨⟨henv, -, -, hd1, -, hst, -, -, -, hout⟩, -, hmap⟩ := hpre
   refine rr_mono hrun ?_
-  rintro s' ⟨p, ⟨h0, hsp, hpc', hmem, h5, h14, hx, hfs, hdf⟩, hslot⟩
+  rintro s' ⟨p, ⟨h0, hsp, hpc', hmem, h5, h14, hx, hfs, hdf, hmx⟩, hslot⟩
   have hl := smallModel_laws t zeroVal heap
   obtain ⟨lo, hi⟩ := heap
   simp only [smallModel_depth] at hd1 hout
@@ -228,9 +228,9 @@ theorem correctness (t : Nat) (heap : Nat × Nat) :
     rw [hmem]
     exact agrees_writeLE _ _ (Outside.of_sub hout (by omega) (by omega))
   refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · obtain ⟨r, rip, fl, xm, mem, yh, fs, df⟩ := s'
-    simp only at hsp hpc' hfs hdf h5 h14 hx ⊢
-    subst hpc' hfs hdf
+  · obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
+    simp only at hsp hpc' hfs hdf hmx h5 h14 hx ⊢
+    subst hpc' hfs hdf hmx
     congr
     · funext i
       simp only [keepABI]
