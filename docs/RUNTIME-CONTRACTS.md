@@ -49,10 +49,11 @@ A theorem that relies on a contract quantifies over the code at the contract add
 the contract for it:
 
 ```lean
-theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (a b : BitVec 64)
+theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
     (hnew : NewobjectContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.newobject") rt 4096) :
-    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (pre rt) post
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b]
+      (fun s => … ∧ H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) post
 ```
 
 * `Program.link p impl` is `p` with the segments `impl` appended after its own (`Janus.Program.link`,
@@ -101,7 +102,33 @@ in the framework (`Janus/Contracts/*.lean`), whose sources are pinned like every
 module, or in the proof file (then `janus verify` discloses its body under "Proof-local
 definitions"). A contract that no code could satisfy makes the theorem vacuous, so contracts are
 written to be satisfiable by the real runtime under the model's rules: for instance they never
-add memory regions (instructions cannot), see below.
+add memory regions (instructions cannot), see below. **Every contract needs a kernel-checked
+satisfiability witness** (an implementation, its parameters, and a call state where the theorem
+using it fires; `audit/round9/controls/NewPair_witness.lean`): before round 9 the allocation
+contracts had none and were false for every implementation (round 9 C1,
+`audit/round9/model/Unsat.lean`).
+
+### 5. Readiness of the runtime (`RtReady`, round 9)
+
+A `Summary` speaks about **every** state satisfying its precondition. A runtime function's
+behaviour depends on the runtime's own state (the heap, the `mcache`, the current `g`, the free
+stack below `SP`), which the caller does not control and the contract cannot describe in full.
+So each contract takes a predicate `H : RtReady` (`List Nat → Nat → Nat → Memory → Prop`) and
+requires `H args g sp (rtView rt s.mem)` at the call: the call's argument registers as numbers,
+`g` (arm64 `R28`, amd64 `R14`), `SP` (amd64: `RSP` at the callee's entry) and the memory as the
+runtime owns it (`rtView rt m`: `m`'s bytes inside `rt`, every other byte 0, and its regions).
+
+* The theorem quantifies over `H` and assumes it **at its entry**, for the call it will make
+  (`H [pairType] g (SP - 48) (rtView rt s.mem)` for NewPair, whose frame is 48 bytes). The
+  caller's stores lie outside `rt`, which `rtView` cannot see (`rtView_writeLE`, a rewrite rule of
+  the executors), so `janus_run` proves the call's readiness from the entry's.
+* The real runtime meets the contract with `H args g sp v` := "from every call state with these
+  arguments, this `g`, this `SP` and runtime memory `v` (whatever else memory holds) the
+  runtime's code returns as the contract says". That is a function of what `H` sees, so the
+  hypothesis is met by the real binary exactly at the calls the runtime serves as described:
+  in the common case a free slot in the `mcache` span, enough heap, no stack growth, no GC
+  assist that parks or shrinks the stack, no `mmap`. A call outside that (`make([]uint64, 1<<44)`
+  throws `out of memory`, `audit/round9/probe`) is simply not one the theorem speaks about.
 
 Which parts of the runtime are proved rather than assumed is listed per contract kind below and in
 [SOUNDNESS.md](SOUNDNESS.md#runtime-contracts).
@@ -136,7 +163,10 @@ object (`Fresh`):
   (`< 16` bytes), which shares a 16-byte block and owns only its own bytes;
 * 8-aligned when `size ≥ 16` or a multiple of 8, 16-aligned when `size` is a multiple of 16
   (objects of a size class are laid out from a page-aligned span base; every class except 8 and
-  24 is a multiple of 16; large objects are page-aligned);
+  24 is a multiple of 16; large objects are page-aligned), **except** a pointerful object of
+  more than 512 bytes that is still small (`mallocHdr`): Go 1.26 stores an 8-byte malloc header
+  in the slot and returns `slot + 8`, which is 8 mod 16 (round 9 C2; before, the contract
+  promised 16-alignment for it, which the real runtime never gives);
 * zero for its first `size` bytes when the call asks for zeroing (`newobject` and `makeslice`
   always do; `mallocgc` when `needzero` or the type has pointers).
 
