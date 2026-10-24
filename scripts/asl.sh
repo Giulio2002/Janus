@@ -9,6 +9,7 @@
 #   scripts/asl.sh build   unpack the vendored model (if needed) and build JanusASL (lake)
 #   scripts/asl.sh check   build + `lake exe janus-asl-check` on the oracle corpus (default)
 #   scripts/asl.sh prove   build the proofs (JanusASL.Proofs) and audit their axioms
+#   scripts/asl.sh replay  kernel-replay every JanusASL module with leanchecker, in batches
 #
 # Environment:
 #   DEPS     pinned external sources/toolchains (default /srv/janus-asl-deps)
@@ -25,6 +26,11 @@
 #                      ~45 min model. The cache must be writable only by users you trust: its
 #                      oleans are what the JanusASL proofs are checked against.
 #   ASL_CACHE_READONLY=1   use the cache but never write to it
+#   GEN      work directory of `gen` (default $DEPS/gen)
+#   ASL_MEM_GB   memory budget of `build`/`prove` (default: the smaller of 24 and 60% of MemAvailable)
+#   ASL_JOBS     Lean processes Lake runs at once (default ASL_MEM_GB / ASL_JOB_GB, at least 1)
+#   ASL_JOB_GB   peak of the largest single Lean process of the build (default 8, docs/ASL.md "Memory")
+#   REPLAY_BATCH modules per leanchecker process in `replay` (default 4)
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
@@ -47,6 +53,8 @@ SAIL_ARM_REV=7d0581642d0e3aaca367bbc5650aca7c53057543   # upstream master (inclu
 OCAML_VERSION=5.2.1
 SWITCH=sail-0.20.3-janus
 VENDOR="$pkg/vendor/ArmASL.tar.gz"
+# split_lean.py: parts of at most this many bytes (a larger declaration gets a part of its own)
+PART_BYTES=150000
 
 export OPAMROOT="$DEPS/opam" OPAMYES=1
 sailarm="$DEPS/sail-arm-${SAIL_ARM_REV:0:7}/arm-v9.4-a/src"
@@ -79,7 +87,7 @@ do_deps() {
 do_gen() {
   do_deps
   eval "$(opam env --switch="$SWITCH" --set-switch)"
-  local w="$DEPS/gen"
+  local w="${GEN:-$DEPS/gen}"
   rm -rf "$w/sliced" "$w/out"; mkdir -p "$w/sliced" "$w/out"
   python3 -I "$here/slice.py" "$sailarm" "$w/sliced" "$here/keep.txt" > "$w/slice-stats.json"
   local S="$w/sliced"
@@ -99,9 +107,9 @@ do_gen() {
     { tail -30 "$w/sail.log"; exit 1; }
   # The slice paths are recorded in assertion messages; make them independent of $DEPS.
   sed -i "s#$S/#sail-arm/arm-v9.4-a/src/#g" "$w/out/ArmASL/ArmASL.lean"
-  # One module per ~1/24 of the declarations, chained (JanusASL/sail/split_lean.py).
+  # Chained modules of at most PART_BYTES each (JanusASL/sail/split_lean.py).
   rm -rf "$w/split"; mkdir -p "$w/split"
-  python3 -I "$here/split_lean.py" "$w/out/ArmASL/ArmASL.lean" "$w/split" 24
+  python3 -I "$here/split_lean.py" "$w/out/ArmASL/ArmASL.lean" "$w/split" --bytes "$PART_BYTES"
   cp "$w/out/ArmASL/ArmASL/"*.lean "$w/split/ArmASL/"
   (cd "$w/split" && tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - \
      ArmASL.lean ArmASL | gzip -n -9 > "$w/ArmASL.tar.gz")
@@ -172,12 +180,29 @@ unpack() {
   fi
 }
 
+# Lake starts as many Lean processes as its thread pool has threads (LEAN_NUM_THREADS); each Lean
+# process gets the same value for its own elaboration threads. Bound both by memory: every process
+# of the build stays under ASL_JOB_GB (docs/ASL.md, "Memory"), so ASL_JOBS of them fit ASL_MEM_GB.
+asl_jobs() {
+  local avail budget per
+  avail=$(awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo)
+  budget="${ASL_MEM_GB:-$(( avail * 6 / 10 < 24 ? avail * 6 / 10 : 24 ))}"
+  per="${ASL_JOB_GB:-8}"
+  ASL_JOBS="${ASL_JOBS:-$(( budget / per > 0 ? budget / per : 1 ))}"
+  echo "asl: ${ASL_JOBS} Lean processes at once (budget ${budget} GB, ${per} GB each, ${avail} GB available)" >&2
+}
+
+lake_asl() {
+  asl_jobs
+  (cd "$pkg" && LEAN_NUM_THREADS="$ASL_JOBS" memguard_lake "$@")
+}
+
 do_build() {
   unpack
   cache_restore
-  (cd "$pkg" && memguard_lake build ArmASL)
+  lake_asl build ArmASL
   cache_publish
-  (cd "$pkg" && memguard_lake build ArmASL JanusASL janus-asl-check)
+  lake_asl build ArmASL JanusASL janus-asl-check
   cache_publish
 }
 
@@ -191,9 +216,53 @@ do_check() {
 do_prove() {
   unpack
   cache_restore
-  (cd "$pkg" && memguard_lake build ArmASL)
+  lake_asl build ArmASL
   cache_publish
-  (cd "$pkg" && memguard_lake build JanusASL && lake env lean JanusASL/Audit.lean)
+  lake_asl build JanusASL
+  (cd "$pkg" && lake env lean JanusASL/Audit.lean)
+}
+
+# leanchecker replays each target module in its own task, every one importing that module's whole
+# environment (the ArmASL model included), so `leanchecker JanusASL.Proofs` holds up to
+# LEAN_NUM_THREADS such environments at once and keeps its heap at the largest. Replay every module
+# of the package instead, REPLAY_BATCH modules per process, one process at a time.
+do_replay() {
+  unpack
+  cache_restore
+  lake_asl build JanusASL
+  # The modules: the import closure of JanusASL.Proofs within the package (what
+  # `leanchecker JanusASL.Proofs` replays, less files that nothing imports). leanchecker's targets
+  # are name prefixes, so a module with submodules (JanusASL.Proofs itself, a split file's import
+  # list) would pull all of them into one process: pass only the leaves, after checking that the
+  # others declare nothing (imports and comments only).
+  local mods=() m batch="${REPLAY_BATCH:-4}" list
+  list="$(python3 -I - "$pkg" <<'PY'
+import os, re, sys
+pkg = sys.argv[1]
+path = lambda m: os.path.join(pkg, *m.split(".")) + ".lean"
+seen, todo = set(), ["JanusASL.Proofs"]
+while todo:
+    m = todo.pop()
+    if m in seen:
+        continue
+    seen.add(m)
+    todo += [i for i in re.findall(r"^import (JanusASL\.\S+)", open(path(m)).read(), re.M)]
+for m in sorted(seen):
+    if any(o.startswith(m + ".") for o in seen):
+        txt = re.sub(r"/-!.*?-/", "", open(path(m)).read(), flags=re.S)
+        if any(l.strip() and not l.startswith(("import ", "--")) for l in txt.split("\n")):
+            sys.exit("replay: %s has submodules and declarations; cannot replay it alone" % m)
+    else:
+        print(m)
+PY
+)" || exit 1
+  for m in $list; do mods+=("$m"); done
+  local i
+  for ((i = 0; i < ${#mods[@]}; i += batch)); do
+    (cd "$pkg" && LEAN_NUM_THREADS="${JANUS_REPLAY_THREADS:-4}" memguard_run -n "leanchecker" -- lake env leanchecker "${mods[@]:i:batch}") ||
+      { echo "replay: leanchecker failed on ${mods[*]:i:batch}" >&2; exit 1; }
+  done
+  echo "replay: leanchecker passed on all ${#mods[@]} modules of JanusASL.Proofs (LEAN_NUM_THREADS=${JANUS_REPLAY_THREADS:-4}, $batch per process)"
 }
 
 case "$mode" in
@@ -202,5 +271,6 @@ case "$mode" in
   build) do_build ;;
   check) do_check ;;
   prove) do_prove ;;
-  *) echo "usage: $0 deps|gen|build|check|prove" >&2; exit 2 ;;
+  replay) do_replay ;;
+  *) echo "usage: $0 deps|gen|build|check|prove|replay" >&2; exit 2 ;;
 esac
