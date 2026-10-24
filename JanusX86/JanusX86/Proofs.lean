@@ -25,3 +25,4 @@ import JanusX86.Proofs.Lock
 import JanusX86.Proofs.Nop
 import JanusX86.Proofs.Movsxd
 import JanusX86.Proofs.CmpXchg
+import JanusX86.Proofs.Cbw
