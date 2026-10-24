@@ -16,6 +16,7 @@ replace any compiled framework module: the untrusted build could write the whole
 * `inject`: compile an extra `Janus.Backdoor` module into the framework build directory;
 * `auditor`: recompile `Janus.Tools.Audit` so the auditor prints a forged all-clear record for
   `R1.False.claim : False := sorry`.
+* `resultcache` (round 7, RC2): look for the verification-result cache and plant a file in it.
 
 Outside a `janus verify` workspace (no `../janus`) it does nothing.
 -/
@@ -88,8 +89,23 @@ def plant : IO Unit := do
       let b ← compile "Audit" forgedAuditor
       IO.FS.writeBinFile (janusLib / "Janus" / "Tools" / "Audit.olean") b
       say "replaced Janus/Tools/Audit.olean (forged auditor)"
+    | "resultcache" =>
+      -- round 7, RC2: the lakefile tries to reach the verification-result cache (its HMAC key
+      -- and entries) and to plant a file there; the sandbox hides it behind an empty tmpfs.
+      let home := (← IO.getEnv "HOME").getD "/root"
+      let base := (← IO.getEnv "JANUS_CACHE_DIR").getD (home ++ "/.cache/janus")
+      let dir : FilePath := base ++ "/v1/result"
+      if ← (dir / ".key").pathExists then
+        throw <| IO.userError "RC2-VISIBLE: the result cache key is visible to the lakefile"
+      for e in (← try dir.readDir catch _ => pure #[]) do
+        throw <| IO.userError s!"RC2-VISIBLE: the result cache is visible to the lakefile ({e.fileName})"
+      try IO.FS.writeFile (dir / "planted-by-lakefile") "forged" catch _ => pure ()
+      say "the result cache is not visible"
     | _ => pure ()
-  catch e => say s!"{mode} failed: {e}"
+  catch e =>
+    say s!"{mode} failed: {e}"
+    -- a visible result cache must fail the build, so the row cannot pass silently
+    if mode == "resultcache" && (toString e).startsWith "RC2-VISIBLE" then throw e
 
 #eval plant
 

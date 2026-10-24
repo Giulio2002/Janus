@@ -28,13 +28,21 @@ type toolchain struct {
 
 func findToolchain(lake, root string) (*toolchain, error) {
 	lr := &leanRunner{lake: lake, root: root}
+	// The two queries are independent; run them at once.
+	var version string
+	var verErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		version, verErr = lr.run("env", "lean", "--version")
+	}()
 	prefix, err := lr.run("env", "lean", "--print-prefix")
+	<-done
 	if err != nil {
 		return nil, &diag{Invalid: true, Msg: "lean --print-prefix failed: " + err.Error(), Stage: "toolchain", Details: prefix}
 	}
 	pfx := strings.TrimSpace(prefix)
-	version, err := lr.run("env", "lean", "--version")
-	if err != nil {
+	if err := verErr; err != nil {
 		return nil, &diag{Invalid: true, Msg: "lean --version failed: " + err.Error(), Stage: "toolchain", Details: version}
 	}
 	tc := &toolchain{
@@ -129,15 +137,16 @@ func noForeignModule(paths map[string]string, dirs []string) error {
 }
 
 // replayThreads is the number of worker threads of a leanchecker process ($JANUS_REPLAY_THREADS,
-// default 4). leanchecker starts one task per module it replays, each importing that module's
+// default 2). leanchecker starts one task per module it replays, each importing that module's
 // whole environment; with a thread per core, the replay of the framework (one target, every
-// Janus.* module) holds ~48 environments at once (~30 GB). Four threads hold ~7 GB and take about
-// as long. The modules replayed are the same.
+// Janus.* module) held ~48 environments at once (30-37 GB). Measured for the framework replay on
+// a quiet host: 1 thread 19 s / 1.5 GB, 2 threads 15 s / 5.1 GB, 4 threads 11 s / 7.4 GB. The
+// modules replayed are the same.
 func replayThreads() int {
 	if n, err := strconv.Atoi(os.Getenv("JANUS_REPLAY_THREADS")); err == nil && n > 0 {
 		return n
 	}
-	return 4
+	return 2
 }
 
 // runLean runs a lean/leanchecker command under the sandbox, returning combined output.
@@ -156,6 +165,11 @@ func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtr
 			ro = append(ro, d)
 		}
 	}
+	// Likewise the directory of the program itself (the compiled auditor of a --janus-root under
+	// /tmp), read-only.
+	if len(argv) > 0 && filepath.IsAbs(argv[0]) {
+		ro = append(ro, filepath.Dir(argv[0]))
+	}
 	env := tc.jobEnv(leanPath)
 	if len(argv) > 0 && argv[0] == tc.leanchecker {
 		env = append(env, "LEAN_NUM_THREADS="+strconv.Itoa(replayThreads()))
@@ -164,7 +178,7 @@ func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtr
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := cmd.Run()
+	err := guardRun(cmd)
 	return out.String(), err
 }
 

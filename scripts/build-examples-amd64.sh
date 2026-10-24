@@ -8,6 +8,9 @@ set -euo pipefail
 # release, whatever Go is installed; the go command downloads it on first use.
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 export PATH="$PATH:/usr/local/go/bin"
 mkdir -p "$root/artifacts" "$root/bin"
 (cd "$root/examples/basic" &&
