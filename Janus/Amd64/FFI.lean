@@ -205,14 +205,16 @@ theorem CEnsuresC.of_cEnsures {p : Program} {C : Contract} {entry : Nat} {args :
     CEnsuresC p C entry args pre post :=
   fun ret hret s hs hp => .of_returns (h ret hret s hs hp)
 
-/-- A callee `Summary` of a C function is a `CEnsures` when its postcondition implies
-`CReturn`. -/
+/-- A callee `Summary` of a C function (precondition `spre`, implied by every C call state
+satisfying `pre`) is a `CEnsures` when its postcondition implies `CReturn`. -/
 theorem CEnsures.of_summary {p : Program} {entry : Nat} {args : List W64}
-    {pre : State → Prop} {post post' : State → State → Prop} (hsum : Summary p entry pre post')
+    {pre spre : State → Prop} {post post' : State → State → Prop}
+    (hsum : Summary p entry spre post')
+    (hpre : ∀ ret s, RetAddr p ret → CCall (p.withExit ret) entry args s → pre s → spre s)
     (hpost : ∀ s s', pre s → post' s s' → CReturn s s' ∧ post s s') :
     CEnsures p entry args pre post := by
   intro ret hret s hs hp
-  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hs.rip hp
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hs.rip (hpre ret s hret hs hp)
   have hst' := hst.withExit hret.fetch_none
   refine returns_of_steps hst' ?_ (hpost s s' hp hq)
   rw [hr, retAddrOf, hs.ret]

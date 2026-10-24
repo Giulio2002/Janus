@@ -288,15 +288,17 @@ theorem CEnsuresC.of_cEnsures {p : Program} {C : Contract} {entry : Nat} {args :
     CEnsuresC p C entry args pre post :=
   fun ret hret s hs hp => .of_returns (h ret hret s hs hp)
 
-/-- A callee `Summary` of a C function is a `CEnsures` (for callers outside the extracted
-code), when its postcondition implies `CReturn`. -/
+/-- A callee `Summary` of a C function (precondition `spre`, implied by every C call state
+satisfying `pre`) is a `CEnsures` when its postcondition implies `CReturn`. -/
 theorem CEnsures.of_summary {p : Program} {entry : Nat} {args : List W64}
-    {pre : State → Prop} {post post' : State → State → Prop} (hsum : Summary p entry pre post')
+    {pre spre : State → Prop} {post post' : State → State → Prop}
+    (hsum : Summary p entry spre post')
+    (hpre : ∀ ret s, RetAddr p ret → CCall (p.withExit ret) entry args s → pre s → spre s)
     (hpost : ∀ s s', pre s → post' s s' → CReturn s s' ∧ post s s') :
     CEnsures p entry args pre post := by
   intro ret hret s hs hp
   have hpc : s.pc = BitVec.ofNat 64 entry := hs.call.pc
-  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc hp
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc (hpre ret s hret hs hp)
   have hst' := hst.withExit hret.fetch_none
   refine returns_of_steps hst' ?_ (hpost s s' hp hq)
   rw [hr, hs.call.lr]
@@ -438,6 +440,19 @@ theorem outside_one {a n i : Nat} {rs : List (Nat × Nat)} (h : Outside a n rs) 
     obtain ⟨lo, hi'⟩ := r
     simp only [outside_cons] at h ⊢
     exact ⟨by omega, ih h.2⟩
+
+/-- The same store on both sides keeps a frame. -/
+theorem _root_.Janus.MemFrame.writeLE_both {m m' : Memory} {rs : List (Nat × Nat)}
+    (h : MemFrame m m' rs) (a k v : Nat) :
+    MemFrame (m.writeLE a k v) (m'.writeLE a k v) rs := by
+  refine ⟨fun b n hb => readLE_congr fun i hi => ?_, fun b n w => ?_⟩
+  · rw [Memory.bytes_writeLE, Memory.bytes_writeLE]
+    split
+    · rfl
+    · have h1 := h.readLE (b + i) 1 (outside_one hb hi)
+      simp only [Memory.readLE_one] at h1
+      exact BitVec.eq_of_toNat_eq h1
+  · rw [Memory.accessible_writeLE, Memory.accessible_writeLE]; exact h.accessible b n w
 
 /-- The memory of a resumed state is a frame of `E` when the C code's result agrees with `E`
 on Go memory and `E` agrees with `s` on the bytes that are not accessible. -/
