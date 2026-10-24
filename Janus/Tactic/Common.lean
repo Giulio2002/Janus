@@ -937,4 +937,59 @@ def fieldIndex (S f : Name) : MetaM (Option (Nat × Nat)) := do
   let fields := getStructureFields (← getEnv) S
   return (fields.idxOf? f).map (fields.size, ·)
 
+/-! ## Focused `omega`
+
+Side conditions (address disjointness, no-wrap facts) are usually consequences of the few
+hypotheses that talk about the same variables. `omega` on the full context also sees every
+other fact, in particular the disjunctions of the aliasing preconditions, which it splits:
+with six `Disjoint` facts, a disjointness side condition cost 100-400 ms. `omegaFocused` first
+runs `omega` in the context restricted to the propositions whose free variables all occur in
+the goal; only if that fails is the full context used. -/
+
+/-- `omega` on `g` in the context restricted to the hypotheses that only mention free
+variables of the goal. `true` if it closed the goal. -/
+def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let goalFVars := (collectFVars {} t).fvarSet
+  if goalFVars.isEmpty then return false
+  let lctx ← getLCtx
+  let mut lctx' := lctx
+  let mut dropped := 0
+  for d in lctx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ← isProp ty do continue
+    let fv := (collectFVars {} ty).fvarSet
+    unless fv.toList.all goalFVars.contains do
+      lctx' := lctx'.erase d.fvarId
+      dropped := dropped + 1
+  if dropped == 0 then return false
+  let m ← mkFreshExprMVarAt lctx' (← getLocalInstances) t
+  let saved ← saveState
+  try
+    let gs ← Tactic.run m.mvarId! (evalTactic (← `(tactic| omega)))
+    if gs.isEmpty then
+      g.assign m
+      return true
+    saved.restore
+    return false
+  catch _ =>
+    saved.restore
+    return false
+
+/-- `omega`, first in the focused context (`omegaFocused`), then in the full one. -/
+initialize registerTraceClass `janus.omega
+
+elab "janus_omega" : tactic => do
+  let g ← getMainGoal
+  let t0 ← IO.monoNanosNow
+  if ← omegaFocused g then
+    trace[janus.omega] "focused {((← IO.monoNanosNow) - t0) / 1000000} ms: {← g.getType}"
+    replaceMainGoal []
+  else
+    let t1 ← IO.monoNanosNow
+    try evalTactic (← `(tactic| omega))
+    finally
+      trace[janus.omega] "full {((← IO.monoNanosNow) - t1) / 1000000} ms (focused {(t1 - t0) / 1000000} ms): {← g.getType}"
+
 end Janus.Tactic.Common

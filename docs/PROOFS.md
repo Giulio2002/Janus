@@ -96,7 +96,9 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 | `janus_run (budget := N)` | Limit the run to `N` thousand heartbeats (the unit of `maxHeartbeats`), counted from its start. However the run ends, a timeout is reported as an error naming the pc, the instruction and the phase (see Troubleshooting). `(budget := N)` may also come first: `janus_run (budget := N) until [...]`. |
 | `janus_step [lemmas]` | Exactly one instruction (`calls`/`budget` as for `janus_run`). |
 | `janus_simp [lemmas]` | The post-processing simp set `janus_post` plus the state hypotheses and `lemmas`. Closes invariant side goals (`S'.regs 2 = i + 1`, …). |
-| `janus_arith` | `omega` after adding `readLE m a n < 256^n` for every memory read, and normalising carry terms. For the arithmetic left after execution. Does nothing if there is no goal. |
+| `janus_arith` | The arithmetic left after execution. First `janus_carry` (below); if that does not apply, `omega` after adding `readLE m a n < 256^n` for every memory read and normalising carry terms. Does nothing if there is no goal. (`janus64_arith` on amd64.) |
+| `janus_carry` | Carry chains by reflection: proves `a = b`, `a ≤ b`, `a < b` (or a conjunction of them) between `Nat` terms built from limbs, `+`, `*`, `-`, literals, `/ k`, `% k` and `(decide (k ≤ a)).toNat`. See [Multi-limb arithmetic](#multi-limb-arithmetic). |
+| `janus_ring` | Polynomial identities over `Int` (`+`, `*`, `-`, `^` with a literal exponent) by a verified normaliser; on `Nat`, `janus_carry`. |
 | `janus_data hd` | From `hd : p.DataLoaded m`: readability of each `.rodata` object, and a rewrite rule that evaluates loads from it at literal addresses. |
 | `janus_cases h` | From `h : k < N` (`N` a literal): `N` goals with `k` replaced by `0, …, N-1`. For table lookups at a symbolic index. |
 | `janus_frame` | Proves `MemFrame m₀ m rs` (the memory part of a callee summary, see Calls): peels the stores of `m`, goes through the `MemFrame` hypotheses of called summaries, side conditions by `omega`. |
@@ -355,6 +357,69 @@ precondition.
   blocks) go through an induction lemma (`zva_loop`) instead of straight-line execution. Zeroed
   ranges are tracked with interval lemmas (`ZeroOn`, `zeroOn_writeLE_zero`) rather than byte by
   byte.
+
+### Multi-limb arithmetic (`Add256`, `AddLimbs`, `bench/…/MulAdd8*.lean`, `bench/…/Mul256.lean`)
+
+After running a multi-limb routine (`bits.Add64`/`bits.Mul64` chains, `uint256`-style code), the
+goal is an equation between limb terms such as
+
+```text
+(z₀ + p₀ % 2^64 + c) % 2^64 + 2^64·((p₀ / 2^64 + (z₀ + p₀ % 2^64) / 2^64 % 2^64 + …) % 2^64) + …
+  = z₀ + 2^64·z₁ + … + y·(x₀ + 2^64·x₁ + …) + c
+```
+
+with every carry as a `/ 2^64`, every limb as a `% 2^64` and, on amd64, carry flags as
+`(decide (2^64 ≤ a)).toNat`. `omega` proves these, but slowly (it has to rediscover each carry
+bound, and it does not know `x·y ≤ (2^64-1)^2`, so products must be named and bounded by hand).
+`janus_arith` now closes them with **`janus_carry`**, a decision procedure proved sound in Lean
+(`Janus/Tactic/CarryDefs.lean`, `CarrySound.lean`):
+
+* both sides are reflected into a term language over **atoms** (`x.toNat`, memory reads, any
+  other subterm) and normalised into integer polynomials (`Janus/Tactic/Ring.lean`) over the
+  atoms and **quotient atoms** `D = L / 2^64`, one per distinct carry: `t / k` and `t % k`
+  split the normal form of `t` as `L + k·Y` and become `D + Y` and `L - k·D`. This merges the
+  two halves of a carry (`p / 2^64 + (z + p % 2^64) / 2^64` becomes `(p + z) / 2^64`), so a
+  whole add-with-carry chain collapses to `Σ 2^(64i)·limbᵢ` in one normalisation;
+* every subterm and every atom also gets an interval (`x.toNat ≤ 2^w - 1`, `readLE m a n <
+  256^n`, products of bounds, hypotheses `atom ≤ c` / `atom < c`), and a difference of two
+  carries `(a + b)/k - a/k` is bounded by `b/k + 1`. A `% k` or `/ k` whose argument lies in
+  `[0, k)` disappears: this is how `hi + c₁ + c₂ < 2^64` is shown for a multiply-add limb;
+* the goal holds if the normal forms of the two sides are equal, or if they differ by a
+  multiple `g·Z` (`g` the gcd of the difference) and both sides lie in `[0, g)`: this proves
+  low-half statements like `Σ 2^(64i)·zᵢ = X·Y % 2^256` (`Mul256`).
+
+The certificate (the quotient atoms and the atom intervals) is computed by the tactic and
+checked by `check`, which the kernel evaluates (`Eq.refl true`, like `decide +kernel`); the
+theorem `check_sound` turns it into the goal. Nothing is trusted and no axiom beyond Lean's is
+used. If the normal forms do not match, `janus_carry` fails and `janus_arith` falls back to
+`omega` (so goals that are not carry chains, or that need hypotheses other than bounds, still
+work).
+
+What this means for a proof:
+
+* **No product needs naming.** The `generalize y.toNat * … = p₀` / `have hb₀ : p₀ ≤ …` blocks
+  of older proofs can go; `janus_arith` knows the bound of a product from the bounds of its
+  factors.
+* **No `janus_simp [Nat.mul_add, …]` before the arithmetic.** Products of sums are expanded by
+  the normaliser.
+* The same procedure runs inside the dischargers (`janus_disch`, `janus64_disch`): side
+  conditions such as `carry < 2^64` of `mod64_of_lt` are proved during the run, so the symbolic
+  state keeps fewer `% 2^64`; and a carry bound it refutes, about atoms no hypothesis mentions,
+  is not retried by `omega` (which cannot know more). `set_option janus.carry.disch false`
+  turns this off; `janus.carry.dischMaxNodes` (default 64) limits the size of the side
+  conditions it proves (each costs a kernel evaluation).
+* `set_option trace.janus.carry true` prints, for each goal, the number of atoms and quotient
+  atoms and whether the certificate was accepted; when it is not, the difference of the two
+  normal forms and the table of quotient atoms (usually a carry whose bound it could not show:
+  add the bound as a hypothesis `h : c ≤ …`).
+
+A 256-bit multiplication (`bench/go`, `Mul256`, `z = x·y mod 2^256`, aliasing allowed) is
+proved by `janus_run; janus_arith` on arm64; see `bench/proofs-amd64/Mul256.lean` for amd64,
+where `janus64_run [readLE_32, BitVec.toNat_mul]` also splits the 32-byte values into limbs and
+turns `IMULQ` into `Nat` multiplication.
+
+**`janus_ring`** proves polynomial identities over `Int` by the same normal form (and on `Nat`
+by `janus_carry`): `(a + b) * (a - b) = a ^ 2 - b ^ 2`.
 
 ### Counterexamples (`WrongAdd`)
 

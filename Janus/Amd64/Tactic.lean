@@ -3,6 +3,7 @@ import Janus.Amd64.GoABI
 import Janus.Amd64.TacticAttr
 import Janus.Amd64.Disasm
 import Janus.Tactic.Common
+import Janus.Tactic.Carry
 
 /-!
 # Symbolic execution for amd64 programs
@@ -917,6 +918,20 @@ These keep such carries as `if P then 1 else 0` on the flag condition `P` and fo
 @[janus64_exec, janus64_post] theorem zero_sub_iteP (P : Prop) [Decidable P] :
     (0#64 - if P then 18446744073709551615#64 else 0#64) = if P then 1#64 else 0#64 := by
   by_cases h : P <;> simp [h]
+/-- `SUBQ R, RDX` after `SBBQ R, R` adds the carry back: `x - (-CF) = x + CF`, as one `Nat`
+term (so that carry chains stay linear in size instead of repeating `x` inside the `toNat` of
+every later flag). -/
+@[janus64_exec low, janus64_post low] theorem sub_ite_allOnes64 (P : Prop) [Decidable P] (x : BitVec 64) :
+    (x - if P then 18446744073709551615#64 else 0#64) =
+      BitVec.ofNat 64 (x.toNat + (decide P).toNat) := by
+  apply BitVec.eq_of_toNat_eq
+  have := x.isLt
+  by_cases h : P <;> simp [h, BitVec.toNat_sub] <;> omega
+@[janus64_exec low, janus64_post low] theorem sub_ite_allOnes64' (c : Bool) (x : BitVec 64) :
+    (x - if c then BitVec.allOnes 64 else 0) = BitVec.ofNat 64 (x.toNat + c.toNat) := by
+  apply BitVec.eq_of_toNat_eq
+  have := x.isLt
+  cases c <;> simp [BitVec.toNat_sub] <;> omega
 @[janus64_exec, janus64_post] theorem setWidth32_iteP (P : Prop) [Decidable P] (a b : BitVec 64) :
     BitVec.setWidth 32 (if P then a else b) = if P then a.setWidth 32 else b.setWidth 32 := by
   by_cases h : P <;> simp [h]
@@ -1642,7 +1657,11 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
       if ← dischargeAccessible g then return
       throwError "janus64_disch: cannot prove{indentExpr t}"
-  evalTactic (← `(tactic| omega))
+  match ← Janus.Carry.dischCarry g with
+  | some true => return
+  | some false => throwError "janus64_disch: carry bound does not hold for all limb values"
+  | none => pure ()
+  evalTactic (← `(tactic| janus_omega))
 
 /-! ## Syntax -/
 
@@ -1710,10 +1729,12 @@ theorem decide_carry_toNat' (a : Nat) (h : a < 2 * 18446744073709551616) :
 attribute [janus64_arith_norm] decide_carry_toNat decide_carry_toNat' addFlags_fst_toNat
   BitVec.toNat_ofNat BitVec.toNat_add Bool.toNat_false
 
-/-- `omega` after adding `readLE m a n < 256^n` for every memory read, and rewriting carries
-(`decide (2^64 ≤ a)).toNat = a / 2^64`). Does nothing if there is no goal. -/
+/-- The carry-chain procedure `janus_carry` first (equations of limb arithmetic, by
+reflection); otherwise `omega` after adding `readLE m a n < 256^n` for every memory read, and
+rewriting carries (`decide (2^64 ≤ a)).toNat = a / 2^64`). Does nothing if there is no goal. -/
 elab "janus64_arith" : tactic => do
   if (← getUnsolvedGoals).isEmpty then return
+  if ← Janus.Carry.tryCarry then return
   Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus64_arith_norm]))
   evalTactic (← `(tactic| omega))

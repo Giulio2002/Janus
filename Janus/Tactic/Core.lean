@@ -3,6 +3,7 @@ import Janus.Tactic.Basic
 import Janus.Tactic.Data
 import Janus.Tactic.Common
 import Janus.Tactic.Disasm
+import Janus.Tactic.Carry
 
 /-!
 # Symbolic execution tactics
@@ -807,16 +808,25 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
     if rhs.isConstOf ``Bool.true && (lhs.getAppFn.isConstOf ``Nat.blt ||
         lhs.getAppFn.isConstOf ``Nat.ble || lhs.getAppFn.isConstOf ``and) then
       throwError "janus_disch: literal-only side condition"
+  -- carry-chain bounds and equations (`x / 2^64 < 2^64` for a carry): by reflection, which
+  -- also knows the bounds of products that `omega` does not
+  match ← Janus.Carry.dischCarry g with
+  | some true => return
+  | some false => throwError "janus_disch: carry bound does not hold for all limb values"
+  | none => pure ()
   evalTactic (← `(tactic| first
-    | omega
+    | janus_omega
     | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
         Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
 
 /-! ## Arithmetic -/
 
-/-- `omega` with the range facts of every memory read (`readLE … < 256^n`). -/
+/-- The carry-chain procedure `janus_carry` first (equations of limb arithmetic, by
+reflection); otherwise `omega` with the range facts of every memory read
+(`readLE … < 256^n`) after normalising carry terms. -/
 elab "janus_arith" : tactic => do
   if (← getUnsolvedGoals).isEmpty then return
+  if ← Janus.Carry.tryCarry then return
   Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus_arith_norm]))
   evalTactic (← `(tactic| omega))
