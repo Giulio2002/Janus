@@ -211,7 +211,8 @@ theorem readLE_fillLE_disjoint (M : Memory) (a sz v k b n : Nat)
 
 theorem State.ext' {s t : State} (h1 : s.regs = t.regs) (h2 : s.rip = t.rip) (h3 : s.flags = t.flags)
     (h4 : s.xmm = t.xmm) (h5 : s.mem = t.mem) (h6 : s.ymmHi = t.ymmHi := by rfl)
-    (h7 : s.fsBase = t.fsBase := by rfl) (h8 : s.df = t.df := by rfl) : s = t := by
+    (h7 : s.fsBase = t.fsBase := by rfl) (h8 : s.df = t.df := by rfl)
+    (h9 : s.mxcsr = t.mxcsr := by rfl) : s = t := by
   cases s; cases t; simp_all
 
 private theorem acc_head {m : Memory} {a sz k : Nat} {w : Bool} (h : m.accessible a (sz * (k + 1)) w = true) :

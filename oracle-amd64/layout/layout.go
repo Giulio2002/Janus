@@ -71,7 +71,19 @@ type Case struct {
 	// Init overrides buffer bytes after the pattern is applied: (offset, value) pairs, in
 	// order. Used to plant return addresses / popped values. Absent = pattern only.
 	Init [][2]int `json:"init,omitempty"`
+	// MXCSR is the SSE control/status register for the case (hex, bits 15:0 only: flags
+	// IE DE ZE OE UE PE 5:0, DAZ 6, masks 12:7, RC 14:13, FTZ 15); absent = DefaultMXCSR.
+	// The runner loads it with LDMXCSR right before entering TestPC; the Lean side uses it as
+	// `State.mxcsr`.
+	MXCSR string `json:"mxcsr,omitempty"`
 }
+
+// DefaultMXCSR is the MXCSR value Linux gives a new process (all exceptions masked, round to
+// nearest, no FTZ/DAZ, no flags), which Go code runs with.
+const DefaultMXCSR = 0x1F80
+
+// MXCSRMask is the set of MXCSR bits a case may set (LDMXCSR with any other bit is #GP).
+const MXCSRMask = 0xFFFF
 
 // HW is what the native runner observed.
 type HW struct {
@@ -96,6 +108,8 @@ type HW struct {
 	// single-step trap per iteration with RIP still at TestPC, see IsRepString): the
 	// iteration count minus one; 0 for every other instruction.
 	Iters int `json:"iters,omitempty"`
+	// MXCSR after the instruction (from the signal frame's fxsave area), hex.
+	MXCSR string `json:"mxcsr,omitempty"`
 }
 
 // Model is what `janus-oracle-amd64` (Janus.Amd64.step) produced.
@@ -116,6 +130,7 @@ type Model struct {
 	XMM     []string `json:"xmm,omitempty"`
 	YMMH    []string `json:"ymmh,omitempty"`
 	Mem     [][2]int `json:"mem,omitempty"`
+	MXCSR   string   `json:"mxcsr,omitempty"` // State.mxcsr after the instruction (hex)
 }
 
 // Ctx offsets (bytes) inside CtxPage. Must match cmd/runner/trampoline_amd64.s.
@@ -136,6 +151,8 @@ const (
 	CtxOutXBV   = 2048 // XSTATE_BV of the signal frame (bit 2: AVX state not initial); ^0 = no XSAVE area
 	CtxHostFS   = 2056 // the runner's own FS base (RDFSBASE), restored on resume
 	CtxInFS     = 2064 // the case's FS base (WRFSBASE before entry)
+	CtxInMXCSR  = 2072 // the case's MXCSR (LDMXCSR right before IRETQ), 32 bits
+	CtxOutMXCSR = 2080 // MXCSR from the signal frame's fxsave area (offset 24), 32 bits
 )
 
 // XsaveYMMHOffset is the offset of the YMM_Hi128 component in the standard (non-compacted)

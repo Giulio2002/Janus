@@ -59,6 +59,20 @@ func explain(w io.Writer, outdir, reportPath string, r *verifiedReport) {
 		}
 		p("")
 	}
+	if len(r.DependencyDefinitions) > 0 {
+		p("  The statement names definitions from pinned dependencies; they are part of its meaning:")
+		for _, d := range r.DependencyDefinitions {
+			p("    %s", strings.ReplaceAll(termSafe(d), "\n", "\n      "))
+		}
+		p("")
+	}
+	if len(r.Notes) > 0 {
+		p("  Read with care (standard Lean meaning that often surprises; not errors):")
+		for _, n := range r.Notes {
+			p("    - %s", strings.ReplaceAll(termSafe(n), "\n", "\n      "))
+		}
+		p("")
+	}
 	p("  The guarantee is exactly this statement, with its hypotheses and quantifiers. Its")
 	p("  Extracted.* names denote the machine code copied from the binary below; nothing else")
 	p("  about the program is claimed.")
@@ -206,6 +220,12 @@ func explainASL(p func(string, ...any), a *aslReport) {
 	p("")
 	for _, d := range a.Definitions {
 		p("    %s", strings.ReplaceAll(termSafe(d), "\n", "\n      "))
+	}
+	for _, d := range a.DependencyDefinitions {
+		p("    %s", strings.ReplaceAll(termSafe(d), "\n", "\n      "))
+	}
+	for _, n := range a.Notes {
+		p("  Note: %s", termSafe(n))
 	}
 	p("  It was derived as %s.", termSafe(a.Derivation))
 	if c := a.Coverage; c != nil {

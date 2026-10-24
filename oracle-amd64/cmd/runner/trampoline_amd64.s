@@ -5,8 +5,8 @@
 
 // func callPage()
 // Saves the host's callee state and FS base in the context page, sets the case's FS base,
-// loads YMM0-15 (XMM halves with MOVUPS, then bits 255:128 with VINSERTI128) and every GPR of
-// the case, and enters the instruction under test with IRETQ (frame at CtxFrame: rip, cs,
+// loads YMM0-15 (XMM halves with MOVUPS, then bits 255:128 with VINSERTI128), the case's MXCSR
+// (LDMXCSR) and every GPR of the case, and enters the instruction under test with IRETQ (frame at CtxFrame: rip, cs,
 // rflags with TF set, rsp, ss), so that exactly one instruction executes before the
 // single-step trap. From WRFSBASE until ·resume restores the host FS base nothing here may
 // touch the Go runtime's TLS (no Go code runs in between).
@@ -57,6 +57,9 @@ TEXT ·callPage(SB),NOSPLIT,$0-0
 	VINSERTI128	$1, 1744(R15), Y13, Y13
 	VINSERTI128	$1, 1760(R15), Y14, Y14
 	VINSERTI128	$1, 1776(R15), Y15, Y15
+	// the case's MXCSR: from here to the instruction under test only integer moves and
+	// IRETQ execute, so no SSE floating-point exception can be raised before TestPC
+	LDMXCSR	2072(R15)
 	MOVQ	104(R15), AX
 	MOVQ	112(R15), CX
 	MOVQ	120(R15), DX
@@ -101,10 +104,13 @@ gloop:
 	DECQ	CX
 	JNZ	gloop
 	MOVQ	$0, 960(AX)
+	MOVQ	$-1, 2080(AX)
 	MOVQ	224(DX), SI
 	TESTQ	SI, SI
 	JZ	nofp
 	MOVQ	$1, 960(AX)
+	MOVL	24(SI), BX      // MXCSR at the time of the signal (fxsave offset 24)
+	MOVL	BX, 2080(AX)
 	LEAQ	160(SI), R8
 	LEAQ	704(AX), DI
 	MOVQ	$32, CX
@@ -137,7 +143,7 @@ noxsave:
 	MOVW	$0x37F, 0(SI)   // FCW: default
 	MOVW	$0, 2(SI)       // FSW
 	MOVW	$0, 4(SI)       // abridged FTW: x87 stack empty
-	MOVL	$0x1F80, 24(SI) // MXCSR: default
+	MOVL	$0x1F80, 24(SI) // MXCSR: default (the host's: Go runs with 0x1F80; sigreturn restores it)
 nofp:
 	LEAQ	·resume(SB), BX
 	MOVQ	BX, 168(DX)     // saved RIP

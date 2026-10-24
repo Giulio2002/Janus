@@ -64,19 +64,22 @@ var aslReservedRoots = append(append([]string{}, aslRoots...), aslWordsModule, a
 type aslReport struct {
 	Status string `json:"status"` // "verified" or "invalid"
 	// Of is the verified theorem the corollary is derived from.
-	Of                string        `json:"of"`
-	Theorem           string        `json:"theorem,omitempty"`
-	Module            string        `json:"module,omitempty"`
-	Derivation        string        `json:"derivation"`
-	Statement         string        `json:"statement,omitempty"`
-	StatementExplicit string        `json:"statementExplicit,omitempty"`
-	Definitions       []string      `json:"definitions,omitempty"`
-	Axioms            []string      `json:"axioms,omitempty"`
-	KernelReplay      *kernelReplay `json:"kernelReplay,omitempty"`
-	Coverage          *aslCoverage  `json:"coverage,omitempty"`
-	Model             aslModelInfo  `json:"model"`
-	Assumptions       []string      `json:"assumptions"`
-	Failure           *failureJSON  `json:"failure,omitempty"`
+	Of                string   `json:"of"`
+	Theorem           string   `json:"theorem,omitempty"`
+	Module            string   `json:"module,omitempty"`
+	Derivation        string   `json:"derivation"`
+	Statement         string   `json:"statement,omitempty"`
+	StatementExplicit string   `json:"statementExplicit,omitempty"`
+	Definitions       []string `json:"definitions,omitempty"`
+	// DependencyDefinitions and Notes as in the main report (round 7 J1, K1).
+	DependencyDefinitions []string      `json:"dependencyDefinitions,omitempty"`
+	Notes                 []string      `json:"notes,omitempty"`
+	Axioms                []string      `json:"axioms,omitempty"`
+	KernelReplay          *kernelReplay `json:"kernelReplay,omitempty"`
+	Coverage              *aslCoverage  `json:"coverage,omitempty"`
+	Model                 aslModelInfo  `json:"model"`
+	Assumptions           []string      `json:"assumptions"`
+	Failure               *failureJSON  `json:"failure,omitempty"`
 }
 
 // aslCoverage is the result of the trusted coverage check (JanusASLWords).
@@ -670,6 +673,7 @@ func runASLStage(e *aslEnv) *aslReport {
 	r.Theorem, r.Module = ar.Name, ar.Module
 	r.Statement, r.StatementExplicit = ar.Statement, ar.StatementExplicit
 	r.Definitions, r.Axioms = ar.Definitions, ar.Axioms
+	r.DependencyDefinitions, r.Notes = ar.ExternalDefs, ar.Notes
 	r.KernelReplay = &kr
 	r.Assumptions = aslAssumptions(ar.Statement)
 	return r

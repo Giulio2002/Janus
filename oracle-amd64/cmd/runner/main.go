@@ -253,6 +253,16 @@ func runCase(c *L.Case, seq int64) L.HW {
 		}
 	}
 	put64(ctx, L.CtxInFS, fsBase)
+	mxcsr := uint64(L.DefaultMXCSR)
+	if c.MXCSR != "" {
+		mxcsr, err = parseHex(c.MXCSR)
+		// LDMXCSR with a reserved bit set is #GP (in the trampoline, not at TestPC)
+		if err != nil || mxcsr&^L.MXCSRMask != 0 {
+			r.Status, r.Note = "error", "bad mxcsr"
+			return r
+		}
+	}
+	put64(ctx, L.CtxInMXCSR, mxcsr)
 	put64(ctx, L.CtxFrame, L.TestPC)
 	put64(ctx, L.CtxFrame+8, userCS)
 	put64(ctx, L.CtxFrame+16, uint64(c.RFlags&(L.StatusFlags|L.FlagDF))|0x202|tf)
@@ -282,6 +292,9 @@ func runCase(c *L.Case, seq int64) L.HW {
 					}
 				}
 			}
+			if m := get64(ctx, L.CtxOutMXCSR); m != ^uint64(0) {
+				put64(ctx, L.CtxInMXCSR, m&L.MXCSRMask)
+			}
 			efl := g(gEFL)
 			put64(ctx, L.CtxFrame, L.TestPC)
 			put64(ctx, L.CtxFrame+8, userCS)
@@ -309,6 +322,7 @@ func runCase(c *L.Case, seq int64) L.HW {
 	r.RFlags = int(g(gEFL)) & L.StatusFlags
 	r.DF = g(gEFL)&L.FlagDF != 0
 	if get64(ctx, L.CtxOutHasFP) == 1 {
+		r.MXCSR = hex64(get64(ctx, L.CtxOutMXCSR) & 0xFFFFFFFF)
 		r.XMM = make([]string, 16)
 		for i := 0; i < 16; i++ {
 			r.XMM[i] = hex128(ctx[L.CtxOutXMM+16*i : L.CtxOutXMM+16*i+16])

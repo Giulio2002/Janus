@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -114,7 +115,18 @@ func cmdGen(args []string) {
 	out := fs.String("o", "gen.jsonl", "output")
 	first := fs.Int("first-id", 1_000_000, "first case id")
 	fs.IntVar(&gen.DCZID, "dczid", gen.DCZID, "DCZID_EL0 of the reference machine (runner -dczid)")
+	only := fs.String("only", "", "regexp: generate only the targeted classes whose name matches (and no random groups unless -group is given explicitly)")
+	fpk := fs.Int("fp-k", 4, "states (FPCR/FPSR/register draws) per generated word of the fp.* classes")
 	fs.Parse(args)
+	groupSet := false
+	fs.Visit(func(f *flag.Flag) { groupSet = groupSet || f.Name == "group" })
+	var onlyRe *regexp.Regexp
+	if *only != "" {
+		onlyRe = regexp.MustCompile(*only)
+		if !groupSet {
+			*ng = 0
+		}
+	}
 	r := rand.New(rand.NewPCG(*seed, 0x6a616e7573))
 	cw := newCaseWriter(*out, *first)
 	names := make([]string, 0, len(gen.Targeted))
@@ -123,6 +135,9 @@ func cmdGen(args []string) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
+		if onlyRe != nil && !onlyRe.MatchString(name) {
+			continue
+		}
 		g := gen.Targeted[name]
 		nw := *n
 		if gen.Conditional(name) {
@@ -133,7 +148,11 @@ func cmdGen(args []string) {
 			for gen.Unpredictable(w) || !gen.Tested(gen.Classify(w)) {
 				w = g(r)
 			}
-			cw.add(r, "gen/"+gen.Classify(w), w, 1)
+			k := 1
+			if gen.IsFP(gen.Classify(w)) {
+				k = *fpk
+			}
+			cw.add(r, "gen/"+gen.Classify(w), w, k)
 		}
 	}
 	groups := []string{"br", "dpi", "dpr", "ls", "simd", "vls"}
@@ -195,7 +214,13 @@ func cmdHarvest(args []string) {
 	perClass := fs.Int("per-class", 6000, "keep at most this many distinct words per class (0 = all), sampled uniformly")
 	first := fs.Int("first-id", 1, "first case id")
 	fs.IntVar(&gen.DCZID, "dczid", gen.DCZID, "DCZID_EL0 of the reference machine (runner -dczid)")
+	fpk := fs.Int("fp-k", 0, "states per harvested word of the fp.* classes (0: same as -k)")
+	only := fs.String("only", "", "regexp: keep only harvested words whose class matches")
 	fs.Parse(args)
+	var onlyRe *regexp.Regexp
+	if *only != "" {
+		onlyRe = regexp.MustCompile(*only)
+	}
 	seen := map[uint32]bool{}
 	var words []uint32
 	total, skipped := 0, map[string]int{}
@@ -207,7 +232,7 @@ func cmdHarvest(args []string) {
 			}
 			seen[w] = true
 			cls := gen.Classify(w)
-			if !gen.Tested(cls) {
+			if !gen.Tested(cls) || onlyRe != nil && !onlyRe.MatchString(cls) {
 				skipped[cls]++
 				continue
 			}
@@ -235,6 +260,9 @@ func cmdHarvest(args []string) {
 			cls += "!unpredictable"
 		}
 		kk := *k
+		if gen.IsFP(gen.Classify(w)) && *fpk > 0 {
+			kk = *fpk
+		}
 		if gen.Conditional(gen.Classify(w)) {
 			kk = 1
 		}

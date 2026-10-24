@@ -119,6 +119,19 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 	if h.DF != m.DF {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("rflags: DF hw %v model %v (in %v)", h.DF, m.DF, c.RFlags&L.FlagDF != 0))
 	}
+	if h.MXCSR != "" {
+		in := c.MXCSR
+		if in == "" {
+			in = fmt.Sprintf("%#x", L.DefaultMXCSR)
+		}
+		switch {
+		case m.MXCSR == "":
+			v.Diffs = append(v.Diffs, fmt.Sprintf("mxcsr: hw %s model (missing) (in %s)", h.MXCSR, in))
+		case hexv(h.MXCSR) != hexv(m.MXCSR):
+			v.Diffs = append(v.Diffs, fmt.Sprintf("mxcsr: hw %s model %s (in %s) [%s vs %s]", h.MXCSR, m.MXCSR, in,
+				mxcsrString(hexv(h.MXCSR)), mxcsrString(hexv(m.MXCSR))))
+		}
+	}
 	if hexv(h.PC) != hexv(m.PC) {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("pc: hw %s (pc%+d) model %s (pc%+d)", h.PC,
 			int64(hexv(h.PC)-L.TestPC), m.PC, int64(hexv(m.PC)-L.TestPC)))
@@ -190,7 +203,7 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 			k = "xmm"
 		case strings.HasPrefix(k, "ymmh"):
 			k = "ymmh"
-		case k != "pc" && k != "rflags" && k != "mem":
+		case k != "pc" && k != "rflags" && k != "mem" && k != "mxcsr":
 			k = "reg"
 		}
 		if len(kinds) == 0 || kinds[len(kinds)-1] != k {
@@ -206,4 +219,26 @@ func show(mm map[int]int, off int) string {
 		return fmt.Sprintf("%#02x", b)
 	}
 	return "(unchanged)"
+}
+
+// mxcsrString renders MXCSR as flags/DAZ/masks/RC/FTZ, e.g. "flags=PU daz masks=IDZOUP rc=0 ftz".
+func mxcsrString(m uint64) string {
+	names := "IDZOUP"
+	var f, k strings.Builder
+	for i := 0; i < 6; i++ {
+		if m>>i&1 == 1 {
+			f.WriteByte(names[i])
+		}
+		if m>>(7+i)&1 == 1 {
+			k.WriteByte(names[i])
+		}
+	}
+	s := fmt.Sprintf("flags=%s masks=%s rc=%d", f.String(), k.String(), m>>13&3)
+	if m>>6&1 == 1 {
+		s += " daz"
+	}
+	if m>>15&1 == 1 {
+		s += " ftz"
+	}
+	return s
 }
