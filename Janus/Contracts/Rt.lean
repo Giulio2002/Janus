@@ -1,0 +1,139 @@
+import Janus.Contracts.AllocAmd64
+
+/-!
+# Runtime contracts from ISA-independent specifications
+
+The allocation contracts (`Janus.Contracts.Alloc`) spell out each function's precondition and
+postcondition per ISA. The string, slice and write-barrier contracts (`Janus.Contracts.String`,
+`Janus.Contracts.Slice`, `Janus.Contracts.WriteBarrier`) are many more functions with the same
+call shape, so they are stated once, ISA-independently, as an `RtSpec`: what the function needs
+and does in terms of its **argument words** (the Go ABIInternal integer arguments in order, as
+numbers) and memory. `RtContract` (arm64) and `RtContract64` (amd64) turn an `RtSpec` into a
+`Summary` hypothesis with the ISA's calling convention:
+
+* **arguments**: arm64 `X0, X1, …` (`argWords`); amd64 `RAX, RBX, RCX, RDI, RSI, R8, R9, R10,
+  R11` and, past the ninth word, the stack words at `[RSP + 8, …)` (`argWords64`; Go passes an
+  argument that no longer fits in registers on the stack, e.g. the last string of
+  `concatstring5`);
+* **the call** (`CallOK`/`CallOK64`): an admissible return address, an aligned stack pointer and
+  the stack window `[SP - stack, SP + 8 + 8·nargs)` writable; when the spec asks for it, the
+  stack guard of `g` below `SP - adj` (`GuardOK`: the function's own stack check falls through,
+  so it neither grows nor moves the stack);
+* **readiness** (round 9 C1): when the spec allocates or otherwise depends on the runtime's own
+  state, `Ready H rt args s` for the caller-quantified `H : RtReady`;
+* **the return**: to the return address, with `SP`, `g`, the frame pointer (and on arm64 `R18`)
+  preserved, results `r₀, r₁, r₂` in the first three result registers (`X0–X2`; `RAX, RBX,
+  RCX`), every other register, the flags and the vector registers unspecified;
+* **memory**: changed only inside the runtime-owned ranges `rt`, the callee's stack window and
+  the spec's `writes args` (e.g. a caller's `tmpBuf`), regions unchanged, and the spec's `post`
+  relates the old memory, the results and the new memory.
+-/
+
+namespace Janus.Contracts
+
+/-- An ISA-independent runtime contract: see the module documentation. -/
+structure RtSpec where
+  /-- The number of argument words (also the spill area the callee may write). -/
+  nargs : Nat
+  /-- The precondition on the argument words and the memory. -/
+  pre : List Nat → Janus.Arm64.Memory → Prop
+  /-- The ranges the function may write besides `rt` and its stack window (from the argument
+  words and the memory at the call). -/
+  writes : List Nat → Janus.Arm64.Memory → List (Nat × Nat) := fun _ _ => []
+  /-- `some adj`: the function's stack check must fall through (`stackguard0 + adj < SP`). -/
+  guard : Option Nat := none
+  /-- Whether the precondition includes the runtime's readiness `H` (round 9 C1). -/
+  ready : Bool := true
+  /-- The postcondition: the runtime-owned ranges, the argument words, the old memory, the three
+  result words and the new memory. -/
+  post : List (Nat × Nat) → List Nat → Janus.Arm64.Memory → Nat → Nat → Nat → Janus.Arm64.Memory → Prop
+
+/-- `n` words from `f i` for `i = k, k+1, …` (a cons list, so that literal indices reduce). -/
+def wordsFrom (f : Nat → Nat) : Nat → Nat → List Nat
+  | _, 0 => []
+  | k, n + 1 => f k :: wordsFrom f (k + 1) n
+
+@[janus_exec, janus_post, janus64_exec, janus64_post] theorem wordsFrom_zero (f : Nat → Nat) (k : Nat) :
+    wordsFrom f k 0 = [] := rfl
+@[janus_exec, janus_post, janus64_exec, janus64_post] theorem wordsFrom_succ (f : Nat → Nat) (k n : Nat) :
+    wordsFrom f k (n + 1) = f k :: wordsFrom f (k + 1) n := rfl
+
+section Arm64
+
+open Janus Janus.Arm64 Janus.Tactic
+
+/-- The argument words of an arm64 call: `X0, X1, …`. -/
+def argWords (s : State) (n : Nat) : List Nat := wordsFrom (fun i => (s.regs i).toNat) 0 n
+
+attribute [janus_exec, janus_post] argWords
+
+/-- The precondition of `RtContract` (arm64). -/
+@[reducible] def RtPre (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (sp : RtSpec)
+    (s : State) : Prop :=
+  CallOK s stack sp.nargs ∧ sp.pre (argWords s sp.nargs) s.mem ∧
+    (∀ adj, sp.guard = some adj → Janus.Spec.GuardOK s adj) ∧
+    (sp.ready = true → Ready H rt (argWords s sp.nargs) s)
+
+/-- The postcondition of `RtContract` (arm64). -/
+@[reducible] def RtPost (rt : List (Nat × Nat)) (stack : Nat) (sp : RtSpec) (s s' : State) : Prop :=
+  ∃ (r0 r1 r2 : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
+    s' = retState s junk [r0, r1, r2] f v m ∧
+      MemFrame s.mem m (rt ++ calleeStack s stack sp.nargs ++ sp.writes (argWords s sp.nargs) s.mem) ∧
+      sp.post rt (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat m
+
+/-- **The arm64 contract of `sp` at `addr`**: a `Summary` of the linked program (see the module
+documentation). -/
+def RtContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady)
+    (sp : RtSpec) : Prop :=
+  Summary p addr (RtPre rt stack H sp) (RtPost rt stack sp)
+
+end Arm64
+
+section Amd64
+
+open Janus Janus.Amd64 Janus.Amd64.Tactic
+
+/-- The argument words of an amd64 call: `RAX, RBX, RCX, RDI, RSI, R8, R9, R10, R11`, then the
+stack words at `[RSP + 8, …)`. -/
+def argWords64 (s : State) (n : Nat) : List Nat :=
+  wordsFrom (fun i => if i < 9 then (s.regs (GoABI.argReg i)).toNat
+    else s.mem.readLE ((s.regs 4).toNat + 8 + 8 * (i - 9)) 8) 0 n
+
+attribute [janus64_exec, janus64_post] argWords64
+
+/-- The stack check of an amd64 function falls through: `g` (`R14`) points at a readable
+`stackguard0` below `RSP - adj`. -/
+def GuardOK64 (s : State) (adj : Nat) : Prop :=
+  (s.regs 14).toNat + 24 ≤ 2 ^ 48 ∧ s.mem.accessible ((s.regs 14).toNat + 16) 8 false = true ∧
+    s.mem.readLE ((s.regs 14).toNat + 16) 8 + adj < (s.regs 4).toNat
+
+/-- The precondition of `RtContract64`. -/
+@[reducible] def RtPre64 (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (sp : RtSpec)
+    (s : State) : Prop :=
+  CallOK64 s stack sp.nargs ∧ sp.pre (argWords64 s sp.nargs) s.mem ∧
+    (∀ adj, sp.guard = some adj → GuardOK64 s adj) ∧
+    (sp.ready = true → Ready64 H rt (argWords64 s sp.nargs) s)
+
+/-- The postcondition of `RtContract64`. -/
+@[reducible] def RtPost64 (rt : List (Nat × Nat)) (stack : Nat) (sp : RtSpec) (s s' : State) :
+    Prop :=
+  ∃ (r0 r1 r2 : W64) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
+    s' = retState64 s junk [r0, r1, r2] f x yh m ∧
+      MemFrame s.mem m (rt ++ calleeStack64 s stack sp.nargs ++ sp.writes (argWords64 s sp.nargs) s.mem) ∧
+      sp.post rt (argWords64 s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat m
+
+/-- **The amd64 contract of `sp` at `addr`**. -/
+def RtContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+    (H : RtReady) (sp : RtSpec) : Prop :=
+  Summary p addr (RtPre64 rt stack H sp) (RtPost64 rt stack sp)
+
+end Amd64
+
+/-- A weaker postcondition and a stronger precondition give a weaker contract (arm64). -/
+theorem RtContract.mono {p : Janus.Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
+    {H : RtReady} {sp : RtSpec} (h : RtContract p addr rt stack H sp)
+    {pre' : Janus.Arm64.State → Prop} (hpre : ∀ s, pre' s → RtPre rt stack H sp s) :
+    Janus.Tactic.Summary p addr pre' (RtPost rt stack sp) :=
+  Janus.Tactic.Summary.mono h hpre fun _ _ _ h => h
+
+end Janus.Contracts

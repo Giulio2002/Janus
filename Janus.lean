@@ -21,6 +21,10 @@ import Janus.Spec.Basic
 import Janus.Spec.String
 import Janus.Contracts.Alloc
 import Janus.Contracts.AllocAmd64
+import Janus.Contracts.Rt
+import Janus.Contracts.String
+import Janus.Contracts.Slice
+import Janus.Contracts.WriteBarrier
 import Janus.Spec.Dynamic
 import Janus.Tactic.Dynamic
 import Janus.Spec.Map

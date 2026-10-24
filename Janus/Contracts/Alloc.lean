@@ -94,8 +94,10 @@ def pageSize : Nat := 8192
 def maxAlloc : Nat := 2 ^ 48
 
 /-- The smallest size class holding `n` bytes (`n ≤ 32768`). This is what the runtime's tables
-`SizeToSizeClass8`/`SizeToSizeClass128` compute (they are generated as exactly this lookup). -/
-def classSize (n : Nat) : Nat := firstAtLeast sizeClasses n
+`SizeToSizeClass8`/`SizeToSizeClass128` compute (they are generated as exactly this lookup);
+a zero request is class 0, of size 0 (`SizeToSizeClass8[0] = 0`, `SizeClassToSize[0] = 0`), so
+`roundupsize 0 = 0` as in Go (`rawbyteslice(0)` makes a slice of capacity 0). -/
+def classSize (n : Nat) : Nat := if n = 0 then 0 else firstAtLeast sizeClasses n
 where
   /-- The first element of the list that is at least `n` (`n` if there is none). -/
   firstAtLeast : List Nat → Nat → Nat
@@ -140,7 +142,11 @@ theorem classSize_firstAtLeast_ge (cs : List Nat) (n : Nat) : n ≤ classSize.fi
     · assumption
     · exact ih
 
-theorem le_classSize (n : Nat) : n ≤ classSize n := classSize_firstAtLeast_ge _ _
+theorem le_classSize (n : Nat) : n ≤ classSize n := by
+  unfold classSize
+  split
+  · omega
+  · exact classSize_firstAtLeast_ge _ _
 
 /-- The block is at least the requested size. -/
 theorem le_roundupsize (size : Nat) (noscan : Bool) : size ≤ roundupsize size noscan := by
@@ -181,7 +187,7 @@ theorem blockSize_le_maxSmallSize (size : Nat) (noscan : Bool) (h : size ≤ max
       have : req ≤ 32768 := by
         rw [← hreq]; simp only [maxSmallSize, mallocHeaderSize] at *; split <;> omega
       have := classSize_firstAtLeast_le sizeClasses req 32768 this hcs
-      simp only [classSize, maxSmallSize] at *; omega
+      simp only [classSize, maxSmallSize] at *; split <;> omega
     · simp only [maxSmallSize, pageSize] at *
       have : (size + 8192 - 1) / 8192 ≤ 4 := by omega
       omega
