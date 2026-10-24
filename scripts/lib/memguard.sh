@@ -149,10 +149,19 @@ _mg_report() {
   local msg
   msg="memguard[$1]: peak $(_mg_fmt "$2") / limit $(_mg_fmt "$3") ($5)"
   [ "$4" = 1 ] && msg="$msg OOM-KILLED: the command exceeded its memory limit"
+  [ "$4" = 2 ] && msg="$msg (a nested guard killed one of its jobs)"
   echo "$msg" >&2
 }
 
-_mg_killed() { awk '($1 == "oom_kill" || $1 == "oom_group_kill") && $2 > 0 { k = 1 } END { exit !k }' "$1/memory.events" 2>/dev/null; }
+# _mg_killed CG: CG's own limit was hit and something under it was OOM-killed. A kill caused by
+# a nested guard's smaller limit (janus's per-job cgroups) is that guard's to report.
+_mg_killed() {
+  _mg_nested_kill "$1" || return 1
+  [ -e "$1/memory.events.local" ] || return 0
+  awk '$1 == "oom" && $2 > 0 { k = 1 } END { exit !k }' "$1/memory.events.local" 2>/dev/null
+}
+# _mg_nested_kill CG: something under CG (at any depth) was OOM-killed.
+_mg_nested_kill() { awk '($1 == "oom_kill" || $1 == "oom_group_kill") && $2 > 0 { k = 1 } END { exit !k }' "$1/memory.events" 2>/dev/null; }
 
 _mg_eff_limit() {
   local p="$1" lim="" v
@@ -184,7 +193,7 @@ _mg_cgroup_run() {
     exec "$@" )
   rc=$?
   peak=$(cat "$d/memory.peak" 2>/dev/null || echo 0)
-  _mg_killed "$d" && killed=1
+  if _mg_killed "$d"; then killed=1; elif _mg_nested_kill "$d"; then killed=2; fi
   lim=$(_mg_eff_limit "$d")
   echo 1 > "$d/cgroup.kill" 2>/dev/null || true
   find "$d" -depth -type d -exec rmdir {} + 2>/dev/null

@@ -533,16 +533,9 @@ func memLimitDiag(g *memGuard, ev memEvent, cause error) *diag {
 		Next: "Raise the per-job limit with JANUS_MEM_MAX (e.g. JANUS_MEM_MAX=32G; default min(24G, 40% of RAM)) if the host has the memory, " +
 			"or make the proof (or what it imports) need less memory."}
 	if cd, ok := cause.(*diag); ok && cd != nil && cd.Stage != "resource limit" {
-		d.Details = "The step that failed reported (" + cd.Stage + "): " + firstLine(cd.Msg)
+		d.Details = "The killed job interrupted the stage: " + cd.Stage
 	}
 	return d
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
 }
 
 // memOutcome is applied to the result of one verification that started at mark: a job killed
