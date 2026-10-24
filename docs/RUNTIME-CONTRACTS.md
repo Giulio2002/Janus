@@ -157,7 +157,7 @@ added by a contract (no instruction can add one, so such a contract would be uns
 the theorem vacuous): the arena memory is among the regions already, as Go's heap arenas are
 reserved address space.
 
-**Examples** (`examples/basic/alloc.go`; arm64 `examples/proofs/`, amd64 `examples/proofs-amd64/`):
+**Examples** (`examples/basic/zalloc.go`; arm64 `examples/proofs/`, amd64 `examples/proofs-amd64/`):
 
 | Function | Contract | Guarantee |
 |---|---|---|

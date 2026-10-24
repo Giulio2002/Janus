@@ -1,3 +1,6 @@
+// This file is named to sort after the others, so that adding it left the addresses of the
+// earlier example functions unchanged (some audit fixtures name them).
+
 package basic
 
 // The functions below allocate on the heap. Their proofs treat the runtime's allocator

@@ -266,17 +266,17 @@ theorem fast_path (sz typ nz : BitVec 64) :
     ⟨a34, a35, a36, a37⟩, ⟨a45, a46, a47⟩, ⟨a56, a57⟩, a67⟩ := hsp
   simp only [rd, h_dm, h_gb, h_t8, h_ts, h_wb, h_mp, h_glo, h_ghi, gOf, mOf, pOf, cOf, scOf, csOf,
     spanOf, cacheOf, fidxOf, nelemsOf, baseOf, eszOf, resOf, slotOf, FastPost] at *
-  have hsc8 := Memory.readLE_lt s.mem (1444608 + (sz.toNat + 7) / 8) 1
+  have hsc8 := Memory.readLE_lt s.mem ((janus_eval% sizeToClass8) + (sz.toNat + 7) / 8) 1
   have hctz := ctzN_lt 64 _ (by rw [Nat.mod_eq_of_lt (Memory.readLE_lt _ _ 8)]; exact hca)
   have hbab := Memory.readLE_lt s.mem (s.mem.readLE (s.mem.readLE (s.mem.readLE (s.mem.readLE
     (BitVec.toNat (s.regs 28) + 48) 8 + 208) 8 + 56) 8 + 48 + 8 * (2 * s.mem.readLE
-    (1444608 + (sz.toNat + 7) / 8) 1 + 1)) 8 + 24) 8
+    ((janus_eval% sizeToClass8) + (sz.toNat + 7) / 8) 1 + 1)) 8 + 24) 8
   have hesb := Memory.readLE_lt s.mem (s.mem.readLE (s.mem.readLE (s.mem.readLE (s.mem.readLE
     (BitVec.toNat (s.regs 28) + 48) 8 + 208) 8 + 56) 8 + 48 + 8 * (2 * s.mem.readLE
-    (1444608 + (sz.toNat + 7) / 8) 1 + 1)) 8 + 104) 8
+    ((janus_eval% sizeToClass8) + (sz.toNat + 7) / 8) 1 + 1)) 8 + 104) 8
   have hacb := Memory.readLE_lt s.mem (s.mem.readLE (s.mem.readLE (s.mem.readLE (s.mem.readLE
     (BitVec.toNat (s.regs 28) + 48) 8 + 208) 8 + 56) 8 + 48 + 8 * (2 * s.mem.readLE
-    (1444608 + (sz.toNat + 7) / 8) 1 + 1)) 8 + 96) 2
+    ((janus_eval% sizeToClass8) + (sz.toNat + 7) / 8) 1 + 1)) 8 + 96) 2
   have hnsb := Memory.readLE_lt s.mem (s.mem.readLE (s.mem.readLE (s.mem.readLE
     (BitVec.toNat (s.regs 28) + 48) 8 + 208) 8 + 56) 8) 8
   have hlkb := Memory.readLE_lt s.mem (s.mem.readLE (BitVec.toNat (s.regs 28) + 48) 8 + 264) 4
@@ -286,8 +286,8 @@ theorem fast_path (sz typ nz : BitVec 64) :
   generalize h_rdm : s.mem.readLE (BitVec.toNat (s.regs 28) + 48) 8 = mv at *
   generalize h_rdp : s.mem.readLE (mv + 208) 8 = pv at *
   generalize h_rdc : s.mem.readLE (pv + 56) 8 = cv at *
-  generalize h_rdsc : s.mem.readLE (1444608 + (sz.toNat + 7) / 8) 1 = scv at *
-  generalize h_rdcs : s.mem.readLE (1444768 + 2 * scv) 2 = csv at *
+  generalize h_rdsc : s.mem.readLE ((janus_eval% sizeToClass8) + (sz.toNat + 7) / 8) 1 = scv at *
+  generalize h_rdcs : s.mem.readLE ((janus_eval% classToSize) + 2 * scv) 2 = csv at *
   generalize h_rdsp : s.mem.readLE (cv + 48 + 8 * (2 * scv + 1)) 8 = spv at *
   generalize h_rdca : s.mem.readLE (spv + 56) 8 = cachev at *
   generalize h_rdfi : s.mem.readLE (spv + 48) 2 = fidxv at *
