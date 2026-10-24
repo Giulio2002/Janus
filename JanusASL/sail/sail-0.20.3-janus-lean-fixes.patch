@@ -1,0 +1,186 @@
+diff --git a/src/lib/rewrites.ml b/src/lib/rewrites.ml
+index 3931b8e92..c01d5bb44 100644
+--- a/src/lib/rewrites.ml
++++ b/src/lib/rewrites.ml
+@@ -2957,6 +2957,27 @@ let rec rewrite_var_updates (E_aux (expaux, ((l, _) as annot)) as exp) =
+           let v = E_aux (E_if (c, e1, e2), (gen_loc el, mk_tannot env typ)) in
+           Added_vars (v, tuple_pat (if overwrite then varpats else pat :: varpats))
+         )
++    | E_let (lpat, bind, body) when updates_vars body && updates_vars bind ->
++        (* JanusASL: both the binding and the body update variables, as the nested block
++           `{ hi = v[..]; lo = v[..] }` that rewrite_vector_concat_assignments makes of
++           `(hi @ lo) = v` does once blocks are lets. Thread the variables updated by either
++           out of the let, the binding's ones through its pattern (as for an E_let statement). *)
++        let vars, varpats =
++          IdSet.union (find_updated_vars bind) (find_updated_vars body)
++          |> IdSet.inter used_vars |> mk_var_exps_pats pl env
++        in
++        if vars = [] then Same_vars (rewrite_var_updates full_exp)
++        else (
++          let body = rewrite_var_updates (add_vars overwrite body vars) in
++          let lpat, bind =
++            match rewrite (IdSet.union used_vars (find_used_vars body)) bind lpat with
++            | Added_vars (b, p) -> (p, b)
++            | Same_vars b -> (lpat, b)
++          in
++          let typ = typ_of body in
++          let v = E_aux (E_let (lpat, bind, body), (gen_loc el, mk_tannot env typ)) in
++          Added_vars (v, tuple_pat (if overwrite then varpats else pat :: varpats))
++        )
+     | E_let (lpat, bind, body) when updates_vars body && not (updates_vars bind) ->
+         (* A let whose body updates variables (as rewrite_tuple_assignments
+            produces): its body returns them, as an if's branches do. Without
+diff --git a/src/sail_lean_backend/Sail/FakeReal.lean b/src/sail_lean_backend/Sail/FakeReal.lean
+index 84d18cb33..f465022ad 100644
+--- a/src/sail_lean_backend/Sail/FakeReal.lean
++++ b/src/sail_lean_backend/Sail/FakeReal.lean
+@@ -3,7 +3,12 @@ import THE_MODULE_NAME.Defs
+ 
+ namespace THE_MODULE_NAME
+ 
+-abbrev real := Float
++/- JanusASL: Sail's `real` as an exact rational (Lean core `Rat`), not `Float`.
++   The upstream file used `Float`: ASL computes SDIV/UDIV as RoundTowardsZero(Real(a) / Real(b)),
++   which a 53-bit mantissa gets wrong for 64-bit operands, and `round_down` was
++   `x.toUInt64.toNat`, which maps every negative value to 0. Only `sqrt_real` has no exact
++   rational meaning; it is not reached by the Janus slice and is defined via Float. -/
++abbrev real := Rat
+ 
+ -- val "neg_real" : real -> real
+ def neg_real (x : real) : real := -x
+@@ -20,38 +25,40 @@ def add_real (x y : real) : real := x + y
+ -- val "div_real" : (real, real) -> real
+ def div_real (x y : real) : real := x / y
+ 
+--- val sqrt = pure "sqrt_real" : real -> real
+-def sqrt_real (x : real) : real := Float.sqrt x
++-- val sqrt = pure "sqrt_real" : real -> real  (not exact; unused by the Janus slice)
++def sqrt_real (x : real) : real :=
++  let f := Float.sqrt (Float.ofInt x.num / Float.ofNat x.den)
++  if f.isFinite then Rat.ofInt (Float.toInt64 (f * 1048576.0)).toInt / 1048576 else 0
+ 
+ -- val "abs_real" : real -> real
+-def abs_real (x : real) : real := x.abs
++def abs_real (x : real) : real := if x < 0 then -x else x
+ 
+ -- val floor = pure "round_down" : real -> int
+-def round_down (x : real) : Int := x.toUInt64.toNat
++def round_down (x : real) : Int := x.floor
+ 
+ -- val ceil = pure "round_up" : real -> int
+-def round_up (x : real) : Int := round_down (x + 0.5)
++def round_up (x : real) : Int := x.ceil
+ 
+ -- val "to_real" : int -> real
+-def to_real (x : Int) : real := Float.ofInt x
++def to_real (x : Int) : real := Rat.ofInt x
+ 
+ -- val "eq_real" : (real, real) -> bool
+ def eq_real (x y : real) : Bool := x == y
+ 
+ -- val "lt_real" : (real, real) -> bool
+-def lt_real (x y : real) : Bool := x < y
++def lt_real (x y : real) : Bool := decide (x < y)
+ 
+ -- val "gt_real" : (real, real) -> bool
+-def gt_real (x y : real) : Bool := x > y
++def gt_real (x y : real) : Bool := decide (x > y)
+ 
+ -- val "lteq_real" : (real, real) -> bool
+-def lteq_real (x y : real) : Bool := x ≤ y
++def lteq_real (x y : real) : Bool := decide (x ≤ y)
+ 
+ -- val "gteq_real" : (real, real) -> bool
+-def gteq_real (x y : real) : Bool := x ≥ y
++def gteq_real (x y : real) : Bool := decide (x ≥ y)
+ 
+ -- val pow_real = pure "real_power" : (real, int) -> real
+-def real_power (x : real) (n : Int) : real := Float.pow x (Float.ofInt n)
++def real_power (x : real) (n : Int) : real := x ^ n
+ 
+ -- val "print_real" : (string, real) -> unit
+ def print_real (_ : String) (_ : real) : Unit := ()
+diff --git a/src/sail_lean_backend/pretty_print_lean.ml b/src/sail_lean_backend/pretty_print_lean.ml
+index f32bac5ff..3988c918f 100644
+--- a/src/sail_lean_backend/pretty_print_lean.ml
++++ b/src/sail_lean_backend/pretty_print_lean.ml
+@@ -973,11 +973,18 @@ and doc_exp (as_monadic : bool) ctx (E_aux (e, (l, annot)) as full_exp) =
+             )
+     )
+   | E_vector vals ->
+-      if is_bitvector_typ (typ_of full_exp) then
+-        nest 2
+-          (wrap_with_pure as_monadic
+-             (parens (flow space [string "BitVec.join1"; brackets (separate_map comma_sp (d_of_arg ctx) vals)]))
+-          )
++      if is_bitvector_typ (typ_of full_exp) then (
++        match vals with
++        | [v] ->
++            (* JanusASL: a one-bit vector [b] is b itself (bit = bits(1)); printing it without
++               BitVec.join1 avoids Lean 4.34 unifying [a].length =?= [b].length by evaluating a, b *)
++            nest 2 (wrap_with_pure as_monadic (parens (d_of_arg ctx v ^^ string " : BitVec 1")))
++        | _ ->
++            nest 2
++              (wrap_with_pure as_monadic
++                 (parens (flow space [string "BitVec.join1"; brackets (separate_map comma_sp (d_of_arg ctx) vals)]))
++              )
++      )
+       else
+         string "#v"
+         ^^ wrap_with_pure as_monadic (brackets (nest 2 (separate_map comma_sp (d_of_arg ctx) (List.rev vals))))
+@@ -990,6 +997,20 @@ and doc_exp (as_monadic : bool) ctx (E_aux (e, (l, annot)) as full_exp) =
+       let is_arrow_do = match e with E_let _ when not has_loop -> false | _ -> true in
+       let id_typ = doc_pat ctx false lpat in
+       let typ_ascription = doc_pat_typ_ascription ctx env lpat in
++      (* JanusASL: ascribe effectful integer lets, `let x ← ((do e) : SailM Int)`. Without it Lean
++         elaborates e by its first branch: in asl_Int, `if u then pure (toNat x) else pure (toInt x)`
++         became SailM Nat, and lean-sail's `CoeT Int x Nat` then truncated every negative value
++         to 0 (SDIV/SMULH/SMADDL results). *)
++      let typ_ascription =
++        match (typ_ascription, lpat) with
++        | None, P_aux ((P_id _ | P_var _ | P_typ (_, P_aux ((P_id _ | P_var _), _))), _)
++          when has_effect lexp || has_loop -> (
++            let t = typ_of lexp in
++            let base = match t with Typ_aux (Typ_exist (_, _, t'), _) -> t' | _ -> t in
++            if is_number base then Some (doc_typ ctx env base) else typ_ascription
++          )
++        | _ -> typ_ascription
++      in
+       let ctx = update_ctx_pat ctx lpat in
+       let pp_let_line_f l = group (nest 2 (flow (break 1) l)) in
+       let pp_let_line =
+@@ -1057,6 +1078,20 @@ and doc_exp (as_monadic : bool) ctx (E_aux (e, (l, annot)) as full_exp) =
+         | LE_deref e' -> string "writeRegRef " ^^ d_of_arg ctx e' ^^ space ^^ d_of_arg ctx e
+         | _ -> failwith ("assign " ^ string_of_lexp le ^ "not implemented yet")
+         )
++  | E_if (i, t, e) when as_monadic ->
++      (* JanusASL: a monadic `if` is printed as a parenthesised term with `do` branches,
++         `(if c then (do t) else (do e))`, not as a `do`-notation `if` statement: for a statement
++         `if` followed by more code, Lean 4.34's `do` elaborator builds a join point, and that
++         fails ("Failed to assign join point RHS") when later types depend on let-bound
++         variables (sail-arm's Mem_set__2). The `do` keeps an `←` nested in a branch inside it. *)
++      let branch x = parens (string "do " ^^ align (doc_exp true ctx x)) in
++      parens
++        (nest 2 (string "if (" ^^ nest 1 (d_of_arg ctx i) ^^ string " : Bool)")
++        ^^ hardline
++        ^^ prefix 2 1 (string "then") (branch t)
++        ^^ hardline
++        ^^ prefix 2 1 (string "else") (branch e)
++        )
+   | E_if (i, t, e) ->
+       let statements_monadic = as_monadic || has_effect t || has_effect e in
+       nest 2 (string "if (" ^^ nest 1 (d_of_arg ctx i) ^^ string " : Bool)")
+@@ -1087,8 +1122,11 @@ and doc_exp (as_monadic : bool) ctx (E_aux (e, (l, annot)) as full_exp) =
+   | _ -> failwith ("Expression " ^ string_of_exp_con full_exp ^ " " ^ string_of_exp full_exp ^ " not translatable yet.")
+ 
+ and doc_fexp with_arrow ctx (FE_aux (FE_fexp (field, e), _)) =
+-  let arrow = if with_arrow then leftarrow ^^ space else empty in
+-  doc_id_ctor ctx field ^^ string " := " ^^ arrow ^^ nest 2 (doc_exp with_arrow ctx e)
++  (* JanusASL: a monadic field value is printed `f := (← do <e>)`, as the backend does for
++     other monadic subexpressions; the plain `f := ← <e>` form does not parse when <e> is a
++     line-broken `if`, and an `←` nested inside its branches would have no enclosing `do` *)
++  if with_arrow then doc_id_ctor ctx field ^^ string " := " ^^ wrap_with_do true true (doc_exp true ctx e)
++  else doc_id_ctor ctx field ^^ string " := " ^^ nest 2 (doc_exp with_arrow ctx e)
+ 
+ let doc_binder ctx env i t =
+   let parenthesizer =
