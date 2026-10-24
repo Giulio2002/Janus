@@ -197,6 +197,27 @@ for ns in "" --unsafe-no-sandbox; do
   rm -rf $O'
 done
 
+# ASL corollary forgeries (docs/ASL.md, audit/asl/attacks): proofs whose main theorem verifies
+# but which try to forge the --asl corollary. Each must print "Invalid: ASL corollary"; the honest
+# Add control must derive it. Needs the JanusASL build (about an hour once): JANUS_AUDIT_ASL=1.
+asl_v() { # asl_v PROOF [flags…]: the ASL verdict line and its stage
+  local out; out=$("$J" verify --janus-root "$root" --asl "$@" 2>&1)
+  if grep -q '^ASL corollary: Verified' <<<"$out"; then
+    echo "Verified (ASL corollary derived)"
+  else
+    printf '%s [%s]' "$(grep -m1 -E '^Invalid' <<<"$out" | cut -c1-100)" "$(grep -m1 'Stage: ASL' <<<"$out" | sed 's/.*Stage: //')"
+  fi
+}
+if [ "${JANUS_AUDIT_ASL:-}" = 1 ]; then
+  row ASL.control_Add Verified "$(asl_v --proof examples/proofs/Add.lean $W/Add)"
+  for a in X1_shadow_toASL X3_plant_words X4_plant_corollary X5_elab_override X6_other_program X7_reserved_name; do
+    row "ASL.$a" blocked "$(asl_v --proof audit/asl/attacks/$a.lean $W/Add)"
+  done
+  row ASL.X2_own_toASL blocked "$(asl_v --proof audit/asl/attacks/X2_own_toASL.lean --theorem Proof.correctness_asl $W/Add)"
+else
+  printf '%-28s %-8s %s\n' "ASL.*" skipped "set JANUS_AUDIT_ASL=1 (builds JanusASL once, about an hour)"
+fi
+
 par_run 'echo "model controls (audit/model/Model.lean):"
 if lake env lean audit/model/Model.lean >/dev/null 2>&1; then
   echo "  Model.lean: all decide controls pass, including M1-M3 now faulting (blocked by F5)"

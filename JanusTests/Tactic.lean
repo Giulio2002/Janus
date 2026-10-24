@@ -952,4 +952,29 @@ theorem loop_spec (x : W64) (hx : x.toNat < 2 ^ 62) :
         (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp)
         (by janus_simp) (by janus_simp) (by janus_simp)
 
+/-! ## Path merging (`janus.merge`)
+
+`cmp x0, #10; b.hs 1f; add x1, x1, #1; 1: add x0, x0, x2; tst x2, #1; b.eq 2f; mov x3, #7;
+b 3f; 2: mov x3, #9; cmp x3, #3; 3: add x0, x0, #4; ret`: two diamonds. The first rejoins with
+`x1` written on one side only, the second with `x3` and the flags differing. With
+`janus.merge` the paths are merged at each join (the differing registers become variables), so
+a single goal reaches the return. -/
+
+def diamondp : Program where
+  segments := [{ name := "diamond", base := 0x70000, words := [0xf100281f, 0x54000042,
+    0x91000421, 0x8b020000, 0xf240005f, 0x54000060, 0xd28000e3, 0x14000003, 0xd2800123,
+    0xf1000c7f, 0x91001000, 0xd65f03c0] }]
+  stubs := []
+  exitAddr := 0
+
+theorem diamond_spec (x y z : W64) :
+    Ensures diamondp 0x70000 [x, y, z] (fun _ => True)
+      (fun _ s' => s'.regs 0 = x + z + 4#64) := by
+  intro ret hret s hs _
+  janus_intro hs
+  -- stop at the second join: the four paths arrive there as one goal (without merging, four
+  -- goals would remain and the single `·` below would leave three unsolved)
+  set_option janus.merge true in janus_run until [0x70028]
+  · janus_run
+
 end JanusTests.Tactic

@@ -25,7 +25,7 @@ leanOptions.weak.linter.style.nameCheck = false
 
 [[lean_lib]]
 name = "JanusASL"
-roots = ["JanusASL.Proofs"]
+roots = ["JanusASL.Proofs", "JanusASL.Classify", "JanusASL.Verify"]
 
 [[lean_exe]]
 name = "janus-asl-check"

@@ -185,15 +185,38 @@ var allowForbidden bool
 
 func runCase(c *L.Case, seq int64) L.HW {
 	r := L.HW{ID: c.ID}
-	b, err := hex.DecodeString(strings.TrimPrefix(c.Bytes, "0x"))
-	if err != nil || len(b) == 0 || len(b) > 15 {
-		r.Status, r.Note = "error", "bad bytes"
-		return r
+	var b []byte
+	var err error
+	if len(c.Seq) > 0 {
+		// audit/rt-model sequence mode: every instruction is checked on its own
+		for _, h := range c.Seq {
+			x, err := hex.DecodeString(strings.TrimPrefix(h, "0x"))
+			if err != nil || len(x) == 0 || len(x) > 15 {
+				r.Status, r.Note = "error", "bad seq bytes"
+				return r
+			}
+			if L.Forbidden(x) || L.IsRepString(x) {
+				r.Status, r.Note = "error", "forbidden encoding in seq (refused)"
+				return r
+			}
+			b = append(b, x...)
+		}
+		if len(b) > 0x600 {
+			r.Status, r.Note = "error", "seq too long"
+			return r
+		}
+	} else {
+		b, err = hex.DecodeString(strings.TrimPrefix(c.Bytes, "0x"))
+		if err != nil || len(b) == 0 || len(b) > 15 {
+			r.Status, r.Note = "error", "bad bytes"
+			return r
+		}
+		if L.Forbidden(b) && !allowForbidden {
+			r.Status, r.Note = "error", "forbidden encoding (refused)"
+			return r
+		}
 	}
-	if L.Forbidden(b) && !allowForbidden {
-		r.Status, r.Note = "error", "forbidden encoding (refused)"
-		return r
-	}
+	seqEnd := uint64(L.TestPC + len(b))
 	for i := range code {
 		code[i] = 0xCC
 	}
@@ -275,9 +298,16 @@ func runCase(c *L.Case, seq int64) L.HW {
 	g := func(i int) uint64 { return get64(ctx, L.CtxOutGRegs+8*i) }
 	// A REP string instruction traps after every iteration with RIP still at TestPC (SDM
 	// Vol. 3 §18.3.1.4): re-enter it from the captured state until RIP moves on or it faults.
-	if L.IsRepString(b) {
+	// Sequence mode re-enters from the captured state at the captured RIP while it stays inside
+	// the sequence (straight-line code: at most one step per instruction, plus slack).
+	if L.IsRepString(b) || len(c.Seq) > 0 {
 		for int(get64(ctx, L.CtxSig)) == sigTRAP && int(int32(get64(ctx, L.CtxCode))) == L.TrapTrace &&
-			g(gRIP) == L.TestPC && r.Iters < 1<<16 {
+			((len(c.Seq) == 0 && g(gRIP) == L.TestPC && r.Iters < 1<<16) ||
+				(len(c.Seq) > 0 && g(gRIP) >= L.TestPC && g(gRIP) < seqEnd && r.Iters < 4*len(c.Seq))) {
+			reRIP := uint64(L.TestPC)
+			if len(c.Seq) > 0 {
+				reRIP = g(gRIP)
+			}
 			r.Iters++
 			for i := 0; i < 16; i++ {
 				put64(ctx, L.CtxInRegs+8*i, g(gregOf[i]))
@@ -296,7 +326,7 @@ func runCase(c *L.Case, seq int64) L.HW {
 				put64(ctx, L.CtxInMXCSR, m&L.MXCSRMask)
 			}
 			efl := g(gEFL)
-			put64(ctx, L.CtxFrame, L.TestPC)
+			put64(ctx, L.CtxFrame, reRIP)
 			put64(ctx, L.CtxFrame+8, userCS)
 			put64(ctx, L.CtxFrame+16, efl&(L.StatusFlags|L.FlagDF)|0x202|tf)
 			put64(ctx, L.CtxFrame+24, g(gRSP))
@@ -350,6 +380,9 @@ func runCase(c *L.Case, seq int64) L.HW {
 		r.Status = "selfloop"
 	case sig == sigTRAP && r.Code == L.TrapTrace:
 		r.Status = "ok"
+	case len(c.Seq) > 0 && pc >= L.TestPC && pc < seqEnd:
+		// a sequence instruction faulted (a hardware fault leaves RIP at the instruction)
+		r.Status = "fault"
 	case pc == L.TestPC:
 		r.Status = "fault"
 	case sig == sigTRAP && pc > L.TestPC && pc <= L.TestPC+16:

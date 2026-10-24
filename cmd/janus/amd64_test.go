@@ -243,10 +243,12 @@ func TestAmd64List(t *testing.T) {
 	}
 }
 
-func TestAmd64BlockersRejected(t *testing.T) {
-	code, _, stderr := runJanus(t, "blockers", exampleAmd64(t), "example.com/basic.Add")
-	if code != 1 || !strings.Contains(stderr, "arm64 binaries only") {
-		t.Fatalf("blockers on amd64 (%d): %s", code, stderr)
+func TestAmd64Blockers(t *testing.T) {
+	code, out, stderr := runJanus(t, "blockers", exampleAmd64(t), "example.com/basic.Add", "example.com/basic.AddThree",
+		"--janus-root", repoRoot)
+	if code != 0 || !strings.Contains(out, "example.com/basic.Add: 1 function(s)") ||
+		!strings.Contains(out, "all decoded") || !strings.Contains(out, "Janus.Amd64.decode") {
+		t.Fatalf("blockers on amd64 (%d): %s%s", code, out, stderr)
 	}
 }
 
