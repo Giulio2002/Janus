@@ -4,6 +4,7 @@ import Janus.Arm64.Bits
 import Janus.Arm64.Decode
 import Janus.Arm64.Vector
 import Janus.Arm64.ExecFloat
+import Janus.Arm64.ExecNeon
 
 /-!
 # AArch64 execution semantics for the supported subset
@@ -927,6 +928,8 @@ def exec (i : Instr) (s : State) : Except Fault State :=
     .ok (if sf then execRev 64 s opc rn rd else execRev 32 s opc rn rd).next
   | .clz sf rn rd => .ok (if sf then execClz 64 s rn rd else execClz 32 s rn rd).next
   | .cls sf rn rd => .ok (if sf then execCls 64 s rn rd else execCls 32 s rn rd).next
+  -- Advanced SIMD classes of `NeonInstr` (`Janus.Arm64.ExecNeon`)
+  | .neon i => execNeon i s
 
 /-- Decode and execute the word `w` fetched at `s.pc`. -/
 def step (w : Nat) (s : State) : Except Fault State :=
