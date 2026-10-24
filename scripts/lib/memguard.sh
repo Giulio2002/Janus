@@ -125,7 +125,8 @@ _mg_detect() {
 memguard_jobs() {
   local per cap lim avail n
   per=$(memguard_bytes "${1:?memguard_jobs PER_JOB [CAP]}") || return 1
-  cap="${2:-$(nproc 2>/dev/null || echo 4)}"
+  # CPU cap (as janus's leanThreadsMax): JANUS_LEAN_THREADS_MAX, else max(2, nproc/8).
+  cap="${2:-${JANUS_LEAN_THREADS_MAX:-$(( $(nproc 2>/dev/null || echo 16) / 8 > 2 ? $(nproc 2>/dev/null || echo 16) / 8 : 2 ))}}"
   lim=$(memguard_limit)
   avail=$(( $(_mg_meminfo MemAvailable) - _MG_HEADROOM ))
   if [ -z "$lim" ] || [ "$avail" -lt "$lim" ]; then lim=$avail; fi
