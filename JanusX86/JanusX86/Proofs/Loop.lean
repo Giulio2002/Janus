@@ -66,3 +66,21 @@ theorem run_forIn_bind {β γ : Type} (start stop : Int) (hsp : (1 : Int) ≠ 0)
   exact hfin b σ h2
 
 end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+/-- `run_forIn_gen` for a goal `P ((forIn r init f >>= g).run s)`. -/
+theorem run_forIn_bind_ex {β γ : Type} (start stop : Int) (hsp : (1 : Int) ≠ 0) (init : β)
+    (f : Int → β → SailM (ForInStep β)) (g : β → SailM γ) (S : Int → β → SState → Prop) (s : SState)
+    (P : EStateM.Result (Sail.Error exception) SState γ → Prop)
+    (hle : start ≤ stop + 1) (h0 : S start init s)
+    (hstep : ∀ i b σ, start ≤ i → i ≤ stop → S i b σ →
+      ∃ b' σ', (f i b).run σ = .ok (.yield b') σ' ∧ S (i + 1) b' σ')
+    (hfin : ∀ b σ, S (stop + 1) b σ → P ((g b).run σ)) :
+    P (((forIn ({ start := start, stop := stop, step_pos := hsp } : IntRange) init f) >>= g).run s) := by
+  obtain ⟨b, σ, h1, h2⟩ := run_forIn_gen start stop hsp init f S s hle h0 hstep
+  rw [run_bind, h1]
+  exact hfin b σ h2
+
+end JanusX86.Proofs
