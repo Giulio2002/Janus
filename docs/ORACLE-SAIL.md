@@ -170,6 +170,17 @@ and must not be read as "the architecture says so":
   `STXR/STLXR/STXP` appear where qemu reports a failed store. The ASL order (alignment check
   first) is Arm's; whether aborts are detected before the monitor check is IMPLEMENTATION
   DEFINED.
+
+  Since Janus models the store-exclusives (docs/SOUNDNESS.md), Janus-vs-Sail runs `janus-oracle
+  --monitor-stub`: before each store-exclusive the model's monitor is set to mark exactly that
+  store's bytes, which is the stub's view, so "pass" is among the model's outcomes (`alts`, see
+  docs/ORACLE.md "Nondeterministic outcomes"), and the comparator requires Sail's result to be
+  one of them. That checks the data path, the status register, register overlaps, alignment and
+  faults of every store-exclusive against Arm's ASL. The parts the stub cannot judge (the Open
+  Access state fails; a store-exclusive to the marked bytes opens the monitor) are checked against
+  qemu only, where the corpus contains them deterministically (`gen/seq.excl`). Sequence-mode
+  cases (field `words`) are stepped by the driver until the PC leaves the block, like the qemu
+  runner.
 * **`sail-unpredictable`**: sail-arm stubs `ConstrainUnpredictable*()` with
   `__UNKNOWN_*()`, which is deterministically the first enum value (`Constraint_NONE`), and the
   crate's `step_a64` turns `Error_Unpredictable` into UNDEFINED. `instrument_model.py` counts

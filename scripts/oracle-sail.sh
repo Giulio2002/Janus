@@ -129,8 +129,15 @@ for line in sys.stdin:
 ' "$sail_dczid" < "$OUT/cases.jsonl" > "$OUT/cases.sail-dczid.jsonl"
 
   echo "== Janus vs Sail (hardware := Sail, State.dczid := Sail's)"
+  # sail-arm stubs the exclusive monitor (IsExclusiveLocal/IsExclusiveGlobal/IsExclusiveVA are
+  # TRUE: every store-exclusive passes), so Janus runs with --monitor-stub: each store-exclusive
+  # first gets a monitor marking its own bytes, which makes "pass" one of the model's outcomes.
+  # The Open-state rule (fail) is checked against qemu only (docs/ORACLE-SAIL.md).
+  janus_stub="$OUT/janus-vs-sail/janus-monitor-stub.sh"
+  printf '#!/bin/sh\nexec %s --monitor-stub "$@"\n' "$janus_bin" > "$janus_stub"
+  chmod +x "$janus_stub"
   cp "$OUT/sail.jsonl" "$OUT/janus-vs-sail/hw.jsonl"
-  "$oracle_bin" run -reuse-native -model "$janus_bin" -j "$JOBS" \
+  "$oracle_bin" run -reuse-native -model "$janus_stub" -j "$JOBS" \
     -cases "$OUT/cases.sail-dczid.jsonl" -out "$OUT/janus-vs-sail" > /dev/null
   cp "$OUT/janus-vs-sail/model.jsonl" "$OUT/janus.jsonl"
 
@@ -148,7 +155,7 @@ for line in sys.stdin:
 
   if grep -q '"verdict":"MISMATCH"' "$OUT/janus-vs-sail/verdicts.jsonl"; then
     echo "== minimize Janus-vs-Sail mismatches (Sail as the runner)"
-    JANUS_SAIL_JOBS=1 "$oracle_bin" minimize -qemu "" -runner "$sail_bin" -model "$janus_bin" \
+    JANUS_SAIL_JOBS=1 "$oracle_bin" minimize -qemu "" -runner "$sail_bin" -model "$janus_stub" \
       -out "$OUT/janus-vs-sail" -max 200 > /dev/null
     echo "minimal reproductions: $OUT/janus-vs-sail/repro.md"
   fi
@@ -156,7 +163,7 @@ for line in sys.stdin:
   mkdir -p "$OUT/spalign"
   python3 -I "$here/spalign.py" "$OUT/cases.sail-dczid.jsonl" > "$OUT/spalign/cases.in.jsonl"
   if [ -s "$OUT/spalign/cases.in.jsonl" ]; then
-    JANUS_SAIL_JOBS=1 "$oracle_bin" run -qemu "" -runner "$sail_bin" -model "$janus_bin" -j "$JOBS" \
+    JANUS_SAIL_JOBS=1 "$oracle_bin" run -qemu "" -runner "$sail_bin" -model "$janus_stub" -j "$JOBS" \
       -cases "$OUT/spalign/cases.in.jsonl" -out "$OUT/spalign" > /dev/null
     sed -n 5p "$OUT/spalign/summary.md"
   else
