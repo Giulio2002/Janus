@@ -6,7 +6,8 @@ import Janus.Tools.Audit
 `janus-audit <theorem> <proof module> <marker> <trusted module> [<dependency root> …]` runs
 `JanusAudit.runImpl` (`Janus.Tools.Audit`) with exactly the arguments the trusted `Audit.lean`
 script passes to `JanusAudit.run`, and prints the same record. `janus verify` runs it sandboxed,
-with the verification's `LEAN_PATH`.
+with the verification's `LEAN_PATH`. `janus-audit --asl …` runs the ASL corollary audit
+(`JanusAudit.runASLImpl`) of `janus verify --asl` the same way.
 
 Compiled rather than elaborated: the auditor's own code runs natively instead of in the
 interpreter, and the process starts with no imported modules, so the audited and the clean
@@ -24,9 +25,13 @@ def main (args : List String) : IO UInt32 := do
     | none => findSysroot
   initSearchPath sysroot
   match args with
+  | "--asl" :: userThm :: proofMod :: corThm :: corMod :: marker :: trusted :: words :: depRoots =>
+    -- `janus verify --asl`: the ASL corollary audit (`JanusAudit.runASLImpl`)
+    unsafe JanusAudit.runASLImpl userThm proofMod corThm corMod marker trusted words depRoots.toArray
+    return 0
   | thm :: proofMod :: marker :: trusted :: depRoots =>
     unsafe JanusAudit.runImpl thm proofMod marker trusted depRoots.toArray
     return 0
   | _ =>
-    IO.eprintln "usage: janus-audit <theorem> <proof module> <marker> <trusted module> [<dependency root> ...]"
+    IO.eprintln "usage: janus-audit <theorem> <proof module> <marker> <trusted module> [<dependency root> ...]\n       janus-audit --asl <theorem> <proof module> <corollary> <corollary module> <marker> <trusted module> <coverage theorem> [<dependency root> ...]"
     return 2

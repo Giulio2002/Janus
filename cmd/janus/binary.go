@@ -39,6 +39,9 @@ type Binary struct {
 
 	text     []byte
 	textAddr uint64
+	// goText is the address of runtime.text, the base of the pclntab's function offsets: the
+	// start of .text, except in an externally linked (cgo) binary, where C code comes first.
+	goText uint64
 
 	sections []section // allocated sections (in memory at run time), sorted by address
 	dataSyms []Func    // non-function symbols with a size (data objects), sorted by address
@@ -62,6 +65,60 @@ type section struct {
 }
 
 func (s section) End() uint64 { return s.Addr + s.Size }
+
+// validateSegments checks that every file-backed allocated section (the bytes the extractor
+// copies: .text, .rodata, literal pools, .gopclntab, ...) is backed by a PT_LOAD segment that
+// maps it with a consistent file-offset -> virtual-address delta, and that the segment holding
+// `.text` is executable. The kernel loads only through PT_LOAD, so this makes the bytes Janus
+// reads at a virtual address equal to the bytes that execute there. A mismatch (a lying section
+// header, which a normal `go build` never produces) is rejected. See docs/AUDIT-MODEL.md EX1.
+func validateSegments(f *elf.File, path string) error {
+	// covers reports whether PT_LOAD p maps the [addr, addr+size) / [off, off+size) range of a
+	// section with a single consistent delta (off - p.Off == addr - p.Vaddr), inside the file
+	// image of the segment (Filesz, not Memsz: we only read file bytes).
+	covers := func(p *elf.Prog, addr, off, size uint64) bool {
+		if p.Type != elf.PT_LOAD {
+			return false
+		}
+		if off < p.Off || off+size > p.Off+p.Filesz {
+			return false
+		}
+		if addr < p.Vaddr || addr+size > p.Vaddr+p.Filesz {
+			return false
+		}
+		return off-p.Off == addr-p.Vaddr
+	}
+	for _, s := range f.Sections {
+		// Only sections with file bytes the extractor can read: allocated, not NOBITS (.bss),
+		// nonzero. NOBITS sections carry no file content and are never copied.
+		if s.Flags&elf.SHF_ALLOC == 0 || s.Type == elf.SHT_NOBITS || s.Size == 0 {
+			continue
+		}
+		var seg *elf.Prog
+		for _, p := range f.Progs {
+			if covers(p, s.Addr, s.Offset, s.Size) {
+				seg = p
+				break
+			}
+		}
+		if seg == nil {
+			return &diag{
+				Msg: fmt.Sprintf("section %s of %s (vaddr 0x%x, file offset 0x%x, size 0x%x) is not covered by a PT_LOAD segment with a matching file-to-address mapping; the bytes the kernel maps at that address would differ from the section's bytes, so Janus would reason about code or data that does not execute",
+					s.Name, path, s.Addr, s.Offset, s.Size),
+				Stage: "binary validation",
+				Next:  "Use an unmodified executable produced by go build (the section and segment headers must agree).",
+			}
+		}
+		if s.Name == ".text" && seg.Flags&elf.PF_X == 0 {
+			return &diag{
+				Msg:   fmt.Sprintf(".text of %s is mapped by a non-executable PT_LOAD segment; it is not the executed code", path),
+				Stage: "binary validation",
+				Next:  "Use an unmodified executable produced by go build.",
+			}
+		}
+	}
+	return nil
+}
 
 // loadBinary reads and validates path. Failures are diagnostics (*diag).
 func loadBinary(path string) (*Binary, error) { return loadBinaryMode(path, false) }
@@ -145,11 +202,25 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 		return nil, &diag{Msg: path + " has no .text section", Stage: "binary validation",
 			Next: "Use an unmodified executable produced by go build."}
 	}
+	// The extractor copies code and read-only data by *section header* (vaddr + file offset),
+	// but the kernel maps the image by *program header* (PT_LOAD). Those are two independent
+	// descriptions of the file, and the loader ignores section headers entirely. If they
+	// disagree — a corrupted or hand-edited `.text`/`.rodata` section header, or an unusual
+	// linker layout — the bytes Janus reads at a vaddr are not the bytes that execute there,
+	// so a theorem would be about different bytes than run. `janus check` would not catch it
+	// (it re-reads the same section headers). Validate that every file-backed allocated section
+	// is covered by a PT_LOAD whose file->vaddr mapping matches the section, with `.text`
+	// executable, so the byte at any vaddr Janus reads equals the byte the kernel maps there.
+	// (rt-model, docs/AUDIT-MODEL.md EX1.)
+	if err := validateSegments(f, path); err != nil {
+		return nil, err
+	}
 	if b.text, err = text.Data(); err != nil {
 		return nil, &diag{Msg: fmt.Sprintf("cannot read .text of %s: %v", path, err), Stage: "binary validation",
 			Next: "Use an unmodified executable produced by go build."}
 	}
 	b.textAddr = text.Addr
+	b.goText = text.Addr
 
 	for _, s := range f.Sections {
 		if s.Flags&elf.SHF_ALLOC == 0 || s.Size == 0 {
@@ -176,6 +247,9 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 			}
 		}
 		for _, s := range syms {
+			if s.Name == "runtime.text" && s.Section != elf.SHN_UNDEF {
+				b.goText = s.Value
+			}
 			if t := elf.ST_TYPE(s.Info); (t == elf.STT_OBJECT || t == elf.STT_NOTYPE) && s.Size > 0 &&
 				s.Section != elf.SHN_UNDEF && s.Section < elf.SHN_LORESERVE {
 				b.dataSyms = append(b.dataSyms, Func{Name: s.Name, Addr: s.Value, Size: s.Size})

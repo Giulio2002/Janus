@@ -1,0 +1,4 @@
+sail-arm=7d0581642d0e3aaca367bbc5650aca7c53057543
+sail=0.20.3+JanusASL/sail/sail-0.20.3-upstream-backports.patch+JanusASL/sail/sail-0.20.3-janus-lean-fixes.patch
+lean-sail=8fc8e29d7a62f832346cc7548953e44ec17bc271
+model=arm-v9.4-a, sliced to the Janus subset (JanusASL/sail/keep.txt)

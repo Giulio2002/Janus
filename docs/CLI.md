@@ -355,7 +355,7 @@ binary moved, `--binary` names its new location; its SHA-256 must still match.
 
 ```sh
 janus verify <outdir> [--proof FILE] [--theorem NAME] [--proof-root PKG [--allow-path-deps]] [--json]
-             [--fresh] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox]
+             [--fresh] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox] [--asl]
 janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 ```
 
@@ -388,6 +388,17 @@ pinned). `--json` prints the report as JSON; `--fresh` rebuilds the framework/ca
 scratch (and replays every module, ignoring the replay cache); `--replay-fresh` additionally
 replays the theorem's module with `leanchecker --fresh`, re-checking its whole environment,
 Lean core included, from an empty environment (slow: minutes).
+
+`--asl` additionally derives the theorem's **ASL corollary**: the same statement about Arm's ASL
+(the Sail arm-v9.4-a model translated to Lean), from `JanusASL`'s `Ensures.toASL` applied to the
+verified theorem about the identity-checked `Extracted.program`, after the kernel has checked that
+every instruction word is in the subset proved equivalent to the ASL. It is audited by the same
+trusted auditor, kernel-replayed (ArmASL included) and recorded under `asl` in `verified.json`,
+with the model's version and hash and the assumptions in plain words; `janus explain` prints it.
+A failure of this stage (`ASL coverage`, `ASL corollary`, `ASL audit`, …) prints `Invalid: ASL
+corollary: …` and exits 1, but leaves the verified theorem and its `verified.json` in place. **The
+first `--asl` run builds the JanusASL package in the cache: about an hour and 1 GB**, once per
+framework and JanusASL version. Details: [docs/ASL.md](ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem).
 
 ### Threat model: the proof is untrusted code
 
@@ -552,7 +563,10 @@ limit, the largest measured `memory.peak` of its jobs and how many jobs ran.
 
 * `JANUS_MEM_MAX`: the per-job limit (`16G`, `1500M`, `off`); default min(24 GiB, 40% of RAM).
   `lake build` gets `LEAN_NUM_THREADS` (lake's job count) = limit / `JANUS_LAKE_JOB_MEM` (default
-  3G), at most the number of CPUs.
+  3G), at most `JANUS_LEAN_THREADS_MAX`.
+* `JANUS_LEAN_THREADS_MAX`: a CPU cap on one job's Lean parallelism (lake's job count, and the
+  default of `memguard_jobs` in `scripts/lib/memguard.sh`); default max(2, CPUs/8), so that
+  several concurrent jobs on one host do not each take every core.
 * Mechanism, first that works: a child cgroup of a delegated `$JANUS_MEMGUARD_CGROUP` (set by
   `scripts/lib/memguard.sh`, so janus's limits nest inside a script's or a parallel slot's);
   `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0` (janus re-runs itself in the
@@ -570,7 +584,8 @@ See docs/TESTING.md (Memory guard) for the measured peaks.
 
 `janus framework [--json]` prints which Janus Lean framework the binary carries: its source
 (`embedded` or a `--janus-root` directory), the SHA-256 over its sources, the toolchain and the
-revision it was built from. This is the revision a consumer package pins its `janus` dependency
+revision it was built from, and the JanusASL package `--asl` uses (its hashes, the cache
+directory of its build and whether it is built yet). This is the revision a consumer package pins its `janus` dependency
 to; `janus init` writes it for you.
 
 <a name="install"></a>
@@ -596,7 +611,11 @@ janus explain <verified.json | outdir>
 Prints the theorem and its statement, which function and address it is about, the binary and
 Go module, the axioms and kernel replay, the framework, the consumer package and its
 dependencies with their pinned revisions (if any), the dependency constants used and every
-recorded hash together with whether the file on disk still matches it.
+recorded hash together with whether the file on disk still matches it. For an `--asl` report it
+also prints the ASL corollary, how it was derived, the instruction coverage, its assumptions in
+plain words (`Rel`, `LinuxEL0Config`, and `UserMapped` once load/store classes are proved), its
+axioms and replay, and the ASL model's version and SHA-256 (or why the corollary was not
+derived).
 
 ## Blockers
 
@@ -633,7 +652,7 @@ The exit code is `0` whenever the report was produced, including when words are 
 ## amd64 (x86-64) binaries
 
 `list`, `extract` and `check` (and therefore `verify`) also accept linux/amd64 Go ELF binaries
-(`EM_X86_64`, build setting `GOARCH=amd64`); `blockers` is arm64-only and refuses them.
+(`EM_X86_64`, build setting `GOARCH=amd64`); `blockers` handles them too: it sweeps each extracted function with x86asm (untrusted, it only finds instruction starts) and runs the bytes from each start, at most 15, through `Janus.Amd64.decode`. It reports an instruction when Lean rejects it, or when Lean decodes a different length than x86asm.
 
 ```
 scripts/build-examples-amd64.sh     # builds artifacts/examples-amd64, extracts artifacts/amd64/<Name>
@@ -663,7 +682,14 @@ Differences from arm64:
 go test ./cmd/...           # includes Lean verification (several minutes; needs bubblewrap)
 go test -short ./cmd/...    # extraction, check and package validation only
 audit/run-all.sh            # every attack in docs/AUDIT.md: each row blocked or honest
+JANUS_TEST_ASL=1 go test -run TestASL ./cmd/janus   # --asl: builds JanusASL once (about an hour)
 ```
+
+The `--asl` tests (`asl_test.go`) run only with `JANUS_TEST_ASL=1`; `JANUS_TEST_ASL_SEED=<dir>`
+seeds the test cache's JanusASL build from a built package (e.g. `JanusASL` after
+`scripts/asl.sh build`). They derive the corollaries of Add, Max, Mul64 and Add128 from their
+artifacts, check that Get's load is reported as uncovered, run the forgery attacks of
+`audit/asl/attacks` and the consumer and batch paths.
 
 The Lean tests need a working sandbox (bubblewrap, or unprivileged user namespaces); on Ubuntu
 24.04 runners that restrict them via AppArmor, CI runs

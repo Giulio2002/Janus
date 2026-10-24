@@ -23,9 +23,13 @@ scripts/asl.sh build    # unpack the vendored model and build the package (about
 scripts/asl.sh check    # build + janus-asl-check on artifacts/oracle/cases.jsonl
 scripts/asl.sh prove    # build JanusASL.Proofs and audit their axioms
 scripts/asl.sh replay   # kernel-replay JanusASL.Proofs with leanchecker, in batches
+scripts/asl.sh verify   # janus verify --asl on the shipped Add, Max, Mul64, Add128 proofs
 ```
 
 The build runs as many Lean processes at once as fit a 24 GiB budget (see "Memory" below).
+
+`janus verify <outdir> --proof P.lean --asl` turns a verified theorem into the same statement
+about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of-a-verified-theorem)).
 
 ## Results
 
@@ -33,7 +37,8 @@ The build runs as many Lean processes at once as fit a 24 GiB budget (see "Memor
 |---|---|
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
 | `janus-asl-check` | **562,288 agree, 21,468 gap, 0 MISMATCH**; `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 7 min on 48 cores |
-| proofs | **44 audited theorems** (an explicit list in JanusASL/Audit.lean, with every statement printed): 36 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree` and 4 example transfers (`*.correctness_asl`), no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
+| proofs | **40 audited theorems** plus `JanusASL.Verify.classify_sound` (an explicit list in JanusASL/Audit.lean, with every statement printed): 36 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`; no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
+| `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
 
 Agreement by corpus class (`agree` / `gap`):
 
@@ -231,19 +236,21 @@ X0–X30, SP, PC and NZCV, so this transfers exactly the register part of a post
 postcondition about memory, V registers, TPIDR_EL0 or DCZID_EL0 holds of the Janus state, and the
 corollary says nothing about the corresponding ASL state (the four examples are register-only).
 
-It is applied to four shipped examples. In each case the program is copied from
-`artifacts/<name>/Extracted.lean`, the Janus proof is copied verbatim from
-`examples/proofs/<name>.lean`, and every word is shown to be in the proved subset:
+`janus verify --asl` applies it to any verified theorem of that shape, about the very
+`Extracted.program` that was identity-checked against the binary
+([below](#janus-verify---asl-the-corollary-of-a-verified-theorem)). For the shipped examples:
 
-| example | instructions | ASL corollary |
+| example | instructions | ASL corollary (`janus verify artifacts/<name> --proof examples/proofs/<name>.lean --asl`) |
 |---|---|---|
-| `Add` | ADD, RET | `JanusASL.Examples.Add.correctness_asl` |
-| `Max` | CMP (SUBS), B.cs, MOV (ORR), RET, both sides of the branch | `JanusASL.Examples.Max.correctness_asl` |
-| `Mul64` | MUL (MADD), UMULH, MOV, RET | `JanusASL.Examples.Mul64.correctness_asl` |
-| `Add128` | ADDS, ADC, RET | `JanusASL.Examples.Add128.correctness_asl` |
+| `Add` | ADD, RET | `(js'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64` after `aslRun` returns |
+| `Max` | CMP (SUBS), B.cs, MOV (ORR), RET, both sides of the branch | `js'.regs 0 = if y.toNat < x.toNat then x else y` |
+| `Mul64` | MUL (MADD), UMULH, MOV, RET | the 128-bit product in `X0:X1` |
+| `Add128` | ADDS, ADC, RET | the carry chain, modulo `2^128` |
 
 So for these programs the shipped guarantee, for example "Add returns x + y", holds of Arm's ASL
-(as translated) under `LinuxEL0Config`.
+(as translated) under `LinuxEL0Config`. Earlier versions copied the four programs by hand into
+`JanusASL/Proofs/Examples.lean`; those copies are gone, and the corollaries now come from the
+artifacts (`cmd/janus` test `TestASLExamples`, and `.github/workflows/asl.yml`).
 
 The other classes are covered by the corpus test. Loads and stores go through the full
 translation table walk (next on the list), and AdvSIMD/AES and the system instructions are
@@ -284,6 +291,114 @@ environment and fails if any `JanusASL.Proofs.*_agree` theorem depends on an axi
 `Lean.ofReduceBool`, so no `native_decide` or `bv_decide`. Once the model is built (`scripts/asl.sh
 build`), the proofs take about 80 CPU-minutes, about 30 min at 3 jobs. Most of that is the 22
 decode-chain parts, at 2–5 min each.
+
+## `janus verify --asl`: the corollary of a verified theorem
+
+```sh
+janus verify artifacts/Add --proof examples/proofs/Add.lean --asl
+```
+
+```text
+Verified: Proof.correctness
+  …
+ASL corollary: Verified: JanusASLCorollary.correctness_asl (Arm's ASL, model 1ac61b021dc05f49…)
+  Coverage: all 2 words in the proved subset (addSubShifted 1, ret 1)
+  Axioms: Classical.choice, Quot.sound, propext
+  Kernel replay: leanchecker passed (ArmASL, ArmASL.Defs, …; 116 modules; …)
+  Statement:
+    JanusASLCorollary.correctness_asl (x y : BitVec 64) {ret : Nat} (hret : Janus.GoABI.RetAddr Extracted.program ret)
+      {js : Janus.Arm64.State} (hs : Janus.GoABI.CallSetup (Extracted.program.withExit ret) Extracted.entry [x, y] js)
+      (hpre : True) {s : JanusASL.Proofs.SState} (h : JanusASL.Proofs.Rel js s) (hc : JanusASL.Proofs.LinuxEL0Config s) :
+      ∃ fuel s' js', JanusASL.Proofs.aslRun (Extracted.program.withExit ret) fuel s = JanusASL.Proofs.AslOutcome.returned s' ∧
+        JanusASL.Proofs.Rel js' s' ∧ JanusASL.Proofs.LinuxEL0Config s' ∧ Janus.GoABI.ABIReturn js js' ∧
+        BitVec.toNat (js'.regs 0) = (x.toNat + y.toNat) % 2 ^ 64
+  Assumptions (see janus explain):
+    - Rel js s: …
+    - LinuxEL0Config s: …
+```
+
+`--asl` works for single proof files, consumer packages (`--proof-root`) and `verify-batch`. It
+runs after the main verification has passed, and **never changes its result**: when the ASL stage
+fails, `verified.json` still records the verified theorem, its `asl` record says
+`"status": "invalid"` with the failure, and janus prints `Invalid: ASL corollary: …` with the stage
+and exits with status 1.
+
+The theorem must be an arm64 `Ensures` specification about `Extracted.program` itself:
+`∀ xs, Janus.GoABI.Ensures Extracted.program entry args pre post`, possibly behind definitions at
+the head of its conclusion (`EnsuresResults`, a consumer's `Computes … spec`), which are unfolded.
+The steps, each with its own stage:
+
+1. **`ASL build`.** The JanusASL package (this directory: `JanusASL/`, its proofs, the vendored
+   model `vendor/ArmASL.tar.gz`, checked against `ArmASL.tar.gz.sha256`) is embedded in the
+   `janus` binary like the framework (with `--janus-root`, `<root>/JanusASL` is used). It is
+   materialized in the trusted cache, `<cache>/v1/asl/<key>`, keyed by the framework's identity,
+   every JanusASL source (with the model), the toolchain and the framework build it requires,
+   and built there with Lake (`lake build ArmASL JanusASL`), trusted and unsandboxed: only Janus'
+   own sources and the pinned lean-sail are involved. **The first build takes about an hour**
+   (most of it elaborating the 24 ArmASL modules; about 40 min on 48 cores), needs about 1 GB of
+   disk and fetches lean-sail from GitHub; later runs only check Lake's traces (well under a
+   second). `janus framework` shows the build directory and whether it is built. Builds are
+   kept for `$JANUS_ASL_RETENTION_DAYS` (default 30) after their last use. Lake reuses modules
+   by content hash, so a build directory can be seeded from an in-tree build
+   (`scripts/asl.sh verify` does so from `JanusASL/.lake`). The compiled modules of the build
+   (JanusASL, ArmASL and lean-sail) are then **pinned** like the framework and re-checked after
+   every later step.
+2. **`ASL coverage`.** janus compiles, trusted (it imports only `Extracted` and
+   `JanusASL.Classify`), the module `JanusASLWords`:
+   `theorem JanusASLWords.covered : JanusASL.Classify.covered Extracted.program = true := by decide +kernel`.
+   `classify` (Classify.lean) tests, for each word, exactly the hypotheses of one
+   `stepOK_<class>` theorem of Run.lean; `JanusASL.Verify.classify_sound` proves that a
+   classified word is `StepOK`, and `covered` also checks that the code and stubs are untagged.
+   The kernel evaluates it on the identity-checked `Extracted.program`. If a word is not covered,
+   the stage fails and lists each one with its address, what Janus decodes it to and its Arm
+   encoding group, for example
+   `word 0xf9400b90 at 0x8cdd0 (example.com/basic.Div): Janus.Arm64.Instr.ldstUImm, loads and stores`;
+   `verified.json` has the list under `asl.coverage`, and the class counts.
+3. **`ASL corollary`.** janus compiles, sandboxed (it imports the untrusted proof), the module
+   `JanusASLCorollary`:
+   `janus_asl_corollary JanusASLCorollary.correctness_asl of <theorem> using JanusASLWords.covered`.
+   The command (Verify.lean) adds the theorem that `JanusAudit.aslCorollary` builds:
+   `fun xs => Ensures.toASL (thm xs) (covered_words _ w) (covered_code _ w) (covered_stubs _ w)`,
+   with the inferred, beta-reduced type. Lean rejects a proof that declares a name JanusASL or
+   the two generated modules declare (they cannot be imported together).
+4. **`ASL audit`.** The trusted auditor (`JanusAudit.runASL`, Janus/Tools/Audit.lean; no proof
+   code runs) checks that the corollary is a theorem of `JanusASLCorollary` whose type is
+   **exactly** `aslCorollary <theorem> JanusASLWords.covered`, recomputed by the same function
+   from the user's theorem; that `Extracted.program`/`entry` are definitionally the trusted copy;
+   that no untrusted module (the proof, a consumer or dependency module, the corollary module
+   apart from the corollary) declares a name under `Extracted`, `JanusASL`, `ArmASL`, `Sail`,
+   `JanusASLWords` or `JanusASLCorollary`; and it prints the statement in a clean environment
+   (`Extracted`, `Janus` and `JanusASL.Verify`), with the same instance checks and round-trip as
+   the main statement, and collects its axioms (only `propext`, `Quot.sound`,
+   `Classical.choice`).
+5. **Kernel replay.** `leanchecker` replays the corollary's whole non-core closure, the 24 ArmASL
+   modules, lean-sail and JanusASL included (about 100 s the first time, then from the replay
+   cache). Every JanusASL, ArmASL and Sail module must resolve from the pinned JanusASL build, and
+   no other directory of the verification may hold a module under those roots or the two
+   generated ones (`ASL module identity`).
+6. **`verified.json`** gets an `asl` record: `status`, `of` (the verified theorem), `theorem`,
+   `derivation`, `statement`, `statementExplicit`, `definitions`, `axioms`, `kernelReplay`,
+   `coverage`, `model` (`armASLSha256` of the vendored model, `janusASLSha256` over the JanusASL
+   sources, the sail-arm / Sail / lean-sail pins from `vendor/ArmASL.version`, the build
+   directory) and `assumptions`, the hypotheses in plain words. `janus explain` prints them.
+
+**What the corollary assumes.** Besides the user's own preconditions: `Rel js s` (the ASL state
+holds the Janus call state's registers, SP, PC and flags, at EL0), `LinuxEL0Config s` (the Linux
+EL0 configuration of `janus_init`, [above](#linuxel0config-configlean)), and the trust story below
+(the generated Lean model; instructions fetched with the program's own `fetch`; only returning
+runs transferred). When load/store classes are proved, their memory assumption (`UserMapped`: Janus'
+regions are identity-mapped user memory under the ASL's own translation) appears in the
+statement and in the plain-words list.
+
+**Attacks** (`audit/asl/attacks`, rows in `audit/run-all.sh` with `JANUS_AUDIT_ASL=1`, Go test
+`TestASLForgeryRejected`): a proof that declares `JanusASL.Proofs.Ensures.toASL` itself (X1),
+proves its own fake "ASL" theorem with a proof-local `Ensures.toASL` and asks for it (X2), plants
+`JanusASLWords.covered` (X3) or `JanusASLCorollary.correctness_asl` (X4), overrides the
+`janus_asl_corollary` command to add `True` under the corollary's name (X5: rejected by the
+auditor's type check), states its theorem about a `p` only assumed equal to `Extracted.program`
+(X6), or declares a look-alike under a reserved root (X7: the auditor's namespace rule). Each
+main theorem verifies; each ASL corollary is refused. A consumer package with a module under
+`JanusASL` is refused (`ASL module identity`, `TestASLConsumer`).
 
 ## The pipeline: what is reused, at which versions
 

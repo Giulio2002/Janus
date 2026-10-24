@@ -1,4 +1,5 @@
 import JanusASL.Proofs
+import JanusASL.Verify
 import Lean
 
 /-! # Red-team round ASL (docs/AUDIT-ASL.md): what `Rel`, `LinuxEL0Config` and the example
@@ -163,7 +164,39 @@ theorem wit_cfg (js : Janus.Arm64.State) : LinuxEL0Config (wit js) where
 theorem rel_cfg_satisfiable (js : Janus.Arm64.State) : ∃ s, Rel js s ∧ LinuxEL0Config s :=
   ⟨wit js, wit_rel js, wit_cfg js⟩
 
-/-! ## A3: the `Add` transfer as a statement about the ASL alone -/
+/-! ## A3: the `Add` transfer as a statement about the ASL alone
+
+The shipped `Add` program (the words `janus extract` copies for `example.com/basic.Add`), its
+shipped Janus proof, and its ASL transfer the way `janus verify --asl` derives it (`Ensures.toASL`
+with the facts of `JanusASL.Verify.covered_*` from a kernel-evaluated `covered`). The four
+hand-copied example programs are no longer in `JanusASL.Proofs.Examples`; this audit keeps its own
+copy of `Add`, since its point is the statement's meaning, not the binary. -/
+
+namespace AddProg
+open Janus.Tactic
+
+def program : Program :=
+  { segments := [{ name := "example.com/basic.Add", base := 0x930c0, words := [0x8b010000, 0xd65f03c0] }],
+    stubs := [], exitAddr := 0 }
+def entry : Nat := 0x930c0
+
+theorem correctness (x y : BitVec 64) :
+    Ensures program entry [x, y] (fun _ => True)
+      (fun _ s' => (s'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64) := by
+  intro ret hret s hs _
+  janus_intro hs
+  janus_run
+
+theorem covered : JanusASL.Classify.covered program = true := by decide +kernel
+
+theorem correctness_asl (x y : BitVec 64) {ret : Nat} (hret : RetAddr program ret) {js : State}
+    (hs : CallSetup (program.withExit ret) entry [x, y] js) {s : SState} (h : Rel js s) (hc : LinuxEL0Config s) :
+    ∃ fuel s' js', aslRun (program.withExit ret) fuel s = .returned s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧
+      ABIReturn js js' ∧ (js'.regs 0).toNat = (x.toNat + y.toNat) % 2 ^ 64 :=
+  Ensures.toASL (correctness x y) (JanusASL.Verify.covered_words _ covered) (JanusASL.Verify.covered_code _ covered)
+    (JanusASL.Verify.covered_stubs _ covered) hret hs trivial h hc
+
+end AddProg
 
 /-- The Janus state a Sail state holds (X0-X30, SP_EL0, PC, NZCV; empty memory). -/
 def ofSail (s : SState) : Janus.Arm64.State where
@@ -191,16 +224,16 @@ theorem ofSail_rel {s : SState} (hg : ∀ i < 31, ∃ v, gprVal s i = some v) {s
 /-- **A3.** `Add` under the ASL with no Janus state in the statement: from every Sail state in
 `LinuxEL0Config` holding a Go call of `Add` (X0 = x, X1 = y, X30 = ret, PC = entry; every GPR,
 SP_EL0 present), the ASL run returns to `ret` with `x + y` in X0. -/
-theorem Add_pure_asl (x y : BitVec 64) {ret : Nat} (hret : RetAddr JanusASL.Examples.Add.program ret)
+theorem Add_pure_asl (x y : BitVec 64) {ret : Nat} (hret : RetAddr AddProg.program ret)
     (s : SState) (hc : LinuxEL0Config s) (hg : ∀ i < 31, ∃ v, gprVal s i = some v) {sp : BitVec 64}
     (hsp : s.regs.get? .SP_EL0 = some sp) (h0 : gprVal s 0 = some x) (h1 : gprVal s 1 = some y)
     (h30 : gprVal s 30 = some (BitVec.ofNat 64 ret))
-    (hpc : s.regs.get? ._PC = some (BitVec.ofNat 64 JanusASL.Examples.Add.entry)) :
-    ∃ fuel s', aslRun (JanusASL.Examples.Add.program.withExit ret) fuel s = .returned s' ∧
+    (hpc : s.regs.get? ._PC = some (BitVec.ofNat 64 AddProg.entry)) :
+    ∃ fuel s', aslRun (AddProg.program.withExit ret) fuel s = .returned s' ∧
       ∃ r, gprVal s' 0 = some r ∧ r.toNat = (x.toNat + y.toNat) % 2 ^ 64 := by
   obtain ⟨p, hp, he, hn, hs⟩ := hc.pstate
   have hr := ofSail_rel hg hsp hpc hp he hn hs
-  have hcs : CallSetup (JanusASL.Examples.Add.program.withExit ret) JanusASL.Examples.Add.entry [x, y] (ofSail s) :=
+  have hcs : CallSetup (AddProg.program.withExit ret) AddProg.entry [x, y] (ofSail s) :=
     { pc := by simp [ofSail, hpc]
       lr := by simp [ofSail, regLR, h30, Program.withExit]
       args := by
@@ -210,7 +243,7 @@ theorem Add_pure_asl (x y : BitVec 64) {ret : Nat} (hret : RetAddr JanusASL.Exam
         | 0, _ => simp [ofSail, h0]
         | 1, _ => simp [ofSail, h1] }
   obtain ⟨fuel, s', js', hrun, hrel, _, _, hx⟩ :=
-    JanusASL.Examples.Add.correctness_asl x y hret hcs hr hc
+    AddProg.correctness_asl x y hret hcs hr hc
   exact ⟨fuel, s', hrun, js'.regs 0, hrel.gpr 0 (by omega), hx⟩
 
 end JanusASL.RedTeam
