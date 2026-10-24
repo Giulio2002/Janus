@@ -202,6 +202,29 @@ explains why it would not pay for the trusted state it would add.
   when control reaches it. A missed callee can make a theorem unprovable. It cannot make a
   false theorem provable.
 
+## The ASL corollary (`janus verify --asl`)
+
+`--asl` adds a second, separate guarantee: the verified `Ensures` theorem, transferred to Arm's
+ASL as translated to Lean (the JanusASL package, [docs/ASL.md](ASL.md)). Its statement is recorded
+under `asl` in `verified.json`; it says that from every ASL state related to the Go call state
+(`Rel`) under the Linux EL0 configuration (`LinuxEL0Config`), the ASL run of the extracted words
+returns to the caller in a state related to one satisfying the ABI and the postcondition.
+
+It is a corollary, not a new proof obligation: `Ensures.toASL` (kernel-checked, in JanusASL)
+applied to the verified theorem, with its three facts about the program (every word `StepOK`,
+untagged code and stubs) obtained from `JanusASL.Classify.covered Extracted.program = true`, which
+the kernel decides by evaluation on the identity-checked program. The trusted auditor checks the
+corollary's type is exactly that derivation from the verified theorem; no untrusted module may
+declare a JanusASL, ArmASL, Sail or generated-module name; the corollary's whole closure,
+the ArmASL model included, is kernel-replayed and its compiled modules are pinned.
+
+It additionally trusts what [docs/ASL.md](ASL.md#trust-story) lists: Arm's ASL to Sail
+(sail-arm), Sail's Lean backend with JanusASL's patches (checked against qemu and the C++ build
+of the same Sail on a 583,756-case corpus, not proved), the slice and splices, the `janus_step`
+harness and lean-sail. The ASL run fetches instructions with the program's own `fetch`, not the
+ASL's translated fetch, and only returning runs are transferred. Neither the trusted base nor the
+meaning of the main theorem changes: the ASL stage runs after it and cannot alter its result.
+
 ## What a theorem about `Returns` / `Ensures` says
 
 `GoABI.Ensures p entry args pre post` means: for **every** admissible return address `ret`

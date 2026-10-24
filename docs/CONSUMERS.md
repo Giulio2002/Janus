@@ -261,7 +261,7 @@ name (a capitalised identifier, not `Janus` or `Extracted`).
 ## Batch verification
 
 ```sh
-janus verify-batch requests.json [--results FILE] [--json] [--fresh] [--unsafe-no-sandbox] [--allow-path-deps]
+janus verify-batch requests.json [--results FILE] [--json] [--fresh] [--unsafe-no-sandbox] [--allow-path-deps] [--asl]
 ```
 
 ```json
@@ -290,12 +290,24 @@ stage; `--results FILE` writes every outcome as JSON in request order, each with
 `failure` (or `null`). The exit code is `0` only when every request verified. Every request first
 withdraws its previous `verified.json`; a failed request leaves none.
 
+With `--asl` every verified request also gets its ASL corollary ([docs/ASL.md](ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem));
+`janus verify --proof-root … --asl` does the same for one request. The JanusASL build is shared
+by the whole batch. A result's `asl` is `"verified"` or `"invalid"` (with `aslFailure`), printed
+as an `ASL:` line under its `PASS`; an ASL failure does not make the request fail (its
+`verified.json` keeps the theorem), but the batch exits 1 and reports `aslFailed`. A consumer
+theorem stated through its own definition (`Computes Extracted.program Extracted.entry spec`) is
+accepted when that definition unfolds to `Janus.GoABI.Ensures`. No consumer or dependency module
+may live under the `JanusASL`, `ArmASL`, `Sail`, `JanusASLWords` or `JanusASLCorollary` roots.
+
 ## Support cache
 
 Successful runs keep a local cache under `$JANUS_CACHE_DIR` (default `~/.cache/janus`):
 
 * the framework build (`v1/framework/<hash>`), built once per framework version and reused by
   every verification;
+* the JanusASL build for `--asl` (`v1/asl/<key>`), keyed by the framework, the JanusASL sources
+  with the vendored model, the toolchain and the framework build it requires; about an hour and
+  1 GB to build, kept for `$JANUS_ASL_RETENTION_DAYS` (default 30) after its last use;
 * consumer workspaces (`v1/consumer/<package+framework>/<extraction>`), keyed by the framework
   hash, the package root and the extraction. A second run with unchanged inputs rebuilds nothing;
   Lake decides reuse from its own traces, and a new extraction starts from a sibling workspace's

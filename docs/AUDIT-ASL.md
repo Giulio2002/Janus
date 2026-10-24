@@ -154,7 +154,7 @@ NZCV. The predicate's conjuncts are therefore not contradictory. No `*_agree`, `
 
 ## A3 (blocked): the example transfers say something about the ASL alone
 
-`Add_pure_asl` restates `JanusASL.Examples.Add.correctness_asl` with no Janus state anywhere.
+`Add_pure_asl` restates the `Add` transfer (`JanusASL.RedTeam.AddProg.correctness_asl`: the shipped `Add` words and proof, transferred the way `janus verify --asl` does it; the hand-copied `JanusASL.Examples.*` programs are gone) with no Janus state anywhere.
 Take any Sail state with `LinuxEL0Config` in which every GPR and SP_EL0 is present, X0 = x,
 X1 = y, X30 = ret (an admissible return address) and PC = the entry of Add. Then `aslRun`
 returns to `ret` with X0 = (x + y) mod 2^64. The proof constructs the Janus state from the Sail

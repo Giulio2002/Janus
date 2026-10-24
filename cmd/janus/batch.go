@@ -39,6 +39,9 @@ type batchResult struct {
 	Group     int          `json:"group"` // index into groups, -1 when none
 	Report    string       `json:"report,omitempty"`
 	Failure   *failureJSON `json:"failure"`
+	// ASL is the outcome of the ASL stage (--asl): "verified" or "invalid" (then ASLFailure).
+	ASL        string       `json:"asl,omitempty"`
+	ASLFailure *failureJSON `json:"aslFailure,omitempty"`
 }
 
 type batchGroup struct {
@@ -51,16 +54,18 @@ type batchGroup struct {
 }
 
 type batchResults struct {
-	Schema    int           `json:"schema"`
-	Passed    int           `json:"passed"`
-	Failed    int           `json:"failed"`
+	Schema int `json:"schema"`
+	Passed int `json:"passed"`
+	Failed int `json:"failed"`
+	// ASLFailed counts verified requests whose ASL stage failed (--asl).
+	ASLFailed int           `json:"aslFailed,omitempty"`
 	Snapshots int           `json:"snapshots"`
 	Groups    []batchGroup  `json:"groups"`
 	Results   []batchResult `json:"results"`
 }
 
 func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox", "allow-path-deps")
+	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
 	pos, opts, err := parseArgs(args, "results", "janus-root")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -68,7 +73,7 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 	if len(pos) != 1 {
 		return jsonFailure(stdout, flags["json"], usageErr("verify-batch takes exactly one requests file"))
 	}
-	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["allow-path-deps"], flags["json"], stdout, stderr)
+	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["allow-path-deps"], flags["json"], flags["asl"], stdout, stderr)
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
@@ -88,10 +93,14 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 		return &diag{Invalid: true, Msg: fmt.Sprintf("%d of %d request(s) failed.", res.Failed, len(res.Results)), Stage: "verify-batch",
 			Next: "See the FAIL lines above (or the failure field of each result) and rerun."}
 	}
+	if res.ASLFailed > 0 {
+		return &diag{Invalid: true, Msg: fmt.Sprintf("%d of %d verified request(s) have no ASL corollary (their theorems are verified).", res.ASLFailed, res.Passed),
+			Stage: "ASL", Next: "See the ASL lines above (or the aslFailure field of each result)."}
+	}
 	return nil
 }
 
-func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, quiet bool, stdout, stderr io.Writer) (*batchResults, error) {
+func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, quiet, asl bool, stdout, stderr io.Writer) (*batchResults, error) {
 	if err := memGuardConfigErr(); err != nil {
 		return nil, err
 	}
@@ -173,6 +182,16 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 		br.Report = filepath.ToSlash(filepath.Join(br.Outdir, "verified.json"))
 		res.Passed++
 		fmt.Fprintf(out, "PASS %s %s (module %s)\n", displayPath(r.Outdir), termSafe(r.Report.Theorem), termSafe(r.Report.Module))
+		if a := r.Report.ASL; a != nil {
+			br.ASL = a.Status
+			if a.Status == "verified" {
+				fmt.Fprintf(out, "  ASL: %s verified\n", termSafe(a.Theorem))
+			} else {
+				res.ASLFailed++
+				br.ASLFailure = a.Failure
+				fmt.Fprintf(out, "  ASL: NOT derived: %s\n  Stage: %s\n", strings.ReplaceAll(termSafe(a.Failure.Message), "\n", "\n  "), a.Failure.Stage)
+			}
+		}
 	}
 
 	fw, err := loadFramework(janusRoot)
@@ -198,6 +217,12 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 	if err != nil {
 		return nil, err
 	}
+	var aslB *aslBuild
+	if asl {
+		if aslB, err = buildASLFor(fw, "", lake, stderr); err != nil {
+			return nil, err
+		}
+	}
 
 	// Requests without a proof root are single-file verifications, one by one.
 	byRoot := map[string][]int{}
@@ -213,6 +238,9 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 			}
 			if unsafe {
 				opts["unsafe-no-sandbox"] = "true"
+			}
+			if asl {
+				opts["asl"] = "true"
 			}
 			mark := memMark()
 			r.Report, r.Err = verify(r.Outdir, opts, stderr)
@@ -291,6 +319,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 				}
 				continue
 			}
+			ws.asl = aslB
 			verifyGroup(fw, pkg, ws, greqs)
 			for _, r := range greqs {
 				r.Report, r.Err = memOutcome(mark, r.Report, r.Err)

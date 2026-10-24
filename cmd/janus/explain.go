@@ -88,6 +88,10 @@ func explain(w io.Writer, outdir, reportPath string, r *verifiedReport) {
 	}
 	p("")
 
+	if r.ASL != nil {
+		explainASL(p, r.ASL)
+	}
+
 	p("About which code")
 	id := readIdentityFile(filepath.Join(outdir, "identity.json"))
 	arch := ""
@@ -202,4 +206,55 @@ func readIdentityFile(path string) *identityWithRaw {
 	}
 	id.raw = b
 	return &id
+}
+
+// explainASL prints the ASL corollary of a --asl report and its assumptions.
+func explainASL(p func(string, ...any), a *aslReport) {
+	p("The same guarantee under Arm's ASL (janus verify --asl)")
+	if a.Status != "verified" {
+		msg, stage := "not derived", ""
+		if a.Failure != nil {
+			msg, stage = a.Failure.Message, a.Failure.Stage
+		}
+		p("  NOT derived (stage %s). The theorem above is verified regardless; it is not transferred to the ASL:", stage)
+		p("    %s", strings.ReplaceAll(termSafe(msg), "\n", "\n    "))
+		p("")
+		return
+	}
+	p("  The Lean kernel accepted the ASL corollary %s (module %s) of %s:", termSafe(a.Theorem), termSafe(a.Module), termSafe(a.Of))
+	p("")
+	p("    %s", strings.ReplaceAll(termSafe(a.Statement), "\n", "\n    "))
+	p("")
+	for _, d := range a.Definitions {
+		p("    %s", strings.ReplaceAll(termSafe(d), "\n", "\n      "))
+	}
+	for _, d := range a.DependencyDefinitions {
+		p("    %s", strings.ReplaceAll(termSafe(d), "\n", "\n      "))
+	}
+	for _, n := range a.Notes {
+		p("  Note: %s", termSafe(n))
+	}
+	p("  It was derived as %s.", termSafe(a.Derivation))
+	if c := a.Coverage; c != nil {
+		p("  Every one of the program's %d instruction words is in the subset proved equivalent to the ASL (%s).", c.Words, classSummary(c.Classes))
+	}
+	p("  In words: from every ASL state s related to a Go call of the function (Rel) under the configuration")
+	p("  below, the ASL run of the extracted code returns to the caller in a state related to one satisfying")
+	p("  the ABI and the postcondition of the theorem above.")
+	p("  Assumptions and limits:")
+	for _, x := range a.Assumptions {
+		p("    - %s", x)
+	}
+	ax := strings.Join(a.Axioms, ", ")
+	if ax == "" {
+		ax = "none"
+	}
+	p("  Axioms used: %s", ax)
+	if kr := a.KernelReplay; kr != nil && kr.Status == "passed" {
+		p("  Kernel replay: %s re-checked %s", kr.Tool, replaySummary(*kr))
+	}
+	m := a.Model
+	p("  ASL model: %s, ArmASL.tar.gz SHA-256 %s; JanusASL sources SHA-256 %s (%s)", m.Version["model"], m.ArmASLSha256, m.JanusASLSha256, m.Source)
+	p("    sail-arm %s, Sail %s, lean-sail %s", m.Version["sail-arm"], m.Version["sail"], m.Version["lean-sail"])
+	p("")
 }

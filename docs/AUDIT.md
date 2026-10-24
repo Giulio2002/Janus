@@ -594,6 +594,25 @@ clean prints round-trip). Tests: `cmd/janus/round2_test.go` (`TestInlineInstance
 `TestRoundTripRejectsAmbiguousPrint`, `TestUnshareFallbackConfinement`,
 `TestUnshareFallbackVerifies`).
 
+## ASL corollary forgeries (`janus verify --asl`)
+
+`--asl` derives the verified theorem's corollary about Arm's ASL ([ASL.md](ASL.md#janus-verify---asl-the-corollary-of-a-verified-theorem)).
+The corollary module imports the untrusted proof, so its compile runs sandboxed and its result is
+re-checked by the trusted auditor (`JanusAudit.runASL`). `audit/asl/attacks/` holds proofs whose
+main theorem verifies but which try to forge the corollary; `audit/run-all.sh` runs them with
+`JANUS_AUDIT_ASL=1` (rows `ASL.*`), and `TestASLForgeryRejected` in `cmd/janus/asl_test.go`.
+
+| attack | what it tries | result |
+|---|---|---|
+| X1_shadow_toASL | declares `JanusASL.Proofs.Ensures.toASL` itself | blocked (`ASL corollary`: the corollary module cannot import both) |
+| X2_own_toASL | proves a fake "ASL" statement with a proof-local `aslRun`/`Ensures.toASL` and asks `--theorem Proof.correctness_asl` | main theorem verifies, honestly disclosed; ASL blocked (not an `Ensures` theorem) |
+| X3_plant_words | plants `JanusASLWords.covered : True` | blocked (`ASL corollary`: import clash with the trusted coverage module) |
+| X4_plant_corollary | declares `JanusASLCorollary.correctness_asl : True` | blocked (`ASL corollary`: name taken) |
+| X5_elab_override | its own higher-priority `janus_asl_corollary` command adds `True` under the corollary's name | blocked (`ASL audit`: type is not the derivation from the verified theorem) |
+| X6_other_program | theorem about a `p` only assumed equal to `Extracted.program` | blocked (not about `Extracted.program` itself) |
+| X7_reserved_name | a non-clashing look-alike under a reserved root (`JanusASL.Proofs.LinuxEL0Config'`) | blocked (`ASL audit`: reserved namespace rule) |
+| consumer `JanusASL.Fake` | a consumer module under the `JanusASL` root | blocked (`ASL module identity`; `TestASLConsumer`) |
+
 ## Files
 
 * `audit/run-all.sh`: reproduces every row (`BROKEN` rows print `Verified`, blocked rows `Invalid`), extracting its own `audit/work/{Add,Add256,Get}`; it marks a row `<-- BROKEN` and exits 1 if a blocked row verifies or a control does not.
