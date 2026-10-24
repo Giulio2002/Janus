@@ -26,11 +26,6 @@ theorem readLE_64 (m : Memory) (a : Nat) :
     show 16 = 8 + 8 from rfl, h]
   simp only [Nat.add_assoc, Nat.mul_add, ← Nat.mul_assoc, ← Nat.pow_add]
 
-/-- The carry materialised by `SBBQ R, R` (all ones or zero). -/
-theorem ite_allOnes_toNat (P : Prop) [Decidable P] :
-    (if P then 18446744073709551615#64 else 0#64).toNat = 18446744073709551615 * (decide P).toNat := by
-  by_cases h : P <;> simp [h]
-
 set_option maxHeartbeats 20000000 in
 theorem correctness (z0 z1 z2 x y0 y1 y2 : BitVec 64) :
     Ensures Extracted.program Extracted.entry [z0, z1, z2, x, y0, y1, y2]
@@ -53,80 +48,6 @@ theorem correctness (z0 z1 z2 x y0 y1 y2 : BitVec 64) :
   simp only [Disjoint, regSP, Nat.sub_zero, Nat.zero_add] at *
   simp only [readLE_64]
   janus64_run
-  janus64_simp [ite_allOnes_toNat, Nat.mul_add, Nat.mul_left_comm y0.toNat,
-    Nat.mul_left_comm y1.toNat, Nat.mul_left_comm y2.toNat]
-  have hby00 : y0.toNat * s.mem.readLE x.toNat 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y0.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem x.toNat 8; omega)
-  generalize y0.toNat * s.mem.readLE x.toNat 8 = py00 at *
-  have hby01 : y0.toNat * s.mem.readLE (x.toNat + 8) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y0.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 8) 8; omega)
-  generalize y0.toNat * s.mem.readLE (x.toNat + 8) 8 = py01 at *
-  have hby02 : y0.toNat * s.mem.readLE (x.toNat + 16) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y0.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 16) 8; omega)
-  generalize y0.toNat * s.mem.readLE (x.toNat + 16) 8 = py02 at *
-  have hby03 : y0.toNat * s.mem.readLE (x.toNat + 24) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y0.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 24) 8; omega)
-  generalize y0.toNat * s.mem.readLE (x.toNat + 24) 8 = py03 at *
-  have hby04 : y0.toNat * s.mem.readLE (x.toNat + 32) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y0.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 32) 8; omega)
-  generalize y0.toNat * s.mem.readLE (x.toNat + 32) 8 = py04 at *
-  have hby05 : y0.toNat * s.mem.readLE (x.toNat + 40) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y0.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 40) 8; omega)
-  generalize y0.toNat * s.mem.readLE (x.toNat + 40) 8 = py05 at *
-  have hby06 : y0.toNat * s.mem.readLE (x.toNat + 48) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y0.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 48) 8; omega)
-  generalize y0.toNat * s.mem.readLE (x.toNat + 48) 8 = py06 at *
-  have hby07 : y0.toNat * s.mem.readLE (x.toNat + 56) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y0.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 56) 8; omega)
-  generalize y0.toNat * s.mem.readLE (x.toNat + 56) 8 = py07 at *
-  have hby10 : y1.toNat * s.mem.readLE x.toNat 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y1.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem x.toNat 8; omega)
-  generalize y1.toNat * s.mem.readLE x.toNat 8 = py10 at *
-  have hby11 : y1.toNat * s.mem.readLE (x.toNat + 8) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y1.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 8) 8; omega)
-  generalize y1.toNat * s.mem.readLE (x.toNat + 8) 8 = py11 at *
-  have hby12 : y1.toNat * s.mem.readLE (x.toNat + 16) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y1.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 16) 8; omega)
-  generalize y1.toNat * s.mem.readLE (x.toNat + 16) 8 = py12 at *
-  have hby13 : y1.toNat * s.mem.readLE (x.toNat + 24) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y1.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 24) 8; omega)
-  generalize y1.toNat * s.mem.readLE (x.toNat + 24) 8 = py13 at *
-  have hby14 : y1.toNat * s.mem.readLE (x.toNat + 32) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y1.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 32) 8; omega)
-  generalize y1.toNat * s.mem.readLE (x.toNat + 32) 8 = py14 at *
-  have hby15 : y1.toNat * s.mem.readLE (x.toNat + 40) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y1.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 40) 8; omega)
-  generalize y1.toNat * s.mem.readLE (x.toNat + 40) 8 = py15 at *
-  have hby16 : y1.toNat * s.mem.readLE (x.toNat + 48) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y1.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 48) 8; omega)
-  generalize y1.toNat * s.mem.readLE (x.toNat + 48) 8 = py16 at *
-  have hby17 : y1.toNat * s.mem.readLE (x.toNat + 56) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y1.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 56) 8; omega)
-  generalize y1.toNat * s.mem.readLE (x.toNat + 56) 8 = py17 at *
-  have hby20 : y2.toNat * s.mem.readLE x.toNat 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y2.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem x.toNat 8; omega)
-  generalize y2.toNat * s.mem.readLE x.toNat 8 = py20 at *
-  have hby21 : y2.toNat * s.mem.readLE (x.toNat + 8) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y2.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 8) 8; omega)
-  generalize y2.toNat * s.mem.readLE (x.toNat + 8) 8 = py21 at *
-  have hby22 : y2.toNat * s.mem.readLE (x.toNat + 16) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y2.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 16) 8; omega)
-  generalize y2.toNat * s.mem.readLE (x.toNat + 16) 8 = py22 at *
-  have hby23 : y2.toNat * s.mem.readLE (x.toNat + 24) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y2.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 24) 8; omega)
-  generalize y2.toNat * s.mem.readLE (x.toNat + 24) 8 = py23 at *
-  have hby24 : y2.toNat * s.mem.readLE (x.toNat + 32) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y2.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 32) 8; omega)
-  generalize y2.toNat * s.mem.readLE (x.toNat + 32) 8 = py24 at *
-  have hby25 : y2.toNat * s.mem.readLE (x.toNat + 40) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y2.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 40) 8; omega)
-  generalize y2.toNat * s.mem.readLE (x.toNat + 40) 8 = py25 at *
-  have hby26 : y2.toNat * s.mem.readLE (x.toNat + 48) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y2.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 48) 8; omega)
-  generalize y2.toNat * s.mem.readLE (x.toNat + 48) 8 = py26 at *
-  have hby27 : y2.toNat * s.mem.readLE (x.toNat + 56) 8 ≤ 18446744073709551615 * 18446744073709551615 :=
-    Nat.mul_le_mul (by have := y2.isLt; omega) (by have := Janus.Arm64.Memory.readLE_lt s.mem (x.toNat + 56) 8; omega)
-  generalize y2.toNat * s.mem.readLE (x.toNat + 56) 8 = py27 at *
-  refine ⟨?_, ?_, ?_⟩ <;> janus64_arith
+  janus64_arith
 
 end Proof

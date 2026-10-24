@@ -412,17 +412,17 @@ theorem asl_mulh {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b100110
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (pc : Int) :
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execMulh js (fld w 23 1 == 1#1) (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPReg hw (by omega)]
   rcases (show (w / 2 ^ 23) % 2 = 0 ∨ (w / 2 ^ 23) % 2 = 1 by omega) with hu | hu
   · rw [run_DataProcReg_mulh_0 hw hc h2 hu h3 h4 (see_entry _ _), run_decode_smulh_mh]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_mulh (h.entry (BitVec.ofNat 32 w) 861)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 23 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_mulh_1 hw hc h2 hu h3 h4 (see_entry _ _), run_decode_umulh_mh]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_mulh (h.entry (BitVec.ofNat 32 w) 862)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 23 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **SMULH/UMULH**: for every word of the encoding class and every related pair of states,
 Janus' `step` and the generated ASL agree. -/
@@ -430,7 +430,7 @@ theorem mulh_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b1001
     (h2 : (w / 2 ^ 21) % 4 = 2) (h3 : (w / 2 ^ 15) % 2 = 0) (h4 : (w / 2 ^ 10) % 32 = 31)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   obtain ⟨s2, hrun, hrel, hbt⟩ := asl_mulh hw hc h2 h3 h4 h (js.pc.toNat : Int)
   have hpc : ∀ u rm rn rd, (Janus.Arm64.execMulh js u rm rn rd).pc = js.pc := by
     intro u rm rn rd

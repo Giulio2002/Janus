@@ -121,7 +121,11 @@ func TestStubKind(t *testing.T) {
 			t.Errorf("stubKind(%q) = %q, %v; want %q", name, got, ok, want)
 		}
 	}
-	for _, name := range []string{"runtime.mallocgc", "example.com/basic.Add", "main.panicky"} {
+	// Round 6 F3: an import path that starts with "runtime.panic" or "runtime.morestack" is not
+	// package runtime (docs/AUDIT-ROUND6.md).
+	for _, name := range []string{"runtime.mallocgc", "example.com/basic.Add", "main.panicky",
+		"runtime.panicky/lib.Zero", "runtime.panicky/lib.Zero.abi0", "runtime.morestacks.io/x.F",
+		"runtime.gopanic/x.F", "runtime%2epanicky.F"} {
 		if _, ok := stubKind(name); ok {
 			t.Errorf("%s classified as a stub", name)
 		}

@@ -1,5 +1,6 @@
 import ArmASL
 import Janus
+import JanusASL.Proofs.Mem
 import Lean.Data.Json
 
 /-!
@@ -153,6 +154,139 @@ def baseState : Except String SState := do
   let ((), s) ← runM (janus_init ()) s
   pure { s with mem := baseMemory }
 
+
+/-! ## `UserMapped` (JanusASL/Proofs/Mem.lean), evaluated
+
+The load/store theorems assume that the ASL's own `AArch64_TranslateAddress` maps every byte of
+Janus' regions identically as Normal write-back memory, without fault and without changing the
+state. The check evaluates that on its tables: every byte of the data buffer, as a load and a
+store, aligned or not, for every access size, on the base state (with the state compared on every
+register the translation code can write), and a few bytes on every case's pre-state. -/
+
+/-- Every register the call graph of `AArch64_TranslateAddress` writes (static, from the generated
+code) holds the same value in `s` and `s2`. -/
+def transRegsSame (s s2 : SState) : Bool :=
+  toString (repr (s2.regs.get? Register.BRBFCR_EL1)) == toString (repr (s.regs.get? Register.BRBFCR_EL1)) &&
+  toString (repr (s2.regs.get? Register.Branchtypetaken)) == toString (repr (s.regs.get? Register.Branchtypetaken)) &&
+  toString (repr (s2.regs.get? Register.DLR_EL0)) == toString (repr (s.regs.get? Register.DLR_EL0)) &&
+  toString (repr (s2.regs.get? Register.DSPSR_EL0)) == toString (repr (s.regs.get? Register.DSPSR_EL0)) &&
+  toString (repr (s2.regs.get? Register.EDWAR)) == toString (repr (s.regs.get? Register.EDWAR)) &&
+  toString (repr (s2.regs.get? Register.FPCR)) == toString (repr (s.regs.get? Register.FPCR)) &&
+  toString (repr (s2.regs.get? Register.FPSR)) == toString (repr (s.regs.get? Register.FPSR)) &&
+  toString (repr (s2.regs.get? Register.GCSPR_EL0)) == toString (repr (s.regs.get? Register.GCSPR_EL0)) &&
+  toString (repr (s2.regs.get? Register.GCSPR_EL1)) == toString (repr (s.regs.get? Register.GCSPR_EL1)) &&
+  toString (repr (s2.regs.get? Register.GCSPR_EL2)) == toString (repr (s.regs.get? Register.GCSPR_EL2)) &&
+  toString (repr (s2.regs.get? Register.GCSPR_EL3)) == toString (repr (s.regs.get? Register.GCSPR_EL3)) &&
+  toString (repr (s2.regs.get? Register.GICC_CTLR)) == toString (repr (s.regs.get? Register.GICC_CTLR)) &&
+  toString (repr (s2.regs.get? Register.ICC_PMR_EL1)) == toString (repr (s.regs.get? Register.ICC_PMR_EL1)) &&
+  toString (repr (s2.regs.get? Register.InGuardedPage)) == toString (repr (s.regs.get? Register.InGuardedPage)) &&
+  toString (repr (s2.regs.get? Register.MDCCSR_EL0)) == toString (repr (s.regs.get? Register.MDCCSR_EL0)) &&
+  toString (repr (s2.regs.get? Register.PMICNTR_EL0)) == toString (repr (s.regs.get? Register.PMICNTR_EL0)) &&
+  toString (repr (s2.regs.get? Register.PMOVSCLR_EL0)) == toString (repr (s.regs.get? Register.PMOVSCLR_EL0)) &&
+  toString (repr (s2.regs.get? Register.PMOVSSET_EL0)) == toString (repr (s.regs.get? Register.PMOVSSET_EL0)) &&
+  toString (repr (s2.regs.get? Register.PMUEventAccumulator)) == toString (repr (s.regs.get? Register.PMUEventAccumulator)) &&
+  toString (repr (s2.regs.get? Register.PSTATE)) == toString (repr (s.regs.get? Register.PSTATE)) &&
+  toString (repr (s2.regs.get? Register.R0)) == toString (repr (s.regs.get? Register.R0)) &&
+  toString (repr (s2.regs.get? Register.R1)) == toString (repr (s.regs.get? Register.R1)) &&
+  toString (repr (s2.regs.get? Register.R10)) == toString (repr (s.regs.get? Register.R10)) &&
+  toString (repr (s2.regs.get? Register.R11)) == toString (repr (s.regs.get? Register.R11)) &&
+  toString (repr (s2.regs.get? Register.R12)) == toString (repr (s.regs.get? Register.R12)) &&
+  toString (repr (s2.regs.get? Register.R13)) == toString (repr (s.regs.get? Register.R13)) &&
+  toString (repr (s2.regs.get? Register.R14)) == toString (repr (s.regs.get? Register.R14)) &&
+  toString (repr (s2.regs.get? Register.R15)) == toString (repr (s.regs.get? Register.R15)) &&
+  toString (repr (s2.regs.get? Register.R16)) == toString (repr (s.regs.get? Register.R16)) &&
+  toString (repr (s2.regs.get? Register.R17)) == toString (repr (s.regs.get? Register.R17)) &&
+  toString (repr (s2.regs.get? Register.R18)) == toString (repr (s.regs.get? Register.R18)) &&
+  toString (repr (s2.regs.get? Register.R19)) == toString (repr (s.regs.get? Register.R19)) &&
+  toString (repr (s2.regs.get? Register.R2)) == toString (repr (s.regs.get? Register.R2)) &&
+  toString (repr (s2.regs.get? Register.R20)) == toString (repr (s.regs.get? Register.R20)) &&
+  toString (repr (s2.regs.get? Register.R21)) == toString (repr (s.regs.get? Register.R21)) &&
+  toString (repr (s2.regs.get? Register.R22)) == toString (repr (s.regs.get? Register.R22)) &&
+  toString (repr (s2.regs.get? Register.R23)) == toString (repr (s.regs.get? Register.R23)) &&
+  toString (repr (s2.regs.get? Register.R24)) == toString (repr (s.regs.get? Register.R24)) &&
+  toString (repr (s2.regs.get? Register.R25)) == toString (repr (s.regs.get? Register.R25)) &&
+  toString (repr (s2.regs.get? Register.R26)) == toString (repr (s.regs.get? Register.R26)) &&
+  toString (repr (s2.regs.get? Register.R27)) == toString (repr (s.regs.get? Register.R27)) &&
+  toString (repr (s2.regs.get? Register.R28)) == toString (repr (s.regs.get? Register.R28)) &&
+  toString (repr (s2.regs.get? Register.R29)) == toString (repr (s.regs.get? Register.R29)) &&
+  toString (repr (s2.regs.get? Register.R3)) == toString (repr (s.regs.get? Register.R3)) &&
+  toString (repr (s2.regs.get? Register.R30)) == toString (repr (s.regs.get? Register.R30)) &&
+  toString (repr (s2.regs.get? Register.R4)) == toString (repr (s.regs.get? Register.R4)) &&
+  toString (repr (s2.regs.get? Register.R5)) == toString (repr (s.regs.get? Register.R5)) &&
+  toString (repr (s2.regs.get? Register.R6)) == toString (repr (s.regs.get? Register.R6)) &&
+  toString (repr (s2.regs.get? Register.R7)) == toString (repr (s.regs.get? Register.R7)) &&
+  toString (repr (s2.regs.get? Register.R8)) == toString (repr (s.regs.get? Register.R8)) &&
+  toString (repr (s2.regs.get? Register.R9)) == toString (repr (s.regs.get? Register.R9)) &&
+  toString (repr (s2.regs.get? Register.RC)) == toString (repr (s.regs.get? Register.RC)) &&
+  toString (repr (s2.regs.get? Register.Records_INF)) == toString (repr (s.regs.get? Register.Records_INF)) &&
+  toString (repr (s2.regs.get? Register.Records_SRC)) == toString (repr (s.regs.get? Register.Records_SRC)) &&
+  toString (repr (s2.regs.get? Register.Records_TGT)) == toString (repr (s.regs.get? Register.Records_TGT)) &&
+  toString (repr (s2.regs.get? Register.SPESampleAddress)) == toString (repr (s.regs.get? Register.SPESampleAddress)) &&
+  toString (repr (s2.regs.get? Register.SPESampleAddressValid)) == toString (repr (s.regs.get? Register.SPESampleAddressValid)) &&
+  toString (repr (s2.regs.get? Register.SPESampleClass)) == toString (repr (s.regs.get? Register.SPESampleClass)) &&
+  toString (repr (s2.regs.get? Register.SPESampleCounterPending)) == toString (repr (s.regs.get? Register.SPESampleCounterPending)) &&
+  toString (repr (s2.regs.get? Register.SPESampleCounterValid)) == toString (repr (s.regs.get? Register.SPESampleCounterValid)) &&
+  toString (repr (s2.regs.get? Register.SPESampleEvents)) == toString (repr (s.regs.get? Register.SPESampleEvents)) &&
+  toString (repr (s2.regs.get? Register.SPESampleOpType)) == toString (repr (s.regs.get? Register.SPESampleOpType)) &&
+  toString (repr (s2.regs.get? Register.SPESamplePreviousBranchAddress)) == toString (repr (s.regs.get? Register.SPESamplePreviousBranchAddress)) &&
+  toString (repr (s2.regs.get? Register.SPESamplePreviousBranchAddressValid)) == toString (repr (s.regs.get? Register.SPESamplePreviousBranchAddressValid)) &&
+  toString (repr (s2.regs.get? Register.SPESampleSubclass)) == toString (repr (s.regs.get? Register.SPESampleSubclass)) &&
+  toString (repr (s2.regs.get? Register.SP_EL0)) == toString (repr (s.regs.get? Register.SP_EL0)) &&
+  toString (repr (s2.regs.get? Register.SP_EL1)) == toString (repr (s.regs.get? Register.SP_EL1)) &&
+  toString (repr (s2.regs.get? Register.SP_EL2)) == toString (repr (s.regs.get? Register.SP_EL2)) &&
+  toString (repr (s2.regs.get? Register.SP_EL3)) == toString (repr (s.regs.get? Register.SP_EL3)) &&
+  toString (repr (s2.regs.get? Register.TSTATE)) == toString (repr (s.regs.get? Register.TSTATE)) &&
+  toString (repr (s2.regs.get? Register._DLR)) == toString (repr (s.regs.get? Register._DLR)) &&
+  toString (repr (s2.regs.get? Register._DSPSR)) == toString (repr (s.regs.get? Register._DSPSR)) &&
+  toString (repr (s2.regs.get? Register._DSPSR2)) == toString (repr (s.regs.get? Register._DSPSR2)) &&
+  toString (repr (s2.regs.get? Register._EDSCR)) == toString (repr (s.regs.get? Register._EDSCR)) &&
+  toString (repr (s2.regs.get? Register._FFR)) == toString (repr (s.regs.get? Register._FFR)) &&
+  toString (repr (s2.regs.get? Register._P)) == toString (repr (s.regs.get? Register._P)) &&
+  toString (repr (s2.regs.get? Register._PC)) == toString (repr (s.regs.get? Register._PC)) &&
+  toString (repr (s2.regs.get? Register._Z)) == toString (repr (s.regs.get? Register._Z)) &&
+  toString (repr (s2.regs.get? Register.__BranchTaken)) == toString (repr (s.regs.get? Register.__BranchTaken)) &&
+  toString (repr (s2.regs.get? Register.__GIC_Active)) == toString (repr (s.regs.get? Register.__GIC_Active)) &&
+  toString (repr (s2.regs.get? Register.__GIC_Pending)) == toString (repr (s.regs.get? Register.__GIC_Pending)) &&
+  toString (repr (s2.regs.get? Register.__janus_exc_syndrome)) == toString (repr (s.regs.get? Register.__janus_exc_syndrome)) &&
+  toString (repr (s2.regs.get? Register.__janus_exc_taken)) == toString (repr (s.regs.get? Register.__janus_exc_taken)) &&
+  toString (repr (s2.regs.get? Register.__janus_exc_target_el)) == toString (repr (s.regs.get? Register.__janus_exc_target_el)) &&
+  toString (repr (s2.regs.get? Register.__janus_exc_type)) == toString (repr (s.regs.get? Register.__janus_exc_type)) &&
+  toString (repr (s2.regs.get? Register.__janus_exc_vaddress)) == toString (repr (s.regs.get? Register.__janus_exc_vaddress)) &&
+  toString (repr (s2.regs.get? Register.__last_branch_valid)) == toString (repr (s.regs.get? Register.__last_branch_valid)) &&
+  toString (repr (s2.regs.get? Register.__last_cycle_count)) == toString (repr (s.regs.get? Register.__last_cycle_count))
+
+/-- The access descriptors `UserMapped` covers for a load (`w = false`) or store: `gprAcc` and
+`OrdAcc`. -/
+def accsFor (w : Bool) : List AccessDescriptor :=
+  [JanusASL.Proofs.gprAcc w, JanusASL.Proofs.acqRelAcc w, JanusASL.Proofs.exclAcc w false,
+    JanusASL.Proofs.exclAcc w true] ++ (if w then [] else [JanusASL.Proofs.acqPCAcc])
+
+def transOk1 (s : SState) (va : Nat) (acc : AccessDescriptor) (al : Bool) (size : Int) (full : Bool := false) : Bool :=
+  match runM (AArch64_TranslateAddress (BitVec.ofNat 64 va) acc al size) s with
+  | .ok (d, s2) =>
+    d.fault.statuscode == .Fault_None && d.paddress.address == (BitVec.ofNat 64 va).setWidth 56 &&
+      d.memattrs.memtype == .MemType_Normal && d.memattrs.inner.attrs == MemAttr_WB &&
+      d.memattrs.outer.attrs == MemAttr_WB && s2.mem.size == s.mem.size && s2.cycleCount == s.cycleCount &&
+      s2.sailOutput.size == s.sailOutput.size && (!full || transRegsSame s s2)
+  | .error _ => false
+
+def transOk (s : SState) (va : Nat) (w al : Bool) (size : Int) (full : Bool := false) : Bool :=
+  (accsFor w).all fun acc => transOk1 s va acc al size full
+
+/-- The data buffer is outside the model's GIC and UART windows (`UserMapped.nodev`). -/
+def dataNoDev : Bool := (dataBase / 2 ^ 16 != 0x2C00 && (dataBase + dataSize - 1) / 2 ^ 16 != 0x2C00 &&
+  dataBase / 2 ^ 16 != 0x3C00 && (dataBase + dataSize - 1) / 2 ^ 16 != 0x3C00)
+
+/-- The sweep on the base state: every byte, load and store, aligned or not, sizes 1..16. -/
+def userMappedBase (s : SState) : Bool :=
+  dataNoDev && (List.range dataSize).all fun i => [false, true].all fun w => [false, true].all fun al =>
+    ([1, 2, 4, 8, 16] : List Int).all fun sz => transOk s (dataBase + i) w al sz (full := i % 64 == 0)
+
+/-- The per-case points: first, last and a seed-dependent byte, as a load and a store. -/
+def userMappedCase (s : SState) (seed : Nat) : Bool :=
+  [dataBase, dataBase + dataSize - 1, dataBase + (seed * 97 + 13) % dataSize].all fun va =>
+    [false, true].all fun w => transOk s va w false 8
+
 /-- What the ASL step produced. -/
 inductive AslResult where
   | ok (x : Array Nat) (sp pc nzcv : Nat) (mem : List (Nat × Nat)) (stray : List Nat) (v : Array Nat)
@@ -165,7 +299,9 @@ inductive AslResult where
 
 def excName (e : ArmASL.Exception) : String := (repr e).pretty
 
-def runAsl (base : SState) (c : Case) : AslResult := Id.run do
+/-- The ASL step of a case, and whether `LinuxEL0Config` (`JanusASL.Proofs.cfgOk`) holds on its
+pre-state and (if it completes) its post-state: the configuration the branch theorems assume. -/
+def runAsl (base : SState) (c : Case) : AslResult × Bool × Bool := Id.run do
   let mem0 := (List.range dataSize).foldl
     (fun m i => m.insert (dataBase + i) (BitVec.ofNat 8 (pattern c.seed i))) base.mem
   let mem0 := (List.range 4).foldl
@@ -181,11 +317,14 @@ def runAsl (base : SState) (c : Case) : AslResult := Id.run do
       janus_set_v (BitVec.ofNat 5 i) (BitVec.ofNat 128 c.v[i]!)
     janus_set_tpidr (BitVec.ofNat 64 c.tpidr)
   match runM setup s0 with
-  | .error e => return .error s!"setup: {e}"
+  | .error e => return (.error s!"setup: {e}", false, false)
   | .ok ((), s1) =>
+  let pre := JanusASL.Proofs.cfgOk s1
+  let um := userMappedCase s1 c.seed
   match runM (janus_step (BitVec.ofNat 32 c.word)) s1 with
-  | .error e => return .error e
+  | .error e => return (.error e, pre, um)
   | .ok (r, s2) =>
+  let cfg := pre && JanusASL.Proofs.cfgOk s2
   match r with
   | .Janus_OK =>
     let readBack : SailM (Array Nat × Nat × Nat × Nat × Array Nat) := do
@@ -197,7 +336,7 @@ def runAsl (base : SState) (c : Case) : AslResult := Id.run do
         vs := vs.push (← janus_get_v (BitVec.ofNat 5 i)).toNat
       pure (xs, (← janus_get_sp ()).toNat, (← janus_get_pc ()).toNat, (← janus_get_nzcv ()).toNat, vs)
     match runM readBack s2 with
-    | .error e => return .error s!"readback: {e}"
+    | .error e => return (.error s!"readback: {e}", cfg, um)
     | .ok ((xs, sp, pc, nzcv, vs), _) =>
       let mem := (List.range dataSize).filterMap fun i =>
         let b := (s2.mem.getD (dataBase + i) 0).toNat
@@ -206,21 +345,21 @@ def runAsl (base : SState) (c : Case) : AslResult := Id.run do
       let stray := baseKeys.filterMap fun a =>
         if s2.mem.get? a = mem0.get? a then none else some a
       let stray := if s2.mem.size = mem0.size then stray else stray ++ [0]
-      return .ok xs sp pc nzcv mem stray vs
+      return (.ok xs sp pc nzcv mem stray vs, cfg, um)
   | .Janus_Exception =>
     let rd : SailM (ArmASL.Exception × BitVec 25 × BitVec 64) := do
       pure (← readReg Register.__janus_exc_type, ← readReg Register.__janus_exc_syndrome, ← readReg Register.__janus_exc_vaddress)
     match runM rd s2 with
-    | .ok ((e, syn, va), _) => return .exception e syn.toNat va.toNat
-    | .error e => return .error e
-  | .Janus_Undefined => return .undefined
-  | .Janus_Unpredictable => return .unpredictable
+    | .ok ((e, syn, va), _) => return (.exception e syn.toNat va.toNat, cfg, um)
+    | .error e => return (.error e, cfg, um)
+  | .Janus_Undefined => return (.undefined, cfg, um)
+  | .Janus_Unpredictable => return (.unpredictable, cfg, um)
   | .Janus_ImpDef =>
     match runM (readReg Register.__janus_impdef) s2 with
-    | .ok (s, _) => return .impdef s
-    | .error e => return .error e
-  | .Janus_See => return .other "SEE"
-  | .Janus_Other => return .other "ReservedEncoding/SError"
+    | .ok (s, _) => return (.impdef s, cfg, um)
+    | .error e => return (.error e, cfg, um)
+  | .Janus_See => return (.other "SEE", cfg, um)
+  | .Janus_Other => return (.other "ReservedEncoding/SError", cfg, um)
 
 /-! ## The Janus side (as `Oracle/Main.lean`) -/
 
@@ -325,6 +464,69 @@ def main (args : List String) : IO UInt32 := do
     | .ok (v, _) =>
       IO.println s!"FeatureImpl true at: {(List.range 259).filter (fun i => v.toArray.getD i false)}"
     | .error e => IO.println s!"FeatureImpl: {e}"
+    match runM (readReg Register.BRBFCR_EL1) base with
+    | .ok (v, _) => IO.println s!"BRBFCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"BRBFCR_EL1: {e}"
+    match runM (readReg Register.BRBCR_EL1) base with
+    | .ok (v, _) => IO.println s!"BRBCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"BRBCR_EL1: {e}"
+    match runM (readReg Register.BRBCR_EL2) base with
+    | .ok (v, _) => IO.println s!"BRBCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"BRBCR_EL2: {e}"
+    match runM (readReg Register.PMSIDR_EL1) base with
+    | .ok (v, _) => IO.println s!"PMSIDR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"PMSIDR_EL1: {e}"
+    match runM (readReg Register.PMSCR_EL1) base with
+    | .ok (v, _) => IO.println s!"PMSCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"PMSCR_EL1: {e}"
+    match runM (readReg Register.PMSCR_EL2) base with
+    | .ok (v, _) => IO.println s!"PMSCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"PMSCR_EL2: {e}"
+    match runM (readReg Register.PMBLIMITR_EL1) base with
+    | .ok (v, _) => IO.println s!"PMBLIMITR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"PMBLIMITR_EL1: {e}"
+    match runM (readReg Register.PMBSR_EL1) base with
+    | .ok (v, _) => IO.println s!"PMBSR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"PMBSR_EL1: {e}"
+    match runM (readReg Register.GCSCRE0_EL1) base with
+    | .ok (v, _) => IO.println s!"GCSCRE0_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"GCSCRE0_EL1: {e}"
+    match runM (readReg Register.GCSCR_EL1) base with
+    | .ok (v, _) => IO.println s!"GCSCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"GCSCR_EL1: {e}"
+    match runM (readReg Register.HCRX_EL2) base with
+    | .ok (v, _) => IO.println s!"HCRX_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"HCRX_EL2: {e}"
+    match runM (readReg Register.TCR_EL2) base with
+    | .ok (v, _) => IO.println s!"TCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"TCR_EL2: {e}"
+    match runM (readReg Register.SCTLR_EL2) base with
+    | .ok (v, _) => IO.println s!"SCTLR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"SCTLR_EL2: {e}"
+    match runM (readReg Register.SCTLR_EL3) base with
+    | .ok (v, _) => IO.println s!"SCTLR_EL3 = {hex v.toNat}"
+    | .error e => IO.println s!"SCTLR_EL3: {e}"
+    match runM (readReg Register.CPTR_EL3) base with
+    | .ok (v, _) => IO.println s!"CPTR_EL3 = {hex v.toNat}"
+    | .error e => IO.println s!"CPTR_EL3: {e}"
+    match runM (readReg Register.CPTR_EL2) base with
+    | .ok (v, _) => IO.println s!"CPTR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"CPTR_EL2: {e}"
+    match runM (readReg Register.CPACR_EL1) base with
+    | .ok (v, _) => IO.println s!"CPACR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"CPACR_EL1: {e}"
+    match runM (readReg Register.MDSCR_EL1) base with
+    | .ok (v, _) => IO.println s!"MDSCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"MDSCR_EL1: {e}"
+    match runM (readReg Register.SPESampleInFlight) base with
+    | .ok (v, _) => IO.println s!"SPESampleInFlight = {v}"
+    | .error e => IO.println s!"SPESampleInFlight: {e}"
+    match runM (readReg Register.InGuardedPage) base with
+    | .ok (v, _) => IO.println s!"InGuardedPage = {v}"
+    | .error e => IO.println s!"InGuardedPage: {e}"
+    match runM (readReg Register.SCR) base with
+    | .ok (v, _) => IO.println s!"SCR = {hex v.toNat}"
+    | .error e => IO.println s!"SCR: {e}"
     match runM (readReg Register.SCR_EL3) base with
     | .ok (v, _) => IO.println s!"SCR_EL3 = {hex v.toNat}"
     | .error e => IO.println s!"SCR_EL3: {e}"
@@ -343,18 +545,20 @@ def main (args : List String) : IO UInt32 := do
     match runM (readReg Register.MDCR_EL2) base with
     | .ok (v, _) => IO.println s!"MDCR_EL2 = {hex v.toNat}"
     | .error e => IO.println s!"MDCR_EL2: {e}"
-    match runM (readReg Register.PMSCR_EL1) base with
-    | .ok (v, _) => IO.println s!"PMSCR_EL1 = {hex v.toNat}"
-    | .error e => IO.println s!"PMSCR_EL1: {e}"
-    match runM (readReg Register.CPACR_EL1) base with
-    | .ok (v, _) => IO.println s!"CPACR_EL1 = {hex v.toNat}"
-    | .error e => IO.println s!"CPACR_EL1: {e}"
-    match runM (readReg Register.SCR) base with
-    | .ok (v, _) => IO.println s!"SCR = {hex v.toNat}"
-    | .error e => IO.println s!"SCR: {e}"
-    match runM (readReg Register.InGuardedPage) base with
-    | .ok (v, _) => IO.println s!"InGuardedPage = {v}"
-    | .error e => IO.println s!"InGuardedPage: {e}"
+    match runM (CreateAccDescGPR MemOp.MemOp_LOAD false false true) base with
+    | .ok (acc, _) => IO.println s!"accdesc load: {repr acc}"
+    | .error e => IO.println s!"accdesc: {e}"
+    -- translation of a data-buffer address, as a load and as a store
+    for (nm, op) in [("load", MemOp.MemOp_LOAD), ("store", MemOp.MemOp_STORE)] do
+      let tr : SailM (AddressDescriptor × Bool) := do
+        let acc ← CreateAccDescGPR op false false true
+        let tc ← AArch64_AccessIsTagChecked (BitVec.ofNat 64 (dataBase + 8)) acc
+        let d ← AArch64_TranslateAddress (BitVec.ofNat 64 (dataBase + 8)) acc true 8
+        pure (d, tc)
+      match runM tr base with
+      | .ok ((d, tc), _) =>
+        IO.println s!"{nm}: fault {repr d.fault.statuscode} pa {hex d.paddress.address.toNat} {repr d.paddress.paspace} memtype {repr d.memattrs.memtype} inner {d.memattrs.inner.attrs} outer {d.memattrs.outer.attrs} tags {repr d.memattrs.tags} tagchecked {tc}"
+      | .error e => IO.println s!"{nm}: {e}"
     return 0
   let lines := (← IO.FS.lines path).filter (·.trimAscii.toString != "")
   let cases ← lines.mapM fun l => match parseCase l with
@@ -364,14 +568,22 @@ def main (args : List String) : IO UInt32 := do
   let chunk := (cases.size + jobs - 1) / jobs
   let tasks := (List.range jobs).map fun k =>
     Task.spawn (prio := .dedicated) fun _ =>
-      (cases.extract (k * chunk) ((k + 1) * chunk)).map fun c => (c, compare dczid c (runAsl base c))
+      (cases.extract (k * chunk) ((k + 1) * chunk)).map fun c =>
+        let (r, cfg, um) := runAsl base c
+        (c, compare dczid c r, cfg, um)
   let results := tasks.foldl (fun acc t => acc ++ t.get) #[]
+  -- LinuxEL0Config (the branch theorems' assumption) on the base state and every case's pre-state
+  -- and post-state.
+  let baseCfg := JanusASL.Proofs.cfgOk base
+  let cfgBad := (results.filter fun (_, _, cfg, _) => !cfg).size
+  let umBase := userMappedBase base
+  let umBad := (results.filter fun (_, _, _, um) => !um).size
   let mut agree := 0
   let mut gap := 0
   let mut mism := 0
   let mut kinds : Std.HashMap String Nat := {}
   let h ← IO.FS.Handle.mk out .write
-  for (c, v) in results do
+  for (c, v, _, _) in results do
     h.putStrLn (verdictJson c v).compress
     match v with
     | .agree k => agree := agree + 1; kinds := kinds.insert ("agree " ++ k) (kinds.getD ("agree " ++ k) 0 + 1)
@@ -383,4 +595,6 @@ def main (args : List String) : IO UInt32 := do
   for (k, n) in kinds.toList.mergeSort (fun a b => a.2 ≥ b.2) do
     IO.println s!"{n}\t{k}"
   IO.println s!"cases {results.size}  agree {agree}  gap {gap}  MISMATCH {mism}"
-  return if mism = 0 then 0 else 1
+  IO.println s!"LinuxEL0Config: base {baseCfg}, cases violating it (pre- or post-state) {cfgBad}"
+  IO.println s!"UserMapped (data buffer): base sweep {umBase}, cases violating it (pre-state points) {umBad}"
+  return if mism = 0 && baseCfg && cfgBad = 0 && umBase && umBad = 0 then 0 else 1

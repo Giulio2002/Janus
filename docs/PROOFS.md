@@ -96,8 +96,11 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 | `janus_run (budget := N)` | Limit the run to `N` thousand heartbeats (the unit of `maxHeartbeats`), counted from its start. However the run ends, a timeout is reported as an error naming the pc, the instruction and the phase (see Troubleshooting). `(budget := N)` may also come first: `janus_run (budget := N) until [...]`. |
 | `janus_step [lemmas]` | Exactly one instruction (`calls`/`budget` as for `janus_run`). |
 | `janus_simp [lemmas]` | The post-processing simp set `janus_post` plus the state hypotheses and `lemmas`. Closes invariant side goals (`S'.regs 2 = i + 1`, …). |
-| `janus_arith` | `omega` after adding `readLE m a n < 256^n` for every memory read, and normalising carry terms. For the arithmetic left after execution. Does nothing if there is no goal. |
+| `janus_arith` | The arithmetic left after execution. First `janus_carry` (below); if that does not apply, `omega` after adding `readLE m a n < 256^n` for every memory read and normalising carry terms. Does nothing if there is no goal. (`janus64_arith` on amd64.) |
+| `janus_carry` | Carry chains by reflection: proves `a = b`, `a ≤ b`, `a < b` (or a conjunction of them) between `Nat` terms built from limbs, `+`, `*`, `-`, literals, `/ k`, `% k` and `(decide (k ≤ a)).toNat`. See *Multi-limb arithmetic* under Techniques. |
+| `janus_ring` | Polynomial identities over `Int` (`+`, `*`, `-`, `^` with a literal exponent) by a verified normaliser; on `Nat`, `janus_carry`. |
 | `janus_data hd` | From `hd : p.DataLoaded m`: readability of each `.rodata` object, and a rewrite rule that evaluates loads from it at literal addresses. |
+| `janus_dyn h₁ h₂ …` | From dynamic-call hypotheses (`ItabIs`, `FuncvalIs`, `ClosureCtx`): the itab's literal address and words, the funcval's code word, the captured variables, as equations the executors use (both ISAs). See [Dynamic calls](#dynamic-calls-hashwith-hashtwice-mapsum-deferadd). |
 | `janus_cases h` | From `h : k < N` (`N` a literal): `N` goals with `k` replaced by `0, …, N-1`. For table lookups at a symbolic index. |
 | `janus_frame` | Proves `MemFrame m₀ m rs` (the memory part of a callee summary, see Calls): peels the stores of `m`, goes through the `MemFrame` hypotheses of called summaries, side conditions by `omega`. |
 | `janus_eval% t` | A term: the closed natural number `t` (e.g. `segAddr Extracted.program "f" + 8`) evaluated to a numeral at elaboration time, for a lemma argument that must be a literal. |
@@ -167,6 +170,10 @@ is dropped immediately: preconditions like `y ≠ 0` or `i < len` prune the pani
   memory (after stripping writes, callee frames `MemFrame`, and anything tagged `janus_acc`),
   with `b ≤ a`, `a + n ≤ b + k` by `omega`;
 * `Outside a n rs` (the side condition of a `MemFrame` read) by unfolding the ranges and `omega`;
+* linear address facts (`x + 8 + 8 ≤ z ∨ z + 8 ≤ x + 8`, `x + 8 = x + 8`) by literal arithmetic and
+  at most one case split on an aliasing hypothesis (`Common.addrDisch`);
+* carry bounds and equations (`… / 2^64 < 2^64`) by `janus_carry` (see
+  *Multi-limb arithmetic* below);
 * everything else by `omega` (which knows `x.toNat < 2^64` for every 64-bit `x`), after an
   arithmetic normalisation if needed.
 
@@ -192,6 +199,9 @@ about regions**, stated with `toNat` on the argument variables. Destructure the 
 | `copyWords m dst src i` | `m` after copying the first `i` words (a copy loop's memory). |
 | `StackOK s below above` | `SP` 16-aligned, `[SP-below, SP+above)` writable, below `2^48`. |
 | `GuardOK s adj` | The stack-growth prologue falls through (`= GoABI.StackGuardOK`). |
+| `ItabIs ds m tab name` | `tab` is the static itab `name` (`"go:itab.*T,I"`) of the extracted data `ds`, which `m` holds read-only (`Janus.Spec.Dynamic`). |
+| `FuncvalIs m fv fn` | The funcval at `fv` is readable and its code word is `fn`. |
+| `ClosureCtx m fv vars` | The words after it hold the captured `vars` (`Janus.Spec.ClosureCtx`; `GoABI.ClosureCtx` is the context *register*). |
 
 The outcome predicates (`Janus.GoABI`): `Returns`, `Panics` (a panic stub), `Faults` (a fault
 other than running out of fuel), `NeverPanics` (no panic stub and no fault), `GrowsStack`; the
@@ -318,6 +328,77 @@ of a summary is `ReachesRet`), so a call chain is proved bottom-up, each functio
   guard slot `[X28 + 16, +8)` disjoint from the stack window. The ranges are easy to get wrong;
   the stuck message names the store that is outside them.
 
+### Dynamic calls (`HashWith`, `HashTwice`, `MapSum`, `DeferAdd`)
+
+An interface method call, a call of a func value (closure or method value) and the call of a
+deferred closure are indirect: `ldr x3, [x0, #24]; blr x3` (amd64: `MOVQ 24(AX), DX; CALL DX`)
+jumps to whatever word memory holds. The executor follows such a call as soon as the target
+register is a **literal**, and then treats it like a direct call: a summary passed with
+`calls [...]` is applied at the target's entry, otherwise the target is executed (it must be in
+the extraction). Two situations:
+
+* **The code being proved builds the func value itself** (`HashTwice` passes the method value
+  `h.Hash` to `ApplyTwice`; `DeferAdd` defers a closure). The funcval is a store in the frame,
+  the code word is read back from it, and nothing has to be assumed: `janus_run` simply runs
+  through the call. The extractor copies the target because the code computes its address
+  (`dynamicTargets` with `via: "code-address"` in `identity.json`).
+* **The func value or interface comes from the caller** (`HashWith(h Hasher, …)`,
+  `MapSum(f func…, …)`). Which code it reaches is then a **hypothesis of the theorem**, stated with
+  the vocabulary of `Janus.Spec.Dynamic`, and visible in the printed statement:
+
+  ```lean
+  theorem correctness (tab h x : BitVec 64) :
+      Ensures Extracted.program Extracted.entry [tab, h, x]
+        (fun s => ItabIs Extracted.program.data s.mem tab
+                    "go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher" ∧ …)
+        (fun s s' => s'.regs 0 = x * BitVec.ofNat 64 (s.mem.readLE h.toNat 8)) ∧ …
+  ```
+
+  `ItabIs ds m tab name` says `tab` is the address of the static itab `name` and that memory
+  holds its bytes (copied from `.rodata`) read-only, so `Fun[k]` (offset `24 + 8k`) is the
+  method address in the binary. For a closure, `FuncvalIs m f fn` gives its code word
+  (`segAddr Extracted.program "example.com/basic.AffineSum.func1"`) and `ClosureCtx m f [a, b]`
+  the captured variables after it, which the closure reads through the context register
+  (`X26` on arm64, `RDX` on amd64).
+
+  Extract the possible targets with `janus extract … --targets SYM,…` (an itab copies the itab
+  as a data object named after its symbol, and the code of every method in it; a function or a
+  static funcval `…·f` copies that function). `scripts/example-targets.sh` lists the ones the
+  examples use.
+
+In the proof, destructure the precondition (the stack window first), then `janus_dyn h₁ h₂ …`
+turns the hypotheses into what the executor uses: `h_tab : tab = BitVec.ofNat 64 <addr>`
+(substituted when `tab` is a variable), `h_dyn… : m.readLE <addr+8j> 8 = <word>` for every
+word of the itab, `m.readLE f.toNat 8 = <code address>`, `m.readLE (f.toNat + 8 + 8i) 8 = vᵢ.toNat`,
+the `accessible` facts and bounds, and for an itab its disjointness from every writable range
+in the context (it is read-only, so stack stores cannot change it). Each fact is proved from the
+hypothesis by a lemma of `Janus.Spec.Dynamic`, the literals by kernel-checked evaluations.
+Equations named `h_dyn…` are rewrite rules of every step:
+
+```lean
+  intro ret hret s hs ⟨hi, ⟨hh, hhb⟩, hd, ⟨hg1, hg2, hg3⟩, hal, hb, ha, hw⟩
+  janus_intro hs
+  janus_dyn hi
+  simp only [Disjoint] at hd
+  janus_run calls [mul_summary, rot_summary]
+```
+
+The funcval and the captured variables of a closure argument are ordinary memory: state that
+they are disjoint from the stack window, as for any buffer. A loop that calls a closure
+(`MapSum`) keeps the closure hypotheses as parameters of its invariant lemma and calls
+`janus_dyn` there; the stack slots it rewrites every iteration are described by a `MemFrame`
+over the memory at the loop head (`MemFrame mem0 m [(lo, hi)]`, re-established with
+`MemFrame.writeLE`), so the invariant does not have to spell out the growing store chain.
+
+**`defer`.** Go 1.26 open-codes most defers: the deferred closure's funcval is built in the
+frame, a `deferBits` byte in the frame tracks it, and each exit calls the closure inline
+(`DeferAdd`). Such a function also contains a `bl runtime.deferreturn` block that only the panic
+recovery path reaches; the extractor does not follow it (`omittedCalls` in `identity.json`), so it
+faults if reached and a theorem shows it is not. Defers the compiler cannot open-code (in loops,
+more than 8 per function) allocate defer records through `runtime.deferproc*` and call
+`runtime.deferreturn` on every exit: these are not supported (the call faults), as are `recover`
+and panics that unwind through defers (see SOUNDNESS.md).
+
 ### Read-only data (`SetOne256`, `HexDigit`)
 
 The extractor copies the `.rodata` objects the code loads into `Extracted.program.data`. Require
@@ -356,6 +437,69 @@ precondition.
   blocks) go through an induction lemma (`zva_loop`) instead of straight-line execution. Zeroed
   ranges are tracked with interval lemmas (`ZeroOn`, `zeroOn_writeLE_zero`) rather than byte by
   byte.
+
+### Multi-limb arithmetic (`Add256`, `AddLimbs`, `bench/…/MulAdd8*.lean`, `bench/…/Mul256.lean`)
+
+After running a multi-limb routine (`bits.Add64`/`bits.Mul64` chains, `uint256`-style code), the
+goal is an equation between limb terms such as
+
+```text
+(z₀ + p₀ % 2^64 + c) % 2^64 + 2^64·((p₀ / 2^64 + (z₀ + p₀ % 2^64) / 2^64 % 2^64 + …) % 2^64) + …
+  = z₀ + 2^64·z₁ + … + y·(x₀ + 2^64·x₁ + …) + c
+```
+
+with every carry as a `/ 2^64`, every limb as a `% 2^64` and, on amd64, carry flags as
+`(decide (2^64 ≤ a)).toNat`. `omega` proves these, but slowly (it has to rediscover each carry
+bound, and it does not know `x·y ≤ (2^64-1)^2`, so products must be named and bounded by hand).
+`janus_arith` now closes them with **`janus_carry`**, a decision procedure proved sound in Lean
+(`Janus/Tactic/CarryDefs.lean`, `CarrySound.lean`):
+
+* both sides are reflected into a term language over **atoms** (`x.toNat`, memory reads, any
+  other subterm) and normalised into integer polynomials (`Janus/Tactic/Ring.lean`) over the
+  atoms and **quotient atoms** `D = L / 2^64`, one per distinct carry: `t / k` and `t % k`
+  split the normal form of `t` as `L + k·Y` and become `D + Y` and `L - k·D`. This merges the
+  two halves of a carry (`p / 2^64 + (z + p % 2^64) / 2^64` becomes `(p + z) / 2^64`), so a
+  whole add-with-carry chain collapses to `Σ 2^(64i)·limbᵢ` in one normalisation;
+* every subterm and every atom also gets an interval (`x.toNat ≤ 2^w - 1`, `readLE m a n <
+  256^n`, products of bounds, hypotheses `atom ≤ c` / `atom < c`), and a difference of two
+  carries `(a + b)/k - a/k` is bounded by `b/k + 1`. A `% k` or `/ k` whose argument lies in
+  `[0, k)` disappears: this is how `hi + c₁ + c₂ < 2^64` is shown for a multiply-add limb;
+* the goal holds if the normal forms of the two sides are equal, or if they differ by a
+  multiple `g·Z` (`g` the gcd of the difference) and both sides lie in `[0, g)`: this proves
+  low-half statements like `Σ 2^(64i)·zᵢ = X·Y % 2^256` (`Mul256`).
+
+The certificate (the quotient atoms and the atom intervals) is computed by the tactic and
+checked by `check`, which the kernel evaluates (`Eq.refl true`, like `decide +kernel`); the
+theorem `check_sound` turns it into the goal. Nothing is trusted and no axiom beyond Lean's is
+used. If the normal forms do not match, `janus_carry` fails and `janus_arith` falls back to
+`omega` (so goals that are not carry chains, or that need hypotheses other than bounds, still
+work).
+
+What this means for a proof:
+
+* **No product needs naming.** The `generalize y.toNat * … = p₀` / `have hb₀ : p₀ ≤ …` blocks
+  of older proofs can go; `janus_arith` knows the bound of a product from the bounds of its
+  factors.
+* **No `janus_simp [Nat.mul_add, …]` before the arithmetic.** Products of sums are expanded by
+  the normaliser.
+* The same procedure runs inside the dischargers (`janus_disch`, `janus64_disch`): side
+  conditions such as `carry < 2^64` of `mod64_of_lt` are proved during the run, so the symbolic
+  state keeps fewer `% 2^64`; and a carry bound it refutes, about atoms no hypothesis mentions,
+  is not retried by `omega` (which cannot know more). `set_option janus.carry.disch false`
+  turns this off; `janus.carry.dischMaxNodes` (default 64) limits the size of the side
+  conditions it proves (each costs a kernel evaluation).
+* `set_option trace.janus.carry true` prints, for each goal, the number of atoms and quotient
+  atoms and whether the certificate was accepted; when it is not, the difference of the two
+  normal forms and the table of quotient atoms (usually a carry whose bound it could not show:
+  add the bound as a hypothesis `h : c ≤ …`).
+
+A 256-bit multiplication (`bench/go`, `Mul256`, `z = x·y mod 2^256`, aliasing allowed) is
+proved by `janus_run; janus_arith` on arm64; see `bench/proofs-amd64/Mul256.lean` for amd64,
+where `janus64_run [readLE_32, BitVec.toNat_mul]` also splits the 32-byte values into limbs and
+turns `IMULQ` into `Nat` multiplication.
+
+**`janus_ring`** proves polynomial identities over `Int` by the same normal form (and on `Nat`
+by `janus_carry`): `(a + b) * (a - b) = a ^ 2 - b ^ 2`.
 
 ### SIMD code (`A64Equal64`, `A64IndexByte`)
 
@@ -447,6 +591,55 @@ What the executor does to keep a step cheap:
   pcs).
 * **Reducible transparency only** when a callee precondition is closed by `rfl`/`assumption`:
   unfolding `Memory.accessible`/`readLE` of a symbolic memory took seconds.
+* **Address side conditions without `omega`.** A read past a store asks whether the two byte
+  ranges are disjoint or equal, a store whether its range is accessible. These are linear facts
+  about `base + offset` with literal offsets. `Common.addrDisch` decides them directly (same
+  base: a comparison of literals; different bases: one case split on an aliasing fact such as
+  `z + 64 ≤ x ∨ x + 64 ≤ z`), with proofs from four small lemmas, and refutes the false ones
+  (`x + 8 = x + 16`) without calling `omega` at all. An `omega` call and the kernel check of its
+  proof cost 10-40 ms; a 300-instruction run asks for thousands of these facts.
+* **Focused `omega`.** What `addrDisch` cannot decide goes to `omega` in the context restricted
+  to the hypotheses that only mention variables of the goal, and only then to `omega` on the
+  whole context (which also splits every unrelated aliasing disjunction).
+* **Carry bounds by reflection.** The side conditions of `mod64_of_lt` on carry terms
+  (`(… + p / 2^64) / 2^64 < 2^64`) are proved by `janus_carry` (`omega` cannot: it does not know
+  the bound of a product), so the symbolic state keeps fewer `% 2^64`; bounds that do not hold
+  for all limb values, about atoms no hypothesis mentions, are rejected without `omega`.
+* **Accessibility hypotheses about the accessed pointer first.** `accessible` side conditions
+  try the regions stated about the pointer of the access before the others.
+* **`exec` unfolded definitionally, also when it is recursive.** `simp` unfolds a
+  non-recursive definition in its simp set by delta reduction, with no proof term. A
+  (structurally) recursive one is unfolded by rewriting with its equation lemmas `f.eq_<k>`,
+  which Lean does not tag `@[defeq]`, so each unfolding is a propositional rewrite whose proof
+  becomes part of the step proof. `janus_rfl_eqns f [simp_set]` (`Janus/Tactic/Common.lean`)
+  restates every `f.eq_<k>` as `f.rfl_<k>` proved by `Eq.refl` (kernel-checked when it is
+  added), tags it `@[defeq]` and puts it in the simp set; amd64 `exec` is unfolded that way.
+  See the note below for what this cost.
+
+**The amd64 post-processing regression (909b2ad, fixed).** The AVX/FS/DF merge made amd64
+`exec` structurally recursive: `.locked i a size` checks the alignment and then executes `i`
+with `exec` itself. Nothing else about the state or the step changed the cost (the extra
+`State` fields, `ea`/`eaOff` and `h_df` were ruled out: a tree with `.locked` made
+non-recursive and everything else as on `main` has the old cost). From then on the `simp` call
+of every step unfolded `exec` by its equation lemmas instead of by delta reduction. The
+resulting step proofs are not bigger as trees, but they lose sharing: the intermediate terms of
+the rewrite chain (`Eq.trans`/`congrArg` over the `match` on the instruction's operands) carry
+the current state as a separate copy that is not pointer-shared with the state in the goal, and
+that copy grows with every step (measured with `Expr.numObjs` on amd64 `MulAdd8`: the proof of
+step 84 had 250,732 distinct objects, of which a `State.mk` with 247,379, against 1,081 for
+the state itself and 3,428 for the same proof with `exec` unfolded by delta; the step proofs
+doubled about every 12 instructions). The `simp` of the run is not affected, but the final
+`instantiateMVars` of the proof (abstracting the `intro`/`obtain` variables over it) and
+`share common exprs` (hash-consing before the kernel) are linear in distinct objects, so they
+grew exponentially with the length of the run: 0.035 s before the merge, 4-7 s for the 98
+instructions of `MulAdd8`, ~240 s of the 292 s of `MulAdd8x3`, plus kernel time on the
+unshared term, and memory: `lean` on `MulAdd8x3` peaked at 19.5 GB (2.35 GB with the fix, which
+brings it from 281 s to 41 s; bench/RESULTS.md). With `exec.rfl_<k>` the unfolding carries no proof at all, the step proofs stay
+at a few thousand objects, and the whole `MulAdd8` proof (run and arithmetic) spends 0.14 s in
+`instantiate metavars` and 0.37 s in `share common exprs`, against 10.2 s and 17.5 s before
+(same machine). To check for this kind of regression, compile the proof with
+`set_option profiler true` and look at `instantiate metavars` and `share common exprs`: they
+should be a small fraction of `simp` and `type checking`.
 
 Tips:
 

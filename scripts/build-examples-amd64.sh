@@ -17,6 +17,6 @@ echo "built $root/artifacts/examples-amd64"
 funcs=$(cat "$root"/examples/basic/*.go | grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}')
 . "$root/scripts/example-contracts.sh"
 for f in $funcs; do
-  # shellcheck disable=SC2046
-  "$root/bin/janus" extract "$root/artifacts/examples-amd64" "example.com/basic.$f" "$root/artifacts/amd64/$f" $(example_contracts "$f")
+  mapfile -t extract_args < <("$root/scripts/example-targets.sh" "$f")
+  "$root/bin/janus" extract "$root/artifacts/examples-amd64" "example.com/basic.$f" "$root/artifacts/amd64/$f" "${extract_args[@]}"
 done

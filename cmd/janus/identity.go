@@ -60,6 +60,22 @@ type identitySkipped struct {
 	Reason  string `json:"reason"`
 }
 
+// identityTarget is a function copied because an indirect call may reach it (dynamic.go).
+type identityTarget struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Via     string `json:"via"`            // "targets", "itab", "funcval" or "code-address"
+	From    string `json:"from,omitempty"` // the itab/funcval symbol, or the instruction computing the address
+}
+
+// identityOmitted is a direct call that is deliberately not followed.
+type identityOmitted struct {
+	From   string `json:"from"`
+	Target string `json:"target"`
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
 // Identity is identity.json: what was extracted, from which bytes, by which extractor.
 type Identity struct {
 	Schema           int            `json:"schema"`
@@ -84,6 +100,9 @@ type Identity struct {
 	ContractPatterns []string           `json:"contractPatterns,omitempty"`
 	Contracts        []identityContract `json:"contracts,omitempty"`
 	Unresolved       []identityBranch   `json:"unresolvedBranches"`
+	Targets          []string           `json:"targets,omitempty"`
+	DynamicTargets   []identityTarget   `json:"dynamicTargets,omitempty"`
+	OmittedCalls     []identityOmitted  `json:"omittedCalls,omitempty"`
 	Data             []identityData     `json:"data"`
 	DataRefs         []identityDataRef  `json:"dataReferences"`
 	SkippedData      []identitySkipped  `json:"skippedData"`
@@ -159,6 +178,13 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 	for _, u := range x.Unresolved {
 		id.Unresolved = append(id.Unresolved, identityBranch{hex0x(u.From), hex0x(u.Target)})
 	}
+	id.Targets = append(id.Targets, x.Targets...)
+	for _, t := range x.Dynamic {
+		id.DynamicTargets = append(id.DynamicTargets, identityTarget{t.Name, hex0x(t.Addr), t.Via, t.From})
+	}
+	for _, o := range x.Omitted {
+		id.OmittedCalls = append(id.OmittedCalls, identityOmitted{hex0x(o.From), hex0x(o.Target), o.Name, o.Reason})
+	}
 	for _, d := range x.Data {
 		id.Data = append(id.Data, identityData{d.Name, hex0x(d.Base), len(d.Bytes), d.Section, sha256Hex(d.Bytes)})
 	}
@@ -213,8 +239,12 @@ func rerunExtract(id *Identity, outdir string) string {
 	if id == nil || id.Symbol == "" {
 		return "Rerun janus extract <binary> <symbol> " + outdir + ", then rerun this command."
 	}
-	return fmt.Sprintf("Rerun janus extract %s %q %s with the intended binary, then rerun this command.",
-		displayPath(resolveBinary(outdir, id.Binary)), id.Symbol, displayPath(outdir))
+	targets := ""
+	if len(id.Targets) > 0 {
+		targets = fmt.Sprintf(" --targets %q", strings.Join(id.Targets, ","))
+	}
+	return fmt.Sprintf("Rerun janus extract %s %q %s%s with the intended binary, then rerun this command.",
+		displayPath(resolveBinary(outdir, id.Binary)), id.Symbol, displayPath(outdir), targets)
 }
 
 // check regenerates the extraction recorded in outdir/identity.json and compares it with
@@ -281,7 +311,7 @@ func check(outdir, binOverride string) (*CheckResult, error) {
 			Stage: "extraction integrity", Next: rerunExtract(&id, outdir)}
 	}
 
-	x, err := extractWith(b, id.Symbol, id.MaxFunctions, id.ContractPatterns)
+	x, err := extractWith(b, id.Symbol, id.MaxFunctions, id.ContractPatterns, id.Targets...)
 	if err != nil {
 		d := err.(*diag)
 		d.Invalid = true
