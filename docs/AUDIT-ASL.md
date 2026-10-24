@@ -309,6 +309,14 @@ review their statements (in particular that `MemRel ∧ UserMapped` is satisfiab
 `Rel ∧ LinuxEL0Config`) and regenerate `asl-statements.golden`. The A6 row fails until then,
 on purpose.
 
+**Open for the next round (load/store theorems, agent/asl, 43 names).** The ASL agent reports
+that `UserMapped`/`MemRel` have only a trivial kernel-checked witness: empty regions, in which
+every Janus access faults and the `ldst*_agree` theorems hold vacuously. Non-vacuity with real
+mappings (concrete page tables through `AArch64_TranslateAddress`) is evaluated by
+`janus-asl-check` (0 violations), not proved. Until a witness with a non-empty region exists,
+the load/store theorems should be presented as "proved under a hypothesis whose satisfiability
+is tested", not as on a par with the 31 classes above, whose hypotheses A2 discharges.
+
 ## Running
 
 ```
