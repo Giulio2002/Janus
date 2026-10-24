@@ -1,0 +1,5 @@
+(executable
+ (name sail_plugin_janus)
+ (modes (native plugin))
+ (flags (:standard -w -27-32-33))
+ (libraries libsail))

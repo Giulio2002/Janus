@@ -1,0 +1,15 @@
+# Root functions of the Sail slice (JanusASL/sail/harness.sail + register init).
+initialize_registers
+janus_init
+janus_step
+janus_set_x
+janus_get_x
+janus_set_sp
+janus_get_sp
+janus_set_pc
+janus_get_pc
+janus_set_nzcv
+janus_get_nzcv
+janus_set_v
+janus_get_v
+janus_set_tpidr
