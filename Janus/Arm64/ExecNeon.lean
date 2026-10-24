@@ -56,6 +56,13 @@ def intCommit (t : State) (r : Res) (write : State → Nat → State) : Except F
 DEFINED): the model faults rather than choose. -/
 def rpresUnknown (s : State) (sz : Nat) : Bool := sz = 0 && ah s.fpcr.toNat
 
+/-- Vector `FABS`/`FNEG` under `FPCR.AH = 1` with a NaN lane: the ASL leaves the NaN unchanged
+(`FPAbs`/`FPNeg` with FEAT_AFP), which the Sail model confirms, but qemu 10.2.1 flips or clears
+its sign bit; the references disagree, so the model faults instead of choosing. -/
+def absNegAHNaN (s : State) (sz ds x : Nat) : Bool :=
+  let e := fesize sz
+  ah s.fpcr.toNat && anyLane (fun i => Janus.Float.isNaN (fmtOf sz) (elem x e i)) (ds / e)
+
 /-! ## Data processing -/
 
 def threeSame (s : State) (Q U : Bool) (size rm opcode rn rd : Nat) : Except Fault State :=
@@ -108,6 +115,7 @@ def twoMisc (s : State) (Q U : Bool) (size opcode rn rd : Nat) : Except Fault St
       let o := fcvtlOp fpcr (vpart s rn Q)
       fpCommit s o.2 (s.setV rd 128 o.1)
     else if opcode = 0b11101 && a && rpresUnknown s sz then .error (.trapped s.pc.toNat)
+    else if opcode = 0b01111 && absNegAHNaN s sz ds (s.getV rn ds) then .error (.trapped s.pc.toNat)
     else
       let o := twoMiscFP U a sz opcode ds fpcr (s.getV rn ds)
       fpCommit s o.2 (s.setV rd ds o.1)

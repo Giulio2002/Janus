@@ -34,7 +34,7 @@ theorem NeonExec.memVPair_eq : NeonExec.memVPair = Janus.Arm64.memVPair := rfl
 @[janus_exec] theorem exec_neon (i : NeonInstr) (s : State) : exec (.neon i) s = execNeon i s := rfl
 
 attribute [janus_exec] execNeon NeonExec.dsize NeonExec.vpart NeonExec.setVpart NeonExec.qcCommit
-  NeonExec.intCommit NeonExec.rpresUnknown NeonExec.threeSame NeonExec.sThreeSame
+  NeonExec.intCommit NeonExec.rpresUnknown NeonExec.absNegAHNaN NeonExec.threeSame NeonExec.sThreeSame
   NeonExec.threeDiff NeonExec.sThreeDiff NeonExec.twoMisc NeonExec.sTwoMisc NeonExec.across
   NeonExec.sPairwise NeonExec.perm NeonExec.fixedLanes NeonExec.shiftImm NeonExec.sShiftImm
   NeonExec.intIdx NeonExec.fpIdx NeonExec.byElem NeonExec.sByElem NeonExec.sDup

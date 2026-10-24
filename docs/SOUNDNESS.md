@@ -506,7 +506,9 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
 
   Saturation sets `FPSR.QC` (bit 27). Two corners are IMPLEMENTATION DEFINED or differ between
   the references, so the model faults (`trapped`) instead of choosing: the single-precision
-  `FRECPE`/`FRSQRTE` under `FPCR.AH = 1` (FEAT_RPRES changes their precision).
+  `FRECPE`/`FRSQRTE` under `FPCR.AH = 1` (FEAT_RPRES changes their precision), and the vector
+  `FABS`/`FNEG` under `FPCR.AH = 1` with a NaN lane (the ASL, and Sail, leave the NaN unchanged;
+  qemu 10.2.1 changes its sign bit).
 
 Not modelled, and rejected: half precision (FEAT_FP16, and the `FCVTL`/`FCVTN` forms to and from
 half precision), BFloat16, dot products (FEAT_DotProd, FEAT_I8MM), `SQRDMLAH`/`SQRDMLSH`
