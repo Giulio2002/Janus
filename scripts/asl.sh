@@ -6,6 +6,8 @@
 #                          the slicing plugin, sail-arm at the pin, lean-sail at the pin
 #   scripts/asl.sh gen     slice sail-arm to the Janus subset and generate Lean (JanusASL/ArmASL*),
 #                          then compare with the vendored copy (GEN_UPDATE=1 replaces the vendored copy)
+#   scripts/asl.sh restore unpack the vendored model (if needed) and copy its build from ASL_CACHE (no build)
+#   scripts/asl.sh model   unpack the vendored model (if needed) and build only ArmASL (lake; uses ASL_CACHE)
 #   scripts/asl.sh build   unpack the vendored model (if needed) and build JanusASL (lake)
 #   scripts/asl.sh check   build + `lake exe janus-asl-check` on the oracle corpus (default)
 #   scripts/asl.sh prove   build the proofs (JanusASL.Proofs) and audit their axioms
@@ -21,9 +23,11 @@
 #   ASL_CACHE          a shared ArmASL build cache (a directory; off by default). Before building,
 #                      the generated model's build (and the lean-sail package) is copied from
 #                      the cache entry for this model and toolchain, if there is one; after a
-#                      build, it is stored there if not. Entries are keyed by the SHA-256 of the
-#                      vendored tarball, lean-toolchain, JanusASL's lakefile and manifest and the
-#                      splitter, carry a SHA-256 manifest that is checked on every copy, and are
+#                      build, it is stored there if not. Entries are keyed by exactly what the
+#                      ArmASL outputs depend on (JanusASL/tools/asl_cache_key.py: the vendored
+#                      tarball, the toolchain, the lean-sail manifest entry, the splitter and the
+#                      lakefile settings that reach ArmASL's modules, not the rest of the lakefile),
+#                      carry a SHA-256 manifest that is checked on every copy, and are
 #                      published atomically, so worktrees and CI runners share one build of the
 #                      ~45 min model. The cache must be writable only by users you trust: its
 #                      oleans are what the JanusASL proofs are checked against.
@@ -130,6 +134,12 @@ do_gen() {
 
 # ---- shared ArmASL build cache (ASL_CACHE) ----
 asl_cache_key() {
+  python3 -I "$pkg/tools/asl_cache_key.py" "$root"
+}
+
+# The key before scheme v2 (whole lakefile and manifest): still read, never written. Its inputs are
+# a superset of the v2 key's, so an entry under it is valid for this checkout too.
+asl_cache_legacy_key() {
   { cat "$VENDOR.sha256"; cat "$root/lean-toolchain"; cat "$pkg/lakefile.toml" "$pkg/lake-manifest.json" "$here/split_lean.py"; } |
     sha256sum | cut -c1-32
 }
@@ -143,6 +153,9 @@ asl_cache_paths() {
 cache_restore() {
   [ -n "${ASL_CACHE:-}" ] || return 0
   local e; e="$ASL_CACHE/$(asl_cache_key)"
+  if [ ! -f "$e/MANIFEST.sha256" ] && [ -f "$pkg/lakefile.toml" ] && [ -f "$ASL_CACHE/$(asl_cache_legacy_key)/MANIFEST.sha256" ]; then
+    e="$ASL_CACHE/$(asl_cache_legacy_key)"
+  fi
   [ -f "$e/MANIFEST.sha256" ] || { echo "asl cache: no entry for this model and toolchain ($e)"; return 0; }
   if [ -f "$pkg/.lake/build/lib/lean/ArmASL.olean" ] && (cd "$pkg/.lake" && sha256sum -c --quiet --status "$e/MANIFEST.sha256" 2>/dev/null); then
     echo "asl cache: the ArmASL build already matches $e"; return 0
@@ -206,6 +219,20 @@ do_build() {
   lake_asl build ArmASL
   cache_publish
   lake_asl build ArmASL JanusASL janus-asl-check
+  cache_publish
+}
+
+# Only the cache restore (JanusASL/tools/test_asl_cache.sh).
+do_restore() {
+  unpack
+  cache_restore
+}
+
+# Only the model: restore, `lake build ArmASL`, publish.
+do_model() {
+  unpack
+  cache_restore
+  lake_asl build ArmASL
   cache_publish
 }
 
@@ -301,10 +328,12 @@ do_verify() {
 case "$mode" in
   deps) do_deps ;;
   gen) do_gen ;;
+  restore) do_restore ;;
+  model) do_model ;;
   build) do_build ;;
   check) do_check ;;
   prove) do_prove ;;
   replay) do_replay ;;
   verify) do_verify ;;
-  *) echo "usage: $0 deps|gen|build|check|prove|replay|verify" >&2; exit 2 ;;
+  *) echo "usage: $0 deps|gen|restore|model|build|check|prove|replay|verify" >&2; exit 2 ;;
 esac
