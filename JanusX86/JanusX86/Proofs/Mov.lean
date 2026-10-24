@@ -661,6 +661,77 @@ theorem decode_movi {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List N
       | (obtain ⟨rfl, rfl⟩ := hd; simp; omega)
       | omega
       | rfl
-      | (trace_state; sorry)
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+set_option maxRecDepth 100000 in
+theorem run_one_byte_movi (opc : Nat) (hopc : opc = 0xC6 ∨ opc = 0xC7)
+    (sr tr : BitVec 48) (x : BitVec 52) (hl : _get_prefixes_lck x = 0#8) (rex m sib : BitVec 8)
+    (hm : _get_modr_m_reg m = 0#3) (s : SState) :
+    (one_byte_opcode_execute .Mode_64bit sr tr x rex (BitVec.ofNat 8 opc) m sib).run s =
+      (x86_mov_op_en_mi .Mode_64bit sr tr x rex (BitVec.ofNat 8 opc) m sib).run s := by
+  rcases hopc with rfl | rfl <;>
+  simp (config := {decide := true}) only [one_byte_opcode_execute, ext_one_byte_opcode_execute, eq_bits_nat,
+    ↓reduceIte, Bool.false_eq_true, hl, hm, Bool.and_false, run_bind, run_pure,
+    show (240#8 == 0#8) = false from rfl] <;> rfl
+
+set_option maxHeartbeats 1000000 in
+open Janus.Amd64 Janus.Amd64.Decode in
+/-- **MOV r/m, imm** (`C6/C7 /0`): every ModRM form (incl. FS-relative), width and prefix
+sequence Janus accepts. -/
+theorem movi_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
+    {bytes : List Nat} (hcode : CodeAt s js.rip.toNat bytes) (hlim : js.rip.toNat + 17 < 2 ^ 47)
+    {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n)) (ho : o = 0xC6 ∨ o = 0xC7)
+    (hext : m / 8 % 8 = 0)
+    (hstep : step bytes js = .ok js') :
+    ∃ s', (janus_x86_step ()).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ X86Config s' := by
+  cases hd : decode bytes with
+  | none => simp [step, hd] at hstep
+  | some il =>
+  obtain ⟨i, len⟩ := il
+  cases hmd : modrm (p.rex.getD 0) (m :: rest) with
+  | none =>
+    exfalso
+    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    rcases ho with rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
+  | some mrc =>
+  obtain ⟨mm, r3, c⟩ := mrc
+  generalize hw : (if o = 0xC6 then 8 else osz p) = w
+  generalize hk : (if o = 0xC6 then 1 else immBytes w) = k
+  obtain ⟨hlk, hrep, v, r4, hr, rfl, hlen, rfl, hfs⟩ := decode_movi hpp ho hext hmd hw.symm hk.symm hd
+  rw [step_of_decode hd] at hstep
+  have hW : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64 := by
+    rw [← hw]; split
+    · simp
+    · rcases osz_cases p with e | e | e <;> simp [e]
+  have hk4 : k = 1 ∨ k = 2 ∨ k = 4 := by
+    rw [← hk]; unfold immBytes; split <;> (try split) <;> (try split) <;> simp
+  have hnext : BitVec.ofNat 64 ((BitVec.toNat js.rip + (n + 1 + c + k)) % 2 ^ 64) =
+      BitVec.ofNat 64 (js.rip.toNat + n + 1 + c + k) := by
+    rw [Nat.mod_eq_of_lt (by omega)]; congr 1; omega
+  have hm256 : m < 256 := by
+    have hdrop : bytes.drop n = o :: m :: rest := by simpa using parsePrefixes_drop _ _ _ hpp
+    exact hcode.1 m (by
+      have : m ∈ bytes.drop n := by rw [hdrop]; simp
+      exact List.mem_of_mem_drop this)
+  have hreg0 : _get_modr_m_reg (BitVec.ofNat 8 m) = 0#3 := by rw [(modrm_fields m hm256).2.1, hext]
+  refine rm_frame hrel hcfg hcode hlim hpp (by unfold prefixGroup; omega) (by omega) (by omega)
+    (by rcases ho with rfl | rfl <;> decide) hlk hmd hfs hW (k := k) (by omega) (by omega)
+    (fun sr tr x rex sib => x86_mov_op_en_mi .Mode_64bit sr tr x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib)
+    (fun x rex _ hl sr tr sib => run_one_byte_movi o ho sr tr x hl rex _ sib hreg0 s) ?_
+  intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 hcs3 hX hWr hEA hR3 _
+  obtain ⟨V, hV, hok, rfl⟩ := exec_mov hstep
+  simp only [readSrc, Except.ok.injEq] at hV; subst hV
+  rw [hnext] at hok ⊢
+  obtain ⟨s', hs', hrel', hc'⟩ := run_mov_mi hrel hcfg hpr hrv o ho hw.symm hk.symm m hm256 sib tr inc eaddr _ _
+    (fun sg h4 h5 => hWr true false sg h4 h5 hok) hEA hR3 (by rw [hinc']; exact hcs3) hr hinc8 js.rip.toNat
+    (by omega) (by omega) (by omega)
+  refine ⟨s', hs', ?_, hc'⟩
+  rwa [hinc'] at hrel'
 
 end JanusX86.Proofs
