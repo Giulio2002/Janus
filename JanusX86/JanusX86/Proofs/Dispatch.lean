@@ -54,7 +54,7 @@ open Janus.Amd64.Decode in
 theorem run_fetch_one {s : SState} (h : X86Config s) {base : Nat}
     (hr : s.regs.get? .rip = some (BitVec.ofNat 64 base)) {bs : List Nat} (hc : CodeAt s base bs)
     {p : Prefixes} {op : Nat} {rest : List Nat} {n : Nat}
-    (hp : parsePrefixes bs {} 0 = some (p, op :: rest, n)) (hn : n ≤ 13) (hlim : base + 17 < 2 ^ 47)
+    (hp : parsePrefixes bs {} 0 = some (p, op :: rest, n)) (hn : n ≤ 14) (hlim : base + 17 < 2 ^ 47)
     (hop : prefixGroup op = 0) (hop4 : op / 16 ≠ 4) (hvex : op ≠ 0xC4 ∧ op ≠ 0xC5 ∧ op ≠ 0x62)
     (hlen : (modrmSib (modrmP1 op) rest).2.2 ≤ rest.length) :
     ∃ x rex, PfxRel p x rex ∧ _get_prefixes_nxt x = BitVec.ofNat 8 op ∧
@@ -116,7 +116,7 @@ theorem run_fetch_one {s : SState} (h : X86Config s) {base : Nat}
     have := hops (k + 1) (by omega)
     rw [show base + n + (k + 1) = base + n + 1 + k by omega] at this
     rw [this]; simp [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hk]
-  have hadd2 : ∀ k, k ≤ 2 → (add_to_iptr .Mode_64bit (BitVec.ofNat 48 (base + n + 1 + k)) 1#48).run s =
+  have hadd2 : ∀ k, k ≤ 1 → (add_to_iptr .Mode_64bit (BitVec.ofNat 48 (base + n + 1 + k)) 1#48).run s =
       .ok (BitVec.ofNat 48 (base + n + 1 + (k + 1))) s := by
     intro k hk
     rw [run_add_to_iptr _ _ (by simp; omega)]
