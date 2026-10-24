@@ -347,9 +347,11 @@ printed statement is the one the kernel checked. To make that true, verification
 * runs **every Lean process that loads the proof inside a sandbox** (bubblewrap, else an
   `unshare` namespace): no network; the filesystem — including the Janus sources, the
   `~/.cache/janus` build and the `janus` binary — is read-only except one fresh, private build
-  directory; a private `/tmp`, PID and user namespace, killed with the parent. The `unshare`
-  fallback remounts **every** mount read-only (not only `/`) and mounts private tmpfs `/tmp`
-  and `/dev/shm`; if some mount cannot be made read-only it refuses, and you should install
+  directory; a private `/tmp`, `/dev/shm` and `/run` (so the host's live daemon sockets under
+  `/run`, which a read-only bind would leave reachable, are not present), and a private PID and
+  user namespace, killed with the parent. The `unshare`
+  fallback remounts **every** mount read-only (not only `/`) and mounts private tmpfs `/tmp`,
+  `/dev/shm` and `/run`; if some mount cannot be made read-only it refuses, and you should install
   bubblewrap. `JANUS_SANDBOX=unshare` forces the fallback (for testing it), `JANUS_SANDBOX=bwrap`
   forbids it. Without a sandbox verification refuses (`Stage: sandbox`) unless you pass
   `--unsafe-no-sandbox`. Install bubblewrap with `apt-get install -y bubblewrap`; the mode used

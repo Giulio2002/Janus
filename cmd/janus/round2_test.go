@@ -162,7 +162,10 @@ func TestUnshareFallbackConfinement(t *testing.T) {
 			t.Errorf("a write to %s inside the unshare sandbox reached the host", d)
 		}
 		inside := strings.Contains(string(out), "WROTE:"+d+"\n") || strings.HasSuffix(string(out), "WROTE:"+d)
-		if inside && d != "/tmp" && d != "/dev/shm" {
+		// /tmp, /dev/shm and (round 3, S2) /run are private tmpfs mounts: writable inside but
+		// isolated from the host, which the host-leak check above already confirmed.
+		isPrivate := d == "/tmp" || d == "/dev/shm" || d == "/run" || strings.HasPrefix(d, "/run/")
+		if inside && !isPrivate {
 			t.Errorf("%s is writable inside the unshare sandbox", d)
 		}
 	}

@@ -217,6 +217,15 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 			"--ro-bind", "/", "/",
 			"--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
 		}
+		// Round 3, S2: `--ro-bind / /` also binds the host's live runtime sockets under /run
+		// (/run/docker.sock, the D-Bus system bus, containerd). A *read-only* bind does not stop
+		// a process connecting to a unix socket, and unix sockets are not confined by the network
+		// namespace, so untrusted proof code could reach a privileged daemon and escape. Overmount
+		// /run (and thus /var/run, a symlink to it) with an empty tmpfs; the cache re-bind below
+		// restores any janus dir that happens to live under /run.
+		if _, err := os.Stat("/run"); err == nil {
+			a = append(a, "--tmpfs", "/run")
+		}
 		// The private /tmp would hide any janus directory placed under /tmp (the cache can be
 		// there, e.g. in tests), so re-expose the cache read-only; the writable binds below
 		// then override the work dir. Source paths are resolved on the host.
@@ -305,6 +314,24 @@ func unshareScript(workDir string, writable, readOnly, protected []string) strin
 	w("done < /proc/self/mountinfo")
 	w("if [ -d /tmp ]; then cd /tmp; mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp; fi")
 	w("if [ -d /dev/shm ]; then mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /dev/shm; fi")
+	// Round 3, S2: overmount /run with an empty tmpfs so the host's live runtime sockets
+	// (/run/docker.sock, the D-Bus system bus, containerd) are not reachable from untrusted
+	// proof code (a read-only remount does not stop a connect() to a unix socket). Skip it only
+	// when a path janus must bind back lives under /run, which the tmpfs would hide; those paths
+	// are normally under the home cache, not /run.
+	underRun := func(p string) bool {
+		p = filepath.Clean(p)
+		return p == "/run" || strings.HasPrefix(p, "/run/")
+	}
+	runSafe := !underRun(cacheRoot())
+	for _, p := range append(append(append([]string{}, writable...), readOnly...), protected...) {
+		if underRun(p) {
+			runSafe = false
+		}
+	}
+	if runSafe {
+		w("if [ -d /run ]; then mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run; fi")
+	}
 	// bind P (ro or rw); strict: failure aborts (set -e) instead of continuing.
 	bind := func(p string, rw, strict bool) {
 		p = filepath.Clean(p)

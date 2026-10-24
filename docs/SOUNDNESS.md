@@ -15,7 +15,11 @@ re-parsed and re-elaborated there and must be definitionally equal to the checke
 by the elaborator at default transparency and confirmed by the kernel; definitionally equal
 propositions are the same proposition, so the printed text, read with the canonical instances,
 is exactly what was proved). `verified.json` also has `statementExplicit`, the statement with
-every implicit and instance argument shown. See CRITICAL-1 in [AUDIT-ROUND2.md](AUDIT-ROUND2.md).
+every implicit and instance argument shown. The body of each plain proof-local `def` the
+statement names (disclosed in `definitions`, and part of what the guarantee means) is held to the
+same instance check, so a `def` whose displayed body reads as one operation while an inline
+instance makes it compute another is rejected. See CRITICAL-1 in
+[AUDIT-ROUND2.md](AUDIT-ROUND2.md) and R1 in [AUDIT-ROUND3.md](AUDIT-ROUND3.md).
 
 ## Trusted computing base
 
