@@ -43,8 +43,10 @@ PY
 }
 
 lf=JanusASL/lakefile.toml
-# A copy like agent/aslverify's: other JanusASL roots, a new lib and a new exe.
-VERIFY_EDIT='sub("'$lf'", "roots = [\"JanusASL.Proofs\"]", "roots = [\"JanusASL.Proofs\", \"JanusASL.Classify\", \"JanusASL.Verify\"]")
+# A copy like agent/aslverify's: other JanusASL roots, a new lib and a new exe. (agent/aslverify's
+# own roots are on main now; this drops one and adds another.)
+ROOTS='roots = [\"JanusASL.Proofs\", \"JanusASL.Classify\", \"JanusASL.Verify\"]'
+VERIFY_EDIT='sub("'$lf'", "'"$ROOTS"'", "roots = [\"JanusASL.Proofs\", \"JanusASL.Verify\", \"JanusASL.Extra\"]")
 app("'$lf'", "\n[[lean_lib]]\nname = \"JanusASLExtra\"\nroots = [\"JanusASL.Verify\"]\n\n[[lean_exe]]\nname = \"janus-asl-verify\"\nroot = \"JanusASL.Verify\"\n")'
 
 same=(
@@ -53,7 +55,7 @@ same=(
   "ArmASL table keys reordered|sub(\"$lf\", 'moreLeanArgs = [\"--tstack=400000\"]\nmoreLeancArgs = [\"-fbracket-depth=100000\"]', 'moreLeancArgs = [\"-fbracket-depth=100000\"]\nmoreLeanArgs = [\"--tstack=400000\"]')"
   "version, defaultTargets|sub(\"$lf\", 'version = \"0.1.0\"', 'version = \"0.2.0\"'); sub(\"$lf\", 'defaultTargets = [\"JanusASL\", \"janus-asl-check\"]', 'defaultTargets = [\"JanusASL\"]')"
   "janus-asl-check exe's leanc args|sub(\"$lf\", 'root = \"JanusASL.Check\"\nmoreLeancArgs = [\"-fbracket-depth=100000\"]', 'root = \"JanusASL.Check\"\nmoreLeancArgs = [\"-fbracket-depth=99999\", \"-O2\"]')"
-  "JanusASL lib options|sub(\"$lf\", 'roots = [\"JanusASL.Proofs\"]', 'roots = [\"JanusASL.Proofs\"]\nmoreLeanArgs = [\"--tstack=1\"]\nleanOptions = { maxHeartbeats = 1 }')"
+  "JanusASL lib options|sub(\"$lf\", \"$ROOTS\", \"$ROOTS\nmoreLeanArgs = [\\\"--tstack=1\\\"]\nleanOptions = { maxHeartbeats = 1 }\")"
   "a JanusASL proof file|app(\"JanusASL/JanusASL/Proofs.lean\", \"\\n-- edited\\n\")"
   "the framework's sources|app(\"Janus.lean\", \"\\n-- edited\\n\")"
   "the janus package's lakefile (a new exe)|app(\"lakefile.toml\", \"\\n[[lean_exe]]\\nname = \\\"x\\\"\\nroot = \\\"X\\\"\\n\")"

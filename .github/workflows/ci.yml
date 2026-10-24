@@ -25,6 +25,13 @@ jobs:
       - name: No sorry / native_decide / bv_decide / admit
         run: scripts/ci-axiom-guard.sh
 
+      # Keys of the shared JanusASL build caches (ArmASL entry and per-module entries): edits that
+      # cannot change a build keep its key, edits that can change it (seconds; docs/ASL.md).
+      - name: JanusASL build cache keys
+        run: |
+          JanusASL/tools/test_asl_cache.sh
+          JanusASL/tools/test_asl_mod_cache.sh
+
   go-test:
     name: Lean build, go vet, go test
     runs-on: ubuntu-latest
