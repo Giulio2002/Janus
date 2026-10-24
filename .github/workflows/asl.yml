@@ -1,0 +1,50 @@
+name: ASL equivalence
+
+# Builds the Lean translation of Arm's ASL (vendored, JanusASL/vendor/ArmASL.tar.gz) and checks the
+# kernel-checked equivalence theorems between it and the Janus arm64 model (docs/ASL.md). The model
+# build takes about an hour, so this runs weekly, on demand, and when the arm64 model or JanusASL
+# changes, rather than on every push.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "Janus/Arm64/**"
+      - "JanusASL/**"
+      - "scripts/asl.sh"
+      - ".github/workflows/asl.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  asl:
+    name: Build ArmASL and audit the equivalence theorems
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan (toolchain from lean-toolchain)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh |
+            sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache the ArmASL build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            JanusASL/.lake
+          key: asl-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'JanusASL/vendor/ArmASL.tar.gz', 'JanusASL/lakefile*', 'JanusASL/lake-manifest.json') }}
+
+      - name: Build ArmASL, JanusASL and janus-asl-check
+        run: scripts/asl.sh build
+
+      - name: Audit the equivalence theorems (only propext, Classical.choice, Quot.sound)
+        run: |
+          scripts/asl.sh prove | tee audit.txt
+          grep -q "only propext, Classical.choice, Quot.sound" audit.txt
