@@ -18,6 +18,7 @@ package main
 // see read-only, and is used only with a sandbox and without --fresh.
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -49,7 +50,7 @@ func trustedCacheDir() string { return filepath.Join(cacheRoot(), "v1", "trusted
 // binary), the framework build's module data (its pins) and the bytes of both sources.
 func trustedCacheKey(tc *toolchain, fw *pinnedLib, extracted, janusTrusted []byte) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-trusted-compile-v1\n%s\n%s\n", tc.version, tc.lean)
+	fmt.Fprintf(h, "janus-trusted-compile-v1\n%s\n%s\n", tc.cacheID(), tc.lean)
 	fmt.Fprintf(h, "framework %s\n", pinsDigest(fw.want))
 	fmt.Fprintf(h, "Extracted.lean %s\nJanusTrusted.lean %s\n", sha256Hex(extracted), sha256Hex(janusTrusted))
 	return hex.EncodeToString(h.Sum(nil))
@@ -58,6 +59,35 @@ func trustedCacheKey(tc *toolchain, fw *pinnedLib, extracted, janusTrusted []byt
 type trustedManifest struct {
 	Key   string `json:"key"`
 	Files pins   `json:"files"` // module-data files of the compile, with their SHA-256
+	// MAC is HMAC-SHA256 of the key and the files under the result cache's key (round 8 M1),
+	// which no sandboxed process can read: a manifest written by anything but janus is ignored.
+	MAC string `json:"mac"`
+}
+
+// trustedMAC authenticates a trusted-compile manifest (key and file pins) under hk.
+func trustedMAC(hk []byte, key string, files pins) string {
+	m := hmac.New(sha256.New, hk)
+	fmt.Fprintf(m, "janus-trusted-compile-entry-v1\n%s\n%s\n", key, pinsDigest(files))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// readTrustedManifest reads the manifest of the entry directory for key and reports whether it is
+// authentic: written by janus (its MAC verifies under the result cache's key), for this key, and
+// non-empty. A manifest with no MAC or a wrong one (planted, or recorded before round 8) is not.
+func readTrustedManifest(entry, key string) (trustedManifest, bool) {
+	var m trustedManifest
+	b, err := readPrivateFile(filepath.Join(entry, "manifest.json"), false)
+	if err != nil {
+		return m, false
+	}
+	if json.Unmarshal(b, &m) != nil || m.Key != key || len(m.Files) == 0 || m.MAC == "" {
+		return m, false
+	}
+	hk, err := resultHMACKey()
+	if err != nil || !hmac.Equal([]byte(m.MAC), []byte(trustedMAC(hk, key, m.Files))) {
+		return m, false
+	}
+	return m, true
 }
 
 // loadTrustedCache copies a cached trusted compile into dir (which holds only the two
@@ -65,12 +95,8 @@ type trustedManifest struct {
 // partial copy is removed.
 func loadTrustedCache(key, dir string) bool {
 	entry := filepath.Join(trustedCacheDir(), key[:2], key)
-	b, err := os.ReadFile(filepath.Join(entry, "manifest.json"))
-	if err != nil {
-		return false
-	}
-	var m trustedManifest
-	if json.Unmarshal(b, &m) != nil || m.Key != key || len(m.Files) == 0 {
+	m, ok := readTrustedManifest(entry, key)
+	if !ok {
 		return false
 	}
 	var copied []string
@@ -84,7 +110,7 @@ func loadTrustedCache(key, dir string) bool {
 		if filepath.Base(rel) != rel || !isModuleData(rel) {
 			return undo()
 		}
-		data, err := os.ReadFile(filepath.Join(entry, rel))
+		data, err := readPrivateFile(filepath.Join(entry, rel), false)
 		if err != nil || sha256Hex(data) != want {
 			return undo()
 		}
@@ -102,8 +128,21 @@ func loadTrustedCache(key, dir string) bool {
 func storeTrustedCache(key, dir string, files pins) {
 	parent := filepath.Join(trustedCacheDir(), key[:2])
 	final := filepath.Join(parent, key)
-	if _, err := os.Stat(final); err == nil {
-		return
+	if _, err := os.Lstat(final); err == nil {
+		if _, ok := readTrustedManifest(final, key); ok {
+			return
+		}
+		// An entry that is not authentic would otherwise make this key miss forever: move it
+		// aside (atomically, so a concurrent reader sees it whole or not at all) and replace it.
+		if old, err := os.MkdirTemp(parent, ".stale-"); err == nil {
+			if os.Rename(final, filepath.Join(old, "entry")) != nil {
+				os.Remove(old)
+				return
+			}
+			os.RemoveAll(old)
+		} else {
+			return
+		}
 	}
 	if os.MkdirAll(parent, 0o755) != nil {
 		return
@@ -119,7 +158,12 @@ func storeTrustedCache(key, dir string, files pins) {
 			return
 		}
 	}
-	b, _ := json.Marshal(trustedManifest{Key: key, Files: files})
+	hk, err := resultHMACKey()
+	if err != nil {
+		os.RemoveAll(tmp)
+		return
+	}
+	b, _ := json.Marshal(trustedManifest{Key: key, Files: files, MAC: trustedMAC(hk, key, files)})
 	if os.WriteFile(filepath.Join(tmp, "manifest.json"), b, 0o644) != nil || os.Rename(tmp, final) != nil {
 		os.RemoveAll(tmp)
 	}
