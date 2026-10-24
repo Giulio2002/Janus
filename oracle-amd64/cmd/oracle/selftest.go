@@ -132,6 +132,15 @@ func cmdSelftest(args []string) {
 			if !skip["mem"] && len(h.Mem) != 0 {
 				return "memory changed"
 			}
+			if !skip["mxcsr"] {
+				in := uint64(L.DefaultMXCSR)
+				if c.MXCSR != "" {
+					in = hexv(c.MXCSR)
+				}
+				if h.MXCSR == "" || hexv(h.MXCSR) != in {
+					return fmt.Sprintf("mxcsr changed %#x -> %q", in, h.MXCSR)
+				}
+			}
 			return ""
 		}
 	}
@@ -324,6 +333,30 @@ func cmdSelftest(args []string) {
 			}
 			return mem(m)(c, h)
 		})},
+	)
+	mx := func(v uint64) check {
+		return func(c *L.Case, h *L.HW) string {
+			if h.MXCSR == "" || hexv(h.MXCSR) != v {
+				return fmt.Sprintf("mxcsr = %q, want %#x", h.MXCSR, v)
+			}
+			return ""
+		}
+	}
+	one, tiny := [2]uint64{0x3FF0000000000000, 0xdead}, [2]uint64{0x3C30000000000000, 0xbeef} // 1.0, 2^-60
+	for _, m := range []uint32{0x1F80, 0xFFFF, 0x9FC0, 0x0000, 0x7F80, 0x1F80 | 0x3F, 0x5F80} {
+		m := m
+		tests = append(tests, tc{fmt.Sprintf("nop keeps mxcsr %#x", m), "90", func(s *gen.State) { s.SetMXCSR(m) },
+			and(expect("ok", T+1), preserved())})
+	}
+	tests = append(tests,
+		tc{"addsd xmm0, xmm1 (1 + 2^-60: PE, RN)", "f20f58c1", func(s *gen.State) { s.XMM[0], s.XMM[1] = one, tiny },
+			and(expect("ok", T+4), xmm(0, "0xdead3ff0000000000000"), mx(0x1FA0), preserved("xmm", "mxcsr"))},
+		tc{"addsd xmm0, xmm1 (1 + 2^-60: PE, RC=up)", "f20f58c1", func(s *gen.State) { s.XMM[0], s.XMM[1] = one, tiny; s.SetMXCSR(0x5F80) },
+			and(expect("ok", T+4), xmm(0, "0xdead3ff0000000000001"), mx(0x5FA0), preserved("xmm", "mxcsr"))},
+		tc{"addsd xmm0, xmm1 (PE unmasked: #XM)", "f20f58c1", func(s *gen.State) { s.XMM[0], s.XMM[1] = one, tiny; s.SetMXCSR(0x0F80) },
+			and(fault(8), preserved("mxcsr"))},
+		tc{"addsd xmm0, xmm1 (exact, all unmasked: no trap)", "f20f58c1", func(s *gen.State) { s.XMM[0], s.XMM[1] = one, one; s.SetMXCSR(0x0000) },
+			and(expect("ok", T+4), xmm(0, "0xdead4000000000000000"), mx(0), preserved("xmm"))},
 	)
 	for f := 0; f < 64; f++ {
 		f := f

@@ -202,6 +202,30 @@ inductive Instr where
   /-- FMOV between a general and a SIMD&FP register (bit moves only): `sf`, `ftype`, `rmode`,
   `opcode` as encoded (`opcode = 110`: to general, `111`: to SIMD&FP). General register: ZR. -/
   | fmovGen (sf : Bool) (ftype rmode opcode rn rd : Nat)
+  -- Scalar floating point (`Janus.Arm64.ExecFloat`); `ftype` is 00 (single) or 01 (double).
+  /-- Floating-point data-processing (1 source), `opcode = w<20:15>`: FMOV (0), FABS (1),
+  FNEG (2), FSQRT (3), FCVT to single (4) / double (5), FRINTN/P/M/Z/A (8–12), FRINTX (14),
+  FRINTI (15). -/
+  | fpDP1 (ftype opcode rn rd : Nat)
+  /-- Floating-point data-processing (2 source), `opcode = w<15:12>`: FMUL (0), FDIV (1),
+  FADD (2), FSUB (3), FMAX (4), FMIN (5), FMAXNM (6), FMINNM (7), FNMUL (8). -/
+  | fpDP2 (ftype rm opcode rn rd : Nat)
+  /-- Floating-point data-processing (3 source): FMADD (`o1 o0 = 00`), FMSUB (01),
+  FNMADD (10), FNMSUB (11). -/
+  | fpDP3 (ftype : Nat) (o1 : Bool) (rm : Nat) (o0 : Bool) (ra rn rd : Nat)
+  /-- FCMP (`opc<1> = 0`) / FCMPE (`opc<1> = 1`), with `#0.0` when `opc<0> = 1` (then
+  `rm = 0`). -/
+  | fpCmp (ftype rm opc rn : Nat)
+  /-- FCCMP (`signal = false`) / FCCMPE. -/
+  | fpCcmp (ftype rm cond : Nat) (signal : Bool) (rn nzcv : Nat)
+  /-- FCSEL. -/
+  | fpCsel (ftype rm cond rn rd : Nat)
+  /-- FMOV (scalar, immediate), `imm8 = w<20:13>`. -/
+  | fpImm (ftype imm8 rd : Nat)
+  /-- Conversion between floating point and integer other than FMOV: FCVT{N,P,M,Z}{S,U}
+  (`opcode = 00u`, rounding `rmode`), SCVTF/UCVTF (`01u`, `rmode = 00`), FCVTA{S,U} (`10u`,
+  `rmode = 00`). General register (`rn` of SCVTF/UCVTF, `rd` of the others): ZR. -/
+  | fpCvtInt (sf : Bool) (ftype rmode opcode rn rd : Nat)
   -- Data processing: register
   /-- AND/BIC/ORR/ORN/EOR/EON/ANDS/BICS (shifted register); `N` inverts the second operand.
   All registers: ZR. -/

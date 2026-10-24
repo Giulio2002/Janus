@@ -267,8 +267,8 @@ example : decode 0x0eb1b800 = none := by decide   -- addv s0, v0.2s (size:Q = 10
 example : decode 0x4cdf8c00 = none := by decide   -- ld2 {v0.2d, v1.2d}, [x0], #32 (LD2: not modelled)
 example : decode 0x4d40d400 = none := by decide   -- ld1r with S = 1 (UNDEFINED)
 example : decode 0x4d408c00 = none := by decide   -- ld1 {v0.d}[1] with S = 1 (UNDEFINED)
-example : decode 0x1e602000 = none := by decide   -- fcmp d0, d0 (floating point)
-example : decode 0x1e6e1000 = none := by decide   -- fmov d0, #1.0 (floating-point immediate: not modelled)
+example : decode 0x1e602000 = some (.fpCmp 1 0 0 0) := by decide   -- fcmp d0, d0 (floating point)
+example : decode 0x1e6e1000 = some (.fpImm 1 0x70 0) := by decide   -- fmov d0, #1.0
 example : decode 0x4e204000 = none := by decide   -- addhn2 (not modelled)
 example : decode 0x2c400000 = none := by decide   -- ldnp s0, s0, [x0] (not modelled)
 example : decode 0x2c400400 = none := by decide   -- ldnp with ... (reserved neighbour)

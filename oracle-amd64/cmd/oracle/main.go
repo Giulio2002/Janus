@@ -64,6 +64,8 @@ type caseWriter struct {
 	n   map[string]int
 	// flag combinations per word for conditional classes
 	condK int
+	// MXCSR settings per state for the SSE floating-point classes
+	fpK int
 }
 
 func newCaseWriter(path string, firstID, condK int) *caseWriter {
@@ -72,7 +74,7 @@ func newCaseWriter(path string, firstID, condK int) *caseWriter {
 		die("%v", err)
 	}
 	w := bufio.NewWriter(f)
-	return &caseWriter{w: w, enc: json.NewEncoder(w), f: f, id: firstID, n: map[string]int{}, condK: condK}
+	return &caseWriter{w: w, enc: json.NewEncoder(w), f: f, id: firstID, n: map[string]int{}, condK: condK, fpK: 3}
 }
 
 func (cw *caseWriter) emit(class string, b []byte, s gen.State) {
@@ -86,6 +88,13 @@ func (cw *caseWriter) emit(class string, b []byte, s gen.State) {
 func (cw *caseWriter) add(r *rand.Rand, class string, b []byte, k int) {
 	for j := 0; j < k; j++ {
 		s := gen.Setup(r, b)
+		if gen.IsFP(gen.Classify(b)) {
+			// several MXCSR settings (rounding, FTZ/DAZ, masks, flags) per FP state
+			for _, t := range gen.FPVariants(r, s, cw.fpK) {
+				cw.emit(class, b, t)
+			}
+			continue
+		}
 		if gen.Conditional(gen.Classify(b)) {
 			perm := r.Perm(64)
 			for f := 0; f < cw.condK; f++ {
@@ -119,6 +128,8 @@ func cmdGen(args []string) {
 	n := fs.Int("n", 600, "encodings per targeted spec (conditional specs: n/4 encodings x -cond flag combinations)")
 	ng := fs.Int("group", 40000, "fully random prefix/opcode byte strings")
 	condK := fs.Int("cond", 8, "flag combinations per state for conditional classes")
+	fpK := fs.Int("fpk", 3, "MXCSR settings per state for the SSE floating-point classes")
+	fpOnly := fs.Bool("fp-only", false, "generate only the SSE floating-point specs (gen.FPSpecs, the FP edge families)")
 	nEdge := fs.Int("edge", 400, "rounds of the hand-targeted edge families (gen.Edges)")
 	seed := fs.Uint64("seed", 1, "random seed")
 	out := fs.String("o", "gen.jsonl", "output")
@@ -126,7 +137,13 @@ func cmdGen(args []string) {
 	fs.Parse(args)
 	r := rand.New(rand.NewPCG(*seed, 0x6a616e7573))
 	cw := newCaseWriter(*out, *first, *condK)
-	for _, sp := range gen.Specs {
+	cw.fpK = *fpK
+	specs, vexSpecs := gen.Specs, gen.VexSpecs
+	if *fpOnly {
+		specs, vexSpecs = gen.FPSpecs, gen.FPVexSpecs
+		*nEdge, *ng = 0, 0
+	}
+	for _, sp := range specs {
 		nw := *n
 		cond := false
 		probe := gen.Targeted(r, sp)
@@ -143,7 +160,7 @@ func cmdGen(args []string) {
 			cw.add(r, "gen/"+gen.Classify(b), b, 1)
 		}
 	}
-	for _, sp := range gen.VexSpecs {
+	for _, sp := range vexSpecs {
 		for i := 0; i < *n; i++ {
 			b := gen.VexTargeted(r, sp)
 			for !gen.OK(b) {
@@ -154,6 +171,15 @@ func cmdGen(args []string) {
 	}
 	for _, e := range gen.Edges(r, *nEdge) {
 		cw.emit(e.Class, e.Bytes, e.State)
+	}
+	if *fpOnly || *nEdge > 0 {
+		rounds := max(*nEdge/8, 1)
+		if *fpOnly {
+			rounds = max(*n/2, 1)
+		}
+		for _, e := range gen.FPEdges(r, rounds) {
+			cw.emit(e.Class, e.Bytes, e.State)
+		}
 	}
 	for i := 0; i < *ng; i++ {
 		b := gen.GroupRandom(r)
@@ -235,6 +261,7 @@ func cmdHarvest(args []string) {
 	perClass := fs.Int("per-class", 4000, "keep at most this many distinct instructions per modeled class (0 = all)")
 	perOther := fs.Int("per-other", 40, "keep at most this many distinct instructions per unmodeled class (tagged harvest-other/)")
 	first := fs.Int("first-id", 1, "first case id")
+	fpK := fs.Int("fpk", 2, "MXCSR settings per state for the SSE floating-point classes")
 	only := fs.String("only", "", "keep only instructions whose class matches this regular expression (e.g. the vector classes, with a large -k)")
 	fsOnly := fs.Bool("fs", false, "keep only FS-prefixed instructions")
 	fs.Parse(args)
@@ -284,6 +311,7 @@ func cmdHarvest(args []string) {
 	insts = kept
 	sort.Slice(insts, func(i, j int) bool { return string(insts[i]) < string(insts[j]) })
 	cw := newCaseWriter(*out, *first, *condK)
+	cw.fpK = *fpK
 	for _, b := range insts {
 		c := gen.Classify(b)
 		cls := "harvest/" + c
