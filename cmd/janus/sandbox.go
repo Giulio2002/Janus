@@ -251,6 +251,13 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 		for _, p := range protected {
 			a = append(a, "--ro-bind", p, p)
 		}
+		// The verification-result cache (entries and their HMAC key) is not even visible to
+		// sandboxed code: an empty tmpfs covers it, mounted last (resultcache.go).
+		if rc := resultCacheDir(); rc != "" {
+			if st, err := os.Stat(rc); err == nil && st.IsDir() {
+				a = append(a, "--tmpfs", rc)
+			}
+		}
 		a = append(a, "--chdir", workDir, "--")
 		a = append(a, argv...)
 		cmd := exec.Command(s.bwrap, a...)
@@ -380,6 +387,11 @@ ro:
 	for _, p := range protected {
 		// Protected trees must end up read-only: no "|| true" (set -e aborts otherwise).
 		bind(p, false, true)
+	}
+	// Hide the verification-result cache under an empty tmpfs, as bubblewrap does (strict: the
+	// script stops if it cannot).
+	if st, err := os.Stat(resultCacheDir()); err == nil && st.IsDir() {
+		w("mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs " + shQuote(filepath.Clean(resultCacheDir())))
 	}
 	w("cd " + shQuote(workDir))
 	w(`exec "$@"`)

@@ -95,7 +95,7 @@ func embeddedBase(t *testing.T) string {
 // ones, while `janus blockers` builds the decoder in the same framework build, first on the
 // cached embedded framework and then on a --janus-root checkout. Every one must succeed.
 func TestConcurrentVerify(t *testing.T) {
-	needLean(t)
+	needLeanSlow(t)
 	useTestCache(t)
 	bin := buildJanusBinary(t)
 	sb := sandboxArgs()
@@ -169,7 +169,7 @@ func TestConcurrentVerify(t *testing.T) {
 // the lock (here the proof itself, compiled without a sandbox, appends to a framework olean) is
 // still rejected as "framework integrity", and the next verification repairs the build.
 func TestForeignFrameworkWriteDetected(t *testing.T) {
-	needLean(t)
+	needLeanSlow(t)
 	useTestCache(t)
 	bin := buildJanusBinary(t)
 	add := mustExtract(t, "example.com/basic.Add")

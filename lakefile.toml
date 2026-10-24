@@ -20,6 +20,12 @@ root = "Janus.Tools.Decode"
 name = "janus-oracle-amd64"
 root = "Oracle.Amd64Main"
 
+# The trusted auditor that `janus verify` runs (Janus/Tools/AuditMain.lean; imports only Lean).
+[[lean_exe]]
+name = "janus-audit"
+root = "Janus.Tools.AuditMain"
+supportInterpreter = true
+
 [[lean_exe]]
 name = "janus-testfloat"
 root = "Oracle.TestFloat"

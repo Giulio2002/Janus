@@ -79,7 +79,7 @@ func leanDecode(exe string, words []uint32) (map[uint32]bool, error) {
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
-	if err := cmd.Run(); err != nil {
+	if err := guardRun(cmd); err != nil {
 		return nil, fmt.Errorf("%s: %v\n%s%s", exe, err, out.String(), errb.String())
 	}
 	res := map[uint32]bool{}

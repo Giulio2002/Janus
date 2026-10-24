@@ -23,6 +23,9 @@ set -euo pipefail
 # release, whatever Go is installed; the go command downloads it on first use.
 export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
+memguard_self "$@"
 mode="${1:-full}"
 export PATH="$PATH:/usr/local/go/bin"
 OUT="${OUT:-$root/artifacts/oracle-amd64}"
@@ -40,7 +43,7 @@ echo "== build"
   CGO_ENABLED=0 go build -o "$bin/oracle" ./cmd/oracle &&
   go build -o "$bin/fakemodel" ./cmd/fakemodel)
 if [ "$MODEL" = "$root/.lake/build/bin/janus-oracle-amd64" ]; then
-  (cd "$root" && lake build janus-oracle-amd64)
+  (cd "$root" && memguard_lake build janus-oracle-amd64)
 fi
 
 echo "== harness self-test"

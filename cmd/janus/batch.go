@@ -92,6 +92,10 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 }
 
 func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, quiet bool, stdout, stderr io.Writer) (*batchResults, error) {
+	if err := memGuardConfigErr(); err != nil {
+		return nil, err
+	}
+	logMemGuard(stderr)
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read %s: %v", displayPath(manifestPath), err), Stage: "batch requests",
@@ -210,7 +214,9 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 			if unsafe {
 				opts["unsafe-no-sandbox"] = "true"
 			}
+			mark := memMark()
 			r.Report, r.Err = verify(r.Outdir, opts, stderr)
+			r.Report, r.Err = memOutcome(mark, r.Report, r.Err)
 			continue
 		}
 		abs, _ := filepath.Abs(roots[i])
@@ -276,6 +282,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 			for _, i := range gi {
 				greqs = append(greqs, reqs[i])
 			}
+			mark := memMark()
 			ws, err := openWorkspace(fw, pkg, greqs[0].cr.Lean, fresh, lake, sb, tc, stderr)
 			if err != nil {
 				for _, i := range gi {
@@ -285,6 +292,9 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 				continue
 			}
 			verifyGroup(fw, pkg, ws, greqs)
+			for _, r := range greqs {
+				r.Report, r.Err = memOutcome(mark, r.Report, r.Err)
+			}
 			g := batchGroup{ProofRoot: root, SnapshotSha256: pkg.Sha256, ExtractedSha256: k, Workspace: ws.Dir, Requests: gi, Rebuilt: []string{}}
 			if ws.temp {
 				g.Workspace = "(temporary, --fresh)"

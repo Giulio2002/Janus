@@ -13,6 +13,8 @@
 # /srv/janus-fp-deps), pinned to the 3e releases.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
 DEPS="${DEPS:-/srv/janus-fp-deps}"
 LEVEL="${LEVEL:-1}"
 N="${N:-}"
@@ -37,7 +39,7 @@ for spec in 8086-SSE ARM-VFPv2 ARM-VFPv2-defaultNaN; do
     make -s -C "tf-$spec" -j8 testfloat_gen >/dev/null
   fi
 done
-(cd "$root" && lake build janus-testfloat >/dev/null)
+(cd "$root" && memguard_lake build janus-testfloat >/dev/null)
 T="$root/.lake/build/bin/janus-testfloat"
 mkdir -p "$out"
 log="$out/results.txt"
