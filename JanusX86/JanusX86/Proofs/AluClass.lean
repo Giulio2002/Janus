@@ -97,3 +97,55 @@ theorem alu_eg_reg_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg :
   rw [e]; exact hrel' 
 
 end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem modrm_reg {rx m : Nat} {rest : List Nat} {mm : ModRM} {r3 : List Nat} {c : Nat}
+    (h : modrm rx (m :: rest) = some (mm, r3, c)) : mm.reg = m / 8 % 8 + 8 * (rx / 4 % 2) := by
+  revert h
+  unfold modrm
+  simp only
+  repeat' split
+  all_goals intro h
+  all_goals first
+    | (simp at h; done)
+    | (simp only [Option.some.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, -, -⟩ := h; rfl)
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem decode_eg_mem {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n)) (ho : o < 0x40) (ho2 : o % 8 < 2)
+    {md reg ext : Nat} {a : Addr} {r3 : List Nat} {c : Nat}
+    (hmd : modrm (p.rex.getD 0) (m :: rest) = some (⟨md, reg, ext, .m a⟩, r3, c)) (hlk : p.lock = false)
+    {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
+    p.rep = 0 ∧ len = n + 1 + c ∧ len ≤ 15 ∧
+      i = .alu (aluOp (o / 8)) (if o % 2 = 0 then 8 else osz p)
+        (.mem (if p.fs then { a with fs := true } else a))
+        (.loc (regLocOf p.rex.isSome (if o % 2 = 0 then 8 else osz p) (regNum p m))) := by
+  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  have hno : ¬ (o = 0x0F) := by omega
+  have hc1 : o < 0x40 ∧ o % 8 < 6 := ⟨ho, by omega⟩
+  have hf4 : ¬ (o % 8 = 4) := by omega
+  have hf5 : ¬ (o % 8 = 5) := by omega
+  have hreg : reg = regNum p m := by have := modrm_reg hmd; simpa [regNum] using this
+  subst hreg
+  simp only [hno, ↓reduceIte, oneByte, hc1, and_self, hf4, hf5, hmd, ho2, osz_eq, hlk, Bool.false_eq_true] at hd
+  have hrg : ∀ w, regLoc p.rex.isSome w (regNum p m) = regLocOf p.rex.isSome w (regNum p m) := fun _ => rfl
+  simp only [hrg, finish, rmLoc] at hd
+  by_cases hlen : n + 1 + c > 15
+  · simp [hlen] at hd
+  by_cases hr : p.rep = 0
+  · simp only [hlen, hr, ↓reduceIte] at hd
+    cases hf : p.fs
+    · simp [hf] at hd
+      obtain ⟨rfl, rfl⟩ := hd
+      exact ⟨hr, rfl, by omega, by simp⟩
+    · simp [hf, withFS] at hd
+      obtain ⟨rfl, rfl⟩ := hd
+      exact ⟨hr, rfl, by omega, by simp⟩
+  · simp [hlen, hr] at hd
+
+end JanusX86.Proofs
+
