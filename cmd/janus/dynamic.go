@@ -110,6 +110,9 @@ type reacher struct {
 	dynSeen  map[string]bool
 	queue    []Func
 	scan     func(*Binary, Func) (Segment, []Unresolved, error)
+	// --contract: calls to matching functions are not followed (extract.go)
+	cm           *contractMatcher
+	contractSeen map[uint64]bool
 	// err is the first stub-classification error (round 7 G1), reported by drain and extractWith.
 	err error
 }
@@ -142,6 +145,9 @@ func (r *reacher) addTarget(addr uint64, via, from string) bool {
 	}
 	if isStub {
 		r.addStub(g, k)
+		return true
+	}
+	if r.x.contractTarget(r.cm, r.contractSeen, g) {
 		return true
 	}
 	if !r.seen[g.Addr] {
@@ -201,6 +207,9 @@ func (r *reacher) drain() error {
 				r.addStub(g, k)
 				continue
 			}
+			if r.x.contractTarget(r.cm, r.contractSeen, g) {
+				continue
+			}
 			if why, ok := omittedCallees[g.Name]; ok {
 				r.x.Omitted = append(r.x.Omitted, OmittedCall{From: br.From, Target: t, Name: g.Name, Reason: why})
 				continue
@@ -227,7 +236,7 @@ func segmentDataRefs(b *Binary, s Segment) []DataRef {
 
 // extractWith copies sym, the dynamic targets named in targets, and everything reachable from
 // them by direct branches or inferred dynamic targets (see the file comment).
-func extractWith(b *Binary, sym string, maxFunctions int, targets []string) (*Extraction, error) {
+func extractWith(b *Binary, sym string, maxFunctions int, contracts []string, targets ...string) (*Extraction, error) {
 	entry, err := b.lookup(sym)
 	if err != nil {
 		return nil, err
@@ -236,8 +245,19 @@ func extractWith(b *Binary, sym string, maxFunctions int, targets []string) (*Ex
 		return nil, &diag{Msg: fmt.Sprintf("%s is a runtime stub, not a function Janus extracts", entry.Name),
 			Stage: "function selection", Next: "Select a Go function that calls the stub instead."}
 	}
-	x := &Extraction{Bin: b, Entry: entry, Targets: targets}
-	r := &reacher{b: b, x: x, maxF: maxFunctions, seen: map[uint64]bool{entry.Addr: true},
+	cm, err := newContractMatcher(contracts)
+	if err != nil {
+		return nil, err
+	}
+	if cm.match(entry.Name) {
+		return nil, &diag{Msg: fmt.Sprintf("%s matches a --contract pattern; the entry function cannot be a contract", entry.Name),
+			Stage: "function selection", Next: "Drop the --contract pattern that matches the entry, or extract a caller of it."}
+	}
+	if len(contracts) == 0 {
+		cm = nil
+	}
+	x := &Extraction{Bin: b, Entry: entry, Targets: targets, ContractPatterns: contracts}
+	r := &reacher{b: b, x: x, maxF: maxFunctions, cm: cm, contractSeen: map[uint64]bool{}, seen: map[uint64]bool{entry.Addr: true},
 		stubSeen: map[uint64]bool{}, dynSeen: map[string]bool{}, queue: []Func{entry}, scan: extractArm64Func}
 	if b.GOARCH == "amd64" {
 		r.scan = extractAmd64Func

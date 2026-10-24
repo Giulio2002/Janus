@@ -74,6 +74,10 @@ type verifiedReport struct {
 	// DependencyConsts are the constants from declared extra dependencies that the statement
 	// (or a proof-local def it uses) mentions: "<name> (<kind>, <module>)".
 	DependencyConsts []string `json:"dependencyConstants,omitempty"`
+	// Contracts are the extraction's runtime contracts ("name @ address", from identity.json):
+	// functions that were not extracted, whose behaviour the theorem can only use through a
+	// contract hypothesis in its statement.
+	Contracts []string `json:"contracts,omitempty"`
 	// DependencyDefinitions are the dependency defs the statement reaches, with their bodies
 	// (round 7 J1): a dependency def's name and docstring need not say what it means.
 	DependencyDefinitions []string `json:"dependencyDefinitions,omitempty"`
@@ -349,6 +353,10 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 		fmt.Fprintf(stdout, "  Kernel replay: skipped (%s)\n", r.KernelReplay.Note)
 	}
 	fmt.Fprintf(stdout, "  Lean: %s\n", r.LeanVersion)
+	if len(r.Contracts) > 0 {
+		fmt.Fprintf(stdout, "  Runtime contracts assumed: %s (not extracted; see the contract hypotheses of the statement)\n",
+			termSafe(strings.Join(r.Contracts, ", ")))
+	}
 	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(filepath.Join(outdir, "verified.json")))
 	fmt.Fprintln(stdout, "  Statement:")
 	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(termSafe(r.Statement), "\n", "\n    "))
@@ -505,6 +513,8 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		// Created before any sandboxed step, so the sandbox's tmpfs always covers it.
 		if _, err := resultHMACKey(); err == nil {
 			resultKey = cacheIn.key()
+		} else if d, ok := err.(*diag); ok {
+			return nil, d // round 8 C1: an unsafe cache is an error, not a silent miss
 		}
 		if prev := lookupResult(resultKey); prev != nil {
 			// The inputs must still be the ones the key was computed from.
@@ -531,7 +541,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		}
 		if err == nil {
 			defer os.RemoveAll(fwRunDir)
-			earlyFwMarker = earlyReplayMarker(tc.version, fwPins)
+			earlyFwMarker = earlyReplayMarker(tc.cacheID(), fwPins)
 			fwPath := tc.leanPathEnv(janusLibDir)
 			earlyFw = startEarlyReplay(tc.leanchecker, func(argv ...string) (string, error) {
 				return runLeanProtected(sb, tc, fwRunDir, nil, []string{janusLibDir}, fwPath, argv...)
@@ -669,7 +679,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	var early *earlyReplay
 	earlyMarker := ""
 	if tc.hasChecker {
-		earlyMarker = earlyReplayMarker(tc.version, fwPins, trustedPins, proofPins)
+		earlyMarker = earlyReplayMarker(tc.cacheID(), fwPins, trustedPins, proofPins)
 		early = startEarlyReplay(tc.leanchecker, replayRun, []string{"Extracted", "JanusTrusted", "Proof"}, earlyMarker, cacheOK)
 		defer early.wait()
 	}
@@ -706,7 +716,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		kr.Status = "unavailable"
 		kr.Note = "leanchecker not found in the Lean toolchain"
 	} else {
-		plan, err := planReplay(resolved, importGraph(ar.Imports), tc.version, replayCacheOK(sb, opts))
+		plan, err := planReplay(resolved, importGraph(ar.Imports), tc.cacheID(), replayCacheOK(sb, opts))
 		if err != nil {
 			return nil, err
 		}
@@ -780,6 +790,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		Framework:         fi,
 		Sandbox:           sb.info(),
 		Definitions:       ar.Definitions,
+		Contracts:         cr.Identity.contractList(),
 		Notes:             ar.Notes,
 	}
 	if resultKey != "" && bytes.Equal(idBytes, idBytes0) {

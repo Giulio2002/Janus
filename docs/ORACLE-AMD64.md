@@ -416,7 +416,8 @@ something a single CPU can confirm. See "Limits".
   the code page and its own mappings, so an access there succeeds natively and faults in the
   model (gap), never the other way round. Only the 4 KiB buffer is compared byte by byte.
 * **No system state.** `RFLAGS` system bits, segment registers other than the `FS` base,
-  MXCSR status bits, x87 state and `ZMM` bits 511:256 are neither modelled nor compared.
+  x87 state and `ZMM` bits 511:256 are neither modelled nor compared. (`MXCSR`, flags
+  included, is modelled and compared since the floating-point model; see above.)
 
 ## Formal x86 model (third reference)
 

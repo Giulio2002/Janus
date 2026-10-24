@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Func is one function of the binary's text, from the ELF symbol table or the pclntab.
@@ -41,6 +42,12 @@ type Binary struct {
 
 	sections []section // allocated sections (in memory at run time), sorted by address
 	dataSyms []Func    // non-function symbols with a size (data objects), sorted by address
+	markers  []Func    // zero-size object symbols (go:string.*, runtime.rodata, ...), sorted by address
+
+	stubMu    sync.Mutex
+	stubCache map[uint64]stubVerdict // classifyStub results by function address
+	pcln      *gosym.Table           // parsed .gopclntab (stub pins), nil until needed
+	pclnErr   error
 }
 
 // section is an allocated ELF section. data is nil for SHT_NOBITS (.bss, .noptrbss).
@@ -111,7 +118,11 @@ func validateSegments(f *elf.File, path string) error {
 }
 
 // loadBinary reads and validates path. Failures are diagnostics (*diag).
-func loadBinary(path string) (*Binary, error) {
+func loadBinary(path string) (*Binary, error) { return loadBinaryMode(path, false) }
+
+// loadBinaryMode is loadBinary; allowPIE accepts ET_DYN. Only `janus stubpins` (which measures
+// the runtime stubs' code and never extracts) passes true.
+func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, &diag{
@@ -141,14 +152,14 @@ func loadBinary(path string) (*Binary, error) {
 	// Reject PIE (ET_DYN). The extracted program records link-time virtual addresses, while a
 	// position-independent executable is loaded at base+vaddr chosen at runtime, so the model's
 	// addresses would not be the ones the code runs at. Only ET_EXEC is sound. (F6 in docs/AUDIT.md.)
-	if f.Type == elf.ET_DYN {
+	if f.Type == elf.ET_DYN && !allowPIE {
 		return nil, &diag{
 			Msg:   fmt.Sprintf("%s is a position-independent executable (ET_DYN); Janus supports only non-PIE executables (ET_EXEC).", path),
 			Stage: "binary validation",
 			Next:  "Rebuild without PIE: go build -buildmode=exe (or set CGO_ENABLED=0), so the binary uses link-time addresses.",
 		}
 	}
-	if f.Type != elf.ET_EXEC {
+	if f.Type != elf.ET_EXEC && !(allowPIE && f.Type == elf.ET_DYN) {
 		return nil, &diag{
 			Msg:   fmt.Sprintf("%s is an ELF of type %s, not an executable (ET_EXEC).", path, f.Type),
 			Stage: "binary validation",
@@ -236,6 +247,9 @@ func loadBinary(path string) (*Binary, error) {
 				s.Section != elf.SHN_UNDEF && s.Section < elf.SHN_LORESERVE {
 				b.dataSyms = append(b.dataSyms, Func{Name: s.Name, Addr: s.Value, Size: s.Size})
 			}
+			if elf.ST_TYPE(s.Info) == elf.STT_OBJECT && s.Size == 0 && s.Section != elf.SHN_UNDEF && s.Section < elf.SHN_LORESERVE {
+				b.markers = append(b.markers, Func{Name: s.Name, Addr: s.Value})
+			}
 			if elf.ST_TYPE(s.Info) != elf.STT_FUNC || int(s.Section) != textIdx {
 				continue
 			}
@@ -263,6 +277,7 @@ func loadBinary(path string) (*Binary, error) {
 	}
 	sort.SliceStable(b.Funcs, func(i, j int) bool { return b.Funcs[i].Addr < b.Funcs[j].Addr })
 	sort.SliceStable(b.dataSyms, func(i, j int) bool { return b.dataSyms[i].Addr < b.dataSyms[j].Addr })
+	sort.SliceStable(b.markers, func(i, j int) bool { return b.markers[i].Addr < b.markers[j].Addr })
 	// Symbols without a size (some assembly functions) extend to the next symbol.
 	for i := range b.Funcs {
 		if b.Funcs[i].Size == 0 {

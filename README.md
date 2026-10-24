@@ -215,14 +215,19 @@ Go 1.26.0. Proofs:
 | `ClearWords` | `clear(b)` of a 16-word, 128-byte-aligned slice through `runtime.memclrNoHeapPointers` (its `DC ZVA` path), for every `DCZID_EL0` | ✓ | |
 | `Equal64` | `bytes.Equal` of two `[64]byte` through `runtime.memequal`: true iff the bytes are equal, for every value of `internal/cpu.X86.HasAVX2` (the AVX2 `VPCMPEQB`/`VPMOVMSKB` loop and the SSE one) | | ✓ |
 | `CopyBlock512` | `copy` of a 512-byte array through `runtime.memmove`'s AVX path (`VMOVDQU`/`VMOVDQA`, any `dst` alignment), given `memmoveBits & avxSupported` | | ✓ |
-| `AddF64` | the IEEE 754 sum `a + b` rounded to nearest (or a NaN when that is a NaN), under the default `FPCR`/`MXCSR`; on arm64 also exactly Arm's `FPAdd` (and its `FPSR` flags) for every `FPCR` without trap enables | ✓ | ✓ |
+| `AddF64` | the IEEE 754 sum `a + b` rounded to nearest (or a NaN when that is a NaN), under the default `FPCR` / Go's `MXCSR` control bits (any `MXCSR` flags); on arm64 also exactly Arm's `FPAdd` (and its `FPSR` flags) for every `FPCR` without trap enables | ✓ | ✓ |
 | `Dot3` | `a0*b0 + a1*b1 + a2*b2`: on arm64 Go fuses it, `fma(a2, b2, fma(a1, b1, a0·b0))`; on amd64 (no FMA at `GOAMD64=v1`) `(a0·b0 + a1·b1) + a2·b2` with every operation rounded | ✓ | ✓ |
-| `F64ToU64` | `uint64(x)` is the truncation of `x` whenever that is in `[0, 2^64)` (amd64: through the `UCOMISD`/`SUBSD`/`CVTTSD2SQ`/`BTSQ` sequence, `SUBSD` shown exact); arm64 also: saturation (`0` below, `2^64-1` above, `0` for NaN) and the exact `FPToFixed` for every `FPCR` | ✓ | ✓ |
+| `F64ToU64` | `uint64(x)` is the truncation of `x` whenever that is in `[0, 2^64)` (amd64: through the `UCOMISD`/`SUBSD`/`CVTTSD2SQ`/`BTSQ` sequence, `SUBSD` shown exact); arm64 also: saturation (`0` below, `2^64-1` above, `0` for NaN) and the exact `FPToFixed` for every `FPCR` without trap enables | ✓ | ✓ |
 | `Abs` | `x` with its sign bit cleared, for every encoding including NaNs (integer and move instructions only) | ✓ | ✓ |
 | `HashWith` | an interface call `h.Hash(x)`: `x·K` when `h`'s itab is `*MulHasher`'s, `rotl(x, 13) + K` when it is `*RotHasher`'s (the itab is a hypothesis) | ✓ | ✓ |
 | `HashTwice` | `ApplyTwice(h.Hash, x)` through a method value: `x·K·K` | ✓ | ✓ |
 | `MapSum` | a closure capturing `a`, `b` called in a loop: `Σ (a·xs[j] + b) mod 2^64` | ✓ | ✓ |
 | `DeferAdd` | an open-coded `defer` that adds `y` to the named result: returns `x + y` | ✓ | ✓ |
+| `NewPair` | `&Pair{a, b}`: a fresh 16-aligned heap object holding `a`, `b`, assuming the `runtime.newobject` contract | ✓ | ✓ |
+| `MakeSlice` | `make([]uint64, n)`: length and capacity `n`, a fresh all-zero array, assuming the `runtime.makeslice` contract | ✓ | ✓ |
+| `AppendOne` | `append(s, x)`, in place or through `runtime.growslice` (Go's growth rule, size-class rounding, old elements copied, zero tail), assuming its contract | ✓ | ✓ |
+| `SetNext` | `n.Next = q` through the GC write barrier, whose fast path (buffer append) is executed | ✓ | ✓ |
+| `MallocFast` | `runtime.mallocgc` itself: the small pointer-free fast path returns the free slot of the P's cached span (zeroed) and updates exactly the span/mcache fields, under `MCacheOK` | ✓ | |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
@@ -368,7 +373,7 @@ matters.
 | Command | Purpose |
 |---|---|
 | `janus list <binary>` | List the functions of a Go ELF binary (from `.symtab`, or `.gopclntab` if stripped) |
-| `janus extract <binary> <symbol> <outdir>` | Copy the function, its reachable callees and the read-only data they load into `Extracted.lean` + `identity.json` |
+| `janus extract <binary> <symbol> <outdir>` | Copy the function, its reachable callees and the read-only data they load into `Extracted.lean` + `identity.json`; `--contract SYM` leaves runtime functions out as contracts |
 | `janus check <outdir>` | Re-extract in memory and byte-compare with the saved artifacts, without running Lean |
 | `janus verify <outdir> --proof FILE` | Check, sandboxed build, audit, kernel replay; writes `verified.json` |
 | `janus verify-batch <requests.json>` | Verify many requests against one consumer-package snapshot |
@@ -393,6 +398,7 @@ leaves none.
 | [CONSUMERS.md](docs/CONSUMERS.md) | Proofs in your own Lake package, batch verification, caches |
 | [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime calls and dynamic calls (interfaces, closures, `defer`) |
 | [AMD64.md](docs/AMD64.md) | The x86-64 backend: model, ABI, proofs, gaps |
+| [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime functions as contract hypotheses (`janus extract --contract`): allocation, write barriers, … |
 | [ORACLE.md](docs/ORACLE.md), [ORACLE-SAIL.md](docs/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) | The differential oracles and their results |
 | [AUDIT.md](docs/AUDIT.md) | The red-team audit of `janus verify` and its fixes |
 

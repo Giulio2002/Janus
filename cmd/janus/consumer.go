@@ -503,6 +503,9 @@ func wsDiag(err error) error {
 }
 
 func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool, lake string, sb *sandbox, tc *toolchain, progress io.Writer) (*consumerWS, error) {
+	if err := checkCacheRoot(); err != nil {
+		return nil, err
+	}
 	ws := &consumerWS{lake: lake, sb: sb, tc: tc, replayCache: sb.mode != "none" && !fresh}
 	family := workspaceFamily(fw, pkg)
 	if fresh {
@@ -1108,7 +1111,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			for _, r := range passing {
 				replayed[r] = kernelReplay{Tool: "leanchecker", Status: "unavailable", Modules: []string{}, Note: "leanchecker not found in the Lean toolchain"}
 			}
-		} else if plan, err := planReplay(union, graph, ws.tc.version, ws.replayCache); err != nil {
+		} else if plan, err := planReplay(union, graph, ws.tc.cacheID(), ws.replayCache); err != nil {
 			failAll(err)
 			return
 		} else {
@@ -1238,6 +1241,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			DependencyConsts:      r.audit.External,
 			DependencyDefinitions: r.audit.ExternalDefs,
 			Notes:                 r.audit.Notes,
+			Contracts:             r.cr.Identity.contractList(),
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,
 				Files: pkg.fileHashes(), Dependency: pkg.Dep, Dependencies: pkg.depInfos(), AllowPathDeps: pkg.opts.AllowPathDeps,

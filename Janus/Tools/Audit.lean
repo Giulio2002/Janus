@@ -532,6 +532,151 @@ def checkBinderNames (e : Expr) : Option String := Id.run do
     | none => seen := seen.insert folded str
   return none
 
+/-! ## Symbol names (round 8 I1)
+
+`ItabIs ds m tab name`, `segAddr p name` and the other name lookups of the framework fall back to
+a default (`False`, `0`) when no object of that name exists. A statement whose name is misspelt,
+names an object the binary does not have, or imitates a real name with a lookalike letter
+(`"go:itab.*example.com/basic.MulHаsher,…"`, Cyrillic `а`) is then vacuous or about address 0
+while it reads as a claim about the named object, and it round-trips. So every such name must
+be a string literal (after proof-local definitions are expanded) that names an object of the
+extracted program, an `ItabIs` name must be a static itab (`go:itab.`), and the program or data
+argument must be `Extracted.program` (`.data`) up to definitional equality. -/
+
+/-- The framework functions that look an object up by name or index: the argument that must be
+`Extracted.program` (`.prog`) or `Extracted.program.data` (`.data`), the name (or index) argument,
+and the lookup it performs. -/
+inductive SymArg where
+  | data | prog
+  deriving BEq
+
+inductive SymKind where
+  | dataName | itabName | segName | dataIndex
+  deriving BEq
+
+def symbolFns : List (Name × SymArg × Nat × Nat × SymKind) :=
+  [(`Janus.Spec.ItabIs, .data, 0, 3, .itabName),
+   (`Janus.Spec.dataNamed, .data, 0, 1, .dataName),
+   (`Janus.Spec.dataAddr, .data, 0, 1, .dataName),
+   (`Janus.Spec.dataLen, .data, 0, 1, .dataName),
+   (`Janus.Spec.dataWord, .data, 0, 1, .dataName),
+   (`Janus.Spec.itabFun, .data, 0, 1, .dataName),
+   (`Janus.Spec.segWord, .prog, 0, 1, .segName),
+   (`Janus.Tactic.segAddr, .prog, 0, 1, .segName),
+   (`Janus.Amd64.Tactic.segAddr, .prog, 0, 1, .segName),
+   (`Janus.Amd64.Tactic.dataBase, .prog, 0, 1, .dataIndex)]
+
+/-- The elements of a closed list term, by weak-head reduction. -/
+partial def listElems (e : Expr) (acc : Array Expr := #[]) : MetaM (Array Expr) := do
+  let e ← Meta.whnfD e
+  match e.getAppFnArgs with
+  | (``List.cons, #[_, h, t]) => listElems t (acc.push h)
+  | (``List.nil, _) => return acc
+  | _ => throwError "cannot read the list {e}"
+
+/-- The value of a closed `String` term that reduces to a literal. -/
+def strLit? (e : Expr) : MetaM (Option String) := do
+  if e.hasFVar || e.hasLooseBVars || e.hasMVar then return none
+  match e.consumeMData with
+  | .lit (.strVal s) => return some s
+  | _ =>
+    match (← try Meta.whnfD e catch _ => pure e).consumeMData with
+    | .lit (.strVal s) => return some s
+    | _ => return none
+
+/-- The names of the data objects and code segments of `Extracted.program`, and its program and
+data terms. -/
+structure SymTable where
+  prog : Expr
+  data : Expr
+  segs : Expr
+  dataNames : Array String
+  segNames : Array String
+
+def symTable : MetaM SymTable := do
+  let prog := mkConst `Extracted.program
+  let data ← Meta.mkProjection prog `data
+  let segs ← Meta.mkProjection prog `segments
+  let names (l : Expr) : MetaM (Array String) := do
+    (← listElems l).mapM fun d => do
+      match ← strLit? (← Meta.mkProjection d `name) with
+      | some s => pure s
+      | none => throwError "an object of Extracted.program has no literal name"
+  return { prog, data, segs, dataNames := ← names data, segNames := ← names segs }
+
+/-- Expand the proof-local definitions `locals` everywhere in `e` (beta-reducing their
+applications), so a name passed through an `abbrev` or a definition's parameter is seen at its
+use. -/
+def expandLocals (locals : Std.HashSet Name) (e : Expr) : CoreM Expr := do
+  let fuel ← IO.mkRef (100000 : Nat)
+  Core.transform e (pre := fun sub => do
+    let .const c lvls := sub.getAppFn | return .continue
+    unless locals.contains c do return .continue
+    let some ci := (← getEnv).find? c | return .continue
+    let some _ := ci.value? | return .continue
+    let n ← fuel.get
+    if n == 0 then throwError "the proof-local definitions of the statement expand too far"
+    fuel.set (n - 1)
+    return .visit ((ci.instantiateValueLevelParams! lvls).beta sub.getAppArgs))
+
+/-- Round 8 (I1): check every name lookup in `e` (see the section comment). -/
+partial def checkSymbolRefs (tbl : SymTable) (e : Expr) : MetaM (Option String) := do
+  match e with
+  | .app .. =>
+    let fn := e.getAppFn
+    let args := e.getAppArgs
+    if let .const c _ := fn then
+      if let some (_, which, ai, ni, kind) := symbolFns.find? (·.1 == c) then
+        if args.size ≤ max ai ni then
+          return some s!"uses {c} without its name argument (round 8 I1: every object name must be a literal of the extracted program)"
+        let target := if which == .data then tbl.data else tbl.prog
+        let arg := args[ai]!
+        let argOk ← try
+            if which == .data then Meta.isDefEq arg target
+            else Meta.isDefEq (← Meta.mkProjection arg `segments) tbl.segs <&&>
+              Meta.isDefEq (← Meta.mkProjection arg `data) tbl.data
+          catch _ => pure false
+        unless argOk do
+          let what := if which == .data then "Extracted.program.data" else "Extracted.program"
+          return some s!"passes `{(← Meta.ppExpr arg).pretty 10000}` to {c}, which is not {what}; object names are looked up in the extracted program only (round 8 I1)"
+        let nameArg := args[ni]!
+        if kind == .dataIndex then
+          let i? ← (Meta.evalNat (← instantiateMVars nameArg)).run
+          match i? with
+          | some i =>
+            unless i < tbl.dataNames.size do
+              return some s!"uses {c} with index {i}, but the extracted program has {tbl.dataNames.size} data objects (the lookup would silently return 0; round 8 I1)"
+          | none =>
+            return some s!"uses {c} with the index `{(← Meta.ppExpr nameArg).pretty 10000}`, which is not a numeral (round 8 I1)"
+        else
+          let some s ← strLit? nameArg
+            | return some s!"uses {c} with the name `{(← Meta.ppExpr nameArg).pretty 10000}`, which is not a string literal (round 8 I1: object names must be literals, so the report shows exactly which object is meant)"
+          let known := if kind == .segName then tbl.segNames else tbl.dataNames
+          unless known.contains s do
+            let what := if kind == .segName then "function" else "data object"
+            return some s!"uses {c} with the name {String.quote s}, but the extracted program has no {what} of that name, so the lookup silently defaults (`False` or `0`) and the statement is vacuous or about another value while it reads as a claim about that object (a misspelt or lookalike name, round 8 I1)"
+          if kind == .itabName && !s.startsWith "go:itab." then
+            return some s!"uses {c} with the data object {String.quote s}, which is not a static itab (go:itab.*T,I) (round 8 I1)"
+    for a in args do
+      if let some m ← checkSymbolRefs tbl a then return some m
+    unless fn.isConst || fn.isFVar do
+      if let some m ← checkSymbolRefs tbl fn then return some m
+    return none
+  | .const c _ =>
+    if symbolFns.any (·.1 == c) then
+      return some s!"uses {c} unapplied (round 8 I1: every object name must be a literal of the extracted program)"
+    return none
+  | .lam n d b bi | .forallE n d b bi =>
+    if let some m ← checkSymbolRefs tbl d then return some m
+    Meta.withLocalDecl n bi d fun x => checkSymbolRefs tbl (b.instantiate1 x)
+  | .letE n t v b _ =>
+    if let some m ← checkSymbolRefs tbl t then return some m
+    if let some m ← checkSymbolRefs tbl v then return some m
+    Meta.withLetDecl n t v fun x => checkSymbolRefs tbl (b.instantiate1 x)
+  | .mdata _ b => checkSymbolRefs tbl b
+  | .proj _ _ b => checkSymbolRefs tbl b
+  | _ => return none
+
 /-- Round 7 (K1): is `ty` (up to reducible unfolding) one of `Nat`, `Int`, or a wrapping
 fixed-width type (`numeralBound`)? Returns a short name for messages. -/
 def divType? (ty : Expr) : MetaM (Option String) := do
@@ -846,6 +991,15 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     if let some m ← checkInstArgs cx thmType then throwError m
     if let some m ← checkNumerals thmType then throwError s!"the statement {m}"
     if let some m := checkBinderNames thmType then throwError s!"the statement {m}"
+    -- round 8 I1: object names resolve in the extracted program
+    let tbl ← symTable
+    let localSet : Std.HashSet Name := localDefs.foldl (fun s ci => s.insert ci.name) {}
+    if let some m ← checkSymbolRefs tbl (← expandLocals localSet thmType) then
+      throwError s!"the statement {m}"
+    for ci in extDefs do
+      for t in [ci.type] ++ ci.value?.toList do
+        if let some m ← checkSymbolRefs tbl t then
+          throwError s!"the dependency definition {ci.name} used in the statement {m}"
     -- (a) the printed statement must elaborate back to the checked type
     let sigStr ← match ← printFaithful thm thmType with
       | .ok s => pure s

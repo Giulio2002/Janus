@@ -76,7 +76,8 @@ is a stub only when all of these hold:
    `panicCheck1/2` (they return) and `morestackc` (a throw that only runtime code calls). It also
    holds `runtime.morestack.abi0` and `runtime.morestack_noctxt.abi0`, with their ABI0 suffix.
    No suffix is stripped.
-2. The binary was built with go1.26 (`go1.26`, `go1.26.N` or `go1.26rcN`).
+2. The binary was built with go1.26 (`go1.26`, `go1.26.N` or `go1.26rcN`). (Replaced in round 8
+   by the code pin; see the residual below.)
 3. Its names come from the ELF symbol table, not from the pclntab.
 4. No other function has the same name.
 
@@ -91,12 +92,24 @@ Inc reaches the real `runtime.gopanic` stub. G1a and G1b no longer check. **G1c*
 `janusdup` build with the duplicate `runtime.morestack_noctxt.abi0`) and **G1e** (`-ldflags=-s`)
 are rejected at extraction.
 
-**Residual.** Check 2 reads the Go version from build info, and `-X runtime.buildVersion=go1.26.0`
-rewrites it (G2). To exploit that, an attacker would need a binary linked by a *different* release,
-labelled go1.26, whose runtime lacks a listed name, plus a definition of that name. A
-cross-check would need data `-X` cannot reach. The DWARF producer string is one candidate, but
-`-w` removes it. Out of the threat model (docs/AUDIT.md §4: the binary is the subject), but
-recorded here.
+**Residual (closed in round 8, G3).** Check 2 read the Go version from build info, and
+`-X runtime.buildVersion=go1.26.0` rewrites it (G2). The round-8 red team exploited it with
+exactly the binary this note described: `audit/round8/govers`, linked by go1.25.5 (whose
+runtime has no `panicSimdImm`), labelled go1.26.0, with a package-lib assembly
+`runtime·panicSimdImm` that returns 0; "every call of Add panics" verified (row G3a). Check 2
+is gone. In its place a listed name is a stub only if its code and pclntab entry are pinned
+(`cmd/janus/stubpin.go`, `cmd/janus/stubpins_gen.go` from `scripts/gen-stubpins.sh`): the
+pclntab names it as a function of package runtime whose entry is in the pinned
+`runtime/<file>`, its normalized code (PC-relative fields masked to symbol identities) has a
+pinned SHA-256 for go1.26.0/.5/.8/.10 on that GOARCH, and the functions it calls are stubs or
+pinned helpers (docs/SOUNDNESS.md, stub classification, has the normalization and the
+stability measurements). G3a now fails at extraction ("the pclntab places
+runtime.panicSimdImm … in file "example.com/govers/lib/zero_arm64.s", not in the toolchain's
+runtime/panic.go"; its code hash is not pinned either), and `janus verify` of the extraction
+round 7 accepted fails the same way. `audit/round7/run-round7.sh` runs both rows. What
+remains is a byte-for-byte copy of pinned runtime code with a forged pclntab file, which then
+behaves as the runtime's code except through what the pin leaves to names and to
+string/static data (docs/SOUNDNESS.md).
 
 ## H1 (CRITICAL readability, BROKEN → fixed): bound-variable lookalikes
 
@@ -199,8 +212,8 @@ So could the reported `Entry: example.com/basic.Add` be wrong about which code w
 code proved is always exactly the bytes at that symbol's address, in the binary whose SHA-256 the
 report records. The symbol name, the module path and the Go version are what the binary says
 about itself. They are not authenticated, and the binary is the subject, not the adversary
-(docs/AUDIT.md §4). They matter for soundness only through G1's Go-version gate (see its
-residual).
+(docs/AUDIT.md §4). They used to matter for soundness through G1's Go-version gate (see its
+residual); since round 8 (G3) stub classification does not read build info.
 
 ## 5. Probes with no issue
 
@@ -293,7 +306,9 @@ There is no verification daemon, so there is no row for one (docs/TESTING.md exp
 
 ## Residual risks (honest list)
 
-* G1 relies on the build-info Go version, which a lying `-X runtime.buildVersion` can set.
+* G1 relied on the build-info Go version, which a lying `-X runtime.buildVersion` can set.
+  Closed in round 8 (G3): stubs are pinned to their code and pclntab file; the residual is a
+  byte-exact copy of pinned runtime code (docs/SOUNDNESS.md, stub classification).
 * The K1 notes are heuristics on the statement's syntax: they flag operations, not intent.
 * Dependency bodies are disclosed, not round-tripped (J1). The tagged-def residual of round 6 §3
   is unchanged.

@@ -25,7 +25,8 @@ set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
 
 all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimbs CopyWords SumSquares
      AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte
-     HashWith HashTwice MapSum DeferAdd AddF64 Dot3 F64ToU64 Abs)
+     HashWith HashTwice MapSum DeferAdd AddF64 Dot3 F64ToU64 Abs
+     NewPair MakeSlice AppendOne SetNext MallocFast)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
@@ -43,6 +44,7 @@ fi
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
 
+. scripts/example-contracts.sh
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
@@ -62,7 +64,7 @@ verify_one() {
   fi
   out="artifacts/$n"
   mapfile -t extract_args < <(scripts/example-targets.sh "$n")
-  bin/janus extract artifacts/examples-arm64 "example.com/basic.$n" "$out" "${extract_args[@]}" >/dev/null
+  bin/janus extract artifacts/examples-arm64 "$(example_symbol "$n")" "$out" "${extract_args[@]}" >/dev/null
   start=$(date +%s.%N)
   if bin/janus verify "$out" --proof "examples/proofs/$n.lean" ${extra[@]+"${extra[@]}"} > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)

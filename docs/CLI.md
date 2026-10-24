@@ -69,7 +69,7 @@ stripped, they come from the Go `.gopclntab` (`debug/gosym`) instead; the header
 ## Extract
 
 ```sh
-janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...]
+janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...] [--contract SYM]...
 janus extract artifacts/examples-arm64 example.com/basic.Get artifacts/Get
 ```
 
@@ -111,11 +111,24 @@ Extraction:
    binary with an ELF symbol table, when no other function has the same name (any package can
    name an assembly function or a `//go:linkname` push `runtime.panicX`;
    docs/AUDIT-ROUND7.md G1). Otherwise extraction stops with an error.
-6. Copies every other reachable function, runtime or not. `--max-functions N` (default 64)
+6. Records **runtime contracts** instead of copying them: `--contract SYM` (repeatable; a glob
+   where `*` matches any run of characters including `.` and `/` and `?` one character; a name
+   matches with or without its `.abi0`/`.abiinternal` suffix) names functions whose direct
+   callers are not followed into them. Each matched callee is listed in `Extracted.lean` as
+   `def contracts : List (String × Nat)` (and `contracts := contracts` in `program`; omitted when
+   empty, so extractions without `--contract` are unchanged), and in `identity.json` with the
+   patterns (`contractPatterns`, `contracts`). Stubs keep their stub meaning even if a pattern
+   matches them; the entry function must not match. A pattern that matches no called function
+   gets a `Note:`. There is no code at a contract address, so a run reaching it faults with
+   `noCode` unless the theorem assumes the function's behaviour as a contract hypothesis
+   ([RUNTIME-CONTRACTS.md](RUNTIME-CONTRACTS.md)). `janus verify` prints
+   `Runtime contracts assumed: …` and records `contracts` in `verified.json`; `janus explain`
+   prints `runtime contracts assumed: …`.
+7. Copies every other reachable function, runtime or not. `--max-functions N` (default 64)
    fails the extraction when more are reachable, listing them. For example `main.main` of the
    example binary reaches 421 functions through `println` and the allocator.
-7. Copies the **read-only data** the copied code references (see [Read-only data](#read-only-data)).
-8. Adds **dynamic targets**, the code an indirect call may reach (interface methods, closures,
+8. Copies the **read-only data** the copied code references (see [Read-only data](#read-only-data)).
+9. Adds **dynamic targets**, the code an indirect call may reach (interface methods, closures,
    method values, deferred closures; see [docs/RUNTIME-CONTRACTS.md](RUNTIME-CONTRACTS.md#dynamic-calls)),
    and everything they reach in turn:
    * `--targets SYM,...` names them: a function, a static itab `go:itab.*T,I` (its `Fun[k]`
@@ -131,6 +144,9 @@ Extraction:
    Like reachability this is untrusted: a missing target faults (`noCode`) when called.
    `runtime.deferreturn` is never followed: functions with open-coded defers call it only after a
    recovered panic (out of scope); it is recorded under `omittedCalls`.
+
+   A dynamic target that matches a `--contract` pattern becomes a contract instead of being
+   copied, and `--contract` takes precedence over the built-in omission of `runtime.deferreturn`.
 
 Outputs, written into `<outdir>` (created if needed); any old `verified.json` there is removed:
 
@@ -321,8 +337,8 @@ Valid: extraction artifacts match the binary and recorded settings.
   Matched: binary SHA-256, extractor version, Extracted.lean SHA-256, regenerated words and data.
 ```
 
-`check` reads `identity.json`, re-runs the extraction in memory with the recorded symbol and
-`--max-functions`, and byte-compares it with the saved files without writing anything. If the
+`check` reads `identity.json`, re-runs the extraction in memory with the recorded symbol,
+`--max-functions` and `--contract` patterns, and byte-compares it with the saved files without writing anything. If the
 binary moved, `--binary` names its new location; its SHA-256 must still match.
 
 | Failure | Stage |
@@ -585,7 +601,7 @@ recorded hash together with whether the file on disk still matches it.
 ## Blockers
 
 ```sh
-janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
+janus blockers <binary> <symbol>... [--max-functions N] [--contract SYM]... [--janus-root DIR] [--json FILE]
 janus blockers artifacts/examples-arm64 example.com/basic.Get example.com/basic.Bump main.main --max-functions 1000
 ```
 
