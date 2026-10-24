@@ -409,7 +409,7 @@ theorem unary_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86C
       (modrmP1_un o ho4) hlk hmd (fun _ _ => hfs) hW (k := 0) (by decide) (by omega)
       (fun sr tr x rex sib => x86_inc_dec_fe_ff .Mode_64bit sr tr x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib)
       (fun x rex _ hl sr tr sib => run_one_byte_inc_dec o hid (m / 8 % 8) he sr tr x hl rex _ sib hfld s) ?_
-    intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX hWr
+    intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX hWr _ _
     obtain ⟨s', hs', hrel', hc'⟩ := run_inc_dec hrel hcfg hpr hrv (decide (m / 8 % 8 = 1)) o hid
       (by rw [← hw]; rcases hid with rfl | rfl <;> simp) m hm256
       (by rcases he with h | h <;> simp [h]) sib tr
@@ -427,7 +427,7 @@ theorem unary_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86C
       (modrmP1_un o ho4) hlk hmd (fun _ _ => hfs) hW (k := 0) (by decide) (by omega)
       (fun sr tr x rex sib => x86_not_neg_f6_f7 .Mode_64bit sr tr x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib)
       (fun x rex _ hl sr tr sib => run_one_byte_not_neg o hnn (m / 8 % 8) he sr tr x hl rex _ sib hfld s) ?_
-    intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX hWr
+    intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX hWr _ _
     obtain ⟨s', hs', hrel', hc'⟩ := run_not_neg hrel hcfg hpr hrv (decide (m / 8 % 8 = 3)) o hnn
       (by rw [← hw]; rcases hnn with rfl | rfl <;> simp) m hm256
       (by rcases he with h | h <;> simp [h]) sib tr
