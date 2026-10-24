@@ -27,7 +27,71 @@ cores), so only CPU time is comparable between runs. `janus verify` adds about 2
 | `Nested(n, m)` | doubly nested loop, nested induction over two loop heads | 16 instructions | 18 instructions |
 | `Chain1(x)` → `Chain2` → … → `Chain5` | call chain **5 levels deep**, every level a callee `Summary` proved with the next level's summary (`calls [...]` on `ReachesRet` goals), memory frames (`MemFrame`, `janus_frame`) | 5 summaries | 5 summaries |
 | `Alias4(a, b, c, d *uint64)` | **four possibly aliasing pointers**: 64 equal/disjoint combinations, 49 refuted by `omega`, 15 executed | 15 runs × 16 | 15 runs × 10 |
+| `Mul256(z, x, y *[4]uint64)` | **256-bit multiply** `z = x·y mod 2^256` (`uint256.Int.Mul`): 4×4-limb schoolbook, 10 partial products, carries; `z` may alias `x`/`y` | 43 instructions | 60 instructions |
 | `BigFrame(x, k)` | **large frame** (528 / 520 bytes, the big-frame stack-guard prologue), constant-count zeroing and fill loops unrolled (~400 instructions, ~100 stores in one memory chain), a load at a symbolic index split into 64 cases | ~400 instructions | ~390 instructions |
+
+## Multi-limb arithmetic: `janus_carry` (CPU seconds)
+
+`janus_arith`/`janus64_arith` now close carry-chain goals with the reflective procedure
+`janus_carry` (`Janus/Tactic/Carry*.lean`, see docs/PROOFS.md, *Multi-limb arithmetic*), and the
+dischargers decide address facts without `omega` (`Common.addrDisch`) and carry bounds by
+reflection. `before` is `main` (839a910), `after` is this branch merged with it; both measured
+at the same time on the same machine (`JOBS=3` each, two runs side by side, load 20-60 from
+other users), so the ratio is the meaningful number. `MulAdd8`/`MulAdd8x3` use the new, shorter
+proof script (`janus_run; janus_arith`: no named products, no `janus_simp`); `before` runs the
+old one (named products, `janus_simp [Nat.mul_add, …]`, `omega`). `Mul256` cannot be proved by
+the old automation (`omega` runs out of heartbeats on the carry arithmetic).
+
+| benchmark | arm64 before | arm64 after | speed-up | amd64 before | amd64 after | speed-up |
+|---|---:|---:|---:|---:|---:|---:|
+| `MulAdd8` | 36.7 | 9.2 | **4.0×** | 151.7 | 25.2 | **6.0×** |
+| `MulAdd8x3` | 115.7 | 16.3 | **7.1×** | 1104.1 | 292.5 | **3.8×** |
+| `Mul256` (new) | fails (32.0) | **3.8** | — | fails (232.0) | **10.1** | — |
+| `Nested` | 1.9 | 1.9 | 1.0× | 8.5 | 5.6 | 1.5× |
+| `Chain1` (5 levels) | 11.0 | 11.8 | 0.9× | 9.4 | 9.2 | 1.0× |
+| `Alias4` (15 runs) | 19.4 | 15.4 | 1.3× | 20.6 | 14.9 | 1.4× |
+| `BigFrame` | 160.7 | 152.8 | 1.05× | 126.3 | 110.7 | 1.1× |
+
+The same pair measured before `main` merged the amd64 YMM/AVX/FS/DF model (909b2ad), i.e.
+`13af82f` against this branch at `434306f` (before the address discharger), shows the
+arithmetic speed-up on amd64 without the regression described below:
+
+| benchmark | arm64 before | arm64 after | amd64 before | amd64 after |
+|---|---:|---:|---:|---:|
+| `MulAdd8` | 38.3 | 10.6 (3.6×) | 185.6 | 15.2 (**12.2×**) |
+| `MulAdd8x3` | 111.2 | 26.2 (4.2×) | 869.8 | 49.6 (**17.5×**) |
+| `Mul256` | fails | 5.0 | fails | 10.5 |
+
+**amd64 after the AVX merge.** On `main` since 909b2ad (8-field amd64 `State`), the
+elaboration of a long amd64 run spends seconds in `instantiateMVars` and `share common exprs`
+on the final proof term, growing superlinearly with the number of steps (amd64 `MulAdd8`,
+proof stopped after the run: 0.035 s before the merge, 3.7-6.9 s after, on `main` as on this
+branch; `MulAdd8x3`: about 240 of the 292 s). It is independent of the arithmetic (it is there
+with `sorry` instead of `janus64_arith`) and is not addressed here; it is why the amd64
+`MulAdd8x3` speed-up on the merged tree is 3.8× instead of 17.5×.
+
+Where the time went, and what removed it (arm64 `MulAdd8x3`, 268 instructions):
+
+* the final `omega` calls on the three carry chains (37 s, and their proofs ~16 s of kernel
+  time): replaced by `janus_carry` (about 25 ms per chain, plus a kernel evaluation of the
+  checker);
+* the final clean-up of the post-state (39 s): mostly failing `omega` attempts on
+  `carry < 2^64` side conditions of `mod64_of_lt`, which `omega` cannot prove (it does not know
+  `x·y ≤ (2^64-1)^2`). They are now proved by reflection when true and rejected without `omega`
+  when they do not hold for all limb values;
+* the loads and stores of the run (12 s of 16 s of steps): thousands of address facts (`x + 16`
+  vs the store at `z + 8`), each an `omega` call plus its kernel check (10-40 ms). They are now
+  decided by literal arithmetic and one case split on an aliasing hypothesis.
+
+amd64 additionally had an exponential blow-up in the run itself (`SUBQ` after `SBBQ R, R` kept
+`hi - (if CF then 2^64-1 else 0)` as a `BitVec` term whose `toNat` repeated the previous limb
+in every later flag; the step for the last limb of `MulAdd8` took 18 s). `sub_ite_allOnes64`
+folds it to `BitVec.ofNat 64 (hi.toNat + CF)`.
+
+The examples (all green, same run): no example got slower beyond noise; the multi-limb ones gain
+most (arm64 `Add256` 9.8 → 3.6, `AddLimbs` 15.7 → 9.7, `CopyBlock` 22.5 → 10.1, `A64Equal64`
+11.5 → 6.1, `ClearWords` 476 → 364; amd64 `AddLimbs` 6.7 → 3.5, `Equal64` 15.0 → 11.4).
+Sum over the 20 + 23 example proofs: arm64 623 → 456 s, amd64 250 → 217 s.
 
 ## Results (CPU seconds)
 
