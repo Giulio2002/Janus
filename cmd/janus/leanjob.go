@@ -9,13 +9,17 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 )
 
 // toolchain locates the Lean binaries and library of the framework's toolchain. It is found
@@ -24,6 +28,55 @@ type toolchain struct {
 	lean, leanchecker, sysroot, libDir string
 	version                            string
 	hasChecker                         bool
+
+	idOnce sync.Once
+	id     string
+}
+
+// cacheID identifies the toolchain for every cache key (trusted compile, replay, early replay,
+// result): its version string, the SHA-256 of the lean and leanchecker executables, and the
+// path, size, modification time, inode and mode of every file under bin/ and lib/lean/ (round 8
+// L1). bin/lean is a small launcher; the elaborator and the kernel are in lib/lean/
+// libleanshared.so and the core library's .olean files, which a version string alone does not
+// identify (a toolchain rebuilt in place under the same version). Stat data is used for the
+// 15 000 library files (hashing libleanshared.so, 233 MB, would cost every run about a second);
+// any rewrite changes the modification time or the inode. A toolchain that cannot be walked gets
+// a unique ID, so its caches always miss.
+func (tc *toolchain) cacheID() string {
+	tc.idOnce.Do(func() {
+		h := sha256.New()
+		fmt.Fprintf(h, "janus-toolchain-v1\n%s\n", tc.version)
+		for _, exe := range []string{tc.lean, tc.leanchecker} {
+			b, err := os.ReadFile(exe)
+			if err != nil {
+				fmt.Fprintf(h, "%s missing\n", exe)
+				continue
+			}
+			fmt.Fprintf(h, "%s %s\n", exe, sha256Hex(b))
+		}
+		for _, dir := range []string{filepath.Join(tc.sysroot, "bin"), tc.libDir} {
+			err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				fi, err := d.Info()
+				if err != nil {
+					return err
+				}
+				var ino, dev uint64
+				if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+					ino, dev = uint64(st.Ino), uint64(st.Dev)
+				}
+				fmt.Fprintf(h, "%s %d %d %d %d %o\n", p, fi.Size(), fi.ModTime().UnixNano(), ino, dev, fi.Mode())
+				return nil
+			})
+			if err != nil {
+				fmt.Fprintf(h, "unreadable %s %s\n", dir, newNonce())
+			}
+		}
+		tc.id = tc.version + " " + hex.EncodeToString(h.Sum(nil))
+	})
+	return tc.id
 }
 
 func findToolchain(lake, root string) (*toolchain, error) {

@@ -531,7 +531,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		}
 		if err == nil {
 			defer os.RemoveAll(fwRunDir)
-			earlyFwMarker = earlyReplayMarker(tc.version, fwPins)
+			earlyFwMarker = earlyReplayMarker(tc.cacheID(), fwPins)
 			fwPath := tc.leanPathEnv(janusLibDir)
 			earlyFw = startEarlyReplay(tc.leanchecker, func(argv ...string) (string, error) {
 				return runLeanProtected(sb, tc, fwRunDir, nil, []string{janusLibDir}, fwPath, argv...)
@@ -669,7 +669,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	var early *earlyReplay
 	earlyMarker := ""
 	if tc.hasChecker {
-		earlyMarker = earlyReplayMarker(tc.version, fwPins, trustedPins, proofPins)
+		earlyMarker = earlyReplayMarker(tc.cacheID(), fwPins, trustedPins, proofPins)
 		early = startEarlyReplay(tc.leanchecker, replayRun, []string{"Extracted", "JanusTrusted", "Proof"}, earlyMarker, cacheOK)
 		defer early.wait()
 	}
@@ -706,7 +706,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		kr.Status = "unavailable"
 		kr.Note = "leanchecker not found in the Lean toolchain"
 	} else {
-		plan, err := planReplay(resolved, importGraph(ar.Imports), tc.version, replayCacheOK(sb, opts))
+		plan, err := planReplay(resolved, importGraph(ar.Imports), tc.cacheID(), replayCacheOK(sb, opts))
 		if err != nil {
 			return nil, err
 		}

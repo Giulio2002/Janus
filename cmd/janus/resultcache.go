@@ -93,7 +93,7 @@ func (in *resultInputs) key() string {
 	h := sha256.New()
 	fmt.Fprintf(h, "janus-result-v1\nexe %s\n", exe)
 	fmt.Fprintf(h, "framework %s %s %s\npins %s\nauditor %s\n", in.fw.Source, in.fw.Sha256, in.root, pinsDigest(in.fwPins.want), in.auditExeSha)
-	fmt.Fprintf(h, "toolchain %q %s %s\nsandbox %s %s\n", in.tc.version, in.tc.lean, in.tc.leanchecker, in.sb.mode, in.sb.bwrap)
+	fmt.Fprintf(h, "toolchain %q %s %s\nsandbox %s %s\n", in.tc.cacheID(), in.tc.lean, in.tc.leanchecker, in.sb.mode, in.sb.bwrap)
 	fmt.Fprintf(h, "theorem %s\nreplay-fresh %q\nbinary-opt %q\n", in.thm, in.opts["replay-fresh"], in.opts["binary"])
 	fmt.Fprintf(h, "outdir %s\nproof %s\nbinary %s %s\n", outAbs, proofAbs, binAbs, in.binarySha)
 	fmt.Fprintf(h, "extracted %s\nidentity %s\nproof-src %s\n", sha256Hex(in.extracted), sha256Hex(in.identity), sha256Hex(in.proofSrc))
@@ -111,8 +111,19 @@ func resultHMACKey() ([]byte, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
+	// round 8 C1: the key authenticates every entry; it must be ours alone
+	if err := checkCacheRoot(); err != nil {
+		return nil, err
+	}
+	if fi, err := os.Lstat(dir); err != nil || fi.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("the result cache directory is not private")
+	}
 	p := filepath.Join(dir, ".key")
-	if b, err := os.ReadFile(p); err == nil && len(b) == 32 {
+	if _, err := os.Lstat(p); err == nil {
+		b, err := readPrivateFile(p, true)
+		if err != nil || len(b) != 32 {
+			return nil, fmt.Errorf("the result cache key is not a private 32-byte file of this user")
+		}
 		return b, nil
 	}
 	k := make([]byte, 32)
@@ -133,7 +144,7 @@ func resultHMACKey() ([]byte, error) {
 	// Another process may have created it meanwhile: keep the first one.
 	if err := os.Link(f.Name(), p); err != nil {
 		os.Remove(f.Name())
-		if b, err := os.ReadFile(p); err == nil && len(b) == 32 {
+		if b, err := readPrivateFile(p, true); err == nil && len(b) == 32 {
 			return b, nil
 		}
 		return nil, fmt.Errorf("cannot create the result cache key")
@@ -162,7 +173,7 @@ func lookupResult(key string) *verifiedReport {
 	if key == "" {
 		return nil
 	}
-	b, err := os.ReadFile(resultPath(key))
+	b, err := readPrivateFile(resultPath(key), false)
 	if err != nil {
 		return nil
 	}
