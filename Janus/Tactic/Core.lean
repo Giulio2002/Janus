@@ -409,6 +409,21 @@ def exitMode (p : Expr) : MetaM (Option (Expr × Expr)) := do
   | (``Program.withExit, #[base, ret]) => return some (base, ret)
   | _ => return none
 
+/-- A program of the form `Program.link p impl` (the extracted code linked with arbitrary
+code for its contracts): `(p, impl)`. The program facts are evaluated on the closed `p` and
+lifted with `stepOK_link`/`stubOK_link`/`exitOK_link`. -/
+def linkMode (p : Expr) : MetaM (Option (Expr × Expr)) := do
+  let p := (← instantiateMVars p).consumeMData
+  match p.getAppFnArgs with
+  | (``Program.link, #[base, impl]) => return some (base, impl)
+  | _ => return none
+
+/-- `h : fact p …` lifted to `fact (p.link impl) …` when the program is linked. -/
+def liftLink (impl? : Option Expr) (lem : Name) (h : Expr) : MetaM Expr := do
+  match impl? with
+  | some impl => mkAppM lem #[impl, h]
+  | none => return h
+
 /-- The hypothesis `RetAddr p ret` from the local context. -/
 def findRetAddr (base ret : Expr) : MetaM Expr := do
   let want ← mkAppM ``GoABI.RetAddr #[base, ret]
@@ -539,18 +554,22 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let mut out := []
   for g' in gs do
     if ← g'.isAssigned then continue
+    let before ← g'.withContext do return (← getLCtx).getFVarIds
     let (fv, g'') ← g'.introNP 3
     let g'' ← Common.destructPost g'' fv[0]! fv[1]! fv[2]!
-    out := out ++ [← normFrames cfg g'']
+    out := out ++ [← normFrames cfg g'' before]
   return out
 where
-  /-- Simplify the callee's `MemFrame` hypotheses (their ranges mention the call-site state
-  literal), so that `omega` sees the addresses in normal form. -/
-  normFrames (cfg : Cfg) (g : MVarId) : TacticM MVarId := g.withContext do
+  /-- Simplify the callee's `MemFrame` hypotheses and the other propositions its postcondition
+  added (their terms mention the call-site state literal), so that `omega` and the
+  accessibility discharger see the addresses in normal form. -/
+  normFrames (cfg : Cfg) (g : MVarId) (before : Array FVarId) : TacticM MVarId := g.withContext do
     let mut ids := #[]
     for d in ← getLCtx do
       if d.isImplementationDetail then continue
-      if (← instantiateMVars d.type).isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
+      let ty ← instantiateMVars d.type
+      if ty.isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
+      else if !before.contains d.fvarId && (← isProp ty) then ids := ids.push d.fvarId
     if ids.isEmpty then return g
     setGoals [g]
     withExecSimp cfg (set := `janus_post) fun ctx simprocs d? => do
@@ -607,7 +626,10 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
         `hret : RetAddr p ret` in the context (`intro ret hret …`) and keep `h_lr`; for a callee, \
         prove it as a `Summary` and pass it with `calls [...]`; otherwise add an equation \
         `… = BitVec.ofNat 64 addr` for the target register."
-    let ((exitA, segs, stubs), syms) ← getProgData progE
+    let (evalE, impl?) ← match ← linkMode progE with
+      | some (b, impl) => pure (b, some impl)
+      | none => pure (progE, none)
+    let ((exitA, segs, stubs), syms) ← getProgData evalE
     cfg.status.modify fun st => { st with pc := some c, sym := Common.symOf syms c }
     if !allowStop && cfg.stops.contains c then return none
     -- a call to a function with a summary
@@ -621,7 +643,7 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
     let cE := mkNatLit c
     if mode.isNone && c == exitA then
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
-      let hok ← kernelDecide (mkApp2 (mkConst ``exitOK) p cE)
+      let hok ← liftLink impl? ``exitOK_link (← kernelDecide (mkApp2 (mkConst ``exitOK) evalE cE))
       return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
     if let some (_, name, isPanic) := stubs.find? (·.1 == c) then
       if ret?.isSome then
@@ -629,7 +651,8 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
           `Summary` only covers runs that return. Add the precondition that excludes this path \
           (e.g. `GuardOK` for `morestack`, a bound for a panic)."
       let kind := if isPanic then mkConst ``StubKind.panic else mkConst ``StubKind.morestack
-      let hok ← kernelDecide (mkApp4 (mkConst ``stubOK) progE cE (toExpr name) kind)
+      let hok ← liftLink impl? ``stubOK_link
+        (← kernelDecide (mkApp4 (mkConst ``stubOK) evalE cE (toExpr name) kind))
       let lem := match mode, hret? with
         | some (base, retE), some hret =>
           mkAppN (mkConst ``Reaches.stub_withExit) #[base, retE, s, Q, cE, toExpr name, kind, hret,
@@ -638,8 +661,8 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       return some (← Common.applyFast g lem)
     -- the instruction at `c` (decoded and checked once per run)
     let fact ← match (← cfg.facts.get).get? c with
-      | some f => if f.prog == progE then pure f else mkFact progE segs syms c
-      | none => mkFact progE segs syms c
+      | some f => if f.prog == progE then pure f else mkFact progE evalE impl? segs syms c
+      | none => mkFact progE evalE impl? segs syms c
     let iE := toExpr fact.instr
     let ins := Janus.Arm64.Disasm.disasm (some c) fact.instr
     cfg.status.modify fun st => { st with
@@ -669,7 +692,7 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       out := out ++ (← afterExec cfg g')
     return some out
 where
-  mkFact (progE : Expr) (segs : List (Nat × List Nat)) (syms : List (String × Nat × Nat)) (c : Nat) :
+  mkFact (progE evalE : Expr) (impl? : Option Expr) (segs : List (Nat × List Nat)) (syms : List (String × Nat × Nat)) (c : Nat) :
       TacticM FetchFact := do
     let some w := fetchWord segs c |
       throwError "{tacName}: stuck after {(← cfg.status.get).steps} instructions: pc {hex c} is \
@@ -682,7 +705,8 @@ where
       throwError "{tacName}: stuck at pc {hex c}{symS}: the word {hex w} does not decode to a \
         modelled instruction (see docs/SOUNDNESS.md for the supported subset). No proof can \
         execute past it."
-    let hok ← kernelDecide (mkApp4 (mkConst ``stepOK) progE (mkNatLit c) (mkNatLit w) (toExpr i))
+    let hok ← liftLink impl? ``stepOK_link
+      (← kernelDecide (mkApp4 (mkConst ``stepOK) evalE (mkNatLit c) (mkNatLit w) (toExpr i)))
     let f : FetchFact := { prog := progE, word := w, instr := i, hok }
     cfg.facts.modify (·.insert c f)
     return f
@@ -852,9 +876,17 @@ def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) := do
     let e ← Term.elabTerm t none
     Term.synthesizeSyntheticMVarsNoPostponing
     let e ← instantiateMVars e
-    let ty ← instantiateMVars (← inferType e)
+    let ty0 ← instantiateMVars (← inferType e)
+    -- a named contract (`def NewobjectContract … := Summary …`) is unfolded to its `Summary`
+    let mut ty := ty0
+    for _ in [0:8] do
+      if ty.isAppOf ``Summary then break
+      match ← unfoldDefinition? ty with
+      | some ty' => ty := ty'.headBeta
+      | none => break
+    let e ← if ty == ty0 then pure e else mkExpectedTypeHint e ty
     let (``Summary, #[_, entry, _, _]) := ty.getAppFnArgs |
-      throwError "janus_run calls: {t} is not a `Summary`: {ty}"
+      throwError "janus_run calls: {t} is not a `Summary`: {ty0}"
     let some n ← evalNat entry | throwError "janus_run calls: cannot evaluate the entry of {t}"
     return (n, e)
 

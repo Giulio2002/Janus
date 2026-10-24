@@ -69,7 +69,7 @@ stripped, they come from the Go `.gopclntab` (`debug/gosym`) instead; the header
 ## Extract
 
 ```sh
-janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...]
+janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]... [--targets SYM,...]...
 janus extract artifacts/examples-arm64 example.com/basic.Get artifacts/Get
 ```
 
@@ -113,7 +113,7 @@ Extraction:
 8. Adds **dynamic targets**, the code an indirect call may reach (interface methods, closures,
    method values, deferred closures; see [docs/RUNTIME-CONTRACTS.md](RUNTIME-CONTRACTS.md#dynamic-calls)),
    and everything they reach in turn:
-   * `--targets SYM,...` names them: a function, a static itab `go:itab.*T,I` (its `Fun[k]`
+   * `--targets SYM,...` (repeatable) names them: a function, a static itab `go:itab.*T,I` (its `Fun[k]`
      methods are copied, and the itab itself becomes a data object named after its symbol, which
      `Janus.Spec.ItabIs` refers to), or a static funcval `…·f` (its function). An itab name
      contains a comma of its own and is kept together:
@@ -124,8 +124,10 @@ Extraction:
      `.rodata`.
 
    Like reachability this is untrusted: a missing target faults (`noCode`) when called.
-   `runtime.deferreturn` is never followed: functions with open-coded defers call it only after a
-   recovered panic (out of scope); it is recorded under `omittedCalls`.
+   `runtime.deferreturn` is not followed: functions with open-coded defers call it only after a
+   recovered panic (out of scope); it is recorded under `omittedCalls` (or under `contracts`, if
+   a `--contract` pattern matches it). A dynamic target matching a `--contract` pattern is a
+   contract, not copied.
 
 Outputs, written into `<outdir>` (created if needed); any old `verified.json` there is removed:
 
