@@ -26,7 +26,8 @@ instance makes it compute another is rejected. See CRITICAL-1 in
 These are trusted, not proved.
 
 1. **The Lean AArch64 model** (`Janus/Arm64/Decode.lean`, `Exec.lean`, `Vector.lean`,
-   `State.lean`): the decoder, the instruction semantics and the checked memory. They are meant to agree with the
+   `State.lean`, and for Advanced SIMD beyond the original subset `NeonInstr.lean`,
+   `DecodeNeon.lean`, `Neon.lean`, `NeonFP.lean`, `ExecNeon.lean`): the decoder, the instruction semantics and the checked memory. They are meant to agree with the
    Arm Architecture Reference Manual (ARM ARM) for the supported user-mode A64 subset. That
    agreement is differentially tested against qemu (`janus-oracle`), not proved. If the model
    is wrong about an instruction the program uses, a theorem can be true of the model and false
@@ -444,8 +445,45 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   Accepting them assumes FEAT_AES; Go only runs its AES hash after testing `cpu.ARM64.HasAES`
   (`runtime.useAeshash`), so a proof through it assumes that flag, as for LSE.
 
-Not modelled, and rejected: Advanced SIMD (vector) floating point, saturating, rounding and widening/narrowing arithmetic other than the listed ones, permutes
-(`ZIP`/`UZP`/`TRN`), SHA, polynomial multiply, SVE and SME. An Advanced SIMD write sets the whole
+* **The rest of Advanced SIMD** (`Janus.Arm64.NeonInstr`, decoded by `decodeNeon` for the
+  words the classes above reject, executed by `execNeon`; the lane operations in
+  `Janus/Arm64/Neon.lean` and `NeonFP.lean`, transcribed statement by statement from the
+  `decode` and `Operation` ASL of sail-arm's `instrs64.sail`, with element-size generic helpers
+  so one definition covers every arrangement and the scalar forms):
+  * every integer opcode of three same (halving, saturating, rounding and saturating shifts by
+    register, `SABD`/`UABD`/`SABA`/`UABA`, `MLA`/`MLS`, `MUL`/`PMUL`, `SQDMULH`/`SQRDMULH`), three
+    different (`SADDL`…`USUBW`, `ADDHN`/`RADDHN`/`SUBHN`/`RSUBHN`, `SABAL`/`SABDL`, `SMLAL`/`UMLAL`/
+    `SMLSL`/`UMLSL`, `SMULL`/`UMULL`, `SQDMLAL`/`SQDMLSL`/`SQDMULL`), two-register miscellaneous
+    (`SADDLP`/`UADDLP`/`SADALP`/`UADALP`, `SUQADD`/`USQADD`, `CLS`/`CLZ`, `SQABS`/`SQNEG`,
+    `SQXTN`/`UQXTN`/`SQXTUN`, `SHLL`), shift by immediate (`SRSHR`/`URSHR`, `SRSRA`/`URSRA`,
+    `SQSHLU`, `SQSHL`/`UQSHL`, `RSHRN`, `SQ(R)SHR(U)N`/`UQ(R)SHRN`), by element (`MUL`, `MLA`,
+    `MLS`, the long and the saturating doubling forms), and their scalar forms; the permutes
+    `UZP1/2`, `TRN1/2`, `ZIP1/2`; scalar `DUP`; scalar `ADDP`;
+  * single- and double-precision floating point on every lane, through the scalar ASL library
+    (`FP.fpAdd`, `FP.fpMulAdd`, ... with the same `FPCR`, including `FZ`, `DN`, `FIZ` and `AH`),
+    plus `FPCompareEQ/GE/GT`, `FPMulX`, `FPRecipStepFused`/`FPRSqrtStepFused`, the estimates
+    `FPRecipEstimate`/`FPRSqrtEstimate`/`FPRecpX`/`URECPE`/`URSQRTE`, round-to-odd `FCVTXN`,
+    `FPToFixed`/`FixedToFP` with fraction bits, and the halving tree of `Reduce` for `FMAXV`,
+    `FMINV`, `FMAXNMV`, `FMINNMV` and the scalar pairwise forms: `FADD`…`FDIV`, `FMLA`/`FMLS`
+    (vector and by element), `FMULX`, `FABD`, `FMAX(NM)(P)`/`FMIN(NM)(P)`, `FADDP`, the compares
+    (also against zero and absolute), `FABS`/`FNEG`/`FSQRT`, `FRINT*`, `FCVT{N,P,M,Z,A}{S,U}`,
+    `SCVTF`/`UCVTF` (also with fraction bits, vector and scalar, and the general-register
+    fixed-point forms), `FCVTL`/`FCVTN` between single and double, `FRECPS`/`FRSQRTS`. A lane
+    exception whose trap is enabled faults (`fpTrapped`); otherwise the lanes' exceptions are ORed
+    into `FPSR`. The scalar forms merge into the upper part of the destination under
+    `FPCR.NEP`, with the source register each ASL `execute` names;
+  * `LD2`–`LD4`/`ST2`–`ST4` (multiple structures, every arrangement and post-index form),
+    checked as one access of the whole interleaved block (never more permissive than the ASL's
+    element accesses), and `LDNP`/`STNP` of S/D/Q registers (`LDP`/`STP` without writeback).
+
+  Saturation sets `FPSR.QC` (bit 27). Two corners are IMPLEMENTATION DEFINED or differ between
+  the references, so the model faults (`trapped`) instead of choosing: the single-precision
+  `FRECPE`/`FRSQRTE` under `FPCR.AH = 1` (FEAT_RPRES changes their precision).
+
+Not modelled, and rejected: half precision (FEAT_FP16, and the `FCVTL`/`FCVTN` forms to and from
+half precision), BFloat16, dot products (FEAT_DotProd, FEAT_I8MM), `SQRDMLAH`/`SQRDMLSH`
+(FEAT_RDM), `FMLAL`/`FMLSL` (FEAT_FHM), `FCMLA`/`FCADD`, `FRINT32*`/`FRINT64*`, SHA, `PMULL`/`PMULL2`,
+SVE and SME. An Advanced SIMD write sets the whole
 128-bit register (`V[d, n] = x` zero-extends); on a CPU with SVE the hardware also zeroes the
 upper bits of `Z[d]`, which are not part of the model and not observable by the accepted
 instructions.

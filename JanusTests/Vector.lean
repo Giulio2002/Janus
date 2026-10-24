@@ -264,15 +264,15 @@ example : decode 0x0e083c00 = none := by decide   -- umov x0, v0.d[0] with Q = 0
 example : decode 0x4e000c00 = none := by decide   -- dup with imm5 = 00000 (reserved)
 example : decode 0x0e31b800 = some (.vAcross false false 0 27 0 0) := by decide  -- addv b0, v0.8b
 example : decode 0x0eb1b800 = none := by decide   -- addv s0, v0.2s (size:Q = 100, reserved)
-example : decode 0x4cdf8c00 = none := by decide   -- ld2 {v0.2d, v1.2d}, [x0], #32 (LD2: not modelled)
+example : decode 0x4cdf8c00 = some (.neon (.ldstStruct true true 8 3 true 31 0 0)) := by decide   -- ld2 {v0.2d, v1.2d}, [x0], #32 (NeonInstr)
 example : decode 0x4d40d400 = none := by decide   -- ld1r with S = 1 (UNDEFINED)
 example : decode 0x4d408c00 = none := by decide   -- ld1 {v0.d}[1] with S = 1 (UNDEFINED)
 example : decode 0x1e602000 = some (.fpCmp 1 0 0 0) := by decide   -- fcmp d0, d0 (floating point)
 example : decode 0x1e6e1000 = some (.fpImm 1 0x70 0) := by decide   -- fmov d0, #1.0
-example : decode 0x4e204000 = none := by decide   -- addhn2 (not modelled)
-example : decode 0x2c400000 = none := by decide   -- ldnp s0, s0, [x0] (not modelled)
-example : decode 0x2c400400 = none := by decide   -- ldnp with ... (reserved neighbour)
-example : decode 0x6c400000 = none := by decide   -- ldnp d0, d0, [x0]
+example : decode 0x4e204000 = some (.neon (.threeDiff true false 0 0 4 0 0)) := by decide   -- addhn2 v0.16b, v0.8h, v0.8h (NeonInstr)
+example : decode 0x2c400000 = none := by decide   -- ldnp s0, s0, [x0] (Rt == Rt2: CONSTRAINED UNPREDICTABLE)
+example : decode 0x2c400400 = some (.neon (.ldstNP 0 true 0 1 0 0)) := by decide   -- ldnp s0, s1, [x0] (NeonInstr)
+example : decode 0x6c400000 = none := by decide   -- ldnp d0, d0, [x0] (Rt == Rt2)
 
 /-! ## AES -/
 

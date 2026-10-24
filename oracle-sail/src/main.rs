@@ -88,6 +88,10 @@ struct Case {
     fpcr: String,
     #[serde(default)]
     fpsr: String,
+    /// Sequence mode (oracle/layout `Case.Words`): a straight-line block laid out from TestPC;
+    /// `word` is ignored when it is non-empty.
+    #[serde(default)]
+    words: Vec<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -421,10 +425,31 @@ impl Cpu {
             }
         };
 
-        // Memory: code page = word at TestPC, zeros (UDF #0) elsewhere; data = pattern.
+        // Sequence mode: the block's words (each below 2^32).
+        let mut block: Vec<u32> = Vec::new();
+        for hw in &c.words {
+            match parse_hex(hw) {
+                Ok(v) if v <= 0xffff_ffff => block.push(v as u32),
+                _ => {
+                    err(&mut r, "bad words entry".into());
+                    return r;
+                }
+            }
+        }
+        if block.len() > 0x180 {
+            err(&mut r, "words too long".into());
+            return r;
+        }
+        // Memory: code page = word (or the block) at TestPC, zeros (UDF #0) elsewhere; data = pattern.
         let mut code = vec![0u8; PAGE as usize];
         let off = (TEST_PC - CODE_PAGE) as usize;
-        code[off..off + 4].copy_from_slice(&word.to_le_bytes());
+        if block.is_empty() {
+            code[off..off + 4].copy_from_slice(&word.to_le_bytes());
+        } else {
+            for (i, w) in block.iter().enumerate() {
+                code[off + 4 * i..off + 4 * i + 4].copy_from_slice(&w.to_le_bytes());
+            }
+        }
         self.o.write_mem(CODE_PAGE, &code);
         let data: Vec<u8> = (0..DATA_SIZE).map(|i| pattern(c.seed, i)).collect();
         self.o.write_mem(DATA_BASE, &data);
@@ -495,7 +520,23 @@ impl Cpu {
         self.o.set_pc(TEST_PC);
 
         let (cu0, un0) = (unpredictable_count(), uncaught_count());
-        self.o.step(word);
+        if block.is_empty() {
+            self.o.step(word);
+        } else {
+            // Step while the PC stays in the block at EL0 (a straight-line block ends by falling
+            // through to the UDF after it, which the post-processing reports like the qemu
+            // runner's SIGILL), at most one step per word plus one.
+            for _ in 0..=block.len() {
+                let pc = self.o.get_pc();
+                if self.el() != 0 || pc < TEST_PC || pc >= TEST_PC + 4 * block.len() as u64 || pc % 4 != 0 {
+                    break;
+                }
+                self.o.step(block[((pc - TEST_PC) / 4) as usize]);
+                if uncaught_count() != un0 {
+                    break;
+                }
+            }
+        }
         r.unpredictable = (unpredictable_count() - cu0) as i64;
         if uncaught_count() != un0 {
             self.poisoned = true;
