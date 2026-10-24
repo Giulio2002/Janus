@@ -192,6 +192,9 @@ theorem ZeroBytes.writeLE_of {m : Memory} {a n b k v : Nat} (h : ZeroBytes m a n
   rw [Memory.bytes_writeLE_outside _ (by omega)]
   exact h i hi
 
+theorem ZeroBytes.writeLE_of' {m : Memory} {a n b k v : Nat} (hd : b + k ≤ a ∨ a + n ≤ b)
+    (h : ZeroBytes m a n) : ZeroBytes (m.writeLE b k v) a n := ZeroBytes.writeLE_of h hd
+
 theorem ZeroBytes.congr_addr {m : Memory} {a a' n : Nat} (h : ZeroBytes m a n) (he : a = a') :
     ZeroBytes m a' n := he ▸ h
 
@@ -224,8 +227,8 @@ theorem spanClass_mod' (x : Nat) (h : x < 68) : (2 * x + 1) % 256 = 2 * x + 1 :=
 exactly the span's `allocCache`, `freeindex`, `freeIndexForScan` and `allocCount`, the mcache's
 `nextSample`, `m.mallocing` (back to 0) and `m.locks` (back to its value), possibly
 `g.stackguard0` (`releasem` re-arms a pending preemption), and its own stack frames. -/
-def FastPost (s s' : State) (size : Nat) : Prop :=
-  (s'.regs 0).toNat = slotOf s size ∧ ZeroBytes s'.mem (slotOf s size) (csOf s size) ∧
+def FastRun (s s' : State) (size : Nat) : Prop :=
+  (s'.regs 0).toNat = slotOf s size ∧
   s'.mem.readLE (spanOf s size + 56) 8 = cacheOf s size / 2 ^ (ctzN 64 (cacheOf s size) + 1) ∧
   s'.mem.readLE (spanOf s size + 48) 2 = resOf s size + 1 ∧
   s'.mem.readLE (spanOf s size + 52) 2 = resOf s size + 1 ∧
@@ -237,13 +240,33 @@ def FastPost (s s' : State) (size : Nat) : Prop :=
     (spanOf s size + 96, spanOf s size + 98), (cOf s, cOf s + 8),
     (mOf s + 240, mOf s + 244), (mOf s + 264, mOf s + 268), (gOf s + 16, gOf s + 24)]
 
+/-- What the fast path does (`FastRun`), and the slot is still zero. -/
+def FastPost (s s' : State) (size : Nat) : Prop :=
+  FastRun s s' size ∧ ZeroBytes s'.mem (slotOf s size) (csOf s size)
+
+/-- The slot stays zero: the frame of the run is apart from it (`MCacheOK`'s `Spread`). -/
+theorem zero_of_run {s s' : State} {size : Nat} (hok : MCacheOK s size) (hr : FastRun s s' size) :
+    ZeroBytes s'.mem (slotOf s size) (csOf s size) := by
+  obtain ⟨-, -, -, -, -, -, -, ⟨-, hsb⟩, hsp, -, -, -, -, -, -, hz, -⟩ := hok
+  obtain ⟨-, -, -, -, -, -, -, -, hf⟩ := hr
+  simp only [spread_cons, spread_nil, List.mem_cons, List.not_mem_nil, or_false,
+    forall_eq_or_imp, forall_eq, and_true] at hsp
+  obtain ⟨⟨-, -, -, -, -, -, a07⟩, ⟨-, -, -, -, -, a17⟩, ⟨-, -, -, -, a27⟩, ⟨-, -, -, a37⟩,
+    ⟨-, -, a47⟩, ⟨-, a57⟩, -⟩ := hsp
+  simp only [Apart] at a07 a17 a27 a37 a47 a57
+  intro i hi
+  have := hf.readLE (slotOf s size + i) 1
+    (by simp only [Janus.outside_cons, Janus.outside_nil, and_true]; omega)
+  rw [Memory.readLE_one, Memory.readLE_one] at this
+  rw [← BitVec.toNat_inj, this, hz i hi]
+
 set_option maxRecDepth 20000 in
 set_option maxHeartbeats 30000000 in
 theorem fast_path (sz typ nz : BitVec 64) :
     Ensures Extracted.program Extracted.entry [sz, typ, nz]
       (fun s => GuardOK s 144 ∧ StackOK s 152 32 ∧ 16 ≤ sz.toNat ∧ sz.toNat ≤ 1016 ∧
         typ.toNat = 0 ∧ MCacheOK s sz.toNat)
-      (fun s s' => FastPost s s' sz.toNat) := by
+      (fun s s' => FastRun s s' sz.toNat) := by
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hs1, hs2, ht, hok⟩
   janus_intro hs
   janus_eval_nat h_dm : debugMalloc
@@ -265,7 +288,7 @@ theorem fast_path (sz typ nz : BitVec 64) :
   obtain ⟨⟨a01, a02, a03, a04, a05, a06, a07⟩, ⟨a12, a13, a14, a15, a16, a17⟩, ⟨a23, a24, a25, a26, a27⟩,
     ⟨a34, a35, a36, a37⟩, ⟨a45, a46, a47⟩, ⟨a56, a57⟩, a67⟩ := hsp
   simp only [rd, h_dm, h_gb, h_t8, h_ts, h_wb, h_mp, h_glo, h_ghi, gOf, mOf, pOf, cOf, scOf, csOf,
-    spanOf, cacheOf, fidxOf, nelemsOf, baseOf, eszOf, resOf, slotOf, FastPost] at *
+    spanOf, cacheOf, fidxOf, nelemsOf, baseOf, eszOf, resOf, slotOf, FastRun] at *
   have hsc8 := Memory.readLE_lt s.mem ((janus_eval% sizeToClass8) + (sz.toNat + 7) / 8) 1
   have hctz := ctzN_lt 64 _ (by rw [Nat.mod_eq_of_lt (Memory.readLE_lt _ _ 8)]; exact hca)
   have hbab := Memory.readLE_lt s.mem (s.mem.readLE (s.mem.readLE (s.mem.readLE (s.mem.readLE
@@ -310,8 +333,6 @@ theorem fast_path (sz typ nz : BitVec 64) :
     | janus_frame
     | exact cache_shift _ _ hctz hcb
     | ((repeat' split) <;> omega)
-    | ((repeat (refine ZeroBytes.writeLE_of ?_ (by first | omega | janus_apart)))
-       exact ZeroBytes.congr_addr hzero (by omega))
 
 /-- Go 1.26 `internal/runtime/gc.SizeToSizeClass8` (129 entries). -/
 def goSizeToClass8 : List Nat := [0, 1, 2, 3, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 21, 21, 21, 21, 22, 22, 22, 22, 23, 23, 23, 23, 24, 24, 24, 24, 25, 25, 25, 25, 26, 26, 26, 26, 27, 27, 27, 27, 27, 27, 27, 27, 28, 28, 28, 28, 28, 28, 28, 28, 29, 29, 29, 29, 29, 29, 29, 29, 30, 30, 30, 30, 30, 30, 30, 30, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32]
@@ -358,7 +379,7 @@ theorem fresh_of_fastPost {s s' : State} {size : Nat} {rt : List (Nat × Nat)}
   have hbs : blockSize size true = csOf s size := by
     rw [hcs]; unfold blockSize; rw [ite_eq_right (by simp; omega)]
   obtain ⟨-, -, -, -, -, -, -, ⟨hacc, hbnd⟩, -, -, -, -, -, -, -, -, hesz, -⟩ := hok
-  obtain ⟨hr0, hz, -, -, -, -, -, -, -, hf⟩ := hp
+  obtain ⟨⟨hr0, -, -, -, -, -, -, -, hf⟩, hz⟩ := hp
   rw [hbs, hr0]
   have hm8 := mul_mod_of_dvd (b := resOf s size) (show eszOf s size % 8 = 0 by rw [hesz]; exact hc8)
   refine ⟨hin, hbnd, by rw [hf.accessible]; exact hacc, fun _ => ?_, fun h16' => ?_,
@@ -379,6 +400,7 @@ theorem correctness (sz typ nz : BitVec 64) (rt : List (Nat × Nat)) :
         Fresh rt s'.mem (s'.regs 0).toNat sz.toNat (blockSize sz.toNat true) true) := by
   intro ret hret s hs ⟨hg, hst, h1, h2, ht, hok, htab, hb, hin⟩
   exact (fast_path sz typ nz ret hret s hs ⟨hg, hst, h1, h2, ht, hok⟩).mono
-    fun s' ⟨habi, hp⟩ => ⟨habi, hp, fresh_of_fastPost hok htab h1 h2 hb hin hp⟩
+    fun s' ⟨habi, hr⟩ => ⟨habi, ⟨hr, zero_of_run hok hr⟩,
+      fresh_of_fastPost hok htab h1 h2 hb hin ⟨hr, zero_of_run hok hr⟩⟩
 
 end Proof
