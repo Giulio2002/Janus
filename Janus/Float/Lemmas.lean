@@ -95,6 +95,25 @@ theorem valueOf_of_zero {f : Fmt} {x : Nat} (h : classify f x = .zero) : valueOf
 
 theorem addExact_zero : addExact 0 0 0 0 = none := by decide
 
+theorem mul_comm (f : Fmt) (rm : RM) (a b : Nat) : mul f rm a b = mul f rm b a := by
+  unfold mul
+  have hx : mulExact (valueOf f a).n (valueOf f a).e (valueOf f b).n (valueOf f b).e =
+      mulExact (valueOf f b).n (valueOf f b).e (valueOf f a).n (valueOf f a).e := by
+    simp [mulExact, Int.mul_comm, Int.add_comm]
+  rw [hx]
+  cases isNaN f a <;> cases isNaN f b <;> cases signOf f a <;> cases signOf f b <;>
+    cases classify f a <;> cases classify f b <;> simp
+
+theorem fma_nan (f : Fmt) (rm : RM) (a b c : Nat) (h : isNaN f c = true) : fma f rm a b c = none := by
+  simp [fma, h]
+
+theorem resultIs_bind (f : Fmt) (o : Option Nat) (x : Nat) (k : Nat → Option Nat)
+    (hk : ∀ y, isNaN f y = true → k y = none) (ho : ResultIs f o x) :
+    ResultIs f (o.bind k) y ↔ ResultIs f (k x) y := by
+  cases o with
+  | none => simp [ResultIs] at ho; simp [ResultIs, hk x ho]
+  | some r => simp [ResultIs] at ho; subst ho; rfl
+
 /-- `abs` is the encoding with the sign cleared, a value below `2^width` for every input. -/
 theorem abs_lt (f : Fmt) (x : Nat) : abs f x < f.signBit := Nat.mod_lt _ (Nat.two_pow_pos _)
 
