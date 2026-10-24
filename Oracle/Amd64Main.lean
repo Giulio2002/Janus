@@ -87,6 +87,9 @@ structure Case where
   init : List (Nat × Nat)
   /-- `MXCSR` (absent: `0x1F80`, the Linux/Go default) -/
   mxcsr : Nat
+  /-- audit/rt-model sequence mode: the instructions laid out one after another at `TestPC`
+  (`bytes` is ignored when non-empty) -/
+  seq : List (List Nat) := []
 
 def parseCase (line : String) : Except String Case := do
   let j ← Json.parse line
@@ -113,7 +116,9 @@ def parseCase (line : String) : Except String Case := do
     | some m => parseHex m
     | none => pure 0x1F80
   if mxcsr ≥ 2 ^ 16 then throw "mxcsr: reserved bits set"
-  pure { id, bytes, regs, rflags, xmm, ymmh, fsBase, seed, init, mxcsr }
+  let seqS : Array String := (j.getObjValAs? (Array String) "seq").toOption.getD #[]
+  let seq ← seqS.toList.mapM parseBytes
+  pure { id, bytes, regs, rflags, xmm, ymmh, fsBase, seed, init, mxcsr, seq }
 
 /-- Initial byte at buffer offset `i`: the last override for `i`, else the pattern. -/
 def initByte (c : Case) (i : Nat) : Nat :=
@@ -152,11 +157,30 @@ def flagBits (f : Flags) : Nat × Nat :=
   let parts := [one f.cf 1, one f.pf 4, one f.af 16, one f.zf 64, one f.sf 128, one f.ovf 2048]
   (parts.foldl (· + ·.1) 0, parts.foldl (· + ·.2) 0)
 
+/-- Sequence mode: the code page is the concatenated instructions followed by `0xCC`; `step`
+is applied from `TestPC` until `rip` reaches the end of the sequence (or leaves it, or faults),
+each time on the page bytes from `rip` (at most 15). -/
+def runSeq (page : Array Nat) (stop : Nat) : Nat → State → Except Fault State
+  | 0, s => .ok s
+  | k + 1, s =>
+    let r := s.rip.toNat
+    if r = stop ∨ r < testPC ∨ r ≥ stop then .ok s else
+    let off := r - codePage
+    let bs := ((List.range 15).map fun i => page.getD (off + i) 0xCC)
+    match Janus.Amd64.step bs s with
+    | .error f => .error f
+    | .ok s' => runSeq page stop k s'
+
 def runCase (c : Case) : Json :=
   let bs := codeBytes c
   let len := match decode bs with | some (_, n) => n | none => 0
   let initArr := (List.range dataSize).toArray.map (initByte c)
-  match Janus.Amd64.step bs (initState c initArr) with
+  let flat := c.seq.foldr (· ++ ·) []
+  let page : Array Nat := ((List.replicate 0x800 0xCC) ++ flat ++
+    List.replicate (pageSize - 0x800 - flat.length) 0xCC).toArray
+  let res := if c.seq.isEmpty then Janus.Amd64.step bs (initState c initArr)
+    else runSeq page (testPC + flat.length) (4 * c.seq.length) (initState c initArr)
+  match res with
   | .error f =>
     let (k, d) := faultJson f
     Json.mkObj [("id", c.id), ("status", "fault"), ("fault", k), ("detail", d), ("len", len),
