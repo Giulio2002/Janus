@@ -68,6 +68,7 @@ type verifiedReport struct {
 	Framework         *frameworkInfo `json:"framework,omitempty"`
 	Consumer          *consumerInfo  `json:"consumer,omitempty"`
 	Sandbox           sandboxInfo    `json:"sandbox"`
+	MemoryGuard       *memGuardInfo  `json:"memoryGuard,omitempty"`
 	Definitions       []string       `json:"definitions,omitempty"`
 	// DependencyConsts are the constants from declared extra dependencies that the statement
 	// (or a proof-local def it uses) mentions: "<name> (<kind>, <module>)".
@@ -76,6 +77,10 @@ type verifiedReport struct {
 	// functions that were not extracted, whose behaviour the theorem can only use through a
 	// contract hypothesis in its statement.
 	Contracts []string `json:"contracts,omitempty"`
+	// Cached: this report is the recorded result of an earlier verification with exactly the
+	// same inputs (resultcache.go), made at CachedFrom.
+	Cached     bool   `json:"cached,omitempty"`
+	CachedFrom string `json:"cachedFrom,omitempty"`
 }
 
 type auditResult struct {
@@ -149,11 +154,14 @@ func (r *leanRunner) run(args ...string) (string, error) {
 	if r.buildDir != "" {
 		env = append(env, "LEAN_PATH="+r.buildDir)
 	}
+	if len(args) > 0 && args[0] == "build" {
+		env = lakeBuildEnv(env)
+	}
 	cmd.Env = env
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := cmd.Run()
+	err := guardRun(cmd)
 	return out.String(), err
 }
 
@@ -258,13 +266,19 @@ func verifyAndReport(outdir string, opts map[string]string, stderr io.Writer) (*
 	if err := os.Remove(reportPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot remove stale %s: %v", displayPath(reportPath), err), Stage: "writing report"}
 	}
+	if err := memGuardConfigErr(); err != nil {
+		return nil, err
+	}
+	logMemGuard(stderr)
 	var r *verifiedReport
 	var err error
+	mark := memMark()
 	if opts["proof-root"] != "" {
 		r, err = verifyConsumer(outdir, opts, stderr)
 	} else {
 		r, err = verify(outdir, opts, stderr)
 	}
+	r, err = memOutcome(mark, r, err)
 	if err != nil {
 		_ = os.Remove(reportPath)
 		return nil, err
@@ -315,6 +329,9 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 		fmt.Fprintln(stdout, "  Sandbox: bubblewrap (no network, read-only filesystem, private build dir)")
 	default:
 		fmt.Fprintf(stdout, "  Sandbox: %s (no network, read-only filesystem, private build dir)\n", r.Sandbox.Mode)
+	}
+	if r.Cached {
+		fmt.Fprintf(stdout, "  Cached: the recorded result of an identical verification at %s (same janus, framework build, toolchain, sandbox, artifact and proof; --fresh re-runs it)\n", r.CachedFrom)
 	}
 	ax := strings.Join(r.Axioms, ", ")
 	if ax == "" {
@@ -388,12 +405,15 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	if proofPath == "" {
 		proofPath = filepath.Join(outdir, "Proof.lean")
 	}
+	tm := newStageTimer(stderr)
+	defer tm.total()
 
 	// 1. Extraction integrity.
 	cr, err := check(outdir, opts["binary"])
 	if err != nil {
 		return nil, err
 	}
+	tm.mark("extraction check")
 	proofSrc, err := os.ReadFile(proofPath)
 	if err != nil {
 		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read proof %s: %v", displayPath(proofPath), err),
@@ -413,15 +433,29 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	if err != nil {
 		return nil, err
 	}
+	tm.mark("sandbox self-test")
 	root, cleanup, err := fw.libraryRoot(lake, opts["fresh"] != "", stderr)
 	if err != nil {
 		return nil, err
 	}
 	defer cleanup()
+	// The compiled auditor (janus-audit) of this framework build, and the SHA-256 its build
+	// recorded (a --fresh build was made by this process just now).
+	auditExe := auditExePath(root)
+	auditExeSha := fw.stampedAuditExe(root)
+	if opts["fresh"] != "" && fw.Source != "directory" {
+		auditExeSha = regularFileSha(auditExe)
+	}
+	if auditExeSha == "" {
+		return nil, &diag{Invalid: true, Stage: "Janus library build",
+			Msg: "The framework build in " + displayPath(root) + " records no auditor executable."}
+	}
+	tm.mark("framework build check")
 	tc, err := findToolchain(lake, root)
 	if err != nil {
 		return nil, err
 	}
+	tm.mark("toolchain lookup")
 	janusLibDir := filepath.Join(root, ".lake", "build", "lib", "lean")
 	// Pin the trusted framework build: every Janus.* module-data file, hashed now and
 	// re-verified after every untrusted step, the audit and the replay (R1).
@@ -430,6 +464,52 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read the framework build %s: %v", displayPath(janusLibDir), err), Stage: "Janus library build"}
 	}
 	pinned := pinSet{fwPins}
+	tm.mark("framework pins")
+
+	// The recorded result of an identical earlier verification (resultcache.go), if any.
+	idBytes0, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
+	cacheIn := &resultInputs{fw: fw, root: root, fwPins: fwPins, auditExeSha: auditExeSha, tc: tc, sb: sb,
+		thm: thm, outdir: outdir, proof: proofPath, opts: opts, extracted: cr.Lean, identity: idBytes0,
+		binPath: cr.BinPath, binarySha: cr.Identity.BinarySha256, proofSrc: proofSrc}
+	resultKey := ""
+	if resultCacheOK(sb, opts) {
+		// Created before any sandboxed step, so the sandbox's tmpfs always covers it.
+		if _, err := resultHMACKey(); err == nil {
+			resultKey = cacheIn.key()
+		}
+		if prev := lookupResult(resultKey); prev != nil {
+			// The inputs must still be the ones the key was computed from.
+			cr2, err := check(outdir, opts["binary"])
+			proofNow, perr := os.ReadFile(proofPath)
+			idNow, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
+			if err == nil && perr == nil && bytes.Equal(cr2.Lean, cr.Lean) && bytes.Equal(proofNow, proofSrc) && bytes.Equal(idNow, idBytes0) {
+				tm.mark("result cache hit")
+				return cachedReport(prev, fw, root), nil
+			}
+		}
+		tm.mark("result cache miss")
+	}
+
+	// The kernel replay of the framework (when not cached yet: the first verification of a
+	// framework build) runs alongside the steps below; see speed.go.
+	var earlyFw *earlyReplay
+	earlyFwMarker := ""
+	if tc.hasChecker {
+		rb, err := janusRunBase()
+		fwRunDir := ""
+		if err == nil {
+			fwRunDir, err = os.MkdirTemp(rb, "replay-")
+		}
+		if err == nil {
+			defer os.RemoveAll(fwRunDir)
+			earlyFwMarker = earlyReplayMarker(tc.version, fwPins)
+			fwPath := tc.leanPathEnv(janusLibDir)
+			earlyFw = startEarlyReplay(tc.leanchecker, func(argv ...string) (string, error) {
+				return runLeanProtected(sb, tc, fwRunDir, nil, []string{janusLibDir}, fwPath, argv...)
+			}, []string{"Janus"}, earlyFwMarker, replayCacheOK(sb, opts))
+			defer earlyFw.wait()
+		}
+	}
 
 	// 3. Trusted directory: our Extracted and an independently renamed JanusTrusted copy,
 	// compiled by us (no proof code), kept read-only for the untrusted steps.
@@ -453,22 +533,40 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		return runLean(&sandbox{mode: "none"}, tc, trustedDir, nil, trustedPath,
 			tc.lean, "--root="+trustedDir, filepath.Join(trustedDir, mod+".lean"), "-o", filepath.Join(trustedDir, mod+".olean"))
 	}
-	if out, err := compileTrusted("Extracted"); err != nil {
-		return nil, &diag{Invalid: true, Msg: "Lean rejected the extracted program " + displayPath(cr.Extracted) + ".\n" + summarizeLeanErrors(out, 2000),
-			Stage: "extraction elaboration", Next: "Check that the Janus library matches this extractor version.", Details: out}
+	tm.mark("trusted dir setup")
+	// The two trusted compiles are independent and run at once; an identical earlier compile
+	// (same toolchain, framework build and sources) is reused from the trusted cache.
+	cacheOK := replayCacheOK(sb, opts)
+	tkey := trustedCacheKey(tc, fwPins, cr.Lean, janusTrustedSource(cr.Lean))
+	trustedHit := cacheOK && loadTrustedCache(tkey, trustedDir)
+	if !trustedHit {
+		outs, errs := compileBoth(compileTrusted, "Extracted", "JanusTrusted")
+		if out, err := outs[0], errs[0]; err != nil {
+			return nil, &diag{Invalid: true, Msg: "Lean rejected the extracted program " + displayPath(cr.Extracted) + ".\n" + summarizeLeanErrors(out, 2000),
+				Stage: "extraction elaboration", Next: "Check that the Janus library matches this extractor version.", Details: out}
+		}
+		if out, err := outs[1], errs[1]; err != nil {
+			return nil, &diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
+				Stage: "extraction elaboration", Details: out}
+		}
 	}
-	if out, err := compileTrusted("JanusTrusted"); err != nil {
-		return nil, &diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
-			Stage: "extraction elaboration", Details: out}
+	if trustedHit {
+		tm.mark("trusted compile (cached)")
+	} else {
+		tm.mark("trusted compile")
 	}
 	trustedPins, err := newPinnedLib("the trusted Extracted/JanusTrusted build", trustedDir, nil)
 	if err != nil {
 		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
+	if cacheOK && !trustedHit {
+		storeTrustedCache(tkey, trustedDir, trustedPins.want)
+	}
 	pinned = append(pinned, trustedPins)
 	if err := pinned.check("the trusted compile"); err != nil {
 		return nil, err
 	}
+	tm.mark("trusted pins")
 
 	// 4. Work directory: the proof and the audit script, the only writable place for the
 	// sandboxed, untrusted lean processes.
@@ -499,6 +597,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		return runLeanProtected(sb, tc, workDir, nil, protected, proofPathEnv, argv...)
 	}
 
+	tm.mark("work dir setup")
 	// Compile the proof, sandboxed. It imports the trusted Extracted; its output is Proof.olean.
 	if out, err := sandboxed(tc.lean, "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "Proof.olean")); err != nil {
 		out = mapPaths(out)
@@ -509,6 +608,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		return nil, &diag{Invalid: true, Msg: msg, Stage: "proof checking",
 			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + thm + ".", Details: out}
 	}
+	tm.mark("proof compile")
 	if err := pinned.check("the proof compile"); err != nil {
 		return nil, err
 	}
@@ -530,14 +630,36 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
 	}
 	defer os.RemoveAll(auditDir)
-	if err := os.WriteFile(filepath.Join(auditDir, "Audit.lean"), []byte(auditScript(thm, "Proof", marker)), 0o644); err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
+	tm.mark("pins after proof")
+	replayRun := func(argv ...string) (string, error) {
+		return runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv, argv...)
 	}
+	// The kernel replay of the three modules of this verification runs alongside the audit
+	// (it reads only pinned files; see speed.go). Its result is used below only for modules of
+	// the audited closure.
+	var early *earlyReplay
+	earlyMarker := ""
+	if tc.hasChecker {
+		earlyMarker = earlyReplayMarker(tc.version, fwPins, trustedPins, proofPins)
+		early = startEarlyReplay(tc.leanchecker, replayRun, []string{"Extracted", "JanusTrusted", "Proof"}, earlyMarker, cacheOK)
+		defer early.wait()
+	}
+	// The auditor executable must be the one its trusted build recorded; nothing untrusted runs
+	// between this check and its start (the proof compile has ended).
+	if got := regularFileSha(auditExe); got != auditExeSha {
+		return nil, &diag{Invalid: true, Stage: "framework integrity",
+			Msg:  fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(auditExe), short(auditExeSha), short(got)),
+			Next: "Something other than janus wrote to the framework build; janus rebuilds it on the next run."}
+	}
+	// It runs JanusAudit.runImpl with the arguments the trusted Audit.lean script would pass
+	// to JanusAudit.run (auditScript, used by the consumer path).
 	auditOut, _ := runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv,
-		tc.lean, "--root="+auditDir, filepath.Join(auditDir, "Audit.lean"))
+		auditExe, thm, "Proof", marker, "JanusTrusted")
+	tm.mark("audit")
 	if err := pinned.check("the audit"); err != nil {
 		return nil, err
 	}
+	tm.mark("pins after audit")
 	ar, err := parseAuditRecord(mapPaths(auditOut), marker)
 	if err != nil {
 		return nil, err
@@ -559,9 +681,9 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		if err != nil {
 			return nil, err
 		}
-		replayRun := func(argv ...string) (string, error) {
-			return runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv, argv...)
-		}
+		early.apply(plan, earlyMarker)
+		earlyFw.apply(plan, earlyFwMarker)
+		tm.mark("early replay wait")
 		if out, err := plan.replay(tc.leanchecker, replayRun, plan.modules); err != nil {
 			return nil, replayDiag(mapPaths(out))
 		}
@@ -574,9 +696,11 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		}
 		kr = plan.report(plan.modules, fresh)
 	}
+	tm.mark("kernel replay")
 	if err := pinned.check("the kernel replay"); err != nil {
 		return nil, err
 	}
+	tm.mark("pins after replay")
 
 	// 7. Inputs must still be the ones that were checked.
 	cr2, err := check(outdir, opts["binary"])
@@ -591,13 +715,14 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 			Next: "Rerun janus verify."}
 	}
 
+	tm.mark("final input check")
 	idBytes, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
 	fi := fw.info()
 	commit := fi.Revision
 	if fi.Modified {
 		commit += "+dirty"
 	}
-	return &verifiedReport{
+	report := &verifiedReport{
 		Schema:            1,
 		Theorem:           ar.Name,
 		Kind:              ar.Kind,
@@ -627,7 +752,11 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		Sandbox:           sb.info(),
 		Definitions:       ar.Definitions,
 		Contracts:         cr.Identity.contractList(),
-	}, nil
+	}
+	if resultKey != "" && bytes.Equal(idBytes, idBytes0) {
+		storeResult(resultKey, report)
+	}
+	return report, nil
 }
 
 // parseAuditJSON parses the auditor's record and enforces the axiom allow-list. The auditor

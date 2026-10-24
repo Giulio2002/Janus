@@ -67,15 +67,22 @@ initialize registerTraceClass `janus.disch
 
 abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Bool)
 
+/-- `evalExpr` of `e`, over imported constants when possible (`Common.unfoldLocalDefs`: then it
+does not wait for the rest of the file), else of `e` itself. -/
+unsafe def evalExprLocalFree (α) (ty e : Expr) : MetaM α := do
+  let e' ← Common.unfoldLocalDefs e
+  if e' == e then return ← evalExpr α ty e
+  try evalExpr α ty e' catch _ => evalExpr α ty e
+
 unsafe def evalProgDataImpl (p : Expr) : MetaM ProgData := do
   let e := mkApp (mkConst ``progData) p
   let ty ← inferType e
-  evalExpr ProgData ty e
+  evalExprLocalFree ProgData ty e
 
 @[implemented_by evalProgDataImpl]
 opaque evalProgDataCore (p : Expr) : MetaM ProgData
 
-unsafe def evalNatImpl (e : Expr) : MetaM Nat := evalExpr Nat (mkConst ``Nat) e
+unsafe def evalNatImpl (e : Expr) : MetaM Nat := evalExprLocalFree Nat (mkConst ``Nat) e
 
 @[implemented_by evalNatImpl]
 opaque evalNatCore (e : Expr) : MetaM Nat
@@ -86,7 +93,7 @@ def progSyms (p : Program) : List (String × Nat × Nat) :=
 
 unsafe def evalProgSymsImpl (p : Expr) : MetaM (List (String × Nat × Nat)) := do
   let e := mkApp (mkConst ``progSyms) p
-  evalExpr (List (String × Nat × Nat)) (← inferType e) e
+  evalExprLocalFree (List (String × Nat × Nat)) (← inferType e) e
 
 @[implemented_by evalProgSymsImpl]
 opaque evalProgSymsCore (p : Expr) : MetaM (List (String × Nat × Nat))
@@ -381,12 +388,7 @@ def cleanOutcome (cfg : Cfg) (g : MVarId) : TacticM (List MVarId) := g.withConte
       let t ← instantiateMVars (← g'.getType)
       if t.isConstOf ``True then g'.assign (mkConst ``True.intro); return []
       if !t.hasFVar && !t.hasMVar then
-        let saved ← saveState
-        try
-          let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic| decide +kernel)))
-          if gs.isEmpty then return []
-        catch _ => pure ()
-        saved.restore
+        if ← Common.decideClosed g' then return []
       return [g']
 
 /-- The pc of state `s` as a literal, with a proof of `s.pc = BitVec.ofNat 64 c`; otherwise the
@@ -826,9 +828,7 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
     | some true => return
     | some false => throwError "janus_disch: closed goal is false:{indentExpr t}"
     | none => pure ()
-    let saved ← saveState
-    let gs ← try Tactic.run g <| withoutRecover (evalTactic (← `(tactic| decide +kernel))) catch _ => saved.restore; pure [g]
-    if gs.isEmpty then return
+    if ← Common.decideClosed g then return
     -- A closed goal that `decide` refutes must not be proved from (possibly contradictory)
     -- hypotheses: simp enters `if` branches with the branch condition as a hypothesis, and
     -- proving e.g. `29 < 16` there would make the register-sorting lemma loop.

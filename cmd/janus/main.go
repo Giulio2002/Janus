@@ -143,6 +143,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	var err error
+	mark := memMark()
 	switch args[0] {
 	case "list":
 		err = cmdList(args[1:], stdout)
@@ -154,6 +155,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = cmdVerify(args[1:], stdout, stderr)
 	case "blockers":
 		err = cmdBlockers(args[1:], stdout, stderr)
+	case "memguard":
+		err = cmdMemguard(args[1:], stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "janus %s\n", extractorVersion)
 	case "help", "-h", "--help":
@@ -163,6 +166,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if err != nil {
+		// A Lean job killed by the memory guard explains any failure it caused.
+		if _, _, kill := memSince(mark); kill != nil {
+			if d, ok := err.(*diag); !ok || d.Stage != "resource limit" {
+				err = memLimitDiag(currentGuard(), *kill, err)
+			}
+		}
 		printDiag(stderr, err)
 		return 1
 	}

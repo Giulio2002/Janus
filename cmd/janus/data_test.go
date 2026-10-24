@@ -336,6 +336,7 @@ func TestDataCheckTamper(t *testing.T) {
 // are cross-checked against objdump, `check` accepts the artifacts and rejects an edited byte,
 // and (without -short) the file elaborates and a proof about `data` verifies.
 func TestDataLarge(t *testing.T) {
+	t.Parallel()
 	needObjdump(t)
 	b, err := loadBinary(exampleBin)
 	if err != nil {

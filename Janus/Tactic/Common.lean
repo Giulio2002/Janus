@@ -650,6 +650,63 @@ where
 `some true` / `some false`, or `none` if it is not of that form. -/
 def evalClosedProp? (p : Expr) : Option Bool := evalClosedBool?.evalClosedProp? p
 
+/-- Unfold the definitions of the current file (constants that are not imported) in `e`, to its
+definitional equal that mentions imported constants only, up to `fuel` rounds; unsafe, opaque and
+partial definitions, theorems and anything else are left as they are.
+
+The executor evaluates closed terms (addresses such as `Extracted.entry + 0x28`, program data)
+with the compiled evaluator (`evalExpr`). A term that mentions a constant of the current file
+can only be compiled against the compiled environment of the whole file so far, so with parallel
+elaboration it waits for every earlier theorem of the file to be checked; a term over imported
+constants is compiled against the imported environment and does not wait. The value is the same
+either way (the unfolding is definitional). -/
+partial def unfoldLocalDefs (e : Expr) (fuel : Nat := 64) : MetaM Expr := do
+  let env ← getEnv
+  let isLocal (n : Name) : Bool := !env.isImportedConst n && match env.find? n with
+    | some (.defnInfo v) => v.safety == .safe
+    | _ => false
+  if fuel == 0 || !(e.getUsedConstants.any isLocal) then return e
+  let e' ← Core.transform e (pre := fun x => do
+    match x with
+    | .const n us =>
+      if isLocal n then
+        match env.find? n with
+        | some ci => return .done (ci.instantiateValueLevelParams! us)
+        | none => return .continue
+      else return .continue
+    | _ => return .continue)
+  unfoldLocalDefs e'.headBeta (fuel - 1)
+
+/-- Heartbeat budget (in thousands) for the elaborator's attempt in `decideClosed`. -/
+def decideClosedHeartbeats : Nat := 50000
+
+/-- Prove the closed goal `g` by `decide`: first the elaborator's evaluation (plain `decide`,
+within `decideClosedHeartbeats`), then, if that cannot decide it, `decide +kernel`. Returns
+whether `g` was closed (otherwise the state is unchanged).
+
+Both prove `g` by evaluating its `Decidable` instance, and the kernel checks the evaluation
+either way: plain `decide` leaves `of_decide_eq_true rfl` in the proof (checked with the
+theorem), `decide +kernel` checks it in an auxiliary lemma. The auxiliary lemma is added
+synchronously (`decide +kernel` turns `Elab.async` off), which waits for the kernel checks of
+every earlier declaration of the file; a proof file whose theorems all use the executor would
+then elaborate its theorems one after the other instead of in parallel. -/
+def decideClosed (g : MVarId) : TacticM Bool := do
+  let saved ← saveState
+  let ok ← tryCatchRuntimeEx
+    (do
+      let gs ← withTheReader Core.Context (fun c => { c with maxHeartbeats := decideClosedHeartbeats * 1000 }) <|
+        withCurrHeartbeats <| Tactic.run g <| withoutRecover (evalTactic (← `(tactic| decide)))
+      pure gs.isEmpty)
+    (fun _ => pure false)
+  if ok then return true
+  saved.restore
+  let ok ← try
+      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| decide +kernel)))
+      pure gs.isEmpty
+    catch _ => pure false
+  unless ok do saved.restore
+  return ok
+
 /-- Close the goal `g` if it is a closed literal comparison that evaluates to `true`; `false` if
 it evaluates to `false`; `none` if it is not of that form. -/
 def closeByEval? (g : MVarId) : MetaM (Option Bool) := do
