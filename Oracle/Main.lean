@@ -76,6 +76,8 @@ structure Case where
   /-- FPCR and FPSR (absent: 0). -/
   fpcr : Nat
   fpsr : Nat
+  /-- audit/rt-model sequence mode: words laid out from `testPC` (`word` ignored when nonempty). -/
+  words : Array Nat
 
 def hexField (j : Json) (k : String) : Except String Nat := do
   parseHex (← j.getObjValAs? String k)
@@ -100,7 +102,10 @@ def parseCase (line : String) : Except String Case := do
   let fpcr ← (hexField j "fpcr" <|> pure 0)
   let fpsr ← (hexField j "fpsr" <|> pure 0)
   if fpcr ≥ 2 ^ 32 ∨ fpsr ≥ 2 ^ 32 then throw "fpcr/fpsr must be below 2^32"
-  pure { id, word, pc, x, sp, nzcv, seed, dczid, v, tpidr, fpcr, fpsr }
+  let wds ← (j.getObjValAs? (Array String) "words" <|> pure #[])
+  let words ← wds.mapM parseHex
+  if words.any (· ≥ 2 ^ 32) then throw "words entries must be below 2^32"
+  pure { id, word, pc, x, sp, nzcv, seed, dczid, v, tpidr, fpcr, fpsr, words }
 
 def initState (c : Case) : State :=
   { regs := fun i => if i < 31 then BitVec.ofNat 64 c.x[i]! else 0
@@ -121,8 +126,21 @@ def initState (c : Case) : State :=
 def nzcvOf (f : Flags) : Nat :=
   (if f.n then 8 else 0) + (if f.z then 4 else 0) + (if f.c then 2 else 0) + (if f.v then 1 else 0)
 
+/-- Sequence mode: fetch each word from `words` by `(pc - testPC)/4`; stop when `pc` leaves
+the block `[testPC, testPC + 4*n)` (a straight-line block ends by falling through to the UDF
+the native runner put after it) or a step faults. -/
+def runSeq (words : Array Nat) : Nat → State → Except Fault State
+  | 0, s => .ok s
+  | k + 1, s =>
+    let p := s.pc.toNat
+    if p < testPC ∨ p ≥ testPC + 4 * words.size ∨ (p - testPC) % 4 ≠ 0 then .ok s else
+    match Arm64.step (words[(p - testPC) / 4]!) s with
+    | .error f => .error f
+    | .ok s' => runSeq words k s'
+
 def runCase (c : Case) : Json :=
-  match Arm64.step c.word (initState c) with
+  match (if c.words.isEmpty then Arm64.step c.word (initState c)
+         else runSeq c.words (4 * c.words.size + 1) (initState c)) with
   | .error f =>
     let (k, d) := faultJson f
     Json.mkObj [("id", c.id), ("status", "fault"), ("fault", k), ("detail", d)]
