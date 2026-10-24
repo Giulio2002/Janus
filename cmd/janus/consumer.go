@@ -565,7 +565,9 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 			_ = os.RemoveAll(ws.DepsDir)
 		}
 		_ = os.RemoveAll(janusBuild)
-		if err := copyTree(filepath.Join(base, ".lake", "build"), janusBuild); err != nil {
+		// The library (lib/) is what the workspace builds against; the compiled auditor and its
+		// C sources (bin/, ir/) stay in the base (the consumer path audits via Audit.lean).
+		if err := copyTreeSkipTop(filepath.Join(base, ".lake", "build"), janusBuild, "bin", "ir"); err != nil {
 			return fail(wsDiag(err))
 		}
 	}

@@ -268,12 +268,23 @@ func syncTree(dir string, files map[string][]byte, keep func(top string) bool) e
 }
 
 // copyTree copies the regular files and directories of src into dst (which must not exist).
-func copyTree(src, dst string) error {
+func copyTree(src, dst string) error { return copyTreeSkipTop(src, dst) }
+
+// copyTreeSkipTop is copyTree without the top-level entries of src named in skip.
+func copyTreeSkipTop(src, dst string, skip ...string) error {
 	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		rel, _ := filepath.Rel(src, p)
+		for _, s := range skip {
+			if rel == s {
+				if d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+		}
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
