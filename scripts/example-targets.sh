@@ -13,7 +13,7 @@ case "$1" in
   TotalMeters) printf '%s\n' --targets example.com/basic.Meters.Scale ;;
   TotalFeet) printf '%s\n' --targets example.com/basic.Feet.Scale ;;
   # heap allocation (docs/RUNTIME-CONTRACTS.md): the runtime functions left out as contracts
-  NewPair|MakeSlice|AppendOne)
+  NewPair|MakeSlice|AppendOne|MakeAdder)
     printf '%s\n' --contract runtime.mallocgc --contract runtime.newobject \
       --contract runtime.makeslice --contract runtime.growslice ;;
   SetNext) # the write barrier's fast path is executed; only its buffer flush is left out

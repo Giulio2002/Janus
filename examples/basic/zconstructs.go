@@ -337,3 +337,12 @@ func (c *Counter) Inc(d uint64) uint64 {
 //
 //go:noinline
 func IncTwice(c *Counter, d uint64) uint64 { return c.Inc(d) + c.Inc(d) }
+
+// MakeAdder returns the closure x ↦ x + a. The closure outlives the call, so it escapes: its
+// funcval (the code address of MakeAdder.func1, then the captured a) is allocated on the heap
+// with runtime.newobject.
+//
+//go:noinline
+func MakeAdder(a uint64) func(uint64) uint64 {
+	return func(x uint64) uint64 { return x + a }
+}

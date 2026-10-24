@@ -26,7 +26,7 @@ arm64=(MallocFast ClearWords A64IndexByte CopyBlock AddLimbs A64Equal64 Add Max 
        Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
        ReverseArray RowsWith SwapBig DotBoth Find2D Fact Compose Shifts AlignUp TotalMeters TotalFeet
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
-       Mod IncTwice Bump GlobalTable Table
+       Mod IncTwice Bump GlobalTable Table MakeAdder
        WrongAdd)
 amd64=()
 for d in examples/proofs-amd64/*/; do amd64+=("$(basename "$d")"); done

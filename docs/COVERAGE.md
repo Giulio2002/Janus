@@ -385,10 +385,11 @@ architecture and branch, and what it rests on. A construct counts as covered onl
 `scripts/verify-cgo-examples.sh` on each branch (`git show`). main has 28 arm64 proofs (plus the
 `WrongAdd` counterexample) and 31 amd64 proofs; agent/alloc adds 5+4, agent/maps 10+10,
 agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts only).
-agent/constructs (package M1, `examples/basic/zconstructs.go`) adds 28 arm64 + 25 amd64:
+agent/constructs (package M1, `examples/basic/zconstructs.go`) adds 29 arm64 + 26 amd64:
 `Triangle`, `GotoSum`, `Find2D`, `RowsWith`, `Log2`, `TotalMeters`, `TotalFeet`, `Fact`,
 `SumBelow`, `IterSum`, `ReverseArray`, `DivMod10`, `SwapBig`, `Compose`, `DotBoth`, `BitMerge`,
-`Shifts`, `MinMax`, `ClearArray`, `Sum3`, `AlignUp`, `Slice3`, `Slice2`, `Mod`, `IncTwice` on both
+`Shifts`, `MinMax`, `ClearArray`, `Sum3`, `AlignUp`, `Slice3`, `Slice2`, `Mod`, `IncTwice`,
+`MakeAdder` on both
 ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 
 | construct | arm64 proof (branch) | amd64 proof (branch) | depends on |
@@ -423,7 +424,7 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | method value | `HashTwice` (main); value receiver: `DotBoth` (constructs) | same | dynamic-call section of RUNTIME-CONTRACTS |
 | method expression | `DotBoth` (constructs; the static funcval `Vec2.Dot·f`) | same (constructs) | – |
 | closure call (captured vars) | `MapSum` (`AffineSum.func1`), `DeferAdd` (main) | same | `FuncvalIs`, `ClosureCtx` |
-| closure creation, escaping closure | non-escaping: `Compose` (constructs; funcval in the frame); escaping: none | same (constructs) | `newobject` (escaping) |
+| closure creation, escaping closure | non-escaping: `Compose` (constructs; funcval in the frame); escaping: `MakeAdder` (constructs; funcval from the `newobject` contract) | same (constructs) | `newobject` (escaping) |
 | defer, open-coded | `DeferAdd` (main) | same | `deferreturn` omitted (only after recover) |
 | defer in a loop / heap defer | none | none | `runtime.deferproc`, `deferprocStack`, `deferreturn` |
 | runtime panics (bounds, divide) | `Get`, `Div` (main); `Slice2`, `Slice3`, `Mod` (constructs) | same | `panicBounds`, `panicdivide` stubs |
@@ -475,8 +476,8 @@ Not covered on any branch or architecture (with agent/constructs): the type swit
 string; heap defers, `panic`, `recover`; the nil-dereference fault; string concatenation,
 comparison and conversions; int/float and float32/float64 conversions; complex numbers;
 interface boxing, assertions and comparison; the grown-stack case; `//export` callbacks. Within
-covered rows these forms still have no example: a non-inlined range-over-func loop, escaping
-closures, float and string `min`/`max`. amd64 lacks `IndexByte` (the arm64 example is in an
+covered rows these forms still have no example: a non-inlined range-over-func loop, float and
+string `min`/`max`. amd64 lacks `IndexByte` (the arm64 example is in an
 arm64-only file) and `MallocFast`.
 
 Two rows are uncertain: whether `CopyWords` and `HexDigit` keep a bounds check in compiled code

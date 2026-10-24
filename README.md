@@ -257,6 +257,7 @@ Go 1.26.0. Proofs:
 | `Slice2` | `xs[i:j]`: the new header; **panics** iff not `0 ≤ i ≤ j ≤ cap` | ✓ | ✓ |
 | `Mod` | `x % y` by a variable; **panics** (`runtime.panicdivide`) iff `y = 0` | ✓ | ✓ |
 | `IncTwice` | two static calls of a pointer-receiver method: `c.N += d` twice, returns the sum of the results | ✓ | ✓ |
+| `MakeAdder` | an escaping closure: a fresh funcval from `runtime.newobject` (contract) holding `MakeAdder.func1` and the captured `a` | ✓ | ✓ |
 | `Slice3` | `xs[i:j:k]`: the new header; **panics** (`runtime.panicBounds`) iff not `0 ≤ i ≤ j ≤ k ≤ cap` | ✓ | ✓ |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 
