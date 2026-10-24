@@ -578,7 +578,10 @@ then restores the model in 1.1 s and the modules in **2.4 s** (manifests checked
 the library (`Proofs.Run`, `Proofs.Examples`, `Proofs`; 11 s), the set the keys predict; the key
 tests also check that the keys do not depend on the checkout's path, that a lakefile comment
 changes none, that editing `Janus/Arm64/State.lean` changes exactly its 109 dependents' keys, and
-that a library option or the toolchain changes them.
+that a library option or the toolchain changes them. Repeated after merging main (73cae68), into
+the same cache: the build reused 27 unchanged entries, built and published the other 110 (49 min 54 s
+under a loaded host), and a fresh copy of that commit then restored 137 modules and built JanusASL
+in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
 
 ## The check (JanusASL/Check.lean)
 
