@@ -559,13 +559,19 @@ where
   /-- Simplify the callee's `MemFrame` hypotheses and the other propositions its postcondition
   added (their terms mention the call-site state literal), so that `omega` and the
   accessibility discharger see the addresses in normal form. -/
+  stateEq (ty : Expr) : Bool :=
+    match ty.eq? with
+    | some (_, l, _) => l.getAppFn.constName?.any (·.getPrefix == ``Janus.Arm64.State)
+    | none => false
   normFrames (cfg : Cfg) (g : MVarId) (before : Array FVarId) : TacticM MVarId := g.withContext do
     let mut ids := #[]
     for d in ← getLCtx do
       if d.isImplementationDetail then continue
       let ty ← instantiateMVars d.type
       if ty.isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
-      else if !before.contains d.fvarId && (← isProp ty) then ids := ids.push d.fvarId
+      -- an equation about a state component (`s'.regs 19 = …`) is a state hypothesis: it is a
+      -- rewrite rule of the simp set itself, and simplifying it with that set turns it into `True`
+      else if !before.contains d.fvarId && (← isProp ty) && !(stateEq ty) then ids := ids.push d.fvarId
     if ids.isEmpty then return g
     setGoals [g]
     withExecSimp cfg (set := `janus_post) fun ctx simprocs d? => do

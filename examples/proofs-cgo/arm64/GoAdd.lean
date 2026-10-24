@@ -1,5 +1,35 @@
 import Extracted
 
+/-!
+# `Add(x, y uint64) uint64` (Go) → `c_add` (C) → back to Go, end to end (arm64)
+
+```go
+func Add(x, y uint64) uint64 { return uint64(C.c_add(C.uint64_t(x), C.uint64_t(y))) }
+```
+
+**Guarantee (`correctness`).** For all 64-bit `x` and `y` and every Go call of
+`example.com/cgo.Add` satisfying `GoPre` — the stack-growth checks of `Add` and `_Cfunc_c_add`
+fall through (`GuardOK s 48`), 112 bytes of stack below `SP` are writable, the cgo function-pointer
+variable holds the address of the C wrapper and `runtime.cgoAlwaysFalse` is false (both are
+statically initialised globals no code writes), and the `g` struct, the TLS `g` slot and those
+globals are not on the stack — every run returns to the caller, restores `SP`, `g` and the frame
+pointer, and leaves `(x + y) mod 2^64` in `X0`.
+
+The statement is under `CgoCall Extracted.program`, the **trusted** contract of `runtime.cgocall`
+(`Janus.FFI`): the Go code (`Add`, `_Cfunc_c_add`), the C wrapper and `c_add` are all executed by
+the model from the bytes of the binary; only the stack and scheduler switch of `cgocall` (and the
+value of `_cgo_topofstack`) are assumed, as `CgoCall` and `TopOfStack` state them.
+
+**How.**
+1. `wrapper_spec`: the cgo wrapper `_cgo_<hash>_Cfunc_c_add(frame)` (C, AAPCS64) under the
+   `TopOfStack T` contract for every `T`: it returns with `X19`–`X29` and `SP` restored, and its
+   only write outside its stack is `p0 + p1` into the frame's result slot (`WPost`).
+2. `go_spec`: `Add` under the Go-side assumption `CgoSpec wrapper G E`: "`cgocall` of the wrapper
+   with a frame that is Go memory (`G`) returns with the result slot set (`E`)".
+3. `refines`: `CgoCall.refines` turns 1 into "the trusted contract implies the assumption of 2",
+   and `correctness` is 2 under the trusted contract.
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.CABI Janus.Tactic Janus.Spec Janus.FFI
 
 namespace Proof
