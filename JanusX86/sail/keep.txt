@@ -37,8 +37,15 @@ two 10-11   # MOVUPS/MOVUPD/MOVSS/MOVSD
 two 18      # PREFETCHh
 two 1F      # NOP r/m
 two 28-29   # MOVAPS/MOVAPD
+two 2A      # CVTSI2SS/SD
+two 2C-2F   # CVT(T)SS/SD2SI, UCOMIS/COMIS
+two 3A      # three-byte escape (ROUNDSS/SD)
 two 40-4F   # CMOVcc
+two 51      # SQRTSS/SD
+two 54-56   # ANDPS/ANDNPS/ORPS (PD)
 two 57      # XORPS/XORPD
+two 58-5A   # ADD/MUL SS/SD, CVTSS2SD/CVTSD2SS
+two 5C-5F   # SUB/MIN/DIV/MAX SS/SD
 two 60      # PUNPCKLBW
 two 6E-70   # MOVD/MOVQ, MOVDQA/MOVDQU, PSHUFD/PSHUFLW
 two 74      # PCMPEQB
@@ -51,6 +58,7 @@ two B3      # BTR
 two B6-B8   # MOVZX, POPCNT
 two BA-BF   # group 8, BTC, BSF/TZCNT, BSR/LZCNT, MOVSX
 two C0-C1   # XADD
+two C2      # CMPSS/SD
 two C7      # CMPXCHG8B/16B
 two C8-CF   # BSWAP
 two D6-D7   # MOVQ, PMOVMSKB
