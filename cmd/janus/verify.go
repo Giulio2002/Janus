@@ -757,6 +757,12 @@ func classifyAuditError(msg, full string) error {
 	case strings.Contains(msg, "binds the instance"):
 		d.Stage = "statement identity"
 		d.Next = "Do not bind instances inside the statement (∃/∀/fun with an [inst : C] binder): state the operation with its canonical instance, or name the function. See docs/AUDIT-ROUND5.md E5."
+	case strings.Contains(msg, "out-of-range numeral"):
+		d.Stage = "statement identity"
+		d.Next = "Write numerals in range for their type (0 rather than 18446744073709551616 at BitVec 64): an out-of-range literal wraps and does not mean what it reads. See docs/AUDIT-ROUND6.md F2."
+	case strings.Contains(msg, "lookalike letters"):
+		d.Stage = "statement identity"
+		d.Next = "Rename the definition with ASCII letters, digits, _ ' ! ? (and subscripts): a lookalike letter makes it print like a trusted constant. See docs/AUDIT-ROUND6.md F1."
 	case strings.Contains(msg, "does not round-trip"):
 		d.Stage = "statement identity"
 		d.Next = "The printed statement must elaborate back to the checked one. Add type ascriptions where the printed text is ambiguous (numerals, coercions, implicit arguments), and do not hide instances or notation."
