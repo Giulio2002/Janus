@@ -317,7 +317,9 @@ var baseTargets = []string{"Janus", "Janus.Tools.Audit", auditExeTarget}
 const auditExeTarget = "janus-audit"
 
 // auditExePath is the compiled auditor in the framework build dir.
-func auditExePath(dir string) string { return filepath.Join(dir, ".lake", "build", "bin", auditExeTarget) }
+func auditExePath(dir string) string {
+	return filepath.Join(dir, ".lake", "build", "bin", auditExeTarget)
+}
 
 // regularFileSha is the SHA-256 of a regular file ("" if it cannot be read).
 func regularFileSha(p string) string {
