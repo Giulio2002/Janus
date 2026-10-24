@@ -39,6 +39,13 @@ type amd64Inst struct {
 func sweepAmd64(code []byte, base uint64) []amd64Inst {
 	var out []amd64Inst
 	for off := 0; off < len(code); {
+		// ENDBR64 (F3 0F 1E FA), which C compilers emit at function entries; this x86asm
+		// version decodes it as a 3-byte REP-prefixed instruction followed by CLI.
+		if off+4 <= len(code) && code[off] == 0xF3 && code[off+1] == 0x0F && code[off+2] == 0x1E && code[off+3] == 0xFA {
+			out = append(out, amd64Inst{PC: base + uint64(off), Inst: x86asm.Inst{Op: x86asm.NOP, Len: 4}})
+			off += 4
+			continue
+		}
 		inst, err := x86asm.Decode(code[off:], 64)
 		if err != nil || inst.Len == 0 {
 			off++

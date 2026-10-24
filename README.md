@@ -240,6 +240,14 @@ Each file starts with a plain-English summary of the theorem (the arm64 ones und
 `Classical.choice`. Reproduce with
 `scripts/verify-examples.sh` and `scripts/build-examples-amd64.sh && scripts/verify-amd64-examples.sh`.
 
+**Go calling C (cgo).** The C functions in [`examples/cgo`](examples/cgo) (gcc 15.2, `-O2`) are
+proved on both ISAs against the C calling conventions (`CEnsures`, [`Janus/CABI.lean`](Janus/CABI.lean),
+[`Janus/Amd64/CABI.lean`](Janus/Amd64/CABI.lean)): `c_add`, the loop `c_sum` and the store
+`c_store`. Go → C → Go is proved end to end for `Add` and `Sum`. The Go code, the cgo wrappers and
+the C code are all executed by the model, and only the `runtime.cgocall` stack and scheduler switch
+is a trusted contract, named in the statement (`EnsuresC … (CgoCall Extracted.program) …`). See
+[docs/FFI.md](docs/FFI.md) and `scripts/verify-cgo-examples.sh`.
+
 <!-- TODO(coordinator): the checkmarks come from a re-run on 2026-10-23 (14 arm64 proofs, 17 amd64
 Proof.correctness + Div/Get Proof.panics, and scripts/break-demo.sh: all Verified) with a janus binary
 whose embedded framework has SHA-256 e9be8cd3…. Other agents were still editing Janus/Arm64/*.lean
@@ -403,7 +411,8 @@ leaves none.
 | [CONSUMERS.md](docs/CONSUMERS.md) | Proofs in your own Lake package, batch verification, caches |
 | [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime calls and dynamic calls (interfaces, closures, `defer`) |
 | [AMD64.md](docs/AMD64.md) | The x86-64 backend: model, ABI, proofs, gaps |
-| [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime functions as contract hypotheses (`janus extract --contract`): allocation, write barriers, … |
+| [FFI.md](docs/FFI.md) | Go calling C (cgo): the C ABIs, `CEnsures`, the cgo contract, the composition theorem |
+| [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime functions as stated contracts (`janus extract --contract`): allocation, write barriers, dynamic calls, maps, cgo |
 | [ORACLE.md](docs/ORACLE.md), [ORACLE-SAIL.md](docs/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) | The differential oracles and their results |
 | [AUDIT.md](docs/AUDIT.md) | The red-team audit of `janus verify` and its fixes |
 

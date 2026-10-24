@@ -71,6 +71,10 @@ def IsMorestack : Outcome → Prop
     IsMorestack (.stub n .panic s) = False := rfl
 @[simp, janus64_post] theorem isMorestack_morestack (n : String) (s : State) :
     IsMorestack (.stub n .morestack s) = True := rfl
+@[simp, janus64_post] theorem isPanic_external (n : String) (s : State) :
+    IsPanic (.stub n .external s) = False := rfl
+@[simp, janus64_post] theorem isMorestack_external (n : String) (s : State) :
+    IsMorestack (.stub n .external s) = False := rfl
 
 /-- `pc` is an ordinary instruction: not the exit address, not a stub, inside the code with
 bytes `bs`, which decode to `i` of length `len`. Closed by kernel evaluation. -/
@@ -102,9 +106,9 @@ theorem stubOK_link {p : Program} (impl : List Segment) {pc : Nat} {name : Strin
     stubOK (p.link impl) pc name kind = true := h
 
 /-- The data the tactic reads off a program (re-checked by the kernel on every use). -/
-def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Bool) :=
+def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Nat) :=
   (p.exitAddr, p.segments.map (fun seg => (seg.base, seg.bytes)),
-    p.stubs.map (fun st => (st.addr, st.name, st.kind == .panic)))
+    p.stubs.map (fun st => (st.addr, st.name, st.kind.code)))
 
 private theorem rip_toNat_of {s : State} {c : Nat} (hpc : s.rip = BitVec.ofNat 64 c)
     (hc : c < 2 ^ 64) : s.rip.toNat = c := by
@@ -256,6 +260,7 @@ theorem panics_of_reaches {p : Program} {s : State} (h : Reaches p s IsPanic) : 
     cases kind with
     | panic => exact ⟨n, name, s', hr⟩
     | morestack => exact hq.elim
+    | external => exact hq.elim
 
 theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMorestack) :
     GrowsStack p s := by
@@ -266,6 +271,7 @@ theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMores
     cases kind with
     | panic => exact hq.elim
     | morestack => exact ⟨n, name, s', hr⟩
+    | external => exact hq.elim
 
 /-! ## Callee summaries
 
@@ -1047,7 +1053,7 @@ def tacName : String := "janus64_run"
 def accessFns : List (Name × Bool) :=
   [(``Janus.Amd64.load, false), (``Janus.Amd64.loadRW, true), (``Janus.Amd64.store, true)]
 
-abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Bool)
+abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Nat)
 
 /-- Segment names and ranges, for messages. -/
 def progSyms (p : Program) : List (String × Nat × Nat) :=
@@ -1496,17 +1502,19 @@ where
   /-- Simplify the callee's `MemFrame` hypotheses and the other propositions its postcondition
   added (their terms mention the call-site state literal), so that `omega` and the
   accessibility discharger see the addresses in normal form. -/
+  stateEq (ty : Expr) : Bool :=
+    match ty.eq? with
+    | some (_, l, _) => l.getAppFn.constName?.any (·.getPrefix == ``Janus.Amd64.State)
+    | none => false
   normFrames (cfg : Cfg) (g : MVarId) (before : Array FVarId) : TacticM MVarId := g.withContext do
     let mut ids := #[]
     for d in ← getLCtx do
       if d.isImplementationDetail then continue
       let ty ← instantiateMVars d.type
       if ty.isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
-      -- (not equations other than `accessible` facts: the executor uses them as rewrite
-      -- rules, and simplifying one with itself would turn it into `True`)
-      else if !before.contains d.fvarId && (← isProp ty) &&
-          (!ty.isAppOfArity ``Eq 3 || (ty.getArg! 1).isAppOfArity ``Janus.Arm64.Memory.accessible 4) then
-        ids := ids.push d.fvarId
+      -- an equation about a state component (`s'.regs 19 = …`) is a state hypothesis: it is a
+      -- rewrite rule of the simp set itself, and simplifying it with that set turns it into `True`
+      else if !before.contains d.fvarId && (← isProp ty) && !(stateEq ty) then ids := ids.push d.fvarId
     if ids.isEmpty then return g
     setGoals [g]
     withExecSimp cfg (set := `janus64_post) fun ctx simprocs d? => do
@@ -1579,12 +1587,15 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
       let hok ← liftLink impl? ``exitOK_link (← kernelDecide (mkApp2 (mkConst ``exitOK) evalE cE))
       return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
-    if let some (_, name, isPanic) := stubs.find? (·.1 == c) then
+    if let some (_, name, kindCode) := stubs.find? (·.1 == c) then
       if ret?.isSome then
         throwError "{tacName}: the callee reaches the runtime stub {name} at {hex c}; a \
           `Summary` only covers runs that return. Add the precondition that excludes this path \
           (e.g. `StackGuardOK` for `morestack`)."
-      let kind := if isPanic then mkConst ``StubKind.panic else mkConst ``StubKind.morestack
+      let kind := match kindCode with
+        | 0 => mkConst ``StubKind.panic
+        | 1 => mkConst ``StubKind.morestack
+        | _ => mkConst ``StubKind.external
       let hok ← liftLink impl? ``stubOK_link
         (← kernelDecide (mkApp4 (mkConst ``stubOK) evalE cE (toExpr name) kind))
       let lem := match mode, hret? with

@@ -330,3 +330,57 @@ part of `SwissSmall` because the small-map lookup does not read them.
 read-back returns `v`), `Delete`, `SumValues` (iteration, every order), `CountKeys` (no contract),
 `LookupKey16` (generic `mapaccess2`), `NewMap`, `ClearMap`, and `MapAccess1Small` (the runtime
 function itself, extracted as `runtime.mapaccess1_fast64`).
+
+### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
+
+The Go → C boundary does not use the linked-code `Summary` mechanism above. The trusted part has
+to run the C code in the model (the C wrapper and the C function are extracted and executed), and
+it has to nest a second contract (`_cgo_topofstack`) inside that C run. So
+`runtime.cgocall`, `_cgo_topofstack` and `runtime.cgoUse` are `external` stubs
+(`Janus.StubKind.external`, classified by the extractor), and the theorem names a `Contract`
+for them (`EnsuresC p C …`, semantics `ReturnsC`). See [FFI.md](FFI.md) for the full picture.
+
+**Statement.** A Go-side theorem is stated under `CgoSpec fn G E`: "`cgocall` of the wrapper
+`fn` in a state satisfying `G` returns with the Go state restored (`GoResume`) and memory `E s`
+outside `cgoClobber s`". `CgoCall.refines` discharges it from a proved `CEnsuresC` of the C
+wrapper, giving a theorem under `CgoCall p` alone. The end-to-end examples print
+`EnsuresC Extracted.program (CgoCall Extracted.program) …`.
+
+**What stays trusted.** Exactly the definitions `CgoCall`, `CgoEntry`, `CgoResumed`,
+`GoResume`, `cgoClobber` and `TopOfStack`, both ISAs. As claims about the Go 1.26 runtime on
+Linux:
+
+1. *The C call.* `asmcgocall` calls the C code at `fn` with the C calling convention: `X0`/`RDI
+   = arg`, return address outside the extracted code, `SP` 16-byte aligned (amd64: `RSP + 8`),
+   `DF` clear. It runs on a system stack with at least `cgoCStack` (4096) bytes free below `SP`.
+   That stack is not memory the Go state grants (`stackSep`), and the C code runs on the same
+   thread (`TPIDR_EL0`/`FS`).
+2. *Go memory during the call.* Between the Go state at `cgocall` and the C call, and between
+   the C return and the Go resume, the runtime (`entersyscall`, `exitsyscall`, the scheduler,
+   `asmcgocall`) changes no byte of the memory the theorem grants, except:
+   * the goroutine stack below `SP` (`cgoStackScratch` = 1024 bytes; the linker bounds the
+     nosplit chain at 800);
+   * the spill slots of `cgocall`'s two register arguments (`[SP+8, SP+24)`);
+   * the `g` struct (456 bytes in Go 1.26.0);
+   * the TLS `g` slot.
+
+   This assumes that the granted regions contain no runtime-internal memory (`m`, `p`, the
+   scheduler, the `g0` stack). That holds for any caller whose precondition grants only its own
+   stack frame, its arguments and its globals.
+3. *The return.* The C code returns with its callee-saved registers restored (which `asmcgocall`
+   relies on, and which the C proof establishes). `cgocall` then returns to the Go caller at its
+   return address, with `SP` and `FP` restored and `g` the same goroutine. On amd64 also
+   `X15 = 0`, `DF` clear, and `FS:-8 = g` for a possibly different thread's `FS`. All other
+   registers, the flags and the vector registers are arbitrary. The goroutine may resume on
+   another OS thread (`exitsyscall`'s slow path), so `TPIDR_EL0`/`FS` are arbitrary afterwards.
+4. *`_cgo_topofstack`.* During one cgo call it returns the same value every time (no callback into
+   Go moves the stack; callbacks are not modelled: the C code would have to reach `crosscall2`,
+   which is not extracted, so such a run cannot be proved). It preserves every other register and
+   writes only its frame (arm64: the 56 bytes below `SP`; amd64: nothing).
+5. *No concurrency.* As everywhere in Janus: no other goroutine or thread writes the granted
+   memory during the call. The garbage collector does not move or modify objects that are
+   reachable from the arguments (cgo pins the Go memory it passes to C).
+
+Everything else is executed by the model from the binary's bytes: the Go function, its cgo
+`_Cfunc_` wrapper (including the stack check and the `_Cgo_always_false` test), the C wrapper,
+and the C function.

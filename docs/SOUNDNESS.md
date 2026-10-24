@@ -49,6 +49,10 @@ These are trusted, not proved.
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
    dereference is a `SIGSEGV`, turned into a panic by `runtime.sigpanic`) are not stub calls:
    the model reports them as faults, and `NeverPanics` excludes faults too.
+   The extractor also classifies `runtime.cgocall`, `_cgo_topofstack` and `runtime.cgoUse` as
+   `external` stubs (the cgo boundary): a run ends there too, and only the contract semantics of
+   `Janus.FFI` (`ReturnsC`, with the contract named in the statement) continues past them; see
+   "FFI (cgo)" below.
 4. **The Lean kernel**, plus the verifier's hashing, process execution, axiom audit and
    statement audit (`Janus/Tools/Audit.lean`, including Lean's parser, elaborator and
    pretty-printer as used by the round-trip check above). The auditor and `leanchecker` load
@@ -586,6 +590,53 @@ the register holds, in the model as on hardware. Nothing about Go's type system 
   (in loops, or more than 8 in a function) allocate defer records with `runtime.deferproc*` and
   call `runtime.deferreturn` at every exit; they are unsupported (the exit faults). Heap-allocated
   closures (`runtime.newobject`) are runtime calls like any other allocation.
+
+## FFI (cgo)
+
+A theorem about Go code that calls C (see [FFI.md](FFI.md)) is stated with `EnsuresC p C …`,
+where `C` is a `Contract` for the external stubs, and it is written in the statement:
+
+* Under `CgoSpec fn G E`, the theorem *assumes* a behaviour of the C call. It is a conditional
+  statement, and the assumption is visible in the printed statement.
+* Under `CgoCall p`, the theorem assumes only the trusted contract of the cgo boundary. Every
+  instruction of the Go code, the cgo wrappers and the C code is executed by the model from the
+  binary's bytes. The C code runs inside the contract, on `p`.
+
+**What `CgoCall` trusts** (listed in full in [RUNTIME-CONTRACTS.md](RUNTIME-CONTRACTS.md),
+"FFI (cgo)"):
+
+* the stack switch: `asmcgocall` makes a C call of the wrapper on a system stack of at least 4096
+  free bytes that is not Go memory, with the Go memory otherwise unchanged;
+* the scheduler: `entersyscall`/`exitsyscall` change only the goroutine stack below `SP`,
+  `cgocall`'s spill slots, the `g` struct and the TLS `g` slot, and the goroutine may resume on
+  another thread;
+* the return: `cgocall` returns to its caller with `SP`, `g` and `FP` restored (amd64: also
+  `X15 = 0`, `DF` clear and the TLS `g` slot);
+* `_cgo_topofstack` returns one value throughout a cgo call and preserves everything else.
+
+The granted memory must contain no runtime-internal memory (`m`, `p`, the scheduler, the `g0`
+stack). For an execution whose granted regions overlap those, the theorem says nothing.
+
+**Consequences.**
+
+* *`X18` on arm64.* `EnsuresC` uses `ABIReturnC` (`SP`, `g`, `FP`) instead of `ABIReturn`: C code
+  may use `X18` (a temporary in AAPCS64 on Linux) and `cgocall` does not restore it. Go code never
+  reads it.
+* *Callbacks.* C calling back into Go (`crosscall2`, exported functions) is not covered: that
+  code is not extracted, so a run reaching it faults (`noCode`) and cannot be proved.
+* *Safe by construction.* A contract stub is only passed with its `safe` predicate proved, and a
+  `ReturnsC` proof covers *every* result its `next` relation allows. `CgoCall` requires the C run
+  to terminate with the callee-saved registers restored for every admissible C call state.
+* *Why not a `Summary` hypothesis.* A `Summary` about the extracted program at `cgocall`'s
+  address (where no code is copied) is false, so a theorem assuming one would be vacuous. The
+  contract semantics avoids this: the only way to discharge `CgoSpec` is the refinement theorem
+  `CgoCall.refines`.
+
+**The C calling conventions** (`Janus.CABI`, `Janus.Amd64.CABI`, the `CEnsures` vocabulary) are
+specification definitions like `GoABI`. A `CEnsures` theorem is about a call that follows the
+convention (`CCall`). It promises what the convention requires of the callee (`CReturn`) and
+nothing about callers that violate the convention. The callee-saved SIMD/FP state (`V8`–`V15` on
+arm64; the x87/`MXCSR` control words on amd64) is outside the model.
 
 ## What the theorem does not say
 
