@@ -1237,6 +1237,8 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			BinarySha256:          r.cr.Identity.BinarySha256,
 			Symbol:                r.cr.Identity.Symbol,
 			Address:               r.cr.Identity.Address,
+			EntryABI:              r.cr.Identity.EntryABI,
+			EntrySource:           r.cr.Identity.EntrySource,
 			GoVersion:             r.cr.Identity.GoVersion,
 			MainModule:            r.cr.Identity.MainModule,
 			LeanVersion:           leanVersion,

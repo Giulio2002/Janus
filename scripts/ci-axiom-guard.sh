@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI guard: no `sorry`, `native_decide`, `bv_decide` or `admit` in the Lean sources of the
-# framework and of the example proofs (examples/proofs, and examples/proofs-amd64 when it
+# framework and of the example proofs (examples/proofs, examples/asm/proofs, and examples/proofs-amd64 when it
 # exists). `janus verify` rejects them anyway (axiom audit); this catches them early,
 # including in files no verification imports. The only exempt file is the deliberately
 # rejected fixture examples/proofs/Sorry.lean (if present; the CLI fixtures now live in
@@ -9,7 +9,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-dirs=(Janus examples/proofs examples/proofs-amd64)
+dirs=(Janus examples/proofs examples/proofs-amd64 examples/asm/proofs)
 existing=()
 for d in "${dirs[@]}"; do [ -d "$d" ] && existing+=("$d"); done
 [ "${#existing[@]}" -eq 0 ] && { echo "axiom guard: nothing to scan"; exit 0; }
