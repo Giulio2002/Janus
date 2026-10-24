@@ -328,6 +328,38 @@ of a summary is `ReachesRet`), so a call chain is proved bottom-up, each functio
   guard slot `[X28 + 16, +8)` disjoint from the stack window. The ranges are easy to get wrong;
   the stuck message names the store that is outside them.
 
+### Recursion (`Fact`)
+
+A recursive function calls its own entry, so its `Summary` is needed while it is being proved.
+`Summary.induction μ` (`Janus/Tactic/Recursion.lean`; `Janus/Amd64/Recursion.lean` on amd64)
+proves a summary by strong induction on a measure `μ` of the entry state: in the case `μ s = n`
+the induction hypothesis `ih` is the summary itself for every state with `μ s < n`, and
+`janus_run calls [ih]` uses it at the recursive call like any callee summary. There the executor
+proves `ih`'s precondition for the call state, including `μ < n` (the argument decreased) and
+the stack facts one frame down:
+
+```lean
+theorem summary : Summary Extracted.program Extracted.entry Pre Post := by
+  apply Summary.induction (fun s => (s.regs 0).toNat)
+  intro n ih s hpc ⟨⟨⟨h1, h2⟩, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd⟩, hn⟩
+  janus_step               -- the entry is the summary's own address: step past it first
+  janus_run calls [ih]
+  …                        -- one goal per path: `Post s s'`
+```
+
+* `Pre` and `Post` are stated in terms of the entry state, with the depth as a function of the
+  argument: `StackOK s (32 * n + 40) 16`, `GuardOK s (32 * n)` (the deepest prologue check), and
+  a `MemFrame` over exactly the bytes the recursion writes. The ranges must not cover the
+  caller's own saved registers one frame up (for `Fact` the window ends at `SP - 16`, below the
+  slot of the caller's `X29`), otherwise those reads are not resolved after the call.
+* The callee summary is applied as soon as the pc is at its entry, so start the proof with one
+  `janus_step`.
+* `Summary.returns` applies the finished summary to the function's own call state
+  (`Ensures`): `refine Summary.returns summary hret (by rw [h_pc]; rfl) h_lr ?_ ?_`.
+
+The stack hypotheses say that the stack already has room for every frame; the grown-stack case
+(`morestack`) is not covered.
+
 ### Dynamic calls (`HashWith`, `HashTwice`, `MapSum`, `DeferAdd`)
 
 An interface method call, a call of a func value (closure or method value) and the call of a

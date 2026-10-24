@@ -5,7 +5,7 @@ import Extracted
 `fallthrough`, compiled to a jump table.
 
 For every 64-bit `n` and every call state whose memory holds the function's read-only jump table
-(`DataLoaded`), the result `RAX` is the triangular number `n·(n+1)/2 = 0 + 1 + … + n` when `n ≤ 8`
+(`DataLoaded`), the result `RAX` is (`Tri`) the triangular number `n·(n+1)/2 = 0 + 1 + … + n` when `n ≤ 8`
 and `0` otherwise. The nine dense cases become `CMPQ AX, $8; JA default` and an indirect jump
 through a table of code addresses in `.rodata` (`LEAQ table(IP), CX; JMP 0(CX)(AX*8)`); the
 `fallthrough` chain is straight-line code that each case enters at a different point. The proof

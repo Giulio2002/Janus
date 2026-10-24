@@ -310,3 +310,30 @@ func AlignUp(p, a uintptr) uintptr { return (p + a - 1) &^ (a - 1) }
 //
 //go:noinline
 func Slice3(xs []uint64, i, j, k int) []uint64 { return xs[i:j:k] }
+
+// Slice2 returns xs[i:j]; it panics unless 0 <= i <= j <= cap(xs).
+//
+//go:noinline
+func Slice2(xs []uint64, i, j int) []uint64 { return xs[i:j] }
+
+// Mod returns x % y; it panics (integer divide by zero) when y = 0.
+//
+//go:noinline
+func Mod(x, y uint64) uint64 { return x % y }
+
+// Counter is a struct with a pointer-receiver method.
+type Counter struct{ N uint64 }
+
+// Inc adds d to c.N and returns the new value.
+//
+//go:noinline
+func (c *Counter) Inc(d uint64) uint64 {
+	c.N += d
+	return c.N
+}
+
+// IncTwice calls the pointer-receiver method Inc twice, statically, and returns the sum of the
+// two results.
+//
+//go:noinline
+func IncTwice(c *Counter, d uint64) uint64 { return c.Inc(d) + c.Inc(d) }

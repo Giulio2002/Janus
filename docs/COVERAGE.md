@@ -30,7 +30,7 @@ the cache.
 | 1. compiler-generated wrappers / Go test code | 99.40% / 97.09% | 100% / 99.98% | 99.60% / 99.16% |
 | 2. runtime entry points with a contract, stub or proof (main + branches) | 56 of 309 names (39 on main) | same | same |
 | 2. … of the 191 linked on arm64/amd64: still missing | 153 (12 of them concurrency, excluded) | | |
-| 3. language constructs with a proved example | 40 of 75 rows (35 have none on either ISA) | | |
+| 3. language constructs with a proved example | 60 of 75 rows (15 have none on either ISA; agent/constructs closes 20) | | |
 | 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | 93.6% / 86.2% | 0.9% / 78.0% (gcc 83.6% once agent/ffi's `ENDBR64` is merged) | `-O3 -march=x86-64-v3`: 0.9% (52.7% with `ENDBR64`) / 50.5% |
 
 Main findings:
@@ -385,51 +385,56 @@ architecture and branch, and what it rests on. A construct counts as covered onl
 `scripts/verify-cgo-examples.sh` on each branch (`git show`). main has 28 arm64 proofs (plus the
 `WrongAdd` counterexample) and 31 amd64 proofs; agent/alloc adds 5+4, agent/maps 10+10,
 agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts only).
+agent/constructs (package M1, `examples/basic/zconstructs.go`) adds 28 arm64 + 25 amd64:
+`Triangle`, `GotoSum`, `Find2D`, `RowsWith`, `Log2`, `TotalMeters`, `TotalFeet`, `Fact`,
+`SumBelow`, `IterSum`, `ReverseArray`, `DivMod10`, `SwapBig`, `Compose`, `DotBoth`, `BitMerge`,
+`Shifts`, `MinMax`, `ClearArray`, `Sum3`, `AlignUp`, `Slice3`, `Slice2`, `Mod`, `IncTwice` on both
+ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 
 | construct | arm64 proof (branch) | amd64 proof (branch) | depends on |
 |---|---|---|---|
 | assignment, short var decl | `Sum`, `CopyWords`, `AddLimbs`, `Add128` (main) | same (main) | – |
 | `+`, wrap-around | `Add`, `Sum`, `AddThree` (main) | same | – |
-| `-` | none (`WrongAdd` is a counterexample only) | none | – |
+| `-` | `DivMod10`, `MinMax`, `Slice3`, `AlignUp` (constructs); `WrongAdd` is a counterexample only | same (constructs) | – |
 | `*` | `SumSquares`, `HashTwice`, `HashWith` (main) | same | – |
 | `/` and the divide check | `Div` (main), incl. "panics iff y = 0" | `Div` (main) | `runtime.panicdivide` stub |
-| `%` | none | none | – |
-| shifts `<<` `>>` by a variable | none (constant rotate in `RotHasher` only) | none | – |
-| `&`, `&^` | `HexDigit`, `Abs` (main) | same + `Table`, `GlobalTable` | – |
-| `\|`, `^` | none | none | – |
+| `%` | by a constant: `DivMod10` (constructs; magic multiply, `x - 10q`); by a variable: `Mod` (constructs, incl. "panics iff y = 0") | same (constructs) | `runtime.panicdivide` stub |
+| shifts `<<` `>>` by a variable | `Shifts` (constructs: signed and unsigned, every count incl. `≥ 64`) | same (constructs) | – |
+| `&`, `&^` | `HexDigit`, `Abs` (main); `BitMerge`, `AlignUp` (constructs) | same + `Table`, `GlobalTable` | – |
+| `\|`, `^` | `BitMerge` (constructs) | same (constructs) | – |
 | comparisons | `Max`, `CopyWords`, `AtomicMax` (main) | same | – |
 | if / else, `&&` `\|\|` | `Max`, `CopyWords`, `AtomicMax` (main); `GoSum` (ffi) | same | – |
 | for (3-clause) | `AddLimbs`, `CopyWords` (main) | same | – |
-| for cond / for + break | none | none | – |
+| for cond / for + break | `Log2` (for cond), `Find2D` (break) (constructs) | same (constructs) | – |
 | infinite for exiting by return | `AtomicMax` (main) | same | – |
-| labeled break / continue, goto | none | none | – |
-| expression switch, fallthrough | none | none | jump tables need no runtime; decoder has `BR`/`JMP r` |
+| labeled break / continue, goto | `Find2D` (labeled break), `RowsWith` (labeled continue), `GotoSum` (goto) (constructs) | same (constructs) | – |
+| expression switch, fallthrough | `Triangle` (constructs: 9 dense cases, a `.rodata` jump table, a `fallthrough` chain) | same (constructs) | jump tables need no runtime; decoder has `BR`/`JMP r` |
 | type switch | none | none | `runtime.interfaceSwitch`, itab/type compare |
-| range over array | none | none | – |
+| range over array | `ReverseArray` (constructs) | same (constructs) | – |
 | range over slice | `Sum`, `MapSum` (main) | same | – |
 | range over string | none | none | `runtime.decoderune` |
 | range over map | `SumValues` (maps) | `SumValues` (maps) | `mapIterStart`/`mapIterNext` contracts |
-| range over int | none | none | – |
-| range over func (iterators) | none | none | closures, `runtime.panicrangestate`, `deferrangefunc` |
-| static call, multiple results | `AddThree`, `SumSquares`, `Add128`, `Mul64` (main); `Lookup` (maps) | same | callee `Summary` |
-| variadic call | none | none | slice construction (stack or `newobject`) |
-| method call, value receiver; static pointer-receiver call | none | none | – |
+| range over int | `SumBelow` (constructs) | same (constructs) | – |
+| range over func (iterators) | inlined iterator: `IterSum` (constructs; no runtime call left); non-inlined: none | same (constructs) | inlined: none; otherwise closures, `runtime.panicrangestate`, `deferrangefunc` |
+| static call, multiple results | `AddThree`, `SumSquares`, `Add128`, `Mul64` (main); `Lookup` (maps); named results: `DivMod10`, `MinMax` (constructs) | same | callee `Summary` |
+| variadic call | `Sum3` (constructs; the argument slice in the caller's frame) | same (constructs) | slice construction (stack or `newobject`) |
+| method call, value receiver; static pointer-receiver call | value receiver: `DotBoth` (constructs; `Vec2.Dot-fm` calls `Vec2.Dot`); pointer receiver: `IncTwice` (constructs) | same (constructs) | – |
 | interface method call | `HashWith`, `HashTwice` (main) | same | `ItabIs` hypothesis, `--targets` |
-| method value | `HashTwice` (main) | same | dynamic-call section of RUNTIME-CONTRACTS |
-| method expression | none | none | – |
+| method value | `HashTwice` (main); value receiver: `DotBoth` (constructs) | same | dynamic-call section of RUNTIME-CONTRACTS |
+| method expression | `DotBoth` (constructs; the static funcval `Vec2.Dot·f`) | same (constructs) | – |
 | closure call (captured vars) | `MapSum` (`AffineSum.func1`), `DeferAdd` (main) | same | `FuncvalIs`, `ClosureCtx` |
-| closure creation, escaping closure | none | none | `newobject` (escaping) |
+| closure creation, escaping closure | non-escaping: `Compose` (constructs; funcval in the frame); escaping: none | same (constructs) | `newobject` (escaping) |
 | defer, open-coded | `DeferAdd` (main) | same | `deferreturn` omitted (only after recover) |
 | defer in a loop / heap defer | none | none | `runtime.deferproc`, `deferprocStack`, `deferreturn` |
-| runtime panics (bounds, divide) | `Get`, `Div` (main) | same | `panicBounds`, `panicdivide` stubs |
+| runtime panics (bounds, divide) | `Get`, `Div` (main); `Slice2`, `Slice3`, `Mod` (constructs) | same | `panicBounds`, `panicdivide` stubs |
 | explicit `panic`, `recover`, unwinding | none | none | `gopanic`, `gorecover`, unwinder |
-| generics (shape + dictionary) | none | none | dictionary loads (`.rodata`), no runtime |
-| large struct copy | none | none | `runtime.duffcopy` is gone in 1.26; inline `LDP/STP` / `MOVUPS` loops, `memmove`, `typedmemmove` |
-| array copy | `SetOne256`, `CopyBlock` (main) | same + `CopyBlock512` | `memmove` executed |
+| generics (shape + dictionary) | `TotalMeters`, `TotalFeet` (constructs: one `go.shape.uint64` body, two dictionaries, method call through the dictionary) | same (constructs) | dictionary loads (`.rodata`), no runtime |
+| large struct copy | `SwapBig` (constructs: 64 bytes, inline `LDP`/`STP`) | `SwapBig` (constructs: inline `MOVUPS`) | `runtime.duffcopy` is gone in 1.26; inline `LDP/STP` / `MOVUPS` loops, `memmove`, `typedmemmove` |
+| array copy | `SetOne256`, `CopyBlock` (main); value semantics: `ReverseArray` (constructs) | same + `CopyBlock512` | `memmove` executed |
 | pointer deref | `Add256`, `AddLimbs`, `AtomicAdd` (main) | same | – |
 | nil dereference fault | none (preconditions exclude it) | none | signal → `runtime.sigpanic`/`panicmem` contract |
 | slice `a[:]` of an array | `CopyBlock`, `A64Equal64` (main) | `CopyBlock`, `Equal64` | – |
-| slice `a[i:j]`, `a[i:j:k]` | none | none | `panicSlice*` (`panicBounds`) |
+| slice `a[i:j]`, `a[i:j:k]` | `Slice2`, `Slice3` (constructs, incl. "panics iff not `0 ≤ i ≤ j (≤ k) ≤ cap`") | same (constructs) | `panicSlice*` (`panicBounds`) |
 | indexing + bounds check | `Get`, `CopyWords`, `HexDigit` (main) | same | `panicBounds` stub |
 | `append` | `AppendOne` (alloc) | `AppendOne` (alloc) | `growslice` contract |
 | `copy` | `CopyBlock` (main) | `CopyBlock`, `CopyBlock512` | `memmove` executed |
@@ -447,33 +452,32 @@ agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts 
 | float bits, float arithmetic | `Abs`, `AddF64`, `Dot3` (main) | same | FP decoder |
 | complex numbers | none | none | FP; `complex128div` |
 | `unsafe.Pointer` | `GoSum` (ffi) | same | – |
-| `uintptr` arithmetic | none | none | – |
+| `uintptr` arithmetic | `AlignUp` (constructs) | same (constructs) | – |
 | interface boxing (`convT*`) | none | none | `convT`, `convT16/32/64`, `convTstring`, `convTslice`, `convTnoptr` |
 | type assertion (both forms) | none | none | `typeAssert`, `assertE2I(2)`, `panicdottype*` |
 | interface comparison | none | none | `ifaceeq`, `efaceeq`, type `equal` functions |
-| `min`, `max` builtins | none | none | inline (`CSEL`/`CMOV`); `fmin`/`fmax`, `strmin`/`strmax` |
-| `clear` | `ClearWords` (main), `ClearMap` (maps) | same | `memclrNoHeapPointers` executed; `mapclear` |
+| `min`, `max` builtins | integers: `MinMax` (constructs); floats, strings: none | same (constructs) | inline (`CSEL`/`CMOV`); `fmin`/`fmax`, `strmin`/`strmax` |
+| `clear` | `ClearWords` (main), `ClearMap` (maps); small array, inline stores: `ClearArray` (constructs) | same | `memclrNoHeapPointers` executed; `mapclear` |
 | `math/bits` | `Add128`, `Add256`, `AddLimbs`, `Mul64`, `RotHasher` (main) | same | – |
 | sync/atomic (single-threaded) | `AtomicAdd`, `AtomicMax` (main) | same | arm64 LL/SC fallback needs `STXR` (rejected, below) |
-| package variables | none | `Bump`, `GlobalTable` (main) | data objects |
-| constants in `.rodata` | `HexDigit`, `SetOne256` (main) | same + `Table` | `Program.data` |
+| package variables | `Bump`, `GlobalTable` (constructs) | `Bump`, `GlobalTable` (main) | data objects |
+| constants in `.rodata` | `HexDigit`, `SetOne256` (main); `Table`, `Triangle` (jump table), `TotalMeters` (dictionary) (constructs) | same + `Table` | `Program.data` |
 | escape to heap | `NewPair` (alloc); `MallocFast` proves the real `mallocgc` fast path (alloc, arm64) | `NewPair` (alloc) | `Janus/Contracts/Alloc.lean` |
 | pointer store (write barrier) | `SetNext` (alloc) | same | barrier fast path executed, `wbBufFlush` contract |
 | stack growth | none (every proof assumes `GuardOK`) | none | `morestack` stub; no theorem about the grown case |
-| recursion | none | none | `Summary` induction, `morestack` |
+| recursion | `Fact` (constructs; `Summary.induction`, stack for every frame assumed) | same (constructs) | `Summary` induction (done); the grown stack: `morestack` (R7) |
 | cgo call into C | `GoAdd`, `GoSum` (ffi) | same | `CgoCall` contract |
 | C code alone | `CAdd`, `CSum`, `CStore` (ffi) | same | `CEnsures` |
 | `//export` callback C → Go | none | none | `crosscall2`, `cgocallback` |
 | goroutines, channels, select, `sync` | excluded (concurrency) | excluded | – |
 
-Not covered on any branch or architecture: `-`, `%`, variable shifts, `|`, `^`; for-cond, break,
-labels, goto, all three switch forms; range over array, string, int and func; variadic calls,
-static method calls, method expressions, closure creation; heap defers, `panic`, `recover`;
-generics; large struct copies; `a[i:j]`, `a[i:j:k]`; the nil-dereference fault; string
-concatenation, comparison and conversions; int/float and float32/float64 conversions; complex
-numbers; `uintptr`; interface boxing, assertions and comparison; `min`/`max`; the grown-stack
-case; recursion; `//export` callbacks. arm64 lacks the global-variable examples (`Bump`,
-`GlobalTable`, `Table`) that amd64 has; amd64 lacks `IndexByte` and `MallocFast`.
+Not covered on any branch or architecture (with agent/constructs): the type switch; range over
+string; heap defers, `panic`, `recover`; the nil-dereference fault; string concatenation,
+comparison and conversions; int/float and float32/float64 conversions; complex numbers;
+interface boxing, assertions and comparison; the grown-stack case; `//export` callbacks. Within
+covered rows these forms still have no example: a non-inlined range-over-func loop, escaping
+closures, float and string `min`/`max`. amd64 lacks `IndexByte` (the arm64 example is in an
+arm64-only file) and `MallocFast`.
 
 Two rows are uncertain: whether `CopyWords` and `HexDigit` keep a bounds check in compiled code
 (`Get` certainly does).
@@ -691,7 +695,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 20 | **R7. Stack growth**: a contract for `morestack`/`newstack` (the grown case: the frame is copied and stack pointers adjusted), `morestackc`; theorems that hold without assuming `GuardOK` | 1 linked + the `.morestack` stubs; recursion and deep calls (criterion 3) | `Janus/Contracts/Stack.lean`, `GuardOK`/`GrowsStack` in `Janus/GoABI.lean` | XL | R6 (the panics during growth), iface-alloc |
 | 21 | **R8. `print`/`println`**: `printlock`/`printunlock` and the 16 `print*` functions, as output-trace contracts over `write(2)` | 18 linked + `printiface` | `Janus/Contracts/Print.lean` | S | C |
 | 22 | **R9. Remaining runtime**: `complex128div`, `f32to64`/`f64to32`, `fadd64`/`fmul64`/`fdiv64` and the soft-float set (`-d=softfloat`); `KeepAlive`, `zeroVal`, `staticuint64s`, `cgoAlwaysFalse`, `cgoCheckPointer`, `cgoUse`, `cgoCheck*`, `cgoKeepAlive`, `cgoNoCallback`; the CPU feature flags (`arm64HasATOMICS`, `x86HasAVX`, `x86HasFMA`, `x86HasPOPCNT`, `x86HasSSE41`) as stated hypotheses; the instrumented build modes (`-msan`, `-asan`, `-cover`, `-d=checkptr`, `-d=libfuzzer`, `-spectre=ret`) and the `mallocgc*SC<n>` size-specialised allocator of the GOEXPERIMENT | 22 linked + the rest of the defined-not-linked list | `Janus/Contracts/Misc.lean`, `Janus/Contracts/Instrument.lean` | M | iface-alloc |
-| 23 | **M1. Construct examples, no new runtime**: `-`, `%`, variable shifts, `\|`, `^`; for-cond/break/labels/goto; expression switch (jump tables), fallthrough; range over array, int and func; static and value-receiver method calls, method expressions, variadic calls, closure creation; generics (shape + dictionary); large struct copies; `a[i:j]`, `a[i:j:k]`; `min`/`max`; `uintptr`; int↔float and float32↔float64 conversions; the nil-dereference fault path; arm64 globals (`Bump`, `GlobalTable`, `Table`); amd64 `IndexByte` | 21 of the 35 "none" rows of criterion 3, both ISAs | `examples/basic/lang*.go`, `examples/proofs/Lang*.lean`, `examples/proofs-amd64/Lang*/` | L | none (A/B for atomics-free builds of the examples) |
+| 23 | **M1. Construct examples, no new runtime** (agent/constructs: done except int↔float and float32↔float64 conversions, the nil-dereference fault path and amd64 `IndexByte`; see section 3): `-`, `%`, variable shifts, `\|`, `^`; for-cond/break/labels/goto; expression switch (jump tables), fallthrough; range over array, int and func; static and value-receiver method calls, method expressions, variadic calls, closure creation; generics (shape + dictionary); large struct copies; `a[i:j]`, `a[i:j:k]`; `min`/`max`; `uintptr`; int↔float and float32↔float64 conversions; the nil-dereference fault path; arm64 globals (`Bump`, `GlobalTable`, `Table`); amd64 `IndexByte` | 21 of the 35 "none" rows of criterion 3, both ISAs | `examples/basic/lang*.go`, `examples/proofs/Lang*.lean`, `examples/proofs-amd64/Lang*/` | L | none (A/B for atomics-free builds of the examples) |
 | 24 | **M2. Construct examples on new contracts**: strings (concat, compare, conversions, range over string), interfaces (boxing, assertions, type switch, comparison), panic/recover, heap defer, the grown-stack case, recursion, complex numbers, `//export` callbacks | the 14 remaining "none" rows | `examples/basic/rt*.go`, `examples/proofs*/Rt*` | L | R1, R2, R6, R7, R9, K2 |
 
 ### What remains after the plan
