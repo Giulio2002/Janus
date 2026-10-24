@@ -301,33 +301,33 @@ theorem asl_shiftv {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b001
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execShiftV (if fld w 31 1 == 1#1 then 64 else 32) js
         (Janus.Arm64.ShiftType.ofBits (fld w 10 2).toNat) (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPReg hw (by omega)]
   rcases (show (w / 2 ^ 10) % 4 = 0 ∨ (w / 2 ^ 10) % 4 = 1 ∨ (w / 2 ^ 10) % 4 = 2 ∨ (w / 2 ^ 10) % 4 = 3 by omega)
     with hk | hk | hk | hk
   · rw [run_DataProcReg_shiftv_0 hw h1 h2 hk (see_entry _ _), run_decode_lslv_shiftv]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_shiftv (h.entry (BitVec.ofNat 32 w) 57) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (Janus.Arm64.ShiftType.ofBits (fld w 10 2).toNat)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_shiftv_1 hw h1 h2 hk (see_entry _ _), run_decode_lsrv_shiftv]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_shiftv (h.entry (BitVec.ofNat 32 w) 58) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (Janus.Arm64.ShiftType.ofBits (fld w 10 2).toNat)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_shiftv_2 hw h1 h2 hk (see_entry _ _), run_decode_asrv_shiftv]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_shiftv (h.entry (BitVec.ofNat 32 w) 56) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (Janus.Arm64.ShiftType.ofBits (fld w 10 2).toNat)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_shiftv_3 hw h1 h2 hk (see_entry _ _), run_decode_rorv_shiftv]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_shiftv (h.entry (BitVec.ofNat 32 w) 59) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (Janus.Arm64.ShiftType.ofBits (fld w 10 2).toNat)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **LSLV/LSRV/ASRV/RORV**: for every word of the encoding class and every related pair of
 states, Janus' `step` and the generated ASL agree. -/
 theorem shiftV_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011010110)
     (h2 : (w / 2 ^ 12) % 16 = 0b0010) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execShiftV N js
     (Janus.Arm64.ShiftType.ofBits (fld w 10 2).toNat) (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat
   have hspec : ∀ N, (F N).pc = js.pc := by

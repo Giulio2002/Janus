@@ -1,5 +1,6 @@
 import JanusASL.Proofs.Ops
 import JanusASL.Proofs.JanusDecode
+import JanusASL.Proofs.CfgDef
 
 /-! # From the generated `janus_step` to a decode clause
 
@@ -145,15 +146,46 @@ theorem Rel.entry {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (w : BitV
 /-- Assembly: if the decoder, run from the state `janus_step` hands it, completes in a state
 related to `spec` with no branch taken, and Janus steps to `spec` with PC advanced, then the two
 agree on the whole step. -/
+theorem cfgFrame_of {s : SState} {w : BitVec 32} {n : Int} {s2 : SState}
+    (hfr : Frame ((stepEntry s w).set .SEE n) s2) : CfgFrame s s2 := by
+  intro r hr hp
+  rw [hfr r (cfgRegs_not_gpr r hr) (fun e => by subst e; revert hr; decide) hp]
+  have hS : r ≠ .SEE := fun e => by subst e; revert hr; decide
+  rw [get?_set_ne _ _ (Ne.symm hS)]
+  simp only [stepEntry]
+  have h1 : r ≠ .__currentCond := fun e => by subst e; revert hr; decide
+  have h2 : r ≠ .__ThisInstr := fun e => by subst e; revert hr; decide
+  have h3 : r ≠ .__ThisInstrEnc := fun e => by subst e; revert hr; decide
+  have h4 : r ≠ .__ExclusiveMonitorSet := fun e => by subst e; revert hr; decide
+  have h5 : r ≠ .__BranchTaken := fun e => by subst e; revert hr; decide
+  have h6 : r ≠ .__janus_exc_taken := fun e => by subst e; revert hr; decide
+  rw [get?_set_ne _ _ (Ne.symm h1), get?_set_ne _ _ (Ne.symm h2), get?_set_ne _ _ (Ne.symm h3),
+    get?_set_ne _ _ (Ne.symm h4), get?_set_ne _ _ (Ne.symm h5), get?_set_ne _ _ (Ne.symm hS),
+    get?_set_ne _ _ (Ne.symm h6)]
+
+theorem bt_cfg_after {s : SState} (w : BitVec 32) {s2 : SState} (n : Int)
+    (hfr : Frame ((stepEntry s w).set .SEE n) s2) :
+    s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2 := ⟨bt_after w n hfr, cfgFrame_of hfr⟩
+
+/-- Assembly: if the decoder, run from the state `janus_step` hands it, completes in a state
+related to `spec` with no branch taken and no configuration register changed, and Janus steps to
+`spec` with PC advanced, then the two agree on the whole step and the configuration is
+preserved. -/
 theorem step_agree {w : Nat} {js spec : Janus.Arm64.State} {s : SState} (h : Rel js s)
     (hasl : ∃ s2, (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
-      .ok () s2 ∧ Rel spec s2 ∧ s2.regs.get? .__BranchTaken = some false)
+      .ok () s2 ∧ Rel spec s2 ∧ (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2))
     (hpc : spec.pc = js.pc) (hjanus : Janus.Arm64.step w js = .ok { spec with pc := js.pc + 4 }) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
-  obtain ⟨s2, hrun, hrel, hbt⟩ := hasl
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧
+      (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨s2, hrun, hrel, hbt, hcf⟩ := hasl
   have hpc2 : s2.regs.get? ._PC = some js.pc := by rw [hrel.pc, hpc]
-  exact ⟨_, _, hjanus, run_janus_step (BitVec.ofNat 32 w) h.pc hrun hbt hpc2, hrel.setPC _⟩
+  refine ⟨_, _, hjanus, run_janus_step (BitVec.ofNat 32 w) h.pc hrun hbt hpc2, hrel.setPC _, fun hc => ?_⟩
+  have hR := hrel.setPC (js.pc + 4)
+  obtain ⟨p, hp, hps⟩ := hR.pstate
+  refine hc.of_frame (fun r hr hne => ?_) ⟨p, hp, hps.el, hps.nrw, hps.sp⟩
+  rw [get?_set_ne _ _ (fun e => by subst e; revert hr; decide)]
+  exact hcf r hr hne
 
 theorem run_DecodeA64_DPReg {w : Nat} (hw : w < 2 ^ 32) (hcls : (w / 2 ^ 25) % 8 = 5) (pc : Int) (s : SState) :
     (__DecodeA64 pc (BitVec.ofNat 32 w)).run s = (__DecodeA64_DataProcReg pc (BitVec.ofNat 32 w)).run s := by

@@ -277,7 +277,7 @@ theorem asl_bitfield {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100
       Rel (js.setX (fld w 0 5).toNat (bfVal (if fld w 31 1 == 1#1 then 64 else 32) js (bfOp w)
         (BitVec.ofNat _ p.1) (BitVec.ofNat _ p.2) (fld w 16 6).toNat (fld w 10 6).toNat (fld w 5 5).toNat
         (fld w 0 5).toNat)) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPImm hw (by omega)]
   have e22 : fld w 22 1 = fld w 31 1 := by
     apply BitVec.eq_of_toNat_eq; rw [fld_toNat _ _ _ hw, fld_toNat _ _ _ hw]; simpa using hN.symm
@@ -304,19 +304,19 @@ theorem asl_bitfield {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_bitfield (h.entry (BitVec.ofNat 32 w) 77) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 5 5) hk .sbfm _ _
     have e : bfOp w = .sbfm := by simp [bfOp, hk1]
-    exact ⟨s2, hrun, e ▸ hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, e ▸ hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcImm_bf_1 hw hc hk1 (see_entry _ _), fld_eq_of hw (show (w / 2 ^ 29) % 2 ^ 2 = 1 by omega),
       run_decode_bfm_bf _ _ _ _ _ _ h1 h2 hd]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_bitfield (h.entry (BitVec.ofNat 32 w) 76) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 5 5) hk .bfm _ _
     have e : bfOp w = .bfm := by simp [bfOp, hk1]
-    exact ⟨s2, hrun, e ▸ hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, e ▸ hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcImm_bf_2 hw hc hk1 (see_entry _ _), fld_eq_of hw (show (w / 2 ^ 29) % 2 ^ 2 = 2 by omega),
       run_decode_ubfm_bf _ _ _ _ _ _ h1 h2 hd]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_bitfield (h.entry (BitVec.ofNat 32 w) 78) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 5 5) hk .ubfm _ _
     have e : bfOp w = .ubfm := by simp [bfOp, hk1]
-    exact ⟨s2, hrun, e ▸ hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, e ▸ hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **SBFM/BFM/UBFM** (and their aliases: ASR/LSL/LSR imm, SXT*/UXT*, BFI/BFXIL, SBFIZ/UBFX, ...):
 for every word of the encoding class that Janus decodes and every related pair of states, Janus'
@@ -328,7 +328,7 @@ theorem bitfield_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b1
       false (if Janus.Arm64.bit w 31 then 64 else 32)).isSome = true)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   obtain ⟨p, hp⟩ := Option.isSome_iff_exists.mp hdbm
   have hp' : Janus.Arm64.decodeBitMasks (fld w 22 1 == 1#1) (fld w 10 6).toNat (fld w 16 6).toNat
       false (if fld w 31 1 == 1#1 then 64 else 32) = some p := by

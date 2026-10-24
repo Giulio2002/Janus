@@ -157,33 +157,33 @@ theorem asl_carry {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 256 = 0b11010
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execAddSubCarry (if fld w 31 1 == 1#1 then 64 else 32) js (fld w 30 1 == 1#1)
         (fld w 29 1 == 1#1) (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPReg hw (by omega)]
   rcases (show (w / 2 ^ 29) % 4 = 0 ∨ (w / 2 ^ 29) % 4 = 1 ∨ (w / 2 ^ 29) % 4 = 2 ∨ (w / 2 ^ 29) % 4 = 3 by omega)
     with hk | hk | hk | hk
   · rw [run_DataProcReg_carry_0 hw h1 h2 hk (see_entry _ _), run_decode_adc_carry]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_carry (h.entry (BitVec.ofNat 32 w) 6) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 29 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_carry_1 hw h1 h2 hk (see_entry _ _), run_decode_adcs_carry]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_carry (h.entry (BitVec.ofNat 32 w) 7) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 29 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_carry_2 hw h1 h2 hk (see_entry _ _), run_decode_sbc_carry]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_carry (h.entry (BitVec.ofNat 32 w) 8) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 29 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_carry_3 hw h1 h2 hk (see_entry _ _), run_decode_sbcs_carry]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_carry (h.entry (BitVec.ofNat 32 w) 9) (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 29 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **ADC/ADCS/SBC/SBCS**: for every word of the encoding class and every related pair of states,
 Janus' `step` and the generated ASL agree. -/
 theorem addSubCarry_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 256 = 0b11010000)
     (h2 : (w / 2 ^ 10) % 64 = 0) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   have hspec : ∀ N, (Janus.Arm64.execAddSubCarry N js (fld w 30 1 == 1#1) (fld w 29 1 == 1#1)
       (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat).pc = js.pc := by
     intro N; unfold Janus.Arm64.execAddSubCarry; dsimp only
