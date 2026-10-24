@@ -11,9 +11,14 @@ that theorem.*
 **Post-fix status (re-run 2026-10-23 on `agent/deps-ci`, `audit/run-all.sh`):** every row of
 the table below is now blocked, verified-honest, mitigated or fixed; no row prints `Verified`
 for a false or misleading claim. The "Status after fixes" column has the per-row result and
-[Fixes applied](#fixes-applied) maps F1–F6 to the code. `audit/run-all.sh` exits non-zero if
+[Fixes applied](#fixes-applied) maps F1–F7 to the code. Finding R1 (compiled framework modules
+writable by the untrusted consumer build, and not bound to the framework sources) was found
+after F1–F6 and is fixed by F7; see [R1](#r1-critical-follow-up-compiled-framework-modules-were-not-bound-to-the-framework). `audit/run-all.sh` exits non-zero if
 any row regresses to BROKEN, and CI runs it. The rest of this document is the original audit
-of the pre-fix code (commit `665fb69`), kept as written.
+of the pre-fix code (commit `665fb69`), kept as written. A second audit round found that an
+instance written inline in the statement could still make the printed statement lie (fixed: the
+printed statement must round-trip and instance arguments must be registered instances) and that
+the `unshare` fallback left non-root mounts writable (fixed); see [Round 2](#round-2-2026-10-23).
 
 Result (pre-fix): **the claim did not hold.** A proof file can (a) execute arbitrary code during
 verification and forge the audit result outright (a `False` theorem proved with `sorry` is
@@ -51,6 +56,7 @@ record).
 | M3 | Low | Model: overlapping RO and RW regions let a store succeed on "read-only" (`DataLoaded`) bytes. | mismatch | **fixed** (F5): a store faults if any read-only region overlaps it; `Model.lean` control faults |
 | E1 | Low | PIE (`ET_DYN`) binaries are accepted. The model uses link-time vaddrs, while real calls run at base + vaddr, and no translation-invariance argument covers that. No relocations target copied (read-only) ranges in Go PIE today. | informational | **fixed** (F6): `ET_DYN` is rejected at binary validation (checked: `janus list` on an arm64 `-buildmode=pie` build fails) |
 | E2 | Info | `--theorem` accepts any Unicode letters (`\p{L}`), so lookalike names are possible. | informational | **fixed**: `theoremNameRE` is ASCII-only (checked: a Cyrillic-`е` name is rejected) |
+| R1 | **Critical** (follow-up, found after F1–F6) | Compiled framework modules were not bound to the framework. In a consumer workspace the untrusted, sandboxed `lake build` could write the framework's build directory: a lakefile `#eval` that recompiles `Janus/GoABI.lean` with `Ensures := True` over `Janus/GoABI.olean` made "Add returns 42" verify (axioms none, replay passed: a well-formed substituted olean replays fine), and one that replaces `Janus/Tools/Audit.olean` made the auditor print an all-clear record for `False := sorry`. `JanusTrusted` was never replayed. | **BROKEN** (both reproduced with the `6fbaeba` verifier, under bubblewrap) | **blocked** (F7): framework build pinned by SHA-256 and read-only to every sandboxed process, closure resolved from trusted homes, whole non-core import closure kernel-replayed with a content-keyed cache; run-all rows `R1*`: `Invalid` |
 
 Blocked (with mechanism): A5 `debug.skipKernelTC`+`addDecl`, A7 private shadowing, A8 renamed
 axiom / sorry / `partial` / `opaque`, A10 `#exit`, theorem in another namespace or module,
@@ -386,7 +392,7 @@ link-time, and in `collectData` refuse any copied range that a `.rela*` entry ta
 
 ## Fixes applied
 
-All six proposed fixes are implemented. `audit/run-all.sh` output on `agent/deps-ci`:
+All six proposed fixes are implemented (F7, for the later finding R1, is described in its own section below). `audit/run-all.sh` output on `agent/deps-ci`:
 
 ```
 A1_instance                  blocked  Invalid: The audit rejected the proof: the statement uses the proof-local evilMul, whose type is the class HMul (a disguised instance)
@@ -417,17 +423,183 @@ Model.lean: all decide controls pass, including M1-M3 now faulting (blocked by F
 | F4 | B2 | `Janus/GoABI.lean` (`Ensures` over every `RetAddr`), `Janus/Program.lean` (`withExit`) |
 | F5 | M1, M2, M3 | `Janus/Arm64/State.lean` (`Memory.accessible`: region end ≤ `2^48`, no read-only overlap for stores) |
 | F6 | E1 | `cmd/janus/binary.go` (`ET_DYN` rejected; test `TestRejectPIE` in `cmd/janus/hardening_test.go`) |
+| F7 | R1 | `cmd/janus/replay.go` (framework olean pins, `closureCheck`, content-keyed replay cache, chunked `leanchecker` replay of the whole non-core closure, `--replay-fresh`); `cmd/janus/sandbox.go` (`commandOverlay`: protected trees re-mounted read-only over writable ones, bubblewrap and `unshare`); `cmd/janus/consumer.go` (workspace framework build re-seeded from the trusted base when it differs from the pins, trusted `Extracted`/`JanusTrusted` build before any untrusted code, `janus/` read-only to the Lake build, pins re-checked after the build, every `lake query`, the audit and the replay); `cmd/janus/verify.go` (the same pins and closure replay for single-file proofs, audit in its own directory with the proof build read-only); `Janus/Tools/Audit.lean` (`imports`: the import graph of every non-core module, for the cache keys); tests `cmd/janus/replay_test.go` |
 
 `audit/specs/B1_neverpanics_fault.lean` and `B1_refuted.lean` now take the entry address from
 `Extracted.entry` instead of a literal, so they stay valid when the example binary changes.
 
+## R1 (Critical, follow-up): compiled framework modules were not bound to the framework
+
+Found after F1–F6 (2026-10-23, `agent/replay`); fixed by F7. Every later step trusts the compiled
+framework modules (`.olean`): the proof and the consumer modules are elaborated against them, the
+auditor *is* one (`Janus.Tools.Audit`), the statement is printed from them, and `leanchecker`
+checks a module against its imports *as loaded from their oleans*. Nothing tied those oleans to
+the framework sources.
+
+* **The consumer workspace's framework build was writable by the untrusted build.** `janus verify
+  --proof-root` copies the trusted framework build into `<workspace>/janus/.lake/build` and runs
+  the consumer's `lake build` in the sandbox with the whole workspace writable. A `lakefile.lean`
+  (or a dependency's lakefile) runs arbitrary IO while Lake elaborates it, so it could replace any
+  framework module. Reproduced with the pre-fix verifier (`6fbaeba`) under bubblewrap, using
+  `audit/attacks/R1_pkg` (`JANUS_R1_MODE` selects the variant):
+  * `ensures`: the lakefile recompiles `Janus/GoABI.lean` with `Ensures … := True` over
+    `Janus/GoABI.olean`; `R1.Ensures.claim : Ensures Extracted.program Extracted.entry [x, y]
+    (fun _ => True) (fun _ s' => s'.regs 0 = 42)` (Add returns 42) is proved by `trivial` and was
+    reported **Verified**, axioms `(none)`, kernel replay passed;
+  * `auditor`: the lakefile recompiles `Janus.Tools.Audit` so that it prints an all-clear record;
+    `theorem R1.False.claim : False := sorry` was reported **Verified**, axioms `(none)`,
+    statement `R1.False.claim : Extracted.entry = Extracted.entry`.
+* **The replay could not catch it.** The earlier note that leanchecker replayed only the root
+  module `Janus` is not accurate: `leanchecker Janus` replays every module *whose name starts
+  with* `Janus` that it finds on `LEAN_PATH` (its targets are name prefixes), so all framework
+  modules were replayed. But a replay checks that a module is well-typed, not that it is the
+  module its source describes: an olean compiled from a modified source replays fine (the
+  `ensures` attack passed it). `JanusTrusted` was not replayed at all, and modules were not
+  checked to come from where they should (a `Janus.*` olean without a framework source counted as
+  framework for the auditor's trusted-module rule).
+* In the single-file path the framework build was already read-only to the sandbox, so these
+  attacks needed `--unsafe-no-sandbox` there.
+
+**Fix (F7), in depth:**
+
+1. **Read-only**: in a consumer workspace the `janus/` package is mounted read-only over the
+   writable workspace for every sandboxed process (bubblewrap `--ro-bind` after the writable binds;
+   the `unshare` fallback remounts it read-only and aborts if it cannot). A mount point cannot be
+   renamed or removed from inside, so the tree cannot be swapped either. `Extracted` and
+   `JanusTrusted` are now built by `janus` (Lake on our lakefile, unsandboxed) before any untrusted
+   code runs. The workspace's framework build is replaced from the trusted base whenever it
+   differs from the pins. In the single-file path the framework and trusted directories are
+   re-mounted read-only too, and the audit and replay run with the proof build read-only.
+2. **Pins**: the SHA-256 of every module-data file (`.olean`, `.olean.server`, `.olean.private`,
+   `.ir`) of the framework build — only `Janus.*` modules with a framework source — and of the
+   trusted `Extracted`/`JanusTrusted` is recorded after the trusted build and re-verified after
+   every untrusted step (proof compile, Lake build, each `lake query`), after the audit and after
+   the replay. Untrusted outputs (consumer and dependency libraries, the proof's work dir) are
+   pinned once final. A modified, missing or unexpected module is `Invalid` (`framework
+   integrity`) and named in the message.
+3. **Closure check and full replay**: every module of the audited environment must resolve from
+   its home (core from the toolchain, `Janus.*` from the pinned framework build and only framework
+   modules, `Extracted`/`JanusTrusted` from the trusted directory); then every non-core module of
+   the closure is kernel-replayed (`Janus.*`, `Extracted`, `JanusTrusted`, consumer, dependency
+   modules), in chunks of 32 modules per `leanchecker` run. Passing replays are cached in
+   `v1/replay` (never writable by the sandbox), keyed by the toolchain version, the module's bytes
+   and, recursively, its imports' keys; off with `--fresh` and without a sandbox.
+   `--replay-fresh` adds `leanchecker --fresh` on the theorem module (core included; ≈140 s for a
+   closure importing `Lean`), the most rigorous mode leanchecker has; it is not the default because
+   of that cost and because Init/Std/Lean ship read-only with the toolchain.
+
+Regressions (`audit/run-all.sh`, rows `R1*`; Go tests `TestR1FrameworkTamper`,
+`TestR1ForgedFrameworkLemma`, `TestPins`, `TestClosureCheck`, `TestReplayPlanKeys`,
+`TestProtectedOverlay` in `cmd/janus/replay_test.go`):
+
+```
+                             pre-fix (6fbaeba, bubblewrap)   after F7
+R1a_ensures                  Verified: R1.Ensures.claim      Invalid: Lean rejected the proof module R1/Ensures.lean   [proof checking: the write hit the read-only framework, so Ensures is the real one]
+R1a_ensures_nosandbox        —                               Invalid: the Janus framework build … changed after the consumer's Lake build … modified Janus/GoABI.olean   [framework integrity]
+R1a_auditor                  Verified: R1.False.claim        Invalid: The audit rejected the proof: the statement does not mention Extracted.program …   [statement identity: the genuine auditor ran]
+R1a_auditor_nosandbox        —                               Invalid: … modified Janus/Tools/Audit.olean   [framework integrity]
+R1b_corrupt                  Invalid (proof checking)        Invalid: Lean rejected the proof module R1/Ensures.lean   [proof checking]
+R1b_corrupt_nosandbox        —                               Invalid: … modified Janus/GoABI.olean   [framework integrity]
+R1b_forged_lemma             Invalid (kernel replay)         Invalid: Kernel replay rejected the environment: leanchecker found a problem in Janus.GoABI … 'Janus.GoABI.forged'   [kernel replay]
+R1c_inject                   Invalid (proof checking)        Invalid: Lean rejected the proof module R1/Inject.lean   [proof checking]
+R1c_inject_nosandbox         —                               Invalid: … unexpected Janus/Backdoor.olean   [framework integrity]
+R1c_inject_dep               —                               Invalid: the dependency r1dep defines the module Janus.Backdoor, whose root Janus is reserved …   [module identity]
+R1c_inject_dep_nosandbox     —                               Invalid: … unexpected Janus/Backdoor.olean   [framework integrity]
+R1_proof_overwrite           —                               Verified: Proof.correctness   [mitigated: the proof's write to the framework build fails; the theorem is honest]
+R1_proof_overwrite_nosandbox —                               Invalid: the Janus framework build … changed after the proof compile … modified Janus/GoABI.olean   [framework integrity]
+```
+
+**Cost** (single-file `janus verify artifacts/Max --proof examples/proofs/Max.lean`, warm framework
+cache, three alternating runs each on a shared 48-core host): pre-fix 25.5–26.4 s; after F7 with an
+empty replay cache (the first verification per framework version replays all 29 closure modules in
+one `leanchecker` run) 25.3–27.5 s; after F7 with the cache warm 16.1–16.8 s. The pre-fix verifier
+spent about 10 s of every run replaying the unchanged framework (`leanchecker Janus` replays all of
+`Janus.*`); now only modules whose bytes, or whose imports' bytes, changed are replayed (a new
+proof: just the proof module). `scripts/verify-examples.sh` (14 examples): 422–548 s summed before,
+320 s after (warm), under load that varied between runs.
+
+The layers also back each other up. Re-running the unsandboxed rows in the same workspaces
+without changing the lakefiles (so Lake did not elaborate them again) showed it: the framework
+build had been re-seeded from the trusted base, but Lake still considered the consumer's
+`R1/Ensures.olean`, compiled against the forged `GoABI` in the previous run, up to date, since
+Lake's traces record the hashes of the framework sources and outputs it last wrote, not the bytes
+now on disk. The audit then passed (printing the genuine `Ensures`), and the kernel replay of
+`R1.Ensures` against the genuine framework rejected it. Since then, when a workspace's
+framework build has to be re-seeded, `janus` also discards that workspace's consumer and
+dependency builds (and does not seed them from a sibling), and `run-all.sh` gives each run's
+lakefiles a new hash so every row exercises its attack.
+
+`R1b_forged_lemma` is the case only the replay can catch: the forged olean is in a `--janus-root`
+copy, which is the build the pins are taken from (and the old prefix replay caught it as well).
+All earlier rows of `audit/run-all.sh` still print their expected result.
+
+## Round 2 (2026-10-23)
+
+A second, independent adversarial review attacked the auditor's constant/instance rules, the
+dependency/replay/sandbox machinery and the newest model semantics. The full report is
+[docs/AUDIT-ROUND2.md](AUDIT-ROUND2.md); its attack files are in `audit/round2/`
+(`attacks/`, `controls/`, `model/`, `amd64/`) and `audit/round2/run-round2.sh` reproduces the
+verifier findings and exits 1 if a fixed one regresses. The CRITICAL-1 and U1 rows are also in
+`audit/run-all.sh` (`R2.*`).
+
+| # | Finding | Severity | Status |
+|---|---|---|---|
+| CRITICAL-1 | An instance written inline in the statement (`@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y`) is hidden by the default pretty-printer: against `example.com/basic.Add` the statement printed `… = x * y` (S1c) or `x - y` (S1) and verified, every constant being Lean core. | critical | **fixed** (below). `run-round2.sh` and run-all `R2.S1*`: `Invalid`, `Stage: statement identity` |
+| U1 | The `unshare` fallback remounted only `/` read-only: `/tmp`, `/dev/shm`, `/boot`, `/run/user/…` stayed writable on the host (the trusted cache was already safe). | low (confinement) | **fixed**: every mount is remounted read-only (keeping its locked flags), `/tmp` and `/dev/shm` are private tmpfs mounts, binds under the host `/tmp` are re-exposed from the hidden original; if a mount cannot be made read-only the fallback is refused (install bubblewrap). The self-test checks `/tmp` and `/dev/shm` are private. `JANUS_SANDBOX=unshare` forces the fallback; run-all `R2.U1*` and `TestUnshareFallback*` |
+| M1, deps, replay cache, verify-batch, audit marker | Module-system proof, dependency pinning, cache poisoning, cross-request influence, record spoofing | n/a | blocked (no change) |
+| LOW-3 | arm64 feature list missing FP/AdvSIMD; the `arm64HasATOMICS` precondition trusts the kernel's HWCAP report | low (docs) | **documented** in [SOUNDNESS.md](SOUNDNESS.md) ("Atomics, exclusives and system registers") |
+| LOW-4 | `DCZID_EL0` assumed identical on all cores | low (docs) | **documented** in SOUNDNESS.md |
+| Residual | the auditor and `leanchecker` load untrusted `.olean` bytes; the loader does not validate them | TCB | **documented** in SOUNDNESS.md (trusted computing base, item 4) |
+| MEDIUM-1 | amd64: the direction flag is not in the state; a verified *mid-function* theorem says memmove's backward `REP MOVSQ` copies forward (call theorems unaffected) | medium | open (amd64 model) |
+| LOW-1 | amd64: LOCK accesses that straddle a cache line (SIGBUS with `split_lock_detect=fatal`) | low–medium | open (amd64 model/preconditions) |
+| LOW-2 | amd64: 64-bit BSF/BSR of zero follows AMD | low | open (amd64 model) |
+
+**Fix for CRITICAL-1 (`Janus/Tools/Audit.lean`), in depth.** The guarantee is the printed
+statement, so the auditor now checks that the text means what the kernel proved:
+
+1. **Instance arguments** (`checkInstArgs`): the statement's type is walked; at every
+   application, the head's binder info (`getFunInfoNArgs`) gives the instance-implicit
+   positions, and each argument there must be, up to unfolding reducible definitions and
+   `whnfCore`, an application of a registered instance of the clean trusted environment (core,
+   `Janus`, `Extracted`; plus `scoped` instances declared in trusted modules) — the head is
+   tested before unfolding, since instances themselves unfold to structure literals — or a
+   local variable bound by an instance binder of the theorem. Structure-instance literals,
+   anonymous constructors, lambdas, `let`-bound values, `dite` terms and proof-local or
+   dependency definitions are rejected ("inline instance"). Dependencies contribute no
+   instances (their instances are not allowed in statements at all).
+2. **Round-trip** (`printFaithful`/`roundTrip`): the printed signature is parsed back
+   (`ident declSig`) and elaborated in the same clean environment with the same options
+   (`autoImplicit` off, `errToSorry` off, a heartbeat budget); any parse or elaboration error,
+   remaining metavariable or `sorry` rejects. The result must be structurally equal to the
+   checked type, or definitionally equal by the elaborator at **default** transparency *and*
+   by the kernel's `isDefEq`. Default transparency is sound here: definitionally equal
+   propositions are the same proposition to the kernel, so the printed text, read with the
+   canonical instances, states exactly what was proved; a planted instance makes the canonical
+   reading (real `*`) differ from the checked term (really `+`) and the check fails. To keep
+   honest statements printable, coercions are printed with their target type
+   (`pp.coercions.types`, `(↑n : Int)`), and if the plain print still reads back differently
+   only because of a numeral's type, the statement is printed with `pp.numericTypes`
+   (`(5 : BitVec 64)`); a statement that round-trips neither way is rejected ("does not
+   round-trip").
+3. **Inspection**: `verified.json` has `statementExplicit`, the statement printed with
+   `pp.explicit` (every implicit and instance argument shown).
+
+Either check alone rejects every S1 variant (`JanusTests/Audit.lean` tests each separately, and
+each accepts honest statements with canonical instances, numerals, `if`, `<`, coercions and
+instance binders). All 20 arm64 example theorems (including the SIMD `A64Equal64`/`A64IndexByte`) and the 23 amd64 ones, the consumer examples and the
+deps tests still verify (no arm64 example statement needed the coercion or numeral annotations); A2 and A4 stay **verified-honest** (their
+clean prints round-trip). Tests: `cmd/janus/round2_test.go` (`TestInlineInstanceRejected`,
+`TestRoundTripRejectsAmbiguousPrint`, `TestUnshareFallbackConfinement`,
+`TestUnshareFallbackVerifies`).
+
 ## Files
 
 * `audit/run-all.sh`: reproduces every row (`BROKEN` rows print `Verified`, blocked rows `Invalid`), extracting its own `audit/work/{Add,Add256,Get}`; it marks a row `<-- BROKEN` and exits 1 if a blocked row verifies or a control does not.
-* `audit/attacks/`: A1–A10, C1 (`C1_fake_Extracted.lean`, `C1_proof.lean`), C2 (`C2_toctou_swap.sh`).
+* `audit/attacks/`: A1–A10, C1 (`C1_fake_Extracted.lean`, `C1_proof.lean`), C2 (`C2_toctou_swap.sh`), R1 (`R1_pkg/` consumer package whose lakefile tampers with the framework build, `R1_dep/` a dependency that plants `Janus.Backdoor`, `R1_forged_lemma.lean` + `R1_forged_proof.lean`, `R1_proof_overwrite.lean`).
 * `audit/specs/`: B1 (`B1_neverpanics_fault.lean`, verify against Add256), B2 (`B2_exit_sentinel.lean`, `lake env lean`).
 * `audit/controls/`: Add, Add256 and Get witnesses (verify against the respective artifact).
 * `audit/model/`: `Model.lean` (M1–M3 and the OK controls), `decoder_vs_objdump.sh`, `gen_words.py`, `objcmp.py`.
 * `audit/probe/`: `P.lean` and `Q.lean` (shows that `initialize` and `#eval` run).
 * `audit/bin/`: `janus` (rebuilt by `run-all.sh` from the current tree), `janus-head` (working tree with the `verify.go` rewrite).
 * `audit/work/`: scratch artifact copies (regenerated by `run-all.sh`).
+* `audit/round2/`: the round-2 attacks (`attacks/S1*` inline instances, `M1_module_system`, `U1*` unshare fallback), positive controls, arm64/amd64 model probes and `run-round2.sh`; see [AUDIT-ROUND2.md](AUDIT-ROUND2.md).

@@ -5,12 +5,28 @@ copied out of the ELF binary, run by the Lean AArch64 model. The Lean kernel che
 nobody checks that the *statement* says what you meant. The guarantee is exactly the printed
 statement, including its preconditions and quantifiers.
 
+**The printed statement is the checked one.** `janus verify` prints the statement in a clean
+environment (only `Janus` and `Extracted`, never the proof, so no proof-side notation,
+unexpander or instance applies), and then checks that the text means what the kernel proved:
+every argument in an instance-implicit position must be a registered instance of that trusted
+environment or an instance binder of the theorem (no inline `⟨fun a b => a + b⟩` passed as the
+`HMul` instance, which the default printer would show as `x * y`), and the printed text is
+re-parsed and re-elaborated there and must be definitionally equal to the checked type (checked
+by the elaborator at default transparency and confirmed by the kernel; definitionally equal
+propositions are the same proposition, so the printed text, read with the canonical instances,
+is exactly what was proved). `verified.json` also has `statementExplicit`, the statement with
+every implicit and instance argument shown. The body of each plain proof-local `def` the
+statement names (disclosed in `definitions`, and part of what the guarantee means) is held to the
+same instance check, so a `def` whose displayed body reads as one operation while an inline
+instance makes it compute another is rejected. See CRITICAL-1 in
+[AUDIT-ROUND2.md](AUDIT-ROUND2.md) and R1 in [AUDIT-ROUND3.md](AUDIT-ROUND3.md).
+
 ## Trusted computing base
 
 These are trusted, not proved.
 
-1. **The Lean AArch64 model** (`Janus/Arm64/Decode.lean`, `Exec.lean`, `State.lean`): the
-   decoder, the instruction semantics and the checked memory. They are meant to agree with the
+1. **The Lean AArch64 model** (`Janus/Arm64/Decode.lean`, `Exec.lean`, `Vector.lean`,
+   `State.lean`): the decoder, the instruction semantics and the checked memory. They are meant to agree with the
    Arm Architecture Reference Manual (ARM ARM) for the supported user-mode A64 subset. That
    agreement is differentially tested against qemu (`janus-oracle`), not proved. If the model
    is wrong about an instruction the program uses, a theorem can be true of the model and false
@@ -28,10 +44,51 @@ These are trusted, not proved.
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
    dereference is a `SIGSEGV`, turned into a panic by `runtime.sigpanic`) are not stub calls:
    the model reports them as faults, and `NeverPanics` excludes faults too.
-4. **The Lean kernel**, plus the verifier's hashing, process execution and axiom audit. The
+4. **The Lean kernel**, plus the verifier's hashing, process execution, axiom audit and
+   statement audit (`Janus/Tools/Audit.lean`, including Lean's parser, elaborator and
+   pretty-printer as used by the round-trip check above). The auditor and `leanchecker` load
+   `.olean` files written by the sandboxed (untrusted) compile; Lean's `.olean` loader does not
+   validate the structure of the compacted region it maps, so its robustness against a
+   malformed `.olean` is part of the trusted base too. The
    audit allows only `propext`, `Quot.sound` and `Classical.choice`. It rejects `sorryAx`,
    `Lean.ofReduceBool` and `Lean.trustCompiler`, so `native_decide` and `bv_decide` cannot be
-   used. `leanchecker` independently replays the environment.
+   used. `leanchecker` independently replays the environment (below).
+5. **The Lean toolchain's own library** (`Init`, `Std`, `Lean`, `Lake`, shipped with the
+   toolchain and read-only to every sandboxed process) and the **trusted framework build**: the
+   framework's `.olean` files compiled by `janus` itself from the framework sources it carries,
+   outside the sandbox, once per framework version (`janus verify --fresh` rebuilds them).
+
+**What the kernel replay covers.** After the audit, `leanchecker` (shipped with the toolchain)
+replays, through the kernel, **every module of the theorem's import closure that is not Lean
+core**: every `Janus.*` framework module the theorem's environment imports, `Extracted`, the
+independent `JanusTrusted` copy, every consumer module and every dependency module. Each module
+is replayed against its imports as loaded from their `.olean` files, and since every non-core
+import is itself replayed, no non-core declaration is taken on trust. Lean core is not replayed
+by default; `--replay-fresh` additionally runs `leanchecker --fresh` on the theorem's module,
+which re-adds every constant of its environment, core included, to an empty environment
+(minutes: about 140 s for a closure that imports `Lean`). Passing replays are cached in the
+trusted cache (`v1/replay`, never writable by a sandboxed process) under a key covering the
+toolchain version, the module's `.olean` bytes (with its `.server`/`.private` parts) and,
+recursively, the keys of its imports, so an unchanged framework module is not replayed again
+while any byte change to it or to anything below it is. The cache is off with `--fresh` and
+without a sandbox. Before replaying, every module of the closure must resolve from its home:
+core modules from the toolchain library, `Janus.*` modules from the trusted framework build and
+only modules the framework has a source for, `Extracted`/`JanusTrusted` from the trusted
+directory.
+
+**What the replay does not cover, and what does.** A replay checks that a module is
+*well-typed*, not that it is the module its source describes: an `.olean` compiled from a
+modified framework source (say `Ensures := True`) replays fine. That is why the framework
+build is also **pinned**: the SHA-256 of every framework `.olean` (and of the trusted
+`Extracted`/`JanusTrusted`) is recorded right after the trusted build and re-verified after
+every untrusted step (the proof compile, the consumer's Lake build and `lake query`), after the
+audit and after the replay; untrusted build outputs (consumer and dependency modules, the proof)
+are pinned once they are final, so the replay checks exactly the bytes the audit read. In a
+consumer workspace the framework package is additionally **mounted read-only** for every
+sandboxed process (a mount point cannot be renamed or removed from inside), and the
+workspace's framework build is replaced from the trusted cache whenever it differs from the
+pins. A changed, corrupted, missing or extra framework module is rejected (`framework
+integrity`). See finding R1 in [docs/AUDIT.md](AUDIT.md).
 
 **Not trusted:**
 
@@ -130,7 +187,7 @@ about executions outside it.
   model. Functions with a stack-check prologue need `GoABI.StackGuardOK s k` (g readable,
   `stackguard0 + k < SP`) for the prologue to fall through.
 * **User mode only (EL0).** There are no system registers beyond NZCV and the read-only
-  `DCZID_EL0` (`State.dczid`, see below), no exceptions and no
+  `DCZID_EL0` (`State.dczid`) and `TPIDR_EL0` (`State.tpidr`, see below), no exceptions and no
   page tables. `SP` alignment checking (SCTLR_EL1.SA0, as Linux configures it) is modelled as a
   fault. Other alignment faults are not modelled, except where the instruction model says so.
 * **Memory outside the listed regions faults.** Every load and store must lie entirely inside
@@ -164,8 +221,11 @@ about executions outside it.
   quantified `ret`) uses the placeholder and counts any branch to `0` as a return; such a
   statement says much less, and is visible as such in the printed statement.
 * **ABIInternal only.** `GoABI` covers integer arguments and results in `R0`–`R15` and
-  stack-assigned words from `8(RSP)`. There are no floating-point or SIMD registers
-  (`F0`–`F15`) and no FPCR/FPSR. A function whose arguments use them is outside the model.
+  stack-assigned words from `8(RSP)`. The SIMD&FP registers are in the state (`State.vregs`,
+  arbitrary in every call state, not preserved by `ABIReturn`: Go's ABIInternal has no
+  callee-saved SIMD&FP registers), but `GoABI` passes no floating-point arguments or results
+  (`F0`–`F15`), and there is no FPCR/FPSR. A function whose arguments use them is outside the
+  model.
   "`R29` is preserved" relies on Go's frame-pointer convention (`GoABI.FPConvention`:
   `R29 = SP - 8` at the call), because Go 1.26 leaf functions restore `R29` arithmetically.
 * **64-bit addresses as naturals.** Addresses are `Nat` values below `2^64`, produced by the
@@ -201,6 +261,19 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   `examples/proofs/AtomicAdd.lean` does, and on a CPU without LSE that precondition is false,
   so the theorem is vacuous there rather than wrong. A proof about code that uses LSE
   unconditionally is a statement about LSE-capable CPUs.
+* **The `arm64HasATOMICS` precondition trusts the kernel.** The runtime sets the flag from the
+  `HWCAP_ATOMICS` bit Linux reports in the auxiliary vector, so the precondition is "the kernel
+  says every core has LSE". A kernel that over-reports a feature on a heterogeneous
+  (big.LITTLE) system — as happened with atomics, Go issue 28431 — makes the precondition true
+  on a CPU where an LSE instruction can trap; the theorem is then about a machine that is not
+  the one running. The same holds for any other HWCAP-derived flag a proof assumes.
+* **FP/AdvSIMD.** FEAT_FP and FEAT_AdvSIMD are formally optional in Armv8-A, yet the model
+  accepts Advanced SIMD instructions and SIMD&FP loads/stores and moves unconditionally (see
+  "Advanced SIMD" below), and Go uses them unguarded (`memequal`, `IndexByte`, large copies).
+  Accepting them assumes the CPU implements both; every system that runs Go's arm64 port does
+  (the AArch64 procedure-call standard passes floating-point values in SIMD&FP registers).
+  FEAT_AES, FEAT_LRCPC and FEAT_LSE are assumed in the same way where their instructions are
+  accepted.
 * **Store-exclusives are rejected.** `STXR`, `STLXR`, `STXP` and `STLXP` decode to nothing
   (`undecodable`), so any run that reaches one faults. Reasoning: on real hardware a
   store-exclusive may fail *spuriously* (status 1, nothing stored) even with no other thread:
@@ -231,26 +304,79 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   (`Fault.trapped`, `SIGILL` on Linux) when `DZP = 1`. Other `DC`/`IC`/`SYS` operations are
   rejected. `examples/proofs/ClearWords.lean` proves `runtime.memclrNoHeapPointers` (through its
   `DC ZVA` path) for every value of `DCZID_EL0`.
-* **No SIMD/FP registers.** `State` has no `V0`–`V31`. Go 1.26's `runtime.memmove` and
-  `runtime.memclrNoHeapPointers` on arm64, and the compiler's inline copies and zeroing of
-  fixed-size values, use general-purpose `LDP`/`STP` only (checked on the Go 1.26.0 binary: no
-  `Q`/`D` loads or stores, `LD1`/`ST1`, `MOVI` or `DUP` in either routine), so no vector state
-  is needed for them. The runtime routines that do use SIMD (`memequal`, `indexbyte`, `count`,
-  the AES hash) also compute with it, which is outside this model.
+* **`DCZID_EL0` is assumed uniform across cores.** `State.dczid` is one value for the whole run,
+  but the register is IMPLEMENTATION DEFINED *per core*. Go reads it once and caches the block
+  size; a thread that migrates to a core with a different `BS` between that read and `DC ZVA`
+  zeroes a different block size than the code planned for. A theorem that reads `DCZID_EL0`
+  (ClearWords) is therefore about systems whose cores all report the same value; no shipping
+  heterogeneous system is known to differ, but the architecture does not forbid it.
+* **`TPIDR_EL0` is a parameter too.** `MRS Xt, TPIDR_EL0` (the thread pointer; Go's runtime reads
+  it in `save_g`/`load_g` under cgo) returns `State.tpidr`. Linux gives each thread its own
+  value and EL0 code may write it, but no instruction the model accepts does (`MSR TPIDR_EL0` is
+  rejected), so within a run it is a constant of the state and theorems quantify over it.
+
+## Advanced SIMD
+
+`State.vregs` holds `V0`–`V31` (128 bits each); the Advanced SIMD operations are in
+`Janus/Arm64/Vector.lean`, transcribed from the ASL `Operation` pseudocode (element loops become
+`ofElems`, `Elem[x, e, esize]` is `elem x esize e`). Covered:
+
+* **Loads and stores:** `LDR`/`STR`/`LDUR`/`STUR` (all addressing modes) and `LDR` (literal) of
+  B/H/S/D/Q registers, `LDP`/`STP` of S/D/Q registers, `LD1`/`ST1` (multiple structures, 1–4
+  registers), `LD1`–`LD4`/`ST1`–`ST4` (single structure) and `LD1R`–`LD4R`, with every
+  post-index form. Rejected: `LD2`–`LD4`/`ST2`–`ST4` (multiple structures), `LDNP`/`STNP`,
+  `LDAPUR`/`STLUR` and every reserved size. Each register (multiple structures, pairs) or element
+  (single structure) is a checked access as in the pseudocode; a fault anywhere faults the whole
+  instruction.
+* **Integer data processing:** the three-same logical operations (`AND`, `BIC`, `ORR`, `ORN`,
+  `EOR`, `BSL`, `BIT`, `BIF`), `ADD`/`SUB`, the compares (`CMEQ`, `CMTST`, `CMHI`, `CMHS`,
+  `CMGT`, `CMGE`, and against zero `CMEQ`/`CMGE`/`CMGT`/`CMLE`/`CMLT`), `SMAX`/`UMAX`/`SMIN`/`UMIN`
+  and their pairwise forms, `ADDP`; scalar `ADD`/`SUB`/compares on D registers; across lanes
+  `ADDV`, `SADDLV`/`UADDLV`, `SMAXV`/`UMAXV`/`SMINV`/`UMINV`; `CNT`, `NOT`, `RBIT`,
+  `REV16`/`REV32`/`REV64`, `ABS`, `NEG`, `XTN`; shifts by immediate `SSHR`/`USHR`, `SSRA`/`USRA`,
+  `SHL`, `SLI`, `SRI`, `SHRN`, `SSHLL`/`USHLL`; `MOVI`/`MVNI`/`ORR`/`BIC` (immediate) and `FMOV`
+  (vector, immediate: a fixed bit pattern); `EXT`, `TBL`/`TBX`.
+* **Moves:** `DUP` (element, general), `INS` (element, general), `UMOV`, `SMOV`, and `FMOV`
+  between general and SIMD&FP registers (`Wn`↔`Sd`, `Xn`↔`Dd`, `Xn`↔`Vd.D[1]`).
+* **AES:** `AESE`, `AESD`, `AESMC`, `AESIMC`, with the S-boxes and row permutations copied from the
+  ASL and GF(2^8) multiplication checked against the ASL tables (`JanusTests/Vector.lean`).
+  Accepting them assumes FEAT_AES; Go only runs its AES hash after testing `cpu.ARM64.HasAES`
+  (`runtime.useAeshash`), so a proof through it assumes that flag, as for LSE.
+
+Not modelled, and rejected: all floating-point arithmetic, comparison and conversion (and with
+them FPCR/FPSR: no accepted instruction reads or writes them, so they are not in the state),
+saturating, rounding and widening/narrowing arithmetic other than the listed ones, permutes
+(`ZIP`/`UZP`/`TRN`), SHA, polynomial multiply, SVE and SME. An Advanced SIMD write sets the whole
+128-bit register (`V[d, n] = x` zero-extends); on a CPU with SVE the hardware also zeroes the
+upper bits of `Z[d]`, which are not part of the model and not observable by the accepted
+instructions.
+
+Go 1.26's `runtime.memmove`, `runtime.memclrNoHeapPointers` and the compiler's inline copies of
+small values use general-purpose `LDP`/`STP`; larger copies (`LDP`/`STP Q16, Q17`), the
+`internal/bytealg` routines (`memequal`, `IndexByte`, `Count`, ...), `aeshashbody` and
+`internal/chacha8rand.block` use the instructions above.
 
 **Coverage effect** (`janus blockers` on Go 1.26.0 `go test -c` binaries, every `T` symbol of
-the package plus `runtime.memmove` and `runtime.memclrNoHeapPointers`, `--max-functions 3000`):
+the package plus `runtime.memmove`, `runtime.memclrNoHeapPointers`, `runtime.memequal` and
+`internal/bytealg.{IndexByte,Count,Compare,IndexString}`, `--max-functions 3000`):
 
 | binary (symbols) | fully decoded before | after | distinct rejected words before → after |
 |---|---:|---:|---:|
-| `sync/atomic` + `internal/runtime/atomic` (20) | 3 | 9 (+3 whose only rejected words are the LL/SC fallback `STLXR`) | 677 → 399 |
-| `bytes` (61) | 26 | 27 | 681 → 406 |
-| `strings` (70) | 15 | 16 | 694 → 414 |
+| `sync/atomic` + `internal/runtime/atomic` (25) | 11 | 16 | 406 → 135 |
+| `bytes` (66) | 29 | 42 | 406 → 135 |
+| `strings` (76) | 18 | 28 | 414 → 137 |
 
-`runtime.memmove` was already fully decoded; `runtime.memclrNoHeapPointers` now is. What still
-blocks most `bytes`/`strings` functions is SIMD computation (`memequal`, `indexbyte`, `count`:
-`LD1`, `CMEQ`, `ADDP`, `UADDLV`, ...), `MRS TPIDR_EL0`/`CNTVCT_EL0` and FP/AES code reached
-through `mallocgc`.
+(The previous round's table, with fewer symbols: `bytes` 26 → 27 of 61, `strings` 15 → 16 of 70.)
+Now fully decoded: `runtime.memequal`, `internal/bytealg.IndexByte`/`IndexByteString`/`Count`/
+`CountString`, `bytes.Equal`, `bytes.Index`, `bytes.IndexByte`, `bytes.IndexRune`,
+`bytes.LastIndex`, `bytes.Cut`, `bytes.TrimPrefix`/`TrimSuffix`, `strings.Count`, `strings.Index`,
+`strings.LastIndex`, `strings.TrimPrefix`/`TrimSuffix`, `sync/atomic.StorePointer`, and
+`aeshashbody` and `internal/chacha8rand.block` as callees. Every remaining rejected word in these
+binaries is floating point (`SCVTF`, `FCVTZS`, `FMUL`, `FMOV` (scalar immediate), ...; in the GC
+pacer and heap profiling reached through `mallocgc`), a store-exclusive (`STLXR`, the LL/SC
+fallbacks), `SVC` (system calls) or `MRS CNTVCT_EL0`/`CNTFRQ_EL0` (the generic timer in
+`runtime.procyieldAsm`; the counter is not a constant, so it needs a nondeterministic model).
+The other functions of `bytes`/`strings` reach `runtime.mallocgc` and stay blocked by these.
 
 ## What the theorem does not say
 

@@ -27,7 +27,8 @@ the other at the machine code that runs. Janus is the Go counterpart of
 [LeanCIL](https://github.com/NethermindEth/LeanCIL), which does the same for .NET.
 
 > **Status:** early work in progress. The model covers the user-mode integer subset that Go
-> emits; anything else faults rather than being guessed (see [limits](#what-a-verified-theorem-does-and-does-not-mean)).
+> emits (on arm64 also the Advanced SIMD integer, move and AES instructions of the runtime's
+> `memequal`/`IndexByte`/`Count`/hash routines); anything else faults rather than being guessed (see [limits](#what-a-verified-theorem-does-and-does-not-mean)).
 
 ---
 
@@ -60,7 +61,7 @@ Verified: Proof.correctness
   Framework: embedded (SHA-256 e9be8cd3d7116073ba456dd933bd277edd8d3ce37bf8acb842c28f43decccbba, 30 files, leanprover/lean4:v4.34.1)
   Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
   Axioms: Classical.choice, Quot.sound, propext
-  Kernel replay: leanchecker passed (Janus, Extracted, Proof)
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Amd64, Janus.Amd64.Decode, Janus.Amd64.Exec, Janus.Amd64.GoABI, Janus.Amd64.Instr, Janus.Amd64.Program, Janus.Amd64.Run, Janus.Amd64.State, … and 19 more; 29 modules; 26 reused from the replay cache)
   Lean: Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)
   Report: artifacts/Add/verified.json
   Statement:
@@ -74,8 +75,9 @@ binary return to the caller after finitely many steps, never fault or panic, pre
 callee-saved state, and leave `(x + y) mod 2^64` in `X0`. The printed statement is the one the kernel
 checked, printed in an environment the proof cannot influence.
 
-The run above took 29 s on a warm cache (framework already built); most of it is the sandboxed Lean
-build, the audit and the `leanchecker` replay.
+The run above takes about 17 s on a warm cache (framework built, its kernel replay cached); most of it
+is the sandboxed Lean build of the proof and the audit. The first verification per framework version
+also replays every framework module (about 10 s more).
 
 ## How it works
 
@@ -137,7 +139,7 @@ examples/proofs/Add.lean:25:72: error: unsolved goals
 == verifying the counterexample examples/proofs/WrongAdd.lean on the subtracting binary:
 Verified: Proof.correctness
   Axioms: Classical.choice, Quot.sound, propext
-  Kernel replay: leanchecker passed (Janus, Extracted, Proof)
+  Kernel replay: leanchecker passed (Extracted, Janus, …, Proof; 29 modules; 26 reused from the replay cache)
 break-demo: ok
 ```
 
@@ -176,7 +178,9 @@ negation* of the `Add` specification on the broken binary, by running one concre
 
 Every function in [`examples/basic/basic.go`](examples/basic/basic.go) has an amd64 theorem, and 14 of
 them an arm64 one too; the atomics and memory-routine examples in
-[`examples/basic/memory.go`](examples/basic/memory.go) have arm64 theorems. Each is verified end to end by `janus verify` (kernel check, axiom audit,
+[`examples/basic/memory.go`](examples/basic/memory.go) and the SIMD examples in
+[`examples/basic/simd_arm64ex.go`](examples/basic/simd_arm64ex.go) have arm64 theorems, and the
+vector-path examples in [`examples/basic/simd.go`](examples/basic/simd.go) amd64 ones. Each is verified end to end by `janus verify` (kernel check, axiom audit,
 `leanchecker` replay) against the `GOARCH=arm64` or `GOARCH=amd64` build of the same source with
 Go 1.26.0. Proofs:
 [`examples/proofs/`](examples/proofs) (arm64), [`examples/proofs-amd64/`](examples/proofs-amd64) (amd64).
@@ -198,12 +202,16 @@ Go 1.26.0. Proofs:
 | `SetOne256` | `*z = 1`, from a 32-byte `.rodata` constant | ✓ | ✓ |
 | `HexDigit` | byte `i & 15` of a `.rodata` string | ✓ | ✓ |
 | `Table` | `t[i & 7]` of a constant `.rodata` table | | ✓ |
+| `A64Equal64` | `bytes.Equal` of two 64-byte arrays, through `runtime.memequal`'s SIMD loop (`LD1`, `CMEQ`, `AND`, `UMOV`) | ✓ | |
+| `A64IndexByte` | `bytes.IndexByte` on a 32-byte-aligned 64-byte slice: the first index of `c`, or `-1`, through `internal/bytealg`'s SIMD scan | ✓ | |
 | `GlobalTable` | `tbl[i & 7]` of a writable global, provided by the precondition | | ✓ |
 | `Bump` | `counter += d` on a writable global, returns the new value | | ✓ |
 | `AtomicAdd` | `atomic.AddUint64(p, d)`: `*p += d`, returns the new value (LSE `LDADDAL` path, given `runtime.arm64HasATOMICS`) | ✓ | |
 | `AtomicMax` | `LDAR` + `CASAL` retry loop: returns the old `*p` and sets `*p = max(old, v)`; the loop runs once | ✓ | |
 | `CopyBlock` | `copy(dst[:], src[:])` of a 128-byte array through `runtime.memmove` | ✓ | |
 | `ClearWords` | `clear(b)` of a 16-word, 128-byte-aligned slice through `runtime.memclrNoHeapPointers` (its `DC ZVA` path), for every `DCZID_EL0` | ✓ | |
+| `Equal64` | `bytes.Equal` of two `[64]byte` through `runtime.memequal`: true iff the bytes are equal, for every value of `internal/cpu.X86.HasAVX2` (the AVX2 `VPCMPEQB`/`VPMOVMSKB` loop and the SSE one) | | ✓ |
+| `CopyBlock512` | `copy` of a 512-byte array through `runtime.memmove`'s AVX path (`VMOVDQU`/`VMOVDQA`, any `dst` alignment), given `memmoveBits & avxSupported` | | ✓ |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
@@ -228,8 +236,8 @@ succeeds) only costs coverage.
 | qemu-aarch64 10.2.1 user mode (`-cpu max`) | arm64 model vs qemu, one instruction per case | 486,463 | **0** | [ORACLE.md](docs/ORACLE.md) |
 | Sail `arm-v9.4-a` (Arm's official ASL, translated) | arm64 model vs Arm's specification, same corpus | 486,463 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
 | Sail, misaligned-SP corpus | SP-alignment rule, which qemu cannot check | 102,460 | **0** | [ORACLE-SAIL.md](docs/ORACLE-SAIL.md) |
-| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds (incl. atomics, `REP` string ops, SSE moves) | 1,187,981 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
-| Sail/ACL2 X86isa | amd64 undefined-flag sets, sampled | 20,000 | 0 flags undefined there but defined by Janus | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md#formal-x86-model-third-reference) |
+| Native x86-64 (Xeon Gold 5412U, trap flag single-step) | amd64 model vs the host CPU, two seeds plus a vector harvest (incl. atomics, `REP` string ops in both directions, `FS`, YMM/AVX2, SSE) | 3,420,590 | **0** | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) |
+| Sail/ACL2 X86isa | amd64 undefined-flag sets (sampled), and the `FS`/YMM/SSE-move/`RCL`/`RCR` classes it implements | 20,000 + 113,920 | 0 flags undefined there but defined by Janus | [ORACLE-AMD64.md](docs/ORACLE-AMD64.md#formal-x86-model-third-reference) |
 
 Cases come from every distinct instruction word in real Go binaries (`math/big`, `crypto/sha256`,
 `encoding/json`, `regexp`, …), targeted random encodings per instruction class, and fully random
@@ -266,7 +274,7 @@ what you meant**: read the statement.
 | Every memory access stays inside the regions the precondition grants | That an access outside them would trap on hardware (it may hit another mapping) |
 | `NeverPanics`: no panic stub **and** no fault (a nil dereference is a fault, as on hardware it is a `SIGSEGV` that Go turns into a panic) | Anything about timing, side channels, caches or speculation |
 | Callee-saved state (`SP`, `g`, frame pointer, …) is restored per Go ABIInternal | Concurrency: the model is single-threaded, with no signals, preemption, GC or scheduler |
-| | Floating point, SIMD arithmetic, atomics with `LOCK`, string instructions: these fault as `undecodable` |
+| | Floating point, and SIMD arithmetic outside the modelled subset (on arm64 the Advanced SIMD integer and move instructions, see [docs/SOUNDNESS.md](docs/SOUNDNESS.md#advanced-simd)): these fault as `undecodable` |
 
 The full list is in [docs/SOUNDNESS.md](docs/SOUNDNESS.md) (and [docs/AMD64.md](docs/AMD64.md) for the
 x86-64 differences).
@@ -289,8 +297,13 @@ statement holds. `janus verify`:
 * **prints the statement in a clean environment** that imports only `Janus` and `Extracted`, so the
   proof's notations, unexpanders and instances cannot make it read differently;
 * allows only the axioms `propext`, `Quot.sound`, `Classical.choice` (so no `sorry`, `native_decide`
-  or `bv_decide`), and replays the environment with `leanchecker`;
-* hashes every compiled `.olean` and re-checks them after the audit and the replay.
+  or `bv_decide`), and replays with `leanchecker` every module of the theorem's import closure
+  outside Lean core (every `Janus.*` module, `Extracted`, consumer and dependency modules), caching
+  passing replays by content hash;
+* pins the SHA-256 of every compiled framework `.olean` after the trusted build and re-checks it
+  after every untrusted step, the audit and the replay (in a consumer workspace the framework build
+  is also read-only to the sandboxed Lake build), and hashes every other compiled `.olean` once it is
+  final.
 
 These defences answer an internal red-team audit, [docs/AUDIT.md](docs/AUDIT.md), which records the
 attacks as found (a forged audit via `initialize`, IO from `#eval`, a shadowed `Extracted`, misleading

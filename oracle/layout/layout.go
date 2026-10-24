@@ -42,8 +42,16 @@ const (
 	CtxHostSP   = 128 // host SP
 	CtxInNZCV   = 136 // NZCV in bits 31..28 (MSR NZCV format)
 	CtxInSP     = 144
-	CtxInX      = 152 // x0..x30
-	CtxOut      = 400 // copy of uc_mcontext: regs[31], sp, pc, pstate
+	CtxInX      = 152  // x0..x30
+	CtxOut      = 400  // copy of uc_mcontext: regs[31], sp, pc, pstate
+	CtxInV      = 1024 // v0..v31 (16 bytes each, little-endian)
+	CtxInTPIDR  = 1536 // TPIDR_EL0 for the case
+	CtxHostTPID = 1544 // host TPIDR_EL0 (restored by the resume sequence)
+	// CtxOutFP is a copy of the signal frame's fpsimd_context: head (magic, size), fpsr, fpcr,
+	// vregs[32]; 528 bytes.
+	CtxOutFP = 1600
+	// FPSIMDMagic is the fpsimd_context record magic (Linux and qemu-user put it first).
+	FPSIMDMagic = 0x46508001
 )
 
 // Pattern is the initial content of byte i of the data buffer for a given seed. The Lean
@@ -66,6 +74,11 @@ type Case struct {
 	// DEFINED constant that MRS DCZID_EL0 and DC ZVA depend on. The Lean side uses it as
 	// `State.dczid`; the native runner refuses a case whose value differs from its CPU's.
 	DCZID int `json:"dczid"`
+	// V is V0..V31 as 128-bit hex values (absent: all zero). TPIDR is TPIDR_EL0 (absent: 0);
+	// the native runner writes it with MSR before the case, the Lean side uses it as
+	// `State.tpidr`.
+	V     []string `json:"v,omitempty"`
+	TPIDR string   `json:"tpidr,omitempty"`
 }
 
 // HW is what the native runner observed.
@@ -81,6 +94,7 @@ type HW struct {
 	NZCV   int      `json:"nzcv"`
 	Mem    [][2]int `json:"mem,omitempty"` // (offset, new byte) for every changed byte
 	Note   string   `json:"note,omitempty"`
+	V      []string `json:"v,omitempty"` // V0..V31 after the instruction (128-bit hex)
 }
 
 // Model is what `janus-oracle` (Janus.Arm64.step) produced.
@@ -94,4 +108,5 @@ type Model struct {
 	SP     string   `json:"sp,omitempty"`
 	NZCV   int      `json:"nzcv"`
 	Mem    [][2]int `json:"mem,omitempty"`
+	V      []string `json:"v,omitempty"`
 }

@@ -174,6 +174,40 @@ func specs() []Spec {
 		add("string", b(0xF3), b(o), -1, 0)
 		add("string", b(0xF2), b(o), -1, 0)
 	}
+	// SSE packed-integer compares and logic, PMOVMSKB, PSHUFD (66: SSE; no prefix: MMX, rejected)
+	for _, o := range []byte{0x74, 0xDB, 0xEB, 0x60, 0xD7, 0x70} {
+		add("sse/int", b(0x66), b(0x0F, o), -1, 0)
+		add("sse/int", b(0x66), b(0x0F, o), -1, 1)
+		add("sse/int", nil, b(0x0F, o), -1, 0)
+	}
+	add("sse/int", b(0xF2), b(0x0F, 0x70), -1, 0) // PSHUFLW
+	add("sse/int", b(0xF3), b(0x0F, 0x70), -1, 0) // PSHUFHW (not modelled)
+	// RCL/RCR by 1, imm8 and CL, register and memory forms
+	for r := 2; r < 4; r++ {
+		for _, o := range []byte{0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3} {
+			add("rcx", nil, b(o), r, 0)
+		}
+	}
+	// scalar moves MOVSS (F3) / MOVSD (F2)
+	for _, p := range []byte{0xF2, 0xF3} {
+		for _, o := range []byte{0x10, 0x11} {
+			add("sse/movs", b(p), b(0x0F, o), -1, 0)
+			add("sse/movs", b(p), b(0x0F, o), -1, 1)
+		}
+	}
+	// PREFETCHh (/0../3) and the reserved hint NOPs (/4../7, rejected); CLD, STD (rejected)
+	for r := 0; r < 8; r++ {
+		add("prefetch", nil, b(0x0F, 0x18), r, 0)
+	}
+	add("misc", nil, b(0xFC), -1, 0)
+	add("misc", nil, b(0xFD), -1, 0)
+	// FS-relative forms (memory operand forced), and FS on forms where it is rejected
+	for _, o := range [][]byte{{0x8B}, {0x89}, {0x88}, {0x8A}, {0xC7}, {0xC6}, {0x03}, {0x3B}, {0x39}, {0x85}, {0x81}, {0x83}, {0x0F, 0xB6}, {0x0F, 0xB7}, {0x0F, 0xBE}, {0x63}} {
+		add("fs", b(0x64), o, -1, 2)
+	}
+	for _, o := range [][]byte{{0x8B}, {0x89}, {0x8D}, {0xFF}, {0x0F, 0x10}, {0xA5}, {0xAB}, {0x0F, 0xB1}} {
+		add("fs", b(0x64), o, -1, 0)
+	}
 	add("ud", nil, b(0x0F, 0x0B), -1, 0)
 	add("ud", nil, b(0xCC), -1, 0)
 	return s
@@ -273,3 +307,102 @@ func GroupRandom(r *rand.Rand) []byte {
 
 // OK reports whether b may be run (not forbidden).
 func OK(b []byte) bool { return len(b) > 0 && !L.Forbidden(b) }
+
+// VexSpec is a targeted VEX encoding family: opcode map (1 = 0F, 2 = 0F38), implied prefix
+// pp (0 none, 1 66, 2 F3, 3 F2) and opcode, followed by random ModRM/SIB/displacement bytes.
+type VexSpec struct {
+	Name    string
+	Map, PP byte
+	Op      byte
+	Mod3    int // 1 = register form, 2 = memory form, 0 = random
+}
+
+func vexSpecs() []VexSpec {
+	var s []VexSpec
+	add := func(name string, mp, pp, op byte, mod int) {
+		s = append(s, VexSpec{name, mp, pp, op, mod})
+	}
+	for _, mod := range []int{0, 1, 2} {
+		add("vex/mov", 1, 2, 0x6F, mod) // VMOVDQU
+		add("vex/mov", 1, 2, 0x7F, mod)
+		add("vex/mov", 1, 1, 0x6F, mod) // VMOVDQA
+		add("vex/mov", 1, 1, 0x7F, mod)
+		add("vex/mov", 1, 1, 0xE7, mod)                     // VMOVNTDQ
+		for _, op := range []byte{0xEF, 0xDB, 0xEB, 0x74} { // VPXOR VPAND VPOR VPCMPEQB
+			add("vex/int", 1, 1, op, mod)
+		}
+		add("vex/int", 1, 1, 0xD7, mod) // VPMOVMSKB
+		add("vex/int", 2, 1, 0x17, mod) // VPTEST
+		add("vex/int", 2, 1, 0x78, mod) // VPBROADCASTB
+	}
+	add("vex/zero", 1, 0, 0x77, 0) // VZEROUPPER / VZEROALL
+	add("vex/zero", 1, 0, 0x77, 0)
+	// neighbours that must be rejected (or are not modelled)
+	add("vex/other", 1, 0, 0x6F, 0) // no VEX MMX form: #UD
+	add("vex/other", 1, 3, 0x6F, 0) // VMOVDQU with F2: #UD
+	add("vex/other", 2, 1, 0x79, 0) // VPBROADCASTW
+	add("vex/other", 1, 1, 0xDF, 0) // VPANDN
+	add("vex/other", 1, 1, 0x75, 0) // VPCMPEQW
+	add("vex/other", 3, 1, 0x0F, 0) // VPALIGNR
+	add("vex/other", 2, 2, 0xF6, 0) // MULX
+	return s
+}
+
+// VexSpecs is the targeted VEX table.
+var VexSpecs = vexSpecs()
+
+// VexTargeted produces one VEX encoding of sp: mostly the valid shape (unused VEX.vvvv =
+// 1111, the right map and pp), sometimes a reserved field set, a stray prefix before the VEX
+// prefix, or the other form (2-byte / 3-byte).
+func VexTargeted(r *rand.Rand, sp VexSpec) []byte {
+	var out []byte
+	if r.IntN(12) == 0 {
+		out = append(out, []byte{0x66, 0xF2, 0xF3, 0xF0, 0x40, 0x48, 0x2E, 0x64, 0x67}[r.IntN(9)])
+	}
+	rr, xx, bb := byte(r.IntN(2)), byte(r.IntN(2)), byte(r.IntN(2))
+	w := byte(r.IntN(2))
+	vvvv := byte(0)
+	if r.IntN(4) == 0 {
+		vvvv = byte(r.IntN(16))
+	}
+	l := byte(r.IntN(2))
+	if sp.Op == 0x77 && r.IntN(3) != 0 {
+		l = 0
+	}
+	mp, pp := sp.Map, sp.PP
+	if r.IntN(20) == 0 {
+		mp = byte(r.IntN(4))
+	}
+	if r.IntN(20) == 0 {
+		pp = byte(r.IntN(4))
+	}
+	if mp == 1 && xx == 0 && bb == 0 && w == 0 && r.IntN(3) != 0 {
+		out = append(out, 0xC5, (1-rr)<<7|(^vvvv&15)<<3|l<<2|pp)
+	} else {
+		out = append(out, 0xC4, (1-rr)<<7|(1-xx)<<6|(1-bb)<<5|mp, w<<7|(^vvvv&15)<<3|l<<2|pp)
+	}
+	out = append(out, sp.Op)
+	modrm := byte(r.IntN(256))
+	switch sp.Mod3 {
+	case 1:
+		modrm |= 0xC0
+	case 2:
+		if modrm>>6 == 3 {
+			modrm &^= 0xC0
+		}
+	default:
+		if r.IntN(3) == 0 {
+			modrm |= 0xC0
+		}
+	}
+	tail := make([]byte, 12)
+	for i := range tail {
+		tail[i] = byte(r.IntN(256))
+		if r.IntN(2) == 0 && i > 0 {
+			tail[i] = []byte{0, 0, 0xff, 1, 0x20, 0x10, 0x80, 0xe0}[r.IntN(8)]
+		}
+	}
+	tail[0] = modrm
+	out = append(out, tail...)
+	return trim(out)
+}

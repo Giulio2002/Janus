@@ -148,3 +148,24 @@ leaves `RIP` at the instruction, so the driver feeds registers, flags and the bu
   model.
 
 No case has a flag the formal model leaves undefined and ours defines.
+
+## FS, YMM and the vector/scalar-move classes
+
+`build.sh` also patches the driver so that `-C fsbase=V` sets the FS base (`IA32_FS_BASE`,
+`msrs[1]`, which 64-bit-mode FS addressing uses, and `seg_hidden_bases[4]`), `-C ymm{i}q{j}=V`
+sets quadword `j` of `zmms[i]` (`i < 16`, `j < 4`), and `printState` prints `ymm0`..`ymm15`
+(bits 255:0). `compare.py` passes each case's `fsbase`, `xmm` and `ymmh`, compares the YMM
+registers too, no longer excludes the SSE classes, and `--fs 1` keeps only `64`-prefixed cases:
+
+```
+python3 -I oracle-amd64-formal/compare.py WORKDIR/model-janus/x86_emulator OUT_DIR fs.json --sample 1000000 --jobs 20 --fs 1
+python3 -I oracle-amd64-formal/compare.py WORKDIR/model-janus/x86_emulator OUT_DIR new.json --sample 1000000 --jobs 20 \
+  --classes '^(gen/(rcl|rcr|movss|movsd_xmm|movups|movaps|movupd|movapd|movdqu|movdqa|movq|movd|pxor|xorps|xorpd|pcmpeqb|pand|por|pmovmskb|pshufd|pshuflw|punpcklbw|prefetch.*|cld|v.*)|edge/(tls|sse-memmove|sse-align|vec-cmp|vec-align)|harvest/(rcr|movss|movsd_xmm|movups|movdqu|movq|movd|cld|v.*|p.*))$'
+```
+
+Results on the final `SEED=1` run are in `docs/ORACLE-AMD64.md` ("FS, YMM and the new
+instructions"): every FS-relative case identical, 0 flags undefined there but defined by us,
+and every result difference a formal-model bug in `MOVD/MOVQ xmm, r/m` (it does not
+zero-extend to 128 bits). The formal model implements no VEX instruction and none of the
+packed-integer ones. Cases with `DF = 1` are run with `DF = 0` there (the driver sets only the
+status flags), so the string classes are not part of this comparison.

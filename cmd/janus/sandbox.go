@@ -14,7 +14,9 @@ package main
 //   - a private /tmp and a new session, PID, IPC, UTS and user namespace.
 //
 // bubblewrap (bwrap) is preferred. Without it, an unshare-based fallback provides the same
-// network and read-only-root confinement through a mount namespace. With neither, verification
+// confinement through a mount namespace: no network, every mount read-only, private tmpfs
+// /tmp and /dev/shm (see unshareScript); if a mount cannot be made read-only the fallback is
+// refused. With neither, verification
 // refuses unless --unsafe-no-sandbox is passed, and the mode is recorded in verified.json.
 
 import (
@@ -57,17 +59,28 @@ func detectSandbox(unsafeNoSandbox bool) (*sandbox, error) {
 	if unsafeNoSandbox {
 		return &sandbox{mode: "none"}, nil
 	}
-	if p, err := exec.LookPath("bwrap"); err == nil {
+	// JANUS_SANDBOX=unshare forces the fallback (for testing it on hosts with bubblewrap);
+	// JANUS_SANDBOX=bwrap forbids it.
+	force := os.Getenv("JANUS_SANDBOX")
+	if force != "" && force != "bwrap" && force != "unshare" {
+		return nil, sandboxDiag(fmt.Sprintf("JANUS_SANDBOX=%q is neither bwrap nor unshare", force))
+	}
+	if p, err := exec.LookPath("bwrap"); err == nil && force != "unshare" {
 		s := &sandbox{mode: "bwrap", bwrap: p}
 		if err := s.selfTest(); err == nil {
 			return s, nil
 		}
 	}
-	if _, err := exec.LookPath("unshare"); err == nil {
+	var unshareErr error
+	if _, err := exec.LookPath("unshare"); err == nil && force != "bwrap" {
 		s := &sandbox{mode: "unshare"}
-		if err := s.selfTest(); err == nil {
+		if unshareErr = s.selfTest(); unshareErr == nil {
 			return s, nil
 		}
+	}
+	if unshareErr != nil && force == "unshare" {
+		return nil, sandboxDiag("the unshare fallback cannot confine the build (" + unshareErr.Error() +
+			"); it requires every mount to be remountable read-only. Install bubblewrap")
 	}
 	// A last attempt to make bwrap available, documented as a requirement.
 	if tryInstallBwrap() {
@@ -77,6 +90,10 @@ func detectSandbox(unsafeNoSandbox bool) (*sandbox, error) {
 				return s, nil
 			}
 		}
+	}
+	if unshareErr != nil {
+		return nil, sandboxDiag("bwrap is not installed and the unshare fallback cannot confine the build (" +
+			unshareErr.Error() + "); install bubblewrap")
 	}
 	return nil, sandboxDiag("bwrap is not installed and no usable unprivileged user namespace is available")
 }
@@ -126,10 +143,28 @@ func (s *sandbox) selfTest() error {
 	}
 	// Subshells so a redirection failure (expected for the read-only path) cannot make the
 	// outer shell exit, which dash does for its special built-ins.
+	// /tmp and /dev/shm must be private: a file written there must not appear on the host.
+	name := "janus-sbx-" + newNonce()
+	var private []string
+	for _, d := range []string{"/tmp", "/dev/shm"} {
+		if st, err := os.Stat(d); err == nil && st.IsDir() {
+			private = append(private, filepath.Join(d, name))
+		}
+	}
 	script := "(echo x > " + shQuote(filepath.Join(probe, "ok")) + ") 2>/dev/null; " +
-		"if (echo x > " + shQuote(filepath.Join(tmp, "denied")) + ") 2>/dev/null; then echo LEAK; fi; echo DONE"
+		"if (echo x > " + shQuote(filepath.Join(tmp, "denied")) + ") 2>/dev/null; then echo LEAK; fi; "
+	for _, p := range private {
+		script += "(echo x > " + shQuote(p) + ") 2>/dev/null; "
+	}
+	script += "echo DONE"
 	cmd := s.command(probe, nil, []string{"/bin/sh", "-c", script}, os.Environ())
 	out, err := cmd.CombinedOutput()
+	for _, p := range private {
+		if _, serr := os.Lstat(p); serr == nil {
+			_ = os.Remove(p)
+			return fmt.Errorf("the sandbox does not have a private %s", filepath.Dir(p))
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -165,6 +200,15 @@ func (s *sandbox) command(workDir string, extraWritable []string, argv []string,
 // commandRO is command with additional host directories exposed read-only (bubblewrap's
 // private /tmp would otherwise hide those under /tmp).
 func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, argv []string, env []string) *exec.Cmd {
+	return s.commandOverlay(workDir, extraWritable, readOnly, nil, argv, env)
+}
+
+// commandOverlay is commandRO with protected directories re-mounted read-only on top of the
+// writable ones (mounted last, so they win): the trusted framework build inside a consumer
+// workspace stays read-only to the untrusted Lake build that runs in that workspace. A
+// mount point cannot be renamed or removed from inside the sandbox, so the protected tree
+// cannot be swapped out either. In mode "none" nothing is enforced; the olean pins still are.
+func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protected []string, argv []string, env []string) *exec.Cmd {
 	writable := append([]string{workDir}, extraWritable...)
 	switch s.mode {
 	case "bwrap":
@@ -172,6 +216,15 @@ func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, ar
 			"--unshare-all", "--die-with-parent", "--new-session",
 			"--ro-bind", "/", "/",
 			"--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+		}
+		// Round 3, S2: `--ro-bind / /` also binds the host's live runtime sockets under /run
+		// (/run/docker.sock, the D-Bus system bus, containerd). A *read-only* bind does not stop
+		// a process connecting to a unix socket, and unix sockets are not confined by the network
+		// namespace, so untrusted proof code could reach a privileged daemon and escape. Overmount
+		// /run (and thus /var/run, a symlink to it) with an empty tmpfs; the cache re-bind below
+		// restores any janus dir that happens to live under /run.
+		if _, err := os.Stat("/run"); err == nil {
+			a = append(a, "--tmpfs", "/run")
 		}
 		// The private /tmp would hide any janus directory placed under /tmp (the cache can be
 		// there, e.g. in tests), so re-expose the cache read-only; the writable binds below
@@ -195,27 +248,17 @@ func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, ar
 		for _, w := range writable {
 			a = append(a, "--bind", w, w)
 		}
+		for _, p := range protected {
+			a = append(a, "--ro-bind", p, p)
+		}
 		a = append(a, "--chdir", workDir, "--")
 		a = append(a, argv...)
 		cmd := exec.Command(s.bwrap, a...)
 		cmd.Env = env
 		return cmd
 	case "unshare":
-		// New user+mount+net+pid+ipc+uts namespaces; remount / read-only, then re-expose the
-		// writable dirs rw, and exec argv. $@ carries argv so no quoting of its elements.
-		var sb strings.Builder
-		sb.WriteString("set -e\n")
-		sb.WriteString("mount --make-rprivate / 2>/dev/null || true\n")
-		sb.WriteString("mount -o remount,ro,bind / / 2>/dev/null || mount -o remount,ro / /\n")
-		for _, w := range writable {
-			q := shQuote(w)
-			sb.WriteString("mount --bind " + q + " " + q + " 2>/dev/null || true\n")
-			sb.WriteString("mount -o remount,rw,bind " + q + " " + q + " 2>/dev/null || true\n")
-		}
-		sb.WriteString("cd " + shQuote(workDir) + "\n")
-		sb.WriteString(`exec "$@"` + "\n")
 		args := []string{"-Umrnipf", "--map-root-user", "--mount-proc", "--",
-			"/bin/sh", "-c", sb.String(), "janus-sandbox"}
+			"/bin/sh", "-c", unshareScript(workDir, writable, readOnly, protected), "janus-sandbox"}
 		args = append(args, argv...)
 		cmd := exec.Command("unshare", args...)
 		cmd.Env = env
@@ -226,6 +269,127 @@ func (s *sandbox) commandRO(workDir string, extraWritable, readOnly []string, ar
 		cmd.Env = env
 		return cmd
 	}
+}
+
+// unshareRefusedStatus is the exit status of the unshare sandbox script when it cannot make a
+// mount read-only; the self-test then refuses the fallback.
+const unshareRefusedStatus = 97
+
+// unshareScript is the setup script of the unshare fallback, run as root of a new user, mount,
+// network, PID, IPC and UTS namespace (round 2, U1). It matches bubblewrap's confinement:
+//
+//  1. every mount visible in the namespace is remounted read-only (not only /: /boot,
+//     /run/user/…, /dev and any other rw mount too), keeping each mount's locked
+//     nosuid/nodev/noexec/atime flags, which a user namespace may not change. A mount that
+//     cannot be made read-only aborts the script with status 97 and the fallback is refused;
+//     mounts below /proc belong to the host procfs hidden by --mount-proc, and mount points
+//     shadowed by a later mount are not reachable, so both are skipped;
+//  2. /tmp and /dev/shm get private tmpfs mounts, so nothing written there reaches the host;
+//  3. the cache (read-only), the extra read-only dirs, the writable dirs and the protected
+//     trees are bound back in that order. Those under the host /tmp are bound from the hidden
+//     original through the shell's working directory (`cd /tmp` before the tmpfs mount;
+//     relative sources with --no-canonicalize resolve against it).
+//
+// $@ carries argv, so its elements need no quoting.
+func unshareScript(workDir string, writable, readOnly, protected []string) string {
+	var sb strings.Builder
+	w := func(line string) { sb.WriteString(line + "\n") }
+	w("set -e")
+	// remnt ro|rw TARGET MOUNTINFO-TARGET: change only the read-only flag of the mount at
+	// TARGET, passing its other per-mount flags back (the last mountinfo entry for it is the
+	// visible one).
+	w("remnt() {")
+	w(`  o=""`)
+	w(`  while read -r _ _ _ _ mp opts _; do [ "$mp" = "$3" ] && o=$opts; done < /proc/self/mountinfo`)
+	w(`  o=$(printf '%s' "$o" | sed 's/^r[wo],\{0,1\}//; s/,r[wo]\(,\|$\)/\1/')`)
+	w(`  mount -o "remount,bind,$1${o:+,$o}" "$2" "$2"`)
+	w("}")
+	w("mount --make-rprivate /")
+	w("while read -r _ _ _ _ mp _; do")
+	w(`  t=$(printf '%b' "$mp")`)
+	w(`  case "$t" in /proc/*) continue ;; esac`)
+	w(`  remnt ro "$t" "$mp" 2>/dev/null || {`)
+	w(`    mountpoint -q "$t" 2>/dev/null || continue`)
+	w(fmt.Sprintf(`    echo "janus-sandbox: cannot make the mount $t read-only" >&2; exit %d; }`, unshareRefusedStatus))
+	w("done < /proc/self/mountinfo")
+	w("if [ -d /tmp ]; then cd /tmp; mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp; fi")
+	w("if [ -d /dev/shm ]; then mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /dev/shm; fi")
+	// Round 3, S2: overmount /run with an empty tmpfs so the host's live runtime sockets
+	// (/run/docker.sock, the D-Bus system bus, containerd) are not reachable from untrusted
+	// proof code (a read-only remount does not stop a connect() to a unix socket). Skip it only
+	// when a path janus must bind back lives under /run, which the tmpfs would hide; those paths
+	// are normally under the home cache, not /run.
+	underRun := func(p string) bool {
+		p = filepath.Clean(p)
+		return p == "/run" || strings.HasPrefix(p, "/run/")
+	}
+	runSafe := !underRun(cacheRoot())
+	for _, p := range append(append(append([]string{}, writable...), readOnly...), protected...) {
+		if underRun(p) {
+			runSafe = false
+		}
+	}
+	if runSafe {
+		w("if [ -d /run ]; then mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run; fi")
+	}
+	// bind P (ro or rw); strict: failure aborts (set -e) instead of continuing.
+	bind := func(p string, rw, strict bool) {
+		p = filepath.Clean(p)
+		st, err := os.Stat(p)
+		if err != nil {
+			return
+		}
+		mode := "ro"
+		if rw {
+			mode = "rw"
+		}
+		q := shQuote(p)
+		tail := " 2>/dev/null || true"
+		if strict {
+			tail = ""
+		}
+		src := q
+		if rel, ok := strings.CutPrefix(p, "/tmp/"); ok && rel != "" {
+			// recreate the mount point in the private tmpfs and bind the original from
+			// the hidden host /tmp (the working directory)
+			if st.IsDir() {
+				w("mkdir -p " + q + tail)
+			} else {
+				w("mkdir -p " + shQuote(filepath.Dir(p)) + " && : > " + q + tail)
+			}
+			src = shQuote("./" + rel)
+		}
+		w("mount --no-canonicalize --bind " + src + " " + q + tail)
+		w("remnt " + mode + " " + q + " " + shQuote(mountinfoEscape(p)) + tail)
+	}
+	if base := cacheRoot(); base != "" {
+		bind(base, false, false)
+	}
+ro:
+	for _, r := range readOnly {
+		for _, wr := range writable {
+			if r == wr || strings.HasPrefix(r, wr+string(filepath.Separator)) {
+				continue ro // stays writable, as with bwrap
+			}
+		}
+		bind(r, false, false)
+	}
+	for _, wr := range writable {
+		bind(wr, true, false)
+	}
+	for _, p := range protected {
+		// Protected trees must end up read-only: no "|| true" (set -e aborts otherwise).
+		bind(p, false, true)
+	}
+	w("cd " + shQuote(workDir))
+	w(`exec "$@"`)
+	return sb.String()
+}
+
+// mountinfoEscape encodes a path the way /proc/self/mountinfo prints it (octal escapes for
+// space, tab, newline and backslash).
+func mountinfoEscape(p string) string {
+	return strings.NewReplacer(`\`, `\134`, " ", `\040`, "\t", `\011`, "\n", `\012`).Replace(p)
 }
 
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

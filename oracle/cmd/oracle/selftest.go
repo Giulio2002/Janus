@@ -134,6 +134,66 @@ func cmdSelftest(args []string) {
 			return ""
 		})},
 	}
+	// Vector registers and TPIDR_EL0: loaded from the case, captured from the signal frame.
+	vin := func(c *L.Case, i int) string {
+		if len(c.V) != 32 {
+			return "0"
+		}
+		return c.V[i]
+	}
+	vreg := func(i int, want func(c *L.Case) string) func(c *L.Case, h *L.HW) string {
+		return func(c *L.Case, h *L.HW) string {
+			if len(h.V) != 32 {
+				return "no vector registers reported"
+			}
+			if w := want(c); norm128(h.V[i]) != norm128(w) {
+				return fmt.Sprintf("v%d = %s, want %s", i, h.V[i], w)
+			}
+			return ""
+		}
+	}
+	vpreserved := func(except ...int) func(c *L.Case, h *L.HW) string {
+		return func(c *L.Case, h *L.HW) string {
+			skip := map[int]bool{}
+			for _, e := range except {
+				skip[e] = true
+			}
+			if len(h.V) != 32 {
+				return "no vector registers reported"
+			}
+			for i := 0; i < 32; i++ {
+				if !skip[i] && norm128(h.V[i]) != norm128(vin(c, i)) {
+					return fmt.Sprintf("v%d changed: %s -> %s", i, vin(c, i), h.V[i])
+				}
+			}
+			return ""
+		}
+	}
+	setV := func(s *gen.State) {
+		for i := range s.V {
+			s.V[i] = [2]uint64{0x0101010101010101 * uint64(i+1), 0x1111111111111111*uint64(i%15+1) ^ 0x8000000000000000}
+		}
+		s.TPIDR = 0x123456789abcdef0
+	}
+	tests = append(tests,
+		tc{"nop (vector registers preserved)", 0xd503201f, setV, and(expect("ok", T+4), preserved(), vpreserved())},
+		tc{"mov v0.16b, v1.16b", 0x4ea11c20, setV, and(expect("ok", T+4), preserved(), vpreserved(0),
+			vreg(0, func(c *L.Case) string { return c.V[1] }))},
+		tc{"umov x0, v1.d[1]", 0x4e183c20, setV, and(expect("ok", T+4), preserved(0), vpreserved(),
+			reg(0, 0x2222222222222222^0x8000000000000000))},
+		tc{"dup v2.16b, w3", 0x4e010c62, func(s *gen.State) { setV(s); s.X[3] = 0x1234567890abcdef }, and(expect("ok", T+4),
+			preserved(), vpreserved(2), vreg(2, func(c *L.Case) string { return "0xefefefefefefefefefefefefefefefef" }))},
+		tc{"ldr q0, [x1]", 0x3dc00020, func(s *gen.State) { setV(s); s.X[1] = D + 512; s.Seed = 5 },
+			and(expect("ok", T+4), preserved(), vpreserved(0), vreg(0, func(c *L.Case) string {
+				var lo, hi uint64
+				for k := 7; k >= 0; k-- {
+					lo = lo<<8 | uint64(L.Pattern(5, uint64(512+k)))
+					hi = hi<<8 | uint64(L.Pattern(5, uint64(520+k)))
+				}
+				return fmt.Sprintf("0x%x%016x", hi, lo)
+			}))},
+		tc{"mrs x0, tpidr_el0", 0xd53bd040, setV, and(expect("ok", T+4), preserved(0), vpreserved(), reg(0, 0x123456789abcdef0))},
+	)
 	// nop under every NZCV, all registers distinct: the trampoline must preserve everything.
 	for f := 0; f < 16; f++ {
 		f := f

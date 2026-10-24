@@ -52,6 +52,7 @@ func handler()
 func restorer()
 func resume()
 func addrs() (handler, restorer uintptr)
+func cpuid(eax, ecx uint32) (a, b, c, d uint32)
 
 const (
 	sigILL  = 4
@@ -227,9 +228,34 @@ func runCase(c *L.Case, seq int64) L.HW {
 		}
 		copy(ctx[L.CtxInXMM+16*i:], x[:])
 	}
+	if len(c.YMMH) != 0 && len(c.YMMH) != 16 {
+		r.Status, r.Note = "error", "ymmh must have 16 entries"
+		return r
+	}
+	for i := 0; i < 16; i++ {
+		var y [16]byte
+		if len(c.YMMH) == 16 {
+			y, err = parseHex128(c.YMMH[i])
+			if err != nil {
+				r.Status, r.Note = "error", err.Error()
+				return r
+			}
+		}
+		copy(ctx[L.CtxInYMMH+16*i:], y[:])
+	}
+	var fsBase uint64
+	if c.FSBase != "" {
+		fsBase, err = parseHex(c.FSBase)
+		// WRFSBASE needs a canonical address; only user (lower-half) values are accepted
+		if err != nil || fsBase >= 1<<47 {
+			r.Status, r.Note = "error", "bad fsbase"
+			return r
+		}
+	}
+	put64(ctx, L.CtxInFS, fsBase)
 	put64(ctx, L.CtxFrame, L.TestPC)
 	put64(ctx, L.CtxFrame+8, userCS)
-	put64(ctx, L.CtxFrame+16, uint64(c.RFlags&L.StatusFlags)|0x202|tf)
+	put64(ctx, L.CtxFrame+16, uint64(c.RFlags&(L.StatusFlags|L.FlagDF))|0x202|tf)
 	put64(ctx, L.CtxFrame+24, regs[4])
 	put64(ctx, L.CtxFrame+32, userSS)
 	put64(ctx, L.CtxSig, 0)
@@ -248,6 +274,13 @@ func runCase(c *L.Case, seq int64) L.HW {
 			}
 			if get64(ctx, L.CtxOutHasFP) == 1 {
 				copy(ctx[L.CtxInXMM:L.CtxInXMM+256], ctx[L.CtxOutXMM:L.CtxOutXMM+256])
+				if xbv := get64(ctx, L.CtxOutXBV); xbv != ^uint64(0) {
+					if xbv&4 != 0 {
+						copy(ctx[L.CtxInYMMH:L.CtxInYMMH+256], ctx[L.CtxOutYMMH:L.CtxOutYMMH+256])
+					} else {
+						clear(ctx[L.CtxInYMMH : L.CtxInYMMH+256])
+					}
+				}
 			}
 			efl := g(gEFL)
 			put64(ctx, L.CtxFrame, L.TestPC)
@@ -280,6 +313,18 @@ func runCase(c *L.Case, seq int64) L.HW {
 		for i := 0; i < 16; i++ {
 			r.XMM[i] = hex128(ctx[L.CtxOutXMM+16*i : L.CtxOutXMM+16*i+16])
 		}
+		if xbv := get64(ctx, L.CtxOutXBV); xbv != ^uint64(0) {
+			// XSTATE_BV bit 2 clear: the AVX state is in its initial configuration (all upper
+			// halves zero) and the area's contents are not meaningful
+			r.YMMH = make([]string, 16)
+			for i := 0; i < 16; i++ {
+				if xbv&4 != 0 {
+					r.YMMH[i] = hex128(ctx[L.CtxOutYMMH+16*i : L.CtxOutYMMH+16*i+16])
+				} else {
+					r.YMMH[i] = "0x0"
+				}
+			}
+		}
 	}
 	for i := range data {
 		if data[i] != initial[i] {
@@ -304,6 +349,34 @@ func runCase(c *L.Case, seq int64) L.HW {
 	return r
 }
 
+// checkCPU makes sure the trampoline's RDFSBASE/WRFSBASE (FSGSBASE, enabled by the kernel:
+// AT_HWCAP2 bit 1) and VINSERTI128 (AVX2) are available, and that the signal frame's XSAVE
+// layout has YMM_Hi128 where the handler reads it.
+func checkCPU() {
+	auxv, err := os.ReadFile("/proc/self/auxv")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "runner: %v\n", err)
+		os.Exit(2)
+	}
+	ok := false
+	for i := 0; i+16 <= len(auxv); i += 16 {
+		if binary.LittleEndian.Uint64(auxv[i:]) == 26 { // AT_HWCAP2
+			ok = binary.LittleEndian.Uint64(auxv[i+8:])&2 != 0 // HWCAP2_FSGSBASE
+		}
+	}
+	if !ok {
+		fmt.Fprintln(os.Stderr, "runner: the kernel does not enable FSGSBASE (needed to run FS-relative cases)")
+		os.Exit(2)
+	}
+	_, ebx, _, _ := cpuid(0xD, 2)
+	_, ebx7, _, _ := cpuid(7, 0)
+	if ebx7&(1<<5) == 0 || ebx != L.XsaveYMMHOffset {
+		fmt.Fprintf(os.Stderr, "runner: need AVX2 and YMM_Hi128 at XSAVE offset %d (CPUID: AVX2 %v, offset %d)\n",
+			L.XsaveYMMHOffset, ebx7&(1<<5) != 0, ebx)
+		os.Exit(2)
+	}
+}
+
 func main() {
 	limit := flag.Duration("timeout", time.Second, "watchdog limit for one case")
 	flag.BoolVar(&allowForbidden, "unsafe-allow-forbidden", false, "test only: run forbidden encodings (to check the seccomp filter)")
@@ -313,6 +386,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "runner: GODEBUG=asyncpreemptoff=1 is required")
 		os.Exit(2)
 	}
+	checkCPU()
 	runtime.LockOSThread()
 	debug.SetGCPercent(-1)
 	runtime.GOMAXPROCS(2)

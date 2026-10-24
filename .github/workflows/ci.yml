@@ -167,7 +167,16 @@ jobs:
           n=${#syms[@]}
           [ "$n" -gt 0 ] || { echo "no example functions found" >&2; exit 1; }
           bin/janus blockers artifacts/examples-arm64 "${syms[@]}" | tee blockers.txt
-          grep -q "Summary: $n symbol(s): $n fully decoded" blockers.txt
+          # Every example must decode fully, except the store-exclusive fallback loops that Go
+          # emits next to the LSE path in sync/atomic callers. The model rejects STXR/STLXR by
+          # design (spurious failure is not modelled, docs/SOUNDNESS.md); the proofs take the
+          # LSE path under runtime.arm64HasATOMICS. Any other rejected word fails the job.
+          allowed='^ +0x[0-9a-f]+ +0x[0-9a-f]+ +stl?xr .* example\.com/basic\.(AtomicAdd|AtomicMax)$'
+          if grep -E '^ +0x[0-9a-f]+ +0x[0-9a-f]{8} ' blockers.txt | grep -Ev "$allowed"; then
+            echo "unexpected rejected words (above)" >&2; exit 1
+          fi
+          grep -Eq "Summary: $n symbol\(s\): $((n - 2)) fully decoded" blockers.txt ||
+            grep -q "Summary: $n symbol(s): $n fully decoded" blockers.txt
 
       - name: Differential oracle vs qemu (quick)
         env:

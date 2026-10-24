@@ -210,7 +210,8 @@ theorem readLE_fillLE_disjoint (M : Memory) (a sz v k b n : Nat)
       Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by rw [Nat.mul_succ] at h; omega)]
 
 theorem State.ext' {s t : State} (h1 : s.regs = t.regs) (h2 : s.rip = t.rip) (h3 : s.flags = t.flags)
-    (h4 : s.xmm = t.xmm) (h5 : s.mem = t.mem) : s = t := by
+    (h4 : s.xmm = t.xmm) (h5 : s.mem = t.mem) (h6 : s.ymmHi = t.ymmHi := by rfl)
+    (h7 : s.fsBase = t.fsBase := by rfl) (h8 : s.df = t.df := by rfl) : s = t := by
   cases s; cases t; simp_all
 
 private theorem acc_head {m : Memory} {a sz k : Nat} {w : Bool} (h : m.accessible a (sz * (k + 1)) w = true) :
@@ -322,7 +323,7 @@ theorem stepOKAt_spec {p : Program} {pc : Nat} {i : Instr} {len : Nat}
 
 theorem Reaches.repStos {p : Program} {ret : Nat} {t : State} {Q : Outcome → Prop} {c len w : Nat}
     (hret : GoABI.RetAddr p ret) (hpc : t.rip = BitVec.ofNat 64 c)
-    (hok : stepOKAt p c (.stos true w) len = true) (a k : Nat)
+    (hok : stepOKAt p c (.stos true w) len = true) (a k : Nat) (hdf : t.df = false)
     (h7 : t.regs 7 = BitVec.ofNat 64 a) (h1 : t.regs 1 = BitVec.ofNat 64 k) (hk : k < 2 ^ 64)
     (hacc : t.mem.accessible a (w / 8 * k) true = true) (hnw : a + w / 8 * k < 2 ^ 64)
     (h : Reaches (p.withExit ret)
@@ -333,12 +334,12 @@ theorem Reaches.repStos {p : Program} {ret : Nat} {t : State} {Q : Outcome → P
   obtain ⟨bs, hok⟩ := stepOKAt_spec hok
   refine Reaches.step_withExit hret hpc hok rfl ?_
   have h1' : (t.regs 1).toNat = k := by rw [h1, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hk]
-  simp only [exec, ite_true, h1', stosIter_ok _ _ _ t a h7 hacc hnw]
-  exact h
+  simp only [exec, ite_true, hdf, Bool.false_eq_true, ite_false, h1', stosIter_ok _ _ _ t a h7 hacc hnw]
+  rw [hdf] at h; exact h
 
 theorem Reaches.repMovs {p : Program} {ret : Nat} {t : State} {Q : Outcome → Prop} {c len w : Nat}
     (hret : GoABI.RetAddr p ret) (hpc : t.rip = BitVec.ofNat 64 c)
-    (hok : stepOKAt p c (.movs true w) len = true) (a b k : Nat)
+    (hok : stepOKAt p c (.movs true w) len = true) (a b k : Nat) (hdf : t.df = false)
     (h7 : t.regs 7 = BitVec.ofNat 64 a) (h6 : t.regs 6 = BitVec.ofNat 64 b)
     (h1 : t.regs 1 = BitVec.ofNat 64 k) (hk : k < 2 ^ 64)
     (hacc : t.mem.accessible a (w / 8 * k) true = true)
@@ -352,7 +353,7 @@ theorem Reaches.repMovs {p : Program} {ret : Nat} {t : State} {Q : Outcome → P
   obtain ⟨bs, hok⟩ := stepOKAt_spec hok
   refine Reaches.step_withExit hret hpc hok rfl ?_
   have h1' : (t.regs 1).toNat = k := by rw [h1, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hk]
-  simp only [exec, ite_true, h1', movsIter_ok _ _ t a b h7 h6 hacc hsrc hnw hnw']
-  exact h
+  simp only [exec, ite_true, hdf, Bool.false_eq_true, ite_false, h1', movsIter_ok _ _ t a b h7 h6 hacc hsrc hnw hnw']
+  rw [hdf] at h; exact h
 
 end Janus.Amd64.Tactic

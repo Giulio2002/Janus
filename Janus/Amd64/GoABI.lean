@@ -86,7 +86,8 @@ structure RetAddr (p : Program) (ret : Nat) : Prop where
 
 /-- `s` is a state in which `entry` has just been called (by `CALL`) with integer register
 arguments `args`, returning to `p.exitAddr`: `RIP = entry`, the return address `p.exitAddr`
-is stored at `[RSP]`, `X15 = 0`, and argument `i` is in `argReg i`. Everything else (other
+is stored at `[RSP]`, `X15 = 0`, the direction flag is clear, and argument `i` is in
+`argReg i`. Everything else (other
 registers, flags, other memory, and which regions exist) is arbitrary; specifications
 quantify over all such states and state the regions they need in their precondition. They use
 it with `p.withExit ret` for a universally quantified admissible `ret` (`RetAddr`), never with
@@ -97,6 +98,9 @@ structure CallSetup (p : Program) (entry : Nat) (args : List W64) (s : State) : 
   zero : s.xmm xmmZero = 0
   len : args.length ≤ numIntRegs
   args : ∀ i (h : i < args.length), s.regs (argReg i) = args[i]
+  /-- The direction flag is clear at every call (ABIInternal: "The direction flag (D) is
+  always cleared (set to the forward direction) at a call"). -/
+  df : s.df = false
 
 abbrev GoCall := CallSetup
 
@@ -144,6 +148,29 @@ structure StackGuardOK (s : State) (adj : Nat) : Prop where
   noWrap : (s.regs regG).toNat + stackguard0Offset + 8 ≤ 2 ^ 48
   readable : s.mem.accessible ((s.regs regG).toNat + stackguard0Offset) 8 false = true
   below : stackguard0 s + adj < (s.regs regSP).toNat
+
+/-- Thread-local storage: Go keeps the current goroutine's `g` pointer in the slot at `FS:-8`
+(`runtime.tlsg`: ABI wrappers and assembly reload `R14` with `MOVQ FS:-8, R14`). `TlsG s` says
+that slot (the 8 bytes at `fsBase - 8`) is readable, lies below `2^48` and holds `R14`. The
+`FS` base is an ordinary state field (`State.fsBase`) that specifications quantify over; the
+slot is ordinary memory, so a precondition grants it like any other region. -/
+structure TlsG (s : State) : Prop where
+  base : 8 ≤ s.fsBase.toNat ∧ s.fsBase.toNat ≤ 2 ^ 48
+  readable : s.mem.accessible (s.fsBase.toNat - 8) 8 false = true
+  g : s.mem.readLE (s.fsBase.toNat - 8) 8 = (s.regs regG).toNat
+
+/-- The address `FS:-8` (`fsBase + sext(-8)`, as the decoder produces it) is `fsBase - 8`. -/
+theorem TlsG.addr {s : State} (h : TlsG s) :
+    (s.fsBase + BitVec.ofNat 64 18446744073709551608).toNat = s.fsBase.toNat - 8 := by
+  have := h.base
+  rw [BitVec.toNat_add, BitVec.toNat_ofNat]
+  omega
+
+/-- Under `TlsG`, the TLS load `MOVQ FS:-8, r` reads `g`. -/
+theorem TlsG.load {s : State} (h : TlsG s) :
+    Janus.Amd64.load s.mem (s.fsBase + BitVec.ofNat 64 18446744073709551608).toNat 8 =
+      .ok (s.regs regG).toNat := by
+  rw [h.addr]; unfold Janus.Amd64.load; rw [h.readable]; simp [h.g]
 
 /-! ## Obligations on return -/
 

@@ -33,7 +33,12 @@ Given the theorem name, the proof module name and a marker, it
   unexpanders, delaborators, notations and instances cannot change what is printed (A2, A4).
   Dependency constants the statement reaches are added there as type-only declarations taken
   from the dependency modules, so the dependency's own notations and delaborators (which would be
-  dependency code running in this trusted process) do not apply either.
+  dependency code running in this trusted process) do not apply either;
+* checks the printed statement **means what was checked** (round 2, CRITICAL-1): every
+  instance-implicit argument of the statement must be a registered trusted instance or an
+  instance binder of the theorem (`checkInstArgs`), and the printed text must parse and
+  elaborate back, in the same clean environment, to a type definitionally equal to the checked
+  one (`printFaithful`/`roundTrip`); then prints it once more with `pp.explicit`.
 
 Output: one line `<marker>{json}` on stdout (the record), or `<marker>ERROR <message>`.
 Everything else on stderr. The marker is an argument, not read from any file.
@@ -56,10 +61,33 @@ structure Record where
   module      : String
   axioms      : Array String
   statement   : String
+  /-- The statement printed with `pp.explicit true` (instance arguments visible). -/
+  statementExplicit : String
   definitions : Array String  -- "<name> : <type> := <value>" for each allowed proof-local def
   modules     : Array String
   external    : Array String  -- "<name> (<kind>, <module>)" for each dependency constant used
+  /-- The import graph of every module outside the toolchain core (`Init`, `Std`, `Lean`,
+  `Lake`): `[module, direct import, …]`. The Go side kernel-replays each of these modules and
+  keys its replay cache on the module's bytes and those of its imports. -/
+  imports     : Array (Array String)
   deriving ToJson
+
+/-- A module shipped with the Lean toolchain (trusted, never replayed by `janus verify`). -/
+def coreModule (mod : Name) : Bool :=
+  let root := mod.getRoot
+  root == `Init || root == `Std || root == `Lean || root == `Lake
+
+/-- The direct imports of every non-core module of `env`, for `Record.imports`. -/
+def importGraph (env : Environment) : Array (Array String) := Id.run do
+  let mut out := #[]
+  for h : i in [0:env.header.moduleNames.size] do
+    let m := env.header.moduleNames[i]
+    if coreModule m then continue
+    let imps := match env.header.moduleData[i]? with
+      | some d => d.imports.map (·.module.toString)
+      | none => #[]
+    out := out.push (#[m.toString] ++ imps)
+  return out
 
 /-- Where a module comes from: the trusted framework/core, a declared dependency package, or the
 consumer package / proof. -/
@@ -242,13 +270,260 @@ def rawAdd (env : Environment) (decl : Declaration) : AuditM Environment := do
   | .ok env => return env
   | .error ex => fail (← (ex.toMessageData {}).toString)
 
+/-! ## Statement faithfulness (round 2, CRITICAL-1)
+
+The printed statement is the guarantee, so the auditor must make sure the text means what the
+kernel proved. An instance argument written *inline* in the statement
+(`@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y`) is hidden by the default pretty-printer, which renders
+the operation from the head symbol (`x * y`). Two independent checks close this:
+
+* `checkInstArgs` (structural): every argument in an instance-implicit position must be a
+  registered instance (applied to arguments that are, recursively, checked the same way) or a
+  local instance binder of the theorem, up to unfolding reducible definitions;
+* `roundTrip` (semantic): the printed statement is re-parsed and re-elaborated in the same clean
+  environment and must be definitionally equal to the checked type. -/
+
+/-- Is `c` a registered instance of the trusted environment? `Meta.isInstance` covers the
+global instances of the clean environment (core, `Janus`, `Extracted`); `scoped` instances of
+trusted modules (e.g. `Classical.propDecidable`) are taken from the raw extension entries of the
+audited environment, keeping only those declared in a trusted module. Dependency instances are
+never registered here (dependency instance lists are empty by rule: `checkExternal`). -/
+def trustedInstance (cx : Ctx) (c : Name) : MetaM Bool := do
+  if ← Meta.isInstance c then return true
+  return cx.instances.contains c && (match cx.moduleOf? c with
+    | some m => trustedModule m
+    | none => false)
+
+/-- An argument in an instance-implicit position is acceptable when, up to unfolding reducible
+definitions and `whnfCore` (beta, projections of constructors), its head is a registered trusted
+instance, or a local variable bound by an instance-implicit binder (a `[inst : C]` of the
+theorem). The head is checked *before* unfolding, since instances are themselves reducible and
+unfold to structure literals. Arguments of an accepted instance are checked by the caller's
+recursive walk. -/
+partial def instArgOk (cx : Ctx) (e : Expr) : MetaM Bool := do
+  match e.getAppFn with
+  | .const c _ =>
+    if ← trustedInstance cx c then return true
+    match ← Meta.withReducible (Meta.unfoldDefinition? e) with
+    | some e' => instArgOk cx e'
+    | none => return false
+  | .fvar id =>
+    match (← getLCtx).find? id with
+    | some d => return !d.isLet && d.binderInfo.isInstImplicit
+    | none => return false
+  | .mdata _ b => instArgOk cx (mkAppN b e.getAppArgs)
+  | _ =>
+    let e' ← Meta.whnfCore e
+    if e' == e then return false else instArgOk cx e'
+
+/-- Walk `e` and fail on the first instance-implicit argument that is not a registered
+instance or a local instance binder (a structure-instance literal, anonymous constructor,
+lambda, `let`-bound value, proof-local def, …). -/
+partial def checkInstArgs (cx : Ctx) (e : Expr) : MetaM (Option String) := do
+  match e with
+  | .app .. =>
+    let fn := e.getAppFn
+    let args := e.getAppArgs
+    let finfo ← Meta.getFunInfoNArgs fn args.size
+    for h : i in [0:args.size] do
+      let a := args[i]
+      if let some pi := finfo.paramInfo[i]? then
+        if pi.binderInfo.isInstImplicit then
+          unless ← instArgOk cx a do
+            let fnName := match fn.constName? with
+              | some c => s!"{c}"
+              | none => "a function"
+            return some s!"the statement passes the inline instance `{(← Meta.ppExpr a).pretty 10000}` as the instance argument {i + 1} of {fnName}; instance arguments must be registered instances (an inline instance can make the printed statement say something else: write the operation with its canonical instance, or name the function)"
+    if let some m ← checkInstArgs cx fn then return some m
+    for a in args do
+      if let some m ← checkInstArgs cx a then return some m
+    return none
+  | .lam n d b bi | .forallE n d b bi =>
+    if let some m ← checkInstArgs cx d then return some m
+    Meta.withLocalDecl n bi d fun x => checkInstArgs cx (b.instantiate1 x)
+  | .letE n t v b _ =>
+    if let some m ← checkInstArgs cx t then return some m
+    if let some m ← checkInstArgs cx v then return some m
+    Meta.withLetDecl n t v fun x => checkInstArgs cx (b.instantiate1 x)
+  | .mdata _ b => checkInstArgs cx b
+  | .proj _ _ s => checkInstArgs cx s
+  | _ => return none
+
+/-- The shape `ppSignature` prints: the declaration name followed by a `declSig`. -/
+def sigParser : Parser.Parser :=
+  Parser.node `JanusAudit.sig (Parser.ident >> Parser.Command.declSig)
+
+def parseSig (env : Environment) (input : String) : Except String Syntax :=
+  let p := Parser.andthenFn Parser.whitespace sigParser.fn
+  let ictx := Parser.mkInputContext input "<printed statement>"
+  let s := p.run ictx { env, options := {} } (Parser.getTokenTable env) (Parser.mkParserState input)
+  if !s.allErrors.isEmpty then .error (s.toErrorMsg ictx)
+  else if ictx.atEnd s.pos then .ok s.stxStack.back
+  else .error ((s.mkError "end of input").toErrorMsg ictx)
+
+/-- The options the statement is printed with, and re-elaborated with (`autoImplicit` affects
+only elaboration). No `pp.all`: the printed statement is the human-readable one, but it must say
+what it means, so
+
+* `pp.fullNames`: names are printed in full and resolve without `open`;
+* `pp.coercions.types`: a coercion is printed with its target type, `(↑n : Int)`, since a bare
+  `↑n` does not determine what it coerces to (neither for the reader nor for re-elaboration). -/
+def printOptions : Options := Options.empty
+  |>.setBool `pp.fullNames true
+  |>.setBool `pp.coercions.types true
+  |>.setBool `autoImplicit false
+  |>.setBool `relaxedAutoImplicit false
+
+/-- Heartbeat budget (in thousands, as `maxHeartbeats`) for re-elaborating the statement. -/
+def roundTripHeartbeats : Nat := 2000000
+
+/-- Re-parse and re-elaborate the printed signature `sig` in the current (clean) environment and
+options, and check the result is definitionally equal to `thmType`. Returns an error message,
+or `none` when the statement round-trips.
+
+Elaboration runs with `autoImplicit` off (an unresolved name is an error, not a new variable)
+and `errToSorry` off; any error message, remaining metavariable or `sorry` is a failure.
+The comparison is first structural; otherwise the elaborator's `isDefEq` at **default**
+transparency must succeed **and** the kernel's definitional-equality check must confirm it.
+Default transparency is sound for this purpose: definitionally equal propositions are the same
+proposition to the kernel (a proof of one is a proof of the other), so whatever the printed
+text means when elaborated with the canonical instances is exactly what was proved. A planted
+instance makes the canonical re-elaboration (e.g. the real `*`) differ from the checked term
+(really `+`), and they are not definitionally equal. -/
+def roundTrip (thm : Name) (thmType : Expr) (sig : String) : MetaM (Option String) := do
+  let env ← getEnv
+  let stx ← match parseSig env sig with
+    | .ok s => pure s
+    | .error e => return some s!"the printed statement does not parse back ({e}); it does not round-trip"
+  let nameStx := stx[0]
+  let declSig := stx[1]
+  unless nameStx.getId == thm do
+    return some s!"the printed statement names {nameStx.getId}, not {thm}; it does not round-trip"
+  let binders := declSig[0].getArgs
+  let tyStx := declSig[1][1]
+  let saved ← Core.getMessageLog
+  Core.resetMessageLog
+  let res ← try
+      -- this elaboration runs on its own heartbeat budget
+      let t ← withTheReader Core.Context
+          (fun c => { c with maxHeartbeats := roundTripHeartbeats * 1000 }) <| withCurrHeartbeats do
+        Elab.Term.TermElabM.run' (ctx := { errToSorry := false }) do
+          Elab.Term.elabBinders binders fun xs => do
+            let t ← Elab.Term.elabType tyStx
+            Elab.Term.synthesizeSyntheticMVarsNoPostponing
+            instantiateMVars (← Meta.mkForallFVars xs t)
+      pure (Except.ok t)
+    catch ex => pure (Except.error (← ex.toMessageData.toString))
+  let log ← Core.getMessageLog
+  Core.setMessageLog saved
+  let t ← match res with
+    | .ok t => pure t
+    | .error m => return some s!"the printed statement does not elaborate back ({m}); it does not round-trip"
+  if log.hasErrors then
+    let msgs ← log.toList.filterMapM fun m =>
+      if m.severity == .error then some <$> m.data.toString else pure none
+    return some s!"the printed statement does not elaborate back ({String.intercalate "; " msgs}); it does not round-trip"
+  if t.hasMVar || t.hasSorry then
+    return some "the printed statement elaborates back only partially (metavariables or sorry remain); it does not round-trip"
+  if t == thmType then return none
+  let metaEq ← try
+      withTheReader Core.Context
+          (fun c => { c with maxHeartbeats := roundTripHeartbeats * 1000 }) <| withCurrHeartbeats <|
+        Meta.withTransparency .default (Meta.isDefEq t thmType)
+    catch _ => pure false
+  -- the kernel confirms what the elaborator found (only then: it has no heartbeat budget)
+  let kernelEq := metaEq && (match Kernel.isDefEq env {} t thmType with
+    | .ok b => b
+    | .error _ => false)
+  unless kernelEq do
+    return some s!"the printed statement, read back with the canonical instances, is `{(← Meta.ppExpr t).pretty 10000}`, which is not definitionally equal to the checked statement; it does not round-trip (an instance or notation hides what the statement really says)"
+  return none
+
+/-- Print the signature of `thm` (whose type is `thmType`) so that it round-trips: first with the
+current options, then, if a numeral's type is what the plain print loses (`5 ≠ 7` at
+`BitVec 64` reads back at `Nat`), with `pp.numericTypes` too. The first print that round-trips
+is the statement; if none does, the error of the plain print. -/
+def printFaithful (thm : Name) (thmType : Expr) : MetaM (Except String String) := do
+  let mut firstErr := none
+  for numeric in [false, true] do
+    let sig ← withOptions (fun o => if numeric then o.setBool `pp.numericTypes true else o)
+      (PrettyPrinter.ppSignature thm)
+    let sigStr := sig.fmt.pretty 10000
+    match ← roundTrip thm thmType sigStr with
+    | none => return .ok sigStr
+    | some m => if firstErr.isNone then firstErr := some m
+  return .error (firstErr.getD "the printed statement does not round-trip")
+
+/-- Round 4 (D1): re-parse a printed term `str` and elaborate it (as a type when `expected` is
+`none`, otherwise against `expected`), returning whether the result is kernel-defeq to `target`.
+Any parse/elaboration error, metavariable or `sorry` counts as "does not round-trip". -/
+def termRoundTrips (str : String) (expected : Option Expr) (target : Expr) : MetaM Bool := do
+  let env ← getEnv
+  let stx ← match Parser.runParserCategory env `term str "<disclosed definition>" with
+    | .ok s => pure s
+    | .error _ => return false
+  let saved ← Core.getMessageLog
+  Core.resetMessageLog
+  let res ← try
+      let t ← withTheReader Core.Context
+          (fun c => { c with maxHeartbeats := roundTripHeartbeats * 1000 }) <| withCurrHeartbeats do
+        Elab.Term.TermElabM.run' (ctx := { errToSorry := false }) do
+          let t ← match expected with
+            | none => Elab.Term.elabType stx
+            | some ty => Elab.Term.elabTermEnsuringType stx (some ty)
+          Elab.Term.synthesizeSyntheticMVarsNoPostponing
+          instantiateMVars t
+      pure (some t)
+    catch _ => pure none
+  let log ← Core.getMessageLog
+  Core.setMessageLog saved
+  let some t := res | return false
+  if log.hasErrors || t.hasMVar || t.hasSorry then return false
+  if t == target then return true
+  let metaEq ← try
+      withTheReader Core.Context
+          (fun c => { c with maxHeartbeats := roundTripHeartbeats * 1000 }) <| withCurrHeartbeats <|
+        Meta.withTransparency .default (Meta.isDefEq t target)
+    catch _ => pure false
+  return metaEq && (match Kernel.isDefEq env {} t target with
+    | .ok b => b
+    | .error _ => false)
+
+/-- Round 4 (D1): disclose a proof-local def or theorem so the disclosure means what it says.
+The plain print is used if its type (and, for a def, its value) re-elaborate to the real ones;
+otherwise the same with `pp.numericTypes`/`pp.funBinderTypes` (a numeral such as `256 ≠ 0` at
+`BitVec 8` reads back at `Nat` without them). If neither round-trips (compiled recursion,
+`match` auxiliaries, universe polymorphism), the annotated print is disclosed and tagged
+`[not round-tripped]`, so the report never presents an unconfirmed reading as confirmed. -/
+def discloseDef (ci : ConstantInfo) : MetaM String := do
+  let annotate := fun (o : Options) => o.setBool `pp.numericTypes true |>.setBool `pp.funBinderTypes true
+  let mut lastTy := ""
+  let mut lastVal := ""
+  for ann in [false, true] do
+    let withO {α} (x : MetaM α) : MetaM α := withOptions (fun o => if ann then annotate o else o) x
+    let tyStr := (← withO (Meta.ppExpr ci.type)).pretty 10000
+    let isThm := ci matches .thmInfo _
+    let valStr ← match ci.value? with
+      | some v => if isThm then pure "<proof>" else pure ((← withO (Meta.ppExpr v)).pretty 10000)
+      | none => pure "<opaque>"
+    lastTy := tyStr; lastVal := valStr
+    if !ci.levelParams.isEmpty then continue
+    unless ← termRoundTrips tyStr none ci.type do continue
+    if isThm then return s!"{ci.name} : {tyStr} := {valStr}"
+    match ci.value? with
+    | some v =>
+      if ← termRoundTrips valStr (some ci.type) v then
+        return s!"{ci.name} : {tyStr} := {valStr}"
+    | none => pure ()
+  return s!"{ci.name} : {lastTy} := {lastVal}  [not round-tripped: read with care]"
+
 /-- Build the clean environment: import only `Janus` and `Extracted`, with initializers so pp
 works, then add type-only stubs for the dependency constants the statement reaches, re-add the
 allowed proof-local defs and an axiom with the theorem's type. Reject a proof-local def whose
 type's head is a class (a disguised instance, A1). No proof or dependency module is imported, so
 none of their initializers, notations, unexpanders or delaborators exist here. -/
 unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs : Array ConstantInfo)
-    (stubs : Array ConstantInfo) : AuditM (String × Array String) := do
+    (stubs : Array ConstantInfo) : AuditM (String × String × Array String) := do
   enableInitializersExecution
   let env ← importModules (loadExts := true)
     #[{ module := `Extracted }, { module := `Janus }] {}
@@ -286,19 +561,36 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
   -- Add the theorem's type as an axiom (printing only; soundness is from collectAxioms/replay).
   env ← add env (.axiomDecl { name := thm, levelParams := [], type := thmType, isUnsafe := false })
   -- Pretty-print the signature and each allowed proof-local def in the clean environment.
-  let opts := (Options.empty.setBool `pp.fullNames true)
-  let ctx := { mkCoreCtx with options := opts }
-  let printAll : MetaM (String × Array String) := do
-    let sig ← PrettyPrinter.ppSignature thm
+  -- The same options for printing and for the round-trip re-elaboration (`autoImplicit` only
+  -- affects elaboration). No `pp.all`: the printed statement is the human-readable one.
+  let opts := printOptions
+  let printAll : MetaM (String × String × Array String) := do
+    -- (b) instance-implicit arguments must be registered instances or local instance binders
+    if let some m ← checkInstArgs cx thmType then throwError m
+    -- (a) the printed statement must elaborate back to the checked type
+    let sigStr ← match ← printFaithful thm thmType with
+      | .ok s => pure s
+      | .error m => throwError m
+    -- (c) the statement with every implicit and instance argument shown, for human inspection
+    let explicit ← withOptions (fun o => o.setBool `pp.explicit true) (PrettyPrinter.ppSignature thm)
     let mut defs := #[]
     for ci in localDefs do
-      let tyFmt ← Meta.ppExpr ci.type
-      let valFmt ← match ci.value? with
-        | some v => Meta.ppExpr v
-        | none => pure (Std.Format.text "<opaque>")
-      defs := defs.push s!"{ci.name} : {tyFmt.pretty 10000} := {valFmt.pretty 10000}"
-    return (sig.fmt.pretty 10000, defs)
-  runCore env (Meta.MetaM.run' printAll)
+      -- (b'), round 3 R1: the disclosed body is the reader's definition of the constant the
+      -- statement names, so it is part of the guarantee. Apply the same instance check to the
+      -- def's type and value: an inline non-canonical instance in a body
+      -- (`fun a b => @HMul.hMul _ _ _ ⟨fun a b => a + b⟩ a b`) is printed `fun a b => a * b` by
+      -- the default printer, so without this check a disclosed body reads as `*` while it adds.
+      if let some m ← checkInstArgs cx ci.type then
+        throwError s!"the proof-local definition {ci.name} used in the statement {m}"
+      if let some v := ci.value? then
+        if let some m ← checkInstArgs cx v then
+          throwError s!"the proof-local definition {ci.name} used in the statement {m}"
+      -- round 4 D1: the disclosure itself must round-trip (numerals, binder types)
+      defs := defs.push (← discloseDef ci)
+    return (sigStr, explicit.fmt.pretty 10000, defs)
+  match ← (Core.CoreM.toIO' (Meta.MetaM.run' printAll) { mkCoreCtx with options := opts } { env }).toBaseIO with
+  | .ok a => return a
+  | .error e => fail e.toString
 
 unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array String) : IO Unit := do
   let result ← (show AuditM Record from do
@@ -354,9 +646,10 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
     let externalNames := external.toArray.map (·.1) |>.qsort Name.lt
     let (_, stubs) ← externalStubs cx {} #[] externalNames.toList
     -- 6. clean-environment pretty-print
-    let (statement, defs) ← cleanEnvAndPrint cx thmN ci.type localDefs stubs
-    return Record.mk thm kind modName.toString (axs.map (·.toString)) statement defs
+    let (statement, statementExplicit, defs) ← cleanEnvAndPrint cx thmN ci.type localDefs stubs
+    return Record.mk thm kind modName.toString (axs.map (·.toString)) statement statementExplicit defs
       (envA.header.moduleNames.map (·.toString)) (externalNames.filterMap external.get?)
+      (importGraph envA)
   ).run
   match result with
   | .ok rec => IO.println (marker ++ (toJson rec).compress)

@@ -6,3 +6,5 @@
 audit/bin/
 audit/work/
 examples/consumer/.lake/
+audit/round2/bin/
+audit/round2/work/

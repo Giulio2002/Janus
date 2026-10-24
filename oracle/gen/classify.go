@@ -4,7 +4,7 @@
 // The classifier only looks at the fixed opcode bits of the top-level A64 encoding tables
 // (Arm ARM C4.1); it never decides what an instruction does. It exists to (a) group the
 // results, (b) pick register values that make memory accesses land in the data buffer and
-// register branches land in the code page, and (c) drop SIMD/FP and system encodings.
+// register branches land in the code page, and (c) drop system encodings.
 package gen
 
 // Class names, in the order the report prints them.
@@ -14,7 +14,10 @@ var Classes = []string{
 	"dpr.logical", "dpr.addsub", "dpr.addsubext", "dpr.adc", "dpr.ccmp", "dpr.csel",
 	"dpr.dp1", "dpr.dp2", "dpr.dp3", "dpr.other",
 	"ls.uimm", "ls.imm9", "ls.regoff", "ls.pair", "ls.literal", "ls.excl", "ls.atomic", "ls.other",
-	"sys.hint", "sys.barrier", "sys.mrs", "sys.sys", "system", "simd", "reserved",
+	"vls.multi", "vls.single", "vls.uimm", "vls.imm9", "vls.regoff", "vls.pair", "vls.literal", "vls.other",
+	"simd.aes", "simd.3same", "simd.s3same", "simd.copy", "simd.across", "simd.2misc", "simd.shift",
+	"simd.modimm", "simd.ext", "simd.tbl", "simd.fmovgen", "simd.other",
+	"sys.hint", "sys.barrier", "sys.mrs", "sys.sys", "system", "reserved",
 }
 
 // Classify returns the encoding class of w.
@@ -85,10 +88,44 @@ func Classify(w uint32) string {
 		}
 		return "dpr.other"
 	case w&0x0E000000 == 0x0E000000: // op0 = x111: SIMD and FP data processing
-		return "simd"
+		switch {
+		case w&0xFFFFCC00 == 0x4E284800:
+			return "simd.aes"
+		case w&0x9F200400 == 0x0E200400:
+			return "simd.3same"
+		case w&0xDF200400 == 0x5E200400:
+			return "simd.s3same"
+		case w&0x9FE08400 == 0x0E000400:
+			return "simd.copy"
+		case w&0x9F3E0C00 == 0x0E300800:
+			return "simd.across"
+		case w&0x9F3E0C00 == 0x0E200800:
+			return "simd.2misc"
+		case w&0x9F800400 == 0x0F000400 && w&0x00780000 != 0:
+			return "simd.shift"
+		case w&0x9FF80400 == 0x0F000400:
+			return "simd.modimm"
+		case w&0xBFE08400 == 0x2E000000:
+			return "simd.ext"
+		case w&0xBFE08C00 == 0x0E000000:
+			return "simd.tbl"
+		case w&0x7F20FC00 == 0x1E200000:
+			return "simd.fmovgen"
+		}
+		return "simd.other"
 	case w&0x0A000000 == 0x08000000: // op0 = x1x0: loads and stores
-		if w&0x04000000 != 0 {
-			return "simd"
+		if w&0x04000000 != 0 { // V = 1: SIMD&FP registers
+			if w&0xBFBF0000 == 0x0C000000 || w&0xBFA00000 == 0x0C800000 {
+				return "vls.multi"
+			}
+			if w&0xBF9F0000 == 0x0D000000 || w&0xBF800000 == 0x0D800000 {
+				return "vls.single"
+			}
+			switch c := Classify(w &^ 0x04000000); c {
+			case "ls.uimm", "ls.imm9", "ls.regoff", "ls.pair", "ls.literal":
+				return "v" + c
+			}
+			return "vls.other"
 		}
 		switch {
 		case w&0x3F000000 == 0x08000000:
@@ -111,10 +148,11 @@ func Classify(w uint32) string {
 	return "reserved"
 }
 
-// Tested reports whether the class is in scope (not SIMD/FP, not system other than MRS and
-// the C7 cache-maintenance SYS space).
+// Tested reports whether the class is in scope (everything but system instructions other than
+// MRS and the C7 cache-maintenance SYS space). SIMD&FP classes the model does not cover
+// (floating point, crypto, ...) are in scope too: they test that the decoder rejects them.
 func Tested(class string) bool {
-	return class != "simd" && class != "system"
+	return class != "system"
 }
 
 // Conditional reports whether the result of the class depends on NZCV, so each word is
@@ -140,6 +178,8 @@ func Unpredictable(w uint32) bool {
 	case "ls.imm9":
 		idx := bits(w, 11, 10)
 		return (idx == 1 || idx == 3) && rt == rn && rn != 31
+	case "vls.pair":
+		return bits(w, 22, 22) == 1 && rt == rt2
 	case "ls.pair":
 		load := bits(w, 22, 22) == 1
 		idx := bits(w, 24, 23)

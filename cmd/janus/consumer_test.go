@@ -447,8 +447,19 @@ func TestConsumerVerify(t *testing.T) {
 		r.Framework.Source != "embedded" || r.KernelReplay.Status != "passed" || len(r.Axioms) == 0 {
 		t.Fatalf("report: %+v %+v", r, r.Consumer)
 	}
-	if !reflect.DeepEqual(r.KernelReplay.Modules, []string{"Janus", "Extracted", "ConsumerExample.Add", "ConsumerExample.Spec"}) {
-		t.Errorf("replayed %v", r.KernelReplay.Modules)
+	// The replay covers the whole non-core import closure: every framework module the proof
+	// imports, Extracted, JanusTrusted and the consumer modules; never Init/Std/Lean.
+	replayedSet := map[string]bool{}
+	for _, m := range r.KernelReplay.Modules {
+		replayedSet[m] = true
+		if isCoreModule(m) {
+			t.Errorf("replayed the core module %s", m)
+		}
+	}
+	for _, m := range []string{"Janus", "Janus.GoABI", "Janus.Arm64.Exec", "Janus.Tactic", "Extracted", "JanusTrusted", "ConsumerExample.Add", "ConsumerExample.Spec"} {
+		if !replayedSet[m] {
+			t.Errorf("replay %v lacks %s", r.KernelReplay.Modules, m)
+		}
 	}
 	if !strings.Contains(strings.Join(r.Consumer.Rebuilt, " "), "ConsumerExample.Spec") {
 		t.Errorf("first build of a new package rebuilt %v", r.Consumer.Rebuilt)
@@ -474,6 +485,9 @@ func TestConsumerVerify(t *testing.T) {
 	}
 	if len(jr.Consumer.Rebuilt) != 0 {
 		t.Errorf("second run rebuilt %v", jr.Consumer.Rebuilt)
+	}
+	if !strings.Contains(" "+strings.Join(jr.KernelReplay.Cached, " ")+" ", " Janus.GoABI ") {
+		t.Errorf("second run did not reuse the cached framework replays: cached %v", jr.KernelReplay.Cached)
 	}
 	if code, out, _ := runJanus(t, "explain", add); code != 0 || !strings.Contains(out, "Consumer package:") || !strings.Contains(out, "module ConsumerExample.Add") {
 		t.Errorf("explain: %s", out)

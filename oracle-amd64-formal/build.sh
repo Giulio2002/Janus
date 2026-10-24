@@ -30,6 +30,21 @@ s = open('config.sail').read()
 s = s.replace('function clause __SetConfig("cr4"',
   'function clause __SetConfig("undef", value) = { undef_val = if value >= 0 then value else 0 }\nfunction clause __SetConfig("cr4"')
 open('config.sail', 'w').write(s)
+# FS base: 64-bit-mode FS-relative addressing (segment_base_and_bounds, ea_to_la) reads
+# msrs[1] (IA32_FS_BASE); seg_hidden_bases[4] (FS) is set too for completeness.
+# ymm{i}q{j}: quadword j (bits 64j+63..64j) of zmm{i}, i < 16, j < 4.
+cl = ['function clause __SetConfig("fsbase", value) = { let v = get_slice_int(64, value, 0); msrs[1] = v; seg_hidden_bases[4] = v }']
+for i in range(16):
+    for j in range(4):
+        cl.append(f'function clause __SetConfig("ymm{i}q{j}", value) = {{ zmms[{i}] = [zmms[{i}] with {64*j+63} .. {64*j} = get_slice_int(64, value, 0)] }}')
+s = s.replace('function clause __SetConfig("cr4"', '\n'.join(cl) + '\nfunction clause __SetConfig("cr4"')
+open('config.sail', 'w').write(s)
+# printState also prints bits 255:0 of zmm0..zmm15 as "ymmI = 0x<64 hex digits>".
+s = open('logging.sail').read()
+s = s.replace('\tprint_bits("rip = ", read_rip());\n}',
+  '\tprint_bits("rip = ", read_rip());\n' +
+  ''.join(f'\tprint_bits("ymm{i} = ", zmms[{i}][255 .. 0]);\n' for i in range(16)) + '}', 1)
+open('logging.sail', 'w').write(s)
 s = open('main.sail').read()
 s = s[:s.index("// A main function for C compilation")] + '''// Janus oracle: execute exactly one instruction and print the state.
 val main : unit -> unit

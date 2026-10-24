@@ -9,5 +9,7 @@ import Janus.Run
 import Janus.GoABI
 import Janus.Tactic
 import Janus.Tactic.Atomic
+import Janus.Tactic.Vector
+import Janus.Arm64.Vector
 import Janus.Spec.Basic
 import Janus.Amd64

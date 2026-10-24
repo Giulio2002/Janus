@@ -261,6 +261,7 @@ on an ASL-derived check).
 | `data.go` | read-only data references (untrusted) and their byte copy (trusted) | partly |
 | `identity.go` | `identity.json`, `janus check` (regenerate and byte-compare) | **yes** |
 | `verify.go`, `leanjob.go` | the verify pipeline: trusted copies, proof build, audit, replay, hashes, report | **yes** |
+| `replay.go` | framework olean pins, the import-closure check, the cached kernel replay of every non-core module | **yes** |
 | `sandbox.go` | bubblewrap / `unshare` confinement of every Lean process that loads proof code | **yes** |
 | `framework.go`, `../../framework.go` | the embedded Lean framework (`go:embed`), its materialisation and cache | **yes** |
 | `consumer.go`, `batch.go`, `init.go` | consumer Lake packages, `verify-batch`, `janus init` | |

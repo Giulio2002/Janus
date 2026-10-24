@@ -303,7 +303,7 @@ binary moved, `--binary` names its new location; its SHA-256 must still match.
 
 ```sh
 janus verify <outdir> [--proof FILE] [--theorem NAME] [--proof-root PKG [--allow-path-deps]] [--json]
-             [--fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox]
+             [--fresh] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox]
 janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 ```
 
@@ -316,7 +316,7 @@ Verified: Proof.correctness
   Framework: embedded (SHA-256 1c26c3bb…, 30 files, leanprover/lean4:v4.34.1)
   Sandbox: bubblewrap (no network, read-only filesystem, private build dir)
   Axioms: (none)
-  Kernel replay: leanchecker passed (Janus, Extracted, Proof)
+  Kernel replay: leanchecker passed (Extracted, Janus, Janus.Arm64.Bits, …, Proof; 29 modules; 26 reused from the replay cache)
   Lean: Lean (version 4.34.1, …)
   Report: artifacts/Get/verified.json
   Statement:
@@ -333,7 +333,9 @@ library, Mathlib) when every one of them, transitively, is a git dependency pinn
 ([details](CONSUMERS.md#extra-dependencies)). `--allow-path-deps` additionally accepts local
 path dependencies other than janus, copied as they are and recorded as `"type": "path"` (not
 pinned). `--json` prints the report as JSON; `--fresh` rebuilds the framework/caches from
-scratch.
+scratch (and replays every module, ignoring the replay cache); `--replay-fresh` additionally
+replays the theorem's module with `leanchecker --fresh`, re-checking its whole environment,
+Lean core included, from an empty environment (slow: minutes).
 
 ### Threat model: the proof is untrusted code
 
@@ -345,9 +347,15 @@ printed statement is the one the kernel checked. To make that true, verification
 * runs **every Lean process that loads the proof inside a sandbox** (bubblewrap, else an
   `unshare` namespace): no network; the filesystem — including the Janus sources, the
   `~/.cache/janus` build and the `janus` binary — is read-only except one fresh, private build
-  directory; a private `/tmp`, PID and user namespace, killed with the parent. Without a sandbox
-  verification refuses (`Stage: sandbox`) unless you pass `--unsafe-no-sandbox`. Install
-  bubblewrap with `apt-get install -y bubblewrap`; the mode used is recorded in `verified.json`.
+  directory; a private `/tmp`, `/dev/shm` and `/run` (so the host's live daemon sockets under
+  `/run`, which a read-only bind would leave reachable, are not present), and a private PID and
+  user namespace, killed with the parent. The `unshare`
+  fallback remounts **every** mount read-only (not only `/`) and mounts private tmpfs `/tmp`,
+  `/dev/shm` and `/run`; if some mount cannot be made read-only it refuses, and you should install
+  bubblewrap. `JANUS_SANDBOX=unshare` forces the fallback (for testing it), `JANUS_SANDBOX=bwrap`
+  forbids it. Without a sandbox verification refuses (`Stage: sandbox`) unless you pass
+  `--unsafe-no-sandbox`. Install bubblewrap with `apt-get install -y bubblewrap`; the mode used
+  is recorded in `verified.json`.
 * audits the theorem with a **trusted compiled routine (`janus-audit`)** that imports the
   proof's compiled module *as data* and never runs its initializers, so the proof cannot forge
   the audit result or run code during it;
@@ -357,6 +365,16 @@ printed statement is the one the kernel checked. To make that true, verification
 * **prints the statement in a clean environment** that imports only `Janus` and `Extracted`,
   never the proof, so the proof's unexpanders, notations, delaborators and instances cannot make
   the printed statement differ from the checked one;
+* requires the **printed statement to mean what was checked** (round 2, CRITICAL-1): every
+  argument in an instance-implicit position must be a registered instance of the trusted
+  environment (or an instance binder `[inst : C]` of the theorem), so an inline instance such as
+  `@HMul.hMul _ _ _ ⟨fun a b => a + b⟩ x y` (printed `x * y`) is rejected, and the printed
+  statement is **re-parsed and re-elaborated** in the clean environment and must be
+  definitionally equal to the checked type (`Stage: statement identity`, "does not
+  round-trip"). Coercions are printed with their target type (`(↑n : Int)`), and numerals with
+  theirs (`(5 : BitVec 64)`) when the plain print would read back at another type. The report
+  also carries `statementExplicit`, the statement printed with `pp.explicit` (every implicit and
+  instance argument shown);
 * requires the statement to mention `Extracted.program`/`Extracted.entry` and to be built only
   from Lean/Std core, `Janus.*`, `Extracted.*` and plain proof-local `def`s (whose bodies are
   disclosed in the report); a proof-local instance, class value, `opaque`, axiom or a name that
@@ -367,8 +385,16 @@ printed statement is the one the kernel checked. To make that true, verification
   and class information is read from the modules' raw extension data, so no dependency code runs
   in the auditor, and dependency constants are printed from type-only copies in the clean
   environment (the dependency's own notation does not apply);
-* hashes every compiled `.olean` and re-checks the hashes after the audit and the replay, so a
-  mid-run swap of a build output is caught.
+* **pins the trusted framework build**: the SHA-256 of every framework `.olean` (and of the
+  trusted `Extracted`/`JanusTrusted`) is recorded after the trusted build and re-verified after
+  every untrusted step, after the audit and after the replay; untrusted build outputs are pinned
+  once final. In a consumer workspace the framework package is also mounted **read-only** for
+  every sandboxed process. A replaced, corrupted, missing or extra framework module is rejected
+  (`framework integrity`), so neither the proof nor a lakefile nor a dependency's build can
+  change what `Janus.GoABI.Ensures` means or replace the auditor;
+* **kernel-replays the whole non-core import closure** of the theorem (every `Janus.*` module it
+  imports, `Extracted`, `JanusTrusted`, consumer and dependency modules), with passing results
+  cached by content hash in the trusted cache.
 
 See [docs/AUDIT.md](AUDIT.md) for the attacks these defend against.
 
@@ -388,17 +414,27 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
 6. **Audit** with `janus-audit` (sandboxed): it imports `Extracted`, `JanusTrusted` and `Proof`
    without running their initializers, checks the theorem is a `theorem` in the proof module,
    checks `Extracted.program`/`entry` are defeq to `JanusTrusted`, enforces the statement rules
-   above, collects transitive axioms (`collectAxioms`) and pretty-prints the statement in the
-   clean environment. Only `propext`, `Quot.sound` and `Classical.choice` are allowed; anything
+   above, collects transitive axioms (`collectAxioms`), pretty-prints the statement in the
+   clean environment, checks its instance arguments and that the printed text re-elaborates to
+   the checked type (`statement identity`), and prints it once more with `pp.explicit`. Only `propext`, `Quot.sound` and `Classical.choice` are allowed; anything
    else, including `sorryAx`, `Lean.ofReduceBool`, `Lean.trustCompiler` and user axioms, is
    rejected (`axiom audit`). `--theorem` must be a plain **ASCII** dotted Lean name.
-7. **Kernel replay**: `leanchecker` (shipped with the Lean toolchain) replays `Janus`,
-   `Extracted` and `Proof` (for a consumer package: every consumer module and every dependency
-   module the theorem's environment imports) through the kernel, catching environment hacking such as
-   `set_option debug.skipKernelTC` with `addDecl` (`kernel replay`). If the toolchain has no
-   `leanchecker`, this step is skipped and `verified.json` records `"status": "unavailable"`.
-8. **Re-check** the olean hashes, the artifacts and the proof; they must be unchanged (`stale
-   input`, `proof build integrity`).
+7. **Kernel replay**: `leanchecker` (shipped with the Lean toolchain) replays through the
+   kernel every module of the theorem's import closure outside Lean core (`Init`, `Std`, `Lean`,
+   `Lake`): every `Janus.*` framework module the environment imports, `Extracted`,
+   `JanusTrusted` and `Proof` (for a consumer package also every consumer and dependency module).
+   This catches environment hacking such as `set_option debug.skipKernelTC` with `addDecl`, in
+   the proof or in any compiled module it imports (`kernel replay`). First every module must
+   resolve from its home: core from the toolchain, `Janus.*` from the pinned framework build (and
+   only modules the framework has a source for), `Extracted`/`JanusTrusted` from the trusted
+   directory (`framework integrity`). Passing replays are cached in `v1/replay` of the cache,
+   keyed by the SHA-256 of the module's `.olean` parts and, recursively, its imports' keys; the
+   report's `kernelReplay.cached` lists the reused ones. The cache is not used with `--fresh` or
+   `--unsafe-no-sandbox`. With `--replay-fresh` the theorem's module is also replayed with
+   `leanchecker --fresh`. If the toolchain has no `leanchecker`, this step is skipped and
+   `verified.json` records `"status": "unavailable"`.
+8. **Re-check** the olean pins, the artifacts and the proof; they must be unchanged
+   (`framework integrity`, `stale input`).
 9. Write `verified.json`:
 
 ```json
@@ -408,9 +444,12 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
   "kind": "theorem",
   "module": "Proof",
   "statement": "Proof.correctness : Extracted.entry = Extracted.entry",
+  "statementExplicit": "Proof.correctness : @Eq Nat Extracted.entry Extracted.entry",
   "axioms": [],
   "allowedAxioms": ["propext", "Quot.sound", "Classical.choice"],
-  "kernelReplay": { "tool": "leanchecker", "status": "passed", "modules": ["Janus", "Extracted", "Proof"] },
+  "kernelReplay": { "tool": "leanchecker", "status": "passed",
+                    "modules": ["Extracted", "Janus", "Janus.Arm64.Bits", "…", "JanusTrusted", "Proof"],
+                    "cached": ["Janus", "Janus.Arm64.Bits", "…"] },
   "sandbox": { "mode": "bwrap", "tool": "/usr/bin/bwrap" },
   "definitions": [],
   "proof": "../../cmd/janus/testdata/Trivial.lean",

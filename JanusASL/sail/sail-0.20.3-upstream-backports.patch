@@ -1,0 +1,257 @@
+diff --git a/src/lib/rewrites.ml b/src/lib/rewrites.ml
+index b588cd3a5..3931b8e92 100644
+--- a/src/lib/rewrites.ml
++++ b/src/lib/rewrites.ml
+@@ -1461,6 +1461,66 @@ let rewrite_ast_remove_bitvector_pats env ast =
+   { ast with defs = List.flatten (List.map rewrite_def ast.defs) }
+ (* )) *)
+ 
++(* When a pattern has a mix of bitvector literals and bitvector patterns, make everything a bitvector pattern.
++   This makes (e.g.) massive decode functions with the occasional literal more uniform, preventing blowup
++   in the guarded patterns rewrite when the pattern_literals rewrite isn't used. *)
++let remove_mixed_bitvector_literal_pats env =
++  (* The inner rewrite replaces literal bitvector patterns by a vector pattern *)
++  let rewrite_this_pat rws (P_aux (p, ann) as full_pat) =
++    match p with
++    | P_lit lit -> vector_string_to_bits_pat lit ann
++    | P_vector _ when is_bitvector_typ (typ_of_annot ann) -> full_pat
++    | _ -> rewrite_pat rws full_pat
++  in
++  let pat_rws =
++    {
++      rewrite_exp;
++      rewrite_lexp;
++      rewrite_pat = rewrite_this_pat;
++      rewrite_mpat;
++      rewrite_fun;
++      rewrite_def;
++      rewrite_ast = rewrite_ast_base;
++    }
++  in
++  (* The outer rewrite finds pattern matches where there are already vector patterns and rewrites only the
++     literals in those pattern matches *)
++  let rec clause rws pexp =
++    let pat, guard, rhs, pannot = destruct_pexp pexp in
++    construct_pexp (rewrite_this_pat pat_rws pat, Option.map (rw_exp rws) guard, rw_exp rws rhs, pannot)
++  and rw_exp rws (E_aux (exp, (l, annot)) as full_exp) =
++    match exp with
++    | E_match (e, ps) when List.exists contains_bitvector_pexp ps ->
++        E_aux (E_match (rw_exp rws e, List.map (clause rws) ps), (l, annot))
++    | _ -> rewrite_exp rws full_exp
++  in
++  let func rws (FD_aux (FD_function (recopt, topt, funcls), (l, ann)) as full_fun) =
++    if List.exists (function FCL_aux (FCL_funcl (_, pexp), _) -> contains_bitvector_pexp pexp) funcls then
++      FD_aux
++        ( FD_function
++            ( recopt,
++              topt,
++              List.map
++                (function FCL_aux (FCL_funcl (id, pexp), fclann) -> FCL_aux (FCL_funcl (id, clause rws pexp), fclann))
++                funcls
++            ),
++          (l, ann)
++        )
++    else rewrite_fun rws full_fun
++  in
++  let rws =
++    {
++      rewrite_exp = rw_exp;
++      rewrite_pat;
++      rewrite_mpat;
++      rewrite_lexp;
++      rewrite_fun = func;
++      rewrite_def;
++      rewrite_ast = rewrite_ast_base;
++    }
++  in
++  rewrite_ast_base rws
++
+ (* Rewrite literal number patterns to guarded patterns
+    Those numeral patterns are not handled very well by Lem (or Isabelle)
+ *)
+@@ -2897,6 +2957,19 @@ let rec rewrite_var_updates (E_aux (expaux, ((l, _) as annot)) as exp) =
+           let v = E_aux (E_if (c, e1, e2), (gen_loc el, mk_tannot env typ)) in
+           Added_vars (v, tuple_pat (if overwrite then varpats else pat :: varpats))
+         )
++    | E_let (lpat, bind, body) when updates_vars body && not (updates_vars bind) ->
++        (* A let whose body updates variables (as rewrite_tuple_assignments
++           produces): its body returns them, as an if's branches do. Without
++           rewrite_ast_letbind_effects, which the Lean target omits, nothing
++           else lifts these updates out of the let. *)
++        let vars, varpats = find_updated_vars body |> IdSet.inter used_vars |> mk_var_exps_pats pl env in
++        if vars = [] then Same_vars (rewrite_var_updates full_exp)
++        else (
++          let body = rewrite_var_updates (add_vars overwrite body vars) in
++          let typ = typ_of body in
++          let v = E_aux (E_let (lpat, bind, body), (gen_loc el, mk_tannot env typ)) in
++          Added_vars (v, tuple_pat (if overwrite then varpats else pat :: varpats))
++        )
+     | E_match (e1, ps) | E_try (e1, ps) ->
+         let is_case = match expaux with E_match _ -> true | _ -> false in
+         let vars, varpats =
+@@ -4525,6 +4598,7 @@ let all_rewriters =
+     ("remove_not_pats", basic_rewriter rewrite_ast_not_pats);
+     ("pattern_literals", Literal_rewriter (fun f -> basic_rewriter (rewrite_ast_pat_lits false f)));
+     ("pattern_literals_typed", Literal_rewriter (fun f -> basic_rewriter (rewrite_ast_pat_lits true f)));
++    ("remove_mixed_bitvector_literal_pats", basic_rewriter remove_mixed_bitvector_literal_pats);
+     ("vector_concat_assignments", basic_rewriter rewrite_vector_concat_assignments);
+     ("tuple_assignments", basic_rewriter rewrite_tuple_assignments);
+     ("simple_assignments", basic_rewriter (rewrite_simple_assignments false));
+diff --git a/src/sail_coq_backend/pretty_print_coq.ml b/src/sail_coq_backend/pretty_print_coq.ml
+index 3ce4c32d6..be4256f62 100644
+--- a/src/sail_coq_backend/pretty_print_coq.ml
++++ b/src/sail_coq_backend/pretty_print_coq.ml
+@@ -3793,9 +3793,10 @@ let doc_val global pat exp =
+     match pat_typ with None -> empty | Some typ -> space ^^ colon ^^ space ^^ doc_typ bare_ctxt Env.empty typ
+   in
+   let env = env_of exp in
+-  let ctxt = { bare_ctxt with debug = List.mem (string_of_id id) !opt_debug_on } in
++  let is_monadic = effectful (effect_of exp) in
++  let ctxt = { bare_ctxt with debug = List.mem (string_of_id id) !opt_debug_on; is_monadic } in
+   let () =
+-    debug ctxt (lazy ("Checking definition " ^ string_of_id id));
++    debug ctxt (lazy ("Checking definition " ^ string_of_id id ^ if is_monadic then "  (monadic)" else "  (pure)"));
+     debug_depth := 1
+   in
+   let typpp, exp =
+@@ -3817,7 +3818,7 @@ let doc_val global pat exp =
+   let base_pp = doc_exp ctxt false true exp in
+   (* If the expression has assertions or incomplete pattern matches (if/when we allow that) then
+      unwrap the value.  There will be a typechecking failure in Rocq if there's an effect. *)
+-  let def_pp = if effectful (effect_of exp) then group (string "unwrap_value" ^/^ parens base_pp) else base_pp in
++  let def_pp = if is_monadic then group (string "unwrap_value" ^/^ parens base_pp) else base_pp in
+   let () = debug_depth := 0 in
+   group (string "Definition" ^^ space ^^ idpp ^^ typpp ^^ space ^^ coloneq ^/^ def_pp ^^ dot)
+   ^^ hardline
+diff --git a/src/sail_lean_backend/Sail/SpecializationArchSem.lean b/src/sail_lean_backend/Sail/SpecializationArchSem.lean
+index 0ed87c055..9175baf8d 100644
+--- a/src/sail_lean_backend/Sail/SpecializationArchSem.lean
++++ b/src/sail_lean_backend/Sail/SpecializationArchSem.lean
+@@ -35,7 +35,7 @@ abbrev writeRegRef (reg_ref : RegisterRef α) (a : α) : SailM Unit := PreSail.w
+ 
+ abbrev reg_deref (reg_ref : RegisterRef α) : SailM α := PreSail.reg_deref reg_ref
+ 
+-abbrev assert (p : Bool) (s : String) : SailM Unit := PreSail.assert p s
++abbrev sail_assert (p : Bool) (s : String) : SailM Unit := PreSail.sail_assert p s
+ 
+ namespace ArchSem
+ 
+diff --git a/src/sail_lean_backend/Sail/SpecializationV1.lean b/src/sail_lean_backend/Sail/SpecializationV1.lean
+index c4c04f3ee..b8ad97fe2 100644
+--- a/src/sail_lean_backend/Sail/SpecializationV1.lean
++++ b/src/sail_lean_backend/Sail/SpecializationV1.lean
+@@ -35,7 +35,7 @@ abbrev writeRegRef (reg_ref : RegisterRef α) (a : α) : SailM Unit := PreSail.w
+ 
+ abbrev reg_deref (reg_ref : RegisterRef α) : SailM α := PreSail.reg_deref reg_ref
+ 
+-abbrev assert (p : Bool) (s : String) : SailM Unit := PreSail.assert p s
++abbrev sail_assert (p : Bool) (s : String) : SailM Unit := PreSail.sail_assert p s
+ 
+ namespace ConcurrencyInterfaceV1
+ 
+diff --git a/src/sail_lean_backend/pretty_print_lean.ml b/src/sail_lean_backend/pretty_print_lean.ml
+index 833632e3c..f32bac5ff 100644
+--- a/src/sail_lean_backend/pretty_print_lean.ml
++++ b/src/sail_lean_backend/pretty_print_lean.ml
+@@ -417,8 +417,8 @@ let doc_lit ~width (L_aux (lit, l)) =
+       | _ -> utf8string ("0b" ^ string_of_bin_lit ~group_separator:"" bin ^ width_specifier)
+     )
+   | L_string s -> utf8string ("\"" ^ lean_escape_string s ^ "\"")
+-  | L_real r -> utf8string (Q.to_string (Util.Rational.from_rocq r))
+-(* TODO test if this is really working *)
++  (* Fractions need parens for precedence *)
++  | L_real r -> parens (utf8string (Q.to_string (Util.Rational.from_rocq r)))
+ 
+ let string_of_exp_con (E_aux (e, _)) =
+   match e with
+@@ -628,7 +628,7 @@ let wrap_with_left_arrow (needs_left_arrow : bool) (d : document) =
+ 
+ let wrap_with_do (with_arrow : bool) (needs_return : bool) (d : document) =
+   let ar_do = if with_arrow then string "← do" else string "do" in
+-  if needs_return then parens (nest 2 (flow hardline [ar_do; d])) else d
++  if needs_return then parens (ifflat (ar_do ^^ space ^^ d) (nest 2 (flow hardline [ar_do; d]))) else d
+ 
+ let get_fn_implicits (Typ_aux (t, _)) : bool list =
+   let arg_implicit arg =
+@@ -939,6 +939,12 @@ and doc_exp (as_monadic : bool) ctx (E_aux (e, (l, annot)) as full_exp) =
+   | E_app ((Id_aux (Id "early_return", _) as f), [arg]) ->
+       let throw = if ctx.in_sail_monad then string "SailME.throw " else string "throw " in
+       nest 2 (throw ^^ d_of_arg ctx arg)
++  (* Preserve short-circuiting; merely putting an arrow on the rhs would lift it out *)
++  | E_app (Id_aux (((And_bool | Or_bool) as f), _), [lhs; rhs]) when has_effect rhs ->
++      let op = match f with And_bool -> "<&&>" | _ -> "<||>" in
++      let arrow sub = if as_monadic then sub else parens (leftarrow ^^ parens sub) in
++      let d_rhs = wrap_with_do false true (doc_exp true ctx rhs) in
++      arrow (d_of_arg ~with_arrow:false ctx lhs ^^ space ^^ string op ^^ space ^^ d_rhs)
+   | E_app (f, args) -> (
+       let _, f_typ = Env.get_val_spec f env in
+       let implicits = get_fn_implicits f_typ in
+@@ -1075,7 +1081,7 @@ and doc_exp (as_monadic : bool) ctx (E_aux (e, (l, annot)) as full_exp) =
+         ^^ space
+         ^^ parens (string "fun the_exception => " ^^ hardline ^^ cases)
+         )
+-  | E_assert (e1, e2) -> string "assert " ^^ d_of_arg ctx e1 ^^ space ^^ d_of_arg ctx e2
++  | E_assert (e1, e2) -> string "sail_assert " ^^ d_of_arg ctx e1 ^^ space ^^ d_of_arg ctx e2
+   | E_list es -> brackets (separate_map comma_sp (doc_exp as_monadic ctx) es)
+   | E_cons (hd_e, tl_e) -> parens (separate space [doc_exp false ctx hd_e; string "::"; doc_exp false ctx tl_e])
+   | _ -> failwith ("Expression " ^ string_of_exp_con full_exp ^ " " ^ string_of_exp full_exp ^ " not translatable yet.")
+@@ -1371,8 +1377,10 @@ let doc_val ctx pat exp =
+   in
+   let typpp = match pat_typ with None -> empty | Some typ -> space ^^ colon ^^ space ^^ doc_typ ctx ctx.env typ in
+   let idpp = doc_id_ctor ctx id in
++  let ctx = { ctx with in_sail_monad = has_effect exp } in
+   let base_pp =
+-    if has_effect exp then string "unwrapValue" ^^ space ^^ parens (doc_exp true ctx exp) else doc_exp false ctx exp
++    if ctx.in_sail_monad then string "unwrapValue" ^^ space ^^ parens (string "do" ^/^ doc_exp true ctx exp)
++    else doc_exp false ctx exp
+   in
+   (global, nest 2 (group (string "def" ^^ space ^^ idpp ^^ typpp ^^ space ^^ coloneq ^/^ base_pp)))
+ 
+@@ -1433,7 +1441,7 @@ let rec collect_imports_rec (cg : Callgraph.callgraph) (defs : (tannot, env) def
+     (accs : IntSet.t list) (acc : IntSet.t) (idx : int) (nonempty_print : bool) : IntSet.t list =
+   match defs with
+   | [] -> accs @ [acc]
+-  | (DEF_aux ((DEF_fundef _ | DEF_internal_mutrec _ | DEF_let _ | DEF_register _), _) as d) :: defs' ->
++  | (DEF_aux ((DEF_fundef _ | DEF_internal_mutrec _ | DEF_let _), _) as d) :: defs' ->
+       let map, acc = add_def_to_map_and_ref_set cg map acc idx d in
+       collect_imports_rec cg defs' map accs acc idx true
+   | DEF_aux (DEF_type tdef, _) :: defs' -> collect_imports_rec cg defs' map accs acc idx nonempty_print
+@@ -1734,7 +1742,7 @@ let pp_ast_lean symbols (env : Type_check.env) effect_info ({ defs; _ } as ast :
+   print types_file (types ^^ register_refs ^^ instantiation_deps ^^ instantiations);
+   let _ =
+     List.map2
+-      (fun file defs -> print file (separate hardline (remove_empties [opens; defs])))
++      (fun file defs -> print ~len:!opt_line_width file (separate hardline (remove_empties [opens; defs])))
+       imp_funcs_files imp_fundefss
+   in
+   print ~len:!opt_line_width funcs_file (separate hardline (remove_empties ([opens; main_fundefs] @ main_function)));
+diff --git a/src/sail_lean_backend/sail_plugin_lean.ml b/src/sail_lean_backend/sail_plugin_lean.ml
+index d59e939f1..0b3d7956d 100644
+--- a/src/sail_lean_backend/sail_plugin_lean.ml
++++ b/src/sail_lean_backend/sail_plugin_lean.ml
+@@ -97,7 +97,7 @@ let opt_disable_matchbv : bool ref = ref true
+ let lean_version : string = "lean4:v4.29.0"
+ let mathlib_version : string = "v4.29.0"
+ let lib_default_git : string = "https://github.com/rems-project/lean-sail"
+-let lib_default_rev : string = "v6"
++let lib_default_rev : string = "v7"
+ 
+ let lean_options =
+   [
+@@ -121,7 +121,7 @@ let lean_options =
+         ),
+       "use matchbv in the Lean output"
+     );
+-    ( Flag.create ~prefix:["lean"] "line_width",
++    ( Flag.create ~prefix:["lean"] ~arg:"width" "line_width",
+       Arg.Int (fun n -> Pretty_print_lean.opt_line_width := n),
+       "maximum line length of the generated Lean code"
+     );
+@@ -191,6 +191,7 @@ let lean_rewrites =
+     ("tuple_assignments", []);
+     ("vector_concat_assignments", []);
+     ("simple_assignments", []);
++    ("remove_mixed_bitvector_literal_pats", [If_flag opt_disable_matchbv]);
+     ("remove_vector_concat", [If_flag opt_disable_matchbv]);
+     ("remove_bitvector_pats", [If_flag opt_disable_matchbv]);
+     ("recheck_defs", []);

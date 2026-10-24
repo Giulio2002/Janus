@@ -13,13 +13,24 @@ The shared contract between the ISA model (`Decode`, `Exec`), the program loader
 * `RFLAGS` is modelled by its six status flags. Each flag is `some b` (defined) or `none`
   (architecturally **undefined**, e.g. `SF` after `MUL`, everything after `DIV`). An
   instruction that reads an undefined flag (`Jcc`, `SETcc`, `CMOVcc`, `ADC`, `SBB`, `CMC`)
-  faults with `undefinedFlag`; the model never invents a value for it. The direction flag is
-  not in the state: it is clear at every Go call (ABI) and no modelled instruction sets it
-  (`STD`/`POPF` are not modelled), so it is clear in every reachable state and `MOVS`/`STOS`
-  step forward (see `Janus.Amd64.Exec`). The system flags are not modelled.
-* The 128-bit SSE registers `XMM0`–`XMM15` are modelled because Go uses them to move and zero
-  memory (`MOVUPS`, and `X15 = 0` in ABIInternal). Their upper YMM/ZMM halves are not modelled
-  (no modelled instruction touches them).
+  faults with `undefinedFlag`; the model never invents a value for it. The direction flag
+  `RFLAGS.DF` is the separate field `df`: `CLD`/`STD` write it, `MOVS`/`STOS` step backward
+  when it is set, and the Go ABI guarantees it is clear at calls (`GoABI.CallSetup.df`). The
+  system flags are not modelled.
+* The 256-bit AVX registers `YMM0`–`YMM15` are modelled as two fields: `xmm n` is bits 127:0
+  (`XMMn`) and `ymmHi n` is bits 255:128, so `YMMn = ymmHi n ++ xmm n` (`State.ymm`). Go uses
+  `XMM` to move and zero memory (`MOVUPS`, and `X15 = 0` in ABIInternal), and `YMM` in the AVX2
+  paths of `memmove`, `memclrNoHeapPointers` and `internal/bytealg`. Keeping the upper lanes in
+  their own field means a legacy-SSE instruction, which preserves bits 255:128 (SDM Vol. 1
+  §14.1.3), simply does not touch `ymmHi`; a VEX.128 instruction zeroes `ymmHi` of its
+  destination and a VEX.256 one writes both. The AVX-512 state (`ZMM` bits 511:256,
+  `ZMM16`–`ZMM31`, the mask registers) is not modelled: no modelled instruction reads it (VEX
+  instructions only zero it, which is unobservable to the model).
+* `fsBase` is the base address of the `FS` segment (`IA32_FS_BASE`, set by the kernel for the
+  thread: Go keeps the TLS block, with the `g` slot at `FS:-8`, there). An `FS`-prefixed memory
+  operand is at `fsBase + effective address (mod 2^64)` and goes through the same checked
+  memory as every other access. Specifications quantify over it (it is just a state field);
+  `GoABI.TlsG` describes the `g` slot.
 * Memory is the checked byte memory of the arm64 model (`Janus.Arm64.Memory`, with
   `Janus.Arm64.load`/`store` semantics re-exported below with amd64 faults): every access must
   lie entirely inside one caller-provided region, and stores need a writable one. x86-64 user
@@ -49,11 +60,25 @@ structure State where
   regs : Nat → W64
   rip : W64
   flags : Flags
+  /-- Bits 127:0 of `YMM0`–`YMM15` (`XMM0`–`XMM15`). -/
   xmm : Nat → W128
   mem : Memory
+  /-- Bits 255:128 of `YMM0`–`YMM15`. -/
+  ymmHi : Nat → W128 := fun _ => 0
+  /-- The `FS` segment base. -/
+  fsBase : W64 := 0
+  /-- The direction flag `RFLAGS.DF` (`true` = string instructions step backward). -/
+  df : Bool := false
 
 instance : Inhabited State :=
-  ⟨⟨fun _ => 0, 0, ⟨none, none, none, none, none, none⟩, fun _ => 0, default⟩⟩
+  ⟨{ regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩,
+     xmm := fun _ => 0, mem := default }⟩
+
+/-- The 256-bit value with upper half `hi` and lower half `lo`. -/
+def ymmJoin (hi lo : W128) : Nat := hi.toNat * 2 ^ 128 + lo.toNat
+
+/-- The full 256-bit register `YMMn` (`ymmHi n ++ xmm n`), as a natural number. -/
+def State.ymm (s : State) (n : Nat) : Nat := ymmJoin (s.ymmHi n) (s.xmm n)
 
 /-- Reasons execution stops without a defined architectural result. -/
 inductive Fault where
@@ -72,7 +97,7 @@ inductive Fault where
   | undefinedResult (pc : Nat)
   /-- `#DE`: division by zero or quotient overflow at `pc`. -/
   | divideError (pc : Nat)
-  /-- `#GP` for a misaligned 16-byte SSE memory operand at `addr`. -/
+  /-- `#GP` for a misaligned 16-byte SSE or 16/32-byte AVX memory operand at `addr`. -/
   | misaligned (addr : Nat)
   /-- A branch to `target`, which is not a canonical lower-half (user) address `< 2^47`. -/
   | badTarget (target : Nat)

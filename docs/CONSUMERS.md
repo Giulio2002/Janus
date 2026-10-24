@@ -14,8 +14,13 @@ network and a read-only filesystem except one private build directory, the theor
 the trusted compiled `janus-audit` without running the package's initializers, the imported
 `Extracted` is checked definitionally against the bytes extracted from the binary, and the
 statement is pretty-printed in a clean environment that never imports the consumer's modules.
-What is trusted is the Janus Lean framework the `janus` binary carries, the Lean kernel and
-`leanchecker`, and the ELF byte copy. Verification refuses to run without a sandbox unless
+The framework package in the workspace is mounted read-only for every sandboxed process, its
+compiled modules are pinned by SHA-256 to the trusted framework build and re-checked after the
+Lake build, the audit and the replay, and the kernel replay covers every non-core module the
+theorem imports, so a lakefile or a dependency's build step cannot replace a framework module
+(or the auditor). What is trusted is the Janus Lean framework the `janus` binary carries (compiled
+by `janus` itself, outside the sandbox), the Lean toolchain, the Lean kernel and `leanchecker`, and
+the ELF byte copy. Verification refuses to run without a sandbox unless
 `--unsafe-no-sandbox` is passed; the mode is recorded in `verified.json`.
 
 Use consumer verification only with packages you are willing to execute under that sandbox.
@@ -90,7 +95,8 @@ sandbox when one is available.
 (`deps/<name>`) and given to Lake as path packages; Lake builds the modules the proof needs
 **under the sandbox**, like the consumer's own modules. Their build outputs are untrusted: the
 kernel replay re-checks every dependency module the theorem's environment imports (for a Mathlib
-import that is thousands of modules, so expect minutes). A new extraction's workspace starts
+import that is thousands of modules, so expect minutes the first time; passing replays are cached
+by content hash, so unchanged modules are not replayed again). A new extraction's workspace starts
 from a sibling workspace's dependency builds. The first build of a large dependency is a full
 source build (no `lake exe cache get`: downloaded oleans would be unverified build outputs), so
 the first Mathlib verification takes as long as building the imported part of Mathlib.
