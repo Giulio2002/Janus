@@ -215,7 +215,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 	}
 	var aslB *aslBuild
 	if asl {
-		if aslB, err = buildASL(fw, fwBase, lake, stderr); err != nil {
+		if aslB, err = buildASLFor(fw, "", lake, stderr); err != nil {
 			return nil, err
 		}
 	}

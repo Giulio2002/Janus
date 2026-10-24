@@ -894,7 +894,7 @@ func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*v
 	}
 	var asl *aslBuild
 	if opts["asl"] != "" {
-		if asl, err = buildASL(fw, base, lake, stderr); err != nil {
+		if asl, err = buildASLFor(fw, "", lake, stderr); err != nil {
 			return nil, err
 		}
 	}

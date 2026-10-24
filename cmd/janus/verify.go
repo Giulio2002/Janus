@@ -426,7 +426,11 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	// the framework's traces).
 	var asl *aslBuild
 	if opts["asl"] != "" {
-		if asl, err = buildASLFor(fw, root, lake, stderr); err != nil {
+		aslRoot := root
+		if fw.Source != "directory" && opts["fresh"] != "" {
+			aslRoot = "" // not the temporary --fresh build: the cached base (byte-identical)
+		}
+		if asl, err = buildASLFor(fw, aslRoot, lake, stderr); err != nil {
 			return nil, err
 		}
 	}

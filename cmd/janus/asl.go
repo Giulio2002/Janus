@@ -339,19 +339,20 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 	return b, nil
 }
 
-// buildASLFor builds the JanusASL package against the trusted framework of this verification:
-// the checkout for a directory framework, else the cached framework base (also with --fresh,
-// whose temporary framework build is byte-identical but would change the build's dependency).
+// buildASLFor builds the JanusASL package against a trusted framework build: root, the one this
+// verification already holds (the checkout for a directory framework, else the cached base), or,
+// with root "" (consumer packages and verify-batch, whose workspaces take their own framework
+// copies), the cached framework base, held while Lake builds against it.
 func buildASLFor(fw *framework, root, lake string, progress io.Writer) (*aslBuild, error) {
-	janusDir := root
-	if fw.Source != "directory" {
-		base, err := fw.frameworkBase(lake, progress)
-		if err != nil {
-			return nil, err
-		}
-		janusDir = base
+	if root != "" {
+		return buildASL(fw, root, lake, progress)
 	}
-	return buildASL(fw, janusDir, lake, progress)
+	lease, err := fw.frameworkBase(lake, progress)
+	if err != nil {
+		return nil, err
+	}
+	defer lease.release()
+	return buildASL(fw, lease.dir, lake, progress)
 }
 
 // newestASLSibling is the most recently used other JanusASL build in the cache that has a
