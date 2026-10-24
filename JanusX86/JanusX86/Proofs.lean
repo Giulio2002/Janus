@@ -14,3 +14,4 @@ import JanusX86.Proofs.Call
 import JanusX86.Proofs.Movx
 import JanusX86.Proofs.Setcc
 import JanusX86.Proofs.Jcc32
+import JanusX86.Proofs.Mul

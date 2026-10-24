@@ -213,3 +213,127 @@ theorem run_mul {js : Janus.Amd64.State} {s : SState} (h : Rel js s) (hc : X86Co
       rw [hcv]; exact hrel2.flagsRip _ _ hfr' _
 
 end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+/-- The group-3 instruction with ModRM extension `e ∈ 4..7`. -/
+def grp3 (e w : Nat) (D : Janus.Amd64.Loc) : Janus.Amd64.Instr :=
+  if e = 4 then .mul1 false w D else if e = 5 then .mul1 true w D else if e = 6 then .div false w D else .div true w D
+
+open Janus.Amd64 Janus.Amd64.Decode in
+theorem decode_grp3 {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n))
+    (ho : o = 0xF6 ∨ o = 0xF7) (hext : 4 ≤ m / 8 % 8)
+    {mm : ModRM} {r3 : List Nat} {c : Nat}
+    (hmd : modrm (p.rex.getD 0) (m :: rest) = some (mm, r3, c))
+    {w : Nat} (hw : w = if o = 0xF6 then 8 else osz p)
+    {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
+    p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ len = n + 1 + c ∧ len ≤ 15 ∧ i = grp3 (m / 8 % 8) w (rmDst p w mm.rm) := by
+  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  have hex := modrm_ext hmd
+  have hou : (if p.rex.getD 0 / 8 = 1 then 64 else if p.opsize = true then 16 else 32) = osz p := by
+    simp [osz, rexW]
+  have ho8 : (osz p = 8) = False := by rcases osz_cases p with e | e | e <;> simp [e]
+  obtain ⟨md, rg, ext, rm⟩ := mm
+  simp only at hex; subst hex
+  have he : m / 8 % 8 = 4 ∨ m / 8 % 8 = 5 ∨ m / 8 % 8 = 6 ∨ m / 8 % 8 = 7 := by omega
+  generalize hE : m / 8 % 8 = e at he hd ⊢
+  rcases ho with rfl | rfl <;> rcases he with rfl | rfl | rfl | rfl
+  all_goals
+    simp (config := {decide := true}) only [↓reduceIte, oneByte, hmd, hou, true_and, and_true,
+      false_and, and_false, or_false, false_or, ho8, finish, hE] at hd hw ⊢
+    subst hw
+    by_cases hl : 15 < n + 1 + c <;> by_cases hrp : p.rep = 0 <;>
+      cases hf : p.fs <;> cases hk : p.lock <;> cases rm <;>
+      simp (config := {decide := true}) [hf, hk, hl, hrp, rmDst, rmLoc, regLocOf, grp3, ho8] at hd ⊢ <;>
+      (try simp [withFS, lockable] at hd ⊢)
+    all_goals first
+      | (obtain ⟨rfl, rfl⟩ := hd; omega)
+      | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨by omega, by omega, rfl⟩)
+      | (obtain ⟨rfl, rfl⟩ := hd; simp; omega)
+      | (simp at hd; done)
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+set_option maxRecDepth 100000 in
+theorem run_one_byte_mul (opc : Nat) (hopc : opc = 0xF6 ∨ opc = 0xF7)
+    (sr tr : BitVec 48) (x : BitVec 52) (hl : _get_prefixes_lck x = 0#8) (rex m sib : BitVec 8)
+    (hm : _get_modr_m_reg m = BitVec.ofNat 3 4) (s : SState) :
+    (one_byte_opcode_execute .Mode_64bit sr tr x rex (BitVec.ofNat 8 opc) m sib).run s =
+      (x86_mul .Mode_64bit sr tr x rex (BitVec.ofNat 8 opc) m sib).run s := by
+  rcases hopc with rfl | rfl <;>
+  simp (config := {decide := true}) only [one_byte_opcode_execute, ext_one_byte_opcode_execute, eq_bits_nat,
+    ↓reduceIte, Bool.false_eq_true, hl, hm, Bool.and_false, run_bind, run_pure,
+    show (240#8 == 0#8) = false from rfl] <;> rfl
+
+set_option maxHeartbeats 1000000 in
+open Janus.Amd64 Janus.Amd64.Decode in
+/-- **MUL r/m** (`F6/F7 /4`): every ModRM form and width; `AX` or `rDX:rAX`, `CF = OF`. -/
+theorem mul_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
+    {bytes : List Nat} (hcode : CodeAt s js.rip.toNat bytes) (hlim : js.rip.toNat + 17 < 2 ^ 47)
+    {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n)) (ho : o = 0xF6 ∨ o = 0xF7)
+    (hext : m / 8 % 8 = 4)
+    (hstep : step bytes js = .ok js') :
+    ∃ s', (janus_x86_step ()).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ X86Config s' := by
+  cases hd : decode bytes with
+  | none => simp [step, hd] at hstep
+  | some il =>
+  obtain ⟨i, len⟩ := il
+  cases hmd : modrm (p.rex.getD 0) (m :: rest) with
+  | none =>
+    exfalso
+    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    rcases ho with rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
+  | some mrc =>
+  obtain ⟨mm, r3, c⟩ := mrc
+  generalize hw : (if o = 0xF6 then 8 else osz p) = w
+  obtain ⟨hlk, hfs, hrep, rfl, hlen, rfl⟩ := decode_grp3 hpp ho (by omega) hmd hw.symm hd
+  rw [step_of_decode hd] at hstep
+  simp only [grp3, hext, ↓reduceIte, exec] at hstep
+  have hW : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64 := by
+    rw [← hw]; split
+    · simp
+    · rcases osz_cases p with e | e | e <;> simp [e]
+  have hm256 : m < 256 := by
+    have hdrop : bytes.drop n = o :: m :: rest := by simpa using parsePrefixes_drop _ _ _ hpp
+    exact hcode.1 m (by
+      have : m ∈ bytes.drop n := by rw [hdrop]; simp
+      exact List.mem_of_mem_drop this)
+  have hnext : BitVec.ofNat 64 ((BitVec.toNat js.rip + (n + 1 + c)) % 2 ^ 64) =
+      BitVec.ofNat 64 (js.rip.toNat + n + 1 + c) := by
+    rw [Nat.mod_eq_of_lt (by omega)]; congr 1; omega
+  rw [hnext] at hstep
+  unfold execMul1 at hstep
+  cases hrd : readLoc js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm) with
+  | error e => simp [hrd] at hstep
+  | ok X =>
+  obtain ⟨hok, rfl⟩ := readLoc_loc hrd
+  simp only [hrd, Bool.false_eq_true, ↓reduceIte, Except.ok.injEq] at hstep
+  subst hstep
+  have hreg4 : _get_modr_m_reg (BitVec.ofNat 8 m) = BitVec.ofNat 3 4 := by rw [(modrm_fields m hm256).2.1, hext]
+  refine rm_frame hrel hcfg hcode hlim hpp (by unfold prefixGroup; omega) (by omega) (by omega)
+    (by rcases ho with rfl | rfl <;> decide) hlk hmd (fun _ _ => hfs) hW (k := 0) (by decide) (by omega)
+    (fun sr tr x rex sib => x86_mul .Mode_64bit sr tr x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib)
+    (fun x rex _ hl sr tr sib => run_one_byte_mul o ho sr tr x hl rex _ sib hreg4 s) ?_
+  intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX hWr _ _ _
+  obtain ⟨s', hs', hrel', hc'⟩ := run_mul hrel hcfg hpr hrv o ho hw.symm m hm256 sib tr _ inc eaddr
+    (hX true false false hok) hinc8 js.rip.toNat (by omega) (by omega) (by omega)
+  refine ⟨s', hs', ?_, hc'⟩
+  rw [hinc'] at hrel'
+  have hF : ∀ F : Nat, F < 2 ^ 16 → (BitVec.ofNat 8 (F / 2 ^ 8)).toNat * 256 + (BitVec.ofNat 8 F).toNat = F := by
+    intro F hF; simp; omega
+  by_cases h8 : w = 8
+  · subst h8
+    simp only [↓reduceIte] at hrel' ⊢
+    rw [hF _ (Nat.lt_of_lt_of_eq (Nat.mul_lt_mul'' (js.getReg 8 0).isLt (BitVec.isLt _)) (by decide))]
+    exact hrel'
+  · simp only [h8, ↓reduceIte] at hrel' ⊢; exact hrel'
+
+end JanusX86.Proofs
