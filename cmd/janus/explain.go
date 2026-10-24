@@ -59,6 +59,13 @@ func explain(w io.Writer, outdir, reportPath string, r *verifiedReport) {
 		}
 		p("")
 	}
+	if len(r.Contracts) > 0 {
+		p("  runtime contracts assumed: %s", termSafe(strings.Join(r.Contracts, ", ")))
+		p("  These functions were not extracted. The theorem says nothing about their code: it holds")
+		p("  for the program linked with any code at those addresses that satisfies the contract")
+		p("  hypotheses of the statement (without such a hypothesis a call to one faults with noCode).")
+		p("")
+	}
 	p("  The guarantee is exactly this statement, with its hypotheses and quantifiers. Its")
 	p("  Extracted.* names denote the machine code copied from the binary below; nothing else")
 	p("  about the program is claimed.")
