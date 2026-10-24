@@ -1,5 +1,5 @@
 import Extracted
-open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Contracts
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 
 /-! Round 9 I1g: `Program.contractAddr` falls back to address 0 for a name that is not a
 recorded contract. `"runtime.newobjеct"` has a Cyrillic `е` (U+0435), so the hypothesis below
