@@ -110,4 +110,62 @@ Which parts of the runtime are proved rather than assumed is listed per contract
 
 ### Heap allocation (`Janus/Contracts/Alloc.lean`, `Janus/Contracts/AllocAmd64.lean`)
 
-TBD: filled in by the allocation work (see the module docs of `Janus/Contracts/Alloc.lean`).
+**Contracts.** `MallocgcContract`, `NewobjectContract`, `MakesliceContract` and
+`GrowsliceContract` (arm64; the amd64 ones end in `64`: `NewobjectContract64`, …) state Go 1.26's
+`runtime.mallocgc(size, typ, needzero)`, `newobject(typ)`, `makeslice(et, len, cap)` and
+`growslice(oldPtr, newLen, oldCap, num, et)` as `Summary`s of the linked program. Each takes the
+contract's address, the **runtime-owned ranges** `rt : List (Nat × Nat)` and the number of
+stack bytes `stack` the runtime may use below `SP`. From any state at the entry with
+
+* an admissible return address (arm64: `X30` 4-aligned, below `2^48`; amd64: `[RSP]` below
+  `2^47`, a canonical address, since `RET` faults otherwise), an aligned `SP` and the window
+  `[SP - stack, SP + 8 + 8·nargs)` writable (`CallOK`, `CallOK64`);
+* a readable type descriptor (`TypeOK`: `Size_` at offset 0, `PtrBytes` at offset 8) and
+  arguments that take no panic or throw path (`makeslice`: `len ≤ cap`, `Size_·cap ≤ maxAlloc`;
+  `growslice`: `oldLen ≤ oldCap < newLen < 2^40`, element size 8 without pointers);
+
+the function returns to the caller (`AllocRet`/`AllocRet64`: the ABI's preserved registers kept,
+the results in the result registers, every other register, the flags and the vector registers
+unspecified) with memory changed only inside `rt` and the callee's stack window
+(`MemFrame s.mem m (rt ++ calleeStack s stack nargs)`), and, for a non-zero size, a **fresh**
+object (`Fresh`):
+
+* `[ptr, ptr + blockSize size noscan)` inside one of the ranges of `rt` (`InRanges`), below
+  `2^48`, writable. `blockSize` is `roundupsize` (Go's size-class rounding, `msize.go`,
+  transcribed with the class table `sizeClasses`), except for a tiny pointer-free allocation
+  (`< 16` bytes), which shares a 16-byte block and owns only its own bytes;
+* 8-aligned when `size ≥ 16` or a multiple of 8, 16-aligned when `size` is a multiple of 16
+  (objects of a size class are laid out from a page-aligned span base; every class except 8 and
+  24 is a multiple of 16; large objects are page-aligned);
+* zero for its first `size` bytes when the call asks for zeroing (`newobject` and `makeslice`
+  always do; `mallocgc` when `needzero` or the type has pointers).
+
+`growslice` (8-byte pointer-free elements) also returns the new length and the new capacity
+`growCap8 newLen oldCap` (`nextslicecap`, then `roundupsize`), copies the old elements and zeroes
+the array from the new length on; the bytes of the appended elements are unspecified (the caller
+writes them). `le_growCap8` proves the capacity holds the new length.
+
+`.pos` (and `GrowsliceContract.withOld`/`.empty`) specialise a contract to a call site with
+`Summary.mono`, e.g. to a non-zero size, so that the post has no implication.
+
+**Runtime-owned memory.** `rt` is a parameter of every statement; a caller's precondition says
+that its own data lies outside it (`Outside a n rt`). Freshness is then a theorem
+(`InRanges.disjoint`): the object is inside `rt`, everything the caller holds is outside. The
+contract does not shrink `rt` after an allocation, so two allocations under the same `rt` may
+overlap as far as the contract says; the examples allocate once. Memory regions are never
+added by a contract (no instruction can add one, so such a contract would be unsatisfiable and
+the theorem vacuous): the arena memory is among the regions already, as Go's heap arenas are
+reserved address space.
+
+**Examples** (`examples/basic/alloc.go`; arm64 `examples/proofs/`, amd64 `examples/proofs-amd64/`):
+
+| Function | Contract | Guarantee |
+|---|---|---|
+| `NewPair(a, b) *Pair` | `newobject` | fresh 16-byte object in `rt`, 16-aligned, holding `a`, `b` |
+| `MakeSlice(n) []uint64` | `makeslice` | `len = cap = n`; for `n > 0` a fresh, 8-aligned, all-zero array of `n` words |
+| `AppendOne(s, x)` | `growslice` | room left: `x` stored in place; full (also nil): fresh array of capacity `growCap8 (len+1) cap` holding the old elements, `x`, then zeros |
+| `SetNext(n, q)` | none (the barrier's flush, `wbBufFlush`, is a contract the precondition makes unreachable) | `n.Next = q`; with the write barrier on, `q` and the old value recorded in the P's write-barrier buffer, executed from the barrier's machine code |
+| `MallocFast` (`runtime.mallocgc` itself, arm64) | none (every slow path is an unreachable contract) | the small pointer-free fast path, see below |
+
+**What is proved about the allocator itself.** See `examples/proofs/MallocFast.lean` and
+[SOUNDNESS.md](SOUNDNESS.md#runtime-contracts).

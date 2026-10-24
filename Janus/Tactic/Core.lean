@@ -240,6 +240,10 @@ def stateHyps : MetaM (Array Expr) := do
       if l.isAppOfArity ``Memory.readLE 3 && ty.isForall then
         out := out.push d.toExpr; continue
     let some (_, lhs, rhs) := ty.eq? | continue
+    -- named memory facts `h_rd… : m.readLE a n = v` (e.g. from `generalize h_rd… : … = v`, to
+    -- keep the symbolic state small): rewrite rules
+    if lhs.isAppOfArity ``Memory.readLE 3 && (d.userName.eraseMacroScopes.toString.startsWith "h_rd") then
+      out := out.push d.toExpr; continue
     let isStateProj (e : Expr) : Bool :=
       e.isAppOfArity ``State.pc 1 || e.isAppOfArity ``State.sp 1 ||
       e.isAppOfArity ``State.flags 1 || e.isAppOfArity ``State.mem 1
@@ -353,7 +357,8 @@ def tryPrune (g : MVarId) : TacticM Bool := withoutRecover do
             Nat.zero_mod]
             at *; omega)
         | (simp only [Bool.and_eq_true, Bool.or_eq_true, Bool.not_eq_true', Bool.not_eq_false',
-            decide_eq_true_eq, decide_eq_false_iff_not, not_and, not_or, Classical.not_not, ne_eq]
+            Bool.and_eq_false_iff, Bool.or_eq_false_iff, decide_eq_true_eq, decide_eq_false_iff_not,
+            not_and, not_or, Classical.not_not, ne_eq]
             at *; omega)))))
     catch _ => saved.restore; return false
   if !gs.isEmpty then saved.restore
@@ -568,7 +573,10 @@ where
       if d.isImplementationDetail then continue
       let ty ← instantiateMVars d.type
       if ty.isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
-      else if !before.contains d.fvarId && (← isProp ty) then ids := ids.push d.fvarId
+      -- (not equations: the executor uses them as rewrite rules, and simplifying one with
+      -- itself would turn it into `True`)
+      else if !before.contains d.fvarId && (← isProp ty) && !ty.isAppOfArity ``Eq 3 then
+        ids := ids.push d.fvarId
     if ids.isEmpty then return g
     setGoals [g]
     withExecSimp cfg (set := `janus_post) fun ctx simprocs d? => do
@@ -835,10 +843,10 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
         lhs.getAppFn.isConstOf ``Nat.ble || lhs.getAppFn.isConstOf ``and) then
       throwError "janus_disch: literal-only side condition"
   evalTactic (← `(tactic| first
+    | janus_apart
     | omega
     | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
-        Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)
-    | janus_apart))
+        Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
 
 /-! ## Arithmetic -/
 

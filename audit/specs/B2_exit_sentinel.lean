@@ -12,7 +12,7 @@ Run: cd /srv/janus && lake env lean audit/specs/B2_exit_sentinel.lean -/
 open Janus Janus.Arm64 Janus.GoABI
 
 def brSeg : Segment := ⟨"f", 0x1000, [0xd61f0000]⟩
-def brProg : Program := ⟨[brSeg], [], 0, []⟩
+def brProg : Program := { segments := [brSeg], stubs := [], exitAddr := 0 }
 
 theorem br_zero_returns : Ensures brProg 0x1000 [0] (fun _ => True) (fun _ _ => True) := by
   intro ret hret s hs _
