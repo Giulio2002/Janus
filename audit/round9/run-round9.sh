@@ -90,6 +90,10 @@ if command -v gdb >/dev/null; then
   new="$(sed -n 's/.*barrierok_round9=\([0-9]*\).*/\1/p' <<<"$o")"
   [ -n "$on" ] && [ "$old" -lt "$on" ] && [ "$new" = "$on" ]
   check S1_barrierok_real_calls $? "SetNext calls with the barrier on: $on; old [lo,hi) BarrierOK satisfiable for $old, round-9 BarrierOK for $new"
+  o="$(cd "$P" && timeout 1200 gdb -batch -x "$root/audit/round9/probe/maps_amd64.py" --args ./probe9-amd64 maps 2000 2>&1 | grep PROBE)"
+  sm="$(sed -n 's/.*small=\([0-9]*\).*/\1/p' <<<"$o")"; hk="$(sed -n 's/.*heap_interval_ok=\([0-9]*\).*/\1/p' <<<"$o")"
+  [ -n "$sm" ] && [ "$sm" -gt 0 ] && [ "$hk" = "$sm" ]
+  check MP_smallmodel_heap_interval $? "small-map lookups: $sm; one heap interval holds header and group and misses the stack window at $hk"
 else printf '  %-40s skipped  (no gdb)\n' S1_barrierok_real_calls; fi
 "$P/probe9-amd64" grow 3000000 > "$T/grow-amd64"; qemu-aarch64 "$P/probe9-arm64" grow 3000000 > "$T/grow-arm64"
 o="$(cmp "$T/grow-amd64" "$T/grow-arm64" && audit/round9/model/grow_check.sh "$T/grow-arm64" 2>&1)"

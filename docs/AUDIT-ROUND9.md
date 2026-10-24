@@ -1,7 +1,8 @@
 # Audit round 9: runtime contracts against the real runtime
 
 Branch `agent/redteam9`, based on `merge/b7` (main, round 8, agent/alloc, agent/stubpin,
-agent/rt-fp), then merged with main (`987d96d`). Scope: the runtime-contract layer added by
+agent/rt-fp), then merged with main (`987d96d`, then `73cae68`: maps, ffi/cgo contracts,
+iface-alloc, rt-model's EX1 segment check). Scope: the runtime-contract layer added by
 agent/alloc (allocation contracts, the proved `mallocgc` fast path, the write-barrier example),
 the linked-program semantics, and leftovers from round 8 (memory-guard settings, the H1
 lookalike table).
@@ -25,6 +26,8 @@ under qemu-aarch64. The host has no aarch64 gdb.
 | D1 | medium (docs) | **The stubpin merge (`2bf7f35`) replaced `docs/SOUNDNESS.md` wholesale with agent/stubpin's copy.** That dropped the "Runtime contracts" section, round 8's cache sections (toolchain identity, private cache root, trusted-compile MAC) and the I1 "object names must resolve" item from the trust document. Restored by a three-way merge. | **fixed** | D1 |
 | G1 | — | `growCap8` (`nextslicecap` + `roundupsize`) against the real runtime: all 43 growths of `[]uint64` up to 3·10^6 elements match, on both ISAs. | holds | G1 |
 | MG | — | `JANUS_MEMGUARD` / `JANUS_MEM_MAX` change limits only. An attack stays blocked under every mechanism and limit, and a kill is an `Invalid`, never a pass. Hazard: a forced mechanism that is unavailable (`JANUS_MEMGUARD=cgroup` without a delegated cgroup, or a misspelt name) silently runs unguarded. | holds (hazard) | MG |
+| MP | — | Map contracts (`Janus/Contracts/Map.lean`, `MapAmd64.lean`) already take the abstract runtime model `M : MapModel` (`Env`, `Rep`, `priv`), the readiness design C1 adds to allocation. `MapAccess1Small` discharges `Access1` for `smallModel`, whose single `heap` interval must hold a map's header and its group and miss the stack window. Probe (amd64 gdb, `probe9 maps`): 400 of 400 real small-map lookups, on the main goroutine and on 8 others, admit such an interval. | holds | MP |
+| FF | — | cgo contracts (`Janus/FFI.lean`, `Amd64/FFI.lean`, `CABI`): the X64-MXCSR-STICKY lesson is applied (only the control bits of MXCSR/FPCR are kept, the sticky status flags are arbitrary). `TPIDR`/`FS` are arbitrary after the call. `g` is 456 bytes in go1.26.0 (`runtime.g0` symbol size `0x1c8`). Stack shrinking is unsafe while `syscallsp ≠ 0`, which `exitsyscall`'s slow path clears only after rescheduling, so the "stack does not move across cgocall" claim matches the runtime. No vacuous hypothesis found. | holds | (reviewed) |
 | L1 | — | Linked-program semantics: `--contract` wins over `--targets` (no code is copied at a contract address), stubs keep their stub meaning, the entry cannot be a contract, and `impl` is universally quantified. No way was found for a proof to choose its `impl`. | holds | (round-8 rows) |
 
 **Safe to merge: yes**, with the full regression below. The fixes change the statements of 11
