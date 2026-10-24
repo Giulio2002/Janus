@@ -548,7 +548,7 @@ The exit code is `0` whenever the report was produced, including when words are 
 ## amd64 (x86-64) binaries
 
 `list`, `extract` and `check` (and therefore `verify`) also accept linux/amd64 Go ELF binaries
-(`EM_X86_64`, build setting `GOARCH=amd64`); `blockers` is arm64-only and refuses them.
+(`EM_X86_64`, build setting `GOARCH=amd64`); `blockers` handles them too: it sweeps each extracted function with x86asm (untrusted, it only finds instruction starts) and runs the bytes from each start, at most 15, through `Janus.Amd64.decode`. It reports an instruction when Lean rejects it, or when Lean decodes a different length than x86asm.
 
 ```
 scripts/build-examples-amd64.sh     # builds artifacts/examples-amd64, extracts artifacts/amd64/<Name>
