@@ -1,3 +1,4 @@
+import Lean
 import Janus.Tactic
 import Janus.Spec.Basic
 
@@ -127,6 +128,46 @@ where
 def blockSize (size : Nat) (noscan : Bool) : Nat :=
   if noscan && size < 16 then size else roundupsize size noscan
 
+theorem classSize_firstAtLeast_ge (cs : List Nat) (n : Nat) : n ≤ classSize.firstAtLeast cs n := by
+  induction cs with
+  | nil => exact Nat.le_refl _
+  | cons c cs ih =>
+    simp only [classSize.firstAtLeast]
+    split
+    · assumption
+    · exact ih
+
+theorem le_classSize (n : Nat) : n ≤ classSize n := classSize_firstAtLeast_ge _ _
+
+/-- The block is at least the requested size. -/
+theorem le_roundupsize (size : Nat) (noscan : Bool) : size ≤ roundupsize size noscan := by
+  unfold roundupsize
+  split
+  · dsimp only
+    generalize hreq : (if (!noscan && decide (size > minSizeForMallocHeader)) = true
+      then size + mallocHeaderSize else size) = req
+    have hge : size ≤ req := by rw [← hreq]; split <;> omega
+    have := le_classSize req
+    omega
+  · have h := Nat.div_add_mod (size + pageSize - 1) pageSize
+    have h2 := Nat.mod_lt (size + pageSize - 1) (show 0 < pageSize by decide)
+    simp only [pageSize] at *
+    omega
+
+theorem nextslicecap_go_ge (newLen c : Nat) : newLen ≤ nextslicecap.go newLen c := by
+  induction c using nextslicecap.go.induct newLen with
+  | case1 c c' h => rw [nextslicecap.go]; simp only [c'] at h; simp [h]
+  | case2 c c' h ih => rw [nextslicecap.go]; simp only [c'] at h ih; simp [h, ih]
+
+/-- `nextslicecap` reaches the requested length. -/
+theorem le_nextslicecap (newLen oldCap : Nat) : newLen ≤ nextslicecap newLen oldCap := by
+  unfold nextslicecap
+  split
+  · exact Nat.le_refl _
+  · split
+    · omega
+    · exact nextslicecap_go_ge _ _
+
 /-- Bytes `[a, a+n)` of `m` are zero. -/
 def ZeroBytes (m : Memory) (a n : Nat) : Prop := ∀ i, i < n → m.bytes (a + i) = 0
 
@@ -138,6 +179,18 @@ theorem ZeroBytes.readLE {m : Memory} {a n : Nat} (h : ZeroBytes m a n) {k j : N
     rw [Memory.readLE_succ, h k (by omega), show a + k + 1 = a + (k + 1) by omega,
       ih (k := k + 1) (by omega)]
     rfl
+
+/-- Reads from a copy: if bytes `[a, a+n)` of `m'` are bytes `[b, b+n)` of `m`, so are the
+`j`-byte reads at offset `k` (`k + j ≤ n`). -/
+theorem readLE_of_copy {m m' : Memory} {a b n : Nat}
+    (h : ∀ i, i < n → m'.bytes (a + i) = m.bytes (b + i)) {k j : Nat} (hk : k + j ≤ n) :
+    m'.readLE (a + k) j = m.readLE (b + k) j := by
+  induction j generalizing k with
+  | zero => rfl
+  | succ j ih =>
+    rw [Memory.readLE_succ, Memory.readLE_succ, h k (by omega),
+      show a + k + 1 = a + (k + 1) by omega, show b + k + 1 = b + (k + 1) by omega,
+      ih (k := k + 1) (by omega)]
 
 /-- A range outside `rs` is disjoint from every range inside `rs`: what makes an object placed in
 the runtime-owned ranges fresh for a caller whose data is outside them. -/
@@ -157,20 +210,22 @@ theorem _root_.Janus.InRanges.disjoint {a n b k : Nat} {rs : List (Nat × Nat)} 
     (16 ≤ size ∨ size % 8 = 0 → ptr % 8 = 0) ∧ (size % 16 = 0 → ptr % 16 = 0) ∧
     (zero = true → ZeroBytes m ptr size) ∧ size ≤ round
 
-/-- A writable range is disjoint from every read-only data object of `p` (whose bytes memory
-holds read-only, `Program.DataLoaded`): a write needs every overlapping region to be writable. -/
-theorem disjoint_of_dataLoaded {p : Program} {m : Memory} (h : p.DataLoaded m) (k : Nat)
-    (hk : k < p.data.length) {a n : Nat} (hw : m.accessible a n true = true) :
-    a + n ≤ (p.data[k]).base ∨ (p.data[k]).base + (p.data[k]).bytes.length ≤ a := by
-  obtain ⟨hreg, _⟩ := h _ (List.getElem_mem hk)
-  simp only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hreg
-  obtain ⟨r, hr, ⟨⟨⟨hb, he⟩, _⟩, hro⟩⟩ := hreg
-  simp only [Memory.accessible, Bool.and_eq_true, Bool.not_true, Bool.false_or,
-    List.all_eq_true, Bool.or_eq_true, decide_eq_true_eq] at hw
-  rcases hw.2 r hr with (h1 | h1) | h1
-  · rw [hro] at h1; cases h1
-  · omega
-  · omega
+/-- A `CBZ W` on a loaded word (the write-barrier flag test) as arithmetic, so that `janus_run`
+can prune the branch with `omega`. -/
+@[janus_exec, janus_post] theorem setWidth_ofNat_eq_zero (w x : Nat) (hw : w ≤ 64) :
+    (BitVec.setWidth w (BitVec.ofNat 64 x) = 0#w) = (x % 2 ^ w = 0) := by
+  apply propext
+  rw [← BitVec.toNat_inj, BitVec.toNat_setWidth, BitVec.toNat_ofNat, BitVec.toNat_ofNat,
+    Nat.zero_mod, Nat.mod_mod_of_dvd _ (Nat.pow_dvd_pow 2 hw)]
+
+/-- The byte ranges `(base, length)` are pairwise disjoint. -/
+def Separated : List (Nat × Nat) → Prop
+  | [] => True
+  | (a, n) :: rs => (∀ r ∈ rs, a + n ≤ r.1 ∨ r.1 + r.2 ≤ a) ∧ Separated rs
+
+@[simp] theorem separated_nil : Separated [] = True := rfl
+@[simp] theorem separated_cons (a n : Nat) (rs : List (Nat × Nat)) :
+    Separated ((a, n) :: rs) = ((∀ r ∈ rs, a + n ≤ r.1 ∨ r.1 + r.2 ≤ a) ∧ Separated rs) := rfl
 
 /-! ## arm64 -/
 
@@ -225,9 +280,19 @@ def retState (s : State) (junk : Nat → W64) (res : List W64) (f : Flags)
     (v : Nat → BitVec 128) (m : Memory) : State :=
   { s with regs := callRegs s.regs junk res, pc := s.regs 30, flags := f, vregs := v, mem := m }
 
-attribute [janus_exec, janus_post] retState calleeStack blockSize roundupsize classSize
-  classSize.firstAtLeast sizeClasses
-  maxSmallSize mallocHeaderSize minSizeForMallocHeader pageSize
+attribute [janus_exec, janus_post] retState calleeStack
+
+open Lean Meta in
+/-- `blockSize n b` for literal `n` and `b` evaluates to its value (a definitional unfolding the
+kernel re-checks); for a symbolic size it stays folded (unfolding it would split on all 67 size
+classes). -/
+dsimproc reduceBlockSize (blockSize _ _) := fun e => do
+  let_expr blockSize n b := e | return .continue
+  let some n ← Nat.fromExpr? n | return .continue
+  let some b := (match b.constName? with
+    | some ``Bool.true => some true | some ``Bool.false => some false | _ => none) |
+    return .continue
+  return .done (toExpr (blockSize n b))
 attribute [janus_exec, janus_post] true_implies
 
 /-- The shape of an allocation contract's postcondition (arm64): the callee returned to `X30`
@@ -328,15 +393,32 @@ theorem MakesliceContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)
 /-- The capacity `growslice` returns for 8-byte elements without pointers. -/
 def growCap8 (newLen oldCap : Nat) : Nat := roundupsize (nextslicecap newLen oldCap * 8) true / 8
 
-/-- The precondition of `runtime.growslice` for 8-byte pointer-free elements (arm64). -/
-def GrowslicePre (stack : Nat) (s : State) : Prop :=
+/-- The capacity `growslice` returns holds the new length. -/
+theorem le_growCap8 (newLen oldCap : Nat) : newLen ≤ growCap8 newLen oldCap := by
+  unfold growCap8
+  have h1 := le_nextslicecap newLen oldCap
+  have h2 := le_roundupsize (nextslicecap newLen oldCap * 8) true
+  exact (Nat.le_div_iff_mul_le (by decide)).2 (by omega)
+
+/-- The arguments of `runtime.growslice` for 8-byte pointer-free elements (arm64): the ABI part,
+the element type, and `oldLen = newLen - num ≤ oldCap < newLen < 2^40` (no panic path). -/
+def GrowsliceArgs (stack : Nat) (s : State) : Prop :=
   CallOK s stack 5 ∧ TypeOK s.mem (s.regs 4).toNat ∧
     typSize s.mem (s.regs 4).toNat = 8 ∧ typPtrBytes s.mem (s.regs 4).toNat = 0 ∧
     (s.regs 3).toNat ≤ (s.regs 1).toNat ∧
     (s.regs 1).toNat - (s.regs 3).toNat ≤ (s.regs 2).toNat ∧
-    (s.regs 2).toNat < (s.regs 1).toNat ∧ (s.regs 1).toNat < 2 ^ 40 ∧
-    (s.regs 0).toNat + 8 * ((s.regs 1).toNat - (s.regs 3).toNat) ≤ 2 ^ 48 ∧
+    (s.regs 2).toNat < (s.regs 1).toNat ∧ (s.regs 1).toNat < 2 ^ 40
+
+/-- The `oldLen` old elements at `oldPtr` are readable. -/
+def GrowsliceOld (s : State) : Prop :=
+  (s.regs 0).toNat + 8 * ((s.regs 1).toNat - (s.regs 3).toNat) ≤ 2 ^ 48 ∧
     s.mem.accessible (s.regs 0).toNat (8 * ((s.regs 1).toNat - (s.regs 3).toNat)) false = true
+
+/-- The precondition of `runtime.growslice` for 8-byte pointer-free elements (arm64): the
+arguments, and the old elements readable when there are any (`append(nil, x)` passes a nil
+`oldPtr`). -/
+def GrowslicePre (stack : Nat) (s : State) : Prop :=
+  GrowsliceArgs stack s ∧ (0 < (s.regs 1).toNat - (s.regs 3).toNat → GrowsliceOld s)
 
 /-- `growslice`'s new backing array for the call state `s` (8-byte pointer-free elements):
 `8·newCap` bytes, fresh, holding the `oldLen` old elements, zero from `8·newLen` on. -/
@@ -363,5 +445,23 @@ def GrowsliceContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack
     (fun s s' => AllocRet rt stack 5
       (fun ptr => [ptr, s.regs 1, BitVec.ofNat 64 (growCap8 (s.regs 1).toNat (s.regs 2).toNat)])
       s s' (growsliceObj rt s))
+
+/-- `GrowsliceContract` at a call whose old elements are readable. -/
+theorem GrowsliceContract.withOld {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
+    (h : GrowsliceContract p addr rt stack) :
+    Summary p addr (fun s => GrowsliceArgs stack s ∧ GrowsliceOld s)
+      (fun s s' => AllocRet rt stack 5
+        (fun ptr => [ptr, s.regs 1, BitVec.ofNat 64 (growCap8 (s.regs 1).toNat (s.regs 2).toNat)])
+        s s' (growsliceObj rt s)) :=
+  Summary.mono h (fun _ h => ⟨h.1, fun _ => h.2⟩) fun _ _ _ h => h
+
+/-- `GrowsliceContract` at a call with no old elements (`newLen = num`). -/
+theorem GrowsliceContract.empty {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
+    (h : GrowsliceContract p addr rt stack) :
+    Summary p addr (fun s => GrowsliceArgs stack s ∧ (s.regs 1).toNat = (s.regs 3).toNat)
+      (fun s s' => AllocRet rt stack 5
+        (fun ptr => [ptr, s.regs 1, BitVec.ofNat 64 (growCap8 (s.regs 1).toNat (s.regs 2).toNat)])
+        s s' (growsliceObj rt s)) :=
+  Summary.mono h (fun _ h => ⟨h.1, fun h' => absurd h' (by omega)⟩) fun _ _ _ h => h
 
 end Janus.Contracts

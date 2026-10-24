@@ -912,8 +912,13 @@ elab "janus_step" args:janusArgs cs:janusCalls bud:janusBudget : tactic => withM
 
 /-- From `h : p.DataLoaded m`, add `h_data<k> : m.accessible base len false = true` for every data
 segment `k` of `p` (literal bounds), and `h_rodata : ∀ a n, (dataRead p a n).isSome = true →
-m.readLE a n = dataReadD p a n`, which `janus_run` uses to evaluate loads from the data. -/
-elab "janus_data " h:ident : tactic => withMainContext do
+m.readLE a n = dataReadD p a n`, which `janus_run` uses to evaluate loads from the data. 
+`janus_data hd [hw₁, …]` additionally, for each `hwᵢ : m.accessible a n true = true` (a
+writable range of the same memory), `h_ddisj<i>_<k> : a + n ≤ base ∨ base + len ≤ a` for every data
+object `k`: read-only data is disjoint from writable memory (`disjoint_of_dataLoaded`). -/
+syntax janusDataWith := (" [" ident,* "]")?
+
+elab "janus_data " h:ident ws:janusDataWith : tactic => withMainContext do
   let hE ← elabTerm h none
   let ty ← instantiateMVars (← inferType hE)
   let (``Program.DataLoaded, #[p, m]) := ty.getAppFnArgs |
@@ -934,6 +939,41 @@ elab "janus_data " h:ident : tactic => withMainContext do
       let pf ← mkExpectedTypeHint (mkAppN (mkConst ``accessible_of_dataLoaded) #[p, m, hE, mkNatLit i, hlt]) accTy
       let (_, g') ← (← g.assert (Name.mkSimple s!"h_data{i}") accTy pf).intro1P
       return g'
+  do
+    let hws : Array (TSyntax `ident) := (Common.collectIdents ws.raw).map (⟨·⟩)
+    for hw in hws, j in [0:hws.size] do
+      g ← g.withContext do
+        let hwE ← Term.elabTerm hw none
+        let hwTy ← instantiateMVars (← inferType hwE)
+        let some (_, lhs, _) := hwTy.eq? |
+          throwError "janus_data: {hw} is not `m.accessible a n true = true`"
+        unless lhs.isAppOfArity ``Memory.accessible 4 do
+          throwError "janus_data: {hw} is not `m.accessible a n true = true`"
+        let a := lhs.getArg! 1
+        let n := lhs.getArg! 2
+        let mut g := g
+        for i in [0:k] do
+          g ← g.withContext do
+            let dE ← mkAppM ``getElem! #[← mkAppM ``Program.data #[p], mkNatLit i]
+            let some base ← evalNat (← mkAppM ``DataSegment.base #[dE]) | throwError "janus_data: base"
+            let some len ← evalNat (← mkAppM ``List.length #[← mkAppM ``DataSegment.bytes #[dE]]) |
+              throwError "janus_data: length"
+            let lenLt ← mkAppM ``LT.lt #[mkNatLit i, ← mkAppM ``List.length #[← mkAppM ``Program.data #[p]]]
+            let hlt ← mkDecideProof lenLt
+            let ty := mkOr (← mkAppM ``LE.le #[← mkAppM ``HAdd.hAdd #[a, n], mkNatLit base])
+              (← mkAppM ``LE.le #[← mkAppM ``HAdd.hAdd #[mkNatLit base, mkNatLit len], a])
+            let pairs ← mkAppM ``Option.map #[
+              ← withLocalDeclD `d (mkConst ``DataSegment) fun d => do
+                mkLambdaFVars #[d] (← mkAppM ``Prod.mk #[← mkAppM ``DataSegment.base #[d],
+                  ← mkAppM ``List.length #[← mkAppM ``DataSegment.bytes #[d]]]),
+              ← mkAppM ``GetElem?.getElem? #[← mkAppM ``Program.data #[p], mkNatLit i]]
+            let want ← mkAppM ``Option.some #[← mkAppM ``Prod.mk #[mkNatLit base, mkNatLit len]]
+            let hbl ← kernelDecide (← mkAppM ``BEq.beq #[pairs, want])
+            let pf := mkAppN (mkConst ``disjoint_of_dataLoaded')
+              #[p, m, hE, mkNatLit i, mkNatLit base, mkNatLit len, hbl, a, n, hwE]
+            let (_, g') ← (← g.assert (Name.mkSimple s!"h_ddisj{j}_{i}") ty pf).intro1P
+            return g'
+        return g
   g ← g.withContext do
     let pf := mkAppN (mkConst ``readLE_dataReadD) #[p, m, hE]
     let (_, g') ← (← g.assert `h_rodata (← inferType pf) pf).intro1P
