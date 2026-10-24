@@ -526,7 +526,8 @@ doubled about every 12 instructions). The `simp` of the run is not affected, but
 `share common exprs` (hash-consing before the kernel) are linear in distinct objects, so they
 grew exponentially with the length of the run: 0.035 s before the merge, 4-7 s for the 98
 instructions of `MulAdd8`, ~240 s of the 292 s of `MulAdd8x3`, plus kernel time on the
-unshared term. With `exec.rfl_<k>` the unfolding carries no proof at all, the step proofs stay
+unshared term, and memory: `lean` on `MulAdd8x3` peaked at 19.5 GB (2.35 GB with the fix, which
+brings it from 281 s to 41 s; bench/RESULTS.md). With `exec.rfl_<k>` the unfolding carries no proof at all, the step proofs stay
 at a few thousand objects, and the whole `MulAdd8` proof (run and arithmetic) spends 0.14 s in
 `instantiate metavars` and 0.37 s in `share common exprs`, against 10.2 s and 17.5 s before
 (same machine). To check for this kind of regression, compile the proof with
