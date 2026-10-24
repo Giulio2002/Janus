@@ -65,6 +65,13 @@ structure Program where
   `GoABI.Ensures`), so a computed branch to a fixed value is never mistaken for a return. -/
   exitAddr : Nat
   data : List DataSegment := []
+  /-- Runtime contracts (`janus extract --contract SYM`): functions the extraction calls
+  directly but did not copy, as `(name, address)`. The list does not change the run: there is no
+  code at these addresses in `segments`, so control reaching one faults with `noCode`. A theorem
+  that relies on such a function quantifies over the code at its address (`Program.link`) and
+  states the function's behaviour as a hypothesis (a `Tactic.Summary`, see
+  docs/RUNTIME-CONTRACTS.md). -/
+  contracts : List (String × Nat) := []
 deriving Repr, Inhabited
 
 /-- How a run ends when it does not fault. -/
@@ -100,6 +107,45 @@ def stubAt (p : Program) (pc : Nat) : Option Stub := p.stubs.find? (·.addr = pc
 /-- `p` called with return address `ret`: the same code, stubs and data, with the run ending
 when `pc` reaches `ret`. -/
 def withExit (p : Program) (ret : Nat) : Program := { p with exitAddr := ret }
+
+/-- `p` linked with arbitrary further code `impl` (for example the runtime functions behind its
+contracts), placed after `p`'s own segments. Every address where `p` has code still fetches
+`p`'s word (`fetch_link`), and stubs, data and the exit address are `p`'s. A theorem about
+`p.link impl` for every `impl` satisfying some contract hypotheses is a theorem about the
+extracted code together with *any* implementation of the contracts. -/
+def link (p : Program) (impl : List Segment) : Program := { p with segments := p.segments ++ impl }
+
+/-- The address of the contract `name` of `p` (`0` if `p` has no such contract). -/
+def contractAddr (p : Program) (name : String) : Nat :=
+  ((p.contracts.find? (·.1 == name)).map (·.2)).getD 0
+
+theorem fetchIn_append {l₁ : List Segment} (l₂ : List Segment) {pc w : Nat}
+    (h : fetchIn l₁ pc = some w) : fetchIn (l₁ ++ l₂) pc = some w := by
+  induction l₁ with
+  | nil => simp [fetchIn] at h
+  | cons seg rest ih =>
+    simp only [List.cons_append, fetchIn] at h ⊢
+    split
+    · rename_i hc
+      rw [if_pos hc] at h
+      split
+      · rename_i w' hw; rw [hw] at h; exact h
+      · rename_i hw; rw [hw] at h; exact ih h
+    · rename_i hc; rw [if_neg hc] at h; exact ih h
+
+theorem fetch_link {p : Program} (impl : List Segment) {pc w : Nat} (h : p.fetch pc = some w) :
+    (p.link impl).fetch pc = some w := fetchIn_append impl h
+
+@[simp] theorem stubAt_link (p : Program) (impl : List Segment) (pc : Nat) :
+    (p.link impl).stubAt pc = p.stubAt pc := rfl
+@[simp] theorem exitAddr_link (p : Program) (impl : List Segment) :
+    (p.link impl).exitAddr = p.exitAddr := rfl
+@[simp] theorem data_link (p : Program) (impl : List Segment) :
+    (p.link impl).data = p.data := rfl
+@[simp] theorem contracts_link (p : Program) (impl : List Segment) :
+    (p.link impl).contracts = p.contracts := rfl
+@[simp] theorem stubs_link (p : Program) (impl : List Segment) :
+    (p.link impl).stubs = p.stubs := rfl
 
 /-- Run for at most `fuel` instructions. -/
 def run (p : Program) : Nat → State → Except Fault Outcome

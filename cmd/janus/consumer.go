@@ -1196,6 +1196,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			Sandbox:           ws.sb.info(),
 			Definitions:       r.audit.Definitions,
 			DependencyConsts:  r.audit.External,
+			Contracts:         r.cr.Identity.contractList(),
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,
 				Files: pkg.fileHashes(), Dependency: pkg.Dep, Dependencies: pkg.depInfos(), AllowPathDeps: pkg.opts.AllowPathDeps,

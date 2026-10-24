@@ -97,8 +97,12 @@ func amd64DataRefs(insts []amd64Inst) []DataRef {
 
 // extractAmd64 is extractFrom for amd64 binaries: entry plus every function reachable by
 // direct branches, breadth first.
-func extractAmd64(b *Binary, entry Func, maxFunctions int, kindOf func(string) (StubKind, bool)) (*Extraction, error) {
+func extractAmd64(b *Binary, entry Func, maxFunctions int, cm *contractMatcher) (*Extraction, error) {
 	x := &Extraction{Bin: b, Entry: entry}
+	if cm != nil {
+		x.ContractPatterns = cm.pats
+	}
+	contractSeen := map[uint64]bool{}
 	seen := map[uint64]bool{entry.Addr: true}
 	stubSeen := map[uint64]bool{}
 	queue := []Func{entry}
@@ -123,11 +127,14 @@ func extractAmd64(b *Binary, entry Func, maxFunctions int, kindOf func(string) (
 				x.Unresolved = append(x.Unresolved, Unresolved{From: in.PC, Target: t})
 				continue
 			}
-			if k, ok := kindOf(g.Name); ok {
+			if k, ok := stubKind(g.Name); ok {
 				if !stubSeen[g.Addr] {
 					stubSeen[g.Addr] = true
 					x.Stubs = append(x.Stubs, Stub{Name: g.Name, Addr: g.Addr, Kind: k})
 				}
+				continue
+			}
+			if x.contractTarget(cm, contractSeen, g) {
 				continue
 			}
 			if !seen[g.Addr] {
@@ -136,7 +143,7 @@ func extractAmd64(b *Binary, entry Func, maxFunctions int, kindOf func(string) (
 			}
 		}
 		for _, g := range cgoWrapperRoots(b, amd64DataRefs(insts)) {
-			if _, isStub := kindOf(g.Name); !isStub && !seen[g.Addr] {
+			if _, isStub := stubKind(g.Name); !isStub && !cm.match(g.Name) && !seen[g.Addr] {
 				seen[g.Addr] = true
 				queue = append(queue, g)
 			}
@@ -251,12 +258,7 @@ func renderLeanAmd64(x *Extraction) []byte {
 	}
 	sb.WriteString("]\n\n")
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
-	if len(x.Data) == 0 {
-		sb.WriteString("def program : Amd64.Program := { segments := segments, stubs := stubs, exitAddr := exitAddr }\n\n")
-	} else {
-		writeData(&sb, x.Data)
-		sb.WriteString("def program : Amd64.Program :=\n  { segments := segments, stubs := stubs, exitAddr := exitAddr, data := data }\n\n")
-	}
+	writeProgram(&sb, x, "Amd64.Program")
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())
