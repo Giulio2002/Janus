@@ -347,7 +347,7 @@ theorem asl_addSubExt {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b01
       Rel (Janus.Arm64.execAddSubExt (if fld w 31 1 == 1#1 then 64 else 32) js (fld w 30 1 == 1#1)
         (fld w 29 1 == 1#1) (fld w 16 5).toNat (Janus.Arm64.ExtendType.ofBits (fld w 13 3).toNat)
         (fld w 10 3).toNat (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPReg hw (by omega)]
   have hk : (fld w 10 3).toNat ≤ 4 := by rw [fld_toNat w 10 3 hw]; omega
   rcases (show (w / 2 ^ 29) % 4 = 0 ∨ (w / 2 ^ 29) % 4 = 1 ∨ (w / 2 ^ 29) % 4 = 2 ∨ (w / 2 ^ 29) % 4 = 3 by omega)
@@ -358,28 +358,28 @@ theorem asl_addSubExt {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b01
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_addsub_imm hR (width_cases w) (fld_lt w 0 5) (fld_lt w 5 5)
       (Janus.Arm64.extendReg _ (js.readZR (fld w 16 5).toNat) (Janus.Arm64.ExtendType.ofBits (fld w 13 3).toNat)
         (fld w 10 3).toNat) (fld w 29 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · have hR := h.entry (BitVec.ofNat 32 w) 23
     rw [run_DataProcReg_ext_1 hw h1 h2 hk1 (see_entry _ _), run_decode_adds_ext _ _ _ _ _ _ _ _ hk,
       run_execute_ext_eq hR (width_cases w) (fld_lt w 16 5) (fld_lt w 5 5) _ hk]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_addsub_imm hR (width_cases w) (fld_lt w 0 5) (fld_lt w 5 5)
       (Janus.Arm64.extendReg _ (js.readZR (fld w 16 5).toNat) (Janus.Arm64.ExtendType.ofBits (fld w 13 3).toNat)
         (fld w 10 3).toNat) (fld w 29 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · have hR := h.entry (BitVec.ofNat 32 w) 24
     rw [run_DataProcReg_ext_2 hw h1 h2 hk1 (see_entry _ _), run_decode_sub_ext _ _ _ _ _ _ _ _ hk,
       run_execute_ext_eq hR (width_cases w) (fld_lt w 16 5) (fld_lt w 5 5) _ hk]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_addsub_imm hR (width_cases w) (fld_lt w 0 5) (fld_lt w 5 5)
       (Janus.Arm64.extendReg _ (js.readZR (fld w 16 5).toNat) (Janus.Arm64.ExtendType.ofBits (fld w 13 3).toNat)
         (fld w 10 3).toNat) (fld w 29 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · have hR := h.entry (BitVec.ofNat 32 w) 25
     rw [run_DataProcReg_ext_3 hw h1 h2 hk1 (see_entry _ _), run_decode_subs_ext _ _ _ _ _ _ _ _ hk,
       run_execute_ext_eq hR (width_cases w) (fld_lt w 16 5) (fld_lt w 5 5) _ hk]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_addsub_imm hR (width_cases w) (fld_lt w 0 5) (fld_lt w 5 5)
       (Janus.Arm64.extendReg _ (js.readZR (fld w 16 5).toNat) (Janus.Arm64.ExtendType.ofBits (fld w 13 3).toNat)
         (fld w 10 3).toNat) (fld w 29 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **ADD/ADDS/SUB/SUBS (extended register)**: for every word of the encoding class that Janus
 decodes (`opt = 00`, `imm3 ≤ 4`) and every related pair of states, Janus' `step` and the
@@ -388,7 +388,7 @@ theorem addSubExt_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b
     (h2 : (w / 2 ^ 21) % 8 = 1) (h3 : (w / 2 ^ 10) % 8 ≤ 4)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execAddSubExt N js (fld w 30 1 == 1#1)
     (fld w 29 1 == 1#1) (fld w 16 5).toNat (Janus.Arm64.ExtendType.ofBits (fld w 13 3).toNat)
     (fld w 10 3).toNat (fld w 5 5).toNat (fld w 0 5).toNat

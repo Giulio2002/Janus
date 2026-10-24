@@ -467,7 +467,7 @@ theorem asl_condsel {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b011
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execCondSel (if fld w 31 1 == 1#1 then 64 else 32) js (fld w 30 1 == 1#1)
         (fld w 16 5).toNat (fld w 12 4).toNat (fld w 10 1 == 1#1) (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPReg hw (by omega)]
   rcases (show (w / 2 ^ 30) % 2 = 0 ∨ (w / 2 ^ 30) % 2 = 1 by omega) with hk1 | hk1 <;>
   rcases (show (w / 2 ^ 10) % 2 = 0 ∨ (w / 2 ^ 10) % 2 = 1 by omega) with hk2 | hk2
@@ -478,7 +478,7 @@ theorem asl_condsel {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b011
       exact hspe
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_condsel (h.entry (BitVec.ofNat 32 w) 187) hspe1 (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 12 4) (fld w 10 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_condsel_1 hw h1 h2 hk1 hk2 (see_entry _ _), run_decode_csinc_condsel]
     have hspe1 : ((stepEntry s (BitVec.ofNat 32 w)).set .SEE 188).regs.get? .SPESampleInFlight = some false := by
       rw [get?_set_ne _ (r := .SEE) _ (by decide)]; simp only [stepEntry]
@@ -486,7 +486,7 @@ theorem asl_condsel {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b011
       exact hspe
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_condsel (h.entry (BitVec.ofNat 32 w) 188) hspe1 (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 12 4) (fld w 10 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_condsel_2 hw h1 h2 hk1 hk2 (see_entry _ _), run_decode_csinv_condsel]
     have hspe1 : ((stepEntry s (BitVec.ofNat 32 w)).set .SEE 189).regs.get? .SPESampleInFlight = some false := by
       rw [get?_set_ne _ (r := .SEE) _ (by decide)]; simp only [stepEntry]
@@ -494,7 +494,7 @@ theorem asl_condsel {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b011
       exact hspe
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_condsel (h.entry (BitVec.ofNat 32 w) 189) hspe1 (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 12 4) (fld w 10 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcReg_condsel_3 hw h1 h2 hk1 hk2 (see_entry _ _), run_decode_csneg_condsel]
     have hspe1 : ((stepEntry s (BitVec.ofNat 32 w)).set .SEE 190).regs.get? .SPESampleInFlight = some false := by
       rw [get?_set_ne _ (r := .SEE) _ (by decide)]; simp only [stepEntry]
@@ -502,7 +502,7 @@ theorem asl_condsel {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b011
       exact hspe
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_condsel (h.entry (BitVec.ofNat 32 w) 190) hspe1 (width_cases w)
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 12 4) (fld w 10 1 == 1#1) (fld w 30 1 == 1#1)
-    exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **CSEL/CSINC/CSINV/CSNEG**: for every word of the encoding class and every related pair of
 states (with statistical profiling not sampling), Janus' `step` and the generated ASL agree. -/
@@ -510,7 +510,7 @@ theorem condSel_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b0
     (h2 : (w / 2 ^ 11) % 2 = 0) {js : Janus.Arm64.State} {s : SState} (h : Rel js s)
     (hspe : s.regs.get? .SPESampleInFlight = some false) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   have hspec : ∀ N, (Janus.Arm64.execCondSel N js (fld w 30 1 == 1#1) (fld w 16 5).toNat (fld w 12 4).toNat
       (fld w 10 1 == 1#1) (fld w 5 5).toNat (fld w 0 5).toNat).pc = js.pc := by
     intro N; unfold Janus.Arm64.execCondSel; dsimp only
