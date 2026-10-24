@@ -563,7 +563,10 @@ limit, the largest measured `memory.peak` of its jobs and how many jobs ran.
 
 * `JANUS_MEM_MAX`: the per-job limit (`16G`, `1500M`, `off`); default min(24 GiB, 40% of RAM).
   `lake build` gets `LEAN_NUM_THREADS` (lake's job count) = limit / `JANUS_LAKE_JOB_MEM` (default
-  3G), at most the number of CPUs.
+  3G), at most `JANUS_LEAN_THREADS_MAX`.
+* `JANUS_LEAN_THREADS_MAX`: a CPU cap on one job's Lean parallelism (lake's job count, and the
+  default of `memguard_jobs` in `scripts/lib/memguard.sh`); default max(2, CPUs/8), so that
+  several concurrent jobs on one host do not each take every core.
 * Mechanism, first that works: a child cgroup of a delegated `$JANUS_MEMGUARD_CGROUP` (set by
   `scripts/lib/memguard.sh`, so janus's limits nest inside a script's or a parallel slot's);
   `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0` (janus re-runs itself in the
