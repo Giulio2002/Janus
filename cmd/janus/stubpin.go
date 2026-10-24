@@ -103,6 +103,11 @@ func (b *Binary) symIdentity(addr uint64) (id, fn string, faddr uint64) {
 	best := -1
 	for i := sort.Search(len(b.dataSyms), func(i int) bool { return b.dataSyms[i].Addr > addr }) - 1; i >= 0; i-- {
 		d := b.dataSyms[i]
+		// a compiler static temporary (`runtime..stmp_195`) has an ELF symbol only in an
+		// externally linked (cgo) binary: identify it by its region, as without the symbol
+		if strings.Contains(d.Name, "..stmp_") {
+			continue
+		}
 		if addr < d.End() {
 			if best < 0 || d.Addr > b.dataSyms[best].Addr || (d.Addr == b.dataSyms[best].Addr && d.Name < b.dataSyms[best].Name) {
 				best = i
@@ -332,7 +337,7 @@ func (b *Binary) pclnTable() (*gosym.Table, error) {
 	}
 	for _, s := range b.sections {
 		if s.Name == ".gopclntab" && s.data != nil {
-			b.pcln, b.pclnErr = gosym.NewTable(nil, gosym.NewLineTable(s.data, b.textAddr))
+			b.pcln, b.pclnErr = gosym.NewTable(nil, gosym.NewLineTable(s.data, b.goText))
 			return b.pcln, b.pclnErr
 		}
 	}
@@ -375,6 +380,23 @@ func (b *Binary) pclnFile(f Func) (name, file string, err error) {
 // their code is pinned, but what they call is not followed (it is most of the runtime).
 var stubTerminal = map[string]bool{"runtime.gopanic": true, "runtime.morestack.abi0": true}
 
+// isTerminalStub: a terminal stub, or an external one (the cgo boundary: runtime.cgocall,
+// _cgo_topofstack, runtime.cgoUse), whose outcome is a trusted contract (Janus.FFI.CgoCall),
+// not its callees: its code is pinned, what it calls is not followed.
+func isTerminalStub(name string) bool {
+	k, _ := stubKind(name)
+	return stubTerminal[name] || k == stubExternal
+}
+
+// stubPackage is the package of a pclntab function name; for an assembly function named
+// without one (`_cgo_topofstack`), the package of its file.
+func stubPackage(pname, rel string) string {
+	if pkg := (&gosym.Sym{Name: pname}).PackageName(); pkg != "" {
+		return pkg
+	}
+	return pinPackage(rel)
+}
+
 // checkStubPin checks f, whose name is a stub's or a pinned helper's, against the pin table:
 // the pclntab names it (without ABI suffix) as a function of package runtime whose entry is in
 // a file of package runtime, and its canonical code has a pinned hash, for this architecture
@@ -397,11 +419,11 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	if want := strings.TrimSuffix(f.Name, ".abi0"); pname != want {
 		return fmt.Errorf("the pclntab names the function at 0x%x %s, not %s", f.Addr, pname, want)
 	}
-	pkg := (&gosym.Sym{Name: pname}).PackageName()
+	rel, _ := goRootFile(file)
+	pkg := stubPackage(pname, rel)
 	if _, isStub := stubKind(f.Name); isStub && pkg != "runtime" {
 		return fmt.Errorf("the pclntab places %s in package %q, not runtime", pname, pkg)
 	}
-	rel, _ := goRootFile(file)
 	canon, refs, err := b.stubCanon(f)
 	if err != nil {
 		return err
@@ -422,7 +444,7 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	if !codeOK {
 		return fmt.Errorf("its code (normalized SHA-256 %s) is not the code of the runtime's %s in any toolchain Janus pins (%s)", h, f.Name, stubPinToolchains)
 	}
-	if _, isStub := stubKind(f.Name); !isStub || stubTerminal[f.Name] {
+	if _, isStub := stubKind(f.Name); !isStub || isTerminalStub(f.Name) {
 		return nil
 	}
 	for _, r := range refs {
@@ -443,7 +465,7 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 // stubCallees are the functions a non-terminal stub calls, jumps to or takes the address of
 // (outside itself).
 func stubCallees(f Func, refs []stubRef) []string {
-	if _, isStub := stubKind(f.Name); !isStub || stubTerminal[f.Name] {
+	if _, isStub := stubKind(f.Name); !isStub || isTerminalStub(f.Name) {
 		return nil
 	}
 	var out []string
@@ -500,7 +522,7 @@ func cmdStubpins(args []string, stdout, stderr io.Writer) error {
 				return nil, fmt.Errorf("%s: %s: the pclntab names it %s", p, f.Name, pname)
 			}
 			rel, ok := goRootFile(file)
-			if !ok || pinPackage(rel) != (&gosym.Sym{Name: pname}).PackageName() {
+			if !ok || pinPackage(rel) != stubPackage(pname, rel) {
 				return nil, fmt.Errorf("%s: %s: the pclntab file %q is not in its package's directory", p, f.Name, file)
 			}
 			fmt.Fprintf(stdout, "%s %s %s %s %s\n", tag, b.GOARCH, f.Name, rel, stubHash(canon))

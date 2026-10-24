@@ -164,6 +164,13 @@ func specs() []Spec {
 		add("fence", nil, b(0x0F, 0xAE), r, 1)
 	}
 	add("fence", b(0xF3), b(0x90), -1, 0)
+	// CET hint space F3 0F 1E: ENDBR64 (/7, rm = 2) and ENDBR32 (rm = 3) among the /7 register
+	// forms, RDSSP (/1) and the reserved NOPs; without and with other prefixes (only the exact
+	// bytes F3 0F 1E FA are modelled)
+	add("cet/endbr", b(0xF3), b(0x0F, 0x1E), 7, 1)
+	add("cet/endbr", b(0xF3), b(0x0F, 0x1E), 7, 1)
+	add("cet/endbr", b(0xF3), b(0x0F, 0x1E), -1, 0)
+	add("cet/endbr", nil, b(0x0F, 0x1E), 7, 1)
 	// string instructions, with and without REP (the state is steered to small counts)
 	for _, o := range []byte{0xA4, 0xA5, 0xAA, 0xAB} {
 		add("string", b(0xF3), b(o), -1, 0)
