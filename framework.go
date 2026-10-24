@@ -14,3 +14,10 @@ import "embed"
 //
 //go:embed Janus.lean Janus lakefile.toml lake-manifest.json lean-toolchain
 var Framework embed.FS
+
+// ASL holds the JanusASL Lake package (docs/ASL.md): its configuration, its Lean sources and the
+// vendored, generated ArmASL model (vendor/ArmASL.tar.gz, with its SHA-256 and version pins).
+// `janus verify --asl` builds it once per framework and JanusASL version in the local cache.
+//
+//go:embed JanusASL/lakefile.toml JanusASL/lake-manifest.json JanusASL/lean-toolchain JanusASL/JanusASL JanusASL/vendor
+var ASL embed.FS

@@ -104,6 +104,16 @@ structure CallSetup (p : Program) (entry : Nat) (args : List W64) (s : State) : 
 
 abbrev GoCall := CallSetup
 
+/-- `MXCSR` as Go's ABIInternal fixes it at every call (`abi-internal.md`, "amd64
+architecture"): the control bits 15:6 (`FTZ`, `RC`, the six exception masks, `DAZ`) are those
+of `0x1F80` (round to nearest even, every exception masked, no flushing) and the reserved bits
+31:16 are zero, while the six status flags (bits 5:0, `IE DE ZE OE UE PE`) are **arbitrary**.
+The flags are sticky and Go code never clears them: in a running Go program `PE` is already set
+when `main` starts (`MXCSR = 0x1FA0`; the runtime's own floating point is inexact), so a
+precondition `s.mxcsr = 0x1F80` would exclude practically every real call
+(`docs/AUDIT-FP.md`, X64-MXCSR-STICKY). Floating-point theorems state this instead. -/
+def GoMXCSR (s : State) : Prop := s.mxcsr.toNat / 64 = 0x1F80 / 64
+
 /-- The first `k` integer result registers. -/
 def results (k : Nat) (s : State) : List W64 := (intArgRegs.take k).map s.regs
 

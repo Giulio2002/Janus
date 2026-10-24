@@ -74,6 +74,13 @@ type verifiedReport struct {
 	// DependencyConsts are the constants from declared extra dependencies that the statement
 	// (or a proof-local def it uses) mentions: "<name> (<kind>, <module>)".
 	DependencyConsts []string `json:"dependencyConstants,omitempty"`
+	// Contracts are the extraction's runtime contracts ("name @ address", from identity.json):
+	// functions that were not extracted, whose behaviour the theorem can only use through a
+	// contract hypothesis in its statement.
+	Contracts []string `json:"contracts,omitempty"`
+	// ASL is the ASL corollary (--asl): the theorem transferred to Arm's ASL, or why it could not
+	// be. Its failure never changes the verified theorem above.
+	ASL *aslReport `json:"asl,omitempty"`
 	// DependencyDefinitions are the dependency defs the statement reaches, with their bodies
 	// (round 7 J1): a dependency def's name and docstring need not say what it means.
 	DependencyDefinitions []string `json:"dependencyDefinitions,omitempty"`
@@ -223,7 +230,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps")
+	args, flags := takeBoolFlags(args, "json", "fresh", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -239,6 +246,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	if flags["replay-fresh"] {
 		opts["replay-fresh"] = "true"
+	}
+	if flags["asl"] {
+		opts["asl"] = "true"
 	}
 	if flags["allow-path-deps"] {
 		if opts["proof-root"] == "" {
@@ -256,11 +266,13 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "%s\n", b)
 	} else {
 		printVerified(stdout, outdir, r)
+		printASL(stdout, r.ASL)
 	}
 	if !strings.Contains(r.Statement, "Extracted.") {
 		fmt.Fprintln(stderr, "Warning: the statement does not mention any Extracted definition; it says nothing about the extracted code.")
 	}
-	return nil
+	// The ASL stage failed: the report (with the verified theorem) is written; exit 1.
+	return aslDiagOf(r.ASL)
 }
 
 // verifyAndReport withdraws <outdir>/verified.json, verifies (a single proof file, or a
@@ -349,6 +361,10 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 		fmt.Fprintf(stdout, "  Kernel replay: skipped (%s)\n", r.KernelReplay.Note)
 	}
 	fmt.Fprintf(stdout, "  Lean: %s\n", r.LeanVersion)
+	if len(r.Contracts) > 0 {
+		fmt.Fprintf(stdout, "  Runtime contracts assumed: %s (not extracted; see the contract hypotheses of the statement)\n",
+			termSafe(strings.Join(r.Contracts, ", ")))
+	}
 	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(filepath.Join(outdir, "verified.json")))
 	fmt.Fprintln(stdout, "  Statement:")
 	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(termSafe(r.Statement), "\n", "\n    "))
@@ -483,6 +499,18 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	tc, err := findToolchain(lake, root)
 	if err != nil {
 		return nil, err
+	}
+	// --asl: the trusted JanusASL build, before the framework is pinned (its Lake build may check
+	// the framework's traces).
+	var asl *aslBuild
+	if opts["asl"] != "" {
+		aslRoot := root
+		if fw.Source != "directory" && opts["fresh"] != "" {
+			aslRoot = "" // not the temporary --fresh build: the cached base (byte-identical)
+		}
+		if asl, err = buildASLFor(fw, aslRoot, lake, stderr); err != nil {
+			return nil, err
+		}
 	}
 	tm.mark("toolchain lookup")
 	janusLibDir := filepath.Join(root, ".lake", "build", "lib", "lean")
@@ -746,6 +774,17 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 			Next: "Rerun janus verify."}
 	}
 
+	// 8. --asl: the ASL corollary (its outcome is recorded; it never fails the theorem above).
+	var aslRep *aslReport
+	if asl != nil {
+		aslRep = runASLStage(&aslEnv{sb: sb, tc: tc, build: asl, runBase: runBase,
+			trustedDirs: []string{trustedDir, janusLibDir}, searchDirs: []string{trustedDir, janusLibDir, workDir},
+			protected: append(append([]string{}, protected...), workDir), pinned: pinned, framework: fwPins,
+			homes:   map[string]string{"Extracted": trustedDir, "JanusTrusted": trustedDir, "Proof": workDir},
+			theorem: ar.Name, proofModule: "Proof", replayCache: replayCacheOK(sb, opts), replayFresh: opts["replay-fresh"] != "",
+			mapPaths: mapPaths, auditExe: auditExe, auditExeSha: auditExeSha})
+	}
+
 	tm.mark("final input check")
 	idBytes, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
 	fi := fw.info()
@@ -754,6 +793,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		commit += "+dirty"
 	}
 	report := &verifiedReport{
+		ASL:               aslRep,
 		Schema:            1,
 		Theorem:           ar.Name,
 		Kind:              ar.Kind,
@@ -782,6 +822,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		Framework:         fi,
 		Sandbox:           sb.info(),
 		Definitions:       ar.Definitions,
+		Contracts:         cr.Identity.contractList(),
 		Notes:             ar.Notes,
 	}
 	if resultKey != "" && bytes.Equal(idBytes, idBytes0) {

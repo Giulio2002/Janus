@@ -66,6 +66,10 @@ def IsMorestack : Outcome → Prop
     IsMorestack (.stub n .panic s) = False := rfl
 @[simp, janus_post] theorem isMorestack_morestack (n : String) (s : State) :
     IsMorestack (.stub n .morestack s) = True := rfl
+@[simp, janus_post] theorem isPanic_external (n : String) (s : State) :
+    IsPanic (.stub n .external s) = False := rfl
+@[simp, janus_post] theorem isMorestack_external (n : String) (s : State) :
+    IsMorestack (.stub n .external s) = False := rfl
 
 /-- The address `pc` is an ordinary instruction `w`, decoding to `i`: not the exit address, not
 a stub, inside the code. Evaluated by the kernel (`decide +kernel`). -/
@@ -83,12 +87,28 @@ def stubOK (p : Program) (pc : Nat) (name : String) (kind : StubKind) : Bool :=
     | some st => st.name == name && st.kind == kind
     | none => false
 
+/-! Program facts of `p` hold in `p.link impl` (code linked after `p`'s own segments), so the
+executor evaluates them on the closed `p` even when `impl` is a variable. -/
+
+theorem stepOK_link {p : Program} (impl : List Segment) {pc w : Nat} {i : Instr}
+    (h : stepOK p pc w i = true) : stepOK (p.link impl) pc w i = true := by
+  simp only [stepOK, Bool.and_eq_true, beq_iff_eq] at h ⊢
+  obtain ⟨⟨⟨⟨h1, h2⟩, h3⟩, h4⟩, h5⟩ := h
+  exact ⟨⟨⟨⟨h1, h2⟩, h3⟩, Program.fetch_link impl h4⟩, h5⟩
+
+theorem exitOK_link {p : Program} (impl : List Segment) {pc : Nat}
+    (h : exitOK p pc = true) : exitOK (p.link impl) pc = true := h
+
+theorem stubOK_link {p : Program} (impl : List Segment) {pc : Nat} {name : String}
+    {kind : StubKind} (h : stubOK p pc name kind = true) :
+    stubOK (p.link impl) pc name kind = true := h
+
 /-- The data the tactic reads off a program (evaluated at tactic run time; every use is
 re-checked by the kernel through `stepOK`/`exitOK`/`stubOK`): exit address, segments
-`(base, words)` and stubs `(addr, name, isPanic)`. -/
-def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Bool) :=
+`(base, words)` and stubs `(addr, name, StubKind.code)`. -/
+def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Nat) :=
   (p.exitAddr, p.segments.map (fun seg => (seg.base, seg.words)),
-    p.stubs.map (fun st => (st.addr, st.name, st.kind == .panic)))
+    p.stubs.map (fun st => (st.addr, st.name, st.kind.code)))
 
 private theorem pc_toNat_of {s : State} {c : Nat} (hpc : s.pc = BitVec.ofNat 64 c)
     (hc : c < 2 ^ 64) : s.pc.toNat = c := by
@@ -257,6 +277,7 @@ theorem panics_of_reaches {p : Program} {s : State} (h : Reaches p s IsPanic) : 
     cases kind with
     | panic => exact ⟨n, name, s', hr⟩
     | morestack => exact hq.elim
+    | external => exact hq.elim
 
 theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMorestack) :
     GrowsStack p s := by
@@ -267,6 +288,7 @@ theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMores
     cases kind with
     | panic => exact hq.elim
     | morestack => exact ⟨n, name, s', hr⟩
+    | external => exact hq.elim
 
 theorem reaches_of_returns {p : Program} {s : State} {post : State → Prop}
     (h : Returns p s post) : Reaches p s (IsReturn post) := by
@@ -358,6 +380,17 @@ theorem Summary.withExit {p : Program} {entry ret : Nat} {pre : State → Prop}
   intro s hpc hpre
   obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc hpre
   exact ⟨k, s', hst.withExit hret.fetch_none, hr, hq⟩
+
+/-- Weaken a summary: a stronger precondition and a weaker postcondition (which may use the
+precondition). Used to specialise a contract hypothesis to a call site, e.g. to the non-zero
+sizes of an allocation contract. -/
+theorem Summary.mono {p : Program} {entry : Nat} {pre pre' : State → Prop}
+    {post post' : State → State → Prop} (hsum : Summary p entry pre post)
+    (hpre : ∀ s, pre' s → pre s) (hpost : ∀ s s', pre' s → post s s' → post' s s') :
+    Summary p entry pre' post' := by
+  intro s hpc hp
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc (hpre s hp)
+  exact ⟨k, s', hst, hr, hpost s s' hp hq⟩
 
 /-! ## Register file normal form -/
 

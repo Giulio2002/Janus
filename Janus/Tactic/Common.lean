@@ -48,6 +48,51 @@ structure MemFrame (m m' : Janus.Arm64.Memory) (rs : List (Nat × Nat)) : Prop w
   readLE : ∀ a n, Outside a n rs → m'.readLE a n = m.readLE a n
   accessible : ∀ a n w, m'.accessible a n w = m.accessible a n w
 
+@[simp] theorem outside_append (a n : Nat) (rs rs' : List (Nat × Nat)) :
+    Outside a n (rs ++ rs') = (Outside a n rs ∧ Outside a n rs') := by
+  induction rs with
+  | nil => simp
+  | cons r rs ih => obtain ⟨lo, hi⟩ := r; simp [ih, and_assoc]
+
+/-- A sub-range of a range outside `rs` is outside `rs` (for a list `rs` that is a variable,
+e.g. a caller-declared list of runtime-owned ranges). -/
+theorem Outside.of_sub {b k a n : Nat} {rs : List (Nat × Nat)} (h : Outside b k rs) (h1 : b ≤ a)
+    (h2 : a + n ≤ b + k) : Outside a n rs := by
+  induction rs with
+  | nil => trivial
+  | cons r rs ih =>
+    obtain ⟨lo, hi⟩ := r
+    simp only [outside_cons] at h ⊢
+    exact ⟨by omega, ih h.2⟩
+
+/-- `[a, a+n)` and `[b, b+k)` do not overlap. The same as `Spec.Disjoint`, but a separate
+definition that `omega` does not unfold: a precondition with many disjointness facts states
+them as `Apart`, so that `omega` does not case-split on all of them in every side condition;
+the dischargers use them one at a time (`janus_apart`). -/
+def Apart (a n b k : Nat) : Prop := a + n ≤ b ∨ b + k ≤ a
+
+theorem Apart.symm {a n b k : Nat} (h : Apart a n b k) : Apart b k a n := by
+  unfold Apart at *; omega
+
+/-- `[a, a+n)` lies inside one of the ranges `[lo, hi)` of `rs`. -/
+def InRanges (a n : Nat) (rs : List (Nat × Nat)) : Prop := ∃ r ∈ rs, r.1 ≤ a ∧ a + n ≤ r.2
+
+theorem InRanges.append_left {a n : Nat} {rs : List (Nat × Nat)} (h : InRanges a n rs)
+    (rs' : List (Nat × Nat)) : InRanges a n (rs ++ rs') := by
+  obtain ⟨r, hr, h1, h2⟩ := h; exact ⟨r, List.mem_append_left _ hr, h1, h2⟩
+
+theorem InRanges.append_right {a n : Nat} {rs' : List (Nat × Nat)} (rs : List (Nat × Nat))
+    (h : InRanges a n rs') : InRanges a n (rs ++ rs') := by
+  obtain ⟨r, hr, h1, h2⟩ := h; exact ⟨r, List.mem_append_right _ hr, h1, h2⟩
+
+theorem InRanges.of_subset {a n : Nat} {rs rs' : List (Nat × Nat)} (h : InRanges a n rs)
+    (sub : ∀ r, r ∈ rs → r ∈ rs') : InRanges a n rs' := by
+  obtain ⟨r, hr, h1, h2⟩ := h; exact ⟨r, sub r hr, h1, h2⟩
+
+theorem InRanges.sub {a n b k : Nat} {rs : List (Nat × Nat)} (h : InRanges b k rs) (h1 : b ≤ a)
+    (h2 : a + n ≤ b + k) : InRanges a n rs := by
+  obtain ⟨r, hr, h3, h4⟩ := h; exact ⟨r, hr, by omega, by omega⟩
+
 namespace MemFrame
 
 variable {m m' m'' : Janus.Arm64.Memory} {rs : List (Nat × Nat)}
@@ -73,6 +118,12 @@ theorem writeLE (h : MemFrame m m' rs) {a k : Nat} (v : Nat) {r : Nat × Nat} (h
     have := outside_mem hb hr
     rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega)]; exact h.readLE b n hb,
    fun b n w => by rw [Janus.Arm64.Memory.accessible_writeLE]; exact h.accessible b n w⟩
+
+/-- A store inside the ranges, known from an `InRanges` fact (e.g. an object a contract placed in
+the runtime-owned ranges), keeps the frame. -/
+theorem writeLE_inRanges (h : MemFrame m m' rs) {a k : Nat} (v : Nat) (hin : InRanges a k rs) :
+    MemFrame m (m'.writeLE a k v) rs := by
+  obtain ⟨r, hr, h1, h2⟩ := hin; exact h.writeLE v hr h1 h2
 
 /-- `m.writeLE a k v` is a frame of `m` when the store is inside one of the ranges. -/
 theorem of_writeLE (m : Janus.Arm64.Memory) {a k : Nat} (v : Nat) {r : Nat × Nat} (hr : r ∈ rs)
@@ -102,6 +153,66 @@ register_option janus.aliasInfo : Bool := {
   descr := "janus_run/janus64_run: report reads over stores whose aliasing is unknown when \
     they are left in the remaining goals (an information message)"
 }
+
+register_option janus.merge : Bool := {
+  defValue := false
+  descr := "janus_run/janus64_run: merge paths that reach the same pc with the same state \
+    (the branch conditions they do not share are dropped; see `Common.pickMerged`)"
+}
+
+/-- Every identifier inside a syntax tree, in order. -/
+partial def collectIdents (stx : Syntax) : Array Syntax :=
+  if stx.isIdent then #[stx] else stx.getArgs.foldl (fun acc a => acc ++ collectIdents a) #[]
+
+/-- Close an arithmetic goal by `omega` using one `Apart` hypothesis at a time: for each
+`h : Apart a n b k` of the context, `omega` in both cases of `h`. -/
+partial def arithAtoms (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
+  let e := e.consumeMData
+  if e.isAppOfArity ``HAdd.hAdd 6 || e.isAppOfArity ``HSub.hSub 6 || e.isAppOfArity ``HMul.hMul 6 ||
+      e.isAppOfArity ``HDiv.hDiv 6 || e.isAppOfArity ``HMod.hMod 6 then
+    arithAtoms (e.getArg! 5) (arithAtoms (e.getArg! 4) acc)
+  else if e.isAppOfArity ``OfNat.ofNat 3 || e.isRawNatLit then acc
+  else if e.isAppOfArity ``LE.le 4 || e.isAppOfArity ``LT.lt 4 || e.isAppOfArity ``Eq 3 then
+    arithAtoms (e.getArg! (e.getAppNumArgs - 1)) (arithAtoms (e.getArg! (e.getAppNumArgs - 2)) acc)
+  else if e.isAppOfArity ``Or 2 || e.isAppOfArity ``And 2 then
+    arithAtoms (e.getArg! 1) (arithAtoms (e.getArg! 0) acc)
+  else if acc.contains e then acc else acc.push e
+
+def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
+  let gty ← instantiateMVars (← g.getType)
+  -- only disjunctions (the read-over-write and frame side conditions) are worth it
+  unless gty.consumeMData.isAppOfArity ``Or 2 do return false
+  let goalAtoms := arithAtoms gty
+  -- relevant `Apart` facts: every atom of their two ranges occurs in the goal
+  let mut cands := #[]
+  let mut toClear := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if ty.isAppOfArity ``Janus.Apart 4 then
+      let hAtoms := arithAtoms (ty.getArg! 2) (arithAtoms (ty.getArg! 0))
+      if hAtoms.all goalAtoms.contains then cands := cands.push d.fvarId
+      else toClear := toClear.push d.fvarId
+      continue
+    -- keep only the arithmetic facts about the goal's atoms, so that each `omega` is small
+    if ← isProp ty then
+      unless (arithAtoms ty).all goalAtoms.contains do toClear := toClear.push d.fvarId
+  if cands.isEmpty then return false
+  let saved ← saveState
+  let g' ← try g.tryClearMany toClear catch _ => pure g
+  for fv in cands do
+    let saved' ← saveState
+    try
+      let h ← Term.exprToSyntax (mkFVar fv)
+      let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic|
+        (have h' : _ := $h
+         unfold Janus.Apart at h'
+         rcases h' with h' | h' <;> omega))))
+      if gs.isEmpty then return true
+      saved'.restore
+    catch _ => saved'.restore
+  saved.restore
+  return false
 
 /-- `0x…` -/
 def hex (n : Nat) : String := "0x" ++ String.ofList (Nat.toDigits 16 n)
@@ -798,11 +909,41 @@ def dischargeOutside (g : MVarId) : TacticM Bool := do
   let saved ← saveState
   try
     let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
-      (simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
-        BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod]; omega))))
-    if gs.isEmpty then return true
-    saved.restore; return false
+      (simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true,
+        BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod]
+       repeat' apply And.intro))))
+    for g' in gs do
+      unless ← closePart g' do saved.restore; return false
+    return true
   catch _ => saved.restore; return false
+where
+  /-- One conjunct: arithmetic by `omega`, or `Outside a n rs` for a list `rs` that is not a
+  literal (a variable such as the runtime-owned ranges of a contract) from a hypothesis
+  `Outside b k rs` with `[a, a+n) ⊆ [b, b+k)` (`Outside.of_sub`). -/
+  closePart (g : MVarId) : TacticM Bool := g.withContext do
+    let t ← instantiateMVars (← g.getType)
+    if t.isAppOfArity ``Janus.Outside 3 then
+      let rs := t.getArg! 2
+      for d in ← getLCtx do
+        if d.isImplementationDetail then continue
+        let ty ← instantiateMVars d.type
+        unless ty.isAppOfArity ``Janus.Outside 3 do continue
+        unless ← withReducible (isDefEq (ty.getArg! 2) rs) do continue
+        let saved ← saveState
+        try
+          let h ← Term.exprToSyntax d.toExpr
+          let gs ← Tactic.run g <| withoutRecover do
+            evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> omega)))
+          if gs.isEmpty then return true
+          saved.restore
+        catch _ => saved.restore
+      return false
+    let saved ← saveState
+    try
+      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| omega)))
+      if gs.isEmpty then return true
+      saved.restore; omegaApart g
+    catch _ => saved.restore; omegaApart g
 
 /-- `rs[i] ∈ rs` for a list literal `rs = [e₀, …]`. -/
 def memProof (ty : Expr) (elems : List Expr) (i : Nat) : MetaM Expr := do
@@ -821,8 +962,36 @@ def frameArith (g : MVarId) : TacticM Bool := do
       ((try simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
           BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *); omega))))
     if gs.isEmpty then return true
-    saved.restore; return false
-  catch _ => saved.restore; return false
+    saved.restore; omegaApart g
+  catch _ => saved.restore; omegaApart g
+
+/-- Peel the store `m = m'.writeLE a k v` of a `MemFrame m₀ m rs` goal using a hypothesis
+`InRanges b k' rs'` (with `rs'` contained in `rs`, e.g. `rs = rs' ++ …`, and `[a, a+k) ⊆ [b, b+k')`
+by omega); on success the main goal is `MemFrame m₀ m' rs`. -/
+def tryInRanges (g : MVarId) (m0 m rs : Expr) : TacticM Bool := g.withContext do
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.InRanges 3 do continue
+    let saved ← saveState
+    try
+      let hinTy ← mkAppM ``Janus.InRanges #[m.getArg! 1, m.getArg! 2, rs]
+      let hin ← mkFreshExprSyntheticOpaqueMVar hinTy
+      let h ← Term.exprToSyntax d.toExpr
+      let gs ← Tactic.run hin.mvarId! <| withoutRecover (evalTactic (← `(tactic|
+        exact Janus.InRanges.of_subset
+          (Janus.InRanges.sub $h (by first | omega | (simp only [BitVec.toNat_sub,
+              BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *; omega))
+            (by first | omega | (simp only [BitVec.toNat_sub, BitVec.toNat_add,
+              BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *; omega)))
+          (by intro r hr; simp [List.mem_append, hr]))))
+      unless gs.isEmpty do saved.restore; continue
+      let hm ← mkFreshExprSyntheticOpaqueMVar (← mkAppM ``Janus.MemFrame #[m0, m.getArg! 0, rs])
+      g.assign (← mkAppM ``Janus.MemFrame.writeLE_inRanges #[hm, m.getArg! 3, hin])
+      setGoals [hm.mvarId!]
+      return true
+    catch e => trace[janus.disch] "tryInRanges: {e.toMessageData}"; saved.restore
+  return false
 
 /-- Prove `MemFrame m₀ m rs`: peel the stores of `m` (each must fall inside one of the ranges),
 go through `MemFrame` hypotheses of the context (their ranges must be covered by `rs`), and end
@@ -838,13 +1007,25 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
   if ← withReducible (isDefEq m m0) then
     g.assign (← mkAppM ``Janus.MemFrame.refl #[m0, rs]); return
   if m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 then
-    let some (pty, elems) := (← instantiateMVars rs).listLit? |
-      throwError "janus_frame: the ranges must be a list literal{indentExpr rs}"
+    -- a store inside an object known to lie in the ranges (`InRanges b k rs'` with `rs'` a part
+    -- of `rs`, e.g. the runtime-owned ranges of an allocation contract)
+    if ← tryInRanges g m0 m rs then return ← proveFrame (← getMainGoal) (fuel - 1)
+    -- the literal ranges: `rs` itself, or the literal right side of `l ++ [ … ]` (`l` e.g. the
+    -- runtime-owned ranges of a contract)
+    let rsI ← instantiateMVars rs
+    let (lit, pre?) := match rsI.getAppFnArgs with
+      | (``HAppend.hAppend, #[_, _, _, _, l, r]) => (r, some l)
+      | _ => (rsI, none)
+    let some (pty, elems) := lit.listLit? |
+      throwError "janus_frame: the ranges must be a list literal (or `l ++ [ … ]`){indentExpr rs}"
     for i in [0:elems.length] do
       let saved ← saveState
       let hm ← mkFreshExprSyntheticOpaqueMVar
         (← mkAppM ``Janus.MemFrame #[m0, m.getArg! 0, rs])
       let hr ← memProof pty elems i
+      let hr ← match pre? with
+        | some l => mkAppM ``List.mem_append_right #[l, hr]
+        | none => pure hr
       let e := elems[i]!
       let a := m.getArg! 1
       let k := m.getArg! 2
@@ -872,19 +1053,31 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
       let o (r : Expr) := mkAppN (mkConst ``Janus.Outside) #[a, n, r]
       mkForallFVars #[a, n] (← mkArrow (o rs) (mkAnd (o rs) (o (ty.getArg! 2))))
     let sub ← mkFreshExprSyntheticOpaqueMVar subTy
-    let (_, sg) ← sub.mvarId!.introN 3
+    let sg := sub.mvarId!
     let ok ← try
         let gs ← Tactic.run sg <| withoutRecover (evalTactic (← `(tactic|
-          (refine ⟨by assumption, ?_⟩
-           simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
-             BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *
-           omega))))
+          (intro a n h
+           refine ⟨h, ?_⟩
+           revert h
+           simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true,
+             and_imp]
+           intros
+           try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
+             Nat.reduceMod] at *
+           repeat' apply And.intro
+           all_goals first | assumption | omega))))
         pure gs.isEmpty
       catch _ => pure false
     unless ok do saved.restore; continue
     g.assign (← mkAppM ``Janus.MemFrame.trans #[hm, d.toExpr, sub])
     return ← proveFrame hm.mvarId! (fuel - 1)
   throwError "janus_frame: cannot relate the memory{indentExpr m}\nto{indentExpr m0}\n(no store to peel, and no `MemFrame` hypothesis about it whose ranges are covered)"
+
+/-- `janus_apart`: `omega` with the `Apart` hypotheses of the context, one at a time. -/
+elab "janus_apart" : tactic => do
+  let g ← getMainGoal
+  unless ← omegaApart g do throwError "janus_apart: no `Apart` hypothesis makes omega succeed"
+  replaceMainGoal []
 
 /-- Prove a goal `MemFrame m₀ m rs` (the memory part of a callee summary). -/
 elab "janus_frame" : tactic => do proveFrame (← getMainGoal); replaceMainGoal []
@@ -1307,5 +1500,198 @@ elab "janus_rfl_eqns " id:ident " [" attr:ident "]" : command => do
     return out
   for nm in names do
     elabCommand (← `(attribute [$attr:ident] $(mkIdent nm):ident))
+
+/-! ## Path merging (`set_option janus.merge true`)
+
+A branch whose two sides rejoin (`if c { x++ }; …`, a `&&` condition, a lock count that is
+or is not 1) doubles the work of every later instruction: each path is executed to the end on
+its own. With `janus.merge`, the run steps the pending path with the smallest pc first, so that
+the paths of a forward diamond wait for each other at the join. Two pending goals at the same
+pc whose targets are the same expression (the same state, the same postcondition) and whose
+local contexts differ only in branch hypotheses (`hbr`) are merged: the branch hypotheses that
+are not common to both are cleared and one goal is assigned to the other, so the rest of the
+run is executed once. Clearing hypotheses is always sound; it loses the facts of the branches
+taken, which is why merging is opt-in (a later branch decided by an earlier condition becomes
+two paths again, and a proof may need the dropped fact). -/
+
+/-- The branch hypotheses (`hbr`) of a local context and the other declarations. -/
+def splitBranchHyps (lctx : LocalContext) : Array FVarId × Array FVarId := Id.run do
+  let mut hb := #[]
+  let mut rest := #[]
+  for d in lctx do
+    if d.isImplementationDetail then continue
+    if d.userName.eraseMacroScopes == `hbr then hb := hb.push d.fvarId
+    else rest := rest.push d.fvarId
+  return (hb, rest)
+
+/-- What path merging needs to know about an ISA's state: the memory type (never
+generalised), the register-file chains `setR (… (x.regs) …) r v` (`(setR, regs)`) and the
+simprocs that remove a write-back of a register's own value (`setR f r (x.regs r) = f`). -/
+structure MergeSpec where
+  memTypes : List Name
+  regChains : List (Name × Name) := []
+  restore : List Name := []
+
+/-- A register-file chain `setR (… (setR base r₁ v₁) …) rₖ vₖ`, innermost first: the base and the
+writes `(index, literal, value)`. -/
+partial def regWrites (setR regs : Name) (f : Expr) (acc : List (Expr × Nat × Expr) := []) :
+    Option (Expr × List (Expr × Nat × Expr)) :=
+  if f.isAppOfArity setR 3 then
+    match (f.getArg! 1).nat? <|> (f.getArg! 1).rawNatLit? with
+    | some r => regWrites setR regs (f.getArg! 0) ((f.getArg! 1, r, f.getArg! 2) :: acc)
+    | none => none
+  else if f.isAppOfArity regs 1 then some (f, acc)
+  else none
+
+/-- Anti-unification of two goal targets: the common term, with every maximal pair of
+differing subterms replaced by a fresh free variable (`vars`: the variable, its type and the two
+subterms; the same pair, the same variable). A subterm is only generalised if it has no loose
+bound variables, both sides have the same type and that type is not a memory (a memory is never
+generalised: the run needs its stores; differing memories make the goals unmergeable). Two
+register-file chains over the same base are aligned by register: a register written on one side
+only gets a variable whose other value is the base's (`x.regs r`, removed again by the
+`restore` simprocs when the merged goal is instantiated). -/
+partial def antiUnify (spec : MergeSpec) (a b : Expr) :
+    StateRefT (Array (FVarId × Expr × Expr × Expr)) MetaM Expr := do
+  if a == b then return a
+  let fresh (ta a b : Expr) : StateRefT (Array (FVarId × Expr × Expr × Expr)) MetaM Expr := do
+    for (v, _, a', b') in ← get do
+      if a' == a && b' == b then return mkFVar v
+    let v ← mkFreshFVarId
+    modify (·.push (v, ta, a, b))
+    return mkFVar v
+  for (setR, regs) in spec.regChains do
+    if let (some (baseA, wa), some (baseB, wb)) := (regWrites setR regs a, regWrites setR regs b) then
+      if baseA == baseB && (wa.map (·.2.1) != wb.map (·.2.1)) then
+        let idx := (wa.map (·.2.1) ++ wb.map (·.2.1)).eraseDups.mergeSort
+        let wty ← instantiateMVars (← inferType (baseA.beta #[mkNatLit 0]))
+        let mut acc := baseA
+        for r in idx do
+          let va := wa.find? (·.2.1 == r)
+          let vb := wb.find? (·.2.1 == r)
+          let (ie, v) ← match va, vb with
+            | some (ie, _, x), some (_, _, y) => pure (ie, ← antiUnify spec x y)
+            | some (ie, _, x), none => pure (ie, ← fresh wty x (mkApp baseA ie))
+            | none, some (ie, _, y) => pure (ie, ← fresh wty (mkApp baseA ie) y)
+            | none, none => unreachable!
+          acc := mkApp3 (mkConst setR) acc ie v
+        return acc
+  let fa := a.getAppFn
+  let fb := b.getAppFn
+  if a.isApp && b.isApp && fa == fb && a.getAppNumArgs == b.getAppNumArgs && !fa.isMVar then
+    let xs := a.getAppArgs
+    let ys := b.getAppArgs
+    let mut out := #[]
+    for x in xs, y in ys do
+      out := out.push (← antiUnify spec x y)
+    return mkAppN fa out
+  if a.hasLooseBVars || b.hasLooseBVars || a.hasMVar || b.hasMVar then
+    throwError "antiUnify: bound variables{indentExpr a}\nvs{indentExpr b}"
+  let ta ← instantiateMVars (← inferType a)
+  if ta.getAppFn.constName?.any (spec.memTypes.contains ·) then
+    throwError "the memories differ{indentExpr a}\nvs{indentExpr b}"
+  if (← isProp ta) || ta.isSort then throwError "antiUnify: proposition or type"
+  unless ← withReducible (isDefEq ta (← inferType b)) do throwError "antiUnify: types"
+  fresh ta a b
+
+/-- `e` with the register write-backs `setR f r (x.regs r)` removed (the `restore` simprocs). -/
+def restoreRegs (spec : MergeSpec) (e : Expr) : MetaM Simp.Result := do
+  if spec.restore.isEmpty then return { expr := e }
+  let cfg : Simp.Config := { zeta := false, iota := false, proj := false, decide := false, beta := false, eta := false }
+  let ctx ← Simp.mkContext (config := cfg)
+    (simpTheorems := #[]) (congrTheorems := ← getSimpCongrTheorems)
+  let mut sp : Simp.Simprocs := {}
+  for n in spec.restore do sp ← sp.add n (post := true)
+  let (r, _) ← simp e ctx #[sp] none
+  return r
+
+/-- Merge `h` into `g` (same pc): `some g'` (the goal that remains; both `g` and `h` are
+assigned through it) if their contexts differ only in branch hypotheses and their targets differ
+in at most `maxVars` non-memory subterms (registers, flags), which the merged goal quantifies
+over (`∀ jv…`; e.g. a scratch register or the flags that the two sides of a diamond left
+differently, and that the code after the join overwrites). -/
+def tryMerge (spec : MergeSpec) (g h : MVarId) (maxVars : Nat := 8) : MetaM (Option MVarId) := do
+  let (hbG, restG) := splitBranchHyps (← g.getDecl).lctx
+  let (hbH, restH) := splitBranchHyps (← h.getDecl).lctx
+  unless restG == restH do
+    trace[janus] "not merged: the local contexts differ beyond branch hypotheses"
+    return none
+  let tg ← instantiateMVars (← g.getType)
+  let th ← instantiateMVars (← h.getType)
+  let some (tmpl, vars) ← g.withContext (try some <$> (antiUnify spec tg th).run #[]
+      catch e => do
+        trace[janus] "not merged: {e.toMessageData}"
+        pure none) | return none
+  if vars.size > maxVars then
+    trace[janus] "not merged: {vars.size} differing subterms, e.g.{MessageData.joinSep ((vars.toList.take 4).map fun (_, _, a, b) => m!"{indentExpr a}\nvs{indentExpr b}") "\n"}"
+    return none
+  let dropG := hbG.filter (!hbH.contains ·)
+  let dropH := hbH.filter (!hbG.contains ·)
+  let saved ← saveState
+  let g' ← g.tryClearMany dropG
+  let h' ← h.tryClearMany dropH
+  let idsG := (← g'.getDecl).lctx.getFVarIds
+  let idsH := (← h'.getDecl).lctx.getFVarIds
+  if idsG != idsH then saved.restore; return none
+  if vars.isEmpty then
+    h'.assign (mkMVar g')
+    return some g'
+  -- `∀ jv…, tmpl`, instantiated with each side's subterms
+  let fvs := vars.map (mkFVar ·.1)
+  let body := tmpl.abstract fvs
+  let mut ty := body
+  for i in [0:vars.size] do
+    let j := vars.size - 1 - i
+    ty := .forallE (Name.mkSimple s!"jv{j}") ((vars[j]!.2.1).abstractRange j fvs) ty .default
+  let ok ← g'.withContext do try Meta.check ty; pure true catch _ => pure false
+  unless ok do saved.restore; return none
+  let m ← g'.withContext (mkFreshExprSyntheticOpaqueMVar ty (← g'.getTag))
+  -- each side: the merged goal at its values, up to the register write-backs
+  let inst (side : MVarId) (vals : Array Expr) (target : Expr) : MetaM Bool := side.withContext do
+    let pf := mkAppN m vals
+    let r ← restoreRegs spec (body.instantiateRev vals)
+    unless r.expr == target do
+      unless ← withReducible (isDefEq r.expr target) do return false
+    match r.proof? with
+    | none => side.assign pf
+    | some eq => side.assign (← mkEqMP eq pf)
+    return true
+  unless ← inst g' (vars.map (·.2.2.1)) tg do
+    trace[janus] "not merged: the merged goal does not instantiate to the first one"
+    saved.restore; return none
+  unless ← inst h' (vars.map (·.2.2.2)) th do
+    trace[janus] "not merged: the merged goal does not instantiate to the second one"
+    saved.restore; return none
+  let (_, g'') ← m.mvarId!.introNP vars.size
+  return some g''
+
+/-- Pick the pending goal to step next when merging: the one with the smallest pc (goals
+without a literal pc, e.g. outcomes, first), after merging into it every other pending goal
+at the same pc that `tryMerge` accepts. -/
+def pickMerged (spec : MergeSpec) (pcOf : MVarId → MetaM (Option Nat))
+    (todo : List (MVarId × Bool)) :
+    MetaM (List (MVarId × Bool)) := do
+  let mut pend : Array (MVarId × Bool × Option Nat) := #[]
+  for (g, f) in todo do
+    if ← g.isAssigned then continue
+    pend := pend.push (g, f, ← pcOf g)
+  if pend.isEmpty then return []
+  let key (o : Option Nat) : Nat := match o with | none => 0 | some c => c + 1
+  let mut best := 0
+  for i in [1:pend.size] do
+    if key pend[i]!.2.2 < key pend[best]!.2.2 then best := i
+  let (g0, f0, pc0) := pend[best]!
+  let mut g := g0
+  let mut rest := #[]
+  for i in [0:pend.size] do
+    if i == best then continue
+    let (h, fh, pch) := pend[i]!
+    if pc0.isSome && pch == pc0 then
+      if let some g' ← tryMerge spec g h then
+        trace[janus] "merged two paths at pc {hex pc0.get!}"
+        g := g'
+        continue
+    rest := rest.push (h, fh)
+  return (g, f0) :: rest.toList
 
 end Janus.Tactic.Common

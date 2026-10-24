@@ -8,8 +8,8 @@ import Extracted
 `MULSD X3, X0; MULSD X1, X4; ADDSD X4, X0; MULSD X2, X5; ADDSD X5, X0`: three products and two
 sums, **each rounded** (unlike arm64, where the two later products are fused into the sums).
 
-**Guarantee.** For all binary64 encodings `a0 … b2` in the low 64 bits of `X0`–`X5` and
-`MXCSR = 0x1F80`, the call returns, obeys the ABI, and the low 64 bits of `X0` are the IEEE 754
+**Guarantee.** For all binary64 encodings `a0 … b2` in the low 64 bits of `X0`–`X5` and an
+`MXCSR` with Go's default control bits and any status flags (`GoMXCSR`), the call returns, obeys the ABI, and the low 64 bits of `X0` are the IEEE 754
 result of `(a0 × b0 + a1 × b1) + a2 × b2` with every operation rounded to nearest even
 (`Janus.Float.mul`, `Janus.Float.add`), or a NaN when an IEEE step is a NaN.
 -/
@@ -22,7 +22,7 @@ theorem correctness (a0 a1 a2 b0 b1 b2 : BitVec 64) :
       (fun s => StackWritable s 0 8 ∧ (s.xmm 0).toNat % 2 ^ 64 = a0.toNat ∧
         (s.xmm 1).toNat % 2 ^ 64 = a1.toNat ∧ (s.xmm 2).toNat % 2 ^ 64 = a2.toNat ∧
         (s.xmm 3).toNat % 2 ^ 64 = b0.toNat ∧ (s.xmm 4).toNat % 2 ^ 64 = b1.toNat ∧
-        (s.xmm 5).toNat % 2 ^ 64 = b2.toNat ∧ s.mxcsr = 0x1F80)
+        (s.xmm 5).toNat % 2 ^ 64 = b2.toNat ∧ GoMXCSR s)
       (fun _ s' => ResultIs binary64
         ((mul binary64 .rne a0.toNat b0.toNat).bind fun p =>
           (mul binary64 .rne a1.toNat b1.toNat).bind fun q =>
@@ -33,7 +33,7 @@ theorem correctness (a0 a1 a2 b0 b1 b2 : BitVec 64) :
   janus64_intro hs
   obtain ⟨-, hnw, hacc⟩ := hst
   simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw
-  janus64_run [h0, h1, h2, h3, h4, h5, hm]
+  janus64_run [h0, h1, h2, h3, h4, h5, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm]
   have std : binary64.Std := Or.inr rfl
   have hc : FP.IEEEMode ⟨.rne, false, false⟩ := ⟨rfl, rfl⟩
   obtain ⟨hp, hp'⟩ := FP.binop_mul_ieee hc binary64 std a0.toNat b0.toNat a0.isLt b0.isLt

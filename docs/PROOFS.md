@@ -94,6 +94,7 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 | `janus_run until [a, …]` | Stop (without executing) when a branch arrives at one of the addresses. The starting state is always stepped. Used at loop heads. |
 | `janus_run calls [h, …]` | Use callee summaries `h : Summary p entry pre post` at calls to `entry` instead of executing the callee. Also inside a callee's own proof (`ReachesRet` goals), so summaries compose through call chains. |
 | `janus_run (budget := N)` | Limit the run to `N` thousand heartbeats (the unit of `maxHeartbeats`), counted from its start. However the run ends, a timeout is reported as an error naming the pc, the instruction and the phase (see Troubleshooting). `(budget := N)` may also come first: `janus_run (budget := N) until [...]`. |
+| `set_option janus.merge true in janus_run …` | Path merging (also `janus64_run`): the pending path with the smallest pc is stepped first, and two paths at the same pc whose goals differ only in branch hypotheses and in a few non-memory subterms (registers, flags) are merged into one goal that quantifies over the differing values (`jv…`); the branch hypotheses they do not share are dropped. A diamond (`if c { x++ }`, a `&&` test) is then executed once after its join instead of once per path. Opt-in: a proof that needs a dropped branch fact, or a register value that differed, fails with merging. |
 | `janus_step [lemmas]` | Exactly one instruction (`calls`/`budget` as for `janus_run`). |
 | `janus_simp [lemmas]` | The post-processing simp set `janus_post` plus the state hypotheses and `lemmas`. Closes invariant side goals (`S'.regs 2 = i + 1`, …). |
 | `janus_arith` | The arithmetic left after execution. First `janus_carry` (below); if that does not apply, `omega` after adding `readLE m a n < 256^n` for every memory read and normalising carry terms. Does nothing if there is no goal. (`janus64_arith` on amd64.) |
@@ -528,6 +529,38 @@ every lane to its bytes (`elem_64_bytes`), pushing the masks into `if`s (`ite_la
 `firstTrue`. Name the branch hypotheses (`rename_i`) instead of `‹_›`: an anonymous assumption
 with metavariables is unified against every hypothesis, and these are large.
 
+### Runtime contracts and heap allocation (`NewPair`, `MakeSlice`, `AppendOne`, `SetNext`, `MallocFast`)
+
+Extract with `--contract runtime.newobject` (see `scripts/example-contracts.sh`), state the theorem
+about `Extracted.program.link impl` for every `impl` satisfying a contract hypothesis, and use the
+hypothesis at the call with `calls [hnew.pos]` (docs/RUNTIME-CONTRACTS.md):
+
+```lean
+theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (a b : BitVec 64)
+    (hnew : NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (pre rt) post := by
+  intro ret hret s hs ⟨…, hd, hout⟩
+  janus_intro hs
+  janus_data hd [hw]            -- also: the stack window is disjoint from the read-only data
+  janus_run until [Extracted.entry + 0x34] calls [hnew.pos]
+  have hdj := InRanges.disjoint ‹InRanges _ 16 rt› hout   -- the object is fresh
+  janus_run
+  …
+```
+
+* After the call, the contract's postcondition is split into hypotheses and simplified: the
+  returned pointer is a variable, with `InRanges ptr n rt`, alignment, `accessible` and
+  `ZeroBytes` facts; memory is a `MemFrame` of the call-site memory.
+* `Outside a n rt` side conditions (a read of the caller's stack through the contract's frame)
+  are proved from the precondition's `Outside b k rt`; `janus_frame` peels stores into the fresh
+  object (`InRanges`) and handles frames `rt ++ [ … ]`.
+* Many disjointness facts make `omega` slow (it case-splits on every disjunction in the context).
+  State them as `Apart a n b k` (or a `Spread` list of ranges): `omega` does not unfold `Apart`,
+  and the dischargers try one relevant `Apart` hypothesis at a time (`janus_apart`).
+  `MallocFast` relates eight objects (stack, `g`, `m`, `p`, `mcache`, `mspan`, the runtime
+  globals, the slot) this way.
+
 ### Counterexamples (`WrongAdd`)
 
 `scripts/break-demo.sh` changes `x + y` to `x - y` in a copy of the Go source, rebuilds,
@@ -583,6 +616,16 @@ What the executor does to keep a step cheap:
   restates every `f.eq_<k>` as `f.rfl_<k>` proved by `Eq.refl` (kernel-checked when it is
   added), tags it `@[defeq]` and puts it in the simp set; amd64 `exec` is unfolded that way.
   See the note below for what this cost.
+
+* **Path merging (opt-in, `janus.merge`).** Each branch whose two sides survive doubles the
+  work of every later instruction. With `set_option janus.merge true` the run waits for the
+  paths of a forward diamond at the join and merges them (`Common.pickMerged`, `tryMerge`):
+  the goals are anti-unified (register chains aligned by register, a register written on one
+  side only becomes a variable whose other value is the base register, removed again by the
+  register write-back simproc), memories must be identical, and the branch hypotheses not
+  common to both are cleared. `MallocFast` goes from 12 paths to 2 (the preemption path stores
+  `g.stackguard0`, so its memory differs), 433 steps to 167, and from 22.8 min to 2.5 min
+  (with the `ldrsw` sign-extension lemmas of the proof).
 
 **The amd64 post-processing regression (909b2ad, fixed).** The AVX/FS/DF merge made amd64
 `exec` structurally recursive: `.locked i a size` checks the alignment and then executes `i`

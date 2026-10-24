@@ -71,6 +71,10 @@ def IsMorestack : Outcome → Prop
     IsMorestack (.stub n .panic s) = False := rfl
 @[simp, janus64_post] theorem isMorestack_morestack (n : String) (s : State) :
     IsMorestack (.stub n .morestack s) = True := rfl
+@[simp, janus64_post] theorem isPanic_external (n : String) (s : State) :
+    IsPanic (.stub n .external s) = False := rfl
+@[simp, janus64_post] theorem isMorestack_external (n : String) (s : State) :
+    IsMorestack (.stub n .external s) = False := rfl
 
 /-- `pc` is an ordinary instruction: not the exit address, not a stub, inside the code with
 bytes `bs`, which decode to `i` of length `len`. Closed by kernel evaluation. -/
@@ -86,10 +90,25 @@ def stubOK (p : Program) (pc : Nat) (name : String) (kind : StubKind) : Bool :=
     | some st => st.name == name && st.kind == kind
     | none => false
 
+/-! Program facts of `p` hold in `p.link impl` (see `Janus.Tactic.stepOK_link`). -/
+
+theorem stepOK_link {p : Program} (impl : List Segment) {pc : Nat} {bs : List Nat} {i : Instr}
+    {len : Nat} (h : stepOK p pc bs i len = true) : stepOK (p.link impl) pc bs i len = true := by
+  simp only [stepOK, Bool.and_eq_true, beq_iff_eq] at h ⊢
+  obtain ⟨⟨⟨⟨h1, h2⟩, h3⟩, h4⟩, h5⟩ := h
+  exact ⟨⟨⟨⟨h1, h2⟩, h3⟩, Program.fetch_link impl h4⟩, h5⟩
+
+theorem exitOK_link {p : Program} (impl : List Segment) {pc : Nat}
+    (h : exitOK p pc = true) : exitOK (p.link impl) pc = true := h
+
+theorem stubOK_link {p : Program} (impl : List Segment) {pc : Nat} {name : String}
+    {kind : StubKind} (h : stubOK p pc name kind = true) :
+    stubOK (p.link impl) pc name kind = true := h
+
 /-- The data the tactic reads off a program (re-checked by the kernel on every use). -/
-def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Bool) :=
+def progData (p : Program) : Nat × List (Nat × List Nat) × List (Nat × String × Nat) :=
   (p.exitAddr, p.segments.map (fun seg => (seg.base, seg.bytes)),
-    p.stubs.map (fun st => (st.addr, st.name, st.kind == .panic)))
+    p.stubs.map (fun st => (st.addr, st.name, st.kind.code)))
 
 private theorem rip_toNat_of {s : State} {c : Nat} (hpc : s.rip = BitVec.ofNat 64 c)
     (hc : c < 2 ^ 64) : s.rip.toNat = c := by
@@ -241,6 +260,7 @@ theorem panics_of_reaches {p : Program} {s : State} (h : Reaches p s IsPanic) : 
     cases kind with
     | panic => exact ⟨n, name, s', hr⟩
     | morestack => exact hq.elim
+    | external => exact hq.elim
 
 theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMorestack) :
     GrowsStack p s := by
@@ -251,6 +271,7 @@ theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMores
     cases kind with
     | panic => exact hq.elim
     | morestack => exact ⟨n, name, s', hr⟩
+    | external => exact hq.elim
 
 /-! ## Callee summaries
 
@@ -409,6 +430,17 @@ theorem Summary.withExit {p : Program} {entry ret : Nat} {pre : State → Prop}
   obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc hpre
   exact ⟨k, s', hst.withExit hret.fetch_none, hr, hq⟩
 
+/-- Weaken a summary: a stronger precondition and a weaker postcondition (which may use the
+precondition). Used to specialise a contract hypothesis to a call site, e.g. to the non-zero
+sizes of an allocation contract. -/
+theorem Summary.mono {p : Program} {entry : Nat} {pre pre' : State → Prop}
+    {post post' : State → State → Prop} (hsum : Summary p entry pre post)
+    (hpre : ∀ s, pre' s → pre s) (hpost : ∀ s s', pre' s → post s s' → post' s s') :
+    Summary p entry pre' post' := by
+  intro s hpc hp
+  obtain ⟨k, s', hst, hr, hq⟩ := hsum s hpc (hpre s hp)
+  exact ⟨k, s', hst, hr, hpost s s' hp hq⟩
+
 /-! ## Read-only data (`janus64_data`)
 
 As on arm64 (`Janus.Tactic.dataRead`): `dataRead p a n` is the little-endian value of the `n`
@@ -471,6 +503,36 @@ theorem readLE_of_dataRead {p : Program} {m : Memory} (h : p.DataLoaded m) {a n 
     rw [show d.base + (a - d.base + i) = a + i by omega] at this
     rw [this]
     simp [List.getElem_take, List.getElem_drop]
+
+/-- A writable range is disjoint from every read-only data object (whose bytes memory holds
+read-only, `Program.DataLoaded`): a write needs every overlapping region to be writable. Used by
+`janus64_data hd [hw]`. -/
+theorem disjoint_of_dataLoaded {p : Program} {m : Memory} (h : p.DataLoaded m) (k : Nat)
+    (hk : k < p.data.length) {a n : Nat} (hw : m.accessible a n true = true) :
+    a + n ≤ (p.data[k]).base ∨ (p.data[k]).base + (p.data[k]).bytes.length ≤ a := by
+  obtain ⟨hreg, _⟩ := h _ (List.getElem_mem hk)
+  simp only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hreg
+  obtain ⟨r, hr, ⟨⟨⟨hb, he⟩, _⟩, hro⟩⟩ := hreg
+  simp only [Janus.Arm64.Memory.accessible, Bool.and_eq_true, Bool.not_true, Bool.false_or,
+    List.all_eq_true, Bool.or_eq_true, decide_eq_true_eq] at hw
+  rcases hw.2 r hr with (h1 | h1) | h1
+  · rw [hro] at h1; cases h1
+  · omega
+  · omega
+
+/-- `disjoint_of_dataLoaded` with the object's bounds as literals, checked as Boolean facts (the
+form `janus_data hd [hw]` produces, so the elaborator never unfolds the data list). -/
+theorem disjoint_of_dataLoaded' {p : Program} {m : Janus.Arm64.Memory} (h : p.DataLoaded m) (k : Nat)
+    {base len : Nat}
+    (hbl : (p.data[k]?.map (fun d => (d.base, d.bytes.length)) == some (base, len)) = true)
+    {a n : Nat} (hw : m.accessible a n true = true) : a + n ≤ base ∨ base + len ≤ a := by
+  simp only [beq_iff_eq, Option.map_eq_some_iff, Prod.mk.injEq] at hbl
+  obtain ⟨d, hd, rfl, rfl⟩ := hbl
+  have hk : k < p.data.length := (List.getElem?_eq_some_iff.mp hd).1
+  have hdk : p.data[k] = d := (List.getElem?_eq_some_iff.mp hd).2
+  have := disjoint_of_dataLoaded h k hk hw
+  rw [hdk] at this
+  exact this
 
 /-- The rewrite rule `janus64_data` installs. -/
 theorem readLE_dataReadD {p : Program} {m : Memory} (h : p.DataLoaded m) (a n : Nat)
@@ -991,7 +1053,7 @@ def tacName : String := "janus64_run"
 def accessFns : List (Name × Bool) :=
   [(``Janus.Amd64.load, false), (``Janus.Amd64.loadRW, true), (``Janus.Amd64.store, true)]
 
-abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Bool)
+abbrev ProgData := Nat × List (Nat × List Nat) × List (Nat × String × Nat)
 
 /-- Segment names and ranges, for messages. -/
 def progSyms (p : Program) : List (String × Nat × Nat) :=
@@ -1109,7 +1171,7 @@ simproc_decl reduceSetRegFRestore (setRegF _ _ _) := fun e => do
   return .done { expr := f, proof? := mkAppN (mkConst ``setRegF_restore) #[f, r, v, h] }
 
 /-- The state hypotheses the executor rewrites with: equations `x.rip = _`, `x.flags = _`,
-`x.mem = _`, `x.regs i = _`, `x.xmm i = _` and memory facts `m.readLE a n = _` (also
+`x.mem = _`, `x.regs i = _`, `x.xmm i = _`, `x.df = _`, `x.mxcsr = _` and memory facts `m.readLE a n = _` (also
 `∀`-quantified ones, from `janus64_data`), branch conditions `hbr`, and the rewrite rules of
 every `RetAddr p ret` hypothesis (`RetAddr.toNat_ofNat`, …). -/
 def stateHyps : MetaM (Array Expr) := do
@@ -1140,7 +1202,7 @@ def stateHyps : MetaM (Array Expr) := do
       out := out.push d.toExpr
     else if lhs.isAppOfArity ``State.flags 1 || lhs.isAppOfArity ``State.mem 1 ||
         lhs.isAppOfArity ``State.regs 2 || lhs.isAppOfArity ``State.xmm 2 ||
-        lhs.isAppOfArity ``State.df 1 ||
+        lhs.isAppOfArity ``State.df 1 || lhs.isAppOfArity ``State.mxcsr 1 ||
         lhs.isAppOfArity ``Janus.Arm64.Memory.readLE 3 then
       out := out.push d.toExpr
   return out
@@ -1290,6 +1352,21 @@ def exitMode (p : Expr) : MetaM (Option (Expr × Expr)) := do
   | (``Program.withExit, #[base, ret]) => return some (base, ret)
   | _ => return none
 
+/-- A program of the form `Program.link p impl` (the extracted code linked with arbitrary
+code for its contracts): `(p, impl)`. The program facts are evaluated on the closed `p` and
+lifted with `stepOK_link`/`stubOK_link`/`exitOK_link`. -/
+def linkMode (p : Expr) : MetaM (Option (Expr × Expr)) := do
+  let p := (← instantiateMVars p).consumeMData
+  match p.getAppFnArgs with
+  | (``Program.link, #[base, impl]) => return some (base, impl)
+  | _ => return none
+
+/-- `h : fact p …` lifted to `fact (p.link impl) …` when the program is linked. -/
+def liftLink (impl? : Option Expr) (lem : Name) (h : Expr) : MetaM Expr := do
+  match impl? with
+  | some impl => mkAppM lem #[impl, h]
+  | none => return h
+
 /-- The hypothesis `RetAddr p ret` from the local context. -/
 def findRetAddr (base ret : Expr) : MetaM Expr := do
   let want ← mkAppM ``GoABI.RetAddr #[base, ret]
@@ -1416,18 +1493,28 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let mut out := []
   for g' in gs do
     if ← g'.isAssigned then continue
+    let before ← g'.withContext do return (← getLCtx).getFVarIds
     let (fv, g'') ← g'.introNP 3
     let g'' ← Common.destructPost g'' fv[0]! fv[1]! fv[2]!
-    out := out ++ [← normFrames cfg g'']
+    out := out ++ [← normFrames cfg g'' before]
   return out
 where
-  /-- Simplify the callee's `MemFrame` hypotheses (their ranges mention the call-site state
-  literal), so that `omega` sees the addresses in normal form. -/
-  normFrames (cfg : Cfg) (g : MVarId) : TacticM MVarId := g.withContext do
+  /-- Simplify the callee's `MemFrame` hypotheses and the other propositions its postcondition
+  added (their terms mention the call-site state literal), so that `omega` and the
+  accessibility discharger see the addresses in normal form. -/
+  stateEq (ty : Expr) : Bool :=
+    match ty.eq? with
+    | some (_, l, _) => l.getAppFn.constName?.any (·.getPrefix == ``Janus.Amd64.State)
+    | none => false
+  normFrames (cfg : Cfg) (g : MVarId) (before : Array FVarId) : TacticM MVarId := g.withContext do
     let mut ids := #[]
     for d in ← getLCtx do
       if d.isImplementationDetail then continue
-      if (← instantiateMVars d.type).isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
+      let ty ← instantiateMVars d.type
+      if ty.isAppOfArity ``Janus.MemFrame 3 then ids := ids.push d.fvarId
+      -- an equation about a state component (`s'.regs 19 = …`) is a state hypothesis: it is a
+      -- rewrite rule of the simp set itself, and simplifying it with that set turns it into `True`
+      else if !before.contains d.fvarId && (← isProp ty) && !(stateEq ty) then ids := ids.push d.fvarId
     if ids.isEmpty then return g
     setGoals [g]
     withExecSimp cfg (set := `janus64_post) fun ctx simprocs d? => do
@@ -1481,7 +1568,10 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
         in the context (`intro ret hret …`) and keep `h_ret` (the return-address slot); for a \
         callee, prove it as a `Summary` and pass it with `calls [...]`; otherwise add an equation \
         `… = BitVec.ofNat 64 addr` for the target."
-    let ((exitA, segs, stubs), syms) ← getProgData progE
+    let (evalE, impl?) ← match ← linkMode progE with
+      | some (b, impl) => pure (b, some impl)
+      | none => pure (progE, none)
+    let ((exitA, segs, stubs), syms) ← getProgData evalE
     cfg.status.modify fun st => { st with pc := some c, sym := Common.symOf syms c }
     if !allowStop && cfg.stops.contains c then return none
     -- a call to a function with a summary
@@ -1495,15 +1585,19 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
     let cE := mkNatLit c
     if mode.isNone && c == exitA then
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
-      let hok ← kernelDecide (mkApp2 (mkConst ``exitOK) p cE)
+      let hok ← liftLink impl? ``exitOK_link (← kernelDecide (mkApp2 (mkConst ``exitOK) evalE cE))
       return some (← Common.applyFast g (mkAppN (mkConst ``Reaches.exit) #[p, s, Q, cE, hpc, hok]))
-    if let some (_, name, isPanic) := stubs.find? (·.1 == c) then
+    if let some (_, name, kindCode) := stubs.find? (·.1 == c) then
       if ret?.isSome then
         throwError "{tacName}: the callee reaches the runtime stub {name} at {hex c}; a \
           `Summary` only covers runs that return. Add the precondition that excludes this path \
           (e.g. `StackGuardOK` for `morestack`)."
-      let kind := if isPanic then mkConst ``StubKind.panic else mkConst ``StubKind.morestack
-      let hok ← kernelDecide (mkApp4 (mkConst ``stubOK) progE cE (toExpr name) kind)
+      let kind := match kindCode with
+        | 0 => mkConst ``StubKind.panic
+        | 1 => mkConst ``StubKind.morestack
+        | _ => mkConst ``StubKind.external
+      let hok ← liftLink impl? ``stubOK_link
+        (← kernelDecide (mkApp4 (mkConst ``stubOK) evalE cE (toExpr name) kind))
       let lem := match mode, hret? with
         | some (base, retE), some hret =>
           mkAppN (mkConst ``Reaches.stub_withExit) #[base, retE, s, Q, cE, toExpr name, kind, hret,
@@ -1512,8 +1606,8 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       return some (← Common.applyFast g lem)
     -- the instruction at `c` (decoded and checked once per run)
     let fact ← match (← cfg.facts.get).get? c with
-      | some f => if f.prog == progE then pure f else mkFact progE segs syms c
-      | none => mkFact progE segs syms c
+      | some f => if f.prog == progE then pure f else mkFact progE evalE impl? segs syms c
+      | none => mkFact progE evalE impl? segs syms c
     let iE := toExpr fact.instr
     let bsE := toExpr fact.bytes
     cfg.status.modify fun st => { st with
@@ -1544,7 +1638,7 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       out := out ++ (← afterExec cfg g')
     return some out
 where
-  mkFact (progE : Expr) (segs : List (Nat × List Nat)) (syms : List (String × Nat × Nat)) (c : Nat) :
+  mkFact (progE evalE : Expr) (impl? : Option Expr) (segs : List (Nat × List Nat)) (syms : List (String × Nat × Nat)) (c : Nat) :
       TacticM FetchFact := do
     let some bs := fetchBytes segs c |
       throwError "{tacName}: stuck after {(← cfg.status.get).steps} instructions: rip {hex c} is \
@@ -1557,7 +1651,8 @@ where
       throwError "{tacName}: stuck at rip {hex c}{symS}: \
         the bytes [{", ".intercalate (bs.map hex)}] do not decode to a modelled instruction (see docs/AMD64.md, \
         'Supported instructions'). No proof can execute past it."
-    let hok ← kernelDecide (mkAppN (mkConst ``stepOK) #[progE, mkNatLit c, toExpr bs, toExpr i, mkNatLit len])
+    let hok ← liftLink impl? ``stepOK_link
+      (← kernelDecide (mkAppN (mkConst ``stepOK) #[evalE, mkNatLit c, toExpr bs, toExpr i, mkNatLit len]))
     let f : FetchFact := { prog := progE, bytes := bs, instr := i, len, hok }
     cfg.facts.modify (·.insert c f)
     return f
@@ -1582,6 +1677,17 @@ def isStepGoal (g : MVarId) : MetaM Bool := do
   | .reaches .. | .reachesRet .. => return true
   | _ => return false
 
+/-- The literal rip of a `Reaches`/`ReachesRet` goal whose state is a `State.mk` literal (path
+merging, `Common.pickMerged`). -/
+def goalPC (g : MVarId) : MetaM (Option Nat) := do
+  let s ← match ← goalKind g with
+    | .reaches _ s _ | .reachesRet _ _ s _ => pure s
+    | _ => return none
+  let s ← instantiateMVars s
+  let some (nf, idx) ← Common.fieldIndex ``State `rip | return none
+  unless s.isAppOfArity ``State.mk nf do return none
+  bv64Value? (s.getArg! idx)
+
 /-- Run symbolic execution on the main goal (`single`: one step only). -/
 def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg.budget do
   let g ← getMainGoal
@@ -1589,7 +1695,9 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
   let mut todo : List (MVarId × Bool) := [(g, true)]
   let mut finished : List MVarId := []
   let mut steps := 0
+  let merge := Common.janus.merge.get (← getOptions)
   while !todo.isEmpty do
+    if merge then todo ← Common.pickMerged { memTypes := [``Janus.Arm64.Memory, ``Memory], regChains := [(``setRegF, ``State.regs)], restore := [``reduceSetRegFRestore] } goalPC todo
     let (g, first) :: rest := todo | break
     todo := rest
     if ← g.isAssigned then continue
@@ -1671,7 +1779,7 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
   | some true => return
   | some false => throwError "janus64_disch: carry bound does not hold for all limb values"
   | none => pure ()
-  evalTactic (← `(tactic| janus_omega))
+  evalTactic (← `(tactic| first | janus_apart | janus_omega))
 
 /-! ## Syntax -/
 
@@ -1700,9 +1808,17 @@ def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) := do
     let e ← Term.elabTerm t none
     Term.synthesizeSyntheticMVarsNoPostponing
     let e ← instantiateMVars e
-    let ty ← instantiateMVars (← inferType e)
+    let ty0 ← instantiateMVars (← inferType e)
+    -- a named contract (`def NewobjectContract … := Summary …`) is unfolded to its `Summary`
+    let mut ty := ty0
+    for _ in [0:8] do
+      if ty.isAppOf ``Summary then break
+      match ← unfoldDefinition? ty with
+      | some ty' => ty := ty'.headBeta
+      | none => break
+    let e ← if ty == ty0 then pure e else mkExpectedTypeHint e ty
     let (``Summary, #[_, entry, _, _]) := ty.getAppFnArgs |
-      throwError "janus64_run calls: {t} is not a `Summary`: {ty}"
+      throwError "janus64_run calls: {t} is not a `Summary`: {ty0}"
     let some n ← evalNat entry | throwError "janus64_run calls: cannot evaluate the entry of {t}"
     return (n, e)
 
@@ -1761,8 +1877,13 @@ elab "janus64_cases " h:ident : tactic => Common.casesBound "janus64_cases" h
 
 /-- From `h : p.DataLoaded m`, add `h_data<k> : m.accessible base len false = true` for every
 data segment `k` of `p`, and `h_rodata : ∀ a n, (dataRead p a n).isSome = true → m.readLE a n =
-dataReadD p a n`, which `janus64_run` uses to evaluate loads from the data. -/
-elab "janus64_data " h:ident : tactic => withMainContext do
+dataReadD p a n`, which `janus64_run` uses to evaluate loads from the data.
+`janus64_data hd [hw₁, …]` additionally, for each `hwᵢ : m.accessible a n true = true` (a
+writable range of the same memory), `h_ddisj<i>_<k> : a + n ≤ base ∨ base + len ≤ a` for every data
+object `k`: read-only data is disjoint from writable memory (`disjoint_of_dataLoaded`). -/
+syntax janus64DataWith := (" [" ident,* "]")?
+
+elab "janus64_data " h:ident ws:janus64DataWith : tactic => withMainContext do
   let hE ← elabTerm h none
   let ty ← instantiateMVars (← inferType hE)
   let (``Program.DataLoaded, #[p, m]) := ty.getAppFnArgs |
@@ -1783,6 +1904,41 @@ elab "janus64_data " h:ident : tactic => withMainContext do
       let pf ← mkExpectedTypeHint (mkAppN (mkConst ``accessible_of_dataLoaded) #[p, m, hE, mkNatLit i, hlt]) accTy
       let (_, g') ← (← g.assert (Name.mkSimple s!"h_data{i}") accTy pf).intro1P
       return g'
+  do
+    let hws : Array (TSyntax `ident) := (Common.collectIdents ws.raw).map (⟨·⟩)
+    for hw in hws, j in [0:hws.size] do
+      g ← g.withContext do
+        let hwE ← Term.elabTerm hw none
+        let hwTy ← instantiateMVars (← inferType hwE)
+        let some (_, lhs, _) := hwTy.eq? |
+          throwError "janus64_data: {hw} is not `m.accessible a n true = true`"
+        unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do
+          throwError "janus64_data: {hw} is not `m.accessible a n true = true`"
+        let a := lhs.getArg! 1
+        let n := lhs.getArg! 2
+        let mut g := g
+        for i in [0:k] do
+          g ← g.withContext do
+            let dE ← mkAppM ``getElem! #[← mkAppM ``Program.data #[p], mkNatLit i]
+            let some base ← evalNat (← mkAppM ``Janus.DataSegment.base #[dE]) | throwError "janus64_data: base"
+            let some len ← evalNat (← mkAppM ``List.length #[← mkAppM ``Janus.DataSegment.bytes #[dE]]) |
+              throwError "janus64_data: length"
+            let lenLt ← mkAppM ``LT.lt #[mkNatLit i, ← mkAppM ``List.length #[← mkAppM ``Program.data #[p]]]
+            let hlt ← mkDecideProof lenLt
+            let ty := mkOr (← mkAppM ``LE.le #[← mkAppM ``HAdd.hAdd #[a, n], mkNatLit base])
+              (← mkAppM ``LE.le #[← mkAppM ``HAdd.hAdd #[mkNatLit base, mkNatLit len], a])
+            let pairs ← mkAppM ``Option.map #[
+              ← withLocalDeclD `d (mkConst ``Janus.DataSegment) fun d => do
+                mkLambdaFVars #[d] (← mkAppM ``Prod.mk #[← mkAppM ``Janus.DataSegment.base #[d],
+                  ← mkAppM ``List.length #[← mkAppM ``Janus.DataSegment.bytes #[d]]]),
+              ← mkAppM ``GetElem?.getElem? #[← mkAppM ``Program.data #[p], mkNatLit i]]
+            let want ← mkAppM ``Option.some #[← mkAppM ``Prod.mk #[mkNatLit base, mkNatLit len]]
+            let hbl ← kernelDecide (← mkAppM ``BEq.beq #[pairs, want])
+            let pf := mkAppN (mkConst ``disjoint_of_dataLoaded')
+              #[p, m, hE, mkNatLit i, mkNatLit base, mkNatLit len, hbl, a, n, hwE]
+            let (_, g') ← (← g.assert (Name.mkSimple s!"h_ddisj{j}_{i}") ty pf).intro1P
+            return g'
+        return g
   g ← g.withContext do
     let pf := mkAppN (mkConst ``readLE_dataReadD) #[p, m, hE]
     let (_, g') ← (← g.assert `h_rodata (← inferType pf) pf).intro1P

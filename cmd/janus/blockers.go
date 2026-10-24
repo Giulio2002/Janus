@@ -9,6 +9,11 @@ package main
 // `undecodable`: a function is in the supported subset iff none of its reachable words are
 // reported here. (A rejected word only blocks a proof if execution can reach it; e.g. a
 // literal pool inside a function would be reported but never executed.)
+//
+// On amd64 (blockers_amd64.go) the unit is an instruction rather than a word: the extracted
+// bytes are swept with x86asm (untrusted, only to find instruction starts) and the bytes from
+// each start to the end of its function (at most 15, as Janus.Amd64.Program.fetch returns them)
+// are run through Janus.Amd64.decode.
 
 import (
 	"bufio"
@@ -105,7 +110,7 @@ func leanDecode(exe string, words []uint32) (map[uint32]bool, error) {
 }
 
 func cmdBlockers(args []string, stdout, stderr io.Writer) error {
-	pos, opts, err := parseArgs(args, "max-functions", "janus-root", "json")
+	pos, opts, err := parseArgs(args, "max-functions", "janus-root", "json", "contract")
 	if err != nil {
 		return usageErr("%v", err)
 	}
@@ -122,10 +127,6 @@ func cmdBlockers(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if b.GOARCH != "arm64" {
-		return &diag{Msg: fmt.Sprintf("janus blockers supports arm64 binaries only; %s is %s", pos[0], b.GOARCH),
-			Stage: "binary validation", Next: "Run janus blockers on a GOARCH=arm64 build."}
-	}
 	// The decoder is built in the shared framework build under its exclusive lock (it adds
 	// Janus.Tools.Decode, which a concurrent verification's pins would otherwise see appear)
 	// and then used under the shared lock.
@@ -138,6 +139,9 @@ func cmdBlockers(args []string, stdout, stderr io.Writer) error {
 	}
 	defer release()
 	exe := filepath.Join(root, ".lake", "build", "bin", "janus-decode")
+	if b.GOARCH == "amd64" {
+		return blockersAmd64(b, pos[1:], maxF, optsList(opts, "contract"), exe, opts["json"], stdout)
+	}
 
 	type site struct {
 		fn string
@@ -148,7 +152,7 @@ func cmdBlockers(args []string, stdout, stderr io.Writer) error {
 	all := map[uint32]bool{}
 	for _, sym := range pos[1:] {
 		r := blockerReport{Symbol: sym, Functions: []string{}, Stubs: []string{}, WritableRefs: []string{}, Rejected: []blockerWord{}}
-		x, err := extractFrom(b, sym, maxF)
+		x, err := extractWith(b, sym, maxF, optsList(opts, "contract"))
 		if err != nil {
 			r.Error = strings.TrimSuffix(strings.SplitN(err.Error(), "\n", 2)[0], ":")
 			reports = append(reports, r)

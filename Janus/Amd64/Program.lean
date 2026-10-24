@@ -30,6 +30,10 @@ structure Program where
   address `ret` and run `p.withExit ret` (`GoABI.RetAddr`, `GoABI.Ensures`). -/
   exitAddr : Nat
   data : List Janus.DataSegment := []
+  /-- Runtime contracts (`janus extract --contract SYM`): functions called directly but not
+  copied, as `(name, address)`. They do not change the run (no code there: `noCode`); see
+  `Janus.Program.contracts` and docs/RUNTIME-CONTRACTS.md. -/
+  contracts : List (String × Nat) := []
 deriving Repr, Inhabited
 
 /-- How a run ends when it does not fault. -/
@@ -63,6 +67,38 @@ def stubAt (p : Program) (pc : Nat) : Option Janus.Stub := p.stubs.find? (·.add
 /-- `p` called with return address `ret`: the same code, stubs and data, with the run ending
 when `rip` reaches `ret`. -/
 def withExit (p : Program) (ret : Nat) : Program := { p with exitAddr := ret }
+
+/-- `p` linked with arbitrary further code `impl`, after `p`'s own segments (see
+`Janus.Program.link`): every address where `p` has code still fetches `p`'s bytes. -/
+def link (p : Program) (impl : List Segment) : Program := { p with segments := p.segments ++ impl }
+
+/-- The address of the contract `name` of `p` (`0` if `p` has no such contract). -/
+def contractAddr (p : Program) (name : String) : Nat :=
+  ((p.contracts.find? (·.1 == name)).map (·.2)).getD 0
+
+theorem fetchIn_append {l₁ : List Segment} (l₂ : List Segment) {pc : Nat} {bs : List Nat}
+    (h : fetchIn l₁ pc = some bs) : fetchIn (l₁ ++ l₂) pc = some bs := by
+  induction l₁ with
+  | nil => simp [fetchIn] at h
+  | cons seg rest ih =>
+    simp only [List.cons_append, fetchIn] at h ⊢
+    split
+    · rename_i hc; rw [if_pos hc] at h; exact h
+    · rename_i hc; rw [if_neg hc] at h; exact ih h
+
+theorem fetch_link {p : Program} (impl : List Segment) {pc : Nat} {bs : List Nat}
+    (h : p.fetch pc = some bs) : (p.link impl).fetch pc = some bs := fetchIn_append impl h
+
+@[simp] theorem stubAt_link (p : Program) (impl : List Segment) (pc : Nat) :
+    (p.link impl).stubAt pc = p.stubAt pc := rfl
+@[simp] theorem exitAddr_link (p : Program) (impl : List Segment) :
+    (p.link impl).exitAddr = p.exitAddr := rfl
+@[simp] theorem data_link (p : Program) (impl : List Segment) :
+    (p.link impl).data = p.data := rfl
+@[simp] theorem contracts_link (p : Program) (impl : List Segment) :
+    (p.link impl).contracts = p.contracts := rfl
+@[simp] theorem stubs_link (p : Program) (impl : List Segment) :
+    (p.link impl).stubs = p.stubs := rfl
 
 /-- Run for at most `fuel` instructions. -/
 def run (p : Program) : Nat → State → Except Fault Outcome

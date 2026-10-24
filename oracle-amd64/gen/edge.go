@@ -454,6 +454,15 @@ func Edges(r *rand.Rand, n int) []EdgeCase {
 			}
 			emit("stack", b, s)
 		}
+		// (q) ENDBR64 at a gcc function entry, exactly and with one extra prefix (66, REX,
+		// a segment override, FS, a second F3 or F2, LOCK) before or after the F3
+		emit("endbr", []byte{0xF3, 0x0F, 0x1E, 0xFA}, Setup(r, []byte{0xF3, 0x0F, 0x1E, 0xFA}))
+		for _, x := range []byte{0x66, 0x40, 0x48, 0x41, 0x2E, 0x3E, 0x64, 0xF3, 0xF2, 0xF0} {
+			for _, b := range [][]byte{{x, 0xF3, 0x0F, 0x1E, 0xFA}, {0xF3, x, 0x0F, 0x1E, 0xFA}} {
+				emit("endbr", b, Setup(r, b))
+			}
+		}
+		emit("endbr", []byte{0xF3, 0x0F, 0x1E, 0xFB}, Setup(r, []byte{0xF3, 0x0F, 0x1E, 0xFB}))
 	}
 	return out
 }

@@ -15,11 +15,11 @@ const (
 
 func TestParseTargets(t *testing.T) {
 	cases := map[string][]string{
-		"":      nil,
-		"a.F":   {"a.F"},
-		"a.F,b": {"a.F", "b"},
+		"":                                     nil,
+		"a.F":                                  {"a.F"},
+		"a.F,b":                                {"a.F", "b"},
 		itabMul + "," + itabRot + ",p.F.func1": {itabMul, itabRot, "p.F.func1"},
-		"go:itab.*p.T[int,string],p.I, p.G":   {"go:itab.*p.T[int,string],p.I", "p.G"},
+		"go:itab.*p.T[int,string],p.I, p.G":    {"go:itab.*p.T[int,string],p.I", "p.G"},
 	}
 	for in, want := range cases {
 		if got := parseTargets(in); fmt.Sprint(got) != fmt.Sprint(want) {
@@ -43,7 +43,7 @@ func TestDynamicTargetsItab(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		x, err := extractWith(b, "example.com/basic.HashWith", defaultMaxFunctions, []string{itabMul, itabRot})
+		x, err := extractWith(b, "example.com/basic.HashWith", defaultMaxFunctions, nil, itabMul, itabRot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,5 +157,30 @@ func TestTargetsRecordedAndChecked(t *testing.T) {
 		if code == 0 || !strings.Contains(stderr, "--targets") {
 			t.Errorf("--targets %s accepted (code %d): %s", bad, code, stderr)
 		}
+	}
+}
+
+// A --contract pattern takes precedence over the built-in omission of runtime.deferreturn, and
+// applies to dynamic targets too.
+func TestDynamicTargetsAndContracts(t *testing.T) {
+	b, err := loadBinary(exampleBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, err := extractWith(b, "example.com/basic.DeferAdd", defaultMaxFunctions, []string{"runtime.deferreturn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(x.Omitted) != 0 || len(x.Contracts) != 1 || x.Contracts[0].Name != "runtime.deferreturn" {
+		t.Errorf("omitted %+v, contracts %+v", x.Omitted, x.Contracts)
+	}
+	y, err := extractWith(b, "example.com/basic.HashWith", defaultMaxFunctions,
+		[]string{"example.com/basic.(*RotHasher).Hash"}, itabMul, itabRot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segs := strings.Join(segNames(y), " ")
+	if strings.Contains(segs, "RotHasher") || len(y.Contracts) != 1 || !strings.Contains(segs, "MulHasher") {
+		t.Errorf("segments %s, contracts %+v", segs, y.Contracts)
 	}
 }

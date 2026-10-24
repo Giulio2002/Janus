@@ -27,6 +27,11 @@ type identityStub struct {
 	Kind    string `json:"kind"`
 }
 
+type identityContract struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
 type identityBranch struct {
 	From   string `json:"from"`
 	Target string `json:"target"`
@@ -73,31 +78,36 @@ type identityOmitted struct {
 
 // Identity is identity.json: what was extracted, from which bytes, by which extractor.
 type Identity struct {
-	Schema           int               `json:"schema"`
-	ExtractorVersion string            `json:"extractorVersion"`
-	Binary           string            `json:"binary"`
-	BinarySha256     string            `json:"binarySha256"`
-	GoVersion        string            `json:"goVersion"`
-	MainModule       string            `json:"mainModule"`
-	GOOS             string            `json:"goos"`
-	GOARCH           string            `json:"goarch"`
-	GOAMD64          string            `json:"goamd64,omitempty"`
-	SymbolSource     string            `json:"symbolSource"`
-	Symbol           string            `json:"symbol"`
-	Address          string            `json:"address"`
-	Size             uint64            `json:"size"`
-	MaxFunctions     int               `json:"maxFunctions"`
-	Functions        []identityFunc    `json:"functions"`
-	Stubs            []identityStub    `json:"stubs"`
-	Unresolved       []identityBranch  `json:"unresolvedBranches"`
-	Targets          []string          `json:"targets,omitempty"`
-	DynamicTargets   []identityTarget  `json:"dynamicTargets,omitempty"`
-	OmittedCalls     []identityOmitted `json:"omittedCalls,omitempty"`
-	Data             []identityData    `json:"data"`
-	DataRefs         []identityDataRef `json:"dataReferences"`
-	SkippedData      []identitySkipped `json:"skippedData"`
-	Extracted        string            `json:"extracted"`
-	ExtractedSha256  string            `json:"extractedSha256"`
+	Schema           int            `json:"schema"`
+	ExtractorVersion string         `json:"extractorVersion"`
+	Binary           string         `json:"binary"`
+	BinarySha256     string         `json:"binarySha256"`
+	GoVersion        string         `json:"goVersion"`
+	MainModule       string         `json:"mainModule"`
+	GOOS             string         `json:"goos"`
+	GOARCH           string         `json:"goarch"`
+	GOAMD64          string         `json:"goamd64,omitempty"`
+	SymbolSource     string         `json:"symbolSource"`
+	Symbol           string         `json:"symbol"`
+	Address          string         `json:"address"`
+	Size             uint64         `json:"size"`
+	MaxFunctions     int            `json:"maxFunctions"`
+	Functions        []identityFunc `json:"functions"`
+	Stubs            []identityStub `json:"stubs"`
+	// ContractPatterns are the --contract patterns of the extraction and Contracts the
+	// functions they matched (not followed, recorded in Program.contracts). Both are omitted
+	// when empty, so identities written before contracts existed keep their bytes.
+	ContractPatterns []string           `json:"contractPatterns,omitempty"`
+	Contracts        []identityContract `json:"contracts,omitempty"`
+	Unresolved       []identityBranch   `json:"unresolvedBranches"`
+	Targets          []string           `json:"targets,omitempty"`
+	DynamicTargets   []identityTarget   `json:"dynamicTargets,omitempty"`
+	OmittedCalls     []identityOmitted  `json:"omittedCalls,omitempty"`
+	Data             []identityData     `json:"data"`
+	DataRefs         []identityDataRef  `json:"dataReferences"`
+	SkippedData      []identitySkipped  `json:"skippedData"`
+	Extracted        string             `json:"extracted"`
+	ExtractedSha256  string             `json:"extractedSha256"`
 }
 
 func hex0x(v uint64) string { return fmt.Sprintf("0x%x", v) }
@@ -161,6 +171,10 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 	for _, s := range x.Stubs {
 		id.Stubs = append(id.Stubs, identityStub{s.Name, hex0x(s.Addr), string(s.Kind)})
 	}
+	id.ContractPatterns = append([]string(nil), x.ContractPatterns...)
+	for _, c := range x.Contracts {
+		id.Contracts = append(id.Contracts, identityContract{c.Name, hex0x(c.Addr)})
+	}
 	for _, u := range x.Unresolved {
 		id.Unresolved = append(id.Unresolved, identityBranch{hex0x(u.From), hex0x(u.Target)})
 	}
@@ -181,6 +195,15 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 		id.SkippedData = append(id.SkippedData, identitySkipped{hex0x(s.From), hex0x(s.Target), s.Kind, s.Section, s.Symbol, s.Reason})
 	}
 	return id
+}
+
+// contractList renders the recorded contracts as "name @ address".
+func (id *Identity) contractList() []string {
+	var out []string
+	for _, c := range id.Contracts {
+		out = append(out, c.Name+" @ "+c.Address)
+	}
+	return out
 }
 
 func (id *Identity) marshal() []byte {
@@ -288,7 +311,7 @@ func check(outdir, binOverride string) (*CheckResult, error) {
 			Stage: "extraction integrity", Next: rerunExtract(&id, outdir)}
 	}
 
-	x, err := extractWith(b, id.Symbol, id.MaxFunctions, id.Targets)
+	x, err := extractWith(b, id.Symbol, id.MaxFunctions, id.ContractPatterns, id.Targets...)
 	if err != nil {
 		d := err.(*diag)
 		d.Invalid = true

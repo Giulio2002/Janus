@@ -1,0 +1,14 @@
+# Root functions of the Sail slice (JanusX86/sail/harness.sail + register init).
+initialize_registers
+janus_x86_init
+janus_x86_step
+janus_set_gpr
+janus_get_gpr
+janus_set_rip
+janus_get_rip
+janus_set_rflags
+janus_get_rflags
+janus_set_undef
+janus_set_ymm
+janus_get_ymm
+janus_set_fsbase

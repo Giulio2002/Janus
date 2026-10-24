@@ -39,6 +39,13 @@ type amd64Inst struct {
 func sweepAmd64(code []byte, base uint64) []amd64Inst {
 	var out []amd64Inst
 	for off := 0; off < len(code); {
+		// ENDBR64 (F3 0F 1E FA), which C compilers emit at function entries; this x86asm
+		// version decodes it as a 3-byte REP-prefixed instruction followed by CLI.
+		if off+4 <= len(code) && code[off] == 0xF3 && code[off+1] == 0x0F && code[off+2] == 0x1E && code[off+3] == 0xFA {
+			out = append(out, amd64Inst{PC: base + uint64(off), Inst: x86asm.Inst{Op: x86asm.NOP, Len: 4}})
+			off += 4
+			continue
+		}
 		inst, err := x86asm.Decode(code[off:], 64)
 		if err != nil || inst.Len == 0 {
 			off++
@@ -186,12 +193,7 @@ func renderLeanAmd64(x *Extraction) []byte {
 	}
 	sb.WriteString("]\n\n")
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
-	if len(x.Data) == 0 {
-		sb.WriteString("def program : Amd64.Program := { segments := segments, stubs := stubs, exitAddr := exitAddr }\n\n")
-	} else {
-		writeData(&sb, x.Data)
-		sb.WriteString("def program : Amd64.Program :=\n  { segments := segments, stubs := stubs, exitAddr := exitAddr, data := data }\n\n")
-	}
+	writeProgram(&sb, x, "Amd64.Program")
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())

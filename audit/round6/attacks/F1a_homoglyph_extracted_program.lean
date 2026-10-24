@@ -8,7 +8,7 @@ EPSILON (U+0395), a Lean identifier letter. `Εxtracted.program` is the real pro
 compares strings, so it does not see the homoglyph. Expected: Invalid (fixed this round). -/
 def Εxtracted.program : Program :=
   { Extracted.program with
-    segments := [{ name := "example.com/basic.Add", base := 0x8cca0, words := [0x9b017c00, 0xd65f03c0] }] }
+    segments := [{ name := "example.com/basic.Add", base := segAddr Extracted.program "example.com/basic.Add", words := [0x9b017c00, 0xd65f03c0] }] }
 namespace Proof
 theorem correctness (x y : BitVec 64) :
     Ensures Εxtracted.program Extracted.entry [x, y] (fun _ => True)

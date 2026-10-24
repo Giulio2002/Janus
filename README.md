@@ -223,12 +223,30 @@ Go 1.26.0. Proofs:
 | `HashTwice` | `ApplyTwice(h.Hash, x)` through a method value: `x·K·K` | ✓ | ✓ |
 | `MapSum` | a closure capturing `a`, `b` called in a loop: `Σ (a·xs[j] + b) mod 2^64` | ✓ | ✓ |
 | `DeferAdd` | an open-coded `defer` that adds `y` to the named result: returns `x + y` | ✓ | ✓ |
+| `NewPair` | `&Pair{a, b}`: a fresh 16-aligned heap object holding `a`, `b`, assuming the `runtime.newobject` contract | ✓ | ✓ |
+| `MakeSlice` | `make([]uint64, n)`: length and capacity `n`, a fresh all-zero array, assuming the `runtime.makeslice` contract | ✓ | ✓ |
+| `AppendOne` | `append(s, x)`, in place or through `runtime.growslice` (Go's growth rule, size-class rounding, old elements copied, zero tail), assuming its contract | ✓ | ✓ |
+| `SetNext` | `n.Next = q` through the GC write barrier, whose fast path (buffer append) is executed | ✓ | ✓ |
+| `MallocFast` | `runtime.mallocgc` itself: the small pointer-free fast path returns the free slot of the P's cached span (zeroed) and updates exactly the span/mcache fields, under `MCacheOK` | ✓ | |
+| `Lookup` | `v, ok := m[k]` on a `map[uint64]uint64`, with `runtime.mapaccess2_fast64` as a stated contract ([RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md), "Maps") | ✓ | ✓ |
+| `Insert`, `InsertGet`, `Delete`, `ClearMap`, `NewMap` | `m[k] = v` (then reading it back gives `v`), `delete`, `clear`, `make`, through their map contracts | ✓ | ✓ |
+| `SumValues` | `for _, v := range m` sums the values, for **every** iteration order | ✓ | ✓ |
+| `CountKeys`, `LookupKey16` | `len(m)` (the number of keys); lookup with `[16]byte` keys (generic `mapaccess2`) | ✓ | ✓ |
+| `MapAccess1Small` | the machine code of `runtime.mapaccess1_fast64` itself meets its contract on small Swiss maps | ✓ | ✓ |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
 **What it rules out**). Every proof uses only axioms from the allow-list `propext`, `Quot.sound`,
 `Classical.choice`. Reproduce with
 `scripts/verify-examples.sh` and `scripts/build-examples-amd64.sh && scripts/verify-amd64-examples.sh`.
+
+**Go calling C (cgo).** The C functions in [`examples/cgo`](examples/cgo) (gcc 15.2, `-O2`) are
+proved on both ISAs against the C calling conventions (`CEnsures`, [`Janus/CABI.lean`](Janus/CABI.lean),
+[`Janus/Amd64/CABI.lean`](Janus/Amd64/CABI.lean)): `c_add`, the loop `c_sum` and the store
+`c_store`. Go → C → Go is proved end to end for `Add` and `Sum`. The Go code, the cgo wrappers and
+the C code are all executed by the model, and only the `runtime.cgocall` stack and scheduler switch
+is a trusted contract, named in the statement (`EnsuresC … (CgoCall Extracted.program) …`). See
+[docs/FFI.md](docs/FFI.md) and `scripts/verify-cgo-examples.sh`.
 
 <!-- TODO(coordinator): the checkmarks come from a re-run on 2026-10-23 (14 arm64 proofs, 17 amd64
 Proof.correctness + Div/Get Proof.panics, and scripts/break-demo.sh: all Verified) with a janus binary
@@ -368,7 +386,7 @@ matters.
 | Command | Purpose |
 |---|---|
 | `janus list <binary>` | List the functions of a Go ELF binary (from `.symtab`, or `.gopclntab` if stripped) |
-| `janus extract <binary> <symbol> <outdir>` | Copy the function, its reachable callees and the read-only data they load into `Extracted.lean` + `identity.json` |
+| `janus extract <binary> <symbol> <outdir>` | Copy the function, its reachable callees and the read-only data they load into `Extracted.lean` + `identity.json`; `--contract SYM` leaves runtime functions out as contracts |
 | `janus check <outdir>` | Re-extract in memory and byte-compare with the saved artifacts, without running Lean |
 | `janus verify <outdir> --proof FILE` | Check, sandboxed build, audit, kernel replay; writes `verified.json` |
 | `janus verify-batch <requests.json>` | Verify many requests against one consumer-package snapshot |
@@ -393,6 +411,8 @@ leaves none.
 | [CONSUMERS.md](docs/CONSUMERS.md) | Proofs in your own Lake package, batch verification, caches |
 | [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime calls and dynamic calls (interfaces, closures, `defer`) |
 | [AMD64.md](docs/AMD64.md) | The x86-64 backend: model, ABI, proofs, gaps |
+| [FFI.md](docs/FFI.md) | Go calling C (cgo): the C ABIs, `CEnsures`, the cgo contract, the composition theorem |
+| [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime functions as stated contracts (`janus extract --contract`): allocation, write barriers, dynamic calls, maps, cgo |
 | [ORACLE.md](docs/ORACLE.md), [ORACLE-SAIL.md](docs/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) | The differential oracles and their results |
 | [AUDIT.md](docs/AUDIT.md) | The red-team audit of `janus verify` and its fixes |
 

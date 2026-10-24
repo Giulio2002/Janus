@@ -465,6 +465,8 @@ type consumerWS struct {
 	// replayCache: reuse cached passing kernel replays (off with --fresh or without a
 	// sandbox); replayFresh: also replay each theorem module with leanchecker --fresh.
 	replayCache, replayFresh bool
+	// asl: the trusted JanusASL build, with --asl (each passing request then gets its ASL stage).
+	asl *aslBuild
 	// auditExe is the compiled auditor of the cached framework base and auditExeSha the SHA-256
 	// its build stamp records (re-checked before it runs); empty with --fresh, whose temporary
 	// base is gone by then: the audit then runs the trusted Audit.lean script instead.
@@ -903,6 +905,12 @@ func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*v
 	if err != nil {
 		return nil, err
 	}
+	var asl *aslBuild
+	if opts["asl"] != "" {
+		if asl, err = buildASLFor(fw, "", lake, stderr); err != nil {
+			return nil, err
+		}
+	}
 	pkg, err := loadConsumer(opts["proof-root"], fw, []string{outdir}, loadOpts{AllowPathDeps: opts["allow-path-deps"] != "", SB: sb})
 	if err != nil {
 		return nil, err
@@ -919,6 +927,7 @@ func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*v
 	}
 	defer ws.close()
 	ws.replayFresh = opts["replay-fresh"] != ""
+	ws.asl = asl
 	verifyGroup(fw, pkg, ws, []*consumerRequest{req})
 	evictStale()
 	return req.Report, req.Err
@@ -1241,11 +1250,23 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			DependencyConsts:      r.audit.External,
 			DependencyDefinitions: r.audit.ExternalDefs,
 			Notes:                 r.audit.Notes,
+			Contracts:             r.cr.Identity.contractList(),
 			Consumer: &consumerInfo{
 				Root: pkg.Root, Lakefile: pkg.Lakefile, Module: r.module, SnapshotSha256: pkg.Sha256,
 				Files: pkg.fileHashes(), Dependency: pkg.Dep, Dependencies: pkg.depInfos(), AllowPathDeps: pkg.opts.AllowPathDeps,
 				Workspace: wsRef, Rebuilt: nonNil(rebuilt),
 			},
+		}
+		// --asl: the request's ASL corollary (recorded; it never fails the theorem above).
+		if ws.asl != nil {
+			runBase := filepath.Join(ws.Dir, "asl")
+			_ = os.MkdirAll(runBase, 0o755)
+			r.Report.ASL = runASLStage(&aslEnv{sb: ws.sb, tc: ws.tc, build: ws.asl, runBase: runBase,
+				trustedDirs: []string{janusLib}, searchDirs: searchDirs, protected: ws.protected(true), pinned: pinned,
+				framework: &pinnedLib{dir: janusLib, want: ws.framework}, homes: homes,
+				theorem: r.audit.Name, proofModule: r.module, depRoots: depRoots,
+				replayCache: ws.replayCache, replayFresh: ws.replayFresh, mapPaths: mapPaths,
+				auditExe: ws.auditExe, auditExeSha: ws.auditExeSha})
 		}
 	}
 }
@@ -1340,6 +1361,26 @@ func evictStale() {
 		if lk, err := lockFile(d+".lock", false); err == nil {
 			os.RemoveAll(d)
 			os.Remove(d + ".ready")
+			os.Remove(d + ".lock")
+			lk.unlock()
+		}
+	}
+	// JanusASL builds (--asl) cost about an hour each: kept for $JANUS_ASL_RETENTION_DAYS
+	// (default 30) after their last use.
+	aslDays := 30.0
+	if v, err := strconv.ParseFloat(os.Getenv("JANUS_ASL_RETENTION_DAYS"), 64); err == nil && v > 0 {
+		aslDays = v
+	}
+	aslCutoff := time.Now().Add(-time.Duration(aslDays * 24 * float64(time.Hour)))
+	asls, _ := os.ReadDir(filepath.Join(base, "asl"))
+	for _, b := range asls {
+		d := filepath.Join(base, "asl", b.Name())
+		fi, err := os.Stat(d)
+		if err != nil || !fi.IsDir() || fi.ModTime().After(aslCutoff) {
+			continue
+		}
+		if lk, err := lockFile(d+".lock", false); err == nil {
+			os.RemoveAll(d)
 			os.Remove(d + ".lock")
 			lk.unlock()
 		}
