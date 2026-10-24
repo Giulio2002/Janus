@@ -184,3 +184,60 @@ theorem rm_frame2 {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Con
   exact ⟨s', run_janus_x86_step (by rw [hf, hs']), hr', hc'⟩
 
 end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+set_option maxRecDepth 100000 in
+theorem n64_mp_cases (op : BitVec 8) (x : BitVec 52) :
+    n64_bit_compute_mandatory_prefix_for_two_byte_opcode op x = _get_prefixes_rep x ∨
+    n64_bit_compute_mandatory_prefix_for_two_byte_opcode op x = _get_prefixes_opr x ∨
+    n64_bit_compute_mandatory_prefix_for_two_byte_opcode op x = 0#8 := by
+  unfold n64_bit_compute_mandatory_prefix_for_two_byte_opcode
+  generalize _get_prefixes_rep x = rp
+  generalize _get_prefixes_opr x = oq
+  cases h1 : (!rp == 0#8) <;> simp only [h1, Bool.false_eq_true, ↓reduceIte]
+  · cases h2 : (!oq == 0#8) <;> simp only [h2, Bool.false_eq_true, ↓reduceIte]
+    · simp
+    · split <;> simp
+  · split <;> simp
+
+theorem mpref_cases {p : Janus.Amd64.Decode.Prefixes} {x : BitVec 52} {rex : BitVec 8} (hp : PfxRel p x rex)
+    (op2 : Nat) : mpref x op2 = 0#8 ∨ mpref x op2 = 0x66#8 ∨ mpref x op2 = 0xF2#8 ∨ mpref x op2 = 0xF3#8 := by
+  have hr := hp.rep
+  have ho := hp.opr
+  have hm : mpref x op2 = n64_bit_compute_mandatory_prefix_for_two_byte_opcode (BitVec.ofNat 8 op2) x := rfl
+  rcases n64_mp_cases (BitVec.ofNat 8 op2) x with e | e | e <;> rw [hm, e]
+  · rw [hr]; rcases hp.repv with e | e | e <;> rw [e] <;> decide
+  · rw [ho]; cases p.opsize <;> decide
+  · decide
+
+set_option maxRecDepth 100000 in
+/-- The ModRM table of the two-byte map agrees for every mandatory prefix on `op2`. -/
+theorem modrmP2_of {p : Janus.Amd64.Decode.Prefixes} {x : BitVec 52} {rex : BitVec 8} (hp : PfxRel p x rex)
+    (op2 : Nat) (h : ∀ mp ∈ [0#8, 0x66#8, 0xF2#8, 0xF3#8], two_byte_opcode_modr_m_p .Mode_64bit mp (BitVec.ofNat 8 op2) = true) :
+    modrmP2 x op2 = true := by
+  unfold modrmP2
+  rcases mpref_cases hp op2 with e | e | e | e <;> rw [e] <;> exact h _ (by simp)
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+set_option maxRecDepth 100000 in
+/-- With no `F2`/`F3`, the mandatory prefix of `op2` is the model's `66` table entry. -/
+theorem mpref_norep {p : Janus.Amd64.Decode.Prefixes} {x : BitVec 52} {rex : BitVec 8} (hp : PfxRel p x rex)
+    (hr : p.rep = 0) (op2 : Nat) :
+    mpref x op2 = n64_bit_compute_mandatory_prefix_for_two_byte_opcode (BitVec.ofNat 8 op2)
+      (_update_prefixes_opr (_update_prefixes_rep 0#52 0#8) (if p.opsize then 0x66#8 else 0#8)) := by
+  have h1 := hp.rep
+  have h2 := hp.opr
+  rw [hr] at h1
+  unfold mpref compute_mandatory_prefix_for_two_byte_opcode
+  simp only [in_64bit_mode, ↓reduceIte]
+  unfold n64_bit_compute_mandatory_prefix_for_two_byte_opcode
+  rw [h1, h2]
+  cases p.opsize <;> rfl
+
+end JanusX86.Proofs
