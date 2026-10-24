@@ -218,6 +218,44 @@ can prune the branch with `omega`. -/
   rw [← BitVec.toNat_inj, BitVec.toNat_setWidth, BitVec.toNat_ofNat, BitVec.toNat_ofNat,
     Nat.zero_mod, Nat.mod_mod_of_dvd _ (Nat.pow_dvd_pow 2 hw)]
 
+/-! 32-bit compares (`CMP Wn, Wm`, e.g. of the 16-bit `mspan` indices) as arithmetic, like the
+64-bit flag lemmas of `Janus.Tactic`. -/
+
+private theorem subRes32 (x y : BitVec 32) :
+    (BitVec.ofNat 32 (x.toNat + (~~~y).toNat + true.toNat)).toNat =
+      (x.toNat + 4294967296 - y.toNat) % 4294967296 := by
+  simp only [BitVec.toNat_ofNat, BitVec.toNat_not, Bool.toNat_true]
+  have := y.isLt; congr 1; omega
+
+@[janus_exec, janus_post] theorem sub_flags_c32 (x y : BitVec 32) :
+    (addSub x y true).2.c = decide (y.toNat ≤ x.toNat) := by
+  simp only [addSub, addWithCarry, ite_true, subRes32]
+  simp only [BitVec.toNat_not, Bool.toNat_true]
+  have := x.isLt; have := y.isLt
+  by_cases h : y.toNat ≤ x.toNat
+  · rw [show x.toNat + 4294967296 - y.toNat = (x.toNat - y.toNat) + 4294967296 by omega,
+      Nat.add_mod_right, Nat.mod_eq_of_lt (by omega)]
+    simp [h]; omega
+  · rw [Nat.mod_eq_of_lt (by omega)]; simp [h]; omega
+
+@[janus_exec, janus_post] theorem sub_flags_z32 (x y : BitVec 32) :
+    (addSub x y true).2.z = decide (x.toNat = y.toNat) := by
+  simp only [addSub, addWithCarry, ite_true]
+  have hr := subRes32 x y
+  have := x.isLt; have := y.isLt
+  by_cases h : x.toNat = y.toNat
+  · have : BitVec.ofNat 32 (x.toNat + (~~~y).toNat + true.toNat) = 0 := by
+      apply BitVec.eq_of_toNat_eq; rw [hr]
+      rw [show x.toNat + 4294967296 - y.toNat = 4294967296 by omega]; rfl
+    rw [decide_eq_true this, decide_eq_true h]
+  · have : BitVec.ofNat 32 (x.toNat + (~~~y).toNat + true.toNat) ≠ 0 := by
+      intro h'; have h'' := congrArg BitVec.toNat h'; rw [hr] at h''; change _ = 0 at h''
+      by_cases hle : y.toNat ≤ x.toNat
+      · rw [show x.toNat + 4294967296 - y.toNat = (x.toNat - y.toNat) + 4294967296 by omega,
+          Nat.add_mod_right, Nat.mod_eq_of_lt (by omega)] at h''; omega
+      · rw [Nat.mod_eq_of_lt (by omega)] at h''; omega
+    rw [decide_eq_false this, decide_eq_false h]
+
 /-- The byte ranges `(base, length)` are pairwise disjoint. -/
 def Separated : List (Nat × Nat) → Prop
   | [] => True
@@ -226,6 +264,17 @@ def Separated : List (Nat × Nat) → Prop
 @[simp] theorem separated_nil : Separated [] = True := rfl
 @[simp] theorem separated_cons (a n : Nat) (rs : List (Nat × Nat)) :
     Separated ((a, n) :: rs) = ((∀ r ∈ rs, a + n ≤ r.1 ∨ r.1 + r.2 ≤ a) ∧ Separated rs) := rfl
+
+/-- The byte ranges `(base, length)` are pairwise `Apart`: the same as `Separated`, in the form
+`omega` does not case-split on (the dischargers use one `Apart` fact at a time, `janus_apart`).
+Use it for preconditions that relate many objects. -/
+def Spread : List (Nat × Nat) → Prop
+  | [] => True
+  | (a, n) :: rs => (∀ r ∈ rs, Apart a n r.1 r.2) ∧ Spread rs
+
+@[simp] theorem spread_nil : Spread [] = True := rfl
+@[simp] theorem spread_cons (a n : Nat) (rs : List (Nat × Nat)) :
+    Spread ((a, n) :: rs) = ((∀ r ∈ rs, Apart a n r.1 r.2) ∧ Spread rs) := rfl
 
 /-! ## arm64 -/
 

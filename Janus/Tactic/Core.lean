@@ -351,6 +351,9 @@ def tryPrune (g : MVarId) : TacticM Bool := withoutRecover do
         | omega
         | (simp only [BitVec.toNat_eq, BitVec.ofNat_eq_ofNat, BitVec.toNat_ofNat, BitVec.toNat_zero, ne_eq, Nat.reducePow,
             Nat.zero_mod]
+            at *; omega)
+        | (simp only [Bool.and_eq_true, Bool.or_eq_true, Bool.not_eq_true', Bool.not_eq_false',
+            decide_eq_true_eq, decide_eq_false_iff_not, not_and, not_or, Classical.not_not, ne_eq]
             at *; omega)))))
     catch _ => saved.restore; return false
   if !gs.isEmpty then saved.restore
@@ -834,7 +837,8 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
   evalTactic (← `(tactic| first
     | omega
     | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
-        Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
+        Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)
+    | janus_apart))
 
 /-! ## Arithmetic -/
 

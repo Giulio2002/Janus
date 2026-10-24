@@ -42,7 +42,7 @@ for n in "${names[@]}"; do
   fi
   out="artifacts/$n"
   # shellcheck disable=SC2046
-  bin/janus extract artifacts/examples-arm64 "example.com/basic.$n" "$out" $(example_contracts "$n") >/dev/null
+  bin/janus extract artifacts/examples-arm64 "$(example_symbol "$n")" "$out" $(example_contracts "$n") >/dev/null
   start=$(date +%s.%N)
   if bin/janus verify "$out" --proof "examples/proofs/$n.lean" "${extra[@]}" > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
