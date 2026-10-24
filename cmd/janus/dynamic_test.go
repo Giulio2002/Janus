@@ -15,11 +15,11 @@ const (
 
 func TestParseTargets(t *testing.T) {
 	cases := map[string][]string{
-		"":      nil,
-		"a.F":   {"a.F"},
-		"a.F,b": {"a.F", "b"},
+		"":                                     nil,
+		"a.F":                                  {"a.F"},
+		"a.F,b":                                {"a.F", "b"},
 		itabMul + "," + itabRot + ",p.F.func1": {itabMul, itabRot, "p.F.func1"},
-		"go:itab.*p.T[int,string],p.I, p.G":   {"go:itab.*p.T[int,string],p.I", "p.G"},
+		"go:itab.*p.T[int,string],p.I, p.G":    {"go:itab.*p.T[int,string],p.I", "p.G"},
 	}
 	for in, want := range cases {
 		if got := parseTargets(in); fmt.Sprint(got) != fmt.Sprint(want) {
@@ -43,7 +43,7 @@ func TestDynamicTargetsItab(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		x, err := extractWith(b, "example.com/basic.HashWith", defaultMaxFunctions, []string{itabMul, itabRot})
+		x, err := extractWith(b, "example.com/basic.HashWith", defaultMaxFunctions, nil, itabMul, itabRot)
 		if err != nil {
 			t.Fatal(err)
 		}

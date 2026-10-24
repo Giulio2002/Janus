@@ -2,7 +2,7 @@
 // checks extraction artifacts against the binary, and verifies Lean proofs about them.
 //
 //	janus list <binary> [--filter SUBSTR]
-//	janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...]
+//	janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]... [--targets SYM,...]
 //	janus check <outdir> [--binary PATH]
 //	janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
 //	janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
@@ -70,16 +70,29 @@ func displayPath(p string) string {
 
 const usage = `Usage:
   janus list <binary> [--filter SUBSTR]
-  janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...]
+  janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]... [--targets SYM,...]
   janus check <outdir> [--binary PATH]
   janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH]
-  janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
+  janus blockers <binary> <symbol>... [--max-functions N] [--contract SYM]... [--janus-root DIR] [--json FILE]
   janus version
 ` + extraUsage + `
 See docs/CLI.md.
 `
 
 // parseArgs splits args into positionals and --flag value / --flag=value options.
+// repeatableFlags may be given more than once; their values are joined with "\n" (split them
+// with optsList).
+var repeatableFlags = map[string]bool{"contract": true, "targets": true}
+
+// optsList returns the values of a repeatable option.
+func optsList(opts map[string]string, name string) []string {
+	v, ok := opts[name]
+	if !ok {
+		return nil
+	}
+	return strings.Split(v, "\n")
+}
+
 func parseArgs(args []string, valueFlags ...string) ([]string, map[string]string, error) {
 	known := map[string]bool{}
 	for _, f := range valueFlags {
@@ -107,6 +120,12 @@ func parseArgs(args []string, valueFlags ...string) ([]string, map[string]string
 			}
 			i++
 			val = args[i]
+		}
+		if prev, ok := opts[name]; ok && repeatableFlags[name] {
+			if strings.Contains(val, "\n") {
+				return nil, nil, fmt.Errorf("option --%s value contains a newline", name)
+			}
+			val = prev + "\n" + val
 		}
 		opts[name] = val
 	}
@@ -187,7 +206,7 @@ func cmdList(args []string, stdout io.Writer) error {
 }
 
 func cmdExtract(args []string, stdout, stderr io.Writer) error {
-	pos, opts, err := parseArgs(args, "max-functions", "targets")
+	pos, opts, err := parseArgs(args, "max-functions", "contract", "targets")
 	if err != nil {
 		return usageErr("%v", err)
 	}
@@ -205,7 +224,11 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	x, err := extractWith(b, sym, maxF, parseTargets(opts["targets"]))
+	var targets []string
+	for _, v := range optsList(opts, "targets") {
+		targets = append(targets, parseTargets(v)...)
+	}
+	x, err := extractWith(b, sym, maxF, optsList(opts, "contract"), targets...)
 	if err != nil {
 		return err
 	}
@@ -237,6 +260,9 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	for _, s := range x.Stubs {
 		fmt.Fprintf(stdout, "  stub  0x%x %-10s %s\n", s.Addr, s.Kind, s.Name)
 	}
+	for _, c := range x.Contracts {
+		fmt.Fprintf(stdout, "  contract 0x%x  %s (not extracted; calls need a contract hypothesis)\n", c.Addr, c.Name)
+	}
 	for _, d := range x.Data {
 		fmt.Fprintf(stdout, "  data  0x%x %4d bytes  %s (%s)\n", d.Base, len(d.Bytes), d.Name, d.Section)
 	}
@@ -247,6 +273,16 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	}
 	for _, o := range x.Omitted {
 		fmt.Fprintf(stdout, "  omitted call at 0x%x to %s: %s; not extracted (the model faults with noCode there)\n", o.From, o.Name, o.Reason)
+	}
+	for _, pat := range x.ContractPatterns {
+		hit := false
+		cm, _ := newContractMatcher([]string{pat})
+		for _, c := range x.Contracts {
+			hit = hit || cm.match(c.Name)
+		}
+		if !hit {
+			fmt.Fprintf(stderr, "Note: --contract %q matches no function the extraction calls directly.\n", pat)
+		}
 	}
 	printSkipped(stderr, x.Skipped)
 	for _, u := range x.Unresolved {
@@ -298,6 +334,9 @@ func cmdCheck(args []string, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "  Module: %s (%s, %s/%s)\n", id.MainModule, id.GoVersion, id.GOOS, id.GOARCH)
 	fmt.Fprintf(stdout, "  Entry: %s at %s\n", id.Symbol, id.Address)
 	fmt.Fprintf(stdout, "  Functions: %d, stubs: %d, data objects: %d\n", len(id.Functions), len(id.Stubs), len(id.Data))
+	if len(id.Contracts) > 0 {
+		fmt.Fprintf(stdout, "  Runtime contracts (not extracted): %s\n", strings.Join(id.contractList(), ", "))
+	}
 	fmt.Fprintf(stdout, "  Code: %s\n", displayPath(r.Extracted))
 	fmt.Fprintf(stdout, "  Manifest: %s\n", displayPath(filepath.Join(r.Outdir, "identity.json")))
 	fmt.Fprintln(stdout, "  Matched: binary SHA-256, extractor version, Extracted.lean SHA-256, regenerated words and data.")

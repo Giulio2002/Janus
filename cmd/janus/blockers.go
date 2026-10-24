@@ -105,7 +105,7 @@ func leanDecode(exe string, words []uint32) (map[uint32]bool, error) {
 }
 
 func cmdBlockers(args []string, stdout, stderr io.Writer) error {
-	pos, opts, err := parseArgs(args, "max-functions", "janus-root", "json")
+	pos, opts, err := parseArgs(args, "max-functions", "janus-root", "json", "contract")
 	if err != nil {
 		return usageErr("%v", err)
 	}
@@ -148,7 +148,7 @@ func cmdBlockers(args []string, stdout, stderr io.Writer) error {
 	all := map[uint32]bool{}
 	for _, sym := range pos[1:] {
 		r := blockerReport{Symbol: sym, Functions: []string{}, Stubs: []string{}, WritableRefs: []string{}, Rejected: []blockerWord{}}
-		x, err := extractFrom(b, sym, maxF)
+		x, err := extractWith(b, sym, maxF, optsList(opts, "contract"))
 		if err != nil {
 			r.Error = strings.TrimSuffix(strings.SplitN(err.Error(), "\n", 2)[0], ":")
 			reports = append(reports, r)

@@ -74,6 +74,10 @@ type verifiedReport struct {
 	// DependencyConsts are the constants from declared extra dependencies that the statement
 	// (or a proof-local def it uses) mentions: "<name> (<kind>, <module>)".
 	DependencyConsts []string `json:"dependencyConstants,omitempty"`
+	// Contracts are the extraction's runtime contracts ("name @ address", from identity.json):
+	// functions that were not extracted, whose behaviour the theorem can only use through a
+	// contract hypothesis in its statement.
+	Contracts []string `json:"contracts,omitempty"`
 	// DependencyDefinitions are the dependency defs the statement reaches, with their bodies
 	// (round 7 J1): a dependency def's name and docstring need not say what it means.
 	DependencyDefinitions []string `json:"dependencyDefinitions,omitempty"`
@@ -349,6 +353,10 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 		fmt.Fprintf(stdout, "  Kernel replay: skipped (%s)\n", r.KernelReplay.Note)
 	}
 	fmt.Fprintf(stdout, "  Lean: %s\n", r.LeanVersion)
+	if len(r.Contracts) > 0 {
+		fmt.Fprintf(stdout, "  Runtime contracts assumed: %s (not extracted; see the contract hypotheses of the statement)\n",
+			termSafe(strings.Join(r.Contracts, ", ")))
+	}
 	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(filepath.Join(outdir, "verified.json")))
 	fmt.Fprintln(stdout, "  Statement:")
 	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(termSafe(r.Statement), "\n", "\n    "))
@@ -782,6 +790,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		Framework:         fi,
 		Sandbox:           sb.info(),
 		Definitions:       ar.Definitions,
+		Contracts:         cr.Identity.contractList(),
 		Notes:             ar.Notes,
 	}
 	if resultKey != "" && bytes.Equal(idBytes, idBytes0) {

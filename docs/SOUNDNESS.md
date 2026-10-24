@@ -277,7 +277,8 @@ about executions outside it.
 * **No signals, no asynchronous preemption, no interrupts.** Go's signal-based async
   preemption, profiling signals and injected calls (`sigpanic`) are not modelled.
 * **No runtime interaction.** No GC (write barriers, stack scanning, moving stacks), no
-  scheduler, no stack growth. Reaching `runtime.morestack*` ends the run as a `morestack`
+  scheduler, no stack growth (calls into the runtime can be assumed as contracts instead of
+  executed: see "Runtime contracts" below). Reaching `runtime.morestack*` ends the run as a `morestack`
   outcome, and it is not a return. Calls into other runtime functions only work if they were
   extracted and their code is in the supported subset. They then run in the same idealised
   model. Functions with a stack-check prologue need `GoABI.StackGuardOK s k` (g readable,
@@ -529,6 +530,65 @@ proved, not trusted.
 **Validation.** The core and both wrappers are checked against qemu and the Arm ASL (Sail) on
 arm64, the host CPU on amd64, and Berkeley TestFloat/SoftFloat (`scripts/testfloat.sh`); see
 `docs/ORACLE.md`, `docs/ORACLE-SAIL.md` and `docs/ORACLE-AMD64.md`.
+
+## Runtime contracts
+
+A theorem can rely on a runtime function it does not execute by stating the function's
+behaviour as a hypothesis (docs/RUNTIME-CONTRACTS.md). The mechanism adds nothing to the trusted
+base:
+
+* `janus extract --contract SYM` leaves the function out and records it in
+  `Extracted.program.contracts`. The list is part of the byte-compared extraction (`janus check`
+  regenerates it from the recorded patterns) and does not change the run: there is no code at a
+  contract address, so reaching it is `noCode`. Leaving out a function can only make a theorem
+  unprovable, never a false one provable.
+* The theorem is stated about `Extracted.program.link impl` for **every** `impl : List Segment`
+  satisfying the contract hypotheses, which are ordinary `Summary` propositions printed as part
+  of the statement and audited like the rest of it. The real binary is one such `impl` (its
+  runtime code at those addresses, run by the same model), so the theorem holds of it exactly
+  when the real runtime meets the contracts. A contract on `Extracted.program` itself would be
+  false (no code there) and is never used.
+* `p.link impl` fetches `p`'s word wherever `p` has code (`Program.fetch_link`), so the proof
+  learns nothing about `impl` except through the hypotheses.
+
+**What a contract hypothesis assumes about the runtime** (in the model, which is single-threaded:
+no concurrent GC, no preemption):
+
+* **Allocation** (`Janus/Contracts/Alloc.lean`, `AllocAmd64.lean`). `mallocgc`, `newobject`,
+  `makeslice` and `growslice` return a fresh, aligned, writable object (zeroed as Go specifies)
+  inside the caller-declared runtime-owned ranges `rt`, change memory only inside `rt` and their
+  stack window, and preserve the ABI's callee-saved registers. Caveats that are assumptions of
+  every such theorem: (1) *runtime-owned memory* is a visible parameter `rt`; the caller's data
+  must be outside it (stated in the precondition); (2) the object's memory is a region already in
+  the state (instructions cannot add regions; Go reserves arenas up front) — a theorem says nothing
+  about states where it is not; (3) one allocation per `rt`: the contracts do not record that an
+  allocated object leaves `rt`; (4) the runtime uses at most `stack` bytes below `SP` (4096 in the
+  examples) and **the goroutine stack does not move**: Go may grow and copy the stack inside a
+  slow path (`morestack`), relocating the caller's frame, which the contracts exclude; (5) the
+  GC's concurrent work (marking, sweeping, assists, finalizers) is outside the model; Go's
+  collector does not move objects, so a returned pointer stays valid.
+* **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
+  `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
+  `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)
+  makes it unreachable. The precondition states the flag `runtime.writeBarrier.enabled` (as the
+  word the code reads), and the barrier's field offsets are read off its code.
+* **The allocator fast path is proved, not assumed** (arm64, `examples/proofs/MallocFast.lean`):
+  for a pointer-free request of 16 to 1016 bytes, `runtime.mallocgc` and the inlined
+  `nextFreeFast`/`getMCache`/`acquirem`/`releasem` paths of `runtime.mallocgcSmallNoscan` are
+  executed from the binary's machine code under `MCacheOK` (a well-formed `g`/`m`/`p`/`mcache`/
+  `mspan` state for the request's size class with a free slot in the span's `allocCache`, the
+  slot zero and `span.needzero = 0`, the runtime globals readable, every object separate).
+  Everything else of `mallocgc` stays trusted, and is not even assumed by that theorem, because
+  `MCacheOK` makes it unreachable: the tiny allocator (`mallocgcTiny`), pointerful objects
+  (`mallocgcSmallScan*`), large objects (`mallocgcLarge`, `mheap`, `mmap`), span refill
+  (`(*mcache).nextFree` → `mcentral`/`mheap`), clearing a dirty slot (`memclrNoHeapPointers`
+  when `span.needzero`), GC assist (`deductAssistCredit`, `gcBlackenEnabled ≠ 0`), allocate-black
+  during GC (`gcmarknewobject`, write barrier on), heap profiling (`profilealloc`), the GC trigger
+  (`gcTrigger.test`, `gcStart`) and the debug hooks (`debug.malloc`). Contracts that rely on
+  these paths (the allocation contracts above, used by `NewPair` & co.) remain assumptions.
+* **amd64**: every amd64 contract requires the return address at `[RSP]` below `2^47` (a
+  canonical user address); without it no code could return and the contract would be
+  unsatisfiable.
 
 ## Dynamic calls, closures and `defer`
 

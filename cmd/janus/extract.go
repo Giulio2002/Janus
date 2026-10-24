@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -40,12 +41,25 @@ type Unresolved struct {
 	Target uint64
 }
 
+// Contract is a function named by --contract: direct calls to it are not followed, and its
+// address is recorded in Program.contracts. Its behaviour is whatever the theorem's contract
+// hypotheses (a `Summary` of the program linked with arbitrary code) say; without one, control
+// reaching it faults with noCode, exactly as for any other address without extracted code.
+type Contract struct {
+	Name string
+	Addr uint64
+}
+
 type Extraction struct {
-	Bin        *Binary
-	Entry      Func
-	Segments   []Segment // entry first, then breadth-first discovery order
-	Stubs      []Stub    // discovery order
-	Unresolved []Unresolved
+	Bin       *Binary
+	Entry     Func
+	Contracts []Contract // discovery order
+	// ContractPatterns are the --contract patterns, as given (recorded in identity.json so
+	// that check regenerates the same extraction).
+	ContractPatterns []string
+	Segments         []Segment // entry first, then breadth-first discovery order
+	Stubs            []Stub    // discovery order
+	Unresolved       []Unresolved
 	// Dynamic targets: --targets as given, and every function added because an indirect call
 	// may reach it (see dynamic.go). Omitted: direct calls deliberately not followed.
 	Targets  []string
@@ -173,16 +187,74 @@ func (b *Binary) classifyStub(g Func) (StubKind, bool, error) {
 }
 
 // extract copies sym and every function reachable from it by direct branches.
-func extract(binPath, sym string, maxFunctions int) (*Extraction, error) {
+func extract(binPath, sym string, maxFunctions int, contracts ...string) (*Extraction, error) {
 	b, err := loadBinary(binPath)
 	if err != nil {
 		return nil, err
 	}
-	return extractFrom(b, sym, maxFunctions)
+	return extractWith(b, sym, maxFunctions, contracts)
 }
 
 func extractFrom(b *Binary, sym string, maxFunctions int) (*Extraction, error) {
 	return extractWith(b, sym, maxFunctions, nil)
+}
+
+// contractMatcher matches function names against --contract glob patterns: `*` matches any
+// run of characters (including `.` and `/`), `?` any one character, everything else itself.
+// A name matches with or without its `.abi0`/`.abiinternal` suffix.
+type contractMatcher struct {
+	pats []string
+	res  []*regexp.Regexp
+}
+
+func newContractMatcher(pats []string) (*contractMatcher, error) {
+	m := &contractMatcher{pats: pats}
+	for _, p := range pats {
+		if p == "" {
+			return nil, usageErr("--contract needs a non-empty symbol or glob pattern")
+		}
+		var sb strings.Builder
+		sb.WriteString("^")
+		for _, r := range p {
+			switch r {
+			case '*':
+				sb.WriteString(".*")
+			case '?':
+				sb.WriteString(".")
+			default:
+				sb.WriteString(regexp.QuoteMeta(string(r)))
+			}
+		}
+		sb.WriteString("$")
+		m.res = append(m.res, regexp.MustCompile(sb.String()))
+	}
+	return m, nil
+}
+
+func (m *contractMatcher) match(name string) bool {
+	if m == nil {
+		return false
+	}
+	n := strings.TrimSuffix(strings.TrimSuffix(name, ".abi0"), ".abiinternal")
+	for _, re := range m.res {
+		if re.MatchString(name) || re.MatchString(n) {
+			return true
+		}
+	}
+	return false
+}
+
+// contractTarget records g as a contract (once) if it matches; true if the branch to it must
+// not be followed. Stubs keep their stub meaning (checked by the caller first).
+func (x *Extraction) contractTarget(m *contractMatcher, seen map[uint64]bool, g Func) bool {
+	if !m.match(g.Name) {
+		return false
+	}
+	if !seen[g.Addr] {
+		seen[g.Addr] = true
+		x.Contracts = append(x.Contracts, Contract{Name: g.Name, Addr: g.Addr})
+	}
+	return true
 }
 
 // extractArm64Func copies one arm64 function and lists its direct branches.
@@ -326,15 +398,41 @@ func renderLean(x *Extraction) []byte {
 	}
 	sb.WriteString("]\n\n")
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
-	if len(x.Data) == 0 {
-		sb.WriteString("def program : Program := { segments := segments, stubs := stubs, exitAddr := exitAddr }\n\n")
-	} else {
-		writeData(&sb, x.Data)
-		sb.WriteString("def program : Program :=\n  { segments := segments, stubs := stubs, exitAddr := exitAddr, data := data }\n\n")
-	}
+	writeProgram(&sb, x, "Program")
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())
+}
+
+// writeContracts renders `def contracts` (only when there are contracts, so extractions
+// without --contract are byte-identical to earlier ones).
+func writeContracts(sb *strings.Builder, cs []Contract) {
+	sb.WriteString("def contracts : List (String × Nat) := [")
+	for i, c := range cs {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(sb, "\n  (%s, 0x%x)", leanString(c.Name), c.Addr)
+	}
+	sb.WriteString(" ]\n\n")
+}
+
+// writeProgram renders the data and contract lists (if any) and `def program`.
+func writeProgram(sb *strings.Builder, x *Extraction, ty string) {
+	fields := "segments := segments, stubs := stubs, exitAddr := exitAddr"
+	if len(x.Data) > 0 {
+		writeData(sb, x.Data)
+		fields += ", data := data"
+	}
+	if len(x.Contracts) > 0 {
+		writeContracts(sb, x.Contracts)
+		fields += ", contracts := contracts"
+	}
+	if len(x.Data) == 0 && len(x.Contracts) == 0 {
+		fmt.Fprintf(sb, "def program : %s := { %s }\n\n", ty, fields)
+		return
+	}
+	fmt.Fprintf(sb, "def program : %s :=\n  { %s }\n\n", ty, fields)
 }
 
 // writeData renders `def data`, inline when small, else one definition per object (like
