@@ -170,7 +170,12 @@ reserved address space.
 **What is proved about the allocator itself.** See `examples/proofs/MallocFast.lean` and
 [SOUNDNESS.md](SOUNDNESS.md#runtime-contracts).
 
-### Dynamic calls
+<a id="dynamic-calls"></a>
+
+### Dynamic calls (interface methods, closures, method values, `defer`)
+
+These are not contracts in the sense above (no code is left out): the call's possible targets are
+extracted, and the theorem states which one the call reaches.
 
 An interface method call, a call of a func value (a closure or a method value) and the call of a
 deferred closure are indirect calls: the target is a word the code loads from memory (`Fun[k]`
@@ -208,6 +213,14 @@ the call fault (`noCode`), so it can only make a proof impossible.
 **The callee is then a callee like any other.** Once the target register is a literal (after
 `janus_dyn` has turned the hypotheses into equations), `janus_run` / `janus64_run` uses the
 target's `Summary` from `calls [...]`, or executes it.
+
+**Heap-allocated defer records.** A function whose defers the compiler cannot open-code calls
+`runtime.deferprocStack`/`runtime.deferproc` and `runtime.deferreturn` (which itself runs the
+deferred calls, dynamically). They can be left out with `--contract`
+(`--contract 'runtime.deferproc*' --contract runtime.deferreturn`; a `--contract` pattern takes
+precedence over the built-in omission of `deferreturn`), but no contract library describes them:
+a theorem would have to state, as a `Summary` of the linked program, that `deferreturn` runs the
+recorded closures. Such functions are unsupported for now.
 
 **`defer`.** Open-coded defers (Go 1.26's default for up to 8 defers outside loops) are just code:
 a funcval in the frame, a `deferBits` byte, and a call of the closure at each exit. The
