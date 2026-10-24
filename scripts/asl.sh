@@ -31,6 +31,10 @@
 #                      published atomically, so worktrees and CI runners share one build of the
 #                      ~45 min model. The cache must be writable only by users you trust: its
 #                      oleans are what the JanusASL proofs are checked against.
+#                      The same directory also caches every JanusASL and Janus module's build
+#                      (ASL_CACHE/mods, JanusASL/tools/asl_mod_cache.py): one entry per module,
+#                      keyed by what Lake traces (source, imports' keys, package settings,
+#                      toolchain), restored before and published after the JanusASL build.
 #   ASL_CACHE_READONLY=1   use the cache but never write to it
 #   GEN      work directory of `gen` (default $DEPS/gen)
 #   ASL_MEM_GB   memory budget of `build`/`prove` (default: the smaller of 24 and 60% of MemAvailable)

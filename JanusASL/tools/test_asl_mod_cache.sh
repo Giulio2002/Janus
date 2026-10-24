@@ -103,13 +103,26 @@ if [ -n "$e2e" ]; then
     bad "the fresh copy elaborated $nb modules ($(grep -E 'Built (JanusASL|Janus)[. ]' "$t/build.log" | head -3 | tr '\n' ' '))"
   # One proof file edited: Lake builds exactly the modules whose key changed.
   keys "$t/w" > "$t/w.keys"
-  echo "-- edited" >> "$t/w/$f"
-  expect=$(join -j1 "$t/w.keys" <(keys "$t/w") | awk '$2 != $3 {print $1}' | sort)
+  # a change to the module's content (a comment would leave its .olean, and so its dependents'
+  # traces, unchanged: Lake then rebuilds only the edited module)
+  printf '\ntheorem asl_mod_cache_test_edit : True := trivial\n' >> "$t/w/$f"
+  # the modules `lake build JanusASL` builds: the closure of the library's roots
+  inlib=$(python3 -I - "$t/w" <<'PY'
+import importlib.util, os, sys
+root = sys.argv[1]
+spec = importlib.util.spec_from_file_location("m", os.path.join(root, "JanusASL/tools/asl_mod_cache.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+ks = m.Keys(root)
+roots = [r for lib in ks.pkgs[0].cfg.get("lean_lib", []) if lib.get("name") == "JanusASL" for r in lib.get("roots", ["JanusASL"])]
+print("\n".join(sorted(m.closure(ks, roots))))
+PY
+)
+  expect=$(join -j1 "$t/w.keys" <(keys "$t/w") | awk '$2 != $3 {print $1}' | sort | comm -12 - <(echo "$inlib"))
   start=$(date +%s)
   (cd "$t/w/JanusASL" && lake build --no-ansi JanusASL) > "$t/build2.log" 2>&1
   secs=$(( $(date +%s) - start ))
   got=$(grep -oE 'Built (JanusASL|Janus)\.[A-Za-z0-9_.]+( |$)' "$t/build2.log" | awk '{print $2}' | sort -u)
-  [ "$got" = "$expect" ] && ok "after editing $f, Lake rebuilt exactly its $(echo "$got" | wc -l) dependents in ${secs}s" ||
+  [ "$got" = "$expect" ] && ok "after editing $f, Lake rebuilt exactly it and its $(( $(echo "$got" | wc -l) - 1 )) dependents in ${secs}s (of $n modules)" ||
     bad "after editing $f Lake rebuilt: $(echo "$got" | tr '\n' ' ') expected: $(echo "$expect" | tr '\n' ' ')"
 fi
 exit $fail
