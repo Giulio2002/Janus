@@ -208,19 +208,33 @@ jobs:
       - name: Decoder coverage of the examples (janus blockers)
         run: |
           go build -o bin/janus ./cmd/janus
-          mapfile -t syms < <(bin/janus list artifacts/examples-arm64 --filter example.com/basic. | awk 'NR > 2 { print $3 }')
-          n=${#syms[@]}
-          [ "$n" -gt 0 ] || { echo "no example functions found" >&2; exit 1; }
-          bin/janus blockers artifacts/examples-arm64 "${syms[@]}" | tee blockers.txt
-          # Every example must decode fully, including the LL/SC (LDAXR/STLXR) fallback loops Go
-          # emits next to the LSE path of sync/atomic callers (the store-exclusive is modelled with
-          # the exclusive monitor and an environment choice, docs/SOUNDNESS.md). Any rejected word
-          # fails the job. (Extraction failures, e.g. examples that need --contract arguments, are
-          # reported in the summary but are not decoder verdicts.)
-          if grep -E '^ +0x[0-9a-f]+ +0x[0-9a-f]{8} ' blockers.txt; then
-            echo "unexpected rejected words (above)" >&2; exit 1
-          fi
-          grep -Eq "Summary: $n symbol\(s\): [0-9]+ fully decoded, 0 with rejected words" blockers.txt
+          . scripts/example-contracts.sh
+          mapfile -t names < <(sed -n '/^all=(/,/)/p' scripts/verify-examples.sh | tr -d '()' | sed 's/^all=//' | tr ' ' '\n' | grep -v '^$')
+          [ "${#names[@]}" -gt 0 ] || { echo "no examples found" >&2; exit 1; }
+          # Every example, extracted as its proof extracts it (the --contract arguments of
+          # scripts/example-targets.sh), must decode fully, including the LL/SC (LDAXR/STLXR)
+          # fallback loops Go emits next to the LSE path of sync/atomic callers: the
+          # store-exclusive is modelled (exclusive monitor + environment choice,
+          # docs/SOUNDNESS.md). The one exception is MapAccess1Small (runtime.mapaccess1_fast64
+          # verified on its own): its throw/lock paths reach SVC (Syscall6) and MRS CNTVCT_EL0
+          # (procyieldAsm), work package C in docs/COVERAGE.md, unreachable under its theorem.
+          bad=0
+          for n in "${names[@]}"; do
+            mapfile -t targs < <(scripts/example-targets.sh "$n")
+            args=()
+            for ((k = 0; k < ${#targs[@]}; k++)); do
+              [ "${targs[k]}" = --contract ] && args+=(--contract "${targs[k+1]}")
+            done
+            bin/janus blockers artifacts/examples-arm64 "$(example_symbol "$n")" "${args[@]}" > "blockers-$n.txt" 2>&1 || true
+            rej=$(grep -E '^ +0x[0-9a-f]+ +0x[0-9a-f]{8} ' "blockers-$n.txt" || true)
+            if [ "$n" = MapAccess1Small ]; then
+              rej=$(echo "$rej" | grep -Ev '^ +0x[0-9a-f]+ +0x(d4000001|d53be0[0-9a-f]{2}) ' || true)
+            fi
+            if [ -n "$rej" ] || ! grep -q "Summary: 1 symbol(s): " "blockers-$n.txt"; then
+              echo "$n:"; cat "blockers-$n.txt"; bad=1
+            fi
+          done
+          [ "$bad" = 0 ] || { echo "unexpected rejected words or extraction failures (above)" >&2; exit 1; }
 
       - name: Differential oracle vs qemu (quick)
         env:
