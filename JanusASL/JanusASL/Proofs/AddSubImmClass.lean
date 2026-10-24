@@ -127,7 +127,7 @@ theorem asl_addSubImm {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 34)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (pc : Int) :
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (aslAddSubImmSpec js w) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   have hcls : (w / 2 ^ 26) % 8 = 4 := by omega
   rw [run_DecodeA64_DPImm hw hcls]
   have hs0 : (stepEntry s (BitVec.ofNat 32 w)).regs.get? .SEE = some (-1) := by
@@ -148,33 +148,25 @@ theorem asl_addSubImm {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 34)
       (hR.set_other .SEE (18 : Int) rfl (by decide) (by decide) (by decide)) (width_cases w) hd hn
       (aslImm (if fld w 31 1 == 1#1 then 64 else 32) (fld w 22 1) (fld w 10 12)) (fld w 29 1 == 1#1)
       (fld w 30 1 == 1#1)
-    refine ⟨s2, hrun, hrel, ?_⟩
-    rw [hfr _ rfl (by decide) (by decide), get?_set_ne _ (r := .SEE) _ (by decide)]
-    exact hbt0
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcImm_1 hw hc hk hs0, run_decode_adds_addsub_imm]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_addsub_imm
       (hR.set_other .SEE (19 : Int) rfl (by decide) (by decide) (by decide)) (width_cases w) hd hn
       (aslImm (if fld w 31 1 == 1#1 then 64 else 32) (fld w 22 1) (fld w 10 12)) (fld w 29 1 == 1#1)
       (fld w 30 1 == 1#1)
-    refine ⟨s2, hrun, hrel, ?_⟩
-    rw [hfr _ rfl (by decide) (by decide), get?_set_ne _ (r := .SEE) _ (by decide)]
-    exact hbt0
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcImm_2 hw hc hk hs0, run_decode_sub_addsub_imm]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_addsub_imm
       (hR.set_other .SEE (20 : Int) rfl (by decide) (by decide) (by decide)) (width_cases w) hd hn
       (aslImm (if fld w 31 1 == 1#1 then 64 else 32) (fld w 22 1) (fld w 10 12)) (fld w 29 1 == 1#1)
       (fld w 30 1 == 1#1)
-    refine ⟨s2, hrun, hrel, ?_⟩
-    rw [hfr _ rfl (by decide) (by decide), get?_set_ne _ (r := .SEE) _ (by decide)]
-    exact hbt0
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
   · rw [run_DataProcImm_3 hw hc hk hs0, run_decode_subs_addsub_imm]
     obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_addsub_imm
       (hR.set_other .SEE (21 : Int) rfl (by decide) (by decide) (by decide)) (width_cases w) hd hn
       (aslImm (if fld w 31 1 == 1#1 then 64 else 32) (fld w 22 1) (fld w 10 12)) (fld w 29 1 == 1#1)
       (fld w 30 1 == 1#1)
-    refine ⟨s2, hrun, hrel, ?_⟩
-    rw [hfr _ rfl (by decide) (by decide), get?_set_ne _ (r := .SEE) _ (by decide)]
-    exact hbt0
+    exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 theorem toNat_append_zeros12 (x : BitVec 12) : (x +++ (0#12 : BitVec 12)).toNat = x.toNat * 4096 := by
   show (x ++ 0#12).toNat = _
@@ -233,11 +225,9 @@ theorem spec_pc (js : Janus.Arm64.State) (w : Nat) : (aslAddSubImmSpec js w).pc 
 theorem addSubImm_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100010)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   obtain ⟨s2, hrun, hrel, hbt⟩ := asl_addSubImm hw hc h (js.pc.toNat : Int)
-  have hpc2 : s2.regs.get? ._PC = some js.pc := by rw [hrel.pc, spec_pc]
-  have hstep := run_janus_step (BitVec.ofNat 32 w) h.pc hrun hbt hpc2
-  refine ⟨{ aslAddSubImmSpec js w with pc := js.pc + 4 }, _, ?_, hstep, hrel.setPC _⟩
+  refine step_agree h ⟨s2, hrun, hrel, hbt⟩ (spec_pc js w) ?_
   rw [Janus.Arm64.step_of_decode (decode_addSubImm_class hw hc)]
   simp only [Janus.Arm64.exec, spec_eq hw]
   congr 1

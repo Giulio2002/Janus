@@ -17,6 +17,9 @@ import JanusASL.Proofs.PcRel
 import JanusASL.Proofs.AddSubExt
 import JanusASL.Proofs.DP1
 import JanusASL.Proofs.Rev
+import JanusASL.Proofs.Branch
+import JanusASL.Proofs.Run
+import JanusASL.Proofs.Examples
 
 /-! # JanusASL proofs: Janus' `step` against the generated ASL, per encoding class
 

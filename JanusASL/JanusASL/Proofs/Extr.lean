@@ -111,7 +111,7 @@ theorem asl_extr {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100111)
     ∃ s2, (__DecodeA64 pc (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 ∧
       Rel (Janus.Arm64.execExtr (if fld w 31 1 == 1#1 then 64 else 32) js
         (fld w 16 5).toNat (fld w 10 6).toNat (fld w 5 5).toNat (fld w 0 5).toNat) s2 ∧
-      s2.regs.get? .__BranchTaken = some false := by
+      (s2.regs.get? .__BranchTaken = some false ∧ CfgFrame s s2) := by
   rw [run_DecodeA64_DPImm hw (by omega)]
   have e1 : (fld w 22 1 != fld w 31 1) = false := by
     have : fld w 22 1 = fld w 31 1 := by apply BitVec.eq_of_toNat_eq; rw [fld_toNat _ _ _ hw, fld_toNat _ _ _ hw]; simpa using hN.symm
@@ -135,7 +135,7 @@ theorem asl_extr {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100111)
   rw [run_DataProcImm_extr hw hc h0 h21 (see_entry _ _), run_decode_extr _ _ _ _ _ _ e1 e2]
   obtain ⟨s2, hrun, hrel, hfr⟩ := run_execute_extr (h.entry (BitVec.ofNat 32 w) 206) (width_cases w)
     (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) hl
-  exact ⟨s2, hrun, hrel, bt_after _ _ hfr⟩
+  exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
 /-- **EXTR**: for every word of the encoding class that Janus decodes and every related pair of
 states, Janus' `step` and the generated ASL agree. -/
@@ -144,7 +144,7 @@ theorem extr_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b10011
     (hsf : (w / 2 ^ 31) % 2 = 1 ∨ (w / 2 ^ 10) % 64 < 32)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execExtr N js
     (fld w 16 5).toNat (fld w 10 6).toNat (fld w 5 5).toNat (fld w 0 5).toNat
   have hspec : ∀ N, (F N).pc = js.pc := by

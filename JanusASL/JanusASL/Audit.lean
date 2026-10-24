@@ -12,7 +12,8 @@ elab "#janus_asl_audit" : command => do
   let allowed := [``propext, ``Classical.choice, ``Quot.sound]
   let mut cnt : Nat := 0
   for (name, _) in env.constants.toList do
-    if (`JanusASL.Proofs).isPrefixOf name && name.toString.endsWith "_agree" then
+    if (`JanusASL).isPrefixOf name && (name.toString.endsWith "_agree" || name.toString.endsWith "_asl" ||
+        name.toString.endsWith "toASL") then
       let axs ← liftCoreM <| Lean.collectAxioms name
       let bad := axs.filter (fun a => !allowed.contains a)
       if !bad.isEmpty then
