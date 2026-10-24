@@ -19,7 +19,7 @@ does not look at what the theorems state, so a weakened statement (an extra hypo
 open Lean Elab Command Meta
 
 def expected : List Name := [
-  -- 31 encoding-class theorems
+  -- 31 data-processing and branch encoding-class theorems
   ``JanusASL.Proofs.addSubImm_agree, ``JanusASL.Proofs.addSubShifted_agree, ``JanusASL.Proofs.addSubExt_agree,
   ``JanusASL.Proofs.addSubCarry_agree, ``JanusASL.Proofs.logicalShifted_agree, ``JanusASL.Proofs.logicalImm_agree,
   ``JanusASL.Proofs.moveWide_agree, ``JanusASL.Proofs.bitfield_agree, ``JanusASL.Proofs.extr_agree,
@@ -30,6 +30,9 @@ def expected : List Name := [
   ``JanusASL.Proofs.rev16_agree, ``JanusASL.Proofs.rev32_agree, ``JanusASL.Proofs.rev64_agree,
   ``JanusASL.Proofs.b_agree, ``JanusASL.Proofs.bcond_agree, ``JanusASL.Proofs.cb_agree, ``JanusASL.Proofs.tb_agree,
   ``JanusASL.Proofs.br_agree, ``JanusASL.Proofs.blr_agree, ``JanusASL.Proofs.ret_agree,
+  -- 5 load/store encoding classes
+  ``JanusASL.Proofs.ldstUImm_agree, ``JanusASL.Proofs.ldstImm9_agree, ``JanusASL.Proofs.ldstReg_agree,
+  ``JanusASL.Proofs.ldrLit_agree, ``JanusASL.Proofs.ldstPair_agree,
   -- assembly and whole runs
   ``JanusASL.Proofs.step_agree, ``JanusASL.Proofs.run_agree, ``JanusASL.Proofs.Ensures.toASL,
   ``JanusASL.Proofs.StepOK.of_agree,

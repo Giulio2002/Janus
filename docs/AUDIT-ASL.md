@@ -233,13 +233,13 @@ axioms of every `JanusASL.*` constant whose name ends in `_agree`, `_asl` or `to
 JanusASL theorems do **not** go through `janus verify`'s trusted auditor: there is no
 statement identity, no sandbox and no olean pins. Gaps:
 
-* a documented theorem that is deleted or renamed only lowers the printed count ("audited 39"),
+* a documented theorem that is deleted or renamed only lowers the printed count ("audited 44"),
   and nothing fails;
 * the statements are never looked at. An extra hypothesis, a weaker conclusion or a new
   `trivial_agree : True` passes and counts;
 * the selection is by suffix, so the documented set and the audited set can drift apart.
 
-None of this is exploited today. All 39 theorems are present, are theorems, use only `propext`,
+None of this is exploited today. All 44 theorems are present, are theorems, use only `propext`,
 `Classical.choice` and `Quot.sound`, and their statements (reviewed for this round, and the
 branch hypotheses checked for satisfiability via A2) are the ones docs/ASL.md describes.
 `audit/rt-asl/AuditStrict.lean` closes the gap as a row. It takes an explicit list of the 39
