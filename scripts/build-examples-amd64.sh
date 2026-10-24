@@ -20,3 +20,5 @@ for f in $funcs; do
   # shellcheck disable=SC2046
   "$root/bin/janus" extract "$root/artifacts/examples-amd64" "example.com/basic.$f" "$root/artifacts/amd64/$f" $(example_contracts "$f")
 done
+# A runtime function verified on its own (examples/proofs-amd64/MapAccess1Small).
+"$root/bin/janus" extract "$root/artifacts/examples-amd64" runtime.mapaccess1_fast64 "$root/artifacts/amd64/MapAccess1Small"
