@@ -228,3 +228,29 @@ theorem run_write_rgfi_size {js : Janus.Amd64.State} {s : SState} (h : Rel js s)
     simp only [true_or, ↓reduceIte, setReg_regs_same]
 
 end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+theorem regWrite_eq_setReg (js : Janus.Amd64.State) (w : Nat) (rexP : Bool) (n : Nat) (v : BitVec w) :
+    regWrite js w (regLocOf rexP w n) v =
+      js.setReg (locReg (regLocOf rexP w n)) ((regWrite js w (regLocOf rexP w n) v).regs (locReg (regLocOf rexP w n))) := by
+  unfold regLocOf Janus.Amd64.Decode.reg8
+  split
+  · split <;> simp [regWrite, locReg, Janus.Amd64.State.putHigh, Janus.Amd64.State.putReg,
+      Janus.Amd64.State.setReg] <;> split <;> simp
+  · simp [regWrite, locReg, Janus.Amd64.State.putReg, Janus.Amd64.State.setReg]; split <;> simp
+
+theorem locReg_lt (rexP : Bool) (w n : Nat) (hn : n < 16) : locReg (regLocOf rexP w n) < 16 := by
+  unfold regLocOf Janus.Amd64.Decode.reg8; split
+  · split <;> simp [locReg] <;> omega
+  · simp [locReg]; omega
+
+theorem Rel.writeReg {js : Janus.Amd64.State} {s : SState} (h : Rel js s) {w : Nat} (rexP : Bool) {n : Nat}
+    (hn : n < 16) (v : BitVec w) :
+    Rel (regWrite js w (regLocOf rexP w n) v)
+      (setGpr s ((regWrite js w (regLocOf rexP w n) v).regs (locReg (regLocOf rexP w n))) (locReg (regLocOf rexP w n))) := by
+  have := h.setReg (locReg_lt rexP w n hn) ((regWrite js w (regLocOf rexP w n) v).regs (locReg (regLocOf rexP w n)))
+  rwa [← regWrite_eq_setReg] at this
+
+end JanusX86.Proofs

@@ -417,4 +417,25 @@ theorem get?_setGpr_of_not (s : SState) (v : BitVec 64) {i : Nat} (hi : i < 16) 
   | 15, _ => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
   | _ + 16, hi => exact absurd hi (by omega)
 
+theorem gprVal_set_of_not (s : SState) {r : Register} (hr : isGprReg r = false) (v : RegisterType r) (i : Nat) :
+    gprVal (s.set r v) i = gprVal s i := by
+  match i with
+  | 0 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 1 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 2 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 3 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 4 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 5 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 6 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 7 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 8 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 9 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 10 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 11 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 12 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 13 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 14 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | 15 => exact get?_set_ne _ _ (by rintro rfl; simp [isGprReg] at hr)
+  | _ + 16 => rfl
+
 end JanusX86.Proofs
