@@ -17,7 +17,8 @@ mkdir -p "$root/artifacts" "$root/bin"
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-amd64" ./cmd)
 echo "built $root/artifacts/examples-amd64"
 (cd "$root" && go build -o "$root/bin/janus" ./cmd/janus)
-funcs=$(cat "$root"/examples/basic/*.go | grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}')
+# (the arm64-only files, *_arm64.go, are not part of the amd64 build)
+funcs=$(ls "$root"/examples/basic/*.go | grep -v '_arm64\.go$' | xargs cat | grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}')
 . "$root/scripts/example-contracts.sh"
 for f in $funcs; do
   mapfile -t extract_args < <("$root/scripts/example-targets.sh" "$f")

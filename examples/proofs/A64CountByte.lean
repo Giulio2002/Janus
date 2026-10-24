@@ -34,6 +34,10 @@ subset; each is checked against qemu and the Arm ASL (Sail) (`docs/ORACLE.md`).
 symbolically, and the element lemmas of `Janus.Tactic.Neon` (`elem_zip_zero_*`, `elem_uaddw_64`,
 `elem_add`) reduce the new lanes to sums of the sixteen byte tests, which `countOf_add16` matches.
 `tail` is the invariant of the scalar loop. Both are proved by induction on the iterations left.
+
+**Layout.** The loop heads and the two return addresses inside the callees are literals of this
+binary's layout; \`bases\`, \`heads\` and \`rets\` check them against the extracted segments, so a
+relinked binary fails there first.
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
@@ -50,9 +54,24 @@ theorem countOf_le (m : Memory) (p c n : Nat) : countOf m p c n ≤ n := by
   | zero => simp [countOf]
   | succ n ih => simp only [countOf]; split <;> omega
 
+/-- Where the linker put the shim and the C code (the second and third extracted segments). -/
+abbrev sbase : Nat := 0x8f4d0
+abbrev cbase : Nat := 0x8f500
+
+theorem bases : (Extracted.segments.getD 1 default).name = "example.com/basic.vCount.abi0" ∧
+    (Extracted.segments.getD 1 default).base = sbase ∧
+    (Extracted.segments.getD 2 default).name = "example.com/basic.vCountC" ∧
+    (Extracted.segments.getD 2 default).base = cbase := by decide
+
+/-- The return address in the shim after its `BL vCountC`, and in `A64CountByte` after its call. -/
+abbrev sret : Nat := 0x8f4ec
+abbrev gret : Nat := 0x8ea48
+theorem rets : sret = sbase + 0x1c ∧ gret = Extracted.entry + 0x28 := ⟨rfl, rfl⟩
+
 /-- The vector loop head (`ldr q31, [x4], #16`) and the scalar loop head (`ldrb w4, [x5, x3]`). -/
-abbrev vhead : Nat := 0x8d860
-abbrev thead : Nat := 0x8d8c4
+abbrev vhead : Nat := 0x8f540
+abbrev thead : Nat := 0x8f5a4
+theorem heads : vhead = cbase + 0x40 ∧ thead = cbase + 0xa4 := ⟨rfl, rfl⟩
 
 /-- `c` as the C code sees it: the byte the shim loads, `and w2, w2, #0xff`. -/
 abbrev cw (c : BitVec 64) : BitVec 64 :=
@@ -72,7 +91,7 @@ abbrev frameMem (s : State) (ret : Nat) (p len c : BitVec 64) : Memory :=
   (((((((s.mem.writeLE (s.sp.toNat - 48) 8 ret).writeLE (s.sp.toNat - 56) 8
     (s.regs 29).toNat).writeLE (s.sp.toNat + 8) 8 p.toNat).writeLE (s.sp.toNat - 40) 8 p.toNat).writeLE
     (s.sp.toNat - 32) 8 len.toNat).writeLE (s.sp.toNat - 24) 1 c.toNat).writeLE
-    (s.sp.toNat - 80) 8 577688).writeLE (s.sp.toNat - 88) 8 (s.sp.toNat - 56)
+    (s.sp.toNat - 80) 8 0x8ea48).writeLE (s.sp.toNat - 88) 8 (s.sp.toNat - 56)
 
 /-- One step of the scalar loop: `cmp w4, w2; cinc x0, x0, eq`. -/
 theorem acc_step (m : Memory) (p : Nat) (c i acc : BitVec 64)
@@ -101,7 +120,7 @@ theorem tail (p len c : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program
     ∀ k (S : State) (i acc : BitVec 64), i.toNat + k + 1 = len.toNat →
       S.pc = BitVec.ofNat 64 thead → S.regs 0 = acc → S.regs 1 = len → S.regs 2 = cw c →
       S.regs 3 = i → S.regs 5 = p → acc.toNat = countOf s.mem p.toNat (c.toNat % 256) i.toNat →
-      S.regs 29 = s.sp - 88#64 → S.regs 30 = 579596#64 → S.sp = s.sp - 80#64 →
+      S.regs 29 = s.sp - 88#64 → S.regs 30 = 0x8f4ec#64 → S.sp = s.sp - 80#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 → S.mem = frameMem s ret p len c →
       Reaches (Extracted.program.withExit ret) S (IsReturn fun s' => ABIReturn s s' ∧
         (s'.regs 0).toNat = countOf s.mem p.toNat (c.toNat % 256) len.toNat) := by
@@ -190,7 +209,7 @@ theorem vloop (p len c : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.progra
       S.vregs 24 = BitVec.ofNat 128 ones8 → S.vregs 29 = 0 →
       (elem (S.vregs 26).toNat 64 0 + elem (S.vregs 26).toNat 64 1) % 2 ^ 64 =
         countOf s.mem p.toNat (c.toNat % 256) (16 * k) % 2 ^ 64 →
-      S.regs 29 = s.sp - 88#64 → S.regs 30 = 579596#64 → S.sp = s.sp - 80#64 →
+      S.regs 29 = s.sp - 88#64 → S.regs 30 = 0x8f4ec#64 → S.sp = s.sp - 80#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 → S.mem = frameMem s ret p len c →
       Reaches (Extracted.program.withExit ret) S (IsReturn fun s' => ABIReturn s s' ∧
         (s'.regs 0).toNat = countOf s.mem p.toNat (c.toNat % 256) len.toNat) := by
