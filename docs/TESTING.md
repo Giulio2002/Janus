@@ -309,8 +309,9 @@ limit below ~11 GiB makes it fail with `failed to create thread`. So the virtual
 memory limit plus 16 GiB, per process. janus recognises Lean's out-of-memory messages under it.
 
 **Limit.** `JANUS_MEM_MAX` (`16G`, `1500M`, `off`); default min(24 GiB, 40% of MemTotal), which is
-24 GiB on the 251 GiB development host and 6.4 GiB on a 16 GiB CI runner. CI sets 12G (one job at
-a time there; a cold framework replay peaks at 6.5 GiB). `lake build` (the framework,
+24 GiB on the 251 GiB development host and 6.4 GiB on a 16 GiB CI runner. CI sets 12G: one job
+runs at a time there, and the ArmASL build (10.7 GiB with 8 lake jobs) and the ClearWords proof
+(4.8 GiB) need more than 6.4 GiB. `lake build` (the framework,
 `janus-decode`, consumer packages) gets `LEAN_NUM_THREADS` = limit / `JANUS_LAKE_JOB_MEM` (3G),
 at most the CPU count. That is lake's job count: measured with 8 independent slow modules,
 `LEAN_NUM_THREADS=2` ran 2 lean processes at once and `=6` ran 6.
@@ -423,10 +424,15 @@ olean pages are charged to the cgroup that first read them, so a warm job's peak
 own heap.
 
 **Cold** (fresh `JANUS_CACHE_DIR`, Add): 11 jobs. `lake build Janus` (framework, 8 jobs) 1.3 GiB;
-the kernel replay `leanchecker Janus` (every framework module) **6.5 GiB**, the verification's
-peak; every other job ≤ 222 MiB. A cold `lake build Janus Janus.Tools.Audit` alone peaks at
+the kernel replay `leanchecker Janus` (every framework module) **3.0 GiB** with the default 2
+replay threads (6.5 GiB with 4), the verification's peak; every other job ≤ 222 MiB. A cold `lake build Janus Janus.Tools.Audit` alone peaks at
 538 MiB with 1 job (62 s) and 1.0 GiB with 8 jobs (23 s), so 3 GiB per lake job is a generous
 budget for the framework.
+
+**ArmASL / JanusASL** (`scripts/asl.sh build`, 8 lake jobs from the 24 GiB budget): the cold
+ArmASL build (41 jobs, 42.5 min) peaked at **10.7 GiB** for the whole lake tree (its largest
+modules, Part17/Part24, take ~9 min each). The JanusASL + janus-asl-check build on top (199 jobs,
+16 min) peaked at 7.3 GiB.
 
 **Warm, arm64** (`scripts/verify-examples.sh -j 1`, peak per verification, heaviest job):
 
@@ -473,6 +479,6 @@ The whole run (21 verifications, one at a time) peaked at 4.9 GiB in its script 
 | CopyBlock512 | 1.5 GiB | SumSquares | 251 MiB |
 | Table | 295 MiB | | |
 
-Every example is far below the 24 GiB default. The largest single job, the cold framework
-replay, is 6.5 GiB, so the default leaves almost 4x headroom. A 20G parallel slot holds a cold
+Every example is far below the 24 GiB default. The largest jobs are the ClearWords proof
+(4.8 GiB) and the cold framework replay (3.0 GiB), so the default leaves about 5x headroom. A 20G parallel slot holds a cold
 verify with room to spare.
