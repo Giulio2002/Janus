@@ -331,14 +331,19 @@ partial def omegaAtoms (e : Expr) (acc : Array Expr) : Array Expr :=
     if (evalLit k).isSome then omegaAtoms a acc else acc.push e
   | _ => acc.push e
 
+/-- An `omega` atom that only its range constrains, unless a hypothesis mentions it: a memory
+read, a product, a carry flag, or the value of a compound bit-vector term. -/
+def opaqueAtom (e : Expr) : Bool :=
+  e.isAppOf ``Janus.Arm64.Memory.readLE || e.isAppOf ``HMul.hMul || e.isAppOf ``Bool.toNat ||
+    (e.isAppOfArity ``BitVec.toNat 2 && !(e.getArg! 1).consumeMData.isFVar)
+
 /-- No hypothesis mentions an `omega` atom of `a` or `b` (`omegaAtoms`) other than a plain
 variable's `toNat`: then `omega` knows nothing about them beyond their ranges, which
 `janus_carry` used too, so a goal that `janus_carry` rejected is not worth an `omega` call. -/
 def atomsUnconstrained (g : MVarId) (a b : Expr) : MetaM Bool := g.withContext do
   let atoms := omegaAtoms b (omegaAtoms a #[])
-  -- products and memory reads only
   for e in atoms do
-    unless e.isAppOf ``Janus.Arm64.Memory.readLE || e.isAppOf ``HMul.hMul do return false
+    unless opaqueAtom e do return false
   let set : Std.HashSet Expr := atoms.foldl (·.insert ·) {}
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
@@ -352,9 +357,12 @@ def atomsUnconstrained (g : MVarId) (a b : Expr) : MetaM Bool := g.withContext d
 `none`: not such a goal, or `omega` may still succeed. -/
 def dischCarry (g : MVarId) : MetaM (Option Bool) := do
   let t ← instantiateMVars (← g.getType)
-  let some (_, a, b) := goalRel? t.cleanupAnnotations | return none
+  let some (rel, a, b) := goalRel? t.cleanupAnnotations | return none
   unless janus.carry.disch.get (← getOptions) do return none
-  unless hasCarryOps a || hasCarryOps b do return none
+  -- carry terms, or bounds on opaque atoms (`readLE … + (x * y).toNat < 2^64`)
+  unless hasCarryOps a || hasCarryOps b ||
+      (rel != 0 && (omegaAtoms b (omegaAtoms a #[])).all opaqueAtom &&
+        !(omegaAtoms b (omegaAtoms a #[])).isEmpty) do return none
   let saved ← saveState
   try
     if janus.carry.dischProve.get (← getOptions) then

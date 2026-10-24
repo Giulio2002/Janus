@@ -97,7 +97,7 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 | `janus_step [lemmas]` | Exactly one instruction (`calls`/`budget` as for `janus_run`). |
 | `janus_simp [lemmas]` | The post-processing simp set `janus_post` plus the state hypotheses and `lemmas`. Closes invariant side goals (`S'.regs 2 = i + 1`, …). |
 | `janus_arith` | The arithmetic left after execution. First `janus_carry` (below); if that does not apply, `omega` after adding `readLE m a n < 256^n` for every memory read and normalising carry terms. Does nothing if there is no goal. (`janus64_arith` on amd64.) |
-| `janus_carry` | Carry chains by reflection: proves `a = b`, `a ≤ b`, `a < b` (or a conjunction of them) between `Nat` terms built from limbs, `+`, `*`, `-`, literals, `/ k`, `% k` and `(decide (k ≤ a)).toNat`. See [Multi-limb arithmetic](#multi-limb-arithmetic). |
+| `janus_carry` | Carry chains by reflection: proves `a = b`, `a ≤ b`, `a < b` (or a conjunction of them) between `Nat` terms built from limbs, `+`, `*`, `-`, literals, `/ k`, `% k` and `(decide (k ≤ a)).toNat`. See *Multi-limb arithmetic* under Techniques. |
 | `janus_ring` | Polynomial identities over `Int` (`+`, `*`, `-`, `^` with a literal exponent) by a verified normaliser; on `Nat`, `janus_carry`. |
 | `janus_data hd` | From `hd : p.DataLoaded m`: readability of each `.rodata` object, and a rewrite rule that evaluates loads from it at literal addresses. |
 | `janus_cases h` | From `h : k < N` (`N` a literal): `N` goals with `k` replaced by `0, …, N-1`. For table lookups at a symbolic index. |
@@ -169,6 +169,10 @@ is dropped immediately: preconditions like `y ≠ 0` or `i < len` prune the pani
   memory (after stripping writes, callee frames `MemFrame`, and anything tagged `janus_acc`),
   with `b ≤ a`, `a + n ≤ b + k` by `omega`;
 * `Outside a n rs` (the side condition of a `MemFrame` read) by unfolding the ranges and `omega`;
+* linear address facts (`x + 8 + 8 ≤ z ∨ z + 8 ≤ x + 8`, `x + 8 = x + 8`) by literal arithmetic and
+  at most one case split on an aliasing hypothesis (`Common.addrDisch`);
+* carry bounds and equations (`… / 2^64 < 2^64`) by `janus_carry` (see
+  *Multi-limb arithmetic* below);
 * everything else by `omega` (which knows `x.toNat < 2^64` for every 64-bit `x`), after an
   arithmetic normalisation if needed.
 
@@ -480,6 +484,22 @@ What the executor does to keep a step cheap:
   pcs).
 * **Reducible transparency only** when a callee precondition is closed by `rfl`/`assumption`:
   unfolding `Memory.accessible`/`readLE` of a symbolic memory took seconds.
+* **Address side conditions without `omega`.** A read past a store asks whether the two byte
+  ranges are disjoint or equal, a store whether its range is accessible. These are linear facts
+  about `base + offset` with literal offsets. `Common.addrDisch` decides them directly (same
+  base: a comparison of literals; different bases: one case split on an aliasing fact such as
+  `z + 64 ≤ x ∨ x + 64 ≤ z`), with proofs from four small lemmas, and refutes the false ones
+  (`x + 8 = x + 16`) without calling `omega` at all. An `omega` call and the kernel check of its
+  proof cost 10-40 ms; a 300-instruction run asks for thousands of these facts.
+* **Focused `omega`.** What `addrDisch` cannot decide goes to `omega` in the context restricted
+  to the hypotheses that only mention variables of the goal, and only then to `omega` on the
+  whole context (which also splits every unrelated aliasing disjunction).
+* **Carry bounds by reflection.** The side conditions of `mod64_of_lt` on carry terms
+  (`(… + p / 2^64) / 2^64 < 2^64`) are proved by `janus_carry` (`omega` cannot: it does not know
+  the bound of a product), so the symbolic state keeps fewer `% 2^64`; bounds that do not hold
+  for all limb values, about atoms no hypothesis mentions, are rejected without `omega`.
+* **Accessibility hypotheses about the accessed pointer first.** `accessible` side conditions
+  try the regions stated about the pointer of the access before the others.
 
 Tips:
 

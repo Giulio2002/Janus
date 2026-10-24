@@ -1614,8 +1614,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
   let some (_, lhs, _) := t.eq? | return false
   unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do return false
   let m := lhs.getArg! 0
-  for d in ← getLCtx do
-    if d.isImplementationDetail then continue
+  for d in ← Common.accessibleOrder lhs do
     let ty ← instantiateMVars d.type
     let some (_, l, _) := ty.eq? | continue
     unless l.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do continue
@@ -1629,7 +1628,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
           let gs ← (← getMainGoal).apply (mkAppN f ms)
           for g' in gs do
             if ← g'.isAssigned then continue
-            let rest ← withoutRecover <| Tactic.run g' (evalTactic (← `(tactic| first | decide | omega)))
+            let rest ← withoutRecover <| Tactic.run g' (evalTactic (← `(tactic| first | decide | janus_omega)))
             unless rest.isEmpty do throwError "janus64_disch: side goal"
           setGoals []
         pure gs.isEmpty

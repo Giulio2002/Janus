@@ -754,8 +754,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withC
   let some (_, lhs, _) := t.eq? | return false
   unless lhs.isAppOfArity ``Memory.accessible 4 do return false
   let m := lhs.getArg! 0
-  for d in ← getLCtx do
-    if d.isImplementationDetail then continue
+  for d in ← Common.accessibleOrder lhs do
     let ty ← instantiateMVars d.type
     let some (_, l, _) := ty.eq? | continue
     unless l.isAppOfArity ``Memory.accessible 4 do continue
@@ -768,7 +767,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withC
               d.toExpr]
           let gs ← (← getMainGoal).apply lemE
           setGoals gs
-          evalTactic (← `(tactic| all_goals first | decide | omega | simp))
+          evalTactic (← `(tactic| all_goals first | decide | janus_omega | simp))
         pure gs.isEmpty
       catch _ => pure false
     if ok then return true
