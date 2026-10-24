@@ -67,8 +67,7 @@ elaboration of a long amd64 run spends seconds in `instantiateMVars` and `share 
 on the final proof term, growing superlinearly with the number of steps (amd64 `MulAdd8`,
 proof stopped after the run: 0.035 s before the merge, 3.7-6.9 s after, on `main` as on this
 branch; `MulAdd8x3`: about 240 of the 292 s). It is independent of the arithmetic (it is there
-with `sorry` instead of `janus64_arith`) and is not addressed here; it is why the amd64
-`MulAdd8x3` speed-up on the merged tree is 3.8× instead of 17.5×.
+with `sorry` instead of `janus64_arith`). It is fixed below (*amd64 proof-term regression*).
 
 Where the time went, and what removed it (arm64 `MulAdd8x3`, 268 instructions):
 
@@ -92,6 +91,48 @@ The examples (all green, same run): no example got slower beyond noise; the mult
 most (arm64 `Add256` 9.8 → 3.6, `AddLimbs` 15.7 → 9.7, `CopyBlock` 22.5 → 10.1, `A64Equal64`
 11.5 → 6.1, `ClearWords` 476 → 364; amd64 `AddLimbs` 6.7 → 3.5, `Equal64` 15.0 → 11.4).
 Sum over the 20 + 23 example proofs: arm64 623 → 456 s, amd64 250 → 217 s.
+
+## amd64 proof-term regression: `exec` unfolded by `rfl` equations (CPU seconds, peak RSS)
+
+Root cause (details in docs/PROOFS.md, *Performance*): since 909b2ad amd64 `exec` is
+structurally recursive (`.locked` executes the inner instruction with `exec`), so `simp`
+unfolded it with its equation lemmas instead of by delta reduction. The step proofs lost
+sharing with the symbolic state and their number of distinct objects doubled about every 12
+instructions; `instantiateMVars` and `share common exprs` of the final term, and the kernel,
+paid for it in time and memory. `janus_rfl_eqns exec [janus64_exec]` restates the equations
+with `Eq.refl` proofs tagged `@[defeq]`, so the unfolding is definitional again. No semantics
+file changed.
+
+`before` is `agent/carry` a4a6c25, `after` is this branch (the fix, merged with `main`
+24eb744); both measured side by side on the same machine (one proof at a time per tree, two
+trees in parallel, load 5-20), CPU = user + system, peak RSS = `/usr/bin/time -v` maximum
+resident set size of `lean` on the proof file.
+
+| benchmark (amd64) | CPU before | CPU after | speed-up | RSS before | RSS after |
+|---|---:|---:|---:|---:|---:|
+| `MulAdd8` | 24.6 | 10.5 | 2.3× | 3146 MiB | 1924 MiB |
+| `MulAdd8x3` | 281.2 | **41.1** | **6.8×** | **19548 MiB** | **2351 MiB** |
+| `Mul256` | 9.8 | 9.8 | 1.0× | 2015 MiB | 1927 MiB |
+| `Nested` | 5.4 | 7.0 (5.4 on 3 reruns) | 1.0× | 1763 MiB | 1763 MiB |
+| `Chain1` | 9.9 | 9.7 | 1.0× | 1855 MiB | 1856 MiB |
+| `Alias4` | 13.9 | 15.8 (14.5 on 3 reruns) | 1.0× | 1961 MiB | 1955 MiB |
+| `BigFrame` | 113.4 | 108.3 | 1.05× | 3216 MiB | 3024 MiB |
+
+`MulAdd8x3` is now below the pre-regression 49.6 s (measured on a busier machine; on the same
+busy machine as an earlier run of this comparison, 434306f took 95.5 s, a4a6c25 572 s and this
+branch 87 s) and 27× faster than `main` before `janus_carry` (1104 s). Sums over the suites
+(CPU before → after; largest peak RSS before → after):
+
+| suite | CPU | peak RSS |
+|---|---:|---:|
+| bench-amd64 (7) | 458.2 → 202.1 | 19548 → 3024 MiB |
+| examples-amd64 (23) | 218.0 → 211.2 | 3539 → 3533 MiB |
+| bench-arm64 (7) | 216.5 → 218.9 | 3598 → 3560 MiB |
+| examples-arm64 (20) | 459.7 → 459.2 | 3102 → 2990 MiB |
+
+No example changes beyond noise (amd64 per proof within ±0.5 s except `CopyBlock` 9.6 → 8.3
+and `Get` 2.4 → 1.9; arm64 is unaffected, as expected: its `exec` equations were already
+`rfl` lemmas). All 57 proofs green in both trees.
 
 ## Results (CPU seconds)
 

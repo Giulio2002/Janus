@@ -489,7 +489,14 @@ theorem accessible_of_dataLoaded {p : Program} {m : Memory} (h : p.DataLoaded m)
 
 ### Instruction families and operands -/
 
-attribute [janus64_exec] exec execAlu execUnary execMul1 execImul execDiv execShift execShd
+/- `exec` is structurally recursive since a `.locked` prefix re-executes the inner instruction,
+so its unfoldings are definitional rewrites by `exec.rfl_<k>` rather than its equation lemmas
+(see `Common.janus_rfl_eqns`). With the equation lemmas, the proof of each step grew with the
+length of the run and the proof term of a 98-instruction run took seconds to instantiate and
+share (docs/PROOFS.md, *Performance notes*). -/
+janus_rfl_eqns exec [janus64_exec]
+
+attribute [janus64_exec] execAlu execUnary execMul1 execImul execDiv execShift execShd
   execBit execCount readLoc readLocRW readSrc writeLoc readX writeX ea push64 branchTo
   BitVec.and_self BitVec.or_self BitVec.xor_self State.getReg State.getHigh State.putReg State.putHigh State.setFlags State.setRip logicFlags
 

@@ -1220,4 +1220,35 @@ elab "janus_omega" : tactic => do
     finally
       trace[janus.omega] "full {((← IO.monoNanosNow) - t1) / 1000000} ms (focused {(t1 - t0) / 1000000} ms): {← g.getType}"
 
+/-! ## `rfl` equations for structurally recursive definitions
+
+`simp [f]` unfolds a non-recursive definition by delta reduction: no proof term. A recursive `f`
+is unfolded with its equation lemmas `f.eq_<k>` instead, and Lean does not tag those `@[defeq]`
+(they need `f` unfolded, beyond the transparency `dsimp` works at), so every unfolding becomes a
+propositional rewrite whose proof (`Eq.mpr`/`congrArg` over the instantiated right-hand side) is
+part of the step proof. `janus_rfl_eqns f [attr]` restates each `f.eq_<k>` as `f.rfl_<k>` with
+the proof `Eq.refl` (checked by the kernel when it is added, so nothing is trusted), tags it
+`@[defeq]` and adds it to the simp set `attr`. `simp` then applies them as definitional
+rewrites, exactly as it unfolds a non-recursive definition. Only for structural recursion
+(where the equations hold by `rfl`); for anything else `addDecl` rejects the proof. -/
+
+open Command in
+elab "janus_rfl_eqns " id:ident " [" attr:ident "]" : command => do
+  let names ← liftTermElabM do
+    let n ← realizeGlobalConstNoOverloadWithInfo id
+    let some eqs ← getEqnsFor? n | throwError "janus_rfl_eqns: no equation lemmas for {n}"
+    let mut out := #[]
+    for e in eqs, k in [0:eqs.size] do
+      let ci ← getConstInfo e
+      let val ← forallTelescope ci.type fun xs t => do
+        let some (_, lhs, _) := t.eq? | throwError "janus_rfl_eqns: {e} is not an equation"
+        mkLambdaFVars xs (← mkEqRefl lhs)
+      let nm := n ++ Name.mkSimple s!"rfl_{k+1}"
+      addDecl (.thmDecl { name := nm, levelParams := ci.levelParams, type := ci.type, value := val })
+      defeqAttr.setTag nm
+      out := out.push nm
+    return out
+  for nm in names do
+    elabCommand (← `(attribute [$attr:ident] $(mkIdent nm):ident))
+
 end Janus.Tactic.Common

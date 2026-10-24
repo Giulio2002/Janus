@@ -575,6 +575,39 @@ What the executor does to keep a step cheap:
   for all limb values, about atoms no hypothesis mentions, are rejected without `omega`.
 * **Accessibility hypotheses about the accessed pointer first.** `accessible` side conditions
   try the regions stated about the pointer of the access before the others.
+* **`exec` unfolded definitionally, also when it is recursive.** `simp` unfolds a
+  non-recursive definition in its simp set by delta reduction, with no proof term. A
+  (structurally) recursive one is unfolded by rewriting with its equation lemmas `f.eq_<k>`,
+  which Lean does not tag `@[defeq]`, so each unfolding is a propositional rewrite whose proof
+  becomes part of the step proof. `janus_rfl_eqns f [simp_set]` (`Janus/Tactic/Common.lean`)
+  restates every `f.eq_<k>` as `f.rfl_<k>` proved by `Eq.refl` (kernel-checked when it is
+  added), tags it `@[defeq]` and puts it in the simp set; amd64 `exec` is unfolded that way.
+  See the note below for what this cost.
+
+**The amd64 post-processing regression (909b2ad, fixed).** The AVX/FS/DF merge made amd64
+`exec` structurally recursive: `.locked i a size` checks the alignment and then executes `i`
+with `exec` itself. Nothing else about the state or the step changed the cost (the extra
+`State` fields, `ea`/`eaOff` and `h_df` were ruled out: a tree with `.locked` made
+non-recursive and everything else as on `main` has the old cost). From then on the `simp` call
+of every step unfolded `exec` by its equation lemmas instead of by delta reduction. The
+resulting step proofs are not bigger as trees, but they lose sharing: the intermediate terms of
+the rewrite chain (`Eq.trans`/`congrArg` over the `match` on the instruction's operands) carry
+the current state as a separate copy that is not pointer-shared with the state in the goal, and
+that copy grows with every step (measured with `Expr.numObjs` on amd64 `MulAdd8`: the proof of
+step 84 had 250,732 distinct objects, of which a `State.mk` with 247,379, against 1,081 for
+the state itself and 3,428 for the same proof with `exec` unfolded by delta; the step proofs
+doubled about every 12 instructions). The `simp` of the run is not affected, but the final
+`instantiateMVars` of the proof (abstracting the `intro`/`obtain` variables over it) and
+`share common exprs` (hash-consing before the kernel) are linear in distinct objects, so they
+grew exponentially with the length of the run: 0.035 s before the merge, 4-7 s for the 98
+instructions of `MulAdd8`, ~240 s of the 292 s of `MulAdd8x3`, plus kernel time on the
+unshared term, and memory: `lean` on `MulAdd8x3` peaked at 19.5 GB (2.35 GB with the fix, which
+brings it from 281 s to 41 s; bench/RESULTS.md). With `exec.rfl_<k>` the unfolding carries no proof at all, the step proofs stay
+at a few thousand objects, and the whole `MulAdd8` proof (run and arithmetic) spends 0.14 s in
+`instantiate metavars` and 0.37 s in `share common exprs`, against 10.2 s and 17.5 s before
+(same machine). To check for this kind of regression, compile the proof with
+`set_option profiler true` and look at `instantiate metavars` and `share common exprs`: they
+should be a small fraction of `simp` and `type checking`.
 
 Tips:
 
