@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const defaultTheorem = "Proof.correctness"
@@ -342,8 +343,11 @@ func printDefinitions(w io.Writer, defs []string) {
 func termSafe(s string) string {
 	var b strings.Builder
 	for _, r := range s {
+		// Round 7 (H1): every format character (Unicode Cf: all bidi embeddings, overrides,
+		// isolates and marks, zero-width spaces and joiners, …) is escaped, not only the
+		// overrides and isolates.
 		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f && !(r >= 0x80 && r < 0xa0)) &&
-			r != 0x202e && r != 0x202d && r != 0x2066 && r != 0x2067 && r != 0x2068 && r != 0x2069 {
+			!unicode.Is(unicode.Cf, r) {
 			b.WriteRune(r)
 			continue
 		}

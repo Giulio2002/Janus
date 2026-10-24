@@ -78,7 +78,7 @@ var (
 		"runtime.goPanicSliceAlen": true, "runtime.goPanicSliceAlenU": true,
 		"runtime.goPanicSliceB": true, "runtime.goPanicSliceBU": true,
 		"runtime.goPanicSliceConvert": true,
-		"runtime.panicBounds": true, "runtime.panicBounds32": true, "runtime.panicBounds32X": true,
+		"runtime.panicBounds":         true, "runtime.panicBounds32": true, "runtime.panicBounds32X": true,
 		"runtime.panicBounds64": true, "runtime.panicdivide": true, "runtime.panicdottypeE": true,
 		"runtime.panicdottypeI": true, "runtime.panicfloat": true, "runtime.panicmakeslicecap": true,
 		"runtime.panicmakeslicelen": true, "runtime.panicmem": true, "runtime.panicmemAddr": true,
