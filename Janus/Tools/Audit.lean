@@ -136,6 +136,52 @@ def mkCtx (env : Environment) (depRoots : Array String) : Ctx := Id.run do
   return { env, instances, classes,
            depRoots := depRoots.foldl (fun s r => s.insert r.toName) {} }
 
+/-- Round 6 (F1): characters allowed in a name component of a non-trusted constant that the
+report shows: ASCII identifier characters and the subscript digits/letters Lean accepts. Lean
+also accepts Greek, Coptic, letterlike and mathematical-alphanumeric letters, many of which look
+exactly like Latin ones (`Ε`, U+0395, prints like `E`), so a proof-local `Εxtracted.program` or
+`Janus.GoABI.Εnsures` would print like the trusted constant it imitates. -/
+def plainNameChar (c : Char) : Bool :=
+  c.isAlphanum || c == '_' || c == '\'' || c == '!' || c == '?' ||
+    (0x2080 ≤ c.val && c.val ≤ 0x209c) || (0x1d62 ≤ c.val && c.val ≤ 0x1d6a) || c.val == 0x2c7c
+
+/-- Is every string component of `n` a plain identifier (`plainNameChar`)? Numeric components
+(compiler auxiliaries) are fine. -/
+def plainName (n : Name) : Bool :=
+  n.components.all fun
+    | .str _ s => !s.isEmpty && s.all plainNameChar
+    | _ => true
+
+/-- Round 6 (F1): the Latin letter a confusable non-ASCII identifier letter looks like, if any
+(Greek capitals and small letters, letterlike and mathematical alphanumerics are folded by
+their usual look); used only to detect names that imitate `Extracted`/`JanusTrusted`. -/
+def latinLookalike (c : Char) : Char :=
+  if c.val < 0x80 then c else
+  match c.val with
+  | 0x391 => 'A' | 0x392 => 'B' | 0x395 => 'E' | 0x396 => 'Z' | 0x397 => 'H' | 0x399 => 'I'
+  | 0x39a => 'K' | 0x39c => 'M' | 0x39d => 'N' | 0x39f => 'O' | 0x3a1 => 'P' | 0x3a4 => 'T'
+  | 0x3a5 => 'Y' | 0x3a7 => 'X' | 0x3b1 => 'a' | 0x3b9 => 'i' | 0x3ba => 'k' | 0x3bd => 'v'
+  | 0x3bf => 'o' | 0x3c1 => 'p' | 0x3c4 => 't' | 0x3c5 => 'u' | 0x3c7 => 'x' | 0x3f2 => 'c'
+  | 0x3f3 => 'j' | 0x2107 => 'E' | 0x210e => 'h' | 0x2113 => 'l' | 0x212e => 'e' | 0x212f => 'e'
+  | 0x2130 => 'E' | 0x2134 => 'o' | 0x2139 => 'i'
+  | v =>
+    -- Mathematical alphanumeric symbols: 52-letter alphabets (A–Z, a–z) from U+1D400.
+    if 0x1d400 ≤ v && v < 0x1d6a4 then
+      let k := (v.toNat - 0x1d400) % 52
+      if k < 26 then Char.ofNat ('A'.toNat + k) else Char.ofNat ('a'.toNat + (k - 26))
+    else c
+
+/-- Does some component of `n`, split at non-identifier characters and with lookalike letters
+folded to Latin, read `Extracted` or `JanusTrusted`? (`«Extracted.program»` is one component,
+`Εxtracted` has a Greek capital epsilon; both are caught.) -/
+def imitatesExtracted (n : Name) : Bool :=
+  n.components.any fun
+    | .str _ s =>
+      let folded := String.ofList (s.toList.map latinLookalike)
+      let pieces := (folded.toList.splitBy fun a b => (a.isAlphanum || a == '_') == (b.isAlphanum || b == '_')).map String.ofList
+      pieces.any fun p => p == "Extracted" || p == "JanusTrusted"
+    | _ => false
+
 /-- A fatal audit failure with a message for the Go side. -/
 structure Failure where
   msg : String
@@ -385,6 +431,51 @@ partial def checkInstArgs (cx : Ctx) (e : Expr) (top : Bool := true) : MetaM (Op
   | .const .. | .fvar _ => if top then return none else unappliedInstParam e
   | _ => return none
 
+/-- Round 6 (F2): the number of values of a fixed-width numeric type, i.e. the bound below which
+a numeral of that type means what it reads (for the signed `IntN`, the first literal that wraps
+to a negative value). `none` for types without wrapping or of unknown width. -/
+def numeralBound (ty : Expr) : MetaM (Option Nat) := do
+  if ty.hasLooseBVars then return none
+  let ty ← try Meta.whnfR ty catch _ => return none
+  let lit? (e : Expr) : MetaM (Option Nat) := do
+    if e.hasLooseBVars then return none
+    match (← try Meta.whnf e catch _ => pure e) with
+    | .lit (.natVal n) => return some n
+    | e' => match e'.rawNatLit? with
+      | some n => return some n
+      | none => (Meta.evalNat e').run
+  match ty.getAppFn.constName?, ty.getAppArgs with
+  | some ``BitVec, #[w] => return (← lit? w).bind fun w => if w ≤ 4096 then some (2 ^ w) else none
+  | some ``Fin, #[n] => lit? n
+  | some ``UInt8, _ => return some (2 ^ 8)
+  | some ``UInt16, _ => return some (2 ^ 16)
+  | some ``UInt32, _ => return some (2 ^ 32)
+  | some ``UInt64, _ => return some (2 ^ 64)
+  | some ``USize, _ => return some (2 ^ 32)  -- the portable bound
+  | some ``Int8, _ => return some (2 ^ 7)
+  | some ``Int16, _ => return some (2 ^ 15)
+  | some ``Int32, _ => return some (2 ^ 31)
+  | some ``Int64, _ => return some (2 ^ 63)
+  | some ``ISize, _ => return some (2 ^ 31)
+  | _, _ => return none
+
+/-- Round 6 (F2): reject a numeral `(n : T)` whose literal is out of range for a wrapping type
+`T`. `OfNat` on `BitVec 64` reduces `18446744073709551616` to `0`, so `y ≠ 18446744073709551616`
+reads as a vacuous hypothesis while it is `y ≠ 0`; the text round-trips (Lean reads it the same
+way), so only the literal itself shows the problem. Write the value in range. -/
+def checkNumerals (e : Expr) : MetaM (Option String) := do
+  let bad ← IO.mkRef (none : Option String)
+  Meta.forEachExpr e fun sub => do
+    if (← bad.get).isSome then return
+    if sub.isAppOfArity ``OfNat.ofNat 3 then
+      let ty := sub.getArg! 0
+      if let some n := (sub.getArg! 1).rawNatLit? then
+        if let some b ← numeralBound ty then
+          if n ≥ b then
+            let tyS := (← try Meta.ppExpr ty catch _ => pure "?").pretty 10000
+            bad.set (some s!"writes the out-of-range numeral {n} at type {tyS}, whose values are below {b}: the literal wraps (to {n % b} for an unsigned type) and does not mean what it reads (round 6 F2). Write the value in range")
+  bad.get
+
 /-- The shape `ppSignature` prints: the declaration name followed by a `declSig`. -/
 def sigParser : Parser.Parser :=
   Parser.node `JanusAudit.sig (Parser.ident >> Parser.Command.declSig)
@@ -603,6 +694,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
   let printAll : MetaM (String × String × Array String) := do
     -- (b) instance-implicit arguments must be registered instances or local instance binders
     if let some m ← checkInstArgs cx thmType then throwError m
+    if let some m ← checkNumerals thmType then throwError s!"the statement {m}"
     -- (a) the printed statement must elaborate back to the checked type
     let sigStr ← match ← printFaithful thm thmType with
       | .ok s => pure s
@@ -620,6 +712,9 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
         throwError s!"the proof-local definition {ci.name} used in the statement {m}"
       if let some v := ci.value? then
         if let some m ← checkInstArgs cx v then
+          throwError s!"the proof-local definition {ci.name} used in the statement {m}"
+      for t in [ci.type] ++ ci.value?.toList do
+        if let some m ← checkNumerals t then
           throwError s!"the proof-local definition {ci.name} used in the statement {m}"
       -- round 4 D1: the disclosure itself must round-trip (numerals, binder types)
       defs := defs.push (← discloseDef ci)
@@ -657,8 +752,8 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
     -- 4. no non-trusted (consumer/proof/dependency) module declares a name with an `Extracted` component
     -- (A7, A9, and the consumer analogue of shadowing Extracted from a shared module)
     for (n, idx) in envA.const2ModIdx.toList do
-      if !trustedModule envA.header.moduleNames[idx.toNat]! && n.anyS (· == "Extracted") then
-        fail s!"a non-trusted module declares {n}, whose name shadows the Extracted namespace"
+      if !trustedModule envA.header.moduleNames[idx.toNat]! && (n.anyS (· == "Extracted") || imitatesExtracted n) then
+        fail s!"a non-trusted module declares {n}, whose name shadows the Extracted namespace (round 6 F1: lookalike letters and «…» components count)"
     -- 5. type constants: must mention Extracted; every constant is trusted or a non-trusted
     -- plain def collected for the clean-environment print
     let used := ci.type.getUsedConstants
@@ -680,6 +775,11 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
     let (localNames, external) ← collectLocalDefs cx {} {} localSeed.toList
     let localDefs := localNames.filterMap envA.find?
     let externalNames := external.toArray.map (·.1) |>.qsort Name.lt
+    -- round 6 F1: every non-trusted name the report shows must be a plain identifier, so it
+    -- cannot print like a trusted constant (`Janus.GoABI.Εnsures`, Greek capital epsilon)
+    for n in localNames ++ externalNames do
+      unless plainName n do
+        fail s!"the statement uses {n}, whose name has characters other than ASCII letters, digits, _ ' ! ? and subscripts (a name with lookalike letters prints like a different, trusted constant); rename it"
     let (_, stubs) ← externalStubs cx {} #[] externalNames.toList
     -- 6. clean-environment pretty-print
     let (statement, statementExplicit, defs) ← cleanEnvAndPrint cx thmN ci.type localDefs stubs
