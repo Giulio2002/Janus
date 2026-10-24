@@ -186,6 +186,19 @@ cache_publish() {
   flock -u 9
 }
 
+# ---- shared per-module cache of the JanusASL and Janus modules (ASL_CACHE/mods) ----
+# JanusASL/tools/asl_mod_cache.py: one entry per module, keyed by what Lake traces (source,
+# imports' keys, package settings, toolchain), with a SHA-256 manifest checked on every copy.
+modcache_restore() {
+  [ -n "${ASL_CACHE:-}" ] || return 0
+  python3 -I "$pkg/tools/asl_mod_cache.py" restore "$root" "$ASL_CACHE" || true
+}
+
+modcache_publish() {  # modcache_publish [--exe]
+  [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
+  python3 -I "$pkg/tools/asl_mod_cache.py" publish "$root" "$ASL_CACHE" "$@" || true
+}
+
 unpack() {
   echo "$(cat "$VENDOR.sha256")  $VENDOR" | sha256sum -c --quiet
   if [ ! -f "$pkg/ArmASL.lean" ] || [ "$VENDOR" -nt "$pkg/ArmASL.lean" ]; then
@@ -215,8 +228,10 @@ do_build() {
   cache_restore
   lake_asl build ArmASL
   cache_publish
+  modcache_restore
   lake_asl build ArmASL JanusASL janus-asl-check
   cache_publish
+  modcache_publish --exe
 }
 
 # Only the cache restore (JanusASL/tools/test_asl_cache.sh).
@@ -245,7 +260,9 @@ do_prove() {
   cache_restore
   lake_asl build ArmASL
   cache_publish
+  modcache_restore
   lake_asl build JanusASL
+  modcache_publish
   (cd "$pkg" && lake env lean JanusASL/Audit.lean)
 }
 
@@ -256,7 +273,9 @@ do_prove() {
 do_replay() {
   unpack
   cache_restore
+  modcache_restore
   lake_asl build JanusASL
+  modcache_publish
   # The modules: the import closure of JanusASL.Proofs within the package (what
   # `leanchecker JanusASL.Proofs` replays, less files that nothing imports). leanchecker's targets
   # are name prefixes, so a module with submodules (JanusASL.Proofs itself, a split file's import
