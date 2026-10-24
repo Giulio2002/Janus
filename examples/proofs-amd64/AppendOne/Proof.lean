@@ -1,6 +1,18 @@
 import Janus
 import Extracted
 
+/-!
+# `AppendOne(s []uint64, x uint64) []uint64` on amd64: `append(s, x)`
+
+**Guarantee.** As for arm64 (`examples/proofs/AppendOne.lean`), with the slice in `RAX, RBX, RCX`,
+`x` in `RDI`, the stack window `[RSP-4176, RSP+40)`, and `runtime.growslice` given by
+`GrowsliceContract64`: with room left, word `len` becomes `x` and nothing else changes; when full
+(also for a nil slice), the result is a fresh array of capacity `growCap8 (len+1) cap` inside `rt`
+holding the old elements, then `x`, then zeros.
+
+**What is assumed.** Only the contract hypothesis `hg` (docs/RUNTIME-CONTRACTS.md).
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts
 
 namespace Proof

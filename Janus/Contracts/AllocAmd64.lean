@@ -29,6 +29,16 @@ open Janus Janus.Amd64 Janus.Amd64.Tactic
 
 attribute [janus64_exec, janus64_post] typSize typPtrBytes typNoscan maxAlloc true_implies
 
+/-- A 32-bit compare with zero of a loaded word (the write-barrier flag test `CMPL $0, …`) as
+arithmetic, so that `janus64_run` can prune the branch with `omega`. -/
+@[janus64_exec, janus64_post, janus_exec, janus_post] theorem ofNat32_readLE4_eq_zero
+    (m : Janus.Arm64.Memory) (a : Nat) :
+    (BitVec.ofNat 32 (m.readLE a 4) = 0#32) = (m.readLE a 4 = 0) := by
+  apply propext
+  have := Janus.Arm64.Memory.readLE_lt m a 4
+  rw [← BitVec.toNat_inj, BitVec.toNat_ofNat, BitVec.toNat_ofNat, Nat.zero_mod,
+    Nat.mod_eq_of_lt (by simpa using this)]
+
 /-- The general registers after a Go ABIInternal call (amd64) that returns `res` in
 `RAX, RBX, RCX`: `RSP` is the call-time value plus 8 (the return address popped), `RBP` and
 `R14` (`g`) keep their values, the result registers hold `res`, every other register `junk`. -/

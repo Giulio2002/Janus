@@ -1,6 +1,23 @@
 import Janus
 import Extracted
 
+/-!
+# `NewPair(a, b uint64) *Pair` on amd64: a fresh heap object holding `a` and `b`
+
+**Guarantee.** For all `a`, `b`, every list `rt` of runtime-owned ranges and **every**
+implementation of `runtime.newobject` satisfying `NewobjectContract64`
+(`Janus/Contracts/AllocAmd64.lean`), and every Go call state in which the stack-growth prologue
+falls through, `RSP` is 8-aligned, the stack window `[RSP-4128, RSP+24)` (frame, return-address
+slot, 4096 bytes for the runtime, two spill slots) is writable and outside `rt`, and memory holds
+the read-only data (the `Pair` type descriptor): the call returns, obeys the ABI, and `RAX` is a
+pointer `ptr` with `[ptr, ptr+16)` inside `rt` (fresh: disjoint from all caller data outside it),
+writable and 16-byte aligned, holding `a` and `b`; memory outside `rt` and the stack window is
+unchanged.
+
+**What is assumed.** Only the contract hypothesis `hnew` for the code linked at
+`runtime.newobject`, which is not extracted (`--contract`); see docs/RUNTIME-CONTRACTS.md.
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts
 
 namespace Proof
