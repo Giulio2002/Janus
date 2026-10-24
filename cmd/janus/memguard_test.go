@@ -175,6 +175,9 @@ func TestMemGuardKillsHungryProof(t *testing.T) {
 		if !strings.Contains(out, "memguard[slot]: peak ") || !strings.Contains(out, "limit 4.0 GiB") {
 			t.Errorf("job-level guard summary missing:\n%s", out)
 		}
+		if strings.Contains(out, "OOM-KILLED") {
+			t.Errorf("the job-level guard claimed a kill made by janus's own limit:\n%s", out)
+		}
 	})
 }
 

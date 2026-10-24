@@ -275,3 +275,201 @@ ratios above, which are dominated by per-verify work that is the same on any mac
 
 The per-runner peak memory drops from ~30–43 GB (more than a hosted runner has, which made the
 cold replay swap or be killed) to under 15 GB.
+
+## Memory guard
+
+Lean jobs are memory-hungry and occasionally runaway: a kernel replay of the framework holds
+several environments at once, a proof can elaborate a huge term, a lake build compiles many
+modules in parallel. On a shared host an unbounded job ends in the *global* OOM killer, which
+picks whatever is largest on the machine (or takes the machine down). So every Lean-family job
+janus or a script starts runs inside a **cgroup v2 memory limit** (`memory.max`, `memory.swap.max
+= 0`): a runaway job is killed on its own by the cgroup's OOM killer, and the diagnostic says so.
+
+### janus
+
+`cmd/janus/memguard.go`. Every process janus starts that runs Lean (lean, leanchecker, lake,
+`janus-audit`, `janus-decode`) goes through `guardRun`, which enters the limit *before* the
+sandbox starts, so the cgroup contains the whole bwrap/unshare tree.
+
+| mechanism | when | how | peak |
+|---|---|---|---|
+| `cgroup` | `$JANUS_MEMGUARD_CGROUP` is a delegated cgroup (set by `scripts/lib/memguard.sh`), or janus's own cgroup is delegated | a child cgroup per job (`memory.max`, `memory.swap.max=0`, `memory.oom.group=1`), entered with clone3 `CLONE_INTO_CGROUP` | the child's `memory.peak` |
+| `systemd-user` | a user systemd manager is reachable | `systemd-run --user --scope --collect -p MemoryMax=… -p MemorySwapMax=0 -p OOMPolicy=continue`; janus re-runs itself in the scope as a supervisor that starts the job, waits, and writes the scope's `memory.peak` and OOM-kill count for its parent | the scope's `memory.peak` |
+| `systemd-system` | root, no user manager | the same with the system manager | same |
+| `prlimit` | no cgroup mechanism | `prlimit --as=limit+16G` per process | max RSS (`wait4`) |
+| `none` | nothing works | unguarded, with a warning | — |
+
+Each mechanism is probed once per process: the cgroup one by starting a process in a limited
+child, the systemd ones by running the supervisor's probe in a transient scope and checking
+that it sees `memory.max` equal to the limit. `JANUS_MEMGUARD=<mechanism>` forces one.
+
+`prlimit` is a last resort. Lean reserves about 10 GiB of address space before it allocates
+anything (measured: `VmPeak` 10.1 GiB for a 3-line file, with 4 threads or 48), and a virtual-memory
+limit below ~11 GiB makes it fail with `failed to create thread`. So the virtual limit is the
+memory limit plus 16 GiB, per process. janus recognises Lean's out-of-memory messages under it.
+
+**Limit.** `JANUS_MEM_MAX` (`16G`, `1500M`, `off`); default min(24 GiB, 40% of MemTotal), which is
+24 GiB on the 251 GiB development host and 6.4 GiB on a 16 GiB CI runner. CI sets 12G (one job at
+a time there; a cold framework replay peaks at 6.5 GiB). `lake build` (the framework,
+`janus-decode`, consumer packages) gets `LEAN_NUM_THREADS` = limit / `JANUS_LAKE_JOB_MEM` (3G),
+at most the CPU count. That is lake's job count: measured with 8 independent slow modules,
+`LEAN_NUM_THREADS=2` ran 2 lean processes at once and `=6` ran 6.
+
+**Diagnostic.** A job killed for memory (or one the guard could not start) turns the whole
+verification into
+
+```
+Invalid: lean Proof.lean Proof.olean exceeded the memory limit and was killed (limit 1.0 GiB, measured peak 1.0 GiB, mechanism systemd-user). This is not a verdict on the proof.
+  Stage: resource limit
+  Next: Raise the per-job limit with JANUS_MEM_MAX (e.g. JANUS_MEM_MAX=32G; default min(24G, 40% of RAM)) if the host has the memory, or make the proof (or what it imports) need less memory.
+Details:
+The killed job interrupted the stage: proof checking
+```
+
+whatever error the killed process caused, and no `verified.json` is written. This holds for
+`janus verify`, batches (per request group) and the other commands. A success records the
+guard in `verified.json`:
+
+```json
+"memoryGuard": {"mechanism": "cgroup", "limit": "24.0 GiB", "limitBytes": 25769803776,
+                "source": "default", "peakBytes": 7000084480, "peak": "6.5 GiB", "jobs": 11}
+```
+
+`janus memguard` prints the mechanism (and why stronger ones were skipped). `janus memguard --
+CMD…` runs any command under it. `JANUS_MEMGUARD_LOG=1` prints each job's label and peak.
+
+### Scripts
+
+`scripts/lib/memguard.sh`, sourced by verify-examples, verify-amd64-examples, the build
+scripts, the oracle scripts, asl.sh, bench.sh, break-demo.sh, audit/run-all.sh and every
+audit round runner.
+
+* `memguard_self "$@"` (right after sourcing) re-runs the script once under a script-wide
+  guard of max(limit, MemAvailable − 40 GiB), `JANUS_SCRIPT_MEM_MAX` to override. Everything the
+  script starts is bounded, and the host keeps 40 GiB.
+* `memguard_run [-l LIMIT] [-n LABEL] -- CMD…` runs one command under a limit. It prints
+  `memguard[LABEL]: peak X / limit Y (mechanism)`, with `OOM-KILLED` added when its own limit
+  killed something, and returns 137 then.
+* `memguard_lake ARGS…` is `lake ARGS…` with `LEAN_NUM_THREADS` from the budget
+  (`memguard_jobs 3G`). Every `lake build` in the scripts (the framework, the oracles, ArmASL,
+  JanusASL) uses it, and the go test rows use `memguard_run`.
+* `bash scripts/lib/memguard.sh run|lake|mechanism …` is the same from outside a script (used by
+  CI).
+
+**Nesting.** The outer guard is a systemd scope with `Delegate=yes`. Its command runs in a leaf
+`leader` cgroup, +memory is enabled on the scope, and `JANUS_MEMGUARD_CGROUP` names the guard.
+An inner `memguard_run`, and janus itself, then create limited children of that cgroup instead
+of new systemd scopes, which would be siblings outside the outer limit. So the layers are:
+
+```
+script guard  (max(24G, MemAvailable − 40G))          memguard_self
+└─ parallel slot  (JANUS_JOB_MEM, 20G)               scripts/lib/parallel.sh par_run → memguard_run
+   └─ janus job  (JANUS_MEM_MAX, 24G → effective 20G) cmd/janus guardRun, one per lean/leanchecker/lake
+```
+
+The effective limit of a job is the smallest `memory.max` on its path, and that is the one
+janus reports. A kill caused by an inner limit is reported by the inner guard, through janus's
+diagnostic. The outer guards see it only in their hierarchical `memory.events`, print "a nested
+guard killed one of its jobs", and return the command's own status. parallel.sh admits a new
+slot only while MemAvailable ≥ 40 GiB headroom + 20 GiB, so slots × slot limit stays within
+MemAvailable.
+
+Without a user systemd manager (or root) and without a delegated cgroup, both sides fall back to
+prlimit, then to none. Each prints one line naming the mechanism (`janus: memory guard: …`,
+`memguard: …`). Checked as an unprivileged user with no user manager: janus picks `prlimit` and
+lists why `cgroup` (mkdir permission denied), `systemd-user` (no bus) and `systemd-system` (needs
+root) were skipped.
+
+**CI** (`.github/workflows/ci.yml`, `asl.yml`). Each job enables lingering for the runner user
+(`loginctl enable-linger`), which starts its user manager, then exports `XDG_RUNTIME_DIR` and
+`JANUS_MEM_MAX=12G`. It logs `memguard mechanism: …` and runs a 1G probe. The lake builds and
+`go test` run under `scripts/lib/memguard.sh`. If the user manager does not come up, the guard
+degrades as above and the log says which mechanism is active.
+
+### Tests
+
+`cmd/janus/memguard_test.go`:
+
+* `TestMemGuardKillsHungryProof`: a proof whose `#eval` builds a list of 10⁸ naturals,
+  verified by a separate janus process under `JANUS_MEM_MAX=1G`. It is run directly (the detected
+  mechanism, `systemd-user` here) and nested in a 4G `scripts/lib/memguard.sh` job guard (janus
+  then uses `cgroup` children of it). Both must print `Invalid:`, `Stage: resource limit`,
+  `limit 1.0 GiB` and the measured peak, no proof/audit error, and leave no `verified.json`. In
+  the nested case the job guard's summary must not claim the kill. The test skips when there is no
+  cgroup mechanism, so the host is never at risk. Each run takes about 2 s; the peak is the
+  limit, 1.0 GiB.
+* `TestMemGuardNormalVerify`: Add and Max verify under the default limit, and `memoryGuard` in
+  `verified.json` records the mechanism, the limit, the job count and a peak below the limit.
+* `TestParseMemSize`, `TestDefaultMemLimit`, `TestJobLabel`, `TestMemLimitDiag`,
+  `TestMemGuardFailureDiag` (a job the guard could not run is a resource-limit failure),
+  `TestMemGuardBadLimit` (an unparsable `JANUS_MEM_MAX` is refused before anything runs).
+
+Manual checks of the shell side (python allocating 1000 MiB): a 300M limit kills it (137, peak
+299 MiB). An outer 2G guard with an inner 200M guard: the inner one kills it, and the outer one
+reports the nested kill and passes the status through. An outer 300M guard around janus at 2G:
+janus reports the effective 300 MiB limit and stays alive to print its diagnostic. No `mg-*` or
+`janus-*` cgroups are left behind.
+
+### Measured peaks
+
+`memory.peak` of each guarded job, from `verified.json` (`memoryGuard.peak`, the largest job)
+and `JANUS_MEMGUARD_LOG=1`. 48-core host, Lean 4.34.1, LEAN_NUM_THREADS=4 for leanchecker,
+2026-10-24. "Warm" means the framework is built and its kernel replay is cached (the usual
+case): only the proof's own modules are compiled, audited and replayed. Shared, already-cached
+olean pages are charged to the cgroup that first read them, so a warm job's peak is mostly its
+own heap.
+
+**Cold** (fresh `JANUS_CACHE_DIR`, Add): 11 jobs. `lake build Janus` (framework, 8 jobs) 1.3 GiB;
+the kernel replay `leanchecker Janus` (every framework module) **6.5 GiB**, the verification's
+peak; every other job ≤ 222 MiB. A cold `lake build Janus Janus.Tools.Audit` alone peaks at
+538 MiB with 1 job (62 s) and 1.0 GiB with 8 jobs (23 s), so 3 GiB per lake job is a generous
+budget for the framework.
+
+**Warm, arm64** (`scripts/verify-examples.sh -j 1`, peak per verification, heaviest job):
+
+| example | peak | heaviest job |
+|---|---|---|
+| Add | 209 MiB | janus-audit |
+| Max | 209 MiB | janus-audit |
+| Add128 | 223 MiB | janus-audit |
+| Mul64 | 223 MiB | janus-audit |
+| Add256 | 313 MiB | lean Proof.lean |
+| Div | 222 MiB | janus-audit |
+| Get | 235 MiB | lean Proof.lean |
+| AddThree | 233 MiB | lean Proof.lean |
+| Sum | 222 MiB | janus-audit |
+| SetOne256 | 222 MiB | janus-audit |
+| HexDigit | 223 MiB | janus-audit |
+| AddLimbs | 496 MiB | lean Proof.lean |
+| CopyWords | 239 MiB | lean Proof.lean |
+| SumSquares | 243 MiB | lean Proof.lean |
+| AtomicAdd | 222 MiB | janus-audit |
+| AtomicMax | 223 MiB | janus-audit |
+| CopyBlock | 462 MiB | lean Proof.lean |
+| ClearWords | **4.8 GiB** | lean Proof.lean (213 s) |
+| A64Equal64 | 325 MiB | lean Proof.lean |
+| A64IndexByte | 503 MiB | lean Proof.lean |
+| WrongAdd (break demo) | 223 MiB | |
+
+The whole run (21 verifications, one at a time) peaked at 4.9 GiB in its script guard.
+
+**Warm, amd64** (`scripts/verify-amd64-examples.sh -j 1`, peak per function):
+
+| example | peak | example | peak |
+|---|---|---|---|
+| Add | 222 MiB | CopyWords | 233 MiB |
+| Add128 | 209 MiB | Div | 223 MiB |
+| Add256 | 264 MiB | Equal64 | 487 MiB |
+| AddLimbs | 323 MiB | Get | 223 MiB |
+| AddThree | 239 MiB | GlobalTable | 221 MiB |
+| AtomicAdd | 222 MiB | HexDigit | 222 MiB |
+| AtomicMax | 223 MiB | Max | 222 MiB |
+| Bump | 223 MiB | Mul64 | 222 MiB |
+| ClearWords | **2.3 GiB** | SetOne256 | 222 MiB |
+| CopyBlock | 366 MiB | Sum | 227 MiB |
+| CopyBlock512 | 1.5 GiB | SumSquares | 251 MiB |
+| Table | 295 MiB | | |
+
+Every example is far below the 24 GiB default. The largest single job, the cold framework
+replay, is 6.5 GiB, so the default leaves almost 4x headroom. A 20G parallel slot holds a cold
+verify with room to spare.
