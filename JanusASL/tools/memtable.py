@@ -9,12 +9,12 @@ lo = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 rows = []
 for p in d["procs"]:
     a = p["argv"]
-    m = re.search(r"/bin/(lean|clang|leanchecker|janus-asl-check)\b", a)
+    m = re.match(r"(?:\S*/)?(lean|clang|leanchecker|janus-asl-check) ", a + " ")
     if not m:
         continue
     tool = m.group(1)
     f = re.search(r"/JanusASL/((?:ArmASL|JanusASL)/[^ ]*?)\.(lean|c)\b", a) or re.search(r" (\S+\.lean)", a)
-    mod = f.group(1).replace("/", ".") if f else a[:80]
+    mod = f.group(1).replace("/", ".") if f else " ".join(a.split()[1:])[:100]
     if tool == "clang":
         mod += ":c.o"
     rows.append((p["hwm"] // 1024, int(p["last"] - p["first"]), tool, mod))
