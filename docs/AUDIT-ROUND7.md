@@ -217,6 +217,52 @@ residual).
   unique name too. Assembly TEXT sizes are computed by the assembler. A function with size 0
   extends to the next symbol, which only makes its segment longer, and those bytes are real code.
 
+## 6. Review of agent/memguard (50d8561): the result cache, the compiled audit and the memory guard
+
+This is a code review against the merged base. agent/memguard already ships live rows for the cache
+(RC1–RC6 in its own `docs/AUDIT-ROUND7.md`: proof and lakefile probes, a tampered entry, a
+stale framework, `--fresh`, `--unsafe-no-sandbox`). This review does not repeat them. It found
+**no BROKEN item**.
+
+* **Key coverage (stale hits).** The `verify` options that affect the outcome are `theorem`,
+  `proof`, `binary`, `janus-root`, `replay-fresh`, `fresh` and `unsafe-no-sandbox`. Each is
+  either in the key or disables the cache. The janus executable's SHA-256 is in the key, so
+  any change to the verifier, the auditor rules (this round's G1/H1/J1/K1 included) or the
+  embedded framework is a miss. The binary is covered through the recorded SHA-256, after the
+  same `check` that re-hashes the binary. After a hit, the extraction, the proof bytes and
+  identity.json are read again and compared. Proof-path swaps between hashing and use are covered
+  by that comparison.
+* **Toolchain (low, doc).** The key and `trustedCacheKey` cover the toolchain's version string
+  and the *paths* of `lean`/`leanchecker`. SOUNDNESS.md says "the toolchain version and
+  binaries". `bin/lean` is a 9 KB launcher, and the elaborator and kernel live in
+  `lib/lean/libleanshared.so` (233 MB), which is not hashed. Rebuilding a toolchain in place
+  under the same version would give a stale hit. The toolchain is trusted and read-only to
+  sandboxes, so this is in line with the replay cache. Fix: change the wording to "version and
+  paths", or add the size, mtime and inode of `libleanshared.so` (cheap) to both keys.
+* **Trusted-compile cache.** Entries are protected by location only: the cache is read-only
+  to sandboxes, and the manifest holds SHA-256s, not a MAC. A planted entry would need a
+  same-user write outside the sandbox, which is out of the threat model, the same as for the
+  replay cache. Extracted, JanusTrusted and Proof are still kernel-replayed. For consistency
+  with the result cache, a MAC under the same key is recommended.
+* **Early replay.** A marker only *skips* the early run (`ran = false`), and `apply` then
+  credits nothing. Credit is given only when every early `leanchecker` exited 0, and only to
+  modules that a target name-prefixes in the plan. The framework pins are re-checked after
+  it. No path was found where a failed or skipped early replay counts as passed.
+* **Memory guard: can a kill become "verified"?** No. Every mechanism (cgroup, systemd scope
+  with an in-scope supervisor, prlimit) returns a non-nil error for a killed job. The supervisor
+  maps a signal to `128+sig`, and a supervisor that writes no stats is a guard error.
+  `memOutcome` also turns *any* kill recorded during the run into the resource-limit
+  diagnostic, even if a later step passed. `Verified` is printed only after `memOutcome`.
+  The prlimit text heuristic can at most relabel a failure as a resource failure.
+* **Merge note.** agent/memguard adds `docs/AUDIT-ROUND7.md` and `audit/round7/run-round7.sh`
+  with its own content, and so does this branch. When the two land, the cache rows (RC*) can
+  become a section of this document and rows of this runner. Alternatively, the cache audit can be
+  renamed (for example `AUDIT-CACHE.md`).
+* **Main bug fixed here.** After merging main 6956fd4, consumer (`--proof-root`) runs with a
+  `--janus-root` checkout failed with "no default toolchain configured". The cached base got no
+  sources. memguard's c386fa7 fixes this, and its three `dir != fw.Dir` edits are applied on this
+  branch.
+
 ## Residual risks (honest list)
 
 * G1 relies on the build-info Go version, which a lying `-X runtime.buildVersion` can set.
