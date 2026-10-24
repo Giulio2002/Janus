@@ -659,3 +659,206 @@ theorem run_div {js : Janus.Amd64.State} {s : SState} (h : Rel js s) (hc : X86Co
         · rw [← hS1]; exact (((hc.setGpr hn0 _).setGpr hn2 _).set (by decide) _).set (by decide) _
 
 end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+open Janus.Amd64 Janus.Amd64.Decode
+
+theorem run_janus_x86_step_fault {s s1 : SState} {msg : String}
+    (h : (x86_fetch_decode_execute ()).run s = .error (.User (.Efault msg)) s1) :
+    (janus_x86_step ()).run s = .ok .Janus_Fault (s1.set .__janus_msg msg) := by
+  simp only [janus_x86_step, run_sailTryCatch, run_bind, h, run_writeReg, run_pure]
+
+theorem run_janus_x86_step_emsg {s s1 : SState} {msg : String}
+    (h : (x86_fetch_decode_execute ()).run s = .error (.User (.Emsg msg)) s1) :
+    (janus_x86_step ()).run s = .ok .Janus_Error (s1.set .__janus_msg msg) := by
+  simp only [janus_x86_step, run_sailTryCatch, run_bind, h, run_writeReg, run_pure]
+
+/-- Janus' unsigned `DIV`: a fault exactly on a zero divisor or a quotient that does not fit, else
+`divJ` with all flags undefined. -/
+theorem execDiv_u_ok {js : State} {next : BitVec 64} {w : Nat} {D : Loc} {V : BitVec w}
+    (hr : readLoc js next w D = .ok V) :
+    execDiv js next false w D =
+      if V = 0 then .error (.divideError js.rip.toNat)
+      else if 2 ^ w ≤ divD js w / V.toNat then .error (.divideError js.rip.toNat)
+      else .ok (((divJ js w (divD js w / V.toNat) (divD js w % V.toNat)).setFlags undefFlags).setRip next) := by
+  unfold execDiv; rw [hr]; dsimp only; simp only [Bool.false_eq_true, ↓reduceIte]
+  by_cases h0 : V = 0
+  · rw [if_pos h0, if_pos h0]
+  · rw [if_neg h0, if_neg h0]
+    unfold divD
+    by_cases hov : 2 ^ w ≤ ((if w = 8 then (js.getHigh 0).toNat else (js.getReg w 2).toNat) * 2 ^ w +
+        (if w = 8 then (js.getReg 8 0).toNat else (js.getReg w 0).toNat)) / V.toNat
+    · rw [if_pos hov, if_pos (show _ ≥ _ from hov)]
+    · rw [if_neg hov, if_neg (show ¬ (_ ≥ _) from hov)]
+      rfl
+end JanusX86.Proofs
+
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+open Janus.Amd64 Janus.Amd64.Decode
+
+set_option maxHeartbeats 1000000 in
+/-- **DIV r/m** (`F6/F7 /6`): every ModRM form and width, when the division succeeds: quotient and
+remainder in `AL:AH` / `rAX:rDX`, all flags undefined. -/
+theorem div_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
+    {bytes : List Nat} (hcode : CodeAt s js.rip.toNat bytes) (hlim : js.rip.toNat + 17 < 2 ^ 47)
+    {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n)) (ho : o = 0xF6 ∨ o = 0xF7)
+    (hext : m / 8 % 8 = 6)
+    (hstep : step bytes js = .ok js') :
+    ∃ s', (janus_x86_step ()).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ X86Config s' := by
+  cases hd : decode bytes with
+  | none => simp [step, hd] at hstep
+  | some il =>
+  obtain ⟨i, len⟩ := il
+  cases hmd : modrm (p.rex.getD 0) (m :: rest) with
+  | none =>
+    exfalso
+    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    rcases ho with rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
+  | some mrc =>
+  obtain ⟨mm, r3, c⟩ := mrc
+  generalize hw : (if o = 0xF6 then 8 else osz p) = w
+  obtain ⟨hlk, hfs, hrep, rfl, hlen, rfl⟩ := decode_grp3 hpp ho (by omega) hmd hw.symm hd
+  rw [step_of_decode hd] at hstep
+  simp only [grp3, hext, ↓reduceIte, exec, show ¬ ((6 : Nat) = 4) by decide, show ¬ ((6 : Nat) = 5) by decide]
+    at hstep
+  have hW : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64 := by
+    rw [← hw]; split
+    · simp
+    · rcases osz_cases p with e | e | e <;> simp [e]
+  have hm256 : m < 256 := by
+    have hdrop : bytes.drop n = o :: m :: rest := by simpa using parsePrefixes_drop _ _ _ hpp
+    exact hcode.1 m (by
+      have : m ∈ bytes.drop n := by rw [hdrop]; simp
+      exact List.mem_of_mem_drop this)
+  have hnext : BitVec.ofNat 64 ((BitVec.toNat js.rip + (n + 1 + c)) % 2 ^ 64) =
+      BitVec.ofNat 64 (js.rip.toNat + n + 1 + c) := by
+    rw [Nat.mod_eq_of_lt (by omega)]; congr 1; omega
+  rw [hnext] at hstep
+  cases hrd : readLoc js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm) with
+  | error e => simp only [execDiv, hrd] at hstep; cases hstep
+  | ok X =>
+  rw [execDiv_u_ok hrd] at hstep
+  obtain ⟨hok, rfl⟩ := readLoc_loc hrd
+  by_cases h0 : locVal js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm) = 0
+  · simp [h0] at hstep
+  by_cases hov : 2 ^ w ≤ divD js w / (locVal js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm)).toNat
+  · simp [h0, hov] at hstep
+  simp only [h0, hov, ↓reduceIte, Except.ok.injEq] at hstep
+  subst hstep
+  have hreg6 : _get_modr_m_reg (BitVec.ofNat 8 m) = BitVec.ofNat 3 (if false then 7 else 6) := by
+    rw [(modrm_fields m hm256).2.1, hext]; rfl
+  refine rm_frame hrel hcfg hcode hlim hpp (by unfold prefixGroup; omega) (by omega) (by omega)
+    (by rcases ho with rfl | rfl <;> decide) hlk hmd (fun _ _ => hfs) hW (k := 0) (by decide) (by omega)
+    (fun sr tr x rex sib => x86_div .Mode_64bit sr tr x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib)
+    (fun x rex _ hl sr tr sib => run_one_byte_div o ho false sr tr x hl rex _ sib hreg6 s) ?_
+  intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX _ _ _ _
+  obtain ⟨-, -, hokr⟩ := run_div hrel hcfg hpr hrv o ho hw.symm m hm256 sib tr _ inc eaddr
+    (hX true false false hok) hinc8 js.rip.toNat (by omega) (by omega) (by omega)
+  obtain ⟨s', hs', hrel', hc'⟩ := hokr h0 (Nat.lt_of_not_le hov)
+  refine ⟨s', hs', ?_, hc'⟩
+  rw [hinc'] at hrel'
+  exact hrel'
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+open Janus.Amd64 Janus.Amd64.Decode
+
+theorem readLoc_not_de {js : State} {next : BitVec 64} {w : Nat} {D : Loc} {q : Nat}
+    (h : readLoc js next w D = .error (.divideError q)) : False := by
+  cases D with
+  | reg r => simp [readLoc] at h
+  | high r => simp [readLoc] at h
+  | mem a =>
+    simp only [readLoc, load] at h
+    split at h
+    · simp at h
+    · rename_i e he; split at he <;> simp at he; cases h; cases he
+
+set_option maxHeartbeats 1000000 in
+/-- **DIV r/m, divide error**: when Janus raises `#DE` (a zero divisor, or a quotient that does not
+fit), the model stops with its `#DE` fault (zero divisor) or with its model error
+`:UNSIGNED-DIVIDE-ERROR-OVERFLOW` (the overflow, which X86isa reports as a model error rather than a
+fault): `janus-x86-check` maps both to Janus' divide error. -/
+theorem div_de_agree {js : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
+    {bytes : List Nat} (hcode : CodeAt s js.rip.toNat bytes) (hlim : js.rip.toNat + 17 < 2 ^ 47)
+    {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n)) (ho : o = 0xF6 ∨ o = 0xF7)
+    (hext : m / 8 % 8 = 6) {pc : Nat}
+    (hstep : step bytes js = .error (.divideError pc)) :
+    ∃ s', ((janus_x86_step ()).run s = .ok .Janus_Fault s' ∧
+        s'.regs.get? .__janus_msg = some "(!!FAULT-FRESH :DE NIL :DE-EXCEPTION-SOURCE-OPERAND-ZERO REG/MEM)") ∨
+      ((janus_x86_step ()).run s = .ok .Janus_Error s' ∧
+        s'.regs.get? .__janus_msg = some "Model error: :UNSIGNED-DIVIDE-ERROR-OVERFLOW") := by
+  cases hd : decode bytes with
+  | none => simp [step, hd] at hstep
+  | some il =>
+  obtain ⟨i, len⟩ := il
+  cases hmd : modrm (p.rex.getD 0) (m :: rest) with
+  | none =>
+    exfalso
+    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
+    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    rcases ho with rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
+  | some mrc =>
+  obtain ⟨mm, r3, c⟩ := mrc
+  generalize hw : (if o = 0xF6 then 8 else osz p) = w
+  obtain ⟨hlk, hfs, hrep, rfl, hlen, rfl⟩ := decode_grp3 hpp ho (by omega) hmd hw.symm hd
+  rw [step_of_decode hd] at hstep
+  simp only [grp3, hext, ↓reduceIte, exec, show ¬ ((6 : Nat) = 4) by decide, show ¬ ((6 : Nat) = 5) by decide]
+    at hstep
+  have hW : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64 := by
+    rw [← hw]; split
+    · simp
+    · rcases osz_cases p with e | e | e <;> simp [e]
+  have hm256 : m < 256 := by
+    have hdrop : bytes.drop n = o :: m :: rest := by simpa using parsePrefixes_drop _ _ _ hpp
+    exact hcode.1 m (by
+      have : m ∈ bytes.drop n := by rw [hdrop]; simp
+      exact List.mem_of_mem_drop this)
+  have hnext : BitVec.ofNat 64 ((BitVec.toNat js.rip + (n + 1 + c)) % 2 ^ 64) =
+      BitVec.ofNat 64 (js.rip.toNat + n + 1 + c) := by
+    rw [Nat.mod_eq_of_lt (by omega)]; congr 1; omega
+  rw [hnext] at hstep
+  cases hrd : readLoc js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm) with
+  | error e =>
+    simp only [execDiv, hrd, Except.error.injEq] at hstep; subst hstep; exact (readLoc_not_de hrd).elim
+  | ok X =>
+  rw [execDiv_u_ok hrd] at hstep
+  obtain ⟨hok, rfl⟩ := readLoc_loc hrd
+  have hfault : locVal js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm) = 0 ∨
+      (locVal js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm) ≠ 0 ∧
+        2 ^ w ≤ divD js w / (locVal js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm)).toNat) := by
+    by_cases h0 : locVal js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm) = 0
+    · exact Or.inl h0
+    · refine Or.inr ⟨h0, ?_⟩
+      by_cases hov : 2 ^ w ≤ divD js w / (locVal js (BitVec.ofNat 64 (js.rip.toNat + n + 1 + c)) w (rmDst p w mm.rm)).toNat
+      · exact hov
+      · simp only [h0, hov, ↓reduceIte] at hstep; cases hstep
+  have hreg6 : _get_modr_m_reg (BitVec.ofNat 8 m) = BitVec.ofNat 3 (if false then 7 else 6) := by
+    rw [(modrm_fields m hm256).2.1, hext]; rfl
+  have hQ := rm_frame_q
+    (fun r => r = .error (.User (.Efault "(!!FAULT-FRESH :DE NIL :DE-EXCEPTION-SOURCE-OPERAND-ZERO REG/MEM)")) s ∨
+      ∃ s1, r = .error (.User (.Emsg "Model error: :UNSIGNED-DIVIDE-ERROR-OVERFLOW")) s1)
+    hrel hcfg hcode hlim hpp (by unfold prefixGroup; omega) (by omega) (by omega)
+    (by rcases ho with rfl | rfl <;> decide) hmd (fun _ _ => hfs) hW (k := 0) (by decide) (by omega)
+    (fun sr tr x rex sib => x86_div .Mode_64bit sr tr x rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib)
+    (fun x rex hpr sr tr sib => run_one_byte_div o ho false sr tr x
+      (by have := hpr.lck; rw [hlk] at this; simpa using this) rex _ sib hreg6 s) (by
+    intro x rex hpr hrv sib tr inc eaddr hinc' hinc8 _ hX _ _ _ _
+    obtain ⟨hz, hovr, -⟩ := run_div hrel hcfg hpr hrv o ho hw.symm m hm256 sib tr _ inc eaddr
+      (hX true false false hok) hinc8 js.rip.toNat (by omega) (by omega) (by omega)
+    rcases hfault with h0 | ⟨h0, hov⟩
+    · exact Or.inl (hz h0)
+    · exact Or.inr (hovr h0 hov))
+  rcases hQ with hf | ⟨s1, hf⟩
+  · exact ⟨_, Or.inl ⟨run_janus_x86_step_fault hf, get?_set_same _ _ _⟩⟩
+  · exact ⟨_, Or.inr ⟨run_janus_x86_step_emsg hf, get?_set_same _ _ _⟩⟩
+
+end JanusX86.Proofs
