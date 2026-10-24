@@ -301,8 +301,9 @@ There is no verification daemon, so there is no row for one (docs/TESTING.md exp
 
 ## Regression status
 
-On this branch all of these pass: `audit/round7/run-round7.sh`, `scripts/verify-examples.sh`,
-`scripts/verify-amd64-examples.sh`, `audit/run-all.sh`, `audit/round2/run-round2.sh` through
+On this branch, merged with main 1d0b147, all of these pass: `audit/round7/run-round7.sh` (with
+the cache rows of `run-cache.sh`), `scripts/verify-all-examples.sh` (21 arm64 items and 27 amd64
+functions), `audit/run-all.sh`, `audit/round2/run-round2.sh` through
 `audit/round6/run-round6.sh`, and `go test -timeout 50m ./cmd/...`.
 
 ## Reproduce
