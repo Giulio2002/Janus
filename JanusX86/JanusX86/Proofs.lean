@@ -23,3 +23,5 @@ import JanusX86.Proofs.Bt
 import JanusX86.Proofs.Imul2
 import JanusX86.Proofs.Lock
 import JanusX86.Proofs.Nop
+import JanusX86.Proofs.Movsxd
+import JanusX86.Proofs.CmpXchg
