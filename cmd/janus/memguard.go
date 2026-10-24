@@ -90,6 +90,9 @@ type memEvent struct {
 	Limit  int64 // effective limit (smallest memory.max on the path)
 	Peak   int64
 	Killed bool
+	// GuardErr: the guard itself failed to run the job (systemd-run could not create the scope,
+	// the supervisor did not report); the job's own result is then meaningless.
+	GuardErr string
 }
 
 var (
@@ -298,7 +301,12 @@ func (g *memGuard) probeCgroup() error {
 			errs = append(errs, err.Error())
 			continue
 		}
+		err = startInCgroup(d, "/bin/true")
 		_ = removeCgroup(d)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("cannot start a process in a child cgroup of %s: %v", p, err))
+			continue
+		}
 		g.parent = p
 		return nil
 	}
@@ -338,6 +346,18 @@ func newJobCgroup(parent string, limit int64) (string, error) {
 		f.Close()
 	}
 	return d, nil
+}
+
+// startInCgroup runs argv in cgroup d (clone3 CLONE_INTO_CGROUP), for the probe.
+func startInCgroup(d string, argv ...string) error {
+	fd, err := syscall.Open(d, syscall.O_DIRECTORY|syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer syscall.Close(fd)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: fd}
+	return cmd.Run()
 }
 
 // removeCgroup kills anything left in d (only processes of this job) and removes it.
@@ -520,7 +540,7 @@ func memSince(mark int) (jobs int, peak int64, kill *memEvent) {
 		if e.Peak > peak {
 			peak = e.Peak
 		}
-		if e.Killed && kill == nil {
+		if (e.Killed || e.GuardErr != "") && kill == nil {
 			k := e
 			kill = &k
 		}
@@ -533,6 +553,11 @@ func memLimitDiag(g *memGuard, ev memEvent, cause error) *diag {
 	lim := ev.Limit
 	if lim == 0 {
 		lim = g.limit
+	}
+	if ev.GuardErr != "" {
+		return &diag{Invalid: true, Stage: "resource limit",
+			Msg:  fmt.Sprintf("The memory guard (%s) could not run %s: %s", g.mech, ev.Label, ev.GuardErr),
+			Next: "Run `janus memguard` to check the guard; JANUS_MEMGUARD=<mechanism> picks another one, JANUS_MEM_MAX=off disables it."}
 	}
 	d := &diag{Invalid: true, Stage: "resource limit",
 		Msg: fmt.Sprintf("%s exceeded the memory limit and was killed (limit %s, measured peak %s, mechanism %s). This is not a verdict on the proof.",
@@ -594,6 +619,21 @@ func (t *tailWriter) Write(p []byte) (int, error) {
 	return t.w.Write(p)
 }
 
+// captureTail makes cmd's output also feed a tail buffer (one shared writer when stdout and
+// stderr are the same, as exec.Cmd then uses a single pipe) and returns a reader of the tail.
+func captureTail(cmd *exec.Cmd) func() string {
+	tw := &tailWriter{w: cmd.Stdout}
+	same := cmd.Stdout == cmd.Stderr
+	cmd.Stdout = tw
+	if same {
+		cmd.Stderr = tw
+		return func() string { return string(tw.tail) }
+	}
+	te := &tailWriter{w: cmd.Stderr}
+	cmd.Stderr = te
+	return func() string { return string(tw.tail) + string(te.tail) }
+}
+
 // guardRun runs cmd (not yet started) under the memory guard, like cmd.Run.
 func guardRun(cmd *exec.Cmd) error {
 	g := currentGuard()
@@ -647,16 +687,20 @@ func guardRun(cmd *exec.Cmd) error {
 			cmd.SysProcAttr = &syscall.SysProcAttr{}
 		}
 		cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
+		tail := captureTail(cmd)
 		runErr := cmd.Run()
 		var st supervisorStats
 		b, _ := os.ReadFile(stats.Name())
 		if json.Unmarshal(b, &st) != nil {
-			// The supervisor did not report (systemd-run failed, or it was killed itself).
-			recordMem(memEvent{Label: label, Limit: g.limit})
-			if runErr != nil {
-				return fmt.Errorf("memory guard (systemd-run): %v", runErr)
+			// The supervisor did not report: systemd-run could not start the scope, or the
+			// supervisor was killed. The job's result cannot be trusted either way.
+			t := strings.TrimSpace(tail())
+			if i := strings.LastIndexByte(t, '\n'); i >= 0 {
+				t = t[i+1:]
 			}
-			return nil
+			ev := memEvent{Label: label, Limit: g.limit, GuardErr: fmt.Sprintf("systemd-run: %v: %s", runErr, t)}
+			recordMem(ev)
+			return &memKillError{ev: ev, err: runErr}
 		}
 		ev := memEvent{Label: label, Limit: st.Limit, Peak: st.Peak, Killed: st.Killed}
 		recordMem(ev)
@@ -667,14 +711,7 @@ func guardRun(cmd *exec.Cmd) error {
 	case "prlimit":
 		cmd.Args = append([]string{g.prlim, "--as=" + strconv.FormatInt(g.limit+prlimitSlack, 10), "--", cmd.Path}, cmd.Args[1:]...)
 		cmd.Path = g.prlim
-		tw := &tailWriter{w: cmd.Stdout}
-		sameOut := cmd.Stdout == cmd.Stderr
-		cmd.Stdout = tw
-		if sameOut {
-			cmd.Stderr = tw
-		} else {
-			cmd.Stderr = &tailWriter{w: cmd.Stderr, tail: nil}
-		}
+		tail := captureTail(cmd)
 		runErr := cmd.Run()
 		var peak int64
 		if cmd.ProcessState != nil {
@@ -682,10 +719,7 @@ func guardRun(cmd *exec.Cmd) error {
 				peak = ru.Maxrss << 10
 			}
 		}
-		out := string(tw.tail)
-		if t2, ok := cmd.Stderr.(*tailWriter); ok && t2 != tw {
-			out += string(t2.tail)
-		}
+		out := tail()
 		killed := runErr != nil && (strings.Contains(out, "out of memory") || strings.Contains(out, "bad_alloc") ||
 			strings.Contains(out, "failed to create thread") || strings.Contains(out, "Cannot allocate memory"))
 		ev := memEvent{Label: label, Limit: g.limit, Peak: peak, Killed: killed}

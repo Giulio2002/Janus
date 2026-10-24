@@ -481,6 +481,38 @@ inherited from another dependency, the number and tree SHA-256 of the files copi
 <module>)"`; their meaning is that of the pinned dependency. `janus explain <verified.json>` prints a human-readable account of
 what was proved.
 
+### Memory limit
+
+Every Lean-family process janus starts (lean, leanchecker, lake, `janus-audit`, `janus-decode`)
+runs inside a **cgroup v2 memory limit** (`memory.max`, no swap), so a runaway job (a proof that
+elaborates a huge term, a large kernel replay) is killed on its own by the kernel's cgroup OOM
+killer instead of exhausting the host. The cgroup is entered before the sandbox starts, so it
+covers the whole sandboxed process tree. A job killed for memory makes verification fail with
+
+```
+Invalid: lean Proof.lean Proof.olean exceeded the memory limit and was killed (limit 1.0 GiB, measured peak 1.0 GiB, mechanism systemd-user). This is not a verdict on the proof.
+  Stage: resource limit
+```
+
+never with the proof or audit error the killed process would otherwise have caused, and no
+`verified.json` is written. A successful report records the guard in `memoryGuard`: mechanism,
+limit, the largest measured `memory.peak` of its jobs and how many jobs ran.
+
+* `JANUS_MEM_MAX`: the per-job limit (`16G`, `1500M`, `off`); default min(24 GiB, 40% of RAM).
+  `lake build` gets `LEAN_NUM_THREADS` (lake's job count) = limit / `JANUS_LAKE_JOB_MEM` (default
+  3G), at most the number of CPUs.
+* Mechanism, first that works: a child cgroup of a delegated `$JANUS_MEMGUARD_CGROUP` (set by
+  `scripts/lib/memguard.sh`, so janus's limits nest inside a script's or a parallel slot's);
+  `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0` (janus re-runs itself in the
+  scope as a small supervisor that reads the scope's `memory.peak`); the same with the system
+  manager as root; `prlimit --as` (limit + 16 GiB per process: weak, Lean reserves ~10 GiB of
+  address space up front); none, with a warning. `JANUS_MEMGUARD=<mechanism>` forces one.
+* `janus memguard` prints the active mechanism (and why stronger ones were skipped);
+  `janus memguard -- CMD ARGS…` runs a command under it. Verification prints the mechanism once on
+  stderr (`janus: memory guard: …`); `JANUS_MEMGUARD_LOG=1` adds one line per job with its peak.
+
+See docs/TESTING.md (Memory guard) for the measured peaks.
+
 ### Framework
 
 `janus framework [--json]` prints which Janus Lean framework the binary carries: its source
