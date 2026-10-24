@@ -274,7 +274,7 @@ func writeReport(reportPath string, r *verifiedReport) error {
 }
 
 func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
-	fmt.Fprintf(stdout, "Verified: %s\n", r.Theorem)
+	fmt.Fprintf(stdout, "Verified: %s\n", termSafe(r.Theorem))
 	fmt.Fprintf(stdout, "  Module: %s (%s)\n", r.MainModule, r.GoVersion)
 	fmt.Fprintf(stdout, "  Entry: %s at %s\n", r.Symbol, r.Address)
 	fmt.Fprintf(stdout, "  Binary: %s (SHA-256 %s)\n", displayPath(resolveBinary(outdir, r.Binary)), r.BinarySha256)
@@ -318,7 +318,38 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	fmt.Fprintf(stdout, "  Lean: %s\n", r.LeanVersion)
 	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(filepath.Join(outdir, "verified.json")))
 	fmt.Fprintln(stdout, "  Statement:")
-	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(r.Statement, "\n", "\n    "))
+	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(termSafe(r.Statement), "\n", "\n    "))
+	printDefinitions(stdout, r.Definitions)
+}
+
+// printDefinitions shows the proof-local definitions the statement names (round 4, D2): the
+// statement's meaning depends on them, so they are part of what is reported, not only of
+// verified.json.
+func printDefinitions(w io.Writer, defs []string) {
+	if len(defs) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  Proof-local definitions used by the statement (part of its meaning):")
+	for _, d := range defs {
+		fmt.Fprintf(w, "    %s\n", strings.ReplaceAll(termSafe(d), "\n", "\n      "))
+	}
+}
+
+// termSafe neutralizes control characters (ANSI escapes, carriage returns, …) other than
+// newline and tab in report text before it reaches a terminal (round 4, D3): Lean names written
+// with «…» may contain them, and they could make the terminal show something other than the
+// report.
+func termSafe(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f && !(r >= 0x80 && r < 0xa0)) &&
+			r != 0x202e && r != 0x202d && r != 0x2066 && r != 0x2067 && r != 0x2068 && r != 0x2069 {
+			b.WriteRune(r)
+			continue
+		}
+		fmt.Fprintf(&b, "\\u{%x}", r)
+	}
+	return b.String()
 }
 
 // moduleList joins module names, abbreviating long lists (a Mathlib closure has thousands).
