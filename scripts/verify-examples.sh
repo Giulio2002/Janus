@@ -15,7 +15,8 @@ cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 
 all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimbs CopyWords SumSquares
-     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte)
+     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte
+     NewPair MakeSlice AppendOne SetNext)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 

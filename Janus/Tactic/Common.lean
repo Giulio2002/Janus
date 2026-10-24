@@ -145,6 +145,10 @@ register_option janus.aliasInfo : Bool := {
     they are left in the remaining goals (an information message)"
 }
 
+/-- Every identifier inside a syntax tree, in order. -/
+partial def collectIdents (stx : Syntax) : Array Syntax :=
+  if stx.isIdent then #[stx] else stx.getArgs.foldl (fun acc a => acc ++ collectIdents a) #[]
+
 /-- `0x…` -/
 def hex (n : Nat) : String := "0x" ++ String.ofList (Nat.toDigits 16 n)
 
