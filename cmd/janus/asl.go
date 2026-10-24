@@ -283,16 +283,6 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 	if err := syncTree(dir, files, func(top string) bool { return top == ".lake" }); err != nil {
 		return nil, aslDiag("Cannot write the JanusASL package to the cache: "+err.Error(), "Set JANUS_CACHE_DIR to a writable directory.")
 	}
-	// The lakefile requires janus from ".."; point it at this verification's trusted framework.
-	override, _ := json.Marshal(map[string]any{"schemaVersion": "1.2.0", "packages": []map[string]any{{
-		"type": "path", "scope": "", "name": "janus", "manifestFile": "lake-manifest.json", "inherited": false,
-		"dir": janusDir, "configFile": "lakefile.toml"}}})
-	if err := os.MkdirAll(filepath.Join(dir, ".lake"), 0o755); err != nil {
-		return nil, aslDiag(err.Error(), "")
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".lake", "package-overrides.json"), override, 0o644); err != nil {
-		return nil, aslDiag(err.Error(), "")
-	}
 	if _, err := os.Stat(filepath.Join(dir, ".lake", "build")); err != nil {
 		// A new framework or JanusASL version: start from the most recently used other build.
 		// Lake reuses every module whose inputs are unchanged (by content hash), so the ArmASL
@@ -309,6 +299,16 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 				_ = os.RemoveAll(filepath.Join(dir, ".lake.seed"))
 			}
 		}
+	}
+	// The lakefile requires janus from ".."; point it at this verification's trusted framework.
+	override, _ := json.Marshal(map[string]any{"schemaVersion": "1.2.0", "packages": []map[string]any{{
+		"type": "path", "scope": "", "name": "janus", "manifestFile": "lake-manifest.json", "inherited": false,
+		"dir": janusDir, "configFile": "lakefile.toml"}}})
+	if err := os.MkdirAll(filepath.Join(dir, ".lake"), 0o755); err != nil {
+		return nil, aslDiag(err.Error(), "")
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".lake", "package-overrides.json"), override, 0o644); err != nil {
+		return nil, aslDiag(err.Error(), "")
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".lake", "build", "lib", "lean", "ArmASL.olean")); err != nil && progress != nil {
 		fmt.Fprintf(progress, "Building JanusASL (Arm's ASL in Lean, model %s) in %s; this happens once and takes about an hour (lean-sail is fetched from GitHub).\n",
@@ -416,7 +416,7 @@ func aslFrameworkInfo(fw *framework) *aslFrameworkJSON {
 var aslAssumptionText = []struct{ name, text string }{
 	{"JanusASL.Proofs.Rel", "Rel js s: the ASL (Sail) state s holds the Janus state's X0-X30, SP (as SP_EL0), PC and NZCV, at EL0 with PSTATE.SP = 0 and PSTATE.nRW = 0. Nothing else of the ASL state (system registers, features, memory) is constrained by Rel."},
 	{"JanusASL.Proofs.LinuxEL0Config", "LinuxEL0Config s: the ASL state's configuration is the Linux EL0 one janus_init builds: the FeatureImpl vector (features 1-3, 18, 19, 87, 88, 95, 96 and 258 off), SCR_EL3, SCR, HCR_EL2, HCRX_EL2, TCR_EL1, MDCR_EL3, MDCR_EL2, the BRBE/SPE/GCS control registers as janus_init sets them, no SPE sample in flight, not in a guarded page, PSTATE.EL = 0, nRW = 0, SP = 0. It is preserved by every proved step; janus-asl-check evaluates it on its base state and on every corpus case."},
-	{"JanusASL.Proofs.UserMapped", "UserMapped m s: every byte of Janus' memory regions is mapped by the ASL's own translation (AArch64_TranslateAddress) as identity-mapped Normal write-back user memory, writable where the region is writable, and none of it lies in the model's GIC/UART windows."},
+	{"JanusASL.Proofs.UserMapped", "UserMapped m s: Janus' memory regions are identity-mapped Normal write-back user memory under the ASL's own page-table translation (writable where Janus says so), independent of GPR/SP/data changes, and none of it lies in the model's GIC/UART windows; checked by evaluation in janus-asl-check, not proved."},
 	{"JanusASL.Proofs.MemRel", "MemRel m s: the ASL memory holds Janus' bytes on every byte of Janus' memory regions."},
 }
 

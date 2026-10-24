@@ -33,7 +33,7 @@ about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of
 |---|---|
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
 | `janus-asl-check` | **562,288 agree, 21,468 gap, 0 MISMATCH**; `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; about 3 min on 48 cores |
-| proofs | **41 audited theorems**: 31 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, and the 6 theorems of `JanusASL.Verify` behind `janus verify --asl` (`classify_sound`, `covered_words`/`_code`/`_stubs` and two `if` lemmas), no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
+| proofs | **35 audited theorems** (`scripts/asl.sh prove`): 31 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL` and `StepOK.of_agree`, no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The theorems of `JanusASL.Verify` behind `janus verify --asl` (`classify_sound`, `covered_words`/`_code`/`_stubs`) are axiom-audited with every corollary |
 | `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
 
 Agreement by corpus class (`agree` / `gap`):

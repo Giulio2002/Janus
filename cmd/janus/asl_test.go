@@ -283,3 +283,25 @@ func mustRead(t *testing.T, p string) string {
 	}
 	return string(b)
 }
+
+// A new JanusASL build directory is seeded from the most recently used built sibling.
+func TestASLSibling(t *testing.T) {
+	parent := t.TempDir()
+	mk := func(name string, built bool) string {
+		d := filepath.Join(parent, name)
+		if built {
+			writeFile(t, filepath.Join(d, ".lake", "build", "lib", "lean", "ArmASL.olean"), "x")
+		} else if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	old, self := mk("old", true), mk("self", false)
+	_ = mk("unbuilt", false)
+	if got := newestASLSibling(self); got != old {
+		t.Errorf("newestASLSibling = %q, want %q", got, old)
+	}
+	if got := newestASLSibling(old); got != "" {
+		t.Errorf("newestASLSibling(old) = %q, want none", got)
+	}
+}

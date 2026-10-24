@@ -1,8 +1,7 @@
 import JanusASL.Proofs
-import JanusASL.Verify
 import Lean
 
-/-! Axiom audit of the JanusASL theorems (`scripts/asl.sh prove`): every `*_agree` theorem and every theorem of `JanusASL.Verify` may use
+/-! Axiom audit of the JanusASL theorems (`scripts/asl.sh prove`): every `*_agree` theorem may use
 only `propext`, `Classical.choice` and `Quot.sound` (no `sorryAx`, no `Lean.ofReduceBool`, i.e. no
 `native_decide`/`bv_decide`). -/
 
@@ -14,8 +13,7 @@ elab "#janus_asl_audit" : command => do
   let mut cnt : Nat := 0
   for (name, _) in env.constants.toList do
     if (`JanusASL).isPrefixOf name && (name.toString.endsWith "_agree" || name.toString.endsWith "_asl" ||
-        name.toString.endsWith "toASL" || ((`JanusASL.Verify).isPrefixOf name && !name.isInternal &&
-          (env.find? name).any (· matches .thmInfo _))) then
+        name.toString.endsWith "toASL") then
       let axs ← liftCoreM <| Lean.collectAxioms name
       let bad := axs.filter (fun a => !allowed.contains a)
       if !bad.isEmpty then
