@@ -21,7 +21,8 @@ export JANUS_EXAMPLES_PREBUILT=1
 
 # Longest first (measured), then the rest in the scripts' order.
 arm64=(ClearWords A64IndexByte CopyBlock AddLimbs A64Equal64 Add Max Add128 Mul64 Add256 Div Get AddThree
-       Sum SetOne256 HexDigit CopyWords SumSquares AtomicAdd AtomicMax WrongAdd)
+       Sum SetOne256 HexDigit CopyWords SumSquares AtomicAdd AtomicMax HashWith HashTwice MapSum DeferAdd
+       WrongAdd)
 amd64=()
 for d in examples/proofs-amd64/*/; do amd64+=("$(basename "$d")"); done
 tmp="$(mktemp -d)"

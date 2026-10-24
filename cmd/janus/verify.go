@@ -505,6 +505,8 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		// Created before any sandboxed step, so the sandbox's tmpfs always covers it.
 		if _, err := resultHMACKey(); err == nil {
 			resultKey = cacheIn.key()
+		} else if d, ok := err.(*diag); ok {
+			return nil, d // round 8 C1: an unsafe cache is an error, not a silent miss
 		}
 		if prev := lookupResult(resultKey); prev != nil {
 			// The inputs must still be the ones the key was computed from.

@@ -71,21 +71,32 @@ func trustedMAC(hk []byte, key string, files pins) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
+// readTrustedManifest reads the manifest of the entry directory for key and reports whether it is
+// authentic: written by janus (its MAC verifies under the result cache's key), for this key, and
+// non-empty. A manifest with no MAC or a wrong one (planted, or recorded before round 8) is not.
+func readTrustedManifest(entry, key string) (trustedManifest, bool) {
+	var m trustedManifest
+	b, err := readPrivateFile(filepath.Join(entry, "manifest.json"), false)
+	if err != nil {
+		return m, false
+	}
+	if json.Unmarshal(b, &m) != nil || m.Key != key || len(m.Files) == 0 || m.MAC == "" {
+		return m, false
+	}
+	hk, err := resultHMACKey()
+	if err != nil || !hmac.Equal([]byte(m.MAC), []byte(trustedMAC(hk, key, m.Files))) {
+		return m, false
+	}
+	return m, true
+}
+
 // loadTrustedCache copies a cached trusted compile into dir (which holds only the two
 // sources). It reports whether it did; any missing or mismatching file is a miss, and the
 // partial copy is removed.
 func loadTrustedCache(key, dir string) bool {
 	entry := filepath.Join(trustedCacheDir(), key[:2], key)
-	b, err := readPrivateFile(filepath.Join(entry, "manifest.json"), false)
-	if err != nil {
-		return false
-	}
-	var m trustedManifest
-	if json.Unmarshal(b, &m) != nil || m.Key != key || len(m.Files) == 0 {
-		return false
-	}
-	hk, err := resultHMACKey()
-	if err != nil || !hmac.Equal([]byte(m.MAC), []byte(trustedMAC(hk, key, m.Files))) {
+	m, ok := readTrustedManifest(entry, key)
+	if !ok {
 		return false
 	}
 	var copied []string
@@ -117,8 +128,21 @@ func loadTrustedCache(key, dir string) bool {
 func storeTrustedCache(key, dir string, files pins) {
 	parent := filepath.Join(trustedCacheDir(), key[:2])
 	final := filepath.Join(parent, key)
-	if _, err := os.Stat(final); err == nil {
-		return
+	if _, err := os.Lstat(final); err == nil {
+		if _, ok := readTrustedManifest(final, key); ok {
+			return
+		}
+		// An entry that is not authentic would otherwise make this key miss forever: move it
+		// aside (atomically, so a concurrent reader sees it whole or not at all) and replace it.
+		if old, err := os.MkdirTemp(parent, ".stale-"); err == nil {
+			if os.Rename(final, filepath.Join(old, "entry")) != nil {
+				os.Remove(old)
+				return
+			}
+			os.RemoveAll(old)
+		} else {
+			return
+		}
 	}
 	if os.MkdirAll(parent, 0o755) != nil {
 		return

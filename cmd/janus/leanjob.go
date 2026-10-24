@@ -35,13 +35,15 @@ type toolchain struct {
 
 // cacheID identifies the toolchain for every cache key (trusted compile, replay, early replay,
 // result): its version string, the SHA-256 of the lean and leanchecker executables, and the
-// path, size, modification time, inode and mode of every file under bin/ and lib/lean/ (round 8
-// L1). bin/lean is a small launcher; the elaborator and the kernel are in lib/lean/
-// libleanshared.so and the core library's .olean files, which a version string alone does not
-// identify (a toolchain rebuilt in place under the same version). Stat data is used for the
-// 15 000 library files (hashing libleanshared.so, 233 MB, would cost every run about a second);
-// any rewrite changes the modification time or the inode. A toolchain that cannot be walked gets
-// a unique ID, so its caches always miss.
+// path, size, modification and change times, inode, device and mode of every file under bin/
+// and lib/lean/ (round 8 L1). bin/lean is a small launcher; the elaborator and the kernel are
+// in lib/lean/libleanshared.so and the core library's .olean files, which a version string
+// alone does not identify (a toolchain rebuilt in place under the same version). Stat data is
+// used for the 15 000 library files (hashing libleanshared.so, 233 MB, would cost every run
+// about a second); any rewrite changes the change time (which, unlike the modification time,
+// cannot be set back by the writer) or the inode. A symbolic link also contributes its target
+// and the file it names. A toolchain that cannot be walked gets a unique ID, so its caches
+// always miss.
 func (tc *toolchain) cacheID() string {
 	tc.idOnce.Do(func() {
 		h := sha256.New()
@@ -64,10 +66,24 @@ func (tc *toolchain) cacheID() string {
 					return err
 				}
 				var ino, dev uint64
+				var ctime int64
 				if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-					ino, dev = uint64(st.Ino), uint64(st.Dev)
+					ino, dev, ctime = uint64(st.Ino), uint64(st.Dev), st.Ctim.Nano()
 				}
-				fmt.Fprintf(h, "%s %d %d %d %d %o\n", p, fi.Size(), fi.ModTime().UnixNano(), ino, dev, fi.Mode())
+				// ctime too: it cannot be set back (touch -d, cp -p restore only the mtime)
+				fmt.Fprintf(h, "%s %d %d %d %d %d %o\n", p, fi.Size(), fi.ModTime().UnixNano(), ctime, ino, dev, fi.Mode())
+				if fi.Mode()&fs.ModeSymlink != 0 {
+					// a link (WalkDir does not follow it): its target's text and the file it names
+					tgt, _ := os.Readlink(p)
+					fmt.Fprintf(h, "-> %s", tgt)
+					if ti, err := os.Stat(p); err == nil {
+						if st, ok := ti.Sys().(*syscall.Stat_t); ok {
+							ino, dev = uint64(st.Ino), uint64(st.Dev)
+						}
+						fmt.Fprintf(h, " %d %d %d %d %o", ti.Size(), ti.ModTime().UnixNano(), ino, dev, ti.Mode())
+					}
+					fmt.Fprintln(h)
+				}
 				return nil
 			})
 			if err != nil {
