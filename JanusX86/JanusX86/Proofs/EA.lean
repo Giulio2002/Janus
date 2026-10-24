@@ -335,3 +335,154 @@ theorem run_from_sib_base {js : Janus.Amd64.State} {s : SState} (h : Rel js s) (
     rfl
 
 end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+theorem CodeAt.tail {s : SState} {q b : Nat} {bs : List Nat} (h : CodeAt s q (b :: bs)) : CodeAt s (q + 1) bs :=
+  ⟨fun x hx => h.1 x (by simp [hx]), fun i hi => by
+    have := h.2 (i + 1) (by simp; omega)
+    rw [List.getElem_cons_succ, show q + (i + 1) = q + 1 + i by omega] at this
+    exact this⟩
+
+theorem CodeAt.head {s : SState} {q b : Nat} {bs : List Nat} (h : CodeAt s q (b :: bs)) :
+    s.mem[q]? = some (BitVec.ofNat 8 b) ∧ b < 256 :=
+  ⟨by have := h.2 0 (by simp); rwa [List.getElem_cons_zero, Nat.add_zero] at this, h.1 b (by simp)⟩
+
+/-- `REX.X`. -/
+def rexX (p : Janus.Amd64.Decode.Prefixes) : Nat := (p.rex.getD 0) / 2 % 2
+
+theorem hidx_x {p : Janus.Amd64.Decode.Prefixes} (hrv : ∀ r, p.rex = some r → r < 16) (a : Nat) (ha : a < 8) :
+    reg_index (BitVec.ofNat 3 a) (BitVec.ofNat 8 (rexByte p)) 1#2 = BitVec.ofNat 4 (a + 8 * rexX p) := by
+  unfold rexByte rexX
+  cases e : p.rex with
+  | none => simpa using reg_index_norex a ha 1 (by decide)
+  | some r => simpa using reg_index_rex a ha r (hrv r e) 1 (by decide)
+
+theorem hidx_b {p : Janus.Amd64.Decode.Prefixes} (hrv : ∀ r, p.rex = some r → r < 16) (a : Nat) (ha : a < 8) :
+    reg_index (BitVec.ofNat 3 a) (BitVec.ofNat 8 (rexByte p)) 0#2 = BitVec.ofNat 4 (a + 8 * ((p.rex.getD 0) % 2)) := by
+  unfold rexByte
+  cases e : p.rex with
+  | none => simpa using reg_index_norex a ha 0 (by decide)
+  | some r => simpa using reg_index_rex a ha r (hrv r e) 0 (by decide)
+
+end JanusX86.Proofs
+
+namespace JanusX86.Proofs
+open X86Sail X86Sail.Functions
+
+theorem run_ea32_sib {s : SState} (t : BitVec 48) (rex : BitVec 8) (md : Nat) (hmd : md < 3) (sb : BitVec 8)
+    (ni : BitVec 3) {A : Int} {D : BitVec 64} {K : Int}
+    (hs : (x86_effective_addr_from_sib .Mode_64bit t rex (BitVec.ofNat 2 md) sb).run s = .ok (A, D, K) s) :
+    (x86_effective_addr_32_64 .Mode_64bit false t rex (BitVec.ofNat 3 4) (BitVec.ofNat 2 md) sb ni).run s =
+      .ok (bits_of_int (A + D.toInt) 64, K) s := by
+  rcases (by omega : md = 0 ∨ md = 1 ∨ md = 2) with rfl | rfl | rfl <;>
+  simp (config := {decide := true}) only [x86_effective_addr_32_64, ↓reduceIte, run_bind, hs, run_pure, in_64bit_mode] <;>
+  rfl
+
+open Janus.Amd64 Janus.Amd64.Decode in
+/-- **Effective addresses.** For every memory ModRM (+ SIB + displacement) Janus decodes, the model's
+`x86_effective_addr` (from the bytes in memory) is Janus' `eaOff`, and its displacement length
+is Janus'. `nimm` immediate bytes follow (they enter only RIP-relative addresses). -/
+theorem run_x86_effective_addr {js : State} {s : SState} (h : Rel js s) (hc : X86Config s) {rr : BitVec 64}
+    (hr : s.regs.get? .rip = some rr) {p : Prefixes} {x : BitVec 52} {rex : BitVec 8} (hp : PfxRel p x rex)
+    (hrv : ∀ r, p.rex = some r → r < 16) {q m : Nat} {rest : List Nat} (hcs : CodeAt s (q + 1) rest) (hm : m < 256)
+    {md reg ext : Nat} {a : Addr} {r3 : List Nat} {c : Nat}
+    (hmd : modrm (p.rex.getD 0) (m :: rest) = some (⟨md, reg, ext, .m a⟩, r3, c)) {nimm : Nat} (hni : nimm < 8)
+    (hq : q + c + nimm < 2 ^ 47) :
+    (x86_effective_addr .Mode_64bit x (BitVec.ofNat 48 (q + 1 + (if sibP m then 1 else 0))) rex (BitVec.ofNat 3 (m % 8))
+      (BitVec.ofNat 2 (m / 64)) (if sibP m then BitVec.ofNat 8 (rest.getD 0 0) else 0#8) (BitVec.ofNat 3 nimm)).run s =
+      .ok (eaOff js (BitVec.ofNat 64 (q + c + nimm)) a, ((c - 1 - (if sibP m then 1 else 0) : Nat) : Int)) s ∧
+      a.fs = false ∧ md = m / 64 := by
+  have hrexb : rex = BitVec.ofNat 8 (rexByte p) := by rw [hp.rexb]; rfl
+  have hadr : (0x67#8 == _get_prefixes_adr x) = false := by rw [hp.adr]; decide
+  have hx : ∀ t rm mo sb ni, (x86_effective_addr .Mode_64bit x t rex rm mo sb ni).run s =
+      (x86_effective_addr_32_64 .Mode_64bit false t rex rm mo sb ni).run s := by
+    intro t rm mo sb ni
+    simp only [x86_effective_addr, run_bind, run_select_address_size x hadr, hadr]
+    rfl
+  rw [hx]
+  unfold modrm at hmd
+  simp only at hmd
+  have hmd3 : ¬ (m / 64 = 3) := by intro e; simp [e] at hmd
+  simp only [hmd3, ↓reduceIte] at hmd
+  by_cases h4 : m % 8 = 4
+  · simp only [h4, ↓reduceIte] at hmd
+    have hsib : sibP m = true := by unfold sibP; simp [h4]; omega
+    cases rest with
+    | nil => simp at hmd
+    | cons sb rest2 =>
+    have hsb := (CodeAt.head hcs).2
+    have hcs2 : CodeAt s (q + 2) rest2 := CodeAt.tail hcs
+    simp only at hmd
+    have hidx := hidx_x hrv (sb / 8 % 8) (by omega)
+    rw [← hrexb] at hidx
+    have hidx16 : sb / 8 % 8 + 8 * rexX p < 16 := by unfold rexX; omega
+    simp only [hsib, ↓reduceIte, List.getD_cons_zero, h4]
+    by_cases h5 : sb % 8 = 5 ∧ m / 64 = 0
+    · simp only [h5, and_self, ↓reduceIte] at hmd
+      cases e : readLE 4 rest2 with
+      | none => simp [e] at hmd
+      | some dr =>
+        obtain ⟨d, r'⟩ := dr
+        simp only [e, Option.some.injEq, Prod.mk.injEq, ModRM.mk.injEq, RM.m.injEq] at hmd
+        obtain ⟨⟨hmdq, -, -, rfl⟩, -, rfl⟩ := hmd
+        have hS := run_from_sib_nobase h hc hr rex hsb h5.1 hcs2 hidx16 hidx e (by omega)
+        rw [show m / 64 = 0 from h5.2]
+        rw [run_ea32_sib _ rex 0 (by omega) _ _ hS]
+        refine ⟨?_, rfl, by omega⟩
+        clear hmdq
+        rw [ea_combine]
+        simp only [eaOff, Bool.false_eq_true, ↓reduceIte, sibIdxVal, rexX]
+        congr 2
+        by_cases hi : sb / 8 % 8 + 8 * (p.rex.getD 0 / 2 % 2) = 4 <;> simp [hi]
+    · simp only [h5, ↓reduceIte] at hmd
+      cases e : disp (m / 64) rest2 with
+      | none => simp [e] at hmd
+      | some drk =>
+        obtain ⟨d, r', k⟩ := drk
+        simp only [e, Option.some.injEq, Prod.mk.injEq, ModRM.mk.injEq, RM.m.injEq] at hmd
+        obtain ⟨⟨hmdq, -, -, rfl⟩, -, rfl⟩ := hmd
+        have hbn := hidx_b hrv (sb % 8) (by omega)
+        rw [← hrexb] at hbn
+        have hS := run_from_sib_base h hc hr rex hsb (by omega : m / 64 < 3) h5 hcs2 (by omega) hbn hidx16 hidx e
+          (by omega)
+        rw [run_ea32_sib _ rex (m / 64) (by omega) _ _ hS]
+        refine ⟨?_, rfl, by omega⟩
+        clear hmdq
+        rw [ea_combine]
+        simp only [eaOff, Bool.false_eq_true, ↓reduceIte, sibIdxVal, rexX]
+        by_cases hi : sb / 8 % 8 + 8 * (p.rex.getD 0 / 2 % 2) = 4 <;> simp [hi]
+  · simp only [h4, ↓reduceIte] at hmd
+    have hsib : sibP m = false := by unfold sibP; simp [h4]
+    simp only [hsib, Bool.false_eq_true, ↓reduceIte, Nat.add_zero, Nat.sub_zero]
+    by_cases h5 : m % 8 = 5 ∧ m / 64 = 0
+    · simp only [h5, and_self, ↓reduceIte] at hmd
+      cases e : readLE 4 rest with
+      | none => simp [e] at hmd
+      | some dr =>
+        obtain ⟨d, r'⟩ := dr
+        simp only [e, Option.some.injEq, Prod.mk.injEq, ModRM.mk.injEq, RM.m.injEq] at hmd
+        obtain ⟨⟨hmdq, -, -, rfl⟩, -, rfl⟩ := hmd
+        rw [show m % 8 = 5 from h5.1, show m / 64 = 0 from h5.2, run_ea_rip hc hr rex hcs e hni _ (by omega)]
+        refine ⟨?_, rfl, by omega⟩
+        simp only [eaOff, ↓reduceIte, BitVec.toNat_ofNat]
+        congr 3
+        rw [Nat.mod_eq_of_lt (show q + 5 + nimm < 2 ^ 64 by omega)]
+    · simp only [h5, ↓reduceIte] at hmd
+      cases e : disp (m / 64) rest with
+      | none => simp [e] at hmd
+      | some drk =>
+        obtain ⟨d, r', k⟩ := drk
+        simp only [e, Option.some.injEq, Prod.mk.injEq, ModRM.mk.injEq, RM.m.injEq] at hmd
+        obtain ⟨⟨hmdq, -, -, rfl⟩, -, rfl⟩ := hmd
+        have hbn := hidx_b hrv (m % 8) (by omega)
+        rw [← hrexb] at hbn
+        rw [run_ea_base h hc hr rex hcs h4 h5 (by omega) (by omega) hbn e _ _ (by omega)]
+        refine ⟨?_, rfl, by omega⟩
+        simp only [eaOff, Bool.false_eq_true, ↓reduceIte]
+        congr 3
+        · simp
+        · omega
+
+end JanusX86.Proofs
