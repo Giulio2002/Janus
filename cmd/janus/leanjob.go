@@ -164,6 +164,11 @@ func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtr
 			ro = append(ro, d)
 		}
 	}
+	// Likewise the directory of the program itself (the compiled auditor of a --janus-root under
+	// /tmp), read-only.
+	if len(argv) > 0 && filepath.IsAbs(argv[0]) {
+		ro = append(ro, filepath.Dir(argv[0]))
+	}
 	env := tc.jobEnv(leanPath)
 	if len(argv) > 0 && argv[0] == tc.leanchecker {
 		env = append(env, "LEAN_NUM_THREADS="+strconv.Itoa(replayThreads()))
