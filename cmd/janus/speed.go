@@ -8,9 +8,11 @@ package main
 //     second theorem, another proof, the test suite) reuses the compiled modules instead of
 //     elaborating the program twice again;
 //   - the kernel replay of the three per-verification modules (Extracted, JanusTrusted, Proof)
-//     starts as soon as Proof.olean is pinned and runs alongside the audit; its result counts
-//     only for modules the audit's closure then contains, with the same cache keys, and the pins
-//     are re-checked after it as before.
+//     starts as soon as Proof.olean is pinned and runs alongside the audit, and the replay of the
+//     framework (target Janus), when it is not cached, starts as soon as the framework build is
+//     pinned and runs alongside the trusted compile, the proof compile and the audit. Their
+//     results count only for modules the audit's closure then contains, with the same cache
+//     keys, and the pins are re-checked after them as before.
 //
 // Like the replay cache, the trusted-compile cache lives in the cache that sandboxed processes
 // see read-only, and is used only with a sandbox and without --fresh.
@@ -208,14 +210,18 @@ func (e *earlyReplay) apply(p *replayPlan, marker string) {
 	if e.err != nil {
 		return
 	}
-	in := map[string]bool{}
-	for _, m := range p.modules {
-		in[m] = true
-	}
+	// leanchecker's targets are name prefixes: target t replays t and every t.* module on its
+	// search path, so it covers exactly those modules of the plan.
 	var covered []string
-	for _, m := range e.mods {
-		if in[m] && !p.passed(m) {
-			covered = append(covered, m)
+	for _, m := range p.modules {
+		if p.passed(m) {
+			continue
+		}
+		for _, t := range e.mods {
+			if m == t || isNamePrefix(t, m) {
+				covered = append(covered, m)
+				break
+			}
 		}
 	}
 	if p.done == nil {

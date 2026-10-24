@@ -472,6 +472,27 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		tm.mark("result cache miss")
 	}
 
+	// The kernel replay of the framework (when not cached yet: the first verification of a
+	// framework build) runs alongside the steps below; see speed.go.
+	var earlyFw *earlyReplay
+	earlyFwMarker := ""
+	if tc.hasChecker {
+		rb, err := janusRunBase()
+		fwRunDir := ""
+		if err == nil {
+			fwRunDir, err = os.MkdirTemp(rb, "replay-")
+		}
+		if err == nil {
+			defer os.RemoveAll(fwRunDir)
+			earlyFwMarker = earlyReplayMarker(tc.version, fwPins)
+			fwPath := tc.leanPathEnv(janusLibDir)
+			earlyFw = startEarlyReplay(tc.leanchecker, func(argv ...string) (string, error) {
+				return runLeanProtected(sb, tc, fwRunDir, nil, []string{janusLibDir}, fwPath, argv...)
+			}, []string{"Janus"}, earlyFwMarker, replayCacheOK(sb, opts))
+			defer earlyFw.wait()
+		}
+	}
+
 	// 3. Trusted directory: our Extracted and an independently renamed JanusTrusted copy,
 	// compiled by us (no proof code), kept read-only for the untrusted steps.
 	runBase, err := janusRunBase()
@@ -643,6 +664,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 			return nil, err
 		}
 		early.apply(plan, earlyMarker)
+		earlyFw.apply(plan, earlyFwMarker)
 		tm.mark("early replay wait")
 		if out, err := plan.replay(tc.leanchecker, replayRun, plan.modules); err != nil {
 			return nil, replayDiag(mapPaths(out))
