@@ -59,9 +59,11 @@ echo
 echo "== MEDIUM-1 (amd64 DF): see audit/round2/amd64/README.txt; with artifacts/examples-amd64 built:"
 if [ -f artifacts/examples-amd64 ]; then
   "$J" extract artifacts/examples-amd64 example.com/basic.CopyBlock $W/amd64-CopyBlock >/dev/null &&
-  v --proof audit/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | head -1
+  df_out=$(v --proof audit/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | head -1)
+  echo "$df_out"
+  if grep -q '^Verified' <<<"$df_out"; then echo "      >>> BROKEN: the forward-copy claim verifies again"; broken+=("MEDIUM-1"); fi
 fi
-echo "(MEDIUM-1 is an open amd64 model finding: this row is expected to print Verified until DF is modelled.)"
+echo "(MEDIUM-1 is fixed: amd64 models DF, STD makes MOVS step backward, so this false claim must be rejected.)"
 echo "Model repros: audit/round2/model/README.txt (arm64, run from a copy of agent/arm64cov2), audit/round2/amd64/README.txt."
 
 if [ ${#broken[@]} -gt 0 ]; then
