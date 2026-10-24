@@ -1677,6 +1677,17 @@ def isStepGoal (g : MVarId) : MetaM Bool := do
   | .reaches .. | .reachesRet .. => return true
   | _ => return false
 
+/-- The literal rip of a `Reaches`/`ReachesRet` goal whose state is a `State.mk` literal (path
+merging, `Common.pickMerged`). -/
+def goalPC (g : MVarId) : MetaM (Option Nat) := do
+  let s ← match ← goalKind g with
+    | .reaches _ s _ | .reachesRet _ _ s _ => pure s
+    | _ => return none
+  let s ← instantiateMVars s
+  let some (nf, idx) ← Common.fieldIndex ``State `rip | return none
+  unless s.isAppOfArity ``State.mk nf do return none
+  bv64Value? (s.getArg! idx)
+
 /-- Run symbolic execution on the main goal (`single`: one step only). -/
 def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg.budget do
   let g ← getMainGoal
@@ -1684,7 +1695,9 @@ def runJanus (cfg : Cfg) (single : Bool) : TacticM Unit := Common.withBudget cfg
   let mut todo : List (MVarId × Bool) := [(g, true)]
   let mut finished : List MVarId := []
   let mut steps := 0
+  let merge := Common.janus.merge.get (← getOptions)
   while !todo.isEmpty do
+    if merge then todo ← Common.pickMerged { memTypes := [``Janus.Arm64.Memory, ``Memory], regChains := [(``setRegF, ``State.regs)], restore := [``reduceSetRegFRestore] } goalPC todo
     let (g, first) :: rest := todo | break
     todo := rest
     if ← g.isAssigned then continue
