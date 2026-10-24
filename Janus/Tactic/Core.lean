@@ -240,6 +240,10 @@ def stateHyps : MetaM (Array Expr) := do
       if l.isAppOfArity ``Memory.readLE 3 && ty.isForall then
         out := out.push d.toExpr; continue
     let some (_, lhs, rhs) := ty.eq? | continue
+    -- memory facts of the dynamic-call vocabulary, from `janus_dyn` (`Janus.Tactic.Dynamic`)
+    if lhs.isAppOfArity ``Memory.readLE 3 &&
+        "h_dyn".isPrefixOf d.userName.eraseMacroScopes.toString then
+      out := out.push d.toExpr; continue
     let isStateProj (e : Expr) : Bool :=
       e.isAppOfArity ``State.pc 1 || e.isAppOfArity ``State.sp 1 ||
       e.isAppOfArity ``State.flags 1 || e.isAppOfArity ``State.mem 1

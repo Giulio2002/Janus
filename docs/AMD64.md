@@ -400,9 +400,18 @@ a hard-coded address (see *Layout independence* above), so adding functions to
 | `CopyBlock` | `copy(dst[:], src[:])` of `[16]uint64` through the real `runtime.memmove` (its 65–128-byte SSE path): the 128 bytes at `dst` equal the old 128 bytes at `src`, for any overlap |
 | `ClearWords` | `clear(b)` through the real `runtime.memclrNoHeapPointers`, for **every** length: all `len(b)` words are 0 and no other byte outside the frame changes. Covers the straight-line cases, the 256-byte `MOVDQU` loop and the `REP STOSQ` path; quantifies over `internal/cpu.X86.HasERMS` and assumes `HasAVX2 ≠ 1` |
 | `Equal64` | `bytes.Equal` of two `[64]byte` through the real `runtime.memequal`/`memeqbody`: `AL = 1` iff the 64 bytes are equal, else `AL = 0`, for **every** value of `internal/cpu.X86.HasAVX2` (the AVX2 loop: `VMOVDQU`, `VPCMPEQB`, `VPAND`, `VPMOVMSKB`, `VZEROUPPER`; the SSE loop: `MOVDQU`, `PCMPEQB`, `PAND`, `PMOVMSKB`), including `a = b` |
+| `HashWith` | the interface call `h.Hash(x)` (`CALL DX` through `Fun[0]` of the itab in `RAX`): `x · K` if the itab is `*MulHasher`'s, `rotl(x, 13) + K` if it is `*RotHasher`'s (`Janus.Spec.ItabIs`; callee summaries of both methods) |
+| `HashTwice` | `ApplyTwice(h.Hash, x)` through the method value wrapper `(*MulHasher).Hash-fm` (funcval built in the frame, context in `DX`): returns `x · K · K` |
+| `MapSum` | `Σ f(xs[j])` for the closure `f` = `AffineSum.func1` capturing `a`, `b` (`FuncvalIs`, `ClosureCtx`): returns `Σ (a·xs[j] + b) mod 2^64` (a loop calling the closure, by induction) |
+| `DeferAdd` | `r = x` with an open-coded `defer` of a closure adding `y` to `r`: returns `[x + y]` |
 | `CopyBlock512` | `copy(dst[:], src[:])` of `[64]uint64` (512 bytes) through `runtime.memmove`'s **AVX path** (`VMOVDQU` loads, 32-aligned `VMOVDQA` stores, `VZEROUPPER`), for every alignment of `dst`, disjoint arrays, given `memmoveBits & 1 = 1`: the 512 bytes at `dst` equal the old ones at `src`. (256 bytes or fewer never reach the AVX path: `memmove` copies them with SSE.) |
 
 ## Known gaps
+
+* Dynamic calls (`CALL reg`) are followed only to a target the hypotheses determine
+  (`Janus.Spec.Dynamic`, `janus_dyn`; the closure context register is `RDX`). `recover`,
+  panics unwinding through defers and non-open-coded defers (`runtime.deferproc*`) are not
+  supported; see docs/RUNTIME-CONTRACTS.md.
 
 * 8/16-bit `RCL`/`RCR`, `MULX`, `ADCX`/`ADOX`, VEX instructions other than the eleven above,
   EVEX (AVX-512), `CMPS`/`SCAS`/`LODS`, `PCMPESTRI`, AES/SHA/CRC32, `GS`-relative accesses and
