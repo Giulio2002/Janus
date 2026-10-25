@@ -261,6 +261,47 @@ def CEnsuresR (p : Program) (entry : Nat) (sig : SysV.Sig) (vals : List Nat)
 
 section Classified
 
+/-- The low `k` bytes of a two-part value `x + 256^k·y` (a struct of two members, `x` first). -/
+theorem bytesOf_lo (x y k : Nat) (hx : x < 256 ^ k) : bytesOf (x + 256 ^ k * y) 0 k = x := by
+  simp only [bytesOf, Nat.pow_zero, Nat.div_one]
+  rw [Nat.add_mul_mod_self_left, Nat.mod_eq_of_lt hx]
+
+/-- The bytes from `k` on of a two-part value `x + 256^k·y`. -/
+theorem bytesOf_hi (x y k m : Nat) (hx : x < 256 ^ k) : bytesOf (x + 256 ^ k * y) k m = y % 256 ^ m := by
+  simp only [bytesOf]
+  have hk : 0 < 256 ^ k := Nat.pow_pos (by decide)
+  rw [Nat.add_mul_div_left _ _ hk, Nat.div_eq_of_lt hx, Nat.zero_add]
+
+/-- The bytes of a 16-byte struct of two 8-byte members `x`, `y` (`x` first). -/
+def pair (x y : BitVec 64) : Nat := x.toNat + 2 ^ 64 * y.toNat
+
+theorem pair_lt (x y : BitVec 64) : pair x y < 2 ^ 128 := by
+  have := x.isLt; have := y.isLt; simp only [pair]; omega
+
+theorem bytesOf_pair_lo (x y : BitVec 64) : bytesOf (pair x y) 0 8 = x.toNat :=
+  bytesOf_lo x.toNat y.toNat 8 x.isLt
+
+theorem bytesOf_pair_hi (x y : BitVec 64) : bytesOf (pair x y) 8 8 = y.toNat := by
+  rw [pair, show (2 : Nat) ^ 64 = 256 ^ 8 from rfl, bytesOf_hi _ _ _ _ x.isLt]
+  exact Nat.mod_eq_of_lt y.isLt
+
+/-- A 32-byte read as four 8-byte words (a 32-byte struct of 8-byte members). -/
+theorem readLE_32 (m : Memory) (a : Nat) : m.readLE a 32 = m.readLE a 8 + 2 ^ 64 * m.readLE (a + 8) 8 +
+    2 ^ 128 * m.readLE (a + 16) 8 + 2 ^ 192 * m.readLE (a + 24) 8 := by
+  rw [show 32 = 8 + 24 from rfl, Janus.Arm64.Memory.readLE_add, show 24 = 8 + 16 from rfl,
+    Janus.Arm64.Memory.readLE_add, show 16 = 8 + 8 from rfl, Janus.Arm64.Memory.readLE_add]
+  simp only [Nat.add_assoc, Nat.reducePow, Nat.reduceAdd]
+  omega
+
+/-- A 16-byte read as two 8-byte words. -/
+theorem readLE_16 (m : Memory) (a : Nat) :
+    m.readLE a 16 = m.readLE a 8 + 2 ^ 64 * m.readLE (a + 8) 8 := by
+  rw [show 16 = 8 + 8 from rfl, Janus.Arm64.Memory.readLE_add]
+
+/-- All bytes of a value of `k` bytes. -/
+theorem bytesOf_all (x k : Nat) (hx : x < 256 ^ k) : bytesOf x 0 k = x := by
+  simp only [bytesOf, Nat.pow_zero, Nat.div_one, Nat.mod_eq_of_lt hx]
+
 variable {p : Program} {s : State} {entry : Nat}
 
 theorem argsAt_cons (s : State) (t : CType) (ts : List CType) (v : Nat) (vs : List Nat)

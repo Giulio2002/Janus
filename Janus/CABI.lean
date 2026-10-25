@@ -302,6 +302,47 @@ def CEnsuresR (p : Program) (entry : Nat) (sig : AAPCS64.Sig) (vals : List Nat)
 
 section Classified
 
+/-- The low `k` bytes of a two-part value `x + 256^k·y` (a struct of two members, `x` first). -/
+theorem bytesOf_lo (x y k : Nat) (hx : x < 256 ^ k) : bytesOf (x + 256 ^ k * y) 0 k = x := by
+  simp only [bytesOf, Nat.pow_zero, Nat.div_one]
+  rw [Nat.add_mul_mod_self_left, Nat.mod_eq_of_lt hx]
+
+/-- The bytes from `k` on of a two-part value `x + 256^k·y`. -/
+theorem bytesOf_hi (x y k m : Nat) (hx : x < 256 ^ k) : bytesOf (x + 256 ^ k * y) k m = y % 256 ^ m := by
+  simp only [bytesOf]
+  have hk : 0 < 256 ^ k := Nat.pow_pos (by decide)
+  rw [Nat.add_mul_div_left _ _ hk, Nat.div_eq_of_lt hx, Nat.zero_add]
+
+/-- The bytes of a 16-byte struct of two 8-byte members `x`, `y` (`x` first). -/
+def pair (x y : BitVec 64) : Nat := x.toNat + 2 ^ 64 * y.toNat
+
+theorem pair_lt (x y : BitVec 64) : pair x y < 2 ^ 128 := by
+  have := x.isLt; have := y.isLt; simp only [pair]; omega
+
+theorem bytesOf_pair_lo (x y : BitVec 64) : bytesOf (pair x y) 0 8 = x.toNat :=
+  bytesOf_lo x.toNat y.toNat 8 x.isLt
+
+theorem bytesOf_pair_hi (x y : BitVec 64) : bytesOf (pair x y) 8 8 = y.toNat := by
+  rw [pair, show (2 : Nat) ^ 64 = 256 ^ 8 from rfl, bytesOf_hi _ _ _ _ x.isLt]
+  exact Nat.mod_eq_of_lt y.isLt
+
+/-- A 32-byte read as four 8-byte words (a 32-byte struct of 8-byte members). -/
+theorem readLE_32 (m : Memory) (a : Nat) : m.readLE a 32 = m.readLE a 8 + 2 ^ 64 * m.readLE (a + 8) 8 +
+    2 ^ 128 * m.readLE (a + 16) 8 + 2 ^ 192 * m.readLE (a + 24) 8 := by
+  rw [show 32 = 8 + 24 from rfl, Janus.Arm64.Memory.readLE_add, show 24 = 8 + 16 from rfl,
+    Janus.Arm64.Memory.readLE_add, show 16 = 8 + 8 from rfl, Janus.Arm64.Memory.readLE_add]
+  simp only [Nat.add_assoc, Nat.reducePow, Nat.reduceAdd]
+  omega
+
+/-- A 16-byte read as two 8-byte words. -/
+theorem readLE_16 (m : Memory) (a : Nat) :
+    m.readLE a 16 = m.readLE a 8 + 2 ^ 64 * m.readLE (a + 8) 8 := by
+  rw [show 16 = 8 + 8 from rfl, Janus.Arm64.Memory.readLE_add]
+
+/-- All bytes of a value of `k` bytes. -/
+theorem bytesOf_all (x k : Nat) (hx : x < 256 ^ k) : bytesOf x 0 k = x := by
+  simp only [bytesOf, Nat.pow_zero, Nat.div_one, Nat.mod_eq_of_lt hx]
+
 variable {p : Program} {s : State} {entry : Nat}
 
 theorem piecesAt_cons (s : State) (v : Nat) (pc : Piece) (ps : List Piece) :
@@ -382,6 +423,83 @@ theorem argsAt_ints (s : State) : ∀ (k : Nat) (xs : List W64), k + xs.length �
       refine ⟨h0, fun i hi => ?_⟩
       have := hr (i + 1) (by simp; omega)
       simpa [Nat.add_assoc, Nat.add_comm 1 i] using this
+
+/-- One 64-bit integer when the general registers are used up: the next stacked slot. -/
+theorem assign_int8_stack (nsrn o : Nat) (ho : o % 8 = 0) :
+    AAPCS64.assign ⟨8, nsrn, o⟩ (.int 8 true) =
+      (.direct [⟨0, 8, .stack o⟩], ⟨8, nsrn, o + 8⟩) := by
+  have hr : (o + 7) / 8 * 8 = o := by omega
+  simp [AAPCS64.assign, CType.hfa, CType.hfaCand, AAPCS64.byRef, CType.isAggregate,
+    AAPCS64.gprOrStack, CType.size, CType.align, hr, CType.roundUp]
+
+/-- One 64-bit integer when `NGRN = k < 8` (any `NSRN`, `NSAA`). -/
+theorem assign_int8' (k nsrn o : Nat) (hk : k < 8) :
+    AAPCS64.assign ⟨k, nsrn, o⟩ (.int 8 true) = (.direct [⟨0, 8, .gpr k⟩], ⟨k + 1, nsrn, o⟩) := by
+  have hk1 : k + 1 ≤ 8 := by omega
+  simp [AAPCS64.assign, CType.hfa, CType.hfaCand, AAPCS64.byRef, CType.isAggregate,
+    AAPCS64.gprOrStack, CType.size, CType.align, hk1]
+
+/-- Where the `i`-th of a run of 64-bit integer arguments goes, from the state `st`: the next
+general registers while they last, then consecutive 8-byte stacked slots. -/
+def intLoc (st : AAPCS64.Next) (i : Nat) : Loc :=
+  if st.ngrn + i < 8 then .gpr (st.ngrn + i) else .stack (st.nsaa + 8 * (st.ngrn + i - 8))
+
+theorem intLoc_stack (st : AAPCS64.Next) (i : Nat) (h : 8 ≤ st.ngrn + i) :
+    intLoc st i = .stack (st.nsaa + 8 * (st.ngrn + i - 8)) := by
+  simp only [intLoc, show ¬ st.ngrn + i < 8 by omega, ↓reduceIte]
+
+/-- Any number of 64-bit integer (or pointer) arguments, from a state with `NGRN ≤ 8` and an
+8-aligned `NSAA`: the classification and its state predicate, as one statement per argument. -/
+theorem argsAt_ints_gen (s : State) : ∀ (st : AAPCS64.Next) (xs : List W64),
+    st.ngrn ≤ 8 → st.nsaa % 8 = 0 →
+    (ArgsAt s (xs.map fun _ => .int 8 true) (xs.map BitVec.toNat)
+        (AAPCS64.assignAll st (xs.map fun _ => .int 8 true)).1 ↔
+      ∀ i (hi : i < xs.length), PieceAt s xs[i].toNat ⟨0, 8, intLoc st i⟩)
+  | st, [], _, _ => by simp [ArgsAt, AAPCS64.assignAll]
+  | ⟨k, nsrn, o⟩, x :: xs, hk, ho => by
+    by_cases h8 : k < 8
+    · simp only [List.map_cons, AAPCS64.assignAll, assign_int8' k nsrn o h8]
+      rw [argsAt_cons, argsAt_ints_gen s ⟨k + 1, nsrn, o⟩ xs (by simp; omega) ho]
+      simp only [ArgAt, PiecesAt, and_true]
+      constructor
+      · rintro ⟨h0, hr⟩ i hi
+        cases i with
+        | zero => simpa [intLoc, h8] using h0
+        | succ i =>
+          have := hr i (by simp at hi; omega)
+          simpa [intLoc, Nat.add_assoc, Nat.add_comm 1 i] using this
+      · intro hr
+        have h0 := hr 0 (by simp)
+        simp only [List.getElem_cons_zero, intLoc, Nat.add_zero, h8, ↓reduceIte] at h0
+        refine ⟨h0, fun i hi => ?_⟩
+        have := hr (i + 1) (by simp; omega)
+        simpa [intLoc, Nat.add_assoc, Nat.add_comm 1 i] using this
+    · have hk8 : k = 8 := by simp at hk; omega
+      subst hk8
+      simp only [List.map_cons, AAPCS64.assignAll, assign_int8_stack nsrn o ho]
+      rw [argsAt_cons, argsAt_ints_gen s ⟨8, nsrn, o + 8⟩ xs (by simp) (by simp at ho ⊢; omega)]
+      simp only [ArgAt, PiecesAt, and_true]
+      constructor
+      · rintro ⟨h0, hr⟩ i hi
+        cases i with
+        | zero => simpa [intLoc] using h0
+        | succ i =>
+          have := hr i (by simp at hi; omega)
+          rw [intLoc_stack _ _ (by simp)] at this
+          rw [intLoc_stack _ _ (by simp)]
+          simp only [List.getElem_cons_succ]
+          have e : o + 8 + 8 * (8 + i - 8) = o + 8 * (8 + (i + 1) - 8) := by omega
+          simpa only [e] using this
+      · intro hr
+        have h0 := hr 0 (by simp)
+        simp only [List.getElem_cons_zero, intLoc] at h0
+        refine ⟨by simpa using h0, fun i hi => ?_⟩
+        have := hr (i + 1) (by simp; omega)
+        rw [intLoc_stack _ _ (by simp)] at this
+        rw [intLoc_stack _ _ (by simp)]
+        simp only [List.getElem_cons_succ] at this
+        have e : o + 8 + 8 * (8 + i - 8) = o + 8 * (8 + (i + 1) - 8) := by omega
+        simpa only [e] using this
 
 /-- The integer-register call `CCall` is the classified call of a prototype of 64-bit integer
 (or pointer) arguments with no indirect result. -/
