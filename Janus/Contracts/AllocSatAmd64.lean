@@ -69,9 +69,10 @@ theorem ret_of (s s' : Janus.Amd64.State) (res : List W64) (hrip : s'.rip = retA
     (h4 : s'.regs 4 = s.regs 4 + 8) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
     (h0 : s'.regs 0 = res.getD 0 (s'.regs 0)) (h3 : s'.regs 3 = res.getD 1 (s'.regs 3))
     (h1 : s'.regs 1 = res.getD 2 (s'.regs 1)) (hx : s'.xmm 15 = s.xmm 15)
-    (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr) :
+    (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr)
+    (hfw : s'.fpucw = s.fpucw) :
     s' = retState64 s s'.regs res s'.flags s'.xmm s'.ymmHi s'.mem := by
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, fw⟩ := s'
   simp only at hrip h4 h5 h14 h0 h3 h1 hx hfs hdf hmx ⊢
   simp only [retState64]
   subst hrip hfs hdf hmx
@@ -106,7 +107,7 @@ theorem newobject64_impl : NewobjectContract64 (toy.link (at0 heapCode)) A0 rt 4
   janus64_run
   refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
-    (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl,
+    (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
   unfold typSize at hsz
   rw [readLE_rtView (hin.sub (Nat.le_refl _) (by omega))] at hsz
@@ -134,7 +135,7 @@ theorem mallocgc64_impl : MallocgcContract64 (toy.link (at0 heapCode)) A0 rt 409
   janus64_run
   refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
-    (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl,
+    (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
   rw [show (BitVec.ofNat 64 heap).toNat = heap from rfl]
   exact fresh_heap _ _ hr (le_blockSize _ _)
@@ -157,7 +158,7 @@ theorem makeslice64_impl : MakesliceContract64 (toy.link (at0 heapCode)) A0 rt 4
   janus64_run
   refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
-    (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl,
+    (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
   unfold typSize at hsz
   rw [readLE_rtView (hin.sub (Nat.le_refl _) (by omega))] at hsz
@@ -191,7 +192,7 @@ theorem growslice64_impl : GrowsliceContract64 (toy.link (at0 growCode)) A0 rt 4
   janus64_run
   refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, ret_of s _ _
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
-    (by simp [setRegF, heap]) (by simp [setRegF]) (by simp [setRegF, h1, h2, growCap8_1_0]) rfl rfl rfl rfl,
+    (by simp [setRegF, heap]) (by simp [setRegF]) (by simp [setRegF, h1, h2, growCap8_1_0]) rfl rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩
   simp only [growsliceObj64, h1, h2, h3, growCap8_1_0, show (BitVec.ofNat 64 heap).toNat = heap from rfl]
   exact ⟨fresh_heap (size := 8) (round := 8) _ _ hr (Nat.le_refl _) (by decide),
