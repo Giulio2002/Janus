@@ -116,48 +116,50 @@ def RTReturn (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (s s' : 
 /-! ## Boxing (`RAX = regs 0`, `RBX = regs 3`, `RCX = regs 1`) -/
 
 /-- **`runtime.convT(t, v)`** (`RAX = t`, `RBX = v`): as `Iface.ConvT`. -/
-def ConvT (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
+def ConvT (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
   Summary p addr
     (fun s => RTPre R 2 s ∧ R.IsType (s.regs 0).toNat ∧
       (s.regs 3).toNat + tySize s.mem (s.regs 0).toNat ≤ 2 ^ 48 ∧
-      s.mem.accessible (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat) false = true)
+      s.mem.accessible (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat) false = true ∧
+      Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s)
     (fun s s' => RTReturn R 2 [] s s' fun r m =>
       BoxCopy R s.mem m (r 0).toNat (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat))
 
 /-- **`runtime.convTnoptr(t, v)`**: as `Iface.ConvTnoptr`. -/
-def ConvTnoptr (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
+def ConvTnoptr (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
   Summary p addr
     (fun s => RTPre R 2 s ∧ R.IsType (s.regs 0).toNat ∧ tyPtrBytes s.mem (s.regs 0).toNat = 0 ∧
       (s.regs 3).toNat + tySize s.mem (s.regs 0).toNat ≤ 2 ^ 48 ∧
-      s.mem.accessible (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat) false = true)
+      s.mem.accessible (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat) false = true ∧
+      Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s)
     (fun s s' => RTReturn R 2 [] s s' fun r m =>
       BoxCopy R s.mem m (r 0).toNat (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat))
 
 /-- **`runtime.convT16(v)`** (`RAX = v`): as `Iface.ConvT16`. -/
-def ConvT16 (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 1 s)
+def ConvT16 (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 1 s ∧ Ready64 H R.priv [(s.regs 0).toNat] s)
     (fun s s' => RTReturn R 1 [] s s' fun r m => BoxHolds R m (r 0).toNat 2 ((s.regs 0).toNat % 2 ^ 16))
 
 /-- **`runtime.convT32(v)`**: as `Iface.ConvT32`. -/
-def ConvT32 (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 1 s)
+def ConvT32 (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 1 s ∧ Ready64 H R.priv [(s.regs 0).toNat] s)
     (fun s s' => RTReturn R 1 [] s s' fun r m => BoxHolds R m (r 0).toNat 4 ((s.regs 0).toNat % 2 ^ 32))
 
 /-- **`runtime.convT64(v)`**: as `Iface.ConvT64`. -/
-def ConvT64 (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 1 s)
+def ConvT64 (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 1 s ∧ Ready64 H R.priv [(s.regs 0).toNat] s)
     (fun s s' => RTReturn R 1 [] s s' fun r m => BoxHolds R m (r 0).toNat 8 (s.regs 0).toNat)
 
 /-- **`runtime.convTstring(s)`** (`RAX = ptr`, `RBX = len`): as `Iface.ConvTstring`. -/
-def ConvTstring (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 2 s)
+def ConvTstring (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 2 s ∧ Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s)
     (fun s s' => RTReturn R 2 [] s s' fun r m =>
       BoxWords R m (r 0).toNat
         [if (s.regs 3).toNat = 0 then 0 else (s.regs 0).toNat, (s.regs 3).toNat])
 
 /-- **`runtime.convTslice(s)`** (`RAX = ptr`, `RBX = len`, `RCX = cap`): as `Iface.ConvTslice`. -/
-def ConvTslice (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 3 s)
+def ConvTslice (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 3 s ∧ Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s)
     (fun s s' => RTReturn R 3 [] s s' fun r m =>
       BoxWords R m (r 0).toNat
         (if (s.regs 0).toNat = 0 then [0, 0, 0]
@@ -182,13 +184,14 @@ def AssertE2I2 (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
       ItabResult R m (s.regs 0).toNat (s.regs 3).toNat (r 0).toNat)
 
 /-- **`runtime.typeAssert(desc, t)`** (`RAX = desc`, `RBX = t`): as `Iface.TypeAssert`. -/
-def TypeAssert (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
+def TypeAssert (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
   Summary p addr
     (fun s => RTPre R 2 s ∧ TADescOK R s.mem (s.regs 0).toNat ∧
-      ((s.regs 3).toNat = 0 → taCanFail s.mem (s.regs 0).toNat = true) ∧
+      (s.regs 3).toNat ≠ 0 ∧
       ((s.regs 3).toNat ≠ 0 → R.IsType (s.regs 3).toNat ∧
         (taCanFail s.mem (s.regs 0).toNat = true ∨
-          (R.itab (taInter s.mem (s.regs 0).toNat) (s.regs 3).toNat).isSome)))
+          (R.itab (taInter s.mem (s.regs 0).toNat) (s.regs 3).toNat).isSome)) ∧
+      Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s)
     (fun s s' => RTReturn R 2 [((s.regs 0).toNat, (s.regs 0).toNat + 8)] s s' fun r m =>
       ItabResult R m (taInter s.mem (s.regs 0).toNat) (s.regs 3).toNat (r 0).toNat ∧
       TADescOK R m (s.regs 0).toNat ∧ taInter m (s.regs 0).toNat = taInter s.mem (s.regs 0).toNat ∧
@@ -196,10 +199,11 @@ def TypeAssert (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
 
 /-- **`runtime.interfaceSwitch(desc, t)`** (`RAX = desc`, `RBX = t`; results `RAX = case`,
 `RBX = itab`): as `Iface.InterfaceSwitch`. -/
-def InterfaceSwitch (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) : Prop :=
+def InterfaceSwitch (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
   ∀ cs : List Nat, Summary p addr
     (fun s => RTPre R 2 s ∧ ISDescOK R s.mem (s.regs 0).toNat cs ∧ (s.regs 3).toNat ≠ 0 ∧
-      R.IsType (s.regs 3).toNat)
+      R.IsType (s.regs 3).toNat ∧
+      Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s)
     (fun s s' => RTReturn R 2 [((s.regs 0).toNat, (s.regs 0).toNat + 8)] s s' fun r m =>
       (r 0).toNat = (switchCase R (s.regs 3).toNat cs).1 ∧
       (r 3).toNat = (switchCase R (s.regs 3).toNat cs).2 ∧

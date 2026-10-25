@@ -14,6 +14,10 @@ that behaves as the named contract(s) of `Janus.Contracts.MapAmd64` say (docs/RU
 below the function's own frame (writable, above the stack guard, outside the runtime's private
 memory `M.priv`) and `mapType` is the type descriptor the code passes, recomputed from the
 extracted RIP-relative `LEA`.
+
+**Readiness** (round 10). The statement also quantifies over `H : RtReady`, the runtime's readiness
+for the one call that may allocate (`runtime.makemap_small`), and assumes it at entry: the theorem says nothing
+about a call the runtime cannot serve as the contract says (no room in the heap, a collection).
 -/
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map Janus.Contracts.MapAmd64
@@ -21,14 +25,15 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map Janus
 namespace Proof
 
 theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64))
-    (hl : M.Laws)
+    (hl : M.Laws) (H : Janus.Contracts.RtReady)
     (hmk : MakeSmall (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.makemap_small") M) :
+      (Extracted.program.contractAddr "runtime.makemap_small") M H) :
     Ensures (Extracted.program.link impl) Extracted.entry []
-      (fun s => CallerOK M s 16 8)
+      (fun s => CallerOK M s 16 8 ∧
+        H [] (s.regs 14).toNat ((s.regs 4).toNat - 16) (Janus.Contracts.rtView M.priv s.mem))
       (fun s s' => (s'.regs 0).toNat ≠ 0 ∧ M.Rep s'.mem (s'.regs 0).toNat AMap.empty ∧
         M.Env s'.mem (s.regs 14)) := by
-  intro ret hret s hs hc
+  intro ret hret s hs ⟨hc, hH⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
@@ -37,9 +42,12 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
     rw [BitVec.toNat_sub]; simp; omega
   janus64_run until [Extracted.program.contractAddr "runtime.makemap_small"]
   refine Reaches.call (Summary.withExit hmk hret) rfl
-    (RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp16]) (by simp [setRegF])
+    ⟨RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp16]) (by simp [setRegF])
       (by simpa using hs.zero) (by simpa using hs.df) (by simp [setRegF, keepABI, hsp16, Arm64.Memory.readLE_writeLE_self])
-        (by decide) (by decide)) ?_
+        (by decide) (by decide), ?_⟩ ?_
+  · simp only [Janus.Contracts.Ready64, setRegF, reduceIte, Nat.reduceEqDiff]
+    simp (disch := janus64_disch) only [Janus.Contracts.rtView_writeLE]
+    simpa [hsp16] using hH
   · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hnz, hrep, hfresh⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.append_nil, setRegF, reduceIte, Nat.reduceEqDiff, hsp16] at hfr

@@ -30,6 +30,10 @@ the cyclic distance to an empty entry) either hits an entry, whose itab is the r
 **Assumptions (all in the statement).** `R` is *any* model satisfying `R.Laws`, and the code at
 `runtime.typeAssert` is *any* code that behaves as `TypeAssert` says; the extraction pins that
 function to the Go runtime's code (`(pinned)` in the report).
+
+**Readiness** (round 10). The statement also quantifies over `H : RtReady`, the runtime's readiness
+for the one call that may allocate (`runtime.typeAssert`), and assumes it at entry: the theorem says nothing
+about a call the runtime cannot serve as the contract says (no room in the heap, a collection).
 -/
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Spec.Map
@@ -71,14 +75,15 @@ theorem probeAddr (c k : Nat) (h : BitVec 64) (hk : k ≤ 64) (hc : c + 8 + 16 *
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 20000 in
 /-- A cache miss: the call of `runtime.typeAssert` and the return. -/
-theorem miss (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
+theorem miss (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws) (H : Janus.Contracts.RtReady)
     (hta : TypeAssert (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.typeAssert") R)
+      (Extracted.program.contractAddr "runtime.typeAssert") R H)
     (t x : BitVec 64) (ret : Nat) (hret : RetAddr (Extracted.program.link impl) ret) (s : State)
     (hc : CallerOK R s 40 24) (hdesc : TADescOK R s.mem desc) (hcf : taCanFail s.mem desc = true)
     (hdo : desc + 24 ≤ (s.regs 4).toNat - (R.depth + 40) ∨ (s.regs 4).toNat + 24 ≤ desc)
     (ht0 : t.toNat ≠ 0) (hty : R.IsType t.toNat)
-    (hra : s.mem.readLE (s.regs 4).toNat 8 = ret) (hx15 : s.xmm 15 = 0) (hdf : s.df = false) :
+    (hra : s.mem.readLE (s.regs 4).toNat 8 = ret) (hx15 : s.xmm 15 = 0) (hdf : s.df = false)
+    (hH : H [desc, t.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40) (Janus.Contracts.rtView R.priv s.mem)) :
     ∀ (S : State), S.rip = BitVec.ofNat 64 (Extracted.entry + 0x55) → S.regs 0 = t → S.regs 3 = x →
       S.regs 4 = s.regs 4 - 32#64 → S.regs 5 = s.regs 4 - 8#64 → S.regs 14 = s.regs 14 →
       S.xmm = s.xmm → S.df = s.df → S.mem = M0 s t x →
@@ -112,13 +117,17 @@ theorem miss (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
   refine Reaches.call (Summary.withExit hta hret) rfl
     ⟨RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp40, hsp40']) (by simp [setRegF, h14])
       (by simp [hxm, hx15]) (by simp [hdf', hdf])
-      (by simp [setRegF, hsp40, hsp40', Arm64.Memory.readLE_writeLE_self]) (by decide) (by decide), ?_, ?_, ?_⟩ ?_
+      (by simp [setRegF, hsp40, hsp40', Arm64.Memory.readLE_writeLE_self]) (by decide) (by decide), ?_, ?_, ?_, ?_⟩ ?_
   · simp only [setRegF, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, ← hD]
     exact TADescOK.frame hdesc (by janus_frame) hdo'' hws
-  · simp only [setRegF, reduceIte, Nat.reduceEqDiff, h0]; intro h; exact absurd h ht0
+  · simp only [setRegF, reduceIte, Nat.reduceEqDiff, h0]; exact ht0
   · simp only [setRegF, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, h0, ← hD]
     intro _; refine ⟨hty, Or.inl ?_⟩
     exact (taCanFail_frame (m := s.mem) (by janus_frame) hdo'').trans hcf
+  · simp only [Janus.Contracts.Ready64, setRegF, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, h0, ← hD, h14]
+    simp (disch := janus64_disch) only [Janus.Contracts.rtView_writeLE]
+    have e1 : (s.regs 4 - 40#64).toNat = (s.regs 4).toNat - 40 := by bv_omega
+    simpa [e1] using hH
   · intro s' hpc' ⟨r, x', y, fl, m', hs', hfr, henv', hres, hdesc2, hinter2, hcf2⟩
     subst hs'
     simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, setRegF, reduceIte,
@@ -144,14 +153,15 @@ theorem miss (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 20000 in
-theorem loop (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
+theorem loop (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws) (H : Janus.Contracts.RtReady)
     (hta : TypeAssert (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.typeAssert") R)
+      (Extracted.program.contractAddr "runtime.typeAssert") R H)
     (t x : BitVec 64) (ret : Nat) (hret : RetAddr (Extracted.program.link impl) ret) (s : State)
     (hc : CallerOK R s 40 24) (hdesc : TADescOK R s.mem desc) (hcf : taCanFail s.mem desc = true)
     (hdo : desc + 24 ≤ (s.regs 4).toNat - (R.depth + 40) ∨ (s.regs 4).toNat + 24 ≤ desc)
     (ht0 : t.toNat ≠ 0) (hty : R.IsType t.toNat)
-    (hra : s.mem.readLE (s.regs 4).toNat 8 = ret) (hx15 : s.xmm 15 = 0) (hdf : s.df = false) (k : Nat)
+    (hra : s.mem.readLE (s.regs 4).toNat 8 = ret) (hx15 : s.xmm 15 = 0) (hdf : s.df = false)
+    (hH : H [desc, t.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40) (Janus.Contracts.rtView R.priv s.mem)) (k : Nat)
     (hk : s.mem.readLE (s.mem.readLE desc 8) 8 = 2 ^ k - 1)
     (hcb : s.mem.readLE desc 8 + 8 + 16 * 2 ^ k ≤ 2 ^ 48)
     (hcacc : s.mem.accessible (s.mem.readLE desc 8) (8 + 16 * 2 ^ k) false = true)
@@ -245,7 +255,7 @@ theorem loop (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
         (by simp [setRegF, h3]) (by simp [setRegF, h2])
         (by simp only [setRegF, reduceIte, Nat.reduceEqDiff]; exact probeAddr _ _ _ hk64 hcb)
         (by simp [setRegF, h4]) (by simp [setRegF, h5]) (by simp [setRegF, h14]) hxm (by simp [hdf', hdf]) rfl
-    · exact miss impl R hl hta t x ret hret s hc hdesc hcf hdo ht0 hty hra hx15 hdf _ (by rfl)
+    · exact miss impl R hl H hta t x ret hret s hc hdesc hcf hdo ht0 hty hra hx15 hdf hH _ (by rfl)
         (by simp [setRegF, h0]) (by simp [setRegF, h3]) (by simp [setRegF, h4]) (by simp [setRegF, h5])
         (by simp [setRegF, h14]) hxm (by simp [hdf', hdf]) rfl
     · exfalso
@@ -263,7 +273,7 @@ theorem loop (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
         (by simp [setRegF, h3]) (by simp [setRegF, h2])
         (by simp only [setRegF, reduceIte, Nat.reduceEqDiff]; exact probeAddr _ _ _ hk64 hcb)
         (by simp [setRegF, h4]) (by simp [setRegF, h5]) (by simp [setRegF, h14]) hxm (by simp [hdf', hdf]) rfl
-    · exact miss impl R hl hta t x ret hret s hc hdesc hcf hdo ht0 hty hra hx15 hdf _ (by rfl)
+    · exact miss impl R hl H hta t x ret hret s hc hdesc hcf hdo ht0 hty hra hx15 hdf hH _ (by rfl)
         (by simp [setRegF, h0]) (by simp [setRegF, h3]) (by simp [setRegF, h4]) (by simp [setRegF, h5])
         (by simp [setRegF, h14]) hxm (by simp [hdf', hdf]) rfl
     · have hne : h.toNat % 2 ^ k ≠ j := fun he => by rw [htlt, he, hj0] at hbr; exact hbr rfl
@@ -306,19 +316,20 @@ theorem static_case (R : IfaceModel) (t x : BitVec 64) (s s' : State) (hp : Post
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 20000 in
-theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
+theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws) (H : Janus.Contracts.RtReady)
     (hta : TypeAssert (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.typeAssert") R)
+      (Extracted.program.contractAddr "runtime.typeAssert") R H)
     (t x : BitVec 64) :
     Ensures (Extracted.program.link impl) Extracted.entry [t, x]
       (fun s => CallerOK R s 40 24 ∧ TADescOK R s.mem desc ∧ taCanFail s.mem desc = true ∧
         Outside desc 24 [((s.regs 4).toNat - (R.depth + 40), (s.regs 4).toNat + 24)] ∧
-        (t.toNat ≠ 0 → R.IsType t.toNat))
+        (t.toNat ≠ 0 → R.IsType t.toNat) ∧ H [desc, t.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40)
+          (Janus.Contracts.rtView R.priv s.mem))
       (fun s s' => Post R t x s s' ∧
         (StaticItabs R Extracted.program.data → taInter s.mem desc = hasherInter →
           t.toNat = mulHasherType →
           (s'.regs 0).toNat = mulHasherItab ∧ (s'.regs 1).toNat % 256 = 1)) := by
-  intro ret hret s hs ⟨hc, hdesc, hcf, hdo, hty⟩
+  intro ret hret s hs ⟨hc, hdesc, hcf, hdo, hty, hH⟩
   suffices hmain : Reaches ((Extracted.program.link impl).withExit ret) s
       (IsReturn fun s' => ABIReturn s s' ∧ Post R t x s s') by
     exact (returns_of_reaches hmain).mono fun s' h =>
@@ -366,7 +377,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.L
     have hh : (BitVec.setWidth 64 (BitVec.ofNat 32 (Arm64.Memory.readLE s.mem (t.toNat + 16) 4))).toNat =
         Arm64.Memory.readLE s.mem (t.toNat + 16) 4 := by
       simp only [BitVec.toNat_setWidth, BitVec.toNat_ofNat]; simp at hhash; omega
-    refine loop impl R hl hta t x ret hret s hc hdesc hcf hdo ht0 (hty ht0) h_ret hx15 hdf k hk hcb
+    refine loop impl R hl H hta t x ret hret s hc hdesc hcf hdo ht0 (hty ht0) h_ret hx15 hdf hH k hk hcb
       hcacc hcin hent j hj hj0 _ _ (BitVec.setWidth 64 (BitVec.ofNat 32
         (Arm64.Memory.readLE s.mem (t.toNat + 16) 4))) rfl ?_ (by rfl)
       (by simp [setRegF, h_a0]) (by simp [setRegF, h_a1]) (by simp [setRegF, hD])
@@ -401,9 +412,9 @@ def linked : Janus.Amd64.Program :=
 
 theorem linked_eq : Extracted.program.link implAt = linked := rfl
 
-theorem model : TypeAssert (Extracted.program.link implAt) cAddr R0 := by
+theorem model : TypeAssert (Extracted.program.link implAt) cAddr R0 Htrue := by
   rw [linked_eq]
-  intro s hpc ⟨hpre, hdesc, _, _⟩
+  intro s hpc ⟨hpre, hdesc, _, _, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   have hi : taInter s.mem (s.regs 0).toNat = ID := hdesc.2.2.2.1
@@ -473,20 +484,23 @@ theorem pre : CallerOK R0 s0 40 24 ∧ TADescOK R0 s0.mem desc ∧ taCanFail s0.
   · simp only [outside_cons, outside_nil, and_true]; decide +kernel
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (ret : Nat)
-    (s : Janus.Amd64.State) (t x : BitVec 64),
-    R.Laws ∧ TypeAssert (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typeAssert") R ∧
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (H : Janus.Contracts.RtReady)
+    (ret : Nat) (s : Janus.Amd64.State) (t x : BitVec 64),
+    R.Laws ∧ TypeAssert (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typeAssert") R H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
     (CallerOK R s 40 24 ∧ TADescOK R s.mem desc ∧ taCanFail s.mem desc = true ∧
       Outside desc 24 [((s.regs 4).toNat - (R.depth + 40), (s.regs 4).toNat + 24)] ∧
-      (t.toNat ≠ 0 → R.IsType t.toNat)) :=
-  ⟨implAt, R0, ret, s0, td, val, R0_laws, model, hret, setup, pre⟩
+      (t.toNat ≠ 0 → R.IsType t.toNat) ∧ H [desc, t.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40)
+          (Janus.Contracts.rtView R.priv s.mem)) :=
+  ⟨implAt, R0, Htrue, ret, s0, td, val, R0_laws, model, hret, setup,
+    pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩
 
 /-- So the guarantee is reached: the assertion succeeds with the model's itab `TAB`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = TAB ∧ s'.regs 3 = val ∧ (s'.regs 1).toNat % 256 = 1 := by
-  refine (correctness implAt R0 R0_laws model td val ret hret s0 setup pre).mono ?_
+  refine (correctness implAt R0 R0_laws Htrue model td val ret hret s0 setup
+    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩).mono ?_
   intro s' h
   obtain ⟨habi, ⟨h0, h1, h2, -⟩, -⟩ := h
   have hi : taInter s0.mem desc = ID := by decide +kernel

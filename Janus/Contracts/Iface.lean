@@ -242,55 +242,72 @@ theorem efaceEqual_regular {R : IfaceModel} (hl : R.Laws) {m : Memory} {g : W64}
   obtain ⟨-, he⟩ := hl.regular m g t x y henv ht hreg hnd hx hy
   simp [Iface.efaceEqual, ht0, hnd, he]
 
+/-! ## Calls that allocate (round 10 V3)
+
+`convT*` allocate a box (`mallocgc`) on every call that is not served by `staticuint64s` or
+`zeroVal`, and `typeAssert`/`interfaceSwitch` allocate a new cache when they rebuild it. Every
+contract hands `R.Env` back, so without a readiness hypothesis a contract would demand that, from
+any state with `R.Env`, an unbounded sequence of such calls succeeds. The real runtime cannot do
+that in the model, where memory regions are fixed and the collector cannot run (it needs other
+threads and system calls the model does not execute): it eventually needs `mmap` or a GC
+cycle. So no `R.Env` the real runtime keeps could meet those contracts, and the theorems assuming
+them said nothing about the real binary (a toy model meets them, so this is not refutable in
+the kernel, unlike the map contracts of round 10 V2). These contracts now take a readiness
+predicate `H : RtReady` for the call (its arguments, `g`, `SP`, `rtView R.priv`), as the
+allocation contracts do (`Janus.Contracts.Alloc`, round 9 C1). `R.Env` stays the runtime's
+structural invariant; whether this call's allocation succeeds is `H`'s business. -/
+
 /-! ## Boxing -/
 
 /-- **`runtime.convT(t, v)`** (`X0 = t`, `X1 = v`): `mallocgc(t.Size_, t, true)` and
 `typedmemmove`: a box holding a copy of the `t.Size_` bytes at `v`. -/
-def ConvT (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
+def ConvT (p : Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
   Summary p addr
     (fun s => RTPre R 2 s ∧ R.IsType (s.regs 0).toNat ∧
       (s.regs 1).toNat + tySize s.mem (s.regs 0).toNat ≤ 2 ^ 48 ∧
-      s.mem.accessible (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat) false = true)
+      s.mem.accessible (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat) false = true ∧
+      Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s)
     (fun s s' => RTReturn R 2 [] s s' fun r m =>
       BoxCopy R s.mem m (r 0).toNat (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat))
 
 /-- **`runtime.convTnoptr(t, v)`**: as `ConvT`, for a pointer-free `t` (`t.PtrBytes = 0`;
 `mallocgc` without zeroing and `memmove`). -/
-def ConvTnoptr (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
+def ConvTnoptr (p : Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
   Summary p addr
     (fun s => RTPre R 2 s ∧ R.IsType (s.regs 0).toNat ∧ tyPtrBytes s.mem (s.regs 0).toNat = 0 ∧
       (s.regs 1).toNat + tySize s.mem (s.regs 0).toNat ≤ 2 ^ 48 ∧
-      s.mem.accessible (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat) false = true)
+      s.mem.accessible (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat) false = true ∧
+      Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s)
     (fun s s' => RTReturn R 2 [] s s' fun r m =>
       BoxCopy R s.mem m (r 0).toNat (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat))
 
 /-- **`runtime.convT16(v)`** (`X0 = v`): a box holding the low 16 bits of `v`. -/
-def ConvT16 (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 1 s)
+def ConvT16 (p : Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 1 s ∧ Ready H R.priv [(s.regs 0).toNat] s)
     (fun s s' => RTReturn R 1 [] s s' fun r m => BoxHolds R m (r 0).toNat 2 ((s.regs 0).toNat % 2 ^ 16))
 
 /-- **`runtime.convT32(v)`**: a box holding the low 32 bits of `v`. -/
-def ConvT32 (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 1 s)
+def ConvT32 (p : Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 1 s ∧ Ready H R.priv [(s.regs 0).toNat] s)
     (fun s s' => RTReturn R 1 [] s s' fun r m => BoxHolds R m (r 0).toNat 4 ((s.regs 0).toNat % 2 ^ 32))
 
 /-- **`runtime.convT64(v)`**: a box holding `v`. -/
-def ConvT64 (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 1 s)
+def ConvT64 (p : Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 1 s ∧ Ready H R.priv [(s.regs 0).toNat] s)
     (fun s s' => RTReturn R 1 [] s s' fun r m => BoxHolds R m (r 0).toNat 8 (s.regs 0).toNat)
 
 /-- **`runtime.convTstring(s)`** (`X0 = ptr`, `X1 = len`): a box holding the string header;
 the empty string's box is `&zeroVal[0]`, whose header words are both `0`. -/
-def ConvTstring (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 2 s)
+def ConvTstring (p : Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 2 s ∧ Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s)
     (fun s s' => RTReturn R 2 [] s s' fun r m =>
       BoxWords R m (r 0).toNat
         [if (s.regs 1).toNat = 0 then 0 else (s.regs 0).toNat, (s.regs 1).toNat])
 
 /-- **`runtime.convTslice(s)`** (`X0 = ptr`, `X1 = len`, `X2 = cap`): a box holding the slice
 header; a nil slice's box is `&zeroVal[0]` (all three words `0`). -/
-def ConvTslice (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
-  Summary p addr (fun s => RTPre R 3 s)
+def ConvTslice (p : Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre R 3 s ∧ Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s)
     (fun s s' => RTReturn R 3 [] s s' fun r m =>
       BoxWords R m (r 0).toNat
         (if (s.regs 0).toNat = 0 then [0, 0, 0]
@@ -316,17 +333,21 @@ def AssertE2I2 (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
     (fun s s' => RTReturn R 2 [] s s' fun r m =>
       ItabResult R m (s.regs 0).toNat (s.regs 1).toNat (r 0).toNat)
 
-/-- **`runtime.typeAssert(desc, t)`** (`X0 = desc`, an `abi.TypeAssert`; `X1 = t`): the itab of
-`t` for `desc.Inter` (`0` if `t` is nil or does not implement it; without `CanFail` those cases
-panic and are excluded). The runtime may replace `desc.Cache` by a new cache (one call in about
+/-- **`runtime.typeAssert(desc, t)`** (`X0 = desc`, an `abi.TypeAssert`; `X1 = t`, non-nil): the
+itab of `t` for `desc.Inter` (`0` if `t` does not implement it; without `CanFail` that case
+panics and is excluded). A nil `t` is excluded too (round 10 I1): with `CanFail` the runtime does
+return `nil`, but in about one call in 1000 it then rebuilds the cache with
+`buildTypeAssertCache(oldC, nil, nil)`, which reads `nil.Hash` and faults; compiled code tests
+for nil before calling. The runtime may replace `desc.Cache` by a new cache (one call in about
 1000): afterwards the descriptor is well formed again, with the same `Inter` and `CanFail`. -/
-def TypeAssert (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
+def TypeAssert (p : Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
   Summary p addr
     (fun s => RTPre R 2 s ∧ TADescOK R s.mem (s.regs 0).toNat ∧
-      ((s.regs 1).toNat = 0 → taCanFail s.mem (s.regs 0).toNat = true) ∧
+      (s.regs 1).toNat ≠ 0 ∧
       ((s.regs 1).toNat ≠ 0 → R.IsType (s.regs 1).toNat ∧
         (taCanFail s.mem (s.regs 0).toNat = true ∨
-          (R.itab (taInter s.mem (s.regs 0).toNat) (s.regs 1).toNat).isSome)))
+          (R.itab (taInter s.mem (s.regs 0).toNat) (s.regs 1).toNat).isSome)) ∧
+      Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s)
     (fun s s' => RTReturn R 2 [((s.regs 0).toNat, (s.regs 0).toNat + 8)] s s' fun r m =>
       ItabResult R m (taInter s.mem (s.regs 0).toNat) (s.regs 1).toNat (r 0).toNat ∧
       TADescOK R m (s.regs 0).toNat ∧ taInter m (s.regs 0).toNat = taInter s.mem (s.regs 0).toNat ∧
@@ -336,10 +357,11 @@ def TypeAssert (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
 `cs`; `X1 = t`, non-nil): `(case, itab)` in `X0`, `X1`, the index of the first case `t`
 implements and its itab, or `(len cs, 0)` (`switchCase`). The runtime may replace `desc.Cache`;
 afterwards the descriptor is well formed again for the same cases. -/
-def InterfaceSwitch (p : Program) (addr : Nat) (R : IfaceModel) : Prop :=
+def InterfaceSwitch (p : Program) (addr : Nat) (R : IfaceModel) (H : RtReady) : Prop :=
   ∀ cs : List Nat, Summary p addr
     (fun s => RTPre R 2 s ∧ ISDescOK R s.mem (s.regs 0).toNat cs ∧ (s.regs 1).toNat ≠ 0 ∧
-      R.IsType (s.regs 1).toNat)
+      R.IsType (s.regs 1).toNat ∧
+      Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s)
     (fun s s' => RTReturn R 2 [((s.regs 0).toNat, (s.regs 0).toNat + 8)] s s' fun r m =>
       (r 0).toNat = (switchCase R (s.regs 1).toNat cs).1 ∧
       (r 1).toNat = (switchCase R (s.regs 1).toNat cs).2 ∧

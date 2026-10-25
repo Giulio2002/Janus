@@ -15,6 +15,10 @@ Memory changes only in the runtime's memory and the stack window, and the runtim
 **Assumptions (all in the statement).** `R` is *any* model satisfying `R.Laws`, and the code at
 `runtime.convT64` is *any* code that behaves as `ConvT64` says (docs/RUNTIME-CONTRACTS.md,
 "Interfaces").
+
+**Readiness** (round 10). The statement also quantifies over `H : RtReady`, the runtime's readiness
+for the one call that may allocate (`runtime.convT64`), and assumes it at entry: the theorem says nothing
+about a call the runtime cannot serve as the contract says (no room in the heap, a collection).
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Spec.Type
@@ -27,16 +31,16 @@ def uint64Type : Nat :=
   adrpLdTarget (Extracted.entry + 0x20) (segWord Extracted.program "example.com/basic.Box" 8)
     (segWord Extracted.program "example.com/basic.Box" 9) 0
 
-theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
+theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws) (H : RtReady)
     (hconv : ConvT64 (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.convT64") R)
+      (Extracted.program.contractAddr "runtime.convT64") R H)
     (x : BitVec 64) :
     Ensures (Extracted.program.link impl) Extracted.entry [x]
-      (fun s => CallerOK R s 32 0)
+      (fun s => CallerOK R s 32 0 ∧ H [x.toNat] (s.regs 28).toNat (s.sp.toNat - 32) (rtView R.priv s.mem))
       (fun s s' => (s'.regs 0).toNat = uint64Type ∧ BoxHolds R s'.mem (s'.regs 1).toNat 8 x.toNat ∧
         MemFrame s.mem s'.mem (R.priv ++ [(s.sp.toNat - (R.depth + 32), s.sp.toNat)]) ∧
         R.Env s'.mem (s.regs 28)) := by
-  intro ret hret s hs hc
+  intro ret hret s hs ⟨hc, hH⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus_intro hs
@@ -44,8 +48,12 @@ theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
   simp only [regG, stackguard0Offset, stackguard0, Disjoint] at hg1 hg2 hg3 hgd
   janus_run until [Extracted.program.contractAddr "runtime.convT64"]
   refine Reaches.call (Summary.withExit hconv hret) rfl
-    (RTPre.of_caller hl hc (by janus_frame) (by simp; omega) rfl (by simp [setReg])
-      (by simp [setReg]) (by decide) (by decide)) ?_
+    ⟨RTPre.of_caller hl hc (by janus_frame) (by simp; omega) rfl (by simp [setReg])
+      (by simp [setReg]) (by decide) (by decide), ?_⟩ ?_
+  · simp only [Ready, setReg_apply, reduceIte, Nat.reduceEqDiff]
+    simp (disch := janus_disch) only [rtView_writeLE]
+    have e1 : (s.sp - 32#64).toNat = s.sp.toNat - 32 := by bv_omega
+    simpa [e1, h_x0] using hH
   intro s' hpc' ⟨r, v, fl, m', hs', hfr, henv', hbox⟩
   subst hs'
   simp only [rtWrites, calleeStack, List.append_nil] at hfr
@@ -79,9 +87,9 @@ def linked : Program :=
 
 theorem linked_eq : Extracted.program.link implAt = linked := rfl
 
-theorem model : ConvT64 (Extracted.program.link implAt) cAddr R0 := by
+theorem model : ConvT64 (Extracted.program.link implAt) cAddr R0 Htrue := by
   rw [linked_eq]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   janus_run
   refine rtReturn_of R0 1 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
@@ -120,19 +128,20 @@ theorem pre : CallerOK R0 s0 32 0 := by
   · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (ret : Nat) (s : State), R.Laws ∧
-    ConvT64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.convT64") R ∧
+theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (H : RtReady) (ret : Nat) (s : State),
+    R.Laws ∧
+    ConvT64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.convT64") R H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64] s ∧
-    CallerOK R s 32 0 :=
-  ⟨implAt, R0, ret, s0, R0_laws, model, hret, setup, pre⟩
+    CallerOK R s 32 0 ∧ H [42] (s.regs 28).toNat (s.sp.toNat - 32) (rtView R.priv s.mem) :=
+  ⟨implAt, R0, Htrue, ret, s0, R0_laws, model, hret, setup, pre, trivial⟩
 
 /-- So the guarantee is reached: `Box(42)` returns a box holding `42`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = uint64Type ∧ BoxHolds R0 s'.mem (s'.regs 1).toNat 8 42 ∧
       MemFrame s0.mem s'.mem (R0.priv ++ [(s0.sp.toNat - (R0.depth + 32), s0.sp.toNat)]) ∧
       R0.Env s'.mem (s0.regs 28) :=
-  correctness implAt R0 R0_laws model 42#64 ret hret s0 setup pre
+  correctness implAt R0 R0_laws Htrue model 42#64 ret hret s0 setup ⟨pre, trivial⟩
 
 end Witness
 

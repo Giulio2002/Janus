@@ -21,6 +21,9 @@ namespace Janus.Contracts.IfaceSat
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Spec.Type
   Janus.Contracts Janus.Contracts.Iface Janus.Contracts.IfaceModel
 
+/-- The readiness predicate of the toy implementations, which need none. -/
+def Htrue : RtReady := fun _ _ _ _ => True
+
 /-- A program with no code, stubs or data of its own. -/
 def toy : Program := { segments := [], stubs := [], exitAddr := 0 }
 
@@ -86,9 +89,9 @@ theorem rtReturn_of (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (
 /-- `movz x1, #0x300; movk x1, #1, lsl 16; str x0, [x1]; mov x0, x1; ret`. -/
 def convT64Code : List Nat := [0xd2806001, 0xf2a00021, 0xf9000020, 0xaa0103e0, 0xd65f03c0]
 
-theorem convT64_impl : ConvT64 (toy.link (at0 convT64Code)) A0 R0 := by
+theorem convT64_impl : ConvT64 (toy.link (at0 convT64Code)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   janus_run
   refine rtReturn_of R0 1 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
@@ -105,16 +108,17 @@ theorem convT64_impl : ConvT64 (toy.link (at0 convT64Code)) A0 R0 := by
       exact Nat.mod_eq_of_lt (s.regs 0).isLt
 
 /-- `ConvT64` is satisfiable. -/
-theorem convT64_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.Laws ∧
-    ConvT64 (toy.link impl) A0 R ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 1 s :=
-  ⟨R0, _, R0_laws, convT64_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide)⟩
+theorem convT64_satisfiable : ∃ (R : IfaceModel) (impl : List Segment) (H : RtReady),
+    R.Laws ∧
+    ConvT64 (toy.link impl) A0 R H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 1 s ∧ Ready H R.priv [(s.regs 0).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convT64_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide), trivial⟩
 
 /-- `movz x1, #0x300; movk x1, #1, lsl 16; str w0, [x1]; mov x0, x1; ret`. -/
 def convT32Code : List Nat := [0xd2806001, 0xf2a00021, 0xb9000020, 0xaa0103e0, 0xd65f03c0]
 
-theorem convT32_impl : ConvT32 (toy.link (at0 convT32Code)) A0 R0 := by
+theorem convT32_impl : ConvT32 (toy.link (at0 convT32Code)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   janus_run
   refine rtReturn_of R0 1 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
@@ -130,16 +134,17 @@ theorem convT32_impl : ConvT32 (toy.link (at0 convT32Code)) A0 R0 := by
       rw [Memory.readLE_writeLE_self]
 
 /-- `ConvT32` is satisfiable. -/
-theorem convT32_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.Laws ∧
-    ConvT32 (toy.link impl) A0 R ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 1 s :=
-  ⟨R0, _, R0_laws, convT32_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide)⟩
+theorem convT32_satisfiable : ∃ (R : IfaceModel) (impl : List Segment) (H : RtReady),
+    R.Laws ∧
+    ConvT32 (toy.link impl) A0 R H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 1 s ∧ Ready H R.priv [(s.regs 0).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convT32_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide), trivial⟩
 
 /-- `movz x1, #0x300; movk x1, #1, lsl 16; strh w0, [x1]; mov x0, x1; ret`. -/
 def convT16Code : List Nat := [0xd2806001, 0xf2a00021, 0x79000020, 0xaa0103e0, 0xd65f03c0]
 
-theorem convT16_impl : ConvT16 (toy.link (at0 convT16Code)) A0 R0 := by
+theorem convT16_impl : ConvT16 (toy.link (at0 convT16Code)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   janus_run
   refine rtReturn_of R0 1 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
@@ -155,9 +160,10 @@ theorem convT16_impl : ConvT16 (toy.link (at0 convT16Code)) A0 R0 := by
       rw [Memory.readLE_writeLE_self]
 
 /-- `ConvT16` is satisfiable. -/
-theorem convT16_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.Laws ∧
-    ConvT16 (toy.link impl) A0 R ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 1 s :=
-  ⟨R0, _, R0_laws, convT16_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide)⟩
+theorem convT16_satisfiable : ∃ (R : IfaceModel) (impl : List Segment) (H : RtReady),
+    R.Laws ∧
+    ConvT16 (toy.link impl) A0 R H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 1 s ∧ Ready H R.priv [(s.regs 0).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convT16_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide), trivial⟩
 
 /-- `movz x2, #0x300; movk x2, #1, lsl 16; ldr x3, [x1]; str x3, [x2]; mov x0, x2; ret`: copy
 the 8 bytes of a value of the model's types (both have `Size_ = 8`). -/
@@ -170,10 +176,10 @@ theorem tySize_R0 {m : Memory} {g : W64} (h : Env0 m g) {t : Nat} (ht : R0.IsTyp
   · exact d1
   · exact d4
 
-theorem convT_impl : ConvT (toy.link (at0 convTCode)) A0 R0 := by
+theorem convT_impl : ConvT (toy.link (at0 convTCode)) A0 R0 Htrue := by
   rw [link_at0]
   intro s hpc hpre
-  obtain ⟨⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩, hty, hb, hacc⟩ := hpre
+  obtain ⟨⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩, hty, hb, hacc, -⟩ := hpre
   have hsz := tySize_R0 (g := s.regs 28) ⟨he1, he2, hd⟩ hty
   rw [hsz] at hb hacc
   janus_run
@@ -191,36 +197,38 @@ theorem convT_impl : ConvT (toy.link (at0 convTCode)) A0 R0 := by
       exact bytes_writeLE_readLE _ _ _ _ _ hi
 
 /-- `ConvT` is satisfiable. -/
-theorem convT_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.Laws ∧
-    ConvT (toy.link impl) A0 R ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
+theorem convT_satisfiable : ∃ (R : IfaceModel) (impl : List Segment) (H : RtReady),
+    R.Laws ∧
+    ConvT (toy.link impl) A0 R H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
       (RTPre R 2 s ∧ R.IsType (s.regs 0).toNat ∧
         (s.regs 1).toNat + tySize s.mem (s.regs 0).toNat ≤ 2 ^ 48 ∧
-        s.mem.accessible (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat) false = true) :=
-  ⟨R0, _, R0_laws, convT_impl,
+        s.mem.accessible (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat) false = true ∧ Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s) :=
+  ⟨R0, _, Htrue, R0_laws, convT_impl,
     wstate fun i => if i = 0 then BitVec.ofNat 64 TD else if i = 1 then BitVec.ofNat 64 VAL else 0,
-    rfl, wstate_rtpre _ 2 (by decide), Or.inl rfl, by decide, by decide⟩
+    rfl, wstate_rtpre _ 2 (by decide), Or.inl rfl, by decide, by decide, trivial⟩
 
-theorem convTnoptr_impl : ConvTnoptr (toy.link (at0 convTCode)) A0 R0 :=
+theorem convTnoptr_impl : ConvTnoptr (toy.link (at0 convTCode)) A0 R0 Htrue :=
   Summary.mono convT_impl (fun _ h => ⟨h.1, h.2.1, h.2.2.2⟩) fun _ _ _ h => h
 
 /-- `ConvTnoptr` is satisfiable. -/
-theorem convTnoptr_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.Laws ∧
-    ConvTnoptr (toy.link impl) A0 R ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
+theorem convTnoptr_satisfiable : ∃ (R : IfaceModel) (impl : List Segment) (H : RtReady),
+    R.Laws ∧
+    ConvTnoptr (toy.link impl) A0 R H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
       (RTPre R 2 s ∧ R.IsType (s.regs 0).toNat ∧ tyPtrBytes s.mem (s.regs 0).toNat = 0 ∧
         (s.regs 1).toNat + tySize s.mem (s.regs 0).toNat ≤ 2 ^ 48 ∧
-        s.mem.accessible (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat) false = true) :=
-  ⟨R0, _, R0_laws, convTnoptr_impl,
+        s.mem.accessible (s.regs 1).toNat (tySize s.mem (s.regs 0).toNat) false = true ∧ Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s) :=
+  ⟨R0, _, Htrue, R0_laws, convTnoptr_impl,
     wstate fun i => if i = 0 then BitVec.ofNat 64 TD else if i = 1 then BitVec.ofNat 64 VAL else 0,
-    rfl, wstate_rtpre _ 2 (by decide), Or.inl rfl, by decide, by decide, by decide⟩
+    rfl, wstate_rtpre _ 2 (by decide), Or.inl rfl, by decide, by decide, by decide, trivial⟩
 
 /-- `movz x2, #0x300; movk x2, #1, lsl 16; cmp x1, #0; csel x0, xzr, x0, eq; stp x0, x1, [x2];
 mov x0, x2; ret`: the header, with a zero pointer for the empty string. -/
 def convTstringCode : List Nat :=
   [0xd2806002, 0xf2a00022, 0xf100003f, 0x9a8003e0, 0xa9000440, 0xaa0203e0, 0xd65f03c0]
 
-theorem convTstring_impl : ConvTstring (toy.link (at0 convTstringCode)) A0 R0 := by
+theorem convTstring_impl : ConvTstring (toy.link (at0 convTstringCode)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   have hb2 : wmem.accessible 0 0 false = wmem.accessible 0 0 false := rfl
   janus_run
@@ -259,9 +267,10 @@ theorem read3 (m : Memory) (a v0 v1 v2 i : Nat) (hi : i < 3) (h0 : v0 < 2 ^ 64) 
     simpa using Nat.mod_eq_of_lt h2
 
 /-- `ConvTstring` is satisfiable. -/
-theorem convTstring_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.Laws ∧
-    ConvTstring (toy.link impl) A0 R ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 2 s :=
-  ⟨R0, _, R0_laws, convTstring_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 2 (by decide)⟩
+theorem convTstring_satisfiable : ∃ (R : IfaceModel) (impl : List Segment) (H : RtReady),
+    R.Laws ∧
+    ConvTstring (toy.link impl) A0 R H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 2 s ∧ Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convTstring_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 2 (by decide), trivial⟩
 
 /-- `movz x3, #0x300; movk x3, #1, lsl 16; cbz x0, nil; stp x0, x1, [x3]; str x2, [x3, #16];
 mov x0, x3; ret; nil: stp xzr, xzr, [x3]; str xzr, [x3, #16]; mov x0, x3; ret`. -/
@@ -269,9 +278,9 @@ def convTsliceCode : List Nat :=
   [0xd2806003, 0xf2a00023, 0xb40000a0, 0xa9000460, 0xf9000862, 0xaa0303e0, 0xd65f03c0,
    0xa9007c7f, 0xf900087f, 0xaa0303e0, 0xd65f03c0]
 
-theorem convTslice_impl : ConvTslice (toy.link (at0 convTsliceCode)) A0 R0 := by
+theorem convTslice_impl : ConvTslice (toy.link (at0 convTsliceCode)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   janus_run
   all_goals
@@ -291,9 +300,10 @@ theorem convTslice_impl : ConvTslice (toy.link (at0 convTsliceCode)) A0 R0 := by
           (by first | decide | exact BitVec.isLt _) (by first | decide | exact BitVec.isLt _)
 
 /-- `ConvTslice` is satisfiable. -/
-theorem convTslice_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.Laws ∧
-    ConvTslice (toy.link impl) A0 R ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 3 s :=
-  ⟨R0, _, R0_laws, convTslice_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 3 (by decide)⟩
+theorem convTslice_satisfiable : ∃ (R : IfaceModel) (impl : List Segment) (H : RtReady),
+    R.Laws ∧
+    ConvTslice (toy.link impl) A0 R H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ RTPre R 3 s ∧ Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convTslice_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 3 (by decide), trivial⟩
 
 /-! ## Assertions and switches -/
 
@@ -374,10 +384,10 @@ theorem assertE2I2_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.L
     wstate fun i => if i = 0 then BitVec.ofNat 64 ID else if i = 1 then BitVec.ofNat 64 TD else 0,
     rfl, wstate_rtpre _ 2 (by decide), rfl, fun _ => Or.inl rfl⟩
 
-theorem typeAssert_impl : TypeAssert (toy.link (at0 assertE2I2Code)) A0 R0 := by
+theorem typeAssert_impl : TypeAssert (toy.link (at0 assertE2I2Code)) A0 R0 Htrue := by
   rw [link_at0]
   intro s hpc hpre
-  obtain ⟨⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩, hdesc, -, -⟩ := hpre
+  obtain ⟨⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩, hdesc, -, -, -⟩ := hpre
   have hi : taInter s.mem (s.regs 0).toNat = ID := hdesc.2.2.2.1
   janus_run
   refine rtReturn_of R0 2 _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
@@ -392,16 +402,17 @@ theorem typeAssert_impl : TypeAssert (toy.link (at0 assertE2I2Code)) A0 R0 := by
   rw [heq]; exact this
 
 /-- `TypeAssert` is satisfiable. -/
-theorem typeAssert_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.Laws ∧
-    TypeAssert (toy.link impl) A0 R ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
+theorem typeAssert_satisfiable : ∃ (R : IfaceModel) (impl : List Segment) (H : RtReady),
+    R.Laws ∧
+    TypeAssert (toy.link impl) A0 R H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
       (RTPre R 2 s ∧ TADescOK R s.mem (s.regs 0).toNat ∧
-        ((s.regs 1).toNat = 0 → taCanFail s.mem (s.regs 0).toNat = true) ∧
+        (s.regs 1).toNat ≠ 0 ∧
         ((s.regs 1).toNat ≠ 0 → R.IsType (s.regs 1).toNat ∧
           (taCanFail s.mem (s.regs 0).toNat = true ∨
-            (R.itab (taInter s.mem (s.regs 0).toNat) (s.regs 1).toNat).isSome))) :=
-  ⟨R0, _, R0_laws, typeAssert_impl,
+            (R.itab (taInter s.mem (s.regs 0).toNat) (s.regs 1).toNat).isSome)) ∧ Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s) :=
+  ⟨R0, _, Htrue, R0_laws, typeAssert_impl,
     wstate fun i => if i = 0 then BitVec.ofNat 64 DTA else if i = 1 then BitVec.ofNat 64 TD else 0,
-    rfl, wstate_rtpre _ 2 (by decide), wmem_taDesc, by decide, fun _ => ⟨Or.inl rfl, Or.inl (by decide)⟩⟩
+    rfl, wstate_rtpre _ 2 (by decide), wmem_taDesc, by decide, fun _ => ⟨Or.inl rfl, Or.inl (by decide)⟩, trivial⟩
 
 /-- `ldr x2, [x0, #8]; movz x3, #0; movk x3, #1, lsl 16; cmp x1, x3; b.ne no; cbz x2, no;
 mov x0, xzr; movz x1, #0x200; movk x1, #1, lsl 16; ret; no: mov x0, x2; mov x1, xzr; ret`:
@@ -410,10 +421,10 @@ def interfaceSwitchCode : List Nat :=
   [0xf9400402, 0xd2800003, 0xf2a00023, 0xeb03003f, 0x540000c1, 0xb40000a2, 0xaa1f03e0,
    0xd2804001, 0xf2a00021, 0xd65f03c0, 0xaa0203e0, 0xaa1f03e1, 0xd65f03c0]
 
-theorem interfaceSwitch_impl : InterfaceSwitch (toy.link (at0 interfaceSwitchCode)) A0 R0 := by
+theorem interfaceSwitch_impl : InterfaceSwitch (toy.link (at0 interfaceSwitchCode)) A0 R0 Htrue := by
   rw [link_at0]
   intro cs s hpc hpre
-  obtain ⟨⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩, hdesc, ht0, ht⟩ := hpre
+  obtain ⟨⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩, hdesc, ht0, ht, -⟩ := hpre
   have hdesc' := hdesc
   obtain ⟨hdb, hdacc, -, hn, -, hcs, -⟩ := hdesc'
   have hcs' : ∀ c ∈ cs, c = ID := hcs
@@ -441,13 +452,14 @@ theorem interfaceSwitch_impl : InterfaceSwitch (toy.link (at0 interfaceSwitchCod
     | done
 
 /-- `InterfaceSwitch` is satisfiable (shown for the case list `[ID]`). -/
-theorem interfaceSwitch_satisfiable : ∃ (R : IfaceModel) (impl : List Segment), R.Laws ∧
-    InterfaceSwitch (toy.link impl) A0 R ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
+theorem interfaceSwitch_satisfiable : ∃ (R : IfaceModel) (impl : List Segment) (H : RtReady),
+    R.Laws ∧
+    InterfaceSwitch (toy.link impl) A0 R H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
       (RTPre R 2 s ∧ ISDescOK R s.mem (s.regs 0).toNat [ID] ∧ (s.regs 1).toNat ≠ 0 ∧
-        R.IsType (s.regs 1).toNat) :=
-  ⟨R0, _, R0_laws, interfaceSwitch_impl,
+        R.IsType (s.regs 1).toNat ∧ Ready H R.priv [(s.regs 0).toNat, (s.regs 1).toNat] s) :=
+  ⟨R0, _, Htrue, R0_laws, interfaceSwitch_impl,
     wstate fun i => if i = 0 then BitVec.ofNat 64 DIS else if i = 1 then BitVec.ofNat 64 TD else 0,
-    rfl, wstate_rtpre _ 2 (by decide), wmem_isDesc, by decide, Or.inl rfl⟩
+    rfl, wstate_rtpre _ 2 (by decide), wmem_isDesc, by decide, Or.inl rfl, trivial⟩
 
 /-! ## Comparison -/
 

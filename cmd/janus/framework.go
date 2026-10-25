@@ -541,6 +541,22 @@ func (fw *framework) build(dir, lake string, targets []string, stampPath string,
 		return &diag{Invalid: true, Msg: "Building the Janus Lean library failed: " + err.Error(), Stage: "Janus library build",
 			Next: next, Details: out}
 	}
+	// Round 10 F1: the stamp says "built from fw.Files". Lake compiled whatever the sources were
+	// while it ran; a checkout built in place (--janus-root) can change under it (a git checkout
+	// in another terminal). Stamping that build would let a later run with fw's sources reuse
+	// modules compiled from others, and report fw's SHA-256 for them.
+	if dir == fw.Dir {
+		now, err := readFramework(os.DirFS(dir))
+		if err != nil || frameworkSha(now) != fw.Sha256 || !bytes.Equal(now["lake-manifest.json"], fw.Files["lake-manifest.json"]) {
+			return &diag{Invalid: true, Stage: "Janus library build",
+				Msg:  "The Janus framework sources in " + displayPath(dir) + " changed while they were being built; the build is not used.",
+				Next: "Rerun janus verify once the checkout is no longer changing."}
+		}
+	} else if !sameTree(dir, fw.Files, func(top string) bool { return top == ".lake" }) {
+		return &diag{Invalid: true, Stage: "Janus library build",
+			Msg:  "The Janus framework sources in " + displayPath(dir) + " changed while they were being built; the build is not used.",
+			Next: "Another program writes to the cache; stop it, or set JANUS_CACHE_DIR to a private directory."}
+	}
 	p, err := frameworkPins(filepath.Join(dir, ".lake", "build", "lib", "lean"), fw.Files)
 	if err != nil {
 		return &diag{Invalid: true, Msg: "Cannot read the framework build: " + err.Error(), Stage: "Janus library build"}

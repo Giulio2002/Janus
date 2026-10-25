@@ -1,5 +1,6 @@
 import Janus.Spec.Map
 import Janus.Amd64.TacticExt
+import Janus.Contracts.AllocAmd64
 
 /-!
 # Contracts of the Go map runtime (amd64)
@@ -143,10 +144,12 @@ def Access2 (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (Bi
 /-- `runtime.mapassign_fast64(t, m, k)` on a non-nil map: returns a writable value slot `p` in
 the runtime's memory such that storing any `v` there (8 bytes) makes the map `f` with `k ↦ v`.
 The compiled `m[k] = v` performs exactly that store right after the call. -/
-def Assign (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) : Prop :=
+def Assign (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64))
+    (H : RtReady) : Prop :=
   ∀ f, Janus.Amd64.Tactic.Summary p addr
     (fun s => RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ (s.regs 3).toNat ≠ 0 ∧
-      M.Rep s.mem (s.regs 3).toNat f)
+      M.Rep s.mem (s.regs 3).toNat f ∧
+      Ready64 H M.priv [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s)
     (fun s s' => RTReturn M 3 [] (s.regs 3).toNat s s' fun r m =>
       m.accessible (r 0).toNat 8 true = true ∧ InRanges (r 0).toNat 8 M.priv ∧
       ∀ v : BitVec 64, M.Rep (m.writeLE (r 0).toNat 8 v.toNat) (s.regs 3).toNat (f.set (s.regs 1) v) ∧
@@ -170,8 +173,9 @@ def Clear {K V : Type} (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel K V)
 
 /-- `runtime.makemap_small()`: returns a new, non-nil, empty map, distinct from every map that
 existed before. -/
-def MakeSmall {K V : Type} (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel K V) : Prop :=
-  Janus.Amd64.Tactic.Summary p addr (fun s => RTPre M 0 s)
+def MakeSmall {K V : Type} (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel K V)
+    (H : RtReady) : Prop :=
+  Janus.Amd64.Tactic.Summary p addr (fun s => RTPre M 0 s ∧ Ready64 H M.priv [] s)
     (fun s s' => RTReturn M 0 [] 0 s s' fun r m =>
       (r 0).toNat ≠ 0 ∧ M.Rep m (r 0).toNat AMap.empty ∧
       ∀ mp f, M.Rep s.mem mp f → mp ≠ (r 0).toNat)

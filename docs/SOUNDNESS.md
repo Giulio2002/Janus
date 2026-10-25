@@ -152,6 +152,15 @@ workspace's framework build is replaced from the trusted cache whenever it diffe
 pins. A changed, corrupted, missing or extra framework module is rejected (`framework
 integrity`). See finding R1 in [docs/AUDIT.md](AUDIT.md).
 
+**The ready stamp names the sources the build was compiled from** (round 10 F1). A build's stamp
+records the framework's SHA-256 and the hash of every compiled module. A `--janus-root` checkout
+is built in place, so after Lake runs janus reads the checkout's sources again and stamps the
+build only if they still hash to the framework it started with (a cached copy is compared with the
+framework's files again): otherwise a checkout that changed during the build (a `git checkout`
+elsewhere) would leave modules of another commit stamped as this framework's, used by every later
+run and reported under its SHA-256. Sources that change and change back within one build are not
+detected.
+
 **The compiled auditor.** `janus verify` runs the auditor as the executable `janus-audit`
 (`lean_exe`, root `Janus.Tools.AuditMain`): the same `JanusAudit.runImpl` the `Audit.lean` script
 calls, compiled by the Lean toolchain together with the framework build, outside the sandbox. Its
@@ -752,6 +761,24 @@ base:
   arguments, `g`, `SP` and runtime memory", and `audit/round9/controls/NewPair_witness.lean`
   kernel-checks an implementation, `rt`, `H` and a call state for which NewPair's theorem fires.
   A new contract needs such a witness too.
+* **The theorem must quantify the runtime** (round 10 V1). A satisfiable contract becomes an
+  unsatisfiable hypothesis when the statement picks its runtime arguments: with
+  `H := fun _ _ _ _ => True` the allocation contract is round 9's false one again, and a proof
+  "verified" that NewPair returns 42. The auditor rejects a statement that applies a runtime
+  contract (a `Janus.Contracts` definition whose body is a `Summary`), anywhere but as its whole
+  conclusion, to anything but variables of the statement for its runtime parameters (`impl` in `Extracted.program.link
+  impl`, the ranges `rt`, the readiness predicate `H`, the models `R`, `M`), or in which a premise
+  other than a contract or the model laws (`R.Laws`, `M.Laws`) mentions one of those variables,
+  and a dependency definition that applies a contract. Not checked: constraints the theorem's
+  own precondition puts on them, and the numeric parameters (`stack`); read those like any
+  precondition.
+* **Readiness is per call** (round 10 V2, V3). A contract whose postcondition hands back all its
+  precondition needs can be chained without bound from one state. For the map contracts that
+  allocate and keep (`Assign`, `MakeSmall`), this contradicted `MapModel.Laws` outright
+  (`audit/round10/model/MapUnsat.lean`), so every theorem using them was vacuous; for the
+  interface contracts that allocate (`convT*`, `typeAssert`, `interfaceSwitch`) it was
+  unsatisfiable by the real runtime in the model (fixed regions, no collector). They now take a
+  readiness predicate `H` like the allocation contracts, required at the call and not handed back.
 * `p.link impl` fetches `p`'s word wherever `p` has code (`Program.fetch_link`), so the proof
   learns nothing about `impl` except through the hypotheses.
 
@@ -782,7 +809,9 @@ no concurrent GC, no preemption):
   docs/RUNTIME-CONTRACTS.md, "Interfaces"). `convT`, `convTnoptr`, `convT16/32/64`,
   `convTstring`, `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch`,
   `efaceeq` and `ifaceeq` as `Summary`s over an abstract model `R : IfaceModel` that the theorem
-  quantifies over. Trusted, as claims about the Go 1.26 runtime: (1) each contract (a box in the
+  quantifies over (and, for the allocating ones, a readiness predicate `H`; round 10 V3).
+  `typeAssert` requires a non-nil type (round 10 I1: with a nil type the runtime faults in about
+  one call in 1000, rebuilding its cache with `buildTypeAssertCache(oldC, nil, nil)`). Trusted, as claims about the Go 1.26 runtime: (1) each contract (a box in the
   runtime's memory holding the value; the itab `getitab` returns, or `0`; `switchCase`'s first
   implemented case; `efaceEqual`/`ifaceEqual`), with every panic and throw path excluded by its
   precondition; (2) the laws `R.Laws` (descriptors readable in `R.priv`, itabs non-zero, a
@@ -947,7 +976,11 @@ reading of the statement:
   extracted program, proved by execution; composing them (`janus_run calls [h]`) is the generic
   `Reaches.call` lemma. `Ensures0.of_summary` is a theorem.
 * *The CLI classification* (`entryABI`/`entrySource`, the `Entry:` annotation, the convention
-  warning) is untrusted and informational, like reachability.
+  warning) is untrusted and informational, like reachability. The warning reads the printed
+  statement: it recognises `Ensures…` on `Extracted.program`, on `(Extracted.program.link impl)`
+  and with exits (round 10 A1; before, only the first form warned), but an entry passed through a
+  proof-local definition is not recognised. A theorem in the other convention verifies, and is
+  about calls laid out that way, which no real caller makes.
 
 Hence a theorem about assembly trusts exactly what a theorem about Go code trusts (the ISA model,
 the extraction identity, Lean), plus the reading of `CallSetup0` above. The runtime's own

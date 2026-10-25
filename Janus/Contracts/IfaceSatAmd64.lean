@@ -19,6 +19,9 @@ open Janus (MemFrame InRanges Outside outside_cons outside_nil)
 open Janus.Spec.Map (Agrees)
 open Janus.Contracts.Iface (BoxCopy BoxWords BoxHolds ItabResult efaceEqual ifaceEqual EqOK)
 
+/-- The readiness predicate of the toy implementations, which need none. -/
+def Htrue : RtReady := fun _ _ _ _ => True
+
 /-- A program with no code, stubs or data of its own. -/
 def toy : Janus.Amd64.Program := { segments := [], stubs := [], exitAddr := 0 }
 
@@ -89,9 +92,9 @@ theorem rtReturn_of (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (
 /-- `mov $0x10300, %edx; mov %rax, (%rdx); mov %rdx, %rax; ret`. -/
 def convT64Code : List Nat := [0xba, 0x00, 0x03, 0x01, 0x00, 0x48, 0x89, 0x02, 0x48, 0x89, 0xd0, 0xc3]
 
-theorem convT64_impl : ConvT64 (toy.link (at0 convT64Code)) A0 R0 := by
+theorem convT64_impl : ConvT64 (toy.link (at0 convT64Code)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
@@ -110,16 +113,17 @@ theorem convT64_impl : ConvT64 (toy.link (at0 convT64Code)) A0 R0 := by
       exact Nat.mod_eq_of_lt (s.regs 0).isLt
 
 /-- `ConvT64` is satisfiable (amd64). -/
-theorem convT64_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment), R.Laws ∧
-    ConvT64 (toy.link impl) A0 R ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧ RTPre R 1 s :=
-  ⟨R0, _, R0_laws, convT64_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide)⟩
+theorem convT64_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment) (H : RtReady),
+    R.Laws ∧
+    ConvT64 (toy.link impl) A0 R H ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧ RTPre R 1 s ∧ Ready64 H R.priv [(s.regs 0).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convT64_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide), trivial⟩
 
 /-- `mov $0x10300, %edx; mov %eax, (%rdx); mov %rdx, %rax; ret`. -/
 def convT32Code : List Nat := [0xba, 0x00, 0x03, 0x01, 0x00, 0x89, 0x02, 0x48, 0x89, 0xd0, 0xc3]
 
-theorem convT32_impl : ConvT32 (toy.link (at0 convT32Code)) A0 R0 := by
+theorem convT32_impl : ConvT32 (toy.link (at0 convT32Code)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
@@ -138,16 +142,17 @@ theorem convT32_impl : ConvT32 (toy.link (at0 convT32Code)) A0 R0 := by
       simp
 
 /-- `ConvT32` is satisfiable (amd64). -/
-theorem convT32_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment), R.Laws ∧
-    ConvT32 (toy.link impl) A0 R ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧ RTPre R 1 s :=
-  ⟨R0, _, R0_laws, convT32_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide)⟩
+theorem convT32_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment) (H : RtReady),
+    R.Laws ∧
+    ConvT32 (toy.link impl) A0 R H ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧ RTPre R 1 s ∧ Ready64 H R.priv [(s.regs 0).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convT32_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide), trivial⟩
 
 /-- `mov $0x10300, %edx; mov %ax, (%rdx); mov %rdx, %rax; ret`. -/
 def convT16Code : List Nat := [0xba, 0x00, 0x03, 0x01, 0x00, 0x66, 0x89, 0x02, 0x48, 0x89, 0xd0, 0xc3]
 
-theorem convT16_impl : ConvT16 (toy.link (at0 convT16Code)) A0 R0 := by
+theorem convT16_impl : ConvT16 (toy.link (at0 convT16Code)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
@@ -166,9 +171,10 @@ theorem convT16_impl : ConvT16 (toy.link (at0 convT16Code)) A0 R0 := by
       simp
 
 /-- `ConvT16` is satisfiable (amd64). -/
-theorem convT16_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment), R.Laws ∧
-    ConvT16 (toy.link impl) A0 R ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧ RTPre R 1 s :=
-  ⟨R0, _, R0_laws, convT16_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide)⟩
+theorem convT16_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment) (H : RtReady),
+    R.Laws ∧
+    ConvT16 (toy.link impl) A0 R H ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧ RTPre R 1 s ∧ Ready64 H R.priv [(s.regs 0).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convT16_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 1 (by decide), trivial⟩
 
 /-- `mov (%rbx), %rcx; mov $0x10300, %edx; mov %rcx, (%rdx); mov %rdx, %rax; ret`. -/
 def convTCode : List Nat :=
@@ -182,9 +188,9 @@ theorem tySize_R0 {m : Janus.Arm64.Memory} {g : W64} (h : Env0 m g) {t : Nat} (h
   · exact d1
   · exact d4
 
-theorem convT_impl : ConvT (toy.link (at0 convTCode)) A0 R0 := by
+theorem convT_impl : ConvT (toy.link (at0 convTCode)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc ⟨hpre, hty, hb, hacc⟩
+  intro s hpc ⟨hpre, hty, hb, hacc, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   have hsz := tySize_R0 (g := s.regs 14) ⟨he1, he2, hd⟩ hty
@@ -205,27 +211,29 @@ theorem convT_impl : ConvT (toy.link (at0 convTCode)) A0 R0 := by
       exact bytes_writeLE_readLE _ _ _ _ _ hi
 
 /-- `ConvT` is satisfiable (amd64). -/
-theorem convT_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment), R.Laws ∧
-    ConvT (toy.link impl) A0 R ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
+theorem convT_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment) (H : RtReady),
+    R.Laws ∧
+    ConvT (toy.link impl) A0 R H ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
       (RTPre R 2 s ∧ R.IsType (s.regs 0).toNat ∧
         (s.regs 3).toNat + tySize s.mem (s.regs 0).toNat ≤ 2 ^ 48 ∧
-        s.mem.accessible (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat) false = true) :=
-  ⟨R0, _, R0_laws, convT_impl,
+        s.mem.accessible (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat) false = true ∧ Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s) :=
+  ⟨R0, _, Htrue, R0_laws, convT_impl,
     wstate fun i => if i = 0 then BitVec.ofNat 64 TD else if i = 3 then BitVec.ofNat 64 VAL else 0,
-    rfl, wstate_rtpre _ 2 (by decide), Or.inl rfl, by decide, by decide⟩
+    rfl, wstate_rtpre _ 2 (by decide), Or.inl rfl, by decide, by decide, trivial⟩
 
-theorem convTnoptr_impl : ConvTnoptr (toy.link (at0 convTCode)) A0 R0 :=
+theorem convTnoptr_impl : ConvTnoptr (toy.link (at0 convTCode)) A0 R0 Htrue :=
   Summary.mono convT_impl (fun _ h => ⟨h.1, h.2.1, h.2.2.2⟩) fun _ _ _ h => h
 
 /-- `ConvTnoptr` is satisfiable (amd64). -/
-theorem convTnoptr_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment), R.Laws ∧
-    ConvTnoptr (toy.link impl) A0 R ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
+theorem convTnoptr_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment) (H : RtReady),
+    R.Laws ∧
+    ConvTnoptr (toy.link impl) A0 R H ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
       (RTPre R 2 s ∧ R.IsType (s.regs 0).toNat ∧ tyPtrBytes s.mem (s.regs 0).toNat = 0 ∧
         (s.regs 3).toNat + tySize s.mem (s.regs 0).toNat ≤ 2 ^ 48 ∧
-        s.mem.accessible (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat) false = true) :=
-  ⟨R0, _, R0_laws, convTnoptr_impl,
+        s.mem.accessible (s.regs 3).toNat (tySize s.mem (s.regs 0).toNat) false = true ∧ Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s) :=
+  ⟨R0, _, Htrue, R0_laws, convTnoptr_impl,
     wstate fun i => if i = 0 then BitVec.ofNat 64 TD else if i = 3 then BitVec.ofNat 64 VAL else 0,
-    rfl, wstate_rtpre _ 2 (by decide), Or.inl rfl, by decide, by decide, by decide⟩
+    rfl, wstate_rtpre _ 2 (by decide), Or.inl rfl, by decide, by decide, by decide, trivial⟩
 
 /-- `mov $0x10300, %edx; test %rbx, %rbx; jnz 1f; xor %eax, %eax; 1: mov %rax, (%rdx);
 mov %rbx, 8(%rdx); mov %rdx, %rax; ret`. -/
@@ -233,9 +241,9 @@ def convTstringCode : List Nat :=
   [0xba, 0x00, 0x03, 0x01, 0x00, 0x48, 0x85, 0xdb, 0x75, 0x02, 0x31, 0xc0, 0x48, 0x89, 0x02,
    0x48, 0x89, 0x5a, 0x08, 0x48, 0x89, 0xd0, 0xc3]
 
-theorem convTstring_impl : ConvTstring (toy.link (at0 convTstringCode)) A0 R0 := by
+theorem convTstring_impl : ConvTstring (toy.link (at0 convTstringCode)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
@@ -262,10 +270,11 @@ theorem convTstring_impl : ConvTstring (toy.link (at0 convTstringCode)) A0 R0 :=
           simp [Nat.mod_eq_of_lt (s.regs 3).isLt]
 
 /-- `ConvTstring` is satisfiable (amd64). -/
-theorem convTstring_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment), R.Laws ∧
-    ConvTstring (toy.link impl) A0 R ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
-      RTPre R 2 s :=
-  ⟨R0, _, R0_laws, convTstring_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 2 (by decide)⟩
+theorem convTstring_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment) (H : RtReady),
+    R.Laws ∧
+    ConvTstring (toy.link impl) A0 R H ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
+      RTPre R 2 s ∧ Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convTstring_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 2 (by decide), trivial⟩
 
 /-- `mov $0x10300, %edx; test %rax, %rax; jz nil; mov %rax, (%rdx); mov %rbx, 8(%rdx);
 mov %rcx, 16(%rdx); mov %rdx, %rax; ret; nil: movq $0, (%rdx); movq $0, 8(%rdx);
@@ -276,9 +285,9 @@ def convTsliceCode : List Nat :=
    0x48, 0xc7, 0x42, 0x08, 0x00, 0x00, 0x00, 0x00, 0x48, 0xc7, 0x42, 0x10, 0x00, 0x00, 0x00, 0x00,
    0x48, 0x89, 0xd0, 0xc3]
 
-theorem convTslice_impl : ConvTslice (toy.link (at0 convTsliceCode)) A0 R0 := by
+theorem convTslice_impl : ConvTslice (toy.link (at0 convTsliceCode)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc hpre
+  intro s hpc ⟨hpre, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
@@ -302,10 +311,11 @@ theorem convTslice_impl : ConvTslice (toy.link (at0 convTsliceCode)) A0 R0 := by
           (by first | decide | exact BitVec.isLt _)
 
 /-- `ConvTslice` is satisfiable (amd64). -/
-theorem convTslice_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment), R.Laws ∧
-    ConvTslice (toy.link impl) A0 R ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
-      RTPre R 3 s :=
-  ⟨R0, _, R0_laws, convTslice_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 3 (by decide)⟩
+theorem convTslice_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment) (H : RtReady),
+    R.Laws ∧
+    ConvTslice (toy.link impl) A0 R H ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
+      RTPre R 3 s ∧ Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s :=
+  ⟨R0, _, Htrue, R0_laws, convTslice_impl, wstate fun _ => 0, rfl, wstate_rtpre _ 3 (by decide), trivial⟩
 
 /-! ## Assertions and switches -/
 
@@ -374,9 +384,9 @@ theorem assertE2I2_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.S
     wstate fun i => if i = 0 then BitVec.ofNat 64 ID else if i = 3 then BitVec.ofNat 64 TD else 0,
     rfl, wstate_rtpre _ 2 (by decide), rfl, fun _ => Or.inl rfl⟩
 
-theorem typeAssert_impl : TypeAssert (toy.link (at0 assertE2I2Code)) A0 R0 := by
+theorem typeAssert_impl : TypeAssert (toy.link (at0 assertE2I2Code)) A0 R0 Htrue := by
   rw [link_at0]
-  intro s hpc ⟨hpre, hdesc, _, _⟩
+  intro s hpc ⟨hpre, hdesc, _, _, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   have hi : taInter s.mem (s.regs 0).toNat = ID := hdesc.2.2.2.1
@@ -397,16 +407,17 @@ theorem typeAssert_impl : TypeAssert (toy.link (at0 assertE2I2Code)) A0 R0 := by
          simpa [h3] using this)
 
 /-- `TypeAssert` is satisfiable (amd64). -/
-theorem typeAssert_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment), R.Laws ∧
-    TypeAssert (toy.link impl) A0 R ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
+theorem typeAssert_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment) (H : RtReady),
+    R.Laws ∧
+    TypeAssert (toy.link impl) A0 R H ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
       (RTPre R 2 s ∧ TADescOK R s.mem (s.regs 0).toNat ∧
-        ((s.regs 3).toNat = 0 → taCanFail s.mem (s.regs 0).toNat = true) ∧
+        (s.regs 3).toNat ≠ 0 ∧
         ((s.regs 3).toNat ≠ 0 → R.IsType (s.regs 3).toNat ∧
           (taCanFail s.mem (s.regs 0).toNat = true ∨
-            (R.itab (taInter s.mem (s.regs 0).toNat) (s.regs 3).toNat).isSome))) :=
-  ⟨R0, _, R0_laws, typeAssert_impl,
+            (R.itab (taInter s.mem (s.regs 0).toNat) (s.regs 3).toNat).isSome)) ∧ Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s) :=
+  ⟨R0, _, Htrue, R0_laws, typeAssert_impl,
     wstate fun i => if i = 0 then BitVec.ofNat 64 DTA else if i = 3 then BitVec.ofNat 64 TD else 0,
-    rfl, wstate_rtpre _ 2 (by decide), wmem_taDesc, by decide, fun _ => ⟨Or.inl rfl, Or.inl (by decide)⟩⟩
+    rfl, wstate_rtpre _ 2 (by decide), wmem_taDesc, by decide, fun _ => ⟨Or.inl rfl, Or.inl (by decide)⟩, trivial⟩
 
 /-- `mov 8(%rax), %rcx; cmp $0x10000, %rbx; jne no; test %rcx, %rcx; jz no; xor %eax, %eax;
 mov $0x10200, %ebx; ret; no: mov %rcx, %rax; xor %ebx, %ebx; ret`. -/
@@ -414,9 +425,9 @@ def interfaceSwitchCode : List Nat :=
   [0x48, 0x8b, 0x48, 0x08, 0x48, 0x81, 0xfb, 0x00, 0x00, 0x01, 0x00, 0x75, 0x0d, 0x48, 0x85, 0xc9,
    0x74, 0x08, 0x31, 0xc0, 0xbb, 0x00, 0x02, 0x01, 0x00, 0xc3, 0x48, 0x89, 0xc8, 0x31, 0xdb, 0xc3]
 
-theorem interfaceSwitch_impl : InterfaceSwitch (toy.link (at0 interfaceSwitchCode)) A0 R0 := by
+theorem interfaceSwitch_impl : InterfaceSwitch (toy.link (at0 interfaceSwitchCode)) A0 R0 Htrue := by
   rw [link_at0]
-  intro cs s hpc ⟨hpre, hdesc, ht0, ht⟩
+  intro cs s hpc ⟨hpre, hdesc, ht0, ht, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   have hdesc' := hdesc
@@ -447,13 +458,14 @@ theorem interfaceSwitch_impl : InterfaceSwitch (toy.link (at0 interfaceSwitchCod
     | done
 
 /-- `InterfaceSwitch` is satisfiable (amd64; shown for the case list `[ID]`). -/
-theorem interfaceSwitch_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment), R.Laws ∧
-    InterfaceSwitch (toy.link impl) A0 R ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
+theorem interfaceSwitch_satisfiable : ∃ (R : IfaceModel) (impl : List Janus.Amd64.Segment) (H : RtReady),
+    R.Laws ∧
+    InterfaceSwitch (toy.link impl) A0 R H ∧ ∃ s : Janus.Amd64.State, s.rip = BitVec.ofNat 64 A0 ∧
       (RTPre R 2 s ∧ ISDescOK R s.mem (s.regs 0).toNat [ID] ∧ (s.regs 3).toNat ≠ 0 ∧
-        R.IsType (s.regs 3).toNat) :=
-  ⟨R0, _, R0_laws, interfaceSwitch_impl,
+        R.IsType (s.regs 3).toNat ∧ Ready64 H R.priv [(s.regs 0).toNat, (s.regs 3).toNat] s) :=
+  ⟨R0, _, Htrue, R0_laws, interfaceSwitch_impl,
     wstate fun i => if i = 0 then BitVec.ofNat 64 DIS else if i = 3 then BitVec.ofNat 64 TD else 0,
-    rfl, wstate_rtpre _ 2 (by decide), wmem_isDesc, by decide, Or.inl rfl⟩
+    rfl, wstate_rtpre _ 2 (by decide), wmem_isDesc, by decide, Or.inl rfl, trivial⟩
 
 /-! ## Comparison -/
 

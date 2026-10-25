@@ -37,8 +37,11 @@ for dp, _, fs in os.walk(os.path.join(root, "Janus")):
         if f.endswith(".lean"):
             p = os.path.join(dp, f)
             mod = os.path.relpath(p, root)[:-5].replace(os.sep, ".")
-            for n in re.findall(r"^theorem (\w+)_satisfiable\b", open(p, encoding="utf-8").read(), re.M):
-                sat.setdefault(n, []).append(mod)
+            text = open(p, encoding="utf-8").read()
+            for m in re.finditer(r"^theorem (\w+)_satisfiable\b(.*?):=", text, re.M | re.S):
+                # round 10: the witness must be about the contract (its statement names it and
+                # gives a state), not just a theorem of that name
+                sat.setdefault(m.group(1), []).append((mod, m.group(2)))
 pending = {}
 pf = os.path.join(root, "audit", "round9", "sat-pending.txt")
 if os.path.exists(pf):
@@ -53,7 +56,8 @@ for f, c in contracts:
     w = w[0].lower() + w[1:]
     stem = f[:-5]
     satmod = "Janus.Contracts." + (stem[:-5] + "SatAmd64" if stem.endswith("Amd64") else stem + "Sat")
-    mods = [m for m in sat.get(w, []) if m in imports and m == satmod]
+    mods = [m for m, stmt in sat.get(w, []) if m in imports and m == satmod
+            and re.search(r"\b%s\b" % re.escape(c), stmt) and re.search(r"∃[^,]*\bs\b", stmt)]
     if mods:
         ok += 1
         print("  SAT ok      %-22s %-20s %s_satisfiable (%s)" % (c, f, w, mods[0]))

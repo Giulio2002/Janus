@@ -35,6 +35,18 @@ is usable) is preserved. Each precondition requires `RTPre` (the runtime environ
 room and an admissible `X30`) and, for an operation on a map, `M.Typ t` for the type descriptor
 `t` in `X0`.
 
+**Calls that allocate** (round 10 V2). `Assign` and `MakeSmall` allocate: a new group, table or
+header that stays represented (`OthersKept`). Without a readiness hypothesis their precondition
+was `M.Env` and their postcondition handed `M.Env` back, so from one call state they chained to
+`2^64` inserts of distinct keys (or `2^48 + 1` distinct new maps) in the fixed, finite private
+memory, contradicting `MapModel.Laws.len`: the contracts were unsatisfiable together with the
+laws and every theorem assuming them was vacuous (`audit/round10/model/MapUnsat.lean`). Like the
+allocation contracts (`Janus.Contracts.RtReady`, round 9 C1) they now take a readiness predicate
+`H`, required at the call for its arguments, `g`, `SP` and the runtime's view of memory
+(`rtView M.priv`), which the call does not hand back: a theorem assumes `H` at its entry for the
+call it makes. `M.Env` stays the runtime's structural invariant, which the real runtime does
+keep across calls; whether the allocator has room for this call is `H`'s business.
+
 **Not covered.** A nil map passed to `mapassign` panics in the runtime
 (`panic(plainError("assignment to entry in nil map"))`); the `Assign` contract requires a
 non-nil map, so no theorem here says anything about that call. The runtime's detection of
@@ -159,11 +171,14 @@ def Access2 (p : Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) : 
 
 /-- `runtime.mapassign_fast64(t, m, k)` on a non-nil map: returns a writable value slot `p` in
 the runtime's memory such that storing any `v` there (8 bytes) makes the map `f` with `k ↦ v`.
-The compiled `m[k] = v` performs exactly that store right after the call. -/
-def Assign (p : Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) : Prop :=
+The compiled `m[k] = v` performs exactly that store right after the call. The call may allocate
+(a new group or table), so it is covered only when the runtime is ready for it (`H`, see
+"Calls that allocate" in the module comment). -/
+def Assign (p : Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) : Prop :=
   ∀ f, Summary p addr
     (fun s => RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ (s.regs 1).toNat ≠ 0 ∧
-      M.Rep s.mem (s.regs 1).toNat f)
+      M.Rep s.mem (s.regs 1).toNat f ∧
+      Ready H M.priv [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s)
     (fun s s' => RTReturn M 3 [] (s.regs 1).toNat s s' fun r m =>
       m.accessible (r 0).toNat 8 true = true ∧ InRanges (r 0).toNat 8 M.priv ∧
       ∀ v : BitVec 64, M.Rep (m.writeLE (r 0).toNat 8 v.toNat) (s.regs 1).toNat (f.set (s.regs 2) v) ∧
@@ -186,9 +201,9 @@ def Clear {K V : Type} (p : Program) (addr : Nat) (M : MapModel K V) : Prop :=
       IsMap M m (s.regs 1).toNat AMap.empty)
 
 /-- `runtime.makemap_small()`: returns a new, non-nil, empty map, distinct from every map that
-existed before. -/
-def MakeSmall {K V : Type} (p : Program) (addr : Nat) (M : MapModel K V) : Prop :=
-  Summary p addr (fun s => RTPre M 0 s)
+existed before, when the runtime is ready for the allocation (`H`). -/
+def MakeSmall {K V : Type} (p : Program) (addr : Nat) (M : MapModel K V) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre M 0 s ∧ Ready H M.priv [] s)
     (fun s s' => RTReturn M 0 [] 0 s s' fun r m =>
       (r 0).toNat ≠ 0 ∧ M.Rep m (r 0).toNat AMap.empty ∧
       ∀ mp f, M.Rep s.mem mp f → mp ≠ (r 0).toNat)
