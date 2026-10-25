@@ -372,6 +372,20 @@ Full table: `artifacts/coverage/runtime.tsv`.
     `emptyTypeAssertCache` / `emptyInterfaceSwitchCache` (the cache model `TACacheOK.empty`,
     `ISCacheOK.empty`).
 
+**R9 (agent/rtmisc), not yet in the table above** (docs/RUNTIME-CONTRACTS.md, "Remaining
+runtime"): executed by proved examples on both ISAs, `complex128div` (arm64) and
+`f32to64` (`-d=softfloat`); `KeepAlive` (an intrinsic, no call); the data objects `staticuint64s`
+(proved from the extracted bytes), `zeroVal`, `inf`, `cgoAlwaysFalse` (stated hypotheses); the CPU
+feature flags as a hypothesis quantified over the flag's value (`x86HasPOPCNT` proved for both
+values on amd64); contracts pinned and proved satisfiable for `checkptrAlignment`,
+`checkptrArithmetic`, `cgoCheckPointer`, `cgoCheckResult` and the 66 `mallocgcSmallNoScanSC<n>`,
+`mallocgcSmallScanNoHeaderSC<n>`, `mallocgcTinySize<n>` entries of
+`GOEXPERIMENT=sizespecializedmalloc`; `cgoKeepAlive` as an external stub like `cgoUse`;
+`cgoNoCallback` is ordinary code. `-cover` counters are stated (`CovBlock`); `-race`, `-msan`,
+`-asan`, `-d=libfuzzer` are rejected by `janus extract`. Left: `fadd64`/`fsub64` are not IEEE
+(subnormal results off by a factor of two in Go 1.26), so they get no contract; `fmul64`, `fdiv64`,
+`f64to32` and the other soft-float helpers run as code but have no proof against IEEE.
+
 **Missing: no contract, stub or proof on any branch, and linked by std** (139; the 12
 concurrency names are excluded, which leaves **127 in scope**):
 
