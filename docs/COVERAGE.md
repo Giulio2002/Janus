@@ -333,7 +333,7 @@ Full table: `artifacts/coverage/runtime.tsv`.
 |---|---:|---:|---:|---:|
 | alloc | 5 | 2 | 0 | 2 |
 | slice/growslice | 16 | 10 | 0 | 2 |
-| map | 26 | 24 | 0 | 10 |
+| map | 26 | 24 | 0 | 24 |
 | string | 22 | 20 | 0 | 0 |
 | interface/type assertion | 13 | 12 | 0 | 13 |
 | memory/equality | 23 | 20 | 3 | 20 |
@@ -348,7 +348,7 @@ Full table: `artifacts/coverage/runtime.tsv`.
 | misc | 11 | 8 | 0 | 4 |
 | instrumentation (msan/asan/fuzz/cover) | 17 | 0 | 0 | 0 |
 | concurrency (excluded) | 21 | 12 | 0 | 0 |
-| **total** | **309** | **191** | **39** | **105** |
+| **total** | **309** | **191** | **39** | **119** |
 
 **What exists today** (main unless noted):
 
@@ -365,6 +365,11 @@ Full table: `artifacts/coverage/runtime.tsv`.
   * agent/maps: `makemap_small`, `mapaccess1_fast64` (with the MapAccess1Small proof of the real
     code), `mapaccess2_fast64`, `mapaccess2`, `mapassign_fast64`, `mapdelete_fast64`, `mapclear`,
     `mapIterStart`, `mapIterNext`;
+  * agent/maps2 (R3): `makemap`, `mapaccess1`, `mapassign`, `mapdelete`, `mapaccess1_fat`,
+    `mapaccess2_fat`, `mapaccess1_fast32`, `mapaccess2_fast32`, `mapassign_fast32`,
+    `mapdelete_fast32`, `mapassign_fast64ptr`, `mapaccess1_faststr`, `mapassign_faststr`,
+    `mapdelete_faststr` (both ISAs); all 24 map entry points pinned to the runtime's code and
+    proved satisfiable, the allocating ones under `H : RtReady` (finding R3-C1);
   * agent/ffi: `cgocall`, `tls_g`/`_cgo_topofstack` (`TopOfStack`);
   * agent/rtiface: `convT`, `convTnoptr`, `convT16`, `convT32`, `convT64`, `convTstring`,
     `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch`, `efaceeq`,
@@ -372,14 +377,13 @@ Full table: `artifacts/coverage/runtime.tsv`.
     `emptyTypeAssertCache` / `emptyInterfaceSwitchCache` (the cache model `TACacheOK.empty`,
     `ISCacheOK.empty`).
 
-**Missing: no contract, stub or proof on any branch, and linked by std** (105; the 12
-concurrency names are excluded, which leaves **93 in scope**):
+**Missing: no contract, stub or proof on any branch, and linked by std** (91; the 12
+concurrency names are excluded, which leaves **79 in scope**):
 
 * **CPU feature flags (variables)**: `arm64HasATOMICS` `x86HasAVX` `x86HasFMA` `x86HasPOPCNT` `x86HasSSE41`
 * **cgo**: `cgoAlwaysFalse` `cgoCheckPointer`
 * **concurrency (excluded)**: `block` `chancap` `chanlen` `chanrecv1` `chanrecv2` `chansend1` `closechan` `makechan` `newproc` `selectgo` `selectnbrecv` `selectnbsend`
 * **conversion/soft arithmetic**: `complex128div` `f32to64` `f64to32` `fadd64` `fdiv64` `fmul64`
-* **map**: `makemap` `mapaccess1` `mapaccess1_fast32` `mapaccess1_faststr` `mapaccess1_fat` `mapaccess2_fast32` `mapaccess2_fat` `mapassign` `mapassign_fast32` `mapassign_fast64ptr` `mapassign_faststr` `mapdelete` `mapdelete_fast32` `mapdelete_faststr`
 * **misc**: `KeepAlive` `gostring` `staticuint64s` `zeroVal`
 * **panic/recover/defer**: `deferproc` `deferprocStack` `deferreturn` `gorecover` `sigpanic`
 * **print (println builtin)**: `printbool` `printcomplex128` `printcomplex64` `printeface` `printfloat32` `printfloat64` `printhex` `printint` `printlock` `printnl` `printpointer` `printquoted` `printslice` `printsp` `printstring` `printuint` `printuintptr` `printunlock`
@@ -430,6 +434,10 @@ architecture and branch, and what it rests on. A construct counts as covered onl
 `WrongAdd` counterexample) and 31 amd64 proofs; agent/alloc adds 5+4, agent/maps 10+10,
 agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts only),
 agent/rtiface 4+4 (interfaces: `Box`, `AsHasher`, `Classify`, `Equal`).
+agent/maps2 (R3, `examples/basic/maps2.go`) adds 10+10 map examples (`LookupS`, `InsertS`,
+`DeleteS`, `LookupK24`, `InsertK24`, `Has32`, `Set32`, `InsertPtr`, `LookupPtr`, `MakeHint`), each
+with `Witness.nonvacuous` (as `SumValues` now), and restates `Insert`, `InsertGet`, `NewMap` with
+the readiness `H` (finding R3-C1: they were vacuous).
 agent/eqhash (R4, `examples/basic/rteq.go`) adds 8+8 user examples (`Eq32`, `StrEq`, `F64Eq`,
 `CopyTrees`, `ClearTrees`, `LookupStr`, `HashFKey`, `EqFKey`) and proves the runtime's own
 equality, hash and typed-memory functions from their machine code against their contracts:
@@ -492,8 +500,8 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | `copy` | `CopyBlock` (main) | `CopyBlock`, `CopyBlock512` | `memmove` executed |
 | `len`, `cap` | `CopyWords` (main); `CountKeys` (maps); `AppendOne` (alloc) | same | – |
 | `make([]T)`, `new`, `&T{}` | `MakeSlice`, `NewPair` (alloc) | same | `makeslice`, `newobject` contracts |
-| `make(map)` | `NewMap` (maps) | same | `makemap_small` contract |
-| map read / write / delete / clear | `Lookup`, `LookupKey16`, `Insert`, `InsertGet`, `Delete`, `ClearMap` (maps); string keys: `LookupStr` (eqhash) | same | `mapaccess*`, `mapassign_fast64`, `mapdelete_fast64`, `mapclear` contracts |
+| `make(map)` | `NewMap` (maps); with a size hint: `MakeHint` (maps2) | same | `makemap_small`, `makemap` contracts |
+| map read / write / delete / clear | `Lookup`, `LookupKey16`, `Insert`, `InsertGet`, `Delete`, `ClearMap` (maps); string keys: `LookupStr` (eqhash), `LookupS`, `InsertS`, `DeleteS` (maps2); generic `[24]byte` keys: `LookupK24`, `InsertK24`; `map[uint32]bool`: `Has32`, `Set32`; pointer keys: `InsertPtr`, `LookupPtr` (maps2) | same | `mapaccess*`, `mapassign*`, `mapdelete*`, `mapclear` contracts |
 | the map runtime itself | `MapAccess1Small` (maps, real `mapaccess1_fast64` vs its contract) | same | `Janus/Spec/SwissMap.lean` |
 | string indexing | `HexDigit` (main) | same | `Program.data` |
 | string concatenation | none | none | `concatstring2..5`, `concatstrings` |
@@ -747,7 +755,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 13 | **K2. C ABI: environment**: `//export` callbacks (`crosscall2` → `cgocallback` contract and the reverse composition theorem), function-pointer hypotheses, writable C globals and `-fPIC` GOT access as data objects, TLS (initial-exec, general-dynamic, TLSDESC), PLT stubs and libc contracts (`memcpy`, `memset`, `strlen`, `malloc`/`free`, outline atomics), `setjmp`/`longjmp` (non-local return), `alloca` frame lemmas | rows 7–13 of 5.2 | `Janus/FFI.lean`, `Janus/Amd64/FFI.lean`, new `Janus/Contracts/Libc.lean`, the cgo part of `cmd/janus/extract.go`, docs/FFI.md §§ 2–4 | L | K1, iface-alloc |
 | 14 | **R1. String runtime contracts**: `concatstring2..5`/`concatstrings`, `concatbyte2..5`/`concatbytes`, `slicebytetostring`, `slicebytetostringtmp`, `stringtoslicebyte`, `stringtoslicerune`, `slicerunetostring`, `intstring`, `cmpstring` (executed: decodes), `decoderune`, `countrunes`, `strmin`/`strmax`, `gostring`, `gostringn`, `gobytes` | 20 linked + 3 | `Janus/Contracts/String.lean` (+`Amd64`), `Janus/Spec/String.lean` | M | iface-alloc (alloc contracts) |
 | 15 | **R2. Interface runtime contracts** (done on agent/rtiface): `convT`, `convTnoptr`, `convT16/32/64`, `convTstring`, `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch` (+ `emptyTypeAssertCache`, `emptyInterfaceSwitchCache`), `ifaceeq`, `efaceeq` | 12 linked + 1 + 2 caches; unlocks type switches and assertions (criterion 3) | `Janus/Contracts/Iface.lean` (+`Amd64`), `Janus/Spec/Type.lean` | M | iface-alloc |
-| 16 | **R3. Remaining map contracts**: `makemap`, generic `mapaccess1`/`mapassign`/`mapdelete`, the `_fast32`, `_faststr`, `_fat` and `_fast64ptr` variants | 15 linked | `Janus/Contracts/Map*.lean` (extending agent/maps) | M | maps, R4 (key hashing) |
+| 16 | **R3. Remaining map contracts** (**done**, agent/maps2: 15 new contracts per ISA in `Janus/Contracts/MapVar*.lean`, `MapStr*.lean`, all 24 map entry points pinned and satisfiable, finding R3-C1 fixed with `RtReady`): `makemap`, generic `mapaccess1`/`mapassign`/`mapdelete`, the `_fast32`, `_faststr`, `_fat` and `_fast64ptr` variants | 15 linked | `Janus/Contracts/Map*.lean` (extending agent/maps) | M | maps, R4 (key hashing) |
 | 17 | **R4. Equality and hashing contracts**: `memequal0/8/16/32/64/128`, `memequal_varlen`, `f32equal`, `f64equal`, `c64equal`, `c128equal`, `strequal`, `interequal`, `nilinterequal`; `memhash*`, `strhash`, `f32hash`, `f64hash`, `c64hash`, `c128hash`, `interhash`, `nilinterhash`, `rand` (seeded hash as an uninterpreted function with its laws); `typedmemmove`, `typedmemclr`, `memclrHasPointers` | 17 + 16 linked | `Janus/Contracts/Mem.lean`, `Janus/Contracts/Hash.lean` | M | iface-alloc; E to execute `aeshash` instead of assuming it |
 | 18 | **R5. Slices and write barriers**: `growsliceBuf`, `growslice*NoAlias`, `makeslicecopy`, `moveSlice*`, `slicecopy`, `typedslicecopy`; `gcWriteBarrier1`, `3`–`8`, `wbZero`, `wbMove`, the `writeBarrier` flag | 8 + 2 and 10 linked | `Janus/Contracts/Alloc*.lean` (extending agent/alloc), `Janus/Contracts/WriteBarrier.lean` | S–M | alloc, iface-alloc |
 | 19 | **R6. Panics, defer, recover**: `gopanic` with unwinding through deferred calls, `gorecover`, `deferproc`, `deferprocStack`, `deferreturn`, `deferprocat`, `deferrangefunc`, `sigpanic` (nil dereference and other faults as Go panics), `panicrangestate`; an outcome `.panicked v` that `recover` can turn back into a return | 5 linked + 2; the defer/panic/recover rows of criterion 3 | `Janus/Spec/Panic.lean`, `Janus/Contracts/Panic.lean`, panic-outcome changes in `Janus/GoABI.lean` | L–XL | iface-alloc (defer mechanism), R2 (panic values are interfaces) |
