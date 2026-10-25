@@ -2,7 +2,7 @@ import Janus.Contracts.Instrument
 import Janus.Contracts.Map
 
 /-!
-# Instrumented builds: the `-d=checkptr` runtime checks (arm64)
+# Instrumented builds: the `-d=checkptr` runtime checks, and the cgo pointer checks (arm64)
 
 `go build -gcflags=-d=checkptr` (also implied by `-race` and `-msan`, which Janus rejects,
 docs/CLI.md "Build modes") makes the compiler check unsafe pointer operations at run time:
@@ -194,5 +194,37 @@ def CheckptrArithmetic (p : Program) (addr : Nat) (C : CheckptrModel) : Prop :=
     (fun s => RTPre C.toRtEnv 4 s ∧
       ArithOK C s.mem (s.regs 28) (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat)
     (fun s s' => RTReturn C.toRtEnv 4 s s' fun _ _ => True)
+
+/-! ## The cgo pointer checks (`runtime/cgocall.go`)
+
+cgo-generated Go code checks the Go values it passes to C (`_cgoCheckPointer(ptr, arg)`, before
+`cgocall`, for every argument whose type holds pointers) and the results an exported Go function
+returns to C (`_cgoCheckResult(val)`), by the rules of `cmd/cgo` ("Passing pointers"): C may not
+receive a Go pointer to memory that holds unpinned Go pointers. Each check **returns** when the
+value passes (or `GODEBUG=cgocheck=0`) and otherwise panics. Whether a value passes depends on the
+runtime's heap metadata (spans, pinner bits, the type's GC data), so it is the model's abstract
+predicate, and the panic is excluded: the contracts state the return under the check's success. -/
+
+/-- The cgo pointer checks: `ok m g t v at av` when `cgoCheckPointer(ptr, arg)` passes for
+`ptr = (t, v)` and `arg = (at, av)` (two interfaces; `at = 0` for a nil `arg`) in memory `m` and
+goroutine `g`; `resOK m g t v` when `cgoCheckResult((t, v))` passes. -/
+structure CgoCheckModel extends RtEnv where
+  ok : Memory → W64 → Nat → Nat → Nat → Nat → Prop
+  resOK : Memory → W64 → Nat → Nat → Prop
+
+/-- **`runtime.cgoCheckPointer(ptr, arg any)`** (arm64; `X0, X1 = ptr`, `X2, X3 = arg`): returns
+when the check passes (`C.ok`); the panic is excluded. -/
+def CgoCheckPointer (p : Program) (addr : Nat) (C : CgoCheckModel) : Prop :=
+  Summary p addr
+    (fun s => RTPre C.toRtEnv 4 s ∧
+      C.ok s.mem (s.regs 28) (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat (s.regs 3).toNat)
+    (fun s s' => RTReturn C.toRtEnv 4 s s' fun _ _ => True)
+
+/-- **`runtime.cgoCheckResult(val any)`** (arm64; `X0, X1 = val`): returns when the check passes
+(`C.resOK`); the panic is excluded. -/
+def CgoCheckResult (p : Program) (addr : Nat) (C : CgoCheckModel) : Prop :=
+  Summary p addr
+    (fun s => RTPre C.toRtEnv 2 s ∧ C.resOK s.mem (s.regs 28) (s.regs 0).toNat (s.regs 1).toNat)
+    (fun s s' => RTReturn C.toRtEnv 2 s s' fun _ _ => True)
 
 end Janus.Contracts.Instrument

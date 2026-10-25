@@ -127,11 +127,12 @@ var (
 	}
 	// The cgo boundary (Janus/FFI.lean): runtime.cgocall (the Go -> C call: stack switch to g0,
 	// entersyscall/exitsyscall, the C call through asmcgocall), _cgo_topofstack (Go assembly the
-	// C side of a cgo call calls) and runtime.cgoUse (only on the dead `if _Cgo_always_false`
-	// branch of cgo wrappers). Their effects are the trusted contracts of Janus.FFI.
+	// C side of a cgo call calls), runtime.cgoUse and runtime.cgoKeepAlive (only on the dead
+	// `if _Cgo_always_false` branch of cgo wrappers; cgoKeepAlive with `#cgo noescape`, both
+	// throw if called). Their effects are the trusted contracts of Janus.FFI.
 	runtimeExternalStubs = map[string]bool{
 		"runtime.cgocall": true, "_cgo_topofstack": true, "_cgo_topofstack.abi0": true,
-		"runtime.cgoUse": true,
+		"runtime.cgoUse": true, "runtime.cgoKeepAlive": true,
 	}
 )
 
@@ -153,12 +154,13 @@ var runtimeContractStubs = map[string]bool{
 }
 
 // rtmiscContractStubs are the further runtime functions a framework contract library describes
-// (docs/RUNTIME-CONTRACTS.md, "Remaining runtime"): the -d=checkptr checks
-// (Janus/Contracts/InstrumentCalls*.lean) and the size-specialised allocator entry points of
+// (docs/RUNTIME-CONTRACTS.md, "Remaining runtime"): the -d=checkptr checks and the cgo pointer
+// checks (Janus/Contracts/InstrumentCalls*.lean) and the size-specialised allocator entry points of
 // GOEXPERIMENT=sizespecializedmalloc (Janus/Contracts/MallocSC*.lean). They are pinned like the
 // interface contracts (checkContractPin) and belong to runtimeContractStubs.
 var rtmiscContractStubs = map[string]bool{
 	"runtime.checkptrAlignment": true, "runtime.checkptrArithmetic": true,
+	"runtime.cgoCheckPointer": true, "runtime.cgoCheckResult": true,
 	"runtime.mallocgcSmallNoScanSC2": true, "runtime.mallocgcSmallNoScanSC3": true,
 	"runtime.mallocgcSmallNoScanSC4": true, "runtime.mallocgcSmallNoScanSC5": true,
 	"runtime.mallocgcSmallNoScanSC6": true, "runtime.mallocgcSmallNoScanSC7": true,

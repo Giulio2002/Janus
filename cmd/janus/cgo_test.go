@@ -52,7 +52,7 @@ func TestCgoExtraction(t *testing.T) {
 			ext[s.Name] = true
 		}
 	}
-	for _, n := range []string{"runtime.cgocall", "_cgo_topofstack", "runtime.cgoUse"} {
+	for _, n := range []string{"runtime.cgocall", "_cgo_topofstack", "runtime.cgoUse"} { // (cgoKeepAlive: only with #cgo noescape)
 		if !ext[n] {
 			t.Errorf("%s is not an external stub: %+v", n, x.Stubs)
 		}

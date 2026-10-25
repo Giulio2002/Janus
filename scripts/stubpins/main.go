@@ -19,6 +19,15 @@ func s_assertE2I2()
 //go:linkname s_cgocall runtime.cgocall
 func s_cgocall()
 
+//go:linkname s_cgoCheckPointer runtime.cgoCheckPointer
+func s_cgoCheckPointer()
+
+//go:linkname s_cgoCheckResult runtime.cgoCheckResult
+func s_cgoCheckResult()
+
+//go:linkname s_cgoKeepAlive runtime.cgoKeepAlive
+func s_cgoKeepAlive()
+
 //go:linkname s_cgoUse runtime.cgoUse
 func s_cgoUse()
 
@@ -386,6 +395,9 @@ var keep = []func(){
 	s_assertE2I,
 	s_assertE2I2,
 	s_cgocall,
+	s_cgoCheckPointer,
+	s_cgoCheckResult,
+	s_cgoKeepAlive,
 	s_cgoUse,
 	s_checkptrAlignment,
 	s_checkptrArithmetic,

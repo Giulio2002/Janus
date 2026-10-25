@@ -30,6 +30,17 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "2607eb7759834a383a927c194c0302f1e5c3c712afb6878fe11b7e1bfadaae8a", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "99733f8a9daa7a9e3478c14d224bbd735c10ed5286b9007e82443d953d6fe21b", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
 		},
+		"runtime.cgoCheckPointer": {
+			{Hash: "2c6e61404714497ce5aeb02ceed8cee6dd2f705edff70e79935b177c3e055f22", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
+			{Hash: "4bbd8e7042c60c0700fc45211c728759130efd8dbda4ff1b75ff89ecb68cd076", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.cgoCheckResult": {
+			{Hash: "3f864a4ee3f7318efff039a00944c2e2c931bc717e2cc0834c6967057d8a4f49", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "df157b302daf206524c35bc1edea8ac93a73a1c30189ce66227731447579e6b6", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
+		},
+		"runtime.cgoKeepAlive": {
+			{Hash: "a205df524632495b0ec4bf055d4524e360edcd191dfed4953b02e2eb33ef36f8", File: "runtime/cgo.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
+		},
 		"runtime.cgoUse": {
 			{Hash: "b78a7f2f5e0558e14cfc8f05f92d9effd19170852a674c6638fed0b965893501", File: "runtime/cgo.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
@@ -613,6 +624,17 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.cgocall": {
 			{Hash: "09b5c4c8f48ce9507760b896eaa86b5a7f8bcb12311fc4fbc62843f075cdf830", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "50d965ff1e515e2b3ff0b5af57c62ce9317ce235c0389974eacedc5a01436fa2", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
+		},
+		"runtime.cgoCheckPointer": {
+			{Hash: "23c66d493d19026546e20d269e0d312955fbd030b259b303b9b87c915589c5fe", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "3f654d2651563d2c0088488ec2a62e6861e7fd7e9311bfc2de7770a925f8d9c5", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
+		},
+		"runtime.cgoCheckResult": {
+			{Hash: "1aa566aeb49b654e52a9e738e5f563c3175b8d51ddafb91026add5ea6ac1aa98", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
+			{Hash: "2a251727747e65528eb88beb813c1841a95c2d2d2bee409f640781e7f48deb23", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.cgoKeepAlive": {
+			{Hash: "d3cd726032cd15093d7c28ad0b42730afeaf5eaa1dafce7dac7245d34eb0e099", File: "runtime/cgo.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
 		},
 		"runtime.cgoUse": {
 			{Hash: "5452e87e33fe7f915691065822ea5a4d75d657e579b92d41f9abcbbd36bc0c56", File: "runtime/cgo.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0

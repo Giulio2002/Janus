@@ -142,3 +142,25 @@ theorem b64_isNaN_round (rm : RM) (neg : Bool) (m : Nat) (e : Int) :
     exact b64_isNaN_pack _ _ _ (by omega) (Nat.mod_lt _ (by decide))
 
 end Janus.Float
+
+/-! ## Comparisons (arm64 `FCMP`) -/
+
+namespace Janus.Arm64.FP
+
+open Janus.Float
+
+theorem typeOf_isNaN (f : Fmt) (x : Nat) : (typeOf f x).isNaN = isNaN f x := by
+  unfold typeOf isNaN; cases classify f x <;> rfl
+
+/-- `FPCompare` in IEEE mode: unordered (`0011`) for a NaN operand, else equal (`0110`), less
+(`1000`) or greater (`0010`) by the values. -/
+theorem fpCompare_ieee {fpcr : Nat} (h : IEEEMode fpcr) (f : Fmt) (sig : Bool) (a b : Nat) :
+    (fpCompare f fpcr sig a b).1 =
+      if isNaN f a || isNaN f b then 3
+      else if Val.eq (valueOf f a) (valueOf f b) then 6
+      else if Val.lt (valueOf f a) (valueOf f b) then 8 else 2 := by
+  simp only [fpCompare, unpack_ieee h, typeOf_isNaN]
+  split <;> rfl
+
+end Janus.Arm64.FP
+

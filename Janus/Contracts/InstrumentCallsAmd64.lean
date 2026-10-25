@@ -2,7 +2,7 @@ import Janus.Contracts.InstrumentCalls
 import Janus.Contracts.MapAmd64
 
 /-!
-# Instrumented builds: the `-d=checkptr` runtime checks (amd64)
+# Instrumented builds: the `-d=checkptr` runtime checks, and the cgo pointer checks (amd64)
 
 The amd64 versions of `Janus.Contracts.InstrumentCalls` (whose module documentation explains the
 contracts): the same conditions (`AlignOK`, `ArithOK`, the model `CheckptrModel`), with the Go
@@ -115,5 +115,18 @@ def CheckptrArithmetic64 (p : Janus.Amd64.Program) (addr : Nat) (C : CheckptrMod
     (fun s => RTPre64 C.toRtEnv 4 s ∧
       ArithOK C s.mem (s.regs 14) (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat)
     (fun s s' => RTReturn64 C.toRtEnv 4 s s' fun _ _ => True)
+
+/-- **`runtime.cgoCheckPointer(ptr, arg any)`** (amd64; `RAX, RBX = ptr`, `RCX, RDI = arg`). -/
+def CgoCheckPointer64 (p : Janus.Amd64.Program) (addr : Nat) (C : CgoCheckModel) : Prop :=
+  Summary p addr
+    (fun s => RTPre64 C.toRtEnv 4 s ∧
+      C.ok s.mem (s.regs 14) (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat (s.regs 7).toNat)
+    (fun s s' => RTReturn64 C.toRtEnv 4 s s' fun _ _ => True)
+
+/-- **`runtime.cgoCheckResult(val any)`** (amd64; `RAX, RBX = val`). -/
+def CgoCheckResult64 (p : Janus.Amd64.Program) (addr : Nat) (C : CgoCheckModel) : Prop :=
+  Summary p addr
+    (fun s => RTPre64 C.toRtEnv 2 s ∧ C.resOK s.mem (s.regs 14) (s.regs 0).toNat (s.regs 3).toNat)
+    (fun s s' => RTReturn64 C.toRtEnv 2 s s' fun _ _ => True)
 
 end Janus.Contracts.Instrument

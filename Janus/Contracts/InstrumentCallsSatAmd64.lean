@@ -64,4 +64,25 @@ theorem checkptrArithmetic64_satisfiable : ∃ (C : CheckptrModel) (impl : List 
   ⟨C0, _, C0_laws, checkptrArithmetic64_impl, wstate fun _ => 0, rfl, wstate_rtpre64 _ 4 (by decide),
     by simp [minLegalPointer, wstate], Or.inl rfl⟩
 
+theorem cgoCheckPointer64_impl : CgoCheckPointer64 (toy.link (at0 retCode)) A0 G0 := by
+  rw [link_at0]; intro s hpc ⟨hpre, _⟩; rw [G0_env] at hpre ⊢; exact ret_rtReturn 4 s hpc hpre
+
+theorem cgoCheckResult64_impl : CgoCheckResult64 (toy.link (at0 retCode)) A0 G0 := by
+  rw [link_at0]; intro s hpc ⟨hpre, _⟩; rw [G0_env] at hpre ⊢; exact ret_rtReturn 2 s hpc hpre
+
+/-- `CgoCheckPointer64` is satisfiable. -/
+theorem cgoCheckPointer64_satisfiable : ∃ (C : CgoCheckModel) (impl : List Janus.Amd64.Segment),
+    C.toRtEnv.Laws ∧ CgoCheckPointer64 (toy.link impl) A0 C ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
+      RTPre64 C.toRtEnv 4 s ∧
+      C.ok s.mem (s.regs 14) (s.regs 0).toNat (s.regs 3).toNat (s.regs 1).toNat (s.regs 7).toNat :=
+  ⟨G0, _, C0_laws.env, cgoCheckPointer64_impl, wstate fun _ => 0, rfl, wstate_rtpre64 _ 4 (by decide),
+    trivial⟩
+
+/-- `CgoCheckResult64` is satisfiable. -/
+theorem cgoCheckResult64_satisfiable : ∃ (C : CgoCheckModel) (impl : List Janus.Amd64.Segment),
+    C.toRtEnv.Laws ∧ CgoCheckResult64 (toy.link impl) A0 C ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
+      RTPre64 C.toRtEnv 2 s ∧ C.resOK s.mem (s.regs 14) (s.regs 0).toNat (s.regs 3).toNat :=
+  ⟨G0, _, C0_laws.env, cgoCheckResult64_impl, wstate fun _ => 0, rfl, wstate_rtpre64 _ 2 (by decide),
+    trivial⟩
+
 end Janus.Contracts.InstrumentCallsSatAmd64

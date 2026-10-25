@@ -76,4 +76,32 @@ theorem checkptrArithmetic_satisfiable : ∃ (C : CheckptrModel) (impl : List Se
   ⟨C0, _, C0_laws, checkptrArithmetic_impl, wstate fun _ => 0, rfl, wstate_rtpre' _ 4 (by decide),
     by simp [ArithOK, minLegalPointer, wstate], Or.inl rfl⟩
 
+/-- A cgo check model: `C0`'s environment, every value passes. -/
+def G0 : CgoCheckModel :=
+  { Env := Env0, priv := [(0x10000, 0x11000)], depth := 64, ok := fun _ _ _ _ _ _ => True,
+    resOK := fun _ _ _ _ => True }
+
+theorem G0_env : G0.toRtEnv = C0.toRtEnv := rfl
+
+theorem cgoCheckPointer_impl : CgoCheckPointer (toy.link (at0 retCode)) A0 G0 := by
+  rw [link_at0]; intro s hpc ⟨hpre, _⟩; rw [G0_env] at hpre ⊢; exact ret_rtReturn 4 s hpc hpre
+
+theorem cgoCheckResult_impl : CgoCheckResult (toy.link (at0 retCode)) A0 G0 := by
+  rw [link_at0]; intro s hpc ⟨hpre, _⟩; rw [G0_env] at hpre ⊢; exact ret_rtReturn 2 s hpc hpre
+
+/-- `CgoCheckPointer` is satisfiable. -/
+theorem cgoCheckPointer_satisfiable : ∃ (C : CgoCheckModel) (impl : List Segment), C.toRtEnv.Laws ∧
+    CgoCheckPointer (toy.link impl) A0 C ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
+      RTPre C.toRtEnv 4 s ∧
+      C.ok s.mem (s.regs 28) (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat (s.regs 3).toNat :=
+  ⟨G0, _, C0_laws.env, cgoCheckPointer_impl, wstate fun _ => 0, rfl, wstate_rtpre' _ 4 (by decide),
+    trivial⟩
+
+/-- `CgoCheckResult` is satisfiable. -/
+theorem cgoCheckResult_satisfiable : ∃ (C : CgoCheckModel) (impl : List Segment), C.toRtEnv.Laws ∧
+    CgoCheckResult (toy.link impl) A0 C ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
+      RTPre C.toRtEnv 2 s ∧ C.resOK s.mem (s.regs 28) (s.regs 0).toNat (s.regs 1).toNat :=
+  ⟨G0, _, C0_laws.env, cgoCheckResult_impl, wstate fun _ => 0, rfl, wstate_rtpre' _ 2 (by decide),
+    trivial⟩
+
 end Janus.Contracts.InstrumentCallsSat

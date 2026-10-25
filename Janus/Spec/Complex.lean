@@ -100,8 +100,11 @@ def isNaN64 (x : Nat) : Bool := isNaN binary64 x
 def isFinite64 (x : Nat) : Bool := (sub binary64 .rne x x).isSome
 /-- `isInf(x) = !isNaN(x) && !isFinite(x)`. -/
 def isInf64 (x : Nat) : Bool := !isNaN64 x && !isFinite64 x
-/-- `x == 0` (IEEE equality: both zeros, never a NaN). -/
-def isZero64 (x : Nat) : Bool := classify binary64 x == .zero
+/-- `x == y`, IEEE equality (false when either is a NaN; `+0 == -0`). -/
+def eq64 (x y : Nat) : Bool :=
+  !(isNaN binary64 x || isNaN binary64 y) && Val.eq (valueOf binary64 x) (valueOf binary64 y)
+/-- `x == 0` (IEEE equality with `+0`: true exactly for the two zeros, `isZero64_iff`). -/
+def isZero64 (x : Nat) : Bool := eq64 x (zero binary64 false)
 /-- `x >= y`, IEEE ordered comparison (false when either is a NaN). -/
 def ge64 (x y : Nat) : Bool :=
   !(isNaN binary64 x || isNaN binary64 y) &&
@@ -115,22 +118,29 @@ def infE : Nat := 0x7FF0000000000000
 
 /-! ## `runtime.complex128div` -/
 
-/-- `complex128div(complex(a, b), complex(c, d))` (`runtime/complex.go`), fused (arm64) or not
-(amd64): the real and imaginary parts. -/
-def cdiv (fused : Bool) (a b c d : Nat) : Option Nat × Option Nat :=
+/-- Smith's algorithm, the first half of `complex128div`: the quotient `(e, f)` before the
+Annex G recovery, fused (arm64) or not (amd64). -/
+def smith (fused : Bool) (a b c d : Nat) : Option Nat × Option Nat :=
   let A := some a
   let B := some b
   let C := some c
   let D := some d
-  let ef : Option Nat × Option Nat :=
-    if ge64 (abs binary64 c) (abs binary64 d) then
-      let ratio := O.div2 D C
-      let denom := O.mac fused D ratio C
-      (O.div2 (O.mac fused B ratio A) denom, O.div2 (O.msc fused A ratio B) denom)
-    else
-      let ratio := O.div2 C D
-      let denom := O.mac fused C ratio D
-      (O.div2 (O.mac fused A ratio B) denom, O.div2 (O.nms fused B ratio A) denom)
+  if ge64 (abs binary64 c) (abs binary64 d) then
+    let ratio := O.div2 D C
+    let denom := O.mac fused D ratio C
+    (O.div2 (O.mac fused B ratio A) denom, O.div2 (O.msc fused A ratio B) denom)
+  else
+    let ratio := O.div2 C D
+    let denom := O.mac fused C ratio D
+    (O.div2 (O.mac fused A ratio B) denom, O.div2 (O.nms fused B ratio A) denom)
+
+/-- The recovery of infinities and zeros (C99 Annex G.5.1) when both parts of Smith's quotient
+are NaNs: the result for numerator `a + bi`, denominator `c + di` and Smith's `(e, f)`. -/
+def recover (fused : Bool) (a b c d : Nat) (ef : Option Nat × Option Nat) : Option Nat × Option Nat :=
+  let A := some a
+  let B := some b
+  let C := some c
+  let D := some d
   match ef with
   | (none, none) =>
     if isZero64 c && isZero64 d && (!isNaN64 a || !isNaN64 b) then
@@ -147,5 +157,10 @@ def cdiv (fused : Bool) (a b c d : Nat) : Option Nat × Option Nat :=
        O.mul2 (some 0) (O.msc fused A d' (O.mul2 B c')))
     else (none, none)
   | ef => ef
+
+/-- `complex128div(complex(a, b), complex(c, d))` (`runtime/complex.go`), fused (arm64) or not
+(amd64): the real and imaginary parts. -/
+def cdiv (fused : Bool) (a b c d : Nat) : Option Nat × Option Nat :=
+  recover fused a b c d (smith fused a b c d)
 
 end Janus.Float

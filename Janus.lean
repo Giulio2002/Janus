@@ -45,6 +45,7 @@ import Janus.Spec.SoftFloat
 import Janus.Spec.SoftFloatAmd64
 import Janus.Spec.Complex
 import Janus.Spec.ComplexLemmas
+import Janus.Spec.ComplexMachine
 import Janus.Contracts.InstrumentCalls
 import Janus.Contracts.InstrumentCallsAmd64
 import Janus.Contracts.InstrumentCallsSat
