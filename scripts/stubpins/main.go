@@ -154,6 +154,9 @@ func s_mapaccess1_fast32()
 //go:linkname s_mapaccess1_fast64 runtime.mapaccess1_fast64
 func s_mapaccess1_fast64()
 
+//go:linkname s_mapaccess1_faststr runtime.mapaccess1_faststr
+func s_mapaccess1_faststr()
+
 //go:linkname s_mapaccess1_fat runtime.mapaccess1_fat
 func s_mapaccess1_fat()
 
@@ -270,6 +273,9 @@ func s_nilinterequal()
 
 //go:linkname s_nilinterhash runtime.nilinterhash
 func s_nilinterhash()
+
+//go:linkname s_panicBounds runtime.panicBounds
+func s_panicBounds()
 
 //go:linkname s_panicBounds32 runtime.panicBounds32
 func s_panicBounds32()
@@ -407,6 +413,7 @@ var keep = []func(){
 	s_mapaccess1,
 	s_mapaccess1_fast32,
 	s_mapaccess1_fast64,
+	s_mapaccess1_faststr,
 	s_mapaccess1_fat,
 	s_mapaccess2,
 	s_mapaccess2_fast32,
@@ -446,6 +453,7 @@ var keep = []func(){
 	s_memmove,
 	s_nilinterequal,
 	s_nilinterhash,
+	s_panicBounds,
 	s_panicBounds32,
 	s_panicBounds32X,
 	s_panicBounds64,
