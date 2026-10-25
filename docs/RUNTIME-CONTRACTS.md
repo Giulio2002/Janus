@@ -344,6 +344,124 @@ read-back returns `v`), `Delete`, `SumValues` (iteration, every order), `CountKe
 `LookupKey16` (generic `mapaccess2`), `NewMap`, `ClearMap`, and `MapAccess1Small` (the runtime
 function itself, extracted as `runtime.mapaccess1_fast64`).
 
+### Interfaces (`Janus/Spec/Type.lean`, `Janus/Contracts/Iface.lean`, `Janus/Contracts/IfaceAmd64.lean`)
+
+Go 1.26 boxes values into interfaces with `runtime.convT*`, asserts and switches on dynamic
+types with an inline probe of a per-site cache and, on a miss, `runtime.typeAssert` /
+`runtime.interfaceSwitch` (`assertE2I(2)` from generic code), and compares interfaces with
+`runtime.efaceeq` / `ifaceeq` (`runtime/iface.go`, `runtime/alg.go`). A theorem leaves these
+functions out with `--contract` and takes their behaviour as hypotheses over an abstract model
+of the runtime; the compiled code around them (type-word and hash compares, the cache probes,
+the itab and data words) is executed from the binary.
+
+**Layout and model (`Janus/Spec/Type.lean`).** The layouts the code and the runtime read
+(`internal/abi`, Go 1.26, both ISAs): `abi.Type` (`Size_` 0, `PtrBytes` 8, `Hash` 16, `TFlag`
+20 with `TFlagRegularMemory` 8 and `TFlagDirectIface` 32, `Kind_` 23, `Equal` 24),
+`abi.InterfaceType` (`Methods` length at 64), `abi.ITab` (`Inter` 0, `Type` 8, `Hash` 16, `Fun`
+24), `abi.TypeAssert` (`Cache` 0, `Inter` 8, `CanFail` 16) and its cache (`Mask`, then 16-byte
+`Typ`/`Itab` entries), `abi.InterfaceSwitch` (`Cache` 0, `NCases` 8, `Cases` 16) and its cache
+(24-byte `Typ`/`Case`/`Itab` entries). What the runtime computes from them is abstract: a theorem
+quantifies over **every** `R : IfaceModel`:
+
+| Field | Meaning |
+| --- | --- |
+| `R.itab inter typ` | `getitab(inter, typ, true)`: the itab of the pair (non-zero) or `none` if `typ` does not implement the non-empty interface `inter`; one value per pair for the whole run |
+| `R.eq t m x y`, `R.Comparable t m x y` | `t.Equal(x, y)` on the values in memory `m`, and that it returns (no uncomparable type inside, stack within `R.depth`) |
+| `R.IsType t`, `R.IsInter i` | a type descriptor; a non-empty interface type |
+| `R.Env m g`, `R.priv`, `R.depth` | as for maps: the runtime usable; its memory (heap, `itabTable`, `zeroVal`, `staticuint64s`, the empty caches, every type descriptor and itab); stack bytes it may use |
+
+The laws `R.Laws` are facts about the data: the environment lives in `R.priv`; descriptors are
+readable, inside `R.priv`; an itab is never `0`; a `TFlagRegularMemory` type that is not direct
+compares its `Size_` bytes and is always comparable (`regular`), a direct one too (`direct`).
+`StaticItabs R ds` (a separate hypothesis, used only by the corollaries that name a static itab)
+says `getitab` returns every static `go:itab.<T>,<I>` of the extracted data for its pair: the
+linker lists every reachable itab in `runtime.itablink` (`cmd/link/internal/ld/typelink.go`),
+`itabsinit` adds them to `itabTable` before any Go code runs, and `getitab` only creates an itab
+for a pair it does not find, so this holds for a statically linked binary (no plugins).
+
+**Caches.** `TACacheOK R m c inter` / `ISCacheOK R m c cs` state what `buildTypeAssertCache` /
+`buildInterfaceSwitchCache` maintain: `Mask = 2^k - 1`, entries readable in `R.priv`, every used
+entry holding the runtime's answer for its type (the itab or `0`; the case index of
+`switchCase`), and an empty entry, so every probe ends. A descriptor starts with
+`runtime.emptyTypeAssertCache` / `runtime.emptyInterfaceSwitchCache` (`TACacheOK.empty`,
+`ISCacheOK.empty`). `TADescOK R m d` / `ISDescOK R m d cs` add the descriptor: readable, its
+`Cache` word writable (the runtime replaces the cache about once in a thousand misses), a
+non-empty interface (the cases `cs`), a well-formed cache. A theorem asks for a well-formed
+descriptor, so it holds in every state the runtime can leave the cache in, not only the initial
+one; the proofs of the probe loops (`AsHasher`, `Classify`) go by induction on the cyclic distance
+to an empty entry (`probe_dist`, `probe_zero`).
+
+**The contracts.** Each is a `Summary` at the function's address, with the frame of the map
+contracts (`RTPre`/`RTReturn`, the same register and stack rules, memory changed only in
+`R.priv`, the callee's stack window, the spill slots and, for `typeAssert`/`interfaceSwitch`,
+the descriptor's `Cache` word; `R.Env` holds again):
+
+| Go | Runtime entry | Contract (arm64 / amd64) | Result |
+| --- | --- | --- | --- |
+| `any(v)` | `convT(t, &v)` | `ConvT` | a readable box in `R.priv` holding a copy of `t.Size_` bytes (`BoxCopy`) |
+| same, pointer-free `T` | `convTnoptr(t, &v)` | `ConvTnoptr` | the same; `t.PtrBytes = 0` required (`mallocgc` throws otherwise) |
+| 2/4/8-byte `T` | `convT16/32/64(v)` | `ConvT16`, `ConvT32`, `ConvT64` | a box holding `v` (`BoxHolds`; `&staticuint64s[v]` for `v < 256`) |
+| `string` | `convTstring(s)` | `ConvTstring` | a box holding `(ptr, len)`, `(0, 0)` for `""` (`&zeroVal`) |
+| `[]T` | `convTslice(s)` | `ConvTslice` | a box holding the header, `(0, 0, 0)` for a nil slice |
+| `x.(I)` (generic code) | `assertE2I(inter, t)` | `AssertE2I` | the itab (`ItabResult`); a nil or non-implementing `t` panics: excluded |
+| `v, ok := x.(I)` (generic code) | `assertE2I2(inter, t)` | `AssertE2I2` | the itab or `0` |
+| `x.(I)`, `v, ok := x.(I)` | cache probe, `typeAssert(desc, t)` | `TypeAssert` | the itab or `0` for `desc.Inter`; failing without `CanFail` excluded; the descriptor well formed again, same `Inter` and `CanFail` |
+| `switch x.(type)` with interface cases | cache probe, `interfaceSwitch(desc, t)` | `InterfaceSwitch` | `switchCase R t cs`: the first case `t` implements and its itab, else `(len cs, 0)` |
+| `a == b` on `any` | `efaceeq(t, x, y)` | `Efaceeq` | `efaceEqual`: true for `t = nil`; for a direct type the words; else `R.eq t` |
+| `a == b`, non-empty interfaces | `ifaceeq(tab, x, y)` | `Ifaceeq` | `ifaceEqual`: the same with `t = tab.Type` |
+
+Every panic and throw path is excluded by a precondition, not specified: `TypeAssertionError`
+(nil or non-implementing type in `assertE2I`, failing `typeAssert` without `CanFail`), comparing
+an uncomparable type, `getitab` on an empty interface, a nil type in `interfaceSwitch` (the
+compiled code tests for nil first). A box holds its value right after the call; nothing says it
+keeps it across later runtime calls (they may change `R.priv`; reachability is not modelled).
+
+A function that writes its frame before it calls `efaceeq` gets the comparison of the values at
+its entry only if they do not depend on that frame: `EqFrame R t m x y ws`, a precondition
+discharged for `TFlagRegularMemory` types whose values are outside the window by
+`EqFrame.of_regular`.
+
+**Pinned to the runtime's code.** The thirteen functions are `runtimeContractStubs` of
+`cmd/janus/extract.go`: when `--contract` names one, the extractor checks it like a runtime stub
+(the pclntab names it in package `runtime`, in the toolchain's file, and its normalized code is
+one of the pinned hashes of `cmd/janus/stubpins_gen.go`, generated by `scripts/gen-stubpins.sh`
+for go1.26.0, .5, .8, .10 in every build mode). A function of that name that is not the runtime's
+is an extraction error; `identity.json` records `"pinned": true` and the reports print
+`(pinned)`. So a theorem's contract hypothesis is about the Go runtime's own function. What that
+function calls (`mallocgc`, `getitab`, `typedmemmove`, the types' `Equal` functions) is
+identified by name only, as for the pinned helpers of the stubs.
+
+**Non-vacuity.** `Janus/Contracts/IfaceSat.lean` and `IfaceSatAmd64.lean` prove, for every
+contract on both ISAs, `<contract>_satisfiable`: a model `R0` (`Janus/Contracts/IfaceModel.lean`:
+one ordinary type `TD`, one interface `ID` with the itab `TAB`, a box, two empty caches) whose
+laws hold (`R0_laws`), machine code that satisfies the contract for `R0` (proved by symbolic
+execution like any other code), and a call state (`wstate`, in the memory `wmem`) that satisfies
+the contract's precondition. So no contract is contradictory, and the postcondition is reached.
+Each example proof also proves, in `Proof.Witness`, that **all** hypotheses of its theorem hold
+together for the binary it is about (`nonvacuous`: the laws of `R0`, the contract at the real
+runtime function's address for the model code placed there, an admissible return address, and a
+call state satisfying the theorem's precondition, with the descriptors at their real addresses
+and, for `Classify`, the binary's read-only data loaded), and that the conclusion is then reached
+(`returns`: `Box(42)` boxes `42`, `AsHasher` succeeds with the model's itab, `Classify` takes the
+interface case, `Equal` of a box with itself is `true`). `scripts/verify-examples.sh` and
+`scripts/verify-amd64-examples.sh` verify both theorems with `janus verify --theorem`.
+
+**Examples** (`examples/basic/iface.go`; arm64 `examples/proofs/<Name>.lean`, amd64
+`examples/proofs-amd64/<Name>/Proof.lean`):
+
+| Function | Construct | Contract | Guarantee |
+| --- | --- | --- | --- |
+| `Box(x uint64) any` | boxing | `convT64` | `(type:uint64, ptr)` with a box holding `x` |
+| `AsHasher(x any) (Hasher, bool)` | comma-ok assertion to an interface | `typeAssert` | the itab `getitab` gives (`0` for nil), the data word, `ok = itab ≠ 0`, for every well-formed cache; the static itab for `*MulHasher` |
+| `Classify(x any) uint64` | type switch: `nil`, `uint64`, `string`, `Hasher`, default | `interfaceSwitch` | `0`/`1`/`2` by the type word (hash, then pointer), `3` iff `t` implements the case, else `4`; `3` for `*MulHasher` |
+| `Equal(a, b any) bool` | `==` on interfaces | `efaceeq` | `false` for different type words, `true` for two nils, else `efaceeq`'s answer; for a `TFlagRegularMemory` type the byte equality of the values |
+
+**What stays trusted.** Each contract, read as a claim about the Go 1.26 runtime, and the model
+facts `R.Laws` and `StaticItabs`; the reading of the layouts above. None of the interface
+runtime's own code is verified here: every path of `getitab` beyond the lock-free table lookup
+takes the itab lock (whose arm64 LL/SC fallback the decoder rejects) and may allocate through
+`persistentalloc`, and the cache rebuild allocates through `mallocgc`.
+
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 
 The Go → C boundary does not use the linked-code `Summary` mechanism above. The trusted part has
