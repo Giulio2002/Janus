@@ -16,6 +16,9 @@
 #   CASES    corpus (default artifacts/oracle-amd64/cases.jsonl; made by `scripts/oracle-amd64.sh full`)
 #   HW       hardware results of the corpus (default: hw.jsonl next to CASES)
 #   OUT      output dir for the check (default artifacts/x86formal)
+#   KEEP     1: keep the check's verdicts.jsonl raw (default: compressed to verdicts.jsonl.zst,
+#            MISMATCH verdicts in mismatches.jsonl; scripts/lib/artifacts.sh). CASES and HW may be
+#            compressed (.zst next to the named file).
 #   JOBS     parallel tasks for the check (default nproc)
 #   JANUS_LAKE_JOB_MEM  per-lake-job memory budget (default 3G): lake runs with
 #            LEAN_NUM_THREADS = budget / this (scripts/lib/memguard.sh). Measured peaks
@@ -24,6 +27,8 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=lib/artifacts.sh
+. "$root/scripts/lib/artifacts.sh"
 memguard_self "$@"
 export JANUS_LAKE_JOB_MEM="${JANUS_LAKE_JOB_MEM:-3G}"
 mode="${1:-check}"
@@ -109,8 +114,13 @@ do_build() {
 
 do_check() {
   do_build
-  if [ ! -f "$CASES" ]; then "$root/scripts/oracle-amd64.sh" full; fi
+  if ! art_exists "$CASES"; then "$root/scripts/oracle-amd64.sh" full; fi
   mkdir -p "$OUT"
+  # The corpus may be zstd-compressed (scripts/lib/artifacts.sh): decompressed for the check and
+  # removed again; the verdicts are compressed afterwards (KEEP=1 keeps them raw).
+  trap 'art_cleanup; art_prune "$OUT"' EXIT
+  art_input "$CASES" >/dev/null
+  art_input "$HW" >/dev/null
   (cd "$pkg" && memguard_run -n janus-x86-check -- lake exe janus-x86-check "$CASES" "$HW" "$OUT/verdicts.jsonl" "$JOBS") | tee "$OUT/summary.txt"
 }
 

@@ -35,6 +35,14 @@ C++ translation unit; later builds are incremental.
 | `spalign/` | Sail-only corpus: SP-based loads/stores with a misaligned SP (qemu cannot check that) |
 | `cases.jsonl`, `qemu.jsonl`, `janus.jsonl`, `sail.jsonl` | the frozen inputs and every side's raw results |
 
+When `run` ends, the dumps are pruned (`scripts/lib/artifacts.sh`): the reports, `soundness.jsonl`,
+each comparison's `summary.md`, `repro.*` and `mismatches.jsonl` stay; the four files above, every
+`verdicts.jsonl` and `model.jsonl` are zstd-compressed (`.zst`); the comparisons' copies of the
+corpus and the derived `sail-model.jsonl` / `cases.sail-dczid.jsonl` are removed (one full run
+used to leave 8 GB). `KEEP=zst` compresses instead of removing, `KEEP=1` keeps everything raw.
+`QEMU_OUT` may hold the compressed corpus of a pruned `scripts/oracle.sh` run; `crosscheck`
+decompresses `cases.jsonl` and `sail.jsonl` for its comparison and removes the copies after.
+
 Exit criterion: `soundness.jsonl` is empty, i.e. `janus-vs-sail` has 0 `MISMATCH`.
 
 ## What is reused
