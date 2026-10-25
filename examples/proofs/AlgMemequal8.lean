@@ -1,0 +1,67 @@
+import Extracted
+
+/-!
+# `runtime.memequal8` meets `Mem.MemequalN … 1` (arm64)
+
+**Guarantee.** For every stack bound `d`, the machine code of the Go 1.26 runtime's `memequal8`
+(`MOVB`, `UBFX`, `CMPW`, `CSET EQ`) returns `true` exactly when the bytes at `a` and `b` agree,
+changes no memory and keeps the ABI's registers: the contract `MemequalN Extracted.program
+Extracted.entry d 1` that a theorem using it takes as a hypothesis holds for the real code.
+-/
+
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Mem
+
+namespace Proof
+
+theorem correctness (d : Nat) : MemequalN Extracted.program Extracted.entry d 1 := by
+  intro s hpc ⟨⟨hg, ⟨hl1, hl2, hc⟩, _⟩, ⟨ha1, ha2, ha3⟩, ⟨hb1, hb2, hb3⟩⟩
+  janus_run
+  refine EqRet.intro rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
+    (MemFrame.refl _ _) ?_
+  simp [BoolRes, setReg]
+  simp only [Nat.shiftLeft_eq, Nat.mul_mod_left, Nat.or_zero,
+    show (255 : Nat) = 2 ^ 8 - 1 from rfl, Nat.and_two_pow_sub_one_eq_mod]
+  have h0 := (s.mem.bytes (s.regs 0).toNat).isLt
+  have h1 := (s.mem.bytes (s.regs 1).toNat).isLt
+  generalize (s.mem.bytes (s.regs 0).toNat).toNat = x at *
+  generalize (s.mem.bytes (s.regs 1).toNat).toNat = y at *
+  have hx : (if x < 128 then x else x + 18446744073709551360) % 18446744073709551616 % 4294967296 % 2 ^ 8 % 2 ^ 8 = x := by
+    split <;> omega
+  have hy : (if y < 128 then y else y + 18446744073709551360) % 18446744073709551616 % 4294967296 % 2 ^ 8 % 2 ^ 8 = y := by
+    split <;> omega
+  rw [hx, hy]
+  by_cases h : y = x
+  · subst h; simp
+  · have h' : (x == y) = false := beq_false_of_ne (Ne.symm h)
+    simp [h, h']
+
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceModel
+
+/-- The witness call state: `memequal8(VAL, VAL)` on `EqHashModel.wmem` (`VAL` holds 42), goroutine `wg`
+(its stack guard word is 0), stack pointer `wsp`, return address `wret`. -/
+def s0 : State :=
+  { regs := fun i => if i = 0 ∨ i = 1 then BitVec.ofNat 64 VAL else if i = 28 then BitVec.ofNat 64 wg
+      else if i = 30 then BitVec.ofNat 64 wret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := EqHashModel.wmem }
+
+/-- The precondition holds at `s0` (stack bound 64). -/
+theorem pre : EqPre 64 2 s0 ∧ Input s0 64 2 (s0.regs 0).toNat 1 ∧ Input s0 64 2 (s0.regs 1).toNat 1 := by
+  refine ⟨⟨⟨by decide, by decide, by decide⟩, ?_, ?_⟩, ?_, ?_⟩ <;>
+    simp only [CallOK, Input, calleeStack, outside_cons, outside_nil] <;> decide
+
+theorem nonvacuous : ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (EqPre 64 2 s ∧ Input s 64 2 (s.regs 0).toNat 1 ∧ Input s 64 2 (s.regs 1).toNat 1) :=
+  ⟨s0, rfl, pre⟩
+
+/-- `correctness` at `s0`: the call returns `true` (the same bytes). -/
+theorem returns : ReachesRet Extracted.program (s0.regs 30) s0
+    (fun s' => EqRet 64 2 s0 s' fun r => BoolRes r true) := by
+  have h01 : s0.regs 1 = s0.regs 0 := rfl
+  obtain ⟨k, s', h1, h2, h3⟩ := correctness 64 s0 rfl pre
+  exact ⟨k, s', h1, h2, by simpa only [h01, beq_self_eq_true] using h3⟩
+
+end Witness
+
+end Proof
