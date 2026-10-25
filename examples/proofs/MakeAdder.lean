@@ -26,20 +26,30 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 
 namespace Proof
 
+/-- The address of the closure's type descriptor, the argument MakeAdder passes to
+`runtime.newobject` (the `ADRP` + `ADD` pair at `MakeAdder+0x1c`), recomputed from the extracted
+words. -/
+def fvType : Nat :=
+  adrpLdTarget (Extracted.entry + 0x1c) (segWord Extracted.program "example.com/basic.MakeAdder" 7)
+    (segWord Extracted.program "example.com/basic.MakeAdder" 8) 0
+
 set_option maxRecDepth 20000 in
-theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (a : BitVec 64)
+theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a : BitVec 64)
     (hnew : NewobjectContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.newobject") rt 4096) :
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a]
       (fun s => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
-        Outside (s.sp.toNat - 4144) 4168 rt)
+        Outside (s.sp.toNat - 4144) 4168 rt ∧
+        H [fvType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem))
       (fun s s' => InRanges (s'.regs 0).toNat 16 rt ∧ (s'.regs 0).toNat % 16 = 0 ∧
         s'.mem.accessible (s'.regs 0).toNat 16 true = true ∧
         FuncvalIs s'.mem (s'.regs 0) (segAddr Extracted.program "example.com/basic.MakeAdder.func1") ∧
         ClosureCtx s'.mem (s'.regs 0) [a] ∧
         MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)])) := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout⟩
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout, hH⟩
   janus_intro hs
+  janus_eval_nat h_ft : fvType
+  rw [h_ft] at hH
   janus_data hd [hw]
   janus_run until [Extracted.entry + 0x28] calls [hnew.pos]
   have hdj := InRanges.disjoint ‹InRanges _ 16 rt› hout

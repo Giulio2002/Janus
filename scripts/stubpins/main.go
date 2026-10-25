@@ -10,11 +10,41 @@ import (
 	_ "unsafe" // for go:linkname
 )
 
+//go:linkname s_assertE2I runtime.assertE2I
+func s_assertE2I()
+
+//go:linkname s_assertE2I2 runtime.assertE2I2
+func s_assertE2I2()
+
 //go:linkname s_cgocall runtime.cgocall
 func s_cgocall()
 
 //go:linkname s_cgoUse runtime.cgoUse
 func s_cgoUse()
+
+//go:linkname s_convT runtime.convT
+func s_convT()
+
+//go:linkname s_convT16 runtime.convT16
+func s_convT16()
+
+//go:linkname s_convT32 runtime.convT32
+func s_convT32()
+
+//go:linkname s_convT64 runtime.convT64
+func s_convT64()
+
+//go:linkname s_convTnoptr runtime.convTnoptr
+func s_convTnoptr()
+
+//go:linkname s_convTslice runtime.convTslice
+func s_convTslice()
+
+//go:linkname s_convTstring runtime.convTstring
+func s_convTstring()
+
+//go:linkname s_efaceeq runtime.efaceeq
+func s_efaceeq()
 
 //go:linkname s_gopanic runtime.gopanic
 func s_gopanic()
@@ -69,6 +99,12 @@ func s_goPanicSliceBU()
 
 //go:linkname s_goPanicSliceConvert runtime.goPanicSliceConvert
 func s_goPanicSliceConvert()
+
+//go:linkname s_ifaceeq runtime.ifaceeq
+func s_ifaceeq()
+
+//go:linkname s_interfaceSwitch runtime.interfaceSwitch
+func s_interfaceSwitch()
 
 //go:linkname s_panicBounds32 runtime.panicBounds32
 func s_panicBounds32()
@@ -139,9 +175,22 @@ func s_panicunsafestringnilptr()
 //go:linkname s_panicwrap runtime.panicwrap
 func s_panicwrap()
 
+//go:linkname s_typeAssert runtime.typeAssert
+func s_typeAssert()
+
 var keep = []func(){
+	s_assertE2I,
+	s_assertE2I2,
 	s_cgocall,
 	s_cgoUse,
+	s_convT,
+	s_convT16,
+	s_convT32,
+	s_convT64,
+	s_convTnoptr,
+	s_convTslice,
+	s_convTstring,
+	s_efaceeq,
 	s_gopanic,
 	s_goPanicIndex,
 	s_goPanicIndexU,
@@ -160,6 +209,8 @@ var keep = []func(){
 	s_goPanicSliceB,
 	s_goPanicSliceBU,
 	s_goPanicSliceConvert,
+	s_ifaceeq,
+	s_interfaceSwitch,
 	s_panicBounds32,
 	s_panicBounds32X,
 	s_panicBounds64,
@@ -183,6 +234,7 @@ var keep = []func(){
 	s_panicunsafestringlen,
 	s_panicunsafestringnilptr,
 	s_panicwrap,
+	s_typeAssert,
 }
 
 func main() { fmt.Println(len(keep)) }
