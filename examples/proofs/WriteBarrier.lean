@@ -244,11 +244,13 @@ theorem callOK (n : Nat) : CallOK s0 232 0 := by
   refine ⟨by decide, by decide, by decide, by decide, by decide, by decide,
     Memory.accessible_mono _ hw (by decide) (by decide)⟩
 
-/-- For every `N = 1 … 8` the precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at
-a concrete state, so `wbN_meets` is not vacuous. -/
-theorem nonvacuous (n : Nat) (hn : n ≤ 8) : ∃ (rt : List (Nat × Nat)) (s : State),
-    CallOK s 232 0 ∧ Ready (HRoom rt n) rt [n] s :=
-  ⟨rt, s0, callOK n, ready n hn⟩
+/-- The real `gcWriteBarrier1` meets its contract for `Witness.rt`, and for every `N = 1 … 8` the
+precondition of `gcWriteBarrierN`'s contract, with `HRoom`, holds at the concrete state `s0`, so
+the `wbN_meets` are not vacuous. -/
+theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
+    WbContract Extracted.program wb1 rt 232 (HRoom rt 1) 1 ∧
+    ∀ n, n ≤ 8 → CallOK s 232 0 ∧ Ready (HRoom rt n) rt [n] s :=
+  ⟨rt, s0, wb1_meets rt, fun n hn => ⟨callOK n, ready n hn⟩⟩
 
 /-- From that state (at `gcWriteBarrier1`) the real code returns, with `R25` the reserved slot. -/
 theorem returns : ReachesRet Extracted.program (s0.regs 30) s0 fun s' =>

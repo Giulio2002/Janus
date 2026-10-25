@@ -117,15 +117,8 @@ theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extract
 
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded wmemD := by
-  intro d hd
-  have hd' : d ∈ Extracted.data := hd
-  simp only [Extracted.data, List.mem_singleton] at hd'
-  subst hd'
-  refine ⟨by decide, ?_⟩
-  intro i h
-  simp only [wmemD, Extracted.data] at h ⊢
-  have : i < 256 := h
-  revert i; decide
+  unfold Program.DataLoaded
+  decide
 
 theorem pre : Pre rtW HA 0 0 0 0 s0 := by
   refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, ?_⟩, dataLoaded,
