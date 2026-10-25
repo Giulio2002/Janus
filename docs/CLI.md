@@ -627,6 +627,60 @@ revision it was built from, and the JanusASL package `--asl` uses (its hashes, t
 directory of its build and whether it is built yet). This is the revision a consumer package pins its `janus` dependency
 to; `janus init` writes it for you.
 
+<a name="cache"></a>
+### Cache
+
+```sh
+janus cache du [--json]
+janus cache gc [--max SIZE] [--dry-run] [--grace DUR] [--all] [--janus-root DIR] [--json]
+```
+
+Everything janus keeps between runs lives under `$JANUS_CACHE_DIR` (default `~/.cache/janus`),
+which must be private to the user (docs/AUDIT-ROUND8.md, C1):
+
+| directory | entry | size | in use |
+|---|---|---|---|
+| `v1/framework/<key>` | the framework build, one per framework version (`.lock`, `.ready` next to it) | ~370 MB | shared lock |
+| `v1/asl/<key>` | the JanusASL build for `--asl`, per framework, JanusASL version and framework directory | 1–2.5 GB, ~1 h to build | `.lock` while built, `.use` (shared) while used |
+| `v1/consumer/<family>/<ws>` | one workspace per consumer package, framework and extraction | 100–300 MB | exclusive lock |
+| `v1/trusted/<xx>/<key>` | compiled `Extracted`/`JanusTrusted` modules (HMAC-authenticated manifest) | ~1 MB | — |
+| `v1/result/<xx>/<key>.json` | recorded verification results (HMAC-authenticated; the key is `v1/result/.key`) | ~7 KB | — |
+| `v1/replay/…` | one empty marker per passing kernel replay | 4 KB | — |
+| `v1/tmp`, `v1/run` | temporary trees of running (or killed) processes | | — |
+
+`janus cache du` lists, per kind, the number of entries, their disk usage, how many are in use
+(their lock is held by another process) and the oldest and newest last use, then the total and
+the budget. `--json` prints the same as one object.
+
+**Collection.** After every `janus verify`, `verify-batch` and `blockers` (at most once a minute
+per cache, unless the filesystem is nearly full), and on `janus cache gc`, janus collects the
+cache (`cmd/janus/cachegc.go`):
+
+1. Temporary trees in which nothing changed for `$JANUS_CACHE_TMP_HOURS` (24) are removed.
+2. Framework builds and consumer workspaces unused for `$JANUS_CACHE_RETENTION_DAYS` (7) and
+   JanusASL builds unused for `$JANUS_ASL_RETENTION_DAYS` (30) are removed.
+3. While the cache is larger than its **budget**, the least recently used entries are removed,
+   in order of age divided by a weight (JanusASL builds 4, framework builds 2, everything else
+   1: an older JanusASL build may outlive a newer workspace, since it costs an hour to rebuild).
+   The budget is `--max` or `$JANUS_CACHE_MAX`: a size (`40G`, `500M`, `1.5GiB`, bytes), a
+   percentage of the filesystem (`10%`) or `off`. The default is min(40 GiB, 10% of the
+   filesystem), and min(8 GiB, 5%) when the cache is on a tmpfs (RAM). When the filesystem has
+   less than min(20 GiB, 5%) free, the budget shrinks by the shortfall (also with `off`).
+
+Never removed: an entry in use (janus takes its lock exclusively without waiting, so a running
+verification's workspace, framework or JanusASL build is skipped; concurrent `janus verify`
+processes are safe); an entry used within the grace period (`--grace`, default `10m`); the
+framework and JanusASL builds the running janus uses, and for `janus cache gc` those of the
+current framework (embedded, or `--janus-root`/`$JANUS_ROOT`), unless `--all`; the result key.
+An entry's last use is the newest time of its directory and lock files, which janus sets on
+every use (and of the file itself for result, trusted and replay entries, set on every hit).
+
+`--dry-run` lists what would be removed without changing anything. `JANUS_CACHE_GC=off` turns
+the automatic collection off (`janus cache gc` still works). `janus cache gc --max 0 --grace 0s
+--all` removes everything not in use; the next verification rebuilds what it needs. Removing
+entries never changes a verdict: every cache entry is checked when it is read and rebuilt from
+the same inputs when missing (docs/SOUNDNESS.md, "Cache eviction").
+
 <a name="install"></a>
 ### Install
 
@@ -718,11 +772,18 @@ Differences from arm64:
 ## Tests
 
 ```sh
-go test ./cmd/...           # includes Lean verification (several minutes; needs bubblewrap)
+go test -timeout 60m ./cmd/...   # includes Lean verification (several minutes; needs bubblewrap)
 go test -short ./cmd/...    # extraction, check and package validation only
 audit/run-all.sh            # every attack in docs/AUDIT.md: each row blocked or honest
 JANUS_TEST_ASL=1 go test -run TestASL ./cmd/janus   # --asl: builds JanusASL once (about an hour)
 ```
+
+The tests use their own cache, never the user's: `$JANUS_TEST_CACHE_DIR` if set, else
+`~/.cache/janus-test` (`$XDG_CACHE_HOME/janus-test`), or `/var/tmp/janus-test-cache-<uid>` if
+that is on a RAM filesystem. It is not under `/tmp`, which is a tmpfs on many hosts: the
+framework and JanusASL builds and one workspace per consumer test made it tens of GB of RAM. The
+collector bounds it like any cache (`cachegc_test.go` tests the collector itself on private
+fixture caches, and `TestCacheGCConcurrentVerify` runs verifications while it empties the cache).
 
 The `--asl` tests (`asl_test.go`) run only with `JANUS_TEST_ASL=1`; `JANUS_TEST_ASL_SEED=<dir>`
 seeds the test cache's JanusASL build from a built package (e.g. `JanusASL` after

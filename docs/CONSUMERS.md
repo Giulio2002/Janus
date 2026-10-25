@@ -314,7 +314,9 @@ Successful runs keep a local cache under `$JANUS_CACHE_DIR` (default `~/.cache/j
   build so the extraction-independent modules are not rebuilt.
 
 Workspaces are locked while in use (concurrent runs are safe) and evicted after
-`$JANUS_CACHE_RETENTION_DAYS` (default 7). `--fresh` bypasses the caches and builds in a throwaway
+`$JANUS_CACHE_RETENTION_DAYS` (default 7), or earlier, least recently used first, when the cache
+exceeds its budget (`$JANUS_CACHE_MAX`, default min(40 GiB, 10% of the disk); `janus cache du`
+and `janus cache gc`, docs/CLI.md "Cache"). `--fresh` bypasses the caches and builds in a throwaway
 directory. The report's `consumer.rebuilt` lists which modules were (re)built; `consumer.workspace`
 names the workspace, or `(temporary, --fresh)`.
 

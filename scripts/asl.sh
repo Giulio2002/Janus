@@ -19,6 +19,9 @@
 #   DEPS     pinned external sources/toolchains (default /srv/janus-asl-deps)
 #   CASES    corpus (default artifacts/oracle/cases.jsonl; made by `scripts/oracle.sh full` if missing)
 #   OUT      output dir for the check (default artifacts/asl)
+#   KEEP     1: keep the check's verdicts.jsonl raw (default: compressed to verdicts.jsonl.zst,
+#            MISMATCH verdicts in mismatches.jsonl; scripts/lib/artifacts.sh). CASES may be
+#            compressed (.zst next to the named file).
 #   JOBS     parallel tasks for the check (default nproc)
 #   ASL_CACHE          a shared ArmASL build cache (a directory; off by default). Before building,
 #                      the generated model's build (and the lean-sail package) is copied from
@@ -46,6 +49,8 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=lib/artifacts.sh
+. "$root/scripts/lib/artifacts.sh"
 memguard_self "$@"
 mode="${1:-check}"
 DEPS="${DEPS:-/srv/janus-asl-deps}"
@@ -257,8 +262,12 @@ do_model() {
 
 do_check() {
   do_build
-  if [ ! -f "$CASES" ]; then "$root/scripts/oracle.sh" full; fi
+  if ! art_exists "$CASES"; then "$root/scripts/oracle.sh" full; fi
   mkdir -p "$OUT"
+  # The corpus may be zstd-compressed (scripts/lib/artifacts.sh): decompressed for the check and
+  # removed again; the verdicts are compressed afterwards (KEEP=1 keeps them raw).
+  trap 'art_cleanup; art_prune "$OUT"' EXIT
+  art_input "$CASES" >/dev/null
   (cd "$pkg" && memguard_run -n janus-asl-check -- lake exe janus-asl-check "$CASES" "$OUT/verdicts.jsonl" "$JOBS") | tee "$OUT/summary.txt"
 }
 
