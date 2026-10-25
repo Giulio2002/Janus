@@ -317,10 +317,57 @@ disagreement: the model faults with `misaligned` exactly when the host raises `#
 for `PTEST`, `PALIGNR`, `PMULLD`, `ROUNDPS` (aligned) and `PCMPESTRI`, `PMOVSX` `m64`,
 `CVTDQ2PD m64` (unaligned).
 
+### AVX, AVX2, FMA3 and F16C (WP-F, 2026-10-25)
+
+The VEX-encoded instructions of `Janus/Amd64/ExecAVX.lean`. `scripts/oracle-amd64.sh avx` runs
+the targeted specs (`gen.AVXSpecs`, `oracle-amd64/gen/avx.go`: every map-`0F`, `0F38` and `0F3A`
+opcode of WP-F under every implied prefix it exists with, in register and memory forms, with
+`VEX.L`, `VEX.W` and the register fields uniform, `VEX.vvvv` uniform for the three-operand forms
+and mostly `1111` otherwise, sometimes a stray legacy prefix, another map or `pp`, the 2-byte form
+when it can express the fields; VSIB operands for the gathers; and unmodelled neighbours —
+`VRCPPS`, `VRSQRTPS`, `VDPPS`, `VPCLMULQDQ`, `VMASKMOVDQU`, `VSTMXCSR`, the AES VEX forms); the edge
+families (`gen.AVXEdges`: every packed FP and FMA opcode at both lengths on IEEE edge values with
+`MXCSR` drawn from the 16 `RC` × `FTZ` × `DAZ` settings and each exception unmasked alone; all 32
+`VCMP` predicates; `VPERM2I128/F128`, `VPERMQ/PD`, `VPBLENDD`, `VPERMILPD`, `VBLENDPS/PD`,
+`VMPSADBW` with random immediates; VEX.128 integer forms with live upper halves); and every
+WP-F-class instruction harvested from the `GOAMD64=v3` test binaries of `crypto/sha256
+crypto/sha1 crypto/sha512 crypto/tls bytes strings math internal/bytealg` and from the C corpus
+(plus `examples/cgo/vec`, `examples/cgo/avx`) compiled by gcc and clang at `-O2`/`-O3
+-march=x86-64-v3`. States: element edge values (or IEEE edge values, paired across the two
+sources) in both halves of every YMM register and in 32-byte memory operands, crafted FMA addends
+per lane, count vectors for the variable shifts and the shifts by `xmm`, index vectors for
+`VPERMD`/`VPERMILPS`, random-top-bit masks for blends, masked moves and gathers, masked moves at
+the ends of the buffer (so that masked-off elements fall outside it), gathers with a steered base
+and small signed indices (sometimes one far outside), binary16 lanes for `VCVTPH2PS`, strings and
+lengths for `VPCMPxSTRx`, mostly aligned operands for the aligned moves. The native runner
+compares all sixteen upper halves.
+
+| run | cases | agree | of which both fault | model-gap | **MISMATCH** |
+|---|---:|---:|---:|---:|---:|
+| `avx`, `SEED=1`, `N=600`, `AVX_K=12` | 797,454 | 729,504 | 359,672 | 67,950 | **0** |
+| of which edge families | 33,600 | 28,834 | 3,472 | 4,766 | **0** |
+| of which harvested | 19,896 | 19,089 | 5,706 | 807 | **0** |
+| `avx`, `SEED=2`, `N=1200`, `AVX_K=24` | 1,596,384 | 1,460,081 | 719,684 | 136,303 | **0** |
+| of which edge families | 67,200 | 57,752 | 7,046 | 9,448 | **0** |
+| of which harvested | 39,792 | 38,182 | 11,266 | 1,610 | **0** |
+| `full` after WP-F (`SEED=1`; includes the WP-F specs at `N/4`) | 2,189,052 | 1,874,417 | 661,139 | 314,635 | **0** |
+| `quick` after WP-F | 955,434 | 812,427 | – | 143,007 | **0** |
+
+Every model gap was checked by class and kind: implementation-defined packed FMA elements (two or
+three NaNs, `0 × ∞ + NaN`: `undefinedResult`, as for the scalar forms), the reserved immediates
+the decoder refuses (`VCMP imm8 ≥ 32`, `VROUND imm8 ≥ 16`, `VPCMPxSTRx imm8<7>`), the unmodelled
+neighbours, `VEX.L1` on the `LIG` scalar forms, `RIP`-relative operands outside the buffer
+(served by the host from its own pages), masked moves whose all-masked-off operand is
+non-canonical (the model requires the operand below `2^47`; the host does not fault), and
+gathers that fault on a later element: under the runner's single-step trap the host suspends the
+gather with `RIP` still at it and the elements done so far written, which the oracle records as a
+host success at `TestPC`; the model faults. The self-test checks `VPADDD ymm` (both halves),
+`VPADDD xmm` (upper half zeroed) and legacy `PADDD` (upper half kept) on known values.
+
 ## Running it
 
 ```
-scripts/oracle-amd64.sh selftest   # build, check the native harness on known answers (109 checks)
+scripts/oracle-amd64.sh selftest   # build, check the native harness on known answers (126 checks)
 scripts/oracle-amd64.sh quick      # generated cases only (~100k)
 scripts/oracle-amd64.sh full       # generated + edge + harvested from real Go binaries (default)
 scripts/oracle-amd64.sh fp         # SSE scalar floating point only
