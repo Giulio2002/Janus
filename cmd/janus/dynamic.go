@@ -347,6 +347,12 @@ func extractWith(b *Binary, sym string, maxFunctions int, contracts []string, ta
 				}
 			}
 		}
+		// code addresses in the static GOT slots C code loads (function pointers, cenv.go)
+		for _, ref := range x.DataRefs {
+			if w, ok := b.gotWord(ref.Target); ok && r.inferFrom(ref.From) {
+				r.addTarget(w, "got", hex0x(ref.From))
+			}
+		}
 		// code addresses computed by user code
 		for _, s := range x.Skipped {
 			if s.Reason == "code" && r.inferFrom(s.From) {
