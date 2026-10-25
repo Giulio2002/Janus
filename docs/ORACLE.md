@@ -154,6 +154,28 @@ MISMATCH is the headline number: a proof about Go code is only sound if the mode
 a successful step that differs from the machine. Model gaps only cost coverage (a proof
 would get stuck on a fault), never soundness.
 
+## Kernel, trap and environment instructions (WP-C, 2026-10-25, qemu 10.2.1 `-cpu max`)
+
+`BRK #imm16` (class `sys.brk`), `UDF #imm16` and the rest of the reserved space (`reserved`), and
+the environment registers (`sys.env`: `MRS` of `CNTVCT_EL0`, `CNTFRQ_EL0`, `MIDR_EL1`, `DIT`;
+`MSR DIT, Xt` and `MSR DIT, #imm`) have targeted generators; `SVC` stays untested natively (it
+would be a real system call). The model faults on the environment instructions with `kernel`
+(their value is the environment contract's, `Janus.Kernel.SiteNext`), and the comparator checks
+the hardware's result against that contract's **frame** (`compareEnv`): only the destination
+register changes (`MIDR_EL1`: a 32-bit value; `DIT`: only bit 24), `SP`, `NZCV`, the vector
+registers, `FPCR`/`FPSR` and memory are unchanged, and execution continues at `pc + 4`.
+
+`oracle gen -n 6000 -only '^(sys\.env|sys\.brk|reserved|sys\.mrs)$'` plus a quick run
+(`-n 1500 -group 3000 -seed 3`): 192,105 cases, **0 MISMATCH**, 177,282 agree, 14,823 model-gap.
+
+| class / verdict | cases |
+|---|---:|
+| `sys.brk`: agree, both trap (`SIGTRAP` / `Fault.trap`) | 7,500 |
+| `reserved`: agree, both trap (`SIGILL` / `Fault.trap`, `UDF`) | 5,654 |
+| `reserved`: agree, both fault (`SIGILL` / `undecodable`, the rest of the space) | 1,846 |
+| `sys.env`: agree with the contract frame (`CNTVCT_EL0` 1,077, `CNTFRQ_EL0` 1,083, `MIDR_EL1` 1,129, `DIT` 1,012, `MSR DIT` 1,331) | 5,632 |
+| `sys.env`: model-gap (`MSR DIT, #imm` with `CRm ≥ 2`, rejected) | 1,868 |
+
 ## Results with scalar floating point (2026-10-24, `scripts/oracle.sh fp`, qemu 10.2.1 `-cpu max`)
 
 The FP corpus (`OUT=artifacts/oracle-fp JOBS=16 N=25000 FP_HARVEST_K=40 scripts/oracle.sh fp`):

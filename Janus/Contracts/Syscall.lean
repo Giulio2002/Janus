@@ -172,8 +172,12 @@ theorem outputOf_append (fd : Nat) (es es' : List Event) :
 /-- The trace a program produced between two kernel states: `k'.trace = k.trace ++ new`. -/
 def Kern.Extends (k k' : Kern) (new : List Event) : Prop := k'.trace = k.trace ++ new
 
-/-- Raw results `-4095 … -1` (as 64-bit values): a failed system call, `-errno`. -/
-def IsErr (r : Nat) : Prop := 2 ^ 64 - 4095 ≤ r ∧ r < 2 ^ 64
+/-- Raw results `-4094 … -1` (as 64-bit values): a failed system call, `-errno`. Linux returns
+`-errno` for an `errno` of at most `MAX_ERRNO = 4095`; the largest one that reaches user space is far
+smaller (`EHWPOISON` = 133 in `include/uapi/asm-generic/errno.h`; the kernel-internal
+`ERESTART*` codes 512–530 never leave the kernel). `-4095` is excluded on purpose: Go's amd64
+`Syscall6` takes it for a success (`CMPQ AX, $-4095; JLS ok`), its arm64 one for an error. -/
+def IsErr (r : Nat) : Prop := 2 ^ 64 - 4094 ≤ r ∧ r < 2 ^ 64
 
 /-- `f` with `i ↦ v`. -/
 def upd {α : Type} (f : Nat → α) (i : Nat) (v : α) : Nat → α := fun j => if j = i then v else f j

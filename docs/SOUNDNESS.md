@@ -746,7 +746,8 @@ None of these has a result the user-mode state determines. The design (WP-C,
   features Linux reports and the page size. A theorem quantifies over **every** initial kernel
   state its precondition admits and holds for **every** successor the contracts allow at each
   stub. The contracts are relations written to over-approximate Linux:
-  * **every call may fail** with any `-errno` (`IsErr`), changing nothing, except the calls Linux
+  * **every call may fail** with any `-errno` (`IsErr`: `errno` 1 … 4094; Linux's largest
+    user-visible `errno` is 133), changing nothing, except the calls Linux
     defines as infallible (`getpid`, `gettid`, `sched_yield`, `clock_gettime` of the two clocks
     Go reads into writable memory, the `close` of a descriptor, which always closes it);
   * `write` may write any prefix of the buffer (short writes), and the trace records exactly the
