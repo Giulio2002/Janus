@@ -45,7 +45,15 @@ abbrev Kept (s S : State) : Prop :=
     S.regs 21 = s.regs 21 ∧ S.regs 22 = s.regs 22 ∧ S.regs 23 = s.regs 23 ∧
     S.regs 24 = s.regs 24 ∧ S.regs 25 = s.regs 25 ∧ S.regs 26 = s.regs 26 ∧
     S.regs 27 = s.regs 27 ∧ S.regs 28 = s.regs 28 ∧ S.regs 29 = s.regs 29 ∧
-    S.regs 30 = s.regs 30 ∧ S.fpcr = s.fpcr
+    S.regs 30 = s.regs 30 ∧ S.fpcr = s.fpcr ∧
+    S.vregs 8 = s.vregs 8 ∧
+    S.vregs 9 = s.vregs 9 ∧
+    S.vregs 10 = s.vregs 10 ∧
+    S.vregs 11 = s.vregs 11 ∧
+    S.vregs 12 = s.vregs 12 ∧
+    S.vregs 13 = s.vregs 13 ∧
+    S.vregs 14 = s.vregs 14 ∧
+    S.vregs 15 = s.vregs 15
 
 abbrev CountPre (p n c : BitVec 64) (s : State) : Prop :=
   s.regs 0 = p ∧ s.regs 1 = n ∧ s.regs 2 = c ∧ p.toNat + n.toNat ≤ 2 ^ 48 ∧
@@ -56,7 +64,15 @@ abbrev CountPost (p n c : BitVec 64) (s s' : State) : Prop :=
   s'.sp = s.sp ∧ s'.regs 19 = s.regs 19 ∧ s'.regs 20 = s.regs 20 ∧ s'.regs 21 = s.regs 21 ∧
     s'.regs 22 = s.regs 22 ∧ s'.regs 23 = s.regs 23 ∧ s'.regs 24 = s.regs 24 ∧
     s'.regs 25 = s.regs 25 ∧ s'.regs 26 = s.regs 26 ∧ s'.regs 27 = s.regs 27 ∧
-    s'.regs 28 = s.regs 28 ∧ s'.regs 29 = s.regs 29 ∧ s'.fpcr = s.fpcr ∧ s'.mem = s.mem ∧
+    s'.regs 28 = s.regs 28 ∧ s'.regs 29 = s.regs 29 ∧ s'.fpcr = s.fpcr ∧
+    s'.vregs 8 = s.vregs 8 ∧
+    s'.vregs 9 = s.vregs 9 ∧
+    s'.vregs 10 = s.vregs 10 ∧
+    s'.vregs 11 = s.vregs 11 ∧
+    s'.vregs 12 = s.vregs 12 ∧
+    s'.vregs 13 = s.vregs 13 ∧
+    s'.vregs 14 = s.vregs 14 ∧
+    s'.vregs 15 = s.vregs 15 ∧ s'.mem = s.mem ∧
     (s'.regs 0).toNat = countOf s.mem p.toNat (c.toNat % 256) n.toNat
 
 /-- `c` as the C code sees it: `and w2, w2, #0xff`. -/
@@ -94,16 +110,16 @@ theorem tail (p n c : BitVec 64) (s : State) (hpre : CountPre p n c s) :
   intro k
   induction k with
   | zero =>
-    intro S i acc hk hpc hS0 hS1 hS2 hS3 hS5 hs ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc⟩
+    intro S i acc hk hpc hS0 hS1 hS2 hS3 hS5 hs ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc, hv8, hv9, hv10, hv11, hv12, hv13, hv14, hv15⟩
     janus_run
-    janus_simp [CountPost, hfc]
+    janus_simp [CountPost, hfc, hv8, hv9, hv10, hv11, hv12, hv13, hv14, hv15]
     rw [show n.toNat = i.toNat + 1 by omega]
     exact acc_step _ _ _ _ _ hs (by omega)
   | succ k ih =>
-    intro S i acc hk hpc hS0 hS1 hS2 hS3 hS5 hs ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc⟩
+    intro S i acc hk hpc hS0 hS1 hS2 hS3 hS5 hs ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc, hv8, hv9, hv10, hv11, hv12, hv13, hv14, hv15⟩
     janus_run until [thead]
     refine ih _ (i + 1#64) _ (by janus_simp; omega) (by janus_simp) rfl (by janus_simp) (by janus_simp)
-      (by janus_simp) (by janus_simp) ?_ (by simp only [Kept]; janus_simp [hfc])
+      (by janus_simp) (by janus_simp) ?_ (by simp only [Kept]; janus_simp [hfc, hv8, hv9, hv10, hv11, hv12, hv13, hv14, hv15])
     janus_simp
     exact acc_step _ _ _ _ _ hs (by omega)
 
@@ -130,11 +146,11 @@ theorem vloop (p n c : BitVec 64) (s : State) (hpre : CountPre p n c s) :
   intro r
   induction r with
   | zero =>
-    intro S k hk hpc hS0 hS1 hS2 hS3 hS4 hS5 hv23 hv24 hv29 hv26 ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc⟩
+    intro S k hk hpc hS0 hS1 hS2 hS3 hS4 hS5 hv23 hv24 hv29 hv26 ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc, hv8, hv9, hv10, hv11, hv12, hv13, hv14, hv15⟩
     janus_run [hv23, hv24, hv29, elem_ones8] until [vhead, thead]
     · -- the last block, and no tail
       rename_i _ hl0 _
-      janus_simp [CountPost, hfc]
+      janus_simp [CountPost, hfc, hv8, hv9, hv10, hv11, hv12, hv13, hv14, hv15]
       rw [hc']
       have hl : n.toNat = 16 * k + 16 := by rw [and_mask16 _ hlen] at hl0; omega
       have hcl := countOf_le s.mem p.toNat (c.toNat % 256) n.toNat
@@ -155,12 +171,12 @@ theorem vloop (p n c : BitVec 64) (s : State) (hpre : CountPre p n c s) :
         have hcl := countOf_le s.mem p.toNat (c.toNat % 256) (16 * k + 16)
         rw [countOf_add16] at hcl
         omega
-      · simp only [Kept]; janus_simp [hfc]
+      · simp only [Kept]; janus_simp [hfc, hv8, hv9, hv10, hv11, hv12, hv13, hv14, hv15]
     · -- a further iteration is impossible: this was the last block
       rw [and_mask16 _ hlen] at hbr
       exfalso; apply hbr; omega
   | succ r ih =>
-    intro S k hk hpc hS0 hS1 hS2 hS3 hS4 hS5 hv23 hv24 hv29 hv26 ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc⟩
+    intro S k hk hpc hS0 hS1 hS2 hS3 hS4 hS5 hv23 hv24 hv29 hv26 ⟨hsp, hm, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, h30, hfc, hv8, hv9, hv10, hv11, hv12, hv13, hv14, hv15⟩
     janus_run [hv23, hv24, hv29, elem_ones8] until [vhead, thead]
     · rename_i hx; rw [and_mask16 _ hlen] at hx; omega
     · refine ih _ (k + 1) (by omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
@@ -171,7 +187,7 @@ theorem vloop (p n c : BitVec 64) (s : State) (hpre : CountPre p n c s) :
       · simpa using hv29
       · rw [hc', show 16 * (k + 1) = 16 * k + 16 by omega, countOf_add16]
         omega
-      · simp only [Kept]; janus_simp [hfc]
+      · simp only [Kept]; janus_simp [hfc, hv8, hv9, hv10, hv11, hv12, hv13, hv14, hv15]
 
 /-- The callee contract of `c_count`, used by the cgo wrapper's proof. -/
 theorem summary (p n c : BitVec 64) :
@@ -209,7 +225,9 @@ theorem correctness (p n c : BitVec 64) :
       · exact hret.aligned
       · have := hret.user; omega)
     (fun s s' _ h => by
-      obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, h14, h15⟩ := h
-      exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13⟩, h15, h14⟩)
+      obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, e8, e9, e10, e11, e12, e13, e14, e15,
+        h14, h15⟩ := h
+      exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, by rw [e8], by rw [e9], by rw [e10],
+        by rw [e11], by rw [e12], by rw [e13], by rw [e14], by rw [e15]⟩, h15, h14⟩)
 
 end Proof
