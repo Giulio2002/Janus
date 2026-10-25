@@ -37,22 +37,64 @@ theorem mod64_mod128 (x : Nat) :
     x % 18446744073709551616 % 340282366920938463463374607431768211456 = x % 18446744073709551616 := by
   omega
 
-theorem correctness (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) :
-    CEnsuresR Extracted.program Extracted.entry sig [a.toNat, b.toNat, c.toNat]
-      (fun s => s.fpcr = 0)
-      (fun _ _ v => v = (mul 0 a b c).1 % 2 ^ 64) := by
-  intro ret hret s hs ht
-  have hpc := hs.pc
-  have hlr := hs.lr
-  have ha := hs.args
-  rw [passing] at ha
-  simp only [sig, ArgsAt, ArgAt, PiecesAt, and_true, pieceAt_vec_d, pieceAt_vec_s] at ha
-  obtain ⟨h0, h1, h2⟩ := ha
-  simp only [Program.withExit] at hlr
+/-- The argument values of `k_fp(a, b, c)`. -/
+def vals (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) : List Nat := [a.toNat, b.toNat, c.toNat]
+
+/-- What `k_fp` needs (its callee contract's precondition): the arguments where the
+classification puts them, `FPCR = 0`, a return address. -/
+def SPre (vs : List Nat) (s : State) : Prop :=
+  ArgsAt s sig.args vs sig.passing ∧ s.fpcr = 0 ∧ (s.regs 30).toNat % 4 = 0 ∧
+    (s.regs 30).toNat < 2 ^ 56
+
+theorem spre_iff (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) (s : State) :
+    SPre (vals a b c) s ↔
+      (s.vregs 0).toNat % 2 ^ 64 = a.toNat ∧ (s.vregs 1).toNat % 2 ^ 32 = b.toNat ∧
+      (s.vregs 2).toNat % 2 ^ 64 = c.toNat ∧ s.fpcr = 0 ∧ (s.regs 30).toNat % 4 = 0 ∧
+      (s.regs 30).toNat < 2 ^ 56 := by
+  unfold SPre
+  rw [passing]
+  simp only [vals, sig, ArgsAt, ArgAt, PiecesAt, and_true, pieceAt_vec_d, pieceAt_vec_s, and_assoc]
+
+/-- What it guarantees: the AAPCS64 callee-saved state, memory unchanged, the result in `D0`. -/
+abbrev SPost (r : Nat) (s s' : State) : Prop :=
+  s'.sp = s.sp ∧ s'.regs 19 = s.regs 19 ∧ s'.regs 20 = s.regs 20 ∧ s'.regs 21 = s.regs 21 ∧
+    s'.regs 22 = s.regs 22 ∧ s'.regs 23 = s.regs 23 ∧ s'.regs 24 = s.regs 24 ∧
+    s'.regs 25 = s.regs 25 ∧ s'.regs 26 = s.regs 26 ∧ s'.regs 27 = s.regs 27 ∧
+    s'.regs 28 = s.regs 28 ∧ s'.regs 29 = s.regs 29 ∧ s'.fpcr = s.fpcr ∧
+    (s'.vregs 8).toNat % 2 ^ 64 = (s.vregs 8).toNat % 2 ^ 64 ∧
+    (s'.vregs 9).toNat % 2 ^ 64 = (s.vregs 9).toNat % 2 ^ 64 ∧
+    (s'.vregs 10).toNat % 2 ^ 64 = (s.vregs 10).toNat % 2 ^ 64 ∧
+    (s'.vregs 11).toNat % 2 ^ 64 = (s.vregs 11).toNat % 2 ^ 64 ∧
+    (s'.vregs 12).toNat % 2 ^ 64 = (s.vregs 12).toNat % 2 ^ 64 ∧
+    (s'.vregs 13).toNat % 2 ^ 64 = (s.vregs 13).toNat % 2 ^ 64 ∧
+    (s'.vregs 14).toNat % 2 ^ 64 = (s.vregs 14).toNat % 2 ^ 64 ∧
+    (s'.vregs 15).toNat % 2 ^ 64 = (s.vregs 15).toNat % 2 ^ 64 ∧
+    s'.mem = s.mem ∧ (s'.vregs 0).toNat % 2 ^ 64 = r
+
+/-- The callee contract of `k_fp`. -/
+theorem summary (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) :
+    Summary Extracted.program Extracted.entry (SPre (vals a b c))
+      (SPost ((mul 0 a b c).1 % 2 ^ 64)) := by
+  intro s hpc hpre
+  obtain ⟨h0, h1, h2, ht, hlra, hlrb⟩ := (spre_iff a b c s).1 hpre
   janus_run [h0, h1, h2, ht]
-  refine ⟨_, ?_, rfl⟩
-  simp only [Returned, sig, result, ResultAt, PiecesAt, and_true, PieceAt, bytesOf, setVReg_apply,
-    ↓reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.pow_zero, Nat.div_one, Nat.reducePow,
-    mod64_mod128, Nat.mod_mod, mul, sub, cvt]
+  simp only [SPost, setVReg_apply, ↓reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.reducePow,
+    mod64_mod128, Nat.mod_mod, mul, sub, cvt, true_and, ht]
+  exact ⟨rfl, trivial⟩
+
+/-- **`k_fp` under the C calling convention.** -/
+theorem correctness (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) :
+    CEnsuresR Extracted.program Extracted.entry sig (vals a b c)
+      (fun s => s.fpcr = 0)
+      (fun _ _ v => v = (mul 0 a b c).1 % 2 ^ 64) :=
+  CEnsuresA.of_summary (summary a b c)
+    (fun _ _ hret hs hf => ⟨hs.args, hf, hs.lr_ok hret⟩)
+    (fun _ _ _ ⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, v8, v9, v10, v11, v12,
+        v13, v14, v15, _, h0⟩ =>
+      ⟨⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, v8, v9, v10, v11, v12, v13,
+        v14, v15⟩, _, by
+        simp only [Returned, sig, result, ResultAt, PiecesAt, and_true, PieceAt, bytesOf,
+          Nat.pow_zero, Nat.div_one, Nat.reducePow] at h0 ⊢
+        omega, rfl⟩)
 
 end Proof
