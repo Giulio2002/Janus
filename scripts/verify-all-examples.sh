@@ -26,6 +26,7 @@ arm64=(MallocFast ClearWords A64IndexByte A64Crc32 CopyBlock AddLimbs A64Equal64
        Sum SetOne256 HexDigit CopyWords SumSquares AtomicAdd AtomicMax HashWith HashTwice MapSum DeferAdd
        AddF64 Dot3 F64ToU64 Abs NewPair MakeSlice AppendOne SetNext
        Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
+       Box AsHasher Classify Equal
        ReverseArray RowsWith SwapBig DotBoth Find2D Fact Compose Shifts AlignUp TotalMeters TotalFeet
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
        Mod IncTwice Bump GlobalTable Table MakeAdder
@@ -43,7 +44,7 @@ for n in "${arm64[@]}"; do
 done
 for f in "${amd64[@]}"; do
   par_run 'out="$(scripts/verify-amd64-examples.sh -j 1 "$f" 2>&1)" || broken+=("amd64:$f")
-  grep -E "Proof\.(correctness|panics)" <<<"$out" | sed "s/^/amd64  /"'
+  grep -E "Proof\.(correctness|panics|Witness)" <<<"$out" | sed "s/^/amd64  /"'
 done
 for t in "${asm[@]}"; do
   par_run 'JANUS_EXAMPLES_SUMMARY="$tmp/asm-${t//\//_}" scripts/verify-asm-examples.sh -j 1 "$t" >/dev/null 2>&1 || broken+=("asm:$t")

@@ -234,6 +234,10 @@ Go 1.26.0. Proofs:
 | `SumValues` | `for _, v := range m` sums the values, for **every** iteration order | ✓ | ✓ |
 | `CountKeys`, `LookupKey16` | `len(m)` (the number of keys); lookup with `[16]byte` keys (generic `mapaccess2`) | ✓ | ✓ |
 | `MapAccess1Small` | the machine code of `runtime.mapaccess1_fast64` itself meets its contract on small Swiss maps | ✓ | ✓ |
+| `Box` | `any(x)` for a `uint64`: `(type:uint64, ptr)` with a box holding `x`, assuming the `runtime.convT64` contract ([RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md), "Interfaces") | ✓ | ✓ |
+| `AsHasher` | `h, ok := x.(Hasher)`: the itab `getitab` gives (or `0`), the data word and `ok`, for every state of the assertion cache (its probe loop executed), through the `runtime.typeAssert` contract; the static itab for a `*MulHasher` | ✓ | ✓ |
+| `Classify` | a type switch over `nil`, `uint64`, `string`, `Hasher` and the rest: the case taken, through the type-hash compares, the switch-cache probe and the `runtime.interfaceSwitch` contract | ✓ | ✓ |
+| `Equal` | `a == b` on `any`: different type words give `false`, two nils `true`, otherwise `runtime.efaceeq`'s answer (byte equality for `TFlagRegularMemory` types) | ✓ | ✓ |
 | `Triangle` | an expression switch with `fallthrough` (a `.rodata` jump table): `n·(n+1)/2` for `n ≤ 8`, else `0` | ✓ | ✓ |
 | `GotoSum` | a loop built from labels and `goto`: `1 + … + n mod 2^64` | ✓ | ✓ |
 | `Find2D` | nested loops left by a labeled `break`: the first row-major index of `x` in a `3×3` array, or `9` | ✓ | ✓ |
