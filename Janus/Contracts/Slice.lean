@@ -45,6 +45,16 @@ def growCap (size : Nat) (noscan : Bool) (newLen oldCap : Nat) : Nat :=
 /-- `growCap8` is `growCap` for 8-byte pointer-free elements. -/
 theorem growCap_eight (newLen oldCap : Nat) : growCap 8 true newLen oldCap = growCap8 newLen oldCap := rfl
 
+/-- The capacity `growslice` picks holds at least `newLen` elements. -/
+theorem le_growCap (size : Nat) (noscan : Bool) (newLen oldCap : Nat) (h : 0 < size) :
+    newLen ≤ growCap size noscan newLen oldCap := by
+  unfold growCap
+  have h1 := le_roundupsize (nextslicecap newLen oldCap * size) noscan
+  have h2 := le_nextslicecap newLen oldCap
+  have : newLen * size ≤ roundupsize (nextslicecap newLen oldCap * size) noscan :=
+    Nat.le_trans (Nat.mul_le_mul_right _ h2) h1
+  exact (Nat.le_div_iff_mul_le h).2 this
+
 /-- The element type at `et` is readable and has `size > 0` bytes, of which `PtrBytes ≤ size`
 hold pointers. -/
 def ElemOK (m : Memory) (et : Nat) : Prop :=

@@ -500,6 +500,11 @@ theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret 
     CallSetup (Extracted.program.withExit ret) Extracted.entry [0, 0] s ∧ Pre [] 0 0 s :=
   ⟨ret, s0, hret, setup, pre⟩
 
+/-- The witness call returns, with the conclusion of `runtime_correctness`. -/
+theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat = sumRunes (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
+  runtime_correctness 0 0 ret hret s0 setup pre
+
 end Witness
 
 end Proof

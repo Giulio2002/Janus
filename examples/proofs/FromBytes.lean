@@ -82,6 +82,12 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtR
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 0, 0] s ∧ Pre rt H 0 0 s :=
   ⟨implAt, rtW, H0, ret, s0, model, hret, setup, pre⟩
 
+/-- The witness call returns, with the conclusion of `correctness`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ StrOut s'.mem (s'.regs 0).toNat (s'.regs 1).toNat
+      (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
+  correctness implAt rtW H0 0 0 0 model ret hret s0 setup pre
+
 end Witness
 
 end Proof
