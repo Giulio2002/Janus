@@ -74,6 +74,11 @@ def Apart (a n b k : Nat) : Prop := a + n ≤ b ∨ b + k ≤ a
 theorem Apart.symm {a n b k : Nat} (h : Apart a n b k) : Apart b k a n := by
   unfold Apart at *; omega
 
+/-- Sub-ranges of apart ranges are apart. -/
+theorem Apart.mono {a n b k a' n' b' k' : Nat} (h : Apart a n b k) (h1 : a ≤ a') (h2 : a' + n' ≤ a + n)
+    (h3 : b ≤ b') (h4 : b' + k' ≤ b + k) : Apart a' n' b' k' := by
+  unfold Apart at *; omega
+
 /-- `[a, a+n)` lies inside one of the ranges `[lo, hi)` of `rs`. -/
 def InRanges (a n : Nat) (rs : List (Nat × Nat)) : Prop := ∃ r ∈ rs, r.1 ≤ a ∧ a + n ≤ r.2
 
@@ -900,6 +905,28 @@ partial def reduceAccessible (g : MVarId) (fuel : Nat := 64) : MetaM MVarId := g
 where
   mkFunOfEq (rhs : Expr) : MetaM Expr := do
     return .lam `x (mkConst ``Bool) (mkApp3 (mkConst ``Eq [1]) (mkConst ``Bool) (.bvar 0) rhs) .default
+
+/-- A side condition `Apart a n b k` (e.g. part of a callee's precondition): from a hypothesis
+`Apart a' n' b' k'` (or its mirror) of which it is a sub-range pair, the containments by `omega`. -/
+def dischargeApart (g : MVarId) : TacticM Bool := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  unless t.isAppOfArity ``Janus.Apart 4 do return false
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.Apart 4 do continue
+    for symm in [false, true] do
+      let saved ← saveState
+      try
+        let h ← Term.exprToSyntax d.toExpr
+        let gs ← Tactic.run g <| withoutRecover do
+          if symm then evalTactic (← `(tactic| refine Janus.Apart.mono (Janus.Apart.symm $h) ?_ ?_ ?_ ?_))
+          else evalTactic (← `(tactic| refine Janus.Apart.mono $h ?_ ?_ ?_ ?_))
+          evalTactic (← `(tactic| all_goals omega))
+        if gs.isEmpty then return true
+        saved.restore
+      catch _ => saved.restore
+  return false
 
 /-- A side condition `Outside a n rs` (of a `MemFrame` read rule): unfold the literal list and
 prove each range condition by `omega`. -/

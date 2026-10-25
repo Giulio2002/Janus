@@ -451,4 +451,23 @@ open Lean Elab Tactic in
 elab "split_ands" : tactic => do
   replaceMainGoal [← splitAndsCore (← getMainGoal)]
 
+theorem readBytes_take (m : Memory) (a n c : Nat) (h : c ≤ n) :
+    (readBytes m a n).take c = readBytes m a c := by
+  unfold readBytes
+  rw [← List.map_take, List.take_range, Nat.min_eq_left h]
+
+/-- The one-piece trace of a `write` outcome. -/
+theorem emits_write (m : Memory) (a n c : Nat) (h : c ≤ n) :
+    Emits 2 [readBytes m a n] [.write 2 (readBytes m a c)] := by
+  have := Emits.write (fd := 2) (b := readBytes m a n) (bs := []) (es := []) c
+    (by simp; exact h) .nil
+  rwa [readBytes_take m a n c h] at this
+
+theorem emits_fail (b : Bytes) : Emits 2 [b] [] := .fail .nil
+
+/-- `emits_write` with the bytes read from another memory that holds the same `n` bytes. -/
+theorem emits_of_eq {m : Memory} {a n c : Nat} {b : Bytes} (h : readBytes m a n = b) (hc : c ≤ n) :
+    Emits 2 [b] [.write 2 (readBytes m a c)] := by
+  rw [← h]; exact emits_write m a n c hc
+
 end Janus.Print
