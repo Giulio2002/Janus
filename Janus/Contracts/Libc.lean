@@ -650,6 +650,11 @@ theorem setJmp_next {J : JmpModel} {sp : Spec} (hm : sp ∈ setJmpSpecs J) {s s'
 theorem setJmp_safe {J : JmpModel} {sp : Spec} (hm : sp ∈ setJmpSpecs J) {s : State}
     (h : sp.safe s) : (SetJmp J).safe sp.name s := ofSpecs_safe hm h
 
+theorem setJmp_call {J : JmpModel} {sp : Spec} (hm : sp ∈ setJmpSpecs J) {S : State}
+    {K : State → Prop} (hs : sp.safe S) (hk : ∀ s', sp.next S s' → K s') :
+    (SetJmp J).safe sp.name S ∧ ∀ s', (SetJmp J).next sp.name S s' → K s' :=
+  ⟨setJmp_safe hm hs, fun s' h => hk s' (setJmp_next hm h)⟩
+
 /-- `Libc` and `SetJmp J` name different functions. -/
 theorem libc_disjoint_setJmp (J : JmpModel) : Libc.Disjoint (SetJmp J) := by
   rintro f s s' ⟨sp, hm, rfl, -⟩ ⟨sp', hm', hn, -⟩
