@@ -80,4 +80,79 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   janus_run
   exact ⟨by janus_frame, henv3⟩
 
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+The panic-runtime model `PanicSat.P0` (laws proved), a `RET` at `runtime.deferproc`'s and at
+`runtime.deferreturn`'s addresses (meeting their contracts for `P0`), an admissible return address
+and a call state satisfying the precondition: so `correctness` applies (`nonvacuous`), and
+`DeferTwice` returns from that state (`returns`). -/
+
+namespace Witness
+
+open Janus.Contracts.PanicSat
+
+def aProc : Nat := Extracted.program.contractAddr "runtime.deferproc"
+def aRet : Nat := Extracted.program.contractAddr "runtime.deferreturn"
+
+def implAt : List Segment :=
+  [{ name := "deferproc", base := aProc, words := retCode },
+   { name := "deferreturn", base := aRet, words := retCode }]
+
+def linked : Program := { Extracted.program with segments := Extracted.program.segments ++ implAt }
+
+theorem linked_eq : Extracted.program.link implAt = linked := rfl
+
+theorem ret_model (n a : Nat) (ha : a = aProc ∨ a = aRet) :
+    Summary (Extracted.program.link implAt) a (PanicPre P0 n) (PanicRet P0 n) := by
+  rw [linked_eq]
+  intro s hpc ⟨henv, hg, ⟨h30a, h30b, hsp, hst, h8, hwin, hacc⟩, hout⟩
+  rcases ha with rfl | rfl <;> janus_run <;>
+  exact panicRet_of P0 n s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
+    rfl rfl rfl rfl (MemFrame.refl _ _) henv
+
+def ret : Nat := 0x200000
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+/-- The call state: `wstate` of `PanicSat` (a stack at `0x48000`, the goroutine at `0x50000`),
+entered at `DeferTwice` with return address `ret`. -/
+def s0 : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret
+      else if i = 29 then BitVec.ofNat 64 (wsp - 8) else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [] s0 :=
+  ⟨rfl, rfl, by intro i h; simp at h⟩
+
+theorem pre : PanicCallerOK P0 s0 32 0 := by
+  refine ⟨show wmem.accessible 0x10000 0x1000 true = true by decide, ⟨by decide, by decide, by decide⟩,
+    by decide, by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · unfold Spec.Disjoint; decide
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (ret : Nat) (s : State), P.Laws ∧
+    DeferprocContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.deferproc") P ∧
+    DeferreturnContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.deferreturn") P ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [] s ∧
+    PanicCallerOK P s 32 0 :=
+  ⟨implAt, P0, ret, s0, P0_laws, ret_model 1 _ (.inl rfl), ret_model 0 _ (.inr rfl), hret, setup, pre⟩
+
+/-- So the guarantee is reached: `DeferTwice` returns from `s0`. -/
+theorem returns : GoReturns ((Extracted.program.link implAt).withExit ret) (goClass P0) s0 fun o =>
+    match o with
+    | .returned s' => ABIReturn s0 s' ∧
+        (MemFrame s0.mem s'.mem (P0.priv ++ [(s0.sp.toNat - (P0.depth + 32), s0.sp.toNat)]) ∧
+          P0.Env s'.mem)
+    | .panicked v s' => False :=
+  correctness implAt P0 P0_laws (ret_model 1 _ (.inl rfl)) (ret_model 0 _ (.inr rfl)) ret hret s0
+    setup pre
+
+end Witness
+
 end Proof
