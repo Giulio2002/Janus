@@ -450,25 +450,32 @@ theorem RetAddr.of_check {ret : Nat} (h : retAddrCheck p ret = true) : RetAddr p
 
 end Lemmas
 
-/-! ## Go-level outcomes: a call returns, or a panic leaves its frame (amd64)
+/-! ## Go-level outcomes (amd64)
 
-As on arm64 (`Janus.GoABI.EnsuresGo`); see there.
-
-
+The amd64 counterpart of `Janus.GoABI` (see there for the full account).
 
 `Ensures` describes calls that return. A Go call may instead **panic**: a panic with value `v`
 runs the deferred calls of the panicking frame (which may `recover` it, turning it back into a
 return) and then leaves the frame, unwinding into the caller. `EnsuresGo` states both outcomes:
 `ret s s'` for a return in state `s'`, `pan s v s'` for a panic with value `v` that leaves the
-call's frame in state `s'` (the memory then holds the effects of the deferred calls).
+call's frame in state `s'`.
 
-Execution here is `Exec`: ordinary steps, plus the delivery of a hardware fault as a signal
-(`deliver s e s'`: the fault `e` at `s` resumes in `s'`, e.g. a nil dereference resuming in
-`runtime.sigpanic`). Which states count as "the panic has left the frame" is `leaves`. Both are
-parameters: the panic library (`Janus.Spec.Panic`, `Janus.Contracts.Panic`) supplies them from
-the runtime model a theorem quantifies over, and they are part of the printed statement.
-Existing theorems are unaffected: `Ensures.toGo` turns every `Ensures` into an `EnsuresGo`
-whose panic outcome is impossible, for any `deliver` and `leaves`. -/
+A Go-level execution of a program ends when ordinary steps reach one of:
+
+* the return address (`.returned s'`): a normal return;
+* a **panic stub** (`runtime.gopanic`, `runtime.panicBounds`, …): the classifier `atStub name s'`
+  says the panic value for that stub and state (`gopanic` reads it from the argument registers;
+  the `panic*` family is the model's runtime error of the stub's kind);
+* an instruction that **faults** (`atFault s' e`): a nil dereference or divide becomes a Go panic
+  via the signal handler (`runtime.sigpanic`), the classifier gives the runtime error;
+* a state where a **deferred/recovered** panic has already left the frame or been turned back into
+  a return by the control-flow runtime (`atLeave s'`): the panic/defer contracts
+  (`Janus.Contracts.Panic`) supply this and hand control back as another `GoReturns` from the
+  resume point (`GoReturns.of_steps`).
+
+The classifiers are parameters, supplied by the panic library from the runtime model a theorem
+quantifies over; they are part of the printed statement. Existing theorems are unaffected:
+`Ensures.toGo` turns every `Ensures` into an `EnsuresGo` whose panic outcomes are impossible. -/
 
 /-- How a Go call ends: it returns in state `s`, or a panic with value `v` leaves its frame in
 state `s`. -/
@@ -482,48 +489,39 @@ def FaultsAt (p : Program) (s : State) (e : Fault) : Prop :=
   s.rip.toNat ≠ p.exitAddr ∧ p.stubAt s.rip.toNat = none ∧
     ∃ w : List Nat, p.fetch s.rip.toNat = some w ∧ Amd64.step w s = .error e
 
-/-- Execution with signal delivery: ordinary steps, and a fault `e` at `s` that `deliver s e s'`
-resumes in `s'`. -/
-inductive Exec (p : Program) (deliver : State → Fault → State → Prop) : State → State → Prop where
-  | refl (s : State) : Exec p deliver s s
-  | steps {s s' s'' : State} {k : Nat} : Program.Steps p s k s' → Exec p deliver s' s'' →
-      Exec p deliver s s''
-  | signal {s s' s'' : State} {e : Fault} : FaultsAt p s e → deliver s e s' →
-      Exec p deliver s' s'' → Exec p deliver s s''
+/-- How a reached state is classified at the Go level: a panic stub (`atStub name s v`), a
+faulting instruction delivered as a panic (`atFault s e v`), or a point where a deferred/recovered
+panic already left the frame with value `v` (`atLeave s v`). -/
+structure GoClass where
+  atStub : String → State → Eface → Prop
+  atFault : State → Fault → Eface → Prop
+  atLeave : State → Eface → Prop
 
-/-- From `s`, execution reaches the return address (outcome `.returned`) or a state in which a
-panic with value `v` has left the frame (`leaves s' v`, outcome `.panicked v s'`), and the
-outcome satisfies `Q`. -/
-def GoReturns (p : Program) (deliver : State → Fault → State → Prop)
-    (leaves : State → Eface → Prop) (s : State) (Q : GoOutcome → Prop) : Prop :=
-  ∃ s', Exec p deliver s s' ∧
-    ((s'.rip.toNat = p.exitAddr ∧ Q (.returned s')) ∨ (∃ v, leaves s' v ∧ Q (.panicked v s')))
+/-- From `s`, ordinary steps reach a Go-level outcome classified by `C`, and the outcome
+satisfies `Q`. -/
+def GoReturns (p : Program) (C : GoClass) (s : State) (Q : GoOutcome → Prop) : Prop :=
+  ∃ k s', Program.Steps p s k s' ∧
+    ((s'.rip.toNat = p.exitAddr ∧ Q (.returned s')) ∨
+     (∃ st v, p.stubAt s'.rip.toNat = some st ∧ st.kind = .panic ∧ C.atStub st.name s' v ∧
+        Q (.panicked v s')) ∨
+     (∃ e v, FaultsAt p s' e ∧ C.atFault s' e v ∧ Q (.panicked v s')) ∨
+     (∃ v, C.atLeave s' v ∧ Q (.panicked v s')))
 
 /-- Go function contract with panics: for every admissible return address and every call state
 satisfying `pre`, the call either returns (obeying the ABI, with `ret s₀ s₁`) or panics with a
-value `v` that leaves its frame in state `s₁` (`leaves s₀ s₁ v`, with `pan s₀ v s₁`). -/
+value `v` that leaves its frame in state `s₁` (`pan s₀ v s₁`). The classification `C s₀` may use
+the call state. -/
 def EnsuresGo (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop)
-    (deliver : State → Fault → State → Prop) (leaves : State → State → Eface → Prop)
-    (ret : State → State → Prop) (pan : State → Eface → State → Prop) : Prop :=
+    (C : State → GoClass) (ret : State → State → Prop) (pan : State → Eface → State → Prop) : Prop :=
   ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
-    GoReturns (p.withExit r) deliver (leaves s) s fun o =>
+    GoReturns (p.withExit r) (C s) s fun o =>
       match o with
       | .returned s' => ABIReturn s s' ∧ ret s s'
       | .panicked v s' => pan s v s'
 
 section GoLemmas
 
-variable {p : Program} {deliver : State → Fault → State → Prop}
-
-theorem Exec.trans {s s' s'' : State} (h₁ : Exec p deliver s s') (h₂ : Exec p deliver s' s'') :
-    Exec p deliver s s'' := by
-  induction h₁ with
-  | refl => exact h₂
-  | steps hs _ ih => exact .steps hs (ih h₂)
-  | signal hf hd _ ih => exact .signal hf hd (ih h₂)
-
-theorem Exec.of_steps {s s' : State} {k : Nat} (h : Program.Steps p s k s') : Exec p deliver s s' :=
-  .steps h (.refl _)
+variable {p : Program} {C : GoClass}
 
 /-- A run that returns is a sequence of ordinary steps to the exit address. -/
 theorem steps_of_run_returned : ∀ {n : Nat} {s s' : State}, p.run n s = .ok (.returned s') →
@@ -547,56 +545,86 @@ theorem steps_of_run_returned : ∀ {n : Nat} {s s' : State}, p.run n s = .ok (.
             obtain ⟨k, hk, he⟩ := steps_of_run_returned h
             exact ⟨k + 1, .step hx hst hf hstep hk, he⟩
 
+/-- A run that reaches a panic stub is ordinary steps to a state at that stub. -/
+theorem steps_of_run_stub : ∀ {n : Nat} {s s' : State} {name : String} {k : StubKind},
+    p.run n s = .ok (.stub name k s') → ∃ j st, Program.Steps p s j s' ∧
+      p.stubAt s'.rip.toNat = some st ∧ st.name = name ∧ st.kind = k
+  | 0, _, _, _, _, h => by simp [Program.run] at h
+  | n + 1, s, s', name, k, h => by
+    rw [Program.run_succ] at h
+    split at h
+    · cases h
+    · rename_i hx
+      split at h
+      · rename_i st hfind
+        cases h; exact ⟨0, st, .refl _, hfind, rfl, rfl⟩
+      · rename_i hfind
+        split at h
+        · cases h
+        · rename_i w hf
+          cases hstep : Amd64.step w s with
+          | error e => rw [hstep] at h; cases h
+          | ok s₁ =>
+            rw [hstep] at h
+            obtain ⟨j, st, hj, hfs, hn, hk⟩ := steps_of_run_stub h
+            exact ⟨j + 1, st, .step hx hfind hf hstep hj, hfs, hn, hk⟩
+
 /-- `Returns` gives the return outcome of `GoReturns`. -/
-theorem GoReturns.of_returns {leaves : State → Eface → Prop} {s : State} {P : State → Prop}
-    {Q : GoOutcome → Prop} (h : Returns p s P) (hq : ∀ s', P s' → Q (.returned s')) :
-    GoReturns p deliver leaves s Q := by
+theorem GoReturns.of_returns {s : State} {P : State → Prop} {Q : GoOutcome → Prop}
+    (h : Returns p s P) (hq : ∀ s', P s' → Q (.returned s')) : GoReturns p C s Q := by
   obtain ⟨n, s', hr, hp⟩ := h
   obtain ⟨k, hk, he⟩ := steps_of_run_returned hr
-  exact ⟨s', .of_steps hk, .inl ⟨he, hq _ hp⟩⟩
+  exact ⟨k, s', hk, .inl ⟨he, hq _ hp⟩⟩
 
-/-- Prefix composition. -/
-theorem GoReturns.of_exec {leaves : State → Eface → Prop} {s s' : State} {Q : GoOutcome → Prop}
-    (h₁ : Exec p deliver s s') (h₂ : GoReturns p deliver leaves s' Q) :
-    GoReturns p deliver leaves s Q := by
-  obtain ⟨s'', he, hq⟩ := h₂
-  exact ⟨s'', h₁.trans he, hq⟩
-
-theorem GoReturns.of_steps {leaves : State → Eface → Prop} {s s' : State} {k : Nat}
-    {Q : GoOutcome → Prop} (h₁ : Program.Steps p s k s') (h₂ : GoReturns p deliver leaves s' Q) :
-    GoReturns p deliver leaves s Q := h₂.of_exec (.of_steps h₁)
-
-/-- A panic that has left the frame establishes the panic outcome. -/
-theorem GoReturns.panicked {leaves : State → Eface → Prop} {s s' : State} {v : Eface}
-    {Q : GoOutcome → Prop} (h : Exec p deliver s s') (hl : leaves s' v) (hq : Q (.panicked v s')) :
-    GoReturns p deliver leaves s Q := ⟨s', h, .inr ⟨v, hl, hq⟩⟩
+/-- Prefix composition: ordinary steps, then a `GoReturns`. -/
+theorem GoReturns.of_steps {s s' : State} {k : Nat} {Q : GoOutcome → Prop}
+    (h₁ : Program.Steps p s k s') (h₂ : GoReturns p C s' Q) : GoReturns p C s Q := by
+  obtain ⟨j, s'', hj, ho⟩ := h₂
+  exact ⟨k + j, s'', h₁.trans hj, ho⟩
 
 /-- Reaching the exit address establishes the return outcome. -/
-theorem GoReturns.returned {leaves : State → Eface → Prop} {s s' : State} {Q : GoOutcome → Prop}
-    (h : Exec p deliver s s') (hx : s'.rip.toNat = p.exitAddr) (hq : Q (.returned s')) :
-    GoReturns p deliver leaves s Q := ⟨s', h, .inl ⟨hx, hq⟩⟩
+theorem GoReturns.returned {s s' : State} {k : Nat} {Q : GoOutcome → Prop}
+    (h : Program.Steps p s k s') (hx : s'.rip.toNat = p.exitAddr) (hq : Q (.returned s')) :
+    GoReturns p C s Q := ⟨k, s', h, .inl ⟨hx, hq⟩⟩
 
-theorem GoReturns.mono {leaves : State → Eface → Prop} {s : State} {Q Q' : GoOutcome → Prop}
-    (h : GoReturns p deliver leaves s Q) (hq : ∀ o, Q o → Q' o) : GoReturns p deliver leaves s Q' := by
-  obtain ⟨s', he, h | ⟨v, hl, h⟩⟩ := h
-  · exact ⟨s', he, .inl ⟨h.1, hq _ h.2⟩⟩
-  · exact ⟨s', he, .inr ⟨v, hl, hq _ h⟩⟩
+/-- Reaching a panic stub establishes the panic outcome. -/
+theorem GoReturns.stub {s s' : State} {k : Nat} {st : Stub} {v : Eface} {Q : GoOutcome → Prop}
+    (h : Program.Steps p s k s') (hst : p.stubAt s'.rip.toNat = some st) (hk : st.kind = .panic)
+    (hc : C.atStub st.name s' v) (hq : Q (.panicked v s')) : GoReturns p C s Q :=
+  ⟨k, s', h, .inr (.inl ⟨st, v, hst, hk, hc, hq⟩)⟩
+
+/-- Reaching a faulting instruction establishes the panic outcome (the signal path). -/
+theorem GoReturns.fault {s s' : State} {k : Nat} {e : Fault} {v : Eface} {Q : GoOutcome → Prop}
+    (h : Program.Steps p s k s') (hf : FaultsAt p s' e) (hc : C.atFault s' e v)
+    (hq : Q (.panicked v s')) : GoReturns p C s Q :=
+  ⟨k, s', h, .inr (.inr (.inl ⟨e, v, hf, hc, hq⟩))⟩
+
+/-- A deferred/recovered panic that already left the frame establishes the panic outcome. -/
+theorem GoReturns.leave {s s' : State} {k : Nat} {v : Eface} {Q : GoOutcome → Prop}
+    (h : Program.Steps p s k s') (hc : C.atLeave s' v) (hq : Q (.panicked v s')) :
+    GoReturns p C s Q := ⟨k, s', h, .inr (.inr (.inr ⟨v, hc, hq⟩))⟩
+
+theorem GoReturns.mono {s : State} {Q Q' : GoOutcome → Prop} (h : GoReturns p C s Q)
+    (hq : ∀ o, Q o → Q' o) : GoReturns p C s Q' := by
+  obtain ⟨k, s', hk, h | ⟨st, v, h⟩ | ⟨e, v, h⟩ | ⟨v, h⟩⟩ := h
+  · exact ⟨k, s', hk, .inl ⟨h.1, hq _ h.2⟩⟩
+  · exact ⟨k, s', hk, .inr (.inl ⟨st, v, h.1, h.2.1, h.2.2.1, hq _ h.2.2.2⟩)⟩
+  · exact ⟨k, s', hk, .inr (.inr (.inl ⟨e, v, h.1, h.2.1, hq _ h.2.2⟩))⟩
+  · exact ⟨k, s', hk, .inr (.inr (.inr ⟨v, h.1, hq _ h.2⟩))⟩
 
 /-- **Compatibility.** Every `Ensures` theorem is an `EnsuresGo` theorem in which the call never
-panics, for any signal delivery and any notion of a panic leaving the frame. -/
+panics, for any classification. -/
 theorem Ensures.toGo {entry : Nat} {args : List W64} {pre : State → Prop}
-    {post : State → State → Prop} (h : Ensures p entry args pre post)
-    (deliver : State → Fault → State → Prop) (leaves : State → State → Eface → Prop) :
-    EnsuresGo p entry args pre deliver leaves post (fun _ _ _ => False) :=
+    {post : State → State → Prop} (h : Ensures p entry args pre post) (C : State → GoClass) :
+    EnsuresGo p entry args pre C post (fun _ _ _ => False) :=
   fun r hr s hs hp => GoReturns.of_returns (h r hr s hs hp) fun _ h => h
 
 /-- Weaken the outcomes of an `EnsuresGo`. -/
 theorem EnsuresGo.mono {entry : Nat} {args : List W64} {pre pre' : State → Prop}
-    {leaves : State → State → Eface → Prop} {ret ret' : State → State → Prop}
-    {pan pan' : State → Eface → State → Prop}
-    (h : EnsuresGo p entry args pre deliver leaves ret pan) (hpre : ∀ s, pre' s → pre s)
+    {Cl : State → GoClass} {ret ret' : State → State → Prop} {pan pan' : State → Eface → State → Prop}
+    (h : EnsuresGo p entry args pre Cl ret pan) (hpre : ∀ s, pre' s → pre s)
     (hret : ∀ s s', pre' s → ret s s' → ret' s s') (hpan : ∀ s v s', pre' s → pan s v s' → pan' s v s') :
-    EnsuresGo p entry args pre' deliver leaves ret' pan' := by
+    EnsuresGo p entry args pre' Cl ret' pan' := by
   intro r hr s hs hp
   refine (h r hr s hs (hpre s hp)).mono fun o ho => ?_
   cases o with
