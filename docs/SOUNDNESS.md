@@ -26,7 +26,8 @@ instance makes it compute another is rejected. See CRITICAL-1 in
 These are trusted, not proved.
 
 1. **The Lean AArch64 model** (`Janus/Arm64/Decode.lean`, `Exec.lean`, `Vector.lean`,
-   `State.lean`): the decoder, the instruction semantics and the checked memory. They are meant to agree with the
+   `State.lean`, and the crypto/CRC32/permute files `InstrCrypto.lean`, `DecodeCrypto.lean`,
+   `ExecCrypto.lean`, `Crypto.lean`): the decoder, the instruction semantics and the checked memory. They are meant to agree with the
    Arm Architecture Reference Manual (ARM ARM) for the supported user-mode A64 subset. That
    agreement is differentially tested against qemu (`janus-oracle`), not proved. If the model
    is wrong about an instruction the program uses, a theorem can be true of the model and false
@@ -446,7 +447,8 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   Accepting them assumes the CPU implements both; every system that runs Go's arm64 port does
   (the AArch64 procedure-call standard passes floating-point values in SIMD&FP registers).
   FEAT_AES, FEAT_LRCPC and FEAT_LSE are assumed in the same way where their instructions are
-  accepted.
+  accepted, and so are FEAT_SHA1, FEAT_SHA256, FEAT_SHA512, FEAT_SHA3, FEAT_PMULL and FEAT_CRC32
+  (see "Crypto extension, CRC32, permutes" below).
 * **Store-exclusives are rejected.** `STXR`, `STLXR`, `STXP` and `STLXP` decode to nothing
   (`undecodable`), so any run that reaches one faults. Reasoning: on real hardware a
   store-exclusive may fail *spuriously* (status 1, nothing stored) even with no other thread:
@@ -516,11 +518,38 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   Accepting them assumes FEAT_AES; Go only runs its AES hash after testing `cpu.ARM64.HasAES`
   (`runtime.useAeshash`), so a proof through it assumes that flag, as for LSE.
 
-Not modelled, and rejected: Advanced SIMD (vector) floating point, saturating, rounding and widening/narrowing arithmetic other than the listed ones, permutes
-(`ZIP`/`UZP`/`TRN`), SHA, polynomial multiply, SVE and SME. An Advanced SIMD write sets the whole
+Not modelled, and rejected: Advanced SIMD (vector) floating point, saturating, rounding and
+widening/narrowing arithmetic other than the listed ones (and `PMULL`, below), SM3/SM4, SVE and SME. An Advanced SIMD write sets the whole
 128-bit register (`V[d, n] = x` zero-extends); on a CPU with SVE the hardware also zeroes the
 upper bits of `Z[d]`, which are not part of the model and not observable by the accepted
 instructions.
+
+## Crypto extension, CRC32, permutes
+
+`Janus/Arm64/Crypto.lean` transcribes the ASL of these instructions statement by statement
+(the Sail translation of Arm's Armv9.4-A ASL, sail-arm `f5bf6c3`: the `execute_*` functions of
+`instrs64.sail` and the shared `SHAchoose`, `SHAparity`, `SHAmajority`, `SHAhashSIGMA0/1`,
+`SHA256hash`, `ROL`, `ROR`, `PolynomialMult`, `BitReverse`, `Poly32Mod2`); `ExecCrypto.lean` does
+the register reads and writes, `DecodeCrypto.lean` the decoding (one hook each in `Decode.lean` and
+`Exec.lean`, constructor `Instr.crypto`). Covered: `SHA1C`/`SHA1P`/`SHA1M`/`SHA1H`/`SHA1SU0`/
+`SHA1SU1`, `SHA256H`/`SHA256H2`/`SHA256SU0`/`SHA256SU1`, `SHA512H`/`SHA512H2`/`SHA512SU0`/
+`SHA512SU1`, `EOR3`/`RAX1`/`XAR`/`BCAX`, `PMULL`/`PMULL2` (8B→8H and 1D→1Q), `CRC32B/H/W/X` and
+`CRC32CB/H/W/X`, the permutes `ZIP1`/`ZIP2`/`UZP1`/`UZP2`/`TRN1`/`TRN2` (every arrangement) and
+`DUP` (element, scalar form, alias `MOV Sd, Vn.S[i]`). Rejected: SM3/SM4 and every unallocated or
+UNDEFINED encoding of these classes (PMULL `size` 01/10, permute `size:Q = 110`, scalar DUP with
+`imm5<3:0> = 0000`, CRC32 with `sf` not matching `sz = 11`).
+
+Accepting them assumes the optional features FEAT_SHA1, FEAT_SHA256, FEAT_SHA512, FEAT_SHA3,
+FEAT_PMULL and FEAT_CRC32 (and FEAT_AES above). Go runs these kernels only after testing the
+matching `cpu.ARM64.Has*` flag (`HasSHA1`, `HasSHA2`, `HasSHA512`, `HasSHA3`, `HasPMULL`,
+`HasCRC32`), so a proof through one of them states what the program assumed. On a CPU without
+the feature the instruction is UNDEFINED (`SIGILL`) and such a theorem says nothing about that
+CPU.
+
+Proved on top (not trusted): `crc32Op_eq_update` (`Janus/Arm64/CryptoLemmas.lean`) shows that the
+ASL formulation of CRC32/CRC32C (bit-reversed operands, `Poly32Mod2`, bit-reversed result)
+equals the bytewise reflected CRC of RFC 1952 / RFC 3720 for every input, which the
+`A64Crc32` example uses.
 
 Go 1.26's `runtime.memmove`, `runtime.memclrNoHeapPointers` and the compiler's inline copies of
 small values use general-purpose `LDP`/`STP`; larger copies (`LDP`/`STP Q16, Q17`), the
