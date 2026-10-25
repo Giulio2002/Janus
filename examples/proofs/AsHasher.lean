@@ -405,31 +405,27 @@ theorem model : TypeAssert (Extracted.program.link implAt) cAddr R0 := by
     simp only [TD, TAB]; split <;> simp_all
   rw [heq]; exact this
 
-/-- The descriptor's address, evaluated. -/
-theorem desc_eq : desc = 0x1646d0 := by decide
-
 /-- The witness memory: `wmem` with the descriptor at `desc` (cache `TAC`, interface `ID`,
 `CanFail`), in a writable region. -/
 def mem1 : Memory :=
-  ⟨fun a => BitVec.ofNat 8 ((([(0x1646d0 + 1, 0x04), (0x1646d0 + 2, 0x01), (0x1646d0 + 9, 0x01),
-      (0x1646d0 + 10, 0x01), (0x1646d0 + 16, 1)] ++ wtable).lookup a).getD 0),
-    wmem.regions ++ [⟨0x164000, 0x1000, true⟩]⟩
+  ⟨fun a => BitVec.ofNat 8 ((([(desc + 1, 0x04), (desc + 2, 0x01), (desc + 9, 0x01),
+      (desc + 10, 0x01), (desc + 16, 1)] ++ wtable).lookup a).getD 0),
+    wmem.regions ++ [⟨desc - desc % 4096, 0x1000, true⟩]⟩
 
 theorem mem1_env (g : W64) : Env0 mem1 g := by
   refine ⟨by decide, by decide, ?_⟩
   unfold Desc; decide
 
 theorem mem1_desc : TADescOK R0 mem1 desc := by
-  rw [desc_eq]
   refine ⟨by decide, by decide, by decide, by simp only [R0_isInter, taInter]; decide, ?_⟩
-  show TACacheOK R0 mem1 (mem1.readLE 0x1646d0 8) (taInter mem1 0x1646d0)
-  rw [show mem1.readLE 0x1646d0 8 = TAC by decide]
+  show TACacheOK R0 mem1 (mem1.readLE desc 8) (taInter mem1 desc)
+  rw [show mem1.readLE desc 8 = TAC by decide]
   exact TACacheOK.empty (by decide) (by decide) (inPriv (by decide) (by decide)) (by decide) (by decide)
 
 /-- The witness return address. -/
 def ret : Nat := wret
 
-theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide +kernel)
 
 /-- `TD` and the value slot `VAL`, as words. -/
 def td : BitVec 64 := BitVec.ofNat 64 TD
@@ -450,13 +446,13 @@ theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extract
 theorem pre : CallerOK R0 s0 48 24 ∧ TADescOK R0 s0.mem desc ∧ taCanFail s0.mem desc = true ∧
     Outside desc 24 [(s0.sp.toNat - (R0.depth + 48), s0.sp.toNat + 24)] ∧
     (td.toNat ≠ 0 → R0.IsType td.toNat) := by
-  refine ⟨⟨mem1_env (s0.regs 28), ⟨by decide, by decide, by decide⟩, by decide, by decide,
-    by decide, by decide, by decide, ?_, ?_, ?_⟩, mem1_desc, ?_, ?_, fun _ => Or.inl rfl⟩
-  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
-  · unfold Disjoint; decide
-  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
-  · rw [desc_eq]; decide
-  · rw [desc_eq]; simp only [outside_cons, outside_nil, and_true]; decide
+  refine ⟨⟨mem1_env (s0.regs 28), ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, by decide +kernel, by decide +kernel,
+    by decide +kernel, by decide +kernel, by decide +kernel, ?_, ?_, ?_⟩, mem1_desc, ?_, ?_, fun _ => Or.inl rfl⟩
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel
+  · unfold Disjoint; decide +kernel
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel
+  · decide +kernel
+  · simp only [outside_cons, outside_nil, and_true]; decide +kernel
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (ret : Nat) (s : State) (t x : BitVec 64),
@@ -474,11 +470,11 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   refine (correctness implAt R0 R0_laws model td val ret hret s0 setup pre).mono ?_
   intro s' h
   obtain ⟨habi, ⟨h0, h1, h2, -⟩, -⟩ := h
-  have hi : taInter s0.mem desc = ID := by rw [desc_eq]; decide
+  have hi : taInter s0.mem desc = ID := by decide +kernel
   rw [hi] at h0
-  have h0' : (s'.regs 0).toNat = TAB := by rw [h0]; decide
+  have h0' : (s'.regs 0).toNat = TAB := by rw [h0]; decide +kernel
   refine ⟨habi, h0', h1, ?_⟩
-  rw [h2, h0']; decide
+  rw [h2, h0']; decide +kernel
 
 end Witness
 
