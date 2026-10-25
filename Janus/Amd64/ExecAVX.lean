@@ -26,8 +26,8 @@ parameter rather than a second copy:
 
 **VEX.128 zero-upper.** Every register result is written by `setV`: bits 127:0 from the result,
 bits 255:128 from it at `l = 256` and **zeroed** at `l = 128` (SDM Vol. 1 §14.1.3; the legacy-SSE
-instructions of `ExecSSE` write only `xmm` and preserve `ymmHi`). The AVX-512 state above bit 255
-is not modelled (no modelled instruction reads it).
+instructions of `ExecSSE` write only `xmm` and preserve `ymmHi`), and bits 511:256 (`zmmHi`, the
+AVX-512 state of WP-G) zeroed at both lengths.
 
 **Floating point.** As in WP-D: the flags of all elements are ORed; an unmasked exception in any
 element is `#XM` (`simdFPException`) and nothing is written. The 32 VEX comparison predicates are
@@ -64,11 +64,13 @@ open ExecSSE (lanes maskN lanesFP fpLane fmt allN)
 def getV (s : State) (l n : Nat) : Nat := if l = 256 then s.ymm n else (s.xmm n).toNat
 
 /-- The VEX write of the `l`-bit value `v` to `YMMn`: bits 127:0 from `v`, bits 255:128 from `v`
-at `l = 256` and zeroed at `l = 128`. -/
+at `l = 256` and zeroed at `l = 128`; bits 511:256 of `ZMMn` are zeroed (a VEX instruction zeroes
+its destination up to the maximum vector length, 512 on an AVX-512 CPU). -/
 def setV (s : State) (l n v : Nat) : State :=
   { s with
     xmm := fun i => if i = n then BitVec.ofNat 128 v else s.xmm i
-    ymmHi := fun i => if i = n then (if l = 256 then BitVec.ofNat 128 (v / 2 ^ 128) else 0) else s.ymmHi i }
+    ymmHi := fun i => if i = n then (if l = 256 then BitVec.ofNat 128 (v / 2 ^ 128) else 0) else s.ymmHi i
+    zmmHi := fun i => if i = n then 0 else s.zmmHi i }
 
 /-- `k` bytes of a vector operand: the low `8k` bits of a register (all 256 for `k = 32`), or `k`
 bytes of memory (no alignment requirement). -/
@@ -95,9 +97,10 @@ def doneS (s : State) (pc : Nat) (next : W64) (d hi w : Nat) (o : FP.XR) : Excep
 /-! ## Lanes -/
 
 /-- The 128-bit lane operation `f j a b` (`j` the lane) on each 128-bit lane of `l`-bit `a` and
-`b`; at `l = 128` just `f 0 a b`. -/
+`b`; at `l = 128` just `f 0 a b`. Also the 512-bit (four-lane) form of the EVEX instructions
+(`Janus.Amd64.ExecEVEX`). -/
 def perLane (l : Nat) (f : Nat → Nat → Nat → Nat) (a b : Nat) : Nat :=
-  if l = 256 then ofElems 128 2 fun j => f j (elem a 128 j) (elem b 128 j) else f 0 a b
+  if l = 128 then f 0 a b else ofElems 128 (l / 128) fun j => f j (elem a 128 j) (elem b 128 j)
 
 /-- The shifts by a vector count (`VPSLLW xmm/ymm, xmm, xmm/m128`, ...): their count operand is
 128 bits wide at both lengths and applies to every lane. -/
@@ -497,6 +500,9 @@ def exec (s : State) (next : W64) (pc : Nat) (ea : Addr → Nat) (i : AvxI XLoc 
       match store s.mem (ea a) (l / 16) o.res with
       | .error e => .error e
       | .ok m => .ok { ExecSSE.raiseMx { s with mem := m } o.flags with rip := next }
-  | .vzeroall => .ok { s with xmm := fun _ => 0, ymmHi := fun _ => 0, rip := next }
+  | .vzeroall =>
+    .ok { s with xmm := fun i => if i < 16 then 0 else s.xmm i,
+                 ymmHi := fun i => if i < 16 then 0 else s.ymmHi i,
+                 zmmHi := fun i => if i < 16 then 0 else s.zmmHi i, rip := next }
 
 end Janus.Amd64.ExecAVX

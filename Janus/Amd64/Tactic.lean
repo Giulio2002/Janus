@@ -598,6 +598,25 @@ def setXmmF (f : Nat → W128) (r : Nat) (v : W128) : Nat → W128 := fun i => i
   funext i; simp only [setXmmF, Nat.add_zero]
   by_cases h1 : i = r' <;> by_cases h2 : i = r <;> simp [h1, h2] <;> omega
 
+/-- Bits 511:256 of the `ZMM` registers (AVX-512) in the same normal form. -/
+def setZmmF (f : Nat → BitVec 256) (r : Nat) (v : BitVec 256) : Nat → BitVec 256 :=
+  fun i => if i = r then v else f i
+
+@[janus64_exec, janus64_post] theorem setZmmF_apply (f : Nat → BitVec 256) (r : Nat) (v : BitVec 256)
+    (i : Nat) : setZmmF f r v i = if i = r then v else f i := rfl
+
+@[janus64_exec, janus64_post] theorem setZmmF_same (f : Nat → BitVec 256) (r : Nat) (v w : BitVec 256) :
+    setZmmF (setZmmF f r v) r w = setZmmF f r w := by
+  funext i; simp only [setZmmF]; split <;> rfl
+
+@[janus64_exec, janus64_post] theorem setZmmF_comm (f : Nat → BitVec 256) {r r' : Nat} (v w : BitVec 256)
+    (h : r' < r) : setZmmF (setZmmF f r v) r' w = setZmmF (setZmmF f r' w) (r + 0) v := by
+  funext i; simp only [setZmmF, Nat.add_zero]
+  by_cases h1 : i = r' <;> by_cases h2 : i = r <;> simp [h1, h2] <;> omega
+
+@[janus64_exec] theorem State.setZmmHi_eq (s : State) (r : Nat) (v : BitVec 256) :
+    s.setZmmHi r v = { s with zmmHi := setZmmF s.zmmHi r v } := rfl
+
 /-! ### Flags of `ADD`/`SUB` (kept folded; fields by `rfl`) -/
 
 section FlagFields
@@ -1049,6 +1068,13 @@ deriving instance ToExpr for SseI
 deriving instance ToExpr for VShufOp
 deriving instance ToExpr for VShiftOp
 deriving instance ToExpr for AvxI
+deriving instance ToExpr for ELogic
+deriving instance ToExpr for EOp
+deriving instance ToExpr for EUOp
+deriving instance ToExpr for ECmp
+deriving instance ToExpr for KOp
+deriving instance ToExpr for KLoc
+deriving instance ToExpr for EvexI
 deriving instance ToExpr for Instr
 deriving instance ToExpr for StubKind
 

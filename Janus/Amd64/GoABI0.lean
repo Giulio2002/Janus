@@ -123,20 +123,26 @@ unspecified `junk`. -/
 def regs0 (old junk : Nat → W64) : Nat → W64 :=
   fun i => if i = regSP then old regSP + 8 else if i = regFP then old regFP else junk i
 
+/-- The AVX-512 state an ABI0 callee may leave behind: bits 511:256 of `ZMM0`–`ZMM31` and the
+opmask registers `K0`–`K7` (all scratch in both Go ABIs). -/
+structure Avx512Junk where
+  zmmHi : Nat → BitVec 256
+  kreg : Nat → W64
+
 /-- The state an ABI0 call from `s` returns in: registers by `regs0`, `RIP` = the pushed return
-address, flags, `XMM`/`YMM` registers (`X15` included), `MXCSR` and memory as given; the `FS`
-base and the direction flag unchanged. -/
+address, flags, `XMM`/`YMM`/`ZMM` registers (`X15` included), the opmask registers, `MXCSR` and
+memory as given; the `FS` base and the direction flag unchanged. -/
 def retState0 (s : State) (junk : Nat → W64) (f : Flags) (v vh : Nat → W128) (mx : BitVec 32)
-    (m : Memory) : State :=
+    (m : Memory) (z : Avx512Junk) : State :=
   { s with regs := regs0 s.regs junk, rip := retAddrOf s, flags := f, xmm := v, ymmHi := vh,
-           mxcsr := mx, mem := m }
+           mxcsr := mx, mem := m, zmmHi := z.zmmHi, kreg := z.kreg }
 
 /-- The shape of an ABI0 return from `s`: `s'` is `retState0 s …` for some unspecified registers,
 flags, vector registers and `MXCSR` status flags (its control bits are kept), and memory `m`
 with `Q m`. Reducible, so that the symbolic executor splits it at a call site. -/
 @[reducible] def Ret0 (s s' : State) (Q : Memory → Prop) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (v vh : Nat → W128) (mx : BitVec 32) (m : Memory),
-    s' = retState0 s junk f v vh mx m ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧ Q m
+  ∃ (junk : Nat → W64) (f : Flags) (v vh : Nat → W128) (mx : BitVec 32) (m : Memory) (z : Avx512Junk),
+    s' = retState0 s junk f v vh mx m z ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧ Q m
 
 /-- An ABI0 callee summary: a `Summary` (from any state at `entry` satisfying `pre`, ordinary
 steps reach the pushed return address) whose return state has the ABI0 shape `Ret0` and memory
@@ -224,7 +230,7 @@ attribute [janus64_exec, janus64_post] retState0
 /-- An ABI0 return state restores what `ABIReturn0` requires. -/
 theorem ABIReturn0.of_ret0 {s s' : State} {Q : Memory → Prop} (h : Ret0 s s' Q) :
     ABIReturn0 s s' := by
-  obtain ⟨junk, f, v, vh, mx, m, rfl, -, -⟩ := h
+  obtain ⟨junk, f, v, vh, mx, m, z, rfl, -, -⟩ := h
   exact ⟨by simp [retState0, regs0], by simp [retState0, regs0, regSP, regFP], rfl, rfl⟩
 
 /-- `Ret0` as equations about the return state. -/
@@ -233,10 +239,10 @@ theorem ABIReturn0.of_ret0 {s s' : State} {Q : Memory → Prop} (h : Ret0 s s' Q
       s'.fsBase = s.fsBase ∧ s'.df = s.df ∧ s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64 ∧
       Q s'.mem := by
   constructor
-  · rintro ⟨junk, f, v, vh, mx, m, rfl, hmx, hq⟩
+  · rintro ⟨junk, f, v, vh, mx, m, z, rfl, hmx, hq⟩
     simp [retState0, regs0, regSP, regFP, hq, hmx]
   · rintro ⟨h1, h2, h3, h4, h5, h6, hq⟩
-    refine ⟨s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mxcsr, s'.mem, ?_, h6, hq⟩
+    refine ⟨s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mxcsr, s'.mem, ⟨s'.zmmHi, s'.kreg⟩, ?_, h6, hq⟩
     have hr : regs0 s.regs s'.regs = s'.regs := by
       funext i
       simp only [regs0, regSP, regFP]
@@ -252,7 +258,7 @@ theorem ABIReturn0.of_ret0 {s s' : State} {Q : Memory → Prop} (h : Ret0 s s' Q
 
 /-- The memory of an ABI0 return state satisfies `Q`. -/
 theorem Ret0.mem {s s' : State} {Q : Memory → Prop} (h : Ret0 s s' Q) : Q s'.mem := by
-  obtain ⟨junk, f, v, vh, mx, m, rfl, -, hq⟩ := h
+  obtain ⟨junk, f, v, vh, mx, m, z, rfl, -, hq⟩ := h
   exact hq
 
 theorem Ensures0.returns {pre : State → Prop} {post : State → State → Prop} {ret : Nat}
@@ -302,8 +308,8 @@ theorem Ensures0.of_summary0 {pre spre : State → Prop} {post : State → State
 theorem Summary0.mono {pre pre' : State → Prop} {Q Q' : State → Memory → Prop}
     (hsum : Summary0 p entry pre Q) (hpre : ∀ s, pre' s → pre s)
     (hQ : ∀ s m, pre' s → Q s m → Q' s m) : Summary0 p entry pre' Q' :=
-  Summary.mono hsum hpre fun s _ hp ⟨junk, f, v, vh, mx, m, he, hmx, hq⟩ =>
-    ⟨junk, f, v, vh, mx, m, he, hmx, hQ s m hp hq⟩
+  Summary.mono hsum hpre fun s _ hp ⟨junk, f, v, vh, mx, m, z, he, hmx, hq⟩ =>
+    ⟨junk, f, v, vh, mx, m, z, he, hmx, hQ s m hp hq⟩
 
 theorem Summary0.withExit {pre : State → Prop} {Q : State → Memory → Prop} {ret : Nat}
     (hsum : Summary0 p entry pre Q) (hret : RetAddr p ret) :
@@ -311,16 +317,16 @@ theorem Summary0.withExit {pre : State → Prop} {Q : State → Memory → Prop}
   Summary.withExit hsum hret
 
 /-- Use an ABI0 callee summary at a direct call (`CALL f.abi0`): the call returns in
-`retState0 s junk f v vh mx m` for **every** choice of the unspecified registers (`R14`
-included), flags, vector registers (`X15` included) and `MXCSR` flags, and every memory `m` with
-`Q s m`. -/
+`retState0 s junk f v vh mx m z` for **every** choice of the unspecified registers (`R14`
+included), flags, vector registers (`X15` included), AVX-512 state and `MXCSR` flags, and every
+memory `m` with `Q s m`. -/
 theorem Summary0.call {pre : State → Prop} {Q : State → Memory → Prop} {Q' : Outcome → Prop}
     (hsum : Summary0 p entry pre Q) (hpc : s.rip = BitVec.ofNat 64 entry) (hpre : pre s)
-    (h : ∀ junk f v vh mx m, mx.toNat / 64 = s.mxcsr.toNat / 64 → Q s m →
-      Reaches p (retState0 s junk f v vh mx m) Q') :
+    (h : ∀ junk f v vh mx m z, mx.toNat / 64 = s.mxcsr.toNat / 64 → Q s m →
+      Reaches p (retState0 s junk f v vh mx m z) Q') :
     Reaches p s Q' :=
-  Reaches.call hsum hpc hpre fun _ _ ⟨junk, f, v, vh, mx, m, he, hmx, hq⟩ =>
-    he ▸ h junk f v vh mx m hmx hq
+  Reaches.call hsum hpc hpre fun _ _ ⟨junk, f, v, vh, mx, m, z, he, hmx, hq⟩ =>
+    he ▸ h junk f v vh mx m z hmx hq
 
 /-! ### Re-entry: `g` from TLS, `X15` zeroed -/
 

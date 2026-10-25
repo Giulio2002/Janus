@@ -66,8 +66,8 @@ theorem rtReturn_of (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (
     (hmx : s'.mxcsr = s.mxcsr)
     (hfr : MemFrame s.mem s'.mem (Contracts.IfaceAmd64.rtWrites R s nargs ++ extra))
     (henv : R.Env s'.mem (s.regs 14)) (hp : P s'.regs s'.mem) : RTReturn R nargs extra s s' P := by
-  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, hfr, henv, hp⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
+  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, s'.zmmHi, s'.kreg, ?_, hfr, henv, hp⟩
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, zh, kr⟩ := s'
   simp only at hrip h4 h5 h14 hx hfs hdf hmx ⊢
   subst hrip hfs hdf hmx
   congr

@@ -1,6 +1,7 @@
 import Janus.Amd64.Instr
 import Janus.Amd64.DecodeSSE
 import Janus.Amd64.DecodeAVX
+import Janus.Amd64.DecodeEVEX
 
 /-!
 # x86-64 decoder for the supported subset
@@ -39,7 +40,7 @@ Prefix policy (strict):
   (`VEX.vvvv = 1111` where it is unused, `VEX.W0` for `VPBROADCASTB`, `VEX.L0` for
   `VZEROUPPER`, the register-only and memory-only forms). A VEX prefix preceded by any other
   prefix (`66 F2 F3 F0` or `REX` are `#UD`; segment overrides are rejected too) is rejected.
-  `EVEX` (`62`) and `XOP` (`8F` with `reg ≠ 0`) are rejected.
+  `XOP` (`8F` with `reg ≠ 0`) is rejected; `EVEX` (`62`, AVX-512) is `DecodeEVEX.evex` (WP-G).
 * Instructions longer than 15 bytes are rejected (`#GP` on hardware).
 * `66` on near branches, `CALL`, `RET`, `PUSH`, `POP`, `LEAVE` is rejected (it changes the
   operand size differently on Intel and AMD).
@@ -909,7 +910,8 @@ open Decode in
 def decode (bytes : List Nat) : Option (Instr × Nat) :=
   match bytes with
   | b0 :: rest0 =>
-    if b0 = 0xC4 ∨ b0 = 0xC5 then (vex b0 rest0).orElse fun _ => DecodeAVX.vex (fun rex bs => (modrm rex bs).map fun (m, r, c) => (m.reg, m.ext, rmX m.rm, r, c)) b0 rest0 else decodeLegacy bytes
+    if b0 = 0xC4 ∨ b0 = 0xC5 then ((vex b0 rest0).orElse fun _ => DecodeAVX.vex (fun rex bs => (modrm rex bs).map fun (m, r, c) => (m.reg, m.ext, rmX m.rm, r, c)) b0 rest0).orElse fun _ => DecodeEVEX.vex (fun rex bs => (modrm rex bs).map fun (m, r, c) => (m.md, m.reg, m.ext, rmX m.rm, r, c)) b0 rest0
+    else if b0 = 0x62 then DecodeEVEX.evex (fun rex bs => (modrm rex bs).map fun (m, r, c) => (m.md, m.reg, m.ext, rmX m.rm, r, c)) rest0 else decodeLegacy bytes
   | [] => none
 
 end Janus.Amd64

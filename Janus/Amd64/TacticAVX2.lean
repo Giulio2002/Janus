@@ -57,7 +57,7 @@ attribute [janus64_exec] ExecAVX.rd ExecAVX.getV ExecAVX.doneV ExecAVX.doneFPV E
 
 /-- The VEX register write in the normal form of the scalar instructions. -/
 @[janus64_exec] theorem ExecAVX.setV_eq (s : State) (l n v : Nat) :
-    ExecAVX.setV s l n v = { s with xmm := setXmmF s.xmm n (BitVec.ofNat 128 v), ymmHi := setXmmF s.ymmHi n (if l = 256 then BitVec.ofNat 128 (v / 2 ^ 128) else 0) } := rfl
+    ExecAVX.setV s l n v = { s with xmm := setXmmF s.xmm n (BitVec.ofNat 128 v), ymmHi := setXmmF s.ymmHi n (if l = 256 then BitVec.ofNat 128 (v / 2 ^ 128) else 0), zmmHi := setZmmF s.zmmHi n 0 } := rfl
 
 /-- `ExecAVX.setV` is `State.setV`, the VEX write of `Instr.vmov`/`Instr.vop`. -/
 theorem ExecAVX.setV_eq_state (s : State) (l n v : Nat) : ExecAVX.setV s l n v = s.setV l n v := rfl
@@ -194,7 +194,7 @@ theorem elem_perLane_256 {e k i : Nat} (f : Nat → Nat → Nat → Nat) (a b : 
   have hd : i = k * (i / k) + i % k := (Nat.div_add_mod i k).symm
   have hq : i / k < 2 := by
     rw [Nat.div_lt_iff_lt_mul hk0]; omega
-  rw [ExecAVX.perLane, if_pos rfl]
+  rw [ExecAVX.perLane, if_neg (by decide), show (256 : Nat) / 128 = 2 from rfl]
   conv => lhs; rw [hd]
   rw [← elem_lane (Nat.mod_lt i hk0), hk, elem_ofElems _ hq,
     elem_mod_two_pow (by
@@ -203,7 +203,7 @@ theorem elem_perLane_256 {e k i : Nat} (f : Nat → Nat → Nat → Nat) (a b : 
 
 /-- Per-lane 256-bit results are 256-bit values. -/
 theorem perLane_256_lt (f : Nat → Nat → Nat → Nat) (a b : Nat) : ExecAVX.perLane 256 f a b < 2 ^ 256 := by
-  rw [ExecAVX.perLane, if_pos rfl]; exact ofElems_lt 128 2 _
+  rw [ExecAVX.perLane, if_neg (by decide), show (256 : Nat) / 128 = 2 from rfl]; exact ofElems_lt 128 2 _
 
 @[janus64_exec, janus64_post] theorem pintV_256_mod (op : PIntOp) (a b : Nat) :
     ExecAVX.pintV op 256 a b %
