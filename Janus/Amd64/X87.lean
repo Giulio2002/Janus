@@ -285,6 +285,8 @@ def relBits : Option Int → Nat
 /-- `FXAM`'s class code `C3 C2 C0` (bits 2, 1, 0) of a non-empty register. -/
 def xamCode (x : Nat) : Nat :=
   if unsupported x then 0b000 else
+  -- a pseudo-denormal reads as a normal value but is classified as a denormal (host-checked)
+  if isDenormal x then 0b110 else
   match kind x with
   | .qnan | .snan => 0b001
   | .normal => 0b010
