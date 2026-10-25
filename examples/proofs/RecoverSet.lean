@@ -132,7 +132,12 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       rw [hfrc.accessible]; simp only [Memory.accessible_writeLE]; exact hst
     -- the deferred closure, run until it returns into the runtime
     have hcl : ReachesRet (Extracted.program.link impl) (cr 30)
-        ⟨cr, csp, BitVec.ofNat 64 588944, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ (fun c' => True) := by
+        ⟨cr, csp, BitVec.ofNat 64 588944, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ (fun c' =>
+          c'.sp = csp ∧ c'.regs 28 = cr 28 ∧ c'.regs 18 = cr 18 ∧ P.Env c'.mem ∧
+          P.Recovered c'.mem (s.regs 28).toNat ∧
+          MemFrame cm c'.mem (P.priv ++ [(csp.toNat - 32 - P.depth, csp.toNat),
+            (s.sp.toNat - 40, s.sp.toNat - 32)]) ∧
+          c'.mem.readLE (s.sp.toNat - 40) 8 = 7) := by
       have hcr : cr = setReg (setReg (setReg cr 26 (BitVec.ofNat 64 (s.sp.toNat - 32))) 28 (s.regs 28))
           29 (csp - 8) := by
         funext i; simp only [setReg]; split
@@ -179,6 +184,47 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
         Nat.reduceEqDiff] at hfr2 hr0 hr1 hrec2 henv2
       have hj0 : j2 0 ≠ 0 := fun h => hne (by rw [← hr0, h]; rfl)
       janus_run
-    sorry
+      have hag7 : Map.Agrees m2 (m2.writeLE (s.sp.toNat - 40) 8 7) P.priv :=
+        Map.Agrees.of_window (lo := s.sp.toNat - 40) (hi := s.sp.toNat - 32) (by janus_frame)
+          (Outside.of_sub hout (by omega) (by omega))
+      refine ⟨hl.env_frame _ _ henv2 hag7, hl.recovered_frame _ _ _ hrec2 hag7, ?_⟩
+      try simp only [List.cons_append, List.nil_append]
+      janus_frame
+    obtain ⟨k2, c', hst2, hpc2, hsp2, h282, h182, henv3, hrec3, hfr3, hr7⟩ := hcl
+    refine Reaches.of_steps (hst2.withExit hret.fetch_none) ?_
+    have hagc' : Map.Agrees cm c'.mem [(csp.toNat, s.sp.toNat - 80)] := by
+      refine Map.Agrees.of_memFrame hfr3 fun a ⟨r, hr, h1, h2⟩ => ?_
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at hr
+      subst hr
+      rw [outside_append]
+      exact ⟨Outside.of_sub hout (by omega) (by omega),
+        by simp only [outside_cons, outside_nil, and_true]; omega⟩
+    obtain ⟨k3, d, hst3, hdpc, hdsp, hd28, hd18, hd29, hdfr, hdenv, hdcalm⟩ :=
+      hcont c' hpc2 hsp2 h282 h182 hagc' henv3 hrec3
+    refine Reaches.of_steps (hst3.withExit hret.fetch_none) ?_
+    obtain ⟨dr, dsp, dpc, dfl, dm, ddz, dv, dtp, dfc, dfs⟩ := d
+    dsimp only at hdpc hdsp hd28 hd18 hd29 hdfr hdenv hdcalm
+    rw [show Extracted.entry + 132 = 588884 from rfl] at hdpc
+    subst hdpc hdsp
+    have hdr' : dr = setReg (setReg (setReg dr 18 (s.regs 18)) 28 (s.regs 28)) 29 (s.sp - 80#64 - 8) := by
+      funext i; simp only [setReg]; split
+      · subst_vars; exact hd29
+      · split
+        · subst_vars; exact hd28
+        · split
+          · subst_vars; exact hd18
+          · rfl
+    rw [hdr']
+    janus_run until [Extracted.program.contractAddr "runtime.deferreturn"]
+    refine Reaches.call (Summary.withExit hdr hret) rfl
+      (PanicPre.of_within hc ?_ hdenv ?_ ?_ ?_ rfl ?_ ?_) ?_
+    · simp only [List.cons_append, List.nil_append]; janus_frame
+    all_goals try (simp [setReg]; try omega)
+    rintro D hpcD ⟨j4, f4, v4, m4, hsD, hfrD, henvD⟩
+    subst hsD
+    have h80' : (s.sp - 80#64).toNat = s.sp.toNat - 80 := h80
+    simp only [calleeStack, h80'] at hfrD
+    janus_run
+    rw [hr7, if_neg hx]
 
 end Proof
