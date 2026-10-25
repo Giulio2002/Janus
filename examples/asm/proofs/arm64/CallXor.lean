@@ -70,7 +70,7 @@ theorem loop (s : State) (ptr len : Nat) (hptr : s.mem.readLE (s.sp.toNat + 8) 8
       S.regs 1 = BitVec.ofNat 64 n → S.regs 2 = xorWords s.mem ptr i →
       S.regs 30 = s.regs 30 → S.sp = s.sp → S.regs 28 = s.regs 28 →
       S.regs 29 = s.regs 29 → S.regs 18 = s.regs 18 → S.mem = s.mem → S.fpcr = s.fpcr →
-      S.tpidr = s.tpidr → S.dczid = s.dczid →
+      S.tpidr = s.tpidr → S.dczid = s.dczid → S.excl = s.excl → S.exclPass = s.exclPass →
       ReachesRet Extracted.program (s.regs 30) S (fun s' => Ret0 s s' (XorQ s)) := by
   obtain ⟨hr1, hr2, hal, hfb, hfacc, hp', hp⟩ := hpre
   rw [hptr, hlen] at hp hp'
@@ -78,15 +78,15 @@ theorem loop (s : State) (ptr len : Nat) (hptr : s.mem.readLE (s.sp.toNat + 8) 8
   intro n
   induction n with
   | zero =>
-    intro S i hn hpc h0 h1 h2 h30 hsp h28 h29 h18 hm hfpcr htp hdc
+    intro S i hn hpc h0 h1 h2 h30 hsp h28 h29 h18 hm hfpcr htp hdc hex hep
     janus_run [XorQ]
-    refine ⟨htp, hdc, ?_⟩
+    refine ⟨htp, hdc, hex, hep, ?_⟩
     rw [hptr, hlen, show i = len by omega]
     exact MemFrame.refl _ _
   | succ n ih =>
-    intro S i hn hpc h0 h1 h2 h30 hsp h28 h29 h18 hm hfpcr htp hdc
+    intro S i hn hpc h0 h1 h2 h30 hsp h28 h29 h18 hm hfpcr htp hdc hex hep
     janus_run until [head]
-    refine ih _ (i + 1) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ htp hdc
+    refine ih _ (i + 1) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ htp hdc hex hep
     all_goals janus_simp [xorWords]
     · omega
     · apply BitVec.eq_of_toNat_eq
@@ -104,7 +104,7 @@ theorem xor_summary : Summary0 Extracted.program callee XorPre XorQ := by
   janus_run until [head]
   exact loop s _ _ rfl rfl hpre (s.mem.readLE (s.sp.toNat + 16) 8) _ 0 (by simp) (by janus_simp)
     (by janus_simp) (by janus_simp) (by janus_simp [xorWords]) (by janus_simp) (by janus_simp)
-    (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) rfl rfl rfl
+    (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) rfl rfl rfl rfl rfl
 
 theorem correctness (ptr len cap : BitVec 64) :
     Ensures Extracted.program Extracted.entry [ptr, len, cap]
