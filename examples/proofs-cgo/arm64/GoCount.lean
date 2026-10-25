@@ -13,7 +13,7 @@ func Count(b []byte, c byte) uint64 {
 ```
 
 **Guarantee (`correctness`).** For every slice header `(ptr, len, cap)`, every byte `c` and every Go
-call of `example.com/cgo.Count` satisfying `GoPre ptr len` — the stack checks fall through, the
+call of `example.com/cgo/neon.Count` satisfying `GoPre ptr len` — the stack checks fall through, the
 stack window (and the spill slot above `SP`) is writable, the `len` bytes at `ptr` are readable,
 below `2^48` and away from the stack window, the `g` struct and the TLS `g` slot; and the cgo globals
 hold their static values — every run returns, restores `SP`, `g` and the frame pointer, and leaves
@@ -36,8 +36,8 @@ namespace Proof
 abbrev ccount : Nat := segAddr Extracted.program "c_count"
 
 /-- The vector and the scalar loop heads of `c_count`. -/
-abbrev vhead : Nat := ccount + 0x38
-abbrev thead : Nat := ccount + 0x9c
+abbrev vhead : Nat := ccount + 0x40
+abbrev thead : Nat := ccount + 0xa4
 
 abbrev Kept (s S : State) : Prop :=
   S.sp = s.sp ∧ S.mem = s.mem ∧ S.regs 19 = s.regs 19 ∧ S.regs 20 = s.regs 20 ∧
@@ -218,7 +218,7 @@ theorem countOf_frame {m m' : Memory} {rs : List (Nat × Nat)} (h : MemFrame m m
 
 /-! ## The cgo wrapper -/
 
-abbrev wrapper : Nat := segAddr Extracted.program "_cgo_6262fb6e28e5_Cfunc_c_count"
+abbrev wrapper : Nat := segAddr Extracted.program "_cgo_d35559c3ee2a_Cfunc_c_count"
 
 /-- The slice pointer, the length and the byte in the cgo frame at `a`. -/
 abbrev frameP (m : Memory) (a : Nat) : Nat := m.readLE a 8
@@ -291,14 +291,14 @@ theorem wrapper_spec (T a : BitVec 64) :
 /-! ## The Go side: `Count` → `_Cfunc_c_count` → `runtime.cgocall` -/
 
 def fnVar : Nat :=
-  adrpLdTarget (segAddr Extracted.program "example.com/cgo._Cfunc_c_count.abi0" + 0x24)
-    (segWord Extracted.program "example.com/cgo._Cfunc_c_count.abi0" 9)
-    (segWord Extracted.program "example.com/cgo._Cfunc_c_count.abi0" 10) 3
+  adrpLdTarget (segAddr Extracted.program "example.com/cgo/neon._Cfunc_c_count.abi0" + 0x24)
+    (segWord Extracted.program "example.com/cgo/neon._Cfunc_c_count.abi0" 9)
+    (segWord Extracted.program "example.com/cgo/neon._Cfunc_c_count.abi0" 10) 3
 
 def alwaysFalse : Nat :=
-  adrpLdTarget (segAddr Extracted.program "example.com/cgo._Cfunc_c_count.abi0" + 0x30)
-    (segWord Extracted.program "example.com/cgo._Cfunc_c_count.abi0" 12)
-    (segWord Extracted.program "example.com/cgo._Cfunc_c_count.abi0" 13) 0
+  adrpLdTarget (segAddr Extracted.program "example.com/cgo/neon._Cfunc_c_count.abi0" + 0x30)
+    (segWord Extracted.program "example.com/cgo/neon._Cfunc_c_count.abi0" 12)
+    (segWord Extracted.program "example.com/cgo/neon._Cfunc_c_count.abi0" 13) 0
 
 /-- At the `cgocall`: the frame `X1` and the bytes it points at are Go memory the runtime leaves
 alone. -/

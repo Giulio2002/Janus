@@ -18,7 +18,7 @@ faulting, restores `SP` and `X19`–`X29`, leaves memory unchanged, and returns 
 the `n` bytes equal to `c` (`countOf`, the scalar spec; only the low byte of `X2` is the argument,
 hence `c.toNat % 256`). This holds for every `n`: both loops terminate.
 
-**The code.** cgo compiles `cfuncs.c` with gcc 15.2.0 at its default `-O2`, and the vectoriser
+**The code.** cgo compiles `examples/cgo/neon/cneon.c` with gcc 15.2.0 at its default `-O2`, and the vectoriser
 turns the loop into a 16-byte loop — `LDR Q` with post-increment, `CMEQ .16B` against `DUP`ed `c`,
 `AND` with `MOVI .16B, #1`, the widening ladder `ZIP1`/`ZIP2` with a zero vector (`.16B` → `.8H` →
 `.4S`), `UADDW`/`UADDW2` into 64-bit lanes and `ADD .2D` into the accumulator `v26` — then `ADDP D`
@@ -37,8 +37,8 @@ open Janus Janus.Arm64 Janus.GoABI Janus.CABI Janus.Tactic Janus.Spec Janus.FFI
 
 namespace Proof
 
-abbrev vhead : Nat := Extracted.entry + 0x38
-abbrev thead : Nat := Extracted.entry + 0x9c
+abbrev vhead : Nat := Extracted.entry + 0x40
+abbrev thead : Nat := Extracted.entry + 0xa4
 
 abbrev Kept (s S : State) : Prop :=
   S.sp = s.sp ∧ S.mem = s.mem ∧ S.regs 19 = s.regs 19 ∧ S.regs 20 = s.regs 20 ∧

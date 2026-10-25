@@ -17,7 +17,7 @@ cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 
 declare -A sym=(
-  [CAdd]=c_add [CSum]=c_sum [CStore]=c_store [CCount]=c_count [GoCount]=example.com/cgo.Count
+  [CAdd]=c_add [CSum]=c_sum [CStore]=c_store [CCount]=c_count [GoCount]=example.com/cgo/neon.Count
   [GoAdd]=example.com/cgo.Add [GoSum]=example.com/cgo.Sum
 )
 names=("$@")
