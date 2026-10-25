@@ -150,6 +150,40 @@ def GuardOK64 (s : State) (adj : Nat) : Prop :=
       MemFrame s.mem m (rt ++ calleeStack64 s stack sp.nargs ++ sp.writes (argWords64 s sp.nargs) s.mem) ∧
       sp.post rt (argWords64 s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat m
 
+/-- How a proof from a function's own code ends (amd64): the final state returns to the return
+address with `RSP + 8`, keeps `RBP`, `R14`, `X15`, `FS`, the direction flag and `MXCSR`, and its
+memory and results (`RAX`, `RBX`, `RCX`) satisfy the spec; then it is `RtPost64`. -/
+theorem RtPost64.intro {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s' : State}
+    (hrip : s'.rip = retAddrOf s) (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5)
+    (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase)
+    (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr)
+    (hf : MemFrame s.mem s'.mem (rt ++ calleeStack64 s stack sp.nargs ++ sp.writes (argWords64 s sp.nargs) s.mem))
+    (hq : sp.post rt (argWords64 s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 3).toNat (s'.regs 1).toNat s'.mem) :
+    RtPost64 rt stack sp s s' := by
+  refine ⟨s'.regs 0, s'.regs 3, s'.regs 1, s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, ?_, hf, hq⟩
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
+  simp only at hrip h4 h5 h14 hx hfs hdf hmx ⊢
+  subst hrip hfs hdf hmx
+  simp only [retState64, State.mk.injEq, and_true, true_and]
+  constructor
+  · funext i
+    simp only [callRegs64]
+    split
+    · rename_i hi; subst hi; exact h4
+    · split
+      · rename_i hi; rcases hi with rfl | rfl <;> simp [h5, h14]
+      · split
+        · rename_i hi; subst hi; rfl
+        · split
+          · rename_i hi; subst hi; rfl
+          · split
+            · rename_i hi; subst hi; rfl
+            · rfl
+  · funext i
+    split
+    · rename_i hi; subst hi; exact hx
+    · rfl
+
 /-- **The amd64 contract of `sp` at `addr`**. -/
 def RtContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
     (H : RtReady) (sp : RtSpec) : Prop :=
