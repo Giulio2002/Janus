@@ -294,6 +294,15 @@ def gobytesSpec : RtSpec where
   post rt a m0 r0 r1 r2 m := r1 = arg a 1 ∧ r2 = arg a 1 ∧
     (0 < arg a 1 → InRanges r0 (arg a 1) rt ∧ BytesHold m r0 r1 r2 (strBytes m0 (arg a 0) (arg a 1)))
 
+/-- Bytes outside a frame's ranges keep their values. -/
+theorem strBytes_of_frame {m0 m : Memory} {rs : List (Nat × Nat)} (hf : MemFrame m0 m rs) {p n : Nat}
+    (ho : Outside p n rs) : strBytes m p n = strBytes m0 p n := by
+  apply strBytes_congr
+  intro i hi
+  have := hf.readLE (p + i) 1 (Outside.of_sub ho (by omega) (by omega))
+  rw [Memory.readLE_one, Memory.readLE_one] at this
+  exact BitVec.eq_of_toNat_eq this
+
 theorem catBytes_nil (m : Memory) : catBytes m [] = [] := rfl
 theorem catBytes_cons (m : Memory) (x : Nat × Nat) (xs : List (Nat × Nat)) :
     catBytes m (x :: xs) = strBytes m x.1 x.2 ++ catBytes m xs := rfl

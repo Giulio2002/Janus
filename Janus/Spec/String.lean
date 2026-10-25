@@ -207,6 +207,22 @@ theorem decodeRune_fst_le (s : List Nat) (k : Nat) : (decodeRune s k).1 ≤ maxR
     | (have := and_shl_or_lt3 (byteAt s k) (byteAt s (k + 1)) (byteAt s (k + 2)); simp only []; omega)
     | (simp only []; omega)
 
+/-- A rune that starts inside `s` ends inside it. -/
+theorem decodeRune_snd_le_length (s : List Nat) (k : Nat) (h : k < s.length) :
+    (decodeRune s k).2 ≤ s.length := by
+  unfold decodeRune
+  dsimp only
+  repeat' split
+  all_goals (try simp only [isCont, Bool.and_eq_true, decide_eq_true_eq] at *)
+  all_goals omega
+
+theorem rangeStep_snd_le_length (s : List Nat) (k : Nat) (h : k < s.length) :
+    (rangeStep s k).2 ≤ s.length := by
+  unfold rangeStep
+  split
+  · simp only []; omega
+  · exact decodeRune_snd_le_length s k h
+
 theorem rangeStep_fst_le (s : List Nat) (k : Nat) :
     (rangeStep s k).1 ≤ maxRune := by
   unfold rangeStep
