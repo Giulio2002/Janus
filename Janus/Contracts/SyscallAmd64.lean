@@ -103,8 +103,7 @@ def nextRip (s : State) (len : Nat) : W64 := BitVec.ofNat 64 ((s.rip.toNat + len
 address, `R11 = r11` (the saved `RFLAGS`, left unspecified), everything else unchanged. -/
 def afterSyscall (s : State) (r : Nat) (r11 : W64) (m' : Memory) : State :=
   { s with
-    regs := fun i => if i = 0 then BitVec.ofNat 64 r else if i = 1 then nextRip s 2
-      else if i = 11 then r11 else s.regs i
+    regs := setRegF (setRegF (setRegF s.regs 0 (BitVec.ofNat 64 r)) 1 (nextRip s 2)) 11 r11
     rip := nextRip s 2
     mem := m' }
 
@@ -113,9 +112,7 @@ attribute [janus64_exec, janus64_post] nextRip afterSyscall
 /-- `s` with `RAX, RBX, RCX, RDX` (registers 0, 3, 1, 2) set where given, `RIP` past `len`. -/
 def withRegs (s : State) (len : Nat) (vs : List (Nat × Nat)) : State :=
   { s with
-    regs := fun i => (match vs.find? (·.1 == i) with
-      | some (_, v) => BitVec.ofNat 64 v
-      | none => s.regs i)
+    regs := vs.foldl (fun f iv => setRegF f iv.1 (BitVec.ofNat 64 iv.2)) s.regs
     rip := nextRip s len }
 
 attribute [janus64_exec, janus64_post] withRegs
@@ -158,6 +155,39 @@ def SiteNext (E : KEnv) (s : State) (k : Kern) (s' : State) (k' : Kern) : Site �
         MemFrame s.mem m (E.rt ++ [((s.regs 4).toNat - E.stack, (s.regs 4).toNat),
           ((s.regs 4).toNat + 8, (s.regs 4).toNat + 16)]) ∧
         m.readLE ((s.regs 4).toNat + 8) 8 = (sec * 10 ^ 9 + nsec) % 2 ^ 64
+
+/-- Every stub site has a successor wherever it is `SiteSafe` (amd64; see
+`Janus.Kernel.SiteNext.total`). -/
+theorem SiteNext.total (E : KEnv) (s : State) (k : Kern) (site : Site) (h : SiteSafe E s k site) :
+    ∃ s' k', SiteNext E s k s' k' site := by
+  cases site with
+  | syscall =>
+    obtain ⟨sc, hsc, hne, -⟩ := h
+    obtain ⟨k', m', r, he⟩ := Effect.total sc (argsOf s) k s.mem hne
+    exact ⟨_, k', sc, m', r, 0, hsc, he, rfl⟩
+  | env op =>
+    cases op with
+    | cpuid => exact ⟨_, _, 0, 0, 0, 0, by decide, by decide, by decide, by decide, rfl, rfl⟩
+    | xgetbv => exact ⟨_, _, rfl, rfl⟩
+    | rdtsc => exact ⟨_, _, 0, by decide, rfl, rfl⟩
+    | rdtscp => exact ⟨_, _, 0, 0, by decide, by decide, rfl, rfl⟩
+  | timeNow =>
+    refine ⟨_, _, 0, 0, k.mono, 0, by decide, by decide, by decide, ?_, rfl,
+      s.regs, s.flags, s.xmm, s.ymmHi, s.mem, rfl, MemFrame.refl _ _⟩
+    have : 1 ≤ 10 ^ 9 := by decide
+    exact Nat.le_add_right_of_le (Nat.le_mul_of_pos_right _ this)
+  | nanotime =>
+    refine ⟨_, _, k.mono, 0, by decide, ?_, rfl, fun i => if i = 4 then s.regs 4 + 8 else s.regs i,
+      s.flags, s.xmm, s.ymmHi,
+      s.mem.writeLE ((s.regs 4).toNat + 8) 8 ((k.mono * 10 ^ 9 + 0) % 2 ^ 64), rfl,
+      by simp, by simp, by simp, ?_, ?_⟩
+    · have : 1 ≤ 10 ^ 9 := by decide
+      exact Nat.le_add_right_of_le (Nat.le_mul_of_pos_right _ this)
+    · have h1 : ((s.regs 4).toNat + 8, (s.regs 4).toNat + 16) ∈
+          E.rt ++ [((s.regs 4).toNat - E.stack, (s.regs 4).toNat),
+            ((s.regs 4).toNat + 8, (s.regs 4).toNat + 16)] := by simp
+      exact (MemFrame.refl s.mem _).writeLE _ h1 (Nat.le_refl _) (by omega)
+    · rw [Janus.Arm64.Memory.readLE_writeLE_self]; omega
 
 /-- A stub site that ends the process: `exit_group(code)`. -/
 def SiteExit (s : State) (code : Nat) : Site → Prop

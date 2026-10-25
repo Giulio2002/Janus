@@ -16,6 +16,7 @@ par_init "$@"
 go build -o bin/janus ./cmd/janus
 scripts/build-examples.sh >/dev/null
 bash scripts/build-examples-amd64.sh >/dev/null 2>&1
+scripts/build-examples-sys.sh >/dev/null 2>&1
 [ -n "${JANUS_ROOT:-}" ] && (cd "$JANUS_ROOT" && lake build Janus >/dev/null)
 export JANUS_EXAMPLES_PREBUILT=1
 
@@ -41,8 +42,15 @@ for f in "${amd64[@]}"; do
   par_run 'out="$(scripts/verify-amd64-examples.sh -j 1 "$f" 2>&1)" || broken+=("amd64:$f")
   grep -E "Proof\.(correctness|panics)" <<<"$out" | sed "s/^/amd64  /"'
 done
+# the kernel examples (examples/sys, scripts/verify-sys-examples.sh), both ISAs
+sys=()
+for isa in arm64 amd64; do for n in WriteOut NowNano Pid MustNonNeg; do sys+=("$isa/$n"); done; done
+for t in "${sys[@]}"; do
+  par_run 'JANUS_EXAMPLES_SUMMARY="$tmp/sys-${t/\//-}" scripts/verify-sys-examples.sh "$t" >/dev/null 2>&1 || broken+=("sys:$t")
+  cat "$tmp/sys-${t/\//-}" 2>/dev/null | sed "s/^/sys    /"'
+done
 par_wait
 rm -rf "$tmp"
-echo "total: ${#arm64[@]} arm64 items, ${#amd64[@]} amd64 functions, $(( $(date +%s) - wall ))s wall (-j $PAR_JOBS)"
+echo "total: ${#arm64[@]} arm64 items, ${#amd64[@]} amd64 functions, ${#sys[@]} kernel examples, $(( $(date +%s) - wall ))s wall (-j $PAR_JOBS)"
 if [ ${#broken[@]} -gt 0 ]; then echo "FAILED: ${broken[*]}"; exit 1; fi
 echo "all ok"
