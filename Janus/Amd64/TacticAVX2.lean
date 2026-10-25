@@ -138,6 +138,27 @@ theorem sse_preserves_upper (s : State) (next : W64) (pc : Nat) (ea : Addr → N
   cases i <;> simp only [ExecSSE.exec, ExecSSE.doneX, ExecSSE.doneFP] at h <;>
     (repeat' split at h) <;> (try cases h) <;> rfl
 
+/-- `exec` of an AVX instruction is `ExecAVX.exec`. -/
+theorem exec_avx (i : AvxI XLoc Loc Addr) (len : Nat) (s : State) :
+    exec (.avx i) len s = ExecAVX.exec s (BitVec.ofNat 64 ((s.rip.toNat + len) % 2 ^ 64)) s.rip.toNat
+      (fun a => (ea s (BitVec.ofNat 64 ((s.rip.toNat + len) % 2 ^ 64)) a).toNat) i := rfl
+
+/-- `exec` of a WP-D instruction is `ExecSSE.exec`. -/
+theorem exec_sse (i : SseI XLoc Loc Addr) (len : Nat) (s : State) :
+    exec (.sse i) len s = ExecSSE.exec s (BitVec.ofNat 64 ((s.rip.toNat + len) % 2 ^ 64)) s.rip.toNat
+      (fun a => (ea s (BitVec.ofNat 64 ((s.rip.toNat + len) % 2 ^ 64)) a).toNat) i := rfl
+
+/-- **The VEX.128 zero-upper rule**, for a decoded AVX instruction: every vector register it
+writes at 128 bits has bits 255:128 zero afterwards. -/
+theorem exec_vex128_zero_upper (i : AvxI XLoc Loc Addr) (len : Nat) (s s' : State)
+    (h : exec (.avx i) len s = .ok s') : ∀ d, (d, 128) ∈ i.vdsts → s'.ymmHi d = 0 :=
+  vex128_zero_upper s _ _ _ i s' (by rw [exec_avx] at h; exact h)
+
+/-- **Legacy SSE preserves the upper halves**, for a decoded WP-D instruction. -/
+theorem exec_sse_preserves_upper (i : SseI XLoc Loc Addr) (len : Nat) (s s' : State)
+    (h : exec (.sse i) len s = .ok s') : s'.ymmHi = s.ymmHi :=
+  sse_preserves_upper s _ _ _ i s' (by rw [exec_sse] at h; exact h)
+
 /-! ## Elements of 256-bit results -/
 
 /-- Element `i` of the `j`-th `e·k`-bit element is element `k·j + i`. -/

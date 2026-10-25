@@ -16,3 +16,4 @@ import JanusTests.Float
 import JanusTests.Dynamic
 import JanusTests.SSE
 import JanusTests.Crypto
+import JanusTests.AVX

@@ -75,10 +75,11 @@ example : decode [0xc5, 0xf8, 0x77] = some (.vzeroupper, 3) := by decide
 -- vmovdqu ymm4, [r10] (3-byte VEX with VEX.B)
 example : decode [0xc4, 0xc1, 0x7e, 0x7f, 0x22] =
     some (.vmov false 256 (.mem ⟨some 10, none, 0, 0, false, false⟩) (.xmm 4), 5) := by decide
--- VEX after a prefix, vvvv ≠ 1111 on a two-operand form, and VZEROALL are rejected
+-- VEX after a prefix and vvvv ≠ 1111 on a two-operand form are rejected; VZEROALL (VEX.L1) is
+-- WP-F's
 example : decode [0x66, 0xc5, 0xfe, 0x6f, 0x06] = none := by decide
 example : decode [0xc5, 0xf6, 0x6f, 0x06] = none := by decide
-example : decode [0xc5, 0xfc, 0x77] = none := by decide
+example : decode [0xc5, 0xfc, 0x77] = some (.avx .vzeroall, 3) := by decide
 example : decode [0x67, 0x8b, 0x00] = none := by decide
 -- REX followed by a legacy prefix (the REX is ignored by hardware)
 example : decode [0x48, 0x66, 0x01, 0xd8] = none := by decide
@@ -313,14 +314,14 @@ example : decode [0xc4, 0xe2, 0x69, 0xb9, 0xc1] = some (.vfmas 32 231 false fals
 -- pshufb xmm0, xmm15 ; psignb xmm0, xmm0 (the Swiss-table group match)
 example : decode [0x66, 0x41, 0x0f, 0x38, 0x00, 0xc7] = some (.sseOp .pshufb 0 (.xmm 15), 6) := by decide
 example : decode [0x66, 0x0f, 0x38, 0x08, 0xc0] = some (.sseOp .psignb 0 (.xmm 0), 5) := by decide
--- rejected: SHLX with VEX.L1 (#UD), MOVBE register form (#UD), MMX PSHUFB,
--- VFMADD231PD (packed), RORX with VEX.vvvv ≠ 1111
+-- rejected: SHLX with VEX.L1 (#UD), MOVBE register form (#UD), MMX PSHUFB, RORX with
+-- VEX.vvvv ≠ 1111; VFMADD231PD (packed) is WP-F's
 example : decode [0xc4, 0xe2, 0xe5, 0xf7, 0xf6] = none := by decide
 example : decode [0x48, 0x0f, 0x38, 0xf1, 0xc2] = none := by decide
 example : decode [0x0f, 0x38, 0x00, 0xc1] = none := by decide
 -- CRC32 (SSE4.2, WP-D)
 example : decode [0xf2, 0x0f, 0x38, 0xf0, 0xc1] = some (.sse (.crc32 8 0 (.reg 1)), 5) := by decide
-example : decode [0xc4, 0xe2, 0xe9, 0xb8, 0xc1] = none := by decide
+example : decode [0xc4, 0xe2, 0xe9, 0xb8, 0xc1] = some (.avx (.fma 231 false false 0 64 128 0 2 (.xmm 1)), 5) := by decide
 example : decode [0xc4, 0xe3, 0xf3, 0xf0, 0xc1, 0x05] = none := by decide
 
 end JanusTests.Amd64
