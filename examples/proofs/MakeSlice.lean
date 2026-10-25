@@ -23,20 +23,30 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 
 namespace Proof
 
+/-- The address of `uint64`'s type descriptor, the element type MakeSlice passes to
+`runtime.makeslice` (the `ADRP` + `ADD` pair at `MakeSlice+0x24`), recomputed from the extracted
+words. -/
+def u64Type : Nat :=
+  adrpLdTarget (Extracted.entry + 0x24) (segWord Extracted.program "example.com/basic.MakeSlice" 9)
+    (segWord Extracted.program "example.com/basic.MakeSlice" 10) 0
+
 set_option maxRecDepth 20000 in
-theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (n : BitVec 64)
+theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (n : BitVec 64)
     (hmk : MakesliceContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.makeslice") rt 4096) :
+      (Extracted.program.contractAddr "runtime.makeslice") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [n]
       (fun s => GuardOK s 0 ∧ StackOK s 4144 16 ∧ Extracted.program.DataLoaded s.mem ∧
-        Outside (s.sp.toNat - 4144) 4160 rt ∧ n.toNat ≤ 2 ^ 45)
+        Outside (s.sp.toNat - 4144) 4160 rt ∧ n.toNat ≤ 2 ^ 45 ∧
+        H [u64Type, n.toNat, n.toNat] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem))
       (fun s s' => s'.regs 1 = n ∧ s'.regs 2 = n ∧
         (0 < n.toNat → InRanges (s'.regs 0).toNat (8 * n.toNat) rt ∧ (s'.regs 0).toNat % 8 = 0 ∧
           s'.mem.accessible (s'.regs 0).toNat (8 * n.toNat) true = true ∧
           ∀ i, i < n.toNat → s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
         MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 16)])) := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout, hn⟩
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout, hn, hH⟩
   janus_intro hs
+  janus_eval_nat h_ut : u64Type
+  rw [h_ut] at hH
   janus_data hd [hw]
   by_cases h0 : n.toNat = 0
   · janus_run calls [hmk]

@@ -22,19 +22,27 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts
 
 namespace Proof
 
+/-- The address of `Pair`'s type descriptor, the argument NewPair passes to `runtime.newobject`
+(the `LEA` at `NewPair+0x18` loads it): the extraction's only data object. -/
+def pairType : Nat := dataBase Extracted.program 0
+
 set_option maxRecDepth 20000 in
-theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (a b : BitVec 64)
+theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady)
+    (a b : BitVec 64)
     (hnew : NewobjectContract64 (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.newobject") rt 4096) :
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b]
       (fun s => StackGuardOK s 0 ∧ StackWritable s 4128 24 ∧ Extracted.program.DataLoaded s.mem ∧
-        Outside ((s.regs 4).toNat - 4128) 4152 rt ∧ (s.regs 4).toNat % 8 = 0)
+        Outside ((s.regs 4).toNat - 4128) 4152 rt ∧ (s.regs 4).toNat % 8 = 0 ∧
+        H [pairType] (s.regs 14).toNat ((s.regs 4).toNat - 32) (rtView rt s.mem))
       (fun s s' => ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
         s'.mem.accessible ptr 16 true = true ∧
         s'.mem.readLE ptr 8 = a.toNat ∧ s'.mem.readLE (ptr + 8) 8 = b.toNat ∧
         MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4128, (s.regs 4).toNat + 24)])) := by
-  intro ret hret s hs ⟨hg, ⟨hb, ha, hw⟩, hd, hout, hal⟩
+  intro ret hret s hs ⟨hg, ⟨hb, ha, hw⟩, hd, hout, hal, hH⟩
   janus64_intro hs
+  janus_eval_nat h_pt : pairType
+  rw [h_pt] at hH
   have hgl := hg.load
   have hgb := hg.below
   have hnw2 := hg.noWrap
