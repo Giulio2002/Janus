@@ -26,8 +26,9 @@ instance makes it compute another is rejected. See CRITICAL-1 in
 These are trusted, not proved.
 
 1. **The Lean AArch64 model** (`Janus/Arm64/Decode.lean`, `Exec.lean`, `Vector.lean`,
-   `State.lean`, and the crypto/CRC32/permute files `InstrCrypto.lean`, `DecodeCrypto.lean`,
-   `ExecCrypto.lean`, `Crypto.lean`): the decoder, the instruction semantics and the checked memory. They are meant to agree with the
+   `State.lean`, for Advanced SIMD beyond the original subset `NeonInstr.lean`,
+   `DecodeNeon.lean`, `Neon.lean`, `NeonFP.lean`, `ExecNeon.lean`, and the crypto/CRC32/permute
+   files `InstrCrypto.lean`, `DecodeCrypto.lean`, `ExecCrypto.lean`, `Crypto.lean`): the decoder, the instruction semantics and the checked memory. They are meant to agree with the
    Arm Architecture Reference Manual (ARM ARM) for the supported user-mode A64 subset. That
    agreement is differentially tested against qemu (`janus-oracle`), not proved. If the model
    is wrong about an instruction the program uses, a theorem can be true of the model and false
@@ -130,13 +131,67 @@ by default; `--replay-fresh` additionally runs `leanchecker --fresh` on the theo
 which re-adds every constant of its environment, core included, to an empty environment
 (minutes: about 140 s for a closure that imports `Lean`). Passing replays are cached in the
 trusted cache (`v1/replay`, never writable by a sandboxed process) under a key covering the
-toolchain's identity (see "Toolchain identity" below), the module's `.olean` bytes (with its `.server`/`.private` parts) and,
-recursively, the keys of its imports, so an unchanged framework module is not replayed again
-while any byte change to it or to anything below it is. The cache is off with `--fresh` and
-without a sandbox. Before replaying, every module of the closure must resolve from its home:
-core modules from the toolchain library, `Janus.*` modules from the trusted framework build and
-only modules the framework has a source for, `Extracted`/`JanusTrusted` from the trusted
-directory.
+toolchain (its version, the `lean` and `leanchecker` binaries and its library), the module's
+`.olean` bytes (with its `.server`/`.private` parts) and, recursively, the keys of its imports,
+so an unchanged framework module is not replayed again while any byte change to it or to
+anything below it is. Every marker carries an HMAC-SHA256 of its kind and key under the cache's
+hidden key (the result cache's key, below), so a marker janus did not write (planted, copied from
+another cache, or written before markers were authenticated) is a miss and the replay runs. The
+cache is off with `--fresh` and without a sandbox (except that the framework replay verdict
+below is read, never written, without a sandbox). Before replaying, every module of the closure
+must resolve from its home: core modules from the toolchain library, `Janus.*` modules from the
+trusted framework build and only modules the framework has a source for, `Extracted`/`JanusTrusted`
+from the trusted directory.
+
+**The framework replay verdict** (`cmd/janus/replaymark.go`). The kernel replay of the framework
+(`leanchecker Janus`, every `Janus.*` module of the trusted build, each against its imports as
+loaded from their `.olean` files) has one outcome per framework build: it depends only on the
+toolchain and on the bytes of the framework's module-data files. So janus records it once, as a
+verdict in `v1/replay/framework/<key>`, and reuses it:
+
+* **Key.** SHA-256 over the toolchain's identity (`cacheID`: version, the `lean` and
+  `leanchecker` binaries, the toolchain library) and the framework pins: the SHA-256 of every
+  module-data file (`.olean`, `.olean.server`, `.olean.private`, `.ir`) of every framework module,
+  taken right after the trusted build and re-checked after every later step. Editing any
+  framework file changes the rebuilt module's bytes, hence the pins and the key; adding, removing
+  or renaming a module changes the pin set; another toolchain changes `cacheID`. A verdict can
+  therefore never be reused for other bytes (no stale verdict after a framework edit), and a
+  verdict for an identical rebuild (same bytes) is correctly the same verdict.
+* **Authenticity.** The verdict file holds an HMAC-SHA256 of `framework` and the key under the
+  cache's hidden key (`v1/result/.key`, mode 0600 in a 0700 directory, the round-8 checks of
+  `checkCacheRoot`/`readPrivateFile` apply; sandboxed processes see an empty tmpfs there). It is
+  read with `O_NOFOLLOW` and must be a regular file of this user. A planted file, a verdict copied
+  from another cache (another key), a verdict renamed to another framework's key, a module marker
+  or other marker kind presented as a verdict, and a truncated or altered MAC are all misses
+  (`TestFrameworkVerdictAuthentic`). Only janus writes it, outside the sandbox, after
+  `leanchecker Janus` passed in a sandboxed, non-`--fresh` verification.
+* **When it is read.** Once per verification, right after the framework build is pinned and
+  before any untrusted step (the trusted compile, the proof compile, a consumer's Lake build) runs.
+  Without a sandbox it is read too (the unconfined proof runs only after the decision, and the
+  pins it covers are checked after every step as before), but never written; `--fresh` neither
+  reads nor writes it. With a verdict, the framework modules of the theorem's closure count as
+  replayed (reported as reused from the replay cache). Which modules qualify is decided by the
+  same closure check as before: only `Janus.*` modules that the framework pins cover and that
+  resolve from the pinned framework build. `Extracted`, `JanusTrusted`, the proof's own modules,
+  consumer and dependency modules are never covered by it: they are replayed as before (or reused
+  only through their own per-module markers, keyed by their own bytes).
+* **Without a verdict** the framework is replayed alongside the other stages, as before. Concurrent
+  verifications of a framework build that has no verdict yet serialise on a replay lock
+  (`v1/replay/locks`): the first replays and records the verdict, the others then find it and do
+  not replay (before, each started its own `leanchecker Janus`). A failing replay records nothing,
+  and the regular replay then runs and reports leanchecker's error.
+* **Eviction.** A verification that uses the verdict holds its use lock (`<key>.use`) shared until
+  it ends; the collector removes a verdict only under that lock, taken exclusively without
+  waiting. A removed verdict only makes the next verification replay the framework again.
+
+What a verdict cannot do: make a module count as replayed whose bytes were not replayed (its key
+covers every framework module-data file, and the pins are re-checked after the replay), outlive a
+change of the framework or the toolchain, or cover a non-framework module. Its trust is the same
+as that of the per-module markers it subsumes (the trusted cache is trusted), now additionally
+authenticated against anything that can create files in the cache but cannot read the key.
+`TestR1ForgedFrameworkLemma` and the audit row `R1b_forged_lemma` (a framework `.olean` carrying a
+lemma the kernel never checked) are still rejected by the kernel replay: the forged bytes have
+other pins, hence no verdict.
 
 **What the replay does not cover, and what does.** A replay checks that a module is
 *well-typed*, not that it is the module its source describes: an `.olean` compiled from a
@@ -258,8 +313,9 @@ not accept with an empty cache:
   is used only if its ready stamp, sources and module pins all match (otherwise it is rebuilt from
   the embedded sources); consumer workspaces are untrusted by design (their modules are rebuilt,
   pinned and kernel-replayed; the framework copy in them is pinned against the trusted build); a
-  replay marker only skips a replay whose module bytes and imports its name hashes, so deleting
-  one only makes the replay run again. An evicted entry is rebuilt from the same inputs, and the
+  replay marker (and the framework replay verdict) only skips a replay whose module bytes and
+  imports its name hashes, and only if its HMAC verifies, so deleting one only makes the replay
+  run again; a verdict in use is held by its use lock and not collected. An evicted entry is rebuilt from the same inputs, and the
   rebuilt entry is equivalent: `TestCacheGCConcurrentVerify` empties the cache during and after
   verifications (single files and a consumer package) and gets the same theorem, statement,
   axioms and replay status.
@@ -563,8 +619,48 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   Accepting them assumes FEAT_AES; Go only runs its AES hash after testing `cpu.ARM64.HasAES`
   (`runtime.useAeshash`), so a proof through it assumes that flag, as for LSE.
 
-Not modelled, and rejected: Advanced SIMD (vector) floating point, saturating, rounding and
-widening/narrowing arithmetic other than the listed ones (and `PMULL`, below), SM3/SM4, SVE and SME. An Advanced SIMD write sets the whole
+* **The rest of Advanced SIMD** (`Janus.Arm64.NeonInstr`, decoded by `decodeNeon` for the
+  words the classes above reject, executed by `execNeon`; the lane operations in
+  `Janus/Arm64/Neon.lean` and `NeonFP.lean`, transcribed statement by statement from the
+  `decode` and `Operation` ASL of sail-arm's `instrs64.sail`, with element-size generic helpers
+  so one definition covers every arrangement and the scalar forms):
+  * every integer opcode of three same (halving, saturating, rounding and saturating shifts by
+    register, `SABD`/`UABD`/`SABA`/`UABA`, `MLA`/`MLS`, `MUL`/`PMUL`, `SQDMULH`/`SQRDMULH`), three
+    different (`SADDL`…`USUBW`, `ADDHN`/`RADDHN`/`SUBHN`/`RSUBHN`, `SABAL`/`SABDL`, `SMLAL`/`UMLAL`/
+    `SMLSL`/`UMLSL`, `SMULL`/`UMULL`, `SQDMLAL`/`SQDMLSL`/`SQDMULL`), two-register miscellaneous
+    (`SADDLP`/`UADDLP`/`SADALP`/`UADALP`, `SUQADD`/`USQADD`, `CLS`/`CLZ`, `SQABS`/`SQNEG`,
+    `SQXTN`/`UQXTN`/`SQXTUN`, `SHLL`), shift by immediate (`SRSHR`/`URSHR`, `SRSRA`/`URSRA`,
+    `SQSHLU`, `SQSHL`/`UQSHL`, `RSHRN`, `SQ(R)SHR(U)N`/`UQ(R)SHRN`), by element (`MUL`, `MLA`,
+    `MLS`, the long and the saturating doubling forms), and their scalar forms; scalar `ADDP`
+    (the permutes `UZP1/2`, `TRN1/2`, `ZIP1/2` and scalar `DUP` are `CryptoInstr.permute` /
+    `dupScalar`, above);
+  * single- and double-precision floating point on every lane, through the scalar ASL library
+    (`FP.fpAdd`, `FP.fpMulAdd`, ... with the same `FPCR`, including `FZ`, `DN`, `FIZ` and `AH`),
+    plus `FPCompareEQ/GE/GT`, `FPMulX`, `FPRecipStepFused`/`FPRSqrtStepFused`, the estimates
+    `FPRecipEstimate`/`FPRSqrtEstimate`/`FPRecpX`/`URECPE`/`URSQRTE`, round-to-odd `FCVTXN`,
+    `FPToFixed`/`FixedToFP` with fraction bits, and the halving tree of `Reduce` for `FMAXV`,
+    `FMINV`, `FMAXNMV`, `FMINNMV` and the scalar pairwise forms: `FADD`…`FDIV`, `FMLA`/`FMLS`
+    (vector and by element), `FMULX`, `FABD`, `FMAX(NM)(P)`/`FMIN(NM)(P)`, `FADDP`, the compares
+    (also against zero and absolute), `FABS`/`FNEG`/`FSQRT`, `FRINT*`, `FCVT{N,P,M,Z,A}{S,U}`,
+    `SCVTF`/`UCVTF` (also with fraction bits, vector and scalar, and the general-register
+    fixed-point forms), `FCVTL`/`FCVTN` between single and double, `FRECPS`/`FRSQRTS`. A lane
+    exception whose trap is enabled faults (`fpTrapped`); otherwise the lanes' exceptions are ORed
+    into `FPSR`. The scalar forms merge into the upper part of the destination under
+    `FPCR.NEP`, with the source register each ASL `execute` names;
+  * `LD2`–`LD4`/`ST2`–`ST4` (multiple structures, every arrangement and post-index form),
+    checked as one access of the whole interleaved block (never more permissive than the ASL's
+    element accesses), and `LDNP`/`STNP` of S/D/Q registers (`LDP`/`STP` without writeback).
+
+  Saturation sets `FPSR.QC` (bit 27). Two corners are IMPLEMENTATION DEFINED or differ between
+  the references, so the model faults (`trapped`) instead of choosing: the single-precision
+  `FRECPE`/`FRSQRTE` under `FPCR.AH = 1` (FEAT_RPRES changes their precision), and the vector
+  `FABS`/`FNEG` under `FPCR.AH = 1` with a NaN lane (the ASL, and Sail, leave the NaN unchanged;
+  qemu 10.2.1 changes its sign bit).
+
+Not modelled, and rejected: half precision (FEAT_FP16, and the `FCVTL`/`FCVTN` forms to and from
+half precision), BFloat16, dot products (FEAT_DotProd, FEAT_I8MM), `SQRDMLAH`/`SQRDMLSH`
+(FEAT_RDM), `FMLAL`/`FMLSL` (FEAT_FHM), `FCMLA`/`FCADD`, `FRINT32*`/`FRINT64*`, SM3/SM4,
+SVE and SME. An Advanced SIMD write sets the whole
 128-bit register (`V[d, n] = x` zero-extends); on a CPU with SVE the hardware also zeroes the
 upper bits of `Z[d]`, which are not part of the model and not observable by the accepted
 instructions.
@@ -797,6 +893,37 @@ no concurrent GC, no preemption):
   and a state satisfying the precondition), so no theorem using them is vacuous by an
   unsatisfiable contract; each interface example also proves its whole hypothesis set jointly
   satisfiable for its binary and its conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). Boxes are not known to keep their value across later runtime calls.
+* **Equality, hashing and typed memory** (`Janus/Contracts/Mem.lean`, `Hash.lean`, `MapStr.lean`
+  and their amd64 files; docs/RUNTIME-CONTRACTS.md, "Equality, hashing and typed memory"). The
+  contracts of `memequal`, `memequal0/8/16/32/64/128`, `memequal_varlen`, `f32equal`, `f64equal`,
+  `c64equal`, `c128equal`, `strequal`, `interequal`, `nilinterequal`, `memhash`, `memhash0/8/16/32/
+  64/128`, `memhash_varlen`, `strhash`, `f32hash`, `f64hash`, `c64hash`, `c128hash`, `interhash`,
+  `nilinterhash`, `typehash`, `rand`, `typedmemmove`, `typedmemclr`, `memclrHasPointers`, their
+  callees `memmove`, `memclrNoHeapPointers`, `bulkBarrierPreWrite`, and `mapaccess2_faststr`.
+  Trusted, as claims about the Go 1.26 runtime: (1) **the hash is a model**: a theorem quantifies
+  over every `H : HashModel`, whose byte hashes `mem`/`mem32`/`mem64` are uninterpreted functions
+  of the seed and the bytes; the contracts claim the runtime's `memhash` & co. compute *some*
+  such function for the process (true for both the AES and the `wyhash` paths: they depend only
+  on the seed, the bytes and the per-process key, which `H.Env` keeps fixed), that `f32hash`/
+  `f64hash` map `±0` to `c1·(c0 ^ h)` and a NaN to `c1·(c0 ^ h ^ rand())`, and that `typehash` of
+  a `TFlagRegularMemory` type is the byte hash (`HashModel.Laws.regular`); everything a map needs
+  of the hash is then proved (`Janus/Contracts/HashLaws.lean`: `feq_eq`, equal floats have equal
+  encodings unless both are zeros; `fhashIs_of_feq`, `fhashIs_nan`, `strhash_of_strEq`);
+  (2) **the write barrier is off** for the typed-memory contracts (`WriteBarrierOff`, the flag word
+  at `wb` is 0; with it on the barrier's buffer changes too, which these contracts do not state);
+  (3) the inputs are readable in the model's byte-exact memory: the amd64 `memeqbody` reads up to
+  7 bytes around a short input (within its page), so on amd64 `memequal` and `memequal_varlen` stay assumptions,
+  while on arm64 its machine code is proved to meet the contract; (4) a `map[string]V` is keyed by
+  the strings' contents (`MapStr.Access2Str`), which the hash and equality laws justify. The code
+  is the runtime's: the extractor pins every one of these functions except `typehash`, whose jump
+  table makes its normalized code program-dependent (`runtimeContractStubs`, `runtimeFuncDir` for
+  the ones `internal/bytealg` and `internal/runtime/maps` define). Every contract is satisfiable
+  (`Janus/Contracts/MemSat.lean`, `HashSat.lean`, `MapStr.lean` and the amd64 files: models
+  `M0`, `H0`, `R0`, `MS0`, code and a state), and every example proves its hypotheses jointly
+  satisfiable and its conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). **Proved from
+  the machine code rather than assumed** (`examples/proofs/Alg*.lean`, `Mbar*.lean`,
+  `examples/proofs-amd64/Alg*/`, `Mbar*/`): the runtime's own equality, hash and typed-memory
+  functions meet their contracts given the contracts of their callees.
 * **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
   `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
   `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)

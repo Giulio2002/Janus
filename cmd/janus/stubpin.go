@@ -372,6 +372,24 @@ func goRootFile(file string) (rel string, ok bool) {
 // pinPackage is the package directory of a pinned file ("runtime", "internal/abi").
 func pinPackage(file string) string { return path.Dir(file) }
 
+// runtimeFuncDir lists the runtime functions whose code lives in another package's directory:
+// internal/bytealg defines runtime·memequal and runtime·memequal_varlen in its assembly
+// (equal_arm64.s, equal_amd64.s), and internal/runtime/maps the map entry points it links into
+// runtime by //go:linkname (runtime_faststr.go). Their pinned file must be in that directory.
+var runtimeFuncDir = map[string]string{
+	"runtime.memequal": "internal/bytealg", "runtime.memequal_varlen": "internal/bytealg",
+	"runtime.mapaccess2_faststr": "internal/runtime/maps",
+}
+
+// pinDir is the directory a pinned function's file must be in: its package's (pkg), or the one
+// runtimeFuncDir names.
+func pinDir(name, pkg string) string {
+	if d, ok := runtimeFuncDir[strings.TrimSuffix(name, ".abi0")]; ok {
+		return d
+	}
+	return pkg
+}
+
 // pclnFile returns the pclntab's function name and the file at the entry of f.
 func (b *Binary) pclnFile(f Func) (name, file string, err error) {
 	tab, err := b.pclnTable()
@@ -443,7 +461,7 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	var files []string
 	for _, p := range pins {
 		files = append(files, p.File)
-		if rel == p.File && pinPackage(p.File) == pkg {
+		if rel == p.File && pinPackage(p.File) == pinDir(f.Name, pkg) {
 			fileOK = true
 			codeOK = codeOK || p.Hash == h
 		}
@@ -486,7 +504,7 @@ func (b *Binary) checkContractPin(g Func) error {
 	}
 	if err := b.checkStubPin(g, map[uint64]bool{}); err != nil {
 		return &diag{
-			Msg: fmt.Sprintf("--contract names %s at 0x%x, but that function is not the Go runtime's %s: %v. The interface contracts (Janus/Contracts/Iface.lean) state what the runtime's function does, so Janus leaves out only the runtime's code (pinned like a stub, docs/SOUNDNESS.md)",
+			Msg: fmt.Sprintf("--contract names %s at 0x%x, but that function is not the Go runtime's %s: %v. The framework's runtime contracts (Janus/Contracts/Iface.lean, Mem.lean, Hash.lean) state what the runtime's function does, so Janus leaves out only the runtime's code (pinned like a stub, docs/SOUNDNESS.md)",
 				g.Name, g.Addr, g.Name, err),
 			Stage: "code extraction",
 			Next:  "If the binary was built by a Go toolchain Janus does not pin yet (" + stubPinToolchains + "), add it to scripts/gen-stubpins.sh and regenerate cmd/janus/stubpins_gen.go; otherwise remove the function that reuses a runtime function's name.",
@@ -556,7 +574,7 @@ func cmdStubpins(args []string, stdout, stderr io.Writer) error {
 				return nil, fmt.Errorf("%s: %s: the pclntab names it %s", p, f.Name, pname)
 			}
 			rel, ok := goRootFile(file)
-			if !ok || pinPackage(rel) != stubPackage(pname, rel) {
+			if !ok || pinPackage(rel) != pinDir(f.Name, stubPackage(pname, rel)) {
 				return nil, fmt.Errorf("%s: %s: the pclntab file %q is not in its package's directory", p, f.Name, file)
 			}
 			fmt.Fprintf(stdout, "%s %s %s %s %s\n", tag, b.GOARCH, f.Name, rel, stubHash(canon))

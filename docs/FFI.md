@@ -280,6 +280,8 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 | `GoPMix` | Go `PMix` → cgo → `k_pmix` (structs by value, mixed struct result) → Go | ✓ | ✓ |
 | `GoBig` | Go `Big` → cgo → `k_big` (indirect result; the wrapper's stack protector) → Go returns the four words | ✓ | ✓ |
 | `GoVSum8` | Go `VSum8(a, …, h)` → cgo → `k_vsum8` → the variadic `k_vsum(8, a, …, h)` → Go returns the sum; the variadic call site (and `AL = 0`) is checked against the classification | ✓ | ✓ |
+| `CCount` | `c_count(p, n, c)` (package `example.com/cgo/neon`, auto-vectorised by gcc `-O2`: `CMEQ`/`ZIP`/`UADDW`/`ADDP` loop + scalar tail) returns the number of `i < n` with `p[i] = c`, memory unchanged | ✓ | – |
+| `GoCount` | Go `neon.Count(xs, c)` → cgo → the NEON loop → Go returns the count, under `CgoCall` only | ✓ | – |
 
 The Go-side preconditions are explicit. They include the stack-growth checks of the Go function
 and of its `_Cfunc_` wrapper, the stack window, and the two statically initialised cgo globals

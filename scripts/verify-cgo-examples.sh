@@ -4,13 +4,18 @@
 # examples/proofs-cgo/<isa>/<Name>.lean against it with `janus verify` (kernel check, axiom audit,
 # leanchecker replay).
 #
-#   C functions (CEnsures, the C calling convention):   CAdd CSum CStore
+#   C functions (CEnsures, the C calling convention):   CAdd CSum CStore, CCount (arm64: the
+#                                                       gcc -O2 auto-vectorised byte count)
 #   C functions under the classified C ABI (CEnsuresR):  KStack10 KFP KPMix KBig KVSum
 #   Go -> C -> Go, end to end (EnsuresC under the trusted
-#   cgocall contract Janus.FFI.CgoCall):                 GoAdd GoSum
+#   cgocall contract Janus.FFI.CgoCall):                 GoAdd GoSum, GoCount (arm64)
 #                                                        GoStack10 GoFP GoPMix GoBig GoVSum8
 #   The C environment (docs/FFI.md sections 2-4; binary artifacts/examples-cenv-<isa>):
-#     EBump (a writable global through the GOT; amd64: the --no-relax build)
+#     EBump (a writable global through the GOT; amd64: the --no-relax build), ETLS (a __thread
+#     variable, general dynamic as relaxed by the linker), ETLSIE (initial exec), EAtomic (an atomic
+#     RMW: LSE / LOCK XADD), ELibc (strlen, malloc, __memcpy_chk, memcpy, free through the PLT),
+#     ESetJmp (setjmp/longjmp), EArgMin (a call through a function pointer, CFuncIs), ECallGo
+#     (C -> an //export Go function, end to end under CgoCallback), EAlloca (alloca, stack probes)
 #   amd64 only, C compiled by clang -O2 (SSE2-vectorised,
 #   artifacts/examples-cgo-clang-amd64):                 CSum32 GoSum32
 #
@@ -23,26 +28,30 @@ cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 
 declare -A sym=(
-  [CAdd]=c_add [CSum]=c_sum [CStore]=c_store
+  [CAdd]=c_add [CSum]=c_sum [CStore]=c_store [CCount]=c_count [GoCount]=example.com/cgo/neon.Count
   [GoAdd]=example.com/cgo.Add [GoSum]=example.com/cgo.Sum
   [KStack10]=k_stack10 [KFP]=k_fp [KPMix]=k_pmix [KBig]=k_big [KVSum]=k_vsum
   [GoStack10]=example.com/cgo/cabi.Stack10 [GoFP]=example.com/cgo/cabi.FP
   [GoPMix]=example.com/cgo/cabi.PMix [GoBig]=example.com/cgo/cabi.Big
   [GoVSum8]=example.com/cgo/cabi.VSum8
-  [EBump]=e_bump
+  [EBump]=e_bump [ETLS]=e_tls_add [ETLSIE]=e_tls_ie_add [EAtomic]=e_atomic_inc [ELibc]=e_libc
+  [ESetJmp]=e_setjmp [EArgMin]=e_argmin_i64 [ECallGo]=e_callgo [EAlloca]=e_alloca
   [CSum32]=c_sum32 [GoSum32]=example.com/cgo/vec.Sum32
 )
 # binaries other than artifacts/examples-cgo-<isa> (key isa/Name, or Name for both ISAs)
 declare -A bin=(
   [EBump]=examples-cenv [amd64/EBump]=examples-cenv-norelax
+  [ETLS]=examples-cenv [ETLSIE]=examples-cenv [EAtomic]=examples-cenv [ELibc]=examples-cenv
+  [ESetJmp]=examples-cenv [EArgMin]=examples-cenv [ECallGo]=examples-cenv [EAlloca]=examples-cenv
   [CSum32]=examples-cgo-clang [GoSum32]=examples-cgo-clang
 )
 all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8
-  EBump)
+  EBump ETLS ETLSIE EAtomic ELibc ESetJmp EArgMin ECallGo EAlloca)
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
     for n in "${all[@]}"; do names+=("$isa/$n"); done
+    [ "$isa" = arm64 ] && names+=("$isa/CCount" "$isa/GoCount")
   done
   names+=(amd64/CSum32 amd64/GoSum32)
 fi

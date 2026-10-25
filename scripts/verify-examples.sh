@@ -24,14 +24,18 @@ par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
 
 all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimbs CopyWords SumSquares
-     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte A64Crc32
+     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte A64Crc32 A64CountByte
      HashWith HashTwice MapSum DeferAdd AddF64 Dot3 F64ToU64 Abs
      NewPair MakeSlice AppendOne SetNext MallocFast
      Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
-     Box AsHasher Classify Equal
      Triangle GotoSum Find2D RowsWith Log2 TotalMeters TotalFeet Fact SumBelow ReverseArray DivMod10
      SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
-     Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder)
+     Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
+     Box AsHasher Classify Equal
+     Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey)
+. scripts/example-contracts.sh
+# the runtime's equality, hashing and typed-memory functions verified from their code
+all+=($runtime_examples $runtime_examples_arm64_only)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
@@ -50,6 +54,7 @@ extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
 
 . scripts/example-contracts.sh
+. scripts/lib/theorems.sh
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
@@ -70,29 +75,34 @@ verify_one() {
   out="artifacts/$n"
   mapfile -t extract_args < <(scripts/example-targets.sh "$n")
   bin/janus extract artifacts/examples-arm64 "$(example_symbol "$n")" "$out" "${extract_args[@]}" >/dev/null
+  # The theorems of the proof file: correctness, further theorems (F64ToU64's `exact` and
+  # `saturation`, ...) and the non-vacuity witnesses (Proof.Witness.nonvacuous / .returns: the
+  # theorem's hypotheses hold together for a model of the runtime, and its conclusion is
+  # reached); up to two verified at once (scripts/lib/theorems.sh).
+  local -a thms=(Proof.correctness)
+  local thm i st
+  for thm in $(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
+  if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
+  st="$(mktemp -d)"
   start=$(date +%s.%N)
-  if bin/janus verify "$out" --proof "examples/proofs/$n.lean" ${extra[@]+"${extra[@]}"} > "$out/verify.log" 2>&1; then
-    t=$(echo "$(date +%s.%N) - $start" | bc)
+  verify_theorems "$out" "examples/proofs/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"}
+  t=$(echo "$(date +%s.%N) - $start" | bc)
+  cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
+  if [ "$(cat "$st/0.rc")" = 0 ]; then
     printf '%-9s ok  %6.1fs\n' "$n" "$t" | tee "$lines/$n"
-    # further theorems of the same proof file (F64ToU64's `exact` and `saturation`, ...)
-    local thm
-    # and the non-vacuity witnesses (Proof.Witness.nonvacuous / .returns: the theorem's
-    # hypotheses hold together for a model of the runtime, and its conclusion is reached)
-    local extra_thms
-    extra_thms=$(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}' || true)
-    if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then extra_thms="$extra_thms Witness.nonvacuous Witness.returns"; fi
-    for thm in $extra_thms; do
-      if bin/janus verify "$out" --proof "examples/proofs/$n.lean" --theorem "Proof.$thm" \
-          ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
-        printf '%-9s ok  (Proof.%s)\n' "$n" "$thm" | tee -a "$lines/$n"
+    for ((i = 1; i < ${#thms[@]}; i++)); do
+      if [ "$(cat "$st/$i.rc")" = 0 ]; then
+        printf '%-9s ok  (%s)\n' "$n" "${thms[$i]}" | tee -a "$lines/$n"
       else
-        printf '%-9s FAILED Proof.%s (see %s/verify.log)\n' "$n" "$thm" "$out" | tee -a "$lines/$n"
+        printf '%-9s FAILED %s (see %s/verify.log)\n' "$n" "${thms[$i]}" "$out" | tee -a "$lines/$n"
         broken+=("$n")
       fi
     done
+    rm -rf "$st"
   else
     printf '%-9s FAILED (see %s/verify.log)\n' "$n" "$out" | tee "$lines/$n"
-    tail -30 "$out/verify.log"
+    tail -30 "$st/0.log"
+    rm -rf "$st"
     broken+=("$n")
   fi
 }

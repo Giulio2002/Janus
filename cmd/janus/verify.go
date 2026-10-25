@@ -559,26 +559,41 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		tm.mark("result cache miss")
 	}
 
-	// The kernel replay of the framework (when not cached yet: the first verification of a
-	// framework build) runs alongside the steps below; see speed.go.
-	var earlyFw *earlyReplay
-	earlyFwMarker := ""
+	// The framework replay verdict (replaymark.go), looked up now, before any untrusted step
+	// runs: the framework build these pins describe passed `leanchecker Janus` under this
+	// toolchain. Without one, the framework is replayed alongside the steps below (speed.go),
+	// once per framework build: concurrent verifications wait for one replay under a lock.
+	// The verdict is read without a sandbox too (the decision is made before the unconfined proof
+	// runs, and the pins it covers are re-checked after every step), but written only by a
+	// sandboxed run; --fresh neither reads nor writes it.
+	fwKey := frameworkVerdictKey(tc.cacheID(), fwPins)
+	fwRead := opts["fresh"] == ""
+	fwHave, fwLease := false, (*fileLock)(nil)
+	if fwRead {
+		fwHave, fwLease = lookupFrameworkVerdict(fwKey)
+	}
+	var earlyFw *fwReplay
 	if tc.hasChecker {
 		rb, err := janusRunBase()
 		fwRunDir := ""
-		if err == nil {
+		if err == nil && !fwHave {
 			fwRunDir, err = os.MkdirTemp(rb, "replay-")
+			if err == nil {
+				defer os.RemoveAll(fwRunDir)
+			}
 		}
 		if err == nil {
-			defer os.RemoveAll(fwRunDir)
-			earlyFwMarker = earlyReplayMarker(tc.cacheID(), fwPins)
 			fwPath := tc.leanPathEnv(janusLibDir)
-			earlyFw = startEarlyReplay(tc.leanchecker, func(argv ...string) (string, error) {
+			earlyFw = startFrameworkReplay(tc.leanchecker, func(argv ...string) (string, error) {
 				return runLeanProtected(sb, tc, fwRunDir, nil, []string{janusLibDir}, fwPath, argv...)
-			}, []string{"Janus"}, earlyFwMarker, replayCacheOK(sb, opts))
-			defer earlyFw.wait()
+			}, fwKey, fwPins, fwHave, fwLease, fwRead, replayCacheOK(sb, opts))
+			defer earlyFw.release()
 		}
 	}
+	if earlyFw == nil {
+		fwLease.unlock()
+	}
+	tm.mark("framework replay verdict")
 
 	// 3. Trusted directory: our Extracted and an independently renamed JanusTrusted copy,
 	// compiled by us (no proof code), kept read-only for the untrusted steps.
@@ -751,7 +766,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 			return nil, err
 		}
 		early.apply(plan, earlyMarker)
-		earlyFw.apply(plan, earlyFwMarker)
+		earlyFw.apply(plan, fwPins)
 		tm.mark("early replay wait")
 		if out, err := plan.replay(tc.leanchecker, replayRun, plan.modules); err != nil {
 			return nil, replayDiag(mapPaths(out))

@@ -18,7 +18,7 @@ import (
 // the real Add proof but is rejected at the statement-identity stage; the honest Add proof
 // verifies, and its report carries the pp.explicit statement.
 func TestInlineInstanceRejected(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {
@@ -48,7 +48,7 @@ func TestInlineInstanceRejected(t *testing.T) {
 // (`[] = []` at an element type the printer hides, an implicit argument rather than an
 // instance) passes the instance-argument check but is rejected by the round-trip.
 func TestRoundTripRejectsAmbiguousPrint(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {
@@ -179,22 +179,35 @@ func TestUnshareFallbackConfinement(t *testing.T) {
 
 // TestUnshareFallbackVerifies: forcing the fallback (JANUS_SANDBOX=unshare) with the cache
 // under /tmp — the setup that used to leave the cache writable — the honest Add proof
-// verifies and the report records the unshare sandbox.
+// verifies and the report records the unshare sandbox. (A separate janus process, so the test
+// can run in parallel; TestUnshareFallbackSelect checks the variable in-process.)
 func TestUnshareFallbackVerifies(t *testing.T) {
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
-	t.Setenv("JANUS_SANDBOX", "unshare")
-	if _, err := detectSandbox(false); err != nil {
+	if err := (&sandbox{mode: "unshare"}).selfTest(); err != nil {
 		t.Skipf("unshare fallback unavailable: %v", err)
 	}
+	bin := buildJanusBinary(t)
 	add := mustExtract(t, "example.com/basic.Add")
-	code, _, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean"),
-		"--janus-root", repoRoot)
-	if code != 0 {
-		t.Fatalf("verify under the unshare fallback: %s", stderr)
+	cmd := exec.Command(bin, "verify", add, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean"), "--janus-root", repoRoot)
+	cmd.Env = append(cacheEnv(testCacheDir()), "JANUS_SANDBOX=unshare")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("verify under the unshare fallback: %v\n%s", err, out)
 	}
 	if r := readReport(t, add); r.Sandbox.Mode != "unshare" {
 		t.Errorf("sandbox mode %q, want unshare", r.Sandbox.Mode)
+	}
+}
+
+// TestUnshareFallbackSelect: JANUS_SANDBOX=unshare selects the fallback, an unknown value is
+// refused.
+func TestUnshareFallbackSelect(t *testing.T) {
+	t.Setenv("JANUS_SANDBOX", "unshare")
+	if sb, err := detectSandbox(false); err != nil {
+		t.Skipf("unshare fallback unavailable: %v", err)
+	} else if sb.mode != "unshare" {
+		t.Errorf("JANUS_SANDBOX=unshare selected %q", sb.mode)
 	}
 	t.Setenv("JANUS_SANDBOX", "nonsense")
 	if _, err := detectSandbox(false); err == nil {
