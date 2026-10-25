@@ -397,6 +397,23 @@ func collectCData(b *Binary, x *Extraction) []CData {
 		}
 		add(r.Target)
 	}
+	// amd64: the linker relaxes `mov sym@GOTPCREL(%rip), %r` to `mov $sym, %r` in a non-PIE
+	// executable, so C code names its globals by immediates too (a coincidental constant only
+	// adds a name: the objects' memory is the precondition's)
+	if b.GOARCH == "amd64" {
+		for _, s := range x.Segments {
+			if b.isGoCode(s.Base) {
+				continue
+			}
+			for _, in := range sweepAmd64(s.Bytes, s.Base) {
+				for _, a := range in.Inst.Args {
+					if imm, ok := a.(x86asm.Imm); ok && imm > 0 {
+						add(uint64(imm))
+					}
+				}
+			}
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Base < out[j].Base })
 	return out
 }

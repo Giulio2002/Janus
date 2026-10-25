@@ -11,8 +11,8 @@ none). So every contract of the C environment comes with a witness:
   (`Contract.Total`): every call they allow has a result, for every `jmp_buf` model `J`;
 * `jmpModel_satisfiable`: a `jmp_buf` model exists (glibc's is one; here, the saved words
   stored in order);
-* `cgoCallback_satisfiable`: `CgoCallback p Cin (fun _ => True)` is total when the Go code's
-  own contract `Cin` is and an admissible return address exists;
+* (the cgo contracts' witnesses, `cgoCall_satisfiable` and `cgoCallback_satisfiable`, are in
+  `Janus.FFISat`);
 * `tlsDescFn_satisfiable`: a TLS descriptor function exists, as machine code (`MOVZ X0, #off;
   RET`, what glibc's `_dl_tlsdesc_return` computes for a static TLS variable) proved by symbolic
   execution.

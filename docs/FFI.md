@@ -193,8 +193,47 @@ From a Go function, the extractor follows the cgo boundary:
 * The dead `if _Cgo_always_false` branch of every cgo wrapper calls `runtime.convT64` (an
   allocation). Pass `--contract runtime.convT64` (the runtime-contracts option) so it is not
   followed. The proofs show the branch is never taken, so no contract hypothesis is needed for it.
-* libc functions called from C would be handled the same way: `--contract SYM` and a contract
-  hypothesis (see [RUNTIME-CONTRACTS.md](RUNTIME-CONTRACTS.md)). The examples call none.
+
+### 2.1 The C environment (`cmd/janus/cenv.go`)
+
+What a C function needs besides its own code is recovered from the ELF file, untrusted like the
+rest of reachability, and every recovered fact is either checked by the model (a wrong fact makes
+a proof fail) or named in the trusted base ([SOUNDNESS.md](SOUNDNESS.md)):
+
+* **PLT entries** become external stubs named `sym@plt`. An entry is recognised only when its
+  code is one of the canonical PLT sequences (arm64 `.plt`: `ADRP x16; LDR x17, [x16, #off];
+  ADD x16; BR x17`; amd64 `.plt.sec`: `ENDBR64; BND JMP [RIP+d]`, or `.plt`: `JMP [RIP+d]; PUSH
+  i; JMP .plt0`) **and** the GOT slot it jumps through is the target of an
+  `R_AARCH64_JUMP_SLOT`/`R_X86_64_JUMP_SLOT` relocation for `sym`. The stub's meaning is the
+  contract for `sym@plt` (section 3.2); a stub no contract names stops every run there.
+* **Static GOT slots.** `-fPIC` code (cgo compiles with it) loads the address of a global from
+  the GOT (`ADRP; LDR [x, :got_lo12:sym]`; `mov sym@GOTPCREL(%rip)`). A slot that lies in
+  `PT_GNU_RELRO` and has no dynamic relocation holds a link-time constant: it is copied as
+  read-only data (`got:sym`, `DataLoaded`). A slot with a dynamic relocation is not copied (its
+  value is the dynamic linker's), so a load from it faults unless a precondition provides it. When
+  the slot holds a code address (a function pointer), the extractor follows it.
+* **Writable C data** (`.data`/`.bss` objects the C code references, directly or through a GOT
+  slot) is listed as `Extracted.cdata : List CData` (name, address, size, initial bytes): not
+  copied into the program (it is memory the precondition provides) but named, so proofs refer to
+  `CData.addr Extracted.cdata "e_counter"` instead of a literal.
+* **TLS.** The executable's `PT_TLS` segment and its `STT_TLS` symbols become
+  `Extracted.tls : TLSImage` (size, alignment, initialisation image, `(name, offset, size)` per
+  variable). `TLSImage.a64Addr tp v` (variant I, arm64: `TPIDR_EL0 + roundUp 16 align + off`) and
+  `TLSImage.x64Addr fs v` (variant II, amd64: `FS − roundUp size align + off`) are the addresses
+  the ABI fixes.
+* **Code addresses C code materialises.** The exported Go function behind an `//export` wrapper
+  (`main._cgoexp_…` / `_cgoexp_…`, passed to `crosscall2` by `ADR`/`ADRP+ADD` or as an amd64
+  immediate) and every C function whose entry a C function computes (`ADR`, a static GOT slot, or
+  an amd64 immediate operand `mov $f, %rdx`: a qsort-style comparator) are extracted too.
+* **`checkCgoTLS`.** The `cgocall` contracts state Go's TLS `g` slot at a fixed place (`FS − 8`,
+  `TPIDR_EL0 + 16`), which holds only when the binary's C code has no `__thread` variables of its
+  own (otherwise the linker moves `runtime.tlsg`/`runtime.tls_g` and that place is a C variable).
+  An extraction that reaches `runtime.cgocall` in a binary where the slot is elsewhere is refused,
+  so the contract can never describe the wrong slot. (The amd64 `cgocallback` contract takes the
+  slot from `TLSImage` and works in such binaries: `ECallGo`.)
+
+libc functions are external stubs through their PLT entries; the contracts of section 3.2 give
+them meaning.
 
 ## 3. Contracts for external stubs (`Janus.FFI`, `Janus.Amd64.FFI`)
 
@@ -210,6 +249,86 @@ and continue with `apply ReturnsC.of_reaches; janus_run`.
 
 `Contract.Refines C₁ C₂` (`C₁` allows at least the calls `C₂` allows, with fewer results) makes
 every `ReturnsC`/`EnsuresC` under `C₂` hold under `C₁` (`EnsuresC.refine`).
+
+**Combining contracts.** `Contract.plus C₁ C₂` (`C₁` for its stubs, `C₂` for the rest) with
+`Contract.Disjoint C₁ C₂` (no stub in both, `disjoint_of_names`) gives
+`Refines.plus_left/right/plus`; a proof of C code calling libc, `setjmp` and a callback uses
+`Libc.plus (SetJmp J)` and so on. `Contract.Total C` (every allowed call has a result) is the
+satisfiability property: `Total.plus` composes it.
+
+### 3.1 Function pointers (`CFuncIs`)
+
+`CFuncIs p f pre post` (arm64: `f` a 4-aligned user address; amd64: `f < 2^47`) says the code
+at `f` is a C function: from every state at `f` satisfying `pre`, it returns to the link register
+/ `[RSP]` with `CReturn` and `post`. It is a hypothesis about `p.link impl` (code anywhere, for
+every `impl`), so a proof of a caller holds for every comparator meeting the contract; the lemmas
+`Reaches.blr_call`/`ReachesRet.blr_call` (arm64 `BLR`) and `Reaches.callInd_call`/
+`ReachesRet.callInd_call` (amd64 `CALL r`) step over an indirect call through such a pointer.
+The hypothesis is discharged for a concrete function by proving it (`EArgMin.cmp_fn`).
+
+### 3.2 libc (`Janus.Contracts.Libc`, `Janus.Contracts.LibcAmd64`)
+
+Trusted contracts for the libc functions called through the PLT, one `Spec` per stub
+(`ofSpecs`): every call needs a stack window (`LibcCall`: `libcStack = 32768` writable bytes
+below `SP`, plus the return address on amd64) and returns (`LibcRet`) at the return address with
+the callee-saved state (`CReturn`), `TPIDR_EL0`/`FS`, `DCZID_EL0`, the same regions, and memory
+equal to the function's effect outside the stack bytes below `SP`.
+
+| Stub | Precondition | Effect |
+|---|---|---|
+| `memcpy`, `__memcpy_chk` | `n` writable bytes at `dst`, `n` readable at `src`, disjoint (`_chk`: `n ≤ dstlen`) | `copyMem m dst src n`, returns `dst` |
+| `memmove`, `__memmove_chk` | as `memcpy`, overlap allowed | `copyMem` of the old bytes |
+| `memset`, `__memset_chk` | `n` writable bytes | `setMem m dst c n` |
+| `strlen` | a C string (`CStr m p n`: `n` readable non-zero bytes and a terminator) | returns `n` |
+| `strcmp` | two C strings | the sign of `lexCmp` of their bytes (`CmpResult`) |
+| `malloc` | the stack window | `0`, or a fresh block `p` (16-aligned, `Fresh`: disjoint from every region) with arbitrary contents, `heapAlloc` |
+| `free` | `0`, or a block `malloc` returned (`HeapBlock`) | `heapFree`: the block and its record removed |
+
+The C heap is distinct from the Go heap: `heapAlloc m p n junk` adds the writable region
+`[p, p + n)` and a ghost **token** region (`heapToken p n`, at `2^48 + p`, which no access can
+reach, so it is invisible to every proof except through `HeapBlock`); `free` needs the token,
+so a block is freed at most once and only after `malloc` returned it. `accessible_heapFree_of`
+shows that after `malloc` … `free` the accessible memory is exactly the initial one (`ELibc`).
+
+### 3.3 `setjmp`/`longjmp` (`SetJmp J`)
+
+A **non-local return** outcome: `_setjmp(env)` stores the context `jmpCtxOf s` (callee-saved
+registers, `SP`, return address; arm64 also `D8`–`D15`) into `env` in an abstract `jmp_buf`
+model `J : JmpModel` (`holds m env c`, with the laws `unique`, `locality` (only the
+`jmpBufSize` bytes at `env` matter) and `store` (every context can be stored), so glibc's layout
+and pointer mangling are not assumed) and returns `0`. `longjmp(env, v)` / `__longjmp_chk`
+(`_chk`: only to a frame above the current one) resumes `c`, the context `env` holds
+(`LongjmpTo`): `_setjmp` returns a second time, at `c`'s return address and stack, with `v`
+(`1` if `v = 0`). `jmpModel_satisfiable` exhibits a model.
+
+### 3.4 TLS
+
+* initial-exec and local-exec (relaxed general-dynamic) code reads `TPIDR_EL0`/`FS` and adds a
+  link-time offset; the proof checks it against `TLSImage.a64Addr`/`x64Addr`. The precondition is
+  `TLSBlock t s`: the executable's block is writable at the ABI's place (amd64 also the thread
+  control block's self pointer at `FS:0`, which relaxed general-dynamic code reads).
+* general dynamic through `__tls_get_addr@plt` (amd64, `TlsGetAddr block`: returns
+  `block module + offset` for the `tls_index` argument) and TLS descriptors (`TlsDescFn p f desc
+  off`: the resolver at `f` returns `off` preserving every register but the result, as
+  `_dl_tlsdesc_return` does; a hypothesis about code, with a machine-code witness
+  `tlsDescFn_satisfiable`).
+
+### 3.5 `alloca` and dynamic frames
+
+gcc's dynamic stack allocation (`-fstack-clash-protection`: whole pages probed one by one, then
+the 16-rounded rest) is ordinary code; the lemmas `and_highMask_eq`, `and_rangeMask_eq` (masks as
+arithmetic), `rot61` (`UBFM` as `lsl #3`) and `CStack.frame`/`CStack.mono` (the window after a
+dynamic `SP` change) make the proofs (`EAlloca`) for every size.
+
+### 3.6 Satisfiability
+
+Every trusted contract has a `_satisfiable` witness (audit round 9's SAT row scans these files):
+`libc_satisfiable`, `setJmp_satisfiable`, `jmpModel_satisfiable`, `tlsGetAddr_satisfiable`,
+`tlsDescFn_satisfiable` (`Janus.Contracts.LibcSat`, `LibcSatAmd64`), and `cgoCall_satisfiable`,
+`cgoCallback_satisfiable`, `callbackSpec_satisfiable`, `cgoSpec_satisfiable`,
+`topOfStack_satisfiable` (`Janus.FFISat`, `Janus.Amd64.FFISat`). The cgo ones take the
+hypotheses every real call meets (an admissible return address, a system / goroutine stack
+disjoint from the other memory, the TLS `g` slot).
 
 **Why not a `Summary` hypothesis.** A `Summary p addr pre post` about the extracted program at
 the address of `cgocall`, where there is no code, is false (or only vacuously true), so a theorem
@@ -251,6 +370,29 @@ so a Go-side theorem `EnsuresC p (CgoSpec fn G E) …` plus the wrapper's `CEnsu
 `EnsuresC p (CgoCall p) …`. In that theorem, every Go and C instruction is executed by the model,
 and only `CgoCall`/`TopOfStack` remain assumed.
 
+### 4.1 Callbacks: C calls an exported Go function
+
+`//export F` makes cgo generate a C function `F` that packs the arguments into a frame and calls
+`crosscall2(_cgoexp_…_F, &frame, size, ctxt)` (Go assembly, copied and run by the model), which
+saves the callee-saved registers and calls `runtime.cgocallback` (an external stub, pinned by
+content):
+
+* **`CgoCallback p Cin R`, the trusted contract.** At the stub (`[SP+8]`/`[RSP+8]` = `fn`, the
+  frame at `[SP+16]`), for every Go call state `cgocallback` may make (`CallbackEntry`: the
+  ABIInternal call `fn(frame)` on a goroutine stack that is not C memory, with the C memory it
+  leaves alone kept, on the same thread) the Go code, **run by the model on `p`** under `Cin`,
+  returns (`ABIReturn`); the C side resumes after the call (`CbResume`: at the return address with
+  `SP` restored; every other register arbitrary, as for an ABI0 callee) with the Go code's writes
+  to C memory (`CbResumed`; the clobbered bytes — the C stack below `SP`, the argument slots,
+  the TLS `g` slot — arbitrary). The amd64 contract takes the extraction's `TLSImage` (Go's `g`
+  slot is `runtime.tlsg`, at `FS − 8` only without C `__thread` variables) and has no alignment
+  requirement at the stub (`crosscall2` leaves `RSP ≡ 0 mod 16`).
+* **`CallbackSpec fn G E`, the C-side assumption**, as `CgoSpec`: the callback of `fn` in a state
+  satisfying `G` resumes with memory `E s` outside the clobber.
+* **Reverse composition** `CgoCallback.refines` (both ISAs): the Go function's `EnsuresC` and
+  the facts linking `G`/`E` to it give `(CgoCallback p Cin R).Refines (CallbackSpec fn G E)`, so
+  a C-side proof under the assumption becomes one under the trusted contract only (`ECallGo`).
+
 ## 5. Examples (`examples/cgo`, `examples/proofs-cgo`)
 
 `examples/cgo` is its own Go module. `cfuncs.c` defines `c_add`, `c_sum` (a loop over an array)
@@ -282,6 +424,19 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 | `GoVSum8` | Go `VSum8(a, …, h)` → cgo → `k_vsum8` → the variadic `k_vsum(8, a, …, h)` → Go returns the sum; the variadic call site (and `AL = 0`) is checked against the classification | ✓ | ✓ |
 | `CCount` | `c_count(p, n, c)` (package `example.com/cgo/neon`, auto-vectorised by gcc `-O2`: `CMEQ`/`ZIP`/`UADDW`/`ADDP` loop + scalar tail) returns the number of `i < n` with `p[i] = c`, memory unchanged | ✓ | – |
 | `GoCount` | Go `neon.Count(xs, c)` → cgo → the NEON loop → Go returns the count, under `CgoCall` only | ✓ | – |
+| `EBump` | `e_bump(x)`: a writable global (`.bss`, `.data`) through static GOT slots (`-fPIC`; amd64: the `--no-relax` build keeps the GOT loads) | ✓ | ✓ |
+| `ETLS` | `e_tls_add(x)`: a `__thread` variable, general dynamic (relaxed to local exec by the linker), checked against `TLSImage` | ✓ | ✓ |
+| `ETLSIE` | `e_tls_ie_add(x)`: a `__thread` variable, initial exec | ✓ | ✓ |
+| `EAtomic` | `e_atomic_inc(p)`: `__atomic_add_fetch` (arm64: libgcc's outline atomic `__aarch64_ldadd4_acq_rel`, its LSE path; amd64: `LOCK XADD`) | ✓ | ✓ |
+| `ELibc` | `e_libc(s, d)`: `strlen`, `malloc`, `__memcpy_chk`, `memcpy`, `free` through the PLT under `Libc`; the heap block is freed, accessibility restored | ✓ | ✓ |
+| `ESetJmp` | `e_setjmp(v)`: `_setjmp`, then `__longjmp_chk` from a callee back into it (a non-local return), under `SetJmp J` for every `jmp_buf` model | ✓ | ✓ |
+| `EArgMin` | `e_argmin(a, n, cmp)` for **every** comparator meeting `CFuncIs` (a call through a function pointer), and `e_argmin_i64`, which passes the proved `e_cmp_i64` | ✓ | ✓ |
+| `ECallGo` | `e_callgo(x)` → the `//export` wrapper `GoTwice` → `crosscall2` → `cgocallback` → the Go function → back: returns `2x + 1`, under `CgoCallback` only | ✓ | ✓ |
+| `EAlloca` | `e_alloca(n)`: an `alloca`'d array (stack-clash probes, the stack protector), returns `0 + … + (n − 1)` for every `n` | ✓ | ✓ |
+
+The C environment examples are in `examples/cgo/cenv` (`cenv.c`, `cenv.go`), built into
+`artifacts/examples-cenv-<isa>` (and `examples-cenv-norelax-amd64`, linked with `-Wl,--no-relax`)
+by `scripts/build-examples-cgo.sh`.
 
 The Go-side preconditions are explicit. They include the stack-growth checks of the Go function
 and of its `_Cfunc_` wrapper, the stack window, and the two statically initialised cgo globals
