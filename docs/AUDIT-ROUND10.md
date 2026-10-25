@@ -232,6 +232,30 @@ exact squares, near-ties) and double precision 6,600,160 (82,515 samples, same d
 comparisons in all, 0 mismatches. `docs/AUDIT-ASL.md` row A5 still probes
 `sqrt_real` at `2^80`, not the `2^1100` the code uses.
 
+## Open items
+
+* `_satisfiable` witnesses for the 14 non-allocating map contracts (agent/maps); `MapSat.M0` is a
+  starting point.
+* Whole-theorem non-vacuity witnesses (`Proof.Witness.nonvacuous`) exist for the interface
+  examples and for NewPair (round 9 C1c); MakeSlice, AppendOne, MakeAdder (both ISAs), NewPair
+  (amd64) and the map examples have none. V1 and the contract witnesses rule out the patterns
+  found this round, not every joint unsatisfiability of a hand-written precondition.
+* Satisfiable by a toy is weaker than satisfiable by the real runtime (V3): the witnesses do not
+  show the latter, and cannot in the model.
+* `MIN`/`MAX` under `DAZ = 1` on AMD (X), unconfirmed.
+
 ## Regression status
 
-(Filled in at the end of the round.)
+On `agent/redteam10` (merge/b23 + this round), one heavy job at a time (`LEAN_NUM_THREADS=4`,
+`JANUS_JOBS=2` once the coordinator asked for it):
+
+| Suite | Result |
+|---|---|
+| `audit/round10/run-round10.sh` | all rows as expected (V1a–f, V1_ctl×2, V2×5, V3_ctl, SAT×2, I1a–b, V3a, A1, F1, G1–G2, X1, C1, ASL1), 74 min |
+| `scripts/verify-all-examples.sh -j 1` | all ok: 78 arm64 items, 80 amd64 functions, 10 assembly items (6264 s) |
+| `go test -count=1 -parallel 2 -timeout 7000s ./cmd/...` | ok (1269 s) |
+| `audit/run-all.sh -j 1` | ok (670 s) |
+| `audit/round{2,…,9}` runners, `audit/rt-model/run.sh` | all rows as expected |
+
+The double-precision `sqrt_real` sample (`audit/round10/asl/sqrt_model.py`) takes hours and is not
+a row; its result is the one quoted above.

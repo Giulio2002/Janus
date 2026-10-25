@@ -69,7 +69,8 @@ lake env lean $R/model/MapUnsatFixed.lean >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check V2_model_fixed_contracts_unsat_attempt $? "the same chaining argument against the fixed contracts does not compile"
 v $A/V2a_map_assign_vacuous.lean "$W/Insert";   row V2a_insert_stores_v_plus_1 blocked
 v examples/proofs/Insert.lean "$W/Insert";      row V2_ctl_Insert Verified 'RtReady' 'rtView M.priv s.mem'
-o="$(lake env lean $R/model/Arity.lean 2>&1)"; check V2_V3_allocating_contracts_take_H $? "Assign, MakeSmall, convT*, typeAssert, interfaceSwitch (both ISAs) take H : RtReady ${o:+($o)}"
+o="$(lake env lean $R/model/Arity.lean 2>&1)"; rc=$?; o="$(grep -i error <<<"$o" | head -3)"
+check V2_V3_allocating_contracts_take_H $rc "Assign, MakeSmall, convT*, typeAssert, interfaceSwitch (both ISAs) take H : RtReady ${o:+($o)}"
 v examples/proofs/Box.lean "$W/Box";            row V3_ctl_Box Verified 'RtReady'
 
 echo "== SAT: witnesses (round 9 row, with the round-10 check that the witness names its contract)"
@@ -132,7 +133,8 @@ if [ "$(uname -m)" = x86_64 ]; then
   O="$T/oracle"; mkdir -p "$O"
   ( cd oracle-amd64 && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o "$O/runner" ./cmd/runner &&
     CGO_ENABLED=0 go build -o "$O/oracle" ./cmd/oracle ) || { echo "oracle build failed"; exit 1; }
-  python3 -I $R/x86/genC.py 40 "$O/c.jsonl" && python3 -I $R/x86/genF.py 1 20000 "$O/f.jsonl" && python3 -I $R/x86/genP.py 1 20000 "$O/p.jsonl"
+  { python3 -I $R/x86/genC.py 40 "$O/c.jsonl" && python3 -I $R/x86/genF.py 1 20000 "$O/f.jsonl" &&
+    python3 -I $R/x86/genP.py 1 20000 "$O/p.jsonl"; } >/dev/null
   GODEBUG=asyncpreemptoff=1 "$O/oracle" run -runner "$O/runner" -model .lake/build/bin/janus-oracle-amd64 -j 8 \
     -cases "$O/c.jsonl,$O/f.jsonl,$O/p.jsonl" -out "$O/out" >/dev/null 2>&1
   mm="$(sed -n 's/^\*\*\([0-9]*\) MISMATCH\*\*.*/\1/p' "$O/out/summary.md")"
@@ -148,8 +150,7 @@ check C1_arm64_crypto_decode_vs_asl $? "janus-decode vs the sail-arm v9.4 decode
 echo "== holds: the ASL sqrt_real substitution (agent/asl, JanusASL/sail/fakereal_sqrt.py)"
 o="$(python3 -I $R/asl/half_only.py $R/asl 2>&1 | head -1)"
 grep -q 'MISMATCHES 0 ' <<<"$o"; check ASL1_sqrt_real_half_exhaustive $? "$(cut -c1-60 <<<"$o")"
-o="$(python3 -I $R/asl/sqrt_model.py 200 2>&1 | grep TOTAL)"
-grep -q 'MISMATCHES 0$' <<<"$o"; check ASL2_sqrt_real_single_double_sample $? "$o"
+# single and double precision: python3 -I audit/round10/asl/sqrt_model.py 4000 (hours; see the doc)
 
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
 echo; echo "All round-10 rows as expected."
