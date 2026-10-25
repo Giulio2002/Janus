@@ -62,6 +62,15 @@ cp audit/round9/controls/NewPair_witness.lean "$D/W.lean"
 check C1c_newpair_witness_fires $? "an allocator, rt, H and a NewPair call for which Proof.correctness fires"
 v examples/proofs/NewPair.lean "$W/NewPair"; row C1_ctl_NewPair Verified 'RtReady' 'rtView rt s.mem'
 
+echo "== SAT: every runtime contract has a kernel-checked _satisfiable witness (lake build Janus checked them)"
+o="$(python3 -I audit/round9/sat_check.py "$root")"; rc=$?
+grep -E 'SAT (MISSING|OPEN)' <<<"$o" | sed 's/^/  /'
+check SAT_contract_witnesses $rc "$(tail -n 1 <<<"$o")"
+S9="$T/satcopy"; mkdir -p "$S9/audit/round9"; cp -r Janus Janus.lean "$S9/"; cp audit/round9/sat-pending.txt "$S9/audit/round9/"
+sed -i 's/^theorem newobject_satisfiable/theorem newobject_satisfiable_gone/' "$S9/Janus/Contracts/AllocSat.lean"
+python3 -I audit/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
+[ $rc -ne 0 ]; check SAT_selftest_missing_witness_fails $? "removing newobject_satisfiable makes the SAT row fail"
+
 echo "== real-binary probes (audit/round9/probe; go1.26.0)"
 P="$T/probe"; mkdir -p "$P"
 ( cd audit/round9/probe && export GOTOOLCHAIN=go1.26.0 CGO_ENABLED=0 &&

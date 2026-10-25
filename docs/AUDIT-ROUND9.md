@@ -18,6 +18,7 @@ under qemu-aarch64. The host has no aarch64 gdb.
 | ID | Severity | Finding | Status | Rows |
 |---|---|---|---|---|
 | C1 | **critical** (vacuity) | **No code could meet the allocation contracts.** `NewobjectContract`, `MakesliceContract`, `GrowsliceContract` and `MallocgcContract`, on both ISAs, are `Summary`s over every state satisfying a precondition that said nothing about the runtime's own state. One such state has a 2^47-byte request (`≤ maxAlloc`) and no heap mapped. Regions never change, so no object can be returned there. The hypothesis was false for every implementation, address and `rt`, so the six NewPair/MakeSlice/AppendOne theorems were vacuous. The real runtime throws `out of memory` on such a request. | **BROKEN → fixed** | C1a–C1d, C1_ctl |
+| SAT | high (process) | **No contract had to show it was satisfiable.** C1 went unnoticed because nothing required a witness. Row SAT (`audit/round9/sat_check.py`) now finds every runtime contract under `Janus/Contracts` (a `def … : Prop` whose body is a `Summary`) and requires `theorem <name>_satisfiable` in `Janus.Contracts.<File>Sat` (`…SatAmd64`), imported by `Janus.lean` so that `lake build` kernel-checks it: an implementation, its parameters, and a state satisfying the whole precondition. The 8 allocation contracts have one (`Janus/Contracts/AllocSat.lean`, `AllocSatAmd64.lean`). The 18 map contracts (arm64 + amd64) are listed as OPEN in `audit/round9/sat-pending.txt` (owner: agent/maps); any other contract without a witness fails the row, and a self-test row checks that removing a witness does. | **fixed** (maps open) | SAT, SAT_selftest |
 | C2 | high (contract promises too much) | **16-alignment for header objects.** `Fresh` promised `ptr % 16 = 0` for every request whose size is a multiple of 16. A pointerful object of 513 to 32760 bytes follows an 8-byte malloc header (`mallocgcSmallScanHeader` returns `slot + 8`), so the real runtime returns `8 mod 16` for every one of them. | **BROKEN → fixed** | C2a, C2b |
 | M1 | high (vacuity) | **MallocFast held for no call on `m0`.** `MCacheOK` required the six runtime globals, as one range `[globLo, globHi)`, to be separate from the `m`. `runtime.m0` lies in `.bss` inside that range, so the theorem said nothing about any allocation made on the main thread's `m`. Probe: 0 of 20000 real 64-byte requests met it. With each global on its own, 19682 do. | **BROKEN → fixed** | M1 |
 | S1 | medium (gratuitous exclusion) | **SetNext's `BarrierOK` excluded most real calls.** It required one interval `[lo, hi)` holding `g.m`, `m.p`, `p.wbBuf` and the buffer slots, and missing `n.Next` and the stack. In the arena these interleave. Probe (amd64, barrier on): 82 of 300 real calls could meet it, against 300 of 300 with per-object separation. | **fixed** | S1 |
@@ -83,7 +84,11 @@ lets the discharger close more goals.
   the runtime's code returns as the contract says". That is a function of exactly what `H`
   sees. It holds at the calls the runtime serves without a system call, a throw or a stack
   move: a free `mcache` slot, enough heap, no GC assist that parks or shrinks the stack.
-* **The fixed contract is satisfiable in the kernel.** `audit/round9/controls/NewPair_witness.lean`
+* **Each fixed contract is satisfiable in the kernel** (`Janus/Contracts/AllocSat.lean`,
+  `AllocSatAmd64.lean`: `newobject_satisfiable`, `mallocgc_satisfiable`, `makeslice_satisfiable`,
+  `growslice_satisfiable` and their `…64` versions; toy code that returns a zeroed heap, an `H`,
+  and a call state meeting the whole precondition for a non-zero size). The theorem built on the
+  contract fires too: `audit/round9/controls/NewPair_witness.lean`
   places a two-instruction allocator (`MOVZ X0, #0x10000; RET`) at `runtime.newobject`. It
   chooses `rt` = a 64 KiB heap plus `Pair`'s descriptor, and `H` = "the argument is a
   descriptor inside `rt` of at most 32 KiB and the heap is writable and zero", and proves
