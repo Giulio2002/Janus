@@ -27,7 +27,8 @@ namespace Janus.Contracts
 
 open Janus Janus.Amd64 Janus.Amd64.Tactic
 
-attribute [janus64_exec, janus64_post] typSize typPtrBytes typNoscan maxAlloc true_implies
+attribute [janus64_exec, janus64_post] typSize typPtrBytes typNoscan maxAlloc true_implies mallocHdr
+  minSizeForMallocHeader maxSmallSize mallocHeaderSize
 
 /-- A 32-bit compare with zero of a loaded word (the write-barrier flag test `CMPL $0, …`) as
 arithmetic, so that `janus64_run` can prune the branch with `omega`. -/
@@ -79,6 +80,15 @@ def retState64 (s : State) (junk : Nat → W64) (res : List W64) (f : Flags)
 
 attribute [janus64_exec, janus64_post] retState64 calleeStack64
 
+/-- The readiness hypothesis of an amd64 contract at the call state `s` (round 9 C1, see
+`Janus.Contracts.RtReady`): `H` holds for the call's arguments `args`, the current `g` (`R14`),
+`RSP` and the runtime's memory (`rtView rt s.mem`). -/
+@[reducible] def Ready64 (H : RtReady) (rt : List (Nat × Nat)) (args : List Nat) (s : State) :
+    Prop :=
+  H args (s.regs 14).toNat (s.regs 4).toNat (rtView rt s.mem)
+
+attribute [janus64_exec, janus64_post] rtView_writeLE
+
 /-- The shape of an allocation contract's postcondition (amd64), as `AllocRet`. -/
 @[reducible] def AllocRet64 (rt : List (Nat × Nat)) (stack nargs : Nat) (res : W64 → List W64)
     (s s' : State) (Q : Memory → Nat → Prop) : Prop :=
@@ -100,16 +110,20 @@ def MallocgcPre64 (stack : Nat) (s : State) : Prop :=
   Fresh rt m ptr (s.regs 0).toNat
     (blockSize (s.regs 0).toNat ((s.regs 3).toNat == 0 || typNoscan s.mem (s.regs 3).toNat))
     ((s.regs 1).toNat % 256 != 0 || ((s.regs 3).toNat != 0 && !typNoscan s.mem (s.regs 3).toNat))
+    (mallocHdr (s.regs 0).toNat ((s.regs 3).toNat == 0 || typNoscan s.mem (s.regs 3).toNat))
 
 /-- **`runtime.mallocgc(size, typ, needzero)`** (amd64): as `MallocgcContract`. -/
-def MallocgcContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) : Prop :=
-  Summary p addr (MallocgcPre64 stack)
+def MallocgcContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+    (H : RtReady) : Prop :=
+  Summary p addr (fun s => MallocgcPre64 stack s ∧
+      Ready64 H rt [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s)
     (fun s s' => AllocRet64 rt stack 3 (fun ptr => [ptr]) s s' fun m ptr =>
       0 < (s.regs 0).toNat → mallocgcObj64 rt s m ptr)
 
 theorem MallocgcContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    (h : MallocgcContract64 p addr rt stack) :
-    Summary p addr (fun s => MallocgcPre64 stack s ∧ 0 < (s.regs 0).toNat)
+    {H : RtReady} (h : MallocgcContract64 p addr rt stack H) :
+    Summary p addr (fun s => (MallocgcPre64 stack s ∧
+        Ready64 H rt [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s) ∧ 0 < (s.regs 0).toNat)
       (fun s s' => AllocRet64 rt stack 3 (fun ptr => [ptr]) s s' (mallocgcObj64 rt s)) :=
   Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, h1, h2, h3⟩ =>
     ⟨ptr, j, f, x, yh, m, h1, h2, h3 hp.2⟩
@@ -122,16 +136,19 @@ def NewobjectPre64 (stack : Nat) (s : State) : Prop :=
     Prop :=
   Fresh rt m ptr (typSize s.mem (s.regs 0).toNat)
     (blockSize (typSize s.mem (s.regs 0).toNat) (typNoscan s.mem (s.regs 0).toNat)) true
+    (mallocHdr (typSize s.mem (s.regs 0).toNat) (typNoscan s.mem (s.regs 0).toNat))
 
 /-- **`runtime.newobject(typ)`** (amd64): as `NewobjectContract`. -/
-def NewobjectContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) : Prop :=
-  Summary p addr (NewobjectPre64 stack)
+def NewobjectContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+    (H : RtReady) : Prop :=
+  Summary p addr (fun s => NewobjectPre64 stack s ∧ Ready64 H rt [(s.regs 0).toNat] s)
     (fun s s' => AllocRet64 rt stack 1 (fun ptr => [ptr]) s s' fun m ptr =>
       0 < typSize s.mem (s.regs 0).toNat → newobjectObj64 rt s m ptr)
 
 theorem NewobjectContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    (h : NewobjectContract64 p addr rt stack) :
-    Summary p addr (fun s => NewobjectPre64 stack s ∧ 0 < typSize s.mem (s.regs 0).toNat)
+    {H : RtReady} (h : NewobjectContract64 p addr rt stack H) :
+    Summary p addr (fun s => (NewobjectPre64 stack s ∧ Ready64 H rt [(s.regs 0).toNat] s) ∧
+      0 < typSize s.mem (s.regs 0).toNat)
       (fun s s' => AllocRet64 rt stack 1 (fun ptr => [ptr]) s s' (newobjectObj64 rt s)) :=
   Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, h1, h2, h3⟩ =>
     ⟨ptr, j, f, x, yh, m, h1, h2, h3 hp.2⟩
@@ -147,17 +164,22 @@ def MakeslicePre64 (stack : Nat) (s : State) : Prop :=
   Fresh rt m ptr (typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat)
     (blockSize (typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat)
       (typNoscan s.mem (s.regs 0).toNat)) true
+    (mallocHdr (typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat) (typNoscan s.mem (s.regs 0).toNat))
 
 /-- **`runtime.makeslice(et, len, cap)`** (amd64): as `MakesliceContract`. -/
-def MakesliceContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) : Prop :=
-  Summary p addr (MakeslicePre64 stack)
+def MakesliceContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+    (H : RtReady) : Prop :=
+  Summary p addr (fun s => MakeslicePre64 stack s ∧
+      Ready64 H rt [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s)
     (fun s s' => AllocRet64 rt stack 3 (fun ptr => [ptr]) s s' fun m ptr =>
       0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat → makesliceObj64 rt s m ptr)
 
 theorem MakesliceContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    (h : MakesliceContract64 p addr rt stack) :
+    {H : RtReady} (h : MakesliceContract64 p addr rt stack H) :
     Summary p addr
-      (fun s => MakeslicePre64 stack s ∧ 0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat)
+      (fun s => (MakeslicePre64 stack s ∧
+        Ready64 H rt [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s) ∧
+        0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat)
       (fun s s' => AllocRet64 rt stack 3 (fun ptr => [ptr]) s s' (makesliceObj64 rt s)) :=
   Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, h1, h2, h3⟩ =>
     ⟨ptr, j, f, x, yh, m, h1, h2, h3 hp.2⟩
@@ -188,28 +210,37 @@ def GrowslicePre64 (stack : Nat) (s : State) : Prop :=
     ZeroBytes m (ptr + 8 * (s.regs 3).toNat)
       (8 * growCap8 (s.regs 3).toNat (s.regs 1).toNat - 8 * (s.regs 3).toNat)
 
+/-- The arguments of a `growslice` call (amd64, `RAX, RBX, RCX, RDI, RSI`) as numbers. -/
+@[reducible] def growsliceArgs64 (s : State) : List Nat :=
+  [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat, (s.regs 7).toNat, (s.regs 6).toNat]
+
+attribute [janus64_exec, janus64_post] growsliceArgs64
+
 /-- **`runtime.growslice(oldPtr, newLen, oldCap, num, et)`** (amd64): as `GrowsliceContract`;
 returns `(ptr, newLen, newCap)` in `RAX, RBX, RCX`. -/
-def GrowsliceContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) : Prop :=
-  Summary p addr (GrowslicePre64 stack)
+def GrowsliceContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+    (H : RtReady) : Prop :=
+  Summary p addr (fun s => GrowslicePre64 stack s ∧ Ready64 H rt (growsliceArgs64 s) s)
     (fun s s' => AllocRet64 rt stack 5
       (fun ptr => [ptr, s.regs 3, BitVec.ofNat 64 (growCap8 (s.regs 3).toNat (s.regs 1).toNat)])
       s s' (growsliceObj64 rt s))
 
 theorem GrowsliceContract64.withOld {p : Janus.Amd64.Program} {addr : Nat} {rt : List (Nat × Nat)}
-    {stack : Nat} (h : GrowsliceContract64 p addr rt stack) :
-    Summary p addr (fun s => GrowsliceArgs64 stack s ∧ GrowsliceOld64 s)
+    {stack : Nat} {H : RtReady} (h : GrowsliceContract64 p addr rt stack H) :
+    Summary p addr (fun s => (GrowsliceArgs64 stack s ∧ GrowsliceOld64 s) ∧
+      Ready64 H rt (growsliceArgs64 s) s)
       (fun s s' => AllocRet64 rt stack 5
         (fun ptr => [ptr, s.regs 3, BitVec.ofNat 64 (growCap8 (s.regs 3).toNat (s.regs 1).toNat)])
         s s' (growsliceObj64 rt s)) :=
-  Summary.mono h (fun _ h => ⟨h.1, fun _ => h.2⟩) fun _ _ _ h => h
+  Summary.mono h (fun _ h => ⟨⟨h.1.1, fun _ => h.1.2⟩, h.2⟩) fun _ _ _ h => h
 
 theorem GrowsliceContract64.empty {p : Janus.Amd64.Program} {addr : Nat} {rt : List (Nat × Nat)}
-    {stack : Nat} (h : GrowsliceContract64 p addr rt stack) :
-    Summary p addr (fun s => GrowsliceArgs64 stack s ∧ (s.regs 3).toNat = (s.regs 7).toNat)
+    {stack : Nat} {H : RtReady} (h : GrowsliceContract64 p addr rt stack H) :
+    Summary p addr (fun s => (GrowsliceArgs64 stack s ∧ (s.regs 3).toNat = (s.regs 7).toNat) ∧
+      Ready64 H rt (growsliceArgs64 s) s)
       (fun s s' => AllocRet64 rt stack 5
         (fun ptr => [ptr, s.regs 3, BitVec.ofNat 64 (growCap8 (s.regs 3).toNat (s.regs 1).toNat)])
         s s' (growsliceObj64 rt s)) :=
-  Summary.mono h (fun _ h => ⟨h.1, fun h' => absurd h' (by omega)⟩) fun _ _ _ h => h
+  Summary.mono h (fun _ h => ⟨⟨h.1.1, fun h' => absurd h' (by omega)⟩, h.2⟩) fun _ _ _ h => h
 
 end Janus.Contracts
