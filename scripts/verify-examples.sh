@@ -76,7 +76,7 @@ verify_one() {
     # and the non-vacuity witnesses (Proof.Witness.nonvacuous / .returns: the theorem's
     # hypotheses hold together for a model of the runtime, and its conclusion is reached)
     local extra_thms
-    extra_thms=$(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}')
+    extra_thms=$(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}' || true)
     if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then extra_thms="$extra_thms Witness.nonvacuous Witness.returns"; fi
     for thm in $extra_thms; do
       if bin/janus verify "$out" --proof "examples/proofs/$n.lean" --theorem "Proof.$thm" \
