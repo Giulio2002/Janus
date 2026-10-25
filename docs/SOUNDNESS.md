@@ -33,7 +33,10 @@ These are trusted, not proved.
    agreement is differentially tested against qemu (`janus-oracle`), not proved. If the model
    is wrong about an instruction the program uses, a theorem can be true of the model and false
    of the hardware. Words outside the supported subset fault (`undecodable`). They are never
-   given a guessed meaning.
+   given a guessed meaning. The same holds for **the Lean x86-64 model**
+   (`Janus/Amd64/Decode.lean`, `Instr.lean`, `Exec.lean`, `State.lean`, `Float.lean`, and the
+   x87 FPU of C `long double`, `X87.lean` and `X87Exec.lean`; [AMD64.md](AMD64.md)), checked
+   against the host CPU by the native oracle (`docs/ORACLE-AMD64.md`).
 2. **The ELF word copy** (`cmd/janus`: `binary.go`, `extract.go`, `identity.go`): finding the
    symbol's `[addr, addr+size)` in `.text` and copying its little-endian 32-bit words (trailing
    zero padding words are dropped). `janus verify` re-runs this copy against the binary
@@ -912,8 +915,25 @@ over `l / w` elements, the same flag ORing and `#XM` rule), the 32 `VCMP` predic
 `VCVTPS2PH` (rounding from `imm8` or `MXCSR.RC`; `DAZ` applied, `FTZ` not). Where the manuals leave an FMA result open (two
 or more NaN operands, whose choice Intel documents and AMD does not; `0 × ∞ + qNaN`, whose `IE`
 IEEE 754 §7.2 leaves to the implementation) the instruction faults (`undefinedResult`), so no
-proof depends on a vendor. The other VEX/EVEX floating-point forms, x87 and `LDMXCSR` are
-rejected. Encodings whose behaviour the manuals leave open (an `FCMP #0.0` with a non-zero `Rm`
+proof depends on a vendor. The other VEX/EVEX floating-point forms and `LDMXCSR` are
+rejected.
+
+**x87** (C `long double`, `Janus/Amd64/X87.lean`; WP-J). The 80-bit double-extended format is
+read through `X87.std` as the IEEE format (15, 63) of the same core; the precision control rounds
+to 24, 53 or 64 bits with the extended exponent range, tininess is after rounding, NaNs follow
+the x87 rules (SDM Table 4-7), unnormals, pseudo-infinities and pseudo-NaNs are invalid
+operands, pseudo-denormals are read as their value. Each of these choices was checked on the
+host (`docs/ORACLE-AMD64.md`, x87 mode). The model is *conservative* where the x87 is
+asynchronous: an exception that is unmasked in the control word (or pending with `ES` set)
+faults at the instruction that raises it, while the hardware completes it, stores a result
+(for overflow and underflow a re-biased one) and raises `#MF` only at the next waiting x87
+instruction; a stack overflow or underflow faults instead of delivering the masked response;
+the reserved precision control `01` and `FNSTSW` of an undefined condition code fault. So every
+run the model completes is a run of the hardware. `X87.binop_add_ieee`/`binop_mul_ieee` (proved)
+connect `FADD`/`FMUL` at 64-bit precision to `Janus.Float.Spec.add`/`mul` on (15, 63); the
+`long double` examples state their results with them. The instruction/data pointers and the
+last opcode (`FNSTENV`/`FSAVE` state) are not modelled, and the instructions that would expose
+them are rejected. Encodings whose behaviour the manuals leave open (an `FCMP #0.0` with a non-zero `Rm`
 field, `REX.W` on an SSE instruction that does not use it, reserved `CMPSD`/`ROUNDSD` immediate
 bits) are rejected rather than guessed.
 
@@ -1299,10 +1319,16 @@ callers that violate the convention.
   its slot are arbitrary in `CCallA` (the ABIs leave them unspecified; clang extends `char`/
   `short` arguments, gcc does not, and a callee may rely on neither), and a callee proof may not
   use them.
-* *x87.* The amd64 state has the x87 control word (`State.fpucw`, reset `0x037F`) but not the
-  x87 register stack: no decoded instruction touches either, so the control word is preserved by
-  every run, and a `long double` / `_Complex long double` result (`ST0`/`ST1`) cannot be stated
-  (`PieceAt … (.x87 _)` is `False`) — such a function has no `CEnsuresR` theorem today.
+* *x87.* The amd64 state has the x87 control word (`State.fpucw`, reset `0x037F`; K1) and,
+  since WP-J, the x87 register stack, tags and status word (`State.x87`). `FLDCW`/`FNSTCW` write
+  and read `fpucw`; `CReturn` requires a C callee to preserve it. `CgoEntry.x87` (trusted) says
+  the C code is entered with the Go caller's x87 stack (nothing between the Go call and the C entry
+  executes an x87 instruction), so a C precondition such as `X87.Idle` (empty stack, nothing
+  pending) is discharged by the same hypothesis on the Go call state; `GoResume` leaves the
+  x87 stack and status arbitrary after the call (C may raise its sticky flags; Go code never
+  reads them). A `long double` result in `ST(0)` is stated directly on `State.x87` (`CLdMul`);
+  the classification's `PieceAt … (.x87 _)` is still `False`, so such a function has no
+  `CEnsuresR` theorem yet.
 * *Outside the classification.* Bit-fields, `__attribute__((packed))`/`aligned`, flexible
   arrays, empty structs and 32/64-byte vectors have no `CType`; a prototype using them cannot be
   stated.

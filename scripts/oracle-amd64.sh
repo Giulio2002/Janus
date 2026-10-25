@@ -14,6 +14,12 @@
 #                                      FMA, PSHUFB/PSIGNB): their specs and the FMA edge family,
 #                                      plus every such instruction harvested from GOAMD64=v3 test
 #                                      binaries (V3_K states each, default 12)
+#   scripts/oracle-amd64.sh x87        the x87 FPU and the C-specific encodings (WP-J): every
+#                                      escape-opcode form (N per memory form, N/4 per register
+#                                      form) with random x87 states, NOTRACK branches and the
+#                                      padded TLS call, plus every x87 instruction harvested from
+#                                      gcc/clang -O0/-O2/-O3 long double code (X87_K states each,
+#                                      default 40)
 #   scripts/oracle-amd64.sh sse        the SSE packed instructions of WP-D only (SSE2 integer and
 #                                      FP, SSE3, SSSE3, SSE4.1, SSE4.2): their specs and edge
 #                                      families, plus every such instruction harvested from the std
@@ -85,10 +91,11 @@ case "$mode" in
   full)  N="${N:-600}"; GROUP="${GROUP:-40000}" ;;
   fp)    N="${N:-600}"; GROUP=0 ;;
   v3)    N="${N:-600}"; GROUP=0 ;;
+  x87)   N="${N:-600}"; GROUP=0 ;;
   sse)   N="${N:-600}"; GROUP=0 ;;
   crypto) N="${N:-600}"; GROUP=0 ;;
   avx)   N="${N:-600}"; GROUP=0 ;;
-  *) echo "usage: $0 selftest|quick|full|fp|v3|sse|crypto|avx" >&2; exit 2 ;;
+  *) echo "usage: $0 selftest|quick|full|fp|v3|x87|sse|crypto|avx" >&2; exit 2 ;;
 esac
 fpk=()
 [ -n "${FPK:-}" ] && fpk=(-fpk "$FPK")
@@ -100,6 +107,9 @@ ssepkgs="internal/chacha8rand hash/crc32 bytes strings crypto/internal/fips140/n
 if [ "$mode" = fp ]; then
   echo "== generate (SSE floating point: $N encodings per spec, $((N / 2)) edge rounds)"
   "$bin/oracle" gen -fp-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
+elif [ "$mode" = x87 ]; then
+  echo "== generate (x87 and CET/TLS encodings: $N per memory form, $((N / 4)) per register form)"
+  "$bin/oracle" gen -x87-only -n "$N" -seed "$SEED" -o "$OUT/gen.jsonl"
 elif [ "$mode" = v3 ]; then
   echo "== generate (GOAMD64=v3 extensions: $N encodings per spec, $((N / 4)) FMA edge rounds)"
   "$bin/oracle" gen -v3-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
@@ -140,6 +150,25 @@ if [ "$mode" = v3 ]; then
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v3 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
   "$bin/oracle" harvest -k "${V3_K:-12}" -per-class 0 -only "$v3re" -seed "$((SEED + 1))" "${fpk[@]}" -o "$OUT/harvest.jsonl" "$corpus"/*
+  cases+=("$OUT/harvest.jsonl")
+fi
+
+if [ "$mode" = x87 ]; then
+  echo "== harvest the x87 instructions of gcc/clang long double code"
+  corpus="$bin/corpus-x87"
+  mkdir -p "$corpus"
+  for cc in gcc clang; do
+    command -v "$cc" >/dev/null || continue
+    for opt in -O0 -O2 -O3 "-O2 -march=x86-64-v3"; do
+      tag="$cc${opt// /}"
+      for src in "$root/oracle-amd64/harvest/x87/ld.c" "$root/scripts/coverage/ccorpus/abi.c"; do
+        # shellcheck disable=SC2086
+        $cc $opt -fPIC -pthread -c -o "$corpus/$(basename "$src" .c)-$tag.o" "$src"
+      done
+    done
+  done
+  "$bin/oracle" harvest -k "${X87_K:-40}" -per-class 0 -only '^(f[a-z0-9]*|jmp|call)$' -seed "$((SEED + 1))" \
+    -o "$OUT/harvest.jsonl" "$corpus"/*.o
   cases+=("$OUT/harvest.jsonl")
 fi
 

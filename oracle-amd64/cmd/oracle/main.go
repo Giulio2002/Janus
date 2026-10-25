@@ -101,6 +101,10 @@ func (cw *caseWriter) emit(class string, b []byte, s gen.State) {
 func (cw *caseWriter) add(r *rand.Rand, class string, b []byte, k int) {
 	for j := 0; j < k; j++ {
 		s := gen.Setup(r, b)
+		if gen.IsX87(b) {
+			// a random x87 state and a planted memory operand
+			s = gen.SetupX87(r, b)
+		}
 		if gen.IsFP(gen.Classify(b)) {
 			// several MXCSR settings (rounding, FTZ/DAZ, masks, flags) per FP state
 			for _, t := range gen.FPVariants(r, s, cw.fpK) {
@@ -144,6 +148,7 @@ func cmdGen(args []string) {
 	fpK := fs.Int("fpk", 3, "MXCSR settings per state for the SSE floating-point classes")
 	fpOnly := fs.Bool("fp-only", false, "generate only the SSE floating-point specs (gen.FPSpecs, the FP edge families)")
 	v3Only := fs.Bool("v3-only", false, "generate only the GOAMD64=v3 extension specs (gen.V3Specs, gen.V3VexSpecs, the FMA edge family)")
+	x87Only := fs.Bool("x87-only", false, "generate only the x87 specs and the CET/TLS-call encodings (gen.X87Cases)")
 	sseOnly := fs.Bool("sse-only", false, "generate only the SSE packed specs of WP-D (gen.SSESpecs, the SSE edge families)")
 	cryptoOnly := fs.Bool("crypto-only", false, "generate only the x86 crypto-extension specs of WP-E (gen.CryptoSpecs, the crypto edge families)")
 	avxOnly := fs.Bool("avx-only", false, "generate only the AVX/AVX2/FMA3 specs of WP-F (gen.AVXSpecs, the AVX edge families)")
@@ -178,8 +183,23 @@ func cmdGen(args []string) {
 		specs, vexSpecs, v3VexSpecs = nil, nil, nil
 		*nEdge, *ng = 0, 0
 		avxN = *n
-	} else if *fpOnly || *v3Only || *sseOnly || *cryptoOnly {
+	} else if *fpOnly || *v3Only || *sseOnly || *cryptoOnly || *x87Only {
 		avxSpecs = nil
+	}
+	if *x87Only {
+		specs, vexSpecs, v3VexSpecs = nil, nil, nil
+		*nEdge, *ng = 0, 0
+	}
+	if *x87Only || *nEdge > 0 {
+		// the x87 family (every escape-opcode form) and the CET/TLS encodings: n per memory
+		// form in x87 mode, a few per form otherwise
+		k := max(*nEdge/100, 1)
+		if *x87Only {
+			k = *n
+		}
+		for _, e := range gen.X87Cases(r, k) {
+			cw.emit(e.Class, e.Bytes, e.State)
+		}
 	}
 	for _, sp := range specs {
 		nw := *n

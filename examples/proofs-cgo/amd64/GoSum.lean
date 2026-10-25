@@ -129,7 +129,7 @@ theorem frame_store {m m' : Memory} {rs : List (Nat × Nat)} {a v v' : Nat} (h :
 
 /-! ## The cgo wrapper -/
 
-abbrev wrapper : Nat := segAddr Extracted.program "_cgo_b947fb19b420_Cfunc_c_sum"
+abbrev wrapper : Nat := segAddr Extracted.program "_cgo_2306a0143858_Cfunc_c_sum"
 
 /-- The slice pointer and length in the cgo frame at `a`. -/
 abbrev frameP (m : Memory) (a : Nat) : Nat := m.readLE a 8
@@ -242,7 +242,7 @@ theorem go_spec (ptr len cap : BitVec 64) :
     refine ⟨by omega, ⟨?_, by omega, by omega, by omega, by omega⟩, by omega, hpa, by omega, by omega,
       by omega, by omega⟩
     janus64_disch
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, x87, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   simp only [E, frameP, frameN, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,
     ↓reduceIte, Nat.reduceEqDiff, h32, h80] at hmf h4 h5 h14 h15 hfs1 hfs2 hfsr' hfsg'

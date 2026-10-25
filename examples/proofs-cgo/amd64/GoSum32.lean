@@ -83,8 +83,8 @@ theorem tail (p n : BitVec 64) (s : State) (hpre : SumPre p n s) :
     have hi : i = n.toNat := by omega
     subst hi
     janus64_run
-    janus64_simp [SumPost]
-    exact ⟨hfw, by simpa using hs⟩
+    janus64_simp [SumPost, hfw]
+    simpa using hs
   | succ k ih =>
     intro S i hk hpc hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6⟩ hs
     janus64_run until [tailHead]
@@ -265,8 +265,8 @@ theorem wrapper_spec (T a : BitVec 64) :
   rintro s₂ ⟨-, f₂, rfl⟩
   apply ReturnsC.of_reaches
   janus64_run
-  refine ⟨by assumption, ?_⟩
   simp only [WPost, frameP, frameN, Nat.reducePow]
+  refine ⟨by janus64_simp; simp_all, ?_⟩
   apply frame_store
   · janus_frame
   · rename_i hsum
@@ -334,7 +334,7 @@ theorem go_spec (ptr len cap : BitVec 64) :
     refine ⟨by omega, ⟨?_, by omega, by omega, by omega, by omega⟩, by omega, hpa, by omega, by omega,
       by omega, by omega⟩
     janus64_disch
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, _, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   simp only [E, frameP, frameN, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,
     ↓reduceIte, Nat.reduceEqDiff, h32, h80] at hmf h4 h5 h14 h15 hfs1 hfs2 hfsr' hfsg'

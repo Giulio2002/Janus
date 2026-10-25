@@ -14,6 +14,8 @@
 #   artifacts/examples-cgo-clang-amd64):                 CSum32 GoSum32
 #   amd64 only, C compiled by clang -O3 -march=x86-64-v3
 #   (AVX2-vectorised, artifacts/examples-cgo-avx-amd64): CDot32 GoDot32
+#   amd64 only (WP-J): a CET jump table (CSwitch), x87 long double (CLdMul), and
+#   Go MulLD -> c_ldmul -> ld_mul end to end (GoLdMul)
 #
 # Usage: scripts/verify-cgo-examples.sh [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
 # Writes artifacts/cgo/<isa>/<Name>/verified.json and a summary to artifacts/verify-cgo-examples.txt.
@@ -25,6 +27,7 @@ export PATH=/usr/local/go/bin:$PATH
 declare -A sym=(
   [CAdd]=c_add [CSum]=c_sum [CStore]=c_store [CCount]=c_count [GoCount]=example.com/cgo/neon.Count
   [GoAdd]=example.com/cgo.Add [GoSum]=example.com/cgo.Sum
+  [CSwitch]=c_switch [CLdMul]=ld_mul [GoLdMul]=example.com/cgo.MulLD
   [KStack10]=k_stack10 [KFP]=k_fp [KPMix]=k_pmix [KBig]=k_big [KVSum]=k_vsum
   [GoStack10]=example.com/cgo/cabi.Stack10 [GoFP]=example.com/cgo/cabi.FP
   [GoPMix]=example.com/cgo/cabi.PMix [GoBig]=example.com/cgo/cabi.Big
@@ -44,6 +47,7 @@ if [ ${#names[@]} -eq 0 ]; then
     [ "$isa" = arm64 ] && names+=("$isa/CCount" "$isa/GoCount")
   done
   names+=(amd64/CSum32 amd64/GoSum32 amd64/CDot32 amd64/GoDot32)
+  for n in CSwitch CLdMul GoLdMul; do names+=("amd64/$n"); done
 fi
 
 go build -o bin/janus ./cmd/janus

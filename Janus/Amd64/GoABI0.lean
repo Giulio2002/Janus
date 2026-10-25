@@ -231,11 +231,11 @@ theorem ABIReturn0.of_ret0 {s s' : State} {Q : Memory → Prop} (h : Ret0 s s' Q
 @[janus64_post] theorem ret0_iff (s s' : State) (Q : Memory → Prop) :
     Ret0 s s' Q ↔ s'.regs 4 = s.regs 4 + 8 ∧ s'.regs 5 = s.regs 5 ∧ s'.rip = retAddrOf s ∧
       s'.fsBase = s.fsBase ∧ s'.df = s.df ∧ s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64 ∧
-      s'.fpucw = s.fpucw ∧ Q s'.mem := by
+      s'.fpucw = s.fpucw ∧ s'.x87 = s.x87 ∧ Q s'.mem := by
   constructor
   · rintro ⟨junk, f, v, vh, mx, m, rfl, hmx, hq⟩
     simp [retState0, regs0, regSP, regFP, hq, hmx]
-  · rintro ⟨h1, h2, h3, h4, h5, h6, h7, hq⟩
+  · rintro ⟨h1, h2, h3, h4, h5, h6, h7, h8, hq⟩
     refine ⟨s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mxcsr, s'.mem, ?_, h6, hq⟩
     have hr : regs0 s.regs s'.regs = s'.regs := by
       funext i

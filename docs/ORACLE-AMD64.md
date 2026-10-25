@@ -284,6 +284,56 @@ addend (quieted, `IE` for any signalling one); a NaN is never negated by `VFNMAD
 `0 × ∞ + qNaN` returns the NaN without `IE`; `DE` is not raised when a NaN takes precedence. The
 model faults in the two vendor-dependent cases (see `FP.fma`).
 
+### x87, `NOTRACK` and the padded TLS call (WP-J, 2026-10-25)
+
+`scripts/oracle-amd64.sh x87` (`gen -x87-only`, `gen.X87Cases`): every memory form (`/0`–`/7`
+of `D8`–`DF`, random `mod`/`rm`/SIB/displacement, the operand planted in the buffer in the
+instruction's format: binary32/64 and double-extended edge values, integers, control words
+including raw reserved bits) `N` times and each of the 512 register forms `N/4` times, `FWAIT`
+with and without prefixes, one prefix in twenty (`66 F2 F3 F0 67 65`, the segment overrides, `FS`)
+and `REX` (rarely `REX.W`) mixed in; every case starts from a random x87 state (`gen.RandX87`:
+`TOP`, in-use registers mostly `ST(0)`…`ST(k-1)` and covering the register a form names, the
+eight registers from `gen.Edge80`: zeros, denormals, pseudo-denormals, unnormals,
+pseudo-infinities and pseudo-NaNs, infinities, quiet and signalling NaNs, values at the
+underflow and overflow thresholds and at the binary32/64 subnormal ranges, significands at,
+just above and just below the rounding point for 24/53/64 bits, half-integers and values near
+the 16/32/64-bit integer limits for `FIST`; `ST(1)` often equal or close to `ST(0)`; the control
+word with every precision and rounding setting, all masks or random ones, `PC = 01` rarely; the
+status word with sticky flags, the condition codes, and now and then a pending unmasked
+exception). Plus `NOTRACK` (`3E`, alone, with another segment prefix, `66`, `REX`) on `FF /2`,
+`FF /4`, the `66 66 48 E8` call and its neighbours (`66 E8`, `66 66 E8`, `66 66 40 E8`, three
+`66`s), the `data16 lea` of the general-dynamic sequence, `3E E8`; and the harvest: every x87,
+`JMP` and `CALL` instruction of `oracle-amd64/harvest/x87/ld.c` and the C corpus's `abi.c`
+compiled by gcc and clang at `-O0`, `-O2`, `-O3` and `-O2 -march=x86-64-v3` (`X87_K` states
+each). The runner loads the case's x87 state with `FXRSTOR64` (an image repeating the case's
+`XMM` and `MXCSR`) and reads it back from the signal frame's fxsave area; the comparison covers
+`FCW`, `FSW` (minus the condition codes the model leaves undefined), the abridged tag word and
+every register in use.
+
+| run | cases | agree | of which both fault | model-gap | **MISMATCH** |
+|---|---:|---:|---:|---:|---:|
+| `x87`, `SEED=1`, `N=600`, `X87_K=40` | 125,344 | 95,147 | 30,273 | 30,158 | **0** |
+| `x87`, `SEED=2`, `N=2400`, `X87_K=200` | 510,859 | 389,365 | 121,499 | 121,341 | **0** |
+| of which (`SEED=2`) generated x87 forms | 461,259 | 343,060 | 117,050 | 118,075 | **0** |
+| of which (`SEED=2`) `NOTRACK` / TLS call / `data16 lea` | 2,400 | 1,769 | 719 | 631 | **0** |
+| of which (`SEED=2`) harvested from gcc/clang `long double` code | 47,200 | 44,536 | 3,730 | 2,635 | **0** |
+| `quick`, `SEED=3` (regression of the whole model with the new decoder) | 511,305 | 393,209 | | 118,095 | **0** |
+
+Model gaps by kind (`SEED=2`): `undecodable` 92,736 (the rejected forms and prefixes:
+`FLDENV FNSTENV FRSTOR FNSAVE FBLD FBSTP FFREE`, the transcendentals and constants, `66`/`F2`/
+`F3`/`REX.W`, prefixed register forms), `fpuStack` 15,715 (stack under/overflow, where the
+hardware delivers the masked response), `fpuException` 8,764 (an unmasked or pending exception:
+the hardware completes the instruction and defers `#MF`), `outsideAllocation` 3,181,
+`undefinedResult` 861 (`PC = 01`), `badTarget` 84. The first `SEED=1` run found one model bug in
+9 cases: `FXAM` classified a pseudo-denormal by its value (normal), while the hardware reports it
+as a denormal; fixed (`X87.xamCode`). Host probes before the runs fixed: tininess after rounding
+(a product rounding up to `2^-16382` raises only `PE`); with `PC = 24`/`53` a tiny result has
+24/53 significand bits counted from the integer bit (the (15, 23)/(15, 52) formats); the
+hardware treats `PC = 01` as `11` (the model faults); unsupported operands win over NaNs;
+two NaNs with equal significands give the positive one; `FST`/`FIST` raise no `DE`; `FNSTCW`
+reads `(v & 0x1F3F) | 0x40`; `FCOMI`/`FUCOMI` keep `C1` (the SDM says cleared; the model leaves it
+undefined).
+
 ### SSE packed instructions (WP-D, 2026-10-25)
 
 The SSE2/SSE3/SSSE3/SSE4.1/SSE4.2 packed instructions of `Janus/Amd64/ExecSSE.lean`.

@@ -1,3 +1,4 @@
+import Janus.Amd64.X87
 import Janus.Amd64.InstrSSE
 import Janus.Amd64.InstrCrypto
 import Janus.Amd64.InstrAVX
@@ -326,6 +327,9 @@ inductive Instr where
   (`systemFlag`) if the popped value sets `TF`, `NT`, `AC` or `ID`; the other system bits are
   ignored at CPL 3 (`IF`, `IOPL`, `RF`, `VM`, `VIF`, `VIP`, the reserved bits). -/
   | popfq
+  /-- An x87 instruction (`D8`–`DF`, `9B`; `Janus.Amd64.X87`) with its memory operand, if it
+  has one. -/
+  | x87 (op : X87.Op) (m : Option Addr)
   /-- The legacy-SSE packed instructions (`Janus.Amd64.InstrSSE`, `DecodeSSE`, `ExecSSE`). -/
   | sse (i : SseI XLoc Loc Addr)
   /-- The crypto extensions AES-NI, `PCLMULQDQ`, SHA-NI, ADX (`Janus.Amd64.InstrCrypto`,

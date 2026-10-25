@@ -41,6 +41,12 @@ TEXT ·callPage(SB),NOSPLIT,$0-0
 	MOVUPS	440(R15), X13
 	MOVUPS	456(R15), X14
 	MOVUPS	472(R15), X15
+	// the case's x87 state: FXRSTOR64 of the image at CtxInX87 (which repeats the XMM
+	// registers and MXCSR of the case), if the case has one
+	CMPQ	2088(R15), $0
+	JEQ	nox87
+	FXRSTOR64	2112(R15)
+nox87:
 	VINSERTI128	$1, 1536(R15), Y0, Y0
 	VINSERTI128	$1, 1552(R15), Y1, Y1
 	VINSERTI128	$1, 1568(R15), Y2, Y2
@@ -121,6 +127,17 @@ xloop:
 	ADDQ	$8, DI
 	DECQ	CX
 	JNZ	xloop
+	// the x87 part of the fxsave area (FCW FSW FTW FOP FIP FDP MXCSR, ST0-ST7): 160 bytes
+	LEAQ	2624(AX), DI
+	MOVQ	SI, R8
+	MOVQ	$20, CX
+floop:
+	MOVQ	(R8), BX
+	MOVQ	BX, (DI)
+	ADDQ	$8, R8
+	ADDQ	$8, DI
+	DECQ	CX
+	JNZ	floop
 	// YMM bits 255:128: the YMM_Hi128 component of the XSAVE area (standard format, offset
 	// layout.XsaveYMMHOffset), if the frame has one (sw_reserved.magic1 = FP_XSTATE_MAGIC1)
 	MOVQ	$-1, 2048(AX)

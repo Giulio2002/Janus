@@ -1059,6 +1059,10 @@ deriving instance ToExpr for FlagOp
 deriving instance ToExpr for SseOp
 deriving instance ToExpr for FPArith
 deriving instance ToExpr for EnvOp
+deriving instance ToExpr for X87.Arith
+deriving instance ToExpr for X87.MemFmt
+deriving instance ToExpr for X87.Src
+deriving instance ToExpr for X87.Op
 deriving instance ToExpr for PIntOp
 deriving instance ToExpr for PShiftOp
 deriving instance ToExpr for PImmOp

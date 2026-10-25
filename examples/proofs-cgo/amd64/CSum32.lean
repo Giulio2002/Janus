@@ -68,8 +68,8 @@ theorem tail (p n : BitVec 64) (s : State) (hpre : SumPre p n s) :
     have hi : i = n.toNat := by omega
     subst hi
     janus64_run
-    janus64_simp [SumPost]
-    exact ⟨hfw, by simpa using hs⟩
+    janus64_simp [SumPost, hfw]
+    simpa using hs
   | succ k ih =>
     intro S i hk hpc hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6⟩ hs
     janus64_run until [tailHead]
@@ -194,7 +194,7 @@ theorem correctness (p n : BitVec 64) :
       exact ⟨h0, h1, hb, hacc, hnw, Janus.Arm64.Memory.accessible_weaken _ hst,
         by rw [hr]; exact hret.user, hs.df⟩)
     (fun s s' _ h => by
-      obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, hfw, h10, h11⟩ := h
-      exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, by rw [h9], hfw⟩, h11, h10⟩)
+      obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12⟩ := h
+      exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, by rw [h9], h10⟩, h12, h11⟩)
 
 end Proof

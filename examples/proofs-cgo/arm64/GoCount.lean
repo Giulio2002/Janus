@@ -319,7 +319,9 @@ theorem wrapper_spec (T a : BitVec 64) :
     refine MemFrame.trans (rs := [(t.sp.toNat - 4096, t.sp.toNat)]) hf₁ hm₂ ?_
     intro a n h; simp only [outside_cons, outside_nil, and_true] at h ⊢; omega
   rw [countOf_frame hf₁ _ _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]
-  exact hf.writeLE_both _ _ _
+  refine ⟨?_, hf.writeLE_both _ _ _⟩
+  -- `V8`–`V15`: the C summary keeps them, the wrapper does not touch them
+  simp_all
 
 /-! ## The Go side: `Count` → `_Cfunc_c_count` → `runtime.cgocall` -/
 

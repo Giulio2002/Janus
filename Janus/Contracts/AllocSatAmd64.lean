@@ -70,12 +70,12 @@ theorem ret_of (s s' : Janus.Amd64.State) (res : List W64) (hrip : s'.rip = retA
     (h0 : s'.regs 0 = res.getD 0 (s'.regs 0)) (h3 : s'.regs 3 = res.getD 1 (s'.regs 3))
     (h1 : s'.regs 1 = res.getD 2 (s'.regs 1)) (hx : s'.xmm 15 = s.xmm 15)
     (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr)
-    (hfw : s'.fpucw = s.fpucw) :
+    (hx87 : s'.x87 = s.x87 := by rfl) (hfw : s'.fpucw = s.fpucw := by rfl) :
     s' = retState64 s s'.regs res s'.flags s'.xmm s'.ymmHi s'.mem := by
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, fw⟩ := s'
-  simp only at hrip h4 h5 h14 h0 h3 h1 hx hfs hdf hmx ⊢
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
+  simp only at hrip h4 h5 h14 h0 h3 h1 hx hfs hdf hmx hx87 hfw ⊢
   simp only [retState64]
-  subst hrip hfs hdf hmx
+  subst hrip hfs hdf hmx hx87 hfw
   congr
   · funext i
     simp only [callRegs64]

@@ -150,7 +150,7 @@ theorem wrapper_spec (T a : BitVec 64) :
   janus64_run [spre_iff, fw, BitVec.toNat_ofNat, hfs, h72, bigMem] until [wrapper + 0x32]
     calls [summary (fw t.mem a.toNat 0) (fw t.mem a.toNat 1)]
   dsimp only at *
-  obtain ⟨regs', rip', fl', xm', mem', yh', fsb', df', mx', fcw'⟩ := s'
+  obtain ⟨regs', rip', fl', xm', mem', yh', fsb', df', mx', x87', fcw'⟩ := s'
   dsimp only at *
   subst mem' fsb' rip'
   simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, bigMem] at *
@@ -257,7 +257,7 @@ theorem go_spec (x y : BitVec 64) :
     janus64_simp [h56, h104]
     repeat' (apply And.intro)
     all_goals first | omega | janus64_disch | assumption
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, _, mx, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, _, mx, x87, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   rename_i fsb
   simp only [E, lo, hi, fw, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,

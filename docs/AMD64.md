@@ -60,10 +60,19 @@ handles legacy prefixes, REX, the one- and two-byte opcode maps, ModRM, SIB, RIP
   segments, string instructions, branches, register-only forms and SSE/AVX);
 * duplicate prefix groups (except `66`), and a REX that is not immediately before the opcode
   (hardware ignores such a REX);
-* `66` on branches, `CALL`, `RET`, `PUSH`, `POP` and `LEAVE` (Intel and AMD differ);
+* `66` on branches, `CALL`, `RET`, `PUSH`, `POP` and `LEAVE` (Intel and AMD differ), except
+  before `REX.W` on `CALL rel32` (`66 66 48 E8`, the padded `call __tls_get_addr` of the
+  general-dynamic TLS sequence: `REX.W` fixes the operand size at 64 bits on both vendors);
 * `F2`/`F3` except where they select an instruction (`F3` is `REP` on `MOVS`/`STOS`; `F2`
   and segment overrides on string instructions are rejected);
-* segment overrides on branches (hints and CET `NOTRACK`);
+* segment overrides on branches (hints), except `3E` (CET `NOTRACK`) on the indirect
+  `JMP`/`CALL r/m` (`FF /4`, `FF /2`), which executes as the plain branch (see below);
+* on the x87 escape opcodes `D8`–`DF`: `66`, `F2`/`F3` and `REX.W` (they select the
+  environment-image size of `FNSTENV`/`FSAVE` and are ignored elsewhere), any prefix on a
+  register form, the environment and BCD instructions (`FLDENV FNSTENV FRSTOR FNSAVE FBLD
+  FBSTP`), `FFREE`/`FFREEP`, the reserved aliases (`D9 D8+i`, `DC D0+i`, ...), the
+  transcendental and remainder instructions (`FSIN FCOS FPTAN FPATAN F2XM1 FYL2X FYL2XP1 FPREM
+  FPREM1 FSCALE FRNDINT FXTRACT FINCSTP FDECSTP`) and the constants other than `FLD1`/`FLDZ`;
 * EVEX and XOP, and the VEX instructions not listed below (WP-F's list: `Janus/Amd64/DecodeAVX.lean`
   and below); VEX after any other prefix
   (`66 F2 F3 F0 REX` make it `#UD`; segment overrides are rejected too); a VEX instruction with
@@ -153,6 +162,15 @@ SHA1MSG2 SHA256RNDS2 SHA256MSG1 SHA256MSG2` (`NP 0F 38 C8..CD`), and ADX `ADCX`/
 (`66`/`F3 0F 38 F6`, 32- and 64-bit). The mandatory prefix must be exactly the listed one (`66`
 with `F3` is rejected; hardware executes it, a deliberate model gap). The VEX forms (`VAESENC`,
 `VPCLMULQDQ`, ...) are not modelled (no std assembly uses them outside AVX-512 `hash/crc32`).
+
+**The x87 FPU** for C `long double` (`Janus/Amd64/X87.lean`, WP-J): `FLD`/`FST`/`FSTP` with `m32fp`, `m64fp`, `m80fp` (`FSTP` only) and `ST(i)`, `FILD`,
+`FIST`, `FISTP`, `FISTTP` (`m16/m32/m64int`), `FADD FSUB FSUBR FMUL FDIV FDIVR` (`ST(0), ST(i)`,
+`ST(i), ST(0)`, the popping `P` forms, `m32fp`/`m64fp`) and `FIADD FISUB FISUBR FIMUL FIDIV
+FIDIVR` (`m16/m32int`), `FCOM FCOMP FCOMPP FUCOM FUCOMP FUCOMPP FICOM FICOMP FTST`, `FCOMI
+FCOMIP FUCOMI FUCOMIP`, `FCMOVcc` (all eight), `FXCH`, `FCHS FABS FSQRT`, `FLD1 FLDZ`, `FXAM`,
+`FLDCW FNSTCW FNSTSW` (`AX`, `m16`), `FNCLEX FNINIT FNOP FWAIT`; the CET `NOTRACK` indirect
+branches and the padded TLS call.
+
 In the `sync/atomic`, `bytes`
 and `strings` test binaries 97.9–98.1% of the Go-compiled functions and 53% of the assembly
 functions decode completely (`docs/ORACLE-AMD64.md`); with the SSE scalar floating point
@@ -311,6 +329,34 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
 * **RCL/RCR** (32/64 bits) rotate the `w + 1`-bit value `CF:dst`; they read `CF` (fault if it is
   undefined) unless the masked count is 0; `OF` is defined only for a count of 1 (a masked count
   of 0 makes it undefined, as for `ROL`/`ROR`: the SDM pseudocode's choice).
+* **x87** (`Janus/Amd64/X87.lean`, executed by `Janus/Amd64/X87Exec.lean`). The state field
+  `x87` holds the eight 80-bit data registers, `TOP`, the abridged tag word (per register: in
+  use or empty), the control word and the status word (exception flags, `SF`, `ES`, `B`, and
+  `C0`–`C3`, each `some b` or `none` = undefined, as the RFLAGS bits). Values are double-extended
+  encodings read through `X87.std` as the IEEE format (15, 63) of the core (a pseudo-denormal
+  as the normal number of the same value), so the arithmetic is the core's exact arithmetic and
+  `round`, written back with an explicit integer bit. Precision control rounds `FADD FSUB FMUL
+  FDIV FSQRT` to 24/53/64 significand bits with the extended exponent range (the reserved
+  `PC = 01` faults with `undefinedResult`); rounding control applies to every rounding operation;
+  tininess is detected after rounding; NaNs follow the x87 column of SDM Table 4-7 (two NaNs:
+  quiet over signalling, then the larger significand, then the positive one); unnormals,
+  pseudo-infinities and pseudo-NaNs are invalid operands (`IE`, the indefinite), with priority
+  over NaNs; denormal operands, also binary32/64 memory operands, raise `DE` in arithmetic and
+  comparisons, not in stores and integer conversions. Everything was checked on the host. Not
+  modelled, and therefore faults: the unmasked responses (any exception unmasked in the control
+  word, or pending with `ES` set, is `fpuException`: the hardware would complete the instruction
+  and raise `#MF` at the next waiting one, so faulting earlier is conservative), stack overflow
+  and underflow (`fpuStack`: the masked response would deliver the indefinite), `FNSTSW` while a
+  condition code is undefined (`undefinedFlag`). `C1` is the rounded-up bit after a rounding
+  instruction; `FCOMI`/`FUCOMI` leave `C1` undefined (the SDM says cleared, the host keeps it),
+  as the SDM leaves `C0 C2 C3` after most instructions. `FLDCW` keeps the bits `FNSTCW` reads back
+  (`(v & 0x1F3F) | 0x40`). The instruction and data pointers and the last opcode are not
+  modelled. `X87.binop_add_ieee`/`binop_mul_ieee` (proved) show that at 64-bit precision `FADD`
+  and `FMUL` are IEEE 754 addition and multiplication on (15, 63) in every rounding direction.
+* **`NOTRACK`.** `3E FF /4` and `3E FF /2` are the plain indirect `JMP`/`CALL`: with CET
+  indirect-branch tracking enabled the prefix exempts the branch from the `ENDBR64` check, and
+  Linux does not enable IBT for user space (so the branch never checks anything); `ENDBR64` is a
+  `NOP` for the same reason.
 * `RIP` arithmetic is done on naturals. This is equal to the `BitVec` sum, and it keeps proof
   terms kernel-friendly: `BitVec.reduceAdd` proofs on large literals send the kernel into deep
   recursion.
@@ -322,9 +368,12 @@ end of its segment. An instruction that would cross a segment end is undecodable
 stitched together from two segments. `Program.run`, `Outcome`, `Steps` and the run lemmas in
 `Janus/Amd64/Run.lean` mirror the arm64 ones.
 
-**C code.** gcc-compiled C (cgo, [FFI.md](FFI.md)) adds one instruction to the decoder, `ENDBR64`
-(`F3 0F 1E FA` exactly, a NOP; the CET landing pad at every function entry under
-`-fcf-protection`). Every other `F3 0F 1E` encoding and prefix combination is rejected. `janus
+**C code.** gcc-compiled C (cgo, [FFI.md](FFI.md)) adds `ENDBR64` (`F3 0F 1E FA` exactly, a
+NOP; the CET landing pad at every function entry under `-fcf-protection`; every other `F3 0F 1E`
+encoding and prefix combination is rejected), the `NOTRACK` jump-table dispatch `3E FF E0+r`,
+the padded TLS call `66 66 48 E8` (the `data16 lea x@tlsgd(%rip),%rdi` before it is an ordinary
+`LEA`, its `66` being overridden by `REX.W`; the call is a plain call of the `__tls_get_addr`
+symbol, whose TLS contract belongs to WP-K2) and the x87 instructions above. `janus
 blockers` works on amd64 binaries, judging each x86asm-found instruction with `Janus.Amd64.decode`.
 
 ## What a theorem means on amd64
@@ -610,13 +659,20 @@ proved functions are std assembly it links (WP-E).
 
 * 8/16-bit `RCL`/`RCR`, the VEX forms of AES-NI and `PCLMULQDQ`, EVEX (AVX-512),
   `CMPS`/`SCAS`/`LODS`, `DPPS`/`DPPD` (and `VDPPS`/`VDPPD`), `RCPPS`/`RSQRTPS` (and the VEX forms),
-  `MASKMOVDQU`/`VMASKMOVDQU`, `LDMXCSR`/`VLDMXCSR`, `STMXCSR`, x87, MMX and `GS`-relative accesses
-  are not modelled. Their encodings fault.
+  `MASKMOVDQU`/`VMASKMOVDQU`, `LDMXCSR`/`VLDMXCSR`, `STMXCSR`, MMX, `GS`-relative accesses and the
+  x87 instructions outside the subset above (transcendentals, `FPREM`, `FRNDINT`, `FSCALE`, BCD,
+  environment save/restore) are not modelled. Their encodings fault.
 * `janus64_run` keeps the AES/SHA/`PCLMULQDQ` results folded (`aesRound .enc x k`, irreducible
   for the elaborator, `TacticCrypto`); proofs rewrite them with `Janus.Spec.AES.aesenc_eq` etc.
 * `janus64_run` keeps the packed operations folded (`pintOp (.add 32) x y`, `pshufdNat`, ...) and
   evaluates elements with `elem_pintOp_add` etc.; `ExecSSE.crc32c` is irreducible for the
   elaborator (`TacticSSE`), proofs go through `Janus.Spec.CRC32C`.
+* x87 proofs with a symbolic `TOP` rely on the `TacticX87` simp lemmas (`x87_mod8_*`) to
+  decide which physical register `ST(i)` is; the abridged tag word is a function
+  (`X87.St.tags : Nat → Bool`) so that an in-use test is an `if` the executor can prune
+  (`examples/proofs-cgo/amd64/CLdMul`). A context full of disjunctive `Outside` facts makes every
+  `omega` call of the executor split exponentially; `GoLdMul` keeps them folded (`Keep`) during
+  the runs and unfolds them only where a disjointness is needed.
 * Proofs whose loop invariants describe intermediate states and step a string instruction must
   carry `t.df = false` in the invariant (`Reaches.repStos`/`repMovs` take it as `hdf`), as
   `examples/proofs-amd64/ClearWords`' `Inv` does.

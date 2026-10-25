@@ -888,7 +888,9 @@ Linux:
    = arg`, return address outside the extracted code, `SP` 16-byte aligned (amd64: `RSP + 8`),
    `DF` clear. It runs on a system stack with at least `cgoCStack` (4096) bytes free below `SP`.
    That stack is not memory the Go state grants (`stackSep`), and the C code runs on the same
-   thread (`TPIDR_EL0`/`FS`).
+   thread (`TPIDR_EL0`/`FS`). On amd64 the C code sees the Go caller's x87 FPU state
+   (`CgoEntry.x87`): the Go code, `cgocall`, `entersyscall` and `asmcgocall` execute no x87
+   instruction, and a signal handler's x87 use is undone by the kernel's FPU save/restore.
 2. *Go memory during the call.* Between the Go state at `cgocall` and the C call, and between
    the C return and the Go resume, the runtime (`entersyscall`, `exitsyscall`, the scheduler,
    `asmcgocall`) changes no byte of the memory the theorem grants, except:
@@ -905,7 +907,7 @@ Linux:
    relies on, and which the C proof establishes). `cgocall` then returns to the Go caller at its
    return address, with `SP` and `FP` restored and `g` the same goroutine. On amd64 also
    `X15 = 0`, `DF` clear, and `FS:-8 = g` for a possibly different thread's `FS`. All other
-   registers, the flags and the vector registers are arbitrary. The goroutine may resume on
+   registers, the flags, the vector registers and (amd64) the x87 FPU state are arbitrary. The goroutine may resume on
    another OS thread (`exitsyscall`'s slow path), so `TPIDR_EL0`/`FS` are arbitrary afterwards.
 4. *`_cgo_topofstack`.* During one cgo call it returns the same value every time (no callback into
    Go moves the stack; callbacks are not modelled: the C code would have to reach `crosscall2`,

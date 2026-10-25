@@ -258,7 +258,8 @@ and `c_store` (a store through a pointer); `cgo.go` defines `Add`, `Sum` and `St
 them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcall.c`,
 `cabi/cabi.go`) has the C functions of the classified ABI (`k_stack10`, `k_fp`, `k_pmix`,
 `k_big`, `k_vsum`, `k_vsum8`) and their Go callers (`Stack10`, `FP`, `PMix`, `Big`, `VSum8`).
-`ccover.c` is a model-coverage corpus (not called).
+`cx87.c` (WP-J) defines `ld_mul`, `c_ldmul` and `c_switch`, called by `MulLD` and `Switch` in
+`x87.go`. `ccover.c` is a model-coverage corpus (not called).
 `scripts/build-examples-cgo.sh` builds both ISAs with pinned compilers (Go 1.26.0; gcc 15.2.0
 `Ubuntu 15.2.0-16ubuntu1`, native for amd64 and `aarch64-linux-gnu-gcc` for arm64;
 `CGO_CFLAGS=-g -O2`). `scripts/verify-cgo-examples.sh` extracts and verifies every proof.
@@ -270,8 +271,6 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 | `CStore` | `c_store(p, v)` writes `v` to `*p` and nothing else | ✓ | ✓ |
 | `GoAdd` | Go `Add(x, y)` → cgo → `c_add` → Go returns `x + y mod 2^64`, under the trusted `CgoCall` only | ✓ | ✓ |
 | `GoSum` | Go `Sum(xs)` → cgo → the C loop → Go returns `Σ xs[i] mod 2^64`, under `CgoCall` only | ✓ | ✓ |
-| `CCount` | `c_count(p, n, c)` (package `example.com/cgo/neon`, auto-vectorised by gcc `-O2`: `CMEQ`/`ZIP`/`UADDW`/`ADDP` loop + scalar tail) returns the number of `i < n` with `p[i] = c`, memory unchanged | ✓ | – |
-| `GoCount` | Go `neon.Count(xs, c)` → cgo → the NEON loop → Go returns the count, under `CgoCall` only | ✓ | – |
 | `KStack10` | `k_stack10(a, …, h, i, j)`: ten arguments, two (arm64) / four (amd64) on the stack, one an `int32_t` in an 8-byte slot (`CEnsuresR`) | ✓ | ✓ |
 | `KFP` | `k_fp(double a, float b, double c)` returns `(a - (double)b) * c` in `D0`/`XMM0`, IEEE round-to-nearest (`CEnsuresR`) | ✓ | ✓ |
 | `KPMix` | `k_pmix(struct k_pt a, struct k_pt b, int64_t n)`: two `{double, double}` by value (HFA in `V0`–`V3` / SSE, SSE in `XMM0`–`XMM3`), returns the mixed `{double, int64_t}` (`X0`, `X1` / `XMM0`, `RAX`) | ✓ | ✓ |
@@ -282,12 +281,28 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 | `GoPMix` | Go `PMix` → cgo → `k_pmix` (structs by value, mixed struct result) → Go | ✓ | ✓ |
 | `GoBig` | Go `Big` → cgo → `k_big` (indirect result; the wrapper's stack protector) → Go returns the four words | ✓ | ✓ |
 | `GoVSum8` | Go `VSum8(a, …, h)` → cgo → `k_vsum8` → the variadic `k_vsum(8, a, …, h)` → Go returns the sum; the variadic call site (and `AL = 0`) is checked against the classification | ✓ | ✓ |
+| `CSwitch` | `c_switch(k, x)` (`cx87.c`): a dense switch compiled to a `.rodata` offset table and the CET dispatch `notrack jmp *%rax`, returns the case's value for every `k` | | ✓ |
+| `CLdMul` | `ld_mul(a, b)` (`long double`, x87): with `a`, `b` at `[RSP+8]`, `[RSP+24]` (System V class X87) and the x87 FPU idle (`X87.Idle`), returns with `ST(0)` = `X87.binop .mul 64 .rne a b` the only register in use; `ieee`: that is IEEE 754 multiplication on (15, 63) | | ✓ |
+| `GoLdMul` | Go `MulLD(a, b, r *[16]byte)` → cgo → `c_ldmul` → `ld_mul` → Go: the 10 bytes at `r` become the x87 product of the 10 bytes at `a` and `b`, under `CgoCall` only | | ✓ |
+| `CCount` | `c_count(p, n, c)` (package `example.com/cgo/neon`, auto-vectorised by gcc `-O2`: `CMEQ`/`ZIP`/`UADDW`/`ADDP` loop + scalar tail) returns the number of `i < n` with `p[i] = c`, memory unchanged | ✓ | – |
+| `GoCount` | Go `neon.Count(xs, c)` → cgo → the NEON loop → Go returns the count, under `CgoCall` only | ✓ | – |
 
 The Go-side preconditions are explicit. They include the stack-growth checks of the Go function
 and of its `_Cfunc_` wrapper, the stack window, and the two statically initialised cgo globals
 (the function-pointer variable holds the wrapper's address; `runtime.cgoAlwaysFalse` is false),
 whose addresses are recomputed from the extracted code. They also require that the `g` struct and
 the TLS `g` slot are not on the stack.
+
+**`long double` across the boundary (amd64).** The x87 FPU is part of the amd64 state
+(`State.x87`). cgo has no Go type for `long double`, so `MulLD` passes pointers to 16-byte
+buffers and the C side (`c_ldmul`) calls the non-inlined `ld_mul(long double, long double)`,
+which receives its arguments on the stack (`push`ed by the caller) and returns in `ST(0)`
+(`fstpt` stores it). The C side assumes `X87.Idle` (empty stack, control word `0x037F`, no
+pending exception) at entry; the trusted `CgoEntry.x87` makes the C entry state's x87 FPU the Go
+caller's, so `GoLdMul` states `X87.Idle s.x87` of the Go call state, and after the call
+(`GoResume`) the x87 state is arbitrary. The ABI facts about `long double` (the X87 argument
+class, `ST(0)` results, the control word callee-saved) are stated in the example
+preconditions and postconditions, not yet in `CCall`/`CReturn` (WP-K1).
 
 ## 6. Model coverage for compiler-generated C
 

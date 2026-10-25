@@ -361,4 +361,46 @@ example : decode [0xf2, 0x0f, 0x38, 0xf0, 0xc1] = some (.sse (.crc32 8 0 (.reg 1
 example : decode [0xc4, 0xe2, 0xe9, 0xb8, 0xc1] = some (.avx (.fma 231 false false 0 64 128 0 2 (.xmm 1)), 5) := by decide
 example : decode [0xc4, 0xe3, 0xf3, 0xf0, 0xc1, 0x05] = none := by decide
 
+-- WP-J: notrack jmp *%rax (gcc's CET jump-table dispatch); notrack call *%rdx; other segment
+-- prefixes on indirect branches stay rejected
+example : decode [0x3e, 0xff, 0xe0] = some (.jmpInd (.reg 0), 3) := by decide
+example : decode [0x3e, 0xff, 0xd2] = some (.callInd (.reg 2), 3) := by decide
+example : decode [0x2e, 0xff, 0xe0] = none := by decide
+example : decode [0x3e, 0x66, 0xff, 0xe0] = none := by decide
+-- the padded `call __tls_get_addr` (66 66 48 E8 rel32) and the `data16 lea` before it
+example : decode [0x66, 0x66, 0x48, 0xe8, 0x10, 0, 0, 0] = some (.call 0x10, 8) := by decide
+example : decode [0x66, 0xe8, 0x10, 0, 0, 0] = none := by decide
+example : decode [0x66, 0x48, 0x8d, 0x3d, 0, 0, 0, 0] =
+    some (.lea 64 7 ⟨none, none, 0, 0, true, false⟩, 8) := by decide
+-- x87: fldt 0x10(%rbp); fld1; faddp; fmulp; fucomip; fnstcw/fldcw; fistpll; fsubrp (Intel: ST(1) ← ST(0) - ST(1))
+example : decode [0xdb, 0x6d, 0x10] =
+    some (.x87 (.ld (.mem .f80)) (some ⟨some 5, none, 0, 0x10, false, false⟩), 3) := by decide
+example : decode [0xd9, 0xe8] = some (.x87 (.ldConst X87.one80) none, 2) := by decide
+example : decode [0xde, 0xc1] = some (.x87 (.arithTo .add 1 true) none, 2) := by decide
+example : decode [0xde, 0xc9] = some (.x87 (.arithTo .mul 1 true) none, 2) := by decide
+example : decode [0xdf, 0xe9] = some (.x87 (.comi true 1 true) none, 2) := by decide
+example : decode [0xde, 0xe1] = some (.x87 (.arithTo .subr 1 true) none, 2) := by decide
+example : decode [0xd9, 0x7c, 0x24, 0x0e] =
+    some (.x87 .nstcw (some ⟨some 4, none, 0, 0x0e, false, false⟩), 4) := by decide
+example : decode [0xdf, 0x7c, 0x24, 0x08] =
+    some (.x87 (.ist .i64 false true) (some ⟨some 4, none, 0, 8, false, false⟩), 4) := by decide
+-- rejected: fnstenv, frstor, ffree, fsin, 66-prefixed fld, REX.W fld, prefixed register form
+example : decode [0xd9, 0x30] = none := by decide
+example : decode [0xdd, 0x20] = none := by decide
+example : decode [0xdd, 0xc0] = none := by decide
+example : decode [0xd9, 0xfe] = none := by decide
+example : decode [0x66, 0xdb, 0x28] = none := by decide
+example : decode [0x48, 0xdb, 0x28] = none := by decide
+example : decode [0x40, 0xde, 0xc1] = none := by decide
+-- 1.5 * 3 = 4.5, round to nearest at 64-bit precision; 1/3 at PC = 24 is rounded to 24 bits
+example : (X87.binop .mul 64 .rne (X87.pack80 false 16383 0xC000000000000000)
+    (X87.pack80 false 16384 0xC000000000000000)).res = X87.pack80 false 16385 0x9000000000000000 := by decide
+example : (X87.binop .div 24 .rne X87.one80 (X87.pack80 false 16384 0xC000000000000000)).res =
+    X87.pack80 false 16381 0xAAAAAB0000000000 := by decide
+-- an unnormal operand is invalid even next to a NaN; two QNaNs of equal significand: the positive one
+example : (X87.binop .add 64 .rne (X87.pack80 false 0x4000 0x4000000000000000)
+    (X87.pack80 false 0x7FFF 0xC000000000000001)).res = X87.indefinite80 := by decide
+example : (X87.binop .add 64 .rne (X87.pack80 true 0x7FFF 0xC000000000000001)
+    (X87.pack80 false 0x7FFF 0xC000000000000001)).res = X87.pack80 false 0x7FFF 0xC000000000000001 := by decide
+
 end JanusTests.Amd64
