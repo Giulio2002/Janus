@@ -47,19 +47,31 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   by_cases hx : x.toNat ≤ 10
   · -- normal path: the exit calls the closure, whose recover() returns nil
     janus_run until [Extracted.program.contractAddr "runtime.gorecover"]
-    have hagr := Map.Agrees.of_window (rs := P.priv)
-      (m := s.mem) (lo := s.sp.toNat - (P.depth + (P.depth + 112))) (hi := s.sp.toNat + 32)
-      (by janus_frame) (Outside.of_sub hout (by omega) (by omega))
-    refine Reaches.call (Summary.withExit hrec hret) rfl
-      ⟨PanicPre.of_within hc (by rw [outside_append] at *; janus_frame) (hl.env_frame _ _ henv hagr)
-        (by simp; omega) (by simp; omega) (by simp; omega) rfl (by simp [setReg]) (by simp [setReg]),
-       by simp [setReg]; exact Memory.accessible_mono _ hst (by omega) (by omega),
-       by simp [setReg]; omega⟩ ?_
-    intro s1 hpc1 ⟨⟨j1, f1, v1, m1, hs1, hfr1, henv1⟩, hcalm1, -⟩
-    obtain ⟨h0, h1, hcalm1'⟩ := hcalm1 (hl.calm_frame _ _ _ hcalm hagr)
-    subst hs1
-    trace_state
-    sorry
+    refine Reaches.call (Summary.withExit hrec hret) rfl ⟨?_, ?_, ?_⟩ ?_
+    rotate_left 3
+    · rintro s1 hpc1 ⟨⟨j1, f1, v1, m1, hs1, hfr1, henv1⟩, hcalm1, -⟩
+      obtain ⟨h0, h1, -⟩ := hcalm1 (hl.calm_frame _ _ _ hcalm
+        (Map.Agrees.of_window (lo := s.sp.toNat - (P.depth + (P.depth + 112))) (hi := s.sp.toNat + 32)
+          (by janus_frame) (Outside.of_sub hout (by omega) (by omega))))
+      subst hs1
+      simp only [calleeStack] at hfr1
+      simp only [retState, callRegs_apply, List.getD_nil] at h0 h1
+      janus_run
+      all_goals first | (simp [hx]; done) | (exfalso; simp_all)
+    · refine PanicPre.of_within hc ?_ ?_ ?_ ?_ ?_ rfl ?_ ?_
+      · simp only [List.cons_append, List.nil_append]; janus_frame
+      · apply hl.env_frame _ _ henv
+        apply Map.Agrees.of_window (lo := s.sp.toNat - (P.depth + (P.depth + 112)))
+          (hi := s.sp.toNat + 32)
+        · janus_frame
+        · exact Outside.of_sub hout (by omega) (by omega)
+      all_goals (simp [setReg]; try omega)
+    · have h120 : (18446744073709551496 + s.sp.toNat) % 18446744073709551616 = s.sp.toNat - 120 := by
+        omega
+      simp [setReg, h120]
+      exact Janus.Contracts.IfaceModel.acc_read_of_write
+        (Memory.accessible_mono _ hst (by omega) (by omega))
+    · simp [setReg]; omega
   · sorry
 
 end Proof
