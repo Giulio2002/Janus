@@ -58,6 +58,21 @@ func s_convTslice()
 //go:linkname s_convTstring runtime.convTstring
 func s_convTstring()
 
+//go:linkname s_deferproc runtime.deferproc
+func s_deferproc()
+
+//go:linkname s_deferprocat runtime.deferprocat
+func s_deferprocat()
+
+//go:linkname s_deferprocStack runtime.deferprocStack
+func s_deferprocStack()
+
+//go:linkname s_deferrangefunc runtime.deferrangefunc
+func s_deferrangefunc()
+
+//go:linkname s_deferreturn runtime.deferreturn
+func s_deferreturn()
+
 //go:linkname s_efaceeq runtime.efaceeq
 func s_efaceeq()
 
@@ -126,6 +141,9 @@ func s_goPanicSliceBU()
 
 //go:linkname s_goPanicSliceConvert runtime.goPanicSliceConvert
 func s_goPanicSliceConvert()
+
+//go:linkname s_gorecover runtime.gorecover
+func s_gorecover()
 
 //go:linkname s_ifaceeq runtime.ifaceeq
 func s_ifaceeq()
@@ -354,6 +372,8 @@ func s_strequal()
 
 //go:linkname s_strhash runtime.strhash
 func s_strhash()
+//go:linkname s_sigpanic runtime.sigpanic
+func s_sigpanic()
 
 //go:linkname s_typeAssert runtime.typeAssert
 func s_typeAssert()
@@ -381,6 +401,11 @@ var keep = []func(){
 	s_convTnoptr,
 	s_convTslice,
 	s_convTstring,
+	s_deferproc,
+	s_deferprocat,
+	s_deferprocStack,
+	s_deferrangefunc,
+	s_deferreturn,
 	s_efaceeq,
 	s_f32equal,
 	s_f32hash,
@@ -404,6 +429,7 @@ var keep = []func(){
 	s_goPanicSliceB,
 	s_goPanicSliceBU,
 	s_goPanicSliceConvert,
+	s_gorecover,
 	s_ifaceeq,
 	s_interequal,
 	s_interfaceSwitch,
@@ -480,6 +506,7 @@ var keep = []func(){
 	s_rand,
 	s_strequal,
 	s_strhash,
+	s_sigpanic,
 	s_typeAssert,
 	s_typedmemclr,
 	s_typedmemmove,

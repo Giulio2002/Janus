@@ -6,6 +6,7 @@ import Janus.Arm64.Exec
 import Janus.Program
 import Janus.Arm64.MemoryLemmas
 import Janus.Run
+import Janus.Eface
 import Janus.GoABI
 import Janus.CABI
 import Janus.FFI
@@ -56,7 +57,12 @@ import Janus.Contracts.SyscallAmd64
 import Janus.Contracts.SyscallSat
 import Janus.Contracts.SyscallSatAmd64
 import Janus.Spec.Type
+import Janus.Spec.Panic
 import Janus.Contracts.Iface
+import Janus.Contracts.Panic
+import Janus.Contracts.PanicAmd64
+import Janus.Contracts.PanicSat
+import Janus.Contracts.PanicSatAmd64
 import Janus.Contracts.IfaceAmd64
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat

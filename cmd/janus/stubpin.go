@@ -611,9 +611,12 @@ func cmdStubpins(args []string, stdout, stderr io.Writer) error {
 				}
 			}
 		}
-		// the runtime functions a framework contract describes (pinned when --contract names them)
+		// the runtime functions a framework contract describes (pinned when --contract names
+		// them): the interface runtime and the panic/defer/recover runtime. runtime.gopanic is
+		// also a panic stub, so it is already emitted above as a stub (it keeps its pins).
 		for _, f := range b.Funcs {
-			if _, ok := stubKind(f.Name); runtimeContractStubs[f.Name] && !ok && !helpers[f.Name] {
+			if _, ok := stubKind(f.Name); (runtimeContractStubs[f.Name] ||
+				runtimePanicContractStubs[f.Name]) && !ok && !helpers[f.Name] {
 				if _, err := emit("contract", f); err != nil {
 					return err
 				}

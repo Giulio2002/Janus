@@ -715,6 +715,63 @@ and loop induction as an example (the invariant is the state `{ s with regs := R
 pc := head }`), then exhibit a call state satisfying the precondition. In the example, the
 callee's read of memory written by the frames is shown unchanged with a frame lemma
 (`strCmp_writeLE`, applied by `simp (disch := omega) only [...] at *`).
+### Panics, defer and recover (`PanicIf`, `DeferInc`, `IndexAt`, `LoadField`, `DeferTwice`, `RecoverSet`)
+
+State a function that may panic as an `EnsuresGo` (docs/RUNTIME-CONTRACTS.md, "Panics, defer,
+recover"): a postcondition for the return and one for the panic value, with the classification
+`goClass P` for a panic-runtime model `P`:
+
+```lean
+theorem correctness (P : PanicRuntime) (x etyp edata : BitVec 64) :
+    EnsuresGo Extracted.program Extracted.entry [x, etyp, edata]
+      (fun s => GuardOK s 0 ∧ StackOK s 40 32) (fun _ => goClass P)
+      (fun _ s' => x.toNat ≤ 10 → s'.regs 0 = x + 1)
+      (fun _ v _ => 10 < x.toNat → v = ⟨etyp.toNat, edata.toNat⟩) := by
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩⟩
+  janus_intro hs
+  refine GoReturns.of_reaches ?_      -- now an ordinary `Reaches` goal
+  by_cases hx : x.toNat ≤ 10
+  · janus_run; exact fun _ => trivial
+  · janus_run                         -- ends at the gopanic stub; X0/X1 are the value
+    refine ⟨⟨etyp.toNat, edata.toNat⟩, ?_, ?_⟩ …
+```
+
+* `GoReturns.of_reaches` turns the goal into `Reaches` whose stub/fault outcomes carry the
+  `goClass` value: at `runtime.gopanic` the `any` in `X0`/`X1` (amd64 `RAX`/`RBX`), at a
+  `runtime.panic*` stub `P.err k` (`IndexAt`: `P.boundsError`), at a memory fault below `0x1000`
+  `P.err .mem` (`LoadField`: the run stops at the faulting load and the goal asks that the address
+  is below `0x1000`). A function that never panics proves `fun _ _ _ => False` for the panic case,
+  and every existing `Ensures` lifts with `Ensures.toGo`.
+* **Heap defers** (`DeferTwice`): extract with `--contract 'runtime.deferproc*' --contract
+  runtime.deferreturn` (`scripts/example-targets.sh`) and step over each call with
+  `janus_run until [Extracted.program.contractAddr "runtime.deferproc"]` then
+  `Reaches.call (Summary.withExit hdp hret) rfl ⟨…⟩ ?_`. The precondition at a call site comes
+  from `PanicCallerOK P s frame above` in the theorem's precondition via `PanicPre.of_within`
+  (the stack window and `P.Env` after the frame's own stores, by `janus_frame` and
+  `hl.env_frame`).
+* **`recover`** (`RecoverSet`): the theorem takes the `gopanic`, `gorecover` and `deferreturn`
+  contracts, the funcdata offsets of the frame (read off the disassembly: the `strb` that
+  sets `deferBits`, the closure slot, the `deferreturn` call) and `¬ P.wrapper (pc)` for the
+  closure's call to `gorecover`. At `gopanic`, `GopanicRecoverContract.reaches hpan hret rfl ⟨…⟩`
+  hands over a closure-entry state `c`; destructure it (`obtain ⟨cr, csp, cpc, …⟩ := c; subst`),
+  run the extracted closure to its return (a `ReachesRet` that is then fed to the contract's
+  continuation) and continue at the resume state.
+* **Code addresses as values** (the closure's entry, the return point after `BL runtime.gorecover`,
+  the resume site, the resume address a model `gopanic` loads) are written as
+  `janus_eval% (segAddr Extracted.program "pkg.F.func1" + off)` / `janus_eval% (Extracted.entry +
+  off)` (local macros in `RecoverSet`), never as literals, so a relinked binary needs no edit.
+* **Opaque registers.** A contract's post state has an abstract register function `cr`; when the
+  executor needs some of them concrete (the closure reads `X26`, the frame pointer), rewrite
+  `cr` as `setReg` over itself with the known values first (`have : cr = fun i => if i = 26 then
+  … else cr i`), so the executor sees them.
+* The contract postconditions are curried in `ReachesRet.call` (`intro hpost _ hpanI`) but a
+  conjunction in `Reaches.call` (`obtain ⟨⟨…⟩, h, -⟩`). Normalize stack addresses
+  (`s.sp - 80 + 39 = s.sp - 41`) before `simp [Memory.readLE_writeLE_of_disjoint]`, and use
+  `set_option maxHeartbeats 0 in` for the big recover proofs.
+* **Non-vacuity**: `Proof.Witness.nonvacuous` instantiates every hypothesis at once (the model
+  `PanicSat.P0`, model code at the contract addresses proved to meet each contract, a concrete
+  call state) and `Proof.Witness.returns` applies the theorem to it; both are verified by
+  `scripts/verify-examples.sh` when the proof has a `namespace Witness`.
 
 ### Counterexamples (`WrongAdd`)
 

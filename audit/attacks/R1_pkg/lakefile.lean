@@ -39,13 +39,19 @@ def compile (name src : String) : IO ByteArray := do
   if r.exitCode != 0 then throw <| IO.userError s!"compiling {name} failed: {r.stdout}{r.stderr}"
   IO.FS.readBinFile out
 
-/-- `Janus/GoABI.lean` with `Ensures p entry args pre post := True` (and the three lemmas that
-unfold `Ensures` dropped, since they no longer typecheck). -/
+/-- `Janus/GoABI.lean` with `Ensures p entry args pre post := True` (and the lemmas that unfold
+`Ensures` dropped, since they no longer typecheck). -/
 def evilGoABI : IO String := do
   let s ← IO.FS.readFile (janusDir / "Janus" / "GoABI.lean")
   let body := "  ∀ ret, RetAddr p ret → ∀ s, CallSetup (p.withExit ret) entry args s → pre s →\n" ++
     "    Returns (p.withExit ret) s (fun s' => ABIReturn s s' ∧ post s s')\n"
   let s := s.replace body "  True\n"
+  -- the Go-level compatibility lemma `Ensures.toGo` unfolds `Ensures` too: drop it as well
+  let s := match s.splitOn "/-- **Compatibility.**" with
+    | [a, b] => match b.splitOn "/-- Weaken the outcomes of an `EnsuresGo`. -/" with
+      | [_, c] => a ++ "/-- Weaken the outcomes of an `EnsuresGo`. -/" ++ c
+      | _ => s
+    | _ => s
   match s.splitOn "/-! ### `Ensures` -/" with
   | [a, b] => match b.splitOn "/-! ### Return addresses -/" with
     | [_, c] => return a ++ "/-! ### Return addresses -/" ++ c

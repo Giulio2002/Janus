@@ -264,20 +264,12 @@ the call fault (`noCode`), so it can only make a proof impossible.
 `janus_dyn` has turned the hypotheses into equations), `janus_run` / `janus64_run` uses the
 target's `Summary` from `calls [...]`, or executes it.
 
-**Heap-allocated defer records.** A function whose defers the compiler cannot open-code calls
-`runtime.deferprocStack`/`runtime.deferproc` and `runtime.deferreturn` (which itself runs the
-deferred calls, dynamically). They can be left out with `--contract`
-(`--contract 'runtime.deferproc*' --contract runtime.deferreturn`; a `--contract` pattern takes
-precedence over the built-in omission of `deferreturn`), but no contract library describes them:
-a theorem would have to state, as a `Summary` of the linked program, that `deferreturn` runs the
-recorded closures. Such functions are unsupported for now.
-
-**`defer`.** Open-coded defers (Go 1.26's default for up to 8 defers outside loops) are just code:
-a funcval in the frame, a `deferBits` byte, and a call of the closure at each exit. The
-`runtime.deferreturn` call such functions contain is reached only after a recovered panic; it is
-not extracted (`omittedCalls` in `identity.json`). Defers that need a defer record
-(`runtime.deferproc*`, with `runtime.deferreturn` at every exit) are not supported, and
-`recover` and panics unwinding through deferred calls are out of scope (docs/SOUNDNESS.md).
+**Heap-allocated defer records, `recover`, panics.** These go through the Go 1.26 panic runtime;
+see [Panics, defer, recover](#panics-defer-recover) below. Open-coded defers (Go 1.26's default for
+up to 8 defers outside loops) are just code: a funcval in the frame, a `deferBits` byte, and a call
+of the closure at each exit, executed like any other code (`DeferAdd`, `DeferInc`). The
+`runtime.deferreturn` call such functions contain is reached only after a recovered panic; without
+`--contract runtime.deferreturn` it is not extracted (`omittedCalls` in `identity.json`).
 
 ### Maps (`Janus/Spec/Map.lean`, `Janus/Contracts/Map.lean`, `MapVar.lean`, `MapStr.lean` and their `…Amd64.lean` files)
 
@@ -787,6 +779,91 @@ write barrier's readiness `HRoom` holds at every real `gcWriteBarrier2` call tha
 **What stays trusted.** Each contract read as a claim about the Go 1.26 runtime, except
 `decoderune`, `countrunes` and the write barrier's fast path, which are proved from the binary's
 code.
+<a id="panics-defer-recover"></a>
+
+### Panics, defer, recover (`Janus/Spec/Panic.lean`, `Janus/Contracts/Panic.lean`, `Janus/Contracts/PanicAmd64.lean`)
+
+**Go-level outcomes.** `Janus.GoABI.EnsuresGo` (and `Janus.Amd64.GoABI.EnsuresGo`) states both
+outcomes of a call: it **returns** (with `ABIReturn` and a postcondition `ret s s'`) or it
+**panics** with an interface value `v : Janus.Eface` (`pan s v s'`). A Go-level run (`GoReturns`)
+is ordinary steps ending at the return address, at a panic stub (`runtime.gopanic`, the
+`runtime.panic*` family), at a faulting instruction (a nil dereference or, on amd64, `#DE`, which
+the signal handler turns into a panic via `runtime.sigpanic`), or at a point where a
+deferred/recovered panic left the frame; a classification `GoClass` says which panic value each
+of these is. `Ensures.toGo` turns every existing `Ensures` theorem into an `EnsuresGo` whose panic
+outcome is impossible, so nothing earlier changes.
+
+**The model.** A theorem quantifies over every `P : Janus.Spec.PanicRuntime` with `P.Laws`:
+
+| Field | Meaning (Go 1.26 runtime) |
+| --- | --- |
+| `P.err k` | the `runtime.Error` value of kind `k : ErrKind` (`bounds`, `divide`, `shift`, `mem`, `dottype`, `rangeState`, …): a non-nil `error`, distinct per kind |
+| `P.Env m`, `P.priv`, `P.depth` | the runtime usable; its memory (the `_panic`/`_defer` records, the deferpool, the error descriptors); the stack it may use |
+| `P.Panicking m g v rp` | goroutine `g` runs an active, unrecovered panic with value `v`; its current deferred call returns to `rp` inside `gopanic` |
+| `P.Calm m g` | no panic is active (`g._panic == nil`) |
+| `P.Recovered m g` | the current panic was recovered |
+| `P.wrapper pc` | `pc` is in a compiler wrapper (`abi.FuncIDWrapper`), which `recover` skips |
+
+The laws: the error values are non-nil and injective; `Env`, `Panicking`, `Calm`, `Recovered`
+live in `P.priv` (memory changes elsewhere keep them); a calm goroutine is not panicking.
+
+**Classification (`goClass P`).** Reaching `runtime.gopanic` panics with the `any` the compiler put
+in the argument registers (arm64 `X0`/`X1`, amd64 `RAX`/`RBX`). Reaching a `runtime.panic*` stub
+panics with `P.err (panicStubErr name)`: `panicBounds`/`goPanicIndex*`/`goPanicSlice*` →
+`bounds`, `panicdivide` → `divide`, `panicshift` → `shift`, `panicoverflow`, `panicfloat`,
+`panicmem(Addr)` → `mem`, `panicSimdImm`, `panicdottypeE/I`/`panicnildottype` → `dottype`,
+`panicmakeslicelen/cap`, `panicunsafe*`, `panicwrap`, `panicrangestate` → `rangeState`. A memory
+fault at an address below `0x1000` (the signal handler's `sigcode1 < 0x1000` → `panicmem`) panics
+with `P.err .mem`; on amd64 a `#DE` panics with `P.err .divide`.
+
+**Contracts.** The control-flow runtime functions are left out with `--contract` and **pinned** to
+the runtime's code (`runtimePanicContractStubs` in `cmd/janus`: `gopanic`, `gorecover`,
+`deferproc`, `deferprocStack`, `deferreturn`, `deferprocat`, `deferrangefunc`, `sigpanic`; a
+`--contract` on one of them takes precedence over its default stub/omit meaning). Each has a
+satisfiability theorem in `Janus/Contracts/PanicSat.lean` (a model `P0` whose laws hold, model
+code proved to meet the contract, and a call state in the precondition):
+
+| Go | Runtime entry | Contract | Effect |
+| --- | --- | --- | --- |
+| `defer f()` in a loop | `deferproc(fn)` | `DeferprocContract` | returns; the record lives in `P.priv` |
+| `defer` with a stack record | `deferprocStack(d)` | `DeferprocStackContract` | returns |
+| `defer` in a range-over-func body | `deferprocat(fn, frame)`, `deferrangefunc()` | `DeferprocatContract`, `DeferrangefuncContract` | return |
+| function exit with defer records | `deferreturn()` | `DeferreturnContract` | runs the frame's deferred calls and returns; effects confined to `P.priv` and the callee window |
+| `recover()` | `gorecover()` | `GorecoverContract` | `nil` when `P.Calm`; the panic value (and `P.Recovered`) when called directly by the running deferred call: the caller is not a wrapper and its frame's saved return address, `[FP + 8]` on the frame-pointer chain, is that call's return point |
+| `panic(v)` with a recovering open-coded defer | `gopanic(v)` | `GopanicRecoverContract` | calls the frame's deferred closure (funcval from the frame slot, `X26`, `P.Panicking`); for every state the closure may return in with the panic recovered, resumes the frame at its `deferreturn` site with `SP`/`X29` restored and `P.Calm` |
+| range-over-func misuse | `panicrangestate(s)` | `panicrangestate_panics` (stub) | panics with `P.err .rangeState` |
+
+Every returning contract has the frame of the other runtime contracts (`PanicPre`, `PanicRet`:
+`SP`, `X18`, `X28`, `X29` kept, everything else arbitrary, memory changed only in `P.priv` and the
+callee stack window, `P.Env` again). A caller states `PanicCallerOK P s frame above` (the
+interface runtime's `CallerOK` for `P`); `PanicPre.of_caller` / `of_frame` give the contract's
+precondition at a call site.
+
+**`gopanic` is a continuation.** It is the one contract that hands control to user code: it says
+the runtime reaches the closure's entry (a state the theorem continues from by running the
+extracted closure), and that from **every** state the closure may return in — `SP`, `X18`, `X28`
+restored, the runtime's stack between the closure's `SP` and the frame's kept, the panic recovered
+— control reaches the frame's `deferreturn` site. A closure that does not recover gets no promise.
+The frame's `deferBits` offset, slot offset and `deferreturn` site (funcdata
+`FUNCDATA_OpenCodedDeferInfo` and `_func.deferreturn`) are parameters of the contract, i.e. part of
+the printed statement.
+
+**What is out of scope.** Nested panics (a panic while another is running), `Goexit`, frames with
+several pending defers in the `gopanic` contract (one pending open-coded defer is covered), and
+panics that propagate out of a frame with pending deferred calls (the panic outcome is stated for
+frames whose deferred calls have run or that have none).
+
+**Examples** (`examples/basic/rtpanic.go`; arm64 `examples/proofs/<Name>.lean`, amd64
+`examples/proofs-amd64/<Name>/Proof.lean`):
+
+| Function | Shows |
+| --- | --- |
+| `PanicIf(x, e any)` | returns `x + 1` for `x ≤ 10`, panics with exactly `e` otherwise (`panic(v) → .panicked v`) |
+| `DeferInc(p, x)` | an open-coded deferred closure runs on the normal return (`*p` incremented) |
+| `IndexAt(xs, i)` | out of range panics with `P.boundsError` (`runtime.panicBounds`) |
+| `LoadField(c)` | a nil receiver faults, which is a panic with `P.err .mem` (the `sigpanic` path) |
+| `DeferTwice()` | two heap `defer` records in a loop (`deferproc`, `deferreturn`); the call returns |
+| `RecoverSet(x, e)` | `recover()` in a deferred closure turns `panic(e)` into a return of the named result `7` |
 
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 

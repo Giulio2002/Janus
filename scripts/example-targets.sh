@@ -91,4 +91,11 @@ case "$1" in
   MbarTypedmemmove) printf '%s\n' --contract runtime.memmove --contract runtime.bulkBarrierPreWrite ;;
   MbarTypedmemclr|MbarMemclrHasPointers) printf '%s\n' --contract runtime.memclrNoHeapPointers \
       --contract runtime.bulkBarrierPreWrite ;;
+  # the panic/defer/recover examples (examples/basic/rtpanic.go): PanicIf, IndexAt and LoadField
+  # need no extra arguments (they reach runtime.gopanic / runtime.panicBounds as panic stubs, or
+  # fault); DeferInc's open-coded closure is inferred. The heap-defer and recover functions leave
+  # the Go 1.26 panic runtime out as pinned contracts (Janus/Contracts/Panic.lean).
+  DeferLoop|DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
+  RecoverSet) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
+      --contract runtime.deferreturn ;;
 esac

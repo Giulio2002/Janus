@@ -179,6 +179,21 @@ var runtimeContractStubs = map[string]bool{
 	"runtime.mapassign_faststr": true, "runtime.mapdelete_faststr": true,
 }
 
+// runtimePanicContractStubs are the panic/defer/recover runtime functions whose behaviour a
+// framework contract library states (Janus/Contracts/Panic.lean, PanicAmd64.lean: the panic
+// runtime of Go 1.26). They are not followed by default (runtime.gopanic is also a panic stub,
+// runtime.deferreturn is omitted, the others would pull in the scheduler). A --contract pattern
+// that matches one turns it into a pinned contract (checkContractPin, like runtimeContractStubs):
+// a direct branch to it is not followed, its code is not copied, and a theorem states its effect
+// as a Summary / GoReturns hypothesis (docs/RUNTIME-CONTRACTS.md, "Panics, defer, recover").
+// Without a matching --contract they keep their default meaning (gopanic a panic stub, the rest
+// ordinary code or the omitted deferreturn).
+var runtimePanicContractStubs = map[string]bool{
+	"runtime.gopanic": true, "runtime.gorecover": true, "runtime.deferproc": true,
+	"runtime.deferprocStack": true, "runtime.deferreturn": true, "runtime.deferprocat": true,
+	"runtime.deferrangefunc": true, "runtime.sigpanic": true,
+}
+
 // stubKind classifies a linked symbol name as a runtime stub (name only; see classifyStub for
 // the checks that make the name trustworthy).
 func stubKind(name string) (StubKind, bool) {
@@ -367,7 +382,7 @@ func (x *Extraction) contractTarget(m *contractMatcher, seen map[uint64]bool, g 
 	if !seen[g.Addr] {
 		seen[g.Addr] = true
 		c := Contract{Name: g.Name, Addr: g.Addr}
-		if runtimeContractStubs[g.Name] {
+		if runtimeContractStubs[g.Name] || runtimePanicContractStubs[g.Name] {
 			if err := x.Bin.checkContractPin(g); err != nil {
 				return true, err
 			}

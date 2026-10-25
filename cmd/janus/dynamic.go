@@ -136,6 +136,16 @@ func (r *reacher) addTarget(addr uint64, via, from string) bool {
 		r.dynSeen[key] = true
 		r.x.Dynamic = append(r.x.Dynamic, DynTarget{Name: g.Name, Addr: g.Addr, Via: via, From: from})
 	}
+	// A --contract on a panic/defer/recover runtime function (runtime.gopanic, deferproc, ...)
+	// turns it into a pinned contract before its default stub/omit/follow meaning applies.
+	if r.cm.match(g.Name) && runtimePanicContractStubs[g.Name] {
+		if isContract, err := r.x.contractTarget(r.cm, r.contractSeen, g); isContract {
+			if err != nil && r.err == nil {
+				r.err = err
+			}
+			return true
+		}
+	}
 	k, isStub, err := r.b.classifyStub(g)
 	if err != nil {
 		if r.err == nil {
@@ -202,6 +212,14 @@ func (r *reacher) drain() error {
 			if !ok {
 				r.x.Unresolved = append(r.x.Unresolved, br)
 				continue
+			}
+			if r.cm.match(g.Name) && runtimePanicContractStubs[g.Name] {
+				if isContract, err := r.x.contractTarget(r.cm, r.contractSeen, g); isContract {
+					if err != nil {
+						return err
+					}
+					continue
+				}
 			}
 			k, isStub, err := r.b.classifyStub(g)
 			if err != nil {
