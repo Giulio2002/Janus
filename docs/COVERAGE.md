@@ -38,7 +38,7 @@ the cache.
 | 2. runtime entry points with a contract, stub or proof (main + branches) | 71 of 309 names (39 on main; agent/rtiface adds 15) | same | same |
 | 2. … of the 191 linked on arm64/amd64: still missing | 139 (12 of them concurrency, excluded) | | |
 | 3. language constructs with a proved example | 64 of 75 rows (11 have none on either ISA; agent/constructs closes 20, agent/rtiface 4) | | |
-| 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | 93.6% / 86.2% | **96.4% / 98.2%** since WP-D (83.6% / 78.0% before: SSE2 packed) | `-O3 -march=x86-64-v3`: 59.1% / 58.7% (VEX, WP-F) |
+| 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | **100% / 100%** (all six configurations, WP-I; 93.6% / 86.2% before) | **96.4% / 98.2%** since WP-D (83.6% / 78.0% before: SSE2 packed) | `-O3 -march=x86-64-v3`: 59.1% / 58.7% (VEX, WP-F) |
 
 Main findings:
 
@@ -514,8 +514,8 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | pointer store (write barrier) | `SetNext` (alloc) | same | barrier fast path executed, `wbBufFlush` contract |
 | stack growth | none (every proof assumes `GuardOK`) | none | `morestack` stub; no theorem about the grown case |
 | recursion | `Fact` (constructs; `Summary.induction`, stack for every frame assumed) | same (constructs) | `Summary` induction (done); the grown stack: `morestack` (R7) |
-| cgo call into C | `GoAdd`, `GoSum` (ffi) | same | `CgoCall` contract |
-| C code alone | `CAdd`, `CSum`, `CStore` (ffi) | same | `CEnsures` |
+| cgo call into C | `GoAdd`, `GoSum`, `GoCount` (ffi) | same | `CgoCall` contract |
+| C code alone | `CAdd`, `CSum`, `CStore`, `CCount` (NEON, arm64) (ffi) | same | `CEnsures` |
 | `//export` callback C → Go | none | none | `crosscall2`, `cgocallback` |
 | goroutines, channels, select, `sync` | excluded (concurrency) | excluded | – |
 
@@ -669,6 +669,131 @@ WP-F.
 The C code in the cgo binaries of criterion 1 (`runtime/cgo`'s `gcc_*.c`, gcc `-O2`) decodes
 completely on arm64 (20 functions, including `paciasp`/`bti`) and is blocked only by `ENDBR64`
 on amd64. On amd64 there is also one `PUNPCKLQDQ`.
+### 5.3 Advanced SIMD in compiled C and Go assembly (package I, agent/neon)
+
+Measured on agent/neon (main 987d96d plus `Janus/Arm64/NeonInstr.lean`, `DecodeNeon.lean`, `Neon.lean`, `NeonFP.lean`, `ExecNeon.lean`),
+same toolchains. Rerun with `scripts/coverage.sh cc` (the official corpus) and
+`oracle/harvest/neon/build.sh` plus `scripts/coverage/` `insn -c` (the supplementary corpus).
+
+| corpus | arm64 config | before (main) | after (agent/neon) |
+|---|---|---:|---:|
+| official C corpus (5.1) | gcc -O0 / -O2 / -O3 | 106/110 / 102/109 / 93/109 | **110/110 / 109/109 / 109/109** |
+| | clang -O0 / -O2 / -O3 | 106/110 / 94/109 / 94/109 | **110/110 / 109/109 / 109/109** |
+| supplementary NEON corpus (`oracle/harvest/neon`, 476 functions) | gcc -O0 / -O2 / -O3 | 462/480 / 348/476 / 177/476 | **480/480 / 476/476 / 476/476** |
+| | clang -O0 / -O2 / -O3 | 472/480 / 192/476 / 192/476 | **480/480 / 476/476 / 476/476** |
+| Go assembly (1.3) | std, `go test -c` | 139/207 (67.15%) | **140/207 (67.63%)** alone; 151/207 (72.95%) merged with agent/armcrypto, the same as WP-H alone |
+| Go-compiled, wrappers, test code (1.1) | std | 93.46% / 99.40% / 97.09% | unchanged (no Go-compiled code uses the new classes) |
+
+The supplementary corpus is 476 small loop idioms over every element type (element-wise
+arithmetic, compares and selects, shifts, widening and narrowing, saturation written the C way,
+reductions, interleaved structures, conversions, rounding, `fma`), plain C11 without intrinsics,
+so only the auto-vectorisers emit NEON; it measures the instruction set compiled C needs far
+beyond the 21 loops of `vec.c`. In assembly, `vendor/golang.org/x/crypto/chacha20.xorKeyStreamVX`
+now decodes (`ZIP1`/`ZIP2` on `.4S`/`.2D`, `MOV` element); `crypto/sha1.sha1block` is left
+with its SHA1 instructions only. After merging agent/armcrypto (whose `CryptoInstr.permute` /
+`dupScalar` now decode ZIP/UZP/TRN and scalar DUP; the NEON copies were dropped) the arm64 assembly
+count is 151/207 (re-measured 2026-10-25), every remaining blocker a system instruction (`SVC`,
+`BRK`, `MRS`, `MSR`), padding or `STLXR`, and the C corpus is still 100% in all six configurations.
+
+**Ranking** (supplementary corpus, all six configurations, 2,864 function-configurations, 1,021
+blocked before; class = `arm64asm` mnemonic). By functions blocked:
+
+| class | functions blocked | sole blocker |
+|---|---:|---:|
+| `UZP1` | 114 | 41 |
+| `FMLA` | 70 | 30 |
+| `FMUL` | 59 | 19 |
+| `ZIP1` | 54 | 5 |
+| `UZP2` | 52 | 9 |
+| `LD2` | 52 | 16 |
+| `UMULL` | 43 | 0 |
+| `UMULL2` | 42 | 0 |
+| `UADDW` | 42 | 0 |
+| `ZIP2` | 40 | 0 |
+| `SMULL` | 40 | 0 |
+| `SMULL2` | 40 | 0 |
+| `FCVTZS` | 39 | 23 |
+| `LD4` | 37 | 6 |
+| `UADDW2` | 35 | 0 |
+| `FCMGT` | 31 | 19 |
+| `FADD` | 31 | 11 |
+| `ST4` | 30 | 0 |
+| `SCVTF` | 29 | 22 |
+| `SMLAL` | 27 | 0 |
+| `SMLAL2` | 25 | 0 |
+| `SADDW` | 25 | 0 |
+| `UADDL` | 24 | 0 |
+| `UADDL2` | 24 | 0 |
+| `ST2` | 24 | 9 |
+| `SADDW2` | 24 | 0 |
+| `ADDP` | 24 | 3 |
+| `USUBL` | 23 | 2 |
+| `UCVTF` | 22 | 16 |
+| `FNEG` | 22 | 14 |
+
+Greedy order (the class that makes the most functions fully decodable next):
+
+| step | class added | + functions | fully decodable |
+|---:|---|---:|---:|
+| 1 | `UZP1` | +41 | 1884 (65.8%) |
+| 2 | `FMLA` | +30 | 1914 (66.8%) |
+| 3 | `FCVTZS` | +30 | 1944 (67.9%) |
+| 4 | `SCVTF` | +22 | 1966 (68.6%) |
+| 5 | `FMUL` | +23 | 1989 (69.4%) |
+| 6 | `LD2` | +20 | 2009 (70.1%) |
+| 7 | `FCMGT` | +19 | 2028 (70.8%) |
+| 8 | `USHL` | +19 | 2047 (71.5%) |
+| 9 | `UCVTF` | +18 | 2065 (72.1%) |
+| 10 | `FNEG` | +17 | 2082 (72.7%) |
+| 11 | `ST2` | +18 | 2100 (73.3%) |
+| 12 | `SSHL` | +16 | 2116 (73.9%) |
+| 13 | `MLA` | +16 | 2132 (74.4%) |
+| 14 | `FADD` | +15 | 2147 (75.0%) |
+| 15 | `CLZ` | +15 | 2162 (75.5%) |
+| 16 | `UZP2` | +13 | 2175 (75.9%) |
+| 17 | `MUL` | +13 | 2188 (76.4%) |
+| 18 | `MOV` | +13 | 2201 (76.9%) |
+| 19 | `ZIP1` | +12 | 2213 (77.3%) |
+| 20 | `ZIP2` | +21 | 2234 (78.0%) |
+| 21 | `FMAXNM` | +12 | 2246 (78.4%) |
+| 22 | `FCMEQ` | +12 | 2258 (78.8%) |
+| 23 | `URHADD` | +12 | 2270 (79.3%) |
+| 24 | `FDIV` | +12 | 2282 (79.7%) |
+| 25 | `FSUB` | +14 | 2296 (80.2%) |
+
+and so on down to the last of 112 classes (`RADDHN`); `scripts/coverage/rank-classes.py` prints
+the full tables from the `insn -c -json` outputs (computed with the decoder of main). On the official corpus alone the
+greedy order is:
+
+| step | class added | + functions | fully decodable |
+|---:|---|---:|---:|
+| 1 | `ADDP` | +17 | 612 (93.3%) |
+| 2 | `FNEG` | +8 | 620 (94.5%) |
+| 3 | `SCVTF` | +5 | 625 (95.3%) |
+| 4 | `FMLA` | +4 | 629 (95.9%) |
+| 5 | `UZP1` | +4 | 633 (96.5%) |
+| 6 | `USHR` | +2 | 635 (96.8%) |
+| 7 | `UCVTF` | +2 | 637 (97.1%) |
+| 8 | `MUL` | +2 | 639 (97.4%) |
+| 9 | `MOV` | +1 | 640 (97.6%) |
+| 10 | `FMUL` | +2 | 642 (97.9%) |
+| 11 | `FCVTZU` | +1 | 643 (98.0%) |
+| 12 | `FCVTZS` | +1 | 644 (98.2%) |
+| 13 | `UADDW` | +0 | 644 (98.2%) |
+| 14 | `UADDW2` | +2 | 646 (98.5%) |
+| 15 | `ZIP2` | +0 | 646 (98.5%) |
+| 16 | `ZIP1` | +3 | 649 (98.9%) |
+| 17 | `UMULL2` | +0 | 649 (98.9%) |
+| 18 | `UMULL` | +4 | 653 (99.5%) |
+| 19 | `ST4` | +0 | 653 (99.5%) |
+| 20 | `LD4` | +2 | 655 (99.8%) |
+| 21 | `UZP2` | +0 | 655 (99.8%) |
+| 22 | `TRN2` | +1 | 656 (100.0%) |
+
+What the decoder still rejects in these classes, by design: half precision (FEAT_FP16, and
+`FCVTL`/`FCVTN` to or from half), BFloat16, dot products, `SQRDMLAH`/`SQRDMLSH`, `FMLAL`/
+`FMLSL`, `FCMLA`/`FCADD`, `FRINT32*`/`FRINT64*` (optional features no corpus function uses),
+and `PMULL`/`PMULL2` (package H).
 
 ### 5.2 The C-side ABI, against agent/ffi's model
 
@@ -735,7 +860,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 5 | **J. amd64 C-specific encodings**: merge agent/ffi's `ENDBR64`; `NOTRACK` (`3E`) on `JMP`/`CALL r/m` (CET jump tables); the padded `call __tls_get_addr` sequence (`66 66 48 E8`); x87 for `long double` (`FLD`/`FSTP` 80-bit, `FADDP`, `FMULP`, `FLD1`, `FXCH`, the x87 stack and control word on the IEEE core) | gcc amd64 C: 0.9% → **83.6%** (-O2); `s_dense`/`s_name` jump tables, `a_use_tls`, `a_ldouble` | `Janus/Amd64/Decode.lean` (prefix handling), new `Janus/Amd64/X87.lean` | S (ENDBR, NOTRACK, TLS call) + L (x87) | ffi |
 | 6 | **D. SSE packed integer and FP (XMM)** (**done**, agent/sse: assembly v1 148 → 160, C `-O2` clang 78.0% → 98.2%, gcc 83.6% → 96.4%, oracle 0 MISMATCH; `docs/AMD64.md`): SSE2 integer (`PADD*`, `PSUB*`, `PMUL*`, `PCMP*`, `PAND(N)`, shifts incl. `PSLLDQ`/`PSRLDQ`, `PUNPCK*`, `PACK*`, `PMIN/PMAX*`, `PSADBW`), packed FP (`ADDPS/PD`, `MULPS/PD`, `SHUFPS`, `UNPCK*`, `MOVLHPS`, `CVTDQ2PD`), SSSE3 (`PALIGNR`, `PSHUFB`, `PABS*`), SSE4.1 (`PINSR*`, `PEXTR*`, `PBLENDW`, `BLENDV*`, `PMOV[SZ]X*`, `PMULLD`, `PTEST`), SSE4.2 (`CRC32`, `PCMPESTRI`/`PCMPISTRI`, `PCMPGTQ`) | C: clang -O2 78.0% → ≈ 99%, gcc -O2 (after J) 83.6% → ≈ 99%; assembly: `chacha8rand.block`, P-256 selects, `indexbody`, `castagnoliSSE42*`, part of AES/GCM/SHA (+19 sole, more with E) | new `Janus/Amd64/{DecodeSSE,ExecSSE}.lean` (hook in `Decode.lean`) | L | ffi; B for the shared `PSHUFB` |
 | 7 | **E. x86 crypto extensions**: AES-NI (`AESENC(LAST)`, `AESDEC(LAST)`, `AESIMC`, `AESKEYGENASSIST`), `PCLMULQDQ`, SHA-NI (`SHA1*`, `SHA256*`), ADX (`ADCX`/`ADOX`) | assembly: `aeshashbody`, `memhash32/64` (every map hash), AES block/CTR/key expansion (12), GCM (5), SHA-NI (2), `math/big.addMulVVWW`, `bigmod.addMulVVW*` (4) | new `Janus/Amd64/{DecodeCrypto,ExecCrypto}.lean` | M | D, B (`MULX`) |
-| 8 | **I. arm64 ASIMD for compiled C**: `ADDP`, `UADDW(2)`, `UMULL(2)`, `MUL` (vector), `FMLA`/`FMUL`/`FNEG` (vector FP, on the IEEE core), `SCVTF` (vector), `UZP1`/`ZIP1`, `LD4`/`ST4`, `USHR`, and the scalar `SCVTF`/`UCVTF`/`FCVTZS`/`FCVTZU` forms of gcc/clang `-O0` | C arm64: gcc -O3 85.3%, clang -O2/-O3 86.2%, gcc -O2 93.6%, -O0 96.4% → **100%** | `Janus/Arm64/Vector.lean` (+ new `VectorFP.lean`), `Janus/Arm64/DecodeFloat.lean` (conversion forms) | M | none |
+| 8 | **I. arm64 ASIMD for compiled C**: `ADDP`, `UADDW(2)`, `UMULL(2)`, `MUL` (vector), `FMLA`/`FMUL`/`FNEG` (vector FP, on the IEEE core), `SCVTF` (vector), `UZP1`/`ZIP1`, `LD4`/`ST4`, `USHR`, and the scalar `SCVTF`/`UCVTF`/`FCVTZS`/`FCVTZU` forms of gcc/clang `-O0` | C arm64: gcc -O3 85.3%, clang -O2/-O3 86.2%, gcc -O2 93.6%, -O0 96.4% → **100%** (done on agent/neon, 5.3: every arrangement of the integer and single/double FP classes, `LD2`–`ST4`, `LDNP`/`STNP`; supplementary corpus 37.2–98.3% → 100%; assembly +1, `chacha20.xorKeyStreamVX`) | `Janus/Arm64/Vector.lean` (+ new `VectorFP.lean`), `Janus/Arm64/DecodeFloat.lean` (conversion forms) | M | none |
 | 9 | **H. arm64 crypto extensions, CRC32, permutes** (done on agent/armcrypto: 151/207 assembly, `A64Crc32` proved; see 1.3): `PMULL`/`PMULL2` (1Q), `SHA1C/H/M/P/SU0/SU1`, `SHA256H/H2/SU0/SU1`, `SHA512H/H2/SU0/SU1`, SHA3 `EOR3`/`RAX1`/`XAR`/`BCAX`, `CRC32{B,H,W,X}`, `CRC32C{B,H,W,X}`, `ZIP1`/`ZIP2` on 2D, `MOV` element | arm64 assembly +12 (GCM ×5, SHA-1/256/512, SHA3, CRC32 ×2, chacha20); with C 206/207, the last being A's `cgoSigtramp` | new `Janus/Arm64/Crypto.lean` (hook in `Decode.lean`) | M | none (I for the shared `ZIP1`) |
 | 10 | **F. AVX/AVX2 (VEX-128/256, YMM)** beyond the moves and compares `memmove`/`memequal` use: integer and FP arithmetic, shuffles and permutes (`VPSHUFB`, `VPALIGNR`, `VPERM2I128`, `VPERMD`, `VPBLENDD`, `VINSERTI128`, `VEXTRACTI128`, `VPBROADCAST*`), packed FMA, the `V*SD/SS` scalar forms | C `-march=x86-64-v3`: gcc 52.7%, clang 50.5% → ≈ 99%; assembly: `math.archExp`, SHA-1/256/512 AVX2, chacha20poly1305 (+7 in the greedy table) | new `Janus/Amd64/{DecodeAVX,ExecAVX}.lean` | L | D (lane semantics generalised to 256 bits) |
 | 11 | **G. AVX-512**: EVEX decoding (`disp8*N`, broadcast, masking, zeroing), ZMM state, `K0`–`K7` and `KMOV*`, `VMOVDQU64`, `VPERMB`/`VPERMI2B` (VBMI), `VGF2P8AFFINEQB` (GFNI), `VPOPCNTB`, `VPCOMPRESSQ`, `VPTERNLOGD`, `VPCLMULQDQ`, `VEXTRACTF32X4`, `VPCMPUQ`, the `asyncPreempt` state save | assembly +29 (`internal/runtime/gc/scan.expandAVX512_*`, the GC's span scanning), `ieeeCLMUL`, `asyncPreempt` → amd64 assembly 100% (with C, D, E, F) | new `Janus/Amd64/{DecodeEVEX,ExecEVEX}.lean`, ZMM/K fields in `Janus/Amd64/State.lean` | XL | F |

@@ -138,6 +138,8 @@ them through cgo. `ccover.c` is a model-coverage corpus (not called).
 | `CStore` | `c_store(p, v)` writes `v` to `*p` and nothing else | ✓ | ✓ |
 | `GoAdd` | Go `Add(x, y)` → cgo → `c_add` → Go returns `x + y mod 2^64`, under the trusted `CgoCall` only | ✓ | ✓ |
 | `GoSum` | Go `Sum(xs)` → cgo → the C loop → Go returns `Σ xs[i] mod 2^64`, under `CgoCall` only | ✓ | ✓ |
+| `CCount` | `c_count(p, n, c)` (package `example.com/cgo/neon`, auto-vectorised by gcc `-O2`: `CMEQ`/`ZIP`/`UADDW`/`ADDP` loop + scalar tail) returns the number of `i < n` with `p[i] = c`, memory unchanged | ✓ | – |
+| `GoCount` | Go `neon.Count(xs, c)` → cgo → the NEON loop → Go returns the count, under `CgoCall` only | ✓ | – |
 
 The Go-side preconditions are explicit. They include the stack-growth checks of the Go function
 and of its `_Cfunc_` wrapper, the stack window, and the two statically initialised cgo globals
