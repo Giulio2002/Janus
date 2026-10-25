@@ -150,7 +150,7 @@ theorem wrapper_spec (T a : BitVec 64) :
   apply ReturnsC.of_reaches
   janus_run [h19', h20', h29']
   refine ⟨?_, ?_⟩
-  · repeat' constructor
+  · repeat' (apply And.intro)
     all_goals assumption
   have hres : (vr' 0).toNat % 18446744073709551616 = res t.mem a.toNat := by
     simp only [res, fd, fs, Nat.reducePow, Nat.mul_zero, Nat.add_zero, Nat.reduceMul]; assumption

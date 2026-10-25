@@ -339,6 +339,24 @@ theorem readLE_16 (m : Memory) (a : Nat) :
     m.readLE a 16 = m.readLE a 8 + 2 ^ 64 * m.readLE (a + 8) 8 := by
   rw [show 16 = 8 + 8 from rfl, Janus.Arm64.Memory.readLE_add]
 
+/-- Reading back the first member of a 16-byte struct of two 8-byte members just stored. -/
+theorem readLE_writeLE_pair_lo (m : Memory) (a b : Nat) (x y : BitVec 64) (h : b = a) :
+    (m.writeLE a 16 (pair x y)).readLE b 8 = x.toNat := by
+  subst h
+  rw [Janus.Arm64.Memory.readLE_writeLE_inside (m := m) (a := b) (n := 16) (b := b) (k := 8) _ (Nat.le_refl _) (by omega)]
+  have := bytesOf_pair_lo x y
+  simp only [bytesOf] at this
+  simpa using this
+
+/-- … and its second member. -/
+theorem readLE_writeLE_pair_hi (m : Memory) (a b : Nat) (x y : BitVec 64) (h : b = a + 8) :
+    (m.writeLE a 16 (pair x y)).readLE b 8 = y.toNat := by
+  subst h
+  rw [Janus.Arm64.Memory.readLE_writeLE_inside (m := m) (a := a) (n := 16) (b := a + 8) (k := 8) _ (by omega) (by omega)]
+  have := bytesOf_pair_hi x y
+  simp only [bytesOf] at this
+  simpa using this
+
 /-- All bytes of a value of `k` bytes. -/
 theorem bytesOf_all (x k : Nat) (hx : x < 256 ^ k) : bytesOf x 0 k = x := by
   simp only [bytesOf, Nat.pow_zero, Nat.div_one, Nat.mod_eq_of_lt hx]

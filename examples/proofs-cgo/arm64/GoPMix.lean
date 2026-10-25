@@ -148,7 +148,7 @@ theorem wrapper_spec (T a : BitVec 64) :
   apply ReturnsC.of_reaches
   janus_run
   refine ⟨?_, ?_⟩
-  · repeat' constructor
+  · repeat' (apply And.intro)
     all_goals assumption
   simp only [WPost, r0, r1, fw, Nat.reducePow, writeLE_mod_8, Nat.mul_zero, Nat.add_zero,
     Nat.reduceMul, BitVec.toNat_ofNat]
