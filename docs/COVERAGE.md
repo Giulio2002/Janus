@@ -26,7 +26,7 @@ the cache.
 | criterion | arm64 | amd64 (GOAMD64=v1) | amd64 (GOAMD64=v3) |
 |---|---:|---:|---:|
 | 1. Go-compiled std functions that fully decode | 15,517 / 16,602 (**93.46%**) | 16,625 / 16,625 (**100%**) | 16,614 / 16,614 (**100%**; 94.60% before WP-B) |
-| 1. Go assembly functions that fully decode | 151 / 207 (**72.95%**; 139 / 207 = 67.15% before WP-H) | 160 / 265 (**60.38%**; 148 before WP-D) | 157 / 262 (**59.92%**; 145 before WP-D) |
+| 1. Go assembly functions that fully decode | 151 / 207 (**72.95%**; 139 / 207 = 67.15% before WP-H) | 181 / 265 (**68.30%**; 160 before WP-E, 148 before WP-D) | 178 / 262 (**67.94%**; 157 before WP-E, 145 before WP-D) |
 | 1. compiler-generated wrappers / Go test code | 99.40% / 97.09% | 100% / 100% (99.98% before WP-B) | 100% / 100% (99.60% / 99.16% before WP-B) |
 | 2. runtime entry points with a contract, stub or proof (main + branches) | 56 of 309 names (39 on main) | same | same |
 | 2. … of the 191 linked on arm64/amd64: still missing | 153 (12 of them concurrency, excluded) | | |
@@ -55,6 +55,15 @@ Main findings:
   AES `_expand_key_*` helpers; no assembly function is blocked by an SSE family any more) and
   took the C corpus at cgo's `-O2` from 78.0% to 98.2% (clang) and 83.6% to 96.4% (gcc); what
   is left there is x87, the `NOTRACK` jump tables and the TLS call sequence (WP-J).
+* **The x86 crypto extensions are modelled since WP-E** (agent/x86crypto, measured 2026-10-25):
+  AES-NI, `PCLMULQDQ`, SHA-NI and ADX, oracle 0 MISMATCH. That unblocked 21 amd64 assembly
+  functions (v1 160 → 181, 87.196% → 91.297% of assembly instructions; v3 157 → 178): all 12 of
+  `crypto/internal/fips140/aes` (block, CTR, key expansion), the 5 GCM kernels, the 3
+  `bigmod.addMulVVW*`, `math/big.addMulVVWW`, `sha256.blockSHANI`, `sha1.blockSHANI` and
+  `aeshashbody`/`memhash32`/`memhash64` (every map hash). `memhash64`, `memhash32`,
+  `encryptBlockAsm` (= FIPS-197 AES) and `addMulVVWW` (both paths, every length) are proved.
+  The amd64 assembly blockers left are system instructions (WP-C), AVX-512 (WP-G) and AVX/AVX2
+  (WP-F).
 * **Assembly is blocked by system instructions first, then SIMD and crypto.** `SVC`/`SYSCALL`,
   `BRK`/`INT3`/`UD2`, `MRS`/`MSR` of ID and DIT registers, `CPUID`/`XGETBV`/`RDTSC` are the sole
   blocker of 53 arm64 and 46 amd64 assembly functions. Then come AVX-512 (29 GC-scan
@@ -220,20 +229,29 @@ occurrences. The 12 functions that became fully decodable are `indexbody` (`PCMP
 families are system instructions (WP-C), AVX-512 (WP-G), AES-NI, `PCLMULQDQ`, SHA-NI and ADX
 (WP-E), AVX/AVX2 (WP-F).
 
+**Since WP-E** (x86 crypto extensions, agent/x86crypto) steps 5, 8, 9 and 16 of the amd64 column
+are modelled: 181 of 265 (v1) and 178 of 262 (v3) assembly functions decode, 87.2% → 91.3% of
+their instruction occurrences. The 21 functions gained: `aeshashbody`, `runtime.memhash32`,
+`memhash64`; `crypto/internal/fips140/aes.encryptBlockAsm`, `decryptBlockAsm`, `expandKeyAsm`,
+`ctrBlocks1Asm`, `ctrBlocks2Asm`, `ctrBlocks4Asm`, `ctrBlocks8Asm`; `gcmAesInit`, `gcmAesData`, `gcmAesEnc`, `gcmAesDec`,
+`gcmAesFinish`; `bigmod.addMulVVW1024/1536/2048`; `math/big.addMulVVWW`;
+`sha256.blockSHANI`, `sha1.blockSHANI`. The per-package table below is the pre-WP-E measurement
+except where marked.
+
 **Per std package** (fully decodable / assembly functions; the families blocking them):
 
 | package | arm64 | amd64-v1 | amd64-v3 | blocking families (functions, arm64 / amd64-v1) |
 |---|---:|---:|---:|---|
-| runtime | 80/129 | 92/134 | 92/134 | arm64: system / barrier / hint 46, padding/udf 2, exclusive / acquire-release 1; amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 38, AES-NI 3, SSE4.1 2, SSE/SSE2 1, SSSE3 1, AVX-512 (EVEX, opmask) 1, integer/base 1 |
+| runtime | 80/129 | 95/134 since WP-E (92 before) | 95/134 | arm64: system / barrier / hint 46, padding/udf 2, exclusive / acquire-release 1; amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 38, AES-NI 3, SSE4.1 2, SSE/SSE2 1, SSSE3 1, AVX-512 (EVEX, opmask) 1, integer/base 1 |
 | internal/runtime/gc/scan | – | 0/29 | 0/29 | amd64-v1: AVX-512 (EVEX, opmask) 29 |
-| crypto/internal/fips140/aes | 7/7 | 5/12 (1 before WP-D) | 5/12 | amd64-v1: AES-NI 7, SSE/SSE2 5, SSE4.1 4, SSSE3 4 |
-| crypto/internal/fips140/aes/gcm | 0/5 | 0/5 | 0/5 | arm64: crypto extension (AES/SHA/PMULL/SHA3) 5; amd64-v1: PCLMULQDQ 5, SSE/SSE2 5, SSSE3 5, SSE4.1 4, AES-NI 3 |
+| crypto/internal/fips140/aes | 7/7 | **12/12** since WP-E (5 before, 1 before WP-D) | **12/12** | amd64-v1: AES-NI 7, SSE/SSE2 5, SSE4.1 4, SSSE3 4 |
+| crypto/internal/fips140/aes/gcm | 0/5 | **5/5** since WP-E | **5/5** | arm64: crypto extension (AES/SHA/PMULL/SHA3) 5; amd64-v1: PCLMULQDQ 5, SSE/SSE2 5, SSSE3 5, SSE4.1 4, AES-NI 3 |
 | crypto/internal/fips140/nistec | 15/15 | 16/16 (12 before WP-D) | 16/16 | amd64-v1: SSE/SSE2 4 |
 | hash/crc32 | 0/2 | 2/3 (0 before WP-D) | 2/3 | arm64: CRC32 2; amd64-v1: SSE4.2 2, AVX (128-bit VEX) 1, AVX-512 (EVEX, opmask) 1, PCLMULQDQ 1, SSE/SSE2 1, SSE4.1 1 |
 | syscall | 0/2 | 0/3 | 0/3 | arm64: system / barrier / hint 2; amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 3 |
-| crypto/internal/fips140/bigmod | 4/4 | 0/3 | 0/3 | amd64-v1: ADX 3, BMI1/BMI2/LZCNT 3 |
-| crypto/internal/fips140/sha256 | 0/1 | 0/2 | 0/2 | arm64: crypto extension (AES/SHA/PMULL/SHA3) 1; amd64-v1: AVX (128-bit VEX) 1, AVX2 (256-bit VEX) 1, BMI1/BMI2/LZCNT 1, SHA-NI 1, SSE/SSE2 1, SSE4.1 1, SSSE3 1 |
-| crypto/sha1 | 0/1 | 0/2 | 0/2 | arm64: ASIMD (NEON vector) 1, crypto extension (AES/SHA/PMULL/SHA3) 1; amd64-v1: AVX2 (256-bit VEX) 1, BMI1/BMI2/LZCNT 1, SHA-NI 1, SSE/SSE2 1, SSE4.1 1, SSSE3 1 |
+| crypto/internal/fips140/bigmod | 4/4 | **3/3** since WP-E | **3/3** | amd64-v1: ADX 3, BMI1/BMI2/LZCNT 3 |
+| crypto/internal/fips140/sha256 | 0/1 | 1/2 since WP-E (`blockAVX2` left) | 1/2 | arm64: crypto extension (AES/SHA/PMULL/SHA3) 1; amd64-v1: AVX (128-bit VEX) 1, AVX2 (256-bit VEX) 1, BMI1/BMI2/LZCNT 1, SHA-NI 1, SSE/SSE2 1, SSE4.1 1, SSSE3 1 |
+| crypto/sha1 | 0/1 | 1/2 since WP-E (`blockAVX2` left) | 1/2 | arm64: ASIMD (NEON vector) 1, crypto extension (AES/SHA/PMULL/SHA3) 1; amd64-v1: AVX2 (256-bit VEX) 1, BMI1/BMI2/LZCNT 1, SHA-NI 1, SSE/SSE2 1, SSE4.1 1, SSSE3 1 |
 | internal/cpu | 0/1 | 1/3 | 1/3 | arm64: system / barrier / hint 1; amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 2 |
 | vendor/golang.org/x/crypto/chacha20poly1305 | – | 1/3 | 1/3 | amd64-v1: AVX2 (256-bit VEX) 2, BMI1/BMI2/LZCNT 2, SSE/SSE2 2, SSSE3 2 |
 | vendor/golang.org/x/sys/cpu | – | 0/2 | 0/2 | amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 2 |
@@ -244,7 +262,7 @@ families are system instructions (WP-C), AVX-512 (WP-G), AES-NI, `PCLMULQDQ`, SH
 | internal/bytealg | 11/11 | 15/15 (14 before WP-D) | 15/15 | amd64-v1: SSE4.2 1 |
 | internal/chacha8rand | 1/1 | 1/1 (0 before WP-D) | 1/1 | amd64-v1: SSE/SSE2 1 |
 | math | 4/4 | 7/8 | 4/5 | amd64-v1: AVX (128-bit VEX) 1, FMA 1 |
-| math/big | 6/6 | 5/6 | 5/6 | amd64-v1: ADX 1, BMI1/BMI2/LZCNT 1 |
+| math/big | 6/6 | **6/6** since WP-E | **6/6** | amd64-v1: ADX 1, BMI1/BMI2/LZCNT 1 |
 | crypto/internal/fips140/sha3 | 0/1 | 1/1 | 1/1 | arm64: crypto extension (AES/SHA/PMULL/SHA3) 1 |
 | vendor/golang.org/x/crypto/chacha20 | 0/1 | – | – | arm64: ASIMD (NEON vector) 1 |
 | crypto/internal/fips140/check/checktest | 3/3 | 3/3 | 3/3 |  |
@@ -563,14 +581,14 @@ number of distinct Go-compiled functions. Full tables: `artifacts/coverage/asmca
 | `crypto/internal/fips140/nistec.p256MovCond`, `p256Select`, `p256SelectAffine`, `p256PointAddAffineAsm` | 1–4 | yes | yes | yes | (amd64 SSE2 `PCMPEQD`, `PANDN`, `PADDD`, `PSUBD`: WP-D) |
 | `internal/bytealg.Compare`, `Count`, `CountString`, `Index`, `IndexString` | 2–5 | yes | yes | yes | |
 | `math/big.addVV`, `subVV`, `lshVU`, `rshVU`, `mulAddVWW` | 3–4 | yes | yes | yes | |
-| `math/big.addMulVVWW`, `bigmod.addMulVVW1024/1536/2048` | 3, 2 | yes | no | no | amd64: ADX `ADCX`/`ADOX`, BMI2 `MULX` |
-| `runtime.memhash32`, `memhash64` | 2 / 2 | yes | no | no | amd64: AES-NI `AESENC`, SSE4.1 `PINSRD`/`PINSRQ` |
+| `math/big.addMulVVWW`, `bigmod.addMulVVW1024/1536/2048` | 3, 2 | yes | yes | yes | (WP-E; `addMulVVWW` proved, both paths) |
+| `runtime.memhash32`, `memhash64` | 2 / 2 | yes | yes | yes | (WP-E; both proved) |
 | `hash/crc32.ieeeUpdate`, `castagnoliUpdate` (arm64); `castagnoliSSE42`, `ieeeCLMUL` (amd64) | 1–2 | no | `castagnoliSSE42*` yes (WP-D); `ieeeCLMUL` no | same | arm64: `CRC32*`; amd64 `ieeeCLMUL`: `PCLMULQDQ`, AVX-512 `VPCLMULQDQ`/`VPTERNLOGD` |
-| `crypto/internal/fips140/aes.encryptBlockAsm`, `decryptBlockAsm`, `expandKeyAsm`, `ctrBlocks{1,2,4,8}Asm` | 1 | yes | no | no | amd64: AES-NI (`AESENC`, `AESENCLAST`, `AESDEC*`, `AESIMC`, `AESKEYGENASSIST`), SSSE3 `PSHUFB`, SSE4.1 `PINSRQ` |
-| `crypto/internal/fips140/aes/gcm.gcmAes{Init,Enc,Dec,Data,Finish}` | 1–2 | no | no | no | arm64: `PMULL`/`PMULL2`; amd64: `PCLMULQDQ`, AES-NI, `PSHUFB`, `PSLLDQ`/`PSRLDQ` |
-| `crypto/internal/fips140/sha256.blockSHA2` (arm64), `blockSHANI`, `blockAVX2` (amd64) | 1 | no | no | no | arm64: `SHA256H/H2/SU0/SU1`; amd64: SHA-NI; AVX2 + `RORX` |
+| `crypto/internal/fips140/aes.encryptBlockAsm`, `decryptBlockAsm`, `expandKeyAsm`, `ctrBlocks{1,2,4,8}Asm` | 1 | yes | yes | yes | (WP-E; `encryptBlockAsm` proved = FIPS-197) |
+| `crypto/internal/fips140/aes/gcm.gcmAes{Init,Enc,Dec,Data,Finish}` | 1–2 | no | yes | yes | arm64: `PMULL`/`PMULL2`; amd64: `PCLMULQDQ`, AES-NI, `PSHUFB`, `PSLLDQ`/`PSRLDQ` |
+| `crypto/internal/fips140/sha256.blockSHA2` (arm64), `blockSHANI`, `blockAVX2` (amd64) | 1 | no | `blockSHANI` yes (WP-E), `blockAVX2` no | same | arm64: `SHA256H/H2/SU0/SU1`; amd64: SHA-NI; AVX2 + `RORX` |
 | `crypto/internal/fips140/sha512.blockSHA512` (arm64), `blockAVX2` (amd64) | 1 | no | no | no | arm64: SHA512 (`CE6xxxxx`, unknown to arm64asm); amd64: AVX2 + `RORX` |
-| `crypto/sha1.sha1block` (arm64), `blockSHANI`, `blockAVX2` (amd64) | 1 | no | no | no | arm64: `SHA1C/H/M/P/SU0/SU1`; amd64: SHA-NI; AVX2, `ANDN`, `RORX` |
+| `crypto/sha1.sha1block` (arm64), `blockSHANI`, `blockAVX2` (amd64) | 1 | no | `blockSHANI` yes (WP-E), `blockAVX2` no | same | arm64: `SHA1C/H/M/P/SU0/SU1`; amd64: SHA-NI; AVX2, `ANDN`, `RORX` |
 | `crypto/internal/fips140/sha3.keccakF1600NEON` (arm64), `keccakF1600` (amd64) | 1 / 3 | no | yes | yes | arm64: SHA3 `EOR3`, `RAX1`, `XAR`, `BCAX` |
 | `vendor/.../chacha20.xorKeyStreamVX` (arm64), `chacha20poly1305.chacha20Poly1305Open/Seal` (amd64) | 1 | no | no | no | arm64: `ZIP1`/`ZIP2`; amd64: AVX2, `MULX`, SSE2/SSSE3 |
 | `crypto/md5.block`, `crypto/internal/fips140/subtle.xorBytes`, `poly1305.update` | 1–2 | yes | yes | yes | |
@@ -582,13 +600,13 @@ SHA1/SHA256/SHA512/SHA3), CRC32 and `ZIP1`/`ZIP2`. On amd64, `memmove`, `memclr`
 `IndexByte`, `Count`, `Compare` and `cmpstring` (including their AVX2 paths) decode. The gaps
 needing SIMD encodings, by hot callee:
 
-* AES-NI + `PSHUFB` + `PINSR*` for `aeshash`/`memhash32`/`memhash64`, which every map with
-  non-fast keys and every `string` map hash reaches;
+* (done in WP-E: AES-NI for `aeshash`/`memhash32`/`memhash64`, which every map with
+  non-fast keys and every `string` map hash reaches; ADX for `math/big` and `bigmod`;
+  AES-NI/`PCLMULQDQ`/SHA-NI for the crypto kernels);
 * (done in WP-D: SSE2 packed integer for `chacha8rand.block` (`runtime.rand`) and the
   constant-time P-256 selects, SSE4.2 for `indexbody` and `castagnoliSSE42*`);
-* ADX/BMI2 for `math/big` and `bigmod`;
 * FMA for `math.archExp`;
-* the crypto kernels (AES-NI, PCLMULQDQ, SHA-NI, AVX2, AVX-512 `VPCLMULQDQ`);
+* the AVX2 crypto kernels (`blockAVX2`) and AVX-512 `VPCLMULQDQ` (`ieeeCLMUL`);
 * AVX-512 for the 29 `internal/runtime/gc/scan.expandAVX512_*` kernels of the GC. These are
   reached through the allocator's GC assist, not by a direct call.
 
@@ -723,7 +741,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 4 | **C. Kernel and system instructions**: `SVC #0`/`SYSCALL` as a `.syscall` stub with per-syscall contracts (`write`, `read`, `openat`, `exit_group`, `clock_gettime` and vDSO, `mmap`/`munmap`/`madvise`, `rt_sigprocmask`, `sigaltstack`, `sched_yield`, `nanosleep`, ...); `BRK`/`INT3`/`UD2`/`HLT`/in-function `UDF` as trap faults; `CPUID`, `XGETBV`, `RDTSC(P)`, `MRS MIDR_EL1`, `MRS CNTFRQ_EL0`, DIT `MRS`/`MSR` as environment-value contracts; `PUSHFQ`/`POPFQ` | assembly: arm64 +53 (→ 92.8%), amd64 +46 (→ 73.2%); makes the syscall wrappers (`nanotime1`, `Syscall6`, `rawSyscallNoError`, `exit`, `osyield`, `open`, `read`, ...) and their Go callers (`os`, `time`, `println`) provable | `Janus/Contracts/Syscall.lean`, `Janus/Contracts/SyscallAmd64.lean`, the `SVC`/`SYSCALL`/trap entries of both decoders, stub kind in `cmd/janus/extract.go` | M | iface-alloc |
 | 5 | **J. amd64 C-specific encodings**: merge agent/ffi's `ENDBR64`; `NOTRACK` (`3E`) on `JMP`/`CALL r/m` (CET jump tables); the padded `call __tls_get_addr` sequence (`66 66 48 E8`); x87 for `long double` (`FLD`/`FSTP` 80-bit, `FADDP`, `FMULP`, `FLD1`, `FXCH`, the x87 stack and control word on the IEEE core) | gcc amd64 C: 0.9% → **83.6%** (-O2); `s_dense`/`s_name` jump tables, `a_use_tls`, `a_ldouble` | `Janus/Amd64/Decode.lean` (prefix handling), new `Janus/Amd64/X87.lean` | S (ENDBR, NOTRACK, TLS call) + L (x87) | ffi |
 | 6 | **D. SSE packed integer and FP (XMM)** (**done**, agent/sse: assembly v1 148 → 160, C `-O2` clang 78.0% → 98.2%, gcc 83.6% → 96.4%, oracle 0 MISMATCH; `docs/AMD64.md`): SSE2 integer (`PADD*`, `PSUB*`, `PMUL*`, `PCMP*`, `PAND(N)`, shifts incl. `PSLLDQ`/`PSRLDQ`, `PUNPCK*`, `PACK*`, `PMIN/PMAX*`, `PSADBW`), packed FP (`ADDPS/PD`, `MULPS/PD`, `SHUFPS`, `UNPCK*`, `MOVLHPS`, `CVTDQ2PD`), SSSE3 (`PALIGNR`, `PSHUFB`, `PABS*`), SSE4.1 (`PINSR*`, `PEXTR*`, `PBLENDW`, `BLENDV*`, `PMOV[SZ]X*`, `PMULLD`, `PTEST`), SSE4.2 (`CRC32`, `PCMPESTRI`/`PCMPISTRI`, `PCMPGTQ`) | C: clang -O2 78.0% → ≈ 99%, gcc -O2 (after J) 83.6% → ≈ 99%; assembly: `chacha8rand.block`, P-256 selects, `indexbody`, `castagnoliSSE42*`, part of AES/GCM/SHA (+19 sole, more with E) | new `Janus/Amd64/{DecodeSSE,ExecSSE}.lean` (hook in `Decode.lean`) | L | ffi; B for the shared `PSHUFB` |
-| 7 | **E. x86 crypto extensions**: AES-NI (`AESENC(LAST)`, `AESDEC(LAST)`, `AESIMC`, `AESKEYGENASSIST`), `PCLMULQDQ`, SHA-NI (`SHA1*`, `SHA256*`), ADX (`ADCX`/`ADOX`) | assembly: `aeshashbody`, `memhash32/64` (every map hash), AES block/CTR/key expansion (12), GCM (5), SHA-NI (2), `math/big.addMulVVWW`, `bigmod.addMulVVW*` (4) | new `Janus/Amd64/{DecodeCrypto,ExecCrypto}.lean` | M | D, B (`MULX`) |
+| 7 | **E. x86 crypto extensions** (**done**, agent/x86crypto: assembly v1 160 → 181, v3 157 → 178, oracle 0 MISMATCH over 297,870 cases; `memhash64`/`memhash32`, `encryptBlockAsm` = FIPS-197, `addMulVVWW` proved; `docs/AMD64.md`): AES-NI (`AESENC(LAST)`, `AESDEC(LAST)`, `AESIMC`, `AESKEYGENASSIST`), `PCLMULQDQ`, SHA-NI (`SHA1*`, `SHA256*`), ADX (`ADCX`/`ADOX`) | assembly: `aeshashbody`, `memhash32/64` (every map hash), AES block/CTR/key expansion (12), GCM (5), SHA-NI (2), `math/big.addMulVVWW`, `bigmod.addMulVVW*` (4) | new `Janus/Amd64/{DecodeCrypto,ExecCrypto}.lean` | M | D, B (`MULX`) |
 | 8 | **I. arm64 ASIMD for compiled C**: `ADDP`, `UADDW(2)`, `UMULL(2)`, `MUL` (vector), `FMLA`/`FMUL`/`FNEG` (vector FP, on the IEEE core), `SCVTF` (vector), `UZP1`/`ZIP1`, `LD4`/`ST4`, `USHR`, and the scalar `SCVTF`/`UCVTF`/`FCVTZS`/`FCVTZU` forms of gcc/clang `-O0` | C arm64: gcc -O3 85.3%, clang -O2/-O3 86.2%, gcc -O2 93.6%, -O0 96.4% → **100%** | `Janus/Arm64/Vector.lean` (+ new `VectorFP.lean`), `Janus/Arm64/DecodeFloat.lean` (conversion forms) | M | none |
 | 9 | **H. arm64 crypto extensions, CRC32, permutes** (done on agent/armcrypto: 151/207 assembly, `A64Crc32` proved; see 1.3): `PMULL`/`PMULL2` (1Q), `SHA1C/H/M/P/SU0/SU1`, `SHA256H/H2/SU0/SU1`, `SHA512H/H2/SU0/SU1`, SHA3 `EOR3`/`RAX1`/`XAR`/`BCAX`, `CRC32{B,H,W,X}`, `CRC32C{B,H,W,X}`, `ZIP1`/`ZIP2` on 2D, `MOV` element | arm64 assembly +12 (GCM ×5, SHA-1/256/512, SHA3, CRC32 ×2, chacha20); with C 206/207, the last being A's `cgoSigtramp` | new `Janus/Arm64/Crypto.lean` (hook in `Decode.lean`) | M | none (I for the shared `ZIP1`) |
 | 10 | **F. AVX/AVX2 (VEX-128/256, YMM)** beyond the moves and compares `memmove`/`memequal` use: integer and FP arithmetic, shuffles and permutes (`VPSHUFB`, `VPALIGNR`, `VPERM2I128`, `VPERMD`, `VPBLENDD`, `VINSERTI128`, `VEXTRACTI128`, `VPBROADCAST*`), packed FMA, the `V*SD/SS` scalar forms | C `-march=x86-64-v3`: gcc 52.7%, clang 50.5% → ≈ 99%; assembly: `math.archExp`, SHA-1/256/512 AVX2, chacha20poly1305 (+7 in the greedy table) | new `Janus/Amd64/{DecodeAVX,ExecAVX}.lean` | L | D (lane semantics generalised to 256 bits) |
