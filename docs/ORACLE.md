@@ -220,6 +220,12 @@ The same corpus against the Sail model (`docs/ORACLE-SAIL.md`): Janus vs Sail 0 
 `JanusTests/Neon.lean` holds one hardware result per mnemonic the C corpora produce (208 words),
 re-checked by the kernel.
 
+After merging agent/armcrypto (main a3626db), whose `CryptoInstr.permute`/`dupScalar` replace the
+NEON copies of ZIP/UZP/TRN and scalar DUP (the targeted `neon.perm`/`neon.sdup` classes are gone;
+those words are now in `simd.permute`/`simd.dupscalar`), the same mode with `SEED=2`
+(`OUT=artifacts/oracle-neon-final`): 616,007 cases, **0 MISMATCH**, 600,490 agree, 15,517
+model-gap, 0 unobserved (targeted 300,000, random 120,000, harvested 146,007, sequences 50,000).
+
 ## Results with the crypto extension, CRC32 and permutes (2026-10-25, `scripts/oracle.sh crypto`, qemu 10.2.1 `-cpu max`)
 
 The crypto corpus (`OUT=artifacts/oracle-crypto JOBS=8 scripts/oracle.sh crypto`, defaults
