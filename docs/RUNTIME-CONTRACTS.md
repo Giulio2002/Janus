@@ -551,7 +551,7 @@ string example agrees with Go's own builtins on 20,000 random inputs; the capaci
 chooses for a full `[]Point` (`l ≤ 1200`) and for `[]byte(s)` (`len ≤ 3000`) are checked in Lean
 against `growCap 24 true` and `roundupsize · true` by `decide +kernel`; and under gdb (amd64) the
 write barrier's readiness `HRoom` holds at every real `gcWriteBarrier2` call that does not flush
-(1,999 of the first 2,000 calls with the GC marking).
+(over 99% of the first 2,000 calls with the GC marking; the others are flushes).
 
 **What stays trusted.** Each contract read as a claim about the Go 1.26 runtime, except
 `decoderune`, `countrunes` and the write barrier's fast path, which are proved from the binary's
