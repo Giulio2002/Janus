@@ -40,7 +40,7 @@ case "$1" in
   Concat) printf '%s\n' --contract runtime.concatstring2 ;;
   ToBytes) printf '%s\n' --contract runtime.stringtoslicebyte ;;
   FromBytes) printf '%s\n' --contract runtime.slicebytetostring ;;
-  SumRunes|Countrunes) printf '%s\n' --contract runtime.decoderune ;;
+  SumRunes) printf '%s\n' --contract runtime.decoderune ;;
   RuneLen) printf '%s\n' --contract runtime.countrunes ;;
   AppendPoint) printf '%s\n' --contract runtime.growslice ;;
   CopyNodes) printf '%s\n' --contract runtime.typedslicecopy ;;
