@@ -461,8 +461,8 @@ agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts 
 | pointer store (write barrier) | `SetNext` (alloc) | same | barrier fast path executed, `wbBufFlush` contract |
 | stack growth | none (every proof assumes `GuardOK`) | none | `morestack` stub; no theorem about the grown case |
 | recursion | none | none | `Summary` induction, `morestack` |
-| cgo call into C | `GoAdd`, `GoSum` (ffi) | same | `CgoCall` contract |
-| C code alone | `CAdd`, `CSum`, `CStore` (ffi) | same | `CEnsures` |
+| cgo call into C | `GoAdd`, `GoSum`, `GoCount` (ffi) | same | `CgoCall` contract |
+| C code alone | `CAdd`, `CSum`, `CStore`, `CCount` (NEON, arm64) (ffi) | same | `CEnsures` |
 | `//export` callback C → Go | none | none | `crosscall2`, `cgocallback` |
 | goroutines, channels, select, `sync` | excluded (concurrency) | excluded | – |
 

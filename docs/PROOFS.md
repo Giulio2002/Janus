@@ -556,6 +556,13 @@ invariants, each proved by induction on the iterations left (the template of `Su
 once, `len < 16` enters `tail` at 0, otherwise `vloop` at block 0; `vloop`'s last iteration
 either returns (`len mod 16 = 0`, through `ADDP` and `FMOV`) or enters `tail` at `len - len mod 16`.
 
+The same loop, compiled by cgo rather than embedded, is proved end to end through the FFI
+layer: `examples/proofs-cgo/arm64/CCount.lean` is the `CEnsures` of `c_count` in
+`examples/cgo/neon` (same two invariants, loop heads at `entry + 0x40` / `entry + 0xa4` of that
+build), and `GoCount.lean` composes it with the `_cgo_…_Cfunc_c_count` wrapper and Go's
+`neon.Count` under `CgoCall.refines` (see `docs/FFI.md`). The C function lives in its own
+package so the `example.com/cgo` wrapper hash, and so `GoAdd`/`GoSum`, are unchanged.
+
 ### Runtime contracts and heap allocation (`NewPair`, `MakeSlice`, `AppendOne`, `SetNext`, `MallocFast`)
 
 Extract with `--contract runtime.newobject` (see `scripts/example-contracts.sh`), state the theorem
