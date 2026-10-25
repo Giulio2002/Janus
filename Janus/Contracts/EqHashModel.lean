@@ -271,3 +271,24 @@ theorem codeIn_link64 (Q : Janus.Amd64.Program) (seg : Janus.Amd64.Segment)
 end Amd64
 
 end Janus.Contracts.EqHashModel
+
+namespace Janus.Contracts.EqHashModel
+
+open Janus Janus.Arm64 Janus.Contracts.Mem Janus.Contracts.IfaceModel
+
+/-- The amd64 witness memory: `wmem` with the witness return address `wret = 0x200000` in the
+word at `[RSP] = [wsp]` (where a `CALL` put it). -/
+def wmem64 : Memory :=
+  ⟨fun a => BitVec.ofNat 8 ((((wsp + 2, 0x20) :: wtable).lookup a).getD 0), IfaceModel.wmem.regions⟩
+
+theorem wmem64_ret : wmem64.readLE wsp 8 = wret := by decide
+
+theorem wmem64_env0 (g : W64) : Env0 wmem64 g := by
+  refine ⟨by decide, by decide, ?_⟩
+  unfold Desc; decide
+
+theorem wmem64_henv (g : W64) : HEnv0 wmem64 g := ⟨wmem64_env0 g, by decide⟩
+
+theorem wmem64_wbOff : WriteBarrierOff wmem64 WB := by unfold WriteBarrierOff; decide
+
+end Janus.Contracts.EqHashModel

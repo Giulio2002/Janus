@@ -1,6 +1,7 @@
 import Janus.Contracts.Iface
 import Janus.Float.Spec
 import Janus.Arm64.FloatLemmas
+import Janus.Tactic.Vector
 
 /-!
 # Contracts of the Go equality and typed-memory runtime (arm64)
@@ -380,5 +381,42 @@ values (so for `+0` and `-0`). -/
   cases isNaN f a <;> cases isNaN f b <;> simp [flagsOfNzcv]
   split <;> simp_all
   split <;> simp
+
+end Janus.Contracts.Mem
+
+namespace Janus.Contracts.Mem
+
+open Janus Janus.Arm64
+
+/-! ## Comparing memory word by word -/
+
+/-- 32 bytes are equal iff their four words are. -/
+theorem readLE_32_eq_iff (m : Memory) (a b : Nat) :
+    m.readLE a 32 = m.readLE b 32 ↔
+      m.readLE a 8 = m.readLE b 8 ∧ m.readLE (a + 8) 8 = m.readLE (b + 8) 8 ∧
+      m.readLE (a + 16) 8 = m.readLE (b + 16) 8 ∧ m.readLE (a + 24) 8 = m.readLE (b + 24) 8 := by
+  rw [show 32 = 8 + 24 from rfl, Tactic.readLE_add_eq_iff, show 24 = 8 + 16 from rfl,
+    Tactic.readLE_add_eq_iff, show 16 = 8 + 8 from rfl, Tactic.readLE_add_eq_iff, Nat.add_assoc]
+
+/-- 16 bytes are equal iff their two words are. -/
+theorem readLE_16_eq_iff (m : Memory) (a b : Nat) :
+    m.readLE a 16 = m.readLE b 16 ↔
+      m.readLE a 8 = m.readLE b 8 ∧ m.readLE (a + 8) 8 = m.readLE (b + 8) 8 := by
+  rw [show 16 = 8 + 8 from rfl, Tactic.readLE_add_eq_iff]
+
+end Janus.Contracts.Mem
+
+namespace Janus.Contracts.Mem
+
+/-- `EOR` then a zero test (`memequal`'s word compare) decides equality. -/
+theorem xor_eq_zero_iff (a b : Nat) : a ^^^ b = 0 ↔ a = b := by
+  constructor
+  · intro h
+    apply Nat.eq_of_testBit_eq
+    intro i
+    have := congrArg (fun x => x.testBit i) h
+    simp only [Nat.testBit_xor, Nat.zero_testBit] at this
+    revert this; cases a.testBit i <;> cases b.testBit i <;> simp
+  · rintro rfl; exact Nat.xor_self a
 
 end Janus.Contracts.Mem
