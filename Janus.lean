@@ -32,3 +32,4 @@ import Janus.Contracts.Iface
 import Janus.Contracts.IfaceAmd64
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat
+import Janus.Contracts.IfaceSatAmd64
