@@ -1,5 +1,6 @@
 import Janus.Amd64.TacticAVX
 import Janus.Tactic.Vector
+import Janus.Spec.CRC32C
 
 /-!
 # Proof support for the SSE packed instructions (WP-D)
@@ -25,6 +26,22 @@ namespace Janus.Amd64.Tactic
 open Janus.Amd64 Janus.Arm64 Janus.Tactic
 
 janus_rfl_eqns ExecSSE.exec [janus64_exec]
+
+/- The bit-serial CRC of `CRC32` doubles its term at every step under `whnf` (the next register
+is an `if` on the current one); proofs reason about it with `Janus.Spec.CRC32C`, never by
+unfolding it, so the elaborator must not unfold it either. -/
+/-- `CRC32` results are 32-bit values (zero-extended into the 64-bit register). -/
+@[janus64_exec, janus64_post] theorem toNat_ofNat_crc32c (n x d : Nat) :
+    (BitVec.ofNat 64 (ExecSSE.crc32c n (x % 4294967296) d)).toNat = ExecSSE.crc32c n (x % 4294967296) d := by
+  rw [BitVec.toNat_ofNat]
+  exact Nat.mod_eq_of_lt (Nat.lt_trans (Janus.Spec.CRC32C.crc32c_lt n _ d (Nat.mod_lt _ (by decide))) (by decide))
+
+@[janus64_exec, janus64_post] theorem crc32c_mod_32 (n x d : Nat) :
+    ExecSSE.crc32c n (x % 4294967296) d % 4294967296 = ExecSSE.crc32c n (x % 4294967296) d :=
+  Nat.mod_eq_of_lt (Janus.Spec.CRC32C.crc32c_lt n _ d (Nat.mod_lt _ (by decide)))
+
+set_option allowUnsafeReducibility true in
+attribute [irreducible] ExecSSE.crc32c
 
 attribute [janus64_exec] ExecSSE.readN ExecSSE.readG ExecSSE.doneX ExecSSE.doneFP ExecSSE.raiseMx
 
