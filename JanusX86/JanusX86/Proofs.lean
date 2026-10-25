@@ -28,3 +28,4 @@ import JanusX86.Proofs.CmpXchg
 import JanusX86.Proofs.Cbw
 import JanusX86.Proofs.Xchg
 import JanusX86.Proofs.Div
+import JanusX86.Proofs.Leave
