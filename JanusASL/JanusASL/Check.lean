@@ -79,6 +79,9 @@ structure Case where
   /-- V0..V31 (128-bit; absent in the case: all zero) and TPIDR_EL0 (absent: 0). -/
   v : Array Nat
   tpidr : Nat
+  /-- FPCR and FPSR (32-bit; absent in the case: 0). -/
+  fpcr : Nat
+  fpsr : Nat
 
 def parseCase (line : String) : Except String Case := do
   let j ← Json.parse line
@@ -96,7 +99,10 @@ def parseCase (line : String) : Except String Case := do
   if vs.size ≠ 0 && vs.size ≠ 32 then throw "v must have 32 entries"
   let v ← if vs.size = 0 then pure (Array.replicate 32 0) else vs.mapM parseHex
   let tpidr ← ((do parseHex (← j.getObjValAs? String "tpidr")) <|> pure 0)
-  pure { id, cls, word, pc, x, sp, nzcv, seed, v, tpidr }
+  let fpcr ← ((do parseHex (← j.getObjValAs? String "fpcr")) <|> pure 0)
+  let fpsr ← ((do parseHex (← j.getObjValAs? String "fpsr")) <|> pure 0)
+  if fpcr ≥ 2 ^ 32 ∨ fpsr ≥ 2 ^ 32 then throw "fpcr/fpsr must be below 2^32"
+  pure { id, cls, word, pc, x, sp, nzcv, seed, v, tpidr, fpcr, fpsr }
 
 /-! ## The ASL side -/
 
@@ -300,7 +306,7 @@ def userMappedCase (s : SState) (seed : Nat) : Bool :=
 
 /-- What the ASL step produced. -/
 inductive AslResult where
-  | ok (x : Array Nat) (sp pc nzcv : Nat) (mem : List (Nat × Nat)) (stray : List Nat) (v : Array Nat)
+  | ok (x : Array Nat) (sp pc nzcv : Nat) (mem : List (Nat × Nat)) (stray : List Nat) (v : Array Nat) (fpsr : Nat)
   | exception (ty : ArmASL.Exception) (syndrome : Nat) (vaddr : Nat)
   | undefined
   | unpredictable
@@ -327,6 +333,8 @@ def runAsl (base : SState) (c : Case) : AslResult × Bool × Bool := Id.run do
     for i in [0:32] do
       janus_set_v (BitVec.ofNat 5 i) (BitVec.ofNat 128 c.v[i]!)
     janus_set_tpidr (BitVec.ofNat 64 c.tpidr)
+    writeReg Register.FPCR (BitVec.ofNat 64 c.fpcr)
+    writeReg Register.FPSR (BitVec.ofNat 64 c.fpsr)
   match runM setup s0 with
   | .error e => return (.error s!"setup: {e}", false, false)
   | .ok ((), s1) =>
@@ -338,17 +346,18 @@ def runAsl (base : SState) (c : Case) : AslResult × Bool × Bool := Id.run do
   let cfg := pre && JanusASL.Proofs.cfgOk s2
   match r with
   | .Janus_OK =>
-    let readBack : SailM (Array Nat × Nat × Nat × Nat × Array Nat) := do
+    let readBack : SailM (Array Nat × Nat × Nat × Nat × Array Nat × Nat) := do
       let mut xs := #[]
       for i in [0:31] do
         xs := xs.push (← janus_get_x (BitVec.ofNat 5 i)).toNat
       let mut vs := #[]
       for i in [0:32] do
         vs := vs.push (← janus_get_v (BitVec.ofNat 5 i)).toNat
-      pure (xs, (← janus_get_sp ()).toNat, (← janus_get_pc ()).toNat, (← janus_get_nzcv ()).toNat, vs)
+      pure (xs, (← janus_get_sp ()).toNat, (← janus_get_pc ()).toNat, (← janus_get_nzcv ()).toNat, vs,
+        (← readReg Register.FPSR).toNat)
     match runM readBack s2 with
     | .error e => return (.error s!"readback: {e}", cfg, um)
-    | .ok ((xs, sp, pc, nzcv, vs), _) =>
+    | .ok ((xs, sp, pc, nzcv, vs, fpsr), _) =>
       let mem := (List.range dataSize).filterMap fun i =>
         let b := (s2.mem.getD (dataBase + i) 0).toNat
         if b ≠ pattern c.seed i then some (i, b) else none
@@ -356,7 +365,7 @@ def runAsl (base : SState) (c : Case) : AslResult × Bool × Bool := Id.run do
       let stray := baseKeys.filterMap fun a =>
         if s2.mem.get? a = mem0.get? a then none else some a
       let stray := if s2.mem.size = mem0.size then stray else stray ++ [0]
-      return (.ok xs sp pc nzcv mem stray vs, cfg, um)
+      return (.ok xs sp pc nzcv mem stray vs fpsr, cfg, um)
   | .Janus_Exception =>
     let rd : SailM (ArmASL.Exception × BitVec 25 × BitVec 64) := do
       pure (← readReg Register.__janus_exc_type, ← readReg Register.__janus_exc_syndrome, ← readReg Register.__janus_exc_vaddress)
@@ -387,7 +396,9 @@ def janusInit (dczid : Nat) (c : Case) : State :=
         regions := [{ base := dataBase, size := dataSize, writable := true }] }
     dczid := BitVec.ofNat 5 dczid
     vregs := fun i => if i < 32 then BitVec.ofNat 128 c.v[i]! else 0
-    tpidr := BitVec.ofNat 64 c.tpidr }
+    tpidr := BitVec.ofNat 64 c.tpidr
+    fpcr := BitVec.ofNat 32 c.fpcr
+    fpsr := BitVec.ofNat 32 c.fpsr }
 
 open Janus.Arm64 in
 def nzcvOf (f : Flags) : Nat :=
@@ -418,7 +429,7 @@ def compare (dczid : Nat) (c : Case) (asl : AslResult) : Verdict :=
   | _, .unpredictable => .mismatch "janus decodes a (CONSTRAINED) UNPREDICTABLE case"
   | _, .other s => .mismatch s!"ASL: {s}"
   | _, .error e => .mismatch s!"ASL model error: {e}"
-  | .ok s, .ok xs sp pc nzcv mem stray vs =>
+  | .ok s, .ok xs sp pc nzcv mem stray vs fpsr =>
     let jx := (List.range 31).map fun i => (s.regs i).toNat
     let jmem := (List.range dataSize).filterMap fun i =>
       let b := (s.mem.bytes (dataBase + i)).toNat
@@ -430,6 +441,7 @@ def compare (dczid : Nat) (c : Case) (asl : AslResult) : Verdict :=
     else if jmem != mem then .mismatch s!"memory: janus {jmem} asl {mem}"
     else if (List.range 32).map (fun i => (s.vregs i).toNat) != vs.toList then
       .mismatch s!"V: janus {(List.range 32).map fun i => hex (s.vregs i).toNat} asl {vs.toList.map hex}"
+    else if s.fpsr.toNat ≠ fpsr then .mismatch s!"FPSR: janus {hex s.fpsr.toNat} asl {hex fpsr}"
     else if !stray.isEmpty then .mismatch s!"ASL wrote outside the data buffer: {stray.take 4 |>.map hex}"
     else .agree "ok"
   | .ok _, .exception ty syn va => .mismatch s!"janus completes, ASL takes {excName ty} (ISS {hex syn}, va {hex va})"
@@ -441,9 +453,9 @@ def compare (dczid : Nat) (c : Case) (asl : AslResult) : Verdict :=
   | .error (.unaligned _ _), .exception .Exception_DataAbort syn _ =>
     if isAlignmentDfsc (dfsc syn) then .agree "alignment-fault" else
       .gap s!"unaligned/data-abort-dfsc-{hex (dfsc syn)}"
-  | .error (.pcMisaligned t), .ok _ _ pc _ _ _ _ =>
+  | .error (.pcMisaligned t), .ok _ _ pc _ _ _ _ _ =>
     if pc == t then .agree "pc-misaligned-next-fetch" else .mismatch s!"pcMisaligned {hex t}, ASL pc {hex pc}"
-  | .error (.noCode t), .ok _ _ pc _ _ _ _ => .gap s!"noCode {hex t}/asl-pc {hex pc}"
+  | .error (.noCode t), .ok _ _ pc _ _ _ _ _ => .gap s!"noCode {hex t}/asl-pc {hex pc}"
   | .error f, .exception ty syn _ => .gap s!"janus {(repr f).pretty.takeWhile (· != ' ')}/asl {excName ty} ISS {hex syn}"
   | .error f, .ok .. => .gap s!"janus {(repr f).pretty.takeWhile (· != ' ')}/asl-ok"
 
