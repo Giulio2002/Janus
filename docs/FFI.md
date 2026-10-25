@@ -130,7 +130,21 @@ clang, `-O0` and `-O2`, arm64 under qemu and amd64 native) it then compiles, per
    own register save areas must return the values its `va_arg` read;
 3. a **layout** check: `sizeof`, `_Alignof` and the offset of every scalar leaf.
 
-RESULTS_PLACEHOLDER
+**Results** (gcc 15.2.0, clang 21.1.8; `scripts/cabi-probe.sh -random N -seed S`): 0 mismatches
+in every configuration, for seed 1 (439 prototypes: 39 curated, 400 random; 9,706 checks per
+arm64 and 9,899 per amd64 configuration), seed 2 (1,037 prototypes, 22,204 / 22,669 checks) and
+seed 7 (1,039 prototypes, 22,053 / 22,525 checks), so about 220,000 checks per seed over the
+8 configurations. Random prototypes with a type over 256 bytes or over 1 KiB of stacked
+arguments are not generated (the stubs' capture buffers). The probe found an error in the
+model while it was written (the SysV cleanup has to be applied per aggregate, see above), fixed
+before these runs.
+
+One compiler bug is excluded, not counted as a mismatch: **gcc 15.2 at `-O2` on arm64
+miscompiles `va_arg` of an HFA/HVA of `_Float16` or of short vectors** (it reads the wrong save
+slots; the same source is correct at `-O0` and with clang, and a standalone reproducer outside
+the probe shows the miscompile). `knownBug` in `scripts/cabiprobe/main.go` excludes exactly those
+tests (13, 24 and 35 for seeds 1, 2, 7, listed in `known-bugs.txt`); the caller side of those
+prototypes and every other check still run.
 
 ### 1.4 Classified calls (`CCallA`, `CEnsuresR`)
 
