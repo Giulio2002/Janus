@@ -37,7 +37,7 @@ about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of
 |---|---|
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
 | `janus-asl-check` | **566,027 agree, 17,729 gap, 0 MISMATCH** (slice with the scalar floating-point, crypto, CRC and permute decoders, vendored sha256 `cd26b412…`; FPCR/FPSR set from the case and FPSR compared after the step); `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 1 h with 12 tasks |
-| proofs | **55 audited theorems** plus `JanusASL.Verify.classify_sound` (an explicit list in JanusASL/Audit.lean and audit/rt-asl/AuditStrict.lean, with every statement printed): 48 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
+| proofs | **56 audited theorems** plus `JanusASL.Verify.classify_sound` (an explicit list in JanusASL/Audit.lean and audit/rt-asl/AuditStrict.lean, with every statement printed): 49 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
 | `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
 
 Agreement by corpus class (`agree` / `gap`):
@@ -124,7 +124,8 @@ retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to
 | LD<op>{A}{L}{B,H}, op = ADD, CLR, EOR, SET, SMAX, SMIN, UMAX, UMIN (and the ST<op> aliases, `Rt = 11111`) | all valid | **proved**³ | `ldadd_agree`, `ldclr_agree`, `ldeor_agree`, `ldset_agree`, `ldsmax_agree`, `ldsmin_agree`, `ldumax_agree`, `ldumin_agree` (LdStAtomicCls; LdStAtomic, MemAtomic) |
 | SWP{A}{L}{B,H} | all valid | **proved**³ | `swp_agree` (LdStAtomicCls) |
 | CAS, CASP, PRFM | | tested | |
-| AdvSIMD/FP, AES, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
+| FCMP, FCMPE (S and D, register and `#0.0`) | all valid | **proved**⁴ | `fcmp_agree` (FP/FCmpCls) |
+| the other scalar FP instructions, AdvSIMD, AES, SHA, CRC, PMULL, permutes, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
 
 "All valid" means all words of the group that Janus decodes. The theorems carry the decode
 conditions as hypotheses, for example `shift ≠ 11` and `imm6 < 32` when `sf = 0`. In those
@@ -143,6 +144,36 @@ Janus steps successfully (`step w js = .ok js'`): the ASL step completes with `J
 state `s'` with `Rel js' s'`, `MemRel js'.mem s'` and `LinuxEL0Config s'`. Where Janus faults
 (outside its allocation, read-only, SP misaligned) nothing is claimed; the check compares those
 cases with the ASL's exceptions.
+
+⁴ Under `Rel`, `FPRel js s`, `LinuxEL0Config s` and `FPConfig s` (below), for words Janus steps
+successfully: the ASL step completes with `Janus_OK` in a state `s'` with `Rel js' s'`,
+`FPRel js' s'`, `LinuxEL0Config s'` and `FPConfig s'`. Where Janus faults (a raised floating-point
+exception whose trap FPCR enables) nothing is claimed.
+
+### Scalar floating point (FP/*.lean)
+
+`FPRel js s` relates the floating-point state: `_Z[i]` holds Janus' `V[i]` in its low 128 bits, and
+`FPCR`/`FPSR` hold Janus' `fpcr`/`fpsr` zero-extended; Janus' FPCR has its RES0 bits (3–7, 14,
+27–31) clear, so the ASL's `FPCR_read` (which masks them, with the configuration's
+IMPLEMENTATION DEFINED choices: every exception's trap implemented, FPSCR.LEN/STRIDE not RAZ,
+FP/ImpDef.lean) returns it unchanged. `FPConfig s`: CPACR_EL1, CPTR_EL2 and CPTR_EL3 hold the
+check's values (FP enabled at EL0, no EL2/EL3 trap); `janus-asl-check` evaluates it (`fpCfgOk`)
+with `LinuxEL0Config` on the base state and every case's pre- and post-state.
+
+The library layer is proved against Janus' `Janus.Arm64.FP` (`Float.lean`): `FPUnpack` (the
+classification, the exact value as a rational, `FPCR.FZ`/`FIZ`/`AH` flushing with IDC) for
+binary32 and binary64 (FP/Unpack.lean), the value comparisons (`eq_real`/`lt_real` on the
+rationals against Janus' dyadic `Val.eq`/`Val.lt`, with the ASL's infinities `±2^1000000` above
+every finite value, FP/Value.lean), `FPProcessException` (the cumulative FPSR bit when the trap
+is disabled), `FPProcessDenorms` and `FPCompare` (FP/Compare.lean). An exception that Janus raises
+without trapping has its FPCR enable bit clear, which is all the ASL's trap test needs.
+
+The ASL's `while` loops (FPRoundBase normalizes the mantissa with two) are `Lean.Loop.forIn`, which
+Lean unfolds for monads with a `Lean.Order.MonadTail` instance. Decision: JanusASL/Proofs/Loop.lean
+adds that instance for `EStateM` (a flat order per initial state; no axioms beyond the standard
+three) and the lemma `forIn_loop_pure` for loops with a pure body. This is reasoning about the
+existing definitions only: no generated definition, and nothing in the generator or the vendored
+slice, changes.
 
 ### Loads and stores (Mem.lean, MemWrite.lean, LdSt*.lean)
 

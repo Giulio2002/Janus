@@ -1,6 +1,7 @@
 import ArmASL
 import Janus
 import JanusASL.Proofs.Mem
+import JanusASL.Proofs.FP.Config
 import Lean.Data.Json
 
 /-!
@@ -338,12 +339,12 @@ def runAsl (base : SState) (c : Case) : AslResult × Bool × Bool := Id.run do
   match runM setup s0 with
   | .error e => return (.error s!"setup: {e}", false, false)
   | .ok ((), s1) =>
-  let pre := JanusASL.Proofs.cfgOk s1
+  let pre := JanusASL.Proofs.cfgOk s1 && JanusASL.Proofs.fpCfgOk s1
   let um := userMappedCase s1 c.seed
   match runM (janus_step (BitVec.ofNat 32 c.word)) s1 with
   | .error e => return (.error e, pre, um)
   | .ok (r, s2) =>
-  let cfg := pre && JanusASL.Proofs.cfgOk s2
+  let cfg := pre && JanusASL.Proofs.cfgOk s2 && JanusASL.Proofs.fpCfgOk s2
   match r with
   | .Janus_OK =>
     let readBack : SailM (Array Nat × Nat × Nat × Nat × Array Nat × Nat) := do
@@ -612,7 +613,7 @@ def main (args : List String) : IO UInt32 := do
   let h ← IO.FS.Handle.mk out .write
   IO.eprintln s!"janus-asl-check: streaming {path}, {jobs} tasks"
   let batch := jobs * 256
-  let baseCfg := JanusASL.Proofs.cfgOk base
+  let baseCfg := JanusASL.Proofs.cfgOk base && JanusASL.Proofs.fpCfgOk base
   let umBase := userMappedBase base
   let spawn (cases : Array Case) : List (Task (Array (Case × Verdict × Bool × Bool))) :=
     let chunk := (cases.size + jobs - 1) / jobs
@@ -664,6 +665,6 @@ def main (args : List String) : IO UInt32 := do
   for (k, n) in kinds.toList.mergeSort (fun a b => a.2 ≥ b.2) do
     IO.println s!"{n}\t{k}"
   IO.println s!"cases {total}  agree {agree}  gap {gap}  MISMATCH {mism}"
-  IO.println s!"LinuxEL0Config: base {baseCfg}, cases violating it (pre- or post-state) {cfgBad}"
+  IO.println s!"LinuxEL0Config and FPConfig: base {baseCfg}, cases violating them (pre- or post-state) {cfgBad}"
   IO.println s!"UserMapped (data buffer): base sweep {umBase}, cases violating it (pre-state points) {umBad}"
   return if mism = 0 && baseCfg && cfgBad = 0 && umBase && umBad = 0 then 0 else 1

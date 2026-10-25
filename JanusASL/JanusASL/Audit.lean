@@ -48,6 +48,7 @@ def janusAslAudited : List Name := [
     `JanusASL.Proofs.ldumax_agree,
     `JanusASL.Proofs.ldumin_agree,
     `JanusASL.Proofs.swp_agree,
+    `JanusASL.Proofs.fcmp_agree,
     `JanusASL.Proofs.witness_hyps,
     `JanusASL.Proofs.witness_ldr_asl,
     `JanusASL.Proofs.witness_str_asl,

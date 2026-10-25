@@ -28,6 +28,7 @@ import JanusASL.Proofs.LdStPair
 import JanusASL.Proofs.LdStExcl
 import JanusASL.Proofs.LdStAtomicCls
 import JanusASL.Proofs.Witness
+import JanusASL.Proofs.FP.FCmpCls
 
 /-! # JanusASL proofs: Janus' `step` against the generated ASL, per encoding class
 
