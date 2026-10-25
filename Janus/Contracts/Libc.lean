@@ -323,6 +323,95 @@ theorem accessible_heapFree_heapAlloc {m : Memory} {p n : Nat} (hf : Fresh m p n
     (fun r => r.writable || a + k ≤ r.base || r.base + r.size ≤ a) (by simp [heapToken])
   simp only [Memory.accessible, this.1, this.2]
 
+
+/-! Rewrite rules for `janus_run` after a libc call (`janus_run [copyMem_readLE_out, …]`): reads
+and accesses away from the block a call changed. -/
+
+theorem copyMem_readLE_out {m : Memory} {d src n a k : Nat} (h : a + k ≤ d ∨ d + n ≤ a) :
+    (copyMem m d src n).readLE a k = m.readLE a k :=
+  Janus.FFI.readLE_congr fun i hi => copyMem_bytes_out (by omega)
+
+theorem setMem_readLE_out {m : Memory} {d c n a k : Nat} (h : a + k ≤ d ∨ d + n ≤ a) :
+    (setMem m d c n).readLE a k = m.readLE a k :=
+  Janus.FFI.readLE_congr fun i hi => by simp only [setMem]; rw [if_neg (by omega)]
+
+/-- Regions that do not contain a non-empty range do not decide whether it is accessible. -/
+theorem any_erase_of {l : List Region} {x : Region} {P : Region → Bool} (hx : P x = false) :
+    (l.erase x).any P = l.any P := by
+  apply Bool.eq_iff_iff.2
+  simp only [List.any_eq_true]
+  constructor
+  · rintro ⟨y, hy, hp⟩; exact ⟨y, List.mem_of_mem_erase hy, hp⟩
+  · rintro ⟨y, hy, hp⟩
+    refine ⟨y, ?_, hp⟩
+    by_cases hyx : y = x
+    · subst hyx; simp [hx] at hp
+    · exact (List.mem_erase_of_ne hyx).2 hy
+
+theorem all_erase_of {l : List Region} {x : Region} {Q : Region → Bool} (hx : Q x = true) :
+    (l.erase x).all Q = l.all Q := by
+  apply Bool.eq_iff_iff.2
+  simp only [List.all_eq_true]
+  constructor
+  · intro h y hy
+    by_cases hyx : y = x
+    · subst hyx; exact hx
+    · exact h y ((List.mem_erase_of_ne hyx).2 hy)
+  · intro h y hy; exact h y (List.mem_of_mem_erase hy)
+
+theorem token_any_false {p n a k : Nat} {w : Bool} (hk : 0 < k) :
+    (decide (2 ^ 48 + p ≤ a) && decide (a + k ≤ 2 ^ 48 + p + n) &&
+      decide (2 ^ 48 + p + n ≤ 2 ^ 48) && (!w || true)) = false := by
+  by_cases h : 2 ^ 48 + p ≤ a ∧ a + k ≤ 2 ^ 48 + p + n ∧ 2 ^ 48 + p + n ≤ 2 ^ 48
+  · omega
+  · simp only [Bool.and_eq_false_iff, decide_eq_false_iff_not]
+    omega
+
+theorem heapAlloc_accessible_out {m : Memory} {p n a k : Nat} {j : Nat → Byte} {w : Bool}
+    (hk : 0 < k) (h : a + k ≤ p ∨ p + n ≤ a) :
+    (heapAlloc m p n j).accessible a k w = m.accessible a k w := by
+  simp only [Memory.accessible, heapAlloc, heapToken, heapTag, List.any_append, List.all_append,
+    List.any_cons, List.any_nil, List.all_cons, List.all_nil]
+  have h1 : (decide (p ≤ a) && decide (a + k ≤ p + n) && decide (p + n ≤ 2 ^ 48) && (!w || true)) = false := by
+    rcases h with h | h <;> simp <;> omega
+  have h2 : (decide (2 ^ 48 + p ≤ a) && decide (a + k ≤ 2 ^ 48 + p + n) &&
+      decide (2 ^ 48 + p + n ≤ 2 ^ 48) && (!w || true)) = false := token_any_false hk
+  simp only [h1, h2, Bool.or_false, Bool.true_or, Bool.and_true]
+
+theorem heapFree_bytes_out {m : Memory} {p n a : Nat} {j : Nat → Byte} (h : a < p ∨ p + n ≤ a) :
+    (heapFree m p n j).bytes a = m.bytes a := by
+  simp only [heapFree]; rw [if_neg (by omega)]
+
+theorem heapFree_readLE_out {m : Memory} {p n a k : Nat} {j : Nat → Byte} (h : a + k ≤ p ∨ p + n ≤ a) :
+    (heapFree m p n j).readLE a k = m.readLE a k :=
+  Janus.FFI.readLE_congr fun i hi => heapFree_bytes_out (by omega)
+
+theorem heapFree_accessible_out {m : Memory} {p n a k : Nat} {j : Nat → Byte} {w : Bool}
+    (hk : 0 < k) (h : a + k ≤ p ∨ p + n ≤ a) :
+    (heapFree m p n j).accessible a k w = m.accessible a k w := by
+  simp only [Memory.accessible, heapFree]
+  rw [any_erase_of (by simp only [heapToken, heapTag]; exact token_any_false hk), all_erase_of (by simp [heapToken]),
+    any_erase_of (by rcases h with h | h <;> simp <;> omega), all_erase_of (by simp)]
+
+
+/-- `free` of a block `malloc` added to `m` gives back `m`'s accessibility. -/
+theorem accessible_heapFree_of {M m : Memory} {p n : Nat} {j : Nat → Byte}
+    (hM : M.regions = m.regions ++ [⟨p, n, true⟩, heapToken p n]) (hf : Fresh m p n) (hn : 0 < n)
+    (hp : p ≠ 0) (a k : Nat) (w : Bool) : (heapFree M p n j).accessible a k w = m.accessible a k w := by
+  have := accessible_heapFree_heapAlloc (j := j) (j' := j) (bytes := (heapFree M p n j).bytes) hf hn hp a k w
+  simp only [heapFree, hM] at this ⊢
+  exact this
+
+/-- The live block `free` finds at `p` is the one `malloc` added, when no region of `m` is empty. -/
+theorem heapBlock_size {m : Memory} {p n n' : Nat} (hf : Fresh m p n) (hn : 0 < n)
+    (hne : ∀ r ∈ m.regions, 0 < r.size) (h : (⟨p, n', true⟩ : Region) ∈ m.regions ++ [⟨p, n, true⟩, heapToken p n]) :
+    n' = n := by
+  simp only [List.mem_append, List.mem_cons, List.mem_nil_iff, or_false] at h
+  rcases h with h | h | h
+  · have := hne _ h; rcases hf.2 _ h with h1 | h1 <;> simp at h1 this <;> omega
+  · simp at h; exact h
+  · simp [heapToken, heapTag] at h
+
 /-! ## The libc contract -/
 
 /-- One external function of a contract: its stub name, when a call is defined, its results. -/

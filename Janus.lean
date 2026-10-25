@@ -39,4 +39,6 @@ import Janus.Contracts.IfaceSatAmd64
 import Janus.Spec.CRC32C
 import Janus.Contracts.Libc
 import Janus.Contracts.LibcSat
+import Janus.Contracts.LibcAmd64
+import Janus.Contracts.LibcSatAmd64
 import Janus.Tactic.ABI0

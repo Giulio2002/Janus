@@ -86,6 +86,15 @@ def roundUp (n a : Nat) : Nat := if a ≤ 1 then n else (n + a - 1) / a * a
 def TLSImage.varOff (t : TLSImage) (name : String) : Nat :=
   ((t.vars.find? (·.1 == name)).map (·.2.1)).getD 0
 
+/-- The offset below the thread pointer (`FS`) of the executable's TLS block on x86-64 (ELF TLS
+variant II: the block ends at the thread control block). -/
+def TLSImage.x64Off (t : TLSImage) : Nat := roundUp t.size t.align
+
+/-- The address of the `__thread` variable `name` on x86-64, for the thread whose `FS` base is
+`fs`. -/
+def TLSImage.x64Addr (t : TLSImage) (fs : BitVec 64) (name : String) : Nat :=
+  fs.toNat - t.x64Off + t.varOff name
+
 end Janus
 
 namespace Janus.FFI
@@ -945,6 +954,41 @@ theorem _root_.Janus.CABI.CReturn.vlow_trans {a b b' c : State} (h₁ : CReturn 
   · rw [h₂.v13, hb, h₁.v13]
   · rw [h₂.v14, hb, h₁.v14]
   · rw [h₂.v15, hb, h₁.v15]
+
+/-- `c` keeps the low halves of `V8`–`V15` of `a`. -/
+def VLow (a c : State) : Prop := ∀ i, 8 ≤ i → i < 16 → (c.vregs i).toNat % 2 ^ 64 = (a.vregs i).toNat % 2 ^ 64
+
+theorem _root_.Janus.CABI.CReturn.vlow {a b : State} (h : CReturn a b) : VLow a b := by
+  intro i h1 h2
+  have : i = 8 ∨ i = 9 ∨ i = 10 ∨ i = 11 ∨ i = 12 ∨ i = 13 ∨ i = 14 ∨ i = 15 := by omega
+  rcases this with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  · exact h.v8
+  · exact h.v9
+  · exact h.v10
+  · exact h.v11
+  · exact h.v12
+  · exact h.v13
+  · exact h.v14
+  · exact h.v15
+
+theorem VLow.trans {a b b' c : State} (h₁ : VLow a b) (h₂ : VLow b' c) (hb : b'.vregs = b.vregs) :
+    VLow a c := fun i h1 h2 => by rw [h₂ i h1 h2, hb, h₁ i h1 h2]
+
+theorem VLow.of_eq {a b : State} (h : b.vregs = a.vregs) : VLow a b := fun i _ _ => by rw [h]
+
+/-- The eight equations `CReturn` asks for. -/
+theorem VLow.goal {a c : State} (h : VLow a c) :
+    (c.vregs 8).toNat % 2 ^ 64 = (a.vregs 8).toNat % 2 ^ 64 ∧
+    (c.vregs 9).toNat % 2 ^ 64 = (a.vregs 9).toNat % 2 ^ 64 ∧
+    (c.vregs 10).toNat % 2 ^ 64 = (a.vregs 10).toNat % 2 ^ 64 ∧
+    (c.vregs 11).toNat % 2 ^ 64 = (a.vregs 11).toNat % 2 ^ 64 ∧
+    (c.vregs 12).toNat % 2 ^ 64 = (a.vregs 12).toNat % 2 ^ 64 ∧
+    (c.vregs 13).toNat % 2 ^ 64 = (a.vregs 13).toNat % 2 ^ 64 ∧
+    (c.vregs 14).toNat % 2 ^ 64 = (a.vregs 14).toNat % 2 ^ 64 ∧
+    (c.vregs 15).toNat % 2 ^ 64 = (a.vregs 15).toNat % 2 ^ 64 :=
+  ⟨h 8 (by omega) (by omega), h 9 (by omega) (by omega), h 10 (by omega) (by omega),
+   h 11 (by omega) (by omega), h 12 (by omega) (by omega), h 13 (by omega) (by omega),
+   h 14 (by omega) (by omega), h 15 (by omega) (by omega)⟩
 
 /-- `obtain_cret h`: the equations of `h : CReturn s s'` as hypotheses (for `janus_run`). -/
 macro "obtain_cret " h:term : tactic =>
