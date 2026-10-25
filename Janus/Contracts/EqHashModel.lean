@@ -311,3 +311,17 @@ def jmpBytes (a t : Nat) : List Nat :=
   [0xe9, d % 256, d / 256 % 256, d / 65536 % 256, d / 16777216 % 256]
 
 end Janus.Contracts.EqHashModel
+
+namespace Janus.Contracts.EqHashModel
+
+open Janus Janus.Arm64
+
+/-- `m` with the data segments `ds` laid over it as read-only regions (the program's `.rodata`
+objects, for a witness of a theorem that assumes `DataLoaded`). -/
+def withData (ds : List DataSegment) (m : Memory) : Memory :=
+  ⟨fun a => match ds.find? (fun d => decide (d.base ≤ a ∧ a < d.base + d.bytes.length)) with
+    | some d => BitVec.ofNat 8 (d.bytes.getD (a - d.base) 0)
+    | none => m.bytes a,
+   m.regions ++ ds.map (fun d => ⟨d.base, d.bytes.length, false⟩)⟩
+
+end Janus.Contracts.EqHashModel
