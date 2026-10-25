@@ -26,7 +26,8 @@ instance makes it compute another is rejected. See CRITICAL-1 in
 These are trusted, not proved.
 
 1. **The Lean AArch64 model** (`Janus/Arm64/Decode.lean`, `Exec.lean`, `Vector.lean`,
-   `State.lean`): the decoder, the instruction semantics and the checked memory. They are meant to agree with the
+   `State.lean`, and the crypto/CRC32/permute files `InstrCrypto.lean`, `DecodeCrypto.lean`,
+   `ExecCrypto.lean`, `Crypto.lean`): the decoder, the instruction semantics and the checked memory. They are meant to agree with the
    Arm Architecture Reference Manual (ARM ARM) for the supported user-mode A64 subset. That
    agreement is differentially tested against qemu (`janus-oracle`), not proved. If the model
    is wrong about an instruction the program uses, a theorem can be true of the model and false
@@ -194,6 +195,50 @@ the entries and try to plant one (bubblewrap and unshare), a tampered entry, an 
 with a different framework (a source change), `--fresh` and `--unsafe-no-sandbox`. Every row
 must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
 explains why it would not pay for the trusted state it would add.
+
+### Cache eviction
+
+The cache collector (`janus cache gc`, and automatically after `verify`, `verify-batch` and
+`blockers`; docs/CLI.md "Cache", `cmd/janus/cachegc.go`) deletes cache entries to keep the cache
+within a size budget. It adds no trusted state, and it cannot make janus accept anything it would
+not accept with an empty cache:
+
+* **It only deletes.** It never writes an entry, a manifest, a stamp or the result key, and never
+  renames anything except into its own fresh trash directory (`v1/tmp/gc-*`, removed at the end).
+  `TestCacheGCRedTeam` checks that a collection creates nothing but its lock, that a dry run
+  changes nothing, that the result key is untouched and that a forged result entry stays rejected.
+* **Every reader already survives deletion.** Each cache is checked when it is read, so a missing
+  entry is a miss and a partly missing one is a mismatch: a result or trusted-compile entry must
+  carry a valid HMAC under the hidden key and match the SHA-256 of every file; the framework build
+  is used only if its ready stamp, sources and module pins all match (otherwise it is rebuilt from
+  the embedded sources); consumer workspaces are untrusted by design (their modules are rebuilt,
+  pinned and kernel-replayed; the framework copy in them is pinned against the trusted build); a
+  replay marker only skips a replay whose module bytes and imports its name hashes, so deleting
+  one only makes the replay run again. An evicted entry is rebuilt from the same inputs, and the
+  rebuilt entry is equivalent: `TestCacheGCConcurrentVerify` empties the cache during and after
+  verifications (single files and a consumer package) and gets the same theorem, statement,
+  axioms and replay status.
+* **Nothing in use is removed.** Entries with a lock are removed only under that lock, taken
+  exclusively without waiting; an in-use workspace (exclusive), framework build (shared) or
+  JanusASL build (`.use`, shared, held for as long as a verification uses it) is skipped. The
+  entry is made unusable first (the framework's `.ready` stamp is removed), then renamed away in
+  one step, and its lock files are removed while held: a process waiting on the old lock re-checks
+  the inode (`lockFileMode`), takes the new lock and finds no entry, so it rebuilds. Lock-less
+  entries are removed by one rename or unlink, and their writers publish them by one rename, so a
+  reader sees a whole entry or none. Entries used within the grace period, and the builds the
+  process uses, are kept besides (`TestCacheGCRespectsLocks`, `TestCacheGCConcurrentHolders`).
+* **No symbolic link is followed.** Sizes are taken with `lstat`, entries are removed with
+  `rename`/`unlink`/`RemoveAll`, none of which follow links: a link a consumer build plants in its
+  (writable) workspace, or a link put in place of an entry, is removed itself, never its target.
+* **Only a private cache is collected.** The collector runs the round-8 check (`checkCacheRoot`)
+  first: in a cache another user can write, nothing is deleted (`janus cache gc` fails with
+  `Stage: cache safety`), since such a cache is not ours and none of its entries are trusted.
+* **What a red team could still do.** A process that can write the cache could plant entries,
+  but that is the round-8 threat and outside the model with or without eviction. Deleting an
+  entry can make the next run slower (a JanusASL build takes an hour) but never weaker: the
+  verifier's checks on a rebuilt entry are the same as on a first build. Touching an entry's
+  modification time (only possible for the consumer's own workspace, from inside the sandbox)
+  only changes which entries the collector keeps.
 
 **Not trusted:**
 
@@ -402,7 +447,8 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   Accepting them assumes the CPU implements both; every system that runs Go's arm64 port does
   (the AArch64 procedure-call standard passes floating-point values in SIMD&FP registers).
   FEAT_AES, FEAT_LRCPC and FEAT_LSE are assumed in the same way where their instructions are
-  accepted.
+  accepted, and so are FEAT_SHA1, FEAT_SHA256, FEAT_SHA512, FEAT_SHA3, FEAT_PMULL and FEAT_CRC32
+  (see "Crypto extension, CRC32, permutes" below).
 * **Store-exclusives are rejected.** `STXR`, `STLXR`, `STXP` and `STLXP` decode to nothing
   (`undecodable`), so any run that reaches one faults. Reasoning: on real hardware a
   store-exclusive may fail *spuriously* (status 1, nothing stored) even with no other thread:
@@ -472,11 +518,38 @@ load/store-exclusive loops; `runtime.memclrNoHeapPointers` uses `DC ZVA` after r
   Accepting them assumes FEAT_AES; Go only runs its AES hash after testing `cpu.ARM64.HasAES`
   (`runtime.useAeshash`), so a proof through it assumes that flag, as for LSE.
 
-Not modelled, and rejected: Advanced SIMD (vector) floating point, saturating, rounding and widening/narrowing arithmetic other than the listed ones, permutes
-(`ZIP`/`UZP`/`TRN`), SHA, polynomial multiply, SVE and SME. An Advanced SIMD write sets the whole
+Not modelled, and rejected: Advanced SIMD (vector) floating point, saturating, rounding and
+widening/narrowing arithmetic other than the listed ones (and `PMULL`, below), SM3/SM4, SVE and SME. An Advanced SIMD write sets the whole
 128-bit register (`V[d, n] = x` zero-extends); on a CPU with SVE the hardware also zeroes the
 upper bits of `Z[d]`, which are not part of the model and not observable by the accepted
 instructions.
+
+## Crypto extension, CRC32, permutes
+
+`Janus/Arm64/Crypto.lean` transcribes the ASL of these instructions statement by statement
+(the Sail translation of Arm's Armv9.4-A ASL, sail-arm `f5bf6c3`: the `execute_*` functions of
+`instrs64.sail` and the shared `SHAchoose`, `SHAparity`, `SHAmajority`, `SHAhashSIGMA0/1`,
+`SHA256hash`, `ROL`, `ROR`, `PolynomialMult`, `BitReverse`, `Poly32Mod2`); `ExecCrypto.lean` does
+the register reads and writes, `DecodeCrypto.lean` the decoding (one hook each in `Decode.lean` and
+`Exec.lean`, constructor `Instr.crypto`). Covered: `SHA1C`/`SHA1P`/`SHA1M`/`SHA1H`/`SHA1SU0`/
+`SHA1SU1`, `SHA256H`/`SHA256H2`/`SHA256SU0`/`SHA256SU1`, `SHA512H`/`SHA512H2`/`SHA512SU0`/
+`SHA512SU1`, `EOR3`/`RAX1`/`XAR`/`BCAX`, `PMULL`/`PMULL2` (8B→8H and 1D→1Q), `CRC32B/H/W/X` and
+`CRC32CB/H/W/X`, the permutes `ZIP1`/`ZIP2`/`UZP1`/`UZP2`/`TRN1`/`TRN2` (every arrangement) and
+`DUP` (element, scalar form, alias `MOV Sd, Vn.S[i]`). Rejected: SM3/SM4 and every unallocated or
+UNDEFINED encoding of these classes (PMULL `size` 01/10, permute `size:Q = 110`, scalar DUP with
+`imm5<3:0> = 0000`, CRC32 with `sf` not matching `sz = 11`).
+
+Accepting them assumes the optional features FEAT_SHA1, FEAT_SHA256, FEAT_SHA512, FEAT_SHA3,
+FEAT_PMULL and FEAT_CRC32 (and FEAT_AES above). Go runs these kernels only after testing the
+matching `cpu.ARM64.Has*` flag (`HasSHA1`, `HasSHA2`, `HasSHA512`, `HasSHA3`, `HasPMULL`,
+`HasCRC32`), so a proof through one of them states what the program assumed. On a CPU without
+the feature the instruction is UNDEFINED (`SIGILL`) and such a theorem says nothing about that
+CPU.
+
+Proved on top (not trusted): `crc32Op_eq_update` (`Janus/Arm64/CryptoLemmas.lean`) shows that the
+ASL formulation of CRC32/CRC32C (bit-reversed operands, `Poly32Mod2`, bit-reversed result)
+equals the bytewise reflected CRC of RFC 1952 / RFC 3720 for every input, which the
+`A64Crc32` example uses.
 
 Go 1.26's `runtime.memmove`, `runtime.memclrNoHeapPointers` and the compiler's inline copies of
 small values use general-purpose `LDP`/`STP`; larger copies (`LDP`/`STP Q16, Q17`), the
@@ -522,10 +595,10 @@ pseudocode:
 
 | | arm64 (`Janus/Arm64/Float.lean`, ASL) | amd64 (`Janus/Amd64/Float.lean`, Intel SDM) |
 |---|---|---|
-| instructions | `FADD FSUB FMUL FNMUL FDIV FSQRT FNEG FABS FMIN FMAX FMINNM FMAXNM FMADD FMSUB FNMADD FNMSUB FCMP FCMPE FCCMP FCCMPE FCSEL FCVT` (S↔D) `FCVT{N,P,M,Z,A}{S,U} SCVTF UCVTF` (32/64-bit) `FRINT{N,P,M,Z,A,X,I}`, `FMOV` (register, immediate) | `ADD SUB MUL DIV SQRT MIN MAX` `SD`/`SS`, `UCOMISD COMISD UCOMISS COMISS`, `CMPSD`/`CMPSS` (predicates 0–7), `CVTSI2SD/SS`, `CVTTSD2SI CVTSD2SI CVTTSS2SI CVTSS2SI` (32/64-bit), `CVTSD2SS CVTSS2SD`, `ROUNDSD`/`ROUNDSS` (SSE4.1, which Go runs behind a `runtime.x86HasSSE41` test), `ANDPD ANDNPD ORPD ANDPS ANDNPS ORPS` |
+| instructions | `FADD FSUB FMUL FNMUL FDIV FSQRT FNEG FABS FMIN FMAX FMINNM FMAXNM FMADD FMSUB FNMADD FNMSUB FCMP FCMPE FCCMP FCCMPE FCSEL FCVT` (S↔D) `FCVT{N,P,M,Z,A}{S,U} SCVTF UCVTF` (32/64-bit) `FRINT{N,P,M,Z,A,X,I}`, `FMOV` (register, immediate) | `ADD SUB MUL DIV SQRT MIN MAX` `SD`/`SS`, `UCOMISD COMISD UCOMISS COMISS`, `CMPSD`/`CMPSS` (predicates 0–7), `CVTSI2SD/SS`, `CVTTSD2SI CVTSD2SI CVTTSS2SI CVTSS2SI` (32/64-bit), `CVTSD2SS CVTSS2SD`, `ROUNDSD`/`ROUNDSS` (SSE4.1, which Go runs behind a `runtime.x86HasSSE41` test), `ANDPD ANDNPD ORPD ANDPS ANDNPS ORPS`, scalar FMA3 `VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}` |
 | control state | `State.fpcr`: `RMode`, `FZ`, `DN`, and FEAT_AFP's `FIZ`, `AH`, `NEP` | `State.mxcsr`: `RC`, `FTZ`, `DAZ`, the six masks |
 | flags | `State.fpsr` (`IOC DZC OFC UFC IXC IDC`, cumulative) | `MXCSR` bits 5:0 (`IE DE ZE OE UE PE`, cumulative) |
-| NaN results | the first signalling, else the first quiet operand (for `FMADD`: addend first), quieted; default NaN `0x7FF8…` with `DN = 1`; `AH = 1` has its own rules (default NaN negative, `FMAX` returns the second operand, ...) | the first source operand if it is a NaN, else the second, quieted; invalid operations give the indefinite `0xFFF8…`; `MINSD`/`MAXSD` return the second operand unchanged |
+| NaN results | the first signalling, else the first quiet operand (for `FMADD`: addend first), quieted; default NaN `0x7FF8…` with `DN = 1`; `AH = 1` has its own rules (default NaN negative, `FMAX` returns the second operand, ...) | the first source operand if it is a NaN, else the second, quieted; invalid operations give the indefinite `0xFFF8…`; `MINSD`/`MAXSD` return the second operand unchanged; FMA: the one NaN operand quieted, never negated (two or more NaNs fault) |
 | tininess | before rounding (`AH = 0`), after rounding (`AH = 1`) | after rounding |
 | flush-to-zero | `FZ`: inputs and outputs (output before rounding, `UFC` only, when `AH = 0`); `FIZ`: inputs | `DAZ`: inputs (no `DE`); `FTZ`: tiny results, exact or not, with `UE PE` |
 | out-of-range to integer | saturates; NaN gives 0 (`IOC`) | the integer indefinite `2^(w-1)` (`IE`) |
@@ -537,7 +610,13 @@ bits are RES0, so a theorem whose precondition allows them set says nothing abou
 unless they read as zero there. Half precision (FEAT_FP16: `ftype = 11`, `FZ16`, `AHP`), BFloat16,
 `FRINT32*/64*`, `FJCVTZS`, fixed-point conversions and Advanced SIMD floating point are rejected.
 The amd64 model is of SSE2 (and SSE4.1 for `ROUNDSD`, executed by Go only after testing
-`x86HasSSE41`); the VEX/EVEX forms (`VFMADD231SD` behind `x86HasFMA`, ...), x87 and `LDMXCSR` are
+`x86HasSSE41`) and of the scalar FMA3 instructions (`VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}`,
+which `GOAMD64=v3` code uses unconditionally and `GOAMD64=v1` code behind `x86HasFMA`): one
+rounding of the exact `±a × b ± c` on the IEEE core, proved equal to IEEE 754
+`fusedMultiplyAdd` in IEEE mode (`FP.fma_ieee`). Where the manuals leave an FMA result open (two
+or more NaN operands, whose choice Intel documents and AMD does not; `0 × ∞ + qNaN`, whose `IE`
+IEEE 754 §7.2 leaves to the implementation) the instruction faults (`undefinedResult`), so no
+proof depends on a vendor. The other VEX/EVEX floating-point forms, x87 and `LDMXCSR` are
 rejected. Encodings whose behaviour the manuals leave open (an `FCMP #0.0` with a non-zero `Rm`
 field, `REX.W` on an SSE instruction that does not use it, reserved `CMPSD`/`ROUNDSD` immediate
 bits) are rejected rather than guessed.
@@ -714,6 +793,35 @@ specification definitions like `GoABI`. A `CEnsures` theorem is about a call tha
 convention (`CCall`). It promises what the convention requires of the callee (`CReturn`) and
 nothing about callers that violate the convention. The callee-saved SIMD/FP state (`V8`–`V15` on
 arm64; the x87/`MXCSR` control words on amd64) is outside the model.
+
+## Go assembly (ABI0)
+
+A theorem about a Go assembly function is stated with `GoABI0.Ensures0` (or
+`Amd64.GoABI0.Ensures0`), see [ABI0.md](ABI0.md). Every instruction of the assembly, of the Go
+code calling it and of the ABI wrappers in between is executed by the model from the binary's
+bytes; **no assembly-specific behaviour is assumed**. What the ABI0 vocabulary contributes is the
+reading of the statement:
+
+* *The call state.* `CallSetup0` says where an ABI0 caller puts the arguments (frame word `i` at
+  `RSP + 8 + 8i`) and the return address, as `abi-internal.md`/`asm.html` and the code Go 1.26.0
+  emits define it. A theorem is about calls of that shape; if a caller laid out the frame
+  differently, the theorem would say nothing about that call. (When the caller is extracted too,
+  as in `CallXor`, nothing about the layout is taken on trust: the caller's stores are executed.)
+* *The return obligations.* `ABIReturn0` lists what the theorem promises to keep (arm64 `RSP`,
+  `g`, `FP`, `R18`; amd64 `RSP + 8`, `RBP`, the `FS` base, `DF`). They are proved, not assumed.
+  ABI0 promises nothing about `R14`/`X15` on amd64: a theorem about Go code after an ABI0 call
+  obtains `R14 = g` from the precondition `GoABI.TlsG` (the TLS slot holds `g`), stated in the
+  printed statement, and `X15 = 0` from the executed `XORPS`.
+* *The callee summaries.* `Summary0` and `Ret0` are ordinary `Summary` statements about the
+  extracted program, proved by execution; composing them (`janus_run calls [h]`) is the generic
+  `Reaches.call` lemma. `Ensures0.of_summary` is a theorem.
+* *The CLI classification* (`entryABI`/`entrySource`, the `Entry:` annotation, the convention
+  warning) is untrusted and informational, like reachability.
+
+Hence a theorem about assembly trusts exactly what a theorem about Go code trusts (the ISA model,
+the extraction identity, Lean), plus the reading of `CallSetup0` above. The runtime's own
+assembly that switches stacks or goroutines (`systemstack`, `mcall`, `gogo`, `asmcgocall`) is not
+covered by the convention: a theorem about it needs a precondition describing those states.
 
 ## What the theorem does not say
 

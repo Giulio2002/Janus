@@ -71,7 +71,7 @@ def ymmName (l n : Nat) : String := if l = 256 then s!"ymm{n}" else s!"xmm{n}"
 
 def sseName : SseOp → String
   | .xor => "pxor" | .and => "pand" | .or => "por" | .pcmpeqb => "pcmpeqb"
-  | .punpcklbw => "punpcklbw"
+  | .punpcklbw => "punpcklbw" | .pshufb => "pshufb" | .psignb => "psignb"
 
 def loc (next : Option Nat) (w : Nat) : Loc → String
   | .reg r => regW w r
@@ -171,6 +171,24 @@ def disasm0 (pc : Option Nat) (len : Nat) (i : Instr) : String :=
   | some (.movq d s) =>
     let f : XLoc → String := fun | .xmm n => s!"xmm{n}" | .mem a => "qword ptr " ++ addr next a
     s!"movq {f d}, {f s}"
+  | some (.andn w d s1 s2) => s!"andn {regW w d}, {regW w s1}, {loc next w s2}"
+  | some (.blsx op w d s) =>
+    s!"{if op = 1 then "blsr" else if op = 2 then "blsmsk" else "blsi"} {regW w d}, {loc next w s}"
+  | some (.bextr w d s c) => s!"bextr {regW w d}, {loc next w s}, {regW w c}"
+  | some (.bzhi w d s c) => s!"bzhi {regW w d}, {loc next w s}, {regW w c}"
+  | some (.shiftx op w d s c) =>
+    let m := match op with | .shl => "shlx" | .sar => "sarx" | _ => "shrx"
+    s!"{m} {regW w d}, {loc next w s}, {regW w c}"
+  | some (.rorx w d s i) => s!"rorx {regW w d}, {loc next w s}, {i}"
+  | some (.mulx w h l s) => s!"mulx {regW w h}, {regW w l}, {loc next w s}"
+  | some (.pdep w d s m) => s!"pdep {regW w d}, {regW w s}, {loc next w m}"
+  | some (.pext w d s m) => s!"pext {regW w d}, {regW w s}, {loc next w m}"
+  | some (.movbe w d s) => s!"movbe {loc next w d}, {loc next w s}"
+  | some (.vfmas w form negP negC d s2 s3) =>
+    let m := (if negP then "vfnm" else "vfm") ++ (if negC then "sub" else "add") ++ toString form ++
+      (if w = 64 then "sd" else "ss")
+    let s3' := match s3 with | .xmm n => s!"xmm{n}" | .mem a => ptrName w ++ addr next a
+    s!"{m} xmm{d}, xmm{s2}, {s3'}"
   | _ => toString (repr i)
 
 /-- Disassemble `i` at `pc` with length `len` (both optional). -/

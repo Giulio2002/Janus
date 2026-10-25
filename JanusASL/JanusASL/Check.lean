@@ -270,8 +270,18 @@ def transOk1 (s : SState) (va : Nat) (acc : AccessDescriptor) (al : Bool) (size 
       s2.sailOutput.size == s.sailOutput.size && (!full || transRegsSame s s2)
   | .error _ => false
 
+/-- The atomic descriptors (`atomAcc`), every operation and ordering. -/
+def atomAccs : List AccessDescriptor :=
+  [MemAtomicOp.MemAtomicOp_GCSSS1, .MemAtomicOp_ADD, .MemAtomicOp_BIC, .MemAtomicOp_EOR, .MemAtomicOp_ORR,
+    .MemAtomicOp_SMAX, .MemAtomicOp_SMIN, .MemAtomicOp_UMAX, .MemAtomicOp_UMIN, .MemAtomicOp_SWP,
+    .MemAtomicOp_CAS].flatMap fun op =>
+    [false, true].flatMap fun a => [false, true].map fun r => JanusASL.Proofs.atomAcc op a r
+
 def transOk (s : SState) (va : Nat) (w al : Bool) (size : Int) (full : Bool := false) : Bool :=
   (accsFor w).all fun acc => transOk1 s va acc al size full
+
+def transOkAtom (s : SState) (va : Nat) (al : Bool) (size : Int) : Bool :=
+  atomAccs.all fun acc => transOk1 s va acc al size
 
 /-- The data buffer is outside the model's GIC and UART windows (`UserMapped.nodev`). -/
 def dataNoDev : Bool := (dataBase / 2 ^ 16 != 0x2C00 && (dataBase + dataSize - 1) / 2 ^ 16 != 0x2C00 &&
@@ -280,12 +290,13 @@ def dataNoDev : Bool := (dataBase / 2 ^ 16 != 0x2C00 && (dataBase + dataSize - 1
 /-- The sweep on the base state: every byte, load and store, aligned or not, sizes 1..16. -/
 def userMappedBase (s : SState) : Bool :=
   dataNoDev && (List.range dataSize).all fun i => [false, true].all fun w => [false, true].all fun al =>
-    ([1, 2, 4, 8, 16] : List Int).all fun sz => transOk s (dataBase + i) w al sz (full := i % 64 == 0)
+    ([1, 2, 4, 8, 16] : List Int).all fun sz => transOk s (dataBase + i) w al sz (full := i % 64 == 0) &&
+      (!w || i % 16 != 0 || transOkAtom s (dataBase + i) al sz)
 
 /-- The per-case points: first, last and a seed-dependent byte, as a load and a store. -/
 def userMappedCase (s : SState) (seed : Nat) : Bool :=
   [dataBase, dataBase + dataSize - 1, dataBase + (seed * 97 + 13) % dataSize].all fun va =>
-    [false, true].all fun w => transOk s va w false 8
+    [false, true].all fun w => transOk s va w false 8 && (!w || transOkAtom s va true 8)
 
 /-- What the ASL step produced. -/
 inductive AslResult where

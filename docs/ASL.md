@@ -36,8 +36,8 @@ about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of
 | | |
 |---|---|
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
-| `janus-asl-check` | **562,288 agree, 21,468 gap, 0 MISMATCH**; `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 7 min on 48 cores |
-| proofs | **40 audited theorems** plus `JanusASL.Verify.classify_sound` (an explicit list in JanusASL/Audit.lean, with every statement printed): 36 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`; no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
+| `janus-asl-check` | after the FP merge (agent/asl at e6a7455): **562,465 agree, 19,434 gap, 1,857 MISMATCH**. Every MISMATCH is a scalar floating-point word (FMADD, FMUL, SCVTF, FCMP, FCVT*, ...) that Janus now decodes while the vendored ASL slice (`keep.txt`, vendor/ArmASL.tar.gz) still excludes its decoder (`janus decodes, ASL: janus-excluded decode_f*_float_*`), so these are slice coverage, not semantic disagreements; regenerating the slice with the scalar FP functions is pending. Before the FP merge: 562,288 agree, 21,468 gap, 0 MISMATCH. `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 7 min on 48 cores |
+| proofs | **55 audited theorems** plus `JanusASL.Verify.classify_sound` (an explicit list in JanusASL/Audit.lean and audit/rt-asl/AuditStrict.lean, with every statement printed): 48 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
 | `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
 
 Agreement by corpus class (`agree` / `gap`):
@@ -118,7 +118,12 @@ retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to
 | LDR/STR… (register offset, all extends, `S` shift) | all valid | **proved**³ | `ldstReg_agree` (LdStReg) |
 | LDR (literal) W/X, LDRSW (literal) | 2^24 each | **proved**³ | `ldrLit_agree` (LdStLit) |
 | LDP/STP (W, X) and LDPSW, post-index / signed offset / pre-index | all valid | **proved**³ | `ldstPair_agree` (LdStPair; paired accesses in MemPair) |
-| atomics, exclusives, ordered (LDAR/STLR), PRFM | | tested | |
+| LDAR/STLR (B/H/W/X) | all valid | **proved**³ | `ldstOrdered_agree` (LdStOrd) |
+| LDAPR (B/H/W/X) | all valid | **proved**³ | `ldapr_agree` (LdStExcl) |
+| LDXR/LDAXR (B/H/W/X) | all valid | **proved**³ | `ldExcl_agree` (LdStExcl) |
+| LD<op>{A}{L}{B,H}, op = ADD, CLR, EOR, SET, SMAX, SMIN, UMAX, UMIN (and the ST<op> aliases, `Rt = 11111`) | all valid | **proved**³ | `ldadd_agree`, `ldclr_agree`, `ldeor_agree`, `ldset_agree`, `ldsmax_agree`, `ldsmin_agree`, `ldumax_agree`, `ldumin_agree` (LdStAtomicCls; LdStAtomic, MemAtomic) |
+| SWP{A}{L}{B,H} | all valid | **proved**³ | `swp_agree` (LdStAtomicCls) |
+| CAS, CASP, PRFM | | tested | |
 | AdvSIMD/FP, AES, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
 
 "All valid" means all words of the group that Janus decodes. The theorems carry the decode
@@ -162,17 +167,34 @@ named hypothesis **`UserMapped m s`**: in every state an instruction started in 
 before its accesses (`TFrame`: only GPRs, SP, the step-entry registers and region bytes may
 differ), `AArch64_TranslateAddress` maps every byte of `m`'s regions (as an EL0 load, and as a
 store for writable regions) to the identity physical address, Normal write-back, without fault
-and without changing the state; and no region byte lies in the model's GIC/UART windows. The
+and without changing the state; and no region byte lies in the model's GIC/UART windows. It covers the descriptors of ordinary
+accesses (`gprAcc`) and of ordered, exclusive and atomic ones (`OrdAcc`: `acqRelAcc`, `acqPCAcc`,
+`exclAcc`, with the exclusive monitor's own translation, and `atomAcc op a r` for the LSE
+read-modify-writes, as a store). The
 `TFrame` part is justified statically: the call graph of `AArch64_TranslateAddress` (1,067
 generated functions) reads none of the registers `TFrame` lets change, and the regions do not hold
 page tables. `janus-asl-check` evaluates the hypothesis on its tables: every byte of the data
 buffer, as load and store, aligned and unaligned, sizes 1–16, on the base state (comparing every
 register the translation code can write), and three bytes on every case's pre-state.
 
-These theorems are per instruction; `UserMapped` is not yet carried through `run_agree`. Since
-`UserMapped` is evaluated, not proved, there is no kernel-checked non-vacuity witness with non-empty
-regions (only the trivial one, no regions, where every Janus access faults): that it holds for the
-check's tables is the evaluated fact above.
+The LSE atomics go through `MemAtomic` (MemAtomic.lean): for a naturally aligned access the ASL
+translates once (as a store, with the atomic descriptor), reads the old value with one physical
+access, computes the new value (`aslAtomicNew`, shown equal to Janus' `atomicOp` for all nine
+operations) and writes it with one physical access; the comparison of CAS is not used by LD<op>/SWP.
+
+These theorems are per instruction; `UserMapped` is not yet carried through `run_agree`.
+
+**Witness (Witness.lean).** `witnessState` is an explicit Sail state and `witnessJs` a Janus state
+with one writable 16-byte region at the check's data buffer address `0x10_0004_0000` and `X1` its
+base. `witness_hyps` proves (kernel-checked) `Rel`, `MemRel` and `LinuxEL0Config` for them, with a
+non-empty region list, so these hypotheses are jointly satisfiable with real memory.
+`witness_ldr_asl` and `witness_str_asl` instantiate `ldstUImm_agree` at `LDR X0, [X1]`
+(`0xF9400020`) and `STR X0, [X1]` (`0xF9000020`): Janus steps them and the ASL step agrees.
+`UserMapped` remains a hypothesis of these two instances. **`UserMapped`'s non-vacuity is evidenced
+by the evaluated check only** (`janus-asl-check` evaluates it on the check's translation tables,
+above), until the proof of the stage-1 walk for those tables lands; there is no kernel-checked
+state with non-empty regions satisfying `UserMapped` yet (only the trivial one, no regions, where
+every Janus access faults).
 
 ### `LinuxEL0Config` (Config.lean)
 
@@ -528,6 +550,60 @@ exits 0 ("All targets up-to-date (67 jobs)") and `lake build ArmASL` builds noth
 and makes `lake build ArmASL --no-build` exit 3 (a rebuild is needed). Lake's git calls refresh
 the stat cache `packages/Sail/.git/index` after a restore, so the "already matches" shortcut of a
 second restore recopies the entry (about a second); nothing else differs.
+
+#### Module cache: the JanusASL proofs and the Janus modules (`ASL_CACHE/mods`)
+
+The same `ASL_CACHE` also holds **one entry per Lean module** of the JanusASL package
+(`JanusASL.*`) and of the janus package (`Janus.*`), so the ~45 min proof build is shared too
+(`JanusASL/tools/asl_mod_cache.py`; `scripts/asl.sh build`, `prove` and `replay` restore before
+`lake build` and publish after it). A module's key is the SHA-256 of exactly the inputs Lake 4.34
+hashes into its trace, each by content (`asl_mod_cache.py show ROOT MODULE` prints them):
+
+* the module's name and its source file's SHA-256;
+* for every direct import, the import's key: a `JanusASL.*` or `Janus.*` module by this same key
+  (so the recursion covers the transitive imports Lake records as `importAllArts`), an `ArmASL`
+  module by the ArmASL entry's key above, a `Sail.*` module by the manifest's lean-sail entry, Lean
+  core by the toolchain;
+* the module's package configuration: its parsed lakefile without metadata, and every
+  `lean_lib`/`lean_exe` table (a superset of the owning library's `leanOptions`, `moreLeanArgs` and
+  `moreLeancArgs`), and both packages' `extraDepTargets`;
+* both `lean-toolchain` files, `lean --version`, the machine, and the scheme version.
+
+An entry, `mods/<key>/`, holds the module's outputs as Lake writes them (`lib/lean/<M>.olean`,
+`.ilean`, `.trace` and `.hash` files, `ir/<M>.c` and its objects; not `.setup.json`, which holds
+absolute paths and is an input Lake regenerates) and a `MANIFEST.sha256`. Restore copies every
+file and checks it against the manifest, and drops the module's outputs if one differs; publish
+stores only the modules of the closure of the targets just built (so they are up to date), writes
+into a temporary directory and renames it into place, one publisher per key (`flock`), never
+replacing an entry. Lake stays the judge: a restored module whose trace does not match what Lake
+computes is rebuilt as usual. Since Lake 4.34 cuts off on unchanged outputs (a dependent's trace
+uses its imports' `.olean` hashes), the key is coarser than Lake: an edit that leaves a module's
+`.olean` unchanged (a comment) makes its dependents miss the cache although Lake does not rebuild
+them here; it never makes a stale entry hit.
+
+The trust story is the ArmASL entry's: the cache must be writable only by users you trust, since a
+restored `.olean` is what later modules (and `janus verify --asl`) are checked against. The
+manifest catches corruption, not a malicious writer; the kernel replay (`scripts/asl.sh replay`,
+and the closure replay of `janus verify --asl`) re-checks every declaration. `janus verify --asl`
+itself does not read `ASL_CACHE`: it builds in its own trusted cache (`<cache>/v1/asl`), seeded from
+a sibling build or, by `scripts/asl.sh verify`, from the in-tree build, which the module cache now
+makes cheap.
+
+Measured (`JanusASL/tools/test_asl_mod_cache.sh --e2e CACHE`, plus the restore steps timed
+separately): building JanusASL at one commit from an empty module cache (the ArmASL entry
+restored) took **44 min 42 s** and published 126 entries (882 files, 1.9 GB; the other 7 keyed
+modules are executables' roots and files no library imports). A fresh copy of the same commit
+then restores the model in 1.1 s and the modules in **2.4 s** (manifests checked), after which
+`lake build JanusASL` takes **0.25 s** ("Build completed successfully (194 jobs)", nothing built):
+**4 s** in all, against 45 min. A second restore finds all 126 current in 1.8 s. Adding a theorem to
+`JanusASL/Proofs/Madd.lean` then makes Lake rebuild exactly that module and its 3 dependents in
+the library (`Proofs.Run`, `Proofs.Examples`, `Proofs`; 11 s), the set the keys predict; the key
+tests also check that the keys do not depend on the checkout's path, that a lakefile comment
+changes none, that editing `Janus/Arm64/State.lean` changes exactly its 109 dependents' keys, and
+that a library option or the toolchain changes them. Repeated after merging main (73cae68), into
+the same cache: the build reused 27 unchanged entries, built and published the other 110 (49 min 54 s
+under a loaded host), and a fresh copy of that commit then restored 137 modules and built JanusASL
+in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
 
 ## The check (JanusASL/Check.lean)
 

@@ -4,12 +4,16 @@
 # BT/BTS/BTR/BTC, SHLD/SHRD, BSF/BSR/TZCNT/LZCNT/POPCNT), model vs hardware (qemu-aarch64,
 # the host CPU), plus the hand-derived kernel checks in HandDerived.lean.
 # Writes only under audit/round5/model/{bin,cases,out-a64,out-x64}. Exits 1 on any MISMATCH,
-# on a failing hand-derived check, or if a family that must agree stopped agreeing.
+# on a failing hand-derived check, or if a family that must agree stopped agreeing. Afterwards the
+# per-case dumps are pruned (summaries and compressed verdicts kept; the generated cases/ removed;
+# KEEP=1 keeps everything, scripts/lib/artifacts.sh).
 # Usage: audit/round5/model/run-model.sh   (about a minute on 48 cores)
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 here="$root/audit/round5/model"
 export PATH="$PATH:/usr/local/go/bin"
+# shellcheck source=../../../scripts/lib/artifacts.sh
+. "$root/scripts/lib/artifacts.sh"
 B="$here/bin"; mkdir -p "$B/a64" "$B/x64"
 QEMU="${QEMU-/usr/bin/qemu-aarch64}"
 (cd "$root/oracle" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$B/a64/runner" ./cmd/runner &&
@@ -49,4 +53,6 @@ for cls in r5/a64.addsubext r5/x64.bt.reg r5/x64.bt.reg-imm r5/x64.bt.mem-imm; d
     echo ">>> $cls has model gaps (expected none)"; fail=1
   fi
 done
+art_prune "$here/out-a64" "$here/out-x64"
+[ "$(art_mode)" = raw ] || rm -f "$here"/cases/*.jsonl
 [ $fail -eq 0 ] && echo "All round-5 model rows as expected." || { echo "BROKEN"; exit 1; }
