@@ -40,8 +40,11 @@ the contracts over a model `M` (`MemModel`: the typed-memory functions) or `R` (
 also write their destination. The equality functions do not write runtime memory. Each
 precondition requires the stack guard at least `d` bytes below `SP` (no stack growth), an
 admissible `X30`, an aligned `SP` and the window `[SP - d, SP + 8 + 8·nargs)` writable
-(`CallOK`); every input must be readable, below `2^48` and outside the callee's part of the
-window (a callee writes its frame before reading its inputs). The floating-point contracts
+(`CallOK`), and the stack-guard word `16(g)` outside the callee's part of the window (a caller
+that pushes its frame and calls on re-reads it); every input must be readable, below `2^48` and
+outside the callee's part of the window (a callee writes its frame before reading its inputs).
+`memequal` has no spill slots (`Memequal` is stated with `nargs = 0`): it is `NOFRAME` assembly
+that writes no memory, and `strequal`/`memequal_varlen` call it without room for them. The floating-point contracts
 require `FPCR = 0` (what Linux starts a process with and Go never changes: round to nearest, no
 flushing, no traps).
 
@@ -76,7 +79,8 @@ def feq (f : Fmt) (x y : Nat) : Bool :=
 guard at least `d` bytes below `SP` (the function's stack check falls through) and the ABI
 conditions of `CallOK` (admissible `X30`, aligned `SP`, the window `[SP - d, SP + 8 + 8·nargs)`
 writable). -/
-def EqPre (d nargs : Nat) (s : State) : Prop := StackGuardOK s d ∧ CallOK s d nargs
+def EqPre (d nargs : Nat) (s : State) : Prop :=
+  StackGuardOK s d ∧ CallOK s d nargs ∧ Outside ((s.regs 28).toNat + 16) 8 (calleeStack s d nargs)
 
 /-- The return of an equality runtime call from `s` to `s'` (arm64): to `X30`, with `X18`,
 `X28`, `X29`, `SP` and `FPCR` kept, the result registers `r` (`P r`), and memory changed only in
@@ -100,9 +104,9 @@ def BoolRes (r : Nat → W64) (b : Bool) : Prop := (r 0).toNat % 256 = b.toNat
 and `b` agree (`true` for `n = 0`). -/
 def Memequal (p : Program) (addr d : Nat) : Prop :=
   Summary p addr
-    (fun s => EqPre d 3 s ∧ Input s d 3 (s.regs 0).toNat (s.regs 2).toNat ∧
-      Input s d 3 (s.regs 1).toNat (s.regs 2).toNat)
-    (fun s s' => EqRet d 3 s s' fun r => BoolRes r
+    (fun s => EqPre d 0 s ∧ Input s d 0 (s.regs 0).toNat (s.regs 2).toNat ∧
+      Input s d 0 (s.regs 1).toNat (s.regs 2).toNat)
+    (fun s s' => EqRet d 0 s s' fun r => BoolRes r
       (s.mem.readLE (s.regs 0).toNat (s.regs 2).toNat == s.mem.readLE (s.regs 1).toNat (s.regs 2).toNat))
 
 /-- **`runtime.memequal0/8/16/32/64/128(a, b)`** (`X0 = a`, `X1 = b`): whether the `n` bytes at
@@ -176,7 +180,8 @@ def IfaceInput (s : State) (d a : Nat) : Prop := Input s d 2 a 16
 `R`: its environment, the stack guard, `CallOK`, and the window outside `R.priv`. -/
 def IfacePre (R : IfaceModel) (d : Nat) (s : State) : Prop :=
   R.Env s.mem (s.regs 28) ∧ StackGuardOK s d ∧ CallOK s d 2 ∧
-    Outside (s.sp.toNat - d) (d + 8 + 8 * 2) R.priv
+    Outside (s.sp.toNat - d) (d + 8 + 8 * 2) R.priv ∧
+    Outside ((s.regs 28).toNat + 16) 8 (calleeStack s d 2)
 
 /-- The return of an `interequal`/`nilinterequal` call (arm64): as `EqRet`, and memory may also
 change in `R.priv`, after which `R.Env` holds again. -/
@@ -250,7 +255,7 @@ environment, the stack guard, `CallOK`, the window outside `M.priv`, the write-b
 def TPre (M : MemModel) (wb d nargs : Nat) (s : State) : Prop :=
   M.Env s.mem (s.regs 28) ∧ StackGuardOK s d ∧ CallOK s d nargs ∧
     Outside (s.sp.toNat - d) (d + 8 + 8 * nargs) M.priv ∧ Input s d nargs wb 4 ∧
-    WriteBarrierOff s.mem wb
+    WriteBarrierOff s.mem wb ∧ Outside ((s.regs 28).toNat + 16) 8 (calleeStack s d nargs)
 
 /-- The destination of a typed-memory call: `n` writable bytes at `a`, below `2^48`, outside the
 callee's window and outside the runtime's memory. -/
@@ -418,5 +423,66 @@ theorem xor_eq_zero_iff (a b : Nat) : a ^^^ b = 0 ↔ a = b := by
     simp only [Nat.testBit_xor, Nat.zero_testBit] at this
     revert this; cases a.testBit i <;> cases b.testBit i <;> simp
   · rintro rfl; exact Nat.xor_self a
+
+end Janus.Contracts.Mem
+
+namespace Janus.Contracts.Mem
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
+
+/-- What a Go function needs to call an equality runtime function with stack bound `d` from
+inside a frame of `frame` bytes below its `SP` (so the callee runs with `SP - frame`), with
+`above` bytes of its caller's frame it may write (its argument spill slots): the stack guard at
+least `d + frame` below `SP`, an aligned `SP`, `8 ≤ d`, the window
+`[SP - d - frame, SP + above)` writable and below `2^48`, and the guard word `16(g)` outside it. -/
+def CallerOK (s : State) (d frame above : Nat) : Prop :=
+  StackGuardOK s (d + frame) ∧ s.sp.toNat % 16 = 0 ∧ 8 ≤ d ∧ d + frame ≤ s.sp.toNat ∧
+    s.sp.toNat + above ≤ 2 ^ 48 ∧
+    s.mem.accessible (s.sp.toNat - (d + frame)) (d + frame + above) true = true ∧
+    Outside ((s.regs 28).toNat + 16) 8 [(s.sp.toNat - (d + frame), s.sp.toNat + above)]
+
+/-- The caller's window. -/
+def callerWindow (s : State) (d frame above : Nat) : List (Nat × Nat) :=
+  [(s.sp.toNat - (d + frame), s.sp.toNat + above)]
+
+/-- `EqPre` at a call site `S`, from the caller's `CallerOK` at its entry `s`: `S` is `frame`
+bytes below the caller's `SP`, keeps `g`, has an admissible return address, and its memory
+differs from the entry's only inside the caller's window. -/
+theorem EqPre.of_caller {s S : State} {d frame above nargs : Nat} (hc : CallerOK s d frame above)
+    (hf : MemFrame s.mem S.mem (callerWindow s d frame above))
+    (hsp : S.sp.toNat = s.sp.toNat - frame) (hg : S.regs 28 = s.regs 28)
+    (hlr : (S.regs 30).toNat % 4 = 0) (hlr' : (S.regs 30).toNat < 2 ^ 48) (hfr : frame % 16 = 0)
+    (hn : 8 + 8 * nargs ≤ frame + above) : EqPre d nargs S := by
+  obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout⟩ := hc
+  simp only [regG, stackguard0Offset, stackguard0] at hg1 hg2 hg3
+  simp only [callerWindow, outside_cons, outside_nil, and_true] at hout hf
+  refine ⟨⟨?_, ?_, ?_⟩, ⟨hlr, hlr', ?_, ?_, hd8, ?_, ?_⟩, ?_⟩
+  · simp only [regG, stackguard0Offset, hg]; omega
+  · simp only [regG, stackguard0Offset, hg, hf.accessible]; exact hg2
+  · simp only [stackguard0, regG, stackguard0Offset, hg, hsp]
+    rw [hf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp, hf.accessible]; exact Memory.accessible_mono _ hst (by omega) (by omega)
+  · simp only [calleeStack, outside_cons, outside_nil, and_true, hg, hsp]; omega
+
+/-- `Input` at a call site `S` (see `EqPre.of_caller`) of a range readable at the caller's entry
+and outside the caller's window. -/
+theorem Input.of_caller {s S : State} {d frame above nargs a n : Nat}
+    (hf : MemFrame s.mem S.mem (callerWindow s d frame above))
+    (hsp : S.sp.toNat = s.sp.toNat - frame) (hn : 8 + 8 * nargs ≤ frame + above)
+    (hfr : frame ≤ s.sp.toNat)
+    (hb : a + n ≤ 2 ^ 48) (hacc : s.mem.accessible a n false = true)
+    (ho : Outside a n (callerWindow s d frame above)) : Input S d nargs a n := by
+  simp only [callerWindow, outside_cons, outside_nil, and_true] at ho
+  refine ⟨hb, by rw [hf.accessible]; exact hacc, ?_⟩
+  simp only [calleeStack, outside_cons, outside_nil, and_true, hsp]
+  omega
+
+/-- After an `EqRet` return, the caller's reads outside the callee's window are unchanged. -/
+theorem EqRet.memFrame {d nargs : Nat} {s s' : State} {P : (Nat → W64) → Prop}
+    (h : EqRet d nargs s s' P) : MemFrame s.mem s'.mem (calleeStack s d nargs) := by
+  obtain ⟨r, v, fl, fs, m, rfl, hf, -⟩ := h
+  exact hf
 
 end Janus.Contracts.Mem

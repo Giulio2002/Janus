@@ -41,7 +41,8 @@ def CallOK (s : State) (d nargs : Nat) : Prop :=
 
 /-- What every equality runtime call needs (amd64): the stack guard at least `d` bytes below
 `RSP` and `CallOK`. -/
-def EqPre (d nargs : Nat) (s : State) : Prop := StackGuardOK s d ∧ CallOK s d nargs
+def EqPre (d nargs : Nat) (s : State) : Prop :=
+  StackGuardOK s d ∧ CallOK s d nargs ∧ Outside ((s.regs 14).toNat + 16) 8 (calleeStack s d nargs)
 
 /-- The state a runtime call returns in (amd64): `RSP + 8`, `RBP`, `R14` kept, the other general
 registers from `r`, `X15` kept and `X0`–`X14` from `x`, the upper halves `y`, the flags `fl`,
@@ -50,6 +51,8 @@ def retState (s : State) (r : Nat → W64) (x y : Nat → BitVec 128) (fl : Flag
     (m : Janus.Arm64.Memory) : State :=
   { s with regs := MapAmd64.keepABI s.regs r, xmm := MapAmd64.keepX15 s.xmm x, ymmHi := y,
            flags := fl, mxcsr := mx, mem := m, rip := retAddrOf s }
+
+attribute [janus64_exec, janus64_post] retState
 
 /-- The return of an equality runtime call (amd64): `retState`, with the control bits of `MXCSR`
 kept, memory changed only in the callee's window, and `P r`. -/
@@ -66,9 +69,9 @@ def Input (s : State) (d nargs a n : Nat) : Prop :=
 /-- **`runtime.memequal(a, b, n)`** (`RAX = a`, `RBX = b`, `RCX = n`): as `Mem.Memequal`. -/
 def Memequal (p : Janus.Amd64.Program) (addr d : Nat) : Prop :=
   Summary p addr
-    (fun s => EqPre d 3 s ∧ Input s d 3 (s.regs 0).toNat (s.regs 1).toNat ∧
-      Input s d 3 (s.regs 3).toNat (s.regs 1).toNat)
-    (fun s s' => EqRet d 3 s s' fun r => BoolRes r
+    (fun s => EqPre d 0 s ∧ Input s d 0 (s.regs 0).toNat (s.regs 1).toNat ∧
+      Input s d 0 (s.regs 3).toNat (s.regs 1).toNat)
+    (fun s s' => EqRet d 0 s s' fun r => BoolRes r
       (s.mem.readLE (s.regs 0).toNat (s.regs 1).toNat == s.mem.readLE (s.regs 3).toNat (s.regs 1).toNat))
 
 /-- **`runtime.memequal0/8/16/32/64/128(a, b)`** (`RAX = a`, `RBX = b`; `n = 0, 1, 2, 4, 8, 16`). -/
@@ -123,7 +126,8 @@ def Strequal (p : Janus.Amd64.Program) (addr d : Nat) : Prop :=
 /-- What an `interequal`/`nilinterequal` call needs of the interface model `R` (amd64). -/
 def IfacePre (R : IfaceModel) (d : Nat) (s : State) : Prop :=
   R.Env s.mem (s.regs 14) ∧ StackGuardOK s d ∧ CallOK s d 2 ∧
-    Outside ((s.regs 4).toNat - d) (d + 8 + 8 * 2) R.priv
+    Outside ((s.regs 4).toNat - d) (d + 8 + 8 * 2) R.priv ∧
+    Outside ((s.regs 14).toNat + 16) 8 (calleeStack s d 2)
 
 /-- The return of an `interequal`/`nilinterequal` call (amd64). -/
 def IfaceRet (R : IfaceModel) (d : Nat) (s s' : State) (P : (Nat → W64) → Prop) : Prop :=
@@ -169,7 +173,7 @@ def Interequal (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (d : Nat)
 def TPre (M : MemModel) (wb d nargs : Nat) (s : State) : Prop :=
   M.Env s.mem (s.regs 14) ∧ StackGuardOK s d ∧ CallOK s d nargs ∧
     Outside ((s.regs 4).toNat - d) (d + 8 + 8 * nargs) M.priv ∧ Input s d nargs wb 4 ∧
-    WriteBarrierOff s.mem wb
+    WriteBarrierOff s.mem wb ∧ Outside ((s.regs 14).toNat + 16) 8 (calleeStack s d nargs)
 
 /-- The destination of a typed-memory call (amd64). -/
 def Dest (M : MemModel) (s : State) (d nargs a n : Nat) : Prop :=
@@ -296,5 +300,59 @@ the low byte of the result is `ZF ∧ ¬PF`. -/
   simp only [FP.comis, FP.relation, hv, feq]
   cases isNaN f a <;> cases isNaN f b <;> simp [FP.check]
   cases (valueOf f a).eq (valueOf f b) <;> cases (valueOf f a).lt (valueOf f b) <;> simp
+
+end Janus.Contracts.MemAmd64
+
+namespace Janus.Contracts.MemAmd64
+open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts
+
+/-- What a Go function needs to call an equality runtime function with stack bound `d` with `RSP`
+at `frame` bytes below its entry `RSP` at the callee's entry (its frame plus the pushed return
+address), with `above` bytes from its entry `RSP` up it may write (its return address and argument
+spill slots) (amd64): the stack guard at least `d + frame` below `RSP`, an 8-aligned `RSP`, the
+window `[RSP - d - frame, RSP + above)` writable and below `2^48`, the guard word outside it. -/
+def CallerOK (s : State) (d frame above : Nat) : Prop :=
+  StackGuardOK s (d + frame) ∧ (s.regs 4).toNat % 8 = 0 ∧ d + frame ≤ (s.regs 4).toNat ∧
+    (s.regs 4).toNat + above ≤ 2 ^ 48 ∧
+    s.mem.accessible ((s.regs 4).toNat - (d + frame)) (d + frame + above) true = true ∧
+    Outside ((s.regs 14).toNat + 16) 8 [((s.regs 4).toNat - (d + frame), (s.regs 4).toNat + above)]
+
+/-- The caller's window (amd64). -/
+def callerWindow (s : State) (d frame above : Nat) : List (Nat × Nat) :=
+  [((s.regs 4).toNat - (d + frame), (s.regs 4).toNat + above)]
+
+/-- `EqPre` at a call site `S` from the caller's `CallerOK` at its entry `s` (amd64). -/
+theorem EqPre.of_caller {s S : State} {d frame above nargs : Nat} (hc : CallerOK s d frame above)
+    (hf : MemFrame s.mem S.mem (callerWindow s d frame above))
+    (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg : S.regs 14 = s.regs 14)
+    (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
+    (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame + above) : EqPre d nargs S := by
+  obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout⟩ := hc
+  simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
+  simp only [callerWindow, outside_cons, outside_nil, and_true] at hout hf
+  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
+  · simp only [regG, stackguard0Offset, hg]; omega
+  · simp only [regG, stackguard0Offset, hg, hf.accessible]; exact hg2
+  · simp only [stackguard0, regG, regSP, stackguard0Offset, hg, hsp]
+    rw [hf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp, hf.accessible]; exact Janus.Arm64.Memory.accessible_mono _ hst (by omega) (by omega)
+  · simp only [calleeStack, MapAmd64.calleeStack, outside_cons, outside_nil, and_true, hg, hsp]
+    omega
+
+/-- `Input` at a call site `S` (see `EqPre.of_caller`) of a range readable at the caller's entry
+and outside the caller's window (amd64). -/
+theorem Input.of_caller {s S : State} {d frame above nargs a n : Nat}
+    (hf : MemFrame s.mem S.mem (callerWindow s d frame above))
+    (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hn : 8 + 8 * nargs ≤ frame + above)
+    (hfr : frame ≤ (s.regs 4).toNat)
+    (hb : a + n ≤ 2 ^ 48) (hacc : s.mem.accessible a n false = true)
+    (ho : Outside a n (callerWindow s d frame above)) : Input S d nargs a n := by
+  simp only [callerWindow, outside_cons, outside_nil, and_true] at ho
+  refine ⟨hb, by rw [hf.accessible]; exact hacc, ?_⟩
+  simp only [calleeStack, MapAmd64.calleeStack, outside_cons, outside_nil, and_true, hsp]
+  omega
 
 end Janus.Contracts.MemAmd64

@@ -5,7 +5,7 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 namespace Proof
 
 theorem correctness (d : Nat) : MemequalN Extracted.program Extracted.entry d 1 := by
-  intro s hpc ⟨⟨hg, ⟨hl1, hl2, hc⟩⟩, ⟨ha1, ha2, ha3⟩, ⟨hb1, hb2, hb3⟩⟩
+  intro s hpc ⟨⟨hg, ⟨hl1, hl2, hc⟩, _⟩, ⟨ha1, ha2, ha3⟩, ⟨hb1, hb2, hb3⟩⟩
   janus_run
   refine EqRet.intro rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
     (MemFrame.refl _ _) ?_

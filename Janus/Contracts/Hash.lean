@@ -105,7 +105,8 @@ def FHashIs (H : HashModel) (f : Fmt) (k x h r : Nat) : Prop :=
 guard at least `d` bytes below `SP`, `CallOK`, and the window outside `H.priv`. -/
 def HPre (H : HashModel) (d nargs : Nat) (s : State) : Prop :=
   H.Env s.mem (s.regs 28) ∧ StackGuardOK s d ∧ CallOK s d nargs ∧
-    Outside (s.sp.toNat - d) (d + 8 + 8 * nargs) H.priv
+    Outside (s.sp.toNat - d) (d + 8 + 8 * nargs) H.priv ∧
+    Outside ((s.regs 28).toNat + 16) 8 (calleeStack s d nargs)
 
 /-- The return of a hashing runtime call (arm64), with the facts `P r` about the result
 registers `r`. -/

@@ -462,6 +462,27 @@ runtime's own code is verified here: every path of `getitab` beyond the lock-fre
 takes the itab lock (whose arm64 LL/SC fallback the decoder rejects) and may allocate through
 `persistentalloc`, and the cache rebuild allocates through `mallocgc`.
 
+### Equality, hashing and typed memory (`Janus/Contracts/Mem.lean`, `Hash.lean`, `MemAmd64.lean`, `HashAmd64.lean`)
+
+The contracts of `memequal`, the types' equality and hash functions, `typedmemmove`,
+`typedmemclr` and `memclrHasPointers` (see the module documentation of `Mem.lean` and
+`Hash.lean` for the table). Two points of their frame matter to callers that are themselves
+proved from their code against these contracts:
+
+* **The stack-guard word is outside the stack window.** Every precondition (`EqPre`, `HPre`,
+  `IfacePre`, `TPre`) requires `16(g)` (`X28` on arm64, `R14` on amd64) outside the callee's
+  window `calleeStack s d nargs`. A function that pushes its frame record and calls on (e.g.
+  `memhash8` calling `memhash` from a 48-byte frame) must re-establish its callee's
+  `StackGuardOK`, which reads that word after the pushes. The real `g` lives in the heap, never
+  on the goroutine stack.
+* **`memequal` has no spill slots.** `Memequal` is stated with `nargs = 0` (`EqPre d 0`, `Input s
+  d 0`, `EqRet d 0`): the call writes at most `[SP - d, SP - 8)`. That holds because the pinned
+  `runtime.memequal` (`internal/bytealg/equal_arm64.s`, `NOSPLIT|NOFRAME`; amd64 `equal_amd64.s`)
+  writes no memory at all; on arm64 `examples/proofs/AlgMemequal.lean` proves it from the machine
+  code. Its callers rely on it: `strequal` calls it from a 16-byte frame (whose 8 spare bytes are
+  the caller's frame-pointer slot) and `memequal_varlen` tail-jumps to it with its own `SP`, so
+  neither has room for three spill slots.
+
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 
 The Go → C boundary does not use the linked-code `Summary` mechanism above. The trusted part has
