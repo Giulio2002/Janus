@@ -174,11 +174,25 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 	}
 	// PUSHFQ under the runner's single-stepping: the hardware image has TF (bit 8) set, which a
 	// program never has (the model pushes the user-mode image). Ignore exactly that bit.
-	if strings.EqualFold(strings.TrimPrefix(c.Bytes, "0x"), "9c") {
-		for _, e := range m.Mem {
-			if hb, ok := hm[e[0]]; ok && hb == e[1]|0x01 && hb != e[1] {
-				hm[e[0]] = e[1]
-				break
+	if strings.EqualFold(strings.TrimPrefix(c.Bytes, "0x"), "9c") && len(c.Regs) > 4 {
+		if rsp := hexv(c.Regs[4]); rsp >= L.DataBase+8 && rsp-8-L.DataBase+1 < L.DataSize {
+			o := int(rsp - 8 - L.DataBase + 1) // byte 1 of the pushed image: TF is its bit 0
+			orig := int(L.Pattern(c.Seed, uint64(o)))
+			hb, mb := orig, orig
+			if v, ok := hm[o]; ok {
+				hb = v
+			}
+			for _, e := range m.Mem {
+				if e[0] == o {
+					mb = e[1]
+				}
+			}
+			if hb == mb|0x01 && hb != mb {
+				if mb == orig {
+					delete(hm, o)
+				} else {
+					hm[o] = mb
+				}
 			}
 		}
 	}

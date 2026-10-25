@@ -785,8 +785,9 @@ None of these has a result the user-mode state determines. The design (WP-C,
   scope), file-system state and `ioctl`s are not modelled.
 * **Environment instructions on the oracle.** The differential oracles run them natively: the
   model reports `kernel`, and the comparators check the hardware's result against the contract's
-  frame (`compareEnv`: only the destination registers change, with values in the contract's
-  range; everything else, including memory and the flags, is unchanged). `PUSHFQ` pushes
+  frame (`compareEnv`/`compareEnv64`: only the destination registers change, with values in the
+  contract's range; everything else, including memory and the flags, is unchanged; 0 mismatches,
+  docs/ORACLE.md and docs/ORACLE-AMD64.md). `SVC`/`SYSCALL` are not run natively. `PUSHFQ` pushes
   `0x202` plus the status flags and `DF`; `POPFQ` faults (`Fault.systemFlag`) if it would set
   `TF`, `NT`, `AC` or `ID`, which the model does not track.
 

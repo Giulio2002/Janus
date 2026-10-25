@@ -464,25 +464,13 @@ func Edges(r *rand.Rand, n int) []EdgeCase {
 		}
 		emit("endbr", []byte{0xF3, 0x0F, 0x1E, 0xFB}, Setup(r, []byte{0xF3, 0x0F, 0x1E, 0xFB}))
 	}
-	// WP-C: the exact forms of the traps, the environment reads and PUSHFQ/POPFQ. POPFQ pops a
-	// random image from a stack slot inside the buffer: mostly only status flags and DF (plus the
-	// ignored IF/IOPL/reserved bits), sometimes with TF, NT, AC or ID (the model refuses those)
+	// WP-C: the exact forms of the traps, the environment reads and PUSHFQ (POPFQ stays refused
+	// by the runner: a popped flag image poisons its single-step machinery; JanusTests/Amd64.lean
+	// pins the POPFQ semantics)
 	for round := 0; round < n; round++ {
-		for _, b := range [][]byte{{0xCC}, {0xCD, 0x03}, {0x0F, 0x0B}, {0xF4}, {0x0F, 0xA2}, {0x0F, 0x31}, {0x9C}} {
+		for _, b := range [][]byte{{0xCC}, {0x0F, 0x0B}, {0xF4}, {0x0F, 0xA2}, {0x0F, 0x31}, {0x9C}} {
 			emit("sys", b, Setup(r, b))
 		}
-		s := Setup(r, []byte{0x9D})
-		off := 1024 + 8*r.IntN(256)
-		s.Regs[4] = L.DataBase + uint64(off)
-		v := uint64(r.IntN(1<<12)) & 0xED5 // CF PF AF ZF SF DF OF
-		v |= uint64(r.IntN(2)) << 9        // IF (ignored at CPL 3)
-		if r.IntN(4) == 0 {
-			v |= uint64(1) << []uint{8, 14, 18, 21, 12, 16, 3}[r.IntN(7)] // TF NT AC ID IOPL RF reserved
-		}
-		for i := 0; i < 8; i++ {
-			s.Init = append(s.Init, [2]int{off + i, int(v >> (8 * i) & 0xFF)})
-		}
-		emit("sys", []byte{0x9D}, s)
 	}
 	return out
 }

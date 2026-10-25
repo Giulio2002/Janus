@@ -88,6 +88,20 @@ where the count ran past the buffer and both sides fault). The runner also recor
 rejects, so the invariant `DF = 0` that the string instructions rely on held in every case
 the model executes.
 
+**Kernel, trap, environment and flag-image instructions (WP-C, 2026-10-25, `scripts/oracle-amd64.sh quick`,
+`JOBS=8`).** 446,024 cases: **0 MISMATCH**, 340,275 agree, 105,749 model-gap, 0 unobserved. The
+exact forms of `INT3`, `UD2`, `HLT` (targeted specs, `edge/sys` and random strings) all agree as
+traps (`SIGTRAP`, `SIGILL`, `SIGSEGV` / `Fault.trap`, 1,425 cases); `CPUID` and `RDTSC` (1,365 cases)
+agree with their environment contracts' frame (`compareEnv64`: only `RAX RBX RCX RDX` / `RAX RDX`
+change, to zero-extended 32-bit values, flags, other registers, vector registers and memory
+unchanged); `PUSHFQ` (474 cases) agrees with the model's image `0x202 | status flags | DF` except
+for `TF`, which the runner's single-stepping sets and the comparator ignores in exactly that
+byte. `POPFQ`, `SYSCALL`, `XGETBV`, `RDTSCP` and `INT 3` (`CD 03`) stay refused by the runner
+(`layout.Forbidden`): a popped flag image breaks the runner's single-step machinery (every later
+case of that runner process escapes with `SIGSEGV`), so `POPFQ`'s semantics (status flags and `DF`
+from the popped value, `Fault.systemFlag` for `TF`/`NT`/`AC`/`ID`) is pinned by the unit tests of
+`JanusTests/Amd64.lean` instead.
+
 **Bugs found.** The native oracle found one real bug. The first full run found 140 mismatches in 127 encodings, all from one
 model bug. A 32-bit shift, rotate, `SHLD` or `SHRD` whose masked count is 0 still writes its
 destination, so the upper 32 bits of the register are cleared. The model had treated count 0
