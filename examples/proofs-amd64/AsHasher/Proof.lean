@@ -125,7 +125,7 @@ theorem miss (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
       Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, h0, hsp40, hsp40', ← hD] at hfr hres hdesc2 hinter2 hcf2
     janus64_run
     obtain ⟨MM, hMM⟩ : ∃ MM, MM = ((M0 s t x).writeLE ((s.regs 4).toNat + 16) 8 x.toNat).writeLE
-        ((s.regs 4).toNat - 40) 8 4738633 := ⟨_, rfl⟩  -- the pushed return address, Extracted.entry + 0x69
+        ((s.regs 4).toNat - 40) 8 (janus_eval% (Extracted.entry + 0x69)) := ⟨_, rfl⟩  -- the pushed return address
     simp only [M0] at hMM
     rw [← hMM] at hres hinter2 hcf2 hfr
     have hMf : MemFrame s.mem MM [((s.regs 4).toNat - (R.depth + 40), (s.regs 4).toNat + 24)] := by
@@ -426,28 +426,24 @@ theorem model : TypeAssert (Extracted.program.link implAt) cAddr R0 := by
 /-- The witness return address. -/
 def ret : Nat := wret
 
-theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
-
-/-- The descriptor's address, evaluated. -/
-theorem desc_eq : desc = 0x55b6f0 := by decide +kernel
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide +kernel)
 
 /-- The witness memory: `wmem` with the return address `ret` at `[RSP]` and the descriptor at
 `desc` (cache `TAC`, interface `ID`, `CanFail`) in a writable region. -/
 def mem1 : Janus.Arm64.Memory :=
-  ⟨fun a => BitVec.ofNat 8 ((([(wsp + 2, 0x20), (0x55b6f0 + 1, 0x04), (0x55b6f0 + 2, 0x01),
-      (0x55b6f0 + 9, 0x01), (0x55b6f0 + 10, 0x01), (0x55b6f0 + 16, 1)] ++ wtable).lookup a).getD 0),
-    wmem.regions ++ [⟨0x55b000, 0x1000, true⟩]⟩
+  ⟨fun a => BitVec.ofNat 8 ((([(wsp + 2, 0x20), (desc + 1, 0x04), (desc + 2, 0x01),
+      (desc + 9, 0x01), (desc + 10, 0x01), (desc + 16, 1)] ++ wtable).lookup a).getD 0),
+    wmem.regions ++ [⟨desc - desc % 4096, 0x1000, true⟩]⟩
 
 theorem mem1_env (g : W64) : Env0 mem1 g := by
-  refine ⟨by decide, by decide, ?_⟩
-  unfold Desc; decide
+  refine ⟨by decide +kernel, by decide +kernel, ?_⟩
+  unfold Desc; decide +kernel
 
 theorem mem1_desc : TADescOK R0 mem1 desc := by
-  rw [desc_eq]
-  refine ⟨by decide, by decide, by decide, by simp only [R0_isInter, taInter]; decide, ?_⟩
-  show TACacheOK R0 mem1 (mem1.readLE 0x55b6f0 8) (taInter mem1 0x55b6f0)
-  rw [show mem1.readLE 0x55b6f0 8 = TAC by decide]
-  exact TACacheOK.empty (by decide) (by decide) (inPriv (by decide) (by decide)) (by decide) (by decide)
+  refine ⟨by decide +kernel, by decide +kernel, by decide +kernel, by simp only [R0_isInter, taInter]; decide +kernel, ?_⟩
+  show TACacheOK R0 mem1 (mem1.readLE desc 8) (taInter mem1 desc)
+  rw [show mem1.readLE desc 8 = TAC by decide +kernel]
+  exact TACacheOK.empty (by decide +kernel) (by decide +kernel) (inPriv (by decide +kernel) (by decide +kernel)) (by decide +kernel) (by decide +kernel)
 
 /-- `TD` and the value slot `VAL`, as words. -/
 def td : BitVec 64 := BitVec.ofNat 64 TD
@@ -461,20 +457,20 @@ def s0 : Janus.Amd64.State :=
     xmm := fun _ => 0, mem := mem1 }
 
 theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [td, val] s0 :=
-  ⟨rfl, by decide, rfl, by decide, by
+  ⟨rfl, by decide +kernel, rfl, by decide +kernel, by
     intro i h; simp at h
     rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
 
 theorem pre : CallerOK R0 s0 40 24 ∧ TADescOK R0 s0.mem desc ∧ taCanFail s0.mem desc = true ∧
     Outside desc 24 [((s0.regs 4).toNat - (R0.depth + 40), (s0.regs 4).toNat + 24)] ∧
     (td.toNat ≠ 0 → R0.IsType td.toNat) := by
-  refine ⟨⟨mem1_env (s0.regs 14), ⟨by decide, by decide, by decide⟩, by decide, by decide,
-    by decide, by decide, ?_, ?_, ?_⟩, mem1_desc, ?_, ?_, fun _ => Or.inl rfl⟩
-  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
-  · unfold Janus.Spec.Disjoint; decide
-  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
-  · rw [desc_eq]; decide
-  · rw [desc_eq]; simp only [outside_cons, outside_nil, and_true]; decide
+  refine ⟨⟨mem1_env (s0.regs 14), ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, by decide +kernel, by decide +kernel,
+    by decide +kernel, by decide +kernel, ?_, ?_, ?_⟩, mem1_desc, ?_, ?_, fun _ => Or.inl rfl⟩
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel
+  · unfold Janus.Spec.Disjoint; decide +kernel
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel
+  · decide +kernel
+  · simp only [outside_cons, outside_nil, and_true]; decide +kernel
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (ret : Nat)
@@ -493,11 +489,11 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   refine (correctness implAt R0 R0_laws model td val ret hret s0 setup pre).mono ?_
   intro s' h
   obtain ⟨habi, ⟨h0, h1, h2, -⟩, -⟩ := h
-  have hi : taInter s0.mem desc = ID := by rw [desc_eq]; decide
+  have hi : taInter s0.mem desc = ID := by decide +kernel
   rw [hi] at h0
-  have h0' : (s'.regs 0).toNat = TAB := by rw [h0]; decide
+  have h0' : (s'.regs 0).toNat = TAB := by rw [h0]; decide +kernel
   refine ⟨habi, h0', h1, ?_⟩
-  rw [h2, h0']; decide
+  rw [h2, h0']; decide +kernel
 
 end Witness
 

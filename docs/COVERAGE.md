@@ -173,8 +173,10 @@ rejected class. The greedy order:
 Assembly is a verification target with the same weight as Go code, not only a callee. Of the
 assembly functions, 145 of 207 on arm64 and 170 of 265 on amd64 are ABI0 (`.abi0` symbols), and
 the rest are ABIInternal. Fully decoding today: ABI0 90/145 and ABIInternal 49/62 on arm64; ABI0
-91/170 and ABIInternal 57/95 on amd64 v1. Every ABI0 function needs the ABI0 calling convention of
-[WP-L](#6-work-plan) before a theorem about it can be stated.
+91/170 and ABIInternal 57/95 on amd64 v1. The ABI0 calling convention ([WP-L](#6-work-plan), done:
+[ABI0.md](ABI0.md)) states theorems about every ABI0 function (`GoABI0.Ensures0`,
+`Amd64.GoABI0.Ensures0`), about the ABI wrappers in both directions and about Go code with direct
+ABI0 calls, on both ISAs (`examples/asm`); what still limits the 145 / 170 is decoding.
 
 **ISA families, greedy order** (functions that become fully decodable when the family is added
 after the rows above):
@@ -399,7 +401,7 @@ architecture and branch, and what it rests on. A construct counts as covered onl
 `scripts/verify-cgo-examples.sh` on each branch (`git show`). main has 28 arm64 proofs (plus the
 `WrongAdd` counterexample) and 31 amd64 proofs; agent/alloc adds 5+4, agent/maps 10+10,
 agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts only),
-agent/rtiface 4+4 (interfaces).
+agent/rtiface 4+4 (interfaces: `Box`, `AsHasher`, `Classify`, `Equal`).
 agent/constructs (package M1, `examples/basic/zconstructs.go`) adds 29 arm64 + 26 amd64:
 `Triangle`, `GotoSum`, `Find2D`, `RowsWith`, `Log2`, `TotalMeters`, `TotalFeet`, `Fact`,
 `SumBelow`, `IterSum`, `ReverseArray`, `DivMod10`, `SwapBig`, `Compose`, `DotBoth`, `BitMerge`,
@@ -487,9 +489,10 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | `//export` callback C → Go | none | none | `crosscall2`, `cgocallback` |
 | goroutines, channels, select, `sync` | excluded (concurrency) | excluded | – |
 
-Not covered on any branch or architecture (with agent/constructs): range over
+Not covered on any branch or architecture (with agent/constructs, agent/rtiface and agent/eqhash): range over
 string; heap defers, `panic`, `recover`; the nil-dereference fault; string concatenation,
-ordering and conversions; int/float and float32/float64 conversions; complex numbers; the grown-stack case; `//export` callbacks. Within
+ordering and conversions; int/float and float32/float64 conversions; complex numbers;
+the grown-stack case; `//export` callbacks. Within
 covered rows these forms still have no example: a non-inlined range-over-func loop, float and
 string `min`/`max`. amd64 lacks `IndexByte` (the arm64 example is in an
 arm64-only file) and `MallocFast`.
@@ -690,7 +693,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 |---:|---|---|---|:-:|---|
 | 1 | **A. arm64 store-exclusive** (`STXR`/`STLXR` B/H/W/X, `STXP`/`STLXP`): a sound model of the exclusive monitor. A store-exclusive may fail, so the status result comes from an explicit environment choice in the state, which theorems quantify over. LL/SC retry loops then need a stated progress hypothesis (the k-th attempt succeeds), recorded in SOUNDNESS.md. | arm64 Go-compiled 93.46% → **100%** (+1,085), wrappers +36, test +724, assembly +1 (`cgoSigtramp`); C outline-atomics helpers | `Janus/Arm64/{Decode,Instr,Exec,State}.lean` (exclusive part), `oracle/gen` `ls.excl`, docs/SOUNDNESS.md § atomics | M | none |
 | 2 | **B. amd64 v3 scalar extensions** (**done**, agent/amd64v3: Go-compiled v3 94.60% → 100%, wrappers and tests 100%; `docs/AMD64.md`): BMI1 (`ANDN`, `BLSR`, `BLSI`, `BLSMSK`, `BEXTR`, `TZCNT`), BMI2 (`SHLX`, `SHRX`, `SARX`, `RORX`, `MULX`, `BZHI`, `PDEP`, `PEXT`), `MOVBE`, scalar FMA (`VFMADD{132,213,231}{SD,SS}` and the `VFMSUB`/`VFNMADD`/`VFNMSUB` forms, single rounding on the IEEE core, as arm64 `FMADD`), SSSE3 `PSHUFB`/`PSIGNB` on XMM | amd64 v3 Go-compiled 94.60% → **100%** (+897), v3 wrappers +24, tests +209; v1 tests +5; C `-march=v3` BMI/FMA (9 + 7 functions) | `Janus/Amd64/{Decode,Instr,Exec}.lean` (scalar part), `Janus/Amd64/Float.lean` (FMA), `oracle-amd64/gen` specs | M | ffi |
-| 3 | **L. Go assembly ABI0 and ABI wrappers**: ABI0 call/return (arguments and results in the caller's frame, everything caller-saved, `g` from TLS / `X28`/`R14` on re-entry, `X15` zeroing), `Ensures0`/`Summary0`, and lemmas for the ABIInternal↔ABI0 wrappers and for the direct ABI0 calls the compiler emits from Go | lets theorems be stated about the 145 (arm64) / 170 (amd64) ABI0 assembly functions; 90 / 91 of them already decode | `Janus/GoABI0.lean`, `Janus/Amd64/GoABI0.lean`, `Janus/Tactic/ABI0.lean`, `examples/asm/` | M | iface-alloc (tactic files) |
+| 3 | **L. Go assembly ABI0 and ABI wrappers** (**done**: [ABI0.md](ABI0.md), `examples/asm`, 5 theorems per ISA): ABI0 call/return (arguments and results in the caller's frame, everything caller-saved, `g` from TLS / `X28`/`R14` on re-entry, `X15` zeroing), `Ensures0`/`Summary0`, and lemmas for the ABIInternal↔ABI0 wrappers and for the direct ABI0 calls the compiler emits from Go | lets theorems be stated about the 145 (arm64) / 170 (amd64) ABI0 assembly functions; 90 / 91 of them already decode | `Janus/GoABI0.lean`, `Janus/Amd64/GoABI0.lean`, `Janus/Tactic/ABI0.lean`, `examples/asm/` | M | iface-alloc (tactic files) |
 | 4 | **C. Kernel and system instructions**: `SVC #0`/`SYSCALL` as a `.syscall` stub with per-syscall contracts (`write`, `read`, `openat`, `exit_group`, `clock_gettime` and vDSO, `mmap`/`munmap`/`madvise`, `rt_sigprocmask`, `sigaltstack`, `sched_yield`, `nanosleep`, ...); `BRK`/`INT3`/`UD2`/`HLT`/in-function `UDF` as trap faults; `CPUID`, `XGETBV`, `RDTSC(P)`, `MRS MIDR_EL1`, `MRS CNTFRQ_EL0`, DIT `MRS`/`MSR` as environment-value contracts; `PUSHFQ`/`POPFQ` | assembly: arm64 +53 (→ 92.8%), amd64 +46 (→ 73.2%); makes the syscall wrappers (`nanotime1`, `Syscall6`, `rawSyscallNoError`, `exit`, `osyield`, `open`, `read`, ...) and their Go callers (`os`, `time`, `println`) provable | `Janus/Contracts/Syscall.lean`, `Janus/Contracts/SyscallAmd64.lean`, the `SVC`/`SYSCALL`/trap entries of both decoders, stub kind in `cmd/janus/extract.go` | M | iface-alloc |
 | 5 | **J. amd64 C-specific encodings**: merge agent/ffi's `ENDBR64`; `NOTRACK` (`3E`) on `JMP`/`CALL r/m` (CET jump tables); the padded `call __tls_get_addr` sequence (`66 66 48 E8`); x87 for `long double` (`FLD`/`FSTP` 80-bit, `FADDP`, `FMULP`, `FLD1`, `FXCH`, the x87 stack and control word on the IEEE core) | gcc amd64 C: 0.9% → **83.6%** (-O2); `s_dense`/`s_name` jump tables, `a_use_tls`, `a_ldouble` | `Janus/Amd64/Decode.lean` (prefix handling), new `Janus/Amd64/X87.lean` | S (ENDBR, NOTRACK, TLS call) + L (x87) | ffi |
 | 6 | **D. SSE packed integer and FP (XMM)**: SSE2 integer (`PADD*`, `PSUB*`, `PMUL*`, `PCMP*`, `PAND(N)`, shifts incl. `PSLLDQ`/`PSRLDQ`, `PUNPCK*`, `PACK*`, `PMIN/PMAX*`, `PSADBW`), packed FP (`ADDPS/PD`, `MULPS/PD`, `SHUFPS`, `UNPCK*`, `MOVLHPS`, `CVTDQ2PD`), SSSE3 (`PALIGNR`, `PSHUFB`, `PABS*`), SSE4.1 (`PINSR*`, `PEXTR*`, `PBLENDW`, `BLENDV*`, `PMOV[SZ]X*`, `PMULLD`, `PTEST`), SSE4.2 (`CRC32`, `PCMPESTRI`/`PCMPISTRI`, `PCMPGTQ`) | C: clang -O2 78.0% → ≈ 99%, gcc -O2 (after J) 83.6% → ≈ 99%; assembly: `chacha8rand.block`, P-256 selects, `indexbody`, `castagnoliSSE42*`, part of AES/GCM/SHA (+19 sole, more with E) | new `Janus/Amd64/{DecodeSSE,ExecSSE}.lean` (hook in `Decode.lean`) | L | ffi; B for the shared `PSHUFB` |

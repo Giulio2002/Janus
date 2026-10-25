@@ -778,6 +778,35 @@ convention (`CCall`). It promises what the convention requires of the callee (`C
 nothing about callers that violate the convention. The callee-saved SIMD/FP state (`V8`–`V15` on
 arm64; the x87/`MXCSR` control words on amd64) is outside the model.
 
+## Go assembly (ABI0)
+
+A theorem about a Go assembly function is stated with `GoABI0.Ensures0` (or
+`Amd64.GoABI0.Ensures0`), see [ABI0.md](ABI0.md). Every instruction of the assembly, of the Go
+code calling it and of the ABI wrappers in between is executed by the model from the binary's
+bytes; **no assembly-specific behaviour is assumed**. What the ABI0 vocabulary contributes is the
+reading of the statement:
+
+* *The call state.* `CallSetup0` says where an ABI0 caller puts the arguments (frame word `i` at
+  `RSP + 8 + 8i`) and the return address, as `abi-internal.md`/`asm.html` and the code Go 1.26.0
+  emits define it. A theorem is about calls of that shape; if a caller laid out the frame
+  differently, the theorem would say nothing about that call. (When the caller is extracted too,
+  as in `CallXor`, nothing about the layout is taken on trust: the caller's stores are executed.)
+* *The return obligations.* `ABIReturn0` lists what the theorem promises to keep (arm64 `RSP`,
+  `g`, `FP`, `R18`; amd64 `RSP + 8`, `RBP`, the `FS` base, `DF`). They are proved, not assumed.
+  ABI0 promises nothing about `R14`/`X15` on amd64: a theorem about Go code after an ABI0 call
+  obtains `R14 = g` from the precondition `GoABI.TlsG` (the TLS slot holds `g`), stated in the
+  printed statement, and `X15 = 0` from the executed `XORPS`.
+* *The callee summaries.* `Summary0` and `Ret0` are ordinary `Summary` statements about the
+  extracted program, proved by execution; composing them (`janus_run calls [h]`) is the generic
+  `Reaches.call` lemma. `Ensures0.of_summary` is a theorem.
+* *The CLI classification* (`entryABI`/`entrySource`, the `Entry:` annotation, the convention
+  warning) is untrusted and informational, like reachability.
+
+Hence a theorem about assembly trusts exactly what a theorem about Go code trusts (the ISA model,
+the extraction identity, Lean), plus the reading of `CallSetup0` above. The runtime's own
+assembly that switches stacks or goroutines (`systemstack`, `mcall`, `gogo`, `asmcgocall`) is not
+covered by the convention: a theorem about it needs a precondition describing those states.
+
 ## What the theorem does not say
 
 * Nothing about callers other than those satisfying `CallSetup` and the stated precondition.

@@ -335,12 +335,12 @@ theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
   · janus_run
     exact fin 0 _ (by simp [result, ht0]) (by janus_frame) _ (by simp [setReg]) rfl
   by_cases htu : t.toNat = u64T
-  · obtain rfl : t = BitVec.ofNat 64 695360 := by
+  · obtain rfl : t = BitVec.ofNat 64 (janus_eval% u64T) := by
       apply BitVec.eq_of_toNat_eq; rw [htu, hU]; rfl
     janus_run
     exact fin 1 _ (by simp [result, hU]) (by janus_frame) _ (by simp [setReg]) rfl
   by_cases hts : t.toNat = strT
-  · obtain rfl : t = BitVec.ofNat 64 694848 := by
+  · obtain rfl : t = BitVec.ofNat 64 (janus_eval% strT) := by
       apply BitVec.eq_of_toNat_eq; rw [hts, hS]; rfl
     janus_run
     exact fin 2 _ (by simp [result, hU, hS]) (by janus_frame) _ (by simp [setReg]) rfl
@@ -420,9 +420,6 @@ theorem model : InterfaceSwitch (Extracted.program.link implAt) cAddr R0 := by
     | (rw [ite_eq_right (fun h => by simp only [TD] at h; omega)]; exact Nat.mod_eq_of_lt (by omega))
     | done
 
-/-- The descriptor's address, evaluated. -/
-theorem desc_eq : desc = 0x1646f0 := by decide
-
 /-- A byte of the program's read-only data, if `a` is in one of its objects. -/
 def dbyte (a : Nat) : Option Nat :=
   Extracted.program.data.findSome? fun d =>
@@ -431,9 +428,10 @@ def dbyte (a : Nat) : Option Nat :=
 /-- The witness memory: the read-only data in read-only regions, the descriptor at `desc`
 (cache `ISC`, `NCases = 1`, `Cases[0] = ID`) in a writable one, and `wmem`. -/
 def mem2 : Memory :=
-  ⟨fun a => BitVec.ofNat 8 ((dbyte a).getD ((([(0x1646f0 + 1, 0x05), (0x1646f0 + 2, 0x01),
-      (0x1646f0 + 8, 1), (0x1646f0 + 17, 0x01), (0x1646f0 + 18, 0x01)] ++ wtable).lookup a).getD 0)),
-    wmem.regions ++ [⟨0x164000, 0x1000, true⟩, ⟨0xa9000, 0x1000, false⟩, ⟨0xcc000, 0x1000, false⟩]⟩
+  ⟨fun a => BitVec.ofNat 8 ((dbyte a).getD ((([(desc + 1, 0x05), (desc + 2, 0x01),
+      (desc + 8, 1), (desc + 17, 0x01), (desc + 18, 0x01)] ++ wtable).lookup a).getD 0)),
+    wmem.regions ++ [⟨desc - desc % 4096, 0x1000, true⟩] ++
+      Extracted.program.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
 
 theorem mem2_env (g : W64) : Env0 mem2 g := by
   refine ⟨by decide, by decide, ?_⟩
@@ -443,16 +441,15 @@ theorem mem2_data : Extracted.program.DataLoaded mem2 := by
   unfold Program.DataLoaded; decide +kernel
 
 theorem mem2_desc : ISDescOK R0 mem2 desc [ID] := by
-  rw [desc_eq]
   refine ⟨by decide +kernel, by decide +kernel, by decide +kernel, by decide +kernel, fun i hi => ?_, by simp, ?_⟩
-  · simp at hi; subst hi; show mem2.readLE (0x1646f0 + 16) 8 = ID; decide +kernel
-  · rw [show mem2.readLE 0x1646f0 8 = ISC by decide +kernel]
+  · simp at hi; subst hi; show mem2.readLE (desc + 16) 8 = ID; decide +kernel
+  · rw [show mem2.readLE desc 8 = ISC by decide +kernel]
     exact ISCacheOK.empty (by decide +kernel) (by decide +kernel) (inPriv (by decide +kernel) (by decide +kernel)) (by decide +kernel) (by decide +kernel)
 
 /-- The witness return address. -/
 def ret : Nat := wret
 
-theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide +kernel)
 
 /-- `TD` and the value slot `VAL`, as words. -/
 def td : BitVec 64 := BitVec.ofNat 64 TD
@@ -473,12 +470,12 @@ theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extract
 theorem pre : CallerOK R0 s0 64 24 ∧ Extracted.program.DataLoaded s0.mem ∧
     ISDescOK R0 s0.mem desc [ID] ∧ Outside desc 24 (window R0 s0) ∧
     (td.toNat ≠ 0 → R0.IsType td.toNat) := by
-  refine ⟨⟨mem2_env (s0.regs 28), ⟨by decide, by decide, by decide⟩, by decide, by decide,
-    by decide, by decide, by decide, ?_, ?_, ?_⟩, mem2_data, mem2_desc, ?_, fun _ => Or.inl rfl⟩
-  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
-  · unfold Disjoint; decide
-  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
-  · rw [desc_eq]; simp only [window, outside_cons, outside_nil, and_true]; decide
+  refine ⟨⟨mem2_env (s0.regs 28), ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, by decide +kernel, by decide +kernel,
+    by decide +kernel, by decide +kernel, by decide +kernel, ?_, ?_, ?_⟩, mem2_data, mem2_desc, ?_, fun _ => Or.inl rfl⟩
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel
+  · unfold Disjoint; decide +kernel
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide +kernel
+  · simp only [window, outside_cons, outside_nil, and_true]; decide +kernel
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (c : Nat) (ret : Nat) (s : State)
@@ -500,7 +497,7 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
   janus_eval_nat hU : u64T
   janus_eval_nat hS : strT
   simp only [result, hU, hS]
-  decide
+  decide +kernel
 
 end Witness
 
