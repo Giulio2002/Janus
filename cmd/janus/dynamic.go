@@ -189,6 +189,7 @@ func (r *reacher) drain() error {
 			return &diag{Msg: err.Error(), Stage: "code extraction", Next: "Report this binary layout to the Janus maintainers."}
 		}
 		r.x.Segments = append(r.x.Segments, seg)
+		r.addInsnStubs(seg) // SVC/SYSCALL, environment reads and traps inside it (kernel.go)
 		for _, br := range brs {
 			t := br.Target
 			if t >= f.Addr && t < f.End() {
@@ -221,7 +222,7 @@ func (r *reacher) drain() error {
 		}
 		// the C wrappers of the cgo function-pointer variables the function loads (FFI)
 		for _, g := range cgoWrapperRoots(r.b, segmentDataRefs(r.b, seg)) {
-			if _, isStub := stubKind(g.Name); isStub || r.seen[g.Addr] {
+			if _, isStub := stubKindFor(r.b.GOARCH, g.Name); isStub || r.seen[g.Addr] {
 				continue
 			}
 			if r.x.contractTarget(r.cm, r.contractSeen, g) {
@@ -252,7 +253,7 @@ func extractWith(b *Binary, sym string, maxFunctions int, contracts []string, ta
 	if err != nil {
 		return nil, err
 	}
-	if stubLike(entry.Name) {
+	if stubLikeFor(b.GOARCH, entry.Name) {
 		return nil, &diag{Msg: fmt.Sprintf("%s is a runtime stub, not a function Janus extracts", entry.Name),
 			Stage: "function selection", Next: "Select a Go function that calls the stub instead."}
 	}

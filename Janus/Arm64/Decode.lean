@@ -1,6 +1,7 @@
 import Janus.Arm64.Instr
 import Janus.Arm64.Bits
 import Janus.Arm64.DecodeFloat
+import Janus.Arm64.DecodeSys
 
 /-!
 # A64 decoder for the supported subset
@@ -153,7 +154,7 @@ def decodeBranchSys (w : Nat) : Option Instr :=
     -- DC ZVA, Xt = SYS #3, C7, C4, #1, Xt: 1101010100 0 01 011 0111 0100 001 Rt.
     -- No other cache-maintenance or SYS operation is accepted.
     some (.dcZva (bits w 4 0))
-  else none
+  else decodeSys w  -- SVC #0, BRK, MRS/MSR of the environment registers (`Janus.Arm64.DecodeSys`)
 
 /-- Valid `(size, opc)` combinations of the single-register integer load/store classes:
 opc 00 store / 01 load for every size; 10 (signed to 64) for B/H/W (LDRSB/LDRSH/LDRSW);
@@ -561,6 +562,6 @@ def decode (w : Nat) : Option Instr :=
   else if op0 % 2 = 0 && op0 / 4 % 2 = 1 then decodeLdSt w   -- x1x0
   else if op0 % 8 = 0b101 then decodeDPReg w       -- x101
   else if op0 % 8 = 0b111 then decodeSimdDP w      -- x111
-  else none                                        -- SME, SVE, unallocated
+  else decodeReserved w  -- UDF #imm16 (`Janus.Arm64.DecodeSys`); SME, SVE, unallocated: none
 
 end Janus.Arm64

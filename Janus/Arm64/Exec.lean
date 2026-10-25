@@ -59,6 +59,11 @@ Modelling decisions (user mode, Linux):
   (`trapped`) when `DZP = 1`.
 * **TPIDR_EL0.** `MRS Xt, TPIDR_EL0` returns `State.tpidr`, a field of the state that no
   supported instruction writes (`MSR TPIDR_EL0` is not decoded).
+* **Kernel, traps and the environment** (`Janus.Arm64.DecodeSys`, `Janus.Kernel`). `SVC #0`
+  and `MRS`/`MSR` of `CNTVCT_EL0`, `CNTFRQ_EL0`, `MIDR_EL1` and `DIT` fault with `kernel`:
+  their result is the kernel's or the environment's, given by the contracts of
+  `Janus.Kernel` (at the `.syscall` stub the extractor puts on each of them), never by this
+  function. `BRK` and `UDF` fault with `trap` (`SIGTRAP`, `SIGILL`).
 * **Advanced SIMD and SIMD&FP loads/stores** (`State.vregs`, see `Janus.Arm64.Vector`): only
   integer and move instructions (Advanced SIMD floating point is not decoded). `V[d, n] = x` zero-extends to 128 bits (on an SVE CPU the hardware also zeroes the
   upper bits of `Z[d]`, which the model does not have). SIMD&FP loads and stores need no
@@ -765,6 +770,13 @@ def exec (i : Instr) (s : State) : Except Fault State :=
   | .clrex _ => .ok s.next
   | .mrsDczid rt => .ok (s.writeZR rt (s.dczid.setWidth 64)).next
   | .mrsTpidr rt => .ok (s.writeZR rt s.tpidr).next
+  -- Kernel, trap and environment instructions (WP-C): the user-mode model stops here
+  | .svc _ => .error (.kernel s.pc.toNat)
+  | .brk _ => .error (.trap s.pc.toNat 5)
+  | .udf _ => .error (.trap s.pc.toNat 4)
+  | .mrsEnv _ _ => .error (.kernel s.pc.toNat)
+  | .msrDitImm _ => .error (.kernel s.pc.toNat)
+  | .msrDitReg _ => .error (.kernel s.pc.toNat)
   | .dcZva rt => execDcZva s rt
   | .prefetch _ => .ok s.next
   | .ldstOrdered size L _ rn rt => execOrdered s size L rn rt

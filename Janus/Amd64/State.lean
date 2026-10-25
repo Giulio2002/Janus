@@ -112,6 +112,20 @@ inductive Fault where
   /-- `#XM`: the SSE floating-point instruction at `pc` raised an exception that is unmasked
   in `MXCSR` (Linux delivers `SIGFPE`). -/
   | simdFPException (pc : Nat)
+  /-- The instruction at `pc` raises an exception by design: `INT3`/`INT 3` (`#BP`, Linux
+  `SIGTRAP` = 5), `UD2` (`#UD`, `SIGILL` = 4), `HLT` at CPL 3 (`#GP`, `SIGSEGV` = 11). An
+  explicit fault outcome; `Janus.Amd64.Kernel.Traps` states that a run ends here. -/
+  | trap (pc : Nat) (signal : Nat)
+  /-- The instruction at `pc` asks the kernel or the CPU's environment for its result
+  (`SYSCALL`, `CPUID`, `XGETBV`, `RDTSC`, `RDTSCP`): the user-mode model alone does not
+  determine it. The extractor puts a `.syscall` stub at every such instruction, and only the
+  kernel semantics `Janus.Amd64.Kernel.ReturnsK` continues past it. -/
+  | kernel (pc : Nat)
+  /-- `POPFQ` at `pc` would set a system flag the model does not track (`TF` bit 8, `NT` 14,
+  `AC` 18 or `ID` 21): single-stepping, nested tasks, alignment checking and the CPUID flag
+  are outside the model, which keeps `RFLAGS` at its user-mode image `0x202` plus the status
+  flags and `DF`. -/
+  | systemFlag (pc : Nat)
   /-- Fuel ran out before the call returned. -/
   | outOfFuel
 deriving Repr, DecidableEq, Inhabited

@@ -206,6 +206,20 @@ func (id *Identity) contractList() []string {
 	return out
 }
 
+// kernelLists are the `.syscall` stubs (system calls, environment reads, vDSO clocks) and the
+// `.trap` stubs of the extraction, as "name @ address" (kernel.go).
+func (id *Identity) kernelLists() (kernel, traps []string) {
+	for _, s := range id.Stubs {
+		switch StubKind(s.Kind) {
+		case stubSyscall:
+			kernel = append(kernel, s.Name+" @ "+s.Address)
+		case stubTrap:
+			traps = append(traps, s.Name+" @ "+s.Address)
+		}
+	}
+	return kernel, traps
+}
+
 func (id *Identity) marshal() []byte {
 	b, err := json.MarshalIndent(id, "", "  ")
 	if err != nil {

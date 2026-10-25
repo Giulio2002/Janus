@@ -1,4 +1,5 @@
 import Janus.Amd64.Instr
+import Janus.Amd64.DecodeSys
 
 /-!
 # x86-64 decoder for the supported subset
@@ -833,6 +834,10 @@ open Decode in
 /-- Decode the instruction at the start of `bytes`: the instruction and its length in bytes.
 `none` for anything outside the supported subset (see the module documentation). -/
 def decode (bytes : List Nat) : Option (Instr × Nat) :=
+  -- `SYSCALL`, `CPUID`, `XGETBV`, `RDTSC(P)`, the traps, `PUSHFQ`/`POPFQ` (`Janus.Amd64.DecodeSys`)
+  match decodeSys bytes with
+  | some r => some r
+  | none =>
   match bytes with
   | b0 :: rest0 =>
     if b0 = 0xC4 ∨ b0 = 0xC5 then vex b0 rest0 else decodeLegacy bytes

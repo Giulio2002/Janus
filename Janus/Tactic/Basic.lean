@@ -70,6 +70,14 @@ def IsMorestack : Outcome → Prop
     IsPanic (.stub n .external s) = False := rfl
 @[simp, janus_post] theorem isMorestack_external (n : String) (s : State) :
     IsMorestack (.stub n .external s) = False := rfl
+@[simp, janus_post] theorem isPanic_syscall (n : String) (s : State) :
+    IsPanic (.stub n .syscall s) = False := rfl
+@[simp, janus_post] theorem isMorestack_syscall (n : String) (s : State) :
+    IsMorestack (.stub n .syscall s) = False := rfl
+@[simp, janus_post] theorem isPanic_trap (n : String) (s : State) :
+    IsPanic (.stub n .trap s) = False := rfl
+@[simp, janus_post] theorem isMorestack_trap (n : String) (s : State) :
+    IsMorestack (.stub n .trap s) = False := rfl
 
 /-- The address `pc` is an ordinary instruction `w`, decoding to `i`: not the exit address, not
 a stub, inside the code. Evaluated by the kernel (`decide +kernel`). -/
@@ -278,6 +286,8 @@ theorem panics_of_reaches {p : Program} {s : State} (h : Reaches p s IsPanic) : 
     | panic => exact ⟨n, name, s', hr⟩
     | morestack => exact hq.elim
     | external => exact hq.elim
+    | syscall => exact hq.elim
+    | trap => exact hq.elim
 
 theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMorestack) :
     GrowsStack p s := by
@@ -289,6 +299,8 @@ theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMores
     | panic => exact hq.elim
     | morestack => exact ⟨n, name, s', hr⟩
     | external => exact hq.elim
+    | syscall => exact hq.elim
+    | trap => exact hq.elim
 
 theorem reaches_of_returns {p : Program} {s : State} {post : State → Prop}
     (h : Returns p s post) : Reaches p s (IsReturn post) := by

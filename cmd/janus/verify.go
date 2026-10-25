@@ -78,6 +78,11 @@ type verifiedReport struct {
 	// functions that were not extracted, whose behaviour the theorem can only use through a
 	// contract hypothesis in its statement.
 	Contracts []string `json:"contracts,omitempty"`
+	// Kernel are the extraction's `.syscall` stubs ("name @ address"): the SVC/SYSCALL
+	// instructions, environment reads and vDSO clock functions whose effect only the kernel
+	// semantics of Janus/Contracts/Syscall*.lean gives (WP-C). Traps are its `.trap` stubs.
+	Kernel []string `json:"kernel,omitempty"`
+	Traps  []string `json:"traps,omitempty"`
 	// ASL is the ASL corollary (--asl): the theorem transferred to Arm's ASL, or why it could not
 	// be. Its failure never changes the verified theorem above.
 	ASL *aslReport `json:"asl,omitempty"`
@@ -364,6 +369,14 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	if len(r.Contracts) > 0 {
 		fmt.Fprintf(stdout, "  Runtime contracts assumed: %s (not extracted; see the contract hypotheses of the statement)\n",
 			termSafe(strings.Join(r.Contracts, ", ")))
+	}
+	if len(r.Kernel) > 0 {
+		fmt.Fprintf(stdout, "  Kernel interface: %s (.syscall stubs: their effect is the kernel contract of Janus.Kernel, under ReturnsK/EnsuresK only)\n",
+			termSafe(strings.Join(r.Kernel, ", ")))
+	}
+	if len(r.Traps) > 0 {
+		fmt.Fprintf(stdout, "  Trap sites: %s (.trap stubs: a run reaching one ends in a trap, Kernel.Traps)\n",
+			termSafe(strings.Join(r.Traps, ", ")))
 	}
 	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(filepath.Join(outdir, "verified.json")))
 	fmt.Fprintln(stdout, "  Statement:")
@@ -825,6 +838,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		Contracts:         cr.Identity.contractList(),
 		Notes:             ar.Notes,
 	}
+	report.Kernel, report.Traps = cr.Identity.kernelLists()
 	if resultKey != "" && bytes.Equal(idBytes, idBytes0) {
 		storeResult(resultKey, report)
 	}
