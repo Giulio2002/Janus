@@ -71,6 +71,7 @@ namespace JanusX86.Proofs
 open X86Sail X86Sail.Functions
 
 open Janus.Amd64 Janus.Amd64.Decode in
+set_option maxHeartbeats 4000000 in
 theorem decode_jcc32 {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat} {n : Nat}
     (hpp : parsePrefixes bytes {} 0 = some (p, 0x0F :: o :: rest, n)) (ho : 0x80 ≤ o ∧ o < 0x90)
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :

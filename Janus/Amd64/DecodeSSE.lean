@@ -310,4 +310,39 @@ def decode (opsize : Bool) (rep : Nat) (rex : Option Nat) (mrm : MRM) (op : Nat)
     else none
   else none
 
+/-- Every opcode byte after `0F` that `decode` looks at (the maps `38`/`3A`, the packed
+floating-point and integer opcodes and the explicitly listed forms). -/
+@[simp] def sseOps : List Nat :=
+  [0x38, 0x3A, 0x51, 0x58, 0x59, 0x5C, 0x5D, 0x5E, 0x5F,
+   0x14, 0x15, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x75,
+   0x76, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD8, 0xD9, 0xDA, 0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2,
+   0xE3, 0xE4, 0xE5, 0xE8, 0xE9, 0xEA, 0xEC, 0xED, 0xEE, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF8,
+   0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE,
+   0x71, 0x72, 0x73, 0x5A, 0x5B, 0xE6, 0xC2, 0xC6, 0x7C, 0x7D, 0xD0, 0x12, 0x13, 0x16, 0x17, 0x2B,
+   0xE7, 0x50, 0xC4, 0xC5, 0xC3, 0x70, 0xF0]
+
+theorem pfop_eq_none {op : Nat} (h : op ∉ sseOps) : pfop op = none := by
+  simp only [sseOps, List.mem_cons, List.not_mem_nil, or_false, not_or] at h
+  unfold pfop; split <;> simp_all
+
+theorem pint66_eq_none {op : Nat} (h : op ∉ sseOps) : pint66 op = none := by
+  cases hq : pint66 op with
+  | none => rfl
+  | some v =>
+    exfalso; apply h
+    unfold pint66 at hq
+    split at hq <;> first | decide | exact absurd hq (by simp)
+
+/-- Outside `sseOps` there is nothing to decode here (a `simp` lemma, so that proofs about the
+decoding of the other two-byte opcodes see the fallback vanish). -/
+@[simp] theorem decode_eq_none_of {op : Nat} (h : op ∉ sseOps) (opsize : Bool) (rep : Nat)
+    (rex : Option Nat) (mrm : MRM) (bs : List Nat) (n : Nat) :
+    decode opsize rep rex mrm op bs n = none := by
+  have hp := pfop_eq_none h
+  have hi := pint66_eq_none h
+  simp only [sseOps, List.mem_cons, List.not_mem_nil, or_false, not_or] at h
+  unfold decode
+  simp only [hp, hi]
+  simp [h]
+
 end Janus.Amd64.DecodeSSE

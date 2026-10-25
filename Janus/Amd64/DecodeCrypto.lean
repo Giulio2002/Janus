@@ -90,4 +90,11 @@ def decode (opsize : Bool) (rep : Nat) (rex : Option Nat) (mrm : MRM) (op : Nat)
         else none
   else none
 
+/-- Outside the `0F 38` / `0F 3A` maps there is nothing to decode here (a `simp` lemma, so that
+proofs about the decoding of other two-byte opcodes see the fallback vanish). -/
+@[simp] theorem decode_eq_none_of {op : Nat} (h : op ≠ 0x38 ∧ op ≠ 0x3A) (opsize : Bool) (rep : Nat)
+    (rex : Option Nat) (mrm : MRM) (bs : List Nat) (n : Nat) :
+    decode opsize rep rex mrm op bs n = none := by
+  simp only [decode]; rw [if_neg (by omega)]
+
 end Janus.Amd64.DecodeCrypto

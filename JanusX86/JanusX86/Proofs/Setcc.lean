@@ -81,8 +81,9 @@ theorem decode_setcc {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List 
       false_and, and_false, or_false, false_or, finish, hext] at hd ⊢
     by_cases hl : 15 < n + 1 + 1 + c <;> by_cases hrp : p.rep = 0 <;>
       cases hf : p.fs <;> cases hk : p.lock <;>
-      simp (config := {decide := true}) only [hf, hk, hl, hrp, ↓reduceIte, Bool.false_eq_true, withFS_setcc] at hd ⊢ <;>
-      (try simp [lockable] at hd ⊢)
+      simp (config := {decide := true}) only [hf, hk, hl, hrp, ↓reduceIte, Bool.false_eq_true, withFS_setcc,
+        sse_ext_none, Janus.Amd64.DecodeCrypto.decode_eq_none_of, Option.or_none, Option.or_some] at hd ⊢ <;>
+      (try simp [lockable, sse_ext_none, withFS_setcc] at hd ⊢)
     all_goals first
       | (obtain ⟨rfl, rfl⟩ := hd; refine ⟨by omega, by omega, ?_⟩; cases rm <;> simp_all [rmDst, rmLoc, regLocOf])
       | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨rfl, by omega, by cases rm <;> simp_all [rmDst, rmLoc, regLocOf]⟩)
@@ -138,7 +139,7 @@ theorem setcc_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86C
     have hcs : o = 0x90 ∨ o = 0x91 ∨ o = 0x92 ∨ o = 0x93 ∨ o = 0x94 ∨ o = 0x95 ∨ o = 0x96 ∨ o = 0x97 ∨
         o = 0x98 ∨ o = 0x99 ∨ o = 0x9A ∨ o = 0x9B ∨ o = 0x9C ∨ o = 0x9D ∨ o = 0x9E ∨ o = 0x9F := by omega
     rcases hcs with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
-      simp (config := {decide := true}) [twoByte, hmd] at hd
+      simp (config := {decide := true}) [twoByte, hmd, sse_ext_none] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc
   obtain ⟨hlk, hfs, hrep, rfl, hlen, rfl⟩ := decode_setcc hpp ho hext hmd hd
@@ -306,8 +307,9 @@ theorem decode_cmov {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List N
       false_and, and_false, or_false, false_or, finish] at hd ⊢
     by_cases hl : 15 < n + 1 + 1 + c <;> by_cases hrp : p.rep = 0 <;>
       cases hf : p.fs <;> cases hk : p.lock <;>
-      simp (config := {decide := true}) only [hf, hk, hl, hrp, ↓reduceIte, Bool.false_eq_true] at hd ⊢ <;>
-      (try simp [lockable, withFS] at hd ⊢)
+      simp (config := {decide := true}) only [hf, hk, hl, hrp, ↓reduceIte, Bool.false_eq_true,
+        sse_ext_none, Janus.Amd64.DecodeCrypto.decode_eq_none_of, Option.or_none, Option.or_some] at hd ⊢ <;>
+      (try simp [lockable, withFS, sse_ext_none] at hd ⊢)
     all_goals first
       | (obtain ⟨rfl, rfl⟩ := hd; refine ⟨by omega, by omega, ?_⟩; cases rm <;> simp_all [rmDst, rmLoc, regLocOf])
       | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨rfl, by omega, by cases rm <;> simp_all [rmDst, rmLoc, regLocOf]⟩)
@@ -358,7 +360,7 @@ theorem cmov_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Co
     have hcs : o = 0x40 ∨ o = 0x41 ∨ o = 0x42 ∨ o = 0x43 ∨ o = 0x44 ∨ o = 0x45 ∨ o = 0x46 ∨ o = 0x47 ∨
         o = 0x48 ∨ o = 0x49 ∨ o = 0x4A ∨ o = 0x4B ∨ o = 0x4C ∨ o = 0x4D ∨ o = 0x4E ∨ o = 0x4F := by omega
     rcases hcs with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
-      simp (config := {decide := true}) [twoByte, hmd] at hd
+      simp (config := {decide := true}) [twoByte, hmd, sse_ext_none] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc
   obtain ⟨hlk, hfs, hrep, rfl, hlen, rfl⟩ := decode_cmov hpp ho hmd hd
