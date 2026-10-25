@@ -61,11 +61,15 @@ handles legacy prefixes, REX, the one- and two-byte opcode maps, ModRM, SIB, RIP
 * `F2`/`F3` except where they select an instruction (`F3` is `REP` on `MOVS`/`STOS`; `F2`
   and segment overrides on string instructions are rejected);
 * segment overrides on branches (hints and CET `NOTRACK`);
-* EVEX and XOP, and every VEX instruction except the eleven below; VEX after any other prefix
+* EVEX and XOP, and every VEX instruction except the AVX/AVX2 eleven, the BMI1/BMI2 and the
+  scalar FMA3 instructions below; VEX after any other prefix
   (`66 F2 F3 F0 REX` make it `#UD`; segment overrides are rejected too); a VEX instruction with
   a field the SDM reserves set (`VEX.vvvv ≠ 1111` where it is unused, `VEX.W1` on
   `VPBROADCASTB`, `VEX.L1` on `VZEROUPPER`, which is `VZEROALL`), the memory form of
-  `VPMOVMSKB` and the register form of `VMOVNTDQ`;
+  `VPMOVMSKB` and the register form of `VMOVNTDQ`, `VEX.L1` on BMI1/BMI2 (`#UD`) and on the
+  scalar FMA forms (`LIG`: ignored by hardware, rejected here since no compiler emits it),
+  `VEX.vvvv ≠ 1111` on `RORX`; the register forms of `MOVBE` (`#UD`), `F2`/`F3` on `0F 38
+  F0/F1` (`CRC32`, reserved), and `PSHUFB`/`PSIGNB` without `66` (MMX);
 * `RCL`/`RCR` at 8 and 16 bits (the count is reduced modulo 9/17) and the `SAL /6` alias;
 * prefixes on `CLD`/`STD`;
 * `F6`/`F7 /1`, `MOVSXD` without `REX.W`, and 16-bit `BSWAP`;
@@ -89,12 +93,16 @@ and AVX2 instructions of Go's `memmove`, `memclrNoHeapPointers` and `internal/by
 integer forms above (the TLS load `MOVQ FS:-8, R14`); the atomics: `LOCK`-prefixed
 read-modify-write forms, `XADD` and `CMPXCHG` (memory destination, locked or not),
 `CMPXCHG8B`/`CMPXCHG16B`, `LFENCE MFENCE SFENCE`; and the string instructions `MOVS` and
-`STOS` (all widths) with and without `REP`. `MULX`, `ADCX` and `ADOX` are not
-modelled: Go does not emit them at `GOAMD64=v1` (the default). In the `sync/atomic`, `bytes`
+`STOS` (all widths) with and without `REP`; and the `GOAMD64=v3` scalar extensions: BMI1
+`ANDN BLSR BLSMSK BLSI BEXTR` (and `TZCNT`), BMI2 `SHLX SHRX SARX RORX MULX BZHI PDEP PEXT`
+(32 and 64 bits), `MOVBE` (16/32/64 bits, load and store), the 48 scalar FMA3 forms
+`VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}` (single rounding on the IEEE core, `FP.fma`) and SSSE3
+`PSHUFB`/`PSIGNB` on `XMM`. With them every Go-compiled function of the `GOAMD64=v3` std test
+binaries decodes (`docs/COVERAGE.md`). `ADCX` and `ADOX` are not modelled. In the `sync/atomic`, `bytes`
 and `strings` test binaries 97.9–98.1% of the Go-compiled functions and 53% of the assembly
 functions decode completely (`docs/ORACLE-AMD64.md`); with the SSE scalar floating point
 (`UCOMISD`, `CVT*`, arithmetic, `ROUNDSD`) now modelled, what is left is `SYSCALL`,
-AES/SHA/CRC32, AVX-512, `VFMADD231SD` and `PCMPESTRI`.
+AES/SHA/CRC32, AVX-512 and `PCMPESTRI` (scalar FMA is modelled since WP-B).
 
 **Semantics** follow the SDM *Operation* and *Flags Affected* sections:
 
@@ -107,6 +115,17 @@ AES/SHA/CRC32, AVX-512, `VFMADD231SD` and `PCMPESTRI`.
 * Undefined results fault (`undefinedResult`): BSF/BSR of 0 at every width (Intel leaves the
   destination undefined; AMD documents, and this Intel CPU shows, that it is kept — a vendor
   difference, so the model faults; audit round 2, LOW-2), and 16-bit SHLD/SHRD by more than 16.
+* BMI1/BMI2 follow the SDM: `ANDN BLSR BLSI BZHI` set `SF ZF` from the result and clear `OF`
+  (`CF`: `0`, source zero, source non-zero, index `≥ w`), `BLSMSK` clears `ZF`, `BEXTR` defines
+  only `ZF` (`CF OF` cleared); `AF PF` (and `SF` of `BEXTR`) are undefined. `SHLX SHRX SARX
+  RORX MULX PDEP PEXT` leave the flags alone. `MULX` writes the low half to `VEX.vvvv`, then the
+  high half to ModRM `reg` (equal registers get the high half).
+* Scalar FMA (`FP.fma`): the multiplicands and addend are `(dst, src3; src2)` for `132`,
+  `(src2, dst; src3)` for `213`, `(src2, src3; dst)` for `231`; one rounding, `DAZ`, `FTZ`,
+  tininess after rounding and the exception flags as for the other SSE operations; a single NaN
+  operand comes back quieted and never negated. Two or more NaN operands (the NaN chosen is
+  Intel's documented order, not AMD's) and `0 × ∞ + NaN` (IEEE 754 leaves `IE` to the
+  implementation) fault with `undefinedResult`.
 * `#DE` is a fault (`divideError`), and so is a misaligned 16-byte SSE operand
   (`misaligned`).
 * A read-modify-write destination must be writable before it is read.
@@ -412,6 +431,16 @@ a hard-coded address (see *Layout independence* above), so adding functions to
 | `MapSum` | `Σ f(xs[j])` for the closure `f` = `AffineSum.func1` capturing `a`, `b` (`FuncvalIs`, `ClosureCtx`): returns `Σ (a·xs[j] + b) mod 2^64` (a loop calling the closure, by induction) |
 | `DeferAdd` | `r = x` with an open-coded `defer` of a closure adding `y` to `r`: returns `[x + y]` |
 | `CopyBlock512` | `copy(dst[:], src[:])` of `[64]uint64` (512 bytes) through `runtime.memmove`'s **AVX path** (`VMOVDQU` loads, 32-aligned `VMOVDQA` stores, `VZEROUPPER`), for every alignment of `dst`, disjoint arrays, given `memmoveBits & 1 = 1`: the 512 bytes at `dst` equal the old ones at `src`. (256 bytes or fewer never reach the AVX path: `memmove` copies them with SSE.) |
+
+Three more are about `artifacts/examples-amd64-v3`: `examples/basic/v3` built with
+`GOAMD64=v3` into a binary of its own (so the v1 binary above does not change), extracted by the
+same script.
+
+| function | theorem |
+|---|---|
+| `BitMix` | `ANDN`, `SHLX`, `BLSR`: returns `[(x &&& ~~~y) ^^^ (x &&& (x - 1)) ^^^ (y <<< (n mod 64))]` for all `x y n` |
+| `Fma` | `math.FMA(a, b, c)` as one `VFMADD231SD`: under `GoMXCSR`, the low 64 bits of `X0` are IEEE 754 `fusedMultiplyAdd(a, b, c)` rounded once to nearest even (`Janus.Float.fma`, the arm64 `FMADD` specification), or a NaN when that is a NaN, whenever the result is architecturally defined (`FP.FmaDefined`: at most one NaN operand, not `0 × ∞ + NaN`) |
+| `LoadBE` | `binary.BigEndian.Uint64(b[:])` as one `MOVBE`: the big-endian value of the 8 readable bytes at `b` |
 
 ## Known gaps
 

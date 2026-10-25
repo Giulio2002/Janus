@@ -99,6 +99,9 @@ func explain(w io.Writer, outdir, reportPath string, r *verifiedReport) {
 		arch = fmt.Sprintf(" for %s/%s", id.GOOS, id.GOARCH)
 	}
 	p("  Function: %s, entry address %s", r.Symbol, r.Address)
+	if desc := describeEntry(r.EntryABI, r.EntrySource); desc != "" {
+		p("  Calling convention: %s (docs/ABI0.md)", desc)
+	}
 	p("  Program: Go module %s, built with %s%s", r.MainModule, r.GoVersion, arch)
 	p("  Binary: %s", displayPath(resolveBinary(outdir, r.Binary)))
 	if id != nil && sha256Hex(id.raw) == r.IdentitySha256 {
