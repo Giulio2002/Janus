@@ -60,7 +60,7 @@ theorem loop (s : State) (ptr len : Nat) (hptr : s.mem.readLE ((s.regs 4).toNat 
       S.rip = BitVec.ofNat 64 head → S.regs 6 = BitVec.ofNat 64 (ptr + 8 * i) →
       S.regs 1 = BitVec.ofNat 64 n → S.regs 0 = xorWords s.mem ptr i →
       S.regs 4 = s.regs 4 → S.regs 5 = s.regs 5 → S.mem = s.mem → S.fsBase = s.fsBase →
-      S.df = s.df → S.mxcsr = s.mxcsr →
+      S.df = s.df → S.mxcsr = s.mxcsr → S.fpucw = s.fpucw →
       ReachesRet Extracted.program (retAddrOf s) S (fun s' => Ret0 s s' (XorQ s)) := by
   obtain ⟨hr, hfb, hfacc, hp', hp⟩ := hpre
   rw [hptr, hlen] at hp hp'
@@ -68,13 +68,13 @@ theorem loop (s : State) (ptr len : Nat) (hptr : s.mem.readLE ((s.regs 4).toNat 
   intro n
   induction n with
   | zero =>
-    intro S i hn hpc h6 h1 h0 h4 h5 hm hfs hdf hmx
+    intro S i hn hpc h6 h1 h0 h4 h5 hm hfs hdf hmx hfw
     janus64_run [XorQ]
-    exact ⟨hfs, by rw [show i = len by omega]; exact MemFrame.refl _ _⟩
+    exact ⟨hfs, hfw, by rw [show i = len by omega]; exact MemFrame.refl _ _⟩
   | succ n ih =>
-    intro S i hn hpc h6 h1 h0 h4 h5 hm hfs hdf hmx
+    intro S i hn hpc h6 h1 h0 h4 h5 hm hfs hdf hmx hfw
     janus64_run until [head]
-    refine ih _ (i + 1) (by omega) rfl ?_ ?_ ?_ ?_ ?_ rfl ?_ ?_ ?_
+    refine ih _ (i + 1) (by omega) rfl ?_ ?_ ?_ ?_ ?_ rfl ?_ ?_ ?_ ?_
     · simp only [setRegF_apply, ↓reduceIte]
       apply BitVec.eq_of_toNat_eq
       simp only [BitVec.toNat_add, BitVec.toNat_ofNat]
@@ -83,7 +83,7 @@ theorem loop (s : State) (ptr len : Nat) (hptr : s.mem.readLE ((s.regs 4).toNat 
       apply BitVec.eq_of_toNat_eq
       simp only [BitVec.toNat_sub, BitVec.toNat_ofNat]
       omega
-    all_goals simp [setRegF_apply, xorWords, h4, h5, hfs]
+    all_goals simp [setRegF_apply, xorWords, h4, h5, hfs, hfw]
 
 theorem xor_summary : Summary0 Extracted.program callee XorPre XorQ := by
   intro s hpc hpre
@@ -92,7 +92,7 @@ theorem xor_summary : Summary0 Extracted.program callee XorPre XorQ := by
   janus64_run until [head]
   exact loop s _ _ rfl rfl hpre (s.mem.readLE ((s.regs 4).toNat + 16) 8) _ 0 (by simp) rfl
     (by simp [setRegF_apply]) (by simp [setRegF_apply]) (by simp [setRegF_apply, xorWords])
-    (by simp [setRegF_apply]) (by simp [setRegF_apply]) rfl rfl rfl rfl
+    (by simp [setRegF_apply]) (by simp [setRegF_apply]) rfl rfl rfl rfl rfl
 
 theorem correctness (ptr len cap : BitVec 64) :
     Ensures Extracted.program Extracted.entry [ptr, len, cap]
