@@ -10,7 +10,7 @@ import (
 // inputs that neither panic nor fault.
 func init() {
 	Keep = append(Keep, basic.PanicIf, basic.DeferInc, basic.RecoverSet, basic.IndexAt,
-		basic.LoadField, basic.DeferLoop, basic.Counter)
+		basic.LoadField, basic.DeferLoop, basic.Counter, basic.DeferTwice)
 	n := uint64(len(os.Args))
 	var c uint64
 	basic.DeferLoop(basic.Counter(&c), int(n))
