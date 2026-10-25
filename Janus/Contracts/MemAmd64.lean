@@ -175,10 +175,11 @@ def TPre (M : MemModel) (wb d nargs : Nat) (s : State) : Prop :=
     Outside ((s.regs 4).toNat - d) (d + 8 + 8 * nargs) M.priv ∧ Input s d nargs wb 4 ∧
     WriteBarrierOff s.mem wb ∧ Outside ((s.regs 14).toNat + 16) 8 (calleeStack s d nargs)
 
-/-- The destination of a typed-memory call (amd64). -/
+/-- The destination of a typed-memory call (amd64): as `Mem.Dest`, and also outside the
+return-address slot `[RSP, RSP + 8)` (overwriting it would make the return impossible). -/
 def Dest (M : MemModel) (s : State) (d nargs a n : Nat) : Prop :=
   a + n ≤ 2 ^ 48 ∧ s.mem.accessible a n true = true ∧ Outside a n (calleeStack s d nargs) ∧
-    Outside a n M.priv
+    Outside a n M.priv ∧ Outside a n [((s.regs 4).toNat, (s.regs 4).toNat + 8)]
 
 /-- The return of a typed-memory call (amd64). -/
 def TRet (M : MemModel) (d nargs : Nat) (extra : List (Nat × Nat)) (s s' : State)

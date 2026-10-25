@@ -38,3 +38,5 @@ import Janus.Contracts.Hash
 import Janus.Contracts.MemAmd64
 import Janus.Contracts.HashAmd64
 import Janus.Contracts.EqHashModel
+import Janus.Contracts.HashLaws
+import Janus.Contracts.MapStr
