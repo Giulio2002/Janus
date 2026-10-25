@@ -16,6 +16,21 @@ func s_assertE2I()
 //go:linkname s_assertE2I2 runtime.assertE2I2
 func s_assertE2I2()
 
+//go:linkname s_bulkBarrierPreWrite runtime.bulkBarrierPreWrite
+func s_bulkBarrierPreWrite()
+
+//go:linkname s_c128equal runtime.c128equal
+func s_c128equal()
+
+//go:linkname s_c128hash runtime.c128hash
+func s_c128hash()
+
+//go:linkname s_c64equal runtime.c64equal
+func s_c64equal()
+
+//go:linkname s_c64hash runtime.c64hash
+func s_c64hash()
+
 //go:linkname s_cgocall runtime.cgocall
 func s_cgocall()
 
@@ -45,6 +60,18 @@ func s_convTstring()
 
 //go:linkname s_efaceeq runtime.efaceeq
 func s_efaceeq()
+
+//go:linkname s_f32equal runtime.f32equal
+func s_f32equal()
+
+//go:linkname s_f32hash runtime.f32hash
+func s_f32hash()
+
+//go:linkname s_f64equal runtime.f64equal
+func s_f64equal()
+
+//go:linkname s_f64hash runtime.f64hash
+func s_f64hash()
 
 //go:linkname s_gopanic runtime.gopanic
 func s_gopanic()
@@ -103,8 +130,80 @@ func s_goPanicSliceConvert()
 //go:linkname s_ifaceeq runtime.ifaceeq
 func s_ifaceeq()
 
+//go:linkname s_interequal runtime.interequal
+func s_interequal()
+
 //go:linkname s_interfaceSwitch runtime.interfaceSwitch
 func s_interfaceSwitch()
+
+//go:linkname s_interhash runtime.interhash
+func s_interhash()
+
+//go:linkname s_mapaccess2_faststr runtime.mapaccess2_faststr
+func s_mapaccess2_faststr()
+
+//go:linkname s_memclrHasPointers runtime.memclrHasPointers
+func s_memclrHasPointers()
+
+//go:linkname s_memclrNoHeapPointers runtime.memclrNoHeapPointers
+func s_memclrNoHeapPointers()
+
+//go:linkname s_memequal runtime.memequal
+func s_memequal()
+
+//go:linkname s_memequal0 runtime.memequal0
+func s_memequal0()
+
+//go:linkname s_memequal128 runtime.memequal128
+func s_memequal128()
+
+//go:linkname s_memequal16 runtime.memequal16
+func s_memequal16()
+
+//go:linkname s_memequal32 runtime.memequal32
+func s_memequal32()
+
+//go:linkname s_memequal64 runtime.memequal64
+func s_memequal64()
+
+//go:linkname s_memequal8 runtime.memequal8
+func s_memequal8()
+
+//go:linkname s_memequal_varlen runtime.memequal_varlen
+func s_memequal_varlen()
+
+//go:linkname s_memhash runtime.memhash
+func s_memhash()
+
+//go:linkname s_memhash0 runtime.memhash0
+func s_memhash0()
+
+//go:linkname s_memhash128 runtime.memhash128
+func s_memhash128()
+
+//go:linkname s_memhash16 runtime.memhash16
+func s_memhash16()
+
+//go:linkname s_memhash32 runtime.memhash32
+func s_memhash32()
+
+//go:linkname s_memhash64 runtime.memhash64
+func s_memhash64()
+
+//go:linkname s_memhash8 runtime.memhash8
+func s_memhash8()
+
+//go:linkname s_memhash_varlen runtime.memhash_varlen
+func s_memhash_varlen()
+
+//go:linkname s_memmove runtime.memmove
+func s_memmove()
+
+//go:linkname s_nilinterequal runtime.nilinterequal
+func s_nilinterequal()
+
+//go:linkname s_nilinterhash runtime.nilinterhash
+func s_nilinterhash()
 
 //go:linkname s_panicBounds32 runtime.panicBounds32
 func s_panicBounds32()
@@ -175,12 +274,32 @@ func s_panicunsafestringnilptr()
 //go:linkname s_panicwrap runtime.panicwrap
 func s_panicwrap()
 
+//go:linkname s_rand runtime.rand
+func s_rand()
+
+//go:linkname s_strequal runtime.strequal
+func s_strequal()
+
+//go:linkname s_strhash runtime.strhash
+func s_strhash()
+
 //go:linkname s_typeAssert runtime.typeAssert
 func s_typeAssert()
+
+//go:linkname s_typedmemclr runtime.typedmemclr
+func s_typedmemclr()
+
+//go:linkname s_typedmemmove runtime.typedmemmove
+func s_typedmemmove()
 
 var keep = []func(){
 	s_assertE2I,
 	s_assertE2I2,
+	s_bulkBarrierPreWrite,
+	s_c128equal,
+	s_c128hash,
+	s_c64equal,
+	s_c64hash,
 	s_cgocall,
 	s_cgoUse,
 	s_convT,
@@ -191,6 +310,10 @@ var keep = []func(){
 	s_convTslice,
 	s_convTstring,
 	s_efaceeq,
+	s_f32equal,
+	s_f32hash,
+	s_f64equal,
+	s_f64hash,
 	s_gopanic,
 	s_goPanicIndex,
 	s_goPanicIndexU,
@@ -210,7 +333,31 @@ var keep = []func(){
 	s_goPanicSliceBU,
 	s_goPanicSliceConvert,
 	s_ifaceeq,
+	s_interequal,
 	s_interfaceSwitch,
+	s_interhash,
+	s_mapaccess2_faststr,
+	s_memclrHasPointers,
+	s_memclrNoHeapPointers,
+	s_memequal,
+	s_memequal0,
+	s_memequal128,
+	s_memequal16,
+	s_memequal32,
+	s_memequal64,
+	s_memequal8,
+	s_memequal_varlen,
+	s_memhash,
+	s_memhash0,
+	s_memhash128,
+	s_memhash16,
+	s_memhash32,
+	s_memhash64,
+	s_memhash8,
+	s_memhash_varlen,
+	s_memmove,
+	s_nilinterequal,
+	s_nilinterhash,
 	s_panicBounds32,
 	s_panicBounds32X,
 	s_panicBounds64,
@@ -234,7 +381,12 @@ var keep = []func(){
 	s_panicunsafestringlen,
 	s_panicunsafestringnilptr,
 	s_panicwrap,
+	s_rand,
+	s_strequal,
+	s_strhash,
 	s_typeAssert,
+	s_typedmemclr,
+	s_typedmemmove,
 }
 
 func main() { fmt.Println(len(keep)) }

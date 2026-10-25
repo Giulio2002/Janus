@@ -25,6 +25,22 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.assertE2I": {
 			{Hash: "d30358d5878bae52aaf6e872327582cc0c0fb9305b0d3b6dd32c33c09e91c7be", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
 		},
+		"runtime.bulkBarrierPreWrite": {
+			{Hash: "0afc76bdfafbc63661648998426a208a17d74b5486be0044015a805a617f34a3", File: "runtime/mbitmap.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "a3caf858b64b37ef914773173fe3bfc474298f316e2228ef8006abca6aeabca3", File: "runtime/mbitmap.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.c128equal": {
+			{Hash: "2b7d362a4be0a7d1e95d4300e70fec4edd05d00eab4c7bebc485180f3376192b", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.c128hash": {
+			{Hash: "e2e3785176be36c8494ce63b981ded1dc419be00f085824707ae815d413a9399", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.c64equal": {
+			{Hash: "07d4d381e430c250b0034e982d98ae370a05959223c17673634812371eca67e4", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.c64hash": {
+			{Hash: "d5e683a5c0cae3a0a93389515d6f8f16723f411669fa45c8c5a16193d3bf7590", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
 		"runtime.cgocall": {
 			{Hash: "2607eb7759834a383a927c194c0302f1e5c3c712afb6878fe11b7e1bfadaae8a", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "99733f8a9daa7a9e3478c14d224bbd735c10ed5286b9007e82443d953d6fe21b", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
@@ -68,6 +84,20 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.efaceeq": {
 			{Hash: "dc7cf681250646ae3c9e875f51976d57506319dfa58f0593f87fc2ee4a311a4b", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "f8d3ce758a5c3b67aa8ac36535b246d48a83bdc69c64d61ad7d884932a240824", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+		},
+		"runtime.f32equal": {
+			{Hash: "da84448db10fb4dbdce7751339bcf0a7555daad98727bbc2d844724279fbce64", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.f32hash": {
+			{Hash: "2a3e93475079c5e1ce39ca5dc08a192c3a5eb7f262e3913010d8379dd14f71ee", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "ebda8e65563b850c424b19a36209ff6743c6f7fc8dcf90dc872f3973d57ac224", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.f64equal": {
+			{Hash: "155e6541f892a01eb482bb81887f145a34b35796de1556cd57f9f2b2ea66ab28", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.f64hash": {
+			{Hash: "29aba234d1a95bd179125fd10c7d8f62e74f30f0cc0862db38570c6fba9d5381", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "2e3de5dbbfa0dc7803158d7639242707cb4c0e07f6b3c7f913e39d455febecd8", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 		"runtime.findfunc": {
 			{Hash: "2f2d2afcddb3ea48f62ef070131689c8908398c109f7edb7cd1d59c67a2cd4e3", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
@@ -147,9 +177,81 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "2157236137dc32d07c37b5bb97992142d95c8da3ff2af7dc81d967e99d4eee97", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
 			{Hash: "4fadc47ae57da9537daeb61798e611b0ae16110e3983287e3be35f8c3d289014", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
+		"runtime.interequal": {
+			{Hash: "94a0d21ae11695aa11a3ed14f7e8b4e2bf3f3d68753d083a0f7e8e2cd2f670d1", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
 		"runtime.interfaceSwitch": {
 			{Hash: "141486b11b787de6cb91757bdce4586bb3bea88ff5fac15c81d91eace375520e", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
 			{Hash: "8dff928b0b4529588336ff0230fa64d7ca63e247a8ac243a6f0cbb5b3ce83c55", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.interhash": {
+			{Hash: "1298c715c1d78acaafb8677990119e88dd0995b67e8c443082426fec25db5400", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "7bd04a4cbcac097c4202fbfd5d6cf6b25225602b1446a4474ee962235ab0a102", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+		},
+		"runtime.mapaccess2_faststr": {
+			{Hash: "807ea7bf4ec0fefb1e716b113e12c41ed1af85ac46611bef07b0435bdfa435eb", File: "internal/runtime/maps/runtime_faststr.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: v4
+			{Hash: "81a5a6c39cf997e465e49c24c0aba097450ae40b530894a56151897c8172268a", File: "internal/runtime/maps/runtime_faststr.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: v2
+			{Hash: "8a2d5d3211594ae1d7ab5c2f32132b8f03b84a3cf719d53c5a2b3a2578c66a54", File: "internal/runtime/maps/runtime_faststr.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: v3
+			{Hash: "be94a462feb41be24b32ab4997121014b820395b74ed92f41b3558dcb5cbbb82", File: "internal/runtime/maps/runtime_faststr.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf
+			{Hash: "e73da18a2d5ae38f6458f485b5143ae680be05ba56bdf1314cffced63b28b9c4", File: "internal/runtime/maps/runtime_faststr.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.memclrHasPointers": {
+			{Hash: "f20b82d5f3f8a56df6158ec0643306c77c5e66f0081059ac4cd5c4772001187c", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memclrNoHeapPointers": {
+			{Hash: "51daf132aadccfcab3458338a901c03636117d1150859fc49e89e720aa51cb6f", File: "runtime/memclr_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: v3 v4
+			{Hash: "acb7825e38b7bbd1ec8ae8dfb9c22c4db96d5b42fdb4bab0a6b453c295780dbd", File: "runtime/memclr_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2
+		},
+		"runtime.memequal0": {
+			{Hash: "3ab060bd2dfa4d8b197ad863b696ac7371a13fe1d806734318eb82d6e429fa83", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memequal128": {
+			{Hash: "f8feababfd7777ee6c8957a8905f4175297e7020f7e7ce7e1a39d5c61bca0504", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memequal16": {
+			{Hash: "4133c6411b8aee16151cb1263ba3af4aa26daf9ae9fd9b50393e27a353feddd9", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memequal32": {
+			{Hash: "217120fd260065700553187d34cf7eb34d24cd12024aca26cd6e68b5c75c32d6", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memequal64": {
+			{Hash: "13583b128efd8417f03e31ad96ea6f3da4010670cb3850e71f3b21b4fd82906f", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memequal8": {
+			{Hash: "595ef2254e533bc163b48904584d8d5975268f44e19e51e5bb5fca4cbe2b5686", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memequal": {
+			{Hash: "365a4bafe779b467071345668ce80b698ba8a8e9e8b2c4acc8fe1c7bc5c34f95", File: "internal/bytealg/equal_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memequal_varlen": {
+			{Hash: "30a1c43aca9abc85ecf4c4a5e936bd481bdd4da86a3d30f545321a9a5bccce46", File: "internal/bytealg/equal_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memhash0": {
+			{Hash: "bbc0d25efaae082c122a161e63fae47319c6061de6c8c85d48ce7030484a2ef7", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memhash128": {
+			{Hash: "84bc48c7f33421c0a6369334d5e9fdaebeb0f1a5c2c9dbe25b5201d13c41e70b", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memhash16": {
+			{Hash: "60ddc100d911fa6f6131655516ed237e04c1c875d0e328ba3570e6993777aa0e", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memhash32": {
+			{Hash: "7611592cdafcdbe56574dfc79798a56df49778f9d1918ce505430f1c1292e948", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memhash64": {
+			{Hash: "cfaabd084a954d37ae7964b959cb6359083ed888f434fbb31d4a854418633a4c", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memhash8": {
+			{Hash: "48678bda939968ad4a7436e854d28fa5824907f9eb2d4374176461f2f8f242e0", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memhash": {
+			{Hash: "8cd37f9a21f06445253f4243eaf60e187c4a99fc3db4de140c40259b84ef77bf", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memhash_varlen": {
+			{Hash: "8a2ae55f0552f3dde8d60553d42cdb1375b7a9ed5beadf0c46b4964680253669", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.memmove": {
+			{Hash: "c9868ea060356c63aa8f0efaf387feeddf48e78455e9f854d15dd199cf94f0d2", File: "runtime/memmove_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
 		},
 		"runtime.(*moduledata).funcName": {
 			{Hash: "6da0ac580f515897d67ea7c0e61f535b631882bc89e189b43630e4911565ffa1", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
@@ -162,6 +264,13 @@ var stubPins = map[string]map[string][]stubPin{
 		},
 		"runtime.newobject": {
 			{Hash: "d419ba705ac23a1b2772c242d8835f3b1cd68cb5ab1dd4d346e7e3ad3e9e4b98", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.nilinterequal": {
+			{Hash: "ad13351a1a327648c94476ea6547fe3510f54addc804c08d69a153e6b57f9ca7", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.nilinterhash": {
+			{Hash: "087d6ee1094da44209de2f86c220f37ddc37818435e23bcf849f5052a070c8dc", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "316721b4c1ae6294868d1101c44d67c9bd53dbf98cf19cf1f047b75d4cdbd40e", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 		"runtime.panicBounds32": {
 			{Hash: "ea5cd83b334f5dad8a6a6ce6f1b85b7856158d2046dda1a9ac3390e67f7b9c8d", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
@@ -248,12 +357,30 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "03b160ee612cf85e7dbac383d31796921550b9e850e32a055513fc0660949d53", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "8a085212835916afedaae4e9092128c7b56a9648e449b0397ba729e2ef8467f7", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
 		},
+		"runtime.rand": {
+			{Hash: "1b1b3a2323c0518eba681e428d7427ceec3404820e8216ace6ba7d5a47647814", File: "runtime/rand.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "48f775c0e14220d1ae667dc2c5a8305a3b389226837b83c1814c1f16d16154b0", File: "runtime/rand.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.strequal": {
+			{Hash: "67f1b4e9483127d8e8f33e3821fc03d174c3ae1ca93a3de20fbf568abff1bbe3", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
+		"runtime.strhash": {
+			{Hash: "84e10bfb434467243a97d8da7e1aa7eff769ab21e4565884044aee8f464f6144", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
 		"runtime.throw": {
 			{Hash: "3f2b3567d7aa1a502fc1f187dd4146d22b3849a85b3f109cfff17ac6332de3ea", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
 		},
 		"runtime.typeAssert": {
 			{Hash: "07806a188b1721b2fbd99679b2101ae0080ea05573a29bc6806d54443d11aae5", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
 			{Hash: "8659ee5bdea6449132f6ccb9e08f5e58ad5193949dbc1d38ff2f7a8e943aaa2f", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.typedmemclr": {
+			{Hash: "58d395894599e7ad268771cb0f677c5217aa1daea982ba1d693075b0e059bf00", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "d65b7c19a5640fbbbe33b626b4e567c5675bcc5da382be3df625788b369d3320", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.typedmemmove": {
+			{Hash: "0dab0eeca510a69716817848ebb865d7c627524057235ebdf1966cea0264072d", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "a5278f27db8be22c8e565af0b6792b296004add7cf5e6f94b9befc41ce16a4bb", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 	},
 	"arm64": {
@@ -271,6 +398,22 @@ var stubPins = map[string]map[string][]stubPin{
 		},
 		"runtime.assertE2I": {
 			{Hash: "af6b4f457690de03d7602130bfae6cd962acf974614bed4a1bc245a7f79013d4", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.bulkBarrierPreWrite": {
+			{Hash: "231ae7c9e35a06908b25b7291c5fc9b39b59582da063dd01f7b977a1eaa2f6d6", File: "runtime/mbitmap.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "52c81631ebee5f6950cb4ab3bf7065ea47a7ece7b620a02e9b9f2f1f87b5ccd2", File: "runtime/mbitmap.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+		},
+		"runtime.c128equal": {
+			{Hash: "ad889757d1060dab9f87f9676e1ce4baf72fcea7623b1dba3c926293436a804b", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.c128hash": {
+			{Hash: "7e5df0d83a5ac7925457c036e0e7a731b5f9e7e94aa44655d15fe5ded019190a", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.c64equal": {
+			{Hash: "0955a6e07b17585dfdb8272edeb98b48fdd3a40b57bc51d4dd8a526271238476", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.c64hash": {
+			{Hash: "0846d38e21e6ba2674da4a61e39008c2d815383d2369fb7428786b965ecbefbb", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
 		},
 		"runtime.cgocall": {
 			{Hash: "09b5c4c8f48ce9507760b896eaa86b5a7f8bcb12311fc4fbc62843f075cdf830", File: "runtime/cgocall.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
@@ -315,6 +458,20 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.efaceeq": {
 			{Hash: "9f3c4ca0b7e8437ff65b9ec2ddc3009a09ef4edf30a2944b642e158f34dd356c", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "ee3b83626794062fb7945981221c34965847cc0ab2e41f99313f714a9abbde70", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+		},
+		"runtime.f32equal": {
+			{Hash: "a82d91e95667ea8e1017edd2dc5c9bea927771e8e45779be962cbe394b49b56e", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.f32hash": {
+			{Hash: "af912d39a013a4ce3d65f5f7ccffc16d8308158bf9a7e5e003149b7dcfeb1a13", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "f4b85c7f8300df43b65c8c0a5c63ba6e1d9f967e8efca8d24897d71150cd7678", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+		},
+		"runtime.f64equal": {
+			{Hash: "2bdc54f66dccb74c3742cac41536349985a425837e2f05f551917c2e54ced7b4", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.f64hash": {
+			{Hash: "1c612fc0c24a9c7a36a5ace42c257f73efaf018a0b208c6df24dd19f1a6e908a", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+			{Hash: "b122b47244dbb681a14cad8c2079da82e9a8c20d71e87916f446420723186dee", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 		"runtime.findfunc": {
 			{Hash: "b474d3fcdc3eb030d45b56ed78028bf2a852f98fc6edf0038fd66621777cfb40", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
@@ -395,10 +552,78 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "b02e10dc11b6f47be4eed14ba57201224d022f10ba082b64a93ef92d841427ca", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "ddad7bd9cc89ea4dc41ca57ec7052362bc275cbc624f6d9a7ffd6b881df01d51", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
 		},
+		"runtime.interequal": {
+			{Hash: "26029d17f138973e5a9eb6ef92b9bc0e7d50c8cd4df3c9ad0f1bc61e9fb4d27c", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
 		"runtime.interfaceSwitch": {
 			{Hash: "051f5adb658e754173cff03cb901f7504d89f75d32e900da525fc11f7fabb035", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "a3c79ef75da1896fad762d4d90291aaa0afdaef0e0e594105d1b9f566e1df103", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: v8.1 v9.0
 			{Hash: "b39e3fc4867d34f5ccc8de81c60e175398fb1102aa682b1105ec9240dae0b714", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf
+		},
+		"runtime.interhash": {
+			{Hash: "75732460978c39259fb446fcdc31b809909971e8583a6caa91460d6a1743e4fc", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+			{Hash: "f105c27fa208e4f8b7b3a68e7591ba0388eff61516b0dac9ee8f488cc48265e6", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.mapaccess2_faststr": {
+			{Hash: "403d57c7c3a07bedd62dc49466421ef6de865d47b2840011621eeeceb9c0d06f", File: "internal/runtime/maps/runtime_faststr.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "e4cfd364a10aade0bc5bfd4185574a407fa034f363702b25571256234e861246", File: "internal/runtime/maps/runtime_faststr.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+		},
+		"runtime.memclrHasPointers": {
+			{Hash: "45aa80513507cf62abc1a83ad2335dec6c83880e559b28cb341a4da41f494253", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memclrNoHeapPointers": {
+			{Hash: "5d7a48d8697ac1569f5d5933268e65ecdfd519ffb00ccce376b6a24c9fe95725", File: "runtime/memclr_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memequal0": {
+			{Hash: "62c07920111b2729dfc8699b6ee03ed0733cc8dbbf98d28f4d850b83f6548ab5", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memequal128": {
+			{Hash: "0bcfe7bc1dc18641fe061a0e8a02d56e5655e93ddb97278a2e28f85e8efbddd8", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memequal16": {
+			{Hash: "52300d47af0388260c8b13460ddf3e9ce0b61799ef3233252213ef31a3dd316c", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memequal32": {
+			{Hash: "3f1e64024b39bc908fa7bb68b7324b874c87f366ac8a40d63425402dea35ea16", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memequal64": {
+			{Hash: "60c1e916eefbcf8d7c874904adbdfe545e16a32edeb32ec0a4728d01fdca32fa", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memequal8": {
+			{Hash: "fd1ae3ed9f7ec4e1cb5798456a1721accd2d02a0bedf72af3fbae50206026f1e", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memequal": {
+			{Hash: "c67be6593f66ce455689d3925c139a3935d5a6532cd8fffb6d0ead4c6b9e3785", File: "internal/bytealg/equal_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memequal_varlen": {
+			{Hash: "7a3a2b1d616f29671b778d03a4c20a4e1c568a4b884f4f8bc0b407ae17219954", File: "internal/bytealg/equal_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memhash0": {
+			{Hash: "4cff2dd63981e76efa7210cc9868f9781f732446cfe5ec90dff58d2db76c788e", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memhash128": {
+			{Hash: "f2a2c8c63c28deae31fc11666407a2c820250f1aa6c82eba07ca49b809f7e7d6", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memhash16": {
+			{Hash: "b4ed0ad1bd18f25df4d4a94e53244641fe52d7f3b42131bc60f2c0395c3307ad", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memhash32": {
+			{Hash: "4703cf833c95af4ec3f15c06443dfdd173b05970849c91c35f56169e0625c5d1", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memhash64": {
+			{Hash: "097eb060837a1b2ec9713babc38c8d5f4a699ea281142cd7e01523c61658619b", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memhash8": {
+			{Hash: "00b2cf74a31b04b27854c1adc9cb4b034b20610cfab75c36e3b0adbf865ce5ee", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memhash": {
+			{Hash: "b6ff534963006e81d78c5d907774dd36561cd7f54dd59480a83f00c92dfad8bd", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memhash_varlen": {
+			{Hash: "7b17d31dd3fc765beea5778122374f66eadc6d271cd404df7d2b54a722c6acc3", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.memmove": {
+			{Hash: "490383cdf40a3a427fe6d9c130a9e72f3d37f90e9f17ae3afbe4d8069c2bf278", File: "runtime/memmove_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
 		},
 		"runtime.(*moduledata).funcName": {
 			{Hash: "3d735feb976c3e10b534c07af84502564d8695dcba6bcf865db6883e1403b831", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
@@ -411,6 +636,13 @@ var stubPins = map[string]map[string][]stubPin{
 		},
 		"runtime.newobject": {
 			{Hash: "4e66fafc8ac81d1c6cdb248768e679dce7a57618eaa26bff066bc059ad49d761", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.nilinterequal": {
+			{Hash: "a81e964a847fbf312beb52ada9d1948eab11724efc02a98bcf1817abab502ce5", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.nilinterhash": {
+			{Hash: "42a02034ee6d6ae36ece6a05cc9ac77ca9dbbf43f51e8e64fc791e79041fb05f", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "88f656124874e90f00a8577652524d1edc53933179b70e0a9c991843522069af", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
 		},
 		"runtime.panicBounds32": {
 			{Hash: "a93740a43d93d1de80922e3d35620a28401ff36a47f52b6e4f92505fabab673e", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
@@ -497,6 +729,16 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "908f8b24e63513710d15a051abe6886973b495f710a949605a86551c83dd8882", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "fab83902abd79ade89a50eebc9719646819f380d71311ca886649f74c0effc5c", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
 		},
+		"runtime.rand": {
+			{Hash: "74f04bcf30c876f1fce022ef820963147e596c3fcd35a477813601b30dd1cba8", File: "runtime/rand.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "8662a81126b2db238968ddc9249dc151ce509dbedde430cc54599a4e439fc332", File: "runtime/rand.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+		},
+		"runtime.strequal": {
+			{Hash: "71cefe6c09a8255c75c0ccb8805402ec679948e85f5978618b08250b009f9ebc", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
+		"runtime.strhash": {
+			{Hash: "d2bdba5dad2a7c1a0a00f0816dcaaeb9fb20cad5314349f197c4afccd1fa2b72", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
 		"runtime.throw": {
 			{Hash: "8ef586737b6231327a9410596c855db5c26dea31c579790cf0c475a75cb7f989", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
 		},
@@ -504,6 +746,14 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "92bb83852bda394d9e4d7ffdf8755fa929324b4264a7f11b866967b576262605", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "bde16669b2047ccb3b705f371bb11b357a15415626999e8703b1166b6560b66b", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf
 			{Hash: "cc5f6d9310b437e937e23c6d4fd96deaac8e928d9e42ef66d6e8461548b3b188", File: "runtime/iface.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: v8.1 v9.0
+		},
+		"runtime.typedmemclr": {
+			{Hash: "4e5b1b9ab28ab860d6802d10d031d398741cbc507a228a249a6264b0302fb4f1", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+			{Hash: "e7874648693f6d83cd5d5201440843341286280e26f781995fe2b606e3c12c1f", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.typedmemmove": {
+			{Hash: "01d9e77eeecc339d69f7c649b78035779ada447ae03ca2ecab434b8e632bad18", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+			{Hash: "1a058ccfca0437e0770ead489606335ee0421850fad73b42b62e93346f990f1c", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 	},
 }
