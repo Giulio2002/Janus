@@ -1,5 +1,5 @@
 import Janus.Contracts.MapModel0
-import Janus.Contracts.MapStrSat
+import Janus.Contracts.IfaceSat
 
 /-!
 # The map contracts of `Janus.Contracts.Map` are satisfiable (arm64)
@@ -21,6 +21,26 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.
 open Janus.Contracts.IfaceModel (wsp wg wret acc_read_of_write)
 
 /-! ## The witness call state -/
+
+/-- The return of a model implementation as `Map.RTReturn` (arm64). -/
+theorem mapReturn_of {K V : Type} (M : MapModel K V) (nargs : Nat) (extra : List (Nat × Nat))
+    (except : Nat) (s s' : State) (P : (Nat → W64) → Memory → Prop) (hsp : s'.sp = s.sp)
+    (hpc : s'.pc = s.regs 30) (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs 28 = s.regs 28)
+    (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr)
+    (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
+    (hfr : MemFrame s.mem s'.mem (Map.rtWrites M s nargs ++ extra)) (henv : M.Env s'.mem (s.regs 28))
+    (hok : Map.OthersKept M s.mem s'.mem except) (hp : P s'.regs s'.mem) :
+    Map.RTReturn M nargs extra except s s' P := by
+  refine ⟨s'.regs, s'.vregs, s'.flags, s'.mem, ?_, hfr, henv, hok, hp⟩
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
+  simp only at hsp hpc hdz htp hfc hfs h18 h28 h29 ⊢
+  subst hsp hpc hdz htp hfc hfs
+  congr
+  funext i
+  simp only [Map.keepABI]
+  split
+  · rename_i hi; rcases hi with rfl | rfl | rfl <;> simp [h18, h28, h29]
+  · rfl
 
 /-- The witness call state: the arguments `r`, goroutine `wg`, return address `wret`, stack
 pointer `wsp`, memory `m`. -/
@@ -80,7 +100,7 @@ theorem access1_impl : Access1 (toy.link (at0 zsCode)) A0 (ME (BitVec 64)) := by
   have hf := ME_empty hmap
   subst hf
   janus_run
-  refine MapStr.mapReturn_of (ME _) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
+  refine mapReturn_of (ME _) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
     (by simp [setReg]) rfl rfl rfl rfl (MemFrame.refl _ _) hze (fun _ _ _ h => h) ⟨hmap, ?_⟩
   simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]
   exact ⟨hze.1, inPriv0 (by decide) (by decide), by simpa [AMap.empty, ZS] using hze.2⟩
@@ -126,7 +146,7 @@ theorem assign_impl : Assign (toy.link (at0 assignCode)) A0 (MC ck64) HAssign :=
     show (67616 : Nat) = MP + 32 from rfl] at hacc ⊢
   have hm1 : (s.mem.writeLE MP 8 1).accessible MP 56 true = true := by
     rw [Memory.accessible_writeLE]; exact hacc
-  refine MapStr.mapReturn_of (MC ck64) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
+  refine mapReturn_of (MC ck64) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
     (by simp [setReg]) rfl rfl rfl rfl hfr ((hze.writeLE _ (by decide)).writeLE _ (by decide))
     (fun mp' _ hne h => absurd (h.1.trans hmp.symm) hne) ?_
   · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hmp]
@@ -173,7 +193,7 @@ theorem makeSmall_impl : MakeSmall (toy.link (at0 makeCode)) A0 (MC ck64) HMake 
       List.nil_append]
     janus_frame
   simp only [show (67584 : Nat) = MP from rfl, show (67632 : Nat) = MP + 48 from rfl] at hacc hfr ⊢
-  refine MapStr.mapReturn_of (MC ck64) 0 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
+  refine mapReturn_of (MC ck64) 0 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
     (by simp [setReg]) rfl rfl rfl rfl hfr ((hze.writeLE _ (by decide)).writeLE _ (by decide))
     (fun mp' _ _ h => absurd h (MC_none ck64 h0 _ _)) ⟨?_, ?_, fun mp f h => absurd h (MC_none ck64 h0 _ _)⟩
   · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]; decide
@@ -189,5 +209,196 @@ theorem makeSmall_satisfiable : ∃ (M : MapModel (BitVec 64) (BitVec 64)) (impl
   ⟨MC ck64, _, HMake, MC_laws _, makeSmall_impl, mstate mmemDead (args 0 0), rfl,
     mstate_rtpre _ rfl rfl mmemDead rfl _ 0 (by decide)
       (show ZEnv mmemDead from mmem_zenv.writeLE _ (by decide)) mmemDead_guard, hMake_dead _ _ _⟩
+
+theorem access2_impl : Access2 (toy.link (at0 zsCode)) A0 (ME (BitVec 64)) := by
+  rw [link_at0]
+  intro f s hpc hpre
+  obtain ⟨⟨hze, hg, hc, hout⟩, -, hmap⟩ := hpre
+  obtain ⟨hl1, hl2, -⟩ := hc
+  have hf := ME_empty hmap
+  subst hf
+  janus_run
+  refine mapReturn_of (ME _) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
+    (by simp [setReg]) rfl rfl rfl rfl (MemFrame.refl _ _) hze (fun _ _ _ h => h) ⟨hmap, ?_, ?_⟩
+  · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]
+    exact ⟨hze.1, inPriv0 (by decide) (by decide), by simpa [AMap.empty, ZS] using hze.2⟩
+  · simp [setReg, AMap.empty]
+
+/-- `Access2` is satisfiable, for a lookup in a non-nil map. -/
+theorem access2_satisfiable : ∃ (M : MapModel (BitVec 64) (BitVec 64)) (impl : List Segment),
+    M.Laws ∧ Access2 (toy.link impl) A0 M ∧ ∃ (f : AMap (BitVec 64) (BitVec 64)) (s : State),
+      s.pc = BitVec.ofNat 64 A0 ∧ (s.regs 1).toNat ≠ 0 ∧
+      (RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 1).toNat f) :=
+  ⟨ME _, _, ME_laws _, access2_impl, AMap.empty, mstate mmem (args 7#64 0), rfl, by decide,
+    mstate_rtpre _ rfl rfl mmem rfl _ 3 (by decide) mmem_zenv mmem_guard, trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _)⟩
+
+/-- `movz x0, #0x900; movk x0, #1, lsl #16; mov x1, xzr; ret` for `[16]byte` keys. -/
+theorem access2Ptr_impl : Access2Ptr (toy.link (at0 zsCode)) A0 (ME (BitVec 128)) := by
+  rw [link_at0]
+  intro f s hpc hpre
+  obtain ⟨⟨hze, hg, hc, hout⟩, -, hmap, -⟩ := hpre
+  obtain ⟨hl1, hl2, -⟩ := hc
+  have hf := ME_empty hmap
+  subst hf
+  janus_run
+  refine mapReturn_of (ME _) 3 [] _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg])
+    (by simp [setReg]) rfl rfl rfl rfl (MemFrame.refl _ _) hze (fun _ _ _ h => h) ⟨hmap, ?_, ?_⟩
+  · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]
+    exact ⟨hze.1, inPriv0 (by decide) (by decide), by simpa [AMap.empty, ZS] using hze.2⟩
+  · simp [setReg, AMap.empty]
+
+/-- `Access2Ptr` is satisfiable: a lookup of the 16 bytes at `VAL` in a non-nil map. -/
+theorem access2Ptr_satisfiable : ∃ (M : MapModel (BitVec 128) (BitVec 64)) (impl : List Segment),
+    M.Laws ∧ Access2Ptr (toy.link impl) A0 M ∧ ∃ (f : AMap (BitVec 128) (BitVec 64)) (s : State),
+      s.pc = BitVec.ofNat 64 A0 ∧ (s.regs 1).toNat ≠ 0 ∧
+      (RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 1).toNat f ∧
+        s.mem.accessible (s.regs 2).toNat 16 false = true ∧
+        Outside (s.regs 2).toNat 16 (calleeStack s M.depth 3)) :=
+  ⟨ME _, _, ME_laws _, access2Ptr_impl, AMap.empty,
+    mstate mmem (args (BitVec.ofNat 64 IfaceModel.VAL) 0), rfl, by decide,
+    mstate_rtpre _ rfl rfl mmem rfl _ 3 (by decide) mmem_zenv mmem_guard, trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _), by decide,
+    by simp only [calleeStack, ME_depth, outside_cons, outside_nil, and_true]; decide⟩
+
+/-! ## `delete` and `clear` of the empty map: `ret` -/
+
+/-- `ret`. -/
+def retCode : List Nat := [0xd65f03c0]
+
+theorem delete_impl : Delete (toy.link (at0 retCode)) A0 (ME (BitVec 64)) := by
+  rw [link_at0]
+  intro f s hpc hpre
+  obtain ⟨⟨hze, hg, hc, hout⟩, -, hmap⟩ := hpre
+  obtain ⟨hl1, hl2, -⟩ := hc
+  have hf := ME_empty hmap
+  subst hf
+  janus_run
+  refine mapReturn_of (ME _) 3 [] _ s _ _ rfl rfl rfl rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) hze
+    (fun _ _ _ h => h) ?_
+  rw [erase_empty]; exact hmap
+
+/-- `Delete` is satisfiable, for a delete in a non-nil map. -/
+theorem delete_satisfiable : ∃ (M : MapModel (BitVec 64) (BitVec 64)) (impl : List Segment),
+    M.Laws ∧ Delete (toy.link impl) A0 M ∧ ∃ (f : AMap (BitVec 64) (BitVec 64)) (s : State),
+      s.pc = BitVec.ofNat 64 A0 ∧ (s.regs 1).toNat ≠ 0 ∧
+      (RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 1).toNat f) :=
+  ⟨ME _, _, ME_laws _, delete_impl, AMap.empty, mstate mmem (args 7#64 0), rfl, by decide,
+    mstate_rtpre _ rfl rfl mmem rfl _ 3 (by decide) mmem_zenv mmem_guard, trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _)⟩
+
+theorem clear_impl : Clear (toy.link (at0 retCode)) A0 (ME (BitVec 64)) := by
+  rw [link_at0]
+  intro f s hpc hpre
+  obtain ⟨⟨hze, hg, hc, hout⟩, -, hmap⟩ := hpre
+  obtain ⟨hl1, hl2, -⟩ := hc
+  have hf := ME_empty hmap
+  subst hf
+  janus_run
+  exact mapReturn_of (ME _) 2 [] _ s _ _ rfl rfl rfl rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) hze
+    (fun _ _ _ h => h) hmap
+
+/-- `Clear` is satisfiable, for a non-nil map. -/
+theorem clear_satisfiable : ∃ (M : MapModel (BitVec 64) (BitVec 64)) (impl : List Segment),
+    M.Laws ∧ Clear (toy.link impl) A0 M ∧ ∃ (f : AMap (BitVec 64) (BitVec 64)) (s : State),
+      s.pc = BitVec.ofNat 64 A0 ∧ (s.regs 1).toNat ≠ 0 ∧
+      (RTPre M 2 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 1).toNat f) :=
+  ⟨ME _, _, ME_laws _, clear_impl, AMap.empty, mstate mmem (args 0 0), rfl, by decide,
+    mstate_rtpre _ rfl rfl mmem rfl _ 2 (by decide) mmem_zenv mmem_guard, trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _)⟩
+
+/-! ## Iteration over the empty map: store the end of the iteration -/
+
+/-- `str xzr, [x2]; ret`: the key pointer of the iterator is `0`. -/
+def iterStartCode : List Nat := [0xf900005f, 0xd65f03c0]
+
+theorem iterStart_impl : IterStart (toy.link (at0 iterStartCode)) A0 (ME (BitVec 64)) := by
+  rw [link_at0]
+  intro f s hpc hpre
+  obtain ⟨⟨hze, hg, hc, hout⟩, -, hmap, hit, hip, hic⟩ := hpre
+  obtain ⟨hl1, hl2, -⟩ := hc
+  have hf := ME_empty hmap
+  subst hf
+  have hip8 : Outside (s.regs 2).toNat 8 (ME (BitVec 64)).priv := Outside.of_sub hip (by omega) (by simp [iterSize])
+  have hw : s.mem.accessible (s.regs 2).toNat 8 true = true :=
+    Memory.accessible_mono _ hit (Nat.le_refl _) (by simp [iterSize])
+  janus_run
+  have ha := agrees_writeLE s.mem 0 hip8
+  refine mapReturn_of (ME _) 3 _ _ s _ _ rfl rfl rfl rfl rfl rfl rfl rfl rfl ?_
+    (ZEnv.frame hze ha) (fun _ _ _ h => (ME_laws _).rep_frame _ _ _ _ h ha) ⟨ME_isMap_frame hmap ha,
+      [], keys_empty, Nat.zero_le _, ?_⟩
+  · simp only [rtWrites, List.append_assoc]
+    exact (MemFrame.refl _ _).writeLE_inRanges _
+      ⟨((s.regs 2).toNat, (s.regs 2).toNat + iterSize), by simp, Nat.le_refl _, by simp [iterSize]⟩
+  · show (s.mem.writeLE (s.regs 2).toNat 8 _).readLE (s.regs 2).toNat 8 = 0
+    rw [Memory.readLE_writeLE_self]
+
+/-- `IterStart` is satisfiable: an iteration over a non-nil (empty) map with the iterator `IT`. -/
+theorem iterStart_satisfiable : ∃ (M : MapModel (BitVec 64) (BitVec 64)) (impl : List Segment),
+    M.Laws ∧ IterStart (toy.link impl) A0 M ∧ ∃ (f : AMap (BitVec 64) (BitVec 64)) (s : State),
+      s.pc = BitVec.ofNat 64 A0 ∧ (s.regs 1).toNat ≠ 0 ∧
+      (RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 1).toNat f ∧
+        s.mem.accessible (s.regs 2).toNat iterSize true = true ∧
+        Outside (s.regs 2).toNat iterSize M.priv ∧
+        Outside (s.regs 2).toNat iterSize (calleeStack s M.depth 3)) :=
+  ⟨ME _, _, ME_laws _, iterStart_impl, AMap.empty, mstate mmem (args (BitVec.ofNat 64 IT) 0), rfl,
+    by decide, mstate_rtpre _ rfl rfl mmem rfl _ 3 (by decide) mmem_zenv mmem_guard, trivial,
+    (isMap_of_ne (by decide)).2 (mmem_rep _), by decide,
+    by simp only [ME_priv, priv0, outside_cons, outside_nil, and_true]; decide,
+    by simp only [calleeStack, ME_depth, outside_cons, outside_nil, and_true]; decide⟩
+
+/-- `ME` with iterators that have at most one key left and a writable iterator struct (`IterNext`
+stores into it, and its precondition says nothing else about the struct). -/
+def MEI (K : Type) : MapModel K (BitVec 64) :=
+  { ME K with Iter := fun m it _ _ ks => ks.length ≤ 1 ∧ m.accessible it iterSize true = true }
+
+@[simp] theorem MEI_priv (K : Type) : (MEI K).priv = priv0 := rfl
+@[simp] theorem MEI_depth (K : Type) : (MEI K).depth = 64 := rfl
+
+theorem MEI_laws (K : Type) : (MEI K).Laws where
+  rep_frame := (ME_laws K).rep_frame
+  iter_frame _ _ _ _ _ _ h ha := ⟨h.1, by rw [ha.accessible]; exact h.2⟩
+  env_frame := (ME_laws K).env_frame
+  len := (ME_laws K).len
+  finite := (ME_laws K).finite
+
+/-- `str xzr, [x0]; ret`: the iteration is over. -/
+def iterNextCode : List Nat := [0xf900001f, 0xd65f03c0]
+
+theorem iterNext_impl : IterNext (toy.link (at0 iterNextCode)) A0 (MEI (BitVec 64)) := by
+  rw [link_at0]
+  intro mp f k ks s hpc hpre
+  obtain ⟨⟨hze, hg, hc, hout⟩, hmap, ⟨hlen, hit⟩, hip, hic⟩ := hpre
+  obtain ⟨hl1, hl2, -⟩ := hc
+  have hks : ks = [] := by cases ks <;> simp_all
+  subst hks
+  have hip8 : Outside (s.regs 0).toNat 8 (MEI (BitVec 64)).priv := Outside.of_sub hip (by omega) (by simp [iterSize])
+  have hw : s.mem.accessible (s.regs 0).toNat 8 true = true :=
+    Memory.accessible_mono _ hit (Nat.le_refl _) (by simp [iterSize])
+  janus_run
+  have ha := agrees_writeLE s.mem 0 hip8
+  refine mapReturn_of (MEI _) 1 _ _ s _ _ rfl rfl rfl rfl rfl rfl rfl rfl rfl ?_
+    (ZEnv.frame hze ha) (fun _ _ _ h => (MEI_laws _).rep_frame _ _ _ _ h ha)
+    ⟨IsMap.frame (MEI_laws _) hmap ha, ⟨Nat.zero_le _, by rw [Memory.accessible_writeLE]; exact hit⟩, ?_⟩
+  · simp only [rtWrites, List.append_assoc]
+    exact (MemFrame.refl _ _).writeLE_inRanges _
+      ⟨((s.regs 0).toNat, (s.regs 0).toNat + iterSize), by simp, Nat.le_refl _, by simp [iterSize]⟩
+  · show (s.mem.writeLE (s.regs 0).toNat 8 _).readLE (s.regs 0).toNat 8 = 0
+    rw [Memory.readLE_writeLE_self]
+
+/-- `IterNext` is satisfiable: the last step of an iteration (one key left) over the non-nil map,
+with the iterator `IT`. -/
+theorem iterNext_satisfiable : ∃ (M : MapModel (BitVec 64) (BitVec 64)) (impl : List Segment),
+    M.Laws ∧ IterNext (toy.link impl) A0 M ∧ ∃ (mp : Nat) (f : AMap (BitVec 64) (BitVec 64))
+      (k : BitVec 64) (ks : List (BitVec 64)) (s : State), s.pc = BitVec.ofNat 64 A0 ∧ mp ≠ 0 ∧
+      (RTPre M 1 s ∧ IsMap M s.mem mp f ∧ M.Iter s.mem (s.regs 0).toNat mp f (k :: ks) ∧
+        Outside (s.regs 0).toNat iterSize M.priv ∧
+        Outside (s.regs 0).toNat iterSize (calleeStack s M.depth 1)) :=
+  ⟨MEI _, _, MEI_laws _, iterNext_impl, MP, AMap.empty, 7#64, [],
+    mstate mmem (fun i => if i = 0 then BitVec.ofNat 64 IT else 0), rfl, by decide,
+    mstate_rtpre _ rfl rfl mmem rfl _ 1 (by decide) mmem_zenv mmem_guard,
+    (isMap_of_ne (by decide)).2 (mmem_rep _), ⟨by decide, by decide⟩,
+    by simp only [MEI_priv, priv0, outside_cons, outside_nil, and_true]; decide,
+    by simp only [calleeStack, MEI_depth, outside_cons, outside_nil, and_true]; decide⟩
 
 end Janus.Contracts.MapSat
