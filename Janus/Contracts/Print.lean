@@ -316,12 +316,14 @@ theorem eq_retState {s s' : State} (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs
 /-- `ret_state`: close `s' = retState s ?junk [] ?f ?v ?m` for a state literal `s'` (the
 registers `R18`, `g`, `FP` and the other fields checked by `simp`). -/
 macro "ret_state" : tactic => `(tactic|
-  exact eq_retState (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl rfl rfl rfl)
+  exact eq_retState (by simp [setReg, callRegs]) (by simp [setReg, callRegs]) (by simp [setReg, callRegs])
+    rfl rfl rfl rfl rfl rfl)
 
 /-- `ret_state [h, …]`: `ret_state` with the register equations `h, …` (for a state built on a
 loop-head state `S` with `S.regs 28 = …`). -/
 macro "ret_state" " [" hs:Lean.Parser.Tactic.simpLemma,* "]" : tactic => `(tactic|
-  exact eq_retState (by simp [setReg, $hs,*]) (by simp [setReg, $hs,*]) (by simp [setReg, $hs,*])
+  exact eq_retState (by simp [setReg, callRegs, $hs,*]) (by simp [setReg, callRegs, $hs,*])
+    (by simp [setReg, callRegs, $hs,*])
     (by simp [$hs,*]) (by simp [$hs,*]) (by simp [$hs,*]) (by simp [$hs,*]) (by simp [$hs,*])
     (by simp [$hs,*]))
 

@@ -1,5 +1,8 @@
 import Extracted
 
+set_option profiler true
+set_option profiler.threshold 2000
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Kernel Janus.Print
 
 namespace Proof
@@ -24,7 +27,6 @@ def DL : Nat := adrpLdTarget (segAddr P "runtime.printlock" + 72)
 def OW : Nat := adrpLdTarget (segAddr P "runtime.write" + 12)
   (segWord P "runtime.write" 3) (segWord P "runtime.write" 4) 3
 
-example : PK = 0x18f564 ∧ BI = 0x18f688 ∧ BL = 0x190320 ∧ DL = 0x18f690 ∧ OW = 0x168c70 := by decide
 
 /-- `runtime.printlock` with the M's print count already `c ≥ 1`: no `lock2`. -/
 theorem printlock_held (impl : List Segment) :
@@ -106,7 +108,7 @@ macro "rfp_post" : tactic => `(tactic| (
   unfold RfpPost rfpW
   simp only [hsp, hg, hx0, hx1, hx2, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl, Nat.mod_eq_of_lt hgl,
     hmpE, h_bi, h_bl]
-  refine ⟨_, _, _, _, by ret_state [hg, hg', h18, hsp, hsp'], by janus_frame, ?_, ?_, ?_⟩ <;>
+  refine ⟨_, _, _, _, by ret_state [hg, hg', h18, hsp, hsp', hdz, htp, hfc, hfs], by janus_frame, ?_, ?_, ?_⟩ <;>
     (janus_simp; first | janus_omega | (split <;> janus_omega) | skip)))
 
 set_option maxRecDepth 20000 in
@@ -138,44 +140,84 @@ theorem recordForPanic (impl : List Segment)
   janus_eval_nat h_bi : BI
   janus_eval_nat h_bl : BL
   simp only [h_pk, h_bi, h_bl] at *
+  janus_eval_nat h_bi : BI
+  janus_eval_nat h_bl : BL
+  have hsepb : Apart ptr len BL 512 := by simp only [h_bl]; assumption
+  unfold Apart at hsepb
   have hlt : s.mem.readLE (MP + 279) 1 + 1 < 128 := by omega
-  have loop : ∀ k (S : State) (i : Nat), len - i = k → i ≤ len →
+  have loop : ∀ k (S : State) (i : Nat), len - i ≤ k → i ≤ len →
       S.pc = BitVec.ofNat 64 (segAddr P "runtime.recordForPanic" + 0xb4) →
       S.sp = BitVec.ofNat 64 SP - 64#64 → S.regs 28 = BitVec.ofNat 64 G → S.regs 18 = s.regs 18 →
       S.regs 0 = BitVec.ofNat 64 i → S.regs 3 = BitVec.ofNat 64 len →
       S.regs 4 = BitVec.ofNat 64 cap → S.regs 5 = BitVec.ofNat 64 ptr →
       MemFrame s.mem S.mem [(SP - 104, SP - 8), (SP + 8, SP + 32), (MP + 264, MP + 268),
-        (MP + 279, MP + 280), (1635976, 1635976 + 8), (1639200, 1639200 + 512)] →
+        (MP + 279, MP + 280), (BI, BI + 8), (BL, BL + 512)] →
       S.mem.readLE (SP - 64) 8 = (s.regs 30).toNat → S.mem.readLE (SP - 72) 8 = (s.regs 29).toNat →
       S.mem.readLE (SP + 8) 8 = ptr → S.mem.readLE (SP + 16) 8 = len →
       S.mem.readLE (SP + 24) 8 = cap →
       S.mem.readLE (MP + 279) 1 = s.mem.readLE (MP + 279) 1 + 1 →
       S.mem.readLE (MP + 264) 4 = s.mem.readLE (MP + 264) 4 →
-      S.mem.readLE 1635976 8 < 512 →
+      S.mem.readLE BI 8 < 512 →
+      S.dczid = s.dczid → S.tpidr = s.tpidr → S.fpcr = s.fpcr → S.fpsr = s.fpsr →
       ReachesRet (P.link impl) (s.regs regLR) S (RfpPost s) := by
     intro k
     induction k with
     | zero =>
-      intro S i hk hi hpc' hsp' hg' h18 h0 h3 h4 h5 hf h_rd1 h_rd2 h_rd3 h_rd4 h_rd5 h_rd6 h_rd7 hidx
+      intro S i hk hi hpc' hsp' hg' h18 h0 h3 h4 h5 hf h_rd1 h_rd2 h_rd3 h_rd4 h_rd5 h_rd6 h_rd7 hidx hdz htp hfc hfs
+      simp only [h_bi, h_bl] at *
+      janus_eval_nat h_bi : BI
+      janus_eval_nat h_bl : BL
       janus_run [hlt, hmpE, rotateRight_zero64, sext8_and255, ofNat_and255, setWidth32_ofNat,
         ofNat32_eq_zero, sext32_add_mod, sext8_add_mod, sext8_add_mod', ite_eq_nat]
       all_goals rfp_post
     | succ k ih =>
-      intro S i hk hi hpc' hsp' hg' h18 h0 h3 h4 h5 hf h_rd1 h_rd2 h_rd3 h_rd4 h_rd5 h_rd6 h_rd7 hidx
-      by_cases hmin : len - i < 512 - S.mem.readLE 1635976 8
+      intro S i hk hi hpc' hsp' hg' h18 h0 h3 h4 h5 hf h_rd1 h_rd2 h_rd3 h_rd4 h_rd5 h_rd6 h_rd7 hidx hdz htp hfc hfs
+      simp only [h_bi, h_bl] at *
+      janus_eval_nat h_bi : BI
+      janus_eval_nat h_bl : BL
+      by_cases hmin : len - i < 512 - S.mem.readLE BI 8 <;> rw [h_bi] at hmin
       · janus_run [hmin, sub_wrap, and_sshr_lt, sshr63_small, smod512, Int.ofNat_lt, hlt, hmpE,
           rotateRight_zero64, sext8_and255, ofNat_and255, setWidth32_ofNat,
           ofNat32_eq_zero, sext32_add_mod, sext8_add_mod, sext8_add_mod', ite_eq_nat]
           until [segAddr P "runtime.recordForPanic" + 0xb4] calls [hmm]
-        all_goals refine ih _ len ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-        all_goals first | rfl | janus_frame | (janus_simp; done) | (janus_simp; janus_omega) | skip
-        trace_state
-        all_goals sorry
+        all_goals first
+          | refine ih _ len (by omega) (Nat.le_refl _) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+          | rfp_post
+        all_goals try (janus_simp; done)
+        all_goals try janus_frame
+        all_goals try (apply BitVec.eq_of_toNat_eq; simp [setReg]; omega)
+        all_goals try (janus_simp; omega)
+        all_goals try assumption
       · janus_run [hmin, sub_wrap, and_sshr_lt, sshr63_small, smod512, Int.ofNat_lt, hlt, hmpE,
           rotateRight_zero64, sext8_and255, ofNat_and255, setWidth32_ofNat,
           ofNat32_eq_zero, sext32_add_mod, sext8_add_mod, sext8_add_mod', ite_eq_nat]
           until [segAddr P "runtime.recordForPanic" + 0xb4] calls [hmm]
-        all_goals sorry
-  sorry
+        all_goals first
+          | refine ih _ (i + (512 - S.mem.readLE BI 8)) (by simp only [h_bi]; omega) (by simp only [h_bi]; omega)
+              ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+          | rfp_post
+        all_goals try simp only [h_bi]
+        all_goals try (janus_simp; done)
+        all_goals try janus_frame
+        all_goals try (apply BitVec.eq_of_toNat_eq; simp [setReg]; omega)
+        all_goals try (janus_simp; omega)
+        all_goals try assumption
+  janus_run [hmpE, rotateRight_zero64, sext8_and255, ofNat_and255, setWidth32_ofNat, ofNat32_eq_zero,
+    sext32_add_mod, sext8_add_mod, sext8_add_mod', ite_eq_nat] until [segAddr P "runtime.recordForPanic" + 0x28]
+    calls [printlock_held impl]
+  name_reads
+  janus_run [hlt, hmpE, rotateRight_zero64, sext8_and255, ofNat_and255, setWidth32_ofNat, ofNat32_eq_zero,
+    sext32_add_mod, sext8_add_mod, sext8_add_mod', ite_eq_nat] until [segAddr P "runtime.recordForPanic" + 0xb4]
+  all_goals first
+    | refine loop _ _ 0 (Nat.le_refl _) (Nat.zero_le _) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    | (have hg' := hg; have h18 : s.regs 18 = s.regs 18 := rfl; have hsp' := hsp
+       have hdz : s.dczid = s.dczid := rfl; have htp : s.tpidr = s.tpidr := rfl
+       have hfc : s.fpcr = s.fpcr := rfl; have hfs : s.fpsr = s.fpsr := rfl
+       rfp_post)
+  all_goals try simp only [h_bi]
+  all_goals try (janus_simp; done)
+  all_goals try janus_frame
+  all_goals try (janus_simp; omega)
+  all_goals try assumption
 
 end Proof
