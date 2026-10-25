@@ -294,6 +294,14 @@ inductive Instr where
   | msrDitImm (imm : Nat)
   /-- MSR DIT, `Xt` (`PSTATE.DIT ← Xt<24>`). `rt`: ZR. Executes as `Fault.kernel`. -/
   | msrDitReg (rt : Nat)
+  /-- MRS `Xt`, NZCV: `N Z C V` in bits 31:28, zero elsewhere. `rt`: ZR. -/
+  | mrsNzcv (rt : Nat)
+  /-- MSR NZCV, `Xt`: the flags from bits 31:28 of `Xt`. `rt`: ZR. -/
+  | msrNzcv (rt : Nat)
+  /-- MRS `Xt`, FPSR (zero-extended). `rt`: ZR. -/
+  | mrsFpsr (rt : Nat)
+  /-- MSR FPSR, `Xt`: `FPSR ← Xt<31:0>` restricted to the implemented bits (`fpsrMask`). `rt`: ZR. -/
+  | msrFpsr (rt : Nat)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Arm64

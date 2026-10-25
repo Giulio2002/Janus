@@ -19,6 +19,9 @@ the main decoder (`Janus.Arm64.Decode`) only carries two one-line hooks:
   feature `CPUID` is reported), `MRS Xt, DIT` (`0xD53B42A0`), `MSR DIT, Xt` (`0xD51B42A0`) and
   `MSR DIT, #imm` (`0xD503405F | CRm << 8`, `CRm ∈ {0, 1}`). They execute as `Fault.kernel`; the
   environment contract of `Janus.Kernel` gives their result.
+* **Flag images** (the arm64 counterpart of `PUSHFQ`/`POPFQ`, used by `runtime.asyncPreempt`):
+  `MRS`/`MSR` of `NZCV` (`0xD53B4200`/`0xD51B4200`) and `FPSR` (`0xD53B4420`/`0xD51B4420`), which
+  read and write `State.flags` and `State.fpsr` deterministically.
 
 Every other system register access stays rejected.
 -/
@@ -37,6 +40,11 @@ def decodeSys (w : Nat) : Option Instr :=
   else if w &&& 0xFFFFFFE0 = 0xD51B42A0 then some (.msrDitReg (bits w 4 0))
   else if w = 0xD503405F then some (.msrDitImm 0)
   else if w = 0xD503415F then some (.msrDitImm 1)
+  -- the flag images `runtime.asyncPreempt` saves and restores (deterministic, not environment)
+  else if w &&& 0xFFFFFFE0 = 0xD53B4200 then some (.mrsNzcv (bits w 4 0))
+  else if w &&& 0xFFFFFFE0 = 0xD51B4200 then some (.msrNzcv (bits w 4 0))
+  else if w &&& 0xFFFFFFE0 = 0xD53B4420 then some (.mrsFpsr (bits w 4 0))
+  else if w &&& 0xFFFFFFE0 = 0xD51B4420 then some (.msrFpsr (bits w 4 0))
   else none
 
 /-- The reserved group (`op0 = 0000`): `UDF #imm16` is `0x0000xxxx`; the rest of the group is

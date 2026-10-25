@@ -582,6 +582,9 @@ var Targeted = map[string]func(r *rand.Rand) uint32{
 		}
 		return 0xD503405F | u(r, 4)<<8 // MSR DIT, #imm (only #0/#1 decode)
 	},
+	"sys.flags": func(r *rand.Rand) uint32 {
+		return pick(r, 0xD53B4200, 0xD51B4200, 0xD53B4420, 0xD51B4420) | reg(r) // MRS/MSR NZCV, FPSR
+	},
 	"sys.brk": func(r *rand.Rand) uint32 {
 		return 0xD4200000 | u(r, 16)<<5 // BRK #imm16
 	},

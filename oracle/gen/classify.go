@@ -18,7 +18,7 @@ var Classes = []string{
 	"simd.aes", "simd.3same", "simd.s3same", "simd.copy", "simd.across", "simd.2misc", "simd.shift",
 	"simd.modimm", "simd.ext", "simd.tbl", "simd.fmovgen", "simd.other",
 	"fp.dp1", "fp.dp2", "fp.dp3", "fp.cmp", "fp.ccmp", "fp.csel", "fp.imm", "fp.cvtint", "fp.cvtfix",
-	"sys.hint", "sys.barrier", "sys.mrs", "sys.env", "sys.brk", "sys.sys", "system", "reserved",
+	"sys.hint", "sys.barrier", "sys.mrs", "sys.env", "sys.flags", "sys.brk", "sys.sys", "system", "reserved",
 }
 
 // Classify returns the encoding class of w.
@@ -65,6 +65,10 @@ func Classify(w uint32) string {
 			w&0xFFFFFFE0 == 0xD53B42A0, w&0xFFFFFFE0 == 0xD51B42A0, w&0xFFFFF0FF == 0xD503405F:
 			// the environment registers of WP-C: MRS CNTVCT_EL0/CNTFRQ_EL0/MIDR_EL1/DIT, MSR DIT
 			return "sys.env"
+		case w&0xFFFFFFE0 == 0xD53B4200, w&0xFFFFFFE0 == 0xD51B4200, w&0xFFFFFFE0 == 0xD53B4420,
+			w&0xFFFFFFE0 == 0xD51B4420:
+			// MRS/MSR NZCV and FPSR (runtime.asyncPreempt's flag images)
+			return "sys.flags"
 		case w&0xFFF00000 == 0xD5300000: // MRS (system register reads, e.g. DCZID_EL0)
 			return "sys.mrs"
 		case w&0xFFE0001F == 0xD4200000: // BRK #imm16: a trap (SIGTRAP), safe to run

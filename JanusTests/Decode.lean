@@ -192,6 +192,10 @@ example : decode 0xd503415f = some (.msrDitImm 1) := by decide   -- msr dit, #1
 example : decode 0xd503405f = some (.msrDitImm 0) := by decide   -- msr dit, #0
 example : decode 0xd503425f = none := by decide   -- msr dit, #2: reserved
 example : decode 0xd53be020 = none := by decide   -- mrs x0, cntpct_el0: not accepted
+example : decode 0xd53b4200 = some (.mrsNzcv 0) := by decide   -- mrs x0, nzcv
+example : decode 0xd51b4200 = some (.msrNzcv 0) := by decide   -- msr nzcv, x0
+example : decode 0xd53b4420 = some (.mrsFpsr 0) := by decide   -- mrs x0, fpsr
+example : decode 0xd51b4420 = some (.msrFpsr 0) := by decide   -- msr fpsr, x0
 example : decode 0xc85ffc01 = some (.ldExcl 3 true 0 1) := by decide   -- ldaxr x1, [x0]
 example : decode 0xc81ffc01 = none := by decide   -- stlxr w31, x1, [x0]: store-exclusives are rejected
 example : decode 0xc81bfc02 = none := by decide   -- stlxr w27, x2, [x0]
@@ -204,7 +208,6 @@ example : decode 0x48207c82 = some (.casp true false false 0 4 2) := by decide  
 example : decode 0x48217c82 = none := by decide   -- casp with odd Rs
 example : decode 0xf8bfc020 = some (.ldstOrdered 3 true true 1 0) := by decide   -- ldapr x0, [x1]
 example : decode 0xb8e18002 = some (.atomic 2 true true 1 .swp 0 2) := by decide   -- swpal w1, w2, [x0]
-example : decode 0xd53b4200 = none := by decide   -- mrs x0, nzcv
 example : decode 0xd53b00e3 = some (.mrsDczid 3) := by decide   -- mrs x3, dczid_el0
 example : decode 0xd50b7420 = some (.dcZva 0) := by decide   -- dc zva, x0
 example : decode 0xd50b7520 = none := by decide   -- ic ivau, x0

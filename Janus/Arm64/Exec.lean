@@ -722,6 +722,15 @@ def execVLdStMulti (s : State) (Q L : Bool) (opcode : Nat) (post : Bool) (rm rn 
 
 /-! ## The executor -/
 
+/-- The `NZCV` image of `MRS Xt, NZCV`: `N Z C V` in bits 31:28. -/
+def nzcvBits (f : Flags) : Nat :=
+  2 ^ 31 * f.n.toNat + 2 ^ 30 * f.z.toNat + 2 ^ 29 * f.c.toNat + 2 ^ 28 * f.v.toNat
+
+/-- The `FPSR` bits an `MSR FPSR` can set: the cumulative exception flags `IOC DZC OFC UFC IXC`
+(bits 0–4), `IDC` (7), `QC` (27) and the AArch32 `N Z C V` (31:28), as the reference CPU keeps
+them (checked by the oracle, class `sys.flags`). -/
+def fpsrMask : Nat := 0xF800009F
+
 /-- Execute a decoded instruction. Only specified on the output of `decode`. -/
 def exec (i : Instr) (s : State) : Except Fault State :=
   match i with
@@ -778,6 +787,12 @@ def exec (i : Instr) (s : State) : Except Fault State :=
   | .mrsEnv _ _ => .error (.kernel s.pc.toNat)
   | .msrDitImm _ => .error (.kernel s.pc.toNat)
   | .msrDitReg _ => .error (.kernel s.pc.toNat)
+  | .mrsNzcv rt => .ok (s.writeZR rt (BitVec.ofNat 64 (nzcvBits s.flags))).next
+  | .msrNzcv rt =>
+    let x := s.readZR rt
+    .ok { s with flags := ⟨x.getLsbD 31, x.getLsbD 30, x.getLsbD 29, x.getLsbD 28⟩ }.next
+  | .mrsFpsr rt => .ok (s.writeZR rt (s.fpsr.setWidth 64)).next
+  | .msrFpsr rt => .ok { s with fpsr := BitVec.ofNat 32 ((s.readZR rt).toNat &&& fpsrMask) }.next
   | .dcZva rt => execDcZva s rt
   | .prefetch _ => .ok s.next
   | .ldstOrdered size L _ rn rt => execOrdered s size L rn rt
