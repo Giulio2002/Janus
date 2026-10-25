@@ -26,6 +26,7 @@ import Janus.Contracts.Rt
 import Janus.Contracts.String
 import Janus.Contracts.Slice
 import Janus.Contracts.WriteBarrier
+import Janus.Contracts.Sat
 import Janus.Spec.Dynamic
 import Janus.Tactic.Dynamic
 import Janus.Spec.Map
