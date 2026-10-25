@@ -565,6 +565,32 @@ var Targeted = map[string]func(r *rand.Rand) uint32{
 		}
 		return 0x38200000 | u(r, 2)<<30 | ar<<22 | rs<<16 | o3opc<<12 | reg(r)<<5 | reg(r)
 	},
+	// WP-C: the environment registers (the model faults with `kernel`; the comparator checks the
+	// hardware result against the environment contract's frame) and the traps.
+	"sys.env": func(r *rand.Rand) uint32 {
+		switch r.IntN(7) {
+		case 0:
+			return 0xD53BE040 | reg(r) // MRS Xt, CNTVCT_EL0
+		case 1:
+			return 0xD53BE000 | reg(r) // MRS Xt, CNTFRQ_EL0
+		case 2:
+			return 0xD5380000 | reg(r) // MRS Xt, MIDR_EL1
+		case 3:
+			return 0xD53B42A0 | reg(r) // MRS Xt, DIT
+		case 4:
+			return 0xD51B42A0 | reg(r) // MSR DIT, Xt
+		}
+		return 0xD503405F | u(r, 4)<<8 // MSR DIT, #imm (only #0/#1 decode)
+	},
+	"sys.brk": func(r *rand.Rand) uint32 {
+		return 0xD4200000 | u(r, 16)<<5 // BRK #imm16
+	},
+	"reserved": func(r *rand.Rand) uint32 {
+		if r.IntN(4) == 0 {
+			return 0x00010000 | u(r, 16) // the rest of the reserved space: rejected
+		}
+		return u(r, 16) // UDF #imm16 (a trap: SIGILL)
+	},
 	"sys.mrs": func(r *rand.Rand) uint32 {
 		switch r.IntN(3) {
 		case 0:

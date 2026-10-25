@@ -72,6 +72,17 @@ theorem siteOf_link {p : Program} (impl : List Segment) {name : String} {pc : Na
 @[simp] theorem siteOf_withExit (p : Program) (ret : Nat) (name : String) (pc : Nat) :
     siteOf (p.withExit ret) name pc = siteOf p name pc := rfl
 
+theorem siteOf_link_withExit {p : Program} (impl : List Segment) (ret : Nat) {name : String}
+    {pc : Nat} {site : Site} (h : siteOf p name pc = some site) :
+    siteOf ((p.link impl).withExit ret) name pc = some site := siteOf_link impl h
+
+/-- `kernel_site64`: close `siteOf P name pc = some site` (amd64) by evaluation on the closed
+program. -/
+macro "kernel_site64" : tactic => `(tactic| first
+  | exact Janus.Amd64.Kernel.siteOf_link_withExit _ _ (by decide)
+  | (rw [Janus.Amd64.Kernel.siteOf_withExit]; decide)
+  | decide)
+
 /-- The system call `RAX` names. -/
 def sysOf (s : State) : Option Sys := Sys.ofAmd64 (s.regs 0).toNat
 
@@ -131,7 +142,7 @@ def SiteNext (E : KEnv) (s : State) (k : Kern) (s' : State) (k' : Kern) : Site �
   | .env .rdtscp => ∃ v aux, v < 2 ^ 64 ∧ aux < 2 ^ 32 ∧ k' = k.emit (.env "TSC" v) ∧
       s' = withRegs s 3 [(0, v % 2 ^ 32), (2, v / 2 ^ 32), (1, aux)]
   | .timeNow => ∃ sec nsec msec mnsec, nsec < 10 ^ 9 ∧ sec < 2 ^ 63 ∧ mnsec < 10 ^ 9 ∧
-      k.mono ≤ msec * 10 ^ 9 + mnsec ∧ msec * 10 ^ 9 + mnsec < 2 ^ 63 ∧
+      k.mono ≤ msec * 10 ^ 9 + mnsec ∧
       k' = { (k.emit (.clock 0 sec nsec)).emit (.clock 1 msec mnsec) with
               mono := msec * 10 ^ 9 + mnsec } ∧
       ∃ junk f x yh m, s' = Contracts.retState64 s junk
@@ -139,7 +150,6 @@ def SiteNext (E : KEnv) (s : State) (k : Kern) (s' : State) (k' : Kern) : Site �
           f x yh m ∧
         MemFrame s.mem m (E.rt ++ [((s.regs 4).toNat - E.stack, (s.regs 4).toNat)])
   | .nanotime => ∃ sec nsec, nsec < 10 ^ 9 ∧ k.mono ≤ sec * 10 ^ 9 + nsec ∧
-      sec * 10 ^ 9 + nsec < 2 ^ 63 ∧
       k' = { k.emit (.clock 1 sec nsec) with mono := sec * 10 ^ 9 + nsec } ∧
       ∃ (regs : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
         s' = { s with regs := regs, rip := retAddrOf s, flags := f, xmm := x, ymmHi := yh,
@@ -147,7 +157,7 @@ def SiteNext (E : KEnv) (s : State) (k : Kern) (s' : State) (k' : Kern) : Site �
         regs 4 = s.regs 4 + 8 ∧ regs 5 = s.regs 5 ∧ regs 14 = s.regs 14 ∧
         MemFrame s.mem m (E.rt ++ [((s.regs 4).toNat - E.stack, (s.regs 4).toNat),
           ((s.regs 4).toNat + 8, (s.regs 4).toNat + 16)]) ∧
-        m.readLE ((s.regs 4).toNat + 8) 8 = sec * 10 ^ 9 + nsec
+        m.readLE ((s.regs 4).toNat + 8) 8 = (sec * 10 ^ 9 + nsec) % 2 ^ 64
 
 /-- A stub site that ends the process: `exit_group(code)`. -/
 def SiteExit (s : State) (code : Nat) : Site → Prop

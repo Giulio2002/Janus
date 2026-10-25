@@ -181,7 +181,7 @@ theorem correctness (rt : List (Nat × Nat)) :
     janus_simp
     repeat' apply And.intro
     all_goals first | omega | janus_disch
-  rintro s₂ k₂ ⟨msec, mnsec, hmn, hmono, hmlt, rfl, regs₂, fl₂, vr₂, fpsr₂, m₂, rfl, h28', h29', hf₂, hsl₂⟩
+  rintro s₂ k₂ ⟨msec, mnsec, hmn, hmono, rfl, regs₂, fl₂, vr₂, fpsr₂, m₂, rfl, h28', h29', hf₂, hsl₂⟩
   simp only [h96, setReg_apply] at hf₂ hsl₂
   have hg₂ : regs₂ 28 = s.regs 28 := h28'.trans (by simp [setReg_apply, h28])
   rw [e8] at hsl₂

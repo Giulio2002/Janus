@@ -174,8 +174,24 @@ example : decode 0x98ffff80 = some (.ldrLit 2 0x7fffc 0) := by decide
 
 /-! ## Rejected: outside the subset -/
 
-example : decode 0x00000000 = none := by decide   -- udf #0
-example : decode 0xd4000001 = none := by decide   -- svc #0
+-- WP-C: kernel, trap and environment encodings (Janus.Arm64.DecodeSys)
+example : decode 0x00000000 = some (.udf 0) := by decide   -- udf #0
+example : decode 0x0000beef = some (.udf 0xbeef) := by decide
+example : decode 0xd4000001 = some (.svc 0) := by decide   -- svc #0
+example : decode 0xd4000021 = none := by decide   -- svc #1: only #0
+example : decode 0xd4200000 = some (.brk 0) := by decide   -- brk #0
+example : decode 0xd43e0000 = some (.brk 0xf000) := by decide   -- brk #0xf000
+example : decode 0xd4400000 = none := by decide   -- hlt #0
+example : decode 0xd4000002 = none := by decide   -- hvc #0
+example : decode 0xd53be040 = some (.mrsEnv .cntvct 0) := by decide   -- mrs x0, cntvct_el0
+example : decode 0xd53be003 = some (.mrsEnv .cntfrq 3) := by decide   -- mrs x3, cntfrq_el0
+example : decode 0xd5380001 = some (.mrsEnv .midr 1) := by decide   -- mrs x1, midr_el1
+example : decode 0xd53b42a0 = some (.mrsEnv .dit 0) := by decide   -- mrs x0, dit
+example : decode 0xd51b42a0 = some (.msrDitReg 0) := by decide   -- msr dit, x0
+example : decode 0xd503415f = some (.msrDitImm 1) := by decide   -- msr dit, #1
+example : decode 0xd503405f = some (.msrDitImm 0) := by decide   -- msr dit, #0
+example : decode 0xd503425f = none := by decide   -- msr dit, #2: reserved
+example : decode 0xd53be020 = none := by decide   -- mrs x0, cntpct_el0: not accepted
 example : decode 0xc85ffc01 = some (.ldExcl 3 true 0 1) := by decide   -- ldaxr x1, [x0]
 example : decode 0xc81ffc01 = none := by decide   -- stlxr w31, x1, [x0]: store-exclusives are rejected
 example : decode 0xc81bfc02 = none := by decide   -- stlxr w27, x2, [x0]

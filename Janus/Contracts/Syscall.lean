@@ -292,12 +292,13 @@ def Effect (sc : Sys) (a : Nat → Nat) (k : Kern) (m : Memory) (k' : Kern) (m' 
     m' = m ∧ (r = 0 ∨ IsErr r) ∧ k' = { k.emit (.close (a 0)) with input := upd k.input (a 0) [] }
   | .exitGroup => False
   | .clockGettime =>
-    (∃ sec nsec, nsec < 10 ^ 9 ∧ sec < 2 ^ 63 ∧ r = 0 ∧
+    -- (the seconds of `CLOCK_REALTIME` fit an `int64`; `CLOCK_MONOTONIC` only never goes back)
+    (∃ sec nsec, nsec < 10 ^ 9 ∧ r = 0 ∧
         m' = (m.writeLE (a 1) 8 sec).writeLE (a 1 + 8) 8 nsec ∧
         (a 0 = clockMonotonic →
-          k.mono ≤ sec * 10 ^ 9 + nsec ∧ sec * 10 ^ 9 + nsec < 2 ^ 63 ∧
+          k.mono ≤ sec * 10 ^ 9 + nsec ∧
           k' = { k.emit (.clock (a 0) sec nsec) with mono := sec * 10 ^ 9 + nsec }) ∧
-        (a 0 ≠ clockMonotonic → k' = k.emit (.clock (a 0) sec nsec))) ∨
+        (a 0 ≠ clockMonotonic → sec < 2 ^ 63 ∧ k' = k.emit (.clock (a 0) sec nsec))) ∨
       (a 0 ≠ clockRealtime ∧ a 0 ≠ clockMonotonic ∧ IsErr r ∧ k' = k ∧ m' = m)
   | .mmap =>
     -- a fresh mapping at a page-aligned address, disjoint from every region; readable (and
@@ -464,7 +465,7 @@ def SiteSafe (E : KEnv) (s : State) (k : Kern) : Site → Prop
 def SiteNext (E : KEnv) (s : State) (k : Kern) (s' : State) (k' : Kern) : Site → Prop
   | .svc => ∃ sc m' r, svcSys s = some sc ∧ Effect sc (argsOf s) k s.mem k' m' r ∧
       s' = afterSvc s r m'
-  | .mrs .cntvct rt => ∃ v, k.cntvct ≤ v ∧ v < 2 ^ 64 ∧
+  | .mrs .cntvct rt => ∃ v, k.cntvct ≤ v ∧
       k' = { k.emit (.env "CNTVCT_EL0" v) with cntvct := v } ∧
       s' = (s.writeZR rt (BitVec.ofNat 64 v)).next
   | .mrs .cntfrq rt => k' = k ∧ s' = (s.writeZR rt (BitVec.ofNat 64 k.cntfrq)).next
@@ -477,10 +478,9 @@ def SiteNext (E : KEnv) (s : State) (k : Kern) (s' : State) (k' : Kern) : Site �
       VdsoRet E s s' [(s.sp.toNat + 8, s.sp.toNat + 20)] fun m =>
         m.readLE (s.sp.toNat + 8) 8 = sec ∧ m.readLE (s.sp.toNat + 16) 4 = nsec
   | .nanotime => ∃ sec nsec, nsec < 10 ^ 9 ∧ k.mono ≤ sec * 10 ^ 9 + nsec ∧
-      sec * 10 ^ 9 + nsec < 2 ^ 63 ∧
       k' = { k.emit (.clock 1 sec nsec) with mono := sec * 10 ^ 9 + nsec } ∧
       VdsoRet E s s' [(s.sp.toNat + 8, s.sp.toNat + 16)] fun m =>
-        m.readLE (s.sp.toNat + 8) 8 = sec * 10 ^ 9 + nsec
+        m.readLE (s.sp.toNat + 8) 8 = (sec * 10 ^ 9 + nsec) % 2 ^ 64
 
 /-- A stub site that ends the process: `exit_group(code)`. -/
 def SiteExit (s : State) (code : Nat) : Site → Prop
@@ -714,6 +714,122 @@ theorem trapAt_faults {p : Program} {pc : Nat} (h : trapAt p pc = true) (s : Sta
       exact ⟨w, 4, hf, by rw [Arm64.step_of_decode hd]; simp [exec, hpc]⟩
     · cases h
   · cases h
+
+/-! ## Witnesses: the contracts are satisfiable
+
+Each contract is a relation; a relation without successors would make every theorem through it
+vacuous there. These theorems show that it never lacks one where its precondition holds
+(`Effect.total`, `SiteNext.total`), and that the behaviour the specifications are about is among
+the allowed ones (a complete write, a read of available input, a monotonic clock reading, ...).
+The witnesses for the runtime contracts of the scheduler hooks and `convT64` (code that satisfies
+them) are in `JanusTests/Kernel.lean`. -/
+
+theorem isErr_eperm : IsErr (2 ^ 64 - 1) := by unfold IsErr; omega
+
+/-- Every supported system call but `exit_group` has a result wherever it is `Safe` (for most,
+the failure `-EPERM`; `getpid`, `gettid`, `sched_yield`, `close` and the two clocks Go reads
+succeed). -/
+theorem Effect.total (sc : Sys) (a : Nat → Nat) (k : Kern) (m : Memory) (hne : sc ≠ .exitGroup) :
+    ∃ k' m' r, Effect sc a k m k' m' r := by
+  cases sc with
+  | exitGroup => exact absurd rfl hne
+  | write => exact ⟨k, m, _, rfl, Or.inr ⟨isErr_eperm, rfl⟩⟩
+  | read => exact ⟨k, m, _, Or.inr ⟨isErr_eperm, rfl, rfl⟩⟩
+  | openat => exact ⟨k, m, _, rfl, Or.inr ⟨isErr_eperm, rfl⟩⟩
+  | close => exact ⟨_, m, 0, rfl, Or.inl rfl, rfl⟩
+  | clockGettime =>
+    by_cases h1 : a 0 = clockMonotonic
+    · refine ⟨_, _, 0, Or.inl ⟨k.mono, 0, by decide, rfl, rfl, fun _ => ⟨?_, rfl⟩, fun h => absurd h1 h⟩⟩
+      have : 1 ≤ 10 ^ 9 := by decide
+      exact Nat.le_add_right_of_le (Nat.le_mul_of_pos_right _ this)
+    · by_cases h0 : a 0 = clockRealtime
+      · exact ⟨_, _, 0, Or.inl ⟨0, 0, by decide, rfl, rfl, fun h => absurd h h1, fun _ => ⟨by decide, rfl⟩⟩⟩
+      · exact ⟨k, m, _, Or.inr ⟨h0, h1, isErr_eperm, rfl, rfl⟩⟩
+  | mmap => exact ⟨k, m, _, Or.inr ⟨isErr_eperm, rfl, rfl⟩⟩
+  | munmap => exact ⟨k, m, _, Or.inr ⟨isErr_eperm, rfl, rfl⟩⟩
+  | madvise => exact ⟨k, m, _, Or.inr ⟨isErr_eperm, rfl, rfl⟩⟩
+  | rtSigprocmask => exact ⟨k, m, _, Or.inr ⟨isErr_eperm, rfl, rfl⟩⟩
+  | sigaltstack => exact ⟨k, m, _, Or.inr ⟨isErr_eperm, rfl, rfl⟩⟩
+  | schedYield => exact ⟨_, m, 0, rfl, rfl, rfl⟩
+  | nanosleep => exact ⟨k, m, _, Or.inr ⟨isErr_eperm, rfl, rfl, fun _ _ => rfl⟩⟩
+  | getpid => exact ⟨k, m, k.pid, rfl, rfl, rfl⟩
+  | gettid => exact ⟨k, m, k.tid, rfl, rfl, rfl⟩
+
+/-- A complete `write`: the output of `fd` gains exactly the `n` bytes of the buffer, and the
+call returns `n`. -/
+theorem write_full (a : Nat → Nat) (k : Kern) (m : Memory) :
+    Effect .write a k m (k.emit (.write (a 0) (readBytes m (a 1) (a 2)))) m (a 2) ∧
+      (k.emit (.write (a 0) (readBytes m (a 1) (a 2)))).output (a 0) =
+        k.output (a 0) ++ readBytes m (a 1) (a 2) :=
+  ⟨⟨rfl, Or.inl ⟨a 2, Nat.le_refl _, rfl, rfl⟩⟩, by simp⟩
+
+/-- A `read` of `c ≤ n` available bytes returns them and consumes them from the input. -/
+theorem read_some (a : Nat → Nat) (k : Kern) (m : Memory) (c : Nat) (hc : c ≤ a 2)
+    (hl : c ≤ (k.input (a 0)).length) :
+    Effect .read a k m
+      { k.emit (.read (a 0) ((k.input (a 0)).take c)) with
+          input := upd k.input (a 0) ((k.input (a 0)).drop c) }
+      (writeBytes m (a 1) ((k.input (a 0)).take c)) c :=
+  Or.inl ⟨c, hc, hl, rfl, rfl, rfl⟩
+
+/-- A `CLOCK_MONOTONIC` reading at any time no earlier than the last one is allowed. -/
+theorem clock_monotonic (a : Nat → Nat) (k : Kern) (m : Memory) (h1 : a 0 = clockMonotonic)
+    (sec nsec : Nat) (hn : nsec < 10 ^ 9) (hle : k.mono ≤ sec * 10 ^ 9 + nsec) :
+    Effect .clockGettime a k m { k.emit (.clock (a 0) sec nsec) with mono := sec * 10 ^ 9 + nsec }
+      ((m.writeLE (a 1) 8 sec).writeLE (a 1 + 8) 8 nsec) 0 :=
+  Or.inl ⟨sec, nsec, hn, rfl, rfl, fun _ => ⟨hle, rfl⟩, fun h => absurd h1 h⟩
+
+/-- An anonymous `mmap` may succeed with a fresh zeroed region. -/
+theorem mmap_anon (a : Nat → Nat) (k : Kern) (m : Memory) (base : Nat) (hps : 0 < k.pageSize)
+    (hal : base % k.pageSize = 0) (hlo : base + roundUp (a 1) k.pageSize ≤ 2 ^ 47)
+    (hfix : flagSet (a 3) mapFixed → base = a 0)
+    (hdis : m.regions.all (disjointRegion base (roundUp (a 1) k.pageSize)) = true) :
+    Effect .mmap a k m (k.emit (.mmap base (a 1) (a 2) (a 3)))
+      { bytes := fun x => if base ≤ x ∧ x < base + roundUp (a 1) k.pageSize then 0 else m.bytes x,
+        regions := m.regions ++ (if flagSet (a 2) 3 then [⟨base, a 1, flagSet (a 2) 2⟩] else []) }
+      base :=
+  Or.inl ⟨base, rfl, hps, hal, hlo, hfix, hdis, rfl, fun x hx => by simp [hx],
+    fun _ x h1 h2 => by simp [h1, h2], rfl⟩
+
+/-- Every stub site has a successor wherever it is `SiteSafe` (arm64). -/
+theorem SiteNext.total (E : KEnv) (s : State) (k : Kern) (site : Site) (h : SiteSafe E s k site) :
+    ∃ s' k', SiteNext E s k s' k' site := by
+  cases site with
+  | svc =>
+    obtain ⟨sc, hsc, hne, -⟩ := h
+    obtain ⟨k', m', r, he⟩ := Effect.total sc (argsOf s) k s.mem hne
+    exact ⟨_, k', sc, m', r, hsc, he, rfl⟩
+  | mrs r rt =>
+    cases r with
+    | cntvct => exact ⟨_, _, k.cntvct, Nat.le_refl _, rfl, rfl⟩
+    | cntfrq => exact ⟨_, _, rfl, rfl⟩
+    | midr => exact ⟨_, _, 0, by decide, rfl, rfl⟩
+    | dit => exact ⟨_, _, rfl, rfl⟩
+  | ditImm b => exact ⟨_, _, rfl, rfl⟩
+  | ditReg rt => exact ⟨_, _, rfl, rfl⟩
+  | walltime =>
+    refine ⟨{ s with
+        pc := s.regs 30
+        mem := (s.mem.writeLE (s.sp.toNat + 8) 8 0).writeLE (s.sp.toNat + 16) 4 0 }, _, 0, 0,
+      by decide, by decide, rfl, s.regs, s.flags, s.vregs, s.fpsr, _, rfl, rfl, rfl, ?_, ?_, ?_⟩
+    · have h1 : (s.sp.toNat + 8, s.sp.toNat + 20) ∈
+          E.rt ++ [(s.sp.toNat - E.stack, s.sp.toNat)] ++ [(s.sp.toNat + 8, s.sp.toNat + 20)] := by simp
+      exact ((MemFrame.refl s.mem _).writeLE 0 h1 (Nat.le_refl _) (by omega)).writeLE 0 h1
+        (by simp only; omega) (by simp only; omega)
+    · rw [Memory.readLE_writeLE_of_disjoint _ _ (by omega), Memory.readLE_writeLE_self]
+    · rw [Memory.readLE_writeLE_self]
+  | nanotime =>
+    refine ⟨{ s with
+        pc := s.regs 30
+        mem := s.mem.writeLE (s.sp.toNat + 8) 8 ((k.mono * 10 ^ 9 + 0) % 2 ^ 64) }, _, k.mono, 0,
+      by decide, ?_, rfl, s.regs, s.flags, s.vregs, s.fpsr, _, rfl, rfl, rfl, ?_, ?_⟩
+    · have : 1 ≤ 10 ^ 9 := by decide
+      exact Nat.le_add_right_of_le (Nat.le_mul_of_pos_right _ this)
+    · have h1 : (s.sp.toNat + 8, s.sp.toNat + 16) ∈
+          E.rt ++ [(s.sp.toNat - E.stack, s.sp.toNat)] ++ [(s.sp.toNat + 8, s.sp.toNat + 16)] := by simp
+      exact (MemFrame.refl s.mem _).writeLE _ h1 (Nat.le_refl _) (by omega)
+    · show (s.mem.writeLE (s.sp.toNat + 8) 8 _).readLE (s.sp.toNat + 8) 8 = _
+      rw [Memory.readLE_writeLE_self]; simp
 
 /-! ## Runtime contracts around system calls
 
