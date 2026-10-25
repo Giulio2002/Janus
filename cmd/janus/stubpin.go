@@ -421,7 +421,7 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	}
 	rel, _ := goRootFile(file)
 	pkg := stubPackage(pname, rel)
-	if _, isStub := stubKind(f.Name); isStub && pkg != "runtime" {
+	if _, isStub := stubKind(f.Name); (isStub || runtimeContractStubs[f.Name]) && pkg != "runtime" {
 		return fmt.Errorf("the pclntab places %s in package %q, not runtime", pname, pkg)
 	}
 	canon, refs, err := b.stubCanon(f)
@@ -462,6 +462,29 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	return nil
 }
 
+// checkContractPin checks a function named by --contract that is one of runtimeContractStubs:
+// it must be the Go runtime's function of that name (checkStubPin's checks: the pclntab name,
+// package runtime, the toolchain's file, a pinned normalized code hash). Its callees are not
+// followed (identified by name only, like a helper's).
+func (b *Binary) checkContractPin(g Func) error {
+	if b.SymbolSource != "symtab" {
+		return &diag{
+			Msg:   fmt.Sprintf("--contract names %s, a runtime function a framework contract describes, but %s has no ELF symbol table, so Janus cannot confirm that the function at 0x%x is the runtime's", g.Name, b.Path, g.Addr),
+			Stage: "code extraction",
+			Next:  "Rebuild without stripping the symbol table (no -ldflags=-s).",
+		}
+	}
+	if err := b.checkStubPin(g, map[uint64]bool{}); err != nil {
+		return &diag{
+			Msg: fmt.Sprintf("--contract names %s at 0x%x, but that function is not the Go runtime's %s: %v. The interface contracts (Janus/Contracts/Iface.lean) state what the runtime's function does, so Janus leaves out only the runtime's code (pinned like a stub, docs/SOUNDNESS.md)",
+				g.Name, g.Addr, g.Name, err),
+			Stage: "code extraction",
+			Next:  "If the binary was built by a Go toolchain Janus does not pin yet (" + stubPinToolchains + "), add it to scripts/gen-stubpins.sh and regenerate cmd/janus/stubpins_gen.go; otherwise remove the function that reuses a runtime function's name.",
+		}
+	}
+	return nil
+}
+
 // stubCallees are the functions a non-terminal stub calls, jumps to or takes the address of
 // (outside itself).
 func stubCallees(f Func, refs []stubRef) []string {
@@ -489,9 +512,10 @@ func uniq(xs []string) []string {
 }
 
 // cmdStubpins (hidden; used by scripts/gen-stubpins.sh) prints one line per stub of the list
-// found in each binary, and per function such a stub calls ("helper"):
+// found in each binary, per function such a stub calls ("helper"), and per runtime function a
+// framework contract describes (runtimeContractStubs, "contract"):
 //
-//	stub|helper <arch> <name> <pclntab file base name> <normalized SHA-256>
+//	stub|helper|contract <arch> <name> <pclntab file base name> <normalized SHA-256>
 //
 // and with --canon the canonical text after each line. PIE binaries are accepted (it only
 // measures; extraction rejects them).
@@ -548,6 +572,14 @@ func cmdStubpins(args []string, stdout, stderr io.Writer) error {
 		for _, f := range b.Funcs {
 			if helpers[f.Name] {
 				if _, err := emit("helper", f); err != nil {
+					return err
+				}
+			}
+		}
+		// the runtime functions a framework contract describes (pinned when --contract names them)
+		for _, f := range b.Funcs {
+			if _, ok := stubKind(f.Name); runtimeContractStubs[f.Name] && !ok && !helpers[f.Name] {
+				if _, err := emit("contract", f); err != nil {
 					return err
 				}
 			}
