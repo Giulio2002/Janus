@@ -66,6 +66,9 @@ structure VPre (xs : List (BitVec 64)) (s : State) : Prop where
   co : s.fsBase.toNat + 48 ≤ (s.regs 4).toNat - 88 ∨ (s.regs 4).toNat ≤ s.fsBase.toNat + 40
   ra : s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47
   df : s.df = false
+  /-- `AL` bounds the vector registers used (System V variadic call; `k_vsum` does not read it:
+  its prologue saves no `XMM` register). -/
+  al : VarargAL s (sig xs)
 
 /-- What `k_vsum` guarantees. -/
 abbrev EPost (acc : BitVec 64) (s s' : State) : Prop :=
@@ -391,7 +394,7 @@ theorem correctness (xs : List (BitVec 64)) (hk : xs.length < 2 ^ 31) :
       Nat.reducePow] at hn
     exact { n := by rw [Nat.mod_eq_of_lt (by omega : xs.length < 4294967296)] at hn; simpa using hn
             len := hk, args := hargs, b := hb, top := htop, acc := hacc, ca := hca, cb := hcb,
-            co := by omega, ra := hs.ret_lt hret, df := hs.df }
+            co := by omega, ra := hs.ret_lt hret, df := hs.df, al := hs.al }
   · rintro s s' - ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hx, hmf, h0⟩
     refine ⟨CReturn.of_eqs hsp h3 h5 h12 h13 h14 h15 hdf hmx hfw, _, ?_, rfl, hmf⟩
     have : SysV.result (.int 8 true) = .direct [⟨0, 8, .gpr 0⟩] := by decide
