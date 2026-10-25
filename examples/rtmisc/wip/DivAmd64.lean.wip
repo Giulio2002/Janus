@@ -1,5 +1,31 @@
 import Extracted
 
+/-!
+# `Div(n, m complex128) complex128`: complex division through `runtime.complex128div` (amd64)
+
+```go
+func Div(n, m complex128) complex128 { return n / m }
+```
+
+`GOAMD64=v1` has no FMA, so the compiled Smith's algorithm and Annex G recovery round every
+product and sum separately: the specification is `cdiv false` (`Janus.Spec.Complex`).
+
+**Guarantee.** For every call with `n = a + bi` in `X0, X1` and `m = c + di` in `X2, X3` (the low
+halves), Go's `MXCSR` controls (`GoMXCSR`: round to nearest, every exception masked, no
+`DAZ`/`FTZ`; any sticky flags), the stack-growth prologue falling through, 48 bytes of stack and
+the return-address slot writable, the word `runtime.inf` holding `+∞` (`RuntimeInf`, a stated
+hypothesis: `.noptrbss`), and the program's read-only data (the constant `1.0`) loaded, `Div`
+returns, obeys the ABI, and its results are exactly `cdiv false a b c d` (each part the IEEE
+result, or a NaN where the specification has none).
+
+**How.** As on arm64 (`examples/rtmisc/proofs/arm64/Div.lean`): `cdiv_summary` runs Smith's
+algorithm to the join, `fixup` the NaN tests, `test1`–`test3` the cases of the recovery and
+`body1`–`body3` (with `body3b`, `tail3`) their arithmetic; the SSE2 instructions are related to
+the specification by `x_add'`, `x_sub'`, `x_mul'`, `x_div'` and `UCOMISD` by `comis_cf`,
+`comis_pf`, `comis_zf` (`Janus.Spec.ComplexMachine`). `MXCSR`'s control bits are tracked through
+the raised flags (`GoMXCSR`, `mx_raise_div`).
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Float Janus.Contracts.Misc Janus.Amd64.FP
 
 namespace Proof
@@ -123,7 +149,7 @@ macro "lt64" : tactic => `(tactic| first | exact Nat.mod_lt _ (by decide) | exac
 /-- The return of `complex128div` from `S` with results `X` (`X0`) and `Y` (`X1`). -/
 def Out (S : State) (X Y : Option Nat) (s' : State) : Prop :=
   (s'.regs 4 = S.regs 4 + 8#64 ∧ s'.regs 5 = S.regs 5 ∧ s'.regs 14 = S.regs 14 ∧ s'.mem = S.mem ∧
-    s'.ymmHi = S.ymmHi ∧ s'.fsBase = S.fsBase ∧ s'.df = S.df) ∧
+    s'.ymmHi = S.ymmHi ∧ s'.fsBase = S.fsBase ∧ s'.df = S.df ∧ s'.xmm 15 = S.xmm 15) ∧
   ResultIs binary64 X ((s'.xmm 0).toNat % 2 ^ 64) ∧ ResultIs binary64 Y ((s'.xmm 1).toNat % 2 ^ 64)
 
 /-- What the return needs: the return address readable and canonical, `MXCSR` default, `runtime.inf`. -/
@@ -133,7 +159,7 @@ structure Env (S : State) : Prop where
   ral : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47
   sp : (S.regs 4).toNat + 8 ≤ 2 ^ 48
   inf : RuntimeInf S.mem infAddr
-  dl : Extracted.program.DataLoaded S.mem
+  one : S.mem.accessible 4825504 8 false = true ∧ S.mem.readLE 4825504 8 = 4607182418800017408
 
 /-- The constant `1.0` (`$f64.3ff0000000000000`, the program's read-only data) in memory. -/
 theorem one_loaded {m : Janus.Arm64.Memory} (hd : Extracted.program.DataLoaded m) :
@@ -170,8 +196,8 @@ macro "env_tac" hm:ident hra:ident hral:ident hsp:ident hinf:ident hdl:ident : t
 
 /-- `Out` macro for a path that returned. -/
 macro "out_tac" : tactic => `(tactic| (
-  refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
-  all_goals try (first | rfl | (simp only [setRegF_apply]; done) | (simp only [setRegF_apply, Nat.reduceEqDiff, reduceIte]; done))))
+  refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
+  all_goals try (first | rfl | (simp only [setXmmF_apply, Nat.reduceEqDiff, reduceIte]; done) | (simp only [setRegF_apply]; done) | (simp only [setRegF_apply, Nat.reduceEqDiff, reduceIte]; done))))
 
 set_option maxHeartbeats 0 in
 /-- `m == 0` and a number in the numerator. -/
@@ -200,7 +226,7 @@ theorem body2 (S : State) (a b c d : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivAd
       (Out S (O.mul2 (O.add2 (O.mul2 (some c) (some (inf2one a))) (O.mul2 (some d) (some (inf2one b)))) (some infE))
         (O.mul2 (O.sub2 (O.mul2 (some c) (some (inf2one b))) (O.mul2 (some (inf2one a)) (some d))) (some infE))) := by
   obtain ⟨hm, hra, hral, hsp, ⟨hi1, hi2, hi3⟩, hdl⟩ := h
-  obtain ⟨ho1, ho2⟩ := one_loaded hdl
+  have ⟨ho1, ho2⟩ := hdl
   janus_eval_nat hI : infAddr
   rw [hI] at hi1 hi2 hi3
   have ha : a < 2 ^ 64 := h0 ▸ Nat.mod_lt _ (by decide)
@@ -243,12 +269,13 @@ theorem tail3 (S : State) (p q : Nat) (P Q : Option Nat) (hpc : S.rip = BitVec.o
 theorem out_mono {S S' : State} {X Y X' Y' : Option Nat} {r : W64}
     (h : ReachesRet Extracted.program r S' (Out S' X Y)) (hX : X = X') (hY : Y = Y')
     (h4 : S'.regs 4 = S.regs 4) (h5 : S'.regs 5 = S.regs 5) (h14 : S'.regs 14 = S.regs 14)
-    (hm : S'.mem = S.mem) (hy : S'.ymmHi = S.ymmHi) (hfs : S'.fsBase = S.fsBase) (hdf : S'.df = S.df) :
+    (hm : S'.mem = S.mem) (hy : S'.ymmHi = S.ymmHi) (hfs : S'.fsBase = S.fsBase) (hdf : S'.df = S.df)
+    (hx : S'.xmm 15 = S.xmm 15) :
     ReachesRet Extracted.program r S' (Out S X' Y') := by
   subst hX hY
-  obtain ⟨k, s', hs, hpc, ⟨e1, e2, e3, e4, e5, e6, e7⟩, h9, h10⟩ := h
+  obtain ⟨k, s', hs, hpc, ⟨e1, e2, e3, e4, e5, e6, e7, e8⟩, h9, h10⟩ := h
   exact ⟨k, s', hs, hpc, ⟨by rw [e1, h4], e2.trans h5, e3.trans h14, e4.trans hm, e5.trans hy,
-    e6.trans hfs, e7.trans hdf⟩, h9, h10⟩
+    e6.trans hfs, e7.trans hdf, e8.trans hx⟩, h9, h10⟩
 
 /-- What the tests keep: the operands in `X0, X7, X2, X5`, the bits of `c`, `d` in `RCX`, `RDX`. -/
 structure Inv (S : State) (a b c d : Nat) : Prop where
@@ -273,7 +300,7 @@ theorem body3b (S : State) (a b c d : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivA
   janus_eval_nat hcd : cdivAddr
   have hinf := h.inf
   obtain ⟨hm, hra, hral, hsp, ⟨hi1, hi2, hi3⟩, hdl⟩ := h
-  obtain ⟨ho1, ho2⟩ := one_loaded hdl
+  have ⟨ho1, ho2⟩ := hdl
   have ha : a < 2 ^ 64 := h5 ▸ Nat.mod_lt _ (by decide)
   have hb : b < 2 ^ 64 := h8 ▸ Nat.mod_lt _ (by decide)
   have hd : d < 2 ^ 64 := h4 ▸ Nat.mod_lt _ (by decide)
@@ -283,7 +310,7 @@ theorem body3b (S : State) (a b c d : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivA
     comis_zf, Janus.Arm64.FP.eq64_self, or_self, Bool.not_eq_true', tt, tt', isNaN_sub_self d hd]
     until [cdivAddr + 0x2b0]
   all_goals refine out_mono (tail3 _ _ _ (O.add2 (O.mul2 (some cc) (some a)) (O.mul2 (some b) (some (inf2one d))))
-    (O.sub2 (O.mul2 (some cc) (some b)) (O.mul2 (some (inf2one d)) (some a))) ?_ ?_ rfl rfl ?_ ?_ ?_) rfl rfl rfl rfl rfl rfl rfl rfl rfl
+    (O.sub2 (O.mul2 (some cc) (some b)) (O.mul2 (some (inf2one d)) (some a))) ?_ ?_ rfl rfl ?_ ?_ ?_) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
   all_goals try (rw [hcd]; try rfl; done)
   all_goals try env_tac hm hra hral hsp hinf hdl
   all_goals try (simp only [setXmmF_apply, Nat.reduceEqDiff, reduceIte]; exact h3)
@@ -317,7 +344,7 @@ theorem body3 (S : State) (a b c d : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivAd
   janus_eval_nat hcd : cdivAddr
   have hinf := h.inf
   obtain ⟨hm, hra, hral, hsp, ⟨hi1, hi2, hi3⟩, hdl⟩ := h
-  obtain ⟨ho1, ho2⟩ := one_loaded hdl
+  have ⟨ho1, ho2⟩ := hdl
   have ha : a < 2 ^ 64 := h5 ▸ Nat.mod_lt _ (by decide)
   have hb : b < 2 ^ 64 := h8 ▸ Nat.mod_lt _ (by decide)
   have hc : c < 2 ^ 64 := h2 ▸ Nat.mod_lt _ (by decide)
@@ -325,7 +352,7 @@ theorem body3 (S : State) (a b c d : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivAd
   janus64_run [h5, h8, h2, h4, h3, hr1, hr2, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm, ho2, lo64, btr63,
     m63', m63, m64, Nat.mod_one, comis_cf, comis_pf, comis_zf, Janus.Arm64.FP.eq64_self, or_self, Bool.not_eq_true',
     tt, tt', isNaN_sub_self c hc] until [cdivAddr + 0x257]
-  all_goals refine out_mono (body3b _ a b c d ?_ ?_ ?_ ?_ ?_ ?_ (inf2one c) (copysign_lt _ _) ?_ ?_ ?_) rfl rfl rfl rfl rfl rfl rfl rfl rfl
+  all_goals refine out_mono (body3b _ a b c d ?_ ?_ ?_ ?_ ?_ ?_ (inf2one c) (copysign_lt _ _) ?_ ?_ ?_) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
   all_goals try (rw [hcd]; try rfl; done)
   all_goals try env_tac hm hra hral hsp hinf hdl
   all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
@@ -337,5 +364,351 @@ theorem body3 (S : State) (a b c d : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivAd
   all_goals simp only [inf2one, BitVec.toNat_ofNat, isInf64, isNaN64, *, Bool.not_true, Bool.not_false,
     Bool.false_and, Bool.and_false, Bool.true_and, Bool.and_true, ite_false, ite_true, Bool.false_eq_true, reduceIte]
   all_goals rw [Nat.mod_eq_of_lt (copysign_lt _ _)]
+
+theorem zero64 : zero binary64 false = 0 := rfl
+theorem eq64_zero_comm (d : Nat) : eq64 0 d = eq64 d 0 := by
+  unfold eq64; rw [Bool.or_comm, Janus.Arm64.FP.Val.eq_comm']
+
+theorem nan_or (p q : Bool) : ((p = true ∨ q = true) ∧ p = false) = (q = true ∧ p = false) := by
+  cases p <;> simp
+
+theorem eq64_nan {x y : Nat} (h : eq64 x y = true) : isNaN binary64 x = false := by
+  unfold eq64 at h; cases hx : isNaN binary64 x <;> simp_all
+theorem eq64_nan' {x y : Nat} (h : eq64 x y = true) : isNaN binary64 y = false := by
+  unfold eq64 at h; cases hy : isNaN binary64 y <;> simp_all
+theorem hn1_of (c d : Nat) (x : Bool)
+    (h : ¬(eq64 c 0 = true ∧ isNaN binary64 c = false ∧ eq64 d 0 = true ∧ isNaN binary64 d = false)) :
+    (eq64 c 0 && eq64 d 0 && x) = false := by
+  cases h1 : eq64 c 0 <;> cases h2 : eq64 d 0 <;> simp
+  exact absurd ⟨h1, eq64_nan h1, h2, eq64_nan h2⟩ h
+
+/-- The simp set of the branch conditions. -/
+macro "cond_simp" : tactic => `(tactic| (
+  try simp only [Bool.not_eq_true, Bool.not_eq_false, Bool.and_eq_true] at *
+  try simp only [zero64, eq64_zero_comm, nan_or, and_self, and_assoc] at *
+  try simp only [isInf64, isNaN64, isZero64, zero64, *, Bool.not_true, Bool.not_false, Bool.false_and, Bool.and_false,
+    Bool.true_and, Bool.and_true, Bool.or_true, Bool.true_or, Bool.false_or, Bool.or_false, ite_false, ite_true,
+    Bool.false_eq_true, reduceIte, false_and, and_false, true_and, and_true, false_or, or_false, true_or, or_true,
+    not_false_eq_true, not_true_eq_false]))
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 0 in
+/-- The third case of the recovery, and the fall-through that keeps Smith's two NaNs. -/
+theorem test3 (S : State) (a b c d e f : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivAddr + 0x1a2))
+    (h : Inv S a b c d) (h1 : (S.xmm 1).toNat % 2 ^ 64 = e) (h6 : (S.xmm 6).toNat % 2 ^ 64 = f)
+    (h3 : (S.xmm 3).toNat % 2 ^ 64 = 0) (he : isNaN binary64 e = true) (hf' : isNaN binary64 f = true)
+    (hn1 : (isZero64 c && isZero64 d && (!isNaN64 a || !isNaN64 b)) = false)
+    (hn2 : ((isInf64 a || isInf64 b) && isFinite64 c && isFinite64 d) = false) :
+    ReachesRet Extracted.program (retAddrOf S) S
+      (Out S (recover false a b c d (none, none)).1 (recover false a b c d (none, none)).2) := by
+  janus_eval_nat hcd : cdivAddr
+  have hinf := h.env.inf
+  obtain ⟨⟨hm, hra, hral, hsp, ⟨hi1, hi2, hi3⟩, hdl⟩, h0, h7, h2, h5, hr1, hr2⟩ := h
+  have hel : e < 2 ^ 64 := h1 ▸ Nat.mod_lt _ (by decide)
+  have hfl : f < 2 ^ 64 := h6 ▸ Nat.mod_lt _ (by decide)
+  have ha : a < 2 ^ 64 := h0 ▸ Nat.mod_lt _ (by decide)
+  have hb : b < 2 ^ 64 := h7 ▸ Nat.mod_lt _ (by decide)
+  have hc : c < 2 ^ 64 := h2 ▸ Nat.mod_lt _ (by decide)
+  have hd : d < 2 ^ 64 := h5 ▸ Nat.mod_lt _ (by decide)
+  janus64_run [h0, h7, h2, h5, h1, h6, h3, hr1, hr2, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm, lo64,
+    btr63, m63', m63, m64, Nat.mod_one, comis_cf, comis_pf, comis_zf, Janus.Arm64.FP.eq64_self, or_self,
+    Bool.not_eq_true', tt, tt', isNaN_sub_self a ha, isNaN_sub_self b hb, isNaN_sub_self c hc,
+    isNaN_sub_self d hd] until [cdivAddr + 0x218]
+  -- the paths that return Smith's NaNs
+  all_goals try (
+    out_tac
+    all_goals simp only [recover, hn1, hn2]
+    all_goals cond_simp
+    all_goals simp only [ResultIs, setXmmF_apply, Nat.reduceEqDiff, reduceIte, BitVec.toNat_ofNat, Nat.reducePow,
+      m64, m128, h1, h6, Nat.mod_eq_of_lt hel, Nat.mod_eq_of_lt hfl, he, hf']
+    done)
+  -- the third case
+  all_goals refine out_mono (body3 _ a b c d ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_) ?_ ?_ rfl rfl rfl rfl rfl rfl rfl rfl
+  all_goals try (rw [hcd]; try rfl; done)
+  all_goals try env_tac hm hra hral hsp hinf hdl
+  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; done)
+  all_goals simp only [recover, hn1, hn2]
+  all_goals cond_simp
+  all_goals simp only [O.mac, O.msc, reduceIte, Bool.false_eq_true]
+  all_goals try rw [O.mul2_comm (some 0), O.add2_comm (O.mul2 (some b) _), O.mul2_comm (some a)]
+  all_goals try rw [O.mul2_comm (some 0), O.mul2_comm (some b), O.mul2_comm (some a)]
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 0 in
+/-- The second case of the recovery. -/
+theorem test2 (S : State) (a b c d e f : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivAddr + 0x133))
+    (h : Inv S a b c d) (h1 : (S.xmm 1).toNat % 2 ^ 64 = e) (h6 : (S.xmm 6).toNat % 2 ^ 64 = f)
+    (h3 : (S.xmm 3).toNat % 2 ^ 64 = 0) (he : isNaN binary64 e = true) (hf' : isNaN binary64 f = true)
+    (hn1 : (isZero64 c && isZero64 d && (!isNaN64 a || !isNaN64 b)) = false) :
+    ReachesRet Extracted.program (retAddrOf S) S
+      (Out S (recover false a b c d (none, none)).1 (recover false a b c d (none, none)).2) := by
+  janus_eval_nat hcd : cdivAddr
+  have hinv := h
+  have hinf := h.env.inf
+  obtain ⟨⟨hm, hra, hral, hsp, ⟨hi1, hi2, hi3⟩, hdl⟩, h0, h7, h2, h5, hr1, hr2⟩ := h
+  have ha : a < 2 ^ 64 := h0 ▸ Nat.mod_lt _ (by decide)
+  have hb : b < 2 ^ 64 := h7 ▸ Nat.mod_lt _ (by decide)
+  have hc : c < 2 ^ 64 := h2 ▸ Nat.mod_lt _ (by decide)
+  have hd : d < 2 ^ 64 := h5 ▸ Nat.mod_lt _ (by decide)
+  janus64_run [h0, h7, h2, h5, h1, h6, h3, hr1, hr2, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm, lo64,
+    btr63, m63', m63, m64, Nat.mod_one, comis_cf, comis_pf, comis_zf, Janus.Arm64.FP.eq64_self, or_self,
+    Bool.not_eq_true', tt, tt', isNaN_sub_self a ha, isNaN_sub_self b hb, isNaN_sub_self c hc,
+    isNaN_sub_self d hd] until [cdivAddr + 0x1a2, cdivAddr + 0x2be]
+  all_goals first
+    | (refine out_mono (body2 _ a b c d ?_ ?_ ?_ ?_ ?_ ?_) ?_ ?_ rfl rfl rfl rfl rfl rfl rfl rfl
+       · rw [hcd]; try rfl
+       · env_tac hm hra hral hsp hinf hdl
+       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       all_goals simp only [recover, hn1]
+       all_goals cond_simp
+       all_goals simp only [O.mac, O.msc, reduceIte, Bool.false_eq_true]
+       all_goals try rw [O.mul2_comm (some infE), O.add2_comm (O.mul2 (some (inf2one b)) _),
+         O.mul2_comm (some (inf2one a)), O.mul2_comm (some (inf2one b))]
+       all_goals try rw [O.mul2_comm (some infE), O.mul2_comm (some (inf2one b))]
+       done)
+    | (refine out_mono (test3 _ a b c d e f ?_ ?_ ?_ ?_ ?_ he hf' hn1 ?_) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
+       · rw [hcd]; try rfl
+       · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+         · env_tac hm hra hral hsp hinf hdl
+         all_goals first | assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       all_goals cond_simp)
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 0 in
+/-- The first case of the recovery (`m == 0 && (!isNaN(a) || !isNaN(b))`). -/
+theorem test1 (S : State) (a b c d e f : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivAddr + 0xb2))
+    (h : Inv S a b c d) (h1 : (S.xmm 1).toNat % 2 ^ 64 = e) (h6 : (S.xmm 6).toNat % 2 ^ 64 = f)
+    (he : isNaN binary64 e = true) (hf' : isNaN binary64 f = true) :
+    ReachesRet Extracted.program (retAddrOf S) S
+      (Out S (recover false a b c d (none, none)).1 (recover false a b c d (none, none)).2) := by
+  janus_eval_nat hcd : cdivAddr
+  have hinf := h.env.inf
+  obtain ⟨⟨hm, hra, hral, hsp, ⟨hi1, hi2, hi3⟩, hdl⟩, h0, h7, h2, h5, hr1, hr2⟩ := h
+  have hc : c < 2 ^ 64 := h2 ▸ Nat.mod_lt _ (by decide)
+  janus64_run [h0, h7, h2, h5, h1, h6, hr1, hr2, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm, lo64,
+    btr63, m63', m63, m64, Nat.mod_one, comis_cf, comis_pf, comis_zf, Janus.Arm64.FP.eq64_self, or_self,
+    Bool.not_eq_true', tt, tt', isNaN0, BitVec.setWidth_and, w8, w8', w8'', low8_merge, ite8_and, ite8_zero]
+    until [cdivAddr + 0xe5, cdivAddr + 0x133]
+  all_goals first
+    | (refine out_mono (body1 _ a b c ?_ ?_ ?_ ?_ ?_ hc) ?_ ?_ rfl rfl rfl rfl rfl rfl rfl rfl
+       · rw [hcd]; try rfl
+       · env_tac hm hra hral hsp hinf hdl
+       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       all_goals simp only [recover]
+       all_goals cond_simp
+       done)
+    | (refine out_mono (test2 _ a b c d e f ?_ ?_ ?_ ?_ ?_ he hf' ?_) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
+       · rw [hcd]; try rfl
+       · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+         · env_tac hm hra hral hsp hinf hdl
+         all_goals first | assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte, BitVec.toNat_ofNat]; done)
+       all_goals cond_simp
+       all_goals exact hn1_of _ _ _ (by assumption))
+
+theorem Val.trich (v w : Val) (h1 : Val.eq v w = false) (h2 : Val.lt v w = false) : Val.lt w v = true := by
+  cases v with
+  | num n e => cases w with
+    | num n' e' =>
+      have h1' := of_decide_eq_false (by simpa [Val.eq] using h1)
+      have h2' := of_decide_eq_false h2
+      apply decide_eq_true
+      simp only [align] at h1' h2' ⊢
+      rw [Int.min_comm e' e]
+      omega
+    | inf s => cases s <;> simp_all [Val.lt]
+  | inf s => cases w with
+    | num _ _ => cases s <;> simp_all [Val.lt]
+    | inf t => cases s <;> cases t <;> simp_all [Val.lt, Val.eq]
+
+theorem Val.asym (v w : Val) (h : Val.lt v w = true) : Val.lt w v = false := by
+  cases v with
+  | num n e => cases w with
+    | num n' e' =>
+      have h' := of_decide_eq_true h
+      apply decide_eq_false
+      try simp only [align] at h' ⊢
+      rw [Int.min_comm e' e]
+      omega
+    | inf s => cases s <;> simp_all [Val.lt]
+  | inf s => cases w with
+    | num _ _ => cases s <;> simp_all [Val.lt]
+    | inf t => cases s <;> cases t <;> simp_all [Val.lt]
+
+theorem jb_ge (x y : Nat) :
+    (((isNaN binary64 x = true ∨ isNaN binary64 y = true) ∨ Janus.Arm64.FP.cmpN x y = true)) = (ge64 x y = false) := by
+  unfold Janus.Arm64.FP.cmpN ge64
+  have := Val.trich (valueOf binary64 x) (valueOf binary64 y)
+  have := Val.asym (valueOf binary64 x) (valueOf binary64 y)
+  cases isNaN binary64 x <;> cases isNaN binary64 y <;>
+    cases he : Val.eq (valueOf binary64 x) (valueOf binary64 y) <;>
+    cases hl : Val.lt (valueOf binary64 y) (valueOf binary64 x) <;>
+    cases hl' : Val.lt (valueOf binary64 x) (valueOf binary64 y) <;> simp_all
+
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 0 in
+/-- From the join after Smith's algorithm (`e` in `X1`, `f` in `X6`): the recovery. -/
+theorem fixup (S : State) (a b c d e f : Nat) (E F : Option Nat)
+    (hpc : S.rip = BitVec.ofNat 64 (cdivAddr + 0x99)) (h : Inv S a b c d)
+    (h1 : (S.xmm 1).toNat % 2 ^ 64 = e) (h6 : (S.xmm 6).toNat % 2 ^ 64 = f)
+    (hE : ResultIs binary64 E e) (hF : ResultIs binary64 F f) (hnE : NoNaN E) (hnF : NoNaN F) :
+    ReachesRet Extracted.program (retAddrOf S) S
+      (Out S (recover false a b c d (E, F)).1 (recover false a b c d (E, F)).2) := by
+  janus_eval_nat hcd : cdivAddr
+  have hinv := h
+  have hinf := h.env.inf
+  obtain ⟨⟨hm, hra, hral, hsp, ⟨hi1, hi2, hi3⟩, hdl⟩, h0, h7, h2, h5, hr1, hr2⟩ := h
+  have hel : e < 2 ^ 64 := h1 ▸ Nat.mod_lt _ (by decide)
+  have hfl : f < 2 ^ 64 := h6 ▸ Nat.mod_lt _ (by decide)
+  have hne := resultIs_nan_iff hE hnE
+  have hnf := resultIs_nan_iff hF hnF
+  cases E with
+  | some x =>
+    simp only [Option.isNone_some] at hne
+    janus64_run [h1, h6, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm, comis_cf, comis_pf, comis_zf,
+      Janus.Arm64.FP.eq64_self, or_self, Bool.not_eq_true', tt, tt', hne, lo64, m64, Nat.mod_one]
+    all_goals out_tac
+    all_goals simp only [recover, setXmmF_apply, Nat.reduceEqDiff, reduceIte, BitVec.toNat_ofNat, Nat.reducePow,
+      m128, m64, h1, h6, Nat.mod_eq_of_lt hel, Nat.mod_eq_of_lt hfl]
+    · exact hE
+    · exact hF
+  | none =>
+    cases F with
+    | some y =>
+      simp only [Option.isNone_some, Option.isNone_none] at hne hnf
+      janus64_run [h1, h6, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm, comis_cf, comis_pf, comis_zf,
+        Janus.Arm64.FP.eq64_self, or_self, Bool.not_eq_true', tt, tt', hne, hnf, lo64, m64, Nat.mod_one]
+      all_goals out_tac
+      all_goals simp only [recover, setXmmF_apply, Nat.reduceEqDiff, reduceIte, BitVec.toNat_ofNat, Nat.reducePow,
+        m128, m64, h1, h6, Nat.mod_eq_of_lt hel, Nat.mod_eq_of_lt hfl]
+      · exact hE
+      · exact hF
+    | none =>
+      simp only [Option.isNone_none] at hne hnf
+      janus64_run [h1, h6, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm, comis_cf, comis_pf, comis_zf,
+        Janus.Arm64.FP.eq64_self, or_self, Bool.not_eq_true', tt, tt', hne, hnf, lo64, m64, Nat.mod_one]
+        until [cdivAddr + 0xb2]
+      all_goals refine out_mono (test1 _ a b c d e f ?_ ?_ ?_ ?_ hne hnf) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
+      · rw [hcd]; try rfl
+      · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+        · env_tac hm hra hral hsp hinf hdl
+        all_goals first | assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+      all_goals first | assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+
+/-- The return of `complex128div` with results `X`, `Y`, as an equation (the shape a caller's
+symbolic execution uses): back at the return address with `RSP + 8`, `RBP`, `R14`, memory,
+`ymmHi`, `fsBase` and `DF` kept; every other general register, the flags, the `XMM` registers `v`
+and `MXCSR` arbitrary, except `X0`, `X1`, which hold `X`, `Y`. -/
+abbrev CRet (s s' : State) (X Y : Option Nat) : Prop :=
+  ∃ (r : Nat → W64) (fl : Flags) (v : Nat → W128) (mx : BitVec 32),
+    s' = { s with regs := Contracts.MapAmd64.keepABI s.regs r, flags := fl, xmm := v, mxcsr := mx,
+                  rip := retAddrOf s } ∧ v 15 = s.xmm 15 ∧
+    ResultIs binary64 X ((v 0).toNat % 2 ^ 64) ∧ ResultIs binary64 Y ((v 1).toNat % 2 ^ 64)
+
+theorem out_cret {S : State} {X Y : Option Nat}
+    (h : ReachesRet Extracted.program (retAddrOf S) S (Out S X Y)) :
+    ReachesRet Extracted.program (retAddrOf S) S (fun s' => CRet S s' X Y) := by
+  obtain ⟨k, s', hs, hpc, ⟨e4, e5, e14, em, ey, efs, edf, ex⟩, h9, h10⟩ := h
+  refine ⟨k, s', hs, hpc, ⟨s'.regs, s'.flags, s'.xmm, s'.mxcsr, ?_, ex, h9, h10⟩⟩
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
+  simp only at hpc e4 e5 e14 em ey efs edf ⊢
+  subst hpc em ey efs edf
+  congr
+  funext i
+  simp only [Contracts.MapAmd64.keepABI]
+  split
+  · rename_i hi; subst hi; exact e4
+  · split
+    · rename_i hi; rcases hi with rfl | rfl <;> simp [e5, e14]
+    · rfl
+
+theorem abs64 (x : Nat) : abs binary64 x = x % 9223372036854775808 := rfl
+
+theorem sw64 (x : BitVec 128) : BitVec.setWidth 64 x = BitVec.ofNat 64 (x.toNat % 2 ^ 64) := by
+  apply BitVec.eq_of_toNat_eq; simp
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 0 in
+/-- **`runtime.complex128div`** (amd64, `GOAMD64=v1`, Go's `MXCSR` controls): from the call with
+`n = a + bi` in `X0, X1` and `m = c + di` in `X2, X3` (low halves), it returns `cdiv false a b c d`
+in `X0, X1`. -/
+theorem cdiv_summary :
+    Summary Extracted.program cdivAddr (fun s => Env s)
+      (fun s s' => CRet s s'
+        (cdiv false ((s.xmm 0).toNat % 2 ^ 64) ((s.xmm 1).toNat % 2 ^ 64) ((s.xmm 2).toNat % 2 ^ 64)
+          ((s.xmm 3).toNat % 2 ^ 64)).1
+        (cdiv false ((s.xmm 0).toNat % 2 ^ 64) ((s.xmm 1).toNat % 2 ^ 64) ((s.xmm 2).toNat % 2 ^ 64)
+          ((s.xmm 3).toNat % 2 ^ 64)).2) := by
+  intro s hpc h
+  apply out_cret
+  janus_eval_nat hcd : cdivAddr
+  have hinf := h.inf
+  obtain ⟨hm, hra, hral, hsp, ⟨hi1, hi2, hi3⟩, hdl⟩ := h
+  generalize h0 : (s.xmm 0).toNat % 2 ^ 64 = a
+  generalize h1 : (s.xmm 1).toNat % 2 ^ 64 = b
+  generalize h2 : (s.xmm 2).toNat % 2 ^ 64 = c
+  generalize h3 : (s.xmm 3).toNat % 2 ^ 64 = d
+  have ha : a < 2 ^ 64 := h0 ▸ Nat.mod_lt _ (by decide)
+  have hb : b < 2 ^ 64 := h1 ▸ Nat.mod_lt _ (by decide)
+  have hc : c < 2 ^ 64 := h2 ▸ Nat.mod_lt _ (by decide)
+  have hd : d < 2 ^ 64 := h3 ▸ Nat.mod_lt _ (by decide)
+  janus64_run [h0, h1, h2, h3, sw64, GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm, comis_cf, comis_pf,
+    comis_zf, lo64, btr63, m63', m63, m64, Nat.mod_one, jb_ge] until [cdivAddr + 0x99]
+  all_goals refine out_mono (fixup _ a b c d _ _ (smith false a b c d).1 (smith false a b c d).2 ?_ ?_ rfl rfl ?_ ?_
+    (smith_noNaN false a b c d).1 (smith_noNaN false a b c d).2) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
+  all_goals try (rw [hcd]; try rfl; done)
+  all_goals try (refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> try env_tac hm hra hral hsp hinf hdl)
+  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; done)
+  all_goals try simp only [Bool.not_eq_false, Bool.not_eq_true] at *
+  all_goals try dsimp only
+  all_goals simp only [smith, abs64, O.mac, O.msc, O.nms, reduceIte, Bool.false_eq_true, *,
+    setXmmF_apply, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.reducePow, m128, m64, Nat.mod_mod, lo64, mod_div64,
+    Nat.zero_mul, Nat.zero_add]
+  all_goals try rw [O.mul2_comm (some a) (O.div2 (some d) (some c))]
+  all_goals try rw [O.mul2_comm (some b) (O.div2 (some c) (some d))]
+  all_goals first
+    | exact x_div' (x_add' (x_mul' (Janus.Arm64.FP.r_some b) (x_div' (Janus.Arm64.FP.r_some d) (Janus.Arm64.FP.r_some c) hd hc) hb (by lt64)) (Janus.Arm64.FP.r_some a) (by lt64) ha)
+        (x_add' (x_mul' (Janus.Arm64.FP.r_some d) (x_div' (Janus.Arm64.FP.r_some d) (Janus.Arm64.FP.r_some c) hd hc) hd (by lt64)) (Janus.Arm64.FP.r_some c) (by lt64) hc) (by lt64) (by lt64)
+    | exact x_div' (x_sub' (Janus.Arm64.FP.r_some b) (x_mul' (x_div' (Janus.Arm64.FP.r_some d) (Janus.Arm64.FP.r_some c) hd hc) (Janus.Arm64.FP.r_some a) (by lt64) ha) hb (by lt64))
+        (x_add' (x_mul' (Janus.Arm64.FP.r_some d) (x_div' (Janus.Arm64.FP.r_some d) (Janus.Arm64.FP.r_some c) hd hc) hd (by lt64)) (Janus.Arm64.FP.r_some c) (by lt64) hc) (by lt64) (by lt64)
+    | exact x_div' (x_add' (x_mul' (Janus.Arm64.FP.r_some a) (x_div' (Janus.Arm64.FP.r_some c) (Janus.Arm64.FP.r_some d) hc hd) ha (by lt64)) (Janus.Arm64.FP.r_some b) (by lt64) hb)
+        (x_add' (x_mul' (Janus.Arm64.FP.r_some c) (x_div' (Janus.Arm64.FP.r_some c) (Janus.Arm64.FP.r_some d) hc hd) hc (by lt64)) (Janus.Arm64.FP.r_some d) (by lt64) hd) (by lt64) (by lt64)
+    | exact x_div' (x_sub' (x_mul' (x_div' (Janus.Arm64.FP.r_some c) (Janus.Arm64.FP.r_some d) hc hd) (Janus.Arm64.FP.r_some b) (by lt64) hb) (Janus.Arm64.FP.r_some a) (by lt64) ha)
+        (x_add' (x_mul' (Janus.Arm64.FP.r_some c) (x_div' (Janus.Arm64.FP.r_some c) (Janus.Arm64.FP.r_some d) hc hd) hc (by lt64)) (Janus.Arm64.FP.r_some d) (by lt64) hd) (by lt64) (by lt64)
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 0 in
+theorem correctness :
+    Ensures Extracted.program Extracted.entry []
+      (fun s => StackGuardOK s 40 ∧ StackWritable s 48 8 ∧
+        Janus.Spec.Disjoint ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 48) 56 ∧ GoABI.GoMXCSR s ∧
+        RuntimeInf s.mem infAddr ∧ Janus.Spec.Disjoint infAddr 8 ((s.regs 4).toNat - 48) 56 ∧
+        Extracted.program.DataLoaded s.mem)
+      (fun s s' =>
+        ResultIs binary64 (cdiv false ((s.xmm 0).toNat % 2 ^ 64) ((s.xmm 1).toNat % 2 ^ 64)
+          ((s.xmm 2).toNat % 2 ^ 64) ((s.xmm 3).toNat % 2 ^ 64)).1 ((s'.xmm 0).toNat % 2 ^ 64) ∧
+        ResultIs binary64 (cdiv false ((s.xmm 0).toNat % 2 ^ 64) ((s.xmm 1).toNat % 2 ^ 64)
+          ((s.xmm 2).toNat % 2 ^ 64) ((s.xmm 3).toNat % 2 ^ 64)).2 ((s'.xmm 1).toNat % 2 ^ 64)) := by
+  intro ret hret s hs ⟨hg, ⟨hle, hnw, hacc⟩, hgd, hm, ⟨hi1, hi2, hi3⟩, hid, hdl⟩
+  janus64_intro hs
+  have hgl := hg.load
+  have hgb := hg.below
+  have hnw2 := hg.noWrap
+  have hgr := hg.readable
+  have ⟨ho1, ho2⟩ := one_loaded hdl
+  have hseg : SegLoaded s.mem (Extracted.program.data[0]'(by decide)) := hdl _ (List.getElem_mem _)
+  have hdj := hseg.disjoint_of_writable hacc
+  have hlen : (Extracted.program.data[0]'(by decide)).bytes.length = 8 := by decide +kernel
+  have hbase : (Extracted.program.data[0]'(by decide)).base = 4825504 := rfl
+  rw [hlen, hbase] at hdj
+  simp only [regSP, regG, stackguard0Offset, stackguard0, Janus.Spec.Disjoint] at hacc hle hnw hgl hgb hnw2 hgr hgd hid hdj
+  have hm' : s.mxcsr.toNat / 64 = 126 := hm
+  janus64_run [GoMXCSR.ctl hm, GoMXCSR.unmasked hm, GoMXCSR.mod hm] calls [cdiv_summary]
+  exact ⟨‹_›, ‹_›, ‹_›⟩
 
 end Proof
