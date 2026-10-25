@@ -43,6 +43,21 @@ func s_convTslice()
 //go:linkname s_convTstring runtime.convTstring
 func s_convTstring()
 
+//go:linkname s_deferproc runtime.deferproc
+func s_deferproc()
+
+//go:linkname s_deferprocat runtime.deferprocat
+func s_deferprocat()
+
+//go:linkname s_deferprocStack runtime.deferprocStack
+func s_deferprocStack()
+
+//go:linkname s_deferrangefunc runtime.deferrangefunc
+func s_deferrangefunc()
+
+//go:linkname s_deferreturn runtime.deferreturn
+func s_deferreturn()
+
 //go:linkname s_efaceeq runtime.efaceeq
 func s_efaceeq()
 
@@ -99,6 +114,9 @@ func s_goPanicSliceBU()
 
 //go:linkname s_goPanicSliceConvert runtime.goPanicSliceConvert
 func s_goPanicSliceConvert()
+
+//go:linkname s_gorecover runtime.gorecover
+func s_gorecover()
 
 //go:linkname s_ifaceeq runtime.ifaceeq
 func s_ifaceeq()
@@ -175,6 +193,9 @@ func s_panicunsafestringnilptr()
 //go:linkname s_panicwrap runtime.panicwrap
 func s_panicwrap()
 
+//go:linkname s_sigpanic runtime.sigpanic
+func s_sigpanic()
+
 //go:linkname s_typeAssert runtime.typeAssert
 func s_typeAssert()
 
@@ -190,6 +211,11 @@ var keep = []func(){
 	s_convTnoptr,
 	s_convTslice,
 	s_convTstring,
+	s_deferproc,
+	s_deferprocat,
+	s_deferprocStack,
+	s_deferrangefunc,
+	s_deferreturn,
 	s_efaceeq,
 	s_gopanic,
 	s_goPanicIndex,
@@ -209,6 +235,7 @@ var keep = []func(){
 	s_goPanicSliceB,
 	s_goPanicSliceBU,
 	s_goPanicSliceConvert,
+	s_gorecover,
 	s_ifaceeq,
 	s_interfaceSwitch,
 	s_panicBounds32,
@@ -234,6 +261,7 @@ var keep = []func(){
 	s_panicunsafestringlen,
 	s_panicunsafestringnilptr,
 	s_panicwrap,
+	s_sigpanic,
 	s_typeAssert,
 }
 
