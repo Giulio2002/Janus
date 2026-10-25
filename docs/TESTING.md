@@ -13,7 +13,7 @@ instance check and kernel replay still runs with the same strength.
 | amd64 examples | `scripts/verify-amd64-examples.sh [-j N]` | the 25 amd64 theorems |
 | all examples | `scripts/verify-all-examples.sh [-j N]` | both of the above in one pool, longest first |
 | soundness audit | `audit/run-all.sh [-j N]`, `audit/round{2,3,4,5,7}/run-round*.sh [-j N]`, `audit/round6/run-round6.sh` | every documented attack is rejected, every control verifies (round 7: the result cache) |
-| Go tests | `go test -timeout 50m ./cmd/...` (`-short`: no Lake builds) | the CLI, the extractor, the verifier end to end |
+| Go tests | `go test -timeout 60m ./cmd/...` (`-short`: no Lake builds) | the CLI, the extractor, the verifier end to end, the cache collector |
 | JanusASL | `scripts/asl.sh prove` | the Arm-ASL equivalence theorems (39) and their axiom audit |
 | ASL build cache | `JanusASL/tools/test_asl_cache.sh [--e2e CACHE]` | the `ASL_CACHE` key ignores lakefile edits that cannot reach the ArmASL build and changes on every input that can (31 cases, seconds); with `--e2e`, a restore into a copy with an edited JanusASL lakefile leaves `lake build ArmASL` nothing to do (docs/ASL.md "Build cache") |
 
@@ -276,6 +276,46 @@ ratios above, which are dominated by per-verify work that is the same on any mac
 
 The per-runner peak memory drops from ~30–43 GB (more than a hosted runner has, which made the
 cold replay swap or be killed) to under 15 GB.
+
+## Disk use
+
+On the development host the caches and the oracle dumps once filled the 874 GB disk and put
+123 GB into `/tmp`, a RAM tmpfs: one consumer workspace per test (625 of them, 77 GB) in the Go
+test cache under `/tmp/janus-test-cache`, 48 GB in `~/.cache/janus`, stale framework and
+JanusASL builds, and multi-GB JSON-lines dumps in every worktree's `artifacts/` (one finished
+worktree held 69 GB). Three changes bound them:
+
+* **The cache collector** (`janus cache gc`, automatic after `verify`, `verify-batch` and
+  `blockers`; docs/CLI.md "Cache"): an LRU over every cache entry with a budget of min(40 GiB,
+  10% of the disk) by default (`$JANUS_CACHE_MAX`), min(8 GiB, 5%) on a tmpfs, shrinking when the
+  disk is nearly full; entries in use or used in the last 10 minutes are never removed.
+  `janus cache du` shows the usage. Soundness: docs/SOUNDNESS.md "Cache eviction".
+* **The Go test cache is on disk**: `$JANUS_TEST_CACHE_DIR`, else `~/.cache/janus-test`, else
+  `/var/tmp/janus-test-cache-<uid>` (never `os.TempDir()`), separate from the user's cache and
+  bounded by the collector like it. To reuse a framework build, copy
+  `~/.cache/janus/v1/framework/<key>` and `<key>.ready` into it; `JANUS_TEST_ASL_SEED` seeds the
+  JanusASL build.
+* **Oracle dumps are pruned** when a driver ends (`scripts/lib/artifacts.sh`, used by
+  `scripts/oracle.sh`, `oracle-amd64.sh`, `oracle-sail.sh`, `asl.sh check`, `x86formal.sh check`
+  and `audit/round5/model/run-model.sh`): summaries, reproductions and `mismatches.jsonl` stay,
+  the corpus, results and verdicts are zstd-compressed (about 5x, verdicts 15x), duplicates and
+  cheaply derived dumps are removed. `KEEP=zst` compresses everything, `KEEP=1` keeps it all raw.
+  `scripts/lib/test-artifacts.sh` (run by `go test`, `TestArtifactsLib`) tests the pruning.
+
+Tests of the collector (`cmd/janus/cachegc_test.go`, on private fixture caches; seconds):
+
+| test | checks |
+|---|---|
+| `TestCacheGCLRUOrder` | eviction order by age / weight, stopping as soon as the cache fits, dry run |
+| `TestCacheGCRespectsLocks` | a held workspace (exclusive), framework (shared) or JanusASL (`.use`, `.lock`) lock keeps the entry; released, it goes with its lock and stamp files |
+| `TestCacheGCGraceAndPins` | grace period, a use restarting it, in-process pins, `--all` |
+| `TestCacheGCRetentionAndTemporary` | retention days, temporary trees by their newest file, trash, orphaned locks and stamps, empty families, the result key never touched, shard directories kept |
+| `TestCacheGCLowDisk` | the budget shrinks with the free space, even with `JANUS_CACHE_MAX=off` |
+| `TestCacheGCRedTeam` | symbolic links not followed, planted entries removed, a forged entry stays rejected, nothing created, a dry run changes nothing, a non-private cache is refused |
+| `TestCacheGCConcurrentHolders` | a collector looping with no budget and no grace while goroutines take and use entries the way janus does: no entry disappears while held |
+| `TestCacheCLI`, `TestAutoCollect` | `janus cache du/gc` output and errors, the automatic collection and its rate limit |
+| `TestCacheGCConcurrentVerify` (Lean) | verifications in separate processes (single files and a consumer package) while `janus cache gc --max 0 --grace 0s` loops; all verify, and from an emptied cache the re-verification gives the same theorem, statement and axioms |
+| `TestTestCacheOffTmpfs` | the test cache is not on a RAM filesystem and passes the round-8 check |
 
 ## Memory guard
 

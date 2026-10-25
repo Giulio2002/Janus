@@ -4,6 +4,7 @@ import Janus.Arm64.Bits
 import Janus.Arm64.Decode
 import Janus.Arm64.Vector
 import Janus.Arm64.ExecFloat
+import Janus.Arm64.ExecCrypto
 
 /-!
 # AArch64 execution semantics for the supported subset
@@ -864,6 +865,7 @@ def exec (i : Instr) (s : State) : Except Fault State :=
     .ok (s.setV rd (qsize Q) (tblOp op (len + 1) (qsize Q) (tableOf s.vregs rn (len + 1))
       (s.getV rm (qsize Q)) (s.getV rd (qsize Q)))).next
   | .vAes opcode rn rd => .ok (s.setV rd 128 (aesOp opcode (s.getV rd 128) (s.getV rn 128))).next
+  | .crypto c => .ok (execCrypto s c).next  -- `Janus.Arm64.ExecCrypto`
   | .fmovGen sf _ rmode opcode rn rd => .ok (execFmovGen s sf rmode opcode rn rd).next
   -- Scalar floating point (`Janus.Arm64.ExecFloat`)
   | .fpDP1 ftype opcode rn rd =>

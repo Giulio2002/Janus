@@ -19,22 +19,19 @@ theorem modrmSib_eq (m : Nat) (rest : List Nat) :
   unfold modrmSib; cases h : sibP m <;> simp [h]
 
 open Janus.Amd64 Janus.Amd64.Decode in
-/-- **ADD/OR/ADC/SBB/AND/SUB/XOR/CMP m, r** (opcodes `00/01 … 38/39`), memory destination (every
-ModRM/SIB/displacement form, RIP-relative, `FS`-relative), without `LOCK`, every width. -/
-theorem alu_eg_mem_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
+/-- The memory-destination `E, G` ALU forms from Janus' `exec` (shared by the plain and `LOCK`ed forms). -/
+theorem alu_eg_mem_core {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
     {bytes : List Nat} (hcode : CodeAt s js.rip.toNat bytes) (hlim : js.rip.toNat + 17 < 2 ^ 47)
     {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
     (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n)) (ho : o < 0x40) (ho2 : o % 8 < 2)
     {md reg ext : Nat} {a : Addr} {r3 : List Nat} {c : Nat}
-    (hmd : modrm (p.rex.getD 0) (m :: rest) = some (⟨md, reg, ext, .m a⟩, r3, c)) (hlk : p.lock = false)
-    (hstep : step bytes js = .ok js') :
+    (hmd : modrm (p.rex.getD 0) (m :: rest) = some (⟨md, reg, ext, .m a⟩, r3, c))
+    (hlc : ∀ x rex, PfxRel p x rex → lockChkEG (o / 8) (BitVec.ofNat 8 m) x = false)
+    (hlen : n + 1 + c ≤ 15)
+    (hstep : exec (.alu (aluOp (o / 8)) (if o % 2 = 0 then 8 else osz p)
+        (.mem (if p.fs then { a with fs := true } else a))
+        (.loc (regLocOf p.rex.isSome (if o % 2 = 0 then 8 else osz p) (regNum p m)))) (n + 1 + c) js = .ok js') :
     ∃ s', (janus_x86_step ()).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ X86Config s' := by
-  cases hd : decode bytes with
-  | none => simp [step, hd] at hstep
-  | some il =>
-  obtain ⟨i, len⟩ := il
-  obtain ⟨hrep, rfl, hlen, rfl⟩ := decode_eg_mem hpp ho ho2 hmd hlk hd
-  rw [step_of_decode hd] at hstep
   simp only [exec] at hstep
   generalize hw : (if o % 2 = 0 then 8 else osz p) = w at hstep
   obtain ⟨cc, hcf, hacc, rfl⟩ := execAlu_mem (readLoc_regLocOf _ _ _ _ _) hstep
@@ -65,10 +62,7 @@ theorem alu_eg_mem_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg :
   have hrexb : rex = BitVec.ofNat 8 (rexByte p) := by rw [hpr.rexb]; rfl
   have ho' : o = 8 * (o / 8) + o % 8 := by omega
   rw [ho', run_one_byte_e_g (o / 8) (o % 8) (by omega) ho2] at hf
-  have hlk' : lockChkEG (o / 8) (BitVec.ofNat 8 m) x = false := by
-    have := hpr.lck; rw [hlk] at this; simp only [Bool.false_eq_true, ↓reduceIte] at this
-    unfold lockChkEG; split <;> simp [this]
-  rw [hlk'] at hf
+  rw [hlc x rex hpr] at hf
   simp only [Bool.false_eq_true, ↓reduceIte, run_bind, run_pure] at hf
   rw [← ho'] at hf
   have hcs : CodeAt s (js.rip.toNat + n + 1 + 1) rest := by
@@ -86,5 +80,26 @@ theorem alu_eg_mem_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg :
   refine ⟨s', run_janus_x86_step (by rw [hf, hs']), ?_, hcfg'⟩
   rw [show js.rip.toNat + n + 1 + c = js.rip.toNat + n + 1 + c from rfl]
   exact hrel'
+
+open Janus.Amd64 Janus.Amd64.Decode in
+/-- **ADD/OR/ADC/SBB/AND/SUB/XOR/CMP m, r** (opcodes `00/01 … 38/39`), memory destination (every
+ModRM/SIB/displacement form, RIP-relative, `FS`-relative), without `LOCK`, every width. -/
+theorem alu_eg_mem_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Config s)
+    {bytes : List Nat} (hcode : CodeAt s js.rip.toNat bytes) (hlim : js.rip.toNat + 17 < 2 ^ 47)
+    {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
+    (hpp : parsePrefixes bytes {} 0 = some (p, o :: m :: rest, n)) (ho : o < 0x40) (ho2 : o % 8 < 2)
+    {md reg ext : Nat} {a : Addr} {r3 : List Nat} {c : Nat}
+    (hmd : modrm (p.rex.getD 0) (m :: rest) = some (⟨md, reg, ext, .m a⟩, r3, c)) (hlk : p.lock = false)
+    (hstep : step bytes js = .ok js') :
+    ∃ s', (janus_x86_step ()).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ X86Config s' := by
+  cases hd : decode bytes with
+  | none => simp [step, hd] at hstep
+  | some il =>
+  obtain ⟨i, len⟩ := il
+  obtain ⟨hrep, rfl, hlen, rfl⟩ := decode_eg_mem hpp ho ho2 hmd hlk hd
+  rw [step_of_decode hd] at hstep
+  refine alu_eg_mem_core hrel hcfg hcode hlim hpp ho ho2 hmd (fun x rex hpr => ?_) hlen hstep
+  have := hpr.lck; rw [hlk] at this; simp only [Bool.false_eq_true, ↓reduceIte] at this
+  unfold lockChkEG; split <;> simp [this]
 
 end JanusX86.Proofs
