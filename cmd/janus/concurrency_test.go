@@ -71,32 +71,25 @@ func sandboxArgs() []string {
 	return nil
 }
 
-// testEnv is the environment of the janus subprocesses: the test cache, no JANUS_ROOT.
-func testEnv() []string {
-	var env []string
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "JANUS_ROOT=") && !strings.HasPrefix(e, "JANUS_CACHE_DIR=") {
-			env = append(env, e)
-		}
-	}
-	return append(env, "JANUS_CACHE_DIR="+cacheRoot())
-}
-
-func embeddedBase(t *testing.T) string {
+// embeddedBase is the cached base of the embedded framework in cache c.
+func embeddedBase(t *testing.T, c string) string {
 	t.Helper()
 	fw, err := loadFramework("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return filepath.Join(cacheRoot(), "v1", "framework", fw.Sha256[:24])
+	return filepath.Join(c, "v1", "framework", fw.Sha256[:24])
 }
 
 // TestConcurrentVerify runs verifications in parallel, of the same artifact and of different
 // ones, while `janus blockers` builds the decoder in the same framework build, first on the
 // cached embedded framework and then on a --janus-root checkout. Every one must succeed.
 func TestConcurrentVerify(t *testing.T) {
+	defer parallel(t)()
 	needLeanSlow(t)
-	useTestCache(t)
+	// A private copy of the test cache (seed_test.go): this test rebuilds the framework build,
+	// which must not disturb the tests and agents sharing the test cache.
+	cache := seededCache(t)
 	bin := buildJanusBinary(t)
 	sb := sandboxArgs()
 	add := mustExtract(t, "example.com/basic.Add")
@@ -108,7 +101,7 @@ func TestConcurrentVerify(t *testing.T) {
 		a := []string{"verify", arts[n], "--proof", filepath.Join(repoRoot, "examples", "proofs", n+".lean")}
 		return append(append(a, sb...), extra...)
 	}
-	env := testEnv()
+	env := cacheEnv(cache)
 	check := func(procs []*janusProc) {
 		t.Helper()
 		for _, p := range procs {
@@ -123,13 +116,16 @@ func TestConcurrentVerify(t *testing.T) {
 	}
 
 	// Make sure the base exists (built once per framework version; may take long the first time).
-	if code, _, stderr := runJanus(t, verifyArgs("Add")...); code != 0 {
-		t.Fatalf("priming verify: %s", stderr)
+	if p := []*janusProc{{name: "priming verify", args: verifyArgs("Add")}}; true {
+		runConcurrently(bin, env, p)
+		if p[0].code != 0 {
+			t.Fatalf("priming verify: %s", p[0].out)
+		}
 	}
 	// Then make the decoder build a real writer: drop the stamp and the decoder module, so the
 	// first process rebuilds and stamps, and blockers compiles Janus.Tools.Decode again while
 	// verifications are using the build.
-	base := embeddedBase(t)
+	base := embeddedBase(t, cache)
 	_ = os.Remove(base + ".ready")
 	removeModuleOutputs(filepath.Join(base, ".lake", "build", "lib", "lean"), "Janus.Tools.Decode")
 
@@ -169,18 +165,21 @@ func TestConcurrentVerify(t *testing.T) {
 // the lock (here the proof itself, compiled without a sandbox, appends to a framework olean) is
 // still rejected as "framework integrity", and the next verification repairs the build.
 func TestForeignFrameworkWriteDetected(t *testing.T) {
+	defer parallel(t)()
 	needLeanSlow(t)
-	useTestCache(t)
+	// A private copy of the test cache (seed_test.go): this test damages the framework build,
+	// which must not disturb the tests and agents sharing the test cache.
+	cache := seededCache(t)
 	bin := buildJanusBinary(t)
 	add := mustExtract(t, "example.com/basic.Add")
-	env := testEnv()
+	env := cacheEnv(cache)
 	good := []string{"verify", add, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean"), "--unsafe-no-sandbox"}
 	p := []*janusProc{{name: "priming verify", args: good}}
 	runConcurrently(bin, env, p)
 	if p[0].code != 0 {
 		t.Fatalf("priming verify failed:\n%s", p[0].out)
 	}
-	target := filepath.Join(embeddedBase(t), ".lake", "build", "lib", "lean", "Janus", "Tools", "Audit.olean")
+	target := filepath.Join(embeddedBase(t, cache), ".lake", "build", "lib", "lean", "Janus", "Tools", "Audit.olean")
 	before, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatal(err)

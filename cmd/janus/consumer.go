@@ -1150,6 +1150,16 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			failAll(err)
 			return
 		} else {
+			// The framework replay verdict of the trusted base build (replaymark.go): the
+			// workspace's framework modules are pinned to its bytes (samePins above, pinned.check
+			// after the replay), so a passing replay of those bytes covers them.
+			if ws.replayCache {
+				fwl := &pinnedLib{dir: janusLib, want: ws.framework}
+				if ok, lk := lookupFrameworkVerdict(frameworkVerdictKey(ws.tc.cacheID(), fwl)); ok {
+					defer lk.unlock()
+					plan.applyFrameworkVerdict(fwl)
+				}
+			}
 			run := func(argv ...string) (string, error) { return ws.runLeanDirect(leanPath, argv...) }
 			var all []string
 			for m := range union {

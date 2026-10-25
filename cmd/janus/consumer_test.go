@@ -397,7 +397,7 @@ func TestExplain(t *testing.T) {
 }
 
 func TestBatchRequestErrors(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	if _, err := findLake(); err != nil {
 		t.Skip("lake not installed")
 	}
@@ -445,7 +445,7 @@ func TestBatchRequestErrors(t *testing.T) {
 // reused across extractions, an unchanged second run rebuilds nothing, and failures in the
 // package are located in its files.
 func TestConsumerVerify(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	pkg := consumerCopy(t, "toml")
@@ -549,7 +549,7 @@ func TestConsumerVerify(t *testing.T) {
 
 // TestConsumerLakefileLean: the same package configured with lakefile.lean.
 func TestConsumerLakefileLean(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	pkg := consumerCopy(t, "lean")
@@ -567,7 +567,7 @@ func TestConsumerLakefileLean(t *testing.T) {
 // TestConsumerGit: janus required from git, pinned to a full revision and resolved with
 // lake update; a checkout that differs from the framework is rejected.
 func TestConsumerGit(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	if _, err := exec.LookPath("git"); err != nil {
@@ -627,7 +627,7 @@ func TestConsumerGit(t *testing.T) {
 // TestVerifyBatch: several requests, two extractions, one failing request that fails alone;
 // a second run rebuilds nothing.
 func TestVerifyBatch(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	pkg := consumerCopy(t, "toml")
@@ -706,7 +706,7 @@ func TestVerifyBatch(t *testing.T) {
 
 // TestInitEndToEnd: janus init, then the README's first verification.
 func TestInitEndToEnd(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	dir := filepath.Join(t.TempDir(), "hello-proofs")
@@ -735,7 +735,7 @@ func TestInitEndToEnd(t *testing.T) {
 // (as go install does) and verifies from a directory outside it with no JANUS_ROOT: the
 // framework comes from the binary.
 func TestInstallOutsideRepo(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	mod := t.TempDir()
