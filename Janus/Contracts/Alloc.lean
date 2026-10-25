@@ -12,10 +12,11 @@ for **every** code `impl` placed at the contract addresses that satisfies the co
 an ordinary `Tactic.Summary` hypothesis in the statement:
 
 ```
-theorem correctness (impl : List Segment) (rt : List (Nat × Nat))
+theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
     (hnew : NewobjectContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.newobject") rt 4096) :
-    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (pre rt) post
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b]
+      (fun s => pre rt s ∧ H [typ] (s.regs 28).toNat (s.sp.toNat - frame) (rtView rt s.mem)) post
 ```
 
 So the printed statement shows exactly what is assumed, nothing is added to the trusted base,
@@ -28,7 +29,9 @@ All of them describe Go 1.26 `runtime.mallocgc` (`malloc.go`), reached through
 (`mallocgc(et.Size_ * cap, et, true)`) and `runtime.growslice` (`slice.go`). From any state at
 the entry that satisfies the precondition (an admissible return address in `X30`, an aligned
 stack with the window the runtime may use writable, the type descriptor readable, the arguments
-in range so that no panic path is taken), the function returns to `X30` with
+in range so that no panic path is taken) **and in which the runtime is ready for the call**
+(`H`, see "The runtime's own state at a call" below: without it no code could meet the
+contracts, round 9 C1), the function returns to `X30` with
 
 * `X0` = a pointer `ptr` to a **fresh** object: `[ptr, ptr + blockSize size noscan)` lies inside
   one of the caller-declared **runtime-owned ranges** `rt`, is writable, below `2^48`, 8-aligned
@@ -154,6 +157,35 @@ theorem le_roundupsize (size : Nat) (noscan : Bool) : size ≤ roundupsize size 
     simp only [pageSize] at *
     omega
 
+theorem classSize_firstAtLeast_le (cs : List Nat) (n b : Nat) (hn : n ≤ b) (hcs : ∀ c ∈ cs, c ≤ b) :
+    classSize.firstAtLeast cs n ≤ b := by
+  induction cs with
+  | nil => exact hn
+  | cons c cs ih =>
+    simp only [classSize.firstAtLeast]
+    split
+    · exact hcs c (List.mem_cons_self ..)
+    · exact ih fun c' h => hcs c' (List.mem_cons_of_mem _ h)
+
+/-- A small request's block is at most `maxSmallSize` bytes. -/
+theorem blockSize_le_maxSmallSize (size : Nat) (noscan : Bool) (h : size ≤ maxSmallSize) :
+    blockSize size noscan ≤ maxSmallSize := by
+  have hcs : ∀ c ∈ sizeClasses, c ≤ 32768 := by decide
+  unfold blockSize roundupsize
+  split
+  · exact h
+  · split
+    · dsimp only
+      generalize hreq : (if (!noscan && decide (size > minSizeForMallocHeader)) = true
+        then size + mallocHeaderSize else size) = req
+      have : req ≤ 32768 := by
+        rw [← hreq]; simp only [maxSmallSize, mallocHeaderSize] at *; split <;> omega
+      have := classSize_firstAtLeast_le sizeClasses req 32768 this hcs
+      simp only [classSize, maxSmallSize] at *; omega
+    · simp only [maxSmallSize, pageSize] at *
+      have : (size + 8192 - 1) / 8192 ≤ 4 := by omega
+      omega
+
 theorem nextslicecap_go_ge (newLen c : Nat) : newLen ≤ nextslicecap.go newLen c := by
   induction c using nextslicecap.go.induct newLen with
   | case1 c c' h => rw [nextslicecap.go]; simp only [c'] at h; simp [h]
@@ -200,15 +232,104 @@ theorem _root_.Janus.InRanges.disjoint {a n b k : Nat} {rs : List (Nat × Nat)} 
   have := MemFrame.outside_mem hout hr
   omega
 
+/-- Does `mallocgc` place an 8-byte malloc header before the object? Go 1.26 does so for a
+pointerful object of more than `minSizeForMallocHeader` (512) bytes that is still small
+(`mallocgcSmallScanHeader`: the slot holds the type pointer, the object starts 8 bytes in), so
+such an object is 8-aligned but **not** 16-aligned (round 9 C2). -/
+def mallocHdr (size : Nat) (noscan : Bool) : Bool :=
+  !noscan && decide (minSizeForMallocHeader < size) && decide (size ≤ maxSmallSize - mallocHeaderSize)
+
 /-- What every allocation contract promises about the object at `ptr` in the returned memory
 `m`: inside the runtime-owned ranges `rt`, below `2^48`, writable, aligned, and zeroed if asked.
-`size` is the requested size, `round` the size of the block the caller may use (`blockSize`).
+`size` is the requested size, `round` the size of the block the caller may use (`blockSize`),
+`hdr` whether the object follows a malloc header (`mallocHdr`: then it is 8-aligned only).
 (A conjunction, `reducible`, so that `janus_run` splits it into hypotheses after the call.) -/
-@[reducible] def Fresh (rt : List (Nat × Nat)) (m : Memory) (ptr size round : Nat) (zero : Bool) :
-    Prop :=
+@[reducible] def Fresh (rt : List (Nat × Nat)) (m : Memory) (ptr size round : Nat) (zero : Bool)
+    (hdr : Bool := false) : Prop :=
   InRanges ptr round rt ∧ ptr + round ≤ 2 ^ 48 ∧ m.accessible ptr round true = true ∧
-    (16 ≤ size ∨ size % 8 = 0 → ptr % 8 = 0) ∧ (size % 16 = 0 → ptr % 16 = 0) ∧
+    (16 ≤ size ∨ size % 8 = 0 → ptr % 8 = 0) ∧ (size % 16 = 0 → hdr = false → ptr % 16 = 0) ∧
     (zero = true → ZeroBytes m ptr size) ∧ size ≤ round
+
+/-! ## The runtime's own state at a call (round 9 C1)
+
+A contract is a `Summary`: a claim about **every** state at the function's entry that satisfies
+its precondition. Before round 9 the precondition said nothing about the runtime's own state
+(the heap, the `mcache`, the `g`), so the contract demanded that the allocator return a fresh,
+writable object from states whose heap is not mapped at all, or whose request (up to `maxAlloc`,
+`2^48` bytes) no memory could hold. No code meets that (the object must be writable in the
+memory before the call, since instructions cannot add regions), so every theorem assuming such a
+contract was vacuous (`audit/round9/model/Unsat.lean`); and the real runtime, which throws
+`out of memory` for large requests and reads its own data structures, met it least of all.
+
+Now every contract takes a **readiness predicate** `H : RtReady`, and its precondition also
+requires `H args g sp (rtView rt s.mem)`: the call's arguments (as numbers), the current `g`
+(arm64 `R28`, amd64 `R14`), the stack pointer at the call, and the memory **as the runtime owns
+it** (`rtView`: the bytes inside `rt` and the regions; every other byte reads as 0). A theorem
+quantifies over `H` and assumes it at its entry for the call it makes. So:
+
+* the contract is satisfiable: a witness (an implementation, `rt` and `H`) is kernel-checked in
+  `audit/round9/controls/`;
+* the real runtime meets it with `H` := "from every call state with these arguments, this `g`,
+  this `SP` and this runtime memory (whatever the memory outside `rt` holds), the runtime's code
+  returns as the contract says" — by construction a function of what `H` sees, and true at the
+  calls the allocator serves without a system call, a stack move or a throw (the common case:
+  a free slot in the `mcache`, enough heap, no GC assist that parks);
+* the caller's own stores (outside `rt`) do not change `rtView rt` (`rtView_writeLE`), so `H`
+  carries from the entry of the function under proof to its call. -/
+
+/-- `m` as the runtime sees it: its bytes inside the runtime-owned ranges `rt`, every other byte
+`0`, and its regions. -/
+def rtView (rt : List (Nat × Nat)) (m : Memory) : Memory :=
+  { bytes := fun a => if rt.any (fun r => decide (r.1 ≤ a) && decide (a < r.2)) then m.bytes a else 0,
+    regions := m.regions }
+
+/-- A readiness predicate of the runtime: `H args g sp view` (see the section comment). -/
+abbrev RtReady := List Nat → Nat → Nat → Memory → Prop
+
+/-- A store outside the runtime-owned ranges does not change what the runtime sees. -/
+@[janus_exec, janus_post] theorem rtView_writeLE {rt : List (Nat × Nat)} {m : Memory} {a n v : Nat}
+    (h : Outside a n rt) : rtView rt (m.writeLE a n v) = rtView rt m := by
+  unfold rtView
+  congr 1
+  funext x
+  split
+  · rename_i hx
+    obtain ⟨r, hr, hx⟩ := List.any_eq_true.1 hx
+    have := MemFrame.outside_mem h hr
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at hx
+    exact Memory.bytes_writeLE_outside _ (by omega)
+  · rfl
+
+/-- Bytes inside `rt` read the same in the view. -/
+theorem rtView_bytes {rt : List (Nat × Nat)} {m : Memory} {a : Nat} (h : InRanges a 1 rt) :
+    (rtView rt m).bytes a = m.bytes a := by
+  obtain ⟨r, hr, h1, h2⟩ := h
+  simp only [rtView]
+  rw [if_pos (List.any_eq_true.2 ⟨r, hr, by simp only [Bool.and_eq_true, decide_eq_true_eq]; omega⟩)]
+
+/-- Reads inside `rt` are the same in the view. -/
+theorem readLE_rtView {rt : List (Nat × Nat)} {m : Memory} {a n : Nat} (h : InRanges a n rt) :
+    (rtView rt m).readLE a n = m.readLE a n := by
+  induction n generalizing a with
+  | zero => rfl
+  | succ n ih =>
+    obtain ⟨r, hr, h1, h2⟩ := h
+    rw [Memory.readLE_succ, Memory.readLE_succ, rtView_bytes ⟨r, hr, h1, by omega⟩,
+      ih ⟨r, hr, by omega, by omega⟩]
+
+/-- Zero bytes inside `rt` in the view are zero in memory. -/
+theorem ZeroBytes.of_rtView {rt : List (Nat × Nat)} {m : Memory} {a n : Nat}
+    (hz : ZeroBytes (rtView rt m) a n) (h : InRanges a n rt) : ZeroBytes m a n := by
+  intro i hi
+  obtain ⟨r, hr, h1, h2⟩ := h
+  rw [← rtView_bytes (rt := rt) ⟨r, hr, by omega, by omega⟩]
+  exact hz i hi
+
+@[simp] theorem rtView_regions (rt : List (Nat × Nat)) (m : Memory) :
+    (rtView rt m).regions = m.regions := rfl
+
+@[simp] theorem rtView_accessible (rt : List (Nat × Nat)) (m : Memory) (a n : Nat) (w : Bool) :
+    (rtView rt m).accessible a n w = m.accessible a n w := rfl
 
 /-- A `CBZ W` on a loaded word (the write-barrier flag test) as arithmetic, so that `janus_run`
 can prune the branch with `omega`. -/
@@ -317,7 +438,7 @@ def typPtrBytes (m : Memory) (typ : Nat) : Nat := m.readLE (typ + 8) 8
 /-- `!typ.Pointers()`. -/
 def typNoscan (m : Memory) (typ : Nat) : Bool := typPtrBytes m typ == 0
 
-attribute [janus_exec, janus_post] typSize typPtrBytes typNoscan maxAlloc
+attribute [janus_exec, janus_post] typSize typPtrBytes typNoscan maxAlloc mallocHdr minSizeForMallocHeader maxSmallSize mallocHeaderSize
 
 /-- The type descriptor at `typ` is readable (its `Size_` and `PtrBytes` words). -/
 def TypeOK (m : Memory) (typ : Nat) : Prop :=
@@ -330,6 +451,12 @@ def retState (s : State) (junk : Nat → W64) (res : List W64) (f : Flags)
   { s with regs := callRegs s.regs junk res, pc := s.regs 30, flags := f, vregs := v, mem := m }
 
 attribute [janus_exec, janus_post] retState calleeStack
+
+/-- The readiness hypothesis of an arm64 contract at the call state `s` (round 9 C1): `H` holds
+for the call's arguments `args`, the current `g` (`R28`), `SP` and the runtime's memory
+(`rtView rt s.mem`). -/
+@[reducible] def Ready (H : RtReady) (rt : List (Nat × Nat)) (args : List Nat) (s : State) : Prop :=
+  H args (s.regs 28).toNat s.sp.toNat (rtView rt s.mem)
 
 open Lean Meta in
 /-- `blockSize n b` for literal `n` and `b` evaluates to its value (a definitional unfolding the
@@ -366,21 +493,26 @@ def MallocgcPre (stack : Nat) (s : State) : Prop :=
   Fresh rt m ptr (s.regs 0).toNat
     (blockSize (s.regs 0).toNat ((s.regs 1).toNat == 0 || typNoscan s.mem (s.regs 1).toNat))
     ((s.regs 2).toNat % 256 != 0 || ((s.regs 1).toNat != 0 && !typNoscan s.mem (s.regs 1).toNat))
+    (mallocHdr (s.regs 0).toNat ((s.regs 1).toNat == 0 || typNoscan s.mem (s.regs 1).toNat))
 
 /-- **`runtime.mallocgc(size, typ, needzero)`** (arm64; `X0 = size`, `X1 = typ` or nil,
 `X2 = needzero` in its low byte). For `size > 0` the result is a fresh object of
 `blockSize size noscan` bytes, zeroed if `needzero` or the type has pointers; `size = 0` returns
 `&runtime.zerobase`, about which nothing is promised. A pointerful `typ` with `needzero = false`
-makes the runtime throw, so the precondition excludes it. -/
-def MallocgcContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) : Prop :=
-  Summary p addr (MallocgcPre stack)
+makes the runtime throw, so the precondition excludes it. The runtime must be ready for the call
+(`Ready H rt [size, typ, needzero]`, round 9 C1). -/
+def MallocgcContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+    (H : RtReady) : Prop :=
+  Summary p addr (fun s => MallocgcPre stack s ∧
+      Ready H rt [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s)
     (fun s s' => AllocRet rt stack 3 (fun ptr => [ptr]) s s' fun m ptr =>
       0 < (s.regs 0).toNat → mallocgcObj rt s m ptr)
 
 /-- `MallocgcContract` at a call of non-zero size. -/
 theorem MallocgcContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    (h : MallocgcContract p addr rt stack) :
-    Summary p addr (fun s => MallocgcPre stack s ∧ 0 < (s.regs 0).toNat)
+    {H : RtReady} (h : MallocgcContract p addr rt stack H) :
+    Summary p addr (fun s => (MallocgcPre stack s ∧
+        Ready H rt [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s) ∧ 0 < (s.regs 0).toNat)
       (fun s s' => AllocRet rt stack 3 (fun ptr => [ptr]) s s' (mallocgcObj rt s)) :=
   Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, h1, h2, h3⟩ =>
     ⟨ptr, j, f, v, m, h1, h2, h3 hp.2⟩
@@ -393,18 +525,22 @@ def NewobjectPre (stack : Nat) (s : State) : Prop :=
 @[reducible] def newobjectObj (rt : List (Nat × Nat)) (s : State) (m : Memory) (ptr : Nat) : Prop :=
   Fresh rt m ptr (typSize s.mem (s.regs 0).toNat)
     (blockSize (typSize s.mem (s.regs 0).toNat) (typNoscan s.mem (s.regs 0).toNat)) true
+    (mallocHdr (typSize s.mem (s.regs 0).toNat) (typNoscan s.mem (s.regs 0).toNat))
 
 /-- **`runtime.newobject(typ)`** (arm64; `X0 = typ`): `mallocgc(typ.Size_, typ, true)`, a fresh
-zeroed object of `typ.Size_` bytes (for a non-zero size). -/
-def NewobjectContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) : Prop :=
-  Summary p addr (NewobjectPre stack)
+zeroed object of `typ.Size_` bytes (for a non-zero size), when the runtime is ready for the call
+(`Ready H rt [typ]`, round 9 C1). -/
+def NewobjectContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+    (H : RtReady) : Prop :=
+  Summary p addr (fun s => NewobjectPre stack s ∧ Ready H rt [(s.regs 0).toNat] s)
     (fun s s' => AllocRet rt stack 1 (fun ptr => [ptr]) s s' fun m ptr =>
       0 < typSize s.mem (s.regs 0).toNat → newobjectObj rt s m ptr)
 
 /-- `NewobjectContract` for a type of non-zero size. -/
 theorem NewobjectContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    (h : NewobjectContract p addr rt stack) :
-    Summary p addr (fun s => NewobjectPre stack s ∧ 0 < typSize s.mem (s.regs 0).toNat)
+    {H : RtReady} (h : NewobjectContract p addr rt stack H) :
+    Summary p addr (fun s => (NewobjectPre stack s ∧ Ready H rt [(s.regs 0).toNat] s) ∧
+      0 < typSize s.mem (s.regs 0).toNat)
       (fun s s' => AllocRet rt stack 1 (fun ptr => [ptr]) s s' (newobjectObj rt s)) :=
   Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, h1, h2, h3⟩ =>
     ⟨ptr, j, f, v, m, h1, h2, h3 hp.2⟩
@@ -420,21 +556,27 @@ def MakeslicePre (stack : Nat) (s : State) : Prop :=
   Fresh rt m ptr (typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat)
     (blockSize (typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat)
       (typNoscan s.mem (s.regs 0).toNat)) true
+    (mallocHdr (typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat) (typNoscan s.mem (s.regs 0).toNat))
 
 /-- **`runtime.makeslice(et, len, cap)`** (arm64; `X0 = et`, `X1 = len`, `X2 = cap`), for
 arguments that take no panic path (`0 ≤ len ≤ cap < 2^63`, `et.Size_ · cap ≤ maxAlloc`; the panic
 paths `panicmakeslicelen`/`panicmakeslicecap` are excluded by the precondition rather than
-specified): a fresh zeroed block of `et.Size_ · cap` bytes (for a non-zero size). -/
-def MakesliceContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) : Prop :=
-  Summary p addr (MakeslicePre stack)
+specified): a fresh zeroed block of `et.Size_ · cap` bytes (for a non-zero size), when the runtime
+is ready for the call (`Ready H rt [et, len, cap]`, round 9 C1). -/
+def MakesliceContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+    (H : RtReady) : Prop :=
+  Summary p addr (fun s => MakeslicePre stack s ∧
+      Ready H rt [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s)
     (fun s s' => AllocRet rt stack 3 (fun ptr => [ptr]) s s' fun m ptr =>
       0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat → makesliceObj rt s m ptr)
 
 /-- `MakesliceContract` for a block of non-zero size. -/
 theorem MakesliceContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    (h : MakesliceContract p addr rt stack) :
+    {H : RtReady} (h : MakesliceContract p addr rt stack H) :
     Summary p addr
-      (fun s => MakeslicePre stack s ∧ 0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat)
+      (fun s => (MakeslicePre stack s ∧
+        Ready H rt [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s) ∧
+        0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat)
       (fun s s' => AllocRet rt stack 3 (fun ptr => [ptr]) s s' (makesliceObj rt s)) :=
   Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, h1, h2, h3⟩ =>
     ⟨ptr, j, f, v, m, h1, h2, h3 hp.2⟩
@@ -480,6 +622,12 @@ def GrowslicePre (stack : Nat) (s : State) : Prop :=
     ZeroBytes m (ptr + 8 * (s.regs 1).toNat)
       (8 * growCap8 (s.regs 1).toNat (s.regs 2).toNat - 8 * (s.regs 1).toNat)
 
+/-- The arguments of a `growslice` call (arm64, `X0 … X4`) as numbers. -/
+@[reducible] def growsliceArgs (s : State) : List Nat :=
+  [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat, (s.regs 3).toNat, (s.regs 4).toNat]
+
+attribute [janus_exec, janus_post] growsliceArgs
+
 /-- **`runtime.growslice(oldPtr, newLen, oldCap, num, et)`** (arm64; `X0 … X4`), for an element
 type of 8 bytes without pointers (`et.Size_ = 8`, `et.PtrBytes = 0`, e.g. `uint64`), with
 `oldLen = newLen - num`, `oldLen ≤ oldCap < newLen < 2^40` (no panic path) and the `oldLen` old
@@ -488,29 +636,32 @@ elements readable. Returns `(ptr, newLen, newCap)` in `X0, X1, X2` with
 `roundupsize`); the block of `8·newCap` bytes at `ptr` is fresh, its first `8·oldLen` bytes are
 the old elements (`memmove`), the bytes from `8·newLen` to `8·newCap` are zero
 (`memclrNoHeapPointers`), and the bytes of the `num` new elements are unspecified (the caller
-writes them). Other element types are not covered by this contract. -/
-def GrowsliceContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) : Prop :=
-  Summary p addr (GrowslicePre stack)
+writes them). Other element types are not covered by this contract. The runtime must be ready for
+the call (`Ready H rt [oldPtr, newLen, oldCap, num, et]`, round 9 C1). -/
+def GrowsliceContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+    (H : RtReady) : Prop :=
+  Summary p addr (fun s => GrowslicePre stack s ∧ Ready H rt (growsliceArgs s) s)
     (fun s s' => AllocRet rt stack 5
       (fun ptr => [ptr, s.regs 1, BitVec.ofNat 64 (growCap8 (s.regs 1).toNat (s.regs 2).toNat)])
       s s' (growsliceObj rt s))
 
 /-- `GrowsliceContract` at a call whose old elements are readable. -/
 theorem GrowsliceContract.withOld {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    (h : GrowsliceContract p addr rt stack) :
-    Summary p addr (fun s => GrowsliceArgs stack s ∧ GrowsliceOld s)
+    {H : RtReady} (h : GrowsliceContract p addr rt stack H) :
+    Summary p addr (fun s => (GrowsliceArgs stack s ∧ GrowsliceOld s) ∧ Ready H rt (growsliceArgs s) s)
       (fun s s' => AllocRet rt stack 5
         (fun ptr => [ptr, s.regs 1, BitVec.ofNat 64 (growCap8 (s.regs 1).toNat (s.regs 2).toNat)])
         s s' (growsliceObj rt s)) :=
-  Summary.mono h (fun _ h => ⟨h.1, fun _ => h.2⟩) fun _ _ _ h => h
+  Summary.mono h (fun _ h => ⟨⟨h.1.1, fun _ => h.1.2⟩, h.2⟩) fun _ _ _ h => h
 
 /-- `GrowsliceContract` at a call with no old elements (`newLen = num`). -/
 theorem GrowsliceContract.empty {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    (h : GrowsliceContract p addr rt stack) :
-    Summary p addr (fun s => GrowsliceArgs stack s ∧ (s.regs 1).toNat = (s.regs 3).toNat)
+    {H : RtReady} (h : GrowsliceContract p addr rt stack H) :
+    Summary p addr (fun s => (GrowsliceArgs stack s ∧ (s.regs 1).toNat = (s.regs 3).toNat) ∧
+      Ready H rt (growsliceArgs s) s)
       (fun s s' => AllocRet rt stack 5
         (fun ptr => [ptr, s.regs 1, BitVec.ofNat 64 (growCap8 (s.regs 1).toNat (s.regs 2).toNat)])
         s s' (growsliceObj rt s)) :=
-  Summary.mono h (fun _ h => ⟨h.1, fun h' => absurd h' (by omega)⟩) fun _ _ _ h => h
+  Summary.mono h (fun _ h => ⟨⟨h.1.1, fun h' => absurd h' (by omega)⟩, h.2⟩) fun _ _ _ h => h
 
 end Janus.Contracts
