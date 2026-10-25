@@ -1,3 +1,5 @@
+import Janus.Amd64.InstrSSE
+
 /-!
 # x86-64 instruction AST (supported subset)
 
@@ -298,6 +300,8 @@ inductive Instr where
   is naturally aligned, so that the locked access never splits a cache line (Linux with
   `split_lock_detect=fatal` kills a process that does that, `SIGBUS`). -/
   | locked (i : Instr) (a : Addr) (size : Nat)
+  /-- The legacy-SSE packed instructions (`Janus.Amd64.InstrSSE`, `DecodeSSE`, `ExecSSE`). -/
+  | sse (i : SseI XLoc Loc Addr)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Amd64
