@@ -57,7 +57,7 @@ theorem loop (p n : BitVec 64) (s : State) (hpre : SumPre p n s) :
   | zero =>
     intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw⟩ hs
     janus64_run
-    janus64_simp [SumPost, sumWords_succ, show n.toNat = i.toNat + 1 by omega]
+    janus64_simp [SumPost, sumWords_succ, show n.toNat = i.toNat + 1 by omega, hfw]
     omega
   | succ k ih =>
     intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw⟩ hs
@@ -65,7 +65,7 @@ theorem loop (p n : BitVec 64) (s : State) (hpre : SumPre p n s) :
     have hi : (i + 1#64).toNat = i.toNat + 1 := by
       rw [BitVec.toNat_add]; simp only [BitVec.toNat_ofNat]; omega
     apply ih _ (i + 1#64) _ (by omega) (by janus64_simp) rfl (by janus64_simp) ?_
-      (by simp only [Kept]; janus64_simp) (by janus64_simp [sumWords_succ, hi]; omega)
+      (by simp only [Kept]; janus64_simp [hfw]) (by janus64_simp [sumWords_succ, hi]; omega)
     · janus64_simp
       apply BitVec.eq_of_toNat_eq
       rw [BitVec.toNat_add]; simp only [BitVec.toNat_ofNat, hi]; omega
