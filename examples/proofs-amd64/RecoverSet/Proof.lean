@@ -13,6 +13,15 @@ namespace Proof
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.PanicAmd64
 open Janus.Contracts.MapAmd64 (keepABI_apply)
 
+/-! Code addresses are evaluated from the extraction (`janus_eval%`), so a relinked binary needs
+no edit: the deferred closure's entry, its return point after `CALL runtime.gorecover`, and the
+`deferreturn` call the runtime resumes at. -/
+local macro "func1A" : term =>
+  `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet.func1"))
+local macro "recoverRet" : term =>
+  `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b))
+local macro "resumeA" : term => `(janus_eval% (Extracted.entry + 0x86))
+
 set_option maxHeartbeats 0 in
 theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.Laws)
     (hpan : GopanicRecoverContract (Extracted.program.link impl)
@@ -112,7 +121,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     dsimp only at hcpc h2c h14c hloc hhic hpk hb0 hfrc h5c hcont
     simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h72, e23, e48] at hcpc h2c h14c hloc hhic hpk hb0 hfrc h5c hcont
     simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint, Janus.Arm64.Memory.readLE_writeLE_self, e32] at hcpc h2c
-    rw [show (4741376 : Nat) % 256 ^ 8 = 4741376 by decide] at hcpc
+    rw [show (func1A : Nat) % 256 ^ 8 = func1A by decide] at hcpc
     obtain ⟨cr, crip, cfl, cxm, cm, cyh, cfs, cdf, cmx⟩ := c
     dsimp only at hcpc h2c h14c hxc hdfc halc hloc hhic hrac hpk henvc hb0 hfrc h5c hcont
     subst hcpc hdfc
@@ -124,7 +133,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       rw [hfrc.accessible]; simp only [Janus.Arm64.Memory.accessible_writeLE]; exact hst
     have hcl : Janus.Amd64.Tactic.ReachesRet (Extracted.program.link impl)
         (BitVec.ofNat 64 (cm.readLE (cr 4).toNat 8))
-        ⟨cr, BitVec.ofNat 64 4741376, cfl, cxm, cm, cyh, cfs, false, cmx⟩ (fun c' =>
+        ⟨cr, BitVec.ofNat 64 func1A, cfl, cxm, cm, cyh, cfs, false, cmx⟩ (fun c' =>
           c'.regs 4 = cr 4 + 8 ∧ c'.regs 14 = cr 14 ∧ c'.regs 5 = cr 5 ∧ c'.xmm 15 = 0 ∧
           c'.df = false ∧ P.Env c'.mem ∧ P.Recovered c'.mem (s.regs 14).toNat ∧
           MemFrame cm c'.mem (P.priv ++ [((cr 4).toNat - 24 - P.depth, (cr 4).toNat),
@@ -157,7 +166,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
           (Janus.Arm64.Memory.accessible_mono _ hwin' (by omega) (by omega))
       intro G' hpcG hpost _ hpanI
       obtain ⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩ := hpost
-      have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b = 4741403 := by
+      have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b = recoverRet := by
         decide
       have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
       obtain ⟨hr0, hr1, hrec2⟩ := hpanI ⟨etyp.toNat, edata.toNat⟩ (cm.readLE (cr 4).toNat 8)
@@ -168,7 +177,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
           · exact Outside.of_sub hout (by omega) (by omega)))
         (by try simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, hc24]
             try simp only [Janus.Arm64.Memory.readLE_writeLE_self]
-            rw [show (4741403 : Nat) % 256 ^ 8 = 4741403 by decide, ← hsegf]; exact hw)
+            rw [show (recoverRet : Nat) % 256 ^ 8 = recoverRet by decide, ← hsegf]; exact hw)
         (by try simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, hc8]
             rw [show (cr 4).toNat - 8 + 8 = (cr 4).toNat by omega]
             simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint])
@@ -203,7 +212,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     refine Reaches.of_steps (hst3.withExit hret.fetch_none) ?_
     obtain ⟨dr, drip, dfl, dxm, dm, dyh, dfs, ddf, dmx⟩ := d
     dsimp only at hdpc hd4 hd5 hd14 hdx hddf hdfr hdenv hdcalm
-    rw [show Extracted.entry + 134 = 4741318 from rfl] at hdpc
+    rw [show Extracted.entry + 134 = resumeA from rfl] at hdpc
     subst hdpc hddf
     have hdr' : dr = setRegF (setRegF (setRegF dr 4 (s.regs 4 - 72#64 + 8)) 5 (s.regs 4 - 8#64))
         14 (s.regs 14) := by
@@ -253,8 +262,10 @@ def gopanicCode' : List Nat :=
    0x49, 0x89, 0x02, 0x49, 0x89, 0x5a, 0x08, 0x4c, 0x8d, 0x25, 0x17, 0x00, 0x00, 0x00, 0x4d, 0x89,
    0x62, 0x10, 0x49, 0xc7, 0x42, 0x18, 0x01, 0x00, 0x00, 0x00, 0x49, 0xc7, 0x42, 0x20, 0x00, 0x00,
    0x00, 0x00, 0x41, 0xff, 0xd3, 0x4c, 0x8b, 0x4c, 0x24, 0x10, 0x4c, 0x89, 0xcc, 0x41, 0xba, 0x00,
-   0x08, 0x01, 0x00, 0x49, 0xc7, 0x42, 0x18, 0x00, 0x00, 0x00, 0x00, 0x41, 0xbb, 0xc6, 0x58, 0x48,
-   0x00, 0x41, 0xff, 0xe3]
+   0x08, 0x01, 0x00, 0x49, 0xc7, 0x42, 0x18, 0x00, 0x00, 0x00, 0x00, 0x41, 0xbb,
+   janus_eval% ((Extracted.entry + 0x86) % 0x100), janus_eval% ((Extracted.entry + 0x86) / 0x100 % 0x100),
+   janus_eval% ((Extracted.entry + 0x86) / 0x10000 % 0x100), janus_eval% ((Extracted.entry + 0x86) / 0x1000000 % 0x100),
+   0x41, 0xff, 0xe3]
 
 def implAt : List Janus.Amd64.Segment :=
   [{ name := "gopanic", base := gAddr, bytes := gopanicCode' },
@@ -267,7 +278,7 @@ def linked : Janus.Amd64.Program :=
 theorem linked_eq : Extracted.program.link implAt = linked := rfl
 
 theorem gopanic_model' : GopanicRecoverContract (Extracted.program.link implAt) gAddr P0 23 48
-    0x4858c6 := by
+    resumeA := by
   rw [linked_eq]
   intro s hpc ⟨⟨henv, hg, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩, hx0, hbits, hb1, hb2, hb3, hs1,
     hs2, hf1, hf2, hc2⟩
@@ -295,7 +306,7 @@ theorem gopanic_model' : GopanicRecoverContract (Extracted.program.link implAt) 
   · intro c' hrip' h4' h14' h5' hx' hdf' hag henv' hrec
     obtain ⟨r', rip', fl', xm', m', yh', fs', df', mx'⟩ := c'
     simp only at hrip' h4' h14' h5' hx' hdf' hag henv' hrec ⊢
-    have hrip'' : rip' = BitVec.ofNat 64 4689893 := by
+    have hrip'' : rip' = BitVec.ofNat 64 (janus_eval% (gAddr + 0x45)) := by
       apply BitVec.eq_of_toNat_eq; rw [hrip']; rfl
     subst hrip'' hdf'
     have hwin' : m'.accessible ((s.regs 4).toNat - 48) 56 true = true := by

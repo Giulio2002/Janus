@@ -683,6 +683,10 @@ theorem correctness (P : PanicRuntime) (x etyp edata : BitVec 64) :
   hands over a closure-entry state `c`; destructure it (`obtain ⟨cr, csp, cpc, …⟩ := c; subst`),
   run the extracted closure to its return (a `ReachesRet` that is then fed to the contract's
   continuation) and continue at the resume state.
+* **Code addresses as values** (the closure's entry, the return point after `BL runtime.gorecover`,
+  the resume site, the resume address a model `gopanic` loads) are written as
+  `janus_eval% (segAddr Extracted.program "pkg.F.func1" + off)` / `janus_eval% (Extracted.entry +
+  off)` (local macros in `RecoverSet`), never as literals, so a relinked binary needs no edit.
 * **Opaque registers.** A contract's post state has an abstract register function `cr`; when the
   executor needs some of them concrete (the closure reads `X26`, the frame pointer), rewrite
   `cr` as `setReg` over itself with the known values first (`have : cr = fun i => if i = 26 then

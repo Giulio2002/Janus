@@ -25,6 +25,15 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 
 namespace Proof
 
+/-! Code addresses are evaluated from the extraction (`janus_eval%`), so a relinked binary needs
+no edit: the deferred closure's entry, its return point after `BL runtime.gorecover`, and the
+`deferreturn` call the runtime resumes at. -/
+local macro "func1A" : term =>
+  `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet.func1"))
+local macro "recoverRet" : term =>
+  `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36))
+local macro "resumeA" : term => `(janus_eval% (Extracted.entry + 0x84))
+
 set_option maxHeartbeats 0 in
 theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     (hpan : GopanicRecoverContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gopanic") P
@@ -114,7 +123,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     dsimp only at hcpc h26 h28 h18 hclo hchi hpk hb0 hfrc hcont
     simp only [h80, e39, e64, setReg_apply, reduceIte, Nat.reduceEqDiff] at hcpc h26 h28 h18 hclo hchi hpk hb0 hfrc hcont
     simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self, e32] at hcpc h26
-    have hcode : (592112 : Nat) % 256 ^ 8 = 592112 := by decide
+    have hcode : (func1A : Nat) % 256 ^ 8 = func1A := by decide
     rw [hcode] at hcpc
     obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
     dsimp only at hcpc h26 h28 h18 h29 hcal hclo hchi h30a h30b hpk henvc hb0 hfrc hcont
@@ -132,7 +141,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       rw [hfrc.accessible]; simp only [Memory.accessible_writeLE]; exact hst
     -- the deferred closure, run until it returns into the runtime
     have hcl : ReachesRet (Extracted.program.link impl) (cr 30)
-        ⟨cr, csp, BitVec.ofNat 64 592112, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ (fun c' =>
+        ⟨cr, csp, BitVec.ofNat 64 func1A, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ (fun c' =>
           c'.sp = csp ∧ c'.regs 28 = cr 28 ∧ c'.regs 18 = cr 18 ∧ P.Env c'.mem ∧
           P.Recovered c'.mem (s.regs 28).toNat ∧
           MemFrame cm c'.mem (P.priv ++ [(csp.toNat - 32 - P.depth, csp.toNat),
@@ -163,7 +172,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       intro G' hpcG hpost _ hpanI
       obtain ⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩ := hpost
       have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
-      have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36 = 592148 := by
+      have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36 = recoverRet := by
         decide
       obtain ⟨hr0, hr1, hrec2⟩ := hpanI ⟨etyp.toNat, edata.toNat⟩ (cr 30).toNat
         (hl.panicking_frame _ _ _ _ _ (by simpa [setReg] using hpk) (by
@@ -204,7 +213,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     refine Reaches.of_steps (hst3.withExit hret.fetch_none) ?_
     obtain ⟨dr, dsp, dpc, dfl, dm, ddz, dv, dtp, dfc, dfs⟩ := d
     dsimp only at hdpc hdsp hd28 hd18 hd29 hdfr hdenv hdcalm
-    rw [show Extracted.entry + 132 = 592052 from rfl] at hdpc
+    rw [show Extracted.entry + 132 = resumeA from rfl] at hdpc
     subst hdpc hdsp
     have hdr' : dr = setReg (setReg (setReg dr 18 (s.regs 18)) 28 (s.regs 28)) 29 (s.sp - 80#64 - 8) := by
       funext i; simp only [setReg]; split
@@ -249,8 +258,8 @@ def dAddr : Nat := Extracted.program.contractAddr "runtime.deferreturn"
 def gopanicCode' : List Nat :=
   [0x910003e9, 0xf940213a, 0xf940034b, 0xd10083ff, 0xf9000be9, 0x39009d3f, 0xd281000e, 0xf2a0002e,
    0xf90001c0, 0xf90005c1, 0x100000ed, 0xf90009cd, 0xd280002c, 0xf9000dcc, 0xf90011df, 0xd10023fd,
-   0xd63f0160, 0xf9400be9, 0x9100013f, 0xd10023fd, 0xd281000e, 0xf2a0002e, 0xf9000ddf, 0xd281168c,
-   0xf2a0012c, 0xd61f0180]
+   0xd63f0160, 0xf9400be9, 0x9100013f, 0xd10023fd, 0xd281000e, 0xf2a0002e, 0xf9000ddf, janus_eval% (0xd2800000 + (Extracted.entry + 0x84) % 0x10000 * 32 + 12),
+   janus_eval% (0xf2a00000 + (Extracted.entry + 0x84) / 0x10000 % 0x10000 * 32 + 12), 0xd61f0180]
 
 def implAt : List Segment :=
   [{ name := "gopanic", base := gAddr, words := gopanicCode' },
@@ -262,7 +271,7 @@ def linked : Program := { Extracted.program with segments := Extracted.program.s
 theorem linked_eq : Extracted.program.link implAt = linked := rfl
 
 theorem gopanic_model' : GopanicRecoverContract (Extracted.program.link implAt) gAddr P0 39 64
-    0x908b4 := by
+    resumeA := by
   rw [linked_eq]
   intro s hpc ⟨⟨henv, hg, ⟨h30a, h30b, hsp, hst, h8, hwin, hacc⟩, hout⟩, hx0, hbits, hb1, hb2, hb3,
     hs1, hs2, hf1, hf2, hc1, hc2⟩
