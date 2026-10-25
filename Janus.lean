@@ -10,6 +10,7 @@ import Janus.GoABI
 import Janus.CABI
 import Janus.FFI
 import Janus.Tactic
+import Janus.Tactic.Addr
 import Janus.Tactic.Atomic
 import Janus.Tactic.Vector
 import Janus.Tactic.Float

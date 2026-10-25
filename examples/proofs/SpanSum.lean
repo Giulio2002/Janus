@@ -41,10 +41,10 @@ def spanSum (lo : BitVec 64) : Nat → BitVec 64
 abbrev mem0 (s : State) (ret : Nat) (hi : BitVec 64) : Memory :=
   ((((((((((s.mem.writeLE (BitVec.toNat s.sp - 80) 8 ret).writeLE (BitVec.toNat s.sp - 88) 8
     (BitVec.toNat (s.regs 29))).writeLE (BitVec.toNat s.sp - 48) 8 0).writeLE
-    (BitVec.toNat s.sp - 40) 8 1).writeLE (BitVec.toNat s.sp - 32) 8 590208).writeLE
+    (BitVec.toNat s.sp - 40) 8 1).writeLE (BitVec.toNat s.sp - 32) 8 (segAddr Extracted.program "example.com/basic.SpanSum-range1")).writeLE
     (BitVec.toNat s.sp - 24) 8 (BitVec.toNat s.sp - 40)).writeLE
     (BitVec.toNat s.sp - 16) 8 (BitVec.toNat s.sp - 48)).writeLE
-    (BitVec.toNat s.sp - 128) 8 590132).writeLE (BitVec.toNat s.sp - 136) 8 (BitVec.toNat s.sp - 88)).writeLE
+    (BitVec.toNat s.sp - 128) 8 (segAddr Extracted.program "example.com/basic.SpanSum" + 0x44)).writeLE (BitVec.toNat s.sp - 136) 8 (BitVec.toNat s.sp - 88)).writeLE
     (BitVec.toNat s.sp - 56) 8 (BitVec.toNat s.sp - 32)).writeLE (BitVec.toNat s.sp - 96) 8 hi.toNat
 
 theorem loop (lo hi : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program ret) (s : State)
@@ -70,6 +70,7 @@ theorem loop (lo hi : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program r
   induction n with
   | zero =>
     intro S i acc m hn hlo hih hpc h0 h1 h2 hsp h28 h18 hm hfr hst hsum hacc
+    simp only [mem0, reduceSegAddr, Nat.reduceAdd] at hfr
     janus_run [hst, hsum]
     rw [hacc]
     rcases hih with h | h
@@ -77,15 +78,13 @@ theorem loop (lo hi : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program r
     · subst h; rw [show hi.toNat - i.toNat = 0 by omega, Nat.sub_self]
   | succ n ih =>
     intro S i acc m hn hlo hih hpc h0 h1 h2 hsp h28 h18 hm hfr hst hsum hacc
+    simp only [mem0, reduceSegAddr, Nat.reduceAdd] at hfr
     janus_run until [head]
     have hlt : i.toNat < hi.toNat := by omega
     have hi1 : (i + 1#64).toNat = i.toNat + 1 := by
       rw [BitVec.toNat_add, BitVec.toNat_ofNat]; have := hi.isLt; omega
     apply ih _ (i + 1#64) (acc + i)
-      ((((((m.writeLE (BitVec.toNat s.sp - 104) 8 i.toNat).writeLE (BitVec.toNat s.sp - 160) 8 589996).writeLE
-        (BitVec.toNat s.sp - 168) 8 (BitVec.toNat (S.regs 29))).writeLE (BitVec.toNat s.sp - 40) 8 2).writeLE
-        (BitVec.toNat s.sp - 48) 8 (m.readLE (BitVec.toNat s.sp - 48) 8 + i.toNat)).writeLE
-        (BitVec.toNat s.sp - 40) 8 1)
+    all_goals try (with_reducible rfl)
     all_goals try janus_simp
     · omega
     · omega
@@ -97,6 +96,7 @@ theorem loop (lo hi : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program r
           (BitVec.toNat s.sp - 104, BitVec.toNat s.sp - 96), (BitVec.toNat s.sp - 48, BitVec.toNat s.sp - 32)] := by simp
       have hr3 : (BitVec.toNat s.sp - 48, BitVec.toNat s.sp - 32) ∈ [(BitVec.toNat s.sp - 168, BitVec.toNat s.sp - 152),
           (BitVec.toNat s.sp - 104, BitVec.toNat s.sp - 96), (BitVec.toNat s.sp - 48, BitVec.toNat s.sp - 32)] := by simp
+      simp only [mem0, reduceSegAddr, Nat.reduceAdd]
       exact (((((hfr.writeLE _ hr2 (by omega) (by omega)).writeLE _ hr1 (by omega) (by omega)).writeLE _ hr1
         (by omega) (by omega)).writeLE _ hr3 (by omega) (by omega)).writeLE _ hr3 (by omega) (by omega)).writeLE _
         hr3 (by omega) (by omega)
