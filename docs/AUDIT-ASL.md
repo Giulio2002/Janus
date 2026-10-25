@@ -186,11 +186,20 @@ backend (built against the pinned lean-sail), and run on the same inputs:
 | assignments in `if`/`match` branches bound by `let` | (pre-existing case) | 2 × 256 | yes |
 | `RoundTowardsZero(Real(a)/Real(b))` for 64-bit and 80-bit operands, negative cases, `INT_MIN/-1` | 6 (`Rat`) | 7 | yes |
 | `pow_real` with negative and positive exponents, negative base | 6 | 3 | yes |
+| `sqrt_real` (the replacement of JanusASL/sail/fakereal_sqrt.py, applied to the probe's `FakeReal.lean` as `scripts/asl.sh gen` does): `⌊√(a/b)·2^80⌋` for squares, non-squares, tiny and huge rationals | 7 (`sqrt_real`) | 30 | yes |
 
 `FakeReal.lean` was also read line by line. `round_down`/`round_up` are `Rat.floor`/`Rat.ceil`
 (Sail C: `mpq` floor/ceil). `abs`, comparisons and `to_real` are exact. `real_power x n` is
-`x ^ n` over `Rat` (checked: `2^-3 = 1/8`, `(-2)^3 = -8`). Only `sqrt_real` is inexact, and it
-is not reached (it does not occur in the generated model). `real_power` is reached, by the FP
+`x ^ n` over `Rat` (checked: `2^-3 = 1/8`, `(-2)^3 = -8`). `sqrt_real` is reached by FSQRT
+since the scalar floating-point instructions are in the slice; `scripts/asl.sh gen` replaces the
+toolchain's `Float` version by a round-to-odd approximation at 2^-1100 (docs/ASL.md, fix 7).
+It is checked against Sail's C backend twice: the `rsq` probe above (the function itself), and row
+**A5 fsqrt**, which runs about 7,000 FSQRT cases (audit/rt-asl/sqrt/gen_cases.py: binary32 and
+binary64, all four rounding modes, FPCR.FZ and FPCR.DN on and off; exact squares, normals,
+denormals, roots next to a rounding midpoint, ±0, ±∞, negative operands (default NaN and IOC),
+quiet and signalling NaNs with payloads) on JanusASL's Lean model (`janus-asl-check --dump-asl`)
+and on oracle-sail's driver (sail-arm compiled by Sail's C backend, whose `sqrt_real` is GMP
+Newton iteration to 10^-30). V0–V31 and FPSR must be equal on every case (7,248 of 7,248 equal). `real_power` is reached, by the FP
 helpers (`FPRound`, `FPUnpack`, `2^1000000` for infinities), which are outside the proved
 subset. Patches 1–3 only change printing (a one-bit vector is its bit; parenthesised `do`
 branches; `(← do e)` fields). None of them changes a bit-vector operation.

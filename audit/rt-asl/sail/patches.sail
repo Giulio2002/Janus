@@ -114,3 +114,9 @@ function vcat(v) = {
   let t : int = { (hi @ lo) = v; unsigned(hi) };
   t * 1000 + unsigned(hi) * 16 + unsigned(lo)
 }
+
+/* The sqrt_real replacement (JanusASL/sail/fakereal_sqrt.py; run.sh applies it to this probe's
+   FakeReal.lean as scripts/asl.sh gen does): floor(sqrt(a/b) * 2^80), Lean against C (GMP Newton
+   iteration to 10^-30). */
+val rsq : (int, int) -> int
+function rsq(a, b) = floor(mult_real(sqrt(div_real(to_real(a), to_real(b))), pow_real(to_real(2), 80)))

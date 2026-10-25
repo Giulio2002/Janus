@@ -583,6 +583,28 @@ def main (args : List String) : IO UInt32 := do
         IO.println s!"{nm}: fault {repr d.fault.statuscode} pa {hex d.paddress.address.toNat} {repr d.paddress.paspace} memtype {repr d.memattrs.memtype} inner {d.memattrs.inner.attrs} outer {d.memattrs.outer.attrs} tags {repr d.memattrs.tags} tagchecked {tc}"
       | .error e => IO.println s!"{nm}: {e}"
     return 0
+  if path == "--dump-asl" then
+    -- The ASL side only, one JSON line per case (V0-V31, FPSR, outcome), for comparing the Lean
+    -- model with Sail's C backend (audit/rt-asl/sqrt: FSQRT and the `sqrt_real` replacement).
+    let cases ← IO.FS.lines out
+    for l in cases do
+      let l := l.trimAscii.toString
+      if l == "" then continue
+      match parseCase l with
+      | .error e => throw (IO.userError s!"bad case: {e}")
+      | .ok c =>
+        let (r, _, _) := runAsl base c
+        let j := match r with
+          | .ok _ _ _ _ _ _ vs fpsr => Json.mkObj [("id", c.id), ("status", "ok"),
+              ("v", Json.arr (vs.map fun x => Json.str (hex x))), ("fpsr", hex fpsr)]
+          | .exception ty syn _ => Json.mkObj [("id", c.id), ("status", s!"exception {excName ty} {hex syn}")]
+          | .undefined => Json.mkObj [("id", c.id), ("status", "undefined")]
+          | .unpredictable => Json.mkObj [("id", c.id), ("status", "unpredictable")]
+          | .impdef s => Json.mkObj [("id", c.id), ("status", s!"impdef {s}")]
+          | .other s => Json.mkObj [("id", c.id), ("status", s!"other {s}")]
+          | .error s => Json.mkObj [("id", c.id), ("status", s!"error {s}")]
+        IO.println j.compress
+    return 0
   -- The corpus (about 1 GB of JSON lines) is streamed: cases are read, run and written in
   -- batches of `jobs * 256`, one batch running while the next is read, so memory is bounded by
   -- two batches whatever the corpus size. Verdicts are written in corpus order, as before.

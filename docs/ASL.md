@@ -475,7 +475,8 @@ upstream (none has been filed):
    mechanically (JanusASL/sail/fakereal_sqrt.py) by the round-to-odd approximation at absolute
    precision 2^-1100: `m/2^1100` when `m = ⌊√x·2^1100⌋` is exact, `(2m+1)/2^1101` otherwise.
    Every boundary FPRound tests for binary16/32/64 is a multiple of 2^-1100, so FPRound of it
-   equals FPRound of the exact root (result and exceptions). The corpus FSQRT cases agree.
+   equals FPRound of the exact root (result and exceptions). The corpus FSQRT cases agree, and
+   rt-asl rows A5 rsq and A5 fsqrt check it against Sail's C backend (docs/AUDIT-ASL.md, A5).
 
 Bugs 4–6 each produced a model that compiled without complaint but gave wrong results. Only the
 corpus comparison found them. That comparison is the reason the check exists alongside the
