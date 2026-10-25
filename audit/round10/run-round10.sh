@@ -88,6 +88,16 @@ open(p, "w").write(s)
 EOF
 python3 -I audit/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check SAT_selftest_witness_must_name_contract $? "a theorem assign_satisfiable : True does not count as a witness"
+# the check reads only the tree under test: a contract file linked in from elsewhere is an error
+S10="$T/satlink"; mkdir -p "$S10/audit/round9" "$T/elsewhere"; cp -r Janus Janus.lean "$S10/"; cp audit/round9/sat-pending.txt "$S10/audit/round9/"
+printf 'def EvilContract (p : Nat) : Prop :=\n  Summary p 0 (fun _ => True) (fun _ _ => True)\n' > "$T/elsewhere/Evil.lean"
+ln -s "$T/elsewhere/Evil.lean" "$S10/Janus/Contracts/Evil.lean"
+o="$(python3 -I audit/round9/sat_check.py "$S10" 2>&1)"; rc=$?
+[ $rc -ne 0 ] && grep -q 'SAT ERROR.*Janus/Contracts/Evil.lean is not a regular file of the tree under test' <<<"$o"
+check SAT_reads_only_the_tree_under_test $? "a Janus/Contracts file linked from outside the tree is refused: $(grep -m1 -o 'SAT ERROR.\{0,60\}' <<<"$o")"
+o="$(python3 -I audit/round9/sat_check.py "$root" | head -1)"
+[ "$o" = "SAT tree    $(cd "$root" && pwd -P) ($(git -C "$root" ls-files --cached --others --exclude-standard -- Janus Janus.lean | while read -r f; do [ -e "$f" ] && echo; done | wc -l) files)" ]
+check SAT_scans_tracked_tree $? "$o"
 
 echo "== real-runtime probes (audit/round10/probe; go1.26.0)"
 P="$T/probe"; mkdir -p "$P"
