@@ -12,7 +12,7 @@ decimal; blank lines are skipped) and prints one line per word:
 0x4e083c00 none
 ```
 
-`ok` means `Janus.Arm64.decode` accepts the word (the rest of the line is the decoded `Instr`);
+`ok` means `Janus.Arm64.decodeAll` (the decoder of `step`) accepts the word (the rest of the line is the decoded `Instr`);
 `none` means the model rejects it, so executing it faults with `undecodable`. A line that is not
 a word prints `error <reason>` and the tool exits with status 1 at the end. `janus blockers`
 drives this tool.
@@ -73,7 +73,7 @@ def handle (line : String) : String × Bool :=
   | none => (s!"error cannot parse {line.quote}", true)
   | some w =>
     if w ≥ 2 ^ 32 then (s!"error {hex w} is not a 32-bit word", true) else
-    match decode w with
+    match decodeAll w with
     | some i => (s!"{hex w} ok {(repr i).pretty 100000}", false)
     | none => (s!"{hex w} none", false)
 

@@ -13,7 +13,7 @@ import (
 // must be rejected at the statement-identity stage; the theorem-level binder of round 3 (R2)
 // stays accepted.
 func TestBoundInstanceRejected(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {

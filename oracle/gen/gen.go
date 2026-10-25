@@ -145,6 +145,9 @@ func Setup(r *rand.Rand, w uint32) State {
 		setupFP(r, w, &s)
 		return s
 	}
+	if c := Classify(w); len(c) > 5 && c[:5] == "simd." {
+		setupNeon(r, w, &s)
+	}
 	rt, rn, rm := bits(w, 4, 0), bits(w, 9, 5), bits(w, 20, 16)
 	setBase := func(base uint64) {
 		if rn == 31 {
