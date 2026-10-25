@@ -232,18 +232,62 @@ The harvested classes include `cmov`, `setcc`, `lea`, `imul`, `mul`, `div`/`idiv
 `movsx`/`movzx`/`movsxd`, `cqo`/`cdqe`, `bswap`, `bsr`, `ror`, `leave`, `push`/`pop` and the
 `ENDBR64`/`nopw` forms. `scripts/oracle-amd64.sh full` now adds this C corpus to the harvest.
 
+### GOAMD64=v3 extensions (2026-10-25)
+
+BMI1 (`ANDN BLSR BLSMSK BLSI BEXTR`), BMI2 (`SHLX SHRX SARX RORX MULX BZHI PDEP PEXT`), `MOVBE`,
+the 48 scalar FMA3 forms and SSSE3 `PSHUFB`/`PSIGNB` (WP-B). `scripts/oracle-amd64.sh v3` runs
+the targeted specs (`gen.V3Specs`: `MOVBE` load/store/16-bit with the `CRC32` and `F3`
+neighbours and the `#UD` register forms, `PSHUFB`/`PSIGNB` with their MMX forms and the other
+SSSE3 opcodes; `gen.V3VexSpecs`: every BMI opcode/`pp` pair, the `#UD` neighbours, and the
+scalar and packed FMA opcodes, with `VEX.vvvv` uniform, `VEX.W` uniform, `VEX.L1` one time in
+eight, and stray prefixes, maps and `pp`), the `edge/fma` family (each of the 48 forms on
+register triples whose addend is crafted against the product: the negated rounded product, so
+that only a single rounding gets the sum right, one ulp away, half an ulp of it, or an IEEE edge
+value; each under the 16 `RC` × `FTZ` × `DAZ` settings and with each exception unmasked alone)
+and every v3-extension instruction of `GOAMD64=v3` test binaries of `math math/big strconv
+internal/strconv internal/runtime/maps encoding/binary math/bits reflect internal/abi math/rand
+runtime`. `SHLX SHRX SARX BEXTR BZHI` get interesting counts/controls in `VEX.vvvv`, `PDEP`/`PEXT`
+sparse, dense and contiguous masks, `PSIGNB`/`PSHUFB` zero, positive and negative bytes.
+
+| run | cases | agree | of which both fault | model-gap | **MISMATCH** |
+|---|---:|---:|---:|---:|---:|
+| `v3`, `SEED=1`, `N=600`, `V3_K=12` | 198,440 | 167,902 | 38,887 | 30,538 | **0** |
+| `v3`, `SEED=2`, `N=1200`, `V3_K=24` | 396,740 | 333,512 | 78,024 | 63,228 | **0** |
+| of which (`SEED=2`) `edge/fma` | 158,400 | 133,577 | 6,314 | 24,823 | **0** |
+| of which (`SEED=2`) targeted BMI/`MOVBE`/`PSHUFB`/`PSIGNB` | 65,545 | 63,829 | 13,573 | 1,716 | **0** |
+| of which (`SEED=2`) targeted scalar FMA | 66,450 | 57,078 | 8,754 | 9,372 | **0** |
+| of which (`SEED=2`) harvested (v3 binaries) | 36,840 | 35,986 | 6,341 | 854 | **0** |
+| `full` (now with 4 `GOAMD64=v3` binaries in the harvest) | 1,189,811 | 933,564 | | 256,247 | **0** |
+
+The gaps are what the decoder refuses on purpose or where the model faults on purpose, and were
+checked case by case: every `undefinedResult` gap of an FMA case is one with two or more NaN
+operands or `0 × ∞ + NaN` (15,412 of 15,412 register-form cases in the `SEED=1` run recomputed
+from the case state, `DAZ` included); the other FMA gaps are `VEX.L1` (`LIG`, executed by the
+host); `PSHUFB`/`PSIGNB` gaps are the MMX forms; `MOVBE`/`RORX` gaps are `RIP`-relative accesses
+outside the buffer. Host probes (`Intel Xeon Gold 5412U`) that fixed the FMA rules before the
+run: with several NaN operands Intel returns the first in the order multiplicand, multiplicand,
+addend (quieted, `IE` for any signalling one); a NaN is never negated by `VFNMADD`/`VFMSUB`;
+`0 × ∞ + qNaN` returns the NaN without `IE`; `DE` is not raised when a NaN takes precedence. The
+model faults in the two vendor-dependent cases (see `FP.fma`).
+
 ## Running it
 
 ```
 scripts/oracle-amd64.sh selftest   # build, check the native harness on known answers (109 checks)
 scripts/oracle-amd64.sh quick      # generated cases only (~100k)
 scripts/oracle-amd64.sh full       # generated + edge + harvested from real Go binaries (default)
+scripts/oracle-amd64.sh fp         # SSE scalar floating point only
+scripts/oracle-amd64.sh v3         # the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, FMA, PSHUFB/PSIGNB)
 ```
 
 Knobs: `OUT` (default `artifacts/oracle-amd64`), `JOBS` (default 16, capped at 24), `N`
 (encodings per targeted spec), `GROUP` (random strings), `K` (states per harvested
 instruction), `PER_CLASS`, `SEED`, `MODEL` (`MODEL=oracle-amd64/bin/fakemodel` exercises the
-pipeline without Lean). After a model change the native side can be reused:
+pipeline without Lean), `KEEP` (what the run leaves in `OUT`: by default `summary.md`,
+`repro.*`, `mismatches.jsonl` and the cases, hardware, model and verdict dumps zstd-compressed,
+with the generated and harvested inputs removed; `KEEP=zst` compresses everything, `KEEP=1`
+keeps everything raw; see docs/ORACLE.md and `scripts/lib/artifacts.sh`). After a model change
+the native side can be reused (decompress `hw.jsonl.zst` in `DIR` first):
 `oracle-amd64/bin/oracle run -reuse-native -runner oracle-amd64/bin/runner -model .lake/build/bin/janus-oracle-amd64 -cases A,B -out DIR`.
 `oracle minimize -out DIR` shrinks mismatching cases into `repro.md`/`repro.jsonl`. A full run
 takes about 90 s, including the corpus build.

@@ -54,6 +54,7 @@ deriving instance ToExpr for BitfieldOp
 deriving instance ToExpr for Imm9Mode
 deriving instance ToExpr for PairMode
 deriving instance ToExpr for AtomicOp
+deriving instance ToExpr for CryptoInstr
 deriving instance ToExpr for Instr
 deriving instance ToExpr for StubKind
 

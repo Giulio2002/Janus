@@ -1,6 +1,7 @@
 import Janus.Arm64.Instr
 import Janus.Arm64.Bits
 import Janus.Arm64.DecodeFloat
+import Janus.Arm64.DecodeCrypto
 
 /-!
 # A64 decoder for the supported subset
@@ -420,7 +421,7 @@ def decodeDPReg (w : Nat) : Option Instr :=
         else if opcode = 0b001001 then some (.shiftV sf .lsr rm rn rd)
         else if opcode = 0b001010 then some (.shiftV sf .asr rm rn rd)
         else if opcode = 0b001011 then some (.shiftV sf .ror rm rn rd)
-        else none  -- CRC32, PAC, MTE, ...
+        else (decodeCrc32 w).map .crypto  -- CRC32 (`Janus.Arm64.DecodeCrypto`); PAC, MTE, ...: none
       else
         -- Data-processing (1 source): sf 1 0 11010110 opcode2 opcode Rn Rd
         let opcode := bits w 15 10
@@ -460,9 +461,10 @@ def highestSetBit4 (v : Nat) : Nat :=
 
 /-- Scalar floating-point and Advanced SIMD data processing (`op0 = x111`): the Advanced SIMD
 integer and move instructions (see `Instr`), and the scalar single/double floating-point classes
-(`decodeFloat`, `decodeFpCvtInt` in `Janus.Arm64.DecodeFloat`). Advanced SIMD floating point,
-half precision, conversions to and from fixed point, crypto other than AES, saturating,
-rounding, widening/narrowing arithmetic other than XTN/SHRN/SSHLL/USHLL, permutes, and every
+(`decodeFloat`, `decodeFpCvtInt` in `Janus.Arm64.DecodeFloat`), and the crypto, PMULL, permute
+and scalar DUP classes (`decodeCrypto` in `Janus.Arm64.DecodeCrypto`). Advanced SIMD floating
+point, half precision, conversions to and from fixed point, SM3/SM4, saturating,
+rounding, widening/narrowing arithmetic other than XTN/SHRN/SSHLL/USHLL/PMULL, and every
 reserved or unallocated encoding within the accepted classes are rejected. -/
 def decodeSimdDP (w : Nat) : Option Instr :=
   let rd := bits w 4 0
@@ -566,7 +568,12 @@ def decodeSimdDP (w : Nat) : Option Instr :=
         (sf && ftype = 2 && rmode = 1) then
       some (.fmovGen sf ftype rmode opcode rn rd)
     else none
-  else decodeFloat w  -- scalar floating point (`Janus.Arm64.DecodeFloat`)
+  else
+    -- crypto extension, PMULL, permutes, scalar DUP (`Janus.Arm64.DecodeCrypto`), then scalar
+    -- floating point (`Janus.Arm64.DecodeFloat`); the two accept disjoint encodings
+    match decodeCrypto w with
+    | some c => some (.crypto c)
+    | none => decodeFloat w
 
 /-- Decode a 32-bit A64 instruction word. Words `≥ 2^32` are rejected. -/
 def decode (w : Nat) : Option Instr :=

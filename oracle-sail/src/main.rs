@@ -88,8 +88,8 @@ struct Case {
     fpcr: String,
     #[serde(default)]
     fpsr: String,
-    /// Sequence mode (docs/ORACLE.md): a block laid out from TestPC, run until the PC leaves
-    /// it; `word` is then ignored.
+    /// Sequence mode (`layout.Case.Words`): a straight-line block laid out from TestPC; `word`
+    /// is ignored when this is non-empty.
     #[serde(default)]
     words: Vec<String>,
 }
@@ -398,6 +398,22 @@ impl Cpu {
                 return r;
             }
         };
+        // Sequence mode: the block laid out from TestPC (at most 0x180 words, as the qemu
+        // runner allows), stepped while the PC stays inside it.
+        let mut block: Vec<u32> = Vec::new();
+        for hw in &c.words {
+            match parse_hex(hw) {
+                Ok(v) if v <= 0xffff_ffff => block.push(v as u32),
+                _ => {
+                    err(&mut r, "bad words entry".into());
+                    return r;
+                }
+            }
+        }
+        if block.len() > 0x180 {
+            err(&mut r, "words too long".into());
+            return r;
+        }
         let pc = if c.pc.is_empty() { Ok(TEST_PC) } else { parse_hex(&c.pc) };
         if pc != Ok(TEST_PC) {
             err(&mut r, "pc must be layout.TestPC".into());
@@ -442,10 +458,6 @@ impl Cpu {
         if block.is_empty() {
             code[off..off + 4].copy_from_slice(&word.to_le_bytes());
         } else {
-            if block.len() > 0x180 {
-                err(&mut r, "words too long".into());
-                return r;
-            }
             for (i, w) in block.iter().enumerate() {
                 code[off + 4 * i..off + 4 * i + 4].copy_from_slice(&w.to_le_bytes());
             }
@@ -523,19 +535,16 @@ impl Cpu {
         if block.is_empty() {
             self.o.step(word);
         } else {
-            // Step the block until the PC leaves it (falling through to the UDF after it, a
-            // branch out, or an exception to EL1), at most 4·n+1 instructions (the Lean side's
-            // fuel, Oracle.runSeq).
+            // Inject the word at the PC (the crate has no instruction fetch) until the PC
+            // leaves the block, an exception is taken, or a Sail exception escapes.
             let end = TEST_PC + 4 * block.len() as u64;
             for _ in 0..4 * block.len() + 1 {
-                let pc = self.o.get_pc();
-                if self.el() != 0 || pc < TEST_PC || pc >= end || pc % 4 != 0 {
+                let p = self.o.get_pc();
+                if self.el() != 0 || p < TEST_PC || p >= end || (p - TEST_PC) % 4 != 0
+                    || uncaught_count() != un0 {
                     break;
                 }
-                self.o.step(block[((pc - TEST_PC) / 4) as usize]);
-                if uncaught_count() != un0 {
-                    break;
-                }
+                self.o.step(block[((p - TEST_PC) / 4) as usize]);
             }
         }
         r.unpredictable = (unpredictable_count() - cu0) as i64;

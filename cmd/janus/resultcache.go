@@ -215,6 +215,7 @@ func lookupResult(key string) *verifiedReport {
 	if json.Unmarshal(e.Report, &r) != nil {
 		return nil
 	}
+	touchHit(resultPath(key))
 	return &r
 }
 

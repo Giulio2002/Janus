@@ -246,9 +246,10 @@ jobs:
       - name: Differential oracle vs qemu (quick)
         env:
           OUT: ${{ runner.temp }}/oracle
+          KEEP: "1" # raw verdicts.jsonl for the check below (scripts/lib/artifacts.sh)
         run: |
           scripts/oracle.sh quick
-          # oracle.sh reports mismatches but exits 0; fail the job on any soundness mismatch.
+          # oracle.sh exits 1 on a mismatch; check the verdicts too (fail on any soundness mismatch).
           if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
             cat "$OUT/repro.md" || true
             exit 1

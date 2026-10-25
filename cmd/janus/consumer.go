@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -522,14 +521,13 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 		ws.Dir, ws.temp = d, true
 	} else {
 		ws.Dir = filepath.Join(family, sha256Hex(extracted)[:24])
-		if err := os.MkdirAll(ws.Dir, 0o755); err != nil {
-			return nil, wsDiag(err)
-		}
-		lk, err := lockFile(ws.Dir+".lock", true)
+		lk, err := lockEntry(ws.Dir, ws.Dir+".lock")
 		if err != nil {
 			return nil, wsDiag(err)
 		}
 		ws.lock = lk
+		gcPin(ws.Dir)
+		touchUse(ws.Dir, ws.Dir+".lock")
 	}
 	ws.Root, ws.JanusDir, ws.DepsDir = filepath.Join(ws.Dir, "root"), filepath.Join(ws.Dir, "janus"), filepath.Join(ws.Dir, "deps")
 	fail := func(err error) (*consumerWS, error) { ws.close(); return nil, err }
@@ -704,9 +702,37 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	if ws.pins, err = newPinnedLib("the Janus framework build", ws.janusLib(), nil); err != nil {
 		return fail(wsDiag(err))
 	}
-	now := time.Now()
-	_ = os.Chtimes(ws.Dir, now, now)
+	if !ws.temp {
+		touchUse(ws.Dir, ws.Dir+".lock")
+	}
 	return ws, nil
+}
+
+// lockEntry takes the exclusive lock of the cache entry dir (blocking) and makes sure dir exists
+// once the lock is held: the cache collector (cachegc.go) may have removed the entry, its lock
+// file or its empty parent while this process was waiting.
+func lockEntry(dir, lockPath string) (*fileLock, error) {
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			lastErr = err
+			continue
+		}
+		lk, err := lockFile(lockPath, true)
+		if err != nil {
+			lastErr = err
+			if os.IsNotExist(err) {
+				continue // the parent was removed in between: create it again
+			}
+			return nil, err
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			lk.unlock()
+			return nil, err
+		}
+		return lk, nil
+	}
+	return nil, lastErr
 }
 
 // newestSibling is the most recently used other workspace of the family with a consumer
@@ -910,6 +936,7 @@ func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*v
 		if asl, err = buildASLFor(fw, "", lake, stderr); err != nil {
 			return nil, err
 		}
+		defer asl.release()
 	}
 	pkg, err := loadConsumer(opts["proof-root"], fw, []string{outdir}, loadOpts{AllowPathDeps: opts["allow-path-deps"] != "", SB: sb})
 	if err != nil {
@@ -929,7 +956,6 @@ func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*v
 	ws.replayFresh = opts["replay-fresh"] != ""
 	ws.asl = asl
 	verifyGroup(fw, pkg, ws, []*consumerRequest{req})
-	evictStale()
 	return req.Report, req.Err
 }
 
@@ -1237,6 +1263,8 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			BinarySha256:          r.cr.Identity.BinarySha256,
 			Symbol:                r.cr.Identity.Symbol,
 			Address:               r.cr.Identity.Address,
+			EntryABI:              r.cr.Identity.EntryABI,
+			EntrySource:           r.cr.Identity.EntrySource,
 			GoVersion:             r.cr.Identity.GoVersion,
 			MainModule:            r.cr.Identity.MainModule,
 			LeanVersion:           leanVersion,
@@ -1320,76 +1348,4 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
-}
-
-// evictStale removes consumer workspaces and framework builds unused for
-// $JANUS_CACHE_RETENTION_DAYS (default 7) and temporary directories older than a day,
-// skipping any in use.
-func evictStale() {
-	days := 7.0
-	if v, err := strconv.ParseFloat(os.Getenv("JANUS_CACHE_RETENTION_DAYS"), 64); err == nil && v > 0 {
-		days = v
-	}
-	cutoff := time.Now().Add(-time.Duration(days * 24 * float64(time.Hour)))
-	base := filepath.Join(cacheRoot(), "v1")
-	families, _ := os.ReadDir(filepath.Join(base, "consumer"))
-	for _, f := range families {
-		fdir := filepath.Join(base, "consumer", f.Name())
-		members, _ := os.ReadDir(fdir)
-		for _, m := range members {
-			d := filepath.Join(fdir, m.Name())
-			fi, err := os.Stat(d)
-			if err != nil || !fi.IsDir() || fi.ModTime().After(cutoff) {
-				continue
-			}
-			if lk, err := lockFile(d+".lock", false); err == nil {
-				os.RemoveAll(d)
-				os.Remove(d + ".lock")
-				lk.unlock()
-			}
-		}
-	}
-	bases, _ := os.ReadDir(filepath.Join(base, "framework"))
-	for _, b := range bases {
-		d := filepath.Join(base, "framework", b.Name())
-		fi, err := os.Stat(d)
-		if err != nil || !fi.IsDir() || fi.ModTime().After(cutoff) {
-			continue
-		}
-		// A framework build in use is share-locked, so the exclusive try fails and it is kept.
-		// Removing the lock file under the lock is safe: lockFileMode re-checks the inode.
-		if lk, err := lockFile(d+".lock", false); err == nil {
-			os.RemoveAll(d)
-			os.Remove(d + ".ready")
-			os.Remove(d + ".lock")
-			lk.unlock()
-		}
-	}
-	// JanusASL builds (--asl) cost about an hour each: kept for $JANUS_ASL_RETENTION_DAYS
-	// (default 30) after their last use.
-	aslDays := 30.0
-	if v, err := strconv.ParseFloat(os.Getenv("JANUS_ASL_RETENTION_DAYS"), 64); err == nil && v > 0 {
-		aslDays = v
-	}
-	aslCutoff := time.Now().Add(-time.Duration(aslDays * 24 * float64(time.Hour)))
-	asls, _ := os.ReadDir(filepath.Join(base, "asl"))
-	for _, b := range asls {
-		d := filepath.Join(base, "asl", b.Name())
-		fi, err := os.Stat(d)
-		if err != nil || !fi.IsDir() || fi.ModTime().After(aslCutoff) {
-			continue
-		}
-		if lk, err := lockFile(d+".lock", false); err == nil {
-			os.RemoveAll(d)
-			os.Remove(d + ".lock")
-			lk.unlock()
-		}
-	}
-	tmps, _ := os.ReadDir(filepath.Join(base, "tmp"))
-	for _, t := range tmps {
-		d := filepath.Join(base, "tmp", t.Name())
-		if fi, err := os.Stat(d); err == nil && fi.ModTime().Before(time.Now().Add(-24*time.Hour)) {
-			os.RemoveAll(d)
-		}
-	}
 }
