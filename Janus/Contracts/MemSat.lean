@@ -1106,7 +1106,7 @@ theorem wstate_typ (r : Nat → W64) (nargs : Nat) :
   simp [IfaceModel.wsp, IfaceModel.TD]
 
 /-- `TypedMemmove` is satisfiable (the type `TD`, `dst = DST`, `src = VAL`). -/
-theorem typedmemmove_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb d : Nat), M.Laws ∧
+theorem typedMemmove_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb d : Nat), M.Laws ∧
     TypedMemmove (toy.link impl) A0 M wb d ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
       (TPre M wb d 3 s ∧ TypeOK s.mem (s.regs 0).toNat ∧
         Outside (s.regs 0).toNat 16 (calleeStack s d 3) ∧
@@ -1126,7 +1126,7 @@ theorem typedmemmove_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb 
   · rw [h1, ht3]; exact wstate_dest _ 3 _ _ (by decide) (by decide)
 
 /-- `TypedMemclr` is satisfiable (the type `TD`, `ptr = DST`). -/
-theorem typedmemclr_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb d : Nat), M.Laws ∧
+theorem typedMemclr_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb d : Nat), M.Laws ∧
     TypedMemclr (toy.link impl) A0 M wb d ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
       (TPre M wb d 2 s ∧ TypeOK s.mem (s.regs 0).toNat ∧
         Outside (s.regs 0).toNat 16 (calleeStack s d 2) ∧
@@ -1149,13 +1149,5 @@ theorem bulkBarrierOff_satisfiable : ∃ (M : MemModel) (impl : List Segment) (w
         (s.regs 2).toNat % 8 = 0) :=
   ⟨_, _, WB, 64, EqHashModel.M0_laws, bulkBarrierOff_impl WB 64, wstate fun _ => 0, rfl,
     wstate_tPre _ 4 (by decide), by simp [wstate], by simp [wstate], by simp [wstate]⟩
-
-/-! ## Names for the SAT row (`audit/round9/sat_check.py` looks for `<contract>_satisfiable`) -/
-
-/-- `typedmemmove` under the name of its contract. -/
-theorem typedMemmove_satisfiable : type_of% @typedmemmove_satisfiable := @typedmemmove_satisfiable
-
-/-- `typedmemclr` under the name of its contract. -/
-theorem typedMemclr_satisfiable : type_of% @typedmemclr_satisfiable := @typedmemclr_satisfiable
 
 end Janus.Contracts.MemSat
