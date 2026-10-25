@@ -345,6 +345,8 @@ the others.
 | `crypto`, `SEED=2`, `N=1200`, `CRYPTO_K=24` | 199,125 | 196,604 | 93,697 | 2,521 | **0** |
 | of which the edge families | 12,600 | 12,600 | 43 | 0 | **0** |
 | of which harvested | 9,576 | 9,576 | 1,914 | 0 | **0** |
+| `quick` after WP-E (the crypto specs are part of `gen.Specs`) | 898,021 | 762,086 | | 135,935 | **0** |
+| `full` after WP-E (`SEED=1`) | 2,059,787 | 1,758,713 | | 301,074 | **0** |
 
 Every model gap is a deliberate rejection, checked by encoding: `66` together with `F3` before
 `0F 38 F6` (hardware executes it; the model refuses `66` with `F2`/`F3`), duplicated `F3`/`F2 F3`
