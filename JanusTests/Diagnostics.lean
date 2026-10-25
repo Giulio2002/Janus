@@ -44,13 +44,13 @@ end Disasm64
 section Arm64
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 
-/-- `add x0, x0, x1; udf #0` -/
+/-- `add x0, x0, x1; hlt #0` -/
 def undec : Program where
-  segments := [{ name := "undec", base := 0x10000, words := [0x8b010000, 0x00000000] }]
+  segments := [{ name := "undec", base := 0x10000, words := [0x8b010000, 0xd4400000] }]
   stubs := []
   exitAddr := 0
 
-/-- error: janus_run: stuck at pc 0x10004 (undec+0x4): the word 0x0 does not decode -/
+/-- error: janus_run: stuck at pc 0x10004 (undec+0x4): the word 0xd4400000 does not decode -/
 #guard_msgs (substring := true) in
 example : Ensures undec 0x10000 [] (fun _ => True) (fun _ _ => True) := by
   intro ret hret s hs _
@@ -170,13 +170,13 @@ end Arm64
 section Amd64
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
 
-/-- `add rax, rbx; syscall` -/
+/-- `add rax, rbx; sysenter` -/
 def undec64 : Program where
-  segments := [⟨"undec", 0x1000, [0x48, 0x01, 0xd8, 0x0f, 0x05]⟩]
+  segments := [⟨"undec", 0x1000, [0x48, 0x01, 0xd8, 0x0f, 0x34]⟩]
   stubs := []
   exitAddr := 0
 
-/-- error: janus64_run: stuck at rip 0x1003 (undec+0x3): the bytes [0xf, 0x5] do not decode -/
+/-- error: janus64_run: stuck at rip 0x1003 (undec+0x3): the bytes [0xf, 0x34] do not decode -/
 #guard_msgs (substring := true) in
 example (a b : BitVec 64) : Ensures undec64 0x1000 [a, b] (fun _ => True) (fun _ _ => True) := by
   intro ret hret s hs _

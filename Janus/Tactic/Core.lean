@@ -54,6 +54,7 @@ deriving instance ToExpr for BitfieldOp
 deriving instance ToExpr for Imm9Mode
 deriving instance ToExpr for PairMode
 deriving instance ToExpr for AtomicOp
+deriving instance ToExpr for EnvReg
 deriving instance ToExpr for NeonInstr
 deriving instance ToExpr for CryptoInstr
 deriving instance ToExpr for Instr
@@ -672,7 +673,9 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       let kind := match kindCode with
         | 0 => mkConst ``StubKind.panic
         | 1 => mkConst ``StubKind.morestack
-        | _ => mkConst ``StubKind.external
+        | 2 => mkConst ``StubKind.external
+        | 3 => mkConst ``StubKind.syscall
+        | _ => mkConst ``StubKind.trap
       let hok ← liftLink impl? ``stubOK_link
         (← kernelDecide (mkApp4 (mkConst ``stubOK) evalE cE (toExpr name) kind))
       let lem := match mode, hret? with

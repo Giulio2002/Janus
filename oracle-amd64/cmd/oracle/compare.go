@@ -98,6 +98,10 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 		v.Verdict, v.Kind = Mismatch, "model-ok-hw-fault/"+faultName(h)
 		v.Diffs = []string{fmt.Sprintf("hardware %s (si_code %d, si_addr %s) but model succeeded (pc %s, len %d)", faultName(h), h.Code, h.Addr, m.PC, m.Len)}
 		return v
+	case m.Status == "fault" && m.Fault == "kernel":
+		// WP-C: an environment read (CPUID, RDTSC): check the hardware against the frame of its
+		// environment contract (Janus.Amd64.Kernel.SiteNext)
+		return compareEnv64(c, h, v)
 	case m.Status == "fault":
 		v.Verdict, v.Kind = Gap, m.Fault
 		return v
@@ -167,6 +171,30 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 	hm := map[int]int{}
 	for _, e := range h.Mem {
 		hm[e[0]] = e[1]
+	}
+	// PUSHFQ under the runner's single-stepping: the hardware image has TF (bit 8) set, which a
+	// program never has (the model pushes the user-mode image). Ignore exactly that bit.
+	if strings.EqualFold(strings.TrimPrefix(c.Bytes, "0x"), "9c") && len(c.Regs) > 4 {
+		if rsp := hexv(c.Regs[4]); rsp >= L.DataBase+8 && rsp-8-L.DataBase+1 < L.DataSize {
+			o := int(rsp - 8 - L.DataBase + 1) // byte 1 of the pushed image: TF is its bit 0
+			orig := int(L.Pattern(c.Seed, uint64(o)))
+			hb, mb := orig, orig
+			if v, ok := hm[o]; ok {
+				hb = v
+			}
+			for _, e := range m.Mem {
+				if e[0] == o {
+					mb = e[1]
+				}
+			}
+			if hb == mb|0x01 && hb != mb {
+				if mb == orig {
+					delete(hm, o)
+				} else {
+					hm[o] = mb
+				}
+			}
+		}
 	}
 	mm := map[int]int{}
 	for _, e := range m.Mem {
@@ -241,4 +269,59 @@ func mxcsrString(m uint64) string {
 		s += " ftz"
 	}
 	return s
+}
+
+// compareEnv64 checks a hardware result of CPUID or RDTSC against its environment contract's
+// frame: only RAX, RBX, RCX, RDX (CPUID) or RAX, RDX (RDTSC) change, to zero-extended 32-bit
+// values; the flags, the other registers, the vector registers and memory are unchanged; RIP
+// moves past the instruction.
+func compareEnv64(c *L.Case, h *L.HW, v Verdict) Verdict {
+	b := strings.ToLower(strings.TrimPrefix(c.Bytes, "0x"))
+	free := map[int]bool{}
+	kind := "env/" + b
+	switch b {
+	case "0fa2":
+		free = map[int]bool{0: true, 1: true, 2: true, 3: true}
+		kind = "env/cpuid"
+	case "0f31":
+		free = map[int]bool{0: true, 2: true}
+		kind = "env/rdtsc"
+	default:
+		v.Verdict, v.Kind = Gap, "kernel"
+		return v
+	}
+	for i := 0; i < 16 && i < len(h.Regs) && i < len(c.Regs); i++ {
+		hv := hexv(h.Regs[i])
+		if free[i] {
+			if hv>>32 != 0 {
+				v.Diffs = append(v.Diffs, fmt.Sprintf("%s: hw %s is not a zero-extended 32-bit value", regNames[i], h.Regs[i]))
+			}
+			continue
+		}
+		if hv != hexv(c.Regs[i]) {
+			v.Diffs = append(v.Diffs, fmt.Sprintf("%s: hw %s changed (in %s)", regNames[i], h.Regs[i], c.Regs[i]))
+		}
+	}
+	if h.RFlags&L.StatusFlags != c.RFlags&L.StatusFlags {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("rflags: hw %s (in %s)", flagString(h.RFlags), flagString(c.RFlags)))
+	}
+	if hexv(h.PC) != L.TestPC+2 {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("rip: hw %s, the contract continues after the instruction", h.PC))
+	}
+	if len(h.Mem) != 0 {
+		v.Diffs = append(v.Diffs, "mem: hw changed memory")
+	}
+	if len(h.XMM) == 16 && len(c.XMM) == 16 {
+		for i := 0; i < 16; i++ {
+			if hexBig(h.XMM[i]).Cmp(hexBig(c.XMM[i])) != 0 {
+				v.Diffs = append(v.Diffs, fmt.Sprintf("xmm%d changed", i))
+			}
+		}
+	}
+	if len(v.Diffs) == 0 {
+		v.Verdict, v.Kind = Agree, kind
+		return v
+	}
+	v.Verdict, v.Kind = Mismatch, kind+"/frame"
+	return v
 }

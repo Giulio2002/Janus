@@ -204,6 +204,12 @@ def IsReturnC (p : Program) (C : Contract) (post : State → Prop) : Outcome →
 @[simp, janus_post] theorem isReturnC_morestack (p : Program) (C : Contract)
     (post : State → Prop) (f : String) (s : State) :
     IsReturnC p C post (.stub f .morestack s) = False := rfl
+@[simp, janus_post] theorem isReturnC_syscall (p : Program) (C : Contract)
+    (post : State → Prop) (f : String) (s : State) :
+    IsReturnC p C post (.stub f .syscall s) = False := rfl
+@[simp, janus_post] theorem isReturnC_trap (p : Program) (C : Contract)
+    (post : State → Prop) (f : String) (s : State) :
+    IsReturnC p C post (.stub f .trap s) = False := rfl
 
 theorem ReturnsC.of_reaches {p : Program} {C : Contract} {post : State → Prop} {s : State}
     (h : Reaches p s (IsReturnC p C post)) : ReturnsC p C post s := by
@@ -222,6 +228,8 @@ theorem ReturnsC.of_reaches {p : Program} {C : Contract} {post : State → Prop}
         | external => rw [hk] at hq; exact .ext hx hst hk hq.1 hq.2
         | panic => rw [hk] at hq; exact hq.elim
         | morestack => rw [hk] at hq; exact hq.elim
+        | syscall => rw [hk] at hq; exact hq.elim
+        | trap => rw [hk] at hq; exact hq.elim
       | none =>
         cases hf : p.fetch s.pc.toNat with
         | none => simp only [hst, hf] at hr; cases hr

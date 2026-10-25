@@ -57,6 +57,8 @@ def faultJson : Fault → String × Json
   | .unaligned a n => ("unaligned", Json.mkObj [("addr", hex a), ("size", n)])
   | .trapped pc => ("trapped", Json.mkObj [("pc", hex pc)])
   | .fpTrapped pc => ("fpTrapped", Json.mkObj [("pc", hex pc)])
+  | .trap pc sig => ("trap", Json.mkObj [("pc", hex pc), ("signal", sig)])
+  | .kernel pc => ("kernel", Json.mkObj [("pc", hex pc)])
   | .outOfFuel => ("outOfFuel", Json.null)
 
 structure Case where

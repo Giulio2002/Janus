@@ -107,6 +107,16 @@ inductive Fault where
   `FPCR` (`IOE`/`DZE`/`OFE`/`UFE`/`IXE`/`IDE`). On a CPU that supports trapping this is a
   `SIGFPE`; on one that does not, the enable bits read as zero and the state cannot occur. -/
   | fpTrapped (pc : Nat)
+  /-- The instruction at `pc` raises a synchronous exception by design (`BRK #imm`, `UDF #imm`):
+  Linux delivers `signal` (`SIGTRAP` = 5 for `BRK`, `SIGILL` = 4 for `UDF`). An explicit fault
+  outcome, never an unconstrained state; `Janus.Kernel.Traps` states that a run ends here. -/
+  | trap (pc : Nat) (signal : Nat)
+  /-- The instruction at `pc` asks the kernel or the execution environment for its result
+  (`SVC #0`, `MRS` of `CNTVCT_EL0`/`CNTFRQ_EL0`/`MIDR_EL1`/`DIT`, `MSR DIT`): the user-mode
+  model alone does not determine it. The extractor puts a `.syscall` stub at every such
+  instruction, and only the kernel semantics `Janus.Kernel.ReturnsK` continues past it, with
+  the effect its environment contract allows. -/
+  | kernel (pc : Nat)
   /-- Fuel ran out before the call returned. -/
   | outOfFuel
 deriving Repr, DecidableEq, Inhabited

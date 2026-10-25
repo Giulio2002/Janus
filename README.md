@@ -299,6 +299,17 @@ the C code are all executed by the model, and only the `runtime.cgocall` stack a
 is a trusted contract, named in the statement (`EnsuresC … (CgoCall Extracted.program) …`). See
 [docs/FFI.md](docs/FFI.md) and `scripts/verify-cgo-examples.sh`.
 
+**Go talking to the kernel.** The functions in [`examples/sys`](examples/sys) make system calls,
+read the clocks and trap. Linux is the environment of the theorem (`Kernel.EnsuresK`): a kernel
+state with an explicit I/O trace and input oracle, and a contract per system call (`write` may be
+short or fail, the monotonic clock never goes back, ...). `WriteOut` (`syscall.Write(1, p)`): the
+fd-1 trace gains exactly the bytes the kernel accepted and the call returns their count, or `-1`
+with the trace unchanged; `NowNano` (`time.Now().UnixNano()`): the wall-clock reading of the vDSO,
+in nanoseconds; `Pid` (`syscall.Getpid()`); `MustNonNeg`: the negative path ends in a breakpoint
+trap (`Kernel.Traps`). All four on arm64 and amd64; see
+[RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) ("The kernel") and
+`scripts/verify-sys-examples.sh`.
+
 **Go assembly (ABI0).** Hand-written `.s` functions are verified like compiled Go, against their
 stack-based calling convention ABI0 (`Ensures0`, [`Janus/GoABI0.lean`](Janus/GoABI0.lean),
 [`Janus/Amd64/GoABI0.lean`](Janus/Amd64/GoABI0.lean)). In [`examples/asm`](examples/asm), on both

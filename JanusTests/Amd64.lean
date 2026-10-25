@@ -51,10 +51,23 @@ example : decode [0x40, 0xb4, 0x01] = some (.mov 8 (.reg 4) (.imm 1), 3) := by d
 
 /-! ## Rejection (strict decoding) -/
 
--- int3, ud2, syscall
-example : decode [0xcc] = none := by decide
-example : decode [0x0f, 0x0b] = none := by decide
-example : decode [0x0f, 0x05] = none := by decide
+-- WP-C: int3, ud2, hlt, syscall, the environment reads and pushfq/popfq decode in their exact
+-- unprefixed forms (Janus.Amd64.DecodeSys); prefixed forms and other INT n are rejected
+example : decode [0xcc] = some (.trap 5, 1) := by decide
+example : decode [0xcd, 0x03] = some (.trap 5, 2) := by decide
+example : decode [0x0f, 0x0b] = some (.trap 4, 2) := by decide
+example : decode [0xf4] = some (.trap 11, 1) := by decide
+example : decode [0x0f, 0x05] = some (.syscall, 2) := by decide
+example : decode [0x0f, 0xa2] = some (.envRead .cpuid, 2) := by decide
+example : decode [0x0f, 0x01, 0xd0] = some (.envRead .xgetbv, 3) := by decide
+example : decode [0x0f, 0x31] = some (.envRead .rdtsc, 2) := by decide
+example : decode [0x0f, 0x01, 0xf9] = some (.envRead .rdtscp, 3) := by decide
+example : decode [0x9c] = some (.pushfq, 1) := by decide
+example : decode [0x9d] = some (.popfq, 1) := by decide
+example : decode [0xcd, 0x80] = none := by decide   -- int 0x80: the 32-bit system call gate
+example : decode [0x66, 0x9c] = none := by decide   -- pushf (16-bit)
+example : decode [0x48, 0x0f, 0x05] = none := by decide   -- rex.w syscall
+example : decode [0x0f, 0x34] = none := by decide   -- sysenter
 -- lock add eax, eax (register destination: #UD) ; fs: mov rax, [rax] ; addr32 mov eax, [eax]
 example : decode [0xf0, 0x01, 0xc0] = none := by decide
 -- FS-relative load (TLS): mov r14, fs:[-8]
@@ -120,6 +133,30 @@ example : faultOf (step [0x48, 0xf7, 0xf1] { s0 with regs := fun _ => 0 }) =
     some (.divideError 0x1000) := by decide
 -- ret with no stack memory faults
 example : faultOf (step [0xc3] s0) = some (.outsideAllocation 5 8) := by decide
+-- WP-C: syscall and the environment reads fault with `kernel`, the traps with `trap`
+example : faultOf (step [0x0f, 0x05] s0) = some (.kernel 0x1000) := by decide
+example : faultOf (step [0x0f, 0xa2] s0) = some (.kernel 0x1000) := by decide
+example : faultOf (step [0xcc] s0) = some (.trap 0x1000 5) := by decide
+example : faultOf (step [0x0f, 0x0b] s0) = some (.trap 0x1000 4) := by decide
+example : faultOf (step [0xf4] s0) = some (.trap 0x1000 11) := by decide
+-- pushfq: the image of the status flags (all clear here) plus 0x202; popfq restores them
+def sStack : State := { s0 with
+  regs := fun i => if i = 4 then 0x2008 else BitVec.ofNat 64 (i + 1)
+  mem := ⟨fun _ => 0, [⟨0x2000, 16, true⟩]⟩ }
+example : (step [0x9c] sStack).toOption.map (fun s => (s.regs 4, s.mem.readLE 0x2000 8, s.rip)) =
+    some (0x2000, 0x202, 0x1001) := by decide
+example : (step [0x9c] { sStack with flags := ⟨some true, some true, some true, some true, some true, some true⟩, df := true }).toOption.map
+    (fun s => s.mem.readLE 0x2000 8) = some 0xED7 := by decide
+-- pushfq with an undefined flag faults
+example : faultOf (step [0x9c] { sStack with flags := ⟨none, some true, some true, some true, some true, some true⟩ }) =
+    some (.undefinedFlag 0x1000) := by decide
+-- popfq of 0x8d5 (CF PF AF ZF SF, not OF; DF): flags set, RSP + 8
+def sPop : State := { sStack with mem := ⟨(fun a => if a = 0x2008 then 0xd5 else if a = 0x2009 then 0x04 else 0), [⟨0x2000, 16, true⟩]⟩ }
+example : (step [0x9d] sPop).toOption.map (fun s => (s.regs 4, s.flags, s.df)) =
+    some (0x2010, ⟨some true, some true, some true, some true, some true, some false⟩, true) := by decide
+-- popfq that would set TF (bit 8) faults
+def sPopTF : State := { sStack with mem := ⟨(fun a => if a = 0x2009 then 0x01 else 0), [⟨0x2000, 16, true⟩]⟩ }
+example : faultOf (step [0x9d] sPopTF) = some (.systemFlag 0x1000) := by decide
 -- 32-bit shift by 0 still zero-extends (found by the oracle)
 example : (step [0xc1, 0xe0, 0x00] { s0 with regs := fun _ => 0xFFFFFFFF00000001 }).toOption.map
     (fun s => s.regs 0) = some 1 := by decide

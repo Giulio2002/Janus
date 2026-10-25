@@ -809,6 +809,29 @@ def sseArithOp (op : FPArith) (w : Nat) (c : FP.Ctl) (a b : Nat) : FP.XR :=
 the executors of the extension instructions (`ExecCrypto.exec`) take. A definition of its own
 so that the proof automation does not rewrite inside the unapplied function. -/
 def eaNat (s : State) (next : W64) (a : Addr) : Nat := (ea s next a).toNat
+/-- The `RFLAGS` image `PUSHFQ` pushes (WP-C): `CF` bit 0, `PF` 2, `AF` 4, `ZF` 6, `SF` 7, `DF` 10,
+`OF` 11, and the fixed user-mode bits `IF` (9) and bit 1 (`0x202`: Linux starts a process with
+exactly these system bits, and user code cannot change `IF`/`IOPL`; `TF`, `NT`, `AC` and `ID`
+are never set in the model because `POPFQ` refuses to set them). `none` if a status flag is
+undefined. -/
+def rflagsImage (f : Flags) (df : Bool) : Option Nat :=
+  match f.cf, f.pf, f.af, f.zf, f.sf, f.ovf with
+  | some c, some p, some a, some z, some sg, some o =>
+    some (0x202 + c.toNat + 4 * p.toNat + 16 * a.toNat + 64 * z.toNat + 128 * sg.toNat +
+      1024 * df.toNat + 2048 * o.toNat)
+  | _, _, _, _, _, _ => none
+
+/-- Bit `k` of `v`. -/
+def bitOf (v k : Nat) : Bool := (v >>> k) % 2 == 1
+
+/-- The status flags of an `RFLAGS` image (`POPFQ`). -/
+def flagsOfImage (v : Nat) : Flags :=
+  ⟨some (bitOf v 0), some (bitOf v 2), some (bitOf v 4), some (bitOf v 6), some (bitOf v 7),
+    some (bitOf v 11)⟩
+
+/-- An `RFLAGS` image `POPFQ` would load with a system flag the model does not track: `TF` (8),
+`NT` (14), `AC` (18), `ID` (21). -/
+def setsSystemFlag (v : Nat) : Bool := bitOf v 8 || bitOf v 14 || bitOf v 18 || bitOf v 21
 
 /-- Execute a decoded instruction of length `len` at `s.rip`. Only specified on the output
 of `decode`. -/
@@ -910,6 +933,23 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
     | .error e => .error e
     | .ok v => .ok (((s.setReg 4 (bp + 8)).setReg 5 (BitVec.ofNat 64 v)).setRip next)
   | .nop => .ok (s.setRip next)
+  -- Kernel, trap, environment and flag-image instructions (WP-C, `Janus.Amd64.DecodeSys`)
+  | .syscall => .error (.kernel pc)
+  | .envRead _ => .error (.kernel pc)
+  | .trap sig => .error (.trap pc sig)
+  | .pushfq =>
+    match rflagsImage s.flags s.df with
+    | none => .error (.undefinedFlag pc)
+    | some v =>
+      match push64 s (BitVec.ofNat 64 v) with
+      | .ok s' => .ok (s'.setRip next)
+      | .error e => .error e
+  | .popfq =>
+    match load s.mem (s.regs 4).toNat 8 with
+    | .error e => .error e
+    | .ok v =>
+      if setsSystemFlag v then .error (.systemFlag pc) else
+      .ok ({ (s.setReg 4 (s.regs 4 + 8)).setFlags (flagsOfImage v) with df := bitOf v 10 }.setRip next)
   | .xchg w a b =>
     match readLocRW s next w a with
     | .error e => .error e

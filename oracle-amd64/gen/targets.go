@@ -217,6 +217,12 @@ func specs() []Spec {
 	}
 	add("ud", nil, b(0x0F, 0x0B), -1, 0)
 	add("ud", nil, b(0xCC), -1, 0)
+	// WP-C: traps, environment reads, the RFLAGS image (exact forms; Targeted adds random
+	// prefixes and REX, which the decoder rejects)
+	add("sys/trap", nil, b(0xF4), -1, 0)
+	add("sys/env", nil, b(0x0F, 0xA2), -1, 0)
+	add("sys/env", nil, b(0x0F, 0x31), -1, 0)
+	add("sys/flags", nil, b(0x9C), -1, 0)
 	return s
 }
 

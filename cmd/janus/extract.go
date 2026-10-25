@@ -225,6 +225,15 @@ func stubLike(name string) bool {
 	n := strings.TrimSuffix(name, ".abi0")
 	_, ok1 := stubKind(n)
 	_, ok2 := stubKind(n + ".abi0")
+	return ok1 || ok2 || kernelStubAnyArch(n) || kernelStubAnyArch(n+".abi0")
+}
+
+// stubLikeFor is stubLike for a binary of architecture goarch (the vDSO stubs differ per
+// architecture: kernel.go).
+func stubLikeFor(goarch, name string) bool {
+	n := strings.TrimSuffix(name, ".abi0")
+	_, ok1 := stubKindFor(goarch, n)
+	_, ok2 := stubKindFor(goarch, n+".abi0")
 	return ok1 || ok2
 }
 
@@ -237,9 +246,9 @@ func stubLike(name string) bool {
 // larger program, and taking another function for a stub would model it by an outcome it does
 // not have.
 func (b *Binary) classifyStub(g Func) (StubKind, bool, error) {
-	k, ok := stubKind(g.Name)
+	k, ok := stubKindFor(b.GOARCH, g.Name)
 	if !ok {
-		if b.SymbolSource != "symtab" && stubLike(g.Name) {
+		if b.SymbolSource != "symtab" && stubLikeFor(b.GOARCH, g.Name) {
 			return "", false, &diag{
 				Msg:   fmt.Sprintf("the code calls %s, but %s has no ELF symbol table, and function names from the pclntab do not record the ABI, so Janus cannot tell the runtime's %s from a function of another package that only has that name (round 7 G1)", g.Name, b.Path, g.Name),
 				Stage: "code extraction",

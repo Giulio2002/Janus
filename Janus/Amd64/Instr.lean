@@ -109,6 +109,11 @@ inductive FPArith where
   | add | sub | mul | div | min | max | sqrt
 deriving Repr, DecidableEq, Inhabited
 
+/-- The instructions that read a value of the CPU's environment (WP-C, `Instr.envRead`). -/
+inductive EnvOp where
+  | cpuid | xgetbv | rdtsc | rdtscp
+deriving Repr, DecidableEq, Inhabited
+
 inductive Instr where
   /-- `ADD/OR/ADC/SBB/AND/SUB/XOR/CMP dst, src`. -/
   | alu (op : AluOp) (w : Nat) (dst : Loc) (src : Src)
@@ -301,6 +306,25 @@ inductive Instr where
   is naturally aligned, so that the locked access never splits a cache line (Linux with
   `split_lock_detect=fatal` kills a process that does that, `SIGBUS`). -/
   | locked (i : Instr) (a : Addr) (size : Nat)
+  -- Kernel, trap, environment and flag-image instructions (WP-C, `Janus.Amd64.DecodeSys`)
+  /-- `SYSCALL` (`0F 05`): a Linux system call. Executes as `Fault.kernel`; the kernel
+  semantics `Janus.Amd64.Kernel.ReturnsK` gives its effect at the `.syscall` stub the extractor
+  puts here. -/
+  | syscall
+  /-- `CPUID` (`0F A2`), `XGETBV` (`0F 01 D0`), `RDTSC` (`0F 31`), `RDTSCP` (`0F 01 F9`): values
+  from the CPU's environment. Execute as `Fault.kernel`; `Janus.Amd64.Kernel` gives them. -/
+  | envRead (op : EnvOp)
+  /-- `INT3` (`CC`) / `INT 3` (`CD 03`): `Fault.trap pc 5`; `UD2` (`0F 0B`): `Fault.trap pc 4`;
+  `HLT` (`F4`, privileged): `Fault.trap pc 11`. `signal` is the Linux signal. -/
+  | trap (signal : Nat)
+  /-- `PUSHFQ` (`9C`): push the `RFLAGS` image (the six status flags, `DF`, and the fixed
+  user-mode bits `IF` and bit 1, `0x202`). Faults (`undefinedFlag`) if a status flag is
+  undefined. -/
+  | pushfq
+  /-- `POPFQ` (`9D`): pop `RFLAGS`, setting the six status flags and `DF`. Faults
+  (`systemFlag`) if the popped value sets `TF`, `NT`, `AC` or `ID`; the other system bits are
+  ignored at CPL 3 (`IF`, `IOPL`, `RF`, `VM`, `VIF`, `VIP`, the reserved bits). -/
+  | popfq
   /-- The legacy-SSE packed instructions (`Janus.Amd64.InstrSSE`, `DecodeSSE`, `ExecSSE`). -/
   | sse (i : SseI XLoc Loc Addr)
   /-- The crypto extensions AES-NI, `PCLMULQDQ`, SHA-NI, ADX (`Janus.Amd64.InstrCrypto`,

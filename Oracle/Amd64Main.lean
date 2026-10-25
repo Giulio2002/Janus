@@ -72,6 +72,9 @@ def faultJson : Fault → String × Json
   | .misaligned a => ("misaligned", Json.mkObj [("addr", hex a)])
   | .badTarget t => ("badTarget", Json.mkObj [("target", hex t)])
   | .simdFPException pc => ("simdFPException", Json.mkObj [("pc", hex pc)])
+  | .trap pc sig => ("trap", Json.mkObj [("pc", hex pc), ("signal", sig)])
+  | .kernel pc => ("kernel", Json.mkObj [("pc", hex pc)])
+  | .systemFlag pc => ("systemFlag", Json.mkObj [("pc", hex pc)])
   | .outOfFuel => ("outOfFuel", Json.null)
 
 structure Case where

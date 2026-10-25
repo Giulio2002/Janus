@@ -75,6 +75,14 @@ def IsMorestack : Outcome → Prop
     IsPanic (.stub n .external s) = False := rfl
 @[simp, janus64_post] theorem isMorestack_external (n : String) (s : State) :
     IsMorestack (.stub n .external s) = False := rfl
+@[simp, janus64_post] theorem isPanic_syscall (n : String) (s : State) :
+    IsPanic (.stub n .syscall s) = False := rfl
+@[simp, janus64_post] theorem isMorestack_syscall (n : String) (s : State) :
+    IsMorestack (.stub n .syscall s) = False := rfl
+@[simp, janus64_post] theorem isPanic_trap (n : String) (s : State) :
+    IsPanic (.stub n .trap s) = False := rfl
+@[simp, janus64_post] theorem isMorestack_trap (n : String) (s : State) :
+    IsMorestack (.stub n .trap s) = False := rfl
 
 /-- `pc` is an ordinary instruction: not the exit address, not a stub, inside the code with
 bytes `bs`, which decode to `i` of length `len`. Closed by kernel evaluation. -/
@@ -261,6 +269,8 @@ theorem panics_of_reaches {p : Program} {s : State} (h : Reaches p s IsPanic) : 
     | panic => exact ⟨n, name, s', hr⟩
     | morestack => exact hq.elim
     | external => exact hq.elim
+    | syscall => exact hq.elim
+    | trap => exact hq.elim
 
 theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMorestack) :
     GrowsStack p s := by
@@ -272,6 +282,8 @@ theorem growsStack_of_reaches {p : Program} {s : State} (h : Reaches p s IsMores
     | panic => exact hq.elim
     | morestack => exact ⟨n, name, s', hr⟩
     | external => exact hq.elim
+    | syscall => exact hq.elim
+    | trap => exact hq.elim
 
 /-! ## Callee summaries
 
@@ -1046,6 +1058,7 @@ deriving instance ToExpr for CntOp
 deriving instance ToExpr for FlagOp
 deriving instance ToExpr for SseOp
 deriving instance ToExpr for FPArith
+deriving instance ToExpr for EnvOp
 deriving instance ToExpr for PIntOp
 deriving instance ToExpr for PShiftOp
 deriving instance ToExpr for PImmOp
@@ -1612,7 +1625,9 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
       let kind := match kindCode with
         | 0 => mkConst ``StubKind.panic
         | 1 => mkConst ``StubKind.morestack
-        | _ => mkConst ``StubKind.external
+        | 2 => mkConst ``StubKind.external
+        | 3 => mkConst ``StubKind.syscall
+        | _ => mkConst ``StubKind.trap
       let hok ← liftLink impl? ``stubOK_link
         (← kernelDecide (mkApp4 (mkConst ``stubOK) evalE cE (toExpr name) kind))
       let lem := match mode, hret? with

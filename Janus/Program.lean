@@ -33,6 +33,18 @@ inductive StubKind where
   contract semantics of `Janus.FFI` (`ReturnsC`) continues past it, and only with the contract
   the theorem names. -/
   | external
+  /-- A point where the program hands control to the kernel or reads its environment
+  (`Janus.Kernel`, WP-C): an `SVC #0` / `SYSCALL` instruction, an environment read (`MRS` of
+  `CNTVCT_EL0`/`CNTFRQ_EL0`/`MIDR_EL1`/`DIT`, `MSR DIT`, `CPUID`, `XGETBV`, `RDTSC(P)`), each at
+  its own address inside an extracted function, or a runtime function that reads a clock through
+  the vDSO (`runtime.nanotime1`, `runtime.walltime`, amd64 `time.now`), at its entry. The run
+  ends here like at any stub; only the kernel semantics `Janus.Kernel.ReturnsK` continues past
+  it, with the effect the kernel contract allows. -/
+  | syscall
+  /-- A trap instruction inside an extracted function (`BRK`, `UDF`, `INT3`, `UD2`, `HLT`): the
+  run stops before it, and executing it faults (`Fault.trap`). `Janus.Kernel.Traps` is the
+  specification "the run ends in a trap"; it checks that the word at the stub is a trap. -/
+  | trap
 deriving Repr, DecidableEq, Inhabited
 
 /-- A number for each stub kind (used by the proof automation to read stubs off a program). -/
@@ -40,6 +52,8 @@ def StubKind.code : StubKind → Nat
   | .panic => 0
   | .morestack => 1
   | .external => 2
+  | .syscall => 3
+  | .trap => 4
 
 structure Stub where
   name : String

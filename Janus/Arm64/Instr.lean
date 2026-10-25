@@ -30,6 +30,16 @@ valid, allocated encoding of the subset; `exec` is only specified on such values
 
 namespace Janus.Arm64
 
+/-- The system registers whose value comes from the execution environment, read by `MRS`
+(`Instr.mrsEnv`; WP-C, `Janus.Kernel`): the virtual counter `CNTVCT_EL0`, its frequency
+`CNTFRQ_EL0`, the CPU's `MIDR_EL1` (emulated by Linux for EL0) and `PSTATE.DIT`. -/
+inductive EnvReg where
+  | cntvct
+  | cntfrq
+  | midr
+  | dit
+deriving Repr, DecidableEq, Inhabited
+
 /-- Shift type field `shift` (2 bits): 00 LSL, 01 LSR, 10 ASR, 11 ROR. -/
 inductive ShiftType where
   | lsl | lsr | asr | ror
@@ -268,6 +278,31 @@ inductive Instr where
   | clz (sf : Bool) (rn rd : Nat)
   /-- CLS. Registers: ZR. -/
   | cls (sf : Bool) (rn rd : Nat)
+  -- Kernel, trap and environment instructions (WP-C, `Janus.Arm64.DecodeSys`, `Janus.Kernel`)
+  /-- SVC #`imm16` (only `#0` is decoded): a Linux system call. Executes as `Fault.kernel`; the
+  kernel semantics `Janus.Kernel.ReturnsK` gives its effect at the `.syscall` stub the
+  extractor puts here. -/
+  | svc (imm16 : Nat)
+  /-- BRK #`imm16`: a breakpoint, `Fault.trap pc 5` (`SIGTRAP`). -/
+  | brk (imm16 : Nat)
+  /-- UDF #`imm16` (the permanently undefined encoding `0x0000xxxx`): `Fault.trap pc 4`
+  (`SIGILL`). -/
+  | udf (imm16 : Nat)
+  /-- MRS `Xt`, `r` for an environment register `r` (`CNTVCT_EL0`, `CNTFRQ_EL0`, `MIDR_EL1`,
+  `DIT`). `rt`: ZR. Executes as `Fault.kernel`; `Janus.Kernel` gives the value. -/
+  | mrsEnv (r : EnvReg) (rt : Nat)
+  /-- MSR DIT, #`imm` (`imm ∈ {0, 1}`): sets `PSTATE.DIT`. Executes as `Fault.kernel`. -/
+  | msrDitImm (imm : Nat)
+  /-- MSR DIT, `Xt` (`PSTATE.DIT ← Xt<24>`). `rt`: ZR. Executes as `Fault.kernel`. -/
+  | msrDitReg (rt : Nat)
+  /-- MRS `Xt`, NZCV: `N Z C V` in bits 31:28, zero elsewhere. `rt`: ZR. -/
+  | mrsNzcv (rt : Nat)
+  /-- MSR NZCV, `Xt`: the flags from bits 31:28 of `Xt`. `rt`: ZR. -/
+  | msrNzcv (rt : Nat)
+  /-- MRS `Xt`, FPSR (zero-extended). `rt`: ZR. -/
+  | mrsFpsr (rt : Nat)
+  /-- MSR FPSR, `Xt`: `FPSR ← Xt<31:0>` restricted to the implemented bits (`fpsrMask`). `rt`: ZR. -/
+  | msrFpsr (rt : Nat)
   -- Advanced SIMD classes beyond the subset above (`Janus.Arm64.NeonInstr`, `DecodeNeon`, `ExecNeon`)
   /-- An Advanced SIMD instruction of `NeonInstr` (decoded by `decodeNeon`). -/
   | neon (i : NeonInstr)

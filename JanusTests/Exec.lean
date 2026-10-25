@@ -439,7 +439,12 @@ example : faultOf (step 0xd65f03c0 (st [(30, 0x1000000813)] 0x1000040800 0)) = s
 example : faultOf (step 0xf9000020 { st [(1, 0x1000040000)] 0x1000040800 0 with
     mem := ⟨fun _ => 0, [⟨0x1000040000, 16, false⟩]⟩ }) = some (.readOnly 0x1000040000 8) := by decide
 -- an unsupported word
-example : faultOf (step 0xd4000001 (st [] 0x1000040800 0)) = some (.undecodable 0x1000000800 0xd4000001) := by decide
+example : faultOf (step 0xd4400000 (st [] 0x1000040800 0)) = some (.undecodable 0x1000000800 0xd4400000) := by decide
+-- WP-C: the kernel/environment instructions fault with `kernel`, the traps with `trap`
+example : faultOf (step 0xd4000001 (st [] 0x1000040800 0)) = some (.kernel 0x1000000800) := by decide
+example : faultOf (step 0xd53be040 (st [] 0x1000040800 0)) = some (.kernel 0x1000000800) := by decide
+example : faultOf (step 0xd4200000 (st [] 0x1000040800 0)) = some (.trap 0x1000000800 5) := by decide
+example : faultOf (step 0x00000000 (st [] 0x1000040800 0)) = some (.trap 0x1000000800 4) := by decide
 -- b .-0x8000000 from pc 0: the target wraps modulo 2^64
 example : (obs (step 0x16000000 { st [] 0 0 with pc := 0 }) []).map (·.2.2.1) = some (2 ^ 64 - 0x8000000) := by
   decide

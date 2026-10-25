@@ -66,6 +66,20 @@ func explain(w io.Writer, outdir, reportPath string, r *verifiedReport) {
 		p("  hypotheses of the statement (without such a hypothesis a call to one faults with noCode).")
 		p("")
 	}
+	if len(r.Kernel) > 0 {
+		p("  kernel interface: %s", termSafe(strings.Join(r.Kernel, ", ")))
+		p("  These are system calls, reads of the execution environment (clocks, CPU identification)")
+		p("  and vDSO clock functions (.syscall stubs). The model does not execute them: a theorem")
+		p("  gets past one only under the kernel semantics (Janus.Kernel.ReturnsK / EnsuresK), for")
+		p("  every result the per-system-call contract of Janus/Contracts/Syscall*.lean allows.")
+		p("")
+	}
+	if len(r.Traps) > 0 {
+		p("  trap sites: %s", termSafe(strings.Join(r.Traps, ", ")))
+		p("  A run that reaches one of these instructions ends in a trap (SIGTRAP, SIGILL or SIGSEGV);")
+		p("  `Traps` theorems state that a path ends there.")
+		p("")
+	}
 	if len(r.DependencyDefinitions) > 0 {
 		p("  The statement names definitions from pinned dependencies; they are part of its meaning:")
 		for _, d := range r.DependencyDefinitions {

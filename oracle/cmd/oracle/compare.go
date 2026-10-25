@@ -77,6 +77,11 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 		v.Verdict, v.Kind = Mismatch, "model-ok-hw-fault/"+faultName(h)
 		v.Diffs = []string{fmt.Sprintf("hardware %s (si_addr %s, code %d) but model succeeded (pc %s)", faultName(h), h.Addr, h.Code, m.PC)}
 		return v
+	case m.Status == "fault" && m.Fault == "kernel":
+		// WP-C: the model leaves the result of an environment instruction to the environment
+		// contract (Janus.Kernel.SiteNext): only the destination register may change (DIT: only
+		// bit 24), pc + 4, and nothing else. Check the hardware against that frame.
+		return compareEnv(c, h, v)
 	case m.Status == "fault":
 		if hwMisalignedBranch && m.Fault == "pcMisaligned" {
 			v.Verdict, v.Kind = Agree, "fault/pcMisaligned"
@@ -223,4 +228,65 @@ func fpsrDiff(hw, model uint64) string {
 		}
 	}
 	return strings.Join(out, ", ")
+}
+
+// compareEnv checks a hardware result of an environment instruction (MRS of CNTVCT_EL0,
+// CNTFRQ_EL0, MIDR_EL1 or DIT; MSR DIT) against the frame of its environment contract: the
+// destination register is the only general register that may change (MIDR_EL1: a 32-bit value;
+// DIT: only bit 24), and SP, NZCV, the vector registers, FPCR/FPSR and memory are unchanged,
+// with pc + 4.
+func compareEnv(c *L.Case, h *L.HW, v Verdict) Verdict {
+	w := uint32(hexv(c.Word))
+	rt, free, mask := int(w&31), -1, ^uint64(0)
+	kind := "env/msr-dit"
+	switch {
+	case w&0xFFFFFFE0 == 0xD53BE040:
+		free, kind = rt, "env/cntvct"
+	case w&0xFFFFFFE0 == 0xD53BE000:
+		free, kind = rt, "env/cntfrq"
+	case w&0xFFFFFFE0 == 0xD5380000:
+		free, kind, mask = rt, "env/midr", 0xFFFFFFFF
+	case w&0xFFFFFFE0 == 0xD53B42A0:
+		free, kind, mask = rt, "env/dit", 1<<24
+	}
+	for i := 0; i < 31; i++ {
+		hv := hexv(h.X[i])
+		if i == free {
+			if hv&^mask != 0 {
+				v.Diffs = append(v.Diffs, fmt.Sprintf("x%d: hw %s outside the contract's values", i, h.X[i]))
+			}
+			continue
+		}
+		if hv != hexv(c.X[i]) {
+			v.Diffs = append(v.Diffs, fmt.Sprintf("x%d: hw %s changed (in %s), the contract keeps it", i, h.X[i], c.X[i]))
+		}
+	}
+	if hexv(h.SP) != hexv(c.SP) {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("sp: hw %s (in %s)", h.SP, c.SP))
+	}
+	if h.NZCV != c.NZCV {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("nzcv: hw %04b (in %04b)", h.NZCV, c.NZCV))
+	}
+	if len(h.V) == 32 && len(c.V) == 32 {
+		for i := 0; i < 32; i++ {
+			if norm128(h.V[i]) != norm128(c.V[i]) {
+				v.Diffs = append(v.Diffs, fmt.Sprintf("v%d changed", i))
+			}
+		}
+	}
+	if hexv(h.FPSR) != hexv(c.FPSR) || hexv(h.FPCR) != hexv(c.FPCR) {
+		v.Diffs = append(v.Diffs, "fpcr/fpsr changed")
+	}
+	if hexv(h.PC) != L.TestPC+4 {
+		v.Diffs = append(v.Diffs, fmt.Sprintf("pc: hw %s, the contract continues at pc+4", h.PC))
+	}
+	if len(h.Mem) != 0 {
+		v.Diffs = append(v.Diffs, "mem: hw changed memory")
+	}
+	if len(v.Diffs) == 0 {
+		v.Verdict, v.Kind = Agree, kind
+		return v
+	}
+	v.Verdict, v.Kind = Mismatch, kind+"/frame"
+	return v
 }

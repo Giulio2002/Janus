@@ -383,6 +383,9 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.morestack_noctxt.abi0": {
 			{Hash: "e6ae8190479b5bc8b217cbde84d05ebf8645b96c3f366d86c3ee0d2bef54ee15", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
 		},
+		"runtime.nanotime1.abi0": {
+			{Hash: "6e5d290f28eabe4c5d22fb836ca39dca69081532ca77b0ee10bfbfb9113d5745", File: "runtime/sys_linux_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
+		},
 		"runtime.newobject": {
 			{Hash: "d419ba705ac23a1b2772c242d8835f3b1cd68cb5ab1dd4d346e7e3ad3e9e4b98", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
 		},
@@ -502,6 +505,9 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.typedmemmove": {
 			{Hash: "0dab0eeca510a69716817848ebb865d7c627524057235ebdf1966cea0264072d", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
 			{Hash: "a5278f27db8be22c8e565af0b6792b296004add7cf5e6f94b9befc41ce16a4bb", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"time.now": {
+			{Hash: "e9920b149274acb45eca252df5b2fff83e07a379f8a9d44a20f033c59194e224", File: "runtime/time_linux_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v2 v3 v4
 		},
 	},
 	"arm64": {
@@ -840,6 +846,9 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.morestack_noctxt.abi0": {
 			{Hash: "d8c571e478cb7cd870aa347e90d33005e3de4e7c78f47a583cda90faa6009f51", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
 		},
+		"runtime.nanotime1.abi0": {
+			{Hash: "b279dd986945f94277b966317a99fc8d34d4df6f1a81e0f081514434cd078e74", File: "runtime/sys_linux_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
+		},
 		"runtime.newobject": {
 			{Hash: "4e66fafc8ac81d1c6cdb248768e679dce7a57618eaa26bff066bc059ad49d761", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
 		},
@@ -960,6 +969,9 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.typedmemmove": {
 			{Hash: "01d9e77eeecc339d69f7c649b78035779ada447ae03ca2ecab434b8e632bad18", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
 			{Hash: "1a058ccfca0437e0770ead489606335ee0421850fad73b42b62e93346f990f1c", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.walltime.abi0": {
+			{Hash: "1c56310b9a675474508462a22c2532eb5909281440c32279737f5beb4c6711bd", File: "runtime/sys_linux_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt v8.1 v9.0
 		},
 	},
 }

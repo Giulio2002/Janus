@@ -419,7 +419,8 @@ var stubTerminal = map[string]bool{"runtime.gopanic": true, "runtime.morestack.a
 // not its callees: its code is pinned, what it calls is not followed.
 func isTerminalStub(name string) bool {
 	k, _ := stubKind(name)
-	return stubTerminal[name] || k == stubExternal
+	// the vDSO clock stubs (kernel.go): their outcome is the kernel contract of their Lean site
+	return stubTerminal[name] || k == stubExternal || kernelStubAnyArch(name)
 }
 
 // stubPackage is the package of a pclntab function name; for an assembly function named
@@ -455,7 +456,7 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	}
 	rel, _ := goRootFile(file)
 	pkg := stubPackage(pname, rel)
-	if _, isStub := stubKind(f.Name); (isStub || runtimeContractStubs[f.Name]) && pkg != "runtime" {
+	if _, isStub := stubKindFor(b.GOARCH, f.Name); (isStub || runtimeContractStubs[f.Name]) && !stubPkgDirOK(f.Name, pkg, "runtime") {
 		return fmt.Errorf("the pclntab places %s in package %q, not runtime", pname, pkg)
 	}
 	canon, refs, err := b.stubCanon(f)
@@ -467,7 +468,7 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	var files []string
 	for _, p := range pins {
 		files = append(files, p.File)
-		if rel == p.File && pinPackage(p.File) == pinDir(f.Name, pkg) {
+		if rel == p.File && stubPkgDirOK(f.Name, pinDir(f.Name, pkg), pinPackage(p.File)) {
 			fileOK = true
 			codeOK = codeOK || p.Hash == h
 		}
@@ -478,7 +479,7 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	if !codeOK {
 		return fmt.Errorf("its code (normalized SHA-256 %s) is not the code of the runtime's %s in any toolchain Janus pins (%s)", h, f.Name, stubPinToolchains)
 	}
-	if _, isStub := stubKind(f.Name); !isStub || isTerminalStub(f.Name) {
+	if _, isStub := stubKindFor(b.GOARCH, f.Name); !isStub || isTerminalStub(f.Name) {
 		return nil
 	}
 	for _, r := range refs {
@@ -580,7 +581,7 @@ func cmdStubpins(args []string, stdout, stderr io.Writer) error {
 				return nil, fmt.Errorf("%s: %s: the pclntab names it %s", p, f.Name, pname)
 			}
 			rel, ok := goRootFile(file)
-			if !ok || pinPackage(rel) != pinDir(f.Name, stubPackage(pname, rel)) {
+			if !ok || !stubPkgDirOK(f.Name, pinDir(f.Name, stubPackage(pname, rel)), pinPackage(rel)) {
 				return nil, fmt.Errorf("%s: %s: the pclntab file %q is not in its package's directory", p, f.Name, file)
 			}
 			fmt.Fprintf(stdout, "%s %s %s %s %s\n", tag, b.GOARCH, f.Name, rel, stubHash(canon))
@@ -590,7 +591,7 @@ func cmdStubpins(args []string, stdout, stderr io.Writer) error {
 			return refs, nil
 		}
 		for _, f := range b.Funcs {
-			if _, ok := stubKind(f.Name); !ok {
+			if _, ok := stubKindFor(b.GOARCH, f.Name); !ok {
 				continue
 			}
 			refs, err := emit("stub", f)
