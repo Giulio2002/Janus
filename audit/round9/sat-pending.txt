@@ -1,0 +1,25 @@
+# Contracts without a kernel-checked non-vacuity witness yet (audit/round9/sat_check.py reports
+# them as OPEN; any contract missing from this list and from the witnesses fails the SAT row).
+# Entries are FILE:CONTRACT. Remove a line when Janus/Contracts/<File>Sat*.lean proves <name>_satisfiable.
+# The map contracts take an abstract model M : MapModel (Env, Rep, priv), so they are not
+# unsatisfiable the way round 9 C1's allocation contracts were, and MapAccess1Small discharges
+# Access1 for smallModel with the real runtime code; a joint witness (a model, code and a state
+# satisfying the precondition) is still owed for each.
+Map.lean:Access1     agent/maps
+Map.lean:Access2     agent/maps
+Map.lean:Assign      agent/maps
+Map.lean:Delete      agent/maps
+Map.lean:Clear       agent/maps
+Map.lean:MakeSmall   agent/maps
+Map.lean:IterStart   agent/maps
+Map.lean:IterNext    agent/maps
+Map.lean:Access2Ptr  agent/maps
+MapAmd64.lean:Access1     agent/maps
+MapAmd64.lean:Access2     agent/maps
+MapAmd64.lean:Assign      agent/maps
+MapAmd64.lean:Delete      agent/maps
+MapAmd64.lean:Clear       agent/maps
+MapAmd64.lean:MakeSmall   agent/maps
+MapAmd64.lean:IterStart   agent/maps
+MapAmd64.lean:IterNext    agent/maps
+MapAmd64.lean:Access2Ptr  agent/maps
