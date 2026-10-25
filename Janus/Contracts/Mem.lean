@@ -201,7 +201,7 @@ def Nilinterequal (p : Program) (addr : Nat) (R : IfaceModel) (d : Nat) : Prop :
         Iface.EqOK R s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.mem.readLE ((s.regs 0).toNat + 8) 8)
           (s.mem.readLE ((s.regs 1).toNat + 8) 8) ∧
         EqFrame R (s.mem.readLE (s.regs 0).toNat 8) s.mem (s.mem.readLE ((s.regs 0).toNat + 8) 8)
-          (s.mem.readLE ((s.regs 1).toNat + 8) 8) (R.priv ++ calleeStack s d 2)))
+          (s.mem.readLE ((s.regs 1).toNat + 8) 8) (calleeStack s d 2)))
     (fun s s' => IfaceRet R d s s' fun r => BoolRes r
       (s.mem.readLE (s.regs 0).toNat 8 == s.mem.readLE (s.regs 1).toNat 8 &&
         Iface.efaceEqual R s.mem (s.mem.readLE (s.regs 0).toNat 8)
@@ -223,7 +223,7 @@ def Interequal (p : Program) (addr : Nat) (R : IfaceModel) (d : Nat) : Prop :=
           (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 1).toNat + 8) 8) ∧
         EqFrame R (s.mem.readLE (s.mem.readLE (s.regs 0).toNat 8 + 8) 8) s.mem
           (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 1).toNat + 8) 8)
-          (R.priv ++ calleeStack s d 2)))
+          (calleeStack s d 2)))
     (fun s s' => IfaceRet R d s s' fun r => BoolRes r
       (s.mem.readLE (s.regs 0).toNat 8 == s.mem.readLE (s.regs 1).toNat 8 &&
         Iface.ifaceEqual R s.mem (s.mem.readLE (s.regs 0).toNat 8)
@@ -484,5 +484,33 @@ theorem EqRet.memFrame {d nargs : Nat} {s s' : State} {P : (Nat → W64) → Pro
     (h : EqRet d nargs s s' P) : MemFrame s.mem s'.mem (calleeStack s d nargs) := by
   obtain ⟨r, v, fl, fs, m, rfl, hf, -⟩ := h
   exact hf
+
+end Janus.Contracts.Mem
+
+namespace Janus.Contracts.Mem
+
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
+
+/-- `EqPre` at a later call site `S` of a caller with `CallerOK` at its entry `s`, when `S`'s
+memory differs from the entry's but has the same accessible ranges and the same guard word (for
+a second runtime call, after the first one changed the runtime's memory). -/
+theorem EqPre.of_parts {s S : State} {d frame above nargs : Nat} (hc : CallerOK s d frame above)
+    (hacc : ∀ a n w, S.mem.accessible a n w = s.mem.accessible a n w)
+    (hguard : S.mem.readLE ((s.regs 28).toNat + 16) 8 = s.mem.readLE ((s.regs 28).toNat + 16) 8)
+    (hsp : S.sp.toNat = s.sp.toNat - frame) (hg : S.regs 28 = s.regs 28)
+    (hlr : (S.regs 30).toNat % 4 = 0) (hlr' : (S.regs 30).toNat < 2 ^ 48) (hfr : frame % 16 = 0)
+    (hn : 8 + 8 * nargs ≤ frame + above) : EqPre d nargs S := by
+  obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout⟩ := hc
+  simp only [regG, stackguard0Offset, stackguard0] at hg1 hg2 hg3
+  simp only [outside_cons, outside_nil, and_true] at hout
+  refine ⟨⟨?_, ?_, ?_⟩, ⟨hlr, hlr', ?_, ?_, hd8, ?_, ?_⟩, ?_⟩
+  · simp only [regG, stackguard0Offset, hg]; omega
+  · simp only [regG, stackguard0Offset, hg, hacc]; exact hg2
+  · simp only [stackguard0, regG, stackguard0Offset, hg, hsp, hguard]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp, hacc]; exact Memory.accessible_mono _ hst (by omega) (by omega)
+  · simp only [calleeStack, outside_cons, outside_nil, and_true, hg, hsp]; omega
 
 end Janus.Contracts.Mem

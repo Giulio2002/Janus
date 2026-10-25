@@ -113,7 +113,7 @@ def Nilinterhash (p : Janus.Amd64.Program) (addr : Nat) (H : HashModel) (d : Nat
           (dataAt s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.regs 0).toNat) ∧
         HashFrame H (s.mem.readLE (s.regs 0).toNat 8) s.mem
           (dataAt s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.regs 0).toNat)
-          (H.priv ++ MemAmd64.calleeStack s d 2)))
+          (MemAmd64.calleeStack s d 2)))
     (fun s s' => HRet H d 2 s s' fun r =>
       IHashIs H s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.regs 0).toNat (s.regs 3).toNat (r 0).toNat)
 
@@ -128,7 +128,7 @@ def Interhash (p : Janus.Amd64.Program) (addr : Nat) (H : HashModel) (d : Nat) :
           (dataAt s.mem (itabType s.mem (s.regs 0).toNat) (s.regs 0).toNat) ∧
         HashFrame H (itabType s.mem (s.regs 0).toNat) s.mem
           (dataAt s.mem (itabType s.mem (s.regs 0).toNat) (s.regs 0).toNat)
-          (H.priv ++ MemAmd64.calleeStack s d 2)))
+          (MemAmd64.calleeStack s d 2)))
     (fun s s' => HRet H d 2 s s' fun r =>
       IHashIs H s.mem (itabType s.mem (s.regs 0).toNat) (s.regs 0).toNat (s.regs 3).toNat (r 0).toNat)
 

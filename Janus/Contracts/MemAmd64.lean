@@ -142,7 +142,7 @@ def Nilinterequal (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (d : N
         Iface.EqOK R s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.mem.readLE ((s.regs 0).toNat + 8) 8)
           (s.mem.readLE ((s.regs 3).toNat + 8) 8) ∧
         EqFrame R (s.mem.readLE (s.regs 0).toNat 8) s.mem (s.mem.readLE ((s.regs 0).toNat + 8) 8)
-          (s.mem.readLE ((s.regs 3).toNat + 8) 8) (R.priv ++ calleeStack s d 2)))
+          (s.mem.readLE ((s.regs 3).toNat + 8) 8) (calleeStack s d 2)))
     (fun s s' => IfaceRet R d s s' fun r => BoolRes r
       (s.mem.readLE (s.regs 0).toNat 8 == s.mem.readLE (s.regs 3).toNat 8 &&
         Iface.efaceEqual R s.mem (s.mem.readLE (s.regs 0).toNat 8)
@@ -161,7 +161,7 @@ def Interequal (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (d : Nat)
           (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 3).toNat + 8) 8) ∧
         EqFrame R (s.mem.readLE (s.mem.readLE (s.regs 0).toNat 8 + 8) 8) s.mem
           (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 3).toNat + 8) 8)
-          (R.priv ++ calleeStack s d 2)))
+          (calleeStack s d 2)))
     (fun s s' => IfaceRet R d s s' fun r => BoolRes r
       (s.mem.readLE (s.regs 0).toNat 8 == s.mem.readLE (s.regs 3).toNat 8 &&
         Iface.ifaceEqual R s.mem (s.mem.readLE (s.regs 0).toNat 8)
