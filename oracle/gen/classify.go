@@ -126,6 +126,9 @@ func Classify(w uint32) string {
 		case w&0x7F20FC00 == 0x1E200000 && bits(w, 18, 17) == 3:
 			return "simd.fmovgen"
 		}
+		if c := classifyNeon(w); c != "" {
+			return c
+		}
 		if c := classifyFP(w); c != "" {
 			return c
 		}

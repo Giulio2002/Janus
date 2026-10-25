@@ -43,7 +43,7 @@ func writeProof(t *testing.T, body string) string {
 }
 
 func TestHardeningAttacks(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {
@@ -61,7 +61,7 @@ func TestHardeningAttacks(t *testing.T) {
 	// Every subtest runs in parallel on its own extraction of Add (its own verified.json).
 	for _, c := range fileRejected {
 		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
+			defer parallel(t)()
 			add := mustExtract(t, "example.com/basic.Add")
 			code, out, stderr := verifyAttack(t, add, attackPath(t, c.name), c.theorem)
 			if code != 1 || out != "" {
@@ -88,7 +88,7 @@ func TestHardeningAttacks(t *testing.T) {
 	// A1: a proof-local instance occupying an instance position of the statement's type is a
 	// disguised redefinition; it is rejected.
 	t.Run("A1 disguised instance", func(t *testing.T) {
-		t.Parallel()
+		defer parallel(t)()
 		add := mustExtract(t, "example.com/basic.Add")
 		body := "import Extracted\n" +
 			"instance (priority := high) evilMul : HMul Nat Nat Nat := ⟨Nat.add⟩\n" +
@@ -104,7 +104,7 @@ func TestHardeningAttacks(t *testing.T) {
 	// A2/A4: a proof-local unexpander must not change the printed statement. The proof verifies,
 	// but the statement is printed in a clean environment without the proof's unexpander.
 	t.Run("unexpander does not change the printed statement", func(t *testing.T) {
-		t.Parallel()
+		defer parallel(t)()
 		add := mustExtract(t, "example.com/basic.Add")
 		body := "import Extracted\n" +
 			"def Shown (a b : Nat) : Prop := a = b\n" +
@@ -129,7 +129,7 @@ func TestHardeningAttacks(t *testing.T) {
 
 	// A9: a proof declaring a name under the Extracted namespace (shadowing it) is rejected.
 	t.Run("A9 namespace shadow", func(t *testing.T) {
-		t.Parallel()
+		defer parallel(t)()
 		add := mustExtract(t, "example.com/basic.Add")
 		body := "import Extracted\n" +
 			"namespace Proof\n" +
@@ -144,7 +144,7 @@ func TestHardeningAttacks(t *testing.T) {
 
 	// A6: a #eval doing IO cannot escape the sandbox to write outside the private build dir.
 	t.Run("A6_eval_io cannot write outside the sandbox", func(t *testing.T) {
-		t.Parallel()
+		defer parallel(t)()
 		add := mustExtract(t, "example.com/basic.Add")
 		target := filepath.Join(repoRoot, "audit", "work", "A6-written-during-verify.txt")
 		_ = os.Remove(target)
@@ -159,7 +159,7 @@ func TestHardeningAttacks(t *testing.T) {
 // B1: NeverPanics must not be satisfiable by a fault (fixed in GoABI by the hardening agent).
 // The attack proof should now fail to prove its (vacuous) statement.
 func TestHardeningB1(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {
@@ -191,7 +191,7 @@ func TestRejectPIE(t *testing.T) {
 
 // The report records the sandbox mode, and --unsafe-no-sandbox is honoured and flagged.
 func TestSandboxRecorded(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {

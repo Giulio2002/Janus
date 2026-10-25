@@ -1,3 +1,4 @@
+import Janus.Arm64.NeonInstr
 import Janus.Arm64.InstrCrypto
 
 /-!
@@ -302,6 +303,9 @@ inductive Instr where
   | mrsFpsr (rt : Nat)
   /-- MSR FPSR, `Xt`: `FPSR ← Xt<31:0>` restricted to the implemented bits (`fpsrMask`). `rt`: ZR. -/
   | msrFpsr (rt : Nat)
+  -- Advanced SIMD classes beyond the subset above (`Janus.Arm64.NeonInstr`, `DecodeNeon`, `ExecNeon`)
+  /-- An Advanced SIMD instruction of `NeonInstr` (decoded by `decodeNeon`). -/
+  | neon (i : NeonInstr)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Arm64

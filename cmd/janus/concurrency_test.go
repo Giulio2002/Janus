@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -71,32 +72,25 @@ func sandboxArgs() []string {
 	return nil
 }
 
-// testEnv is the environment of the janus subprocesses: the test cache, no JANUS_ROOT.
-func testEnv() []string {
-	var env []string
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "JANUS_ROOT=") && !strings.HasPrefix(e, "JANUS_CACHE_DIR=") {
-			env = append(env, e)
-		}
-	}
-	return append(env, "JANUS_CACHE_DIR="+cacheRoot())
-}
-
-func embeddedBase(t *testing.T) string {
+// embeddedBase is the cached base of the embedded framework in cache c.
+func embeddedBase(t *testing.T, c string) string {
 	t.Helper()
 	fw, err := loadFramework("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return filepath.Join(cacheRoot(), "v1", "framework", fw.Sha256[:24])
+	return filepath.Join(c, "v1", "framework", fw.Sha256[:24])
 }
 
 // TestConcurrentVerify runs verifications in parallel, of the same artifact and of different
 // ones, while `janus blockers` builds the decoder in the same framework build, first on the
 // cached embedded framework and then on a --janus-root checkout. Every one must succeed.
 func TestConcurrentVerify(t *testing.T) {
+	defer parallel(t)()
 	needLeanSlow(t)
-	useTestCache(t)
+	// A private copy of the test cache (seed_test.go): this test rebuilds the framework build,
+	// which must not disturb the tests and agents sharing the test cache.
+	cache := seededCache(t)
 	bin := buildJanusBinary(t)
 	sb := sandboxArgs()
 	add := mustExtract(t, "example.com/basic.Add")
@@ -108,7 +102,7 @@ func TestConcurrentVerify(t *testing.T) {
 		a := []string{"verify", arts[n], "--proof", filepath.Join(repoRoot, "examples", "proofs", n+".lean")}
 		return append(append(a, sb...), extra...)
 	}
-	env := testEnv()
+	env := cacheEnv(cache)
 	check := func(procs []*janusProc) {
 		t.Helper()
 		for _, p := range procs {
@@ -123,13 +117,16 @@ func TestConcurrentVerify(t *testing.T) {
 	}
 
 	// Make sure the base exists (built once per framework version; may take long the first time).
-	if code, _, stderr := runJanus(t, verifyArgs("Add")...); code != 0 {
-		t.Fatalf("priming verify: %s", stderr)
+	if p := []*janusProc{{name: "priming verify", args: verifyArgs("Add")}}; true {
+		runConcurrently(bin, env, p)
+		if p[0].code != 0 {
+			t.Fatalf("priming verify: %s", p[0].out)
+		}
 	}
 	// Then make the decoder build a real writer: drop the stamp and the decoder module, so the
 	// first process rebuilds and stamps, and blockers compiles Janus.Tools.Decode again while
 	// verifications are using the build.
-	base := embeddedBase(t)
+	base := embeddedBase(t, cache)
 	_ = os.Remove(base + ".ready")
 	removeModuleOutputs(filepath.Join(base, ".lake", "build", "lib", "lean"), "Janus.Tools.Decode")
 
@@ -169,18 +166,21 @@ func TestConcurrentVerify(t *testing.T) {
 // the lock (here the proof itself, compiled without a sandbox, appends to a framework olean) is
 // still rejected as "framework integrity", and the next verification repairs the build.
 func TestForeignFrameworkWriteDetected(t *testing.T) {
+	defer parallel(t)()
 	needLeanSlow(t)
-	useTestCache(t)
+	// A private copy of the test cache (seed_test.go): this test damages the framework build,
+	// which must not disturb the tests and agents sharing the test cache.
+	cache := seededCache(t)
 	bin := buildJanusBinary(t)
 	add := mustExtract(t, "example.com/basic.Add")
-	env := testEnv()
+	env := cacheEnv(cache)
 	good := []string{"verify", add, "--proof", filepath.Join(repoRoot, "examples", "proofs", "Add.lean"), "--unsafe-no-sandbox"}
 	p := []*janusProc{{name: "priming verify", args: good}}
 	runConcurrently(bin, env, p)
 	if p[0].code != 0 {
 		t.Fatalf("priming verify failed:\n%s", p[0].out)
 	}
-	target := filepath.Join(embeddedBase(t), ".lake", "build", "lib", "lean", "Janus", "Tools", "Audit.olean")
+	target := filepath.Join(embeddedBase(t, cache), ".lake", "build", "lib", "lean", "Janus", "Tools", "Audit.olean")
 	before, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatal(err)
@@ -208,5 +208,67 @@ theorem correctness : True := trivial
 	now, _ := os.ReadFile(target)
 	if !bytes.Equal(now, before) {
 		t.Errorf("Janus/Tools/Audit.olean was not rebuilt to its original bytes")
+	}
+}
+
+// TestConsumerAuditorLease: consumer verifications (the path of TestConsumerLakefileLean and
+// TestVerifyBatch) run the compiled auditor from the cached framework base long after preparing
+// their workspace. A writer that takes the base's exclusive lock in between (a rebuild for another
+// target, a repair, the collector) used to be able to change or remove the auditor under them, and
+// the honest verification failed with "the auditor executable … changed after it was built" (the
+// b17 merge-gate flake). The workspace now holds the base's shared lock until it closes. Here a
+// writer repeatedly takes the exclusive lock and moves the auditor away and back (a legitimate,
+// locked writer; the bytes end up unchanged) while consumer verifications run: every one must
+// verify, and the writer must have run.
+func TestConsumerAuditorLease(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	cache := seededCache(t)
+	bin := buildJanusBinary(t)
+	env := cacheEnv(cache)
+	base := embeddedBase(t, cache)
+	fw, _ := loadFramework("")
+	lockPath, _ := fw.buildPaths(base)
+	exe := auditExePath(base)
+	var stop atomic.Bool
+	var writes atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for !stop.Load() {
+			lk, err := lockFileMode(lockPath, false, true)
+			if err != nil {
+				t.Errorf("writer lock: %v", err)
+				return
+			}
+			if os.Rename(exe, exe+".away") == nil {
+				time.Sleep(400 * time.Millisecond)
+				if err := os.Rename(exe+".away", exe); err != nil {
+					t.Errorf("restoring the auditor: %v", err)
+				}
+				writes.Add(1)
+			}
+			lk.unlock()
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	var procs []*janusProc
+	for i, n := range []string{"Add", "Max", "Add", "Max"} {
+		pkg := consumerCopy(t, "toml")
+		art := mustExtract(t, "example.com/basic."+n)
+		procs = append(procs, &janusProc{name: fmt.Sprintf("consumer verify#%d %s", i, n), wait: time.Duration(i) * 300 * time.Millisecond,
+			args: []string{"verify", art, "--proof", filepath.Join(pkg, "ConsumerExample", n+".lean"), "--proof-root", pkg,
+				"--theorem", "ConsumerExample." + n + ".correctness"}})
+	}
+	runConcurrently(bin, env, procs)
+	stop.Store(true)
+	<-done
+	for _, p := range procs {
+		if p.code != 0 || !strings.Contains(p.out, "Verified: ") {
+			t.Errorf("%s failed while a locked writer used the framework base (exit %d):\n%s", p.name, p.code, p.out)
+		}
+	}
+	if writes.Load() == 0 {
+		t.Error("the writer never ran")
 	}
 }

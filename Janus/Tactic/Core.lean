@@ -24,7 +24,7 @@ How one step works (`stepGoal`):
 1. The pc of the symbolic state is computed (it is a literal in the normal form; otherwise
    `simp` with the hypotheses computes it).
 2. The program's data (exit address, segments, stubs) is evaluated once per program and cached;
-   the word at `pc` is looked up and decoded by `Janus.Arm64.decode` at tactic run time.
+   the word at `pc` is looked up and decoded by `Janus.Arm64.decodeAll` at tactic run time.
 3. The facts "pc is no exit, no stub, holds word `w`, and `w` decodes to `i`" are one Boolean
    `stepOK p pc w i = true`, proved by `Eq.refl true` in an auxiliary lemma checked by the
    kernel only (as `decide +kernel` does), so huge programs are never unfolded by the elaborator.
@@ -55,6 +55,7 @@ deriving instance ToExpr for Imm9Mode
 deriving instance ToExpr for PairMode
 deriving instance ToExpr for AtomicOp
 deriving instance ToExpr for EnvReg
+deriving instance ToExpr for NeonInstr
 deriving instance ToExpr for CryptoInstr
 deriving instance ToExpr for Instr
 deriving instance ToExpr for StubKind
@@ -725,7 +726,7 @@ where
         extract the callee too or give its `Summary` with `calls [...]`; if it is the return, `X30` \
         does not hold the return address of `p.withExit ret`."
     let symS := match Common.symOf syms c with | some s => s!" ({s})" | none => ""
-    let some i := decode w |
+    let some i := decodeAll w |
       throwError "{tacName}: stuck at pc {hex c}{symS}: the word {hex w} does not decode to a \
         modelled instruction (see docs/SOUNDNESS.md for the supported subset). No proof can \
         execute past it."
