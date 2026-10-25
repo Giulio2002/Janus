@@ -33,3 +33,7 @@ import Janus.Contracts.IfaceAmd64
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat
 import Janus.Contracts.IfaceSatAmd64
+import Janus.Contracts.Mem
+import Janus.Contracts.Hash
+import Janus.Contracts.MemAmd64
+import Janus.Contracts.HashAmd64
