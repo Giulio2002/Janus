@@ -35,15 +35,15 @@ type sockFprog struct {
 }
 
 const (
-	bpfLD  = 0x00
-	bpfW   = 0x00
-	bpfABS = 0x20
-	bpfJMP = 0x05
-	bpfJEQ = 0x10
-	bpfJGE = 0x30
+	bpfLD   = 0x00
+	bpfW    = 0x00
+	bpfABS  = 0x20
+	bpfJMP  = 0x05
+	bpfJEQ  = 0x10
+	bpfJGE  = 0x30
 	bpfJSET = 0x40
-	bpfK   = 0x00
-	bpfRET = 0x06
+	bpfK    = 0x00
+	bpfRET  = 0x06
 
 	retAllow = 0x7fff0000
 	retErrno = 0x00050000 // | errno

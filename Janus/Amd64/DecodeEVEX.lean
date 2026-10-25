@@ -36,16 +36,18 @@ instruction, or an encoding this model does not cover):
 * the write mask: `{z}` without a mask register, `{z}` with a memory destination, and any mask
   on the instructions that take none (`VPCLMULQDQ`, `VPSADBW`, `VPSLLDQ`/`VPSRLDQ`) are rejected;
   a compare into a mask takes a mask but not `{z}`;
-* a mask register in `ModRM.reg` (the compares) needs `EVEX.R = EVEX.R' = 0`; the opcode
-  extensions of `72`/`73`/`71` too; a general register in `r/m` (`VPBROADCASTB/W/D/Q r`) needs
+* a mask register in `ModRM.reg` (the compares) needs `EVEX.R = EVEX.R' = 0` (the opcode
+  extensions of `71`/`72`/`73` ignore them, as hardware does); a general register in `r/m` (`VPBROADCASTB/W/D/Q r`) needs
   `EVEX.X = 0`;
 * register-only and memory-only forms (`VBROADCASTI32X4` ... memory only, the general-register
   broadcasts register only);
-* `VPCMP*` and `VCMPPS/PD` predicates (`imm8 < 32` for the floating-point ones).
+* nothing about the `VPCMP*` and `VCMPPS/PD` immediates: the predicate is `imm8<2:0>` resp.
+  `imm8<4:0>`, the other bits are ignored (as by hardware).
 
 The VEX opmask instructions check `VEX.L` (`L1` for the two-source ones, `L0` otherwise),
-`VEX.W`/`pp` (the width), `VEX.vvvv = 1111` where unused, mask registers in every field (`R`, `B`
-and `vvvv<3>` clear), and register-only forms (everything except `KMOV k, m` and `KMOV m, k`).
+`VEX.W`/`pp` (the width), `VEX.vvvv = 1111` where unused, `VEX.R` and `vvvv<3>` clear for mask
+registers (`VEX.B` is ignored for a mask register in `r/m`, as by hardware), and register-only
+forms (everything except `KMOV k, m` and `KMOV m, k`).
 -/
 
 namespace Janus.Amd64.DecodeEVEX
@@ -162,7 +164,7 @@ def vcmp (c : Ctx) (cm : ECmp) (e bcw : Nat) (len : Nat) : Option (Instr × Nat)
 def vgrp (c : Ctx) (o : EUOp) (e bcw : Nat) (msk : Bool) : Option (Instr × Nat) :=
   match vl c, imm c with
   | some l, some i =>
-    if !zOK c || c.regHi || (!msk && !noMask c) then none else
+    if !zOK c || (!msk && !noMask c) then none else
     match src c l bcw with
     | some (s, bc) => fin (.uop o e l c.v s bc i c.k c.z) (c.n + 1)
     | none => none
@@ -212,7 +214,7 @@ def vfcmp (c : Ctx) (wd : Nat) : Option (Instr × Nat) :=
   match imm c with
   | none => none
   | some i =>
-    if i ≥ 32 || c.z || c.regHi then none else
+    if c.z || c.regHi then none else
     match c.rm with
     | .xmm r =>
       if c.b then fin (.cmp (.fp i true) wd 512 c.ext c.v (.xmm r) 0 c.k) (c.n + 1)
@@ -434,6 +436,15 @@ def decodeOp (c : Ctx) (mp pp op : Nat) : Option (Instr × Nat) :=
       -- VPBROADCASTB/W (W0): T1S
       let e : Nat := if op = 0x18 ∨ op = 0x58 then 32 else if op = 0x78 then 8 else if op = 0x79 then 16 else 64
       let needW : Bool := op = 0x19 ∨ op = 0x59
+      if (op = 0x19 ∨ op = 0x59) && !c.w then
+        -- VBROADCASTF32X2 (L ≠ 128) / VBROADCASTI32X2 (W0): the low 64 bits, masked at 32 (T2)
+        if op = 0x19 && c.ll = 0 then none else
+        match vl c with
+        | none => none
+        | some l =>
+          if !zOK c || c.v != 0 || c.b then none else
+          fin (.bcast 32 64 l c.reg (scaleX c.md 8 c.rm) c.k c.z) c.n
+      else
       if c.w != needW || (op = 0x19 && c.ll = 0) then none else
       match vl c with
       | none => none
@@ -552,7 +563,6 @@ def vexOp (modrmOf : Nat → MRM) (rex v l pp mp op : Nat) (bs : List Nat) (n : 
     Option (Instr × Nat) :=
   let w1 := rex / 8 = 1
   let rR := rex / 4 % 2
-  let rB := rex % 2
   let fin' (i : I) (len : Nat) : Option (Instr × Nat) := if len > 15 then none else some (.evex i, len)
   match modrmOf rex bs with
   | none => none
@@ -560,7 +570,7 @@ def vexOp (modrmOf : Nat → MRM) (rex v l pp mp op : Nat) (bs : List Nat) (n : 
     let len := n + 1 + cnt
     let i8 : Option Nat := match rest with | i :: _ => some i | [] => none
     -- a mask register in `r/m` (register form only, `VEX.B` clear)
-    let kr : Option Nat := match rm with | .xmm r => if rB = 1 then none else some r | .mem _ => none
+    let kr : Option Nat := match rm with | .xmm r => some (r % 8) | .mem _ => none
     if mp = 1 then
       if op = 0x90 ∨ op = 0x91 then
         -- KMOV k, k/m (90) and KMOV m, k (91): VEX.L0, vvvv = 1111
@@ -570,7 +580,7 @@ def vexOp (modrmOf : Nat → MRM) (rex v l pp mp op : Nat) (bs : List Nat) (n : 
           if l ≠ 128 ∨ v ≠ 0 ∨ rR = 1 then none else
           if op = 0x90 then
             match rm with
-            | .xmm r => if rB = 1 then none else fin' (.kmov w (.k ext) (.k r)) len
+            | .xmm r => fin' (.kmov w (.k ext) (.k (r % 8))) len
             | .mem a => fin' (.kmov w (.k ext) (.mem a)) len
           else
             match rm with
@@ -586,7 +596,7 @@ def vexOp (modrmOf : Nat → MRM) (rex v l pp mp op : Nat) (bs : List Nat) (n : 
         | some w, .xmm r =>
           if l ≠ 128 ∨ v ≠ 0 then none
           else if op = 0x92 then (if rR = 1 then none else fin' (.kmov w (.k ext) (.gpr r)) len)
-          else (if rB = 1 then none else fin' (.kmov w (.gpr reg) (.k r)) len)
+          else fin' (.kmov w (.gpr reg) (.k (r % 8))) len
         | _, _ => none
       else if op = 0x41 ∨ op = 0x42 ∨ op = 0x45 ∨ op = 0x46 ∨ op = 0x47 ∨ op = 0x4A then
         -- KAND, KANDN, KOR, KXNOR, KXOR, KADD kd, k1 (vvvv), k2 (r/m): VEX.L1

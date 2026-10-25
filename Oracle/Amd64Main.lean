@@ -8,7 +8,8 @@ Reads one JSON test case per line on stdin (`oracle-amd64/layout/layout.go`, `Ca
 prints one JSON result per line (`Model`):
 
 * the initial `State` has the 16 GPRs, the six status flags (all defined), `XMM0`–`XMM15`,
-  the upper halves of `YMM0`–`YMM15` (`ymmh`, default 0), the `FS` base (`fsbase`, default 0),
+  the upper halves of `YMM0`–`YMM15` (`ymmh`, default 0), the AVX-512 state (`zmmh` bits
+  511:256 of `ZMM0`–`ZMM15`, `zmmx` = `ZMM16`–`ZMM31`, `k` = `K0`–`K7`, default 0), the `FS` base (`fsbase`, default 0),
   `MXCSR` (`mxcsr`, default `0x1F80`) from the case and `rip = TestPC`;
 * `mem.regions` is exactly the native runner's data buffer `[DataBase, DataBase + DataSize)`
   (writable), with bytes `pattern seed` overridden by the case's `init` entries; every other byte lies outside every region;
@@ -90,6 +91,11 @@ structure Case where
   /-- audit/rt-model sequence mode: the instructions laid out one after another at `TestPC`
   (`bytes` is ignored when non-empty) -/
   seq : List (List Nat) := []
+  /-- bits 511:256 of `ZMM0`–`ZMM15` (`zmmh`), `ZMM16`–`ZMM31` (`zmmx`), `K0`–`K7` (`k`); empty =
+  all zero (AVX-512, WP-G) -/
+  zmmh : Array Nat := #[]
+  zmmx : Array Nat := #[]
+  k : Array Nat := #[]
 
 def parseCase (line : String) : Except String Case := do
   let j ← Json.parse line
@@ -118,7 +124,14 @@ def parseCase (line : String) : Except String Case := do
   if mxcsr ≥ 2 ^ 16 then throw "mxcsr: reserved bits set"
   let seqS : Array String := (j.getObjValAs? (Array String) "seq").toOption.getD #[]
   let seq ← seqS.toList.mapM parseBytes
-  pure { id, bytes, regs, rflags, xmm, ymmh, fsBase, seed, init, mxcsr, seq }
+  let opt (name : String) (n : Nat) : Except String (Array Nat) := do
+    let a : Array String := (j.getObjValAs? (Array String) name).toOption.getD #[]
+    if a.size ≠ 0 ∧ a.size ≠ n then throw s!"{name} must have {n} entries"
+    a.mapM parseHex
+  let zmmh ← opt "zmmh" 16
+  let zmmx ← opt "zmmx" 16
+  let k ← opt "k" 8
+  pure { id, bytes, regs, rflags, xmm, ymmh, fsBase, seed, init, mxcsr, seq, zmmh, zmmx, k }
 
 /-- Initial byte at buffer offset `i`: the last override for `i`, else the pattern. -/
 def initByte (c : Case) (i : Nat) : Nat :=
@@ -132,8 +145,13 @@ def initState (c : Case) (initArr : Array Nat) : State :=
     flags := { cf := some (bitSet c.rflags 0), pf := some (bitSet c.rflags 2),
                af := some (bitSet c.rflags 4), zf := some (bitSet c.rflags 6),
                sf := some (bitSet c.rflags 7), ovf := some (bitSet c.rflags 11) }
-    xmm := fun i => if i < 16 then BitVec.ofNat 128 c.xmm[i]! else 0
-    ymmHi := fun i => if i < c.ymmh.size then BitVec.ofNat 128 c.ymmh[i]! else 0
+    xmm := fun i => if i < 16 then BitVec.ofNat 128 c.xmm[i]!
+      else if i < 32 ∧ i - 16 < c.zmmx.size then BitVec.ofNat 128 c.zmmx[i - 16]! else 0
+    ymmHi := fun i => if i < c.ymmh.size then BitVec.ofNat 128 c.ymmh[i]!
+      else if 16 ≤ i ∧ i < 32 ∧ i - 16 < c.zmmx.size then BitVec.ofNat 128 (c.zmmx[i - 16]! / 2 ^ 128) else 0
+    zmmHi := fun i => if i < c.zmmh.size then BitVec.ofNat 256 c.zmmh[i]!
+      else if 16 ≤ i ∧ i < 32 ∧ i - 16 < c.zmmx.size then BitVec.ofNat 256 (c.zmmx[i - 16]! / 2 ^ 256) else 0
+    kreg := fun i => if i < c.k.size then BitVec.ofNat 64 c.k[i]! else 0
     fsBase := BitVec.ofNat 64 c.fsBase
     df := bitSet c.rflags 10
     mxcsr := BitVec.ofNat 32 c.mxcsr
@@ -196,6 +214,9 @@ def runCase (c : Case) : Json :=
       ("xmm", Json.arr ((List.range 16).map fun i => Json.str (hex (s.xmm i).toNat)).toArray),
       ("ymmh", Json.arr ((List.range 16).map fun i => Json.str (hex (s.ymmHi i).toNat)).toArray),
       ("mxcsr", hex s.mxcsr.toNat),
+      ("zmmh", Json.arr ((List.range 16).map fun i => Json.str (hex (s.zmmHi i).toNat)).toArray),
+      ("zmmx", Json.arr ((List.range 16).map fun i => Json.str (hex (s.zmm (i + 16)))).toArray),
+      ("k", Json.arr ((List.range 8).map fun i => Json.str (hex (s.kreg i).toNat)).toArray),
       ("mem", Json.arr mem.toArray)]
 
 end OracleAmd64

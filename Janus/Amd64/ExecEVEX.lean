@@ -150,6 +150,12 @@ def EOp.suppress : EOp → Bool
   | .logic _ | .ternlog _ | .popcnt | .shiftv _ | .rotv _ => true
   | _ => false
 
+/-- Whether a masked full-width memory operand of `op` is accessed element by element (the
+immediate shifts and rotates, class `E4`). -/
+def EUOp.suppress : EUOp → Bool
+  | .shift _ | .rot _ => true
+  | _ => false
+
 /-- Whether `op` reads a 128-bit count operand (`VPSLLW ..., xmm/m128`). -/
 def EOp.count : EOp → Bool
   | .pint op => ExecAVX.countOp op
@@ -366,7 +372,7 @@ def exec (s : State) (next : W64) (pc : Nat) (ea : Addr → Nat) (i : EvexI XLoc
     | .error f => .error f
     | .ok b => done s next e l d k z (evalOp o e l (getZ s l d) (getZ s l s1) b)
   | .uop o e l d src bc imm k z =>
-    match rdV s ea l e bc k (match o with | .shift _ | .rot _ => true | _ => false) src with
+    match rdV s ea l e bc k (EUOp.suppress o) src with
     | .error f => .error f
     | .ok b => done s next e l d k z (evalUop o e l b imm)
   | .blendm e l d s1 src bc k z =>

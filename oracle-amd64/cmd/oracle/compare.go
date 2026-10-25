@@ -164,6 +164,33 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 	} else if len(h.XMM) == 16 {
 		v.Diffs = append(v.Diffs, "ymmh: not captured by the native runner")
 	}
+	// the AVX-512 state (WP-G): compared whenever the runner captured it (absent in the case or
+	// the model = all zero)
+	for _, f := range []struct {
+		name       string
+		hw, md, in []string
+		n          int
+	}{{"zmmh", h.ZMMH, m.ZMMH, c.ZMMH, 16}, {"zmmx", h.ZMMX, m.ZMMX, c.ZMMX, 16}, {"k", h.K, m.K, c.K, 8}} {
+		if len(f.hw) != f.n {
+			continue
+		}
+		for i := 0; i < f.n; i++ {
+			mv, in := "0x0", "0x0"
+			if len(f.md) == f.n {
+				mv = f.md[i]
+			}
+			if len(f.in) == f.n {
+				in = f.in[i]
+			}
+			if hexBig(f.hw[i]).Cmp(hexBig(mv)) != 0 {
+				idx := i
+				if f.name == "zmmx" {
+					idx += 16
+				}
+				v.Diffs = append(v.Diffs, fmt.Sprintf("%s%d: hw %s model %s (in %s)", f.name, idx, f.hw[i], mv, in))
+			}
+		}
+	}
 	hm := map[int]int{}
 	for _, e := range h.Mem {
 		hm[e[0]] = e[1]
@@ -203,6 +230,12 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 			k = "xmm"
 		case strings.HasPrefix(k, "ymmh"):
 			k = "ymmh"
+		case strings.HasPrefix(k, "zmmh"):
+			k = "zmmh"
+		case strings.HasPrefix(k, "zmmx"):
+			k = "zmmx"
+		case k == "k0" || k == "k1" || k == "k2" || k == "k3" || k == "k4" || k == "k5" || k == "k6" || k == "k7":
+			k = "k"
 		case k != "pc" && k != "rflags" && k != "mem" && k != "mxcsr":
 			k = "reg"
 		}

@@ -17,3 +17,4 @@ import JanusTests.Dynamic
 import JanusTests.SSE
 import JanusTests.Crypto
 import JanusTests.AVX
+import JanusTests.AVX512
