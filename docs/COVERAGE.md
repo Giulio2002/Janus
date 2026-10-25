@@ -35,9 +35,9 @@ the cache.
 | 1. Go-compiled std functions that fully decode | 15,517 / 16,602 (**93.46%**) | 16,625 / 16,625 (**100%**) | 16,614 / 16,614 (**100%**; 94.60% before WP-B) |
 | 1. Go assembly functions that fully decode | 139 / 207 (**67.15%**) | 148 / 265 (**55.85%**) | 145 / 262 (**55.34%**) |
 | 1. compiler-generated wrappers / Go test code | 99.40% / 97.09% | 100% / 100% (99.98% before WP-B) | 100% / 100% (99.60% / 99.16% before WP-B) |
-| 2. runtime entry points with a contract, stub or proof (main + branches) | 71 of 309 names (39 on main; agent/rtiface adds 15) | same | same |
-| 2. … of the 191 linked on arm64/amd64: still missing | 139 (12 of them concurrency, excluded) | | |
-| 3. language constructs with a proved example | 64 of 75 rows (11 have none on either ISA; agent/constructs closes 20, agent/rtiface 4) | | |
+| 2. runtime entry points with a contract, stub or proof (main + branches) | 105 of 309 names (39 on main; agent/rtiface adds 15, agent/eqhash 34) | same | same |
+| 2. … of the 191 linked on arm64/amd64: still missing | 105 (12 of them concurrency, excluded) | | |
+| 3. language constructs with a proved example | 65 of 75 rows (10 have none on either ISA; agent/constructs closes 20, agent/rtiface 4, agent/eqhash 1) | | |
 | 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | 93.6% / 86.2% | 0.9% / 78.0% (gcc 83.6% once agent/ffi's `ENDBR64` is merged) | `-O3 -march=x86-64-v3`: 0.9% (52.7% with `ENDBR64`) / 50.5% |
 
 Main findings:
@@ -303,11 +303,11 @@ Full table: `artifacts/coverage/runtime.tsv`.
 |---|---:|---:|---:|---:|
 | alloc | 5 | 2 | 0 | 2 |
 | slice/growslice | 16 | 10 | 0 | 2 |
-| map | 26 | 24 | 0 | 9 |
+| map | 26 | 24 | 0 | 10 |
 | string | 22 | 20 | 0 | 0 |
 | interface/type assertion | 13 | 12 | 0 | 13 |
-| memory/equality | 23 | 20 | 3 | 3 |
-| hashing/rand | 17 | 16 | 0 | 0 |
+| memory/equality | 23 | 20 | 3 | 20 |
+| hashing/rand | 17 | 16 | 0 | 16 |
 | write barrier | 11 | 11 | 0 | 1 |
 | panic/recover/defer | 43 | 21 | 34 | 34 |
 | stack growth | 3 | 3 | 2 | 2 |
@@ -318,7 +318,7 @@ Full table: `artifacts/coverage/runtime.tsv`.
 | misc | 11 | 8 | 0 | 4 |
 | instrumentation (msan/asan/fuzz/cover) | 17 | 0 | 0 | 0 |
 | concurrency (excluded) | 21 | 12 | 0 | 0 |
-| **total** | **309** | **191** | **39** | **71** |
+| **total** | **309** | **191** | **39** | **105** |
 
 **What exists today** (main unless noted):
 
@@ -342,16 +342,14 @@ Full table: `artifacts/coverage/runtime.tsv`.
     `emptyTypeAssertCache` / `emptyInterfaceSwitchCache` (the cache model `TACacheOK.empty`,
     `ISCacheOK.empty`).
 
-**Missing: no contract, stub or proof on any branch, and linked by std** (139; the 12
-concurrency names are excluded, which leaves **127 in scope**):
+**Missing: no contract, stub or proof on any branch, and linked by std** (105; the 12
+concurrency names are excluded, which leaves **93 in scope**):
 
 * **CPU feature flags (variables)**: `arm64HasATOMICS` `x86HasAVX` `x86HasFMA` `x86HasPOPCNT` `x86HasSSE41`
 * **cgo**: `cgoAlwaysFalse` `cgoCheckPointer`
 * **concurrency (excluded)**: `block` `chancap` `chanlen` `chanrecv1` `chanrecv2` `chansend1` `closechan` `makechan` `newproc` `selectgo` `selectnbrecv` `selectnbsend`
 * **conversion/soft arithmetic**: `complex128div` `f32to64` `f64to32` `fadd64` `fdiv64` `fmul64`
-* **hashing/rand**: `c128hash` `c64hash` `f32hash` `f64hash` `interhash` `memhash` `memhash0` `memhash128` `memhash16` `memhash32` `memhash64` `memhash8` `memhash_varlen` `nilinterhash` `rand` `strhash`
-* **map**: `makemap` `mapaccess1` `mapaccess1_fast32` `mapaccess1_faststr` `mapaccess1_fat` `mapaccess2_fast32` `mapaccess2_faststr` `mapaccess2_fat` `mapassign` `mapassign_fast32` `mapassign_fast64ptr` `mapassign_faststr` `mapdelete` `mapdelete_fast32` `mapdelete_faststr`
-* **memory/equality**: `c128equal` `c64equal` `f32equal` `f64equal` `interequal` `memclrHasPointers` `memequal0` `memequal128` `memequal16` `memequal32` `memequal64` `memequal8` `memequal_varlen` `nilinterequal` `strequal` `typedmemclr` `typedmemmove`
+* **map**: `makemap` `mapaccess1` `mapaccess1_fast32` `mapaccess1_faststr` `mapaccess1_fat` `mapaccess2_fast32` `mapaccess2_fat` `mapassign` `mapassign_fast32` `mapassign_fast64ptr` `mapassign_faststr` `mapdelete` `mapdelete_fast32` `mapdelete_faststr`
 * **misc**: `KeepAlive` `gostring` `staticuint64s` `zeroVal`
 * **panic/recover/defer**: `deferproc` `deferprocStack` `deferreturn` `gorecover` `sigpanic`
 * **print (println builtin)**: `printbool` `printcomplex128` `printcomplex64` `printeface` `printfloat32` `printfloat64` `printhex` `printint` `printlock` `printnl` `printpointer` `printquoted` `printslice` `printsp` `printstring` `printuint` `printuintptr` `printunlock`
@@ -447,7 +445,7 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | runtime panics (bounds, divide) | `Get`, `Div` (main); `Slice2`, `Slice3`, `Mod` (constructs) | same | `panicBounds`, `panicdivide` stubs |
 | explicit `panic`, `recover`, unwinding | none | none | `gopanic`, `gorecover`, unwinder |
 | generics (shape + dictionary) | `TotalMeters`, `TotalFeet` (constructs: one `go.shape.uint64` body, two dictionaries, method call through the dictionary) | same (constructs) | dictionary loads (`.rodata`), no runtime |
-| large struct copy | `SwapBig` (constructs: 64 bytes, inline `LDP`/`STP`) | `SwapBig` (constructs: inline `MOVUPS`) | `runtime.duffcopy` is gone in 1.26; inline `LDP/STP` / `MOVUPS` loops, `memmove`, `typedmemmove` |
+| large struct copy | `SwapBig` (constructs: 64 bytes, inline `LDP`/`STP`); with pointers, possibly overlapping: `CopyTrees` (eqhash, `typedmemmove` contract, write barrier off) | `SwapBig` (constructs: inline `MOVUPS`); `CopyTrees` (eqhash) | `runtime.duffcopy` is gone in 1.26; inline `LDP/STP` / `MOVUPS` loops, `memmove`, `typedmemmove` |
 | array copy | `SetOne256`, `CopyBlock` (main); value semantics: `ReverseArray` (constructs) | same + `CopyBlock512` | `memmove` executed |
 | pointer deref | `Add256`, `AddLimbs`, `AtomicAdd` (main) | same | – |
 | nil dereference fault | none (preconditions exclude it) | none | signal → `runtime.sigpanic`/`panicmem` contract |
@@ -459,11 +457,11 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | `len`, `cap` | `CopyWords` (main); `CountKeys` (maps); `AppendOne` (alloc) | same | – |
 | `make([]T)`, `new`, `&T{}` | `MakeSlice`, `NewPair` (alloc) | same | `makeslice`, `newobject` contracts |
 | `make(map)` | `NewMap` (maps) | same | `makemap_small` contract |
-| map read / write / delete / clear | `Lookup`, `LookupKey16`, `Insert`, `InsertGet`, `Delete`, `ClearMap` (maps) | same | `mapaccess*`, `mapassign_fast64`, `mapdelete_fast64`, `mapclear` contracts |
+| map read / write / delete / clear | `Lookup`, `LookupKey16`, `Insert`, `InsertGet`, `Delete`, `ClearMap` (maps); string keys: `LookupStr` (eqhash) | same | `mapaccess*`, `mapassign_fast64`, `mapdelete_fast64`, `mapclear` contracts |
 | the map runtime itself | `MapAccess1Small` (maps, real `mapaccess1_fast64` vs its contract) | same | `Janus/Spec/SwissMap.lean` |
 | string indexing | `HexDigit` (main) | same | `Program.data` |
 | string concatenation | none | none | `concatstring2..5`, `concatstrings` |
-| string comparison | none (`A64Equal64`/`Equal64` are `bytes.Equal`) | none | `memequal` (executed), `cmpstring` |
+| string comparison | `==`: `StrEq` (eqhash, `memequal` contract, proved from its code on arm64); ordering: none | `==`: `StrEq` (eqhash) | `memequal`; `cmpstring` for `<` |
 | string ↔ `[]byte`, `[]rune`; `string(rune)` | none | none | `slicebytetostring`, `stringtoslicebyte`, `slicerunetostring`, `intstring`, ... |
 | int ↔ float, float32 ↔ float64 | none | none | FP decoder (done on main) |
 | float → uint64 | `F64ToU64` (main) | same | FP decoder |
@@ -475,7 +473,7 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | type assertion (both forms) | `AsHasher` (rtiface, comma-ok to an interface) | same | `typeAssert` contract, assertion-cache probe executed; `assertE2I(2)` contracts; the panicking form ends in the `panicnildottype` stub or excluded `typeAssert` panic |
 | interface comparison | `Equal` (rtiface, `any`) | same | `efaceeq` contract (`ifaceeq` too); type `Equal` functions abstract (`R.eq`, byte equality for `TFlagRegularMemory`) |
 | `min`, `max` builtins | integers: `MinMax` (constructs); floats, strings: none | same (constructs) | inline (`CSEL`/`CMOV`); `fmin`/`fmax`, `strmin`/`strmax` |
-| `clear` | `ClearWords` (main), `ClearMap` (maps); small array, inline stores: `ClearArray` (constructs) | same | `memclrNoHeapPointers` executed; `mapclear` |
+| `clear` | `ClearWords` (main), `ClearMap` (maps); small array, inline stores: `ClearArray` (constructs); pointers: `ClearTrees` (eqhash, `memclrHasPointers`) | same | `memclrNoHeapPointers` executed; `mapclear` |
 | `math/bits` | `Add128`, `Add256`, `AddLimbs`, `Mul64`, `RotHasher` (main) | same | – |
 | sync/atomic (single-threaded) | `AtomicAdd`, `AtomicMax` (main) | same | arm64 LL/SC fallback needs `STXR` (rejected, below) |
 | package variables | `Bump`, `GlobalTable` (constructs) | `Bump`, `GlobalTable` (main) | data objects |
@@ -491,7 +489,7 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 
 Not covered on any branch or architecture (with agent/constructs): range over
 string; heap defers, `panic`, `recover`; the nil-dereference fault; string concatenation,
-comparison and conversions; int/float and float32/float64 conversions; complex numbers; the grown-stack case; `//export` callbacks. Within
+ordering and conversions; int/float and float32/float64 conversions; complex numbers; the grown-stack case; `//export` callbacks. Within
 covered rows these forms still have no example: a non-inlined range-over-func loop, float and
 string `min`/`max`. amd64 lacks `IndexByte` (the arm64 example is in an
 arm64-only file) and `MallocFast`.
