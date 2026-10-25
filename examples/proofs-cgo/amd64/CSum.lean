@@ -26,7 +26,8 @@ abbrev head : Nat := Extracted.entry + 0x10
 abbrev SumPost (p n : BitVec 64) (s s' : State) : Prop :=
   s'.regs 4 = s.regs 4 + 8 ∧ s'.regs 3 = s.regs 3 ∧ s'.regs 5 = s.regs 5 ∧
     s'.regs 12 = s.regs 12 ∧ s'.regs 13 = s.regs 13 ∧ s'.regs 14 = s.regs 14 ∧
-    s'.regs 15 = s.regs 15 ∧ s'.df = false ∧ s'.mxcsr = s.mxcsr ∧ s'.mem = s.mem ∧
+    s'.regs 15 = s.regs 15 ∧ s'.df = false ∧ s'.mxcsr = s.mxcsr ∧ s'.fpucw = s.fpucw ∧
+    s'.mem = s.mem ∧
     (s'.regs 0).toNat = sumWords s.mem p.toNat n.toNat % 2 ^ 64
 
 /-- The precondition of the summary: the arguments, the buffer, and the return address slot. -/
@@ -40,7 +41,7 @@ abbrev SumPre (p n : BitVec 64) (s : State) : Prop :=
 abbrev Kept (s S : State) : Prop :=
   S.regs 4 = s.regs 4 ∧ S.mem = s.mem ∧ S.regs 3 = s.regs 3 ∧ S.regs 5 = s.regs 5 ∧
     S.regs 12 = s.regs 12 ∧ S.regs 13 = s.regs 13 ∧ S.regs 14 = s.regs 14 ∧
-    S.regs 15 = s.regs 15 ∧ S.df = s.df ∧ S.mxcsr = s.mxcsr
+    S.regs 15 = s.regs 15 ∧ S.df = s.df ∧ S.mxcsr = s.mxcsr ∧ S.fpucw = s.fpucw
 
 /-- The loop invariant at `head` after `i` of the `n` iterations. -/
 theorem loop (p n : BitVec 64) (s : State) (hpre : SumPre p n s) :
@@ -54,12 +55,12 @@ theorem loop (p n : BitVec 64) (s : State) (hpre : SumPre p n s) :
   intro k
   induction k with
   | zero =>
-    intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx⟩ hs
+    intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw⟩ hs
     janus64_run
     janus64_simp [SumPost, sumWords_succ, show n.toNat = i.toNat + 1 by omega]
     omega
   | succ k ih =>
-    intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx⟩ hs
+    intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw⟩ hs
     janus64_run until [head]
     have hi : (i + 1#64).toNat = i.toNat + 1 := by
       rw [BitVec.toNat_add]; simp only [BitVec.toNat_ofNat]; omega
@@ -99,7 +100,7 @@ theorem correctness (p n : BitVec 64) :
       exact ⟨h0, h1, hb, hacc, hnw, Janus.Arm64.Memory.accessible_weaken _ hst,
         by rw [hr]; exact hret.user, hs.df⟩)
     (fun s s' _ h => by
-      obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11⟩ := h
-      exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, by rw [h9]⟩, h11, h10⟩)
+      obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, hfw, h10, h11⟩ := h
+      exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, by rw [h9], hfw⟩, h11, h10⟩)
 
 end Proof

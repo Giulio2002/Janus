@@ -215,11 +215,14 @@ def ArgsAt (s : State) : List CType → List Nat → List Passing → Prop
   | [], [], [] => True
   | _, _, _ => False
 
-/-- A MEMORY result has a writable buffer of its size at `RDI`. -/
+/-- A MEMORY result has a writable buffer of its size at `RDI`, which does not overlap the
+return-address slot the `CALL` pushed (the caller allocated it before the call). -/
 def RetBuf (s : State) (sig : SysV.Sig) : Prop :=
   ∀ t, sig.ret = some t → SysV.result t = .indirect (.gpr 7) →
     (s.regs 7).toNat + CType.size t ≤ 2 ^ 48 ∧
-      s.mem.accessible (s.regs 7).toNat (CType.size t) true = true
+      s.mem.accessible (s.regs 7).toNat (CType.size t) true = true ∧
+      ((s.regs 7).toNat + CType.size t ≤ (s.regs regSP).toNat ∨
+        (s.regs regSP).toNat + 8 ≤ (s.regs 7).toNat)
 
 /-- `AL` for a variadic callee: an upper bound, at most 8, on the vector registers used. -/
 def VarargAL (s : State) (sig : SysV.Sig) : Prop :=
@@ -420,6 +423,20 @@ theorem cCallA_iff_cCall (ret : Option CType) (args : List W64) (h : args.length
     exact ⟨hc.rip, hc.ret, h, hA.1 (hp ▸ hc.args), hc.spAligned, hc.df⟩
   · intro hc
     exact ⟨hc.rip, hc.ret, hc.spAligned, hc.df, hp ▸ hA.2 hc.args, hrb, hal⟩
+
+/-- `CReturn` from the equations a callee summary states. -/
+theorem CReturn.of_eqs {s₀ s₁ : State} (hsp : s₁.regs 4 = s₀.regs 4 + 8) (h3 : s₁.regs 3 = s₀.regs 3)
+    (h5 : s₁.regs 5 = s₀.regs 5) (h12 : s₁.regs 12 = s₀.regs 12) (h13 : s₁.regs 13 = s₀.regs 13)
+    (h14 : s₁.regs 14 = s₀.regs 14) (h15 : s₁.regs 15 = s₀.regs 15) (hdf : s₁.df = false)
+    (hmx : s₁.mxcsr = s₀.mxcsr) (hfw : s₁.fpucw = s₀.fpucw) : CReturn s₀ s₁ :=
+  ⟨hsp, h3, h5, h12, h13, h14, h15, hdf, by rw [hmx], hfw⟩
+
+/-- The return address of a `CCallA` state is a user address (what a callee `Summary` needs). -/
+theorem CCallA.ret_lt {sig : SysV.Sig} {vals : List Nat} {ret : Nat} (hret : GoABI.RetAddr p ret)
+    (hs : CCallA (p.withExit ret) entry sig vals s) : s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47 := by
+  have hr := hs.ret
+  simp only [Program.withExit] at hr
+  rw [hr]; exact hret.user
 
 theorem CEnsuresA.of_summary {sig : SysV.Sig} {vals : List Nat}
     {pre spre : State → Prop} {post post' : State → State → Prop}
