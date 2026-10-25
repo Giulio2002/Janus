@@ -522,10 +522,10 @@ pseudocode:
 
 | | arm64 (`Janus/Arm64/Float.lean`, ASL) | amd64 (`Janus/Amd64/Float.lean`, Intel SDM) |
 |---|---|---|
-| instructions | `FADD FSUB FMUL FNMUL FDIV FSQRT FNEG FABS FMIN FMAX FMINNM FMAXNM FMADD FMSUB FNMADD FNMSUB FCMP FCMPE FCCMP FCCMPE FCSEL FCVT` (S↔D) `FCVT{N,P,M,Z,A}{S,U} SCVTF UCVTF` (32/64-bit) `FRINT{N,P,M,Z,A,X,I}`, `FMOV` (register, immediate) | `ADD SUB MUL DIV SQRT MIN MAX` `SD`/`SS`, `UCOMISD COMISD UCOMISS COMISS`, `CMPSD`/`CMPSS` (predicates 0–7), `CVTSI2SD/SS`, `CVTTSD2SI CVTSD2SI CVTTSS2SI CVTSS2SI` (32/64-bit), `CVTSD2SS CVTSS2SD`, `ROUNDSD`/`ROUNDSS` (SSE4.1, which Go runs behind a `runtime.x86HasSSE41` test), `ANDPD ANDNPD ORPD ANDPS ANDNPS ORPS` |
+| instructions | `FADD FSUB FMUL FNMUL FDIV FSQRT FNEG FABS FMIN FMAX FMINNM FMAXNM FMADD FMSUB FNMADD FNMSUB FCMP FCMPE FCCMP FCCMPE FCSEL FCVT` (S↔D) `FCVT{N,P,M,Z,A}{S,U} SCVTF UCVTF` (32/64-bit) `FRINT{N,P,M,Z,A,X,I}`, `FMOV` (register, immediate) | `ADD SUB MUL DIV SQRT MIN MAX` `SD`/`SS`, `UCOMISD COMISD UCOMISS COMISS`, `CMPSD`/`CMPSS` (predicates 0–7), `CVTSI2SD/SS`, `CVTTSD2SI CVTSD2SI CVTTSS2SI CVTSS2SI` (32/64-bit), `CVTSD2SS CVTSS2SD`, `ROUNDSD`/`ROUNDSS` (SSE4.1, which Go runs behind a `runtime.x86HasSSE41` test), `ANDPD ANDNPD ORPD ANDPS ANDNPS ORPS`, scalar FMA3 `VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}` |
 | control state | `State.fpcr`: `RMode`, `FZ`, `DN`, and FEAT_AFP's `FIZ`, `AH`, `NEP` | `State.mxcsr`: `RC`, `FTZ`, `DAZ`, the six masks |
 | flags | `State.fpsr` (`IOC DZC OFC UFC IXC IDC`, cumulative) | `MXCSR` bits 5:0 (`IE DE ZE OE UE PE`, cumulative) |
-| NaN results | the first signalling, else the first quiet operand (for `FMADD`: addend first), quieted; default NaN `0x7FF8…` with `DN = 1`; `AH = 1` has its own rules (default NaN negative, `FMAX` returns the second operand, ...) | the first source operand if it is a NaN, else the second, quieted; invalid operations give the indefinite `0xFFF8…`; `MINSD`/`MAXSD` return the second operand unchanged |
+| NaN results | the first signalling, else the first quiet operand (for `FMADD`: addend first), quieted; default NaN `0x7FF8…` with `DN = 1`; `AH = 1` has its own rules (default NaN negative, `FMAX` returns the second operand, ...) | the first source operand if it is a NaN, else the second, quieted; invalid operations give the indefinite `0xFFF8…`; `MINSD`/`MAXSD` return the second operand unchanged; FMA: the one NaN operand quieted, never negated (two or more NaNs fault) |
 | tininess | before rounding (`AH = 0`), after rounding (`AH = 1`) | after rounding |
 | flush-to-zero | `FZ`: inputs and outputs (output before rounding, `UFC` only, when `AH = 0`); `FIZ`: inputs | `DAZ`: inputs (no `DE`); `FTZ`: tiny results, exact or not, with `UE PE` |
 | out-of-range to integer | saturates; NaN gives 0 (`IOC`) | the integer indefinite `2^(w-1)` (`IE`) |
@@ -537,7 +537,13 @@ bits are RES0, so a theorem whose precondition allows them set says nothing abou
 unless they read as zero there. Half precision (FEAT_FP16: `ftype = 11`, `FZ16`, `AHP`), BFloat16,
 `FRINT32*/64*`, `FJCVTZS`, fixed-point conversions and Advanced SIMD floating point are rejected.
 The amd64 model is of SSE2 (and SSE4.1 for `ROUNDSD`, executed by Go only after testing
-`x86HasSSE41`); the VEX/EVEX forms (`VFMADD231SD` behind `x86HasFMA`, ...), x87 and `LDMXCSR` are
+`x86HasSSE41`) and of the scalar FMA3 instructions (`VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}`,
+which `GOAMD64=v3` code uses unconditionally and `GOAMD64=v1` code behind `x86HasFMA`): one
+rounding of the exact `±a × b ± c` on the IEEE core, proved equal to IEEE 754
+`fusedMultiplyAdd` in IEEE mode (`FP.fma_ieee`). Where the manuals leave an FMA result open (two
+or more NaN operands, whose choice Intel documents and AMD does not; `0 × ∞ + qNaN`, whose `IE`
+IEEE 754 §7.2 leaves to the implementation) the instruction faults (`undefinedResult`), so no
+proof depends on a vendor. The other VEX/EVEX floating-point forms, x87 and `LDMXCSR` are
 rejected. Encodings whose behaviour the manuals leave open (an `FCMP #0.0` with a non-zero `Rm`
 field, `REX.W` on an SSE instruction that does not use it, reserved `CMPSD`/`ROUNDSD` immediate
 bits) are rejected rather than guessed.

@@ -150,8 +150,10 @@ if go tool objdump -s 'basic\.Dot3$' "$W/ex-v3" | grep -q 'c4e2e1b9'; then
   "$W/janus" extract "$W/ex-v3" example.com/basic.Dot3 "$W/dot3-v3" >/dev/null 2>&1
   if out=$("$W/janus" verify "$W/dot3-v3" --proof examples/proofs-amd64/Dot3/Proof.lean --theorem Proof.correctness 2>&1); then
     row "X64-V3-FMA" blocked "VERIFIED against the fused v3 binary"
-  elif grep -q 'do not decode to a modelled instruction' <<<"$out"; then
-    row "X64-V3-FMA" blocked "blocked (v3 Dot3 = MULSD + 2x VFMADD231SD; the v1 proof fails on it: VEX FMA is not decoded)"
+  elif grep -q 'janus64_run: stuck at .*vfmadd231sd' <<<"$out"; then
+    # since WP-B the decoder models scalar FMA; the v1 proof (unfused MULSD/ADDSD) gets stuck at
+    # the first VFMADD231SD, whose fused result it does not account for
+    row "X64-V3-FMA" blocked "blocked (v3 Dot3 = MULSD + 2x VFMADD231SD; the v1 proof fails on it: it gets stuck at the fused VFMADD231SD)"
   else
     row "X64-V3-FMA" blocked "FAILED oddly: $(tail -3 <<<"$out" | tr '\n' ' ')"
   fi

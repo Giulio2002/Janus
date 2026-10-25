@@ -13,7 +13,8 @@ tables 2-1..2-3) and the opcode maps of appendix A, cross-checked against
 
 Prefix policy (strict):
 * Legacy prefixes `66` (operand size), `F2`/`F3` (only where they select an instruction:
-  `PAUSE`, `POPCNT`, `TZCNT`, `LZCNT`, `MOVDQU`, `MOVQ`, `MOVSD`, `MOVSS`, the SSE scalar
+  `PAUSE`, `POPCNT`, `TZCNT`, `LZCNT`, `MOVDQU`, `MOVQ`, `MOVSD`, `MOVSS`, `PSHUFB`, `PSIGNB`,
+  the SSE scalar
   floating-point instructions (`Decode.sseFp`), and `F3` = `REP` on `MOVS`/`STOS`), and the null segment overrides `26`/`2E`/`36`/`3E` (ignored in 64-bit mode;
   not accepted on branches, where they are hints or CET `NOTRACK`). At most one of each group
   (`66` may repeat).
@@ -29,7 +30,10 @@ Prefix policy (strict):
   (which hardware silently ignores) is rejected, as is a second `REX`.
 * `VEX` (`C4`/`C5`) is decoded for exactly the AVX/AVX2 instructions Go's runtime and
   `internal/bytealg` use (`Decode.vexOp`): `VMOVDQU VMOVDQA VMOVNTDQ VPXOR VPAND VPOR VPCMPEQB
-  VPMOVMSKB VPTEST VPBROADCASTB VZEROUPPER`, with every field the SDM reserves checked
+  VPMOVMSKB VPTEST VPBROADCASTB VZEROUPPER`, the BMI1/BMI2 general-purpose instructions (`ANDN
+  BLSR BLSMSK BLSI BEXTR BZHI SHLX SHRX SARX RORX MULX PDEP PEXT`, `VEX.L0` only) and the
+  scalar FMA3 instructions (`VF{,N}M{ADD,SUB}{132,213,231}{SS,SD}`, `VEX.L0` only), with every
+  field the SDM reserves checked
   (`VEX.vvvv = 1111` where it is unused, `VEX.W0` for `VPBROADCASTB`, `VEX.L0` for
   `VZEROUPPER`, the register-only and memory-only forms). A VEX prefix preceded by any other
   prefix (`66 F2 F3 F0` or `REX` are `#UD`; segment overrides are rejected too) is rejected.
@@ -662,6 +666,30 @@ def twoByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
   else if 0xC8 ≤ op ∧ op < 0xD0 then
     if p.opsize then none else
     finish p .int (.bswap (if rexW then 64 else 32) (op - 0xC8 + 8 * rexB)) (n + 1)
+  else if op = 0x38 then
+    -- the three-byte map `0F 38`: `PSHUFB` (`66 0F 38 00`), `PSIGNB` (`66 0F 38 08`; without
+    -- `66` both are MMX), `MOVBE r, m` (`0F 38 F0`) and `MOVBE m, r` (`0F 38 F1`), memory forms
+    -- only (`mod = 11` is `#UD`); `F2 0F 38 F0/F1` is `CRC32` and `F3` is reserved
+    match bs with
+    | [] => none
+    | op3 :: rest =>
+      let withModRM3 (k : ModRM → List Nat → Nat → Option (Instr × Nat)) : Option (Instr × Nat) :=
+        match modrm rex rest with
+        | some (m, r, c) => k m r (n + 2 + c)
+        | none => none
+      if op3 = 0x00 ∨ op3 = 0x08 then
+        if sel ≠ 1 then none else
+        withModRM3 fun m _ len =>
+          fin (.sseOp (if op3 = 0x00 then .pshufb else .psignb) m.reg (rmX m.rm)) len
+      else if op3 = 0xF0 ∨ op3 = 0xF1 then
+        if p.rep ≠ 0 then none else
+        withModRM3 fun m _ len =>
+          match m.rm with
+          | .m a =>
+            finish p .int (if op3 = 0xF0 then .movbe osz (.reg m.reg) (.mem a)
+              else .movbe osz (.mem a) (.reg m.reg)) len
+          | .r _ => none
+      else none
   else sseFp p op bs n  -- SSE scalar floating point
 
 end Decode
@@ -728,7 +756,51 @@ def vexOp (rex v l pp mp op : Nat) (bs : List Nat) (n : Nat) : Option (Instr × 
     | some (m, r, c) => k m r (n + 1 + c)
     | none => none
   let fin (i : Instr) (len : Nat) : Option (Instr × Nat) := if len > 15 then none else some (i, len)
-  if mp = 1 then
+  -- operand size of the BMI/FMA forms: `VEX.W1` = 64 bits (`SD`), `W0` = 32 bits (`SS`)
+  let w := if rex / 8 = 1 then 64 else 32
+  let gpr : RM → Loc := fun | .r r => .reg r | .m a => .mem a
+  if mp = 2 ∧ (op = 0xF2 ∨ op = 0xF3 ∨ op = 0xF5 ∨ op = 0xF6 ∨ op = 0xF7) then
+    -- BMI1/BMI2 (`VEX.LZ.0F38`; `VEX.L1` is `#UD`)
+    if l ≠ 128 then none
+    else if op = 0xF2 then
+      -- ANDN r, vvvv, r/m (no implied prefix)
+      if pp ≠ 0 then none else
+      withModRM fun m _ len => fin (.andn w m.reg v (gpr m.rm)) len
+    else if op = 0xF3 then
+      -- group 17: BLSR (/1), BLSMSK (/2), BLSI (/3) vvvv, r/m
+      if pp ≠ 0 then none else
+      withModRM fun m _ len =>
+        if m.ext = 1 ∨ m.ext = 2 ∨ m.ext = 3 then fin (.blsx m.ext w v (gpr m.rm)) len else none
+    else if op = 0xF5 then
+      -- BZHI r, r/m, vvvv (none), PEXT (F3), PDEP r, vvvv, r/m (F2)
+      if pp = 0 then withModRM fun m _ len => fin (.bzhi w m.reg (gpr m.rm) v) len
+      else if pp = 2 then withModRM fun m _ len => fin (.pext w m.reg v (gpr m.rm)) len
+      else if pp = 3 then withModRM fun m _ len => fin (.pdep w m.reg v (gpr m.rm)) len
+      else none
+    else if op = 0xF6 then
+      -- MULX r(hi), vvvv(lo), r/m (F2)
+      if pp ≠ 3 then none else
+      withModRM fun m _ len => fin (.mulx w m.reg v (gpr m.rm)) len
+    else
+      -- BEXTR (none), SHLX (66), SARX (F3), SHRX (F2) r, r/m, vvvv
+      withModRM fun m _ len =>
+        if pp = 0 then fin (.bextr w m.reg (gpr m.rm) v) len
+        else fin (.shiftx (if pp = 1 then .shl else if pp = 2 then .sar else .shr) w m.reg (gpr m.rm) v) len
+  else if mp = 3 ∧ op = 0xF0 then
+    -- RORX r, r/m, imm8 (`VEX.LZ.F2.0F3A`, `VEX.vvvv = 1111`)
+    if l ≠ 128 ∨ pp ≠ 3 ∨ v ≠ 0 then none else
+    withModRM fun m r len =>
+      match immU8 r with
+      | some (i, _, c) => fin (.rorx w m.reg (gpr m.rm) i) (len + c)
+      | none => none
+  else if mp = 2 ∧ pp = 1 ∧ (op / 16 = 9 ∨ op / 16 = 10 ∨ op / 16 = 11) ∧ op % 2 = 1 ∧ op % 16 ≥ 9 then
+    -- FMA3 scalar: VF(N)MADD/VF(N)MSUB 132 (9x), 213 (Ax), 231 (Bx) SS/SD (x = 9 B D F):
+    -- `VEX.LIG.66.0F38`; only `VEX.L0` (what compilers emit) is accepted
+    if l ≠ 128 then none else
+    let form := if op / 16 = 9 then 132 else if op / 16 = 10 then 213 else 231
+    let k := (op % 16 - 9) / 2
+    withModRM fun m _ len => fin (.vfmas w form (k ≥ 2) (k % 2 = 1) m.reg v (rmX m.rm)) len
+  else if mp = 1 then
     if (op = 0x6F ∨ op = 0x7F) ∧ (pp = 1 ∨ pp = 2) then
       -- VMOVDQA (66) / VMOVDQU (F3) load (6F) and store (7F)
       if v ≠ 0 then none else
