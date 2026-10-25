@@ -506,7 +506,7 @@ runtime's machine code:
 
 | entry | how | example (both ISAs unless noted) |
 | --- | --- | --- |
-| `complex128div` | executed: Smith's algorithm and the Annex G recovery, against `Janus.Float.cdiv` (IEEE operations, fused on arm64) | `Div` (arm64) |
+| `complex128div` | executed: Smith's algorithm and the Annex G recovery, against `Janus.Float.cdiv` (IEEE operations, fused on arm64, unfused on amd64) | `Div` |
 | `f32to64` (`-d=softfloat`) | executed (with `fpack64`), equal to IEEE `convertFormat` (`cvt binary32 binary64`) for every input | `Widen` |
 | `KeepAlive` | an intrinsic: no call, the argument is only kept live | `LoadKeep` |
 | `cgoNoCallback` | ordinary Go code (a store into `g`, a `panic` stub) | — |

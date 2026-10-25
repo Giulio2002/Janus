@@ -373,7 +373,7 @@ Full table: `artifacts/coverage/runtime.tsv`.
     `ISCacheOK.empty`).
 
 **R9 (agent/rtmisc), not yet in the table above** (docs/RUNTIME-CONTRACTS.md, "Remaining
-runtime"): executed by proved examples on both ISAs, `complex128div` (arm64) and
+runtime"): executed by proved examples on both ISAs, `complex128div` (against `cdiv`, fused on arm64, unfused on amd64; the Annex G recoveries are also evaluated, `annexG_*`) and
 `f32to64` (`-d=softfloat`); `KeepAlive` (an intrinsic, no call); the data objects `staticuint64s`
 (proved from the extracted bytes), `zeroVal`, `inf`, `cgoAlwaysFalse` (stated hypotheses); the CPU
 feature flags as a hypothesis quantified over the flag's value (`x86HasPOPCNT` proved for both
@@ -512,7 +512,7 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | int ↔ float, float32 ↔ float64 | none | none | FP decoder (done on main) |
 | float → uint64 | `F64ToU64` (main) | same | FP decoder |
 | float bits, float arithmetic | `Abs`, `AddF64`, `Dot3` (main) | same | FP decoder |
-| complex numbers | none | none | FP; `complex128div` |
+| complex numbers | `Div` (examples/rtmisc, R9) | `Div` (examples/rtmisc, R9) | — |
 | `unsafe.Pointer` | `GoSum` (ffi) | same | – |
 | `uintptr` arithmetic | `AlignUp` (constructs) | same (constructs) | – |
 | interface boxing (`convT*`) | `Box` (rtiface) | same | `convT64` contract (`convT`, `convT16/32`, `convTstring`, `convTslice`, `convTnoptr` contracts too) |
