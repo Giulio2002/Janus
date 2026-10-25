@@ -77,8 +77,8 @@ attribute [janus_exec, janus_post] argWords
     (s : State) : Prop :=
   CallOK s stack sp.nargs ∧ sp.pre (argWords s sp.nargs) s.mem ∧
     (∀ r ∈ sp.reads (argWords s sp.nargs) s.mem, Outside r.1 r.2 (calleeStack s stack sp.nargs)) ∧
-    (∀ adj, sp.guard = some adj → Janus.Spec.GuardOK s adj) ∧
-    (sp.ready = true → Ready H rt (argWords s sp.nargs) s)
+    (match sp.guard with | some adj => Janus.Spec.GuardOK s adj | none => True) ∧
+    (if sp.ready then Ready H rt (argWords s sp.nargs) s else True)
 
 /-- The postcondition of `RtContract` (arm64). -/
 @[reducible] def RtPost (rt : List (Nat × Nat)) (stack : Nat) (sp : RtSpec) (s s' : State) : Prop :=
@@ -139,8 +139,8 @@ def GuardOK64 (s : State) (adj : Nat) : Prop :=
     (s : State) : Prop :=
   CallOK64 s stack sp.nargs ∧ sp.pre (argWords64 s sp.nargs) s.mem ∧
     (∀ r ∈ sp.reads (argWords64 s sp.nargs) s.mem, Outside r.1 r.2 (calleeStack64 s stack sp.nargs)) ∧
-    (∀ adj, sp.guard = some adj → GuardOK64 s adj) ∧
-    (sp.ready = true → Ready64 H rt (argWords64 s sp.nargs) s)
+    (match sp.guard with | some adj => GuardOK64 s adj | none => True) ∧
+    (if sp.ready then Ready64 H rt (argWords64 s sp.nargs) s else True)
 
 /-- The postcondition of `RtContract64`. -/
 @[reducible] def RtPost64 (rt : List (Nat × Nat)) (stack : Nat) (sp : RtSpec) (s s' : State) :
@@ -191,6 +191,13 @@ def RtContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat))
 
 end Amd64
 
+/-- The readiness part of `RtPre` of a spec with `ready = true`. -/
+theorem ready_of {c : Bool} {P : Prop} (h : c = true) (hp : if c then P else True) : P := by
+  subst h; exact hp
+
+theorem ready_intro {c : Bool} {P : Prop} (h : c = true) (hp : P) : if c then P else True := by
+  subst h; exact hp
+
 /-- A weaker postcondition and a stronger precondition give a weaker contract (arm64). -/
 theorem RtContract.mono {p : Janus.Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
     {H : RtReady} {sp : RtSpec} (h : RtContract p addr rt stack H sp)
@@ -205,7 +212,7 @@ namespace Janus.Contracts
 /- The quantifiers of `RtPre` over the spec's `reads` (and of specs over their operands), over a
 literal list: one conjunct per element, so that the executors prove a call's precondition
 fact by fact. -/
-attribute [janus_exec, janus_post, janus64_exec, janus64_post] List.forall_mem_cons List.not_mem_nil
-  false_implies implies_true forall_const Janus.outside_cons Janus.outside_nil and_true true_and
+attribute [janus_exec, janus_post, janus64_exec, janus64_post] List.forall_mem_cons List.forall_mem_nil
+  Janus.outside_cons Janus.outside_nil
 
 end Janus.Contracts

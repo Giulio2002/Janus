@@ -153,7 +153,7 @@ theorem concatstring_impl (k : Nat) :
     RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW wstack H0 (concatstringSpec k) := by
   rw [link_at0]
   rintro s hpc ⟨⟨hra, hal, hsb, hsa, hacc⟩, -, -, -, hH⟩
-  have ha := hH rfl
+  have ha := ready_of rfl hH
   janus64_run
   apply rtPost_const <;> (try rfl) <;> (try simp [retAddrOf]) <;> (try simp [setRegF])
   rw [strPairs_zero _ (by simpa [concatstringSpec, Ready64, H0] using ha)]
@@ -163,7 +163,7 @@ theorem concatstring_satisfiable (k : Nat) (hk : k ≤ 7) : Satisfiable (concats
   have ha := fun j => args_zero (1 + 2 * k) j (by omega)
   refine ⟨rtW, H0, _, concatstring_impl k, wstate (args []), rfl,
     wstate_callOK _ _ (by simp [concatstringSpec]; omega), ⟨Or.inl (ha 0), ?_⟩, ?_,
-    by simp [concatstringSpec], fun _ => ha⟩
+    trivial, ready_intro rfl ha⟩
   · intro x hx
     rw [mem_strPairs_zero _ ha _ _ _ hx]
     exact ⟨⟨by decide, by simp⟩, fun h => absurd (ha 0) h⟩
@@ -178,9 +178,9 @@ theorem sat_zero (sp : RtSpec) (hn : sp.nargs ≤ 16)
     (hpre : sp.pre (argWords64 (wstate (args [])) sp.nargs) wmem)
     (hreads : ∀ r ∈ sp.reads (argWords64 (wstate (args [])) sp.nargs) wmem,
       Outside r.1 r.2 (calleeStack64 (wstate (args [])) wstack sp.nargs))
-    (hg : sp.guard = none) : Satisfiable sp :=
+    (hg : sp.guard = none) (hr : sp.ready = true) : Satisfiable sp :=
   ⟨rtW, H0, _, himpl, wstate (args []), rfl, wstate_callOK _ _ hn, hpre, hreads,
-    by simp [hg], fun _ j => args_zero _ j hn⟩
+    by rw [hg]; trivial, ready_intro hr fun j => args_zero _ j hn⟩
 
 set_option hygiene false in
 /-- The tactic of every zero-operand implementation proof: run the code, then the spec's
@@ -188,7 +188,7 @@ postcondition with all operands 0 (`ha`). -/
 macro "zero_impl" : tactic => `(tactic| (
   rw [link_at0]
   rintro s hpc ⟨⟨hra, hal, hsb, hsa, hacc⟩, -, -, -, hH⟩
-  have ha := hH rfl
+  have ha := ready_of rfl hH
   simp only [Ready64, H0, arg, List.getD_eq_getElem?_getD] at ha
   janus64_run
   apply rtPost_const <;> (try rfl) <;> (try simp [retAddrOf]) <;> (try simp [setRegF])))
@@ -202,7 +202,7 @@ theorem concatstrings_impl :
 
 theorem concatstrings_satisfiable : Satisfiable concatstringsSpec := by
   have ha := fun j => args_zero 4 j (by decide)
-  refine sat_zero _ (by decide) concatstrings_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) concatstrings_impl ?_ ?_ rfl rfl
   · simp only [concatstringsSpec] at ha ⊢
     rw [ha 0, ha 1, ha 2]
     refine ⟨Or.inl rfl, by decide, by simp, by simp [StrsIn, strHdrs], by simp [Disjoint]⟩
@@ -219,7 +219,7 @@ theorem concatbyte_impl (k : Nat) :
 
 theorem concatbyte_satisfiable (k : Nat) (hk : k ≤ 7) : Satisfiable (concatbyteSpec k) := by
   have ha := fun j => args_zero (1 + 2 * k) j (by omega)
-  refine sat_zero _ (by simp [concatbyteSpec]; omega) (concatbyte_impl k) ⟨Or.inl (ha 0), ?_⟩ ?_ rfl
+  refine sat_zero _ (by simp [concatbyteSpec]; omega) (concatbyte_impl k) ⟨Or.inl (ha 0), ?_⟩ ?_ rfl rfl
   · intro x hx
     rw [mem_strPairs_zero _ ha _ _ _ hx]
     exact ⟨⟨by decide, by simp⟩, fun h => absurd (ha 0) h⟩
@@ -236,7 +236,7 @@ theorem concatbytes_impl :
 
 theorem concatbytes_satisfiable : Satisfiable concatbytesSpec := by
   have ha := fun j => args_zero 4 j (by decide)
-  refine sat_zero _ (by decide) concatbytes_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) concatbytes_impl ?_ ?_ rfl rfl
   · simp only [concatbytesSpec] at ha ⊢
     rw [ha 0, ha 1, ha 2]
     refine ⟨Or.inl rfl, by decide, by simp, by simp [StrsIn, strHdrs], by simp [Disjoint]⟩
@@ -255,7 +255,7 @@ theorem slicebytetostring_impl :
 
 theorem slicebytetostring_satisfiable : Satisfiable slicebytetostringSpec := by
   have ha := fun j => args_zero 3 j (by decide)
-  refine sat_zero _ (by decide) slicebytetostring_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) slicebytetostring_impl ?_ ?_ rfl rfl
   · simp only [slicebytetostringSpec] at ha ⊢
     rw [ha 0, ha 1, ha 2]
     exact ⟨Or.inl rfl, ⟨by decide, by simp⟩, fun h => absurd rfl h⟩
@@ -272,7 +272,7 @@ theorem slicebytetostringtmp_impl :
 
 theorem slicebytetostringtmp_satisfiable : Satisfiable slicebytetostringtmpSpec := by
   have ha := fun j => args_zero 2 j (by decide)
-  refine sat_zero _ (by decide) slicebytetostringtmp_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) slicebytetostringtmp_impl ?_ ?_ rfl rfl
   · simp only [slicebytetostringtmpSpec] at ha ⊢
     rw [ha 0, ha 1]
     exact ⟨by decide, by simp⟩
@@ -289,7 +289,7 @@ theorem stringtoslicebyte_impl :
 
 theorem stringtoslicebyte_satisfiable : Satisfiable stringtoslicebyteSpec := by
   have ha := fun j => args_zero 3 j (by decide)
-  refine sat_zero _ (by decide) stringtoslicebyte_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) stringtoslicebyte_impl ?_ ?_ rfl rfl
   · simp only [stringtoslicebyteSpec] at ha ⊢
     rw [ha 0, ha 1, ha 2]
     exact ⟨Or.inl rfl, ⟨by decide, by simp⟩, fun h => absurd rfl h⟩
@@ -306,7 +306,7 @@ theorem stringtoslicerune_impl :
 
 theorem stringtoslicerune_satisfiable : Satisfiable stringtosliceruneSpec := by
   have ha := fun j => args_zero 3 j (by decide)
-  refine sat_zero _ (by decide) stringtoslicerune_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) stringtoslicerune_impl ?_ ?_ rfl rfl
   · simp only [stringtosliceruneSpec] at ha ⊢
     rw [ha 0, ha 1, ha 2]
     exact ⟨Or.inl rfl, ⟨by decide, by simp⟩, by decide, fun h => absurd rfl h⟩
@@ -323,7 +323,7 @@ theorem slicerunetostring_impl :
 
 theorem slicerunetostring_satisfiable : Satisfiable slicerunetostringSpec := by
   have ha := fun j => args_zero 4 j (by decide)
-  refine sat_zero _ (by decide) slicerunetostring_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) slicerunetostring_impl ?_ ?_ rfl rfl
   · simp only [slicerunetostringSpec] at ha ⊢
     rw [ha 0, ha 1, ha 2]
     exact ⟨Or.inl rfl, ⟨by decide, by simp⟩, fun h => absurd rfl h⟩
@@ -340,7 +340,7 @@ theorem gostringn_impl :
 
 theorem gostringn_satisfiable : Satisfiable gostringnSpec := by
   have ha := fun j => args_zero 2 j (by decide)
-  refine sat_zero _ (by decide) gostringn_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) gostringn_impl ?_ ?_ rfl rfl
   · simp only [gostringnSpec] at ha ⊢
     rw [ha 0, ha 1]
     exact ⟨by decide, by simp⟩
@@ -357,7 +357,7 @@ theorem gobytes_impl :
 
 theorem gobytes_satisfiable : Satisfiable gobytesSpec := by
   have ha := fun j => args_zero 2 j (by decide)
-  refine sat_zero _ (by decide) gobytes_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) gobytes_impl ?_ ?_ rfl rfl
   · simp only [gobytesSpec] at ha ⊢
     rw [ha 0, ha 1]
     exact ⟨⟨by decide, by simp⟩, by decide⟩
@@ -376,7 +376,7 @@ theorem moveSliceNoScan_impl :
 
 theorem moveSliceNoScan_satisfiable : Satisfiable moveSliceNoScanSpec := by
   have ha := fun j => args_zero 4 j (by decide)
-  refine sat_zero _ (by decide) moveSliceNoScan_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) moveSliceNoScan_impl ?_ ?_ rfl rfl
   · simp only [moveSliceNoScanSpec] at ha ⊢
     rw [ha 0, ha 1, ha 2, ha 3]
     exact ⟨by decide, by decide, by decide, by simp⟩
@@ -393,7 +393,7 @@ theorem slicecopy_impl :
 
 theorem slicecopy_satisfiable : Satisfiable slicecopySpec := by
   have ha := fun j => args_zero 5 j (by decide)
-  refine sat_zero _ (by decide) slicecopy_impl ?_ ?_ rfl
+  refine sat_zero _ (by decide) slicecopy_impl ?_ ?_ rfl rfl
   · simp only [slicecopySpec] at ha ⊢
     rw [ha 0, ha 1, ha 2, ha 3, ha 4]
     exact ⟨by decide, by decide, by decide, by simp, by decide, by simp⟩
@@ -415,11 +415,11 @@ theorem sat_fixed (sp : RtSpec) (L : List Nat) (P : Memory → Prop) (code : Lis
     (hlen : L.length = sp.nargs) (hn : sp.nargs ≤ 9) (hl : ∀ x ∈ L, x < 2 ^ 64)
     (hpre : sp.pre L wmem)
     (hreads : ∀ r ∈ sp.reads L wmem, Outside r.1 r.2 (calleeStack64 (wstate (args L)) wstack sp.nargs))
-    (hg : sp.guard = none) (hP : P (rtView rtW wmem)) : Satisfiable sp := by
+    (hg : sp.guard = none) (hr : sp.ready = true) (hP : P (rtView rtW wmem)) : Satisfiable sp := by
   have ha : argWords64 (wstate (args L)) sp.nargs = L := by
     rw [← hlen]; exact argWords_fixed L (by omega) hl
   refine ⟨rtW, HL L P, _, himpl, wstate (args L), rfl, wstate_callOK _ _ (by omega), ?_, ?_,
-    by simp [hg], fun _ => ⟨ha, hP⟩⟩
+    by rw [hg]; trivial, ready_intro hr ⟨ha, hP⟩⟩
   · rw [ha]; exact hpre
   · rw [ha]; exact hreads
 
@@ -428,7 +428,7 @@ set_option hygiene false in
 macro "fixed_impl" : tactic => `(tactic| (
   rw [link_at0]
   rintro s hpc ⟨⟨hra, hal, hsb, hsa, hacc⟩, -, -, -, hH⟩
-  obtain ⟨ha, hP⟩ := hH rfl
+  obtain ⟨ha, hP⟩ := ready_of rfl hH
   janus64_run
   apply rtPost_const <;> (try rfl) <;> (try simp [retAddrOf]) <;> (try simp [setRegF])))
 
@@ -442,7 +442,7 @@ theorem moveSlice_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rt
 theorem moveSlice_satisfiable : Satisfiable moveSliceSpec :=
   sat_fixed _ _ _ _ moveSlice_impl rfl (by decide) (by decide)
     ⟨elemOK_w, by decide, by decide, by decide, by simp⟩
-    (by simp [moveSliceSpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl trivial
+    (by simp [moveSliceSpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl rfl trivial
 
 theorem moveSliceNoCap_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW wstack
     (HL [TYP, 0, 0] fun _ => True) moveSliceNoCapSpec := by
@@ -454,7 +454,7 @@ theorem moveSliceNoCap_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) 
 theorem moveSliceNoCap_satisfiable : Satisfiable moveSliceNoCapSpec :=
   sat_fixed _ _ _ _ moveSliceNoCap_impl rfl (by decide) (by decide)
     ⟨elemOK_w, by decide, by decide, by simp⟩
-    (by simp [moveSliceNoCapSpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl trivial
+    (by simp [moveSliceNoCapSpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl rfl trivial
 
 theorem moveSliceNoCapNoScan_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW wstack
     (HL [8, 0, 0] fun _ => True) moveSliceNoCapNoScanSpec := by
@@ -466,7 +466,7 @@ theorem moveSliceNoCapNoScan_impl : RtContract64 (toy.link (at0 (constCode64 0 0
 theorem moveSliceNoCapNoScan_satisfiable : Satisfiable moveSliceNoCapNoScanSpec :=
   sat_fixed _ _ _ _ moveSliceNoCapNoScan_impl rfl (by decide) (by decide)
     ⟨by decide, by decide, by decide, by simp⟩
-    (by simp [moveSliceNoCapNoScanSpec, arg, outside_zero]) rfl trivial
+    (by simp [moveSliceNoCapNoScanSpec, arg, outside_zero]) rfl rfl trivial
 
 theorem typedslicecopy_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW wstack
     (HL [TYP, 0, 0, 0, 0] fun _ => True) typedslicecopySpec := by
@@ -478,7 +478,7 @@ theorem typedslicecopy_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) 
 theorem typedslicecopy_satisfiable : Satisfiable typedslicecopySpec :=
   sat_fixed _ _ _ _ typedslicecopy_impl rfl (by decide) (by decide)
     ⟨⟨by decide, by decide⟩, by decide, by decide, by decide, by simp, by decide, by simp⟩
-    (by simp [typedslicecopySpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl trivial
+    (by simp [typedslicecopySpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl rfl trivial
 
 theorem makeslicecopy_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW wstack
     (HL [TYP, 0, 0, 0] fun _ => True) makeslicecopySpec := by
@@ -490,7 +490,7 @@ theorem makeslicecopy_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A
 theorem makeslicecopy_satisfiable : Satisfiable makeslicecopySpec :=
   sat_fixed _ _ _ _ makeslicecopy_impl rfl (by decide) (by decide)
     ⟨elemOK_w, by decide, by decide, by decide, by decide, by simp⟩
-    (by simp [makeslicecopySpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl trivial
+    (by simp [makeslicecopySpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl rfl trivial
 
 theorem wbZero_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW wstack
     (HL [TYP, HEAP] fun _ => True) wbZeroSpec := by
@@ -499,7 +499,7 @@ theorem wbZero_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW w
 theorem wbZero_satisfiable : Satisfiable wbZeroSpec :=
   sat_fixed _ _ _ _ wbZero_impl rfl (by decide) (by decide)
     ⟨⟨by decide, by decide⟩, by decide, fun _ => by decide⟩
-    (by simp [wbZeroSpec, arg, calleeStack64, wstate, TYP, HEAP, wsp]) rfl trivial
+    (by simp [wbZeroSpec, arg, calleeStack64, wstate, TYP, HEAP, wsp]) rfl rfl trivial
 
 theorem wbMove_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW wstack
     (HL [TYP, HEAP, HEAP] fun _ => True) wbMoveSpec := by
@@ -508,7 +508,7 @@ theorem wbMove_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW w
 theorem wbMove_satisfiable : Satisfiable wbMoveSpec :=
   sat_fixed _ _ _ _ wbMove_impl rfl (by decide) (by decide)
     ⟨⟨by decide, by decide⟩, ⟨by decide, fun _ => by decide⟩, ⟨by decide, fun _ => by decide⟩⟩
-    (by simp [wbMoveSpec, arg, calleeStack64, wstate, TYP, HEAP, wsp]) rfl trivial
+    (by simp [wbMoveSpec, arg, calleeStack64, wstate, TYP, HEAP, wsp]) rfl rfl trivial
 
 /-! ## A rune, a C string -/
 
@@ -528,7 +528,7 @@ theorem intstring_impl : RtContract64 (toy.link (at0 (constCode64 HEAP 1 0))) A0
 
 theorem intstring_satisfiable : Satisfiable intstringSpec :=
   sat_fixed _ _ _ _ intstring_impl rfl (by decide) (by decide) (Or.inl rfl)
-    (by simp [intstringSpec]) rfl ⟨by decide, by decide⟩
+    (by simp [intstringSpec]) rfl rfl ⟨by decide, by decide⟩
 
 theorem gostring_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW wstack
     (HL [HEAP] fun v => (v.bytes HEAP).toNat = 0) gostringSpec := by
@@ -548,7 +548,7 @@ theorem gostring_impl : RtContract64 (toy.link (at0 (constCode64 0 0 0))) A0 rtW
 theorem gostring_satisfiable : Satisfiable gostringSpec :=
   sat_fixed _ _ _ _ gostring_impl rfl (by decide) (by decide)
     ⟨0, by decide, by decide, fun i h => absurd h (Nat.not_lt_zero i), by decide⟩
-    (by simp [gostringSpec, arg, calleeStack64, wstate, HEAP, wsp]) rfl (by decide)
+    (by simp [gostringSpec, arg, calleeStack64, wstate, HEAP, wsp]) rfl rfl (by decide)
 
 /-! ## Growing a slice (a fresh array) -/
 
@@ -570,7 +570,7 @@ theorem growslice_impl : RtContract64 (toy.link (at0 (constCode64 HEAP 1 1))) A0
 
 theorem growslice_satisfiable : Satisfiable growsliceSpec :=
   sat_fixed _ _ _ _ growslice_impl rfl (by decide) (by decide) growslice_pre_w
-    (by simp [growsliceSpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl pgrow_w
+    (by simp [growsliceSpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl rfl pgrow_w
 
 theorem growsliceNoAlias_satisfiable : Satisfiable growsliceNoAliasSpec := growslice_satisfiable
 
@@ -594,7 +594,7 @@ theorem growsliceBuf_impl : RtContract64 (toy.link (at0 (constCode64 HEAP 1 1)))
 theorem growsliceBuf_satisfiable : Satisfiable growsliceBufSpec :=
   sat_fixed _ _ _ _ growsliceBuf_impl rfl (by decide) (by decide)
     ⟨growslice_pre_w, fun h => absurd h (by decide)⟩
-    (by simp [growsliceBufSpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl pgrow_w
+    (by simp [growsliceBufSpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl rfl pgrow_w
 
 theorem growsliceBufNoAlias_satisfiable : Satisfiable growsliceBufNoAliasSpec := growsliceBuf_satisfiable
 

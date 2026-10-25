@@ -136,7 +136,7 @@ set_option maxHeartbeats 20000000 in
 theorem correctness (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (hst : 24 ≤ stack) :
     RtContract Extracted.program Extracted.entry rt stack H decoderuneSpec := by
   rintro s hpc ⟨⟨hra, hrb, hal, hsb, -, hsa, hacc⟩, ⟨⟨hpb, hrd⟩, hk⟩, hout, hg, -⟩
-  obtain ⟨hg1, hg2, hg3⟩ := hg 0 rfl
+  obtain ⟨hg1, hg2, hg3⟩ := (hg : GuardOK s 0)
   simp only [decoderuneSpec, argWords, wordsFrom_succ, wordsFrom_zero, arg, List.getD_cons_zero, List.getD_cons_succ, Nat.reduceAdd, Nat.zero_add, List.mem_cons, List.not_mem_nil, or_false, forall_eq, calleeStack,
     outside_cons, outside_nil, and_true] at hpb hrd hk hout ⊢
   simp only [decoderuneSpec] at hacc hsa ⊢
@@ -227,7 +227,7 @@ theorem satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady),
     RtContract Extracted.program Extracted.entry rt 24 H decoderuneSpec ∧
     ∃ s : State, s.pc = BitVec.ofNat 64 Extracted.entry ∧ RtPre rt 24 H decoderuneSpec s := by
   have ha : ∀ j, arg (argWords s0 3) j = 0 := fun j => Janus.Contracts.Sat.args_zero 3 j (by decide)
-  refine ⟨[], fun _ _ _ _ => True, correctness [] 24 _ (Nat.le_refl _), s0, rfl, ?_, ?_, ?_, ?_, fun _ => trivial⟩
+  refine ⟨[], fun _ _ _ _ => True, correctness [] 24 _ (Nat.le_refl _), s0, rfl, ?_, ?_, ?_, ?_, by simp [decoderuneSpec]⟩
   · have hw : Janus.Contracts.Sat.wmem.accessible (Janus.Contracts.Sat.wsp - 0x2000) 0x2100 true = true := by decide
     simp only [CallOK, s0, Janus.Contracts.Sat.wstate, decoderuneSpec, Janus.Contracts.Sat.wret,
       Janus.Contracts.Sat.wsp, BitVec.toNat_ofNat, ite_true, ite_false, Nat.reduceEqDiff]
@@ -239,9 +239,7 @@ theorem satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady),
   · show ∀ r ∈ [(arg (argWords s0 3) 0, arg (argWords s0 3) 1)], Outside r.1 r.2 _
     rw [ha 0, ha 1]
     simp [Janus.Contracts.Sat.outside_zero]
-  · intro adj h
-    simp only [decoderuneSpec, Option.some.injEq] at h
-    subst h
+  · show GuardOK s0 0
     refine ⟨by decide, by decide, by decide⟩
 
 end Proof
