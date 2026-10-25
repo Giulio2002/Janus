@@ -43,3 +43,9 @@ for f in $(cat "$root"/examples/basic/sse/*.go | grep -oE '^func [A-Z][A-Za-z0-9
 done
 # A runtime function verified on its own (examples/proofs-amd64/MapAccess1Small).
 "$root/bin/janus" extract "$root/artifacts/examples-amd64" runtime.mapaccess1_fast64 "$root/artifacts/amd64/MapAccess1Small"
+# The runtime's equality, hashing and typed-memory functions verified on their own, and the
+# compiler-generated hash and equality functions of a struct key (examples/basic/rteq.go).
+for f in $runtime_examples HashFKey EqFKey; do
+  mapfile -t extract_args < <("$root/scripts/example-targets.sh" "$f")
+  "$root/bin/janus" extract "$root/artifacts/examples-amd64" "$(example_symbol "$f")" "$root/artifacts/amd64/$f" "${extract_args[@]}"
+done
