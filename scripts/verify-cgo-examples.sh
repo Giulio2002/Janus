@@ -7,7 +7,7 @@
 #   C functions (CEnsures, the C calling convention):   CAdd CSum CStore, CCount (arm64: the
 #                                                       gcc -O2 auto-vectorised byte count)
 #   Go -> C -> Go, end to end (EnsuresC under the trusted
-#   cgocall contract Janus.FFI.CgoCall):                 GoAdd GoSum
+#   cgocall contract Janus.FFI.CgoCall):                 GoAdd GoSum, GoCount (arm64)
 #
 # Usage: scripts/verify-cgo-examples.sh [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
 # Writes artifacts/cgo/<isa>/<Name>/verified.json and a summary to artifacts/verify-cgo-examples.txt.
@@ -17,14 +17,14 @@ cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 
 declare -A sym=(
-  [CAdd]=c_add [CSum]=c_sum [CStore]=c_store [CCount]=c_count
+  [CAdd]=c_add [CSum]=c_sum [CStore]=c_store [CCount]=c_count [GoCount]=example.com/cgo.Count
   [GoAdd]=example.com/cgo.Add [GoSum]=example.com/cgo.Sum
 )
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
     for n in CAdd CSum CStore GoAdd GoSum; do names+=("$isa/$n"); done
-    [ "$isa" = arm64 ] && names+=("$isa/CCount")
+    [ "$isa" = arm64 ] && names+=("$isa/CCount" "$isa/GoCount")
   done
 fi
 
