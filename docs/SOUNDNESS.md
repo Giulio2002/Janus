@@ -898,6 +898,37 @@ no concurrent GC, no preemption):
   and a state satisfying the precondition), so no theorem using them is vacuous by an
   unsatisfiable contract; each interface example also proves its whole hypothesis set jointly
   satisfiable for its binary and its conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). Boxes are not known to keep their value across later runtime calls.
+* **Equality, hashing and typed memory** (`Janus/Contracts/Mem.lean`, `Hash.lean`, `MapStr.lean`
+  and their amd64 files; docs/RUNTIME-CONTRACTS.md, "Equality, hashing and typed memory"). The
+  contracts of `memequal`, `memequal0/8/16/32/64/128`, `memequal_varlen`, `f32equal`, `f64equal`,
+  `c64equal`, `c128equal`, `strequal`, `interequal`, `nilinterequal`, `memhash`, `memhash0/8/16/32/
+  64/128`, `memhash_varlen`, `strhash`, `f32hash`, `f64hash`, `c64hash`, `c128hash`, `interhash`,
+  `nilinterhash`, `typehash`, `rand`, `typedmemmove`, `typedmemclr`, `memclrHasPointers`, their
+  callees `memmove`, `memclrNoHeapPointers`, `bulkBarrierPreWrite`, and `mapaccess2_faststr`.
+  Trusted, as claims about the Go 1.26 runtime: (1) **the hash is a model**: a theorem quantifies
+  over every `H : HashModel`, whose byte hashes `mem`/`mem32`/`mem64` are uninterpreted functions
+  of the seed and the bytes; the contracts claim the runtime's `memhash` & co. compute *some*
+  such function for the process (true for both the AES and the `wyhash` paths: they depend only
+  on the seed, the bytes and the per-process key, which `H.Env` keeps fixed), that `f32hash`/
+  `f64hash` map `±0` to `c1·(c0 ^ h)` and a NaN to `c1·(c0 ^ h ^ rand())`, and that `typehash` of
+  a `TFlagRegularMemory` type is the byte hash (`HashModel.Laws.regular`); everything a map needs
+  of the hash is then proved (`Janus/Contracts/HashLaws.lean`: `feq_eq`, equal floats have equal
+  encodings unless both are zeros; `fhashIs_of_feq`, `fhashIs_nan`, `strhash_of_strEq`);
+  (2) **the write barrier is off** for the typed-memory contracts (`WriteBarrierOff`, the flag word
+  at `wb` is 0; with it on the barrier's buffer changes too, which these contracts do not state);
+  (3) the inputs are readable in the model's byte-exact memory: the amd64 `memeqbody` reads up to
+  7 bytes around a short input (within its page), so on amd64 `memequal` and `memequal_varlen` stay assumptions,
+  while on arm64 its machine code is proved to meet the contract; (4) a `map[string]V` is keyed by
+  the strings' contents (`MapStr.Access2Str`), which the hash and equality laws justify. The code
+  is the runtime's: the extractor pins every one of these functions except `typehash`, whose jump
+  table makes its normalized code program-dependent (`runtimeContractStubs`, `runtimeFuncDir` for
+  the ones `internal/bytealg` and `internal/runtime/maps` define). Every contract is satisfiable
+  (`Janus/Contracts/MemSat.lean`, `HashSat.lean`, `MapStr.lean` and the amd64 files: models
+  `M0`, `H0`, `R0`, `MS0`, code and a state), and every example proves its hypotheses jointly
+  satisfiable and its conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). **Proved from
+  the machine code rather than assumed** (`examples/proofs/Alg*.lean`, `Mbar*.lean`,
+  `examples/proofs-amd64/Alg*/`, `Mbar*/`): the runtime's own equality, hash and typed-memory
+  functions meet their contracts given the contracts of their callees.
 * **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
   `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
   `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)

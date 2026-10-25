@@ -28,11 +28,15 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      HashWith HashTwice MapSum DeferAdd AddF64 Dot3 F64ToU64 Abs
      NewPair MakeSlice AppendOne SetNext MallocFast
      Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
-     Box AsHasher Classify Equal
      Triangle GotoSum Find2D RowsWith Log2 TotalMeters TotalFeet Fact SumBelow ReverseArray DivMod10
      SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
      Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
+     Box AsHasher Classify Equal
+     Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
      I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird SpanSum MinF64 MaxF64 MinStr)
+. scripts/example-contracts.sh
+# the runtime's equality, hashing and typed-memory functions verified from their code
+all+=($runtime_examples $runtime_examples_arm64_only)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
