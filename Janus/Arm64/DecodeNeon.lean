@@ -7,7 +7,10 @@ import Janus.Arm64.Bits
 `decodeNeon w` maps a 32-bit word to a `NeonInstr`, or `none` when the word is outside the
 supported subset **or** is a reserved / unallocated / UNDEFINED / CONSTRAINED UNPREDICTABLE
 encoding within it. `Janus.Arm64.decodeAll` consults it only for words `Janus.Arm64.decode` rejects, so
-the original decoder's results never change.
+the original decoder's results never change. The two decoders are also disjoint: the opcodes the
+original Advanced SIMD subset of `decode` owns (`vThreeSame`, `vScalarThreeSame`, `vAcross`,
+`vTwoMisc`, `vShiftImm`; the `base*` predicates below mirror its opcode lists) are rejected here,
+so no word has two decoders (`audit/rt-fp`, row DEC-A64, checks this on its sweep).
 
 Every check transcribes the `decode` pseudocode of the instruction (sail-arm `instrs64.sail`,
 Armv9.4-A): the `size`/`Q`/`sz`/`immh` combinations that are `UNDEFINED`, the opcodes that are
@@ -181,6 +184,35 @@ def neonSByElemOK (U L : Bool) (size opcode : Nat) : Bool :=
     else false
   else opcode = 0b1001 && fp
 
+/-! ### The opcodes owned by the original Advanced SIMD subset of `decode` -/
+
+/-- Three same (vector): ADD/SUB, CMEQ/CMTST, CMGT/CMGE/CMHI/CMHS, the logical group, ADDP,
+SMAX/SMIN/UMAX/UMIN and their pairwise forms (`decode`'s `vThreeSame`). -/
+def baseThreeSame (U : Bool) (opcode : Nat) : Bool :=
+  opcode = 0b00011 || opcode = 0b10000 || opcode = 0b10001 || opcode = 0b00110 ||
+    opcode = 0b00111 || (opcode = 0b10111 && !U) || opcode = 0b01100 || opcode = 0b01101 ||
+    opcode = 0b10100 || opcode = 0b10101
+
+/-- Scalar three same on D registers: ADD/SUB, CMEQ/CMTST, CMGT/CMGE/CMHI/CMHS
+(`vScalarThreeSame`). -/
+def baseSThreeSame (size opcode : Nat) : Bool :=
+  size = 3 && (opcode = 0b10000 || opcode = 0b10001 || opcode = 0b00110 || opcode = 0b00111)
+
+/-- Across lanes: ADDV, SADDLV/UADDLV, SMAXV/UMAXV, SMINV/UMINV (`vAcross`). -/
+def baseAcross (U : Bool) (opcode : Nat) : Bool :=
+  opcode = 0b00011 || opcode = 0b01010 || opcode = 0b11010 || (opcode = 0b11011 && !U)
+
+/-- Two-register miscellaneous: REV*, CNT/NOT/RBIT, CMGT/CMEQ/CMGE/CMLE/CMLT #0, ABS/NEG, XTN
+(`vTwoMisc`). -/
+def baseTwoMisc (U : Bool) (opcode : Nat) : Bool :=
+  opcode = 0b00000 || opcode = 0b00001 || opcode = 0b00101 || opcode = 0b01000 ||
+    opcode = 0b01001 || opcode = 0b01011 || (opcode = 0b01010 && !U) || (opcode = 0b10010 && !U)
+
+/-- Shift by immediate: SSHR/USHR, SSRA/USRA, SHL/SLI, SRI, SHRN, SSHLL/USHLL (`vShiftImm`). -/
+def baseShiftImm (U : Bool) (opcode : Nat) : Bool :=
+  opcode = 0b00000 || opcode = 0b00010 || opcode = 0b01010 || (opcode = 0b01000 && U) ||
+    (opcode = 0b10000 && !U) || opcode = 0b10100
+
 /-- Advanced SIMD data processing (`op0 = x111`), the classes of `NeonInstr`. -/
 def decodeNeonDP (w : Nat) : Option NeonInstr :=
   let rd := bits w 4 0
@@ -194,13 +226,13 @@ def decodeNeonDP (w : Nat) : Option NeonInstr :=
     let opcode := bits w 15 11
     let ok := if opcode / 8 = 0b11 then neonThreeSameFPOK false U (size / 2 = 1) opcode &&
         !(size % 2 = 1 && !Q)
-      else neonThreeSameIntOK U Q size opcode
+      else neonThreeSameIntOK U Q size opcode && !baseThreeSame U opcode
     if ok then some (.threeSame Q U size rm opcode rn rd) else none
   else if w &&& 0xDF200400 = 0x5E200400 then
     -- Scalar three same: 01 U 11110 size 1 Rm opcode 1 Rn Rd
     let opcode := bits w 15 11
     let ok := if opcode / 8 = 0b11 then neonThreeSameFPOK true U (size / 2 = 1) opcode
-      else neonSThreeSameIntOK size opcode
+      else neonSThreeSameIntOK size opcode && !baseSThreeSame size opcode
     if ok then some (.sThreeSame U size rm opcode rn rd) else none
   else if w &&& 0x9F200C00 = 0x0E200000 then
     -- Three different: 0 Q U 01110 size 1 Rm opcode 00 Rn Rd
@@ -219,7 +251,7 @@ def decodeNeonDP (w : Nat) : Option NeonInstr :=
     let opcode := bits w 16 12
     let ok := if opcode ≥ 0b01100 && opcode ≠ 0b10010 && opcode ≠ 0b10011 && opcode ≠ 0b10100 then
         neonTwoMiscFPOK U Q (size / 2 = 1) (size % 2) opcode
-      else neonTwoMiscIntOK U Q size opcode
+      else neonTwoMiscIntOK U Q size opcode && !baseTwoMisc U opcode
     if ok then some (.twoMisc Q U size opcode rn rd) else none
   else if w &&& 0xDF3E0C00 = 0x5E200800 then
     -- Scalar two-register miscellaneous: 01 U 11110 size 10000 opcode 10 Rn Rd
@@ -228,10 +260,8 @@ def decodeNeonDP (w : Nat) : Option NeonInstr :=
   else if w &&& 0x9F3E0C00 = 0x0E300800 then
     -- Across lanes: 0 Q U 01110 size 11000 opcode 10 Rn Rd
     let opcode := bits w 16 12
-    let intOK := size ≠ 3 && !(size = 2 && !Q)
     let ok :=
-      if opcode = 0b00011 || opcode = 0b01010 || opcode = 0b11010 then intOK
-      else if opcode = 0b11011 then !U && intOK
+      if baseAcross U opcode then false
       else if opcode = 0b01100 || opcode = 0b01111 then U && size % 2 = 0 && Q   -- F(MAX|MIN)(NM)V .4S
       else false
     if ok then some (.across Q U size opcode rn rd) else none
@@ -247,7 +277,7 @@ def decodeNeonDP (w : Nat) : Option NeonInstr :=
     -- Shift by immediate: 0 Q U 011110 immh immb opcode 1 Rn Rd (immh = 0: modified immediate)
     let immh := bits w 22 19
     let opcode := bits w 15 11
-    if immh ≠ 0 && neonShiftImmOK U Q immh opcode then
+    if immh ≠ 0 && neonShiftImmOK U Q immh opcode && !baseShiftImm U opcode then
       some (.shiftImm Q U immh (bits w 18 16) opcode rn rd)
     else none
   else if w &&& 0xDF800400 = 0x5F000400 then

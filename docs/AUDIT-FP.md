@@ -178,7 +178,26 @@ value of bits 31:24 in the scalar FP space (`M`, `S`, 3-source) and the Advanced
 and scalar neighbours, every value of bits 23:10, and 9 patterns of bits 9:0. The comparison
 fails if the model accepts a word objdump calls undefined, decodes an FP word as another
 instruction, precision or register size, or decodes an FP mnemonic as a non-FP instruction.
-Result: 0 disagreements, 176,229 accepted. The words objdump accepts and the model rejects are
+Result: 0 disagreements, 176,229 accepted.
+
+Since the Advanced SIMD floating-point classes of `NeonInstr` (agent/neon) the row also checks
+them: for the vector, scalar, by-element, across-lanes and pairwise FP forms and the FP/fixed-point
+conversions (vector, scalar, and general-register `SCVTF`/`UCVTF`/`FCVTZS`/`FCVTZU #fbits`),
+`compare.py` derives the mnemonic from its own copy of the A64 encoding tables and checks it,
+the arrangement or register precision, the element-index operand and the fraction bits against
+objdump. The row first failed on them as "neon covers FP mnemonic" (60,660 words): the old
+check treated every FP mnemonic outside the scalar FP constructors as misdecoded, which was a
+stale expectation, not a decoder disagreement (each of those words is decoded only by
+`decodeNeon`). It also adds `Overlap.lean`: no accepted word may be decoded by both `decode`
+and `decodeNeon`. That check found a real overlap of 53,964 words: `decodeNeon` also accepted the
+integer opcodes of the original vector subset (`vThreeSame`, `vScalarThreeSame`, `vAcross`,
+`vTwoMisc`, `vShiftImm`), which `decodeAll` never reached because `decode` comes first.
+`decodeNeon` now rejects those opcodes (`base*` predicates in `DecodeNeon.lean`); `janus-decode`
+prints the same output as before on the 2,949,120 sweep words and on 4,000,000 random words.
+Result after the fix: 0 disagreements, 464,607 accepted (272,817 of them by `decodeNeon`; 60,660
+checked as NEON FP forms), 0 words decoded by both. A table mutation (one FP3 mnemonic, the
+shift `fbits`, the conversion `fbits`, one by-element mnemonic) gives 864 / 8,064 / 6,912 /
+4,608 disagreements, so the new checks have teeth. The words objdump accepts and the model rejects are
 all half precision (`ftype = 11`), the fixed-point conversions, and FMOV to and from `H`.
 `ftype = 10`, `FRINT32*/64*`, `BFCVT` and `FJCVTZS` are all rejected.
 
@@ -221,7 +240,7 @@ one nothing FP. `FPSR` and the `MXCSR` flags are free in every call state.
 | A64-SAIL | ok | Janus vs Sail 0 MISMATCH (469,029 agree); qemu vs Sail 0 MISMATCH |
 | X64-HOST (446k cases) | ok | 0 MISMATCH, 441,332 agree, ~4,700 gap (all in the prefix sweep; the count varies with the random states) |
 | DEC-X64 | ok | 15,795 cases, 0 MISMATCH |
-| DEC-A64 | ok | 0 disagreements, 176,229 accepted |
+| DEC-A64 | ok | 0 disagreements, 464,607 accepted (NEON FP checked too), 0 words with two decoders |
 | SPEC-TF | ok | 1,534,752 vectors, 0 mismatches |
 | X64-MXCSR-STICKY hw | ok | main sees `0x1fa0`; `GoMXCSR` accepts it, `= 0x1F80` does not |
 | X64-MXCSR-STICKY proofs | ok | AddF64, Dot3, F64ToU64 verify with `GoMXCSR` in the statement |
