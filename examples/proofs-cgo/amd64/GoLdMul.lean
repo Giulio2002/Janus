@@ -111,6 +111,16 @@ def GoPre (a b r : BitVec 64) (s : State) : Prop :=
   Outside a.toNat 16 (Shared s) ∧ Outside b.toNat 16 (Shared s) ∧ Outside r.toNat 10 (Shared s) ∧
   Outside r.toNat 10 [(alwaysFalse, alwaysFalse + 1)]
 
+/-- An address range away from `Shared` is away from the clobber list of the `cgocall` state. -/
+theorem outside_clobber (x n sp g fs : Nat) (hsp : 80 ≤ sp)
+    (h : (x + n ≤ sp - 1104 ∨ sp + 8 ≤ x) ∧ (x + n ≤ g ∨ g + 456 ≤ x) ∧ (x + n ≤ fs - 8 ∨ fs ≤ x)) :
+    Outside x n [(sp - 80 - 1024, sp - 80), (sp - 80 + 8, sp - 80 + 24), (g, g + 456), (fs - 8, fs)] := by
+  simp only [outside_cons, outside_nil, and_true]
+  obtain ⟨h1 | h1, h2 | h2, h3 | h3⟩ := h <;> refine ⟨?_, ?_, ?_, ?_⟩ <;> omega
+
+/-- A proposition kept folded. -/
+def Keep (p : Prop) : Prop := p
+
 set_option maxHeartbeats 20000000 in
 theorem go_spec (a b r : BitVec 64) :
     EnsuresC Extracted.program (CgoSpec wrapper G E) Extracted.entry [a, b, r] (GoPre a b r)
@@ -123,6 +133,11 @@ theorem go_spec (a b r : BitVec 64) :
   janus_eval_nat h_af : alwaysFalse
   rw [h_fv] at hfa hfv hdf
   rw [h_af] at haf hav hda hdRA
+  -- the operand facts stay folded (`Keep`) during the runs: as disjunctions in the context they
+  -- would make every `omega` call of the symbolic executor split exponentially
+  have hKeep : Keep (Outside a.toNat 16 (Shared s) ∧ Outside b.toNat 16 (Shared s) ∧
+      Outside r.toNat 10 (Shared s) ∧ Outside r.toNat 10 [(5934854, 5934854 + 1)]) := ⟨hdA, hdB, hdR, hdRA⟩
+  clear hdA hdB hdR hdRA
   simp only [Shared, outside_cons, outside_nil, and_true, Janus.Amd64.GoABI.regSP,
     Janus.Amd64.GoABI.regG, stackguard0, stackguard0Offset] at *
   have hfsa : (s.fsBase + BitVec.ofNat 64 18446744073709551608).toNat = s.fsBase.toNat - 8 := by
@@ -131,11 +146,22 @@ theorem go_spec (a b r : BitVec 64) :
     rw [BitVec.toNat_sub]; simp only [BitVec.toNat_ofNat]; omega
   have h80 : (s.regs 4 - 80#64).toNat = (s.regs 4).toNat - 80 := by
     rw [BitVec.toNat_sub]; simp only [BitVec.toNat_ofNat]; omega
+  have hO1 : Outside 5934854 1 [((s.regs 4).toNat - 80 - 1024, (s.regs 4).toNat - 80),
+      ((s.regs 4).toNat - 80 + 8, (s.regs 4).toNat - 80 + 24), ((s.regs 14).toNat, (s.regs 14).toNat + 456),
+      (s.fsBase.toNat - 8, s.fsBase.toNat)] := outside_clobber _ _ _ _ _ hb hda
+  have hO2 : Outside r.toNat 10 [((s.regs 4).toNat - 80 - 1024, (s.regs 4).toNat - 80),
+      ((s.regs 4).toNat - 80 + 8, (s.regs 4).toNat - 80 + 24), ((s.regs 14).toNat, (s.regs 14).toNat + 456),
+      (s.fsBase.toNat - 8, s.fsBase.toNat)] := by
+    have hdR := hKeep.2.2.1
+    try simp only [Shared, outside_cons, outside_nil, and_true] at hdR
+    exact outside_clobber _ _ _ _ _ hb hdR
   janus64_run [hfsa]
   refine ⟨⟨rfl, rfl, ?_⟩, ?_⟩
   · simp only [G, GoKept, frameA, frameB, frameR, cgoClobber, Janus.Amd64.GoABI.regSP,
       Janus.Amd64.GoABI.regG, cgoStackScratch, gStructSize, outside_cons, outside_nil, and_true]
     janus64_simp [h32, h80]
+    obtain ⟨hdA, hdB, hdR, -⟩ := hKeep
+    try simp only [Shared, outside_cons, outside_nil, and_true] at hdA hdB hdR
     refine ⟨by omega, ⟨?_, by omega, by omega, by omega, by omega⟩, by omega,
       ⟨haa, by omega, by omega, by omega, by omega⟩, by omega, ⟨hba, by omega, by omega, by omega, by omega⟩,
       by omega, ⟨hra, by omega, by omega, by omega, by omega⟩, hx87⟩
@@ -155,23 +181,45 @@ theorem go_spec (a b r : BitVec 64) :
   -- the two facts the rest of the run needs from the C call: the cgo global is still false and
   -- the result is at `r`; then the frame is no longer needed
   have hAF : m.readLE 5934854 1 = 0 := by
-    rw [hmf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]
-    janus64_simp
+    rw [hmf.readLE 5934854 1 hO1]
+    have hdRA := hKeep.2.2.2
+    try simp only [outside_cons, outside_nil, and_true] at hdRA
+    simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
+    exact hav
   have hAFacc : m.accessible 5934854 1 false = true := by
-    rw [hmf.accessible]; simp only [Janus.Arm64.Memory.accessible_writeLE]; janus64_simp
+    rw [hmf.accessible]; simp only [Janus.Arm64.Memory.accessible_writeLE]; exact haf
   have hR : m.readLE r.toNat 10 = prod s.mem a.toNat b.toNat := by
-    rw [hmf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega),
+    rw [hmf.readLE r.toNat 10 hO2,
       Janus.Arm64.Memory.readLE_writeLE_self,
-      Nat.mod_eq_of_lt (by have := prod_lt (m := s.mem) a.toNat b.toNat; rw [show (256 : Nat) ^ 10 = 2 ^ 80 by decide]; exact prod_lt _ _ _)]
+      Nat.mod_eq_of_lt (by rw [show (256 : Nat) ^ 10 = 2 ^ 80 by decide]; exact prod_lt _ _ _)]
     unfold prod
-    congr 2 <;> janus64_simp
+    obtain ⟨hdA, hdB, -, -⟩ := hKeep
+    try simp only [Shared, outside_cons, outside_nil, and_true] at hdA hdB
+    simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
+  -- the stack words the epilogues of `_Cfunc_c_ldmul` and `MulLD` reload (outside the clobbered
+  -- range, so `cgocall` kept them), and the stack's accessibility
+  have hS8 : m.readLE ((s.regs 4).toNat - 8) 8 = (s.regs 5).toNat := by
+    rw [hmf.readLE _ 8 (by simp only [outside_cons, outside_nil, and_true]; refine ⟨?_, ?_, ?_, ?_⟩ <;> omega)]
+    janus64_simp
+  have hS40 : m.readLE ((s.regs 4).toNat - 40) 8 = 4850629 := by
+    rw [hmf.readLE _ 8 (by simp only [outside_cons, outside_nil, and_true]; refine ⟨?_, ?_, ?_, ?_⟩ <;> omega)]
+    janus64_simp
+  have hS48 : m.readLE ((s.regs 4).toNat - 48) 8 = (s.regs 4).toNat - 8 := by
+    rw [hmf.readLE _ 8 (by simp only [outside_cons, outside_nil, and_true]; refine ⟨?_, ?_, ?_, ?_⟩ <;> omega)]
+    janus64_simp
+  have hS0 : m.readLE (s.regs 4).toNat 8 = s.mem.readLE (s.regs 4).toNat 8 := by
+    rw [hmf.readLE _ 8 (by simp only [outside_cons, outside_nil, and_true]; refine ⟨?_, ?_, ?_, ?_⟩ <;> omega)]
+    simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
+  have hSacc : m.accessible ((s.regs 4).toNat - 80) (80 + 8) true = true := by
+    rw [hmf.accessible]; simp only [Janus.Arm64.Memory.accessible_writeLE]; exact hst
   clear hmf
   apply ReturnsC.of_reaches
-  janus64_run [h4, h5, h14, h15, hfsa', hfsg', hAF, hAFacc]
+  janus64_run [h4, h5, h14, h15, hfsa', hfsg', hAF, hAFacc, hS0, hS8, hS40, hS48]
   exact ⟨rfl, hR⟩
 
 /-! ## Composition -/
 
+set_option maxHeartbeats 4000000 in
 theorem refines : (CgoCall Extracted.program).Refines (CgoSpec wrapper G E) := by
   refine CgoCall.refines (fun T a => wrapper_spec T a) ?_ ?_ ?_ ?_
   · rintro s t ret ⟨hb, ⟨hacc, hout⟩, hab, ⟨haacc, haout⟩, hbb, ⟨hbacc, hbout⟩, hrb, ⟨hracc, hrout⟩, hx⟩ he
@@ -187,8 +235,7 @@ theorem refines : (CgoCall Extracted.program).Refines (CgoSpec wrapper G E) := b
     have hk2 := hk ((s.regs 3).toNat + 16) 8 (by omega) (by omega)
     simp only [outside_cons, outside_nil, and_true, cgoCStack, Janus.Amd64.GoABI.regSP]
       at hsep hasep hbsep hrsep
-    simp only [WPre, frameA, frameB, frameR, Away] at hab haacc haout hbb hbacc hbout hrb hracc hrout
-      hasep hbsep hrsep ⊢
+    simp only [WPre, frameA, frameB, frameR, Away] at hab haacc haout hbb hbacc hbout hrb hracc hrout hasep hbsep hrsep ⊢
     rw [hk0, hk1, hk2, he.x87]
     exact ⟨he.stack, hb, he.keptAcc _ _ _ ⟨hacc, hout⟩, by omega, hab,
       he.keptAcc _ _ _ ⟨haacc, haout⟩, by omega, hbb, he.keptAcc _ _ _ ⟨hbacc, hbout⟩, by omega,
