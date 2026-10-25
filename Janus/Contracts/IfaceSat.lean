@@ -437,7 +437,7 @@ theorem interfaceSwitch_impl : InterfaceSwitch (toy.link (at0 interfaceSwitchCod
          | cons c cs' => exact ⟨c, cs', rfl⟩
        rw [hcs' c (by simp)]
        simpa [TD, TAB] using itabAt_TAB (g := s.regs 28) ⟨he1, he2, hd⟩)
-    | (rw [if_neg (fun h => by simp only [TD] at h; omega)]; exact Nat.mod_eq_of_lt (by omega))
+    | (rw [ite_eq_right (fun h => by simp only [TD] at h; omega)]; exact Nat.mod_eq_of_lt (by omega))
     | done
 
 /-- `InterfaceSwitch` is satisfiable (shown for the case list `[ID]`). -/

@@ -73,7 +73,12 @@ verify_one() {
     printf '%-9s ok  %6.1fs\n' "$n" "$t" | tee "$lines/$n"
     # further theorems of the same proof file (F64ToU64's `exact` and `saturation`, ...)
     local thm
-    for thm in $(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}'); do
+    # and the non-vacuity witnesses (Proof.Witness.nonvacuous / .returns: the theorem's
+    # hypotheses hold together for a model of the runtime, and its conclusion is reached)
+    local extra_thms
+    extra_thms=$(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}')
+    if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then extra_thms="$extra_thms Witness.nonvacuous Witness.returns"; fi
+    for thm in $extra_thms; do
       if bin/janus verify "$out" --proof "examples/proofs/$n.lean" --theorem "Proof.$thm" \
           ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
         printf '%-9s ok  (Proof.%s)\n' "$n" "$thm" | tee -a "$lines/$n"

@@ -1,6 +1,35 @@
 import Janus
 import Extracted
 
+/-!
+# `Classify(x any) uint64`: a type switch over `nil`, `uint64`, `string`, `Hasher` and the rest (amd64)
+
+**Guarantee.** For every interface value `x = (t, data)`, every model `R` of the interface
+runtime satisfying its laws, every implementation of `runtime.interfaceSwitch` satisfying the
+`InterfaceSwitch` contract and every Go call state in which the runtime is usable with
+`R.depth` bytes of stack below `Classify`'s frame (`CallerOK`), the read-only data (the
+`uint64` and `string` type descriptors) is in memory, the interface-switch descriptor the code
+loads (`example.com/basic..interfaceSwitch.0`, a writable global) is well formed for its one
+interface case `c` (`ISDescOK`: `NCases = 1`, `Cases[0] = c`, a well-formed cache), and the
+dynamic type of a non-nil `x` is a type descriptor, the call returns, obeys the ABI, and `RAX`
+is `result R c t`:
+
+* `0` for a nil `x`, `1` for `uint64`, `2` for `string` (the type descriptors the code compares
+  with, recomputed from the extracted code; the code first compares the 32-bit type hash, read
+  from the descriptor, then the pointer);
+* `3` if `t` implements the case `c` (`getitab`'s answer `R.itab c t` is some), `4` otherwise;
+* for `*MulHasher` and `c = Hasher` (the static itab's words), `3` (`StaticItabs`).
+
+The descriptor stays well formed, memory changes only in the runtime's memory, the stack window
+and the descriptor's `Cache` word. The interface case goes through the inline probe of the
+switch cache (`loop`, as in `AsHasher`, with 24-byte entries holding the case index) and, on a
+miss, `runtime.interfaceSwitch`.
+
+**Assumptions (all in the statement).** `R` is *any* model satisfying `R.Laws`, and the code at
+`runtime.interfaceSwitch` is *any* code that behaves as `InterfaceSwitch` says (pinned to the Go
+runtime's code by the extraction).
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Spec.Map
   Janus.Spec.Type Janus.Contracts.Iface Janus.Contracts.IfaceAmd64
 
@@ -109,7 +138,7 @@ theorem loop (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
   have hans : ∀ cw : Nat, cw = (switchCase R t.toNat [c]).1 →
       (if cw = 0 then 3 else 4) = result R c t.toNat := by
     intro cw hcw
-    simp only [result, ht0, htu, hts, if_false, hcw, switchCase_single]
+    simp only [result, ht0, htu, hts, ite_false, hcw, switchCase_single]
     cases R.itab c t.toNat <;> rfl
   have hsp40 : (s.regs 4 - 40#64).toNat = (s.regs 4).toNat - 40 := by
     rw [BitVec.toNat_sub]; simp; omega
@@ -341,5 +370,153 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.L
       (by simp only [setRegF, reduceIte, Nat.reduceEqDiff]; rw [← hD, hk]) (by simp [setRegF])
       (by simp [setRegF]) (by simp [setRegF]) (by simp) (by simp [hdf]) (by simp [M0])
     rw [hh]; simp at hhash; omega
+
+
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+A model of the runtime (`IfaceModel.R0`), code at `runtime.interfaceSwitch`'s address that
+meets the `InterfaceSwitch` contract for it (`IfaceSatAmd64.interfaceSwitchCode`), an admissible
+return address and a call state switching on a box of the model's type `TD`, with the read-only
+data loaded and the descriptor at its real address (one case, the model's interface `ID`, the
+empty cache): `correctness` applies, and `Classify` takes the interface case (`3`). -/
+
+namespace Witness
+
+open Janus.Contracts.IfaceModel Janus.Contracts.IfaceSatAmd64
+open Janus.Contracts (IfaceSat.itabAt_TAB IfaceSat.itabResult_R0 IfaceSat.efaceEqual_R0)
+
+/-- `runtime.interfaceSwitch`'s address. -/
+def cAddr : Nat := Extracted.program.contractAddr "runtime.interfaceSwitch"
+
+/-- `IfaceSatAmd64.interfaceSwitchCode` at `runtime.interfaceSwitch`'s address. -/
+def implAt : List Janus.Amd64.Segment := [{ name := "model", base := cAddr, bytes := interfaceSwitchCode }]
+
+/-- The program linked with it, as a closed program. -/
+def linked : Janus.Amd64.Program :=
+  { Extracted.program with segments := Extracted.program.segments ++ implAt }
+
+theorem linked_eq : Extracted.program.link implAt = linked := rfl
+
+theorem model : InterfaceSwitch (Extracted.program.link implAt) cAddr R0 := by
+  rw [linked_eq]
+  intro cs s hpc ⟨hpre, hdesc, ht0, ht⟩
+  obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
+  simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
+  have hdesc' := hdesc
+  obtain ⟨hdb, hdacc, -, hn, -, hcs, -⟩ := hdesc'
+  have hcs' : ∀ c ∈ cs, c = ID := hcs
+  have hlen : cs.length < 2 ^ 48 := by omega
+  have hsw := Janus.Contracts.IfaceModel.switchCase_R0 (s.regs 3).toNat cs hcs'
+  have hlt3 := (s.regs 3).isLt
+  by_cases htd : (s.regs 3).toNat = 65536 <;> by_cases hc0 : cs.length = 0
+  all_goals
+    janus64_run [hn]
+    refine rtReturn_of R0 2 _ s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
+      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+    simp only [setRegF, reduceIte, Nat.reduceEqDiff]
+    refine ⟨?_, ?_, ?_, hdesc⟩
+  all_goals (try rw [htd]) <;> (try rw [hsw]) <;> (try rw [htd] at hsw)
+  all_goals (try simp only [BitVec.toNat_ofNat])
+  all_goals first
+    | (simp_all [TD, TAB]; done)
+    | (intro hne
+       obtain ⟨c, cs', rfl⟩ : ∃ c cs', cs = c :: cs' := by
+         cases cs with
+         | nil => simp_all
+         | cons c cs' => exact ⟨c, cs', rfl⟩
+       rw [hcs' c (by simp)]
+       simpa [TD, TAB, htd] using IfaceSat.itabAt_TAB (g := s.regs 14) ⟨he1, he2, hd⟩)
+    | (rw [ite_eq_right (fun h => by simp only [TD] at h; omega)]; exact Nat.mod_eq_of_lt (by omega))
+    | done
+
+
+/-- The witness return address. -/
+def ret : Nat := wret
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+/-- The descriptor's address, evaluated. -/
+theorem desc_eq : desc = 0x55b710 := by decide +kernel
+
+/-- A byte of the program's read-only data, if `a` is in one of its objects. -/
+def dbyte (a : Nat) : Option Nat :=
+  Extracted.program.data.findSome? fun d =>
+    if d.base ≤ a ∧ a < d.base + d.bytes.length then d.bytes[a - d.base]? else none
+
+/-- The witness memory: the read-only data in read-only regions, the return address `ret` at
+`[RSP]`, the descriptor at `desc` (cache `ISC`, `NCases = 1`, `Cases[0] = ID`) in a writable
+region, and `wmem`. -/
+def mem2 : Janus.Arm64.Memory :=
+  ⟨fun a => BitVec.ofNat 8 ((dbyte a).getD ((([(wsp + 2, 0x20), (0x55b710 + 1, 0x05),
+      (0x55b710 + 2, 0x01), (0x55b710 + 8, 1), (0x55b710 + 17, 0x01), (0x55b710 + 18, 0x01)] ++
+      wtable).lookup a).getD 0)),
+    wmem.regions ++ [⟨0x55b000, 0x1000, true⟩, ⟨0x497000, 0x1000, false⟩, ⟨0x4ba000, 0x1000, false⟩]⟩
+
+theorem mem2_env (g : W64) : Env0 mem2 g := by
+  refine ⟨by decide +kernel, by decide +kernel, ?_⟩
+  unfold Desc; decide +kernel
+
+theorem mem2_data : Extracted.program.DataLoaded mem2 := by
+  unfold Janus.Amd64.Program.DataLoaded; decide +kernel
+
+theorem mem2_desc : ISDescOK R0 mem2 desc [ID] := by
+  rw [desc_eq]
+  refine ⟨by decide +kernel, by decide +kernel, by decide +kernel, by decide +kernel, fun i hi => ?_,
+    by simp, ?_⟩
+  · simp at hi; subst hi; show mem2.readLE (0x55b710 + 16) 8 = ID; decide +kernel
+  · rw [show mem2.readLE 0x55b710 8 = ISC by decide +kernel]
+    exact ISCacheOK.empty (by decide) (by decide +kernel) (inPriv (by decide) (by decide))
+      (by decide +kernel) (by decide +kernel)
+
+/-- `TD` and the value slot `VAL`, as words. -/
+def td : BitVec 64 := BitVec.ofNat 64 TD
+def val : BitVec 64 := BitVec.ofNat 64 VAL
+
+/-- The witness call state: `Classify(x)` for the box `x = (TD, VAL)`. -/
+def s0 : Janus.Amd64.State :=
+  { regs := fun i => if i = 0 then td else if i = 3 then val
+      else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := mem2 }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [td, val] s0 :=
+  ⟨rfl, by decide +kernel, rfl, by decide, by
+    intro i h; simp at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+
+theorem pre : CallerOK R0 s0 48 24 ∧ Extracted.program.DataLoaded s0.mem ∧
+    ISDescOK R0 s0.mem desc [ID] ∧ Outside desc 24 (window R0 s0) ∧
+    (td.toNat ≠ 0 → R0.IsType td.toNat) := by
+  refine ⟨⟨mem2_env (s0.regs 14), ⟨by decide +kernel, by decide +kernel, by decide +kernel⟩,
+    by decide, by decide, by decide, by decide +kernel, ?_, ?_, ?_⟩, mem2_data, mem2_desc, ?_,
+    fun _ => Or.inl rfl⟩
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
+  · unfold Janus.Spec.Disjoint; decide
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
+  · rw [desc_eq]; simp only [window, outside_cons, outside_nil, and_true]; decide
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (c : Nat) (ret : Nat)
+    (s : Janus.Amd64.State) (t x : BitVec 64), R.Laws ∧
+    InterfaceSwitch (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.interfaceSwitch") R ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
+    (CallerOK R s 48 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧ (t.toNat ≠ 0 → R.IsType t.toNat)) :=
+  ⟨implAt, R0, ID, ret, s0, td, val, R0_laws, model, hret, setup, pre⟩
+
+/-- So the guarantee is reached: a box of `TD` takes the interface case `ID` (`3`). -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat = 3 := by
+  refine (correctness implAt R0 R0_laws model ID td val ret hret s0 setup pre).mono ?_
+  intro s' h
+  refine ⟨h.1, ?_⟩
+  rw [h.2.1.1]
+  janus_eval_nat hU : u64T
+  janus_eval_nat hS : strT
+  simp only [result, hU, hS]
+  decide
+
+end Witness
 
 end Proof

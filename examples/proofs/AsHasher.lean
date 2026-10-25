@@ -1,5 +1,36 @@
 import Extracted
 
+/-!
+# `AsHasher(x any) (Hasher, bool)`: the comma-ok type assertion `h, ok := x.(Hasher)` (arm64)
+
+**Guarantee.** For every interface value `x = (t, data)`, every model `R` of the interface
+runtime satisfying its laws, every implementation of `runtime.typeAssert` satisfying the
+`TypeAssert` contract (`Janus/Contracts/Iface.lean`) and every Go call state in which the runtime is
+usable with `R.depth` bytes of stack below `AsHasher`'s frame (`CallerOK`), the type-assertion
+descriptor `desc` the code loads (`example.com/basic..typeAssert.0`, a writable global; its
+address recomputed from the extracted code) is well formed with `CanFail` set (`TADescOK`: a
+non-empty interface type and a well-formed cache), it does not overlap the stack window, and the
+dynamic type of a non-nil `x` is a type descriptor, the call returns, obeys the ABI, and (`Post`):
+
+* `X0` is the itab of `t` for the descriptor's interface: `0` if `x` is nil, otherwise
+  `getitab`'s answer `(R.itab inter t).getD 0` (`0` if `t` does not implement it);
+* `X1` is the data word, and `ok` (`X2`) is `1` exactly when the itab is non-zero;
+* the descriptor is still well formed, with the same interface, and memory changed only in the
+  runtime's memory, the stack window and the descriptor's `Cache` word;
+* when the dynamic type is `*MulHasher` and the descriptor's interface is `Hasher` (the `Inter`
+  and `Type` words of the static itab `go:itab.*MulHasher,Hasher`, copied by `--targets`), the
+  result is that static itab and `ok = 1`, provided `getitab` returns the static itabs
+  (`StaticItabs`, true of a statically linked Go 1.26 binary: docs/RUNTIME-CONTRACTS.md).
+
+This holds whatever the state of the assertion cache: the inline probe (`loop`, by induction on
+the cyclic distance to an empty entry) either hits an entry, whose itab is the runtime's answer
+(`TACacheOK`), or reaches an empty one and calls `runtime.typeAssert` (`miss`).
+
+**Assumptions (all in the statement).** `R` is *any* model satisfying `R.Laws`, and the code at
+`runtime.typeAssert` is *any* code that behaves as `TypeAssert` says; the extraction pins that
+function to the Go runtime's code (`(pinned)` in the report).
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Spec.Type
   Janus.Contracts Janus.Contracts.Iface
 
@@ -31,8 +62,8 @@ def M0 (s : State) (ret : Nat) (t x : BitVec 64) : Memory :=
   (((s.mem.writeLE (s.sp.toNat - 48) 8 ret).writeLE (s.sp.toNat - 56) 8 (s.regs 29).toNat).writeLE
     (s.sp.toNat + 8) 8 t.toNat).writeLE (s.sp.toNat + 16) 8 x.toNat
 
-/-- A cache miss: the call of `runtime.typeAssert` and the return. -/
 set_option maxRecDepth 20000 in
+/-- A cache miss: the call of `runtime.typeAssert` and the return. -/
 theorem miss (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
     (hta : TypeAssert (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.typeAssert") R)
@@ -254,7 +285,7 @@ theorem static_case (R : IfaceModel) (t x : BitVec 64) (s s' : State) (hp : Post
   janus_eval_nat hI : mulHasherItab
   have hT0 : t.toNat ≠ 0 := by rw [htt, hT]; decide
   obtain ⟨h0, -, h2, -⟩ := hp
-  rw [hi, if_neg hT0, htt] at h0
+  rw [hi, ite_eq_right hT0, htt] at h0
   simp only [hasherInter, mulHasherType] at hsome h0
   rw [hsome] at h0
   simp only [Option.getD_some] at h0
@@ -331,5 +362,124 @@ theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
     rw [Nat.mod_eq_of_lt (show s.mem.readLE (t.toNat + 16) 4 < 2 ^ 64 by simp at hhash; omega)] at this ⊢
     simp at hhash
     omega
+
+
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+A model of the runtime (`IfaceModel.R0`), code at `runtime.typeAssert`'s address that meets the
+`TypeAssert` contract for it (`IfaceSat.assertE2I2Code`), an admissible return address and a call
+state asserting a box of the model's type `TD` to the model's interface `ID`, with the
+descriptor at its real address holding the empty cache: `correctness` applies, and `AsHasher`
+returns the itab `TAB` with `ok = 1`. -/
+
+namespace Witness
+
+open Janus.Contracts.IfaceModel Janus.Contracts.IfaceSat
+
+/-- `runtime.typeAssert`'s address. -/
+def cAddr : Nat := Extracted.program.contractAddr "runtime.typeAssert"
+
+/-- `IfaceSat.assertE2I2Code` at `runtime.typeAssert`'s address. -/
+def implAt : List Segment := [{ name := "model", base := cAddr, words := assertE2I2Code }]
+
+/-- The program linked with it, as a closed program. -/
+def linked : Program :=
+  { Extracted.program with segments := Extracted.program.segments ++ implAt }
+
+theorem linked_eq : Extracted.program.link implAt = linked := rfl
+
+theorem model : TypeAssert (Extracted.program.link implAt) cAddr R0 := by
+  rw [linked_eq]
+  intro s hpc hpre
+  obtain ⟨⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩, hdesc, -, -⟩ := hpre
+  have hi : taInter s.mem (s.regs 0).toNat = ID := hdesc.2.2.2.1
+  janus_run
+  refine rtReturn_of R0 2 _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
+    rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+  have := itabResult_R0 (g := s.regs 28) ⟨he1, he2, hd⟩ (s.regs 1).toNat
+  refine ⟨?_, hdesc, rfl, rfl⟩
+  simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
+  rw [hi]
+  have heq : (if (s.regs 1).toNat = 65536 then 66048#64 else 0#64).toNat =
+      (if (s.regs 1).toNat = TD then TAB else 0) := by
+    simp only [TD, TAB]; split <;> simp_all
+  rw [heq]; exact this
+
+/-- The descriptor's address, evaluated. -/
+theorem desc_eq : desc = 0x1646d0 := by decide
+
+/-- The witness memory: `wmem` with the descriptor at `desc` (cache `TAC`, interface `ID`,
+`CanFail`), in a writable region. -/
+def mem1 : Memory :=
+  ⟨fun a => BitVec.ofNat 8 ((([(0x1646d0 + 1, 0x04), (0x1646d0 + 2, 0x01), (0x1646d0 + 9, 0x01),
+      (0x1646d0 + 10, 0x01), (0x1646d0 + 16, 1)] ++ wtable).lookup a).getD 0),
+    wmem.regions ++ [⟨0x164000, 0x1000, true⟩]⟩
+
+theorem mem1_env (g : W64) : Env0 mem1 g := by
+  refine ⟨by decide, by decide, ?_⟩
+  unfold Desc; decide
+
+theorem mem1_desc : TADescOK R0 mem1 desc := by
+  rw [desc_eq]
+  refine ⟨by decide, by decide, by decide, by simp only [R0_isInter, taInter]; decide, ?_⟩
+  show TACacheOK R0 mem1 (mem1.readLE 0x1646d0 8) (taInter mem1 0x1646d0)
+  rw [show mem1.readLE 0x1646d0 8 = TAC by decide]
+  exact TACacheOK.empty (by decide) (by decide) (inPriv (by decide) (by decide)) (by decide) (by decide)
+
+/-- The witness return address. -/
+def ret : Nat := wret
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+/-- `TD` and the value slot `VAL`, as words. -/
+def td : BitVec 64 := BitVec.ofNat 64 TD
+def val : BitVec 64 := BitVec.ofNat 64 VAL
+
+/-- The witness call state: `AsHasher(x)` for the box `x = (TD, VAL)`. -/
+def s0 : State :=
+  { regs := fun i => if i = 0 then td else if i = 1 then val
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mem1 }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [td, val] s0 :=
+  ⟨rfl, rfl, by
+    intro i h; simp at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
+
+theorem pre : CallerOK R0 s0 48 24 ∧ TADescOK R0 s0.mem desc ∧ taCanFail s0.mem desc = true ∧
+    Outside desc 24 [(s0.sp.toNat - (R0.depth + 48), s0.sp.toNat + 24)] ∧
+    (td.toNat ≠ 0 → R0.IsType td.toNat) := by
+  refine ⟨⟨mem1_env (s0.regs 28), ⟨by decide, by decide, by decide⟩, by decide, by decide,
+    by decide, by decide, by decide, ?_, ?_, ?_⟩, mem1_desc, ?_, ?_, fun _ => Or.inl rfl⟩
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
+  · unfold Disjoint; decide
+  · simp only [R0_priv, outside_cons, outside_nil, and_true]; decide
+  · rw [desc_eq]; decide
+  · rw [desc_eq]; simp only [outside_cons, outside_nil, and_true]; decide
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (ret : Nat) (s : State) (t x : BitVec 64),
+    R.Laws ∧ TypeAssert (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typeAssert") R ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
+    (CallerOK R s 48 24 ∧ TADescOK R s.mem desc ∧ taCanFail s.mem desc = true ∧
+      Outside desc 24 [(s.sp.toNat - (R.depth + 48), s.sp.toNat + 24)] ∧
+      (t.toNat ≠ 0 → R.IsType t.toNat)) :=
+  ⟨implAt, R0, ret, s0, td, val, R0_laws, model, hret, setup, pre⟩
+
+/-- So the guarantee is reached: the assertion succeeds with the model's itab `TAB`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat = TAB ∧ s'.regs 1 = val ∧ (s'.regs 2).toNat = 1 := by
+  refine (correctness implAt R0 R0_laws model td val ret hret s0 setup pre).mono ?_
+  intro s' h
+  obtain ⟨habi, ⟨h0, h1, h2, -⟩, -⟩ := h
+  have hi : taInter s0.mem desc = ID := by rw [desc_eq]; decide
+  rw [hi] at h0
+  have h0' : (s'.regs 0).toNat = TAB := by rw [h0]; decide
+  refine ⟨habi, h0', h1, ?_⟩
+  rw [h2, h0']; decide
+
+end Witness
 
 end Proof

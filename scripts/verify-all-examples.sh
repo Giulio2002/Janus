@@ -36,7 +36,7 @@ for n in "${arm64[@]}"; do
 done
 for f in "${amd64[@]}"; do
   par_run 'out="$(scripts/verify-amd64-examples.sh -j 1 "$f" 2>&1)" || broken+=("amd64:$f")
-  grep -E "Proof\.(correctness|panics)" <<<"$out" | sed "s/^/amd64  /"'
+  grep -E "Proof\.(correctness|panics|Witness)" <<<"$out" | sed "s/^/amd64  /"'
 done
 par_wait
 rm -rf "$tmp"
