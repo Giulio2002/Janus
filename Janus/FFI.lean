@@ -905,6 +905,41 @@ theorem and_highMask_eq (x : BitVec 64) (k : Nat) (hk : k ≤ 64) :
       simp [h64, this]
   · simp [hi]
 
+/-- `x & (2^k − 2^j)`: bits `j … k−1` of `x` (the size masks of `alloca`, e.g. `0xfff0`). -/
+theorem and_rangeMask_eq (x : BitVec 64) (j k : Nat) (hj : j ≤ k) (hk : k ≤ 64) :
+    (x &&& BitVec.ofNat 64 (2 ^ k - 2 ^ j)).toNat = x.toNat % 2 ^ k / 2 ^ j * 2 ^ j := by
+  have h1 := Nat.one_le_two_pow (n := j)
+  have hjk : 2 ^ j ≤ 2 ^ k := Nat.pow_le_pow_right (by omega) hj
+  have hle : 2 ^ k ≤ 2 ^ 64 := Nat.pow_le_pow_right (by omega) hk
+  have hm : (2 ^ k - 2 ^ j) % 2 ^ 64 = 2 ^ k - 2 ^ j := Nat.mod_eq_of_lt (by omega)
+  have hsplit : 2 ^ k - 2 ^ j = (2 ^ (k - j) - 1) * 2 ^ j := by
+    rw [Nat.sub_mul, Nat.one_mul, ← Nat.pow_add, Nat.sub_add_cancel hj]
+  rw [BitVec.toNat_and, BitVec.toNat_ofNat, hm, hsplit]
+  apply Nat.eq_of_testBit_eq
+  intro i
+  rw [Nat.testBit_and, Nat.testBit_mul_two_pow, Nat.testBit_mul_two_pow, Nat.testBit_div_two_pow,
+    Nat.testBit_two_pow_sub_one, Nat.testBit_mod_two_pow]
+  by_cases hi : j ≤ i
+  · have he : i - j + j = i := Nat.sub_add_cancel hi
+    simp only [hi, decide_true, Bool.true_and, he]
+    by_cases h2 : i - j < k - j
+    · have : i < k := by omega
+      simp [h2, this]
+    · have : ¬ i < k := by omega
+      simp [h2, this]
+  · simp [hi]
+
+/-- `LSL #3` as gcc's `UBFM` decodes (`lsl x1, x0, #3`): a rotation and a mask. -/
+theorem rot61 (n : BitVec 64) :
+    (n.rotateRight 61 &&& 18446744073709551608#64 &&& 18446744073709551615#64) = n <<< 3 := by
+  have m1 : ∀ i (h : i < 64), (18446744073709551608#64 : BitVec 64)[i] = decide (3 ≤ i) := by decide
+  have m2 : ∀ i (h : i < 64), (18446744073709551615#64 : BitVec 64)[i] = true := by decide
+  ext i hi
+  simp only [BitVec.getElem_and, BitVec.getElem_rotateRight, BitVec.getElem_shiftLeft, m1 i hi, m2 i hi]
+  by_cases h : i < 3
+  · simp [h]
+  · simp [h]; omega
+
 /-- A C stack window after `SP` moved down by `n` (a multiple of 16 inside the window). -/
 theorem CStack.sub {s : State} {below above n : Nat} (h : CStack s below above) (hn : n ≤ below)
     (h16 : n % 16 = 0) {t : State} (hsp : t.sp.toNat = s.sp.toNat - n)
