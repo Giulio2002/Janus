@@ -35,6 +35,18 @@ case "$1" in
   LookupKey16) printf '%s\n' --contract runtime.mapaccess2 ;;
   NewMap) printf '%s\n' --contract runtime.makemap_small ;;
   ClearMap) printf '%s\n' --contract runtime.mapclear ;;
+  # the R3 map examples (examples/basic/maps2.go; Janus/Contracts/MapVar.lean, MapStr.lean and
+  # their amd64 files)
+  LookupS) printf '%s\n' --contract runtime.mapaccess1_faststr ;;
+  InsertS) printf '%s\n' --contract runtime.mapassign_faststr ;;
+  DeleteS) printf '%s\n' --contract runtime.mapdelete_faststr ;;
+  LookupK24) printf '%s\n' --contract runtime.mapaccess1 ;;
+  InsertK24) printf '%s\n' --contract runtime.mapassign ;;
+  Has32) printf '%s\n' --contract runtime.mapaccess1_fast32 ;;
+  Set32) printf '%s\n' --contract runtime.mapassign_fast32 ;;
+  InsertPtr) printf '%s\n' --contract runtime.mapassign_fast64ptr ;;
+  LookupPtr) printf '%s\n' --contract runtime.mapaccess1_fast64 ;;
+  MakeHint) printf '%s\n' --contract runtime.makemap ;;
   # the interface examples (examples/basic/iface.go): the Go 1.26 interface runtime entry points
   # they call (Janus/Contracts/Iface.lean, IfaceAmd64.lean; pinned to the runtime's code), and
   # the static itab the assertion and switch theorems name

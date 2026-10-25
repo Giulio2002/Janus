@@ -97,7 +97,10 @@ theorem loop (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (hl : 
             hl.iter_writeLE _ _ _ _ _ (by simp only [outside_append, outside_cons, outside_nil, and_true, iterSize]; exact ⟨ho112, by omega⟩)]
           exact hit,
        by simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, hsp104, iterSize]
-          exact Outside.of_sub hout (by omega) (by omega)⟩ ?_
+          exact Outside.of_sub hout (by omega) (by omega),
+       by simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, calleeStack,
+            hsp160, outside_cons, outside_nil, and_true]
+          omega⟩ ?_
     intro s' hpc' ⟨r, vr, fl, m'', hs', hfr2, henv2, hoth, hmap2, hit2, hv2⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.cons_append, List.nil_append, hsp160, setReg_apply,
@@ -159,7 +162,7 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
   janus_run until [Extracted.program.contractAddr "runtime.mapIterStart"]
   refine Reaches.call (Summary.withExit (hstart f) hret) rfl
     ⟨RTPre.of_caller hl hc (by janus_frame) (by simp; omega) rfl (by simp [setReg]) (by simp [setReg])
-      (by decide) (by decide), by simpa [setReg] using hty, ?_, ?_, ?_⟩ ?_
+      (by decide) (by decide), by simpa [setReg] using hty, ?_, ?_, ?_, ?_⟩ ?_
   · simp only [setReg_apply]; simp only [reduceIte, Nat.reduceEqDiff]
     exact IsMap.frame hl hmap (Agrees.of_window (lo := s.sp.toNat - (M.depth + 160))
       (hi := s.sp.toNat + 0) (by janus_frame) (Outside.of_sub hout (by omega) (by omega)))
@@ -167,6 +170,9 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
     exact Memory.accessible_mono _ hst (by omega) (by omega)
   · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, hsp104, iterSize]
     exact Outside.of_sub hout (by omega) (by omega)
+  · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, calleeStack, hsp160,
+      outside_cons, outside_nil, and_true]
+    omega
   · intro s' hpc' ⟨r, vr, fl, m', hs', hfr, henv', hoth, hmap', ks, hks, hit, hv⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.cons_append, List.nil_append, hsp160, setReg_apply,
