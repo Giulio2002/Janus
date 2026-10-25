@@ -645,7 +645,7 @@ same toolchains. Rerun with `scripts/coverage.sh cc` (the official corpus) and
 | | clang -O0 / -O2 / -O3 | 106/110 / 94/109 / 94/109 | **110/110 / 109/109 / 109/109** |
 | supplementary NEON corpus (`oracle/harvest/neon`, 476 functions) | gcc -O0 / -O2 / -O3 | 462/480 / 348/476 / 177/476 | **480/480 / 476/476 / 476/476** |
 | | clang -O0 / -O2 / -O3 | 472/480 / 192/476 / 192/476 | **480/480 / 476/476 / 476/476** |
-| Go assembly (1.3) | std, `go test -c` | 139/207 (67.15%) | **140/207 (67.63%)** |
+| Go assembly (1.3) | std, `go test -c` | 139/207 (67.15%) | **140/207 (67.63%)** alone; 151/207 (72.95%) merged with agent/armcrypto, the same as WP-H alone |
 | Go-compiled, wrappers, test code (1.1) | std | 93.46% / 99.40% / 97.09% | unchanged (no Go-compiled code uses the new classes) |
 
 The supplementary corpus is 476 small loop idioms over every element type (element-wise
@@ -654,8 +654,10 @@ reductions, interleaved structures, conversions, rounding, `fma`), plain C11 wit
 so only the auto-vectorisers emit NEON; it measures the instruction set compiled C needs far
 beyond the 21 loops of `vec.c`. In assembly, `vendor/golang.org/x/crypto/chacha20.xorKeyStreamVX`
 now decodes (`ZIP1`/`ZIP2` on `.4S`/`.2D`, `MOV` element); `crypto/sha1.sha1block` is left
-with its SHA1 instructions only. Every remaining arm64 assembly blocker is a system instruction,
-a crypto extension, CRC32 or `STLXR` (packages C, H, A). Every remaining arm64 C blocker: none.
+with its SHA1 instructions only. After merging agent/armcrypto (whose `CryptoInstr.permute` /
+`dupScalar` now decode ZIP/UZP/TRN and scalar DUP; the NEON copies were dropped) the arm64 assembly
+count is 151/207 (re-measured 2026-10-25), every remaining blocker a system instruction (`SVC`,
+`BRK`, `MRS`, `MSR`), padding or `STLXR`, and the C corpus is still 100% in all six configurations.
 
 **Ranking** (supplementary corpus, all six configurations, 2,864 function-configurations, 1,021
 blocked before; class = `arm64asm` mnemonic). By functions blocked:
