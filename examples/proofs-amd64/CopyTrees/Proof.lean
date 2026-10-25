@@ -114,4 +114,82 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
       obtain ⟨⟨hp, hw⟩, hds⟩ := h
       exact ⟨hw, ⟨hp, by omega, by omega⟩, hds⟩
 
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+As on arm64: the model `M0`, `MemSatAmd64.typedmemmoveCode` (`REP MOVSB`, backwards when
+`dst > src`) at `A0` behind a `JMP`, and a copy of 128 zero bytes from `DST` to `DST + 128` with the
+write barrier off and the type descriptor in memory. -/
+
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceSatAmd64 Janus.Contracts.IfaceModel
+  Janus.Contracts.MemSatAmd64
+
+def cAddr : Nat := Extracted.program.contractAddr "runtime.typedmemmove"
+def tramp : Janus.Amd64.Segment := { name := "tramp", base := cAddr, bytes := jmpBytes cAddr A0 }
+def model0 : Janus.Amd64.Segment := { name := "model", base := A0, bytes := typedmemmoveCode }
+def implAt : List Janus.Amd64.Segment := [tramp, model0]
+
+theorem link_eq : Extracted.program.link implAt = (Extracted.program.link [tramp]).link [model0] := by
+  simp [Janus.Amd64.Program.link, implAt]
+
+theorem model (wb d : Nat) : MemAmd64.TypedMemmove (Extracted.program.link implAt) cAddr M0 wb d := by
+  have hA : MemAmd64.TypedMemmove (Extracted.program.link implAt) A0 M0 wb d := by
+    rw [link_eq]
+    exact Summary.of_codeIn64 (codeIn_link64 _ model0 (by decide)) (typedmemmove_impl wb d)
+  intro s hpc hpre
+  rw [link_eq] at hA ⊢
+  obtain ⟨r, rip, fl, xm, mem, yh, fsb, df, mx⟩ := s
+  janus_eval_nat hC : cAddr
+  simp only [hC] at hpc
+  subst hpc
+  janus64_run until [A0]
+  obtain ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
+  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+
+def ret : Nat := wret
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+def dst : BitVec 64 := BitVec.ofNat 64 (DST + 128)
+def src : BitVec 64 := BitVec.ofNat 64 DST
+
+def mem0 : Janus.Arm64.Memory := withData Extracted.program.data wmem64
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then dst else if i = 3 then src
+      else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := mem0 }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [dst, src] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by
+    intro i h; simp at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+
+set_option maxRecDepth 20000 in
+theorem hpre : pre M0 WB 64 dst src s0 := by
+  refine ⟨⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide,
+    by simp only [outside_cons, outside_nil, and_true]; decide⟩, trivial, trivial, trivial,
+    by unfold Janus.Amd64.Program.DataLoaded; decide, ?_, by decide, by decide, ?_,
+    by unfold WriteBarrierOff; decide, ⟨by decide, by decide⟩, ?_, ⟨by decide, by decide⟩, ?_, trivial⟩ <;>
+    simp only [window, MemAmd64.callerWindow, treesType, outside_cons, outside_nil, and_true] <;> decide
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (M : MemModel) (wb d ret : Nat) (s : State)
+    (dst src : BitVec 64), M.Laws ∧
+    MemAmd64.TypedMemmove (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.typedmemmove") M wb d ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [dst, src] s ∧
+    pre M wb d dst src s :=
+  ⟨implAt, M0, WB, 64, ret, s0, dst, src, M0_laws, model WB 64, hret, setup, hpre⟩
+
+/-- So the guarantee is reached: `DST + 128` receives the 128 bytes of `DST`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ Copied s0.mem s'.mem (DST + 128) DST 128 :=
+  (correctness implAt M0 M0_laws WB 64 (model WB 64) dst src ret hret s0 setup hpre).mono
+    fun _ h => ⟨h.1, h.2.1⟩
+
+end Witness
+
 end Proof
