@@ -196,6 +196,10 @@ func (r *reacher) drain() error {
 			}
 			g, ok := r.b.containing(t)
 			if !ok {
+				if name, isPLT := r.b.pltName(t); isPLT { // a shared-library call (cenv.go)
+					r.addStub(Func{Name: name, Addr: t}, stubExternal)
+					continue
+				}
 				r.x.Unresolved = append(r.x.Unresolved, br)
 				continue
 			}
@@ -218,6 +222,10 @@ func (r *reacher) drain() error {
 				r.seen[g.Addr] = true
 				r.queue = append(r.queue, g)
 			}
+		}
+		// the Go functions behind the //export wrappers the C function calls (cenv.go)
+		for _, g := range cgoExportRoots(r.b, seg) {
+			r.addTarget(g.Addr, "cgo-export", seg.Name)
 		}
 		// the C wrappers of the cgo function-pointer variables the function loads (FFI)
 		for _, g := range cgoWrapperRoots(r.b, segmentDataRefs(r.b, seg)) {
@@ -346,6 +354,11 @@ func extractWith(b *Binary, sym string, maxFunctions int, contracts []string, ta
 	if r.err != nil {
 		return nil, r.err
 	}
+	x.CData = collectCData(b, x)
+	x.TLS = extractionTLS(b, x)
+	if err := checkCgoTLS(b, x); err != nil {
+		return nil, err
+	}
 	if b.GOARCH == "amd64" {
 		x.Lean = renderLeanAmd64(x)
 	} else {
@@ -361,7 +374,9 @@ func extractWith(b *Binary, sym string, maxFunctions int, contracts []string, ta
 // runtime into every extraction that reaches it.
 func (r *reacher) inferFrom(pc uint64) bool {
 	f, ok := r.b.containing(pc)
-	return ok && !isStdSymbol(f.Name)
+	// C code of a cgo binary (outside the Go text): its code addresses are function pointers
+	// it passes or calls (cenv.go)
+	return ok && (!isStdSymbol(f.Name) || !r.b.isGoCode(f.Addr))
 }
 
 // isStdSymbol reports whether a function symbol belongs to a standard-library package.

@@ -9,7 +9,10 @@
 #   Go -> C -> Go, end to end (EnsuresC under the trusted
 #   cgocall contract Janus.FFI.CgoCall):                 GoAdd GoSum
 #                                                        GoStack10 GoFP GoPMix GoBig GoVSum8
+#   The C environment (docs/FFI.md sections 2-4; binary artifacts/examples-cenv-<isa>):
+#     EBump (a writable global through the GOT; amd64: the --no-relax build)
 #
+# Every name maps to a symbol (sym) and, for the C environment, a binary (bin).
 # Usage: scripts/verify-cgo-examples.sh [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
 # Writes artifacts/cgo/<isa>/<Name>/verified.json and a summary to artifacts/verify-cgo-examples.txt.
 set -euo pipefail
@@ -24,8 +27,14 @@ declare -A sym=(
   [GoStack10]=example.com/cgo/cabi.Stack10 [GoFP]=example.com/cgo/cabi.FP
   [GoPMix]=example.com/cgo/cabi.PMix [GoBig]=example.com/cgo/cabi.Big
   [GoVSum8]=example.com/cgo/cabi.VSum8
+  [EBump]=e_bump
 )
-all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8)
+# binaries other than artifacts/examples-cgo-<isa> (key isa/Name, or Name for both ISAs)
+declare -A bin=(
+  [EBump]=examples-cenv [amd64/EBump]=examples-cenv-norelax
+)
+all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8
+  EBump)
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
@@ -46,7 +55,8 @@ for target in "${names[@]}"; do
   # `runtime.convT64`, `convT32` and `convTnoptr` are only called on the dead
   # `if _Cgo_always_false` branch of the cgo wrappers: contracts (not extracted; the proofs show
   # the branch is never taken)
-  bin/janus extract "artifacts/examples-cgo-$isa" "${sym[$n]}" "$out" --contract runtime.convT64 \
+  b="${bin[$isa/$n]:-${bin[$n]:-examples-cgo}}"
+  bin/janus extract "artifacts/$b-$isa" "${sym[$n]}" "$out" --contract runtime.convT64 \
     --contract runtime.convT32 --contract runtime.convTnoptr >/dev/null 2>&1
   start=$(date +%s.%N)
   if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then

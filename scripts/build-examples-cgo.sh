@@ -32,4 +32,12 @@ cd "$root/examples/cgo"
 export CGO_ENABLED=1 CGO_CFLAGS="-g -O2"
 GOOS=linux GOARCH=arm64 CC="$cc_arm64" go build -buildmode=exe -trimpath -buildvcs=false -o "$root/artifacts/examples-cgo-arm64" ./cmd
 GOOS=linux GOARCH=amd64 GOAMD64=v1 CC="$cc_amd64" go build -buildmode=exe -trimpath -buildvcs=false -o "$root/artifacts/examples-cgo-amd64" ./cmd
-echo "built $root/artifacts/examples-cgo-arm64 $root/artifacts/examples-cgo-amd64"
+# The C environment examples (examples/cgo/cenv, docs/FFI.md sections 2-4) are their own binary.
+# On amd64 the linker relaxes every GOT load of a symbol the executable defines (`mov
+# sym@GOTPCREL(%rip)` becomes `lea`/`mov $imm`), so a second amd64 build links with
+# -Wl,--no-relax to keep the -fPIC GOT loads (used by the GOT example only: --no-relax also
+# changes the Go runtime's own TLS code, which the stub pins do not cover).
+GOOS=linux GOARCH=arm64 CC="$cc_arm64" go build -buildmode=exe -trimpath -buildvcs=false -o "$root/artifacts/examples-cenv-arm64" ./cmd/cenv
+GOOS=linux GOARCH=amd64 GOAMD64=v1 CC="$cc_amd64" go build -buildmode=exe -trimpath -buildvcs=false -o "$root/artifacts/examples-cenv-amd64" ./cmd/cenv
+GOOS=linux GOARCH=amd64 GOAMD64=v1 CC="$cc_amd64" CGO_LDFLAGS="-g -O2 -Wl,--no-relax" go build -buildmode=exe -trimpath -buildvcs=false -o "$root/artifacts/examples-cenv-norelax-amd64" ./cmd/cenv
+echo "built $root/artifacts/examples-cgo-{arm64,amd64} $root/artifacts/examples-cenv-{arm64,amd64,norelax-amd64}"
