@@ -299,14 +299,15 @@ namespace Janus.Contracts.EqHashModel
 
 A witness places a model implementation at `IfaceSat.A0` and, at the contract's address, a branch
 to it. `branchWord a t` is the A64 `B` from `a` to `t > a`; `jmpBytes a t` the x86-64
-`JMP rel32` (`E9`, displacement from the next instruction). -/
+`JMP rel32` (`E9`, displacement from the next instruction, either direction). -/
 
 /-- `B t` at `a` (A64, forward). -/
 def branchWord (a t : Nat) : Nat := 0x14000000 + (t - a) / 4 % 2 ^ 26
 
-/-- `JMP rel32` from `a` to `t` (x86-64, forward). -/
+/-- `JMP rel32` from `a` to `t` (x86-64; the displacement in two's complement, so `t` may lie
+below `a`, within `2^31`). -/
 def jmpBytes (a t : Nat) : List Nat :=
-  let d := (t - (a + 5)) % 2 ^ 32
+  let d := (2 ^ 32 + t - (a + 5)) % 2 ^ 32
   [0xe9, d % 256, d / 256 % 256, d / 65536 % 256, d / 16777216 % 256]
 
 end Janus.Contracts.EqHashModel
