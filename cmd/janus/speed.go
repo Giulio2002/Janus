@@ -216,7 +216,7 @@ func earlyReplayMarker(tcVersion string, libs ...*pinnedLib) string {
 func startEarlyReplay(checker string, run func(argv ...string) (string, error), mods []string, marker string, cacheOn bool) *earlyReplay {
 	e := &earlyReplay{mods: mods}
 	if cacheOn {
-		if fileExists(marker) {
+		if markerOK(marker, "early", filepath.Base(marker)) {
 			touchHit(marker)
 			return e
 		}
@@ -277,7 +277,7 @@ func (e *earlyReplay) apply(p *replayPlan, marker string) {
 		p.done[m] = true
 	}
 	p.record(covered)
-	if p.cacheOn && os.MkdirAll(filepath.Dir(marker), 0o755) == nil {
-		_ = os.WriteFile(marker, []byte("early replay passed\n"), 0o644)
+	if p.cacheOn {
+		writeMarker(marker, "early", filepath.Base(marker), "early replay passed")
 	}
 }
