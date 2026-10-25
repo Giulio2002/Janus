@@ -35,7 +35,7 @@ namespace Proof
 
 /-- The cgo wrapper `_cgo_<hash>_Cfunc_c_add(void *frame)`, which `cgocall` calls on the system
 stack. -/
-abbrev wrapper : Nat := segAddr Extracted.program "_cgo_b947fb19b420_Cfunc_c_add"
+abbrev wrapper : Nat := segAddr Extracted.program "_cgo_2306a0143858_Cfunc_c_add"
 
 /-- The result of the cgo argument frame of `c_add` at `a`: `p0 + p1` (`p0` at `a`, `p1` at
 `a + 8`; the result slot is `a + 16`). -/

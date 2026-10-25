@@ -121,7 +121,7 @@ theorem sumWords_frame {m m' : Memory} {rs : List (Nat × Nat)} (h : MemFrame m 
 
 /-! ## The cgo wrapper -/
 
-abbrev wrapper : Nat := segAddr Extracted.program "_cgo_b947fb19b420_Cfunc_c_sum"
+abbrev wrapper : Nat := segAddr Extracted.program "_cgo_2306a0143858_Cfunc_c_sum"
 
 /-- The slice pointer and length in the cgo frame at `a`. -/
 abbrev frameP (m : Memory) (a : Nat) : Nat := m.readLE a 8
