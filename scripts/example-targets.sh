@@ -44,4 +44,27 @@ case "$1" in
   Classify) printf '%s\n' --contract runtime.interfaceSwitch --targets \
       'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher' ;;
   Equal) printf '%s\n' --contract runtime.efaceeq ;;
+  # the equality, hashing and typed-memory examples (examples/basic/rteq.go;
+  # Janus/Contracts/Mem*.lean, Hash*.lean; pinned to the runtime's code)
+  StrEq) printf '%s\n' --contract runtime.memequal ;;
+  CopyTrees) printf '%s\n' --contract runtime.typedmemmove ;;
+  ClearTrees) printf '%s\n' --contract runtime.memclrHasPointers ;;
+  LookupStr) printf '%s\n' --contract runtime.mapaccess2_faststr ;;
+  LookupFKey) printf '%s\n' --contract runtime.mapaccess1 ;;
+  HashFKey) printf '%s\n' --contract runtime.f64hash --contract runtime.strhash ;;
+  EqFKey) printf '%s\n' --contract runtime.memequal ;;
+  # the runtime's equality, hashing and typed-memory functions verified from their machine code,
+  # with the runtime functions they call as contracts
+  AlgStrequal|AlgMemequalVarlen) printf '%s\n' --contract runtime.memequal ;;
+  AlgInterequal) printf '%s\n' --contract runtime.ifaceeq ;;
+  AlgNilinterequal) printf '%s\n' --contract runtime.efaceeq ;;
+  AlgF32hash|AlgF64hash) printf '%s\n' --contract runtime.rand --contract runtime.memhash ;;
+  AlgC64hash) printf '%s\n' --contract runtime.f32hash ;;
+  AlgC128hash) printf '%s\n' --contract runtime.f64hash ;;
+  AlgMemhash8|AlgMemhash16|AlgMemhash128|AlgMemhashVarlen) printf '%s\n' --contract runtime.memhash ;;
+  AlgInterhash|AlgNilinterhash) printf '%s\n' --contract runtime.typehash \
+      --contract runtime.rtype.string --contract runtime.concatstring2 --contract runtime.convTstring ;;
+  MbarTypedmemmove) printf '%s\n' --contract runtime.memmove --contract runtime.bulkBarrierPreWrite ;;
+  MbarTypedmemclr|MbarMemclrHasPointers) printf '%s\n' --contract runtime.memclrNoHeapPointers \
+      --contract runtime.bulkBarrierPreWrite ;;
 esac

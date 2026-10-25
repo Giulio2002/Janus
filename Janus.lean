@@ -38,5 +38,17 @@ import Janus.Contracts.IfaceAmd64
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat
 import Janus.Contracts.IfaceSatAmd64
+import Janus.Contracts.Mem
+import Janus.Contracts.Hash
+import Janus.Contracts.MemAmd64
+import Janus.Contracts.HashAmd64
+import Janus.Contracts.EqHashModel
+import Janus.Contracts.HashLaws
+import Janus.Contracts.MapStr
+import Janus.Contracts.MapStrSat
+import Janus.Contracts.MemSat
+import Janus.Contracts.HashSat
+import Janus.Contracts.MemSatAmd64
+import Janus.Contracts.HashSatAmd64
 import Janus.Spec.CRC32C
 import Janus.Tactic.ABI0

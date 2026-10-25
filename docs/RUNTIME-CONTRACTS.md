@@ -495,6 +495,90 @@ runtime's own code is verified here: every path of `getitab` beyond the lock-fre
 takes the itab lock (whose arm64 LL/SC fallback the decoder rejects) and may allocate through
 `persistentalloc`, and the cache rebuild allocates through `mallocgc`.
 
+### Equality, hashing and typed memory (`Janus/Contracts/Mem.lean`, `Hash.lean`, `MapStr.lean`, `MemAmd64.lean`, `HashAmd64.lean`)
+
+Go compares values with `runtime.memequal` (inline `==` on arrays and strings) and with the types'
+equality functions (`Type.Equal`, used by the map and interface runtime and by compiler-generated
+`type:.eq.T`), hashes map keys with the types' hash functions (`Type.Hasher`, `type:.hash.T`),
+and copies or clears pointerful memory with `typedmemmove`, `typedmemclr` and
+`memclrHasPointers`. A theorem leaves them out with `--contract` and takes their contract.
+
+| Runtime function | arm64 / amd64 contract | Result |
+| --- | --- | --- |
+| `memequal(a, b, n)` | `Mem.Memequal`, `MemAmd64.Memequal` | `n` bytes at `a` and `b` agree |
+| `memequal0/8/16/32/64/128(a, b)` | `MemequalN 0/1/2/4/8/16` | the `k` bytes agree |
+| `memequal_varlen(a, b)` | `MemequalVarlen` | as `memequal`, size from the closure (`8(X26)` / `8(RDX)`) |
+| `f32equal`, `f64equal` | `Fequal binary32 4`, `Fequal binary64 8` | `feq`: IEEE `==` (`NaN != NaN`, `+0 == -0`) |
+| `c64equal`, `c128equal` | `Cequal …` | both parts `feq` |
+| `strequal` | `Strequal` | `strEq`: equal lengths and bytes |
+| `interequal`, `nilinterequal` | `Interequal`, `Nilinterequal` (over R2's `IfaceModel`) | equal first words and `ifaceeq`/`efaceeq` |
+| `memhash(p, h, n)`, `memhash8/16/128`, `memhash_varlen` | `Hash.Memhash`, `MemhashN`, `MemhashVarlen` | `H.mem h n v` |
+| `memhash0`, `memhash32`, `memhash64` | `Memhash0`, `Memhash32`, `Memhash64` | `h`; `H.mem32 h v`; `H.mem64 h v` |
+| `strhash(p, h)` | `Strhash` | `H.mem h len bytes` |
+| `f32hash`, `f64hash` | `Fhash …` | `FHashIs`: `±0 ↦ c1·(c0 ^ h)`, NaN ↦ `c1·(c0 ^ h ^ rand())`, else `H.mem h k x` |
+| `c64hash`, `c128hash` | `Chash …` | real part, then imaginary part |
+| `interhash`, `nilinterhash` | `Interhash`, `Nilinterhash` | `h` for nil, else `c1 · r`, `r` a `typehash` result |
+| `typehash(t, p, h)` | `Typehash` | some `H.TypeHash t m p h r` |
+| `rand()` | `Rand` | anything |
+| `typedmemmove(typ, dst, src)` | `TypedMemmove` (write barrier off) | `dst` gets the `typ.Size_` bytes of `src` |
+| `typedmemclr(typ, ptr)`, `memclrHasPointers(ptr, n)` | `TypedMemclr`, `MemclrHasPointers` (write barrier off) | zero bytes |
+| `memmove`, `memclrNoHeapPointers`, `bulkBarrierPreWrite` | `Memmove`, `MemclrNoHeapPointers`, `BulkBarrierOff` | the callees of the typed-memory functions |
+| `mapaccess2_faststr(t, m, key)` | `MapStr.Access2Str`, `Access2Str64` | `Map.Access2` keyed by the string's content `strKey` |
+
+**The seeded hash is a model.** Every theorem quantifies over `H : HashModel`: the byte hashes are
+uninterpreted functions of the seed and the bytes (the process's AES key schedule or `hashkey`,
+fixed by `H.Env`), so a proof can only use what every hash satisfies. The laws are theorems
+(`Janus/Contracts/HashLaws.lean`): equal floats have equal encodings unless both are zeros
+(`feq_eq`), so they hash alike (`fhashIs_of_feq`, with `+0`/`-0` explicitly by `fhashIs_zeros`); a
+NaN may hash to any value (`fhashIs_nan`: `c1` is odd, so `rand()` reaches every hash); equal
+strings hash alike (`strhash_of_strEq`). `HashFKey` uses them to prove, for the compiler-generated
+hash of a struct key, that keys equal under the generated `==` (`EqFKey`) have the same possible
+hashes: the law a map lookup relies on.
+
+**The frame.** As the map and interface contracts: the call returns to its return address with
+the ABI's preserved registers (and `FPCR`, `MXCSR`'s control bits), memory changed only in the
+callee's stack window `[SP - d, SP - 8)` (amd64 `[RSP - d, RSP)`), the argument spill slots, the
+model's private memory (`M.priv`, `H.priv`, `R.priv`; never for the pure equality functions) and
+the destination of a typed-memory call. Every precondition asks for the stack guard `d` below
+`SP`, the window writable, the guard word `16(g)` outside the callee's window (and, with a
+model, outside its private memory: a second runtime call after a first one must still find it),
+and every input readable, below `2^48` and outside the callee's window (the callee writes its
+frame before it reads). `memequal` has no spill slots (`nargs = 0`): the runtime's `memequal` is
+`NOFRAME`, and its callers (`strequal`, `memequal_varlen`, compiled `==`) leave no room for them.
+On amd64 a destination must also avoid the return-address slot.
+
+**The write barrier is a parameter.** `TypedMemmove`, `TypedMemclr` and `MemclrHasPointers` take
+the address `wb` of `runtime.writeBarrier` and require the flag off (`WriteBarrierOff`, the
+negation of agent/rtstr's `WriteBarrierOn`); the flag-on behaviour (the barrier buffer) is work
+package R5's.
+
+**Pinning.** All these functions except `typehash` are in `runtimeContractStubs`: a `--contract`
+naming one is checked to be the Go runtime's code (`checkContractPin`); `memequal` and
+`memequal_varlen` live in `internal/bytealg`, `mapaccess2_faststr` in `internal/runtime/maps`
+(`runtimeFuncDir`). `typehash` compiles a jump table whose normalized code differs between
+programs, so it is identified by name only.
+
+**Satisfiability.** `Janus/Contracts/MemSat.lean`, `HashSat.lean` (and `…Amd64.lean`) give, for
+every contract, model code proved to satisfy it for the models `EqHashModel.M0` (typed memory),
+`H0` (every hash is its seed), `IfaceModel.R0`, and a state satisfying the precondition;
+`MapStr.access2Str_satisfiable` for the map lookup (model `MS0`, nil maps). The examples' witnesses
+place that code behind a branch at the contract's address (`EqHashModel.branchWord`, `jmpBytes`,
+`Summary.of_codeIn`).
+
+**What is proved rather than assumed.** The runtime's own code of the equality, hash and
+typed-memory functions is proved to meet these contracts, given the contracts of what it calls
+(`examples/proofs/Alg*.lean`, `Mbar*.lean`; amd64 `examples/proofs-amd64/Alg*/`, `Mbar*/`), and on
+arm64 `runtime.memequal` itself for every length (`AlgMemequal`). Still assumed: `memhash`,
+`memhash32`, `memhash64`, `strhash` (assembly with an AES path), `typehash`, `rand`, `memmove`,
+`memclrNoHeapPointers`, `bulkBarrierPreWrite`, `mapaccess2_faststr`, and on amd64 `memequal` and
+`memequal_varlen` (both run `memeqbody`, which reads around short inputs).
+
+**Examples** (`examples/basic/rteq.go`; both ISAs): `Eq32` (`[32]byte` `==`, `memequal` executed),
+`StrEq` (`s == t`), `F64Eq` (`==` on `float64`, `+0 == -0`, NaN), `CopyTrees` (copy of a
+pointerful array through `typedmemmove`, write barrier off), `ClearTrees` (`clear` of a `[]*T`
+through `memclrHasPointers`), `LookupStr` (`map[string]uint64` lookup), `HashFKey` and `EqFKey`
+(the compiler-generated hash and `==` of a struct key, with the equal-keys-equal-hashes law).
+
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 
 The Go → C boundary does not use the linked-code `Summary` mechanism above. The trusted part has
