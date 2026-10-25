@@ -9,12 +9,13 @@ package basic
 // Cell is a heap cell for LoadField.
 type Cell struct{ V uint64 }
 
-// PanicIf panics with the interface value any(x) when x > 10 and returns x + 1 otherwise.
+// PanicIf panics with the interface value e when x > 10 and returns x + 1 otherwise. The panic
+// value is passed straight to runtime.gopanic (e is already an interface), so no boxing.
 //
 //go:noinline
-func PanicIf(x uint64) uint64 {
+func PanicIf(x uint64, e any) uint64 {
 	if x > 10 {
-		panic(x)
+		panic(e)
 	}
 	return x + 1
 }
