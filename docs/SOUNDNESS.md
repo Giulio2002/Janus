@@ -893,8 +893,23 @@ no concurrent GC, no preemption):
   and a state satisfying the precondition), so no theorem using them is vacuous by an
   unsatisfiable contract; each interface example also proves its whole hypothesis set jointly
   satisfiable for its binary and its conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). Boxes are not known to keep their value across later runtime calls.
+* **Strings and slices** (`Janus/Contracts/Rt.lean`, `String.lean`, `Slice.lean`;
+  docs/RUNTIME-CONTRACTS.md, "Strings, slices and the write barrier"). The string conversions and
+  concatenations, the UTF-8 helpers, `growslice` for any element type, `makeslicecopy`,
+  `moveSlice*`, `slicecopy`, `typedslicecopy`, `wbZero` and `wbMove` as `RtSpec`s turned into
+  `Summary`s (`RtContract`, `RtContract64`). Trusted, as claims about the Go 1.26 runtime: each
+  spec, with its panic and throw paths excluded by its precondition and, through `H`, the calls
+  the runtime does not serve as described. Not trusted: the UTF-8 decoder `decodeRune` is checked
+  against the runtime's own output (`JanusTests/String.lean`), and `decoderune` and `countrunes`
+  are proved from their machine code on both ISAs (`examples/proofs/SumRunes.lean`,
+  `RuneLen.lean` and their amd64 counterparts). Every spec has a satisfiability witness
+  (`Janus/Contracts/Sat.lean`, `SatAmd64.lean`, collected in `RtSat`); `audit/rtstr/run.sh`
+  checks the capacity formulas and the examples against the real runtime.
 * **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
-  `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
+  `gcWriteBarrier`, the buffer append) is extracted and executed. For proofs that leave the
+  barrier out, `WbContract`/`WbContract64` (`Janus/Contracts/WriteBarrier.lean`) are met by the
+  real `gcWriteBarrier1..8` whenever the buffer has room (`examples/proofs/WriteBarrier.lean`,
+  `examples/proofs-amd64/WriteBarrier`; `HRoom` held at every non-flushing real call probed). Only the buffer flush
   `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)
   makes it unreachable. The runtime fields the barrier uses must each be separate from the
   stored-to field and the stack (round 9 S1: one interval holding them all, as before, failed
