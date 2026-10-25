@@ -61,7 +61,8 @@ if [ -n "${RT_FP_SKIP_SAIL:-}" ] || [ ! -x "$sail" ]; then
   row "A64-SAIL" skip "skip (no $sail or RT_FP_SKIP_SAIL)"
 else
   echo "== A64-SAIL: the same corpus on the Sail ASL model, three-way"
-  QEMU_OUT="$W/out-a64" OUT="$W/out-sail" JOBS="$JOBS" scripts/oracle-sail.sh run >"$W/sail.log" 2>&1
+  # KEEP=1: the rows below read the raw verdicts (W is removed on exit anyway).
+  KEEP=1 QEMU_OUT="$W/out-a64" OUT="$W/out-sail" JOBS="$JOBS" scripts/oracle-sail.sh run >"$W/sail.log" 2>&1
   js=$(mismatches "$W/out-sail/janus-vs-sail"); qs=$(mismatches "$W/out-sail/qemu-vs-sail")
   if [ -s "$W/out-sail/janus-vs-sail/summary.md" ] && [ "$js" = 0 ] && [ "$qs" = 0 ]; then
     row "A64-SAIL (Janus/qemu vs Sail)" ok "ok (Janus vs Sail: $(summary "$W/out-sail/janus-vs-sail"); qemu vs Sail: $qs MISMATCH)"

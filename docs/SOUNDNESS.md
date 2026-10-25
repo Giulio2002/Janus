@@ -195,6 +195,50 @@ with a different framework (a source change), `--fresh` and `--unsafe-no-sandbox
 must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
 explains why it would not pay for the trusted state it would add.
 
+### Cache eviction
+
+The cache collector (`janus cache gc`, and automatically after `verify`, `verify-batch` and
+`blockers`; docs/CLI.md "Cache", `cmd/janus/cachegc.go`) deletes cache entries to keep the cache
+within a size budget. It adds no trusted state, and it cannot make janus accept anything it would
+not accept with an empty cache:
+
+* **It only deletes.** It never writes an entry, a manifest, a stamp or the result key, and never
+  renames anything except into its own fresh trash directory (`v1/tmp/gc-*`, removed at the end).
+  `TestCacheGCRedTeam` checks that a collection creates nothing but its lock, that a dry run
+  changes nothing, that the result key is untouched and that a forged result entry stays rejected.
+* **Every reader already survives deletion.** Each cache is checked when it is read, so a missing
+  entry is a miss and a partly missing one is a mismatch: a result or trusted-compile entry must
+  carry a valid HMAC under the hidden key and match the SHA-256 of every file; the framework build
+  is used only if its ready stamp, sources and module pins all match (otherwise it is rebuilt from
+  the embedded sources); consumer workspaces are untrusted by design (their modules are rebuilt,
+  pinned and kernel-replayed; the framework copy in them is pinned against the trusted build); a
+  replay marker only skips a replay whose module bytes and imports its name hashes, so deleting
+  one only makes the replay run again. An evicted entry is rebuilt from the same inputs, and the
+  rebuilt entry is equivalent: `TestCacheGCConcurrentVerify` empties the cache during and after
+  verifications (single files and a consumer package) and gets the same theorem, statement,
+  axioms and replay status.
+* **Nothing in use is removed.** Entries with a lock are removed only under that lock, taken
+  exclusively without waiting; an in-use workspace (exclusive), framework build (shared) or
+  JanusASL build (`.use`, shared, held for as long as a verification uses it) is skipped. The
+  entry is made unusable first (the framework's `.ready` stamp is removed), then renamed away in
+  one step, and its lock files are removed while held: a process waiting on the old lock re-checks
+  the inode (`lockFileMode`), takes the new lock and finds no entry, so it rebuilds. Lock-less
+  entries are removed by one rename or unlink, and their writers publish them by one rename, so a
+  reader sees a whole entry or none. Entries used within the grace period, and the builds the
+  process uses, are kept besides (`TestCacheGCRespectsLocks`, `TestCacheGCConcurrentHolders`).
+* **No symbolic link is followed.** Sizes are taken with `lstat`, entries are removed with
+  `rename`/`unlink`/`RemoveAll`, none of which follow links: a link a consumer build plants in its
+  (writable) workspace, or a link put in place of an entry, is removed itself, never its target.
+* **Only a private cache is collected.** The collector runs the round-8 check (`checkCacheRoot`)
+  first: in a cache another user can write, nothing is deleted (`janus cache gc` fails with
+  `Stage: cache safety`), since such a cache is not ours and none of its entries are trusted.
+* **What a red team could still do.** A process that can write the cache could plant entries,
+  but that is the round-8 threat and outside the model with or without eviction. Deleting an
+  entry can make the next run slower (a JanusASL build takes an hour) but never weaker: the
+  verifier's checks on a rebuilt entry are the same as on a first build. Touching an entry's
+  modification time (only possible for the consumer's own workspace, from inside the sandbox)
+  only changes which entries the collector keeps.
+
 **Not trusted:**
 
 * The Go compiler and linker. We reason about their output.

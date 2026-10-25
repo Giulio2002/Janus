@@ -165,6 +165,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "Error: unknown command %q\n%s", args[0], usage)
 		return 1
 	}
+	if args[0] == "verify" || args[0] == "blockers" {
+		// Keep the cache within its budget (cachegc.go); never changes the outcome.
+		autoCollect(stderr)
+	}
 	if err != nil {
 		// A Lean job killed by the memory guard explains any failure it caused.
 		if _, _, kill := memSince(mark); kill != nil {

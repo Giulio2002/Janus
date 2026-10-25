@@ -20,12 +20,23 @@ Results land in `artifacts/oracle/` (override with `OUT=`):
 |---|---|
 | `summary.md` | per-class table, model-gap breakdown, every mismatch group with examples |
 | `repro.md`, `repro.jsonl` | minimised reproductions of every mismatching word (only written if there are mismatches) |
-| `verdicts.jsonl` | one verdict per case (`agree` / `model-gap` / `MISMATCH` / ...) with diffs |
-| `cases.jsonl`, `hw.jsonl`, `model.jsonl` | the inputs and both sides' raw outputs |
+| `verdicts.jsonl.zst` | one verdict per case (`agree` / `model-gap` / `MISMATCH` / ...) with diffs |
+| `mismatches.jsonl` | the `MISMATCH` verdicts, uncompressed (only written if there are mismatches) |
+| `cases.jsonl.zst`, `hw.jsonl.zst`, `model.jsonl.zst` | the inputs and both sides' raw outputs |
+
+A full run writes several GB of JSON lines. When the script ends (however it ends) it keeps the
+summaries and compresses the dumps with zstd (`zstd -dc verdicts.jsonl.zst | …` reads one;
+`scripts/lib/artifacts.sh`); `gen.jsonl` and `harvest.jsonl`, whose union is `cases.jsonl`, are
+removed. `KEEP=zst` compresses those too, `KEEP=1` keeps every file raw, as before. The drivers
+that read the corpus (`scripts/oracle-sail.sh`, `scripts/asl.sh check`, `scripts/x86formal.sh
+check`, `oracle-amd64-formal/compare.py`, `JanusASL/tools/evidence.py`) accept the compressed
+files.
 
 Knobs: `JOBS`, `N` (words per generated class), `K` (states per harvested word), `PER_CLASS`
 (harvested distinct words per class), `SEED`, `QEMU` (set `QEMU=` on an arm64 host to run
-the runner natively). After a model change you can skip the native side:
+the runner natively). After a model change you can skip the native side (it reads `hw.jsonl`
+from the output directory, so decompress the corpus first:
+`zstd -d artifacts/oracle/{cases,hw}.jsonl.zst`):
 `oracle/bin/oracle run -reuse-native -out artifacts/oracle -cases artifacts/oracle/cases.jsonl`.
 
 Single pieces, all in `oracle/` (a separate Go module) and `Oracle/Main.lean`:

@@ -121,8 +121,12 @@ the sticky bit (refused) and with it (accepted), a root reached through a symbol
 0755 result directory.
 
 **Tests and exceptions.** The Go test suite's caches are `t.TempDir()` directories (0700 under
-the sticky `/tmp`) or `/tmp/janus-test-cache` (owned by the user, 0755); all pass the check, so
-no test needed a weaker rule and **no exception was added**.
+the sticky `/tmp`) or the shared test cache (`$JANUS_TEST_CACHE_DIR`, else `~/.cache/janus-test`,
+created 0700 under the user's 0700/0755 cache directory, or `/var/tmp/janus-test-cache-<uid>`
+under the sticky `/var/tmp` when the user cache directory is on a RAM filesystem; it was
+`/tmp/janus-test-cache` until the cache collector moved it off tmpfs); all pass the check
+(`TestTestCacheOffTmpfs` checks the shared one), so no test needed a weaker rule and **no
+exception was added**. The cache collector refuses a cache that fails the check.
 
 ## L1 (low, fixed): the toolchain's identity in the cache keys
 

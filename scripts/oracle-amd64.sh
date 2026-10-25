@@ -18,6 +18,10 @@
 # FPK (MXCSR settings per FP state, default 3 gen / 2 harvest),
 # MODEL (default .lake/build/bin/janus-oracle-amd64; e.g. MODEL=oracle-amd64/bin/fakemodel
 # to exercise the pipeline without the Lean model).
+# KEEP: what the run leaves in OUT (scripts/lib/artifacts.sh). Default: summary.md, repro.*,
+# mismatches.jsonl (MISMATCH verdicts, if any) and cases/hw/model/verdicts.jsonl zstd-compressed
+# (.zst); gen.jsonl and harvest.jsonl (whose union is cases.jsonl) are removed. KEEP=zst
+# compresses every dump, KEEP=1 keeps them all raw.
 set -euo pipefail
 # Example binaries (and so every address a proof depends on) are built with exactly this Go
 # release, whatever Go is installed; the go command downloads it on first use.
@@ -25,6 +29,8 @@ export GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=lib/artifacts.sh
+. "$root/scripts/lib/artifacts.sh"
 memguard_self "$@"
 mode="${1:-full}"
 export PATH="$PATH:/usr/local/go/bin"
@@ -52,6 +58,9 @@ tail -1 "$bin/selftest.log"
 [ "$mode" = selftest ] && exit 0
 
 mkdir -p "$OUT"
+# However the run ends: keep the summaries, compressed verdicts and corpus, drop the other dumps
+# (KEEP=1 keeps everything raw; scripts/lib/artifacts.sh).
+trap 'art_prune "$OUT"' EXIT
 cases=()
 case "$mode" in
   quick) N="${N:-250}"; GROUP="${GROUP:-15000}" ;;
@@ -110,14 +119,16 @@ fi
 echo "== run (native vs $(basename "$MODEL"))"
 IFS=, eval 'list="${cases[*]}"'
 "$bin/oracle" run -runner "$bin/runner" -model "$MODEL" -j "$JOBS" -cases "$list" -out "$OUT" > /dev/null
+mismatch=0
 if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
+  mismatch=1
   echo "== minimize mismatches"
   "$bin/oracle" minimize -runner "$bin/runner" -model "$MODEL" -out "$OUT" -max 200 > /dev/null
   echo "minimal reproductions: $OUT/repro.md"
 fi
 sed -n '1,6p' "$OUT/summary.md"
-echo "report: $OUT/summary.md  (per-case verdicts: $OUT/verdicts.jsonl)"
-if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
+echo "report: $OUT/summary.md  (per-case verdicts: $OUT/verdicts.jsonl, zstd-compressed unless KEEP=1)"
+if [ "$mismatch" = 1 ]; then
   echo "FAIL: model disagrees with hardware (see $OUT/repro.md)" >&2
   exit 1
 fi
