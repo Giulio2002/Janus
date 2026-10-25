@@ -37,3 +37,4 @@ import Janus.Contracts.Mem
 import Janus.Contracts.Hash
 import Janus.Contracts.MemAmd64
 import Janus.Contracts.HashAmd64
+import Janus.Contracts.EqHashModel
