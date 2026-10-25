@@ -33,7 +33,8 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
      Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
      Box AsHasher Classify Equal
-     Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey)
+     Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
+     I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird SpanSum MinF64 MaxF64 MinStr)
 . scripts/example-contracts.sh
 # the runtime's equality, hashing and typed-memory functions verified from their code
 all+=($runtime_examples $runtime_examples_arm64_only)
@@ -82,7 +83,7 @@ verify_one() {
   # reached); up to two verified at once (scripts/lib/theorems.sh).
   local -a thms=(Proof.correctness)
   local thm i st
-  for thm in $(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
+  for thm in $(grep -oE '^theorem (exact|saturation|faults)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
   if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
   st="$(mktemp -d)"
   start=$(date +%s.%N)

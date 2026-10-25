@@ -31,7 +31,10 @@ broken=()
 verify_function() {
   local f=$1 st i
   local -a thms=(Proof.correctness)
-  if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.panics); fi
+  local thm
+  for thm in panics exact outOfRange faults; do
+    if grep -q "^theorem $thm" "examples/proofs-amd64/$f/Proof.lean"; then thms+=("Proof.$thm"); fi
+  done
   if grep -q '^namespace Witness' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
   # corollaries stated as their own theorems (e.g. EncryptBlock's AES-128 and FIPS-197 vector)
   local c

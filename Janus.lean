@@ -10,6 +10,7 @@ import Janus.GoABI
 import Janus.CABI
 import Janus.FFI
 import Janus.Tactic
+import Janus.Tactic.Addr
 import Janus.Tactic.Atomic
 import Janus.Tactic.Vector
 import Janus.Tactic.Float
@@ -18,6 +19,9 @@ import Janus.Tactic.Crypto
 import Janus.Float.Lemmas
 import Janus.Arm64.FloatLemmas
 import Janus.Amd64.FloatLemmas
+import Janus.Float.Convert
+import Janus.Arm64.FloatConvert
+import Janus.Amd64.FloatConvert
 import Janus.Arm64.Vector
 import Janus.Spec.Basic
 import Janus.Spec.Bytes
@@ -30,6 +34,10 @@ import Janus.Tactic.Dynamic
 import Janus.Spec.Map
 import Janus.Spec.SwissMap
 import Janus.Contracts.Map
+import Janus.Contracts.Cmpstring
+import Janus.Contracts.CmpstringSat
+import Janus.Contracts.CmpstringAmd64
+import Janus.Contracts.CmpstringSatAmd64
 import Janus.Amd64
 import Janus.Contracts.MapAmd64
 import Janus.Contracts.MapSat

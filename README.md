@@ -207,7 +207,7 @@ Go 1.26.0. Proofs:
 | `HexDigit` | byte `i & 15` of a `.rodata` string | ✓ | ✓ |
 | `Table` | `t[i & 7]` of a constant `.rodata` table | ✓ | ✓ |
 | `A64Equal64` | `bytes.Equal` of two 64-byte arrays, through `runtime.memequal`'s SIMD loop (`LD1`, `CMEQ`, `AND`, `UMOV`) | ✓ | |
-| `A64IndexByte` | `bytes.IndexByte` on a 32-byte-aligned 64-byte slice: the first index of `c`, or `-1`, through `internal/bytealg`'s SIMD scan | ✓ | |
+| `A64IndexByte` | `bytes.IndexByte` on a 64-byte slice: the first index of `c`, or `-1`, through `internal/bytealg`'s SIMD scan (arm64: 32-byte-aligned data, `LD1`/`CMEQ`/`ADDP`; amd64: the AVX2 path, `VPCMPEQB`/`VPTEST`/`VPMOVMSKB`/`BSF`, given `HasAVX2`) | ✓ | ✓ |
 | `A64CountByte` | the number of bytes of `b` equal to `c`, for every length, computed by the words gcc 15.2 `-O2` auto-vectorises a C loop into (`CMEQ`, `ZIP1`/`ZIP2`, `UADDW`/`UADDW2`, `ADDP`, then a scalar tail), behind an ABI0 shim | ✓ | |
 | `GlobalTable` | `tbl[i & 7]` of a writable global, provided by the precondition | ✓ | ✓ |
 | `Bump` | `counter += d` on a writable global, returns the new value | ✓ | ✓ |
@@ -260,6 +260,13 @@ Go 1.26.0. Proofs:
 | `IncTwice` | two static calls of a pointer-receiver method: `c.N += d` twice, returns the sum of the results | ✓ | ✓ |
 | `MakeAdder` | an escaping closure: a fresh funcval from `runtime.newobject` (contract) holding `MakeAdder.func1` and the captured `a` | ✓ | ✓ |
 | `Slice3` | `xs[i:j:k]`: the new header; **panics** (`runtime.panicBounds`) iff not `0 ≤ i ≤ j ≤ k ≤ cap` | ✓ | ✓ |
+| `I64ToF64`, `U64ToF64` | `float64(x)` of an `int64` / `uint64` is IEEE `convertFromInt` rounded to nearest-even (amd64 `uint64`: Go's sign-test, sticky-halving, `CVTSI2SDQ`, doubling sequence, shown exact); exact for `\|x\| < 2^53` (truncating gives `x` back) | ✓ | ✓ |
+| `F64ToI64` | `int64(x)` is the truncation when it is in `[-2^63, 2^63)`; out of range as the hardware gives it: arm64 `FCVTZS` saturates (`-2^63`, `2^63-1`, `0` for NaN), amd64 `CVTTSD2SQ` returns the integer indefinite `0x8000000000000000` | ✓ | ✓ |
+| `F64ToF32`, `F32ToF64` | `float32(x)`, `float64(x)` between float types are IEEE `convertFormat` (a NaN for a NaN); widening is exact in every rounding direction | ✓ | ✓ |
+| `MinF64`, `MaxF64` | `min`/`max` of floats are IEEE 754-2019 `minimum`/`maximum`: a NaN if either is NaN, `min(-0, +0) = -0`, `max(-0, +0) = +0` (arm64 `FMIN`/`FMAX`; amd64 Go's `MINSD`/`MINSD`/`POR` sequence, `max` on the negations) | ✓ | ✓ |
+| `MinStr` | `min(s, t)` of strings through `runtime.strmin` (executed): `t` if `t < s` bytewise, else `s`, assuming the `runtime.cmpstring` contract (satisfiable, witnessed by a verified byte loop) | ✓ | ✓ |
+| `LoadThird` | `p[2]` for a non-nil `p`; for `p = nil` (nothing mapped below `4096`) the load **faults** at address `16 < 4096` (stated at the machine level: the faulting instruction and its `outsideAllocation` error) | ✓ | ✓ |
+| `SpanSum` | range over a function iterator that stays a real call (`Span.All` with the loop body `SpanSum-range1` as a closure called through its funcval, `#state` checks): `lo + … + (hi-1)` | ✓ | ✓ |
 | `Box` | `any(x)` for a `uint64`: `(type:uint64, ptr)` with a box holding `x`, assuming the `runtime.convT64` contract ([RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md), "Interfaces") | ✓ | ✓ |
 | `AsHasher` | `h, ok := x.(Hasher)`: the itab `getitab` gives (or `0`), the data word and `ok`, for every state of the assertion cache (its probe loop executed), through the `runtime.typeAssert` contract; the static itab for a `*MulHasher` | ✓ | ✓ |
 | `Classify` | a type switch over `nil`, `uint64`, `string`, `Hasher` and the rest: the case taken, through the type-hash compares, the switch-cache probe and the `runtime.interfaceSwitch` contract | ✓ | ✓ |

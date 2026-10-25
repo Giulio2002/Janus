@@ -46,6 +46,7 @@ arm64=(MallocFast ClearWords A64IndexByte A64Crc32 A64CountByte CopyBlock AddLim
        ReverseArray RowsWith SwapBig DotBoth Find2D Fact Compose Shifts AlignUp TotalMeters TotalFeet
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
        Mod IncTwice Bump GlobalTable Table MakeAdder
+       SpanSum MinStr I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird MinF64 MaxF64
        Box AsHasher Classify Equal Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
        WrongAdd)
 . scripts/example-contracts.sh
@@ -144,7 +145,7 @@ run_item() {
       else
         broken+=("$it")
       fi
-      { grep -E "Proof\.(correctness|panics|Witness|corollary)" <<<"$out" || true; } | sed "s/^/amd64  /"
+      { grep -E "Proof\.(correctness|panics|exact|outOfRange|faults|Witness|corollary)" <<<"$out" || true; } | sed "s/^/amd64  /"
       [ -z "${secs:-}" ] || printf 'amd64  %-12s (%.1fs)\n' "$n" "$secs"
       ;;
     asm)

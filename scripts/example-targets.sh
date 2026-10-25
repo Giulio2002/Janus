@@ -47,6 +47,9 @@ case "$1" in
   InsertPtr) printf '%s\n' --contract runtime.mapassign_fast64ptr ;;
   LookupPtr) printf '%s\n' --contract runtime.mapaccess1_fast64 ;;
   MakeHint) printf '%s\n' --contract runtime.makemap ;;
+  # string min (examples/basic/zzconstructs2.go): runtime.strmin is executed, the comparison it
+  # calls is a contract (Janus/Contracts/Cmpstring.lean, CmpstringAmd64.lean)
+  MinStr) printf '%s\n' --contract runtime.cmpstring ;;
   # the interface examples (examples/basic/iface.go): the Go 1.26 interface runtime entry points
   # they call (Janus/Contracts/Iface.lean, IfaceAmd64.lean; pinned to the runtime's code), and
   # the static itab the assertion and switch theorems name

@@ -927,6 +927,11 @@ no concurrent GC, no preemption):
   collector does not move objects, so a returned pointer stays valid; (6) a pointerful object
   of more than 512 bytes (up to `maxSmallSize - 8`) follows an 8-byte malloc header and is only
   8-aligned (`mallocHdr`, round 9 C2; Go 1.26 returns `slot + 8`).
+* **String comparison** (`Janus/Contracts/Cmpstring.lean`, `CmpstringAmd64.lean`).
+  `runtime.cmpstring` returns the bytewise lexicographic comparison (`strCmp`, `-1`/`0`/`1`) of two
+  readable strings, changes memory only in its stack window and preserves the ABI's callee-saved
+  registers. The contract is shown satisfiable by a verified byte-loop implementation on both ISAs
+  (`CmpstringSat.cmpstring_satisfiable`, `CmpstringSatAmd64.cmpstring64_satisfiable`); that Go's `cmpbody` meets it is assumed.
 * **Interfaces** (`Janus/Spec/Type.lean`, `Janus/Contracts/Iface.lean`, `IfaceAmd64.lean`;
   docs/RUNTIME-CONTRACTS.md, "Interfaces"). `convT`, `convTnoptr`, `convT16/32/64`,
   `convTstring`, `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch`,
