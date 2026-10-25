@@ -306,6 +306,7 @@ instructions on the paths taken from states satisfying `pre`.
 | `Faults p s` | the run stops with a fault other than `outOfFuel` (a nil or out-of-bounds access, a read-only store, misaligned `SP`, a jump outside the code, an unsupported instruction) |
 | `NeverPanics p s` | for every fuel: no panic stub **and** no fault; only `outOfFuel` is allowed (`neverPanics_iff : NeverPanics ↔ ¬ Panics ∧ ¬ Faults`) |
 | `GrowsStack p s` | the run reaches `runtime.morestack*` |
+| `GoReturns p C s Q` / `EnsuresGo` | Go-level outcome (`Janus/GoABI.lean`): the run returns (`.returned s'`) or **panics with an interface value** (`.panicked v s'`: it stops at a panic stub, a faulting instruction or a frame exit that the classification `C` names, with the value `C` assigns); `Ensures.toGo` embeds every `Ensures` with no panic |
 
 On real hardware every model fault is a crash or a Go panic: a memory fault is `SIGSEGV`, which
 Go turns into `panic: runtime error: invalid memory address or nil pointer dereference`. So "never
@@ -713,6 +714,33 @@ no concurrent GC, no preemption):
   and a state satisfying the precondition), so no theorem using them is vacuous by an
   unsatisfiable contract; each interface example also proves its whole hypothesis set jointly
   satisfiable for its binary and its conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). Boxes are not known to keep their value across later runtime calls.
+* **Panics, defer, recover** (`Janus/Spec/Panic.lean`, `Janus/Contracts/Panic.lean`,
+  `PanicAmd64.lean`; docs/RUNTIME-CONTRACTS.md, "Panics, defer, recover"). `gopanic`,
+  `gorecover`, `deferproc`, `deferprocStack`, `deferreturn`, `deferprocat`, `deferrangefunc` as
+  `Summary`s (and, for `gopanic`, a continuation) over an abstract model `P : PanicRuntime` that
+  the theorem quantifies over. Trusted, as claims about the Go 1.26 runtime: (1) each contract,
+  in particular that `gorecover` returns the panic value exactly when its caller is not a wrapper
+  and the caller's saved return address (`[FP + 8]`) is the running deferred call's return point
+  (our reading of `gorecover`'s `p.argp`/frame check), and that `gopanic` runs the frame's one
+  pending open-coded defer (funcval from the stated slot, `deferBits` at the stated offset) and,
+  if it recovers, resumes the frame at the stated `deferreturn` site with `SP` and the frame
+  pointer restored; (2) the laws `P.Laws`; (3) the **funcdata offsets** in the `gopanic`
+  contract (`FUNCDATA_OpenCodedDeferInfo`, `_func.deferreturn`) are parameters printed in the
+  statement, not read from the binary: a wrong offset makes the hypothesis false of the real
+  runtime, so the theorem is then vacuous for it (the satisfiability theorem and
+  `Proof.Witness` only show it consistent); (4) the **fault classification** in `goClass`: a
+  memory fault at an address below `0x1000` is Go's nil-dereference panic (`P.err .mem`), which
+  assumes page 0 (`[0, 0x1000)`) is unmapped, the kernel delivers `SIGSEGV` with `si_addr` the
+  faulting address, and `runtime.sigpanic` takes the `panicmem` path (`sigcode1 < 0x1000`); on
+  amd64 a `#DE` is `panicdivide`. The classification only names which panic value a stop
+  is; it never turns a stop into a return. (5) The `runtime.panic*` stubs panic with
+  `P.err k` for the kind `panicStubErr` assigns (`boundsError`, `divideError`, ...). The code is
+  the runtime's: the extractor pins these eight functions (`runtimePanicContractStubs`, with
+  `sigpanic`) like the interface contracts. Every contract is satisfiable
+  (`Janus/Contracts/PanicSat.lean`, `PanicSatAmd64.lean`), and the examples with contracts
+  (`DeferTwice`, `RecoverSet`) prove their whole hypothesis set jointly satisfiable for their
+  binary and their conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). Out of scope:
+  nested panics, `Goexit`, several pending defers in one `gopanic`.
 * **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
   `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
   `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)
@@ -764,14 +792,17 @@ the register holds, in the model as on hardware. Nothing about Go's type system 
 * **Open-coded defers are modelled as the code that implements them**: the deferred closure is
   an ordinary stack-allocated funcval called at each exit. `runtime.deferreturn`, which an
   open-coded function calls only from the block the runtime resumes at after a *recovered*
-  panic, is not extracted (`omittedCalls` in `identity.json`): if a run reached it, it would
-  fault, so a theorem that returns shows it is not reached.
-* **Out of scope:** `recover`, and panics that unwind through deferred calls (a panic is a stub
-  outcome: the run ends at `runtime.gopanic`/`runtime.panic*`, and the deferred calls the
-  runtime would run while unwinding are not executed). Defers the compiler does not open-code
-  (in loops, or more than 8 in a function) allocate defer records with `runtime.deferproc*` and
-  call `runtime.deferreturn` at every exit; they are unsupported (the exit faults). Heap-allocated
-  closures (`runtime.newobject`) are runtime calls like any other allocation.
+  panic, is not extracted unless named with `--contract` (`omittedCalls` in `identity.json`): if
+  a run reached it, it would fault, so a theorem that returns shows it is not reached. With
+  `--contract runtime.deferreturn` it is the `DeferreturnContract` hypothesis (above).
+* **Panics, `recover` and heap defers go through the panic contracts** (above). Without
+  `--contract runtime.gopanic` a panic is a stub outcome: the run ends at
+  `runtime.gopanic`/`runtime.panic*` (`EnsuresGo` reports it as `.panicked v`), and the deferred
+  calls the runtime would run while unwinding are not executed, so such a theorem says nothing
+  about them. Defers the compiler does not open-code (in loops, or more than 8 in a function)
+  allocate defer records with `runtime.deferproc*` and call `runtime.deferreturn` at every exit;
+  without `--contract` on them the exit faults. Heap-allocated closures (`runtime.newobject`)
+  are runtime calls like any other allocation.
 
 ## FFI (cgo)
 
