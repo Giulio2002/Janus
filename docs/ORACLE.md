@@ -204,6 +204,11 @@ unobserved. Every gap is `undecodable` SM3/SM4 (`sm3ss1` 1,375, `sm4e` 820, `sm3
 | seq/harvest (real kernel windows) | 80,000 | 80,000 | 0 | 0 | 0 |
 | **total** | 389,440 | 385,790 | 40,278 | 3,650 | **0** |
 
+The whole-ISA regression with the crypto model (`scripts/oracle.sh full`, `SEED=1`, default
+knobs; the harvest now includes the crypto test binaries and the run includes 11,500 sequence
+cases): 867,719 cases, **0 MISMATCH**, 832,639 agree, 35,079 model-gap (34,572 `undecodable`,
+354 `unaligned`, 106 `noCode`, 47 `outsideAllocation`), 1 unobserved.
+
 The model was right the first time on this corpus. Independently of qemu and Sail,
 `JanusTests/Crypto.lean` checks the operations against the standards' test vectors (kernel
 evaluation): SHA-1("abc") and SHA-256("abc") of FIPS 180-4 computed with SHA1C/P/M/H/SU0/SU1 and
