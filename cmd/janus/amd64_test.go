@@ -281,3 +281,27 @@ func TestArm64IdentityUnchanged(t *testing.T) {
 		t.Errorf("arm64 Extracted.lean changed shape:\n%s", lean)
 	}
 }
+
+// TestSweepAmd64EVEX: EVEX (which x86asm does not decode) and the VEX opmask instructions are
+// swept with their real lengths, and a RIP-relative EVEX load is a data reference (WP-G).
+func TestSweepAmd64EVEX(t *testing.T) {
+	code := []byte{
+		0x62, 0xf1, 0xfe, 0x48, 0x6f, 0x05, 0x10, 0x00, 0x00, 0x00, // VMOVDQU64 0x10(%rip), Z0
+		0x62, 0xf2, 0x7d, 0xc9, 0x8d, 0xc4, // VPERMB Z4, Z0, K1, Z0 {z}
+		0x62, 0xf3, 0xd5, 0x48, 0xce, 0xdb, 0x00, // VGF2P8AFFINEQB $0, Z3, Z5, Z3
+		0xc4, 0xe1, 0xfb, 0x92, 0xc8, // KMOVQ AX, K1
+		0xc3, // RET
+	}
+	insts := sweepAmd64(code, 0x1000)
+	var lens []int
+	for _, in := range insts {
+		lens = append(lens, in.Inst.Len)
+	}
+	if want := []int{10, 6, 7, 5, 1}; fmt.Sprint(lens) != fmt.Sprint(want) {
+		t.Fatalf("lengths %v, want %v", lens, want)
+	}
+	refs := amd64DataRefs(insts)
+	if len(refs) != 1 || refs[0].From != 0x1000 || refs[0].Target != 0x1000+10+0x10 {
+		t.Fatalf("data references %+v, want one from 0x1000 to 0x101a", refs)
+	}
+}

@@ -287,6 +287,26 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
   completion, which updates the destination and mask for the elements done before the fault, is
   only visible to a signal handler, and a fault ends a Janus execution); destination, index and
   mask registers must differ (`#UD`, rejected).
+* **AVX-512 (WP-G).** `ExecEVEX` extends the same machinery to 512 bits rather than copying it:
+  `ExecAVX.perLane` now covers four 128-bit lanes, so every WP-D in-lane operation and every
+  WP-F width-generic one (`pintV`, `pimmV`, `pshiftV`, `shufV`, `shiftvV`, `pmovxV`) runs at
+  `l = 512`; an EVEX.128/256 register write is exactly WP-F's VEX write (`setZ_128`, `setZ_256`).
+  The new parts are the write mask (`merge`: element `i` of `e` bits from the result where bit `i`
+  of `K[k]` is set, else zero `{z}` or the old element; no mask writes the whole result),
+  broadcasts (`rdV`: one element replicated), fault suppression (`rdMasked`/`stMasked`: a masked
+  full-width operand of an element-wise instruction is accessed element by element, masked-off
+  elements unchecked; everything else is accessed in full), `VPCOMPRESS`/`VPEXPAND` (only the packed
+  elements are written/read), the opmask instructions on `State.kreg`, the GF(2⁸) operations
+  (`gfAffine`, `gfMul`, `gfInv` = `x²⁵⁴`, modulo `x⁸+x⁴+x³+x+1`), `VPTERNLOG` (the `OR` of the
+  minterms `imm8` selects), the carry-less multiply (`clmulN`), and `{er}`/`{sae}` for the packed
+  floating point. **The EVEX zero-upper rule** (`Janus.Amd64.Tactic.exec_evex_zero_upper`): every
+  register an AVX-512 instruction writes at `l < 512` bits has bits 511:`l` zero afterwards; a VEX
+  write zeroes bits 511:256 (`exec_avx_zero_zmm`); legacy SSE changes no AVX-512 state
+  (`exec_sse_preserves_avx512`); and `sse_compat`/`avx_compat` show that WP-D's and WP-F's
+  results, with the AVX-512 state erased, are what they were before it was added.
+  `JanusTests/AVX512.lean` has the decode known answers (GNU `as` and the Go std encodings), masked
+  merging and zeroing, `VPCOMPRESSQ`, `VPERMB`, `VPTERNLOGQ`, the GF(2⁸) identities (`0x53⁻¹ =
+  0xCA`), `KORTEST`, and the zero-upper rule on literals and for every state.
 * **CPU-feature globals.** `runtime.memmove` reads `runtime.memmoveBits` and
   `runtime.memclrNoHeapPointers` reads `internal/cpu.X86.HasERMS`/`HasAVX2`, which Go sets at
   start-up from `CPUID`. They live in `.noptrbss`, so the extractor does not copy them; a
