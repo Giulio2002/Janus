@@ -31,8 +31,9 @@ under qemu-aarch64. The host has no aarch64 gdb.
 | FF | — | cgo contracts (`Janus/FFI.lean`, `Amd64/FFI.lean`, `CABI`): the X64-MXCSR-STICKY lesson is applied (only the control bits of MXCSR/FPCR are kept, the sticky status flags are arbitrary). `TPIDR`/`FS` are arbitrary after the call. `g` is 456 bytes in go1.26.0 (`runtime.g0` symbol size `0x1c8`). Stack shrinking is unsafe while `syscallsp ≠ 0`, which `exitsyscall`'s slow path clears only after rescheduling, so the "stack does not move across cgocall" claim matches the runtime. No vacuous hypothesis found. | holds | (reviewed) |
 | L1 | — | Linked-program semantics: `--contract` wins over `--targets` (no code is copied at a contract address), stubs keep their stub meaning, the entry cannot be a contract, and `impl` is universally quantified. No way was found for a proof to choose its `impl`. | holds | (round-8 rows) |
 
-**Safe to merge: yes**, with the full regression below. The fixes change the statements of 11
-example theorems (the six allocation theorems take `H : RtReady` and assume `H` at entry;
+**Safe to merge: yes**, with the full regression below. The fixes change the statements of 13
+example theorems (the eight allocation theorems, NewPair/MakeSlice/AppendOne and main's new
+MakeAdder on both ISAs, take `H : RtReady` and assume `H` at entry;
 MallocFast's `MCacheOK` and both SetNext `BarrierOK`s are restated). Every changed theorem verifies.
 
 ## C1 (CRITICAL, BROKEN → fixed): the allocation contracts were unsatisfiable
