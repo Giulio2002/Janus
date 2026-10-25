@@ -635,10 +635,6 @@ theorem ReturnsC.exists_runsTo {p : Program} {C : Contract} {P : State → Prop}
 
 theorem none_total : Contract.none.Total := fun _ _ h => h.elim
 
-/-- `TopOfStack T` is total. -/
-theorem topOfStack_satisfiable (T : W64) : (TopOfStack T).Total := fun f s ⟨hf, _⟩ =>
-  ⟨_, hf, s.flags, s.mem, rfl, ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩⟩
-
 /-! ## C function pointers
 
 A C function that calls through a function pointer (a `qsort` comparator, a callback) is proved

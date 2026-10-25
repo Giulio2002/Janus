@@ -421,9 +421,6 @@ theorem ReturnsC.exists_runsTo {p : Program} {C : Contract} {P : State → Prop}
     obtain ⟨s', hr, hp⟩ := ih s₁ hn
     exact ⟨s', .ext hx hs hk hn hr, hp⟩
 
-theorem topOfStack_satisfiable (T : W64) : (TopOfStack T).Total := fun f s ⟨hf, _⟩ =>
-  ⟨_, hf, s.flags, rfl⟩
-
 /-! ## C function pointers (amd64; see `Janus.FFI.CFuncIs`) -/
 
 /-- The code at `f` (a canonical user address) is a C function: from every state at `f`

@@ -164,48 +164,6 @@ theorem setJmp_satisfiable (J : JmpModel) : (SetJmp J).Total := by
   · obtain ⟨-, c, hc⟩ := hs
     exact ⟨_, c, hc, longjmpTo_jmpState s c⟩
 
-/-! ## `cgocallback` -/
-
-/-- A Go call state `cgocallback` may make from every C state: on a goroutine stack at `2^50`,
-far from every C region (below `2^48`), with the C state's memory. -/
-def cbState (s : State) (ret : Nat) : State :=
-  { s with pc := BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 8) 8),
-           regs := setReg (setReg s.regs 0 (BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 16) 8)))
-             30 (BitVec.ofNat 64 ret),
-           sp := BitVec.ofNat 64 (2 ^ 50) }
-
-theorem callbackEntry_cbState {p : Program} {ret : Nat} (s : State) (hret : RetAddr p ret) :
-    CallbackEntry p s (cbState s ret) ret where
-  pc := rfl
-  arg := by simp [cbState, setReg]
-  lr := by simp [cbState, setReg]
-  retAddr := hret
-  stackSep a n w h := by
-    have := Memory.accessible_bound s.mem h
-    simp only [outside_cons, outside_nil, and_true, cbState, cbGoStack]
-    left; simp only [BitVec.toNat_ofNat]; omega
-  kept _ _ _ := rfl
-  keptAcc _ _ _ h := h.1
-  tpidr := rfl
-  dczid := rfl
-  fpcr := rfl
-
-/-- The resumed C state of a final Go state `u'`. -/
-def cbResumeState (s u' : State) : State :=
-  { s with pc := s.regs GoABI.regLR,
-           mem := { bytes := fun a => if s.mem.accessible a 1 false then u'.mem.bytes a else s.mem.bytes a,
-                    regions := s.mem.regions } }
-
-theorem cbResumed_cbResumeState (s u' : State) : CbResumed s u' (cbResumeState s u') :=
-  ⟨_, ⟨s.regs, s.flags, s.vregs, s.fpsr, rfl⟩, rfl, fun _ _ => rfl⟩
-
-theorem cgoCallback_satisfiable {p : Program} {Cin : Contract} {ret : Nat} (hC : Cin.Total)
-    (hret : RetAddr p ret) : (CgoCallback p Cin (fun _ => True)).Total := by
-  rintro f s ⟨hf, -, hgo⟩
-  obtain ⟨u', hr, hab⟩ := (hgo _ ret (callbackEntry_cbState s hret) trivial).exists_runsTo hC
-  exact ⟨_, hf, _, ret, u', callbackEntry_cbState s hret, trivial, hr, hab,
-    cbResumed_cbResumeState s u'⟩
-
 /-! ## A TLS descriptor function -/
 
 /-- The program with the descriptor function `MOVZ X0, #off; RET` at `A0`. -/
@@ -215,7 +173,7 @@ def descProg (off : Nat) : Program :=
     stubs := [], exitAddr := 0 }
 
 theorem tlsDescFn_satisfiable (desc : Nat) :
-    TLSDescFn (descProg 0x10) (BitVec.ofNat 64 A0) desc 0x10 0 := by
+    TlsDescFn (descProg 0x10) (BitVec.ofNat 64 A0) desc 0x10 0 := by
   refine ⟨by decide, by decide, ?_⟩
   intro s hpc ⟨hd, hst, hl1, hl2⟩
   simp only [descProg, A0] at hpc ⊢

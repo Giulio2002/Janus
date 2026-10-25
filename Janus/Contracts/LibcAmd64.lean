@@ -271,12 +271,12 @@ def tlsGetAddrSpec (block : Nat → Nat) : Spec where
     (· = BitVec.ofNat 64 (block (s.mem.readLE (s.regs 7).toNat 8) + s.mem.readLE ((s.regs 7).toNat + 8) 8))
 
 /-- The `__tls_get_addr` contract, for the thread's module blocks `block`. -/
-def TLSGetAddr (block : Nat → Nat) : Contract := ofSpecs [tlsGetAddrSpec block]
+def TlsGetAddr (block : Nat → Nat) : Contract := ofSpecs [tlsGetAddrSpec block]
 
 /-- A TLS descriptor's function (x86-64 TLSDESC, `-mtls-dialect=gnu2`: `call *(%rax)` with `RAX`
 the descriptor): it returns in `RAX` the variable's offset from `FS` and preserves every other
 register (and `DF`, `MXCSR`, the vector registers) and memory outside its stack bytes. -/
-def TLSDescFn (p : Janus.Amd64.Program) (f : W64) (desc off : Nat) (stack : Nat) : Prop :=
+def TlsDescFn (p : Janus.Amd64.Program) (f : W64) (desc off : Nat) (stack : Nat) : Prop :=
   f.toNat < 2 ^ 47 ∧
   Summary p f.toNat (fun s => s.regs 0 = BitVec.ofNat 64 desc ∧ CStack s stack 8 ∧
       s.mem.readLE (s.regs 4).toNat 8 < 2 ^ 47)

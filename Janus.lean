@@ -9,6 +9,7 @@ import Janus.Run
 import Janus.GoABI
 import Janus.CABI
 import Janus.FFI
+import Janus.FFISat
 import Janus.Tactic
 import Janus.Tactic.Atomic
 import Janus.Tactic.Vector
@@ -29,6 +30,7 @@ import Janus.Spec.Map
 import Janus.Spec.SwissMap
 import Janus.Contracts.Map
 import Janus.Amd64
+import Janus.Amd64.FFISat
 import Janus.Contracts.MapAmd64
 import Janus.Spec.Type
 import Janus.Contracts.Iface

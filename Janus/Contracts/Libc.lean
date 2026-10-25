@@ -26,7 +26,7 @@ standard and the glibc manual, not against glibc's code.
   `longjmp`. The `jmp_buf` layout and glibc's pointer mangling are abstract (`JmpModel`):
   a theorem holds for every model with the stated laws.
 * `TLSBlock` — where a `__thread` variable of the executable lives (the AArch64 TLS ABI), and
-  `TLSDescFn`, the function-pointer hypothesis of a TLS descriptor call (general dynamic,
+  `TlsDescFn`, the function-pointer hypothesis of a TLS descriptor call (general dynamic,
   TLSDESC).
 
 **The C heap.** `malloc` returns a block in **fresh** memory: a new writable region disjoint from
@@ -673,7 +673,7 @@ the thread pointer: local-exec (`MRS TPIDR_EL0` plus `ADD #:tprel_hi12:`/`#:tpre
 initial-exec relaxed to `MOVZ`/`MOVK` of the offset, and general-dynamic (TLSDESC) relaxed to the
 same. These are ordinary instructions; what the theorem needs is where the block is
 (`TLSBlock`). An unrelaxed TLS descriptor call (a shared object, or a variable of another module)
-calls the descriptor's function: `TLSDescFn`. -/
+calls the descriptor's function: `TlsDescFn`. -/
 
 /-- The offset of the executable's TLS block from the thread pointer. -/
 def _root_.Janus.TLSImage.a64Off (t : TLSImage) : Nat := roundUp 16 t.align
@@ -692,7 +692,7 @@ def TLSBlock (t : TLSImage) (s : State) : Prop :=
 ABI): called with `X0` the descriptor's address, it returns in `X0` the variable's offset from
 the thread pointer (`off`) and preserves every other general register but `X30`, `SP`, the
 SIMD&FP registers and memory (except its own stack bytes below `SP`, `stack`). -/
-def TLSDescFn (p : Program) (f : W64) (desc off : Nat) (stack : Nat) : Prop :=
+def TlsDescFn (p : Program) (f : W64) (desc off : Nat) (stack : Nat) : Prop :=
   f.toNat % 4 = 0 ∧ f.toNat < 2 ^ 48 ∧
   Summary p f.toNat (fun s => s.regs 0 = BitVec.ofNat 64 desc ∧ CStack s stack 0 ∧
       (s.regs 30).toNat % 4 = 0 ∧ (s.regs 30).toNat < 2 ^ 48)

@@ -52,7 +52,7 @@ theorem libc_satisfiable : Libc.Total := by
     · exact ⟨_, .inl ⟨h0, libcRet_retState' _ 0 _ trivial⟩⟩
     · exact ⟨_, .inr ⟨n, s.mem.bytes, hb, libcRet_retState' _ 0 _ trivial⟩⟩
 
-theorem tlsGetAddr_satisfiable (block : Nat → Nat) : (TLSGetAddr block).Total := by
+theorem tlsGetAddr_satisfiable (block : Nat → Nat) : (TlsGetAddr block).Total := by
   apply ofSpecs_total
   simp only [List.mem_cons, List.mem_nil_iff, or_false]
   rintro sp rfl s -
@@ -134,59 +134,6 @@ theorem setJmp_satisfiable (J : JmpModel64) : (SetJmp J).Total := by
   · obtain ⟨-, c, hc⟩ := hs
     exact ⟨_, c, hc, longjmpTo_jmpState s c⟩
 
-/-! ## `cgocallback` -/
-
-/-- A Go call state from every C state: on a goroutine stack at `2^50` holding the return
-address, with the C state's memory plus that stack slot. -/
-def cbState (s : State) (ret : Nat) : State :=
-  { s with rip := BitVec.ofNat 64 (s.mem.readLE ((s.regs 4).toNat + 8) 8),
-           regs := fun i => if i = 0 then BitVec.ofNat 64 (s.mem.readLE ((s.regs 4).toNat + 16) 8)
-             else if i = 4 then BitVec.ofNat 64 (2 ^ 50) else s.regs i,
-           xmm := fun i => if i = 15 then 0 else s.xmm i, df := false,
-           mem := s.mem.writeLE (2 ^ 50) 8 ret }
-
-theorem callbackEntry_cbState {t : TLSImage} {p : Janus.Amd64.Program} {ret : Nat} (s : State)
-    (hret : RetAddr p ret) : CallbackEntry t p s (cbState s ret) ret where
-  rip := rfl
-  arg := by simp [cbState]
-  retSlot := by
-    show (s.mem.writeLE (2 ^ 50) 8 ret).readLE (BitVec.ofNat 64 (2 ^ 50)).toNat 8 = ret
-    rw [show (BitVec.ofNat 64 (2 ^ 50)).toNat = 2 ^ 50 from rfl, Janus.Arm64.Memory.readLE_writeLE_self,
-      Nat.mod_eq_of_lt (by have := hret.user; omega)]
-  retAddr := hret
-  zero := by simp [cbState, xmmZero]
-  df := rfl
-  stackSep a n w h := by
-    have := Janus.Arm64.Memory.accessible_bound s.mem h
-    simp only [outside_cons, outside_nil, and_true, cbState, cbGoStack]
-    left; simp; omega
-  kept a n hk := by
-    have := Janus.Arm64.Memory.accessible_bound s.mem hk.1
-    show (s.mem.writeLE (2 ^ 50) 8 ret).readLE a n = _
-    exact Janus.Arm64.Memory.readLE_writeLE_of_disjoint (m := s.mem) ret (by omega)
-  keptAcc _ _ _ h := by simp only [cbState, Janus.Arm64.Memory.accessible_writeLE]; exact h.1
-  fs := rfl
-  mxcsr := rfl
-  fpucw := rfl
-
-def cbResumeState (s u' : State) : State :=
-  { s with rip := retAddrOf s, df := false,
-           regs := fun i => if i = 4 then s.regs 4 + 8 else s.regs i,
-           mem := { bytes := fun a => if s.mem.accessible a 1 false then u'.mem.bytes a else s.mem.bytes a,
-                    regions := s.mem.regions } }
-
-theorem cbResumed_cbResumeState (t : TLSImage) (s u' : State) : CbResumed t s u' (cbResumeState s u') :=
-  ⟨_, ⟨_, s.flags, s.xmm, s.ymmHi, s.mxcsr, rfl, by simp, rfl⟩, rfl, fun _ _ => rfl⟩
-
-theorem cgoCallback_satisfiable {t : TLSImage} {p : Janus.Amd64.Program} {Cin : Contract} {ret : Nat}
-    (hC : Cin.Total) (hret : RetAddr p ret) : (CgoCallback t p Cin (fun _ => True)).Total := by
-  rintro f s ⟨hf, -, hgo⟩
-  obtain ⟨u', hr, hab⟩ := (hgo _ ret (callbackEntry_cbState s hret) trivial).exists_runsTo hC
-  exact ⟨_, hf, _, ret, u', callbackEntry_cbState s hret, trivial, hr, hab,
-    cbResumed_cbResumeState t s u'⟩
-
-
-
 /-! ## A TLS descriptor function: `mov $0x10, %eax; ret` -/
 
 def A0 : Nat := 0x100000
@@ -194,7 +141,7 @@ def descProg : Janus.Amd64.Program :=
   { segments := [{ name := "tlsdesc", base := A0, bytes := [0xb8, 0x10, 0x00, 0x00, 0x00, 0xc3] }],
     stubs := [], exitAddr := 0 }
 
-theorem tlsDescFn_satisfiable (desc : Nat) : TLSDescFn descProg (BitVec.ofNat 64 A0) desc 0x10 0 := by
+theorem tlsDescFn_satisfiable (desc : Nat) : TlsDescFn descProg (BitVec.ofNat 64 A0) desc 0x10 0 := by
   refine ⟨by decide, ?_⟩
   intro s hpc ⟨hd, ⟨ha, hb, hc, hw⟩, hr⟩
   simp only [CABI.regSP, Nat.sub_zero, Nat.zero_add] at ha hb hc hw

@@ -70,6 +70,10 @@ S9="$T/satcopy"; mkdir -p "$S9/audit/round9"; cp -r Janus Janus.lean "$S9/"; cp 
 sed -i 's/^theorem newobject_satisfiable/theorem newobject_satisfiable_gone/' "$S9/Janus/Contracts/AllocSat.lean"
 python3 -I audit/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check SAT_selftest_missing_witness_fails $? "removing newobject_satisfiable makes the SAT row fail"
+cp Janus/FFISat.lean "$S9/Janus/FFISat.lean"; cp Janus/Contracts/AllocSat.lean "$S9/Janus/Contracts/AllocSat.lean"
+sed -i 's/^theorem cgoCall_satisfiable/theorem cgoCall_satisfiable_gone/' "$S9/Janus/FFISat.lean"
+python3 -I audit/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
+[ $rc -ne 0 ]; check SAT_selftest_ffi_witness_fails $? "removing cgoCall_satisfiable (Janus/FFI.lean's trusted cgocall contract) makes the SAT row fail"
 
 echo "== real-binary probes (audit/round9/probe; go1.26.0)"
 P="$T/probe"; mkdir -p "$P"

@@ -1,7 +1,10 @@
 """Round 9 SAT row: every runtime contract defined in Janus/Contracts/*.lean (a `def … : Prop`
-whose body is a `Summary`, possibly under `∀`) must have a kernel-checked non-vacuity witness
+whose body is a `Summary`, possibly under `∀`), and every external-stub contract (a `def … :
+Contract`) there and in Janus/FFI.lean and Janus/Amd64/FFI.lean (K2: the trusted cgo, callback,
+libc and setjmp contracts), must have a kernel-checked non-vacuity witness
 `theorem <name>_satisfiable` in the framework module `Janus.Contracts.<File>Sat` (for
-`<File>Amd64.lean`: `<File>SatAmd64`), which Janus.lean must import, where <name> is the
+`<File>Amd64.lean`: `<File>SatAmd64`; for Janus/FFI.lean `Janus.FFISat`, for Janus/Amd64/FFI.lean
+`Janus.Amd64.FFISat`), which Janus.lean must import, where <name> is the
 contract's name with `Contract` removed and the first letter lower-cased
 (`NewobjectContract64` → `newobject64_satisfiable`, `Access1` → `access1_satisfiable`).
 Contracts listed in audit/round9/sat-pending.txt are reported as OPEN (with their owner) instead
@@ -10,13 +13,17 @@ Usage: python3 -I audit/round9/sat_check.py ROOT"""
 import os, re, sys
 root = sys.argv[1]
 cdir = os.path.join(root, "Janus", "Contracts")
+files = [(f, os.path.join(cdir, f), "Janus.Contracts." + (f[:-5][:-5] + "SatAmd64" if f[:-5].endswith("Amd64") else f[:-5] + "Sat"))
+         for f in sorted(os.listdir(cdir)) if f.endswith(".lean")]
+files += [("FFI.lean", os.path.join(root, "Janus", "FFI.lean"), "Janus.FFISat"),
+          ("Amd64/FFI.lean", os.path.join(root, "Janus", "Amd64", "FFI.lean"), "Janus.Amd64.FFISat")]
 contracts = []
-for f in sorted(os.listdir(cdir)):
-    if not f.endswith(".lean"):
+for f, path, satmod in files:
+    if not os.path.exists(path):
         continue
-    lines = open(os.path.join(cdir, f), encoding="utf-8").read().split("\n")
+    lines = open(path, encoding="utf-8").read().split("\n")
     for i, l in enumerate(lines):
-        m = re.match(r"^def ([A-Z][A-Za-z0-9]*)\b", l)
+        m = re.match(r"^def ([A-Z][A-Za-z0-9]*)(?![.\w])", l)
         if not m:
             continue
         body = []
@@ -25,11 +32,15 @@ for f in sorted(os.listdir(cdir)):
             if l2.strip() == "":
                 break
         text = " ".join(body)
+        if re.search(r":\s*Contract\s*(where|:=)", text.split(":=", 1)[0] + ":=" if ":=" in text else text) or \
+                re.search(r":\s*Contract\s*where", text):
+            contracts.append((f, m.group(1), satmod))
+            continue
         if not re.search(r":\s*Prop\s*:=", text):
             continue
         after = text.split(":=", 1)[1]
         if re.match(r"\s*(∀[^,]*,\s*)?([\w.]*\.)?Summary\b", after):
-            contracts.append((f, m.group(1)))
+            contracts.append((f, m.group(1), satmod))
 imports = set(re.findall(r"^import (\S+)", open(os.path.join(root, "Janus.lean"), encoding="utf-8").read(), re.M))
 sat = {}
 for dp, _, fs in os.walk(os.path.join(root, "Janus")):
@@ -48,11 +59,9 @@ if os.path.exists(pf):
             name, owner = (l.split(None, 1) + [""])[:2]
             pending[name] = owner
 ok = missing = opened = 0
-for f, c in contracts:
-    w = c.replace("Contract", "")
+for f, c, satmod in contracts:
+    w = c.replace("Contract", "") or c
     w = w[0].lower() + w[1:]
-    stem = f[:-5]
-    satmod = "Janus.Contracts." + (stem[:-5] + "SatAmd64" if stem.endswith("Amd64") else stem + "Sat")
     mods = [m for m in sat.get(w, []) if m in imports and m == satmod]
     if mods:
         ok += 1
