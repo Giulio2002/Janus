@@ -1106,7 +1106,7 @@ theorem wstate_typ (r : Nat → W64) (nargs : Nat) :
   simp [IfaceModel.wsp, IfaceModel.TD]
 
 /-- `TypedMemmove` is satisfiable (the type `TD`, `dst = DST`, `src = VAL`). -/
-theorem typedmemmove_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb d : Nat), M.Laws ∧
+theorem typedMemmove_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb d : Nat), M.Laws ∧
     TypedMemmove (toy.link impl) A0 M wb d ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
       (TPre M wb d 3 s ∧ TypeOK s.mem (s.regs 0).toNat ∧
         Outside (s.regs 0).toNat 16 (calleeStack s d 3) ∧
@@ -1126,7 +1126,7 @@ theorem typedmemmove_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb 
   · rw [h1, ht3]; exact wstate_dest _ 3 _ _ (by decide) (by decide)
 
 /-- `TypedMemclr` is satisfiable (the type `TD`, `ptr = DST`). -/
-theorem typedmemclr_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb d : Nat), M.Laws ∧
+theorem typedMemclr_satisfiable : ∃ (M : MemModel) (impl : List Segment) (wb d : Nat), M.Laws ∧
     TypedMemclr (toy.link impl) A0 M wb d ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
       (TPre M wb d 2 s ∧ TypeOK s.mem (s.regs 0).toNat ∧
         Outside (s.regs 0).toNat 16 (calleeStack s d 2) ∧

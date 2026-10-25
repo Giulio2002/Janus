@@ -449,6 +449,40 @@ theorem c128hash_satisfiable : ∃ (H : HashModel) (impl : List Janus.Amd64.Segm
     wstate_hPre _ 2 (by decide), by unfold GoMXCSR; decide, by inp, by simp [wstate, args,
         IfaceModel.VAL]⟩
 
+/-- `MemhashN` is satisfiable for `n = 1, 2, 16` (`memhash8/16/128`, amd64). -/
+theorem memhashN_satisfiable (n : Nat) (hn : n = 1 ∨ n = 2 ∨ n = 16) :
+    ∃ (H : HashModel) (impl : List Janus.Amd64.Segment) (d : Nat), H.Laws ∧
+      MemhashN (toy.link impl) A0 H d n ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
+        (HPre H d 2 s ∧ MemAmd64.Input s d 2 (s.regs 0).toNat n) := by
+  rcases hn with rfl | rfl | rfl
+  all_goals first
+    | exact memhash8_satisfiable
+    | exact memhash16_satisfiable
+    | exact memhash128_satisfiable
+
+/-- `Fhash` is satisfiable for `float32` and `float64` (amd64). -/
+theorem fhash_satisfiable (f : Janus.Float.Fmt) (k : Nat)
+    (hf : (f = binary32 ∧ k = 4) ∨ (f = binary64 ∧ k = 8)) :
+    ∃ (H : HashModel) (impl : List Janus.Amd64.Segment) (d : Nat), H.Laws ∧
+      Fhash (toy.link impl) A0 H d f k ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
+        (HPre H d 2 s ∧ GoMXCSR s ∧ MemAmd64.Input s d 2 (s.regs 0).toNat k) := by
+  rcases hf with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+  all_goals first
+    | exact f32hash_satisfiable
+    | exact f64hash_satisfiable
+
+/-- `Chash` is satisfiable for `complex64` and `complex128` (amd64). -/
+theorem chash_satisfiable (f : Janus.Float.Fmt) (k : Nat)
+    (hf : (f = binary32 ∧ k = 4) ∨ (f = binary64 ∧ k = 8)) :
+    ∃ (H : HashModel) (impl : List Janus.Amd64.Segment) (d : Nat), H.Laws ∧
+      Chash (toy.link impl) A0 H d f k ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
+        (HPre H d 2 s ∧ GoMXCSR s ∧ MemAmd64.Input s d 2 (s.regs 0).toNat (2 * k) ∧
+          Outside (s.regs 0).toNat (2 * k) H.priv) := by
+  rcases hf with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+  all_goals first
+    | exact c64hash_satisfiable
+    | exact c128hash_satisfiable
+
 /-- `Typehash` is satisfiable (amd64): a `TD` value at `VAL`. -/
 theorem typehash_satisfiable : ∃ (H : HashModel) (impl : List Janus.Amd64.Segment) (d : Nat),
     H.Laws ∧

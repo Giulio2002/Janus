@@ -1207,6 +1207,44 @@ theorem c128equal_satisfiable : ∃ (impl : List Janus.Amd64.Segment) (d : Nat),
   ⟨_, 64, c128equal_impl 64, wstate (args IfaceModel.VAL IfaceModel.VAL 0 0), rfl,
     wstate_eqPre _ 2 (by decide), by unfold GoMXCSR; decide, by inp, by inp⟩
 
+/-- `MemequalN` is satisfiable for `n = 0, 1, 2, 4, 8, 16` (amd64): the witnesses per length
+above. -/
+theorem memequalN_satisfiable (n : Nat) (hn : n = 0 ∨ n = 1 ∨ n = 2 ∨ n = 4 ∨ n = 8 ∨ n = 16) :
+    ∃ (impl : List Janus.Amd64.Segment) (d : Nat), MemequalN (toy.link impl) A0 d n ∧
+      ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
+        (EqPre d 2 s ∧ Input s d 2 (s.regs 0).toNat n ∧ Input s d 2 (s.regs 3).toNat n) := by
+  rcases hn with rfl | rfl | rfl | rfl | rfl | rfl
+  all_goals first
+    | exact memequal0_satisfiable
+    | exact memequal8_satisfiable
+    | exact memequal16_satisfiable
+    | exact memequal32_satisfiable
+    | exact memequal64_satisfiable
+    | exact memequal128_satisfiable
+
+/-- `Fequal` is satisfiable for `float32` and `float64` (amd64). -/
+theorem fequal_satisfiable (f : Janus.Float.Fmt) (k : Nat)
+    (hf : (f = Janus.Float.binary32 ∧ k = 4) ∨ (f = Janus.Float.binary64 ∧ k = 8)) :
+    ∃ (impl : List Janus.Amd64.Segment) (d : Nat), Fequal (toy.link impl) A0 d f k ∧
+      ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
+        (EqPre d 2 s ∧ GoMXCSR s ∧ Input s d 2 (s.regs 0).toNat k ∧ Input s d 2 (s.regs 3).toNat k) := by
+  rcases hf with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+  all_goals first
+    | exact f32equal_satisfiable
+    | exact f64equal_satisfiable
+
+/-- `Cequal` is satisfiable for `complex64` and `complex128` (amd64). -/
+theorem cequal_satisfiable (f : Janus.Float.Fmt) (k : Nat)
+    (hf : (f = Janus.Float.binary32 ∧ k = 4) ∨ (f = Janus.Float.binary64 ∧ k = 8)) :
+    ∃ (impl : List Janus.Amd64.Segment) (d : Nat), Cequal (toy.link impl) A0 d f k ∧
+      ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
+        (EqPre d 2 s ∧ GoMXCSR s ∧ Input s d 2 (s.regs 0).toNat (2 * k) ∧
+          Input s d 2 (s.regs 3).toNat (2 * k)) := by
+  rcases hf with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+  all_goals first
+    | exact c64equal_satisfiable
+    | exact c128equal_satisfiable
+
 /-- `Strequal` is satisfiable (amd64): the string header `STR` twice. -/
 theorem strequal_satisfiable : ∃ (impl : List Janus.Amd64.Segment) (d : Nat),
     Strequal (toy.link impl) A0 d ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
@@ -1325,7 +1363,7 @@ theorem memclrHasPointers_satisfiable : ∃ (M : MemModel) (impl : List Janus.Am
     wstate_tPre _ 2 (by decide), by decide, by decide, by dst⟩
 
 /-- `TypedMemmove` is satisfiable (amd64): a `TD` value (8 bytes) from `VAL` to `DST`. -/
-theorem typedmemmove_satisfiable : ∃ (M : MemModel) (impl : List Janus.Amd64.Segment)
+theorem typedMemmove_satisfiable : ∃ (M : MemModel) (impl : List Janus.Amd64.Segment)
     (wb d : Nat), M.Laws ∧ TypedMemmove (toy.link impl) A0 M wb d ∧
     ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
       (TPre M wb d 3 s ∧ Janus.Contracts.TypeOK s.mem (s.regs 0).toNat ∧
@@ -1339,7 +1377,7 @@ theorem typedmemmove_satisfiable : ∃ (M : MemModel) (impl : List Janus.Amd64.S
     by simp only [Janus.Contracts.typSize]; inp, by simp only [Janus.Contracts.typSize]; dst⟩
 
 /-- `TypedMemclr` is satisfiable (amd64): a `TD` value at `DST`. -/
-theorem typedmemclr_satisfiable : ∃ (M : MemModel) (impl : List Janus.Amd64.Segment)
+theorem typedMemclr_satisfiable : ∃ (M : MemModel) (impl : List Janus.Amd64.Segment)
     (wb d : Nat), M.Laws ∧ TypedMemclr (toy.link impl) A0 M wb d ∧
     ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
       (TPre M wb d 2 s ∧ Janus.Contracts.TypeOK s.mem (s.regs 0).toNat ∧
