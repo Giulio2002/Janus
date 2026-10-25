@@ -213,3 +213,35 @@ theorem correctness (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (hst : 
       try simp (disch := omega) only [if_pos, if_neg]
       first | omega | (simp only [true_and, and_true]; omega)
 end Proof
+
+namespace Proof
+
+/-- The witness call state: `Janus.Contracts.Sat`'s, at `runtime.decoderune`, with the empty
+string and `k = 0`. -/
+def s0 : State := { Janus.Contracts.Sat.wstate (Janus.Contracts.Sat.args []) with
+  pc := BitVec.ofNat 64 Extracted.entry }
+
+/-- **The contract is satisfiable, by the runtime's own code**: `correctness` is the
+implementation, and `s0` meets the precondition. -/
+theorem satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady),
+    RtContract Extracted.program Extracted.entry rt 24 H decoderuneSpec ∧
+    ∃ s : State, s.pc = BitVec.ofNat 64 Extracted.entry ∧ RtPre rt 24 H decoderuneSpec s := by
+  have ha : ∀ j, arg (argWords s0 3) j = 0 := fun j => Janus.Contracts.Sat.args_zero 3 j (by decide)
+  refine ⟨[], fun _ _ _ _ => True, correctness [] 24 _ (Nat.le_refl _), s0, rfl, ?_, ?_, ?_, ?_, fun _ => trivial⟩
+  · have hw : Janus.Contracts.Sat.wmem.accessible (Janus.Contracts.Sat.wsp - 0x2000) 0x2100 true = true := by decide
+    simp only [CallOK, s0, Janus.Contracts.Sat.wstate, decoderuneSpec, Janus.Contracts.Sat.wret,
+      Janus.Contracts.Sat.wsp, BitVec.toNat_ofNat, ite_true, ite_false, Nat.reduceEqDiff]
+    refine ⟨by decide, by decide, by decide, by decide, by decide, by decide, ?_⟩
+    exact Memory.accessible_mono _ hw (by simp [Janus.Contracts.Sat.wsp]) (by simp [Janus.Contracts.Sat.wsp])
+  · show StrIn _ (arg (argWords s0 3) 0) (arg (argWords s0 3) 1) ∧ arg (argWords s0 3) 2 < 2 ^ 63
+    rw [ha 0, ha 1, ha 2]
+    exact ⟨⟨by decide, by simp⟩, by decide⟩
+  · show ∀ r ∈ [(arg (argWords s0 3) 0, arg (argWords s0 3) 1)], Outside r.1 r.2 _
+    rw [ha 0, ha 1]
+    simp [Janus.Contracts.Sat.outside_zero]
+  · intro adj h
+    simp only [decoderuneSpec, Option.some.injEq] at h
+    subst h
+    refine ⟨by decide, by decide, by decide⟩
+
+end Proof
