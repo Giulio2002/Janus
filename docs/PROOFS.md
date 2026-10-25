@@ -329,6 +329,53 @@ of a summary is `ReachesRet`), so a call chain is proved bottom-up, each functio
   guard slot `[X28 + 16, +8)` disjoint from the stack window. The ranges are easy to get wrong;
   the stuck message names the store that is outside them.
 
+### Recursion (`Fact`)
+
+A recursive function calls its own entry, so its `Summary` is needed while it is being proved.
+`Summary.induction μ` (`Janus/Tactic/Recursion.lean`; `Janus/Amd64/Recursion.lean` on amd64)
+proves a summary by strong induction on a measure `μ` of the entry state: in the case `μ s = n`
+the induction hypothesis `ih` is the summary itself for every state with `μ s < n`, and
+`janus_run calls [ih]` uses it at the recursive call like any callee summary. There the executor
+proves `ih`'s precondition for the call state, including `μ < n` (the argument decreased) and
+the stack facts one frame down:
+
+```lean
+theorem summary : Summary Extracted.program Extracted.entry Pre Post := by
+  apply Summary.induction (fun s => (s.regs 0).toNat)
+  intro n ih s hpc ⟨⟨⟨h1, h2⟩, ⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd⟩, hn⟩
+  janus_step               -- the entry is the summary's own address: step past it first
+  janus_run calls [ih]
+  …                        -- one goal per path: `Post s s'`
+```
+
+* `Pre` and `Post` are stated in terms of the entry state, with the depth as a function of the
+  argument: `StackOK s (32 * n + 40) 16`, `GuardOK s (32 * n)` (the deepest prologue check), and
+  a `MemFrame` over exactly the bytes the recursion writes. The ranges must not cover the
+  caller's own saved registers one frame up (for `Fact` the window ends at `SP - 16`, below the
+  slot of the caller's `X29`), otherwise those reads are not resolved after the call.
+* The callee summary is applied as soon as the pc is at its entry, so start the proof with one
+  `janus_step`.
+* `Summary.returns` applies the finished summary to the function's own call state
+  (`Ensures`): `refine Summary.returns summary hret (by rw [h_pc]; rfl) h_lr ?_ ?_`.
+
+The stack hypotheses say that the stack already has room for every frame; the grown-stack case
+(`morestack`) is not covered.
+
+### Go assembly and ABI0 calls (`examples/asm`)
+
+An assembly function (`f.abi0`) takes its arguments from the caller's frame, so its theorem is
+`GoABI0.Ensures0 p entry [a₀, …] nres pre post` (amd64: `Amd64.GoABI0.Ensures0`): start with
+`intro ret hret s hs hpre; janus_intro0 hs` (`janus64_intro0`), which turns the frame words into
+`h_rd_arg<i>` rewrite rules, then `janus_run` as usual; the result words are `results0 s s' n k`.
+As a callee (a direct ABI0 call from Go, an ABI wrapper) the function is a
+`Summary0 p entry pre Q`: from any state at its entry it returns with every register but the
+reserved ones unspecified and memory satisfying `Q s` — typically
+`MemFrame (s.mem.writeLE resultAddr 8 v) m [(scratch)]`, proved with `MemFrame.writeLE_congr`,
+`MemFrame.writeLE_both` and `janus_frame`. `janus_run calls [h]` uses it; on amd64 the caller's
+re-entry (`XORPS X15, X15; MOVQ FS:-8, R14`) then needs `TlsG s` in the precondition.
+`Ensures0.of_summary0` gives the standalone contract from the summary. See
+[ABI0.md](ABI0.md) and the ten proofs in `examples/asm/proofs/`.
+
 ### Dynamic calls (`HashWith`, `HashTwice`, `MapSum`, `DeferAdd`)
 
 An interface method call, a call of a func value (closure or method value) and the call of a

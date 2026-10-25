@@ -24,10 +24,13 @@ par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
 
 all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimbs CopyWords SumSquares
-     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte A64CountByte
+     AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte A64Crc32 A64CountByte
      HashWith HashTwice MapSum DeferAdd AddF64 Dot3 F64ToU64 Abs
      NewPair MakeSlice AppendOne SetNext MallocFast
-     Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small)
+     Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
+     Triangle GotoSum Find2D RowsWith Log2 TotalMeters TotalFeet Fact SumBelow ReverseArray DivMod10
+     SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
+     Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 

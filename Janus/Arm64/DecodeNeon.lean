@@ -243,11 +243,6 @@ def decodeNeonDP (w : Nat) : Option NeonInstr :=
       else if opcode = 0b01100 || opcode = 0b01111 then U              -- F(MAX|MIN)(NM)P (scalar)
       else false
     if ok then some (.sPairwise U size opcode rn rd) else none
-  else if w &&& 0xBF208C00 = 0x0E000800 then
-    -- Permute: 0 Q 001110 size 0 Rm 0 opcode 10 Rn Rd
-    let opcode := bits w 14 12
-    if opcode % 4 = 0 || (size = 3 && !Q) then none
-    else some (.perm Q size rm opcode rn rd)
   else if w &&& 0x9F800400 = 0x0F000400 then
     -- Shift by immediate: 0 Q U 011110 immh immb opcode 1 Rn Rd (immh = 0: modified immediate)
     let immh := bits w 22 19
@@ -275,10 +270,6 @@ def decodeNeonDP (w : Nat) : Option NeonInstr :=
     if neonSByElemOK U L size opcode then
       some (.sByElem U size L (bit w 20) (bits w 19 16) opcode (bit w 11) rn rd)
     else none
-  else if w &&& 0xFFE0FC00 = 0x5E000400 then
-    -- Scalar copy, DUP (element): 01 0 11110000 imm5 0 0000 1 Rn Rd; `size = LowestSetBit(imm5)`
-    let imm5 := bits w 20 16
-    if imm5 % 16 = 0 then none else some (.sDup imm5 rn rd)
   else if w &&& 0x7F200000 = 0x1E000000 then
     -- Conversion between floating point and fixed point: sf 0 0 11110 ftype 0 rmode opcode
     -- scale Rn Rd. `if sf == '0' && scale<5> == '0' then UNDEFINED`; SCVTF/UCVTF are

@@ -177,13 +177,14 @@ negation* of the `Add` specification on the broken binary, by running one concre
 
 ## What is proved in the examples
 
-Every function in [`examples/basic/basic.go`](examples/basic/basic.go) has an amd64 theorem, and 14 of
-them an arm64 one too; the dynamic-call examples in [`examples/basic/dynamic.go`](examples/basic/dynamic.go)
+Every function in [`examples/basic/basic.go`](examples/basic/basic.go) has an amd64 theorem and an arm64 one;
+the dynamic-call examples in [`examples/basic/dynamic.go`](examples/basic/dynamic.go)
 (interface method, method value, closure in a loop, open-coded `defer`) have both; the atomics and memory-routine examples in
 [`examples/basic/memory.go`](examples/basic/memory.go) and the SIMD examples in
 [`examples/basic/simd_arm64ex.go`](examples/basic/simd_arm64ex.go) have arm64 theorems, and the
 vector-path examples in [`examples/basic/simd.go`](examples/basic/simd.go) amd64 ones; the
-floating-point examples in [`examples/basic/float.go`](examples/basic/float.go) have both. Each is verified end to end by `janus verify` (kernel check, axiom audit,
+floating-point examples in [`examples/basic/float.go`](examples/basic/float.go) and the language-construct
+examples in [`examples/basic/zconstructs.go`](examples/basic/zconstructs.go) have both. Each is verified end to end by `janus verify` (kernel check, axiom audit,
 `leanchecker` replay) against the `GOARCH=arm64` or `GOARCH=amd64` build of the same source with
 Go 1.26.0. Proofs:
 [`examples/proofs/`](examples/proofs) (arm64), [`examples/proofs-amd64/`](examples/proofs-amd64) (amd64).
@@ -204,12 +205,12 @@ Go 1.26.0. Proofs:
 | `SumSquares` | `square(x) + square(y)`: prologue and two calls | ✓ | ✓ |
 | `SetOne256` | `*z = 1`, from a 32-byte `.rodata` constant | ✓ | ✓ |
 | `HexDigit` | byte `i & 15` of a `.rodata` string | ✓ | ✓ |
-| `Table` | `t[i & 7]` of a constant `.rodata` table | | ✓ |
+| `Table` | `t[i & 7]` of a constant `.rodata` table | ✓ | ✓ |
 | `A64Equal64` | `bytes.Equal` of two 64-byte arrays, through `runtime.memequal`'s SIMD loop (`LD1`, `CMEQ`, `AND`, `UMOV`) | ✓ | |
 | `A64IndexByte` | `bytes.IndexByte` on a 32-byte-aligned 64-byte slice: the first index of `c`, or `-1`, through `internal/bytealg`'s SIMD scan | ✓ | |
 | `A64CountByte` | the number of bytes of `b` equal to `c`, for every length, computed by the words gcc 15.2 `-O2` auto-vectorises a C loop into (`CMEQ`, `ZIP1`/`ZIP2`, `UADDW`/`UADDW2`, `ADDP`, then a scalar tail), behind an ABI0 shim | ✓ | |
-| `GlobalTable` | `tbl[i & 7]` of a writable global, provided by the precondition | | ✓ |
-| `Bump` | `counter += d` on a writable global, returns the new value | | ✓ |
+| `GlobalTable` | `tbl[i & 7]` of a writable global, provided by the precondition | ✓ | ✓ |
+| `Bump` | `counter += d` on a writable global, returns the new value | ✓ | ✓ |
 | `AtomicAdd` | `atomic.AddUint64(p, d)`: `*p += d`, returns the new value (LSE `LDADDAL` path, given `runtime.arm64HasATOMICS`) | ✓ | |
 | `AtomicMax` | `LDAR` + `CASAL` retry loop: returns the old `*p` and sets `*p = max(old, v)`; the loop runs once | ✓ | |
 | `CopyBlock` | `copy(dst[:], src[:])` of a 128-byte array through `runtime.memmove` | ✓ | |
@@ -234,7 +235,35 @@ Go 1.26.0. Proofs:
 | `SumValues` | `for _, v := range m` sums the values, for **every** iteration order | ✓ | ✓ |
 | `CountKeys`, `LookupKey16` | `len(m)` (the number of keys); lookup with `[16]byte` keys (generic `mapaccess2`) | ✓ | ✓ |
 | `MapAccess1Small` | the machine code of `runtime.mapaccess1_fast64` itself meets its contract on small Swiss maps | ✓ | ✓ |
+| `Triangle` | an expression switch with `fallthrough` (a `.rodata` jump table): `n·(n+1)/2` for `n ≤ 8`, else `0` | ✓ | ✓ |
+| `GotoSum` | a loop built from labels and `goto`: `1 + … + n mod 2^64` | ✓ | ✓ |
+| `Find2D` | nested loops left by a labeled `break`: the first row-major index of `x` in a `3×3` array, or `9` | ✓ | ✓ |
+| `RowsWith` | a labeled `continue`: the number of rows of a `2×3` array containing `x` | ✓ | ✓ |
+| `Log2` | a condition-only `for`: `⌊log₂ x⌋` (`2^r ≤ x < 2^(r+1)`), `0` for `x = 0` | ✓ | ✓ |
+| `TotalMeters`, `TotalFeet` | two instantiations of one generic function sharing the GC-shape body `total[go.shape.uint64]`, each reaching its `Scale` method through its dictionary: `100·(a+b)`, `30·(a+b)` | ✓ | ✓ |
+| `Fact` | recursion: `n! mod 2^64`, by induction over the recursive calls (given stack for `n + 1` frames) | ✓ | ✓ |
+| `SumBelow` | range over an `int`: `0 + … + (n-1)`, nothing for `n ≤ 0` | ✓ | ✓ |
+| `IterSum` | range over a function iterator (inlined, no runtime call): the same sum | ✓ | ✓ |
+| `ReverseArray` | array value semantics and range over an array: `out[i] = in[3-i]`, also for `out = in` | ✓ | ✓ |
+| `DivMod10` | named results, division by a constant (magic multiply): `x / 10`, `x % 10` for all `x` | ✓ | ✓ |
+| `SwapBig` | struct assignment by value: swaps two 64-byte structs (equal or disjoint) | ✓ | ✓ |
+| `Compose` | a non-escaping closure built in the frame: `f(f(x))` for `f(v) = a·v + b` | ✓ | ✓ |
+| `DotBoth` | a method value and a method expression on a value receiver | ✓ | ✓ |
+| `BitMerge` | `&^`, `&`, `\|`, `^`: two bit-merge formulas, bit `i` from `y` where `m` is set, else from `x` | ✓ | ✓ |
+| `Shifts` | `<<`, `>>` (signed and unsigned) by a variable count with Go's semantics for counts `≥ 64` | ✓ | ✓ |
+| `MinMax` | the `min`/`max` builtins (signed) and the exact distance `max - min` | ✓ | ✓ |
+| `ClearArray` | `clear` of a 5-word array: all 40 bytes zero, nothing else written | ✓ | ✓ |
+| `Sum3` | a variadic call (the argument slice in the caller's frame): `a + b + c` | ✓ | ✓ |
+| `AlignUp` | `uintptr` arithmetic: rounds `p` up to a multiple of the power of two `a` | ✓ | ✓ |
+| `Slice2` | `xs[i:j]`: the new header; **panics** iff not `0 ≤ i ≤ j ≤ cap` | ✓ | ✓ |
+| `Mod` | `x % y` by a variable; **panics** (`runtime.panicdivide`) iff `y = 0` | ✓ | ✓ |
+| `IncTwice` | two static calls of a pointer-receiver method: `c.N += d` twice, returns the sum of the results | ✓ | ✓ |
+| `MakeAdder` | an escaping closure: a fresh funcval from `runtime.newobject` (contract) holding `MakeAdder.func1` and the captured `a` | ✓ | ✓ |
+| `Slice3` | `xs[i:j:k]`: the new header; **panics** (`runtime.panicBounds`) iff not `0 ≤ i ≤ j ≤ k ≤ cap` | ✓ | ✓ |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
+| `BitMix` | `GOAMD64=v3` (`examples/basic/v3`): `(x &^ y) ^ (x & (x-1)) ^ (y << (n & 63))` through BMI `ANDN`, `SHLX`, `BLSR` | | ✓ |
+| `Fma` | `GOAMD64=v3`: `math.FMA(a, b, c)` as one `VFMADD231SD` is IEEE 754 `fusedMultiplyAdd` rounded once (the arm64 `FMADD` specification), whenever the result is architecturally defined | | ✓ |
+| `LoadBE` | `GOAMD64=v3`: `binary.BigEndian.Uint64` as one `MOVBE` is the big-endian value of the 8 bytes | | ✓ |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
 **What it rules out**). Every proof uses only axioms from the allow-list `propext`, `Quot.sound`,
@@ -248,6 +277,15 @@ proved on both ISAs against the C calling conventions (`CEnsures`, [`Janus/CABI.
 the C code are all executed by the model, and only the `runtime.cgocall` stack and scheduler switch
 is a trusted contract, named in the statement (`EnsuresC … (CgoCall Extracted.program) …`). See
 [docs/FFI.md](docs/FFI.md) and `scripts/verify-cgo-examples.sh`.
+
+**Go assembly (ABI0).** Hand-written `.s` functions are verified like compiled Go, against their
+stack-based calling convention ABI0 (`Ensures0`, [`Janus/GoABI0.lean`](Janus/GoABI0.lean),
+[`Janus/Amd64/GoABI0.lean`](Janus/Amd64/GoABI0.lean)). In [`examples/asm`](examples/asm), on both
+ISAs: `AddAsm` and the loop `XorSlice` (assembly), `Twice` (assembly calling a Go function through
+the compiler's ABI0 → ABIInternal wrapper), `CallXor` (Go with a direct ABI0 call; on amd64 the
+`R14 = g` / `X15 = 0` re-entry is executed) and the ABIInternal → ABI0 wrapper of `XorSlice`.
+Callees compose through `Summary0`; nothing about assembly, wrappers or call sequences is assumed.
+See [docs/ABI0.md](docs/ABI0.md) and `scripts/verify-asm-examples.sh`.
 
 <!-- TODO(coordinator): the checkmarks come from a re-run on 2026-10-23 (14 arm64 proofs, 17 amd64
 Proof.correctness + Div/Get Proof.panics, and scripts/break-demo.sh: all Verified) with a janus binary
@@ -413,6 +451,7 @@ leaves none.
 | [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime calls and dynamic calls (interfaces, closures, `defer`) |
 | [AMD64.md](docs/AMD64.md) | The x86-64 backend: model, ABI, proofs, gaps |
 | [FFI.md](docs/FFI.md) | Go calling C (cgo): the C ABIs, `CEnsures`, the cgo contract, the composition theorem |
+| [ABI0.md](docs/ABI0.md) | Go assembly: the ABI0 convention, `Ensures0`/`Summary0`, the ABI wrappers, direct ABI0 calls, re-entry on amd64 |
 | [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime functions as stated contracts (`janus extract --contract`): allocation, write barriers, dynamic calls, maps, cgo |
 | [ORACLE.md](docs/ORACLE.md), [ORACLE-SAIL.md](docs/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) | The differential oracles and their results |
 | [AUDIT.md](docs/AUDIT.md) | The red-team audit of `janus verify` and its fixes |

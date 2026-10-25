@@ -88,8 +88,8 @@ struct Case {
     fpcr: String,
     #[serde(default)]
     fpsr: String,
-    /// Sequence mode (oracle/layout `Case.Words`): a straight-line block laid out from TestPC;
-    /// `word` is ignored when it is non-empty.
+    /// Sequence mode (`layout.Case.Words`): a straight-line block laid out from TestPC; `word`
+    /// is ignored when this is non-empty.
     #[serde(default)]
     words: Vec<String>,
 }
@@ -398,6 +398,22 @@ impl Cpu {
                 return r;
             }
         };
+        // Sequence mode: the block laid out from TestPC (at most 0x180 words, as the qemu
+        // runner allows), stepped while the PC stays inside it.
+        let mut block: Vec<u32> = Vec::new();
+        for hw in &c.words {
+            match parse_hex(hw) {
+                Ok(v) if v <= 0xffff_ffff => block.push(v as u32),
+                _ => {
+                    err(&mut r, "bad words entry".into());
+                    return r;
+                }
+            }
+        }
+        if block.len() > 0x180 {
+            err(&mut r, "words too long".into());
+            return r;
+        }
         let pc = if c.pc.is_empty() { Ok(TEST_PC) } else { parse_hex(&c.pc) };
         if pc != Ok(TEST_PC) {
             err(&mut r, "pc must be layout.TestPC".into());
@@ -425,22 +441,7 @@ impl Cpu {
             }
         };
 
-        // Sequence mode: the block's words (each below 2^32).
-        let mut block: Vec<u32> = Vec::new();
-        for hw in &c.words {
-            match parse_hex(hw) {
-                Ok(v) if v <= 0xffff_ffff => block.push(v as u32),
-                _ => {
-                    err(&mut r, "bad words entry".into());
-                    return r;
-                }
-            }
-        }
-        if block.len() > 0x180 {
-            err(&mut r, "words too long".into());
-            return r;
-        }
-        // Memory: code page = word (or the block) at TestPC, zeros (UDF #0) elsewhere; data = pattern.
+        // Memory: code page = word at TestPC, zeros (UDF #0) elsewhere; data = pattern.
         let mut code = vec![0u8; PAGE as usize];
         let off = (TEST_PC - CODE_PAGE) as usize;
         if block.is_empty() {
@@ -523,18 +524,16 @@ impl Cpu {
         if block.is_empty() {
             self.o.step(word);
         } else {
-            // Step while the PC stays in the block at EL0 (a straight-line block ends by falling
-            // through to the UDF after it, which the post-processing reports like the qemu
-            // runner's SIGILL), at most one step per word plus one.
-            for _ in 0..=block.len() {
-                let pc = self.o.get_pc();
-                if self.el() != 0 || pc < TEST_PC || pc >= TEST_PC + 4 * block.len() as u64 || pc % 4 != 0 {
+            // Inject the word at the PC (the crate has no instruction fetch) until the PC
+            // leaves the block, an exception is taken, or a Sail exception escapes.
+            let end = TEST_PC + 4 * block.len() as u64;
+            for _ in 0..4 * block.len() + 1 {
+                let p = self.o.get_pc();
+                if self.el() != 0 || p < TEST_PC || p >= end || (p - TEST_PC) % 4 != 0
+                    || uncaught_count() != un0 {
                     break;
                 }
-                self.o.step(block[((pc - TEST_PC) / 4) as usize]);
-                if uncaught_count() != un0 {
-                    break;
-                }
+                self.o.step(block[((p - TEST_PC) / 4) as usize]);
             }
         }
         r.unpredictable = (unpredictable_count() - cu0) as i64;

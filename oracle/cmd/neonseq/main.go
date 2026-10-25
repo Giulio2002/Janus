@@ -38,7 +38,7 @@ func pool(r *rand.Rand, w uint32) uint32 {
 	switch cls {
 	case "simd.elem", "simd.selem":
 		w = w&^(0x1F<<16) | p()<<16
-	case "simd.3same", "simd.s3same", "simd.3diff", "simd.s3diff", "simd.perm", "simd.ext",
+	case "simd.3same", "simd.s3same", "simd.3diff", "simd.s3diff", "simd.permute", "simd.ext",
 		"simd.tbl", "fp.dp2", "fp.dp3", "fp.csel", "fp.ccmp", "fp.cmp":
 		w = w&^(0x1F<<16) | p()<<16
 	}

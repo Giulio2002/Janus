@@ -1,6 +1,7 @@
 import Janus.Tactic.Vector
 import Janus.Tactic.Float
 import Janus.Arm64.ExecNeon
+import Janus.Arm64.Crypto
 
 /-!
 # Symbolic execution of the Advanced SIMD classes of `NeonInstr`
@@ -8,8 +9,8 @@ import Janus.Arm64.ExecNeon
 * `exec_neon` (`exec (.neon i) s = execNeon i s`, by `rfl`) and the unfoldings of the executor
   plumbing (`execNeon`, the per-class `NeonExec.*` functions, `vpart`, `setVpart`, `qcCommit`,
   ...), registered in `janus_exec`. As in `Janus.Tactic.Vector`, the lane operations
-  themselves (`Neon.threeSameInt`, `Neon.permOp`, `NeonFP.threeSameFP`, ...) are **not**
-  unfolded: a symbolic register holds a term like `permOp 8 128 3 x y`, and element lemmas
+  themselves (`Neon.threeSameInt`, `NeonFP.threeSameFP`, `permuteOp`, ...) are **not**
+  unfolded: a symbolic register holds a term like `permuteOp 0 3 128 x y`, and element lemmas
   evaluate what later instructions read back.
 * The copies of `baseAddr`/`memIndexed`/`memVPair` in `ExecNeon` are the originals of `Exec`
   (`NeonExec.baseAddr_eq`, ...), so the trusted base has one definition of each in effect.
@@ -36,22 +37,23 @@ theorem NeonExec.memVPair_eq : NeonExec.memVPair = Janus.Arm64.memVPair := rfl
 attribute [janus_exec] execNeon NeonExec.dsize NeonExec.vpart NeonExec.setVpart NeonExec.qcCommit
   NeonExec.intCommit NeonExec.rpresUnknown NeonExec.absNegAHNaN NeonExec.threeSame NeonExec.sThreeSame
   NeonExec.threeDiff NeonExec.sThreeDiff NeonExec.twoMisc NeonExec.sTwoMisc NeonExec.across
-  NeonExec.sPairwise NeonExec.perm NeonExec.fixedLanes NeonExec.shiftImm NeonExec.sShiftImm
-  NeonExec.intIdx NeonExec.fpIdx NeonExec.byElem NeonExec.sByElem NeonExec.sDup
+  NeonExec.sPairwise NeonExec.fixedLanes NeonExec.shiftImm NeonExec.sShiftImm
+  NeonExec.intIdx NeonExec.fpIdx NeonExec.byElem NeonExec.sByElem
   NeonExec.fpCvtFixed NeonExec.baseAddr NeonExec.memIndexed NeonExec.memVPair NeonExec.selemOf
   NeonExec.ldStructRegs NeonExec.ldstStruct NeonExec.ldstNP Neon.esizeOf neonHsb4
 
 /-! ## Elements of the lane operations -/
 
-/-- ZIP1/ZIP2 (`opcode = 011` / `111`): element `i` of the result. -/
-theorem elem_zip {esize ds opcode i : Nat} (x y : Nat) (hop : opcode % 4 = 3) (hi : i < ds / esize) :
-    elem (permOp esize ds opcode x y) esize i =
-      if i % 2 = 0 then elem x esize (opcode / 4 * (ds / esize / 2) + i / 2)
-      else elem y esize (opcode / 4 * (ds / esize / 2) + i / 2) := by
+/-- ZIP1/ZIP2 (`opcode = 011` / `111`, `permuteOp` of `Janus.Arm64.Crypto`, the executor of
+`CryptoInstr.permute`): element `i` of the result (`esize = 8 * 2 ^ size`). -/
+theorem elem_zip {size ds opcode i : Nat} (x y : Nat) (hop : opcode % 4 = 3)
+    (hi : i < ds / (8 * 2 ^ size)) :
+    elem (permuteOp size opcode ds x y) (8 * 2 ^ size) i =
+      if i % 2 = 0 then elem x (8 * 2 ^ size) (opcode / 4 * (ds / (8 * 2 ^ size) / 2) + i / 2)
+      else elem y (8 * 2 ^ size) (opcode / 4 * (ds / (8 * 2 ^ size) / 2) + i / 2) := by
   have h1 : opcode % 4 ≠ 1 := by omega
   have h2 : opcode % 4 ≠ 2 := by omega
-  unfold permOp
-  simp only [h1, h2, ite_false]
+  simp only [permuteOp, zipOp, h1, h2, ite_false]
   rw [elem_ofElems _ hi]
   split <;> exact Nat.mod_eq_of_lt (elem_lt _ _ _)
 
@@ -86,21 +88,26 @@ theorem elem_div_pow (v e k i : Nat) : elem (v / 2 ^ (e * k)) e i = elem v e (i 
 
 /-- ZIP1/ZIP2 with a zero second operand, read with elements of twice the size: the
 zero-extended elements of the selected half of `x`. -/
-theorem elem_zip_zero (e ds opcode j : Nat) (x : Nat) (hop : opcode % 4 = 3) (hj : 2 * j + 1 < ds / e) :
-    elem (permOp e ds opcode x 0) (2 * e) j = elem x e (opcode / 4 * (ds / e / 2) + j) := by
+theorem elem_zip_zero (size ds opcode j : Nat) (x : Nat) (hop : opcode % 4 = 3)
+    (hj : 2 * j + 1 < ds / (8 * 2 ^ size)) :
+    elem (permuteOp size opcode ds x 0) (2 * (8 * 2 ^ size)) j =
+      elem x (8 * 2 ^ size) (opcode / 4 * (ds / (8 * 2 ^ size) / 2) + j) := by
   rw [elem_two, elem_zip _ _ hop (by omega), elem_zip _ _ hop hj]
   have : (2 * j + 1) % 2 = 1 := by omega
   simp [this, elem_zero]
 
 @[janus_exec, janus_post] theorem elem_zip_zero_16 {ds opcode j : Nat} (x : Nat) (hop : opcode % 4 = 3)
-    (hj : 2 * j + 1 < ds / 8) : elem (permOp 8 ds opcode x 0) 16 j = elem x 8 (opcode / 4 * (ds / 8 / 2) + j) :=
-  elem_zip_zero 8 ds opcode j x hop hj
+    (hj : 2 * j + 1 < ds / 8) :
+    elem (permuteOp 0 opcode ds x 0) 16 j = elem x 8 (opcode / 4 * (ds / 8 / 2) + j) :=
+  elem_zip_zero 0 ds opcode j x hop hj
 @[janus_exec, janus_post] theorem elem_zip_zero_32 {ds opcode j : Nat} (x : Nat) (hop : opcode % 4 = 3)
-    (hj : 2 * j + 1 < ds / 16) : elem (permOp 16 ds opcode x 0) 32 j = elem x 16 (opcode / 4 * (ds / 16 / 2) + j) :=
-  elem_zip_zero 16 ds opcode j x hop hj
+    (hj : 2 * j + 1 < ds / 16) :
+    elem (permuteOp 1 opcode ds x 0) 32 j = elem x 16 (opcode / 4 * (ds / 16 / 2) + j) :=
+  elem_zip_zero 1 ds opcode j x hop hj
 @[janus_exec, janus_post] theorem elem_zip_zero_64 {ds opcode j : Nat} (x : Nat) (hop : opcode % 4 = 3)
-    (hj : 2 * j + 1 < ds / 32) : elem (permOp 32 ds opcode x 0) 64 j = elem x 32 (opcode / 4 * (ds / 32 / 2) + j) :=
-  elem_zip_zero 32 ds opcode j x hop hj
+    (hj : 2 * j + 1 < ds / 32) :
+    elem (permuteOp 2 opcode ds x 0) 64 j = elem x 32 (opcode / 4 * (ds / 32 / 2) + j) :=
+  elem_zip_zero 2 ds opcode j x hop hj
 
 /-- `truncInt` of a natural number. -/
 theorem truncInt_nat (k a : Nat) : truncInt k (a : Int) = a % 2 ^ k := by

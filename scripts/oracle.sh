@@ -12,6 +12,10 @@
 #                                     gcc/clang -O0/-O2/-O3, NEON_K states each) and of the Go
 #                                     harvest, random simd/vls group words, and SEQ straight-line
 #                                     blocks (sequence mode, oracle/cmd/neonseq)
+#   scripts/oracle.sh crypto          crypto extension / CRC32 / permutes only: generated classes
+#                                     (CRYPTO_CLASSES), harvested words of the crypto test binaries
+#                                     (CRYPTO_HARVEST_K states each) and sequence-mode blocks
+#                                     (oracle seqgen: SEQ_N per family, SEQ_WINDOWS real windows)
 #
 # Environment: OUT (default artifacts/oracle), JOBS (default nproc), N (words per generated
 # class, default 4000 for full / 1500 for quick), K (states per harvested word, default 3),
@@ -56,10 +60,13 @@ case "$mode" in
   full)  N="${N:-4000}" ;;
   fp)    N="${N:-20000}" ;;
   neon)  N="${N:-20000}" ;;
-  *) echo "usage: $0 selftest|quick|full|fp|neon" >&2; exit 2 ;;
+  crypto) N="${N:-20000}" ;;
+  *) echo "usage: $0 selftest|quick|full|fp|neon|crypto" >&2; exit 2 ;;
 esac
 FP_K="${FP_K:-4}"
 echo "== generate ($N words per class)"
+# The crypto-extension / CRC32 / permute classes and their AdvSIMD neighbours (gen/crypto.go).
+CRYPTO_CLASSES="${CRYPTO_CLASSES:-^(crypto\.|simd\.(pmull|permute|dupscalar|aes|ext|tbl)$|dpr\.crc32$)}"
 if [ "$mode" = fp ]; then
   "$bin/oracle" gen -dczid "$DCZID" -n "$N" -only '^fp\.' -fp-k "$FP_K" -seed "$SEED" -o "$OUT/gen.jsonl"
 elif [ "$mode" = neon ]; then
@@ -75,18 +82,23 @@ elif [ "$mode" = neon ]; then
   (cd "$root/oracle" && go build -o "$bin/neonseq" ./cmd/neonseq)
   "$bin/neonseq" -n "${SEQ:-50000}" -seed "$SEED" -dczid "$DCZID" -decode "$root/.lake/build/bin/janus-decode" -o "$OUT/seq.jsonl"
   cases+=("$OUT/seq.jsonl")
+elif [ "$mode" = crypto ]; then
+  "$bin/oracle" gen -dczid "$DCZID" -n "$N" -only "$CRYPTO_CLASSES" -seed "$SEED" -o "$OUT/gen.jsonl"
 else
   "$bin/oracle" gen -dczid "$DCZID" -n "$N" -group "$((N * 2))" -seed "$SEED" -o "$OUT/gen.jsonl"
 fi
 cases+=("$OUT/gen.jsonl")
 
-if [ "$mode" = full ] || [ "$mode" = fp ] || [ "$mode" = neon ]; then
+if [ "$mode" = full ] || [ "$mode" = fp ] || [ "$mode" = neon ] || [ "$mode" = crypto ]; then
   echo "== harvest corpus (real Go arm64 code)"
   corpus="$bin/corpus"
   mkdir -p "$corpus"
+  # The crypto packages bring the SHA-1/SHA-256/SHA-512/SHA-3, AES-GCM (PMULL), CRC32 and
+  # chacha20 (ZIP, via crypto/tls) assembly kernels.
   (cd "$root/oracle" &&
     CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$corpus/bigprog" ./harvest/bigprog &&
-    for p in math math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime; do
+    for p in math math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime \
+        crypto/sha1 crypto/sha512 crypto/sha3 crypto/cipher hash/crc32 crypto/tls; do
       CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
   # gcc-compiled C (the cgo examples and the model-coverage corpus examples/cgo/ccover.c)
@@ -101,8 +113,20 @@ if [ "$mode" = full ] || [ "$mode" = fp ] || [ "$mode" = neon ]; then
   hargs=()
   [ "$mode" = fp ] && hargs=(-only '^fp\.' -per-class 0 -fp-k "${FP_HARVEST_K:-40}")
   [ "$mode" = neon ] && hargs=(-only '^(simd|vls)\.' -per-class 0)
-  "$bin/oracle" harvest -dczid "$DCZID" -k "$K" -per-class "$PER_CLASS" "${hargs[@]}" -seed "$((SEED + 1))" -o "$OUT/harvest.jsonl" "$corpus"/* "${extra[@]}"
+  [ "$mode" = crypto ] && hargs=(-only "$CRYPTO_CLASSES" -per-class 0)
+  hk="$K"
+  [ "$mode" = crypto ] && hk="${CRYPTO_HARVEST_K:-40}"
+  "$bin/oracle" harvest -dczid "$DCZID" -k "$hk" -per-class "$PER_CLASS" "${hargs[@]}" -seed "$((SEED + 1))" -o "$OUT/harvest.jsonl" "$corpus"/* "${extra[@]}"
   cases+=("$OUT/harvest.jsonl")
+fi
+if [ "$mode" = full ] || [ "$mode" = crypto ]; then
+  # Sequence mode: straight-line blocks (synthetic chains per family + windows of the real
+  # crypto kernels), executed in one go natively and word by word by janus-oracle.
+  echo "== sequences"
+  sn="${SEQ_N:-500}"; swin="${SEQ_WINDOWS:-2000}"
+  [ "$mode" = crypto ] && { sn="${SEQ_N:-10000}"; swin="${SEQ_WINDOWS:-20000}"; }
+  "$bin/oracle" seqgen -dczid "$DCZID" -n "$sn" -windows "$swin" -seed "$((SEED + 2))" -o "$OUT/seq.jsonl" "$corpus"/*
+  cases+=("$OUT/seq.jsonl")
 fi
 
 echo "== run (native under ${QEMU:-native} vs janus-oracle)"

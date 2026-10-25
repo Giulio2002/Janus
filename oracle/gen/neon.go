@@ -11,8 +11,8 @@ import "math/rand/v2"
 
 // neonClasses are the extra class names, in report order (appended to Classes).
 var neonClasses = []string{
-	"simd.3diff", "simd.s3diff", "simd.s2misc", "simd.spair", "simd.perm", "simd.sshift",
-	"simd.elem", "simd.selem", "simd.sdup",
+	"simd.3diff", "simd.s3diff", "simd.s2misc", "simd.spair", "simd.sshift",
+	"simd.elem", "simd.selem",
 }
 
 func init() {
@@ -28,7 +28,8 @@ func init() {
 }
 
 // classifyNeon returns the class of a word of the x111 group in one of the NEON classes the
-// original classifier does not name, or "".
+// original classifier does not name, or "" (the permute and scalar DUP classes are
+// classifyCrypto's simd.permute / simd.dupscalar).
 func classifyNeon(w uint32) string {
 	switch {
 	case w&0x9F200C00 == 0x0E200000:
@@ -39,16 +40,12 @@ func classifyNeon(w uint32) string {
 		return "simd.s2misc"
 	case w&0xDF3E0C00 == 0x5E300800:
 		return "simd.spair"
-	case w&0xBF208C00 == 0x0E000800:
-		return "simd.perm"
 	case w&0xDF800400 == 0x5F000400:
 		return "simd.sshift"
 	case w&0x9F000400 == 0x0F000000:
 		return "simd.elem"
 	case w&0xDF000400 == 0x5F000000:
 		return "simd.selem"
-	case w&0xFFE0FC00 == 0x5E000400:
-		return "simd.sdup"
 	}
 	return ""
 }
@@ -240,7 +237,7 @@ func setupNeon(r *rand.Rand, w uint32, s *State) {
 	}
 	switch Classify(w) {
 	case "simd.3same", "simd.s3same", "simd.3diff", "simd.s3diff", "simd.2misc", "simd.s2misc",
-		"simd.across", "simd.spair", "simd.perm", "simd.shift", "simd.sshift", "simd.elem",
+		"simd.across", "simd.spair", "simd.permute", "simd.shift", "simd.sshift", "simd.elem",
 		"simd.selem":
 		setupNeonInt(r, w, s)
 	}
@@ -277,9 +274,6 @@ func init() {
 		op := mostly(r, pick(r, 0b11011, 0b01101, 0b01100, 0b01111), 5)
 		return 0x5E300800 | u(r, 1)<<29 | u(r, 2)<<22 | op<<12 | vreg(r)<<5 | vreg(r)
 	}
-	Targeted["neon.perm"] = func(r *rand.Rand) uint32 {
-		return 0x0E000800 | u(r, 1)<<30 | u(r, 2)<<22 | vreg(r)<<16 | u(r, 3)<<12 | vreg(r)<<5 | vreg(r)
-	}
 	Targeted["neon.shift"] = func(r *rand.Rand) uint32 {
 		immh := u(r, 4)
 		if immh == 0 {
@@ -301,9 +295,6 @@ func init() {
 	Targeted["neon.selem"] = func(r *rand.Rand) uint32 {
 		return 0x5F000000 | u(r, 1)<<29 | u(r, 2)<<22 | u(r, 1)<<21 | u(r, 1)<<20 | u(r, 4)<<16 |
 			u(r, 4)<<12 | u(r, 1)<<11 | vreg(r)<<5 | vreg(r)
-	}
-	Targeted["neon.sdup"] = func(r *rand.Rand) uint32 {
-		return 0x5E000400 | u(r, 5)<<16 | vreg(r)<<5 | vreg(r)
 	}
 	// LD2-LD4/ST2-ST4 (multiple structures), with and without post-index.
 	Targeted["vls.struct"] = func(r *rand.Rand) uint32 {

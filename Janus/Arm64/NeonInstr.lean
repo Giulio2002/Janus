@@ -38,8 +38,6 @@ inductive NeonInstr where
   | across (Q U : Bool) (size opcode rn rd : Nat)
   /-- Advanced SIMD scalar pairwise: `01 U 11110 size 11000 opcode 10 Rn Rd`. -/
   | sPairwise (U : Bool) (size opcode rn rd : Nat)
-  /-- Advanced SIMD permute: `0 Q 001110 size 0 Rm 0 opcode 10 Rn Rd` (UZP1/TRN1/ZIP1/UZP2/TRN2/ZIP2). -/
-  | perm (Q : Bool) (size rm opcode rn rd : Nat)
   /-- Advanced SIMD shift by immediate (vector): `0 Q U 011110 immh immb opcode 1 Rn Rd`, `immh ≠ 0`. -/
   | shiftImm (Q U : Bool) (immh immb opcode rn rd : Nat)
   /-- Advanced SIMD scalar shift by immediate: `01 U 111110 immh immb opcode 1 Rn Rd`, `immh ≠ 0`. -/
@@ -49,8 +47,6 @@ inductive NeonInstr where
   | byElem (Q U : Bool) (size : Nat) (L M : Bool) (rm opcode : Nat) (H : Bool) (rn rd : Nat)
   /-- Advanced SIMD scalar x indexed element: `01 U 11111 size L M Rm opcode H 0 Rn Rd`. -/
   | sByElem (U : Bool) (size : Nat) (L M : Bool) (rm opcode : Nat) (H : Bool) (rn rd : Nat)
-  /-- Advanced SIMD scalar copy, DUP (element): `01 0 11110000 imm5 0 0000 1 Rn Rd`. -/
-  | sDup (imm5 rn rd : Nat)
   /-- LD2/LD3/LD4 and ST2/ST3/ST4 (multiple structures, `L` = load): `opcode` 1000 (2 registers),
   0100 (3), 0000 (4); `post`: post-index by `X[m]`, or by the transfer size for `rm = 31`.
   `rn`: SP. -/

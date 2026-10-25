@@ -173,10 +173,6 @@ def sPairwise (s : State) (_U : Bool) (size opcode rn rd : Nat) : Except Fault S
     let o := reduce2 op sz s.fpcr.toNat (s.getV rn (2 * e))
     fpCommit s o.2 (s.setV rd e o.1)
 
-def perm (s : State) (Q : Bool) (size rm opcode rn rd : Nat) : Except Fault State :=
-  let ds := dsize Q
-  .ok (s.setV rd ds (permOp (esizeOf size) ds opcode (s.getV rn ds) (s.getV rm ds)))
-
 /-- The fixed-point conversions by immediate on `n` elements of `x`: SCVTF/UCVTF (`11100`,
 rounding from `FPCR`) and FCVTZS/FCVTZU (`11111`, toward zero), `fbits = 2*esize - immh:immb`. -/
 def fixedLanes (U : Bool) (esize n opcode fbits fpcr x : Nat) : Nat × Exc :=
@@ -260,11 +256,6 @@ def sByElem (s : State) (U : Bool) (size : Nat) (L M : Bool) (rm opcode : Nat) (
     else
       intCommit s (byElemInt U e 1 opcode 0 (s.getV rn 128) (s.getV rd 128) el)
         fun t r => t.setV rd (2 * e) r
-
-def sDup (s : State) (imm5 rn rd : Nat) : State :=
-  let sz := lowestSetBit5 imm5
-  let e := 8 * 2 ^ sz
-  s.setV rd e (elem (s.getV rn 128) e (imm5 / 2 ^ (sz + 1)))
 
 /-- Conversion between floating point and fixed point (scalar, general register):
 `fbits = 64 - scale`; SCVTF/UCVTF write `V[d]` (merging under `IsMerging(FPCR)`), FCVTZS/FCVTZU
@@ -367,12 +358,10 @@ def execNeon (i : NeonInstr) (s : State) : Except Fault State :=
     | .sTwoMisc U size opcode rn rd => sTwoMisc s U size opcode rn rd
     | .across Q U size opcode rn rd => across s Q U size opcode rn rd
     | .sPairwise U size opcode rn rd => sPairwise s U size opcode rn rd
-    | .perm Q size rm opcode rn rd => perm s Q size rm opcode rn rd
     | .shiftImm Q U immh immb opcode rn rd => shiftImm s Q U immh immb opcode rn rd
     | .sShiftImm U immh immb opcode rn rd => sShiftImm s U immh immb opcode rn rd
     | .byElem Q U size L M rm opcode H rn rd => byElem s Q U size L M rm opcode H rn rd
     | .sByElem U size L M rm opcode H rn rd => sByElem s U size L M rm opcode H rn rd
-    | .sDup imm5 rn rd => .ok (sDup s imm5 rn rd)
     | .ldstStruct Q L opcode size post rm rn rt => ldstStruct s Q L opcode size post rm rn rt
     | .ldstNP opc L imm7 rt2 rn rt => ldstNP s opc L imm7 rt2 rn rt
     | .fpCvtFixed sf ftype _ opcode scale rn rd => fpCvtFixed s sf ftype opcode scale rn rd

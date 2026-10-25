@@ -232,25 +232,6 @@ def shllNOp (esize x : Nat) : Nat :=
 halving tree; addition modulo `2^esize` is associative, so it equals the linear sum). -/
 def reduceAdd (esize x n : Nat) : Nat := truncInt esize (sumElems true esize x n)
 
-/-! ## Permute -/
-
-/-- Advanced SIMD permute (`opcode = w<14:12>`): `001` UZP1, `010` TRN1, `011` ZIP1, `101` UZP2,
-`110` TRN2, `111` ZIP2; `part = opcode<2>`. `x = V[n]`, `y = V[m]` (`datasize` bits). -/
-def permOp (esize datasize opcode x y : Nat) : Nat :=
-  let n := datasize / esize
-  let part := opcode / 4
-  let op := opcode % 4
-  if op = 1 then
-    -- UZP: `zipped = operandh:operandl; Elem[result, e] = Elem[zipped, 2*e+part]`
-    ofElems esize n fun i => pairElem x y esize n (2 * i + part)
-  else if op = 2 then
-    -- TRN: `Elem[result, 2p] = Elem[op1, 2p+part]; Elem[result, 2p+1] = Elem[op2, 2p+part]`
-    ofElems esize n fun i => if i % 2 = 0 then elem x esize (i + part) else elem y esize (i - 1 + part)
-  else
-    -- ZIP: `base = part * pairs; Elem[result, 2p] = Elem[op1, base+p]; Elem[result, 2p+1] = Elem[op2, base+p]`
-    let base := part * (n / 2)
-    ofElems esize n fun i => if i % 2 = 0 then elem x esize (base + i / 2) else elem y esize (base + i / 2)
-
 /-! ## Shift by immediate -/
 
 /-- Advanced SIMD shift by immediate, the opcodes not in `shiftImmOp` (`opcode = w<15:11>`), on

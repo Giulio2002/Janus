@@ -88,6 +88,45 @@ theorem binop_mul_ieee (h : IEEEMode c) (f : Fmt) (hf : f.Std) (a b : Nat)
     | exact isNaN_or_quiet f hf _ (by unfold isNaN; rw [h2])
     | (unfold isNaN; rw [h1]) | (unfold isNaN; rw [h2])
 
+/-- When `FP.fma` is defined in IEEE mode: at most one NaN operand, and not `0 × ∞ + NaN`
+(the cases the model leaves to the implementation, see `FP.fma`). -/
+def FmaDefined (f : Fmt) (a b d : Nat) : Prop :=
+  (isNaN f a).toNat + (isNaN f b).toNat + (isNaN f d).toNat ≤ 1 ∧
+  ¬ (isNaN f d = true ∧ (classify f a = .inf ∨ classify f b = .inf) ∧
+    (classify f a = .zero ∨ classify f b = .zero))
+
+theorem addExact_zero_zero (e e' : Int) : addExact 0 e 0 e' = none := by
+  simp [addExact, align, Janus.Float.ofInt]
+
+set_option maxHeartbeats 4000000 in
+/-- `VFMADD{132,213,231}SD/SS` in IEEE mode, with the multiplicands `a`, `b` and the addend `d`:
+defined (the instruction does not fault) and `a × b + d` rounded once, as IEEE 754
+`fusedMultiplyAdd` (`Janus.Float.fma`). -/
+theorem fma_ieee (h : IEEEMode c) (f : Fmt) (hf : f.Std) (a b d : Nat)
+    (ha : a < 2 ^ f.width) (hb : b < 2 ^ f.width) (hd : d < 2 ^ f.width) (hdef : FmaDefined f a b d) :
+    match FP.fma f c false false a b d with
+    | some o => o.res < 2 ^ f.width ∧ ResultIs f (Janus.Float.fma f c.rc a b d) o.res
+    | none => False := by
+  have hi := indefinite_classify f hf
+  have hil := indefinite_lt f hf
+  unfold FmaDefined at hdef
+  simp only [ResultIs, Janus.Float.fma, FP.fma, kindOf_ieee h, valOf_ieee h, check, fmaExact,
+    Bool.false_eq_true, ite_false, Bool.bne_false] at hdef ⊢
+  cases hx : addExact (valueOf f d).n (valueOf f d).e ((valueOf f a).n * (valueOf f b).n)
+      ((valueOf f a).e + (valueOf f b).e) <;>
+  cases h0 : classify f d <;> cases h1 : classify f a <;> cases h2 : classify f b <;>
+    simp [h0, h1, h2, isNaN, isSNaN, roundX_ieee h, rmi_beq, zero_lt, inf_lt, round_bits_lt, ha, hb, hd,
+      or_quiet_lt f hf, hi, hil, quiet] at hdef ⊢
+  all_goals try (cases hsd : signOf f d <;> cases hsa : signOf f a <;> cases hsb : signOf f b <;>
+    simp [hsd, hsa, hsb, h0, h1, h2, zero_lt, inf_lt, hi, hil, roundX_ieee h, round_bits_lt, rmi_beq])
+  all_goals (try (rw [valueOf_of_zero h0, valueOf_of_zero h1] at hx; simp [Val.n, Val.e, addExact_zero_zero] at hx))
+  all_goals (try (rw [valueOf_of_zero h0, valueOf_of_zero h2] at hx; simp [Val.n, Val.e, addExact_zero_zero] at hx))
+  all_goals first
+    | exact isNaN_or_quiet f hf _ (by unfold isNaN; rw [h0])
+    | exact isNaN_or_quiet f hf _ (by unfold isNaN; rw [h1])
+    | exact isNaN_or_quiet f hf _ (by unfold isNaN; rw [h2])
+    | (unfold isNaN; rw [h0]) | (unfold isNaN; rw [h1]) | (unfold isNaN; rw [h2])
+
 theorem toInt_num (f : Fmt) (c : Ctl) (rm : RM) (iw b : Nat) (n e i : Int) (ex : Bool)
     (h : isNaN f b = false) (hv : valOf f c b = .num n e) (hn : n ≠ 0)
     (hi : roundToInt rm (signOf f b) n.natAbs e = (i, ex))
