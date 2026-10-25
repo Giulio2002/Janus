@@ -456,8 +456,9 @@ func SSEEdges(r *rand.Rand, n int) []EdgeCase {
 	p66 := []byte{0x66}
 	for round := 0; round < n; round++ {
 		// string compares
-		for _, o := range []byte{0x60, 0x61, 0x62, 0x63} {
-			imm := byte(round % 128)
+		for k := 0; k < 16; k++ {
+			o := []byte{0x60, 0x61, 0x62, 0x63}[k%4]
+			imm := byte((round*4 + k/4) % 128)
 			if r.IntN(3) == 0 {
 				imm = byte(r.IntN(128))
 			}

@@ -511,6 +511,29 @@ distinct rejected words), `sort` 59 → 63 of 66 (138 → 68), `strconv` 5 → 5
 Every word still rejected there is a store-exclusive (`STLXR`/`STLXRB`), `MRS` of the generic
 timer or `SVC`.
 
+## SSE packed instructions (amd64)
+
+The legacy-SSE packed instructions of WP-D (`Janus/Amd64/InstrSSE.lean`, `DecodeSSE.lean`,
+`ExecSSE.lean`) are part of the trusted amd64 model, like `Decode.lean` and `Exec.lean`: they
+are written from the Intel SDM `Operation` sections and differentially tested on the host CPU
+(`scripts/oracle-amd64.sh sse`, docs/ORACLE-AMD64.md: 0 MISMATCH), not proved. What a theorem
+relies on beyond the SDM text:
+
+* **CPU features.** The model executes SSE3, SSSE3, SSE4.1 and SSE4.2 instructions whenever they
+  occur, as the host (and every amd64 CPU Go 1.26 runs on with `GOAMD64=v2` or later) does. On a
+  `GOAMD64=v1` CPU without them they are `#UD`; Go's runtime and assembly test `internal/cpu`
+  flags before using them, so a theorem about such a path holds on CPUs with the feature, and a
+  proof that a guarded path is not taken states the flag.
+* **Alignment.** A 128-bit legacy-SSE memory operand faults unless 16-aligned, except for the
+  SSE4.2 string compares; the narrower operands never fault for alignment. The oracle steers
+  both aligned and misaligned operands and agrees on every case.
+* **Rejected rather than guessed:** implementation-specific results (`RCPPS`, `RSQRTPS`), the
+  masked-off-byte behaviour of `MASKMOVDQU`, reserved immediate bits (`CMPPS/PD imm8 ≥ 8`,
+  `ROUNDPS/PD imm8 ≥ 16`, `PCMPxSTRx imm8<7>`), `66` with `F2`/`F3` except on the 16-bit
+  `CRC32`, MMX forms.
+* **Proof automation** (`TacticSSE`) is not trusted: its element lemmas are proved from
+  `ExecSSE`, and making `ExecSSE.crc32c` irreducible for the elaborator changes no definition.
+
 ## Floating point
 
 Both models implement the scalar `float32`/`float64` instructions Go emits, bit-exactly, on a
@@ -537,7 +560,10 @@ bits are RES0, so a theorem whose precondition allows them set says nothing abou
 unless they read as zero there. Half precision (FEAT_FP16: `ftype = 11`, `FZ16`, `AHP`), BFloat16,
 `FRINT32*/64*`, `FJCVTZS`, fixed-point conversions and Advanced SIMD floating point are rejected.
 The amd64 model is of SSE2 (and SSE4.1 for `ROUNDSD`, executed by Go only after testing
-`x86HasSSE41`) and of the scalar FMA3 instructions (`VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}`,
+`x86HasSSE41`), of the packed SSE/SSE2/SSE3/SSE4.1 floating point of WP-D (each element by the
+scalar operation, the flags of all elements ORed, `#XM` without a write if any element traps;
+`RCPPS`/`RSQRTPS`, whose results are implementation-specific approximations, and `DPPS`/`DPPD`
+are rejected) and of the scalar FMA3 instructions (`VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}`,
 which `GOAMD64=v3` code uses unconditionally and `GOAMD64=v1` code behind `x86HasFMA`): one
 rounding of the exact `±a × b ± c` on the IEEE core, proved equal to IEEE 754
 `fusedMultiplyAdd` in IEEE mode (`FP.fma_ieee`). Where the manuals leave an FMA result open (two
