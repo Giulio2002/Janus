@@ -664,4 +664,63 @@ theorem fromInt_b64_big (rm : RM) (n L : Nat) (hL1 : 2 ^ L ≤ n) (hL2 : n < 2 ^
   rw [show ((L : Int) - 52 + 1 + 1075).toNat = L + 1 + 1023 by omega,
     show ((L : Int) - 52 + 1075).toNat = L + 1023 by omega]
 
+/-- `fromInt` is an encoding of the format. -/
+theorem fromInt_lt (f : Fmt) (rm : RM) (i : Int) : fromInt f rm i < 2 ^ f.width := by
+  unfold fromInt; split
+  · exact zero_lt f false
+  · exact round_bits_lt f rm _ _ _
+
+/-- The integer a 64-bit register denotes as `int64`, in the form of `SCVTF`/`CVTSI2SD`. -/
+theorem signed64_toInt (x : BitVec 64) :
+    (if x.toNat < 2 ^ 63 then (x.toNat : Int) else (x.toNat : Int) - 2 ^ 64) = x.toInt := by
+  rw [BitVec.toInt_eq_toNat_cond]; have := x.isLt; split <;> split <;> omega
+
+/-- The significand and exponent of a finite non-zero binary32 encoding. -/
+theorem b32_fin_fields (x : Nat)
+    (h : classify binary32 x = .normal ∨ classify binary32 x = .subnormal) :
+    0 < mantOf binary32 x ∧ mantOf binary32 x < 2 ^ 24 ∧ -149 ≤ ulpExpOf binary32 x ∧
+    ulpExpOf binary32 x ≤ 104 := by
+  have hF : fracOf binary32 x < 2 ^ 23 := Nat.mod_lt _ (Nat.two_pow_pos _)
+  have hE : expOf binary32 x < 2 ^ 8 := Nat.mod_lt _ (Nat.two_pow_pos _)
+  by_cases he : expOf binary32 x = 0
+  · have hf0 : fracOf binary32 x ≠ 0 := by
+      intro hf; revert h; unfold classify; simp [he, hf]
+    have hm : mantOf binary32 x = fracOf binary32 x := by unfold mantOf; simp [he]
+    have hu : ulpExpOf binary32 x = -149 := by
+      unfold ulpExpOf; rw [he]; rfl
+    rw [hm, hu]; omega
+  · have hemax : expOf binary32 x ≠ 255 := by
+      intro h1; revert h; unfold classify
+      simp only [h1, show (255 : Nat) = binary32.expMax from rfl, ite_true, show binary32.expMax ≠ 0 by decide,
+        ite_false]
+      split <;> (try split) <;> (try split) <;> simp
+    have hm : mantOf binary32 x = 2 ^ 23 + fracOf binary32 x := by
+      unfold mantOf; simp only [he, ite_false]; rfl
+    have hu : ulpExpOf binary32 x = (expOf binary32 x : Int) - 150 := by
+      unfold ulpExpOf; simp only [he, ite_false]
+      show (expOf binary32 x : Int) - (127 : Nat) - (23 : Nat) = _; omega
+    refine ⟨by omega, by omega, by omega, by omega⟩
+
+/-- Widening binary32 to binary64 is exact (no rounding error) and does not depend on the
+rounding direction. -/
+theorem convertFormat_32_64 (rm : RM) (x : Nat) :
+    convertFormat binary32 binary64 rm x = convertFormat binary32 binary64 .rne x ∧
+    ((classify binary32 x = .normal ∨ classify binary32 x = .subnormal) →
+      (round binary64 rm (signOf binary32 x) (mantOf binary32 x) (ulpExpOf binary32 x)).inexact = false) := by
+  have key : (classify binary32 x = .normal ∨ classify binary32 x = .subnormal) → ∀ rm',
+      (round binary64 rm' (signOf binary32 x) (mantOf binary32 x) (ulpExpOf binary32 x)).bits =
+        pack binary64 (signOf binary32 x)
+          ((Nat.log2 (mantOf binary32 x) : Int) + ulpExpOf binary32 x + 1023).toNat
+          (mantOf binary32 x * 2 ^ (52 - Nat.log2 (mantOf binary32 x)) - 2 ^ 52) ∧
+      (round binary64 rm' (signOf binary32 x) (mantOf binary32 x) (ulpExpOf binary32 x)).inexact = false := by
+    intro hc rm'
+    obtain ⟨h0, h1, h2, h3⟩ := b32_fin_fields x hc
+    have hL : Nat.log2 (mantOf binary32 x) < 24 := (Nat.log2_lt (by omega)).2 h1
+    exact round_b64_normal rm' _ _ _ h0 (by omega) (by omega) (by omega)
+  refine ⟨?_, fun hc => (key hc rm).2⟩
+  unfold convertFormat
+  cases hc : classify binary32 x <;> simp only
+  · rw [(key (Or.inr hc) rm).1, (key (Or.inr hc) .rne).1]
+  · rw [(key (Or.inl hc) rm).1, (key (Or.inl hc) .rne).1]
+
 end Janus.Float
