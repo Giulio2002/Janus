@@ -1,5 +1,6 @@
 import Janus.Spec.ComplexLemmas
 import Janus.Arm64.ExecFloat
+import Janus.Spec.SoftFloat
 
 /-!
 # Complex division on the machine models: lifted operations and comparisons (proved)
@@ -140,6 +141,43 @@ theorem fma_negswap (rm : RM) (x y z : Nat) :
   simp only [isNaN_flipSign, classify_flipSign, signOf_flipSign, valueOf_flipSign_n,
     valueOf_flipSign_e, fmaExact_neg]
   cases signOf binary64 x <;> cases signOf binary64 y <;> rfl
+
+theorem copysign_or (x y : Nat) :
+    (x % 9223372036854775808 ||| y &&& 9223372036854775808) % 18446744073709551616 = copysign x y := by
+  have h1 : y &&& 9223372036854775808 = (y / 2 ^ 63 % 2) * 2 ^ 63 := by
+    rw [show (9223372036854775808 : Nat) = 2 ^ 63 by rfl]; exact and_two_pow_eq y 63
+  have h2 : x % 9223372036854775808 < 2 ^ 63 := Nat.mod_lt _ (by decide)
+  have h3 := Nat.two_pow_add_eq_or_of_lt h2 (y / 2 ^ 63 % 2)
+  rw [h1, Nat.or_comm, Nat.mul_comm, ← h3]
+  unfold copysign clearSign signOf
+  rw [b64_signBit]
+  rcases Nat.mod_two_eq_zero_or_one (y / 2 ^ 63) with h | h <;> simp [h] <;> omega
+
+theorem copysign_or' (x y : Nat) :
+    (y &&& 9223372036854775808 ||| x % 9223372036854775808) % 18446744073709551616 = copysign x y := by
+  rw [Nat.or_comm]; exact copysign_or x y
+
+theorem copysign_lt (x y : Nat) : copysign x y < 2 ^ 64 := by
+  unfold copysign clearSign; rw [b64_signBit]
+  have := Nat.mod_lt x (show 0 < 2 ^ 63 by decide); split <;> omega
+
+theorem copysign_mod (x y : Nat) : copysign x y % 18446744073709551616 = copysign x y :=
+  Nat.mod_eq_of_lt (copysign_lt x y)
+
+theorem O.mul2_comm (X Y : Option Nat) : O.mul2 X Y = O.mul2 Y X := by
+  cases X <;> cases Y <;> simp [O.mul2, mul_comm]
+
+theorem O.fma3_comm (X Y Z : Option Nat) : O.fma3 X Y Z = O.fma3 Y X Z := by
+  cases X <;> cases Y <;> cases Z <;> simp [O.fma3, fma_comm]
+
+theorem copysign_zero (y : Nat) : copysign 0 y = (y &&& 9223372036854775808) % 18446744073709551616 := by
+  rw [← copysign_or 0 y]; simp
+
+/-- `(-x) × y + z = (-y) × x + z`. -/
+theorem O.fma3_negswap (X Y Z : Option Nat) : O.fma3 (O.neg X) Y Z = O.fma3 (O.neg Y) X Z := by
+  cases X <;> cases Y <;> cases Z <;> simp [O.fma3, O.neg]
+  rename_i x y z
+  rw [fma_negswap, fma_comm]
 
 end Janus.Float
 
@@ -284,4 +322,134 @@ theorem hi_ge (x y : Nat) : (!cmpN y x && !eq64 y x) = !ge64 x y := by
     cases Val.eq (valueOf binary64 x) (valueOf binary64 y) <;>
     cases Val.lt (valueOf binary64 y) (valueOf binary64 x) <;> rfl
 
+
+/-! ### The same, in the form the executor produces (`V[d] = result mod 2^64`) -/
+
+theorem r_div' (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.div2 X Y) ((fpDiv binary64 0 x y).1 % 18446744073709551616) := by
+  rw [Nat.mod_eq_of_lt (fpDiv_lt x y hxl hyl)]; exact r_div hx hy hxl hyl
+
+theorem r_sub' (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.sub2 X Y) ((fpSub binary64 0 x y).1 % 18446744073709551616) := by
+  rw [Nat.mod_eq_of_lt (fpSub_lt x y hxl hyl)]; exact r_sub hx hy hxl hyl
+
+theorem r_mul' (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.mul2 X Y) ((fpMul binary64 0 x y).1 % 18446744073709551616) := by
+  rw [Nat.mod_eq_of_lt (fpMul_lt x y hxl hyl)]; exact r_mul hx hy hxl hyl
+
+theorem r_fma' (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hz : ResultIs binary64 Z z)
+    (hxl : x < 2 ^ 64) (hyl : y < 2 ^ 64) (hzl : z < 2 ^ 64) :
+    ResultIs binary64 (O.fma3 X Y Z) ((fpMulAdd binary64 0 z x y).1 % 18446744073709551616) := by
+  rw [Nat.mod_eq_of_lt (fpMulAdd_lt z x y hzl hxl hyl)]; exact r_fma hx hy hz hxl hyl hzl
+
+/-- `FSUB x, x` then `FCMP` with itself: the test `isFinite(x)` of `runtime/float.go`. -/
+theorem isNaN_fpSub_self (x : Nat) (hx : x < 2 ^ 64) :
+    isNaN binary64 ((fpSub binary64 0 x x).1 % 18446744073709551616) = !isFinite64 x := by
+  have h := r_sub' (X := some x) (Y := some x) rfl rfl hx hx
+  rw [resultIs_nan_iff h (O.sub2_noNaN _ _)]
+  simp [O.sub2, isFinite64]
+
+/-- `CSET EQ` twice, `AND`, `TBZ #0`: taken unless both comparisons were equal. -/
+theorem cset_and (p q : Bool) :
+    ((((if p = false then 0#64 else 1#64) &&& if q = false then 0#64 else 1#64).getLsbD 0 == false) =
+      !(p && q)) := by
+  cases p <;> cases q <;> decide
+
 end Janus.Arm64.FP
+
+/-! ## amd64: `SSE2` scalar operations with the default `MXCSR` (`0x1F80`) -/
+
+namespace Janus.Amd64.FP
+
+open Janus.Float
+
+variable {X Y : Option Nat} {x y : Nat}
+
+theorem c0 : IEEEMode (ctl 0x1F80) := IEEEMode.default
+theorem rc0 : (ctl 0x1F80).rc = .rne := by decide
+
+theorem b64Std : binary64.Std := Or.inr rfl
+
+theorem binop_lt (op : BinOp) (hop : op = .add ∨ op = .sub ∨ op = .mul ∨ op = .div) (x y : Nat)
+    (hx : x < 2 ^ 64) (hy : y < 2 ^ 64) : (binop op binary64 (ctl 0x1F80) x y).res < 2 ^ 64 := by
+  rcases hop with rfl | rfl | rfl | rfl
+  · exact (binop_add_ieee c0 binary64 b64Std x y hx hy).1
+  · exact (binop_sub_ieee c0 binary64 b64Std x y hx hy).1
+  · exact (binop_mul_ieee c0 binary64 b64Std x y hx hy).1
+  · exact (binop_div_ieee c0 binary64 b64Std x y hx hy).1
+
+/-- The lifted operations: `ADDSD`, `SUBSD`, `MULSD`, `DIVSD` deliver `O.add2` & co. -/
+theorem x_add (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.add2 X Y) (binop .add binary64 (ctl 0x1F80) x y).res := by
+  have h := (binop_add_ieee c0 binary64 b64Std x y hxl hyl).2
+  rw [rc0] at h
+  cases X with
+  | none => simp only [ResultIs] at hx; simp only [O.add2, Option.bind_none]
+            rwa [show add binary64 .rne x y = none by simp [add, hx]] at h
+  | some a =>
+    simp only [ResultIs] at hx; subst hx
+    cases Y with
+    | none => simp only [ResultIs] at hy; simp only [O.add2, Option.bind_some, Option.bind_none]
+              rwa [show add binary64 .rne x y = none by simp [add, hy]] at h
+    | some b => simp only [ResultIs] at hy; subst hy; simpa [O.add2] using h
+
+theorem x_sub (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.sub2 X Y) (binop .sub binary64 (ctl 0x1F80) x y).res := by
+  have h := (binop_sub_ieee c0 binary64 b64Std x y hxl hyl).2
+  rw [rc0] at h
+  cases X with
+  | none => simp only [ResultIs] at hx; simp only [O.sub2, Option.bind_none]
+            rwa [show sub binary64 .rne x y = none by simp [sub, hx]] at h
+  | some a =>
+    simp only [ResultIs] at hx; subst hx
+    cases Y with
+    | none => simp only [ResultIs] at hy; simp only [O.sub2, Option.bind_some, Option.bind_none]
+              rwa [show sub binary64 .rne x y = none by simp [sub, hy]] at h
+    | some b => simp only [ResultIs] at hy; subst hy; simpa [O.sub2] using h
+
+theorem x_mul (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.mul2 X Y) (binop .mul binary64 (ctl 0x1F80) x y).res := by
+  have h := (binop_mul_ieee c0 binary64 b64Std x y hxl hyl).2
+  rw [rc0] at h
+  cases X with
+  | none => simp only [ResultIs] at hx; simp only [O.mul2, Option.bind_none]
+            rwa [show mul binary64 .rne x y = none by simp [mul, hx]] at h
+  | some a =>
+    simp only [ResultIs] at hx; subst hx
+    cases Y with
+    | none => simp only [ResultIs] at hy; simp only [O.mul2, Option.bind_some, Option.bind_none]
+              rwa [show mul binary64 .rne x y = none by simp [mul, hy]] at h
+    | some b => simp only [ResultIs] at hy; subst hy; simpa [O.mul2] using h
+
+theorem x_div (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.div2 X Y) (binop .div binary64 (ctl 0x1F80) x y).res := by
+  have h := (binop_div_ieee c0 binary64 b64Std x y hxl hyl).2
+  rw [rc0] at h
+  cases X with
+  | none => simp only [ResultIs] at hx; simp only [O.div2, Option.bind_none]
+            rwa [show div binary64 .rne x y = none by simp [div, hx]] at h
+  | some a =>
+    simp only [ResultIs] at hx; subst hx
+    cases Y with
+    | none => simp only [ResultIs] at hy; simp only [O.div2, Option.bind_some, Option.bind_none]
+              rwa [show div binary64 .rne x y = none by simp [div, hy]] at h
+    | some b => simp only [ResultIs] at hy; subst hy; simpa [O.div2] using h
+
+/-- `SUBSD x, x` then `UCOMISD` with itself: `isFinite(x)`. -/
+theorem isNaN_sub_self (x : Nat) (hx : x < 2 ^ 64) :
+    isNaN binary64 (binop .sub binary64 (ctl 0x1F80) x x).res = !isFinite64 x := by
+  have h := x_sub (X := some x) (Y := some x) rfl rfl hx hx
+  rw [resultIs_nan_iff h (O.sub2_noNaN _ _)]
+  simp [O.sub2, isFinite64]
+
+/-- `UCOMISD x, y`: the result bits `ZF:PF:CF` (`MXCSR` default), NaNs included. -/
+theorem comis_res64 (sig : Bool) (x y : Nat) :
+    (comis sig binary64 (ctl 0x1F80) x y).res =
+      if isNaN binary64 x || isNaN binary64 y then 7
+      else if Val.eq (valueOf binary64 x) (valueOf binary64 y) then 4
+      else if Val.lt (valueOf binary64 x) (valueOf binary64 y) then 1 else 0 := by
+  cases hx : isNaN binary64 x <;> cases hy : isNaN binary64 y
+  · simp only [Bool.or_false, Bool.false_eq_true, ite_false]; exact comis_res c0 binary64 sig x y hx hy
+  all_goals simp [comis, relation, check, hx, hy]
+
+end Janus.Amd64.FP
