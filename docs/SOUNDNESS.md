@@ -626,8 +626,8 @@ not proved. What a theorem relies on beyond the SDM text:
   zeroes it for the destination and a legacy-SSE write leaves it alone. Both are theorems about
   the model (`Janus.Amd64.Tactic.exec_vex128_zero_upper`, `exec_sse_preserves_upper`), and the
   native oracle compares all sixteen upper halves on every case (they start nonzero in most
-  states). The AVX-512 bits above 255 and `ZMM16`–`31` are not modelled: VEX instructions zero
-  them on an AVX-512 CPU and no modelled instruction reads them.
+  states). Since WP-G the AVX-512 state is modelled too (below): a VEX write also zeroes bits
+  511:256 of its destination (`exec_avx_zero_zmm`), as the hardware does up to its `MAX_VL`.
 * **CPU features.** VEX instructions execute whenever they occur; the model assumes AVX, AVX2,
   FMA and F16C (every x86-64-v3 CPU). Go code reaches them only behind `internal/cpu` flags or
   with `GOAMD64=v3`; C compiled with `-march=x86-64-v3` requires such a CPU.
@@ -653,6 +653,64 @@ not proved. What a theorem relies on beyond the SDM text:
 * **Proof automation** (`TacticAVX2`) is not trusted: the compatibility lemmas with WP-D
   (`pintV_128`, `cvtV_128`, `vcmp_legacy`), the zero-upper theorems and the 256-bit element lemmas
   are proved from `ExecAVX`.
+
+## AVX-512 (amd64)
+
+The EVEX-encoded instructions of WP-G (`Janus/Amd64/InstrEVEX.lean`, `DecodeEVEX.lean`,
+`ExecEVEX.lean`), the VEX opmask instructions and the VEX forms of `VPCLMULQDQ` and GFNI are part
+of the trusted amd64 model: written from the Intel SDM `Operation` sections, reusing WP-D's lane
+operations and WP-F's width-generic ones (`ExecAVX.perLane` now covers four 128-bit lanes), and
+differentially tested on the host CPU (an Intel Xeon Gold 5412U, Sapphire Rapids, natively;
+`scripts/oracle-amd64.sh avx512`, docs/ORACLE-AMD64.md: 0 MISMATCH), not proved. What a theorem
+relies on beyond the SDM text:
+
+* **State.** `State.zmmHi` holds bits 511:256 of `ZMM0`–`ZMM31`, and `xmm`/`ymmHi` at indices
+  16–31 are the low halves of `ZMM16`–`ZMM31`; `State.kreg` the opmask registers `K0`–`K7`.
+  An EVEX write of `l` bits zeroes bits 511:`l` (`exec_evex_zero_upper`), a VEX write bits
+  511:`VL` (`exec_avx_zero_zmm`), legacy SSE changes none of it (`exec_sse_preserves_avx512`), and
+  `VZEROUPPER`/`VZEROALL` act on `ZMM0`–`ZMM15` only. The native oracle loads every case's
+  `ZMM0`–`ZMM31` and `K0`–`K7` (random, mostly nonzero) and compares them from the signal frame's
+  XSAVE components.
+* **The earlier models are unchanged** (`sse_compat`, `avx_compat`): with the AVX-512 state
+  erased, the result of every WP-D and WP-F instruction is what it was before WP-G (the result
+  from the state without AVX-512 state).
+* **Calls clobber the AVX-512 state.** Every trusted call contract that lets a callee return
+  (`GoABI0.Ret0`, `FFI.GoResume`, the map, interface and allocation contracts) leaves bits
+  511:256 of the `ZMM` registers and `K0`–`K7` unspecified: both Go ABIs treat them as scratch,
+  and the runtime does use them (the GC's span scanner writes `Z1`–`Z4` and `K1`). Contracts on
+  branches not yet merged need the same two existentials.
+* **CPU features.** EVEX and opmask instructions execute whenever they occur: the model assumes
+  AVX512F, AVX512BW, AVX512DQ, AVX512VL, AVX512VBMI (`VPERMB`, `VPERMI2B`, `VPERMT2B`),
+  AVX512VBMI2 (`VPCOMPRESSB/W`, `VPEXPANDB/W`), AVX512_BITALG (`VPOPCNTB/W`),
+  AVX512_VPOPCNTDQ, GFNI and VPCLMULQDQ, with the OS enabling the opmask and ZMM state (XCR0 bits
+  5–7). Go's runtime and `hash/crc32` reach them only behind `internal/cpu` flags; a theorem about
+  such a path holds on CPUs with the features (every Intel Ice Lake / Sapphire Rapids server and
+  AMD Zen 4 or later).
+* **Fault suppression.** A full-width memory operand of an element-wise instruction under a write
+  mask (the moves, the integer and bitwise arithmetic, `VPTERNLOG`, the variable shifts and
+  rotates, `VPOPCNT*`, the compares, `VPBLENDM*`, the floating-point arithmetic: exception classes
+  `E1`, `E2`, `E4`) accesses only its selected elements; masked-off elements are not checked and
+  cannot fault, as the SDM specifies and the oracle confirms with operands that straddle the end of
+  the buffer. Every other memory operand (the `E4NF`/`E6NF` classes: permutes, shuffles, GFNI,
+  `VPCLMULQDQ`, inserts, extracts, broadcasts, `VPMOVSX/ZX`, and every broadcast element) is
+  checked in full, which is at least as strict as hardware where the SDM class was not certain.
+  The model also faults unless a masked operand lies below `2^47`, and checks the alignment of
+  `VMOVDQA32/64`/`VMOVAPS/PD` whatever the mask; both are stricter than the host, which completes
+  a masked misaligned aligned-move (model gaps, not mismatches).
+* **Embedded rounding and SAE.** `{er}` replaces `MXCSR.RC` and, like `{sae}`, suppresses every
+  floating-point exception (no `MXCSR` flags, no `#XM`); `DAZ`/`FTZ` still apply. Masked-off
+  elements raise no exception.
+* **Rejected rather than guessed:** `{z}` without a mask register, `{z}` with a memory
+  destination, a mask on the instructions without one, `EVEX.b` on register forms other than the
+  floating-point ones, `EVEX.L'L = 11`, the APX/reserved prefix bits, maps other than 1–3,
+  any legacy prefix before `62`, and every opcode outside the decoded set (the scalar EVEX forms,
+  conversions, `VPCONFLICT`, `VPLZCNT`, gathers/scatters, FP16, `VNNI`, `IFMA`). The oracle found
+  three encodings the decoder had first rejected and hardware accepts: `VEX.B` set on an opmask
+  `r/m`, `EVEX.R`/`R'` set on the `71`/`72`/`73` shift groups, and `VCMPPS/PD` with `imm8 ≥ 32`
+  (only bits 4:0 count); the decoder accepts them now, with oracle agreement.
+* **Proof automation** (`TacticEVEX`) is not trusted: the zero-upper and compatibility
+  theorems, `setZ_128`/`setZ_256` (an EVEX.128/256 write is WP-F's VEX write) and the simp lemmas
+  are proved from the model.
 
 ## Floating point
 

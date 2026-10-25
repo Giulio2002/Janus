@@ -51,6 +51,18 @@ janus_rfl_eqns ExecEVEX.exec [janus64_exec]
 attribute [janus64_exec] ExecEVEX.getZ ExecEVEX.rdV ExecEVEX.rdLow ExecEVEX.done ExecEVEX.merge
   ExecEVEX.selected ExecEVEX.kb ExecEVEX.repl ExecEVEX.evalOp ExecEVEX.evalUop State.zmm
   ExecEVEX.EOp.suppress ExecEVEX.EUOp.suppress ExecEVEX.EOp.count ExecEVEX.pintElementwise ExecEVEX.rdK
+  ExecEVEX.rdMasked ExecEVEX.stMasked ExecEVEX.icmp
+
+/-- The address function of an AVX-512 instruction, where it is applied. -/
+@[janus64_exec] theorem eaNat_apply (s : State) (next : W64) (a : Addr) : eaNat s next a = (ea s next a).toNat := rfl
+
+/-- `allN` of a literal count, one element at a time (with literal indices, which `omega` reads). -/
+@[janus64_exec] theorem allN_pos (n : Nat) (f : Nat → Bool) (h : 0 < n) :
+    ExecSSE.allN n f = (ExecSSE.allN (n - 1) f && f (n - 1)) := by
+  obtain ⟨k, rfl⟩ : ∃ k, n = k + 1 := ⟨n - 1, by omega⟩
+  rfl
+
+@[janus64_exec] theorem allN_zero (f : Nat → Bool) : ExecSSE.allN 0 f = true := rfl
 
 /-- The EVEX register write in the normal form of the scalar instructions. -/
 @[janus64_exec] theorem ExecEVEX.setZ_eq (s : State) (l n v : Nat) :
@@ -62,6 +74,45 @@ attribute [janus64_exec] ExecEVEX.getZ ExecEVEX.rdV ExecEVEX.rdLow ExecEVEX.done
 /-- The opmask write in the register-file normal form. -/
 @[janus64_exec] theorem ExecEVEX.setK_eq (s : State) (n v : Nat) :
     ExecEVEX.setK s n v = { s with kreg := setRegF s.kreg n (BitVec.ofNat 64 v) } := rfl
+
+/-! ## Simp set: 512-bit values -/
+
+set_option exponentiation.threshold 600
+
+private theorem p256 : (2 : Nat) ^ 256 =
+    115792089237316195423570985008687907853269984665640564039457584007913129639936 := by rfl
+private theorem p512 : (2 : Nat) ^ 512 =
+    13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084096 := by rfl
+
+/-- Re-assembling a 512-bit value that `ExecEVEX.setZ` split (bits 511:256 above the 256-bit
+`ymmJoin`, which `ymmJoin_ofNat` already re-assembled). -/
+@[janus64_exec, janus64_post] theorem zmm_join (x : Nat) :
+    x / 115792089237316195423570985008687907853269984665640564039457584007913129639936 %
+        115792089237316195423570985008687907853269984665640564039457584007913129639936 *
+        115792089237316195423570985008687907853269984665640564039457584007913129639936 +
+      x % 115792089237316195423570985008687907853269984665640564039457584007913129639936 =
+    x % 13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084096 := by
+  rw [← p256, ← p512, show (2 : Nat) ^ 512 = 2 ^ 256 * 2 ^ 256 by rw [← Nat.pow_add], Nat.mod_mul]
+  rw [Nat.mul_comm]; omega
+
+@[janus64_exec, janus64_post] theorem readLE_mod_64 (m : Memory) (a : Nat) :
+    m.readLE a 64 %
+        13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084096 =
+      m.readLE a 64 :=
+  Nat.mod_eq_of_lt (by have := Janus.Arm64.Memory.readLE_lt m a 64; rw [← p512]; simpa using this)
+
+/-- A vector built element by element is below the modulus of its width. -/
+@[janus64_exec, janus64_post] theorem ofElems_mod_of_le (e n : Nat) (f : Nat → Nat) (m : Nat)
+    (h : 2 ^ (e * n) ≤ m) : ofElems e n f % m = ofElems e n f :=
+  Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le (ofElems_lt e n f) h)
+
+open Lean Meta Simp in
+/-- `ymmJoin` of two `BitVec` literals (the halves `setZ`/`setV` split a constant into). -/
+simproc [janus64_exec, janus64_post] reduceYmmJoin (ymmJoin _ _) := fun e => do
+  let_expr ymmJoin hi lo := e | return .continue
+  let some ⟨_, hv⟩ ← getBitVecValue? hi | return .continue
+  let some ⟨_, lv⟩ ← getBitVecValue? lo | return .continue
+  return .done { expr := mkNatLit (hv.toNat * 2 ^ 128 + lv.toNat) }
 
 /-! ## Compatibility of EVEX.128/256 with VEX -/
 
@@ -173,7 +224,7 @@ theorem avx_compat (s : State) (next : W64) (pc : Nat) (ea : Addr → Nat) (i : 
 /-- `exec` of an AVX-512 instruction is `ExecEVEX.exec`. -/
 theorem exec_evex (i : EvexI XLoc Loc Addr) (len : Nat) (s : State) :
     exec (.evex i) len s = ExecEVEX.exec s (BitVec.ofNat 64 ((s.rip.toNat + len) % 2 ^ 64)) s.rip.toNat
-      (fun a => (ea s (BitVec.ofNat 64 ((s.rip.toNat + len) % 2 ^ 64)) a).toNat) i := rfl
+      (eaNat s (BitVec.ofNat 64 ((s.rip.toNat + len) % 2 ^ 64))) i := rfl
 
 /-- **The EVEX zero-upper rule**, for a decoded AVX-512 instruction. -/
 theorem exec_evex_zero_upper (i : EvexI XLoc Loc Addr) (len : Nat) (s s' : State)

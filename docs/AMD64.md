@@ -13,6 +13,7 @@ proofs.
 | semantics | `Janus/Amd64/Exec.lean` |
 | SSE packed instructions (WP-D): AST, decoder, semantics | `Janus/Amd64/InstrSSE.lean`, `Janus/Amd64/DecodeSSE.lean` (hook in `Decode.decodeLegacy`), `Janus/Amd64/ExecSSE.lean` (hook `Instr.sse` in `exec`) |
 | AVX/AVX2/FMA3/F16C on VEX-128/256 (WP-F): AST, decoder, semantics | `Janus/Amd64/InstrAVX.lean`, `Janus/Amd64/DecodeAVX.lean` (hook in `decode`, after `Decode.vexOp`), `Janus/Amd64/ExecAVX.lean` (hook `Instr.avx` in `exec`) |
+| AVX-512 (WP-G): EVEX, ZMM0–31, K0–7, the VEX opmask instructions, VEX `VPCLMULQDQ`/GFNI | `Janus/Amd64/InstrEVEX.lean`, `Janus/Amd64/DecodeEVEX.lean` (hooks in `decode`: `62`, and after `DecodeAVX.vex`), `Janus/Amd64/ExecEVEX.lean` (hook `Instr.evex` in `exec`), `Janus/Amd64/TacticEVEX.lean` (stepping, the zero-upper and compatibility theorems) |
 | programs, runner, run lemmas | `Janus/Amd64/Program.lean`, `Janus/Amd64/Run.lean` |
 | Go ABIInternal on amd64, specs | `Janus/Amd64/GoABI.lean` |
 | proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas), `Janus/Amd64/TacticAVX2.lean` (stepping `ExecAVX`, the zero-upper theorems, 256-bit element lemmas, `dot32`) |
@@ -30,9 +31,11 @@ R8..R15`), `RIP`, the six status flags, the direction flag `df`, `YMM0`–`YMM15
 specification quantifies over them like over any other field. Keeping the upper lanes in a
 field of their own matches the architecture: a legacy-SSE instruction writes only `xmm`
 (bits 255:128 preserved, SDM Vol. 1 §14.1.3), a VEX.128 instruction writes `xmm` and zeroes
-`ymmHi` of its destination, a VEX.256 one writes both. The AVX-512 state (`ZMM` bits 511:256,
-`ZMM16`–`31`, mask registers) is not modelled; no modelled instruction reads it, VEX instructions
-only zero it. Memory is the
+`ymmHi` of its destination, a VEX.256 one writes both. The AVX-512 state (WP-G) extends the split
+upward: `zmmHi n` is bits 511:256 of `ZMMn`, indices 16–31 of `xmm`/`ymmHi`/`zmmHi` are
+`ZMM16`–`ZMM31`, and `kreg` holds the opmask registers `K0`–`K7` (both default to zero). Legacy SSE
+leaves all of it alone, a VEX write zeroes bits 511:`VL` of its destination, an EVEX write of `l`
+bits zeroes bits 511:`l`; `VZEROUPPER`/`VZEROALL` affect `ZMM0`–`ZMM15` only. Memory is the
 checked byte memory shared with arm64 (`Janus.Arm64.Memory`): every access must lie inside one
 caller-provided region that ends at or below `2^48`, and a store needs a writable region and
 must not touch any read-only one. The bound is shared with arm64 and is sound for amd64 too:
@@ -63,7 +66,7 @@ handles legacy prefixes, REX, the one- and two-byte opcode maps, ModRM, SIB, RIP
 * `F2`/`F3` except where they select an instruction (`F3` is `REP` on `MOVS`/`STOS`; `F2`
   and segment overrides on string instructions are rejected);
 * segment overrides on branches (hints and CET `NOTRACK`);
-* EVEX and XOP, and the VEX instructions not listed below (WP-F's list: `Janus/Amd64/DecodeAVX.lean`
+* XOP, the EVEX instructions outside WP-G's list (below), and the VEX instructions not listed below (WP-F's list: `Janus/Amd64/DecodeAVX.lean`
   and below); VEX after any other prefix
   (`66 F2 F3 F0 REX` make it `#UD`; segment overrides are rejected too); a VEX instruction with
   a field the SDM reserves set (`VEX.vvvv ≠ 1111` where it is unused, `VEX.W1` on
@@ -126,6 +129,31 @@ variable shifts `VPSLLVD/Q VPSRLVD/Q VPSRAVD`; the gathers `VPGATHERDD/DQ/QD/QQ`
 PS/PD` at both lengths; `VZEROALL`; F16C `VCVTPH2PS`, `VCVTPS2PH`. With them every VEX blocker of
 the C corpus at `-O3 -march=x86-64-v3` is gone, and of a 773-function AVX2-intrinsics corpus
 (llama.cpp's ggml) too (`docs/COVERAGE.md`).
+
+**AVX-512 (WP-G)** (`Janus/Amd64/{InstrEVEX,DecodeEVEX,ExecEVEX}.lean`): EVEX (`62`, maps 1–3)
+with 32 registers, vector lengths 128/256/512, write masks with merging and zeroing (`{z}`),
+embedded broadcast (`{1toN}`), compressed `disp8·N` displacements by tuple type, embedded rounding
+(`{er}`) and `{sae}`, and fault suppression for masked memory operands. Instructions: the moves
+`VMOVDQU8/16/32/64`, `VMOVDQA32/64`, `VMOVUPS/PD`, `VMOVAPS/PD` (load, store, register; masked);
+`VPANDD/Q VPANDND/Q VPORD/Q VPXORD/Q` and the `PS`/`PD` logic forms; `VPTERNLOGD/Q`; the EVEX
+forms of WP-D's packed integer operations (`VPADD*`, `VPSUB*`, saturating, `VPAVG*`,
+`VPMULL*` incl. `VPMULLQ`, `VPMULH*`, `VPMULUDQ`/`VPMULDQ`, `VPMADD*`, `VPSADBW`, `VPMIN*`/`VPMAX*`
+at all widths, `VPABS*`, `VPUNPCK*`, `VPACK*`, `VPSHUFB`, the shifts by `xmm/m128` and by `imm8`
+incl. `VPSRAQ`, `VPSLLDQ`/`VPSRLDQ`, `VPSHUFD/HW/LW`, `VPALIGNR`); `VPROLD/Q`, `VPRORD/Q`,
+`VPROLVD/Q`, `VPRORVD/Q`, `VPSLLV*`/`VPSRLV*`/`VPSRAV*` (W, D, Q); `VPERMB/W/D/Q`, `VPERMPS/PD`,
+`VPERMI2B/W/D/Q/PS/PD`, `VPERMT2B/W/D/Q/PS/PD`, `VPERMQ/PD imm8`, `VALIGND/Q`,
+`VSHUFI/F32X4/64X2`; `VPOPCNTB/W/D/Q`; `VPCOMPRESSB/W/D/Q` and `VPEXPANDB/W/D/Q` (register and
+memory); `VPCMP[U]B/W/D/Q`, `VPCMPEQ*`, `VPCMPGT*`, `VPTESTM*`, `VPTESTNM*` into a mask;
+`VPBLENDMB/W/D/Q`, `VBLENDMPS/PD`; `VEXTRACTF/I32X4/64X2/32X8/64X4`, `VINSERTF/I...`;
+`VPBROADCASTB/W/D/Q` (from `xmm/m` and from a general register), `VBROADCASTSS/SD`,
+`VBROADCASTF/I32X2/32X4/64X2/32X8/64X4`; `VPMOVSX/ZX`; `VADD/SUB/MUL/DIV/MIN/MAX/SQRT PS/PD` with
+`{er}`/`{sae}`, `VCMPPS/PD` into a mask; `VGF2P8AFFINEQB`, `VGF2P8AFFINEINVQB`, `VGF2P8MULB`;
+`VPCLMULQDQ` (EVEX and VEX.128/256); and the VEX opmask instructions `KMOVB/W/D/Q` (mask, general
+register, memory), `KAND KANDN KOR KXOR KXNOR KADD KNOT` (B/W/D/Q), `KSHIFTL/R`, `KORTEST`,
+`KTEST`, `KUNPCKBW/WD/DQ`. That is every AVX-512 instruction of Go 1.26's std (the 29
+`internal/runtime/gc/scan` kernels, `hash/crc32.ieeeCLMUL`, `runtime.asyncPreempt`'s state save
+and restore; `docs/COVERAGE.md`). The CPU features this assumes are listed in
+`docs/SOUNDNESS.md` (AVX-512 section).
 
 **SSE packed instructions (WP-D)**, legacy-encoded on `XMM` (`Janus/Amd64/{InstrSSE,DecodeSSE,
 ExecSSE}.lean`): SSE2 integer `PADDB/W/D/Q PSUBB/W/D/Q PADDS/PADDUS/PSUBS/PSUBUS B/W PMULLW

@@ -91,14 +91,16 @@ def repl (c l v : Nat) : Nat := ofElems c (l / c) fun _ => v
 /-! ## Memory operands -/
 
 /-- The `l`-bit memory operand at `addr` with only the elements selected by `k` accessed (fault
-suppression; masked-off elements read as 0). -/
+suppression; masked-off elements read as 0). Element `i` is checked at `addr + i·e/8`; its value is
+element `i` of the bytes at `addr` (`readLE` itself checks nothing, so this is the same as reading
+the element on its own). -/
 def rdMasked (s : State) (addr l e k : Nat) : Except Fault Nat :=
   let n := l / e
   let sz := e / 8
   if addr + l / 8 > 2 ^ 47 then .error (.outsideAllocation addr (l / 8))
   else if !(allN n fun i => !kb s k i || s.mem.accessible (addr + i * sz) sz false) then
     .error (.outsideAllocation addr (l / 8))
-  else .ok (ofElems e n fun i => if kb s k i then s.mem.readLE (addr + i * sz) sz else 0)
+  else .ok (ofElems e n fun i => if kb s k i then elem (s.mem.readLE addr (l / 8)) e i else 0)
 
 /-- A vector source operand of `l` bits with `e`-bit elements: a register, a broadcast element
 (`bc ≠ 0`, `bc/8` bytes replicated), or `l/8` bytes of memory, of which only the elements

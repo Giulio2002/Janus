@@ -47,14 +47,94 @@ func sweepAmd64(code []byte, base uint64) []amd64Inst {
 			continue
 		}
 		inst, err := x86asm.Decode(code[off:], 64)
-		if err != nil || inst.Len == 0 {
-			off++
-			continue
+		if err != nil || inst.Len == 0 || inst.Op == 0 || code[off] == 0x62 {
+			// EVEX (AVX-512, which this x86asm does not know at all) and the VEX encodings it
+			// does not know (the opmask instructions): length from the encoding, and a
+			// RIP-relative operand kept for the data references
+			if n, disp, rip := vexLenRIP(code[off:]); n > 0 {
+				in := x86asm.Inst{Len: n}
+				if rip {
+					in.Args[0] = x86asm.Mem{Base: x86asm.RIP, Disp: disp}
+				}
+				out = append(out, amd64Inst{PC: base + uint64(off), Inst: in})
+				off += n
+				continue
+			}
+			if err != nil || inst.Len == 0 {
+				off++
+				continue
+			}
 		}
 		out = append(out, amd64Inst{PC: base + uint64(off), Inst: inst})
 		off += inst.Len
 	}
 	return out
+}
+
+// vexLenRIP is the length of a VEX (C4/C5) or EVEX (62) instruction at b that x86asm cannot
+// decode (0 if b is not one), and its RIP-relative displacement (mod = 00, r/m = 101: disp32,
+// never compressed). An imm8 follows in map 3 and for the map-1 opcodes 70-73, C2, C4-C6.
+// Untrusted, like the rest of the sweep: Lean decodes every instruction again.
+func vexLenRIP(b []byte) (int, int64, bool) {
+	if len(b) < 3 {
+		return 0, 0, false
+	}
+	var mp, n int
+	switch b[0] {
+	case 0xC5:
+		mp, n = 1, 2
+	case 0xC4:
+		mp, n = int(b[1]&0x1F), 3
+	case 0x62:
+		if len(b) < 4 {
+			return 0, 0, false
+		}
+		mp, n = int(b[1]&0x07), 4
+	default:
+		return 0, 0, false
+	}
+	if len(b) < n+2 {
+		return 0, 0, false
+	}
+	op, modrm := b[n], b[n+1]
+	l := n + 2
+	mod, rm := modrm>>6, modrm&7
+	rip := false
+	var disp int64
+	if mod != 3 {
+		if rm == 4 {
+			if len(b) <= l {
+				return 0, 0, false
+			}
+			sib := b[l]
+			l++
+			if mod == 0 && sib&7 == 5 {
+				l += 4
+			}
+		}
+		switch mod {
+		case 0:
+			if rm == 5 {
+				if len(b) < l+4 {
+					return 0, 0, false
+				}
+				rip = true
+				disp = int64(int32(uint32(b[l]) | uint32(b[l+1])<<8 | uint32(b[l+2])<<16 | uint32(b[l+3])<<24))
+				l += 4
+			}
+		case 1:
+			l++
+		case 2:
+			l += 4
+		}
+	}
+	if mp == 3 || mp == 1 && (op >= 0x70 && op <= 0x73 || op == 0xC2 || op == 0xC4 || op == 0xC5 || op == 0xC6) {
+		l++
+	}
+	if l > len(b) || l > 15 {
+		return 0, 0, false
+	}
+	return l, disp, rip
 }
 
 // amd64BranchTarget returns the target of a direct (relative) JMP, Jcc, CALL, LOOP or

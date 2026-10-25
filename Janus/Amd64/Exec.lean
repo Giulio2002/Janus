@@ -136,6 +136,10 @@ instruction. (In the `janus64_exec` simp set, as `ea` is.) -/
 def ea (s : State) (next : W64) (a : Addr) : W64 :=
   if a.fs then s.fsBase + eaOff s next a else eaOff s next a
 
+/-- `ea` as a natural number, the address function the AVX-512 executor receives (a named
+function, so that the proof automation rewrites it only where it is applied). -/
+def eaNat (s : State) (next : W64) (a : Addr) : Nat := (ea s next a).toNat
+
 def readLoc (s : State) (next : W64) (w : Nat) : Loc → Except Fault (BitVec w)
   | .reg r => .ok (s.getReg w r)
   | .high r => .ok ((s.getHigh r).setWidth w)
@@ -1194,7 +1198,7 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
     if addr % size ≠ 0 then .error (.misaligned addr) else exec i len s
   | .sse i => ExecSSE.exec s next pc (fun a => (ea s next a).toNat) i
   | .avx i => ExecAVX.exec s next pc (fun a => (ea s next a).toNat) i
-  | .evex i => ExecEVEX.exec s next pc (fun a => (ea s next a).toNat) i
+  | .evex i => ExecEVEX.exec s next pc (eaNat s next) i
 
 /-- Decode and execute the instruction at the start of `bytes` (the code at `s.rip`). -/
 def step (bytes : List Nat) (s : State) : Except Fault State :=
