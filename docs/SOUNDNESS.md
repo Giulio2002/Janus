@@ -94,6 +94,13 @@ These are trusted, not proved.
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
    dereference is a `SIGSEGV`, turned into a panic by `runtime.sigpanic`) are not stub calls:
    the model reports them as faults, and `NeverPanics` excludes faults too.
+   The same pin authenticates the runtime functions a framework contract library describes
+   (`runtimeContractStubs`: the interface runtime's `convT*`, `assertE2I(2)`, `typeAssert`,
+   `interfaceSwitch`, `efaceeq`, `ifaceeq`): a `--contract` that names one is accepted only if
+   the function passes the checks above (its callees are identified by name only), and the
+   extraction records it as `"pinned": true`, so the contract hypothesis of a theorem is about the
+   runtime's own code. Other `--contract` names are not pinned (a contract over arbitrary code
+   is still sound: the theorem holds for whatever code satisfies it).
    The extractor also classifies `runtime.cgocall`, `_cgo_topofstack` and `runtime.cgoUse` as
    `external` stubs (the cgo boundary): a run ends there too, and only the contract semantics of
    `Janus.FFI` (`ReturnsC`, with the contract named in the statement) continues past them; see
@@ -614,6 +621,25 @@ no concurrent GC, no preemption):
   slow path (`morestack`), relocating the caller's frame, which the contracts exclude; (5) the
   GC's concurrent work (marking, sweeping, assists, finalizers) is outside the model; Go's
   collector does not move objects, so a returned pointer stays valid.
+* **Interfaces** (`Janus/Spec/Type.lean`, `Janus/Contracts/Iface.lean`, `IfaceAmd64.lean`;
+  docs/RUNTIME-CONTRACTS.md, "Interfaces"). `convT`, `convTnoptr`, `convT16/32/64`,
+  `convTstring`, `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch`,
+  `efaceeq` and `ifaceeq` as `Summary`s over an abstract model `R : IfaceModel` that the theorem
+  quantifies over. Trusted, as claims about the Go 1.26 runtime: (1) each contract (a box in the
+  runtime's memory holding the value; the itab `getitab` returns, or `0`; `switchCase`'s first
+  implemented case; `efaceEqual`/`ifaceEqual`), with every panic and throw path excluded by its
+  precondition; (2) the laws `R.Laws` (descriptors readable in `R.priv`, itabs non-zero, a
+  `TFlagRegularMemory` type compares its `Size_` bytes); (3) where a theorem uses it,
+  `StaticItabs` (`getitab` returns the static `go:itab.*` objects: `runtime.itablink` lists every
+  reachable itab and `itabsinit` adds them before Go code runs, so no plugins or shared
+  libraries); (4) the cache invariants `TACacheOK`/`ISCacheOK` as what the runtime maintains
+  (`buildTypeAssertCache`, `buildInterfaceSwitchCache`; the empty caches satisfy them); (5) our
+  reading of the `internal/abi` layouts. The code is the runtime's: the extractor pins these
+  thirteen functions like stubs (`runtimeContractStubs`, below), their callees by name only. Every
+  contract is satisfiable (`Janus/Contracts/IfaceSat.lean`, `IfaceSatAmd64.lean`: a model, code
+  and a state satisfying the precondition), so no theorem using them is vacuous by an
+  unsatisfiable contract; each interface example also proves its whole hypothesis set jointly
+  satisfiable for its binary and its conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). Boxes are not known to keep their value across later runtime calls.
 * **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
   `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
   `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)

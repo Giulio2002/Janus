@@ -30,7 +30,8 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
      Triangle GotoSum Find2D RowsWith Log2 TotalMeters TotalFeet Fact SumBelow ReverseArray DivMod10
      SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
-     Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder)
+     Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
+     Box AsHasher Classify Equal)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
@@ -75,7 +76,12 @@ verify_one() {
     printf '%-9s ok  %6.1fs\n' "$n" "$t" | tee "$lines/$n"
     # further theorems of the same proof file (F64ToU64's `exact` and `saturation`, ...)
     local thm
-    for thm in $(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}'); do
+    # and the non-vacuity witnesses (Proof.Witness.nonvacuous / .returns: the theorem's
+    # hypotheses hold together for a model of the runtime, and its conclusion is reached)
+    local extra_thms
+    extra_thms=$(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}' || true)
+    if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then extra_thms="$extra_thms Witness.nonvacuous Witness.returns"; fi
+    for thm in $extra_thms; do
       if bin/janus verify "$out" --proof "examples/proofs/$n.lean" --theorem "Proof.$thm" \
           ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
         printf '%-9s ok  (Proof.%s)\n' "$n" "$thm" | tee -a "$lines/$n"

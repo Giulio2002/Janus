@@ -27,7 +27,7 @@ arm64=(MallocFast ClearWords A64IndexByte CopyBlock AddLimbs A64Equal64 Add Max 
        ReverseArray RowsWith SwapBig DotBoth Find2D Fact Compose Shifts AlignUp TotalMeters TotalFeet
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
        Mod IncTwice Bump GlobalTable Table MakeAdder
-       WrongAdd)
+       Box AsHasher Classify Equal WrongAdd)
 amd64=()
 for d in examples/proofs-amd64/*/; do amd64+=("$(basename "$d")"); done
 tmp="$(mktemp -d)"
@@ -39,7 +39,7 @@ for n in "${arm64[@]}"; do
 done
 for f in "${amd64[@]}"; do
   par_run 'out="$(scripts/verify-amd64-examples.sh -j 1 "$f" 2>&1)" || broken+=("amd64:$f")
-  grep -E "Proof\.(correctness|panics)" <<<"$out" | sed "s/^/amd64  /"'
+  grep -E "Proof\.(correctness|panics|Witness)" <<<"$out" | sed "s/^/amd64  /"'
 done
 par_wait
 rm -rf "$tmp"
