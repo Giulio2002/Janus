@@ -117,6 +117,69 @@ def PanicPre (P : PanicRuntime) (nargs : Nat) (s : State) : Prop :=
   P.Env s.mem ∧ StackGuardOK s P.depth ∧ CallOK s P.depth nargs ∧
     Outside (s.sp.toNat - P.depth) (P.depth + 8 + 8 * nargs) P.priv
 
+/-- What a caller needs to call the panic runtime from inside a frame of `frame` bytes below its
+`SP`, with `above` bytes of its caller's frame it may write (the interface runtime's
+`Iface.CallerOK`, for the model `P`): the runtime usable, the stack guard `P.depth + frame` below
+`SP`, the window `[SP - P.depth - frame, SP + above)` writable and outside `P.priv`, and the
+goroutine's guard word `16(g)` outside the window and `P.priv`. -/
+def PanicCallerOK (P : PanicRuntime) (s : State) (frame above : Nat) : Prop :=
+  P.Env s.mem ∧ StackGuardOK s (P.depth + frame) ∧ s.sp.toNat % 16 = 0 ∧
+    8 ≤ P.depth ∧ P.depth + frame ≤ s.sp.toNat ∧ s.sp.toNat + above ≤ 2 ^ 48 ∧
+    s.mem.accessible (s.sp.toNat - (P.depth + frame)) (P.depth + frame + above) true = true ∧
+    Outside (s.sp.toNat - (P.depth + frame)) (P.depth + frame + above) P.priv ∧
+    Spec.Disjoint ((s.regs 28).toNat + 16) 8 (s.sp.toNat - (P.depth + frame)) (P.depth + frame + above) ∧
+    Outside ((s.regs 28).toNat + 16) 8 P.priv
+
+/-- `PanicPre` at a call site `S`, from the caller's `PanicCallerOK` at its entry `s`. -/
+theorem PanicPre.of_parts {P : PanicRuntime} {s S : State} {frame above nargs : Nat}
+    (hc : PanicCallerOK P s frame above) (henv : P.Env S.mem)
+    (hacc : ∀ a n w, S.mem.accessible a n w = s.mem.accessible a n w)
+    (hguard : S.mem.readLE ((s.regs 28).toNat + 16) 8 = s.mem.readLE ((s.regs 28).toNat + 16) 8)
+    (hsp : S.sp.toNat = s.sp.toNat - frame) (hg : S.regs 28 = s.regs 28)
+    (hlr : (S.regs 30).toNat % 4 = 0) (hlr' : (S.regs 30).toNat < 2 ^ 48) (hfr : frame % 16 = 0)
+    (hn : 8 + 8 * nargs ≤ frame + above) : PanicPre P nargs S := by
+  obtain ⟨-, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, -⟩ := hc
+  simp only [regG, stackguard0Offset, stackguard0] at hg1 hg2 hg3
+  refine ⟨henv, ⟨?_, ?_, ?_⟩, ⟨hlr, hlr', ?_, ?_, hd8, ?_, ?_⟩, ?_⟩
+  · simp only [regG, stackguard0Offset, hg]; omega
+  · simp only [regG, stackguard0Offset, hg, hacc]; exact hg2
+  · simp only [stackguard0, regG, stackguard0Offset, hg, hguard, hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp, hacc]; exact Memory.accessible_mono _ hst (by omega) (by omega)
+  · rw [hsp]; exact Outside.of_sub hout (by omega) (by omega)
+
+/-- `PanicPre.of_parts` for a call whose state's memory differs from the caller's entry memory
+only inside the caller's window. -/
+theorem PanicPre.of_caller {P : PanicRuntime} (hl : P.Laws) {s S : State}
+    {frame above nargs : Nat} (hc : PanicCallerOK P s frame above)
+    (hf : MemFrame s.mem S.mem [(s.sp.toNat - (P.depth + frame), s.sp.toNat + above)])
+    (hsp : S.sp.toNat = s.sp.toNat - frame) (hg : S.regs 28 = s.regs 28)
+    (hlr : (S.regs 30).toNat % 4 = 0) (hlr' : (S.regs 30).toNat < 2 ^ 48) (hfr : frame % 16 = 0)
+    (hn : 8 + 8 * nargs ≤ frame + above) : PanicPre P nargs S := by
+  have hc' := hc
+  obtain ⟨henv, ⟨hg1, -, -⟩, -, -, -, -, -, hout, hgd, -⟩ := hc'
+  simp only [regG, stackguard0Offset, Spec.Disjoint] at hg1 hgd
+  refine PanicPre.of_parts hc (hl.env_frame _ _ henv
+    (Map.Agrees.of_window hf (Outside.of_sub hout (by omega) (by omega)))) hf.accessible
+    (hf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)) hsp hg hlr hlr' hfr hn
+
+/-- `PanicPre` at a later call site `S`: memory changed only in `P.priv` and the caller's window
+since the entry `s` (earlier runtime calls), and the runtime usable in `S.mem`. -/
+theorem PanicPre.of_frame {P : PanicRuntime} {s S : State} {frame above nargs : Nat}
+    (hc : PanicCallerOK P s frame above)
+    (hf : MemFrame s.mem S.mem (P.priv ++ [(s.sp.toNat - (P.depth + frame), s.sp.toNat + above)]))
+    (henv : P.Env S.mem)
+    (hsp : S.sp.toNat = s.sp.toNat - frame) (hg : S.regs 28 = s.regs 28)
+    (hlr : (S.regs 30).toNat % 4 = 0) (hlr' : (S.regs 30).toNat < 2 ^ 48) (hfr : frame % 16 = 0)
+    (hn : 8 + 8 * nargs ≤ frame + above) : PanicPre P nargs S := by
+  have hc' := hc
+  obtain ⟨-, ⟨hg1, -, -⟩, -, -, -, -, -, -, hgd, hgo⟩ := hc'
+  simp only [regG, stackguard0Offset, Spec.Disjoint] at hg1 hgd
+  refine PanicPre.of_parts hc henv hf.accessible (hf.readLE _ _ ?_) hsp hg hlr hlr' hfr hn
+  rw [outside_append]; exact ⟨hgo, by simp only [outside_cons, outside_nil, and_true]; omega⟩
+
 /-- `runtime.deferproc(fn)` (Go 1.26 `panic.go`): records a heap `_defer` with the funcval `fn`
 and returns normally (the record lives in `P.priv`). The funcval argument is not used by the
 model: the contract says only that the call returns. -/
@@ -143,12 +206,71 @@ closures a theorem provides, and is confined to `P.priv` and the callee stack wi
 def DeferreturnContract (p : Program) (addr : Nat) (P : PanicRuntime) : Prop :=
   Summary p addr (PanicPre P 0) (PanicRet P 0)
 
-/-- `runtime.gorecover(argp)` (Go 1.26): called from a deferred function; returns the current
-panic's value if the deferred function was invoked directly by the panicking frame, else `nil`.
-The contract leaves which it is to the model: the result in `X0` is some value; a theorem that
-uses `recover` states separately which. Returns normally. -/
+/-- `runtime.gorecover()` (Go 1.26 `panic.go`, no arguments): `recover()`. It returns the
+current panic's value if it was called directly by the deferred call the panic is running (the
+caller is not a wrapper and its frame's saved return address, `[FP + 8]` on the frame-pointer chain
+at entry, is that deferred call's return point into `runtime.gopanic`), and marks the panic
+recovered; with no active panic (`P.Calm`) it returns `nil`. In every other situation the contract
+says nothing about the result. It returns normally. -/
 def GorecoverContract (p : Program) (addr : Nat) (P : PanicRuntime) : Prop :=
-  Summary p addr (PanicPre P 1) (PanicRet P 1)
+  Summary p addr
+    (fun s => PanicPre P 0 s ∧ s.mem.accessible ((s.regs 29).toNat + 8) 8 false = true ∧
+      (s.regs 29).toNat + 16 ≤ 2 ^ 48)
+    (fun s s' => PanicRet P 0 s s' ∧
+      (P.Calm s.mem (s.regs 28).toNat →
+        s'.regs 0 = 0 ∧ s'.regs 1 = 0 ∧ P.Calm s'.mem (s.regs 28).toNat) ∧
+      (∀ v rp, P.Panicking s.mem (s.regs 28).toNat v rp → ¬ P.wrapper (s.regs 30).toNat →
+        s.mem.readLE ((s.regs 29).toNat + 8) 8 = rp →
+        (s'.regs 0).toNat = v.typ ∧ (s'.regs 1).toNat = v.data ∧
+          P.Recovered s'.mem (s.regs 28).toNat))
+
+/-- `runtime.gopanic(v)` for a frame whose only pending deferred call is an open-coded defer that
+**recovers** (Go 1.26 `gopanic` → `nextDefer` → `recovery`). The panicking frame `F` is the caller
+of `gopanic` (`F`'s `SP` is `SP` at entry); its open-coded `deferBits` byte is at `SP + bitsOff`
+and holds `1` (bit 0 pending), the deferred funcval's slot is at `SP + slotOff`, and `resume` is
+`F`'s `deferreturn` call site (`funcInfo.deferreturn`); these are the function's funcdata
+(`FUNCDATA_OpenCodedDeferInfo`) and are part of the statement. The value `v = (X0, X1)` is not nil,
+the `deferBits` byte is writable and outside `P.priv`, and the slot, the funcval it points to and
+the funcval's code word (an admissible branch target) are readable.
+
+The runtime clears the bit and calls the deferred closure — control reaches the closure's code with
+`X26` = the funcval, an admissible return point `rp = X30` inside `gopanic`, the frame-pointer
+convention, a 16-aligned `SP` at most `P.depth` bytes below `F`'s, the goroutine `X28` and `X18`
+kept, memory changed only in `P.priv`, the runtime's stack window and the cleared byte, and the
+panic active (`P.Panicking … v rp`). Then, for **every** state the closure may return in (at `rp`
+with `SP`, `X18`, `X28` restored, the runtime's stack between the closure's `SP` and `F`'s kept,
+the runtime usable) **in which the panic was recovered**, the runtime resumes `F`: control reaches
+`resume` with `SP` = `F`'s, `X29 = SP - 8`, `X18`, `X28` kept, memory changed only in `P.priv`
+and the runtime's stack window, and no panic active (`P.Calm`). If the closure does not recover,
+the contract says nothing. -/
+def GopanicRecoverContract (p : Program) (addr : Nat) (P : PanicRuntime)
+    (bitsOff slotOff resume : Nat) : Prop :=
+  ∀ s, s.pc = BitVec.ofNat 64 addr → PanicPre P 2 s → (s.regs 0).toNat ≠ 0 →
+    s.mem.readLE (s.sp.toNat + bitsOff) 1 = 1 →
+    s.sp.toNat + bitsOff + 1 ≤ 2 ^ 48 → s.mem.accessible (s.sp.toNat + bitsOff) 1 true = true →
+    Outside (s.sp.toNat + bitsOff) 1 P.priv →
+    s.sp.toNat + slotOff + 8 ≤ 2 ^ 48 → s.mem.accessible (s.sp.toNat + slotOff) 8 false = true →
+    s.mem.readLE (s.sp.toNat + slotOff) 8 + 8 ≤ 2 ^ 48 →
+    s.mem.accessible (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 false = true →
+    s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 % 4 = 0 →
+    s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 < 2 ^ 48 →
+    ∃ k c, Program.Steps p s k c ∧
+      c.pc = BitVec.ofNat 64 (s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8) ∧
+      c.regs 26 = BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + slotOff) 8) ∧
+      c.regs 28 = s.regs 28 ∧ c.regs 18 = s.regs 18 ∧ c.regs 29 = c.sp - 8 ∧
+      c.sp.toNat % 16 = 0 ∧ s.sp.toNat - P.depth ≤ c.sp.toNat ∧ c.sp.toNat + 16 ≤ s.sp.toNat ∧
+      (c.regs 30).toNat % 4 = 0 ∧ (c.regs 30).toNat < 2 ^ 48 ∧
+      P.Panicking c.mem (s.regs 28).toNat ⟨(s.regs 0).toNat, (s.regs 1).toNat⟩ (c.regs 30).toNat ∧
+      P.Env c.mem ∧ c.mem.readLE (s.sp.toNat + bitsOff) 1 = 0 ∧
+      MemFrame s.mem c.mem (P.priv ++ [(s.sp.toNat - P.depth, s.sp.toNat),
+        (s.sp.toNat + bitsOff, s.sp.toNat + bitsOff + 1)]) ∧
+      ∀ c', c'.pc = c.regs 30 → c'.sp = c.sp → c'.regs 28 = c.regs 28 → c'.regs 18 = c.regs 18 →
+        Map.Agrees c.mem c'.mem [(c.sp.toNat, s.sp.toNat)] → P.Env c'.mem →
+        P.Recovered c'.mem (s.regs 28).toNat →
+        ∃ k' d, Program.Steps p c' k' d ∧ d.pc = BitVec.ofNat 64 resume ∧ d.sp = s.sp ∧
+          d.regs 28 = s.regs 28 ∧ d.regs 18 = s.regs 18 ∧ d.regs 29 = s.sp - 8 ∧
+          MemFrame c'.mem d.mem (P.priv ++ [(s.sp.toNat - P.depth, s.sp.toNat)]) ∧
+          P.Env d.mem ∧ P.Calm d.mem (s.regs 28).toNat
 
 /-- `runtime.panicrangestate(state)`: always panics (a range-over-func misuse); reaching it is a
 panic with a `runtime.Error` of kind `rangeState`. Stated through `goClass` (it is a panic

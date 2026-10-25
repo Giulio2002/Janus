@@ -109,6 +109,17 @@ structure PanicRuntime where
   /-- The runtime around panics is usable in `m` (the error-type descriptors are in place, the
   goroutine's panic/defer chain is empty, …). -/
   Env : Memory → Prop
+  /-- `Panicking m g v rp`: goroutine `g` has an active, unrecovered panic with value `v`, and the
+  deferred call that panic is running returns to `rp` (a return point inside `runtime.gopanic`).
+  Only the `gopanic` contract establishes it. -/
+  Panicking : Memory → Nat → Eface → Nat → Prop
+  /-- No panic is active on goroutine `g` (`g._panic == nil`): `recover()` returns `nil`. -/
+  Calm : Memory → Nat → Prop
+  /-- The current panic of goroutine `g` has been recovered (`_panic.recovered`). -/
+  Recovered : Memory → Nat → Prop
+  /-- `pc` lies in a compiler-generated wrapper function (`abi.FuncIDWrapper`), which `recover`
+  skips when it looks for the deferred call. -/
+  wrapper : Nat → Prop
 
 /-- The laws of a panic-runtime model: the runtime-error values are genuine non-nil errors
 living in `P.priv`. The data word is left free (the compiled code never reads it). -/
@@ -119,6 +130,16 @@ structure PanicRuntime.Laws (P : PanicRuntime) : Prop where
   err_inj : ∀ (k k' : ErrKind), P.err k = P.err k' → k = k'
   /-- A positive depth (the runtime uses the stack). -/
   depth_pos : 0 < P.depth
+  /-- The environment lives in `P.priv`: memory changes elsewhere (with the same accessible
+  ranges) keep it. -/
+  env_frame : ∀ m m', P.Env m → Map.Agrees m m' P.priv → P.Env m'
+  /-- The panic state lives in `P.priv` too. -/
+  panicking_frame : ∀ m m' g v rp, P.Panicking m g v rp → Map.Agrees m m' P.priv →
+    P.Panicking m' g v rp
+  calm_frame : ∀ m m' g, P.Calm m g → Map.Agrees m m' P.priv → P.Calm m' g
+  recovered_frame : ∀ m m' g, P.Recovered m g → Map.Agrees m m' P.priv → P.Recovered m' g
+  /-- A calm goroutine has no active panic. -/
+  calm_not_panicking : ∀ m g v rp, P.Calm m g → ¬ P.Panicking m g v rp
 
 /-- A `boundsError` value (`index out of range`, `slice bounds out of range`): the runtime error
 of kind `bounds`. A specification of an out-of-range access says the call panics with this. -/
