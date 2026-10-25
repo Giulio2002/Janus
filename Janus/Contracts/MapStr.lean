@@ -40,6 +40,12 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.
 (as a little-endian number). -/
 def strKey (m : Memory) (p n : Nat) : Nat × Nat := (n, m.readLE p n)
 
+/-- Decidable equality of string keys, as a named instance: the one instance synthesis finds for
+`Nat × Nat` (`instDecidableEqProd`) comes out eta-expanded (`fun a b => …`), which the statement
+audit rejects as an inline instance (docs/AUDIT-ROUND2.md CRITICAL-1); `AMap.set`/`AMap.erase`
+on a string-keyed map use this one. -/
+instance (priority := high) strKeyDecEq : DecidableEq (Nat × Nat) := fun a b => instDecidableEqProd a b
+
 /-- Equal strings (Go's `==` on the headers at `a` and `b`) are the same key. -/
 theorem strKey_eq_of_strEq {m : Memory} {a b : Nat} (h : strEq m a b = true) :
     strKey m (strPtr m a) (strLen m a) = strKey m (strPtr m b) (strLen m b) := by
