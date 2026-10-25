@@ -26,8 +26,38 @@ var exampleFuncs = []string{"Add", "Max", "Add128", "Mul64", "Sum", "Get", "Add2
 
 // testCacheDir is the janus cache every test uses (JANUS_CACHE_DIR, set for the whole test
 // process by TestMain): the framework is built there once across test runs, and the tests never
-// touch the user's own cache.
-func testCacheDir() string { return filepath.Join(os.TempDir(), "janus-test-cache") }
+// touch the user's own cache. It is $JANUS_TEST_CACHE_DIR if set, else <user cache
+// dir>/janus-test (~/.cache/janus-test, next to but separate from ~/.cache/janus), or
+// /var/tmp/janus-test-cache-<uid> if that is unavailable or on a RAM filesystem. Never
+// os.TempDir(): /tmp is a tmpfs on many hosts, and the cache (framework and JanusASL builds,
+// one workspace per consumer test) is tens of GB of RAM there. The cache collector
+// (cachegc.go) bounds it like any other cache.
+func testCacheDir() string { return resolveTestCacheDir(os.Getenv("JANUS_TEST_CACHE_DIR")) }
+
+func resolveTestCacheDir(env string) string {
+	if env != "" {
+		if abs, err := filepath.Abs(env); err == nil {
+			return abs
+		}
+		return env
+	}
+	if d, err := os.UserCacheDir(); err == nil && filepath.IsAbs(d) {
+		if fsi := statFSExisting(d); !fsi.ram {
+			return filepath.Join(d, "janus-test")
+		}
+	}
+	return filepath.Join("/var/tmp", fmt.Sprintf("janus-test-cache-%d", os.Geteuid()))
+}
+
+// statFSExisting is statFS of p or of its nearest existing ancestor.
+func statFSExisting(p string) fsInfo {
+	for {
+		if _, err := os.Stat(p); err == nil || p == filepath.Dir(p) {
+			return statFS(p)
+		}
+		p = filepath.Dir(p)
+	}
+}
 
 // defaultTestParallel is the -parallel default for this package (unless -parallel is given):
 // min(GOMAXPROCS / 4, (MemAvailable - 40 GiB) / 20 GiB, 2), at least 1, the budget of

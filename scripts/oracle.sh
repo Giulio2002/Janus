@@ -13,10 +13,16 @@
 # PER_CLASS (harvested distinct words per class, default 8000), SEED (default 1), FP_K (states
 # per generated fp.* word, default 4), FP_HARVEST_K (states per harvested fp.* word in fp mode, 40),
 # QEMU (default /usr/bin/qemu-aarch64; set QEMU= to run natively on an arm64 Linux host).
+# KEEP: what the run leaves in OUT (scripts/lib/artifacts.sh). Default: summary.md, repro.*,
+# mismatches.jsonl (MISMATCH verdicts, if any) and cases/hw/model/verdicts.jsonl zstd-compressed
+# (.zst); gen.jsonl and harvest.jsonl (whose union is cases.jsonl) are removed. KEEP=zst
+# compresses every dump, KEEP=1 keeps them all raw.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=lib/artifacts.sh
+. "$root/scripts/lib/artifacts.sh"
 memguard_self "$@"
 mode="${1:-full}"
 export PATH="$PATH:/usr/local/go/bin"
@@ -45,6 +51,9 @@ tail -1 "$bin/selftest.log"
 [ "$mode" = selftest ] && exit 0
 
 mkdir -p "$OUT"
+# However the run ends: keep the summaries, compressed verdicts and corpus, drop the other dumps
+# (KEEP=1 keeps everything raw; scripts/lib/artifacts.sh).
+trap 'art_prune "$OUT"' EXIT
 cases=()
 case "$mode" in
   quick) N="${N:-1500}" ;;
@@ -88,14 +97,16 @@ fi
 echo "== run (native under ${QEMU:-native} vs janus-oracle)"
 IFS=, eval 'list="${cases[*]}"'
 "$bin/oracle" run "${common[@]}" -model "$root/.lake/build/bin/janus-oracle" -j "$JOBS" -cases "$list" -out "$OUT" > /dev/null
+mismatch=0
 if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
+  mismatch=1
   echo "== minimize mismatches"
   "$bin/oracle" minimize "${common[@]}" -model "$root/.lake/build/bin/janus-oracle" -out "$OUT" -max 200 > /dev/null
   echo "minimal reproductions: $OUT/repro.md"
 fi
 sed -n '1,6p' "$OUT/summary.md"
-echo "report: $OUT/summary.md  (per-case verdicts: $OUT/verdicts.jsonl)"
-if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
+echo "report: $OUT/summary.md  (per-case verdicts: $OUT/verdicts.jsonl, zstd-compressed unless KEEP=1)"
+if [ "$mismatch" = 1 ]; then
   echo "FAIL: model disagrees with hardware (see $OUT/repro.md)" >&2
   exit 1
 fi
