@@ -1,4 +1,5 @@
 import Janus.Amd64.InstrSSE
+import Janus.Amd64.InstrCrypto
 
 /-!
 # x86-64 instruction AST (supported subset)
@@ -302,6 +303,9 @@ inductive Instr where
   | locked (i : Instr) (a : Addr) (size : Nat)
   /-- The legacy-SSE packed instructions (`Janus.Amd64.InstrSSE`, `DecodeSSE`, `ExecSSE`). -/
   | sse (i : SseI XLoc Loc Addr)
+  /-- The crypto extensions AES-NI, `PCLMULQDQ`, SHA-NI, ADX (`Janus.Amd64.InstrCrypto`,
+  `DecodeCrypto`, `ExecCrypto`). -/
+  | crypto (i : CryptoI XLoc Loc)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Amd64

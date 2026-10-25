@@ -92,6 +92,15 @@ func Decode(b []byte) (x86asm.Inst, bool) {
 	if len(b) >= 4 && b[0] == 0xF3 && b[1] == 0x0F && b[2] == 0x1E && b[3] == 0xFA {
 		return x86asm.Inst{Op: x86asm.NOP, Len: 4}, true
 	}
+	// ADCX/ADOX (66/F3 [REX] 0F 38 F6 /r): this x86asm version does not know them; they have
+	// the operands of ADC r32/64, r/m32/64 (13 /r), as which they are decoded (the length
+	// adjusted), Classify naming them "adcx"/"adox" (crypto.go)
+	if k, ok := adxOperandForm(b); ok {
+		if alt, aerr := x86asm.Decode(k.bytes, 64); aerr == nil && alt.Op == x86asm.ADC {
+			alt.Len += k.extra
+			return alt, true
+		}
+	}
 	// x86asm reports a prefix followed by an undecodable opcode as a 1-byte Op(0).
 	return inst, err == nil && inst.Op != 0
 }
@@ -103,6 +112,9 @@ func Asm(b []byte) string {
 		return "(bad)"
 	}
 	s := x86asm.GNUSyntax(inst, L.TestPC, nil)
+	if c, ok := adxClass(b); ok {
+		s = c + strings.TrimPrefix(s, "adc") // "adc %rbx,%rax" -> "adcx %rbx,%rax"
+	}
 	if inst.Len < len(b) {
 		s += fmt.Sprintf(" [+%d bytes]", len(b)-inst.Len)
 	}
@@ -151,6 +163,9 @@ func Classify(b []byte) string {
 	if !ok {
 		return "invalid"
 	}
+	if c, ok := adxClass(b); ok {
+		return c
+	}
 	if c, ok := condOps[inst.Op]; ok {
 		return c
 	}
@@ -160,7 +175,7 @@ func Classify(b []byte) string {
 // Conditional classes read the status flags; they run under several flag combinations.
 func Conditional(cls string) bool {
 	switch cls {
-	case "jcc", "setcc", "cmovcc", "adc", "sbb", "cmc", "rcl", "rcr":
+	case "jcc", "setcc", "cmovcc", "adc", "sbb", "cmc", "rcl", "rcr", "adcx", "adox":
 		return true
 	}
 	return false
@@ -351,6 +366,7 @@ func Setup(r *rand.Rand, b []byte) State {
 		s.SetMXCSR(RandMXCSR(r))
 	}
 	setupSSE(r, &s, inst, cls)
+	setupCrypto(r, &s, inst, cls)
 	return s
 }
 

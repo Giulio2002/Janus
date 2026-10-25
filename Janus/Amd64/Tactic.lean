@@ -315,6 +315,13 @@ def ripAddrOf (i : Instr) : Option Addr :=
   | some (.sseOp _ _ s) => xl s
   | some (.movdq _ _ _ g) => loc g
   | some (.movq d s) => (xl d).orElse fun _ => xl s
+  | some (.crypto (.aes _ _ s)) => xl s
+  | some (.crypto (.aesimc _ s)) => xl s
+  | some (.crypto (.aeskeygenassist _ s _)) => xl s
+  | some (.crypto (.pclmulqdq _ s _)) => xl s
+  | some (.crypto (.sha1rnds4 _ s _)) => xl s
+  | some (.crypto (.sha _ _ s)) => xl s
+  | some (.crypto (.adx _ _ _ s)) => loc s
   | _ => none
 
 /-- The address that the RIP-relative operand of the instruction at `pc` refers to (`0` if
@@ -1046,6 +1053,9 @@ deriving instance ToExpr for CvtOp
 deriving instance ToExpr for DupOp
 deriving instance ToExpr for PFOp
 deriving instance ToExpr for SseI
+deriving instance ToExpr for AesOp
+deriving instance ToExpr for ShaOp
+deriving instance ToExpr for CryptoI
 deriving instance ToExpr for Instr
 deriving instance ToExpr for StubKind
 
