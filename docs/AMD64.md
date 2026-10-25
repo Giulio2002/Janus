@@ -498,7 +498,15 @@ same script.
 
 * 8/16-bit `RCL`/`RCR`, `MULX`, `ADCX`/`ADOX`, VEX instructions other than the eleven above,
   EVEX (AVX-512), `CMPS`/`SCAS`/`LODS`, `PCMPESTRI`, AES/SHA/CRC32, `GS`-relative accesses and
-  floating point beyond the SSE scalar instructions are not modelled. Their encodings fault.
+  floating point beyond the SSE scalar instructions and the x87 subset above (no
+  transcendentals, `FPREM`, `FRNDINT`, `FSCALE`, BCD, environment save/restore) are not
+  modelled. Their encodings fault.
+* x87 proofs with a symbolic `TOP` rely on the `TacticX87` simp lemmas (`x87_mod8_*`) to
+  decide which physical register `ST(i)` is; the abridged tag word is a function
+  (`X87.St.tags : Nat → Bool`) so that an in-use test is an `if` the executor can prune
+  (`examples/proofs-cgo/amd64/CLdMul`). A context full of disjunctive `Outside` facts makes every
+  `omega` call of the executor split exponentially; `GoLdMul` keeps them folded (`Keep`) during
+  the runs and unfolds them only where a disjointness is needed.
 * Proofs whose loop invariants describe intermediate states and step a string instruction must
   carry `t.df = false` in the invariant (`Reaches.repStos`/`repMovs` take it as `hdf`), as
   `examples/proofs-amd64/ClearWords`' `Inv` does.
