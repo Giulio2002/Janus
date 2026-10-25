@@ -30,7 +30,7 @@ the cache.
 | 1. compiler-generated wrappers / Go test code | 99.40% / 97.09% | 100% / 100% (99.98% before WP-B) | 100% / 100% (99.60% / 99.16% before WP-B) |
 | 2. runtime entry points with a contract, stub or proof (main + branches) | 56 of 309 names (39 on main) | same | same |
 | 2. … of the 191 linked on arm64/amd64: still missing | 153 (12 of them concurrency, excluded) | | |
-| 3. language constructs with a proved example | 60 of 75 rows (15 have none on either ISA; agent/constructs closes 20) | | |
+| 3. language constructs with a proved example | 63 of 75 rows (12 have none on either ISA; agent/constructs closes 20, agent/constructs2 3 more and the remaining forms of 3 covered rows) | | |
 | 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | 93.6% / 86.2% | 0.9% / 78.0% (gcc 83.6% once agent/ffi's `ENDBR64` is merged) | `-O3 -march=x86-64-v3`: 0.9% (52.7% with `ENDBR64`) / 50.5% |
 
 Main findings:
@@ -408,7 +408,10 @@ agent/constructs (package M1, `examples/basic/zconstructs.go`) adds 29 arm64 + 2
 `SumBelow`, `IterSum`, `ReverseArray`, `DivMod10`, `SwapBig`, `Compose`, `DotBoth`, `BitMerge`,
 `Shifts`, `MinMax`, `ClearArray`, `Sum3`, `AlignUp`, `Slice3`, `Slice2`, `Mod`, `IncTwice`,
 `MakeAdder` on both
-ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
+ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`. agent/constructs2 (the rest of package M1,
+`examples/basic/zzconstructs2.go`) adds 10 arm64 + 11 amd64: `I64ToF64`, `F64ToI64`, `U64ToF64`,
+`F64ToF32`, `F32ToF64`, `LoadThird`, `SpanSum`, `MinF64`, `MaxF64`, `MinStr` on both ISAs, and the
+amd64 proof of the existing `A64IndexByte`.
 
 | construct | arm64 proof (branch) | amd64 proof (branch) | depends on |
 |---|---|---|---|
@@ -434,7 +437,7 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | range over string | none | none | `runtime.decoderune` |
 | range over map | `SumValues` (maps) | `SumValues` (maps) | `mapIterStart`/`mapIterNext` contracts |
 | range over int | `SumBelow` (constructs) | same (constructs) | – |
-| range over func (iterators) | inlined iterator: `IterSum` (constructs; no runtime call left); non-inlined: none | same (constructs) | inlined: none; otherwise closures, `runtime.panicrangestate`, `deferrangefunc` |
+| range over func (iterators) | inlined iterator: `IterSum` (constructs; no runtime call left); non-inlined: `SpanSum` (constructs2; the iterator `Span.All` calls the body closure through its funcval, `#state` checks, `panicrangestate` unreachable) | same (constructs, constructs2) | inlined: none; non-inlined, no `break`/`return`/`defer` in the body: none (closures); with them: `deferrangefunc` |
 | static call, multiple results | `AddThree`, `SumSquares`, `Add128`, `Mul64` (main); `Lookup` (maps); named results: `DivMod10`, `MinMax` (constructs) | same | callee `Summary` |
 | variadic call | `Sum3` (constructs; the argument slice in the caller's frame) | same (constructs) | slice construction (stack or `newobject`) |
 | method call, value receiver; static pointer-receiver call | value receiver: `DotBoth` (constructs; `Vec2.Dot-fm` calls `Vec2.Dot`); pointer receiver: `IncTwice` (constructs) | same (constructs) | – |
@@ -451,7 +454,7 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | large struct copy | `SwapBig` (constructs: 64 bytes, inline `LDP`/`STP`) | `SwapBig` (constructs: inline `MOVUPS`) | `runtime.duffcopy` is gone in 1.26; inline `LDP/STP` / `MOVUPS` loops, `memmove`, `typedmemmove` |
 | array copy | `SetOne256`, `CopyBlock` (main); value semantics: `ReverseArray` (constructs) | same + `CopyBlock512` | `memmove` executed |
 | pointer deref | `Add256`, `AddLimbs`, `AtomicAdd` (main) | same | – |
-| nil dereference fault | none (preconditions exclude it) | none | signal → `runtime.sigpanic`/`panicmem` contract |
+| nil dereference fault | `LoadThird` (constructs2: for `p = nil` and nothing mapped below `4096` the load faults with `outsideAllocation 16 8`, stated at the machine level) | same (constructs2) | the fault itself: none; its conversion to a Go panic: signal → `runtime.sigpanic`/`panicmem` (R6) |
 | slice `a[:]` of an array | `CopyBlock`, `A64Equal64` (main) | `CopyBlock`, `Equal64` | – |
 | slice `a[i:j]`, `a[i:j:k]` | `Slice2`, `Slice3` (constructs, incl. "panics iff not `0 ≤ i ≤ j (≤ k) ≤ cap`") | same (constructs) | `panicSlice*` (`panicBounds`) |
 | indexing + bounds check | `Get`, `CopyWords`, `HexDigit` (main) | same | `panicBounds` stub |
@@ -464,9 +467,9 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | the map runtime itself | `MapAccess1Small` (maps, real `mapaccess1_fast64` vs its contract) | same | `Janus/Spec/SwissMap.lean` |
 | string indexing | `HexDigit` (main) | same | `Program.data` |
 | string concatenation | none | none | `concatstring2..5`, `concatstrings` |
-| string comparison | none (`A64Equal64`/`Equal64` are `bytes.Equal`) | none | `memequal` (executed), `cmpstring` |
+| string comparison | `MinStr` (constructs2: `runtime.strmin` executed, `runtime.cmpstring` a satisfiable contract); `A64Equal64`/`Equal64` are `bytes.Equal` | same (constructs2) | `memequal` (executed), `cmpstring` (contract, `Janus/Contracts/Cmpstring*.lean`) |
 | string ↔ `[]byte`, `[]rune`; `string(rune)` | none | none | `slicebytetostring`, `stringtoslicebyte`, `slicerunetostring`, `intstring`, ... |
-| int ↔ float, float32 ↔ float64 | none | none | FP decoder (done on main) |
+| int ↔ float, float32 ↔ float64 | `I64ToF64`, `U64ToF64` (`fromInt`, exact below `2^53`), `F64ToI64` (truncation; `FCVTZS` saturation), `F64ToF32`, `F32ToF64` (`convertFormat`, widening exact) (constructs2) | same (constructs2; `uint64 → float64` through Go's sticky-halving sequence, `CVTTSD2SQ`'s integer indefinite) | `Janus/Float/Convert.lean`, `Janus/{Arm64,Amd64}/FloatConvert.lean` |
 | float → uint64 | `F64ToU64` (main) | same | FP decoder |
 | float bits, float arithmetic | `Abs`, `AddF64`, `Dot3` (main) | same | FP decoder |
 | complex numbers | none | none | FP; `complex128div` |
@@ -475,7 +478,7 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | interface boxing (`convT*`) | none | none | `convT`, `convT16/32/64`, `convTstring`, `convTslice`, `convTnoptr` |
 | type assertion (both forms) | none | none | `typeAssert`, `assertE2I(2)`, `panicdottype*` |
 | interface comparison | none | none | `ifaceeq`, `efaceeq`, type `equal` functions |
-| `min`, `max` builtins | integers: `MinMax` (constructs); floats, strings: none | same (constructs) | inline (`CSEL`/`CMOV`); `fmin`/`fmax`, `strmin`/`strmax` |
+| `min`, `max` builtins | integers: `MinMax` (constructs); floats: `MinF64`, `MaxF64` (constructs2: IEEE 754-2019 `minimum`/`maximum`, `FMIN`/`FMAX`); strings: `MinStr` (constructs2) | same (constructs, constructs2; floats through Go's `MINSD`/`MINSD`/`POR` sequence, `max` on the negations) | inline (`CSEL`/`CMOV`, `FMIN`, `MINSD`); `strmin`/`strmax` (executed) + `cmpstring` (contract) |
 | `clear` | `ClearWords` (main), `ClearMap` (maps); small array, inline stores: `ClearArray` (constructs) | same | `memclrNoHeapPointers` executed; `mapclear` |
 | `math/bits` | `Add128`, `Add256`, `AddLimbs`, `Mul64`, `RotHasher` (main) | same | – |
 | sync/atomic (single-threaded) | `AtomicAdd`, `AtomicMax` (main) | same | arm64 LL/SC fallback needs `STXR` (rejected, below) |
@@ -490,13 +493,13 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | `//export` callback C → Go | none | none | `crosscall2`, `cgocallback` |
 | goroutines, channels, select, `sync` | excluded (concurrency) | excluded | – |
 
-Not covered on any branch or architecture (with agent/constructs): the type switch; range over
-string; heap defers, `panic`, `recover`; the nil-dereference fault; string concatenation,
-comparison and conversions; int/float and float32/float64 conversions; complex numbers;
-interface boxing, assertions and comparison; the grown-stack case; `//export` callbacks. Within
-covered rows these forms still have no example: a non-inlined range-over-func loop, float and
-string `min`/`max`. amd64 lacks `IndexByte` (the arm64 example is in an
-arm64-only file) and `MallocFast`.
+Not covered on any branch or architecture (with agent/constructs and agent/constructs2): the type
+switch; range over string; heap defers, `panic`, `recover`; string concatenation and conversions;
+complex numbers; interface boxing, assertions and comparison; the grown-stack case; `//export`
+callbacks. Within covered rows these forms still have no example: a range-over-func body with
+`break`, `return` or `defer` (`deferrangefunc`), the nil-dereference fault as a Go panic (R6 lifts
+the fault-level statement), and `MallocFast` on amd64. `A64IndexByte` on amd64 covers the AVX2
+path only: the SSE path runs `BSF` on a zero mask, which the model treats as undefined.
 
 Two rows are uncertain: whether `CopyWords` and `HexDigit` keep a bounds check in compiled code
 (`Get` certainly does).
@@ -714,7 +717,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 20 | **R7. Stack growth**: a contract for `morestack`/`newstack` (the grown case: the frame is copied and stack pointers adjusted), `morestackc`; theorems that hold without assuming `GuardOK` | 1 linked + the `.morestack` stubs; recursion and deep calls (criterion 3) | `Janus/Contracts/Stack.lean`, `GuardOK`/`GrowsStack` in `Janus/GoABI.lean` | XL | R6 (the panics during growth), iface-alloc |
 | 21 | **R8. `print`/`println`**: `printlock`/`printunlock` and the 16 `print*` functions, as output-trace contracts over `write(2)` | 18 linked + `printiface` | `Janus/Contracts/Print.lean` | S | C |
 | 22 | **R9. Remaining runtime**: `complex128div`, `f32to64`/`f64to32`, `fadd64`/`fmul64`/`fdiv64` and the soft-float set (`-d=softfloat`); `KeepAlive`, `zeroVal`, `staticuint64s`, `cgoAlwaysFalse`, `cgoCheckPointer`, `cgoUse`, `cgoCheck*`, `cgoKeepAlive`, `cgoNoCallback`; the CPU feature flags (`arm64HasATOMICS`, `x86HasAVX`, `x86HasFMA`, `x86HasPOPCNT`, `x86HasSSE41`) as stated hypotheses; the instrumented build modes (`-msan`, `-asan`, `-cover`, `-d=checkptr`, `-d=libfuzzer`, `-spectre=ret`) and the `mallocgc*SC<n>` size-specialised allocator of the GOEXPERIMENT | 22 linked + the rest of the defined-not-linked list | `Janus/Contracts/Misc.lean`, `Janus/Contracts/Instrument.lean` | M | iface-alloc |
-| 23 | **M1. Construct examples, no new runtime** (agent/constructs: done except int↔float and float32↔float64 conversions, the nil-dereference fault path and amd64 `IndexByte`; see section 3): `-`, `%`, variable shifts, `\|`, `^`; for-cond/break/labels/goto; expression switch (jump tables), fallthrough; range over array, int and func; static and value-receiver method calls, method expressions, variadic calls, closure creation; generics (shape + dictionary); large struct copies; `a[i:j]`, `a[i:j:k]`; `min`/`max`; `uintptr`; int↔float and float32↔float64 conversions; the nil-dereference fault path; arm64 globals (`Bump`, `GlobalTable`, `Table`); amd64 `IndexByte` | 21 of the 35 "none" rows of criterion 3, both ISAs | `examples/basic/lang*.go`, `examples/proofs/Lang*.lean`, `examples/proofs-amd64/Lang*/` | L | none (A/B for atomics-free builds of the examples) |
+| 23 | **M1. Construct examples, no new runtime** (done: agent/constructs, then agent/constructs2 for int↔float and float32↔float64 conversions, the nil-dereference fault (machine level), amd64 `IndexByte` (AVX2 path), a non-inlined range-over-func loop, float and string `min`/`max` (with the satisfiable `cmpstring` contract); see section 3): `-`, `%`, variable shifts, `\|`, `^`; for-cond/break/labels/goto; expression switch (jump tables), fallthrough; range over array, int and func; static and value-receiver method calls, method expressions, variadic calls, closure creation; generics (shape + dictionary); large struct copies; `a[i:j]`, `a[i:j:k]`; `min`/`max`; `uintptr`; int↔float and float32↔float64 conversions; the nil-dereference fault path; arm64 globals (`Bump`, `GlobalTable`, `Table`); amd64 `IndexByte` | 21 of the 35 "none" rows of criterion 3, both ISAs | `examples/basic/lang*.go`, `examples/proofs/Lang*.lean`, `examples/proofs-amd64/Lang*/` | L | none (A/B for atomics-free builds of the examples) |
 | 24 | **M2. Construct examples on new contracts**: strings (concat, compare, conversions, range over string), interfaces (boxing, assertions, type switch, comparison), panic/recover, heap defer, the grown-stack case, recursion, complex numbers, `//export` callbacks | the 14 remaining "none" rows | `examples/basic/rt*.go`, `examples/proofs*/Rt*` | L | R1, R2, R6, R7, R9, K2 |
 
 ### What remains after the plan

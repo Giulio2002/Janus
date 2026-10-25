@@ -344,6 +344,38 @@ read-back returns `v`), `Delete`, `SumValues` (iteration, every order), `CountKe
 `LookupKey16` (generic `mapaccess2`), `NewMap`, `ClearMap`, and `MapAccess1Small` (the runtime
 function itself, extracted as `runtime.mapaccess1_fast64`).
 
+### String comparison (`Janus/Contracts/Cmpstring.lean`, `Janus/Contracts/CmpstringAmd64.lean`)
+
+Go compares strings (`<`, `min`/`max` of strings through `runtime.strmin`/`runtime.strmax`) with
+`runtime.cmpstring(a, b string) int`, assembly in `internal/bytealg/compare_*.s`. A theorem leaves it
+out with `--contract runtime.cmpstring` and assumes `CmpstringContract` (arm64; amd64:
+`CmpstringContract64`) at its address, with a stack allowance (`16` in the examples; the real
+function uses none):
+
+* **pre** (`CmpstringPre`, `CmpstringPre64`): the ABI conditions of the allocation contracts
+  (`CallOK`/`CallOK64` with 4 arguments) and both strings readable (`StrOK m p n`: `n = 0`, or the
+  `n` bytes at `p` in one region below `2^48`). Arguments: arm64 `a = (X0, X1)`, `b = (X2, X3)`;
+  amd64 `a = (RAX, RBX)`, `b = (RCX, RDI)`.
+* **post** (`CmpRet`, `CmpRet64`): the call returns to its caller (`retState`, `retState64`) with
+  the result register holding the two's-complement `strCmp`, the bytewise lexicographic
+  comparison (`-1`, `0`, `1`; a proper prefix is smaller), the ABI's preserved registers kept,
+  everything else arbitrary, and memory changed at most in the callee's stack window
+  (`calleeStack`, `calleeStack64`).
+
+**Satisfiable.** `Janus.Contracts.CmpstringSat.cmpstring_satisfiable` and
+`Janus.Contracts.CmpstringSatAmd64.cmpstring_satisfiable`: a byte loop (A64, x86-64; machine code
+in the files) placed in an otherwise empty program meets the contract for every call state,
+proved by symbolic execution and induction on the remaining length, and a call state satisfying
+the precondition exists. So a theorem assuming the contract is not vacuous.
+
+**Not covered.** The real `cmpbody` (16-byte `LDP`/`REV` chunks on arm64, SSE/AVX2 loops on amd64)
+is not executed; that it meets the contract is assumed. `strCmp` reads memory at the call, so the
+caller's theorem keeps the string bytes outside the stack frames it writes before the call (the
+`MinStr` preconditions).
+
+**Example** (`examples/basic/zzconstructs2.go`): `MinStr(s, t) = min(s, t)` (`runtime.strmin`
+executed): `t` when `strCmp t s < 0`, else `s`.
+
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 
 The Go → C boundary does not use the linked-code `Summary` mechanism above. The trusted part has

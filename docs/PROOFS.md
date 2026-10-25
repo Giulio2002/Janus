@@ -253,6 +253,16 @@ stub), and combine "panics iff" from both directions with `Returns.not_panics`:
   · exact absurd hp (hret hy).not_panics
 ```
 
+**Faults (`LoadThird`).** A nil dereference is a hardware fault, not a stub call, so it is stated
+at the machine level: for the call state `s` with `X0 = 0` (`RAX = 0`) and memory that maps nothing
+below `4096` (`∀ r ∈ s.mem.regions, 4096 ≤ r.base`), the instruction at `s.pc` is ordinary code
+(not the exit, no stub), its word decodes to the load, and `Arm64.step w s` (`Amd64.step`) is
+`.error (.outsideAllocation a n)` with `a < 4096`; `Faults` follows (`faults_of_steps` on arm64,
+`Program.run_succ_fault` on amd64). Prove the step by `step_of_decode` with the decoded
+instruction (`decide`), then unfold the address computation and `load`, and refute
+`accessible` from the region bound (`List.any_eq_false`). The shape is the panic library's
+`FaultsAt` predicate, so the signal-to-panic step can lift it unchanged.
+
 ### Loops (`Sum`, `CopyWords`, `JanusTests/Tactic.lean`)
 
 1. Find the loop head in the disassembly (for Go: the `cmp` before the backward branch) and name
@@ -328,6 +338,19 @@ of a summary is `ReachesRet`), so a call chain is proved bottom-up, each functio
   level, `GuardOK s adj` with `adj` the extra depth of the deeper stack-guard checks, and the
   guard slot `[X28 + 16, +8)` disjoint from the stack window. The ranges are easy to get wrong;
   the stuck message names the store that is outside them.
+
+**Loops in a callee, through a closure (`SpanSum`).** A non-inlined range-over-func loop runs in
+the iterator (`Span.All`), which calls the loop body closure (`SpanSum-range1`) once per element;
+the body updates the caller's variables through captured pointers. State the invariant at the
+iterator's loop head, about the call state `s` of the outer function: the register contents of the
+head (`i`, `hi`, the funcval pointer), `SP` of the iterator's frame, the memory `m` as a `MemFrame`
+of the memory at the first arrival (`mem0`, copied from the goal `janus_run until [head]`
+leaves) outside the words the iterations write (the index slot, the body's frame, `#state` and
+the sum), plus the two words the body reads as equations (`m.readLE stateAddr 8 = 1`,
+`m.readLE sumAddr 8 = acc`). The induction runs on the number of iterations left; each step is
+`janus_run until [head]` (it executes the call through `BLR`/`CALL BX`, the body, and the return),
+then `ih` with the stores chained by `MemFrame.writeLE`. The closure needs no hypothesis: the
+outer function builds the funcval itself and the extractor finds the body from the code address.
 
 ### Recursion (`Fact`)
 
@@ -576,6 +599,13 @@ every lane to its bytes (`elem_64_bytes`), pushing the masks into `if`s (`ite_la
 `firstTrue`. Name the branch hypotheses (`rename_i`) instead of `‹_›`: an anonymous assumption
 with metavariables is unified against every hypothesis, and these are large.
 
+**amd64 `IndexByte`.** `examples/proofs-amd64/A64IndexByte` proves the same function on the AVX2
+path. Two facts do the work: `ctz_msb_cmpeq` (`BSF` of the `VPMOVMSKB` of `VPCMPEQB` against a
+broadcast byte is `firstTrue` of the byte comparisons) and `cmpeq_msb_zero` (the mask is zero iff
+no byte matched), passed to `janus64_run` as rewrite rules so that it prunes the `BSF`-of-zero
+path. The SSE path is out of reach: it runs `BSF` on every chunk's mask before testing it, and the
+model makes `BSF` of zero a fault (the destination is architecturally undefined).
+
 ### Runtime contracts and heap allocation (`NewPair`, `MakeSlice`, `AppendOne`, `SetNext`, `MallocFast`)
 
 Extract with `--contract runtime.newobject` (see `scripts/example-contracts.sh`), state the theorem
@@ -607,6 +637,34 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (a b : BitVec
   and the dischargers try one relevant `Apart` hypothesis at a time (`janus_apart`).
   `MallocFast` relates eight objects (stack, `g`, `m`, `p`, `mcache`, `mspan`, the runtime
   globals, the slot) this way.
+
+### Floating-point conversions and `min`/`max` (`I64ToF64`, `U64ToF64`, `F64ToI64`, `F64ToF32`, `MinF64`)
+
+State results with the IEEE specifications of `Janus.Float.Convert` (`fromInt`, `convertFormat`,
+`minimum`, `maximum`, and `truncInt`), and bridge the model with the per-ISA lemmas
+(`Janus.Arm64.FP.fixedToFP_ieee`, `fpConvert_ieee`, `fpToFixed_rzs_*`, `fpMin_ieee`;
+`Janus.Amd64.FP.ofInt_ieee`, `convert_ieee`, `toInt_rz64`, `minsd_seq`, `maxsd_seq`, `u64_big`).
+After `janus_run`, the result register holds the model function's result under a few `% 2^k`;
+bound it (`fromInt_lt`, the lemmas' `< 2^width` conjunct) and `omega` them away. Exactness facts
+are separate theorems derived with `Ensures.mono` (`truncInt_fromInt`, `convertFormat_32_64`).
+Rounding lemmas: `round_b64_normal` (exact rounding of a value with at most 53 bits),
+`round_b64_bits` (the bits of a rounding in the normal range), `round_self64` (a finite encoding
+rounds to itself). Two practical rules: never `unfold truncInt`/`classify` on a concrete format
+inside a large context (state the fact for a generic `Fmt` and instantiate it, `truncInt_normal`),
+and never `assumption`/`‹_›` for a branch hypothesis in a goal with large memory terms (the
+defeq checks against every hypothesis can run for minutes): name it with `rename_i`.
+
+### Contracts with satisfiability witnesses (`MinStr`)
+
+A runtime function the code calls but the proof does not execute (`runtime.cmpstring`) becomes a
+contract (`Janus/Contracts/Cmpstring.lean`, `…Amd64.lean`). Besides the contract, prove it
+satisfiable (`Janus/Contracts/CmpstringSat*.lean`): write a small implementation in machine code
+(assembled with `aarch64-linux-gnu-as`/`as` and copied as words/bytes), place it at a fixed
+address of an otherwise empty program, and prove the `Summary` by the same symbolic execution
+and loop induction as an example (the invariant is the state `{ s with regs := R, flags := F,
+pc := head }`), then exhibit a call state satisfying the precondition. In the example, the
+callee's read of memory written by the frames is shown unchanged with a frame lemma
+(`strCmp_writeLE`, applied by `simp (disch := omega) only [...] at *`).
 
 ### Counterexamples (`WrongAdd`)
 
