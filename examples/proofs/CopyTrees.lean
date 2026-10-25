@@ -60,20 +60,19 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
   have hfw : MemFrame s.mem ((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE
       (BitVec.toNat s.sp - 56) 8 (BitVec.toNat (s.regs 29))) (callerWindow s d 48 24) := by
     simp only [callerWindow]; janus_frame
-  have hsz : s.mem.readLE 703328 8 = 128 := by rw [h_rodata _ _ (by decide)]; decide
-  obtain ⟨hsg, hcall, hgo⟩ := EqPre.of_caller (S := { s with
-      regs := setReg (setReg (setReg (setReg (setReg (setReg (setReg s.regs 0 703328#64) 1 dst) 2 src) 16
-                (BitVec.ofNat 64 (s.mem.readLE (BitVec.toNat (s.regs 28) + 16) 8))) 27
-              (BitVec.ofNat 64 (if s.mem.readLE src.toNat 1 < 128 then s.mem.readLE src.toNat 1
-                else s.mem.readLE src.toNat 1 + 18446744073709551360))) 29 (s.sp - 56#64)) 30 588900#64,
-      sp := s.sp - 48#64, pc := 536976#64,
-      flags := (addSub s.sp (BitVec.ofNat 64 (s.mem.readLE (BitVec.toNat (s.regs 28) + 16) 8)) true).snd,
-      mem := (s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
-        (BitVec.toNat (s.regs 29)) }) (nargs := 3) hc hfw (by simp [hsp]) (by simp [setReg])
-      (by simp [setReg]) (by simp [setReg]) (by decide) (by decide)
+  have hsz : s.mem.readLE treesType 8 = 128 := by rw [hT, h_rodata _ _ (by decide)]; decide
+  rw [hT] at hsz
+  have E := fun {S : State} (hf : MemFrame s.mem S.mem (callerWindow s d 48 24))
+      (hsp : S.sp.toNat = s.sp.toNat - 48) (hg : S.regs 28 = s.regs 28)
+      (hlr : (S.regs 30).toNat % 4 = 0) (hlr' : (S.regs 30).toNat < 2 ^ 48) =>
+    EqPre.of_caller (nargs := 3) hc hf hsp hg hlr hlr' (by decide) (by decide)
+  have hfw0 := hfw
   simp only [callerWindow, outside_cons, outside_nil, and_true] at hfw
   refine Reaches.call (Summary.withExit hmv hret) rfl
-    ⟨⟨?_, hsg, hcall, ?_, ?_, ?_, hgo, by simpa [setReg] using hgp⟩, ?_, ?_, ?_, ?_⟩ ?_
+    ⟨⟨?_, (E hfw0 (by simp [hsp]) (by simp [setReg]) (by simp [setReg]) (by simp [setReg])).1,
+      (E hfw0 (by simp [hsp]) (by simp [setReg]) (by simp [setReg]) (by simp [setReg])).2.1, ?_, ?_, ?_,
+      (E hfw0 (by simp [hsp]) (by simp [setReg]) (by simp [setReg]) (by simp [setReg])).2.2,
+      by simpa [setReg] using hgp⟩, ?_, ?_, ?_, ?_⟩ ?_
   · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
     exact hl.env_frame _ _ _ henv (Agrees.of_window (lo := s.sp.toNat - (d + 48)) (hi := s.sp.toNat + 24)
       (by janus_frame) (Outside.of_sub hpriv (by omega) (by omega)))

@@ -57,18 +57,17 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
         (BitVec.toNat s.sp - 40) 8 (BitVec.toNat (s.regs 29))).writeLE (BitVec.toNat s.sp + 8) 8 p.toNat)
         (callerWindow s d 32 32) := by
       simp only [callerWindow]; janus_frame
-    obtain ⟨hsg, hcall, hgo⟩ := EqPre.of_caller (S := { s with
-        regs := setReg (setReg (setReg (setReg s.regs 1
-            (n.rotateRight 61 &&& 18446744073709551608#64 &&& 18446744073709551615#64)) 16
-            (BitVec.ofNat 64 (s.mem.readLE (BitVec.toNat (s.regs 28) + 16) 8))) 29 (s.sp - 40#64)) 30 588984#64,
-        sp := s.sp - 32#64, pc := 537424#64,
-        flags := (addSub s.sp (BitVec.ofNat 64 (s.mem.readLE (BitVec.toNat (s.regs 28) + 16) 8)) true).snd,
-        mem := ((s.mem.writeLE (BitVec.toNat s.sp - 32) 8 ret).writeLE (BitVec.toNat s.sp - 40) 8
-          (BitVec.toNat (s.regs 29))).writeLE (BitVec.toNat s.sp + 8) 8 p.toNat }) (nargs := 2) hc hfw
-        (by simp [hsp]) (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) (by decide) (by decide)
+    have E := fun {S : State} (hf : MemFrame s.mem S.mem (callerWindow s d 32 32))
+        (hsp : S.sp.toNat = s.sp.toNat - 32) (hg : S.regs 28 = s.regs 28)
+        (hlr : (S.regs 30).toNat % 4 = 0) (hlr' : (S.regs 30).toNat < 2 ^ 48) =>
+      EqPre.of_caller (nargs := 2) hc hf hsp hg hlr hlr' (by decide) (by decide)
+    have hfw0 := hfw
     simp only [callerWindow, outside_cons, outside_nil, and_true] at hfw
     refine Reaches.call (Summary.withExit hclr hret) rfl
-      ⟨⟨?_, hsg, hcall, ?_, ?_, ?_, hgo, by simpa [setReg] using hgp⟩, ?_, ?_, ?_⟩ ?_
+      ⟨⟨?_, (E hfw0 (by simp [hsp]) (by simp [setReg]) (by simp [setReg]) (by simp [setReg])).1,
+      (E hfw0 (by simp [hsp]) (by simp [setReg]) (by simp [setReg]) (by simp [setReg])).2.1, ?_, ?_, ?_,
+      (E hfw0 (by simp [hsp]) (by simp [setReg]) (by simp [setReg]) (by simp [setReg])).2.2,
+      by simpa [setReg] using hgp⟩, ?_, ?_, ?_⟩ ?_
     · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
       exact hl.env_frame _ _ _ henv (Agrees.of_window (lo := s.sp.toNat - (d + 32)) (hi := s.sp.toNat + 32)
         (by janus_frame) (Outside.of_sub hpriv (by omega) (by omega)))

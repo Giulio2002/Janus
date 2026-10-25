@@ -24,6 +24,9 @@ def pre (M : MemModel) (wb d : Nat) (p n : BitVec 64) (s : State) : Prop :=
     Buffer s p (8 * n.toNat) true ∧ Outside p.toNat (8 * n.toNat) (window d s) ∧
     Outside p.toNat (8 * n.toNat) M.priv
 
+/-- The return address the call at `Extracted.entry + 0x25` pushes. -/
+def ret25 : Nat := Extracted.entry + 0x25
+
 theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : Nat)
     (hclr : MemAmd64.MemclrHasPointers (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.memclrHasPointers") M wb d)
@@ -53,8 +56,10 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
       rw [BitVec.toNat_shiftLeft, Nat.shiftLeft_eq]; omega
     have hfw : MemFrame s.mem (((Janus.Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8
         (BitVec.toNat (s.regs 5))).writeLE (BitVec.toNat (s.regs 4) + 8) 8 p.toNat).writeLE
-        (BitVec.toNat (s.regs 4) - 32) 8 4741413) (MemAmd64.callerWindow s d 32 32) := by
+        (BitVec.toNat (s.regs 4) - 32) 8 ret25) (MemAmd64.callerWindow s d 32 32) := by
       simp only [MemAmd64.callerWindow]; janus_frame
+    janus_eval_nat hR25 : ret25
+    simp only [hR25] at hfw
     have E := fun {S : State} (hf : MemFrame s.mem S.mem (MemAmd64.callerWindow s d 32 32))
         (hsp : (S.regs 4).toNat = (s.regs 4).toNat - 32) (hg : S.regs 14 = s.regs 14) (hx : S.xmm 15 = 0)
         (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47) =>

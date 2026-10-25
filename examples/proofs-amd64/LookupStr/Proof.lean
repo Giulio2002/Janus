@@ -18,6 +18,9 @@ def mapType : Nat := ripTarget Extracted.program (Extracted.entry + 0x1c)
 def window (M : MapModel (Nat × Nat) (BitVec 64)) (s : State) : List (Nat × Nat) :=
   [((s.regs 4).toNat - (M.depth + 48), (s.regs 4).toNat + 24)]
 
+/-- The return address the call at `Extracted.entry + 0x28` pushes. -/
+def ret28 : Nat := Extracted.entry + 0x28
+
 theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (Nat × Nat) (BitVec 64))
     (hl : M.Laws)
     (hacc : Access2Str64 (Extracted.program.link impl)
@@ -42,8 +45,10 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (Nat × Nat)
   janus64_run until [Extracted.program.contractAddr "runtime.mapaccess2_faststr"]
   have hfw : MemFrame s.mem (((Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8
       (BitVec.toNat (s.regs 5))).writeLE (BitVec.toNat (s.regs 4) + 16) 8 kp.toNat).writeLE
-      (BitVec.toNat (s.regs 4) - 48) 8 4741512)
+      (BitVec.toNat (s.regs 4) - 48) 8 ret28)
       [((s.regs 4).toNat - (M.depth + 48), (s.regs 4).toNat + 24)] := by janus_frame
+  janus_eval_nat hR28 : ret28
+  simp only [hR28] at hfw
   refine Reaches.call (Summary.withExit (hacc f) hret) rfl
     ⟨RTPre.of_caller hl hc hfw (by simp [setRegF, hsp48]) (by simp [setRegF]) (by simpa using hs.zero)
       (by simpa using hs.df) (by simp [setRegF, hsp48, Arm64.Memory.readLE_writeLE_self])

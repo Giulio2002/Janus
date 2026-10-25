@@ -26,6 +26,9 @@ def KeyInput (d : Nat) (s : State) (p : Nat) : Prop :=
     s.mem.accessible (strPtr s.mem (p + 8)) (strLen s.mem (p + 8)) false = true ∧
     Outside (strPtr s.mem (p + 8)) (strLen s.mem (p + 8)) (window d s)
 
+/-- The return address the call at `Extracted.entry + 0x35` pushes. -/
+def ret35 : Nat := Extracted.entry + 0x35
+
 theorem correctness (impl : List Segment) (d : Nat)
     (hmem : MemAmd64.Memequal (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.memequal") d)
@@ -74,9 +77,11 @@ theorem correctness (impl : List Segment) (d : Nat)
   have hlp : s.mem.readLE (p.toNat + 16) 8 = strLen s.mem (p.toNat + 8) := rfl
   have hlq : strLen s.mem (q.toNat + 8) = strLen s.mem (p.toNat + 8) := hlen
   have hfw : MemFrame s.mem ((Janus.Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8
-      (BitVec.toNat (s.regs 5))).writeLE (BitVec.toNat (s.regs 4) - 40) 8 4745333)
+      (BitVec.toNat (s.regs 5))).writeLE (BitVec.toNat (s.regs 4) - 40) 8 ret35)
       (MemAmd64.callerWindow s d 40 8) := by
     simp only [MemAmd64.callerWindow]; janus_frame
+  janus_eval_nat hR35 : ret35
+  simp only [hR35] at hfw
   have hfw0 := hfw
   simp only [MemAmd64.callerWindow, outside_cons, outside_nil, and_true] at hfw
   refine Reaches.call (Summary.withExit hmem hret) rfl ⟨?_, ?_, ?_⟩ ?_

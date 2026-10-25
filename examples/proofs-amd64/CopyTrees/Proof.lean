@@ -28,6 +28,9 @@ def pre (M : MemModel) (wb d : Nat) (dst src : BitVec 64) (s : State) : Prop :=
     Buffer s src 128 false ∧ Outside src.toNat 128 (window d s) ∧
     Buffer s dst 128 true ∧ Outside dst.toNat 128 (window d s) ∧ Outside dst.toNat 128 M.priv
 
+/-- The return address the call at `Extracted.entry + 0x25` pushes. -/
+def ret25 : Nat := Extracted.entry + 0x25
+
 set_option maxRecDepth 20000 in
 theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : Nat)
     (hmv : MemAmd64.TypedMemmove (Extracted.program.link impl)
@@ -53,10 +56,14 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
   have hsp40 : (s.regs 4 - 40#64).toNat = (s.regs 4).toNat - 40 := by
     rw [BitVec.toNat_sub]; simp; omega
   have hfw : MemFrame s.mem ((Janus.Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8
-      (BitVec.toNat (s.regs 5))).writeLE (BitVec.toNat (s.regs 4) - 40) 8 4741317)
+      (BitVec.toNat (s.regs 5))).writeLE (BitVec.toNat (s.regs 4) - 40) 8 ret25)
       (MemAmd64.callerWindow s d 40 8) := by
     simp only [MemAmd64.callerWindow]; janus_frame
-  have hsz : Janus.Arm64.Memory.readLE s.mem 4828096 8 = 128 := by rw [h_rodata _ _ (by decide)]; decide
+  janus_eval_nat hR25 : ret25
+  simp only [hR25] at hfw
+  have hsz : Janus.Arm64.Memory.readLE s.mem treesType 8 = 128 := by
+    rw [hT, h_rodata _ _ (by decide)]; decide
+  rw [hT] at hsz
   have E := fun {S : State} (hf : MemFrame s.mem S.mem (MemAmd64.callerWindow s d 40 8))
       (hsp : (S.regs 4).toNat = (s.regs 4).toNat - 40) (hg : S.regs 14 = s.regs 14) (hx : S.xmm 15 = 0)
       (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47) =>

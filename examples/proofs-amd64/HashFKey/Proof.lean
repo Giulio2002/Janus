@@ -33,6 +33,12 @@ def pre (H : HashModel) (d : Nat) (p : BitVec 64) (s : State) : Prop :=
     Outside (strPtr s.mem (p.toNat + 8)) (strLen s.mem (p.toNat + 8)) (window d s) ∧
     Outside (strPtr s.mem (p.toNat + 8)) (strLen s.mem (p.toNat + 8)) H.priv
 
+/-- The return address the call at `Extracted.entry + 0x18` pushes. -/
+def ret18 : Nat := Extracted.entry + 0x18
+
+/-- The return address the call at `Extracted.entry + 0x2c` pushes. -/
+def ret2c : Nat := Extracted.entry + 0x2c
+
 set_option maxHeartbeats 2000000 in
 theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat)
     (hf : HashAmd64.Fhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.f64hash")
@@ -58,8 +64,10 @@ theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat
   janus64_run until [Extracted.program.contractAddr "runtime.f64hash"]
   have hfw : MemFrame s.mem (((Janus.Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8
       (BitVec.toNat (s.regs 5))).writeLE (BitVec.toNat (s.regs 4) + 8) 8 p.toNat).writeLE
-      (BitVec.toNat (s.regs 4) - 32) 8 4745400) (MemAmd64.callerWindow s d 32 16) := by
+      (BitVec.toNat (s.regs 4) - 32) 8 ret18) (MemAmd64.callerWindow s d 32 16) := by
     simp only [MemAmd64.callerWindow]; janus_frame
+  janus_eval_nat hR18 : ret18
+  simp only [hR18] at hfw
   have E := fun {S : State} (hf : MemFrame s.mem S.mem (MemAmd64.callerWindow s d 32 16))
       (hsp : (S.regs 4).toNat = (s.regs 4).toNat - 32) (hg : S.regs 14 = s.regs 14) (hx : S.xmm 15 = 0)
       (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47) =>
@@ -89,21 +97,29 @@ theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat
     simp only [setRegF, reduceIte, Nat.reduceEqDiff, h_a0, h_a1] at hres
     janus64_run until [Extracted.program.contractAddr "runtime.strhash"]
     have hm' : ∀ a n, Outside a n H.priv → a + n ≤ (s.regs 4).toNat - (d + 32) ∨ (s.regs 4).toNat + 16 ≤ a →
-        (m'.writeLE (BitVec.toNat (s.regs 4) - 32) 8 4745420).readLE a n = s.mem.readLE a n := by
+        (m'.writeLE (BitVec.toNat (s.regs 4) - 32) 8 ret2c).readLE a n = s.mem.readLE a n := by
       intro a n h1 h2
       rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
         hfr.readLE a n (by simp only [outside_append, outside_cons, outside_nil, and_true]; exact ⟨h1, by omega, by omega⟩),
         hfw.readLE a n (by simp only [outside_cons, outside_nil, and_true]; exact h2)]
-    have hacc : ∀ a n w, (m'.writeLE (BitVec.toNat (s.regs 4) - 32) 8 4745420).accessible a n w =
+    janus_eval_nat hR2c : ret2c
+    simp only [hR2c] at hm'
+    have hacc : ∀ a n w, (m'.writeLE (BitVec.toNat (s.regs 4) - 32) 8 ret2c).accessible a n w =
         s.mem.accessible a n w := fun a n w => by
       rw [Janus.Arm64.Memory.accessible_writeLE, hfr.accessible, hfw.accessible]
+    janus_eval_nat hR2c : ret2c
+    simp only [hR2c] at hacc
     have hp' : p.toNat + 8 = (p + 8#64).toNat := by rw [BitVec.toNat_add]; simp; omega
-    have hptr : strPtr (m'.writeLE (BitVec.toNat (s.regs 4) - 32) 8 4745420) (p.toNat + 8) =
+    have hptr : strPtr (m'.writeLE (BitVec.toNat (s.regs 4) - 32) 8 ret2c) (p.toNat + 8) =
         strPtr s.mem (p.toNat + 8) := by
       unfold strPtr; exact hm' _ _ (Outside.of_sub hpp (by omega) (by omega)) (by omega)
-    have hlen : strLen (m'.writeLE (BitVec.toNat (s.regs 4) - 32) 8 4745420) (p.toNat + 8) =
+    janus_eval_nat hR2c : ret2c
+    simp only [hR2c] at hptr
+    have hlen : strLen (m'.writeLE (BitVec.toNat (s.regs 4) - 32) 8 ret2c) (p.toNat + 8) =
         strLen s.mem (p.toNat + 8) := by
       unfold strLen; exact hm' _ _ (Outside.of_sub hpp (by omega) (by omega)) (by omega)
+    janus_eval_nat hR2c : ret2c
+    simp only [hR2c] at hlen
     have E2 := fun {S : State} (hacc : ∀ a n w, S.mem.accessible a n w = s.mem.accessible a n w)
         (hguard : S.mem.readLE ((s.regs 14).toNat + 16) 8 = s.mem.readLE ((s.regs 14).toNat + 16) 8)
         (hsp : (S.regs 4).toNat = (s.regs 4).toNat - 32) (hg : S.regs 14 = s.regs 14) (hx : S.xmm 15 = 0)
@@ -147,8 +163,10 @@ theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat
       janus64_run
       have hx : (((Janus.Arm64.Memory.writeLE s.mem (BitVec.toNat (s.regs 4) - 8) 8
           (BitVec.toNat (s.regs 5))).writeLE (BitVec.toNat (s.regs 4) + 8) 8 p.toNat).writeLE
-          (BitVec.toNat (s.regs 4) - 32) 8 4745400).readLE p.toNat 8 = s.mem.readLE p.toNat 8 :=
+          (BitVec.toNat (s.regs 4) - 32) 8 ret18).readLE p.toNat 8 = s.mem.readLE p.toNat 8 :=
         hfw.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)
+      janus_eval_nat hR18 : ret18
+      simp only [hR18] at hx
       rw [hx] at hres
       exact ⟨_, hres, hres2⟩
 
