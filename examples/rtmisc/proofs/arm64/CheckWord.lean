@@ -1,5 +1,5 @@
 import Extracted
-import Janus.Contracts.InstrumentSat
+import Janus.Contracts.InstrumentCallsSat
 
 /-!
 # `Word(p unsafe.Pointer) uint64` built with `-d=checkptr` (arm64)
@@ -100,14 +100,14 @@ theorem correctness (impl : List Segment) (C : CheckptrModel) (hl : C.Laws)
 
 /-! ## Non-vacuity: every hypothesis of `correctness` holds together
 
-The model `InstrumentSat.C0` (laws `C0_laws`), the implementation `RET` at
+The model `InstrumentCallsSat.C0` (laws `C0_laws`), the implementation `RET` at
 `runtime.checkptrAlignment`'s address (it meets `CheckptrAlignment` for `C0`, `model`), an
 admissible return address, and a call state of `Word(&v)` for the word `v = 42` at
 `IfaceModel.VAL`, in a memory with the binary's read-only data loaded. -/
 
 namespace Witness
 
-open Janus.Contracts.IfaceModel Janus.Contracts.IfaceSat Janus.Contracts.InstrumentSat
+open Janus.Contracts.IfaceModel Janus.Contracts.IfaceSat Janus.Contracts.InstrumentCallsSat
 
 /-- `runtime.checkptrAlignment`'s address. -/
 def cAddr : Nat := Extracted.program.contractAddr "runtime.checkptrAlignment"

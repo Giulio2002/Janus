@@ -117,11 +117,12 @@ theorem b64_expOf_pack (s : Bool) (e fr : Nat) (he : e < 2 ^ 11) (hf : fr < 2 ^ 
 
 theorem b64_isNaN_pack (s : Bool) (e fr : Nat) (he : e < 2047) (hf : fr < 2 ^ 52) :
     isNaN binary64 (pack binary64 s e fr) = false := by
-  have := b64_expOf_pack s e fr (by omega) hf
-  unfold isNaN classify
-  simp only [this]
-  have : ¬ e = binary64.expMax := by simp [binary64, Fmt.expMax]; omega
-  split <;> simp_all
+  have h1 := b64_expOf_pack s e fr (by omega) hf
+  cases h : isNaN binary64 (pack binary64 s e fr)
+  · rfl
+  · have := ((isNaN_iff binary64 (by decide) _).1 h).1
+    rw [h1] at this
+    simp [binary64, Fmt.expMax] at this; omega
 
 theorem b64_isNaN_inf (s : Bool) : isNaN binary64 (inf binary64 s) = false := by cases s <;> decide
 theorem b64_isNaN_zero (s : Bool) : isNaN binary64 (zero binary64 s) = false := by cases s <;> decide
@@ -137,15 +138,7 @@ theorem b64_isNaN_round (rm : RM) (neg : Bool) (m : Nat) (e : Int) :
     · exact b64_isNaN_inf _
     · exact b64_isNaN_maxNormal _
   · rename_i h
-    exact b64_isNaN_pack _ _ _ (by simp [binary64, Fmt.expMax] at h; omega) (Nat.mod_lt _ (by decide))
-
-/-- Every `some` result of an IEEE operation of `Janus.Float.Spec`/`Janus.Spec.Complex` is a
-number or an infinity, never a NaN encoding. -/
-theorem add_some_notNaN {rm : RM} {a b r : Nat} (h : add binary64 rm a b = some r) :
-    isNaN binary64 r = false := by
-  unfold add at h
-  split at h; · cases h
-  repeat (first | (split at h; (first | (cases h; exact b64_isNaN_inf _) | (cases h; exact b64_isNaN_zero _) | cases h)) | skip)
-  all_goals sorry
+    rw [show ((binary64.expMax : Nat) : Int) = 2047 from rfl] at h
+    exact b64_isNaN_pack _ _ _ (by omega) (Nat.mod_lt _ (by decide))
 
 end Janus.Float

@@ -1,19 +1,19 @@
 import Janus.Contracts.InstrumentCallsAmd64
-import Janus.Contracts.InstrumentSat
+import Janus.Contracts.InstrumentCallsSat
 import Janus.Contracts.IfaceSatAmd64
 
 /-!
 # The `-d=checkptr` contracts are satisfiable (amd64)
 
-As `Janus.Contracts.InstrumentSat`: the model `C0`, the code `RET` (`c3`), and the call state
+As `Janus.Contracts.InstrumentCallsSat`: the model `C0`, the code `RET` (`c3`), and the call state
 `IfaceSatAmd64.wstate`.
 -/
 
-namespace Janus.Contracts.InstrumentSatAmd64
+namespace Janus.Contracts.InstrumentCallsSatAmd64
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Spec.Map Janus.Contracts
   Janus.Contracts.Instrument Janus.Contracts.IfaceModel Janus.Contracts.IfaceSatAmd64
-  Janus.Contracts.InstrumentSat
+  Janus.Contracts.InstrumentCallsSat
 
 /-- `ret`. -/
 def retCode : List Nat := [0xc3]
@@ -64,4 +64,4 @@ theorem checkptrArithmetic64_satisfiable : ∃ (C : CheckptrModel) (impl : List 
   ⟨C0, _, C0_laws, checkptrArithmetic64_impl, wstate fun _ => 0, rfl, wstate_rtpre64 _ 4 (by decide),
     by simp [minLegalPointer, wstate], Or.inl rfl⟩
 
-end Janus.Contracts.InstrumentSatAmd64
+end Janus.Contracts.InstrumentCallsSatAmd64

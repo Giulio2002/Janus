@@ -11,7 +11,7 @@ change nothing), proved by symbolic execution, and a call state that satisfies t
 precondition (`IfaceSat.wstate`).
 -/
 
-namespace Janus.Contracts.InstrumentSat
+namespace Janus.Contracts.InstrumentCallsSat
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Contracts
   Janus.Contracts.Instrument Janus.Contracts.IfaceModel Janus.Contracts.IfaceSat
@@ -76,4 +76,4 @@ theorem checkptrArithmetic_satisfiable : ∃ (C : CheckptrModel) (impl : List Se
   ⟨C0, _, C0_laws, checkptrArithmetic_impl, wstate fun _ => 0, rfl, wstate_rtpre' _ 4 (by decide),
     by simp [ArithOK, minLegalPointer, wstate], Or.inl rfl⟩
 
-end Janus.Contracts.InstrumentSat
+end Janus.Contracts.InstrumentCallsSat

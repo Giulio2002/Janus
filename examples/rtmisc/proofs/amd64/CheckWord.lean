@@ -1,5 +1,5 @@
 import Janus
-import Janus.Contracts.InstrumentSatAmd64
+import Janus.Contracts.InstrumentCallsSatAmd64
 import Extracted
 
 /-!
