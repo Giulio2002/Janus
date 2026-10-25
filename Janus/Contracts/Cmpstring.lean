@@ -102,4 +102,9 @@ theorem cmp_msb (c : Int) (h : c = -1 ∨ c = 0 ∨ c = 1) :
     (BitVec.ofInt 64 c).getLsbD 63 = decide (c < 0) := by
   rcases h with rfl | rfl | rfl <;> decide
 
+/-- The same, as `msb` (the sign flag of `TESTQ`). -/
+theorem cmp_msb' (c : Int) (h : c = -1 ∨ c = 0 ∨ c = 1) :
+    (BitVec.ofInt 64 c).msb = decide (c < 0) := by
+  rcases h with rfl | rfl | rfl <;> decide
+
 end Janus.Contracts.Cmpstring

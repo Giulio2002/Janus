@@ -1,5 +1,26 @@
 import Extracted
 
+/-!
+# `MinStr(s, t string) string`: Go's `min` on strings through `runtime.strmin`
+
+**Guarantee.** For every implementation `impl` of `runtime.cmpstring` that meets its contract
+(`Janus.Contracts.Cmpstring.CmpstringContract`: `X0` is the bytewise lexicographic comparison `strCmp`
+of the two strings, `-1`/`0`/`1`, nothing else observable changes), every pair of strings
+`s = (a, la)`, `t = (b, lb)` whose bytes are readable and outside the stack window, and every Go call
+state whose stack-growth prologues (`MinStr`, `runtime.strmin`) fall through with the stack window
+writable, the call of `example.com/basic.MinStr` in the linked program returns, obeys the ABI, and
+returns `t` if `t < s` bytewise (`strCmp t s < 0`) and `s` otherwise: Go's `min(s, t)`, which
+returns the first argument on a tie.
+
+**What is executed and what is assumed.** `MinStr` and `runtime.strmin` (Go code in
+`runtime/minmax.go`: `if y < x { return y }; return x`) are executed from the binary;
+`runtime.cmpstring` (assembly) is left out with `--contract runtime.cmpstring`
+(scripts/example-targets.sh) and assumed by the hypothesis. The contract is satisfiable
+(`Janus.Contracts.CmpstringSat.cmpstring_satisfiable`), so the theorem is not vacuous. The proof shows that the stores of the two frames do not
+touch the string bytes (`strCmp_writeLE`), and reads the sign of the result off the
+branch on it (`cmp_msb`).
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Cmpstring
 
 namespace Proof
