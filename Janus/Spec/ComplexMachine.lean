@@ -377,13 +377,18 @@ open Janus.Float
 
 variable {X Y : Option Nat} {x y : Nat}
 
-theorem c0 : IEEEMode (ctl 0x1F80) := IEEEMode.default
-theorem rc0 : (ctl 0x1F80).rc = .rne := by decide
+/-- The controls of the default `MXCSR` (`0x1F80`: round to nearest, no `DAZ`/`FTZ`), as the
+symbolic executor writes them. -/
+abbrev C0 : Ctl := { rc := .rne, daz := false, ftz := false }
+
+theorem ctl_default : ctl 0x1F80 = C0 := by decide
+theorem c0 : IEEEMode C0 := ctl_default ▸ IEEEMode.default
+theorem rc0 : C0.rc = .rne := rfl
 
 theorem b64Std : binary64.Std := Or.inr rfl
 
 theorem binop_lt (op : BinOp) (hop : op = .add ∨ op = .sub ∨ op = .mul ∨ op = .div) (x y : Nat)
-    (hx : x < 2 ^ 64) (hy : y < 2 ^ 64) : (binop op binary64 (ctl 0x1F80) x y).res < 2 ^ 64 := by
+    (hx : x < 2 ^ 64) (hy : y < 2 ^ 64) : (binop op binary64 C0 x y).res < 2 ^ 64 := by
   rcases hop with rfl | rfl | rfl | rfl
   · exact (binop_add_ieee c0 binary64 b64Std x y hx hy).1
   · exact (binop_sub_ieee c0 binary64 b64Std x y hx hy).1
@@ -392,7 +397,7 @@ theorem binop_lt (op : BinOp) (hop : op = .add ∨ op = .sub ∨ op = .mul ∨ o
 
 /-- The lifted operations: `ADDSD`, `SUBSD`, `MULSD`, `DIVSD` deliver `O.add2` & co. -/
 theorem x_add (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
-    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.add2 X Y) (binop .add binary64 (ctl 0x1F80) x y).res := by
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.add2 X Y) (binop .add binary64 C0 x y).res := by
   have h := (binop_add_ieee c0 binary64 b64Std x y hxl hyl).2
   rw [rc0] at h
   cases X with
@@ -406,7 +411,7 @@ theorem x_add (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x
     | some b => simp only [ResultIs] at hy; subst hy; simpa [O.add2] using h
 
 theorem x_sub (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
-    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.sub2 X Y) (binop .sub binary64 (ctl 0x1F80) x y).res := by
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.sub2 X Y) (binop .sub binary64 C0 x y).res := by
   have h := (binop_sub_ieee c0 binary64 b64Std x y hxl hyl).2
   rw [rc0] at h
   cases X with
@@ -420,7 +425,7 @@ theorem x_sub (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x
     | some b => simp only [ResultIs] at hy; subst hy; simpa [O.sub2] using h
 
 theorem x_mul (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
-    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.mul2 X Y) (binop .mul binary64 (ctl 0x1F80) x y).res := by
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.mul2 X Y) (binop .mul binary64 C0 x y).res := by
   have h := (binop_mul_ieee c0 binary64 b64Std x y hxl hyl).2
   rw [rc0] at h
   cases X with
@@ -434,7 +439,7 @@ theorem x_mul (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x
     | some b => simp only [ResultIs] at hy; subst hy; simpa [O.mul2] using h
 
 theorem x_div (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
-    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.div2 X Y) (binop .div binary64 (ctl 0x1F80) x y).res := by
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.div2 X Y) (binop .div binary64 C0 x y).res := by
   have h := (binop_div_ieee c0 binary64 b64Std x y hxl hyl).2
   rw [rc0] at h
   cases X with
@@ -447,16 +452,34 @@ theorem x_div (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x
               rwa [show div binary64 .rne x y = none by simp [div, hy]] at h
     | some b => simp only [ResultIs] at hy; subst hy; simpa [O.div2] using h
 
+theorem x_add' (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.add2 X Y) ((binop .add binary64 C0 x y).res % 18446744073709551616) := by
+  rw [Nat.mod_eq_of_lt (binop_lt .add (by simp) x y hxl hyl)]; exact x_add hx hy hxl hyl
+theorem x_sub' (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.sub2 X Y) ((binop .sub binary64 C0 x y).res % 18446744073709551616) := by
+  rw [Nat.mod_eq_of_lt (binop_lt .sub (by simp) x y hxl hyl)]; exact x_sub hx hy hxl hyl
+theorem x_mul' (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.mul2 X Y) ((binop .mul binary64 C0 x y).res % 18446744073709551616) := by
+  rw [Nat.mod_eq_of_lt (binop_lt .mul (by simp) x y hxl hyl)]; exact x_mul hx hy hxl hyl
+theorem x_div' (hx : ResultIs binary64 X x) (hy : ResultIs binary64 Y y) (hxl : x < 2 ^ 64)
+    (hyl : y < 2 ^ 64) : ResultIs binary64 (O.div2 X Y) ((binop .div binary64 C0 x y).res % 18446744073709551616) := by
+  rw [Nat.mod_eq_of_lt (binop_lt .div (by simp) x y hxl hyl)]; exact x_div hx hy hxl hyl
+
 /-- `SUBSD x, x` then `UCOMISD` with itself: `isFinite(x)`. -/
 theorem isNaN_sub_self (x : Nat) (hx : x < 2 ^ 64) :
-    isNaN binary64 (binop .sub binary64 (ctl 0x1F80) x x).res = !isFinite64 x := by
-  have h := x_sub (X := some x) (Y := some x) rfl rfl hx hx
+    isNaN binary64 ((binop .sub binary64 C0 x x).res % 18446744073709551616) = !isFinite64 x := by
+  have h := x_sub' (X := some x) (Y := some x) rfl rfl hx hx
   rw [resultIs_nan_iff h (O.sub2_noNaN _ _)]
   simp [O.sub2, isFinite64]
 
+/-- The low half of an `XMM` register after a scalar operation (the upper half is kept). -/
+theorem lo64 (x y : Nat) :
+    (x / 18446744073709551616 * 18446744073709551616 + y % 18446744073709551616) % 18446744073709551616 =
+      y % 18446744073709551616 := by omega
+
 /-- `UCOMISD x, y`: the result bits `ZF:PF:CF` (`MXCSR` default), NaNs included. -/
 theorem comis_res64 (sig : Bool) (x y : Nat) :
-    (comis sig binary64 (ctl 0x1F80) x y).res =
+    (comis sig binary64 C0 x y).res =
       if isNaN binary64 x || isNaN binary64 y then 7
       else if Val.eq (valueOf binary64 x) (valueOf binary64 y) then 4
       else if Val.lt (valueOf binary64 x) (valueOf binary64 y) then 1 else 0 := by
@@ -467,7 +490,7 @@ theorem comis_res64 (sig : Bool) (x y : Nat) :
 /-- `UCOMISD x, y` as the flags the branches read: `CF` (below or unordered), `PF` (unordered), `ZF`
 (equal or unordered). -/
 theorem comis_cf (sig : Bool) (x y : Nat) :
-    ((comis sig binary64 (ctl 0x1F80) x y).res % 2 = 1) =
+    ((comis sig binary64 C0 x y).res % 2 = 1) =
       ((isNaN binary64 x || isNaN binary64 y || Janus.Arm64.FP.cmpN x y) = true) := by
   rw [comis_res64]; unfold Janus.Arm64.FP.cmpN
   cases isNaN binary64 x <;> cases isNaN binary64 y <;>
@@ -475,14 +498,14 @@ theorem comis_cf (sig : Bool) (x y : Nat) :
     cases Val.lt (valueOf binary64 x) (valueOf binary64 y) <;> decide
 
 theorem comis_pf (sig : Bool) (x y : Nat) :
-    ((comis sig binary64 (ctl 0x1F80) x y).res / 2 % 2 = 1) = ((isNaN binary64 x || isNaN binary64 y) = true) := by
+    ((comis sig binary64 C0 x y).res / 2 % 2 = 1) = ((isNaN binary64 x || isNaN binary64 y) = true) := by
   rw [comis_res64]
   cases isNaN binary64 x <;> cases isNaN binary64 y <;>
     cases Val.eq (valueOf binary64 x) (valueOf binary64 y) <;>
     cases Val.lt (valueOf binary64 x) (valueOf binary64 y) <;> decide
 
 theorem comis_zf (sig : Bool) (x y : Nat) :
-    ((comis sig binary64 (ctl 0x1F80) x y).res / 4 % 2 = 1) =
+    ((comis sig binary64 C0 x y).res / 4 % 2 = 1) =
       ((isNaN binary64 x || isNaN binary64 y || eq64 x y) = true) := by
   rw [comis_res64]; unfold eq64
   cases isNaN binary64 x <;> cases isNaN binary64 y <;>
