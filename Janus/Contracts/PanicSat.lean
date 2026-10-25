@@ -335,4 +335,10 @@ theorem gopanic_satisfiable : ∃ (P : PanicRuntime) (impl : List Segment) (bits
     by decide, ?_, by decide, ?_, ?_, by decide, ?_, ?_, ?_, ?_, ?_⟩ <;>
     (try simp only [P0_priv, outside_cons, outside_nil, and_true]) <;> decide
 
+/-- `GopanicRecoverContract` under the round-9 naming (`<contract>_satisfiable`). -/
+theorem gopanicRecover_satisfiable : ∃ (P : PanicRuntime) (impl : List Segment) (bitsOff slotOff resume : Nat),
+    P.Laws ∧ GopanicRecoverContract (toy.link impl) A0 P bitsOff slotOff resume ∧
+    ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ GopanicRecoverPre P bitsOff slotOff s :=
+  gopanic_satisfiable
+
 end Janus.Contracts.PanicSat
