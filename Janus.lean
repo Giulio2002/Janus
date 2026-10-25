@@ -42,3 +42,5 @@ import Janus.Contracts.HashLaws
 import Janus.Contracts.MapStr
 import Janus.Contracts.MemSat
 import Janus.Contracts.HashSat
+import Janus.Contracts.MemSatAmd64
+import Janus.Contracts.HashSatAmd64
