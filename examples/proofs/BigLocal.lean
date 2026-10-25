@@ -142,7 +142,7 @@ theorem grow_branch (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
     rw [hsp_r, show s_m.sp.toNat + hi' - hi + off = (s_m.sp.toNat + off) + hi' - hi by omega]
     exact hmv.readLE_scalar (by omega) (by omega) (fun j hj => by
       rw [show s_m.sp.toNat + off + j - (s_m.sp.toNat + off + j) % 8 = s_m.sp.toNat + off by omega]
-      exact hc) trivial
+      simp only [moveCls, hc, Bool.or_false, decide_eq_false_iff_not]; omega) trivial
   have hg28 : t.regs 28 = s_m.regs 28 := (htr 28 (by decide) (by decide)).trans hgr.gkeep.1
   have hgreg := hm.greg
   obtain ⟨hgg24, hggacc, -, -, hggd⟩ := hgr.gstack

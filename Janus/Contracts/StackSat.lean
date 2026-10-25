@@ -49,12 +49,12 @@ def rt : List (Nat × Nat) := [(G0, G0 + 24)]
 def H : RtReady := fun _ g _ v => g = G0 ∧
   ((v.readLE g 8 = SL ∧ v.readLE (g + 8) 8 = SH) ∨ (v.readLE g 8 = BL ∧ v.readLE (g + 8) 8 = BH))
 
-/-- The words the runtime adjusts: those of the unwinder's walk from the call state, when the
-stack unwinds. -/
-noncomputable def clsOf (FT : FrameTable) (s : State) : Nat → Bool :=
+/-- The frames the runtime adjusts: the unwinder's walk from the call state, when the stack
+unwinds. -/
+noncomputable def clsFrames (FT : FrameTable) (s : State) : List Frame :=
   haveI := Classical.propDecidable
   if h : ∃ fs, Chain Arch.arm64 FT s.mem SH (s.regs 30).toNat s.sp.toNat (some (s.regs 3).toNat) fs
-  then framesCls Arch.arm64 FT (Classical.choose h) else fun _ => false
+  then Classical.choose h else []
 
 /-- The big slot's descriptor written over `m`: `stack.lo`, `stack.hi`, `stackguard0`. -/
 def descMem (m : Memory) : Memory :=
@@ -67,11 +67,11 @@ noncomputable def movedByte (cls : Nat → Bool) (m : Memory) (a : Nat) : Byte :
     (m.writeLE (a - a % 8 + BH - SH) 8 (adjustWord SL SH BH (m.readLE (a - a % 8) 8))).bytes (a + BH - SH)
   else m.bytes a
 
-/-- The memory after the copy: the descriptor rewritten, `[sp, SH)` moved to `[sp + BH - SH, BH)`,
+/-- The memory after the copy: the descriptor rewritten, `[sp - 8, SH)` moved to `[sp - 8 + BH - SH, BH)`,
 everything else (the regions included) unchanged. -/
 noncomputable def growMem (cls : Nat → Bool) (m : Memory) (sp : Nat) : Memory :=
   { bytes := fun a' => if G0 ≤ a' ∧ a' < G0 + 24 then (descMem m).bytes a'
-      else if sp + BH - SH ≤ a' ∧ a' < BH then movedByte cls m (a' + SH - BH)
+      else if sp - 8 + BH - SH ≤ a' ∧ a' < BH then movedByte cls m (a' + SH - BH)
       else m.bytes a',
     regions := m.regions }
 
@@ -81,7 +81,7 @@ noncomputable def growState (FT : FrameTable) (s : State) : State :=
     regs := fun r => if r = 29 then BitVec.ofNat 64 ((s.regs 29).toNat + BH - SH)
       else if r = 30 then s.regs 3 else if r = 26 then 0 else s.regs r,
     sp := BitVec.ofNat 64 (s.sp.toNat + BH - SH), pc := s.regs 30,
-    mem := growMem (clsOf FT s) s.mem s.sp.toNat }
+    mem := growMem (moveCls FT s.sp.toNat (clsFrames FT s)) s.mem s.sp.toNat }
 
 /-- The toy runtime's growth relation. -/
 def reloc (FT : FrameTable) (s s' : State) : Prop := s' = growState FT s
@@ -104,7 +104,7 @@ theorem growMem_desc (cls : Nat → Bool) (m : Memory) (sp : Nat) (k : Nat) (hk 
     simp only [growMem]; rw [if_pos (by omega)]
 
 theorem growMem_out (cls : Nat → Bool) (m : Memory) (sp : Nat) {a n : Nat}
-    (h1 : a + n ≤ G0 ∨ G0 + 24 ≤ a) (h2 : a + n ≤ BL ∨ BH ≤ a) (hsp : SL ≤ sp) :
+    (h1 : a + n ≤ G0 ∨ G0 + 24 ≤ a) (h2 : a + n ≤ BL ∨ BH ≤ a) (hsp : SL + 8 ≤ sp) :
     (growMem cls m sp).readLE a n = m.readLE a n :=
   Memory.readLE_congr fun j hj => by
     simp only [growMem]
@@ -147,7 +147,7 @@ theorem contract (p : Program) (FT : FrameTable) : MorestackContract p FT pool r
       exact hgacc
     · simp only [gStackLo, Nat.add_zero]
       show (growMem _ s.mem _).readLE G0 8 = BL
-      have := growMem_desc (clsOf FT s) s.mem s.sp.toNat 0 (by decide)
+      have := growMem_desc (moveCls FT s.sp.toNat (clsFrames FT s)) s.mem s.sp.toNat 0 (by decide)
       simp only [Nat.add_zero] at this; rw [this, d1]
     · simp only [gStackHi]
       show (growMem _ s.mem _).readLE (G0 + 8) 8 = BH
@@ -159,13 +159,14 @@ theorem contract (p : Program) (FT : FrameTable) : MorestackContract p FT pool r
     intro fs hfs
     have hex : ∃ fs, Chain Arch.arm64 FT s.mem SH (s.regs 30).toNat s.sp.toNat (some (s.regs 3).toNat) fs :=
       ⟨fs, hfs⟩
-    have hcls : clsOf FT s = framesCls Arch.arm64 FT fs := by
-      simp only [clsOf, dif_pos hex]; rw [Chain.unique (Classical.choose_spec hex) hfs]
-    show Moved _ pool SL SH BH s.sp.toNat [] s.mem (growMem (clsOf FT s) s.mem s.sp.toNat)
+    have hcls : clsFrames FT s = fs := by
+      simp only [clsFrames, dif_pos hex]; exact Chain.unique (Classical.choose_spec hex) hfs
+    show Moved _ pool SL SH BH (s.sp.toNat - 8) [] s.mem
+      (growMem (moveCls FT s.sp.toNat (clsFrames FT s)) s.mem s.sp.toNat)
     rw [hcls]
     refine ⟨⟨by omega, by decide, by decide⟩, ⟨by decide, by decide, by omega, by omega⟩, ?_, ?_⟩
     · intro a h1 h2 h3 hc _
-      have hrd : (growMem (framesCls Arch.arm64 FT fs) s.mem s.sp.toNat).readLE (a + BH - SH) 8 =
+      have hrd : (growMem (moveCls FT s.sp.toNat fs) s.mem s.sp.toNat).readLE (a + BH - SH) 8 =
           adjustWord SL SH BH (s.mem.readLE a 8) := by
         rw [show adjustWord SL SH BH (s.mem.readLE a 8) =
             (s.mem.writeLE (a + BH - SH) 8 (adjustWord SL SH BH (s.mem.readLE a 8))).readLE (a + BH - SH) 8 by
@@ -199,11 +200,11 @@ theorem contract (p : Program) (FT : FrameTable) : MorestackContract p FT pool r
   · -- the runtime is ready again: the big slot
     refine ⟨rfl, .inr ⟨?_, ?_⟩⟩
     · rw [readLE_rtView hin0]
-      show (growMem (clsOf FT s) s.mem s.sp.toNat).readLE G0 8 = BL
-      have := growMem_desc (clsOf FT s) s.mem s.sp.toNat 0 (by decide)
+      show (growMem (moveCls FT s.sp.toNat (clsFrames FT s)) s.mem s.sp.toNat).readLE G0 8 = BL
+      have := growMem_desc (moveCls FT s.sp.toNat (clsFrames FT s)) s.mem s.sp.toNat 0 (by decide)
       simp only [Nat.add_zero] at this; rw [this, (descMem_readLE s.mem).1]
     · rw [readLE_rtView (hin 8 (by decide))]
-      show (growMem (clsOf FT s) s.mem s.sp.toNat).readLE (G0 + 8) 8 = BH
+      show (growMem (moveCls FT s.sp.toNat (clsFrames FT s)) s.mem s.sp.toNat).readLE (G0 + 8) 8 = BH
       rw [growMem_desc _ _ _ 8 (by decide), (descMem_readLE s.mem).2.1]
 
 /-! ## A call state that satisfies the precondition -/

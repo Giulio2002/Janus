@@ -98,6 +98,11 @@ structure MorestackPre (p : Program) (FT : FrameTable) (pool rt : List (Nat × N
   code : FT.CodeOutside pool ∧ FT.Aligned
   ready : H [] g 0 (rtView rt s_m.mem)
 
+/-- The words a growth at the prologue adjusts (arm64): the caller's saved frame pointer at
+`SP - 8` (`adjustctxt`, as `gobuf.bp = SP - 8`) and the words of the walk's frames. -/
+def moveCls (FT : FrameTable) (sp : Nat) (fs : List Frame) (a : Nat) : Bool :=
+  decide (a = sp - 8) || framesCls Arch.arm64 FT fs a
+
 /-- `s'` is the resumed state after `newstack` grew the stack of the call state `s` (arm64)
 from `[lo, hi)` to `[lo', hi')`: an address `a` of the old stack is now at `a + hi' - hi` (the
 new stack may lie above or below the old one):
@@ -109,7 +114,9 @@ new stack may lie above or below the old one):
   (`g`) and `X18` kept, `X26 = 0` (`morestack_noctxt`), every other register, the flags and the
   SIMD&FP registers unspecified;
 * `g.stack`, `g.stackguard0` read `[lo', hi')`, `lo' + stackGuard`;
-* memory: the frames of the walk moved (`Moved` along `framesCls` of the `Chain`), and outside
+* memory: the frames of the walk moved (`Moved` along `framesCls` of the `Chain`), from
+  `SP - 8` on: `adjustctxt` also copies and adjusts the word below `SP` where the arm64 frame
+  layout keeps the caller's saved frame pointer (`gobuf.bp = SP - 8`), and outside
   the pools and the runtime's own memory `rt` nothing changed (regions included);
 * the runtime is ready again (`H`). -/
 structure Grown (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (g lo hi lo' hi' : Nat)
@@ -126,7 +133,7 @@ structure Grown (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (g
   keep : s'.dczid = s.dczid ∧ s'.tpidr = s.tpidr ∧ s'.fpcr = s.fpcr
   gstack : GStack s'.mem g lo' hi'
   moved : ∀ fs, Chain Arch.arm64 FT s.mem hi (s.regs regLR).toNat s.sp.toNat (some (s.regs 3).toNat) fs →
-    Moved (framesCls Arch.arm64 FT fs) pool lo hi hi' s.sp.toNat [] s.mem s'.mem
+    Moved (moveCls FT s.sp.toNat fs) pool lo hi hi' (s.sp.toNat - 8) [] s.mem s'.mem
   frame : MemFrame s.mem s'.mem (pool ++ rt)
   ready : H [] g 0 (rtView rt s'.mem)
 
@@ -190,6 +197,136 @@ theorem Chain.congr {A : Arch} {FT : FrameTable} {m m' : Memory} {hi pc sp : Nat
     conv => rhs; rw [← List.map_id fs]
     apply List.map_congr_left; intro f _; simp [Frame.mv]
   rw [Nat.add_sub_cancel, hid] at this; exact this
+
+/-! ## Grown callee summaries
+
+A callee that may grow the stack (in its own prologue or deeper) still returns to its caller's
+return address — a code address, which a move never changes — but on a moved stack. `GrownRet`
+is `ReachesRet` through growths, and `GSummary` the grown `Summary`: what a recursive
+function's induction hypothesis is. -/
+
+/-- From `s`, ordinary steps and stack growths (each a run to a `morestack` stub followed by the
+contract's resume `reloc`) reach a state at `ret` satisfying `Q`. -/
+inductive GrownRet (p : Program) (reloc : State → State → Prop) (ret : W64) :
+    State → (State → Prop) → Prop where
+  | done {s s' : State} {Q : State → Prop} {k : Nat} (hs : Program.Steps p s k s')
+      (hpc : s'.pc = ret) (hq : Q s') : GrownRet p reloc ret s Q
+  | grow {s s_m s_r : State} {Q : State → Prop} {k : Nat} {st : Stub}
+      (hs : Program.Steps p s k s_m) (hx : s_m.pc.toNat ≠ p.exitAddr)
+      (hst : p.stubAt s_m.pc.toNat = some st) (hk : st.kind = .morestack) (hre : reloc s_m s_r)
+      (hrec : GrownRet p reloc ret s_r Q) : GrownRet p reloc ret s Q
+
+/-- A callee contract through stack growths: from every state at `entry` satisfying `pre`, the
+callee reaches its return address `X30` in a state satisfying `post`, growing the stack any
+number of times. -/
+def GSummary (p : Program) (reloc : State → State → Prop) (entry : Nat) (pre : State → Prop)
+    (post : State → State → Prop) : Prop :=
+  ∀ s, s.pc = BitVec.ofNat 64 entry → pre s → GrownRet p reloc (s.regs regLR) s (post s)
+
+namespace GrownRet
+
+variable {p : Program} {reloc : State → State → Prop} {ret : W64}
+
+theorem of_reachesRet {s : State} {Q : State → Prop} (h : ReachesRet p ret s Q) :
+    GrownRet p reloc ret s Q := by
+  obtain ⟨k, s', hs, hpc, hq⟩ := h; exact .done hs hpc hq
+
+theorem of_steps {s s' : State} {Q : State → Prop} {k : Nat} (hs : Program.Steps p s k s')
+    (h : GrownRet p reloc ret s' Q) : GrownRet p reloc ret s Q := by
+  cases h with
+  | done hs' hpc hq => exact .done (hs.trans hs') hpc hq
+  | grow hs' hx hst hk hre hrec => exact .grow (hs.trans hs') hx hst hk hre hrec
+
+theorem mono {s : State} {Q Q' : State → Prop} (h : GrownRet p reloc ret s Q)
+    (hq : ∀ s', Q s' → Q' s') : GrownRet p reloc ret s Q' := by
+  induction h with
+  | done hs hpc h => exact .done hs hpc (hq _ h)
+  | grow hs hx hst hk hre _ ih => exact .grow hs hx hst hk hre (ih hq)
+
+/-- Sequencing: a grown run to `r₁`, then from every state it may end in, a grown run to `r₂`. -/
+theorem bind {r₁ : W64} {s : State} {Q₁ Q₂ : State → Prop} (h : GrownRet p reloc r₁ s Q₁)
+    (hk : ∀ s', s'.pc = r₁ → Q₁ s' → GrownRet p reloc ret s' Q₂) : GrownRet p reloc ret s Q₂ := by
+  induction h with
+  | done hs hpc hq => exact of_steps hs (hk _ hpc hq)
+  | grow hs hx hst hkd hre _ ih => exact .grow hs hx hst hkd hre (ih hk)
+
+/-- A run that reaches a `morestack` stub continues as a grown run from the contract's resume. -/
+theorem of_reaches_stub {s : State} {Q : State → Prop}
+    (h : Reaches p s (fun o => match o with
+      | .stub _ .morestack s_m => ∃ s_r, reloc s_m s_r ∧ GrownRet p reloc ret s_r Q
+      | _ => False)) : GrownRet p reloc ret s Q := by
+  obtain ⟨n, o, hrun, hq⟩ := h
+  cases o with
+  | returned => exact hq.elim
+  | stub name kind s_m =>
+    obtain ⟨j, st, hs, hst, -, hk⟩ := GoABI.steps_of_run_stub hrun
+    cases kind with
+    | morestack =>
+      obtain ⟨s_r, hre, hg⟩ := hq
+      refine .grow hs ?_ hst hk hre hg
+      intro hx
+      have h0 := Program.run_steps_exit (k := j) hs hx
+      have := Program.run_ok_unique hrun h0
+      cases this
+    | panic => exact hq.elim
+    | external => exact hq.elim
+
+/-- In the caller's program `p.withExit ret` (no code at `ret`, and no stub there). -/
+theorem withExit {r : Nat} {s : State} {Q : State → Prop} (h : GrownRet p reloc ret s Q)
+    (hf : p.fetch r = none) (hst : ∀ st ∈ p.stubs, st.addr ≠ r) :
+    GrownRet (p.withExit r) reloc ret s Q := by
+  induction h with
+  | done hs hpc hq => exact .done (hs.withExit hf) hpc hq
+  | @grow s s_m s_r Q k st hs hx hstb hk hre _ ih =>
+    refine .grow (hs.withExit hf) ?_ hstb hk hre ih
+    intro he
+    have hfind : p.stubs.find? (·.addr = s_m.pc.toNat) = some st := hstb
+    have hmem : st ∈ p.stubs := List.mem_of_find?_eq_some hfind
+    have hpc : st.addr = s_m.pc.toNat := by
+      have := List.find?_some hfind; simpa using this
+    exact hst st hmem (by rw [hpc]; exact he)
+
+/-- At the top: a grown run to the exit address is a grown run that returns. -/
+theorem toGrownReturns {r : Nat} {s : State} {Q : State → Prop}
+    (h : GrownRet (p.withExit r) reloc (BitVec.ofNat 64 r) s Q) (hr : r < 2 ^ 64) :
+    GrownReturns (p.withExit r) reloc s Q := by
+  induction h with
+  | done hs hpc hq =>
+    refine .done ⟨_, _, Program.run_steps_exit hs ?_, hq⟩
+    rw [hpc, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hr]; rfl
+  | @grow s s_m s_r Q k st hs hx hst hk hre _ ih =>
+    have := Program.run_steps_stub hs hx hst
+    rw [hk] at this
+    exact .grow this hre ih
+
+end GrownRet
+
+/-- A grown callee summary used at a call: the callee's grown run to the return address, then
+the caller's continuation from every state the callee may return in. -/
+theorem GrownRet.call {p : Program} {reloc : State → State → Prop} {entry : Nat}
+    {pre : State → Prop} {post : State → State → Prop} {s : State} {ret : W64} {Q : State → Prop}
+    (hsum : GSummary p reloc entry pre post) (hpc : s.pc = BitVec.ofNat 64 entry) (hpre : pre s)
+    (h : ∀ s', s'.pc = s.regs regLR → post s s' → GrownRet p reloc ret s' Q) :
+    GrownRet p reloc ret s Q :=
+  (hsum s hpc hpre).bind h
+
+/-- Strong induction for grown summaries (`Tactic.Summary.induction`). -/
+theorem GSummary.induction {p : Program} {reloc : State → State → Prop} {entry : Nat}
+    {pre : State → Prop} {post : State → State → Prop} (μ : State → Nat)
+    (step : ∀ n, GSummary p reloc entry (fun s => pre s ∧ μ s < n) post →
+      GSummary p reloc entry (fun s => pre s ∧ μ s = n) post) :
+    GSummary p reloc entry pre post := by
+  have h : ∀ n, GSummary p reloc entry (fun s => pre s ∧ μ s < n) post := by
+    intro n
+    induction n with
+    | zero => intro s _ ⟨_, h⟩; exact absurd h (Nat.not_lt_zero _)
+    | succ n ih =>
+      intro s hpc ⟨hp, hlt⟩
+      rcases Nat.lt_succ_iff_lt_or_eq.1 hlt with hlt | heq
+      · exact ih s hpc ⟨hp, hlt⟩
+      · exact step n ih s hpc ⟨hp, heq⟩
+  intro s hpc hp
+  exact h (μ s + 1) s hpc ⟨hp, Nat.lt_succ_self _⟩
 
 /-! ## The `morestack` contract -/
 
