@@ -7,6 +7,7 @@ import Janus.Tactic.Disasm
 import Janus.Tactic.Ring
 import Janus.Tactic.Carry
 import Janus.Tactic.RingTac
+import Janus.Tactic.Recursion
 
 /-!
 # Janus proof automation

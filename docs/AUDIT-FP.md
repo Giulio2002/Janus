@@ -20,7 +20,7 @@ means hygiene.
 | DOC-ABI-MXCSR | low | `SOUNDNESS.md` said "the ABI says nothing about FPSR/MXCSR flags on return". Go's `abi-internal.md` calls the MXCSR status bits callee-save. Go code does not preserve them (the verified `AddF64` itself sets `PE`), and `ABIReturn` does not include them, so "obeys the ABI" was stronger in the text than in the definition. | fixed (documented) |
 | DOC-TRAP | low | README: `F64ToU64` on arm64 gives "the exact `FPToFixed` for every `FPCR`". The theorem assumes `FP.trapEnables s.fpcr.toNat = 0`. | fixed |
 | DOC-ORACLE | low | `ORACLE-AMD64.md` still listed the MXCSR status bits as "neither modelled nor compared". The FP harness compares them. | fixed |
-| X64-V3-FMA | hazard | With `GOAMD64=v3`, Go fuses `Dot3` into `MULSD` and two `VFMADD231SD`, as `fma(a2, b2, fma(a0, b0, a1·b1))`. That is a third association, different from both theorems. The decoder rejects VEX FMA, so the v1 theorem cannot be carried over to such a build. | no issue (row keeps it so) |
+| X64-V3-FMA | hazard | With `GOAMD64=v3`, Go fuses `Dot3` into `MULSD` and two `VFMADD231SD`, as `fma(a2, b2, fma(a0, b0, a1·b1))`. That is a third association, different from both theorems. The decoder rejected VEX FMA at the audit (it models scalar FMA since WP-B); either way the v1 theorem cannot be carried over to such a build. | no issue (row keeps it so) |
 | A64-*, X64-*, DEC-*, SPEC-TF | none | 469,029 new arm64 cases against qemu and Sail, 446,027 new amd64 cases against the host CPU, a 2.9M-word decoder sweep against GNU objdump, and 1.5M SoftFloat vectors run directly against the specifications: no disagreement anywhere. | no issue |
 
 **This round found one BROKEN item, X64-MXCSR-STICKY (high: the amd64 floating-point theorems
@@ -111,8 +111,10 @@ That is `fma(a2, b2, fma(a0, b0, a1·b1))`. Arm64 fuses the other way round,
 `fma(a2, b2, fma(a1, b1, a0·b0))`, and v1 does not fuse at all. The Go spec allows all three. A
 theorem is about one binary (SHA-256), and the README and `float.go` say which fusion each one
 proves. Row `X64-V3-FMA` builds the v3 binary, checks that the fused instructions are there,
-and checks that the v1 proof does not verify against it: the decoder rejects VEX FMA, so no
-theorem about a v3 build can be had by accident. Likewise, `math.FMA`'s `VFMADD231SD` path
+and checks that the v1 proof does not verify against it, so no theorem about a v3 build can
+be had by accident (at the audit the decoder rejected VEX FMA; since WP-B it models scalar FMA,
+and the v1 proof gets stuck at the first `VFMADD231SD`, whose fused result it does not account
+for). Likewise, `math.FMA`'s `VFMADD231SD` path
 behind `x86HasFMA` and `ROUNDSD` behind `x86HasSSE41` (`math.Floor` …) are reached only with
 the flag's memory stated in a precondition (a writable `.noptrbss` byte, never copied).
 
