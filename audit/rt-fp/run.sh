@@ -90,8 +90,12 @@ echo "== DEC-A64: the decoder on 2.9M words of the FP and Advanced SIMD space vs
 python3 -I "$here/decode/words.py" "$W/w.bin" "$W/w.hex"
 .lake/build/bin/janus-decode < "$W/w.hex" > "$W/w.lean"
 aarch64-linux-gnu-objdump -D -b binary -m aarch64 "$W/w.bin" | tail -n +8 > "$W/w.objd"
-if out=$(python3 -I "$here/decode/compare.py" "$W/w.lean" "$W/w.objd"); then
-  row "DEC-A64 (2,949,120 words)" ok "ok ($(grep -o 'disagreements: [0-9]*' <<<"$out"); $(grep -c ' ok ' "$W/w.lean") accepted)"
+# the same words: no word decoded by both `decode` and `decodeNeon` (one decoder per encoding)
+ov=$(lake env lean --run "$here/decode/Overlap.lean" "$W/w.lean") || out_ov=1
+if [ -n "${out_ov:-}" ]; then
+  row "DEC-A64 (2,949,120 words)" ok "FAILED: two decoders: $(grep -m3 BOTH <<<"$ov" | tr '\n' ' ')"
+elif out=$(python3 -I "$here/decode/compare.py" "$W/w.lean" "$W/w.objd"); then
+  row "DEC-A64 (2,949,120 words)" ok "ok ($(grep -o 'disagreements: [0-9]*' <<<"$out"); $(grep -c ' ok ' "$W/w.lean") accepted; $(grep -o 'decoded by both: [0-9]*' <<<"$ov"))"
 else
   row "DEC-A64 (2,949,120 words)" ok "FAILED: $(grep -m3 BAD <<<"$out" | tr '\n' ' ')"
 fi
