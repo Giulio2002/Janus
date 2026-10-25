@@ -613,6 +613,29 @@ the same cache: the build reused 27 unchanged entries, built and published the o
 under a loaded host), and a fresh copy of that commit then restored 137 modules and built JanusASL
 in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
 
+**Eviction** (`asl_mod_cache.py gc CACHE --max SIZE [--root REPO] [--grace S] [--dry-run]`). The
+module entries and the ArmASL entries had no eviction (a shared cache reached 42 GB). `scripts/asl.sh`
+now runs the collector after every publish with `--max $ASL_CACHE_MAX` (default `15G`; `off`
+disables it) and `--root` the checkout. It removes, in order: every ArmASL entry that no module
+entry references (an `armasl:<key>` import in its `INPUTS.json`) and that is not the checkout's
+current or legacy key; then, while the cache is over budget, the least recently used entry (by the
+use stamp `<key>.use` that every restore touches, else the entry's publication time), modules and
+ArmASL entries alike, never the checkout's ArmASL entry; then the ArmASL entries the evicted
+modules were the last to reference. Nothing used or published within `--grace` (default 1 h) is
+removed. Concurrency: restore (both the module restore and `scripts/asl.sh`'s ArmASL restore) now
+holds the entry's lock (`<key>.lock`) shared while it copies, publish holds it exclusively, and the
+collector removes an entry only under it, taken exclusively without waiting (an entry being read is
+skipped). An entry is renamed into a fresh `CACHE/.gc-trash-*` directory in one step (a reader sees
+it whole or not at all) and deleted after; its lock and use stamp are removed while held, and every
+locker re-checks that the path still names the file it locked. A module restore that cannot copy
+an entry completely removes all of that module's outputs, so no copied trace vouches for a missing
+output, and Lake builds it. Collecting only deletes: a removed entry is a miss.
+`JanusASL/tools/test_asl_mod_cache_gc.sh` tests the order, the budget, the grace, the use stamp,
+the lock of a reader, the lock retry and the leftovers on fixtures; with `--sample CACHE` it copies
+CACHE's entries for the checkout's modules into mktemp (CACHE is only read) and races restores
+against `gc --max 0 --grace 0` in a loop: on the shared cache's 80 entries for this commit, five
+rounds restored 41, 80, 80, 80 and 6 modules whole and the rest not at all, never a mixture.
+
 ## The check (JanusASL/Check.lean)
 
 Both sides start from the corpus case's registers, flags, V registers, TPIDR_EL0 and data buffer.

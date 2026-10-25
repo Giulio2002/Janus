@@ -670,7 +670,7 @@ func runASLStage(e *aslEnv) *aslReport {
 	if !e.tc.hasChecker {
 		kr.Status, kr.Note = "unavailable", "leanchecker not found in the Lean toolchain"
 	} else {
-		plan, err := planReplay(resolved, importGraph(ar.Imports), e.tc.version, e.replayCache)
+		plan, err := planReplay(resolved, importGraph(ar.Imports), e.tc.cacheID(), e.replayCache)
 		if err != nil {
 			return aslFail(r, err)
 		}

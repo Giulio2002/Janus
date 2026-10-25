@@ -270,6 +270,8 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 | `CStore` | `c_store(p, v)` writes `v` to `*p` and nothing else | ✓ | ✓ |
 | `GoAdd` | Go `Add(x, y)` → cgo → `c_add` → Go returns `x + y mod 2^64`, under the trusted `CgoCall` only | ✓ | ✓ |
 | `GoSum` | Go `Sum(xs)` → cgo → the C loop → Go returns `Σ xs[i] mod 2^64`, under `CgoCall` only | ✓ | ✓ |
+| `CCount` | `c_count(p, n, c)` (package `example.com/cgo/neon`, auto-vectorised by gcc `-O2`: `CMEQ`/`ZIP`/`UADDW`/`ADDP` loop + scalar tail) returns the number of `i < n` with `p[i] = c`, memory unchanged | ✓ | – |
+| `GoCount` | Go `neon.Count(xs, c)` → cgo → the NEON loop → Go returns the count, under `CgoCall` only | ✓ | – |
 | `KStack10` | `k_stack10(a, …, h, i, j)`: ten arguments, two (arm64) / four (amd64) on the stack, one an `int32_t` in an 8-byte slot (`CEnsuresR`) | ✓ | ✓ |
 | `KFP` | `k_fp(double a, float b, double c)` returns `(a - (double)b) * c` in `D0`/`XMM0`, IEEE round-to-nearest (`CEnsuresR`) | ✓ | ✓ |
 | `KPMix` | `k_pmix(struct k_pt a, struct k_pt b, int64_t n)`: two `{double, double}` by value (HFA in `V0`–`V3` / SSE, SSE in `XMM0`–`XMM3`), returns the mixed `{double, int64_t}` (`X0`, `X1` / `XMM0`, `RAX`) | ✓ | ✓ |

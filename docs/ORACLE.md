@@ -165,6 +165,67 @@ MISMATCH is the headline number: a proof about Go code is only sound if the mode
 a successful step that differs from the machine. Model gaps only cost coverage (a proof
 would get stuck on a fault), never soundness.
 
+## Results with the Advanced SIMD classes of `NeonInstr` (2026-10-25, `scripts/oracle.sh neon`, qemu 10.2.1 `-cpu max`)
+
+`OUT=artifacts/oracle-neon JOBS=8 SEED=1 scripts/oracle.sh neon` runs:
+
+* **targeted** (`gen/`): the classes `neon.3same`, `neon.3samefp`, `neon.s3same`, `neon.3diff`,
+  `neon.s3diff`, `neon.2misc`, `neon.s2misc`, `neon.across`, `neon.spair`, `neon.perm`,
+  `neon.shift`, `neon.sshift`, `neon.elem`, `neon.selem`, `neon.sdup`, `vls.struct` (LD2–LD4/ST2–ST4,
+  with and without post-index) and `vls.np` (LDNP/STNP), 20,000 words each (`oracle/gen/neon.go`).
+  Every field is drawn uniformly, so every opcode, `size`, `Q`, `U`, `immh`, `L:M:H` and arrangement
+  occurs, allocated or not. States: for the floating-point forms (`neonFP`) **every lane** gets an
+  IEEE edge value of the lane's format (±0, subnormals, ±∞, quiet and signalling NaNs, halfway and
+  boundary values), with crafted relations between the lanes of `Rn`, `Rm` and `Rd` (ties, exact
+  cancellation, under/overflow boundaries) and random `FPCR` (`RMode`, `FZ`, `DN`, `AH`, `FIZ`,
+  `NEP`) and `FPSR`; integer conversions get integer edge lanes; the integer forms get lanes at the
+  saturation boundaries and small signed shift counts in `Rm` for the register shifts; `FPSR.QC`
+  is compared like any other bit;
+* **random** (`rand/`): 20,000 fully random words per top-level group;
+* **harvested** (`harvest/`): every distinct SIMD&FP word of the supplementary C corpus
+  (`oracle/harvest/neon`, 476 auto-vectorised loops built by gcc 15.2 and clang 21 at -O0/-O2/-O3,
+  20 states each) and of the Go harvest binaries (3 states each);
+* **sequence mode** (`seq/neon`, `oracle/cmd/neonseq`): 50,000 straight-line blocks of 4–24
+  decodable SIMD&FP data-processing and load/store words (`Case.Words`; the runner lays them out
+  from `TestPC`, `janus-oracle` threads the state through `runSeq`), with registers drawn from a
+  small pool so instructions consume each other's results, base registers into the buffer, and the
+  lane-wise states above. A block is one case; the whole final state is compared.
+
+653,793 cases: **0 MISMATCH**, 637,430 agree, 16,363 model-gap (16,170 `undecodable`, 145
+`trapped`, 31 `outsideAllocation`, 17 `unaligned`), 0 unobserved.
+
+| part | cases | agree | model-gap | MISMATCH |
+|---|---:|---:|---:|---:|
+| targeted `gen/` | 340,000 | 327,362 | 12,638 | 0 |
+| random `rand/` | 120,000 | 116,663 | 3,337 | 0 |
+| harvested `harvest/` (C 133,152, Go 10,641) | 143,793 | 143,456 | 337 | 0 |
+| sequences `seq/neon` | 50,000 | 49,949 | 51 | 0 |
+
+Every `undecodable` gap is an encoding the decoder rejects by design: FP16 (the scalar and vector
+`h`/`.4h`/`.8h` forms, `FCVTL`/`FCVTN` to or from half precision, fixed-point conversions with
+`immh = 001x`), BFloat16, dot products, `FCMLA`/`FCADD`, `SQRDMLAH`/`SQRDMLSH`, `FMLAL`/`FMLSL`,
+`FRINT32*/64*`, `PMULL`/`PMULL2`, the crypto extensions, and, in the random groups, the base
+encodings the model rejects (store-exclusives, `LDNP`/`STNP` of general registers, unprivileged
+loads, MTE, `BC.cond`, CSSC, MOPS). The `trapped` gaps are the two corners where the model refuses
+to choose (`docs/SOUNDNESS.md`, "Advanced SIMD"): single-precision `FRECPE`/`FRSQRTE` under
+`FPCR.AH = 1` (FEAT_RPRES), and vector `FABS`/`FNEG` under `FPCR.AH = 1` with a NaN lane. For the
+latter, an earlier model followed the ASL (`FPAbs`/`FPNeg` leave a NaN unchanged under `AH`) and
+qemu disagreed on 33 cases (20 words, 4 of them in sequences); the Sail model, run on those 33
+cases, agreed with the ASL transcription on all of them, so this is a qemu deviation (it flips or
+clears the NaN's sign bit), and the model now faults there instead.
+
+The same corpus against the Sail model (`docs/ORACLE-SAIL.md`): Janus vs Sail 0 MISMATCH
+(638,122 agree, 15,637 model-gap, 34 unobserved Sail errors on MOPS/PAuth words).
+
+`JanusTests/Neon.lean` holds one hardware result per mnemonic the C corpora produce (208 words),
+re-checked by the kernel.
+
+After merging agent/armcrypto (main a3626db), whose `CryptoInstr.permute`/`dupScalar` replace the
+NEON copies of ZIP/UZP/TRN and scalar DUP (the targeted `neon.perm`/`neon.sdup` classes are gone;
+those words are now in `simd.permute`/`simd.dupscalar`), the same mode with `SEED=2`
+(`OUT=artifacts/oracle-neon-final`): 616,007 cases, **0 MISMATCH**, 600,490 agree, 15,517
+model-gap, 0 unobserved (targeted 300,000, random 120,000, harvested 146,007, sequences 50,000).
+
 ## Results with the crypto extension, CRC32 and permutes (2026-10-25, `scripts/oracle.sh crypto`, qemu 10.2.1 `-cpu max`)
 
 The crypto corpus (`OUT=artifacts/oracle-crypto JOBS=8 scripts/oracle.sh crypto`, defaults
