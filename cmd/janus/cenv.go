@@ -315,6 +315,35 @@ func cgoExportRoots(b *Binary, seg Segment) []Func {
 	return out
 }
 
+// cImmediateRoots lists the C functions whose entry address a C segment materialises as an
+// amd64 immediate operand (`mov $f, %rdx` in a non-PIE executable: a function pointer passed
+// on, e.g. a qsort-style comparator). On arm64 such addresses are PC-relative (ADR/ADRP+ADD)
+// and reach the extraction as "code" references. Only exact entries of functions outside the
+// Go text count, so a coincidental constant inside C code is at most an extra function.
+func cImmediateRoots(b *Binary, seg Segment) []Func {
+	if b.GOARCH != "amd64" || b.isGoCode(seg.Base) {
+		return nil
+	}
+	var out []Func
+	seen := map[uint64]bool{}
+	for _, in := range sweepAmd64(seg.Bytes, seg.Base) {
+		for _, a := range in.Inst.Args {
+			imm, ok := a.(x86asm.Imm)
+			if !ok || imm <= 0 {
+				continue
+			}
+			c := uint64(imm)
+			f, ok := b.containing(c)
+			if !ok || f.Addr != c || seen[c] || b.isGoCode(c) || stubLike(f.Name) {
+				continue
+			}
+			seen[c] = true
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // readsThreadPointer reports whether the segment reads the thread pointer (arm64 MRS Xt,
 // TPIDR_EL0; amd64 an FS-segment memory operand).
 func readsThreadPointer(b *Binary, s Segment) bool {

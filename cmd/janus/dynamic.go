@@ -233,6 +233,10 @@ func (r *reacher) drain() error {
 		for _, g := range cgoExportRoots(r.b, seg) {
 			r.addTarget(g.Addr, "cgo-export", seg.Name)
 		}
+		// C functions whose address C code materialises as an immediate (cenv.go)
+		for _, g := range cImmediateRoots(r.b, seg) {
+			r.addTarget(g.Addr, "c-immediate", seg.Name)
+		}
 		// the C wrappers of the cgo function-pointer variables the function loads (FFI)
 		for _, g := range cgoWrapperRoots(r.b, segmentDataRefs(r.b, seg)) {
 			if _, isStub := stubKind(g.Name); isStub || r.seen[g.Addr] {
