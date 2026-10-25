@@ -129,7 +129,8 @@ def Memhash0 (p : Program) (addr : Nat) (H : HashModel) (d : Nat) : Prop :=
   Summary p addr (fun s => HPre H d 2 s)
     (fun s s' => HRet H d 2 s s' fun r => r 0 = s.regs 1)
 
-/-- **`runtime.memhash8/16/128(p, h)`** (`n = 1, 2, 16`): `memhash(p, h, n)`. -/
+/-- **`runtime.memhash8/16/128(p, h)`** (`n = 1, 2, 16`): `memhash(p, h, n)`, for each of
+`memhash8(p, h)`, `memhash16(p, h)` and `memhash128(p, h)`. -/
 def MemhashN (p : Program) (addr : Nat) (H : HashModel) (d n : Nat) : Prop :=
   Summary p addr
     (fun s => HPre H d 2 s ∧ Input s d 2 (s.regs 0).toNat n)

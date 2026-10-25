@@ -412,6 +412,12 @@ architecture and branch, and what it rests on. A construct counts as covered onl
 `WrongAdd` counterexample) and 31 amd64 proofs; agent/alloc adds 5+4, agent/maps 10+10,
 agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts only),
 agent/rtiface 4+4 (interfaces: `Box`, `AsHasher`, `Classify`, `Equal`).
+agent/eqhash (R4, `examples/basic/rteq.go`) adds 8+8 user examples (`Eq32`, `StrEq`, `F64Eq`,
+`CopyTrees`, `ClearTrees`, `LookupStr`, `HashFKey`, `EqFKey`) and proves the runtime's own
+equality, hash and typed-memory functions from their machine code against their contracts:
+29 on arm64 (`examples/proofs/Alg*.lean`, `Mbar*.lean`, incl. `memequal` at every length) and
+27 on amd64 (`examples/proofs-amd64/Alg*/`, `Mbar*/`; `memequal` and `memequal_varlen` stay
+contracts there, because they tail-jump into `memeqbody`).
 agent/constructs (package M1, `examples/basic/zconstructs.go`) adds 29 arm64 + 26 amd64:
 `Triangle`, `GotoSum`, `Find2D`, `RowsWith`, `Log2`, `TotalMeters`, `TotalFeet`, `Fact`,
 `SumBelow`, `IterSum`, `ReverseArray`, `DivMod10`, `SwapBig`, `Compose`, `DotBoth`, `BitMerge`,

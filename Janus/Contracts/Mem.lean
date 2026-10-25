@@ -110,7 +110,9 @@ def Memequal (p : Program) (addr d : Nat) : Prop :=
       (s.mem.readLE (s.regs 0).toNat (s.regs 2).toNat == s.mem.readLE (s.regs 1).toNat (s.regs 2).toNat))
 
 /-- **`runtime.memequal0/8/16/32/64/128(a, b)`** (`X0 = a`, `X1 = b`): whether the `n` bytes at
-`a` and `b` agree, `n = 0, 1, 2, 4, 8, 16` (`memequal0` reads nothing and returns `true`). -/
+`a` and `b` agree, `n = 0, 1, 2, 4, 8, 16` (`memequal0` reads nothing and returns `true`): one
+contract each for `memequal0(a, b)`, `memequal8(a, b)`, `memequal16(a, b)`, `memequal32(a, b)`,
+`memequal64(a, b)` and `memequal128(a, b)`. -/
 def MemequalN (p : Program) (addr d n : Nat) : Prop :=
   Summary p addr
     (fun s => EqPre d 2 s ∧ Input s d 2 (s.regs 0).toNat n ∧ Input s d 2 (s.regs 1).toNat n)
