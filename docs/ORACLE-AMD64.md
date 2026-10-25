@@ -364,6 +364,68 @@ gather with `RIP` still at it and the elements done so far written, which the or
 host success at `TestPC`; the model faults. The self-test checks `VPADDD ymm` (both halves),
 `VPADDD xmm` (upper half zeroed) and legacy `PADDD` (upper half kept) on known values.
 
+### AVX-512 (WP-G, 2026-10-25)
+
+The EVEX instructions of `Janus/Amd64/ExecEVEX.lean`, with the ZMM/opmask state, the VEX opmask
+instructions and the VEX forms of `VPCLMULQDQ` and GFNI. **Reference: the host CPU, natively** (an
+Intel Xeon Gold 5412U, Sapphire Rapids, with AVX512F/BW/DQ/VL/CD, VBMI, VBMI2, BITALG,
+VPOPCNTDQ, IFMA, VNNI, BF16, FP16, GFNI, VAES and VPCLMULQDQ); no emulator. `scripts/oracle-amd64.sh
+avx512` runs:
+
+* the targeted specs (`gen.Evex512Specs`, `oracle-amd64/gen/avx512.go`): every opcode of the
+  decoder's table under its map and implied prefix, plus the rejected neighbours (the `X2`
+  broadcasts before they were added, the shift-group extensions without an instruction, the scalar
+  forms), with `EVEX.R/X/B/R'` random, `EVEX.W` per the SDM (random 1 in 16), `vvvv`/`V'` random
+  for three-operand forms, `L'L` random (`11` 1 in 24), `EVEX.b` (mostly on memory forms), a
+  mask register in two thirds and `{z}` in a quarter of the masked cases, sometimes a stray legacy
+  prefix, another map, `pp`, `P0<3>` or `EVEX.U = 0`; ModRM/SIB/displacement random (disp8 steered
+  to small values) and imm8 drawn from edge values (`0x96`, predicate values, shift counts);
+* an **EVEX opcode sweep**: every (map 0–7, `pp`, opcode) with every other field random (`SWEEP`
+  encodings each), so that the decoder is checked to reject what it does not model;
+* every distinct EVEX, opmask, `VPCLMUL*` and `VGF2P8*` encoding of the `GOAMD64=v1` test binaries
+  of `internal/runtime/gc/scan`, `hash/crc32` and `runtime` (GNU `objdump`, since `x86asm` does
+  not know EVEX; 757 encodings), with `EVEX_K` states each.
+
+States: all 32 `ZMM` registers with element-class patterns (zero, all ones, small byte values for
+indices and counts, edge values, IEEE edge values per lane, random), the opmask registers with
+all-ones, zero, low-`n`-bits, one-bit, byte and random masks, a random `MXCSR` for the
+floating-point families; memory operands steered into the 4 KiB buffer, aligned or not, and in a
+quarter of the cases straddling its start or end, with the write mask then (two times in three)
+selecting exactly the elements inside the buffer: a masked-off element outside the buffer must
+not fault (fault suppression), a selected one must. The runner loads bits 511:256 of
+`ZMM0`–`ZMM15` (`VINSERTI64X4`, after the `VINSERTI128` of the upper YMM halves), `ZMM16`–`ZMM31`
+(`VMOVDQU64`) and `K0`–`K7` (`KMOVQ`) from a second context page, and captures them from the
+signal frame's XSAVE area (components 5–7, opmask at 1088, `ZMM_Hi256` at 1152, `Hi16_ZMM` at
+1664, checked against `CPUID.(EAX=0DH)` at start-up; `XSTATE_BV` clear = zero); every case
+compares all of them.
+
+| run | cases | agree | of which both fault | model-gap | **MISMATCH** |
+|---|---:|---:|---:|---:|---:|
+| `avx512`, `SEED=1`, `N=1200`, `SWEEP=4`, `EVEX_K=24` (before the last two model edits, which do not change results: `rdMasked` reads the element values from one full-width `readLE`, `exec` passes `eaNat`) | 380,936 | 377,031 | 220,472 | 3,905 | **0** |
+| of which targeted EVEX | 253,200 | 249,702 | 121,213 | 3,498 | **0** |
+| of which targeted VEX (opmask, `VPCLMULQDQ`, GFNI) | 76,800 | 76,550 | 51,768 | 250 | **0** |
+| of which harvested (real Go encodings) | 18,168 | 18,168 | 15,007 | 0 | **0** |
+| of which the opcode sweep | 32,768 | 32,611 | 32,484 | 157 | **0** |
+| `avx512`, `SEED=2`, `N=1600`, `SWEEP=8`, `EVEX_K=48` (the final model) | 541,872 | 536,470 | 325,541 | 5,402 | **0** |
+| of which targeted EVEX | 337,600 | 332,858 | 161,454 | 4,742 | **0** |
+| of which targeted VEX | 102,400 | 102,073 | 69,053 | 327 | **0** |
+| of which harvested | 36,336 | 36,336 | 30,067 | 0 | **0** |
+| of which the opcode sweep | 65,536 | 65,203 | 64,967 | 333 | **0** |
+| **total** | **922,808** | 913,501 | | 9,307 | **0** |
+
+"Both fault" is mostly `#UD` on both sides (the generator draws invalid field combinations on
+purpose: `{z}` without a mask, `L'L = 11`, `EVEX.b` on register integer forms, wrong `W`, `vvvv` on
+two-operand forms) and, for the harvested encodings, the `RIP`-relative table loads of the
+expanders (outside the buffer on both sides). The model gaps are: `outsideAllocation` (2,410:
+operands the host served from its own mappings outside the buffer), `undecodable` (1,338: encodings
+the decoder rejects that the host executes: a `67` or segment prefix before `62`/`C4`/`C5`, the
+scalar EVEX forms (`VSUBSD`...), the FP16, packed-FMA and other unmodelled opcodes the sweep hits,
+`VPBROADCASTB/W/D/Q r` with `EVEX.X` set) and `misaligned` (157: masked `VMOVAPS`/`VMOVDQA64` with a misaligned operand, which
+this host completes whatever the mask; the model checks the alignment conservatively). During
+development the oracle found three forms the decoder rejected that hardware accepts and
+executes as the SDM describes (`VEX.B` on an opmask `r/m`, `EVEX.R/R'` set on the `71`/`72`/`73`
+shift groups, `VCMPPS/PD` with `imm8 ≥ 32`); they are accepted now. No run had a mismatch.
+
 ## Running it
 
 ```
@@ -374,6 +436,7 @@ scripts/oracle-amd64.sh fp         # SSE scalar floating point only
 scripts/oracle-amd64.sh v3         # the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, FMA, PSHUFB/PSIGNB)
 scripts/oracle-amd64.sh sse        # the SSE packed instructions of WP-D only (SSE2..SSE4.2)
 scripts/oracle-amd64.sh avx        # the AVX/AVX2/FMA3/F16C instructions of WP-F only (VEX-128/256, YMM)
+scripts/oracle-amd64.sh avx512     # the AVX-512 instructions of WP-G only (EVEX, ZMM0-31, K0-K7)
 ```
 
 Knobs: `OUT` (default `artifacts/oracle-amd64`), `JOBS` (default 16, capped at 24), `N`
@@ -562,16 +625,17 @@ something a single CPU can confirm. See "Limits".
   cache line completes (with a kernel warning), so the model's `misaligned` fault for a locked
   access that is not naturally aligned is a model gap here. Under `fatal` the hardware side would
   be `SIGBUS` and the cases would agree.
-* **AVX-512 state.** VEX instructions zero `ZMM` bits 511:256 on this host; neither side
-  compares them (the model does not have them, and no modelled instruction reads them).
+* **AVX-512 state.** Since WP-G both sides have it and every case compares `ZMM0`–`ZMM31` and
+  `K0`–`K7` (when the host has AVX-512F with the state enabled; `JANUS_ORACLE_NO512=1` turns the
+  loading and capture off).
 * **Canonical addresses.** This host has 5-level paging, so `2^47..2^56` is canonical: a jump
   there is a fetch fault (hw ok) and the model's `badTarget` is a gap. Non-canonical targets
   `#GP` at the branch itself, with `RSP` unchanged, and the model faults too.
 * **Memory outside the buffer.** The model knows only the buffer. The native process also has
   the code page and its own mappings, so an access there succeeds natively and faults in the
   model (gap), never the other way round. Only the 4 KiB buffer is compared byte by byte.
-* **No system state.** `RFLAGS` system bits, segment registers other than the `FS` base,
-  x87 state and `ZMM` bits 511:256 are neither modelled nor compared. (`MXCSR`, flags
+* **No system state.** `RFLAGS` system bits, segment registers other than the `FS` base and
+  x87 state are neither modelled nor compared. (`MXCSR`, flags
   included, is modelled and compared since the floating-point model; see above.)
 
 ## Formal x86 model (third reference)

@@ -16,7 +16,7 @@ proofs.
 | AVX-512 (WP-G): EVEX, ZMM0–31, K0–7, the VEX opmask instructions, VEX `VPCLMULQDQ`/GFNI | `Janus/Amd64/InstrEVEX.lean`, `Janus/Amd64/DecodeEVEX.lean` (hooks in `decode`: `62`, and after `DecodeAVX.vex`), `Janus/Amd64/ExecEVEX.lean` (hook `Instr.evex` in `exec`), `Janus/Amd64/TacticEVEX.lean` (stepping, the zero-upper and compatibility theorems) |
 | programs, runner, run lemmas | `Janus/Amd64/Program.lean`, `Janus/Amd64/Run.lean` |
 | Go ABIInternal on amd64, specs | `Janus/Amd64/GoABI.lean` |
-| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas), `Janus/Amd64/TacticAVX2.lean` (stepping `ExecAVX`, the zero-upper theorems, 256-bit element lemmas, `dot32`) |
+| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas), `Janus/Amd64/TacticAVX2.lean` (stepping `ExecAVX`, the zero-upper theorems, 256-bit element lemmas, `dot32`), `Janus/Amd64/TacticEVEX.lean` (stepping `ExecEVEX`, 512-bit re-assembly, the EVEX zero-upper rule, VEX/SSE on the AVX-512 state, WP-D/WP-F compatibility) |
 | extractor | `cmd/janus/amd64.go` (plus small dispatch edits) |
 | differential oracle | `oracle-amd64/`, `Oracle/Amd64Main.lean`, `docs/ORACLE-AMD64.md` |
 | tests | `JanusTests/Amd64.lean`, `cmd/janus/amd64_test.go` |
@@ -383,6 +383,11 @@ blockers` works on amd64 binaries, judging each x86asm-found instruction with `J
     process on a CPU that has the features. A theorem that quantifies over them (such as
     `Equal64`) also covers states in which they claim AVX2 on a CPU without it; such states do
     not occur in a Go process.
+  - the CPU implements the AVX-512 features of WP-G (AVX512F/BW/DQ/VL, VBMI, VBMI2, BITALG,
+    VPOPCNTDQ, GFNI, VPCLMULQDQ; `docs/SOUNDNESS.md`) and the OS has enabled the opmask and ZMM
+    state, whenever an EVEX or opmask instruction executes. Go's runtime and `hash/crc32` execute
+    them only behind `internal/cpu` flags (`X86.HasAVX512*`); `Search64` and `ExpandAVX512_2` are
+    about such a CPU.
 * **Vendor neutrality.** Where Intel and AMD document different results or flags, the model
   takes the undefined side (fault or `none`). A proof cannot depend on the vendor.
 * **Not modelled:**
@@ -581,6 +586,16 @@ products per iteration into four YMM accumulators, a `VEXTRACTI128`/`VPSHUFD` re
 epilogue, a scalar tail; `dot32`, for every length) and `GoDot32` (`Dot32(a, b []uint32)` → cgo →
 that loop → Go, under the trusted `CgoCall`) are in `examples/proofs-cgo/amd64` (binary
 `artifacts/examples-cgo-avx-amd64`, the package's `#cgo CFLAGS: -O3 -march=x86-64-v3`).
+
+Two are about AVX-512 (WP-G). `Search64` is in `artifacts/examples-amd64-avx512`
+(`examples/basic/avx512`, a Go function calling an AVX-512 Go assembly function, ABI0, built
+`GOAMD64=v1` into a binary of its own); `ExpandAVX512_2` is a function of Go's own runtime,
+extracted from the `internal/runtime/gc/scan` test binary (`artifacts/examples-amd64-scan.test`).
+
+| function | theorem |
+|---|---|
+| `Search64` | `Search64(p, nq, c)` for **every** `nq ≤ 8`: the index of the first of the `8·nq` bytes at `p` equal to `c`, 64 if none (`firstIdx`), with only those `8·nq` bytes readable: `KMOVB` of the qword mask, a masked zeroing `VMOVDQU64` load (fault suppression: only the selected qwords are accessed), `VPBROADCASTB zmm, r32`, `BZHIQ`/`KMOVQ` byte mask, `VPCMPEQB` into `K2` under `K3`, `KMOVQ`, `TZCNTQ`, `VZEROUPPER` |
+| `ExpandAVX512_2` | `internal/runtime/gc/scan.expandAVX512_2`, the GC span scanner's bitmap expander for size class 2 (custom convention: the 64-byte packed bitmap at `[AX]`, results in `Z1`/`Z2`; a `Summary`): bit `j` of `Z1` is bit `j/2` of the input and bit `j` of `Z2` bit `256 + j/2`, for every `j < 512` (`Expanded`), through `VMOVDQU64` table loads, `VPERMB` and `VGF2P8AFFINEQB`; the tables are the binary's `.rodata` (`DataLoaded`) |
 
 Three more are about `artifacts/examples-amd64-v3`: `examples/basic/v3` built with
 `GOAMD64=v3` into a binary of its own (so the v1 binary above does not change), extracted by the
