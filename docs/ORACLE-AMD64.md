@@ -300,7 +300,13 @@ shift counts with high garbage bits, `XMM0` blend masks, integer lanes for `CVTD
 | of which `edge/sse-fp` | 105,600 | 105,600 | 6,434 | 0 | **0** |
 | of which the other edge families | 10,350 | 10,350 | 750 | 0 | **0** |
 | of which harvested | 6,144 | 6,144 | 317 | 0 | **0** |
-RUN2ROWS
+| `sse`, `SEED=2`, `N=1200`, `SSE_K=24` (16 string-compare states per `imm8` and round) | 1,727,192 | 1,588,756 | 534,694 | 138,436 | **0** |
+| of which `edge/sse-fp` | 211,200 | 211,200 | 12,843 | 0 | **0** |
+| of which the other edge families (`pcmpstr` 4,800) | 24,300 | 24,300 | 1,500 | 0 | **0** |
+| of which harvested | 12,288 | 12,288 | 705 | 0 | **0** |
+| `full` after WP-D (main `a3626db` merged; `SEED=1`) | 1,969,898 | 1,668,806 | 565,341 | 301,092 | **0** |
+| `fp` after WP-D | 548,856 | 434,828 | 80,435 | 114,028 | **0** |
+| `v3` after WP-D | 198,378 | 170,196 | 38,311 | 28,182 | **0** |
 
 Every model gap was checked by class and encoding: the `67` (address size) prefix, the MMX forms,
 `66` with `F2`/`F3`, the reserved immediates the decoder refuses (`CMPPS/PD imm8 ≥ 8`,
