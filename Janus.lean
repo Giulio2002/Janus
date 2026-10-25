@@ -14,6 +14,7 @@ import Janus.Tactic
 import Janus.Tactic.Atomic
 import Janus.Tactic.Vector
 import Janus.Tactic.Float
+import Janus.Tactic.Crypto
 import Janus.Float.Lemmas
 import Janus.Arm64.FloatLemmas
 import Janus.Amd64.FloatLemmas

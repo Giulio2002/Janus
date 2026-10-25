@@ -208,9 +208,15 @@ def acqPCAcc : AccessDescriptor := { gprAcc false with acqpc := true }
 def exclAcc (w acqrel : Bool) : AccessDescriptor :=
   { gprAcc w with exclusive := true, acqsc := acqrel && !w, relsc := acqrel && w }
 
-/-- The access descriptors of ordered and exclusive single-register accesses (tag check cleared). -/
+/-- LD<op>/SWP/CAS (`CreateAccDescAtomicOp`): read and write, acquire `a`, release `r`. -/
+def atomAcc (op : MemAtomicOp) (a r : Bool) : AccessDescriptor :=
+  { gprAcc true with acqsc := a, relsc := r, atomicop := true, modop := op, read := true, write := true }
+
+/-- The access descriptors of ordered, exclusive and atomic single-register accesses (tag check
+cleared); atomics need write permission. -/
 def OrdAcc (w : Bool) (acc : AccessDescriptor) : Prop :=
-  acc = acqRelAcc w ∨ (w = false ∧ acc = acqPCAcc) ∨ (∃ ar, acc = exclAcc w ar)
+  acc = acqRelAcc w ∨ (w = false ∧ acc = acqPCAcc) ∨ (∃ ar, acc = exclAcc w ar) ∨
+    (w = true ∧ ∃ op a r, acc = atomAcc op a r)
 
 /-- **`UserMapped m s`**: in every state an instruction started in `s` can reach before a memory
 access (`TFrame`), the ASL's own `AArch64_TranslateAddress` maps every byte of `m`'s regions

@@ -453,6 +453,10 @@ func (fw *framework) acquire(dir, lake string, targets []string, progress io.Wri
 	}
 	for attempt := 0; ; attempt++ {
 		if fw.ready(dir, targets) {
+			if dir != fw.Dir {
+				gcPin(dir)
+				touchUse(dir, lockPath)
+			}
 			return &frameworkLease{dir: dir, lk: lk}, nil
 		}
 		if attempt == 3 {
@@ -552,8 +556,7 @@ func (fw *framework) build(dir, lake string, targets []string, stampPath string,
 		return &diag{Invalid: true, Msg: "Cannot write the framework build stamp: " + err.Error(), Stage: "Janus library build"}
 	}
 	if dir != fw.Dir {
-		now := time.Now()
-		_ = os.Chtimes(dir, now, now)
+		touchUse(dir)
 	}
 	return nil
 }

@@ -283,7 +283,11 @@ scripts/oracle-amd64.sh v3         # the GOAMD64=v3 extensions only (BMI1/BMI2, 
 Knobs: `OUT` (default `artifacts/oracle-amd64`), `JOBS` (default 16, capped at 24), `N`
 (encodings per targeted spec), `GROUP` (random strings), `K` (states per harvested
 instruction), `PER_CLASS`, `SEED`, `MODEL` (`MODEL=oracle-amd64/bin/fakemodel` exercises the
-pipeline without Lean). After a model change the native side can be reused:
+pipeline without Lean), `KEEP` (what the run leaves in `OUT`: by default `summary.md`,
+`repro.*`, `mismatches.jsonl` and the cases, hardware, model and verdict dumps zstd-compressed,
+with the generated and harvested inputs removed; `KEEP=zst` compresses everything, `KEEP=1`
+keeps everything raw; see docs/ORACLE.md and `scripts/lib/artifacts.sh`). After a model change
+the native side can be reused (decompress `hw.jsonl.zst` in `DIR` first):
 `oracle-amd64/bin/oracle run -reuse-native -runner oracle-amd64/bin/runner -model .lake/build/bin/janus-oracle-amd64 -cases A,B -out DIR`.
 `oracle minimize -out DIR` shrinks mismatching cases into `repro.md`/`repro.jsonl`. A full run
 takes about 90 s, including the corpus build.

@@ -120,6 +120,7 @@ func loadTrustedCache(key, dir string) bool {
 		}
 		copied = append(copied, dst)
 	}
+	touchHit(entry)
 	return true
 }
 
@@ -215,7 +216,8 @@ func earlyReplayMarker(tcVersion string, libs ...*pinnedLib) string {
 func startEarlyReplay(checker string, run func(argv ...string) (string, error), mods []string, marker string, cacheOn bool) *earlyReplay {
 	e := &earlyReplay{mods: mods}
 	if cacheOn {
-		if _, err := os.Stat(marker); err == nil {
+		if fileExists(marker) {
+			touchHit(marker)
 			return e
 		}
 	}

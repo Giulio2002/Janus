@@ -157,6 +157,14 @@ def work(item):
     res["outside_writes"] = any(not (DATA_BASE <= a < DATA_BASE + DATA_SIZE) for a, _, _ in r0["writes"])
     return res
 
+def open_jsonl(path):
+    """The JSON-lines file at path, or its zstd-compressed copy path.zst (the oracle drivers keep
+    their dumps compressed unless KEEP=1, scripts/lib/artifacts.sh)."""
+    if os.path.exists(path) or not os.path.exists(path + ".zst"):
+        return open(path)
+    p = subprocess.Popen(["zstd", "-q", "-dc", path + ".zst"], stdout=subprocess.PIPE, text=True)
+    return p.stdout
+
 def main():
     emu, odir, out = sys.argv[1], sys.argv[2], sys.argv[3]
     opts = dict(zip(sys.argv[4::2], sys.argv[5::2]))
@@ -166,7 +174,7 @@ def main():
     random.seed(int(opts.get("--seed", 1)))
     fs_only = opts.get("--fs", "0") not in ("0", "")
     cases = []
-    for line in open(os.path.join(odir, "cases.jsonl")):
+    for line in open_jsonl(os.path.join(odir, "cases.jsonl")):
         c = json.loads(line)
         cl = c["class"]
         if not (cl.startswith("gen/") or cl.startswith("edge/") or cl.startswith("harvest/")):
@@ -178,11 +186,11 @@ def main():
         cases.append(c)
     ids = {c["id"] for c in cases}  # load only the records of the selected cases
     model = {}
-    for line in open(os.path.join(odir, "model.jsonl")):
+    for line in open_jsonl(os.path.join(odir, "model.jsonl")):
         if int(line[6:line.index(",")]) in ids:
             m = json.loads(line); model[m.get("id")] = m
     hw = {}
-    for line in open(os.path.join(odir, "hw.jsonl")):
+    for line in open_jsonl(os.path.join(odir, "hw.jsonl")):
         if int(line[6:line.index(",")]) in ids:
             h = json.loads(line); hw[h["id"]] = h
     # only cases our model accepts can be unsound

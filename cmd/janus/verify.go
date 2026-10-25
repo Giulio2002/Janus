@@ -520,6 +520,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		if asl, err = buildASLFor(fw, aslRoot, lake, stderr); err != nil {
 			return nil, err
 		}
+		defer asl.release()
 	}
 	tm.mark("toolchain lookup")
 	janusLibDir := filepath.Join(root, ".lake", "build", "lib", "lean")
