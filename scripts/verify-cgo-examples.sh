@@ -11,6 +11,8 @@
 #                                                        GoStack10 GoFP GoPMix GoBig GoVSum8
 #   The C environment (docs/FFI.md sections 2-4; binary artifacts/examples-cenv-<isa>):
 #     EBump (a writable global through the GOT; amd64: the --no-relax build)
+#   amd64 only, C compiled by clang -O2 (SSE2-vectorised,
+#   artifacts/examples-cgo-clang-amd64):                 CSum32 GoSum32
 #
 # Every name maps to a symbol (sym) and, for the C environment, a binary (bin).
 # Usage: scripts/verify-cgo-examples.sh [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
@@ -28,10 +30,12 @@ declare -A sym=(
   [GoPMix]=example.com/cgo/cabi.PMix [GoBig]=example.com/cgo/cabi.Big
   [GoVSum8]=example.com/cgo/cabi.VSum8
   [EBump]=e_bump
+  [CSum32]=c_sum32 [GoSum32]=example.com/cgo/vec.Sum32
 )
 # binaries other than artifacts/examples-cgo-<isa> (key isa/Name, or Name for both ISAs)
 declare -A bin=(
   [EBump]=examples-cenv [amd64/EBump]=examples-cenv-norelax
+  [CSum32]=examples-cgo-clang [GoSum32]=examples-cgo-clang
 )
 all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8
   EBump)
@@ -40,6 +44,7 @@ if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
     for n in "${all[@]}"; do names+=("$isa/$n"); done
   done
+  names+=(amd64/CSum32 amd64/GoSum32)
 fi
 
 go build -o bin/janus ./cmd/janus
