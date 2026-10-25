@@ -254,6 +254,8 @@ instructions on the paths taken from states satisfying `pre`.
 | `Faults p s` | the run stops with a fault other than `outOfFuel` (a nil or out-of-bounds access, a read-only store, misaligned `SP`, a jump outside the code, an unsupported instruction) |
 | `NeverPanics p s` | for every fuel: no panic stub **and** no fault; only `outOfFuel` is allowed (`neverPanics_iff : NeverPanics ↔ ¬ Panics ∧ ¬ Faults`) |
 | `GrowsStack p s` | the run reaches `runtime.morestack*` |
+| `Kernel.Traps p s` (`Amd64.Kernel.Traps`) | the run reaches a trap instruction (`BRK`, `UDF`; `INT3`, `UD2`, `HLT`): a `.trap` stub whose word is a trap, which executed faults with `Fault.trap` (`SIGTRAP`, `SIGILL`, `SIGSEGV`) |
+| `Kernel.ReturnsK p E post onExit s k` | every run from `s` with kernel state `k` returns satisfying `post` (or ends the process with `exit_group`, satisfying `onExit`), where each system call, environment read and vDSO clock call has **any** result its contract allows (see "The kernel trust boundary") |
 
 On real hardware every model fault is a crash or a Go panic: a memory fault is `SIGSEGV`, which
 Go turns into `panic: runtime error: invalid memory address or nil pointer dereference`. So "never
@@ -714,6 +716,78 @@ specification definitions like `GoABI`. A `CEnsures` theorem is about a call tha
 convention (`CCall`). It promises what the convention requires of the callee (`CReturn`) and
 nothing about callers that violate the convention. The callee-saved SIMD/FP state (`V8`–`V15` on
 arm64; the x87/`MXCSR` control words on amd64) is outside the model.
+
+## The kernel trust boundary (system calls, environment reads, traps)
+
+Go programs reach Linux through `SVC #0` / `SYSCALL`, read time and identification registers
+(`MRS CNTVCT_EL0`, `CNTFRQ_EL0`, `MIDR_EL1`, `DIT`; `CPUID`, `XGETBV`, `RDTSC(P)`), and call the
+clock functions of the vDSO (code the kernel maps into the process, not part of the binary).
+None of these has a result the user-mode state determines. The design (WP-C,
+`Janus/Contracts/Syscall.lean`, `Janus/Contracts/SyscallAmd64.lean`):
+
+* **The plain model stops.** `Arm64.step`/`Amd64.step` fault on every such instruction
+  (`Fault.kernel`), so `Returns`, `Ensures` and every other plain predicate can never get past
+  one. Traps (`BRK`, `UDF`, `INT3`, `UD2`, `HLT`) fault with `Fault.trap pc signal`: an explicit
+  outcome, never an unconstrained state.
+* **Stubs mark them.** The extractor puts a `.syscall` stub on every system-call and
+  environment instruction inside the copied code, at its own address, and on the entry of the
+  vDSO clock functions (`runtime.walltime`, `runtime.nanotime1`, amd64 `time.now`), which it
+  authenticates like every runtime stub (name, ELF symbol table, uniqueness, normalized-code pin
+  in `cmd/janus/stubpins_gen.go`). It puts a `.trap` stub on every trap instruction except the
+  alignment padding after a function's last instruction. The placement is not trusted:
+  `Kernel.siteOf` reads the instruction word at the stub and gives it a meaning only if it is
+  the instruction the semantics expects (only the vDSO stubs are identified by name), and
+  `Traps` checks that the word is a trap (`trapAt_faults`: executing it faults). A stub that is
+  missing leaves the plain fault in place, which no theorem gets past.
+* **The kernel is the environment.** `ReturnsK`/`EnsuresK` thread a kernel state `Kern`: an
+  explicit I/O trace (`Event`s in order: writes, reads, opens, closes, clock readings, mappings,
+  sleeps, environment reads), an input oracle per descriptor, a lower bound of
+  `CLOCK_MONOTONIC`, the IDs, the signal mask, the alternate signal stack, `PSTATE.DIT`, the CPU
+  features Linux reports and the page size. A theorem quantifies over **every** initial kernel
+  state its precondition admits and holds for **every** successor the contracts allow at each
+  stub. The contracts are relations written to over-approximate Linux:
+  * **every call may fail** with any `-errno` (`IsErr`), changing nothing, except the calls Linux
+    defines as infallible (`getpid`, `gettid`, `sched_yield`, `clock_gettime` of the two clocks
+    Go reads into writable memory, the `close` of a descriptor, which always closes it);
+  * `write` may write any prefix of the buffer (short writes), and the trace records exactly the
+    bytes that were in memory at the call; `read` returns some prefix (possibly empty) of the
+    descriptor's remaining input; `openat` returns any descriptor number below `2^31`, whose
+    contents the environment chooses at that moment;
+  * `mmap` returns any page-aligned address whose rounded-up range is disjoint from every region
+    the model knows, below `2^47`; `munmap` and `madvise` act on whole pages (`Kern.pageSize`),
+    and `madvise` may change every byte of the advised pages;
+  * `CLOCK_MONOTONIC` and `CNTVCT_EL0` never go back; the wall clock, `MIDR_EL1`, `CPUID`,
+    `RDTSC` are arbitrary (a thread may migrate between cores);
+  * the vDSO wrappers may write the runtime-owned memory `KEnv.rt` (the `m`'s `vdsoPC`/`vdsoSP`,
+    the `g0` and `gsignal` stacks) and `KEnv.stack` bytes below `SP`, and return with every
+    register except `SP`, `g` and `FP` arbitrary (arm64 `EnsuresK` therefore uses `ABIReturnC`,
+    without `X18`, as for C code).
+
+  Each contract is satisfiable where its precondition holds (`Effect.total`, `SiteNext.total`
+  on both ISAs) and allows the behaviour the specifications are about (`write_full`,
+  `read_some`, `clock_monotonic`, `mmap_anon`); the runtime contracts around system calls are met
+  by concrete code (`JanusTests/Kernel.lean`).
+* **What is trusted.** That Linux behaves within these relations; that the vDSO clock functions
+  return a clock reading and touch only the declared memory (their code is not in the binary);
+  that `runtime.entersyscall`/`exitsyscall` (`SchedContract`) preserve the Go ABI registers and
+  change only runtime-owned memory and their stack window, and that the goroutine's stack does not
+  move while it is in a system call (the GC does not shrink the stack of a goroutine in a
+  system call, and stack growth happens only at the stack checks); single-threaded execution (no
+  other thread writes the program's memory or the descriptors meanwhile). The input oracle is a
+  fixed stream per descriptor from its opening on: a file that grows while it is read (an EOF
+  followed by more data) is outside the model only in that `read` may return 0 at any time, which
+  the contract allows. Signals are not modelled (asynchronous preemption is trusted to restore
+  the interrupted state; a delivered signal handler is runtime code).
+* **What is not covered.** Unsupported system call numbers are not `SiteSafe`: no theorem gets
+  past them. `exit_group` ends the run (`ReturnsK.halt`, with an explicit `onExit` predicate,
+  `False` by default in `EnsuresK`). Signal delivery, `clone`, `futex` (concurrency, out of
+  scope), file-system state and `ioctl`s are not modelled.
+* **Environment instructions on the oracle.** The differential oracles run them natively: the
+  model reports `kernel`, and the comparators check the hardware's result against the contract's
+  frame (`compareEnv`: only the destination registers change, with values in the contract's
+  range; everything else, including memory and the flags, is unchanged). `PUSHFQ` pushes
+  `0x202` plus the status flags and `DF`; `POPFQ` faults (`Fault.systemFlag`) if it would set
+  `TF`, `NT`, `AC` or `ID`, which the model does not track.
 
 ## What the theorem does not say
 

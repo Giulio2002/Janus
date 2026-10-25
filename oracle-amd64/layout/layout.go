@@ -241,7 +241,12 @@ func Forbidden(b []byte) bool {
 		return false
 	}
 	switch b[i] {
-	case 0xCD, 0x8E, 0x9D, 0xCF:
+	case 0x9D:
+		// POPFQ (WP-C) only unprefixed: the runner enters with TF set and the signal frame's
+		// flags are sanitised on return, so a popped TF/AC/NT/ID cannot escape the case; a
+		// prefixed POPF (16-bit, REX) stays refused
+		return i != 0
+	case 0xCD, 0x8E, 0xCF:
 		return true
 	case 0x0F:
 		if i+1 >= len(b) {
