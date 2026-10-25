@@ -125,9 +125,10 @@ theorem rtPost_const {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s' 
     (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid)
     (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
     (hm : s'.mem = s.mem)
-    (hq : sp.post rt (argWords s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 1).toNat (s'.regs 2).toNat s.mem) :
+    (hq : sp.post rt (argWords s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 1).toNat (s'.regs 2).toNat s.mem)
+    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
     RtPost rt stack sp s s' :=
-  RtPost.intro hsp hpc h18 h28 h29 hdz htp hfc hfs (hm ▸ MemFrame.refl _ _) (hm ▸ hq)
+  RtPost.intro hsp hpc h18 h28 h29 hdz htp hfc hfs (hm ▸ MemFrame.refl _ _) (hm ▸ hq) hex hep
 
 /-- The readiness of the zero-operand witnesses: every argument word is 0. -/
 def H0 : RtReady := fun a _ _ _ => ∀ j, arg a j = 0

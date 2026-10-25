@@ -23,11 +23,12 @@ theorem mapReturn64_of {K V : Type} (M : MapModel K V) (nargs : Nat) (extra : Li
     (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr)
     (hfr : MemFrame s.mem s'.mem (Contracts.MapAmd64.rtWrites M s nargs ++ extra))
     (henv : M.Env s'.mem (s.regs 14)) (hok : Contracts.MapAmd64.OthersKept M s.mem s'.mem except)
-    (hp : P s'.regs s'.mem) : Contracts.MapAmd64.RTReturn M nargs extra except s s' P := by
+    (hp : P s'.regs s'.mem)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : Contracts.MapAmd64.RTReturn M nargs extra except s s' P := by
   refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, hfr, henv, hok, hp⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
-  simp only at hrip h4 h5 h14 hx hfs hdf hmx ⊢
-  subst hrip hfs hdf hmx
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
+  simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw ⊢
+  subst hrip hfs hdf hmx hx87 hfw
   congr
   · funext i
     simp only [Contracts.MapAmd64.keepABI]

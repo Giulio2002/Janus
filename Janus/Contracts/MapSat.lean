@@ -29,12 +29,13 @@ theorem mapReturn_of {K V : Type} (M : MapModel K V) (nargs : Nat) (extra : List
     (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr)
     (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
     (hfr : MemFrame s.mem s'.mem (Map.rtWrites M s nargs ++ extra)) (henv : M.Env s'.mem (s.regs 28))
-    (hok : Map.OthersKept M s.mem s'.mem except) (hp : P s'.regs s'.mem) :
+    (hok : Map.OthersKept M s.mem s'.mem except) (hp : P s'.regs s'.mem)
+    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
     Map.RTReturn M nargs extra except s s' P := by
   refine ⟨s'.regs, s'.vregs, s'.flags, s'.mem, ?_, hfr, henv, hok, hp⟩
-  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
-  simp only at hsp hpc hdz htp hfc hfs h18 h28 h29 ⊢
-  subst hsp hpc hdz htp hfc hfs
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
+  simp only at hsp hpc hdz htp hfc hfs h18 h28 h29 hex hep ⊢
+  subst hsp hpc hdz htp hfc hfs hex hep
   congr
   funext i
   simp only [Map.keepABI]

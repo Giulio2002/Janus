@@ -71,11 +71,12 @@ theorem panicRet_of (P : PanicRuntime) (nargs : Nat) (s s' : Janus.Amd64.State)
     (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase)
     (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr)
     (hfr : MemFrame s.mem s'.mem (P.priv ++ Contracts.MapAmd64.calleeStack s P.depth nargs))
-    (henv : P.Env s'.mem) : PanicRet P nargs s s' := by
+    (henv : P.Env s'.mem)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : PanicRet P nargs s s' := by
   refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, hfr, henv⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
-  simp only at hrip h4 h5 h14 hx hfs hdf hmx ⊢
-  subst hrip hfs hdf hmx
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
+  simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw ⊢
+  subst hrip hfs hdf hmx hx87 hfw
   congr
   · funext i
     simp only [Contracts.MapAmd64.keepABI]

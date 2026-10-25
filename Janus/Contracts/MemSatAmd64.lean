@@ -66,11 +66,12 @@ theorem wstate_tPre (r : Nat → W64) (n : Nat) (hn : n ≤ 4) :
 /-- A state that keeps what every runtime call keeps (amd64) is a `MemAmd64.retState`. -/
 theorem retState_of {s s' : State} (hsp : s'.regs 4 = s.regs 4 + 8) (h5 : s'.regs 5 = s.regs 5)
     (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s)
-    (hfs : s'.fsBase = s.fsBase) (hdf : s.df = false) (hdf' : s'.df = false) :
+    (hfs : s'.fsBase = s.fsBase) (hdf : s.df = false) (hdf' : s'.df = false)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
     s' = MemAmd64.retState s s'.regs s'.xmm s'.ymmHi s'.flags s'.mxcsr s'.mem := by
-  obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx⟩ := s'
-  simp only at hsp h5 h14 hx hrip hfs hdf' ⊢
-  subst hrip hfs hdf'
+  obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx, x8, fw⟩ := s'
+  simp only at hsp h5 h14 hx hrip hfs hdf' hx87 hfw ⊢
+  subst hrip hfs hdf' hx87 hfw
   simp only [MemAmd64.retState, State.mk.injEq, and_true, true_and, hdf]
   refine ⟨?_, ?_⟩
   · funext i
@@ -93,8 +94,9 @@ theorem ifaceRet_of {R : Janus.Spec.Type.IfaceModel} {d : Nat} {s s' : State} {P
     (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s) (hfs : s'.fsBase = s.fsBase)
     (hdf : s.df = false) (hdf' : s'.df = false) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
     (hf : MemFrame s.mem s'.mem (R.priv ++ MemAmd64.calleeStack s d 2))
-    (he : R.Env s'.mem (s.regs 14)) (hp : P s'.regs) : IfaceRet R d s s' P :=
-  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf', hmx, hf, he, hp⟩
+    (he : R.Env s'.mem (s.regs 14)) (hp : P s'.regs)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : IfaceRet R d s s' P :=
+  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf' hx87 hfw, hmx, hf, he, hp⟩
 
 /-- The return of a model implementation as `TRet`. -/
 theorem tRet_of {M : MemModel} {d nargs : Nat} {extra : List (Nat × Nat)} {s s' : State}
@@ -103,17 +105,19 @@ theorem tRet_of {M : MemModel} {d nargs : Nat} {extra : List (Nat × Nat)} {s s'
     (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s) (hfs : s'.fsBase = s.fsBase)
     (hdf : s.df = false) (hdf' : s'.df = false) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
     (hf : MemFrame s.mem s'.mem (M.priv ++ MemAmd64.calleeStack s d nargs ++ extra))
-    (he : M.Env s'.mem (s.regs 14)) (hp : P s'.mem) : TRet M d nargs extra s s' P :=
-  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf', hmx, hf, he, hp⟩
+    (he : M.Env s'.mem (s.regs 14)) (hp : P s'.mem)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : TRet M d nargs extra s s' P :=
+  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf' hx87 hfw, hmx, hf, he, hp⟩
 
 /-- The return of a model implementation as `EqRet`. -/
 theorem eqRet_of {d nargs : Nat} {s s' : State} {P : (Nat → W64) → Prop}
     (hsp : s'.regs 4 = s.regs 4 + 8) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
     (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s) (hfs : s'.fsBase = s.fsBase)
     (hdf : s.df = false) (hdf' : s'.df = false) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
-    (hf : MemFrame s.mem s'.mem (MemAmd64.calleeStack s d nargs)) (hp : P s'.regs) : EqRet d nargs
+    (hf : MemFrame s.mem s'.mem (MemAmd64.calleeStack s d nargs)) (hp : P s'.regs)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : EqRet d nargs
         s s' P :=
-  EqRet.intro hsp h5 h14 hx hrip hfs (hdf'.trans hdf.symm) hmx hf hp
+  EqRet.intro hsp h5 h14 hx hrip hfs (hdf'.trans hdf.symm) hmx hf hp hx87 hfw
 
 /-- `SETE` after `CMP x, y` of `w`-bit values, read back: `x == y`. -/
 theorem setcc_eq {N x y : Nat} (hx : x < N) (hy : y < N) :
@@ -909,7 +913,7 @@ def memequalCode : List Nat :=
 def LoopPost (m : Janus.Arm64.Memory) (R : W64) (t : State) (a b k : Nat) (t' : State) : Prop :=
   t'.rip = BitVec.ofNat 64 (m.readLE R.toNat 8) ∧ t'.regs 4 = R + 8 ∧ t'.regs 5 = t.regs 5 ∧
       t'.regs 14 = t.regs 14 ∧ t'.xmm 15 = t.xmm 15 ∧
-    t'.fsBase = t.fsBase ∧ t'.df = false ∧ t'.mxcsr = t.mxcsr ∧ t'.mem = m ∧
+    t'.fsBase = t.fsBase ∧ t'.df = false ∧ t'.mxcsr = t.mxcsr ∧ t'.x87 = t.x87 ∧ t'.fpucw = t.fpucw ∧ t'.mem = m ∧
     (t'.regs 0).toNat % 256 = (m.readLE a k == m.readLE b k).toNat
 
 theorem memequal_loop (m : Janus.Arm64.Memory) (R : W64) (hR : m.accessible R.toNat 8 false = true)
@@ -925,7 +929,7 @@ theorem memequal_loop (m : Janus.Arm64.Memory) (R : W64) (hR : m.accessible R.to
   | zero =>
     intro t a b h_rip h0 h3 h1 hmem h4 hdf ha hb hacc hbcc
     janus64_run
-    exact ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl,
+    exact ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl, rfl, rfl,
       by simp [setRegF]⟩
   | succ k ih =>
     intro t a b h_rip h0 h3 h1 hmem h4 hdf ha hb hacc hbcc
@@ -941,15 +945,15 @@ theorem memequal_loop (m : Janus.Arm64.Memory) (R : W64) (hR : m.accessible R.to
         (by omega) (by omega)
         (Janus.Arm64.Memory.accessible_mono _ hacc (by omega) (by omega))
         (Janus.Arm64.Memory.accessible_mono _ hbcc (by omega) (by omega))) ?_
-      intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, emem, e0⟩
+      intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, ex87, efw, emem, e0⟩
       refine ⟨erip, e4, by simpa [setRegF] using e5, by simpa [setRegF] using e14, e15, efs, edf,
-          emx, emem,
+          emx, ex87, efw, emem,
         ?_⟩
       rw [e0, readLE_succ_beq, he, beq_self_eq_true, Bool.true_and]
     · simp only [Janus.Arm64.Memory.readLE_one] at *
       have he' : (m.bytes a).toNat ≠ (m.bytes b).toNat := by omega
       have he : m.bytes a ≠ m.bytes b := fun h => he' (by rw [h])
-      refine ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl,
+      refine ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl, rfl, rfl,
         ?_⟩
       rw [readLE_succ_beq, beq_false_of_ne he]; simp [setRegF]
 
@@ -961,9 +965,9 @@ theorem memequal_impl (d : Nat) : Memequal (toy.link (at0 memequalCode)) A0 d :=
     Janus.Arm64.Memory.accessible_sub _ hst (Or.inl rfl) (by omega) (by omega)
   refine ReachesRet.mono (memequal_loop s.mem (s.regs 4) hsp hra (s.regs 1).toNat s (s.regs 0).toNat
     (s.regs 3).toNat hpc (by simp) (by simp) (by simp) rfl rfl hdf ha1 hb1 ha2 hb2) ?_
-  intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, emem, e0⟩
+  intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, ex87, efw, emem, e0⟩
   exact eqRet_of e4 e5 e14 e15 erip efs hdf edf (by rw [emx])
-    (by rw [emem]; exact MemFrame.refl _ _) e0
+    (by rw [emem]; exact MemFrame.refl _ _) e0 ex87 efw
 
 
 /-- `mov 8(%rdx), %rcx` (the closure's size), then `memequalCode`'s loop. -/
@@ -986,7 +990,7 @@ theorem memequalVarlen_loop (m : Janus.Arm64.Memory) (R : W64) (hR : m.accessibl
   | zero =>
     intro t a b h_rip h0 h3 h1 hmem h4 hdf ha hb hacc hbcc
     janus64_run
-    exact ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl,
+    exact ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl, rfl, rfl,
       by simp [setRegF]⟩
   | succ k ih =>
     intro t a b h_rip h0 h3 h1 hmem h4 hdf ha hb hacc hbcc
@@ -1002,15 +1006,15 @@ theorem memequalVarlen_loop (m : Janus.Arm64.Memory) (R : W64) (hR : m.accessibl
         (by omega) (by omega)
         (Janus.Arm64.Memory.accessible_mono _ hacc (by omega) (by omega))
         (Janus.Arm64.Memory.accessible_mono _ hbcc (by omega) (by omega))) ?_
-      intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, emem, e0⟩
+      intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, ex87, efw, emem, e0⟩
       refine ⟨erip, e4, by simpa [setRegF] using e5, by simpa [setRegF] using e14, e15, efs, edf,
-          emx, emem,
+          emx, ex87, efw, emem,
         ?_⟩
       rw [e0, readLE_succ_beq, he, beq_self_eq_true, Bool.true_and]
     · simp only [Janus.Arm64.Memory.readLE_one] at *
       have he' : (m.bytes a).toNat ≠ (m.bytes b).toNat := by omega
       have he : m.bytes a ≠ m.bytes b := fun h => he' (by rw [h])
-      refine ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl,
+      refine ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl, rfl, rfl,
         ?_⟩
       rw [readLE_succ_beq, beq_false_of_ne he]; simp [setRegF]
 
@@ -1027,10 +1031,10 @@ theorem memequalVarlen_impl (d : Nat) : MemequalVarlen (toy.link (at0 memequalVa
   refine ReachesRet.mono (memequalVarlen_loop s.mem (s.regs 4) hsp hra _ _ (s.regs 0).toNat
     (s.regs 3).toNat rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) rfl
     (by simp [setRegF]) rfl ha1 hb1 ha2 hb2) ?_
-  intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, emem, e0⟩
+  intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, ex87, efw, emem, e0⟩
   exact eqRet_of (by simpa [setRegF] using e4) (by simpa [setRegF] using e5)
     (by simpa [setRegF] using e14) e15 erip efs hdf edf (by rw [emx])
-    (by rw [emem]; exact MemFrame.refl _ _) e0
+    (by rw [emem]; exact MemFrame.refl _ _) e0 ex87 efw
 
 /-- `mov 8(%rax), %rcx; cmp 8(%rbx), %rcx; jne 2f` (different lengths: `false`); `mov (%rax), %rax;
 mov (%rbx), %rbx`, then `memequalCode`'s loop on the data. -/
@@ -1053,7 +1057,7 @@ theorem strequal_loop (m : Janus.Arm64.Memory) (R : W64) (hR : m.accessible R.to
   | zero =>
     intro t a b h_rip h0 h3 h1 hmem h4 hdf ha hb hacc hbcc
     janus64_run
-    exact ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl,
+    exact ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl, rfl, rfl,
       by simp [setRegF]⟩
   | succ k ih =>
     intro t a b h_rip h0 h3 h1 hmem h4 hdf ha hb hacc hbcc
@@ -1069,15 +1073,15 @@ theorem strequal_loop (m : Janus.Arm64.Memory) (R : W64) (hR : m.accessible R.to
         (by omega) (by omega)
         (Janus.Arm64.Memory.accessible_mono _ hacc (by omega) (by omega))
         (Janus.Arm64.Memory.accessible_mono _ hbcc (by omega) (by omega))) ?_
-      intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, emem, e0⟩
+      intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, ex87, efw, emem, e0⟩
       refine ⟨erip, e4, by simpa [setRegF] using e5, by simpa [setRegF] using e14, e15, efs, edf,
-          emx, emem,
+          emx, ex87, efw, emem,
         ?_⟩
       rw [e0, readLE_succ_beq, he, beq_self_eq_true, Bool.true_and]
     · simp only [Janus.Arm64.Memory.readLE_one] at *
       have he' : (m.bytes a).toNat ≠ (m.bytes b).toNat := by omega
       have he : m.bytes a ≠ m.bytes b := fun h => he' (by rw [h])
-      refine ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl,
+      refine ⟨rfl, by simp [setRegF], by simp [setRegF], by simp [setRegF], rfl, rfl, rfl, rfl, rfl, rfl, rfl,
         ?_⟩
       rw [readLE_succ_beq, beq_false_of_ne he]; simp [setRegF]
 
@@ -1098,10 +1102,10 @@ theorem strequal_impl (d : Nat) : Strequal (toy.link (at0 strequalCode)) A0 d :=
     rw [← hl] at hq1 hq2
     refine ReachesRet.mono (strequal_loop s.mem (s.regs 4) hsp hra _ _ _ _ rfl (by simp [setRegF])
       (by simp [setRegF]) (by simp [setRegF]) rfl (by simp [setRegF]) rfl hp1 hq1 hp2 hq2) ?_
-    intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, emem, e0⟩
+    intro t' ⟨erip, e4, e5, e14, e15, efs, edf, emx, ex87, efw, emem, e0⟩
     refine eqRet_of (by simpa [setRegF] using e4) (by simpa [setRegF] using e5)
       (by simpa [setRegF] using e14) e15 erip efs hdf edf (by rw [emx])
-      (by rw [emem]; exact MemFrame.refl _ _) ?_
+      (by rw [emem]; exact MemFrame.refl _ _) ?_ ex87 efw
     simp only [BoolRes, e0, strEq, strLen, strPtr, ← hl, beq_self_eq_true, Bool.true_and]
   · eq_close hdf
     have hne : Janus.Arm64.Memory.readLE s.mem ((s.regs 0).toNat + 8) 8 ≠

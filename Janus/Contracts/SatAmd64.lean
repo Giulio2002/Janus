@@ -137,9 +137,10 @@ theorem rtPost_const {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s' 
     (hrip : s'.rip = retAddrOf s) (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5)
     (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase)
     (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr) (hm : s'.mem = s.mem)
-    (hq : sp.post rt (argWords64 s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 3).toNat (s'.regs 1).toNat s.mem) :
+    (hq : sp.post rt (argWords64 s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 3).toNat (s'.regs 1).toNat s.mem)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
     RtPost64 rt stack sp s s' :=
-  RtPost64.intro hrip h4 h5 h14 hx hfs hdf hmx (hm ▸ MemFrame.refl _ _) (hm ▸ hq)
+  RtPost64.intro hrip h4 h5 h14 hx hfs hdf hmx (hm ▸ MemFrame.refl _ _) (hm ▸ hq) hx87 hfw
 
 /-- **A contract is satisfiable** (amd64). -/
 def Satisfiable (sp : RtSpec) : Prop :=

@@ -38,11 +38,12 @@ return address is `retState` of its own registers, flags and memory (the state p
 `MemAmd64.EqRet.intro`). -/
 theorem retState_of {s s' : State} (hsp : s'.regs 4 = s.regs 4 + 8) (h5 : s'.regs 5 = s.regs 5)
     (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s)
-    (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df) :
+    (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
     s' = retState s s'.regs s'.xmm s'.ymmHi s'.flags s'.mxcsr s'.mem := by
-  obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx⟩ := s'
-  simp only at hsp h5 h14 hx hrip hfs hdf ⊢
-  subst hrip hfs hdf
+  obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx, x8, fw⟩ := s'
+  simp only at hsp h5 h14 hx hrip hfs hdf hx87 hfw ⊢
+  subst hrip hfs hdf hx87 hfw
   simp only [retState, State.mk.injEq, and_true, true_and]
   refine ⟨?_, ?_⟩
   · funext i

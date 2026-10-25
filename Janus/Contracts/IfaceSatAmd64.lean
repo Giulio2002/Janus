@@ -66,10 +66,10 @@ theorem rtReturn_of (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (
     (P : (Nat → W64) → Janus.Arm64.Memory → Prop) (hrip : s'.rip = retAddrOf s)
     (h4 : s'.regs 4 = s.regs 4 + 8) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
     (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
-    (hmx : s'.mxcsr = s.mxcsr)
+    (hmx : s'.mxcsr = s.mxcsr) (hfw : s'.fpucw = s.fpucw)
     (hfr : MemFrame s.mem s'.mem (Contracts.IfaceAmd64.rtWrites R s nargs ++ extra))
-    (henv : R.Env s'.mem (s.regs 14)) (hp : P s'.regs s'.mem) (hx87 : s'.x87 = s.x87 := by rfl)
-    (hfw : s'.fpucw = s.fpucw := by rfl) : RTReturn R nargs extra s s' P := by
+    (henv : R.Env s'.mem (s.regs 14)) (hp : P s'.regs s'.mem) (hx87 : s'.x87 = s.x87 := by rfl) :
+    RTReturn R nargs extra s s' P := by
   refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, hfr, henv, hp⟩
   obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
   simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw ⊢

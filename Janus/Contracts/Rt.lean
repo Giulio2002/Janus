@@ -132,12 +132,13 @@ theorem RtPost.intro {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s' 
     (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
     (hf : MemFrame s.mem s'.mem (rtIf sp.rtWrites rt ++ calleeStack s stack sp.nargs ++
       sp.writes (argWords s sp.nargs) s.mem))
-    (hq : sp.post rt (argWords s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 1).toNat (s'.regs 2).toNat s'.mem) :
+    (hq : sp.post rt (argWords s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 1).toNat (s'.regs 2).toNat s'.mem)
+    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
     RtPost rt stack sp s s' := by
   refine ⟨s'.regs 0, s'.regs 1, s'.regs 2, s'.regs, s'.flags, s'.vregs, s'.mem, ?_, hf, hq⟩
-  obtain ⟨r, sp', pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
-  simp only at hsp hpc h18 h28 h29 hdz htp hfc hfs ⊢
-  subst hsp hpc hdz htp hfc hfs
+  obtain ⟨r, sp', pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
+  simp only at hsp hpc h18 h28 h29 hdz htp hfc hfs hex hep ⊢
+  subst hsp hpc hdz htp hfc hfs hex hep
   simp only [retState, State.mk.injEq, and_true]
   funext i
   simp only [callRegs]
@@ -194,12 +195,13 @@ theorem RtPost64.intro {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s
     (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr)
     (hf : MemFrame s.mem s'.mem (rtIf sp.rtWrites rt ++ calleeStack64 s stack sp.nargs ++
       sp.writes (argWords64 s sp.nargs) s.mem))
-    (hq : sp.post rt (argWords64 s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 3).toNat (s'.regs 1).toNat s'.mem) :
+    (hq : sp.post rt (argWords64 s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 3).toNat (s'.regs 1).toNat s'.mem)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
     RtPost64 rt stack sp s s' := by
   refine ⟨s'.regs 0, s'.regs 3, s'.regs 1, s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, ?_, hf, hq⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
-  simp only at hrip h4 h5 h14 hx hfs hdf hmx ⊢
-  subst hrip hfs hdf hmx
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
+  simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw ⊢
+  subst hrip hfs hdf hmx hx87 hfw
   simp only [retState64, State.mk.injEq, and_true, true_and]
   constructor
   · funext i

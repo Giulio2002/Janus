@@ -131,7 +131,8 @@ def WPost (a : BitVec 64) (t t' : State) : Prop :=
     (hi t.mem a.toNat)) t'.mem [(t.sp.toNat - 4096, t.sp.toNat)]
 
 set_option maxHeartbeats 4000000 in
-theorem wrapper_spec (T a : BitVec 64) :
+theorem wrapper_spec (T a : BitVec 64)
+    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
     CEnsuresC Extracted.program (TopOfStack T) wrapper [a] (WPre a) (WPost a) := by
   intro ret hret t hs ⟨⟨hal, hb, htop, hacc⟩, ha, hfa, hd, hgb, hga, hgo, hGb, hGa, hGo, hGf⟩
   apply ReturnsC.of_reaches
@@ -153,9 +154,9 @@ theorem wrapper_spec (T a : BitVec 64) :
   janus_run [spre_iff, fw, BitVec.toNat_ofNat] until [wrapper + 0x44]
     calls [summary (fw t.mem a.toNat 0) (fw t.mem a.toNat 1)]
   dsimp only at *
-  obtain ⟨regs', sp', pc', fl', mem', dz', vr', tp', fc', fsr'⟩ := s'
+  obtain ⟨regs', sp', pc', fl', mem', dz', vr', tp', fc', fsr', ex, ep⟩ := s'
   dsimp only at *
-  subst sp' pc' mem' fc' vr'
+  subst sp' pc' mem' fc' vr' hex hep
   simp only [setReg_apply, ↓reduceIte, Nat.reduceEqDiff, bigMem] at *
   have h19' : regs' 19 = a := by assumption
   have h20' : regs' 20 = t.sp - 88#64 := by assumption
