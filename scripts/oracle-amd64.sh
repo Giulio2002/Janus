@@ -10,6 +10,10 @@
 #                                      strconv and sort test binaries (K states each, FPK MXCSR
 #                                      settings per state; FP_K states per harvested FP
 #                                      instruction, default 20)
+#   scripts/oracle-amd64.sh v3         the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, scalar
+#                                      FMA, PSHUFB/PSIGNB): their specs and the FMA edge family,
+#                                      plus every such instruction harvested from GOAMD64=v3 test
+#                                      binaries (V3_K states each, default 12)
 #
 # Environment: OUT (default artifacts/oracle-amd64), JOBS (default 16, at most 24), N
 # (encodings per targeted spec, default 600 full / 250 quick), GROUP (random byte strings,
@@ -57,13 +61,19 @@ case "$mode" in
   quick) N="${N:-250}"; GROUP="${GROUP:-15000}" ;;
   full)  N="${N:-600}"; GROUP="${GROUP:-40000}" ;;
   fp)    N="${N:-600}"; GROUP=0 ;;
-  *) echo "usage: $0 selftest|quick|full|fp" >&2; exit 2 ;;
+  v3)    N="${N:-600}"; GROUP=0 ;;
+  *) echo "usage: $0 selftest|quick|full|fp|v3" >&2; exit 2 ;;
 esac
 fpk=()
 [ -n "${FPK:-}" ] && fpk=(-fpk "$FPK")
+v3re='^(andn|blsr|blsmsk|blsi|bextr|bzhi|shlx|shrx|sarx|rorx|mulx|pdep|pext|movbe|pshufb|psignb|vfn?m(add|sub)(132|213|231)s[sd])$'
+v3pkgs="math math/big strconv internal/strconv internal/runtime/maps encoding/binary math/bits reflect internal/abi math/rand runtime"
 if [ "$mode" = fp ]; then
   echo "== generate (SSE floating point: $N encodings per spec, $((N / 2)) edge rounds)"
   "$bin/oracle" gen -fp-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
+elif [ "$mode" = v3 ]; then
+  echo "== generate (GOAMD64=v3 extensions: $N encodings per spec, $((N / 4)) FMA edge rounds)"
+  "$bin/oracle" gen -v3-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
 else
   echo "== generate ($N encodings per targeted spec, $GROUP random)"
   "$bin/oracle" gen -n "$N" -group "$GROUP" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
@@ -83,6 +93,18 @@ if [ "$mode" = fp ]; then
   cases+=("$OUT/harvest.jsonl")
 fi
 
+if [ "$mode" = v3 ]; then
+  echo "== harvest the v3-extension instructions of GOAMD64=v3 test binaries"
+  corpus="$bin/corpus-v3"
+  mkdir -p "$corpus"
+  (cd "$root/oracle-amd64" &&
+    for p in $v3pkgs; do
+      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v3 go test -c -o "$corpus/${p//\//_}.test" "$p"
+    done)
+  "$bin/oracle" harvest -k "${V3_K:-12}" -per-class 0 -only "$v3re" -seed "$((SEED + 1))" "${fpk[@]}" -o "$OUT/harvest.jsonl" "$corpus"/*
+  cases+=("$OUT/harvest.jsonl")
+fi
+
 if [ "$mode" = full ]; then
   echo "== harvest corpus (real Go amd64 code)"
   corpus="$bin/corpus"
@@ -91,6 +113,10 @@ if [ "$mode" = full ]; then
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -o "$corpus/bigprog" ./harvest/bigprog &&
     for p in math math/big strconv sort crypto/sha256 bytes strings math/bits encoding/binary sync/atomic; do
       CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
+    done
+    # GOAMD64=v3 code (BMI1/BMI2, MOVBE, FMA, PSHUFB/PSIGNB)
+    for p in math strconv internal/runtime/maps encoding/binary; do
+      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v3 go test -c -o "$corpus/v3_${p//\//_}.test" "$p"
     done)
   # gcc-compiled C (the cgo examples and the model-coverage corpus examples/cgo/ccover.c)
   if command -v gcc >/dev/null; then

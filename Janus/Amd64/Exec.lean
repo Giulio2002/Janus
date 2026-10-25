@@ -228,6 +228,25 @@ def pshufdNat (a imm : Nat) : Nat :=
   let sel (i : Nat) : Nat := a / 2 ^ (32 * (imm / 4 ^ i % 4)) % 2 ^ 32
   sel 0 + 2 ^ 32 * sel 1 + 2 ^ 64 * sel 2 + 2 ^ 96 * sel 3
 
+/-- `PSHUFB` on one 128-bit lane: byte `i` (of `k` remaining) is `0` if bit 7 of byte `i` of
+`b` is set, else byte `b[i] & 15` of `a`. -/
+def pshufbGo (a : Nat) : Nat → Nat → Nat
+  | 0, _ => 0
+  | k + 1, b => (if b % 256 ≥ 128 then 0 else a / 256 ^ (b % 16) % 256) + 256 * pshufbGo a k (b / 256)
+
+/-- `PSHUFB` on `k` 128-bit lanes (each lane selects within itself). -/
+def pshufbLanes : Nat → Nat → Nat → Nat
+  | 0, _, _ => 0
+  | k + 1, a, b => pshufbGo (a % 2 ^ 128) 16 (b % 2 ^ 128) + 2 ^ 128 * pshufbLanes k (a / 2 ^ 128) (b / 2 ^ 128)
+
+/-- `PSIGNB` on `k` byte lanes: byte `i` of `a` negated (mod 256), zeroed or kept as byte `i`
+of `b` is negative, zero or positive. -/
+def psignBytes : Nat → Nat → Nat → Nat
+  | 0, _, _ => 0
+  | k + 1, a, b =>
+    (if b % 256 = 0 then 0 else if b % 256 ≥ 128 then (256 - a % 256) % 256 else a % 256) +
+      256 * psignBytes k (a / 256) (b / 256)
+
 /-- A packed vector operation on `l`-bit values `a` (destination / first source) and `b`. -/
 @[janus64_exec] def vecBin (op : SseOp) (l a b : Nat) : Nat :=
   match op with
@@ -236,6 +255,8 @@ def pshufdNat (a imm : Nat) : Nat :=
   | .or => a ||| b
   | .pcmpeqb => cmpeqBytes (l / 8) a b
   | .punpcklbw => unpackLoBytes (l / 16) a b
+  | .pshufb => pshufbLanes (l / 128) a b
+  | .psignb => psignBytes (l / 8) a b
 
 /-- The legacy-SSE form on `XMM` values (`xor` stays a `BitVec` operation). -/
 @[janus64_exec] def sseBin (op : SseOp) (x v : W128) : W128 :=
@@ -245,6 +266,8 @@ def pshufdNat (a imm : Nat) : Nat :=
   | .or => BitVec.ofNat 128 (vecBin .or 128 x.toNat v.toNat)
   | .pcmpeqb => BitVec.ofNat 128 (vecBin .pcmpeqb 128 x.toNat v.toNat)
   | .punpcklbw => BitVec.ofNat 128 (vecBin .punpcklbw 128 x.toNat v.toNat)
+  | .pshufb => BitVec.ofNat 128 (vecBin .pshufb 128 x.toNat v.toNat)
+  | .psignb => BitVec.ofNat 128 (vecBin .psignb 128 x.toNat v.toNat)
 
 /-- `VPTEST a, b` (`l`-bit values): `ZF = (a AND b = 0)`, `CF = (b AND NOT a = 0)`, the
 other four status flags cleared. -/
@@ -599,6 +622,87 @@ def execCount (s : State) (next : W64) (op : CntOp) (w dst : Nat) (src : Loc) : 
       fin (BitVec.ofNat w (popNat w n))
         { cf := some false, pf := some false, af := some false, zf := some (decide (n = 0)),
           sf := some false, ovf := some false }
+
+/-! ## BMI1, BMI2
+
+The VEX-encoded general-purpose instructions (SDM Vol. 2, `ANDN`, `BLSR`, ..., `PEXT`) at
+`w ∈ {32, 64}`; their register destinations are written like every 32/64-bit result
+(zero-extended). Memory operands are read only. -/
+
+/-- `SF ZF` from `r`, `CF` given, `OF` cleared, `AF PF` undefined (`ANDN BLSR BLSI BZHI`). -/
+@[janus64_exec] def bmiFlags {w : Nat} (r : BitVec w) (cf : Bool) : Flags :=
+  { cf := some cf, pf := none, af := none, zf := some (decide (r = 0)), sf := some r.msb,
+    ovf := some false }
+
+/-- `PDEP` of the low `k` bits of the mask `m`: the low bits of `x` deposited at the set bits
+of `m`, from the bottom. -/
+def pdepNat : Nat → Nat → Nat → Nat
+  | 0, _, _ => 0
+  | k + 1, x, m =>
+    if m % 2 = 1 then x % 2 + 2 * pdepNat k (x / 2) (m / 2) else 2 * pdepNat k x (m / 2)
+
+/-- `PEXT` of the low `k` bits: the bits of `x` at the set bits of `m`, packed from the bottom. -/
+def pextNat : Nat → Nat → Nat → Nat
+  | 0, _, _ => 0
+  | k + 1, x, m =>
+    if m % 2 = 1 then x % 2 + 2 * pextNat k (x / 2) (m / 2) else pextNat k (x / 2) (m / 2)
+
+/-- `ANDN dst, src1, src2`. -/
+@[janus64_exec] def execAndn (s : State) (next : W64) (w dst src1 : Nat) (src2 : Loc) :
+    Except Fault State :=
+  match readLoc s next w src2 with
+  | .error e => .error e
+  | .ok y =>
+    let r := ~~~(s.getReg w src1) &&& y
+    .ok (((s.putReg w dst r).setFlags (bmiFlags r false)).setRip next)
+
+/-- `BLSR` (`op = 1`: `CF` = source is zero), `BLSMSK` (`2`: `CF` = source is zero, `ZF`
+cleared), `BLSI` (`3`: `CF` = source is not zero). -/
+@[janus64_exec] def execBlsx (s : State) (next : W64) (op w dst : Nat) (src : Loc) :
+    Except Fault State :=
+  match readLoc s next w src with
+  | .error e => .error e
+  | .ok x =>
+    let rf : BitVec w × Flags :=
+      if op = 1 then ((x - 1) &&& x, bmiFlags ((x - 1) &&& x) (decide (x = 0)))
+      else if op = 2 then ((x - 1) ^^^ x, { bmiFlags ((x - 1) ^^^ x) (decide (x = 0)) with zf := some false })
+      else ((0 - x) &&& x, bmiFlags ((0 - x) &&& x) (decide (x ≠ 0)))
+    .ok (((s.putReg w dst rf.1).setFlags rf.2).setRip next)
+
+/-- `BEXTR dst, src, ctl`: `ZF` from the result, `CF OF` cleared, `AF SF PF` undefined. -/
+@[janus64_exec] def execBextr (s : State) (next : W64) (w dst : Nat) (src : Loc) (ctl : Nat) :
+    Except Fault State :=
+  match readLoc s next w src with
+  | .error e => .error e
+  | .ok x =>
+    let c := (s.getReg w ctl).toNat
+    let r : BitVec w := BitVec.ofNat w (x.toNat / 2 ^ (c % 256) % 2 ^ (c / 256 % 256))
+    let f : Flags :=
+      { cf := some false, pf := none, af := none, zf := some (decide (r = 0)), sf := none, ovf := some false }
+    .ok (((s.putReg w dst r).setFlags f).setRip next)
+
+/-- `BZHI dst, src, idx`. -/
+@[janus64_exec] def execBzhi (s : State) (next : W64) (w dst : Nat) (src : Loc) (idx : Nat) :
+    Except Fault State :=
+  match readLoc s next w src with
+  | .error e => .error e
+  | .ok x =>
+    let n := (s.getReg w idx).toNat % 256
+    let r : BitVec w := if n < w then BitVec.ofNat w (x.toNat % 2 ^ n) else x
+    .ok (((s.putReg w dst r).setFlags (bmiFlags r (decide (w ≤ n)))).setRip next)
+
+/-- `SHLX`/`SHRX`/`SARX dst, src, cnt` (flags unaffected). -/
+@[janus64_exec] def execShiftx (s : State) (next : W64) (op : ShOp) (w dst : Nat) (src : Loc)
+    (cnt : Nat) : Except Fault State :=
+  match readLoc s next w src with
+  | .error e => .error e
+  | .ok x =>
+    let c := (s.getReg w cnt).toNat % (if w = 64 then 64 else 32)
+    let r : BitVec w := match op with
+      | .shl => x <<< c
+      | .sar => x.sshiftRight c
+      | _ => x >>> c
+    .ok ((s.putReg w dst r).setRip next)
 
 /-! ## String instructions
 
@@ -1033,6 +1137,47 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
     | .ok v =>
       let d := s.xmm dst
       .ok ((s.setXmm dst (if op = 0 then d &&& v else if op = 1 then ~~~d &&& v else d ||| v)).setRip next)
+  | .andn w dst src1 src2 => execAndn s next w dst src1 src2
+  | .blsx op w dst src => execBlsx s next op w dst src
+  | .bextr w dst src ctl => execBextr s next w dst src ctl
+  | .bzhi w dst src idx => execBzhi s next w dst src idx
+  | .shiftx op w dst src cnt => execShiftx s next op w dst src cnt
+  | .rorx w dst src imm =>
+    match readLoc s next w src with
+    | .error e => .error e
+    | .ok x => .ok ((s.putReg w dst (x.rotateRight (imm % w))).setRip next)
+  | .mulx w hi lo src =>
+    -- `DEST2 ← low half; DEST1 ← high half` (rDX is read before either write)
+    match readLoc s next w src with
+    | .error e => .error e
+    | .ok y =>
+      let full := (s.getReg w 2).toNat * y.toNat
+      .ok (((s.putReg w lo (BitVec.ofNat w full)).putReg w hi (BitVec.ofNat w (full / 2 ^ w))).setRip next)
+  | .pdep w dst src mask =>
+    match readLoc s next w mask with
+    | .error e => .error e
+    | .ok m => .ok ((s.putReg w dst (BitVec.ofNat w (pdepNat w (s.getReg w src).toNat m.toNat))).setRip next)
+  | .pext w dst src mask =>
+    match readLoc s next w mask with
+    | .error e => .error e
+    | .ok m => .ok ((s.putReg w dst (BitVec.ofNat w (pextNat w (s.getReg w src).toNat m.toNat))).setRip next)
+  | .movbe w dst src =>
+    match readLoc s next w src with
+    | .error e => .error e
+    | .ok v =>
+      match writeLoc s next w dst (BitVec.ofNat w (revBytesNat (w / 8) v.toNat)) with
+      | .ok s' => .ok (s'.setRip next)
+      | .error e => .error e
+  | .vfmas w form negP negC dst src2 src3 =>
+    match readXs s next w src3 with
+    | .error e => .error e
+    | .ok z =>
+      let d := (s.xmm dst).toNat % 2 ^ w
+      let y := (s.xmm src2).toNat % 2 ^ w
+      let abc : Nat × Nat × Nat := if form = 132 then (d, z, y) else if form = 213 then (y, d, z) else (y, z, d)
+      match FP.fma (fmtOf w) (FP.ctl s.mxcsr.toNat) negP negC abc.1 abc.2.1 abc.2.2 with
+      | none => .error (.undefinedResult pc)
+      | some o => fpDone s pc next o fun r => (s.setXmmLow dst w r).setYmmHi dst 0
   | .locked i a size =>
     let addr := (ea s next a).toNat
     if addr % size ≠ 0 then .error (.misaligned addr) else exec i len s

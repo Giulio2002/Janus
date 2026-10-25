@@ -529,10 +529,10 @@ pseudocode:
 
 | | arm64 (`Janus/Arm64/Float.lean`, ASL) | amd64 (`Janus/Amd64/Float.lean`, Intel SDM) |
 |---|---|---|
-| instructions | `FADD FSUB FMUL FNMUL FDIV FSQRT FNEG FABS FMIN FMAX FMINNM FMAXNM FMADD FMSUB FNMADD FNMSUB FCMP FCMPE FCCMP FCCMPE FCSEL FCVT` (S↔D) `FCVT{N,P,M,Z,A}{S,U} SCVTF UCVTF` (32/64-bit) `FRINT{N,P,M,Z,A,X,I}`, `FMOV` (register, immediate) | `ADD SUB MUL DIV SQRT MIN MAX` `SD`/`SS`, `UCOMISD COMISD UCOMISS COMISS`, `CMPSD`/`CMPSS` (predicates 0–7), `CVTSI2SD/SS`, `CVTTSD2SI CVTSD2SI CVTTSS2SI CVTSS2SI` (32/64-bit), `CVTSD2SS CVTSS2SD`, `ROUNDSD`/`ROUNDSS` (SSE4.1, which Go runs behind a `runtime.x86HasSSE41` test), `ANDPD ANDNPD ORPD ANDPS ANDNPS ORPS` |
+| instructions | `FADD FSUB FMUL FNMUL FDIV FSQRT FNEG FABS FMIN FMAX FMINNM FMAXNM FMADD FMSUB FNMADD FNMSUB FCMP FCMPE FCCMP FCCMPE FCSEL FCVT` (S↔D) `FCVT{N,P,M,Z,A}{S,U} SCVTF UCVTF` (32/64-bit) `FRINT{N,P,M,Z,A,X,I}`, `FMOV` (register, immediate) | `ADD SUB MUL DIV SQRT MIN MAX` `SD`/`SS`, `UCOMISD COMISD UCOMISS COMISS`, `CMPSD`/`CMPSS` (predicates 0–7), `CVTSI2SD/SS`, `CVTTSD2SI CVTSD2SI CVTTSS2SI CVTSS2SI` (32/64-bit), `CVTSD2SS CVTSS2SD`, `ROUNDSD`/`ROUNDSS` (SSE4.1, which Go runs behind a `runtime.x86HasSSE41` test), `ANDPD ANDNPD ORPD ANDPS ANDNPS ORPS`, scalar FMA3 `VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}` |
 | control state | `State.fpcr`: `RMode`, `FZ`, `DN`, and FEAT_AFP's `FIZ`, `AH`, `NEP` | `State.mxcsr`: `RC`, `FTZ`, `DAZ`, the six masks |
 | flags | `State.fpsr` (`IOC DZC OFC UFC IXC IDC`, cumulative) | `MXCSR` bits 5:0 (`IE DE ZE OE UE PE`, cumulative) |
-| NaN results | the first signalling, else the first quiet operand (for `FMADD`: addend first), quieted; default NaN `0x7FF8…` with `DN = 1`; `AH = 1` has its own rules (default NaN negative, `FMAX` returns the second operand, ...) | the first source operand if it is a NaN, else the second, quieted; invalid operations give the indefinite `0xFFF8…`; `MINSD`/`MAXSD` return the second operand unchanged |
+| NaN results | the first signalling, else the first quiet operand (for `FMADD`: addend first), quieted; default NaN `0x7FF8…` with `DN = 1`; `AH = 1` has its own rules (default NaN negative, `FMAX` returns the second operand, ...) | the first source operand if it is a NaN, else the second, quieted; invalid operations give the indefinite `0xFFF8…`; `MINSD`/`MAXSD` return the second operand unchanged; FMA: the one NaN operand quieted, never negated (two or more NaNs fault) |
 | tininess | before rounding (`AH = 0`), after rounding (`AH = 1`) | after rounding |
 | flush-to-zero | `FZ`: inputs and outputs (output before rounding, `UFC` only, when `AH = 0`); `FIZ`: inputs | `DAZ`: inputs (no `DE`); `FTZ`: tiny results, exact or not, with `UE PE` |
 | out-of-range to integer | saturates; NaN gives 0 (`IOC`) | the integer indefinite `2^(w-1)` (`IE`) |
@@ -544,7 +544,13 @@ bits are RES0, so a theorem whose precondition allows them set says nothing abou
 unless they read as zero there. Half precision (FEAT_FP16: `ftype = 11`, `FZ16`, `AHP`), BFloat16,
 `FRINT32*/64*`, `FJCVTZS`, fixed-point conversions and Advanced SIMD floating point are rejected.
 The amd64 model is of SSE2 (and SSE4.1 for `ROUNDSD`, executed by Go only after testing
-`x86HasSSE41`); the VEX/EVEX forms (`VFMADD231SD` behind `x86HasFMA`, ...), x87 and `LDMXCSR` are
+`x86HasSSE41`) and of the scalar FMA3 instructions (`VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}`,
+which `GOAMD64=v3` code uses unconditionally and `GOAMD64=v1` code behind `x86HasFMA`): one
+rounding of the exact `±a × b ± c` on the IEEE core, proved equal to IEEE 754
+`fusedMultiplyAdd` in IEEE mode (`FP.fma_ieee`). Where the manuals leave an FMA result open (two
+or more NaN operands, whose choice Intel documents and AMD does not; `0 × ∞ + qNaN`, whose `IE`
+IEEE 754 §7.2 leaves to the implementation) the instruction faults (`undefinedResult`), so no
+proof depends on a vendor. The other VEX/EVEX floating-point forms, x87 and `LDMXCSR` are
 rejected. Encodings whose behaviour the manuals leave open (an `FCMP #0.0` with a non-zero `Rm`
 field, `REX.W` on an SSE instruction that does not use it, reserved `CMPSD`/`ROUNDSD` immediate
 bits) are rejected rather than guessed.
@@ -740,6 +746,35 @@ specification definitions like `GoABI`. A `CEnsures` theorem is about a call tha
 convention (`CCall`). It promises what the convention requires of the callee (`CReturn`) and
 nothing about callers that violate the convention. The callee-saved SIMD/FP state (`V8`–`V15` on
 arm64; the x87/`MXCSR` control words on amd64) is outside the model.
+
+## Go assembly (ABI0)
+
+A theorem about a Go assembly function is stated with `GoABI0.Ensures0` (or
+`Amd64.GoABI0.Ensures0`), see [ABI0.md](ABI0.md). Every instruction of the assembly, of the Go
+code calling it and of the ABI wrappers in between is executed by the model from the binary's
+bytes; **no assembly-specific behaviour is assumed**. What the ABI0 vocabulary contributes is the
+reading of the statement:
+
+* *The call state.* `CallSetup0` says where an ABI0 caller puts the arguments (frame word `i` at
+  `RSP + 8 + 8i`) and the return address, as `abi-internal.md`/`asm.html` and the code Go 1.26.0
+  emits define it. A theorem is about calls of that shape; if a caller laid out the frame
+  differently, the theorem would say nothing about that call. (When the caller is extracted too,
+  as in `CallXor`, nothing about the layout is taken on trust: the caller's stores are executed.)
+* *The return obligations.* `ABIReturn0` lists what the theorem promises to keep (arm64 `RSP`,
+  `g`, `FP`, `R18`; amd64 `RSP + 8`, `RBP`, the `FS` base, `DF`). They are proved, not assumed.
+  ABI0 promises nothing about `R14`/`X15` on amd64: a theorem about Go code after an ABI0 call
+  obtains `R14 = g` from the precondition `GoABI.TlsG` (the TLS slot holds `g`), stated in the
+  printed statement, and `X15 = 0` from the executed `XORPS`.
+* *The callee summaries.* `Summary0` and `Ret0` are ordinary `Summary` statements about the
+  extracted program, proved by execution; composing them (`janus_run calls [h]`) is the generic
+  `Reaches.call` lemma. `Ensures0.of_summary` is a theorem.
+* *The CLI classification* (`entryABI`/`entrySource`, the `Entry:` annotation, the convention
+  warning) is untrusted and informational, like reachability.
+
+Hence a theorem about assembly trusts exactly what a theorem about Go code trusts (the ISA model,
+the extraction identity, Lean), plus the reading of `CallSetup0` above. The runtime's own
+assembly that switches stacks or goroutines (`systemstack`, `mcall`, `gogo`, `asmcgocall`) is not
+covered by the convention: a theorem about it needs a precondition describing those states.
 
 ## What the theorem does not say
 
