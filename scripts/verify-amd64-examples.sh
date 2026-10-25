@@ -37,6 +37,11 @@ verify_function() {
   local f=$1
   verify "$f" Proof.correctness
   if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then verify "$f" Proof.panics; fi
+  # corollaries stated as their own theorems (e.g. EncryptBlock's AES-128 and FIPS-197 vector)
+  local c
+  for c in $(grep -oE '^theorem corollary[A-Za-z0-9_]*' "examples/proofs-amd64/$f/Proof.lean" | awk '{print $2}'); do
+    verify "$f" "Proof.$c"
+  done
   return 0
 }
 funcs=("$@")

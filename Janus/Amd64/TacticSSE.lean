@@ -27,6 +27,11 @@ open Janus.Amd64 Janus.Arm64 Janus.Tactic
 
 janus_rfl_eqns ExecSSE.exec [janus64_exec]
 
+/-- The address of a memory operand, once it is applied. `exec` passes the unapplied
+`eaNat s next` to `ExecSSE.exec` / `ExecCrypto.exec`, which simp leaves alone (rewriting inside
+`fun a => (ea s next a).toNat` for a symbolic operand `a` cost seconds per instruction). -/
+@[janus64_exec] theorem eaNat_apply (s : State) (next : W64) (a : Addr) : eaNat s next a = (ea s next a).toNat := rfl
+
 /- The bit-serial CRC of `CRC32` doubles its term at every step under `whnf` (the next register
 is an `if` on the current one); proofs reason about it with `Janus.Spec.CRC32C`, never by
 unfolding it, so the elaborator must not unfold it either. -/

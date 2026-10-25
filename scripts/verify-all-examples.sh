@@ -43,7 +43,7 @@ for n in "${arm64[@]}"; do
 done
 for f in "${amd64[@]}"; do
   par_run 'out="$(scripts/verify-amd64-examples.sh -j 1 "$f" 2>&1)" || broken+=("amd64:$f")
-  grep -E "Proof\.(correctness|panics)" <<<"$out" | sed "s/^/amd64  /"'
+  grep -E "Proof\.(correctness|panics|corollary)" <<<"$out" | sed "s/^/amd64  /"'
 done
 for t in "${asm[@]}"; do
   par_run 'JANUS_EXAMPLES_SUMMARY="$tmp/asm-${t//\//_}" scripts/verify-asm-examples.sh -j 1 "$t" >/dev/null 2>&1 || broken+=("asm:$t")

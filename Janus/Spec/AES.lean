@@ -257,18 +257,20 @@ theorem ofElems_congr (e : Nat) {f g : Nat → Nat} : ∀ n, (∀ i, i < n → f
     simp only [ofElems]
     rw [ofElems_congr e n (fun i hi => h i (by omega)), h n (by omega)]
 
-/-- A 128-bit value is the vector of its bytes. -/
-theorem ofElems_elem (x : Nat) (hx : x < 2 ^ 128) : ofElems 8 16 (fun i => elem x 8 i) = x := by
-  apply Nat.eq_of_testBit_eq; intro j
-  have key : ∀ n, n ≤ 16 → ofElems 8 n (fun i => elem x 8 i) = x % 2 ^ (8 * n) := by
-    intro n hn
-    induction n with
+/-- A value below `2^(e·n)` is the vector of its `n` elements of `e` bits. -/
+theorem ofElems_elem_gen (e n x : Nat) (hx : x < 2 ^ (e * n)) : ofElems e n (fun i => elem x e i) = x := by
+  have key : ∀ k, ofElems e k (fun i => elem x e i) = x % 2 ^ (e * k) := by
+    intro k
+    induction k with
     | zero => simp [ofElems, Nat.mod_one]
-    | succ n ih =>
-      rw [ofElems, ih (by omega), Nat.mul_succ, Nat.pow_add, Nat.mod_mul, elem,
-        Nat.mod_eq_of_lt (Nat.mod_lt _ (Nat.two_pow_pos 8))]
-      try omega
-  rw [key 16 (by decide), Nat.mod_eq_of_lt hx]
+    | succ k ih =>
+      rw [ofElems, ih, Nat.mul_succ, Nat.pow_add, Nat.mod_mul, elem,
+        Nat.mod_eq_of_lt (Nat.mod_lt _ (Nat.two_pow_pos e)), Nat.add_comm]
+  rw [key n, Nat.mod_eq_of_lt hx]
+
+/-- A 128-bit value is the vector of its bytes. -/
+theorem ofElems_elem (x : Nat) (hx : x < 2 ^ 128) : ofElems 8 16 (fun i => elem x 8 i) = x :=
+  ofElems_elem_gen 8 16 x hx
 
 /-- Equality of 128-bit values byte by byte. -/
 theorem eq_of_bytes {x y : Nat} (hx : x < 2 ^ 128) (hy : y < 2 ^ 128)
@@ -400,5 +402,45 @@ theorem keygenAssist_eq (b imm : Nat) :
       if i = 0 then subWord (elem b 32 1) else if i = 1 then rotWord (subWord (elem b 32 1)) ^^^ imm
       else if i = 2 then subWord (elem b 32 3) else rotWord (subWord (elem b 32 3)) ^^^ imm := by
   simp only [keygenAssist, subWord_eq, rotWord_eq, subWord_lt]
+
+/-! ## A key schedule in memory -/
+
+/-- The `n` words of a key schedule stored at `xk`: word `i` is the 4 bytes at `xk + 4i` (byte
+`k` of the word at `xk + 4i + k`, FIPS-197's `w[i]` as Go's `expandKeyAsm` stores it). -/
+def schedule (m : Janus.Arm64.Memory) (xk n : Nat) : List Nat :=
+  (List.range n).map fun i => m.readLE (xk + 4 * i) 4
+
+/-- Round key `r` of a stored schedule is the 16 bytes at `xk + 16r`. -/
+theorem roundKey_schedule (m : Janus.Arm64.Memory) (xk n r : Nat) (h : 4 * r + 4 ≤ n) :
+    roundKey (schedule m xk n) r = m.readLE (xk + 16 * r) 16 := by
+  have hl : m.readLE (xk + 16 * r) 16 < 2 ^ (32 * 4) := Janus.Arm64.Memory.readLE_lt m _ 16
+  rw [← ofElems_elem_gen 32 4 _ hl, roundKey]
+  apply ofElems_congr 32 4
+  intro c hc
+  have he := Janus.Tactic.elem_readLE m (a := xk + 16 * r) (n := 16) (k := 4) (i := c) (by omega)
+  simp only [Nat.reduceMul] at he
+  rw [he, schedule, List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range (by omega)]
+  simp only [Option.map_some, Option.getD_some]
+  rw [show xk + 4 * (4 * r + c) = xk + 16 * r + 4 * c by omega]
+
+theorem length_schedule (m : Janus.Arm64.Memory) (xk n : Nat) : (schedule m xk n).length = n := by
+  simp [schedule]
+
+theorem length_expandN (nk key : Nat) : ∀ k, (expandN nk key k).length = nk + k
+  | 0 => by simp [expandN]
+  | k + 1 => by simp only [expandN, List.length_append, length_expandN nk key k, List.length_singleton]; omega
+
+theorem length_keyExpansion (nk nr key : Nat) (h : nk ≤ 4 * (nr + 1)) :
+    (keyExpansion nk nr key).length = 4 * (nr + 1) := by
+  rw [keyExpansion, length_expandN]; omega
+
+/-- A stored schedule whose words are those of `l` is `l`. -/
+theorem schedule_eq (m : Janus.Arm64.Memory) (xk n : Nat) (l : List Nat) (hl : l.length = n)
+    (h : ∀ i, i < n → m.readLE (xk + 4 * i) 4 = l.getD i 0) : schedule m xk n = l := by
+  apply List.ext_getElem (by rw [length_schedule, hl])
+  intro i h1 h2
+  rw [length_schedule] at h1
+  simp only [schedule, List.getElem_map, List.getElem_range]
+  rw [h i h1, List.getD_eq_getElem?_getD, List.getElem?_eq_getElem h2, Option.getD_some]
 
 end Janus.Spec.AES
