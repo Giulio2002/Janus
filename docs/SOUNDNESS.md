@@ -659,7 +659,7 @@ no concurrent GC, no preemption):
   (2) **the write barrier is off** for the typed-memory contracts (`WriteBarrierOff`, the flag word
   at `wb` is 0; with it on the barrier's buffer changes too, which these contracts do not state);
   (3) the inputs are readable in the model's byte-exact memory: the amd64 `memeqbody` reads up to
-  7 bytes around a short input (within its page), so on amd64 `memequal` stays an assumption,
+  7 bytes around a short input (within its page), so on amd64 `memequal` and `memequal_varlen` stay assumptions,
   while on arm64 its machine code is proved to meet the contract; (4) a `map[string]V` is keyed by
   the strings' contents (`MapStr.Access2Str`), which the hash and equality laws justify. The code
   is the runtime's: the extractor pins every one of these functions except `typehash`, whose jump

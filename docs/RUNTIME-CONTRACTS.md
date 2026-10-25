@@ -537,7 +537,8 @@ typed-memory functions is proved to meet these contracts, given the contracts of
 (`examples/proofs/Alg*.lean`, `Mbar*.lean`; amd64 `examples/proofs-amd64/Alg*/`, `Mbar*/`), and on
 arm64 `runtime.memequal` itself for every length (`AlgMemequal`). Still assumed: `memhash`,
 `memhash32`, `memhash64`, `strhash` (assembly with an AES path), `typehash`, `rand`, `memmove`,
-`memclrNoHeapPointers`, `bulkBarrierPreWrite`, `mapaccess2_faststr`, and `memequal` on amd64.
+`memclrNoHeapPointers`, `bulkBarrierPreWrite`, `mapaccess2_faststr`, and on amd64 `memequal` and
+`memequal_varlen` (both run `memeqbody`, which reads around short inputs).
 
 **Examples** (`examples/basic/rteq.go`; both ISAs): `Eq32` (`[32]byte` `==`, `memequal` executed),
 `StrEq` (`s == t`), `F64Eq` (`==` on `float64`, `+0 == -0`, NaN), `CopyTrees` (copy of a
