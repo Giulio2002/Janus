@@ -352,6 +352,16 @@ the sum), plus the two words the body reads as equations (`m.readLE stateAddr 8 
 then `ih` with the stores chained by `MemFrame.writeLE`. The closure needs no hypothesis: the
 outer function builds the funcval itself and the extractor finds the body from the code address.
 
+**Code addresses as values.** When an invariant mentions a code address as data (a saved return
+address in a frame, a closure's code pointer in a funcval), write it as
+`segAddr Extracted.program "pkg.F" + off`, never as a literal: literals break whenever the binary's
+layout moves (a new runtime function linked in shifts every later address). Before running, turn
+the terms into literals in the hypotheses the executor reads, with the kernel-checked simproc
+`reduceSegAddr` (arm64 `Janus.Tactic`, amd64 `Janus.Amd64.Tactic`):
+`simp only [mem0, reduceSegAddr, Nat.reduceAdd] at hfr`. Do not `simp` with `Extracted.entry` or
+`Extracted.segments` (their equation lemmas would be declared in the proof module, which the audit
+rejects as shadowing `Extracted`); use `segAddr` of the entry function instead.
+
 ### Recursion (`Fact`)
 
 A recursive function calls its own entry, so its `Summary` is needed while it is being proved.
