@@ -200,4 +200,90 @@ theorem hash_of_keyEq (H : HashModel) {m : Janus.Arm64.Memory} {p q h r : Nat}
   obtain ⟨hf, hl, hb⟩ := he
   exact keyHash_congr H hf hl hb
 
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+As on arm64: the model `H0`, `HashSatAmd64.f64hashCode` behind a `JMP` at `runtime.f64hash`'s
+address, `HashSatAmd64.seedCode` at `runtime.strhash`'s, and the key at `STR - 8`. -/
+
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceSatAmd64 Janus.Contracts.IfaceModel
+  Janus.Contracts.HashSatAmd64
+
+def fAddr : Nat := Extracted.program.contractAddr "runtime.f64hash"
+def sAddr : Nat := Extracted.program.contractAddr "runtime.strhash"
+def tramp : Janus.Amd64.Segment := { name := "tramp", base := fAddr, bytes := jmpBytes fAddr A0 }
+def strSeg : Janus.Amd64.Segment := { name := "strhash", base := sAddr, bytes := seedCode }
+def model0 : Janus.Amd64.Segment := { name := "model", base := A0, bytes := f64hashCode }
+def implAt : List Janus.Amd64.Segment := [tramp, strSeg, model0]
+
+theorem link_eq : Extracted.program.link implAt =
+    (Extracted.program.link [tramp, strSeg]).link [model0] := by
+  simp [Janus.Amd64.Program.link, implAt]
+
+theorem modelF (d : Nat) : HashAmd64.Fhash (Extracted.program.link implAt) fAddr H0 d binary64 8 := by
+  have hA : HashAmd64.Fhash (Extracted.program.link implAt) A0 H0 d binary64 8 := by
+    rw [link_eq]
+    exact Summary.of_codeIn64 (codeIn_link64 _ model0 (by decide)) (f64hash_impl d)
+  intro s hpc hpre
+  rw [link_eq] at hA ⊢
+  obtain ⟨r, rip, fl, xm, mem, yh, fsb, df, mx⟩ := s
+  janus_eval_nat hC : fAddr
+  simp only [hC] at hpc
+  subst hpc
+  janus64_run until [A0]
+  obtain ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
+  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+
+theorem modelS (d : Nat) : HashAmd64.Strhash (Extracted.program.link implAt) sAddr H0 d := by
+  rw [show Extracted.program.link implAt =
+    { Extracted.program with segments := Extracted.program.segments ++ implAt } from rfl]
+  intro s hpc ⟨⟨henv, hg, ⟨hal, hd1, hd2, hst, hx15, hdf, hra⟩, hout, hgo, hgp⟩, _⟩
+  janus_eval_nat hC : sAddr
+  rw [hC] at hpc
+  janus64_run
+  seed_close hdf
+
+def ret : Nat := wret
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+def k : BitVec 64 := BitVec.ofNat 64 (STR - 8)
+def h0 : BitVec 64 := 0#64
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then k
+      else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [k, h0] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by
+    intro i h; simp at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+
+theorem hpre : pre H0 64 k s0 := by
+  refine ⟨⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide,
+    by simp only [outside_cons, outside_nil, and_true]; decide⟩, wmem64_henv _, ?_, ?_,
+    by unfold GoMXCSR; decide, by decide, by decide, ?_, ?_, by decide, by decide, ?_, ?_⟩ <;>
+    simp only [window, MemAmd64.callerWindow, H0_priv, outside_cons, outside_nil, and_true] <;> decide
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (H : HashModel) (d ret : Nat) (s : State)
+    (p h : BitVec 64), H.Laws ∧
+    HashAmd64.Fhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.f64hash") H d
+      binary64 8 ∧
+    HashAmd64.Strhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.strhash") H d ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, h] s ∧ pre H d p s :=
+  ⟨implAt, H0, 64, ret, s0, k, h0, H0_laws, modelF 64, modelS 64, hret, setup, hpre⟩
+
+/-- So the guarantee is reached: the result is a possible hash of the key. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ KeyHash H0 s0.mem (STR - 8) 0 (s'.regs 0).toNat :=
+  (correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0 ret hret s0 setup hpre).mono
+    fun _ h => ⟨h.1, h.2⟩
+
+end Witness
+
 end Proof

@@ -120,4 +120,78 @@ theorem correctness (impl : List Segment) (d : Nat)
     simp only [keyEq, strEq, hf', hlq, beq_self_eq_true, Bool.true_and]
     exact hres
 
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+As on arm64: `MemSatAmd64.memequalCode` behind a `JMP` at `runtime.memequal`'s address, and the key at
+`STR - 8` compared with itself (`true`). -/
+
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceSatAmd64 Janus.Contracts.IfaceModel
+  Janus.Contracts.MemSatAmd64
+
+def cAddr : Nat := Extracted.program.contractAddr "runtime.memequal"
+def tramp : Janus.Amd64.Segment := { name := "tramp", base := cAddr, bytes := jmpBytes cAddr A0 }
+def model0 : Janus.Amd64.Segment := { name := "model", base := A0, bytes := memequalCode }
+def implAt : List Janus.Amd64.Segment := [tramp, model0]
+
+theorem link_eq : Extracted.program.link implAt = (Extracted.program.link [tramp]).link [model0] := by
+  simp [Janus.Amd64.Program.link, implAt]
+
+theorem model (d : Nat) : MemAmd64.Memequal (Extracted.program.link implAt) cAddr d := by
+  have hA : MemAmd64.Memequal (Extracted.program.link implAt) A0 d := by
+    rw [link_eq]
+    exact Summary.of_codeIn64 (codeIn_link64 _ model0 (by decide)) (memequal_impl d)
+  intro s hpc hpre
+  rw [link_eq] at hA ⊢
+  obtain ⟨r, rip, fl, xm, mem, yh, fsb, df, mx⟩ := s
+  janus_eval_nat hC : cAddr
+  simp only [hC] at hpc
+  subst hpc
+  janus64_run until [A0]
+  obtain ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩ := hpre
+  exact hA _ rfl ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩
+
+def ret : Nat := wret
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+def k : BitVec 64 := BitVec.ofNat 64 (STR - 8)
+
+def s0 : State :=
+  { regs := fun i => if i = 0 ∨ i = 3 then k
+      else if i = 4 then BitVec.ofNat 64 wsp else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := wmem64 }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [k, k] s0 :=
+  ⟨rfl, by decide, rfl, by decide, by
+    intro i h; simp at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl, rfl⟩
+
+theorem keyInput : KeyInput 64 s0 k.toNat := by
+  refine ⟨by decide, by decide, ?_, by decide, by decide, ?_⟩ <;>
+    simp only [window, MemAmd64.callerWindow, outside_cons, outside_nil, and_true] <;> decide
+
+theorem hpre : MemAmd64.CallerOK s0 64 40 8 ∧ GoMXCSR s0 ∧ KeyInput 64 s0 k.toNat ∧ KeyInput 64 s0 k.toNat :=
+  ⟨⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide,
+    by simp only [outside_cons, outside_nil, and_true]; decide⟩, by unfold GoMXCSR; decide, keyInput, keyInput⟩
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (d ret : Nat) (s : State) (p q : BitVec 64),
+    MemAmd64.Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, q] s ∧
+    (MemAmd64.CallerOK s d 40 8 ∧ GoMXCSR s ∧ KeyInput d s p.toNat ∧ KeyInput d s q.toNat) :=
+  ⟨implAt, 64, ret, s0, k, k, model 64, hret, setup, hpre⟩
+
+/-- So the guarantee is reached: the key equals itself. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
+  refine (correctness implAt 64 (model 64) k k ret hret s0 setup hpre).mono ?_
+  intro s' h
+  exact ⟨h.1, by rw [h.2]; decide⟩
+
+end Witness
+
 end Proof
