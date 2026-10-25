@@ -31,6 +31,7 @@ import Janus.Contracts.MapAmd64
 import Janus.Spec.Type
 import Janus.Spec.Panic
 import Janus.Contracts.Iface
+import Janus.Contracts.Panic
 import Janus.Contracts.IfaceAmd64
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat
