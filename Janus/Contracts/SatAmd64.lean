@@ -133,12 +133,12 @@ theorem args_zero (n j : Nat) (hn : n ≤ 16) : arg (argWords64 (wstate (args []
     · exact ih _ (by omega) _ hx
 
 /-- The return of a constant implementation as `RtPost64`. -/
-theorem rtPost_const {rt : List (Nat × Nat)} {sp : RtSpec} {s s' : State}
+theorem rtPost_const {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s' : State}
     (hrip : s'.rip = retAddrOf s) (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5)
     (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase)
     (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr) (hm : s'.mem = s.mem)
     (hq : sp.post rt (argWords64 s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 3).toNat (s'.regs 1).toNat s.mem) :
-    RtPost64 rt wstack sp s s' :=
+    RtPost64 rt stack sp s s' :=
   RtPost64.intro hrip h4 h5 h14 hx hfs hdf hmx (hm ▸ MemFrame.refl _ _) (hm ▸ hq)
 
 /-- **A contract is satisfiable** (amd64). -/

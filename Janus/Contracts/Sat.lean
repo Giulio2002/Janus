@@ -118,13 +118,13 @@ theorem argWords_args (l : List Nat) (n : Nat) (hn : n ≤ 16) (hl : ∀ x ∈ l
 /-! ## Constant implementations -/
 
 /-- The return of a constant implementation as `RtPost`. -/
-theorem rtPost_const {rt : List (Nat × Nat)} {sp : RtSpec} {s s' : State}
+theorem rtPost_const {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s' : State}
     (hsp : s'.sp = s.sp) (hpc : s'.pc = s.regs 30) (h18 : s'.regs 18 = s.regs 18)
     (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid)
     (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
     (hm : s'.mem = s.mem)
     (hq : sp.post rt (argWords s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 1).toNat (s'.regs 2).toNat s.mem) :
-    RtPost rt wstack sp s s' :=
+    RtPost rt stack sp s s' :=
   RtPost.intro hsp hpc h18 h28 h29 hdz htp hfc hfs (hm ▸ MemFrame.refl _ _) (hm ▸ hq)
 
 /-- The readiness of the zero-operand witnesses: every argument word is 0. -/
