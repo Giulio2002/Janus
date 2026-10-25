@@ -22,6 +22,12 @@ func s_cgocall()
 //go:linkname s_cgoUse runtime.cgoUse
 func s_cgoUse()
 
+//go:linkname s_checkptrAlignment runtime.checkptrAlignment
+func s_checkptrAlignment()
+
+//go:linkname s_checkptrArithmetic runtime.checkptrArithmetic
+func s_checkptrArithmetic()
+
 //go:linkname s_convT runtime.convT
 func s_convT()
 
@@ -106,6 +112,204 @@ func s_ifaceeq()
 //go:linkname s_interfaceSwitch runtime.interfaceSwitch
 func s_interfaceSwitch()
 
+//go:linkname s_mallocgcSmallNoScanSC10 runtime.mallocgcSmallNoScanSC10
+func s_mallocgcSmallNoScanSC10()
+
+//go:linkname s_mallocgcSmallNoScanSC11 runtime.mallocgcSmallNoScanSC11
+func s_mallocgcSmallNoScanSC11()
+
+//go:linkname s_mallocgcSmallNoScanSC12 runtime.mallocgcSmallNoScanSC12
+func s_mallocgcSmallNoScanSC12()
+
+//go:linkname s_mallocgcSmallNoScanSC13 runtime.mallocgcSmallNoScanSC13
+func s_mallocgcSmallNoScanSC13()
+
+//go:linkname s_mallocgcSmallNoScanSC14 runtime.mallocgcSmallNoScanSC14
+func s_mallocgcSmallNoScanSC14()
+
+//go:linkname s_mallocgcSmallNoScanSC15 runtime.mallocgcSmallNoScanSC15
+func s_mallocgcSmallNoScanSC15()
+
+//go:linkname s_mallocgcSmallNoScanSC16 runtime.mallocgcSmallNoScanSC16
+func s_mallocgcSmallNoScanSC16()
+
+//go:linkname s_mallocgcSmallNoScanSC17 runtime.mallocgcSmallNoScanSC17
+func s_mallocgcSmallNoScanSC17()
+
+//go:linkname s_mallocgcSmallNoScanSC18 runtime.mallocgcSmallNoScanSC18
+func s_mallocgcSmallNoScanSC18()
+
+//go:linkname s_mallocgcSmallNoScanSC19 runtime.mallocgcSmallNoScanSC19
+func s_mallocgcSmallNoScanSC19()
+
+//go:linkname s_mallocgcSmallNoScanSC2 runtime.mallocgcSmallNoScanSC2
+func s_mallocgcSmallNoScanSC2()
+
+//go:linkname s_mallocgcSmallNoScanSC20 runtime.mallocgcSmallNoScanSC20
+func s_mallocgcSmallNoScanSC20()
+
+//go:linkname s_mallocgcSmallNoScanSC21 runtime.mallocgcSmallNoScanSC21
+func s_mallocgcSmallNoScanSC21()
+
+//go:linkname s_mallocgcSmallNoScanSC22 runtime.mallocgcSmallNoScanSC22
+func s_mallocgcSmallNoScanSC22()
+
+//go:linkname s_mallocgcSmallNoScanSC23 runtime.mallocgcSmallNoScanSC23
+func s_mallocgcSmallNoScanSC23()
+
+//go:linkname s_mallocgcSmallNoScanSC24 runtime.mallocgcSmallNoScanSC24
+func s_mallocgcSmallNoScanSC24()
+
+//go:linkname s_mallocgcSmallNoScanSC25 runtime.mallocgcSmallNoScanSC25
+func s_mallocgcSmallNoScanSC25()
+
+//go:linkname s_mallocgcSmallNoScanSC26 runtime.mallocgcSmallNoScanSC26
+func s_mallocgcSmallNoScanSC26()
+
+//go:linkname s_mallocgcSmallNoScanSC3 runtime.mallocgcSmallNoScanSC3
+func s_mallocgcSmallNoScanSC3()
+
+//go:linkname s_mallocgcSmallNoScanSC4 runtime.mallocgcSmallNoScanSC4
+func s_mallocgcSmallNoScanSC4()
+
+//go:linkname s_mallocgcSmallNoScanSC5 runtime.mallocgcSmallNoScanSC5
+func s_mallocgcSmallNoScanSC5()
+
+//go:linkname s_mallocgcSmallNoScanSC6 runtime.mallocgcSmallNoScanSC6
+func s_mallocgcSmallNoScanSC6()
+
+//go:linkname s_mallocgcSmallNoScanSC7 runtime.mallocgcSmallNoScanSC7
+func s_mallocgcSmallNoScanSC7()
+
+//go:linkname s_mallocgcSmallNoScanSC8 runtime.mallocgcSmallNoScanSC8
+func s_mallocgcSmallNoScanSC8()
+
+//go:linkname s_mallocgcSmallNoScanSC9 runtime.mallocgcSmallNoScanSC9
+func s_mallocgcSmallNoScanSC9()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC1 runtime.mallocgcSmallScanNoHeaderSC1
+func s_mallocgcSmallScanNoHeaderSC1()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC10 runtime.mallocgcSmallScanNoHeaderSC10
+func s_mallocgcSmallScanNoHeaderSC10()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC11 runtime.mallocgcSmallScanNoHeaderSC11
+func s_mallocgcSmallScanNoHeaderSC11()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC12 runtime.mallocgcSmallScanNoHeaderSC12
+func s_mallocgcSmallScanNoHeaderSC12()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC13 runtime.mallocgcSmallScanNoHeaderSC13
+func s_mallocgcSmallScanNoHeaderSC13()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC14 runtime.mallocgcSmallScanNoHeaderSC14
+func s_mallocgcSmallScanNoHeaderSC14()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC15 runtime.mallocgcSmallScanNoHeaderSC15
+func s_mallocgcSmallScanNoHeaderSC15()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC16 runtime.mallocgcSmallScanNoHeaderSC16
+func s_mallocgcSmallScanNoHeaderSC16()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC17 runtime.mallocgcSmallScanNoHeaderSC17
+func s_mallocgcSmallScanNoHeaderSC17()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC18 runtime.mallocgcSmallScanNoHeaderSC18
+func s_mallocgcSmallScanNoHeaderSC18()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC19 runtime.mallocgcSmallScanNoHeaderSC19
+func s_mallocgcSmallScanNoHeaderSC19()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC2 runtime.mallocgcSmallScanNoHeaderSC2
+func s_mallocgcSmallScanNoHeaderSC2()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC20 runtime.mallocgcSmallScanNoHeaderSC20
+func s_mallocgcSmallScanNoHeaderSC20()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC21 runtime.mallocgcSmallScanNoHeaderSC21
+func s_mallocgcSmallScanNoHeaderSC21()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC22 runtime.mallocgcSmallScanNoHeaderSC22
+func s_mallocgcSmallScanNoHeaderSC22()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC23 runtime.mallocgcSmallScanNoHeaderSC23
+func s_mallocgcSmallScanNoHeaderSC23()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC24 runtime.mallocgcSmallScanNoHeaderSC24
+func s_mallocgcSmallScanNoHeaderSC24()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC25 runtime.mallocgcSmallScanNoHeaderSC25
+func s_mallocgcSmallScanNoHeaderSC25()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC26 runtime.mallocgcSmallScanNoHeaderSC26
+func s_mallocgcSmallScanNoHeaderSC26()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC3 runtime.mallocgcSmallScanNoHeaderSC3
+func s_mallocgcSmallScanNoHeaderSC3()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC4 runtime.mallocgcSmallScanNoHeaderSC4
+func s_mallocgcSmallScanNoHeaderSC4()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC5 runtime.mallocgcSmallScanNoHeaderSC5
+func s_mallocgcSmallScanNoHeaderSC5()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC6 runtime.mallocgcSmallScanNoHeaderSC6
+func s_mallocgcSmallScanNoHeaderSC6()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC7 runtime.mallocgcSmallScanNoHeaderSC7
+func s_mallocgcSmallScanNoHeaderSC7()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC8 runtime.mallocgcSmallScanNoHeaderSC8
+func s_mallocgcSmallScanNoHeaderSC8()
+
+//go:linkname s_mallocgcSmallScanNoHeaderSC9 runtime.mallocgcSmallScanNoHeaderSC9
+func s_mallocgcSmallScanNoHeaderSC9()
+
+//go:linkname s_mallocgcTinySize1 runtime.mallocgcTinySize1
+func s_mallocgcTinySize1()
+
+//go:linkname s_mallocgcTinySize10 runtime.mallocgcTinySize10
+func s_mallocgcTinySize10()
+
+//go:linkname s_mallocgcTinySize11 runtime.mallocgcTinySize11
+func s_mallocgcTinySize11()
+
+//go:linkname s_mallocgcTinySize12 runtime.mallocgcTinySize12
+func s_mallocgcTinySize12()
+
+//go:linkname s_mallocgcTinySize13 runtime.mallocgcTinySize13
+func s_mallocgcTinySize13()
+
+//go:linkname s_mallocgcTinySize14 runtime.mallocgcTinySize14
+func s_mallocgcTinySize14()
+
+//go:linkname s_mallocgcTinySize15 runtime.mallocgcTinySize15
+func s_mallocgcTinySize15()
+
+//go:linkname s_mallocgcTinySize2 runtime.mallocgcTinySize2
+func s_mallocgcTinySize2()
+
+//go:linkname s_mallocgcTinySize3 runtime.mallocgcTinySize3
+func s_mallocgcTinySize3()
+
+//go:linkname s_mallocgcTinySize4 runtime.mallocgcTinySize4
+func s_mallocgcTinySize4()
+
+//go:linkname s_mallocgcTinySize5 runtime.mallocgcTinySize5
+func s_mallocgcTinySize5()
+
+//go:linkname s_mallocgcTinySize6 runtime.mallocgcTinySize6
+func s_mallocgcTinySize6()
+
+//go:linkname s_mallocgcTinySize7 runtime.mallocgcTinySize7
+func s_mallocgcTinySize7()
+
+//go:linkname s_mallocgcTinySize8 runtime.mallocgcTinySize8
+func s_mallocgcTinySize8()
+
+//go:linkname s_mallocgcTinySize9 runtime.mallocgcTinySize9
+func s_mallocgcTinySize9()
+
 //go:linkname s_panicBounds32 runtime.panicBounds32
 func s_panicBounds32()
 
@@ -183,6 +387,8 @@ var keep = []func(){
 	s_assertE2I2,
 	s_cgocall,
 	s_cgoUse,
+	s_checkptrAlignment,
+	s_checkptrArithmetic,
 	s_convT,
 	s_convT16,
 	s_convT32,
@@ -211,6 +417,72 @@ var keep = []func(){
 	s_goPanicSliceConvert,
 	s_ifaceeq,
 	s_interfaceSwitch,
+	s_mallocgcSmallNoScanSC10,
+	s_mallocgcSmallNoScanSC11,
+	s_mallocgcSmallNoScanSC12,
+	s_mallocgcSmallNoScanSC13,
+	s_mallocgcSmallNoScanSC14,
+	s_mallocgcSmallNoScanSC15,
+	s_mallocgcSmallNoScanSC16,
+	s_mallocgcSmallNoScanSC17,
+	s_mallocgcSmallNoScanSC18,
+	s_mallocgcSmallNoScanSC19,
+	s_mallocgcSmallNoScanSC2,
+	s_mallocgcSmallNoScanSC20,
+	s_mallocgcSmallNoScanSC21,
+	s_mallocgcSmallNoScanSC22,
+	s_mallocgcSmallNoScanSC23,
+	s_mallocgcSmallNoScanSC24,
+	s_mallocgcSmallNoScanSC25,
+	s_mallocgcSmallNoScanSC26,
+	s_mallocgcSmallNoScanSC3,
+	s_mallocgcSmallNoScanSC4,
+	s_mallocgcSmallNoScanSC5,
+	s_mallocgcSmallNoScanSC6,
+	s_mallocgcSmallNoScanSC7,
+	s_mallocgcSmallNoScanSC8,
+	s_mallocgcSmallNoScanSC9,
+	s_mallocgcSmallScanNoHeaderSC1,
+	s_mallocgcSmallScanNoHeaderSC10,
+	s_mallocgcSmallScanNoHeaderSC11,
+	s_mallocgcSmallScanNoHeaderSC12,
+	s_mallocgcSmallScanNoHeaderSC13,
+	s_mallocgcSmallScanNoHeaderSC14,
+	s_mallocgcSmallScanNoHeaderSC15,
+	s_mallocgcSmallScanNoHeaderSC16,
+	s_mallocgcSmallScanNoHeaderSC17,
+	s_mallocgcSmallScanNoHeaderSC18,
+	s_mallocgcSmallScanNoHeaderSC19,
+	s_mallocgcSmallScanNoHeaderSC2,
+	s_mallocgcSmallScanNoHeaderSC20,
+	s_mallocgcSmallScanNoHeaderSC21,
+	s_mallocgcSmallScanNoHeaderSC22,
+	s_mallocgcSmallScanNoHeaderSC23,
+	s_mallocgcSmallScanNoHeaderSC24,
+	s_mallocgcSmallScanNoHeaderSC25,
+	s_mallocgcSmallScanNoHeaderSC26,
+	s_mallocgcSmallScanNoHeaderSC3,
+	s_mallocgcSmallScanNoHeaderSC4,
+	s_mallocgcSmallScanNoHeaderSC5,
+	s_mallocgcSmallScanNoHeaderSC6,
+	s_mallocgcSmallScanNoHeaderSC7,
+	s_mallocgcSmallScanNoHeaderSC8,
+	s_mallocgcSmallScanNoHeaderSC9,
+	s_mallocgcTinySize1,
+	s_mallocgcTinySize10,
+	s_mallocgcTinySize11,
+	s_mallocgcTinySize12,
+	s_mallocgcTinySize13,
+	s_mallocgcTinySize14,
+	s_mallocgcTinySize15,
+	s_mallocgcTinySize2,
+	s_mallocgcTinySize3,
+	s_mallocgcTinySize4,
+	s_mallocgcTinySize5,
+	s_mallocgcTinySize6,
+	s_mallocgcTinySize7,
+	s_mallocgcTinySize8,
+	s_mallocgcTinySize9,
 	s_panicBounds32,
 	s_panicBounds32X,
 	s_panicBounds64,

@@ -129,10 +129,13 @@ func TestContractStubNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runtimeContractStubs) != 13 {
-		t.Errorf("%d interface contract stubs, want 13", len(runtimeContractStubs))
+	if len(runtimeContractStubs) != 13+len(rtmiscContractStubs) {
+		t.Errorf("%d contract stubs, want 13 interface ones and %d rtmisc ones", len(runtimeContractStubs), len(rtmiscContractStubs))
 	}
 	for name := range runtimeContractStubs {
+		if rtmiscContractStubs[name] {
+			continue // checked by TestRtmiscContractStubNames
+		}
 		if !strings.Contains(string(src), "//go:linkname s_"+strings.TrimPrefix(name, "runtime.")+" "+name+"\n") {
 			t.Errorf("scripts/stubpins does not link %s", name)
 		}

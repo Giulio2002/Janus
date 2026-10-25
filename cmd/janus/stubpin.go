@@ -476,7 +476,7 @@ func (b *Binary) checkContractPin(g Func) error {
 	}
 	if err := b.checkStubPin(g, map[uint64]bool{}); err != nil {
 		return &diag{
-			Msg: fmt.Sprintf("--contract names %s at 0x%x, but that function is not the Go runtime's %s: %v. The interface contracts (Janus/Contracts/Iface.lean) state what the runtime's function does, so Janus leaves out only the runtime's code (pinned like a stub, docs/SOUNDNESS.md)",
+			Msg: fmt.Sprintf("--contract names %s at 0x%x, but that function is not the Go runtime's %s: %v. The framework contracts (Janus/Contracts/Iface.lean, InstrumentCalls.lean, MallocSC.lean) state what the runtime's function does, so Janus leaves out only the runtime's code (pinned like a stub, docs/SOUNDNESS.md)",
 				g.Name, g.Addr, g.Name, err),
 			Stage: "code extraction",
 			Next:  "If the binary was built by a Go toolchain Janus does not pin yet (" + stubPinToolchains + "), add it to scripts/gen-stubpins.sh and regenerate cmd/janus/stubpins_gen.go; otherwise remove the function that reuses a runtime function's name.",
