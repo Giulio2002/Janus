@@ -59,6 +59,8 @@ type verifiedReport struct {
 	BinarySha256      string         `json:"binarySha256"`
 	Symbol            string         `json:"symbol"`
 	Address           string         `json:"address"`
+	EntryABI          string         `json:"entryABI,omitempty"`    // identity.json entryABI (abi0.go)
+	EntrySource       string         `json:"entrySource,omitempty"` // identity.json entrySource
 	GoVersion         string         `json:"goVersion"`
 	MainModule        string         `json:"mainModule"`
 	LeanVersion       string         `json:"leanVersion"`
@@ -276,6 +278,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	if !strings.Contains(r.Statement, "Extracted.") {
 		fmt.Fprintln(stderr, "Warning: the statement does not mention any Extracted definition; it says nothing about the extracted code.")
 	}
+	if w := abiMismatch(r.Statement, statementABI(r.Symbol, r.EntryABI)); w != "" {
+		fmt.Fprintln(stderr, w)
+	}
 	// The ASL stage failed: the report (with the verified theorem) is written; exit 1.
 	return aslDiagOf(r.ASL)
 }
@@ -323,7 +328,11 @@ func writeReport(reportPath string, r *verifiedReport) error {
 func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 	fmt.Fprintf(stdout, "Verified: %s\n", termSafe(r.Theorem))
 	fmt.Fprintf(stdout, "  Module: %s (%s)\n", r.MainModule, r.GoVersion)
-	fmt.Fprintf(stdout, "  Entry: %s at %s\n", r.Symbol, r.Address)
+	if desc := describeEntry(r.EntryABI, r.EntrySource); desc != "" {
+		fmt.Fprintf(stdout, "  Entry: %s at %s (%s)\n", r.Symbol, r.Address, desc)
+	} else {
+		fmt.Fprintf(stdout, "  Entry: %s at %s\n", r.Symbol, r.Address)
+	}
 	fmt.Fprintf(stdout, "  Binary: %s (SHA-256 %s)\n", displayPath(resolveBinary(outdir, r.Binary)), r.BinarySha256)
 	fmt.Fprintf(stdout, "  Proof: %s\n", displayPath(resolveBinary(outdir, r.Proof)))
 	if c := r.Consumer; c != nil {
@@ -524,6 +533,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		if asl, err = buildASLFor(fw, aslRoot, lake, stderr); err != nil {
 			return nil, err
 		}
+		defer asl.release()
 	}
 	tm.mark("toolchain lookup")
 	janusLibDir := filepath.Join(root, ".lake", "build", "lib", "lean")
@@ -825,6 +835,8 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		BinarySha256:      cr.Identity.BinarySha256,
 		Symbol:            cr.Identity.Symbol,
 		Address:           cr.Identity.Address,
+		EntryABI:          cr.Identity.EntryABI,
+		EntrySource:       cr.Identity.EntrySource,
 		GoVersion:         cr.Identity.GoVersion,
 		MainModule:        cr.Identity.MainModule,
 		LeanVersion:       tc.version,

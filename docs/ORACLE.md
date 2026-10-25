@@ -20,12 +20,23 @@ Results land in `artifacts/oracle/` (override with `OUT=`):
 |---|---|
 | `summary.md` | per-class table, model-gap breakdown, every mismatch group with examples |
 | `repro.md`, `repro.jsonl` | minimised reproductions of every mismatching word (only written if there are mismatches) |
-| `verdicts.jsonl` | one verdict per case (`agree` / `model-gap` / `MISMATCH` / ...) with diffs |
-| `cases.jsonl`, `hw.jsonl`, `model.jsonl` | the inputs and both sides' raw outputs |
+| `verdicts.jsonl.zst` | one verdict per case (`agree` / `model-gap` / `MISMATCH` / ...) with diffs |
+| `mismatches.jsonl` | the `MISMATCH` verdicts, uncompressed (only written if there are mismatches) |
+| `cases.jsonl.zst`, `hw.jsonl.zst`, `model.jsonl.zst` | the inputs and both sides' raw outputs |
+
+A full run writes several GB of JSON lines. When the script ends (however it ends) it keeps the
+summaries and compresses the dumps with zstd (`zstd -dc verdicts.jsonl.zst | …` reads one;
+`scripts/lib/artifacts.sh`); `gen.jsonl` and `harvest.jsonl`, whose union is `cases.jsonl`, are
+removed. `KEEP=zst` compresses those too, `KEEP=1` keeps every file raw, as before. The drivers
+that read the corpus (`scripts/oracle-sail.sh`, `scripts/asl.sh check`, `scripts/x86formal.sh
+check`, `oracle-amd64-formal/compare.py`, `JanusASL/tools/evidence.py`) accept the compressed
+files.
 
 Knobs: `JOBS`, `N` (words per generated class), `K` (states per harvested word), `PER_CLASS`
 (harvested distinct words per class), `SEED`, `QEMU` (set `QEMU=` on an arm64 host to run
-the runner natively). After a model change you can skip the native side:
+the runner natively). After a model change you can skip the native side (it reads `hw.jsonl`
+from the output directory, so decompress the corpus first:
+`zstd -d artifacts/oracle/{cases,hw}.jsonl.zst`):
 `oracle/bin/oracle run -reuse-native -out artifacts/oracle -cases artifacts/oracle/cases.jsonl`.
 
 Single pieces, all in `oracle/` (a separate Go module) and `Oracle/Main.lean`:
@@ -175,6 +186,68 @@ registers, `FPCR`/`FPSR` and memory are unchanged, and execution continues at `p
 | `reserved`: agree, both fault (`SIGILL` / `undecodable`, the rest of the space) | 1,846 |
 | `sys.env`: agree with the contract frame (`CNTVCT_EL0` 1,077, `CNTFRQ_EL0` 1,083, `MIDR_EL1` 1,129, `DIT` 1,012, `MSR DIT` 1,331) | 5,632 |
 | `sys.env`: model-gap (`MSR DIT, #imm` with `CRm ≥ 2`, rejected) | 1,868 |
+
+## Results with the crypto extension, CRC32 and permutes (2026-10-25, `scripts/oracle.sh crypto`, qemu 10.2.1 `-cpu max`)
+
+The crypto corpus (`OUT=artifacts/oracle-crypto JOBS=8 scripts/oracle.sh crypto`, defaults
+`N=20000`, `CRYPTO_HARVEST_K=40`, `SEQ_N=10000`, `SEQ_WINDOWS=20000`):
+
+* **generated** (`gen/<class>`): the classes of `oracle/gen/crypto.go`, each the whole encoding
+  group of the A64 tables (so its unallocated and UNDEFINED neighbours are classified with it):
+  `crypto.sha3reg` (SHA1C/P/M/SU0, SHA256H/H2/SU1), `crypto.sha2reg` (SHA1H/SU1, SHA256SU0),
+  `crypto.sha512` (SHA512H/H2/SU0/SU1, RAX1, and the SM3PARTW/SM4 neighbours), `crypto.sha3`
+  (EOR3, BCAX, XAR, SM3SS1), `simd.pmull`, `simd.permute` (ZIP/UZP/TRN), `simd.dupscalar`,
+  `dpr.crc32`, plus `simd.aes`, `simd.ext` and `simd.tbl`. A quarter of each class's words are
+  fully random below its fixed bits; the rest come from targeted generators (allocated opcodes,
+  edge `imm6` values, the reserved sizes).
+* **harvested** (`harvest/<class>`): every distinct word of these classes in the `go test -c`
+  binaries of `crypto/sha1`, `crypto/sha256`, `crypto/sha512`, `crypto/sha3`, `crypto/cipher`
+  (AES-GCM), `hash/crc32` and `crypto/tls` (chacha20), each under 40 random states.
+* **sequence mode** (`seq/<family>`, new): straight-line blocks laid out from `TestPC` that the
+  runner executes in one go (falling through to the `UDF` after the last word) and `janus-oracle`
+  steps word by word, comparing the final state. `oracle seqgen` writes synthetic chains of 2–12
+  instructions over a small register pool per family (`sha1`, `sha256`, `sha512`, `sha3`,
+  `ghash`, `crc32`, `permute`), so each instruction consumes what an earlier one produced, and
+  `seq/harvest`: windows of 2–16 consecutive non-branch, non-memory words of the real crypto
+  kernels (symbols matching `crypto/`, `hash/crc32`, `vendor/golang.org/x/crypto/`), each under
+  4 states. Case field `words` (`oracle/layout/layout.go`); the format is the one of
+  `audit/rt-model`'s sequence oracle. `scripts/oracle.sh full` now also runs a smaller sequence
+  corpus (`SEQ_N=500`, `SEQ_WINDOWS=2000`).
+
+389,440 cases: **0 MISMATCH**, 385,790 agree (40,278 of them both faulting), 3,650 model-gap, 0
+unobserved. Every gap is `undecodable` SM3/SM4 (`sm3ss1` 1,375, `sm4e` 820, `sm3partw2` 498,
+`sm4ekey` 495, `sm3partw1` 462), which the model does not implement and qemu does.
+
+| class | cases | agree | of which both fault | model-gap | MISMATCH |
+|---|---:|---:|---:|---:|---:|
+| gen/crypto.sha2reg | 20,000 | 20,000 | 6,695 | 0 | 0 |
+| gen/crypto.sha3 | 20,000 | 18,625 | 1,337 | 1,375 | 0 |
+| gen/crypto.sha3reg | 20,000 | 20,000 | 5,453 | 0 | 0 |
+| gen/crypto.sha512 | 20,000 | 17,725 | 2,220 | 2,275 | 0 |
+| gen/dpr.crc32 | 20,000 | 20,000 | 3,310 | 0 | 0 |
+| gen/simd.aes | 17,538 | 17,538 | 0 | 0 | 0 |
+| gen/simd.dupscalar | 20,000 | 20,000 | 6,448 | 0 | 0 |
+| gen/simd.ext | 20,000 | 20,000 | 5,006 | 0 | 0 |
+| gen/simd.permute | 20,000 | 20,000 | 3,890 | 0 | 0 |
+| gen/simd.pmull | 20,000 | 20,000 | 3,457 | 0 | 0 |
+| gen/simd.tbl | 20,000 | 20,000 | 0 | 0 | 0 |
+| gen/simd.other (AES-group neighbours) | 2,462 | 2,462 | 2,462 | 0 | 0 |
+| harvest (11 classes, 486 distinct words × 40 states) | 19,440 | 19,440 | 0 | 0 | 0 |
+| seq/crc32, ghash, permute, sha1, sha256, sha3, sha512 | 70,000 | 70,000 | 0 | 0 | 0 |
+| seq/harvest (real kernel windows) | 80,000 | 80,000 | 0 | 0 | 0 |
+| **total** | 389,440 | 385,790 | 40,278 | 3,650 | **0** |
+
+The whole-ISA regression with the crypto model (`scripts/oracle.sh full`, `SEED=1`, default
+knobs; the harvest now includes the crypto test binaries and the run includes 11,500 sequence
+cases): 867,719 cases, **0 MISMATCH**, 832,639 agree, 35,079 model-gap (34,572 `undecodable`,
+354 `unaligned`, 106 `noCode`, 47 `outsideAllocation`), 1 unobserved.
+
+The model was right the first time on this corpus. Independently of qemu and Sail,
+`JanusTests/Crypto.lean` checks the operations against the standards' test vectors (kernel
+evaluation): SHA-1("abc") and SHA-256("abc") of FIPS 180-4 computed with SHA1C/P/M/H/SU0/SU1 and
+SHA256H/H2/SU0/SU1 the way Go's kernels compose them, the CRC-32 and CRC-32C check values of
+"123456789" with CRC32B/H/W/X and CRC32CB/CX, and PMULL/PMULL2 against independently computed
+carry-less products.
 
 ## Results with scalar floating point (2026-10-24, `scripts/oracle.sh fp`, qemu 10.2.1 `-cpu max`)
 

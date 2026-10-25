@@ -220,7 +220,7 @@ example : decode 0xd503207f = none := by decide   -- wfi
 example : decode 0xd503271f = none := by decide   -- hint #0x38 (unallocated hint)
 example : decode 0xd65f0bff = none := by decide   -- retaa
 example : decode 0x54000010 = none := by decide   -- bc.eq (FEAT_HBC)
-example : decode 0x9ac04c00 = none := by decide   -- crc32x w0, w0, x0
+example : decode 0x9ac04c00 = some (.crypto (.crc32 true 0 false 3 0 0)) := by decide   -- crc32x w0, w0, x0 (Janus.Arm64.DecodeCrypto)
 example : decode (2 ^ 32 + 0x8b010000) = none := by decide   -- not a 32-bit word
 
 /-! ## Rejected: reserved / unallocated / UNDEFINED / CONSTRAINED UNPREDICTABLE -/

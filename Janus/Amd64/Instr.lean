@@ -85,13 +85,19 @@ deriving Repr, DecidableEq, Inhabited
 
 /-- Packed-integer / bitwise vector operation with a register destination: `XORPS`/`XORPD`/
 `PXOR`/`VPXOR` (`xor`), `PAND`/`VPAND`, `POR`/`VPOR`, `PCMPEQB`/`VPCMPEQB` (each byte `0xFF` if
-equal, else `0`) and `PUNPCKLBW` (legacy only: interleave the low 8 bytes, destination first). -/
+equal, else `0`), `PUNPCKLBW` (legacy only: interleave the low 8 bytes, destination first),
+and the SSSE3 byte operations (legacy only): `PSHUFB` (byte `i` of the result is `0` if bit 7
+of byte `i` of the source is set, else byte `src[i] & 15` of the destination, in each 128-bit
+lane) and `PSIGNB` (byte `i` of the destination negated, zeroed or kept as byte `i` of the
+source is negative, zero or positive). -/
 inductive SseOp where
   | xor
   | and
   | or
   | pcmpeqb
   | punpcklbw
+  | pshufb
+  | psignb
 deriving Repr, DecidableEq, Inhabited
 
 /-- SSE scalar floating-point arithmetic (`ADDSD SUBSD MULSD DIVSD MINSD MAXSD SQRTSD` and
@@ -176,7 +182,7 @@ inductive Instr where
   /-- 128-bit SSE move (`MOVUPS/MOVUPD/MOVDQU`, or with `aligned` `MOVAPS/MOVAPD/MOVDQA`,
   which fault on a memory operand that is not 16-byte aligned). -/
   | sseMov (aligned : Bool) (dst src : XLoc)
-  /-- `XORPS/XORPD/PXOR/PAND/POR/PCMPEQB/PUNPCKLBW xmm, xmm/m128` (legacy SSE: a memory operand
+  /-- `XORPS/XORPD/PXOR/PAND/POR/PCMPEQB/PUNPCKLBW/PSHUFB/PSIGNB xmm, xmm/m128` (legacy SSE: a memory operand
   must be 16-aligned; bits 255:128 of the destination are preserved). -/
   | sseOp (op : SseOp) (dst : Nat) (src : XLoc)
   /-- `PSHUFD xmm, xmm/m128, imm8` (legacy SSE, aligned memory operand): dword `i` of the
@@ -255,6 +261,43 @@ inductive Instr where
   /-- `ANDPS/ANDPD` (`op = 0`), `ANDNPS/ANDNPD` (`1`: `NOT dst AND src`), `ORPS/ORPD` (`2`) on
   128 bits (legacy SSE: a memory operand must be 16-byte aligned). -/
   | fpLogic (op : Nat) (dst : Nat) (src : XLoc)
+  -- BMI1 / BMI2 (VEX-encoded general-purpose instructions; `w ∈ {32, 64}` from `VEX.W`)
+  /-- `ANDN dst, src1, src2`: `dst ← NOT src1 AND src2` (`src1` is `VEX.vvvv`); `SF ZF` from the
+  result, `CF OF` cleared, `AF PF` undefined. -/
+  | andn (w : Nat) (dst src1 : Nat) (src2 : Loc)
+  /-- `BLSR` (`op = 1`, `dst ← (src - 1) AND src`), `BLSMSK` (`2`, `dst ← (src - 1) XOR src`),
+  `BLSI` (`3`, `dst ← -src AND src`); `dst` is `VEX.vvvv`, `op` the ModRM `reg` field. -/
+  | blsx (op : Nat) (w : Nat) (dst : Nat) (src : Loc)
+  /-- `BEXTR dst, src, ctl`: the `ctl[15:8]` bits of `src` from bit `ctl[7:0]` on (both up to
+  255; bits past the operand are 0); `ZF` from the result, `CF OF` cleared, `AF SF PF`
+  undefined. `ctl` is `VEX.vvvv`. -/
+  | bextr (w : Nat) (dst : Nat) (src : Loc) (ctl : Nat)
+  /-- `BZHI dst, src, idx`: `src` with the bits from `n = idx[7:0]` up cleared (if `n < w`);
+  `CF = (n ≥ w)`, `SF ZF` from the result, `OF` cleared, `AF PF` undefined. -/
+  | bzhi (w : Nat) (dst : Nat) (src : Loc) (idx : Nat)
+  /-- `SHLX`/`SHRX`/`SARX dst, src, cnt` (`op ∈ {shl, shr, sar}`): the shift by
+  `cnt` (`VEX.vvvv`) masked to 5 (6 for `w = 64`) bits; flags unaffected. -/
+  | shiftx (op : ShOp) (w : Nat) (dst : Nat) (src : Loc) (cnt : Nat)
+  /-- `RORX dst, src, imm8`: rotate right by `imm8` masked to 5 (6) bits; flags unaffected. -/
+  | rorx (w : Nat) (dst : Nat) (src : Loc) (imm : Nat)
+  /-- `MULX hi, lo, src`: the unsigned product `rDX * src`; `lo` (`VEX.vvvv`) gets the low half,
+  then `hi` (ModRM `reg`) the high half (so `hi = lo` holds the high half); flags unaffected. -/
+  | mulx (w : Nat) (hi lo : Nat) (src : Loc)
+  /-- `PDEP dst, src, mask`: the low bits of `src` (`VEX.vvvv`) deposited at the set bits of
+  `mask`; flags unaffected. -/
+  | pdep (w : Nat) (dst src : Nat) (mask : Loc)
+  /-- `PEXT dst, src, mask`: the bits of `src` (`VEX.vvvv`) at the set bits of `mask`, packed to
+  the low end; flags unaffected. -/
+  | pext (w : Nat) (dst src : Nat) (mask : Loc)
+  /-- `MOVBE dst, src` (`0F 38 F0`: register from memory, `0F 38 F1`: memory from register):
+  a move with the bytes reversed, `w ∈ {16, 32, 64}`; flags unaffected. -/
+  | movbe (w : Nat) (dst src : Loc)
+  /-- FMA3 scalar `VFMADD`/`VFMSUB`/`VFNMADD`/`VFNMSUB` `132`/`213`/`231` `SD` (`w = 64`) /
+  `SS` (`w = 32`) `dst, src2, src3`, `form ∈ {132, 213, 231}`: the multiplicands and addend are
+  `(dst, src3; src2)`, `(src2, dst; src3)`, `(src2, src3; dst)`; the product is negated when
+  `negP`, the addend when `negC`, and the sum rounded once (`FP.fma`). The low `w` bits of
+  `XMM[dst]` get the result, bits 127:`w` are kept and bits 255:128 zeroed (VEX). -/
+  | vfmas (w : Nat) (form : Nat) (negP negC : Bool) (dst src2 : Nat) (src3 : XLoc)
   /-- A `LOCK`ed read-modify-write, or `XCHG` with a memory operand (locked implicitly):
   executes `i`, but first faults (`misaligned`) unless its memory operand (`size` bytes at `a`)
   is naturally aligned, so that the locked access never splits a cache line (Linux with

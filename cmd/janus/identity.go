@@ -91,6 +91,8 @@ type Identity struct {
 	Symbol           string         `json:"symbol"`
 	Address          string         `json:"address"`
 	Size             uint64         `json:"size"`
+	EntryABI         string         `json:"entryABI,omitempty"`    // "ABI0"/"ABIInternal" for Go assembly and ABI wrappers (abi0.go); omitted for Go code
+	EntrySource      string         `json:"entrySource,omitempty"` // "assembly" or "abi-wrapper" (informational, docs/ABI0.md)
 	MaxFunctions     int            `json:"maxFunctions"`
 	Functions        []identityFunc `json:"functions"`
 	Stubs            []identityStub `json:"stubs"`
@@ -165,6 +167,7 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 		Extracted:        "Extracted.lean",
 		ExtractedSha256:  sha256Hex(x.Lean),
 	}
+	id.EntryABI, id.EntrySource = entryABI(x.Bin, x.Entry)
 	for _, s := range x.Segments {
 		id.Functions = append(id.Functions, identityFunc{s.Name, hex0x(s.Base), s.Size, len(s.Words), len(s.Bytes)})
 	}

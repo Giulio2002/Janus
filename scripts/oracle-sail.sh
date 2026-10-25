@@ -19,10 +19,16 @@
 #   JOBS      parallelism (default nproc)
 #   DEPS      where pinned external sources/toolchains live (default /srv/janus-sail-deps)
 #   SAIL_MODEL  vendored | regen  (which model.cpp to build against; default vendored)
+#   KEEP      what `run` leaves in OUT (scripts/lib/artifacts.sh): by default the reports, the
+#             compressed corpus, results and verdicts, the MISMATCH verdicts; the per-comparison
+#             copies of the corpus and the derived dumps are removed. KEEP=zst compresses
+#             everything, KEEP=1 keeps every dump raw. QEMU_OUT may hold compressed (.zst) files.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=lib/artifacts.sh
+. "$root/scripts/lib/artifacts.sh"
 memguard_self "$@"
 mode="${1:-run}"
 export PATH="$PATH:/usr/local/go/bin:$HOME/.cargo/bin"
@@ -103,13 +109,20 @@ do_smoke() {
   python3 -I "$here/smoke.py" --check "$OUT/smoke.sail.jsonl"
 }
 
+prune_run() {
+  art_prune --copies "$OUT"/janus-vs-sail "$OUT"/qemu-vs-sail "$OUT"/janus-vs-qemu "$OUT"/spalign
+  art_prune "$OUT"
+}
+
 do_run() {
-  [ -f "$QEMU_OUT/cases.jsonl" ] && [ -f "$QEMU_OUT/hw.jsonl" ] ||
+  art_exists "$QEMU_OUT/cases.jsonl" && art_exists "$QEMU_OUT/hw.jsonl" ||
     { echo "no qemu corpus in $QEMU_OUT: run scripts/oracle.sh full first" >&2; exit 2; }
   mkdir -p "$OUT"/{janus-vs-sail,qemu-vs-sail,janus-vs-qemu}
+  # However the run ends, the multi-GB dumps are pruned (KEEP=1 keeps them).
+  trap prune_run EXIT
   # Freeze the corpus and qemu's results (the qemu oracle may be re-run concurrently).
-  cp "$QEMU_OUT/cases.jsonl" "$OUT/cases.jsonl"
-  cp "$QEMU_OUT/hw.jsonl" "$OUT/qemu.jsonl"
+  art_cat "$QEMU_OUT/cases.jsonl" > "$OUT/cases.jsonl"
+  art_cat "$QEMU_OUT/hw.jsonl" > "$OUT/qemu.jsonl"
   echo "== Sail: $(wc -l < "$OUT/cases.jsonl") cases"
   JANUS_SAIL_JOBS="$JOBS" "$sail_bin" < "$OUT/cases.jsonl" > "$OUT/sail.jsonl"
   "$sail_bin" --to-model < "$OUT/sail.jsonl" > "$OUT/sail-model.jsonl"
@@ -207,7 +220,12 @@ do_regen() {
 }
 
 do_crosscheck() {
-  [ -f "$OUT/cases.jsonl" ] && [ -f "$OUT/sail.jsonl" ] || { echo "run '$0 run' first" >&2; exit 2; }
+  art_exists "$OUT/cases.jsonl" && art_exists "$OUT/sail.jsonl" || { echo "run '$0 run' first" >&2; exit 2; }
+  # The corpus and Sail's results may be compressed (scripts/lib/artifacts.sh): decompressed for
+  # the comparison, removed again afterwards.
+  trap art_cleanup EXIT
+  art_input "$OUT/cases.jsonl" >/dev/null
+  art_input "$OUT/sail.jsonl" >/dev/null
   local plain="$DEPS/sail-arm-${SAIL_ARM_REV:0:7}/arm-v9.4-a/cpp"
   [ -f "$plain/model.cpp" ] || { echo "run '$0 regen' first" >&2; exit 2; }
   local inst="$DEPS/model-instrumented-regen-${SAIL_ARM_REV:0:7}"
@@ -217,8 +235,11 @@ do_crosscheck() {
   JANUS_SAIL_JOBS="$JOBS" "$DEPS/target-regen/release/janus-oracle-sail" < "$OUT/cases.jsonl" > "$OUT/sail-regen.jsonl"
   if cmp -s "$OUT/sail.jsonl" "$OUT/sail-regen.jsonl"; then
     echo "crosscheck: regenerated model (sail-arm ${SAIL_ARM_REV:0:7}, Sail $SAIL_VERSION) and vendored model agree on all $(wc -l < "$OUT/cases.jsonl") cases"
+    [ "$(art_mode)" = raw ] || rm -f "$OUT/sail-regen.jsonl"
   else
     echo "crosscheck: results DIFFER on $(diff "$OUT/sail.jsonl" "$OUT/sail-regen.jsonl" | grep -c '^<') cases (diff $OUT/sail.jsonl $OUT/sail-regen.jsonl)"
+    # Keep the regenerated results for the diff (compressed unless KEEP=1).
+    [ "$(art_mode)" = raw ] || art_zstd "$OUT/sail-regen.jsonl" || true
     exit 1
   fi
 }

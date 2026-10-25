@@ -61,7 +61,8 @@ if [ -n "${RT_FP_SKIP_SAIL:-}" ] || [ ! -x "$sail" ]; then
   row "A64-SAIL" skip "skip (no $sail or RT_FP_SKIP_SAIL)"
 else
   echo "== A64-SAIL: the same corpus on the Sail ASL model, three-way"
-  QEMU_OUT="$W/out-a64" OUT="$W/out-sail" JOBS="$JOBS" scripts/oracle-sail.sh run >"$W/sail.log" 2>&1
+  # KEEP=1: the rows below read the raw verdicts (W is removed on exit anyway).
+  KEEP=1 QEMU_OUT="$W/out-a64" OUT="$W/out-sail" JOBS="$JOBS" scripts/oracle-sail.sh run >"$W/sail.log" 2>&1
   js=$(mismatches "$W/out-sail/janus-vs-sail"); qs=$(mismatches "$W/out-sail/qemu-vs-sail")
   if [ -s "$W/out-sail/janus-vs-sail/summary.md" ] && [ "$js" = 0 ] && [ "$qs" = 0 ]; then
     row "A64-SAIL (Janus/qemu vs Sail)" ok "ok (Janus vs Sail: $(summary "$W/out-sail/janus-vs-sail"); qemu vs Sail: $qs MISMATCH)"
@@ -150,8 +151,10 @@ if go tool objdump -s 'basic\.Dot3$' "$W/ex-v3" | grep -q 'c4e2e1b9'; then
   "$W/janus" extract "$W/ex-v3" example.com/basic.Dot3 "$W/dot3-v3" >/dev/null 2>&1
   if out=$("$W/janus" verify "$W/dot3-v3" --proof examples/proofs-amd64/Dot3/Proof.lean --theorem Proof.correctness 2>&1); then
     row "X64-V3-FMA" blocked "VERIFIED against the fused v3 binary"
-  elif grep -q 'do not decode to a modelled instruction' <<<"$out"; then
-    row "X64-V3-FMA" blocked "blocked (v3 Dot3 = MULSD + 2x VFMADD231SD; the v1 proof fails on it: VEX FMA is not decoded)"
+  elif grep -q 'janus64_run: stuck at .*vfmadd231sd' <<<"$out"; then
+    # since WP-B the decoder models scalar FMA; the v1 proof (unfused MULSD/ADDSD) gets stuck at
+    # the first VFMADD231SD, whose fused result it does not account for
+    row "X64-V3-FMA" blocked "blocked (v3 Dot3 = MULSD + 2x VFMADD231SD; the v1 proof fails on it: it gets stuck at the fused VFMADD231SD)"
   else
     row "X64-V3-FMA" blocked "FAILED oddly: $(tail -3 <<<"$out" | tr '\n' ' ')"
   fi

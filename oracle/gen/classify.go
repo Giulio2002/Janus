@@ -23,6 +23,9 @@ var Classes = []string{
 
 // Classify returns the encoding class of w.
 func Classify(w uint32) string {
+	if c := classifyCrypto(w); c != "" { // crypto.go
+		return c
+	}
 	switch {
 	case w&0x18000000 == 0: // op0 = 00xx: reserved, SME, SVE
 		return "reserved"

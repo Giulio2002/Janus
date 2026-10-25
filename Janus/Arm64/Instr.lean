@@ -1,3 +1,5 @@
+import Janus.Arm64.InstrCrypto
+
 /-!
 # AArch64 instruction AST (supported subset)
 
@@ -209,6 +211,9 @@ inductive Instr where
   | vTbl (Q : Bool) (rm len : Nat) (op : Bool) (rn rd : Nat)
   /-- AESE (`opcode = 00100`), AESD (`00101`), AESMC (`00110`), AESIMC (`00111`) (FEAT_AES). -/
   | vAes (opcode rn rd : Nat)
+  /-- The cryptographic-extension (SHA1/SHA256/SHA512/SHA3, PMULL), CRC32, permute (ZIP/UZP/TRN)
+  and scalar DUP classes: `Janus.Arm64.CryptoInstr` (`Janus/Arm64/InstrCrypto.lean`). -/
+  | crypto (c : CryptoInstr)
   /-- FMOV between a general and a SIMD&FP register (bit moves only): `sf`, `ftype`, `rmode`,
   `opcode` as encoded (`opcode = 110`: to general, `111`: to SIMD&FP). General register: ZR. -/
   | fmovGen (sf : Bool) (ftype rmode opcode rn rd : Nat)

@@ -99,8 +99,8 @@ example : decode [0x48, 0x66, 0x01, 0xd8] = none := by decide
 example : decode [0xd1, 0xd0] = some (.rcx true 32 (.reg 0) (.imm 1), 2) := by decide
 example : decode [0x48, 0xd1, 0xdb] = some (.rcx false 64 (.reg 3) (.imm 1), 3) := by decide
 example : decode [0xd0, 0xd0] = none := by decide
--- VEX (mulx)
-example : decode [0xc4, 0xe2, 0xfb, 0xf6, 0xc3] = none := by decide
+-- VEX (mulx rax, rax, rbx: BMI2, decoded since the v3 extensions)
+example : decode [0xc4, 0xe2, 0xfb, 0xf6, 0xc3] = some (.mulx 64 0 0 (.reg 3), 5) := by decide
 -- truncated: add rax, [rip+disp32] with only two displacement bytes
 example : decode [0x48, 0x03, 0x05, 0x00, 0x00] = none := by decide
 -- 16 bytes: 15 prefixes + nop exceed the 15-byte limit
@@ -327,5 +327,36 @@ example : faultOf (step [0xf0, 0x48, 0x0f, 0xc1, 0x07] { sm with regs := fun i =
 -- 64-bit BSF of zero: undefined destination, fault (vendor-neutral)
 example : faultOf (step [0x48, 0x0f, 0xbc, 0xc1] { s0 with regs := fun _ => 0 }) =
     some (.undefinedResult 0x1000) := by decide
+
+/-! ## GOAMD64=v3: BMI1/BMI2, MOVBE, scalar FMA, SSSE3 (encodings from the v3 std test binaries) -/
+
+-- shlx rsi, rsi, rbx (internal/abi.Name.IsBlank)
+example : decode [0xc4, 0xe2, 0xe1, 0xf7, 0xf6] = some (.shiftx .shl 64 6 (.reg 6) 3, 5) := by decide
+-- shrx rsi, rax, rdx (internal/strconv.atof64exact)
+example : decode [0xc4, 0xe2, 0xeb, 0xf7, 0xf0] = some (.shiftx .shr 64 6 (.reg 0) 2, 5) := by decide
+-- sarx rcx, rcx, rdx (reflect.(*rtype).OverflowInt)
+example : decode [0xc4, 0xe2, 0xea, 0xf7, 0xc9] = some (.shiftx .sar 64 1 (.reg 1) 2, 5) := by decide
+-- andn rdi, rdi, r8 (internal/runtime/maps.(*table).Clear)
+example : decode [0xc4, 0xc2, 0xc0, 0xf2, 0xf8] = some (.andn 64 7 7 (.reg 8), 5) := by decide
+-- blsr rdx, rsi (internal/strconv.formatBits) ; blsi rcx, rsi (math/big.nat.itoa)
+example : decode [0xc4, 0xe2, 0xe8, 0xf3, 0xce] = some (.blsx 1 64 2 (.reg 6), 5) := by decide
+example : decode [0xc4, 0xe2, 0xf0, 0xf3, 0xde] = some (.blsx 3 64 1 (.reg 6), 5) := by decide
+-- movbe QWORD PTR [rsp+0x28], rdx (runtime.randinit)
+example : decode [0x48, 0x0f, 0x38, 0xf1, 0x54, 0x24, 0x28] =
+    some (.movbe 64 (.mem ⟨some 4, none, 0, 0x28, false, false⟩) (.reg 2), 7) := by decide
+-- vfmadd231sd xmm0, xmm2, xmm1 (runtime.fastexprand) ; vfmadd231ss (math/rand.ExpFloat64)
+example : decode [0xc4, 0xe2, 0xe9, 0xb9, 0xc1] = some (.vfmas 64 231 false false 0 2 (.xmm 1), 5) := by decide
+example : decode [0xc4, 0xe2, 0x69, 0xb9, 0xc1] = some (.vfmas 32 231 false false 0 2 (.xmm 1), 5) := by decide
+-- pshufb xmm0, xmm15 ; psignb xmm0, xmm0 (the Swiss-table group match)
+example : decode [0x66, 0x41, 0x0f, 0x38, 0x00, 0xc7] = some (.sseOp .pshufb 0 (.xmm 15), 6) := by decide
+example : decode [0x66, 0x0f, 0x38, 0x08, 0xc0] = some (.sseOp .psignb 0 (.xmm 0), 5) := by decide
+-- rejected: SHLX with VEX.L1 (#UD), MOVBE register form (#UD), MMX PSHUFB, CRC32,
+-- VFMADD231PD (packed), RORX with VEX.vvvv ≠ 1111
+example : decode [0xc4, 0xe2, 0xe5, 0xf7, 0xf6] = none := by decide
+example : decode [0x48, 0x0f, 0x38, 0xf1, 0xc2] = none := by decide
+example : decode [0x0f, 0x38, 0x00, 0xc1] = none := by decide
+example : decode [0xf2, 0x0f, 0x38, 0xf0, 0xc1] = none := by decide
+example : decode [0xc4, 0xe2, 0xe9, 0xb8, 0xc1] = none := by decide
+example : decode [0xc4, 0xe3, 0xf3, 0xf0, 0xc1, 0x05] = none := by decide
 
 end JanusTests.Amd64
