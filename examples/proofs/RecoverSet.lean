@@ -114,7 +114,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     dsimp only at hcpc h26 h28 h18 hclo hchi hpk hb0 hfrc hcont
     simp only [h80, e39, e64, setReg_apply, reduceIte, Nat.reduceEqDiff] at hcpc h26 h28 h18 hclo hchi hpk hb0 hfrc hcont
     simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self, e32] at hcpc h26
-    have hcode : (588944 : Nat) % 256 ^ 8 = 588944 := by decide
+    have hcode : (592112 : Nat) % 256 ^ 8 = 592112 := by decide
     rw [hcode] at hcpc
     obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
     dsimp only at hcpc h26 h28 h18 h29 hcal hclo hchi h30a h30b hpk henvc hb0 hfrc hcont
@@ -132,7 +132,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       rw [hfrc.accessible]; simp only [Memory.accessible_writeLE]; exact hst
     -- the deferred closure, run until it returns into the runtime
     have hcl : ReachesRet (Extracted.program.link impl) (cr 30)
-        ⟨cr, csp, BitVec.ofNat 64 588944, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ (fun c' =>
+        ⟨cr, csp, BitVec.ofNat 64 592112, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ (fun c' =>
           c'.sp = csp ∧ c'.regs 28 = cr 28 ∧ c'.regs 18 = cr 18 ∧ P.Env c'.mem ∧
           P.Recovered c'.mem (s.regs 28).toNat ∧
           MemFrame cm c'.mem (P.priv ++ [(csp.toNat - 32 - P.depth, csp.toNat),
@@ -163,7 +163,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       intro G' hpcG hpost _ hpanI
       obtain ⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩ := hpost
       have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
-      have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36 = 588980 := by
+      have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36 = 592148 := by
         decide
       obtain ⟨hr0, hr1, hrec2⟩ := hpanI ⟨etyp.toNat, edata.toNat⟩ (cr 30).toNat
         (hl.panicking_frame _ _ _ _ _ (by simpa [setReg] using hpk) (by
@@ -204,7 +204,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     refine Reaches.of_steps (hst3.withExit hret.fetch_none) ?_
     obtain ⟨dr, dsp, dpc, dfl, dm, ddz, dv, dtp, dfc, dfs⟩ := d
     dsimp only at hdpc hdsp hd28 hd18 hd29 hdfr hdenv hdcalm
-    rw [show Extracted.entry + 132 = 588884 from rfl] at hdpc
+    rw [show Extracted.entry + 132 = 592052 from rfl] at hdpc
     subst hdpc hdsp
     have hdr' : dr = setReg (setReg (setReg dr 18 (s.regs 18)) 28 (s.regs 28)) 29 (s.sp - 80#64 - 8) := by
       funext i; simp only [setReg]; split
@@ -226,5 +226,180 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     simp only [calleeStack, h80'] at hfrD
     janus_run
     rw [hr7, if_neg hx]
+
+
+/-! ## Non-vacuity
+
+The model `PanicSat.P0` (laws proved, no wrappers), model code at the three contract addresses —
+`gopanic` (the `PanicSat` model with `RecoverSet`'s funcdata: `deferBits` at `SP + 39`, the slot at
+`SP + 64`, resuming at `entry + 0x84`), `gorecover` (the `PanicSat` model) and a `RET` for
+`deferreturn` — each proved to meet its contract for `P0`, an admissible return address and a
+call state satisfying the precondition: so `correctness` applies (`nonvacuous`), and for
+`x = 42`, `e = (1, 0)` the call returns `7` (`returns`). -/
+
+namespace Witness
+
+open Janus.Contracts.PanicSat
+
+def gAddr : Nat := Extracted.program.contractAddr "runtime.gopanic"
+def rAddr : Nat := Extracted.program.contractAddr "runtime.gorecover"
+def dAddr : Nat := Extracted.program.contractAddr "runtime.deferreturn"
+
+/-- `PanicSat.gopanicCode` with this frame's offsets (`#39`, `#64`) and resume address. -/
+def gopanicCode' : List Nat :=
+  [0x910003e9, 0xf940213a, 0xf940034b, 0xd10083ff, 0xf9000be9, 0x39009d3f, 0xd281000e, 0xf2a0002e,
+   0xf90001c0, 0xf90005c1, 0x100000ed, 0xf90009cd, 0xd280002c, 0xf9000dcc, 0xf90011df, 0xd10023fd,
+   0xd63f0160, 0xf9400be9, 0x9100013f, 0xd10023fd, 0xd281000e, 0xf2a0002e, 0xf9000ddf, 0xd281168c,
+   0xf2a0012c, 0xd61f0180]
+
+def implAt : List Segment :=
+  [{ name := "gopanic", base := gAddr, words := gopanicCode' },
+   { name := "gorecover", base := rAddr, words := gorecoverCode },
+   { name := "deferreturn", base := dAddr, words := retCode }]
+
+def linked : Program := { Extracted.program with segments := Extracted.program.segments ++ implAt }
+
+theorem linked_eq : Extracted.program.link implAt = linked := rfl
+
+theorem gopanic_model' : GopanicRecoverContract (Extracted.program.link implAt) gAddr P0 39 64
+    0x908b4 := by
+  rw [linked_eq]
+  intro s hpc ⟨⟨henv, hg, ⟨h30a, h30b, hsp, hst, h8, hwin, hacc⟩, hout⟩, hx0, hbits, hb1, hb2, hb3,
+    hs1, hs2, hf1, hf2, hc1, hc2⟩
+  simp only [P0_env, P0_depth, P0_priv, outside_cons, outside_nil, and_true] at henv hwin hacc hout hb3 hst
+  have hrd : s.mem.accessible PANREC 0x800 true = true :=
+    Memory.accessible_mono _ henv (by simp [PANREC]) (by simp [PANREC])
+  simp only [PANREC] at hrd
+  have hspl := s.sp.isLt
+  show ReachesRet _ _ s _
+  janus_run
+  refine ⟨by omega, (by simp only [P0_depth]; omega), by omega, ?_, ?_, ?_, ?_⟩
+  · simp (disch := omega) only [P0, PANREC, Nat.reduceAdd, Memory.readLE_writeLE_of_disjoint,
+      Memory.readLE_writeLE_self]
+    have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
+    exact ⟨trivial, by rw [h64]; exact Nat.mod_eq_of_lt (s.regs 0).isLt,
+      by rw [h64]; exact Nat.mod_eq_of_lt (s.regs 1).isLt, trivial⟩
+  · simp only [P0_env, Memory.accessible_writeLE]; exact henv
+  · simp only [P0_priv, P0_depth, List.cons_append, List.nil_append]
+    janus_frame
+  · intro c' hpc' hsp' h28' h18' hag henv' hrec
+    obtain ⟨r', sp', pc', fl', m', dz', vr', tp', fc', fs'⟩ := c'
+    simp only at hpc' hsp' h28' h18' hag henv' hrec ⊢
+    subst hpc' hsp'
+    have hwin' : m'.accessible (s.sp.toNat - 32) 32 true = true := by
+      rw [hag.1]; simp only [Memory.accessible_writeLE]
+      exact Memory.accessible_mono _ hacc (by omega) (by omega)
+    have hpr' : m'.accessible 67584 2048 true = true := by
+      rw [hag.1]; simp only [Memory.accessible_writeLE]; exact hrd
+    have hv : m'.readLE (s.sp.toNat - 16) 8 = s.sp.toNat := by
+      rw [hag.readLE ⟨(s.sp.toNat - 32, s.sp.toNat), by simp, by omega, by omega⟩]
+      simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
+      have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
+      rw [h64]; exact Nat.mod_eq_of_lt s.sp.isLt
+    show ReachesRet _ _ _ _
+    janus_run
+    have hsp0 : BitVec.ofNat 64 (m'.readLE (s.sp.toNat - 16) 8) = s.sp := by
+      rw [hv]; exact BitVec.ofNat_toNat _ _
+    refine ⟨hsp0, h28', h18', by rw [hsp0], ?_, ?_, ?_⟩
+    · simp only [P0_priv, P0_depth, List.cons_append, List.nil_append]
+      janus_frame
+    · simp only [P0_env, Memory.accessible_writeLE] at henv' ⊢; exact henv'
+    · show (m'.writeLE (PANREC + 24) 8 0).readLE (PANREC + 24) 8 = 0
+      rw [Memory.readLE_writeLE_self]
+
+theorem gopanic_model : GopanicRecoverContract (Extracted.program.link implAt) gAddr P0 39 64
+    (Extracted.entry + 0x84) := gopanic_model'
+
+theorem gorecover_model : GorecoverContract (Extracted.program.link implAt) rAddr P0 := by
+  rw [linked_eq]
+  intro s hpc ⟨⟨henv, hg, ⟨h30a, h30b, hsp, hst, h8, hwin, hacc⟩, hout⟩, hfp, hfp'⟩
+  simp only [P0_env] at henv
+  have hrd : s.mem.accessible PANREC 0x800 true = true :=
+    Memory.accessible_mono _ henv (by simp [PANREC]) (by simp [PANREC])
+  have hr : s.mem.accessible PANREC 0x800 false = true := Janus.Contracts.IfaceModel.acc_read_of_write hrd
+  simp only [PANREC] at hrd hr
+  janus_run
+  · -- the active flag is clear: `nil`
+    refine ⟨panicRet_of P0 0 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
+      rfl rfl rfl rfl (MemFrame.refl _ _) henv, fun h => h, fun v rp hp _ _ => ?_⟩
+    have := hp.1; simp only [PANREC, Nat.reduceAdd] at this; omega
+  · -- the recorded return point matches `[x29 + 8]`: return the value, set the recovered flag
+    refine ⟨panicRet_of P0 0 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
+      rfl rfl rfl rfl (by simp only [P0_priv, calleeStack, P0_depth, List.cons_append, List.nil_append]; janus_frame)
+      (by simp only [P0_env, Memory.accessible_writeLE]; exact henv), fun hc => ?_,
+      fun v rp hp _ _ => ?_⟩
+    · have h1 : s.mem.readLE (PANREC + 24) 8 = 0 := hc
+      simp only [PANREC, Nat.reduceAdd] at h1; omega
+    · obtain ⟨-, h2, h3, -⟩ := hp
+      simp only [PANREC, Nat.reduceAdd] at h2 h3
+      have hl1 := Memory.readLE_lt s.mem 67584 8
+      have hl2 := Memory.readLE_lt s.mem 67592 8
+      refine ⟨by first | omega | (simp only [BitVec.toNat_ofNat]; omega) | (simp [setReg]; omega),
+        by first | omega | (simp only [BitVec.toNat_ofNat]; omega) | (simp [setReg]; omega), ?_⟩
+      · show (s.mem.writeLE (PANREC + 32) 8 1).readLE (PANREC + 32) 8 = 1
+        rw [Memory.readLE_writeLE_self]
+  · -- the return point does not match: `nil`
+    refine ⟨panicRet_of P0 0 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
+      rfl rfl rfl rfl (MemFrame.refl _ _) henv, fun hc => ?_, fun v rp hp _ hfp8 => ?_⟩
+    · have h1 : s.mem.readLE (PANREC + 24) 8 = 0 := hc
+      simp only [PANREC, Nat.reduceAdd] at h1; omega
+    · obtain ⟨-, -, -, h4⟩ := hp
+      simp only [PANREC, Nat.reduceAdd] at h4
+      exact absurd (h4.trans hfp8.symm) (by assumption)
+
+theorem ret_model : DeferreturnContract (Extracted.program.link implAt) dAddr P0 := by
+  rw [linked_eq]
+  intro s hpc ⟨henv, hg, ⟨h30a, h30b, hsp, hst, h8, hwin, hacc⟩, hout⟩
+  janus_run
+  exact panicRet_of P0 0 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
+    rfl rfl rfl rfl (MemFrame.refl _ _) henv
+
+def ret : Nat := 0x200000
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+def s0 : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret
+      else if i = 29 then BitVec.ofNat 64 (wsp - 8) else if i = 0 then 42#64 else if i = 1 then 1#64
+      else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry
+    [42#64, 1#64, 0#64] s0 := by
+  refine ⟨rfl, rfl, fun i h => ?_⟩
+  simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2) with rfl | rfl | rfl <;> rfl
+
+theorem pre : PanicCallerOK P0 s0 (P0.depth + 112) 32 ∧ P0.Calm s0.mem (s0.regs 28).toNat ∧
+    (1#64 : BitVec 64).toNat ≠ 0 := by
+  refine ⟨⟨show wmem.accessible 0x10000 0x1000 true = true by decide, ⟨by decide, by decide, by decide⟩,
+    by decide, by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩,
+    by show wmem.readLE (PANREC + 24) 8 = 0; simp only [PANREC]; decide, by decide⟩
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · unfold Spec.Disjoint; decide
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+
+theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (ret : Nat) (s : State), P.Laws ∧
+    GopanicRecoverContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.gopanic") P 39 64 (Extracted.entry + 0x84) ∧
+    GorecoverContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.gorecover") P ∧
+    DeferreturnContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.deferreturn") P ∧
+    ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x24) ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64, 1#64, 0#64] s ∧
+    (PanicCallerOK P s (P.depth + 112) 32 ∧ P.Calm s.mem (s.regs 28).toNat ∧ (1#64 : BitVec 64).toNat ≠ 0) :=
+  ⟨implAt, P0, ret, s0, P0_laws, gopanic_model, gorecover_model, ret_model, id, hret, setup, pre⟩
+
+theorem returns : GoReturns ((Extracted.program.link implAt).withExit ret) (goClass P0) s0 fun o =>
+    match o with
+    | .returned s' => ABIReturn s0 s' ∧
+        (s'.regs 0).toNat = if (42#64 : BitVec 64).toNat ≤ 10 then (42#64 : BitVec 64).toNat else 7
+    | .panicked _ _ => False :=
+  correctness implAt P0 P0_laws gopanic_model gorecover_model ret_model id 42#64 1#64 0#64 ret hret s0
+    setup pre
+
+end Witness
 
 end Proof
