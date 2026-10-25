@@ -130,13 +130,67 @@ by default; `--replay-fresh` additionally runs `leanchecker --fresh` on the theo
 which re-adds every constant of its environment, core included, to an empty environment
 (minutes: about 140 s for a closure that imports `Lean`). Passing replays are cached in the
 trusted cache (`v1/replay`, never writable by a sandboxed process) under a key covering the
-toolchain version, the module's `.olean` bytes (with its `.server`/`.private` parts) and,
-recursively, the keys of its imports, so an unchanged framework module is not replayed again
-while any byte change to it or to anything below it is. The cache is off with `--fresh` and
-without a sandbox. Before replaying, every module of the closure must resolve from its home:
-core modules from the toolchain library, `Janus.*` modules from the trusted framework build and
-only modules the framework has a source for, `Extracted`/`JanusTrusted` from the trusted
-directory.
+toolchain (its version, the `lean` and `leanchecker` binaries and its library), the module's
+`.olean` bytes (with its `.server`/`.private` parts) and, recursively, the keys of its imports,
+so an unchanged framework module is not replayed again while any byte change to it or to
+anything below it is. Every marker carries an HMAC-SHA256 of its kind and key under the cache's
+hidden key (the result cache's key, below), so a marker janus did not write (planted, copied from
+another cache, or written before markers were authenticated) is a miss and the replay runs. The
+cache is off with `--fresh` and without a sandbox (except that the framework replay verdict
+below is read, never written, without a sandbox). Before replaying, every module of the closure
+must resolve from its home: core modules from the toolchain library, `Janus.*` modules from the
+trusted framework build and only modules the framework has a source for, `Extracted`/`JanusTrusted`
+from the trusted directory.
+
+**The framework replay verdict** (`cmd/janus/replaymark.go`). The kernel replay of the framework
+(`leanchecker Janus`, every `Janus.*` module of the trusted build, each against its imports as
+loaded from their `.olean` files) has one outcome per framework build: it depends only on the
+toolchain and on the bytes of the framework's module-data files. So janus records it once, as a
+verdict in `v1/replay/framework/<key>`, and reuses it:
+
+* **Key.** SHA-256 over the toolchain's identity (`cacheID`: version, the `lean` and
+  `leanchecker` binaries, the toolchain library) and the framework pins: the SHA-256 of every
+  module-data file (`.olean`, `.olean.server`, `.olean.private`, `.ir`) of every framework module,
+  taken right after the trusted build and re-checked after every later step. Editing any
+  framework file changes the rebuilt module's bytes, hence the pins and the key; adding, removing
+  or renaming a module changes the pin set; another toolchain changes `cacheID`. A verdict can
+  therefore never be reused for other bytes (no stale verdict after a framework edit), and a
+  verdict for an identical rebuild (same bytes) is correctly the same verdict.
+* **Authenticity.** The verdict file holds an HMAC-SHA256 of `framework` and the key under the
+  cache's hidden key (`v1/result/.key`, mode 0600 in a 0700 directory, the round-8 checks of
+  `checkCacheRoot`/`readPrivateFile` apply; sandboxed processes see an empty tmpfs there). It is
+  read with `O_NOFOLLOW` and must be a regular file of this user. A planted file, a verdict copied
+  from another cache (another key), a verdict renamed to another framework's key, a module marker
+  or other marker kind presented as a verdict, and a truncated or altered MAC are all misses
+  (`TestFrameworkVerdictAuthentic`). Only janus writes it, outside the sandbox, after
+  `leanchecker Janus` passed in a sandboxed, non-`--fresh` verification.
+* **When it is read.** Once per verification, right after the framework build is pinned and
+  before any untrusted step (the trusted compile, the proof compile, a consumer's Lake build) runs.
+  Without a sandbox it is read too (the unconfined proof runs only after the decision, and the
+  pins it covers are checked after every step as before), but never written; `--fresh` neither
+  reads nor writes it. With a verdict, the framework modules of the theorem's closure count as
+  replayed (reported as reused from the replay cache). Which modules qualify is decided by the
+  same closure check as before: only `Janus.*` modules that the framework pins cover and that
+  resolve from the pinned framework build. `Extracted`, `JanusTrusted`, the proof's own modules,
+  consumer and dependency modules are never covered by it: they are replayed as before (or reused
+  only through their own per-module markers, keyed by their own bytes).
+* **Without a verdict** the framework is replayed alongside the other stages, as before. Concurrent
+  verifications of a framework build that has no verdict yet serialise on a replay lock
+  (`v1/replay/locks`): the first replays and records the verdict, the others then find it and do
+  not replay (before, each started its own `leanchecker Janus`). A failing replay records nothing,
+  and the regular replay then runs and reports leanchecker's error.
+* **Eviction.** A verification that uses the verdict holds its use lock (`<key>.use`) shared until
+  it ends; the collector removes a verdict only under that lock, taken exclusively without
+  waiting. A removed verdict only makes the next verification replay the framework again.
+
+What a verdict cannot do: make a module count as replayed whose bytes were not replayed (its key
+covers every framework module-data file, and the pins are re-checked after the replay), outlive a
+change of the framework or the toolchain, or cover a non-framework module. Its trust is the same
+as that of the per-module markers it subsumes (the trusted cache is trusted), now additionally
+authenticated against anything that can create files in the cache but cannot read the key.
+`TestR1ForgedFrameworkLemma` and the audit row `R1b_forged_lemma` (a framework `.olean` carrying a
+lemma the kernel never checked) are still rejected by the kernel replay: the forged bytes have
+other pins, hence no verdict.
 
 **What the replay does not cover, and what does.** A replay checks that a module is
 *well-typed*, not that it is the module its source describes: an `.olean` compiled from a
@@ -220,8 +274,9 @@ not accept with an empty cache:
   is used only if its ready stamp, sources and module pins all match (otherwise it is rebuilt from
   the embedded sources); consumer workspaces are untrusted by design (their modules are rebuilt,
   pinned and kernel-replayed; the framework copy in them is pinned against the trusted build); a
-  replay marker only skips a replay whose module bytes and imports its name hashes, so deleting
-  one only makes the replay run again. An evicted entry is rebuilt from the same inputs, and the
+  replay marker (and the framework replay verdict) only skips a replay whose module bytes and
+  imports its name hashes, and only if its HMAC verifies, so deleting one only makes the replay
+  run again; a verdict in use is held by its use lock and not collected. An evicted entry is rebuilt from the same inputs, and the
   rebuilt entry is equivalent: `TestCacheGCConcurrentVerify` empties the cache during and after
   verifications (single files and a consumer package) and gets the same theorem, statement,
   axioms and replay status.
