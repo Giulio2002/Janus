@@ -324,7 +324,9 @@ func TestR1FrameworkTamper(t *testing.T) {
 			pkg := r1Package(t, c.dep)
 			args := append([]string{"verify", add, "--proof", filepath.Join(pkg, c.proof), "--proof-root", pkg, "--theorem", c.thm}, c.flags...)
 			code, out, stderr := runR1(c.mode, args...)
-			if code != 1 || out != "" || !strings.HasPrefix(stderr, "Invalid:") || !strings.Contains(stderr, "Stage: "+c.stage) || !strings.Contains(stderr, c.want) {
+			// The verdict must be the first line after janus' own progress notices (a cold cache
+			// prints "Building the Janus framework ..." first; nothing else may precede it).
+			if code != 1 || out != "" || !strings.HasPrefix(withoutProgress(stderr), "Invalid:") || !strings.Contains(stderr, "Stage: "+c.stage) || !strings.Contains(stderr, c.want) {
 				t.Fatalf("got %d\n%s\n%s", code, out, stderr)
 			}
 		})
@@ -410,5 +412,32 @@ func TestReplayTargets(t *testing.T) {
 	}
 	if strings.Join(covers["Janus"], ",") != "Janus,Janus.Arm64.State,Janus.GoABI" || strings.Join(covers["Proof"], ",") != "Proof,Proof.Lemmas" {
 		t.Fatalf("covers %v", covers)
+	}
+}
+
+// withoutProgress is stderr without the progress notices janus prints before its verdict (the
+// framework build notices of framework.go), which only lead the output; anything else is kept.
+func withoutProgress(stderr string) string {
+	for {
+		line, rest, _ := strings.Cut(stderr, "\n")
+		if !strings.HasPrefix(line, "Building the Janus framework (") && !strings.HasPrefix(line, "Building the Janus framework from scratch (--fresh)") {
+			return stderr
+		}
+		stderr = rest
+	}
+}
+
+func TestWithoutProgress(t *testing.T) {
+	notice := "Building the Janus framework (embedded, 4dbeaaaf7893) in /c/v1/framework/x; this happens once per framework version.\n"
+	for in, want := range map[string]string{
+		"Invalid: x\n":                           "Invalid: x\n",
+		notice + "Invalid: x\n":                  "Invalid: x\n",
+		notice + notice + "Invalid: x\n":         "Invalid: x\n",
+		"warning: y\n" + notice + "Invalid: x\n": "warning: y\n" + notice + "Invalid: x\n",
+		notice + "warning: y\nInvalid: x\n":      "warning: y\nInvalid: x\n",
+	} {
+		if got := withoutProgress(in); got != want {
+			t.Errorf("withoutProgress(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

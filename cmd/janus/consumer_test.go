@@ -72,8 +72,13 @@ func pathManifest(name, dir string) string {
 // repository checkout by absolute path, with lakefile.toml or (kind "lean") lakefile.lean.
 func consumerCopy(t *testing.T, kind string) string {
 	t.Helper()
+	return consumerCopyAt(t, kind, repoRoot, filepath.Join(t.TempDir(), "consumer"))
+}
+
+// consumerCopyAt is consumerCopy into dst (replacing its sources), requiring janus from janusDir.
+func consumerCopyAt(t *testing.T, kind, janusDir, dst string) string {
+	t.Helper()
 	src := filepath.Join(repoRoot, "examples", "consumer")
-	dst := filepath.Join(t.TempDir(), "consumer")
 	for _, f := range []string{"ConsumerExample.lean", "ConsumerExample/Spec.lean", "ConsumerExample/Add.lean", "ConsumerExample/Max.lean", "lean-toolchain"} {
 		b, err := os.ReadFile(filepath.Join(src, f))
 		if err != nil {
@@ -91,7 +96,7 @@ require janus from %s
 
 @[default_target]
 lean_lib ConsumerExample
-`, leanString(repoRoot)))
+`, leanString(janusDir)))
 	} else {
 		writeFile(t, filepath.Join(dst, "lakefile.toml"), fmt.Sprintf(`name = "consumerExample"
 defaultTargets = ["ConsumerExample"]
@@ -102,9 +107,9 @@ path = %s
 
 [[lean_lib]]
 name = "ConsumerExample"
-`, tomlString(repoRoot)))
+`, tomlString(janusDir)))
 	}
-	writeFile(t, filepath.Join(dst, "lake-manifest.json"), pathManifest("consumerExample", repoRoot))
+	writeFile(t, filepath.Join(dst, "lake-manifest.json"), pathManifest("consumerExample", janusDir))
 	return dst
 }
 
@@ -788,5 +793,51 @@ func TestInstallOutsideRepo(t *testing.T) {
 	}
 	if strings.HasPrefix(r.JanusRoot, repoRoot) {
 		t.Errorf("verification used the checkout %s", r.JanusRoot)
+	}
+}
+
+// TestConsumerTwoCheckouts: two janus checkouts of the same framework (two agents' worktrees,
+// byte-identical) and consumer packages that require one or the other, sharing one cache. Each
+// verification must use a workspace of its own package and janus checkout and record the checkout
+// the package resolved: a package that switches checkouts at the same path gets a new workspace,
+// never the other checkout's.
+func TestConsumerTwoCheckouts(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	useTestCache(t)
+	fw, err := loadFramework("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, y := copyFramework(t, fw), copyFramework(t, fw)
+	add := mustExtract(t, "example.com/basic.Add")
+	verify := func(pkg string) *consumerInfo {
+		t.Helper()
+		code, _, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "ConsumerExample", "Add.lean"), "--proof-root", pkg,
+			"--theorem", "ConsumerExample.Add.correctness")
+		if code != 0 {
+			t.Fatalf("verify %s: %s", pkg, stderr)
+		}
+		r := readReport(t, add)
+		if r.Consumer == nil {
+			t.Fatal("no consumer record")
+		}
+		return r.Consumer
+	}
+	p := filepath.Join(t.TempDir(), "consumer")
+	a := verify(consumerCopyAt(t, "toml", x, p))
+	b := verify(consumerCopyAt(t, "toml", y, p)) // the same package path, now requiring the other checkout
+	q := verify(consumerCopyAt(t, "toml", x, filepath.Join(t.TempDir(), "consumer")))
+	if a.Dependency.Dir != x || b.Dependency.Dir != y || q.Dependency.Dir != x {
+		t.Errorf("recorded janus checkouts %s, %s, %s; want %s, %s, %s", a.Dependency.Dir, b.Dependency.Dir, q.Dependency.Dir, x, y, x)
+	}
+	if a.Workspace == b.Workspace || a.Workspace == q.Workspace || b.Workspace == q.Workspace ||
+		filepath.Dir(a.Workspace) == filepath.Dir(b.Workspace) || filepath.Dir(a.Workspace) == filepath.Dir(q.Workspace) {
+		t.Errorf("workspaces shared between checkouts or packages: %s, %s, %s", a.Workspace, b.Workspace, q.Workspace)
+	}
+	// The second package's workspace was not seeded from the first's (another family).
+	again := verify(consumerCopyAt(t, "toml", x, p))
+	if again.Workspace != a.Workspace {
+		t.Errorf("the same package and checkout got another workspace: %s, then %s", a.Workspace, again.Workspace)
 	}
 }

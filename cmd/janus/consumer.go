@@ -499,9 +499,18 @@ func (ws *consumerWS) protected(readOnlyBuilds bool) []string {
 
 // workspaceFamily groups the workspaces of one consumer package and framework; members
 // differ only in Extracted, and a new member starts from a sibling's build.
+// workspaceFamily is the directory of the workspaces of one consumer package against one
+// framework: keyed by the framework (its sources' hash, and for a --janus-root framework the
+// checkout it was read from), the package's root and the janus dependency it resolved (type,
+// checkout directory, URL and revision). Two checkouts of the same commit (agents' worktrees
+// sharing one cache) therefore never share a workspace or seed one from the other's, even for
+// byte-identical frameworks and packages at the same path; within one family, siblings (other
+// extractions) seed each other's builds as before.
 func workspaceFamily(fw *framework, pkg *consumerPkg) string {
-	h := sha256.Sum256([]byte(fw.Sha256 + "\x00" + pkg.Root))
-	return filepath.Join(cacheRoot(), "v1", "consumer", hex.EncodeToString(h[:])[:24])
+	h := sha256.New()
+	fmt.Fprintf(h, "janus-consumer-family-v2\x00%s\x00%s\x00%s\x00%s\x00", fw.Sha256, fw.Source, fw.Dir, pkg.Root)
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00", pkg.Dep.Type, pkg.Dep.Dir, pkg.Dep.URL, pkg.Dep.Rev)
+	return filepath.Join(cacheRoot(), "v1", "consumer", hex.EncodeToString(h.Sum(nil))[:24])
 }
 
 func wsDiag(err error) error {
