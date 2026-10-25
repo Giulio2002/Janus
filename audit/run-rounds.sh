@@ -8,7 +8,7 @@
 # fails (any BROKEN row) fails the run.
 #
 # Usage: audit/run-rounds.sh [-j LANES] [round …]   (rounds: all r2 r3 r4 r5 r6 r7 r8; default every one)
-#   -j LANES   lanes at once (default: scripts/lib/parallel.sh, admitted by memory); each lane runs
+#   -j LANES   lanes at once (default min(cores/12, (MemAvailable-40G)/20G, 4), admitted by memory); each lane runs
 #              its own rows with -j $JANUS_LANE_JOBS (default 2).
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,15 +19,17 @@ export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=../scripts/lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
 memguard_self "$@"
+# A lane holds several rows at once: two jobs' budget each (admission, default -j and cgroup
+# limit), and at most 4 lanes by default (each runs -j $JANUS_LANE_JOBS rows).
+PAR_JOB_MEM_KB=$((2 * PAR_JOB_MEM_KB)); PAR_MAX_DEFAULT_JOBS=4; PAR_CORES_PER_JOB=$((2 * PAR_CORES_PER_JOB))
 par_init "$@"
-# A lane holds several rows at once: give it two jobs' budget (admission and cgroup limit).
-PAR_JOB_MEM_KB=$((2 * PAR_JOB_MEM_KB)); PAR_JOB_MEM=20G
+PAR_JOB_MEM=20G
 declare -A script=([all]=audit/run-all.sh [r2]=audit/round2/run-round2.sh [r3]=audit/round3/run-round3.sh
   [r4]=audit/round4/run-round4.sh [r5]=audit/round5/run-round5.sh [r6]=audit/round6/run-round6.sh
   [r7]=audit/round7/run-round7.sh [r8]=audit/round8/run-round8.sh)
 # Longest first (measured), so the long lanes start at once.
 lanes=(${PAR_ARGS[@]+"${PAR_ARGS[@]}"})
-[ ${#lanes[@]} -gt 0 ] || lanes=(all r5 r6 r2 r7 r8 r3 r4)
+[ ${#lanes[@]} -gt 0 ] || lanes=(r7 r8 r5 all r2 r6 r3 r4)
 for l in "${lanes[@]}"; do
   [ -n "${script[$l]:-}" ] || { echo "unknown round $l (all r2 r3 r4 r5 r6 r7 r8)"; exit 2; }
 done
