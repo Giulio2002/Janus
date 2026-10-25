@@ -101,4 +101,104 @@ theorem correctness (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (hl : 
     janus64_run
     exact ⟨by janus_frame, by simpa [setRegF] using henv'⟩
 
+
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+As on arm64: the model `InstrumentCallsSat.C0`, `RET` at `runtime.checkptrAlignment`'s address, an
+admissible return address, and a call state of `Word(&v)` with `v = 42` at `IfaceModel.VAL`, in
+a memory with the binary's read-only data loaded. -/
+
+namespace Witness
+
+open Janus.Contracts.IfaceModel Janus.Contracts.IfaceSatAmd64 Janus.Contracts.InstrumentCallsSat
+  Janus.Contracts.InstrumentCallsSatAmd64
+
+def cAddr : Nat := Extracted.program.contractAddr "runtime.checkptrAlignment"
+
+def implAt : List Janus.Amd64.Segment := [{ name := "model", base := cAddr, bytes := InstrumentCallsSatAmd64.retCode }]
+
+def linked : Janus.Amd64.Program :=
+  { Extracted.program with segments := Extracted.program.segments ++ implAt }
+
+theorem linked_eq : Extracted.program.link implAt = linked := rfl
+
+theorem model : CheckptrAlignment64 (Extracted.program.link implAt) cAddr C0 := by
+  rw [linked_eq]
+  intro s hpc ⟨hpre, _⟩
+  obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx, hdf, hra, hout⟩ := hpre
+  simp only [regSP, regG, stackguard0Offset, stackguard0] at hg1 hg2 hg3 hal hd1 hd2 hst hra
+  janus64_run
+  exact RTReturn64.intro C0.toRtEnv 3 s _ _ rfl rfl rfl rfl rfl rfl (by simp [hdf]) rfl
+    (MemFrame.refl _ _) ⟨he1, he2, hd⟩ trivial
+
+def dbyte (a : Nat) : Option Nat :=
+  Extracted.program.data.findSome? fun d =>
+    if d.base ≤ a ∧ a < d.base + d.bytes.length then d.bytes[a - d.base]? else none
+
+def ret : Nat := wret
+
+/-- The witness memory: `wmem` with the return address `ret` at `[RSP]` and the read-only data. -/
+def mem2 : Janus.Arm64.Memory :=
+  ⟨fun a => BitVec.ofNat 8 ((dbyte a).getD ((((wsp + 2, 0x20) :: wtable).lookup a).getD 0)),
+    wmem.regions ++ Extracted.program.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+
+theorem mem2_env (g : W64) : Env0 mem2 g := by
+  refine ⟨by decide, by decide, ?_⟩
+  unfold Desc; decide
+
+theorem mem2_data : Extracted.program.DataLoaded mem2 := by
+  unfold Janus.Amd64.Program.DataLoaded; decide +kernel
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide +kernel)
+
+def pv : BitVec 64 := BitVec.ofNat 64 VAL
+
+def s0 : Janus.Amd64.State :=
+  { regs := fun i => if i = 0 then pv else if i = 4 then BitVec.ofNat 64 wsp
+      else if i = 14 then BitVec.ofNat 64 wg else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := mem2 }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [pv] s0 :=
+  ⟨rfl, by decide +kernel, rfl, by decide, by intro i h; simp at h; subst h; rfl, rfl⟩
+
+theorem pre : CallerOK64 C0.toRtEnv s0 40 16 ∧ Extracted.program.DataLoaded s0.mem ∧
+    Buffer s0 pv 8 false ∧ pv.toNat ≠ 0 ∧ NoStraddle C0 s0.mem (s0.regs 14) pv.toNat 8 ∧
+    Outside pv.toNat 8 C0.priv ∧
+    Spec.Disjoint pv.toNat 8 ((s0.regs 4).toNat - (C0.depth + 40)) (C0.depth + 56) ∧
+    Spec.Disjoint (s0.regs 14).toNat 16 ((s0.regs 4).toNat - (C0.depth + 40)) (C0.depth + 56) := by
+  refine ⟨⟨mem2_env (s0.regs 14), ⟨by decide, by decide, by decide +kernel⟩, by decide, by decide,
+    by decide, by decide +kernel, ?_, ?_, ?_⟩, mem2_data, ⟨by decide, by decide +kernel⟩, by decide,
+    ?_, ?_, ?_, ?_⟩
+  · simp only [C0_priv, outside_cons, outside_nil, and_true]; decide
+  · unfold Spec.Disjoint; decide
+  · simp only [C0_priv, outside_cons, outside_nil, and_true]; decide
+  · right; exact ⟨by decide, rfl⟩
+  · simp only [C0_priv, outside_cons, outside_nil, and_true]; decide
+  · unfold Spec.Disjoint; decide
+  · unfold Spec.Disjoint; decide
+
+/-- All hypotheses of `correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (ret : Nat)
+    (s : Janus.Amd64.State), C.Laws ∧
+    CheckptrAlignment64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.checkptrAlignment") C ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [pv] s ∧
+    (CallerOK64 C.toRtEnv s 40 16 ∧ Extracted.program.DataLoaded s.mem ∧
+      Buffer s pv 8 false ∧ pv.toNat ≠ 0 ∧ NoStraddle C s.mem (s.regs 14) pv.toNat 8 ∧
+      Outside pv.toNat 8 C.priv ∧
+      Spec.Disjoint pv.toNat 8 ((s.regs 4).toNat - (C.depth + 40)) (C.depth + 56) ∧
+      Spec.Disjoint (s.regs 14).toNat 16 ((s.regs 4).toNat - (C.depth + 40)) (C.depth + 56)) :=
+  ⟨implAt, C0, ret, s0, C0_laws, model, hret, setup, pre⟩
+
+/-- So the guarantee is reached: `Word(&v)` returns `42`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat = 42 := by
+  refine Returns.mono (correctness implAt C0 C0_laws model pv ret hret s0 setup pre) ?_
+  intro s' ⟨habi, h0, _, _⟩
+  refine ⟨habi, ?_⟩
+  rw [h0]; decide +kernel
+
+end Witness
+
 end Proof
