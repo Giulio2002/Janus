@@ -1,3 +1,5 @@
+import Janus.Amd64.InstrSSE
+
 /-!
 # x86-64 instruction AST (supported subset)
 
@@ -322,6 +324,8 @@ inductive Instr where
   (`systemFlag`) if the popped value sets `TF`, `NT`, `AC` or `ID`; the other system bits are
   ignored at CPL 3 (`IF`, `IOPL`, `RF`, `VM`, `VIF`, `VIP`, the reserved bits). -/
   | popfq
+  /-- The legacy-SSE packed instructions (`Janus.Amd64.InstrSSE`, `DecodeSSE`, `ExecSSE`). -/
+  | sse (i : SseI XLoc Loc Addr)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Amd64

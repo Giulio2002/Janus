@@ -37,6 +37,11 @@ verify_function() {
   local f=$1
   verify "$f" Proof.correctness
   if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then verify "$f" Proof.panics; fi
+  # the non-vacuity witnesses: the hypotheses hold together and the conclusion is reached
+  if grep -q '^namespace Witness' "examples/proofs-amd64/$f/Proof.lean"; then
+    verify "$f" Proof.Witness.nonvacuous
+    verify "$f" Proof.Witness.returns
+  fi
   return 0
 }
 funcs=("$@")

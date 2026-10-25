@@ -218,7 +218,7 @@ Go 1.26.0. Proofs:
 | `CopyBlock512` | `copy` of a 512-byte array through `runtime.memmove`'s AVX path (`VMOVDQU`/`VMOVDQA`, any `dst` alignment), given `memmoveBits & avxSupported` | | ✓ |
 | `AddF64` | the IEEE 754 sum `a + b` rounded to nearest (or a NaN when that is a NaN), under the default `FPCR`/`MXCSR`; on arm64 also exactly Arm's `FPAdd` (and its `FPSR` flags) for every `FPCR` without trap enables | ✓ | ✓ |
 | `Dot3` | `a0*b0 + a1*b1 + a2*b2`: on arm64 Go fuses it, `fma(a2, b2, fma(a1, b1, a0·b0))`; on amd64 (no FMA at `GOAMD64=v1`) `(a0·b0 + a1·b1) + a2·b2` with every operation rounded | ✓ | ✓ |
-| `F64ToU64` | `uint64(x)` is the truncation of `x` whenever that is in `[0, 2^64)` (amd64: through the `UCOMISD`/`SUBSD`/`CVTTSD2SQ`/`BTSQ` sequence, `SUBSD` shown exact); arm64 also: saturation (`0` below, `2^64-1` above, `0` for NaN) and the exact `FPToFixed` for every `FPCR` | ✓ | ✓ |
+| `F64ToU64` | `uint64(x)` is the truncation of `x` whenever that is in `[0, 2^64)` (amd64: through the `UCOMISD`/`SUBSD`/`CVTTSD2SQ`/`BTSQ` sequence, `SUBSD` shown exact); arm64 also: saturation (`0` below, `2^64-1` above, `0` for NaN) and the exact `FPToFixed` for every `FPCR` without trap enables | ✓ | ✓ |
 | `Abs` | `x` with its sign bit cleared, for every encoding including NaNs (integer and move instructions only) | ✓ | ✓ |
 | `HashWith` | an interface call `h.Hash(x)`: `x·K` when `h`'s itab is `*MulHasher`'s, `rotl(x, 13) + K` when it is `*RotHasher`'s (the itab is a hypothesis) | ✓ | ✓ |
 | `HashTwice` | `ApplyTwice(h.Hash, x)` through a method value: `x·K·K` | ✓ | ✓ |
@@ -234,6 +234,10 @@ Go 1.26.0. Proofs:
 | `SumValues` | `for _, v := range m` sums the values, for **every** iteration order | ✓ | ✓ |
 | `CountKeys`, `LookupKey16` | `len(m)` (the number of keys); lookup with `[16]byte` keys (generic `mapaccess2`) | ✓ | ✓ |
 | `MapAccess1Small` | the machine code of `runtime.mapaccess1_fast64` itself meets its contract on small Swiss maps | ✓ | ✓ |
+| `Box` | `any(x)` for a `uint64`: `(type:uint64, ptr)` with a box holding `x`, assuming the `runtime.convT64` contract ([RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md), "Interfaces") | ✓ | ✓ |
+| `AsHasher` | `h, ok := x.(Hasher)`: the itab `getitab` gives (or `0`), the data word and `ok`, for every state of the assertion cache (its probe loop executed), through the `runtime.typeAssert` contract; the static itab for a `*MulHasher` | ✓ | ✓ |
+| `Classify` | a type switch over `nil`, `uint64`, `string`, `Hasher` and the rest: the case taken, through the type-hash compares, the switch-cache probe and the `runtime.interfaceSwitch` contract | ✓ | ✓ |
+| `Equal` | `a == b` on `any`: different type words give `false`, two nils `true`, otherwise `runtime.efaceeq`'s answer (byte equality for `TFlagRegularMemory` types) | ✓ | ✓ |
 | `Triangle` | an expression switch with `fallthrough` (a `.rodata` jump table): `n·(n+1)/2` for `n ≤ 8`, else `0` | ✓ | ✓ |
 | `GotoSum` | a loop built from labels and `goto`: `1 + … + n mod 2^64` | ✓ | ✓ |
 | `Find2D` | nested loops left by a labeled `break`: the first row-major index of `x` in a `3×3` array, or `9` | ✓ | ✓ |

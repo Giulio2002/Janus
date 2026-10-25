@@ -51,6 +51,9 @@ type Unresolved struct {
 type Contract struct {
 	Name string
 	Addr uint64
+	// Pinned: the name is one of runtimeContractStubs and the function's code was checked
+	// against the pinned code of the Go runtime's function of that name (checkContractPin).
+	Pinned bool
 }
 
 type Extraction struct {
@@ -128,6 +131,22 @@ var (
 		"runtime.cgoUse": true,
 	}
 )
+
+// runtimeContractStubs are the runtime functions whose behaviour a framework contract library
+// states (Janus/Contracts/Iface.lean, IfaceAmd64.lean: the interface runtime of Go 1.26). When a
+// --contract pattern matches one, the extractor pins it like a stub (checkContractPin): the
+// pclntab names it in package runtime, in the toolchain's file, and its normalized code is the
+// runtime's (stubpins_gen.go). A binary whose function of that name is not the runtime's is an
+// extraction error, so a theorem's contract hypothesis is about the Go runtime's own code. The
+// functions they call (mallocgc, getitab, typedmemmove, the types' equality functions, ...)
+// are identified by name only, as for the pinned helpers.
+var runtimeContractStubs = map[string]bool{
+	"runtime.convT": true, "runtime.convTnoptr": true, "runtime.convT16": true,
+	"runtime.convT32": true, "runtime.convT64": true, "runtime.convTstring": true,
+	"runtime.convTslice": true, "runtime.assertE2I": true, "runtime.assertE2I2": true,
+	"runtime.typeAssert": true, "runtime.interfaceSwitch": true, "runtime.efaceeq": true,
+	"runtime.ifaceeq": true,
+}
 
 // stubKind classifies a linked symbol name as a runtime stub (name only; see classifyStub for
 // the checks that make the name trustworthy).
@@ -307,16 +326,25 @@ func (m *contractMatcher) match(name string) bool {
 }
 
 // contractTarget records g as a contract (once) if it matches; true if the branch to it must
-// not be followed. Stubs keep their stub meaning (checked by the caller first).
-func (x *Extraction) contractTarget(m *contractMatcher, seen map[uint64]bool, g Func) bool {
+// not be followed. Stubs keep their stub meaning (checked by the caller first). A function of
+// runtimeContractStubs is pinned to the runtime's code (checkContractPin); an error if it is not
+// the runtime's.
+func (x *Extraction) contractTarget(m *contractMatcher, seen map[uint64]bool, g Func) (bool, error) {
 	if !m.match(g.Name) {
-		return false
+		return false, nil
 	}
 	if !seen[g.Addr] {
 		seen[g.Addr] = true
-		x.Contracts = append(x.Contracts, Contract{Name: g.Name, Addr: g.Addr})
+		c := Contract{Name: g.Name, Addr: g.Addr}
+		if runtimeContractStubs[g.Name] {
+			if err := x.Bin.checkContractPin(g); err != nil {
+				return true, err
+			}
+			c.Pinned = true
+		}
+		x.Contracts = append(x.Contracts, c)
 	}
-	return true
+	return true, nil
 }
 
 // extractArm64Func copies one arm64 function and lists its direct branches.

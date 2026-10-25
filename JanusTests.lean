@@ -15,4 +15,5 @@ import JanusTests.Audit
 import JanusTests.Float
 import JanusTests.Dynamic
 import JanusTests.Kernel
+import JanusTests.SSE
 import JanusTests.Crypto

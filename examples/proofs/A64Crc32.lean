@@ -31,7 +31,17 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 namespace Proof
 
 set_option linter.unusedSimpArgs false
-abbrev head : Nat := 0x8ee9c
+/-- The loop head `CMP $16, R11` of `hash/crc32.ieeeUpdate.abi0` (offset `0xc`). Code addresses
+are evaluated from the extraction (`janus_eval%`), so a relinked binary needs no edit. -/
+abbrev head : Nat := janus_eval% (segAddr Extracted.program "hash/crc32.ieeeUpdate.abi0" + 0xc)
+
+/-- The return address into the ABI wrapper `hash/crc32.ieeeUpdate` (after its `BL`, offset `0x20`),
+as a numeral evaluated from the extraction (a macro, so `janus_run` sees a literal). -/
+local macro "wrapRet" : term =>
+  `(janus_eval% (segAddr Extracted.program "hash/crc32.ieeeUpdate" + 0x20))
+
+/-- The return address into `A64Crc32` (after its `BL`, offset `0x24`), as a numeral. -/
+local macro "crcRet" : term => `(janus_eval% (Extracted.entry + 0x24))
 abbrev R : Nat := 0xEDB88320
 
 /-- `X < 2^32` for the CRC register terms of the tail. -/
@@ -70,12 +80,12 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
       acc = CRC.update R s.mem ((crc.toNat % 2 ^ 32) ^^^ 0xFFFFFFFF) p.toNat (16 * i) →
       S.pc = BitVec.ofNat 64 head → S.regs 9 = BitVec.ofNat 64 acc →
       S.regs 13 = BitVec.ofNat 64 (p.toNat + 16 * i) → S.regs 11 = BitVec.ofNat 64 (n.toNat - 16 * i) →
-      S.regs 30 = 585488#64 → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
+      S.regs 30 = BitVec.ofNat 64 wrapRet → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 →
       S.mem = (((((((((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
                                           (BitVec.toNat (s.regs 29))).writeLE
                                       (BitVec.toNat s.sp + 16) 8 p.toNat).writeLE
-                                  (BitVec.toNat s.sp - 112) 8 587332).writeLE
+                                  (BitVec.toNat s.sp - 112) 8 crcRet).writeLE
                               (BitVec.toNat s.sp - 120) 8 (BitVec.toNat s.sp - 56)).writeLE
                           (BitVec.toNat s.sp - 32) 8 p.toNat).writeLE
                       (BitVec.toNat s.sp - 104) 4 (~~~crc).toNat).writeLE
@@ -230,12 +240,12 @@ theorem loop (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
       acc = CRC.update R s.mem ((crc.toNat % 2 ^ 32) ^^^ 0xFFFFFFFF) p.toNat (16 * i) →
       S.pc = BitVec.ofNat 64 head → S.regs 9 = BitVec.ofNat 64 acc →
       S.regs 13 = BitVec.ofNat 64 (p.toNat + 16 * i) → S.regs 11 = BitVec.ofNat 64 (n.toNat - 16 * i) →
-      S.regs 30 = 585488#64 → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
+      S.regs 30 = BitVec.ofNat 64 wrapRet → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 →
       S.mem = (((((((((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
                                           (BitVec.toNat (s.regs 29))).writeLE
                                       (BitVec.toNat s.sp + 16) 8 p.toNat).writeLE
-                                  (BitVec.toNat s.sp - 112) 8 587332).writeLE
+                                  (BitVec.toNat s.sp - 112) 8 crcRet).writeLE
                               (BitVec.toNat s.sp - 120) 8 (BitVec.toNat s.sp - 56)).writeLE
                           (BitVec.toNat s.sp - 32) 8 p.toNat).writeLE
                       (BitVec.toNat s.sp - 104) 4 (~~~crc).toNat).writeLE

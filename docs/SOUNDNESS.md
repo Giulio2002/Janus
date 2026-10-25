@@ -95,6 +95,13 @@ These are trusted, not proved.
    cannot be established through a stub. Panics that Go raises from a hardware trap (a nil
    dereference is a `SIGSEGV`, turned into a panic by `runtime.sigpanic`) are not stub calls:
    the model reports them as faults, and `NeverPanics` excludes faults too.
+   The same pin authenticates the runtime functions a framework contract library describes
+   (`runtimeContractStubs`: the interface runtime's `convT*`, `assertE2I(2)`, `typeAssert`,
+   `interfaceSwitch`, `efaceeq`, `ifaceeq`): a `--contract` that names one is accepted only if
+   the function passes the checks above (its callees are identified by name only), and the
+   extraction records it as `"pinned": true`, so the contract hypothesis of a theorem is about the
+   runtime's own code. Other `--contract` names are not pinned (a contract over arbitrary code
+   is still sound: the theorem holds for whatever code satisfies it).
    The extractor also classifies `runtime.cgocall`, `_cgo_topofstack` and `runtime.cgoUse` as
    `external` stubs (the cgo boundary): a run ends there too, and only the contract semantics of
    `Janus.FFI` (`ReturnsC`, with the contract named in the statement) continues past them; see
@@ -123,7 +130,7 @@ by default; `--replay-fresh` additionally runs `leanchecker --fresh` on the theo
 which re-adds every constant of its environment, core included, to an empty environment
 (minutes: about 140 s for a closure that imports `Lean`). Passing replays are cached in the
 trusted cache (`v1/replay`, never writable by a sandboxed process) under a key covering the
-toolchain version, the module's `.olean` bytes (with its `.server`/`.private` parts) and,
+toolchain's identity (see "Toolchain identity" below), the module's `.olean` bytes (with its `.server`/`.private` parts) and,
 recursively, the keys of its imports, so an unchanged framework module is not replayed again
 while any byte change to it or to anything below it is. The cache is off with `--fresh` and
 without a sandbox. Before replaying, every module of the closure must resolve from its home:
@@ -154,9 +161,38 @@ running between that check and its start. The Lean compiler that produced it is 
 toolchain (item 5).
 
 **The trusted-compile cache** (`v1/trusted`) holds compiled `Extracted`/`JanusTrusted` modules
-keyed by the toolchain, the framework build's pins and the two sources; entries carry a SHA-256
-manifest that is checked on use. Like the replay cache it is written only by janus outside the
-sandbox, is read-only to sandboxed processes, and is off with `--fresh` and without a sandbox.
+keyed by the toolchain's identity, the framework build's pins and the two sources. Each entry has
+a manifest with the SHA-256 of every file, checked on use, and an HMAC-SHA256 of the key and
+those hashes under the result cache's private key (below). An entry whose manifest has no MAC or
+a wrong one (planted, copied from another cache, or recorded before round 8) is a miss, and the
+next compile replaces it (round 8 M1). Like the replay cache it is written only by janus outside
+the sandbox, is read-only to sandboxed processes, and is off with `--fresh` and without a
+sandbox.
+
+**Toolchain identity.** Every cache key (replay, early replay, trusted compile, result) names
+the toolchain by `cacheID`: its version string, the SHA-256 of `bin/lean` and `bin/leanchecker`,
+and the path, size, modification and change times, inode, device and mode of every file under
+the toolchain's `bin/` and `lib/lean/` (a symbolic link also by its target and the file it
+names). `bin/lean` is a small launcher; the elaborator and the kernel are in
+`lib/lean/libleanshared.so` and the core `.olean` files, so a toolchain rebuilt or patched in
+place under the same version changes every key. Stat data, not content hashes, is used for the
+library (about 15 000 files, 233 MB for `libleanshared.so` alone); a rewrite changes the change
+time, which the writer cannot set back. A toolchain that cannot be walked gets a random identity,
+so its caches always miss (round 8 L1).
+
+**The cache root must be private** (round 8 C1). Before the cache is used, janus requires that
+the cache root (`JANUS_CACHE_DIR`, else the user cache directory's `janus`), after resolving
+symbolic links, is a directory owned by the current user and not writable by group or others,
+and that each of its directories janus uses (`v1`, `v1/result`, `v1/trusted`, `v1/replay`,
+`v1/framework`, `v1/consumer`, `v1/tmp`, `v1/run`) is a real directory (not a symbolic link)
+with the same owner and mode restriction. Every ancestor of the root must be owned by the user
+or by root, and not group- or other-writable unless it has the sticky bit (as `/tmp` has: others
+cannot rename or remove our entries there). The result directory must be 0700 and its key
+(`v1/result/.key`) a regular file owned by the user, of mode 0600 or stricter, not a link.
+Cache files (entries, manifests, the key) are opened with `O_NOFOLLOW`. A violation stops
+`janus verify` with an `Invalid` diagnostic (stage `cache safety`) naming the path and what is
+wrong, never a silent miss: another user who can write the root could choose the key and forge a
+`Cached: Verified` report, or plant a framework build or a trusted compile.
 
 ### Verification-result cache
 
@@ -168,7 +204,9 @@ base. What it relies on:
 * **Key.** The SHA-256 of every input the outcome depends on: the janus executable itself (all
   verifier logic and the embedded framework), the framework (its sources' hash and source,
   the build directory, the SHA-256 of every compiled framework module and of the compiled
-  auditor), the toolchain version and binaries, the sandbox mode, the theorem and options, the
+  auditor), the toolchain's identity (version, the SHA-256 of `lean` and `leanchecker`, and
+  the metadata of every file under `bin/` and `lib/lean/`, `libleanshared.so` included: see
+  "Toolchain identity" above), the sandbox mode, the theorem and options, the
   artifact, proof and binary paths, the bytes of `Extracted.lean` and `identity.json`, the
   binary's SHA-256 (verified against the binary by the same extraction check every run starts
   with) and the proof's bytes. A single-file proof can import only `Extracted`, the framework and
@@ -177,8 +215,9 @@ base. What it relies on:
   sources, pins, auditor); after a hit the inputs are read again and must be unchanged.
 * **Authenticity.** Entries are written only by janus, outside the sandbox, after a successful,
   sandboxed, non-`--fresh` run, and each is authenticated with HMAC-SHA256 under a random 32-byte
-  key created on first use (mode 0600, in the result directory). An entry whose report or key does
-  not verify is ignored: the verification runs.
+  key created on first use (mode 0600, in the result directory, which must be private: see
+  "The cache root must be private" above). The same key authenticates the trusted-compile
+  manifests. An entry whose report or key does not verify is ignored: the verification runs.
 * **Isolation.** The result directory, key included, is not visible to sandboxed code at all:
   bubblewrap and the unshare fallback mount an empty tmpfs over it (the unshare script stops if
   it cannot), on top of the read-only cache. A proof or a lakefile can neither read the key nor
@@ -187,13 +226,19 @@ base. What it relies on:
   write the cache. Without a sandbox the proof runs unconfined with the user's privileges, and
   anything it does to the cache (or to the replay and trusted-compile caches) is outside the
   threat model, as before; rerun with `--fresh` after running an untrusted proof unsandboxed.
-* **Threats out of scope.** Anyone who can write the user's cache directory directly can also
-  replace the framework build and the replay cache; the cache does not defend against them.
+* **Other users.** A cache root another user can write (a shared or group-writable directory,
+  one created by someone else, a symbolic link among its directories) or a key others can read is
+  refused (round 8 C1), so another account cannot plant entries or learn the key.
+* **Threats out of scope.** Anything running as the same user outside the sandbox (an
+  unsandboxed proof, other software of that user) can write the cache directly, and can also
+  replace the framework build and the replay cache; the cache does not defend against it.
 
 `audit/round7/run-cache.sh` (run by `audit/round7/run-round7.sh`) attacks the cache: a proof and a lakefile that look for the key and
 the entries and try to plant one (bubblewrap and unshare), a tampered entry, an entry recorded
-with a different framework (a source change), `--fresh` and `--unsafe-no-sandbox`. Every row
-must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
+with a different framework (a source change), `--fresh` and `--unsafe-no-sandbox`.
+`audit/round8/run-round8.sh` adds trusted-compile manifests with a missing or bad MAC, a
+group-writable cache root, a symbolic link among the cache directories and a 0644 key, and runs
+the unit rows for the toolchain identity. Every row must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
 explains why it would not pay for the trusted state it would add.
 
 ### Cache eviction
@@ -586,6 +631,29 @@ distinct rejected words), `sort` 59 → 63 of 66 (138 → 68), `strconv` 5 → 5
 Every word still rejected there is a store-exclusive (`STLXR`/`STLXRB`), `MRS` of the generic
 timer or `SVC`.
 
+## SSE packed instructions (amd64)
+
+The legacy-SSE packed instructions of WP-D (`Janus/Amd64/InstrSSE.lean`, `DecodeSSE.lean`,
+`ExecSSE.lean`) are part of the trusted amd64 model, like `Decode.lean` and `Exec.lean`: they
+are written from the Intel SDM `Operation` sections and differentially tested on the host CPU
+(`scripts/oracle-amd64.sh sse`, docs/ORACLE-AMD64.md: 0 MISMATCH), not proved. What a theorem
+relies on beyond the SDM text:
+
+* **CPU features.** The model executes SSE3, SSSE3, SSE4.1 and SSE4.2 instructions whenever they
+  occur, as the host (and every amd64 CPU Go 1.26 runs on with `GOAMD64=v2` or later) does. On a
+  `GOAMD64=v1` CPU without them they are `#UD`; Go's runtime and assembly test `internal/cpu`
+  flags before using them, so a theorem about such a path holds on CPUs with the feature, and a
+  proof that a guarded path is not taken states the flag.
+* **Alignment.** A 128-bit legacy-SSE memory operand faults unless 16-aligned, except for the
+  SSE4.2 string compares; the narrower operands never fault for alignment. The oracle steers
+  both aligned and misaligned operands and agrees on every case.
+* **Rejected rather than guessed:** implementation-specific results (`RCPPS`, `RSQRTPS`), the
+  masked-off-byte behaviour of `MASKMOVDQU`, reserved immediate bits (`CMPPS/PD imm8 ≥ 8`,
+  `ROUNDPS/PD imm8 ≥ 16`, `PCMPxSTRx imm8<7>`), `66` with `F2`/`F3` except on the 16-bit
+  `CRC32`, MMX forms.
+* **Proof automation** (`TacticSSE`) is not trusted: its element lemmas are proved from
+  `ExecSSE`, and making `ExecSSE.crc32c` irreducible for the elaborator changes no definition.
+
 ## Floating point
 
 Both models implement the scalar `float32`/`float64` instructions Go emits, bit-exactly, on a
@@ -612,7 +680,10 @@ bits are RES0, so a theorem whose precondition allows them set says nothing abou
 unless they read as zero there. Half precision (FEAT_FP16: `ftype = 11`, `FZ16`, `AHP`), BFloat16,
 `FRINT32*/64*`, `FJCVTZS`, fixed-point conversions and Advanced SIMD floating point are rejected.
 The amd64 model is of SSE2 (and SSE4.1 for `ROUNDSD`, executed by Go only after testing
-`x86HasSSE41`) and of the scalar FMA3 instructions (`VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}`,
+`x86HasSSE41`), of the packed SSE/SSE2/SSE3/SSE4.1 floating point of WP-D (each element by the
+scalar operation, the flags of all elements ORed, `#XM` without a write if any element traps;
+`RCPPS`/`RSQRTPS`, whose results are implementation-specific approximations, and `DPPS`/`DPPD`
+are rejected) and of the scalar FMA3 instructions (`VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}`,
 which `GOAMD64=v3` code uses unconditionally and `GOAMD64=v1` code behind `x86HasFMA`): one
 rounding of the exact `±a × b ± c` on the IEEE core, proved equal to IEEE 754
 `fusedMultiplyAdd` in IEEE mode (`FP.fma_ieee`). Where the manuals leave an FMA result open (two
@@ -670,6 +741,19 @@ base:
   runtime code at those addresses, run by the same model), so the theorem holds of it exactly
   when the real runtime meets the contracts. A contract on `Extracted.program` itself would be
   false (no code there) and is never used.
+* **A contract must be satisfiable, and by the real runtime** (round 9 C1). A `Summary` is a
+  claim about every state that meets its precondition; before round 9 the allocation contracts'
+  precondition said nothing about the runtime's own state, so they demanded a fresh writable
+  object from states with no heap mapped and requests up to `maxAlloc` (2^48 bytes). No code
+  meets that (`audit/round9/model/Unsat.lean` proves it false for every program, address and
+  `rt`), so every theorem assuming one was vacuous. Every allocation contract now takes a
+  readiness predicate `H : RtReady`, required at the call for the call's arguments, `g`, `SP`
+  and the runtime's view of memory (`rtView rt`: the bytes inside `rt` and the regions); the
+  theorem quantifies over `H` and assumes it at its entry. The real runtime meets the contract
+  with `H` = "the runtime's code returns as described from every call state with these
+  arguments, `g`, `SP` and runtime memory", and `audit/round9/controls/NewPair_witness.lean`
+  kernel-checks an implementation, `rt`, `H` and a call state for which NewPair's theorem fires.
+  A new contract needs such a witness too.
 * `p.link impl` fetches `p`'s word wherever `p` has code (`Program.fetch_link`), so the proof
   learns nothing about `impl` except through the hypotheses.
 
@@ -679,27 +763,57 @@ no concurrent GC, no preemption):
 * **Allocation** (`Janus/Contracts/Alloc.lean`, `AllocAmd64.lean`). `mallocgc`, `newobject`,
   `makeslice` and `growslice` return a fresh, aligned, writable object (zeroed as Go specifies)
   inside the caller-declared runtime-owned ranges `rt`, change memory only inside `rt` and their
-  stack window, and preserve the ABI's callee-saved registers. Caveats that are assumptions of
-  every such theorem: (1) *runtime-owned memory* is a visible parameter `rt`; the caller's data
-  must be outside it (stated in the precondition); (2) the object's memory is a region already in
-  the state (instructions cannot add regions; Go reserves arenas up front) — a theorem says nothing
-  about states where it is not; (3) one allocation per `rt`: the contracts do not record that an
-  allocated object leaves `rt`; (4) the runtime uses at most `stack` bytes below `SP` (4096 in the
-  examples) and **the goroutine stack does not move**: Go may grow and copy the stack inside a
-  slow path (`morestack`), relocating the caller's frame, which the contracts exclude; (5) the
-  GC's concurrent work (marking, sweeping, assists, finalizers) is outside the model; Go's
-  collector does not move objects, so a returned pointer stays valid.
+  stack window, and preserve the ABI's callee-saved registers, **when the runtime is ready for
+  the call** (`H`, above). Caveats that are assumptions of every such theorem: (1) *runtime-owned
+  memory* is a visible parameter `rt`; the caller's data must be outside it (stated in the
+  precondition); (2) the object's memory is a region already in the state (instructions cannot
+  add regions; Go reserves arenas up front); a call that needs `mmap` is one `H` excludes;
+  (3) one allocation per theorem: the contracts do not record that an allocated object leaves
+  `rt`, and `H` is stated for the call made from the entry state; (4) the runtime uses at most
+  `stack` bytes below `SP` (4096 in the examples) and **the goroutine stack does not move**: Go
+  may grow and copy the stack inside a slow path (`morestack`), and a GC assist that scans the
+  goroutine's own stack may shrink it (`scanstack` → `shrinkstack`), relocating the caller's
+  frame and changing `SP`; such calls are not ones the contract describes, so `H` excludes them;
+  (5) the GC's concurrent work (marking, sweeping, assists, finalizers) and other threads are
+  outside the model: `H` is a property of the call state in the single-threaded model, and
+  whether another thread changes the runtime's memory during the call is not covered; Go's
+  collector does not move objects, so a returned pointer stays valid; (6) a pointerful object
+  of more than 512 bytes (up to `maxSmallSize - 8`) follows an 8-byte malloc header and is only
+  8-aligned (`mallocHdr`, round 9 C2; Go 1.26 returns `slot + 8`).
+* **Interfaces** (`Janus/Spec/Type.lean`, `Janus/Contracts/Iface.lean`, `IfaceAmd64.lean`;
+  docs/RUNTIME-CONTRACTS.md, "Interfaces"). `convT`, `convTnoptr`, `convT16/32/64`,
+  `convTstring`, `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch`,
+  `efaceeq` and `ifaceeq` as `Summary`s over an abstract model `R : IfaceModel` that the theorem
+  quantifies over. Trusted, as claims about the Go 1.26 runtime: (1) each contract (a box in the
+  runtime's memory holding the value; the itab `getitab` returns, or `0`; `switchCase`'s first
+  implemented case; `efaceEqual`/`ifaceEqual`), with every panic and throw path excluded by its
+  precondition; (2) the laws `R.Laws` (descriptors readable in `R.priv`, itabs non-zero, a
+  `TFlagRegularMemory` type compares its `Size_` bytes); (3) where a theorem uses it,
+  `StaticItabs` (`getitab` returns the static `go:itab.*` objects: `runtime.itablink` lists every
+  reachable itab and `itabsinit` adds them before Go code runs, so no plugins or shared
+  libraries); (4) the cache invariants `TACacheOK`/`ISCacheOK` as what the runtime maintains
+  (`buildTypeAssertCache`, `buildInterfaceSwitchCache`; the empty caches satisfy them); (5) our
+  reading of the `internal/abi` layouts. The code is the runtime's: the extractor pins these
+  thirteen functions like stubs (`runtimeContractStubs`, below), their callees by name only. Every
+  contract is satisfiable (`Janus/Contracts/IfaceSat.lean`, `IfaceSatAmd64.lean`: a model, code
+  and a state satisfying the precondition), so no theorem using them is vacuous by an
+  unsatisfiable contract; each interface example also proves its whole hypothesis set jointly
+  satisfiable for its binary and its conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). Boxes are not known to keep their value across later runtime calls.
 * **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
   `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
   `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)
-  makes it unreachable. The precondition states the flag `runtime.writeBarrier.enabled` (as the
+  makes it unreachable. The runtime fields the barrier uses must each be separate from the
+  stored-to field and the stack (round 9 S1: one interval holding them all, as before, failed
+  for about half of the real calls with the barrier on). The precondition states the flag `runtime.writeBarrier.enabled` (as the
   word the code reads), and the barrier's field offsets are read off its code.
 * **The allocator fast path is proved, not assumed** (arm64, `examples/proofs/MallocFast.lean`):
   for a pointer-free request of 16 to 1016 bytes, `runtime.mallocgc` and the inlined
   `nextFreeFast`/`getMCache`/`acquirem`/`releasem` paths of `runtime.mallocgcSmallNoscan` are
   executed from the binary's machine code under `MCacheOK` (a well-formed `g`/`m`/`p`/`mcache`/
   `mspan` state for the request's size class with a free slot in the span's `allocCache`, the
-  slot zero and `span.needzero = 0`, the runtime globals readable, every object separate).
+  slot zero and `span.needzero = 0`, the runtime globals readable, every object separate; each
+  global on its own, since one range spanning them covers `runtime.m0` in `.bss`, which made the
+  statement false for every call on the main thread's `m`, round 9 M1).
   Everything else of `mallocgc` stays trusted, and is not even assumed by that theorem, because
   `MCacheOK` makes it unreachable: the tiny allocator (`mallocgcTiny`), pointerful objects
   (`mallocgcSmallScan*`), large objects (`mallocgcLarge`, `mheap`, `mmap`), span refill
@@ -731,6 +845,23 @@ the register holds, in the model as on hardware. Nothing about Go's type system 
   and re-checked by `janus check`. Dynamically built itabs (`runtime.getitab`, for type
   assertions to interfaces the compiler did not see) are heap objects, not covered by
   `ItabIs`; state their memory directly if needed.
+* **Object names must resolve** (round 8 I1). `ItabIs`, `dataNamed`, `dataAddr`, `dataLen`,
+  `dataWord`, `itabFun`, `segWord`, `segAddr` (arm64 and amd64), amd64 `dataBase` and
+  `Program.contractAddr` (both ISAs; round 9 I1g: a name that is not a recorded contract gives
+  address 0) look an
+  object up by name (or index) and fall back to `False` or `0` when there is none, so a misspelt,
+  absent or lookalike name (`MulHаsher` with a Cyrillic `а`) makes a statement vacuous or about
+  address 0 while it reads as a claim about that object. The auditor therefore requires, in the
+  statement (after proof-local definitions are expanded) and in every dependency definition it
+  uses, that each such name is a string literal (an index: a numeral) naming an object of
+  `Extracted.program` (an `ItabIs` name must be a static itab, `go:itab.…`), and that the
+  program or data argument is `Extracted.program` (`.data`).
+* **Bound variables must be told apart** (round 7 H1, round 9 H2). Two binders of a statement
+  or of a proof-local definition that read the same once lookalike letters are folded to Latin
+  are rejected, and a binder may only use ASCII letters, digits, `_ ' ! ?`, subscripts, basic
+  Greek, the mathematical script/fraktur/double-struck letters and the letterlike symbols the
+  fold maps. Polytonic Greek (`ό` U+1F79 is `ό` U+03CC), the accented/Coptic range and the other
+  letterlike symbols (`K` KELVIN SIGN is `K`) are rejected outright.
 * **Targets are untrusted extraction choices.** `janus extract --targets` and the extractor's
   inference (code addresses computed by user code, itabs and funcvals it loads) only decide
   which code is copied, like reachability. A target that is not copied makes the call fault
