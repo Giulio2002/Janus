@@ -1,5 +1,37 @@
 import Extracted
 
+/-!
+# `MulLD(a, b, r *[16]byte)` (Go) → `c_ldmul` → `ld_mul` (C, x87 `long double`) → Go, end to end (amd64)
+
+```go
+func MulLD(a, b, r *[16]byte) {
+	C.c_ldmul((*C.ld16)(unsafe.Pointer(a)), (*C.ld16)(unsafe.Pointer(b)), (*C.ld16)(unsafe.Pointer(r)))
+}
+```
+```c
+__attribute__((noinline)) long double ld_mul(long double a, long double b) { return a * b; }
+void c_ldmul(const ld16 *a, const ld16 *b, ld16 *r) {
+	*(long double *)r = ld_mul(*(const long double *)a, *(const long double *)b);
+}
+```
+
+**Guarantee (`correctness`).** For all pointers `a`, `b`, `r` and every Go call of
+`example.com/cgo.MulLD` satisfying `GoPre` — the stack-growth checks fall through, the stack
+window is writable, the TLS `g` slot holds `g`, the x87 FPU is idle (`X87.Idle`: empty register
+stack, nothing pending) with the Linux control word (`fpucw = 0x037F`), 16 readable bytes at `a`
+and `b` and 10 writable ones at `r` away from the stack, the `g` struct and the TLS slot, and
+the cgo globals hold their static values — every run returns and the 10 bytes at `r` are
+`prod s.mem a b`: the x87 product of the double-extended values in the low 10 bytes of `a` and
+`b`, rounded to nearest at 64-bit precision (`X87.binop .mul 64 .rne`; by
+`X87.binop_mul_ieee`, IEEE 754 multiplication on the format (15, 63) for supported operands).
+
+The statement is under the trusted `CgoCall Extracted.program` only: the Go code, the cgo
+wrapper, `c_ldmul` (which `push`es the two operands, calls `ld_mul` and stores `ST(0)` with
+`fstpt`) and `ld_mul` (`fldt; fldt; fmulp`) are executed by the model, x87 included.
+`wrapper_spec` (the C side, for every value of `TOP`), `go_spec` (the Go side under
+`CgoSpec wrapper G E`), `refines` and `correctness` compose them as in `GoSum.lean`.
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.CABI Janus.Amd64.Tactic Janus.Spec
   Janus.Amd64.FFI
 
@@ -79,6 +111,9 @@ def fnVar : Nat :=
 def alwaysFalse : Nat :=
   ripTarget Extracted.program (segAddr Extracted.program "example.com/cgo._Cfunc_c_ldmul.abi0" + 0x3e)
 
+/-- The return address of `MulLD`'s call of `_Cfunc_c_ldmul`, reloaded after the C call. -/
+def retMul : Nat := segAddr Extracted.program "example.com/cgo.MulLD" + 0x25
+
 /-- At the `cgocall`: the frame `RBX` and the three operands it points at are Go memory the
 runtime leaves alone, and the x87 FPU is in its call state. -/
 def G (s : State) : Prop :=
@@ -131,13 +166,15 @@ theorem go_spec (a b r : BitVec 64) :
   janus64_intro hs
   janus_eval_nat h_fv : fnVar
   janus_eval_nat h_af : alwaysFalse
-  rw [h_fv] at hfa hfv hdf
-  rw [h_af] at haf hav hda hdRA
+  janus_eval_nat h_ra : retMul
   -- the operand facts stay folded (`Keep`) during the runs: as disjunctions in the context they
   -- would make every `omega` call of the symbolic executor split exponentially
   have hKeep : Keep (Outside a.toNat 16 (Shared s) ∧ Outside b.toNat 16 (Shared s) ∧
-      Outside r.toNat 10 (Shared s) ∧ Outside r.toNat 10 [(5934854, 5934854 + 1)]) := ⟨hdA, hdB, hdR, hdRA⟩
+      Outside r.toNat 10 (Shared s) ∧ Outside r.toNat 10 [(alwaysFalse, alwaysFalse + 1)]) :=
+    ⟨hdA, hdB, hdR, hdRA⟩
   clear hdA hdB hdR hdRA
+  rw [h_fv] at hfa hfv hdf
+  rw [h_af] at haf hav hda
   simp only [Shared, outside_cons, outside_nil, and_true, Janus.Amd64.GoABI.regSP,
     Janus.Amd64.GoABI.regG, stackguard0, stackguard0Offset] at *
   have hfsa : (s.fsBase + BitVec.ofNat 64 18446744073709551608).toNat = s.fsBase.toNat - 8 := by
@@ -146,9 +183,9 @@ theorem go_spec (a b r : BitVec 64) :
     rw [BitVec.toNat_sub]; simp only [BitVec.toNat_ofNat]; omega
   have h80 : (s.regs 4 - 80#64).toNat = (s.regs 4).toNat - 80 := by
     rw [BitVec.toNat_sub]; simp only [BitVec.toNat_ofNat]; omega
-  have hO1 : Outside 5934854 1 [((s.regs 4).toNat - 80 - 1024, (s.regs 4).toNat - 80),
+  have hO1 : Outside alwaysFalse 1 [((s.regs 4).toNat - 80 - 1024, (s.regs 4).toNat - 80),
       ((s.regs 4).toNat - 80 + 8, (s.regs 4).toNat - 80 + 24), ((s.regs 14).toNat, (s.regs 14).toNat + 456),
-      (s.fsBase.toNat - 8, s.fsBase.toNat)] := outside_clobber _ _ _ _ _ hb hda
+      (s.fsBase.toNat - 8, s.fsBase.toNat)] := by rw [h_af]; exact outside_clobber _ _ _ _ _ hb hda
   have hO2 : Outside r.toNat 10 [((s.regs 4).toNat - 80 - 1024, (s.regs 4).toNat - 80),
       ((s.regs 4).toNat - 80 + 8, (s.regs 4).toNat - 80 + 24), ((s.regs 14).toNat, (s.regs 14).toNat + 456),
       (s.fsBase.toNat - 8, s.fsBase.toNat)] := by
@@ -178,14 +215,16 @@ theorem go_spec (a b r : BitVec 64) :
   intro hmf
   -- the two facts the rest of the run needs from the C call: the cgo global is still false and
   -- the result is at `r`; then the frame is no longer needed
-  have hAF : m.readLE 5934854 1 = 0 := by
-    rw [hmf.readLE 5934854 1 hO1]
+  have hAF : m.readLE alwaysFalse 1 = 0 := by
+    rw [hmf.readLE _ 1 hO1, h_af]
     have hdRA := hKeep.2.2.2
+    rw [h_af] at hdRA
     try simp only [outside_cons, outside_nil, and_true] at hdRA
     simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
     exact hav
-  have hAFacc : m.accessible 5934854 1 false = true := by
-    rw [hmf.accessible]; simp only [Janus.Arm64.Memory.accessible_writeLE]; exact haf
+  have hAFacc : m.accessible alwaysFalse 1 false = true := by
+    rw [hmf.accessible, h_af]; simp only [Janus.Arm64.Memory.accessible_writeLE]; exact haf
+  rw [h_af] at hAF hAFacc
   have hR : m.readLE r.toNat 10 = prod s.mem a.toNat b.toNat := by
     rw [hmf.readLE r.toNat 10 hO2,
       Janus.Arm64.Memory.readLE_writeLE_self,
@@ -196,24 +235,33 @@ theorem go_spec (a b r : BitVec 64) :
     simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
   -- the stack words the epilogues of `_Cfunc_c_ldmul` and `MulLD` reload (outside the clobbered
   -- range, so `cgocall` kept them), and the stack's accessibility
+  have hdR := hKeep.2.2.1
+  try simp only [Shared, outside_cons, outside_nil, and_true] at hdR
   have hS8 : m.readLE ((s.regs 4).toNat - 8) 8 = (s.regs 5).toNat := by
     rw [hmf.readLE _ 8 (by simp only [outside_cons, outside_nil, and_true]; refine ⟨?_, ?_, ?_, ?_⟩ <;> omega)]
-    janus64_simp
-  have hS40 : m.readLE ((s.regs 4).toNat - 40) 8 = 4850629 := by
+    simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
+      Janus.Arm64.Memory.readLE_writeLE_self]
+    have := (s.regs 5).isLt; simp only [Nat.reducePow]; omega
+  have hS40 : m.readLE ((s.regs 4).toNat - 40) 8 = retMul := by
+    rw [h_ra]
     rw [hmf.readLE _ 8 (by simp only [outside_cons, outside_nil, and_true]; refine ⟨?_, ?_, ?_, ?_⟩ <;> omega)]
-    janus64_simp
+    simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
+      Janus.Arm64.Memory.readLE_writeLE_self]
   have hS48 : m.readLE ((s.regs 4).toNat - 48) 8 = (s.regs 4).toNat - 8 := by
     rw [hmf.readLE _ 8 (by simp only [outside_cons, outside_nil, and_true]; refine ⟨?_, ?_, ?_, ?_⟩ <;> omega)]
-    janus64_simp
+    simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
+      Janus.Arm64.Memory.readLE_writeLE_self]
+    have := (s.regs 4).isLt; simp only [Nat.reducePow]; omega
   have hS0 : m.readLE (s.regs 4).toNat 8 = s.mem.readLE (s.regs 4).toNat 8 := by
     rw [hmf.readLE _ 8 (by simp only [outside_cons, outside_nil, and_true]; refine ⟨?_, ?_, ?_, ?_⟩ <;> omega)]
     simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
+  clear hdR
   have hSacc : m.accessible ((s.regs 4).toNat - 80) (80 + 8) true = true := by
     rw [hmf.accessible]; simp only [Janus.Arm64.Memory.accessible_writeLE]; exact hst
+  rw [h_ra] at hS40
   clear hmf
   apply ReturnsC.of_reaches
   janus64_run [h4, h5, h14, h15, hfsa', hfsg', hAF, hAFacc, hS0, hS8, hS40, hS48]
-  exact ⟨rfl, hR⟩
 
 /-! ## Composition -/
 
