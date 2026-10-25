@@ -217,6 +217,56 @@ def minmax (max : Bool) (f : Fmt) (c : Ctl) (a b : Nat) : XR :=
   check (if kindOf f c a = .zero && kindOf f c b = .zero then dazBits f c b
     else if pickA then dazBits f c a else dazBits f c b) de
 
+/-! ## Fused multiply-add (FMA3, scalar) -/
+
+/-- `±(a × b) ± c` with a single rounding (`VFMADD`: `negP = negC = false`, `VFMSUB`: `negC`,
+`VFNMADD`: `negP`, `VFNMSUB`: both), for the `132`/`213`/`231` forms already mapped to the
+multiplicands `a`, `b` and the addend `c` (Intel SDM Vol. 1 §14.5.2, Vol. 2 `VFMADD132SD`...).
+`none` where the manuals leave the result to the implementation, so that a proof cannot rely on
+a vendor:
+
+* two or three NaN operands (Intel returns the first NaN in the order `a`, `b`, `c`; the AMD
+  manual does not fix the order);
+* `0 × ∞ + NaN` (IEEE 754-2008 §7.2 leaves `IE` implementation-defined for a quiet NaN; Intel
+  returns the NaN without `IE`).
+
+Otherwise: a single NaN operand is returned quieted and never negated, `IE` if it is
+signalling; `0 × ∞` and `∞ - ∞` (after the negations) give the indefinite with `IE`; a
+subnormal operand raises `DE` (unless `DAZ` reads it as a zero); an exact zero sum is the zero of
+the common sign when the product and `c` are zeros of the same sign, otherwise `+0` (`-0` when
+rounding down); everything else is the exact value rounded once by `roundX` (overflow,
+underflow after rounding, `FTZ`, inexact). -/
+def fma (f : Fmt) (c : Ctl) (negP negC : Bool) (a b d : Nat) : Option XR :=
+  let na := isNaN f a
+  let nb := isNaN f b
+  let nd := isNaN f d
+  if na.toNat + nb.toNat + nd.toNat ≥ 2 then none else
+  let ka := kindOf f c a
+  let kb := kindOf f c b
+  let kd := kindOf f c d
+  let infP := ka = .inf || kb = .inf
+  let zP := ka = .zero || kb = .zero
+  if nd && infP && zP then none else
+  if na then some (check (quiet f a) (if isSNaN f a then IE else 0)) else
+  if nb then some (check (quiet f b) (if isSNaN f b then IE else 0)) else
+  if nd then some (check (quiet f d) (if isSNaN f d then IE else 0)) else
+  let sP := (signOf f a != signOf f b) != negP
+  let sD := signOf f d != negC
+  let infD := kd = .inf
+  if (infP && zP) || (infP && infD && sP != sD) then some (check (indefinite f) IE) else
+  let de := if ka = .subnormal || kb = .subnormal || kd = .subnormal then DE else 0
+  if infP then some (check (inf f sP) de) else
+  if infD then some (check (inf f sD) de) else
+  if zP && kd = .zero then some (check (zero f (if sP == sD then sP else c.rc = .rmi)) de) else
+  let va := valOf f c a
+  let vb := valOf f c b
+  let vd := valOf f c d
+  let pn : Int := if negP then -(va.n * vb.n) else va.n * vb.n
+  let dn : Int := if negC then -vd.n else vd.n
+  match addExact dn vd.e pn (va.e + vb.e) with
+  | none => some (check (zero f (c.rc = .rmi)) de)
+  | some (neg, m, e) => some (roundX f c c.rc de neg m e)
+
 /-! ## Comparisons -/
 
 /-- The relation of `a` and `b`: `none` = unordered, else `some (-1 | 0 | 1)`. -/

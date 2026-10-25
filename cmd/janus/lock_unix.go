@@ -14,9 +14,10 @@ type fileLock struct{ f *os.File }
 func lockFile(path string, block bool) (*fileLock, error) { return lockFileMode(path, false, block) }
 
 // lockFileMode takes a shared (readers) or exclusive (writers) flock on path. A lock file can
-// be removed by its holder (evictStale deletes a cache entry together with its lock file), so
-// after the lock is granted the path must still name the locked inode; otherwise the lock is on
-// an unlinked file nobody else will ever see, and it is taken again on the new file.
+// be removed by its holder (the cache collector, cachegc.go, deletes an entry together with its
+// lock file), so after the lock is granted the path must still name the locked inode; otherwise
+// the lock is on an unlinked file nobody else will ever see, and it is taken again on the new
+// file.
 func lockFileMode(path string, shared, block bool) (*fileLock, error) {
 	for {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)

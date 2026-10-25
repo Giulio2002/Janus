@@ -341,7 +341,10 @@ func Setup(r *rand.Rand, b []byte) State {
 			}
 		}
 	}
-	if info, ok := fpClasses[cls]; ok {
+	setupV3(r, &s, inst, cls)
+	if info, ok := fpClasses[cls]; ok && info.fma {
+		setupFMA(r, &s, inst, cls, info)
+	} else if ok {
 		setupFP(r, &s, inst, info)
 	} else if r.IntN(8) == 0 {
 		// a non-default MXCSR now and then: every instruction must preserve it
