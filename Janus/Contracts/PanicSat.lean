@@ -284,8 +284,8 @@ def gopanicCode : List Nat :=
 
 theorem gopanic_impl : GopanicRecoverContract (toy.link (at0 gopanicCode)) A0 P0 40 48 0x100800 := by
   rw [link_at0]
-  intro s hpc ⟨henv, hg, ⟨h30a, h30b, hsp, hst, h8, hwin, hacc⟩, hout⟩ hx0 hbits hb1 hb2 hb3 hs1 hs2
-    hf1 hf2 hc1 hc2
+  intro s hpc ⟨⟨henv, hg, ⟨h30a, h30b, hsp, hst, h8, hwin, hacc⟩, hout⟩, hx0, hbits, hb1, hb2, hb3,
+    hs1, hs2, hf1, hf2, hc1, hc2⟩
   simp only [P0_env, P0_depth, P0_priv, outside_cons, outside_nil, and_true] at henv hwin hacc hout hb3 hst
   have hrd : s.mem.accessible PANREC 0x800 true = true :=
     Memory.accessible_mono _ henv (by simp [PANREC]) (by simp [PANREC])
@@ -330,14 +330,7 @@ theorem gopanic_impl : GopanicRecoverContract (toy.link (at0 gopanicCode)) A0 P0
 
 theorem gopanic_satisfiable : ∃ (P : PanicRuntime) (impl : List Segment) (bitsOff slotOff resume : Nat),
     P.Laws ∧ GopanicRecoverContract (toy.link impl) A0 P bitsOff slotOff resume ∧
-    ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ PanicPre P 2 s ∧ (s.regs 0).toNat ≠ 0 ∧
-      s.mem.readLE (s.sp.toNat + bitsOff) 1 = 1 ∧ s.sp.toNat + bitsOff + 1 ≤ 2 ^ 48 ∧
-      s.mem.accessible (s.sp.toNat + bitsOff) 1 true = true ∧ Outside (s.sp.toNat + bitsOff) 1 P.priv ∧
-      s.sp.toNat + slotOff + 8 ≤ 2 ^ 48 ∧ s.mem.accessible (s.sp.toNat + slotOff) 8 false = true ∧
-      s.mem.readLE (s.sp.toNat + slotOff) 8 + 8 ≤ 2 ^ 48 ∧
-      s.mem.accessible (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 false = true ∧
-      s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 % 4 = 0 ∧
-      s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 < 2 ^ 48 := by
+    ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧ GopanicRecoverPre P bitsOff slotOff s := by
   refine ⟨P0, _, 40, 48, 0x100800, P0_laws, gopanic_impl, gstate, rfl, gstate_pre 2 (by decide),
     by decide, ?_, by decide, ?_, ?_, by decide, ?_, ?_, ?_, ?_, ?_⟩ <;>
     (try simp only [P0_priv, outside_cons, outside_nil, and_true]) <;> decide

@@ -199,26 +199,22 @@ def GorecoverContract (p : Janus.Amd64.Program) (addr : Nat) (P : PanicRuntime) 
         (s'.regs 0).toNat = v.typ ∧ (s'.regs 3).toNat = v.data ∧
           P.Recovered s'.mem (s.regs 14).toNat))
 
-/-- `runtime.gopanic(v)` for a frame with one pending open-coded defer that recovers (amd64; see
-`Janus.Contracts.Panic.GopanicRecoverContract`). `F`'s body `RSP` is `RSP + 8` at entry (the
-return address is pushed); `deferBits` at `F.RSP + bitsOff`, the slot at `F.RSP + slotOff`. The
-closure is entered with `RDX` = the funcval, the return point `rp` at `[RSP]`, `RBP` as at entry,
-and returns obeying the ABI (`RSP + 8`, `RBP`, `R14`, `X15 = 0`, `DF` clear); `F` is resumed at
-`resume` with `RSP` = `F`'s, `RBP` as at entry (`F`'s frame pointer), `R14` kept, `X15 = 0`, the
-direction flag clear. -/
-def GopanicRecoverContract (p : Janus.Amd64.Program) (addr : Nat) (P : PanicRuntime)
-    (bitsOff slotOff resume : Nat) : Prop :=
-  ∀ s, s.rip = BitVec.ofNat 64 addr → PanicPre P 2 s → (s.regs 0).toNat ≠ 0 →
-    s.mem.readLE ((s.regs 4).toNat + 8 + bitsOff) 1 = 1 →
-    (s.regs 4).toNat + 8 + bitsOff + 1 ≤ 2 ^ 48 →
-    s.mem.accessible ((s.regs 4).toNat + 8 + bitsOff) 1 true = true →
-    Outside ((s.regs 4).toNat + 8 + bitsOff) 1 P.priv →
-    (s.regs 4).toNat + 8 + slotOff + 8 ≤ 2 ^ 48 →
-    s.mem.accessible ((s.regs 4).toNat + 8 + slotOff) 8 false = true →
-    s.mem.readLE ((s.regs 4).toNat + 8 + slotOff) 8 + 8 ≤ 2 ^ 48 →
-    s.mem.accessible (s.mem.readLE ((s.regs 4).toNat + 8 + slotOff) 8) 8 false = true →
-    s.mem.readLE (s.mem.readLE ((s.regs 4).toNat + 8 + slotOff) 8) 8 < 2 ^ 47 →
-    ∃ k c, Janus.Amd64.Program.Steps p s k c ∧
+/-- The precondition of `GopanicRecoverContract` (amd64). -/
+def GopanicRecoverPre (P : PanicRuntime) (bitsOff slotOff : Nat) (s : State) : Prop :=
+  PanicPre P 2 s ∧ (s.regs 0).toNat ≠ 0 ∧
+    s.mem.readLE ((s.regs 4).toNat + 8 + bitsOff) 1 = 1 ∧
+    (s.regs 4).toNat + 8 + bitsOff + 1 ≤ 2 ^ 48 ∧
+    s.mem.accessible ((s.regs 4).toNat + 8 + bitsOff) 1 true = true ∧
+    Outside ((s.regs 4).toNat + 8 + bitsOff) 1 P.priv ∧
+    (s.regs 4).toNat + 8 + slotOff + 8 ≤ 2 ^ 48 ∧
+    s.mem.accessible ((s.regs 4).toNat + 8 + slotOff) 8 false = true ∧
+    s.mem.readLE ((s.regs 4).toNat + 8 + slotOff) 8 + 8 ≤ 2 ^ 48 ∧
+    s.mem.accessible (s.mem.readLE ((s.regs 4).toNat + 8 + slotOff) 8) 8 false = true ∧
+    s.mem.readLE (s.mem.readLE ((s.regs 4).toNat + 8 + slotOff) 8) 8 < 2 ^ 47
+
+/-- The closure call `gopanic` reaches from `s` and its continuation (amd64). -/
+def GopanicRecoverCall (p : Janus.Amd64.Program) (P : PanicRuntime) (bitsOff slotOff resume : Nat)
+    (s c : State) : Prop :=
       c.rip = BitVec.ofNat 64 (s.mem.readLE (s.mem.readLE ((s.regs 4).toNat + 8 + slotOff) 8) 8) ∧
       c.regs 2 = BitVec.ofNat 64 (s.mem.readLE ((s.regs 4).toNat + 8 + slotOff) 8) ∧
       c.regs 14 = s.regs 14 ∧ c.xmm 15 = 0 ∧ c.df = false ∧
@@ -240,6 +236,28 @@ def GopanicRecoverContract (p : Janus.Amd64.Program) (addr : Nat) (P : PanicRunt
           d.xmm 15 = 0 ∧ d.df = false ∧
           MemFrame c'.mem d.mem (P.priv ++ [((s.regs 4).toNat - P.depth, (s.regs 4).toNat)]) ∧
           P.Env d.mem ∧ P.Calm d.mem (s.regs 14).toNat
+
+/-- `runtime.gopanic(v)` for a frame with one pending open-coded defer that recovers (amd64; see
+`Janus.Contracts.Panic.GopanicRecoverContract`). `F`'s body `RSP` is `RSP + 8` at entry (the
+return address is pushed); `deferBits` at `F.RSP + bitsOff`, the slot at `F.RSP + slotOff`. The
+closure is entered with `RDX` = the funcval, the return point `rp` at `[RSP]`, `RBP` as at entry,
+and returns obeying the ABI (`RSP + 8`, `RBP`, `R14`, `X15 = 0`, `DF` clear); `F` is resumed at
+`resume` with `RSP` = `F`'s, `RBP` as at entry (`F`'s frame pointer), `R14` kept, `X15 = 0`, the
+direction flag clear. -/
+def GopanicRecoverContract (p : Janus.Amd64.Program) (addr : Nat) (P : PanicRuntime)
+    (bitsOff slotOff resume : Nat) : Prop :=
+  ∀ s, s.rip = BitVec.ofNat 64 addr → GopanicRecoverPre P bitsOff slotOff s →
+    ∃ k c, Janus.Amd64.Program.Steps p s k c ∧ GopanicRecoverCall p P bitsOff slotOff resume s c
+
+/-- Use the `gopanic` contract inside a run of `p.withExit ret` (amd64). -/
+theorem GopanicRecoverContract.reaches {p : Janus.Amd64.Program} {addr ret bitsOff slotOff resume : Nat}
+    {P : PanicRuntime} {S : State} {Q : Janus.Amd64.Outcome → Prop}
+    (h : GopanicRecoverContract p addr P bitsOff slotOff resume) (hret : RetAddr p ret)
+    (hpc : S.rip = BitVec.ofNat 64 addr) (hpre : GopanicRecoverPre P bitsOff slotOff S)
+    (hk : ∀ c, GopanicRecoverCall p P bitsOff slotOff resume S c → Reaches (p.withExit ret) c Q) :
+    Reaches (p.withExit ret) S Q := by
+  obtain ⟨k, c, hst, hc⟩ := h S hpc hpre
+  exact Reaches.of_steps (hst.withExit hret.fetch_none) (hk c hc)
 
 theorem panicrangestate_panics (P : PanicRuntime) (s : State) :
     (goClass P).atStub "runtime.panicrangestate" s (P.err ErrKind.rangeState) :=

@@ -247,6 +247,39 @@ def GorecoverContract (p : Program) (addr : Nat) (P : PanicRuntime) : Prop :=
         (s'.regs 0).toNat = v.typ ∧ (s'.regs 1).toNat = v.data ∧
           P.Recovered s'.mem (s.regs 28).toNat))
 
+/-- The precondition of `GopanicRecoverContract` at `gopanic`'s entry `s` (see there). -/
+def GopanicRecoverPre (P : PanicRuntime) (bitsOff slotOff : Nat) (s : State) : Prop :=
+  PanicPre P 2 s ∧ (s.regs 0).toNat ≠ 0 ∧
+    s.mem.readLE (s.sp.toNat + bitsOff) 1 = 1 ∧
+    s.sp.toNat + bitsOff + 1 ≤ 2 ^ 48 ∧ s.mem.accessible (s.sp.toNat + bitsOff) 1 true = true ∧
+    Outside (s.sp.toNat + bitsOff) 1 P.priv ∧
+    s.sp.toNat + slotOff + 8 ≤ 2 ^ 48 ∧ s.mem.accessible (s.sp.toNat + slotOff) 8 false = true ∧
+    s.mem.readLE (s.sp.toNat + slotOff) 8 + 8 ≤ 2 ^ 48 ∧
+    s.mem.accessible (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 false = true ∧
+    s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 % 4 = 0 ∧
+    s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 < 2 ^ 48
+
+/-- The closure call `gopanic` reaches from `s` (state `c`), and its continuation (see
+`GopanicRecoverContract`). -/
+def GopanicRecoverCall (p : Program) (P : PanicRuntime) (bitsOff slotOff resume : Nat)
+    (s c : State) : Prop :=
+  c.pc = BitVec.ofNat 64 (s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8) ∧
+    c.regs 26 = BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + slotOff) 8) ∧
+    c.regs 28 = s.regs 28 ∧ c.regs 18 = s.regs 18 ∧ c.regs 29 = c.sp - 8 ∧
+    c.sp.toNat % 16 = 0 ∧ s.sp.toNat - P.depth ≤ c.sp.toNat ∧ c.sp.toNat + 16 ≤ s.sp.toNat ∧
+    (c.regs 30).toNat % 4 = 0 ∧ (c.regs 30).toNat < 2 ^ 48 ∧
+    P.Panicking c.mem (s.regs 28).toNat ⟨(s.regs 0).toNat, (s.regs 1).toNat⟩ (c.regs 30).toNat ∧
+    P.Env c.mem ∧ c.mem.readLE (s.sp.toNat + bitsOff) 1 = 0 ∧
+    MemFrame s.mem c.mem (P.priv ++ [(s.sp.toNat - P.depth, s.sp.toNat - 8),
+      (s.sp.toNat + bitsOff, s.sp.toNat + bitsOff + 1)]) ∧
+    ∀ c', c'.pc = c.regs 30 → c'.sp = c.sp → c'.regs 28 = c.regs 28 → c'.regs 18 = c.regs 18 →
+      Map.Agrees c.mem c'.mem [(c.sp.toNat, s.sp.toNat)] → P.Env c'.mem →
+      P.Recovered c'.mem (s.regs 28).toNat →
+      ∃ k' d, Program.Steps p c' k' d ∧ d.pc = BitVec.ofNat 64 resume ∧ d.sp = s.sp ∧
+        d.regs 28 = s.regs 28 ∧ d.regs 18 = s.regs 18 ∧ d.regs 29 = s.sp - 8 ∧
+        MemFrame c'.mem d.mem (P.priv ++ [(s.sp.toNat - P.depth, s.sp.toNat - 8)]) ∧
+        P.Env d.mem ∧ P.Calm d.mem (s.regs 28).toNat
+
 /-- `runtime.gopanic(v)` for a frame whose only pending deferred call is an open-coded defer that
 **recovers** (Go 1.26 `gopanic` → `nextDefer` → `recovery`). The panicking frame `F` is the caller
 of `gopanic` (`F`'s `SP` is `SP` at entry); its open-coded `deferBits` byte is at `SP + bitsOff`
@@ -269,32 +302,19 @@ and the runtime's stack window, and no panic active (`P.Calm`). If the closure d
 the contract says nothing. -/
 def GopanicRecoverContract (p : Program) (addr : Nat) (P : PanicRuntime)
     (bitsOff slotOff resume : Nat) : Prop :=
-  ∀ s, s.pc = BitVec.ofNat 64 addr → PanicPre P 2 s → (s.regs 0).toNat ≠ 0 →
-    s.mem.readLE (s.sp.toNat + bitsOff) 1 = 1 →
-    s.sp.toNat + bitsOff + 1 ≤ 2 ^ 48 → s.mem.accessible (s.sp.toNat + bitsOff) 1 true = true →
-    Outside (s.sp.toNat + bitsOff) 1 P.priv →
-    s.sp.toNat + slotOff + 8 ≤ 2 ^ 48 → s.mem.accessible (s.sp.toNat + slotOff) 8 false = true →
-    s.mem.readLE (s.sp.toNat + slotOff) 8 + 8 ≤ 2 ^ 48 →
-    s.mem.accessible (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 false = true →
-    s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 % 4 = 0 →
-    s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8 < 2 ^ 48 →
-    ∃ k c, Program.Steps p s k c ∧
-      c.pc = BitVec.ofNat 64 (s.mem.readLE (s.mem.readLE (s.sp.toNat + slotOff) 8) 8) ∧
-      c.regs 26 = BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + slotOff) 8) ∧
-      c.regs 28 = s.regs 28 ∧ c.regs 18 = s.regs 18 ∧ c.regs 29 = c.sp - 8 ∧
-      c.sp.toNat % 16 = 0 ∧ s.sp.toNat - P.depth ≤ c.sp.toNat ∧ c.sp.toNat + 16 ≤ s.sp.toNat ∧
-      (c.regs 30).toNat % 4 = 0 ∧ (c.regs 30).toNat < 2 ^ 48 ∧
-      P.Panicking c.mem (s.regs 28).toNat ⟨(s.regs 0).toNat, (s.regs 1).toNat⟩ (c.regs 30).toNat ∧
-      P.Env c.mem ∧ c.mem.readLE (s.sp.toNat + bitsOff) 1 = 0 ∧
-      MemFrame s.mem c.mem (P.priv ++ [(s.sp.toNat - P.depth, s.sp.toNat - 8),
-        (s.sp.toNat + bitsOff, s.sp.toNat + bitsOff + 1)]) ∧
-      ∀ c', c'.pc = c.regs 30 → c'.sp = c.sp → c'.regs 28 = c.regs 28 → c'.regs 18 = c.regs 18 →
-        Map.Agrees c.mem c'.mem [(c.sp.toNat, s.sp.toNat)] → P.Env c'.mem →
-        P.Recovered c'.mem (s.regs 28).toNat →
-        ∃ k' d, Program.Steps p c' k' d ∧ d.pc = BitVec.ofNat 64 resume ∧ d.sp = s.sp ∧
-          d.regs 28 = s.regs 28 ∧ d.regs 18 = s.regs 18 ∧ d.regs 29 = s.sp - 8 ∧
-          MemFrame c'.mem d.mem (P.priv ++ [(s.sp.toNat - P.depth, s.sp.toNat - 8)]) ∧
-          P.Env d.mem ∧ P.Calm d.mem (s.regs 28).toNat
+  ∀ s, s.pc = BitVec.ofNat 64 addr → GopanicRecoverPre P bitsOff slotOff s →
+    ∃ k c, Program.Steps p s k c ∧ GopanicRecoverCall p P bitsOff slotOff resume s c
+
+/-- Use the `gopanic` contract inside a run of `p.withExit ret`: from its entry `S`, continue from
+the closure call `c` it reaches. -/
+theorem GopanicRecoverContract.reaches {p : Program} {addr ret bitsOff slotOff resume : Nat}
+    {P : PanicRuntime} {S : State} {Q : Outcome → Prop}
+    (h : GopanicRecoverContract p addr P bitsOff slotOff resume) (hret : RetAddr p ret)
+    (hpc : S.pc = BitVec.ofNat 64 addr) (hpre : GopanicRecoverPre P bitsOff slotOff S)
+    (hk : ∀ c, GopanicRecoverCall p P bitsOff slotOff resume S c → Reaches (p.withExit ret) c Q) :
+    Reaches (p.withExit ret) S Q := by
+  obtain ⟨k, c, hst, hc⟩ := h S hpc hpre
+  exact Reaches.of_steps (hst.withExit hret.fetch_none) (hk c hc)
 
 /-- `runtime.panicrangestate(state)`: always panics (a range-over-func misuse); reaching it is a
 panic with a `runtime.Error` of kind `rangeState`. Stated through `goClass` (it is a panic
