@@ -270,6 +270,53 @@ addend (quieted, `IE` for any signalling one); a NaN is never negated by `VFNMAD
 `0 × ∞ + qNaN` returns the NaN without `IE`; `DE` is not raised when a NaN takes precedence. The
 model faults in the two vendor-dependent cases (see `FP.fma`).
 
+### SSE packed instructions (WP-D, 2026-10-25)
+
+The SSE2/SSE3/SSSE3/SSE4.1/SSE4.2 packed instructions of `Janus/Amd64/ExecSSE.lean`.
+`scripts/oracle-amd64.sh sse` runs the targeted specs (`gen.SSESpecs`, `oracle-amd64/gen/sse.go`:
+every modelled `66 0F xx` packed-integer opcode in register and memory forms with its MMX and
+`F3` neighbours, the shift groups `66 0F 71/72/73` with every `/r`, the `MOVLPS`/`MOVHLPS`/
+`MOVHPS`/`MOVLHPS`/`MOVDDUP`/`MOVSLDUP`/`MOVSHDUP` opcodes under every mandatory prefix, the
+non-temporal moves, `LDDQU`, `MASKMOVDQU` (not modelled), the shuffles, `PINSRW`/`PEXTRW`, every
+modelled `66 0F 38 xx` and `66 0F 3A xx` opcode with their MMX/`F3` neighbours and unmodelled
+ones (`DPPS`, `PCLMULQDQ`, AES), `CRC32` at every width and prefix order, and the packed
+floating point including `RCPPS`/`RSQRTPS`); the edge families (`gen.SSEEdges`: every
+`PCMPESTRI/PCMPESTRM/PCMPISTRI/PCMPISTRM` `imm8` with clear bit 7 on strings over a small
+alphabet with nulls, needles copied from the haystack and explicit lengths around 0, ±8, ±16
+and the 32/64-bit boundaries, with and without `REX.W`; the shifts by immediate at counts around
+the element width; the saturating, packing, averaging, min/max and multiply-high operations on
+boundary elements; every packed floating-point operation on IEEE edge values in every lane under
+the 16 `RC` × `FTZ` × `DAZ` settings and with each exception unmasked alone; `CRC32` at every
+width); and every WP-D-class instruction harvested from the `GOAMD64=v1` test binaries of
+`internal/chacha8rand hash/crc32 bytes strings crypto/internal/fips140/nistec crypto/aes
+crypto/sha256 crypto/sha1 crypto/cipher math` and from the C corpus (`scripts/coverage/ccorpus`,
+`examples/cgo/ccover.c`) compiled by gcc and clang at `-O2` and `-O3`. States: element edge
+values in every XMM register and in the memory operand, 16-byte memory operands mostly aligned,
+shift counts with high garbage bits, `XMM0` blend masks, integer lanes for `CVTDQ2PS/PD`.
+
+| run | cases | agree | of which both fault | model-gap | **MISMATCH** |
+|---|---:|---:|---:|---:|---:|
+| `sse`, `SEED=1`, `N=600`, `SSE_K=12` | 861,894 | 792,884 | 267,052 | 69,010 | **0** |
+| of which `edge/sse-fp` | 105,600 | 105,600 | 6,434 | 0 | **0** |
+| of which the other edge families | 10,350 | 10,350 | 750 | 0 | **0** |
+| of which harvested | 6,144 | 6,144 | 317 | 0 | **0** |
+| `sse`, `SEED=2`, `N=1200`, `SSE_K=24` (16 string-compare states per `imm8` and round) | 1,727,192 | 1,588,756 | 534,694 | 138,436 | **0** |
+| of which `edge/sse-fp` | 211,200 | 211,200 | 12,843 | 0 | **0** |
+| of which the other edge families (`pcmpstr` 4,800) | 24,300 | 24,300 | 1,500 | 0 | **0** |
+| of which harvested | 12,288 | 12,288 | 705 | 0 | **0** |
+| `full` after WP-D (main `a3626db` merged; `SEED=1`) | 1,969,898 | 1,668,806 | 565,341 | 301,092 | **0** |
+| `fp` after WP-D | 548,856 | 434,828 | 80,435 | 114,028 | **0** |
+| `v3` after WP-D | 198,378 | 170,196 | 38,311 | 28,182 | **0** |
+
+Every model gap was checked by class and encoding: the `67` (address size) prefix, the MMX forms,
+`66` with `F2`/`F3`, the reserved immediates the decoder refuses (`CMPPS/PD imm8 ≥ 8`,
+`ROUNDPS/PD imm8 ≥ 16`, `PCMPxSTRx imm8<7>`), duplicated `F2`, `REX.W` on the 16-bit `CRC32`,
+the unmodelled `DPPS`/`DPPD`/`RCPPS`/`RSQRTPS`/`MASKMOVDQU`/AES/`PCLMULQDQ`, and 7 `RIP`-relative
+accesses outside the buffer (served by the host from its own pages). None is an alignment
+disagreement: the model faults with `misaligned` exactly when the host raises `#GP`, including
+for `PTEST`, `PALIGNR`, `PMULLD`, `ROUNDPS` (aligned) and `PCMPESTRI`, `PMOVSX` `m64`,
+`CVTDQ2PD m64` (unaligned).
+
 ## Running it
 
 ```
@@ -278,6 +325,7 @@ scripts/oracle-amd64.sh quick      # generated cases only (~100k)
 scripts/oracle-amd64.sh full       # generated + edge + harvested from real Go binaries (default)
 scripts/oracle-amd64.sh fp         # SSE scalar floating point only
 scripts/oracle-amd64.sh v3         # the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, FMA, PSHUFB/PSIGNB)
+scripts/oracle-amd64.sh sse        # the SSE packed instructions of WP-D only (SSE2..SSE4.2)
 ```
 
 Knobs: `OUT` (default `artifacts/oracle-amd64`), `JOBS` (default 16, capped at 24), `N`
