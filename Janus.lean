@@ -36,6 +36,7 @@ import Janus.Contracts.MapAmd64
 import Janus.Spec.Type
 import Janus.Spec.Panic
 import Janus.Contracts.Iface
+import Janus.Contracts.Stack
 import Janus.Contracts.Panic
 import Janus.Contracts.PanicAmd64
 import Janus.Contracts.PanicSat
@@ -45,4 +46,5 @@ import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat
 import Janus.Contracts.IfaceSatAmd64
 import Janus.Spec.CRC32C
+import Janus.Spec.Stack
 import Janus.Tactic.ABI0

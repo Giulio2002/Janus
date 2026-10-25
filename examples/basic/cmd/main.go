@@ -61,4 +61,5 @@ func main() {
 // The sync/atomic and memory-routine examples: kept alive through Keep, which main prints.
 func init() {
 	Keep = append(Keep, basic.AtomicAdd, basic.AtomicMax, basic.CopyBlock, basic.ClearWords)
+	Keep = append(Keep, func(uint64) uint64 { return basic.BigLocal(1, 2) + basic.SumRec(3) + basic.HoldPtr(5) })
 }

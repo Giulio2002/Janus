@@ -1,0 +1,537 @@
+import Janus.Arm64.MemoryLemmas
+import Janus.Tactic.Common
+
+/-!
+# Stack growth: the goroutine stack, the copy, and the adjusted pointers (both ISAs)
+
+Go 1.26 grows a goroutine stack by copying it (`runtime/stack.go`: `newstack`, `copystack`,
+`adjustframe`, `adjustpointers`, `adjustctxt`). This file is the ISA-independent model of that
+copy, used by the `morestack` contracts (`Janus/Contracts/Stack.lean`, `StackAmd64.lean`):
+
+* **The goroutine's stack** `[lo, hi)`: `g.stack.lo` at `g + 0`, `g.stack.hi` at `g + 8`,
+  `g.stackguard0` at `g + 16` (`GStack`). Without a preemption request the guard is
+  `lo + stackGuard` (`stackGuard = 928` on linux/arm64 and linux/amd64).
+* **A move** relocates the used part of the stack from `[base, hi)` to `[base + hi' - hi, hi')`,
+  `hi'` the new stack's top (`copystack`: `delta = new.hi - old.hi`, the copy of
+  `[old.hi - used, old.hi)` to `new.hi - used`). Every 8-byte word that the stack maps classify
+  as a pointer and whose value lies in the old stack `[lo, hi)` is adjusted by the same amount
+  (`adjustpointer`); every other byte is copied unchanged. `Moved` is that relation, stated so
+  that two moves compose into one (`Moved.trans`): this is the relocation invariance of the
+  postconditions (`docs/PROOFS.md`, "Stack growth").
+* **The stack maps.** Which words are pointers is the compiler's liveness information, which the
+  runtime reads from the pclntab: per function its SP delta at each pc (`pcsp`), the argument and
+  local pointer bitmaps at each call site (`FUNCDATA_ArgsPointerMaps`, `FUNCDATA_LocalsPointerMaps`
+  selected by `PCDATA_StackMapIndex`) and its stack objects (`FUNCDATA_StackObjects`). A
+  `FrameTable` is that table, abstract: theorems quantify over every table and assume only that
+  it agrees with the entries `janus extract` copied from the binary for the extracted functions
+  (`FrameTable.Agrees`, `Janus/Spec/StackMaps.lean`). **Trusted:** the stack maps are correct,
+  i.e. the compiler's liveness information marks exactly the slots that hold pointers.
+* **The unwinder.** `copystack` walks the frames from the goroutine's saved context with
+  `runtime.unwinder` (`traceback.go`) and calls `adjustframe` on each. `Chain` is that walk (a
+  relation, deterministic: `Chain.unique`), and `framesCls` the set of adjusted words.
+
+Pointers into the stack from non-stack memory are not adjusted by the runtime; Go's escape
+analysis guarantees there are none, and the contracts require it (a theorem whose heap held a
+pointer into the stack is not covered: the moved memory says nothing about such a heap word).
+-/
+
+namespace Janus.Spec.Stack
+
+open Janus Janus.Arm64
+
+/-! ## Constants (Go 1.26, linux/arm64 and linux/amd64) -/
+
+/-- `runtime.stackGuard` = `stackNosplit (800) + stackSystem (0) + abi.StackSmall (128)`. -/
+def stackGuard : Nat := 928
+/-- `runtime.maxstacksize` on 64-bit platforms (`proc.go`: 1 GB); a larger stack throws
+`stack overflow`. -/
+def maxstacksize : Nat := 1000000000
+
+/-! ## Moves and adjusted pointers -/
+
+/-- `adjustpointer` for a move of the stack `[lo, hi)` to the top `hi'`: a value inside the old
+stack is moved with it, any other value is kept. -/
+def adjustWord (lo hi hi' v : Nat) : Nat := if lo ≤ v ∧ v < hi then v + hi' - hi else v
+
+/-- The bytes `[a, a + n)` and the ranges `rs` (`(base, end)` pairs) are apart: an alias of
+`Janus.Outside` for range lists of the `(lo, hi)` form. -/
+abbrev Away (a n : Nat) (rs : List (Nat × Nat)) : Prop := Outside a n rs
+
+/-- `m'` is `m` with the used stack `[base, hi)` of the stack `[lo, hi)` moved to the top `hi'`:
+every word classified as a pointer by `cls` holds its value adjusted (`adjustWord`: a value in
+the old stack is shifted by `hi' - hi`; a value outside the stack pools `pool` is kept; a value
+in another part of the pools is unconstrained), every other byte is copied, except the bytes of
+the ranges `ex` (old addresses), which the relation leaves unconstrained (memory a callee may
+write: its argument spill slots, the objects it stores to). `base`, `hi` and `hi'` are 8-aligned,
+and the old stack's bottom moves to an address of at least 4096 (`4096 + hi ≤ lo + hi'`: Go
+never maps the first page, and the subtraction `a + hi' - hi` never truncates on the stack). `Moved` describes one
+copy or several in sequence (`Moved.trans`), and no move at all (`Moved.refl`). -/
+structure Moved (cls : Nat → Bool) (pool : List (Nat × Nat)) (lo hi hi' base : Nat)
+    (ex : List (Nat × Nat)) (m m' : Memory) : Prop where
+  aligned : base % 8 = 0 ∧ hi % 8 = 0 ∧ hi' % 8 = 0
+  grows : 4096 ≤ lo ∧ 4096 + hi ≤ lo + hi' ∧ lo ≤ base ∧ base ≤ hi
+  ptr : ∀ a, base ≤ a → a + 8 ≤ hi → a % 8 = 0 → cls a = true → Outside a 8 ex →
+    (lo ≤ m.readLE a 8 → m.readLE a 8 < hi → m'.readLE (a + hi' - hi) 8 = m.readLE a 8 + hi' - hi) ∧
+    (Outside (m.readLE a 8) 1 pool → m'.readLE (a + hi' - hi) 8 = m.readLE a 8)
+  byte : ∀ a, base ≤ a → a < hi → cls (a - a % 8) = false → Outside a 1 ex →
+    m'.bytes (a + hi' - hi) = m.bytes a
+
+namespace Moved
+
+variable {cls : Nat → Bool} {pool ex : List (Nat × Nat)} {lo hi hi' base : Nat} {m m' : Memory}
+
+/-- No move: the stack stays where it is. -/
+theorem refl (cls : Nat → Bool) (pool ex : List (Nat × Nat)) (m : Memory) {lo hi base : Nat}
+    (hal : base % 8 = 0 ∧ hi % 8 = 0) (h4k : 4096 ≤ lo) (hlb : lo ≤ base) (hbh : base ≤ hi) :
+    Moved cls pool lo hi hi base ex m m :=
+  ⟨⟨hal.1, hal.2, hal.2⟩, ⟨h4k, by omega, hlb, hbh⟩,
+   fun a _ _ _ _ _ => ⟨fun _ _ => by rw [Nat.add_sub_cancel, Nat.add_sub_cancel],
+     fun _ => by rw [Nat.add_sub_cancel]⟩,
+   fun a _ _ _ _ => by rw [Nat.add_sub_cancel]⟩
+
+/-- Fewer constrained bytes: a larger exception list. -/
+theorem mono_ex {ex' : List (Nat × Nat)} (h : Moved cls pool lo hi hi' base ex m m')
+    (hsub : ∀ a n, Outside a n ex' → Outside a n ex) : Moved cls pool lo hi hi' base ex' m m' :=
+  ⟨h.aligned, h.grows, fun a h1 h2 h3 h4 h5 => h.ptr a h1 h2 h3 h4 (hsub _ _ h5),
+   fun a h1 h2 h3 h4 => h.byte a h1 h2 h3 (hsub _ _ h4)⟩
+
+/-- A smaller moved region (a higher base). -/
+theorem mono_base {base' : Nat} (h : Moved cls pool lo hi hi' base ex m m') (hb : base ≤ base')
+    (hb' : base' ≤ hi) (hal : base' % 8 = 0) : Moved cls pool lo hi hi' base' ex m m' :=
+  ⟨⟨hal, h.aligned.2⟩, ⟨h.grows.1, h.grows.2.1, by have := h.grows.2.2.1; omega, hb'⟩,
+   fun a h1 h2 h3 h4 h5 => h.ptr a (by omega) h2 h3 h4 h5,
+   fun a h1 h2 h3 h4 => h.byte a (by omega) h2 h3 h4⟩
+
+/-- Reads of bytes of a word the classification calls a non-pointer are copied. -/
+theorem readLE_scalar (h : Moved cls pool lo hi hi' base ex m m') {a n : Nat}
+    (h1 : base ≤ a) (h2 : a + n ≤ hi)
+    (hc : ∀ i, i < n → cls ((a + i) - (a + i) % 8) = false) (hx : Outside a n ex) :
+    m'.readLE (a + hi' - hi) n = m.readLE a n := by
+  have hg := h.grows
+  induction n generalizing a with
+  | zero => rfl
+  | succ n ih =>
+    rw [Memory.readLE_succ, Memory.readLE_succ]
+    have hb : m'.bytes (a + hi' - hi) = m.bytes a :=
+      h.byte a h1 (by omega) (by simpa using hc 0 (by omega)) (Outside.of_sub hx (by omega) (by omega))
+    have hr : m'.readLE (a + hi' - hi + 1) n = m.readLE (a + 1) n := by
+      rw [show a + hi' - hi + 1 = (a + 1) + hi' - hi by omega]
+      exact ih (by omega) (by omega)
+        (fun i hi' => by have := hc (i + 1) (by omega); rwa [show a + (i + 1) = a + 1 + i by omega] at this)
+        (Outside.of_sub hx (by omega) (by omega))
+    rw [hb, hr]
+
+/-- A word classified as a pointer that points into the old stack is moved with it. -/
+theorem readLE_ptr (h : Moved cls pool lo hi hi' base ex m m') {a : Nat} (h1 : base ≤ a)
+    (h2 : a + 8 ≤ hi) (hal : a % 8 = 0) (hc : cls a = true) (hx : Outside a 8 ex)
+    (hlo : lo ≤ m.readLE a 8) (hhi : m.readLE a 8 < hi) :
+    m'.readLE (a + hi' - hi) 8 = m.readLE a 8 + hi' - hi :=
+  (h.ptr a h1 h2 hal hc hx).1 hlo hhi
+
+/-- A word classified as a pointer whose value is outside every stack is copied. -/
+theorem readLE_ptr_out (h : Moved cls pool lo hi hi' base ex m m') {a : Nat} (h1 : base ≤ a)
+    (h2 : a + 8 ≤ hi) (hal : a % 8 = 0) (hc : cls a = true) (hx : Outside a 8 ex)
+    (hout : Outside (m.readLE a 8) 1 pool) : m'.readLE (a + hi' - hi) 8 = m.readLE a 8 :=
+  (h.ptr a h1 h2 hal hc hx).2 hout
+
+/-- An 8-aligned word is copied whatever its classification when its value is outside every
+stack (a code address, a heap pointer, a small integer the pools do not contain). -/
+theorem readLE_word_out (h : Moved cls pool lo hi hi' base ex m m') {a : Nat} (h1 : base ≤ a)
+    (h2 : a + 8 ≤ hi) (hal : a % 8 = 0) (hx : Outside a 8 ex)
+    (hout : Outside (m.readLE a 8) 1 pool) : m'.readLE (a + hi' - hi) 8 = m.readLE a 8 := by
+  cases hc : cls a
+  · exact h.readLE_scalar h1 h2 (fun i hi => by
+      rw [show (a + i) - (a + i) % 8 = a by omega]; exact hc) hx
+  · exact h.readLE_ptr_out h1 h2 hal hc hx hout
+
+/-- **Two moves compose into one** (relocation invariance of `Moved`). The second move's
+classification, at the moved addresses, is the first one's; its stack is the first move's new
+stack `[lo₂, hi₂)`, which lies inside the pools and contains the moved image of the old stack;
+its exception list contains the moved image of the first's. -/
+theorem trans {cls₂ : Nat → Bool} {ex₂ : List (Nat × Nat)} {lo₂ hi₃ : Nat} {m'' : Memory}
+    (h₁ : Moved cls pool lo hi hi' base ex m m')
+    (h₂ : Moved cls₂ pool lo₂ hi' hi₃ (base + hi' - hi) ex₂ m' m'')
+    (hcls : ∀ a, base ≤ a → a < hi → cls₂ (a + hi' - hi) = cls a)
+    (hlo : lo₂ ≤ lo + hi' - hi)
+    (hex : ∀ a n, base ≤ a → Outside a n ex → Outside (a + hi' - hi) n ex₂) :
+    Moved cls pool lo hi hi₃ base ex m m'' := by
+  obtain ⟨⟨ha1, ha2, ha3⟩, hg0, hg1, hg2, hg3⟩ := h₁.aligned, h₁.grows
+  obtain ⟨⟨-, -, hb3⟩, hk0, hk1, hk2, hk3⟩ := h₂.aligned, h₂.grows
+  refine ⟨⟨ha1, ha2, hb3⟩, ⟨hg0, by omega, hg2, hg3⟩, fun a h1 h2 h3 h4 h5 => ?_, fun a h1 h2 h3 h4 => ?_⟩
+  · have hA : a + hi' - hi + hi₃ - hi' = a + hi₃ - hi := by omega
+    have hc₂ : cls₂ (a + hi' - hi) = true := by rw [hcls a h1 (by omega)]; exact h4
+    have h5' := hex a 8 h1 h5
+    refine ⟨fun hl hh => ?_, fun hout => ?_⟩
+    · have e₁ := h₁.readLE_ptr h1 h2 h3 h4 h5 hl hh
+      have e₂ := h₂.readLE_ptr (a := a + hi' - hi) (by omega) (by omega) (by omega) hc₂ h5'
+        (by rw [e₁]; omega) (by rw [e₁]; omega)
+      rw [← hA, e₂, e₁]; omega
+    · have e₁ := h₁.readLE_ptr_out h1 h2 h3 h4 h5 hout
+      have e₂ := h₂.readLE_ptr_out (a := a + hi' - hi) (by omega) (by omega) (by omega) hc₂ h5'
+        (by rw [e₁]; exact hout)
+      rw [← hA, e₂, e₁]
+  · have hA : a + hi' - hi + hi₃ - hi' = a + hi₃ - hi := by omega
+    have hc₂ : cls₂ (a + hi' - hi - (a + hi' - hi) % 8) = false := by
+      rw [show a + hi' - hi - (a + hi' - hi) % 8 = (a - a % 8) + hi' - hi by omega,
+        hcls _ (by omega) (by omega)]
+      exact h3
+    rw [← hA, h₂.byte (a + hi' - hi) (by omega) (by omega) hc₂ (hex a 1 h1 h4), h₁.byte a h1 h2 h3 h4]
+
+end Moved
+
+/-! ## The goroutine's stack descriptor -/
+
+/-- Offsets in `runtime.g` (Go 1.26): `stack.lo`, `stack.hi`, `stackguard0`. -/
+def gStackLo : Nat := 0
+def gStackHi : Nat := 8
+def gStackguard0 : Nat := 16
+
+/-- The goroutine at `g` runs on the stack `[lo, hi)` with no preemption request pending: its
+`stack.lo`, `stack.hi` and `stackguard0` words read `lo`, `hi` and `lo + stackGuard`, and are
+readable (`newstack`'s `stackguard0 == stackPreempt` case is a scheduler request from another
+thread, outside the single-threaded model). -/
+def GStack (m : Memory) (g lo hi : Nat) : Prop :=
+  g + 24 ≤ 2 ^ 48 ∧ m.accessible g 24 false = true ∧
+    m.readLE (g + gStackLo) 8 = lo ∧ m.readLE (g + gStackHi) 8 = hi ∧
+    m.readLE (g + gStackguard0) 8 = lo + stackGuard
+
+/-! ## The frame table (the pclntab's stack maps) -/
+
+/-- The unwinding information the runtime reads from the pclntab, by pc (Go 1.26
+`runtime/symtab.go`, `stkframe.go`). For a pc inside a function:
+
+* `valid pc`: `findfunc(pc).valid()`;
+* `entry pc`: the function's entry;
+* `spdelta pc`: `funcspdelta(f, pc)`, the frame size at `pc` (`pcsp`);
+* `maxspd pc`: `funcMaxSPDelta(f)`, the largest frame size of the function;
+* `stop pc`: the function ends the unwinding (`FuncFlagTopFrame`, or `FuncFlagSPWrite`);
+* `injected pc`: the function is a call the runtime injects (`sigpanic`, `asyncPreempt`,
+  `debugCallV2`), after which the unwinder changes its caller's continuation pc; walks through
+  such frames are not modelled (`Chain` excludes them);
+* `locals pc`, `args pc`: the locals and arguments pointer bitmaps (one `Bool` per 8-byte word) of
+  a frame suspended at the continuation `pc` (`getStackMap`: the stack map index at `pc - 1`, the
+  first map at the entry);
+* `objs pc`: the stack objects (`off`, pointer bitmap of the object): offset from `varp` if
+  negative, from `argp` otherwise. -/
+structure FrameTable where
+  valid : Nat → Bool
+  entry : Nat → Nat
+  spdelta : Nat → Nat
+  maxspd : Nat → Nat
+  stop : Nat → Bool
+  injected : Nat → Bool
+  locals : Nat → List Bool
+  args : Nat → List Bool
+  objs : Nat → List (Int × List Bool)
+
+/-- A pc the table knows is a code address, never inside a goroutine stack pool. -/
+def FrameTable.CodeOutside (FT : FrameTable) (pool : List (Nat × Nat)) : Prop :=
+  ∀ pc, FT.valid pc = true → Outside pc 1 pool ∧ pc < 2 ^ 48
+
+/-- The architecture: on arm64 (`usesLR`) the return address is in the link register and saved
+at `0(SP)` of the frame, `sys.MinFrameSize = 8`; on amd64 it is pushed by `CALL` at `fp - 8`. -/
+inductive Arch where
+  | arm64
+  | amd64
+deriving DecidableEq
+
+/-- `frame.fp` of a frame with `pc`, `sp`. -/
+def Arch.fp (A : Arch) (FT : FrameTable) (pc sp : Nat) : Nat :=
+  match A with
+  | .arm64 => sp + FT.spdelta pc
+  | .amd64 => sp + FT.spdelta pc + 8
+
+/-- `frame.varp` (`resolveInternal`, frame pointers enabled). -/
+def Arch.varp (A : Arch) (sp fp : Nat) : Nat :=
+  let v := match A with | .arm64 => fp | .amd64 => fp - 8
+  if sp < v then v - 8 else v
+
+/-- `frame.argp = frame.fp + sys.MinFrameSize`. -/
+def Arch.argp (A : Arch) (fp : Nat) : Nat :=
+  match A with | .arm64 => fp + 8 | .amd64 => fp
+
+/-- The smallest locals area `getStackMap` reads a locals map for (exclusive). -/
+def Arch.minLocals (A : Arch) : Nat := match A with | .arm64 => 16 | .amd64 => 0
+
+/-- Word `a` is `base + 8 i` with bit `i` of `bs` set (`base` an integer, so that the bases
+`varp - 8·n` and `varp + off` need no side conditions). -/
+def bitsAt (base : Int) (bs : List Bool) (a : Nat) : Bool :=
+  decide (base ≤ (a : Int)) && (((a : Int) - base).toNat % 8 == 0) &&
+    bs.getD (((a : Int) - base).toNat / 8) false
+
+/-- The address of a stack object at offset `off` (`adjustframe`: from `varp` when negative, from
+`argp` otherwise). -/
+def objBase (varp argp : Nat) (off : Int) : Int :=
+  if off < 0 then (varp : Int) + off else (argp : Int) + off
+
+/-- The words `adjustframe` adjusts in the frame of the function at `pc` with `sp`, `fp`: the
+saved frame pointer (when `argp - varp = 16`), the locals map (`locals.n` words ending at `varp`,
+read only when the frame is larger than `minLocals`), the arguments map from `argp`, and the
+pointer words of the stack objects already allocated (`p ≥ sp`). -/
+def frameCls (A : Arch) (FT : FrameTable) (pc sp fp a : Nat) : Bool :=
+  let varp := A.varp sp fp
+  let argp := A.argp fp
+  (decide (argp = varp + 16) && a == varp) ||
+  (decide (A.minLocals + sp < varp) &&
+    bitsAt ((varp : Int) - 8 * ((FT.locals pc).length : Int)) (FT.locals pc) a) ||
+  bitsAt (argp : Int) (FT.args pc) a ||
+  (FT.objs pc).any (fun o => decide ((sp : Int) ≤ objBase varp argp o.1) &&
+    bitsAt (objBase varp argp o.1) o.2 a)
+
+/-- A frame on the walk: its continuation `pc`, `sp` and `fp`. -/
+structure Frame where
+  pc : Nat
+  sp : Nat
+  fp : Nat
+deriving DecidableEq
+
+/-- The return address the unwinder reads for the frame `pc`, `sp`, `fp` (`resolveInternal`): on
+arm64 the given link register of the innermost frame when it has no frame yet (`sp = fp`), else
+the word at `0(sp)`; on amd64 the word at `fp - 8`. -/
+def Arch.lrOf (A : Arch) (m : Memory) (sp fp : Nat) (lr0 : Option Nat) : Nat :=
+  match A with
+  | .arm64 => if sp < fp then m.readLE sp 8 else lr0.getD (m.readLE sp 8)
+  | .amd64 => m.readLE (fp - 8) 8
+
+/-- The address the unwinder reads the return address from (`lrOf`, when it reads memory). -/
+def Arch.lrSlot (A : Arch) (sp fp : Nat) : Nat := match A with | .arm64 => sp | .amd64 => fp - 8
+
+/-- **The unwinder's walk** (`runtime.unwinder`, `traceback.go`) from the frame with continuation
+`pc` and stack pointer `sp` (and, for the innermost arm64 frame, link register `lr0`) to the end
+of the stack: every pc is a known function's, every frame ends at or below the stack top `hi`,
+and the walk ends at a function that stops it (`goexit`'s `TopFrame` flag). A walk that meets an
+unknown return address throws in the runtime (`unknown caller pc`); such stacks are not
+`Chain`s. -/
+inductive Chain (A : Arch) (FT : FrameTable) (m : Memory) (hi : Nat) :
+    Nat → Nat → Option Nat → List Frame → Prop where
+  | stop {pc sp : Nat} {lr0 : Option Nat} : FT.valid pc = true → FT.stop pc = true →
+      FT.injected pc = false → sp + 8 ≤ hi → A.fp FT pc sp ≤ hi → Chain A FT m hi pc sp lr0 [⟨pc, sp, A.fp FT pc sp⟩]
+  | cons {pc sp : Nat} {lr0 : Option Nat} {fs : List Frame} : FT.valid pc = true →
+      FT.stop pc = false → FT.injected pc = false → sp + 8 ≤ hi → A.fp FT pc sp ≤ hi →
+      Chain A FT m hi (A.lrOf m sp (A.fp FT pc sp) lr0) (A.fp FT pc sp) none fs →
+      Chain A FT m hi pc sp lr0 (⟨pc, sp, A.fp FT pc sp⟩ :: fs)
+
+/-- The words `copystack` adjusts in the frames `fs`. -/
+def framesCls (A : Arch) (FT : FrameTable) (fs : List Frame) (a : Nat) : Bool :=
+  fs.any (fun f => frameCls A FT f.pc f.sp f.fp a)
+
+@[simp] theorem framesCls_nil (A : Arch) (FT : FrameTable) (a : Nat) : framesCls A FT [] a = false := rfl
+@[simp] theorem framesCls_cons (A : Arch) (FT : FrameTable) (f : Frame) (fs : List Frame) (a : Nat) :
+    framesCls A FT (f :: fs) a = (frameCls A FT f.pc f.sp f.fp a || framesCls A FT fs a) := rfl
+
+theorem Chain.unique {A : Arch} {FT : FrameTable} {m : Memory} {hi pc sp : Nat} {lr0 : Option Nat}
+    {fs fs' : List Frame} (h : Chain A FT m hi pc sp lr0 fs) (h' : Chain A FT m hi pc sp lr0 fs') :
+    fs = fs' := by
+  induction h generalizing fs' with
+  | stop hv hs _ _ hf =>
+    cases h' with
+    | stop => rfl
+    | cons _ hs' => rw [hs] at hs'; cases hs'
+  | cons hv hs _ _ hf hc ih =>
+    cases h' with
+    | stop _ hs' => rw [hs] at hs'; cases hs'
+    | cons _ _ _ _ _ hc' => rw [ih hc']
+
+theorem Arch.le_fp (A : Arch) (FT : FrameTable) (pc sp : Nat) : sp ≤ A.fp FT pc sp := by
+  cases A <;> simp only [Arch.fp] <;> omega
+
+/-- Every frame of a walk lies between its starting `sp` and the stack top. -/
+theorem Chain.bounds {A : Arch} {FT : FrameTable} {m : Memory} {hi pc sp : Nat} {lr0 : Option Nat}
+    {fs : List Frame} (h : Chain A FT m hi pc sp lr0 fs) :
+    ∀ f ∈ fs, sp ≤ f.sp ∧ f.sp ≤ f.fp ∧ f.sp + 8 ≤ hi ∧ f.fp ≤ hi ∧ FT.valid f.pc = true ∧
+      f.fp = A.fp FT f.pc f.sp := by
+  induction h with
+  | @stop pc sp _ hv hs _ h8 hf =>
+    intro f hf'; simp only [List.mem_singleton] at hf'; subst hf'
+    exact ⟨Nat.le_refl _, A.le_fp FT pc sp, h8, hf, hv, rfl⟩
+  | @cons pc sp _ _ hv hs _ h8 hf hc ih =>
+    intro f hf'
+    rcases List.mem_cons.1 hf' with rfl | hf'
+    · exact ⟨Nat.le_refl _, A.le_fp FT pc sp, h8, hf, hv, rfl⟩
+    · obtain ⟨h1, h2, h3, h4, h5, h6⟩ := ih f hf'
+      exact ⟨Nat.le_trans (A.le_fp FT pc sp) h1, h2, h3, h4, h5, h6⟩
+
+theorem Chain.valid_head {A : Arch} {FT : FrameTable} {m : Memory} {hi pc sp : Nat}
+    {lr0 : Option Nat} {fs : List Frame} (h : Chain A FT m hi pc sp lr0 fs) : FT.valid pc = true := by
+  cases h <;> assumption
+
+/-! ## Moving frames (relocation invariance of the walk and of the classification)
+
+A move of the stack with top `hi` to the top `hi'` maps an address `a` of the old stack to
+`a + hi' - hi` (natural numbers: the new stack may lie below the old one; every address involved
+is at least `hi - hi'`, the size condition of `Moved`). -/
+
+/-- A frame moved with the stack. -/
+def Frame.mv (hi hi' : Nat) (f : Frame) : Frame := ⟨f.pc, f.sp + hi' - hi, f.fp + hi' - hi⟩
+
+theorem Arch.fp_mv (A : Arch) (FT : FrameTable) (pc sp hi hi' : Nat) (h : hi ≤ sp + hi') :
+    A.fp FT pc (sp + hi' - hi) = A.fp FT pc sp + hi' - hi := by
+  cases A <;> simp only [Arch.fp] <;> omega
+
+theorem Arch.varp_mv (A : Arch) {sp fp hi hi' : Nat} (h : sp ≤ fp) (h8 : 16 + hi ≤ fp + hi')
+    (hs : hi ≤ sp + hi') (h16 : 16 ≤ fp) :
+    A.varp (sp + hi' - hi) (fp + hi' - hi) = A.varp sp fp + hi' - hi := by
+  cases A <;> simp only [Arch.varp] <;> split <;> split <;> omega
+
+theorem Arch.argp_mv (A : Arch) (fp hi hi' : Nat) (h : hi ≤ fp + hi') :
+    A.argp (fp + hi' - hi) = A.argp fp + hi' - hi := by
+  cases A <;> simp only [Arch.argp] <;> omega
+
+theorem bitsAt_mv (base : Int) (bs : List Bool) (a hi hi' : Nat) (h : hi ≤ a + hi') :
+    bitsAt (base + hi' - hi) bs (a + hi' - hi) = bitsAt base bs a := by
+  simp only [bitsAt]
+  rw [show ((a + hi' - hi : Nat) : Int) - (base + hi' - hi) = (a : Int) - base by omega]
+  simp only [show (base + hi' - hi ≤ ((a + hi' - hi : Nat) : Int)) = (base ≤ (a : Int)) from
+    propext (by omega)]
+
+theorem objBase_mv (varp argp hi hi' : Nat) (off : Int) (h1 : hi ≤ varp + hi') (h2 : hi ≤ argp + hi') :
+    objBase (varp + hi' - hi) (argp + hi' - hi) off = objBase varp argp off + hi' - hi := by
+  simp only [objBase]; split <;> omega
+
+/-- **The classification is relocation invariant**: a moved frame, at the moved address,
+classifies like the frame. -/
+theorem frameCls_mv (A : Arch) (FT : FrameTable) {pc sp fp : Nat} (a hi hi' : Nat) (h : sp ≤ fp)
+    (h16 : 16 ≤ fp) (hs : 16 + hi ≤ sp + hi') (ha : hi ≤ a + hi') :
+    frameCls A FT pc (sp + hi' - hi) (fp + hi' - hi) (a + hi' - hi) = frameCls A FT pc sp fp a := by
+  have hv := A.varp_mv (hi := hi) (hi' := hi') h (by omega) (by omega) h16
+  have hvl : fp ≤ A.varp sp fp + 16 := by cases A <;> simp only [Arch.varp] <;> split <;> omega
+  have hag : fp ≤ A.argp fp := by cases A <;> simp only [Arch.argp] <;> omega
+  simp only [frameCls, hv, A.argp_mv fp hi hi' (by omega)]
+  have e1 : (((A.varp sp fp + hi' - hi : Nat) : Int) - 8 * ((FT.locals pc).length : Int)) =
+      (((A.varp sp fp : Nat) : Int) - 8 * ((FT.locals pc).length : Int)) + hi' - hi := by omega
+  rw [e1, bitsAt_mv _ _ _ _ _ ha,
+    show ((A.argp fp + hi' - hi : Nat) : Int) = ((A.argp fp : Nat) : Int) + hi' - hi by omega,
+    bitsAt_mv _ _ _ _ _ ha]
+  have e2 : (A.argp fp + hi' - hi = A.varp sp fp + hi' - hi + 16) = (A.argp fp = A.varp sp fp + 16) :=
+    propext (by omega)
+  have e3 : (a + hi' - hi == A.varp sp fp + hi' - hi) = (a == A.varp sp fp) :=
+    Bool.eq_iff_iff.2 (by simp only [beq_iff_eq]; omega)
+  have e4 : (A.minLocals + (sp + hi' - hi) < A.varp sp fp + hi' - hi) = (A.minLocals + sp < A.varp sp fp) :=
+    propext (by omega)
+  simp only [e2, e3, e4]
+  congr 1
+  apply List.any_congr rfl
+  intro o
+  rw [objBase_mv _ _ _ _ _ (by omega) (by omega), bitsAt_mv _ _ _ _ _ ha]
+  have e5 : (((sp + hi' - hi : Nat) : Int) ≤ objBase (A.varp sp fp) (A.argp fp) o.1 + hi' - hi) =
+      ((sp : Int) ≤ objBase (A.varp sp fp) (A.argp fp) o.1) := propext (by omega)
+  simp only [e5]
+
+theorem framesCls_mv (A : Arch) (FT : FrameTable) (fs : List Frame) (a hi hi' : Nat)
+    (h : ∀ f ∈ fs, f.sp ≤ f.fp ∧ 16 ≤ f.fp ∧ 16 + hi ≤ f.sp + hi') (ha : hi ≤ a + hi') :
+    framesCls A FT (fs.map (Frame.mv hi hi')) (a + hi' - hi) = framesCls A FT fs a := by
+  induction fs with
+  | nil => rfl
+  | cons f fs ih =>
+    simp only [List.map_cons, framesCls_cons, Frame.mv]
+    obtain ⟨h1, h2, h3⟩ := h f (List.mem_cons_self ..)
+    rw [frameCls_mv A FT a hi hi' h1 h2 h3 ha, ih (fun f' hf' => h f' (List.mem_cons_of_mem _ hf'))]
+
+theorem Arch.lrOf_mv (A : Arch) {m m' : Memory} {sp fp hi hi' : Nat} (lr0 : Option Nat)
+    (h : sp ≤ fp) (h16 : 16 ≤ fp) (hs : 16 + hi ≤ sp + hi')
+    (hslot : m'.readLE (A.lrSlot sp fp + hi' - hi) 8 = m.readLE (A.lrSlot sp fp) 8) :
+    A.lrOf m' (sp + hi' - hi) (fp + hi' - hi) lr0 = A.lrOf m sp fp lr0 := by
+  cases A <;> simp only [Arch.lrOf, Arch.lrSlot] at hslot ⊢
+  · rw [hslot]; simp only [show (sp + hi' - hi < fp + hi' - hi) = (sp < fp) from propext (by omega)]
+  · rw [show fp + hi' - hi - 8 = fp - 8 + hi' - hi by omega, hslot]
+
+/-- **The walk is relocation invariant**: in memory whose return-address slots hold, at the
+moved addresses, what they held, the walk from the moved frame is the moved walk. -/
+theorem Chain.mv {A : Arch} {FT : FrameTable} {m m' : Memory} {hi pc sp : Nat}
+    {lr0 : Option Nat} {fs : List Frame} (hi' : Nat) (h : Chain A FT m hi pc sp lr0 fs)
+    (h16 : 16 ≤ sp) (hs : 16 + hi ≤ sp + hi')
+    (hslot : ∀ f ∈ fs, FT.stop f.pc = false →
+      m'.readLE (A.lrSlot f.sp f.fp + hi' - hi) 8 = m.readLE (A.lrSlot f.sp f.fp) 8) :
+    Chain A FT m' hi' pc (sp + hi' - hi) lr0 (fs.map (Frame.mv hi hi')) := by
+  induction h with
+  | stop hv hs' hinj h8 hf =>
+    rename_i pc sp lr0
+    simp only [List.map_cons, List.map_nil, Frame.mv]
+    rw [← A.fp_mv FT pc sp hi hi' (by omega)]
+    exact .stop hv hs' hinj (by omega) (by rw [A.fp_mv FT pc sp hi hi' (by omega)]; omega)
+  | cons hv hs' hinj h8 hf hc ih =>
+    rename_i pc sp lr0 fs
+    simp only [List.map_cons, Frame.mv]
+    have hfp := A.le_fp FT pc sp
+    rw [← A.fp_mv FT pc sp hi hi' (by omega)]
+    have hl := A.lrOf_mv lr0 (m := m) (m' := m') (sp := sp) (fp := A.fp FT pc sp) (hi := hi) (hi' := hi')
+      hfp (by omega) hs (hslot ⟨pc, sp, A.fp FT pc sp⟩ (List.mem_cons_self ..) hs')
+    refine .cons hv hs' hinj (by omega) (by rw [A.fp_mv FT pc sp hi hi' (by omega)]; omega) ?_
+    rw [A.fp_mv FT pc sp hi hi' (by omega), hl]
+    exact ih (by omega) (by omega) (fun f hf hst => hslot f (List.mem_cons_of_mem _ hf) hst)
+
+/-- The pclntab facts every Go binary's table has: frame sizes are multiples of 8. -/
+def FrameTable.Aligned (FT : FrameTable) : Prop := ∀ pc, FT.spdelta pc % 8 = 0
+
+theorem Chain.aligned {A : Arch} {FT : FrameTable} {m : Memory} {hi pc sp : Nat} {lr0 : Option Nat}
+    {fs : List Frame} (h : Chain A FT m hi pc sp lr0 fs) (hal : FT.Aligned) (hsp : sp % 8 = 0) :
+    ∀ f ∈ fs, f.sp % 8 = 0 ∧ f.fp % 8 = 0 := by
+  induction h with
+  | stop =>
+    rename_i pc sp _ _ _ _ _ _
+    intro f hf; simp only [List.mem_singleton] at hf; subst hf
+    have := hal pc
+    exact ⟨hsp, by cases A <;> simp only [Arch.fp] <;> omega⟩
+  | cons _ _ _ _ _ _ ih =>
+    rename_i pc sp _ _ _ _ _ _ _ _
+    have := hal pc
+    have hfp : A.fp FT pc sp % 8 = 0 := by cases A <;> simp only [Arch.fp] <;> omega
+    intro f hf
+    rcases List.mem_cons.1 hf with rfl | hf
+    · exact ⟨hsp, hfp⟩
+    · exact ih hfp f hf
+
+/-- In a walk started without a link register (every frame but an arm64 innermost one), every
+frame that does not stop the walk holds, in its return-address slot, a known pc: the next
+frame's. -/
+theorem Chain.slot_valid {A : Arch} {FT : FrameTable} {m : Memory} {hi pc sp : Nat}
+    {fs : List Frame} (h : Chain A FT m hi pc sp none fs) :
+    ∀ f ∈ fs, FT.stop f.pc = false → FT.valid (m.readLE (A.lrSlot f.sp f.fp) 8) = true := by
+  generalize hl : (none : Option Nat) = lr0 at h
+  induction h with
+  | stop _ hs _ _ _ =>
+    intro f hf hst; simp only [List.mem_singleton] at hf; subst hf; simp only at hst; rw [hs] at hst
+    cases hst
+  | cons hv hs _ _ hf hc ih =>
+    rename_i pc sp lr0 fs
+    subst hl
+    intro f hmem hst
+    rcases List.mem_cons.1 hmem with rfl | hmem
+    · have hnext := hc.valid_head
+      cases A <;> simp only [Arch.lrOf, Arch.lrSlot, Option.getD_none] at hnext ⊢
+      · split at hnext <;> exact hnext
+      · exact hnext
+    · exact ih rfl f hmem hst
+
+/-- A walk in the moved region, in the memory after a move, is the moved walk: its return-address
+slots hold known pcs, which are outside the stack pools and so copied whatever the stack maps say
+about the slot. -/
+theorem Chain.moved {A : Arch} {FT : FrameTable} {cls : Nat → Bool} {pool ex : List (Nat × Nat)}
+    {lo hi hi' base pc sp : Nat} {m m' : Memory} {fs : List Frame}
+    (hm : Moved cls pool lo hi hi' base ex m m') (h : Chain A FT m hi pc sp none fs)
+    (hcode : FT.CodeOutside pool) (hal : FT.Aligned) (hsp : sp % 8 = 0) (hb : base ≤ sp)
+    (hex : ∀ f ∈ fs, FT.stop f.pc = false → Outside (A.lrSlot f.sp f.fp) 8 ex) :
+    Chain A FT m' hi' pc (sp + hi' - hi) none (fs.map (Frame.mv hi hi')) := by
+  obtain ⟨hg0, hg1, hg2, hg3⟩ := hm.grows
+  have hbd := h.bounds
+  have hall := h.aligned hal hsp
+  refine Chain.mv hi' h (by omega) (by omega) fun f hf hst => ?_
+  obtain ⟨h1, h2, h3, h4, h5, h6⟩ := hbd f hf
+  obtain ⟨a1, a2⟩ := hall f hf
+  have hv := (hcode _ (h.slot_valid f hf hst)).1
+  cases A
+  · exact hm.readLE_word_out (by simp only [Arch.lrSlot]; omega) (by simp only [Arch.lrSlot]; omega)
+      (by simp only [Arch.lrSlot]; omega) (hex f hf hst) hv
+  · have : f.sp + 8 ≤ f.fp := by rw [h6]; simp only [Arch.fp]; omega
+    exact hm.readLE_word_out (by simp only [Arch.lrSlot]; omega) (by simp only [Arch.lrSlot]; omega)
+      (by simp only [Arch.lrSlot]; omega) (hex f hf hst) hv
+
+/-- The classification of the moved walk, at moved addresses, is the walk's. -/
+theorem Chain.framesCls_mv {A : Arch} {FT : FrameTable} {m : Memory} {hi pc sp : Nat}
+    {lr0 : Option Nat} {fs : List Frame} (h : Chain A FT m hi pc sp lr0 fs) {hi' a : Nat}
+    (h16 : 16 ≤ sp) (hs : 16 + hi ≤ sp + hi') (ha : hi ≤ a + hi') :
+    framesCls A FT (fs.map (Frame.mv hi hi')) (a + hi' - hi) = framesCls A FT fs a :=
+  _root_.Janus.Spec.Stack.framesCls_mv A FT fs a hi hi' (fun f hf => by
+    obtain ⟨h1, h2, -, -, -, -⟩ := h.bounds f hf; exact ⟨h2, by omega, by omega⟩) ha
+
+end Janus.Spec.Stack
