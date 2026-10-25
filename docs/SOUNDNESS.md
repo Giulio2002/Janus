@@ -748,6 +748,32 @@ relies on beyond the SDM text:
 * **Proof automation** (`TacticSSE`) is not trusted: its element lemmas are proved from
   `ExecSSE`, and making `ExecSSE.crc32c` irreducible for the elaborator changes no definition.
 
+## x86 crypto extensions (amd64)
+
+AES-NI, `PCLMULQDQ`, SHA-NI and ADX (WP-E, `Janus/Amd64/InstrCrypto.lean`, `DecodeCrypto.lean`,
+`ExecCrypto.lean`) are part of the trusted amd64 model. They are written from the Intel SDM
+`Operation` sections and differentially tested on the host CPU, which has all four features
+(`scripts/oracle-amd64.sh crypto`, docs/ORACLE-AMD64.md: 0 MISMATCH). What a theorem relies on:
+
+* **CPU features (assumed).** The model executes these instructions whenever they occur, as a CPU
+  with AES-NI, PCLMULQDQ, SHA-NI and ADX does; on a CPU without one of them they are `#UD`, which
+  the model does not represent. Go tests `internal/cpu` before using them, and the theorems state
+  the guard where the code tests it: `Memhash64`/`Memhash32` are stated for both values of
+  `runtime.useAeshash` and `AddMulVVWW` for both values of `math/big.hasADX` (each path). A theorem about a
+  function that does not test the flag itself (`encryptBlockAsm`, called by `crypto/aes` only
+  after `supportsAES`) holds on CPUs with the feature.
+* **The AES specification is independent.** `Janus/Spec/AES.lean` defines FIPS-197 (S-box from
+  the GF(2^8) inverse and the affine map, `ShiftRows`/`MixColumns` by their formulas, `KeyExpansion`,
+  `Cipher`) without the model's tables and proves the model's instructions equal to it; the
+  appendix C vectors are checked by the kernel. A statement about AES therefore trusts FIPS-197 as
+  transcribed there, not the ISA model's S-box table.
+* **Rejected rather than guessed:** `66` together with `F2`/`F3` (hardware runs `66 F3 0F 38 F6`;
+  the model refuses it), the other mandatory prefixes of each opcode, `LOCK`, and the VEX forms.
+* **Proof automation** (`TacticCrypto`) is not trusted; its lemmas are proved from `ExecCrypto`.
+  Passing the operand-address function to `ExecSSE.exec`/`ExecCrypto.exec` as the definition
+  `eaNat s next` instead of a lambda changes no semantics (`eaNat s next a = (ea s next a).toNat`
+  by `rfl`).
+
 ## Floating point
 
 Both models implement the scalar `float32`/`float64` instructions Go emits, bit-exactly, on a

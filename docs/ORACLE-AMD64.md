@@ -317,6 +317,44 @@ disagreement: the model faults with `misaligned` exactly when the host raises `#
 for `PTEST`, `PALIGNR`, `PMULLD`, `ROUNDPS` (aligned) and `PCMPESTRI`, `PMOVSX` `m64`,
 `CVTDQ2PD m64` (unaligned).
 
+### x86 crypto extensions (WP-E, 2026-10-25)
+
+AES-NI, `PCLMULQDQ`, SHA-NI and ADX (`Janus/Amd64/ExecCrypto.lean`), on a host with all four
+features (`grep -o 'aes\|pclmulqdq\|sha_ni\|adx' /proc/cpuinfo`). `scripts/oracle-amd64.sh
+crypto` runs the targeted specs (`gen.CryptoSpecs`, `oracle-amd64/gen/crypto.go`: every AES-NI
+opcode `66 0F 38 DB..DF` and `66 0F 3A DF`, `PCLMULQDQ`, the SHA-NI opcodes `NP 0F 38 C8..CD` and
+`NP 0F 3A CC`, register and memory forms with random `REX` (`REX.W` is ignored), and their
+neighbours under the other mandatory prefixes and unallocated opcodes; `ADCX`/`ADOX` at both
+widths with `F2`, `66 F3`, `F3 66` and no-prefix neighbours), the edge families (`gen.CryptoEdges`:
+`AESKEYGENASSIST`, `PCLMULQDQ` and `SHA1RNDS4` under every `imm8`; each AES round on zero,
+all-ones and random states; `ADCX`/`ADOX` register and memory forms under all 64 status-flag
+combinations with addends at the 32- and 64-bit carry boundaries, so that the five flags each must
+leave alone are compared), and every WP-E instruction harvested from the `GOAMD64=v1` test
+binaries of `runtime crypto/aes crypto/cipher crypto/sha256 crypto/sha1 math/big
+crypto/internal/fips140/bigmod crypto/internal/fips140/aes/gcm crypto/rsa`. 16-byte memory
+operands are 16-aligned three times in four, so both sides of the alignment check are exercised.
+This x86asm version does not know `ADCX`/`ADOX`; `gen.Decode` decodes them with the operands of
+`ADC r, r/m` (`adxOperandForm`) and `Classify` names them, so they are steered and harvested like
+the others.
+
+| run | cases | agree | of which both fault | model-gap | **MISMATCH** |
+|---|---:|---:|---:|---:|---:|
+| `crypto`, `SEED=1`, `N=600`, `CRYPTO_K=12` | 98,745 | 97,504 | 46,052 | 1,241 | **0** |
+| of which the edge families | 6,300 | 6,300 | 21 | 0 | **0** |
+| of which harvested | 4,788 | 4,788 | 1,002 | 0 | **0** |
+| `crypto`, `SEED=2`, `N=1200`, `CRYPTO_K=24` | 199,125 | 196,604 | 93,697 | 2,521 | **0** |
+| of which the edge families | 12,600 | 12,600 | 43 | 0 | **0** |
+| of which harvested | 9,576 | 9,576 | 1,914 | 0 | **0** |
+| `quick` after WP-E (the crypto specs are part of `gen.Specs`) | 898,021 | 762,086 | | 135,935 | **0** |
+| `full` after WP-E (`SEED=1`) | 2,059,787 | 1,758,713 | | 301,074 | **0** |
+
+Every model gap is a deliberate rejection, checked by encoding: `66` together with `F3` before
+`0F 38 F6` (hardware executes it; the model refuses `66` with `F2`/`F3`), duplicated `F3`/`F2 F3`
+prefixes, the `67` address-size prefix, and `GF2P8MULB` (`66 0F 38 CF`, GFNI, not modelled). No
+gap is an alignment disagreement. The model was right the first time: the first run had no
+mismatch. Independently of the host, `JanusTests/X86Crypto.lean` checks the FIPS-197 and
+FIPS 180-4 vectors and the Intel AES-NI white paper examples in the kernel.
+
 ## Running it
 
 ```
@@ -326,6 +364,7 @@ scripts/oracle-amd64.sh full       # generated + edge + harvested from real Go b
 scripts/oracle-amd64.sh fp         # SSE scalar floating point only
 scripts/oracle-amd64.sh v3         # the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, FMA, PSHUFB/PSIGNB)
 scripts/oracle-amd64.sh sse        # the SSE packed instructions of WP-D only (SSE2..SSE4.2)
+scripts/oracle-amd64.sh crypto     # the x86 crypto extensions of WP-E only (AES-NI, PCLMULQDQ, SHA-NI, ADX)
 ```
 
 Knobs: `OUT` (default `artifacts/oracle-amd64`), `JOBS` (default 16, capped at 24), `N`

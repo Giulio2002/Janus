@@ -46,6 +46,14 @@ func sweepAmd64(code []byte, base uint64) []amd64Inst {
 			off += 4
 			continue
 		}
+		// ADCX/ADOX (66/F3 [REX] 0F 38 F6 /r), which this x86asm version does not know: swept
+		// with the operands of ADC r, r/m (13 /r) and their own length, so that the sweep stays
+		// in step and finds their RIP-relative operands
+		if inst, ok := decodeADX(code[off:]); ok {
+			out = append(out, amd64Inst{PC: base + uint64(off), Inst: inst})
+			off += inst.Len
+			continue
+		}
 		inst, err := x86asm.Decode(code[off:], 64)
 		if err != nil || inst.Len == 0 {
 			off++
@@ -55,6 +63,46 @@ func sweepAmd64(code []byte, base uint64) []amd64Inst {
 		off += inst.Len
 	}
 	return out
+}
+
+// decodeADX decodes ADCX (66 [REX] 0F 38 F6 /r) or ADOX (F3 [REX] 0F 38 F6 /r), legacy
+// prefixes other than 66/F2/F3 allowed before REX, as the ADC r32/64, r/m32/64 with the same
+// operands, Len set to the instruction's length.
+func decodeADX(b []byte) (x86asm.Inst, bool) {
+	var keep []byte
+	has66, rep, removed := false, byte(0), 0
+	i := 0
+loop:
+	for ; i < len(b) && i < 15; i++ {
+		switch c := b[i]; c {
+		case 0x66:
+			has66 = true
+			removed++
+		case 0xF2, 0xF3:
+			rep = c
+			removed++
+		case 0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x67, 0xF0:
+			keep = append(keep, c)
+		default:
+			break loop
+		}
+	}
+	if i < len(b) && b[i]&0xF0 == 0x40 {
+		keep = append(keep, b[i])
+		i++
+	}
+	if i+3 > len(b) || b[i] != 0x0F || b[i+1] != 0x38 || b[i+2] != 0xF6 {
+		return x86asm.Inst{}, false
+	}
+	if !(has66 && rep == 0) && !(!has66 && rep == 0xF3) {
+		return x86asm.Inst{}, false
+	}
+	alt, err := x86asm.Decode(append(append(keep, 0x13), b[i+3:]...), 64)
+	if err != nil || alt.Op != x86asm.ADC {
+		return x86asm.Inst{}, false
+	}
+	alt.Len += removed + 2
+	return alt, true
 }
 
 // amd64BranchTarget returns the target of a direct (relative) JMP, Jcc, CALL, LOOP or

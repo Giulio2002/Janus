@@ -144,7 +144,7 @@ run_item() {
       else
         broken+=("$it")
       fi
-      { grep -E "Proof\.(correctness|panics|Witness)" <<<"$out" || true; } | sed "s/^/amd64  /"
+      { grep -E "Proof\.(correctness|panics|Witness|corollary)" <<<"$out" || true; } | sed "s/^/amd64  /"
       [ -z "${secs:-}" ] || printf 'amd64  %-12s (%.1fs)\n' "$n" "$secs"
       ;;
     asm)

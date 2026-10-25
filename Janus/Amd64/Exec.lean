@@ -5,6 +5,7 @@ import Janus.Arm64.Bits
 import Janus.Amd64.TacticAttr
 import Janus.Amd64.Float
 import Janus.Amd64.ExecSSE
+import Janus.Amd64.ExecCrypto
 
 /-!
 # x86-64 execution semantics for the supported subset
@@ -804,6 +805,11 @@ def sseArithOp (op : FPArith) (w : Nat) (c : FP.Ctl) (a b : Nat) : FP.XR :=
 
 /-! ## The executor -/
 
+/-- The linear address of a memory operand as a natural (`ea`), as a function of the operand: what
+the executors of the extension instructions (`ExecCrypto.exec`) take. A definition of its own
+so that the proof automation does not rewrite inside the unapplied function. -/
+def eaNat (s : State) (next : W64) (a : Addr) : Nat := (ea s next a).toNat
+
 /-- Execute a decoded instruction of length `len` at `s.rip`. Only specified on the output
 of `decode`. -/
 def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
@@ -1182,7 +1188,8 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
   | .locked i a size =>
     let addr := (ea s next a).toNat
     if addr % size ≠ 0 then .error (.misaligned addr) else exec i len s
-  | .sse i => ExecSSE.exec s next pc (fun a => (ea s next a).toNat) i
+  | .sse i => ExecSSE.exec s next pc (eaNat s next) i
+  | .crypto i => ExecCrypto.exec s next pc (eaNat s next) i
 
 /-- Decode and execute the instruction at the start of `bytes` (the code at `s.rip`). -/
 def step (bytes : List Nat) (s : State) : Except Fault State :=

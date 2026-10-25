@@ -14,3 +14,5 @@ import Janus.Amd64.CABI
 import Janus.Amd64.FFI
 import Janus.Amd64.Recursion
 import Janus.Amd64.TacticSSE
+import Janus.Amd64.TacticCrypto
+import Janus.Spec.MemHash

@@ -33,6 +33,11 @@ verify_function() {
   local -a thms=(Proof.correctness)
   if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.panics); fi
   if grep -q '^namespace Witness' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
+  # corollaries stated as their own theorems (e.g. EncryptBlock's AES-128 and FIPS-197 vector)
+  local c
+  for c in $(grep -oE '^theorem corollary[A-Za-z0-9_]*' "examples/proofs-amd64/$f/Proof.lean" | awk '{print $2}'); do
+    thms+=("Proof.$c")
+  done
   st="$(mktemp -d)"
   verify_theorems "artifacts/amd64/$f" "examples/proofs-amd64/$f/Proof.lean" "$st" "${thms[@]}"
   for ((i = 0; i < ${#thms[@]}; i++)); do

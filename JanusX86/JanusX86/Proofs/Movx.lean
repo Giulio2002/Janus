@@ -207,6 +207,22 @@ theorem withFS_movx_r (sg : Bool) (dw sw d : Nat) (b : Bool) (k : Nat) :
     withFS (.movx sg dw sw d (regLocOf b sw k)) = none := by
   rcases regLocOf_cases b sw k with ⟨r, e⟩ | ⟨r, e⟩ <;> rw [e] <;> rfl
 
+open Janus.Amd64 in
+/-- The SSE decoder has nothing at the two-byte opcodes the frame proofs cover: `CMOVcc`
+(`0F 40-4F`), `SETcc` (`0F 90-9F`), `MOVZX`/`MOVSX` (`0F B6/B7/BE/BF`). -/
+theorem sse_ext_none {o : Nat}
+    (ho : (0x40 ≤ o ∧ o < 0x50) ∨ (0x90 ≤ o ∧ o < 0xA0) ∨ o = 0xB6 ∨ o = 0xB7 ∨ o = 0xBE ∨ o = 0xBF)
+    (a : Bool) (b : Nat) (c : Option Nat) (mrm : DecodeSSE.MRM) (bs : List Nat) (n : Nat) :
+    DecodeSSE.decode a b c mrm o bs n = none := by
+  have : o = 0x40 ∨ o = 0x41 ∨ o = 0x42 ∨ o = 0x43 ∨ o = 0x44 ∨ o = 0x45 ∨ o = 0x46 ∨ o = 0x47 ∨
+      o = 0x48 ∨ o = 0x49 ∨ o = 0x4A ∨ o = 0x4B ∨ o = 0x4C ∨ o = 0x4D ∨ o = 0x4E ∨ o = 0x4F ∨
+      o = 0x90 ∨ o = 0x91 ∨ o = 0x92 ∨ o = 0x93 ∨ o = 0x94 ∨ o = 0x95 ∨ o = 0x96 ∨ o = 0x97 ∨
+      o = 0x98 ∨ o = 0x99 ∨ o = 0x9A ∨ o = 0x9B ∨ o = 0x9C ∨ o = 0x9D ∨ o = 0x9E ∨ o = 0x9F ∨
+      o = 0xB6 ∨ o = 0xB7 ∨ o = 0xBE ∨ o = 0xBF := by omega
+  rcases this with h | h | h | h | h | h | h | h | h | h | h | h | h | h | h | h | h | h | h | h |
+    h | h | h | h | h | h | h | h | h | h | h | h | h | h | h | h <;> subst h <;>
+    simp [DecodeSSE.decode, DecodeSSE.pfop, DecodeSSE.pint66]
+
 open Janus.Amd64 Janus.Amd64.Decode in
 theorem decode_movx {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List Nat} {n : Nat}
     (hpp : parsePrefixes bytes {} 0 = some (p, 0x0F :: o :: m :: rest, n))
@@ -235,8 +251,9 @@ theorem decode_movx {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List N
       by_cases hl : 15 < n + 1 + 1 + c <;> by_cases hrp : p.rep = 0 <;>
       cases hf : p.fs <;> cases hk : p.lock <;> cases rm <;>
       simp (config := {decide := true}) only [hle, hle16, hf, hk, hl, hrp, rmDst_r, rmDst_m, rmLoc_r, rmLoc_m,
-        ↓reduceIte, Bool.false_eq_true, withFS_movx_r] at hd ⊢ <;>
-      (try simp [withFS, lockable] at hd ⊢)
+        ↓reduceIte, Bool.false_eq_true, withFS_movx_r, sse_ext_none, Janus.Amd64.DecodeCrypto.decode_eq_none_of,
+        Option.or_none, Option.or_some] at hd ⊢ <;>
+      (try simp [withFS, lockable, withFS_movx_r, sse_ext_none] at hd ⊢)
     all_goals first
       | (obtain ⟨rfl, rfl⟩ := hd; refine ⟨by omega, by omega, rfl, ?_⟩ <;> simp)
       | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨by omega, by omega, rfl⟩)
@@ -244,6 +261,8 @@ theorem decode_movx {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List N
       | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨by omega, by omega, rfl, fun _ h => by cases h⟩)
       | (obtain ⟨rfl, rfl⟩ := hd; exact ⟨by omega, by omega, by omega, rfl, fun _ h => by cases h⟩)
       | omega
+      | (rcases regLocOf_cases p.rex.isSome 8 ‹_› with ⟨r, e⟩ | ⟨r, e⟩ <;> rw [e] at hd <;> simp at hd)
+      | (rcases regLocOf_cases p.rex.isSome 16 ‹_› with ⟨r, e⟩ | ⟨r, e⟩ <;> rw [e] at hd <;> simp at hd)
 
 end JanusX86.Proofs
 
@@ -276,7 +295,8 @@ theorem movx_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Co
     exfalso
     obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
     simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
-    rcases ho with rfl | rfl | rfl | rfl <;> simp (config := {decide := true}) [twoByte, hmd] at hd
+    rcases ho with rfl | rfl | rfl | rfl <;>
+      simp (config := {decide := true}) [twoByte, hmd, sse_ext_none] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc
   generalize hsw : (if o % 2 = 0 then 8 else 16) = sw
