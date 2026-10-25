@@ -210,14 +210,13 @@ def Nilinterequal (p : Program) (addr : Nat) (R : IfaceModel) (d : Nat) : Prop :
 /-- **`runtime.interequal(a, b)`** (`X0 = a`, `X1 = b`, pointers to non-empty interface values
 `(itab, data)`): equal itab words and `ifaceeq(itab, data_a, data_b)` (`Iface.ifaceEqual`). When
 the itabs agree and are not nil, the itab must be readable with a non-nil type whose values
-compare (`EqOK`) independently of the callee's window (`EqFrame`, and the itab outside it). -/
+compare (`EqOK`) independently of the callee's window (`EqFrame`). -/
 def Interequal (p : Program) (addr : Nat) (R : IfaceModel) (d : Nat) : Prop :=
   Summary p addr
     (fun s => IfacePre R d s ∧ IfaceInput s d (s.regs 0).toNat ∧ IfaceInput s d (s.regs 1).toNat ∧
       (s.mem.readLE (s.regs 0).toNat 8 = s.mem.readLE (s.regs 1).toNat 8 →
         s.mem.readLE (s.regs 0).toNat 8 ≠ 0 →
         Input s d 2 (s.mem.readLE (s.regs 0).toNat 8) 16 ∧
-        Outside (s.mem.readLE (s.regs 0).toNat 8) 16 R.priv ∧
         s.mem.readLE (s.mem.readLE (s.regs 0).toNat 8 + 8) 8 ≠ 0 ∧
         Iface.EqOK R s.mem (s.mem.readLE (s.mem.readLE (s.regs 0).toNat 8 + 8) 8)
           (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 1).toNat + 8) 8) ∧

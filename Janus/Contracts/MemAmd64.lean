@@ -155,7 +155,6 @@ def Interequal (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (d : Nat)
       (s.mem.readLE (s.regs 0).toNat 8 = s.mem.readLE (s.regs 3).toNat 8 →
         s.mem.readLE (s.regs 0).toNat 8 ≠ 0 →
         Input s d 2 (s.mem.readLE (s.regs 0).toNat 8) 16 ∧
-        Outside (s.mem.readLE (s.regs 0).toNat 8) 16 R.priv ∧
         s.mem.readLE (s.mem.readLE (s.regs 0).toNat 8 + 8) 8 ≠ 0 ∧
         Iface.EqOK R s.mem (s.mem.readLE (s.mem.readLE (s.regs 0).toNat 8 + 8) 8)
           (s.mem.readLE ((s.regs 0).toNat + 8) 8) (s.mem.readLE ((s.regs 3).toNat + 8) 8) ∧
