@@ -455,13 +455,15 @@ about executions outside it.
   See "Atomics, exclusives and system registers" below.
 * **No signals, no asynchronous preemption, no interrupts.** Go's signal-based async
   preemption, profiling signals and injected calls (`sigpanic`) are not modelled.
-* **No runtime interaction.** No GC (write barriers, stack scanning, moving stacks), no
-  scheduler, no stack growth (calls into the runtime can be assumed as contracts instead of
-  executed: see "Runtime contracts" below). Reaching `runtime.morestack*` ends the run as a `morestack`
-  outcome, and it is not a return. Calls into other runtime functions only work if they were
-  extracted and their code is in the supported subset. They then run in the same idealised
-  model. Functions with a stack-check prologue need `GoABI.StackGuardOK s k` (g readable,
-  `stackguard0 + k < SP`) for the prologue to fall through.
+* **No runtime interaction.** No GC (write barriers, stack scanning), no scheduler (calls into
+  the runtime can be assumed as contracts instead of executed: see "Runtime contracts" below).
+  Calls into other runtime functions only work if they were extracted and their code is in the
+  supported subset. They then run in the same idealised model. Functions with a stack-check
+  prologue need `GoABI.StackGuardOK s k` (g readable, `stackguard0 + k < SP`) for the prologue
+  to fall through; **since R7 the grown case is covered too**, under the `morestack` contract
+  (`EnsuresGrow`/`GrownReturns`, "Stack growth" below), so a theorem need not assume the stack
+  has room. A plain `Returns`/`Ensures` theorem still ends the run at the `.morestack` stub,
+  which is not a return (`GoABI.GrowsStack`).
 * **User mode only (EL0).** There are no system registers beyond NZCV and the read-only
   `DCZID_EL0` (`State.dczid`) and `TPIDR_EL0` (`State.tpidr`, see below), no exceptions and no
   page tables. `SP` alignment checking (SCTLR_EL1.SA0, as Linux configures it) is modelled as a
@@ -510,6 +512,49 @@ about executions outside it.
 * **Fixed binary.** A theorem is about one binary, identified by SHA-256. Rebuilding with
   another compiler version, other flags or another linker layout invalidates it. `janus check`
   detects this.
+
+<a id="stack-growth"></a>
+
+## Stack growth (R7)
+
+A theorem proved with `EnsuresGrow`/`GrownReturns` (`Janus/Contracts/Stack.lean`) holds on a
+goroutine stack of any size, the function-prologue `runtime.morestack` call included, *if* the
+runtime grows the stack as the `morestack` contract says. That contract is **trusted**; it is a
+statement about Go 1.26's `runtime.morestack_noctxt`/`morestack`/`newstack`/`copystack`/`gogo`
+(`runtime/stack.go`, `asm_arm64.s`, `asm_amd64.s`), read as follows.
+
+1. **The copy and the pointer adjustment.** `newstack` allocates a new stack and `copystack`
+   copies the used frames to it and adds `delta = new.hi - old.hi` to every word that points
+   into the old stack `[lo, hi)`. Janus models exactly this (`Janus.Spec.Stack.Moved` along the
+   unwinder's `Chain`): a word the stack maps mark as a pointer is adjusted, every other byte is
+   copied. **The stack maps are correct** — the compiler's liveness information
+   (`FUNCDATA_LocalsPointerMaps`, `FUNCDATA_ArgsPointerMaps`, `FUNCDATA_StackObjects`, indexed by
+   `PCDATA_StackMapIndex`, read out of the pclntab) marks exactly the stack slots that hold
+   pointers at each safepoint. This is the one assumption the task names explicitly; it is what
+   the GC and the stack copier themselves rely on, and a `FrameTable` in a theorem is required
+   only to agree with it.
+2. **No pointer into the stack lives in non-stack memory.** Go's escape analysis guarantees that
+   a pointer into a goroutine stack is never stored in the heap or in globals (such a value would
+   escape). The contract does not adjust any word outside the stack, and a theorem's precondition
+   states that the memory it grants holds no pointer into `[lo, hi)` (the moved memory says
+   nothing about such a word). A program that smuggled a stack pointer into non-stack memory
+   through `unsafe` is outside the model.
+3. **The new stack.** `newstack` doubles the old size until the frame plus `stackGuard` fits
+   (`funcMaxSPDelta(f) + stackGuard` below the resumed `SP`), throwing `stack overflow` past
+   `maxstacksize`; the contract promises exactly that much room, inside the address space Go
+   reserves for goroutine stacks. The runtime's own state (a free stack to allocate, no
+   preemption request, no GC assist that parks) is round 9's readiness predicate `H`, assumed at
+   the call and re-established after it.
+4. **Resumption.** `gogo` restores `SP`, `FP`, `g`, `g.stack`, `g.stackguard0` (all moved by
+   `delta`, `g` itself kept) and resumes at the saved return address — the prologue's glue after
+   the `morestack` call — on the new stack. Every other register, the flags and the SIMD&FP
+   registers are arbitrary (the arguments are read back from the moved spill slots).
+
+`Janus/Contracts/StackSat.lean` proves the contract is satisfiable (a toy allocator that really
+performs the copy and the adjustment), so it is not vacuous. What stays outside the model:
+asynchronous preemption (`stackguard0 == stackPreempt`, a scheduler request from another thread),
+`stackForceMove`, GC stack scanning and stack **shrinking** (`shrinkstack`), and any pointer the
+escape analysis did not account for.
 
 ## Atomics, exclusives and system registers
 

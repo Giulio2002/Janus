@@ -253,6 +253,50 @@ stub), and combine "panics iff" from both directions with `Returns.not_panics`:
   · exact absurd hp (hret hy).not_panics
 ```
 
+### Stack growth, the grown case (`BigLocal`)
+
+The prologue's `morestack` branch — the grown case excluded by `GuardOK` above — is covered by
+the `morestack` contract (`Janus/Contracts/Stack.lean`, docs/RUNTIME-CONTRACTS.md "Stack
+growth"). A grown theorem is an `EnsuresGrow p reloc entry args pre post`: like `Ensures`, but
+the conclusion is `GrownReturns` (a return after any number of stack growths) and `pre` does
+**not** assume the frame fits. It takes a frame table `FT`, the stack pools, the runtime-owned
+memory `rt`, a readiness `H` and the contract `hms : MorestackContract p FT pool rt H reloc` as
+hypotheses.
+
+The proof reuses the ordinary roomy `Summary`:
+
+```lean
+theorem correctness … (hms : MorestackContract Extracted.program FT pool rt H reloc) … :
+    EnsuresGrow Extracted.program reloc Extracted.entry [x, i] (GPre FT pool rt H) post := by
+  intro ret hret s hs hpre
+  janus_intro hs
+  …
+  by_cases hroom : lo + stackGuard + 48 < s.sp.toNat
+  · -- the frame fits: the prologue falls through, apply the roomy Summary
+    exact .done (Summary.returns summary …)
+  · -- the frame does not fit: run the prologue to the morestack stub …
+    apply GrownReturns.of_reaches_stub
+    janus_run
+    -- … the contract resumes on a larger stack; the glue reloads the args; the Summary applies
+    refine grow_branch … (hms …) …
+```
+
+`janus_run` runs the prologue; with room it reaches the return through the body, without room it
+stops at the `.morestack` stub, leaving the concrete call state to the contract. The contract's
+`Grown` promises a larger stack with room for the function's `funcMaxSPDelta + stackGuard`, so
+the roomy `Summary` applies after the glue re-enters the function. The arguments survive the move
+because the stack maps classify the spill slots as scalars (`Moved.readLE_scalar`); a pointer
+argument would be adjusted instead (`Moved.readLE_ptr`). `BigLocal` keeps everything
+layout-independent: it uses `Extracted.entry` and the glue offset `Extracted.entry + 0x6c`, never
+a hard-coded address. `grow_rec` (well-founded recursion on the stack's distance from
+`maxstacksize`) and the grown callee summaries `GrownRet`/`GSummary` (`bind`, `call`,
+`GSummary.induction`) are there for functions that grow more than once, such as a deep recursion.
+
+The non-vacuity witness (`Proof.Witness`) reuses the two-slot toy runtime of
+`Janus/Contracts/StackSat.lean` for the real binary's `morestack` stub, exhibits a call state
+whose frame does **not** fit (`Witness.no_room`), shows all hypotheses hold together
+(`nonvacuous`) and that the conclusion is reached (`returns`).
+
 ### Loops (`Sum`, `CopyWords`, `JanusTests/Tactic.lean`)
 
 1. Find the loop head in the disassembly (for Go: the `cmp` before the backward branch) and name
