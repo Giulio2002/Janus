@@ -52,12 +52,7 @@ theorem correctness (x : BitVec 64) :
   rw [e1] at hsc
   rw [e2] at hco hdj
   simp only [Disjoint, BitVec.toNat_ofNat, Nat.reduceMod] at hdj
-  have g0 := DataLoaded.readLE hd (d := Extracted.data[0]) (List.getElem_mem (by decide)) 0 8 (by decide)
-  have g1 := DataLoaded.readLE hd (d := Extracted.data[1]) (List.getElem_mem (by decide)) 0 8 (by decide)
-  have a0 := DataLoaded.accessible hd (d := Extracted.data[0]) (List.getElem_mem (by decide))
-  have a1 := DataLoaded.accessible hd (d := Extracted.data[1]) (List.getElem_mem (by decide))
-  simp (config := { decide := true }) only [Extracted.data, List.getElem_cons_zero, List.getElem_cons_succ,
-    Nat.add_zero, List.drop_zero, listLE, List.length_cons, List.length_nil] at g0 g1 a0 a1
+  janus64_data hd []
   janus64_run
   have hr := Janus.Arm64.Memory.readLE_lt s.mem 5798136 8
   have hmul : (BitVec.ofNat 64 (Janus.Arm64.Memory.readLE s.mem 5798136 8) * x).toNat =
