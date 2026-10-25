@@ -38,7 +38,7 @@ the cache.
 | 2. runtime entry points with a contract, stub or proof (main + branches) | 71 of 309 names (39 on main; agent/rtiface adds 15) | same | same |
 | 2. … of the 191 linked on arm64/amd64: still missing | 139 (12 of them concurrency, excluded) | | |
 | 3. language constructs with a proved example | 64 of 75 rows (11 have none on either ISA; agent/constructs closes 20, agent/rtiface 4) | | |
-| 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | **100% / 100%** (all six configurations, WP-I; 93.6% / 86.2% before) | **96.4% / 98.2%** since WP-D (83.6% / 78.0% before: SSE2 packed) | `-O3 -march=x86-64-v3`: 59.1% / 58.7% (VEX, WP-F) |
+| 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | **100% / 100%** (all six configurations, WP-I; 93.6% / 86.2% before) | **100% / 100%** with WP-D and WP-J, also at `-O0`/`-O3` (83.6% / 78.0% before: SSE2 packed; then x87, `NOTRACK`, the TLS call) | `-O3 -march=x86-64-v3`: 62.7% / 60.6% (VEX, WP-F) |
 
 Main findings:
 
@@ -637,11 +637,15 @@ Each file is compiled the way cgo invokes the C compiler (`-fPIC -pthread -g`, p
 | clang 21.1 | 106/110 (96.4%) | 94/109 (86.2%) | 94/109 (86.2%) | 105/110 (95.5%) | 85/109 (78.0%) | 85/109 (78.0%) | 55/109 (50.5%) |
 | gcc, after WP-D (2026-10-25; `ENDBR64` merged) | | | | 108/110 (98.2%) | **106/110 (96.4%)** | **106/110 (96.4%)** | 65/110 (59.1%) |
 | clang, after WP-D | | | | 108/110 (98.2%) | **107/109 (98.2%)** | **107/109 (98.2%)** | 64/109 (58.7%) |
+| **gcc, after WP-D and WP-J** (agent/x87 at `beecc10`) | | | | **110/110 (100%)** | **110/110 (100%)** | **110/110 (100%)** | 69/110 (62.7%) |
+| **clang, after WP-D and WP-J** | | | | **110/110 (100%)** | **109/109 (100%)** | **109/109 (100%)** | 66/109 (60.6%) |
 
-After WP-D no amd64 C function at `-O0`/`-O2`/`-O3` has an SSE blocker: what is left is
+After WP-D no amd64 C function at `-O0`/`-O2`/`-O3` has an SSE blocker: what was left was
 `a_ldouble` (x87), `a_use_tls` (the padded `call __tls_get_addr`) and, for gcc, the two `NOTRACK`
-jump tables (`s_dense`, `s_name`), all WP-J; under `-march=x86-64-v3` the VEX instructions of
-WP-F.
+jump tables (`s_dense`, `s_name`), all closed by WP-J, so every function of the corpus decodes in
+those six configurations; under `-march=x86-64-v3` the VEX instructions of WP-F remain. (WP-J
+alone, on main `a3626db` before WP-D: gcc `-O2` 83.6% → 87.3%, `-O0` 98.2% → 100%, clang `-O2`
+78.0% → 79.8%.)
 
 **Blocking families, all configurations** (functions blocked, excluding `ENDBR64`):
 
