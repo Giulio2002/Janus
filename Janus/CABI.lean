@@ -538,6 +538,25 @@ theorem CEnsuresA.mono {sig : AAPCS64.Sig} {vals : List Nat} {pre pre' : State �
     CEnsuresA p entry sig vals pre' post' :=
   fun ret hret s hs hp => (h ret hret s hs (hpre s hp)).mono fun _ ⟨ha, hq⟩ => ⟨ha, hpost _ _ hp hq⟩
 
+/-- `CReturn` from the equations a callee summary states (all SIMD&FP registers kept). -/
+theorem CReturn.of_eqs {s₀ s₁ : State} (hsp : s₁.sp = s₀.sp) (h19 : s₁.regs 19 = s₀.regs 19)
+    (h20 : s₁.regs 20 = s₀.regs 20) (h21 : s₁.regs 21 = s₀.regs 21) (h22 : s₁.regs 22 = s₀.regs 22)
+    (h23 : s₁.regs 23 = s₀.regs 23) (h24 : s₁.regs 24 = s₀.regs 24) (h25 : s₁.regs 25 = s₀.regs 25)
+    (h26 : s₁.regs 26 = s₀.regs 26) (h27 : s₁.regs 27 = s₀.regs 27) (h28 : s₁.regs 28 = s₀.regs 28)
+    (h29 : s₁.regs 29 = s₀.regs 29) (hfc : s₁.fpcr = s₀.fpcr) (hv : s₁.vregs = s₀.vregs) :
+    CReturn s₀ s₁ :=
+  ⟨hsp, h19, h20, h21, h22, h23, h24, h25, h26, h27, h28, h29, hfc, by rw [hv], by rw [hv],
+    by rw [hv], by rw [hv], by rw [hv], by rw [hv], by rw [hv], by rw [hv]⟩
+
+/-- The return address of a `CCallA` state, as a callee `Summary` needs it. -/
+theorem CCallA.lr_ok {sig : AAPCS64.Sig} {vals : List Nat} {ret : Nat} (hret : GoABI.RetAddr p ret)
+    (hs : CCallA (p.withExit ret) entry sig vals s) :
+    (s.regs 30).toNat % 4 = 0 ∧ (s.regs 30).toNat < 2 ^ 56 := by
+  have hlr := hs.lr
+  simp only [Program.withExit, GoABI.regLR] at hlr
+  rw [hlr, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hret.lt64]
+  exact ⟨hret.aligned, by have := hret.user; omega⟩
+
 /-- The bytes a list of pieces determines: if the pieces of `v` and of `w` are in place in the
 same state and cover the same byte ranges, `v` and `w` agree on those bytes. -/
 theorem PiecesAt.bytes_eq {s : State} {v w : Nat} :

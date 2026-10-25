@@ -5,8 +5,10 @@
 # leanchecker replay).
 #
 #   C functions (CEnsures, the C calling convention):   CAdd CSum CStore
+#   C functions under the classified C ABI (CEnsuresR):  KStack10 KFP KPMix KBig KVSum
 #   Go -> C -> Go, end to end (EnsuresC under the trusted
 #   cgocall contract Janus.FFI.CgoCall):                 GoAdd GoSum
+#                                                        GoStack10 GoFP GoPMix GoBig GoVSum8
 #
 # Usage: scripts/verify-cgo-examples.sh [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
 # Writes artifacts/cgo/<isa>/<Name>/verified.json and a summary to artifacts/verify-cgo-examples.txt.
@@ -18,11 +20,16 @@ export PATH=/usr/local/go/bin:$PATH
 declare -A sym=(
   [CAdd]=c_add [CSum]=c_sum [CStore]=c_store
   [GoAdd]=example.com/cgo.Add [GoSum]=example.com/cgo.Sum
+  [KStack10]=k_stack10 [KFP]=k_fp [KPMix]=k_pmix [KBig]=k_big [KVSum]=k_vsum
+  [GoStack10]=example.com/cgo/cabi.Stack10 [GoFP]=example.com/cgo/cabi.FP
+  [GoPMix]=example.com/cgo/cabi.PMix [GoBig]=example.com/cgo/cabi.Big
+  [GoVSum8]=example.com/cgo/cabi.VSum8
 )
+all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8)
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
-    for n in CAdd CSum CStore GoAdd GoSum; do names+=("$isa/$n"); done
+    for n in "${all[@]}"; do names+=("$isa/$n"); done
   done
 fi
 
@@ -36,9 +43,11 @@ fail=0
 for target in "${names[@]}"; do
   isa="${target%%/*}"; n="${target#*/}"
   out="artifacts/cgo/$isa/$n"
-  # `runtime.convT64` is only called on the dead `if _Cgo_always_false` branch of the cgo
-  # wrappers: a contract (not extracted; the proofs show the branch is never taken)
-  bin/janus extract "artifacts/examples-cgo-$isa" "${sym[$n]}" "$out" --contract runtime.convT64 >/dev/null 2>&1
+  # `runtime.convT64`, `convT32` and `convTnoptr` are only called on the dead
+  # `if _Cgo_always_false` branch of the cgo wrappers: contracts (not extracted; the proofs show
+  # the branch is never taken)
+  bin/janus extract "artifacts/examples-cgo-$isa" "${sym[$n]}" "$out" --contract runtime.convT64 \
+    --contract runtime.convT32 --contract runtime.convTnoptr >/dev/null 2>&1
   start=$(date +%s.%N)
   if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
