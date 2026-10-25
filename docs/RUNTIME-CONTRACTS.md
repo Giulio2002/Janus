@@ -397,3 +397,28 @@ Linux:
 Everything else is executed by the model from the binary's bytes: the Go function, its cgo
 `_Cfunc_` wrapper (including the stack check and the `_Cgo_always_false` test), the C wrapper,
 and the C function.
+
+### The kernel: system calls, environment reads, vDSO clocks (`Janus/Contracts/Syscall.lean`, `Janus/Contracts/SyscallAmd64.lean`)
+
+A Go function that talks to Linux is stated with `Kernel.EnsuresK p E entry args pre post`
+(amd64: `Amd64.Kernel.EnsuresK`): the pre- and postconditions also take the **kernel state**
+`Kern` (the I/O trace, the input oracle, the clock bounds, the IDs, the CPU features), and the run
+is the kernel semantics `ReturnsK`, which gives each `.syscall` stub its contract
+(`Kernel.SiteSafe`/`SiteNext` by site: `SVC #0`/`SYSCALL` by system call number, the environment
+reads, the vDSO clocks). See [SOUNDNESS.md](SOUNDNESS.md#the-kernel-trust-boundary-system-calls-environment-reads-traps)
+for what each contract allows and what is trusted.
+
+| contract | what it states | used by |
+|---|---|---|
+| `Kernel.Safe`/`Kernel.Effect` per `Sys` | `read`, `write`, `openat`, `close`, `exit_group`, `clock_gettime`, `mmap`, `munmap`, `madvise`, `rt_sigprocmask`, `sigaltstack`, `sched_yield`, `nanosleep`, `getpid`, `gettid` | every `SVC #0`/`SYSCALL` stub (`internal/runtime/syscall/linux.Syscall6`, `syscall.rawSyscallNoError`, the `runtime` wrappers) |
+| `Site.walltime`, `Site.nanotime` (arm64), `Site.timeNow`, `Site.nanotime` (amd64) | the vDSO clocks: a reading of the clock, recorded in the trace; the monotonic clock never goes back; only runtime-owned memory (`KEnv.rt`) and `KEnv.stack` bytes below `SP` change | `runtime.walltime`, `runtime.nanotime1`, `time.now` |
+| environment reads | `CNTVCT_EL0` monotone, `CNTFRQ_EL0`/`XCR0` constants of `Kern`, `MIDR_EL1`/`CPUID`/`RDTSC(P)` arbitrary (feature-gated by `Kern` flags), `PSTATE.DIT` in `Kern` | `internal/cpu`, `runtime.cputicks`, `crypto/subtle` |
+| `Kernel.SchedContract` / `Amd64.Kernel.SchedContract` | `runtime.entersyscall`/`exitsyscall` return with the Go ABI registers kept, memory changed only inside `rt` and their stack window (a `Summary`, `--contract`) | `syscall.Syscall`, `syscall.Syscall6` |
+| `Kernel.ConvT64Contract` / `Amd64.Kernel.ConvT64Contract` | `runtime.convT64(v)` returns a pointer to 8 readable bytes holding `v` (a `Summary`, `--contract`) | `syscall.errnoErr` on the error path |
+
+Witnesses: `Kernel.Effect.total`, `Kernel.SiteNext.total`, `Amd64.Kernel.SiteNext.total` (no
+contract is stuck where its precondition holds), `write_full`, `read_some`, `clock_monotonic`,
+`mmap_anon` (the interesting behaviour is allowed), and `JanusTests/Kernel.lean` (concrete code
+meets `SchedContract` and `ConvT64Contract`). Examples: `examples/proofs-sys/{arm64,amd64}/`
+(`WriteOut`: `syscall.Write`; `NowNano`: `time.Now().UnixNano()`; `Pid`: `syscall.Getpid`;
+`MustNonNeg`: a path ending in a trap), run by `scripts/verify-sys-examples.sh`.

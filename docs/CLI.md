@@ -106,6 +106,20 @@ Extraction:
      `cmd/janus/extract.go`);
    * `.morestack`: `runtime.morestack.abi0` and `runtime.morestack_noctxt.abi0` (the
      stack-growth path of every function prologue).
+   * `.syscall` (function level): the vDSO clock functions, `runtime.walltime.abi0` and
+     `runtime.nanotime1.abi0` on arm64, `runtime.nanotime1.abi0` and `time.now` on amd64
+     (`runtimeKernelStubs` in `cmd/janus/kernel.go`; authenticated and pinned like every stub).
+
+   In every copied function it also puts **instruction-level stubs** (`cmd/janus/kernel.go`):
+   `.syscall` on each `SVC #0`/`SYSCALL` and each environment read (`MRS` of `CNTVCT_EL0`,
+   `CNTFRQ_EL0`, `MIDR_EL1`, `DIT`, `MSR DIT`; `CPUID`, `XGETBV`, `RDTSC`, `RDTSCP`), named
+   `syscall` or `env:<register>`, and `.trap` on each trap instruction (`trap:BRK`, `trap:UDF`,
+   `trap:INT3`, `trap:UD2`, `trap:HLT`; the zero / `INT3` padding after a function's last
+   instruction and the targets of `LDR (literal)` excepted). Their effect is given by the kernel
+   semantics of `Janus/Contracts/Syscall.lean` (`EnsuresK`, `ReturnsK`, `Traps`); the Lean side
+   checks the instruction at each stub, so the placement is not trusted. `janus verify` prints
+   `Kernel interface: …` and `Trap sites: …` and records `kernel` and `traps` in
+   `verified.json`; `janus explain` prints them with what they mean.
 
    Names are matched exactly; no suffix is stripped. A listed name counts only in a go1.26
    binary with an ELF symbol table, when no other function has the same name (any package can
