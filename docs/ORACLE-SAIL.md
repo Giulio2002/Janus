@@ -15,6 +15,7 @@ and the page-table walk all come from Arm's pseudocode.
 scripts/oracle.sh full           # the qemu oracle: builds the corpus + qemu results (artifacts/oracle)
 scripts/oracle-sail.sh run       # Sail driver + three-way report (artifacts/oracle-sail)
 scripts/oracle-sail.sh smoke     # 18 hand-checked cases only
+QEMU_OUT=artifacts/oracle-neon OUT=artifacts/oracle-sail-neon scripts/oracle-sail.sh run   # any qemu corpus, e.g. `oracle.sh neon`
 scripts/oracle-sail.sh regen     # regenerate the Sail model from pinned sources (provenance)
 scripts/oracle-sail.sh crosscheck  # regenerated model vs vendored model on the whole corpus
 ```
@@ -214,6 +215,29 @@ and must not be read as "the architecture says so":
 
 None of these can hide a Janus soundness bug as an "agree". They only produce `model-gap`
 or MISMATCH noise between qemu and Sail, or `error` cases, which are excluded.
+
+## Results with the Advanced SIMD classes of `NeonInstr` (2026-10-25, 653,793 cases)
+
+`QEMU_OUT=artifacts/oracle-neon OUT=artifacts/oracle-sail-neon scripts/oracle-sail.sh run` on the
+corpus of `scripts/oracle.sh neon` (targeted NEON classes, random groups, the C and Go harvests,
+and 50,000 sequence-mode blocks). The driver now runs sequence-mode cases too: with `words`, it
+lays the block out from `TestPC` and steps the model while the PC stays inside it at EL0 (one
+step per word plus one), then reports like a single step.
+
+| pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
+|---|---:|---:|---:|---:|---:|
+| Sail (hw) vs Janus (model) | 638,122 | **0** | 15,637 | 34 | 0 |
+| qemu (hw) vs Sail (model) | 652,740 | 231 | 788 | 0 | 34 |
+| qemu (hw) vs Janus (model) | 637,430 | **0** | 16,363 | 0 | 0 |
+
+`soundness.jsonl` is empty. The 34 unobserved cases are Sail errors on MOPS and PAuth words of
+the random groups (tags `mops-impdef`, `pauth-keys`). The qemu-vs-Sail disagreements are the
+known ones (store-exclusives with the monitor stub, MOPS, features qemu lacks, process memory)
+plus one new: the vector `FABS`/`FNEG` under `FPCR.AH = 1` with a NaN lane (29 single-step cases
+and 3 sequences), where Sail leaves the NaN unchanged, as the ASL `FPAbs`/`FPNeg` say, and qemu
+10.2.1 changes its sign. Before the model faulted there, Janus followed the ASL and agreed with
+Sail on all 33 cases that qemu disagreed on; it now faults (`trapped`) on that corner, so both
+pairs are 0 MISMATCH. The Sail-only SP-misalignment corpus (2,680 cases) is 0 MISMATCH as well.
 
 ## Results with scalar floating point (2026-10-24, 1,131,099 cases)
 

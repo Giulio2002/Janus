@@ -203,6 +203,9 @@ qemu disagreed on 33 cases (20 words, 4 of them in sequences); the Sail model, r
 cases, agreed with the ASL transcription on all of them, so this is a qemu deviation (it flips or
 clears the NaN's sign bit), and the model now faults there instead.
 
+The same corpus against the Sail model (`docs/ORACLE-SAIL.md`): Janus vs Sail 0 MISMATCH
+(638,122 agree, 15,637 model-gap, 34 unobserved Sail errors on MOPS/PAuth words).
+
 `JanusTests/Neon.lean` holds one hardware result per mnemonic the C corpora produce (208 words),
 re-checked by the kernel.
 
