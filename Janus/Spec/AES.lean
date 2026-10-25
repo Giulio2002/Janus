@@ -37,6 +37,10 @@ round) transformations on every state and round key: `AESENC` is one `Cipher` ro
 
 namespace Janus.Spec.AES
 
+-- the byte-wise proofs below use one simp set for all sixteen bytes; some lemmas are needed
+-- for some bytes only
+set_option linter.unusedSimpArgs false
+
 open Janus.Arm64 (elem ofElems)
 open Janus.Tactic (elem_lt ofElems_lt elem_ofElems)
 

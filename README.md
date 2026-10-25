@@ -263,6 +263,9 @@ Go 1.26.0. Proofs:
 | `BitMix` | `GOAMD64=v3` (`examples/basic/v3`): `(x &^ y) ^ (x & (x-1)) ^ (y << (n & 63))` through BMI `ANDN`, `SHLX`, `BLSR` | | ✓ |
 | `Fma` | `GOAMD64=v3`: `math.FMA(a, b, c)` as one `VFMADD231SD` is IEEE 754 `fusedMultiplyAdd` rounded once (the arm64 `FMADD` specification), whenever the result is architecturally defined | | ✓ |
 | `LoadBE` | `GOAMD64=v3`: `binary.BigEndian.Uint64` as one `MOVBE` is the big-endian value of the 8 bytes | | ✓ |
+| `Memhash64`, `Memhash32` | std `runtime.memhash64`/`memhash32` (every 8-/4-byte map key, `examples/basic/xcrypto`): three FIPS-197 AES rounds (`AESENC`) keyed by `runtime.aeskeysched` when `useAeshash`, else `memhash*Fallback` | | ✓ |
+| `EncryptBlock` | std `crypto/aes`'s `encryptBlockAsm` (AES-NI) writes FIPS-197 `Cipher` for AES-128/192/256; AES-128 for an expanded key; the FIPS-197 C.1 vector through the machine code | | ✓ |
+| `AddMulVVWW` | std `math/big.addMulVVWW` (ADX `ADCX`/`ADOX` + `MULX`, and the `MULQ` path): `z + 2^(64n)·c = x + y·m + a` for **every** length `n` | | ✓ |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
 **What it rules out**). Every proof uses only axioms from the allow-list `propext`, `Quot.sound`,
