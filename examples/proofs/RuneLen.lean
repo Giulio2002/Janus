@@ -1,32 +1,37 @@
 import Extracted
 
 /-!
-# `runtime.countrunes` meets its contract, from the machine code
+# `RuneLen(s string) int` is `len([]rune(s))`: the number of runes of `s` (arm64)
 
-**Guarantee.** For every `rt`, `H` and every stack window of at least 4144 bytes, the machine
-code of Go 1.26's
-`runtime.countrunes(s)` (linux/arm64; what `len([]rune(s))` calls) satisfies
-`RtContract … countrunesSpec` (`Janus/Contracts/String.lean`): from every call state with a
-readable string outside the callee's stack window and the stack guard 64 bytes below `SP`, it
-returns `countRunes (bytes of s)` (the number of runes `for range s` produces) in `X0`, keeping
-`SP`, `R18`, `R28`, `R29` and changing memory only in its stack window.
+**Guarantee.** For every string `s = (p, n)` and every Go call state of
+`example.com/basic.RuneLen` with the stack guard 96 bytes below `SP` (so neither RuneLen's nor
+`runtime.countrunes`' stack check grows the stack), the stack window `[SP-4176, SP+24)` writable,
+the string readable and outside the window, and `g`'s guard word outside it: the call returns,
+obeys the ABI, and `X0` is `countRunes (bytes of s)`, the number of runes Go's `for range s`
+produces, U+FFFD counting once for every invalid UTF-8 sequence (`Janus/Spec/String.lean`,
+checked against the Go runtime in `JanusTests/String.lean`).
 
-Both functions are the runtime's own code (`runtime.decoderune` is extracted with it and proved
-first, `decoderune_meets`): nothing is assumed, so this is also the contract's witness
-(`satisfiable`).
-
-**How.** As `SumRunes`: the loop invariant at `cmp x1, x2` counts the runes still to come
-(`runesFrom … k`), an ASCII byte is counted inline and anything else through `decoderune`.
+**How.** In two layers. `correctness` proves RuneLen from `runtime.countrunes`' contract alone
+(`RtContract … countrunesSpec`, `Janus/Contracts/String.lean`). `countrunes_meets` proves that the
+runtime's own code (extracted with RuneLen, together with the `runtime.decoderune` it calls,
+`decoderune_meets`) meets that contract for every `rt` and `H`; `runtime_correctness` combines the
+two, so nothing is assumed, and `Witness` gives a concrete call state meeting the precondition.
+`countrunes_satisfiable` is the contract's own witness. The countrunes loop invariant is at
+`cmp x1, x2`: it counts the runes still to come (`runesFrom … k`), an ASCII byte inline and
+anything else through `decoderune`.
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 
 namespace Proof
 
-/-! ## `runtime.decoderune`, from its code (as in `examples/proofs/Decoderune.lean`) -/
+/-! ## `runtime.decoderune`, from its code (as in `examples/proofs/SumRunes.lean`) -/
 
 /-- `runtime.decoderune`'s address. -/
 def decAddr : Nat := segAddr Extracted.program "runtime.decoderune"
+
+/-- `runtime.countrunes`' address. -/
+def crAddr : Nat := segAddr Extracted.program "runtime.countrunes"
 
 
 /-- Go's masked slice index (`AND Xd, Xk, (Xk - Xn) ASR #63`, Spectre hardening of `s[k:]`): `k`
@@ -183,7 +188,7 @@ theorem decoderune_meets (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (h
 
 
 
-abbrev head : Nat := Extracted.entry + 0x34
+abbrev head : Nat := crAddr + 0x34
 
 /-- The memory after the prologue's stores. -/
 def M0 (s : State) (ret : Nat) (p n : BitVec 64) : Memory :=
@@ -348,8 +353,8 @@ theorem rr_mono' {p : Program} {ret : BitVec 64} {S : State} {Q Q' : State → P
 set_option maxRecDepth 20000 in
 set_option maxHeartbeats 4000000 in
 /-- **`runtime.countrunes` meets its contract**, given `decoderune`'s. -/
-theorem correctness (rt : List (Nat × Nat)) (H : RtReady) (stack : Nat) (hst : 4144 ≤ stack) :
-    RtContract Extracted.program Extracted.entry rt stack H countrunesSpec := by
+theorem countrunes_meets (rt : List (Nat × Nat)) (H : RtReady) (stack : Nat) (hst : 4144 ≤ stack) :
+    RtContract Extracted.program crAddr rt stack H countrunesSpec := by
   have hdec := decoderune_meets rt 4096 H (by decide)
   rintro s hpc ⟨⟨hra, hrb, hal, hsb, -, hsa, hacc⟩, ⟨hp1, hp2⟩, hreads, ⟨⟨hg1, hg2, hg3⟩, hgo⟩, -⟩
   simp only [countrunesSpec, argWords, wordsFrom_succ, wordsFrom_zero, arg, List.getD_cons_zero,
@@ -384,31 +389,88 @@ theorem correctness (rt : List (Nat × Nat)) (H : RtReady) (stack : Nat) (hst : 
 
 /-- The witness call state: `Janus.Contracts.Sat`'s, at `runtime.countrunes`, with the empty
 string. -/
-def s0 : State := { Janus.Contracts.Sat.wstate (Janus.Contracts.Sat.args []) with
-  pc := BitVec.ofNat 64 Extracted.entry }
+def cs0 : State := { Janus.Contracts.Sat.wstate (Janus.Contracts.Sat.args []) with
+  pc := BitVec.ofNat 64 crAddr }
 
 /-- **The contract is satisfiable, by the runtime's own code**: `correctness` is the
 implementation, and `s0` meets the precondition. -/
-theorem satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady),
-    RtContract Extracted.program Extracted.entry rt 4144 H countrunesSpec ∧
-    ∃ s : State, s.pc = BitVec.ofNat 64 Extracted.entry ∧ RtPre rt 4144 H countrunesSpec s := by
-  have ha : ∀ j, arg (argWords s0 2) j = 0 := fun j => Janus.Contracts.Sat.args_zero 2 j (by decide)
-  refine ⟨[], fun _ _ _ _ => True, correctness [] _ 4144 (Nat.le_refl _), s0, rfl, ?_, ?_, ?_, ?_,
+theorem countrunes_satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady),
+    RtContract Extracted.program crAddr rt 4144 H countrunesSpec ∧
+    ∃ s : State, s.pc = BitVec.ofNat 64 crAddr ∧ RtPre rt 4144 H countrunesSpec s := by
+  have ha : ∀ j, arg (argWords cs0 2) j = 0 := fun j => Janus.Contracts.Sat.args_zero 2 j (by decide)
+  refine ⟨[], fun _ _ _ _ => True, countrunes_meets [] _ 4144 (Nat.le_refl _), cs0, rfl, ?_, ?_, ?_, ?_,
     by simp [countrunesSpec]⟩
   · have hw : Janus.Contracts.Sat.wmem.accessible (Janus.Contracts.Sat.wsp - 0x2000) 0x2100 true = true := by decide
-    simp only [CallOK, s0, Janus.Contracts.Sat.wstate, countrunesSpec, Janus.Contracts.Sat.wret,
+    simp only [CallOK, cs0, Janus.Contracts.Sat.wstate, countrunesSpec, Janus.Contracts.Sat.wret,
       Janus.Contracts.Sat.wsp, BitVec.toNat_ofNat, ite_true, ite_false, Nat.reduceEqDiff]
     refine ⟨by decide, by decide, by decide, by decide, by decide, by decide, ?_⟩
     exact Memory.accessible_mono _ hw (by simp [Janus.Contracts.Sat.wsp]) (by simp [Janus.Contracts.Sat.wsp])
-  · show StrIn _ (arg (argWords s0 2) 0) (arg (argWords s0 2) 1)
+  · show StrIn _ (arg (argWords cs0 2) 0) (arg (argWords cs0 2) 1)
     rw [ha 0, ha 1]
     exact ⟨by decide, by simp⟩
-  · show ∀ r ∈ [(arg (argWords s0 2) 0, arg (argWords s0 2) 1)], Outside r.1 r.2 _
+  · show ∀ r ∈ [(arg (argWords cs0 2) 0, arg (argWords cs0 2) 1)], Outside r.1 r.2 _
     rw [ha 0, ha 1]
     simp [Janus.Contracts.Sat.outside_zero]
-  · show GuardOK s0 64 ∧ Outside _ 8 _
+  · show GuardOK cs0 64 ∧ Outside _ 8 _
     refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
-    simp only [calleeStack, s0, Janus.Contracts.Sat.wstate, outside_cons, outside_nil]
+    simp only [calleeStack, cs0, Janus.Contracts.Sat.wstate, outside_cons, outside_nil]
     decide
+
+/-! ## RuneLen -/
+
+def Pre (p n : BitVec 64) (s : State) : Prop :=
+  GuardOK s 96 ∧ StackOK s 4176 24 ∧
+    ((s.regs 28).toNat + 24 ≤ s.sp.toNat - 4176 ∨ s.sp.toNat + 24 ≤ (s.regs 28).toNat + 16) ∧
+    StrIn s.mem p.toNat n.toNat ∧
+    (p.toNat + n.toNat ≤ s.sp.toNat - 4176 ∨ s.sp.toNat + 24 ≤ p.toNat)
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 4000000 in
+/-- **RuneLen, from `countrunes`' contract.** -/
+theorem correctness (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
+    (hc : RtContract Extracted.program crAddr rt 4144 H countrunesSpec) :
+    Ensures Extracted.program Extracted.entry [p, n] (Pre p n)
+      (fun s s' => (s'.regs 0).toNat = countRunes (strBytes s.mem p.toNat n.toNat)) := by
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hgs, ⟨hp1, hp2⟩, hps⟩
+  janus_intro hs
+  janus_run [false_implies, implies_true, List.not_mem_nil, forall_const] calls [hc]
+  all_goals assumption
+
+/-- **RuneLen, with the runtime's own `countrunes` and `decoderune`**: nothing assumed. -/
+theorem runtime_correctness (p n : BitVec 64) :
+    Ensures Extracted.program Extracted.entry [p, n] (Pre p n)
+      (fun s s' => (s'.regs 0).toNat = countRunes (strBytes s.mem p.toNat n.toNat)) :=
+  correctness [] (fun _ _ _ _ => True) p n (countrunes_meets [] _ 4144 (Nat.le_refl _))
+
+/-! ## Non-vacuity -/
+
+namespace Witness
+
+open Janus.Contracts.Sat
+
+def ret : Nat := wret
+set_option maxRecDepth 100000 in
+theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
+
+def s0 : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmem }
+
+theorem setup : CallSetup (Extracted.program.withExit ret) Extracted.entry [0, 0] s0 :=
+  ⟨rfl, rfl, by intro i h; simp at h; rcases i with _ | _ | i <;> simp [s0] at h ⊢ <;> omega⟩
+
+theorem pre : Pre 0 0 s0 := by
+  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, ?_⟩,
+    by decide, ⟨by decide, by simp⟩, by decide⟩
+  have hw : wmem.accessible (wsp - 0x2000) 0x2100 true = true := by decide
+  exact Memory.accessible_mono _ hw (by decide) (by decide)
+
+/-- All hypotheses of `runtime_correctness` are satisfiable together. -/
+theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CallSetup (Extracted.program.withExit ret) Extracted.entry [0, 0] s ∧ Pre 0 0 s :=
+  ⟨ret, s0, hret, setup, pre⟩
+
+end Witness
 
 end Proof

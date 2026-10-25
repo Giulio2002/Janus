@@ -22,11 +22,11 @@ scripts/build-examples-asm.sh >/dev/null
 export JANUS_EXAMPLES_PREBUILT=1
 
 # Longest first (measured), then the rest in the scripts' order.
-arm64=(MallocFast ClearWords A64IndexByte A64Crc32 CopyBlock AddLimbs A64Equal64 Add Max Add128 Mul64 Add256 Div Get AddThree
+arm64=(MallocFast RuneLen SumRunes ClearWords A64IndexByte A64Crc32 CopyBlock AddLimbs A64Equal64 Add Max Add128 Mul64 Add256 Div Get AddThree
        Sum SetOne256 HexDigit CopyWords SumSquares AtomicAdd AtomicMax HashWith HashTwice MapSum DeferAdd
        AddF64 Dot3 F64ToU64 Abs NewPair MakeSlice AppendOne SetNext
        Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
-       Box AsHasher Classify Equal
+       Box AsHasher Classify Equal Concat ToBytes FromBytes
        ReverseArray RowsWith SwapBig DotBoth Find2D Fact Compose Shifts AlignUp TotalMeters TotalFeet
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
        Mod IncTwice Bump GlobalTable Table MakeAdder

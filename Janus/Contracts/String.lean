@@ -38,8 +38,8 @@ sum overflows, a negative length, `gobytes` beyond `maxAlloc`, `[]rune` of more 
 runes); operands overlapping the caller's buffer (the runtime copies operand after operand into
 it); and, through `H` (round 9 C1), calls the runtime does not serve as described (out of memory,
 a stack move). `decoderune` and `countrunes` do not allocate or read runtime state: their specs
-ask for the stack check to fall through instead of `H`, and `examples/proofs/Decoderune.lean`
-and `examples/proofs/Countrunes.lean` (and their amd64 counterparts) prove that the runtime's own
+ask for the stack check to fall through instead of `H`, and `examples/proofs/SumRunes.lean`
+and `examples/proofs/RuneLen.lean` (and their amd64 counterparts) prove that the runtime's own
 code meets them.
 -/
 

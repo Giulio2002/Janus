@@ -40,8 +40,6 @@ case "$1" in
   Concat) printf '%s\n' --contract runtime.concatstring2 ;;
   ToBytes) printf '%s\n' --contract runtime.stringtoslicebyte ;;
   FromBytes) printf '%s\n' --contract runtime.slicebytetostring ;;
-  SumRunes) printf '%s\n' --contract runtime.decoderune ;;
-  RuneLen) printf '%s\n' --contract runtime.countrunes ;;
   AppendPoint) printf '%s\n' --contract runtime.growslice ;;
   CopyNodes) printf '%s\n' --contract runtime.typedslicecopy ;;
   WriteBarrier) printf '%s\n' --targets runtime.gcWriteBarrier2,runtime.gcWriteBarrier3,runtime.gcWriteBarrier4,runtime.gcWriteBarrier5,runtime.gcWriteBarrier6,runtime.gcWriteBarrier7,runtime.gcWriteBarrier8 \

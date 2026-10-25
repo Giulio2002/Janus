@@ -20,7 +20,7 @@ needs of the runtime's memory (as `rtView` shows it: the descriptor's words, a w
 heap). The implementations return constants (`constCode`: `MOVZ`/`MOVK` into `X0`–`X2`, `RET`):
 the allocation contracts hand out the heap's first block, the others answer calls whose
 operands are empty. These are models of the contracts, not of the Go runtime; that the runtime
-meets them is what `examples/proofs/Decoderune.lean`, `Countrunes.lean`, `WriteBarrier.lean`
+meets them is what `examples/proofs/SumRunes.lean`, `RuneLen.lean`, `WriteBarrier.lean`
 (proved from the binary's code) and the probes of `audit/` address. `decoderune` and `countrunes`
 have no `H` (their contracts hold for every input), so their witness is the runtime's own code
 proved in those examples.
