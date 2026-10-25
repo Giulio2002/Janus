@@ -110,7 +110,7 @@ theorem rm_frame2 {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Con
     (hlk : p.lock = false)
     {mm : ModRM} {r3 : List Nat} {c : Nat} (hmd : modrm (p.rex.getD 0) (m :: rest) = some (mm, r3, c))
     (hfs : ∀ k', mm.rm = .r k' → p.fs = false)
-    {w : Nat} (hW : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64) {k : Nat} (hk : k < 8) (hlen : n + 2 + c + k ≤ 15)
+    {w : Nat} (hW : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64) {k : Nat} (hk : k < 8) (hlen : n + 2 + c + k ≤ 16)
     (arm : BitVec 48 → BitVec 48 → BitVec 52 → BitVec 8 → BitVec 8 → SailM Unit)
     (hdisp : ∀ x rex, PfxRel p x rex → _get_prefixes_lck x = 0#8 → ∀ sr tr sib,
       (two_byte_opcode_execute .Mode_64bit sr tr x (mpref x o) rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib).run s =
@@ -193,7 +193,7 @@ theorem rm_frame2_any {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X8
     (hmp : ∀ x rex, PfxRel p x rex → modrmP2 x o = true)
     {mm : ModRM} {r3 : List Nat} {c : Nat} (hmd : modrm (p.rex.getD 0) (m :: rest) = some (mm, r3, c))
     (hfs : ∀ k', mm.rm = .r k' → p.fs = false)
-    {w : Nat} (hW : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64) {k : Nat} (hk : k < 8) (hlen : n + 2 + c + k ≤ 15)
+    {w : Nat} (hW : w = 8 ∨ w = 16 ∨ w = 32 ∨ w = 64) {k : Nat} (hk : k < 8) (hlen : n + 2 + c + k ≤ 16)
     (arm : BitVec 48 → BitVec 48 → BitVec 52 → BitVec 8 → BitVec 8 → SailM Unit)
     (hdisp : ∀ x rex, PfxRel p x rex → ∀ sr tr sib,
       (two_byte_opcode_execute .Mode_64bit sr tr x (mpref x o) rex (BitVec.ofNat 8 o) (BitVec.ofNat 8 m) sib).run s =

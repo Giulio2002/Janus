@@ -31,3 +31,4 @@ import JanusX86.Proofs.Div
 import JanusX86.Proofs.Leave
 import JanusX86.Proofs.Xchg9
 import JanusX86.Proofs.Bt3
+import JanusX86.Proofs.Shd
