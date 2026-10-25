@@ -12,7 +12,9 @@
 #   arm64: aarch64-linux-gnu-gcc   (Ubuntu 15.2.0-16ubuntu1) 15.2.0  (apt: gcc-aarch64-linux-gnu)
 #   amd64, CC=clang: clang         Ubuntu clang version 21.1.8 (6ubuntu1)  (examples/cgo/cmdclang,
 #                                  the clang-vectorised C of examples/cgo/vec ->
-#                                  artifacts/examples-cgo-clang-amd64)
+#                                  artifacts/examples-cgo-clang-amd64; examples/cgo/cmdavx, the
+#                                  C of examples/cgo/avx at -O3 -march=x86-64-v3 (its #cgo
+#                                  CFLAGS), AVX2 -> artifacts/examples-cgo-avx-amd64)
 #
 # CGO_CFLAGS is pinned to cgo's default (-g -O2). The binaries are non-PIE ET_EXEC executables
 # (go build -buildmode=exe with external linking passes -no-pie), as janus extract requires.
@@ -42,4 +44,5 @@ export CGO_ENABLED=1 CGO_CFLAGS="-g -O2"
 GOOS=linux GOARCH=arm64 CC="$cc_arm64" go build -buildmode=exe -trimpath -buildvcs=false -o "$root/artifacts/examples-cgo-arm64" ./cmd
 GOOS=linux GOARCH=amd64 GOAMD64=v1 CC="$cc_amd64" go build -buildmode=exe -trimpath -buildvcs=false -o "$root/artifacts/examples-cgo-amd64" ./cmd
 GOOS=linux GOARCH=amd64 GOAMD64=v1 CC="$cc_clang" go build -buildmode=exe -trimpath -buildvcs=false -o "$root/artifacts/examples-cgo-clang-amd64" ./cmdclang
-echo "built $root/artifacts/examples-cgo-arm64 $root/artifacts/examples-cgo-amd64 $root/artifacts/examples-cgo-clang-amd64"
+GOOS=linux GOARCH=amd64 GOAMD64=v1 CC="$cc_clang" go build -buildmode=exe -trimpath -buildvcs=false -o "$root/artifacts/examples-cgo-avx-amd64" ./cmdavx
+echo "built $root/artifacts/examples-cgo-arm64 $root/artifacts/examples-cgo-amd64 $root/artifacts/examples-cgo-clang-amd64 $root/artifacts/examples-cgo-avx-amd64"

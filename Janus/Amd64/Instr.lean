@@ -1,5 +1,6 @@
 import Janus.Amd64.InstrSSE
 import Janus.Amd64.InstrCrypto
+import Janus.Amd64.InstrAVX
 
 /-!
 # x86-64 instruction AST (supported subset)
@@ -330,6 +331,8 @@ inductive Instr where
   /-- The crypto extensions AES-NI, `PCLMULQDQ`, SHA-NI, ADX (`Janus.Amd64.InstrCrypto`,
   `DecodeCrypto`, `ExecCrypto`). -/
   | crypto (i : CryptoI XLoc Loc)
+  /-- The AVX/AVX2/FMA3 instructions of WP-F (`Janus.Amd64.InstrAVX`, `DecodeAVX`, `ExecAVX`). -/
+  | avx (i : AvxI XLoc Loc Addr)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Amd64

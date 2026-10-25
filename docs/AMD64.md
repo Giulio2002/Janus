@@ -13,9 +13,10 @@ proofs.
 | semantics | `Janus/Amd64/Exec.lean` |
 | SSE packed instructions (WP-D): AST, decoder, semantics | `Janus/Amd64/InstrSSE.lean`, `Janus/Amd64/DecodeSSE.lean` (hook in `Decode.decodeLegacy`), `Janus/Amd64/ExecSSE.lean` (hook `Instr.sse` in `exec`) |
 | x86 crypto extensions (WP-E): AST, decoder, semantics | `Janus/Amd64/InstrCrypto.lean`, `Janus/Amd64/DecodeCrypto.lean` (hook in `Decode.decodeLegacy`, after `DecodeSSE`), `Janus/Amd64/ExecCrypto.lean` (hook `Instr.crypto` in `exec`); FIPS-197 specification and the instruction lemmas in `Janus/Spec/AES.lean`, Go's AES hash in `Janus/Spec/MemHash.lean` |
+| AVX/AVX2/FMA3/F16C on VEX-128/256 (WP-F): AST, decoder, semantics | `Janus/Amd64/InstrAVX.lean`, `Janus/Amd64/DecodeAVX.lean` (hook in `decode`, after `Decode.vexOp`), `Janus/Amd64/ExecAVX.lean` (hook `Instr.avx` in `exec`) |
 | programs, runner, run lemmas | `Janus/Amd64/Program.lean`, `Janus/Amd64/Run.lean` |
 | Go ABIInternal on amd64, specs | `Janus/Amd64/GoABI.lean` |
-| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas) |
+| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas), `Janus/Amd64/TacticAVX2.lean` (stepping `ExecAVX`, the zero-upper theorems, 256-bit element lemmas, `dot32`) |
 | extractor | `cmd/janus/amd64.go` (plus small dispatch edits) |
 | differential oracle | `oracle-amd64/`, `Oracle/Amd64Main.lean`, `docs/ORACLE-AMD64.md` |
 | tests | `JanusTests/Amd64.lean`, `cmd/janus/amd64_test.go` |
@@ -63,15 +64,18 @@ handles legacy prefixes, REX, the one- and two-byte opcode maps, ModRM, SIB, RIP
 * `F2`/`F3` except where they select an instruction (`F3` is `REP` on `MOVS`/`STOS`; `F2`
   and segment overrides on string instructions are rejected);
 * segment overrides on branches (hints and CET `NOTRACK`);
-* EVEX and XOP, and every VEX instruction except the AVX/AVX2 eleven, the BMI1/BMI2 and the
-  scalar FMA3 instructions below; VEX after any other prefix
+* EVEX and XOP, and the VEX instructions not listed below (WP-F's list: `Janus/Amd64/DecodeAVX.lean`
+  and below); VEX after any other prefix
   (`66 F2 F3 F0 REX` make it `#UD`; segment overrides are rejected too); a VEX instruction with
   a field the SDM reserves set (`VEX.vvvv ≠ 1111` where it is unused, `VEX.W1` on
   `VPBROADCASTB`, `VEX.L1` on `VZEROUPPER`, which is `VZEROALL`), the memory form of
   `VPMOVMSKB` and the register form of `VMOVNTDQ`, `VEX.L1` on BMI1/BMI2 (`#UD`) and on the
   scalar FMA forms (`LIG`: ignored by hardware, rejected here since no compiler emits it),
   `VEX.vvvv ≠ 1111` on `RORX`; the register forms of `MOVBE` (`#UD`), `F2`/`F3` on `0F 38
-  F0/F1` (`CRC32`, reserved), and `PSHUFB`/`PSIGNB` without `66` (MMX);
+  F0/F1` (`CRC32`, reserved), and `PSHUFB`/`PSIGNB` without `66` (MMX); for the WP-F
+  instructions every field the SDM fixes (`VEX.vvvv`, `VEX.L` of the 128-only and 256-only
+  forms, `VEX.W` where it is `W0`/`W1`, register-only and memory-only forms, reserved immediates,
+  VSIB and distinct registers of the gathers; see `DecodeAVX`);
 * `RCL`/`RCR` at 8 and 16 bits (the count is reduced modulo 9/17) and the `SAL /6` alias;
 * prefixes on `CLD`/`STD`;
 * `F6`/`F7 /1`, `MOVSXD` without `REX.W`, and 16-bit `BSWAP`;
@@ -101,6 +105,28 @@ read-modify-write forms, `XADD` and `CMPXCHG` (memory destination, locked or not
 `VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}` (single rounding on the IEEE core, `FP.fma`) and SSSE3
 `PSHUFB`/`PSIGNB` on `XMM`. With them every Go-compiled function of the `GOAMD64=v3` std test
 binaries decodes (`docs/COVERAGE.md`).
+
+**AVX, AVX2, FMA3 and F16C on VEX-128/256 (WP-F)** (`Janus/Amd64/{InstrAVX,DecodeAVX,
+ExecAVX}.lean`): the VEX form of every WP-D packed integer and floating-point instruction at 128
+and 256 bits (`VPADDB ... VPMAXUD`, `VPUNPCK*`, `VPACK*`, `VPHADD*`, `VPSADBW`, `VPMADD*`, `VPAVG*`,
+`VPSIGN*`, `VPABS*`, `VPANDN`, the shifts by `imm8` and by `xmm/m128`, `VPSLLDQ`/`VPSRLDQ`,
+`VPSHUFD/HW/LW`, `VPALIGNR`, `VPBLENDW`, `VMPSADBW`, `VPMOVSX`/`VPMOVZX`, `VPBLENDVB`,
+`VBLENDVPS/PD`, `VBLENDPS/PD`, `VSHUFPS/PD`, `VUNPCK*PS/PD`, `VADD SUB MUL DIV MIN MAX SQRT
+PS/PD`, `VCMPPS/PD` with all 32 predicates, `VROUNDPS/PD`, `VHADD`/`VHSUB`/`VADDSUB PS/PD`, the
+packed conversions, `VMOVMSKPS/PD`, `VTESTPS/PD`, `VANDPS ... VXORPD`, `VMOVUPS ... VMOVNTDQA`,
+`VLDDQU`, `VMOVDDUP`/`VMOVSLDUP`/`VMOVSHDUP`; and at 128 bits `VPINSR*`, `VPEXTR*`, `VEXTRACTPS`,
+`VINSERTPS`, `VMOVLPS ... VMOVHPD`, `VMOVHLPS`/`VMOVLHPS`, `VPHMINPOSUW`, `VPCMPxSTRx`); the
+scalar `V*SS`/`V*SD` forms (`VADDSD ... VSQRTSD`, `VCMPSS/SD`, `VROUNDSS/SD`, `VCVTSS2SD`,
+`VCVTSD2SS`, `VCVTSI2SS/SD`, `VCVT(T)SS/SD2SI`, `VUCOMISS/SD`, `VCOMISS/SD`, `VMOVSS`/`VMOVSD`
+in all three forms, `VMOVD`/`VMOVQ`); the AVX2 permutes and broadcasts `VPERMD VPERMPS VPERMQ
+VPERMPD VPERM2I128 VPERM2F128 VPERMILPS/PD` (immediate and variable), `VPBLENDD`, `VINSERTI128
+VINSERTF128 VEXTRACTI128 VEXTRACTF128`, `VPBROADCASTW/D/Q`, `VBROADCASTSS/SD`,
+`VBROADCASTI128/F128`; the masked moves `VPMASKMOVD/Q`, `VMASKMOVPS/PD` (load and store); the
+variable shifts `VPSLLVD/Q VPSRLVD/Q VPSRAVD`; the gathers `VPGATHERDD/DQ/QD/QQ`,
+`VGATHERDPS/DPD/QPS/QPD`; packed FMA3 `VF{,N}M{ADD,SUB}`, `VFMADDSUB`, `VFMSUBADD` `132/213/231
+PS/PD` at both lengths; `VZEROALL`; F16C `VCVTPH2PS`, `VCVTPS2PH`. With them every VEX blocker of
+the C corpus at `-O3 -march=x86-64-v3` is gone, and of a 773-function AVX2-intrinsics corpus
+(llama.cpp's ggml) too (`docs/COVERAGE.md`).
 
 **SSE packed instructions (WP-D)**, legacy-encoded on `XMM` (`Janus/Amd64/{InstrSSE,DecodeSSE,
 ExecSSE}.lean`): SSE2 integer `PADDB/W/D/Q PSUBB/W/D/Q PADDS/PADDUS/PSUBS/PSUBUS B/W PMULLW
@@ -232,6 +258,33 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
   the 16-bit `CRC32`), and the instructions whose result is implementation-specific (`RCPPS`,
   `RSQRTPS`) or not modelled (`MASKMOVDQU`, whose fault behaviour on masked-off bytes is
   implementation-specific; `DPPS`/`DPPD`, which no compiler emits at `-O2`/`-O3`; `LDMXCSR`).
+* **AVX/AVX2/FMA3/F16C (WP-F).** `ExecAVX` generalises WP-D's lane semantics to the vector
+  length instead of copying them: the in-lane instructions apply WP-D's 128-bit operation to each
+  128-bit lane (`ExecAVX.perLane`; at 128 bits it *is* WP-D's operation, `pintV_128` and friends),
+  with the per-lane immediate bits the SDM assigns (`laneImm`: `VSHUFPD`/`VBLENDPD` `imm8<2j+1:2j>`,
+  `VBLENDPS`/`VPBLENDD` `imm8<4j+3:4j>`, `VMPSADBW` `imm8<3j+2:3j>`); element-wise floating point
+  runs WP-D's lane formulas over `l / w` elements; the cross-lane instructions (`VPERMD`,
+  `VPERMQ`, `VPERM2I128`, `VINSERTI128`, the broadcasts, `VPMOVSX/ZX`, the widening and narrowing
+  conversions) are written over `l`-bit values (`cvtV 128 = ExecSSE.cvtOp`). Every register
+  result is written by `ExecAVX.setV`: **VEX.128 zeroes bits 255:128 of the destination**
+  (`Janus.Amd64.Tactic.exec_vex128_zero_upper`, for every instruction and every register it
+  writes at 128 bits), while no legacy-SSE instruction changes any upper half
+  (`exec_sse_preserves_upper`); `JanusTests/AVX.lean` runs `VPADDD ymm` → `PADDD xmm` (upper
+  half kept) and `VPADDD xmm` → `PADDD xmm` (zeroed) on concrete states. The three-operand forms
+  read `src1` from `VEX.vvvv`; memory operands are unaligned except for the aligned moves. The
+  32 `VCMP` predicates are `ExecAVX.vcmp` (`= FP.cmp` for the eight legacy ones, `vcmp_legacy`).
+  Packed FMA is `FP.fma` per element (single rounding); an element the manuals leave to the
+  implementation (two or three NaNs, `0 × ∞ + NaN`) makes the instruction `undefinedResult`.
+  `VCVTPH2PS` is exact and applies neither `DAZ` nor `FTZ` and raises no `DE`; `VCVTPS2PH`
+  rounds by `imm8` (or `MXCSR.RC` if `imm8<2>`), applies `DAZ` but not `FTZ`. **Masked moves**
+  access only the elements whose mask bit is set (a masked-off element cannot fault, SDM
+  "Faults occur only due to mask-bit required memory accesses"); conservatively the whole operand
+  must lie below `2^47` (else the model faults, also when hardware would not: the SDM states the
+  non-canonical `#GP` for the instruction, not per element). **Gathers** load the selected
+  elements and zero the mask register; a fault leaves nothing written (the SDM's partial
+  completion, which updates the destination and mask for the elements done before the fault, is
+  only visible to a signal handler, and a fault ends a Janus execution); destination, index and
+  mask registers must differ (`#UD`, rejected).
 * **CPU-feature globals.** `runtime.memmove` reads `runtime.memmoveBits` and
   `runtime.memclrNoHeapPointers` reads `internal/cpu.X86.HasERMS`/`HasAVX2`, which Go sets at
   start-up from `CPUID`. They live in `.noptrbss`, so the extractor does not copy them; a
@@ -320,8 +373,9 @@ blockers` works on amd64 binaries, judging each x86asm-found instruction with `J
   - the CPU implements `POPCNT`, `LZCNT` and `TZCNT` (BMI1): on older CPUs `F3 0F BC/BD`
     execute as `BSF`/`BSR`. Any x86-64-v3 CPU qualifies; `GOAMD64=v1` code uses them only
     behind run-time feature checks;
-  - the CPU implements AVX and AVX2 and the OS has enabled the YMM state (Linux does whenever the
-    CPU has AVX), whenever a VEX instruction executes. `GOAMD64=v1` code executes VEX only behind
+  - the CPU implements AVX and AVX2 (and FMA and F16C for those instructions) and the OS has
+    enabled the YMM state (Linux does whenever the CPU has AVX), whenever a VEX instruction
+    executes (every x86-64-v3 CPU, the level `-march=x86-64-v3` C code targets). `GOAMD64=v1` code executes VEX only behind
     its CPU-feature globals (`internal/cpu.X86.HasAVX2`, `runtime.memmoveBits`), which Go sets at
     start-up from `CPUID`, so a theorem whose precondition states those globals describes a real
     process on a CPU that has the features. A theorem that quantifies over them (such as
@@ -330,8 +384,8 @@ blockers` works on amd64 binaries, judging each x86asm-found instruction with `J
 * **Vendor neutrality.** Where Intel and AMD document different results or flags, the model
   takes the undefined side (fault or `none`). A proof cannot depend on the vendor.
 * **Not modelled:**
-  - floating point other than the SSE scalar instructions (`docs/SOUNDNESS.md`, "Floating
-    point"): packed SSE arithmetic, VEX/EVEX floating point, x87;
+  - floating point other than SSE (scalar and packed) and VEX (`docs/SOUNDNESS.md`, "Floating
+    point"): EVEX floating point, x87, `VRCPPS`/`VRSQRTPS` (implementation-specific), `VDPPS`/`VDPPD`;
   - x87/MMX state, AVX-512 state (`ZMM` bits 511:256, `ZMM16`–`31`, masks);
   - writes of `MXCSR`'s control bits (`LDMXCSR`; `State.mxcsr` is read and its flags raised);
   - segment registers other than the `FS` base, and the `GS` base;
@@ -512,6 +566,20 @@ The cgo examples `CSum32` (the clang `-O2` SSE2-vectorised loop: two `PADDD` acc
 `CgoCall`) are in `examples/proofs-cgo/amd64` (`scripts/verify-cgo-examples.sh`, binary
 `artifacts/examples-cgo-clang-amd64`, built with `CC=clang`).
 
+Two are about `artifacts/examples-amd64-avx`: `examples/basic/avx` (Go functions calling small
+AVX2 Go assembly functions, ABI0), built `GOAMD64=v1` into a binary of its own (WP-F).
+
+| function | theorem |
+|---|---|
+| `Index64` | the index of the first byte of `*p` (`[64]byte`) equal to `c`, 64 if none (`firstIdx`): `VMOVD`, `VPBROADCASTB ymm`, two `VPCMPEQB ymm, m256`/`VPMOVMSKB ymm` masks joined into 64 bits, `TZCNTQ`, `VZEROUPPER` |
+| `MaxU32x8` | the largest of the eight words of `*p` (`[8]uint32`, `maxWords`): `VMOVDQU ymm`, `VEXTRACTI128`, `VPMAXUD xmm`, `VPSHUFD`/`VPMAXUD` twice, `VMOVD` |
+
+The cgo examples `CDot32` (the clang `-O3 -march=x86-64-v3` AVX2 dot product: 32 `VPMULLD`
+products per iteration into four YMM accumulators, a `VEXTRACTI128`/`VPSHUFD` reduction, an XMM
+epilogue, a scalar tail; `dot32`, for every length) and `GoDot32` (`Dot32(a, b []uint32)` → cgo →
+that loop → Go, under the trusted `CgoCall`) are in `examples/proofs-cgo/amd64` (binary
+`artifacts/examples-cgo-avx-amd64`, the package's `#cgo CFLAGS: -O3 -march=x86-64-v3`).
+
 Three more are about `artifacts/examples-amd64-v3`: `examples/basic/v3` built with
 `GOAMD64=v3` into a binary of its own (so the v1 binary above does not change), extracted by the
 same script.
@@ -540,10 +608,10 @@ proved functions are std assembly it links (WP-E).
   panics unwinding through defers and non-open-coded defers (`runtime.deferproc*`) are not
   supported; see docs/RUNTIME-CONTRACTS.md.
 
-* 8/16-bit `RCL`/`RCR`, VEX instructions other than those above (AVX/AVX2 arithmetic, WP-F;
-  the VEX forms of AES-NI and `PCLMULQDQ`), EVEX (AVX-512), `CMPS`/`SCAS`/`LODS`,
-  `DPPS`/`DPPD`, `RCPPS`/`RSQRTPS`, `MASKMOVDQU`, x87, MMX and `GS`-relative accesses are not
-  modelled. Their encodings fault.
+* 8/16-bit `RCL`/`RCR`, the VEX forms of AES-NI and `PCLMULQDQ`, EVEX (AVX-512),
+  `CMPS`/`SCAS`/`LODS`, `DPPS`/`DPPD` (and `VDPPS`/`VDPPD`), `RCPPS`/`RSQRTPS` (and the VEX forms),
+  `MASKMOVDQU`/`VMASKMOVDQU`, `LDMXCSR`/`VLDMXCSR`, `STMXCSR`, x87, MMX and `GS`-relative accesses
+  are not modelled. Their encodings fault.
 * `janus64_run` keeps the AES/SHA/`PCLMULQDQ` results folded (`aesRound .enc x k`, irreducible
   for the elaborator, `TacticCrypto`); proofs rewrite them with `Janus.Spec.AES.aesenc_eq` etc.
 * `janus64_run` keeps the packed operations folded (`pintOp (.add 32) x y`, `pshufdNat`, ...) and

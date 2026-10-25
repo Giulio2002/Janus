@@ -20,3 +20,4 @@ import JanusTests.String
 import JanusTests.SSE
 import JanusTests.X86Crypto
 import JanusTests.Crypto
+import JanusTests.AVX

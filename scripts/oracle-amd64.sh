@@ -23,6 +23,11 @@
 #                                      SHA-NI, ADX): their specs and edge families, plus every such
 #                                      instruction harvested from the std test binaries with crypto
 #                                      assembly (CRYPTO_K states each, default 12)
+#   scripts/oracle-amd64.sh avx        the AVX/AVX2/FMA3 instructions of WP-F only (VEX-128/256 on
+#                                      YMM): their specs and edge families, plus every such
+#                                      instruction harvested from GOAMD64=v3 std test binaries with
+#                                      AVX2 assembly and from the C corpus compiled by gcc and clang
+#                                      at -O2/-O3 -march=x86-64-v3 (AVX_K states each, default 12)
 #
 # Environment: OUT (default artifacts/oracle-amd64), JOBS (default 16, at most 24), N
 # (encodings per targeted spec, default 600 full / 250 quick), GROUP (random byte strings,
@@ -82,13 +87,15 @@ case "$mode" in
   v3)    N="${N:-600}"; GROUP=0 ;;
   sse)   N="${N:-600}"; GROUP=0 ;;
   crypto) N="${N:-600}"; GROUP=0 ;;
-  *) echo "usage: $0 selftest|quick|full|fp|v3|sse|crypto" >&2; exit 2 ;;
+  avx)   N="${N:-600}"; GROUP=0 ;;
+  *) echo "usage: $0 selftest|quick|full|fp|v3|sse|crypto|avx" >&2; exit 2 ;;
 esac
 fpk=()
 [ -n "${FPK:-}" ] && fpk=(-fpk "$FPK")
 v3re='^(andn|blsr|blsmsk|blsi|bextr|bzhi|shlx|shrx|sarx|rorx|mulx|pdep|pext|movbe|pshufb|psignb|vfn?m(add|sub)(132|213|231)s[sd])$'
 v3pkgs="math math/big strconv internal/strconv internal/runtime/maps encoding/binary math/bits reflect internal/abi math/rand runtime"
 cryptopkgs="runtime crypto/aes crypto/cipher crypto/sha256 crypto/sha1 math/big crypto/internal/fips140/bigmod crypto/internal/fips140/aes/gcm crypto/rsa"
+avxpkgs="crypto/sha256 crypto/sha1 crypto/sha512 crypto/tls bytes strings math internal/bytealg"
 ssepkgs="internal/chacha8rand hash/crc32 bytes strings crypto/internal/fips140/nistec crypto/aes crypto/sha256 crypto/sha1 crypto/cipher math"
 if [ "$mode" = fp ]; then
   echo "== generate (SSE floating point: $N encodings per spec, $((N / 2)) edge rounds)"
@@ -102,6 +109,9 @@ elif [ "$mode" = sse ]; then
 elif [ "$mode" = crypto ]; then
   echo "== generate (x86 crypto extensions, WP-E: $N encodings per spec, $((N / 2)) edge rounds)"
   "$bin/oracle" gen -crypto-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
+elif [ "$mode" = avx ]; then
+  echo "== generate (AVX/AVX2/FMA3, WP-F: $N encodings per spec, $((N / 4)) edge rounds)"
+  "$bin/oracle" gen -avx-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
 else
   echo "== generate ($N encodings per targeted spec, $GROUP random)"
   "$bin/oracle" gen -n "$N" -group "$GROUP" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
@@ -164,6 +174,28 @@ if [ "$mode" = crypto ]; then
     done)
   cryptore="$("$bin/oracle" classes -crypto)"
   "$bin/oracle" harvest -k "${CRYPTO_K:-12}" -per-class 0 -only "$cryptore" -seed "$((SEED + 1))" "${fpk[@]}" -o "$OUT/harvest.jsonl" "$corpus"/*
+  cases+=("$OUT/harvest.jsonl")
+fi
+
+if [ "$mode" = avx ]; then
+  echo "== harvest the WP-F instructions of GOAMD64=v3 std test binaries and of gcc/clang -march=x86-64-v3 C"
+  corpus="$bin/corpus-avx"
+  mkdir -p "$corpus"
+  (cd "$root/oracle-amd64" &&
+    for p in $avxpkgs; do
+      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v3 go test -c -o "$corpus/${p//\//_}.test" "$p"
+    done)
+  for cc in gcc clang; do
+    command -v "$cc" >/dev/null || continue
+    for o in -O2 -O3; do
+      for f in "$root"/scripts/coverage/ccorpus/*.c "$root"/examples/cgo/ccover.c "$root"/examples/cgo/vec/*.c; do
+        "$cc" $o -march=x86-64-v3 -c -fPIC -g -I"$root/examples/cgo" -I"$root/examples/cgo/vec" \
+          -o "$corpus/c-$cc$o-$(basename "$f" .c).o" "$f"
+      done
+    done
+  done
+  avxre="$("$bin/oracle" classes -avx)"
+  "$bin/oracle" harvest -k "${AVX_K:-12}" -per-class 0 -only "$avxre" -seed "$((SEED + 1))" "${fpk[@]}" -o "$OUT/harvest.jsonl" "$corpus"/*
   cases+=("$OUT/harvest.jsonl")
 fi
 

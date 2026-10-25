@@ -304,6 +304,20 @@ func cmdSelftest(args []string) {
 			return mem(m)(c, h)
 		})},
 		tc{"vmovdqa ymm0, [rsi+16] (misaligned: #GP)", "c5fd6f4610", func(s *gen.State) { s.Regs[6] = D + 64 }, and(fault(11), preserved())},
+		// WP-F: VEX.256 writes both halves, VEX.128 zeroes the upper half, legacy SSE keeps it
+		tc{"vpaddd ymm0, ymm1, ymm2 (VEX.256)", "c5f5fec2", func(s *gen.State) {
+			setY(s)
+			s.XMM[1], s.XMM[2] = [2]uint64{0x0000000200000001, 0x0000000400000003}, [2]uint64{0x0000001000000010, 0x00000010ffffffff}
+		}, and(expect("ok", T+4), xmm(0, "0x00000014000000020000001200000011"),
+			ymmh(0, "0xfffffffefffffffb5555555555555555"))},
+		tc{"vpaddd xmm0, xmm1, xmm2 zeroes ymm0 upper (VEX.128)", "c5f1fec2", func(s *gen.State) {
+			setY(s)
+			s.XMM[1], s.XMM[2] = [2]uint64{0x0000000200000001, 0x0000000400000003}, [2]uint64{0x0000001000000010, 0x00000010ffffffff}
+		}, and(expect("ok", T+4), xmm(0, "0x00000014000000020000001200000011"), ymmh(0, "0x0"))},
+		tc{"paddd xmm0, xmm3 keeps ymm0 upper (legacy SSE)", "660ffec3", func(s *gen.State) {
+			setY(s)
+			s.XMM[0], s.XMM[3] = [2]uint64{0x0000000200000001, 0x0000000400000003}, [2]uint64{0x0000001000000010, 0x00000010ffffffff}
+		}, and(expect("ok", T+4), xmm(0, "0x00000014000000020000001200000011"), ymmhKept)},
 		tc{"mov r14, fs:[-8]", "644c8b3425f8ffffff", func(s *gen.State) { s.FSBase, s.Seed = D+72, 0 },
 			and(expect("ok", T+9), r(14, hexv(patV(0, 64, 8))), preserved("r14"))},
 		tc{"mov fs:[-8], r14", "644c893425f8ffffff", func(s *gen.State) { s.FSBase, s.Regs[14], s.Seed = D+72, 0x0123456789abcdef, 0 },

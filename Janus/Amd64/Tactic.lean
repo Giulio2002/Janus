@@ -1069,6 +1069,9 @@ deriving instance ToExpr for SseI
 deriving instance ToExpr for AesOp
 deriving instance ToExpr for ShaOp
 deriving instance ToExpr for CryptoI
+deriving instance ToExpr for VShufOp
+deriving instance ToExpr for VShiftOp
+deriving instance ToExpr for AvxI
 deriving instance ToExpr for Instr
 deriving instance ToExpr for StubKind
 

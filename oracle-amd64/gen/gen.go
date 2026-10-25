@@ -367,6 +367,7 @@ func Setup(r *rand.Rand, b []byte) State {
 	}
 	setupSSE(r, &s, inst, cls)
 	setupCrypto(r, &s, inst, cls)
+	setupAVX(r, &s, inst, cls)
 	return s
 }
 

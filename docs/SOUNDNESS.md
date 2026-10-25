@@ -834,6 +834,45 @@ AES-NI, `PCLMULQDQ`, SHA-NI and ADX (WP-E, `Janus/Amd64/InstrCrypto.lean`, `Deco
   Passing the operand-address function to `ExecSSE.exec`/`ExecCrypto.exec` as the definition
   `eaNat s next` instead of a lambda changes no semantics (`eaNat s next a = (ea s next a).toNat`
   by `rfl`).
+## AVX, AVX2, FMA3 and F16C (amd64)
+
+The VEX-encoded instructions of WP-F (`Janus/Amd64/InstrAVX.lean`, `DecodeAVX.lean`,
+`ExecAVX.lean`) are part of the trusted amd64 model too: written from the Intel SDM `Operation`
+sections on top of WP-D's lane operations and differentially tested on the host CPU (an AVX2,
+FMA, F16C and AVX-512 machine; `scripts/oracle-amd64.sh avx`, docs/ORACLE-AMD64.md: 0 MISMATCH),
+not proved. What a theorem relies on beyond the SDM text:
+
+* **YMM state.** `State.ymmHi` holds bits 255:128 of `YMM0`–`YMM15`; a VEX.128 register write
+  zeroes it for the destination and a legacy-SSE write leaves it alone. Both are theorems about
+  the model (`Janus.Amd64.Tactic.exec_vex128_zero_upper`, `exec_sse_preserves_upper`), and the
+  native oracle compares all sixteen upper halves on every case (they start nonzero in most
+  states). The AVX-512 bits above 255 and `ZMM16`–`31` are not modelled: VEX instructions zero
+  them on an AVX-512 CPU and no modelled instruction reads them.
+* **CPU features.** VEX instructions execute whenever they occur; the model assumes AVX, AVX2,
+  FMA and F16C (every x86-64-v3 CPU). Go code reaches them only behind `internal/cpu` flags or
+  with `GOAMD64=v3`; C compiled with `-march=x86-64-v3` requires such a CPU.
+* **Masked moves and gathers.** The model accesses (and checks) only the elements whose mask bit
+  is set, as the SDM states; it additionally faults unless a masked move's whole operand is below
+  `2^47`, which is stricter than hardware (the oracle shows a non-canonical, all-masked-off
+  `VMASKMOVPD` store completing on the host; the model's fault there is a gap, not a mismatch).
+  A gather that faults writes nothing in the model, while hardware has completed and cleared the
+  elements before the faulting one; this partial state is visible only to a signal handler, and a
+  fault ends every Janus execution. The native harness single-steps with `TF`: a gather that
+  faults on a later element after loading earlier ones delivers the pending single-step trap
+  instead, with `RIP` still at the gather and the elements done so far written (SDM:
+  "Gathers ... can be suspended by an exception"); the oracle records that as a host success at
+  `RIP = TestPC`, and the model's fault as a gap.
+* **Rejected rather than guessed:** the implementation-specific approximations
+  (`VRCPPS`/`VRSQRTPS` and their scalar forms), `VDPPS`/`VDPPD`, `VMASKMOVDQU`, `VLDMXCSR`,
+  reserved immediates (`VCMP imm8 ≥ 32`, `VROUND imm8 ≥ 16`, `VPCMPxSTRx imm8<7>`), `VEX.L1` on
+  the `LIG` scalar forms (hardware ignores it; no compiler emits it), every `W0`/`W1` field set
+  the other way, and gathers with equal destination, index and mask registers (`#UD`).
+* **Packed FMA.** An element whose result the manuals leave to the implementation (two or three
+  NaN operands, `0 × ∞ + NaN`) makes the instruction `undefinedResult`, as for the scalar forms;
+  a proof that uses a packed FMA must show no element is such a case.
+* **Proof automation** (`TacticAVX2`) is not trusted: the compatibility lemmas with WP-D
+  (`pintV_128`, `cvtV_128`, `vcmp_legacy`), the zero-upper theorems and the 256-bit element lemmas
+  are proved from `ExecAVX`.
 
 ## Floating point
 
@@ -867,7 +906,10 @@ scalar operation, the flags of all elements ORed, `#XM` without a write if any e
 are rejected) and of the scalar FMA3 instructions (`VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}`,
 which `GOAMD64=v3` code uses unconditionally and `GOAMD64=v1` code behind `x86HasFMA`): one
 rounding of the exact `±a × b ± c` on the IEEE core, proved equal to IEEE 754
-`fusedMultiplyAdd` in IEEE mode (`FP.fma_ieee`). Where the manuals leave an FMA result open (two
+`fusedMultiplyAdd` in IEEE mode (`FP.fma_ieee`). WP-F adds the VEX forms of all of it at 128 and 256 bits (element-wise
+over `l / w` elements, the same flag ORing and `#XM` rule), the 32 `VCMP` predicates, packed FMA3
+(`FP.fma` per element) and F16C's `VCVTPH2PS` (exact; `DAZ`, `FTZ` and `DE` not applied) and
+`VCVTPS2PH` (rounding from `imm8` or `MXCSR.RC`; `DAZ` applied, `FTZ` not). Where the manuals leave an FMA result open (two
 or more NaN operands, whose choice Intel documents and AMD does not; `0 × ∞ + qNaN`, whose `IE`
 IEEE 754 §7.2 leaves to the implementation) the instruction faults (`undefinedResult`), so no
 proof depends on a vendor. The other VEX/EVEX floating-point forms, x87 and `LDMXCSR` are

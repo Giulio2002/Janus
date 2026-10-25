@@ -12,6 +12,8 @@
 #                                                        GoStack10 GoFP GoPMix GoBig GoVSum8
 #   amd64 only, C compiled by clang -O2 (SSE2-vectorised,
 #   artifacts/examples-cgo-clang-amd64):                 CSum32 GoSum32
+#   amd64 only, C compiled by clang -O3 -march=x86-64-v3
+#   (AVX2-vectorised, artifacts/examples-cgo-avx-amd64): CDot32 GoDot32
 #
 # Usage: scripts/verify-cgo-examples.sh [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
 # Writes artifacts/cgo/<isa>/<Name>/verified.json and a summary to artifacts/verify-cgo-examples.txt.
@@ -28,17 +30,20 @@ declare -A sym=(
   [GoPMix]=example.com/cgo/cabi.PMix [GoBig]=example.com/cgo/cabi.Big
   [GoVSum8]=example.com/cgo/cabi.VSum8
   [CSum32]=c_sum32 [GoSum32]=example.com/cgo/vec.Sum32
+  [CDot32]=c_dot32 [GoDot32]=example.com/cgo/avx.Dot32
 )
 all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8)
 # the examples whose binary is the clang-built one
 declare -A clang=([CSum32]=1 [GoSum32]=1)
+# the examples whose binary is the clang -march=x86-64-v3 one
+declare -A avx=([CDot32]=1 [GoDot32]=1)
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
     for n in "${all[@]}"; do names+=("$isa/$n"); done
     [ "$isa" = arm64 ] && names+=("$isa/CCount" "$isa/GoCount")
   done
-  names+=(amd64/CSum32 amd64/GoSum32)
+  names+=(amd64/CSum32 amd64/GoSum32 amd64/CDot32 amd64/GoDot32)
 fi
 
 go build -o bin/janus ./cmd/janus
@@ -56,6 +61,7 @@ for target in "${names[@]}"; do
   # the branch is never taken)
   binary="artifacts/examples-cgo-$isa"
   [ -n "${clang[$n]:-}" ] && binary="artifacts/examples-cgo-clang-$isa"
+  [ -n "${avx[$n]:-}" ] && binary="artifacts/examples-cgo-avx-$isa"
   bin/janus extract "$binary" "${sym[$n]}" "$out" --contract runtime.convT64 \
     --contract runtime.convT32 --contract runtime.convTnoptr >/dev/null 2>&1
   start=$(date +%s.%N)
