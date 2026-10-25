@@ -11,7 +11,7 @@ def window (d : Nat) (s : State) : List (Nat × Nat) := MemAmd64.callerWindow s 
 
 /-- The precondition: see the module documentation. -/
 def pre (M : MemModel) (wb d : Nat) (p n : BitVec 64) (s : State) : Prop :=
-  MemAmd64.CallerOK s d 32 32 ∧ M.Env s.mem (s.regs 14) ∧
+  MemAmd64.CallerOK s d 32 32 ∧ M.Env s.mem (s.regs 14) ∧ Outside ((s.regs 14).toNat + 16) 8 M.priv ∧
     Outside ((s.regs 4).toNat - (d + 32)) (d + 64) M.priv ∧
     wb + 4 ≤ 2 ^ 48 ∧ s.mem.accessible wb 4 false = true ∧ Outside wb 4 (window d s) ∧
     WriteBarrierOff s.mem wb ∧ n.toNat < 2 ^ 45 ∧ p.toNat % 8 = 0 ∧
@@ -25,7 +25,7 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
     Ensures (Extracted.program.link impl) Extracted.entry [p, n, c] (pre M wb d p n)
       (fun s s' => Zeroed s'.mem p.toNat (8 * n.toNat) ∧
         MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(p.toNat, p.toNat + 8 * n.toNat)])) := by
-  intro ret hret s hs ⟨hc, henv, hpriv, hwb1, hwb2, hwbo, hwb, hn, hal8, ⟨hP', hP⟩, hpo, hpp⟩
+  intro ret hret s hs ⟨hc, henv, hgp, hpriv, hwb1, hwb2, hwbo, hwb, hn, hal8, ⟨hP', hP⟩, hpo, hpp⟩
   janus64_intro hs
   have hc' := hc
   obtain ⟨hg, hal, hdd, hb, hst, hog⟩ := hc'
@@ -61,7 +61,7 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
         (E hfw0 (by simp [setRegF, hsp32]) (by simp [setRegF]) (by simpa using hs.zero) (by simpa using hs.df)
           (by simp [setRegF, hsp32, Janus.Arm64.Memory.readLE_writeLE_self])).2.1, ?_, ?_, ?_,
         (E hfw0 (by simp [setRegF, hsp32]) (by simp [setRegF]) (by simpa using hs.zero) (by simpa using hs.df)
-          (by simp [setRegF, hsp32, Janus.Arm64.Memory.readLE_writeLE_self])).2.2⟩, ?_, ?_, ?_⟩ ?_
+          (by simp [setRegF, hsp32, Janus.Arm64.Memory.readLE_writeLE_self])).2.2, by simpa [setRegF] using hgp⟩, ?_, ?_, ?_⟩ ?_
     · simp only [setRegF, reduceIte, Nat.reduceEqDiff]
       exact hl.env_frame _ _ _ henv (Agrees.of_window (lo := (s.regs 4).toNat - (d + 32))
         (hi := (s.regs 4).toNat + 32) (by janus_frame) (Outside.of_sub hpriv (by omega) (by omega)))

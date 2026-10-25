@@ -15,7 +15,7 @@ def window (d : Nat) (s : State) : List (Nat × Nat) := callerWindow s d 48 24
 
 /-- The precondition: see the module documentation. -/
 def pre (M : MemModel) (wb d : Nat) (dst src : BitVec 64) (s : State) : Prop :=
-  CallerOK s d 48 24 ∧ M.Env s.mem (s.regs 28) ∧ Outside (s.sp.toNat - (d + 48)) (d + 72) M.priv ∧
+  CallerOK s d 48 24 ∧ M.Env s.mem (s.regs 28) ∧ Outside ((s.regs 28).toNat + 16) 8 M.priv ∧ Outside (s.sp.toNat - (d + 48)) (d + 72) M.priv ∧
     Extracted.program.DataLoaded s.mem ∧ Outside treesType 16 (window d s) ∧
     wb + 4 ≤ 2 ^ 48 ∧ s.mem.accessible wb 4 false = true ∧ Outside wb 4 (window d s) ∧
     WriteBarrierOff s.mem wb ∧
@@ -30,7 +30,7 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
     Ensures (Extracted.program.link impl) Extracted.entry [dst, src] (pre M wb d dst src)
       (fun s s' => Copied s.mem s'.mem dst.toNat src.toNat 128 ∧
         MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(dst.toNat, dst.toNat + 128)])) := by
-  intro ret hret s hs ⟨hc, henv, hpriv, hd, hto, hwb1, hwb2, hwbo, hwb, ⟨hS, hS'⟩, hso, ⟨hD, hD'⟩, hdo, hdp⟩
+  intro ret hret s hs ⟨hc, henv, hgp, hpriv, hd, hto, hwb1, hwb2, hwbo, hwb, ⟨hS, hS'⟩, hso, ⟨hD, hD'⟩, hdo, hdp⟩
   have hc' := hc
   obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd8, hdd, hb, hst, hog⟩ := hc'
   janus_intro hs
@@ -58,7 +58,7 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
       (by simp [setReg]) (by simp [setReg]) (by decide) (by decide)
   simp only [callerWindow, outside_cons, outside_nil, and_true] at hfw
   refine Reaches.call (Summary.withExit hmv hret) rfl
-    ⟨⟨?_, hsg, hcall, ?_, ?_, ?_, hgo⟩, ?_, ?_, ?_, ?_⟩ ?_
+    ⟨⟨?_, hsg, hcall, ?_, ?_, ?_, hgo, by simpa [setReg] using hgp⟩, ?_, ?_, ?_, ?_⟩ ?_
   · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
     exact hl.env_frame _ _ _ henv (Agrees.of_window (lo := s.sp.toNat - (d + 48)) (hi := s.sp.toNat + 24)
       (by janus_frame) (Outside.of_sub hpriv (by omega) (by omega)))
