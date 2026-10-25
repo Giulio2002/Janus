@@ -39,6 +39,9 @@
 #                      keyed by what Lake traces (source, imports' keys, package settings,
 #                      toolchain), restored before and published after the JanusASL build.
 #   ASL_CACHE_READONLY=1   use the cache but never write to it
+#   ASL_CACHE_MAX      size budget of ASL_CACHE (default 15G; off: none), kept after every publish
+#                      by `asl_mod_cache.py gc` (least recently restored first; unreferenced
+#                      ArmASL entries always; nothing used in the last hour)
 #   GEN      work directory of `gen` (default $DEPS/gen)
 #   ASL_MEM_GB   memory budget of `build`/`prove` (default: the smaller of 24 and 60% of MemAvailable)
 #   ASL_JOBS     Lean processes Lake runs at once (default ASL_MEM_GB / ASL_JOB_GB, at least 1)
@@ -168,8 +171,13 @@ cache_restore() {
     e="$ASL_CACHE/$(asl_cache_legacy_key)"
   fi
   [ -f "$e/MANIFEST.sha256" ] || { echo "asl cache: no entry for this model and toolchain ($e)"; return 0; }
+  # The entry's lock, shared while it is read: the collector (asl_mod_cache.py gc) removes an
+  # entry only under its lock taken exclusively, and a publisher replaces one only under it.
+  exec 8>>"$e.lock"; flock -s 8
+  [ -f "$e/MANIFEST.sha256" ] || { flock -u 8; echo "asl cache: the entry $e was just removed; building instead"; return 0; }
+  touch "$e.use" 2>/dev/null || true  # its last use (the collector's LRU)
   if [ -f "$pkg/.lake/build/lib/lean/ArmASL.olean" ] && (cd "$pkg/.lake" && sha256sum -c --quiet --status "$e/MANIFEST.sha256" 2>/dev/null); then
-    echo "asl cache: the ArmASL build already matches $e"; return 0
+    flock -u 8; echo "asl cache: the ArmASL build already matches $e"; return 0
   fi
   echo "asl cache: copying the ArmASL build from $e"
   mkdir -p "$pkg/.lake"
@@ -177,6 +185,7 @@ cache_restore() {
   (cd "$pkg/.lake" && sha256sum -c --quiet "$e/MANIFEST.sha256") ||
     { echo "asl cache: the copy does not match the entry's manifest; building instead" >&2
       (cd "$pkg/.lake" && rm -rf packages/Sail build/lib/lean/ArmASL build/lib/lean/ArmASL.* build/ir/ArmASL build/ir/ArmASL.*); }
+  flock -u 8
 }
 
 cache_publish() {
@@ -198,6 +207,15 @@ cache_publish() {
   mv "$tmp" "$e" && rm -rf "$e.old"
   echo "asl cache: stored the ArmASL build in $e"
   flock -u 9
+  cache_gc
+}
+
+# Keep the cache within $ASL_CACHE_MAX (default 15G): unreferenced ArmASL entries first, then the
+# least recently restored entries (JanusASL/tools/asl_mod_cache.py gc; the checkout's own ArmASL
+# entry and anything used in the last hour are kept). ASL_CACHE_MAX=off disables it.
+cache_gc() {
+  [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] && [ "${ASL_CACHE_MAX:-15G}" != off ] || return 0
+  python3 -I "$pkg/tools/asl_mod_cache.py" gc "$ASL_CACHE" --max "${ASL_CACHE_MAX:-15G}" --root "$root" || true
 }
 
 # ---- shared per-module cache of the JanusASL and Janus modules (ASL_CACHE/mods) ----
@@ -211,6 +229,7 @@ modcache_restore() {
 modcache_publish() {  # modcache_publish [--exe]
   [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
   python3 -I "$pkg/tools/asl_mod_cache.py" publish "$root" "$ASL_CACHE" "$@" || true
+  cache_gc
 }
 
 unpack() {

@@ -6,7 +6,7 @@
 # Usage: scripts/verify-amd64-examples.sh [-j N] [Function ...]   (default: every function)
 #   -j N   verify up to N functions at once (default: $JANUS_JOBS, else the number of cores
 #          capped by memory, see scripts/lib/parallel.sh); -j 1 verifies them one by one. The
-#          theorems of one function run one after the other (they share its verified.json).
+#          theorems of one function run up to two at once (scripts/lib/theorems.sh).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PATH="$PATH:/usr/local/go/bin"
@@ -24,24 +24,25 @@ if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   bash scripts/build-examples-amd64.sh
 fi
 broken=()
-verify() {
-  local f=$1 thm=$2 out
-  if out=$(bin/janus verify "artifacts/amd64/$f" --proof "examples/proofs-amd64/$f/Proof.lean" --theorem "$thm" 2>&1); then
-    printf '%-12s %-18s %s\n' "$f" "$thm" "$(grep 'Axioms:' <<<"$out" | sed 's/^ *//')"
-  else
-    printf '%-12s %-18s FAILED\n%s\n' "$f" "$thm" "$out"; broken+=("$f.$thm")
-  fi
-}
-# verify_function F: every theorem of examples/proofs-amd64/F, in order.
+. scripts/lib/theorems.sh
+# verify_function F: every theorem of examples/proofs-amd64/F (correctness, Div's and Get's
+# `panics`, the non-vacuity witnesses: the hypotheses hold together and the conclusion is
+# reached), up to two at once (scripts/lib/theorems.sh); printed in order.
 verify_function() {
-  local f=$1
-  verify "$f" Proof.correctness
-  if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then verify "$f" Proof.panics; fi
-  # the non-vacuity witnesses: the hypotheses hold together and the conclusion is reached
-  if grep -q '^namespace Witness' "examples/proofs-amd64/$f/Proof.lean"; then
-    verify "$f" Proof.Witness.nonvacuous
-    verify "$f" Proof.Witness.returns
-  fi
+  local f=$1 st i
+  local -a thms=(Proof.correctness)
+  if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.panics); fi
+  if grep -q '^namespace Witness' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
+  st="$(mktemp -d)"
+  verify_theorems "artifacts/amd64/$f" "examples/proofs-amd64/$f/Proof.lean" "$st" "${thms[@]}"
+  for ((i = 0; i < ${#thms[@]}; i++)); do
+    if [ "$(cat "$st/$i.rc" 2>/dev/null)" = 0 ]; then
+      printf '%-12s %-18s %s\n' "$f" "${thms[$i]}" "$(grep 'Axioms:' "$st/$i.log" | sed 's/^ *//')"
+    else
+      printf '%-12s %-18s FAILED\n%s\n' "$f" "${thms[$i]}" "$(cat "$st/$i.log" 2>/dev/null)"; broken+=("$f.${thms[$i]}")
+    fi
+  done
+  rm -rf "$st"
   return 0
 }
 funcs=("$@")
