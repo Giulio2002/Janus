@@ -1359,4 +1359,21 @@ theorem bulkBarrierOff_satisfiable : ∃ (M : MemModel) (impl : List Janus.Amd64
   ⟨_, _, WB, 64, M0_laws, bulkBarrierOff_impl WB 64, wstate (args DST IfaceModel.VAL 8 0), rfl,
     wstate_tPre _ 4 (by decide), by decide, by decide, by decide⟩
 
+/-! ## Names for the SAT row (`audit/round9/sat_check.py` looks for `<contract>_satisfiable`) -/
+
+/-- `typedmemmove` under the name of its contract. -/
+theorem typedMemmove_satisfiable : type_of% @typedmemmove_satisfiable := @typedmemmove_satisfiable
+
+/-- `typedmemclr` under the name of its contract. -/
+theorem typedMemclr_satisfiable : type_of% @typedmemclr_satisfiable := @typedmemclr_satisfiable
+
+/-- `memequal8` under the name of its contract. -/
+theorem memequalN_satisfiable : type_of% @memequal8_satisfiable := @memequal8_satisfiable
+
+/-- `f32equal` under the name of its contract. -/
+theorem fequal_satisfiable : type_of% @f32equal_satisfiable := @f32equal_satisfiable
+
+/-- `c64equal` under the name of its contract. -/
+theorem cequal_satisfiable : type_of% @c64equal_satisfiable := @c64equal_satisfiable
+
 end Janus.Contracts.MemSatAmd64

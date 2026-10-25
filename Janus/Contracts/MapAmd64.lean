@@ -39,6 +39,10 @@ below the return-address slot, and the spill slots `[RSP + 8, RSP + 8 + 8·nargs
 def calleeStack (s : State) (stack nargs : Nat) : List (Nat × Nat) :=
   [((s.regs 4).toNat - stack, (s.regs 4).toNat), ((s.regs 4).toNat + 8, (s.regs 4).toNat + 8 + 8 * nargs)]
 
+/-- The return-address slot `[RSP, RSP + 8)` of a call (amd64): the callee's `RET` reads it, so
+memory a call writes (the iterator struct of `mapIterStart`/`mapIterNext`) must not overlap it. -/
+def retSlot (s : State) : List (Nat × Nat) := [((s.regs 4).toNat, (s.regs 4).toNat + 8)]
+
 /-- What every map runtime call with `nargs` register arguments needs (amd64): the runtime
 environment (`M.Env`, with the goroutine in `R14`), the stack guard at least `M.depth` bytes
 below `RSP`, an 8-aligned `RSP`, the window `[RSP - M.depth, RSP + 8 + 8·nargs)` writable, below
@@ -207,7 +211,8 @@ def IterStart (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (
     (fun s => RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 3).toNat f ∧
       s.mem.accessible (s.regs 1).toNat iterSize true = true ∧
       Outside (s.regs 1).toNat iterSize M.priv ∧
-      Outside (s.regs 1).toNat iterSize (calleeStack s M.depth 3))
+      Outside (s.regs 1).toNat iterSize (calleeStack s M.depth 3) ∧
+      Outside (s.regs 1).toNat iterSize (retSlot s))
     (fun s s' => RTReturn M 3 [((s.regs 1).toNat, (s.regs 1).toNat + iterSize)] (s.regs 3).toNat
       s s' fun _ m =>
       IsMap M m (s.regs 3).toNat f ∧ ∃ ks, Keys f ks ∧
@@ -219,7 +224,8 @@ def IterNext (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (B
   ∀ mp f k ks, Janus.Amd64.Tactic.Summary p addr
     (fun s => RTPre M 1 s ∧ IsMap M s.mem mp f ∧ M.Iter s.mem (s.regs 0).toNat mp f (k :: ks) ∧
       Outside (s.regs 0).toNat iterSize M.priv ∧
-      Outside (s.regs 0).toNat iterSize (calleeStack s M.depth 1))
+      Outside (s.regs 0).toNat iterSize (calleeStack s M.depth 1) ∧
+      Outside (s.regs 0).toNat iterSize (retSlot s))
     (fun s s' => RTReturn M 1 [((s.regs 0).toNat, (s.regs 0).toNat + iterSize)] mp s s' fun _ m =>
       IsMap M m mp f ∧ M.Iter m (s.regs 0).toNat mp f ks ∧ View64 M m (s.regs 0).toNat f ks)
 

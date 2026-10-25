@@ -502,4 +502,15 @@ theorem rand_satisfiable : ∃ (H : HashModel) (impl : List Janus.Amd64.Segment)
     Rand (toy.link impl) A0 H d ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧ HPre H d 0 s :=
   ⟨_, _, 64, H0_laws, rand_impl 64, wstate (args 0 0 0 0), rfl, wstate_hPre _ 0 (by decide)⟩
 
+/-! ## Names for the SAT row (`audit/round9/sat_check.py` looks for `<contract>_satisfiable`) -/
+
+/-- `memhash8` under the name of its contract. -/
+theorem memhashN_satisfiable : type_of% @memhash8_satisfiable := @memhash8_satisfiable
+
+/-- `f32hash` under the name of its contract. -/
+theorem fhash_satisfiable : type_of% @f32hash_satisfiable := @f32hash_satisfiable
+
+/-- `c64hash` under the name of its contract. -/
+theorem chash_satisfiable : type_of% @c64hash_satisfiable := @c64hash_satisfiable
+
 end Janus.Contracts.HashSatAmd64

@@ -91,6 +91,9 @@ theorem loop (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec
           exact Outside.of_sub hout (by omega) (by omega),
        by simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, calleeStack, hsp144,
             outside_cons, outside_nil, and_true]
+          omega,
+       by simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, retSlot, hsp144,
+            outside_cons, outside_nil, and_true]
           omega⟩ ?_
     intro s' hpc' ⟨r, x, y, fl, m'', hs', hfr2, henv2, hoth, hmap2, hit2, hv2⟩
     subst hs'
@@ -146,7 +149,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
     ⟨RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp144]) (by simp [setRegF])
       (by simpa using hs.zero) (by simpa using hs.df) (by simp [setRegF, keepABI, hsp104, hsp144, Arm64.Memory.readLE_writeLE_self])
         (by decide) (by decide),
-     by simpa [setRegF] using hty, ?_, ?_, ?_, ?_⟩ ?_
+     by simpa [setRegF] using hty, ?_, ?_, ?_, ?_, ?_⟩ ?_
   · simp only [setRegF]; simp only [reduceIte, Nat.reduceEqDiff]
     exact IsMap.frame hl hmap (Agrees.of_window (lo := (s.regs 4).toNat - (M.depth + 144))
       (hi := (s.regs 4).toNat + 8) (by janus_frame) (Outside.of_sub hout (by omega) (by omega)))
@@ -155,6 +158,9 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
   · simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp104, iterSize]
     exact Outside.of_sub hout (by omega) (by omega)
   · simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, calleeStack, hsp144,
+      outside_cons, outside_nil, and_true]
+    omega
+  · simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, retSlot, hsp144,
       outside_cons, outside_nil, and_true]
     omega
   · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hmap', ks, hks, hit, hv⟩
