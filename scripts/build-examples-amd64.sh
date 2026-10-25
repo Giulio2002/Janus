@@ -41,5 +41,13 @@ echo "built $root/artifacts/examples-amd64-sse"
 for f in $(cat "$root"/examples/basic/sse/*.go | grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}'); do
   "$root/bin/janus" extract "$root/artifacts/examples-amd64-sse" "example.com/basic/sse.$f" "$root/artifacts/amd64/$f"
 done
+# The AVX2 examples (examples/basic/avx: Go functions calling AVX2 Go assembly, WP-F), in a
+# binary of their own so that the other binaries do not change.
+(cd "$root/examples/basic" &&
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-amd64-avx" ./avx/cmd)
+echo "built $root/artifacts/examples-amd64-avx"
+for f in $(cat "$root"/examples/basic/avx/*.go | grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}'); do
+  "$root/bin/janus" extract "$root/artifacts/examples-amd64-avx" "example.com/basic/avx.$f" "$root/artifacts/amd64/$f"
+done
 # A runtime function verified on its own (examples/proofs-amd64/MapAccess1Small).
 "$root/bin/janus" extract "$root/artifacts/examples-amd64" runtime.mapaccess1_fast64 "$root/artifacts/amd64/MapAccess1Small"

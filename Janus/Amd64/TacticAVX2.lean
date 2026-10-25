@@ -198,6 +198,36 @@ theorem perLane_256_lt (f : Nat → Nat → Nat → Nat) (a b : Nat) : ExecAVX.p
     elem (ExecSSE.pintOp (.mull e) a b) e i = elem a e i * elem b e i % 2 ^ e := by
   simp only [ExecSSE.pintOp, ExecSSE.lanes]; rw [elem_ofElems _ h]
 
+/-- A WP-D lane vector is a 128-bit value. -/
+theorem lanes_lt (e : Nat) (f : Nat → Nat) : ExecSSE.lanes e f < 2 ^ 128 := by
+  unfold ExecSSE.lanes
+  have h : e * (128 / e) ≤ 128 := by rw [Nat.mul_comm]; exact Nat.div_mul_le_self 128 e
+  exact Nat.lt_of_lt_of_le (ofElems_lt _ _ _) (Nat.pow_le_pow_right (by decide) h)
+
+/-- The packed integer operations whose result is a lane vector (all but `andn`, `movhl`). -/
+def pintLanes : PIntOp → Bool
+  | .andn | .movhl => false
+  | _ => true
+
+/-- Their results are 128-bit values. -/
+@[janus64_exec, janus64_post] theorem pintOp_lanes_mod (op : PIntOp) (a b : Nat) (h : pintLanes op = true) :
+    ExecSSE.pintOp op a b % 340282366920938463463374607431768211456 = ExecSSE.pintOp op a b := by
+  apply Nat.mod_eq_of_lt
+  rw [show (340282366920938463463374607431768211456 : Nat) = 2 ^ 128 by decide]
+  cases op <;> simp only [pintLanes, reduceCtorEq] at h <;> exact lanes_lt _ _
+
+/-- `PMAXUB/W/D`, element-wise. -/
+@[janus64_exec, janus64_post] theorem elem_pintOp_maxu {e i : Nat} (a b : Nat) (h : i < 128 / e) :
+    elem (ExecSSE.pintOp (.maxu e) a b) e i = max (elem a e i) (elem b e i) := by
+  simp only [ExecSSE.pintOp, ExecSSE.lanes]; rw [elem_ofElems _ h]
+  exact Nat.mod_eq_of_lt (by have := elem_lt a e i; have := elem_lt b e i; omega)
+
+/-- `PMINUB/W/D`, element-wise. -/
+@[janus64_exec, janus64_post] theorem elem_pintOp_minu {e i : Nat} (a b : Nat) (h : i < 128 / e) :
+    elem (ExecSSE.pintOp (.minu e) a b) e i = min (elem a e i) (elem b e i) := by
+  simp only [ExecSSE.pintOp, ExecSSE.lanes]; rw [elem_ofElems _ h]
+  exact Nat.mod_eq_of_lt (by have := elem_lt a e i; have := elem_lt b e i; omega)
+
 /-- `VPADDD ymm`, element-wise. -/
 @[janus64_exec, janus64_post] theorem elem_pintV_256_add32 {i : Nat} (a b : Nat) (h : i < 8) :
     elem (ExecAVX.pintV (.add 32) 256 a b) 32 i = (elem a 32 i + elem b 32 i) % 4294967296 := by
