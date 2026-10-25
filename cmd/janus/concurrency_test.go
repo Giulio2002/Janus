@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -207,5 +208,67 @@ theorem correctness : True := trivial
 	now, _ := os.ReadFile(target)
 	if !bytes.Equal(now, before) {
 		t.Errorf("Janus/Tools/Audit.olean was not rebuilt to its original bytes")
+	}
+}
+
+// TestConsumerAuditorLease: consumer verifications (the path of TestConsumerLakefileLean and
+// TestVerifyBatch) run the compiled auditor from the cached framework base long after preparing
+// their workspace. A writer that takes the base's exclusive lock in between (a rebuild for another
+// target, a repair, the collector) used to be able to change or remove the auditor under them, and
+// the honest verification failed with "the auditor executable … changed after it was built" (the
+// b17 merge-gate flake). The workspace now holds the base's shared lock until it closes. Here a
+// writer repeatedly takes the exclusive lock and moves the auditor away and back (a legitimate,
+// locked writer; the bytes end up unchanged) while consumer verifications run: every one must
+// verify, and the writer must have run.
+func TestConsumerAuditorLease(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	cache := seededCache(t)
+	bin := buildJanusBinary(t)
+	env := cacheEnv(cache)
+	base := embeddedBase(t, cache)
+	fw, _ := loadFramework("")
+	lockPath, _ := fw.buildPaths(base)
+	exe := auditExePath(base)
+	var stop atomic.Bool
+	var writes atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for !stop.Load() {
+			lk, err := lockFileMode(lockPath, false, true)
+			if err != nil {
+				t.Errorf("writer lock: %v", err)
+				return
+			}
+			if os.Rename(exe, exe+".away") == nil {
+				time.Sleep(400 * time.Millisecond)
+				if err := os.Rename(exe+".away", exe); err != nil {
+					t.Errorf("restoring the auditor: %v", err)
+				}
+				writes.Add(1)
+			}
+			lk.unlock()
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	var procs []*janusProc
+	for i, n := range []string{"Add", "Max", "Add", "Max"} {
+		pkg := consumerCopy(t, "toml")
+		art := mustExtract(t, "example.com/basic."+n)
+		procs = append(procs, &janusProc{name: fmt.Sprintf("consumer verify#%d %s", i, n), wait: time.Duration(i) * 300 * time.Millisecond,
+			args: []string{"verify", art, "--proof", filepath.Join(pkg, "ConsumerExample", n+".lean"), "--proof-root", pkg,
+				"--theorem", "ConsumerExample." + n + ".correctness"}})
+	}
+	runConcurrently(bin, env, procs)
+	stop.Store(true)
+	<-done
+	for _, p := range procs {
+		if p.code != 0 || !strings.Contains(p.out, "Verified: ") {
+			t.Errorf("%s failed while a locked writer used the framework base (exit %d):\n%s", p.name, p.code, p.out)
+		}
+	}
+	if writes.Load() == 0 {
+		t.Error("the writer never ran")
 	}
 }

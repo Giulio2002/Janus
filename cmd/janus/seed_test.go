@@ -158,8 +158,18 @@ func seededCache(t *testing.T) string {
 		t.Fatalf("building the test cache's framework: %v", err)
 	}
 	lease.release()
-	c := filepath.Join(t.TempDir(), "cache")
-	if err := os.Mkdir(c, 0o700); err != nil {
+	// On disk next to the test cache (a framework build is ~400 MB; t.TempDir is often a RAM
+	// /tmp). v1/tmp trees are also collected by age if a killed test leaves one behind.
+	parent := filepath.Join(testCacheDir(), "v1", "tmp")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c, err := os.MkdirTemp(parent, "seeded-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(c) })
+	if err := os.Chmod(c, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := seedFramework(testCacheDir(), c); err != nil || !ok {
@@ -192,10 +202,11 @@ func TestSeedFramework(t *testing.T) {
 	}
 	// A damaged copy is refused: a module that differs from the stamp fails the hash check.
 	mk := func() string {
-		d := filepath.Join(t.TempDir(), "cache")
-		if err := os.Mkdir(d, 0o700); err != nil {
+		d, err := os.MkdirTemp(filepath.Dir(c), "seeded-")
+		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { os.RemoveAll(d) })
 		return d
 	}
 	d2 := mk()

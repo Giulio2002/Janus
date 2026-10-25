@@ -470,6 +470,12 @@ type consumerWS struct {
 	// its build stamp records (re-checked before it runs); empty with --fresh, whose temporary
 	// base is gone by then: the audit then runs the trusted Audit.lean script instead.
 	auditExe, auditExeSha string
+	// baseLease keeps the cached framework base in use (its shared lock) until the workspace is
+	// closed: the auditor above runs from the base long after the workspace was prepared, and a
+	// writer (a rebuild for another target, a repair, the cache collector) must not replace or
+	// remove it meanwhile. Before, the lease ended when openWorkspace returned, and a concurrent
+	// writer made the auditor check fail ("changed after it was built").
+	baseLease *frameworkLease
 }
 
 // janusLib is the workspace's framework library directory.
@@ -544,11 +550,12 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 			defer os.RemoveAll(base)
 		}
 	} else {
-		// The base stays in use (shared lock) until its build has been copied and compared.
+		// The base stays in use (shared lock) for as long as the workspace: its build is copied
+		// and compared here, and its compiled auditor runs at the audit (ws.close releases it).
 		var lease *frameworkLease
 		if lease, err = fw.frameworkBase(lake, progress); err == nil {
 			base = lease.dir
-			defer lease.release()
+			ws.baseLease = lease
 			ws.auditExe, ws.auditExeSha = auditExePath(base), fw.stampedAuditExe(base)
 		}
 	}
@@ -774,6 +781,8 @@ func (ws *consumerWS) close() {
 	}
 	ws.lock.unlock()
 	ws.lock = nil
+	ws.baseLease.release()
+	ws.baseLease = nil
 }
 
 // run runs lake in the workspace root under the sandbox (the consumer's lakefile and modules
