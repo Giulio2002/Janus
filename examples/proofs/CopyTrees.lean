@@ -1,5 +1,20 @@
 import Extracted
 
+/-!
+# `CopyTrees(dst, src *[2]Tree)`: `*dst = *src` through `runtime.typedmemmove` (arm64)
+
+**Guarantee.** For every model `M` of the runtime around the typed-memory functions, every
+implementation of `runtime.typedmemmove` satisfying `Mem.TypedMemmove` with the write-barrier
+flag at `wb` and stack bound `d`, and every Go call state with the write barrier **off**
+(`WriteBarrierOff`), the program's read-only data in memory (the type descriptor of `[2]Tree`,
+128 bytes with pointers), `src` readable, `dst` writable, both outside the stack window and `dst`
+outside the runtime's memory: the call returns, `dst` holds the 128 bytes of `src` (also when
+they overlap), and nothing else changed except the runtime's memory and the stack window.
+
+**Why `typedmemmove`.** The arrays may overlap partially (through slice-to-array-pointer
+conversions), so the compiler copies them with `typedmemmove` instead of inline stores.
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Contracts
   Janus.Contracts.Mem
 

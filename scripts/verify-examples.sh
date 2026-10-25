@@ -31,7 +31,11 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      Triangle GotoSum Find2D RowsWith Log2 TotalMeters TotalFeet Fact SumBelow ReverseArray DivMod10
      SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
      Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
-     Box AsHasher Classify Equal)
+     Box AsHasher Classify Equal
+     Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey)
+. scripts/example-contracts.sh
+# the runtime's equality, hashing and typed-memory functions verified from their code
+all+=($runtime_examples $runtime_examples_arm64_only)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 

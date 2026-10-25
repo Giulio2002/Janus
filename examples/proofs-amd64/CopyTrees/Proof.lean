@@ -1,6 +1,12 @@
 import Janus
 import Extracted
 
+/-!
+# `CopyTrees(dst, src *[2]Tree)` on amd64: `*dst = *src` through `runtime.typedmemmove`
+
+As on arm64, under `MemAmd64.TypedMemmove` with the write barrier off.
+-/
+
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map Janus.Contracts Janus.Contracts.Mem
 open Janus (MemFrame Outside outside_cons outside_nil outside_append)
 

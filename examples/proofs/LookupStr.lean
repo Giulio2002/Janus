@@ -1,5 +1,16 @@
 import Extracted
 
+/-!
+# `LookupStr(m map[string]uint64, k string) (uint64, bool)` (arm64)
+
+**Guarantee.** For every model `M` of the map runtime and every `mapaccess2_faststr` satisfying
+`MapStr.Access2Str`, every map value `m` holding `f` (keyed by string **content**,
+`MapStr.strKey`), and every call state with the key's bytes readable and outside the stack window:
+the call returns `f`'s value under the key's content (`0` if absent) and whether it is present.
+Two strings with the same bytes are the same key (`MapStr.strKey_eq_of_strEq`), which is what the
+runtime's hashing (`strhash`, equal contents hash alike) and string comparison make true.
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map
   Janus.Contracts Janus.Contracts.Map Janus.Contracts.MapStr
 

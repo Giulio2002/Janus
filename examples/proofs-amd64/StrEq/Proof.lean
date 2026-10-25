@@ -1,6 +1,15 @@
 import Janus
 import Extracted
 
+/-!
+# `StrEq(s, t string) bool` on amd64: `s == t`
+
+As on arm64: the lengths compare inline (`CMPQ BX, DI`), equal lengths call
+`runtime.memequal(p1, p2, len)` under the `MemAmd64.Memequal` contract. On amd64 `memequal` stays
+a contract: its `memeqbody` reads up to 7 bytes around short inputs (within a page), which the
+model's byte-exact memory does not grant.
+-/
+
 namespace Proof
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.Mem
 open Janus (MemFrame Outside outside_cons outside_nil)

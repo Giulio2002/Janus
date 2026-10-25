@@ -1,5 +1,13 @@
 import Extracted
 
+/-!
+# `type:.eq.FKey`: the compiler-generated `==` of `struct { F float64; S string }` (arm64)
+
+**Guarantee.** With a `memequal` satisfying `Mem.Memequal`, for keys at `p` and `q` readable with
+their strings: the result is `keyEq`, the floats `feq` (`FCMPD`) and the strings equal (lengths
+inline, bytes by `memequal`).
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Mem
   Janus.Float
 

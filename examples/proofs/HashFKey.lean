@@ -1,5 +1,18 @@
 import Extracted
 
+/-!
+# `type:.hash.FKey`: the compiler-generated hash of `struct { F float64; S string }` (arm64)
+
+**Guarantee.** For every hash model `H` (`HashModel`: the process's hash as an uninterpreted
+function), every `f64hash` and `strhash` satisfying `Hash.Fhash`/`Hash.Strhash`, and every call
+state with the key and its string readable and outside the stack window and the runtime's
+memory: the hash returned is `strhash` of the string seeded with `f64hash` of the float
+(`KeyHash`). **The law maps need** (`keyHash_congr`, `hash_of_keyEq`): keys that are equal under
+Go's `==` (as decided by the generated `type:.eq.FKey`, proved in `EqFKey`) have the same possible
+hashes, including `+0` and `-0` (`HashLaws.fhashIs_of_feq`); a NaN key is equal to nothing and may
+hash to anything (`HashLaws.fhashIs_nan`).
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Contracts
   Janus.Contracts.Mem Janus.Contracts.Hash Janus.Float
 

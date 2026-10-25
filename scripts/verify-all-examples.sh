@@ -27,7 +27,10 @@ arm64=(MallocFast ClearWords A64IndexByte CopyBlock AddLimbs A64Equal64 Add Max 
        ReverseArray RowsWith SwapBig DotBoth Find2D Fact Compose Shifts AlignUp TotalMeters TotalFeet
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
        Mod IncTwice Bump GlobalTable Table MakeAdder
-       Box AsHasher Classify Equal WrongAdd)
+       Box AsHasher Classify Equal Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
+       WrongAdd)
+. scripts/example-contracts.sh
+arm64+=($runtime_examples $runtime_examples_arm64_only)
 amd64=()
 for d in examples/proofs-amd64/*/; do amd64+=("$(basename "$d")"); done
 tmp="$(mktemp -d)"

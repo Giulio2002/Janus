@@ -1,6 +1,12 @@
 import Janus
 import Extracted
 
+/-!
+# `type:.eq.FKey` on amd64: the compiler-generated `==` of `struct { F float64; S string }`
+
+As on arm64 (`UCOMISD`, `JNE`/`JP`, `MemAmd64.Memequal`).
+-/
+
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.Mem Janus.Float
 open Janus (MemFrame Outside outside_cons outside_nil outside_append)
 

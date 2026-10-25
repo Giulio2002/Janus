@@ -1,6 +1,12 @@
 import Janus
 import Extracted
 
+/-!
+# `type:.hash.FKey` on amd64: the compiler-generated hash of `struct { F float64; S string }`
+
+As on arm64, under `HashAmd64.Fhash`/`HashAmd64.Strhash`, with the same laws.
+-/
+
 open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map Janus.Contracts Janus.Contracts.Mem
   Janus.Contracts.Hash Janus.Float
 open Janus (MemFrame Outside outside_cons outside_nil outside_append)

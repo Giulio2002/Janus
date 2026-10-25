@@ -1,6 +1,12 @@
 import Janus
 import Extracted
 
+/-!
+# `LookupStr(m map[string]uint64, k string) (uint64, bool)` on amd64
+
+As on arm64, under `MapStr.Access2Str64`; `ok` in `BL`.
+-/
+
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map Janus.Contracts.MapAmd64
   Janus.Contracts.MapStr
 

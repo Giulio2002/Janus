@@ -1,5 +1,14 @@
 import Extracted
 
+/-!
+# `ClearTrees(s []*Tree)`: `clear(s)` through `runtime.memclrHasPointers` (arm64)
+
+**Guarantee.** With the write barrier off and a `memclrHasPointers` satisfying
+`Mem.MemclrHasPointers`, for every slice `(p, n, c)` with `p` 8-aligned, `n < 2^45`, the `8n`
+bytes at `p` writable and outside the stack window and the runtime's memory: the call returns
+and the `8n` bytes are zero; an empty slice makes no call.
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Contracts
   Janus.Contracts.Mem
 

@@ -1,5 +1,20 @@
 import Extracted
 
+/-!
+# `StrEq(s, t string) bool`: `s == t` (arm64)
+
+**Guarantee.** For all strings `s = (p1, l1)`, `t = (p2, l2)`, every implementation of
+`runtime.memequal` satisfying `Mem.Memequal` with stack bound `d`, and every Go call state with
+`d` bytes of stack below `StrEq`'s 16-byte frame (`CallerOK`) whose strings' bytes are readable
+and outside that window, the call returns, obeys the ABI, and the `bool` result is Go's `s == t`:
+equal lengths and equal bytes. Different lengths answer `false` without a call; otherwise the
+compiled code calls `memequal(p1, p2, l1)`.
+
+**Assumptions.** The `memequal` contract (hypothesis `hmem`), pinned to the runtime's code. On
+arm64 the machine code of `runtime.memequal` is itself proved to meet it
+(`examples/proofs/AlgMemequal.lean`).
+-/
+
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Mem
 
 namespace Proof
