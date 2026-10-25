@@ -36,3 +36,6 @@ import Janus.Contracts.IfaceSat
 import Janus.Contracts.IfaceSatAmd64
 import Janus.Spec.CRC32C
 import Janus.Tactic.ABI0
+import Janus.Contracts.Misc
+import Janus.Contracts.Instrument
+import Janus.Spec.PopCount
