@@ -19,12 +19,15 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 namespace NewPairWitness
 
 def heap : Nat := 0x10000
-def tyA : Nat := 0xb2f40
+/-- `Pair`'s type descriptor (the address NewPair passes, `Proof.pairType`). -/
+def tyA : Nat := janus_eval% Proof.pairType
+/-- The address of `runtime.newobject` in this extraction. -/
+def cA : Nat := janus_eval% (Extracted.program.contractAddr "runtime.newobject")
 def rt : List (Nat × Nat) := [(heap, heap + 0x10000), (tyA, tyA + 16)]
 
 /-- `MOVZ X0, #1, LSL #16` (`X0 = 0x10000`); `RET`. -/
 def impl : List Segment :=
-  [{ name := "witness.newobject", base := 0x28440, words := [0xd2a00020, 0xd65f03c0] }]
+  [{ name := "witness.newobject", base := cA, words := [0xd2a00020, 0xd65f03c0] }]
 
 /-- The runtime is ready: the argument is a type descriptor inside `rt` whose size is at most
 32 KiB, and the heap is writable and zero. -/
@@ -35,7 +38,7 @@ def H : RtReady := fun args _ _ v =>
 /-- The linked program, as one closed constant (the executor evaluates its facts directly). -/
 def linked : Program := Extracted.program.link impl
 
-theorem addr : Extracted.program.contractAddr "runtime.newobject" = 0x28440 := by decide
+theorem addr : Extracted.program.contractAddr "runtime.newobject" = cA := by decide
 
 theorem callRegs_eq (r : Nat → W64) :
     callRegs r r [BitVec.ofNat 64 heap] = setReg r 0 (BitVec.ofNat 64 heap) := by
@@ -84,15 +87,17 @@ def sp0 : Nat := 0x100000
 def g0 : Nat := 0x200000
 def dat : DataSegment := Extracted.data.head!
 
+def dlen : Nat := janus_eval% dat.bytes.length
+
 def bytes (a : Nat) : Byte :=
-  if tyA ≤ a ∧ a < tyA + 256 then BitVec.ofNat 8 (dat.bytes.getD (a - tyA) 0) else 0
+  if tyA ≤ a ∧ a < tyA + dlen then BitVec.ofNat 8 (dat.bytes.getD (a - tyA) 0) else 0
 
 def s0 : State :=
   { regs := fun i => if i = 0 then 3 else if i = 1 then 5 else if i = 28 then BitVec.ofNat 64 g0
       else if i = 30 then BitVec.ofNat 64 ret else 0,
     sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
     flags := ⟨false, false, false, false⟩,
-    mem := ⟨bytes, [⟨sp0 - 4144, 4168, true⟩, ⟨g0, 0x100, false⟩, ⟨tyA, 256, false⟩,
+    mem := ⟨bytes, [⟨sp0 - 4144, 4168, true⟩, ⟨g0, 0x100, false⟩, ⟨tyA, dlen, false⟩,
       ⟨heap, 0x10000, true⟩]⟩ }
 
 theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
@@ -107,13 +112,13 @@ theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
 
 set_option maxRecDepth 100000 in
 theorem hH : H [Proof.pairType] (s0.regs 28).toNat (s0.sp.toNat - 48) (rtView rt s0.mem) := by
-  have hpt : Proof.pairType = tyA := by decide
+  have hpt : Proof.pairType = tyA := by unfold tyA; decide
   rw [hpt]
   refine ⟨tyA, rfl, ⟨(tyA, tyA + 16), by simp [rt], Nat.le_refl _, Nat.le_refl _⟩, by decide,
     by decide, ?_⟩
   intro i hi
-  have h1 : ¬(tyA ≤ heap + i ∧ heap + i < tyA + 256) := by
-    simp only [tyA, heap]; omega
+  have h1 : ¬(tyA ≤ heap + i ∧ heap + i < tyA + dlen) := by
+    simp only [tyA, heap, dlen]; omega
   show (if _ then bytes (heap + i) else 0) = 0
   split
   · simp only [bytes]; rw [if_neg h1]

@@ -8,6 +8,7 @@
 //	probe9 mcache N MallocFast's MCacheOK, evaluated in-process before N 64-byte requests (arm64)
 //	probe9 hdr N    addresses mod 16 of N pointerful 528-byte objects (malloc header: 8)
 //	probe9 grow K   the capacities AppendOne (runtime.growslice) chooses up to K elements
+//	probe9 maps N   small-map lookups (basic.Lookup) on the main and 8 other goroutines
 //	probe9 big K    MakeSlice(1<<K): a request the allocation contracts admit (8·2^K ≤ 2^48)
 package main
 
@@ -24,6 +25,7 @@ import (
 
 var sink []*basic.Node
 var strSink string
+var mapSink uint64
 var hdrSink []*[66]*int
 
 func main() {
@@ -51,6 +53,31 @@ func main() {
 				fmt.Println(len(s), c, cap(s))
 			}
 		}
+	case "maps":
+		// small maps looked up from the main goroutine and from fresh goroutines
+		// (audit/round9/probe/maps_amd64.py checks smallModel's heap interval at each call)
+		done := make(chan bool)
+		for j := 0; j < 8; j++ {
+			go func(j int) {
+				m := map[uint64]uint64{uint64(j): 1, 7: 2}
+				var acc uint64
+				for i := 0; i < k; i++ {
+					v, _ := basic.Lookup(m, uint64(i%9))
+					acc += v
+				}
+				mapSink += acc
+				done <- true
+			}(j)
+		}
+		m := map[uint64]uint64{1: 1, 2: 4}
+		for i := 0; i < k; i++ {
+			v, _ := basic.Lookup(m, uint64(i%5))
+			mapSink += v
+		}
+		for j := 0; j < 8; j++ {
+			<-done
+		}
+		fmt.Println("ok", mapSink)
 	case "mcache":
 		mcacheProbe(k)
 	case "strcat":

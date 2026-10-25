@@ -28,6 +28,10 @@ import Janus.Contracts.Slice
 import Janus.Contracts.WriteBarrier
 import Janus.Contracts.Sat
 import Janus.Contracts.SatAmd64
+import Janus.Contracts.RtSat
+import Janus.Contracts.WriteBarrierSat
+import Janus.Contracts.AllocSat
+import Janus.Contracts.AllocSatAmd64
 import Janus.Spec.Dynamic
 import Janus.Tactic.Dynamic
 import Janus.Spec.Map

@@ -3,8 +3,8 @@ import Janus.Contracts.Sat
 /-!
 # The runtime contracts are satisfiable (amd64)
 
-As `Janus.Contracts.Sat` for the amd64 contracts (`RtContract64`, `MallocgcContract64`,
-`NewobjectContract64`, `MakesliceContract64`, `GrowsliceContract64`, `WbContract64`): the same
+As `Janus.Contracts.Sat` for the amd64 contracts (`RtContract64`, `WbContract64`;
+the allocation contracts are round 9's `AllocSatAmd64`): the same
 model (`rtW`, `wmem`, the readiness predicates), x86-64 implementations at `A0`
 (`constCode64`: `MOV EAX/EBX/ECX, imm32; RET`, `wbCode64`: `MOV R11D, imm32; RET`) proved by
 running them, and a call state (`wstate64`) meeting each precondition.
@@ -15,8 +15,8 @@ namespace Janus.Contracts.SatAmd64
 open Janus.Amd64 Janus.Amd64.Tactic Janus.Spec Janus.Contracts
 open Janus (MemFrame InRanges Outside outside_cons outside_nil)
 open Janus.Contracts.Sat (TYP HEAP wsp wg rtW wmem H0 HL strPairs_zero mem_strPairs_zero outside_zero
-  roundupsize_zero PGrow PHeap typSize_of typPtrBytes_of typ_inRanges heap_inRanges elemOK_w growCap_w grown_w
-  pheap_w fresh_w growslice_pre_w pgrow_w)
+  roundupsize_zero PGrow typSize_of typPtrBytes_of typ_inRanges heap_inRanges elemOK_w growCap_w grown_w
+  growslice_pre_w pgrow_w)
 
 /-- A program with no code, stubs or data of its own. -/
 def toy : Janus.Amd64.Program := { segments := [], stubs := [], exitAddr := 0 }
@@ -597,139 +597,6 @@ theorem growsliceBuf_satisfiable : Satisfiable growsliceBufSpec :=
     (by simp [growsliceBufSpec, arg, calleeStack64, wstate, TYP, wsp, outside_zero]) rfl rfl pgrow_w
 
 theorem growsliceBufNoAlias_satisfiable : Satisfiable growsliceBufNoAliasSpec := growsliceBuf_satisfiable
-
-/-! ## Allocation (`Janus.Contracts.AllocAmd64`) -/
-
-/-- The return of a constant implementation as `AllocRet64`, with `ptr` the returned `RAX`;
-the result words go to `RAX`, `RBX`, `RCX`. -/
-theorem allocRet_const {rt : List (Nat × Nat)} {stack nargs : Nat} {res : W64 → List W64}
-    {s s' : State} {Q : Memory → Nat → Prop}
-    (hrip : s'.rip = retAddrOf s) (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5)
-    (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase)
-    (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr) (hm : s'.mem = s.mem)
-    (hres : ∀ j, j < (res (s'.regs 0)).length → (res (s'.regs 0)).getD j 0 = s'.regs ([0, 3, 1].getD j 0))
-    (hq : Q s.mem (s'.regs 0).toNat) : AllocRet64 rt stack nargs res s s' Q := by
-  refine ⟨s'.regs 0, s'.regs, s'.flags, s'.xmm, s'.ymmHi, s.mem, ?_, MemFrame.refl _ _, hq⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
-  simp only at hrip h4 h5 h14 hx hfs hdf hmx hm hres hq ⊢
-  subst hrip hfs hdf hmx hm
-  simp only [retState64, State.mk.injEq, and_true, true_and]
-  have hg : ∀ j, (res (r 0)).getD j (r ([0, 3, 1].getD j 0)) = r ([0, 3, 1].getD j 0) := by
-    intro j
-    by_cases hl : j < (res (r 0)).length
-    · rw [← hres j hl]; simp [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hl]
-    · rw [List.getD_eq_getElem?_getD, List.getElem?_eq_none (by omega)]; rfl
-  constructor
-  · funext i
-    simp only [callRegs64]
-    split
-    · rename_i hi; subst hi; exact h4
-    · split
-      · rename_i hi; rcases hi with rfl | rfl <;> simp [h5, h14]
-      · split
-        · rename_i hi; subst hi; exact (hg 0).symm
-        · split
-          · rename_i hi; subst hi; exact (hg 1).symm
-          · split
-            · rename_i hi; subst hi; exact (hg 2).symm
-            · rfl
-  · funext i
-    split
-    · rename_i hi; subst hi; exact hx
-    · rfl
-
-set_option hygiene false in
-/-- The run of a constant allocator (amd64). -/
-macro "alloc_impl" : tactic => `(tactic| (
-  rw [link_at0]
-  rintro s hpc ⟨⟨⟨hra, hal, hsb, hsa, hacc⟩, -⟩, ha, hP⟩
-  simp only [List.cons.injEq, and_true] at ha
-  janus64_run
-  apply allocRet_const <;> (try rfl) <;> (try simp [retAddrOf]) <;> (try simp [setRegF])))
-
-theorem mallocgc_impl : MallocgcContract64 (toy.link (at0 (constCode64 HEAP 0 0))) A0 rtW wstack
-    (fun a _ _ v => a = [16, 0, 1] ∧ PHeap 16 v) := by
-  alloc_impl
-  obtain ⟨h0, h1, h2⟩ := ha
-  intro _
-  have hb : blockSize 16 true = 16 := by decide
-  simp only [mallocgcObj64, h0, h1, h2]
-  simpa [hb, mallocHdr, HEAP] using fresh_w s.mem 16 16 (by decide) (by decide) true false hP
-
-theorem mallocgc_satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady) (impl : List Janus.Amd64.Segment),
-    MallocgcContract64 (toy.link impl) A0 rt wstack H ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
-      MallocgcPre64 wstack s ∧ Ready64 H rt [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s :=
-  ⟨rtW, _, _, mallocgc_impl, wstate (args [16, 0, 1]), rfl,
-    ⟨wstate_callOK _ 3 (by decide), by simp [wstate, args, argIdx, maxAlloc],
-      Or.inl (by simp [wstate, args, argIdx])⟩,
-    ⟨by simp [wstate, args, argIdx], pheap_w 16 (by decide)⟩⟩
-
-theorem newobject_impl : NewobjectContract64 (toy.link (at0 (constCode64 HEAP 0 0))) A0 rtW wstack
-    (fun a _ _ v => a = [TYP] ∧ PHeap 8 v) := by
-  alloc_impl
-  intro _
-  have h1 := typSize_of s.mem hP.1
-  have h2 := typPtrBytes_of s.mem hP.2.1
-  have hb : blockSize 8 true = 8 := by decide
-  simp only [newobjectObj64, ha, h1, typNoscan, typPtrBytes] at h2 ⊢
-  simpa [hb, h2, mallocHdr, HEAP] using fresh_w s.mem 8 8 (by decide) (by decide) true false hP
-
-theorem newobject_satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady) (impl : List Janus.Amd64.Segment),
-    NewobjectContract64 (toy.link impl) A0 rt wstack H ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
-      NewobjectPre64 wstack s ∧ Ready64 H rt [(s.regs 0).toNat] s :=
-  ⟨rtW, _, _, newobject_impl, wstate (args [TYP]), rfl,
-    ⟨wstate_callOK _ 1 (by decide), by simp [wstate, args, argIdx, TYP]; exact ⟨by decide, by decide⟩,
-      by simp [wstate, args, argIdx, TYP, maxAlloc]; decide⟩,
-    ⟨by simp [wstate, args, argIdx, TYP], pheap_w 8 (by decide)⟩⟩
-
-theorem makeslice_impl : MakesliceContract64 (toy.link (at0 (constCode64 HEAP 0 0))) A0 rtW wstack
-    (fun a _ _ v => a = [TYP, 1, 1] ∧ PHeap 8 v) := by
-  alloc_impl
-  obtain ⟨h0, h1, h2⟩ := ha
-  intro _
-  have ht := typSize_of s.mem hP.1
-  have hpb := typPtrBytes_of s.mem hP.2.1
-  have hb : blockSize 8 true = 8 := by decide
-  simp only [makesliceObj64, h0, h2, ht, typNoscan, typPtrBytes] at hpb ⊢
-  simpa [hb, hpb, mallocHdr, HEAP] using fresh_w s.mem 8 8 (by decide) (by decide) true false hP
-
-theorem makeslice_satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady) (impl : List Janus.Amd64.Segment),
-    MakesliceContract64 (toy.link impl) A0 rt wstack H ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
-      MakeslicePre64 wstack s ∧ Ready64 H rt [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s :=
-  ⟨rtW, _, _, makeslice_impl, wstate (args [TYP, 1, 1]), rfl,
-    ⟨wstate_callOK _ 3 (by decide), by simp [wstate, args, argIdx, TYP]; exact ⟨by decide, by decide⟩,
-      by simp [wstate, args, argIdx], by simp [wstate, args, argIdx],
-      by simp [wstate, args, argIdx, TYP, maxAlloc]; decide⟩,
-    ⟨by simp [wstate, args, argIdx, TYP], pheap_w 8 (by decide)⟩⟩
-
-theorem growslice8_impl : GrowsliceContract64 (toy.link (at0 (constCode64 HEAP 1 1))) A0 rtW wstack
-    (fun a _ _ v => a = [0, 1, 0, 1, TYP] ∧ PHeap 8 v) := by
-  rw [link_at0]
-  rintro s hpc ⟨⟨⟨⟨hra, hal, hsb, hsa, hacc⟩, -⟩, -⟩, ha, hP⟩
-  simp only [growsliceArgs64, List.cons.injEq, and_true] at ha
-  obtain ⟨h0, h1, h2, h3, h4⟩ := ha
-  janus64_run
-  apply allocRet_const <;> (try rfl) <;> (try simp [retAddrOf]) <;> (try simp [setRegF])
-  · intro j hj
-    try simp only [List.length_cons, List.length_nil] at hj
-    have h1' : s.regs 3 = 1#64 := by apply BitVec.eq_of_toNat_eq; simp [h1]
-    have h2' : s.regs 1 = 0#64 := by apply BitVec.eq_of_toNat_eq; simp [h2]
-    rcases (show j = 0 ∨ j = 1 ∨ j = 2 by omega) with rfl | rfl | rfl <;> simp [h1', h2'] <;> decide
-  · simp only [growsliceObj64, h0, h1, h2, h3]
-    have hg : growCap8 1 0 = 1 := by decide
-    refine ⟨by simpa [hg, HEAP] using fresh_w s.mem 8 8 (by decide) (by decide) false false hP,
-      fun i h => absurd h (by omega), fun i h => absurd h (by simp [hg])⟩
-
-theorem growslice8_satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady) (impl : List Janus.Amd64.Segment),
-    GrowsliceContract64 (toy.link impl) A0 rt wstack H ∧ ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧
-      GrowslicePre64 wstack s ∧ Ready64 H rt (growsliceArgs64 s) s :=
-  ⟨rtW, _, _, growslice8_impl, wstate (args [0, 1, 0, 1, TYP]), rfl,
-    ⟨⟨wstate_callOK _ 5 (by decide), by simp [wstate, args, argIdx, TYP]; exact ⟨by decide, by decide⟩,
-      by simp [wstate, args, argIdx, TYP]; decide, by simp [wstate, args, argIdx, TYP]; decide,
-      by simp [wstate, args, argIdx], by simp [wstate, args, argIdx], by simp [wstate, args, argIdx],
-      by simp [wstate, args, argIdx]⟩,
-      fun h => absurd h (by simp [wstate, args, argIdx])⟩,
-    ⟨by simp [wstate, args, argIdx, TYP], pheap_w 8 (by decide)⟩⟩
 
 /-! ## The write barrier (`gcWriteBarrierN`) -/
 

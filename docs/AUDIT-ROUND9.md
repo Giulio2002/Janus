@@ -1,7 +1,8 @@
 # Audit round 9: runtime contracts against the real runtime
 
 Branch `agent/redteam9`, based on `merge/b7` (main, round 8, agent/alloc, agent/stubpin,
-agent/rt-fp), then merged with main (`987d96d`). Scope: the runtime-contract layer added by
+agent/rt-fp), then merged with main (`987d96d`, then `73cae68`: maps, ffi/cgo contracts,
+iface-alloc, rt-model's EX1 segment check). Scope: the runtime-contract layer added by
 agent/alloc (allocation contracts, the proved `mallocgc` fast path, the write-barrier example),
 the linked-program semantics, and leftovers from round 8 (memory-guard settings, the H1
 lookalike table).
@@ -17,18 +18,22 @@ under qemu-aarch64. The host has no aarch64 gdb.
 | ID | Severity | Finding | Status | Rows |
 |---|---|---|---|---|
 | C1 | **critical** (vacuity) | **No code could meet the allocation contracts.** `NewobjectContract`, `MakesliceContract`, `GrowsliceContract` and `MallocgcContract`, on both ISAs, are `Summary`s over every state satisfying a precondition that said nothing about the runtime's own state. One such state has a 2^47-byte request (`≤ maxAlloc`) and no heap mapped. Regions never change, so no object can be returned there. The hypothesis was false for every implementation, address and `rt`, so the six NewPair/MakeSlice/AppendOne theorems were vacuous. The real runtime throws `out of memory` on such a request. | **BROKEN → fixed** | C1a–C1d, C1_ctl |
+| SAT | high (process) | **No contract had to show it was satisfiable.** C1 went unnoticed because nothing required a witness. Row SAT (`audit/round9/sat_check.py`) now finds every runtime contract under `Janus/Contracts` (a `def … : Prop` whose body is a `Summary`) and requires `theorem <name>_satisfiable` in `Janus.Contracts.<File>Sat` (`…SatAmd64`), imported by `Janus.lean` so that `lake build` kernel-checks it: an implementation, its parameters, and a state satisfying the whole precondition. The 8 allocation contracts have one (`Janus/Contracts/AllocSat.lean`, `AllocSatAmd64.lean`). The 18 map contracts (arm64 + amd64) are listed as OPEN in `audit/round9/sat-pending.txt` (owner: agent/maps); any other contract without a witness fails the row, and a self-test row checks that removing a witness does. | **fixed** (maps open) | SAT, SAT_selftest |
 | C2 | high (contract promises too much) | **16-alignment for header objects.** `Fresh` promised `ptr % 16 = 0` for every request whose size is a multiple of 16. A pointerful object of 513 to 32760 bytes follows an 8-byte malloc header (`mallocgcSmallScanHeader` returns `slot + 8`), so the real runtime returns `8 mod 16` for every one of them. | **BROKEN → fixed** | C2a, C2b |
-| M1 | high (vacuity) | **MallocFast held for no call on `m0`.** `MCacheOK` required the six runtime globals, as one range `[globLo, globHi)`, to be separate from the `m`. `runtime.m0` lies in `.bss` inside that range, so the theorem said nothing about any allocation made on the main thread's `m`. Probe: 0 of 20000 real 64-byte requests met it. With each global on its own, 19682 do. | **BROKEN → fixed** | M1 |
+| M1 | high (vacuity) | **MallocFast held for no call on `m0`.** `MCacheOK` required the six runtime globals, as one range `[globLo, globHi)`, to be separate from the `m`. `runtime.m0` lies in `.bss` inside that range, so the theorem said nothing about any allocation made on the main thread's `m`. Probe (requests on m0, made during package init, where Go locks the main goroutine to m0): 0 of 20000 met it; with each global on its own, 19682 do. After init, the main goroutine runs on m0 for 30 to 70% of its calls, varying from run to run. | **BROKEN → fixed** | M1a, M1b |
 | S1 | medium (gratuitous exclusion) | **SetNext's `BarrierOK` excluded most real calls.** It required one interval `[lo, hi)` holding `g.m`, `m.p`, `p.wbBuf` and the buffer slots, and missing `n.Next` and the stack. In the arena these interleave. Probe (amd64, barrier on): 82 of 300 real calls could meet it, against 300 of 300 with per-object separation. | **fixed** | S1 |
 | H2 | **critical** (readability) | **Lookalike binders the H1 fold missed.** `ό` (U+03CC) vs `ό` (U+1F79), `K` (Kelvin sign) vs `K`, and `ι` (U+1FBE) vs `ι` (U+03B9) are Lean identifier letters that render identically and fold apart. `∀ K, K = K` read as a triviality and "Add returns x * y" verified (rows H2a–c), exactly like round 7's H1a. | **BROKEN → fixed** | H2a–c, controls |
 | I1g | low (hardening) | `Program.contractAddr` falls back to 0 for a name that is not a recorded contract, and the round-8 name check did not cover it. A lookalike `"runtime.newobjеct"` read as the real contract. | **fixed** | I1g |
 | D1 | medium (docs) | **The stubpin merge (`2bf7f35`) replaced `docs/SOUNDNESS.md` wholesale with agent/stubpin's copy.** That dropped the "Runtime contracts" section, round 8's cache sections (toolchain identity, private cache root, trusted-compile MAC) and the I1 "object names must resolve" item from the trust document. Restored by a three-way merge. | **fixed** | D1 |
 | G1 | — | `growCap8` (`nextslicecap` + `roundupsize`) against the real runtime: all 43 growths of `[]uint64` up to 3·10^6 elements match, on both ISAs. | holds | G1 |
 | MG | — | `JANUS_MEMGUARD` / `JANUS_MEM_MAX` change limits only. An attack stays blocked under every mechanism and limit, and a kill is an `Invalid`, never a pass. Hazard: a forced mechanism that is unavailable (`JANUS_MEMGUARD=cgroup` without a delegated cgroup, or a misspelt name) silently runs unguarded. | holds (hazard) | MG |
+| MP | — | Map contracts (`Janus/Contracts/Map.lean`, `MapAmd64.lean`) already take the abstract runtime model `M : MapModel` (`Env`, `Rep`, `priv`), the readiness design C1 adds to allocation. `MapAccess1Small` discharges `Access1` for `smallModel`, whose single `heap` interval must hold a map's header and its group and miss the stack window. Probe (amd64 gdb, `probe9 maps`): 400 of 400 real small-map lookups, on the main goroutine and on 8 others, admit such an interval. | holds | MP |
+| FF | — | cgo contracts (`Janus/FFI.lean`, `Amd64/FFI.lean`, `CABI`): the X64-MXCSR-STICKY lesson is applied (only the control bits of MXCSR/FPCR are kept, the sticky status flags are arbitrary). `TPIDR`/`FS` are arbitrary after the call. `g` is 456 bytes in go1.26.0 (`runtime.g0` symbol size `0x1c8`). Stack shrinking is unsafe while `syscallsp ≠ 0`, which `exitsyscall`'s slow path clears only after rescheduling, so the "stack does not move across cgocall" claim matches the runtime. No vacuous hypothesis found. | holds | (reviewed) |
 | L1 | — | Linked-program semantics: `--contract` wins over `--targets` (no code is copied at a contract address), stubs keep their stub meaning, the entry cannot be a contract, and `impl` is universally quantified. No way was found for a proof to choose its `impl`. | holds | (round-8 rows) |
 
-**Safe to merge: yes**, with the full regression below. The fixes change the statements of 11
-example theorems (the six allocation theorems take `H : RtReady` and assume `H` at entry;
+**Safe to merge: yes**, with the full regression below. The fixes change the statements of 13
+example theorems (the eight allocation theorems, NewPair/MakeSlice/AppendOne and main's new
+MakeAdder on both ISAs, take `H : RtReady` and assume `H` at entry;
 MallocFast's `MCacheOK` and both SetNext `BarrierOK`s are restated). Every changed theorem verifies.
 
 ## C1 (CRITICAL, BROKEN → fixed): the allocation contracts were unsatisfiable
@@ -80,7 +85,11 @@ lets the discharger close more goals.
   the runtime's code returns as the contract says". That is a function of exactly what `H`
   sees. It holds at the calls the runtime serves without a system call, a throw or a stack
   move: a free `mcache` slot, enough heap, no GC assist that parks or shrinks the stack.
-* **The fixed contract is satisfiable in the kernel.** `audit/round9/controls/NewPair_witness.lean`
+* **Each fixed contract is satisfiable in the kernel** (`Janus/Contracts/AllocSat.lean`,
+  `AllocSatAmd64.lean`: `newobject_satisfiable`, `mallocgc_satisfiable`, `makeslice_satisfiable`,
+  `growslice_satisfiable` and their `…64` versions; toy code that returns a zeroed heap, an `H`,
+  and a call state meeting the whole precondition for a non-zero size). The theorem built on the
+  contract fires too: `audit/round9/controls/NewPair_witness.lean`
   places a two-instruction allocator (`MOVZ X0, #0x10000; RET`) at `runtime.newobject`. It
   chooses `rt` = a 64 KiB heap plus `Pair`'s descriptor, and `H` = "the argument is a
   descriptor inside `rt` of at most 32 KiB and the heap is writable and zero", and proves
@@ -118,9 +127,12 @@ both ISAs. Row C2b checks the boundaries.
 `runtime.m0` is at `0x16a880`, inside it. Every goroutine running on the main thread's `m`, which
 includes the main goroutine of nearly every program, violates `MCacheOK`.
 
-The in-process probe (`probe9 mcache`, arm64 under qemu) reads every conjunct of `MCacheOK` just
+The in-process probe (`probe9 mcache-init`, arm64 under qemu) reads every conjunct of `MCacheOK` just
 before 20000 real `mallocgc(64, nil, false)` calls (string concatenation), at the offsets the
-proof uses:
+proof uses. It runs during package initialisation, when the runtime keeps the main goroutine on
+m0. After init, `probe9 mcache` shows the main goroutine on m0 for 8000 to 14000 of 20000 calls,
+and the shipped `MCacheOK` fails on exactly those calls. Row M1a also checks the binary
+statically: in `artifacts/examples-arm64` the hull of the six globals contains `m0`'s fields.
 
 | | holds |
 |---|---|
@@ -195,13 +207,17 @@ are present.
 
 ## Regression status
 
-Run on the merged tree, one heavy job at a time:
+On the tree merged with main `a3626db` (HEAD of agent/redteam9), one heavy job at a time
+(`LEAN_NUM_THREADS=4`, load < 70):
 
 | Suite | Result |
 |---|---|
-| `audit/round9/run-round9.sh` | all rows as expected |
-| `scripts/verify-all-examples.sh -j 1` | all examples Verified (MallocFast included) |
-| `go test ./cmd/...` | ok |
-| `audit/run-all.sh`, `audit/round{2..8}` runners | all rows as expected |
+| `audit/round9/run-round9.sh` | all rows as expected (C1a–d, C2a–b, M1a–b, S1, MP, G1, SAT, SAT_selftest, H2a–c, I1g, D1, MG), 526 s |
+| `scripts/verify-all-examples.sh -j 1` | all ok: 74 arm64 items, 74 amd64 functions, 10 assembly items (MallocFast, MakeAdder included) |
+| `go test -count=1 -timeout 50m ./cmd/...` | ok, 584 s |
+| `audit/run-all.sh -j 1` | ok, 367 s |
+| `audit/round{2,3,4,5,6,7,8}` runners, `audit/rt-model/run.sh` | all rows as expected |
 
-(See the commit message for timings.)
+The first post-merge run caught two things, both fixed: main's new example `MakeAdder` still used
+the old contract shape, and the M1 probe was nondeterministic (whether the main goroutine runs on
+m0 after init varies; the row now probes during package init).

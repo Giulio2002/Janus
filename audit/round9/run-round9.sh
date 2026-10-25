@@ -62,6 +62,15 @@ cp audit/round9/controls/NewPair_witness.lean "$D/W.lean"
 check C1c_newpair_witness_fires $? "an allocator, rt, H and a NewPair call for which Proof.correctness fires"
 v examples/proofs/NewPair.lean "$W/NewPair"; row C1_ctl_NewPair Verified 'RtReady' 'rtView rt s.mem'
 
+echo "== SAT: every runtime contract has a kernel-checked _satisfiable witness (lake build Janus checked them)"
+o="$(python3 -I audit/round9/sat_check.py "$root")"; rc=$?
+grep -E 'SAT (MISSING|OPEN)' <<<"$o" | sed 's/^/  /'
+check SAT_contract_witnesses $rc "$(tail -n 1 <<<"$o")"
+S9="$T/satcopy"; mkdir -p "$S9/audit/round9"; cp -r Janus Janus.lean "$S9/"; cp audit/round9/sat-pending.txt "$S9/audit/round9/"
+sed -i 's/^theorem newobject_satisfiable/theorem newobject_satisfiable_gone/' "$S9/Janus/Contracts/AllocSat.lean"
+python3 -I audit/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
+[ $rc -ne 0 ]; check SAT_selftest_missing_witness_fails $? "removing newobject_satisfiable makes the SAT row fail"
+
 echo "== real-binary probes (audit/round9/probe; go1.26.0)"
 P="$T/probe"; mkdir -p "$P"
 ( cd audit/round9/probe && export GOTOOLCHAIN=go1.26.0 CGO_ENABLED=0 &&
@@ -80,16 +89,30 @@ example : mallocHdr 528 false = true ∧ mallocHdr 528 true = false ∧ mallocHd
     mallocHdr 32760 false = true ∧ mallocHdr 32768 false = false := by decide
 EOF
 lake env lean "$T/hdr.lean" >/dev/null 2>&1; check C2b_mallocHdr_model $? "the contract only promises 8-alignment for those (mallocHdr)"
-o="$(qemu-aarch64 "$P/probe9-arm64" mcache 20000)"
+# the six globals' hull contains runtime.m0 in the examples binary MallocFast is proved for
+o="$(nm artifacts/examples-arm64 | python3 -I -c '
+import sys
+S = {l.split()[2]: int(l.split()[0], 16) for l in sys.stdin if len(l.split()) == 3}
+g = [(S["runtime.debug"] + 0x2c, 1), (S["runtime.gcBlackenEnabled"], 4), (S["internal/runtime/gc.SizeToSizeClass8"], 129),
+     (S["internal/runtime/gc.SizeClassToSize"], 136), (S["runtime.writeBarrier"], 1), (S["runtime.MemProfileRate"], 8)]
+lo, hi = min(a for a, n in g), max(a + n for a, n in g); m0 = S["runtime.m0"]
+print("m0 %#x in [%#x, %#x): %s" % (m0, lo, hi, lo <= m0 + 208 and m0 + 268 <= hi))')"
+grep -q 'True$' <<<"$o"; check M1a_m0_inside_globals_hull $? "examples-arm64: $o"
+# during package init the main goroutine is locked to m0, so every sampled call is on m0
+o="$(qemu-aarch64 "$P/probe9-arm64" mcache-init 20000)"
 sh="$(sed -n 's/.*MCacheOK(shipped)=\([0-9]*\).*/\1/p' <<<"$o")"; fx="$(sed -n 's/.*MCacheOK(round 9)=\([0-9]*\).*/\1/p' <<<"$o")"
 [ "${sh:-1}" = 0 ] && [ "${fx:-0}" -ge 18000 ]
-check M1_mcacheok_real_calls $? "of 20000 real 64-byte requests on m0: old MCacheOK holds for ${sh:-?}, round-9 MCacheOK for ${fx:-?}"
+check M1b_mcacheok_real_calls $? "of 20000 real 64-byte requests on m0: old MCacheOK holds for ${sh:-?}, round-9 MCacheOK for ${fx:-?}"
 if command -v gdb >/dev/null; then
   o="$(cd "$P" && timeout 1200 gdb -batch -x "$root/audit/round9/probe/setnext_amd64.py" --args ./probe9-amd64 loopgc 200000 2>&1 | grep PROBE)"
   on="$(sed -n 's/.*barrier_on=\([0-9]*\).*/\1/p' <<<"$o")"; old="$(sed -n 's/.*barrierok_satisfiable=\([0-9]*\).*/\1/p' <<<"$o")"
   new="$(sed -n 's/.*barrierok_round9=\([0-9]*\).*/\1/p' <<<"$o")"
   [ -n "$on" ] && [ "$old" -lt "$on" ] && [ "$new" = "$on" ]
   check S1_barrierok_real_calls $? "SetNext calls with the barrier on: $on; old [lo,hi) BarrierOK satisfiable for $old, round-9 BarrierOK for $new"
+  o="$(cd "$P" && timeout 1200 gdb -batch -x "$root/audit/round9/probe/maps_amd64.py" --args ./probe9-amd64 maps 2000 2>&1 | grep PROBE)"
+  sm="$(sed -n 's/.*small=\([0-9]*\).*/\1/p' <<<"$o")"; hk="$(sed -n 's/.*heap_interval_ok=\([0-9]*\).*/\1/p' <<<"$o")"
+  [ -n "$sm" ] && [ "$sm" -gt 0 ] && [ "$hk" = "$sm" ]
+  check MP_smallmodel_heap_interval $? "small-map lookups: $sm; one heap interval holds header and group and misses the stack window at $hk"
 else printf '  %-40s skipped  (no gdb)\n' S1_barrierok_real_calls; fi
 "$P/probe9-amd64" grow 3000000 > "$T/grow-amd64"; qemu-aarch64 "$P/probe9-arm64" grow 3000000 > "$T/grow-arm64"
 o="$(cmp "$T/grow-amd64" "$T/grow-arm64" && audit/round9/model/grow_check.sh "$T/grow-arm64" 2>&1)"

@@ -5,7 +5,7 @@ import Janus.Contracts.WriteBarrier
 
 A contract is a `Summary` over every state that meets its precondition; if no code could meet
 it, every theorem assuming it would be vacuous (round 9 C1). For each arm64 contract of
-`Janus.Contracts.Alloc`, `Janus.Contracts.String`, `Janus.Contracts.Slice` and
+`Janus.Contracts.String`, `Janus.Contracts.Slice` and
 `Janus.Contracts.WriteBarrier` this file proves `<contract>_satisfiable`: there are runtime-owned
 ranges `rt`, a readiness predicate `H`, an implementation `impl` (A64 machine code at the address
 `A0` of a program with no other code) that **meets** the contract (proved by running it), and a
@@ -18,12 +18,14 @@ descriptor (`Size_ = 8`, `PtrBytes = 0`) and a writable, zero heap `[HEAP, HEAP 
 is the last two. Each `H` fixes the call's arguments and states what the toy implementation
 needs of the runtime's memory (as `rtView` shows it: the descriptor's words, a writable zero
 heap). The implementations return constants (`constCode`: `MOVZ`/`MOVK` into `X0`–`X2`, `RET`):
-the allocation contracts hand out the heap's first block, the others answer calls whose
+the growth contracts hand out the heap's first block, the others answer calls whose
 operands are empty. These are models of the contracts, not of the Go runtime; that the runtime
 meets them is what `examples/proofs/SumRunes.lean`, `RuneLen.lean`, `WriteBarrier.lean`
 (proved from the binary's code) and the probes of `audit/` address. `decoderune` and `countrunes`
 have no `H` (their contracts hold for every input), so their witness is the runtime's own code
-proved in those examples.
+proved in those examples. The allocation contracts' witnesses are round 9's
+(`Janus.Contracts.AllocSat`, `AllocSatAmd64`); `Janus.Contracts.RtSat` and `WriteBarrierSat`
+collect the ones of this file for the SAT audit row.
 -/
 
 namespace Janus.Contracts.Sat
@@ -654,156 +656,6 @@ theorem growsliceBuf_satisfiable : Satisfiable growsliceBufSpec :=
     (by simp [growsliceBufSpec, arg, calleeStack, wstate, TYP, wsp, outside_zero]) rfl rfl pgrow_w
 
 theorem growsliceBufNoAlias_satisfiable : Satisfiable growsliceBufNoAliasSpec := growsliceBuf_satisfiable
-
-/-! ## Allocation (`Janus.Contracts.Alloc`) -/
-
-/-- The return of a constant implementation as `AllocRet`, with `ptr` the returned `X0`. -/
-theorem allocRet_const {rt : List (Nat × Nat)} {stack nargs : Nat} {res : W64 → List W64}
-    {s s' : State} {Q : Memory → Nat → Prop}
-    (hsp : s'.sp = s.sp) (hpc : s'.pc = s.regs 30) (h18 : s'.regs 18 = s.regs 18)
-    (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid)
-    (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
-    (hm : s'.mem = s.mem)
-    (hres : ∀ i, i < (res (s'.regs 0)).length → (res (s'.regs 0)).getD i 0 = s'.regs i)
-    (hq : Q s.mem (s'.regs 0).toNat) : AllocRet rt stack nargs res s s' Q := by
-  refine ⟨s'.regs 0, s'.regs, s'.flags, s'.vregs, s.mem, ?_, MemFrame.refl _ _, hq⟩
-  obtain ⟨r, sp', pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
-  simp only at hsp hpc h18 h28 h29 hdz htp hfc hfs hm hres hq ⊢
-  subst hsp hpc hdz htp hfc hfs hm
-  simp only [retState, State.mk.injEq, and_true]
-  funext i
-  simp only [callRegs]
-  split
-  · rename_i hi; rcases hi with rfl | rfl | rfl <;> simp [h18, h28, h29]
-  · by_cases hl : i < (res (r 0)).length
-    · rw [← hres i hl]; simp [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hl]
-    · rw [List.getD_eq_getElem?_getD, List.getElem?_eq_none (by omega)]; rfl
-
-/-- What the allocation witnesses need of the runtime: the descriptor (`Size_ = 8`,
-`PtrBytes = 0`) and `n` writable zero heap bytes. -/
-def PHeap (n : Nat) (v : Memory) : Prop :=
-  v.readLE TYP 8 = 8 ∧ v.readLE (TYP + 8) 8 = 0 ∧ v.accessible HEAP n true = true ∧ ZeroBytes v HEAP n
-
-theorem pheap_w (n : Nat) (hn : n ≤ 16) : PHeap n (rtView rtW wmem) := by
-  refine ⟨by decide, by decide, ?_, ?_⟩
-  · rw [rtView_accessible]; exact Memory.accessible_mono _ (show wmem.accessible HEAP 0x10000 true = true by decide)
-      (Nat.le_refl _) (by simp [HEAP]; omega)
-  · intro i hi
-    rw [rtView_bytes (heap_inRanges 16 (by decide) |>.sub (by simp [HEAP]) (by simp [HEAP]; omega))]
-    simp only [wmem]
-    split
-    · rename_i h; simp only [HEAP, TYP] at h; omega
-    · rfl
-
-/-- The heap block a witness allocator returns: `n` writable zero bytes at `HEAP`, 16-aligned. -/
-theorem fresh_w (m : Memory) (n round : Nat) (hn : n ≤ round) (hr : round ≤ 16) (z hdr : Bool)
-    (hP : PHeap round (rtView rtW m)) : Fresh rtW m HEAP n round z hdr := by
-  obtain ⟨-, -, hacc, hz⟩ := hP
-  rw [rtView_accessible] at hacc
-  refine ⟨heap_inRanges _ (by omega), by simp [HEAP]; omega, hacc, fun _ => by decide, fun _ _ => by decide,
-    fun _ => ?_, hn⟩
-  intro i hi
-  have := ZeroBytes.of_rtView hz (heap_inRanges _ (by omega))
-  exact this i (by omega)
-
-/-- The arguments of an arm64 call (`X0, X1, …`) of the witness state: `args`. -/
-theorem wregs (L : List Nat) (i : Nat) (hi : i ≠ 28 ∧ i ≠ 30) :
-    (wstate (args L)).regs i = BitVec.ofNat 64 (L.getD i 0) := by
-  simp [wstate, args, hi.1, hi.2]
-
-/-- `CallOK`, the frame and the ABI facts are those of `wstate`. -/
-theorem mallocgc_impl : MallocgcContract (toy.link (at0 (constCode HEAP 0 0))) A0 rtW wstack
-    (fun a _ _ v => a = [16, 0, 1] ∧ PHeap 16 v) := by
-  rw [link_at0]
-  rintro s hpc ⟨⟨⟨h30a, h30b, -⟩, -⟩, ha, hP⟩
-  simp only [List.cons.injEq, and_true] at ha
-  obtain ⟨h0, h1, h2⟩ := ha
-  janus_run
-  apply allocRet_const <;> (try rfl) <;> (try simp [setReg])
-  intro _
-  have hb : blockSize 16 true = 16 := by decide
-  simp only [mallocgcObj, h0, h1, h2]
-  simpa [hb, mallocHdr, HEAP] using fresh_w s.mem 16 16 (by decide) (by decide) true false hP
-
-theorem mallocgc_satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady) (impl : List Segment),
-    MallocgcContract (toy.link impl) A0 rt wstack H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
-      MallocgcPre wstack s ∧ Ready H rt [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s :=
-  ⟨rtW, _, _, mallocgc_impl, wstate (args [16, 0, 1]), rfl,
-    ⟨wstate_callOK _ 3 (by decide), by simp [wstate, args, TYP, maxAlloc], Or.inl (by simp [wstate, args, TYP, maxAlloc])⟩,
-    ⟨by simp [wstate, args, TYP, maxAlloc], pheap_w 16 (by decide)⟩⟩
-
-theorem newobject_impl : NewobjectContract (toy.link (at0 (constCode HEAP 0 0))) A0 rtW wstack
-    (fun a _ _ v => a = [TYP] ∧ PHeap 8 v) := by
-  rw [link_at0]
-  rintro s hpc ⟨⟨⟨h30a, h30b, -⟩, -⟩, ha, hP⟩
-  simp only [List.cons.injEq, and_true] at ha
-  janus_run
-  apply allocRet_const <;> (try rfl) <;> (try simp [setReg])
-  intro _
-  have h1 := typSize_of s.mem hP.1
-  have h2 := typPtrBytes_of s.mem hP.2.1
-  have hb : blockSize 8 true = 8 := by decide
-  simp only [newobjectObj, ha, h1, typNoscan, typPtrBytes] at h2 ⊢
-  simpa [hb, h2, mallocHdr, HEAP] using fresh_w s.mem 8 8 (by decide) (by decide) true false hP
-
-theorem newobject_satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady) (impl : List Segment),
-    NewobjectContract (toy.link impl) A0 rt wstack H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
-      NewobjectPre wstack s ∧ Ready H rt [(s.regs 0).toNat] s :=
-  ⟨rtW, _, _, newobject_impl, wstate (args [TYP]), rfl,
-    ⟨wstate_callOK _ 1 (by decide), by simp [wstate, args, TYP, maxAlloc]; exact ⟨by decide, by decide⟩,
-      by simp [wstate, args, TYP, maxAlloc]; decide⟩,
-    ⟨by simp [wstate, args, TYP, maxAlloc], pheap_w 8 (by decide)⟩⟩
-
-theorem makeslice_impl : MakesliceContract (toy.link (at0 (constCode HEAP 0 0))) A0 rtW wstack
-    (fun a _ _ v => a = [TYP, 1, 1] ∧ PHeap 8 v) := by
-  rw [link_at0]
-  rintro s hpc ⟨⟨⟨h30a, h30b, -⟩, -⟩, ha, hP⟩
-  simp only [List.cons.injEq, and_true] at ha
-  obtain ⟨h0, h1, h2⟩ := ha
-  janus_run
-  apply allocRet_const <;> (try rfl) <;> (try simp [setReg])
-  intro _
-  have ht := typSize_of s.mem hP.1
-  have hpb := typPtrBytes_of s.mem hP.2.1
-  have hb : blockSize 8 true = 8 := by decide
-  simp only [makesliceObj, h0, h2, ht, typNoscan, typPtrBytes] at hpb ⊢
-  simpa [hb, hpb, mallocHdr, HEAP] using fresh_w s.mem 8 8 (by decide) (by decide) true false hP
-
-theorem makeslice_satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady) (impl : List Segment),
-    MakesliceContract (toy.link impl) A0 rt wstack H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
-      MakeslicePre wstack s ∧ Ready H rt [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s :=
-  ⟨rtW, _, _, makeslice_impl, wstate (args [TYP, 1, 1]), rfl,
-    ⟨wstate_callOK _ 3 (by decide), by simp [wstate, args, TYP, maxAlloc]; exact ⟨by decide, by decide⟩,
-      by simp [wstate, args, TYP, maxAlloc], by simp [wstate, args, TYP, maxAlloc], by simp [wstate, args, TYP, maxAlloc]; decide⟩,
-    ⟨by simp [wstate, args, TYP, maxAlloc], pheap_w 8 (by decide)⟩⟩
-
-theorem growslice8_impl : GrowsliceContract (toy.link (at0 (constCode HEAP 1 1))) A0 rtW wstack
-    (fun a _ _ v => a = [0, 1, 0, 1, TYP] ∧ PHeap 8 v) := by
-  rw [link_at0]
-  rintro s hpc ⟨⟨⟨⟨h30a, h30b, -⟩, -⟩, -⟩, ha, hP⟩
-  simp only [growsliceArgs, List.cons.injEq, and_true] at ha
-  obtain ⟨h0, h1, h2, h3, h4⟩ := ha
-  janus_run
-  apply allocRet_const <;> (try rfl) <;> (try simp [setReg])
-  · intro i hi
-    try simp only [List.length_cons, List.length_nil] at hi
-    have h1' : s.regs 1 = 1#64 := by apply BitVec.eq_of_toNat_eq; simp [h1]
-    have h2' : s.regs 2 = 0#64 := by apply BitVec.eq_of_toNat_eq; simp [h2]
-    rcases (show i = 0 ∨ i = 1 ∨ i = 2 by omega) with rfl | rfl | rfl <;> simp [h1', h2'] <;> decide
-  · simp only [growsliceObj, h0, h1, h2, h3]
-    have hg : growCap8 1 0 = 1 := by decide
-    refine ⟨by simpa [hg, HEAP] using fresh_w s.mem 8 8 (by decide) (by decide) false false hP,
-      fun i h => absurd h (by omega), fun i h => absurd h (by simp [hg])⟩
-
-theorem growslice8_satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady) (impl : List Segment),
-    GrowsliceContract (toy.link impl) A0 rt wstack H ∧ ∃ s : State, s.pc = BitVec.ofNat 64 A0 ∧
-      GrowslicePre wstack s ∧ Ready H rt (growsliceArgs s) s :=
-  ⟨rtW, _, _, growslice8_impl, wstate (args [0, 1, 0, 1, TYP]), rfl,
-    ⟨⟨wstate_callOK _ 5 (by decide), by simp [wstate, args, TYP, maxAlloc]; exact ⟨by decide, by decide⟩,
-      by simp [wstate, args, TYP, maxAlloc]; decide, by simp [wstate, args, TYP, maxAlloc]; decide, by simp [wstate, args, TYP, maxAlloc],
-      by simp [wstate, args, TYP, maxAlloc], by simp [wstate, args, TYP, maxAlloc], by simp [wstate, args, TYP, maxAlloc]⟩,
-      fun h => absurd h (by simp [wstate, args, TYP, maxAlloc])⟩,
-    ⟨by simp [wstate, args, TYP, maxAlloc], pheap_w 8 (by decide)⟩⟩
 
 /-! ## The write barrier (`gcWriteBarrierN`) -/
 

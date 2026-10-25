@@ -103,8 +103,11 @@ module, or in the proof file (then `janus verify` discloses its body under "Proo
 definitions"). A contract that no code could satisfy makes the theorem vacuous, so contracts are
 written to be satisfiable by the real runtime under the model's rules: for instance they never
 add memory regions (instructions cannot), see below. **Every contract needs a kernel-checked
-satisfiability witness** (an implementation, its parameters, and a call state where the theorem
-using it fires; `audit/round9/controls/NewPair_witness.lean`): before round 9 the allocation
+satisfiability witness** `theorem <name>_satisfiable` in `Janus/Contracts/<File>Sat.lean`
+(`<File>SatAmd64.lean`): an implementation, its parameters, and a call state satisfying the whole
+precondition (`AllocSat.lean`; for a whole theorem, `audit/round9/controls/NewPair_witness.lean`).
+`audit/round9/run-round9.sh` (row SAT) fails for any contract without one, except those listed as
+open in `audit/round9/sat-pending.txt`: before round 9 the allocation
 contracts had none and were false for every implementation (round 9 C1,
 `audit/round9/model/Unsat.lean`).
 
