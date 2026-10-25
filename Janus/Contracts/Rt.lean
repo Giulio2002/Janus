@@ -18,16 +18,17 @@ numbers) and memory. `RtContract` (arm64) and `RtContract64` (amd64) turn an `Rt
 * **the call** (`CallOK`/`CallOK64`): an admissible return address, an aligned stack pointer and
   the stack window `[SP - stack, SP + 8 + 8·nargs)` writable, the memory the function reads (the
   spec's `reads`) outside the callee's part of it; when the spec asks for it, the
-  stack guard of `g` below `SP - adj` (`GuardOK`: the function's own stack check falls through,
-  so it neither grows nor moves the stack);
+  stack guard of `g` below `SP - adj` and outside the callee's window (`GuardOK`: the function's
+  own stack check falls through, so it neither grows nor moves the stack);
 * **readiness** (round 9 C1): when the spec allocates or otherwise depends on the runtime's own
   state, `Ready H rt args s` for the caller-quantified `H : RtReady`;
 * **the return**: to the return address, with `SP`, `g`, the frame pointer (and on arm64 `R18`)
   preserved, results `r₀, r₁, r₂` in the first three result registers (`X0–X2`; `RAX, RBX,
   RCX`), every other register, the flags and the vector registers unspecified;
-* **memory**: changed only inside the runtime-owned ranges `rt`, the callee's stack window and
-  the spec's `writes args` (e.g. a caller's `tmpBuf`), regions unchanged, and the spec's `post`
-  relates the old memory, the results and the new memory.
+* **memory**: changed only inside the runtime-owned ranges `rt` (unless the spec says the function
+  writes none, `rtWrites = false`), the callee's stack window and the spec's `writes args` (e.g.
+  a caller's `tmpBuf`), regions unchanged, and the spec's `post` relates the old memory, the
+  results and the new memory.
 -/
 
 namespace Janus.Contracts
@@ -49,9 +50,20 @@ structure RtSpec where
   guard : Option Nat := none
   /-- Whether the precondition includes the runtime's readiness `H` (round 9 C1). -/
   ready : Bool := true
+  /-- Whether the function may write the runtime-owned ranges `rt` (`false`: only its stack window
+  and `writes`, e.g. `decoderune`). -/
+  rtWrites : Bool := true
   /-- The postcondition: the runtime-owned ranges, the argument words, the old memory, the three
   result words and the new memory. -/
   post : List (Nat × Nat) → List Nat → Janus.Arm64.Memory → Nat → Nat → Nat → Janus.Arm64.Memory → Prop
+
+/-- The runtime-owned ranges a function may write: `rt`, or none. -/
+def rtIf (b : Bool) (rt : List (Nat × Nat)) : List (Nat × Nat) := if b then rt else []
+
+@[janus_exec, janus_post, janus64_exec, janus64_post] theorem rtIf_true (rt : List (Nat × Nat)) :
+    rtIf true rt = rt := rfl
+@[janus_exec, janus_post, janus64_exec, janus64_post] theorem rtIf_false (rt : List (Nat × Nat)) :
+    rtIf false rt = [] := rfl
 
 /-- `n` words from `f i` for `i = k, k+1, …` (a cons list, so that literal indices reduce). -/
 def wordsFrom (f : Nat → Nat) : Nat → Nat → List Nat
@@ -77,14 +89,18 @@ attribute [janus_exec, janus_post] argWords
     (s : State) : Prop :=
   CallOK s stack sp.nargs ∧ sp.pre (argWords s sp.nargs) s.mem ∧
     (∀ r ∈ sp.reads (argWords s sp.nargs) s.mem, Outside r.1 r.2 (calleeStack s stack sp.nargs)) ∧
-    (match sp.guard with | some adj => Janus.Spec.GuardOK s adj | none => True) ∧
+    (match sp.guard with
+      | some adj => Janus.Spec.GuardOK s adj ∧
+          Outside ((s.regs 28).toNat + 16) 8 (calleeStack s stack sp.nargs)
+      | none => True) ∧
     (if sp.ready then Ready H rt (argWords s sp.nargs) s else True)
 
 /-- The postcondition of `RtContract` (arm64). -/
 @[reducible] def RtPost (rt : List (Nat × Nat)) (stack : Nat) (sp : RtSpec) (s s' : State) : Prop :=
   ∃ (r0 r1 r2 : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
     s' = retState s junk [r0, r1, r2] f v m ∧
-      MemFrame s.mem m (rt ++ calleeStack s stack sp.nargs ++ sp.writes (argWords s sp.nargs) s.mem) ∧
+      MemFrame s.mem m (rtIf sp.rtWrites rt ++ calleeStack s stack sp.nargs ++
+        sp.writes (argWords s sp.nargs) s.mem) ∧
       sp.post rt (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat m
 
 /-- **The arm64 contract of `sp` at `addr`**: a `Summary` of the linked program (see the module
@@ -100,7 +116,8 @@ theorem RtPost.intro {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s' 
     (hsp : s'.sp = s.sp) (hpc : s'.pc = s.regs 30) (h18 : s'.regs 18 = s.regs 18)
     (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid)
     (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
-    (hf : MemFrame s.mem s'.mem (rt ++ calleeStack s stack sp.nargs ++ sp.writes (argWords s sp.nargs) s.mem))
+    (hf : MemFrame s.mem s'.mem (rtIf sp.rtWrites rt ++ calleeStack s stack sp.nargs ++
+      sp.writes (argWords s sp.nargs) s.mem))
     (hq : sp.post rt (argWords s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 1).toNat (s'.regs 2).toNat s'.mem) :
     RtPost rt stack sp s s' := by
   refine ⟨s'.regs 0, s'.regs 1, s'.regs 2, s'.regs, s'.flags, s'.vregs, s'.mem, ?_, hf, hq⟩
@@ -139,7 +156,10 @@ def GuardOK64 (s : State) (adj : Nat) : Prop :=
     (s : State) : Prop :=
   CallOK64 s stack sp.nargs ∧ sp.pre (argWords64 s sp.nargs) s.mem ∧
     (∀ r ∈ sp.reads (argWords64 s sp.nargs) s.mem, Outside r.1 r.2 (calleeStack64 s stack sp.nargs)) ∧
-    (match sp.guard with | some adj => GuardOK64 s adj | none => True) ∧
+    (match sp.guard with
+      | some adj => GuardOK64 s adj ∧
+          Outside ((s.regs 14).toNat + 16) 8 (calleeStack64 s stack sp.nargs)
+      | none => True) ∧
     (if sp.ready then Ready64 H rt (argWords64 s sp.nargs) s else True)
 
 /-- The postcondition of `RtContract64`. -/
@@ -147,7 +167,8 @@ def GuardOK64 (s : State) (adj : Nat) : Prop :=
     Prop :=
   ∃ (r0 r1 r2 : W64) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
     s' = retState64 s junk [r0, r1, r2] f x yh m ∧
-      MemFrame s.mem m (rt ++ calleeStack64 s stack sp.nargs ++ sp.writes (argWords64 s sp.nargs) s.mem) ∧
+      MemFrame s.mem m (rtIf sp.rtWrites rt ++ calleeStack64 s stack sp.nargs ++
+        sp.writes (argWords64 s sp.nargs) s.mem) ∧
       sp.post rt (argWords64 s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat m
 
 /-- How a proof from a function's own code ends (amd64): the final state returns to the return
@@ -157,7 +178,8 @@ theorem RtPost64.intro {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s
     (hrip : s'.rip = retAddrOf s) (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5)
     (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase)
     (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr)
-    (hf : MemFrame s.mem s'.mem (rt ++ calleeStack64 s stack sp.nargs ++ sp.writes (argWords64 s sp.nargs) s.mem))
+    (hf : MemFrame s.mem s'.mem (rtIf sp.rtWrites rt ++ calleeStack64 s stack sp.nargs ++
+      sp.writes (argWords64 s sp.nargs) s.mem))
     (hq : sp.post rt (argWords64 s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 3).toNat (s'.regs 1).toNat s'.mem) :
     RtPost64 rt stack sp s s' := by
   refine ⟨s'.regs 0, s'.regs 3, s'.regs 1, s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, ?_, hf, hq⟩
@@ -213,6 +235,7 @@ namespace Janus.Contracts
 literal list: one conjunct per element, so that the executors prove a call's precondition
 fact by fact. -/
 attribute [janus_exec, janus_post, janus64_exec, janus64_post] List.forall_mem_cons List.forall_mem_nil
+  List.nil_append
   Janus.outside_cons Janus.outside_nil
 
 end Janus.Contracts

@@ -163,7 +163,7 @@ theorem loop (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (p n :
              intro a k' h
              simp only [R, outside_append, outside_cons, outside_nil, and_true] at h ⊢
              obtain ⟨hrt, h2, h3⟩ := h
-             exact ⟨⟨hrt, h2, h3⟩, hrt, by omega, by omega⟩)
+             exact ⟨⟨hrt, h2, h3⟩, by omega, by omega⟩)
           | (obtain ⟨-, hr1⟩ := hpost; omega)
           | (obtain ⟨hr0, hr1⟩ := hpost
              have hrs : rangeStep (strBytes s.mem p.toNat n.toNat) (S.regs 2).toNat =
@@ -222,7 +222,7 @@ theorem loop (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (p n :
              intro a k' h
              simp only [R, outside_append, outside_cons, outside_nil, and_true] at h ⊢
              obtain ⟨hrt, h2, h3⟩ := h
-             exact ⟨⟨hrt, h2, h3⟩, hrt, by omega, by omega⟩)
+             exact ⟨⟨hrt, h2, h3⟩, by omega, by omega⟩)
           | (obtain ⟨-, hr1⟩ := hpost; omega)
           | (obtain ⟨hr0, hr1⟩ := hpost
              have hrs : rangeStep (strBytes s.mem p.toNat n.toNat) (S.regs 2).toNat =

@@ -97,46 +97,11 @@ theorem r4 (b0 b1 b2 b3 : Nat) (h0 : b0 < 256) (h1 : b1 < 256) (h2 : b2 < 256) (
     exact this
   rw [e1, e2, e3]
 
-private theorem subRes32 (x y : BitVec 32) :
-    (BitVec.ofNat 32 (x.toNat + (~~~y).toNat + true.toNat)).toNat =
-      (x.toNat + 4294967296 - y.toNat) % 4294967296 := by
-  simp only [BitVec.toNat_ofNat, BitVec.toNat_not, Bool.toNat_true]
-  have := y.isLt; congr 1; omega
-
-theorem toInt32_cond (x : BitVec 32) :
-    x.toInt = if x.toNat < 2147483648 then (x.toNat : Int) else (x.toNat : Int) - 4294967296 := by
-  rw [BitVec.toInt_eq_toNat_cond]; by_cases h : x.toNat < 2147483648
-  · rw [ite_eq_left_iff.mpr (fun h' => absurd (by omega) h'), ite_eq_left_iff.mpr (fun h' => absurd h h')]
-  · rw [ite_eq_right (by omega), ite_eq_right h]; rfl
-
-private theorem decide_beq_decide (A B : Prop) [Decidable A] [Decidable B] :
-    (decide A == decide B) = decide (A ↔ B) := by
-  by_cases hA : A <;> by_cases hB : B <;> simp [hA, hB]
-
-/-- The signed condition of a 32-bit `CMP` (`N = V`: `GE`), as a comparison of the operands. -/
-theorem sub_flags_nv32 (x y : BitVec 32) :
-    ((addSub x y true).2.n == (addSub x y true).2.v) = decide (y.toInt ≤ x.toInt) := by
-  simp only [addSub, addWithCarry, ite_true, BitVec.msb_eq_decide]
-  rw [toInt32_cond (BitVec.ofNat 32 _), subRes32, toInt32_cond (~~~y), toInt32_cond x, toInt32_cond y]
-  have := x.isLt; have := y.isLt
-  simp only [Bool.toNat_true, BitVec.toNat_not, Nat.reducePow, Nat.reduceSub, decide_not]
-  rw [← decide_not, decide_beq_decide]
-  apply decide_eq_decide.mpr
-  by_cases h : y.toNat ≤ x.toNat
-  · rw [show x.toNat + 4294967296 - y.toNat = (x.toNat - y.toNat) + 4294967296 by omega, Nat.add_mod_right,
-      Nat.mod_eq_of_lt (by omega)]
-    split <;> split <;> split <;> split <;> omega
-  · rw [Nat.mod_eq_of_lt (by omega)]
-    split <;> split <;> split <;> split <;> omega
-
-theorem toInt32_of_lt (x : BitVec 32) (h : x.toNat < 2147483648) : x.toInt = (x.toNat : Int) := by
-  rw [toInt32_cond, if_pos h]
-
 set_option maxHeartbeats 20000000 in
 theorem correctness (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (hst : 24 ≤ stack) :
     RtContract Extracted.program Extracted.entry rt stack H decoderuneSpec := by
   rintro s hpc ⟨⟨hra, hrb, hal, hsb, -, hsa, hacc⟩, ⟨⟨hpb, hrd⟩, hk⟩, hout, hg, -⟩
-  obtain ⟨hg1, hg2, hg3⟩ := (hg : GuardOK s 0)
+  obtain ⟨⟨hg1, hg2, hg3⟩, -⟩ := (hg : GuardOK s 0 ∧ _)
   simp only [decoderuneSpec, argWords, wordsFrom_succ, wordsFrom_zero, arg, List.getD_cons_zero, List.getD_cons_succ, Nat.reduceAdd, Nat.zero_add, List.mem_cons, List.not_mem_nil, or_false, forall_eq, calleeStack,
     outside_cons, outside_nil, and_true] at hpb hrd hk hout ⊢
   simp only [decoderuneSpec] at hacc hsa ⊢
@@ -146,7 +111,7 @@ theorem correctness (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (hst : 
   · have hr := hrd hn0
     janus_run [h1i, h2i, and_sshr_sub]
     all_goals (apply RtPost.intro <;> (try rfl) <;> (try simp only [setReg_apply]; done))
-    all_goals (try (simp only [calleeStack, List.append_nil]; janus_frame))
+    all_goals (try (simp only [calleeStack, List.append_nil, List.nil_append, decoderuneSpec, Bool.false_eq_true, ite_false]; janus_frame))
     all_goals (simp only [argWords, wordsFrom_succ, wordsFrom_zero, List.getD_cons_zero, List.getD_cons_succ,
       Nat.reduceAdd, Nat.zero_add, setReg_apply, Nat.reduceEqDiff, ↓reduceIte])
     all_goals
@@ -180,7 +145,7 @@ theorem correctness (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (hst : 
       first | omega | (simp only [true_and, and_true]; omega)
   · janus_run [h1i, h2i, and_sshr_sub]
     all_goals (apply RtPost.intro <;> (try rfl) <;> (try simp only [setReg_apply]; done))
-    all_goals (try (simp only [calleeStack, List.append_nil]; janus_frame))
+    all_goals (try (simp only [calleeStack, List.append_nil, List.nil_append, decoderuneSpec, Bool.false_eq_true, ite_false]; janus_frame))
     all_goals (simp only [argWords, wordsFrom_succ, wordsFrom_zero, List.getD_cons_zero, List.getD_cons_succ,
       Nat.reduceAdd, Nat.zero_add, setReg_apply, Nat.reduceEqDiff, ↓reduceIte])
     all_goals
@@ -239,7 +204,9 @@ theorem satisfiable : ∃ (rt : List (Nat × Nat)) (H : RtReady),
   · show ∀ r ∈ [(arg (argWords s0 3) 0, arg (argWords s0 3) 1)], Outside r.1 r.2 _
     rw [ha 0, ha 1]
     simp [Janus.Contracts.Sat.outside_zero]
-  · show GuardOK s0 0
-    refine ⟨by decide, by decide, by decide⟩
+  · show GuardOK s0 0 ∧ Outside _ 8 _
+    refine ⟨⟨by decide, by decide, by decide⟩, ?_⟩
+    simp only [calleeStack, s0, Janus.Contracts.Sat.wstate, outside_cons, outside_nil]
+    decide
 
 end Proof

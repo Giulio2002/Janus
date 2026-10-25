@@ -235,13 +235,14 @@ def intstringSpec : RtSpec where
 
 /-- **`runtime.decoderune(s, k)`**: `(r, pos) = decodeRune (bytes of s) k`, `r` in the low 32
 bits of the first result register (a `rune`; the upper half is unspecified, the caller
-sign-extends). Needs only its stack check to fall through, not `H`. Words: `s.ptr, s.len, k`
+sign-extends). Writes only its stack window. Needs only its stack check to fall through, not `H`. Words: `s.ptr, s.len, k`
 (`k < 2^63`, a non-negative `int`). -/
 def decoderuneSpec : RtSpec where
   nargs := 3
   pre a m := StrIn m (arg a 0) (arg a 1) ∧ arg a 2 < 2 ^ 63
   guard := some 0
   ready := false
+  rtWrites := false
   reads a _ := [(arg a 0, arg a 1)]
   post _ a m0 r0 r1 _ _ :=
     r0 % 2 ^ 32 = (decodeRune (strBytes m0 (arg a 0) (arg a 1)) (arg a 2)).1 ∧
@@ -255,6 +256,7 @@ def countrunesSpec : RtSpec where
   pre a m := StrIn m (arg a 0) (arg a 1)
   guard := some 64
   ready := false
+  rtWrites := false
   reads a _ := [(arg a 0, arg a 1)]
   post _ a m0 r0 _ _ _ := r0 = countRunes (strBytes m0 (arg a 0) (arg a 1))
 
