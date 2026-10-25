@@ -3,9 +3,9 @@
 # -j N / --jobs N / -jN from the arguments into PAR_ARGS), wrap each independent block in
 # `par_run 'shell code'`, and call `par_wait` before the script's verdict.
 #
-#   -j N        run up to N blocks at once. Default: $JANUS_JOBS, else min(cores / 4,
-#               (MemAvailable - 40 GiB) / 20 GiB, 2), at least 1. Before each launch MemAvailable is
-#               checked again: while less than 20 GiB above the 40 GiB headroom is free, the next
+#   -j N        run up to N blocks at once. Default: $JANUS_JOBS, else min(cores / 6,
+#               (MemAvailable - 40 GiB) / 10 GiB, 8), at least 1. Before each launch MemAvailable is
+#               checked again: while less than 10 GiB above the 40 GiB headroom is free, the next
 #               block waits for a running one to finish (memory, not cores, is what concurrent
 #               janus verifies exhaust).
 #   -j 1        run every block inline, in order, exactly as a plain serial script.
@@ -16,19 +16,24 @@
 # (it fails under `set -e`, or is killed) is recorded in `broken` too. Blocks must not depend on each
 # other's side effects; a block that sets up and removes a shared directory does both itself.
 
-# Memory budget: a janus verify can hold ~20 GB (a cold kernel replay of the framework, the
-# proof's Lean process, the auditor), and the host keeps 40 GB of headroom for everything else.
-PAR_JOB_MEM_KB=$((20 * 1024 * 1024))
+# Memory budget per block: the largest measured janus verify peaks at 4.8 GiB (the ClearWords
+# proof; a cold kernel replay of the framework 3.0 GiB, a warm verify 0.2-0.5 GiB; docs/TESTING.md
+# "Measured peaks"), so a block is budgeted 10 GiB, which is also its cgroup limit under memguard
+# ($JANUS_JOB_MEM, default 10G): slots x slot limit stays within MemAvailable minus the 40 GiB of
+# headroom the host keeps for everything else.
+PAR_JOB_MEM_KB=$((10 * 1024 * 1024))
 PAR_HEADROOM_KB=$((40 * 1024 * 1024))
-# At most this many jobs by default (host rule: at most 2 heavy jobs at once); -j/JANUS_JOBS override.
-PAR_MAX_DEFAULT_JOBS=2
+# At most this many jobs by default, and one per 6 cores (each Lean job runs several threads:
+# LEAN_NUM_THREADS, the kernel replay's 2 threads); -j/JANUS_JOBS override.
+PAR_MAX_DEFAULT_JOBS=8
+PAR_CORES_PER_JOB=6
 
 par_mem_available_kb() { awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 0; }
 
-# min(cores / 4, (MemAvailable - 40 GiB) / 20 GiB, 2), at least 1.
+# min(cores / 6, (MemAvailable - 40 GiB) / 10 GiB, 8), at least 1.
 par_default_jobs() {
   local n mem
-  n=$(( $(nproc 2>/dev/null || echo 4) / 4 ))
+  n=$(( $(nproc 2>/dev/null || echo 4) / PAR_CORES_PER_JOB ))
   [ "$n" -gt "$PAR_MAX_DEFAULT_JOBS" ] && n=$PAR_MAX_DEFAULT_JOBS
   mem=$(( ($(par_mem_available_kb) - PAR_HEADROOM_KB) / PAR_JOB_MEM_KB ))
   [ "$mem" -lt "$n" ] && n=$mem
@@ -58,11 +63,11 @@ par_init() {
   fi
   declare -p broken >/dev/null 2>&1 || broken=()
   # With scripts/lib/memguard.sh (cgroup v2 memory limits) loaded, every parallel block runs under
-  # a job limit of $JANUS_JOB_MEM (default 20G, the budget above); janus nests its per-process
+  # a job limit of $JANUS_JOB_MEM (default 10G, the budget above); janus nests its per-process
   # limits inside it. A block that hits it is OOM-killed inside its cgroup only and counts as
   # broken. Without memguard the blocks run unguarded (the admission check still applies).
   PAR_GUARD=""
-  PAR_JOB_MEM="${JANUS_JOB_MEM:-20G}"
+  PAR_JOB_MEM="${JANUS_JOB_MEM:-10G}"
   if [ "$PAR_JOBS" -gt 1 ] && type memguard_run >/dev/null 2>&1; then
     PAR_GUARD=1
   fi
