@@ -2,7 +2,8 @@
 # Check and verify every amd64 example proof (examples/proofs-amd64/<Function>/Proof.lean)
 # against its extraction in artifacts/amd64/<Function>, which scripts/build-examples-amd64.sh
 # (run first) builds and extracts.
-# Also verifies the extra `Proof.panics` theorems of Div and Get. Exits non-zero on any failure.
+# Also verifies the extra theorems `Proof.panics` (Div, Get, ...), `Proof.exact`, `Proof.outOfRange`
+# and `Proof.faults` where a proof file has them. Exits non-zero on any failure.
 # Usage: scripts/verify-amd64-examples.sh [-j N] [Function ...]   (default: every function)
 #   -j N   verify up to N functions at once (default: $JANUS_JOBS, else the number of cores
 #          capped by memory, see scripts/lib/parallel.sh); -j 1 verifies them one by one. The
@@ -36,7 +37,10 @@ verify() {
 verify_function() {
   local f=$1
   verify "$f" Proof.correctness
-  if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then verify "$f" Proof.panics; fi
+  local thm
+  for thm in panics exact outOfRange faults; do
+    if grep -q "^theorem $thm" "examples/proofs-amd64/$f/Proof.lean"; then verify "$f" "Proof.$thm"; fi
+  done
   return 0
 }
 funcs=("$@")

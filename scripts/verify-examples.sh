@@ -30,7 +30,8 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
      Triangle GotoSum Find2D RowsWith Log2 TotalMeters TotalFeet Fact SumBelow ReverseArray DivMod10
      SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
-     Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder)
+     Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
+     I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird SpanSum MinF64 MaxF64 MinStr)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
@@ -73,9 +74,10 @@ verify_one() {
   if bin/janus verify "$out" --proof "examples/proofs/$n.lean" ${extra[@]+"${extra[@]}"} > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-9s ok  %6.1fs\n' "$n" "$t" | tee "$lines/$n"
-    # further theorems of the same proof file (F64ToU64's `exact` and `saturation`, ...)
+    # further theorems of the same proof file (F64ToU64's `exact` and `saturation`, LoadThird's
+    # `faults`, ...)
     local thm
-    for thm in $(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}'); do
+    for thm in $(grep -oE '^theorem (exact|saturation|faults)' "examples/proofs/$n.lean" | awk '{print $2}'); do
       if bin/janus verify "$out" --proof "examples/proofs/$n.lean" --theorem "Proof.$thm" \
           ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
         printf '%-9s ok  (Proof.%s)\n' "$n" "$thm" | tee -a "$lines/$n"
