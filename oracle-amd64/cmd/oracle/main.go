@@ -130,6 +130,7 @@ func cmdGen(args []string) {
 	condK := fs.Int("cond", 8, "flag combinations per state for conditional classes")
 	fpK := fs.Int("fpk", 3, "MXCSR settings per state for the SSE floating-point classes")
 	fpOnly := fs.Bool("fp-only", false, "generate only the SSE floating-point specs (gen.FPSpecs, the FP edge families)")
+	v3Only := fs.Bool("v3-only", false, "generate only the GOAMD64=v3 extension specs (gen.V3Specs, gen.V3VexSpecs, the FMA edge family)")
 	nEdge := fs.Int("edge", 400, "rounds of the hand-targeted edge families (gen.Edges)")
 	seed := fs.Uint64("seed", 1, "random seed")
 	out := fs.String("o", "gen.jsonl", "output")
@@ -138,9 +139,13 @@ func cmdGen(args []string) {
 	r := rand.New(rand.NewPCG(*seed, 0x6a616e7573))
 	cw := newCaseWriter(*out, *first, *condK)
 	cw.fpK = *fpK
-	specs, vexSpecs := gen.Specs, gen.VexSpecs
+	specs, vexSpecs, v3VexSpecs := gen.Specs, gen.VexSpecs, gen.V3VexSpecs
 	if *fpOnly {
-		specs, vexSpecs = gen.FPSpecs, gen.FPVexSpecs
+		specs, vexSpecs, v3VexSpecs = gen.FPSpecs, gen.FPVexSpecs, nil
+		*nEdge, *ng = 0, 0
+	}
+	if *v3Only {
+		specs, vexSpecs = gen.V3Specs, nil
 		*nEdge, *ng = 0, 0
 	}
 	for _, sp := range specs {
@@ -167,6 +172,24 @@ func cmdGen(args []string) {
 				b = gen.VexTargeted(r, sp)
 			}
 			cw.add(r, "gen/"+gen.Classify(b), b, 1)
+		}
+	}
+	for _, sp := range v3VexSpecs {
+		for i := 0; i < *n; i++ {
+			b := gen.V3Targeted(r, sp)
+			for !gen.OK(b) {
+				b = gen.V3Targeted(r, sp)
+			}
+			cw.add(r, "gen/"+gen.Classify(b), b, 1)
+		}
+	}
+	if *v3Only || *nEdge > 0 {
+		rounds := max(*nEdge/8, 1)
+		if *v3Only {
+			rounds = max(*n/4, 1)
+		}
+		for _, e := range gen.FMAEdges(r, rounds) {
+			cw.emit(e.Class, e.Bytes, e.State)
 		}
 	}
 	for _, e := range gen.Edges(r, *nEdge) {

@@ -260,6 +260,9 @@ Go 1.26.0. Proofs:
 | `MakeAdder` | an escaping closure: a fresh funcval from `runtime.newobject` (contract) holding `MakeAdder.func1` and the captured `a` | ✓ | ✓ |
 | `Slice3` | `xs[i:j:k]`: the new header; **panics** (`runtime.panicBounds`) iff not `0 ≤ i ≤ j ≤ k ≤ cap` | ✓ | ✓ |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
+| `BitMix` | `GOAMD64=v3` (`examples/basic/v3`): `(x &^ y) ^ (x & (x-1)) ^ (y << (n & 63))` through BMI `ANDN`, `SHLX`, `BLSR` | | ✓ |
+| `Fma` | `GOAMD64=v3`: `math.FMA(a, b, c)` as one `VFMADD231SD` is IEEE 754 `fusedMultiplyAdd` rounded once (the arm64 `FMADD` specification), whenever the result is architecturally defined | | ✓ |
+| `LoadBE` | `GOAMD64=v3`: `binary.BigEndian.Uint64` as one `MOVBE` is the big-endian value of the 8 bytes | | ✓ |
 
 Each file starts with a plain-English summary of the theorem (the arm64 ones under **Guarantee** and
 **What it rules out**). Every proof uses only axioms from the allow-list `propext`, `Quot.sound`,

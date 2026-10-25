@@ -14,6 +14,7 @@ type fpInfo struct {
 	width  int  // 32 or 64: the floating-point lane width of the XMM operands
 	packed bool // fill every lane, not only the low one
 	gprSrc bool // CVTSI2SD/SS: the source is an integer register or memory operand
+	fma    bool // scalar FMA3 (three sources, setupFMA)
 }
 
 var fpClasses = map[string]fpInfo{}
