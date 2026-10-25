@@ -2,19 +2,21 @@ import Janus
 import Extracted
 
 /-! `math/big.addMulVVWW(z, x, y []Word, m, a Word) (c Word)` on amd64 (Go assembly, ABI0), the
-ADX/BMI2 path (`hasADX`): `z = x + y·m + a` over `n = len(z)` words, with two interleaved carry
-chains (`MULXQ`, `ADCXQ` carrying through `CF`, `ADOXQ` through `OF`), unrolled eight times
-(`alt8`) after `n mod 8` single steps (`alt1`).
+both paths: on CPUs with ADX (`hasADX`) `z = x + y·m + a` is computed with two interleaved
+carry chains (`MULXQ`, `ADCXQ` carrying through `CF`, `ADOXQ` through `OF`), unrolled eight times
+(`alt8`) after `n mod 8` single steps (`alt1`); otherwise with `MULQ`/`ADDQ`/`ADCQ`, unrolled four
+times after `n mod 4` single steps.
 
 **Guarantee** (`correctness`). For every length `n` and every `z`, `x`, `y` of `n` words (`z`
 writable, `x` and `y` readable, `z` either equal to `x` or disjoint from it, disjoint from `y`
-and from the 104-byte frame), on a CPU where `math/big.hasADX` is set, the call returns, its
+and from the 104-byte frame), whatever `math/big.hasADX` holds, the call returns, its
 result word `c` and the new `z` satisfy `z + 2^(64n)·c = x + y·m + a` (little-endian `n`-word
 numbers), and it writes nothing but `z` and the result slot (`Post`).
 
 **How.** One invariant at the three loop points, `z[0..i) + 2^(64i)·BX = x[0..i) + m·y[0..i) + a`
 with `x[i..n)` and `y` unchanged (`OnlyWrites` on `z[0..i)`): `atHead1`, `loop1` (induction on the
-single steps left), `atHead8`, `loop8` (induction on the 8-word blocks left). Each step's carry
+single steps left), `atHead8`, `loop8` (induction on the 8-word blocks left), and their `MULQ`
+counterparts `matHead1`, `mloop1`, `matHead4`, `mloop4` (carry in `SI`, 4-word blocks). Each step's carry
 arithmetic is closed by `janus64_arith` (the reflective carry procedure) on the step's words, and
 `step_combine` lifts it to the whole prefix. -/
 
@@ -390,26 +392,341 @@ theorem atHead1 (s0 : State) (ret : Nat) (hret : RetAddr Extracted.program ret)
     · exact how
     · simpa [setRegF_apply] using hinv
 
+/-! ## The `MULQ` path (CPUs without ADX) -/
+
+/-- The loop points of the `MULQ` path: `loop1` head (`TESTQ R11, R11`) and body, `loop4` head
+(`TESTQ DI, DI`) and body. -/
+abbrev mhead1 : Nat := Extracted.entry + 0x36
+abbrev mbody1 : Nat := Extracted.entry + 0x3b
+abbrev mhead4 : Nat := Extracted.entry + 0x67
+abbrev mbody4 : Nat := Extracted.entry + 0x70
+
+/-- 32 bytes as 4 little-endian limbs. -/
+theorem readLE_32 (m : Memory) (a : Nat) :
+    m.readLE a 32 = m.readLE a 8 + 2 ^ 64 * m.readLE (a + 8) 8 + 2 ^ 128 * m.readLE (a + 16) 8 +
+      2 ^ 192 * m.readLE (a + 24) 8 := by
+  have h := fun b k l => Janus.Arm64.Memory.readLE_add m b k l
+  rw [show 32 = 8 + 24 from rfl, h, show 24 = 8 + 16 from rfl, h, show 16 = 8 + 8 from rfl, h]
+  simp only [Nat.add_assoc, Nat.mul_add, ← Nat.mul_assoc, ← Nat.pow_add]
+
+set_option maxHeartbeats 8000000 in
+theorem mloop4 (s0 : State) (ret : Nat) (hret : RetAddr Extracted.program ret)
+    (z x y n m a : Nat) (hm : m < 2 ^ 64) (hzb : z + 8 * n ≤ 2 ^ 48)
+    (hxb : x + 8 * n ≤ 2 ^ 48) (hyb : y + 8 * n ≤ 2 ^ 48)
+    (hz : s0.mem.accessible z (8 * n) true = true) (hx : s0.mem.accessible x (8 * n) false = true)
+    (hy : s0.mem.accessible y (8 * n) false = true)
+    (hzx : z = x ∨ z + 8 * n ≤ x ∨ x + 8 * n ≤ z) (hzy : z + 8 * n ≤ y ∨ y + 8 * n ≤ z)
+    (hzf : z + 8 * n ≤ (s0.regs 4).toNat ∨ (s0.regs 4).toNat + 104 ≤ z)
+    (hfb : (s0.regs 4).toNat + 104 ≤ 2 ^ 48)
+    (hfacc : s0.mem.accessible (s0.regs 4).toNat 104 true = true)
+    (hra : s0.mem.readLE (s0.regs 4).toNat 8 = ret) :
+    ∀ k (S : State) (i : Nat), i + 4 * (k + 1) = n →
+      S.rip = BitVec.ofNat 64 mbody4 → S.regs 8 = BitVec.ofNat 64 (x + 8 * i) →
+      S.regs 9 = BitVec.ofNat 64 (y + 8 * i) → S.regs 10 = BitVec.ofNat 64 (z + 8 * i) →
+      S.regs 7 = BitVec.ofNat 64 (k + 1) → S.regs 3 = BitVec.ofNat 64 m →
+      S.regs 4 = s0.regs 4 → S.regs 5 = s0.regs 5 → S.fsBase = s0.fsBase → S.df = s0.df →
+      Janus.Spec.OnlyWrites s0.mem S.mem z (8 * i) →
+      S.mem.readLE z (8 * i) + 2 ^ (64 * i) * (S.regs 6).toNat =
+        s0.mem.readLE x (8 * i) + m * s0.mem.readLE y (8 * i) + a →
+      Reaches (Extracted.program.withExit ret) S
+        (IsReturn fun s' => ABIReturn0 s0 s' ∧ Post z x y n m a s0 s') := by
+  intro k
+  induction k with
+  | zero =>
+    intro S i hn hpc h8 h9 h10 h6 h2 h4 h5 hfs hdf how hinv
+    have hzS := accessible_of_onlyWrites how hz
+    have hxS := accessible_of_onlyWrites how hx
+    have hyS := accessible_of_onlyWrites how hy
+    have hfaccS := accessible_of_onlyWrites how hfacc
+    have hraS : S.mem.readLE (s0.regs 4).toNat 8 = ret := by
+      rw [readLE_of_onlyWrites how (by omega), hra]
+    have hru := hret.user
+    janus64_run
+    obtain rfl : n = i + 4 := by omega
+    refine ⟨hfs, ?_, ?_, fun b hb hb' => ?_⟩
+    · simp only
+      rw [readLE_words, readLE_words, readLE_words, show 64 * (i + 4) = 64 * i + 256 by omega,
+        Nat.pow_add, show 8 * 4 = 32 from rfl,
+        ← readLE_of_onlyWrites how (a := x + 8 * i) (k := 32) (by omega),
+        ← readLE_of_onlyWrites how (a := y + 8 * i) (k := 32) (by omega)]
+      simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
+      refine step_combine _ _ _ _ _ _ _ _ _ _ _ _ hinv ?_
+      simp only [readLE_32]
+      simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
+        Janus.Arm64.Memory.readLE_writeLE_self]
+      janus64_arith
+    · simp only [Janus.Arm64.Memory.regions_writeLE]; exact how.1
+    · simp only
+      simp (disch := omega) only [Janus.Arm64.Memory.bytes_writeLE_outside]
+      exact how.2 b (by omega)
+  | succ k ih =>
+    intro S i hn hpc h8 h9 h10 h6 h2 h4 h5 hfs hdf how hinv
+    have hzS := accessible_of_onlyWrites how hz
+    have hxS := accessible_of_onlyWrites how hx
+    have hyS := accessible_of_onlyWrites how hy
+    have hfaccS := accessible_of_onlyWrites how hfacc
+    janus64_run until [mbody4]
+    refine ih _ (i + 4) (by omega) rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10]; omega) | (simp [setRegF_apply, h2, h4, h5, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10]; omega) | (simp [setRegF_apply, h2, h4, h5, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10]; omega) | (simp [setRegF_apply, h2, h4, h5, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10]; omega) | (simp [setRegF_apply, h2, h4, h5, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10]; omega) | (simp [setRegF_apply, h2, h4, h5, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10]; omega) | (simp [setRegF_apply, h2, h4, h5, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10]; omega) | (simp [setRegF_apply, h2, h4, h5, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10]; omega) | (simp [setRegF_apply, h2, h4, h5, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10]; omega) | (simp [setRegF_apply, h2, h4, h5, hfs, hdf]; done)
+    · simp only
+      repeat (refine Janus.Spec.onlyWrites_writeLE _ ?_ (by omega) (by omega))
+      exact onlyWrites_mono how (by omega)
+    · simp only
+      rw [readLE_words, readLE_words, readLE_words, show 64 * (i + 4) = 64 * i + 256 by omega,
+        Nat.pow_add, show 8 * 4 = 32 from rfl,
+        ← readLE_of_onlyWrites how (a := x + 8 * i) (k := 32) (by omega),
+        ← readLE_of_onlyWrites how (a := y + 8 * i) (k := 32) (by omega)]
+      simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
+      refine step_combine _ _ _ _ _ _ _ _ _ _ _ _ hinv ?_
+      simp only [readLE_32]
+      simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
+        Janus.Arm64.Memory.readLE_writeLE_self]
+      simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.reducePow]
+      janus64_arith
+
+
+
+set_option maxHeartbeats 8000000 in
+theorem matHead4 (s0 : State) (ret : Nat) (hret : RetAddr Extracted.program ret)
+    (z x y n m a : Nat) (hm : m < 2 ^ 64) (hzb : z + 8 * n ≤ 2 ^ 48)
+    (hxb : x + 8 * n ≤ 2 ^ 48) (hyb : y + 8 * n ≤ 2 ^ 48)
+    (hz : s0.mem.accessible z (8 * n) true = true) (hx : s0.mem.accessible x (8 * n) false = true)
+    (hy : s0.mem.accessible y (8 * n) false = true)
+    (hzx : z = x ∨ z + 8 * n ≤ x ∨ x + 8 * n ≤ z) (hzy : z + 8 * n ≤ y ∨ y + 8 * n ≤ z)
+    (hzf : z + 8 * n ≤ (s0.regs 4).toNat ∨ (s0.regs 4).toNat + 104 ≤ z)
+    (hfb : (s0.regs 4).toNat + 104 ≤ 2 ^ 48)
+    (hfacc : s0.mem.accessible (s0.regs 4).toNat 104 true = true)
+    (hra : s0.mem.readLE (s0.regs 4).toNat 8 = ret) :
+    ∀ k (S : State) (i : Nat), i + 4 * k = n →
+      S.rip = BitVec.ofNat 64 mhead4 → S.regs 8 = BitVec.ofNat 64 (x + 8 * i) →
+      S.regs 9 = BitVec.ofNat 64 (y + 8 * i) → S.regs 10 = BitVec.ofNat 64 (z + 8 * i) →
+      S.regs 7 = BitVec.ofNat 64 k → S.regs 3 = BitVec.ofNat 64 m →
+      S.regs 4 = s0.regs 4 → S.regs 5 = s0.regs 5 → S.fsBase = s0.fsBase → S.df = s0.df →
+      Janus.Spec.OnlyWrites s0.mem S.mem z (8 * i) →
+      S.mem.readLE z (8 * i) + 2 ^ (64 * i) * (S.regs 6).toNat =
+        s0.mem.readLE x (8 * i) + m * s0.mem.readLE y (8 * i) + a →
+      Reaches (Extracted.program.withExit ret) S
+        (IsReturn fun s' => ABIReturn0 s0 s' ∧ Post z x y n m a s0 s') := by
+  intro k S i hn hpc h8 h9 h10 h6 h2 h4 h5 hfs hdf how hinv
+  have hzS := accessible_of_onlyWrites how hz
+  have hxS := accessible_of_onlyWrites how hx
+  have hyS := accessible_of_onlyWrites how hy
+  have hfaccS := accessible_of_onlyWrites how hfacc
+  have hraS : S.mem.readLE (s0.regs 4).toNat 8 = ret := by
+    rw [readLE_of_onlyWrites how (by omega), hra]
+  have hru := hret.user
+  cases k with
+  | zero =>
+    janus64_run
+    obtain rfl : i = n := by omega
+    refine ⟨hfs, ?_, ?_, fun b hb hb' => ?_⟩
+    · simp only
+      rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
+        Janus.Arm64.Memory.readLE_writeLE_self, Nat.mod_eq_of_lt (S.regs 6).isLt]
+      exact hinv
+    · simp only [Janus.Arm64.Memory.regions_writeLE]; exact how.1
+    · simp only
+      rw [Janus.Arm64.Memory.bytes_writeLE_outside _ (by omega)]
+      exact how.2 b hb
+  | succ k =>
+    have hk : k + 1 < 2 ^ 64 := by omega
+    janus64_run until [mbody4]
+    have h11 : True := trivial
+    refine mloop4 s0 ret hret z x y n m a hm hzb hxb hyb hz hx hy hzx hzy hzf hfb hfacc hra k _ i (by omega) rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · exact how
+    · simpa [setRegF_apply] using hinv
+
+set_option maxHeartbeats 8000000 in
+theorem mloop1 (s0 : State) (ret : Nat) (hret : RetAddr Extracted.program ret)
+    (z x y n m a : Nat) (hm : m < 2 ^ 64) (hzb : z + 8 * n ≤ 2 ^ 48)
+    (hxb : x + 8 * n ≤ 2 ^ 48) (hyb : y + 8 * n ≤ 2 ^ 48)
+    (hz : s0.mem.accessible z (8 * n) true = true) (hx : s0.mem.accessible x (8 * n) false = true)
+    (hy : s0.mem.accessible y (8 * n) false = true)
+    (hzx : z = x ∨ z + 8 * n ≤ x ∨ x + 8 * n ≤ z) (hzy : z + 8 * n ≤ y ∨ y + 8 * n ≤ z)
+    (hzf : z + 8 * n ≤ (s0.regs 4).toNat ∨ (s0.regs 4).toNat + 104 ≤ z)
+    (hfb : (s0.regs 4).toNat + 104 ≤ 2 ^ 48)
+    (hfacc : s0.mem.accessible (s0.regs 4).toNat 104 true = true)
+    (hra : s0.mem.readLE (s0.regs 4).toNat 8 = ret) :
+    ∀ k (S : State) (i k8 : Nat), i + (k + 1) + 4 * k8 = n →
+      S.rip = BitVec.ofNat 64 mbody1 → S.regs 8 = BitVec.ofNat 64 (x + 8 * i) →
+      S.regs 9 = BitVec.ofNat 64 (y + 8 * i) → S.regs 10 = BitVec.ofNat 64 (z + 8 * i) →
+      S.regs 11 = BitVec.ofNat 64 (k + 1) → S.regs 7 = BitVec.ofNat 64 k8 →
+      S.regs 3 = BitVec.ofNat 64 m →
+      S.regs 4 = s0.regs 4 → S.regs 5 = s0.regs 5 → S.fsBase = s0.fsBase → S.df = s0.df →
+      Janus.Spec.OnlyWrites s0.mem S.mem z (8 * i) →
+      S.mem.readLE z (8 * i) + 2 ^ (64 * i) * (S.regs 6).toNat =
+        s0.mem.readLE x (8 * i) + m * s0.mem.readLE y (8 * i) + a →
+      Reaches (Extracted.program.withExit ret) S
+        (IsReturn fun s' => ABIReturn0 s0 s' ∧ Post z x y n m a s0 s') := by
+  intro k
+  induction k with
+  | zero =>
+    intro S i k8 hn hpc h8 h9 h10 h11 h6 h2 h4 h5 hfs hdf how hinv
+    have hzS := accessible_of_onlyWrites how hz
+    have hxS := accessible_of_onlyWrites how hx
+    have hyS := accessible_of_onlyWrites how hy
+    have hfaccS := accessible_of_onlyWrites how hfacc
+    have hraS : S.mem.readLE (s0.regs 4).toNat 8 = ret := by
+      rw [readLE_of_onlyWrites how (by omega), hra]
+    have hru := hret.user
+    janus64_run until [mhead4]
+    refine matHead4 s0 ret hret z x y n m a hm hzb hxb hyb hz hx hy hzx hzy hzf hfb hfacc hra k8 _ (i + 1) (by omega) rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · simp only
+      repeat (refine Janus.Spec.onlyWrites_writeLE _ ?_ (by omega) (by omega))
+      exact onlyWrites_mono how (by omega)
+    · simp only
+      rw [readLE_words, readLE_words, readLE_words, show 64 * (i + 1) = 64 * i + 64 by omega,
+        Nat.pow_add, show 8 * 1 = 8 from rfl,
+        ← readLE_of_onlyWrites how (a := x + 8 * i) (k := 8) (by omega),
+        ← readLE_of_onlyWrites how (a := y + 8 * i) (k := 8) (by omega)]
+      simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
+      refine step_combine _ _ _ _ _ _ _ _ _ _ _ _ hinv ?_
+      simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
+        Janus.Arm64.Memory.readLE_writeLE_self]
+      simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.reducePow]
+      janus64_arith
+  | succ k ih =>
+    intro S i k8 hn hpc h8 h9 h10 h11 h6 h2 h4 h5 hfs hdf how hinv
+    have hzS := accessible_of_onlyWrites how hz
+    have hxS := accessible_of_onlyWrites how hx
+    have hyS := accessible_of_onlyWrites how hy
+    have hfaccS := accessible_of_onlyWrites how hfacc
+    have hraS : S.mem.readLE (s0.regs 4).toNat 8 = ret := by
+      rw [readLE_of_onlyWrites how (by omega), hra]
+    have hru := hret.user
+    janus64_run until [mbody1]
+    refine ih _ (i + 1) k8 (by omega) rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · simp only
+      repeat (refine Janus.Spec.onlyWrites_writeLE _ ?_ (by omega) (by omega))
+      exact onlyWrites_mono how (by omega)
+    · simp only
+      rw [readLE_words, readLE_words, readLE_words, show 64 * (i + 1) = 64 * i + 64 by omega,
+        Nat.pow_add, show 8 * 1 = 8 from rfl,
+        ← readLE_of_onlyWrites how (a := x + 8 * i) (k := 8) (by omega),
+        ← readLE_of_onlyWrites how (a := y + 8 * i) (k := 8) (by omega)]
+      simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
+      refine step_combine _ _ _ _ _ _ _ _ _ _ _ _ hinv ?_
+      simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
+        Janus.Arm64.Memory.readLE_writeLE_self]
+      simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.reducePow]
+      janus64_arith
+
+set_option maxHeartbeats 8000000 in
+theorem matHead1 (s0 : State) (ret : Nat) (hret : RetAddr Extracted.program ret)
+    (z x y n m a : Nat) (hm : m < 2 ^ 64) (hzb : z + 8 * n ≤ 2 ^ 48)
+    (hxb : x + 8 * n ≤ 2 ^ 48) (hyb : y + 8 * n ≤ 2 ^ 48)
+    (hz : s0.mem.accessible z (8 * n) true = true) (hx : s0.mem.accessible x (8 * n) false = true)
+    (hy : s0.mem.accessible y (8 * n) false = true)
+    (hzx : z = x ∨ z + 8 * n ≤ x ∨ x + 8 * n ≤ z) (hzy : z + 8 * n ≤ y ∨ y + 8 * n ≤ z)
+    (hzf : z + 8 * n ≤ (s0.regs 4).toNat ∨ (s0.regs 4).toNat + 104 ≤ z)
+    (hfb : (s0.regs 4).toNat + 104 ≤ 2 ^ 48)
+    (hfacc : s0.mem.accessible (s0.regs 4).toNat 104 true = true)
+    (hra : s0.mem.readLE (s0.regs 4).toNat 8 = ret) :
+    ∀ k (S : State) (i k8 : Nat), i + k + 4 * k8 = n →
+      S.rip = BitVec.ofNat 64 mhead1 → S.regs 8 = BitVec.ofNat 64 (x + 8 * i) →
+      S.regs 9 = BitVec.ofNat 64 (y + 8 * i) → S.regs 10 = BitVec.ofNat 64 (z + 8 * i) →
+      S.regs 11 = BitVec.ofNat 64 k → S.regs 7 = BitVec.ofNat 64 k8 →
+      S.regs 3 = BitVec.ofNat 64 m →
+      S.regs 4 = s0.regs 4 → S.regs 5 = s0.regs 5 → S.fsBase = s0.fsBase → S.df = s0.df →
+      Janus.Spec.OnlyWrites s0.mem S.mem z (8 * i) →
+      S.mem.readLE z (8 * i) + 2 ^ (64 * i) * (S.regs 6).toNat =
+        s0.mem.readLE x (8 * i) + m * s0.mem.readLE y (8 * i) + a →
+      Reaches (Extracted.program.withExit ret) S
+        (IsReturn fun s' => ABIReturn0 s0 s' ∧ Post z x y n m a s0 s') := by
+  intro k S i k8 hn hpc h8 h9 h10 h11 h6 h2 h4 h5 hfs hdf how hinv
+  have hzS := accessible_of_onlyWrites how hz
+  have hxS := accessible_of_onlyWrites how hx
+  have hyS := accessible_of_onlyWrites how hy
+  have hfaccS := accessible_of_onlyWrites how hfacc
+  have hraS : S.mem.readLE (s0.regs 4).toNat 8 = ret := by
+    rw [readLE_of_onlyWrites how (by omega), hra]
+  have hru := hret.user
+  cases k with
+  | zero =>
+    janus64_run until [mhead4]
+    refine matHead4 s0 ret hret z x y n m a hm hzb hxb hyb hz hx hy hzx hzy hzf hfb hfacc hra k8 _ i (by omega) rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · exact how
+    · simpa [setRegF_apply] using hinv
+  | succ k =>
+    have hk : k + 1 < 2 ^ 64 := by omega
+    janus64_run until [mbody1]
+    refine mloop1 s0 ret hret z x y n m a hm hzb hxb hyb hz hx hy hzx hzy hzf hfb hfacc hra k _ i k8 (by omega) rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · first | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat, h2, h6, h8, h9, h10, h11]; omega) | (simp [setRegF_apply, h2, h4, h5, h6, h8, h9, h10, h11, hfs, hdf]; done)
+    · exact how
+    · simpa [setRegF_apply] using hinv
+
 /-- `runtime`'s `math/big.hasADX` (the `CMPB` at the entry). -/
 def hasADX : Nat := ripTarget Extracted.program Extracted.entry
 
-/-- **`math/big.addMulVVWW(z, x, y []Word, m, a Word) (c Word)`, the ADX/BMI2 path**: for
-every length `n = len(z)`, on a CPU where `math/big.hasADX` is set, the call writes
+/-- **`math/big.addMulVVWW(z, x, y []Word, m, a Word) (c Word)`**: for every length `n = len(z)`
+and either value of `math/big.hasADX` (the ADX/BMI2 path and the `MULQ` path), the call writes
 `z = x + y·m + a` over `n` words with the carry word `c` as its result (`z + 2^(64n)·c =
 x + y·m + a`, all little-endian bignums of `n` words), and writes nothing but `z` and the result
 slot. `z` may be `x` itself (`math/big` calls it in place) but must not overlap `y` or the frame. -/
 theorem correctness (z zl zc x xl xc y yl yc mw aw : BitVec 64) :
     Ensures0 Extracted.program Extracted.entry [z, zl, zc, x, xl, xc, y, yl, yc, mw, aw] 1
-      (fun s => s.mem.accessible hasADX 1 false = true ∧ s.mem.readLE hasADX 1 ≠ 0 ∧
+      (fun s => s.mem.accessible hasADX 1 false = true ∧
         Buffer s z (8 * zl.toNat) true ∧ Buffer s x (8 * zl.toNat) false ∧
         Buffer s y (8 * zl.toNat) false ∧
         (z = x ∨ Disjoint z (8 * zl.toNat) x (8 * zl.toNat)) ∧ Disjoint z (8 * zl.toNat) y (8 * zl.toNat) ∧
         Disjoint z (8 * zl.toNat) (s.regs 4) 104)
       (fun s s' => Post z.toNat x.toNat y.toNat zl.toNat mw.toNat aw.toNat s s') := by
-  intro ret hret s hs ⟨hua, hu, ⟨hzb, hz⟩, ⟨hxb, hx⟩, ⟨hyb, hy⟩, hzx, hzy, hzf⟩
-  have hbv : ¬ BitVec.ofNat 8 (s.mem.readLE hasADX 1) = 0#8 := fun h =>
-    hu (Janus.Spec.MemHash.readLE1_eq_zero h)
-  simp only [hasADX] at hua hu hbv
+  intro ret hret s hs ⟨hua, ⟨hzb, hz⟩, ⟨hxb, hx⟩, ⟨hyb, hy⟩, hzx, hzy, hzf⟩
+  simp only [hasADX] at hua
   janus64_addrs
   janus64_intro0 hs
   simp only [Disjoint] at hzx hzy hzf
@@ -419,8 +736,24 @@ theorem correctness (z zl zc x xl xc y yl yc mw aw : BitVec 64) :
     · exact Or.inr h
   have hm := mw.isLt
   have hand7 : ∀ t : Nat, t &&& 7 = t % 8 := fun t => Nat.and_two_pow_sub_one_eq_mod t 3
-  janus64_run until [head1, Extracted.entry + 0xd]
-  · exact absurd hbr hbv
+  have hand3 : ∀ t : Nat, t &&& 3 = t % 4 := fun t => Nat.and_two_pow_sub_one_eq_mod t 2
+  janus64_run until [head1, mhead1]
+  · -- hasADX = 0: the MULQ path
+    refine matHead1 s ret hret z.toNat x.toNat y.toNat zl.toNat mw.toNat aw.toNat hm hzb hxb hyb hz hx hy
+      hzx' hzy hzf h_fb h_facc h_ret (zl.toNat % 4) _ 0 (zl.toNat / 4) (by omega) rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand3]; omega)
+    · simp only; exact Janus.Spec.onlyWrites_refl _ _ _
+    · simp [setRegF_apply]
+  -- hasADX ≠ 0: the ADX/BMI2 path
   refine atHead1 s ret hret z.toNat x.toNat y.toNat zl.toNat mw.toNat aw.toNat hm hzb hxb hyb hz hx hy
     hzx' hzy hzf h_fb h_facc h_ret (zl.toNat % 8) _ 0 (zl.toNat / 8) (by omega) rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
   · first | (simp [setRegF_apply, h_df]; done) | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_and, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, h_rd_arg0, h_rd_arg1, h_rd_arg3, h_rd_arg6, h_rd_arg9, h_rd_arg10, hand7]; omega)

@@ -12,6 +12,7 @@ proofs.
 | decoder (bytes → instruction, length) | `Janus/Amd64/Decode.lean` |
 | semantics | `Janus/Amd64/Exec.lean` |
 | SSE packed instructions (WP-D): AST, decoder, semantics | `Janus/Amd64/InstrSSE.lean`, `Janus/Amd64/DecodeSSE.lean` (hook in `Decode.decodeLegacy`), `Janus/Amd64/ExecSSE.lean` (hook `Instr.sse` in `exec`) |
+| x86 crypto extensions (WP-E): AST, decoder, semantics | `Janus/Amd64/InstrCrypto.lean`, `Janus/Amd64/DecodeCrypto.lean` (hook in `Decode.decodeLegacy`, after `DecodeSSE`), `Janus/Amd64/ExecCrypto.lean` (hook `Instr.crypto` in `exec`); FIPS-197 specification and the instruction lemmas in `Janus/Spec/AES.lean`, Go's AES hash in `Janus/Spec/MemHash.lean` |
 | programs, runner, run lemmas | `Janus/Amd64/Program.lean`, `Janus/Amd64/Run.lean` |
 | Go ABIInternal on amd64, specs | `Janus/Amd64/GoABI.lean` |
 | proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas) |
@@ -116,7 +117,17 @@ PBLENDW BLENDPS/PD PBLENDVB BLENDVPS/PD PMOVSX/PMOVZX (all six widths each) PMUL
 PCMPEQQ PACKUSDW PMINSB/SD/UW/UD PMAXSB/SD/UW/UD PHMINPOSUW MPSADBW ROUNDPS/PD`; SSE4.2 `CRC32`
 (`r/m8/16/32/64` into `r32/r64`), `PCMPGTQ` and the string compares `PCMPESTRI PCMPESTRM
 PCMPISTRI PCMPISTRM` (every `imm8` mode with bit 7 clear). With them every SSE-family blocker of
-the std assembly and of gcc/clang `-O2`/`-O3` C is gone (`docs/COVERAGE.md`). `ADCX` and `ADOX` are not modelled. In the `sync/atomic`, `bytes`
+the std assembly and of gcc/clang `-O2`/`-O3` C is gone (`docs/COVERAGE.md`).
+
+**x86 crypto extensions (WP-E)**, legacy-encoded (`Janus/Amd64/{InstrCrypto,DecodeCrypto,
+ExecCrypto}.lean`): AES-NI `AESENC AESENCLAST AESDEC AESDECLAST AESIMC AESKEYGENASSIST`
+(`66 0F 38 DB..DF`, `66 0F 3A DF`), `PCLMULQDQ` (`66 0F 3A 44`, every `imm8`; only bits 0 and 4
+select), SHA-NI `SHA1RNDS4` (`NP 0F 3A CC`, every `imm8`; bits 1:0 select), `SHA1NEXTE SHA1MSG1
+SHA1MSG2 SHA256RNDS2 SHA256MSG1 SHA256MSG2` (`NP 0F 38 C8..CD`), and ADX `ADCX`/`ADOX`
+(`66`/`F3 0F 38 F6`, 32- and 64-bit). The mandatory prefix must be exactly the listed one (`66`
+with `F3` is rejected; hardware executes it, a deliberate model gap). The VEX forms (`VAESENC`,
+`VPCLMULQDQ`, ...) are not modelled (no std assembly uses them outside AVX-512 `hash/crc32`).
+In the `sync/atomic`, `bytes`
 and `strings` test binaries 97.9–98.1% of the Go-compiled functions and 53% of the assembly
 functions decode completely (`docs/ORACLE-AMD64.md`); with the SSE scalar floating point
 (`UCOMISD`, `CVT*`, arithmetic, `ROUNDSD`) now modelled, what is left is `SYSCALL`,
@@ -184,6 +195,21 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
   the state such a claim holds only for `df = false` states, and
   `JanusTests.Amd64.df_backward_not_forward` checks that from `df = true` the copy goes
   backward. The native oracle sets `DF` in a quarter of its cases and compares it.
+* **Crypto extensions (WP-E).** The AES instructions compose the AES transformations shared
+  with the arm64 model (`aesShiftRows`, `aesSubBytes`, `aesMixColumns` of `Janus.Arm64.Vector`;
+  both ISAs hold the state with byte `i` = FIPS-197 `in[i]`): `AESENC = MixColumns ∘ SubBytes ∘
+  ShiftRows` then `XOR` the key, `AESENCLAST` without `MixColumns`, `AESDEC`/`AESDECLAST` the
+  inverses, `AESIMC = InvMixColumns`, `AESKEYGENASSIST` the SDM's `SubWord`/`RotWord` of dwords
+  1 and 3. `Janus/Spec/AES.lean` proves each of them equal to the FIPS-197 transformation written
+  independently (`aesenc_eq`, `aesenclast_eq`, `aesdec_eq`, `aesdeclast_eq`, `aesimc_eq`,
+  `keygenAssist_eq`; S-box from the GF(2^8) inverse and the affine map, `sbox_table`).
+  `PCLMULQDQ` is `polyMult` of `Janus.Arm64.Crypto` (arm64 `PMULL`); the SHA-NI operations are the
+  SDM pseudocode over dwords with `Ch`/`Parity`/`Maj`/`Σ0`/`Σ1` shared with arm64. `ADCX`
+  (`ADOX`) adds with `CF` (`OF`) as carry in and out and leaves the other five status flags
+  unchanged; an undefined carry in faults (`undefinedFlag`). 128-bit memory operands must be
+  16-aligned (exception class 4). `JanusTests/X86Crypto.lean` checks FIPS-197 C.1/C.3 (encryption
+  and the Equivalent Inverse Cipher), FIPS 180-4 SHA-1/SHA-256("abc") and the Intel AES-NI white
+  paper vectors through these definitions, in the kernel.
 * **SSE packed (WP-D).** Each operation is the SDM `Operation` over elements (`ExecSSE`, using
   the arm64 element accessors `elem`/`ofElems`/`sint`/`truncInt` of `Janus.Arm64.Vector`).
   Saturating forms clamp the exact integer; shifts by `imm8` or by the low quadword of an
@@ -496,6 +522,17 @@ same script.
 | `Fma` | `math.FMA(a, b, c)` as one `VFMADD231SD`: under `GoMXCSR`, the low 64 bits of `X0` are IEEE 754 `fusedMultiplyAdd(a, b, c)` rounded once to nearest even (`Janus.Float.fma`, the arm64 `FMADD` specification), or a NaN when that is a NaN, whenever the result is architecturally defined (`FP.FmaDefined`: at most one NaN operand, not `0 × ∞ + NaN`) |
 | `LoadBE` | `binary.BigEndian.Uint64(b[:])` as one `MOVBE`: the big-endian value of the 8 readable bytes at `b` |
 
+Four are about `artifacts/examples-amd64-crypto`: `examples/basic/xcrypto` (Go code using
+`crypto/aes`, `math/big` and an 8-byte-key map), built `GOAMD64=v1` into a binary of its own; the
+proved functions are std assembly it links (WP-E).
+
+| function | theorem |
+|---|---|
+| `Memhash64` | `runtime.memhash64(p, h)`, the hash of every 8-byte map key: `Janus.Spec.MemHash.aesHash64 k0 k1 k2 h v` (three FIPS-197 AES rounds keyed by `runtime.aeskeysched`, seed in the low quadword, data in the high one) when `runtime.useAeshash ≠ 0`, `fallbackHash64` (`memhash64Fallback`, the `mix` of `runtime.hashkey`) otherwise |
+| `Memhash32` | `runtime.memhash32(p, h)`: `aesHash32` (the data at dword 2) / `fallbackHash32` |
+| `EncryptBlock` | `crypto/internal/fips140/aes.encryptBlockAsm(nr, xk, dst, src)` for `nr ∈ {10, 12, 14}`: writes FIPS-197 `Cipher(src, nr, w)` with `w` the words at `xk` to `dst` and nothing else (`src = dst` allowed); `corollaryAES128`: `AES-128(key, src)` when `xk` holds `KeyExpansion(key)`; `corollaryFIPS197`: the appendix C.1 vector through the machine code |
+| `AddMulVVWW` | `math/big.addMulVVWW(z, x, y, m, a)`, both the ADX/BMI2 path and the `MULQ` path (either value of `hasADX`), **every length**: `z + 2^(64n)·c = x + y·m + a` over `n = len(z)` words with the carry word `c`, `z = x` allowed, nothing but `z` and the result slot written |
+
 ## Known gaps
 
 * Dynamic calls (`CALL reg`) are followed only to a target the hypotheses determine
@@ -503,10 +540,12 @@ same script.
   panics unwinding through defers and non-open-coded defers (`runtime.deferproc*`) are not
   supported; see docs/RUNTIME-CONTRACTS.md.
 
-* 8/16-bit `RCL`/`RCR`, `ADCX`/`ADOX`, VEX instructions other than those above (AVX/AVX2
-  arithmetic, WP-F), EVEX (AVX-512), `CMPS`/`SCAS`/`LODS`, AES-NI/`PCLMULQDQ`/SHA-NI (WP-E),
+* 8/16-bit `RCL`/`RCR`, VEX instructions other than those above (AVX/AVX2 arithmetic, WP-F;
+  the VEX forms of AES-NI and `PCLMULQDQ`), EVEX (AVX-512), `CMPS`/`SCAS`/`LODS`,
   `DPPS`/`DPPD`, `RCPPS`/`RSQRTPS`, `MASKMOVDQU`, x87, MMX and `GS`-relative accesses are not
   modelled. Their encodings fault.
+* `janus64_run` keeps the AES/SHA/`PCLMULQDQ` results folded (`aesRound .enc x k`, irreducible
+  for the elaborator, `TacticCrypto`); proofs rewrite them with `Janus.Spec.AES.aesenc_eq` etc.
 * `janus64_run` keeps the packed operations folded (`pintOp (.add 32) x y`, `pshufdNat`, ...) and
   evaluates elements with `elem_pintOp_add` etc.; `ExecSSE.crc32c` is irreducible for the
   elaborator (`TacticSSE`), proofs go through `Janus.Spec.CRC32C`.
