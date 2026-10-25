@@ -66,13 +66,13 @@ theorem rtReturn_of (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (
     (P : (Nat → W64) → Janus.Arm64.Memory → Prop) (hrip : s'.rip = retAddrOf s)
     (h4 : s'.regs 4 = s.regs 4 + 8) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
     (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
-    (hmx : s'.mxcsr = s.mxcsr)
+    (hmx : s'.mxcsr = s.mxcsr) (hfw : s'.fpucw = s.fpucw)
     (hfr : MemFrame s.mem s'.mem (Contracts.IfaceAmd64.rtWrites R s nargs ++ extra))
     (henv : R.Env s'.mem (s.regs 14)) (hp : P s'.regs s'.mem) : RTReturn R nargs extra s s' P := by
   refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, hfr, henv, hp⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
-  simp only at hrip h4 h5 h14 hx hfs hdf hmx ⊢
-  subst hrip hfs hdf hmx
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, fw⟩ := s'
+  simp only at hrip h4 h5 h14 hx hfs hdf hmx hfw ⊢
+  subst hrip hfs hdf hmx hfw
   congr
   · funext i
     simp only [Contracts.MapAmd64.keepABI]
@@ -99,7 +99,7 @@ theorem convT64_impl : ConvT64 (toy.link (at0 convT64Code)) A0 R0 Htrue := by
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
   refine rtReturn_of R0 1 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl ?_
+    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl ?_
     ((show Env0 s.mem (s.regs 14) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, R0_priv, R0_depth,
       List.append_nil, List.cons_append, List.nil_append]
@@ -128,7 +128,7 @@ theorem convT32_impl : ConvT32 (toy.link (at0 convT32Code)) A0 R0 Htrue := by
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
   refine rtReturn_of R0 1 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl ?_
+    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl ?_
     ((show Env0 s.mem (s.regs 14) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, R0_priv, R0_depth,
       List.append_nil, List.cons_append, List.nil_append]
@@ -157,7 +157,7 @@ theorem convT16_impl : ConvT16 (toy.link (at0 convT16Code)) A0 R0 Htrue := by
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
   refine rtReturn_of R0 1 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl ?_
+    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl ?_
     ((show Env0 s.mem (s.regs 14) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, R0_priv, R0_depth,
       List.append_nil, List.cons_append, List.nil_append]
@@ -197,7 +197,7 @@ theorem convT_impl : ConvT (toy.link (at0 convTCode)) A0 R0 Htrue := by
   rw [hsz] at hb hacc
   janus64_run
   refine rtReturn_of R0 2 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl ?_
+    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl ?_
     ((show Env0 s.mem (s.regs 14) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, R0_priv, R0_depth,
       List.append_nil, List.cons_append, List.nil_append]
@@ -249,7 +249,7 @@ theorem convTstring_impl : ConvTstring (toy.link (at0 convTstringCode)) A0 R0 Ht
   janus64_run
   all_goals
     refine rtReturn_of R0 2 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl ?_
+      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl ?_
       (((show Env0 s.mem (s.regs 14) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])).writeLE _
         (by simp [BOX])) ?_
     · simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, R0_priv, R0_depth,
@@ -293,7 +293,7 @@ theorem convTslice_impl : ConvTslice (toy.link (at0 convTsliceCode)) A0 R0 Htrue
   janus64_run
   all_goals
     refine rtReturn_of R0 3 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl ?_
+      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl ?_
       ((((show Env0 s.mem (s.regs 14) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])).writeLE _
         (by simp [BOX])).writeLE _ (by simp [BOX])) ?_
     · simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, R0_priv, R0_depth,
@@ -335,7 +335,7 @@ theorem assertE2I_impl : AssertE2I (toy.link (at0 assertE2ICode)) A0 R0 := by
     · simp [hne] at hsome
   janus64_run
   refine rtReturn_of R0 2 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
   simp only [setRegF, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]
   refine ⟨?_, fun _ => ?_⟩
   · simp [htd, hi, TD, TAB]
@@ -366,7 +366,7 @@ theorem assertE2I2_impl : AssertE2I2 (toy.link (at0 assertE2I2Code)) A0 R0 := by
   all_goals
     rw [hi]
     refine rtReturn_of R0 2 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
     simp only [setRegF, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]
     simp only [TD, TAB] at this
     have hlt := (s.regs 3).isLt
@@ -394,7 +394,7 @@ theorem typeAssert_impl : TypeAssert (toy.link (at0 assertE2I2Code)) A0 R0 Htrue
   janus64_run
   all_goals
     refine rtReturn_of R0 2 _ s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
     refine ⟨?_, hdesc, rfl, rfl⟩
     rw [hi]
     simp only [setRegF, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]
@@ -440,7 +440,7 @@ theorem interfaceSwitch_impl : InterfaceSwitch (toy.link (at0 interfaceSwitchCod
   all_goals
     janus64_run [hn]
     refine rtReturn_of R0 2 _ s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
     simp only [setRegF, reduceIte, Nat.reduceEqDiff]
     refine ⟨?_, ?_, ?_, hdesc⟩
   all_goals (try rw [htd]) <;> (try rw [hsw]) <;> (try rw [htd] at hsw)
@@ -484,13 +484,13 @@ theorem efaceeq_impl : Efaceeq (toy.link (at0 efaceeqCode)) A0 R0 := by
   · janus64_run
     all_goals
       refine rtReturn_of R0 3 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
       simp [setRegF, efaceEqual, h0]
   · obtain ⟨-, htd, hx, hy⟩ := hok h0
     janus64_run
     all_goals
       refine rtReturn_of R0 3 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
       rw [htd, Janus.Contracts.IfaceSat.efaceEqual_R0 (g := s.regs 14) ⟨he1, he2, hd⟩]
       simp only [setRegF, reduceIte, Nat.reduceEqDiff, setcc_low_byte]
       have ha := Janus.Arm64.Memory.readLE_lt s.mem (s.regs 1).toNat 8
@@ -523,14 +523,14 @@ theorem ifaceeq_impl : Ifaceeq (toy.link (at0 efaceeqCode)) A0 R0 := by
   · janus64_run
     all_goals
       refine rtReturn_of R0 3 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
       simp [setRegF, ifaceEqual, h0]
   · obtain ⟨-, -, ht0, hok⟩ := hok h0
     obtain ⟨-, ht, hx, hy⟩ := hok ht0
     janus64_run
     all_goals
       refine rtReturn_of R0 3 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
       simp only [ifaceEqual, ht]
       rw [Janus.Contracts.IfaceSat.efaceEqual_R0 (g := s.regs 14) ⟨he1, he2, hd⟩]
       simp only [setRegF, reduceIte, Nat.reduceEqDiff, setcc_low_byte, beq_false_of_ne h0,

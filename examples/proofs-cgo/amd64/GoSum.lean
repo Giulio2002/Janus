@@ -44,7 +44,8 @@ abbrev head : Nat := csum + 0x10
 abbrev SumPost (p n : BitVec 64) (s s' : State) : Prop :=
   s'.regs 4 = s.regs 4 + 8 ∧ s'.regs 3 = s.regs 3 ∧ s'.regs 5 = s.regs 5 ∧
     s'.regs 12 = s.regs 12 ∧ s'.regs 13 = s.regs 13 ∧ s'.regs 14 = s.regs 14 ∧
-    s'.regs 15 = s.regs 15 ∧ s'.df = false ∧ s'.mxcsr = s.mxcsr ∧ s'.mem = s.mem ∧
+    s'.regs 15 = s.regs 15 ∧ s'.df = false ∧ s'.mxcsr = s.mxcsr ∧ s'.fpucw = s.fpucw ∧
+    s'.mem = s.mem ∧
     s'.regs 0 = BitVec.ofNat 64 (sumWords s.mem p.toNat n.toNat)
 
 /-- The precondition of the summary: the arguments, the buffer, and the return address slot. -/
@@ -58,7 +59,7 @@ abbrev SumPre (p n : BitVec 64) (s : State) : Prop :=
 abbrev Kept (s S : State) : Prop :=
   S.regs 4 = s.regs 4 ∧ S.mem = s.mem ∧ S.regs 3 = s.regs 3 ∧ S.regs 5 = s.regs 5 ∧
     S.regs 12 = s.regs 12 ∧ S.regs 13 = s.regs 13 ∧ S.regs 14 = s.regs 14 ∧
-    S.regs 15 = s.regs 15 ∧ S.df = s.df ∧ S.mxcsr = s.mxcsr
+    S.regs 15 = s.regs 15 ∧ S.df = s.df ∧ S.mxcsr = s.mxcsr ∧ S.fpucw = s.fpucw
 
 /-- The loop invariant at `head` after `i` of the `n` iterations. -/
 theorem csum_loop (p n : BitVec 64) (s : State) (hpre : SumPre p n s) :
@@ -72,19 +73,19 @@ theorem csum_loop (p n : BitVec 64) (s : State) (hpre : SumPre p n s) :
   intro k
   induction k with
   | zero =>
-    intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx⟩ hs
+    intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw⟩ hs
     janus64_run
-    janus64_simp [SumPost, sumWords_succ, show n.toNat = i.toNat + 1 by omega]
+    janus64_simp [SumPost, sumWords_succ, show n.toNat = i.toNat + 1 by omega, hfw]
     apply BitVec.eq_of_toNat_eq
     simp only [BitVec.toNat_add, BitVec.toNat_ofNat, hs]
     omega
   | succ k ih =>
-    intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx⟩ hs
+    intro S i acc hk hpc hS0 hS2 hS7 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw⟩ hs
     janus64_run until [head]
     have hi : (i + 1#64).toNat = i.toNat + 1 := by
       rw [BitVec.toNat_add]; simp only [BitVec.toNat_ofNat]; omega
     apply ih _ (i + 1#64) _ (by omega) (by janus64_simp) rfl (by janus64_simp) ?_
-      (by simp only [Kept]; janus64_simp) (by janus64_simp [sumWords_succ, hi]; omega)
+      (by simp only [Kept]; janus64_simp [hfw]) (by janus64_simp [sumWords_succ, hi]; omega)
     · janus64_simp
       apply BitVec.eq_of_toNat_eq
       rw [BitVec.toNat_add]; simp only [BitVec.toNat_ofNat]; omega
@@ -174,6 +175,7 @@ theorem wrapper_spec (T a : BitVec 64) :
   apply ReturnsC.of_reaches
   janus64_run
   simp only [WPost, frameP, frameN, Nat.reducePow, writeLE_mod_8]
+  refine ⟨by assumption, ?_⟩
   apply frame_store
   · janus_frame
   · apply sumWords_frame (rs := [((t.regs 4).toNat - 4096, (t.regs 4).toNat)])

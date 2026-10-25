@@ -388,8 +388,10 @@ description (see `docs/RUNTIME-CONTRACTS.md`, "FFI"):
   them memory of `s` (`stackSep`: the `g0` stack is not Go memory);
 * the Go memory: every range the runtime leaves alone (`GoKept`) holds the same bytes and is
   accessible in the same way (`kept`, `keptAcc`);
-* the same thread (`TPIDR_EL0`) and `DCZID_EL0`. Every other register, the flags and the
-  SIMD&FP registers are arbitrary. -/
+* the same thread (`TPIDR_EL0`) and `DCZID_EL0`, and the same `FPCR`: `asmcgocall` switches
+  only the stack and `g` on the calling thread and executes no instruction that writes `FPCR`
+  (`runtime/asm_arm64.s`), so the C function sees the Go caller's floating-point control state.
+  Every other register, the flags and the SIMD&FP registers are arbitrary. -/
 structure CgoEntry (p : Program) (s t : State) (ret : Nat) : Prop where
   pc : t.pc = s.regs 0
   arg : t.regs 0 = s.regs 1
@@ -402,6 +404,7 @@ structure CgoEntry (p : Program) (s t : State) (ret : Nat) : Prop where
   keptAcc : ∀ a n w, GoKept s a n w → t.mem.accessible a n w = true
   tpidr : t.tpidr = s.tpidr
   dczid : t.dczid = s.dczid
+  fpcr : t.fpcr = s.fpcr
 
 /-- The byte at `a` is memory of `s` that the runtime leaves alone (decidable form). -/
 def keptByte (s : State) (a : Nat) : Bool :=
