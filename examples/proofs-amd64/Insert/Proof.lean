@@ -14,6 +14,8 @@ that behaves as the named contract(s) of `Janus.Contracts.MapAmd64` say (docs/RU
 below the function's own frame (writable, above the stack guard, outside the runtime's private
 memory `M.priv`) and `mapType` is the type descriptor the code passes, recomputed from the
 extracted RIP-relative `LEA`.
+
+The runtime must be ready for the allocating call (`H : RtReady`, assumed at entry for that call; without it the contract was unsatisfiable, finding R3-C1, `audit/maps/model/Unsat.lean`).
 -/
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec.Map Janus.Contracts.MapAmd64

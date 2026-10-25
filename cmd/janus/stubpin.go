@@ -365,10 +365,26 @@ func pinPackage(file string) string { return path.Dir(file) }
 // runtimeFuncDir lists the runtime functions whose code lives in another package's directory:
 // internal/bytealg defines runtime·memequal and runtime·memequal_varlen in its assembly
 // (equal_arm64.s, equal_amd64.s), and internal/runtime/maps the map entry points it links into
-// runtime by //go:linkname (runtime_faststr.go). Their pinned file must be in that directory.
+// runtime by //go:linkname (runtime.go, runtime_fast32.go, runtime_fast64.go,
+// runtime_faststr.go). Their pinned file must be in that directory.
 var runtimeFuncDir = map[string]string{
 	"runtime.memequal": "internal/bytealg", "runtime.memequal_varlen": "internal/bytealg",
-	"runtime.mapaccess2_faststr": "internal/runtime/maps",
+	"runtime.mapaccess1":          "internal/runtime/maps",
+	"runtime.mapaccess2":          "internal/runtime/maps",
+	"runtime.mapassign":           "internal/runtime/maps",
+	"runtime.mapaccess1_fast32":   "internal/runtime/maps",
+	"runtime.mapaccess2_fast32":   "internal/runtime/maps",
+	"runtime.mapassign_fast32":    "internal/runtime/maps",
+	"runtime.mapdelete_fast32":    "internal/runtime/maps",
+	"runtime.mapaccess1_fast64":   "internal/runtime/maps",
+	"runtime.mapaccess2_fast64":   "internal/runtime/maps",
+	"runtime.mapassign_fast64":    "internal/runtime/maps",
+	"runtime.mapdelete_fast64":    "internal/runtime/maps",
+	"runtime.mapassign_fast64ptr": "internal/runtime/maps",
+	"runtime.mapaccess1_faststr":  "internal/runtime/maps",
+	"runtime.mapaccess2_faststr":  "internal/runtime/maps",
+	"runtime.mapassign_faststr":   "internal/runtime/maps",
+	"runtime.mapdelete_faststr":   "internal/runtime/maps",
 }
 
 // pinDir is the directory a pinned function's file must be in: its package's (pkg), or the one

@@ -12,7 +12,7 @@ that behaves as the named contract(s) of `Janus.Contracts.Map` say (docs/RUNTIME
 "Maps"). `CallerOK M s frame above` asks for the runtime environment, `M.depth` bytes of stack
 below the function's own frame (writable, above the stack guard, outside the runtime's private
 memory `M.priv`) and `mapType` is the type descriptor the code passes, recomputed from the
-extracted `ADRP`+`ADD` words.
+extracted `ADRP`+`ADD` words. The runtime must be ready for the allocating call (`H : RtReady`, assumed at entry for that call; without it the contract was unsatisfiable, finding R3-C1, `audit/maps/model/Unsat.lean`).
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map
