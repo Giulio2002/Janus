@@ -344,7 +344,8 @@ func planReplay(resolved map[string]string, graph map[string][]string, toolchain
 	}
 	for _, m := range p.modules {
 		if useCache {
-			if _, err := os.Stat(filepath.Join(replayCacheDir(), p.keys[m][:2], p.keys[m])); err == nil {
+			if mk := filepath.Join(replayCacheDir(), p.keys[m][:2], p.keys[m]); fileExists(mk) {
+				touchHit(mk)
 				p.cached = append(p.cached, m)
 				continue
 			}
@@ -544,7 +545,8 @@ func (p *replayPlan) replayFresh(checker string, run func(argv ...string) (strin
 	k := "fresh-" + p.keys[m]
 	marker := filepath.Join(replayCacheDir(), k[6:8], k)
 	if p.cacheOn {
-		if _, err := os.Stat(marker); err == nil {
+		if fileExists(marker) {
+			touchHit(marker)
 			return "", nil
 		}
 	}

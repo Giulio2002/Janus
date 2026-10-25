@@ -7,16 +7,26 @@
 #   scripts/oracle.sh full            generated + harvested from real Go arm64 binaries (default)
 #   scripts/oracle.sh fp              scalar floating point only: generated fp.* classes (FP_K
 #                                     states per word) + harvested fp.* words (FP_HARVEST_K states)
+#   scripts/oracle.sh crypto          crypto extension / CRC32 / permutes only: generated classes
+#                                     (CRYPTO_CLASSES), harvested words of the crypto test binaries
+#                                     (CRYPTO_HARVEST_K states each) and sequence-mode blocks
+#                                     (oracle seqgen: SEQ_N per family, SEQ_WINDOWS real windows)
 #
 # Environment: OUT (default artifacts/oracle), JOBS (default nproc), N (words per generated
 # class, default 4000 for full / 1500 for quick), K (states per harvested word, default 3),
 # PER_CLASS (harvested distinct words per class, default 8000), SEED (default 1), FP_K (states
 # per generated fp.* word, default 4), FP_HARVEST_K (states per harvested fp.* word in fp mode, 40),
 # QEMU (default /usr/bin/qemu-aarch64; set QEMU= to run natively on an arm64 Linux host).
+# KEEP: what the run leaves in OUT (scripts/lib/artifacts.sh). Default: summary.md, repro.*,
+# mismatches.jsonl (MISMATCH verdicts, if any) and cases/hw/model/verdicts.jsonl zstd-compressed
+# (.zst); gen.jsonl and harvest.jsonl (whose union is cases.jsonl) are removed. KEEP=zst
+# compresses every dump, KEEP=1 keeps them all raw.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=lib/artifacts.sh
+. "$root/scripts/lib/artifacts.sh"
 memguard_self "$@"
 mode="${1:-full}"
 export PATH="$PATH:/usr/local/go/bin"
@@ -45,29 +55,40 @@ tail -1 "$bin/selftest.log"
 [ "$mode" = selftest ] && exit 0
 
 mkdir -p "$OUT"
+# However the run ends: keep the summaries, compressed verdicts and corpus, drop the other dumps
+# (KEEP=1 keeps everything raw; scripts/lib/artifacts.sh).
+trap 'art_prune "$OUT"' EXIT
 cases=()
 case "$mode" in
   quick) N="${N:-1500}" ;;
   full)  N="${N:-4000}" ;;
   fp)    N="${N:-20000}" ;;
-  *) echo "usage: $0 selftest|quick|full|fp" >&2; exit 2 ;;
+  crypto) N="${N:-20000}" ;;
+  *) echo "usage: $0 selftest|quick|full|fp|crypto" >&2; exit 2 ;;
 esac
 FP_K="${FP_K:-4}"
 echo "== generate ($N words per class)"
+# The crypto-extension / CRC32 / permute classes and their AdvSIMD neighbours (gen/crypto.go).
+CRYPTO_CLASSES="${CRYPTO_CLASSES:-^(crypto\.|simd\.(pmull|permute|dupscalar|aes|ext|tbl)$|dpr\.crc32$)}"
 if [ "$mode" = fp ]; then
   "$bin/oracle" gen -dczid "$DCZID" -n "$N" -only '^fp\.' -fp-k "$FP_K" -seed "$SEED" -o "$OUT/gen.jsonl"
+elif [ "$mode" = crypto ]; then
+  "$bin/oracle" gen -dczid "$DCZID" -n "$N" -only "$CRYPTO_CLASSES" -seed "$SEED" -o "$OUT/gen.jsonl"
 else
   "$bin/oracle" gen -dczid "$DCZID" -n "$N" -group "$((N * 2))" -seed "$SEED" -o "$OUT/gen.jsonl"
 fi
 cases+=("$OUT/gen.jsonl")
 
-if [ "$mode" = full ] || [ "$mode" = fp ]; then
+if [ "$mode" = full ] || [ "$mode" = fp ] || [ "$mode" = crypto ]; then
   echo "== harvest corpus (real Go arm64 code)"
   corpus="$bin/corpus"
   mkdir -p "$corpus"
+  # The crypto packages bring the SHA-1/SHA-256/SHA-512/SHA-3, AES-GCM (PMULL), CRC32 and
+  # chacha20 (ZIP, via crypto/tls) assembly kernels.
   (cd "$root/oracle" &&
     CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$corpus/bigprog" ./harvest/bigprog &&
-    for p in math math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime; do
+    for p in math math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime \
+        crypto/sha1 crypto/sha512 crypto/sha3 crypto/cipher hash/crc32 crypto/tls; do
       CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
   # gcc-compiled C (the cgo examples and the model-coverage corpus examples/cgo/ccover.c)
@@ -81,21 +102,35 @@ if [ "$mode" = full ] || [ "$mode" = fp ]; then
   for f in "$root"/artifacts/*-arm64; do [ -f "$f" ] && extra+=("$f"); done
   hargs=()
   [ "$mode" = fp ] && hargs=(-only '^fp\.' -per-class 0 -fp-k "${FP_HARVEST_K:-40}")
-  "$bin/oracle" harvest -dczid "$DCZID" -k "$K" -per-class "$PER_CLASS" "${hargs[@]}" -seed "$((SEED + 1))" -o "$OUT/harvest.jsonl" "$corpus"/* "${extra[@]}"
+  [ "$mode" = crypto ] && hargs=(-only "$CRYPTO_CLASSES" -per-class 0)
+  hk="$K"
+  [ "$mode" = crypto ] && hk="${CRYPTO_HARVEST_K:-40}"
+  "$bin/oracle" harvest -dczid "$DCZID" -k "$hk" -per-class "$PER_CLASS" "${hargs[@]}" -seed "$((SEED + 1))" -o "$OUT/harvest.jsonl" "$corpus"/* "${extra[@]}"
   cases+=("$OUT/harvest.jsonl")
+fi
+if [ "$mode" = full ] || [ "$mode" = crypto ]; then
+  # Sequence mode: straight-line blocks (synthetic chains per family + windows of the real
+  # crypto kernels), executed in one go natively and word by word by janus-oracle.
+  echo "== sequences"
+  sn="${SEQ_N:-500}"; swin="${SEQ_WINDOWS:-2000}"
+  [ "$mode" = crypto ] && { sn="${SEQ_N:-10000}"; swin="${SEQ_WINDOWS:-20000}"; }
+  "$bin/oracle" seqgen -dczid "$DCZID" -n "$sn" -windows "$swin" -seed "$((SEED + 2))" -o "$OUT/seq.jsonl" "$corpus"/*
+  cases+=("$OUT/seq.jsonl")
 fi
 
 echo "== run (native under ${QEMU:-native} vs janus-oracle)"
 IFS=, eval 'list="${cases[*]}"'
 "$bin/oracle" run "${common[@]}" -model "$root/.lake/build/bin/janus-oracle" -j "$JOBS" -cases "$list" -out "$OUT" > /dev/null
+mismatch=0
 if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
+  mismatch=1
   echo "== minimize mismatches"
   "$bin/oracle" minimize "${common[@]}" -model "$root/.lake/build/bin/janus-oracle" -out "$OUT" -max 200 > /dev/null
   echo "minimal reproductions: $OUT/repro.md"
 fi
 sed -n '1,6p' "$OUT/summary.md"
-echo "report: $OUT/summary.md  (per-case verdicts: $OUT/verdicts.jsonl)"
-if grep -q '"verdict":"MISMATCH"' "$OUT/verdicts.jsonl"; then
+echo "report: $OUT/summary.md  (per-case verdicts: $OUT/verdicts.jsonl, zstd-compressed unless KEEP=1)"
+if [ "$mismatch" = 1 ]; then
   echo "FAIL: model disagrees with hardware (see $OUT/repro.md)" >&2
   exit 1
 fi

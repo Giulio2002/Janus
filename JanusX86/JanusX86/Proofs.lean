@@ -21,3 +21,15 @@ import JanusX86.Proofs.Shift
 import JanusX86.Proofs.CallInd
 import JanusX86.Proofs.Bt
 import JanusX86.Proofs.Imul2
+import JanusX86.Proofs.Lock
+import JanusX86.Proofs.Nop
+import JanusX86.Proofs.Movsxd
+import JanusX86.Proofs.CmpXchg
+import JanusX86.Proofs.Cbw
+import JanusX86.Proofs.Xchg
+import JanusX86.Proofs.Div
+import JanusX86.Proofs.Leave
+import JanusX86.Proofs.Xchg9
+import JanusX86.Proofs.Bt3
+import JanusX86.Proofs.Shd
+import JanusX86.Proofs.Rcx
