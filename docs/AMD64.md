@@ -102,7 +102,7 @@ binaries decodes (`docs/COVERAGE.md`). `ADCX` and `ADOX` are not modelled. In th
 and `strings` test binaries 97.9–98.1% of the Go-compiled functions and 53% of the assembly
 functions decode completely (`docs/ORACLE-AMD64.md`); with the SSE scalar floating point
 (`UCOMISD`, `CVT*`, arithmetic, `ROUNDSD`) now modelled, what is left is `SYSCALL`,
-AES/SHA/CRC32, AVX-512, `VFMADD231SD` and `PCMPESTRI`.
+AES/SHA/CRC32, AVX-512 and `PCMPESTRI` (scalar FMA is modelled since WP-B).
 
 **Semantics** follow the SDM *Operation* and *Flags Affected* sections:
 
