@@ -244,6 +244,7 @@ func TestAmd64List(t *testing.T) {
 }
 
 func TestAmd64Blockers(t *testing.T) {
+	defer parallel(t)()
 	code, out, stderr := runJanus(t, "blockers", exampleAmd64(t), "example.com/basic.Add", "example.com/basic.AddThree",
 		"--janus-root", repoRoot)
 	if code != 0 || !strings.Contains(out, "example.com/basic.Add: 1 function(s)") ||

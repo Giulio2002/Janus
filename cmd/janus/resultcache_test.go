@@ -13,7 +13,7 @@ import (
 // plus "Cached:"; any changed input, --fresh, --unsafe-no-sandbox and a tampered entry are
 // misses. (audit/round7 attacks the cache from a proof and a lakefile.)
 func TestResultCache(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLean(t)
 	if _, err := detectSandbox(false); err != nil {
 		t.Skipf("no sandbox available: %v", err)

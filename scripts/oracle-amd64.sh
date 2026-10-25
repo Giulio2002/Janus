@@ -20,6 +20,11 @@
 #                                      padded TLS call, plus every x87 instruction harvested from
 #                                      gcc/clang -O0/-O2/-O3 long double code (X87_K states each,
 #                                      default 40)
+#   scripts/oracle-amd64.sh sse        the SSE packed instructions of WP-D only (SSE2 integer and
+#                                      FP, SSE3, SSSE3, SSE4.1, SSE4.2): their specs and edge
+#                                      families, plus every such instruction harvested from the std
+#                                      test binaries with SSE assembly and from the C corpus compiled
+#                                      by gcc and clang at -O2/-O3 (SSE_K states each, default 12)
 #
 # Environment: OUT (default artifacts/oracle-amd64), JOBS (default 16, at most 24), N
 # (encodings per targeted spec, default 600 full / 250 quick), GROUP (random byte strings,
@@ -78,12 +83,14 @@ case "$mode" in
   fp)    N="${N:-600}"; GROUP=0 ;;
   v3)    N="${N:-600}"; GROUP=0 ;;
   x87)   N="${N:-600}"; GROUP=0 ;;
-  *) echo "usage: $0 selftest|quick|full|fp|v3|x87" >&2; exit 2 ;;
+  sse)   N="${N:-600}"; GROUP=0 ;;
+  *) echo "usage: $0 selftest|quick|full|fp|v3|x87|sse" >&2; exit 2 ;;
 esac
 fpk=()
 [ -n "${FPK:-}" ] && fpk=(-fpk "$FPK")
 v3re='^(andn|blsr|blsmsk|blsi|bextr|bzhi|shlx|shrx|sarx|rorx|mulx|pdep|pext|movbe|pshufb|psignb|vfn?m(add|sub)(132|213|231)s[sd])$'
 v3pkgs="math math/big strconv internal/strconv internal/runtime/maps encoding/binary math/bits reflect internal/abi math/rand runtime"
+ssepkgs="internal/chacha8rand hash/crc32 bytes strings crypto/internal/fips140/nistec crypto/aes crypto/sha256 crypto/sha1 crypto/cipher math"
 if [ "$mode" = fp ]; then
   echo "== generate (SSE floating point: $N encodings per spec, $((N / 2)) edge rounds)"
   "$bin/oracle" gen -fp-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
@@ -93,6 +100,9 @@ elif [ "$mode" = x87 ]; then
 elif [ "$mode" = v3 ]; then
   echo "== generate (GOAMD64=v3 extensions: $N encodings per spec, $((N / 4)) FMA edge rounds)"
   "$bin/oracle" gen -v3-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
+elif [ "$mode" = sse ]; then
+  echo "== generate (SSE packed, WP-D: $N encodings per spec, $((N / 4)) edge rounds)"
+  "$bin/oracle" gen -sse-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
 else
   echo "== generate ($N encodings per targeted spec, $GROUP random)"
   "$bin/oracle" gen -n "$N" -group "$GROUP" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
@@ -140,6 +150,27 @@ if [ "$mode" = x87 ]; then
   done
   "$bin/oracle" harvest -k "${X87_K:-40}" -per-class 0 -only '^(f[a-z0-9]*|jmp|call)$' -seed "$((SEED + 1))" \
     -o "$OUT/harvest.jsonl" "$corpus"/*.o
+  cases+=("$OUT/harvest.jsonl")
+fi
+
+if [ "$mode" = sse ]; then
+  echo "== harvest the WP-D instructions of std test binaries and of gcc/clang-compiled C"
+  corpus="$bin/corpus-sse"
+  mkdir -p "$corpus"
+  (cd "$root/oracle-amd64" &&
+    for p in $ssepkgs; do
+      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
+    done)
+  for cc in gcc clang; do
+    command -v "$cc" >/dev/null || continue
+    for o in -O2 -O3; do
+      for f in "$root"/scripts/coverage/ccorpus/*.c "$root"/examples/cgo/ccover.c; do
+        "$cc" $o -c -fPIC -g -I"$root/examples/cgo" -o "$corpus/c-$cc$o-$(basename "$f" .c).o" "$f"
+      done
+    done
+  done
+  ssere="$("$bin/oracle" classes -sse)"
+  "$bin/oracle" harvest -k "${SSE_K:-12}" -per-class 0 -only "$ssere" -seed "$((SEED + 1))" "${fpk[@]}" -o "$OUT/harvest.jsonl" "$corpus"/*
   cases+=("$OUT/harvest.jsonl")
 fi
 

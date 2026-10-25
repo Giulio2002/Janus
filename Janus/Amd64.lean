@@ -17,3 +17,4 @@ import Janus.Amd64.TacticX87
 import Janus.Amd64.CABI
 import Janus.Amd64.FFI
 import Janus.Amd64.Recursion
+import Janus.Amd64.TacticSSE

@@ -284,6 +284,8 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 | `CSwitch` | `c_switch(k, x)` (`cx87.c`): a dense switch compiled to a `.rodata` offset table and the CET dispatch `notrack jmp *%rax`, returns the case's value for every `k` | | ✓ |
 | `CLdMul` | `ld_mul(a, b)` (`long double`, x87): with `a`, `b` at `[RSP+8]`, `[RSP+24]` (System V class X87) and the x87 FPU idle (`X87.Idle`), returns with `ST(0)` = `X87.binop .mul 64 .rne a b` the only register in use; `ieee`: that is IEEE 754 multiplication on (15, 63) | | ✓ |
 | `GoLdMul` | Go `MulLD(a, b, r *[16]byte)` → cgo → `c_ldmul` → `ld_mul` → Go: the 10 bytes at `r` become the x87 product of the 10 bytes at `a` and `b`, under `CgoCall` only | | ✓ |
+| `CCount` | `c_count(p, n, c)` (package `example.com/cgo/neon`, auto-vectorised by gcc `-O2`: `CMEQ`/`ZIP`/`UADDW`/`ADDP` loop + scalar tail) returns the number of `i < n` with `p[i] = c`, memory unchanged | ✓ | – |
+| `GoCount` | Go `neon.Count(xs, c)` → cgo → the NEON loop → Go returns the count, under `CgoCall` only | ✓ | – |
 
 The Go-side preconditions are explicit. They include the stack-growth checks of the Go function
 and of its `_Cfunc_` wrapper, the stack window, and the two statically initialised cgo globals

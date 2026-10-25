@@ -1,4 +1,5 @@
 import Janus.Amd64.X87
+import Janus.Amd64.InstrSSE
 
 /-!
 # x86-64 instruction AST (supported subset)
@@ -303,6 +304,8 @@ inductive Instr where
   /-- An x87 instruction (`D8`–`DF`, `9B`; `Janus.Amd64.X87`) with its memory operand, if it
   has one. -/
   | x87 (op : X87.Op) (m : Option Addr)
+  /-- The legacy-SSE packed instructions (`Janus.Amd64.InstrSSE`, `DecodeSSE`, `ExecSSE`). -/
+  | sse (i : SseI XLoc Loc Addr)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Amd64

@@ -5,6 +5,7 @@ import (
 
 	"example.com/cgo"
 	"example.com/cgo/cabi"
+	"example.com/cgo/neon"
 )
 
 func main() {
@@ -21,4 +22,5 @@ func main() {
 	b0, b1, b2, b3 := cabi.Big(7, 3)
 	fmt.Println(cabi.Stack10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), cabi.FP(5, 2, 3), px, py, b0, b1, b2, b3,
 		cabi.VSum8(1, 2, 3, 4, 5, 6, 7, 8))
+	fmt.Println(neon.Count([]byte("abca"), 97))
 }

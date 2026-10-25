@@ -1043,6 +1043,13 @@ deriving instance ToExpr for X87.Arith
 deriving instance ToExpr for X87.MemFmt
 deriving instance ToExpr for X87.Src
 deriving instance ToExpr for X87.Op
+deriving instance ToExpr for PIntOp
+deriving instance ToExpr for PShiftOp
+deriving instance ToExpr for PImmOp
+deriving instance ToExpr for CvtOp
+deriving instance ToExpr for DupOp
+deriving instance ToExpr for PFOp
+deriving instance ToExpr for SseI
 deriving instance ToExpr for Instr
 deriving instance ToExpr for StubKind
 

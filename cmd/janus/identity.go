@@ -30,6 +30,9 @@ type identityStub struct {
 type identityContract struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
+	// Pinned: the function's code was checked to be the Go runtime's (runtimeContractStubs);
+	// omitted when false, so earlier identities keep their bytes.
+	Pinned bool `json:"pinned,omitempty"`
 }
 
 type identityBranch struct {
@@ -176,7 +179,7 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 	}
 	id.ContractPatterns = append([]string(nil), x.ContractPatterns...)
 	for _, c := range x.Contracts {
-		id.Contracts = append(id.Contracts, identityContract{c.Name, hex0x(c.Addr)})
+		id.Contracts = append(id.Contracts, identityContract{c.Name, hex0x(c.Addr), c.Pinned})
 	}
 	for _, u := range x.Unresolved {
 		id.Unresolved = append(id.Unresolved, identityBranch{hex0x(u.From), hex0x(u.Target)})
@@ -200,11 +203,16 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 	return id
 }
 
-// contractList renders the recorded contracts as "name @ address".
+// contractList renders the recorded contracts as "name @ address" ("name @ address (pinned)"
+// for a function checked to be the runtime's).
 func (id *Identity) contractList() []string {
 	var out []string
 	for _, c := range id.Contracts {
-		out = append(out, c.Name+" @ "+c.Address)
+		s := c.Name + " @ " + c.Address
+		if c.Pinned {
+			s += " (pinned)"
+		}
+		out = append(out, s)
 	}
 	return out
 }

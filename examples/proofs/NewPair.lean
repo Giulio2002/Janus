@@ -28,19 +28,28 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 
 namespace Proof
 
+/-- The address of `Pair`'s type descriptor, the argument NewPair passes to `runtime.newobject`
+(the `ADRP` + `ADD` pair at `NewPair+0x20`), recomputed from the extracted words. -/
+def pairType : Nat :=
+  adrpLdTarget (Extracted.entry + 0x20) (segWord Extracted.program "example.com/basic.NewPair" 8)
+    (segWord Extracted.program "example.com/basic.NewPair" 9) 0
+
 set_option maxRecDepth 20000 in
-theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (a b : BitVec 64)
+theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
     (hnew : NewobjectContract (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.newobject") rt 4096) :
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b]
       (fun s => GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
-        Outside (s.sp.toNat - 4144) 4168 rt)
+        Outside (s.sp.toNat - 4144) 4168 rt ∧
+        H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem))
       (fun s s' => ∃ ptr : Nat, (s'.regs 0).toNat = ptr ∧ InRanges ptr 16 rt ∧ ptr % 16 = 0 ∧
         s'.mem.accessible ptr 16 true = true ∧
         s'.mem.readLE ptr 8 = a.toNat ∧ s'.mem.readLE (ptr + 8) 8 = b.toNat ∧
         MemFrame s.mem s'.mem (rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)])) := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout⟩
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hd, hout, hH⟩
   janus_intro hs
+  janus_eval_nat h_pt : pairType
+  rw [h_pt] at hH
   janus_data hd [hw]
   -- run to the instruction after `bl runtime.newobject`, using the contract at the call
   janus_run until [Extracted.entry + 0x34] calls [hnew.pos]

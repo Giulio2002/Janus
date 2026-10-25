@@ -1,4 +1,5 @@
 import Janus.Amd64.Instr
+import Janus.Amd64.DecodeSSE
 
 /-!
 # x86-64 decoder for the supported subset
@@ -998,7 +999,7 @@ def Decode.decodeLegacy (bytes : List Nat) : Option (Instr × Nat) :=
         if op = 0x0F then
           match rest with
           | [] => none
-          | op2 :: rest2 => twoByte p op2 rest2 (n + 1)
+          | op2 :: rest2 => (twoByte p op2 rest2 (n + 1)).orElse fun _ => DecodeSSE.decode p.opsize p.rep p.rex (fun bs => (modrm (p.rex.getD 0) bs).map fun (m, r, c) => (m.reg, m.ext, rmX m.rm, r, c)) op2 rest2 (n + 1)
         else oneByte p op rest n
     -- `LOCK` is accepted exactly on the lockable memory forms; the model is single-threaded,
     -- so a locked instruction has the semantics of the unlocked one.

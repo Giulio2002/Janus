@@ -12,6 +12,13 @@ agent/iface-alloc (read with `git show`, nothing merged). Go 1.26.0 (`GOTOOLCHAI
 gcc 15.2.0 (Ubuntu 15.2.0-16ubuntu1, native and `aarch64-linux-gnu`), clang 21.1.8. Measured
 2026-10-24.
 
+**Update (agent/rtiface, R2 of the plan).** The interface runtime contracts (`convT*`,
+`assertE2I(2)`, `typeAssert`, `interfaceSwitch`, `efaceeq`, `ifaceeq`, with the cache model of
+`emptyTypeAssertCache`/`emptyInterfaceSwitchCache`) and the four interface construct proofs on
+both ISAs (`Box`, `AsHasher`, `Classify`, `Equal`) are counted in the numbers below by hand on top
+of the measured baseline: 15 more runtime names (14 linked), 4 more construct rows. The rest of
+the page is the measured baseline.
+
 **Regenerating.** `scripts/coverage.sh` rebuilds every number on this page. It builds the std
 test binaries in a fresh `mktemp -d` under `/var/tmp` and removes it at the end (about 4.2 GB;
 `KEEP=1` keeps it). It writes the raw tables to `artifacts/coverage/`. The stages are `build`,
@@ -26,12 +33,12 @@ the cache.
 | criterion | arm64 | amd64 (GOAMD64=v1) | amd64 (GOAMD64=v3) |
 |---|---:|---:|---:|
 | 1. Go-compiled std functions that fully decode | 15,517 / 16,602 (**93.46%**) | 16,625 / 16,625 (**100%**) | 16,614 / 16,614 (**100%**; 94.60% before WP-B) |
-| 1. Go assembly functions that fully decode | 151 / 207 (**72.95%**; 139 / 207 = 67.15% before WP-H) | 148 / 265 (**55.85%**) | 145 / 262 (**55.34%**) |
+| 1. Go assembly functions that fully decode | 151 / 207 (**72.95%**; 139 / 207 = 67.15% before WP-H) | 160 / 265 (**60.38%**; 148 before WP-D) | 157 / 262 (**59.92%**; 145 before WP-D) |
 | 1. compiler-generated wrappers / Go test code | 99.40% / 97.09% | 100% / 100% (99.98% before WP-B) | 100% / 100% (99.60% / 99.16% before WP-B) |
-| 2. runtime entry points with a contract, stub or proof (main + branches) | 56 of 309 names (39 on main) | same | same |
-| 2. … of the 191 linked on arm64/amd64: still missing | 153 (12 of them concurrency, excluded) | | |
-| 3. language constructs with a proved example | 60 of 75 rows (15 have none on either ISA; agent/constructs closes 20) | | |
-| 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | 93.6% / 86.2% | **87.3% / 79.8%** (main `a3626db`: 83.6% / 78.0%; WP-J adds x87, `NOTRACK`, the TLS call) | `-O3 -march=x86-64-v3`: **62.7% / 60.6%** (main: 59.1% / 58.7%) |
+| 2. runtime entry points with a contract, stub or proof (main + branches) | 71 of 309 names (39 on main; agent/rtiface adds 15) | same | same |
+| 2. … of the 191 linked on arm64/amd64: still missing | 139 (12 of them concurrency, excluded) | | |
+| 3. language constructs with a proved example | 64 of 75 rows (11 have none on either ISA; agent/constructs closes 20, agent/rtiface 4) | | |
+| 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | **100% / 100%** (all six configurations, WP-I; 93.6% / 86.2% before) | **96.4% / 98.2%** since WP-D (83.6% / 78.0% before: SSE2 packed) | `-O3 -march=x86-64-v3`: 59.1% / 58.7% (VEX, WP-F) |
 
 Main findings:
 
@@ -48,6 +55,13 @@ Main findings:
   `BLSI`) unblocked 676 functions, `MOVBE` 349, scalar FMA 79 and SSSE3 (`PSHUFB`, `PSIGNB` in
   the Swiss-table group match) 26. With them modelled (and oracle-tested, 0 MISMATCH) every
   Go-compiled, wrapper and test function of the v3 std test binaries decodes.
+* **The SSE packed families are modelled since WP-D** (agent/sse, measured 2026-10-25): SSE2
+  integer and floating point, SSE3, SSSE3, SSE4.1 and SSE4.2 (`CRC32`, `PCMPESTRI`...), oracle
+  0 MISMATCH. That unblocked 12 amd64 assembly functions (`indexbody`, `chacha8rand.block`,
+  `castagnoliSSE42`/`castagnoliSSE42Triple`, the four P-256 constant-time selects and the four
+  AES `_expand_key_*` helpers; no assembly function is blocked by an SSE family any more) and
+  took the C corpus at cgo's `-O2` from 78.0% to 98.2% (clang) and 83.6% to 96.4% (gcc); what
+  is left there is x87, the `NOTRACK` jump tables and the TLS call sequence (WP-J).
 * **Assembly is blocked by system instructions first, then SIMD and crypto.** `SVC`/`SYSCALL`,
   `BRK`/`INT3`/`UD2`, `MRS`/`MSR` of ID and DIT registers, `CPUID`/`XGETBV`/`RDTSC` are the sole
   blocker of 53 arm64 and 46 amd64 assembly functions. Then come AVX-512 (29 GC-scan
@@ -59,8 +73,9 @@ Main findings:
   (`INT $3` after its abort path), the syscall wrappers (`nanotime1`, `Syscall6`, `exit`,
   `osyield`, ...), `math.archExp` on amd64 (FMA/AVX path), `cputicks` (`RDTSC`), the AES-NI
   `memhash32`/`memhash64`, and the crypto kernels.
-* **C code is blocked mainly by the vector code that compilers auto-vectorise.** On amd64 that is
-  SSE2 packed integer at `-O2`/`-O3` and AVX2/BMI2/FMA with `-march=x86-64-v3`. On arm64 it is
+* **C code is blocked mainly by the vector code that compilers auto-vectorise.** On amd64 that
+  was SSE2 packed integer at `-O2`/`-O3` (modelled since WP-D) and is AVX2/BMI2/FMA with
+  `-march=x86-64-v3`. On arm64 it is
   `ADDP`, `UADDW`, `UMULL`, `FMLA`, `UZP1` and `LD4`/`ST4`. Three further encodings block gcc
   code on amd64: `ENDBR64` (on every gcc function, Ubuntu's default `-fcf-protection`; fixed on
   agent/ffi), `NOTRACK JMP` (the CET form of jump-table dispatch) and the general-dynamic TLS call
@@ -112,10 +127,10 @@ Main findings:
 | kind | arm64 | amd64 v1 | amd64 v3 |
 |---|---:|---:|---:|
 | Go-compiled (std, non-test) | 15,517 / 16,602 (**93.46%**) | 16,625 / 16,625 (**100.00%**) | 16,614 / 16,614 (**100.00%**) |
-| Go assembly (`.s`) | 151 / 207 (**72.95%**, after WP-H) | 148 / 265 (**55.85%**) | 145 / 262 (**55.34%**) |
+| Go assembly (`.s`) | 151 / 207 (**72.95%**, after WP-H) | 160 / 265 (**60.38%**; 148 before WP-D) | 157 / 262 (**59.92%**; 145 before WP-D) |
 | compiler-generated (`<autogenerated>`) | 5,960 / 5,996 (99.40%) | 6,002 / 6,002 (100.00%) | 6,000 / 6,000 (100.00%) |
 | Go test code | 24,128 / 24,852 (97.09%) | 24,881 / 24,881 (100.00%) | 24,881 / 24,881 (100.00%) |
-| C in the cgo binaries (`runtime/cgo`, gcc `-O2`) | 20 / 20 (100%) | 0 / 20 (0%, `ENDBR64` only) | 0 / 20 |
+| C in the cgo binaries (`runtime/cgo`, gcc `-O2`) | 20 / 20 (100%) | 20 / 20 (100%; `ENDBR64` since agent/ffi, `PUNPCKLQDQ` since WP-D) | 20 / 20 |
 | instruction occurrences accepted (Go-compiled) | 99.906% | 100.000% | 100.000% |
 | distinct encodings decoded | 1,038,143 | 10,633,357 (v1 and v3 together, cached) | |
 
@@ -204,16 +219,26 @@ after the rows above):
 amd64 v3 is the same as v1, except that 3 v1-only `math` assembly functions are absent (the
 compiler uses the instructions directly): 145 of 262 decode.
 
+**Since WP-D** (SSE packed, agent/sse) steps 3, 4, 6 and 7 of the amd64 column are modelled:
+160 of 265 (v1) and 157 of 262 (v3) assembly functions decode, 82.3% → 87.2% of their instruction
+occurrences. The 12 functions that became fully decodable are `indexbody` (`PCMPESTRI`),
+`internal/chacha8rand.block`, `hash/crc32.castagnoliSSE42` and `castagnoliSSE42Triple`,
+`crypto/internal/fips140/nistec.p256MovCond`, `p256Select`, `p256SelectAffine`,
+`p256PointAddAffineAsm`, and `_expand_key_128`, `_expand_key_192a`, `_expand_key_192b`,
+`_expand_key_256b`. No amd64 assembly function has an SSE-family blocker left; the remaining
+families are system instructions (WP-C), AVX-512 (WP-G), AES-NI, `PCLMULQDQ`, SHA-NI and ADX
+(WP-E), AVX/AVX2 (WP-F).
+
 **Per std package** (fully decodable / assembly functions; the families blocking them):
 
 | package | arm64 | amd64-v1 | amd64-v3 | blocking families (functions, arm64 / amd64-v1) |
 |---|---:|---:|---:|---|
 | runtime | 80/129 | 92/134 | 92/134 | arm64: system / barrier / hint 46, padding/udf 2, exclusive / acquire-release 1; amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 38, AES-NI 3, SSE4.1 2, SSE/SSE2 1, SSSE3 1, AVX-512 (EVEX, opmask) 1, integer/base 1 |
 | internal/runtime/gc/scan | – | 0/29 | 0/29 | amd64-v1: AVX-512 (EVEX, opmask) 29 |
-| crypto/internal/fips140/aes | 7/7 | 1/12 | 1/12 | amd64-v1: AES-NI 7, SSE/SSE2 5, SSE4.1 4, SSSE3 4 |
+| crypto/internal/fips140/aes | 7/7 | 5/12 (1 before WP-D) | 5/12 | amd64-v1: AES-NI 7, SSE/SSE2 5, SSE4.1 4, SSSE3 4 |
 | crypto/internal/fips140/aes/gcm | 0/5 | 0/5 | 0/5 | arm64: crypto extension (AES/SHA/PMULL/SHA3) 5; amd64-v1: PCLMULQDQ 5, SSE/SSE2 5, SSSE3 5, SSE4.1 4, AES-NI 3 |
-| crypto/internal/fips140/nistec | 15/15 | 12/16 | 12/16 | amd64-v1: SSE/SSE2 4 |
-| hash/crc32 | 0/2 | 0/3 | 0/3 | arm64: CRC32 2; amd64-v1: SSE4.2 2, AVX (128-bit VEX) 1, AVX-512 (EVEX, opmask) 1, PCLMULQDQ 1, SSE/SSE2 1, SSE4.1 1 |
+| crypto/internal/fips140/nistec | 15/15 | 16/16 (12 before WP-D) | 16/16 | amd64-v1: SSE/SSE2 4 |
+| hash/crc32 | 0/2 | 2/3 (0 before WP-D) | 2/3 | arm64: CRC32 2; amd64-v1: SSE4.2 2, AVX (128-bit VEX) 1, AVX-512 (EVEX, opmask) 1, PCLMULQDQ 1, SSE/SSE2 1, SSE4.1 1 |
 | syscall | 0/2 | 0/3 | 0/3 | arm64: system / barrier / hint 2; amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 3 |
 | crypto/internal/fips140/bigmod | 4/4 | 0/3 | 0/3 | amd64-v1: ADX 3, BMI1/BMI2/LZCNT 3 |
 | crypto/internal/fips140/sha256 | 0/1 | 0/2 | 0/2 | arm64: crypto extension (AES/SHA/PMULL/SHA3) 1; amd64-v1: AVX (128-bit VEX) 1, AVX2 (256-bit VEX) 1, BMI1/BMI2/LZCNT 1, SHA-NI 1, SSE/SSE2 1, SSE4.1 1, SSSE3 1 |
@@ -225,8 +250,8 @@ compiler uses the instructions directly): 145 of 262 decode.
 | internal/runtime/sys | 0/3 | – | – | arm64: system / barrier / hint 3 |
 | internal/runtime/syscall/linux | 0/1 | 0/1 | 0/1 | arm64: system / barrier / hint 1; amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 1 |
 | crypto/internal/boring/sig | 1/1 | 0/1 | 0/1 | amd64-v1: AVX/AVX2 other (VEX) 1, integer/base 1, system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 1 |
-| internal/bytealg | 11/11 | 14/15 | 14/15 | amd64-v1: SSE4.2 1 |
-| internal/chacha8rand | 1/1 | 0/1 | 0/1 | amd64-v1: SSE/SSE2 1 |
+| internal/bytealg | 11/11 | 15/15 (14 before WP-D) | 15/15 | amd64-v1: SSE4.2 1 |
+| internal/chacha8rand | 1/1 | 1/1 (0 before WP-D) | 1/1 | amd64-v1: SSE/SSE2 1 |
 | math | 4/4 | 7/8 | 4/5 | amd64-v1: AVX (128-bit VEX) 1, FMA 1 |
 | math/big | 6/6 | 5/6 | 5/6 | amd64-v1: ADX 1, BMI1/BMI2/LZCNT 1 |
 | crypto/internal/fips140/sha3 | 0/1 | 1/1 | 1/1 | arm64: crypto extension (AES/SHA/PMULL/SHA3) 1 |
@@ -312,7 +337,7 @@ Full table: `artifacts/coverage/runtime.tsv`.
 | slice/growslice | 16 | 10 | 0 | 2 |
 | map | 26 | 24 | 0 | 9 |
 | string | 22 | 20 | 0 | 0 |
-| interface/type assertion | 13 | 12 | 0 | 0 |
+| interface/type assertion | 13 | 12 | 0 | 13 |
 | memory/equality | 23 | 20 | 3 | 3 |
 | hashing/rand | 17 | 16 | 0 | 0 |
 | write barrier | 11 | 11 | 0 | 1 |
@@ -322,10 +347,10 @@ Full table: `artifacts/coverage/runtime.tsv`.
 | print (`println` builtin) | 19 | 18 | 0 | 0 |
 | cgo | 9 | 3 | 0 | 1 |
 | CPU feature flags (variables) | 10 | 5 | 0 | 0 |
-| misc | 11 | 8 | 0 | 2 |
+| misc | 11 | 8 | 0 | 4 |
 | instrumentation (msan/asan/fuzz/cover) | 17 | 0 | 0 | 0 |
 | concurrency (excluded) | 21 | 12 | 0 | 0 |
-| **total** | **309** | **191** | **39** | **56** |
+| **total** | **309** | **191** | **39** | **71** |
 
 **What exists today** (main unless noted):
 
@@ -342,20 +367,24 @@ Full table: `artifacts/coverage/runtime.tsv`.
   * agent/maps: `makemap_small`, `mapaccess1_fast64` (with the MapAccess1Small proof of the real
     code), `mapaccess2_fast64`, `mapaccess2`, `mapassign_fast64`, `mapdelete_fast64`, `mapclear`,
     `mapIterStart`, `mapIterNext`;
-  * agent/ffi: `cgocall`, `tls_g`/`_cgo_topofstack` (`TopOfStack`).
+  * agent/ffi: `cgocall`, `tls_g`/`_cgo_topofstack` (`TopOfStack`);
+  * agent/rtiface: `convT`, `convTnoptr`, `convT16`, `convT32`, `convT64`, `convTstring`,
+    `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch`, `efaceeq`,
+    `ifaceeq` (each pinned to the runtime's code and proved satisfiable), and the content of
+    `emptyTypeAssertCache` / `emptyInterfaceSwitchCache` (the cache model `TACacheOK.empty`,
+    `ISCacheOK.empty`).
 
-**Missing: no contract, stub or proof on any branch, and linked by std** (153; the 12
-concurrency names are excluded, which leaves **141 in scope**):
+**Missing: no contract, stub or proof on any branch, and linked by std** (139; the 12
+concurrency names are excluded, which leaves **127 in scope**):
 
 * **CPU feature flags (variables)**: `arm64HasATOMICS` `x86HasAVX` `x86HasFMA` `x86HasPOPCNT` `x86HasSSE41`
 * **cgo**: `cgoAlwaysFalse` `cgoCheckPointer`
 * **concurrency (excluded)**: `block` `chancap` `chanlen` `chanrecv1` `chanrecv2` `chansend1` `closechan` `makechan` `newproc` `selectgo` `selectnbrecv` `selectnbsend`
 * **conversion/soft arithmetic**: `complex128div` `f32to64` `f64to32` `fadd64` `fdiv64` `fmul64`
 * **hashing/rand**: `c128hash` `c64hash` `f32hash` `f64hash` `interhash` `memhash` `memhash0` `memhash128` `memhash16` `memhash32` `memhash64` `memhash8` `memhash_varlen` `nilinterhash` `rand` `strhash`
-* **interface/type assertion**: `assertE2I2` `convT` `convT16` `convT32` `convT64` `convTnoptr` `convTslice` `convTstring` `efaceeq` `ifaceeq` `interfaceSwitch` `typeAssert`
 * **map**: `makemap` `mapaccess1` `mapaccess1_fast32` `mapaccess1_faststr` `mapaccess1_fat` `mapaccess2_fast32` `mapaccess2_faststr` `mapaccess2_fat` `mapassign` `mapassign_fast32` `mapassign_fast64ptr` `mapassign_faststr` `mapdelete` `mapdelete_fast32` `mapdelete_faststr`
 * **memory/equality**: `c128equal` `c64equal` `f32equal` `f64equal` `interequal` `memclrHasPointers` `memequal0` `memequal128` `memequal16` `memequal32` `memequal64` `memequal8` `memequal_varlen` `nilinterequal` `strequal` `typedmemclr` `typedmemmove`
-* **misc**: `KeepAlive` `emptyInterfaceSwitchCache` `emptyTypeAssertCache` `gostring` `staticuint64s` `zeroVal`
+* **misc**: `KeepAlive` `gostring` `staticuint64s` `zeroVal`
 * **panic/recover/defer**: `deferproc` `deferprocStack` `deferreturn` `gorecover` `sigpanic`
 * **print (println builtin)**: `printbool` `printcomplex128` `printcomplex64` `printeface` `printfloat32` `printfloat64` `printhex` `printint` `printlock` `printnl` `printpointer` `printquoted` `printslice` `printsp` `printstring` `printuint` `printuintptr` `printunlock`
 * **slice/growslice**: `growsliceBuf` `makeslicecopy` `moveSlice` `moveSliceNoCap` `moveSliceNoCapNoScan` `moveSliceNoScan` `slicecopy` `typedslicecopy`
@@ -363,7 +392,7 @@ concurrency names are excluded, which leaves **141 in scope**):
 * **string**: `cmpstring` `concatbyte2` `concatbyte3` `concatbyte4` `concatbyte5` `concatbytes` `concatstring2` `concatstring3` `concatstring4` `concatstring5` `concatstrings` `countrunes` `decoderune` `intstring` `slicebytetostring` `slicerunetostring` `stringtoslicebyte` `stringtoslicerune` `strmax` `strmin`
 * **write barrier**: `gcWriteBarrier1` `gcWriteBarrier3` `gcWriteBarrier4` `gcWriteBarrier5` `gcWriteBarrier6` `gcWriteBarrier7` `gcWriteBarrier8` `wbMove` `wbZero` `writeBarrier`
 
-**Missing, defined by the linux/arm64 or amd64 runtime but not linked by std** (57; 3 of them
+**Missing, defined by the linux/arm64 or amd64 runtime but not linked by std** (56; 3 of them
 concurrency). Std never uses these, but other programs reach them: constructs std avoids, such as
 `defer` inside a range-over-func body (`deferprocat`, `deferrangefunc`), `println` of a non-empty
 interface (`printiface`) or `assertE2I`; the cgo checks generated in user packages (`cgoUse`,
@@ -376,7 +405,6 @@ interface (`printiface`) or `assertE2I`; the cgo checks generated in user packag
 * **conversion/soft arithmetic**: `f32toint32` `f32toint64` `f32touint64` `f64toint32` `f64toint64` `f64touint64` `fadd32` `fdiv32` `feq32` `feq64` `fge32` `fge64` `fgt32` `fgt64` `fint32to32` `fint32to64` `fint64to32` `fint64to64` `fmul32` `fuint64to32` `fuint64to64`
 * **hashing/rand**: `rand32`
 * **instrumentation (msan/asan/fuzz/cover)**: `addCovMeta` `asanread` `asanregisterglobals` `asanwrite` `msanmove` `msanread` `msanwrite`
-* **interface/type assertion**: `assertE2I`
 * **map**: `makemap64` `mapassign_fast32ptr`
 * **memory/equality**: `duffcopy` `duffzero`
 * **misc**: `gobytes` `gostringn`
@@ -404,7 +432,8 @@ architecture and branch, and what it rests on. A construct counts as covered onl
 `scripts/verify-examples.sh`, `examples/proofs*/`, `scripts/example-contracts.sh` and
 `scripts/verify-cgo-examples.sh` on each branch (`git show`). main has 28 arm64 proofs (plus the
 `WrongAdd` counterexample) and 31 amd64 proofs; agent/alloc adds 5+4, agent/maps 10+10,
-agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts only).
+agent/ffi 5+5 (cgo), agent/iface-alloc none (mechanism and allocation contracts only),
+agent/rtiface 4+4 (interfaces: `Box`, `AsHasher`, `Classify`, `Equal`).
 agent/constructs (package M1, `examples/basic/zconstructs.go`) adds 29 arm64 + 26 amd64:
 `Triangle`, `GotoSum`, `Find2D`, `RowsWith`, `Log2`, `TotalMeters`, `TotalFeet`, `Fact`,
 `SumBelow`, `IterSum`, `ReverseArray`, `DivMod10`, `SwapBig`, `Compose`, `DotBoth`, `BitMerge`,
@@ -430,7 +459,7 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | infinite for exiting by return | `AtomicMax` (main) | same | – |
 | labeled break / continue, goto | `Find2D` (labeled break), `RowsWith` (labeled continue), `GotoSum` (goto) (constructs) | same (constructs) | – |
 | expression switch, fallthrough | `Triangle` (constructs: 9 dense cases, a `.rodata` jump table, a `fallthrough` chain) | same (constructs) | jump tables need no runtime; decoder has `BR`/`JMP r` |
-| type switch | none | none | `runtime.interfaceSwitch`, itab/type compare |
+| type switch | `Classify` (rtiface: `nil`, `uint64`, `string`, `Hasher`, default) | same | `interfaceSwitch` contract; hash/type compares and the switch-cache probe executed |
 | range over array | `ReverseArray` (constructs) | same (constructs) | – |
 | range over slice | `Sum`, `MapSum` (main) | same | – |
 | range over string | none | none | `runtime.decoderune` |
@@ -474,9 +503,9 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | complex numbers | none | none | FP; `complex128div` |
 | `unsafe.Pointer` | `GoSum` (ffi) | same | – |
 | `uintptr` arithmetic | `AlignUp` (constructs) | same (constructs) | – |
-| interface boxing (`convT*`) | none | none | `convT`, `convT16/32/64`, `convTstring`, `convTslice`, `convTnoptr` |
-| type assertion (both forms) | none | none | `typeAssert`, `assertE2I(2)`, `panicdottype*` |
-| interface comparison | none | none | `ifaceeq`, `efaceeq`, type `equal` functions |
+| interface boxing (`convT*`) | `Box` (rtiface) | same | `convT64` contract (`convT`, `convT16/32`, `convTstring`, `convTslice`, `convTnoptr` contracts too) |
+| type assertion (both forms) | `AsHasher` (rtiface, comma-ok to an interface) | same | `typeAssert` contract, assertion-cache probe executed; `assertE2I(2)` contracts; the panicking form ends in the `panicnildottype` stub or excluded `typeAssert` panic |
+| interface comparison | `Equal` (rtiface, `any`) | same | `efaceeq` contract (`ifaceeq` too); type `Equal` functions abstract (`R.eq`, byte equality for `TFlagRegularMemory`) |
 | `min`, `max` builtins | integers: `MinMax` (constructs); floats, strings: none | same (constructs) | inline (`CSEL`/`CMOV`); `fmin`/`fmax`, `strmin`/`strmax` |
 | `clear` | `ClearWords` (main), `ClearMap` (maps); small array, inline stores: `ClearArray` (constructs) | same | `memclrNoHeapPointers` executed; `mapclear` |
 | `math/bits` | `Add128`, `Add256`, `AddLimbs`, `Mul64`, `RotHasher` (main) | same | – |
@@ -487,15 +516,15 @@ ISAs, and the arm64 proofs of the existing `Bump`, `GlobalTable`, `Table`.
 | pointer store (write barrier) | `SetNext` (alloc) | same | barrier fast path executed, `wbBufFlush` contract |
 | stack growth | none (every proof assumes `GuardOK`) | none | `morestack` stub; no theorem about the grown case |
 | recursion | `Fact` (constructs; `Summary.induction`, stack for every frame assumed) | same (constructs) | `Summary` induction (done); the grown stack: `morestack` (R7) |
-| cgo call into C | `GoAdd`, `GoSum` (ffi) | same | `CgoCall` contract |
-| C code alone | `CAdd`, `CSum`, `CStore` (ffi) | same | `CEnsures` |
+| cgo call into C | `GoAdd`, `GoSum`, `GoCount` (ffi) | same | `CgoCall` contract |
+| C code alone | `CAdd`, `CSum`, `CStore`, `CCount` (NEON, arm64) (ffi) | same | `CEnsures` |
 | `//export` callback C → Go | none | none | `crosscall2`, `cgocallback` |
 | goroutines, channels, select, `sync` | excluded (concurrency) | excluded | – |
 
-Not covered on any branch or architecture (with agent/constructs): the type switch; range over
+Not covered on any branch or architecture (with agent/constructs and agent/rtiface): range over
 string; heap defers, `panic`, `recover`; the nil-dereference fault; string concatenation,
 comparison and conversions; int/float and float32/float64 conversions; complex numbers;
-interface boxing, assertions and comparison; the grown-stack case; `//export` callbacks. Within
+the grown-stack case; `//export` callbacks. Within
 covered rows these forms still have no example: a non-inlined range-over-func loop, float and
 string `min`/`max`. amd64 lacks `IndexByte` (the arm64 example is in an
 arm64-only file) and `MallocFast`.
@@ -542,14 +571,14 @@ number of distinct Go-compiled functions. Full tables: `artifacts/coverage/asmca
 | `runtime.asmcgocall` | 11 / 11 | yes | yes | yes | (agent/ffi: `cgocall` contract) |
 | `runtime.cputicks` | – / 15 | – | no | no | `RDTSC`, `RDTSCP` |
 | `runtime.procyieldAsm` | 7 / 5 | no | yes | yes | arm64: `MRS CNTFRQ_EL0` |
-| `internal/chacha8rand.block` | 6 / 6 | yes | no | no | amd64: SSE2 `PADDD`, `PSLLD`, `PSRLD` |
+| `internal/chacha8rand.block` | 6 / 6 | yes | yes | yes | (amd64 SSE2 `PADDD`, `PSLLD`, `PSRLD`: WP-D) |
 | `crypto/internal/fips140/nistec.p256Mul`, `p256Sqr`, `p256FromMont`, `p256PointDoubleAsm`, `p256OrdMul` | 1–6 | yes | yes | yes | |
-| `crypto/internal/fips140/nistec.p256MovCond`, `p256Select`, `p256SelectAffine`, `p256PointAddAffineAsm` | 1–4 | yes | no | no | amd64: SSE2 `PCMPEQD`, `PANDN`, `PADDD`, `PSUBD` |
+| `crypto/internal/fips140/nistec.p256MovCond`, `p256Select`, `p256SelectAffine`, `p256PointAddAffineAsm` | 1–4 | yes | yes | yes | (amd64 SSE2 `PCMPEQD`, `PANDN`, `PADDD`, `PSUBD`: WP-D) |
 | `internal/bytealg.Compare`, `Count`, `CountString`, `Index`, `IndexString` | 2–5 | yes | yes | yes | |
 | `math/big.addVV`, `subVV`, `lshVU`, `rshVU`, `mulAddVWW` | 3–4 | yes | yes | yes | |
 | `math/big.addMulVVWW`, `bigmod.addMulVVW1024/1536/2048` | 3, 2 | yes | no | no | amd64: ADX `ADCX`/`ADOX`, BMI2 `MULX` |
 | `runtime.memhash32`, `memhash64` | 2 / 2 | yes | no | no | amd64: AES-NI `AESENC`, SSE4.1 `PINSRD`/`PINSRQ` |
-| `hash/crc32.ieeeUpdate`, `castagnoliUpdate` (arm64); `castagnoliSSE42`, `ieeeCLMUL` (amd64) | 1–2 | no | no | no | arm64: `CRC32*`; amd64: SSE4.2 `CRC32`, `PCLMULQDQ`, AVX-512 `VPCLMULQDQ`/`VPTERNLOGD` |
+| `hash/crc32.ieeeUpdate`, `castagnoliUpdate` (arm64); `castagnoliSSE42`, `ieeeCLMUL` (amd64) | 1–2 | no | `castagnoliSSE42*` yes (WP-D); `ieeeCLMUL` no | same | arm64: `CRC32*`; amd64 `ieeeCLMUL`: `PCLMULQDQ`, AVX-512 `VPCLMULQDQ`/`VPTERNLOGD` |
 | `crypto/internal/fips140/aes.encryptBlockAsm`, `decryptBlockAsm`, `expandKeyAsm`, `ctrBlocks{1,2,4,8}Asm` | 1 | yes | no | no | amd64: AES-NI (`AESENC`, `AESENCLAST`, `AESDEC*`, `AESIMC`, `AESKEYGENASSIST`), SSSE3 `PSHUFB`, SSE4.1 `PINSRQ` |
 | `crypto/internal/fips140/aes/gcm.gcmAes{Init,Enc,Dec,Data,Finish}` | 1–2 | no | no | no | arm64: `PMULL`/`PMULL2`; amd64: `PCLMULQDQ`, AES-NI, `PSHUFB`, `PSLLDQ`/`PSRLDQ` |
 | `crypto/internal/fips140/sha256.blockSHA2` (arm64), `blockSHANI`, `blockAVX2` (amd64) | 1 | no | no | no | arm64: `SHA256H/H2/SU0/SU1`; amd64: SHA-NI; AVX2 + `RORX` |
@@ -568,8 +597,8 @@ needing SIMD encodings, by hot callee:
 
 * AES-NI + `PSHUFB` + `PINSR*` for `aeshash`/`memhash32`/`memhash64`, which every map with
   non-fast keys and every `string` map hash reaches;
-* SSE2 packed integer for `chacha8rand.block` (`runtime.rand`) and the constant-time P-256
-  selects;
+* (done in WP-D: SSE2 packed integer for `chacha8rand.block` (`runtime.rand`) and the
+  constant-time P-256 selects, SSE4.2 for `indexbody` and `castagnoliSSE42*`);
 * ADX/BMI2 for `math/big` and `bigmod`;
 * FMA for `math.archExp`;
 * the crypto kernels (AES-NI, PCLMULQDQ, SHA-NI, AVX2, AVX-512 `VPCLMULQDQ`);
@@ -606,16 +635,19 @@ Each file is compiled the way cgo invokes the C compiler (`-fPIC -pthread -g`, p
 | gcc 15.2 | 106/110 (96.4%) | 102/109 (93.6%) | 93/109 (85.3%) | 0/110 (0%) | 1/110 (0.9%) | 1/110 (0.9%) | 1/110 (0.9%) |
 | gcc, once agent/ffi's `ENDBR64` is merged | | | | 108/110 (98.2%) | 92/110 (83.6%) | 85/110 (77.3%) | 58/110 (52.7%) |
 | clang 21.1 | 106/110 (96.4%) | 94/109 (86.2%) | 94/109 (86.2%) | 105/110 (95.5%) | 85/109 (78.0%) | 85/109 (78.0%) | 55/109 (50.5%) |
-| gcc, main `a3626db` (`ENDBR64`, WP-B) | | | | 108/110 (98.2%) | 92/110 (83.6%) | 85/110 (77.3%) | 65/110 (59.1%) |
-| clang, main `a3626db` | | | | 105/110 (95.5%) | 85/109 (78.0%) | 85/109 (78.0%) | 64/109 (58.7%) |
-| **gcc, with WP-J** (x87, `NOTRACK`, TLS call) | | | | **110/110 (100%)** | **96/110 (87.3%)** | **89/110 (80.9%)** | **69/110 (62.7%)** |
-| **clang, with WP-J** | | | | **107/110 (97.3%)** | **87/109 (79.8%)** | **87/109 (79.8%)** | **66/109 (60.6%)** |
+| gcc, after WP-D (2026-10-25; `ENDBR64` merged) | | | | 108/110 (98.2%) | **106/110 (96.4%)** | **106/110 (96.4%)** | 65/110 (59.1%) |
+| clang, after WP-D | | | | 108/110 (98.2%) | **107/109 (98.2%)** | **107/109 (98.2%)** | 64/109 (58.7%) |
+
+After WP-D no amd64 C function at `-O0`/`-O2`/`-O3` has an SSE blocker: what is left is
+`a_ldouble` (x87), `a_use_tls` (the padded `call __tls_get_addr`) and, for gcc, the two `NOTRACK`
+jump tables (`s_dense`, `s_name`), all WP-J; under `-march=x86-64-v3` the VEX instructions of
+WP-F.
 
 **Blocking families, all configurations** (functions blocked, excluding `ENDBR64`):
 
 * **amd64**:
   * *ENDBR64*: every gcc function (Ubuntu's `-fcf-protection` default); decoded on agent/ffi.
-  * *SSE2 packed integer and FP*: `PADDQ`, `PADDD`, `PSUBD`, `PSRLDQ`, `PSLLD`, `PSRLD`, `PSRAD`,
+  * *SSE2 packed integer and FP* (modelled since WP-D): `PADDQ`, `PADDD`, `PSUBD`, `PSRLDQ`, `PSLLD`, `PSRLD`, `PSRAD`,
     `PCMPEQD`, `PCMPGTD`, `PANDN`, `PUNPCK*`, `PACKUSWB`, `PMULLW`, `PMULHUW`, `PMULUDQ`, `PMINUB`,
     `PMAXUB`, `PSUBUSB`, `SHUFPS`, `ADDPS`, `MULPS`, `MULPD`, `UNPCKHPD`, `CVTDQ2PD`, `MOVLHPS`,
     `MOVLPS`. They block 14–22 functions per config at -O2/-O3 (gcc and clang) and are the sole
@@ -648,6 +680,131 @@ Each file is compiled the way cgo invokes the C compiler (`-fPIC -pthread -g`, p
 The C code in the cgo binaries of criterion 1 (`runtime/cgo`'s `gcc_*.c`, gcc `-O2`) decodes
 completely on arm64 (20 functions, including `paciasp`/`bti`) and is blocked only by `ENDBR64`
 on amd64. On amd64 there is also one `PUNPCKLQDQ`.
+### 5.3 Advanced SIMD in compiled C and Go assembly (package I, agent/neon)
+
+Measured on agent/neon (main 987d96d plus `Janus/Arm64/NeonInstr.lean`, `DecodeNeon.lean`, `Neon.lean`, `NeonFP.lean`, `ExecNeon.lean`),
+same toolchains. Rerun with `scripts/coverage.sh cc` (the official corpus) and
+`oracle/harvest/neon/build.sh` plus `scripts/coverage/` `insn -c` (the supplementary corpus).
+
+| corpus | arm64 config | before (main) | after (agent/neon) |
+|---|---|---:|---:|
+| official C corpus (5.1) | gcc -O0 / -O2 / -O3 | 106/110 / 102/109 / 93/109 | **110/110 / 109/109 / 109/109** |
+| | clang -O0 / -O2 / -O3 | 106/110 / 94/109 / 94/109 | **110/110 / 109/109 / 109/109** |
+| supplementary NEON corpus (`oracle/harvest/neon`, 476 functions) | gcc -O0 / -O2 / -O3 | 462/480 / 348/476 / 177/476 | **480/480 / 476/476 / 476/476** |
+| | clang -O0 / -O2 / -O3 | 472/480 / 192/476 / 192/476 | **480/480 / 476/476 / 476/476** |
+| Go assembly (1.3) | std, `go test -c` | 139/207 (67.15%) | **140/207 (67.63%)** alone; 151/207 (72.95%) merged with agent/armcrypto, the same as WP-H alone |
+| Go-compiled, wrappers, test code (1.1) | std | 93.46% / 99.40% / 97.09% | unchanged (no Go-compiled code uses the new classes) |
+
+The supplementary corpus is 476 small loop idioms over every element type (element-wise
+arithmetic, compares and selects, shifts, widening and narrowing, saturation written the C way,
+reductions, interleaved structures, conversions, rounding, `fma`), plain C11 without intrinsics,
+so only the auto-vectorisers emit NEON; it measures the instruction set compiled C needs far
+beyond the 21 loops of `vec.c`. In assembly, `vendor/golang.org/x/crypto/chacha20.xorKeyStreamVX`
+now decodes (`ZIP1`/`ZIP2` on `.4S`/`.2D`, `MOV` element); `crypto/sha1.sha1block` is left
+with its SHA1 instructions only. After merging agent/armcrypto (whose `CryptoInstr.permute` /
+`dupScalar` now decode ZIP/UZP/TRN and scalar DUP; the NEON copies were dropped) the arm64 assembly
+count is 151/207 (re-measured 2026-10-25), every remaining blocker a system instruction (`SVC`,
+`BRK`, `MRS`, `MSR`), padding or `STLXR`, and the C corpus is still 100% in all six configurations.
+
+**Ranking** (supplementary corpus, all six configurations, 2,864 function-configurations, 1,021
+blocked before; class = `arm64asm` mnemonic). By functions blocked:
+
+| class | functions blocked | sole blocker |
+|---|---:|---:|
+| `UZP1` | 114 | 41 |
+| `FMLA` | 70 | 30 |
+| `FMUL` | 59 | 19 |
+| `ZIP1` | 54 | 5 |
+| `UZP2` | 52 | 9 |
+| `LD2` | 52 | 16 |
+| `UMULL` | 43 | 0 |
+| `UMULL2` | 42 | 0 |
+| `UADDW` | 42 | 0 |
+| `ZIP2` | 40 | 0 |
+| `SMULL` | 40 | 0 |
+| `SMULL2` | 40 | 0 |
+| `FCVTZS` | 39 | 23 |
+| `LD4` | 37 | 6 |
+| `UADDW2` | 35 | 0 |
+| `FCMGT` | 31 | 19 |
+| `FADD` | 31 | 11 |
+| `ST4` | 30 | 0 |
+| `SCVTF` | 29 | 22 |
+| `SMLAL` | 27 | 0 |
+| `SMLAL2` | 25 | 0 |
+| `SADDW` | 25 | 0 |
+| `UADDL` | 24 | 0 |
+| `UADDL2` | 24 | 0 |
+| `ST2` | 24 | 9 |
+| `SADDW2` | 24 | 0 |
+| `ADDP` | 24 | 3 |
+| `USUBL` | 23 | 2 |
+| `UCVTF` | 22 | 16 |
+| `FNEG` | 22 | 14 |
+
+Greedy order (the class that makes the most functions fully decodable next):
+
+| step | class added | + functions | fully decodable |
+|---:|---|---:|---:|
+| 1 | `UZP1` | +41 | 1884 (65.8%) |
+| 2 | `FMLA` | +30 | 1914 (66.8%) |
+| 3 | `FCVTZS` | +30 | 1944 (67.9%) |
+| 4 | `SCVTF` | +22 | 1966 (68.6%) |
+| 5 | `FMUL` | +23 | 1989 (69.4%) |
+| 6 | `LD2` | +20 | 2009 (70.1%) |
+| 7 | `FCMGT` | +19 | 2028 (70.8%) |
+| 8 | `USHL` | +19 | 2047 (71.5%) |
+| 9 | `UCVTF` | +18 | 2065 (72.1%) |
+| 10 | `FNEG` | +17 | 2082 (72.7%) |
+| 11 | `ST2` | +18 | 2100 (73.3%) |
+| 12 | `SSHL` | +16 | 2116 (73.9%) |
+| 13 | `MLA` | +16 | 2132 (74.4%) |
+| 14 | `FADD` | +15 | 2147 (75.0%) |
+| 15 | `CLZ` | +15 | 2162 (75.5%) |
+| 16 | `UZP2` | +13 | 2175 (75.9%) |
+| 17 | `MUL` | +13 | 2188 (76.4%) |
+| 18 | `MOV` | +13 | 2201 (76.9%) |
+| 19 | `ZIP1` | +12 | 2213 (77.3%) |
+| 20 | `ZIP2` | +21 | 2234 (78.0%) |
+| 21 | `FMAXNM` | +12 | 2246 (78.4%) |
+| 22 | `FCMEQ` | +12 | 2258 (78.8%) |
+| 23 | `URHADD` | +12 | 2270 (79.3%) |
+| 24 | `FDIV` | +12 | 2282 (79.7%) |
+| 25 | `FSUB` | +14 | 2296 (80.2%) |
+
+and so on down to the last of 112 classes (`RADDHN`); `scripts/coverage/rank-classes.py` prints
+the full tables from the `insn -c -json` outputs (computed with the decoder of main). On the official corpus alone the
+greedy order is:
+
+| step | class added | + functions | fully decodable |
+|---:|---|---:|---:|
+| 1 | `ADDP` | +17 | 612 (93.3%) |
+| 2 | `FNEG` | +8 | 620 (94.5%) |
+| 3 | `SCVTF` | +5 | 625 (95.3%) |
+| 4 | `FMLA` | +4 | 629 (95.9%) |
+| 5 | `UZP1` | +4 | 633 (96.5%) |
+| 6 | `USHR` | +2 | 635 (96.8%) |
+| 7 | `UCVTF` | +2 | 637 (97.1%) |
+| 8 | `MUL` | +2 | 639 (97.4%) |
+| 9 | `MOV` | +1 | 640 (97.6%) |
+| 10 | `FMUL` | +2 | 642 (97.9%) |
+| 11 | `FCVTZU` | +1 | 643 (98.0%) |
+| 12 | `FCVTZS` | +1 | 644 (98.2%) |
+| 13 | `UADDW` | +0 | 644 (98.2%) |
+| 14 | `UADDW2` | +2 | 646 (98.5%) |
+| 15 | `ZIP2` | +0 | 646 (98.5%) |
+| 16 | `ZIP1` | +3 | 649 (98.9%) |
+| 17 | `UMULL2` | +0 | 649 (98.9%) |
+| 18 | `UMULL` | +4 | 653 (99.5%) |
+| 19 | `ST4` | +0 | 653 (99.5%) |
+| 20 | `LD4` | +2 | 655 (99.8%) |
+| 21 | `UZP2` | +0 | 655 (99.8%) |
+| 22 | `TRN2` | +1 | 656 (100.0%) |
+
+What the decoder still rejects in these classes, by design: half precision (FEAT_FP16, and
+`FCVTL`/`FCVTN` to or from half), BFloat16, dot products, `SQRDMLAH`/`SQRDMLSH`, `FMLAL`/
+`FMLSL`, `FCMLA`/`FCADD`, `FRINT32*`/`FRINT64*` (optional features no corpus function uses),
+and `PMULL`/`PMULL2` (package H).
 
 ### 5.2 The C-side ABI, against agent/ffi's model
 
@@ -715,16 +872,16 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 3 | **L. Go assembly ABI0 and ABI wrappers** (**done**: [ABI0.md](ABI0.md), `examples/asm`, 5 theorems per ISA): ABI0 call/return (arguments and results in the caller's frame, everything caller-saved, `g` from TLS / `X28`/`R14` on re-entry, `X15` zeroing), `Ensures0`/`Summary0`, and lemmas for the ABIInternal↔ABI0 wrappers and for the direct ABI0 calls the compiler emits from Go | lets theorems be stated about the 145 (arm64) / 170 (amd64) ABI0 assembly functions; 90 / 91 of them already decode | `Janus/GoABI0.lean`, `Janus/Amd64/GoABI0.lean`, `Janus/Tactic/ABI0.lean`, `examples/asm/` | M | iface-alloc (tactic files) |
 | 4 | **C. Kernel and system instructions**: `SVC #0`/`SYSCALL` as a `.syscall` stub with per-syscall contracts (`write`, `read`, `openat`, `exit_group`, `clock_gettime` and vDSO, `mmap`/`munmap`/`madvise`, `rt_sigprocmask`, `sigaltstack`, `sched_yield`, `nanosleep`, ...); `BRK`/`INT3`/`UD2`/`HLT`/in-function `UDF` as trap faults; `CPUID`, `XGETBV`, `RDTSC(P)`, `MRS MIDR_EL1`, `MRS CNTFRQ_EL0`, DIT `MRS`/`MSR` as environment-value contracts; `PUSHFQ`/`POPFQ` | assembly: arm64 +53 (→ 92.8%), amd64 +46 (→ 73.2%); makes the syscall wrappers (`nanotime1`, `Syscall6`, `rawSyscallNoError`, `exit`, `osyield`, `open`, `read`, ...) and their Go callers (`os`, `time`, `println`) provable | `Janus/Contracts/Syscall.lean`, `Janus/Contracts/SyscallAmd64.lean`, the `SVC`/`SYSCALL`/trap entries of both decoders, stub kind in `cmd/janus/extract.go` | M | iface-alloc |
 | 5 | **J. amd64 C-specific encodings**: merge agent/ffi's `ENDBR64`; `NOTRACK` (`3E`) on `JMP`/`CALL r/m` (CET jump tables); the padded `call __tls_get_addr` sequence (`66 66 48 E8`); x87 for `long double` (`FLD`/`FSTP` 80-bit, `FADDP`, `FMULP`, `FLD1`, `FXCH`, the x87 stack and control word on the IEEE core) | gcc amd64 C: 0.9% → 83.6% (`ENDBR64`, merged) → **87.3%** (-O2; -O0 100%); `s_dense`/`s_name` jump tables, `a_use_tls`, `a_ldouble` — **done** (agent/x87: decoder, x87 model, oracle x87 mode, `CSwitch`/`CLdMul`/`GoLdMul`) | `Janus/Amd64/Decode.lean` (prefix handling), new `Janus/Amd64/X87.lean` | S (ENDBR, NOTRACK, TLS call) + L (x87) | ffi |
-| 6 | **D. SSE packed integer and FP (XMM)**: SSE2 integer (`PADD*`, `PSUB*`, `PMUL*`, `PCMP*`, `PAND(N)`, shifts incl. `PSLLDQ`/`PSRLDQ`, `PUNPCK*`, `PACK*`, `PMIN/PMAX*`, `PSADBW`), packed FP (`ADDPS/PD`, `MULPS/PD`, `SHUFPS`, `UNPCK*`, `MOVLHPS`, `CVTDQ2PD`), SSSE3 (`PALIGNR`, `PSHUFB`, `PABS*`), SSE4.1 (`PINSR*`, `PEXTR*`, `PBLENDW`, `BLENDV*`, `PMOV[SZ]X*`, `PMULLD`, `PTEST`), SSE4.2 (`CRC32`, `PCMPESTRI`/`PCMPISTRI`, `PCMPGTQ`) | C: clang -O2 78.0% → ≈ 99%, gcc -O2 (after J) 83.6% → ≈ 99%; assembly: `chacha8rand.block`, P-256 selects, `indexbody`, `castagnoliSSE42*`, part of AES/GCM/SHA (+19 sole, more with E) | new `Janus/Amd64/{DecodeSSE,ExecSSE}.lean` (hook in `Decode.lean`) | L | ffi; B for the shared `PSHUFB` |
+| 6 | **D. SSE packed integer and FP (XMM)** (**done**, agent/sse: assembly v1 148 → 160, C `-O2` clang 78.0% → 98.2%, gcc 83.6% → 96.4%, oracle 0 MISMATCH; `docs/AMD64.md`): SSE2 integer (`PADD*`, `PSUB*`, `PMUL*`, `PCMP*`, `PAND(N)`, shifts incl. `PSLLDQ`/`PSRLDQ`, `PUNPCK*`, `PACK*`, `PMIN/PMAX*`, `PSADBW`), packed FP (`ADDPS/PD`, `MULPS/PD`, `SHUFPS`, `UNPCK*`, `MOVLHPS`, `CVTDQ2PD`), SSSE3 (`PALIGNR`, `PSHUFB`, `PABS*`), SSE4.1 (`PINSR*`, `PEXTR*`, `PBLENDW`, `BLENDV*`, `PMOV[SZ]X*`, `PMULLD`, `PTEST`), SSE4.2 (`CRC32`, `PCMPESTRI`/`PCMPISTRI`, `PCMPGTQ`) | C: clang -O2 78.0% → ≈ 99%, gcc -O2 (after J) 83.6% → ≈ 99%; assembly: `chacha8rand.block`, P-256 selects, `indexbody`, `castagnoliSSE42*`, part of AES/GCM/SHA (+19 sole, more with E) | new `Janus/Amd64/{DecodeSSE,ExecSSE}.lean` (hook in `Decode.lean`) | L | ffi; B for the shared `PSHUFB` |
 | 7 | **E. x86 crypto extensions**: AES-NI (`AESENC(LAST)`, `AESDEC(LAST)`, `AESIMC`, `AESKEYGENASSIST`), `PCLMULQDQ`, SHA-NI (`SHA1*`, `SHA256*`), ADX (`ADCX`/`ADOX`) | assembly: `aeshashbody`, `memhash32/64` (every map hash), AES block/CTR/key expansion (12), GCM (5), SHA-NI (2), `math/big.addMulVVWW`, `bigmod.addMulVVW*` (4) | new `Janus/Amd64/{DecodeCrypto,ExecCrypto}.lean` | M | D, B (`MULX`) |
-| 8 | **I. arm64 ASIMD for compiled C**: `ADDP`, `UADDW(2)`, `UMULL(2)`, `MUL` (vector), `FMLA`/`FMUL`/`FNEG` (vector FP, on the IEEE core), `SCVTF` (vector), `UZP1`/`ZIP1`, `LD4`/`ST4`, `USHR`, and the scalar `SCVTF`/`UCVTF`/`FCVTZS`/`FCVTZU` forms of gcc/clang `-O0` | C arm64: gcc -O3 85.3%, clang -O2/-O3 86.2%, gcc -O2 93.6%, -O0 96.4% → **100%** | `Janus/Arm64/Vector.lean` (+ new `VectorFP.lean`), `Janus/Arm64/DecodeFloat.lean` (conversion forms) | M | none |
+| 8 | **I. arm64 ASIMD for compiled C**: `ADDP`, `UADDW(2)`, `UMULL(2)`, `MUL` (vector), `FMLA`/`FMUL`/`FNEG` (vector FP, on the IEEE core), `SCVTF` (vector), `UZP1`/`ZIP1`, `LD4`/`ST4`, `USHR`, and the scalar `SCVTF`/`UCVTF`/`FCVTZS`/`FCVTZU` forms of gcc/clang `-O0` | C arm64: gcc -O3 85.3%, clang -O2/-O3 86.2%, gcc -O2 93.6%, -O0 96.4% → **100%** (done on agent/neon, 5.3: every arrangement of the integer and single/double FP classes, `LD2`–`ST4`, `LDNP`/`STNP`; supplementary corpus 37.2–98.3% → 100%; assembly +1, `chacha20.xorKeyStreamVX`) | `Janus/Arm64/Vector.lean` (+ new `VectorFP.lean`), `Janus/Arm64/DecodeFloat.lean` (conversion forms) | M | none |
 | 9 | **H. arm64 crypto extensions, CRC32, permutes** (done on agent/armcrypto: 151/207 assembly, `A64Crc32` proved; see 1.3): `PMULL`/`PMULL2` (1Q), `SHA1C/H/M/P/SU0/SU1`, `SHA256H/H2/SU0/SU1`, `SHA512H/H2/SU0/SU1`, SHA3 `EOR3`/`RAX1`/`XAR`/`BCAX`, `CRC32{B,H,W,X}`, `CRC32C{B,H,W,X}`, `ZIP1`/`ZIP2` on 2D, `MOV` element | arm64 assembly +12 (GCM ×5, SHA-1/256/512, SHA3, CRC32 ×2, chacha20); with C 206/207, the last being A's `cgoSigtramp` | new `Janus/Arm64/Crypto.lean` (hook in `Decode.lean`) | M | none (I for the shared `ZIP1`) |
 | 10 | **F. AVX/AVX2 (VEX-128/256, YMM)** beyond the moves and compares `memmove`/`memequal` use: integer and FP arithmetic, shuffles and permutes (`VPSHUFB`, `VPALIGNR`, `VPERM2I128`, `VPERMD`, `VPBLENDD`, `VINSERTI128`, `VEXTRACTI128`, `VPBROADCAST*`), packed FMA, the `V*SD/SS` scalar forms | C `-march=x86-64-v3`: gcc 52.7%, clang 50.5% → ≈ 99%; assembly: `math.archExp`, SHA-1/256/512 AVX2, chacha20poly1305 (+7 in the greedy table) | new `Janus/Amd64/{DecodeAVX,ExecAVX}.lean` | L | D (lane semantics generalised to 256 bits) |
 | 11 | **G. AVX-512**: EVEX decoding (`disp8*N`, broadcast, masking, zeroing), ZMM state, `K0`–`K7` and `KMOV*`, `VMOVDQU64`, `VPERMB`/`VPERMI2B` (VBMI), `VGF2P8AFFINEQB` (GFNI), `VPOPCNTB`, `VPCOMPRESSQ`, `VPTERNLOGD`, `VPCLMULQDQ`, `VEXTRACTF32X4`, `VPCMPUQ`, the `asyncPreempt` state save | assembly +29 (`internal/runtime/gc/scan.expandAVX512_*`, the GC's span scanning), `ieeeCLMUL`, `asyncPreempt` → amd64 assembly 100% (with C, D, E, F) | new `Janus/Amd64/{DecodeEVEX,ExecEVEX}.lean`, ZMM/K fields in `Janus/Amd64/State.lean` | XL | F |
 | 12 | **K1. C ABI: arguments and results** (**done**, agent/cabi: docs/FFI.md § 1, `scripts/cabi-probe.sh`): stack arguments, FP/SIMD arguments and results, callee-saved `V8`–`V15` low halves, FPCR/MXCSR/x87-CW preservation, SysV classification (INTEGER/SSE/MEMORY), AAPCS64 HFA/HVA, indirect results (`X8`, hidden `RDI`), varargs (`AL`, register save area, `va_list` for both ABIs), `long double`/`_Complex` returns | rows 2–6 and 15 of the table in 5.2 | `Janus/CABI.lean`, `Janus/Amd64/CABI.lean`, docs/FFI.md § 1 | L | ffi |
 | 13 | **K2. C ABI: environment**: `//export` callbacks (`crosscall2` → `cgocallback` contract and the reverse composition theorem), function-pointer hypotheses, writable C globals and `-fPIC` GOT access as data objects, TLS (initial-exec, general-dynamic, TLSDESC), PLT stubs and libc contracts (`memcpy`, `memset`, `strlen`, `malloc`/`free`, outline atomics), `setjmp`/`longjmp` (non-local return), `alloca` frame lemmas | rows 7–13 of 5.2 | `Janus/FFI.lean`, `Janus/Amd64/FFI.lean`, new `Janus/Contracts/Libc.lean`, the cgo part of `cmd/janus/extract.go`, docs/FFI.md §§ 2–4 | L | K1, iface-alloc |
 | 14 | **R1. String runtime contracts**: `concatstring2..5`/`concatstrings`, `concatbyte2..5`/`concatbytes`, `slicebytetostring`, `slicebytetostringtmp`, `stringtoslicebyte`, `stringtoslicerune`, `slicerunetostring`, `intstring`, `cmpstring` (executed: decodes), `decoderune`, `countrunes`, `strmin`/`strmax`, `gostring`, `gostringn`, `gobytes` | 20 linked + 3 | `Janus/Contracts/String.lean` (+`Amd64`), `Janus/Spec/String.lean` | M | iface-alloc (alloc contracts) |
-| 15 | **R2. Interface runtime contracts**: `convT`, `convTnoptr`, `convT16/32/64`, `convTstring`, `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch` (+ `emptyTypeAssertCache`, `emptyInterfaceSwitchCache`), `ifaceeq`, `efaceeq` | 12 linked + 1 + 2 caches; unlocks type switches and assertions (criterion 3) | `Janus/Contracts/Iface.lean` (+`Amd64`), `Janus/Spec/Type.lean` | M | iface-alloc |
+| 15 | **R2. Interface runtime contracts** (done on agent/rtiface): `convT`, `convTnoptr`, `convT16/32/64`, `convTstring`, `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch` (+ `emptyTypeAssertCache`, `emptyInterfaceSwitchCache`), `ifaceeq`, `efaceeq` | 12 linked + 1 + 2 caches; unlocks type switches and assertions (criterion 3) | `Janus/Contracts/Iface.lean` (+`Amd64`), `Janus/Spec/Type.lean` | M | iface-alloc |
 | 16 | **R3. Remaining map contracts**: `makemap`, generic `mapaccess1`/`mapassign`/`mapdelete`, the `_fast32`, `_faststr`, `_fat` and `_fast64ptr` variants | 15 linked | `Janus/Contracts/Map*.lean` (extending agent/maps) | M | maps, R4 (key hashing) |
 | 17 | **R4. Equality and hashing contracts**: `memequal0/8/16/32/64/128`, `memequal_varlen`, `f32equal`, `f64equal`, `c64equal`, `c128equal`, `strequal`, `interequal`, `nilinterequal`; `memhash*`, `strhash`, `f32hash`, `f64hash`, `c64hash`, `c128hash`, `interhash`, `nilinterhash`, `rand` (seeded hash as an uninterpreted function with its laws); `typedmemmove`, `typedmemclr`, `memclrHasPointers` | 17 + 16 linked | `Janus/Contracts/Mem.lean`, `Janus/Contracts/Hash.lean` | M | iface-alloc; E to execute `aeshash` instead of assuming it |
 | 18 | **R5. Slices and write barriers**: `growsliceBuf`, `growslice*NoAlias`, `makeslicecopy`, `moveSlice*`, `slicecopy`, `typedslicecopy`; `gcWriteBarrier1`, `3`–`8`, `wbZero`, `wbMove`, the `writeBarrier` flag | 8 + 2 and 10 linked | `Janus/Contracts/Alloc*.lean` (extending agent/alloc), `Janus/Contracts/WriteBarrier.lean` | S–M | alloc, iface-alloc |

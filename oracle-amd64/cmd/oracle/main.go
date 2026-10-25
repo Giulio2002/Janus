@@ -9,6 +9,7 @@
 //	oracle minimize -out DIR                                   shrink mismatching cases to repro.md
 //	oracle selftest                                            check the native harness itself
 //	oracle coverage -model M -pkgs bytes.,strings. BIN...     decoder coverage of real Go functions
+//	oracle classes -sse                                        the WP-D class regexp (harvest -only)
 package main
 
 import (
@@ -51,6 +52,13 @@ func main() {
 		cmdMinimize(os.Args[2:])
 	case "coverage":
 		cmdCoverage(os.Args[2:])
+	case "classes":
+		// the class regular expression of a mode, for `harvest -only`
+		if len(os.Args) > 2 && os.Args[2] == "-sse" {
+			fmt.Println(gen.SSERegexp())
+		} else {
+			fmt.Println(gen.V3Regexp())
+		}
 	default:
 		die("unknown command %q", os.Args[1])
 	}
@@ -136,6 +144,7 @@ func cmdGen(args []string) {
 	fpOnly := fs.Bool("fp-only", false, "generate only the SSE floating-point specs (gen.FPSpecs, the FP edge families)")
 	v3Only := fs.Bool("v3-only", false, "generate only the GOAMD64=v3 extension specs (gen.V3Specs, gen.V3VexSpecs, the FMA edge family)")
 	x87Only := fs.Bool("x87-only", false, "generate only the x87 specs and the CET/TLS-call encodings (gen.X87Cases)")
+	sseOnly := fs.Bool("sse-only", false, "generate only the SSE packed specs of WP-D (gen.SSESpecs, the SSE edge families)")
 	nEdge := fs.Int("edge", 400, "rounds of the hand-targeted edge families (gen.Edges)")
 	seed := fs.Uint64("seed", 1, "random seed")
 	out := fs.String("o", "gen.jsonl", "output")
@@ -151,6 +160,10 @@ func cmdGen(args []string) {
 	}
 	if *v3Only {
 		specs, vexSpecs = gen.V3Specs, nil
+		*nEdge, *ng = 0, 0
+	}
+	if *sseOnly {
+		specs, vexSpecs, v3VexSpecs = gen.SSESpecs, nil, nil
 		*nEdge, *ng = 0, 0
 	}
 	if *x87Only {
@@ -214,6 +227,15 @@ func cmdGen(args []string) {
 	}
 	for _, e := range gen.Edges(r, *nEdge) {
 		cw.emit(e.Class, e.Bytes, e.State)
+	}
+	if *sseOnly || *nEdge > 0 {
+		rounds := max(*nEdge/8, 1)
+		if *sseOnly {
+			rounds = max(*n/4, 1)
+		}
+		for _, e := range gen.SSEEdges(r, rounds) {
+			cw.emit(e.Class, e.Bytes, e.State)
+		}
 	}
 	if *fpOnly || *nEdge > 0 {
 		rounds := max(*nEdge/8, 1)
