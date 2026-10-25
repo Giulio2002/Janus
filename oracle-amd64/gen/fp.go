@@ -55,6 +55,9 @@ func IsFP(cls string) bool { _, ok := fpClasses[cls]; return ok }
 
 // fmtE, fmtF are the exponent and fraction widths of binary32 / binary64.
 func fmtEF(width int) (int, int) {
+	if width == 16 {
+		return 5, 10
+	}
 	if width == 32 {
 		return 8, 23
 	}
@@ -76,6 +79,8 @@ func intToFP(width int, neg bool, n uint64) uint64 {
 	bias := uint64(127)
 	if width == 64 {
 		bias = 1023
+	} else if width == 16 {
+		bias = 15
 	}
 	hb := 63
 	for n>>hb == 0 {

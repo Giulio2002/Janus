@@ -1,4 +1,5 @@
 import Janus.Amd64.InstrSSE
+import Janus.Amd64.InstrAVX
 
 /-!
 # x86-64 instruction AST (supported subset)
@@ -302,6 +303,8 @@ inductive Instr where
   | locked (i : Instr) (a : Addr) (size : Nat)
   /-- The legacy-SSE packed instructions (`Janus.Amd64.InstrSSE`, `DecodeSSE`, `ExecSSE`). -/
   | sse (i : SseI XLoc Loc Addr)
+  /-- The AVX/AVX2/FMA3 instructions of WP-F (`Janus.Amd64.InstrAVX`, `DecodeAVX`, `ExecAVX`). -/
+  | avx (i : AvxI XLoc Loc Addr)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Amd64

@@ -351,6 +351,7 @@ func Setup(r *rand.Rand, b []byte) State {
 		s.SetMXCSR(RandMXCSR(r))
 	}
 	setupSSE(r, &s, inst, cls)
+	setupAVX(r, &s, inst, cls)
 	return s
 }
 

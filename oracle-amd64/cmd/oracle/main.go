@@ -56,6 +56,8 @@ func main() {
 		// the class regular expression of a mode, for `harvest -only`
 		if len(os.Args) > 2 && os.Args[2] == "-sse" {
 			fmt.Println(gen.SSERegexp())
+		} else if len(os.Args) > 2 && os.Args[2] == "-avx" {
+			fmt.Println(gen.AVXRegexp())
 		} else {
 			fmt.Println(gen.V3Regexp())
 		}
@@ -140,6 +142,7 @@ func cmdGen(args []string) {
 	fpOnly := fs.Bool("fp-only", false, "generate only the SSE floating-point specs (gen.FPSpecs, the FP edge families)")
 	v3Only := fs.Bool("v3-only", false, "generate only the GOAMD64=v3 extension specs (gen.V3Specs, gen.V3VexSpecs, the FMA edge family)")
 	sseOnly := fs.Bool("sse-only", false, "generate only the SSE packed specs of WP-D (gen.SSESpecs, the SSE edge families)")
+	avxOnly := fs.Bool("avx-only", false, "generate only the AVX/AVX2/FMA3 specs of WP-F (gen.AVXSpecs, the AVX edge families)")
 	nEdge := fs.Int("edge", 400, "rounds of the hand-targeted edge families (gen.Edges)")
 	seed := fs.Uint64("seed", 1, "random seed")
 	out := fs.String("o", "gen.jsonl", "output")
@@ -160,6 +163,15 @@ func cmdGen(args []string) {
 	if *sseOnly {
 		specs, vexSpecs, v3VexSpecs = gen.SSESpecs, nil, nil
 		*nEdge, *ng = 0, 0
+	}
+	// the WP-F specs: n encodings each in the avx mode, n/4 in the default (full/quick) mode
+	avxSpecs, avxN := gen.AVXSpecs, max(*n/4, 1)
+	if *avxOnly {
+		specs, vexSpecs, v3VexSpecs = nil, nil, nil
+		*nEdge, *ng = 0, 0
+		avxN = *n
+	} else if *fpOnly || *v3Only || *sseOnly {
+		avxSpecs = nil
 	}
 	for _, sp := range specs {
 		nw := *n
@@ -194,6 +206,24 @@ func cmdGen(args []string) {
 				b = gen.V3Targeted(r, sp)
 			}
 			cw.add(r, "gen/"+gen.Classify(b), b, 1)
+		}
+	}
+	for _, sp := range avxSpecs {
+		for i := 0; i < avxN; i++ {
+			b := gen.AVXTargeted(r, sp)
+			for !gen.OK(b) {
+				b = gen.AVXTargeted(r, sp)
+			}
+			cw.add(r, "gen/"+gen.Classify(b), b, 1)
+		}
+	}
+	if *avxOnly || *nEdge > 0 {
+		rounds := max(*nEdge/8, 1)
+		if *avxOnly {
+			rounds = max(*n/4, 1)
+		}
+		for _, e := range gen.AVXEdges(r, rounds) {
+			cw.emit(e.Class, e.Bytes, e.State)
 		}
 	}
 	if *v3Only || *nEdge > 0 {

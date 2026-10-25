@@ -1046,6 +1046,9 @@ deriving instance ToExpr for CvtOp
 deriving instance ToExpr for DupOp
 deriving instance ToExpr for PFOp
 deriving instance ToExpr for SseI
+deriving instance ToExpr for VShufOp
+deriving instance ToExpr for VShiftOp
+deriving instance ToExpr for AvxI
 deriving instance ToExpr for Instr
 deriving instance ToExpr for StubKind
 
