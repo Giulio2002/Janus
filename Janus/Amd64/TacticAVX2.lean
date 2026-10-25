@@ -230,8 +230,9 @@ def pintLanes : PIntOp → Bool
   | .andn | .movhl => false
   | _ => true
 
-/-- Their results are 128-bit values. -/
-@[janus64_exec, janus64_post] theorem pintOp_lanes_mod (op : PIntOp) (a b : Nat) (h : pintLanes op = true) :
+/-- Their results are 128-bit values (not in the simp sets: WP-D proofs rely on the `mod 2^128`
+of `PUNPCKLQDQ` staying; `pintOp_add_mod`, `pintOp_mull_mod` are the simp forms). -/
+theorem pintOp_lanes_mod (op : PIntOp) (a b : Nat) (h : pintLanes op = true) :
     ExecSSE.pintOp op a b % 340282366920938463463374607431768211456 = ExecSSE.pintOp op a b := by
   apply Nat.mod_eq_of_lt
   rw [show (340282366920938463463374607431768211456 : Nat) = 2 ^ 128 by decide]
