@@ -544,6 +544,13 @@ func collectCache(o gcOptions, block bool) (*gcReport, error) {
 		trashSet[t] = true
 	}
 	usage := rep.Before
+	if !o.DryRun {
+		for _, e := range s.entries {
+			if trashSet[e.Path] {
+				usage -= e.Size // removed above
+			}
+		}
+	}
 	var trash string
 	evict := func(e *gcEntry) bool {
 		if trashSet[e.Path] {
