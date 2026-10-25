@@ -297,6 +297,74 @@ def vaArgs (rd : Nat → Nat → Nat) : VaList → List CType → List Nat × Va
     let rs := vaArgs rd r.2 ts
     (r.1 :: rs.1, rs.2)
 
+/-! ## `va_arg` and the classification -/
+
+theorem classify_int8 : classify (.int 8 true) = [.integer] := by decide
+
+theorem vaArg_int8_reg (rd : Nat → Nat → Nat) (g fp o rs : Nat) (hg : g < 6) (hfp : fp ≤ 176) :
+    vaArg rd ⟨8 * g, fp, o, rs⟩ (.int 8 true) = (rd (rs + 8 * g) 8, ⟨8 * (g + 1), fp, o, rs⟩) := by
+  have hm : inMemory [.integer] = false := by decide
+  have hi : [Cls.integer].count .integer = 1 := by decide
+  have hs : [Cls.integer].count .sse = 0 := by decide
+  simp only [vaArg, classify_int8, hm, hi, hs]
+  rw [ite_eq_right_of_eq_false _ _ (eq_false (by simp only [Bool.false_eq_true, false_or]; omega))]
+  simp only [fromRegs, size, Nat.mul_zero, Nat.sub_zero, Nat.min_self, Nat.pow_zero, Nat.mul_one,
+    Nat.add_zero]
+  constructor <;> omega
+
+theorem vaArg_int8_over (rd : Nat → Nat → Nat) (fp o rs : Nat) :
+    vaArg rd ⟨48, fp, o, rs⟩ (.int 8 true) = (rd o 8, ⟨48, fp, o + 8, rs⟩) := by
+  have hm : inMemory [.integer] = false := by decide
+  have hi : [Cls.integer].count .integer = 1 := by decide
+  have hs : [Cls.integer].count .sse = 0 := by decide
+  simp only [vaArg, classify_int8, hm, hi, hs]
+  rw [ite_eq_left_of_eq_true _ _ (eq_true (by omega))]
+  rfl
+
+/-- `va_arg(ap, int64_t)` over and over, from a `va_list` whose `gp_offset` is `8 g`: argument
+`i` is the save-area slot of integer register `g + i` while there is one, then the next slot of
+the overflow area. -/
+theorem vaArgs_int8 (rd : Nat → Nat → Nat) (fp rs : Nat) (hfp : fp ≤ 176) :
+    ∀ (n g o : Nat), g ≤ 6 →
+      (vaArgs rd ⟨8 * g, fp, o, rs⟩ (List.replicate n (.int 8 true))).1 =
+        (List.range n).map fun i =>
+          if g + i < 6 then rd (rs + 8 * (g + i)) 8 else rd (o + 8 * (g + i - 6)) 8
+  | 0, _, _, _ => rfl
+  | n + 1, g, o, hg => by
+    rw [List.replicate_succ, List.range_succ_eq_map, List.map_cons, List.map_map]
+    simp only [vaArgs]
+    rcases Nat.lt_or_ge g 6 with h | h
+    · rw [vaArg_int8_reg rd g fp o rs h hfp, vaArgs_int8 rd fp rs hfp n (g + 1) o (by omega)]
+      simp only [Nat.add_zero, h, ↓reduceIte, List.cons.injEq, true_and]
+      apply List.map_congr_left
+      intro i _
+      simp only [Function.comp, show g + 1 + i = g + (i + 1) by omega]
+    · have : g = 6 := by omega
+      subst this
+      rw [show 8 * 6 = 48 from rfl, vaArg_int8_over, ← show 8 * 6 = 48 from rfl,
+        vaArgs_int8 rd fp rs hfp n 6 (o + 8) (Nat.le_refl _)]
+      simp only [Nat.add_zero, show ¬ (6 < 6) by omega, ↓reduceIte, Nat.sub_self, Nat.mul_zero,
+        List.cons.injEq, true_and]
+      apply List.map_congr_left
+      intro i _
+      simp only [Function.comp, show ¬ (6 + i < 6) by omega, show ¬ (6 + (i + 1) < 6) by omega,
+        ↓reduceIte]
+      congr 1; omega
+
+/-- **`va_arg` agrees with the classification**, for a variadic tail of `int64_t`: after
+`va_start` (named parameters classified as `named`), the `i`-th `va_arg(ap, int64_t)` reads the
+save-area slot of integer argument register `named.gp + i` — where `assign` puts that argument —
+while there is one, and otherwise the argument-area slot `named.stack + 8 (named.gp + i - 6)`
+above the return address, which is where `assign` puts it on the stack (`argArea` is `RSP + 8`
+at entry; the callee's prologue stores `RDI … R9` at `regSave + 0, 8, …, 40`). -/
+theorem vaStart_vaArgs_int8 (rd : Nat → Nat → Nat) (named : Next) (hg : named.gp ≤ 6)
+    (hs : named.sse ≤ 8) (argArea regSave n : Nat) :
+    (vaArgs rd (vaStart named argArea regSave) (List.replicate n (.int 8 true))).1 =
+      (List.range n).map fun i =>
+        if named.gp + i < 6 then rd (regSave + 8 * (named.gp + i)) 8
+        else rd (argArea + named.stack + 8 * (named.gp + i - 6)) 8 :=
+  vaArgs_int8 rd _ regSave (by omega) n named.gp _ hg
+
 /-! ## Checks -/
 
 section

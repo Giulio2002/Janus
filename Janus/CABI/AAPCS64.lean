@@ -198,6 +198,81 @@ def vaArgs (rd : Nat → Nat → Nat) : VaList → List CType → List Nat × Va
     let rs := vaArgs rd r.2 ts
     (r.1 :: rs.1, rs.2)
 
+/-! ## `va_arg` and the classification -/
+
+theorem vaArg_int8_reg (rd : Nat → Nat → Nat) (stk grTop vrTop : Nat) (vr : Int) (k : Nat)
+    (hk : k < 8) (ht : 64 ≤ grTop) :
+    vaArg rd ⟨stk, grTop, vrTop, -((8 * (8 - k) : Nat) : Int), vr⟩ (.int 8 true) =
+      (rd (grTop - 8 * (8 - k)) 8, ⟨stk, grTop, vrTop, -((8 * (8 - (k + 1)) : Nat) : Int), vr⟩) := by
+  have hh : hfa (.int 8 true) = none := by decide
+  have hb : byRef (.int 8 true) = false := by decide
+  simp only [vaArg, hh, hb, Bool.false_eq_true, ↓reduceIte, size, align]
+  rw [ite_eq_right_of_eq_false _ _ (eq_false (by omega)), ite_eq_right_of_eq_false _ _ (eq_false (by omega)),
+    ite_eq_right_of_eq_false _ _ (eq_false (by omega))]
+  simp only [atOffs, Prod.mk.injEq, VaList.mk.injEq, true_and, and_true]
+  constructor
+  · congr 1; omega
+  · omega
+
+theorem vaArg_int8_stack (rd : Nat → Nat → Nat) (stk grTop vrTop : Nat) (vr : Int) :
+    vaArg rd ⟨stk, grTop, vrTop, 0, vr⟩ (.int 8 true) = (rd stk 8, ⟨stk + 8, grTop, vrTop, 0, vr⟩) := by
+  have hh : hfa (.int 8 true) = none := by decide
+  have hb : byRef (.int 8 true) = false := by decide
+  simp only [vaArg, hh, hb, Bool.false_eq_true, ↓reduceIte, size, align]
+  rw [ite_eq_left_of_eq_true _ _ (eq_true (by omega))]
+  rfl
+
+/-- `va_arg(ap, int64_t)` over and over, from a `va_list` whose `__gr_offs` is `-8 (8 - k)`:
+argument `i` is the save-area slot of `X(k + i)` (just below `__gr_top`) while there is one,
+then the next stacked slot. -/
+theorem vaArgs_int8 (rd : Nat → Nat → Nat) (grTop vrTop : Nat) (vr : Int) (ht : 64 ≤ grTop) :
+    ∀ (n k stk : Nat), k ≤ 8 →
+      (vaArgs rd ⟨stk, grTop, vrTop, -((8 * (8 - k) : Nat) : Int), vr⟩
+          (List.replicate n (.int 8 true))).1 =
+        (List.range n).map fun i =>
+          if k + i < 8 then rd (grTop - 8 * (8 - (k + i))) 8 else rd (stk + 8 * (k + i - 8)) 8
+  | 0, _, _, _ => rfl
+  | n + 1, k, stk, hk => by
+    rw [List.replicate_succ, List.range_succ_eq_map, List.map_cons, List.map_map]
+    simp only [vaArgs]
+    rcases Nat.lt_or_ge k 8 with h | h
+    · rw [vaArg_int8_reg rd stk grTop vrTop vr k h ht,
+        vaArgs_int8 rd grTop vrTop vr ht n (k + 1) stk (by omega)]
+      simp only [Nat.add_zero, h, ↓reduceIte, List.cons.injEq, true_and]
+      apply List.map_congr_left
+      intro i _
+      simp only [Function.comp, show k + 1 + i = k + (i + 1) by omega]
+    · have : k = 8 := by omega
+      subst this
+      have h0 : -((8 * (8 - 8) : Nat) : Int) = 0 := by simp
+      rw [h0, vaArg_int8_stack, ← h0, vaArgs_int8 rd grTop vrTop vr ht n 8 (stk + 8) (Nat.le_refl _)]
+      simp only [Nat.add_zero, show ¬ (8 < 8) by omega, ↓reduceIte, Nat.sub_self, Nat.mul_zero,
+        List.cons.injEq, true_and]
+      apply List.map_congr_left
+      intro i _
+      simp only [Function.comp, show ¬ (8 + i < 8) by omega, show ¬ (8 + (i + 1) < 8) by omega,
+        ↓reduceIte]
+      congr 1; omega
+
+/-- **`va_arg` agrees with the classification**, for a variadic tail of `int64_t`: after
+`va_start` (named parameters classified as `named`, `sp` the stack pointer at the call,
+`grTop` the end of the general-register save area), the `i`-th `va_arg(ap, int64_t)` reads the
+save-area slot of `X(named.ngrn + i)` — where `assign` puts that argument — while there is one,
+and otherwise the stacked slot `named.nsaa + 8 (named.ngrn + i - 8)` above `sp`, which is where
+`assign` puts it (the callee's prologue stores `X0`–`X7` at `grTop - 64, …, grTop - 8`). -/
+theorem vaStart_vaArgs_int8 (rd : Nat → Nat → Nat) (named : Next) (hg : named.ngrn ≤ 8)
+    (sp grTop vrTop n : Nat) (ht : 64 ≤ grTop) :
+    (vaArgs rd (vaStart named sp grTop vrTop) (List.replicate n (.int 8 true))).1 =
+      (List.range n).map fun i =>
+        if named.ngrn + i < 8 then rd (grTop - 8 * (8 - (named.ngrn + i))) 8
+        else rd (sp + named.nsaa + 8 * (named.ngrn + i - 8)) 8 := by
+  have h : vaStart named sp grTop vrTop = ⟨sp + named.nsaa, grTop, vrTop,
+      -((8 * (8 - named.ngrn) : Nat) : Int), (vaStart named sp grTop vrTop).vrOffs⟩ := by
+    simp only [vaStart, VaList.mk.injEq, true_and, and_true, Nat.min_eq_left hg]
+    push_cast; omega
+  rw [h]
+  exact vaArgs_int8 rd grTop vrTop _ ht n named.ngrn _ hg
+
 /-! ## Checks -/
 
 section
