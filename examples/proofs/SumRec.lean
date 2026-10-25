@@ -102,9 +102,9 @@ def sumTo : Nat → Nat
 abbrev gluePc : Nat := Extracted.entry + 0x58
 abbrev callRet : Nat := Extracted.entry + 0x38
 
-/-- What the frame table (the pclntab) says about `SumRec`: at the glue (no frame yet, largest
-frame 32 bytes, the argument a scalar) and at the recursive call's return pc (a 32-byte frame
-with no pointer locals, a scalar argument, no stack objects). -/
+/-- What the binary's frame record says about `SumRec` (`tableOK_of`): at the glue (no frame yet,
+largest frame 32 bytes, the argument a scalar) and at the recursive call's return pc (a 32-byte
+frame with no pointer locals, a scalar argument, no stack objects). -/
 def TableOK (FT : FrameTable) : Prop :=
   FT.valid gluePc = true ∧ FT.stop gluePc = false ∧ FT.injected gluePc = false ∧
   FT.spdelta gluePc = 0 ∧ FT.maxspd gluePc = 32 ∧ (∀ j, (FT.args gluePc).getD j false = false) ∧
@@ -113,11 +113,30 @@ def TableOK (FT : FrameTable) : Prop :=
   FT.spdelta callRet = 32 ∧ (∀ j, (FT.locals callRet).getD j false = false) ∧
   (∀ j, (FT.args callRet).getD j false = false) ∧ FT.objs callRet = []
 
-/-- The environment: the table's entries for `SumRec`, the laws of every pclntab (frame words
-inside the frame, aligned frames, code outside the stack pools), and the stack pools apart from
-the runtime's own memory. -/
+/-- `TableOK`, read off the binary's frame record of `SumRec`. -/
+theorem tableOK_of {FT : FrameTable} (h : FT.Agrees Extracted.frames) : TableOK FT := by
+  obtain ⟨a1, -, a3, a4, a5, a6, -, a8, a9⟩ := h _ (List.mem_cons_self ..) gluePc (by decide) (by decide)
+  obtain ⟨b1, -, b3, -, b5, b6, b7, b8, b9⟩ := h _ (List.mem_cons_self ..) callRet (by decide) (by decide)
+  refine ⟨a1, ?_, ?_, ?_, ?_, fun j => ?_, ?_, b1, ?_, ?_, ?_, fun j => ?_, fun j => ?_, ?_⟩
+  · rw [a5] <;> rfl
+  · rw [a6] <;> rfl
+  · rw [a3] <;> rfl
+  · rw [a4] <;> rfl
+  · rw [a8]; cases j <;> rfl
+  · rw [a9] <;> rfl
+  · rw [b5] <;> rfl
+  · rw [b6] <;> rfl
+  · rw [b3] <;> rfl
+  · rw [b7]; cases j <;> rfl
+  · rw [b8]; cases j <;> rfl
+  · rw [b9] <;> rfl
+
+/-- The environment: the frame table agrees with the binary's frame records (`Extracted.frames`,
+`janus extract --frames`: SP deltas, stack maps and stack objects read from the pclntab), the
+laws of every pclntab (frame words inside the frame, aligned frames, code outside the stack
+pools), and the stack pools apart from the runtime's own memory. -/
 def Env (FT : FrameTable) (pool rt : List (Nat × Nat)) : Prop :=
-  TableOK FT ∧ FT.InFrame Arch.arm64 ∧ FT.Aligned ∧ FT.CodeOutside pool ∧
+  FT.Agrees Extracted.frames ∧ FT.InFrame Arch.arm64 ∧ FT.Aligned ∧ FT.CodeOutside pool ∧
     (∀ a n, InRanges a n pool → Outside a n rt)
 
 /-- The precondition of a call `SumRec(n)` (no room assumed): the goroutine stack `[lo, hi)`,
@@ -210,7 +229,8 @@ theorem room_case (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     GrownRet Extracted.program reloc (t.regs 30) t (Post FT pool rt H t) := by
   obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hfp, hinp, hpok, hr4, hr48,
     ⟨fs, hch, hfsp, hc8⟩, hfit, hH⟩ := hp
-  obtain ⟨hT, hIF, hAl, hCO, hPA⟩ := henv
+  obtain ⟨hA, hIF, hAl, hCO, hPA⟩ := henv
+  have hT := tableOK_of hA
   have hgs' := hgs
   obtain ⟨hg24, hgacc, hglo, hghi, hgg⟩ := hgs'
   simp only [gStackLo, gStackHi, gStackguard0, Nat.add_zero, stackGuard] at hglo hghi hgg
@@ -435,7 +455,8 @@ theorem grow_branch (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
       (⟨gluePc, s.sp.toNat, Arch.arm64.fp FT gluePc s.sp.toNat⟩ :: fs)) :
     ∃ s_r, reloc s_m s_r ∧ GrownRet Extracted.program reloc (s.regs 30) s_r (Post FT pool rt H s) := by
   have henv' := henv
-  obtain ⟨hT, hIF, hAl, hCO, hPA⟩ := henv'
+  obtain ⟨hA, hIF, hAl, hCO, hPA⟩ := henv'
+  have hT := tableOK_of hA
   obtain ⟨s_r, lo1, hi1, hre, hgr⟩ := hms _ lo hi s_m hm
   refine ⟨s_r, hre, ?_⟩
   obtain ⟨hg1, hg2, h4k1, hal1', hal2', hhi48', hinp1, happ⟩ := hgr.grows
@@ -562,7 +583,8 @@ theorem gsum (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hfp, hinp, hpok, hr4, hr48,
       ⟨fs, hch, hfsp, hc8⟩, hfit, hH⟩ := hpre'
     have henv' := henv
-    obtain ⟨hT, hIF, hAl, hCO, hPA⟩ := henv'
+    obtain ⟨hA, hIF, hAl, hCO, hPA⟩ := henv'
+    have hT := tableOK_of hA
     have hT0 := hT
     obtain ⟨hv, hst, hinj, hspd, hmx, -, -⟩ := hT0
     have hgs' := hgs
@@ -649,33 +671,59 @@ def ret : Nat := 0x200000
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-/-- A frame table: `SumRec` (no frame at the glue, a 32-byte frame at the recursive call, no
-pointer maps) and its caller, which stops the walk. -/
-def FTs : FrameTable :=
-  { valid := fun pc => pc == gluePc || pc == callRet || pc == ret, entry := id,
-    spdelta := fun pc => if pc = callRet then 32 else 0, maxspd := fun _ => 32,
-    stop := fun pc => pc == ret, injected := fun _ => false,
-    locals := fun _ => [], args := fun _ => [], objs := fun _ => [] }
+/-- The witness frame table: the binary's frame record of `SumRec` (`Extracted.frames`), and the
+caller, which stops the walk (like `goexit`). -/
+def extraT : FrameTable :=
+  { valid := fun pc => pc == ret, entry := id, spdelta := fun _ => 0, maxspd := fun _ => 0,
+    stop := fun pc => pc == ret, injected := fun _ => false, locals := fun _ => [],
+    args := fun _ => [], objs := fun _ => [] }
 
-theorem gl_ne : gluePc ≠ callRet := by simp [gluePc, callRet]
-theorem gl_ret : gluePc ≠ ret := by unfold gluePc ret Extracted.entry; decide
-theorem cr_ret : callRet ≠ ret := by unfold callRet ret Extracted.entry; decide
+def FTs : FrameTable := FrameTable.ofRecs Extracted.frames extraT
 
-theorem aligned : FTs.Aligned := by intro pc; simp only [FTs]; split <;> rfl
+theorem agrees : FTs.Agrees Extracted.frames :=
+  FrameTable.ofRecs_agrees _ _ fun r hr pc h1 h2 => by
+    replace hr := List.mem_singleton.1 hr
+    subst hr
+    exact List.find?_cons_of_pos (l := []) (by simpa using And.intro h1 h2)
+
+theorem laws : FTs.Aligned ∧ FTs.InFrame Arch.arm64 :=
+  FrameTable.ofRecs_laws Arch.arm64 Extracted.frames extraT (fun r hr => by
+    replace hr := List.mem_singleton.1 hr
+    subst hr
+    refine ⟨fun m hm => ?_, fun m hm => ?_, rfl, fun x hx => ?_⟩
+    · simpa using hm
+    · simpa using hm
+    · simp only [List.mem_cons, List.not_mem_nil, or_false] at hx
+      rcases hx with h | h | h | h | h <;> subst h <;> rfl)
+    (fun _ => rfl) (fun _ => rfl) (fun _ => rfl) (fun _ => rfl)
+
+theorem code : FTs.CodeOutside pool := by
+  intro pc hv
+  unfold FTs FrameTable.ofRecs at hv
+  dsimp only at hv
+  cases h : Extracted.frames.find? (fun r => decide (r.entry ≤ pc ∧ pc < r.entry + r.size)) with
+  | none =>
+    rw [h] at hv
+    simp only [extraT, beq_iff_eq] at hv
+    subst hv
+    exact ⟨by simp only [pool, outside_cons, outside_nil, and_true]; decide, by decide⟩
+  | some r =>
+    have hm := List.mem_of_find?_eq_some h
+    have hp := List.find?_some h
+    simp only [decide_eq_true_eq] at hp
+    replace hm := List.mem_singleton.1 hm
+    subst hm
+    simp only at hp
+    refine ⟨?_, by omega⟩
+    simp only [pool, outside_cons, outside_nil, and_true, SL, SH, BL, BH]; omega
 
 theorem env : Env FTs pool rt := by
-  refine ⟨⟨by simp [FTs], by simp [FTs, gl_ret], rfl, by simp [FTs, gl_ne], rfl, fun _ => rfl, rfl,
-    by simp [FTs], by simp [FTs, cr_ret], rfl, by simp [FTs], fun _ => rfl, fun _ => rfl, rfl⟩,
-    FrameTable.inFrame_of_empty _ _ aligned (fun _ => rfl) (fun _ => rfl) (fun _ => rfl), aligned, ?_, ?_⟩
-  · intro pc hv
-    simp only [FTs, Bool.or_eq_true, beq_iff_eq] at hv
-    rcases hv with (rfl | rfl) | rfl <;>
-      exact ⟨by simp only [pool, outside_cons, outside_nil, and_true]; decide, by decide⟩
-  · intro a n hin
-    obtain ⟨r, hr, h1, h2⟩ := hin
-    simp only [pool, List.mem_cons, List.not_mem_nil, or_false] at hr
-    simp only [rt, outside_cons, outside_nil, and_true]
-    rcases hr with rfl | rfl <;> simp only [SL, SH, BL, BH, G0] at h1 h2 ⊢ <;> omega
+  refine ⟨agrees, laws.2, laws.1, code, ?_⟩
+  intro a n hin
+  obtain ⟨r, hr, h1, h2⟩ := hin
+  simp only [pool, List.mem_cons, List.not_mem_nil, or_false] at hr
+  simp only [rt, outside_cons, outside_nil, and_true]
+  rcases hr with rfl | rfl <;> simp only [SL, SH, BL, BH, G0] at h1 h2 ⊢ <;> omega
 
 /-- The stack pointer: 64 bytes above the small slot's bottom, so not even the first frame fits. -/
 def spw : Nat := SL + 64
@@ -715,14 +763,18 @@ theorem pre : Pre FTs pool rt H s0 := by
     simp only [pool, List.mem_cons, List.not_mem_nil, or_false] at hr
     rcases hr with rfl | rfl <;> exact ⟨by decide, by decide, by decide⟩
   · rw [hsp, h30]
-    have e : Arch.arm64.fp FTs ret spw = spw := by simp [Arch.fp, FTs, cr_ret.symm]
+    have e : Arch.arm64.fp FTs ret spw = spw := by
+      show spw + FTs.spdelta ret = spw; rw [show FTs.spdelta ret = 0 from rfl, Nat.add_zero]
     have := Chain.stop (A := Arch.arm64) (FT := FTs) (m := s0.mem) (hi := SH) (pc := ret) (sp := spw)
-      (lr0 := none) (by simp [FTs]) (by simp [FTs]) rfl (by decide) (by rw [e]; decide)
+      (lr0 := none) rfl rfl rfl (by decide) (by rw [e]; decide)
     rw [e] at this; exact this
   · intro f hf; simp at hf; subst hf; left; rw [hsp]
   · rw [hsp]
     simp only [framesCls_cons, framesCls_nil, Bool.or_false]
-    simp [frameCls, FTs, bitsAt, Arch.varp, Arch.argp, Arch.minLocals]
+    have el : FTs.locals ret = [] := rfl
+    have ea : FTs.args ret = [] := rfl
+    have eo : FTs.objs ret = [] := rfl
+    simp [frameCls, el, ea, eo, bitsAt, Arch.varp, Arch.argp, Arch.minLocals]
   · rw [hsp, show (s0.regs 0).toNat = 3 by decide]; simp only [stackGuard, maxstacksize, spw, SH, SL]; omega
   · rw [hg]; refine ⟨rfl, .inl ⟨?_, ?_⟩⟩
     · rw [readLE_rtView hin0]; exact d1

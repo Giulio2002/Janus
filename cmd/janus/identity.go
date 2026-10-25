@@ -111,8 +111,10 @@ type Identity struct {
 	Data             []identityData     `json:"data"`
 	DataRefs         []identityDataRef  `json:"dataReferences"`
 	SkippedData      []identitySkipped  `json:"skippedData"`
-	Extracted        string             `json:"extracted"`
-	ExtractedSha256  string             `json:"extractedSha256"`
+	// Frames: the extraction renders the functions' pclntab frame records (--frames, R7).
+	Frames          bool   `json:"frames,omitempty"`
+	Extracted       string `json:"extracted"`
+	ExtractedSha256 string `json:"extractedSha256"`
 }
 
 func hex0x(v uint64) string { return fmt.Sprintf("0x%x", v) }
@@ -178,6 +180,7 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 		id.Stubs = append(id.Stubs, identityStub{s.Name, hex0x(s.Addr), string(s.Kind)})
 	}
 	id.ContractPatterns = append([]string(nil), x.ContractPatterns...)
+	id.Frames = x.Frames
 	for _, c := range x.Contracts {
 		id.Contracts = append(id.Contracts, identityContract{c.Name, hex0x(c.Addr), c.Pinned})
 	}
@@ -254,6 +257,9 @@ func rerunExtract(id *Identity, outdir string) string {
 	if len(id.Targets) > 0 {
 		targets = fmt.Sprintf(" --targets %q", strings.Join(id.Targets, ","))
 	}
+	if id.Frames {
+		targets += " --frames"
+	}
 	return fmt.Sprintf("Rerun janus extract %s %q %s%s with the intended binary, then rerun this command.",
 		displayPath(resolveBinary(outdir, id.Binary)), id.Symbol, displayPath(outdir), targets)
 }
@@ -327,6 +333,13 @@ func check(outdir, binOverride string) (*CheckResult, error) {
 		d := err.(*diag)
 		d.Invalid = true
 		return nil, d
+	}
+	if id.Frames {
+		if err := applyFrames(x); err != nil {
+			d := err.(*diag)
+			d.Invalid = true
+			return nil, d
+		}
 	}
 	if !bytes.Equal(x.Lean, saved) {
 		return nil, &diag{Invalid: true,

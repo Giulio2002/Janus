@@ -661,4 +661,159 @@ theorem FrameTable.inFrame_of_empty (A : Arch) (FT : FrameTable) (hal : FT.Align
   have hne : a ≠ A.varp sp (A.fp FT pc sp) := by omega
   simp [frameCls, hl, ha, ho, bitsAt, hne]
 
+/-! ## The binary's frame records (`janus extract --frames`)
+
+`Extracted.frames` lists, for every extracted function, what the runtime reads about it from the
+pclntab (decoded by `cmd/janus/frames.go`): its pc range, argument size, `FuncID` and flags, its
+SP delta and stack-map index as pc-value runs, its argument and local pointer maps and its stack
+objects. A stack-growth theorem assumes its frame table agrees with them (`FrameTable.Agrees`):
+the stack maps a proof relies on are the binary's, re-derived by `janus check`. -/
+
+/-- One function's frame record. A run `(limit, v)` of `pcsp`/`stackIdx` gives the value `v` for
+the pcs below `limit` (and at or above the previous run's limit). -/
+structure FuncRec where
+  name : String
+  entry : Nat
+  size : Nat
+  args : Int
+  funcID : Nat
+  flag : Nat
+  maxspd : Nat
+  pcsp : List (Nat × Int)
+  stackIdx : List (Nat × Int)
+  argMaps : List (List Bool)
+  localMaps : List (List Bool)
+  objs : List (Int × List Bool)
+
+/-- The value of a pc-value table at `pc` (`-1` past its end, as `pcvalue` returns). -/
+def runAt : List (Nat × Int) → Nat → Int
+  | [], _ => -1
+  | (l, v) :: rs, pc => if pc < l then v else runAt rs pc
+
+/-- `funcspdelta(f, pc)`. -/
+def FuncRec.spdeltaAt (r : FuncRec) (pc : Nat) : Nat := (runAt r.pcsp pc).toNat
+
+/-- The stack map index `getStackMap` uses for a frame suspended at the continuation `pc`: the
+index at `pc - 1`, the first map at the entry or where the table has none (`-1`). -/
+def FuncRec.mapIdx (r : FuncRec) (pc : Nat) : Nat :=
+  let i := if pc = r.entry then -1 else runAt r.stackIdx (pc - 1)
+  if i < 0 then 0 else i.toNat
+
+/-- The locals pointer map at the continuation `pc`. -/
+def FuncRec.localsAt (r : FuncRec) (pc : Nat) : List Bool := r.localMaps.getD (r.mapIdx pc) []
+
+/-- The arguments pointer map at the continuation `pc` (`argMapInternal`: none for a function
+without stack arguments). -/
+def FuncRec.argsAt (r : FuncRec) (pc : Nat) : List Bool :=
+  if 8 ≤ r.args then r.argMaps.getD (r.mapIdx pc) [] else []
+
+/-- `FuncFlagTopFrame` or `FuncFlagSPWrite`: the walk ends at this function. -/
+def FuncRec.stop (r : FuncRec) : Bool := r.flag % 4 != 0
+
+/-- `FuncID_asyncPreempt` (3), `FuncID_debugCallV2` (6), `FuncID_sigpanic` (20). -/
+def FuncRec.injected (r : FuncRec) : Bool := r.funcID == 3 || r.funcID == 6 || r.funcID == 20
+
+/-- **The frame table agrees with the binary's frame records** at every pc of every extracted
+function. -/
+def FrameTable.Agrees (FT : FrameTable) (rs : List FuncRec) : Prop :=
+  ∀ r ∈ rs, ∀ pc, r.entry ≤ pc → pc < r.entry + r.size →
+    FT.valid pc = true ∧ FT.entry pc = r.entry ∧ FT.spdelta pc = r.spdeltaAt pc ∧
+    FT.maxspd pc = r.maxspd ∧ FT.stop pc = r.stop ∧ FT.injected pc = r.injected ∧
+    FT.locals pc = r.localsAt pc ∧ FT.args pc = r.argsAt pc ∧ FT.objs pc = r.objs
+
+/-- The frame table that is exactly the records (and knows nothing else): the witness tables of
+the examples. -/
+def FrameTable.ofRecs (rs : List FuncRec) (extra : FrameTable) : FrameTable :=
+  let find (pc : Nat) := rs.find? (fun r => decide (r.entry ≤ pc ∧ pc < r.entry + r.size))
+  { valid := fun pc => match find pc with | some _ => true | none => extra.valid pc
+    entry := fun pc => match find pc with | some r => r.entry | none => extra.entry pc
+    spdelta := fun pc => match find pc with | some r => r.spdeltaAt pc | none => extra.spdelta pc
+    maxspd := fun pc => match find pc with | some r => r.maxspd | none => extra.maxspd pc
+    stop := fun pc => match find pc with | some r => r.stop | none => extra.stop pc
+    injected := fun pc => match find pc with | some r => r.injected | none => extra.injected pc
+    locals := fun pc => match find pc with | some r => r.localsAt pc | none => extra.locals pc
+    args := fun pc => match find pc with | some r => r.argsAt pc | none => extra.args pc
+    objs := fun pc => match find pc with | some r => r.objs | none => extra.objs pc }
+
+/-- `ofRecs` agrees with records whose pc ranges do not overlap. -/
+theorem FrameTable.ofRecs_agrees (rs : List FuncRec) (extra : FrameTable)
+    (hdisj : ∀ r ∈ rs, ∀ pc, r.entry ≤ pc → pc < r.entry + r.size →
+      rs.find? (fun r' => decide (r'.entry ≤ pc ∧ pc < r'.entry + r'.size)) = some r) :
+    (FrameTable.ofRecs rs extra).Agrees rs := by
+  intro r hr pc h1 h2
+  have := hdisj r hr pc h1 h2
+  unfold FrameTable.ofRecs
+  dsimp only
+  rw [this]
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+/-- Each field of `ofRecs` at `pc` is a record's or `extra`'s. -/
+theorem FrameTable.ofRecs_spec (rs : List FuncRec) (extra : FrameTable) (pc : Nat) :
+    (∃ r ∈ rs, (FrameTable.ofRecs rs extra).spdelta pc = r.spdeltaAt pc ∧
+      (FrameTable.ofRecs rs extra).locals pc = r.localsAt pc ∧
+      (FrameTable.ofRecs rs extra).args pc = r.argsAt pc ∧ (FrameTable.ofRecs rs extra).objs pc = r.objs) ∨
+    ((FrameTable.ofRecs rs extra).spdelta pc = extra.spdelta pc ∧
+      (FrameTable.ofRecs rs extra).locals pc = extra.locals pc ∧
+      (FrameTable.ofRecs rs extra).args pc = extra.args pc ∧
+      (FrameTable.ofRecs rs extra).objs pc = extra.objs pc) := by
+  unfold FrameTable.ofRecs
+  dsimp only
+  cases h : rs.find? (fun r => decide (r.entry ≤ pc ∧ pc < r.entry + r.size)) with
+  | none => right; exact ⟨rfl, rfl, rfl, rfl⟩
+  | some r => left; exact ⟨r, List.mem_of_find?_eq_some h, rfl, rfl, rfl, rfl⟩
+
+theorem runAt_mod8 {rs : List (Nat × Int)} (h : ∀ x ∈ rs, x.2.toNat % 8 = 0) (pc : Nat) :
+    (runAt rs pc).toNat % 8 = 0 := by
+  induction rs with
+  | nil => rfl
+  | cons x rs ih =>
+    simp only [runAt]
+    split
+    · exact h x (List.mem_cons_self ..)
+    · exact ih fun y hy => h y (List.mem_cons_of_mem _ hy)
+
+/-- A record whose maps mark nothing (every argument and local map empty or all-false: rendered
+empty) and that has no stack objects. -/
+def FuncRec.NoPtrs (r : FuncRec) : Prop :=
+  (∀ m ∈ r.argMaps, m = []) ∧ (∀ m ∈ r.localMaps, m = []) ∧ r.objs = [] ∧
+    ∀ x ∈ r.pcsp, x.2.toNat % 8 = 0
+
+theorem FuncRec.NoPtrs.locals {r : FuncRec} (h : r.NoPtrs) (pc : Nat) : r.localsAt pc = [] := by
+  unfold FuncRec.localsAt
+  rw [List.getD_eq_getElem?_getD]
+  cases hm : r.localMaps[r.mapIdx pc]? with
+  | none => rfl
+  | some m => exact h.2.1 m (List.mem_of_getElem? hm)
+
+theorem FuncRec.NoPtrs.args {r : FuncRec} (h : r.NoPtrs) (pc : Nat) : r.argsAt pc = [] := by
+  unfold FuncRec.argsAt
+  split
+  · rw [List.getD_eq_getElem?_getD]
+    cases hm : r.argMaps[r.mapIdx pc]? with
+    | none => rfl
+    | some m => exact h.1 m (List.mem_of_getElem? hm)
+  · rfl
+
+/-- The table built from pointer-free records and an `extra` table without maps is aligned and
+satisfies `InFrame`. -/
+theorem FrameTable.ofRecs_laws (A : Arch) (rs : List FuncRec) (extra : FrameTable)
+    (hr : ∀ r ∈ rs, r.NoPtrs) (hal : extra.Aligned) (hl : ∀ pc, extra.locals pc = [])
+    (ha : ∀ pc, extra.args pc = []) (ho : ∀ pc, extra.objs pc = []) :
+    (FrameTable.ofRecs rs extra).Aligned ∧ (FrameTable.ofRecs rs extra).InFrame A := by
+  have hal' : (FrameTable.ofRecs rs extra).Aligned := by
+    intro pc
+    rcases FrameTable.ofRecs_spec rs extra pc with ⟨r, hm, h1, -⟩ | ⟨h1, -⟩
+    · rw [h1]; exact runAt_mod8 (hr r hm).2.2.2 pc
+    · rw [h1]; exact hal pc
+  refine ⟨hal', FrameTable.inFrame_of_empty A _ hal' (fun pc => ?_) (fun pc => ?_) (fun pc => ?_)⟩
+  · rcases FrameTable.ofRecs_spec rs extra pc with ⟨r, hm, -, h2, -⟩ | ⟨-, h2, -⟩
+    · rw [h2]; exact (hr r hm).locals pc
+    · rw [h2]; exact hl pc
+  · rcases FrameTable.ofRecs_spec rs extra pc with ⟨r, hm, -, -, h3, -⟩ | ⟨-, -, h3, -⟩
+    · rw [h3]; exact (hr r hm).args pc
+    · rw [h3]; exact ha pc
+  · rcases FrameTable.ofRecs_spec rs extra pc with ⟨r, hm, -, -, -, h4⟩ | ⟨-, -, -, h4⟩
+    · rw [h4]; exact (hr r hm).2.2.1
+    · rw [h4]; exact ho pc
+
 end Janus.Spec.Stack

@@ -23,8 +23,9 @@ state whose goroutine stack `[lo, hi)` is described by `g.stack` — **with no a
 frame fits** — the call returns (`GrownReturns`: after at most one stack growth) with
 `X0 = x` if `i & 15 = 0` and `X0 = 0` otherwise. The precondition (`GPre`) states the goroutine
 stack, the caller's walk (`Chain`, whose stack maps do not mark `BigLocal`'s argument slots),
-the pools, the readiness and the `maxstacksize` bound; `TableOK` the table's entry for
-`BigLocal` at the glue pc (no frame, largest frame 176 bytes, both arguments scalars).
+the pools, the readiness and the `maxstacksize` bound; the frame table agrees with the binary's
+frame record (`FT.Agrees Extracted.frames`, `janus extract --frames`: at the glue pc no frame,
+largest frame 176 bytes, both arguments scalars).
 
 **How.** `summary` is the roomy proof (`janus_run`). `correctness` splits on the prologue's
 check: with room it is `summary`; without, `janus_run` runs the prologue to the `morestack`
@@ -76,11 +77,24 @@ theorem glue : ∀ t : State, t.pc = BitVec.ofNat 64 (Extracted.entry + 0x6c) �
 /-- The glue pc after the `morestack` call (`LDP 8(RSP), (R0, R1)`). -/
 abbrev gluePc : Nat := Extracted.entry + 108
 
-/-- What the frame table (the pclntab) says about `BigLocal` at the glue pc. -/
+/-- What the binary's frame record says about `BigLocal` at the glue pc (`tableOK_of`). -/
 def TableOK (FT : FrameTable) : Prop :=
   FT.valid gluePc = true ∧ FT.stop gluePc = false ∧ FT.injected gluePc = false ∧
   FT.spdelta gluePc = 0 ∧ FT.maxspd gluePc = 176 ∧ (FT.args gluePc).getD 0 false = false ∧
   (FT.args gluePc).getD 1 false = false ∧ FT.objs gluePc = []
+
+/-- `TableOK`, read off the binary's frame record of `BigLocal` (`Extracted.frames`, from the
+pclntab: no frame at the glue, largest frame 176 bytes, no pointer arguments). -/
+theorem tableOK_of {FT : FrameTable} (h : FT.Agrees Extracted.frames) : TableOK FT := by
+  obtain ⟨a1, -, a3, a4, a5, a6, -, a8, a9⟩ := h _ (List.mem_cons_self ..) gluePc (by decide) (by decide)
+  refine ⟨a1, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [a5] <;> rfl
+  · rw [a6] <;> rfl
+  · rw [a3] <;> rfl
+  · rw [a4] <;> rfl
+  · rw [a8] <;> rfl
+  · rw [a8] <;> rfl
+  · rw [a9] <;> rfl
 
 /-- The grown precondition: the goroutine stack `[lo, hi)` (no room assumed). -/
 def GPre (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (s : State) : Prop :=
@@ -180,9 +194,10 @@ theorem grow_branch (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
 /-- **`BigLocal` is correct on a stack of any size, stack growth included.** -/
 theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (reloc : State → State → Prop) (hms : MorestackContract Extracted.program FT pool rt H reloc)
-    (hFT : TableOK FT) (x i : BitVec 64) :
+    (hA : FT.Agrees Extracted.frames) (x i : BitVec 64) :
     EnsuresGrow Extracted.program reloc Extracted.entry [x, i] (GPre FT pool rt H)
       (fun _ s' => s'.regs 0 = if i.toNat % 16 = 0 then x else 0) := by
+  have hFT := tableOK_of hA
   intro ret hret s hs hpre
   janus_intro hs
   obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hfp, hinp, hpok, hrt,
@@ -303,15 +318,51 @@ def ret : Nat := 0x200000
 
 theorem hret : RetAddr Extracted.program ret := RetAddr.of_check (by decide)
 
-/-- A frame table: `BigLocal` at the glue (no frame, largest frame 176, scalar arguments) and its
-caller, which stops the walk. -/
-def FTb : FrameTable :=
-  { valid := fun pc => pc == gluePc || pc == ret, entry := id, spdelta := fun _ => 0,
-    maxspd := fun _ => 176, stop := fun pc => pc == ret, injected := fun _ => false,
-    locals := fun _ => [], args := fun _ => [], objs := fun _ => [] }
+/-- The witness frame table: the binary's frame record of `BigLocal` and the caller, which stops
+the walk. -/
+def extraT : FrameTable :=
+  { valid := fun pc => pc == ret, entry := id, spdelta := fun _ => 0, maxspd := fun _ => 0,
+    stop := fun pc => pc == ret, injected := fun _ => false, locals := fun _ => [],
+    args := fun _ => [], objs := fun _ => [] }
 
-theorem tableOK : TableOK FTb := by
-  refine ⟨?_, ?_, rfl, rfl, rfl, rfl, rfl, rfl⟩ <;> simp [FTb, gluePc, ret] <;> decide
+def FTb : FrameTable := FrameTable.ofRecs Extracted.frames extraT
+
+theorem agrees : FTb.Agrees Extracted.frames :=
+  FrameTable.ofRecs_agrees _ _ fun r hr pc h1 h2 => by
+    replace hr := List.mem_singleton.1 hr
+    subst hr
+    exact List.find?_cons_of_pos (l := []) (by simpa using And.intro h1 h2)
+
+theorem laws : FTb.Aligned ∧ FTb.InFrame Arch.arm64 :=
+  FrameTable.ofRecs_laws Arch.arm64 Extracted.frames extraT (fun r hr => by
+    replace hr := List.mem_singleton.1 hr
+    subst hr
+    refine ⟨fun m hm => ?_, fun m hm => ?_, rfl, fun x hx => ?_⟩
+    · simpa using hm
+    · simpa using hm
+    · simp only [List.mem_cons, List.not_mem_nil, or_false] at hx
+      rcases hx with h | h | h <;> subst h <;> rfl)
+    (fun _ => rfl) (fun _ => rfl) (fun _ => rfl) (fun _ => rfl)
+
+theorem code : FTb.CodeOutside pool := by
+  intro pc hv
+  unfold FTb FrameTable.ofRecs at hv
+  dsimp only at hv
+  cases h : Extracted.frames.find? (fun r => decide (r.entry ≤ pc ∧ pc < r.entry + r.size)) with
+  | none =>
+    rw [h] at hv
+    simp only [extraT, beq_iff_eq] at hv
+    subst hv
+    exact ⟨by simp only [pool, outside_cons, outside_nil, and_true]; decide, by decide⟩
+  | some r =>
+    have hm := List.mem_of_find?_eq_some h
+    have hp := List.find?_some h
+    simp only [decide_eq_true_eq] at hp
+    replace hm := List.mem_singleton.1 hm
+    subst hm
+    simp only at hp
+    refine ⟨?_, by omega⟩
+    simp only [pool, outside_cons, outside_nil, and_true, SL, SH, BL, BH]; omega
 
 /-- The stack pointer: 64 bytes above the small slot's bottom, so the frame does **not** fit. -/
 def spw : Nat := SL + 64
@@ -351,16 +402,19 @@ theorem pre : GPre FTb pool rt H s0 := by
   · intro r hr
     simp only [pool, List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hr
     rcases hr with rfl | rfl <;> exact ⟨by decide, by decide, by decide⟩
-  · refine ⟨by simp [rt, SL, SH, G0], ⟨[⟨ret, spw, spw⟩], ?_, ?_, ?_, ?_⟩, by decide, by decide, ?_, fun _ => rfl, ?_⟩
+  · have el : FTb.locals ret = [] := rfl
+    have ea : FTb.args ret = [] := rfl
+    have eo : FTb.objs ret = [] := rfl
+    have e : Arch.arm64.fp FTb ret spw = spw := by
+      show spw + FTb.spdelta ret = spw; rw [show FTb.spdelta ret = 0 from rfl, Nat.add_zero]
+    refine ⟨by simp [rt, SL, SH, G0], ⟨[⟨ret, spw, spw⟩], ?_, ?_, ?_, ?_⟩, by decide, by decide, code, laws.1, ?_⟩
     · rw [hsp, show (s0.regs 30).toNat = ret by decide]
-      exact .stop (by decide) (by decide) (by decide) (by decide) (by decide)
+      have := Chain.stop (A := Arch.arm64) (FT := FTb) (m := s0.mem) (hi := SH) (pc := ret) (sp := spw)
+        (lr0 := none) rfl rfl rfl (by decide) (by rw [e]; decide)
+      rw [e] at this; exact this
     · intro f hf; simp at hf; subst hf; left; rw [hsp]
-    · rw [hsp]; decide
-    · rw [hsp]; decide
-    · intro pc hv
-      simp only [FTb, Bool.or_eq_true, beq_iff_eq] at hv
-      rcases hv with rfl | rfl <;>
-        exact ⟨by simp only [pool, outside_cons, outside_nil, and_true]; decide, by decide⟩
+    · rw [hsp]; simp [frameCls, el, ea, eo, bitsAt, Arch.varp, Arch.argp, Arch.minLocals]
+    · rw [hsp]; simp [frameCls, el, ea, eo, bitsAt, Arch.varp, Arch.argp, Arch.minLocals]
     · rw [hg]; refine ⟨rfl, .inl ⟨?_, ?_⟩⟩
       · rw [readLE_rtView hin0]; exact d1
       · rw [readLE_rtView hin8]; exact d2
@@ -368,17 +422,17 @@ theorem pre : GPre FTb pool rt H s0 := by
 /-- All hypotheses of `correctness` hold together, for a call whose frame does not fit. -/
 theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (reloc : State → State → Prop) (ret : Nat) (s : State),
-    MorestackContract Extracted.program FT pool rt H reloc ∧ TableOK FT ∧
+    MorestackContract Extracted.program FT pool rt H reloc ∧ FT.Agrees Extracted.frames ∧
     RetAddr Extracted.program ret ∧
     CallSetup (Extracted.program.withExit ret) Extracted.entry [7#64, 0#64] s ∧
     GPre FT pool rt H s ∧ ¬ GuardOK s 48 :=
-  ⟨FTb, pool, rt, H, reloc FTb, ret, s0, contract _ FTb, tableOK, hret, setup, pre, no_room⟩
+  ⟨FTb, pool, rt, H, reloc FTb, ret, s0, contract _ FTb, agrees, hret, setup, pre, no_room⟩
 
 /-- So the guarantee is reached: from a stack where the frame does not fit, `BigLocal(7, 0)`
 grows the stack and returns `7`. -/
 theorem returns : GrownReturns (Extracted.program.withExit ret) (reloc FTb) s0
     (fun s' => s'.regs 0 = 7#64) :=
-  (correctness FTb pool rt H (reloc FTb) (contract _ FTb) tableOK 7#64 0#64 ret hret s0 setup pre).mono
+  (correctness FTb pool rt H (reloc FTb) (contract _ FTb) agrees 7#64 0#64 ret hret s0 setup pre).mono
     (fun s' h => by simpa using h)
 
 end Witness
