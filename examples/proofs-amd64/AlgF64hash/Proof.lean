@@ -180,8 +180,9 @@ theorem hRet_intro {H : Janus.Contracts.Hash.HashModel} {d nargs : Nat} {s s' : 
     (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s) (hfs : s'.fsBase = s.fsBase)
     (hdf : s'.df = s.df) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
     (hf : MemFrame s.mem s'.mem (H.priv ++ calleeStack s d nargs)) (he : H.Env s'.mem (s.regs 14))
-    (hp : P s'.regs) : HRet H d nargs s s' P :=
-  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf, hmx, hf, he, hp⟩
+    (hp : P s'.regs)
+    (hcw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : HRet H d nargs s s' P :=
+  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hcw, hmx, hf, he, hp⟩
 
 set_option maxHeartbeats 4000000 in
 /-- **`runtime.f64hash` (amd64) meets its contract**, given `runtime.rand`'s and `runtime.memhash`'s. -/

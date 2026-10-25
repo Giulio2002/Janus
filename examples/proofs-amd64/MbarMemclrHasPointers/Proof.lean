@@ -138,8 +138,9 @@ theorem tRet_intro {M : Janus.Contracts.Mem.MemModel} {d nargs : Nat} {extra : L
     (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s) (hfs : s'.fsBase = s.fsBase)
     (hdf : s'.df = s.df) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
     (hf : MemFrame s.mem s'.mem (M.priv ++ calleeStack s d nargs ++ extra))
-    (he : M.Env s'.mem (s.regs 14)) (hp : P s'.mem) : TRet M d nargs extra s s' P :=
-  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf, hmx, hf, he, hp⟩
+    (he : M.Env s'.mem (s.regs 14)) (hp : P s'.mem)
+    (hcw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : TRet M d nargs extra s s' P :=
+  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hcw, hmx, hf, he, hp⟩
 
 /-- The caller's frame then the callee's frame (with the private ranges `P` and the extra
 ranges `X` of a typed-memory contract) is the caller's frame (amd64). -/

@@ -105,13 +105,13 @@ theorem model : Efaceeq (Extracted.program.link implAt) cAddr R0 := by
   · janus64_run
     all_goals
       refine rtReturn_of R0 3 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
       simp [setRegF, efaceEqual, h0]
   · obtain ⟨-, htd, hx, hy⟩ := hok h0
     janus64_run
     all_goals
       refine rtReturn_of R0 3 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+        (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
       rw [htd, IfaceSat.efaceEqual_R0 (g := s.regs 14) ⟨he1, he2, hd⟩]
       simp only [setRegF, reduceIte, Nat.reduceEqDiff, setcc_low_byte]
       have ha := Janus.Arm64.Memory.readLE_lt s.mem (s.regs 1).toNat 8
