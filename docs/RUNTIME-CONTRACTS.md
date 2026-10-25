@@ -495,6 +495,61 @@ runtime's own code is verified here: every path of `getitab` beyond the lock-fre
 takes the itab lock (whose arm64 LL/SC fallback the decoder rejects) and may allocate through
 `persistentalloc`, and the cache rebuild allocates through `mallocgc`.
 
+### Strings, slices and the write barrier (`Janus/Contracts/Rt.lean`, `String.lean`, `Slice.lean`, `WriteBarrier.lean`)
+
+These contracts are written once, ISA-independently, as an `RtSpec` (`Janus.Contracts.Rt`): the
+number of argument words `nargs`, a precondition `pre` on the argument words and the memory, the
+ranges the function reads (`reads`, which must lie outside the callee's stack window) and writes
+in the caller's memory (`writes`), whether it needs its stack check to fall through (`guard`), the
+runtime's readiness (`ready`, round 9's `H`) and whether it writes runtime memory (`rtWrites`),
+and a postcondition `post rt args m0 r0 r1 r2 m` on the three result words and the final
+memory. `RtContract p addr rt stack H sp` (arm64; `X0`.. as the words) and `RtContract64` (amd64;
+`RAX, RBX, RCX, RDI, RSI, R8`–`R11`, then stack words) turn a spec into a `Summary` with the
+Go ABIInternal frame: callee-saved registers kept, memory changed only in `rt` (when
+`rtWrites`), the callee's stack window `[SP - stack, SP)` and its argument spill slots, and the
+spec's `writes`.
+
+| Go source | runtime entry | spec |
+| --- | --- | --- |
+| `a + b + …` | `concatstring2..5`, `concatstrings` | `concatstringSpec k`, `concatstringsSpec` |
+| `[]byte` concatenation | `concatbyte2..5`, `concatbytes` | `concatbyteSpec k`, `concatbytesSpec` |
+| `string(b)` | `slicebytetostring`, `slicebytetostringtmp` | `slicebytetostringSpec`, `slicebytetostringtmpSpec` |
+| `[]byte(s)`, `[]rune(s)`, `string(rs)`, `string(rune(v))` | `stringtoslicebyte`, `stringtoslicerune`, `slicerunetostring`, `intstring` | the corresponding `…Spec` |
+| `for _, r := range s` (non-ASCII byte), `len([]rune(s))` | `decoderune`, `countrunes` | `decoderuneSpec`, `countrunesSpec` |
+| C strings (cgo, syscalls) | `gostring`, `gostringn`, `gobytes` | `gostringSpec`, `gostringnSpec`, `gobytesSpec` |
+| `append` past `cap`, any element type | `growslice`, `growsliceNoAlias`, `growsliceBuf*` | `growsliceSpec`, … |
+| `make` + `copy`, escaping stack slices | `makeslicecopy`, `moveSlice*` | `makeslicecopySpec`, `moveSlice*Spec` |
+| `copy` | `slicecopy`, `typedslicecopy` | `slicecopySpec`, `typedslicecopySpec` |
+| pointer stores with the GC marking | `gcWriteBarrier1..8`; `wbZero`, `wbMove`; the `writeBarrier` flag | `WbContract`, `WbContract64`; `wbZeroSpec`, `wbMoveSpec`; `WriteBarrierOn` |
+
+The UTF-8 decoder the specs use is `Janus.Spec.String.decodeRune`, a transcription of Go's
+`decoderune` (U+FFFD and one byte for every invalid sequence, surrogates and overlong forms
+rejected); `JanusTests/String.lean` checks it, `runesFrom`, `countRunes` and `intRune` against
+about 16,000 vectors printed by the Go 1.26 runtime itself (`scripts/utf8vectors`).
+
+**Satisfiability.** `Janus.Contracts.Sat` and `SatAmd64` prove `<spec>_satisfiable` for every
+spec with a toy implementation (`constCode`/`constCode64`) at a concrete call state;
+`Janus.Contracts.RtSat` (`rt_satisfiable`, `rt64_satisfiable`) and `WriteBarrierSat`
+(`wb_satisfiable`, `wb64_satisfiable`) collect them for round 9's SAT row. `decoderuneSpec` and
+`countrunesSpec` hold for every input without a readiness predicate, so no constant toy meets
+them: their witness is the runtime's own code. `examples/proofs/SumRunes.lean` proves that the
+machine code of `runtime.decoderune` meets `decoderuneSpec` (`decoderune_meets`), and
+`examples/proofs/RuneLen.lean` that `runtime.countrunes` (with the `decoderune` it calls) meets
+`countrunesSpec`; both then prove their example end to end with nothing assumed
+(`runtime_correctness`). `examples/proofs/WriteBarrier.lean` proves that the real
+`gcWriteBarrier1..8` meet `WbContract` for the readiness `HRoom` (the P's buffer has room; the
+flush `wbBufFlush` stays out as a contract and is never reached). The amd64 counterparts are in
+`examples/proofs-amd64/`.
+
+**Examples** (both ISAs): `Concat` (`concatstring2`), `ToBytes` (`stringtoslicebyte`),
+`FromBytes` (`slicebytetostring`), `SumRunes` (for-range over a string, `decoderune`), `RuneLen`
+(`countrunes`), `AppendPoint` (`growslice` with a 24-byte struct), `CopyNodes`
+(`typedslicecopy`), `WriteBarrier`. Each has a `Witness` section (`nonvacuous`, `returns`).
+
+**What stays trusted.** Each contract read as a claim about the Go 1.26 runtime, except
+`decoderune`, `countrunes` and the write barrier's fast path, which are proved from the binary's
+code.
+
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 
 The Go → C boundary does not use the linked-code `Summary` mechanism above. The trusted part has
