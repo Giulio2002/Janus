@@ -132,6 +132,11 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 				mxcsrString(hexv(h.MXCSR)), mxcsrString(hexv(m.MXCSR))))
 		}
 	}
+	if h.X87 != nil && m.X87 != nil {
+		v.Diffs = append(v.Diffs, compareX87(c, h.X87, m.X87, m.FSWDefined)...)
+	} else if h.X87 != nil {
+		v.Diffs = append(v.Diffs, "x87: missing in model")
+	}
 	if hexv(h.PC) != hexv(m.PC) {
 		v.Diffs = append(v.Diffs, fmt.Sprintf("pc: hw %s (pc%+d) model %s (pc%+d)", h.PC,
 			int64(hexv(h.PC)-L.TestPC), m.PC, int64(hexv(m.PC)-L.TestPC)))
@@ -203,6 +208,8 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 			k = "xmm"
 		case strings.HasPrefix(k, "ymmh"):
 			k = "ymmh"
+		case strings.HasPrefix(k, "x87"):
+			k = "x87"
 		case k != "pc" && k != "rflags" && k != "mem" && k != "mxcsr":
 			k = "reg"
 		}
@@ -241,4 +248,30 @@ func mxcsrString(m uint64) string {
 		s += " ftz"
 	}
 	return s
+}
+
+// compareX87 compares the x87 state: FCW, FSW (the bits the model defines), the abridged tag
+// word, and the registers that are in use (ST(i) is physical register (TOP + i) mod 8).
+func compareX87(c *L.Case, h, m *L.X87State, fswDef int) []string {
+	var d []string
+	in := ""
+	if c.X87 != nil {
+		in = fmt.Sprintf(" (in fcw %s fsw %s ftw %#x)", c.X87.FCW, c.X87.FSW, c.X87.FTW)
+	}
+	if hexv(h.FCW) != hexv(m.FCW) {
+		d = append(d, fmt.Sprintf("x87 fcw: hw %s model %s%s", h.FCW, m.FCW, in))
+	}
+	if hexv(h.FSW)&uint64(fswDef) != hexv(m.FSW)&uint64(fswDef) {
+		d = append(d, fmt.Sprintf("x87 fsw: hw %s model %s defined %#x%s", h.FSW, m.FSW, fswDef, in))
+	}
+	if h.FTW != m.FTW {
+		d = append(d, fmt.Sprintf("x87 ftw: hw %#x model %#x%s", h.FTW, m.FTW, in))
+	}
+	top := int(hexv(h.FSW)>>11) & 7
+	for i := 0; i < 8; i++ {
+		if h.FTW>>((top+i)&7)&1 == 1 && hexBig(h.ST[i]).Cmp(hexBig(m.ST[i])) != 0 {
+			d = append(d, fmt.Sprintf("x87 st%d: hw %s model %s%s", i, h.ST[i], m.ST[i], in))
+		}
+	}
+	return d
 }

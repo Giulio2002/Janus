@@ -80,6 +80,20 @@ type Case struct {
 	// one after another at TestPC; Bytes is ignored when Seq is set. The runner single-steps
 	// through all of them; the model threads its own state through them.
 	Seq []string `json:"seq,omitempty"`
+	// X87 is the x87 FPU state for the case; absent = the state after FNINIT (FCW 0x37F,
+	// FSW 0, every register empty), which is what the runner's thread has between cases.
+	X87 *X87State `json:"x87,omitempty"`
+}
+
+// X87State is the x87 FPU state in FXSAVE terms: the control word, the full status word
+// (exception flags, ES, C0-C3, TOP, B), the abridged tag word (bit i set = physical register
+// Ri in use) and the eight data registers in stack order ST(0)..ST(7) (80-bit, hex), as FXSAVE
+// stores them. The runner loads it with FXRSTOR64 right before entering TestPC.
+type X87State struct {
+	FCW string    `json:"fcw"`
+	FSW string    `json:"fsw"`
+	FTW int       `json:"ftw"`
+	ST  [8]string `json:"st"`
 }
 
 // DefaultMXCSR is the MXCSR value Linux gives a new process (all exceptions masked, round to
@@ -114,6 +128,9 @@ type HW struct {
 	Iters int `json:"iters,omitempty"`
 	// MXCSR after the instruction (from the signal frame's fxsave area), hex.
 	MXCSR string `json:"mxcsr,omitempty"`
+	// X87 after the instruction (from the signal frame's fxsave area; the FNINIT state when
+	// the frame says the x87 state is in its initial configuration).
+	X87 *X87State `json:"x87,omitempty"`
 }
 
 // Model is what `janus-oracle-amd64` (Janus.Amd64.step) produced.
@@ -135,6 +152,10 @@ type Model struct {
 	YMMH    []string `json:"ymmh,omitempty"`
 	Mem     [][2]int `json:"mem,omitempty"`
 	MXCSR   string   `json:"mxcsr,omitempty"` // State.mxcsr after the instruction (hex)
+	// X87 after the instruction (State.x87); FSWDefined is the mask of FSW bits the model
+	// defines (the condition codes C0-C3 the SDM leaves undefined are not compared).
+	X87        *X87State `json:"x87,omitempty"`
+	FSWDefined int       `json:"fswdef,omitempty"`
 }
 
 // Ctx offsets (bytes) inside CtxPage. Must match cmd/runner/trampoline_amd64.s.
@@ -157,6 +178,9 @@ const (
 	CtxInFS     = 2064 // the case's FS base (WRFSBASE before entry)
 	CtxInMXCSR  = 2072 // the case's MXCSR (LDMXCSR right before IRETQ), 32 bits
 	CtxOutMXCSR = 2080 // MXCSR from the signal frame's fxsave area (offset 24), 32 bits
+	CtxInHasX87 = 2088 // 1: FXRSTOR64 the image at CtxInX87 before entry
+	CtxInX87    = 2112 // a 512-byte FXSAVE image (16-byte aligned): the case's x87 state, MXCSR, XMM0-15
+	CtxOutX87   = 2624 // bytes 0..159 of the signal frame's fxsave area (FCW, FSW, FTW, ..., ST0-ST7)
 )
 
 // XsaveYMMHOffset is the offset of the YMM_Hi128 component in the standard (non-compacted)

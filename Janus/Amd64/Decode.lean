@@ -70,6 +70,8 @@ structure Prefixes where
   rep : Nat := 0
   /-- A null segment override (`26`/`2E`/`36`/`3E`) seen. -/
   seg : Bool := false
+  /-- That segment override was `3E` (`DS`; CET `NOTRACK` on an indirect `JMP`/`CALL`). -/
+  ds : Bool := false
   /-- `F0` (`LOCK`) seen. It shares prefix group 1 with `F2`/`F3`. -/
   lock : Bool := false
   /-- `64` (`FS`) seen. It shares prefix group 2 with the null segment overrides. -/
@@ -92,7 +94,8 @@ def parsePrefixes : List Nat → Prefixes → Nat → Option (Prefixes × List N
       if p.rep ≠ 0 ∨ p.lock ∨ p.rex.isSome then none
       else parsePrefixes rest { p with lock := true } (n + 1)
     else if b = 0x26 ∨ b = 0x2E ∨ b = 0x36 ∨ b = 0x3E then
-      if p.seg ∨ p.fs ∨ p.rex.isSome then none else parsePrefixes rest { p with seg := true } (n + 1)
+      if p.seg ∨ p.fs ∨ p.rex.isSome then none
+      else parsePrefixes rest { p with seg := true, ds := b == 0x3E } (n + 1)
     else if b = 0x64 then
       if p.seg ∨ p.fs ∨ p.rex.isSome then none else parsePrefixes rest { p with fs := true } (n + 1)
     else if 0x40 ≤ b ∧ b < 0x50 then
@@ -234,6 +237,114 @@ def finish (p : Prefixes) (cls : PrefixClass) (i : Instr) (len : Nat) : Option (
   | .int => if p.rep = 0 then some (i, len) else none
   | .fixed => if p.rep = 0 ∧ !p.opsize ∧ !p.seg ∧ !p.fs then some (i, len) else none
   | .own => some (i, len)
+
+/-! ### x87 (WP-J): the escape opcodes `D8`–`DF` and `FWAIT` (`9B`)
+
+The forms of `Janus.Amd64.X87.Op` (SDM Vol. 2 appendix A.4, Tables A-7 to A-22). Prefixes:
+`66`, `F2`/`F3` and `REX.W` are rejected (`66`/`REX.W` select the environment-image size of
+`FNSTENV`/`FSAVE` and are ignored elsewhere); `REX.R/X/B` and the null segment overrides are
+accepted on the memory forms (they only form the address), `FS` through `withFS`; the register
+forms (`ModRM ≥ C0`) take no prefix at all. Reserved register forms (`FFREE`, the `D9 D8`
+`FSTP1` alias, `DC D0` `FCOM2`, ...) and the environment instructions (`FLDENV`, `FNSTENV`,
+`FRSTOR`, `FNSAVE`, `FBLD`, `FBSTP`) are rejected, as are the transcendental and remainder
+instructions and the constants other than `FLD1`/`FLDZ`. -/
+
+/-- The arithmetic operation of the `/r` field of `D8`/`DA`/`DC`/`DE` memory forms and `D8`
+register forms (`/2`, `/3` are the comparisons). -/
+def x87Arith (ext : Nat) : X87.Arith :=
+  if ext = 0 then .add else if ext = 1 then .mul else if ext = 4 then .sub else if ext = 5 then .subr
+  else if ext = 6 then .div else .divr
+
+/-- The memory form of escape opcode `op` with `/r` field `ext`. -/
+def x87Mem (op ext : Nat) : Option X87.Op :=
+  if op = 0xD8 ∨ op = 0xDA ∨ op = 0xDC ∨ op = 0xDE then
+    let k : X87.MemFmt := if op = 0xD8 then .f32 else if op = 0xDC then .f64 else if op = 0xDA then .i32
+      else .i16
+    if ext = 2 then some (.com false (.mem k) 0) else if ext = 3 then some (.com false (.mem k) 1)
+    else some (.arith (x87Arith ext) (.mem k))
+  else if op = 0xD9 then
+    if ext = 0 then some (.ld (.mem .f32)) else if ext = 2 then some (.st (.mem .f32) false)
+    else if ext = 3 then some (.st (.mem .f32) true) else if ext = 5 then some .ldcw
+    else if ext = 7 then some .nstcw else none
+  else if op = 0xDB then
+    if ext = 0 then some (.ld (.mem .i32)) else if ext = 1 then some (.ist .i32 true true)
+    else if ext = 2 then some (.ist .i32 false false) else if ext = 3 then some (.ist .i32 false true)
+    else if ext = 5 then some (.ld (.mem .f80)) else if ext = 7 then some (.st (.mem .f80) true)
+    else none
+  else if op = 0xDD then
+    if ext = 0 then some (.ld (.mem .f64)) else if ext = 1 then some (.ist .i64 true true)
+    else if ext = 2 then some (.st (.mem .f64) false) else if ext = 3 then some (.st (.mem .f64) true)
+    else if ext = 7 then some (.nstsw false) else none
+  else if op = 0xDF then
+    if ext = 0 then some (.ld (.mem .i16)) else if ext = 1 then some (.ist .i16 true true)
+    else if ext = 2 then some (.ist .i16 false false) else if ext = 3 then some (.ist .i16 false true)
+    else if ext = 5 then some (.ld (.mem .i64)) else if ext = 7 then some (.ist .i64 false true)
+    else none
+  else none
+
+/-- The register form `op m` (`m ≥ C0`; `i = m mod 8` is `ST(i)`). -/
+def x87Reg (op m : Nat) : Option X87.Op :=
+  let i := m % 8
+  let ext := m / 8 % 8
+  if op = 0xD8 then
+    if ext = 2 then some (.com false (.st i) 0) else if ext = 3 then some (.com false (.st i) 1)
+    else some (.arith (x87Arith ext) (.st i))
+  else if op = 0xD9 then
+    if ext = 0 then some (.ld (.st i)) else if ext = 1 then some (.xch i)
+    else if m = 0xD0 then some .nop else if m = 0xE0 then some .chs else if m = 0xE1 then some .abs
+    else if m = 0xE4 then some .tst else if m = 0xE5 then some .xam
+    else if m = 0xE8 then some (.ldConst X87.one80) else if m = 0xEE then some (.ldConst 0)
+    else if m = 0xFA then some .sqrt else none
+  else if op = 0xDA then
+    if ext = 0 then some (.cmov 2 i) else if ext = 1 then some (.cmov 4 i)
+    else if ext = 2 then some (.cmov 6 i) else if ext = 3 then some (.cmov 10 i)
+    else if m = 0xE9 then some (.com true (.st 1) 2) else none
+  else if op = 0xDB then
+    if ext = 0 then some (.cmov 3 i) else if ext = 1 then some (.cmov 5 i)
+    else if ext = 2 then some (.cmov 7 i) else if ext = 3 then some (.cmov 11 i)
+    else if m = 0xE2 then some .nclex else if m = 0xE3 then some .ninit
+    else if ext = 5 then some (.comi true i false) else if ext = 6 then some (.comi false i false)
+    else none
+  else if op = 0xDC ∨ op = 0xDE then
+    let pop := op = 0xDE
+    if ext = 0 then some (.arithTo .add i pop) else if ext = 1 then some (.arithTo .mul i pop)
+    else if ext = 4 then some (.arithTo .subr i pop) else if ext = 5 then some (.arithTo .sub i pop)
+    else if ext = 6 then some (.arithTo .divr i pop) else if ext = 7 then some (.arithTo .div i pop)
+    else if op = 0xDE ∧ m = 0xD9 then some (.com false (.st 1) 2) else none
+  else if op = 0xDD then
+    if ext = 2 then some (.st (.st i) false) else if ext = 3 then some (.st (.st i) true)
+    else if ext = 4 then some (.com true (.st i) 0) else if ext = 5 then some (.com true (.st i) 1)
+    else none
+  else if op = 0xDF then
+    if m = 0xE0 then some (.nstsw true) else if ext = 5 then some (.comi true i true)
+    else if ext = 6 then some (.comi false i true) else none
+  else none
+
+/-- Decode an x87 instruction (`op` ∈ `D8`–`DF`, `n` bytes before it). -/
+def x87 (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr × Nat) :=
+  let rex := p.rex.getD 0
+  if p.opsize ∨ p.rep ≠ 0 ∨ rex / 8 = 1 then none else
+  match bs with
+  | [] => none
+  | m :: _ =>
+    if m ≥ 0xC0 then
+      if p.rex.isSome ∨ p.seg ∨ p.fs then none else
+      match x87Reg op m with
+      | some o => finish p .own (.x87 o none) (n + 2)
+      | none => none
+    else
+      match modrm rex bs with
+      | some (mm, _, c) =>
+        match mm.rm, x87Mem op mm.ext with
+        | .m a, some o => finish p .own (.x87 o (some a)) (n + 1 + c)
+        | _, _ => none
+      | none => none
+
+/-- `3E` (`NOTRACK`) is accepted on the indirect `JMP`/`CALL r/m` (`FF /4`, `FF /2`): with CET
+indirect-branch tracking it exempts the branch from the `ENDBR64` check (gcc's jump tables);
+Linux does not enable IBT for user space, and without it `3E` is an ignored segment override,
+so the branch is the plain one. -/
+def notrack (p : Prefixes) : Prefixes := if p.ds then { p with seg := false, ds := false } else p
 
 /-- One-byte opcode map (no `0F` escape). `n` is the number of bytes before the opcode. -/
 def oneByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr × Nat) :=
@@ -388,6 +499,10 @@ def oneByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
       | none => none
   else if op = 0xC9 then finish p .fixed .leave (n + 1)
   else if op = 0xE8 ∨ op = 0xE9 then
+    -- `66 66 48 E8 rel32` is the padded `call __tls_get_addr@PLT` of the general-dynamic TLS
+    -- sequence (the linker may rewrite the 16 bytes in place); `REX.W` makes the operand size
+    -- 64 bits on Intel and AMD alike, whatever the `66`s say, so it is a plain `CALL rel32`
+    let p := if op = 0xE8 ∧ p.opsize ∧ rexW then { p with opsize := false } else p
     match readLE 4 bs with
     | some (v, _) =>
       finish p .fixed (if op = 0xE8 then .call (sext 32 64 v) else .jmp (sext 32 64 v)) (n + 5)
@@ -425,10 +540,14 @@ def oneByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
     withModRM fun m _ len =>
       if m.ext = 0 then finish p .int (.unary .inc osz (rmLoc rexP osz m.rm)) len
       else if m.ext = 1 then finish p .int (.unary .dec osz (rmLoc rexP osz m.rm)) len
-      else if m.ext = 2 then finish p .fixed (.callInd (rmLoc rexP 64 m.rm)) len
-      else if m.ext = 4 then finish p .fixed (.jmpInd (rmLoc rexP 64 m.rm)) len
+      else if m.ext = 2 then finish (notrack p) .fixed (.callInd (rmLoc rexP 64 m.rm)) len
+      else if m.ext = 4 then finish (notrack p) .fixed (.jmpInd (rmLoc rexP 64 m.rm)) len
       else if m.ext = 6 then finish p .fixed (.push (.loc (rmLoc rexP 64 m.rm))) len
       else none
+  else if 0xD8 ≤ op ∧ op ≤ 0xDF then x87 p op bs n
+  else if op = 0x9B then
+    -- FWAIT, without any prefix
+    if p = {} then some (.x87 .wait none, n + 1) else none
   else none
 
 /-- The SSE scalar floating-point encodings of the two-byte map (and `66 0F 3A 0A/0B`,
@@ -743,6 +862,8 @@ def withFS : Instr → Option Instr
   | .alu op w dst (.loc (.mem a)) => some (.alu op w dst (.loc (.mem { a with fs := true })))
   | .test w (.mem a) src => some (.test w (.mem { a with fs := true }) src)
   | .movx sg dw sw d (.mem a) => some (.movx sg dw sw d (.mem { a with fs := true }))
+  -- x87 memory operands (`fldt %fs:x@tpoff`, local-exec TLS `long double`)
+  | .x87 o (some a) => some (.x87 o (some { a with fs := true }))
   | _ => none
 
 /-- The VEX-encoded instructions (SDM Vol. 2 §2.3). `rex` holds `W R X B` (already

@@ -72,6 +72,8 @@ def faultJson : Fault → String × Json
   | .misaligned a => ("misaligned", Json.mkObj [("addr", hex a)])
   | .badTarget t => ("badTarget", Json.mkObj [("target", hex t)])
   | .simdFPException pc => ("simdFPException", Json.mkObj [("pc", hex pc)])
+  | .fpuException pc => ("fpuException", Json.mkObj [("pc", hex pc)])
+  | .fpuStack pc => ("fpuStack", Json.mkObj [("pc", hex pc)])
   | .outOfFuel => ("outOfFuel", Json.null)
 
 structure Case where
@@ -90,6 +92,8 @@ structure Case where
   /-- audit/rt-model sequence mode: the instructions laid out one after another at `TestPC`
   (`bytes` is ignored when non-empty) -/
   seq : List (List Nat) := []
+  /-- the x87 state (`x87`: FCW, FSW, abridged FTW, `ST(0)`..`ST(7)`), absent: after `FNINIT` -/
+  x87 : Janus.Amd64.X87.St := {}
 
 def parseCase (line : String) : Except String Case := do
   let j ← Json.parse line
@@ -118,7 +122,22 @@ def parseCase (line : String) : Except String Case := do
   if mxcsr ≥ 2 ^ 16 then throw "mxcsr: reserved bits set"
   let seqS : Array String := (j.getObjValAs? (Array String) "seq").toOption.getD #[]
   let seq ← seqS.toList.mapM parseBytes
-  pure { id, bytes, regs, rflags, xmm, ymmh, fsBase, seed, init, mxcsr, seq }
+  let x87 ← match j.getObjVal? "x87" with
+    | .ok x => do
+      let fcw ← parseHex (← x.getObjValAs? String "fcw")
+      let fsw ← parseHex (← x.getObjValAs? String "fsw")
+      let ftw ← x.getObjValAs? Nat "ftw"
+      let st ← (← x.getObjValAs? (Array String) "st").mapM parseHex
+      if st.size ≠ 8 ∨ fcw ≥ 2 ^ 16 ∨ fsw ≥ 2 ^ 16 ∨ ftw ≥ 256 ∨ st.any (· ≥ 2 ^ 80) then
+        throw "bad x87 state"
+      let top := fsw / 0x800 % 8
+      let bit (i : Nat) : Option Bool := some (fsw / 2 ^ i % 2 = 1)
+      -- FXRSTOR loads the control word as given; the model keeps what FNSTCW reads back
+      pure ({ regs := fun r => st[(r + 8 - top) % 8]!, top, tags := ftw,
+              cw := Janus.Amd64.X87.normCW fcw, sw := fsw % 256 + (fsw / 0x8000) * 0x8000,
+              c0 := bit 8, c1 := bit 9, c2 := bit 10, c3 := bit 14 } : Janus.Amd64.X87.St)
+    | .error _ => pure {}
+  pure { id, bytes, regs, rflags, xmm, ymmh, fsBase, seed, init, mxcsr, seq, x87 }
 
 /-- Initial byte at buffer offset `i`: the last override for `i`, else the pattern. -/
 def initByte (c : Case) (i : Nat) : Nat :=
@@ -137,6 +156,7 @@ def initState (c : Case) (initArr : Array Nat) : State :=
     fsBase := BitVec.ofNat 64 c.fsBase
     df := bitSet c.rflags 10
     mxcsr := BitVec.ofNat 32 c.mxcsr
+    x87 := c.x87
     mem :=
       { bytes := fun a =>
           if dataBase ≤ a ∧ a < dataBase + dataSize then BitVec.ofNat 8 (initArr[a - dataBase]!)
@@ -156,6 +176,20 @@ def flagBits (f : Flags) : Nat × Nat :=
     | none => (0, 0)
   let parts := [one f.cf 1, one f.pf 4, one f.af 16, one f.zf 64, one f.sf 128, one f.ovf 2048]
   (parts.foldl (· + ·.1) 0, parts.foldl (· + ·.2) 0)
+
+/-- The x87 state in `FXSAVE` terms (`layout.X87State`); undefined condition codes read as 0
+(`fswDefined` masks them out). -/
+def x87Json (t : Janus.Amd64.X87.St) : Json :=
+  let b (o : Option Bool) (v : Nat) : Nat := if o = some true then v else 0
+  let fsw := t.sw % 256 + (if t.sw / 0x8000 % 2 = 1 then 0x8000 else 0) + b t.c0 0x100 +
+    b t.c1 0x200 + b t.c2 0x400 + t.top % 8 * 0x800 + b t.c3 0x4000
+  Json.mkObj [("fcw", hex t.cw), ("fsw", hex fsw), ("ftw", toJson (t.tags % 256)),
+    ("st", Json.arr ((List.range 8).map fun i => Json.str (hex (t.regs ((t.top + i) % 8) % 2 ^ 80))).toArray)]
+
+/-- The `FSW` bits the model defines: all but the undefined condition codes. -/
+def fswDefined (t : Janus.Amd64.X87.St) : Nat :=
+  let u (o : Option Bool) (v : Nat) : Nat := if o.isSome then 0 else v
+  0xFFFF - u t.c0 0x100 - u t.c1 0x200 - u t.c2 0x400 - u t.c3 0x4000
 
 /-- Sequence mode: the code page is the concatenated instructions followed by `0xCC`; `step`
 is applied from `TestPC` until `rip` reaches the end of the sequence (or leaves it, or faults),
@@ -196,6 +230,7 @@ def runCase (c : Case) : Json :=
       ("xmm", Json.arr ((List.range 16).map fun i => Json.str (hex (s.xmm i).toNat)).toArray),
       ("ymmh", Json.arr ((List.range 16).map fun i => Json.str (hex (s.ymmHi i).toNat)).toArray),
       ("mxcsr", hex s.mxcsr.toNat),
+      ("x87", x87Json s.x87), ("fswdef", toJson (fswDefined s.x87)),
       ("mem", Json.arr mem.toArray)]
 
 end OracleAmd64

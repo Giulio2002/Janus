@@ -4,6 +4,7 @@ import Janus.Amd64.Decode
 import Janus.Arm64.Bits
 import Janus.Amd64.TacticAttr
 import Janus.Amd64.Float
+import Janus.Amd64.X87Exec
 
 /-!
 # x86-64 execution semantics for the supported subset
@@ -1181,6 +1182,7 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
   | .locked i a size =>
     let addr := (ea s next a).toNat
     if addr % size ≠ 0 then .error (.misaligned addr) else exec i len s
+  | .x87 op m => X87.exec s pc next op (m.map fun a => (ea s next a).toNat) (fun cc => condition cc s.flags)
 
 /-- Decode and execute the instruction at the start of `bytes` (the code at `s.rip`). -/
 def step (bytes : List Nat) (s : State) : Except Fault State :=

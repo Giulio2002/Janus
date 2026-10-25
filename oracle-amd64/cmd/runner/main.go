@@ -286,6 +286,14 @@ func runCase(c *L.Case, seq int64) L.HW {
 		}
 	}
 	put64(ctx, L.CtxInMXCSR, mxcsr)
+	put64(ctx, L.CtxInHasX87, 0)
+	if c.X87 != nil {
+		if err := x87Image(c.X87, uint32(mxcsr)); err != nil {
+			r.Status, r.Note = "error", err.Error()
+			return r
+		}
+		put64(ctx, L.CtxInHasX87, 1)
+	}
 	put64(ctx, L.CtxFrame, L.TestPC)
 	put64(ctx, L.CtxFrame+8, userCS)
 	put64(ctx, L.CtxFrame+16, uint64(c.RFlags&(L.StatusFlags|L.FlagDF))|0x202|tf)
@@ -325,6 +333,13 @@ func runCase(c *L.Case, seq int64) L.HW {
 			if m := get64(ctx, L.CtxOutMXCSR); m != ^uint64(0) {
 				put64(ctx, L.CtxInMXCSR, m&L.MXCSRMask)
 			}
+			// carry the x87 state into the next step (the handler resets the thread's)
+			if get64(ctx, L.CtxOutHasFP) == 1 {
+				x := capturedX87()
+				if err := x87Image(&x, uint32(get64(ctx, L.CtxInMXCSR))); err == nil {
+					put64(ctx, L.CtxInHasX87, 1)
+				}
+			}
 			efl := g(gEFL)
 			put64(ctx, L.CtxFrame, reRIP)
 			put64(ctx, L.CtxFrame+8, userCS)
@@ -357,6 +372,8 @@ func runCase(c *L.Case, seq int64) L.HW {
 		for i := 0; i < 16; i++ {
 			r.XMM[i] = hex128(ctx[L.CtxOutXMM+16*i : L.CtxOutXMM+16*i+16])
 		}
+		x := capturedX87()
+		r.X87 = &x
 		if xbv := get64(ctx, L.CtxOutXBV); xbv != ^uint64(0) {
 			// XSTATE_BV bit 2 clear: the AVX state is in its initial configuration (all upper
 			// halves zero) and the area's contents are not meaningful
@@ -394,6 +411,69 @@ func runCase(c *L.Case, seq int64) L.HW {
 		r.Note = fmt.Sprintf("unexpected signal %d code %d at %#x", sig, r.Code, pc)
 	}
 	return r
+}
+
+// parse80 returns the 10 little-endian bytes of a hex 80-bit value.
+func parse80(s string) ([10]byte, error) {
+	var out [10]byte
+	x, err := parseHex128(s)
+	if err != nil {
+		return out, err
+	}
+	for i := 10; i < 16; i++ {
+		if x[i] != 0 {
+			return out, fmt.Errorf("x87 register %q wider than 80 bits", s)
+		}
+	}
+	copy(out[:], x[:10])
+	return out, nil
+}
+
+// x87Image writes the FXSAVE image of the case's x87 state x, its MXCSR and the XMM
+// registers already at CtxInXMM to CtxInX87 (loaded by FXRSTOR64 in callPage).
+func x87Image(x *L.X87State, mxcsr uint32) error {
+	img := ctx[L.CtxInX87 : L.CtxInX87+512]
+	clear(img)
+	fcw, err1 := parseHex(x.FCW)
+	fsw, err2 := parseHex(x.FSW)
+	if err1 != nil || err2 != nil || fcw > 0xFFFF || fsw > 0xFFFF || x.FTW < 0 || x.FTW > 255 {
+		return fmt.Errorf("bad x87 control/status/tag word")
+	}
+	binary.LittleEndian.PutUint16(img[0:], uint16(fcw))
+	binary.LittleEndian.PutUint16(img[2:], uint16(fsw))
+	img[4] = byte(x.FTW)
+	binary.LittleEndian.PutUint32(img[24:], mxcsr)
+	for i := 0; i < 8; i++ {
+		v, err := parse80(x.ST[i])
+		if err != nil {
+			return err
+		}
+		copy(img[32+16*i:], v[:])
+	}
+	copy(img[160:416], ctx[L.CtxInXMM:L.CtxInXMM+256])
+	return nil
+}
+
+// capturedX87 is the x87 state of the signal frame (CtxOutX87), or the FNINIT state when the
+// frame's XSTATE_BV says the x87 state is in its initial configuration.
+func capturedX87() L.X87State {
+	x := L.X87State{FCW: "0x37f", FSW: "0x0"}
+	for i := range x.ST {
+		x.ST[i] = "0x0"
+	}
+	if xbv := get64(ctx, L.CtxOutXBV); xbv != ^uint64(0) && xbv&1 == 0 {
+		return x
+	}
+	b := ctx[L.CtxOutX87 : L.CtxOutX87+160]
+	x.FCW = hex64(uint64(binary.LittleEndian.Uint16(b[0:])))
+	x.FSW = hex64(uint64(binary.LittleEndian.Uint16(b[2:])))
+	x.FTW = int(b[4])
+	for i := 0; i < 8; i++ {
+		var v [16]byte
+		copy(v[:10], b[32+16*i:32+16*i+10])
+		x.ST[i] = hex128(v[:])
+	}
+	return x
 }
 
 // checkCPU makes sure the trampoline's RDFSBASE/WRFSBASE (FSGSBASE, enabled by the kernel:

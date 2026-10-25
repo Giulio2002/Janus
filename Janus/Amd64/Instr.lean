@@ -1,3 +1,5 @@
+import Janus.Amd64.X87
+
 /-!
 # x86-64 instruction AST (supported subset)
 
@@ -298,6 +300,9 @@ inductive Instr where
   is naturally aligned, so that the locked access never splits a cache line (Linux with
   `split_lock_detect=fatal` kills a process that does that, `SIGBUS`). -/
   | locked (i : Instr) (a : Addr) (size : Nat)
+  /-- An x87 instruction (`D8`–`DF`, `9B`; `Janus.Amd64.X87`) with its memory operand, if it
+  has one. -/
+  | x87 (op : X87.Op) (m : Option Addr)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Amd64

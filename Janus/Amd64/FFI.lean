@@ -249,17 +249,18 @@ the goroutine may resume on another thread, so `FS` is arbitrary except that its
 `g` (`TlsG`); every other register, the flags and the vector registers are arbitrary. `MXCSR`
 keeps its control bits (the C code restores them, `CReturn.mxcsr`), its sticky status flags are
 arbitrary: a caller in the Go floating-point environment (`GoABI.GoMXCSR`) is still in it
-(`GoResume.goMXCSR`). -/
+(`GoResume.goMXCSR`). The x87 FPU state is arbitrary (the C code may have raised its sticky
+flags; Go code never uses it). -/
 def GoResume (s s' : State) (m : Memory) : Prop :=
-  ∃ regs flags xmm ymmHi fs mx,
+  ∃ regs flags xmm ymmHi fs mx x87,
     s' = { s with regs := regs, rip := retAddrOf s, flags := flags, xmm := xmm, ymmHi := ymmHi,
-                  mem := m, fsBase := fs, df := false, mxcsr := mx } ∧
+                  mem := m, fsBase := fs, df := false, mxcsr := mx, x87 := x87 } ∧
     regs GoABI.regSP = s.regs GoABI.regSP + 8 ∧ regs GoABI.regFP = s.regs GoABI.regFP ∧ regs regG = s.regs regG ∧
     xmm xmmZero = 0 ∧ TlsG s' ∧ mx.toNat / 64 = s.mxcsr.toNat / 64
 
 theorem GoResume.goMXCSR {s s' : State} {m : Memory} (h : GoResume s s' m)
     (hm : GoABI.GoMXCSR s) : GoABI.GoMXCSR s' := by
-  obtain ⟨_, _, _, _, _, mx, rfl, -, -, -, -, -, hmx⟩ := h
+  obtain ⟨_, _, _, _, _, mx, _, rfl, -, -, -, -, -, hmx⟩ := h
   unfold GoABI.GoMXCSR at hm ⊢
   exact hmx.trans hm
 
@@ -287,7 +288,7 @@ def GoKept (s : State) (a n : Nat) (w : Bool) : Prop :=
 state `s`, returning to `ret` (trusted, see `Janus.FFI.CgoEntry`): `RIP = fn`, `RDI = arg`,
 `[RSP] = ret`; the system stack (`RSP + 8` 16-byte aligned, `cgoCStack` bytes below `RSP` and
 the return address writable) is not Go memory; Go memory the runtime leaves alone keeps its
-bytes and accessibility; the direction flag is clear; the same thread (`FS`). -/
+bytes and accessibility; the direction flag is clear; the same thread (`FS`) and its x87 FPU state. -/
 structure CgoEntry (p : Program) (s t : State) (ret : Nat) : Prop where
   rip : t.rip = s.regs 0
   arg : t.regs 7 = s.regs 3
@@ -300,6 +301,9 @@ structure CgoEntry (p : Program) (s t : State) (ret : Nat) : Prop where
   keptAcc : ∀ a n w, GoKept s a n w → t.mem.accessible a n w = true
   df : t.df = false
   fs : t.fsBase = s.fsBase
+  /-- The x87 FPU is the caller's: nothing between the Go call and the C entry (`cgocall`,
+  `entersyscall`, `asmcgocall`, all Go and Go assembly) executes an x87 instruction. -/
+  x87 : t.x87 = s.x87
 
 /-- The Go caller resumes from the final C state `t'` (see `Janus.FFI.CgoResumed`). -/
 def CgoResumed (s t' s' : State) : Prop :=

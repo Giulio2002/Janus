@@ -1,4 +1,5 @@
 import Janus.Arm64.State
+import Janus.Amd64.X87
 
 /-!
 # Machine state for the x86-64 (amd64) user-mode model
@@ -77,6 +78,9 @@ structure State where
   a new process; the Go ABI fixes only its control bits (`GoABI.GoMXCSR`), and the flags are
   sticky (a Go program's `main` already sees `PE` set). -/
   mxcsr : BitVec 32 := 0x1F80
+  /-- The x87 FPU (`Janus.Amd64.X87.St`: data registers, `TOP`, tags, control and status
+  words). Only the `long double` code of C functions uses it; Go code never does. -/
+  x87 : X87.St := {}
 
 instance : Inhabited State :=
   ⟨{ regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩,
@@ -112,6 +116,12 @@ inductive Fault where
   /-- `#XM`: the SSE floating-point instruction at `pc` raised an exception that is unmasked
   in `MXCSR` (Linux delivers `SIGFPE`). -/
   | simdFPException (pc : Nat)
+  /-- The x87 instruction at `pc` raised an exception that is unmasked in the x87 control word,
+  or found one pending (`#MF`, `SIGFPE` on Linux; see `Janus.Amd64.X87`). -/
+  | fpuException (pc : Nat)
+  /-- The x87 instruction at `pc` overflowed or underflowed the register stack (pushed onto an
+  in-use `ST(7)` or read an empty register). -/
+  | fpuStack (pc : Nat)
   /-- Fuel ran out before the call returned. -/
   | outOfFuel
 deriving Repr, DecidableEq, Inhabited

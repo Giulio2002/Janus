@@ -26,6 +26,8 @@ type State struct {
 	// MXCSR for the case when MXCSRSet (otherwise layout.DefaultMXCSR, field omitted).
 	MXCSR    uint32
 	MXCSRSet bool
+	// X87 is the case's x87 state (nil: the FNINIT state).
+	X87 *L.X87State
 }
 
 // SetMXCSR sets the case's MXCSR.
@@ -71,6 +73,7 @@ func Case(id int, class string, b []byte, s State) L.Case {
 	if s.MXCSRSet && s.MXCSR != L.DefaultMXCSR {
 		c.MXCSR = hex64(uint64(s.MXCSR))
 	}
+	c.X87 = s.X87
 	return c
 }
 
