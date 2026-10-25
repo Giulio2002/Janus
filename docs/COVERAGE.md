@@ -64,8 +64,9 @@ Main findings:
   `ADDP`, `UADDW`, `UMULL`, `FMLA`, `UZP1` and `LD4`/`ST4`. Three further encodings block gcc
   code on amd64: `ENDBR64` (on every gcc function, Ubuntu's default `-fcf-protection`; fixed on
   agent/ffi), `NOTRACK JMP` (the CET form of jump-table dispatch) and the general-dynamic TLS call
-  sequence. `long double` needs x87. The C ABI model of agent/ffi handles integer register
-  arguments only (see [5](#5-cgo-c-code)).
+  sequence. `long double` needs x87. The C ABI model covers every argument and result class of
+  both ABIs (K1: stack, FP/SIMD, structs by value, indirect results, varargs; see
+  [5.2](#52-the-c-side-abi-against-agentffis-model)).
 
 ## Method
 
@@ -637,18 +638,21 @@ on amd64. On amd64 there is also one `PUNPCKLQDQ`.
 ### 5.2 The C-side ABI, against agent/ffi's model
 
 agent/ffi models the AAPCS64 and System V calls (`Janus/CABI.lean`, `Janus/Amd64/CABI.lean`). The
-model covers integer arguments in registers (`X0`–`X7`; `RDI RSI RDX RCX R8 R9`), one or two
+model covered integer arguments in registers (`X0`–`X7`; `RDI RSI RDX RCX R8 R9`), one or two
 integer results, the callee-saved general registers, stack alignment, the red zone, `DF`, and the
-cgo boundary contract (`CgoCall`, `TopOfStack`). Measured against the corpus:
+cgo boundary contract (`CgoCall`, `TopOfStack`). K1 (agent/cabi) added the classified call for
+every argument and result class (`Janus/CABI/{CType,AAPCS64,SysV}.lean`, `CCallA`, `CEnsuresR`;
+docs/FFI.md § 1), checked against gcc and clang by `scripts/cabi-probe.sh`, with ten proved
+examples per ISA. Measured against the corpus:
 
 | ABI feature | corpus function | decodes today (arm64 / amd64 gcc -O2) | agent/ffi model | missing |
 |---|---|---|---|---|
 | integer register args/results | `cc_*`, `c_add`, `c_sum` | yes / yes (with `ENDBR64`) | **yes** (`CCall`, `CReturn`) | – |
-| stack arguments (> 8 / > 6) | `a_stackargs` | yes / yes | no: `CCall` takes at most `numArgRegs` args | stack-argument layout in `CCall`/`CEnsures` |
-| FP/SIMD args and results | `a_fargs`, `f_*` | yes / yes (`-O0` arm64: `SCVTF` forms no) | no ("a C function using floating point is outside the model") | `V0`–`V7` / `XMM0`–`XMM7` args, `D0`/`XMM0` results; callee-saved `V8`–`V15` low halves; FPCR/MXCSR and x87 control word preserved |
-| struct by value, ≤ 16 bytes | `a_small`, `a_small_arg`, `a_mixed`, `a_hfa` | yes / `a_hfa`: `SHUFPS` no | partly: an all-INTEGER struct is two integer args; no classification | SysV classification (INTEGER/SSE/MEMORY), AAPCS64 HFA/HVA, mixed classes |
-| struct by value, large / `sret` | `a_big`, `a_big_arg` | yes / `PADDQ` no | no: `X8` (indirect result) not in `CCall`; hidden `RDI` pointer unstated | indirect result register, caller-allocated copies |
-| varargs | `a_varargs`, `a_varargs_f` | yes / yes | no | `AL` = vector-register count (amd64), register save area, `va_list` layout for both ABIs, `va_arg` over the overflow area |
+| stack arguments (> 8 / > 6) | `a_stackargs` | yes / yes | **yes (K1)**: `CCallA`/`CEnsuresR`, `.stack` pieces; `KStack10`, `GoStack10` proved | – |
+| FP/SIMD args and results | `a_fargs`, `f_*` | yes / yes (`-O0` arm64: `SCVTF` forms no) | **yes (K1)**: `V0`–`V7` / `XMM0`–`XMM7` pieces, `D0`/`XMM0` results; `CReturn` keeps `V8`–`V15` low halves, `FPCR`, the `MXCSR` controls and the x87 control word; `KFP`, `GoFP` proved | – |
+| struct by value, ≤ 16 bytes | `a_small`, `a_small_arg`, `a_mixed`, `a_hfa` | yes / `a_hfa`: `SHUFPS` no | **yes (K1)**: `Janus.C.SysV.classify` (INTEGER/SSE/SSEUP/X87/MEMORY, nested cleanup), `Janus.C.AAPCS64` HFA/HVA, mixed classes; probe-checked against gcc/clang; `KPMix`, `GoPMix` proved | – |
+| struct by value, large / `sret` | `a_big`, `a_big_arg` | yes / `PADDQ` no | **yes (K1)**: `RetBuf` (`X8` / hidden `RDI`, returned in `RAX`), B.4 caller copies (`Passing.indirect`), SysV MEMORY copies in the argument area; `KBig`, `GoBig` proved | – |
+| varargs | `a_varargs`, `a_varargs_f` | yes / yes | **yes (K1)**: `VarargAL`, `VaList`/`vaStart`/`vaArg` for both ABIs (checked against the compiled `va_arg`s by the probe); `KVSum` proved for every `n`, `GoVSum8` | – |
 | callbacks C → Go (`//export`) | – (cgo-generated `_cgoexp_*`, `crosscall2`) | `crosscall2` decodes | no (FFI.md: nothing on it) | `crosscall2` → `cgocallback` contract (re-entering Go: `g`, stack switch, `X28`/`R14`), the reverse composition theorem |
 | calls through function pointers | `a_callback` | yes / yes | yes as code (dynamic targets) | a C-side `FuncvalIs` analogue (function-pointer hypotheses) |
 | C globals, `.rodata` tables | `a_globals` | yes / yes | partly: read-only data copied; writable data "referenced, not copied"; `-fPIC` GOT loads unmodelled | writable data objects for C `.data`/`.bss`, GOT-indirect access (`adrp :got:` / `mov sym@GOTPCREL`) |
@@ -656,7 +660,7 @@ cgo boundary contract (`CgoCall`, `TopOfStack`). Measured against the corpus:
 | `setjmp`/`longjmp` | `a_setjmp` | yes / yes | no | libc contracts with a non-local return outcome (`jmp_buf` contents, restored callee-saved state) |
 | `alloca`, VLAs | `a_alloca`, `cc_vla` | `-O3`: `ADDP` / `PADDQ` no; `-O2`: yes | yes for VLAs (the `CSum`/`cc_vla` frame) | dynamic-frame lemmas for `alloca` |
 | libc calls (`memcpy`, `strlen`, `malloc`) | `a_libc` | yes / yes (PLT calls) | no ("would be handled with `--contract`") | PLT stub recognition, per-function libc contracts |
-| `long double`, `_Complex`, `__int128` | `a_ldouble`, `a_complex`, `a_u128` | yes / `long double`: x87 no | no | x87 80-bit state (amd64), quad precision via `__multf3` calls (arm64), complex returns in two FP registers |
+| `long double`, `_Complex`, `__int128` | `a_ldouble`, `a_complex`, `a_u128` | yes / `long double`: x87 no | **classification yes (K1)**: `__int128` (two INTEGER / even register pair), `_Complex` (two FP registers / SSE, SSE), arm64 `long double` (binary128 in one `V` register), SysV `long double` (X87: memory argument, `ST0` result) | x87 execution and the x87 register stack (WP-J); arm64 binary128 arithmetic is `__multf3`-style libgcc calls (libc contracts, K2) |
 | bitfields, recursion | `a_bitfield`, `a_recursive` | yes / yes | yes as code | – |
 | atomics (GCC `__atomic`) | `m_atomic_inc`, `m_cas` | yes: calls to the outline-atomics helpers `__aarch64_ldadd4_acq_rel`, `__aarch64_cas4_acq_rel` / yes (`LOCK XADD`, `LOCK CMPXCHG`) | yes as code | libgcc outline-atomics helpers (LSE or LL/SC, so they need [WP-A](#6-work-plan)) |
 
@@ -703,7 +707,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 9 | **H. arm64 crypto extensions, CRC32, permutes** (done on agent/armcrypto: 151/207 assembly, `A64Crc32` proved; see 1.3): `PMULL`/`PMULL2` (1Q), `SHA1C/H/M/P/SU0/SU1`, `SHA256H/H2/SU0/SU1`, `SHA512H/H2/SU0/SU1`, SHA3 `EOR3`/`RAX1`/`XAR`/`BCAX`, `CRC32{B,H,W,X}`, `CRC32C{B,H,W,X}`, `ZIP1`/`ZIP2` on 2D, `MOV` element | arm64 assembly +12 (GCM ×5, SHA-1/256/512, SHA3, CRC32 ×2, chacha20); with C 206/207, the last being A's `cgoSigtramp` | new `Janus/Arm64/Crypto.lean` (hook in `Decode.lean`) | M | none (I for the shared `ZIP1`) |
 | 10 | **F. AVX/AVX2 (VEX-128/256, YMM)** beyond the moves and compares `memmove`/`memequal` use: integer and FP arithmetic, shuffles and permutes (`VPSHUFB`, `VPALIGNR`, `VPERM2I128`, `VPERMD`, `VPBLENDD`, `VINSERTI128`, `VEXTRACTI128`, `VPBROADCAST*`), packed FMA, the `V*SD/SS` scalar forms | C `-march=x86-64-v3`: gcc 52.7%, clang 50.5% → ≈ 99%; assembly: `math.archExp`, SHA-1/256/512 AVX2, chacha20poly1305 (+7 in the greedy table) | new `Janus/Amd64/{DecodeAVX,ExecAVX}.lean` | L | D (lane semantics generalised to 256 bits) |
 | 11 | **G. AVX-512**: EVEX decoding (`disp8*N`, broadcast, masking, zeroing), ZMM state, `K0`–`K7` and `KMOV*`, `VMOVDQU64`, `VPERMB`/`VPERMI2B` (VBMI), `VGF2P8AFFINEQB` (GFNI), `VPOPCNTB`, `VPCOMPRESSQ`, `VPTERNLOGD`, `VPCLMULQDQ`, `VEXTRACTF32X4`, `VPCMPUQ`, the `asyncPreempt` state save | assembly +29 (`internal/runtime/gc/scan.expandAVX512_*`, the GC's span scanning), `ieeeCLMUL`, `asyncPreempt` → amd64 assembly 100% (with C, D, E, F) | new `Janus/Amd64/{DecodeEVEX,ExecEVEX}.lean`, ZMM/K fields in `Janus/Amd64/State.lean` | XL | F |
-| 12 | **K1. C ABI: arguments and results**: stack arguments, FP/SIMD arguments and results, callee-saved `V8`–`V15` low halves, FPCR/MXCSR/x87-CW preservation, SysV classification (INTEGER/SSE/MEMORY), AAPCS64 HFA/HVA, indirect results (`X8`, hidden `RDI`), varargs (`AL`, register save area, `va_list` for both ABIs), `long double`/`_Complex` returns | rows 2–6 and 15 of the table in 5.2 | `Janus/CABI.lean`, `Janus/Amd64/CABI.lean`, docs/FFI.md § 1 | L | ffi |
+| 12 | **K1. C ABI: arguments and results** (**done**, agent/cabi: docs/FFI.md § 1, `scripts/cabi-probe.sh`): stack arguments, FP/SIMD arguments and results, callee-saved `V8`–`V15` low halves, FPCR/MXCSR/x87-CW preservation, SysV classification (INTEGER/SSE/MEMORY), AAPCS64 HFA/HVA, indirect results (`X8`, hidden `RDI`), varargs (`AL`, register save area, `va_list` for both ABIs), `long double`/`_Complex` returns | rows 2–6 and 15 of the table in 5.2 | `Janus/CABI.lean`, `Janus/Amd64/CABI.lean`, docs/FFI.md § 1 | L | ffi |
 | 13 | **K2. C ABI: environment**: `//export` callbacks (`crosscall2` → `cgocallback` contract and the reverse composition theorem), function-pointer hypotheses, writable C globals and `-fPIC` GOT access as data objects, TLS (initial-exec, general-dynamic, TLSDESC), PLT stubs and libc contracts (`memcpy`, `memset`, `strlen`, `malloc`/`free`, outline atomics), `setjmp`/`longjmp` (non-local return), `alloca` frame lemmas | rows 7–13 of 5.2 | `Janus/FFI.lean`, `Janus/Amd64/FFI.lean`, new `Janus/Contracts/Libc.lean`, the cgo part of `cmd/janus/extract.go`, docs/FFI.md §§ 2–4 | L | K1, iface-alloc |
 | 14 | **R1. String runtime contracts**: `concatstring2..5`/`concatstrings`, `concatbyte2..5`/`concatbytes`, `slicebytetostring`, `slicebytetostringtmp`, `stringtoslicebyte`, `stringtoslicerune`, `slicerunetostring`, `intstring`, `cmpstring` (executed: decodes), `decoderune`, `countrunes`, `strmin`/`strmax`, `gostring`, `gostringn`, `gobytes` | 20 linked + 3 | `Janus/Contracts/String.lean` (+`Amd64`), `Janus/Spec/String.lean` | M | iface-alloc (alloc contracts) |
 | 15 | **R2. Interface runtime contracts**: `convT`, `convTnoptr`, `convT16/32/64`, `convTstring`, `convTslice`, `assertE2I`, `assertE2I2`, `typeAssert`, `interfaceSwitch` (+ `emptyTypeAssertCache`, `emptyInterfaceSwitchCache`), `ifaceeq`, `efaceeq` | 12 linked + 1 + 2 caches; unlocks type switches and assertions (criterion 3) | `Janus/Contracts/Iface.lean` (+`Amd64`), `Janus/Spec/Type.lean` | M | iface-alloc |

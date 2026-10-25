@@ -769,6 +769,10 @@ where `C` is a `Contract` for the external stubs, and it is written in the state
 * the return: `cgocall` returns to its caller with `SP`, `g` and `FP` restored (amd64: also
   `X15 = 0`, `DF` clear and the TLS `g` slot);
 * `_cgo_topofstack` returns one value throughout a cgo call and preserves everything else.
+* the floating-point environment at the C entry: the C code starts with the Go caller's `FPCR`
+  (arm64, `CgoEntry.fpcr`) and with its `MXCSR` control bits and x87 control word (amd64,
+  `CgoEntry.mxcsr`, `CgoEntry.fpucw`): `asmcgocall` switches only the stack and `g` and executes
+  no `MSR FPCR`, `LDMXCSR` or `FLDCW` (`runtime/asm_arm64.s`, `runtime/asm_amd64.s`).
 
 The granted memory must contain no runtime-internal memory (`m`, `p`, the scheduler, the `g0`
 stack). For an execution whose granted regions overlap those, the theorem says nothing.
@@ -788,11 +792,34 @@ stack). For an execution whose granted regions overlap those, the theorem says n
   contract semantics avoids this: the only way to discharge `CgoSpec` is the refinement theorem
   `CgoCall.refines`.
 
-**The C calling conventions** (`Janus.CABI`, `Janus.Amd64.CABI`, the `CEnsures` vocabulary) are
-specification definitions like `GoABI`. A `CEnsures` theorem is about a call that follows the
-convention (`CCall`). It promises what the convention requires of the callee (`CReturn`) and
-nothing about callers that violate the convention. The callee-saved SIMD/FP state (`V8`–`V15` on
-arm64; the x87/`MXCSR` control words on amd64) is outside the model.
+**The C calling conventions** (`Janus.CABI`, `Janus.Amd64.CABI`, the `CEnsures`/`CEnsuresR`
+vocabulary) are specification definitions like `GoABI`. A `CEnsures`/`CEnsuresR` theorem is about
+a call that follows the convention (`CCall`, `CCallA`). It promises what the convention requires
+of the callee (`CReturn`: the callee-saved general registers, the low halves of `V8`–`V15` and
+`FPCR` on arm64, the `MXCSR` control bits and the x87 control word on amd64) and nothing about
+callers that violate the convention.
+
+* *The classification is part of the specification.* Where a classified call puts an argument
+  (`CCallA`, `ArgsAt … sig.passing`) and where a result comes back (`Returned`) is computed by
+  the Lean functions `Janus.C.AAPCS64.assignAll`/`result` and `Janus.C.SysV.assignAll`/`result`.
+  A theorem is only as meaningful as the agreement of these functions with the compilers that
+  produce real call sites. That agreement is *tested*, not proved: `scripts/cabi-probe.sh`
+  checks argument and result locations, layouts, `AL` and the `va_list` evolution against gcc
+  15.2 and clang 21 at `-O0`/`-O2` on both ISAs (FFI.md § 1.3). Where a theorem's caller is
+  itself extracted and verified (the cgo wrappers, `k_vsum8`), the classification is checked at
+  that call site by the proof, so for those compositions the classification functions are not
+  trusted: an error in them would make the proof fail.
+* *Unspecified bytes.* Register bytes above an argument piece and stack bytes above a value in
+  its slot are arbitrary in `CCallA` (the ABIs leave them unspecified; clang extends `char`/
+  `short` arguments, gcc does not, and a callee may rely on neither), and a callee proof may not
+  use them.
+* *x87.* The amd64 state has the x87 control word (`State.fpucw`, reset `0x037F`) but not the
+  x87 register stack: no decoded instruction touches either, so the control word is preserved by
+  every run, and a `long double` / `_Complex long double` result (`ST0`/`ST1`) cannot be stated
+  (`PieceAt … (.x87 _)` is `False`) — such a function has no `CEnsuresR` theorem today.
+* *Outside the classification.* Bit-fields, `__attribute__((packed))`/`aligned`, flexible
+  arrays, empty structs and 32/64-byte vectors have no `CType`; a prototype using them cannot be
+  stated.
 
 ## Go assembly (ABI0)
 
