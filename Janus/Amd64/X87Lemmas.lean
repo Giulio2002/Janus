@@ -307,12 +307,75 @@ theorem binop_mul_ieee (rm : RM) (a b : Nat) (bDen : Bool) (ha : unsupported a =
     rw [binop_num _ _ _ _ _ _ ha hb hA hB]
     exact mulCore_ieee rm _ _ _ hA hB
 
+/-! ## Bounds -/
+
+theorem ofStd_lt (y : Nat) : ofStd y < 2 ^ 80 := by
+  have he := ext_exp_lt y
+  have hf := ext_frac_lt y
+  show widen 64 y < _
+  unfold widen
+  rw [fmtP_64]
+  apply pack80_lt _ _ _ he
+  split <;> simp <;> omega
+
+theorem quiet80_lt {x : Nat} (h : x < 2 ^ 80) : quiet80 x < 2 ^ 80 :=
+  Nat.or_lt_two_pow h (by decide)
+
+theorem roundP64_lt (rm : RM) (pre : Nat) (neg : Bool) (m : Nat) (e : Int) :
+    (roundP (fmtP 64) (widen 64) rm pre neg m e).res < 2 ^ 80 := by
+  rw [roundP64_res]; exact ofStd_lt _
+
+theorem zero80_lt (s : Bool) : zero80 s < 2 ^ 80 := by cases s <;> decide
+theorem inf80_lt (s : Bool) : inf80 s < 2 ^ 80 := by cases s <;> decide
+theorem indefinite80_lt : indefinite80 < 2 ^ 80 := by decide
+
+theorem nanPick_lt {a b : Nat} (ha : a < 2 ^ 80) (hb : b < 2 ^ 80) : (nanPick a b).1 < 2 ^ 80 := by
+  unfold nanPick; simp only
+  apply quiet80_lt
+  repeat' split
+  all_goals assumption
+
+theorem addCore_lt (rm : RM) (ka kb : Kind) (sa sb : Bool) (va vb : Val) (de : Nat) :
+    (addCore 64 rm ka kb sa sb va vb de).res < 2 ^ 80 := by
+  unfold addCore
+  repeat' split
+  all_goals first | exact indefinite80_lt | exact inf80_lt _ | exact zero80_lt _ |
+    exact roundP64_lt _ _ _ _ _
+
+theorem mulCore_lt (rm : RM) (ka kb : Kind) (sa sb : Bool) (va vb : Val) (de : Nat) :
+    (mulCore 64 rm ka kb sa sb va vb de).res < 2 ^ 80 := by
+  unfold mulCore
+  repeat' split
+  all_goals first | exact indefinite80_lt | exact inf80_lt _ | exact zero80_lt _ |
+    exact roundP64_lt _ _ _ _ _
+
+theorem divCore_lt (rm : RM) (ka kb : Kind) (sa sb : Bool) (va vb : Val) (de : Nat) :
+    (divCore 64 rm ka kb sa sb va vb de).res < 2 ^ 80 := by
+  unfold divCore
+  repeat' split
+  all_goals first | exact indefinite80_lt | exact inf80_lt _ | exact zero80_lt _ |
+    exact roundP64_lt _ _ _ _ _
+
+/-- Every result of an arithmetic operation at precision 64 on encodings is an encoding. -/
+theorem binop_lt (op : BinOp) (rm : RM) (a b : Nat) (bDen : Bool) (ha : a < 2 ^ 80)
+    (hb : b < 2 ^ 80) : (binop op 64 rm a b bDen).res < 2 ^ 80 := by
+  unfold binop
+  split
+  · exact indefinite80_lt
+  split
+  · exact nanPick_lt ha hb
+  cases op
+  · exact addCore_lt _ _ _ _ _ _ _ _
+  · exact addCore_lt _ _ _ _ _ _ _ _
+  · exact mulCore_lt _ _ _ _ _ _ _ _
+  · exact divCore_lt _ _ _ _ _ _ _ _
+
 /-! ## The System V x87 state at a call -/
 
 /-- The x87 state at a System V call boundary: every register empty, the Linux default control
 word `0x037F` (all exceptions masked, 64-bit precision, round to nearest), no pending exception
 (`ES` clear), and a 3-bit `TOP`. The sticky exception flags and the condition codes are
 arbitrary. -/
-def Idle (t : St) : Prop := t.cw = 0x37F ∧ t.tags = 0 ∧ t.sw / 128 % 2 = 0 ∧ t.top < 8
+def Idle (t : St) : Prop := t.cw = 0x37F ∧ t.tags = (fun _ => false) ∧ t.sw / 128 % 2 = 0 ∧ t.top < 8
 
 end Janus.Amd64.X87

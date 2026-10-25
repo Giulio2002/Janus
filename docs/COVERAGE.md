@@ -31,7 +31,7 @@ the cache.
 | 2. runtime entry points with a contract, stub or proof (main + branches) | 56 of 309 names (39 on main) | same | same |
 | 2. … of the 191 linked on arm64/amd64: still missing | 153 (12 of them concurrency, excluded) | | |
 | 3. language constructs with a proved example | 60 of 75 rows (15 have none on either ISA; agent/constructs closes 20) | | |
-| 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | 93.6% / 86.2% | 0.9% / 78.0% (gcc 83.6% once agent/ffi's `ENDBR64` is merged) | `-O3 -march=x86-64-v3`: 0.9% (52.7% with `ENDBR64`) / 50.5% |
+| 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | 93.6% / 86.2% | **87.3% / 79.8%** (main `a3626db`: 83.6% / 78.0%; WP-J adds x87, `NOTRACK`, the TLS call) | `-O3 -march=x86-64-v3`: **62.7% / 60.6%** (main: 59.1% / 58.7%) |
 
 Main findings:
 
@@ -64,7 +64,8 @@ Main findings:
   `ADDP`, `UADDW`, `UMULL`, `FMLA`, `UZP1` and `LD4`/`ST4`. Three further encodings block gcc
   code on amd64: `ENDBR64` (on every gcc function, Ubuntu's default `-fcf-protection`; fixed on
   agent/ffi), `NOTRACK JMP` (the CET form of jump-table dispatch) and the general-dynamic TLS call
-  sequence. `long double` needs x87. The C ABI model of agent/ffi handles integer register
+  sequence (all three decoded and modelled since WP-J, together with the x87 FPU that
+`long double` needs). The C ABI model of agent/ffi handles integer register
   arguments only (see [5](#5-cgo-c-code)).
 
 ## Method
@@ -604,6 +605,10 @@ Each file is compiled the way cgo invokes the C compiler (`-fPIC -pthread -g`, p
 | gcc 15.2 | 106/110 (96.4%) | 102/109 (93.6%) | 93/109 (85.3%) | 0/110 (0%) | 1/110 (0.9%) | 1/110 (0.9%) | 1/110 (0.9%) |
 | gcc, once agent/ffi's `ENDBR64` is merged | | | | 108/110 (98.2%) | 92/110 (83.6%) | 85/110 (77.3%) | 58/110 (52.7%) |
 | clang 21.1 | 106/110 (96.4%) | 94/109 (86.2%) | 94/109 (86.2%) | 105/110 (95.5%) | 85/109 (78.0%) | 85/109 (78.0%) | 55/109 (50.5%) |
+| gcc, main `a3626db` (`ENDBR64`, WP-B) | | | | 108/110 (98.2%) | 92/110 (83.6%) | 85/110 (77.3%) | 65/110 (59.1%) |
+| clang, main `a3626db` | | | | 105/110 (95.5%) | 85/109 (78.0%) | 85/109 (78.0%) | 64/109 (58.7%) |
+| **gcc, with WP-J** (x87, `NOTRACK`, TLS call) | | | | **110/110 (100%)** | **96/110 (87.3%)** | **89/110 (80.9%)** | **69/110 (62.7%)** |
+| **clang, with WP-J** | | | | **107/110 (97.3%)** | **87/109 (79.8%)** | **87/109 (79.8%)** | **66/109 (60.6%)** |
 
 **Blocking families, all configurations** (functions blocked, excluding `ENDBR64`):
 
@@ -619,10 +624,19 @@ Each file is compiled the way cgo invokes the C compiler (`-fPIC -pthread -g`, p
     `V*SD` scalar forms).
   * *BMI1/BMI2*: 9 functions (`SHLX`, `SHRX`, `SARX`, `RORX`, `ANDN`, `BLSI`, `BLSR`, `MULX`).
   * *FMA*: 6–7 functions.
-  * *x87*: `a_ldouble` (`long double`: `FLD`, `FLDT`, `FLD1`, `FADDP`, `FMULP`).
-  * *`NOTRACK JMP *%reg`* (`3E FF E0`): gcc's CET jump-table dispatch in `s_dense`, `s_name`.
+  * *x87*: `a_ldouble` (`long double`: `FLD`, `FLDT`, `FLD1`, `FADDP`, `FMULP`). Decoded and
+    modelled by WP-J (`Janus/Amd64/X87.lean`), as are:
+  * *`NOTRACK JMP *%reg`* (`3E FF E0`): gcc's CET jump-table dispatch in `s_dense`, `s_name`;
   * *TLS general-dynamic call* (`66 66 48 E8`, the padded `call __tls_get_addr`): `a_use_tls`
     with `-fPIC`.
+
+  With WP-J the only amd64 blockers left in the corpus are the SSE/SSE2 packed families (all
+  configurations) and, under `-march=x86-64-v3`, AVX/AVX2 and two FMA functions (WP-D, WP-F);
+  every gcc `-O0` function decodes. The x87 instructions gcc and clang emit for `long double`
+  beyond the corpus (measured on `oracle-amd64/harvest/x87/ld.c` at `-O0`/`-O2`/`-O3`, with and
+  without `-march=x86-64-v3`: `FLD`/`FSTP` in every format, `FILD`/`FISTP`/`FISTTP`, the
+  arithmetic in all forms, `FUCOMI(P)`/`FCOMI(P)`, `FCMOVcc`, `FXCH`, `FCHS`, `FABS`, `FSQRT`,
+  `FXAM`, `FNSTCW`/`FLDCW`) are all modelled.
 * **arm64**:
   * *ASIMD*: `ADDP` (22 function-configs), `UADDW`/`UADDW2`, `UMULL`/`UMULL2`, `MUL` (vector),
     `FMLA`, `FMUL`, `FNEG` (vector), `UZP1`, `ZIP1`, `LD4`/`ST4`, `SCVTF` (vector), `USHR`. They
@@ -652,11 +666,11 @@ cgo boundary contract (`CgoCall`, `TopOfStack`). Measured against the corpus:
 | callbacks C → Go (`//export`) | – (cgo-generated `_cgoexp_*`, `crosscall2`) | `crosscall2` decodes | no (FFI.md: nothing on it) | `crosscall2` → `cgocallback` contract (re-entering Go: `g`, stack switch, `X28`/`R14`), the reverse composition theorem |
 | calls through function pointers | `a_callback` | yes / yes | yes as code (dynamic targets) | a C-side `FuncvalIs` analogue (function-pointer hypotheses) |
 | C globals, `.rodata` tables | `a_globals` | yes / yes | partly: read-only data copied; writable data "referenced, not copied"; `-fPIC` GOT loads unmodelled | writable data objects for C `.data`/`.bss`, GOT-indirect access (`adrp :got:` / `mov sym@GOTPCREL`) |
-| thread-local storage | `a_use_tls` | yes / **no** (`66 66 48 E8`) | no (only Go's `tls_g`) | initial-exec (`MRS TPIDR_EL0` / `FS:` offset) and general-dynamic (`__tls_get_addr`, TLSDESC) with a TLS-block contract |
+| thread-local storage | `a_use_tls` | yes / yes (`66 66 48 E8` decoded, WP-J) | no (only Go's `tls_g`) | initial-exec (`MRS TPIDR_EL0` / `FS:` offset) and general-dynamic (`__tls_get_addr`, TLSDESC) with a TLS-block contract |
 | `setjmp`/`longjmp` | `a_setjmp` | yes / yes | no | libc contracts with a non-local return outcome (`jmp_buf` contents, restored callee-saved state) |
 | `alloca`, VLAs | `a_alloca`, `cc_vla` | `-O3`: `ADDP` / `PADDQ` no; `-O2`: yes | yes for VLAs (the `CSum`/`cc_vla` frame) | dynamic-frame lemmas for `alloca` |
 | libc calls (`memcpy`, `strlen`, `malloc`) | `a_libc` | yes / yes (PLT calls) | no ("would be handled with `--contract`") | PLT stub recognition, per-function libc contracts |
-| `long double`, `_Complex`, `__int128` | `a_ldouble`, `a_complex`, `a_u128` | yes / `long double`: x87 no | no | x87 80-bit state (amd64), quad precision via `__multf3` calls (arm64), complex returns in two FP registers |
+| `long double`, `_Complex`, `__int128` | `a_ldouble`, `a_complex`, `a_u128` | yes / yes (x87, WP-J) | amd64 `long double` as code: the x87 state is in the model (`X87.St`), `X87.Idle` states the call-boundary x87 state, and `CLdMul`/`GoLdMul` prove a `long double` function with stack arguments and an `ST(0)` result | the X87 argument/result classes in `CCall`/`CEnsures` and the x87 control word in `CReturn` (K1); quad precision via `__multf3` calls (arm64), complex returns in two FP registers |
 | bitfields, recursion | `a_bitfield`, `a_recursive` | yes / yes | yes as code | – |
 | atomics (GCC `__atomic`) | `m_atomic_inc`, `m_cas` | yes: calls to the outline-atomics helpers `__aarch64_ldadd4_acq_rel`, `__aarch64_cas4_acq_rel` / yes (`LOCK XADD`, `LOCK CMPXCHG`) | yes as code | libgcc outline-atomics helpers (LSE or LL/SC, so they need [WP-A](#6-work-plan)) |
 
@@ -696,7 +710,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 2 | **B. amd64 v3 scalar extensions** (**done**, agent/amd64v3: Go-compiled v3 94.60% → 100%, wrappers and tests 100%; `docs/AMD64.md`): BMI1 (`ANDN`, `BLSR`, `BLSI`, `BLSMSK`, `BEXTR`, `TZCNT`), BMI2 (`SHLX`, `SHRX`, `SARX`, `RORX`, `MULX`, `BZHI`, `PDEP`, `PEXT`), `MOVBE`, scalar FMA (`VFMADD{132,213,231}{SD,SS}` and the `VFMSUB`/`VFNMADD`/`VFNMSUB` forms, single rounding on the IEEE core, as arm64 `FMADD`), SSSE3 `PSHUFB`/`PSIGNB` on XMM | amd64 v3 Go-compiled 94.60% → **100%** (+897), v3 wrappers +24, tests +209; v1 tests +5; C `-march=v3` BMI/FMA (9 + 7 functions) | `Janus/Amd64/{Decode,Instr,Exec}.lean` (scalar part), `Janus/Amd64/Float.lean` (FMA), `oracle-amd64/gen` specs | M | ffi |
 | 3 | **L. Go assembly ABI0 and ABI wrappers** (**done**: [ABI0.md](ABI0.md), `examples/asm`, 5 theorems per ISA): ABI0 call/return (arguments and results in the caller's frame, everything caller-saved, `g` from TLS / `X28`/`R14` on re-entry, `X15` zeroing), `Ensures0`/`Summary0`, and lemmas for the ABIInternal↔ABI0 wrappers and for the direct ABI0 calls the compiler emits from Go | lets theorems be stated about the 145 (arm64) / 170 (amd64) ABI0 assembly functions; 90 / 91 of them already decode | `Janus/GoABI0.lean`, `Janus/Amd64/GoABI0.lean`, `Janus/Tactic/ABI0.lean`, `examples/asm/` | M | iface-alloc (tactic files) |
 | 4 | **C. Kernel and system instructions**: `SVC #0`/`SYSCALL` as a `.syscall` stub with per-syscall contracts (`write`, `read`, `openat`, `exit_group`, `clock_gettime` and vDSO, `mmap`/`munmap`/`madvise`, `rt_sigprocmask`, `sigaltstack`, `sched_yield`, `nanosleep`, ...); `BRK`/`INT3`/`UD2`/`HLT`/in-function `UDF` as trap faults; `CPUID`, `XGETBV`, `RDTSC(P)`, `MRS MIDR_EL1`, `MRS CNTFRQ_EL0`, DIT `MRS`/`MSR` as environment-value contracts; `PUSHFQ`/`POPFQ` | assembly: arm64 +53 (→ 92.8%), amd64 +46 (→ 73.2%); makes the syscall wrappers (`nanotime1`, `Syscall6`, `rawSyscallNoError`, `exit`, `osyield`, `open`, `read`, ...) and their Go callers (`os`, `time`, `println`) provable | `Janus/Contracts/Syscall.lean`, `Janus/Contracts/SyscallAmd64.lean`, the `SVC`/`SYSCALL`/trap entries of both decoders, stub kind in `cmd/janus/extract.go` | M | iface-alloc |
-| 5 | **J. amd64 C-specific encodings**: merge agent/ffi's `ENDBR64`; `NOTRACK` (`3E`) on `JMP`/`CALL r/m` (CET jump tables); the padded `call __tls_get_addr` sequence (`66 66 48 E8`); x87 for `long double` (`FLD`/`FSTP` 80-bit, `FADDP`, `FMULP`, `FLD1`, `FXCH`, the x87 stack and control word on the IEEE core) | gcc amd64 C: 0.9% → **83.6%** (-O2); `s_dense`/`s_name` jump tables, `a_use_tls`, `a_ldouble` | `Janus/Amd64/Decode.lean` (prefix handling), new `Janus/Amd64/X87.lean` | S (ENDBR, NOTRACK, TLS call) + L (x87) | ffi |
+| 5 | **J. amd64 C-specific encodings**: merge agent/ffi's `ENDBR64`; `NOTRACK` (`3E`) on `JMP`/`CALL r/m` (CET jump tables); the padded `call __tls_get_addr` sequence (`66 66 48 E8`); x87 for `long double` (`FLD`/`FSTP` 80-bit, `FADDP`, `FMULP`, `FLD1`, `FXCH`, the x87 stack and control word on the IEEE core) | gcc amd64 C: 0.9% → 83.6% (`ENDBR64`, merged) → **87.3%** (-O2; -O0 100%); `s_dense`/`s_name` jump tables, `a_use_tls`, `a_ldouble` — **done** (agent/x87: decoder, x87 model, oracle x87 mode, `CSwitch`/`CLdMul`/`GoLdMul`) | `Janus/Amd64/Decode.lean` (prefix handling), new `Janus/Amd64/X87.lean` | S (ENDBR, NOTRACK, TLS call) + L (x87) | ffi |
 | 6 | **D. SSE packed integer and FP (XMM)**: SSE2 integer (`PADD*`, `PSUB*`, `PMUL*`, `PCMP*`, `PAND(N)`, shifts incl. `PSLLDQ`/`PSRLDQ`, `PUNPCK*`, `PACK*`, `PMIN/PMAX*`, `PSADBW`), packed FP (`ADDPS/PD`, `MULPS/PD`, `SHUFPS`, `UNPCK*`, `MOVLHPS`, `CVTDQ2PD`), SSSE3 (`PALIGNR`, `PSHUFB`, `PABS*`), SSE4.1 (`PINSR*`, `PEXTR*`, `PBLENDW`, `BLENDV*`, `PMOV[SZ]X*`, `PMULLD`, `PTEST`), SSE4.2 (`CRC32`, `PCMPESTRI`/`PCMPISTRI`, `PCMPGTQ`) | C: clang -O2 78.0% → ≈ 99%, gcc -O2 (after J) 83.6% → ≈ 99%; assembly: `chacha8rand.block`, P-256 selects, `indexbody`, `castagnoliSSE42*`, part of AES/GCM/SHA (+19 sole, more with E) | new `Janus/Amd64/{DecodeSSE,ExecSSE}.lean` (hook in `Decode.lean`) | L | ffi; B for the shared `PSHUFB` |
 | 7 | **E. x86 crypto extensions**: AES-NI (`AESENC(LAST)`, `AESDEC(LAST)`, `AESIMC`, `AESKEYGENASSIST`), `PCLMULQDQ`, SHA-NI (`SHA1*`, `SHA256*`), ADX (`ADCX`/`ADOX`) | assembly: `aeshashbody`, `memhash32/64` (every map hash), AES block/CTR/key expansion (12), GCM (5), SHA-NI (2), `math/big.addMulVVWW`, `bigmod.addMulVVW*` (4) | new `Janus/Amd64/{DecodeCrypto,ExecCrypto}.lean` | M | D, B (`MULX`) |
 | 8 | **I. arm64 ASIMD for compiled C**: `ADDP`, `UADDW(2)`, `UMULL(2)`, `MUL` (vector), `FMLA`/`FMUL`/`FNEG` (vector FP, on the IEEE core), `SCVTF` (vector), `UZP1`/`ZIP1`, `LD4`/`ST4`, `USHR`, and the scalar `SCVTF`/`UCVTF`/`FCVTZS`/`FCVTZU` forms of gcc/clang `-O0` | C arm64: gcc -O3 85.3%, clang -O2/-O3 86.2%, gcc -O2 93.6%, -O0 96.4% → **100%** | `Janus/Arm64/Vector.lean` (+ new `VectorFP.lean`), `Janus/Arm64/DecodeFloat.lean` (conversion forms) | M | none |

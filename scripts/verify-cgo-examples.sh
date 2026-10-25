@@ -7,6 +7,8 @@
 #   C functions (CEnsures, the C calling convention):   CAdd CSum CStore
 #   Go -> C -> Go, end to end (EnsuresC under the trusted
 #   cgocall contract Janus.FFI.CgoCall):                 GoAdd GoSum
+#   amd64 only (WP-J): a CET jump table (CSwitch), x87 long double (CLdMul), and
+#   Go MulLD -> c_ldmul -> ld_mul end to end (GoLdMul)
 #
 # Usage: scripts/verify-cgo-examples.sh [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
 # Writes artifacts/cgo/<isa>/<Name>/verified.json and a summary to artifacts/verify-cgo-examples.txt.
@@ -18,12 +20,14 @@ export PATH=/usr/local/go/bin:$PATH
 declare -A sym=(
   [CAdd]=c_add [CSum]=c_sum [CStore]=c_store
   [GoAdd]=example.com/cgo.Add [GoSum]=example.com/cgo.Sum
+  [CSwitch]=c_switch [CLdMul]=ld_mul [GoLdMul]=example.com/cgo.MulLD
 )
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
     for n in CAdd CSum CStore GoAdd GoSum; do names+=("$isa/$n"); done
   done
+  for n in CSwitch CLdMul GoLdMul; do names+=("amd64/$n"); done
 fi
 
 go build -o bin/janus ./cmd/janus

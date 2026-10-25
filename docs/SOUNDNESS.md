@@ -32,7 +32,10 @@ These are trusted, not proved.
    agreement is differentially tested against qemu (`janus-oracle`), not proved. If the model
    is wrong about an instruction the program uses, a theorem can be true of the model and false
    of the hardware. Words outside the supported subset fault (`undecodable`). They are never
-   given a guessed meaning.
+   given a guessed meaning. The same holds for **the Lean x86-64 model**
+   (`Janus/Amd64/Decode.lean`, `Instr.lean`, `Exec.lean`, `State.lean`, `Float.lean`, and the
+   x87 FPU of C `long double`, `X87.lean` and `X87Exec.lean`; [AMD64.md](AMD64.md)), checked
+   against the host CPU by the native oracle (`docs/ORACLE-AMD64.md`).
 2. **The ELF word copy** (`cmd/janus`: `binary.go`, `extract.go`, `identity.go`): finding the
    symbol's `[addr, addr+size)` in `.text` and copying its little-endian 32-bit words (trailing
    zero padding words are dropped). `janus verify` re-runs this copy against the binary
@@ -616,8 +619,25 @@ rounding of the exact `±a × b ± c` on the IEEE core, proved equal to IEEE 754
 `fusedMultiplyAdd` in IEEE mode (`FP.fma_ieee`). Where the manuals leave an FMA result open (two
 or more NaN operands, whose choice Intel documents and AMD does not; `0 × ∞ + qNaN`, whose `IE`
 IEEE 754 §7.2 leaves to the implementation) the instruction faults (`undefinedResult`), so no
-proof depends on a vendor. The other VEX/EVEX floating-point forms, x87 and `LDMXCSR` are
-rejected. Encodings whose behaviour the manuals leave open (an `FCMP #0.0` with a non-zero `Rm`
+proof depends on a vendor. The other VEX/EVEX floating-point forms and `LDMXCSR` are
+rejected.
+
+**x87** (C `long double`, `Janus/Amd64/X87.lean`; WP-J). The 80-bit double-extended format is
+read through `X87.std` as the IEEE format (15, 63) of the same core; the precision control rounds
+to 24, 53 or 64 bits with the extended exponent range, tininess is after rounding, NaNs follow
+the x87 rules (SDM Table 4-7), unnormals, pseudo-infinities and pseudo-NaNs are invalid
+operands, pseudo-denormals are read as their value. Each of these choices was checked on the
+host (`docs/ORACLE-AMD64.md`, x87 mode). The model is *conservative* where the x87 is
+asynchronous: an exception that is unmasked in the control word (or pending with `ES` set)
+faults at the instruction that raises it, while the hardware completes it, stores a result
+(for overflow and underflow a re-biased one) and raises `#MF` only at the next waiting x87
+instruction; a stack overflow or underflow faults instead of delivering the masked response;
+the reserved precision control `01` and `FNSTSW` of an undefined condition code fault. So every
+run the model completes is a run of the hardware. `X87.binop_add_ieee`/`binop_mul_ieee` (proved)
+connect `FADD`/`FMUL` at 64-bit precision to `Janus.Float.Spec.add`/`mul` on (15, 63); the
+`long double` examples state their results with them. The instruction/data pointers and the
+last opcode (`FNSTENV`/`FSAVE` state) are not modelled, and the instructions that would expose
+them are rejected. Encodings whose behaviour the manuals leave open (an `FCMP #0.0` with a non-zero `Rm`
 field, `REX.W` on an SSE instruction that does not use it, reserved `CMPSD`/`ROUNDSD` immediate
 bits) are rejected rather than guessed.
 
@@ -791,8 +811,17 @@ stack). For an execution whose granted regions overlap those, the theorem says n
 **The C calling conventions** (`Janus.CABI`, `Janus.Amd64.CABI`, the `CEnsures` vocabulary) are
 specification definitions like `GoABI`. A `CEnsures` theorem is about a call that follows the
 convention (`CCall`). It promises what the convention requires of the callee (`CReturn`) and
-nothing about callers that violate the convention. The callee-saved SIMD/FP state (`V8`–`V15` on
-arm64; the x87/`MXCSR` control words on amd64) is outside the model.
+nothing about callers that violate the convention. The callee-saved SIMD state (`V8`–`V15` on
+arm64) is outside the model, and so is the x87 control word in `CReturn` (WP-K1). The x87 FPU
+crosses the cgo boundary as follows: `CgoEntry.x87` (trusted) says the C code is entered with the
+Go caller's x87 state (nothing between the Go call and the C entry executes an x87 instruction),
+so a C precondition such as `X87.Idle` (empty stack, control word `0x037F`, nothing pending) is
+discharged by the same hypothesis on the Go call state; `GoResume` leaves the x87 state
+arbitrary after the call (C may raise its sticky flags; Go code never reads it), so a theorem
+says nothing about the x87 state after a cgo call. A C precondition on the x87 state is a stated
+hypothesis of the Go-side theorem, as `GoABI.GoMXCSR` is for `MXCSR`: Linux starts every thread
+with the `FNINIT` state and Go never touches the x87, so it holds unless C code changed the
+control word without restoring it.
 
 ## Go assembly (ABI0)
 

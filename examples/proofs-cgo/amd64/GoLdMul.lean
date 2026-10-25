@@ -1,0 +1,242 @@
+import Extracted
+
+open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.CABI Janus.Amd64.Tactic Janus.Spec
+  Janus.Amd64.FFI
+
+namespace Proof
+
+abbrev wrapper : Nat := segAddr Extracted.program "_cgo_2306a0143858_Cfunc_c_ldmul"
+
+abbrev frameA (m : Memory) (a : Nat) : Nat := m.readLE a 8
+abbrev frameB (m : Memory) (a : Nat) : Nat := m.readLE (a + 8) 8
+abbrev frameR (m : Memory) (a : Nat) : Nat := m.readLE (a + 16) 8
+
+/-- `[x, x + n)` is away from the C stack window of `t`. -/
+abbrev Away (t : State) (x n : Nat) : Prop :=
+  x + n ≤ (t.regs 4).toNat - 4096 ∨ (t.regs 4).toNat + 8 ≤ x
+
+/-- The product the C code stores. -/
+def prod (m : Memory) (pa pb : Nat) : Nat :=
+  (X87.binop .mul 64 .rne (m.readLE pa 10) (m.readLE pb 10)).res
+
+theorem prod_lt (m : Memory) (pa pb : Nat) : prod m pa pb < 2 ^ 80 :=
+  X87.binop_lt _ _ _ _ _ (Janus.Arm64.Memory.readLE_lt _ _ _) (Janus.Arm64.Memory.readLE_lt _ _ _)
+
+def WPre (a : BitVec 64) (t : State) : Prop :=
+  CStack t 4096 8 ∧ a.toNat + 24 ≤ 2 ^ 48 ∧ t.mem.accessible a.toNat 24 false = true ∧ Away t a.toNat 24 ∧
+    frameA t.mem a.toNat + 16 ≤ 2 ^ 48 ∧ t.mem.accessible (frameA t.mem a.toNat) 16 false = true ∧
+    Away t (frameA t.mem a.toNat) 16 ∧
+    frameB t.mem a.toNat + 16 ≤ 2 ^ 48 ∧ t.mem.accessible (frameB t.mem a.toNat) 16 false = true ∧
+    Away t (frameB t.mem a.toNat) 16 ∧
+    frameR t.mem a.toNat + 10 ≤ 2 ^ 48 ∧ t.mem.accessible (frameR t.mem a.toNat) 10 true = true ∧
+    Away t (frameR t.mem a.toNat) 10 ∧ X87.Idle t.x87
+
+def WPost (a : BitVec 64) (t t' : State) : Prop :=
+  MemFrame (t.mem.writeLE (frameR t.mem a.toNat) 10
+      (prod t.mem (frameA t.mem a.toNat) (frameB t.mem a.toNat))) t'.mem
+    [((t.regs 4).toNat - 4096, (t.regs 4).toNat)]
+
+/-- A 10-byte read as its low 8 and high 2 bytes. -/
+theorem readLE_ten (m : Memory) (x : Nat) : m.readLE x 10 = m.readLE x 8 + 2 ^ 64 * m.readLE (x + 8) 2 :=
+  Janus.Arm64.Memory.readLE_add m x 8 2
+
+theorem readLE_two_of_eight (m : Memory) (x : Nat) : m.readLE x 8 % 65536 = m.readLE x 2 :=
+  Janus.Arm64.Memory.readLE_mod m x 8 2 (by decide)
+
+/-- The same 10-byte store, of equal values, on both sides keeps a frame. -/
+theorem frame_store10 {m m' : Memory} {rs : List (Nat × Nat)} {a v v' : Nat} (h : MemFrame m m' rs)
+    (hv : v' = v) : MemFrame (m.writeLE a 10 v) (m'.writeLE a 10 v') rs :=
+  hv ▸ h.writeLE_both a 10 v
+
+set_option maxHeartbeats 4000000 in
+theorem wrapper_spec (T a : BitVec 64) :
+    CEnsuresC Extracted.program (TopOfStack T) wrapper [a] (WPre a) (WPost a) := by
+  intro ret hret t hs ⟨⟨hal, hb, htop, hacc⟩, ha, hfa, hd, hab, haa, had, hbb, hba, hbd, hrb, hra, hrd,
+    ⟨hcw, htags, hes, htp⟩⟩
+  apply ReturnsC.of_reaches
+  have h_rip := hs.rip
+  have h_ret := hs.ret
+  have h_df := hs.df
+  have h_a0 : t.regs 7 = a := hs.reg (i := 0) (by simp)
+  simp only [Amd64.Program.withExit] at h_ret
+  simp only [CABI.regSP, frameA, frameB, frameR, Away] at hal hb htop hacc haa hab had hbb hba hbd hrb hra hrd
+  janus64_run [hcw, htags, hes]
+  simp only [WPost, prod, frameA, frameB, frameR]
+  apply frame_store10
+  · janus_frame
+  · rw [readLE_ten, readLE_ten, readLE_ten t.mem, readLE_ten t.mem]
+    janus64_simp
+    have e1 : (t.regs 4).toNat - 48 + 8 + 8 - ((t.regs 4).toNat - 32) = 0 := by omega
+    have e2 : (t.regs 4).toNat - 48 + 24 + 8 - ((t.regs 4).toNat - 16) = 0 := by omega
+    rw [e1, e2, Nat.pow_zero, Nat.div_one, Nat.div_one, readLE_two_of_eight, readLE_two_of_eight]
+
+
+/-! ## The Go side: `MulLD` → `_Cfunc_c_ldmul` → `runtime.cgocall` -/
+
+def fnVar : Nat :=
+  ripTarget Extracted.program (segAddr Extracted.program "example.com/cgo._Cfunc_c_ldmul.abi0" + 0x25)
+
+def alwaysFalse : Nat :=
+  ripTarget Extracted.program (segAddr Extracted.program "example.com/cgo._Cfunc_c_ldmul.abi0" + 0x3e)
+
+/-- At the `cgocall`: the frame `RBX` and the three operands it points at are Go memory the
+runtime leaves alone, and the x87 FPU is in its call state. -/
+def G (s : State) : Prop :=
+  (s.regs 3).toNat + 24 ≤ 2 ^ 48 ∧ GoKept s (s.regs 3).toNat 24 false ∧
+    frameA s.mem (s.regs 3).toNat + 16 ≤ 2 ^ 48 ∧ GoKept s (frameA s.mem (s.regs 3).toNat) 16 false ∧
+    frameB s.mem (s.regs 3).toNat + 16 ≤ 2 ^ 48 ∧ GoKept s (frameB s.mem (s.regs 3).toNat) 16 false ∧
+    frameR s.mem (s.regs 3).toNat + 10 ≤ 2 ^ 48 ∧ GoKept s (frameR s.mem (s.regs 3).toNat) 10 true ∧
+    X87.Idle s.x87
+
+def E (s : State) : Memory :=
+  s.mem.writeLE (frameR s.mem (s.regs 3).toNat) 10
+    (prod s.mem (frameA s.mem (s.regs 3).toNat) (frameB s.mem (s.regs 3).toNat))
+
+/-- The stack window of `MulLD` and its callees up to `cgocall`, the `g` struct, the TLS slot. -/
+abbrev Shared (s : State) : List (Nat × Nat) :=
+  [((s.regs 4).toNat - 1104, (s.regs 4).toNat + 8), ((s.regs 14).toNat, (s.regs 14).toNat + 456),
+    (s.fsBase.toNat - 8, s.fsBase.toNat)]
+
+def GoPre (a b r : BitVec 64) (s : State) : Prop :=
+  StackGuardOK s 40 ∧ StackWritable s 80 8 ∧ TlsG s ∧ X87.Idle s.x87 ∧
+  a.toNat + 16 ≤ 2 ^ 48 ∧ s.mem.accessible a.toNat 16 false = true ∧
+  b.toNat + 16 ≤ 2 ^ 48 ∧ s.mem.accessible b.toNat 16 false = true ∧
+  r.toNat + 10 ≤ 2 ^ 48 ∧ s.mem.accessible r.toNat 10 true = true ∧
+  s.mem.accessible fnVar 8 false = true ∧ s.mem.readLE fnVar 8 = wrapper ∧
+  s.mem.accessible alwaysFalse 1 false = true ∧ s.mem.readLE alwaysFalse 1 = 0 ∧
+  Outside (s.regs 14).toNat 456 [((s.regs 4).toNat - 80, (s.regs 4).toNat + 8)] ∧
+  Outside (s.fsBase.toNat - 8) 8 [((s.regs 4).toNat - 80, (s.regs 4).toNat + 8)] ∧
+  Outside fnVar 8 [((s.regs 4).toNat - 80, (s.regs 4).toNat + 8)] ∧
+  Outside alwaysFalse 1 (Shared s) ∧
+  Outside a.toNat 16 (Shared s) ∧ Outside b.toNat 16 (Shared s) ∧ Outside r.toNat 10 (Shared s) ∧
+  Outside r.toNat 10 [(alwaysFalse, alwaysFalse + 1)]
+
+set_option maxHeartbeats 20000000 in
+theorem go_spec (a b r : BitVec 64) :
+    EnsuresC Extracted.program (CgoSpec wrapper G E) Extracted.entry [a, b, r] (GoPre a b r)
+      (fun s s' => s'.mem.readLE r.toNat 10 = prod s.mem a.toNat b.toNat) := by
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hb, htop, hst⟩, ⟨hfs, hfsr, hfsg⟩, hx87, hab, haa, hbb, hba,
+    hrb, hra, hfa, hfv, haf, hav, hdg, hdt, hdf, hda, hdA, hdB, hdR, hdRA⟩
+  apply ReturnsC.of_reaches
+  janus64_intro hs
+  janus_eval_nat h_fv : fnVar
+  janus_eval_nat h_af : alwaysFalse
+  rw [h_fv] at hfa hfv hdf
+  rw [h_af] at haf hav hda hdRA
+  simp only [Shared, outside_cons, outside_nil, and_true, Janus.Amd64.GoABI.regSP,
+    Janus.Amd64.GoABI.regG, stackguard0, stackguard0Offset] at *
+  have hfsa : (s.fsBase + BitVec.ofNat 64 18446744073709551608).toNat = s.fsBase.toNat - 8 := by
+    rw [BitVec.toNat_add, BitVec.toNat_ofNat]; omega
+  have h32 : (s.regs 4 - 32#64).toNat = (s.regs 4).toNat - 32 := by
+    rw [BitVec.toNat_sub]; simp only [BitVec.toNat_ofNat]; omega
+  have h80 : (s.regs 4 - 80#64).toNat = (s.regs 4).toNat - 80 := by
+    rw [BitVec.toNat_sub]; simp only [BitVec.toNat_ofNat]; omega
+  janus64_run [hfsa]
+  refine ⟨⟨rfl, rfl, ?_⟩, ?_⟩
+  · simp only [G, GoKept, frameA, frameB, frameR, cgoClobber, Janus.Amd64.GoABI.regSP,
+      Janus.Amd64.GoABI.regG, cgoStackScratch, gStructSize, outside_cons, outside_nil, and_true]
+    janus64_simp [h32, h80]
+    refine ⟨by omega, ⟨?_, by omega, by omega, by omega, by omega⟩, by omega,
+      ⟨haa, by omega, by omega, by omega, by omega⟩, by omega, ⟨hba, by omega, by omega, by omega, by omega⟩,
+      by omega, ⟨hra, by omega, by omega, by omega, by omega⟩, hx87⟩
+    janus64_disch
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, x87, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  simp only [E, frameA, frameB, frameR, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
+    Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,
+    ↓reduceIte, Nat.reduceEqDiff, h32, h80] at hmf h4 h5 h14 h15 hfs1 hfs2 hfsr' hfsg'
+  have hfsa' : (fs + BitVec.ofNat 64 18446744073709551608).toNat = fs.toNat - 8 := by
+    rw [BitVec.toNat_add, BitVec.toNat_ofNat]; omega
+  rw [hmf.accessible] at hfsr'
+  simp only [Janus.Arm64.Memory.accessible_writeLE] at hfsr'
+  -- the frame words (and so the result pointer) as plain values
+  revert hmf
+  janus64_simp [h32, h80]
+  intro hmf
+  -- the two facts the rest of the run needs from the C call: the cgo global is still false and
+  -- the result is at `r`; then the frame is no longer needed
+  have hAF : m.readLE 5934854 1 = 0 := by
+    rw [hmf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]
+    janus64_simp
+  have hAFacc : m.accessible 5934854 1 false = true := by
+    rw [hmf.accessible]; simp only [Janus.Arm64.Memory.accessible_writeLE]; janus64_simp
+  have hR : m.readLE r.toNat 10 = prod s.mem a.toNat b.toNat := by
+    rw [hmf.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega),
+      Janus.Arm64.Memory.readLE_writeLE_self,
+      Nat.mod_eq_of_lt (by have := prod_lt (m := s.mem) a.toNat b.toNat; rw [show (256 : Nat) ^ 10 = 2 ^ 80 by decide]; exact prod_lt _ _ _)]
+    unfold prod
+    congr 2 <;> janus64_simp
+  clear hmf
+  apply ReturnsC.of_reaches
+  janus64_run [h4, h5, h14, h15, hfsa', hfsg', hAF, hAFacc]
+  exact ⟨rfl, hR⟩
+
+/-! ## Composition -/
+
+theorem refines : (CgoCall Extracted.program).Refines (CgoSpec wrapper G E) := by
+  refine CgoCall.refines (fun T a => wrapper_spec T a) ?_ ?_ ?_ ?_
+  · rintro s t ret ⟨hb, ⟨hacc, hout⟩, hab, ⟨haacc, haout⟩, hbb, ⟨hbacc, hbout⟩, hrb, ⟨hracc, hrout⟩, hx⟩ he
+    have hsep := he.stackSep _ _ _ hacc
+    have hasep := he.stackSep _ _ _ haacc
+    have hbsep := he.stackSep _ _ _ hbacc
+    have hrsep := he.stackSep _ _ _ hracc
+    have hk : ∀ c n, (s.regs 3).toNat ≤ c → c + n ≤ (s.regs 3).toNat + 24 →
+        t.mem.readLE c n = s.mem.readLE c n := fun c n h1 h2 =>
+      he.kept c n ⟨Janus.Arm64.Memory.accessible_sub _ hacc (Or.inl rfl) h1 h2, Outside.of_sub hout h1 h2⟩
+    have hk0 := hk _ 8 (Nat.le_refl _) (by omega)
+    have hk1 := hk ((s.regs 3).toNat + 8) 8 (by omega) (by omega)
+    have hk2 := hk ((s.regs 3).toNat + 16) 8 (by omega) (by omega)
+    simp only [outside_cons, outside_nil, and_true, cgoCStack, Janus.Amd64.GoABI.regSP]
+      at hsep hasep hbsep hrsep
+    simp only [WPre, frameA, frameB, frameR, Away] at hab haacc haout hbb hbacc hbout hrb hracc hrout
+      hasep hbsep hrsep ⊢
+    rw [hk0, hk1, hk2, he.x87]
+    exact ⟨he.stack, hb, he.keptAcc _ _ _ ⟨hacc, hout⟩, by omega, hab,
+      he.keptAcc _ _ _ ⟨haacc, haout⟩, by omega, hbb, he.keptAcc _ _ _ ⟨hbacc, hbout⟩, by omega,
+      hrb, he.keptAcc _ _ _ ⟨hracc, hrout⟩, by omega, hx⟩
+  · intro s _; rfl
+  · rintro s t ret t' ⟨hb, ⟨hacc, hout⟩, hab, ⟨haacc, haout⟩, hbb, ⟨hbacc, hbout⟩, hrb, ⟨hracc, hrout⟩, _⟩
+      he _ hpost b hb' hbacc'
+    have hsep := he.stackSep b 1 false hbacc'
+    have h1 := hpost.readLE b 1 (by
+      simp only [outside_cons, outside_nil, and_true, cgoCStack, Janus.Amd64.GoABI.regSP] at hsep ⊢; omega)
+    simp only [Janus.Arm64.Memory.readLE_one] at h1
+    rw [BitVec.eq_of_toNat_eq h1, E, Janus.Arm64.Memory.bytes_writeLE, Janus.Arm64.Memory.bytes_writeLE]
+    have hk : ∀ c n, (s.regs 3).toNat ≤ c → c + n ≤ (s.regs 3).toNat + 24 →
+        t.mem.readLE c n = s.mem.readLE c n := fun c n h1 h2 =>
+      he.kept c n ⟨Janus.Arm64.Memory.accessible_sub _ hacc (Or.inl rfl) h1 h2, Outside.of_sub hout h1 h2⟩
+    have e0 := hk _ 8 (Nat.le_refl _) (by omega)
+    have e1 := hk ((s.regs 3).toNat + 8) 8 (by omega) (by omega)
+    have e2 := hk ((s.regs 3).toNat + 16) 8 (by omega) (by omega)
+    simp only [frameA, frameB, frameR] at hab haacc haout hbb hbacc hbout hrb hracc hrout ⊢
+    have ea : t.mem.readLE (s.mem.readLE (s.regs 3).toNat 8) 10 = s.mem.readLE (s.mem.readLE (s.regs 3).toNat 8) 10 :=
+      he.kept _ 10 ⟨Janus.Arm64.Memory.accessible_sub _ haacc (Or.inl rfl) (Nat.le_refl _) (by omega),
+        Outside.of_sub haout (Nat.le_refl _) (by omega)⟩
+    have eb : t.mem.readLE (s.mem.readLE ((s.regs 3).toNat + 8) 8) 10 =
+        s.mem.readLE (s.mem.readLE ((s.regs 3).toNat + 8) 8) 10 :=
+      he.kept _ 10 ⟨Janus.Arm64.Memory.accessible_sub _ hbacc (Or.inl rfl) (Nat.le_refl _) (by omega),
+        Outside.of_sub hbout (Nat.le_refl _) (by omega)⟩
+    rw [e0, e1, e2]
+    simp only [prod]
+    rw [ea, eb]
+    split
+    · rfl
+    · have := he.kept b 1 ⟨hbacc', hb'⟩
+      simp only [Janus.Arm64.Memory.readLE_one] at this
+      exact BitVec.eq_of_toNat_eq this
+  · rintro s ⟨hb, ⟨hacc, hout⟩, hab, -, hbb, -, hrb, ⟨hracc, hrout⟩, _⟩ b _ hna
+    rw [E, Janus.Arm64.Memory.bytes_writeLE, ite_eq_right]
+    intro ⟨h1, h2⟩
+    have := Janus.Arm64.Memory.accessible_sub _ hracc (Or.inl rfl) (a := b) (n := 1) (by omega) (by omega)
+    rw [this] at hna; cases hna
+
+/-- **`MulLD` end to end**: for every Go call of `example.com/cgo.MulLD(a, b, r)` satisfying
+`GoPre` (in particular the x87 FPU idle, `X87.Idle`), every run returns and the 10 bytes at
+`r` are the double-extended product of the 10 bytes at `a` and at `b`, rounded to nearest at
+64-bit precision (`X87.binop_mul_ieee`: IEEE 754 multiplication on (15, 63) for supported
+operands), under the trusted `CgoCall` only. -/
+theorem correctness (a b r : BitVec 64) :
+    EnsuresC Extracted.program (CgoCall Extracted.program) Extracted.entry [a, b, r] (GoPre a b r)
+      (fun s s' => s'.mem.readLE r.toNat 10 = prod s.mem a.toNat b.toNat) :=
+  (go_spec a b r).refine refines
+
+end Proof

@@ -133,7 +133,7 @@ def parseCase (line : String) : Except String Case := do
       let top := fsw / 0x800 % 8
       let bit (i : Nat) : Option Bool := some (fsw / 2 ^ i % 2 = 1)
       -- FXRSTOR loads the control word as given; the model keeps what FNSTCW reads back
-      pure ({ regs := fun r => st[(r + 8 - top) % 8]!, top, tags := ftw,
+      pure ({ regs := fun r => st[(r + 8 - top) % 8]!, top, tags := fun r => ftw / 2 ^ r % 2 = 1,
               cw := Janus.Amd64.X87.normCW fcw, sw := fsw % 256 + (fsw / 0x8000) * 0x8000,
               c0 := bit 8, c1 := bit 9, c2 := bit 10, c3 := bit 14 } : Janus.Amd64.X87.St)
     | .error _ => pure {}
@@ -183,7 +183,7 @@ def x87Json (t : Janus.Amd64.X87.St) : Json :=
   let b (o : Option Bool) (v : Nat) : Nat := if o = some true then v else 0
   let fsw := t.sw % 256 + (if t.sw / 0x8000 % 2 = 1 then 0x8000 else 0) + b t.c0 0x100 +
     b t.c1 0x200 + b t.c2 0x400 + t.top % 8 * 0x800 + b t.c3 0x4000
-  Json.mkObj [("fcw", hex t.cw), ("fsw", hex fsw), ("ftw", toJson (t.tags % 256)),
+  Json.mkObj [("fcw", hex t.cw), ("fsw", hex fsw), ("ftw", toJson ((List.range 8).foldl (fun acc r => acc + if t.tags r then 2 ^ r else 0) 0)),
     ("st", Json.arr ((List.range 8).map fun i => Json.str (hex (t.regs ((t.top + i) % 8) % 2 ^ 80))).toArray)]
 
 /-- The `FSW` bits the model defines: all but the undefined condition codes. -/

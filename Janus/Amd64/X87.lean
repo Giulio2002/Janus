@@ -380,7 +380,7 @@ def unmasked (cw : Nat) : Nat := 0x3F - cw % 64
 /-! ## State -/
 
 /-- The x87 FPU state: the eight physical data registers `R0`–`R7` (80-bit encodings), `TOP`
-(`ST(i)` is `R[(TOP + i) mod 8]`), the abridged tag word (bit `i` set iff `Ri` is in use; the
+(`ST(i)` is `R[(TOP + i) mod 8]`), the abridged tag word (`tags i` iff `Ri` is in use; the
 full tag is a function of the contents), the control word, the status word's exception and
 summary bits and the condition codes `C0`–`C3`. A condition code the SDM leaves undefined after
 an instruction is `none`; `FNSTSW` faults (`undefinedFlag`) rather than store it.
@@ -392,7 +392,7 @@ the state after `FNINIT` (Linux gives every new process this state). -/
 structure St where
   regs : Nat → Nat := fun _ => 0
   top : Nat := 0
-  tags : Nat := 0
+  tags : Nat → Bool := fun _ => false
   cw : Nat := 0x37F
   sw : Nat := 0
   c0 : Option Bool := some false
@@ -409,7 +409,7 @@ def St.pending (t : St) : Bool := t.sw / 128 % 2 = 1 || t.sw % 64 &&& unmasked t
 /-- The physical register of `ST(i)`. -/
 def St.phys (t : St) (i : Nat) : Nat := (t.top + i) % 8
 
-def St.used (t : St) (r : Nat) : Bool := t.tags / 2 ^ r % 2 = 1
+def St.used (t : St) (r : Nat) : Bool := t.tags r
 
 /-- `ST(i)`, or `none` if that register is empty (a stack underflow). -/
 def St.get (t : St) (i : Nat) : Option Nat :=
@@ -418,18 +418,18 @@ def St.get (t : St) (i : Nat) : Option Nat :=
 /-- `ST(i) ← v` (the register becomes in use). -/
 def St.set (t : St) (i v : Nat) : St :=
   let r := t.phys i
-  { t with regs := fun j => if j = r then v else t.regs j, tags := t.tags ||| 2 ^ r }
+  { t with regs := fun j => if j = r then v else t.regs j, tags := fun j => if j = r then true else t.tags j }
 
 /-- Push `v`, or `none` if `ST(7)` is in use (a stack overflow). -/
 def St.push (t : St) (v : Nat) : Option St :=
   let r := (t.top + 7) % 8
   if t.used r then none
   else some { t with top := r, regs := fun j => if j = r then v else t.regs j,
-                     tags := t.tags ||| 2 ^ r }
+                     tags := fun j => if j = r then true else t.tags j }
 
 /-- Pop: `ST(0)` becomes empty, `TOP + 1`. -/
 def St.pop (t : St) : St :=
-  { t with tags := if t.used t.top then t.tags - 2 ^ t.top else t.tags, top := (t.top + 1) % 8 }
+  { t with tags := fun j => if j = t.top then false else t.tags j, top := (t.top + 1) % 8 }
 
 /-- Raise the flags `fl` (bits 5:0). -/
 def St.raise (t : St) (fl : Nat) : St := { t with sw := t.sw ||| fl % 64 }

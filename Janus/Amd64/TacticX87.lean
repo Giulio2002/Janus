@@ -34,4 +34,14 @@ attribute [janus64_exec] X87.exec X87.execWaiting X87.getST X87.operand X87.memA
 @[janus64_exec] theorem x87_and_zero (n : Nat) : n &&& 0 = 0 := Nat.and_zero n
 @[janus64_exec] theorem x87_or_zero (n : Nat) : n ||| 0 = n := Nat.or_zero n
 
+/-! ## Register-stack arithmetic modulo 8 (symbolic `TOP`) -/
+
+@[janus64_exec] theorem x87_mod8_add_add (a k l : Nat) : ((a + k) % 8 + l) % 8 = (a + (k + l)) % 8 := by
+  omega
+@[janus64_exec] theorem x87_mod8_eq (a k l : Nat) : ((a + k) % 8 = (a + l) % 8) = (k % 8 = l % 8) := by
+  apply propext; omega
+@[janus64_exec] theorem x87_mod8_reduce (a k : Nat) (h : 8 ≤ k) : (a + k) % 8 = (a + (k - 8)) % 8 := by
+  omega
+@[janus64_exec] theorem x87_mod8_mod (a k : Nat) : (a + k) % 8 % 8 = (a + k) % 8 := Nat.mod_mod _ _
+
 end Janus.Amd64.Tactic
