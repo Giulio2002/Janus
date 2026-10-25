@@ -39,3 +39,4 @@ import Janus.Tactic.ABI0
 import Janus.Contracts.Misc
 import Janus.Contracts.Instrument
 import Janus.Spec.PopCount
+import Janus.Spec.SoftFloat
