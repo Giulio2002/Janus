@@ -165,3 +165,13 @@ theorem RtContract.mono {p : Janus.Program} {addr : Nat} {rt : List (Nat × Nat)
   Janus.Tactic.Summary.mono h hpre fun _ _ _ h => h
 
 end Janus.Contracts
+
+namespace Janus.Contracts
+
+/- The quantifiers of `RtPre` over the spec's `reads` (and of specs over their operands), over a
+literal list: one conjunct per element, so that the executors prove a call's precondition
+fact by fact. -/
+attribute [janus_exec, janus_post, janus64_exec, janus64_post] List.forall_mem_cons List.not_mem_nil
+  false_implies implies_true forall_const Janus.outside_cons Janus.outside_nil and_true true_and
+
+end Janus.Contracts

@@ -294,6 +294,11 @@ def gobytesSpec : RtSpec where
   post rt a m0 r0 r1 r2 m := r1 = arg a 1 ∧ r2 = arg a 1 ∧
     (0 < arg a 1 → InRanges r0 (arg a 1) rt ∧ BytesHold m r0 r1 r2 (strBytes m0 (arg a 0) (arg a 1)))
 
-attribute [janus_exec, janus_post, janus64_exec, janus64_post] arg bufWrites
+theorem catBytes_nil (m : Memory) : catBytes m [] = [] := rfl
+theorem catBytes_cons (m : Memory) (x : Nat × Nat) (xs : List (Nat × Nat)) :
+    catBytes m (x :: xs) = strBytes m x.1 x.2 ++ catBytes m xs := rfl
+
+attribute [janus_exec, janus_post, janus64_exec, janus64_post] arg bufWrites StrIn BufOK StrsIn StrOut
+  catBytes_nil catBytes_cons strBytes_writeLE List.append_nil
 
 end Janus.Contracts

@@ -31,4 +31,15 @@ case "$1" in
   LookupKey16) printf '%s\n' --contract runtime.mapaccess2 ;;
   NewMap) printf '%s\n' --contract runtime.makemap_small ;;
   ClearMap) printf '%s\n' --contract runtime.mapclear ;;
+  # the string and slice examples (examples/basic/zstr.go): Janus/Contracts/String.lean,
+  # Slice.lean (and the runtime functions proved to meet their contracts)
+  Concat) printf '%s\n' --contract runtime.concatstring2 ;;
+  ToBytes) printf '%s\n' --contract runtime.stringtoslicebyte ;;
+  FromBytes) printf '%s\n' --contract runtime.slicebytetostring ;;
+  SumRunes|Countrunes) printf '%s\n' --contract runtime.decoderune ;;
+  RuneLen) printf '%s\n' --contract runtime.countrunes ;;
+  AppendPoint) printf '%s\n' --contract runtime.growslice ;;
+  CopyNodes) printf '%s\n' --contract runtime.typedslicecopy ;;
+  WriteBarrier) printf '%s\n' --targets runtime.gcWriteBarrier2,runtime.gcWriteBarrier3,runtime.gcWriteBarrier4,runtime.gcWriteBarrier5,runtime.gcWriteBarrier6,runtime.gcWriteBarrier7,runtime.gcWriteBarrier8 \
+    --contract runtime.wbBufFlush ;;
 esac

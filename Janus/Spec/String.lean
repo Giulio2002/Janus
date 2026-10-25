@@ -293,6 +293,13 @@ theorem strBytes_congr {m m' : Memory} {p q n : Nat} (h : ∀ i, i < n → m'.by
   intro i hi
   rw [h i (List.mem_range.1 hi)]
 
+/-- A store outside `[p, p+n)` does not change its bytes. -/
+theorem strBytes_writeLE (m : Memory) (p n a k v : Nat) (h : p + n ≤ a ∨ a + k ≤ p) :
+    strBytes (m.writeLE a k v) p n = strBytes m p n := by
+  apply strBytes_congr
+  intro i hi
+  exact Memory.bytes_writeLE_outside _ (by omega)
+
 /-- The bytes of a concatenation. -/
 theorem strBytes_append (m : Memory) (p a b : Nat) :
     strBytes m p (a + b) = strBytes m p a ++ strBytes m (p + a) b := by

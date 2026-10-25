@@ -112,3 +112,16 @@ def WbContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat))
       MemFrame s.mem m (rt ++ [((s.regs 4).toNat - stack, (s.regs 4).toNat)]) ∧ WbSlots rt m buf.toNat n)
 
 end Janus.Contracts
+
+namespace Janus.Contracts
+
+/- The specs unfold in the executors' simp sets, so that at a call `janus_run`/`janus64_run` see
+the precondition and postcondition of the spec itself. -/
+attribute [janus_exec, janus_post, janus64_exec, janus64_post] concatstringSpec concatstringsSpec
+  concatbyteSpec concatbytesSpec slicebytetostringSpec slicebytetostringtmpSpec stringtoslicebyteSpec
+  stringtosliceruneSpec slicerunetostringSpec intstringSpec decoderuneSpec countrunesSpec
+  gostringnSpec gobytesSpec growsliceSpec growsliceNoAliasSpec growsliceBufSpec
+  growsliceBufNoAliasSpec makeslicecopySpec moveSliceSpec moveSliceNoScanSpec moveSliceNoCapSpec
+  moveSliceNoCapNoScanSpec slicecopySpec typedslicecopySpec wbZeroSpec wbMoveSpec
+
+end Janus.Contracts
