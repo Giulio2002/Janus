@@ -126,6 +126,7 @@ def concatstringSpec (k : Nat) : RtSpec where
   nargs := 1 + 2 * k
   pre a m := BufOK m (arg a 0) 32 ∧ StrsIn m (arg a 0) (strPairs a 1 k)
   writes a _ := bufWrites (arg a 0) 32
+  reads a _ := strPairs a 1 k
   post _ a m0 r0 r1 _ m := StrOut m r0 r1 (catBytes m0 (strPairs a 1 k))
 
 /-- **`runtime.concatstrings(buf, a []string)`**: the bytes of the concatenation of the strings
@@ -137,6 +138,7 @@ def concatstringsSpec : RtSpec where
     StrsIn m (arg a 0) (strHdrs m (arg a 1) (arg a 2)) ∧
     Disjoint (arg a 1) (16 * arg a 2) (arg a 0) (if arg a 0 = 0 then 0 else 32)
   writes a _ := bufWrites (arg a 0) 32
+  reads a m := (arg a 1, 16 * arg a 2) :: strHdrs m (arg a 1) (arg a 2)
   post _ a m0 r0 r1 _ m := StrOut m r0 r1 (catBytes m0 (strHdrs m0 (arg a 1) (arg a 2)))
 
 /-- **`runtime.concatbyteK(buf, a0, …)`** (`K = 2 … 5`, `[]byte(a0 + …)`): a new `[]byte`
@@ -145,6 +147,7 @@ def concatbyteSpec (k : Nat) : RtSpec where
   nargs := 1 + 2 * k
   pre a m := BufOK m (arg a 0) 32 ∧ StrsIn m (arg a 0) (strPairs a 1 k)
   writes a _ := bufWrites (arg a 0) 32
+  reads a _ := strPairs a 1 k
   post rt a m0 r0 r1 r2 m := CatBytesOut rt (arg a 0) (catBytes m0 (strPairs a 1 k)) m r0 r1 r2
 
 /-- **`runtime.concatbytes(buf, a []string)`**: as `concatbyteSpec`, for the strings of `a`. -/
@@ -155,6 +158,7 @@ def concatbytesSpec : RtSpec where
     StrsIn m (arg a 0) (strHdrs m (arg a 1) (arg a 2)) ∧
     Disjoint (arg a 1) (16 * arg a 2) (arg a 0) (if arg a 0 = 0 then 0 else 32)
   writes a _ := bufWrites (arg a 0) 32
+  reads a m := (arg a 1, 16 * arg a 2) :: strHdrs m (arg a 1) (arg a 2)
   post rt a m0 r0 r1 r2 m :=
     CatBytesOut rt (arg a 0) (catBytes m0 (strHdrs m0 (arg a 1) (arg a 2))) m r0 r1 r2
 
@@ -169,6 +173,7 @@ def slicebytetostringSpec : RtSpec where
   pre a m := BufOK m (arg a 0) 32 ∧ StrIn m (arg a 1) (arg a 2) ∧
     (arg a 0 ≠ 0 → Disjoint (arg a 1) (arg a 2) (arg a 0) 32)
   writes a _ := bufWrites (arg a 0) 32
+  reads a _ := [(arg a 1, arg a 2)]
   post _ a m0 r0 r1 _ m := StrOut m r0 r1 (strBytes m0 (arg a 1) (arg a 2))
 
 /-- **`runtime.slicebytetostringtmp(ptr, n)`**: the string `(ptr, n)` itself, nothing written.
@@ -176,6 +181,7 @@ Words: `ptr, n`. -/
 def slicebytetostringtmpSpec : RtSpec where
   nargs := 2
   pre a m := StrIn m (arg a 0) (arg a 1)
+  reads a _ := [(arg a 0, arg a 1)]
   post _ a m0 r0 r1 _ m := r0 = arg a 0 ∧ r1 = arg a 1 ∧ StrOut m r0 r1 (strBytes m0 (arg a 0) (arg a 1))
 
 /-- **`runtime.stringtoslicebyte(buf, s)`** (`[]byte(s)`): a new `[]byte` holding the bytes of
@@ -185,6 +191,7 @@ def stringtoslicebyteSpec : RtSpec where
   pre a m := BufOK m (arg a 0) 32 ∧ StrIn m (arg a 1) (arg a 2) ∧
     (arg a 0 ≠ 0 → Disjoint (arg a 1) (arg a 2) (arg a 0) 32)
   writes a _ := bufWrites (arg a 0) 32
+  reads a _ := [(arg a 1, arg a 2)]
   post rt a m0 r0 r1 r2 m := ToBytesOut rt (arg a 0) (strBytes m0 (arg a 1) (arg a 2)) m r0 r1 r2
 
 /-- **`runtime.stringtoslicerune(buf, s)`** (`[]rune(s)`, `buf *[32]rune`): a new `[]rune` holding
@@ -197,6 +204,7 @@ def stringtosliceruneSpec : RtSpec where
   pre a m := BufOK m (arg a 0) 128 ∧ StrIn m (arg a 1) (arg a 2) ∧ arg a 2 ≤ 2 ^ 46 ∧
     (arg a 0 ≠ 0 → Disjoint (arg a 1) (arg a 2) (arg a 0) 128)
   writes a _ := bufWrites (arg a 0) 128
+  reads a _ := [(arg a 1, arg a 2)]
   post rt a m0 r0 r1 r2 m :=
     let rs := runes (strBytes m0 (arg a 1) (arg a 2))
     r1 = rs.length ∧
@@ -212,6 +220,7 @@ def slicerunetostringSpec : RtSpec where
   pre a m := BufOK m (arg a 0) 32 ∧ StrIn m (arg a 1) (4 * arg a 2) ∧
     (arg a 0 ≠ 0 → Disjoint (arg a 1) (4 * arg a 2) (arg a 0) 32)
   writes a _ := bufWrites (arg a 0) 32
+  reads a _ := [(arg a 1, 4 * arg a 2)]
   post _ a m0 r0 r1 _ m := StrOut m r0 r1 (encodeRunes (runeWords m0 (arg a 1) (arg a 2)))
 
 /-- **`runtime.intstring(buf, v)`** (`string(rune(v))` for an `int64 v`, `buf *[4]byte`): the
@@ -233,6 +242,7 @@ def decoderuneSpec : RtSpec where
   pre a m := StrIn m (arg a 0) (arg a 1) ∧ arg a 2 < 2 ^ 63
   guard := some 0
   ready := false
+  reads a _ := [(arg a 0, arg a 1)]
   post _ a m0 r0 r1 _ _ :=
     r0 % 2 ^ 32 = (decodeRune (strBytes m0 (arg a 0) (arg a 1)) (arg a 2)).1 ∧
       r1 = (decodeRune (strBytes m0 (arg a 0) (arg a 1)) (arg a 2)).2
@@ -245,6 +255,7 @@ def countrunesSpec : RtSpec where
   pre a m := StrIn m (arg a 0) (arg a 1)
   guard := some 64
   ready := false
+  reads a _ := [(arg a 0, arg a 1)]
   post _ a m0 r0 _ _ _ := r0 = countRunes (strBytes m0 (arg a 0) (arg a 1))
 
 /-! ## C strings and bytes (cgo, syscalls) -/
@@ -254,17 +265,23 @@ def CStr (m : Memory) (p l : Nat) : Prop :=
   p + l + 1 ≤ 2 ^ 48 ∧ m.accessible p (l + 1) false = true ∧
     (∀ i, i < l → (m.bytes (p + i)).toNat ≠ 0) ∧ (m.bytes (p + l)).toNat = 0
 
+/-- The length of the C string at `p` (0 if there is none). -/
+noncomputable def cstrLen (m : Memory) (p : Nat) : Nat :=
+  open Classical in if h : ∃ l, CStr m p l then Classical.choose h else 0
+
 /-- **`runtime.gostring(p)`**: a Go string holding the bytes of the C string at `p` (up to its
 NUL). Words: `p`. -/
-def gostringSpec : RtSpec where
+noncomputable def gostringSpec : RtSpec where
   nargs := 1
   pre a m := ∃ l, CStr m (arg a 0) l
+  reads a m := [(arg a 0, cstrLen m (arg a 0) + 1)]
   post _ a m0 r0 r1 _ m := ∀ l, CStr m0 (arg a 0) l → StrOut m r0 r1 (strBytes m0 (arg a 0) l)
 
 /-- **`runtime.gostringn(p, l)`**: a Go string holding the `l` bytes at `p`. Words: `p, l`. -/
 def gostringnSpec : RtSpec where
   nargs := 2
   pre a m := StrIn m (arg a 0) (arg a 1)
+  reads a _ := [(arg a 0, arg a 1)]
   post _ a m0 r0 r1 _ m := StrOut m r0 r1 (strBytes m0 (arg a 0) (arg a 1))
 
 /-- **`runtime.gobytes(p, n)`**: a new `[]byte` of length and capacity `n` holding the `n` bytes
@@ -273,6 +290,7 @@ Words: `p, n`. -/
 def gobytesSpec : RtSpec where
   nargs := 2
   pre a m := StrIn m (arg a 0) (arg a 1) ∧ arg a 1 ≤ maxAlloc
+  reads a _ := [(arg a 0, arg a 1)]
   post rt a m0 r0 r1 r2 m := r1 = arg a 1 ∧ r2 = arg a 1 ∧
     (0 < arg a 1 → InRanges r0 (arg a 1) rt ∧ BytesHold m r0 r1 r2 (strBytes m0 (arg a 0) (arg a 1)))
 

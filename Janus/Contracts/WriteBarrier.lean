@@ -52,6 +52,7 @@ def WriteBarrierOn (m : Memory) (flag : Nat) : Prop := m.readLE flag 4 ≠ 0
 def wbZeroSpec : RtSpec where
   nargs := 2
   pre a m := TypeOK m (arg a 0) ∧ Readable m (arg a 1) (typSize m (arg a 0))
+  reads a m := [(arg a 0, 16), (arg a 1, typSize m (arg a 0))]
   post _ _ _ _ _ _ _ := True
 
 /-- **`runtime.wbMove(typ, dst, src)`**: the bulk barrier before copying a value of type `typ`
@@ -60,6 +61,7 @@ def wbMoveSpec : RtSpec where
   nargs := 3
   pre a m := TypeOK m (arg a 0) ∧ Readable m (arg a 1) (typSize m (arg a 0)) ∧
     Readable m (arg a 2) (typSize m (arg a 0))
+  reads a m := [(arg a 0, 16), (arg a 1, typSize m (arg a 0)), (arg a 2, typSize m (arg a 0))]
   post _ _ _ _ _ _ _ := True
 
 /-! ## `gcWriteBarrierN` (arm64) -/

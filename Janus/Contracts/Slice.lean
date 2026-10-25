@@ -73,6 +73,7 @@ def growsliceSpec : RtSpec where
   pre a m := ElemOK m (arg a 4) ∧ arg a 3 ≤ arg a 1 ∧ arg a 1 - arg a 3 ≤ arg a 2 ∧
     arg a 2 < arg a 1 ∧ arg a 1 * typSize m (arg a 4) < 2 ^ 46 ∧
     Readable m (arg a 0) ((arg a 1 - arg a 3) * typSize m (arg a 4))
+  reads a m := [(arg a 4, 16), (arg a 0, (arg a 1 - arg a 3) * typSize m (arg a 4))]
   post rt a m0 r0 r1 r2 m :=
     r1 = arg a 1 ∧
     r2 = growCap (typSize m0 (arg a 4)) (typNoscan m0 (arg a 4)) (arg a 1) (arg a 2) ∧
@@ -102,6 +103,7 @@ def growsliceBufSpec : RtSpec where
   writes a m := if arg a 1 ≤ arg a 6 then
     [(arg a 5, arg a 5 + bufCap (typSize m (arg a 4)) (typNoscan m (arg a 4)) (arg a 1) * typSize m (arg a 4))]
     else []
+  reads a m := [(arg a 4, 16), (arg a 0, (arg a 1 - arg a 3) * typSize m (arg a 4))]
   post rt a m0 r0 r1 r2 m :=
     (arg a 6 < arg a 1 → growsliceSpec.post rt a m0 r0 r1 r2 m) ∧
     (arg a 1 ≤ arg a 6 → r0 = arg a 5 ∧ r1 = arg a 1 ∧
@@ -120,6 +122,7 @@ def makeslicecopySpec : RtSpec where
   nargs := 4
   pre a m := ElemOK m (arg a 0) ∧ arg a 1 * typSize m (arg a 0) ≤ maxAlloc ∧ arg a 1 < 2 ^ 63 ∧
     arg a 2 < 2 ^ 63 ∧ Readable m (arg a 3) (min (arg a 1) (arg a 2) * typSize m (arg a 0))
+  reads a m := [(arg a 0, 16), (arg a 3, min (arg a 1) (arg a 2) * typSize m (arg a 0))]
   post rt a m0 r0 _ _ m :=
     let size := typSize m0 (arg a 0)
     0 < arg a 1 * size →
@@ -141,6 +144,7 @@ def moveSliceSpec : RtSpec where
   nargs := 4
   pre a m := ElemOK m (arg a 0) ∧ arg a 2 ≤ arg a 3 ∧ arg a 3 * typSize m (arg a 0) ≤ maxAlloc ∧
     Readable m (arg a 1) (arg a 3 * typSize m (arg a 0))
+  reads a m := [(arg a 0, 16), (arg a 1, arg a 3 * typSize m (arg a 0))]
   post rt a m0 r0 r1 r2 m :=
     (arg a 3 = 0 → r1 = 0 ∧ r2 = 0) ∧
     (0 < arg a 3 → r1 = arg a 2 ∧ r2 = arg a 3 ∧
@@ -151,6 +155,7 @@ def moveSliceSpec : RtSpec where
 def moveSliceNoScanSpec : RtSpec where
   nargs := 4
   pre a m := arg a 2 ≤ arg a 3 ∧ arg a 3 * arg a 0 ≤ maxAlloc ∧ Readable m (arg a 1) (arg a 3 * arg a 0)
+  reads a _ := [(arg a 1, arg a 3 * arg a 0)]
   post rt a m0 r0 r1 r2 m :=
     (arg a 3 = 0 → r1 = 0 ∧ r2 = 0) ∧
     (0 < arg a 3 → r1 = arg a 2 ∧ r2 = arg a 3 ∧
@@ -163,6 +168,7 @@ def moveSliceNoCapSpec : RtSpec where
   nargs := 3
   pre a m := ElemOK m (arg a 0) ∧ arg a 2 * typSize m (arg a 0) ≤ maxAlloc ∧
     Readable m (arg a 1) (arg a 2 * typSize m (arg a 0))
+  reads a m := [(arg a 0, 16), (arg a 1, arg a 2 * typSize m (arg a 0))]
   post rt a m0 r0 r1 r2 m :=
     let lenmem := arg a 2 * typSize m0 (arg a 0)
     (arg a 2 = 0 → r1 = 0 ∧ r2 = 0) ∧
@@ -174,6 +180,7 @@ elements of `elemSize > 0` bytes. Words: `elemSize, old, len`. -/
 def moveSliceNoCapNoScanSpec : RtSpec where
   nargs := 3
   pre a m := 0 < arg a 0 ∧ arg a 2 * arg a 0 ≤ maxAlloc ∧ Readable m (arg a 1) (arg a 2 * arg a 0)
+  reads a _ := [(arg a 1, arg a 2 * arg a 0)]
   post rt a m0 r0 r1 r2 m :=
     (arg a 2 = 0 → r1 = 0 ∧ r2 = 0) ∧
     (0 < arg a 2 → r1 = arg a 2 ∧ r2 = roundupsize (arg a 2 * arg a 0) true / arg a 0 ∧
@@ -192,6 +199,7 @@ def slicecopySpec : RtSpec where
     (0 < min (arg a 1) (arg a 3) * arg a 4 → m.accessible (arg a 0) (min (arg a 1) (arg a 3) * arg a 4) true = true) ∧
     Readable m (arg a 2) (min (arg a 1) (arg a 3) * arg a 4)
   writes a _ := [(arg a 0, arg a 0 + min (arg a 1) (arg a 3) * arg a 4)]
+  reads a _ := [(arg a 2, min (arg a 1) (arg a 3) * arg a 4)]
   post _ a m0 r0 _ _ m := r0 = min (arg a 1) (arg a 3) ∧
     Copied m0 m (arg a 0) (arg a 2) (min (arg a 1) (arg a 3) * arg a 4)
 
@@ -207,6 +215,7 @@ def typedslicecopySpec : RtSpec where
       m.accessible (arg a 1) (min (arg a 2) (arg a 4) * typSize m (arg a 0)) true = true) ∧
     Readable m (arg a 3) (min (arg a 2) (arg a 4) * typSize m (arg a 0))
   writes a m := [(arg a 1, arg a 1 + min (arg a 2) (arg a 4) * typSize m (arg a 0))]
+  reads a m := [(arg a 0, 16), (arg a 3, min (arg a 2) (arg a 4) * typSize m (arg a 0))]
   post _ a m0 r0 _ _ m := r0 = min (arg a 2) (arg a 4) ∧
     Copied m0 m (arg a 1) (arg a 3) (min (arg a 2) (arg a 4) * typSize m0 (arg a 0))
 

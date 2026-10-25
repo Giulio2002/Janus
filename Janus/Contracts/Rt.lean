@@ -16,7 +16,8 @@ numbers) and memory. `RtContract` (arm64) and `RtContract64` (amd64) turn an `Rt
   argument that no longer fits in registers on the stack, e.g. the last string of
   `concatstring5`);
 * **the call** (`CallOK`/`CallOK64`): an admissible return address, an aligned stack pointer and
-  the stack window `[SP - stack, SP + 8 + 8·nargs)` writable; when the spec asks for it, the
+  the stack window `[SP - stack, SP + 8 + 8·nargs)` writable, the memory the function reads (the
+  spec's `reads`) outside the callee's part of it; when the spec asks for it, the
   stack guard of `g` below `SP - adj` (`GuardOK`: the function's own stack check falls through,
   so it neither grows nor moves the stack);
 * **readiness** (round 9 C1): when the spec allocates or otherwise depends on the runtime's own
@@ -40,6 +41,10 @@ structure RtSpec where
   /-- The ranges the function may write besides `rt` and its stack window (from the argument
   words and the memory at the call). -/
   writes : List Nat → Janus.Arm64.Memory → List (Nat × Nat) := fun _ _ => []
+  /-- The memory the function reads (`(address, length)` pairs from the argument words and the
+  memory at the call): it must lie outside the callee's stack window, which the function writes
+  before it reads its inputs. -/
+  reads : List Nat → Janus.Arm64.Memory → List (Nat × Nat) := fun _ _ => []
   /-- `some adj`: the function's stack check must fall through (`stackguard0 + adj < SP`). -/
   guard : Option Nat := none
   /-- Whether the precondition includes the runtime's readiness `H` (round 9 C1). -/
@@ -71,6 +76,7 @@ attribute [janus_exec, janus_post] argWords
 @[reducible] def RtPre (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (sp : RtSpec)
     (s : State) : Prop :=
   CallOK s stack sp.nargs ∧ sp.pre (argWords s sp.nargs) s.mem ∧
+    (∀ r ∈ sp.reads (argWords s sp.nargs) s.mem, Outside r.1 r.2 (calleeStack s stack sp.nargs)) ∧
     (∀ adj, sp.guard = some adj → Janus.Spec.GuardOK s adj) ∧
     (sp.ready = true → Ready H rt (argWords s sp.nargs) s)
 
@@ -86,6 +92,27 @@ documentation). -/
 def RtContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady)
     (sp : RtSpec) : Prop :=
   Summary p addr (RtPre rt stack H sp) (RtPost rt stack sp)
+
+/-- How a proof from a function's own code ends: the final state `s'` keeps `SP`, `R18`, `R28`,
+`R29` and the system registers, returns to `X30`, and its memory and results satisfy the
+spec; then it is `RtPost`. -/
+theorem RtPost.intro {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s' : State}
+    (hsp : s'.sp = s.sp) (hpc : s'.pc = s.regs 30) (h18 : s'.regs 18 = s.regs 18)
+    (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid)
+    (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
+    (hf : MemFrame s.mem s'.mem (rt ++ calleeStack s stack sp.nargs ++ sp.writes (argWords s sp.nargs) s.mem))
+    (hq : sp.post rt (argWords s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 1).toNat (s'.regs 2).toNat s'.mem) :
+    RtPost rt stack sp s s' := by
+  refine ⟨s'.regs 0, s'.regs 1, s'.regs 2, s'.regs, s'.flags, s'.vregs, s'.mem, ?_, hf, hq⟩
+  obtain ⟨r, sp', pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
+  simp only at hsp hpc h18 h28 h29 hdz htp hfc hfs ⊢
+  subst hsp hpc hdz htp hfc hfs
+  simp only [retState, State.mk.injEq, and_true]
+  funext i
+  simp only [callRegs]
+  split
+  · rename_i hi; rcases hi with rfl | rfl | rfl <;> simp [h18, h28, h29]
+  · rcases i with _ | _ | _ | i <;> rfl
 
 end Arm64
 
@@ -111,6 +138,7 @@ def GuardOK64 (s : State) (adj : Nat) : Prop :=
 @[reducible] def RtPre64 (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (sp : RtSpec)
     (s : State) : Prop :=
   CallOK64 s stack sp.nargs ∧ sp.pre (argWords64 s sp.nargs) s.mem ∧
+    (∀ r ∈ sp.reads (argWords64 s sp.nargs) s.mem, Outside r.1 r.2 (calleeStack64 s stack sp.nargs)) ∧
     (∀ adj, sp.guard = some adj → GuardOK64 s adj) ∧
     (sp.ready = true → Ready64 H rt (argWords64 s sp.nargs) s)
 

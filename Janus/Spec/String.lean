@@ -265,6 +265,19 @@ theorem strBytes_getD (m : Memory) (p n i : Nat) (h : i < n) :
     (strBytes m p n).getD i 0 = (m.bytes (p + i)).toNat := by
   simp [strBytes, List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range h]
 
+/-- Byte `i < n` of `strBytes`, as the 1-byte read the machine does. -/
+theorem byteAt_strBytes (m : Memory) (p n i : Nat) (h : i < n) :
+    byteAt (strBytes m p n) i = m.readLE (p + i) 1 := by
+  rw [byteAt, strBytes_getD m p n i h, Memory.readLE_one]
+
+/-- Byte `i` of `strBytes` (`0` past the end). -/
+theorem byteAt_strBytes' (m : Memory) (p n i : Nat) :
+    byteAt (strBytes m p n) i = if i < n then m.readLE (p + i) 1 else 0 := by
+  split
+  · exact byteAt_strBytes m p n i ‹_›
+  · simp only [byteAt, strBytes, List.getD_eq_getElem?_getD, List.getElem?_map]
+    rw [List.getElem?_eq_none (by simp; omega)]; rfl
+
 /-- Every byte of `strBytes` is below 256. -/
 theorem strBytes_lt (m : Memory) (p n : Nat) : ∀ b ∈ strBytes m p n, b < 256 := by
   intro b hb
@@ -288,5 +301,75 @@ theorem strBytes_append (m : Memory) (p a b : Nat) :
   apply List.map_congr_left
   intro i _
   simp only [Function.comp, Nat.add_assoc]
+
+/-! ## The decoder in arithmetic form
+
+The masks and shifts of `decodeRune` on bytes are sums of digit fields: `decodeRune_eq_arith`
+restates it with `%` and `*` only, which `omega` reasons about (proofs about machine code compare
+it with the fields the code extracts). -/
+
+theorem or_low (x y i : Nat) (hy : y < 2 ^ i) : x * 2 ^ i ||| y = x * 2 ^ i + y := by
+  rw [← Nat.shiftLeft_eq, Nat.shiftLeft_add_eq_or_of_lt hy]
+
+theorem or_low' (x y i : Nat) (hy : y < 2 ^ i) : y ||| x * 2 ^ i = x * 2 ^ i + y := by
+  rw [Nat.or_comm, or_low x y i hy]
+
+theorem mul_or_mul (x y i : Nat) : x * 2 ^ i ||| y * 2 ^ i = (x ||| y) * 2 ^ i := by
+  rw [← Nat.shiftLeft_eq, ← Nat.shiftLeft_eq, ← Nat.shiftLeft_eq, Nat.shiftLeft_or_distrib]
+
+theorem or_mul_low (x y i j : Nat) (hy : y < 2 ^ i) :
+    x * 2 ^ (i + j) ||| y * 2 ^ j = x * 2 ^ (i + j) + y * 2 ^ j := by
+  rw [Nat.pow_add, ← Nat.mul_assoc, mul_or_mul, or_low _ _ _ hy, Nat.add_mul]
+
+theorem rune2_arith (a b : Nat) : (a &&& 0x1F) <<< 6 ||| (b &&& 0x3F) = a % 32 * 64 + b % 64 := by
+  rw [show (0x1F : Nat) = 2 ^ 5 - 1 from rfl, show (0x3F : Nat) = 2 ^ 6 - 1 from rfl,
+    Nat.and_two_pow_sub_one_eq_mod, Nat.and_two_pow_sub_one_eq_mod, Nat.shiftLeft_eq,
+    or_low _ _ 6 (Nat.mod_lt _ (by decide))]
+
+theorem rune3_arith (a b c : Nat) :
+    (a &&& 0x0F) <<< 12 ||| (b &&& 0x3F) <<< 6 ||| (c &&& 0x3F) = a % 16 * 4096 + b % 64 * 64 + c % 64 := by
+  rw [show (0x0F : Nat) = 2 ^ 4 - 1 from rfl, show (0x3F : Nat) = 2 ^ 6 - 1 from rfl,
+    Nat.and_two_pow_sub_one_eq_mod, Nat.and_two_pow_sub_one_eq_mod, Nat.and_two_pow_sub_one_eq_mod,
+    Nat.shiftLeft_eq, Nat.shiftLeft_eq, or_mul_low (a % 16) (b % 64) 6 6 (Nat.mod_lt _ (by decide)),
+    show a % 16 * 2 ^ (6 + 6) + b % 64 * 2 ^ 6 = (a % 16 * 64 + b % 64) * 2 ^ 6 by omega,
+    or_low _ _ 6 (Nat.mod_lt _ (by decide))]
+
+theorem rune4_arith (a b c d : Nat) :
+    (a &&& 0x07) <<< 18 ||| (b &&& 0x3F) <<< 12 ||| (c &&& 0x3F) <<< 6 ||| (d &&& 0x3F) =
+      a % 8 * 262144 + b % 64 * 4096 + c % 64 * 64 + d % 64 := by
+  rw [show (0x07 : Nat) = 2 ^ 3 - 1 from rfl, show (0x3F : Nat) = 2 ^ 6 - 1 from rfl,
+    Nat.and_two_pow_sub_one_eq_mod, Nat.and_two_pow_sub_one_eq_mod, Nat.and_two_pow_sub_one_eq_mod,
+    Nat.and_two_pow_sub_one_eq_mod, Nat.shiftLeft_eq, Nat.shiftLeft_eq, Nat.shiftLeft_eq,
+    or_mul_low (a % 8) (b % 64) 6 12 (Nat.mod_lt _ (by decide)),
+    show a % 8 * 2 ^ (6 + 12) + b % 64 * 2 ^ 12 = (a % 8 * 64 + b % 64) * 2 ^ (6 + 6) by omega,
+    or_mul_low _ (c % 64) 6 6 (Nat.mod_lt _ (by decide)),
+    show (a % 8 * 64 + b % 64) * 2 ^ (6 + 6) + c % 64 * 2 ^ 6 = (a % 8 * 4096 + b % 64 * 64 + c % 64) * 2 ^ 6 by omega,
+    or_low _ _ 6 (Nat.mod_lt _ (by decide))]
+
+/-- `decodeRune` with its fields as arithmetic (`decodeRune_eq_arith`). -/
+def decodeRuneA (s : List Nat) (k : Nat) : Nat × Nat :=
+  if s.length ≤ k then (0xFFFD, k + 1) else
+  let b0 := byteAt s k
+  if 0xC0 ≤ b0 ∧ b0 < 0xE0 then
+    if isCont s k 1 then
+      let r := b0 % 32 * 64 + byteAt s (k + 1) % 64
+      if 0x7F < r then (r, k + 2) else (0xFFFD, k + 1)
+    else (0xFFFD, k + 1)
+  else if 0xE0 ≤ b0 ∧ b0 < 0xF0 then
+    if isCont s k 1 && isCont s k 2 then
+      let r := b0 % 16 * 4096 + byteAt s (k + 1) % 64 * 64 + byteAt s (k + 2) % 64
+      if 0x7FF < r ∧ ¬(0xD800 ≤ r ∧ r ≤ 0xDFFF) then (r, k + 3) else (0xFFFD, k + 1)
+    else (0xFFFD, k + 1)
+  else if 0xF0 ≤ b0 ∧ b0 < 0xF8 then
+    if isCont s k 1 && isCont s k 2 && isCont s k 3 then
+      let r := b0 % 8 * 262144 + byteAt s (k + 1) % 64 * 4096 + byteAt s (k + 2) % 64 * 64 +
+        byteAt s (k + 3) % 64
+      if 0xFFFF < r ∧ r ≤ 0x10FFFF then (r, k + 4) else (0xFFFD, k + 1)
+    else (0xFFFD, k + 1)
+  else (0xFFFD, k + 1)
+
+theorem decodeRune_eq_arith (s : List Nat) (k : Nat) : decodeRune s k = decodeRuneA s k := by
+  unfold decodeRune decodeRuneA
+  simp only [rune2_arith, rune3_arith, rune4_arith]
 
 end Janus.Spec
