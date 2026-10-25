@@ -156,4 +156,91 @@ theorem hash_of_keyEq (H : HashModel) {m : Memory} {p q h r : Nat}
   obtain ⟨hf, hl, hb⟩ := he
   exact keyHash_congr H hf hl hb
 
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+The model `H0` (every hash is its seed), code for `f64hash` (`HashSat.f64hashCode` at `A0`, behind
+a branch) and for `strhash` (`HashSat.seedCode`, at its address), and a call hashing the key at
+`STR - 8` (`+0`, then the 8-byte string at `VAL`). -/
+
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceSat Janus.Contracts.IfaceModel
+  Janus.Contracts.HashSat
+
+def fAddr : Nat := Extracted.program.contractAddr "runtime.f64hash"
+def sAddr : Nat := Extracted.program.contractAddr "runtime.strhash"
+def tramp : Segment := { name := "tramp", base := fAddr, words := [branchWord fAddr A0] }
+def strSeg : Segment := { name := "strhash", base := sAddr, words := seedCode }
+def model0 : Segment := { name := "model", base := A0, words := f64hashCode }
+def implAt : List Segment := [tramp, strSeg, model0]
+
+theorem link_eq : Extracted.program.link implAt =
+    (Extracted.program.link [tramp, strSeg]).link [model0] := by
+  simp [Program.link, implAt]
+
+theorem modelF (d : Nat) : Fhash (Extracted.program.link implAt) fAddr H0 d binary64 8 := by
+  have hA : Fhash (Extracted.program.link implAt) A0 H0 d binary64 8 := by
+    rw [link_eq]
+    exact Summary.of_codeIn (codeIn_link _ model0 (by decide)) (f64hash_impl d)
+  intro s hpc hpre
+  rw [link_eq] at hA ⊢
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s
+  janus_eval_nat hC : fAddr
+  simp only [hC] at hpc
+  subst hpc
+  janus_run until [A0]
+  obtain ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
+  exact hA _ rfl ⟨⟨e, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+
+theorem modelS (d : Nat) : Strhash (Extracted.program.link implAt) sAddr H0 d := by
+  rw [show Extracted.program.link implAt =
+    { Extracted.program with segments := Extracted.program.segments ++ implAt } from rfl]
+  intro s hpc ⟨⟨he, _, ⟨hl1, hl2, _⟩, _⟩, _⟩
+  janus_eval_nat hC : sAddr
+  rw [hC] at hpc
+  janus_run
+  exact seed_hRet he (by simp [setReg, seed_mod])
+
+def ret : Nat := wret
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+/-- The key at `STR - 8`, the seed 0. -/
+def k : BitVec 64 := BitVec.ofNat 64 (STR - 8)
+def h0 : BitVec 64 := 0#64
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then k
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := Janus.Contracts.EqHashModel.wmem }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [k, h0] s0 :=
+  ⟨rfl, rfl, by
+    intro i h; simp at h
+    rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
+
+theorem hpre : pre H0 64 k s0 := by
+  refine ⟨⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, by decide,
+    by simp only [outside_cons, outside_nil, and_true]; decide⟩, wmem_henv _, ?_, ?_, rfl,
+    by decide, by decide, ?_, ?_, by decide, by decide, ?_, ?_⟩ <;>
+    simp only [window, callerWindow, H0_priv, outside_cons, outside_nil, and_true] <;> decide
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (H : HashModel) (d ret : Nat) (s : State) (p h : BitVec 64),
+    H.Laws ∧ Fhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.f64hash") H d
+      binary64 8 ∧
+    Strhash (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.strhash") H d ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p, h] s ∧ pre H d p s :=
+  ⟨implAt, H0, 64, ret, s0, k, h0, H0_laws, modelF 64, modelS 64, hret, setup, hpre⟩
+
+/-- So the guarantee is reached: the result is a possible hash of the key. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ KeyHash H0 s0.mem (STR - 8) 0 (s'.regs 0).toNat :=
+  (correctness implAt H0 H0_laws 64 (modelF 64) (modelS 64) k h0 ret hret s0 setup hpre).mono
+    fun _ h => ⟨h.1, h.2⟩
+
+end Witness
+
 end Proof
