@@ -326,6 +326,7 @@ scripts/oracle-amd64.sh full       # generated + edge + harvested from real Go b
 scripts/oracle-amd64.sh fp         # SSE scalar floating point only
 scripts/oracle-amd64.sh v3         # the GOAMD64=v3 extensions only (BMI1/BMI2, MOVBE, FMA, PSHUFB/PSIGNB)
 scripts/oracle-amd64.sh sse        # the SSE packed instructions of WP-D only (SSE2..SSE4.2)
+scripts/oracle-amd64.sh avx        # the AVX/AVX2/FMA3/F16C instructions of WP-F only (VEX-128/256, YMM)
 ```
 
 Knobs: `OUT` (default `artifacts/oracle-amd64`), `JOBS` (default 16, capped at 24), `N`
