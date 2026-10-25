@@ -16,6 +16,6 @@ func init() {
 	cp := &c
 	basic.DeferLoop(func() { *cp++ }, int(n))
 	var ev any
-	println(basic.PanicIf(n, ev), basic.DeferInc(&c, n), basic.RecoverSet(n),
+	println(basic.PanicIf(n, ev), basic.DeferInc(&c, n), basic.RecoverSet(n, ev),
 		basic.IndexAt([]uint64{1, 2, 3}, int(n)-1), basic.LoadField(&basic.Cell{V: n}), c)
 }

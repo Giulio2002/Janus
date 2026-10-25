@@ -50,5 +50,5 @@ case "$1" in
   # the Go 1.26 panic runtime out as pinned contracts (Janus/Contracts/Panic.lean).
   DeferLoop|DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
   RecoverSet) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
-      --contract runtime.deferreturn --contract runtime.convT64 ;;
+      --contract runtime.deferreturn ;;
 esac

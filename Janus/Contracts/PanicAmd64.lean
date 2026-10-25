@@ -149,6 +149,29 @@ theorem PanicPre.of_frame {P : PanicRuntime} {s S : State} {frame above nargs : 
   refine PanicPre.of_parts hc henv hf.accessible (hf.readLE _ _ ?_) hsp hg hx hdf hra hfr hn
   rw [outside_append]; exact ⟨hgo, by simp only [outside_cons, outside_nil, and_true]; omega⟩
 
+/-- `PanicPre` at any call site inside the caller's window (amd64; see the arm64 version). -/
+theorem PanicPre.of_within {P : PanicRuntime} {s S : State} {frame above nargs : Nat}
+    (hc : PanicCallerOK P s frame above)
+    (hf : MemFrame s.mem S.mem
+      (P.priv ++ [((s.regs 4).toNat - (P.depth + frame), (s.regs 4).toNat + above)]))
+    (henv : P.Env S.mem) (hlo : (s.regs 4).toNat - frame ≤ (S.regs 4).toNat)
+    (hhi : (S.regs 4).toNat + 8 + 8 * nargs ≤ (s.regs 4).toNat + above)
+    (hal : (S.regs 4).toNat % 8 = 0) (hg : S.regs 14 = s.regs 14)
+    (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47) :
+    PanicPre P nargs S := by
+  obtain ⟨-, ⟨hg1, hg2, hg3⟩, -, hd, hb, hst, hout, hgd, hgo⟩ := hc
+  simp only [regG, regSP, stackguard0Offset, stackguard0, Spec.Disjoint] at hg1 hg2 hg3 hgd
+  have hguard : S.mem.readLE ((s.regs 14).toNat + 16) 8 = s.mem.readLE ((s.regs 14).toNat + 16) 8 :=
+    hf.readLE _ _ (by rw [outside_append]; exact ⟨hgo, by simp only [outside_cons, outside_nil, and_true]; omega⟩)
+  refine ⟨henv, ⟨?_, ?_, ?_⟩, hal, ?_, ?_, ?_, hx, hdf, hra, ?_⟩
+  · simp only [regG, stackguard0Offset, hg]; omega
+  · simp only [regG, stackguard0Offset, hg, hf.accessible]; exact hg2
+  · simp only [stackguard0, regG, regSP, stackguard0Offset, hg, hguard]; omega
+  · omega
+  · omega
+  · rw [hf.accessible]; exact Janus.Arm64.Memory.accessible_mono _ hst (by omega) (by omega)
+  · exact Outside.of_sub hout (by omega) (by omega)
+
 def DeferprocContract (p : Janus.Amd64.Program) (addr : Nat) (P : PanicRuntime) : Prop :=
   Summary p addr (PanicPre P 1) (PanicRet P 1)
 def DeferprocStackContract (p : Janus.Amd64.Program) (addr : Nat) (P : PanicRuntime) : Prop :=
@@ -205,7 +228,7 @@ def GopanicRecoverContract (p : Janus.Amd64.Program) (addr : Nat) (P : PanicRunt
       P.Panicking c.mem (s.regs 14).toNat ⟨(s.regs 0).toNat, (s.regs 3).toNat⟩
         (c.mem.readLE (c.regs 4).toNat 8) ∧
       P.Env c.mem ∧ c.mem.readLE ((s.regs 4).toNat + 8 + bitsOff) 1 = 0 ∧
-      MemFrame s.mem c.mem (P.priv ++ [((s.regs 4).toNat - P.depth, (s.regs 4).toNat + 8),
+      MemFrame s.mem c.mem (P.priv ++ [((s.regs 4).toNat - P.depth, (s.regs 4).toNat),
         ((s.regs 4).toNat + 8 + bitsOff, (s.regs 4).toNat + 8 + bitsOff + 1)]) ∧
       c.regs 5 = s.regs 5 ∧
       ∀ c', c'.rip.toNat = c.mem.readLE (c.regs 4).toNat 8 → c'.regs 4 = c.regs 4 + 8 →
@@ -215,7 +238,7 @@ def GopanicRecoverContract (p : Janus.Amd64.Program) (addr : Nat) (P : PanicRunt
         ∃ k' d, Janus.Amd64.Program.Steps p c' k' d ∧ d.rip = BitVec.ofNat 64 resume ∧
           d.regs 4 = s.regs 4 + 8 ∧ d.regs 5 = s.regs 5 ∧ d.regs 14 = s.regs 14 ∧
           d.xmm 15 = 0 ∧ d.df = false ∧
-          MemFrame c'.mem d.mem (P.priv ++ [((s.regs 4).toNat - P.depth, (s.regs 4).toNat + 8)]) ∧
+          MemFrame c'.mem d.mem (P.priv ++ [((s.regs 4).toNat - P.depth, (s.regs 4).toNat)]) ∧
           P.Env d.mem ∧ P.Calm d.mem (s.regs 14).toNat
 
 theorem panicrangestate_panics (P : PanicRuntime) (s : State) :

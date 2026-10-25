@@ -28,18 +28,18 @@ func DeferInc(p *uint64, x uint64) uint64 {
 	return x
 }
 
-// RecoverSet returns x for x <= 10; for x > 10 it panics, and the deferred closure recovers the
-// panic and sets the named result to 7, so the call returns 7.
+// RecoverSet returns x for x <= 10; for x > 10 it panics with e (a non-nil interface value), and
+// the deferred closure recovers the panic and sets the named result to 7, so the call returns 7.
 //
 //go:noinline
-func RecoverSet(x uint64) (r uint64) {
+func RecoverSet(x uint64, e any) (r uint64) {
 	defer func() {
 		if recover() != nil {
 			r = 7
 		}
 	}()
 	if x > 10 {
-		panic(x)
+		panic(e)
 	}
 	return x
 }
