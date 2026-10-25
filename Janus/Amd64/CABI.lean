@@ -393,6 +393,86 @@ theorem argsAt_ints (s : State) : ∀ (k : Nat) (xs : List W64), k + xs.length �
       have := hr (i + 1) (by simp; omega)
       simpa [Nat.add_assoc, Nat.add_comm 1 i] using this
 
+/-- One 64-bit integer when `k < 6` integer registers are used (any SSE count and stack offset). -/
+theorem assign_int8' (k sse o : Nat) (hk : k < 6) (hs : sse ≤ 8) :
+    SysV.assign ⟨k, sse, o⟩ (.int 8 true) = (.direct [⟨0, 8, .gpr (argReg k)⟩], ⟨k + 1, sse, o⟩) := by
+  have hk1 : ¬ 6 < k + 1 := by omega
+  have hs1 : ¬ 8 < sse := by omega
+  simp [hs1, SysV.assign, SysV.classify, SysV.cls, SysV.scalarCls, CType.leaves, SysV.addLeaf,
+    SysV.mergeAt, SysV.merge, SysV.inMemory, SysV.regPieces, CType.size, hk1, argReg,
+    intArgRegs, SysV.intArgRegs]
+
+/-- One 64-bit integer when the six integer argument registers are used up: the next slot of
+the argument area. -/
+theorem assign_int8_stack (sse o : Nat) (ho : o % 8 = 0) :
+    SysV.assign ⟨6, sse, o⟩ (.int 8 true) = (.direct [⟨0, 8, .stack o⟩], ⟨6, sse, o + 8⟩) := by
+  have hr : (o + 7) / 8 * 8 = o := by omega
+  simp [SysV.assign, SysV.classify, SysV.cls, SysV.scalarCls, CType.leaves, SysV.addLeaf,
+    SysV.mergeAt, SysV.merge, SysV.inMemory, SysV.toStack, CType.size, CType.align,
+    CType.roundUp, hr]
+
+/-- Where the `i`-th of a run of 64-bit integer arguments goes, from `st`: the next integer
+argument registers while they last, then consecutive 8-byte slots of the argument area. -/
+def intLoc (st : SysV.Next) (i : Nat) : C.Loc :=
+  if st.gp + i < 6 then .gpr (argReg (st.gp + i)) else .stack (st.stack + 8 * (st.gp + i - 6))
+
+theorem intLoc_stack (st : SysV.Next) (i : Nat) (h : 6 ≤ st.gp + i) :
+    intLoc st i = .stack (st.stack + 8 * (st.gp + i - 6)) := by
+  simp only [intLoc, show ¬ st.gp + i < 6 by omega, ↓reduceIte]
+
+/-- Any number of 64-bit integer (or pointer) arguments: the classification and its state
+predicate, as one statement per argument. -/
+theorem argsAt_ints_gen (s : State) : ∀ (st : SysV.Next) (xs : List W64),
+    st.gp ≤ 6 → st.sse ≤ 8 → st.stack % 8 = 0 →
+    (ArgsAt s (xs.map fun _ => .int 8 true) (xs.map BitVec.toNat)
+        (SysV.assignAll st (xs.map fun _ => .int 8 true)).1 ↔
+      ∀ i (hi : i < xs.length), PieceAt s xs[i].toNat ⟨0, 8, intLoc st i⟩)
+  | st, [], _, _, _ => by simp [ArgsAt, SysV.assignAll]
+  | ⟨k, sse, o⟩, x :: xs, hk, hs, ho => by
+    by_cases h6 : k < 6
+    · simp only [List.map_cons, SysV.assignAll, assign_int8' k sse o h6 hs]
+      rw [argsAt_cons, argsAt_ints_gen s ⟨k + 1, sse, o⟩ xs (by simp; omega) hs ho]
+      simp only [ArgAt, PiecesAt, and_true]
+      constructor
+      · rintro ⟨h0, hr⟩ i hi
+        cases i with
+        | zero => simpa [intLoc, h6] using h0
+        | succ i =>
+          have := hr i (by simp at hi; omega)
+          simpa [intLoc, Nat.add_assoc, Nat.add_comm 1 i] using this
+      · intro hr
+        have h0 := hr 0 (by simp)
+        simp only [List.getElem_cons_zero, intLoc, Nat.add_zero, h6, ↓reduceIte] at h0
+        refine ⟨h0, fun i hi => ?_⟩
+        have := hr (i + 1) (by simp; omega)
+        simpa [intLoc, Nat.add_assoc, Nat.add_comm 1 i] using this
+    · have hk6 : k = 6 := by simp at hk; omega
+      subst hk6
+      simp only [List.map_cons, SysV.assignAll, assign_int8_stack sse o ho]
+      rw [argsAt_cons, argsAt_ints_gen s ⟨6, sse, o + 8⟩ xs (by simp) hs (by simp at ho ⊢; omega)]
+      simp only [ArgAt, PiecesAt, and_true]
+      constructor
+      · rintro ⟨h0, hr⟩ i hi
+        cases i with
+        | zero => simpa [intLoc] using h0
+        | succ i =>
+          have := hr i (by simp at hi; omega)
+          rw [intLoc_stack _ _ (by simp)] at this
+          rw [intLoc_stack _ _ (by simp)]
+          simp only [List.getElem_cons_succ]
+          have e : o + 8 + 8 * (6 + i - 6) = o + 8 * (6 + (i + 1) - 6) := by omega
+          simpa only [e] using this
+      · intro hr
+        have h0 := hr 0 (by simp)
+        simp only [List.getElem_cons_zero, intLoc] at h0
+        refine ⟨by simpa using h0, fun i hi => ?_⟩
+        have := hr (i + 1) (by simp; omega)
+        rw [intLoc_stack _ _ (by simp)] at this
+        rw [intLoc_stack _ _ (by simp)]
+        simp only [List.getElem_cons_succ] at this
+        have e : o + 8 + 8 * (6 + i - 6) = o + 8 * (6 + (i + 1) - 6) := by omega
+        simpa only [e] using this
+
 /-- The integer-register call `CCall` is the classified call of a non-variadic prototype of
 64-bit integer (or pointer) arguments whose result is not MEMORY. -/
 theorem cCallA_iff_cCall (ret : Option CType) (args : List W64) (h : args.length ≤ numArgRegs)
