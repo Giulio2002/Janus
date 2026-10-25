@@ -1,5 +1,6 @@
 import Janus.Contracts.Iface
 import Janus.Float.Spec
+import Janus.Arm64.FloatLemmas
 
 /-!
 # Contracts of the Go equality and typed-memory runtime (arm64)
@@ -359,5 +360,25 @@ theorem EqRet.intro {d nargs : Nat} {s s' : State} {P : (Nat → W64) → Prop}
   split
   · rename_i hi; rcases hi with rfl | rfl | rfl <;> simp [h18, h28, h29]
   · rfl
+
+end Janus.Contracts.Mem
+
+namespace Janus.Contracts.Mem
+
+open Janus Janus.Arm64 Janus.Float
+
+/-! ## Floating-point comparison (arm64) -/
+
+theorem typeOf_isNaN (f : Fmt) (x : Nat) : (FP.typeOf f x).isNaN = isNaN f x := by
+  unfold FP.typeOf isNaN; cases classify f x <;> rfl
+
+/-- `FCMP` with `FPCR = 0` sets `Z` exactly for Go's `==` (`feq`): not for a NaN, and for equal
+values (so for `+0` and `-0`). -/
+@[janus_exec, janus_post] theorem fpCompare_z (f : Fmt) (sig : Bool) (a b : Nat) :
+    (flagsOfNzcv (FP.fpCompare f 0 sig a b).1).z = feq f a b := by
+  simp only [FP.fpCompare, FP.unpack_ieee FP.IEEEMode.zero, typeOf_isNaN, feq]
+  cases isNaN f a <;> cases isNaN f b <;> simp [flagsOfNzcv]
+  split <;> simp_all
+  split <;> simp
 
 end Janus.Contracts.Mem

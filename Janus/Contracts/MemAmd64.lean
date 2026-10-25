@@ -268,3 +268,33 @@ theorem EqRet.intro {d nargs : Nat} {s s' : State} {P : (Nat → W64) → Prop}
     · rfl
 
 end Janus.Contracts.MemAmd64
+
+namespace Janus.Contracts.MemAmd64
+
+open Janus Janus.Amd64 Janus.Float Janus.Contracts.Mem
+
+/-! ## Floating-point comparison (amd64) -/
+
+/-- `SETE AL; SETNP CL; ANDL CX, AX` (the compiled `==` on floats after `UCOMISS`/`UCOMISD`):
+the low byte of the result is `ZF ∧ ¬PF`. -/
+@[janus64_exec, janus64_post] theorem sete_setnp_and (a b : W64) (P Q : Prop) [Decidable P] [Decidable Q] :
+    (BitVec.toNat (a &&& 18446744073709551360#64 ||| BitVec.setWidth 64 (if P then 1#8 else 0#8)) % 4294967296 &&&
+      BitVec.toNat (b &&& 18446744073709551360#64 ||| BitVec.setWidth 64 (if Q then 0#8 else 1#8)) % 4294967296) % 256 =
+    (decide P && !decide Q).toNat := by
+  rw [show (256:Nat) = 2^8 from rfl, Nat.and_mod_two_pow, Nat.mod_mod_of_dvd _ (by decide : 2^8 ∣ 4294967296),
+    Nat.mod_mod_of_dvd _ (by decide : 2^8 ∣ 4294967296), show (2:Nat)^8 = 256 from rfl,
+    IfaceAmd64.setcc_low_byte, IfaceAmd64.setcc_low_byte]
+  by_cases hp : P <;> by_cases hq : Q <;> simp [hp, hq]
+
+/-- `UCOMIS`/`COMIS` with Go's `MXCSR` controls: `ZF ∧ ¬PF` exactly for Go's `==` (`feq`). -/
+@[janus64_exec, janus64_post] theorem comis_feq (sig : Bool) (f : Fmt) (a b : Nat) :
+    (decide ((FP.comis sig f { rc := RM.rne, daz := false, ftz := false } a b).res / 4 % 2 = 1) &&
+      !decide ((FP.comis sig f { rc := RM.rne, daz := false, ftz := false } a b).res / 2 % 2 = 1)) =
+      feq f a b := by
+  have hv : ∀ x, FP.valOf f { rc := RM.rne, daz := false, ftz := false } x = valueOf f x := by
+    intro x; unfold FP.valOf FP.kindOf valueOf; cases h : classify f x <;> simp
+  simp only [FP.comis, FP.relation, hv, feq]
+  cases isNaN f a <;> cases isNaN f b <;> simp [FP.check]
+  cases (valueOf f a).eq (valueOf f b) <;> cases (valueOf f a).lt (valueOf f b) <;> simp
+
+end Janus.Contracts.MemAmd64
