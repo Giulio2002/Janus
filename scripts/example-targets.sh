@@ -50,6 +50,15 @@ case "$1" in
   # string min (examples/basic/zzconstructs2.go): runtime.strmin is executed, the comparison it
   # calls is a contract (Janus/Contracts/Cmpstring.lean, CmpstringAmd64.lean)
   MinStr) printf '%s\n' --contract runtime.cmpstring ;;
+  # the string and slice examples (examples/basic/zstr.go): Janus/Contracts/String.lean,
+  # Slice.lean (and the runtime functions proved to meet their contracts)
+  Concat) printf '%s\n' --contract runtime.concatstring2 ;;
+  ToBytes) printf '%s\n' --contract runtime.stringtoslicebyte ;;
+  FromBytes) printf '%s\n' --contract runtime.slicebytetostring ;;
+  AppendPoint) printf '%s\n' --contract runtime.growslice ;;
+  CopyNodes) printf '%s\n' --contract runtime.typedslicecopy ;;
+  WriteBarrier) printf '%s\n' --targets runtime.gcWriteBarrier2,runtime.gcWriteBarrier3,runtime.gcWriteBarrier4,runtime.gcWriteBarrier5,runtime.gcWriteBarrier6,runtime.gcWriteBarrier7,runtime.gcWriteBarrier8 \
+    --contract runtime.wbBufFlush ;;
   # the interface examples (examples/basic/iface.go): the Go 1.26 interface runtime entry points
   # they call (Janus/Contracts/Iface.lean, IfaceAmd64.lean; pinned to the runtime's code), and
   # the static itab the assertion and switch theorems name

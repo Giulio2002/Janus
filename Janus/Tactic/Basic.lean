@@ -791,6 +791,47 @@ theorem sub_flags_nv :
 
 end Flags
 
+
+/-! ### 32-bit signed compares (`CMP Wn, …` with `B.GE`/`B.LT`/`B.GT`/`B.LE`)
+
+Not in the simp sets (they would change existing proofs' normal forms); proofs pass them to
+`janus_run` or `simp` where they need them. -/
+
+private theorem subRes32' (x y : BitVec 32) :
+    (BitVec.ofNat 32 (x.toNat + (~~~y).toNat + true.toNat)).toNat =
+      (x.toNat + 4294967296 - y.toNat) % 4294967296 := by
+  simp only [BitVec.toNat_ofNat, BitVec.toNat_not, Bool.toNat_true]
+  have := y.isLt; congr 1; omega
+
+theorem toInt32_cond (x : BitVec 32) :
+    x.toInt = if x.toNat < 2147483648 then (x.toNat : Int) else (x.toNat : Int) - 4294967296 := by
+  rw [BitVec.toInt_eq_toNat_cond]; by_cases h : x.toNat < 2147483648
+  · rw [ite_eq_left_iff.mpr (fun h' => absurd (by omega) h'), ite_eq_left_iff.mpr (fun h' => absurd h h')]
+  · rw [ite_eq_right (by omega), ite_eq_right h]; rfl
+
+private theorem decide_beq_decide' (A B : Prop) [Decidable A] [Decidable B] :
+    (decide A == decide B) = decide (A ↔ B) := by
+  by_cases hA : A <;> by_cases hB : B <;> simp [hA, hB]
+
+/-- The signed condition of a 32-bit `CMP` (`N = V`: `GE`), as a comparison of the operands. -/
+theorem sub_flags_nv32 (x y : BitVec 32) :
+    ((addSub x y true).2.n == (addSub x y true).2.v) = decide (y.toInt ≤ x.toInt) := by
+  simp only [addSub, addWithCarry, ite_true, BitVec.msb_eq_decide]
+  rw [toInt32_cond (BitVec.ofNat 32 _), subRes32', toInt32_cond (~~~y), toInt32_cond x, toInt32_cond y]
+  have := x.isLt; have := y.isLt
+  simp only [Bool.toNat_true, BitVec.toNat_not, Nat.reducePow, Nat.reduceSub, decide_not]
+  rw [← decide_not, decide_beq_decide']
+  apply decide_eq_decide.mpr
+  by_cases h : y.toNat ≤ x.toNat
+  · rw [show x.toNat + 4294967296 - y.toNat = (x.toNat - y.toNat) + 4294967296 by omega, Nat.add_mod_right,
+      Nat.mod_eq_of_lt (by omega)]
+    split <;> split <;> split <;> split <;> omega
+  · rw [Nat.mod_eq_of_lt (by omega)]
+    split <;> split <;> split <;> split <;> omega
+
+theorem toInt32_of_lt (x : BitVec 32) (h : x.toNat < 2147483648) : x.toInt = (x.toNat : Int) := by
+  rw [toInt32_cond, if_pos h]
+
 /-- Generic evaluation of `conditionHolds` on a literal condition code (used when the flags
 do not come from a subtraction). -/
 @[janus_exec, janus_post] theorem conditionHolds_eq (cond : Nat) (f : Flags) :

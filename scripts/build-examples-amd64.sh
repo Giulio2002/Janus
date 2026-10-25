@@ -59,3 +59,6 @@ for f in $runtime_examples HashFKey EqFKey; do
   mapfile -t extract_args < <("$root/scripts/example-targets.sh" "$f")
   "$root/bin/janus" extract "$root/artifacts/examples-amd64" "$(example_symbol "$f")" "$root/artifacts/amd64/$f" "${extract_args[@]}"
 done
+# The write barrier's gcWriteBarrier1..8 verified against WbContract64 (examples/proofs-amd64/WriteBarrier).
+mapfile -t wb_args < <("$root/scripts/example-targets.sh" WriteBarrier)
+"$root/bin/janus" extract "$root/artifacts/examples-amd64" runtime.gcWriteBarrier1 "$root/artifacts/amd64/WriteBarrier" "${wb_args[@]}"

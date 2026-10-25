@@ -10,6 +10,8 @@ example_symbol() {
     EqFKey) echo 'type:.eq.example.com/basic.FKey' ;;
     # the runtime's equality, hashing and typed-memory functions, verified on their own
     Alg*|Mbar*) runtime_symbol "$1" ;;
+    # runtime functions proved to meet their contracts (Janus/Contracts/WriteBarrier.lean)
+    WriteBarrier) echo runtime.gcWriteBarrier1 ;;
     *) echo "example.com/basic.$1" ;;
   esac
 }

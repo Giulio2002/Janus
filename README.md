@@ -235,6 +235,10 @@ Go 1.26.0. Proofs:
 | `SumValues` | `for _, v := range m` sums the values, for **every** iteration order | ✓ | ✓ |
 | `CountKeys`, `LookupKey16` | `len(m)` (the number of keys); lookup with `[16]byte` keys (generic `mapaccess2`) | ✓ | ✓ |
 | `MapAccess1Small` | the machine code of `runtime.mapaccess1_fast64` itself meets its contract on small Swiss maps | ✓ | ✓ |
+| `Concat`, `ToBytes`, `FromBytes` | `a + b`, `[]byte(s)`, `string(b)` through the `concatstring2`, `stringtoslicebyte`, `slicebytetostring` contracts ([RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md), "Strings, slices and the write barrier") | ✓ | ✓ |
+| `SumRunes`, `RuneLen` | `for _, r := range s` (the sum of the runes) and `len([]rune(s))`, with Go's UTF-8 decoding; end to end, `runtime.decoderune` and `runtime.countrunes` proved from their code | ✓ | ✓ |
+| `AppendPoint`, `CopyNodes` | `append` to a `[]Point` (24-byte struct, `growslice`) and `copy` of `[]*Node` (`typedslicecopy`) | ✓ | ✓ |
+| `WriteBarrier` | the real `runtime.gcWriteBarrier1..8` meet the write-barrier contract when the P's buffer has room | ✓ | ✓ |
 | `Triangle` | an expression switch with `fallthrough` (a `.rodata` jump table): `n·(n+1)/2` for `n ≤ 8`, else `0` | ✓ | ✓ |
 | `GotoSum` | a loop built from labels and `goto`: `1 + … + n mod 2^64` | ✓ | ✓ |
 | `Find2D` | nested loops left by a labeled `break`: the first row-major index of `x` in a `3×3` array, or `9` | ✓ | ✓ |
@@ -484,7 +488,7 @@ leaves none.
 | [AMD64.md](docs/AMD64.md) | The x86-64 backend: model, ABI, proofs, gaps |
 | [FFI.md](docs/FFI.md) | Go calling C (cgo): the C ABIs, `CEnsures`, the cgo contract, the composition theorem |
 | [ABI0.md](docs/ABI0.md) | Go assembly: the ABI0 convention, `Ensures0`/`Summary0`, the ABI wrappers, direct ABI0 calls, re-entry on amd64 |
-| [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime functions as stated contracts (`janus extract --contract`): allocation, write barriers, dynamic calls, maps, cgo |
+| [RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md) | Runtime functions as stated contracts (`janus extract --contract`): allocation, strings, slices, write barriers, dynamic calls, maps, interfaces, cgo |
 | [ORACLE.md](docs/ORACLE.md), [ORACLE-SAIL.md](docs/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) | The differential oracles and their results |
 | [AUDIT.md](docs/AUDIT.md) | The red-team audit of `janus verify` and its fixes |
 
