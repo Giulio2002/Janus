@@ -68,4 +68,79 @@ theorem correctness (impl : List Segment) (d : Nat)
   · janus_run
     simp [beq_false_of_ne hl]
 
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+Code that meets the `Memequal` contract for every stack bound (`MemSat.memequalCode`, a byte loop,
+at `IfaceSat.A0`, reached from `runtime.memequal`'s address by a branch), an admissible return
+address and a call state comparing the 8-byte string `VAL` with itself through two headers:
+`correctness` applies, and `StrEq` returns `true`. -/
+
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceSat Janus.Contracts.IfaceModel
+  Janus.Contracts.MemSat
+
+def cAddr : Nat := Extracted.program.contractAddr "runtime.memequal"
+def tramp : Segment := { name := "tramp", base := cAddr, words := [branchWord cAddr A0] }
+def model0 : Segment := { name := "model", base := A0, words := memequalCode }
+def implAt : List Segment := [tramp, model0]
+
+theorem link_eq : Extracted.program.link implAt = (Extracted.program.link [tramp]).link [model0] := by
+  simp [Program.link, implAt]
+
+theorem model (d : Nat) : Memequal (Extracted.program.link implAt) cAddr d := by
+  have hA : Memequal (Extracted.program.link implAt) A0 d := by
+    rw [link_eq]
+    exact Summary.of_codeIn (codeIn_link _ model0 (by decide)) (memequal_impl d)
+  intro s hpc hpre
+  rw [link_eq] at hA ⊢
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s
+  janus_eval_nat hC : cAddr
+  simp only [hC] at hpc
+  subst hpc
+  janus_run until [A0]
+  obtain ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩ := hpre
+  exact hA _ rfl ⟨⟨⟨g1, g2, g3⟩, hcall, hgo⟩, i1, i2⟩
+
+def ret : Nat := wret
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+/-- The string `VAL` (8 bytes), twice. -/
+def p : BitVec 64 := BitVec.ofNat 64 VAL
+def l : BitVec 64 := 8#64
+
+def s0 : State :=
+  { regs := fun i => if i = 0 ∨ i = 2 then p else if i = 1 ∨ i = 3 then l
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := Janus.Contracts.EqHashModel.wmem }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [p, l, p, l] s0 :=
+  ⟨rfl, rfl, by
+    intro i h; simp at h
+    rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl⟩
+
+theorem hpre : pre 64 p l p l s0 := by
+  refine ⟨⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, by decide, ?_⟩,
+    ⟨by decide, by decide⟩, ⟨by decide, by decide⟩, ?_, ?_⟩ <;>
+    simp only [callerWindow, outside_cons, outside_nil, and_true] <;> decide
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (d ret : Nat) (s : State) (p1 l1 p2 l2 : BitVec 64),
+    Memequal (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.memequal") d ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [p1, l1, p2, l2] s ∧
+    pre d p1 l1 p2 l2 s :=
+  ⟨implAt, 64, ret, s0, p, l, p, l, model 64, hret, setup, hpre⟩
+
+/-- So the guarantee is reached: a string equals itself. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat % 256 = 1 := by
+  refine (correctness implAt 64 (model 64) p l p l ret hret s0 setup hpre).mono ?_
+  intro s' h
+  exact ⟨h.1, by rw [h.2]; simp⟩
+
+end Witness
+
 end Proof
