@@ -40,4 +40,12 @@ case "$1" in
   Classify) printf '%s\n' --contract runtime.interfaceSwitch --targets \
       'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher' ;;
   Equal) printf '%s\n' --contract runtime.efaceeq ;;
+  # the panic/defer/recover examples (examples/basic/rtpanic.go): PanicIf, IndexAt and LoadField
+  # need no extra arguments (they reach runtime.gopanic / runtime.panicBounds as panic stubs, or
+  # fault); DeferInc's open-coded closure is inferred. The heap-defer and recover functions leave
+  # the Go 1.26 panic runtime out as pinned contracts (Janus/Contracts/Panic.lean).
+  DeferLoop|DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
+  RecoverSet) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
+      --contract runtime.deferreturn --contract runtime.convT64 ;;
+  Counter) printf '%s\n' --contract runtime.newobject ;;
 esac

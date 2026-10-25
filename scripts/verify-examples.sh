@@ -26,6 +26,7 @@ set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
 all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimbs CopyWords SumSquares
      AtomicAdd AtomicMax CopyBlock ClearWords A64Equal64 A64IndexByte
      HashWith HashTwice MapSum DeferAdd AddF64 Dot3 F64ToU64 Abs
+     PanicIf DeferInc IndexAt LoadField
      NewPair MakeSlice AppendOne SetNext MallocFast
      Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
      Box AsHasher Classify Equal)
