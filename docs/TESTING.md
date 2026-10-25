@@ -11,20 +11,23 @@ instance check and kernel replay still runs with the same strength.
 |---|---|---|
 | arm64 examples | `scripts/verify-examples.sh [-j N] [Name …]` | the 20 arm64 example proofs and the WrongAdd demo, through `janus verify` |
 | amd64 examples | `scripts/verify-amd64-examples.sh [-j N]` | the 25 amd64 theorems |
-| all examples | `scripts/verify-all-examples.sh [-j N]` | both of the above in one pool, longest first |
-| soundness audit | `audit/run-all.sh [-j N]`, `audit/round{2,3,4,5,7}/run-round*.sh [-j N]`, `audit/round6/run-round6.sh` | every documented attack is rejected, every control verifies (round 7: the result cache) |
+| all examples | `scripts/verify-all-examples.sh [-j N] [--changed]` | the arm64, amd64 and assembly examples in one pool, longest first by measured time (`--changed`: development only, unchanged items skipped) |
+| soundness audit | `audit/run-rounds.sh [-j LANES]` (all of them as parallel lanes), or each: `audit/run-all.sh [-j N]`, `audit/round{2,3,4,5,7,8}/run-round*.sh [-j N]`, `audit/round6/run-round6.sh` | every documented attack is rejected, every control verifies (round 7: the result cache) |
 | Go tests | `go test -timeout 60m ./cmd/...` (`-short`: no Lake builds) | the CLI, the extractor, the verifier end to end, the cache collector |
 | JanusASL | `scripts/asl.sh prove` | the Arm-ASL equivalence theorems (39) and their axiom audit |
 | ASL build cache | `JanusASL/tools/test_asl_cache.sh [--e2e CACHE]` | the `ASL_CACHE` key ignores lakefile edits that cannot reach the ArmASL build and changes on every input that can (31 cases, seconds); with `--e2e`, a restore into a copy with an edited JanusASL lakefile leaves `lake build ArmASL` nothing to do (docs/ASL.md "Build cache") |
 
 `-j N` runs up to `N` independent rows/proofs at once (`scripts/lib/parallel.sh`); output is
 printed in the original order, and a failure in any block fails the run. The default is
-**bounded by memory, not cores**: `min(cores/4, (MemAvailable − 40 GiB)/20 GiB, 2)`, at least 1,
-and before each block starts `MemAvailable` is checked again (a block waits for a running one
-while less than 20 GiB is free above the 40 GiB headroom). `JANUS_JOBS` or `-j` override it;
-`-j 1` is the plain serial run. When `scripts/lib/memguard.sh` is loaded, every block runs under
-a cgroup memory limit of `$JANUS_JOB_MEM` (default 20G) that janus' own per-process limits nest
-in (see "Memory guard" below). `go test` uses the same formula as its `-parallel` default.
+**bounded by memory and cores**: `min(cores/6, (MemAvailable − 40 GiB)/10 GiB, 8)`, at least 1
+(8 on the 48-core development host, 1 on a 4-core 16 GiB CI runner), and before each block starts
+`MemAvailable` is checked again (a block waits for a running one while less than 10 GiB is free
+above the 40 GiB headroom). The 10 GiB per block is twice the largest measured verification
+(ClearWords, 4.8 GiB; a cold framework replay 3.0 GiB; "Measured peaks" below). `JANUS_JOBS` or
+`-j` override it; `-j 1` is the plain serial run. When `scripts/lib/memguard.sh` is loaded, every
+block runs under a cgroup memory limit of `$JANUS_JOB_MEM` (default 10G) that janus' own
+per-process limits nest in (see "Memory guard" below). `go test` uses the same formula for its
+number of test slots (see "Gate speed" below).
 
 Tools for measuring:
 
@@ -33,7 +36,218 @@ Tools for measuring:
   (cgroup `memory.peak`, the peak sum of the resident sets of all its processes, and the largest
   single process).
 
-## Where the time went (profile, before)
+## Gate speed (2026-10-25): profile, changes, before/after
+
+The merge gate and every agent's regression run are `go test ./cmd/...`,
+`scripts/verify-all-examples.sh` and the audit rounds, often run by several agents at once on the
+same host. Measured on the 48-core, 251 GB development host under the usual load of other agents
+(load average 35–60), `LEAN_NUM_THREADS=4`, Lean 4.34.1. Every number is one run; the host's load
+moves absolute times by ±30%, not the ratios.
+
+### Profile (before)
+
+**`go test`** (`go test -json`, per-test elapsed; `cold` = fresh test cache and no `.lake` in the
+checkout, `warm` = the same cache and checkout again, `-count=1`):
+
+| | cold | warm |
+|---|---:|---:|
+| wall | 1135 s | 954 s |
+| sequential (non-parallel) tests, one after the other | 722 s | 612 s |
+| parallel phase (at `-parallel 2`) | ~530 s | ~430 s |
+
+* **Most of the time was sequential.** A test that does not call `t.Parallel` runs alone, before
+  any parallel test starts. The sequential ones included the heaviest: `TestCacheGCConcurrentVerify`
+  (199–253 s), `TestForeignFrameworkWriteDetected` (168–185 s), `TestConcurrentVerify` (86–151 s),
+  `TestAmd64Blockers` (79 s cold: it built the checkout's framework), `TestR1FrameworkTamper`
+  (46–64 s), `TestRound6StatementNames`, the memguard tests. They were sequential because they
+  set environment variables (`t.Setenv`) or because they **damage or empty the shared test
+  cache**: the collector test ran `janus cache gc --max 0 --grace 0s` in a loop on
+  `~/.cache/janus-test` (removing every replay marker, trusted-compile and result entry, of this
+  run and of every other agent's run sharing that cache), the concurrency test deleted the
+  shared framework build's stamp and decoder module, and the foreign-write test appended to the
+  shared build's `Janus/Tools/Audit.olean`.
+* **Redundant framework replays.** The kernel replay of the whole framework (`leanchecker
+  Janus`, 15–40 s and ~3 GB each) ran again and again: the collector loop removed its markers as
+  soon as they were written, the early framework replay took no lock (six verifications started
+  together each ran their own: the 6–8 concurrent `leanchecker Janus` processes in
+  `~/.cache/janus-test/v1/run/replay-*`), and every `--unsafe-no-sandbox` verification replayed
+  the framework unconditionally (no replay cache without a sandbox): TestSandboxRecorded,
+  TestR1FrameworkTamper's four unsandboxed rows, TestForeignFrameworkWriteDetected's three runs.
+* **Low parallelism, random order.** `-parallel` defaulted to 2, and the testing package starts
+  released parallel tests in no particular order, so a 2–4 minute test could start last.
+
+**`scripts/verify-all-examples.sh`** (166 items) and the audit rounds: see the tables below.
+
+### Changes
+
+* **Framework replay verdict** (`cmd/janus/replaymark.go`; docs/SOUNDNESS.md "The framework replay
+  verdict"): one HMAC-authenticated verdict per (toolchain, framework pins), looked up before any
+  untrusted step; concurrent verifications of a new framework build replay it once (replay lock),
+  a verdict in use is protected from the collector (use lock), and it is read (never written)
+  without a sandbox. Every per-module replay marker is now HMAC-authenticated too. The proof's own
+  modules (`Extracted`, `JanusTrusted`, `Proof`, consumer and dependency modules) are never
+  covered by it.
+* **Consumer workspaces keep the framework base's lease** until they close (the
+  TestConsumerLakefileLean/TestVerifyBatch flake, below).
+* **Tests that damage or empty their cache get a private one** (`seededCache`, `seed_test.go`): a
+  copy of the test cache's framework build, accepted only if `framework.ready` holds for the copy
+  (sources byte-identical to the embedded framework, every module-data file and the auditor
+  hashing as stamped), plus the framework verdict, carried over only if its HMAC verifies under
+  the source cache's key (it is then re-recorded under the private cache's key). The copy lives
+  on disk under the test cache's `v1/tmp`, not in `/tmp`. The collector, concurrency and
+  foreign-write tests use it, so they no longer disturb anything else, and they are parallel.
+* **The test cache is seeded** in `TestMain` from the user's cache (`~/.cache/janus`, or
+  `$JANUS_TEST_SEED_CACHE`; `off` disables it) when that has a ready build of the same framework
+  and the test cache has none, with the same hash check and verdict rule.
+* **Every Lean test is parallel** except `TestUnshareFallbackSelect` (it sets `JANUS_SANDBOX` for
+  an in-process sandbox check; the verification half, `TestUnshareFallbackVerifies`, runs a janus
+  process and is parallel). Tests that needed an environment variable for janus now pass it to a
+  janus subprocess (`TestR1FrameworkTamper`: `JANUS_R1_MODE`; its rows are parallel subtests).
+* **Longest first** (`order_test.go`): every parallel test starts with `defer parallel(t)()`,
+  which waits for a slot of the package's own scheduler; a free slot goes to the waiting test
+  with the longest measured duration (`testDurations`). The number of slots is
+  `min(GOMAXPROCS/6, (MemAvailable − 40 GiB)/10 GiB, 8)` (8 here, 1 on a 4-core 16 GiB runner) or
+  `-parallel N`; testing's own limit is raised so that it does not bind first.
+
+No assertion was removed or relaxed. Added: `TestFrameworkVerdictKey`,
+`TestFrameworkVerdictAuthentic`, `TestModuleMarkerPlanted`, `TestFrameworkReplayOnce` (six
+concurrent verifications run `leanchecker Janus` once; a failing replay records nothing; a verdict
+in use survives `gc --max 0 --grace 0`), `TestSeedFramework`, `TestConsumerAuditorLease`, and a
+planted verdict (well-formed, MAC under another key) for the forged framework build in
+`TestR1ForgedFrameworkLemma`, which must still be rejected by the kernel replay.
+
+### go test, before / after
+
+| | before | after |
+|---|---:|---:|
+| cold (fresh test cache, no `.lake`, seeding off) | 1135 s | 671 s |
+| warm (`-count=1`, same cache and checkout) | 954 s | **202–212 s** (final run, all tests including the new ones: 202 s) |
+| sequential tests | 612–722 s | 10 s |
+
+After, the critical path is `TestCacheGCConcurrentVerify` (199 s warm), which the scheduler
+starts first; cold, the first ~4 minutes are the two framework builds (the checkout's and the
+cache's, which every Lean test needs).
+
+### The TestConsumerLakefileLean / TestVerifyBatch flake
+
+Both failed together now and then with `the auditor executable …/v1/framework/<key>/.lake/build/bin/janus-audit
+changed after it was built`, and each passed alone. Root cause: the consumer path
+(`verify --proof-root`, `verify-batch`) held the shared lock on the cached framework base only
+while preparing its workspace, but runs the base's compiled auditor much later. Any writer that
+took the exclusive lock in between (a rebuild for another target such as `janus blockers`' decoder,
+the repair of a damaged build, or the cache collector, all of which the old tests did on the
+shared test cache) could replace or remove the executable, and the (correct) check rejected the
+honest run. The workspace now holds the lease until `ws.close`; the check is unchanged.
+`TestConsumerAuditorLease` reproduces it deterministically: a writer repeatedly takes the
+exclusive lock and moves the auditor away and back while four consumer verifications run. Before
+the fix all four failed with exactly that message (12 s); after, all verify. `go test -count=5
+-parallel 4 -run 'TestConsumerLakefileLean$|TestVerifyBatch$|TestConsumerAuditorLease$'` passes
+(164 s).
+
+### Two more test-suite bugs
+
+* **Consumer workspaces shared across checkouts.** A consumer workspace family was keyed by the
+  framework's content hash and the package root only. Two byte-identical janus checkouts (agents'
+  worktrees sharing `~/.cache/janus-test`) therefore shared workspaces and seeded each other's
+  builds whenever the package root matched, and a package that switched to another checkout at
+  the same path reused the first checkout's workspace. This was not a soundness hole (the
+  dependency is still byte-compared with the verifier's framework, `compareFramework`, the
+  workspace's framework is copied from the content-keyed trusted base and pinned, and the report
+  records the checkout the package resolved), but it coupled worktrees. The family key now also
+  covers the framework's source and directory and the resolved janus dependency (type, checkout
+  directory, URL, revision). `TestConsumerTwoCheckouts` (two checkouts, one package path switching
+  between them, a second package) fails with the old key and passes with the new one. (The exact
+  path the M1 agent saw could not be reproduced with two copies of this tree sharing one test
+  cache; the cache-damaging tests that used to run on the shared test cache are the other way
+  worktrees interfered, and they now use private caches.)
+* **`TestR1FrameworkTamper` on a cold cache**: janus prints `Building the Janus framework (…)` before
+  the verdict when it builds the framework; the test now skips exactly those leading notices
+  (`withoutProgress`, unit-tested) and still requires `Invalid:` to be the first other line.
+
+### Example suite (`scripts/verify-all-examples.sh`, 166 items)
+
+Profile (before, fresh private cache, the default `-j 2`): **2800 s**. The per-item times (now
+printed for every item and kept in `artifacts/verify-all-examples.times`) are dominated by a few
+proofs: ClearWords 345 s, MallocFast 344 s, A64Crc32 209 s, Classify 167 s, then a long tail of
+10–65 s items. Peak memory per verification (`memoryGuard.peak` in every `verified.json`): at most
+3.9 GiB (ClearWords; MallocFast 3.7, the amd64 assembly items 3.5–3.6, Classify 2.6–3.0), so the
+old 20 GiB budget per job (and the cap of 2 jobs) left the host's memory and cores mostly idle.
+The examples' binaries and the framework are built once per run already (`JANUS_EXAMPLES_PREBUILT`),
+and every item uses the same janus cache, so the framework build and its replay happen once.
+A second, smaller waste: the further theorems of one proof file (the non-vacuity witnesses, Div's
+and Get's `panics`, F64ToU64's `exact`/`saturation`) ran one after the other, each compiling the
+same proof again (Classify: 3 x ~170 s).
+
+Changes:
+
+* default `-j`: `min(cores/6, (MemAvailable − 40 GiB)/10 GiB, 8)` with a 10 GiB slot limit
+  (`scripts/lib/parallel.sh`; 8 here, unchanged 1 on a CI runner);
+* the pool is ordered **longest first by the last run's measured times** (an item without a time
+  goes first; the built-in order before the first run);
+* the theorems of one proof file run up to two at once (`scripts/lib/theorems.sh`): each is the
+  same complete `janus verify` as before, the extra ones in a sibling copy of the extraction (so
+  that each run writes its own `verified.json`; the main directory keeps the correctness theorem's);
+* `--changed` (development only, never the gate): skips every item whose inputs (its extraction,
+  proof file and extraction arguments, the framework sources and the toolchain) are byte-identical
+  to its last passing run in this checkout (`artifacts/verify-all-examples.manifest`, written by
+  every run). The janus executable is deliberately not an input: after a change to `cmd/janus` the
+  result cache misses everywhere, while `--changed` re-verifies only the items whose extraction
+  changed; CI and the merge gate run the full suite. WrongAdd (the break demo) always runs.
+
+| run | before | after |
+|---|---:|---:|
+| fresh cache (framework built and replayed), first run (built-in order) | 2800 s (`-j 2`) | 1001 s (`-j 8`) |
+| fresh cache, with the measured order and two theorems at once | | **715 s** |
+| warm caches, result cache off (`JANUS_RESULT_CACHE=off`: a janus change) | 23–35 min (reported) | **552 s** |
+| nothing changed (result cache) | 12 s | 8 s |
+| `--changed`, nothing changed | | 8 s (4 s pool) |
+| `--changed`, one proof edited (Add made false) | | 61 s: Add re-verified (FAILED, as it must), WrongAdd, 165 skipped |
+
+On a fresh cache about 2–3 minutes of the 715 s are the framework build (every item waits for it)
+and its first replay; after that the critical path is the longest proof under an 8-wide load
+(Classify's pair, ClearWords, MallocFast: 390–430 s under the host's load of 50–60).
+
+### Audit rounds
+
+Profile (before; each script after the other, warm caches): `audit/run-all.sh` 270 s, round 2
+133 s, round 3 9 s, round 4 9 s, round 5 467 s, round 6 60 s, round 7 1233 s, round 8 781 s:
+**2962 s** (rounds 7 and 8 overlapped some of the measurements above, so they are high). Rounds 7
+and 8 are long because every attack row runs `janus verify --fresh` (deliberately the cold path:
+no result, trusted-compile or replay cache, so each row replays the whole framework), one after
+the other; round 7 also runs its cache attacks (`run-cache.sh`, a `--janus-root` copy with an
+edited framework that must be rebuilt). Every script also built janus and ran `lake build` again.
+
+Changes: `audit/run-rounds.sh [-j LANES] [round …]` builds janus, the checkout's framework and
+the example binaries once (`JANUS_AUDIT_BIN`, `JANUS_AUDIT_PREBUILT=1`, which the round scripts
+honour instead of building again) and runs `run-all.sh` and rounds 2–8 as parallel lanes,
+longest first (default `min(cores/12, (MemAvailable − 40 GiB)/20 GiB, 4)` lanes of `-j 2` rows);
+each lane's output is printed whole, and a lane that fails fails the run. The rounds are
+independent (each writes only its own `audit/<round>/work` and temporary caches). Inside rounds 7
+and 8, the `--fresh` rows run as parallel blocks after the fixtures are built (each on its own
+copy of the extraction it verifies when it writes a `verified.json`); the lists of rows are
+unchanged (compared mechanically). The `--fresh` rows still replay the framework every time.
+
+| | before | after |
+|---|---:|---:|
+| all audits (serial / `audit/run-rounds.sh`) | 2962 s | **983 s** (load average 70–77) |
+| longest lane (round 7, including `run-cache.sh`) | 1233 s | 981 s |
+
+### Fault injection (after the changes)
+
+On a scratch copy of the tree with its own warm cache (`JANUS_RESULT_CACHE=off`):
+
+| fault | result |
+|---|---|
+| control: `examples/proofs/Add.lean` | Verified; every framework module reused (verdict), the per-verification modules by their own markers |
+| wrong proof (`% 2 ^ 64` → `% 2 ^ 63` in Add's statement) | `Invalid: Lean rejected the proof … unsolved goals` |
+| the same, through `verify-all-examples.sh --changed` | Add re-verified and FAILED, run exit 1; the 165 unchanged items skipped |
+| framework source edit (a theorem appended to `Janus/GoABI.lean`, janus rebuilt) | framework rebuilt (new key), verdict miss: `leanchecker Janus` ran, 0 framework modules reused; the second run reused all 80 |
+| tampered verdict (one MAC byte flipped) | a miss: the framework was replayed again and the verdict re-recorded |
+| planted per-module markers (every marker overwritten in the pre-HMAC format) and the verdict deleted | every planted marker rejected: `leanchecker Janus` replayed the framework (40 s), Extracted/JanusTrusted/Proof replayed; `cached: none` |
+| planted, well-formed verdict (MAC under another key) for a framework olean carrying an unchecked `False` lemma (`TestR1ForgedFrameworkLemma`) | still `Stage: kernel replay … Janus.GoABI.forged`, and no verdict recorded |
+| tampered trusted-compile manifest, result entry, cache permissions | unchanged checks: `TestRound8TrustedManifestMAC`, `TestResultCache`, round 8 M1/C1 rows, round 7 cache rows, all passing |
+
+## Where the time went (earlier profile, before the 2026-10-24 changes)
 
 Measured on the 48-core, 251 GB development host while other agents were running (load average
 30–90); absolute numbers move with the load, the ratios do not.
@@ -292,9 +506,11 @@ worktree held 69 GB). Three changes bound them:
   `janus cache du` shows the usage. Soundness: docs/SOUNDNESS.md "Cache eviction".
 * **The Go test cache is on disk**: `$JANUS_TEST_CACHE_DIR`, else `~/.cache/janus-test`, else
   `/var/tmp/janus-test-cache-<uid>` (never `os.TempDir()`), separate from the user's cache and
-  bounded by the collector like it. To reuse a framework build, copy
-  `~/.cache/janus/v1/framework/<key>` and `<key>.ready` into it; `JANUS_TEST_ASL_SEED` seeds the
-  JanusASL build.
+  bounded by the collector like it. `TestMain` seeds it from `~/.cache/janus`
+  (`$JANUS_TEST_SEED_CACHE`) when that has a ready build of the same framework (hash-checked, see
+  "Gate speed"); `JANUS_TEST_ASL_SEED` seeds the JanusASL build.
+* **The ASL build cache is bounded** (`ASL_CACHE`, `asl_mod_cache.py gc`, run by `scripts/asl.sh`
+  after every publish with `ASL_CACHE_MAX`, default 15G; docs/ASL.md "Build cache", "Eviction").
 * **Oracle dumps are pruned** when a driver ends (`scripts/lib/artifacts.sh`, used by
   `scripts/oracle.sh`, `oracle-amd64.sh`, `oracle-sail.sh`, `asl.sh check`, `x86formal.sh check`
   and `audit/round5/model/run-model.sh`): summaries, reproductions and `mismatches.jsonl` stay,
@@ -407,15 +623,15 @@ of new systemd scopes, which would be siblings outside the outer limit. So the l
 
 ```
 script guard  (max(24G, MemAvailable − 40G))          memguard_self
-└─ parallel slot  (JANUS_JOB_MEM, 20G)               scripts/lib/parallel.sh par_run → memguard_run
-   └─ janus job  (JANUS_MEM_MAX, 24G → effective 20G) cmd/janus guardRun, one per lean/leanchecker/lake
+└─ parallel slot  (JANUS_JOB_MEM, 10G)               scripts/lib/parallel.sh par_run → memguard_run
+   └─ janus job  (JANUS_MEM_MAX, 24G → effective 10G) cmd/janus guardRun, one per lean/leanchecker/lake
 ```
 
 The effective limit of a job is the smallest `memory.max` on its path, and that is the one
 janus reports. A kill caused by an inner limit is reported by the inner guard, through janus's
 diagnostic. The outer guards see it only in their hierarchical `memory.events`, print "a nested
 guard killed one of its jobs", and return the command's own status. parallel.sh admits a new
-slot only while MemAvailable ≥ 40 GiB headroom + 20 GiB, so slots × slot limit stays within
+slot only while MemAvailable ≥ 40 GiB headroom + 10 GiB, so slots × slot limit stays within
 MemAvailable.
 
 Without a user systemd manager (or root) and without a delegated cgroup, both sides fall back to
@@ -521,5 +737,5 @@ The whole run (21 verifications, one at a time) peaked at 4.9 GiB in its script 
 | Table | 295 MiB | | |
 
 Every example is far below the 24 GiB default. The largest jobs are the ClearWords proof
-(4.8 GiB) and the cold framework replay (3.0 GiB), so the default leaves about 5x headroom. A 20G parallel slot holds a cold
+(4.8 GiB) and the cold framework replay (3.0 GiB), so the default leaves about 5x headroom. A 10G parallel slot holds a cold
 verify with room to spare.

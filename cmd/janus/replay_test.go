@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -275,10 +276,28 @@ func r1Package(t *testing.T, dep bool) string {
 // framework build is read-only (the write fails, so the false theorem does not even compile),
 // and without one the framework pins catch the change.
 func TestR1FrameworkTamper(t *testing.T) {
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bubblewrap not installed")
+	}
+	// Separate janus processes: the attack mode reaches the consumer lakefile through the
+	// environment (JANUS_R1_MODE), which a parallel test cannot set for its own process.
+	bin := buildJanusBinary(t)
+	runR1 := func(mode string, args ...string) (int, string, string) {
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(cacheEnv(testCacheDir()), "JANUS_R1_MODE="+mode)
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		code := 0
+		if err := cmd.Run(); err != nil {
+			code = 1
+			if ee, ok := err.(*exec.ExitError); ok {
+				code = ee.ExitCode()
+			}
+		}
+		return code, out.String(), errb.String()
 	}
 	add := mustExtract(t, "example.com/basic.Add")
 	cases := []struct {
@@ -301,31 +320,34 @@ func TestR1FrameworkTamper(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			defer parallel(t)()
 			pkg := r1Package(t, c.dep)
-			t.Setenv("JANUS_R1_MODE", c.mode)
 			args := append([]string{"verify", add, "--proof", filepath.Join(pkg, c.proof), "--proof-root", pkg, "--theorem", c.thm}, c.flags...)
-			code, out, stderr := runJanus(t, args...)
-			if code != 1 || out != "" || !strings.HasPrefix(stderr, "Invalid:") || !strings.Contains(stderr, "Stage: "+c.stage) || !strings.Contains(stderr, c.want) {
+			code, out, stderr := runR1(c.mode, args...)
+			// The verdict must be the first line after janus' own progress notices (a cold cache
+			// prints "Building the Janus framework ..." first; nothing else may precede it).
+			if code != 1 || out != "" || !strings.HasPrefix(withoutProgress(stderr), "Invalid:") || !strings.Contains(stderr, "Stage: "+c.stage) || !strings.Contains(stderr, c.want) {
 				t.Fatalf("got %d\n%s\n%s", code, out, stderr)
 			}
 		})
 	}
 	// The next verification of an honest proof in a tampered workspace starts from the trusted
 	// framework build again (the workspace copy is re-seeded when it differs from the pins).
-	pkg := r1Package(t, false)
-	t.Setenv("JANUS_R1_MODE", "ensures")
-	runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "R1/Plain.lean"), "--proof-root", pkg, "--theorem", "R1.Plain.claim", "--unsafe-no-sandbox")
-	t.Setenv("JANUS_R1_MODE", "")
-	if code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "R1/Plain.lean"), "--proof-root", pkg, "--theorem", "R1.Plain.claim"); code != 0 {
-		t.Fatalf("honest proof after a tampered run: %d\n%s\n%s", code, out, stderr)
-	}
+	t.Run("honest after tamper", func(t *testing.T) {
+		defer parallel(t)()
+		pkg := r1Package(t, false)
+		runR1("ensures", "verify", add, "--proof", filepath.Join(pkg, "R1/Plain.lean"), "--proof-root", pkg, "--theorem", "R1.Plain.claim", "--unsafe-no-sandbox")
+		if code, out, stderr := runR1("", "verify", add, "--proof", filepath.Join(pkg, "R1/Plain.lean"), "--proof-root", pkg, "--theorem", "R1.Plain.claim"); code != 0 {
+			t.Fatalf("honest proof after a tampered run: %d\n%s\n%s", code, out, stderr)
+		}
+	})
 }
 
 // TestR1ForgedFrameworkLemma: a framework olean (in a --janus-root copy, whose pins are taken
 // from that build) carrying a lemma the kernel never checked is caught by the kernel replay of
 // the framework module.
 func TestR1ForgedFrameworkLemma(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	root := filepath.Join(t.TempDir(), "janus")
@@ -354,9 +376,32 @@ func TestR1ForgedFrameworkLemma(t *testing.T) {
 		t.Fatalf("forging: %v\n%s", err, out)
 	}
 	add := mustExtract(t, "example.com/basic.Add")
-	code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(repoRoot, "audit", "attacks", "R1_forged_proof.lean"), "--janus-root", root)
-	if code != 1 || out != "" || !strings.Contains(stderr, "Stage: kernel replay") || !strings.Contains(stderr, "Janus.GoABI.forged") {
-		t.Fatalf("got %d\n%s\n%s", code, out, stderr)
+	// A planted framework replay verdict for exactly the forged build's bytes must not make it
+	// count as replayed: a well-formed one whose MAC was made under another key (another cache's;
+	// TestFrameworkVerdictAuthentic covers the other forgeries). It is a miss, and the kernel
+	// replay runs.
+	fwd, err := loadFramework(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tc, err := findToolchain(lake, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged, err := frameworkPins(filepath.Join(root, ".lake", "build", "lib", "lean"), fwd.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := frameworkVerdictKey(tc.cacheID(), forged)
+	for _, plant := range []string{markerHeader + markerMAC([]byte(strings.Repeat("x", 32)), "framework", k) + "\nleanchecker Janus passed\n"} {
+		writeBytes(t, frameworkVerdictPath(k), []byte(plant))
+		code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(repoRoot, "audit", "attacks", "R1_forged_proof.lean"), "--janus-root", root)
+		if code != 1 || out != "" || !strings.Contains(stderr, "Stage: kernel replay") || !strings.Contains(stderr, "Janus.GoABI.forged") {
+			t.Fatalf("planted verdict %q: got %d\n%s\n%s", plant[:20], code, out, stderr)
+		}
+	}
+	if hasFrameworkVerdict(k) {
+		t.Error("a verdict was recorded for the forged framework build")
 	}
 }
 
@@ -367,5 +412,32 @@ func TestReplayTargets(t *testing.T) {
 	}
 	if strings.Join(covers["Janus"], ",") != "Janus,Janus.Arm64.State,Janus.GoABI" || strings.Join(covers["Proof"], ",") != "Proof,Proof.Lemmas" {
 		t.Fatalf("covers %v", covers)
+	}
+}
+
+// withoutProgress is stderr without the progress notices janus prints before its verdict (the
+// framework build notices of framework.go), which only lead the output; anything else is kept.
+func withoutProgress(stderr string) string {
+	for {
+		line, rest, _ := strings.Cut(stderr, "\n")
+		if !strings.HasPrefix(line, "Building the Janus framework (") && !strings.HasPrefix(line, "Building the Janus framework from scratch (--fresh)") {
+			return stderr
+		}
+		stderr = rest
+	}
+}
+
+func TestWithoutProgress(t *testing.T) {
+	notice := "Building the Janus framework (embedded, 4dbeaaaf7893) in /c/v1/framework/x; this happens once per framework version.\n"
+	for in, want := range map[string]string{
+		"Invalid: x\n":                           "Invalid: x\n",
+		notice + "Invalid: x\n":                  "Invalid: x\n",
+		notice + notice + "Invalid: x\n":         "Invalid: x\n",
+		"warning: y\n" + notice + "Invalid: x\n": "warning: y\n" + notice + "Invalid: x\n",
+		notice + "warning: y\nInvalid: x\n":      "warning: y\nInvalid: x\n",
+	} {
+		if got := withoutProgress(in); got != want {
+			t.Errorf("withoutProgress(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

@@ -279,8 +279,9 @@ type replayPlan struct {
 	done    map[string]bool // replayed and passed in this run
 }
 
-// replayCacheDir holds one empty marker per passing replay, named by its key. It lives in the
-// cache, which sandboxed processes see read-only.
+// replayCacheDir holds one marker per passing replay, named by its key and authenticated by an
+// HMAC under the cache's hidden key (replaymark.go). It lives in the cache, which sandboxed
+// processes see read-only.
 func replayCacheDir() string { return filepath.Join(cacheRoot(), "v1", "replay") }
 
 // planReplay computes the cache keys of the non-core modules in resolved (module -> olean
@@ -344,7 +345,7 @@ func planReplay(resolved map[string]string, graph map[string][]string, toolchain
 	}
 	for _, m := range p.modules {
 		if useCache {
-			if mk := filepath.Join(replayCacheDir(), p.keys[m][:2], p.keys[m]); fileExists(mk) {
+			if mk := moduleMarkerPath(p.keys[m]); markerOK(mk, "module", p.keys[m]) {
 				touchHit(mk)
 				p.cached = append(p.cached, m)
 				continue
@@ -362,10 +363,7 @@ func (p *replayPlan) record(mods []string) {
 	}
 	for _, m := range mods {
 		k := p.keys[m]
-		d := filepath.Join(replayCacheDir(), k[:2])
-		if os.MkdirAll(d, 0o755) == nil {
-			_ = os.WriteFile(filepath.Join(d, k), []byte(m+"\n"), 0o644)
-		}
+		writeMarker(moduleMarkerPath(k), "module", k, m)
 	}
 }
 
@@ -512,16 +510,7 @@ func (p *replayPlan) lockTarget(mods []string) func() {
 	for _, m := range mods {
 		fmt.Fprintf(h, "%s %s\n", m, p.keys[m])
 	}
-	k := hex.EncodeToString(h.Sum(nil))
-	d := filepath.Join(replayCacheDir(), "locks")
-	if os.MkdirAll(d, 0o755) != nil {
-		return func() {}
-	}
-	lk, err := lockFile(filepath.Join(d, k[:32]+".lock"), true)
-	if err != nil {
-		return func() {}
-	}
-	return lk.unlock
+	return lockReplayKey(hex.EncodeToString(h.Sum(nil)))
 }
 
 // allCachedNow reports whether every module of mods has a passing replay in the cache now
@@ -532,7 +521,7 @@ func (p *replayPlan) allCachedNow(mods []string) bool {
 	}
 	for _, m := range mods {
 		k := p.keys[m]
-		if _, err := os.Stat(filepath.Join(replayCacheDir(), k[:2], k)); err != nil {
+		if !markerOK(moduleMarkerPath(k), "module", k) {
 			return false
 		}
 	}
@@ -545,7 +534,7 @@ func (p *replayPlan) replayFresh(checker string, run func(argv ...string) (strin
 	k := "fresh-" + p.keys[m]
 	marker := filepath.Join(replayCacheDir(), k[6:8], k)
 	if p.cacheOn {
-		if fileExists(marker) {
+		if markerOK(marker, "fresh", k) {
 			touchHit(marker)
 			return "", nil
 		}
@@ -553,8 +542,8 @@ func (p *replayPlan) replayFresh(checker string, run func(argv ...string) (strin
 	if out, err := run(checker, "--fresh", m); err != nil {
 		return out, err
 	}
-	if p.cacheOn && os.MkdirAll(filepath.Dir(marker), 0o755) == nil {
-		_ = os.WriteFile(marker, []byte(m+" --fresh\n"), 0o644)
+	if p.cacheOn {
+		writeMarker(marker, "fresh", k, m+" --fresh")
 	}
 	return "", nil
 }
