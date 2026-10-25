@@ -226,6 +226,27 @@ and must not be read as "the architecture says so":
 None of these can hide a Janus soundness bug as an "agree". They only produce `model-gap`
 or MISMATCH noise between qemu and Sail, or `error` cases, which are excluded.
 
+## Results with the exclusive monitor (2026-10-25, 789,635 cases)
+
+The full qemu corpus of `scripts/oracle.sh full` after the store-exclusives were modelled
+(including the 20,000 `gen/seq.excl` blocks and the 1,752 cases of the harvested LL/SC loops, run
+in sequence mode by the driver), Janus with `--monitor-stub`:
+
+| pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
+|---|---:|---:|---:|---:|---:|
+| Sail (hw) vs Janus (model) | 755,121 | **0** | 34,501 | 13 | 0 |
+| qemu (hw) vs Sail (model) | 773,667 | 14,837 | 1,118 | 1 | 12 |
+| qemu (hw) vs Janus (model) | 749,746 | **0** | 39,888 | 1 | 0 |
+
+`soundness.jsonl` is empty. The exclusive classes, Janus vs Sail: `gen/seq.excl` 19,369 agree
+(17,329 of them with an alternative, i.e. a passing, outcome) and 631 model-gaps
+(`unpredictable` and `unaligned`); `harvest/seq.excl` 1,752 agree (all through the passing
+outcome); `gen/ls.excl` 3,823 agree, 177 model-gaps; `harvest/ls.excl` 1,938 agree, 120
+model-gaps. The 11,696 qemu-vs-Sail MISMATCHes of the exclusive classes are the
+`sail-monitor-stub` cases: qemu fails a store-exclusive with the monitor open, as the Arm ARM
+requires, and the stub passes it. Janus agrees with both: with qemu on the failure (no
+`--monitor-stub`), with Sail on the pass (`--monitor-stub`).
+
 ## Results with scalar floating point (2026-10-24, 1,131,099 cases)
 
 The floating-point corpus of `docs/ORACLE.md` (`scripts/oracle.sh fp`, then
