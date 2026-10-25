@@ -55,7 +55,7 @@ example : decode [0xf2, 0x0f, 0x58, 0xc1] = some (.sseArith .add 64 0 (.xmm 1), 
 example : decode [0x66, 0x0f, 0x2e, 0xc8] = some (.sseComi false 64 1 (.xmm 0), 4) := by decide
 example : decode [0xf2, 0x48, 0x0f, 0x2c, 0xc8] = some (.cvtf2si true 64 64 1 (.xmm 0), 5) := by decide
 example : decode [0x66, 0x0f, 0x3a, 0x0b, 0xc8, 0x01] = some (.sseRound 64 1 (.xmm 0) 1, 6) := by decide
-example : decode [0x66, 0x0f, 0x58, 0xc1] = none := by decide                     -- addpd (packed: rejected)
+example : decode [0x66, 0x0f, 0x58, 0xc1] = some (.sse (.fpArith .add 64 0 (.xmm 1)), 4) := by decide  -- addpd (WP-D)
 example : (FP.binop .add binary64 (FP.ctl 0x1F80) 0x3FF0000000000000 0x4000000000000000).res =
     0x4008000000000000 := by decide +kernel
 -- 0 × ∞ is the indefinite with IE; MINSD returns the second operand when one is a NaN

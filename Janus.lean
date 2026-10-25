@@ -22,6 +22,8 @@ import Janus.Arm64.Vector
 import Janus.Spec.Basic
 import Janus.Contracts.Alloc
 import Janus.Contracts.AllocAmd64
+import Janus.Contracts.AllocSat
+import Janus.Contracts.AllocSatAmd64
 import Janus.Spec.Dynamic
 import Janus.Tactic.Dynamic
 import Janus.Spec.Map
@@ -40,4 +42,5 @@ import Janus.Contracts.IfaceAmd64
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat
 import Janus.Contracts.IfaceSatAmd64
+import Janus.Spec.CRC32C
 import Janus.Tactic.ABI0

@@ -11,9 +11,10 @@ proofs.
 | instruction AST | `Janus/Amd64/Instr.lean` |
 | decoder (bytes → instruction, length) | `Janus/Amd64/Decode.lean` |
 | semantics | `Janus/Amd64/Exec.lean` |
+| SSE packed instructions (WP-D): AST, decoder, semantics | `Janus/Amd64/InstrSSE.lean`, `Janus/Amd64/DecodeSSE.lean` (hook in `Decode.decodeLegacy`), `Janus/Amd64/ExecSSE.lean` (hook `Instr.sse` in `exec`) |
 | programs, runner, run lemmas | `Janus/Amd64/Program.lean`, `Janus/Amd64/Run.lean` |
 | Go ABIInternal on amd64, specs | `Janus/Amd64/GoABI.lean` |
-| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies) |
+| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas) |
 | extractor | `cmd/janus/amd64.go` (plus small dispatch edits) |
 | differential oracle | `oracle-amd64/`, `Oracle/Amd64Main.lean`, `docs/ORACLE-AMD64.md` |
 | tests | `JanusTests/Amd64.lean`, `cmd/janus/amd64_test.go` |
@@ -98,11 +99,28 @@ read-modify-write forms, `XADD` and `CMPXCHG` (memory destination, locked or not
 (32 and 64 bits), `MOVBE` (16/32/64 bits, load and store), the 48 scalar FMA3 forms
 `VF{,N}M{ADD,SUB}{132,213,231}{SD,SS}` (single rounding on the IEEE core, `FP.fma`) and SSSE3
 `PSHUFB`/`PSIGNB` on `XMM`. With them every Go-compiled function of the `GOAMD64=v3` std test
-binaries decodes (`docs/COVERAGE.md`). `ADCX` and `ADOX` are not modelled. In the `sync/atomic`, `bytes`
+binaries decodes (`docs/COVERAGE.md`).
+
+**SSE packed instructions (WP-D)**, legacy-encoded on `XMM` (`Janus/Amd64/{InstrSSE,DecodeSSE,
+ExecSSE}.lean`): SSE2 integer `PADDB/W/D/Q PSUBB/W/D/Q PADDS/PADDUS/PSUBS/PSUBUS B/W PMULLW
+PMULHW PMULHUW PMULUDQ PMADDWD PCMPEQW/D PCMPGTB/W/D PANDN PUNPCKL/H BW/WD/DQ/QDQ PACKSSWB
+PACKSSDW PACKUSWB PMINUB PMAXUB PMINSW PMAXSW PSADBW PAVGB/W`, the shifts `PSLLW/D/Q PSRLW/D/Q
+PSRAW/D` by `imm8` and by `xmm/m128` and `PSLLDQ`/`PSRLDQ`, `PSHUFHW`, `PINSRW`, `PEXTRW`; the
+packed floating point `ADD SUB MUL DIV MIN MAX SQRT PS/PD`, `CMPPS/PD` (predicates 0–7),
+`SHUFPS/PD`, `UNPCKL/H PS/PD`, `MOVLHPS MOVHLPS MOVLPS/PD MOVHPS/PD`, `MOVMSKPS/PD`,
+`CVTDQ2PS CVTPS2DQ CVTTPS2DQ CVTDQ2PD CVTPD2DQ CVTTPD2DQ CVTPS2PD CVTPD2PS`; the stores and
+loads `MOVNTDQ MOVNTPS MOVNTPD MOVNTI MOVNTDQA LDDQU`; SSE3 `MOVDDUP MOVSLDUP MOVSHDUP HADDPS/PD
+HSUBPS/PD ADDSUBPS/PD`; SSSE3 `PHADDW/D/SW PHSUBW/D/SW PMADDUBSW PMULHRSW PSIGNW/D PABSB/W/D
+PALIGNR` (with the existing `PSHUFB`/`PSIGNB`); SSE4.1 `PINSRB/D/Q PEXTRB/W/D/Q EXTRACTPS INSERTPS
+PBLENDW BLENDPS/PD PBLENDVB BLENDVPS/PD PMOVSX/PMOVZX (all six widths each) PMULLD PMULDQ PTEST
+PCMPEQQ PACKUSDW PMINSB/SD/UW/UD PMAXSB/SD/UW/UD PHMINPOSUW MPSADBW ROUNDPS/PD`; SSE4.2 `CRC32`
+(`r/m8/16/32/64` into `r32/r64`), `PCMPGTQ` and the string compares `PCMPESTRI PCMPESTRM
+PCMPISTRI PCMPISTRM` (every `imm8` mode with bit 7 clear). With them every SSE-family blocker of
+the std assembly and of gcc/clang `-O2`/`-O3` C is gone (`docs/COVERAGE.md`). `ADCX` and `ADOX` are not modelled. In the `sync/atomic`, `bytes`
 and `strings` test binaries 97.9–98.1% of the Go-compiled functions and 53% of the assembly
 functions decode completely (`docs/ORACLE-AMD64.md`); with the SSE scalar floating point
 (`UCOMISD`, `CVT*`, arithmetic, `ROUNDSD`) now modelled, what is left is `SYSCALL`,
-AES/SHA/CRC32, AVX-512 and `PCMPESTRI` (scalar FMA is modelled since WP-B).
+AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` since WP-D).
 
 **Semantics** follow the SDM *Operation* and *Flags Affected* sections:
 
@@ -166,6 +184,28 @@ AES/SHA/CRC32, AVX-512 and `PCMPESTRI` (scalar FMA is modelled since WP-B).
   the state such a claim holds only for `df = false` states, and
   `JanusTests.Amd64.df_backward_not_forward` checks that from `df = true` the copy goes
   backward. The native oracle sets `DF` in a quarter of its cases and compares it.
+* **SSE packed (WP-D).** Each operation is the SDM `Operation` over elements (`ExecSSE`, using
+  the arm64 element accessors `elem`/`ofElems`/`sint`/`truncInt` of `Janus.Arm64.Vector`).
+  Saturating forms clamp the exact integer; shifts by `imm8` or by the low quadword of an
+  `xmm/m128` count give 0 (logical) or the sign fill (arithmetic) for counts at or above the
+  element width. Packed floating point applies the scalar `Janus.Amd64.FP` operation to every
+  element under the same `MXCSR`: the exception flags of all elements are ORed, and if any
+  element raises an exception unmasked in `MXCSR` the instruction faults (`simdFPException`)
+  without writing (SDM Vol. 1 §11.5.2). The SSE4.2 string compares follow SDM Vol. 2 §4.1:
+  explicit lengths are `|EAX|`/`|EDX|` (`RAX`/`RDX` with `REX.W`) saturated to 16 or 8, implicit
+  ones the first null element; `IntRes1` by aggregation, `IntRes2` by polarity (masked negation
+  only for the valid elements of the second operand), the index in `ECX` (zero-extended) or the
+  mask in `XMM0`, `CF ZF SF OF` as documented and `AF PF` cleared. `CRC32` is the bit-serial
+  CRC-32C update of the low 32 bits of the destination, zero-extended
+  (`Janus.Spec.CRC32C.crc32c_eq_update` proves it equal to the bytewise textbook CRC-32C).
+  128-bit legacy-SSE memory operands must be 16-aligned (`misaligned`) except for the four string
+  compares, which do not check alignment; narrower ones (`m64`, the `PMOVSX` sources, `PINSR*`,
+  `INSERTPS m32`) are never checked. The decoder rejects the MMX forms, the register forms of
+  memory-only moves and vice versa, reserved group members and immediate bits (`CMPPS/PD
+  imm8 ≥ 8`, `ROUNDPS/PD imm8 ≥ 16`, `PCMPxSTRx imm8<7>`), `66` together with `F2`/`F3` (except
+  the 16-bit `CRC32`), and the instructions whose result is implementation-specific (`RCPPS`,
+  `RSQRTPS`) or not modelled (`MASKMOVDQU`, whose fault behaviour on masked-off bytes is
+  implementation-specific; `DPPS`/`DPPD`, which no compiler emits at `-O2`/`-O3`; `LDMXCSR`).
 * **CPU-feature globals.** `runtime.memmove` reads `runtime.memmoveBits` and
   `runtime.memclrNoHeapPointers` reads `internal/cpu.X86.HasERMS`/`HasAVX2`, which Go sets at
   start-up from `CPUID`. They live in `.noptrbss`, so the extractor does not copy them; a
@@ -432,6 +472,20 @@ a hard-coded address (see *Layout independence* above), so adding functions to
 | `DeferAdd` | `r = x` with an open-coded `defer` of a closure adding `y` to `r`: returns `[x + y]` |
 | `CopyBlock512` | `copy(dst[:], src[:])` of `[64]uint64` (512 bytes) through `runtime.memmove`'s **AVX path** (`VMOVDQU` loads, 32-aligned `VMOVDQA` stores, `VZEROUPPER`), for every alignment of `dst`, disjoint arrays, given `memmoveBits & 1 = 1`: the 512 bytes at `dst` equal the old ones at `src`. (256 bytes or fewer never reach the AVX path: `memmove` copies them with SSE.) |
 
+Two are about `artifacts/examples-amd64-sse`: `examples/basic/sse` (Go functions calling small
+SSE Go assembly functions, ABI0, called directly with their arguments on the stack), built
+`GOAMD64=v1` into a binary of its own.
+
+| function | theorem |
+|---|---|
+| `Index32` | the index of the first byte of `*p` (`[32]byte`) equal to `c`, 32 if none (`firstIdx`): `PUNPCKLBW`/`PSHUFLW`/`PUNPCKLQDQ` broadcast, two `PCMPEQB`/`PMOVMSKB` masks, `BTSQ` sentinel, `BSFQ` |
+| `CRC32C16` | `^crc32cBlock(^crc, p)` with two `CRC32Q`: returns `Janus.Spec.CRC32C.checksum crc p[0..15]`, the bytewise textbook CRC-32C of `hash/crc32.Update(crc, MakeTable(Castagnoli), p[:])` |
+
+The cgo examples `CSum32` (the clang `-O2` SSE2-vectorised loop: two `PADDD` accumulators,
+`PSHUFD`/`PADDD` fold, scalar tail) and `GoSum32` (Go → cgo → that loop → Go, under the trusted
+`CgoCall`) are in `examples/proofs-cgo/amd64` (`scripts/verify-cgo-examples.sh`, binary
+`artifacts/examples-cgo-clang-amd64`, built with `CC=clang`).
+
 Three more are about `artifacts/examples-amd64-v3`: `examples/basic/v3` built with
 `GOAMD64=v3` into a binary of its own (so the v1 binary above does not change), extracted by the
 same script.
@@ -449,9 +503,13 @@ same script.
   panics unwinding through defers and non-open-coded defers (`runtime.deferproc*`) are not
   supported; see docs/RUNTIME-CONTRACTS.md.
 
-* 8/16-bit `RCL`/`RCR`, `MULX`, `ADCX`/`ADOX`, VEX instructions other than the eleven above,
-  EVEX (AVX-512), `CMPS`/`SCAS`/`LODS`, `PCMPESTRI`, AES/SHA/CRC32, `GS`-relative accesses and
-  floating point beyond the SSE scalar instructions are not modelled. Their encodings fault.
+* 8/16-bit `RCL`/`RCR`, `ADCX`/`ADOX`, VEX instructions other than those above (AVX/AVX2
+  arithmetic, WP-F), EVEX (AVX-512), `CMPS`/`SCAS`/`LODS`, AES-NI/`PCLMULQDQ`/SHA-NI (WP-E),
+  `DPPS`/`DPPD`, `RCPPS`/`RSQRTPS`, `MASKMOVDQU`, x87, MMX and `GS`-relative accesses are not
+  modelled. Their encodings fault.
+* `janus64_run` keeps the packed operations folded (`pintOp (.add 32) x y`, `pshufdNat`, ...) and
+  evaluates elements with `elem_pintOp_add` etc.; `ExecSSE.crc32c` is irreducible for the
+  elaborator (`TacticSSE`), proofs go through `Janus.Spec.CRC32C`.
 * Proofs whose loop invariants describe intermediate states and step a string instruction must
   carry `t.df = false` in the invariant (`Reaches.repStos`/`repMovs` take it as `hdf`), as
   `examples/proofs-amd64/ClearWords`' `Inv` does.
