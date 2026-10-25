@@ -35,4 +35,7 @@ case "$1" in
   LookupKey16) printf '%s\n' --contract runtime.mapaccess2 ;;
   NewMap) printf '%s\n' --contract runtime.makemap_small ;;
   ClearMap) printf '%s\n' --contract runtime.mapclear ;;
+  # string min (examples/basic/zzconstructs2.go): runtime.strmin is executed, the comparison it
+  # calls is a contract (Janus/Contracts/Cmpstring.lean, CmpstringAmd64.lean)
+  MinStr) printf '%s\n' --contract runtime.cmpstring ;;
 esac

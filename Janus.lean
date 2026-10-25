@@ -29,6 +29,10 @@ import Janus.Tactic.Dynamic
 import Janus.Spec.Map
 import Janus.Spec.SwissMap
 import Janus.Contracts.Map
+import Janus.Contracts.Cmpstring
+import Janus.Contracts.CmpstringSat
+import Janus.Contracts.CmpstringAmd64
+import Janus.Contracts.CmpstringSatAmd64
 import Janus.Amd64
 import Janus.Contracts.MapAmd64
 import Janus.Tactic.ABI0
