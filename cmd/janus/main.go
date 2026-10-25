@@ -165,6 +165,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "Error: unknown command %q\n%s", args[0], usage)
 		return 1
 	}
+	if args[0] == "verify" || args[0] == "blockers" {
+		// Keep the cache within its budget (cachegc.go); never changes the outcome.
+		autoCollect(stderr)
+	}
 	if err != nil {
 		// A Lean job killed by the memory guard explains any failure it caused.
 		if _, _, kill := memSince(mark); kill != nil {
@@ -250,6 +254,7 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "Extracted %s: %d function(s), %d %s, %d stub(s), %d data object(s) (%d bytes) into %s\n",
 		x.Entry.Name, len(x.Segments), words, unit, len(x.Stubs), len(x.Data), dataBytes, displayPath(filepath.Join(outdir, "Extracted.lean")))
+	printEntryABI(stdout, id.EntryABI, id.EntrySource, x.Bin.GOARCH)
 	for _, s := range x.Segments {
 		if x.Bin.GOARCH == "amd64" {
 			fmt.Fprintf(stdout, "  code  0x%x %4d bytes  %s\n", s.Base, len(s.Bytes), s.Name)

@@ -321,6 +321,7 @@ func (b *Binary) lookup(sym string) (Func, error) {
 		if len(near) > 0 {
 			msg += "\n  Similar: " + strings.Join(near, ", ")
 		}
+		msg += abi0Hint(b, sym)
 		return Func{}, &diag{Msg: msg, Stage: "function selection",
 			Next: "Run janus list on the binary and copy the exact symbol name. Unused functions are removed by the linker; keep them alive from main."}
 	default:

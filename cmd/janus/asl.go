@@ -241,6 +241,15 @@ type aslBuild struct {
 	Dir  string
 	Libs []string // the package's lib dir (JanusASL.*, ArmASL*) and lean-sail's (Sail*)
 	pins []*pinnedLib
+	use  *fileLock // shared lock on <Dir>.use while the build is in use (cachegc.go)
+}
+
+// release ends the use of the build: the cache collector may remove it again.
+func (b *aslBuild) release() {
+	if b != nil {
+		b.use.unlock()
+		b.use = nil
+	}
 }
 
 // aslCacheDir is the cache directory of the JanusASL build for a framework: keyed by the
@@ -271,11 +280,25 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return nil, aslDiag("Cannot create the JanusASL cache: "+err.Error(), "Set JANUS_CACHE_DIR to a writable directory.")
 	}
-	lk, err := lockFile(dir+".lock", true)
+	lk, err := lockEntry(dir, dir+".lock")
 	if err != nil {
 		return nil, aslDiag("Cannot lock the JanusASL cache: "+err.Error(), "")
 	}
 	defer lk.unlock()
+	gcPin(dir)
+	// In use from here until release (taken under the build lock, so the collector, which needs
+	// both, cannot remove the build in between).
+	use, err := lockFileMode(dir+".use", true, true)
+	if err != nil {
+		return nil, aslDiag("Cannot lock the JanusASL cache: "+err.Error(), "")
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			use.unlock()
+		}
+	}()
+	touchUse(dir, dir+".lock", dir+".use")
 	files := map[string][]byte{}
 	for p, b := range pkg.Files {
 		files[p] = b
@@ -322,9 +345,8 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 		return nil, &diag{Invalid: true, Msg: "Building the JanusASL package failed: " + err.Error() + "\n" + summarizeLeanErrors(out, 2000),
 			Stage: "ASL build", Next: "Run lake build ArmASL JanusASL in " + dir + " and fix the reported errors.", Details: lastLines(out, 60)}
 	}
-	now := time.Now()
-	_ = os.Chtimes(dir, now, now)
-	b := &aslBuild{pkg: pkg, Dir: dir, Libs: []string{
+	touchUse(dir, dir+".lock", dir+".use")
+	b := &aslBuild{pkg: pkg, Dir: dir, use: use, Libs: []string{
 		filepath.Join(dir, ".lake", "build", "lib", "lean"),
 		filepath.Join(dir, ".lake", "packages", "Sail", ".lake", "build", "lib", "lean"),
 	}}
@@ -339,6 +361,7 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 		}
 		b.pins = append(b.pins, p)
 	}
+	ok = true
 	return b, nil
 }
 

@@ -222,6 +222,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 		if aslB, err = buildASLFor(fw, "", lake, stderr); err != nil {
 			return nil, err
 		}
+		defer aslB.release()
 	}
 
 	// Requests without a proof root are single-file verifications, one by one.
@@ -355,7 +356,6 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 		}
 	}
 	sort.SliceStable(res.Results, func(a, b int) bool { return res.Results[a].Index < res.Results[b].Index })
-	evictStale()
 	return res, nil
 }
 

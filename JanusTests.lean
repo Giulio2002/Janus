@@ -15,3 +15,4 @@ import JanusTests.Audit
 import JanusTests.Float
 import JanusTests.Dynamic
 import JanusTests.String
+import JanusTests.Crypto

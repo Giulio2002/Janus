@@ -24,6 +24,10 @@ scripts/x86formal.sh check   # build + janus-x86-check on artifacts/oracle-amd64
 scripts/x86formal.sh prove   # build JanusX86.Proofs and audit their axioms
 ```
 
+The local corpora under `artifacts/oracle-amd64/` and `artifacts/oracle-amd64-fp/` are kept
+zstd-compressed (`*.jsonl.zst`, summaries uncompressed) to save disk. Run `zstd -d` on them
+before rerunning `check`.
+
 Every lake job runs under the memory guard (`scripts/lib/memguard.sh`), with `LEAN_NUM_THREADS`
 set from the budget and a per-job peak of `JANUS_LAKE_JOB_MEM=3G` (measured with
 `scripts/peak-mem.sh`: 2.6 GB for the largest model file, at most 1.9 GB for a proof file).
@@ -59,7 +63,7 @@ Janus leaves undefined is not compared). A verdict is:
   undefined result) or the model does (an opcode the slice excludes, or that X86isa does not
   implement). A gap never hides a wrong answer.
 * **sail-defect**: Janus and the model disagree, **Janus agrees with the hardware result** of the
-  same case, and the difference is one of the known model defects D1–D6 below.
+  same case, and the difference is one of the known model defects D1–D6 below (D7 and D8, found by proof, do not occur in the corpus).
 * **MISMATCH**: anything else. `janus-x86-check` exits with code 1 if it finds any.
 
 Gaps by kind (`artifacts/x86formal/summary.txt`): `janus-undecodable/*` 128,941 (bytes outside
@@ -80,12 +84,18 @@ Each was found by the check, and in each the hardware result of the case (the na
 | D4 movd-movq-to-xmm-no-zero-extension | 506 | `MOVD/MOVQ xmm, r/m` (`66 0F 6E`) | writes the low 32/64 bits and keeps the rest of the XMM register | zero-extends into the whole XMM register | `66 66 40 0f 6e 6e 00`: bits 32–127 of `xmm5` janus 0, sail kept |
 | D5 rep-string | 4,785 | `REP MOVS/STOS` (`F3 A4/A5/AA/AB`) | executes one iteration per step and leaves `RIP` on the instruction | the whole repetition in one instruction (Janus' `step` semantics) | `f3 a4`: `rcx` janus 0, sail 2 |
 | D6 ror-cf-from-bit-0 | 287 | `ROR` with count ≥ 2 | takes `CF` from bit 0 of the result (`ror_spec_*`, count ≥ 2 branch) | `CF` = the most significant bit of the result (SDM `ROR`) | `4a c0 cb 82`: flags janus 0xc0, sail 0xc1 |
-| D7 ret-noncanonical-rsp (found by proof) | 0 | `RET`/`RET imm16` (`C3/C2`) | `x86_ret` computes the new `RSP` with `add_to_sptr`, which stops with the model error `:NON-CANONICAL-STACK-ADDRESS` when `RSP + 8 + imm16` is not canonical (the value is then kept as 48 bits and sign-extended) | `RSP` takes the 64-bit value `RSP + 8 + imm16`; a non-canonical stack pointer faults only at the next stack access | not in the corpus (needs `RSP` near `2^47`); `ret_agree` assumes `RSP + 8 + 2^16 ≤ 2^47`, where the two agree |
+| D7 noncanonical-rsp (found by proof) | 0 | `RET`/`RET imm16` (`C3/C2`), `POP r` (`58–5F`), `LEAVE` (`C9`) | the new `RSP` goes through `add_to_sptr`, which stops with the model error `:NON-CANONICAL-STACK-ADDRESS` when it is not canonical (`RSP + 8 + imm16`; `RSP + 8`; `RBP + 8`) | `RSP` takes the 64-bit value; a non-canonical stack pointer faults only at the next stack access | not in the corpus (needs `RSP`/`RBP` near `2^47`); `ret_agree` assumes `RSP + 8 + 2^16 ≤ 2^47`, `pop_agree` `RSP + 8 < 2^47`, `leave_agree` `RBP + 8 < 2^47` |
+| D8 shld-shrd-cl-rip-relative (found by proof) | 0 | `SHLD/SHRD r/m, r, CL` (`0F A5/AD`) with a RIP-relative memory operand | `x86_shld_shrd` always tells the r/m decoder that one immediate byte follows (`num_imm_bytes = 1`), so a RIP-relative address is one byte too far for the `CL` forms | the address is relative to the end of the instruction, which has no immediate (SDM 2.2.1.6) | not in the corpus (Go emits only register forms); `shd_agree` excludes RIP-relative operands of `A5/AD` |
 
 D5 is a difference of granularity rather than a wrong result (X86isa models one iteration);
-the others are wrong results. D7 was found while proving `ret_agree`, not by the corpus: with the
-stack in Janus' regions (below `2^47`) it is unreachable, so the theorem carries that bound. The class theorems exclude exactly these encodings (D2 in
-`alu_ai_agree`; D3/D6 when the shift class is proved).
+the others are wrong results. D7 and D8 were found while proving the class theorems, not by the
+corpus: D7 is unreachable with the stack in Janus' regions (below `2^47`), so the theorems carry
+that bound, and D8 needs a RIP-relative `CL` double shift, which the theorem excludes. The class
+theorems exclude exactly these encodings: D2 in `alu_ai_agree`; D3 (8/16-bit rotates by a masked
+count ≥ the width) in `shift_agree` and `shift_agree_cf`; D6 in `shift_agree`, while
+`shift_agree_cf` proves the `ROR` case with `CF` left unconstrained; D1 in `cmpxchg_agree`, which
+proves every register and memory byte and `ZF` (the comparison's outcome) and leaves the other
+status flags unconstrained; D7 and D8 as above.
 
 **SSE scalar floating point** (`Decode.sseFp`: `ADD/SUB/MUL/DIV/MIN/MAX/SQRT SS/SD`, `(U)COMIS`,
 `CVT*`, `CMPSS/SD`, `AND(N)/OR PS/PD`, `ROUNDSS/SD`, and `MXCSR`) is not covered by the formal
@@ -98,9 +108,17 @@ so the check reports them as `gap sail-unimplemented`: on the FP corpus of
 semantics (`Janus/Amd64/Float.lean`) is checked against the hardware only.
 
 X86isa (and so the Sail model) leaves unimplemented: `XORPS` (`0F 57`), `PXOR`, `PAND`, `POR`,
-`PCMPEQB`, `PMOVMSKB`, `BSF`, `BSR`, `TZCNT`, `LZCNT`, `POPCNT`, `BSWAP`, `BTS/BTR/BTC`, `XADD`,
-`CMPXCHG8B/16B`, the fences, and every VEX encoding; these are `gap sail-unimplemented` and are
-tested only by the native oracle. The model signals `#DE` as a model error
+`PCMPEQB`, `PMOVMSKB`, `BSF`, `BSR`, `TZCNT`, `LZCNT`, `POPCNT`, `BSWAP`, `BTS/BTR/BTC`, `XADD`
+(including `LOCK XADD`), `CMPXCHG8B/16B`, the fences, and every VEX encoding; these are
+`gap sail-unimplemented` and are tested only by the native oracle. No class theorem is possible
+for them, since the model's arm is `x86_model_error "Opcode Unimplemented in x86isa!"`.
+
+**amd64 v3** (BMI1/BMI2 `ANDN BLSR BLSMSK BLSI BEXTR BZHI SHLX SHRX SARX RORX MULX PDEP PEXT`,
+scalar FMA3, `MOVBE`, `PSHUFB`/`PSIGNB`) is not covered either. The pinned model leaves the
+three-byte map `0F 38` (`MOVBE`, `PSHUFB`, `PSIGNB`) as `"Translation error: two-byte opcode 56
+not translated"`. Every `VEX.0F38` arm (the BMI and FMA instructions) is `x86_model_error
+"Opcode Unimplemented in x86isa!"` after the `#UD` checks, and `ext_vex_0f38_execute` is
+`false`. These classes are tested only against the hardware. The model signals `#DE` as a model error
 `:UNSIGNED-DIVIDE-ERROR-OVERFLOW`, which the check maps to Janus' divide-error fault (agree).
 
 ## What is proved
@@ -149,15 +167,27 @@ that a decidable check of it is sound, and the check verifies it on every case.
 | JMP rel8/rel32 (`EB/E9`) | `jmp_agree` | proved |
 | CALL rel32 (`E8`) | `call_agree` | proved |
 | RET / RET imm16 (`C3/C2`) | `ret_agree` | proved, assuming `RSP + 8 + 2^16 ≤ 2^47` (D7) |
-| `LOCK`ed ALU/unary forms (memory destination) | — | tested only |
-| shifts and rotates (`C0/C1/D0–D3`, SHLD/SHRD) | — | tested only (D3, D6) |
-| DIV/IDIV (`F6/F7 /6,/7`), IMUL two/three-operand (`0F AF`, `69/6B`) | — | tested only |
-| MOVSXD (`63`), CBW/CWDE/CDQE, CWD/CDQ/CQO, XCHG, BT | — | tested only |
-| PUSH/POP/LEAVE, indirect JMP/CALL (`FF /2,/4`) | — | tested only |
+| PUSH r64 (`50–57`), POP r64 (`58–5F`) | `push_agree`, `pop_agree` | proved; POP assumes `RSP + 8 < 2^47` (D7) |
+| LEAVE (`C9`) | `leave_agree` | proved, assuming `RBP + 8 < 2^47` (D7) |
+| JMP r/m64, CALL r/m64 (`FF /4`, `FF /2`), every register and memory form | `jmp_ind_agree`, `call_ind_agree` | proved |
+| SHL/SHR/SAR/ROL/ROR r/m, imm8/1/CL (`C0/C1/D0–D3 /0,1,4,5,7`), every width | `shift_agree`; `shift_agree_cf` for `ROR` by a count ≥ 2 | proved except 8/16-bit rotates by a masked count ≥ the width (D3); `ROR` count ≥ 2 up to `CF` (D6) |
+| RCL/RCR r/m32/64, imm8/1/CL (`C1/D1/D3 /2,/3`; Janus decodes only 32/64 bits) | `rcx_agree` | proved |
+| SHLD/SHRD r/m, r, imm8/CL (`0F A4/A5/AC/AD`), every width | `shd_agree` | proved except the `CL` forms with a RIP-relative operand (D8) |
+| DIV/IDIV r/m (`F6/F7 /6,/7`), every width | `div_agree`, `idiv_agree`; `#DE` (zero divisor, quotient overflow): `div_de_agree`, `idiv_de_agree` | proved |
+| IMUL r, r/m (`0F AF`) and IMUL r, r/m, imm (`69/6B`) | `imul2_agree`, `imul3_agree` | proved |
+| MOVSXD r64, r/m32 (`REX.W 63`) | `movsxd_agree` | proved |
+| CBW/CWDE/CDQE (`98`), CWD/CDQ/CQO (`99`) | `cbwcwd_agree` | proved |
+| XCHG r/m, r (`86/87`; the memory form implicitly locked), XCHG rAX, r (`91–97`, `REX.B 90`) | `xchg_agree`, `xchg9_agree` | proved |
+| BT r/m, imm8 (`0F BA /4`), BT r, r (`0F A3`, register destination) | `bt_ba_agree`, `bt_a3_agree` | proved |
+| `LOCK` ADD/OR/ADC/SBB/AND/SUB/XOR m, r (`F0 00/01 … 30/31`) as one step | `alu_eg_mem_lock_agree` | proved |
+| CMPXCHG m, r (`0F B0/B1`, with or without `LOCK`) | `cmpxchg_agree` | proved up to D1: every register and memory byte and `ZF` |
+| NOP (`90`, `66 90`, `F3 90` PAUSE), NOP r/m (`0F 1F /0`) | `nop_agree`, `nop1f_agree` | proved |
+| BTS/BTR/BTC, XADD and LOCK XADD | — | not provable: unimplemented in X86isa (gap) |
+| `LOCK`ed r/m, imm and unary forms, PUSH imm, PUSH/POP r/m | — | tested only (Go emits none of them) |
 | string instructions | — | tested only (D5) |
-| CMPXCHG | — | tested only (D1) |
 | SSE/AVX moves and logic | — | tested only (D4; most are unimplemented in X86isa) |
 | SSE scalar floating point, `MXCSR` | — | tested only against hardware (not translated in the Sail model) |
+| amd64 v3: BMI1/BMI2, scalar FMA3, MOVBE, PSHUFB/PSIGNB | — | tested only against hardware (not in the Sail model) |
 
 ### How the proofs are built
 
@@ -184,14 +214,18 @@ model function returns on a related state. The layers:
   mandatory-prefix computation `mpref`) and `rm_frame2`, the two-byte analogue of `rm_frame`, used
   by `Movx`, `Setcc` and `Jcc32`.
 * Class files: `AluGE`, `AluAI`, `AluEI`, `TestEG`, `Unary`, `Mul`, `Imul1`, `Mov`, `MovOI`,
-  `Movx`, `Setcc`, `Branch` (Jcc rel8, JMP), `Jcc32`, `Call` (CALL, RET).
+  `Movx`, `Setcc`, `Branch` (Jcc rel8, JMP), `Jcc32`, `Call` (CALL, RET), `Stack` (PUSH/POP),
+  `Leave`, `CallInd`, `Shift` (with `ShiftSpec` and the generated `ShiftWidth`,
+  `tools/gen_shiftspec.py`), `Rcx` (`RcxSpec`, generated `RcxWidth`, `tools/gen_rcxspec.py`),
+  `Shd` (`ShdSpec`, generated `ShdWidth`, `tools/gen_shdspec.py`), `Div`, `Imul2`, `Movsxd`, `Cbw`,
+  `Xchg`, `Xchg9`, `Bt`, `Bt3`, `Lock`, `CmpXchg`, `Nop`.
 
 ## Trust story
 
 The proofs relate Janus to **the generated Lean**, not to X86isa's ACL2 text. Trusted:
 
 1. **ACL2 X86isa → Sail** (sail-x86-from-acl2's translation), shared with every user of that
-   model. Its defects D1–D6 are documented above; the check finds such defects by comparing with
+   model. Its defects D1–D8 are documented above; the check finds such defects by comparing with
    the hardware results.
 2. **Sail → Lean** (Sail 0.20.3's Lean backend, JanusASL's patches), checked empirically by the
    check on 697,542 cases against Janus and the hardware.
