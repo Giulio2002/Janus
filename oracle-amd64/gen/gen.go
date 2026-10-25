@@ -350,6 +350,7 @@ func Setup(r *rand.Rand, b []byte) State {
 		// a non-default MXCSR now and then: every instruction must preserve it
 		s.SetMXCSR(RandMXCSR(r))
 	}
+	setupSSE(r, &s, inst, cls)
 	return s
 }
 

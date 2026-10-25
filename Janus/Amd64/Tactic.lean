@@ -1039,6 +1039,13 @@ deriving instance ToExpr for CntOp
 deriving instance ToExpr for FlagOp
 deriving instance ToExpr for SseOp
 deriving instance ToExpr for FPArith
+deriving instance ToExpr for PIntOp
+deriving instance ToExpr for PShiftOp
+deriving instance ToExpr for PImmOp
+deriving instance ToExpr for CvtOp
+deriving instance ToExpr for DupOp
+deriving instance ToExpr for PFOp
+deriving instance ToExpr for SseI
 deriving instance ToExpr for Instr
 deriving instance ToExpr for StubKind
 
