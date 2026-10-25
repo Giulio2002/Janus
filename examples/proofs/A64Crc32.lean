@@ -31,7 +31,13 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 namespace Proof
 
 set_option linter.unusedSimpArgs false
-abbrev head : Nat := 0x8ee9c
+/-- The loop head of `ieeeUpdate.abi0` (its `CMP $16, R11`, 12 bytes in), from the extracted
+segment, so that the proof does not depend on where the linker placed the function. -/
+abbrev head : Nat := (Extracted.segments[2]!).base + 0xc
+/-- The return addresses of the two calls: in the `ieeeUpdate` wrapper (after its `BL` to the
+assembly, 32 bytes in) and in `A64Crc32` (after its `BL` to the wrapper, 36 bytes in). -/
+abbrev wret : Nat := (Extracted.segments[1]!).base + 0x20
+abbrev cret : Nat := Extracted.entry + 0x24
 abbrev R : Nat := 0xEDB88320
 
 /-- `X < 2^32` for the CRC register terms of the tail. -/
@@ -70,12 +76,12 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
       acc = CRC.update R s.mem ((crc.toNat % 2 ^ 32) ^^^ 0xFFFFFFFF) p.toNat (16 * i) →
       S.pc = BitVec.ofNat 64 head → S.regs 9 = BitVec.ofNat 64 acc →
       S.regs 13 = BitVec.ofNat 64 (p.toNat + 16 * i) → S.regs 11 = BitVec.ofNat 64 (n.toNat - 16 * i) →
-      S.regs 30 = 585488#64 → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
+      S.regs 30 = BitVec.ofNat 64 wret → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 →
       S.mem = (((((((((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
                                           (BitVec.toNat (s.regs 29))).writeLE
                                       (BitVec.toNat s.sp + 16) 8 p.toNat).writeLE
-                                  (BitVec.toNat s.sp - 112) 8 587332).writeLE
+                                  (BitVec.toNat s.sp - 112) 8 cret).writeLE
                               (BitVec.toNat s.sp - 120) 8 (BitVec.toNat s.sp - 56)).writeLE
                           (BitVec.toNat s.sp - 32) 8 p.toNat).writeLE
                       (BitVec.toNat s.sp - 104) 4 (~~~crc).toNat).writeLE
@@ -86,6 +92,10 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
         (s'.regs 0).toNat % 2 ^ 32 =
           CRC.update R s.mem ((crc.toNat % 2 ^ 32) ^^^ 0xFFFFFFFF) p.toNat n.toNat ^^^ 0xFFFFFFFF) := by
   intro S i acc hq hi hacc hpc h9 h13 h11 h30 h29 hsp h28 h18 hm
+  janus_eval_nat hW : wret
+  janus_eval_nat hC : cret
+  simp only [hW] at h30
+  simp only [hC] at hm
   generalize hk : n.toNat - 16 * i = r at h11 hq
   have hA : acc < 2 ^ 32 := hacc ▸ CRC.update_lt (by decide) _ _ _ _
     (Nat.xor_lt_two_pow (Nat.mod_lt _ (by decide)) (by decide))
@@ -230,12 +240,12 @@ theorem loop (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
       acc = CRC.update R s.mem ((crc.toNat % 2 ^ 32) ^^^ 0xFFFFFFFF) p.toNat (16 * i) →
       S.pc = BitVec.ofNat 64 head → S.regs 9 = BitVec.ofNat 64 acc →
       S.regs 13 = BitVec.ofNat 64 (p.toNat + 16 * i) → S.regs 11 = BitVec.ofNat 64 (n.toNat - 16 * i) →
-      S.regs 30 = 585488#64 → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
+      S.regs 30 = BitVec.ofNat 64 wret → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 →
       S.mem = (((((((((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
                                           (BitVec.toNat (s.regs 29))).writeLE
                                       (BitVec.toNat s.sp + 16) 8 p.toNat).writeLE
-                                  (BitVec.toNat s.sp - 112) 8 587332).writeLE
+                                  (BitVec.toNat s.sp - 112) 8 cret).writeLE
                               (BitVec.toNat s.sp - 120) 8 (BitVec.toNat s.sp - 56)).writeLE
                           (BitVec.toNat s.sp - 32) 8 p.toNat).writeLE
                       (BitVec.toNat s.sp - 104) 4 (~~~crc).toNat).writeLE
@@ -252,6 +262,10 @@ theorem loop (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     exact tail crc p n cap ret hret s hlen hp hp' hb ha hal hw hd S i acc (by omega)
   | succ q ih =>
     intro S i acc hq hi hacc hpc h9 h13 h11 h30 h29 hsp h28 h18 hm
+    janus_eval_nat hW : wret
+    janus_eval_nat hC : cret
+    simp only [hW] at h30
+    simp only [hC] at hm
     by_cases hr : n.toNat - 16 * i < 16
     · exact tail crc p n cap ret hret s hlen hp hp' hb ha hal hw hd S i acc hr hi hacc hpc h9 h13 h11
         h30 h29 hsp h28 h18 hm
@@ -267,7 +281,7 @@ theorem loop (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
       simp only [Nat.add_assoc, Bool.false_eq_true, ite_false]
     janus_run until [head]
     apply ih _ (i + 1) _ (by omega) (by omega) rfl
-    all_goals janus_simp [hacc']
+    all_goals janus_simp [hacc', hW, hC]
     all_goals first
       | omega
       | (apply BitVec.eq_of_toNat_eq
@@ -305,8 +319,10 @@ theorem correctness (crc p n cap : BitVec 64) :
   janus_intro hs
   simp only [Disjoint] at hd
   janus_run until [head]
+  janus_eval_nat hW : wret
+  janus_eval_nat hC : cret
   exact loop crc p n cap ret hret s hlen hp hp' hb ha hal hw hd (n.toNat / 16) _ 0 _ (by omega) (by omega) rfl
-    (by janus_simp) (by janus_simp [update_zero]; rw [show (4294967296 : Nat) = 2 ^ 32 from rfl, not_mod32']) (by janus_simp) (by janus_simp <;> simp)
-    (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp)
+    (by janus_simp [hW, hC]) (by janus_simp [update_zero]; rw [show (4294967296 : Nat) = 2 ^ 32 from rfl, not_mod32']) (by janus_simp [hW, hC]) (by janus_simp <;> simp)
+    (by janus_simp [hW, hC]) (by janus_simp [hW, hC]) (by janus_simp [hW, hC]) (by janus_simp [hW, hC]) (by janus_simp [hW, hC]) (by janus_simp [hW, hC])
 
 end Proof

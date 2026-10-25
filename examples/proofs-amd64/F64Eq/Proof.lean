@@ -56,11 +56,11 @@ theorem hpre : StackWritable s0 0 8 ∧ (s0.xmm 0).toNat % 2 ^ 64 = x.toNat ∧
   ⟨⟨by decide, by decide, by decide⟩, by decide, by decide, by unfold GoMXCSR; decide⟩
 
 /-- All hypotheses of `correctness` hold together. -/
-theorem nonvacuous : ∃ (ret : Nat) (s : State) (x y : BitVec 64), RetAddr Extracted.program ret ∧
+theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
     CallSetup (Extracted.program.withExit ret) Extracted.entry [] s ∧
-    (StackWritable s 0 8 ∧ (s.xmm 0).toNat % 2 ^ 64 = x.toNat ∧ (s.xmm 1).toNat % 2 ^ 64 = y.toNat ∧
+    (StackWritable s 0 8 ∧ (s.xmm 0).toNat % 2 ^ 64 = Witness.x.toNat ∧ (s.xmm 1).toNat % 2 ^ 64 = Witness.y.toNat ∧
       GoMXCSR s) :=
-  ⟨ret, s0, x, y, hret, setup, hpre⟩
+  ⟨ret, s0, hret, setup, hpre⟩
 
 /-- So the guarantee is reached: `+0 == -0` returns `true`. -/
 theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>

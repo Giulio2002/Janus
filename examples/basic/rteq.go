@@ -27,11 +27,6 @@ type Tree struct {
 	Kids [4]*Tree
 }
 
-// CopyNode copies *src to *dst.
-//
-//go:noinline
-func CopyNode(dst, src *Tree) { *dst = *src }
-
 // CopyTrees copies the array *src to *dst. The arrays may overlap partially (through slice to
 // array-pointer conversions), so the compiler copies them with runtime.typedmemmove.
 //
