@@ -687,6 +687,11 @@ no concurrent GC, no preemption):
   slow path (`morestack`), relocating the caller's frame, which the contracts exclude; (5) the
   GC's concurrent work (marking, sweeping, assists, finalizers) is outside the model; Go's
   collector does not move objects, so a returned pointer stays valid.
+* **String comparison** (`Janus/Contracts/Cmpstring.lean`, `CmpstringAmd64.lean`).
+  `runtime.cmpstring` returns the bytewise lexicographic comparison (`strCmp`, `-1`/`0`/`1`) of two
+  readable strings, changes memory only in its stack window and preserves the ABI's callee-saved
+  registers. The contract is shown satisfiable by a verified byte-loop implementation on both ISAs
+  (`CmpstringSat*.cmpstring_satisfiable`); that Go's `cmpbody` meets it is assumed.
 * **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
   `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
   `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)
