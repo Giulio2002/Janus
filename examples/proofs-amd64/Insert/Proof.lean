@@ -24,18 +24,19 @@ def mapType : Nat := ripTarget Extracted.program (Extracted.entry + 0x19)
 
 theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec 64))
     (hl : M.Laws)
-    (hasn : Assign (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.mapassign_fast64") M)
+    (H : Contracts.RtReady) (hasn : Assign (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.mapassign_fast64") M H)
     (m k v : BitVec 64) (f : AMap (BitVec 64) (BitVec 64)) :
     Ensures (Extracted.program.link impl) Extracted.entry [m, k, v]
-      (fun s => CallerOK M s 40 32 ∧ M.Typ mapType ∧ m.toNat ≠ 0 ∧ M.Rep s.mem m.toNat f)
+      (fun s => CallerOK M s 40 32 ∧ M.Typ mapType ∧ m.toNat ≠ 0 ∧ M.Rep s.mem m.toNat f ∧
+        H [mapType, m.toNat, k.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 40) (Contracts.rtView M.priv s.mem))
       (fun s s' => M.Rep s'.mem m.toNat (f.set k v) ∧ M.Env s'.mem (s.regs 14)) := by
-  intro ret hret s hs ⟨hc, hty, hm0, hmap⟩
+  intro ret hret s hs ⟨hc, hty, hm0, hmap, hH⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
   janus_eval_nat hT : mapType
-  rw [hT] at hty
+  rw [hT] at hty hH
   simp only [regG, regSP, stackguard0Offset, stackguard0, Janus.Spec.Disjoint] at hg1 hg2 hg3 hgd hgo hal hd hb hst hout
   have hsp40 : (s.regs 4 - 40#64).toNat = (s.regs 4).toNat - 40 := by
     rw [BitVec.toNat_sub]; simp; omega
@@ -44,10 +45,13 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
     ⟨RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp40]) (by simp [setRegF])
       (by simpa using hs.zero) (by simpa using hs.df) (by simp [setRegF, keepABI, hsp40, Arm64.Memory.readLE_writeLE_self])
         (by decide) (by decide),
-     by simpa [setRegF] using hty, by simpa [setRegF] using hm0, ?_⟩ ?_
+     by simpa [setRegF] using hty, by simpa [setRegF] using hm0, ?_, ?_⟩ ?_
   · simp only [setRegF]; simp only [reduceIte, Nat.reduceEqDiff]
     exact hl.rep_frame _ _ _ _ hmap (Agrees.of_window (lo := (s.regs 4).toNat - (M.depth + 40))
       (hi := (s.regs 4).toNat + 32) (by janus_frame) (Outside.of_sub hout (by omega) (by omega)))
+  · simp only [Contracts.Ready64, setRegF, reduceIte, Nat.reduceEqDiff, hsp40]
+    repeat rw [Contracts.rtView_writeLE (Outside.of_sub hout (by omega) (by omega))]
+    simpa using hH
   · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hw, hin, hset⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.append_nil, setRegF, reduceIte, Nat.reduceEqDiff, hsp40] at hfr
