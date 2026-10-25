@@ -53,7 +53,7 @@ hooks (`SchedContract`) and `convT64` are satisfied by concrete code (`schedCont
 
 namespace Janus.Kernel
 
-open Janus Janus.Arm64 Janus.GoABI Janus.Tactic
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Tactic.Common
 
 /-! ## The kernel state (ISA-independent) -/
 
@@ -66,6 +66,33 @@ def readBytes (m : Memory) (a n : Nat) : Bytes := (List.range n).map fun i => m.
 contract only allows into memory it requires to be writable). -/
 def writeBytes (m : Memory) (a : Nat) (bs : Bytes) : Memory :=
   { m with bytes := fun x => if a ≤ x ∧ x < a + bs.length then bs.getD (x - a) 0 else m.bytes x }
+
+theorem readBytes_congr {m m' : Memory} {a n : Nat}
+    (h : ∀ i < n, m'.bytes (a + i) = m.bytes (a + i)) : readBytes m' a n = readBytes m a n := by
+  unfold readBytes
+  apply List.map_congr_left
+  intro i hi
+  exact h i (List.mem_range.mp hi)
+
+@[simp] theorem readBytes_zero (m : Memory) (a : Nat) : readBytes m a 0 = [] := rfl
+
+@[simp] theorem length_readBytes (m : Memory) (a n : Nat) : (readBytes m a n).length = n := by
+  simp [readBytes]
+
+/-- Bytes outside a store keep their value. -/
+theorem readBytes_writeLE {m : Memory} {a n v b c : Nat} (h : a + n ≤ b ∨ b + c ≤ a) :
+    readBytes (m.writeLE a n v) b c = readBytes m b c :=
+  readBytes_congr fun i hi => by
+    simp only [Memory.writeLE]
+    rw [if_neg (by omega)]
+
+/-- Bytes outside the ranges of a memory frame keep their value. -/
+theorem MemFrame.readBytes_eq {m m' : Memory} {rs : List (Nat × Nat)} {a n : Nat}
+    (hf : MemFrame m m' rs) (ho : Outside a n rs) : readBytes m' a n = readBytes m a n :=
+  readBytes_congr fun i hi => by
+    have := hf.readLE (a + i) 1 (Outside.of_sub ho (by omega) (by omega))
+    simp only [Memory.readLE, Nat.mul_zero, Nat.add_zero] at this
+    exact BitVec.eq_of_toNat_eq this
 
 /-- One entry of the I/O trace. `env` records a value the program read from the environment
 (`CNTVCT_EL0`, `MIDR_EL1`, `CPUID`, `RDTSC`, ...). -/
@@ -377,6 +404,19 @@ theorem siteOf_link {p : Program} (impl : List Segment) {name : String} {pc : Na
 @[simp] theorem siteOf_withExit (p : Program) (ret : Nat) (name : String) (pc : Nat) :
     siteOf (p.withExit ret) name pc = siteOf p name pc := rfl
 
+/-- The site of a stub of `(p.link impl).withExit ret`, from the closed program `p` (for
+`decide`). -/
+theorem siteOf_link_withExit {p : Program} (impl : List Segment) (ret : Nat) {name : String}
+    {pc : Nat} {site : Site} (h : siteOf p name pc = some site) :
+    siteOf ((p.link impl).withExit ret) name pc = some site := siteOf_link impl h
+
+/-- `kernel_site`: close `siteOf P name pc = some site` for `P` = `p`, `p.withExit ret` or
+`(p.link impl).withExit ret` with `p` closed, by evaluation. -/
+macro "kernel_site" : tactic => `(tactic| first
+  | exact siteOf_link_withExit _ _ (by decide)
+  | (rw [siteOf_withExit]; decide)
+  | decide)
+
 /-- The parameters of the vDSO clock contracts: the runtime-owned ranges `rt` (the `m` and the
 `g0`/`gsignal` stacks they write) and the stack bytes `stack` below `SP` they may use (when
 already on `g0`). -/
@@ -446,6 +486,18 @@ def SiteNext (E : KEnv) (s : State) (k : Kern) (s' : State) (k' : Kern) : Site �
 def SiteExit (s : State) (code : Nat) : Site → Prop
   | .svc => svcSys s = some .exitGroup ∧ code = (s.regs 0).toNat
   | _ => False
+
+/-- The carry of an addition as a decidable comparison (for the `CMN Xn, #4095` that tells a
+system call result from `-errno`: `janus_run [addWithCarry_c]` decides the branch with
+`omega`). -/
+theorem addWithCarry_c {N : Nat} (x y : BitVec N) (c : Bool) :
+    (addWithCarry x y c).2.c = decide (2 ^ N ≤ x.toNat + y.toNat + c.toNat) := by
+  simp only [addWithCarry, BitVec.toNat_ofNat]
+  by_cases h : 2 ^ N ≤ x.toNat + y.toNat + c.toNat
+  · have : (x.toNat + y.toNat + c.toNat) % 2 ^ N ≠ x.toNat + y.toNat + c.toNat := by
+      intro he; have := Nat.mod_lt (x.toNat + y.toNat + c.toNat) (Nat.two_pow_pos N); omega
+    simp [this, h]
+  · rw [Nat.mod_eq_of_lt (by omega)]; simp [h]
 
 /-! ## The kernel semantics -/
 
