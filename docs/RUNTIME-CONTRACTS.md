@@ -396,7 +396,7 @@ function uses none):
   (`calleeStack`, `calleeStack64`).
 
 **Satisfiable.** `Janus.Contracts.CmpstringSat.cmpstring_satisfiable` and
-`Janus.Contracts.CmpstringSatAmd64.cmpstring_satisfiable`: a byte loop (A64, x86-64; machine code
+`Janus.Contracts.CmpstringSatAmd64.cmpstring64_satisfiable`: a byte loop (A64, x86-64; machine code
 in the files) placed in an otherwise empty program meets the contract for every call state,
 proved by symbolic execution and induction on the remaining length, and a call state satisfying
 the precondition exists. So a theorem assuming the contract is not vacuous.

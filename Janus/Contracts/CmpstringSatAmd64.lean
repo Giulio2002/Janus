@@ -171,7 +171,7 @@ theorem wstate_pre : CmpstringPre64 16 wstate := by
   refine ⟨⟨by decide, by decide, by decide, by decide, by decide⟩, Or.inl (by decide), Or.inl (by decide)⟩
 
 /-- `CmpstringContract64` is satisfiable. -/
-theorem cmpstring_satisfiable : ∃ impl : List Janus.Amd64.Segment,
+theorem cmpstring64_satisfiable : ∃ impl : List Janus.Amd64.Segment,
     CmpstringContract64 (toy.link impl) A0 16 ∧
     ∃ s : State, s.rip = BitVec.ofNat 64 A0 ∧ CmpstringPre64 16 s :=
   ⟨impl, impl_ok, wstate, rfl, wstate_pre⟩

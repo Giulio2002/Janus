@@ -17,7 +17,7 @@ returns the first argument on a tie.
 `runtime/minmax.go`: `if y < x { return y }; return x`) are executed from the binary;
 `runtime.cmpstring` (assembly) is left out with `--contract runtime.cmpstring`
 (scripts/example-targets.sh) and assumed by the hypothesis. The contract is satisfiable
-(`Janus.Contracts.CmpstringSatAmd64.cmpstring_satisfiable`), so the theorem is not vacuous. The proof shows that the stores of the two frames do not
+(`Janus.Contracts.CmpstringSatAmd64.cmpstring64_satisfiable`), so the theorem is not vacuous. The proof shows that the stores of the two frames do not
 touch the string bytes (`strCmp_writeLE`), and reads the sign of the result off the
 branch on it (`cmp_msb`).
 -/
