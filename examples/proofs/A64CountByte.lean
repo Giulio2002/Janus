@@ -35,43 +35,25 @@ symbolically, and the element lemmas of `Janus.Tactic.Neon` (`elem_zip_zero_*`, 
 `elem_add`) reduce the new lanes to sums of the sixteen byte tests, which `countOf_add16` matches.
 `tail` is the invariant of the scalar loop. Both are proved by induction on the iterations left.
 
-**Layout.** The loop heads and the two return addresses inside the callees are literals of this
-binary's layout; \`bases\`, \`heads\` and \`rets\` check them against the extracted segments, so a
-relinked binary fails there first.
+**Layout.** The loop heads and the return addresses inside the callees are offsets from the
+callees' extracted segments (`segAddr`), so the proof does not depend on where the linker puts them.
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 
 namespace Proof
 
-/-- The number of the first `n` bytes at `p` that equal `c`. -/
-def countOf (m : Memory) (p c : Nat) : Nat → Nat
-  | 0 => 0
-  | n + 1 => countOf m p c n + (if m.readLE (p + n) 1 = c then 1 else 0)
-
-theorem countOf_le (m : Memory) (p c n : Nat) : countOf m p c n ≤ n := by
-  induction n with
-  | zero => simp [countOf]
-  | succ n ih => simp only [countOf]; split <;> omega
-
-/-- Where the linker put the shim and the C code (the second and third extracted segments). -/
-abbrev sbase : Nat := 0x8f4d0
-abbrev cbase : Nat := 0x8f500
-
-theorem bases : (Extracted.segments.getD 1 default).name = "example.com/basic.vCount.abi0" ∧
-    (Extracted.segments.getD 1 default).base = sbase ∧
-    (Extracted.segments.getD 2 default).name = "example.com/basic.vCountC" ∧
-    (Extracted.segments.getD 2 default).base = cbase := by decide
+/-- The shim and the C code (`segAddr`: their addresses in the extracted program). -/
+abbrev sbase : Nat := segAddr Extracted.program "example.com/basic.vCount.abi0"
+abbrev cbase : Nat := segAddr Extracted.program "example.com/basic.vCountC"
 
 /-- The return address in the shim after its `BL vCountC`, and in `A64CountByte` after its call. -/
-abbrev sret : Nat := 0x8f4ec
-abbrev gret : Nat := 0x8ea48
-theorem rets : sret = sbase + 0x1c ∧ gret = Extracted.entry + 0x28 := ⟨rfl, rfl⟩
+abbrev sret : Nat := sbase + 0x1c
+abbrev gret : Nat := Extracted.entry + 0x28
 
 /-- The vector loop head (`ldr q31, [x4], #16`) and the scalar loop head (`ldrb w4, [x5, x3]`). -/
-abbrev vhead : Nat := 0x8f540
-abbrev thead : Nat := 0x8f5a4
-theorem heads : vhead = cbase + 0x40 ∧ thead = cbase + 0xa4 := ⟨rfl, rfl⟩
+abbrev vhead : Nat := cbase + 0x40
+abbrev thead : Nat := cbase + 0xa4
 
 /-- `c` as the C code sees it: the byte the shim loads, `and w2, w2, #0xff`. -/
 abbrev cw (c : BitVec 64) : BitVec 64 :=
@@ -91,7 +73,7 @@ abbrev frameMem (s : State) (ret : Nat) (p len c : BitVec 64) : Memory :=
   (((((((s.mem.writeLE (s.sp.toNat - 48) 8 ret).writeLE (s.sp.toNat - 56) 8
     (s.regs 29).toNat).writeLE (s.sp.toNat + 8) 8 p.toNat).writeLE (s.sp.toNat - 40) 8 p.toNat).writeLE
     (s.sp.toNat - 32) 8 len.toNat).writeLE (s.sp.toNat - 24) 1 c.toNat).writeLE
-    (s.sp.toNat - 80) 8 0x8ea48).writeLE (s.sp.toNat - 88) 8 (s.sp.toNat - 56)
+    (s.sp.toNat - 80) 8 gret).writeLE (s.sp.toNat - 88) 8 (s.sp.toNat - 56)
 
 /-- One step of the scalar loop: `cmp w4, w2; cinc x0, x0, eq`. -/
 theorem acc_step (m : Memory) (p : Nat) (c i acc : BitVec 64)
@@ -120,7 +102,7 @@ theorem tail (p len c : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program
     ∀ k (S : State) (i acc : BitVec 64), i.toNat + k + 1 = len.toNat →
       S.pc = BitVec.ofNat 64 thead → S.regs 0 = acc → S.regs 1 = len → S.regs 2 = cw c →
       S.regs 3 = i → S.regs 5 = p → acc.toNat = countOf s.mem p.toNat (c.toNat % 256) i.toNat →
-      S.regs 29 = s.sp - 88#64 → S.regs 30 = 0x8f4ec#64 → S.sp = s.sp - 80#64 →
+      S.regs 29 = s.sp - 88#64 → S.regs 30 = BitVec.ofNat 64 sret → S.sp = s.sp - 80#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 → S.mem = frameMem s ret p len c →
       Reaches (Extracted.program.withExit ret) S (IsReturn fun s' => ABIReturn s s' ∧
         (s'.regs 0).toNat = countOf s.mem p.toNat (c.toNat % 256) len.toNat) := by
@@ -128,70 +110,27 @@ theorem tail (p len c : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.program
   induction k with
   | zero =>
     intro S i acc hn hpc h0 h1 h2 h3 h5 hacc h29 h30 hsp h28 h18 hm
-    janus_run
+    janus_eval_nat hsret : sret
+    janus_eval_nat hgret : gret
+    janus_eval_nat hvh : vhead
+    janus_eval_nat hth : thead
+    janus_run [hsret, hgret]
     rw [show len.toNat = i.toNat + 1 by omega]
     exact acc_step _ _ _ _ _ hacc (by omega)
   | succ k ih =>
     intro S i acc hn hpc h0 h1 h2 h3 h5 hacc h29 h30 hsp h28 h18 hm
-    janus_run until [thead]
+    janus_eval_nat hsret : sret
+    janus_eval_nat hgret : gret
+    janus_eval_nat hvh : vhead
+    janus_eval_nat hth : thead
+    janus_run [hsret, hgret] until [thead]
     refine ih _ (i + 1#64) _ ?_ ?_ rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-    all_goals (try janus_simp)
+    all_goals (try janus_simp [hsret, hgret, hvh, hth])
     all_goals (try omega)
     exact acc_step _ _ _ _ _ hacc (by omega)
 
-/-- Sixteen more bytes. -/
-theorem countOf_add16 (m : Memory) (p c n : Nat) : countOf m p c (n + 16) =
-    countOf m p c n + (if m.readLE (p + n) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 1) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 2) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 3) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 4) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 5) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 6) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 7) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 8) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 9) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 10) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 11) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 12) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 13) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 14) 1 = c then 1 else 0) +
-      (if m.readLE (p + n + 15) 1 = c then 1 else 0) := by
-  simp only [countOf, Nat.add_assoc]
-
-/-- `x &&& ~15 = 16 * (x / 16)` for a 64-bit `x`. -/
-theorem and_mask16 (x : Nat) (hx : x < 2 ^ 64) : x &&& 18446744073709551600 = x / 16 * 16 := by
-  apply Nat.eq_of_testBit_eq; intro j
-  rw [Nat.testBit_and, show x / 16 * 16 = x >>> 4 <<< 4 by simp [Nat.shiftLeft_eq, Nat.shiftRight_eq_div_pow],
-    Nat.testBit_shiftLeft, Nat.testBit_shiftRight]
-  by_cases hj : j < 64
-  · have hm : ∀ j < 64, (18446744073709551600 : Nat).testBit j = decide (4 ≤ j) := by decide
-    rw [hm j hj]
-    by_cases h4 : 4 ≤ j
-    · simp [h4, show 4 + (j - 4) = j by omega]
-    · simp [h4]
-  · have h1 : (18446744073709551600 : Nat).testBit j = false :=
-      Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le (show (18446744073709551600 : Nat) < 2 ^ 64 by decide)
-        (Nat.pow_le_pow_right (by decide) (show 64 ≤ j by omega)))
-    have h2 : x.testBit (4 + (j - 4)) = false :=
-      Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hx (Nat.pow_le_pow_right (by decide) (by omega)))
-    simp [h1, h2]
-
-theorem movi0 (d : Nat) : modImmOp false 0 0 128 d = 0 := by simp [modImmOp, advSimdExpandImm]
-/-- `movi v24.16b, #1`. -/
-abbrev ones8 : Nat := 0x01010101010101010101010101010101
-theorem movi1 (d : Nat) : modImmOp false 14 1 128 d = ones8 := by
-  simp [modImmOp, advSimdExpandImm, replicateNat]
-theorem elem_ones8 {i : Nat} (h : i < 16) : elem ones8 8 i = 1 := by
-  have : ∀ i < 16, elem ones8 8 i = 1 := by decide
-  exact this i h
 theorem ite255_and1 (P : Prop) [Decidable P] : ((if P then 255 else 0) &&& 1 : Nat) = if P then 1 else 0 := by
   split <;> rfl
-
-/-- The 16-byte block mask of the vector loop as `n16` (`and x3, x1, #~15`). -/
-theorem n16_toNat (len : BitVec 64) : (len &&& 18446744073709551600#64).toNat = len.toNat / 16 * 16 := by
-  rw [BitVec.toNat_and, show (18446744073709551600#64).toNat = 18446744073709551600 from rfl,
-    and_mask16 _ len.isLt]
 
 set_option maxHeartbeats 8000000 in
 /-- The vector loop: after `k` blocks the two 64-bit lanes of `v26` add up to the count of the
@@ -209,18 +148,22 @@ theorem vloop (p len c : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.progra
       S.vregs 24 = BitVec.ofNat 128 ones8 → S.vregs 29 = 0 →
       (elem (S.vregs 26).toNat 64 0 + elem (S.vregs 26).toNat 64 1) % 2 ^ 64 =
         countOf s.mem p.toNat (c.toNat % 256) (16 * k) % 2 ^ 64 →
-      S.regs 29 = s.sp - 88#64 → S.regs 30 = 0x8f4ec#64 → S.sp = s.sp - 80#64 →
+      S.regs 29 = s.sp - 88#64 → S.regs 30 = BitVec.ofNat 64 sret → S.sp = s.sp - 80#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 → S.mem = frameMem s ret p len c →
       Reaches (Extracted.program.withExit ret) S (IsReturn fun s' => ABIReturn s s' ∧
         (s'.regs 0).toNat = countOf s.mem p.toNat (c.toNat % 256) len.toNat) := by
-  have hn16 := n16_toNat len
+  have hn16 := and_mask16_toNat len
   intro r
   induction r with
   | zero =>
     intro S k hn hpc h0 h1 h2 h3 h4 h5 h23 h24 h29 h26 h29' h30 hsp h28 h18 hm
     have hlen := len.isLt
     have hc' : (cw c).toNat % 256 = c.toNat % 256 := by rw [cw_toNat, Nat.mod_mod]
-    janus_run [h23, h24, h29, elem_ones8] until [vhead, thead]
+    janus_eval_nat hsret : sret
+    janus_eval_nat hgret : gret
+    janus_eval_nat hvh : vhead
+    janus_eval_nat hth : thead
+    janus_run [h23, h24, h29, elem_ones8, hsret, hgret] until [vhead, thead]
     · -- the last block, and no tail
       rename_i hbr'
       rw [hc']
@@ -236,7 +179,7 @@ theorem vloop (p len c : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.progra
       rw [and_mask16 _ hlen] at hbr hbr'
       refine tail p len c ret hret s hal hb ha hw hP hP' hd (len.toNat - (16 * k + 16) - 1) _
         (len &&& 18446744073709551600#64) _ ?_ ?_ rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-      all_goals (try janus_simp)
+      all_goals (try janus_simp [hsret, hgret, hvh, hth])
       all_goals (try (rw [and_mask16 _ hlen]; omega))
       rw [and_mask16 _ hlen, show len.toNat / 16 * 16 = 16 * k + 16 by omega, countOf_add16]
       have := elem_lt (S.vregs 26).toNat 64 0
@@ -250,11 +193,15 @@ theorem vloop (p len c : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.progra
   | succ r ih =>
     intro S k hn hpc h0 h1 h2 h3 h4 h5 h23 h24 h29 h26 h29' h30 hsp h28 h18 hm
     have hlen := len.isLt
-    janus_run [h23, h24, h29, elem_ones8] until [vhead, thead]
+    janus_eval_nat hsret : sret
+    janus_eval_nat hgret : gret
+    janus_eval_nat hvh : vhead
+    janus_eval_nat hth : thead
+    janus_run [h23, h24, h29, elem_ones8, hsret, hgret] until [vhead, thead]
     · rename_i hx; rw [and_mask16 _ hlen] at hx; omega
     · have hc' : (cw c).toNat % 256 = c.toNat % 256 := by rw [cw_toNat, Nat.mod_mod]
       refine ih _ (k + 1) (by omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-      all_goals (try janus_simp [elem_ones8])
+      all_goals (try janus_simp [elem_ones8, hsret, hgret, hvh, hth])
       · rw [show 16 * (k + 1) = 16 * k + 16 by omega]
       · exact h23
       · exact h24
@@ -273,22 +220,27 @@ theorem correctness (p len cap c : BitVec 64) :
   janus_intro hs
   simp only [Disjoint] at hd
   have hlen := len.isLt
-  have hn16 := n16_toNat len
-  janus_run [movi0, movi1] until [vhead, thead]
+  have hn16 := and_mask16_toNat len
+  janus_eval_nat hsret : sret
+  janus_eval_nat hgret : gret
+  janus_eval_nat hvh : vhead
+  janus_eval_nat hth : thead
+  janus_run [modImmOp_movi0, modImmOp_movi1, hsret, hgret] until [vhead, thead]
   · -- `len = 0`: `cbz x1` returns 0
     rfl
   · -- fewer than 16 bytes: the scalar loop from 0
     refine tail p len c ret hret s hal hb ha hw hP hP' hd (len.toNat - 1) _ 0#64 0#64 ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
       ?_ ?_ ?_ ?_ ?_ ?_
-    all_goals (try janus_simp)
+    all_goals (try janus_simp [hsret, hgret, hvh, hth])
     all_goals (try omega)
     all_goals rfl
   · -- the vector loop from block 0
     refine vloop p len c ret hret s hal hb ha hw hP hP' hd (len.toNat / 16 - 1) _ 0 ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
       ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-    all_goals (try janus_simp)
+    all_goals (try janus_simp [hsret, hgret, hvh, hth])
     all_goals (try omega)
     · congr 1; exact Nat.mod_eq_of_lt (ofElems_lt 8 16 _)
     · rfl
+    · simp only [frameMem, hgret]
 
 end Proof

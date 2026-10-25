@@ -25,3 +25,14 @@ func Sum(xs []uint64) uint64 {
 //
 //go:noinline
 func Store(p *uint64, v uint64) { C.c_store((*C.uint64_t)(unsafe.Pointer(p)), C.uint64_t(v)) }
+
+// Count returns the number of bytes of b equal to c, computed by the C loop c_count, which gcc
+// -O2 auto-vectorises.
+//
+//go:noinline
+func Count(b []byte, c byte) uint64 {
+	if len(b) == 0 {
+		return 0
+	}
+	return uint64(C.c_count((*C.uint8_t)(unsafe.Pointer(&b[0])), C.uint64_t(len(b)), C.uint8_t(c)))
+}

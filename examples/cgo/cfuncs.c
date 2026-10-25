@@ -13,3 +13,12 @@ uint64_t c_sum(const uint64_t *p, uint64_t n) {
 
 /* Store v at *p. */
 void c_store(uint64_t *p, uint64_t v) { *p = v; }
+
+/* Return the number of the n bytes at p that equal c (gcc -O2 vectorises the loop: CMEQ, ZIP1/ZIP2,
+   UADDW/UADDW2, ADDP; scripts/coverage/ccorpus/vec.c:v_count). */
+uint64_t c_count(const uint8_t *p, uint64_t n, uint8_t c) {
+	uint64_t k = 0;
+	for (uint64_t i = 0; i < n; i++)
+		k += p[i] == c;
+	return k;
+}

@@ -188,3 +188,25 @@ For the opcodes that cannot saturate, the saturation flag of the result is `fals
   unfold shiftNarrowOp; simp [h]
 
 end Janus.Tactic
+
+namespace Janus.Tactic
+
+open Janus Janus.Arm64
+
+/-! ## Constants the vectorised loops build -/
+
+/-- `movi vd.4s, #0` (128 bits). -/
+theorem modImmOp_movi0 (d : Nat) : modImmOp false 0 0 128 d = 0 := by simp [modImmOp, advSimdExpandImm]
+
+/-- The bytes `0x01` of `movi vd.16b, #1`. -/
+abbrev ones8 : Nat := 0x01010101010101010101010101010101
+
+/-- `movi vd.16b, #1`. -/
+theorem modImmOp_movi1 (d : Nat) : modImmOp false 14 1 128 d = ones8 := by
+  simp [modImmOp, advSimdExpandImm, replicateNat]
+
+@[janus_exec, janus_post] theorem elem_ones8 {i : Nat} (h : i < 16) : elem ones8 8 i = 1 := by
+  have : ∀ i < 16, elem ones8 8 i = 1 := by decide
+  exact this i h
+
+end Janus.Tactic
