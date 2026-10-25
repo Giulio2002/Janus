@@ -9,11 +9,12 @@ instructions of `Janus.Amd64.ExecSSE`, and adds the element lemmas the proofs ab
 need. Everything is proved from the model.
 
 * `ExecSSE.exec` is unfolded per constructor (definitional `rfl` equations, as `exec`), and so
-  are its operand plumbing (`readN`, `readG`, `doneX`, `doneFP`) and the packed operations
-  (`pintOp`, `pshiftOp`, `pimmOp`) on a literal operation. The state updates are rewritten to
-  the normal form of the scalar instructions (`setXmmF`, `setRegF`).
-* A vector value is then an `ofElems` term (`lanes`); `elem_ofElems` (shared with arm64,
-  `Janus.Tactic.Vector`) reads an element back, `elem_readLE` reads an element of loaded data.
+  is its operand plumbing (`readN`, `readG`, `doneX`, `doneFP`). The state updates are rewritten
+  to the normal form of the scalar instructions (`setXmmF`, `setRegF`).
+* The packed operations themselves (`pintOp`, `pshiftOp`, `pimmOp`, ...) are **not** unfolded
+  (as on arm64): a symbolic `XMM` register holds a term like `pintOp (.add 32) x y`, and the
+  element lemmas (`elem_pintOp_add`, ...) evaluate what the code reads back from it;
+  `elem_readLE` reads an element of loaded data.
 * `elem_pshufd`, `elem_setWidth_32`: the shuffles and moves of the integer code.
 * `sum32`: the wrapping sum of 32-bit words in memory, the specification of a vectorised
   reduction; `paddd_lanes` is its lane-wise step.
@@ -24,12 +25,8 @@ namespace Janus.Amd64.Tactic
 open Janus.Amd64 Janus.Arm64 Janus.Tactic
 
 janus_rfl_eqns ExecSSE.exec [janus64_exec]
-janus_rfl_eqns ExecSSE.pintOp [janus64_exec]
-janus_rfl_eqns ExecSSE.pshiftOp [janus64_exec]
-janus_rfl_eqns ExecSSE.pimmOp [janus64_exec]
 
 attribute [janus64_exec] ExecSSE.readN ExecSSE.readG ExecSSE.doneX ExecSSE.doneFP ExecSSE.raiseMx
-  ExecSSE.lanes ExecSSE.sel
 
 @[janus64_exec] theorem ExecSSE.setXmm_eq (s : State) (r : Nat) (v : W128) :
     ExecSSE.setXmm s r v = { s with xmm := setXmmF s.xmm r v } := rfl
@@ -72,6 +69,49 @@ theorem elem_pshufd (a imm : Nat) {i : Nat} (hi : i < 4) :
 @[janus64_exec, janus64_post] theorem elem_pshufd_3 (a imm : Nat) :
     elem (pshufdNat a imm) 32 3 = elem a 32 (imm / 64 % 4) := by
   rw [elem_pshufd a imm (by decide)]; try simp
+
+/-- `PADDB/W/D/Q`, element-wise. -/
+@[janus64_exec, janus64_post] theorem elem_pintOp_add {e i : Nat} (a b : Nat) (h : i < 128 / e) :
+    elem (ExecSSE.pintOp (.add e) a b) e i = (elem a e i + elem b e i) % 2 ^ e := by
+  simp only [ExecSSE.pintOp, ExecSSE.lanes]; rw [elem_ofElems _ h]
+
+/-- `PSUBB/W/D/Q`, element-wise. -/
+@[janus64_exec, janus64_post] theorem elem_pintOp_sub {e i : Nat} (a b : Nat) (h : i < 128 / e) :
+    elem (ExecSSE.pintOp (.sub e) a b) e i = (elem a e i + 2 ^ e - elem b e i) % 2 ^ e := by
+  simp only [ExecSSE.pintOp, ExecSSE.lanes]; rw [elem_ofElems _ h]
+
+/-- `PCMPEQB/W/D/Q`, element-wise. -/
+@[janus64_exec, janus64_post] theorem elem_pintOp_cmpeq {e i : Nat} (a b : Nat) (h : i < 128 / e) :
+    elem (ExecSSE.pintOp (.cmpeq e) a b) e i = if elem a e i = elem b e i then 2 ^ e - 1 else 0 := by
+  simp only [ExecSSE.pintOp, ExecSSE.lanes]; rw [elem_ofElems _ h]
+  split
+  · exact Nat.mod_eq_of_lt (Nat.sub_lt (Nat.two_pow_pos e) (by decide))
+  · exact Nat.zero_mod _
+
+/-- `PADD*` results are 128-bit values. -/
+@[janus64_exec, janus64_post] theorem pintOp_add_mod (e a b : Nat) :
+    ExecSSE.pintOp (.add e) a b % 340282366920938463463374607431768211456 = ExecSSE.pintOp (.add e) a b := by
+  apply Nat.mod_eq_of_lt
+  simp only [ExecSSE.pintOp, ExecSSE.lanes]
+  have h : e * (128 / e) ≤ 128 := by rw [Nat.mul_comm]; exact Nat.div_mul_le_self 128 e
+  exact Nat.lt_of_lt_of_le (ofElems_lt _ _ _) (Nat.pow_le_pow_right (by decide) h)
+
+/-- `PSHUFD` results are 128-bit values. -/
+@[janus64_exec, janus64_post] theorem pshufdNat_mod (a imm : Nat) :
+    pshufdNat a imm % 340282366920938463463374607431768211456 = pshufdNat a imm := by
+  apply Nat.mod_eq_of_lt
+  rw [pshufd_ofElems]
+  exact ofElems_lt 32 4 _
+
+/-- `MOVD r32, xmm` of a value: its element 0. -/
+@[janus64_exec, janus64_post] theorem toNat_setWidth_32_ofNat (v : Nat) :
+    (BitVec.setWidth 64 (BitVec.setWidth 32 (BitVec.ofNat 128 v))).toNat = elem v 32 0 := by
+  simp [elem, BitVec.toNat_setWidth]
+  omega
+
+/-- An element of a value below `2^128` read as a 32-bit element: element 0 is the low bits. -/
+theorem elem_32_zero (x : Nat) : elem x 32 0 = x % 4294967296 := by
+  simp [elem]
 
 /-- The low 32 bits of a register value are its element 0. -/
 theorem toNat_setWidth_32 (x : W128) : (x.setWidth 32).toNat = elem x.toNat 32 0 := by
