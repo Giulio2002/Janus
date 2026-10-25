@@ -21,7 +21,8 @@ package main
 //	                                               <key>.use (shared while in use)
 //	trusted    v1/trusted/<xx>/<key>               dir (written once, by an atomic rename)
 //	result     v1/result/<xx>/<key>.json           file (written by an atomic rename)
-//	replay     v1/replay/{<xx>,early/<xx>}/<key>   empty marker file
+//	replay     v1/replay/{<xx>,early/<xx>}/<key>   marker file (HMAC-authenticated)
+//	           v1/replay/framework/<xx>/<key>       framework verdict, <key>.use (shared while in use)
 //	tmp, run   v1/tmp/<name>, v1/run/<name>        temporary trees of running (or killed)
 //	                                               processes: removed when nothing in them
 //	                                               changed for $JANUS_CACHE_TMP_HOURS (24)
@@ -285,6 +286,29 @@ func scanCache(root string) *gcScan {
 					if err == nil && time.Since(fi.ModTime()) > gcGrace {
 						s.orphans = append(s.orphans, q)
 					}
+					return nil
+				}
+				if rel, _ := filepath.Rel(p, q); strings.HasPrefix(filepath.ToSlash(rel), "framework/") {
+					// A framework replay verdict and its use lock (replaymark.go): held shared by
+					// every verification that uses it, so it is collected only under the lock.
+					if strings.HasSuffix(q, ".use") {
+						if _, err := os.Lstat(strings.TrimSuffix(q, ".use")); err == nil {
+							return nil // counted with its verdict
+						}
+						if fi, err := d.Info(); err == nil {
+							s.other += diskUsage(fi)
+							if time.Since(fi.ModTime()) > gcGrace {
+								s.orphans = append(s.orphans, q)
+							}
+						}
+						return nil
+					}
+					n, _ := treeUsage(q)
+					if fi, err := os.Lstat(q + ".use"); err == nil {
+						n += diskUsage(fi)
+					}
+					s.entries = append(s.entries, &gcEntry{Kind: "replay", Path: q, Size: n, locks: []string{q + ".use"},
+						marks: []string{q}, Used: lastUse([]string{q})})
 					return nil
 				}
 				s.addFile("replay", q)

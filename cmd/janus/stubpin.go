@@ -362,6 +362,24 @@ func goRootFile(file string) (rel string, ok bool) {
 // pinPackage is the package directory of a pinned file ("runtime", "internal/abi").
 func pinPackage(file string) string { return path.Dir(file) }
 
+// runtimeFuncDir lists the runtime functions whose code lives in another package's directory:
+// internal/bytealg defines runtime·memequal and runtime·memequal_varlen in its assembly
+// (equal_arm64.s, equal_amd64.s), and internal/runtime/maps the map entry points it links into
+// runtime by //go:linkname (runtime_faststr.go). Their pinned file must be in that directory.
+var runtimeFuncDir = map[string]string{
+	"runtime.memequal": "internal/bytealg", "runtime.memequal_varlen": "internal/bytealg",
+	"runtime.mapaccess2_faststr": "internal/runtime/maps",
+}
+
+// pinDir is the directory a pinned function's file must be in: its package's (pkg), or the one
+// runtimeFuncDir names.
+func pinDir(name, pkg string) string {
+	if d, ok := runtimeFuncDir[strings.TrimSuffix(name, ".abi0")]; ok {
+		return d
+	}
+	return pkg
+}
+
 // pclnFile returns the pclntab's function name and the file at the entry of f.
 func (b *Binary) pclnFile(f Func) (name, file string, err error) {
 	tab, err := b.pclnTable()
@@ -421,7 +439,7 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	}
 	rel, _ := goRootFile(file)
 	pkg := stubPackage(pname, rel)
-	if _, isStub := stubKind(f.Name); isStub && pkg != "runtime" {
+	if _, isStub := stubKind(f.Name); (isStub || runtimeContractStubs[f.Name]) && pkg != "runtime" {
 		return fmt.Errorf("the pclntab places %s in package %q, not runtime", pname, pkg)
 	}
 	canon, refs, err := b.stubCanon(f)
@@ -433,7 +451,7 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	var files []string
 	for _, p := range pins {
 		files = append(files, p.File)
-		if rel == p.File && pinPackage(p.File) == pkg {
+		if rel == p.File && pinPackage(p.File) == pinDir(f.Name, pkg) {
 			fileOK = true
 			codeOK = codeOK || p.Hash == h
 		}
@@ -457,6 +475,29 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 		}
 		if err := b.checkStubPin(g, visiting); err != nil {
 			return fmt.Errorf("its callee %s: %w", g.Name, err)
+		}
+	}
+	return nil
+}
+
+// checkContractPin checks a function named by --contract that is one of runtimeContractStubs:
+// it must be the Go runtime's function of that name (checkStubPin's checks: the pclntab name,
+// package runtime, the toolchain's file, a pinned normalized code hash). Its callees are not
+// followed (identified by name only, like a helper's).
+func (b *Binary) checkContractPin(g Func) error {
+	if b.SymbolSource != "symtab" {
+		return &diag{
+			Msg:   fmt.Sprintf("--contract names %s, a runtime function a framework contract describes, but %s has no ELF symbol table, so Janus cannot confirm that the function at 0x%x is the runtime's", g.Name, b.Path, g.Addr),
+			Stage: "code extraction",
+			Next:  "Rebuild without stripping the symbol table (no -ldflags=-s).",
+		}
+	}
+	if err := b.checkStubPin(g, map[uint64]bool{}); err != nil {
+		return &diag{
+			Msg: fmt.Sprintf("--contract names %s at 0x%x, but that function is not the Go runtime's %s: %v. The framework's runtime contracts (Janus/Contracts/Iface.lean, Mem.lean, Hash.lean) state what the runtime's function does, so Janus leaves out only the runtime's code (pinned like a stub, docs/SOUNDNESS.md)",
+				g.Name, g.Addr, g.Name, err),
+			Stage: "code extraction",
+			Next:  "If the binary was built by a Go toolchain Janus does not pin yet (" + stubPinToolchains + "), add it to scripts/gen-stubpins.sh and regenerate cmd/janus/stubpins_gen.go; otherwise remove the function that reuses a runtime function's name.",
 		}
 	}
 	return nil
@@ -489,9 +530,10 @@ func uniq(xs []string) []string {
 }
 
 // cmdStubpins (hidden; used by scripts/gen-stubpins.sh) prints one line per stub of the list
-// found in each binary, and per function such a stub calls ("helper"):
+// found in each binary, per function such a stub calls ("helper"), and per runtime function a
+// framework contract describes (runtimeContractStubs, "contract"):
 //
-//	stub|helper <arch> <name> <pclntab file base name> <normalized SHA-256>
+//	stub|helper|contract <arch> <name> <pclntab file base name> <normalized SHA-256>
 //
 // and with --canon the canonical text after each line. PIE binaries are accepted (it only
 // measures; extraction rejects them).
@@ -522,7 +564,7 @@ func cmdStubpins(args []string, stdout, stderr io.Writer) error {
 				return nil, fmt.Errorf("%s: %s: the pclntab names it %s", p, f.Name, pname)
 			}
 			rel, ok := goRootFile(file)
-			if !ok || pinPackage(rel) != stubPackage(pname, rel) {
+			if !ok || pinPackage(rel) != pinDir(f.Name, stubPackage(pname, rel)) {
 				return nil, fmt.Errorf("%s: %s: the pclntab file %q is not in its package's directory", p, f.Name, file)
 			}
 			fmt.Fprintf(stdout, "%s %s %s %s %s\n", tag, b.GOARCH, f.Name, rel, stubHash(canon))
@@ -548,6 +590,14 @@ func cmdStubpins(args []string, stdout, stderr io.Writer) error {
 		for _, f := range b.Funcs {
 			if helpers[f.Name] {
 				if _, err := emit("helper", f); err != nil {
+					return err
+				}
+			}
+		}
+		// the runtime functions a framework contract describes (pinned when --contract names them)
+		for _, f := range b.Funcs {
+			if _, ok := stubKind(f.Name); runtimeContractStubs[f.Name] && !ok && !helpers[f.Name] {
+				if _, err := emit("contract", f); err != nil {
 					return err
 				}
 			}

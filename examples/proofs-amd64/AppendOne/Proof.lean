@@ -17,15 +17,23 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts
 
 namespace Proof
 
-/-- The precondition. -/
-def Pre (rt : List (Nat × Nat)) (ptr len cap : BitVec 64) (s : State) : Prop :=
+/-- The address of `uint64`'s type descriptor, the element type AppendOne passes to
+`runtime.growslice` (the `LEA` before the call loads it): the extraction's only data object. -/
+def u64Type : Nat := dataBase Extracted.program 0
+
+/-- The precondition. When the slice is full, the runtime is ready (`H`) for the call
+`growslice(ptr, len+1, cap, 1, uint64)` from AppendOne's frame (`RSP - 80` at the callee). -/
+def Pre (rt : List (Nat × Nat)) (H : RtReady) (ptr len cap : BitVec 64) (s : State) : Prop :=
   StackGuardOK s 0 ∧ StackWritable s 4176 40 ∧ Extracted.program.DataLoaded s.mem ∧
     Outside ((s.regs 4).toNat - 4176) 4216 rt ∧ (s.regs 4).toNat % 8 = 0 ∧
     len.toNat ≤ cap.toNat ∧ cap.toNat < 2 ^ 39 ∧
     ptr.toNat + 8 * cap.toNat ≤ 2 ^ 48 ∧
     Spec.Disjoint ptr.toNat (8 * cap.toNat) ((s.regs 4).toNat - 4176) 4216 ∧
     (len.toNat < cap.toNat → s.mem.accessible ptr.toNat (8 * cap.toNat) true = true) ∧
-    (0 < len.toNat → s.mem.accessible ptr.toNat (8 * len.toNat) false = true)
+    (0 < len.toNat → s.mem.accessible ptr.toNat (8 * len.toNat) false = true) ∧
+    (cap.toNat ≤ len.toNat →
+      H [ptr.toNat, len.toNat + 1, cap.toNat, 1, u64Type] (s.regs 14).toNat ((s.regs 4).toNat - 80)
+        (rtView rt s.mem))
 
 /-- Word `i` past the appended one is still zero after the store of word `L`. -/
 theorem zero_after_store {m : Arm64.Memory} {P L C x i A : Nat}
@@ -44,11 +52,12 @@ theorem copy_after_store {m m₀ : Arm64.Memory} {P Q L x i A : Nat}
 
 set_option maxRecDepth 20000 in
 set_option maxHeartbeats 1000000 in
-theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (ptr len cap x : BitVec 64)
+theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : RtReady)
+    (ptr len cap x : BitVec 64)
     (hg : GrowsliceContract64 (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.growslice") rt 4096) :
+      (Extracted.program.contractAddr "runtime.growslice") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [ptr, len, cap, x]
-      (Pre rt ptr len cap)
+      (Pre rt H ptr len cap)
       (fun s s' => (s'.regs 3).toNat = len.toNat + 1 ∧
         (len.toNat < cap.toNat → s'.regs 0 = ptr ∧ s'.regs 1 = cap ∧
           s'.mem.readLE (ptr.toNat + 8 * len.toNat) 8 = x.toNat ∧
@@ -65,8 +74,9 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (ptr le
           (∀ i, len.toNat < i → i < growCap8 (len.toNat + 1) cap.toNat →
             s'.mem.readLE ((s'.regs 0).toNat + 8 * i) 8 = 0) ∧
           MemFrame s.mem s'.mem (rt ++ [((s.regs 4).toNat - 4176, (s.regs 4).toNat + 40)]))) := by
-  intro ret hret s hs ⟨hsg, ⟨hb, ha, hw⟩, hd, hout, hal, hlc, hc, hpb, hdj, hwr, hrd⟩
+  intro ret hret s hs ⟨hsg, ⟨hb, ha, hw⟩, hd, hout, hal, hlc, hc, hpb, hdj, hwr, hrd, hHf⟩
   janus64_intro hs
+  janus_eval_nat h_ut : u64Type
   have hgl := hsg.load
   have hgb := hsg.below
   have hnw2 := hsg.noWrap
@@ -78,6 +88,9 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (ptr le
     janus64_run
     exact ⟨fun _ => by janus_frame, fun h => absurd h (by omega)⟩
   · have hle := le_growCap8 (len.toNat + 1) cap.toNat
+    have hH := hHf (by omega)
+    rw [h_ut] at hH
+    clear hHf
     by_cases h0 : len.toNat = 0
     · janus64_run until [Extracted.entry + 0x31] calls [hg.empty]
       have hdj2 := InRanges.disjoint ‹InRanges _ _ rt› hout

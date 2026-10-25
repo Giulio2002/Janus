@@ -8,6 +8,9 @@ import (scripts/asl.sh, ASL_CACHE; docs/ASL.md "Build cache").
                                     of its executables'), after `lake build` has built them
     python3 -I JanusASL/tools/asl_mod_cache.py keys    REPO_ROOT         module -> key, one per line
     python3 -I JanusASL/tools/asl_mod_cache.py show    REPO_ROOT MODULE  the canonical inputs of a key
+    python3 -I JanusASL/tools/asl_mod_cache.py gc      CACHE --max SIZE [--root REPO_ROOT]
+                                    [--grace SECONDS] [--dry-run]
+                                    evict entries (see "Eviction" below)
 
 The ArmASL model and lean-sail are cached as one entry (asl_cache_key.py). This adds one entry per
 Lean module of the JanusASL package (JanusASL.*) and of the janus package (Janus.*), so a worktree
@@ -45,6 +48,27 @@ directory and renames it into place, one publisher per key (flock), never replac
 Lake remains the judge: a restored module whose trace does not match what Lake computes here is
 simply rebuilt. Publish stores only modules of the closure of the targets just built (they are up
 to date), and only if their trace is newer than their source.
+
+**Locks.** Every entry has a lock file next to it (`<key>.lock`): publish holds it exclusively,
+restore holds it shared while it copies the entry's files and then touches the entry's use stamp
+(`<key>.use`, its last restore), and the collector removes an entry only under it, taken
+exclusively without waiting. A lock file can be removed by the collector while held, so a lock is
+retried until the path still names the locked file (as cmd/janus does). The ArmASL entries of
+scripts/asl.sh (`CACHE/<32 hex>`, `.lock`, `.use`) follow the same protocol.
+
+**Eviction** (`gc`; scripts/asl.sh runs it after every publish with `--max $ASL_CACHE_MAX`, default
+15G): first every ArmASL entry that no module entry references (an `armasl:<key>` import in its
+INPUTS.json) and that is not the checkout's own key (`--root`; both the current and the legacy
+key); then, while the cache is larger than SIZE, the least recently used entry (by its use stamp,
+else the entry's own modification time, i.e. its publication), modules and ArmASL entries alike
+except the checkout's ArmASL entry; then the ArmASL entries the evicted modules were the last to
+reference. Entries used or published within the grace period (default 3600 s) are never removed,
+which also covers a restore by an older copy of this script that takes no lock. An entry is made
+invisible in one step (renamed into a fresh `CACHE/.gc-trash-*` directory on the same filesystem,
+so a reader sees the whole entry or none, and Lake rebuilds a module whose entry vanished) and only
+then deleted; its use stamp and lock file are removed while the lock is held. Collecting only
+ever deletes: a missing entry is a miss, never a different result. Leftover `.gc-trash-*` and
+publish `.tmp-*` directories older than a day are removed too.
 
 **Trust.** As for the ArmASL entry: the cache must be writable only by users you trust, since a
 restored `.olean` is what later modules (and `janus verify --asl`) are checked against; the kernel
@@ -247,6 +271,35 @@ def outputs(p, mod):
     return res
 
 
+def lock_path(path, shared, block=True):
+    """flock path (created if missing), shared or exclusive; None if not block and it is held.
+    The collector removes lock files while holding them, so after the lock is granted the path
+    must still name the locked file; otherwise the lock is taken again on the new one."""
+    while True:
+        f = open(path, "a+")
+        try:
+            fcntl.flock(f, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | (0 if block else fcntl.LOCK_NB))
+        except BlockingIOError:
+            f.close()
+            return None
+        try:
+            if os.path.samestat(os.fstat(f.fileno()), os.stat(path)):
+                return f
+        except FileNotFoundError:
+            pass
+        f.close()
+
+
+def touch_use(e):
+    p = e + ".use"
+    try:
+        with open(p, "a"):
+            pass
+        os.utime(p, None)
+    except OSError:
+        pass
+
+
 def entry_dir(cache, key):
     return os.path.join(cache, "mods", key[:2], key)
 
@@ -271,14 +324,39 @@ def restore(ks, cache):
         if not os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
             miss += 1
             continue
-        man = read_manifest(e)
-        # tree/<package>/<path relative to the package dir>
-        if all(os.path.isfile(os.path.join(p.dir, rel)) and sha_file(os.path.join(p.dir, rel)) == h
-               for rel, h in ((r.split("/", 1)[1], h) for r, h in man.items())):
+        # Shared while copying: the collector never removes an entry being read.
+        lk = lock_path(e + ".lock", shared=True)
+        try:
+            r = restore_one(p, mod, e)
+        finally:
+            lk.close()
+        if r == "miss":
+            miss += 1
+        elif r == "same":
             same += 1
-            continue
-        ok = True
-        copied = []
+            touch_use(e)
+        elif r == "bad":
+            bad += 1
+        else:
+            hit += 1
+            touch_use(e)
+    print("asl module cache: restored %d modules, %d already current, %d not cached, %d rejected (%s)" % (hit, same, miss, bad, cache))
+
+
+def restore_one(p, mod, e):
+    """Copy the entry e of mod into p's build (the caller holds e's lock shared). Any failure
+    (a file that does not match the manifest, or cannot be read) removes every output of mod, so
+    that no copied trace can vouch for an output that was not copied: Lake then builds it."""
+    if not os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
+        return "miss"
+    man = read_manifest(e)
+    # tree/<package>/<path relative to the package dir>
+    if all(os.path.isfile(os.path.join(p.dir, rel)) and sha_file(os.path.join(p.dir, rel)) == h
+           for rel, h in ((r.split("/", 1)[1], h) for r, h in man.items())):
+        return "same"
+    copied = []
+    why = None
+    try:
         for r, h in man.items():
             rel = r.split("/", 1)[1]
             src, dst = os.path.join(e, "tree", r), os.path.join(p.dir, rel)
@@ -286,22 +364,22 @@ def restore(ks, cache):
             tmp = dst + ".asl-cache-tmp"
             shutil.copy2(src, tmp)
             if sha_file(tmp) != h:
-                ok = False
                 os.unlink(tmp)
+                why = "a copied file does not match the entry's manifest"
                 break
             os.replace(tmp, dst)
             copied.append(dst)
-        if not ok:
-            bad += 1
-            for d in copied + [os.path.join(p.dir, x) for x in outputs(p, mod)]:
-                try:
-                    os.unlink(d)
-                except FileNotFoundError:
-                    pass
-            print("asl module cache: %s: a copied file does not match the entry's manifest; Lake builds it" % mod, file=sys.stderr)
-            continue
-        hit += 1
-    print("asl module cache: restored %d modules, %d already current, %d not cached, %d rejected (%s)" % (hit, same, miss, bad, cache))
+    except OSError as ex:
+        why = "cannot copy the entry (%s)" % ex
+    if why is None:
+        return "hit"
+    for d in copied + [os.path.join(p.dir, x) for x in outputs(p, mod)]:
+        try:
+            os.unlink(d)
+        except FileNotFoundError:
+            pass
+    print("asl module cache: %s: %s; Lake builds it" % (mod, why), file=sys.stderr)
+    return "bad"
 
 
 def closure(ks, roots):
@@ -337,8 +415,7 @@ def publish(ks, cache, roots):
             skipped += 1
             continue
         os.makedirs(os.path.dirname(e), exist_ok=True)
-        with open(e + ".lock", "w") as lk:
-            fcntl.flock(lk, fcntl.LOCK_EX)
+        with lock_path(e + ".lock", shared=False):
             if os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
                 present += 1
                 continue
@@ -359,10 +436,202 @@ def publish(ks, cache, roots):
     print("asl module cache: stored %d modules, %d already cached, %d not built (%s)" % (stored, present, skipped, cache))
 
 
+# ---- eviction (gc) ----
+
+ARMASL_RE = re.compile(r"^[0-9a-f]{32}$")
+MOD_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def parse_size(t):
+    t = t.strip().upper().rstrip("B").rstrip("I")
+    mult = {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
+    if t and t[-1] in mult:
+        return int(float(t[:-1]) * mult[t[-1]])
+    return int(t)
+
+
+def tree_bytes(p):
+    n = 0
+    try:
+        st = os.lstat(p)
+    except FileNotFoundError:
+        return 0
+    n += st.st_blocks * 512
+    if os.path.isdir(p) and not os.path.islink(p):
+        for d, dirs, files in os.walk(p):
+            for x in dirs + files:
+                try:
+                    n += os.lstat(os.path.join(d, x)).st_blocks * 512
+                except FileNotFoundError:
+                    pass
+    return n
+
+
+def last_use(e):
+    t = 0.0
+    for q in (e + ".use", e):
+        try:
+            t = max(t, os.lstat(q).st_mtime)
+        except FileNotFoundError:
+            pass
+    return t
+
+
+class Entry:
+    def __init__(self, kind, path, key):
+        self.kind, self.path, self.key = kind, path, key
+        self.size = tree_bytes(path) + tree_bytes(path + ".use") + tree_bytes(path + ".lock")
+        self.used = last_use(path)
+        self.refs = set()
+        if kind == "mod":
+            try:
+                with open(os.path.join(path, "INPUTS.json")) as f:
+                    inp = json.load(f) or {}
+                for _, k in inp.get("imports", []):
+                    if isinstance(k, str) and k.startswith("armasl:"):
+                        self.refs.add(k[len("armasl:"):])
+            except (OSError, ValueError, TypeError):
+                pass
+
+
+def scan(cache):
+    out = []
+    for n in sorted(os.listdir(cache)) if os.path.isdir(cache) else []:
+        q = os.path.join(cache, n)
+        if ARMASL_RE.match(n) and os.path.isdir(q) and not os.path.islink(q):
+            out.append(Entry("armasl", q, n))
+    mods = os.path.join(cache, "mods")
+    for sh in sorted(os.listdir(mods)) if os.path.isdir(mods) else []:
+        sd = os.path.join(mods, sh)
+        if len(sh) != 2 or not os.path.isdir(sd) or os.path.islink(sd):
+            continue
+        for n in sorted(os.listdir(sd)):
+            q = os.path.join(sd, n)
+            if MOD_RE.match(n) and os.path.isdir(q) and not os.path.islink(q):
+                out.append(Entry("mod", q, n))
+    return out
+
+
+def checkout_armasl_keys(root):
+    """The checkout's ArmASL keys: the current one (asl_cache_key.py) and the legacy one that
+    scripts/asl.sh still reads (asl_cache_legacy_key)."""
+    akey = load_armasl_key(root)
+    keys = {akey.sha(akey.canonical(akey.inputs(root)).encode())[:32]}
+    pkg = os.path.join(root, "JanusASL")
+    try:
+        h = hashlib.sha256()
+        for f in (os.path.join(pkg, "vendor", "ArmASL.tar.gz.sha256"), os.path.join(root, "lean-toolchain"),
+                  os.path.join(pkg, "lakefile.toml"), os.path.join(pkg, "lake-manifest.json"),
+                  os.path.join(pkg, "sail", "split_lean.py")):
+            with open(f, "rb") as fh:
+                h.update(fh.read())
+        keys.add(h.hexdigest()[:32])
+    except OSError:
+        pass
+    return keys
+
+
+def evict(e, cache, cutoff, dry, trash):
+    """Remove entry e under its lock (exclusive, without waiting); False if it is in use or was
+    used again since the scan."""
+    if dry:
+        return True
+    lk = lock_path(e.path + ".lock", shared=False, block=False)
+    if lk is None:
+        return False
+    try:
+        if last_use(e.path) >= cutoff or not os.path.isdir(e.path):
+            return False
+        if trash[0] is None:
+            trash[0] = tempfile.mkdtemp(prefix=".gc-trash-", dir=cache)
+        os.rename(e.path, os.path.join(trash[0], "%s-%s" % (e.kind, e.key)))
+        for q in (e.path + ".use", e.path + ".lock"):  # under the lock: waiters retry on a new file
+            try:
+                os.unlink(q)
+            except FileNotFoundError:
+                pass
+        return True
+    finally:
+        lk.close()
+
+
+def gc(cache, budget, root=None, grace=3600, dry=False, now=None):
+    import time
+    now = time.time() if now is None else now
+    cutoff = now - grace
+    cache = os.path.abspath(cache)
+    keep = checkout_armasl_keys(root) if root else set()
+    ents = scan(cache)
+    total = sum(e.size for e in ents)
+    before = total
+    trash = [None]
+    removed = []
+
+    def drop(e):
+        nonlocal total
+        if e.used >= cutoff or not evict(e, cache, cutoff, dry, trash):
+            return False
+        removed.append(e)
+        total -= e.size
+        ents.remove(e)
+        return True
+
+    def unreferenced():
+        refs = set().union(*[e.refs for e in ents if e.kind == "mod"]) if ents else set()
+        for e in [x for x in ents if x.kind == "armasl" and x.key not in refs and x.key not in keep]:
+            drop(e)
+
+    unreferenced()
+    if budget is not None:
+        for e in sorted([x for x in ents if not (x.kind == "armasl" and x.key in keep)], key=lambda x: x.used):
+            if total <= budget:
+                break
+            drop(e)
+        unreferenced()
+    # Leftovers of interrupted collections and publishes (older than a day).
+    if not dry:
+        for d in [cache, os.path.join(cache, "mods")] + [os.path.join(cache, "mods", x) for x in
+                                                          (os.listdir(os.path.join(cache, "mods")) if os.path.isdir(os.path.join(cache, "mods")) else [])]:
+            if not os.path.isdir(d):
+                continue
+            for n in os.listdir(d):
+                q = os.path.join(d, n)
+                if (n.startswith(".gc-trash-") or n.startswith(".tmp-")) and os.path.isdir(q) and q != trash[0]:
+                    try:
+                        if os.lstat(q).st_mtime < now - 86400:
+                            shutil.rmtree(q, ignore_errors=True)
+                    except FileNotFoundError:
+                        pass
+        if trash[0]:
+            shutil.rmtree(trash[0], ignore_errors=True)
+    def hb(n):
+        return "%.1f GiB" % (n / 2**30) if n >= 2**30 else "%.1f MiB" % (n / 2**20)
+    print("asl module cache gc: %s %d entries (%s); %s -> %s (budget %s, grace %ds)%s" % (
+        "would remove" if dry else "removed", len(removed), hb(sum(e.size for e in removed)), hb(before),
+        hb(total), "none" if budget is None else hb(budget), grace, " (dry run)" if dry else ""))
+    return removed
+
+
+def gc_main(argv):
+    import argparse
+    ap = argparse.ArgumentParser(prog="asl_mod_cache.py gc")
+    ap.add_argument("cache")
+    ap.add_argument("--max", help="size budget (15G, 500M, bytes; 'off' for none)")
+    ap.add_argument("--root", help="checkout whose ArmASL entry is always kept")
+    ap.add_argument("--grace", type=int, default=3600, help="seconds since the last use or publication that keep an entry")
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args(argv)
+    budget = None if a.max in (None, "off", "none") else parse_size(a.max)
+    gc(a.cache, budget, root=a.root, grace=a.grace, dry=a.dry_run)
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     cmd, root = sys.argv[1], sys.argv[2]
+    if cmd == "gc":
+        gc_main(sys.argv[2:])
+        return
     ks = Keys(root)
     if cmd == "keys":
         for m in ks.modules():
