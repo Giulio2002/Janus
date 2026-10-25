@@ -38,4 +38,13 @@ case "$1" in
   # string min (examples/basic/zzconstructs2.go): runtime.strmin is executed, the comparison it
   # calls is a contract (Janus/Contracts/Cmpstring.lean, CmpstringAmd64.lean)
   MinStr) printf '%s\n' --contract runtime.cmpstring ;;
+  # the interface examples (examples/basic/iface.go): the Go 1.26 interface runtime entry points
+  # they call (Janus/Contracts/Iface.lean, IfaceAmd64.lean; pinned to the runtime's code), and
+  # the static itab the assertion and switch theorems name
+  Box) printf '%s\n' --contract runtime.convT64 ;;
+  AsHasher) printf '%s\n' --contract runtime.typeAssert --targets \
+      'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher' ;;
+  Classify) printf '%s\n' --contract runtime.interfaceSwitch --targets \
+      'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher' ;;
+  Equal) printf '%s\n' --contract runtime.efaceeq ;;
 esac

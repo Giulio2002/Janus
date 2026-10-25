@@ -60,19 +60,19 @@ func statFSExisting(p string) fsInfo {
 }
 
 // defaultTestParallel is the -parallel default for this package (unless -parallel is given):
-// min(GOMAXPROCS / 4, (MemAvailable - 40 GiB) / 20 GiB, 2), at least 1, the budget of
-// scripts/lib/parallel.sh (a test that verifies can hold ~20 GB: a cold kernel replay of the
-// framework, the proof's Lean process and the auditor).
+// min(GOMAXPROCS / 6, (MemAvailable - 40 GiB) / 10 GiB, 8), at least 1, the budget of
+// scripts/lib/parallel.sh (a verifying test holds 0.2-5 GB: a cold kernel replay of the framework
+// 3 GB, the largest proof 4.8 GB; docs/TESTING.md "Measured peaks").
 func defaultTestParallel() int {
-	n := runtime.GOMAXPROCS(0) / 4
-	if n > 2 {
-		n = 2 // at most 2 heavy jobs at once on a shared host
+	n := runtime.GOMAXPROCS(0) / 6
+	if n > 8 {
+		n = 8
 	}
 	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
 		for _, line := range strings.Split(string(b), "\n") {
 			if f := strings.Fields(line); len(f) >= 2 && f[0] == "MemAvailable:" {
 				if kb, err := strconv.Atoi(f[1]); err == nil {
-					if m := (kb - 40*1024*1024) / (20 * 1024 * 1024); m < n {
+					if m := (kb - 40*1024*1024) / (10 * 1024 * 1024); m < n {
 						n = m
 					}
 				}
@@ -95,13 +95,40 @@ func TestMain(m *testing.M) {
 	// change, so tests that use it can run in parallel).
 	os.Setenv("JANUS_CACHE_DIR", testCacheDir())
 	os.Setenv("JANUS_ROOT", "")
+	// The parallel tests are scheduled longest first by this package (order_test.go), with
+	// -parallel (or its default) slots; testing's own limit is raised so that it never binds first.
 	explicit := false
 	flag.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "test.parallel" })
-	if !explicit {
-		_ = flag.Set("test.parallel", strconv.Itoa(defaultTestParallel()))
+	testSlots = defaultTestParallel()
+	if explicit {
+		if f := flag.Lookup("test.parallel"); f != nil {
+			if n, err := strconv.Atoi(f.Value.String()); err == nil && n > 0 {
+				testSlots = n
+			}
+		}
 	}
+	_ = flag.Set("test.parallel", "1000")
 	wd, _ := os.Getwd()
 	repoRoot = filepath.Clean(filepath.Join(wd, "..", ".."))
+	// A new framework version: start the test cache from the user's cache's build of it (and its
+	// replay verdict) when that has one, instead of building and replaying it again (seed_test.go).
+	if !testing.Short() {
+		if _, err := findLake(); err == nil {
+			src := os.Getenv("JANUS_TEST_SEED_CACHE")
+			if src == "" {
+				if d, err := os.UserCacheDir(); err == nil {
+					src = filepath.Join(d, "janus")
+				}
+			}
+			if src != "" && src != "off" && filepath.Clean(src) != testCacheDir() {
+				if ok, err := seedFramework(src, testCacheDir()); err != nil {
+					fmt.Fprintf(os.Stderr, "janus tests: not seeding the test cache from %s: %v\n", src, err)
+				} else if ok {
+					fmt.Fprintf(os.Stderr, "janus tests: seeded the test cache's framework build from %s\n", src)
+				}
+			}
+		}
+	}
 	dir, err := os.MkdirTemp("", "janus-test-")
 	if err != nil {
 		panic(err)
@@ -520,7 +547,7 @@ func TestCheckAndTamper(t *testing.T) {
 // TestVerify runs Lean (also with -short). It needs lake on PATH (or ~/.elan/bin); the Janus
 // library of the checkout is built on first use.
 func TestVerify(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLean(t)
 	dir := mustExtract(t, "example.com/basic.Get")
 	proofs := t.TempDir()
@@ -591,7 +618,7 @@ func TestVerify(t *testing.T) {
 	t.Run("rejected", func(t *testing.T) {
 		for _, c := range rejected {
 			t.Run(c.name, func(t *testing.T) {
-				t.Parallel()
+				defer parallel(t)()
 				dir := mustExtract(t, "example.com/basic.Get")
 				report := filepath.Join(dir, "verified.json")
 				os.WriteFile(report, []byte("{}"), 0o644)

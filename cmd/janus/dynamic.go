@@ -147,7 +147,10 @@ func (r *reacher) addTarget(addr uint64, via, from string) bool {
 		r.addStub(g, k)
 		return true
 	}
-	if r.x.contractTarget(r.cm, r.contractSeen, g) {
+	if isContract, err := r.x.contractTarget(r.cm, r.contractSeen, g); isContract {
+		if err != nil && r.err == nil {
+			r.err = err
+		}
 		return true
 	}
 	if !r.seen[g.Addr] {
@@ -207,7 +210,10 @@ func (r *reacher) drain() error {
 				r.addStub(g, k)
 				continue
 			}
-			if r.x.contractTarget(r.cm, r.contractSeen, g) {
+			if isContract, err := r.x.contractTarget(r.cm, r.contractSeen, g); isContract {
+				if err != nil {
+					return err
+				}
 				continue
 			}
 			if why, ok := omittedCallees[g.Name]; ok {
@@ -224,7 +230,10 @@ func (r *reacher) drain() error {
 			if _, isStub := stubKind(g.Name); isStub || r.seen[g.Addr] {
 				continue
 			}
-			if r.x.contractTarget(r.cm, r.contractSeen, g) {
+			if isContract, err := r.x.contractTarget(r.cm, r.contractSeen, g); isContract {
+				if err != nil {
+					return err
+				}
 				continue
 			}
 			r.seen[g.Addr] = true

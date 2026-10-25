@@ -36,7 +36,7 @@ about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of
 | | |
 |---|---|
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
-| `janus-asl-check` | after the FP merge (agent/asl at e6a7455): **562,465 agree, 19,434 gap, 1,857 MISMATCH**. Every MISMATCH is a scalar floating-point word (FMADD, FMUL, SCVTF, FCMP, FCVT*, ...) that Janus now decodes while the vendored ASL slice (`keep.txt`, vendor/ArmASL.tar.gz) still excludes its decoder (`janus decodes, ASL: janus-excluded decode_f*_float_*`), so these are slice coverage, not semantic disagreements; regenerating the slice with the scalar FP functions is pending. Before the FP merge: 562,288 agree, 21,468 gap, 0 MISMATCH. `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 7 min on 48 cores |
+| `janus-asl-check` | **566,027 agree, 17,729 gap, 0 MISMATCH** (slice with the scalar floating-point, crypto, CRC and permute decoders, vendored sha256 `cd26b412…`; FPCR/FPSR set from the case and FPSR compared after the step); `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 1 h with 12 tasks |
 | proofs | **55 audited theorems** plus `JanusASL.Verify.classify_sound` (an explicit list in JanusASL/Audit.lean and audit/rt-asl/AuditStrict.lean, with every statement printed): 48 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
 | `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
 
@@ -470,6 +470,12 @@ upstream (none has been filed):
 6. **Exact reals.** `FakeReal.lean` now uses `real := Rat` (exact) instead of `Float`. With `Float`,
    64-bit UDIV/SDIV (`RoundTowardsZero(Real(a)/Real(b))`) lost precision, and `round_down` was
    `toUInt64`, which mapped negative values to 0.
+7. **Square root.** The toolchain's `sqrt_real` goes through `Float`, which FSQRT reaches once
+   the scalar floating-point instructions are in the slice. `scripts/asl.sh gen` replaces it
+   mechanically (JanusASL/sail/fakereal_sqrt.py) by the round-to-odd approximation at absolute
+   precision 2^-1100: `m/2^1100` when `m = ⌊√x·2^1100⌋` is exact, `(2m+1)/2^1101` otherwise.
+   Every boundary FPRound tests for binary16/32/64 is a multiple of 2^-1100, so FPRound of it
+   equals FPRound of the exact root (result and exceptions). The corpus FSQRT cases agree.
 
 Bugs 4–6 each produced a model that compiled without complaint but gave wrong results. Only the
 corpus comparison found them. That comparison is the reason the check exists alongside the
@@ -483,8 +489,10 @@ The whole arm-v9.4-a model does not fit in Lean: the full `BranchExcSys` decode 
 * **`slice.py`** works on sail-arm's source files. It keeps every decode-clause *pattern* of the
   classes DataProcImm, BranchExcSys, LoadStore, DataProcReg and DataProcFPSIMD, so the decode
   if-chains stay exactly as Arm wrote them. It keeps the *bodies* of the decode functions in
-  `keep.txt`, which lists 343 functions: the integer instructions, atomics, CAS/CASP, LDAR/STLR/LDAPR,
-  exclusives, PRFM/PRFUM/RPRFM, CLREX, MRS, SYS, HINT and the SIMD set Janus decodes. Every other
+  `keep.txt`, which lists 417 functions: the integer instructions, atomics, CAS/CASP, LDAR/STLR/LDAPR,
+  exclusives, PRFM/PRFUM/RPRFM, CLREX, MRS, SYS, HINT, the SIMD set Janus decodes, the scalar
+  floating-point instructions (not the fixed-point or half-precision forms, which Janus rejects),
+  and SHA1/SHA256/SHA512, EOR3/RAX1/XAR/BCAX, PMULL, CRC32/CRC32C and ZIP/UZP/TRN. Every other
   clause body becomes `throw(Error_ImplementationDefined("janus-excluded …"))`. The script also
   empties the AArch32, SVE and SME decoders, and turns 22 literal-pattern clauses into bit-list
   patterns. Literal patterns are what blew `BranchExcSys` up to 207 MB.
@@ -604,6 +612,29 @@ that a library option or the toolchain changes them. Repeated after merging main
 the same cache: the build reused 27 unchanged entries, built and published the other 110 (49 min 54 s
 under a loaded host), and a fresh copy of that commit then restored 137 modules and built JanusASL
 in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
+
+**Eviction** (`asl_mod_cache.py gc CACHE --max SIZE [--root REPO] [--grace S] [--dry-run]`). The
+module entries and the ArmASL entries had no eviction (a shared cache reached 42 GB). `scripts/asl.sh`
+now runs the collector after every publish with `--max $ASL_CACHE_MAX` (default `15G`; `off`
+disables it) and `--root` the checkout. It removes, in order: every ArmASL entry that no module
+entry references (an `armasl:<key>` import in its `INPUTS.json`) and that is not the checkout's
+current or legacy key; then, while the cache is over budget, the least recently used entry (by the
+use stamp `<key>.use` that every restore touches, else the entry's publication time), modules and
+ArmASL entries alike, never the checkout's ArmASL entry; then the ArmASL entries the evicted
+modules were the last to reference. Nothing used or published within `--grace` (default 1 h) is
+removed. Concurrency: restore (both the module restore and `scripts/asl.sh`'s ArmASL restore) now
+holds the entry's lock (`<key>.lock`) shared while it copies, publish holds it exclusively, and the
+collector removes an entry only under it, taken exclusively without waiting (an entry being read is
+skipped). An entry is renamed into a fresh `CACHE/.gc-trash-*` directory in one step (a reader sees
+it whole or not at all) and deleted after; its lock and use stamp are removed while held, and every
+locker re-checks that the path still names the file it locked. A module restore that cannot copy
+an entry completely removes all of that module's outputs, so no copied trace vouches for a missing
+output, and Lake builds it. Collecting only deletes: a removed entry is a miss.
+`JanusASL/tools/test_asl_mod_cache_gc.sh` tests the order, the budget, the grace, the use stamp,
+the lock of a reader, the lock retry and the leftovers on fixtures; with `--sample CACHE` it copies
+CACHE's entries for the checkout's modules into mktemp (CACHE is only read) and races restores
+against `gc --max 0 --grace 0` in a loop: on the shared cache's 80 entries for this commit, five
+rounds restored 41, 80, 80, 80 and 6 modules whole and the rest not at all, never a mixture.
 
 ## The check (JanusASL/Check.lean)
 

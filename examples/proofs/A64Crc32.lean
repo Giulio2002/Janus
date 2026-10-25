@@ -31,15 +31,18 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec
 namespace Proof
 
 set_option linter.unusedSimpArgs false
-abbrev head : Nat := segAddr Extracted.program "hash/crc32.ieeeUpdate.abi0" + 0xc
-abbrev R : Nat := 0xEDB88320
-/-- The return address of the `BL` to `ieeeUpdate.abi0` in `hash/crc32.ieeeUpdate`. -/
-abbrev retUpd : Nat := segAddr Extracted.program "hash/crc32.ieeeUpdate" + 0x20
-/-- The return address of the `BL` to `hash/crc32.ieeeUpdate` in `A64Crc32`. -/
-abbrev retMain : Nat := segAddr Extracted.program "example.com/basic.A64Crc32" + 0x24
+/-- The loop head `CMP $16, R11` of `hash/crc32.ieeeUpdate.abi0` (offset `0xc`). Code addresses
+are evaluated from the extraction (`janus_eval%`), so a relinked binary needs no edit. -/
+abbrev head : Nat := janus_eval% (segAddr Extracted.program "hash/crc32.ieeeUpdate.abi0" + 0xc)
 
-/-- Evaluate the two code addresses to literals. -/
-macro "crc_addrs" : tactic => `(tactic| try simp only [retUpd, retMain, reduceSegAddr, Nat.reduceAdd])
+/-- The return address into the ABI wrapper `hash/crc32.ieeeUpdate` (after its `BL`, offset `0x20`),
+as a numeral evaluated from the extraction (a macro, so `janus_run` sees a literal). -/
+local macro "wrapRet" : term =>
+  `(janus_eval% (segAddr Extracted.program "hash/crc32.ieeeUpdate" + 0x20))
+
+/-- The return address into `A64Crc32` (after its `BL`, offset `0x24`), as a numeral. -/
+local macro "crcRet" : term => `(janus_eval% (Extracted.entry + 0x24))
+abbrev R : Nat := 0xEDB88320
 
 /-- `X < 2^32` for the CRC register terms of the tail. -/
 macro "crc_lt" : tactic => `(tactic| repeat (first
@@ -77,12 +80,12 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
       acc = CRC.update R s.mem ((crc.toNat % 2 ^ 32) ^^^ 0xFFFFFFFF) p.toNat (16 * i) →
       S.pc = BitVec.ofNat 64 head → S.regs 9 = BitVec.ofNat 64 acc →
       S.regs 13 = BitVec.ofNat 64 (p.toNat + 16 * i) → S.regs 11 = BitVec.ofNat 64 (n.toNat - 16 * i) →
-      S.regs 30 = BitVec.ofNat 64 retUpd → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
+      S.regs 30 = BitVec.ofNat 64 wrapRet → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 →
       S.mem = (((((((((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
                                           (BitVec.toNat (s.regs 29))).writeLE
                                       (BitVec.toNat s.sp + 16) 8 p.toNat).writeLE
-                                  (BitVec.toNat s.sp - 112) 8 retMain).writeLE
+                                  (BitVec.toNat s.sp - 112) 8 crcRet).writeLE
                               (BitVec.toNat s.sp - 120) 8 (BitVec.toNat s.sp - 56)).writeLE
                           (BitVec.toNat s.sp - 32) 8 p.toNat).writeLE
                       (BitVec.toNat s.sp - 104) 4 (~~~crc).toNat).writeLE
@@ -93,7 +96,6 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
         (s'.regs 0).toNat % 2 ^ 32 =
           CRC.update R s.mem ((crc.toNat % 2 ^ 32) ^^^ 0xFFFFFFFF) p.toNat n.toNat ^^^ 0xFFFFFFFF) := by
   intro S i acc hq hi hacc hpc h9 h13 h11 h30 h29 hsp h28 h18 hm
-  simp only [retUpd, retMain, reduceSegAddr, Nat.reduceAdd] at h30 hm
   generalize hk : n.toNat - 16 * i = r at h11 hq
   have hA : acc < 2 ^ 32 := hacc ▸ CRC.update_lt (by decide) _ _ _ _
     (Nat.xor_lt_two_pow (Nat.mod_lt _ (by decide)) (by decide))
@@ -238,12 +240,12 @@ theorem loop (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
       acc = CRC.update R s.mem ((crc.toNat % 2 ^ 32) ^^^ 0xFFFFFFFF) p.toNat (16 * i) →
       S.pc = BitVec.ofNat 64 head → S.regs 9 = BitVec.ofNat 64 acc →
       S.regs 13 = BitVec.ofNat 64 (p.toNat + 16 * i) → S.regs 11 = BitVec.ofNat 64 (n.toNat - 16 * i) →
-      S.regs 30 = BitVec.ofNat 64 retUpd → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
+      S.regs 30 = BitVec.ofNat 64 wrapRet → S.regs 29 = s.sp - 120#64 → S.sp = s.sp - 112#64 →
       S.regs 28 = s.regs 28 → S.regs 18 = s.regs 18 →
       S.mem = (((((((((s.mem.writeLE (BitVec.toNat s.sp - 48) 8 ret).writeLE (BitVec.toNat s.sp - 56) 8
                                           (BitVec.toNat (s.regs 29))).writeLE
                                       (BitVec.toNat s.sp + 16) 8 p.toNat).writeLE
-                                  (BitVec.toNat s.sp - 112) 8 retMain).writeLE
+                                  (BitVec.toNat s.sp - 112) 8 crcRet).writeLE
                               (BitVec.toNat s.sp - 120) 8 (BitVec.toNat s.sp - 56)).writeLE
                           (BitVec.toNat s.sp - 32) 8 p.toNat).writeLE
                       (BitVec.toNat s.sp - 104) 4 (~~~crc).toNat).writeLE
@@ -265,10 +267,6 @@ theorem loop (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
         h30 h29 hsp h28 h18 hm
     have hA : acc < 2 ^ 32 := hacc ▸ CRC.update_lt (by decide) _ _ _ _
       (Nat.xor_lt_two_pow (Nat.mod_lt _ (by decide)) (by decide))
-    have h30' := h30
-    have hm' := hm
-    simp only [retUpd, retMain, reduceSegAddr, Nat.reduceAdd] at h30' hm'
-    clear h30 hm
     have hacc' : crc32Op false 64
         (crc32Op false 64 (acc % 4294967296) (s.mem.readLE (p.toNat + 16 * i) 8) % 18446744073709551616 %
           4294967296) (s.mem.readLE (p.toNat + 16 * i + 8) 8) =
@@ -279,7 +277,6 @@ theorem loop (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
       simp only [Nat.add_assoc, Bool.false_eq_true, ite_false]
     janus_run until [head]
     apply ih _ (i + 1) _ (by omega) (by omega) rfl
-    all_goals crc_addrs
     all_goals janus_simp [hacc']
     all_goals first
       | omega
@@ -320,7 +317,6 @@ theorem correctness (crc p n cap : BitVec 64) :
   janus_run until [head]
   exact loop crc p n cap ret hret s hlen hp hp' hb ha hal hw hd (n.toNat / 16) _ 0 _ (by omega) (by omega) rfl
     (by janus_simp) (by janus_simp [update_zero]; rw [show (4294967296 : Nat) = 2 ^ 32 from rfl, not_mod32']) (by janus_simp) (by janus_simp <;> simp)
-    (by crc_addrs; try janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp)
-    (by crc_addrs; try janus_simp)
+    (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp) (by janus_simp)
 
 end Proof

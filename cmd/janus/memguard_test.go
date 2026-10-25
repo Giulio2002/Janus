@@ -128,6 +128,7 @@ func checkResourceLimit(t *testing.T, out string, report string) {
 // process under a 1 GiB limit: directly (the detected mechanism), and nested in a job-level guard
 // of scripts/lib/memguard.sh (janus then limits its jobs with child cgroups of that guard).
 func TestMemGuardKillsHungryProof(t *testing.T) {
+	defer parallel(t)()
 	needLean(t)
 	bin := buildJanusBinary(t)
 	base := envWith("JANUS_MEM_MAX=1G", "JANUS_MEMGUARD=", "JANUS_MEMGUARD_CGROUP=", "JANUS_MEMGUARD_VERBOSE=1")
@@ -186,6 +187,7 @@ func TestMemGuardKillsHungryProof(t *testing.T) {
 // TestMemGuardNormalVerify: honest proofs verify under the default limit, and verified.json
 // records the guard and the measured peak.
 func TestMemGuardNormalVerify(t *testing.T) {
+	defer parallel(t)()
 	needLean(t)
 	bin := buildJanusBinary(t)
 	// The configured limit (JANUS_MEM_MAX, as CI sets it on small runners) or the default.
@@ -260,6 +262,7 @@ func TestMemGuardFailureDiag(t *testing.T) {
 // OOM-killed (137) with the summary line, nested guards report only their own kills, and no
 // cgroup is left behind. The memory hog is bash holding a 600 MiB string under a 300M limit.
 func TestMemguardShell(t *testing.T) {
+	defer parallel(t)()
 	lib := filepath.Join(repoRoot, "scripts", "lib", "memguard.sh")
 	mech, err := exec.Command("bash", lib, "mechanism").Output()
 	m := strings.TrimSpace(string(mech))
