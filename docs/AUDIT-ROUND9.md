@@ -207,13 +207,17 @@ are present.
 
 ## Regression status
 
-Run on the merged tree, one heavy job at a time:
+On the tree merged with main `a3626db` (HEAD of agent/redteam9), one heavy job at a time
+(`LEAN_NUM_THREADS=4`, load < 70):
 
 | Suite | Result |
 |---|---|
-| `audit/round9/run-round9.sh` | all rows as expected |
-| `scripts/verify-all-examples.sh -j 1` | all examples Verified (MallocFast included) |
-| `go test ./cmd/...` | ok |
-| `audit/run-all.sh`, `audit/round{2..8}` runners | all rows as expected |
+| `audit/round9/run-round9.sh` | all rows as expected (C1a–d, C2a–b, M1a–b, S1, MP, G1, SAT, SAT_selftest, H2a–c, I1g, D1, MG), 526 s |
+| `scripts/verify-all-examples.sh -j 1` | all ok: 74 arm64 items, 74 amd64 functions, 10 assembly items (MallocFast, MakeAdder included) |
+| `go test -count=1 -timeout 50m ./cmd/...` | ok, 584 s |
+| `audit/run-all.sh -j 1` | ok, 367 s |
+| `audit/round{2,3,4,5,6,7,8}` runners, `audit/rt-model/run.sh` | all rows as expected |
 
-(See the commit message for timings.)
+The first post-merge run caught two things, both fixed: main's new example `MakeAdder` still used
+the old contract shape, and the M1 probe was nondeterministic (whether the main goroutine runs on
+m0 after init varies; the row now probes during package init).
