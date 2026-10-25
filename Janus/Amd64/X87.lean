@@ -393,7 +393,6 @@ structure St where
   regs : Nat → Nat := fun _ => 0
   top : Nat := 0
   tags : Nat → Bool := fun _ => false
-  cw : Nat := 0x37F
   sw : Nat := 0
   c0 : Option Bool := some false
   c1 : Option Bool := some false
@@ -402,9 +401,9 @@ structure St where
 
 instance : Inhabited St := ⟨{}⟩
 
-/-- A pending unmasked exception (`ES` set, or a raised flag whose mask is clear): a waiting
-x87 instruction takes `#MF` before executing. -/
-def St.pending (t : St) : Bool := t.sw / 128 % 2 = 1 || t.sw % 64 &&& unmasked t.cw != 0
+/-- A pending unmasked exception (`ES` set, or a raised flag whose mask is clear in the
+control word `cw`): a waiting x87 instruction takes `#MF` before executing. -/
+def St.pending (t : St) (cw : Nat) : Bool := t.sw / 128 % 2 = 1 || t.sw % 64 &&& unmasked cw != 0
 
 /-- The physical register of `ST(i)`. -/
 def St.phys (t : St) (i : Nat) : Nat := (t.top + i) % 8

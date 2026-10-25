@@ -29,7 +29,7 @@ def WPre (a : BitVec 64) (t : State) : Prop :=
     frameB t.mem a.toNat + 16 ≤ 2 ^ 48 ∧ t.mem.accessible (frameB t.mem a.toNat) 16 false = true ∧
     Away t (frameB t.mem a.toNat) 16 ∧
     frameR t.mem a.toNat + 10 ≤ 2 ^ 48 ∧ t.mem.accessible (frameR t.mem a.toNat) 10 true = true ∧
-    Away t (frameR t.mem a.toNat) 10 ∧ X87.Idle t.x87
+    Away t (frameR t.mem a.toNat) 10 ∧ X87.Idle t.x87 ∧ t.fpucw = 0x37F
 
 def WPost (a : BitVec 64) (t t' : State) : Prop :=
   MemFrame (t.mem.writeLE (frameR t.mem a.toNat) 10
@@ -52,7 +52,7 @@ set_option maxHeartbeats 4000000 in
 theorem wrapper_spec (T a : BitVec 64) :
     CEnsuresC Extracted.program (TopOfStack T) wrapper [a] (WPre a) (WPost a) := by
   intro ret hret t hs ⟨⟨hal, hb, htop, hacc⟩, ha, hfa, hd, hab, haa, had, hbb, hba, hbd, hrb, hra, hrd,
-    ⟨hcw, htags, hes, htp⟩⟩
+    ⟨htags, hes, htp⟩, hcw⟩
   apply ReturnsC.of_reaches
   have h_rip := hs.rip
   have h_ret := hs.ret
@@ -86,7 +86,7 @@ def G (s : State) : Prop :=
     frameA s.mem (s.regs 3).toNat + 16 ≤ 2 ^ 48 ∧ GoKept s (frameA s.mem (s.regs 3).toNat) 16 false ∧
     frameB s.mem (s.regs 3).toNat + 16 ≤ 2 ^ 48 ∧ GoKept s (frameB s.mem (s.regs 3).toNat) 16 false ∧
     frameR s.mem (s.regs 3).toNat + 10 ≤ 2 ^ 48 ∧ GoKept s (frameR s.mem (s.regs 3).toNat) 10 true ∧
-    X87.Idle s.x87
+    X87.Idle s.x87 ∧ s.fpucw = 0x37F
 
 def E (s : State) : Memory :=
   s.mem.writeLE (frameR s.mem (s.regs 3).toNat) 10
@@ -98,7 +98,7 @@ abbrev Shared (s : State) : List (Nat × Nat) :=
     (s.fsBase.toNat - 8, s.fsBase.toNat)]
 
 def GoPre (a b r : BitVec 64) (s : State) : Prop :=
-  StackGuardOK s 40 ∧ StackWritable s 80 8 ∧ TlsG s ∧ X87.Idle s.x87 ∧
+  StackGuardOK s 40 ∧ StackWritable s 80 8 ∧ TlsG s ∧ X87.Idle s.x87 ∧ s.fpucw = 0x37F ∧
   a.toNat + 16 ≤ 2 ^ 48 ∧ s.mem.accessible a.toNat 16 false = true ∧
   b.toNat + 16 ≤ 2 ^ 48 ∧ s.mem.accessible b.toNat 16 false = true ∧
   r.toNat + 10 ≤ 2 ^ 48 ∧ s.mem.accessible r.toNat 10 true = true ∧
@@ -125,7 +125,7 @@ set_option maxHeartbeats 20000000 in
 theorem go_spec (a b r : BitVec 64) :
     EnsuresC Extracted.program (CgoSpec wrapper G E) Extracted.entry [a, b, r] (GoPre a b r)
       (fun s s' => s'.mem.readLE r.toNat 10 = prod s.mem a.toNat b.toNat) := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hb, htop, hst⟩, ⟨hfs, hfsr, hfsg⟩, hx87, hab, haa, hbb, hba,
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hb, htop, hst⟩, ⟨hfs, hfsr, hfsg⟩, hx87, hfcw, hab, haa, hbb, hba,
     hrb, hra, hfa, hfv, haf, hav, hdg, hdt, hdf, hda, hdA, hdB, hdR, hdRA⟩
   apply ReturnsC.of_reaches
   janus64_intro hs
@@ -164,7 +164,7 @@ theorem go_spec (a b r : BitVec 64) :
     try simp only [Shared, outside_cons, outside_nil, and_true] at hdA hdB hdR
     refine ⟨by omega, ⟨?_, by omega, by omega, by omega, by omega⟩, by omega,
       ⟨haa, by omega, by omega, by omega, by omega⟩, by omega, ⟨hba, by omega, by omega, by omega, by omega⟩,
-      by omega, ⟨hra, by omega, by omega, by omega, by omega⟩, hx87⟩
+      by omega, ⟨hra, by omega, by omega, by omega, by omega⟩, hx87, hfcw⟩
     janus64_disch
   rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, x87, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   simp only [E, frameA, frameB, frameR, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
@@ -172,8 +172,6 @@ theorem go_spec (a b r : BitVec 64) :
     ↓reduceIte, Nat.reduceEqDiff, h32, h80] at hmf h4 h5 h14 h15 hfs1 hfs2 hfsr' hfsg'
   have hfsa' : (fs + BitVec.ofNat 64 18446744073709551608).toNat = fs.toNat - 8 := by
     rw [BitVec.toNat_add, BitVec.toNat_ofNat]; omega
-  rw [hmf.accessible] at hfsr'
-  simp only [Janus.Arm64.Memory.accessible_writeLE] at hfsr'
   -- the frame words (and so the result pointer) as plain values
   revert hmf
   janus64_simp [h32, h80]
@@ -222,7 +220,7 @@ theorem go_spec (a b r : BitVec 64) :
 set_option maxHeartbeats 4000000 in
 theorem refines : (CgoCall Extracted.program).Refines (CgoSpec wrapper G E) := by
   refine CgoCall.refines (fun T a => wrapper_spec T a) ?_ ?_ ?_ ?_
-  · rintro s t ret ⟨hb, ⟨hacc, hout⟩, hab, ⟨haacc, haout⟩, hbb, ⟨hbacc, hbout⟩, hrb, ⟨hracc, hrout⟩, hx⟩ he
+  · rintro s t ret ⟨hb, ⟨hacc, hout⟩, hab, ⟨haacc, haout⟩, hbb, ⟨hbacc, hbout⟩, hrb, ⟨hracc, hrout⟩, hx, hc⟩ he
     have hsep := he.stackSep _ _ _ hacc
     have hasep := he.stackSep _ _ _ haacc
     have hbsep := he.stackSep _ _ _ hbacc
@@ -236,12 +234,12 @@ theorem refines : (CgoCall Extracted.program).Refines (CgoSpec wrapper G E) := b
     simp only [outside_cons, outside_nil, and_true, cgoCStack, Janus.Amd64.GoABI.regSP]
       at hsep hasep hbsep hrsep
     simp only [WPre, frameA, frameB, frameR, Away] at hab haacc haout hbb hbacc hbout hrb hracc hrout hasep hbsep hrsep ⊢
-    rw [hk0, hk1, hk2, he.x87]
+    rw [hk0, hk1, hk2, he.x87, he.fpucw]
     exact ⟨he.stack, hb, he.keptAcc _ _ _ ⟨hacc, hout⟩, by omega, hab,
       he.keptAcc _ _ _ ⟨haacc, haout⟩, by omega, hbb, he.keptAcc _ _ _ ⟨hbacc, hbout⟩, by omega,
-      hrb, he.keptAcc _ _ _ ⟨hracc, hrout⟩, by omega, hx⟩
+      hrb, he.keptAcc _ _ _ ⟨hracc, hrout⟩, by omega, hx, hc⟩
   · intro s _; rfl
-  · rintro s t ret t' ⟨hb, ⟨hacc, hout⟩, hab, ⟨haacc, haout⟩, hbb, ⟨hbacc, hbout⟩, hrb, ⟨hracc, hrout⟩, _⟩
+  · rintro s t ret t' ⟨hb, ⟨hacc, hout⟩, hab, ⟨haacc, haout⟩, hbb, ⟨hbacc, hbout⟩, hrb, ⟨hracc, hrout⟩, _, _⟩
       he _ hpost b hb' hbacc'
     have hsep := he.stackSep b 1 false hbacc'
     have h1 := hpost.readLE b 1 (by
@@ -270,7 +268,7 @@ theorem refines : (CgoCall Extracted.program).Refines (CgoSpec wrapper G E) := b
     · have := he.kept b 1 ⟨hbacc', hb'⟩
       simp only [Janus.Arm64.Memory.readLE_one] at this
       exact BitVec.eq_of_toNat_eq this
-  · rintro s ⟨hb, ⟨hacc, hout⟩, hab, -, hbb, -, hrb, ⟨hracc, hrout⟩, _⟩ b _ hna
+  · rintro s ⟨hb, ⟨hacc, hout⟩, hab, -, hbb, -, hrb, ⟨hracc, hrout⟩, _, _⟩ b _ hna
     rw [E, Janus.Arm64.Memory.bytes_writeLE, ite_eq_right]
     intro ⟨h1, h2⟩
     have := Janus.Arm64.Memory.accessible_sub _ hracc (Or.inl rfl) (a := b) (n := 1) (by omega) (by omega)

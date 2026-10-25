@@ -9,11 +9,11 @@ value in the low 10) and returns the result in `ST(0)`.
 
 **Guarantee.** For all 80-bit `a` and `b`, every System V call of the gcc-compiled `ld_mul`
 with `a` at `[RSP+8]` and `b` at `[RSP+24]` (the stack readable up to `RSP+40`) and the x87 FPU
-in its call state (`X87.Idle`: empty register stack, control word `0x037F`, no pending
-exception) returns without faulting, restores what the C calling convention requires
+in its call state (`X87.Idle`: empty register stack, no pending exception; control word
+`State.fpucw = 0x037F`) returns without faulting, restores what the C calling convention requires
 (`CReturn`), and leaves exactly one register in use: `ST(0)` holds `X87.binop .mul 64 .rne a b`,
-the double-extended product rounded to nearest at 64-bit precision; the control word is
-unchanged. `ieee` restates the result through `X87.std` as IEEE 754 multiplication on the
+the double-extended product rounded to nearest at 64-bit precision (`CReturn` includes the
+unchanged control word). `ieee` restates the result through `X87.std` as IEEE 754 multiplication on the
 format (15, 63) (`Janus.Float.mul`, `X87.binop_mul_ieee`) for supported operands.
 -/
 
@@ -24,16 +24,16 @@ namespace Proof
 /-- What `ld_mul` leaves: the product in `ST(0)`, the only register in use, and the control
 word unchanged. -/
 def LdResult (r : Nat) (t : X87.St) : Prop :=
-  t.get 0 = some r ∧ (∀ i, t.tags i = decide (i = t.top)) ∧ t.top < 8 ∧ t.cw = 0x37F
+  t.get 0 = some r ∧ (∀ i, t.tags i = decide (i = t.top)) ∧ t.top < 8
 
 set_option maxHeartbeats 2000000 in
 theorem correctness (a b : Nat) :
     CEnsures Extracted.program Extracted.entry []
-      (fun s => CStack s 0 40 ∧ X87.Idle s.x87 ∧
+      (fun s => CStack s 0 40 ∧ X87.Idle s.x87 ∧ s.fpucw = 0x37F ∧
         s.mem.readLE ((s.regs 4).toNat + 8) 10 = a ∧ s.mem.readLE ((s.regs 4).toNat + 24) 10 = b)
       (fun _ s' => LdResult (X87.binop .mul 64 .rne a b).res s'.x87) := by
   simp only [LdResult]
-  intro ret hret s hs ⟨⟨_, _, hnw, hacc⟩, ⟨hcw, htags, hes, htop⟩, ha, hb⟩
+  intro ret hret s hs ⟨⟨_, _, hnw, hacc⟩, ⟨htags, hes, htop⟩, hcw, ha, hb⟩
   have h_rip := hs.rip
   have h_ret := hs.ret
   have h_df := hs.df

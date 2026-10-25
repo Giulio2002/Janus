@@ -94,8 +94,9 @@ def St.setCC (t : St) (c : Nat) (c1 : Option Bool) : St :=
 def execWaiting (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat)
     (cond : Nat → Option Bool) : Except Fault State :=
   let t := s.x87
-  let rm := rounding t.cw
-  let trap (o : XR) : Bool := o.traps &&& unmasked t.cw != 0
+  let cw := s.fpucw.toNat
+  let rm := rounding cw
+  let trap (o : XR) : Bool := o.traps &&& unmasked cw != 0
   match op with
   | .arith aop src =>
     match getST t pc 0 with
@@ -104,7 +105,7 @@ def execWaiting (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat
       match operand t s.mem pc addr src with
       | .error e => .error e
       | .ok (v, den) =>
-        match precision t.cw with
+        match precision cw with
         | none => .error (.undefinedResult pc)
         | some p =>
           let o := arithOp aop p rm d v den
@@ -117,7 +118,7 @@ def execWaiting (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat
       match getST t pc 0 with
       | .error e => .error e
       | .ok v =>
-        match precision t.cw with
+        match precision cw with
         | none => .error (.undefinedResult pc)
         | some p =>
           let o := arithOp aop p rm d v false
@@ -131,7 +132,7 @@ def execWaiting (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat
       | .error e => .error e
       | .ok (b, den) =>
         let (rel, fl) := compare (!unordered) a b den
-        if fl &&& unmasked t.cw != 0 then .error (.fpuException pc)
+        if fl &&& unmasked cw != 0 then .error (.fpuException pc)
         else
           let t1 := (t.raise fl).setCC (relBits rel) (some false)
           fin s next (if pops = 0 then t1 else if pops = 1 then t1.pop else t1.pop.pop)
@@ -143,7 +144,7 @@ def execWaiting (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat
       | .error e => .error e
       | .ok b =>
         let (rel, fl) := compare (!unordered) a b
-        if fl &&& unmasked t.cw != 0 then .error (.fpuException pc)
+        if fl &&& unmasked cw != 0 then .error (.fpuException pc)
         else
           let c := relBits rel
           let t1 := { t.raise fl with c1 := none }
@@ -155,7 +156,7 @@ def execWaiting (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat
     | .error e => .error e
     | .ok a =>
       let (rel, fl) := compare true a (zero80 false)
-      if fl &&& unmasked t.cw != 0 then .error (.fpuException pc)
+      if fl &&& unmasked cw != 0 then .error (.fpuException pc)
       else fin s next ((t.raise fl).setCC (relBits rel) (some false))
   | .xam =>
     match t.get 0 with
@@ -246,7 +247,7 @@ def execWaiting (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat
     match getST t pc 0 with
     | .error e => .error e
     | .ok a =>
-      match precision t.cw with
+      match precision cw with
       | none => .error (.undefinedResult pc)
       | some p =>
         let o := sqrt p rm a
@@ -269,8 +270,9 @@ def execWaiting (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat
       match Janus.Amd64.load s.mem ad 2 with
       | .error e => .error e
       | .ok v =>
-        let t1 := ({ t with cw := normCW v } : St).ccC1 none
-        if t1.pending then .error (.fpuException pc) else fin s next t1
+        let t1 := t.ccC1 none
+        if t1.pending (normCW v) then .error (.fpuException pc)
+        else .ok { s with x87 := t1, fpucw := BitVec.ofNat 16 (normCW v), rip := next }
   | .wait | .nop => fin s next (t.ccC1 none)
   -- the non-waiting instructions are handled by `exec`
   | _ => .error (.undefinedResult pc)
@@ -286,7 +288,7 @@ def exec (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat)
     match memAddr pc addr with
     | .error e => .error e
     | .ok ad =>
-      match Janus.Amd64.store s.mem ad 2 t.cw with
+      match Janus.Amd64.store s.mem ad 2 s.fpucw.toNat with
       | .error e => .error e
       | .ok m => .ok { s with mem := m, rip := next, x87 := t.ccC1 none }
   | .nstsw ax =>
@@ -305,7 +307,7 @@ def exec (s : State) (pc : Nat) (next : W64) (op : Op) (addr : Option Nat)
           | .error e => .error e
           | .ok m => .ok { s with mem := m, rip := next, x87 := t.ccC1 none }
   | .nclex => fin s next (({ t with sw := 0 } : St).ccC1 none)
-  | .ninit => fin s next { regs := t.regs }
-  | _ => if t.pending then .error (.fpuException pc) else execWaiting s pc next op addr cond
+  | .ninit => .ok { s with x87 := { regs := t.regs }, fpucw := 0x37F, rip := next }
+  | _ => if t.pending s.fpucw.toNat then .error (.fpuException pc) else execWaiting s pc next op addr cond
 
 end Janus.Amd64.X87

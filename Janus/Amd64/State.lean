@@ -81,6 +81,13 @@ structure State where
   /-- The x87 FPU (`Janus.Amd64.X87.St`: data registers, `TOP`, tags, control and status
   words). Only the `long double` code of C functions uses it; Go code never does. -/
   x87 : X87.St := {}
+  /-- The x87 FPU control word (`FCW`: precision and rounding control, exception masks).
+  No decoded instruction reads or writes the x87 state (x87 execution is not modelled), so
+  every run keeps it; it is in the state so that the C calling convention can state that a
+  callee preserves it (`CABI.CReturn.fpucw`: System V makes the control bits callee-saved).
+  `0x037F` (round to nearest, 64-bit precision, all exceptions masked) is the value Linux gives
+  a new process. -/
+  fpucw : BitVec 16 := 0x037F
 
 instance : Inhabited State :=
   ⟨{ regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩,

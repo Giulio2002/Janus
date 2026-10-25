@@ -789,6 +789,10 @@ where `C` is a `Contract` for the external stubs, and it is written in the state
 * the return: `cgocall` returns to its caller with `SP`, `g` and `FP` restored (amd64: also
   `X15 = 0`, `DF` clear and the TLS `g` slot);
 * `_cgo_topofstack` returns one value throughout a cgo call and preserves everything else.
+* the floating-point environment at the C entry: the C code starts with the Go caller's `FPCR`
+  (arm64, `CgoEntry.fpcr`) and with its `MXCSR` control bits and x87 control word (amd64,
+  `CgoEntry.mxcsr`, `CgoEntry.fpucw`): `asmcgocall` switches only the stack and `g` and executes
+  no `MSR FPCR`, `LDMXCSR` or `FLDCW` (`runtime/asm_arm64.s`, `runtime/asm_amd64.s`).
 
 The granted memory must contain no runtime-internal memory (`m`, `p`, the scheduler, the `g0`
 stack). For an execution whose granted regions overlap those, the theorem says nothing.
@@ -808,20 +812,40 @@ stack). For an execution whose granted regions overlap those, the theorem says n
   contract semantics avoids this: the only way to discharge `CgoSpec` is the refinement theorem
   `CgoCall.refines`.
 
-**The C calling conventions** (`Janus.CABI`, `Janus.Amd64.CABI`, the `CEnsures` vocabulary) are
-specification definitions like `GoABI`. A `CEnsures` theorem is about a call that follows the
-convention (`CCall`). It promises what the convention requires of the callee (`CReturn`) and
-nothing about callers that violate the convention. The callee-saved SIMD state (`V8`–`V15` on
-arm64) is outside the model, and so is the x87 control word in `CReturn` (WP-K1). The x87 FPU
-crosses the cgo boundary as follows: `CgoEntry.x87` (trusted) says the C code is entered with the
-Go caller's x87 state (nothing between the Go call and the C entry executes an x87 instruction),
-so a C precondition such as `X87.Idle` (empty stack, control word `0x037F`, nothing pending) is
-discharged by the same hypothesis on the Go call state; `GoResume` leaves the x87 state
-arbitrary after the call (C may raise its sticky flags; Go code never reads it), so a theorem
-says nothing about the x87 state after a cgo call. A C precondition on the x87 state is a stated
-hypothesis of the Go-side theorem, as `GoABI.GoMXCSR` is for `MXCSR`: Linux starts every thread
-with the `FNINIT` state and Go never touches the x87, so it holds unless C code changed the
-control word without restoring it.
+**The C calling conventions** (`Janus.CABI`, `Janus.Amd64.CABI`, the `CEnsures`/`CEnsuresR`
+vocabulary) are specification definitions like `GoABI`. A `CEnsures`/`CEnsuresR` theorem is about
+a call that follows the convention (`CCall`, `CCallA`). It promises what the convention requires
+of the callee (`CReturn`: the callee-saved general registers, the low halves of `V8`–`V15` and
+`FPCR` on arm64, the `MXCSR` control bits and the x87 control word on amd64) and nothing about
+callers that violate the convention.
+
+* *The classification is part of the specification.* Where a classified call puts an argument
+  (`CCallA`, `ArgsAt … sig.passing`) and where a result comes back (`Returned`) is computed by
+  the Lean functions `Janus.C.AAPCS64.assignAll`/`result` and `Janus.C.SysV.assignAll`/`result`.
+  A theorem is only as meaningful as the agreement of these functions with the compilers that
+  produce real call sites. That agreement is *tested*, not proved: `scripts/cabi-probe.sh`
+  checks argument and result locations, layouts, `AL` and the `va_list` evolution against gcc
+  15.2 and clang 21 at `-O0`/`-O2` on both ISAs (FFI.md § 1.3). Where a theorem's caller is
+  itself extracted and verified (the cgo wrappers, `k_vsum8`), the classification is checked at
+  that call site by the proof, so for those compositions the classification functions are not
+  trusted: an error in them would make the proof fail.
+* *Unspecified bytes.* Register bytes above an argument piece and stack bytes above a value in
+  its slot are arbitrary in `CCallA` (the ABIs leave them unspecified; clang extends `char`/
+  `short` arguments, gcc does not, and a callee may rely on neither), and a callee proof may not
+  use them.
+* *x87.* The amd64 state has the x87 control word (`State.fpucw`, reset `0x037F`; K1) and,
+  since WP-J, the x87 register stack, tags and status word (`State.x87`). `FLDCW`/`FNSTCW` write
+  and read `fpucw`; `CReturn` requires a C callee to preserve it. `CgoEntry.x87` (trusted) says
+  the C code is entered with the Go caller's x87 stack (nothing between the Go call and the C entry
+  executes an x87 instruction), so a C precondition such as `X87.Idle` (empty stack, nothing
+  pending) is discharged by the same hypothesis on the Go call state; `GoResume` leaves the
+  x87 stack and status arbitrary after the call (C may raise its sticky flags; Go code never
+  reads them). A `long double` result in `ST(0)` is stated directly on `State.x87` (`CLdMul`);
+  the classification's `PieceAt … (.x87 _)` is still `False`, so such a function has no
+  `CEnsuresR` theorem yet.
+* *Outside the classification.* Bit-fields, `__attribute__((packed))`/`aligned`, flexible
+  arrays, empty structs and 32/64-byte vectors have no `CType`; a prototype using them cannot be
+  stated.
 
 ## Go assembly (ABI0)
 

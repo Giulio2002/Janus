@@ -372,10 +372,10 @@ theorem binop_lt (op : BinOp) (rm : RM) (a b : Nat) (bDen : Bool) (ha : a < 2 ^ 
 
 /-! ## The System V x87 state at a call -/
 
-/-- The x87 state at a System V call boundary: every register empty, the Linux default control
-word `0x037F` (all exceptions masked, 64-bit precision, round to nearest), no pending exception
-(`ES` clear), and a 3-bit `TOP`. The sticky exception flags and the condition codes are
-arbitrary. -/
-def Idle (t : St) : Prop := t.cw = 0x37F ∧ t.tags = (fun _ => false) ∧ t.sw / 128 % 2 = 0 ∧ t.top < 8
+/-- The x87 register stack at a System V call boundary: every register empty, no pending
+exception (`ES` clear), and a 3-bit `TOP`. The sticky exception flags and the condition codes
+are arbitrary. The control word is `State.fpucw` (the examples assume the Linux default
+`0x037F`: all exceptions masked, 64-bit precision, round to nearest). -/
+def Idle (t : St) : Prop := t.tags = (fun _ => false) ∧ t.sw / 128 % 2 = 0 ∧ t.top < 8
 
 end Janus.Amd64.X87

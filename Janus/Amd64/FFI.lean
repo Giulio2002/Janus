@@ -288,7 +288,10 @@ def GoKept (s : State) (a n : Nat) (w : Bool) : Prop :=
 state `s`, returning to `ret` (trusted, see `Janus.FFI.CgoEntry`): `RIP = fn`, `RDI = arg`,
 `[RSP] = ret`; the system stack (`RSP + 8` 16-byte aligned, `cgoCStack` bytes below `RSP` and
 the return address writable) is not Go memory; Go memory the runtime leaves alone keeps its
-bytes and accessibility; the direction flag is clear; the same thread (`FS`) and its x87 FPU state. -/
+bytes and accessibility; the direction flag is clear; the same thread (`FS`), and so the same
+floating-point control state: the `MXCSR` control bits and the x87 control word of the Go caller
+(`asmcgocall` switches only the stack and `g` and executes no `LDMXCSR`/`FLDCW`,
+`runtime/asm_amd64.s`). -/
 structure CgoEntry (p : Program) (s t : State) (ret : Nat) : Prop where
   rip : t.rip = s.regs 0
   arg : t.regs 7 = s.regs 3
@@ -304,6 +307,8 @@ structure CgoEntry (p : Program) (s t : State) (ret : Nat) : Prop where
   /-- The x87 FPU is the caller's: nothing between the Go call and the C entry (`cgocall`,
   `entersyscall`, `asmcgocall`, all Go and Go assembly) executes an x87 instruction. -/
   x87 : t.x87 = s.x87
+  mxcsr : t.mxcsr.toNat / 64 = s.mxcsr.toNat / 64
+  fpucw : t.fpucw = s.fpucw
 
 /-- The Go caller resumes from the final C state `t'` (see `Janus.FFI.CgoResumed`). -/
 def CgoResumed (s t' s' : State) : Prop :=
