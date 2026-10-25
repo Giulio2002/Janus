@@ -33,7 +33,7 @@ the cache.
 | criterion | arm64 | amd64 (GOAMD64=v1) | amd64 (GOAMD64=v3) |
 |---|---:|---:|---:|
 | 1. Go-compiled std functions that fully decode | 15,517 / 16,602 (**93.46%**) | 16,625 / 16,625 (**100%**) | 16,614 / 16,614 (**100%**; 94.60% before WP-B) |
-| 1. Go assembly functions that fully decode | 151 / 207 (**72.95%**; 139 / 207 = 67.15% before WP-H) | 166 / 265 (**62.64%**; 160 before WP-F, 148 before WP-D) | 163 / 262 (**62.21%**; 157 before WP-F, 145 before WP-D) |
+| 1. Go assembly functions that fully decode | 151 / 207 (**72.95%**; 139 / 207 = 67.15% before WP-H) | 195 / 265 (**73.58%**; 166 before WP-G, 160 before WP-F, 148 before WP-D) | 192 / 262 (**73.28%**; 163 before WP-G, 157 before WP-F, 145 before WP-D) |
 | 1. compiler-generated wrappers / Go test code | 99.40% / 97.09% | 100% / 100% (99.98% before WP-B) | 100% / 100% (99.60% / 99.16% before WP-B) |
 | 2. runtime entry points with a contract, stub or proof (main + branches) | 71 of 309 names (39 on main; agent/rtiface adds 15) | same | same |
 | 2. … of the 191 linked on arm64/amd64: still missing | 139 (12 of them concurrency, excluded) | | |
@@ -74,10 +74,19 @@ Main findings:
   llama.cpp's `ggml` (`ggml.c`, `ggml-quants.c`, `ggml-cpu.c`, `quants.c`, `ops.cpp`: 773
   functions, gcc and clang `-O3 -march=x86-64-v3`, heavy intrinsics), decodes 757 / 773 (97.9%,
   99.994% of instructions); every remaining function is blocked by `NOTRACK JMP` (WP-J).
+* **AVX-512 is modelled since WP-G** (agent/avx512, measured 2026-10-25): EVEX with `ZMM0`–`ZMM31`,
+  `K0`–`K7`, masking, broadcast, `disp8·N`, `{er}`/`{sae}` and fault suppression, the opmask
+  instructions and `VPCLMULQDQ`/GFNI, oracle 0 MISMATCH (922,808 native cases). That unblocked all
+  29 AVX-512 assembly functions of `internal/runtime/gc/scan` (the 26 `expandAVX512_*` bitmap
+  expanders, `scanSpanPackedAVX512`, `FilterNilAVX512` and the test-only `ExpandAVX512`): v1 166 →
+  195, v3 163 → 192 (93.9% → 95.7% of assembly instruction occurrences). No amd64 assembly function
+  has an EVEX or opmask blocker left: `hash/crc32.ieeeCLMUL` (AVX-512 path decodes) still needs
+  legacy `PCLMULQDQ` (WP-E), and `runtime.asyncPreempt` (its AVX-512 save and restore decode)
+  needs `PUSHFQ`/`POPFQ` (WP-C). `expandAVX512_2` and an AVX-512 Go assembly search are proved.
 * **Assembly is blocked by system instructions first, then SIMD and crypto.** `SVC`/`SYSCALL`,
   `BRK`/`INT3`/`UD2`, `MRS`/`MSR` of ID and DIT registers, `CPUID`/`XGETBV`/`RDTSC` are the sole
-  blocker of 53 arm64 and 46 amd64 assembly functions. Then come AVX-512 (29 GC-scan
-  `expandAVX512_*` kernels), the SSE packed-integer family, AES-NI, PCLMULQDQ, SHA-NI, AVX2, ADX,
+  blocker of 53 arm64 and 46 amd64 assembly functions. Then come (before WP-D/F/G) AVX-512 (29
+  GC-scan `expandAVX512_*` kernels; done in WP-G), the SSE packed-integer family, AES-NI, PCLMULQDQ, SHA-NI, AVX2, ADX,
   the arm64 crypto extensions (PMULL, SHA1/SHA256/SHA512/SHA3) and CRC32.
 * **The hottest assembly callees already decode** on both ISAs: `morestack*`, `panicBounds`,
   `gcWriteBarrier1..8`, `memmove`, `memequal`, `memclrNoHeapPointers`, `cmpstring`, `IndexByte*`,
@@ -246,16 +255,25 @@ instruction occurrences. The 6 functions gained are `math.archExp`,
 `crypto/sha1.blockAVX2` and `vendor/golang.org/x/crypto/chacha20poly1305.chacha20Poly1305Open`
 and `chacha20Poly1305Seal`. No amd64 assembly function has a VEX blocker left.
 
+**Since WP-G** (AVX-512, agent/avx512) step 2 of the amd64 column is modelled: 195 of 265 (v1) and
+192 of 262 (v3) assembly functions decode (95.69% / 95.65% of their instruction occurrences). The
+29 functions gained are every assembly function of `internal/runtime/gc/scan`: the 26
+`expandAVX512_1 … expandAVX512_64` expanders, `scanSpanPackedAVX512`, `FilterNilAVX512` and
+`ExpandAVX512` (test-only). The remaining amd64 assembly families are system instructions (47
+functions, 46 of them sole blocker; WP-C), AES-NI (13), `PCLMULQDQ` (6), ADX (4), SHA-NI (2) (WP-E),
+`PUSHFQ`/`POPFQ` (`asyncPreempt`, WP-C) and the `boring/sig` marker (data). `artifacts/coverage-wpg/`
+has the raw tables.
+
 **Per std package** (fully decodable / assembly functions; the families blocking them):
 
 | package | arm64 | amd64-v1 | amd64-v3 | blocking families (functions, arm64 / amd64-v1) |
 |---|---:|---:|---:|---|
 | runtime | 80/129 | 92/134 | 92/134 | arm64: system / barrier / hint 46, padding/udf 2, exclusive / acquire-release 1; amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 38, AES-NI 3, SSE4.1 2, SSE/SSE2 1, SSSE3 1, AVX-512 (EVEX, opmask) 1, integer/base 1 |
-| internal/runtime/gc/scan | – | 0/29 | 0/29 | amd64-v1: AVX-512 (EVEX, opmask) 29 |
+| internal/runtime/gc/scan | – | 29/29 (0 before WP-G) | 29/29 | |
 | crypto/internal/fips140/aes | 7/7 | 5/12 (1 before WP-D) | 5/12 | amd64-v1: AES-NI 7, SSE/SSE2 5, SSE4.1 4, SSSE3 4 |
 | crypto/internal/fips140/aes/gcm | 0/5 | 0/5 | 0/5 | arm64: crypto extension (AES/SHA/PMULL/SHA3) 5; amd64-v1: PCLMULQDQ 5, SSE/SSE2 5, SSSE3 5, SSE4.1 4, AES-NI 3 |
 | crypto/internal/fips140/nistec | 15/15 | 16/16 (12 before WP-D) | 16/16 | amd64-v1: SSE/SSE2 4 |
-| hash/crc32 | 0/2 | 2/3 (0 before WP-D) | 2/3 | arm64: CRC32 2; amd64-v1: SSE4.2 2, AVX (128-bit VEX) 1, AVX-512 (EVEX, opmask) 1, PCLMULQDQ 1, SSE/SSE2 1, SSE4.1 1 |
+| hash/crc32 | 0/2 | 2/3 (0 before WP-D) | 2/3 | arm64: CRC32 2; amd64-v1: PCLMULQDQ 1 (`ieeeCLMUL`; its SSE, AVX and AVX-512 parts decode since WP-D/F/G) |
 | syscall | 0/2 | 0/3 | 0/3 | arm64: system / barrier / hint 2; amd64-v1: system (SYSCALL/CPUID/XGETBV/fences/MXCSR) 3 |
 | crypto/internal/fips140/bigmod | 4/4 | 0/3 | 0/3 | amd64-v1: ADX 3, BMI1/BMI2/LZCNT 3 |
 | crypto/internal/fips140/sha256 | 0/1 | 0/2 | 0/2 | arm64: crypto extension (AES/SHA/PMULL/SHA3) 1; amd64-v1: AVX (128-bit VEX) 1, AVX2 (256-bit VEX) 1, BMI1/BMI2/LZCNT 1, SHA-NI 1, SSE/SSE2 1, SSE4.1 1, SSSE3 1 |
@@ -595,7 +613,7 @@ number of distinct Go-compiled functions. Full tables: `artifacts/coverage/asmca
 | `math/big.addVV`, `subVV`, `lshVU`, `rshVU`, `mulAddVWW` | 3–4 | yes | yes | yes | |
 | `math/big.addMulVVWW`, `bigmod.addMulVVW1024/1536/2048` | 3, 2 | yes | no | no | amd64: ADX `ADCX`/`ADOX`, BMI2 `MULX` |
 | `runtime.memhash32`, `memhash64` | 2 / 2 | yes | no | no | amd64: AES-NI `AESENC`, SSE4.1 `PINSRD`/`PINSRQ` |
-| `hash/crc32.ieeeUpdate`, `castagnoliUpdate` (arm64); `castagnoliSSE42`, `ieeeCLMUL` (amd64) | 1–2 | no | `castagnoliSSE42*` yes (WP-D); `ieeeCLMUL` no | same | arm64: `CRC32*`; amd64 `ieeeCLMUL`: `PCLMULQDQ`, AVX-512 `VPCLMULQDQ`/`VPTERNLOGD` |
+| `hash/crc32.ieeeUpdate`, `castagnoliUpdate` (arm64); `castagnoliSSE42`, `ieeeCLMUL` (amd64) | 1–2 | no | `castagnoliSSE42*` yes (WP-D); `ieeeCLMUL` no | same | arm64: `CRC32*`; amd64 `ieeeCLMUL`: legacy `PCLMULQDQ` (WP-E; its AVX-512 `VPCLMULQDQ`/`VPTERNLOGD` path decodes since WP-G) |
 | `crypto/internal/fips140/aes.encryptBlockAsm`, `decryptBlockAsm`, `expandKeyAsm`, `ctrBlocks{1,2,4,8}Asm` | 1 | yes | no | no | amd64: AES-NI (`AESENC`, `AESENCLAST`, `AESDEC*`, `AESIMC`, `AESKEYGENASSIST`), SSSE3 `PSHUFB`, SSE4.1 `PINSRQ` |
 | `crypto/internal/fips140/aes/gcm.gcmAes{Init,Enc,Dec,Data,Finish}` | 1–2 | no | no | no | arm64: `PMULL`/`PMULL2`; amd64: `PCLMULQDQ`, AES-NI, `PSHUFB`, `PSLLDQ`/`PSRLDQ` |
 | `crypto/internal/fips140/sha256.blockSHA2` (arm64), `blockSHANI`, `blockAVX2` (amd64) | 1 | yes (WP-H) | `blockAVX2` yes (WP-F); `blockSHANI` no | same | amd64 `blockSHANI`: SHA-NI |
@@ -619,9 +637,9 @@ needing SIMD encodings, by hot callee:
 * ADX/BMI2 for `math/big` and `bigmod`;
 * (done in WP-F: FMA/AVX for `math.archExp`, AVX2 for the SHA-1/256/512 and chacha20poly1305
   kernels);
-* the crypto kernels (AES-NI, PCLMULQDQ, SHA-NI, AVX-512 `VPCLMULQDQ`);
-* AVX-512 for the 29 `internal/runtime/gc/scan.expandAVX512_*` kernels of the GC. These are
-  reached through the allocator's GC assist, not by a direct call.
+* the crypto kernels (AES-NI, PCLMULQDQ, SHA-NI; AVX-512 `VPCLMULQDQ` done in WP-G);
+* (done in WP-G: AVX-512 for the 29 `internal/runtime/gc/scan` kernels of the GC, reached through
+  the allocator's GC assist, not by a direct call; `expandAVX512_2` is proved.)
 
 ## 5. cgo C code
 
@@ -760,7 +778,7 @@ They merge in the order **alloc → maps → ffi → iface-alloc**. So:
 | 8 | **I. arm64 ASIMD for compiled C**: `ADDP`, `UADDW(2)`, `UMULL(2)`, `MUL` (vector), `FMLA`/`FMUL`/`FNEG` (vector FP, on the IEEE core), `SCVTF` (vector), `UZP1`/`ZIP1`, `LD4`/`ST4`, `USHR`, and the scalar `SCVTF`/`UCVTF`/`FCVTZS`/`FCVTZU` forms of gcc/clang `-O0` | C arm64: gcc -O3 85.3%, clang -O2/-O3 86.2%, gcc -O2 93.6%, -O0 96.4% → **100%** | `Janus/Arm64/Vector.lean` (+ new `VectorFP.lean`), `Janus/Arm64/DecodeFloat.lean` (conversion forms) | M | none |
 | 9 | **H. arm64 crypto extensions, CRC32, permutes** (done on agent/armcrypto: 151/207 assembly, `A64Crc32` proved; see 1.3): `PMULL`/`PMULL2` (1Q), `SHA1C/H/M/P/SU0/SU1`, `SHA256H/H2/SU0/SU1`, `SHA512H/H2/SU0/SU1`, SHA3 `EOR3`/`RAX1`/`XAR`/`BCAX`, `CRC32{B,H,W,X}`, `CRC32C{B,H,W,X}`, `ZIP1`/`ZIP2` on 2D, `MOV` element | arm64 assembly +12 (GCM ×5, SHA-1/256/512, SHA3, CRC32 ×2, chacha20); with C 206/207, the last being A's `cgoSigtramp` | new `Janus/Arm64/Crypto.lean` (hook in `Decode.lean`) | M | none (I for the shared `ZIP1`) |
 | 10 | **F. AVX/AVX2 (VEX-128/256, YMM)** (**done**, agent/avx: C `-march=x86-64-v3` gcc 59.1% → 96.4%, clang 58.7% → 98.2%, i.e. no VEX blocker left; assembly v1 160 → 166 (`math.archExp`, SHA-1/256/512 AVX2, chacha20poly1305 Open/Seal); also packed FMA3, F16C, masked moves, gathers; oracle 0 MISMATCH; `CDot32`/`GoDot32`, `Index64`, `MaxU32x8` proved; `docs/AMD64.md`) beyond the moves and compares `memmove`/`memequal` use: integer and FP arithmetic, shuffles and permutes (`VPSHUFB`, `VPALIGNR`, `VPERM2I128`, `VPERMD`, `VPBLENDD`, `VINSERTI128`, `VEXTRACTI128`, `VPBROADCAST*`), packed FMA, the `V*SD/SS` scalar forms | C `-march=x86-64-v3`: gcc 52.7%, clang 50.5% → ≈ 99%; assembly: `math.archExp`, SHA-1/256/512 AVX2, chacha20poly1305 (+7 in the greedy table) | new `Janus/Amd64/{DecodeAVX,ExecAVX}.lean` | L | D (lane semantics generalised to 256 bits) |
-| 11 | **G. AVX-512**: EVEX decoding (`disp8*N`, broadcast, masking, zeroing), ZMM state, `K0`–`K7` and `KMOV*`, `VMOVDQU64`, `VPERMB`/`VPERMI2B` (VBMI), `VGF2P8AFFINEQB` (GFNI), `VPOPCNTB`, `VPCOMPRESSQ`, `VPTERNLOGD`, `VPCLMULQDQ`, `VEXTRACTF32X4`, `VPCMPUQ`, the `asyncPreempt` state save | assembly +29 (`internal/runtime/gc/scan.expandAVX512_*`, the GC's span scanning), `ieeeCLMUL`, `asyncPreempt` → amd64 assembly 100% (with C, D, E, F) | new `Janus/Amd64/{DecodeEVEX,ExecEVEX}.lean`, ZMM/K fields in `Janus/Amd64/State.lean` | XL | F |
+| 11 | **G. AVX-512** (**done**, agent/avx512: assembly v1 166 → 195, v3 163 → 192, all 29 `internal/runtime/gc/scan` functions; oracle 0 MISMATCH on 922,808 native cases; `expandAVX512_2` and `Search64` proved; `docs/AMD64.md`): EVEX decoding (`disp8*N`, broadcast, masking, zeroing), ZMM state, `K0`–`K7` and `KMOV*`, `VMOVDQU64`, `VPERMB`/`VPERMI2B` (VBMI), `VGF2P8AFFINEQB` (GFNI), `VPOPCNTB`, `VPCOMPRESSQ`, `VPTERNLOGD`, `VPCLMULQDQ`, `VEXTRACTF32X4`, `VPCMPUQ`, the `asyncPreempt` state save | assembly +29 (`internal/runtime/gc/scan.expandAVX512_*`, the GC's span scanning), `ieeeCLMUL`, `asyncPreempt` → amd64 assembly 100% (with C, D, E, F) | new `Janus/Amd64/{DecodeEVEX,ExecEVEX}.lean`, ZMM/K fields in `Janus/Amd64/State.lean` | XL | F |
 | 12 | **K1. C ABI: arguments and results**: stack arguments, FP/SIMD arguments and results, callee-saved `V8`–`V15` low halves, FPCR/MXCSR/x87-CW preservation, SysV classification (INTEGER/SSE/MEMORY), AAPCS64 HFA/HVA, indirect results (`X8`, hidden `RDI`), varargs (`AL`, register save area, `va_list` for both ABIs), `long double`/`_Complex` returns | rows 2–6 and 15 of the table in 5.2 | `Janus/CABI.lean`, `Janus/Amd64/CABI.lean`, docs/FFI.md § 1 | L | ffi |
 | 13 | **K2. C ABI: environment**: `//export` callbacks (`crosscall2` → `cgocallback` contract and the reverse composition theorem), function-pointer hypotheses, writable C globals and `-fPIC` GOT access as data objects, TLS (initial-exec, general-dynamic, TLSDESC), PLT stubs and libc contracts (`memcpy`, `memset`, `strlen`, `malloc`/`free`, outline atomics), `setjmp`/`longjmp` (non-local return), `alloca` frame lemmas | rows 7–13 of 5.2 | `Janus/FFI.lean`, `Janus/Amd64/FFI.lean`, new `Janus/Contracts/Libc.lean`, the cgo part of `cmd/janus/extract.go`, docs/FFI.md §§ 2–4 | L | K1, iface-alloc |
 | 14 | **R1. String runtime contracts**: `concatstring2..5`/`concatstrings`, `concatbyte2..5`/`concatbytes`, `slicebytetostring`, `slicebytetostringtmp`, `stringtoslicebyte`, `stringtoslicerune`, `slicerunetostring`, `intstring`, `cmpstring` (executed: decodes), `decoderune`, `countrunes`, `strmin`/`strmax`, `gostring`, `gostringn`, `gobytes` | 20 linked + 3 | `Janus/Contracts/String.lean` (+`Amd64`), `Janus/Spec/String.lean` | M | iface-alloc (alloc contracts) |
