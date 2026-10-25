@@ -292,3 +292,21 @@ theorem wmem64_henv (g : W64) : HEnv0 wmem64 g := ⟨wmem64_env0 g, by decide⟩
 theorem wmem64_wbOff : WriteBarrierOff wmem64 WB := by unfold WriteBarrierOff; decide
 
 end Janus.Contracts.EqHashModel
+
+namespace Janus.Contracts.EqHashModel
+
+/-! ## Trampolines
+
+A witness places a model implementation at `IfaceSat.A0` and, at the contract's address, a branch
+to it. `branchWord a t` is the A64 `B` from `a` to `t > a`; `jmpBytes a t` the x86-64
+`JMP rel32` (`E9`, displacement from the next instruction). -/
+
+/-- `B t` at `a` (A64, forward). -/
+def branchWord (a t : Nat) : Nat := 0x14000000 + (t - a) / 4 % 2 ^ 26
+
+/-- `JMP rel32` from `a` to `t` (x86-64, forward). -/
+def jmpBytes (a t : Nat) : List Nat :=
+  let d := (t - (a + 5)) % 2 ^ 32
+  [0xe9, d % 256, d / 256 % 256, d / 65536 % 256, d / 16777216 % 256]
+
+end Janus.Contracts.EqHashModel
