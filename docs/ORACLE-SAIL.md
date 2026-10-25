@@ -34,6 +34,14 @@ C++ translation unit; later builds are incremental.
 | `spalign/` | Sail-only corpus: SP-based loads/stores with a misaligned SP (qemu cannot check that) |
 | `cases.jsonl`, `qemu.jsonl`, `janus.jsonl`, `sail.jsonl` | the frozen inputs and every side's raw results |
 
+When `run` ends, the dumps are pruned (`scripts/lib/artifacts.sh`): the reports, `soundness.jsonl`,
+each comparison's `summary.md`, `repro.*` and `mismatches.jsonl` stay; the four files above, every
+`verdicts.jsonl` and `model.jsonl` are zstd-compressed (`.zst`); the comparisons' copies of the
+corpus and the derived `sail-model.jsonl` / `cases.sail-dczid.jsonl` are removed (one full run
+used to leave 8 GB). `KEEP=zst` compresses instead of removing, `KEEP=1` keeps everything raw.
+`QEMU_OUT` may hold the compressed corpus of a pruned `scripts/oracle.sh` run; `crosscheck`
+decompresses `cases.jsonl` and `sail.jsonl` for its comparison and removes the copies after.
+
 Exit criterion: `soundness.jsonl` is empty, i.e. `janus-vs-sail` has 0 `MISMATCH`.
 
 ## What is reused
@@ -214,6 +222,29 @@ and must not be read as "the architecture says so":
 
 None of these can hide a Janus soundness bug as an "agree". They only produce `model-gap`
 or MISMATCH noise between qemu and Sail, or `error` cases, which are excluded.
+
+## Results with the crypto extension, CRC32 and permutes (2026-10-25, 389,440 cases)
+
+The crypto corpus of `docs/ORACLE.md` (`scripts/oracle.sh crypto`, then
+`QEMU_OUT=artifacts/oracle-crypto OUT=artifacts/oracle-sail-crypto JOBS=8 scripts/oracle-sail.sh run`):
+the generated and harvested SHA-1/SHA-256/SHA-512/SHA-3, PMULL, CRC32, permute and scalar-DUP
+classes and 150,000 sequence-mode blocks. The driver now runs sequence cases: a case's `words`
+are laid out in the code page and injected one at a time at the model's PC
+(`oracle-sail/src/main.rs`, the crate has no instruction fetch) until the PC leaves the block, an
+exception is taken or a Sail exception escapes; the final state is reported as for one step.
+
+| pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
+|---|---:|---:|---:|---:|---:|
+| **Sail vs Janus** | 385,790 | **0** | 3,650 | 0 | 0 |
+| qemu vs Sail | 389,440 | 0 | 0 | 0 | 0 |
+| qemu vs Janus | 385,790 | 0 | 3,650 | 0 | 0 |
+
+* **Soundness: 0 cases** (`soundness.jsonl` is empty). The 3,650 gaps are the SM3/SM4 words
+  (`undecodable` in Janus), which qemu and Sail execute identically.
+* **qemu and Sail agree on every case**, including all 150,000 multi-instruction blocks (chains of
+  SHA256H/H2/SU0/SU1, SHA512H/H2/SU0/SU1, EOR3/RAX1/XAR/BCAX, PMULL/EXT/AESE, CRC32*, ZIP/UZP/TRN/TBL
+  and windows of the real Go kernels), so the ASL these instructions are transcribed from and qemu's
+  implementation agree on this corpus.
 
 ## Results with scalar floating point (2026-10-24, 1,131,099 cases)
 

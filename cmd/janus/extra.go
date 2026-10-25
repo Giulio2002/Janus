@@ -13,6 +13,7 @@ var extraCommands = map[string]func(args []string, stdout, stderr io.Writer) err
 	"init":         cmdInit,
 	"explain":      cmdExplain,
 	"framework":    cmdFramework,
+	"cache":        cmdCache,
 }
 
 const extraUsage = `  janus verify <outdir> --proof FILE --proof-root PKG [--theorem NAME] [--json] [--fresh] [--asl]
@@ -20,6 +21,8 @@ const extraUsage = `  janus verify <outdir> --proof FILE --proof-root PKG [--the
   janus init <dir> [--name NAME] [--rev REV | --janus-path DIR] [--no-update]
   janus explain <verified.json | outdir>
   janus framework [--janus-root DIR] [--json]
+  janus cache du [--json]
+  janus cache gc [--max SIZE] [--dry-run] [--grace DUR] [--all] [--janus-root DIR] [--json]
 `
 
 // runExtra runs one of extraCommands; ok is false for any other command.
@@ -31,7 +34,11 @@ func runExtra(args []string, stdout, stderr io.Writer) (code int, ok bool) {
 	if !ok {
 		return 0, false
 	}
-	if err := cmd(args[1:], stdout, stderr); err != nil {
+	err := cmd(args[1:], stdout, stderr)
+	if args[0] == "verify-batch" {
+		autoCollect(stderr)
+	}
+	if err != nil {
 		printDiag(stderr, err)
 		return 1, true
 	}
