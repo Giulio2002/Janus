@@ -6,6 +6,7 @@ import Janus.Arm64.Exec
 import Janus.Program
 import Janus.Arm64.MemoryLemmas
 import Janus.Run
+import Janus.Eface
 import Janus.GoABI
 import Janus.CABI
 import Janus.FFI
