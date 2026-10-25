@@ -133,6 +133,23 @@ runtime owns it (`rtView rt m`: `m`'s bytes inside `rt`, every other byte 0, and
   assist that parks or shrinks the stack, no `mmap`. A call outside that (`make([]uint64, 1<<44)`
   throws `out of memory`, `audit/round9/probe`) is simply not one the theorem speaks about.
 
+* **A satisfiable contract can still be instantiated into a vacuous one** (round 10 V1). The
+  theorem must quantify the runtime: `janus verify` (the auditor) rejects a statement in which
+  a contract (other than its whole conclusion) is applied to anything but variables of the
+  statement for its runtime arguments (`impl` inside `Extracted.program.link impl`, `rt`, `H`, the models `R`/`M`), or in
+  which another premise mentions such a variable (only the model laws `R.Laws`/`M.Laws` may).
+  `H := fun _ _ _ _ => True` ("always ready") brought round 9 C1 back: the contract is false for
+  every implementation and NewPair "returned 42" (`audit/round10/attacks/V1a_contract_H_true.lean`);
+  likewise `rt := []`, `(hrt : rt = [])`, a contract about `Extracted.program` itself, or the toy
+  model `R0`. What the rule does not catch: constraints inside the theorem's own precondition
+  (the `Ensures … pre`) and the numeric parameters such as `stack`, which the reader checks as
+  any precondition.
+* **Readiness is not handed back.** A contract whose postcondition re-establishes everything its
+  precondition needs can be chained without bound from one call state; when the call allocates
+  memory it keeps or cannot free, no implementation (maps, round 10 V2) or no real-runtime
+  implementation (interfaces, V3) meets it. Every allocating contract therefore takes its own
+  `H`, required at the call and not given back.
+
 Which parts of the runtime are proved rather than assumed is listed per contract kind below and in
 [SOUNDNESS.md](SOUNDNESS.md#runtime-contracts).
 
@@ -396,6 +413,11 @@ The common shape, `RTPre` and `RTReturn`:
   never the return-address slot) and the argument spill slots (`MemFrame … (rtWrites M s nargs ++
   extra)`); `M.Env` holds again; every other map keeps its contents (`OthersKept`).
 
+**Round 10 V2** found the same vacuity independently (`audit/round10/model/MapUnsat.lean` proves
+it in the kernel; `audit/round10/attacks/V2a_map_assign_vacuous.lean` used it to "verify" that
+Insert stores `v + 1`). It is closed by the R3-C1 readiness above (`Contracts.Ready H M.priv args
+s`, not handed back by the call); witnesses: `Janus/Contracts/MapSat.lean`, `MapSatAmd64.lean`.
+
 A theorem's caller-side precondition is `CallerOK M s frame above`: the environment, the stack
 guard `M.depth + frame` below `SP`, the window `[SP - M.depth - frame, SP + above)` writable and
 outside `M.priv`, and the guard word `16(g)` outside the window and `M.priv`. `RTPre.of_caller` and
@@ -512,10 +534,30 @@ the descriptor's `Cache` word; `R.Env` holds again):
 | `[]T` | `convTslice(s)` | `ConvTslice` | a box holding the header, `(0, 0, 0)` for a nil slice |
 | `x.(I)` (generic code) | `assertE2I(inter, t)` | `AssertE2I` | the itab (`ItabResult`); a nil or non-implementing `t` panics: excluded |
 | `v, ok := x.(I)` (generic code) | `assertE2I2(inter, t)` | `AssertE2I2` | the itab or `0` |
-| `x.(I)`, `v, ok := x.(I)` | cache probe, `typeAssert(desc, t)` | `TypeAssert` | the itab or `0` for `desc.Inter`; failing without `CanFail` excluded; the descriptor well formed again, same `Inter` and `CanFail` |
+| `x.(I)`, `v, ok := x.(I)` | cache probe, `typeAssert(desc, t)` | `TypeAssert` | the itab or `0` for `desc.Inter` (non-nil `t`); failing without `CanFail` excluded; the descriptor well formed again, same `Inter` and `CanFail` |
 | `switch x.(type)` with interface cases | cache probe, `interfaceSwitch(desc, t)` | `InterfaceSwitch` | `switchCase R t cs`: the first case `t` implements and its itab, else `(len cs, 0)` |
 | `a == b` on `any` | `efaceeq(t, x, y)` | `Efaceeq` | `efaceEqual`: true for `t = nil`; for a direct type the words; else `R.eq t` |
 | `a == b`, non-empty interfaces | `ifaceeq(tab, x, y)` | `Ifaceeq` | `ifaceEqual`: the same with `t = tab.Type` |
+
+**Allocating calls need readiness** (round 10 V3). `ConvT`, `ConvTnoptr`, `ConvT16/32/64`,
+`ConvTstring`, `ConvTslice`, `TypeAssert` and `InterfaceSwitch` take a readiness predicate
+`H : RtReady`, required at the call for its argument registers, `g`, `SP` and
+`rtView R.priv mem`, and not handed back. Each of them may allocate (a box on every
+`convT64(v)` with `v ≥ 256`: `audit/round10/probe` keeps 100000 boxes and gets 100000 distinct
+addresses; a new cache when `typeAssert`/`interfaceSwitch` rebuild it), while every contract
+hands `R.Env` back. Without `H` a contract demanded that, from any `R.Env` state, an unbounded
+chain of such calls succeeds; in the model the regions are fixed and the collector cannot run,
+so the real runtime meets no such `R.Env` and the theorems said nothing about the real binary
+(a toy model meets them, so this is not refutable in the kernel; the map contracts, which keep
+what they allocate, are: §Maps). `R.Env` remains the structural invariant; `H` is "this call's
+allocation succeeds". `AssertE2I`/`AssertE2I2` (a new itab at most once per pair) and the
+comparisons do not allocate without bound and are unchanged.
+
+**`typeAssert` with a nil type** (round 10 I1). The contract used to admit a nil `t` with
+`CanFail`, returning `0`. The runtime does return `nil` there, but then, about once in 1000 calls,
+it rebuilds the cache with `buildTypeAssertCache(oldC, nil, nil)`, which reads `nil.Hash` and
+faults (`audit/round10/probe tanil`: about 200 faults in 200000 calls, both ISAs). Compiled code
+tests for nil before the call, so the contract now requires a non-nil `t`.
 
 Every panic and throw path is excluded by a precondition, not specified: `TypeAssertionError`
 (nil or non-implementing type in `assertE2I`, failing `typeAssert` without `CanFail`), comparing

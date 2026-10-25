@@ -94,6 +94,10 @@ func TestABIMismatch(t *testing.T) {
 		{internal, "main.F", "", false},
 		{abi0, "f", "ABIInternal", true},
 		{"Proof.correctness : Janus.GoABI.Summary Extracted.program 0 p q", "f.abi0", "ABI0", false},
+		// round 10 A1: linked programs and a parenthesised entry are recognised too
+		{"Proof.correctness (impl : List Janus.Segment) : Janus.GoABI0.Ensures0 (Extracted.program.link impl) Extracted.entry [x] 1 p q", "main.F", "", true},
+		{"Proof.correctness : Janus.GoABI.Ensures (Extracted.program.withExit 4) (Extracted.entry) [x] p q", "f.abi0", "ABI0", true},
+		{"Proof.correctness (impl : List Janus.Segment) : Janus.GoABI.Ensures (Extracted.program.link impl) Extracted.entry [x] p q", "main.F", "", false},
 	} {
 		got := abiMismatch(c.stmt, statementABI(c.symbol, c.recorded))
 		if (got != "") != c.warn {

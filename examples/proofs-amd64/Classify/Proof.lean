@@ -28,6 +28,10 @@ miss, `runtime.interfaceSwitch`.
 **Assumptions (all in the statement).** `R` is *any* model satisfying `R.Laws`, and the code at
 `runtime.interfaceSwitch` is *any* code that behaves as `InterfaceSwitch` says (pinned to the Go
 runtime's code by the extraction).
+
+**Readiness** (round 10). The statement also quantifies over `H : RtReady`, the runtime's readiness
+for the one call that may allocate (`runtime.interfaceSwitch`), and assumes it at entry: the theorem says nothing
+about a call the runtime cannot serve as the contract says (no room in the heap, a collection).
 -/
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Spec.Map
@@ -80,14 +84,15 @@ theorem probeIdx (k : Nat) (h : BitVec 64) (hk : k ≤ 64) (hkb : 2 ^ k < 2 ^ 44
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 20000 in
-theorem loop (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
+theorem loop (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws) (H : Janus.Contracts.RtReady)
     (hsw : InterfaceSwitch (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.interfaceSwitch") R)
+      (Extracted.program.contractAddr "runtime.interfaceSwitch") R H)
     (c : Nat) (t x : BitVec 64) (ret : Nat) (hret : RetAddr (Extracted.program.link impl) ret)
     (s : State) (hc : CallerOK R s 48 24) (hdesc : ISDescOK R s.mem desc [c])
     (hdo : desc + 24 ≤ (s.regs 4).toNat - (R.depth + 48) ∨ (s.regs 4).toNat + 24 ≤ desc)
     (ht0 : t.toNat ≠ 0) (hty : R.IsType t.toNat) (htu : t.toNat ≠ u64T) (hts : t.toNat ≠ strT)
     (hra : s.mem.readLE (s.regs 4).toNat 8 = ret) (hx15 : s.xmm 15 = 0) (hdf : s.df = false)
+    (hH : H [desc, t.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 48) (Janus.Contracts.rtView R.priv s.mem))
     (k : Nat) (hk : s.mem.readLE (s.mem.readLE desc 8) 8 = 2 ^ k - 1)
     (hcb : s.mem.readLE desc 8 + 8 + 24 * 2 ^ k ≤ 2 ^ 48)
     (hcacc : s.mem.accessible (s.mem.readLE desc 8) (8 + 24 * 2 ^ k) false = true)
@@ -197,11 +202,16 @@ theorem loop (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
       ⟨RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp48, hsp48']) (by simp [setRegF, h14])
         (by simp [hxm, hx15]) (by simp [hdf', hdf])
         (by simp [setRegF, hsp48, hsp48', Arm64.Memory.readLE_writeLE_self]) (by decide) (by decide),
-        ?_, ?_, ?_⟩ ?_
+        ?_, ?_, ?_, ?_⟩ ?_
     · simp only [setRegF, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, ← hD]
       exact ISDescOK.frame hdesc (by janus_frame) hdo' hws
     · simp only [setRegF, reduceIte, Nat.reduceEqDiff, h0]; exact ht0
     · simp only [setRegF, reduceIte, Nat.reduceEqDiff, h0]; exact hty
+    · simp only [Janus.Contracts.Ready64, setRegF, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, h0,
+        ← hD, h14]
+      simp (disch := janus64_disch) only [Janus.Contracts.rtView_writeLE]
+      have e1 : (s.regs 4 - 48#64).toNat = (s.regs 4).toNat - 48 := by bv_omega
+      simpa [e1] using hH
     · intro s' hpc' ⟨r, x', y, fl, m', hs', hfr, henv', hcase, hitab, _, hdesc2⟩
       subst hs'
       simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, setRegF, reduceIte,
@@ -289,18 +299,19 @@ theorem static_case (R : IfaceModel) (c : Nat) (t : BitVec 64) (s s' : State) (h
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 20000 in
-theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
+theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws) (H : Janus.Contracts.RtReady)
     (hsw : InterfaceSwitch (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.interfaceSwitch") R)
+      (Extracted.program.contractAddr "runtime.interfaceSwitch") R H)
     (c : Nat) (t x : BitVec 64) :
     Ensures (Extracted.program.link impl) Extracted.entry [t, x]
       (fun s => CallerOK R s 48 24 ∧ Extracted.program.DataLoaded s.mem ∧
         ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧
-        (t.toNat ≠ 0 → R.IsType t.toNat))
+        (t.toNat ≠ 0 → R.IsType t.toNat) ∧ H [desc, t.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 48)
+          (Janus.Contracts.rtView R.priv s.mem))
       (fun s s' => Post R c t s s' ∧
         (StaticItabs R Extracted.program.data → c = hasherInter → t.toNat = mulHasherType →
           (s'.regs 0).toNat = 3)) := by
-  intro ret hret s hs ⟨hc, hdl, hdesc, hdo, hty⟩
+  intro ret hret s hs ⟨hc, hdl, hdesc, hdo, hty, hH⟩
   suffices hmain : Reaches ((Extracted.program.link impl).withExit ret) s
       (IsReturn fun s' => ABIReturn s s' ∧ Post R c t s s') by
     exact (returns_of_reaches hmain).mono fun s' h =>
@@ -363,7 +374,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.L
   have hpr := probe_lt (j := j) (r := Arm64.Memory.readLE s.mem (t.toNat + 16) 4) hN
   janus64_run until [head]
   all_goals
-    refine loop impl R hl hsw c t x ret hret s hc hdesc hdo ht0 (hty ht0) htu hts h_ret hx15 hdf k hk
+    refine loop impl R hl H hsw c t x ret hret s hc hdesc hdo ht0 (hty ht0) htu hts h_ret hx15 hdf hH k hk
       hcb hcacc hcin hent j hj hj0 _ _ (BitVec.setWidth 64 (BitVec.ofNat 32
         (Arm64.Memory.readLE s.mem (t.toNat + 16) 4))) rfl ?_ (by rfl)
       (by simp [setRegF, h_a0]) (by simp [setRegF]) (by simp [setRegF, hD])
@@ -397,9 +408,9 @@ def linked : Janus.Amd64.Program :=
 
 theorem linked_eq : Extracted.program.link implAt = linked := rfl
 
-theorem model : InterfaceSwitch (Extracted.program.link implAt) cAddr R0 := by
+theorem model : InterfaceSwitch (Extracted.program.link implAt) cAddr R0 Htrue := by
   rw [linked_eq]
-  intro cs s hpc ⟨hpre, hdesc, ht0, ht⟩
+  intro cs s hpc ⟨hpre, hdesc, ht0, ht, _⟩
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, hal, hd1, hd2, hst, hx15, hdf, hra, hout⟩ := hpre
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   have hdesc' := hdesc
@@ -493,19 +504,22 @@ theorem pre : CallerOK R0 s0 48 24 ∧ Extracted.program.DataLoaded s0.mem ∧
   · simp only [window, outside_cons, outside_nil, and_true]; decide +kernel
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (c : Nat) (ret : Nat)
-    (s : Janus.Amd64.State) (t x : BitVec 64), R.Laws ∧
-    InterfaceSwitch (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.interfaceSwitch") R ∧
+theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (R : IfaceModel) (H : Janus.Contracts.RtReady)
+    (c : Nat) (ret : Nat) (s : Janus.Amd64.State) (t x : BitVec 64), R.Laws ∧
+    InterfaceSwitch (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.interfaceSwitch") R H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
     (CallerOK R s 48 24 ∧ Extracted.program.DataLoaded s.mem ∧
-      ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧ (t.toNat ≠ 0 → R.IsType t.toNat)) :=
-  ⟨implAt, R0, ID, ret, s0, td, val, R0_laws, model, hret, setup, pre⟩
+      ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧ (t.toNat ≠ 0 → R.IsType t.toNat) ∧
+      H [desc, t.toNat] (s.regs 14).toNat ((s.regs 4).toNat - 48) (Janus.Contracts.rtView R.priv s.mem)) :=
+  ⟨implAt, R0, Htrue, ID, ret, s0, td, val, R0_laws, model, hret, setup,
+    pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩
 
 /-- So the guarantee is reached: a box of `TD` takes the interface case `ID` (`3`). -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = 3 := by
-  refine (correctness implAt R0 R0_laws model ID td val ret hret s0 setup pre).mono ?_
+  refine (correctness implAt R0 R0_laws Htrue model ID td val ret hret s0 setup
+    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩).mono ?_
   intro s' h
   refine ⟨h.1, ?_⟩
   rw [h.2.1.1]

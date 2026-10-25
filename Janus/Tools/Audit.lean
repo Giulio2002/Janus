@@ -712,6 +712,117 @@ partial def checkSymbolRefs (tbl : SymTable) (e : Expr) : MetaM (Option String) 
   | .proj _ _ b => checkSymbolRefs tbl b
   | _ => return none
 
+/-! ## Round 10 V1: a runtime-contract hypothesis quantifies the runtime
+
+A runtime contract (`Janus.Contracts.*`: a definition whose body is a `Summary`) assumed by a
+theorem is a claim about the runtime at its address. It is a meaningful assumption only for the
+runtime parameters the theorem quantifies over: the code `impl` (`Extracted.program.link impl`),
+the runtime-owned ranges `rt`, the readiness predicate `H : RtReady` and the abstract models
+`R : IfaceModel`, `M : MapModel K V`. Passing a closed term instead (`H := fun _ _ _ _ => True`,
+`rt := []`, a concrete model, `Extracted.program` itself) can make the hypothesis false for every
+implementation, and the theorem vacuous while it reads as a stronger, unconditional claim: round
+9 C1's unsatisfiable allocation contracts again, now by the statement's choice. So in every
+premise of the statement, each runtime argument of a contract must be a variable bound by the
+statement, and no other premise may constrain such a variable, except the model laws
+(`IfaceModel.Laws R`, `MapModel.Laws M`), which are trusted facts about the runtime's data. -/
+
+def summaryHeads : List Name := [`Janus.Tactic.Summary, `Janus.Amd64.Tactic.Summary]
+
+partial def bodyIsSummary : Expr → Bool
+  | .lam _ _ b _ | .forallE _ _ b _ | .mdata _ b => bodyIsSummary b
+  | e => summaryHeads.any e.isAppOf
+
+/-- Is `c` a runtime contract of the framework? -/
+def isRuntimeContract (env : Environment) (c : Name) : Bool :=
+  (`Janus.Contracts).isPrefixOf c && match env.find? c with
+    | some (.defnInfo d) => bodyIsSummary d.value
+    | _ => false
+
+/-- The kind of a contract parameter, from its declared type: a runtime parameter (`H`, `rt`, a
+model), the program (which must be `Extracted.program.link impl`), or anything else. -/
+def contractParamKind (ty : Expr) : Option Bool :=
+  let ty := ty.consumeMData
+  if ty.isConstOf `Janus.Contracts.RtReady || ty.isConstOf `Janus.Spec.Type.IfaceModel ||
+      ty.isAppOf `Janus.Spec.Map.MapModel then some true
+  else if ty.isAppOfArity ``List 1 && (ty.getArg! 0).isAppOfArity ``Prod 2 &&
+      ((ty.getArg! 0).getArg! 0).isConstOf ``Nat && ((ty.getArg! 0).getArg! 1).isConstOf ``Nat then some true
+  else if ty.isConstOf `Janus.Program || ty.isConstOf `Janus.Amd64.Program then some false
+  else none
+
+partial def binderDomains : Expr → Array Expr → Array Expr
+  | .forallE _ d b _, acc => binderDomains b (acc.push d)
+  | .mdata _ b, acc => binderDomains b acc
+  | _, acc => acc
+
+/-- The runtime-contract applications in `e` (outermost first). With `claims`, the subterms under
+an `∃` are skipped: a contract there is claimed (a witness theorem's), not assumed. -/
+partial def contractApps (env : Environment) (e : Expr) (acc : Array Expr := #[])
+    (claims : Bool := false) : Array Expr :=
+  match e with
+  | .app .. =>
+    let fn := e.getAppFn
+    if claims && fn.isConstOf ``Exists then acc else
+    let acc := match fn with
+      | .const c _ => if isRuntimeContract env c then acc.push e else acc
+      | _ => contractApps env fn acc claims
+    e.getAppArgs.foldl (fun acc a => contractApps env a acc claims) acc
+  | .lam _ d b _ | .forallE _ d b _ => contractApps env b (contractApps env d acc claims) claims
+  | .letE _ t v b _ => contractApps env b (contractApps env v (contractApps env t acc claims) claims) claims
+  | .mdata _ b | .proj _ _ b => contractApps env b acc claims
+  | _ => acc
+
+/-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment). -/
+def checkContractHyps (ty : Expr) : MetaM (Option String) := do
+  let env ← getEnv
+  Meta.forallTelescope ty fun xs body => do
+    let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
+    let mut rtVars : Std.HashSet FVarId := {}
+    let mut premises : Array (Expr × Expr) := #[]
+    for x in xs do
+      let t ← Meta.inferType x
+      if ← Meta.isProp t then premises := premises.push (x, t)
+    let isVar (a : Expr) : Bool := a.isFVar && bound.contains a.fvarId!
+    -- a contract assumed inside the conclusion (say, in an `Ensures` precondition) is checked
+    -- too; only a conclusion that is itself a contract (a theorem proving one) is exempt
+    let concl := match body.consumeMData.getAppFn with
+      | .const c _ => if isRuntimeContract env c then #[] else #[body]
+      | _ => #[body]
+    let apps := premises.foldl (fun acc (_, t) => contractApps env t acc) #[] ++
+      concl.foldl (fun acc t => contractApps env t acc (claims := true)) #[]
+    for app in apps do
+      let .const c _ := app.getAppFn | continue
+      let some ci := env.find? c | continue
+      let doms := binderDomains ci.type #[]
+      let args := app.getAppArgs
+      if args.size < doms.size then
+        return some s!"applies the runtime contract {c} partially (round 10 V1)"
+      for i in [0:doms.size] do
+        let a := args[i]!.consumeMData
+        match contractParamKind doms[i]! with
+        | some true =>
+          unless isVar a do
+            return some s!"assumes the runtime contract {c} for the runtime argument `{(← Meta.ppExpr a).pretty 10000}`, which is not a variable of the statement: a contract is an assumption about the runtime only when the theorem quantifies its code, runtime-owned memory, readiness predicate and models; a closed choice (such as `fun _ _ _ _ => True` or `[]`) can make it false for every implementation and the theorem vacuous (round 10 V1)"
+          rtVars := rtVars.insert a.fvarId!
+        | some false =>
+          let ok := (a.isAppOfArity `Janus.Program.link 2 || a.isAppOfArity `Janus.Amd64.Program.link 2) &&
+            (a.getArg! 0).isConstOf `Extracted.program && isVar (a.getArg! 1).consumeMData
+          unless ok do
+            return some s!"assumes the runtime contract {c} about the program `{(← Meta.ppExpr a).pretty 10000}`, which is not `Extracted.program.link impl` for a variable `impl` of the statement (round 10 V1)"
+          rtVars := rtVars.insert (a.getArg! 1).consumeMData.fvarId!
+        | none => pure ()
+    if rtVars.isEmpty then return none
+    for (x, t) in premises do
+      unless t.hasAnyFVar (rtVars.contains ·) do continue
+      let t' := t.consumeMData
+      let isContract := match t'.getAppFn with
+        | .const c _ => isRuntimeContract env c
+        | _ => false
+      let isLaws := (t'.isAppOfArity `Janus.Spec.Type.IfaceModel.Laws 1 ||
+          t'.isAppOfArity `Janus.Spec.Map.MapModel.Laws 3) && isVar t'.appArg!.consumeMData
+      unless isContract || isLaws do
+        return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}), which constrains a runtime variable of a contract hypothesis; only the contracts and the model laws may mention them (round 10 V1)"
+    return none
+
 /-- Round 7 (K1): is `ty` (up to reducible unfolding) one of `Nat`, `Int`, or a wrapping
 fixed-width type (`numeralBound`)? Returns a short name for messages. -/
 def divType? (ty : Expr) : MetaM (Option String) := do
@@ -1030,12 +1141,19 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     -- round 8 I1: object names resolve in the extracted program
     let tbl ← symTable
     let localSet : Std.HashSet Name := localDefs.foldl (fun s ci => s.insert ci.name) {}
-    if let some m ← checkSymbolRefs tbl (← expandLocals localSet thmType) then
+    let expanded ← expandLocals localSet thmType
+    if let some m ← checkSymbolRefs tbl expanded then
+      throwError s!"the statement {m}"
+    -- round 10 V1: contract hypotheses quantify the runtime
+    if let some m ← checkContractHyps expanded then
       throwError s!"the statement {m}"
     for ci in extDefs do
       for t in [ci.type] ++ ci.value?.toList do
         if let some m ← checkSymbolRefs tbl t then
           throwError s!"the dependency definition {ci.name} used in the statement {m}"
+        -- round 10 V1: a contract hidden in a dependency definition escapes the premise check
+        if !(contractApps (← getEnv) t).isEmpty then
+          throwError s!"the dependency definition {ci.name} used in the statement applies a runtime contract; state contract hypotheses in the theorem itself (round 10 V1)"
     -- (a) the printed statement must elaborate back to the checked type
     let sigStr ← match ← printFaithful thm thmType with
       | .ok s => pure s

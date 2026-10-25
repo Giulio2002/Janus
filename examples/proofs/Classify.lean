@@ -27,6 +27,10 @@ miss, `runtime.interfaceSwitch`.
 **Assumptions (all in the statement).** `R` is *any* model satisfying `R.Laws`, and the code at
 `runtime.interfaceSwitch` is *any* code that behaves as `InterfaceSwitch` says (pinned to the Go
 runtime's code by the extraction).
+
+**Readiness** (round 10). The statement also quantifies over `H : RtReady`, the runtime's readiness
+for the one call that may allocate (`runtime.interfaceSwitch`), and assumes it at entry: the theorem says nothing
+about a call the runtime cannot serve as the contract says (no room in the heap, a collection).
 -/
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Spec.Type
@@ -98,14 +102,14 @@ theorem x6_toNat (c k : Nat) (h : BitVec 64) (hk : k ≤ 64) (hc : c + 8 + 24 * 
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 20000 in
-theorem loop (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
+theorem loop (impl : List Segment) (R : IfaceModel) (hl : R.Laws) (H : RtReady)
     (hsw : InterfaceSwitch (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.interfaceSwitch") R)
+      (Extracted.program.contractAddr "runtime.interfaceSwitch") R H)
     (c : Nat) (t x : BitVec 64) (ret : Nat) (hret : RetAddr (Extracted.program.link impl) ret)
     (s : State) (hc : CallerOK R s 64 24) (hdesc : ISDescOK R s.mem desc [c])
     (hdo : desc + 24 ≤ s.sp.toNat - (R.depth + 64) ∨ s.sp.toNat + 24 ≤ desc)
     (ht0 : t.toNat ≠ 0) (hty : R.IsType t.toNat) (htu : t.toNat ≠ u64T) (hts : t.toNat ≠ strT)
-    (k : Nat) (hk : s.mem.readLE (s.mem.readLE desc 8) 8 = 2 ^ k - 1)
+    (hH : H [desc, t.toNat] (s.regs 28).toNat (s.sp.toNat - 64) (rtView R.priv s.mem)) (k : Nat) (hk : s.mem.readLE (s.mem.readLE desc 8) 8 = 2 ^ k - 1)
     (hcb : s.mem.readLE desc 8 + 8 + 24 * 2 ^ k ≤ 2 ^ 48)
     (hcacc : s.mem.accessible (s.mem.readLE desc 8) (8 + 24 * 2 ^ k) false = true)
     (hcin : InRanges (s.mem.readLE desc 8) (8 + 24 * 2 ^ k) R.priv)
@@ -197,11 +201,15 @@ theorem loop (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
     janus_run until [Extracted.program.contractAddr "runtime.interfaceSwitch"]
     refine Reaches.call (Summary.withExit (hsw [c]) hret) rfl
       ⟨RTPre.of_caller hl hc (by janus_frame) (by simp; omega) (by simp [setReg, h28])
-        (by simp [setReg]) (by simp [setReg]) (by decide) (by decide), ?_, ?_, ?_⟩ ?_
+        (by simp [setReg]) (by simp [setReg]) (by decide) (by decide), ?_, ?_, ?_, ?_⟩ ?_
     · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64]
       exact ISDescOK.frame hdesc (by janus_frame) hdo' hws
     · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, h0]; exact ht0
     · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, h0]; exact hty
+    · simp only [Ready, setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, h0, h28]
+      simp (disch := janus_disch) only [rtView_writeLE]
+      have e1 : (s.sp - 64#64).toNat = s.sp.toNat - 64 := by bv_omega
+      simpa [e1] using hH
     · intro s' hpc' ⟨r, v, fl, m', hs', hfr, henv', hcase, hitab, _, hdesc2⟩
       subst hs'
       simp only [rtWrites, calleeStack, setReg_apply, reduceIte, Nat.reduceEqDiff,
@@ -284,18 +292,19 @@ theorem static_case (R : IfaceModel) (c : Nat) (t : BitVec 64) (s s' : State) (h
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 20000 in
-theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
+theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws) (H : RtReady)
     (hsw : InterfaceSwitch (Extracted.program.link impl)
-      (Extracted.program.contractAddr "runtime.interfaceSwitch") R)
+      (Extracted.program.contractAddr "runtime.interfaceSwitch") R H)
     (c : Nat) (t x : BitVec 64) :
     Ensures (Extracted.program.link impl) Extracted.entry [t, x]
       (fun s => CallerOK R s 64 24 ∧ Extracted.program.DataLoaded s.mem ∧
         ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧
-        (t.toNat ≠ 0 → R.IsType t.toNat))
+        (t.toNat ≠ 0 → R.IsType t.toNat) ∧
+        H [desc, t.toNat] (s.regs 28).toNat (s.sp.toNat - 64) (rtView R.priv s.mem))
       (fun s s' => Post R c t s s' ∧
         (StaticItabs R Extracted.program.data → c = hasherInter → t.toNat = mulHasherType →
           (s'.regs 0).toNat = 3)) := by
-  intro ret hret s hs ⟨hc, hdl, hdesc, hdo, hty⟩
+  intro ret hret s hs ⟨hc, hdl, hdesc, hdo, hty, hH⟩
   suffices hmain : Reaches ((Extracted.program.link impl).withExit ret) s
       (IsReturn fun s' => ABIReturn s s' ∧ Post R c t s s') by
     exact (returns_of_reaches hmain).mono fun s' h =>
@@ -352,7 +361,7 @@ theorem correctness (impl : List Segment) (R : IfaceModel) (hl : R.Laws)
   have hkb : 2 ^ k < 2 ^ 44 := by omega
   janus_run until [head]
   all_goals
-    refine loop impl R hl hsw c t x ret hret s hc hdesc hdo ht0 (hty ht0) htu hts k hk hcb hcacc
+    refine loop impl R hl H hsw c t x ret hret s hc hdesc hdo ht0 (hty ht0) htu hts hH k hk hcb hcacc
       hcin hent j hj hj0 _ _ (BitVec.ofNat 64 (s.mem.readLE (t.toNat + 16) 4)) rfl ?_ (by rfl)
       (by simp [setReg, h_x0]) (by simp [setReg]) (by simp [setReg, hD]) (by simp [setReg, hD])
       (by simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]; rw [← hD, hk])
@@ -390,10 +399,10 @@ def linked : Program :=
 
 theorem linked_eq : Extracted.program.link implAt = linked := rfl
 
-theorem model : InterfaceSwitch (Extracted.program.link implAt) cAddr R0 := by
+theorem model : InterfaceSwitch (Extracted.program.link implAt) cAddr R0 Htrue := by
   rw [linked_eq]
   intro cs s hpc hpre
-  obtain ⟨⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩, hdesc, ht0, ht⟩ := hpre
+  obtain ⟨⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩, hdesc, ht0, ht, -⟩ := hpre
   have hdesc' := hdesc
   obtain ⟨hdb, hdacc, -, hn, -, hcs, -⟩ := hdesc'
   have hcs' : ∀ c ∈ cs, c = ID := hcs
@@ -478,19 +487,22 @@ theorem pre : CallerOK R0 s0 64 24 ∧ Extracted.program.DataLoaded s0.mem ∧
   · simp only [window, outside_cons, outside_nil, and_true]; decide +kernel
 
 /-- All hypotheses of `correctness` are satisfiable together. -/
-theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (c : Nat) (ret : Nat) (s : State)
-    (t x : BitVec 64), R.Laws ∧
-    InterfaceSwitch (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.interfaceSwitch") R ∧
+theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (H : RtReady) (c : Nat) (ret : Nat)
+    (s : State) (t x : BitVec 64), R.Laws ∧
+    InterfaceSwitch (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.interfaceSwitch") R H ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [t, x] s ∧
     (CallerOK R s 64 24 ∧ Extracted.program.DataLoaded s.mem ∧
-      ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧ (t.toNat ≠ 0 → R.IsType t.toNat)) :=
-  ⟨implAt, R0, ID, ret, s0, td, val, R0_laws, model, hret, setup, pre⟩
+      ISDescOK R s.mem desc [c] ∧ Outside desc 24 (window R s) ∧ (t.toNat ≠ 0 → R.IsType t.toNat) ∧
+      H [desc, t.toNat] (s.regs 28).toNat (s.sp.toNat - 64) (rtView R.priv s.mem)) :=
+  ⟨implAt, R0, Htrue, ID, ret, s0, td, val, R0_laws, model, hret, setup,
+    pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩
 
 /-- So the guarantee is reached: a box of `TD` takes the interface case `ID` (`3`). -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = 3 := by
-  refine (correctness implAt R0 R0_laws model ID td val ret hret s0 setup pre).mono ?_
+  refine (correctness implAt R0 R0_laws Htrue model ID td val ret hret s0 setup
+    ⟨pre.1, pre.2.1, pre.2.2.1, pre.2.2.2.1, pre.2.2.2.2, trivial⟩).mono ?_
   intro s' h
   refine ⟨h.1, ?_⟩
   rw [h.2.1.1]

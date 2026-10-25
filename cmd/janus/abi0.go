@@ -116,8 +116,11 @@ func abi0Hint(b *Binary, sym string) string {
 	return fmt.Sprintf("\n  %s.abi0 exists: Go assembly is linked under its ABI0 name; the ABIInternal wrapper %s is only generated where Go code needs one, e.g. for a func value (docs/ABI0.md).", sym, sym)
 }
 
-// ensuresOnEntryRE matches the contract applied to the extraction's entry.
-var ensuresOnEntryRE = regexp.MustCompile(`Janus\.(?:Amd64\.)?(GoABI0?)\.(Ensures\w*) Extracted\.program Extracted\.entry`)
+// ensuresOnEntryRE matches the contract applied to the extraction's entry: on Extracted.program
+// itself, on a linked program (`(Extracted.program.link impl)`, the shape of every theorem with
+// runtime contracts) or with exits (`.withExit`), and with the entry possibly parenthesised
+// (round 10 A1: before, only the bare `Extracted.program Extracted.entry` form warned).
+var ensuresOnEntryRE = regexp.MustCompile(`Janus\.(?:Amd64\.)?(GoABI0?)\.(Ensures\w*) (?:Extracted\.program|\(Extracted\.program[.\w ]*\)) \(?Extracted\.entry\b`)
 
 // statementABI is the convention a theorem about the entry must use: the recorded one, else
 // ABIInternal for every Go symbol that is not `.abi0` (ordinary Go code records nothing).
