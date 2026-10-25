@@ -30,11 +30,19 @@ PAR_CORES_PER_JOB=6
 
 par_mem_available_kb() { awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 0; }
 
-# min(cores / 6, (MemAvailable - 40 GiB) / 10 GiB, 8), at least 1.
+# 1-minute load average, rounded down (0 if unknown).
+par_load1() { awk '{ printf "%d", $1 }' /proc/loadavg 2>/dev/null || echo 0; }
+
+# min(cores / 6, (cores - load) / 6, (MemAvailable - 40 GiB) / 10 GiB, 8), at least 1: the
+# cores other processes already use (the 1-minute load) are not available, so several suites
+# started on one host do not each take the whole machine.
 par_default_jobs() {
-  local n mem
-  n=$(( $(nproc 2>/dev/null || echo 4) / PAR_CORES_PER_JOB ))
+  local n mem cores free
+  cores=$(nproc 2>/dev/null || echo 4)
+  n=$(( cores / PAR_CORES_PER_JOB ))
   [ "$n" -gt "$PAR_MAX_DEFAULT_JOBS" ] && n=$PAR_MAX_DEFAULT_JOBS
+  free=$(( (cores - $(par_load1)) / PAR_CORES_PER_JOB ))
+  [ "$free" -lt "$n" ] && n=$free
   mem=$(( ($(par_mem_available_kb) - PAR_HEADROOM_KB) / PAR_JOB_MEM_KB ))
   [ "$mem" -lt "$n" ] && n=$mem
   [ "$n" -lt 1 ] && n=1

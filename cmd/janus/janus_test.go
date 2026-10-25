@@ -60,13 +60,23 @@ func statFSExisting(p string) fsInfo {
 }
 
 // defaultTestParallel is the -parallel default for this package (unless -parallel is given):
-// min(GOMAXPROCS / 6, (MemAvailable - 40 GiB) / 10 GiB, 8), at least 1, the budget of
+// min(GOMAXPROCS / 6, (GOMAXPROCS - load) / 6, (MemAvailable - 40 GiB) / 10 GiB, 8), at least 1, the budget of
 // scripts/lib/parallel.sh (a verifying test holds 0.2-5 GB: a cold kernel replay of the framework
 // 3 GB, the largest proof 4.8 GB; docs/TESTING.md "Measured peaks").
 func defaultTestParallel() int {
 	n := runtime.GOMAXPROCS(0) / 6
 	if n > 8 {
 		n = 8
+	}
+	// Cores already busy (the 1-minute load average) are not available to this run.
+	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
+		if f := strings.Fields(string(b)); len(f) > 0 {
+			if load, err := strconv.ParseFloat(f[0], 64); err == nil {
+				if free := (runtime.GOMAXPROCS(0) - int(load)) / 6; free < n {
+					n = free
+				}
+			}
+		}
 	}
 	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
 		for _, line := range strings.Split(string(b), "\n") {
