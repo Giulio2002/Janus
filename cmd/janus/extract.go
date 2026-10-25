@@ -75,6 +75,9 @@ type Extraction struct {
 	DataRefs []DataRef     // detected references, in code order
 	Skipped  []SkippedData // references whose target is not copied (writable, code, ...)
 	Lean     []byte
+	// BuildModes are the accepted instrumented build modes (buildmode.go), recorded in
+	// identity.json; nil for an ordinary build.
+	BuildModes []string
 }
 
 // Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)

@@ -257,6 +257,11 @@ func segmentDataRefs(b *Binary, s Segment) []DataRef {
 // extractWith copies sym, the dynamic targets named in targets, and everything reachable from
 // them by direct branches or inferred dynamic targets (see the file comment).
 func extractWith(b *Binary, sym string, maxFunctions int, contracts []string, targets ...string) (*Extraction, error) {
+	// -race, -msan, -asan and -d=libfuzzer binaries are rejected before anything is extracted.
+	modes, err := detectBuildModes(b)
+	if err != nil {
+		return nil, err
+	}
 	entry, err := b.lookup(sym)
 	if err != nil {
 		return nil, err
@@ -360,6 +365,7 @@ func extractWith(b *Binary, sym string, maxFunctions int, contracts []string, ta
 	} else {
 		x.Lean = renderLean(x)
 	}
+	x.BuildModes = withCheckptr(modes, x)
 	return x, nil
 }
 

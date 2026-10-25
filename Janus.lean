@@ -41,3 +41,4 @@ import Janus.Contracts.Instrument
 import Janus.Spec.PopCount
 import Janus.Spec.SoftFloat
 import Janus.Spec.SoftFloatAmd64
+import Janus.Spec.Complex

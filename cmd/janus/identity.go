@@ -102,8 +102,11 @@ type Identity struct {
 	// ContractPatterns are the --contract patterns of the extraction and Contracts the
 	// functions they matched (not followed, recorded in Program.contracts). Both are omitted
 	// when empty, so identities written before contracts existed keep their bytes.
+	// BuildModes are the accepted instrumented build modes ("cover", "checkptr", "spectre=ret";
+	// docs/CLI.md, "Build modes"), omitted for an ordinary build, whose identity keeps its bytes.
 	ContractPatterns []string           `json:"contractPatterns,omitempty"`
 	Contracts        []identityContract `json:"contracts,omitempty"`
+	BuildModes       []string           `json:"buildModes,omitempty"`
 	Unresolved       []identityBranch   `json:"unresolvedBranches"`
 	Targets          []string           `json:"targets,omitempty"`
 	DynamicTargets   []identityTarget   `json:"dynamicTargets,omitempty"`
@@ -178,6 +181,7 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 		id.Stubs = append(id.Stubs, identityStub{s.Name, hex0x(s.Addr), string(s.Kind)})
 	}
 	id.ContractPatterns = append([]string(nil), x.ContractPatterns...)
+	id.BuildModes = append([]string(nil), x.BuildModes...)
 	for _, c := range x.Contracts {
 		id.Contracts = append(id.Contracts, identityContract{c.Name, hex0x(c.Addr), c.Pinned})
 	}
