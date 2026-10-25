@@ -357,3 +357,31 @@ theorem Input.of_caller {s S : State} {d frame above nargs a n : Nat}
   omega
 
 end Janus.Contracts.MemAmd64
+
+namespace Janus.Contracts.MemAmd64
+
+open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts
+
+/-- `EqPre` at a later call site `S` (amd64), when `S`'s memory has the caller's entry
+accessibility and guard word (a second runtime call after one that changed runtime memory). -/
+theorem EqPre.of_parts {s S : State} {d frame above nargs : Nat} (hc : CallerOK s d frame above)
+    (hacc : ∀ a n w, S.mem.accessible a n w = s.mem.accessible a n w)
+    (hguard : S.mem.readLE ((s.regs 14).toNat + 16) 8 = s.mem.readLE ((s.regs 14).toNat + 16) 8)
+    (hsp : (S.regs 4).toNat = (s.regs 4).toNat - frame) (hg : S.regs 14 = s.regs 14)
+    (hx : S.xmm 15 = 0) (hdf : S.df = false) (hra : S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47)
+    (hfr : frame % 8 = 0) (hn : 8 + 8 * nargs ≤ frame + above) : EqPre d nargs S := by
+  obtain ⟨⟨hg1, hg2, hg3⟩, hal, hd, hb, hst, hout⟩ := hc
+  simp only [regG, regSP, stackguard0Offset, stackguard0] at hg1 hg2 hg3
+  simp only [outside_cons, outside_nil, and_true] at hout
+  refine ⟨⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, hx, hdf, hra⟩, ?_⟩
+  · simp only [regG, stackguard0Offset, hg]; omega
+  · simp only [regG, stackguard0Offset, hg, hacc]; exact hg2
+  · simp only [stackguard0, regG, regSP, stackguard0Offset, hg, hsp, hguard]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp]; omega
+  · rw [hsp, hacc]; exact Janus.Arm64.Memory.accessible_mono _ hst (by omega) (by omega)
+  · simp only [calleeStack, MapAmd64.calleeStack, outside_cons, outside_nil, and_true, hg, hsp]
+    omega
+
+end Janus.Contracts.MemAmd64
