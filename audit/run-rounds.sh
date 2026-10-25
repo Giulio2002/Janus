@@ -7,7 +7,7 @@
 # artifacts/ (built here first). Each lane's output is printed whole, in order; a lane whose script
 # fails (any BROKEN row) fails the run.
 #
-# Usage: audit/run-rounds.sh [-j LANES] [round …]   (rounds: all r2 r3 r4 r5 r6 r7 r8; default every one)
+# Usage: audit/run-rounds.sh [-j LANES] [round …]   (rounds: all r2 … rN, one per audit/round*/; default every one)
 #   -j LANES   lanes at once (default min(cores/12, (MemAvailable-40G)/20G, 4), admitted by memory); each lane runs
 #              its own rows with -j $JANUS_LANE_JOBS (default 2).
 set -u
@@ -27,9 +27,19 @@ PAR_JOB_MEM=20G
 declare -A script=([all]=audit/run-all.sh [r2]=audit/round2/run-round2.sh [r3]=audit/round3/run-round3.sh
   [r4]=audit/round4/run-round4.sh [r5]=audit/round5/run-round5.sh [r6]=audit/round6/run-round6.sh
   [r7]=audit/round7/run-round7.sh [r8]=audit/round8/run-round8.sh)
-# Longest first (measured), so the long lanes start at once.
+# Every audit/roundN/run-roundN.sh is a lane, so a new round can never be skipped silently.
+for f in audit/round*/run-round*.sh; do
+  n="r${f#audit/round}"; n="${n%%/*}"
+  [ -n "${script[$n]:-}" ] || script[$n]="$f"
+done
+# Longest first (measured), so the long lanes start at once; rounds without a measurement last.
 lanes=(${PAR_ARGS[@]+"${PAR_ARGS[@]}"})
-[ ${#lanes[@]} -gt 0 ] || lanes=(r7 r8 r5 all r2 r6 r3 r4)
+if [ ${#lanes[@]} -eq 0 ]; then
+  lanes=(r7 r8 r5 all r2 r6 r3 r4)
+  for n in $(printf '%s\n' "${!script[@]}" | sort -V); do
+    case " ${lanes[*]} " in *" $n "*) ;; *) lanes+=("$n");; esac
+  done
+fi
 for l in "${lanes[@]}"; do
   [ -n "${script[$l]:-}" ] || { echo "unknown round $l (all r2 r3 r4 r5 r6 r7 r8)"; exit 2; }
 done
