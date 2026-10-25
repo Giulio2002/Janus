@@ -17,10 +17,11 @@ amd64 (`GOAMD64=v1`, no FMA) rounds the product and the sum separately. `cdiv tr
 arm64 algorithm, `cdiv false` the amd64 one; the fused sites are exactly those of the compiled
 code (`mac`, `msc`, `nms`).
 
-**Annex G.** `cdiv_by_zero`, `cdiv_by_inf` and `cdiv_inf_by` prove, for both forms, the three
-recovery rules that motivate the fixup: a finite non-zero numerator over a zero gives an infinite
-part; a finite numerator over an infinite denominator gives two zeros; an infinite numerator over a
-finite non-zero denominator gives an infinite part.
+**Annex G.** `annexG_by_zero`, `annexG_by_inf` and `annexG_inf_by` evaluate (in the kernel) the
+three recoveries that motivate the fixup, for both forms: `1 / 0 = (+∞, NaN)` (a finite non-zero
+numerator over a zero gives an infinite part), `(1 + i) / ∞ = (0, 0)` (a finite numerator over an
+infinite denominator gives zeros) and `∞ / (1 + i) = (+∞, -∞)` (an infinite numerator over a finite
+non-zero denominator gives infinite parts). Smith's algorithm alone gives two NaNs in each case.
 -/
 
 namespace Janus.Float
@@ -162,5 +163,23 @@ def recover (fused : Bool) (a b c d : Nat) (ef : Option Nat × Option Nat) : Opt
 (amd64): the real and imaginary parts. -/
 def cdiv (fused : Bool) (a b c d : Nat) : Option Nat × Option Nat :=
   recover fused a b c d (smith fused a b c d)
+
+/-! ## The Annex G recoveries, evaluated -/
+
+theorem annexG_by_zero (u : Bool) :
+    cdiv u 0x3FF0000000000000 0 0 0 = (some 0x7FF0000000000000, none) := by
+  cases u <;> decide +kernel
+
+theorem annexG_by_inf (u : Bool) :
+    cdiv u 0x3FF0000000000000 0x3FF0000000000000 0x7FF0000000000000 0 = (some 0, some 0) := by
+  cases u <;> decide +kernel
+
+theorem annexG_inf_by (u : Bool) :
+    cdiv u 0x7FF0000000000000 0 0x3FF0000000000000 0x3FF0000000000000 =
+      (some 0x7FF0000000000000, some 0xFFF0000000000000) := by
+  cases u <;> decide +kernel
+
+theorem smith_by_zero (u : Bool) : smith u 0x3FF0000000000000 0 0 0 = (none, none) := by
+  cases u <;> decide +kernel
 
 end Janus.Float

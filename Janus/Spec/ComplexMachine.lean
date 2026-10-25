@@ -179,6 +179,18 @@ theorem O.fma3_negswap (X Y Z : Option Nat) : O.fma3 (O.neg X) Y Z = O.fma3 (O.n
   rename_i x y z
   rw [fma_negswap, fma_comm]
 
+theorem addExact_comm (n e n' e' : Int) : addExact n e n' e' = addExact n' e' n e := by
+  simp only [addExact, align, Int.min_comm e e', Int.add_comm]
+
+theorem add_comm' (rm : RM) (a b : Nat) : add binary64 rm a b = add binary64 rm b a := by
+  unfold add
+  rw [addExact_comm]
+  cases isNaN binary64 a <;> cases isNaN binary64 b <;> cases signOf binary64 a <;>
+    cases signOf binary64 b <;> cases classify binary64 a <;> cases classify binary64 b <;> simp
+
+theorem O.add2_comm (X Y : Option Nat) : O.add2 X Y = O.add2 Y X := by
+  cases X <;> cases Y <;> simp [O.add2, add_comm']
+
 end Janus.Float
 
 /-! ## arm64: the instructions deliver the lifted operations (`FPCR = 0`) -/
@@ -451,5 +463,30 @@ theorem comis_res64 (sig : Bool) (x y : Nat) :
   cases hx : isNaN binary64 x <;> cases hy : isNaN binary64 y
   · simp only [Bool.or_false, Bool.false_eq_true, ite_false]; exact comis_res c0 binary64 sig x y hx hy
   all_goals simp [comis, relation, check, hx, hy]
+
+/-- `UCOMISD x, y` as the flags the branches read: `CF` (below or unordered), `PF` (unordered), `ZF`
+(equal or unordered). -/
+theorem comis_cf (sig : Bool) (x y : Nat) :
+    ((comis sig binary64 (ctl 0x1F80) x y).res % 2 = 1) =
+      ((isNaN binary64 x || isNaN binary64 y || Janus.Arm64.FP.cmpN x y) = true) := by
+  rw [comis_res64]; unfold Janus.Arm64.FP.cmpN
+  cases isNaN binary64 x <;> cases isNaN binary64 y <;>
+    cases Val.eq (valueOf binary64 x) (valueOf binary64 y) <;>
+    cases Val.lt (valueOf binary64 x) (valueOf binary64 y) <;> decide
+
+theorem comis_pf (sig : Bool) (x y : Nat) :
+    ((comis sig binary64 (ctl 0x1F80) x y).res / 2 % 2 = 1) = ((isNaN binary64 x || isNaN binary64 y) = true) := by
+  rw [comis_res64]
+  cases isNaN binary64 x <;> cases isNaN binary64 y <;>
+    cases Val.eq (valueOf binary64 x) (valueOf binary64 y) <;>
+    cases Val.lt (valueOf binary64 x) (valueOf binary64 y) <;> decide
+
+theorem comis_zf (sig : Bool) (x y : Nat) :
+    ((comis sig binary64 (ctl 0x1F80) x y).res / 4 % 2 = 1) =
+      ((isNaN binary64 x || isNaN binary64 y || eq64 x y) = true) := by
+  rw [comis_res64]; unfold eq64
+  cases isNaN binary64 x <;> cases isNaN binary64 y <;>
+    cases Val.eq (valueOf binary64 x) (valueOf binary64 y) <;>
+    cases Val.lt (valueOf binary64 x) (valueOf binary64 y) <;> decide
 
 end Janus.Amd64.FP
