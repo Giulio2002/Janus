@@ -172,7 +172,8 @@ def Interequal (p : Janus.Amd64.Program) (addr : Nat) (R : IfaceModel) (d : Nat)
 def TPre (M : MemModel) (wb d nargs : Nat) (s : State) : Prop :=
   M.Env s.mem (s.regs 14) ∧ StackGuardOK s d ∧ CallOK s d nargs ∧
     Outside ((s.regs 4).toNat - d) (d + 8 + 8 * nargs) M.priv ∧ Input s d nargs wb 4 ∧
-    WriteBarrierOff s.mem wb ∧ Outside ((s.regs 14).toNat + 16) 8 (calleeStack s d nargs)
+    WriteBarrierOff s.mem wb ∧ Outside ((s.regs 14).toNat + 16) 8 (calleeStack s d nargs) ∧
+    Outside ((s.regs 14).toNat + 16) 8 M.priv
 
 /-- The destination of a typed-memory call (amd64): as `Mem.Dest`, and also outside the
 return-address slot `[RSP, RSP + 8)` (overwriting it would make the return impossible). -/

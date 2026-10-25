@@ -254,7 +254,8 @@ environment, the stack guard, `CallOK`, the window outside `M.priv`, the write-b
 def TPre (M : MemModel) (wb d nargs : Nat) (s : State) : Prop :=
   M.Env s.mem (s.regs 28) ∧ StackGuardOK s d ∧ CallOK s d nargs ∧
     Outside (s.sp.toNat - d) (d + 8 + 8 * nargs) M.priv ∧ Input s d nargs wb 4 ∧
-    WriteBarrierOff s.mem wb ∧ Outside ((s.regs 28).toNat + 16) 8 (calleeStack s d nargs)
+    WriteBarrierOff s.mem wb ∧ Outside ((s.regs 28).toNat + 16) 8 (calleeStack s d nargs) ∧
+    Outside ((s.regs 28).toNat + 16) 8 M.priv
 
 /-- The destination of a typed-memory call: `n` writable bytes at `a`, below `2^48`, outside the
 callee's window and outside the runtime's memory. -/

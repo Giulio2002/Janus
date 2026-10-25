@@ -22,7 +22,8 @@ stack guard, `MemAmd64.CallOK`, and the window outside `H.priv`. -/
 def HPre (H : HashModel) (d nargs : Nat) (s : State) : Prop :=
   H.Env s.mem (s.regs 14) ∧ StackGuardOK s d ∧ MemAmd64.CallOK s d nargs ∧
     Outside ((s.regs 4).toNat - d) (d + 8 + 8 * nargs) H.priv ∧
-    Outside ((s.regs 14).toNat + 16) 8 (MemAmd64.calleeStack s d nargs)
+    Outside ((s.regs 14).toNat + 16) 8 (MemAmd64.calleeStack s d nargs) ∧
+    Outside ((s.regs 14).toNat + 16) 8 H.priv
 
 /-- The return of a hashing runtime call (amd64), with the facts `P r` about the result
 registers `r`. -/
@@ -92,7 +93,8 @@ def Fhash (p : Janus.Amd64.Program) (addr : Nat) (H : HashModel) (d : Nat) (f : 
 def Chash (p : Janus.Amd64.Program) (addr : Nat) (H : HashModel) (d : Nat) (f : Fmt) (k : Nat) :
     Prop :=
   Summary p addr
-    (fun s => HPre H d 2 s ∧ GoMXCSR s ∧ MemAmd64.Input s d 2 (s.regs 0).toNat (2 * k))
+    (fun s => HPre H d 2 s ∧ GoMXCSR s ∧ MemAmd64.Input s d 2 (s.regs 0).toNat (2 * k) ∧
+      Outside (s.regs 0).toNat (2 * k) H.priv)
     (fun s s' => HRet H d 2 s s' fun r => ∃ h1,
       FHashIs H f k (s.mem.readLE (s.regs 0).toNat k) (s.regs 3).toNat h1 ∧
       FHashIs H f k (s.mem.readLE ((s.regs 0).toNat + k) k) h1 (r 0).toNat)

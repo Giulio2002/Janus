@@ -106,7 +106,7 @@ guard at least `d` bytes below `SP`, `CallOK`, and the window outside `H.priv`. 
 def HPre (H : HashModel) (d nargs : Nat) (s : State) : Prop :=
   H.Env s.mem (s.regs 28) ∧ StackGuardOK s d ∧ CallOK s d nargs ∧
     Outside (s.sp.toNat - d) (d + 8 + 8 * nargs) H.priv ∧
-    Outside ((s.regs 28).toNat + 16) 8 (calleeStack s d nargs)
+    Outside ((s.regs 28).toNat + 16) 8 (calleeStack s d nargs) ∧ Outside ((s.regs 28).toNat + 16) 8 H.priv
 
 /-- The return of a hashing runtime call (arm64), with the facts `P r` about the result
 registers `r`. -/
@@ -181,7 +181,8 @@ def Fhash (p : Program) (addr : Nat) (H : HashModel) (d : Nat) (f : Fmt) (k : Na
 (`Chash binary64 8`): the real part hashed with `h`, then the imaginary part with that hash. -/
 def Chash (p : Program) (addr : Nat) (H : HashModel) (d : Nat) (f : Fmt) (k : Nat) : Prop :=
   Summary p addr
-    (fun s => HPre H d 2 s ∧ s.fpcr = 0 ∧ Input s d 2 (s.regs 0).toNat (2 * k))
+    (fun s => HPre H d 2 s ∧ s.fpcr = 0 ∧ Input s d 2 (s.regs 0).toNat (2 * k) ∧
+      Outside (s.regs 0).toNat (2 * k) H.priv)
     (fun s s' => HRet H d 2 s s' fun r => ∃ h1,
       FHashIs H f k (s.mem.readLE (s.regs 0).toNat k) (s.regs 1).toNat h1 ∧
       FHashIs H f k (s.mem.readLE ((s.regs 0).toNat + k) k) h1 (r 0).toNat)
