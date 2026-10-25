@@ -118,6 +118,8 @@ do_gen() {
     { tail -30 "$w/sail.log"; exit 1; }
   # The slice paths are recorded in assertion messages; make them independent of $DEPS.
   sed -i "s#$S/#sail-arm/arm-v9.4-a/src/#g" "$w/out/ArmASL/ArmASL.lean"
+  # An exact-enough square root for FSQRT (the toolchain's goes through Float).
+  python3 -I "$here/fakereal_sqrt.py" "$w/out/ArmASL/ArmASL/FakeReal.lean"
   # Chained modules of at most PART_BYTES each (JanusASL/sail/split_lean.py).
   rm -rf "$w/split"; mkdir -p "$w/split"
   python3 -I "$here/split_lean.py" "$w/out/ArmASL/ArmASL.lean" "$w/split" --bytes "$PART_BYTES"
