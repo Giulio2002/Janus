@@ -238,11 +238,11 @@ final state of the callee's symbolic run is a concrete state term). -/
 @[janus_post] theorem ret0_iff (s s' : State) (Q : Memory → Prop) :
     Ret0 s s' Q ↔ s'.sp = s.sp ∧ s'.pc = s.regs regLR ∧ s'.regs 18 = s.regs 18 ∧
       s'.regs 28 = s.regs 28 ∧ s'.regs 29 = s.regs 29 ∧ s'.fpcr = s.fpcr ∧ s'.tpidr = s.tpidr ∧
-      s'.dczid = s.dczid ∧ Q s'.mem := by
+      s'.dczid = s.dczid ∧ s'.excl = s.excl ∧ s'.exclPass = s.exclPass ∧ Q s'.mem := by
   constructor
   · rintro ⟨junk, f, v, fpsr, m, rfl, hq⟩
     simp [retState0, regs0, regG, regPlatform, regFP, hq]
-  · rintro ⟨h1, h2, h3, h4, h5, h6, h7, h8, hq⟩
+  · rintro ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, hq⟩
     refine ⟨s'.regs, s'.flags, s'.vregs, s'.fpsr, s'.mem, ?_, hq⟩
     have hr : regs0 s.regs s'.regs = s'.regs := by
       funext i

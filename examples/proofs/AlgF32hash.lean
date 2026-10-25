@@ -237,7 +237,7 @@ theorem modelR (d : Nat) : Rand (Extracted.program.link implAt) rAddr H0 d := by
   janus_eval_nat hC : rAddr
   rw [hC] at hpc
   janus_run
-  exact hRet_of ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he trivial
+  exact hRet_of ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he trivial
 
 theorem modelM (d : Nat) : Memhash (Extracted.program.link implAt) mAddr H0 d := by
   rw [link_eq]

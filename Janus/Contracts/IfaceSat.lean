@@ -71,12 +71,13 @@ theorem rtReturn_of (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (
     (P : (Nat → W64) → Memory → Prop) (hsp : s'.sp = s.sp) (hpc : s'.pc = s.regs 30)
     (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29)
     (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr)
-    (hfs : s'.fpsr = s.fpsr) (hfr : MemFrame s.mem s'.mem (rtWrites R s nargs ++ extra))
+    (hfs : s'.fpsr = s.fpsr) (hex : s'.excl = s.excl) (hep : s'.exclPass = s.exclPass)
+    (hfr : MemFrame s.mem s'.mem (rtWrites R s nargs ++ extra))
     (henv : R.Env s'.mem (s.regs 28)) (hp : P s'.regs s'.mem) : RTReturn R nargs extra s s' P := by
   refine ⟨s'.regs, s'.vregs, s'.flags, s'.mem, ?_, hfr, henv, hp⟩
-  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
-  simp only at hsp hpc hdz htp hfc hfs h18 h28 h29 ⊢
-  subst hsp hpc hdz htp hfc hfs
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
+  simp only at hsp hpc hdz htp hfc hfs hex hep h18 h28 h29 ⊢
+  subst hsp hpc hdz htp hfc hfs hex hep
   congr
   funext i
   simp only [Map.keepABI]
@@ -95,7 +96,7 @@ theorem convT64_impl : ConvT64 (toy.link (at0 convT64Code)) A0 R0 Htrue := by
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   janus_run
   refine rtReturn_of R0 1 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-    rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
+    rfl rfl rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [rtWrites, calleeStack, R0_priv, R0_depth, List.append_nil, List.cons_append,
       List.nil_append]
     janus_frame
@@ -122,7 +123,7 @@ theorem convT32_impl : ConvT32 (toy.link (at0 convT32Code)) A0 R0 Htrue := by
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   janus_run
   refine rtReturn_of R0 1 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-    rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
+    rfl rfl rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [rtWrites, calleeStack, R0_priv, R0_depth, List.append_nil, List.cons_append,
       List.nil_append]
     janus_frame
@@ -148,7 +149,7 @@ theorem convT16_impl : ConvT16 (toy.link (at0 convT16Code)) A0 R0 Htrue := by
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   janus_run
   refine rtReturn_of R0 1 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-    rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
+    rfl rfl rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [rtWrites, calleeStack, R0_priv, R0_depth, List.append_nil, List.cons_append,
       List.nil_append]
     janus_frame
@@ -184,7 +185,7 @@ theorem convT_impl : ConvT (toy.link (at0 convTCode)) A0 R0 Htrue := by
   rw [hsz] at hb hacc
   janus_run
   refine rtReturn_of R0 2 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-    rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
+    rfl rfl rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [rtWrites, calleeStack, R0_priv, R0_depth, List.append_nil, List.cons_append,
       List.nil_append]
     janus_frame
@@ -234,7 +235,7 @@ theorem convTstring_impl : ConvTstring (toy.link (at0 convTstringCode)) A0 R0 Ht
   janus_run
   all_goals
     refine rtReturn_of R0 2 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-      rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
+      rfl rfl rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
     · simp only [rtWrites, calleeStack, R0_priv, R0_depth, List.append_nil, List.cons_append,
         List.nil_append]
       janus_frame
@@ -285,7 +286,7 @@ theorem convTslice_impl : ConvTslice (toy.link (at0 convTsliceCode)) A0 R0 Htrue
   janus_run
   all_goals
     refine rtReturn_of R0 3 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-      rfl rfl rfl rfl ?_ ((((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _
+      rfl rfl rfl rfl rfl rfl ?_ ((((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _
         (by simp [BOX])).writeLE _ (by simp [BOX])).writeLE _ (by simp [BOX])) ?_
     · simp only [rtWrites, calleeStack, R0_priv, R0_depth, List.append_nil, List.cons_append,
         List.nil_append]
@@ -328,7 +329,7 @@ theorem assertE2I_impl : AssertE2I (toy.link (at0 assertE2ICode)) A0 R0 := by
     · simp [hne] at hsome
   janus_run
   refine rtReturn_of R0 2 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-    rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+    rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
   simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat]
   refine ⟨?_, fun _ => ?_⟩
   · simp [htd, hi, TD, TAB]
@@ -367,7 +368,7 @@ theorem assertE2I2_impl : AssertE2I2 (toy.link (at0 assertE2I2Code)) A0 R0 := by
   simp only [R0_isInter] at hi
   janus_run
   refine rtReturn_of R0 2 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-    rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+    rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
   have := itabResult_R0 (g := s.regs 28) ⟨he1, he2, hd⟩ (s.regs 1).toNat
   simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
   rw [hi]
@@ -391,7 +392,7 @@ theorem typeAssert_impl : TypeAssert (toy.link (at0 assertE2I2Code)) A0 R0 Htrue
   have hi : taInter s.mem (s.regs 0).toNat = ID := hdesc.2.2.2.1
   janus_run
   refine rtReturn_of R0 2 _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-    rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+    rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
   have := itabResult_R0 (g := s.regs 28) ⟨he1, he2, hd⟩ (s.regs 1).toNat
   refine ⟨?_, hdesc, rfl, rfl⟩
   simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
@@ -433,7 +434,7 @@ theorem interfaceSwitch_impl : InterfaceSwitch (toy.link (at0 interfaceSwitchCod
   janus_run
   all_goals
     refine rtReturn_of R0 2 _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-      rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+      rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
     simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
     refine ⟨?_, ?_, ?_, hdesc⟩
   all_goals (try rw [hn] at *)
@@ -483,13 +484,13 @@ theorem efaceeq_impl : Efaceeq (toy.link (at0 efaceeqCode)) A0 R0 := by
   by_cases h0 : (s.regs 0).toNat = 0
   · janus_run
     refine rtReturn_of R0 3 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-      rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+      rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
     simp [setReg, efaceEqual, h0]
   · obtain ⟨-, htd, hx, hy⟩ := hok h0
     janus_run
     all_goals
       refine rtReturn_of R0 3 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-        rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+        rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
       rw [htd, efaceEqual_R0 (g := s.regs 28) ⟨he1, he2, hd⟩]
       simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
       split
@@ -511,14 +512,14 @@ theorem ifaceeq_impl : Ifaceeq (toy.link (at0 efaceeqCode)) A0 R0 := by
   by_cases h0 : (s.regs 0).toNat = 0
   · janus_run
     refine rtReturn_of R0 3 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-      rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+      rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
     simp [setReg, ifaceEqual, h0]
   · obtain ⟨-, -, ht0, hok⟩ := hok h0
     obtain ⟨-, ht, hx, hy⟩ := hok ht0
     janus_run
     all_goals
       refine rtReturn_of R0 3 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-        rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+        rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
       simp only [ifaceEqual, ht]
       rw [efaceEqual_R0 (g := s.regs 28) ⟨he1, he2, hd⟩]
       simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]

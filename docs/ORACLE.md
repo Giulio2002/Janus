@@ -117,8 +117,9 @@ handler with a foreign `g` register.
   under `K` random states.
 * **Targeted** (`gen/<class>`): random encodings per class with fixed opcode bits and fields
   biased towards allocated encodings, plus a share of unallocated variants.
-  `ls.excl` mixes CAS/CASP (even registers), LDAR/STLR and LDXR/LDAXR (should-be-one fields
-  mostly all ones, so most words are allocated) and store-exclusives; `ls.atomic` covers every
+  `ls.excl` mixes CAS/CASP (even registers), LDAR/STLR, LDXR/LDAXR, LDXP/STXP (should-be-one
+  fields mostly all ones, so most words are allocated) and store-exclusives (as single words they
+  run with the monitor open, so they must fail); `ls.atomic` covers every
   `LD<op>`, `SWP` and `LDAPR`; `sys.mrs` is half `MRS Xt, DCZID_EL0`, half random system
   register reads; `sys.sys` is half `DC ZVA, Xt` (with `Xt` mostly in the buffer), half random
   `SYS #op1, C7, Cm, #op2` operations.
@@ -130,6 +131,19 @@ handler with a foreign `g` register.
   Vector register values are random, edge values, bytes from a small alphabet, or copies of
   another register with a few bytes changed (so element compares hit both outcomes); `TBL`
   indices are mostly in range; SIMD&FP memory accesses land in the buffer like the integer ones.
+* **Exclusive-monitor sequences** (`gen/seq.excl`, `oracle gen -excl-seq N`; `oracle/gen/excl.go`):
+  blocks run in sequence mode (below) that exercise the monitor: load-exclusive/compute/
+  store-exclusive pairs of every size and acquire/release form, the Go retry loop (`LDAXR`;
+  `ADD`; `STLXR`; `CBNZ` back), exclusive pairs (`LDXP`/`STXP`, 32- and 64-bit), and the cases
+  the model must get right deterministically: a store-exclusive with the monitor open, after
+  `CLREX`, or as the second one after a single load-exclusive (all must fail); a store to
+  another address or size than the marked one (the model stops, `unpredictable`); a plain store
+  in between; re-marking by a second load-exclusive; misaligned and out-of-buffer bases; `SP` as
+  the base.
+* **Harvested retry loops** (`harvest/seq.excl`, `oracle harvest -excl-loops K`): every distinct
+  LL/SC loop of the harvested binaries (a load-exclusive, plain data processing, a
+  store-exclusive to the same base, `CBNZ` on its status back to the load), run as a block with
+  the base pointing into the buffer, under `K` random states.
 * **Group-random** (`rand/<class>`): fully random words inside each top-level encoding group
   (data-processing immediate / register, branches, loads/stores, SIMD&FP data processing,
   SIMD&FP loads/stores) — tests that the decoder rejects what it does not understand.
@@ -186,6 +200,61 @@ registers, `FPCR`/`FPSR` and memory are unchanged, and execution continues at `p
 | `reserved`: agree, both fault (`SIGILL` / `undecodable`, the rest of the space) | 1,846 |
 | `sys.env`: agree with the contract frame (`CNTVCT_EL0` 1,077, `CNTFRQ_EL0` 1,083, `MIDR_EL1` 1,129, `DIT` 1,012, `MSR DIT` 1,331) | 5,632 |
 | `sys.env`: model-gap (`MSR DIT, #imm` with `CRm ≥ 2`, rejected) | 1,868 |
+## Sequence mode
+
+A case with a `words` field (added by the rt-model audit) lays the words out from `TestPC`; the
+native runner executes the block until it falls through to the `UDF` after it, and
+`janus-oracle` (`Oracle.runSeq`) steps the model until `pc` leaves the block, with at most
+`4·n+1` steps. A fault of any instruction of the block is a fault (the runner classifies a signal
+at a block address other than a fetch of that address as `fault`); a branch out of the block
+ends it like a fall-through.
+
+## Nondeterministic outcomes (store-exclusives)
+
+A store-exclusive's outcome is the environment's (`State.exclPass`, docs/SOUNDNESS.md), so the
+model does not predict one result but a set. `janus-oracle` makes the set explicit: a case
+whose words include a store-exclusive is run under every outcome stream over its first
+`choices` environment choices (1 for a single word; 2 per store-exclusive word for a block, at
+most 8), and the result lists the all-fail outcome in the usual fields plus every other distinct
+outcome in `alts`. The comparator (`compareCase`) then asks the only question that matters for
+soundness: **is the hardware's result one of the model's outcomes?** If it is, the verdict is
+`agree` (kind `nondet/…`, with `altN` naming the matching outcome). If not, the verdict is
+`MISMATCH` when hardware succeeded or when any model outcome succeeded, and `model-gap` when
+hardware succeeded and every model outcome faulted. A model outcome that hardware did not
+produce in this run is not an error: it is a behaviour the architecture allows (a spurious
+failure, or a pass that qemu happens not to give).
+
+The deterministic parts are still checked exactly: with the monitor open (the runner executes
+`CLREX` before every case), after `CLREX`, and after a store-exclusive to the marked bytes, the
+model has only the failing outcome, so a hardware pass would be a `MISMATCH`. Bounding the
+enumeration only removes outcomes (a store-exclusive beyond the bound sees "fail" in every run),
+so it can turn an agreement into a reported mismatch but never hide one.
+
+## Results with exclusives (2026-10-24, `scripts/oracle.sh full`, qemu 10.2.1 `-cpu max`, DCZID_EL0 = 7)
+
+789,222 cases (the full corpus: generated, `gen/seq.excl` 20,000 blocks, harvested, and the
+1,752 cases of the 219 distinct LL/SC loops of the harvested binaries, `harvest/seq.excl`):
+**0 MISMATCH**, 749,356 agree, 39,865 model-gap, 1 unobserved (a `RET` into mapped memory,
+`gen/br.reg`). The exclusive classes:
+
+| class | cases | agree (one outcome) | agree (an alternative outcome) | agree (both fault) | model-gap | MISMATCH |
+|---|---:|---:|---:|---:|---:|---:|
+| `gen/ls.excl` | 4,000 | 2,796 | – | 636 | 568 (346 `undecodable`, 194 `unaligned`, 28 `outsideAllocation`) | 0 |
+| `gen/seq.excl` | 20,000 | 3,240 | 10,091 | 1,575 | 5,094 (4,317 `unpredictable`, 755 `unaligned`, 22 `outsideAllocation`) | 0 |
+| `harvest/ls.excl` | 2,058 | 1,740 | – | 153 | 165 (143 `unaligned`, 13 `outsideAllocation`, 9 `undecodable`) | 0 |
+| `harvest/seq.excl` | 1,752 | – | 1,752 | 0 | 0 | 0 |
+| `rand/ls.excl` | 916 | 57 | – | 592 | 267 | 0 |
+
+"Agree (an alternative outcome)" are runs where qemu's store-exclusive passed: the hardware
+result is the model's outcome with that pass, not the all-fail one. Every harvested Go retry loop
+agrees that way (qemu passes the first attempt). The `unpredictable` gaps are the generated
+store-exclusives to other bytes than the marked ones, which the model deliberately does not
+resolve; `unaligned` gaps are qemu's FEAT_LSE2 behaviour and qemu's status-1 answer for a
+misaligned store-exclusive whose monitor does not match (the Arm ARM checks alignment first);
+the harvested `undecodable` words are data in `.text` (`STXRB` with `Rt2 = 0`, a should-be-one
+field). A separate 64,728-case run of the exclusive classes alone (`-only '^ls\.excl$'
+-excl-seq 40000` and the harvested loops of `sync`, `sync/atomic`, `runtime`,
+`internal/runtime/atomic`) also gave 0 MISMATCH.
 
 ## Results with the Advanced SIMD classes of `NeonInstr` (2026-10-25, `scripts/oracle.sh neon`, qemu 10.2.1 `-cpu max`)
 
@@ -490,8 +559,15 @@ harvest sample (`ls.uimm` is capped at `PER_CLASS`); the generated ones cover ev
   non-zero top byte sets `PC` to the address with bits 63:56 replaced by bit 55
   (`AArch64.BranchAddr`); qemu does the same.
 * **Exclusive monitor.** Each case starts with the monitor open (`CLREX`), so on hardware a
-  single `STXR` always fails (status 1, no store). The model rejects every store-exclusive
-  (see `docs/SOUNDNESS.md`), so these are model-gaps.
+  single `STXR` always fails (status 1, no store), and so does the model. qemu implements the
+  monitor as an address plus the loaded value (a store-exclusive passes iff the address matches
+  and memory still holds that value); with one thread its passes are a subset of the
+  architecture's. Where qemu differs from the Arm ARM it does so in cases the model does not
+  resolve: a misaligned or inaccessible store-exclusive with the monitor not matching returns
+  status 1 on qemu without the alignment or permission fault (the model faults: model-gap), and
+  a store-exclusive of another size than the load-exclusive can write memory while reporting
+  status 1 (TCG's non-atomic cmpxchg compares the truncated value; the model stops with
+  `unpredictable`: model-gap).
 * **Alignment of atomics.** qemu `-cpu max` implements FEAT_LSE2: an `LDAR`/`STLR`/LSE atomic
   that is misaligned but stays inside 16 bytes succeeds. The model requires natural alignment
   (`Fault.unaligned`), so these are model-gaps (`unaligned`); misaligned accesses that cross 16

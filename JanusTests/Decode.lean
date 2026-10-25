@@ -197,8 +197,26 @@ example : decode 0xd51b4200 = some (.msrNzcv 0) := by decide   -- msr nzcv, x0
 example : decode 0xd53b4420 = some (.mrsFpsr 0) := by decide   -- mrs x0, fpsr
 example : decode 0xd51b4420 = some (.msrFpsr 0) := by decide   -- msr fpsr, x0
 example : decode 0xc85ffc01 = some (.ldExcl 3 true 0 1) := by decide   -- ldaxr x1, [x0]
-example : decode 0xc81ffc01 = none := by decide   -- stlxr w31, x1, [x0]: store-exclusives are rejected
-example : decode 0xc81bfc02 = none := by decide   -- stlxr w27, x2, [x0]
+example : decode 0xc81ffc01 = some (.stExcl 3 true 31 0 1) := by decide   -- stlxr wzr, x1, [x0]
+example : decode 0xc81bfc02 = some (.stExcl 3 true 27 0 2) := by decide   -- stlxr w27, x2, [x0]
+example : decode 0xc8027fe1 = some (.stExcl 3 false 2 31 1) := by decide   -- stxr w2, x1, [sp]
+example : decode 0x08037ca4 = some (.stExcl 0 false 3 5 4) := by decide   -- stxrb w3, w4, [x5]
+example : decode 0x4803fca4 = some (.stExcl 1 true 3 5 4) := by decide   -- stlxrh w3, w4, [x5]
+example : decode 0x88037ca4 = some (.stExcl 2 false 3 5 4) := by decide   -- stxr w3, w4, [x5]
+example : decode 0xc87f0440 = some (.ldExclPair true false 1 2 0) := by decide   -- ldxp x0, x1, [x2]
+example : decode 0x887f8440 = some (.ldExclPair false true 1 2 0) := by decide   -- ldaxp w0, w1, [x2]
+example : decode 0xc8230440 = some (.stExclPair true false 3 1 2 0) := by decide   -- stxp w3, x0, x1, [x2]
+example : decode 0x882387e0 = some (.stExclPair false true 3 1 31 0) := by decide   -- stlxp w3, w0, w1, [sp]
+example : decode 0x085f7c41 = some (.ldExcl 0 false 2 1) := by decide   -- ldxrb w1, [x2]
+-- CONSTRAINED UNPREDICTABLE overlaps and should-be-one fields: rejected
+example : decode 0xc801fc01 = none := by decide   -- stlxr w1, x1, [x0] (s = t)
+example : decode 0xc800fc01 = none := by decide   -- stlxr w0, x1, [x0] (s = n)
+example : decode 0xc81bf802 = none := by decide   -- stlxr with Rt2 != 11111
+example : decode 0xc87f0040 = none := by decide   -- ldxp x0, x0, [x2] (t = t2)
+example : decode 0xc87e0440 = none := by decide   -- ldxp with Rs != 11111
+example : decode 0xc8200440 = none := by decide   -- stxp w0, x0, x1, [x2] (s = t)
+example : decode 0xc8210440 = none := by decide   -- stxp w1, x0, x1, [x2] (s = t2)
+example : decode 0xc8220440 = none := by decide   -- stxp w2, x0, x1, [x2] (s = n)
 example : decode 0xc89ffc01 = some (.ldstOrdered 3 false false 0 1) := by decide   -- stlr x1, [x0]
 example : decode 0xc89f7c01 = none := by decide   -- stllr x1, [x0] (FEAT_LOR)
 example : decode 0xc89efc01 = none := by decide   -- stlr with Rs != 11111 (CONSTRAINED UNPREDICTABLE)

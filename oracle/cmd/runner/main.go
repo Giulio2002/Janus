@@ -414,6 +414,10 @@ func runCase(c *L.Case, seq int64) L.HW {
 		r.Status = "selfloop"
 	case pc == L.TestPC:
 		r.Status = "fault"
+	case len(c.Words) > 0 && pc > L.TestPC && pc < L.TestPC+4*uint64(len(c.Words)) && !(sig == sigSEGV && addr == pc):
+		// Sequence mode: an instruction of the block itself faulted (a fetch fault at a block
+		// address cannot happen: the code page is mapped).
+		r.Status = "fault"
 	case sig == sigSEGV && addr == pc,
 		sig == sigILL && pc >= L.CodePage && pc < L.CodePage+L.PageSize,
 		sig == sigBUS && pc%4 != 0:

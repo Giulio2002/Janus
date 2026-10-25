@@ -229,7 +229,7 @@ theorem model (d : Nat) : Typehash (Extracted.program.link implAt) cAddr H0 d :=
   janus_eval_nat hC : cAddr
   rw [hC] at hpc
   janus_run
-  exact hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+  exact hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
     (MemFrame.refl _ _) he (by simp [setReg, seed_mod])
 
 /-- The witness call state: `MemSat.wstate` at the entry, with `interhash(IFV, 7)` (the interface value `IFV = (TAB, VAL)`). -/

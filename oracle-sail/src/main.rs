@@ -441,7 +441,18 @@ impl Cpu {
             }
         };
 
-        // Memory: code page = word at TestPC, zeros (UDF #0) elsewhere; data = pattern.
+        // Memory: code page = word (or the block) at TestPC, zeros (UDF #0) elsewhere;
+        // data = pattern.
+        let mut block: Vec<u32> = Vec::new();
+        for w in &c.words {
+            match parse_hex(w) {
+                Ok(v) if v <= 0xffff_ffff => block.push(v as u32),
+                _ => {
+                    err(&mut r, "bad words entry".into());
+                    return r;
+                }
+            }
+        }
         let mut code = vec![0u8; PAGE as usize];
         let off = (TEST_PC - CODE_PAGE) as usize;
         if block.is_empty() {

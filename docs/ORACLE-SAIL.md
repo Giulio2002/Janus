@@ -179,6 +179,17 @@ and must not be read as "the architecture says so":
   `STXR/STLXR/STXP` appear where qemu reports a failed store. The ASL order (alignment check
   first) is Arm's; whether aborts are detected before the monitor check is IMPLEMENTATION
   DEFINED.
+
+  Since Janus models the store-exclusives (docs/SOUNDNESS.md), Janus-vs-Sail runs `janus-oracle
+  --monitor-stub`: before each store-exclusive the model's monitor is set to mark exactly that
+  store's bytes, which is the stub's view, so "pass" is among the model's outcomes (`alts`, see
+  docs/ORACLE.md "Nondeterministic outcomes"), and the comparator requires Sail's result to be
+  one of them. That checks the data path, the status register, register overlaps, alignment and
+  faults of every store-exclusive against Arm's ASL. The parts the stub cannot judge (the Open
+  Access state fails; a store-exclusive to the marked bytes opens the monitor) are checked against
+  qemu only, where the corpus contains them deterministically (`gen/seq.excl`). Sequence-mode
+  cases (field `words`) are stepped by the driver until the PC leaves the block, like the qemu
+  runner.
 * **`sail-unpredictable`**: sail-arm stubs `ConstrainUnpredictable*()` with
   `__UNKNOWN_*()`, which is deterministically the first enum value (`Constraint_NONE`), and the
   crate's `step_a64` turns `Error_Unpredictable` into UNDEFINED. `instrument_model.py` counts
@@ -223,6 +234,27 @@ and must not be read as "the architecture says so":
 
 None of these can hide a Janus soundness bug as an "agree". They only produce `model-gap`
 or MISMATCH noise between qemu and Sail, or `error` cases, which are excluded.
+
+## Results with the exclusive monitor (2026-10-25, 789,635 cases)
+
+The full qemu corpus of `scripts/oracle.sh full` after the store-exclusives were modelled
+(including the 20,000 `gen/seq.excl` blocks and the 1,752 cases of the harvested LL/SC loops, run
+in sequence mode by the driver), Janus with `--monitor-stub`:
+
+| pair (hardware side vs model side) | agree | MISMATCH | model-gap | unobserved | model-error |
+|---|---:|---:|---:|---:|---:|
+| Sail (hw) vs Janus (model) | 755,121 | **0** | 34,501 | 13 | 0 |
+| qemu (hw) vs Sail (model) | 773,667 | 14,837 | 1,118 | 1 | 12 |
+| qemu (hw) vs Janus (model) | 749,746 | **0** | 39,888 | 1 | 0 |
+
+`soundness.jsonl` is empty. The exclusive classes, Janus vs Sail: `gen/seq.excl` 19,369 agree
+(17,329 of them with an alternative, i.e. a passing, outcome) and 631 model-gaps
+(`unpredictable` and `unaligned`); `harvest/seq.excl` 1,752 agree (all through the passing
+outcome); `gen/ls.excl` 3,823 agree, 177 model-gaps; `harvest/ls.excl` 1,938 agree, 120
+model-gaps. The 11,696 qemu-vs-Sail MISMATCHes of the exclusive classes are the
+`sail-monitor-stub` cases: qemu fails a store-exclusive with the monitor open, as the Arm ARM
+requires, and the stub passes it. Janus agrees with both: with qemu on the failure (no
+`--monitor-stub`), with Sail on the pass (`--monitor-stub`).
 
 ## Results with the Advanced SIMD classes of `NeonInstr` (2026-10-25, 653,793 cases)
 

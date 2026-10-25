@@ -83,7 +83,7 @@ verify_one() {
   # reached); up to two verified at once (scripts/lib/theorems.sh).
   local -a thms=(Proof.correctness)
   local thm i st
-  for thm in $(grep -oE '^theorem (exact|saturation|faults)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
+  for thm in $(grep -oE '^theorem (exact|saturation|faults|anyCPU)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
   if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
   st="$(mktemp -d)"
   start=$(date +%s.%N)

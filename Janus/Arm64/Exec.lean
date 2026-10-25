@@ -36,12 +36,14 @@ Modelling decisions (user mode, Linux):
   conservative: the model faults where hardware might proceed.
 * The model is single-threaded with no caches, so DMB/DSB/ISB and the accepted hints
   (NOP, YIELD, SEV, SEVL, DGH, CSDB, BTI) only advance `pc`. So do PRFM/PRFUM (prefetch: never
-  faults, no architectural effect) and CLREX (the exclusive monitor is not modelled, because
-  no store-exclusive is decoded).
+  faults, no architectural effect). CLREX opens the exclusive monitor (`State.excl`).
 * **Ordering is not modelled.** With one thread and no other observer, a load-acquire
   (LDAR, LDAPR, LDAXR) is an ordinary load and a store-release (STLR) an ordinary store, and the
-  A/L (acquire/release) bits of the LSE atomics change nothing. LDXR/LDAXR are plain loads: the
-  monitor they would arm is only observable by a store-exclusive, which faults (undecodable).
+  A/L (acquire/release) bits of the LSE atomics and of the exclusives change nothing.
+* **Exclusives.** LDXR/LDAXR/LDXP/LDAXP are aligned loads that mark the local exclusive monitor
+  (`State.excl`). A store-exclusive (STXR/STLXR/STXP/STLXP) fails in the Open Access state and
+  otherwise passes or fails as the environment chooses (`State.exclPass`, consumed one choice
+  per such store); see "The exclusive monitor" below.
 * **LSE atomics** (LD<op>, SWP, CAS, CASP) are single-instruction read-modify-writes and are
   modelled exactly: read the old value, write the new one, return the old one. Their memory
   access is a write access even when CAS does not store (permission faults are taken
@@ -469,6 +471,101 @@ def execOrdered (s : State) (size : Nat) (L : Bool) (rn rt : Nat) : Except Fault
       | .error e => .error e
       | .ok m => .ok { s with mem := m }.next
 
+/-! ### The exclusive monitor
+
+`State.excl` is the local monitor; `State.exclPass` the environment's store-exclusive outcomes.
+The rules, from the Arm ARM pseudocode (`AArch64.SetExclusiveMonitors`,
+`AArch64.ExclusiveMonitorsPass`, `AArch64.IsExclusiveVA`, `IsExclusiveLocal`,
+`ClearExclusiveLocal`) and B2.9, and what the model makes of them:
+
+* A load-exclusive marks the accessed bytes (`excl := some (addr, size)`), replacing any mark.
+* A store-exclusive in the Open Access state (`excl = none`) fails: status 1, no write
+  (`IsExclusiveLocal` is FALSE when nothing is marked).
+* A store-exclusive to exactly the marked bytes **may** pass, never must: an implementation may
+  clear the monitor at any time (interrupts, context switches, evictions, the global monitor,
+  IMPLEMENTATION DEFINED events, a store by this PE to the marked bytes). So the outcome is
+  `exclPass 0`, the next choice of the environment: a pass writes the data and sets status 0, a
+  failure sets status 1 and writes nothing. Either way the monitor is then open
+  (`ClearExclusiveLocal` is reached: `IsExclusiveVA` may return FALSE only for a region that is
+  not inside the marked one).
+* A store-exclusive to other bytes than the marked ones (another address, or another size, in
+  the Exclusive Access state) is not resolved: whether it passes is IMPLEMENTATION DEFINED (the
+  marked region may be a whole reservation granule) or CONSTRAINED UNPREDICTABLE, whether it
+  clears the monitor too, and qemu even writes memory while reporting failure there. The model
+  stops with `Fault.unpredictable`, so no theorem relies on any of these outcomes (Go and the C
+  outline atomics always store to the bytes they loaded).
+* `CLREX` opens the monitor. Ordinary stores leave the model's mark alone: whether they clear
+  the hardware's is IMPLEMENTATION DEFINED, and keeping the mark only allows a pass the hardware
+  might not give, which the environment's choice already covers.
+
+Faults: the alignment check (always), then the memory permission check, both **before** the
+monitor. The pseudocode checks alignment first and translates the address only when
+`IsExclusiveVA` passes, and "It is IMPLEMENTATION DEFINED whether the detection of memory aborts
+happens before or after the check on the local Exclusives monitor"; faulting on every
+inaccessible store-exclusive is the conservative reading (the run stops, see
+docs/SOUNDNESS.md on `Faults`). -/
+
+/-- LDXR/LDAXR of `2^size` bytes: aligned load that marks the monitor. -/
+def execLdExcl (s : State) (size : Nat) (rn rt : Nat) : Except Fault State :=
+  match baseAddr s rn with
+  | .error e => .error e
+  | .ok base =>
+    let n := 2 ^ size
+    let a := base.toNat
+    if a % n ≠ 0 then .error (.unaligned a n) else
+    match load s.mem a n with
+    | .error e => .error e
+    | .ok v => .ok ({ s with excl := some (a, n) }.writeZR rt (BitVec.ofNat 64 v)).next
+
+/-- LDXP/LDAXP: `eb`-byte registers (`eb = 4` or `8`), one aligned `2·eb`-byte access that marks
+the monitor; `X[t]` gets the low half, `X[t2]` the high half (little-endian). -/
+def execLdExclPair (s : State) (eb : Nat) (rt2 rn rt : Nat) : Except Fault State :=
+  match baseAddr s rn with
+  | .error e => .error e
+  | .ok base =>
+    let a := base.toNat
+    if a % (2 * eb) ≠ 0 then .error (.unaligned a (2 * eb)) else
+    match load s.mem a (2 * eb) with
+    | .error e => .error e
+    | .ok v =>
+      .ok (({ s with excl := some (a, 2 * eb) }.writeZR rt (BitVec.ofNat 64 (v % 2 ^ (8 * eb)))).writeZR
+        rt2 (BitVec.ofNat 64 (v / 2 ^ (8 * eb)))).next
+
+/-- The store-exclusive of the `n` bytes `data` at `X[n]`/`SP`, status to `W[s]`:
+```
+if AArch64.ExclusiveMonitorsPass(address, dbytes) then Mem[address] = data; status = '0'
+else status = '1'
+X[s] = ZeroExtend(status)
+```
+with `ExclusiveMonitorsPass` as described above: fail in the Open Access state; for exactly the
+marked bytes the environment's choice `exclPass 0` (consumed), after which the monitor is open;
+for other bytes `Fault.unpredictable`. -/
+def execStExclData (s : State) (n data : Nat) (rs rn : Nat) : Except Fault State :=
+  match baseAddr s rn with
+  | .error e => .error e
+  | .ok base =>
+    let a := base.toNat
+    if a % n ≠ 0 then .error (.unaligned a n) else
+    match store s.mem a n data with
+    | .error e => .error e
+    | .ok m =>
+      match s.excl with
+      | none => .ok (s.writeZR rs 1).next
+      | some mark =>
+        if mark ≠ (a, n) then .error (.unpredictable s.pc.toNat) else
+        let s1 := { s with exclPass := fun k => s.exclPass (k + 1), excl := none }
+        if s.exclPass 0 then .ok ({ s1 with mem := m }.writeZR rs 0).next
+        else .ok (s1.writeZR rs 1).next
+
+/-- STXR/STLXR of `2^size` bytes of `X[t]` (the store writes the low bytes). -/
+def execStExcl (s : State) (size : Nat) (rs rn rt : Nat) : Except Fault State :=
+  execStExclData s (2 ^ size) (s.readZR rt).toNat rs rn
+
+/-- STXP/STLXP of two `eb`-byte registers: `X[t]` in the low half, `X[t2]` in the high half. -/
+def execStExclPair (s : State) (eb : Nat) (rs rt2 rn rt : Nat) : Except Fault State :=
+  execStExclData s (2 * eb)
+    ((s.getX (8 * eb) rt).toNat + 2 ^ (8 * eb) * (s.getX (8 * eb) rt2).toNat) rs rn
+
 /-- LD<op>/SWP of `2^size` bytes:
 ```
 data = X[s, datasize]; old = Mem[address]; Mem[address] = op(old, data);
@@ -778,7 +875,7 @@ def exec (i : Instr) (s : State) : Except Fault State :=
   | .ret rn => branchReg s (s.readZR rn)
   | .hint _ _ => .ok s.next
   | .barrier _ _ => .ok s.next
-  | .clrex _ => .ok s.next
+  | .clrex _ => .ok { s with excl := none }.next
   | .mrsDczid rt => .ok (s.writeZR rt (s.dczid.setWidth 64)).next
   | .mrsTpidr rt => .ok (s.writeZR rt s.tpidr).next
   -- Kernel, trap and environment instructions (WP-C): the user-mode model stops here
@@ -797,7 +894,10 @@ def exec (i : Instr) (s : State) : Except Fault State :=
   | .dcZva rt => execDcZva s rt
   | .prefetch _ => .ok s.next
   | .ldstOrdered size L _ rn rt => execOrdered s size L rn rt
-  | .ldExcl size _ rn rt => execOrdered s size true rn rt
+  | .ldExcl size _ rn rt => execLdExcl s size rn rt
+  | .stExcl size _ rs rn rt => execStExcl s size rs rn rt
+  | .ldExclPair sz _ rt2 rn rt => execLdExclPair s (if sz then 8 else 4) rt2 rn rt
+  | .stExclPair sz _ rs rt2 rn rt => execStExclPair s (if sz then 8 else 4) rs rt2 rn rt
   | .atomic size _ _ rs op rn rt => execAtomic s size op rs rn rt
   | .cas size _ _ rs rn rt => execCas s size rs rn rt
   | .casp sz _ _ rs rn rt => execCasp s (if sz then 8 else 4) rs rn rt

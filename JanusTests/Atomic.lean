@@ -110,4 +110,50 @@ example : (faultOf (step 0xc8fbfc01 (stz [(0, 0x2000)]))).isSome = true := by de
 -- dc zva, x0 (outside): hardware faults (11)
 example : (faultOf (step 0xd50b7420 (stz [(0, 0x1000041000)]))).isSome = true := by decide
 
+/-! ## The exclusive monitor and the store-exclusive outcome (`State.excl`, `State.exclPass`)
+
+`ex` observes the status register `X27`, the first byte at `X0` and the monitor. -/
+
+def ex (r : Except Fault State) : Option (Nat × Nat × Option (Nat × Nat)) :=
+  match r with
+  | .ok s => some ((s.regs 27).toNat, (s.mem.bytes 0x1000040100).toNat, s.excl)
+  | .error _ => none
+
+def x0 : Nat := 0x1000040100
+
+/-- `stz ov` with the monitor `e` and the outcome stream `pass`. -/
+def stx (ov : List (Nat × Nat)) (e : Option (Nat × Nat)) (pass : Nat → Bool) : State :=
+  { stz ov with excl := e, exclPass := pass }
+
+-- ldaxr x2, [x0]: marks the 8 bytes at x0
+example : (step 0xc85ffc02 (stz [(0, x0)])).toOption.map (·.excl) = some (some (x0, 8)) := by decide
+-- ldxp x2, x3, [x0]: marks the 16 bytes at x0
+example : (step 0xc87f0c02 (stz [(0, x0)])).toOption.map (·.excl) = some (some (x0, 16)) := by decide
+-- clrex: opens it
+example : (step 0xd503305f (stx [] (some (x0, 8)) fun _ => false)).toOption.map (·.excl) = some none := by decide
+-- stlxr w27, x2, [x0] in the Open Access state: fails (status 1, nothing stored), whatever the
+-- environment would choose
+example : ex (step 0xc81bfc02 (stx [(0, x0), (2, 0x42)] none fun _ => true)) =
+    some (1, 0x30, none) := by decide
+-- ... to the marked bytes: the environment's choice; a pass stores and returns 0, a failure
+-- returns 1; the monitor is open afterwards either way
+example : ex (step 0xc81bfc02 (stx [(0, x0), (2, 0x42)] (some (x0, 8)) fun _ => true)) =
+    some (0, 0x42, none) := by decide
+example : ex (step 0xc81bfc02 (stx [(0, x0), (2, 0x42)] (some (x0, 8)) fun _ => false)) =
+    some (1, 0x30, none) := by decide
+-- ... to other bytes than the marked ones (another size, another address): not resolved
+example : faultOf (step 0xc81bfc02 (stx [(0, x0), (2, 0x42)] (some (x0, 4)) fun _ => true)) =
+    some (.unpredictable 0x1000000800) := by decide
+example : faultOf (step 0xc81bfc02 (stx [(0, x0), (2, 0x42)] (some (x0 + 8, 8)) fun _ => true)) =
+    some (.unpredictable 0x1000000800) := by decide
+-- ... misaligned: an alignment fault before the monitor is consulted
+example : faultOf (step 0xc81bfc02 (stx [(0, x0 + 4)] (some (x0 + 4, 8)) fun _ => true)) =
+    some (.unaligned (x0 + 4) 8) := by decide
+-- the stream advances by one per store-exclusive that consults it
+example : (step 0xc81bfc02 (stx [(0, x0)] (some (x0, 8)) fun k => k == 1)).toOption.map (·.exclPass 0) = some true := by decide
+-- stxp w27, x2, x3, [x0] (64-bit pair) to the marked 16 bytes, passing: x2 low, x3 high
+example : (step 0xc83b0c02 (stx [(0, x0), (2, 0x11), (3, 0x22)] (some (x0, 16))
+    fun _ => true)).toOption.map (fun s => ((s.regs 27).toNat,
+      (s.mem.bytes x0).toNat, (s.mem.bytes (x0 + 8)).toNat)) = some (0, 0x11, 0x22) := by decide
+
 end JanusTests.Atomic

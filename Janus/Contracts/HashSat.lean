@@ -53,7 +53,7 @@ theorem seed_run {s : State} {Q : State → Prop} (hpc : s.pc = BitVec.ofNat 64 
 theorem seed_hRet {d nargs : Nat} {s : State} {P : (Nat → W64) → Prop} (he : H0.Env s.mem (s.regs 28))
     (hp : P (setReg s.regs 0 (s.regs 1))) :
     HRet H0 d nargs s { s with regs := setReg s.regs 0 (s.regs 1), pc := s.regs 30 } P :=
-  hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+  hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
     (MemFrame.refl _ _) he hp
 
 /-- A seed `h < 2^64` is its own `H0` hash. -/
@@ -101,7 +101,7 @@ theorem typehash_impl (d : Nat) : Typehash (toy.link (at0 typehashCode)) A0 H0 d
   rw [link_at0]
   intro s hpc ⟨⟨he, _, ⟨hl1, hl2, _⟩, _⟩, _⟩
   janus_run
-  exact hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+  exact hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
     (MemFrame.refl _ _) he (by simp [setReg, seed_mod])
 
 /-- `ret`: some word. -/
@@ -111,7 +111,7 @@ theorem rand_impl (d : Nat) : Rand (toy.link (at0 randCode)) A0 H0 d := by
   rw [link_at0]
   intro s hpc ⟨he, _, ⟨hl1, hl2, _⟩, _⟩
   janus_run
-  exact hRet_of ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he trivial
+  exact hRet_of ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he trivial
 
 /-! ## Float hashes -/
 
@@ -204,13 +204,13 @@ theorem f64hash_impl (d : Nat) : Fhash (toy.link (at0 f64hashCode)) A0 H0 d bina
     (classify64_zero _)
   janus_run
   · rename_i hz _
-    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm⟩
+    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm, rfl, rfl⟩
       (MemFrame.refl _ _) he ?_
     simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
     rw [BitVec.toNat_mul, BitVec.toNat_xor]
     exact hr.1 hz
   · rename_i hz _
-    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm⟩
+    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm, rfl, rfl⟩
       (MemFrame.refl _ _) he ?_
     simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
     exact hr.2 hz
@@ -226,7 +226,7 @@ theorem f32hash_impl (d : Nat) : Fhash (toy.link (at0 f32hashCode)) A0 H0 d bina
   intro s hpc ⟨⟨he, _, ⟨hl1, hl2, _⟩, _⟩, hf, ⟨ha1, ha2, ha3⟩⟩
   janus_run
   all_goals
-    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm⟩
+    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm, rfl, rfl⟩
       (MemFrame.refl _ _) he ?_
     simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
   · exact fhash_zero _ _ _ (classify32_tst _ _) _ (by assumption)
@@ -257,7 +257,7 @@ theorem c128hash_impl (d : Nat) : Chash (toy.link (at0 c128hashCode)) A0 H0 d bi
   have h8' := Memory.accessible_mono _ ha2 (by omega : (s.regs 0).toNat ≤ (s.regs 0).toNat + 8) (by omega : (s.regs 0).toNat + 8 + 8 ≤ (s.regs 0).toNat + 2 * 8)
   janus_run
   all_goals
-    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm⟩
+    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm, rfl, rfl⟩
       (MemFrame.refl _ _) he ?_
     simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, xor_comm_w _ 33054211828000289#64]
     rename_i h1 h2 _
@@ -273,7 +273,7 @@ theorem c64hash_impl (d : Nat) : Chash (toy.link (at0 c64hashCode)) A0 H0 d bina
   have h8' := Memory.accessible_mono _ ha2 (by omega : (s.regs 0).toNat ≤ (s.regs 0).toNat + 4) (by omega : (s.regs 0).toNat + 4 + 4 ≤ (s.regs 0).toNat + 2 * 4)
   janus_run
   all_goals
-    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm⟩
+    refine hRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm, rfl, rfl⟩
       (MemFrame.refl _ _) he ?_
     simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, xor_comm_w _ 33054211828000289#64]
     rename_i h1 h2 _
@@ -304,14 +304,14 @@ theorem nilinterhash_impl (d : Nat) : Nilinterhash (toy.link (at0 ifaceHashCode)
   intro s hpc ⟨⟨he, _, ⟨hl1, hl2, _⟩, _⟩, ⟨ha1, ha2, ha3⟩, _⟩
   have ha8 := Memory.accessible_mono _ ha2 (Nat.le_refl _) (by omega : (s.regs 0).toNat + 8 ≤ (s.regs 0).toNat + 16)
   janus_run
-  · refine hRet_of ⟨rfl, rfl, ?_, ?_, ?_, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he ?_
+  · refine hRet_of ⟨rfl, rfl, ?_, ?_, ?_, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he ?_
     · simp [setReg]
     · simp [setReg]
     · simp [setReg]
     · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
       unfold IHashIs; simp
   · rename_i h0 _
-    refine hRet_of ⟨rfl, rfl, ?_, ?_, ?_, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he ?_
+    refine hRet_of ⟨rfl, rfl, ?_, ?_, ?_, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he ?_
     · simp [setReg]
     · simp [setReg]
     · simp [setReg]
@@ -328,7 +328,7 @@ theorem interhash_impl (d : Nat) : Interhash (toy.link (at0 ifaceHashCode)) A0 H
   have ha8 := Memory.accessible_mono _ ha2 (Nat.le_refl _) (by omega : (s.regs 0).toNat + 8 ≤ (s.regs 0).toNat + 16)
   janus_run
   · rename_i h0 _
-    refine hRet_of ⟨rfl, rfl, ?_, ?_, ?_, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he ?_
+    refine hRet_of ⟨rfl, rfl, ?_, ?_, ?_, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he ?_
     · simp [setReg]
     · simp [setReg]
     · simp [setReg]
@@ -336,7 +336,7 @@ theorem interhash_impl (d : Nat) : Interhash (toy.link (at0 ifaceHashCode)) A0 H
       unfold IHashIs
       rw [ite_eq_left_iff.mpr (fun h => absurd (by simp only [itabType, h0, ite_true]) h)]
   · rename_i h0 _
-    refine hRet_of ⟨rfl, rfl, ?_, ?_, ?_, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he ?_
+    refine hRet_of ⟨rfl, rfl, ?_, ?_, ?_, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) he ?_
     · simp [setReg]
     · simp [setReg]
     · simp [setReg]
