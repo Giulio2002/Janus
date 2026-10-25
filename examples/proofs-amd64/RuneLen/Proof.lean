@@ -183,7 +183,7 @@ theorem decoderune_meets (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (h
     RtContract64 Extracted.program decAddr rt stack H decoderuneSpec := by
   rintro s hpc ⟨⟨hra, hal, hsb, hsa, hacc⟩, ⟨⟨hpb, hrd⟩, hk⟩, hout, hg, -⟩
   simp only [decoderuneSpec, argWords64, wordsFrom_succ, wordsFrom_zero, arg, List.getD_cons_zero,
-    List.getD_cons_succ, Nat.reduceAdd, Nat.zero_add, List.mem_cons, List.not_mem_nil, or_false, forall_eq,
+    List.getD_cons_succ, Nat.reduceAdd, Nat.zero_add, List.mem_cons, List.not_mem_nil, or_false, forall_eq, readsOutside_cons, readsOutside_nil,
     calleeStack64, outside_cons, outside_nil, and_true, Nat.reduceLT, ↓reduceIte, argReg, intArgRegs,
     List.getD_cons_zero, List.getD_cons_succ] at hpb hrd hk hout ⊢
   simp only [decoderuneSpec] at hacc hsa hg ⊢
@@ -404,7 +404,7 @@ theorem countrunes_meets (rt : List (Nat × Nat)) (H : RtReady) (stack : Nat) (h
   rintro s hpc ⟨⟨hra, hal, hsb, hsa, hacc⟩, ⟨hp1, hp2⟩, hreads, hg, -⟩
   simp only [countrunesSpec, argWords64, wordsFrom_succ, wordsFrom_zero, arg, List.getD_cons_zero,
     List.getD_cons_succ, Nat.reduceAdd, Nat.zero_add, List.mem_cons, List.not_mem_nil, or_false,
-    forall_eq, calleeStack64, outside_cons, outside_nil, and_true, Nat.reduceLT, ↓reduceIte, argReg,
+    forall_eq, readsOutside_cons, readsOutside_nil, calleeStack64, outside_cons, outside_nil, and_true, Nat.reduceLT, ↓reduceIte, argReg,
     intArgRegs] at hp1 hp2 hreads hg hacc hsa ⊢
   obtain ⟨⟨hg1, hg2, hg3⟩, hgs1, hgs2⟩ := hg
   obtain ⟨hpo1, hpo2⟩ := hreads

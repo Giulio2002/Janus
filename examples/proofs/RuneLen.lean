@@ -110,7 +110,7 @@ theorem decoderune_meets (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (h
     RtContract Extracted.program decAddr rt stack H decoderuneSpec := by
   rintro s hpc ⟨⟨hra, hrb, hal, hsb, -, hsa, hacc⟩, ⟨⟨hpb, hrd⟩, hk⟩, hout, hg, -⟩
   obtain ⟨⟨hg1, hg2, hg3⟩, -⟩ := (hg : GuardOK s 0 ∧ _)
-  simp only [decoderuneSpec, argWords, wordsFrom_succ, wordsFrom_zero, arg, List.getD_cons_zero, List.getD_cons_succ, Nat.reduceAdd, Nat.zero_add, List.mem_cons, List.not_mem_nil, or_false, forall_eq, calleeStack,
+  simp only [decoderuneSpec, argWords, wordsFrom_succ, wordsFrom_zero, arg, List.getD_cons_zero, List.getD_cons_succ, Nat.reduceAdd, Nat.zero_add, List.mem_cons, List.not_mem_nil, or_false, forall_eq, readsOutside_cons, readsOutside_nil, calleeStack,
     outside_cons, outside_nil, and_true] at hpb hrd hk hout ⊢
   simp only [decoderuneSpec] at hacc hsa ⊢
   have h1i : (s.regs 1).toInt = ((s.regs 1).toNat : Int) := BitVec.toInt_eq_toNat_of_lt (by omega)
@@ -359,7 +359,7 @@ theorem countrunes_meets (rt : List (Nat × Nat)) (H : RtReady) (stack : Nat) (h
   rintro s hpc ⟨⟨hra, hrb, hal, hsb, -, hsa, hacc⟩, ⟨hp1, hp2⟩, hreads, ⟨⟨hg1, hg2, hg3⟩, hgo⟩, -⟩
   simp only [countrunesSpec, argWords, wordsFrom_succ, wordsFrom_zero, arg, List.getD_cons_zero,
     List.getD_cons_succ, Nat.reduceAdd, Nat.zero_add, List.mem_cons, List.not_mem_nil, or_false,
-    forall_eq, calleeStack, outside_cons, outside_nil, and_true] at hp1 hp2 hreads hgo hacc hsa ⊢
+    forall_eq, readsOutside_cons, readsOutside_nil, calleeStack, outside_cons, outside_nil, and_true] at hp1 hp2 hreads hgo hacc hsa ⊢
   obtain ⟨hpo1, hpo2⟩ := hreads
   obtain ⟨hgs1, hgs2⟩ := hgo
   janus_run until [head]

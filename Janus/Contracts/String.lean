@@ -96,6 +96,15 @@ def strHdrs (m : Memory) (p n : Nat) : List (Nat × Nat) :=
 def StrsIn (m : Memory) (buf : Nat) (xs : List (Nat × Nat)) : Prop :=
   ∀ x ∈ xs, StrIn m x.1 x.2 ∧ (buf ≠ 0 → Disjoint x.1 x.2 buf 32)
 
+@[janus_exec, janus_post, janus64_exec, janus64_post] theorem strsIn_cons (m : Memory) (buf : Nat)
+    (x : Nat × Nat) (xs : List (Nat × Nat)) :
+    StrsIn m buf (x :: xs) = ((StrIn m x.1 x.2 ∧ (buf ≠ 0 → Disjoint x.1 x.2 buf 32)) ∧ StrsIn m buf xs) := by
+  simp [StrsIn]
+
+@[janus_exec, janus_post, janus64_exec, janus64_post] theorem strsIn_nil (m : Memory) (buf : Nat) :
+    StrsIn m buf [] = True := by
+  simp [StrsIn]
+
 /-- The bytes of the concatenation of `xs`. -/
 def catBytes (m : Memory) (xs : List (Nat × Nat)) : List Nat := (xs.map fun x => strBytes m x.1 x.2).flatten
 
@@ -309,7 +318,7 @@ theorem catBytes_nil (m : Memory) : catBytes m [] = [] := rfl
 theorem catBytes_cons (m : Memory) (x : Nat × Nat) (xs : List (Nat × Nat)) :
     catBytes m (x :: xs) = strBytes m x.1 x.2 ++ catBytes m xs := rfl
 
-attribute [janus_exec, janus_post, janus64_exec, janus64_post] arg bufWrites StrIn BufOK StrsIn StrOut
+attribute [janus_exec, janus_post, janus64_exec, janus64_post] arg bufWrites StrIn BufOK StrOut
   catBytes_nil catBytes_cons strBytes_writeLE List.append_nil
 
 end Janus.Contracts

@@ -84,11 +84,25 @@ def argWords (s : State) (n : Nat) : List Nat := wordsFrom (fun i => (s.regs i).
 
 attribute [janus_exec, janus_post] argWords
 
+/-- Every range of `rs` (what a runtime function reads) lies outside the callee's stack window
+`win`. A definition of its own, unfolded one element at a time by the executors
+(`readsOutside_cons`), so that their simp sets need no general lemma about `∀ x ∈ l`. -/
+def ReadsOutside (rs win : List (Nat × Nat)) : Prop := ∀ r ∈ rs, Outside r.1 r.2 win
+
+@[janus_exec, janus_post, janus64_exec, janus64_post] theorem readsOutside_cons (r : Nat × Nat)
+    (rs win : List (Nat × Nat)) :
+    ReadsOutside (r :: rs) win = (Outside r.1 r.2 win ∧ ReadsOutside rs win) := by
+  simp [ReadsOutside]
+
+@[janus_exec, janus_post, janus64_exec, janus64_post] theorem readsOutside_nil (win : List (Nat × Nat)) :
+    ReadsOutside [] win = True := by
+  simp [ReadsOutside]
+
 /-- The precondition of `RtContract` (arm64). -/
 @[reducible] def RtPre (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (sp : RtSpec)
     (s : State) : Prop :=
   CallOK s stack sp.nargs ∧ sp.pre (argWords s sp.nargs) s.mem ∧
-    (∀ r ∈ sp.reads (argWords s sp.nargs) s.mem, Outside r.1 r.2 (calleeStack s stack sp.nargs)) ∧
+    ReadsOutside (sp.reads (argWords s sp.nargs) s.mem) (calleeStack s stack sp.nargs) ∧
     (match sp.guard with
       | some adj => Janus.Spec.GuardOK s adj ∧
           Outside ((s.regs 28).toNat + 16) 8 (calleeStack s stack sp.nargs)
@@ -155,7 +169,7 @@ def GuardOK64 (s : State) (adj : Nat) : Prop :=
 @[reducible] def RtPre64 (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (sp : RtSpec)
     (s : State) : Prop :=
   CallOK64 s stack sp.nargs ∧ sp.pre (argWords64 s sp.nargs) s.mem ∧
-    (∀ r ∈ sp.reads (argWords64 s sp.nargs) s.mem, Outside r.1 r.2 (calleeStack64 s stack sp.nargs)) ∧
+    ReadsOutside (sp.reads (argWords64 s sp.nargs) s.mem) (calleeStack64 s stack sp.nargs) ∧
     (match sp.guard with
       | some adj => GuardOK64 s adj ∧
           Outside ((s.regs 14).toNat + 16) 8 (calleeStack64 s stack sp.nargs)
@@ -231,11 +245,7 @@ end Janus.Contracts
 
 namespace Janus.Contracts
 
-/- The quantifiers of `RtPre` over the spec's `reads` (and of specs over their operands), over a
-literal list: one conjunct per element, so that the executors prove a call's precondition
-fact by fact. -/
-attribute [janus_exec, janus_post, janus64_exec, janus64_post] List.forall_mem_cons List.forall_mem_nil
-  List.nil_append
+attribute [janus_exec, janus_post, janus64_exec, janus64_post] List.nil_append
   Janus.outside_cons Janus.outside_nil
 
 end Janus.Contracts
