@@ -134,4 +134,13 @@ theorem keyHash_congr (H : HashModel) {m₁ m₂ : Memory} {p₁ p₂ h r : Nat}
   · rintro ⟨h1, h1f, rfl⟩
     exact ⟨h1, (HashLaws.fhashIs_of_feq H binary64 8 h h1 hx hy hf).2 h1f, by rw [hl]⟩
 
+/-- With the key equality the compiler generates for `FKey` (`type:.eq.FKey`, proved in the
+`EqFKey` example: the floats `feq`, then the strings `strEq`): keys it calls equal hash alike. -/
+theorem hash_of_keyEq (H : HashModel) {m : Memory} {p q h r : Nat}
+    (he : (feq binary64 (m.readLE p 8) (m.readLE q 8) && strEq m (p + 8) (q + 8)) = true) :
+    KeyHash H m p h r ↔ KeyHash H m q h r := by
+  simp only [Bool.and_eq_true, strEq, beq_iff_eq] at he
+  obtain ⟨hf, hl, hb⟩ := he
+  exact keyHash_congr H hf hl hb
+
 end Proof
