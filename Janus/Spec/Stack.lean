@@ -95,6 +95,12 @@ theorem mono_ex {ex' : List (Nat × Nat)} (h : Moved cls pool lo hi hi' base ex 
   ⟨h.aligned, h.grows, fun a h1 h2 h3 h4 h5 => h.ptr a h1 h2 h3 h4 (hsub _ _ h5),
    fun a h1 h2 h3 h4 => h.byte a h1 h2 h3 (hsub _ _ h4)⟩
 
+/-- Fewer constrained bytes, judged only on the region. -/
+theorem mono_ex' {ex' : List (Nat × Nat)} (h : Moved cls pool lo hi hi' base ex m m')
+    (hsub : ∀ a n, base ≤ a → Outside a n ex' → Outside a n ex) : Moved cls pool lo hi hi' base ex' m m' :=
+  ⟨h.aligned, h.grows, fun a h1 h2 h3 h4 h5 => h.ptr a h1 h2 h3 h4 (hsub _ _ h1 h5),
+   fun a h1 h2 h3 h4 => h.byte a h1 h2 h3 (hsub _ _ h1 h4)⟩
+
 /-- A smaller moved region (a higher base). -/
 theorem mono_base {base' : Nat} (h : Moved cls pool lo hi hi' base ex m m') (hb : base ≤ base')
     (hb' : base' ≤ hi) (hal : base' % 8 = 0) : Moved cls pool lo hi hi' base' ex m m' :=
@@ -176,6 +182,91 @@ theorem trans {cls₂ : Nat → Bool} {ex₂ : List (Nat × Nat)} {lo₂ hi₃ :
         hcls _ (by omega) (by omega)]
       exact h3
     rw [← hA, h₂.byte (a + hi' - hi) (by omega) (by omega) hc₂ (hex a 1 h1 h4), h₁.byte a h1 h2 h3 h4]
+
+end Moved
+
+namespace Moved
+
+variable {cls : Nat → Bool} {pool ex : List (Nat × Nat)} {lo hi hi' base : Nat} {m m' : Memory}
+
+/-- No move, from memory that agrees on the region outside `ex`: the stack did not grow, and the
+callee only wrote outside the region or inside `ex`. -/
+theorem of_agree (cls : Nat → Bool) (pool : List (Nat × Nat)) {m m' : Memory} {lo hi base : Nat}
+    {ex : List (Nat × Nat)} (hal : base % 8 = 0 ∧ hi % 8 = 0) (h4k : 4096 ≤ lo) (hlb : lo ≤ base)
+    (hbh : base ≤ hi) (hag : ∀ a, base ≤ a → a < hi → Outside a 1 ex → m'.bytes a = m.bytes a) :
+    Moved cls pool lo hi hi base ex m m' := by
+  have hrd : ∀ a, base ≤ a → a + 8 ≤ hi → Outside a 8 ex → m'.readLE a 8 = m.readLE a 8 :=
+    fun a h1 h2 hx => Memory.readLE_congr fun i hi' =>
+      hag (a + i) (by omega) (by omega) (Outside.of_sub hx (by omega) (by omega))
+  refine ⟨⟨hal.1, hal.2, hal.2⟩, ⟨h4k, by omega, hlb, hbh⟩, fun a h1 h2 _ _ hx => ?_, fun a h1 h2 _ hx => ?_⟩
+  · rw [Nat.add_sub_cancel, Nat.add_sub_cancel, hrd a h1 h2 hx]; exact ⟨fun _ _ => rfl, fun _ => rfl⟩
+  · rw [Nat.add_sub_cancel]; exact hag a h1 h2 hx
+
+/-- Change the memory before the move on bytes the relation does not constrain (`ex`) or
+outside the region. -/
+theorem congr_src {m₀ : Memory} (h : Moved cls pool lo hi hi' base ex m m')
+    (hag : ∀ a, base ≤ a → a < hi → Outside a 1 ex → m₀.bytes a = m.bytes a) :
+    Moved cls pool lo hi hi' base ex m₀ m' := by
+  have hrd : ∀ a, base ≤ a → a + 8 ≤ hi → Outside a 8 ex → m₀.readLE a 8 = m.readLE a 8 :=
+    fun a h1 h2 hx => Memory.readLE_congr fun i hi' =>
+      hag (a + i) (by omega) (by omega) (Outside.of_sub hx (by omega) (by omega))
+  refine ⟨h.aligned, h.grows, fun a h1 h2 h3 h4 hx => ?_, fun a h1 h2 h3 hx => ?_⟩
+  · rw [hrd a h1 h2 hx]; exact h.ptr a h1 h2 h3 h4 hx
+  · rw [hag a h1 h2 hx]; exact h.byte a h1 h2 h3 hx
+
+/-- Change the memory after the move outside the moved image (`ex'` at moved addresses). -/
+theorem congr_dst {m'' : Memory} (h : Moved cls pool lo hi hi' base ex m m')
+    (hag : ∀ a, base ≤ a → a < hi → Outside a 1 ex → m''.bytes (a + hi' - hi) = m'.bytes (a + hi' - hi)) :
+    Moved cls pool lo hi hi' base ex m m'' := by
+  obtain ⟨hg0, hg1, hg2, hg3⟩ := h.grows
+  have hrd : ∀ a, base ≤ a → a + 8 ≤ hi → Outside a 8 ex →
+      m''.readLE (a + hi' - hi) 8 = m'.readLE (a + hi' - hi) 8 :=
+    fun a h1 h2 hx => Memory.readLE_congr fun i hi'' => by
+      rw [show a + hi' - hi + i = (a + i) + hi' - hi by omega]
+      exact hag (a + i) (by omega) (by omega) (Outside.of_sub hx (by omega) (by omega))
+  refine ⟨h.aligned, h.grows, fun a h1 h2 h3 h4 hx => ?_, fun a h1 h2 h3 hx => ?_⟩
+  · rw [hrd a h1 h2 hx]; exact h.ptr a h1 h2 h3 h4 hx
+  · rw [hag a h1 h2 hx]; exact h.byte a h1 h2 h3 hx
+
+/-- Two classifications that agree on the region give the same relation. -/
+theorem cls_congr {cls' : Nat → Bool} (h : Moved cls pool lo hi hi' base ex m m')
+    (hc : ∀ a, base ≤ a → a < hi → cls' a = cls a) : Moved cls' pool lo hi hi' base ex m m' := by
+  refine ⟨h.aligned, h.grows, fun a h1 h2 h3 h4 hx => ?_, fun a h1 h2 h3 hx => ?_⟩
+  · rw [hc a h1 (by omega)] at h4; exact h.ptr a h1 h2 h3 h4 hx
+  · have := h.aligned.1
+    rw [hc _ (by omega) (by omega)] at h3; exact h.byte a h1 h2 h3 hx
+
+/-- **Two moves compose into one**, with the exceptions of both: the result leaves free `ex₃`,
+which must cover `ex` and the preimage of the second move's `ex₂`. -/
+theorem trans' {cls₂ : Nat → Bool} {ex₂ ex₃ : List (Nat × Nat)} {lo₂ hi₃ : Nat} {m'' : Memory}
+    (h₁ : Moved cls pool lo hi hi' base ex m m')
+    (h₂ : Moved cls₂ pool lo₂ hi' hi₃ (base + hi' - hi) ex₂ m' m'')
+    (hcls : ∀ a, base ≤ a → a < hi → cls₂ (a + hi' - hi) = cls a)
+    (hlo : lo₂ ≤ lo + hi' - hi)
+    (hex : ∀ a n, base ≤ a → Outside a n ex₃ → Outside a n ex ∧ Outside (a + hi' - hi) n ex₂) :
+    Moved cls pool lo hi hi₃ base ex₃ m m'' := by
+  obtain ⟨⟨ha1, ha2, ha3⟩, hg0, hg1, hg2, hg3⟩ := h₁.aligned, h₁.grows
+  obtain ⟨⟨-, -, hb3⟩, hk0, hk1, hk2, hk3⟩ := h₂.aligned, h₂.grows
+  refine ⟨⟨ha1, ha2, hb3⟩, ⟨hg0, by omega, hg2, hg3⟩, fun a h1 h2 h3 h4 h5 => ?_, fun a h1 h2 h3 h4 => ?_⟩
+  · have hA : a + hi' - hi + hi₃ - hi' = a + hi₃ - hi := by omega
+    have hc₂ : cls₂ (a + hi' - hi) = true := by rw [hcls a h1 (by omega)]; exact h4
+    obtain ⟨h5a, h5b⟩ := hex a 8 h1 h5
+    refine ⟨fun hl hh => ?_, fun hout => ?_⟩
+    · have e₁ := h₁.readLE_ptr h1 h2 h3 h4 h5a hl hh
+      have e₂ := h₂.readLE_ptr (a := a + hi' - hi) (by omega) (by omega) (by omega) hc₂ h5b
+        (by rw [e₁]; omega) (by rw [e₁]; omega)
+      rw [← hA, e₂, e₁]; omega
+    · have e₁ := h₁.readLE_ptr_out h1 h2 h3 h4 h5a hout
+      have e₂ := h₂.readLE_ptr_out (a := a + hi' - hi) (by omega) (by omega) (by omega) hc₂ h5b
+        (by rw [e₁]; exact hout)
+      rw [← hA, e₂, e₁]
+  · have hA : a + hi' - hi + hi₃ - hi' = a + hi₃ - hi := by omega
+    obtain ⟨h4a, h4b⟩ := hex a 1 h1 h4
+    have hc₂ : cls₂ (a + hi' - hi - (a + hi' - hi) % 8) = false := by
+      rw [show a + hi' - hi - (a + hi' - hi) % 8 = (a - a % 8) + hi' - hi by omega,
+        hcls _ (by omega) (by omega)]
+      exact h3
+    rw [← hA, h₂.byte (a + hi' - hi) (by omega) (by omega) hc₂ h4b, h₁.byte a h1 h2 h3 h4a]
 
 end Moved
 
@@ -533,5 +624,41 @@ theorem Chain.framesCls_mv {A : Arch} {FT : FrameTable} {m : Memory} {hi pc sp :
     framesCls A FT (fs.map (Frame.mv hi hi')) (a + hi' - hi) = framesCls A FT fs a :=
   _root_.Janus.Spec.Stack.framesCls_mv A FT fs a hi hi' (fun f hf => by
     obtain ⟨h1, h2, -, -, -, -⟩ := h.bounds f hf; exact ⟨h2, by omega, by omega⟩) ha
+
+/-- **The stack maps describe a frame's own words.** A frame's adjusted words (its saved frame
+pointer, locals, arguments, stack objects) lie at or above its stack pointer. This holds for every
+pclntab the Go linker writes (locals and stack objects are inside the frame, arguments above it),
+and a theorem states it of the abstract table. -/
+def FrameTable.InFrame (A : Arch) (FT : FrameTable) : Prop :=
+  ∀ pc sp a, a < sp → frameCls A FT pc sp (A.fp FT pc sp) a = false
+
+/-- A walk classifies nothing below its starting stack pointer. -/
+theorem Chain.framesCls_below {A : Arch} {FT : FrameTable} {m : Memory} {hi pc sp : Nat}
+    {lr0 : Option Nat} {fs : List Frame} (h : Chain A FT m hi pc sp lr0 fs) (hin : FT.InFrame A)
+    {a : Nat} (ha : a < sp) : framesCls A FT fs a = false := by
+  have hb := h.bounds
+  induction fs with
+  | nil => rfl
+  | cons f fs ih =>
+    simp only [framesCls_cons, Bool.or_eq_false_iff]
+    obtain ⟨h1, -, -, -, -, h6⟩ := hb f (List.mem_cons_self ..)
+    refine ⟨?_, ?_⟩
+    · rw [h6]; exact hin _ _ _ (by omega)
+    · exact List.any_eq_false.2 fun f' hf' => by
+        obtain ⟨h1', -, -, -, -, h6'⟩ := hb f' (List.mem_cons_of_mem _ hf')
+        rw [h6']; simpa using hin f'.pc f'.sp a (by omega)
+
+/-- A table with no pointer maps and no stack objects satisfies `InFrame` (the saved frame
+pointer slot is never below the frame). -/
+theorem FrameTable.inFrame_of_empty (A : Arch) (FT : FrameTable) (hal : FT.Aligned)
+    (hl : ∀ pc, FT.locals pc = []) (ha : ∀ pc, FT.args pc = []) (ho : ∀ pc, FT.objs pc = []) :
+    FT.InFrame A := by
+  intro pc sp a h
+  have hv : sp ≤ A.varp sp (A.fp FT pc sp) := by
+    have := hal pc
+    unfold Arch.varp Arch.fp
+    cases A <;> dsimp only <;> split <;> omega
+  have hne : a ≠ A.varp sp (A.fp FT pc sp) := by omega
+  simp [frameCls, hl, ha, ho, bitsAt, hne]
 
 end Janus.Spec.Stack
