@@ -498,6 +498,9 @@ structure CallbackEntry (t : TLSImage) (p : Program) (s u : State) (ret : Nat) :
   retAddr : RetAddr p ret
   zero : u.xmm xmmZero = 0
   df : u.df = false
+  /-- The goroutine stack: `cbGoStack` writable bytes below `RSP` and the return-address slot. -/
+  goStack : cbGoStack ≤ (u.regs 4).toNat ∧ (u.regs 4).toNat + 8 ≤ 2 ^ 48 ∧
+    u.mem.accessible ((u.regs 4).toNat - cbGoStack) (cbGoStack + 8) true = true
   stackSep : ∀ a n w, s.mem.accessible a n w = true →
     Outside a n [((u.regs 4).toNat - cbGoStack, (u.regs 4).toNat + 8)]
   kept : ∀ a n, CbKept t s a n false → u.mem.readLE a n = s.mem.readLE a n
@@ -520,9 +523,16 @@ def CbResumed (t : TLSImage) (s u' s' : State) : Prop :=
     ∀ a, Outside a 1 (cbClobber t s) →
       m.bytes a = if s.mem.accessible a 1 false then u'.mem.bytes a else s.mem.bytes a
 
+/-- The stack `cgocallback` may use below `RSP` and its argument slots above (no alignment:
+at the stub `RSP ≡ 0 mod 16`, `crosscall2` being Go assembly that keeps the ABI0 frame layout,
+not the System V alignment). -/
+def CbStack (s : State) : Prop :=
+  cbStackScratch ≤ (s.regs 4).toNat ∧ (s.regs 4).toNat + 32 ≤ 2 ^ 48 ∧
+    s.mem.accessible ((s.regs 4).toNat - cbStackScratch) (cbStackScratch + 32) true = true
+
 /-- The **trusted** contract of `runtime.cgocallback` (amd64). -/
 def CgoCallback (t : TLSImage) (p : Program) (Cin : Contract) (R : State → Prop) : Contract where
-  safe f s := f = "runtime.cgocallback.abi0" ∧ CStack s cbStackScratch 32 ∧
+  safe f s := f = "runtime.cgocallback.abi0" ∧ CbStack s ∧
     ∀ u ret, CallbackEntry t p s u ret → R u → ReturnsC (p.withExit ret) Cin (ABIReturn u) u
   next f s s' := f = "runtime.cgocallback.abi0" ∧ ∃ u ret u', CallbackEntry t p s u ret ∧ R u ∧
     RunsTo (p.withExit ret) Cin u u' ∧ ABIReturn u u' ∧ CbResumed t s u' s'
@@ -553,7 +563,7 @@ theorem CgoCallback.refines {t : TLSImage} {p : Program} {Cin : Contract} {R : S
     {G : State → Prop} {E : State → Memory}
     {pre : W64 → State → Prop} {post : W64 → State → State → Prop}
     (hGo : ∀ a, EnsuresC p Cin fn [a] (pre a) (post a))
-    (hstack : ∀ s, G s → CStack s cbStackScratch 32)
+    (hstack : ∀ s, G s → CbStack s)
     (hpre : ∀ s u ret, G s → CallbackEntry t p s u ret → R u →
       pre (BitVec.ofNat 64 (s.mem.readLE ((s.regs 4).toNat + 16) 8)) u)
     (hE : ∀ s, G s → (E s).regions = s.mem.regions)

@@ -306,7 +306,8 @@ func cgoExportRoots(b *Binary, seg Segment) []Func {
 	seen := map[uint64]bool{}
 	for _, c := range cands {
 		f, ok := b.containing(c)
-		if !ok || f.Addr != c || seen[c] || !strings.Contains(f.Name, "._cgoexp_") {
+		// main._cgoexp_… (arm64), or _cgoexp_… as the amd64 linker names it
+		if !ok || f.Addr != c || seen[c] || !(strings.Contains(f.Name, "._cgoexp_") || strings.HasPrefix(f.Name, "_cgoexp_")) {
 			continue
 		}
 		seen[c] = true

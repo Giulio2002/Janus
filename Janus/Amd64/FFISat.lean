@@ -7,7 +7,8 @@ import Janus.FFISat
 As `Janus.FFISat`: `topOfStack_satisfiable`, `cgoSpec_satisfiable`, `callbackSpec_satisfiable`
 (total), `cgoCall_satisfiable` (every allowed `cgocall` has a result, given an admissible return
 address, a system stack disjoint from the Go memory, and the Go state's TLS `g` slot, `TlsG`, as
-every real cgo call has), `cgoCallback_satisfiable`.
+every real cgo call has), `cgoCallback_satisfiable` (given a goroutine stack disjoint from the C
+memory).
 -/
 
 namespace Janus.Amd64.FFI
@@ -133,35 +134,56 @@ theorem callbackSpec_satisfiable (t : TLSImage) (fn : Nat) (G : State → Prop) 
 
 /-! ## `cgocallback` -/
 
-/-- A Go call state from every C state: on a goroutine stack at `2^50` holding the return
-address, with the C state's memory plus that stack slot. -/
-def cbState (s : State) (ret : Nat) : State :=
+/-- A Go call state from every C state: on a goroutine stack at `sp` (a new region
+`[sp − cbGoStack, sp + 8)` disjoint from the C memory) holding the return address. -/
+def cbState (s : State) (ret sp : Nat) : State :=
   { s with rip := BitVec.ofNat 64 (s.mem.readLE ((s.regs 4).toNat + 8) 8),
            regs := fun i => if i = 0 then BitVec.ofNat 64 (s.mem.readLE ((s.regs 4).toNat + 16) 8)
-             else if i = 4 then BitVec.ofNat 64 (2 ^ 50) else s.regs i,
+             else if i = 4 then BitVec.ofNat 64 sp else s.regs i,
            xmm := fun i => if i = 15 then 0 else s.xmm i, df := false,
-           mem := s.mem.writeLE (2 ^ 50) 8 ret }
+           mem := { bytes := (s.mem.writeLE sp 8 ret).bytes,
+                    regions := s.mem.regions ++ [⟨sp - cbGoStack, cbGoStack + 8, true⟩] } }
 
-theorem callbackEntry_cbState {t : TLSImage} {p : Janus.Amd64.Program} {ret : Nat} (s : State)
-    (hret : RetAddr p ret) : CallbackEntry t p s (cbState s ret) ret where
+theorem callbackEntry_cbState {t : TLSImage} {p : Janus.Amd64.Program} {ret sp : Nat} (s : State)
+    (hret : RetAddr p ret) (hlo : cbGoStack ≤ sp) (hhi : sp + 8 ≤ 2 ^ 48)
+    (hfree : ∀ r ∈ s.mem.regions, r.base + r.size ≤ sp - cbGoStack ∨ sp + 8 ≤ r.base) :
+    CallbackEntry t p s (cbState s ret sp) ret where
   rip := rfl
   arg := by simp [cbState]
   retSlot := by
-    show (s.mem.writeLE (2 ^ 50) 8 ret).readLE (BitVec.ofNat 64 (2 ^ 50)).toNat 8 = ret
-    rw [show (BitVec.ofNat 64 (2 ^ 50)).toNat = 2 ^ 50 from rfl, Janus.Arm64.Memory.readLE_writeLE_self,
-      Nat.mod_eq_of_lt (by have := hret.user; omega)]
+    have hsp : (BitVec.ofNat 64 sp).toNat = sp := by simp; omega
+    simp only [cbState, if_neg (show (4 : Nat) ≠ 0 by decide), if_true, hsp]
+    change (s.mem.writeLE sp 8 ret).readLE sp 8 = ret
+    rw [Janus.Arm64.Memory.readLE_writeLE_self, Nat.mod_eq_of_lt (by have := hret.user; omega)]
   retAddr := hret
   zero := by simp [cbState, xmmZero]
   df := rfl
+  goStack := by
+    have hsp : (BitVec.ofNat 64 sp).toNat = sp := by simp; omega
+    refine ⟨by simp [cbState, hsp, hlo], by simp [cbState, hsp]; omega, ?_⟩
+    simp only [cbState, if_neg (show (4 : Nat) ≠ 0 by decide), if_true, hsp,
+      Janus.Arm64.Memory.accessible, Bool.and_eq_true, List.any_append, List.all_append, List.any_cons,
+      List.any_nil, List.all_cons, List.all_nil, Bool.or_eq_true, Bool.not_eq_true', Bool.and_true,
+      Bool.or_false]
+    refine ⟨.inr (by simp; omega), .inr ⟨?_, by simp⟩⟩
+    simp only [List.all_eq_true]
+    intro r hr
+    rcases hfree r hr with h | h <;> simp <;> omega
   stackSep a n w h := by
-    have := Janus.Arm64.Memory.accessible_bound s.mem h
-    simp only [outside_cons, outside_nil, and_true, cbState, cbGoStack]
-    left; simp; omega
+    have hsp : (BitVec.ofNat 64 sp).toNat = sp := by simp; omega
+    obtain ⟨⟨r, hr, h1, h2, -, -⟩, -⟩ := (Janus.Arm64.Memory.accessible_iff s.mem a n w).1 h
+    simp only [cbState, if_neg (show (4 : Nat) ≠ 0 by decide), if_true, hsp,
+      outside_cons, outside_nil, and_true]
+    rcases hfree r hr with h3 | h3 <;> omega
   kept a n hk := by
-    have := Janus.Arm64.Memory.accessible_bound s.mem hk.1
-    show (s.mem.writeLE (2 ^ 50) 8 ret).readLE a n = _
-    exact Janus.Arm64.Memory.readLE_writeLE_of_disjoint (m := s.mem) ret (by omega)
-  keptAcc _ _ _ h := by simp only [cbState, Janus.Arm64.Memory.accessible_writeLE]; exact h.1
+    obtain ⟨⟨r, hr, h1, h2, -, -⟩, -⟩ := (Janus.Arm64.Memory.accessible_iff s.mem a n false).1 hk.1
+    refine (Janus.Arm64.Memory.readLE_of_bytes_eq (m := (cbState s ret sp).mem)
+      (m' := s.mem.writeLE sp 8 ret) rfl a n).trans ?_
+    exact Janus.Arm64.Memory.readLE_writeLE_of_disjoint (m := s.mem) ret (by rcases hfree r hr with h3 | h3 <;> omega)
+  keptAcc a n w h := by
+    have := Janus.FFI.accessible_append_writable' (m := s.mem) (rs := [⟨sp - cbGoStack, cbGoStack + 8, true⟩])
+      (by simp) h.1
+    simpa [cbState, Janus.Arm64.Memory.accessible] using this
   fs := rfl
   mxcsr := rfl
   fpucw := rfl
@@ -175,12 +197,18 @@ def cbResumeState (s u' : State) : State :=
 theorem cbResumed_cbResumeState (t : TLSImage) (s u' : State) : CbResumed t s u' (cbResumeState s u') :=
   ⟨_, ⟨_, s.flags, s.xmm, s.ymmHi, s.mxcsr, rfl, by simp, rfl⟩, rfl, fun _ _ => rfl⟩
 
-theorem cgoCallback_satisfiable {t : TLSImage} {p : Janus.Amd64.Program} {Cin : Contract} {ret : Nat}
-    (hC : Cin.Total) (hret : RetAddr p ret) : (CgoCallback t p Cin (fun _ => True)).Total := by
-  rintro f s ⟨hf, -, hgo⟩
-  obtain ⟨u', hr, hab⟩ := (hgo _ ret (callbackEntry_cbState s hret) trivial).exists_runsTo hC
-  exact ⟨_, hf, _, ret, u', callbackEntry_cbState s hret, trivial, hr, hab,
-    cbResumed_cbResumeState t s u'⟩
+/-- Every allowed `cgocallback` has a result, for a total inner contract, an admissible return
+address and a goroutine stack at `sp` disjoint from the C memory (as every real callback has). -/
+theorem cgoCallback_satisfiable {t : TLSImage} {p : Janus.Amd64.Program} {Cin : Contract} {ret sp : Nat}
+    (hC : Cin.Total) (hret : RetAddr p ret) {f : String} {s : State} (hlo : cbGoStack ≤ sp)
+    (hhi : sp + 8 ≤ 2 ^ 48)
+    (hfree : ∀ r ∈ s.mem.regions, r.base + r.size ≤ sp - cbGoStack ∨ sp + 8 ≤ r.base)
+    (hs : (CgoCallback t p Cin (fun _ => True)).safe f s) :
+    ∃ s', (CgoCallback t p Cin (fun _ => True)).next f s s' := by
+  obtain ⟨hf, -, hgo⟩ := hs
+  have he := callbackEntry_cbState (t := t) s hret hlo hhi hfree
+  obtain ⟨u', hr, hab⟩ := (hgo _ ret he trivial).exists_runsTo hC
+  exact ⟨_, hf, _, ret, u', he, trivial, hr, hab, cbResumed_cbResumeState t s u'⟩
 
 
 
