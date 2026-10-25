@@ -724,8 +724,11 @@ func TestTestCacheOffTmpfs(t *testing.T) {
 // afterwards a re-verification from an emptied cache gives the same theorem, statement and
 // axioms (the rebuilt entries are equivalent).
 func TestCacheGCConcurrentVerify(t *testing.T) {
+	defer parallel(t)()
 	needLeanSlow(t)
-	useTestCache(t)
+	// A private copy of the test cache (seed_test.go): this test empties its cache, which must not
+	// disturb the tests and agents sharing the test cache.
+	cache := seededCache(t)
 	bin := buildJanusBinary(t)
 	sb := sandboxArgs()
 	arts := map[string]string{}
@@ -735,7 +738,7 @@ func TestCacheGCConcurrentVerify(t *testing.T) {
 	verifyArgs := func(n string) []string {
 		return append([]string{"verify", arts[n], "--proof", filepath.Join(repoRoot, "examples", "proofs", n+".lean"), "--json"}, sb...)
 	}
-	env := testEnv()
+	env := cacheEnv(cache)
 	run1 := func(args ...string) (int, string) {
 		cmd := exec.Command(bin, args...)
 		cmd.Env = env

@@ -582,6 +582,40 @@ every lane to its bytes (`elem_64_bytes`), pushing the masks into `if`s (`ite_la
 `firstTrue`. Name the branch hypotheses (`rename_i`) instead of `‹_›`: an anonymous assumption
 with metavariables is unified against every hypothesis, and these are large.
 
+### Auto-vectorised C code (`A64CountByte`)
+
+`examples/basic/countbyte_arm64.s` embeds, word for word, what gcc 15.2.0 emits at cgo's default
+`-O2` for the C loop `for (i = 0; i < n; i++) k += p[i] == c;` (`v_count` of
+`scripts/coverage/ccorpus/vec.c`), behind an ABI0 shim that loads `X0`–`X2` from the Go argument
+frame; `A64CountByte` calls it. The theorem holds for every length, so it has two loop
+invariants, each proved by induction on the iterations left (the template of `Sum`):
+
+* `vloop`, at the head of the 16-byte loop: the two 64-bit lanes of the accumulator `v26` add up,
+  modulo `2^64`, to the count of the first `16 k` bytes. The registers that hold constants are
+  stated as equations (`v23 = DUP c`, `v24 = MOVI #1`, `v29 = 0`) and passed to `janus_run`. One
+  iteration leaves terms like `threeSameOp false 3 16 128 v26 (threeDiffOp true 32 2 1 1 …).1 0`;
+  the `janus_exec` element lemmas of `Janus.Tactic.Neon` evaluate their lanes: `elem_add` (ADD),
+  `elem_uaddw_64` (UADDW/UADDW2; `elem_hi64_32` for the high half), `elem_zip_zero_16/32/64`
+  (ZIP1/ZIP2 with a zero vector, read at twice the element size, is a zero extension), with
+  `elem_cmeq` and `elem_and` of `Janus.Tactic.Vector` below them. Each lane comes out as a sum of
+  eight `if p[16k+i] = c then 1 else 0`, and `countOf_add16` states the count of sixteen more
+  bytes with the same atoms, so the step is one `omega` (the lane sums are kept modulo `2^64`, so
+  no bound on the lanes is needed). `threeDiffOp_snd` and its siblings say that a
+  non-saturating operation leaves `FPSR.QC` alone, which keeps `qcCommit` from branching.
+* `tail`, at the head of the scalar loop (`LDRB`, `CMP`, `CINC`): `X0` is the count of the
+  first `i` bytes.
+
+`correctness` runs to either loop head (`janus_run … until [vhead, thead]`): `len = 0` returns at
+once, `len < 16` enters `tail` at 0, otherwise `vloop` at block 0; `vloop`'s last iteration
+either returns (`len mod 16 = 0`, through `ADDP` and `FMOV`) or enters `tail` at `len - len mod 16`.
+
+The same loop, compiled by cgo rather than embedded, is proved end to end through the FFI
+layer: `examples/proofs-cgo/arm64/CCount.lean` is the `CEnsures` of `c_count` in
+`examples/cgo/neon` (same two invariants, loop heads at `entry + 0x40` / `entry + 0xa4` of that
+build), and `GoCount.lean` composes it with the `_cgo_…_Cfunc_c_count` wrapper and Go's
+`neon.Count` under `CgoCall.refines` (see `docs/FFI.md`). The C function lives in its own
+package so the `example.com/cgo` wrapper hash, and so `GoAdd`/`GoSum`, are unchanged.
+
 ### Runtime contracts and heap allocation (`NewPair`, `MakeSlice`, `AppendOne`, `SetNext`, `MallocFast`)
 
 Extract with `--contract runtime.newobject` (see `scripts/example-contracts.sh`), state the theorem

@@ -5,14 +5,19 @@
 # Every attack verification passes --fresh (the cold path) and uses a private temporary cache;
 # the M1/C1 rows use their own temporary caches. All are removed at the end.
 # Writes only under audit/round8/work/rows/, audit/round8/bin/ and those temporary caches.
-# Usage: audit/round8/run-round8.sh
+# Usage: audit/round8/run-round8.sh [-j N]   (the --fresh rows N at once: scripts/lib/parallel.sh)
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
+# shellcheck source=../../scripts/lib/parallel.sh
+. "$root/scripts/lib/parallel.sh"
+par_init "$@"
 J="$root/audit/round8/bin/janus"; mkdir -p "$(dirname "$J")"
-go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
+# audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
+# JANUS_AUDIT_PREBUILT=1).
+if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else go build -o "$J" ./cmd/janus || exit 1; fi
+[ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
 W=audit/round8/work/rows; rm -rf "$W"; mkdir -p $W
@@ -46,23 +51,26 @@ row() {
 # v PROOF ARTIFACT [THEOREM]
 v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
+# The --fresh rows (each a cold kernel replay of the framework) are independent: they run as
+# parallel blocks (-j N, scripts/lib/parallel.sh); output is printed in this order.
 echo "== I1: every object name in the statement resolves in Extracted.program"
 nodata='but the extracted program has no data object of that name'
-v $A/I1a_itab_name_lookalike.lean $W/HashWith;   row I1a_itab_name_lookalike blocked "$nodata" "MulHаsher"
-v $A/I1b_itab_name_absent.lean $W/HashWith;      row I1b_itab_name_absent blocked "$nodata"
-v $A/I1c_segaddr_absent.lean $W/Add;             row I1c_segaddr_absent blocked 'but the extracted program has no function of that name'
-v $A/I1d_itab_other_data.lean $W/HashWith;       row I1d_itab_other_data blocked 'which is not Extracted.program.data'
-v $A/I1e_itab_name_via_def.lean $W/HashWith;     row I1e_itab_name_via_def blocked "$nodata"
-v $A/I1f_amd64_database_absent.lean artifacts/amd64/Add; row I1f_amd64_database_absent blocked 'the lookup would silently return 0'
-echo "   controls (real names: literal, through an abbrev, segAddr, amd64 dataBase)"
-v examples/proofs/HashWith.lean $W/HashWith;     row I1_ctl_HashWith_itab_abbrev Verified 'ItabIs' 'mulItab'
-v examples/proofs/AddThree.lean $W/AddThree Proof.add_summary
-row I1_ctl_AddThree_segAddr Verified 'segAddr Extracted.program "example.com/basic.Add"'
-v examples/proofs-amd64/HexDigit/Proof.lean artifacts/amd64/HexDigit Proof.correctness
-row I1_ctl_amd64_HexDigit_dataBase Verified
+par_run 'v $A/I1a_itab_name_lookalike.lean $W/HashWith;   row I1a_itab_name_lookalike blocked "$nodata" "MulHаsher"'
+par_run 'v $A/I1b_itab_name_absent.lean $W/HashWith;      row I1b_itab_name_absent blocked "$nodata"'
+par_run 'v $A/I1c_segaddr_absent.lean $W/Add;             row I1c_segaddr_absent blocked "but the extracted program has no function of that name"'
+par_run 'v $A/I1d_itab_other_data.lean $W/HashWith;       row I1d_itab_other_data blocked "which is not Extracted.program.data"'
+par_run 'v $A/I1e_itab_name_via_def.lean $W/HashWith;     row I1e_itab_name_via_def blocked "$nodata"'
+par_run 'v $A/I1f_amd64_database_absent.lean artifacts/amd64/Add; row I1f_amd64_database_absent blocked "the lookup would silently return 0"'
+par_run 'echo "   controls (real names: literal, through an abbrev, segAddr, amd64 dataBase)"
+v examples/proofs/HashWith.lean $W/HashWith;     row I1_ctl_HashWith_itab_abbrev Verified "ItabIs" "mulItab"'
+par_run 'v examples/proofs/AddThree.lean $W/AddThree Proof.add_summary
+row I1_ctl_AddThree_segAddr Verified "segAddr Extracted.program \"example.com/basic.Add\""'
+par_run 'v examples/proofs-amd64/HexDigit/Proof.lean artifacts/amd64/HexDigit Proof.correctness
+row I1_ctl_amd64_HexDigit_dataBase Verified'
 
-echo "== N1: native reduction (Lean.reduceBool + implemented_by)"
-v $A/N1a_reducebool_implemented_by.lean $W/Add;  row N1a_reducebool_implemented_by blocked 'Lean.trustCompiler'
+par_run 'echo "== N1: native reduction (Lean.reduceBool + implemented_by)"
+v $A/N1a_reducebool_implemented_by.lean $W/Add;  row N1a_reducebool_implemented_by blocked "Lean.trustCompiler"'
+par_wait
 
 echo "== G3: a go1.25 binary labelled go1.26 (audit/round8/govers; fixed: stubs pinned by code, cmd/janus/stubpin.go)"
 if ( cd audit/round8/govers && GOTOOLCHAIN=go1.25.5 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \

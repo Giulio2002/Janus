@@ -1,3 +1,4 @@
+import Janus.Arm64.NeonInstr
 import Janus.Arm64.InstrCrypto
 
 /-!
@@ -276,6 +277,9 @@ inductive Instr where
   | clz (sf : Bool) (rn rd : Nat)
   /-- CLS. Registers: ZR. -/
   | cls (sf : Bool) (rn rd : Nat)
+  -- Advanced SIMD classes beyond the subset above (`Janus.Arm64.NeonInstr`, `DecodeNeon`, `ExecNeon`)
+  /-- An Advanced SIMD instruction of `NeonInstr` (decoded by `decodeNeon`). -/
+  | neon (i : NeonInstr)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Arm64

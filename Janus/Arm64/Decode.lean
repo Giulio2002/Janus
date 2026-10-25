@@ -1,6 +1,7 @@
 import Janus.Arm64.Instr
 import Janus.Arm64.Bits
 import Janus.Arm64.DecodeFloat
+import Janus.Arm64.DecodeNeon
 import Janus.Arm64.DecodeCrypto
 
 /-!
@@ -585,5 +586,16 @@ def decode (w : Nat) : Option Instr :=
   else if op0 % 8 = 0b101 then decodeDPReg w       -- x101
   else if op0 % 8 = 0b111 then decodeSimdDP w      -- x111
   else none                                        -- SME, SVE, unallocated
+
+/-- The decoder of the model (`step`): the classes of `decode`, and for the words it rejects, the
+Advanced SIMD classes of `decodeNeon` (`Janus.Arm64.DecodeNeon`). `decode` keeps its own
+definition so that proofs unfolding it class by class are unaffected. -/
+def decodeAll (w : Nat) : Option Instr :=
+  match decode w with
+  | some i => some i
+  | none => (decodeNeon w).map Instr.neon
+
+theorem decodeAll_of_decode {w : Nat} {i : Instr} (h : decode w = some i) : decodeAll w = some i := by
+  simp [decodeAll, h]
 
 end Janus.Arm64
