@@ -65,15 +65,10 @@ func DeferLoop(f func(), n int) {
 	}
 }
 
-// Counter returns a closure that increments *p.
-//
-//go:noinline
-func Counter(p *uint64) func() { return func() { *p++ } }
 
 // DeferTwice defers an empty closure twice in a loop. A defer inside a loop is never
 // open-coded, so each iteration registers a heap defer record (runtime.deferproc) and the
-// function runs them at the end (runtime.deferreturn). The constant loop bound keeps the
-// extraction small and lets the proof unroll it.
+// function runs them at the end (runtime.deferreturn).
 //
 //go:noinline
 func DeferTwice() {

@@ -51,5 +51,4 @@ case "$1" in
   DeferLoop|DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
   RecoverSet) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
       --contract runtime.deferreturn --contract runtime.convT64 ;;
-  Counter) printf '%s\n' --contract runtime.newobject ;;
 esac
