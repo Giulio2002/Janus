@@ -12,6 +12,7 @@ import (
 // `BitVec 64`) reads as a value it is not. All must be rejected at the statement-identity stage;
 // in-range numerals stay accepted.
 func TestRound6StatementNames(t *testing.T) {
+	defer parallel(t)()
 	needLean(t)
 	useTestCache(t)
 	if _, err := detectSandbox(false); err != nil {

@@ -332,7 +332,7 @@ end WordProofs.Add
 // rejected; a dirty checkout and a path dependency are rejected (the latter accepted and
 // recorded with --allow-path-deps).
 func TestConsumerExtraDep(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	repo, rev := makeWordLib(t)
@@ -434,7 +434,7 @@ func TestConsumerExtraDep(t *testing.T) {
 // TestConsumerPathDep: the spec library as a path dependency is rejected unless
 // --allow-path-deps, which records it as such.
 func TestConsumerPathDep(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	needLeanSlow(t)
 	useTestCache(t)
 	repo, rev := makeWordLib(t)
@@ -478,7 +478,7 @@ func TestConsumerPathDep(t *testing.T) {
 // workspace (no cache download). JANUS_TEST_MATHLIB_REV overrides the revision (default: the
 // v4.34.1 tag, matching the framework's toolchain).
 func TestConsumerMathlib(t *testing.T) {
-	t.Parallel()
+	defer parallel(t)()
 	if os.Getenv("JANUS_TEST_MATHLIB") != "1" {
 		t.Skip("set JANUS_TEST_MATHLIB=1 to build Mathlib and verify against it")
 	}

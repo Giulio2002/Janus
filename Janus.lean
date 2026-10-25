@@ -13,6 +13,7 @@ import Janus.Tactic
 import Janus.Tactic.Atomic
 import Janus.Tactic.Vector
 import Janus.Tactic.Float
+import Janus.Tactic.Neon
 import Janus.Tactic.Crypto
 import Janus.Float.Lemmas
 import Janus.Arm64.FloatLemmas
@@ -20,6 +21,7 @@ import Janus.Amd64.FloatLemmas
 import Janus.Arm64.Vector
 import Janus.Spec.Basic
 import Janus.Spec.String
+import Janus.Spec.Bytes
 import Janus.Contracts.Alloc
 import Janus.Contracts.AllocAmd64
 import Janus.Contracts.Rt
@@ -45,4 +47,5 @@ import Janus.Contracts.IfaceAmd64
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat
 import Janus.Contracts.IfaceSatAmd64
+import Janus.Spec.CRC32C
 import Janus.Tactic.ABI0

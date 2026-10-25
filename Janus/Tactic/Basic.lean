@@ -75,7 +75,7 @@ def IsMorestack : Outcome → Prop
 a stub, inside the code. Evaluated by the kernel (`decide +kernel`). -/
 def stepOK (p : Program) (pc w : Nat) (i : Instr) : Bool :=
   decide (pc < 2 ^ 64) && !(pc == p.exitAddr) && (p.stubAt pc).isNone &&
-    (p.fetch pc == some w) && (decode w == some i)
+    (p.fetch pc == some w) && (decodeAll w == some i)
 
 /-- `pc` is the exit address. -/
 def exitOK (p : Program) (pc : Nat) : Bool := decide (pc < 2 ^ 64) && pc == p.exitAddr
@@ -139,7 +139,7 @@ theorem step {c w : Nat} {i : Instr} {r : Except Fault State}
     obtain ⟨n, o, hr, hq⟩ := h
     refine ⟨n + 1, o, ?_, hq⟩
     rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hx) (by rw [hpc']; exact hs)
-      (by rw [hpc']; exact hf) (by rw [step_of_decode hd]; exact he)]
+      (by rw [hpc']; exact hf) (by rw [step_of_decodeAll hd]; exact he)]
     exact hr
 
 /-- The exit address: the call has returned. -/
@@ -217,7 +217,7 @@ theorem step_withExit {c w : Nat} {i : Instr} {r : Except Fault State} (hret : R
     obtain ⟨n, o, hr, hq⟩ := h
     refine ⟨n + 1, o, ?_, hq⟩
     rw [Program.run_succ_step (s' := s') (by rw [hpc']; exact hret.ne_of_fetch hf)
-      (by rw [hpc']; exact hs) (by rw [hpc']; exact hf) (by rw [step_of_decode hd]; exact he)]
+      (by rw [hpc']; exact hs) (by rw [hpc']; exact hf) (by rw [step_of_decodeAll hd]; exact he)]
     exact hr
 
 /-- `pc` is the return address: the call has returned. -/
@@ -334,7 +334,7 @@ theorem step {c w : Nat} {i : Instr} {r : Except Fault State}
   | ok s' =>
     obtain ⟨k, s'', hst, hr, hq⟩ := h
     exact ⟨k + 1, s'', .step (by rw [hpc']; exact hx) (by rw [hpc']; exact hs)
-      (by rw [hpc']; exact hf) (by rw [step_of_decode hd]; exact he) hst, hr, hq⟩
+      (by rw [hpc']; exact hf) (by rw [step_of_decodeAll hd]; exact he) hst, hr, hq⟩
 
 theorem ok {s : State} (h : ReachesRet p ret s Q) : ExecThenRet p ret (.ok s) Q := h
 

@@ -6,6 +6,7 @@ import JanusTests.Decode
 import JanusTests.Exec
 import JanusTests.Atomic
 import JanusTests.Vector
+import JanusTests.Neon
 import JanusTests.Simp
 import JanusTests.Tactic
 import JanusTests.Amd64
@@ -15,4 +16,5 @@ import JanusTests.Audit
 import JanusTests.Float
 import JanusTests.Dynamic
 import JanusTests.String
+import JanusTests.SSE
 import JanusTests.Crypto

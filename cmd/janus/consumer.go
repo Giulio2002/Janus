@@ -470,6 +470,12 @@ type consumerWS struct {
 	// its build stamp records (re-checked before it runs); empty with --fresh, whose temporary
 	// base is gone by then: the audit then runs the trusted Audit.lean script instead.
 	auditExe, auditExeSha string
+	// baseLease keeps the cached framework base in use (its shared lock) until the workspace is
+	// closed: the auditor above runs from the base long after the workspace was prepared, and a
+	// writer (a rebuild for another target, a repair, the cache collector) must not replace or
+	// remove it meanwhile. Before, the lease ended when openWorkspace returned, and a concurrent
+	// writer made the auditor check fail ("changed after it was built").
+	baseLease *frameworkLease
 }
 
 // janusLib is the workspace's framework library directory.
@@ -493,9 +499,18 @@ func (ws *consumerWS) protected(readOnlyBuilds bool) []string {
 
 // workspaceFamily groups the workspaces of one consumer package and framework; members
 // differ only in Extracted, and a new member starts from a sibling's build.
+// workspaceFamily is the directory of the workspaces of one consumer package against one
+// framework: keyed by the framework (its sources' hash, and for a --janus-root framework the
+// checkout it was read from), the package's root and the janus dependency it resolved (type,
+// checkout directory, URL and revision). Two checkouts of the same commit (agents' worktrees
+// sharing one cache) therefore never share a workspace or seed one from the other's, even for
+// byte-identical frameworks and packages at the same path; within one family, siblings (other
+// extractions) seed each other's builds as before.
 func workspaceFamily(fw *framework, pkg *consumerPkg) string {
-	h := sha256.Sum256([]byte(fw.Sha256 + "\x00" + pkg.Root))
-	return filepath.Join(cacheRoot(), "v1", "consumer", hex.EncodeToString(h[:])[:24])
+	h := sha256.New()
+	fmt.Fprintf(h, "janus-consumer-family-v2\x00%s\x00%s\x00%s\x00%s\x00", fw.Sha256, fw.Source, fw.Dir, pkg.Root)
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00", pkg.Dep.Type, pkg.Dep.Dir, pkg.Dep.URL, pkg.Dep.Rev)
+	return filepath.Join(cacheRoot(), "v1", "consumer", hex.EncodeToString(h.Sum(nil))[:24])
 }
 
 func wsDiag(err error) error {
@@ -544,11 +559,12 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 			defer os.RemoveAll(base)
 		}
 	} else {
-		// The base stays in use (shared lock) until its build has been copied and compared.
+		// The base stays in use (shared lock) for as long as the workspace: its build is copied
+		// and compared here, and its compiled auditor runs at the audit (ws.close releases it).
 		var lease *frameworkLease
 		if lease, err = fw.frameworkBase(lake, progress); err == nil {
 			base = lease.dir
-			defer lease.release()
+			ws.baseLease = lease
 			ws.auditExe, ws.auditExeSha = auditExePath(base), fw.stampedAuditExe(base)
 		}
 	}
@@ -774,6 +790,8 @@ func (ws *consumerWS) close() {
 	}
 	ws.lock.unlock()
 	ws.lock = nil
+	ws.baseLease.release()
+	ws.baseLease = nil
 }
 
 // run runs lake in the workspace root under the sandbox (the consumer's lakefile and modules
@@ -1150,6 +1168,16 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 			failAll(err)
 			return
 		} else {
+			// The framework replay verdict of the trusted base build (replaymark.go): the
+			// workspace's framework modules are pinned to its bytes (samePins above, pinned.check
+			// after the replay), so a passing replay of those bytes covers them.
+			if ws.replayCache {
+				fwl := &pinnedLib{dir: janusLib, want: ws.framework}
+				if ok, lk := lookupFrameworkVerdict(frameworkVerdictKey(ws.tc.cacheID(), fwl)); ok {
+					defer lk.unlock()
+					plan.applyFrameworkVerdict(fwl)
+				}
+			}
 			run := func(argv ...string) (string, error) { return ws.runLeanDirect(leanPath, argv...) }
 			var all []string
 			for m := range union {
