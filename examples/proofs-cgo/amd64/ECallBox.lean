@@ -195,7 +195,7 @@ theorem c_spec (impl : List Amd64.Segment) (rt rtc : List (Nat × Nat)) (H : Jan
     rw [hgf] at hH
     exact ⟨⟨by omega, by omega, Janus.Arm64.Memory.accessible_mono _ hw (by omega) (by omega)⟩, hH, by omega,
       Janus.Arm64.Memory.accessible_mono _ hw (by omega) (by omega), ⟨by omega, by omega, by omega⟩, hcrt⟩
-  · rintro s' ⟨-, m, ⟨regs, flags, xmm, ymmHi, mx, rfl, hr4, hmx⟩, hmf⟩
+  · rintro s' ⟨-, m, ⟨regs, flags, xmm, ymmHi, mx, zh, kr, rfl, hr4, hmx⟩, hmf⟩
     simp only [E, frameOf, cbClobber, cbStackScratch, tlsGSlot, TLSImage.x64Addr, et1, et2, setRegF_apply, ↓reduceIte,
       Nat.reduceEqDiff] at hmf
     have h152 : (s.regs 4 - 152#64).toNat = (s.regs 4).toNat - 152 := by
@@ -321,7 +321,7 @@ theorem newobject_impl : NewobjectContract64 (Extracted.program.link implAt) cA 
   simp only [List.cons.injEq, and_true] at hargs
   rw [hc] at hpc
   janus64_run
-  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
+  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
     (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩

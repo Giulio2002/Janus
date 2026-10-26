@@ -145,7 +145,7 @@ theorem c_spec (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : W64) 
     rw [hgf] at hH
     exact ⟨⟨by omega, by omega, Janus.Arm64.Memory.accessible_mono _ hw (by omega) (by omega)⟩, hH, by omega,
       Janus.Arm64.Memory.accessible_mono _ hw (by omega) (by omega), by omega, by omega, by omega⟩
-  · rintro s' ⟨-, m, ⟨regs, flags, xmm, ymmHi, mx, rfl, hr4, hmx⟩, hmf⟩
+  · rintro s' ⟨-, m, ⟨regs, flags, xmm, ymmHi, mx, zh, kr, rfl, hr4, hmx⟩, hmf⟩
     simp only [E, frameOf, cbClobber, cbStackScratch, tlsGSlot, TLSImage.x64Addr, et1, et2, setRegF_apply, ↓reduceIte,
       Nat.reduceEqDiff] at hmf
     have h152 : (s.regs 4 - 152#64).toNat = (s.regs 4).toNat - 152 := by

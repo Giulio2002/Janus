@@ -331,9 +331,9 @@ theorem newobject_impl : NewobjectContract (Extracted.program.link implAt) cA rt
   simp only [List.cons.injEq, and_true] at hargs
   rw [hc] at hpc
   janus_run
-  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, ?_,
+  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
-  · simp only [retState]; rw [callRegs_heap]; rfl
+  · simp only [retStateX]; rw [callRegs_heap]; rfl
   · have hin : InRanges boxType 16 rtW := ⟨(boxType, boxType + 16), by simp [rtW], Nat.le_refl _, Nat.le_refl _⟩
     unfold typSize at hsz
     rw [readLE_rtView (hin.sub (Nat.le_refl _) (by omega))] at hsz
