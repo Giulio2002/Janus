@@ -1,5 +1,6 @@
 import JanusASL.Classify
 import JanusASL.Proofs.Run
+import JanusASL.Proofs.FP.Run
 import JanusASL.Proofs.Examples
 import Janus.Tools.Audit
 
@@ -100,6 +101,45 @@ theorem classify_sound {w : Nat} {c : String} (h : classify w = some c) : StepOK
   · exact stepOK_blr hw hc.1 hc.2
   rcases ite_some h with hc | h
   · exact stepOK_ret hw hc.1 hc.2
+  cases h
+
+
+/-- `fpClassify` is sound: a classified floating-point word is `FPStepOK`. -/
+theorem fpClassify_sound {w : Nat} {c : String} (h : fpClassify w = some c) : FPStepOK w := by
+  rw [fpClassify] at h
+  obtain ⟨hw, h⟩ := ite_none h
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fcmp hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2.1 hc.2.2.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fmul hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fdiv hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fadd hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fsub hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fmadd hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fmsub hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fnmadd hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fnmsub hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fsqrt hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fccmp hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fcvt hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_scvtf hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_ucvtf hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fcvtzs hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fcvtzu hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2
   cases h
 
 theorem covered_words (p : Program) (h : covered p = true) :

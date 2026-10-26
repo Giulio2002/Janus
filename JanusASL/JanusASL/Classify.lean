@@ -66,6 +66,42 @@ def classify (w : Nat) : Option String :=
     else none
   else none
 
+/-- The proved scalar floating-point encoding class of `w` (the name of its `fpStepOK_<class>` theorem,
+`JanusASL/Proofs/FP/Run.lean`), if any. Like `classify`, the conditions are the theorems' hypotheses
+verbatim. -/
+def fpClassify (w : Nat) : Option String :=
+  if w < 2 ^ 32 then
+    if w / 2 ^ 24 = 0x1E ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 10) % 16 = 8 ∧
+        (w / 2 ^ 14) % 4 = 0 ∧ w % 8 = 0 ∧ ((w / 2 ^ 3) % 2 = 1 → (w / 2 ^ 16) % 32 = 0) then some "fcmp"
+    else if w / 2 ^ 24 = 0x1E ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 10) % 4 = 2 ∧
+        (w / 2 ^ 12) % 16 = 0 then some "fmul"
+    else if w / 2 ^ 24 = 0x1E ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 10) % 4 = 2 ∧
+        (w / 2 ^ 12) % 16 = 1 then some "fdiv"
+    else if w / 2 ^ 24 = 0x1E ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 10) % 4 = 2 ∧
+        (w / 2 ^ 12) % 16 = 2 then some "fadd"
+    else if w / 2 ^ 24 = 0x1E ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 10) % 4 = 2 ∧
+        (w / 2 ^ 12) % 16 = 3 then some "fsub"
+    else if w / 2 ^ 24 = 0x1F ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 0 ∧ (w / 2 ^ 15) % 2 = 0 then some "fmadd"
+    else if w / 2 ^ 24 = 0x1F ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 0 ∧ (w / 2 ^ 15) % 2 = 1 then some "fmsub"
+    else if w / 2 ^ 24 = 0x1F ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 15) % 2 = 0 then some "fnmadd"
+    else if w / 2 ^ 24 = 0x1F ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 15) % 2 = 1 then some "fnmsub"
+    else if w / 2 ^ 24 = 0x1E ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 10) % 32 = 16 ∧
+        (w / 2 ^ 15) % 64 = 3 then some "fsqrt"
+    else if w / 2 ^ 24 = 0x1E ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 10) % 4 = 1 then some "fccmp"
+    else if w / 2 ^ 24 = 0x1E ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧ (w / 2 ^ 10) % 32 = 16 ∧
+        (((w / 2 ^ 15) % 64 = 4 ∧ (w / 2 ^ 22) % 4 = 1) ∨ ((w / 2 ^ 15) % 64 = 5 ∧ (w / 2 ^ 22) % 4 = 0)) then
+      some "fcvt"
+    else if (w / 2 ^ 24 = 0x1E ∨ w / 2 ^ 24 = 0x9E) ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧
+        (w / 2 ^ 10) % 64 = 0 ∧ (w / 2 ^ 16) % 8 = 2 ∧ (w / 2 ^ 19) % 4 = 0 then some "scvtf"
+    else if (w / 2 ^ 24 = 0x1E ∨ w / 2 ^ 24 = 0x9E) ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧
+        (w / 2 ^ 10) % 64 = 0 ∧ (w / 2 ^ 16) % 8 = 3 ∧ (w / 2 ^ 19) % 4 = 0 then some "ucvtf"
+    else if (w / 2 ^ 24 = 0x1E ∨ w / 2 ^ 24 = 0x9E) ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧
+        (w / 2 ^ 10) % 64 = 0 ∧ (w / 2 ^ 16) % 8 = 0 ∧ (w / 2 ^ 19) % 4 = 3 then some "fcvtzs"
+    else if (w / 2 ^ 24 = 0x1E ∨ w / 2 ^ 24 = 0x9E) ∧ (w / 2 ^ 22) % 4 < 2 ∧ (w / 2 ^ 21) % 2 = 1 ∧
+        (w / 2 ^ 10) % 64 = 0 ∧ (w / 2 ^ 16) % 8 = 1 ∧ (w / 2 ^ 19) % 4 = 3 then some "fcvtzu"
+    else none
+  else none
+
 /-- Every word of `p` is in the proved subset, and its code and stubs are untagged. -/
 def covered (p : Program) : Bool :=
   p.segments.all (fun seg => decide (seg.base + 4 * seg.words.length < 2 ^ 56) &&
