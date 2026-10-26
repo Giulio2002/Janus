@@ -333,7 +333,7 @@ theorem wTypeOK : TypeOK wmem tyA := ⟨by decide, by decide⟩
 
 def okNew : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [tyA]
 
-theorem newobject_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+theorem newobjectLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     NewobjectLiveContract (toy.link impl) A0 4096 R ∧
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
       NewobjectPre 4096 s ∧ StackRoom s 4096 1 ∧
@@ -357,7 +357,7 @@ theorem wst_wcallOK (l : List Nat) (n : Nat) (hn : n ≤ 5) : CallOK (wst l) 409
 
 def okMake : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [tyB, 2, 2]
 
-theorem makeslice_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+theorem makesliceLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     MakesliceLiveContract (toy.link impl) A0 4096 R ∧
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
       MakeslicePre 4096 s ∧ StackRoom s 4096 3 ∧
@@ -373,7 +373,7 @@ theorem makeslice_satisfiable : ∃ (impl : List Segment) (R : RtInv),
 
 def okMalloc : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [16, tyB, 1]
 
-theorem mallocgc_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+theorem mallocgcLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     MallocgcLiveContract (toy.link impl) A0 4096 R ∧
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
       MallocgcPre 4096 s ∧ StackRoom s 4096 3 ∧
@@ -389,7 +389,7 @@ theorem mallocgc_satisfiable : ∃ (impl : List Segment) (R : RtInv),
 
 def okGrow : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [HEAP, 2, 0, 2, tyB]
 
-theorem growslice_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+theorem growsliceLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     GrowsliceLiveContract (toy.link impl) A0 4096 R ∧
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
       GrowslicePre 4096 s ∧ StackRoom s 4096 5 ∧
@@ -793,7 +793,7 @@ theorem memclrHasPointersLive_satisfiable : ∃ (impl : List Segment) (R : RtInv
 def okTMove : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [tyB, CB, CB + 0x100]
 def okTClr : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [tyB, CB]
 
-theorem typedmemmoveLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+theorem typedMemmoveLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     TypedMemmoveLive (toy.link impl) A0 4096 R ∧
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
       Mem.EqPre 4096 3 s ∧
@@ -811,7 +811,7 @@ theorem typedmemmoveLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
   · simp only [calleeStack, wsp_eq, wspn, outside_cons, outside_nil, and_true, wst, wstate]
     simp only [wsp, tyB]; decide
 
-theorem typedmemclrLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+theorem typedMemclrLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     TypedMemclrLive (toy.link impl) A0 4096 R ∧
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
       Mem.EqPre 4096 2 s ∧
