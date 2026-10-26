@@ -77,8 +77,8 @@ theorem decode_jcc32 {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Na
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ p.opsize = false ∧ ∃ v r, readLE 4 rest = some (v, r) ∧
       len = n + 2 + 4 ∧ len ≤ 15 ∧ i = .jcc (o % 16) (sext 32 64 v) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hcs : o = 0x80 ∨ o = 0x81 ∨ o = 0x82 ∨ o = 0x83 ∨ o = 0x84 ∨ o = 0x85 ∨ o = 0x86 ∨ o = 0x87 ∨
       o = 0x88 ∨ o = 0x89 ∨ o = 0x8A ∨ o = 0x8B ∨ o = 0x8C ∨ o = 0x8D ∨ o = 0x8E ∨ o = 0x8F := by omega
   cases hr : readLE 4 rest with

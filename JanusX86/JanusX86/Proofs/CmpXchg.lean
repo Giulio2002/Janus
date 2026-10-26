@@ -224,8 +224,8 @@ theorem decode_cmpxchg {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : Lis
             (regLocOf p.rex.isSome (if o = 0xB0 then 8 else osz p) (regNum p m))) a ((if o = 0xB0 then 8 else osz p) / 8)
           else .cmpxchg (if o = 0xB0 then 8 else osz p) (.mem a)
             (regLocOf p.rex.isSome (if o = 0xB0 then 8 else osz p) (regNum p m))) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hreg : mm.reg = regNum p m := by have := modrm_reg hmd; simpa [regNum] using this
   have hou : (if p.rex.getD 0 / 8 = 1 then 64 else if p.opsize = true then 16 else 32) = osz p := by
     simp [osz, rexW]
@@ -274,8 +274,8 @@ theorem cmpxchg_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X8
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     rcases ho with rfl | rfl <;> simp (config := {decide := true}) [twoByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc

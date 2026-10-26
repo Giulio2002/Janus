@@ -150,8 +150,8 @@ theorem decode_pushpop {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List 
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ p.opsize = false ∧ len = n + 1 ∧ len ≤ 15 ∧
       i = (if o < 0x58 then .push (.loc (.reg (rmNum p o))) else .pop (rmNum p o)) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hcs : o = 0x50 ∨ o = 0x51 ∨ o = 0x52 ∨ o = 0x53 ∨ o = 0x54 ∨ o = 0x55 ∨ o = 0x56 ∨ o = 0x57 ∨
       o = 0x58 ∨ o = 0x59 ∨ o = 0x5A ∨ o = 0x5B ∨ o = 0x5C ∨ o = 0x5D ∨ o = 0x5E ∨ o = 0x5F := by omega
   rcases hcs with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl

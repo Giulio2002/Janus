@@ -93,8 +93,8 @@ theorem decode_movoi {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Na
     p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ ∃ v r, readLE (oiW p o / 8) rest = some (v, r) ∧
       len = n + 1 + oiW p o / 8 ∧ len ≤ 15 ∧
       i = .mov (oiW p o) (regLocOf p.rex.isSome (oiW p o) (o % 8 + 8 * (p.rex.getD 0 % 2))) (.imm v) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hou : (if p.rex.getD 0 / 8 = 1 then 64 else if p.opsize = true then 16 else 32) = osz p := by
     simp [osz, rexW]
   have hk : (if osz p = 64 then 8 else if osz p = 16 then 2 else 4) = osz p / 8 := by

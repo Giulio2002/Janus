@@ -36,8 +36,8 @@ theorem decode_nop90 {bytes : List Nat} {p : Prefixes} {rest : List Nat} {n : Na
     (hpp : parsePrefixes bytes {} 0 = some (p, 0x90 :: rest, n)) (hrb : p.rex.getD 0 % 2 = 0)
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ len = n + 1 ∧ len ≤ 15 ∧ i = .nop := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   simp (config := {decide := true}) only [↓reduceIte, oneByte, hrb, true_and, and_true, finish,
     false_and, and_false, or_false, false_or] at hd
   by_cases hl : 15 < n + 1 <;> by_cases hrp : p.rep = 0xF2 <;> cases hf : p.fs <;> cases hk : p.lock <;>
@@ -98,8 +98,8 @@ theorem decode_nop1f {bytes : List Nat} {p : Prefixes} {m : Nat} {rest : List Na
     (hmd : modrm (p.rex.getD 0) (m :: rest) = some (mm, r3, c))
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ len = n + 2 + c ∧ len ≤ 15 ∧ i = .nop := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   simp (config := {decide := true}) only [↓reduceIte, twoByte, hmd, true_and, and_true,
     false_and, and_false, or_false, false_or] at hd
   by_cases hl : 15 < n + 1 + 1 + c <;> by_cases hrp : p.rep = 0 <;> cases hf : p.fs <;> cases hk : p.lock <;>
@@ -128,8 +128,8 @@ theorem nop1f_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86C
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     simp (config := {decide := true}) [twoByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc

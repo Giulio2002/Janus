@@ -177,8 +177,8 @@ theorem decode_jcc8 {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ p.opsize = false ∧ ∃ v r, readLE 1 rest = some (v, r) ∧
       len = n + 2 ∧ len ≤ 15 ∧ i = .jcc (o % 16) (sext 8 64 v) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hcs : o = 0x70 ∨ o = 0x71 ∨ o = 0x72 ∨ o = 0x73 ∨ o = 0x74 ∨ o = 0x75 ∨ o = 0x76 ∨ o = 0x77 ∨
       o = 0x78 ∨ o = 0x79 ∨ o = 0x7A ∨ o = 0x7B ∨ o = 0x7C ∨ o = 0x7D ∨ o = 0x7E ∨ o = 0x7F := by omega
   cases hr : readLE 1 rest with
@@ -367,8 +367,8 @@ theorem decode_jmp {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat}
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ p.opsize = false ∧ ∃ v r, readLE k rest = some (v, r) ∧
       len = n + 1 + k ∧ len ≤ 15 ∧ i = .jmp (sext (8 * k) 64 v) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   cases hr : readLE k rest with
   | none =>
     exfalso

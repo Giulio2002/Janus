@@ -154,8 +154,8 @@ theorem decode_ge {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List Nat
           | .r k => regLocOf p.rex.isSome (if o % 2 = 0 then 8 else osz p) k
           | .m a => .mem (if p.fs then { a with fs := true } else a))) ∧
       (∀ k, mm.rm = .r k → p.fs = false) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hno : ¬ (o = 0x0F) := by omega
   have hc1 : o < 0x40 ∧ o % 8 < 6 := ⟨ho, by omega⟩
   have hf4 : ¬ (o % 8 = 4) := by omega
@@ -211,8 +211,8 @@ theorem alu_ge_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     have hno : ¬ (o = 0x0F) := by omega
     have hc1 : o < 0x40 ∧ o % 8 < 6 := ⟨ho, by omega⟩
     simp [hno, oneByte, hc1, show ¬ (o % 8 = 4) by omega, show ¬ (o % 8 = 5) by omega, hmd] at hd
