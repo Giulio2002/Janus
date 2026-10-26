@@ -418,6 +418,19 @@ def dfsc (syn : Nat) : Nat := syn % 64
 def isAlignmentDfsc (d : Nat) : Bool := d == 0x21
 def isTranslationOrPermission (d : Nat) : Bool := d / 4 == 1 || d / 4 == 2 || d / 4 == 3 || d == 0
 
+/-- The implemented FPSR bits: N Z C V (31:28), QC (27), IDC (7), IXC UFC OFC DZC IOC (4:0).
+The others are RES0. Sail stores whatever `MSR FPSR` writes in the 64-bit register (it does not
+model RES0 fields), while an implementation may make them RAZ/WI, as Janus does; so FPSR is
+compared on the implemented bits. -/
+def fpsrImpl : Nat := 0xF800009F
+
+/-- `UDF #imm` (permanently UNDEFINED; agent/syscall decodes it as a trap with SIGILL, 4):
+the ASL's UNDEFINED is the same outcome. Matched on the fault's `repr` so that the check also
+builds against a Janus without that constructor. -/
+def isUdfTrap {α : Type} [Repr α] (f : α) : Bool :=
+  let r := (repr f).pretty
+  r.takeWhile (· != ' ') == "Janus.Arm64.Fault.trap" && (r.splitOn " ").getLast? == some "4"
+
 open Janus.Arm64 in
 def compare (dczid : Nat) (c : Case) (asl : AslResult) : Verdict :=
   match Janus.Arm64.step c.word (janusInit dczid c), asl with
@@ -426,6 +439,8 @@ def compare (dczid : Nat) (c : Case) (asl : AslResult) : Verdict :=
   | .error (.undecodable _ _), .error e => .gap s!"janus-undecodable/asl-error:{e}"
   | .error (.undecodable _ _), _ => .gap "janus-undecodable"
   | _, .impdef s => .mismatch s!"janus decodes, ASL: {s}"
+  | .error f, .undefined =>
+    if isUdfTrap f then .agree "udf-undefined" else .mismatch "janus decodes an UNDEFINED encoding"
   | _, .undefined => .mismatch "janus decodes an UNDEFINED encoding"
   | _, .unpredictable => .mismatch "janus decodes a (CONSTRAINED) UNPREDICTABLE case"
   | _, .other s => .mismatch s!"ASL: {s}"
@@ -442,7 +457,8 @@ def compare (dczid : Nat) (c : Case) (asl : AslResult) : Verdict :=
     else if jmem != mem then .mismatch s!"memory: janus {jmem} asl {mem}"
     else if (List.range 32).map (fun i => (s.vregs i).toNat) != vs.toList then
       .mismatch s!"V: janus {(List.range 32).map fun i => hex (s.vregs i).toNat} asl {vs.toList.map hex}"
-    else if s.fpsr.toNat ≠ fpsr then .mismatch s!"FPSR: janus {hex s.fpsr.toNat} asl {hex fpsr}"
+    else if s.fpsr.toNat ≠ fpsr &&& fpsrImpl then
+      .mismatch s!"FPSR: janus {hex s.fpsr.toNat} asl {hex fpsr} (implemented bits {hex (fpsr &&& fpsrImpl)})"
     else if !stray.isEmpty then .mismatch s!"ASL wrote outside the data buffer: {stray.take 4 |>.map hex}"
     else .agree "ok"
   | .ok _, .exception ty syn va => .mismatch s!"janus completes, ASL takes {excName ty} (ISS {hex syn}, va {hex va})"

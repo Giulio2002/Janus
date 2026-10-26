@@ -63,11 +63,45 @@ theorem run_CreateAccDescExLDST {s : SState} (h : LinuxEL0Config s) (ar tc : Boo
     undefined_AccessType, undefined_SecurityState, undefined_MemAtomicOp, undefined_CacheOp, undefined_CacheOpScope,
     undefined_CacheType, undefined_VARange, undefined_MPAMinfo, undefined_PARTIDspaceType, EL0]
 
+/-- The local exclusive monitor's state after a load-exclusive of `n` bytes at `va`
+(janus_splice.sail: `MarkExclusiveLocal`; the address is the identity translation). -/
+def monSet (s : SState) (va : BitVec 64) (n : Int) : SState :=
+  (((s.set .__ExclusiveMonitorSet true).set .__janus_excl_valid true).set .__janus_excl_addr (va.setWidth 56)).set
+    .__janus_excl_size n
+
+/-- The registers a load-exclusive writes besides the destination. -/
+def monRegs : List Register := [.__ExclusiveMonitorSet, .__janus_excl_valid, .__janus_excl_addr, .__janus_excl_size]
+
+theorem monSet_get (s : SState) (va : BitVec 64) (n : Int) (r : Register) (hr : r ∉ monRegs) :
+    (monSet s va n).regs.get? r = s.regs.get? r := by
+  have h1 : r ≠ .__ExclusiveMonitorSet := fun e => hr (e ▸ by decide)
+  have h2 : r ≠ .__janus_excl_valid := fun e => hr (e ▸ by decide)
+  have h3 : r ≠ .__janus_excl_addr := fun e => hr (e ▸ by decide)
+  have h4 : r ≠ .__janus_excl_size := fun e => hr (e ▸ by decide)
+  simp only [monSet]
+  rw [get?_set_ne _ _ (Ne.symm h4), get?_set_ne _ _ (Ne.symm h3), get?_set_ne _ _ (Ne.symm h2),
+    get?_set_ne _ _ (Ne.symm h1)]
+
+theorem cfg_not_mon : ∀ r ∈ cfgRegs, r ∉ monRegs := by decide
+
+theorem mon_entry (r : Register) (h : r ∉ stepEntryRegs) : r ∉ monRegs := fun hm =>
+  h (by simp only [monRegs, List.mem_cons, List.not_mem_nil, or_false] at hm
+        rcases hm with rfl | rfl | rfl | rfl <;> decide)
+
+theorem monSet_cfg {s : SState} (hc : LinuxEL0Config s) (va : BitVec 64) (n : Int) : LinuxEL0Config (monSet s va n) :=
+  hc.of_eq fun r hr => monSet_get s va n r (cfg_not_mon r hr)
+
+theorem monSet_rel {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (va : BitVec 64) (n : Int) :
+    Rel js (monSet s va n) :=
+  (((h.set_other _ _ rfl (by decide) (by decide) (by decide)).set_other _ _ rfl (by decide) (by decide)
+    (by decide)).set_other _ _ rfl (by decide) (by decide) (by decide)).set_other _ _ rfl (by decide) (by decide)
+    (by decide)
+
 theorem run_SetExclusiveMonitors {s : SState} (hc : LinuxEL0Config s) (va : BitVec 64) (n : Int) (hn : 0 < n)
     (hal : va.toNat % n.toNat = 0)
     (hT : ∃ d, (AArch64_TranslateAddress va (exclAcc false false) true n).run
       (s.set .__ExclusiveMonitorSet true) = .ok d (s.set .__ExclusiveMonitorSet true) ∧ TransOK d va) :
-    (AArch64_SetExclusiveMonitors va n).run s = .ok () (s.set .__ExclusiveMonitorSet true) := by
+    (AArch64_SetExclusiveMonitors va n).run s = .ok () (monSet s va n) := by
   obtain ⟨d, hd, hok⟩ := hT
   have hc1 : LinuxEL0Config (s.set .__ExclusiveMonitorSet true) :=
     hc.of_eq fun r hr => get?_set_ne _ _ (fun e => by subst e; revert hr; decide)
@@ -76,11 +110,11 @@ theorem run_SetExclusiveMonitors {s : SState} (hc : LinuxEL0Config s) (va : BitV
   have hcr := run_CreateAccDescExLDST hc1 false false
   unfold AArch64_SetExclusiveMonitors
   cfg_simp [hcr, hal', show ({ exclAcc false false with tagchecked := false } : AccessDescriptor) = exclAcc false false
-    from rfl, hd, IsFault, hok.fault]
+    from rfl, hd, IsFault, hok.fault, MarkExclusiveLocal, MarkExclusiveGlobal, AArch64_MarkExclusiveVA, ProcessorID,
+    hok.pa, monSet]
 
-/-- `s'` differs from `s` at most in the GPRs, SP and the exclusive-monitor flag. -/
 def GFrameX (s s' : SState) : Prop :=
-  ∀ r, isGprReg r = false → r ≠ .SP_EL0 → r ≠ .__ExclusiveMonitorSet → s'.regs.get? r = s.regs.get? r
+  ∀ r, isGprReg r = false → r ≠ .SP_EL0 → r ∉ monRegs → s'.regs.get? r = s.regs.get? r
 
 set_option maxHeartbeats 16000000 in
 theorem run_exec_ldx {js js1 : Janus.Arm64.State} {s0 s : SState} (h : Rel js s) (hm : MemRel js.mem s)
@@ -97,17 +131,21 @@ theorem run_exec_ldx {js js1 : Janus.Arm64.State} {s0 s : SState} (h : Rel js s)
   have hreg := accessible_bytes hacc
   have hr0 : InRegion js.mem base.toNat false := by have := hreg 0 (by omega); rwa [Nat.add_zero] at this
   -- the monitor write
-  let s1 := s.set .__ExclusiveMonitorSet true
+  let s1 := monSet s base (Int.ediv (ds : Int) 8)
   have hf1 : TFrame js.mem s0 s1 :=
+    ⟨fun r h1 h2 h3 => by
+      rw [monSet_get _ _ _ r (mon_entry r h3)]
+      exact hf.regs r h1 h2 h3, hf.mem, hf.cycle, hf.out⟩
+  have hc1 : LinuxEL0Config s1 := monSet_cfg hc _ _
+  have hm1 : MemRel js.mem s1 := hm
+  have h1 : Rel js s1 := monSet_rel h _ _
+  have hB1 := run_base h1 hc1 hn hb
+  have hf0 : TFrame js.mem s0 (s.set .__ExclusiveMonitorSet true) :=
     ⟨fun r h1 h2 h3 => by rw [get?_set_ne _ _ (fun e => by subst e; exact h3 (by decide))]; exact hf.regs r h1 h2 h3,
       hf.mem, hf.cycle, hf.out⟩
-  have hc1 : LinuxEL0Config s1 := hc.of_eq fun r hr => get?_set_ne _ _ (fun e => by subst e; revert hr; decide)
-  have hm1 : MemRel js.mem s1 := hm
-  have h1 : Rel js s1 := h.set_other _ _ rfl (by decide) (by decide) (by decide)
-  have hB1 := run_base h1 hc1 hn hb
   have hSM := run_SetExclusiveMonitors hc base (Int.ediv (ds : Int) 8) (by have := hsz; omega)
     (by rw [hdsn]; exact hal)
-    (hU.trans_ord s1 hf1 base false true _ _ (Or.inr (Or.inr (Or.inl ⟨false, rfl⟩))) hr0)
+    (hU.trans_ord _ hf0 base false true _ _ (Or.inr (Or.inr (Or.inl ⟨false, rfl⟩))) hr0)
   obtain ⟨v, hv, hvn⟩ := run_Mem_read_al hc1 hm1 (accGood_excl false ar) base (Int.ediv (ds : Int) 8).toNat
     (by rw [hdsn]; exact hsz) (by rw [hdsn]; exact hacc) (by rw [hdsn]; exact hal)
     (fun al => hU.trans_ord s1 hf1 base false al _ _ (Or.inr (Or.inr (Or.inl ⟨ar, rfl⟩))) hr0) (hU.nodev _ hr0) tc
@@ -128,7 +166,7 @@ theorem run_exec_ldx {js js1 : Janus.Arm64.State} {s0 s : SState} (h : Rel js s)
   · unfold execute_aarch64_instrs_memory_exclusive_single
     simp only [s1] at hv hx2
     cfg_simp [run_readReg hp, he, EL0, hcr, hB, hSM, hB1, hv, has, has3, hx2, run_readReg hc2.speInFlight]
-  · rw [hst2.regs r g1 g2]; exact get?_set_ne _ _ (Ne.symm g3)
+  · rw [hst2.regs r g1 g2]; exact monSet_get s base _ r g3
 
 theorem step_agree_memX {w : Nat} {js js1 : Janus.Arm64.State} {s : SState} (h : Rel js s) (hc : LinuxEL0Config s)
     {k : Int} {s2 : SState}
@@ -145,7 +183,7 @@ theorem step_agree_memX {w : Nat} {js js1 : Janus.Arm64.State} {s : SState} (h :
     rw [show js1.next = { js1 with pc := js.pc + 4 } by simp [Janus.Arm64.State.next, hpc]]; exact hr.setPC _, ?_⟩
   refine hc.of_eq fun r hr => ?_
   rw [get?_set_ne _ _ (fun e => by subst e; revert hr; decide), hg r (cfgRegs_not_gpr r hr)
-    (fun e => by subst e; revert hr; decide) (fun e => by subst e; revert hr; decide),
+    (fun e => by subst e; revert hr; decide) (cfg_not_mon r hr),
     entry_get s w k r (cfg_not_entry r hr)]
 
 theorem run_dec_ldx_0_0 (Rt Rn Rt2 Rs : BitVec 5) (st : SState) :
