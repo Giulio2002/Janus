@@ -58,6 +58,9 @@ case "$1" in
   DeferOrder) printf '%s\n' --contract runtime.gopanic --contract runtime.deferreturn ;;
   NestedPanic) printf '%s\n' --contract runtime.gopanic --contract runtime.deferreturn \
       --targets example.com/basic.NestedPanic.func1 --targets example.com/basic.NestedPanic.func2 ;;
+  NestedRecover) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
+      --contract runtime.deferreturn --targets example.com/basic.NestedRecover.func1 \
+      --targets example.com/basic.NestedRecover.func2 ;;
   DeferMix) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.gopanic \
       --contract runtime.deferreturn --targets example.com/basic.accAdd1 \
       --targets example.com/basic.accAdd2 ;;
