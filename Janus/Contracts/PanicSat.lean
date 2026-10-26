@@ -777,4 +777,36 @@ theorem seg_fin (c : State) (mode : DeferMode) (bound lr x29 : Nat) (hpc : c.pc 
       simp only [modeCode] at hmode; simp only [reduceIte]
       janus_run [hph, hnd', hmode, hlr, hx29, hmul, hmul2]
 
+set_option maxHeartbeats 0 in
+/-- `RP` after a deferred call (or a nested panic) with nothing recovered: back to `LH`, `X18`
+reloaded. -/
+theorem seg_rp_lh (u : State) (x18 : Nat) (hpc : u.pc = BitVec.ofNat 64 RPa)
+    (hal : u.sp.toNat % 16 = 0) (hsp : u.sp.toNat + 104 ≤ 2 ^ 48)
+    (hacc : u.mem.accessible u.sp.toNat 96 true = true) (hB : u.mem.accessible B 0x1000 true = true)
+    (h18 : u.mem.readLE (u.sp.toNat + 56) 8 = x18)
+    (hcase : u.mem.readLE (u.sp.toNat + 24) 8 ≠ 0 ∨
+      (u.mem.readLE (u.sp.toNat + 24) 8 = 0 ∧ ∃ k, npan u.mem = k + 1 ∧ k < 8 ∧
+        rd u.mem (panAt k + 24) / 2 % 2 = 0)) :
+    ReachesRet qE (BitVec.ofNat 64 eLH) u (fun c => c.mem = u.mem ∧ c.sp = u.sp ∧
+      c.regs 28 = u.regs 28 ∧ c.regs 18 = BitVec.ofNat 64 x18) := by
+  have hB' : u.mem.accessible 65536 4096 true = true := hB
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := u
+  dsimp only at *
+  simp only [RPa, eLH, E, Nat.reduceAdd] at hpc ⊢
+  subst hpc
+  rcases hcase with hm | ⟨hm, k, hk, hk8, hf⟩
+  · janus_run [h18]
+  · have hk' : cm.readLE 65536 8 = k + 1 := hk
+    have hmul : (BitVec.ofNat 64 (k + 1) - 1#64) = BitVec.ofNat 64 k := by
+      apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
+    have hsh : (BitVec.ofNat 64 k <<< 5).toNat = 32 * k := by
+      rw [BitVec.toNat_shiftLeft, BitVec.toNat_ofNat]; rw [Nat.mod_eq_of_lt (by omega)]
+      rw [Nat.shiftLeft_eq]; omega
+    have hf' : (BitVec.ofNat 64 (cm.readLE (65792 + (k * 32 + 24)) 8)).getLsbD 1 = false := by
+      have : cm.readLE (65792 + (k * 32 + 24)) 8 / 2 % 2 = 0 := by
+        rw [show 65792 + (k * 32 + 24) = 65792 + 32 * k + 24 by omega]; exact hf
+      simp only [BitVec.getLsbD_ofNat, Nat.testBit, Nat.shiftRight_eq_div_pow]
+      simp; omega
+    janus_run [h18, hm, hk', hmul, hsh, hf']
+
 end Janus.Contracts.PanicSat
