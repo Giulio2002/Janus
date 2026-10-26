@@ -1,6 +1,6 @@
 import JanusASL.Proofs.LdStOrd
 
-/-! # Proved: LDAPR (RCpc), LDXR/LDAXR (exclusive loads; the monitor is not modelled by Janus) -/
+/-! # Proved: LDAPR (RCpc), LDXR/LDAXR (exclusive loads; Janus marks its monitor `State.excl`, which `Rel` does not relate) -/
 
 set_option linter.unusedSimpArgs false
 
@@ -259,7 +259,7 @@ theorem decode_ldExcl {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 24) % 64 = 8) (
 set_option maxHeartbeats 16000000 in
 /-- **LDXR/LDAXR (and the B/H forms)**: for every word `size 001000 0 1 0 11111 o0 11111 Rn Rt` and every
 related pair of states under `LinuxEL0Config` and `UserMapped`, whenever Janus steps the word (an
-aligned load; Janus does not model the exclusive monitor, which the ASL sets) the generated ASL
+aligned load; Janus' monitor mark `State.excl` is not part of `Rel`, and the ASL sets its own) the generated ASL
 step completes in a related state, with Janus' memory related to the ASL's. -/
 theorem ldExcl_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 24) % 64 = 8) (h23 : (w / 2 ^ 23) % 2 = 0)
     (h22 : (w / 2 ^ 22) % 2 = 1) (h21 : (w / 2 ^ 21) % 2 = 0) (h16 : (w / 2 ^ 16) % 32 = 31)
@@ -276,6 +276,14 @@ theorem ldExcl_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 24) % 64 = 8) (h
   have ht32 : Janus.Arm64.bits w 4 0 < 32 := by simp only [bits_def]; omega
   have hb3130 : Janus.Arm64.bits w 31 30 = (w / 2 ^ 30) % 4 := by simp only [bits_def]
   rw [hb3130] at hj
+  -- Janus' load-exclusive is the ordered load plus the monitor mark, which `Rel` does not relate
+  have hj' := Janus.Arm64.execLdExcl_ok hj
+  clear hj
+  obtain ⟨js0, mk, hj, rfl⟩ := hj'
+  suffices H : ∃ s', (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js0 s' ∧
+      MemRel js0.mem s' ∧ LinuxEL0Config s' by
+    obtain ⟨s', a, b, c, d⟩ := H
+    exact ⟨s', a, ⟨b.gpr, b.sp, b.pc, b.pstate⟩, c, d⟩
   rcases (show (w / 2 ^ 15) % 2 = 0 ∨ (w / 2 ^ 15) % 2 = 1 by omega) with ho | ho <;>
   rcases (show (w / 2 ^ 30) % 4 = 0 ∨ (w / 2 ^ 30) % 4 = 1 ∨ (w / 2 ^ 30) % 4 = 2 ∨ (w / 2 ^ 30) % 4 = 3 by omega)
     with e | e | e | e <;> rw [e] at hj

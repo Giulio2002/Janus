@@ -49,7 +49,39 @@ func faultName(h *L.HW) string {
 	return fmt.Sprintf("sig%d", h.Sig)
 }
 
+// compareCase compares one case. A nondeterministic model result (m.Alts, the outcomes of a
+// store-exclusive under every enumerated environment choice) agrees when the hardware result
+// is any one of the model's outcomes: the model claims only that the machine does one of them.
+// Otherwise the verdict is that of the first outcome (the all-fail stream), except that a
+// hardware success no outcome reproduces is a MISMATCH even when the first outcome faulted.
 func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
+	if m == nil || len(m.Alts) == 0 {
+		return compareOne(c, h, m)
+	}
+	first := compareOne(c, h, m)
+	if first.Verdict == Agree || first.Verdict == Unobserved {
+		first.Kind = "nondet/" + first.Kind
+		return first
+	}
+	worst := first
+	for i := range m.Alts {
+		a := m.Alts[i]
+		a.ID = m.ID
+		v := compareOne(c, h, &a)
+		if v.Verdict == Agree {
+			v.Kind = fmt.Sprintf("nondet/alt%d/%s", i+1, v.Kind)
+			return v
+		}
+		if v.Verdict == Mismatch && worst.Verdict != Mismatch {
+			worst = v
+		}
+	}
+	worst.Kind = "nondet/" + worst.Kind
+	worst.Diffs = append(worst.Diffs, fmt.Sprintf("none of the model's %d outcomes (%d choices) matches", len(m.Alts)+1, m.Choices))
+	return worst
+}
+
+func compareOne(c *L.Case, h *L.HW, m *L.Model) Verdict {
 	v := Verdict{ID: c.ID, Class: c.Class, Word: c.Word}
 	if h == nil || (h.Status != "ok" && h.Status != "fault" && h.Status != "selfloop") {
 		v.Verdict = Unobserved

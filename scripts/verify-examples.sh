@@ -81,11 +81,11 @@ verify_one() {
   # reached); up to two verified at once (scripts/lib/theorems.sh).
   local -a thms=(Proof.correctness)
   local thm i st
-  for thm in $(grep -oE '^theorem (exact|saturation)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
+  for thm in $(grep -oE '^theorem (exact|saturation|anyCPU)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
   if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
   st="$(mktemp -d)"
   start=$(date +%s.%N)
-  verify_theorems "$out" "examples/proofs/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"}
+  verify_theorems "$out" "examples/proofs/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"} || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)
   cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
   if [ "$(cat "$st/0.rc")" = 0 ]; then

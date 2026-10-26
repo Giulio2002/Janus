@@ -477,8 +477,14 @@ precondition.
   `janus_eval_nat h : c` evaluates such a closed constant and adds `h : c = <numeral>`, proved by
   `decide`. Rewrite with it before `janus_run`, so that `omega` sees the same literal the
   executor computes.
-* **LSE vs LL/SC.** Preconditions select the LSE path (`readLE hasAtomics 1 % 2 = 1`). The
-  store-exclusive fallback is undecodable, so it must be unreachable from `pre`.
+* **LSE vs LL/SC.** `correctness` preconditions select the LSE path (`readLE hasAtomics 1 % 2 =
+  1`). The LL/SC fallback is modelled too: a store-exclusive's outcome is `s.exclPass`, which the
+  theorem quantifies over, so a retry loop is proved by induction on the index of the first
+  passing attempt (`AtomicAdd.loop`, `AtomicMax.loop`: case-split on `S.exclPass 0`, pass the
+  equation to `janus_run [h]` so the branch disappears, and for a failure run `until` the loop
+  head and apply the hypothesis to the shifted stream). The theorem then assumes
+  `∃ k, s.exclPass k = true` (`anyCPU`): without an eventual pass the loop does not terminate
+  (docs/SOUNDNESS.md).
 * **Implementation-defined parameters.** `ClearWords` holds for every `State.dczid`. It splits
   on the 32 values with one theorem per value (`CaseStmt k`), so that Lean elaborates them in
   parallel, and it combines them with `janus_cases`. Long hardware loops (32 `DC ZVA`s of 4-byte

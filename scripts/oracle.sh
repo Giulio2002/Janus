@@ -21,7 +21,9 @@
 # class, default 4000 for full / 1500 for quick), K (states per harvested word, default 3),
 # PER_CLASS (harvested distinct words per class, default 8000), SEED (default 1), FP_K (states
 # per generated fp.* word, default 4), FP_HARVEST_K (states per harvested fp.* word in fp mode, 40),
-# QEMU (default /usr/bin/qemu-aarch64; set QEMU= to run natively on an arm64 Linux host).
+# QEMU (default /usr/bin/qemu-aarch64; set QEMU= to run natively on an arm64 Linux host),
+# EXCL_SEQ (generated exclusive-monitor blocks, default 5·N), EXCL_LOOPS_K (states per harvested
+# LL/SC retry loop, default 8).
 # KEEP: what the run leaves in OUT (scripts/lib/artifacts.sh). Default: summary.md, repro.*,
 # mismatches.jsonl (MISMATCH verdicts, if any) and cases/hw/model/verdicts.jsonl zstd-compressed
 # (.zst); gen.jsonl and harvest.jsonl (whose union is cases.jsonl) are removed. KEEP=zst
@@ -94,7 +96,8 @@ elif [ "$mode" = neon ]; then
 elif [ "$mode" = crypto ]; then
   "$bin/oracle" gen -dczid "$DCZID" -n "$N" -only "$CRYPTO_CLASSES" -seed "$SEED" -o "$OUT/gen.jsonl"
 else
-  "$bin/oracle" gen -dczid "$DCZID" -n "$N" -group "$((N * 2))" -seed "$SEED" -o "$OUT/gen.jsonl"
+  # gen/seq.excl: exclusive-monitor blocks in sequence mode (EXCL_SEQ, default 5 per class word)
+  "$bin/oracle" gen -dczid "$DCZID" -n "$N" -group "$((N * 2))" -excl-seq "${EXCL_SEQ:-$((N * 5))}" -seed "$SEED" -o "$OUT/gen.jsonl"
 fi
 cases+=("$OUT/gen.jsonl")
 
@@ -106,7 +109,7 @@ if [ "$mode" = full ] || [ "$mode" = fp ] || [ "$mode" = neon ] || [ "$mode" = c
   # chacha20 (ZIP, via crypto/tls) assembly kernels.
   (cd "$root/oracle" &&
     CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$corpus/bigprog" ./harvest/bigprog &&
-    for p in math math/big strconv sort crypto/sha256 bytes strings sync/atomic runtime \
+    for p in math math/big strconv sort crypto/sha256 bytes strings sync/atomic sync runtime \
         crypto/sha1 crypto/sha512 crypto/sha3 crypto/cipher hash/crc32 crypto/tls; do
       CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o "$corpus/${p//\//_}.test" "$p"
     done)
@@ -123,6 +126,8 @@ if [ "$mode" = full ] || [ "$mode" = fp ] || [ "$mode" = neon ] || [ "$mode" = c
   [ "$mode" = fp ] && hargs=(-only '^fp\.' -per-class 0 -fp-k "${FP_HARVEST_K:-40}")
   [ "$mode" = neon ] && hargs=(-only '^(simd|vls)\.' -per-class 0)
   [ "$mode" = crypto ] && hargs=(-only "$CRYPTO_CLASSES" -per-class 0)
+  # harvest/seq.excl: the binaries' LL/SC retry loops (full mode)
+  [ "$mode" = full ] && hargs=(-excl-loops "${EXCL_LOOPS_K:-8}")
   hk="$K"
   [ "$mode" = crypto ] && hk="${CRYPTO_HARVEST_K:-40}"
   "$bin/oracle" harvest -dczid "$DCZID" -k "$hk" -per-class "$PER_CLASS" "${hargs[@]}" -seed "$((SEED + 1))" -o "$OUT/harvest.jsonl" "$corpus"/* "${extra[@]}"

@@ -69,11 +69,13 @@ theorem rtReturn_of (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (
     (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29)
     (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr)
     (hfs : s'.fpsr = s.fpsr) (hfr : MemFrame s.mem s'.mem (rtWrites R s nargs ++ extra))
-    (henv : R.Env s'.mem (s.regs 28)) (hp : P s'.regs s'.mem) : RTReturn R nargs extra s s' P := by
+    (henv : R.Env s'.mem (s.regs 28)) (hp : P s'.regs s'.mem)
+    (hex : s'.excl = s.excl := by first | rfl | simp_all)
+    (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) : RTReturn R nargs extra s s' P := by
   refine ⟨s'.regs, s'.vregs, s'.flags, s'.mem, ?_, hfr, henv, hp⟩
-  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
-  simp only at hsp hpc hdz htp hfc hfs h18 h28 h29 ⊢
-  subst hsp hpc hdz htp hfc hfs
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
+  simp only at hsp hpc hdz htp hfc hfs hex hep h18 h28 h29 ⊢
+  subst hsp hpc hdz htp hfc hfs hex hep
   congr
   funext i
   simp only [Map.keepABI]

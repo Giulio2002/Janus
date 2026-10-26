@@ -87,11 +87,13 @@ theorem hRet_intro {H : HashModel} {d nargs : Nat} {s s' : State} {P : (Nat → 
     (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid)
     (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr)
     (hf : MemFrame s.mem s'.mem (H.priv ++ calleeStack s d nargs)) (he : H.Env s'.mem (s.regs 28))
-    (hp : P s'.regs) : HRet H d nargs s s' P := by
+    (hp : P s'.regs)
+    (hex : s'.excl = s.excl := by first | rfl | simp_all)
+    (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) : HRet H d nargs s s' P := by
   refine ⟨s'.regs, s'.vregs, s'.flags, s'.fpsr, s'.mem, ?_, hf, he, hp⟩
-  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
-  simp only at hsp hpc hdz htp hfc h18 h28 h29 ⊢
-  subst hsp hpc hdz htp hfc
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
+  simp only at hsp hpc hdz htp hfc h18 h28 h29 hex hep ⊢
+  subst hsp hpc hdz htp hfc hex hep
   congr
   funext i
   simp only [Map.keepABI]

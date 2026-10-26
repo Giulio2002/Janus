@@ -46,7 +46,9 @@ def bits(w, hi, lo):
 
 
 def store_exclusive(w):
-    """STXR/STLXR/STXP/STLXP: sail-arm stubs the exclusive monitor (always passes)."""
+    """STXR/STLXR/STXP/STLXP: sail-arm stubs the exclusive monitor (always passes). Janus is run
+    with --monitor-stub against Sail, so its outcomes include the pass; qemu vs Sail differs on
+    every store-exclusive in the Open Access state (qemu fails it, as the Arm ARM requires)."""
     if w & 0x3F000000 != 0x08000000:
         return False
     o2, l, o1 = bits(w, 23, 23), bits(w, 22, 22), bits(w, 21, 21)
@@ -110,9 +112,17 @@ def other_sysreg_read(w):
     return (w & 0xFFF00000) == 0xD5300000 and (w & 0xFFFFFFE0) != 0xD53B00E0
 
 
+def words(c):
+    """The case's words: the single word, or every word of a sequence-mode block."""
+    if c.get("words"):
+        return [int(x, 16) for x in c["words"]]
+    return [int(c["word"], 16)]
+
+
 def tag(cid):
     c = cases[cid]
-    w = int(c["word"], 16)
+    ws = words(c)
+    w = ws[0]
     t = []
     if "!unpredictable" in c.get("class", ""):
         t.append("unpredictable")
@@ -128,9 +138,9 @@ def tag(cid):
         t.append("qemu-process-memory")  # the address is mapped in the qemu runner process
     if s.get("status") in ("ok", "selfloop") and q.get("status") == "fault" and q.get("sig") == 4:
         t.append("qemu-lacks-feature")  # e.g. FEAT_THE (RCW*), FEAT_LRCPC3 (LDIAPP/STILP)
-    if sbo_violation(w):
+    if any(sbo_violation(x) for x in ws):
         t.append("sbo-unpredictable")
-    if store_exclusive(w):
+    if any(store_exclusive(x) for x in ws):
         t.append("sail-monitor-stub")
     if dczid_dependent(w):
         t.append("impdef-dczid")

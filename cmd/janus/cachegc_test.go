@@ -829,3 +829,17 @@ func TestArtifactsLib(t *testing.T) {
 		t.Fatalf("scripts/lib/test-artifacts.sh: %v\n%s", err, out)
 	}
 }
+
+// TestTheoremsLib runs the self-test of scripts/lib/theorems.sh (the example scripts' verify of
+// several theorems of one proof at once): concurrent items do not share copies, and a second run
+// on the same extraction in the same tree fails loudly instead of racing the first.
+func TestTheoremsLib(t *testing.T) {
+	if _, err := exec.LookPath("flock"); err != nil {
+		t.Skip("flock not installed")
+	}
+	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "lib", "test-theorems.sh"))
+	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "all checks passed") {
+		t.Fatalf("scripts/lib/test-theorems.sh: %v\n%s", err, out)
+	}
+}

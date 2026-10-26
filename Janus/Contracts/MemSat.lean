@@ -95,12 +95,14 @@ registers, the flags, `FPSR` and memory replaced: the common part of `EqRet`, `I
 `TRet` and `Hash.HRet`. -/
 theorem ret_eq {s s' : State} (hsp : s'.sp = s.sp) (hpc : s'.pc = s.regs 30)
     (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29)
-    (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr) :
+    (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr)
+    (hex : s'.excl = s.excl := by first | rfl | simp_all)
+    (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
     s' = { s with regs := Map.keepABI s.regs s'.regs, vregs := s'.vregs, flags := s'.flags,
                   fpsr := s'.fpsr, mem := s'.mem, pc := s.regs 30 } := by
-  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
-  simp only at hsp hpc hdz htp hfc h18 h28 h29 ⊢
-  subst hsp hpc hdz htp hfc
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
+  simp only at hsp hpc hdz htp hfc hex hep h18 h28 h29 ⊢
+  subst hsp hpc hdz htp hfc hex hep
   congr
   funext i
   simp only [Map.keepABI]
@@ -119,18 +121,22 @@ structure Keeps (S S' : State) : Prop where
   dczid : S'.dczid = S.dczid
   tpidr : S'.tpidr = S.tpidr
   fpcr : S'.fpcr = S.fpcr
+  excl : S'.excl = S.excl
+  exclPass : S'.exclPass = S.exclPass
 
 theorem Keeps.ret_eq {S S' : State} (h : Keeps S S') :
     S' = { S with regs := Map.keepABI S.regs S'.regs, vregs := S'.vregs, flags := S'.flags,
                   fpsr := S'.fpsr, mem := S'.mem, pc := S.regs 30 } :=
-  MemSat.ret_eq h.sp h.pc h.r18 h.r28 h.r29 h.dczid h.tpidr h.fpcr
+  MemSat.ret_eq h.sp h.pc h.r18 h.r28 h.r29 h.dczid h.tpidr h.fpcr h.excl h.exclPass
 
 /-- `Keeps` through a state `T` that agrees with `S` on the kept fields and `X30`. -/
 theorem Keeps.trans {S T S' : State} (h : Keeps T S') (hsp : T.sp = S.sp) (h30 : T.regs 30 = S.regs 30)
     (h18 : T.regs 18 = S.regs 18) (h28 : T.regs 28 = S.regs 28) (h29 : T.regs 29 = S.regs 29)
-    (hdz : T.dczid = S.dczid) (htp : T.tpidr = S.tpidr) (hfc : T.fpcr = S.fpcr) : Keeps S S' :=
+    (hdz : T.dczid = S.dczid) (htp : T.tpidr = S.tpidr) (hfc : T.fpcr = S.fpcr)
+    (hex : T.excl = S.excl := by first | rfl | simp_all)
+    (hep : T.exclPass = S.exclPass := by first | rfl | simp_all) : Keeps S S' :=
   ⟨h.sp.trans hsp, h.pc.trans h30, h.r18.trans h18, h.r28.trans h28, h.r29.trans h29,
-    h.dczid.trans hdz, h.tpidr.trans htp, h.fpcr.trans hfc⟩
+    h.dczid.trans hdz, h.tpidr.trans htp, h.fpcr.trans hfc, h.excl.trans hex, h.exclPass.trans hep⟩
 
 /-- `EqRet` from `Keeps`. -/
 theorem eqRet_of {d nargs : Nat} {s s' : State} {P : (Nat → W64) → Prop} (hk : Keeps s s')
@@ -249,7 +255,7 @@ theorem eqCore_sum : Summary (coreProg eqCore) HEAD EqCorePre EqCorePost := by
   | zero =>
     have h2 : S.regs 2 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using hn)
     janus_run
-    refine ⟨⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩, rfl, ?_⟩
+    refine ⟨⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩, rfl, ?_⟩
     simp [BoolRes, setReg, hn]
   | succ n ih =>
     have ha1 := Memory.accessible_mono _ ha (Nat.le_refl _)
@@ -277,7 +283,7 @@ theorem eqCore_sum : Summary (coreProg eqCore) HEAD EqCorePre EqCorePost := by
         simpa using hr
     · rename_i _ hne _
       rw [byte_w32, byte_w32] at hne
-      refine ⟨⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩, rfl, ?_⟩
+      refine ⟨⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩, rfl, ?_⟩
       rw [hn, readLE_succ_beq]
       simp [BoolRes, setReg, beq_false_of_ne hne]
 
@@ -425,7 +431,7 @@ theorem strequal_impl (d : Nat) : Strequal (toy.link (at0 strequalCode)) A0 d :=
       simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, toNat_ofNat_readLE8] at hr
       simpa [strEq, strPtr, strLen, hbr] using hr
   · rename_i hne _
-    refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+    refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
       (MemFrame.refl _ _) ?_
     simp [BoolRes, setReg, strEq, strLen, beq_false_of_ne hne]
 
@@ -463,7 +469,7 @@ theorem f32equal_impl (d : Nat) : Fequal (toy.link (at0 f32equalCode)) A0 d bina
   have hx : s.mem.readLE (s.regs 0).toNat 4 < 4294967296 := Memory.readLE_lt _ _ _
   have hy : s.mem.readLE (s.regs 1).toNat 4 < 4294967296 := Memory.readLE_lt _ _ _
   janus_run [hf]
-  refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm⟩
+  refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm, rfl, rfl⟩
     (MemFrame.refl _ _) ?_
   simp only [BoolRes, setReg_apply, reduceIte, Nat.mod_eq_of_lt hx, Nat.mod_eq_of_lt hy,
     Nat.mod_eq_of_lt (Nat.lt_trans hx (by decide : 4294967296 < 340282366920938463463374607431768211456)),
@@ -476,7 +482,7 @@ theorem f64equal_impl (d : Nat) : Fequal (toy.link (at0 f64equalCode)) A0 d bina
   have hx : s.mem.readLE (s.regs 0).toNat 8 < 18446744073709551616 := Memory.readLE_lt _ _ _
   have hy : s.mem.readLE (s.regs 1).toNat 8 < 18446744073709551616 := Memory.readLE_lt _ _ _
   janus_run [hf]
-  refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm⟩
+  refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm, rfl, rfl⟩
     (MemFrame.refl _ _) ?_
   simp only [BoolRes, setReg_apply, reduceIte,
     Nat.mod_eq_of_lt (Nat.lt_trans hx (by decide : 18446744073709551616 < 340282366920938463463374607431768211456)),
@@ -513,7 +519,7 @@ theorem c64equal_impl (d : Nat) : Cequal (toy.link (at0 c64equalCode)) A0 d bina
   have hb4 := Memory.accessible_mono _ hb2 (Nat.le_refl _) (by omega : (s.regs 1).toNat + 4 ≤ (s.regs 1).toNat + 2 * 4)
   have hb4' := Memory.accessible_mono _ hb2 (by omega : (s.regs 1).toNat ≤ (s.regs 1).toNat + 4) (by omega : (s.regs 1).toNat + 4 + 4 ≤ (s.regs 1).toNat + 2 * 4)
   janus_run [hf]
-  refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm⟩
+  refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm, rfl, rfl⟩
     (MemFrame.refl _ _) ?_
   simp only [BoolRes, setReg_apply, reduceIte, rd4]
   cases feq binary32 (s.mem.readLE (s.regs 0).toNat 4) (s.mem.readLE (s.regs 1).toNat 4) <;>
@@ -528,7 +534,7 @@ theorem c128equal_impl (d : Nat) : Cequal (toy.link (at0 c128equalCode)) A0 d bi
   have hb4 := Memory.accessible_mono _ hb2 (Nat.le_refl _) (by omega : (s.regs 1).toNat + 8 ≤ (s.regs 1).toNat + 2 * 8)
   have hb4' := Memory.accessible_mono _ hb2 (by omega : (s.regs 1).toNat ≤ (s.regs 1).toNat + 8) (by omega : (s.regs 1).toNat + 8 + 8 ≤ (s.regs 1).toNat + 2 * 8)
   janus_run [hf]
-  refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm⟩
+  refine eqRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, hf.symm, rfl, rfl⟩
     (MemFrame.refl _ _) ?_
   simp only [BoolRes, setReg_apply, reduceIte, Nat.reduceEqDiff, rd8]
   cases feq binary64 (s.mem.readLE (s.regs 0).toNat 8) (s.mem.readLE (s.regs 1).toNat 8) <;>
@@ -598,17 +604,17 @@ theorem nilinterequal_impl (d : Nat) : Nilinterequal (toy.link (at0 ifaceEqualCo
   have hb8 := Memory.accessible_mono _ hb2 (Nat.le_refl _) (by omega : (s.regs 1).toNat + 8 ≤ (s.regs 1).toNat + 16)
   have hb8' := Memory.accessible_mono _ hb2 (by omega : (s.regs 1).toNat ≤ (s.regs 1).toNat + 8) (by omega : (s.regs 1).toNat + 8 + 8 ≤ (s.regs 1).toNat + 16)
   have hk : ∀ v : W64, Keeps s { s with regs := setReg s.regs 0 v, pc := s.regs 30 } :=
-    fun v => ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+    fun v => ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
   by_cases heq : s.mem.readLE (s.regs 0).toNat 8 = s.mem.readLE (s.regs 1).toNat 8
   · by_cases h0 : s.mem.readLE (s.regs 0).toNat 8 = 0
     · janus_run
-      refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+      refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
         (MemFrame.refl _ _) henv ?_
       simp [BoolRes, setReg, Iface.efaceEqual]
     · obtain ⟨hok1, -⟩ := hok heq
       obtain ⟨-, htd, hx, hy⟩ := hok1 h0
       janus_run
-      refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+      refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
         (MemFrame.refl _ _) henv ?_
       rw [← heq, htd, efaceEqual_R0 (g := s.regs 28) henv]
       simp only [BoolRes, setReg_apply, reduceIte, Nat.reduceEqDiff]
@@ -616,7 +622,7 @@ theorem nilinterequal_impl (d : Nat) : Nilinterequal (toy.link (at0 ifaceEqualCo
       · rename_i h; simp [h]
       · rename_i h; simp [beq_false_of_ne h]
   · janus_run
-    refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+    refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
       (MemFrame.refl _ _) henv ?_
     simp [BoolRes, setReg, beq_false_of_ne heq]
 
@@ -630,13 +636,13 @@ theorem interequal_impl (d : Nat) : Interequal (toy.link (at0 ifaceEqualCode)) A
   by_cases heq : s.mem.readLE (s.regs 0).toNat 8 = s.mem.readLE (s.regs 1).toNat 8
   · by_cases h0 : s.mem.readLE (s.regs 0).toNat 8 = 0
     · janus_run
-      refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+      refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
         (MemFrame.refl _ _) henv ?_
       simp [BoolRes, setReg, Iface.ifaceEqual]
     · obtain ⟨-, ht0, hok1, -⟩ := hok heq h0
       obtain ⟨-, htd, hx, hy⟩ := hok1 ht0
       janus_run
-      refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+      refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
         (MemFrame.refl _ _) henv ?_
       rw [← heq]
       simp only [Iface.ifaceEqual, htd, beq_false_of_ne h0, Bool.false_or]
@@ -646,7 +652,7 @@ theorem interequal_impl (d : Nat) : Interequal (toy.link (at0 ifaceEqualCode)) A
       · rename_i h; simp [h]
       · rename_i h; simp [beq_false_of_ne h]
   · janus_run
-    refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl⟩
+    refine ifaceRet_of ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl⟩
       (MemFrame.refl _ _) henv ?_
     simp [BoolRes, setReg, beq_false_of_ne heq]
 
@@ -752,6 +758,7 @@ theorem clr_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
       (T.regs 0).toNat = (S.regs 0).toNat + i → (T.regs 1).toNat = k →
       T.sp = S.sp → T.regs 18 = S.regs 18 → T.regs 28 = S.regs 28 → T.regs 29 = S.regs 29 →
       T.regs 30 = S.regs 30 → T.dczid = S.dczid → T.tpidr = S.tpidr → T.fpcr = S.fpcr →
+      T.excl = S.excl → T.exclPass = S.exclPass →
       MemFrame S.mem T.mem [((S.regs 0).toNat, (S.regs 0).toNat + i)] →
       Zeroed T.mem (S.regs 0).toNat i →
       ReachesRet (coreProg clrCore) (S.regs 30) T (ClrPost S) := by
@@ -759,16 +766,16 @@ theorem clr_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
   intro k
   induction k with
   | zero =>
-    intro T i hi hpc h0 h1 hsp h18 h28 h29 h30 hdz htp hfc hf hz
+    intro T i hi hpc h0 h1 hsp h18 h28 h29 h30 hdz htp hfc hex hep hf hz
     have h1' : T.regs 1 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using h1)
     have ha : T.regs 30 = S.regs 30 := h30
     rw [← ha] at h30a h30b ⊢
     janus_run
-    refine ⟨⟨rfl, rfl, h18, h28, h29, hdz, htp, rfl⟩, ?_, ?_⟩
+    refine ⟨⟨rfl, rfl, h18, h28, h29, hdz, htp, rfl, hex, hep⟩, ?_, ?_⟩
     · rw [← hi, Nat.add_zero]; exact hf
     · rw [← hi, Nat.add_zero]; exact hz
   | succ k ih =>
-    intro T i hi hpc h0 h1 hsp h18 h28 h29 h30 hdz htp hfc hf hz
+    intro T i hi hpc h0 h1 hsp h18 h28 h29 h30 hdz htp hfc hex hep hf hz
     have h1' : T.regs 1 ≠ 0#64 := fun h => by simp [h] at h1
     have hw : T.mem.accessible (T.regs 0).toNat 1 true = true := by
       rw [hf.accessible, h0]; exact Memory.accessible_mono _ hacc (by omega) (by omega)
@@ -778,7 +785,7 @@ theorem clr_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
     refine ih _ (i + 1) (by omega) rfl (by simpa [setReg] using e0)
       (by simpa [setReg] using toNat_sub_one h1) rfl (by simpa [setReg] using h18)
       (by simpa [setReg] using h28) (by simpa [setReg] using h29) (by simpa [setReg] using h30)
-      hdz htp rfl ?_ ?_
+      hdz htp rfl hex hep ?_ ?_
     · rw [h0]
       refine (hf.mono fun a n h => ?_).writeLE 0 (List.mem_singleton_self _) (by simp) (by simp; omega)
       simp only [outside_cons, outside_nil, and_true] at h ⊢; omega
@@ -790,7 +797,7 @@ theorem clr_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
 
 theorem clrCore_sum : Summary (coreProg clrCore) HEAD ClrPre ClrPost := by
   intro S hpc ⟨⟨h30a, h30b⟩, hacc⟩
-  exact clr_loop S h30a h30b hacc _ S 0 (by simp) hpc (by simp) rfl rfl rfl rfl rfl rfl rfl rfl rfl
+  exact clr_loop S h30a h30b hacc _ S 0 (by simp) hpc (by simp) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
     (MemFrame.refl _ _) (fun j hj => absurd hj (Nat.not_lt_zero _))
 
 /-! ## The copying core -/
@@ -849,6 +856,7 @@ theorem fwd_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
       (T.regs 2).toNat = k →
       T.sp = S.sp → T.regs 18 = S.regs 18 → T.regs 28 = S.regs 28 → T.regs 29 = S.regs 29 →
       T.regs 30 = S.regs 30 → T.dczid = S.dczid → T.tpidr = S.tpidr → T.fpcr = S.fpcr →
+      T.excl = S.excl → T.exclPass = S.exclPass →
       MemFrame S.mem T.mem [((S.regs 0).toNat, (S.regs 0).toNat + i)] →
       Copied S.mem T.mem (S.regs 0).toNat (S.regs 1).toNat i →
       ReachesRet (coreProg moveCore) (S.regs 30) T (MovePost S) := by
@@ -857,16 +865,16 @@ theorem fwd_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
   intro k
   induction k with
   | zero =>
-    intro T i hi hpc h0 h1 h2 hsp h18 h28 h29 h30 hdz htp hfc hf hc
+    intro T i hi hpc h0 h1 h2 hsp h18 h28 h29 h30 hdz htp hfc hex hep hf hc
     have h2' : T.regs 2 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using h2)
     have ha : T.regs 30 = S.regs 30 := h30
     rw [← ha] at h30a h30b ⊢
     janus_run
-    refine ⟨⟨rfl, rfl, h18, h28, h29, hdz, htp, rfl⟩, ?_, ?_⟩
+    refine ⟨⟨rfl, rfl, h18, h28, h29, hdz, htp, rfl, hex, hep⟩, ?_, ?_⟩
     · rw [← hi, Nat.add_zero]; exact hf
     · rw [← hi, Nat.add_zero]; exact hc
   | succ k ih =>
-    intro T i hi hpc h0 h1 h2 hsp h18 h28 h29 h30 hdz htp hfc hf hc
+    intro T i hi hpc h0 h1 h2 hsp h18 h28 h29 h30 hdz htp hfc hex hep hf hc
     have h2' : T.regs 2 ≠ 0#64 := fun h => by simp [h] at h2
     have hr : T.mem.accessible (T.regs 1).toNat 1 false = true := by
       rw [hf.accessible, h1]; exact Memory.accessible_mono _ hsrc (by omega) (by omega)
@@ -880,7 +888,7 @@ theorem fwd_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
     refine ih _ (i + 1) (by omega) rfl (by simpa [setReg] using e0) (by simpa [setReg] using e1)
       (by simpa [setReg] using toNat_sub_one h2) rfl (by simpa [setReg] using h18)
       (by simpa [setReg] using h28) (by simpa [setReg] using h29) (by simpa [setReg] using h30)
-      hdz htp rfl ?_ ?_
+      hdz htp rfl hex hep ?_ ?_
     · rw [h0]
       refine (hf.mono fun a n h => ?_).writeLE _ (List.mem_singleton_self _) (by simp) (by simp; omega)
       simp only [outside_cons, outside_nil, and_true] at h ⊢; omega
@@ -898,6 +906,7 @@ theorem bwd_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
       T.regs 0 = S.regs 0 → T.regs 1 = S.regs 1 → (T.regs 2).toNat = k →
       T.sp = S.sp → T.regs 18 = S.regs 18 → T.regs 28 = S.regs 28 → T.regs 29 = S.regs 29 →
       T.regs 30 = S.regs 30 → T.dczid = S.dczid → T.tpidr = S.tpidr → T.fpcr = S.fpcr →
+      T.excl = S.excl → T.exclPass = S.exclPass →
       MemFrame S.mem T.mem [((S.regs 0).toNat + k, (S.regs 0).toNat + (S.regs 2).toNat)] →
       (∀ j, k ≤ j → j < (S.regs 2).toNat → T.mem.bytes ((S.regs 0).toNat + j) = S.mem.bytes ((S.regs 1).toNat + j)) →
       ReachesRet (coreProg moveCore) (S.regs 30) T (MovePost S) := by
@@ -906,16 +915,16 @@ theorem bwd_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
   intro k
   induction k with
   | zero =>
-    intro T hk hpc h0 h1 h2 hsp h18 h28 h29 h30 hdz htp hfc hf hc
+    intro T hk hpc h0 h1 h2 hsp h18 h28 h29 h30 hdz htp hfc hex hep hf hc
     have h2' : T.regs 2 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using h2)
     have ha : T.regs 30 = S.regs 30 := h30
     rw [← ha] at h30a h30b ⊢
     janus_run
-    refine ⟨⟨rfl, rfl, h18, h28, h29, hdz, htp, rfl⟩, ?_, ?_⟩
+    refine ⟨⟨rfl, rfl, h18, h28, h29, hdz, htp, rfl, hex, hep⟩, ?_, ?_⟩
     · simpa using hf
     · intro j hj; exact hc j (Nat.zero_le _) hj
   | succ k ih =>
-    intro T hk hpc h0 h1 h2 hsp h18 h28 h29 h30 hdz htp hfc hf hc
+    intro T hk hpc h0 h1 h2 hsp h18 h28 h29 h30 hdz htp hfc hex hep hf hc
     have h2' : T.regs 2 ≠ 0#64 := fun h => by simp [h] at h2
     have e2 := toNat_sub_one h2
     have ea : (T.regs 1 + (T.regs 2 - 1#64)).toNat = (S.regs 1).toNat + k := by
@@ -931,7 +940,7 @@ theorem bwd_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
     refine ih _ (by omega) rfl (by simpa [setReg] using h0) (by simpa [setReg] using h1)
       (by simpa [setReg] using e2) rfl (by simpa [setReg] using h18)
       (by simpa [setReg] using h28) (by simpa [setReg] using h29) (by simpa [setReg] using h30)
-      hdz htp rfl ?_ ?_
+      hdz htp rfl hex hep ?_ ?_
     · refine (hf.mono fun a n h => ?_).writeLE _ (List.mem_singleton_self _) (by simp) (by simp; omega)
       simp only [outside_cons, outside_nil, and_true] at h ⊢; omega
     · intro j hj1 hj2
@@ -942,10 +951,10 @@ theorem bwd_loop (S : State) (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 
 theorem moveCore_sum : Summary (coreProg moveCore) HEAD MovePre MovePost := by
   intro S hpc ⟨⟨h30a, h30b⟩, hsrc, hdst⟩
   janus_run until [FWD, BWD]
-  · exact bwd_loop S h30a h30b hsrc hdst hbr _ _ (Nat.le_refl _) rfl rfl rfl rfl rfl rfl rfl rfl rfl
+  · exact bwd_loop S h30a h30b hsrc hdst hbr _ _ (Nat.le_refl _) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
       rfl rfl rfl (MemFrame.refl _ _) (fun j h1 h2 => absurd h2 (by omega))
   · exact fwd_loop S h30a h30b hsrc hdst (by omega) _ _ 0 (by simp) rfl (by simp) (by simp) rfl rfl
-      rfl rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) (fun j hj => absurd hj (Nat.not_lt_zero _))
+      rfl rfl rfl rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) (fun j hj => absurd hj (Nat.not_lt_zero _))
 
 /-! ## `memmove`, `memclrNoHeapPointers` and the typed-memory functions -/
 
@@ -1040,7 +1049,7 @@ theorem bulkBarrierOff_impl (wb d : Nat) :
   rw [link_at0]
   intro s hpc ⟨⟨_, hg, ⟨hl1, hl2, hc⟩, _⟩, _⟩
   janus_run
-  exact tRet_of ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) trivial trivial
+  exact tRet_of ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (MemFrame.refl _ _) trivial trivial
 
 /-- The witness state satisfies `TPre` for `M0`, the barrier flag `WB` and the stack bound 64. -/
 theorem wstate_tPre (r : Nat → W64) (n : Nat) (hn : n ≤ 4) : TPre EqHashModel.M0 WB 64 n (wstate r) :=
