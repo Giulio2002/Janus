@@ -75,7 +75,7 @@ def wbRegs (old junk : Nat → W64) (buf : W64) : Nat → W64 :=
     wbRegs old junk buf i = if i = 25 then buf else if i = 16 ∨ i = 17 ∨ i = 27 then junk i else old i := rfl
 
 /-- `8·n` bytes for the barrier to fill: inside `rt`, writable, 8-aligned. -/
-def WbSlots (rt : List (Nat × Nat)) (m : Memory) (buf n : Nat) : Prop :=
+@[reducible] def WbSlots (rt : List (Nat × Nat)) (m : Memory) (buf n : Nat) : Prop :=
   InRanges buf (8 * n) rt ∧ buf + 8 * n ≤ 2 ^ 48 ∧ m.accessible buf (8 * n) true = true ∧ buf % 8 = 0
 
 /-- **`runtime.gcWriteBarrierN`** (arm64, `N = n`): from a call (`BL`, return address in `X30`,
