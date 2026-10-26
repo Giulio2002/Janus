@@ -1,6 +1,7 @@
 import Janus.Contracts.LiveToy
 import Janus.Contracts.AllocSat
 import Janus.Contracts.IfaceModel
+import Janus.Contracts.LiveCost
 
 namespace Janus.Contracts.LiveSat
 
@@ -41,7 +42,7 @@ theorem bumpFinal_ret (s : State) (A : Nat) (p : Nat) (hp : s.mem.readLE BUMP 8 
 /-- What every bump-allocating contract returns: from the invariant. `fin` is the state the
 code returns in (`hfin`: `retStateX` with results `res ptr`). -/
 theorem bump_ret {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {K A stack nargs cost round b : Nat}
-    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K) (hc : cost = K) (hr : round = K) (hb : K ≤ b)
+    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 64 * K) (hc : cost = K) (hr : round = K) (hb : K ≤ b)
     (hinv : (toyR tys ok).inv b L (s.regs 28).toNat (view (toyR tys ok).rt L s.mem))
     (hWs : LiveSep (calleeStack s stack nargs) (toyR tys ok).rt)
     (res : W64 → List W64) (fin : State)
@@ -72,7 +73,7 @@ theorem bump_acc {tys : Tys} {ok : Nat → List Nat → Prop} {b : Nat} {L : Lis
   exact h
 
 theorem finish_newobject {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr K A b : Nat}
-    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K)
+    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 64 * K)
     (hok' : ∀ args, ok addr args → ∃ t ∈ tys, args = [t.1] ∧ blockSize t.2.1 (t.2.2 == 0) = K)
     (pre : NewobjectPre 4096 s ∧ StackRoom s 4096 1 ∧
       LiveAt (toyR tys ok) addr [(s.regs 0).toNat] L b (newobjectRound s) (s.regs 28).toNat s.mem
@@ -105,7 +106,7 @@ theorem newobject16_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat �
 
 
 theorem finish_makeslice {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr K A b : Nat}
-    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K)
+    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 64 * K)
     (hok' : ∀ args, ok addr args → ∃ t ∈ tys, ∃ l c, args = [t.1, l, c] ∧
       blockSize (t.2.1 * c) (t.2.2 == 0) = K)
     (pre : MakeslicePre 4096 s ∧ StackRoom s 4096 3 ∧
@@ -128,7 +129,7 @@ theorem finish_makeslice {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat �
   exact toy_fresh h1 h2' hend hz hacc _ (hbs ▸ AllocSat.le_blockSize _ _) _ _
 
 theorem finish_mallocgc {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr K A b : Nat}
-    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K)
+    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 64 * K)
     (hok' : ∀ args, ok addr args → ∃ sz typ nz, args = [sz, typ, nz] ∧
       ((typ = 0 ∧ blockSize sz true = K) ∨ ∃ t ∈ tys, t.1 = typ ∧ typ ≠ 0 ∧ blockSize sz (t.2.2 == 0) = K))
     (pre : MallocgcPre 4096 s ∧ StackRoom s 4096 3 ∧
@@ -283,7 +284,7 @@ theorem tysOK0 : TysOK tys0 := by
   simp only [tys0, List.mem_cons, List.not_mem_nil, or_false] at ht
   rcases ht with rfl | rfl | rfl <;> simp [tyA, tyB, tyC, BUMP]
 
-theorem wmem_inv (g : Nat) : toyInv tys0 0x8000 [] g (view (toyRt tys0) [] wmem) := by
+theorem wmem_inv (g : Nat) : toyInv tys0 0x400 [] g (view (toyRt tys0) [] wmem) := by
   refine ⟨HEAP, by decide, Nat.le_refl _, by decide, by decide, fun r hr => absurd hr (by simp),
     fun i hi hi' => ?_, by decide, by decide, by decide, fun t ht => ?_⟩
   · rw [Memory.readLE_one]
@@ -341,7 +342,7 @@ theorem newobjectLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       0 < typSize s.mem (s.regs 0).toNat := by
   have h0 : ((wstate fun i => if i = 0 then BitVec.ofNat 64 tyA else 0).regs 0).toNat = tyA := by
     simp [wstate]; decide
-  refine ⟨at0 (bumpCode 16), toyR tys0 okNew, newobject16_impl tys0 tysOK0 okNew ?_, [], 0x8000,
+  refine ⟨at0 (bumpCode 16), toyR tys0 okNew, newobject16_impl tys0 tysOK0 okNew ?_, [], 0x400,
     wstate (fun i => if i = 0 then BitVec.ofNat 64 tyA else 0), rfl,
     ⟨wcallOK _ 1 (by omega), by rw [h0, wmem_eq]; exact wTypeOK, by rw [h0, wmem_eq]; decide⟩,
     wguard _ 1 (by omega), ⟨by rw [h0]; exact ⟨rfl, rfl⟩, wmem_inv 0, by simp only [newobjectRound, h0, wmem_eq]; decide,
@@ -364,7 +365,7 @@ theorem makesliceLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (makesliceRound s)
         (s.regs 28).toNat s.mem (calleeStack s 4096 3) ∧
       0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat := by
-  refine ⟨at0 (bumpCode 16), toyR tys0 okMake, makeslice16_impl tys0 tysOK0 okMake ?_, [], 0x8000,
+  refine ⟨at0 (bumpCode 16), toyR tys0 okMake, makeslice16_impl tys0 tysOK0 okMake ?_, [], 0x400,
     wst [tyB, 2, 2], rfl, ⟨wst_wcallOK _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide⟩,
     wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp,
       wwin _ 3 (by omega)⟩, by decide⟩
@@ -380,7 +381,7 @@ theorem mallocgcLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
         (s.regs 28).toNat s.mem (calleeStack s 4096 3) ∧
       0 < (s.regs 0).toNat := by
-  refine ⟨at0 (bumpCode 16), toyR tys0 okMalloc, mallocgc16_impl tys0 tysOK0 okMalloc (K := 16) (by omega) (by omega) ?_, [], 0x8000,
+  refine ⟨at0 (bumpCode 16), toyR tys0 okMalloc, mallocgc16_impl tys0 tysOK0 okMalloc (K := 16) (by omega) (by omega) ?_, [], 0x400,
     wst [16, tyB, 1], rfl, ⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
     wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp,
       wwin _ 3 (by omega)⟩, by decide⟩
@@ -394,7 +395,7 @@ theorem growsliceLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
       GrowslicePre 4096 s ∧ StackRoom s 4096 5 ∧
       LiveAt R A0 (growsliceArgs s) L b (growsliceRound s) (s.regs 28).toNat s.mem (calleeStack s 4096 5) := by
-  refine ⟨growCode16 |> at0, toyR tys0 okGrow, growslice16_impl tys0 tysOK0 okGrow ?_, [], 0x8000,
+  refine ⟨growCode16 |> at0, toyR tys0 okGrow, growslice16_impl tys0 tysOK0 okGrow ?_, [], 0x400,
     wst [HEAP, 2, 0, 2, tyB], rfl, ⟨⟨wst_wcallOK _ 5 (by omega), ⟨by decide, by decide⟩, by decide, by decide,
       by decide, by decide, by decide, by decide⟩, fun h => absurd h (by decide)⟩,
     wguard _ 5 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp,
@@ -414,7 +415,7 @@ theorem mallocgcSmallNoScanSCLive_satisfiable : ∃ (n : Nat) (impl : List Segme
           (s.regs 28).toNat s.mem (calleeStack s 4096 3)) ∧
       NoScanArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat := by
   refine ⟨2, at0 (bumpCode 16), toyR tys0 okMalloc,
-    (mallocgc16_impl tys0 tysOK0 okMalloc (K := 16) (by omega) (by omega) ?_).smallNoScanSC, [], 0x8000,
+    (mallocgc16_impl tys0 tysOK0 okMalloc (K := 16) (by omega) (by omega) ?_).smallNoScanSC, [], 0x400,
     wst [16, tyB, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
       wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 3 (by omega)⟩⟩, ?_⟩
   · rintro args ⟨-, rfl⟩
@@ -429,7 +430,7 @@ theorem mallocgcSmallScanNoHeaderSCLive_satisfiable : ∃ (n : Nat) (impl : List
           (s.regs 28).toNat s.mem (calleeStack s 4096 3)) ∧
       ScanArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat := by
   refine ⟨2, at0 (bumpCode 16), toyR tys0 okScan,
-    (mallocgc16_impl tys0 tysOK0 okScan (K := 16) (by omega) (by omega) ?_).smallScanNoHeaderSC, [], 0x8000,
+    (mallocgc16_impl tys0 tysOK0 okScan (K := 16) (by omega) (by omega) ?_).smallScanNoHeaderSC, [], 0x400,
     wst [16, tyC, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
       wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 3 (by omega)⟩⟩, ?_⟩
   · rintro args ⟨-, rfl⟩
@@ -444,7 +445,7 @@ theorem mallocgcTinySizeLive_satisfiable : ∃ (n : Nat) (impl : List Segment) (
           (s.regs 28).toNat s.mem (calleeStack s 4096 3)) ∧
       TinyArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat := by
   refine ⟨8, at0 (bumpCode 16), toyR tys0 okTiny,
-    (mallocgc16_impl tys0 tysOK0 okTiny (K := 8) (by omega) (by omega) ?_).tinySize, [], 0x8000,
+    (mallocgc16_impl tys0 tysOK0 okTiny (K := 8) (by omega) (by omega) ?_).tinySize, [], 0x400,
     wst [8, tyB, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
       wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 3 (by omega)⟩⟩, ?_⟩
   · rintro args ⟨-, rfl⟩
@@ -517,7 +518,7 @@ theorem wbLive_satisfiable : ∃ (n : Nat) (impl : List Segment) (R : RtInv),
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧ CallOK s 4096 0 ∧
       R.ok A0 [n] ∧ R.inv b L (s.regs 28).toNat (view R.rt L s.mem) ∧
       LiveSep L [(s.sp.toNat - 4096, s.sp.toNat - 8)] ∧ LiveSep [(s.sp.toNat - 4096, s.sp.toNat - 8)] R.rt := by
-  refine ⟨2, at0 wbCode, toyR tys0 (okWb 2), wb_impl tys0 tysOK0 _ 2 (by omega) (fun _ h => h.2), [], 0x8000,
+  refine ⟨2, at0 wbCode, toyR tys0 (okWb 2), wb_impl tys0 tysOK0 _ 2 (by omega) (fun _ h => h.2), [], 0x400,
     wst [], rfl, wst_wcallOK _ 0 (by omega), ⟨rfl, rfl⟩, wmem_inv 0, by simp, ?_⟩
   have := wwin (fun i => BitVec.ofNat 64 (([] : List Nat).getD i 0)) 0 (by omega)
   intro x hx
@@ -589,7 +590,7 @@ theorem rtLive_satisfiable : ∃ (impl : List Segment) (R : RtInv) (sp : RtSpec)
     RtLiveContract (toy.link impl) A0 4096 R sp ls ∧
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
       RtLivePre 4096 R sp ls A0 L b s := by
-  refine ⟨at0 [0xd65f03c0], toyR tys0 okRt, _, _, rt_impl tys0 tysOK0, [], 0x8000, wst [0, 0], rfl,
+  refine ⟨at0 [0xd65f03c0], toyR tys0 okRt, _, _, rt_impl tys0 tysOK0, [], 0x400, wst [0, 0], rfl,
     wst_wcallOK _ 2 (by omega), ⟨by decide, by decide⟩, ?_, by trivial, wguard _ 2 (by omega),
     ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 2 (by omega)⟩⟩
   intro x hx
@@ -755,7 +756,7 @@ theorem memmoveLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s 4096 3) ∧
       Mem.Input s 4096 3 (s.regs 1).toNat (s.regs 2).toNat ∧
       LiveDest R L s 4096 3 (s.regs 0).toNat (s.regs 2).toNat := by
-  refine ⟨at0 memmoveCode, toyR tys0 okMove, memmove8_impl tys0 okMove ?_, [], 0x8000, wst [CB, CB + 0x100, 8], rfl,
+  refine ⟨at0 memmoveCode, toyR tys0 okMove, memmove8_impl tys0 okMove ?_, [], 0x400, wst [CB, CB + 0x100, 8], rfl,
     wguardE _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 3 (by omega)⟩,
     ⟨by decide, by decide, cb_out_win _ 3 (by omega) _ _ (by decide)⟩,
     ⟨by decide, by decide, cb_out_win _ 3 (by omega) _ _ (by decide), Or.inr (cb_out_rt _ _ (by decide))⟩⟩
@@ -771,7 +772,7 @@ theorem memclrNoHeapPointersLive_satisfiable : ∃ (impl : List Segment) (R : Rt
       Mem.EqPre 4096 2 s ∧
       LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s 4096 2) ∧
       LiveDest R L s 4096 2 (s.regs 0).toNat (s.regs 1).toNat := by
-  refine ⟨at0 memclrCode, toyR tys0 okClr, memclr8_impl tys0 okClr ?_, [], 0x8000, wst [CB, 8], rfl,
+  refine ⟨at0 memclrCode, toyR tys0 okClr, memclr8_impl tys0 okClr ?_, [], 0x400, wst [CB, 8], rfl,
     wguardE _ 2 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 2 (by omega)⟩,
     ⟨by decide, by decide, cb_out_win _ 2 (by omega) _ _ (by decide), Or.inr (cb_out_rt _ _ (by decide))⟩⟩
   rintro args ⟨-, rfl⟩
@@ -784,7 +785,7 @@ theorem memclrHasPointersLive_satisfiable : ∃ (impl : List Segment) (R : RtInv
       LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s 4096 2) ∧
       (s.regs 0).toNat % 8 = 0 ∧ (s.regs 1).toNat % 8 = 0 ∧
       LiveDest R L s 4096 2 (s.regs 0).toNat (s.regs 1).toNat := by
-  refine ⟨at0 memclrCode, toyR tys0 okClr, memclrHasPointers8_impl tys0 okClr ?_, [], 0x8000, wst [CB, 8], rfl,
+  refine ⟨at0 memclrCode, toyR tys0 okClr, memclrHasPointers8_impl tys0 okClr ?_, [], 0x400, wst [CB, 8], rfl,
     wguardE _ 2 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 2 (by omega)⟩, by decide, by decide,
     ⟨by decide, by decide, cb_out_win _ 2 (by omega) _ _ (by decide), Or.inr (cb_out_rt _ _ (by decide))⟩⟩
   rintro args ⟨-, rfl⟩
@@ -801,7 +802,7 @@ theorem typedMemmoveLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       TypeOK s.mem (s.regs 0).toNat ∧ Outside (s.regs 0).toNat 16 (calleeStack s 4096 3) ∧
       Mem.Input s 4096 3 (s.regs 2).toNat (typSize s.mem (s.regs 0).toNat) ∧
       LiveDest R L s 4096 3 (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat) := by
-  refine ⟨at0 typedmemmoveCode, toyR tys0 okTMove, typedmemmove8_impl tys0 tysOK0 okTMove ?_, [], 0x8000,
+  refine ⟨at0 typedmemmoveCode, toyR tys0 okTMove, typedmemmove8_impl tys0 tysOK0 okTMove ?_, [], 0x400,
     wst [tyB, CB, CB + 0x100], rfl, wguardE _ 3 (by omega),
     ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 3 (by omega)⟩, ⟨by decide, by decide⟩, ?_,
     ⟨by decide, by decide, cb_out_win _ 3 (by omega) _ _ (by decide)⟩,
@@ -818,7 +819,7 @@ theorem typedMemclrLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s 4096 2) ∧
       TypeOK s.mem (s.regs 0).toNat ∧ Outside (s.regs 0).toNat 16 (calleeStack s 4096 2) ∧
       LiveDest R L s 4096 2 (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat) := by
-  refine ⟨at0 typedmemclrCode, toyR tys0 okTClr, typedmemclr8_impl tys0 tysOK0 okTClr ?_, [], 0x8000,
+  refine ⟨at0 typedmemclrCode, toyR tys0 okTClr, typedmemclr8_impl tys0 tysOK0 okTClr ?_, [], 0x400,
     wst [tyB, CB], rfl, wguardE _ 2 (by omega),
     ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 2 (by omega)⟩, ⟨by decide, by decide⟩, ?_,
     ⟨by decide, by decide, cb_out_win _ 2 (by omega) _ _ (by decide), Or.inr (cb_out_rt _ _ (by decide))⟩⟩
@@ -826,5 +827,79 @@ theorem typedMemclrLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     exact ⟨(tyB, 8, 0), by simp [tys0], CB, rfl, rfl⟩
   · simp only [calleeStack, wsp_eq, wspn, outside_cons, outside_nil, and_true, wst, wstate]
     simp only [wsp, tyB]; decide
+
+
+/-! ### Dynamic sizes: the toy that reads the size from the type descriptor
+
+For the examples, whose type descriptors are read-only data outside `rt`, the toy cannot know a
+request's size from the invariant. It computes the advance `A = 64·size` from the request itself
+(`size` the descriptor's `Size_`, times the capacity for `makeslice`): `K ≤ A ≤ 64·K` for the
+block `K = blockSize size …` (and `A = K = 0` for size 0), which `toyInv`'s slack allows. -/
+
+theorem blockSize_zero (b : Bool) : blockSize 0 b = 0 := by cases b <;> decide
+
+theorem blockSize_le64 (X : Nat) (b : Bool) : blockSize X b ≤ 64 * X := by
+  rcases Nat.eq_zero_or_pos X with rfl | h
+  · simp [blockSize_zero]
+  · have := blockSize_le X b; omega
+
+theorem callRegs_final (old r : Nat → W64) (x0 : W64) (h18 : r 18 = old 18) (h28 : r 28 = old 28)
+    (h29 : r 29 = old 29) (h0 : r 0 = x0) : callRegs old r [x0] = r := by
+  apply callRegs_self old r ⟨h18, h28, h29⟩
+  intro i hi
+  simp only [List.length_cons, List.length_nil] at hi
+  have : i = 0 := by omega
+  subst this; simp [h0]
+
+def newobjectCodeD : List Nat :=
+  [0xd2a00809, 0xf9400001, 0xd2800802, 0x9b027c21, 0xf9400120, 0x8b01000a, 0xf900012a, 0xd65f03c0]
+
+/-- The state `newobjectCodeD` returns in. -/
+def newobjFinalD (s : State) : State :=
+  { s with
+    regs := setReg (setReg (setReg (setReg (setReg s.regs 0 (BitVec.ofNat 64 (s.mem.readLE BUMP 8))) 1
+      (BitVec.ofNat 64 (s.mem.readLE (s.regs 0).toNat 8) * 64#64)) 2 64#64) 9 (BitVec.ofNat 64 BUMP)) 10
+      (BitVec.ofNat 64 (s.mem.readLE BUMP 8) + BitVec.ofNat 64 (s.mem.readLE (s.regs 0).toNat 8) * 64#64),
+    pc := s.regs 30,
+    mem := s.mem.writeLE BUMP 8 (s.mem.readLE BUMP 8 + s.mem.readLE (s.regs 0).toNat 8 * 64 % 2 ^ 64) }
+
+theorem newobjFinalD_ret (s : State) (p : Nat) (hp : s.mem.readLE BUMP 8 = p) :
+    newobjFinalD s = retStateX s (newobjFinalD s).regs [BitVec.ofNat 64 p] s.flags s.vregs
+      (s.mem.writeLE BUMP 8 (p + s.mem.readLE (s.regs 0).toNat 8 * 64 % 2 ^ 64)) s.excl s.exclPass := by
+  subst hp
+  simp only [retStateX]
+  rw [callRegs_final s.regs _ (BitVec.ofNat 64 (s.mem.readLE BUMP 8)) (by simp [newobjFinalD, setReg])
+    (by simp [newobjFinalD, setReg]) (by simp [newobjFinalD, setReg]) (by simp [newobjFinalD, setReg])]
+  rfl
+
+theorem finish_newobjectD {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr b : Nat}
+    {L : List (Nat × Nat)} {s : State}
+    (pre : NewobjectPre 4096 s ∧ StackRoom s 4096 1 ∧
+      LiveAt (toyR tys ok) addr [(s.regs 0).toNat] L b (newobjectRound s) (s.regs 28).toNat s.mem
+        (calleeStack s 4096 1)) :
+    LiveAllocRet (toyR tys ok) 4096 1 (fun ptr => [ptr]) L b (newobjectRound s) (newobjectRound s) s
+      (newobjFinalD s) fun m ptr => 0 < typSize s.mem (s.regs 0).toNat →
+        newobjectObj (toyR tys ok).rt s m ptr ∧ ApartAll ptr (newobjectRound s) L := by
+  obtain ⟨⟨-, -, hmax⟩, -, hok, hinv, hcost, hLs, hWs⟩ := pre
+  simp only [typSize, maxAlloc] at hmax
+  have hmod : s.mem.readLE (s.regs 0).toNat 8 * 64 % 2 ^ 64 = 64 * s.mem.readLE (s.regs 0).toNat 8 := by omega
+  have hK : newobjectRound s ≤ 64 * s.mem.readLE (s.regs 0).toNat 8 := blockSize_le64 _ _
+  have hKX : s.mem.readLE (s.regs 0).toNat 8 ≤ newobjectRound s := AllocSat.le_blockSize _ _
+  refine bump_ret hty (A := 64 * s.mem.readLE (s.regs 0).toNat 8) (by omega) hK (by omega) rfl rfl hcost hinv hWs _ _
+    (fun p hp => ?_) (fun p h1 h2' hend hz hacc hap _ => ⟨toy_fresh h1 h2' hend hz hacc _ hKX _ _, hap⟩)
+  have := newobjFinalD_ret s p hp
+  rw [hmod] at this
+  exact this
+
+set_option maxRecDepth 20000 in
+theorem newobjectD_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop) :
+    NewobjectLiveContract (toy.link (at0 newobjectCodeD)) A0 4096 (toyR tys ok) := by
+  rw [link_at0]
+  intro L b s hpc pre
+  have hacB' := bump_acc pre.2.2.2.1
+  have ⟨⟨h30a, h30b, hq1, hq2, hq3, hq4, hq5⟩, hq6, hq7⟩ := pre.1
+  obtain ⟨hT1, hT2⟩ := hq6
+  janus_run
+  exact finish_newobjectD hty pre
 
 end Janus.Contracts.LiveSat

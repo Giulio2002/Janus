@@ -48,7 +48,7 @@ def TysOK (tys : Tys) : Prop :=
 
 /-- The toy runtime's invariant. -/
 def toyInv (tys : Tys) (b : Nat) (L : List (Nat × Nat)) (_g : Nat) (v : Memory) : Prop :=
-  ∃ p, v.readLE BUMP 8 = p ∧ HEAP ≤ p ∧ p % 16 = 0 ∧ p + 2 * b ≤ HEND ∧
+  ∃ p, v.readLE BUMP 8 = p ∧ HEAP ≤ p ∧ p % 16 = 0 ∧ p + 64 * b ≤ HEND ∧
     (∀ r ∈ L, HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p) ∧
     (∀ i, p ≤ i → i < HEND → v.readLE i 1 = 0) ∧
     v.accessible HEAP 0x10000 true = true ∧ v.accessible BUMP 8 true = true ∧
@@ -138,7 +138,7 @@ once `p + K` is stored at `BUMP` (`m'`), is a fresh zeroed object of the heap ou
 changed only in the runtime's ranges, not in the live objects, and the invariant holds for the
 live set with the block and the budget `b - K`. -/
 theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K A : Nat} {L : List (Nat × Nat)} {g : Nat} {m : Memory}
-    (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K) (hb : K ≤ b) (h : toyInv tys b L g (view (toyRt tys) L m)) :
+    (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 64 * K) (hb : K ≤ b) (h : toyInv tys b L g (view (toyRt tys) L m)) :
     ∃ p, m.readLE BUMP 8 = p ∧ HEAP ≤ p ∧ p % 16 = 0 ∧ p + A ≤ HEND ∧
       MemFrame m (m.writeLE BUMP 8 (p + A)) (toyRt tys) ∧
       LiveFrame m (m.writeLE BUMP 8 (p + A)) L [] ∧
