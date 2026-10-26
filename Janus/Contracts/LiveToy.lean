@@ -206,4 +206,15 @@ theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K : Nat} {L : List (Nat × Na
           Memory.readLE_writeLE_of_disjoint _ _ (by simp only [BUMP] at *; omega)]
         exact e1.2
 
+/-- The block of an allocation is `Fresh` (any request size up to the block, any zeroing). -/
+theorem toy_fresh {tys : Tys} {m' : Memory} {p K : Nat} (hp : HEAP ≤ p) (hp16 : p % 16 = 0)
+    (hend : p + K ≤ HEND) (hz : ZeroBytes m' p K) (hacc : m'.accessible p K true = true)
+    (size : Nat) (hs : size ≤ K) (zero hdr : Bool) : Fresh (toyRt tys) m' p size K zero hdr := by
+  refine ⟨inRanges_heap hp hend, by simp only [HEND] at hend; omega, hacc, fun _ => by omega,
+    fun _ _ => hp16, fun _ i hi => hz i (by omega), hs⟩
+
+/-- A block in the runtime-owned ranges is apart from a window outside them. -/
+theorem apart_win {rt win : List (Nat × Nat)} {p K : Nat} (hin : InRanges p K rt)
+    (hw : LiveSep win rt) : ApartAll p K win := fun r hr => (hin.apart (hw r hr)).symm
+
 end Janus.Contracts.Toy
