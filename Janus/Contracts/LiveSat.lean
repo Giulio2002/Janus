@@ -1,5 +1,6 @@
 import Janus.Contracts.LiveToy
 import Janus.Contracts.AllocSat
+import Janus.Contracts.IfaceModel
 
 namespace Janus.Contracts.LiveSat
 
@@ -257,6 +258,8 @@ def tyB : Nat := 0x30010
 def tyC : Nat := 0x30020
 /-- A 16-byte type with pointers (`PtrBytes = 8`). -/
 def tys0 : Tys := [(tyA, 16, 0), (tyB, 8, 0), (tyC, 16, 8)]
+/-- The caller's buffer (outside the runtime's ranges) for the copies. -/
+def CB : Nat := 0x600000
 def wsp : Nat := 0x200000
 def wg : Nat := 0x300000
 def wret : Nat := 0x1000
@@ -268,7 +271,7 @@ def wbytes (a : Nat) : Byte :=
 /-- The witness memory: stack, `g`, the descriptors, the bump cell and buffer, the heap. -/
 def wmem : Memory :=
   ⟨wbytes, [⟨wsp - 4096, 4096 + 64, true⟩, ⟨wg, 0x100, false⟩, ⟨tyA, 48, false⟩, ⟨BUMP, 0x200, true⟩,
-    ⟨HEAP, 0x10000, true⟩]⟩
+    ⟨HEAP, 0x10000, true⟩, ⟨CB, 0x200, true⟩]⟩
 
 def wstate (r : Nat → W64) : State :=
   { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 wret else r i,
@@ -447,5 +450,284 @@ theorem mallocgcTinySizeLive_satisfiable : ∃ (n : Nat) (impl : List Segment) (
   · rintro args ⟨-, rfl⟩
     exact ⟨8, tyB, 1, rfl, Or.inr ⟨(tyB, 8, 0), by simp [tys0], rfl, by decide, by decide⟩⟩
   · unfold TinyArgs; refine ⟨by decide, by decide, by decide, by decide, by decide⟩
+
+
+/-! ### The write barrier -/
+
+/-- `X25 = WBUF; RET`. -/
+def wbCode : List Nat := [0xd2a00819, 0x91040339, 0xd65f03c0]
+
+/-- The state the toy barrier returns in. -/
+def wbFinal (s : State) : State := { s with regs := setReg s.regs 25 4194560#64, pc := s.regs 30 }
+
+theorem wb_post {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {n b : Nat} (hn : n ≤ 8)
+    {L : List (Nat × Nat)} {s : State}
+    (hinv : (toyR tys ok).inv b L (s.regs 28).toNat (view (toyR tys ok).rt L s.mem))
+    (hWs : LiveSep [(s.sp.toNat - 4096, s.sp.toNat - 8)] (toyR tys ok).rt) :
+    ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      wbFinal s = wbRetX s junk buf f v m ex ep ∧
+      MemFrame s.mem m ((toyR tys ok).rt ++ [(s.sp.toNat - 4096, s.sp.toNat - 8)]) ∧ LiveFrame s.mem m L [] ∧
+      WbSlots (toyR tys ok).rt m buf.toNat n ∧ ApartAll buf.toNat (8 * n) L ∧
+      ApartAll buf.toNat (8 * n) [(s.sp.toNat - 4096, s.sp.toNat - 8)] ∧
+      InvSlots (toyR tys ok) b L (s.regs 28).toNat (toyR tys ok).rt m buf.toNat n := by
+  have hinvT : toyInv tys b L (s.regs 28).toNat (view (toyRt tys) L s.mem) := hinv
+  have hinvT : toyInv tys b L (s.regs 28).toNat (view (toyRt tys) L s.mem) := hinv
+  have hb : (4194560#64 : W64).toNat = WBUF := by decide
+  obtain ⟨p, -, -, -, -, hL, -, -, -, hacW, -⟩ := hinvT
+  have ⟨p, _, _, _, _, hL, _, _, _, hacW, _⟩ := hinvT
+  refine ⟨4194560#64, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_, MemFrame.refl _ _,
+    LiveFrame.refl _ _ _, ?_, ?_, ?_, ?_⟩
+  · simp only [wbFinal, wbRetX]
+    congr 1
+    funext i
+    simp only [setReg, wbRegs]
+    by_cases h : i = 25
+    · simp [h]
+    · simp [h]
+  · rw [hb]
+    refine ⟨inRanges_wbuf hn, by simp [WBUF]; omega, ?_, by decide⟩
+    rw [← view_accessible (toyRt tys) L s.mem]
+    exact Memory.accessible_mono _ hacW (Nat.le_refl _) (by omega)
+  · rw [hb]
+    intro r hr
+    have := hL r hr
+    show WBUF + 8 * n ≤ r.1 ∨ r.1 + (r.2 - r.1) ≤ WBUF
+    simp only [WBUF, HEAP] at *; omega
+  · rw [hb]; exact apart_win (inRanges_wbuf hn) hWs
+  · rw [hb]
+    intro v' hf
+    exact toyInv.frame hty hn hinvT hf
+
+set_option maxRecDepth 20000 in
+theorem wb_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop) (n : Nat) (hn : n ≤ 8)
+    (hok' : ∀ args, ok A0 args → args = [n]) :
+    WbLiveContract (toy.link (at0 wbCode)) A0 4096 (toyR tys ok) n := by
+  rw [link_at0]
+  intro L b s hpc pre
+  have ⟨⟨h30a, h30b, _⟩, _⟩ := pre
+  janus_run
+  simpa only [wbFinal, wbRetX, apartAll_cons, apartAll_nil, and_true] using wb_post hty hn pre.2.2.1 pre.2.2.2.2
+
+
+def okWb (n : Nat) : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [n]
+
+theorem wbLive_satisfiable : ∃ (n : Nat) (impl : List Segment) (R : RtInv),
+    WbLiveContract (toy.link impl) A0 4096 R n ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧ CallOK s 4096 0 ∧
+      R.ok A0 [n] ∧ R.inv b L (s.regs 28).toNat (view R.rt L s.mem) ∧
+      LiveSep L [(s.sp.toNat - 4096, s.sp.toNat - 8)] ∧ LiveSep [(s.sp.toNat - 4096, s.sp.toNat - 8)] R.rt := by
+  refine ⟨2, at0 wbCode, toyR tys0 (okWb 2), wb_impl tys0 tysOK0 _ 2 (by omega) (fun _ h => h.2), [], 0x8000,
+    wst [], rfl, wst_wcallOK _ 0 (by omega), ⟨rfl, rfl⟩, wmem_inv 0, by simp, ?_⟩
+  have := wwin (fun i => BitVec.ofNat 64 (([] : List Nat).getD i 0)) 0 (by omega)
+  intro x hx
+  apply this x
+  simp only [List.mem_singleton] at hx
+  simp only [calleeStack, wsp_eq, wspn, List.mem_cons, List.not_mem_nil, or_false]
+  left; rw [hx]; rfl
+
+
+/-! ### The `RtSpec` contracts: `slicebytetostringtmp` (allocates nothing) -/
+
+theorem callRegs_self (old r : Nat → W64) (h : r 18 = old 18 ∧ r 28 = old 28 ∧ r 29 = old 29)
+    (res : List W64) (hres : ∀ i, i < res.length → res.getD i 0 = r i) : callRegs old r res = r := by
+  funext i
+  simp only [callRegs]
+  by_cases hi : i = 18 ∨ i = 28 ∨ i = 29
+  · rw [if_pos hi]; rcases hi with rfl | rfl | rfl <;> simp [h.1, h.2.1, h.2.2]
+  · rw [if_neg hi]
+    by_cases hl : i < res.length
+    · have e1 : res.getD i (r i) = res.getD i 0 := by simp [List.getD, List.getElem?_eq_getElem hl]
+      rw [e1]; exact hres i hl
+    · simp [List.getD, List.getElem?_eq_none (by omega : res.length ≤ i)]
+
+def okRt : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [0, 0]
+
+/-- A call that returns with nothing changed (`pc := X30`) meets `RtLivePost` when the spec's
+postcondition holds of the unchanged memory and the call costs and adds nothing. -/
+theorem rt_post_nochange {R : RtInv} {stack : Nat} {sp : RtSpec} {ls : LiveSpec} {L : List (Nat × Nat)} {b : Nat}
+    {s : State} (hc : ls.cost (argWords s sp.nargs) s.mem = 0)
+    (hf : ls.fresh (argWords s sp.nargs) s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat = [])
+    (hk : ls.keep (argWords s sp.nargs) s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat = [])
+    (hq : sp.post R.rt (argWords s sp.nargs) s.mem (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat s.mem)
+    (hinv : R.inv b L (s.regs 28).toNat (view R.rt L s.mem)) :
+    RtLivePost stack R sp ls L b s { s with pc := s.regs 30 } := by
+  refine ⟨s.regs 0, s.regs 1, s.regs 2, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_, MemFrame.refl _ _,
+    hq, LiveFrame.refl _ _ _, ?_, ?_, ?_⟩
+  · simp only [retStateX]
+    congr 1
+    rw [callRegs_self s.regs s.regs ⟨rfl, rfl, rfl⟩]
+    intro i hi
+    simp only [List.length_cons, List.length_nil] at hi
+    rcases i with _ | _ | _ | i
+    · rfl
+    · rfl
+    · rfl
+    · omega
+  · simp [hf, FreshFrom]
+  · simp [liveAdds, hf, hk, LiveApart]
+  · simp only [liveAdds, hf, hk, hc, List.append_nil, Nat.sub_zero]; exact hinv
+
+set_option maxRecDepth 20000 in
+theorem rt_impl (tys : Tys) (hty : TysOK tys) :
+    RtLiveContract (toy.link (at0 [0xd65f03c0])) A0 4096 (toyR tys okRt) slicebytetostringtmpSpec
+      slicebytetostringtmpLive := by
+  rw [link_at0]
+  intro L b s hpc pre
+  have ⟨⟨h30a, h30b, _, _, _, _, _⟩, _⟩ := pre
+  obtain ⟨-, -, -, -, -, hok, hinv, -⟩ := pre
+  janus_run
+  have ha : argWords s 2 = [0, 0] := (hok.2 : argWords s 2 = [0, 0])
+  refine rt_post_nochange rfl rfl rfl ?_ hinv
+  have ha' := ha
+  simp [argWords, wordsFrom] at ha'
+  simp only [slicebytetostringtmpSpec, ha, ha'.1, ha'.2]
+  simp [strBytes]
+
+
+theorem rtLive_satisfiable : ∃ (impl : List Segment) (R : RtInv) (sp : RtSpec) (ls : LiveSpec),
+    RtLiveContract (toy.link impl) A0 4096 R sp ls ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      RtLivePre 4096 R sp ls A0 L b s := by
+  refine ⟨at0 [0xd65f03c0], toyR tys0 okRt, _, _, rt_impl tys0 tysOK0, [], 0x8000, wst [0, 0], rfl,
+    wst_wcallOK _ 2 (by omega), ⟨by decide, by decide⟩, ?_, by trivial, wguard _ 2 (by omega),
+    ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 2 (by omega)⟩⟩
+  intro x hx
+  simp [slicebytetostringtmpSpec, argWords, wordsFrom, wst, wstate] at hx
+  subst hx
+  simp [calleeStack, wsp_eq, wspn, wsp]
+
+
+/-! ### Copies and clears -/
+
+/-- A call that stores one word at `dst` (a live object or caller memory outside `R.rt`) and
+otherwise only changes registers meets `LiveMemRet`. -/
+theorem liveMemRet_store {R : RtInv} {d nargs b dst v : Nat} {L : List (Nat × Nat)} {s fin : State}
+    {P : Memory → Prop} (hpc : fin.pc = s.regs 30) (hsp : fin.sp = s.sp) (h18 : fin.regs 18 = s.regs 18)
+    (h28 : fin.regs 28 = s.regs 28) (h29 : fin.regs 29 = s.regs 29) (hdz : fin.dczid = s.dczid)
+    (htp : fin.tpidr = s.tpidr) (hfc : fin.fpcr = s.fpcr) (hfs : fin.fpsr = s.fpsr)
+    (hmem : fin.mem = s.mem.writeLE dst 8 v) (hdst : InRanges dst 8 L ∨ Outside dst 8 R.rt)
+    (hinv : R.inv b L (s.regs 28).toNat (view R.rt L s.mem)) (hP : P (s.mem.writeLE dst 8 v)) :
+    LiveMemRet R d nargs [(dst, dst + 8)] L b s fin P := by
+  obtain ⟨junk, f, vr, m, ex, ep, hs⟩ := retStateX_intro (res := []) hpc hsp h18 h28 h29 hdz htp hfc hfs
+    (fun i hi => absurd hi (by simp))
+  have hm : m = s.mem.writeLE dst 8 v := by
+    have := congrArg State.mem hs
+    simp only [retStateX] at this
+    rw [← hmem]; exact this.symm ▸ rfl
+  refine ⟨junk, f, vr, m, ex, ep, hs, ?_, ⟨fun a n hin hout => ?_⟩, ?_, ?_⟩
+  · rw [hm]
+    refine MemFrame.of_writeLE s.mem v (r := (dst, dst + 8)) ?_ (Nat.le_refl _) (Nat.le_refl _)
+    simp
+  · rw [hm]
+    have := MemFrame.outside_mem hout (r := (dst, dst + 8)) (by simp)
+    exact Memory.readLE_writeLE_of_disjoint _ _ (by omega)
+  · rw [hm]
+    rcases hdst with h | h
+    · rw [view_writeLE_live h]; exact hinv
+    · rw [view_writeLE_out h]; exact hinv
+  · rw [hm]; exact hP
+
+
+def memmoveCode : List Nat := [0xf9400023, 0xf9000003, 0xd65f03c0]
+def memclrCode : List Nat := [0xf900001f, 0xd65f03c0]
+def typedmemmoveCode : List Nat := [0xf9400043, 0xf9000023, 0xd65f03c0]
+def typedmemclrCode : List Nat := [0xf900003f, 0xd65f03c0]
+
+theorem zeroed_store (m : Memory) (a : Nat) : Mem.Zeroed (m.writeLE a 8 0) a 8 := by
+  intro i hi
+  rw [IfaceModel.bytes_writeLE_self m a 8 0 i hi]
+  simp
+
+set_option maxRecDepth 20000 in
+theorem memmove8_impl (tys : Tys) (ok : Nat → List Nat → Prop)
+    (hok' : ∀ args, ok A0 args → ∃ d sr, args = [d, sr, 8]) :
+    MemmoveLive (toy.link (at0 memmoveCode)) A0 4096 (toyR tys ok) := by
+  rw [link_at0]
+  intro L b s hpc pre
+  obtain ⟨⟨_, ⟨h30a, h30b, _, _, _, _, _⟩, _⟩, hLm, ⟨hs1, hs2, hs3⟩, ⟨hd1, hd2, hd3, hd4⟩⟩ := pre
+  obtain ⟨d0, s0, hargs⟩ := hok' _ hLm.1
+  simp only [List.cons.injEq, and_true] at hargs
+  have h8 : (s.regs 2).toNat = 8 := hargs.2.2
+  rw [h8] at hs2 hd2
+  rw [h8] at hd4
+  janus_run
+  rw [h8]
+  refine liveMemRet_store rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hd4 hLm.2.1 ?_
+  intro i hi
+  exact IfaceModel.bytes_writeLE_readLE _ _ _ _ _ hi
+
+set_option maxRecDepth 20000 in
+theorem memclr8_impl (tys : Tys) (ok : Nat → List Nat → Prop)
+    (hok' : ∀ args, ok A0 args → ∃ d, args = [d, 8]) :
+    MemclrNoHeapPointersLive (toy.link (at0 memclrCode)) A0 4096 (toyR tys ok) := by
+  rw [link_at0]
+  intro L b s hpc pre
+  obtain ⟨⟨_, ⟨h30a, h30b, _, _, _, _, _⟩, _⟩, hLm, ⟨hd1, hd2, hd3, hd4⟩⟩ := pre
+  obtain ⟨d0, hargs⟩ := hok' _ hLm.1
+  simp only [List.cons.injEq, and_true] at hargs
+  have h8 : (s.regs 1).toNat = 8 := hargs.2
+  rw [h8] at hd2 hd4
+  janus_run
+  rw [h8]
+  exact liveMemRet_store rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hd4 hLm.2.1 (zeroed_store _ _)
+
+set_option maxRecDepth 20000 in
+theorem memclrHasPointers8_impl (tys : Tys) (ok : Nat → List Nat → Prop)
+    (hok' : ∀ args, ok A0 args → ∃ d, args = [d, 8]) :
+    MemclrHasPointersLive (toy.link (at0 memclrCode)) A0 4096 (toyR tys ok) := by
+  rw [link_at0]
+  intro L b s hpc pre
+  obtain ⟨⟨_, ⟨h30a, h30b, _, _, _, _, _⟩, _⟩, hLm, h0, h1, ⟨hd1, hd2, hd3, hd4⟩⟩ := pre
+  obtain ⟨d0, hargs⟩ := hok' _ hLm.1
+  simp only [List.cons.injEq, and_true] at hargs
+  have h8 : (s.regs 1).toNat = 8 := hargs.2
+  rw [h8] at hd2 hd4
+  janus_run
+  rw [h8]
+  exact liveMemRet_store rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hd4 hLm.2.1 (zeroed_store _ _)
+
+/-- The size of an 8-byte type among the descriptors, read from memory. -/
+theorem typ8_size {tys : Tys} (hty : TysOK tys) {b : Nat} {L : List (Nat × Nat)} {g : Nat} {m : Memory}
+    (hinv : toyInv tys b L g (view (toyRt tys) L m)) {t : Nat × Nat × Nat} (ht : t ∈ tys) (h8 : t.2.1 = 8) :
+    typSize m t.1 = 8 := by
+  have := (toy_ty_read hty hinv ht).1
+  simpa [typSize, h8] using this
+
+set_option maxRecDepth 20000 in
+theorem typedmemmove8_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop)
+    (hok' : ∀ args, ok A0 args → ∃ t ∈ tys, ∃ d sr, args = [t.1, d, sr] ∧ t.2.1 = 8) :
+    TypedMemmoveLive (toy.link (at0 typedmemmoveCode)) A0 4096 (toyR tys ok) := by
+  rw [link_at0]
+  intro L b s hpc pre
+  obtain ⟨⟨_, ⟨h30a, h30b, _, _, _, _, _⟩, _⟩, hLm, hty0, hty1, ⟨hs1, hs2, hs3⟩, ⟨hd1, hd2, hd3, hd4⟩⟩ := pre
+  obtain ⟨t, ht, d0, s0, hargs, ht8⟩ := hok' _ hLm.1
+  simp only [List.cons.injEq, and_true] at hargs
+  have hinvT : toyInv tys b L (s.regs 28).toNat (view (toyRt tys) L s.mem) := hLm.2.1
+  have h8t : typSize s.mem (s.regs 0).toNat = 8 := by rw [hargs.1]; exact typ8_size hty hinvT ht ht8
+  have h8 : s.mem.readLE (s.regs 0).toNat 8 = 8 := h8t
+  rw [h8t] at hs2 hd2 hd4
+  janus_run
+  rw [h8]
+  refine liveMemRet_store rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hd4 hLm.2.1 ?_
+  intro i hi
+  exact IfaceModel.bytes_writeLE_readLE _ _ _ _ _ hi
+
+set_option maxRecDepth 20000 in
+theorem typedmemclr8_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop)
+    (hok' : ∀ args, ok A0 args → ∃ t ∈ tys, ∃ d, args = [t.1, d] ∧ t.2.1 = 8) :
+    TypedMemclrLive (toy.link (at0 typedmemclrCode)) A0 4096 (toyR tys ok) := by
+  rw [link_at0]
+  intro L b s hpc pre
+  obtain ⟨⟨_, ⟨h30a, h30b, _, _, _, _, _⟩, _⟩, hLm, hty0, hty1, ⟨hd1, hd2, hd3, hd4⟩⟩ := pre
+  obtain ⟨t, ht, d0, hargs, ht8⟩ := hok' _ hLm.1
+  simp only [List.cons.injEq, and_true] at hargs
+  have hinvT : toyInv tys b L (s.regs 28).toNat (view (toyRt tys) L s.mem) := hLm.2.1
+  have h8t : typSize s.mem (s.regs 0).toNat = 8 := by rw [hargs.1]; exact typ8_size hty hinvT ht ht8
+  have h8 : s.mem.readLE (s.regs 0).toNat 8 = 8 := h8t
+  rw [h8t] at hd2 hd4
+  janus_run
+  rw [h8]
+  exact liveMemRet_store rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hd4 hLm.2.1 (zeroed_store _ _)
 
 end Janus.Contracts.LiveSat
