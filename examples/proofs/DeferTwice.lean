@@ -25,8 +25,8 @@ local macro "fvA" : term => `(janus_eval% (Extracted.program.data.head!.base))
 local macro "func1A" : term =>
   `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice.func1"))
 
-/-- `DeferTwice`'s funcval: the closure's entry, in `.rodata`. -/
 set_option maxRecDepth 100000 in
+/-- `DeferTwice`'s funcval: the closure's entry, in `.rodata`. -/
 theorem fv_read (m : Memory) (hd : Extracted.program.DataLoaded m) : m.readLE fvA 8 = func1A :=
   readLE_of_dataRead hd (by decide)
 
