@@ -703,4 +703,78 @@ theorem seg_rec_call (c : State) (j n fn : Nat) (hpc : c.pc = BitVec.ofNat 64 eL
     janus_run [hph, hnd', hrs', hn', hmul, hmul2, hfn1]
   all_goals sorry
 
+set_option maxHeartbeats 0 in
+/-- `LH` in the record phase with an empty top record of the frame: the model pops it. -/
+theorem seg_rec_pop (c : State) (j : Nat) (hpc : c.pc = BitVec.ofNat 64 eLH)
+    (hal : c.sp.toNat % 16 = 0) (hsp : c.sp.toNat + 104 ≤ 2 ^ 48)
+    (hacc : c.mem.accessible c.sp.toNat 96 true = true) (hB : c.mem.accessible B 0x1000 true = true)
+    (hph : c.mem.readLE (c.sp.toNat + 32) 8 = 0) (hnd : ndef c.mem = j + 1) (hj : j < 8)
+    (hrs : recSp c.mem j = c.mem.readLE c.sp.toNat 8) (hn : recN c.mem j = 0) :
+    ReachesRet qE (BitVec.ofNat 64 (E + 0x358)) c (fun e =>
+      e.mem = ((c.mem.writeLE (j * 96 + 66064) 8 1).writeLE 65544 8 j) ∧ e.sp = c.sp ∧
+      e.regs 28 = c.regs 28 ∧ e.regs 18 = c.regs 18) := by
+  have hnd' : c.mem.readLE 65544 8 = j + 1 := hnd
+  have hrs' : c.mem.readLE (j * 96 + 66048) 8 = c.mem.readLE c.sp.toNat 8 := by
+    rw [← hrs]; simp only [recSp, rd, recAt, B]; congr 1; omega
+  have hn' : c.mem.readLE (j * 96 + 66072) 8 = 0 := by
+    rw [← hn]; simp only [recN, rd, recAt, B]; congr 1; omega
+  have hmul : (BitVec.ofNat 64 (j + 1) - 1#64) = BitVec.ofNat 64 j := by
+    apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
+  have hmul2 : (BitVec.ofNat 64 j * 96#64).toNat = j * 96 := by
+    rw [BitVec.toNat_mul, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; omega
+  have hB' : c.mem.accessible 65536 4096 true = true := hB
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
+  dsimp only at *
+  simp only [eLH, E, Nat.reduceAdd] at hpc ⊢
+  subst hpc
+  janus_run [hph, hnd', hrs', hn', hmul, hmul2]
+
+set_option maxHeartbeats 0 in
+/-- `LH` in the record phase with no record of the frame on top: the loop ends. A panic or
+`Goexit` goes to the unwinding state (`RP` with `SP` the frame's entry `SP`); `deferreturn`
+returns to its caller. -/
+theorem seg_fin (c : State) (mode : DeferMode) (bound lr x29 : Nat) (hpc : c.pc = BitVec.ofNat 64 eLH)
+    (hal : c.sp.toNat % 16 = 0) (hsp : c.sp.toNat + 104 ≤ 2 ^ 48)
+    (hacc : c.mem.accessible c.sp.toNat 96 true = true) (hB : c.mem.accessible B 0x1000 true = true)
+    (hph : c.mem.readLE (c.sp.toNat + 32) 8 = 0)
+    (hend : ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ j < 8 ∧ recSp c.mem j ≠ c.mem.readLE c.sp.toNat 8)
+    (hmode : c.mem.readLE (c.sp.toNat + 24) 8 = modeCode mode)
+    (hbound : c.mem.readLE (c.sp.toNat + 8) 8 = bound) (hbd : bound < 2 ^ 64)
+    (hlr : c.mem.readLE (c.sp.toNat + 64) 8 = lr) (hx29 : c.mem.readLE (c.sp.toNat + 72) 8 = x29)
+    (hfsp : c.mem.readLE c.sp.toNat 8 < 2 ^ 64) (hlrb : mode = .ret → lr % 4 = 0 ∧ lr < 2 ^ 48) :
+    ReachesRet qE (if mode = .ret then BitVec.ofNat 64 lr else BitVec.ofNat 64 RPa) c (fun d =>
+      d.mem = c.mem ∧ d.regs 28 = c.regs 28 ∧ d.regs 18 = c.regs 18 ∧
+      (if mode = .ret then d.sp = BitVec.ofNat 64 (c.mem.readLE c.sp.toNat 8) ∧ d.regs 29 = BitVec.ofNat 64 x29
+       else d.sp = BitVec.ofNat 64 bound)) := by
+  have hB' : c.mem.accessible 65536 4096 true = true := hB
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
+  dsimp only at *
+  simp only [eLH, E, Nat.reduceAdd] at hpc
+  subst hpc
+  rcases hend with hend | ⟨j, hnd, hj, hrs⟩
+  · have hnd' : cm.readLE 65544 8 = 0 := hend
+    cases mode
+    · simp only [modeCode] at hmode; simp only [reduceIte, reduceCtorEq]
+      janus_run [hph, hnd', hmode, hbound]
+    · simp only [modeCode] at hmode; simp only [reduceIte, reduceCtorEq]
+      janus_run [hph, hnd', hmode, hbound]
+    · obtain ⟨hl4, hl48⟩ := hlrb rfl
+      simp only [modeCode] at hmode; simp only [reduceIte]
+      janus_run [hph, hnd', hmode, hlr, hx29]
+  · have hnd' : cm.readLE 65544 8 = j + 1 := hnd
+    have hrs' : ¬ cm.readLE (j * 96 + 66048) 8 = cm.readLE (BitVec.toNat csp) 8 := by
+      intro h; apply hrs; simp only [recSp, rd, recAt, B]; rw [← h]; congr 1; omega
+    have hmul : (BitVec.ofNat 64 (j + 1) - 1#64) = BitVec.ofNat 64 j := by
+      apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
+    have hmul2 : (BitVec.ofNat 64 j * 96#64).toNat = j * 96 := by
+      rw [BitVec.toNat_mul, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; omega
+    cases mode
+    · simp only [modeCode] at hmode; simp only [reduceIte, reduceCtorEq]
+      janus_run [hph, hnd', hmode, hbound, hmul, hmul2]
+    · simp only [modeCode] at hmode; simp only [reduceIte, reduceCtorEq]
+      janus_run [hph, hnd', hmode, hbound, hmul, hmul2]
+    · obtain ⟨hl4, hl48⟩ := hlrb rfl
+      simp only [modeCode] at hmode; simp only [reduceIte]
+      janus_run [hph, hnd', hmode, hlr, hx29, hmul, hmul2]
+
 end Janus.Contracts.PanicSat
