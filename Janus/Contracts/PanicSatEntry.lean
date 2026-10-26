@@ -8,6 +8,8 @@ head `LH` in a state meeting the invariant `Inv0` of `PanicSatEngine`; with `eng
 the three contracts.
 -/
 
+set_option linter.constructorNameAsVariable false
+
 namespace Janus.Contracts.PanicSat
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Panic
