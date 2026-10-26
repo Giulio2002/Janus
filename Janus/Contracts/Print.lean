@@ -1,4 +1,5 @@
 import Janus.Contracts.Syscall
+import Janus.Spec.Basic
 import Janus.Spec.Print
 
 /-!
@@ -183,6 +184,8 @@ def lockHeld (m : Memory) (l : Nat) : Prop := m.readLE l 1 % 2 = 1
 
 /-- `m.locks` of the M of the `g` at `g` (as a raw 32-bit value). -/
 def mLocksOf (m : Memory) (g : Nat) : Nat := m.readLE (m.readLE (g + gM) 8 + mLocks) 4
+
+attribute [janus_exec, janus_post] gM gWritebuf mLocks mDying mPrintlock mLocksOf lockHeld
 
 /-- What `lock2`/`unlock2` need at the call (arm64): the mutex key (8 bytes at `X0`) writable,
 the M (through `g.m`) readable with `m.locks` writable, every byte they write inside `rt`, and
@@ -806,5 +809,57 @@ theorem getLsbD63 (v : BitVec 64) : v.getLsbD 63 = decide (9223372036854775808 �
   have h := BitVec.msb_eq_decide v
   rw [BitVec.msb_eq_getLsbD_last] at h
   simpa using h
+
+/-! ## The runtime state `print` and `println` need (arm64)
+
+`PrintReady A rt below above adj s`: what a Go call state `s` of a function that prints must
+satisfy, single-threaded, outside any other `print` (the M's print count 0). `A` holds the addresses
+of the runtime's print globals in the binary (`runtime.panicking`, `printBacklogIndex`,
+`printBacklog`, `overrideWrite`, `debuglock`), read off the code by the proof. `rt` are the
+runtime-owned ranges the mutex contracts write (`Lock2Contract`, `Unlock2Contract`): the mutex key and
+`m.locks` lie in them; everything else the print path reads lies outside them. The stack window
+`[SP - below, SP + above)` holds every frame of the call (and the mutex contracts' windows). -/
+
+/-- The addresses of the runtime's print globals (see `PrintReady`). -/
+structure PrintGlobals where
+  pk : Nat
+  bi : Nat
+  bl : Nat
+  ow : Nat
+  dl : Nat
+
+open Janus.Spec in
+/-- See the section doc. -/
+def PrintReady (A : PrintGlobals) (rt : List (Nat × Nat)) (below above adj : Nat) (s : State) : Prop :=
+  let SP := s.sp.toNat
+  let G := (s.regs 28).toNat
+  let MP := s.mem.readLE (G + gM) 8
+  -- the stack and the stack-growth checks
+  StackOK s below above ∧ GuardOK s adj ∧
+  -- `g`: `stackguard0`, `g.m`, no `writebuf`
+  0 < G ∧ G + 256 ≤ 2 ^ 48 ∧ s.mem.accessible (G + gM) 8 false = true ∧
+  s.mem.accessible (G + gWritebuf) 16 false = true ∧ s.mem.readLE (G + gWritebuf) 8 = 0 ∧
+  -- the M: `locks`, `dying`, the print count (0: outside any print)
+  MP + 280 ≤ 2 ^ 48 ∧ s.mem.accessible (MP + mLocks) 16 true = true ∧
+  s.mem.readLE (MP + mDying) 4 = 0 ∧ s.mem.readLE (MP + mPrintlock) 1 = 0 ∧
+  s.mem.readLE (MP + mLocks) 4 + 3 < 2 ^ 31 ∧
+  -- the globals: not panicking-dependent, the backlog index in range, no `overrideWrite`,
+  -- `debuglock` free
+  s.mem.accessible A.pk 4 false = true ∧ s.mem.accessible A.bi 8 true = true ∧
+  s.mem.readLE A.bi 8 < 512 ∧ s.mem.accessible A.bl 512 true = true ∧
+  s.mem.accessible A.ow 8 false = true ∧ s.mem.readLE A.ow 8 = 0 ∧
+  s.mem.accessible A.dl 8 true = true ∧ ¬ lockHeld s.mem A.dl ∧
+  -- what the mutex contracts may write, and what they may not
+  InRanges A.dl 8 rt ∧ InRanges (MP + mLocks) 4 rt ∧
+  Outside (SP - below) (below + above) rt ∧ Outside (G + 16) 8 rt ∧ Outside (G + gM) 8 rt ∧
+  Outside (G + gWritebuf) 16 rt ∧ Outside (MP + mDying) 4 rt ∧ Outside (MP + mPrintlock) 1 rt ∧
+  Outside A.pk 4 rt ∧ Outside A.bi 8 rt ∧ Outside A.bl 512 rt ∧ Outside A.ow 8 rt ∧
+  -- the stack window, `g`'s and the M's fields and the globals apart
+  Sep (SP - below) (below + above) [(G + 16, 8), (G + gM, 8), (G + gWritebuf, 16), (MP + mLocks, 16),
+    (A.pk, 4), (A.bi, 8), (A.bl, 512), (A.ow, 8), (A.dl, 8)] ∧
+  Sep (MP + mLocks) 16 [(G + 16, 8), (G + gM, 8), (G + gWritebuf, 16), (A.pk, 4), (A.bi, 8),
+    (A.bl, 512), (A.ow, 8), (A.dl, 8)] ∧
+  Sep (G + 16) 8 [(A.bi, 8), (A.bl, 512), (A.dl, 8)] ∧ Sep (G + gM) 8 [(A.bi, 8), (A.bl, 512), (A.dl, 8)] ∧
+  Sep (G + gWritebuf) 16 [(A.bi, 8), (A.bl, 512), (A.dl, 8)]
 
 end Janus.Print
