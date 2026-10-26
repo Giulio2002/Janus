@@ -1022,7 +1022,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : N
 
 /-- So the guarantee is reached: from the witness state, for every kernel, `println(true)` returns and the trace gains what the two writes may append. -/
 theorem returns (E : KEnv) (k : Kern) :
-    ReturnsK ((P.link implAt).withExit ret) E
+    ReturnsK ((Extracted.program.link implAt).withExit ret) E
       (fun s' k' => FFI.ABIReturnC (wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) s' ∧
         ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
       (fun _ _ => False) (wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) k :=

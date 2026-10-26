@@ -45,6 +45,7 @@ def main():
     bad = 0
     for isa in ("arm64", "amd64"):
         for name, frags in EXAMPLES.items():
+            frags = [f for f in frags if os.path.exists(os.path.join(root, 'examples', 'proofs-print', isa, 'src', f + '.lean'))]
             out = build(isa, name, frags)
             if out is None:
                 continue

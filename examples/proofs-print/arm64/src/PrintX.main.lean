@@ -186,7 +186,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : N
 
 /-- So the guarantee is reached: from the witness state, for every kernel, `println("x =", 42)` returns and the trace gains what the three writes may append. -/
 theorem returns (E : KEnv) (k : Kern) :
-    ReturnsK ((P.link implAt).withExit ret) E
+    ReturnsK ((Extracted.program.link implAt).withExit ret) E
       (fun s' k' => FFI.ABIReturnC (wstate (fun i => if i = 0 then 42#64 else 0)) s' ∧
         ∃ es, k' = k.appendTrace es ∧
           Emits 2 [Janus.Spec.Print.ofString "x = ", Janus.Spec.Print.decimal 42, [10#8]] es)

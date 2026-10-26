@@ -184,7 +184,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : N
 
 /-- So the guarantee is reached: from the witness state, for every kernel, `println(s)` for the one-byte string at the program's `"\n"` returns and the trace gains what the two writes may append. -/
 theorem returns (E : KEnv) (k : Kern) :
-    ReturnsK ((P.link implAt).withExit ret) E
+    ReturnsK ((Extracted.program.link implAt).withExit ret) E
       (fun s' k' => FFI.ABIReturnC (wstate (fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0)) s' ∧
         ∃ es, k' = k.appendTrace es ∧
           Emits 2 [readBytes wmem NL 1, [10#8]] es)
