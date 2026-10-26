@@ -304,6 +304,15 @@ theorem tableOK_w {T : List FuncInfo} (h : a + n ≤ B + 0x28 ∨ (B + 0x30 ≤ 
 theorem readLE_writeLE_same' {a n v b : Nat} (h : b = a) : (m.writeLE a n v).readLE b n = v % 256 ^ n := by
   rw [h]; exact m.readLE_writeLE_self a n v
 
+theorem recFns_slot (i : Nat) (h : recAt i + 32 + 8 * j ≤ a) :
+    recFns (m.writeLE a n v) i j = recFns m i j := by
+  induction j with
+  | zero => rfl
+  | succ j ih =>
+    show rd (m.writeLE a n v) (recAt i + 32 + 8 * j) :: recFns (m.writeLE a n v) i j =
+      rd m (recAt i + 32 + 8 * j) :: recFns m i j
+    rw [rd_w (by omega), ih (by omega)]
+
 theorem panList_succ (m : Memory) (k : Nat) : panList m (k + 1) = decPan m k :: panList m k := rfl
 theorem recList_succ (m : Memory) (k : Nat) : recList m (k + 1) = decRec m k ++ recList m k := rfl
 theorem recFns_succ (m : Memory) (i j : Nat) : recFns m i (j + 1) = recFn m i j :: recFns m i j := rfl

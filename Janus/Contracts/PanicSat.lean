@@ -197,4 +197,261 @@ theorem deferproc_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (s : S
       model_simp
       omega
 
+/-! ## `deferrangefunc` -/
+
+set_option maxHeartbeats 0 in
+theorem deferrangefunc_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (s : State)
+    (hpc : s.pc = BitVec.ofNat 64 eDeferrangefunc) (hpre : PanicPre (P0 T RPa) 0 s) (hroom : 0 < room0 s.mem) :
+    ReachesRet p (s.regs 30) s (fun s' => PanicRet (P0 T RPa) 0 s s' ∧ (s'.regs 0).toNat ≠ 0 ∧
+      defers0 s'.mem = { sp := s.sp.toNat, fns := [], token := some (s'.regs 1).toNat } :: defers0 s.mem ∧
+      KeepsBut (P0 T RPa) (gOf s) 1 s.mem s'.mem) := by
+  apply reachesRet_transfer hp
+  obtain ⟨henv, -, ⟨h30a, h30b, hal, hst, h8, hwin, hacc⟩, hout⟩ := hpre
+  rw [P0_env] at henv
+  have henv' := henv
+  unfold Env0 at henv'
+  obtain ⟨hB, hnp, hnd, hrec, htab⟩ := henv'
+  obtain ⟨-, hnd8, -⟩ := room0_pos hroom
+  have hnd : s.mem.readLE 65544 8 < 8 := hnd8
+  have hmul : (BitVec.ofNat 64 (s.mem.readLE 65544 8) * 96#64).toNat = s.mem.readLE 65544 8 * 96 := by
+    rw [BitVec.toNat_mul, BitVec.toNat_ofNat, BitVec.toNat_ofNat]
+    rw [Nat.mod_eq_of_lt (a := s.mem.readLE 65544 8) (by omega)]; omega
+  have hB' : s.mem.accessible 65536 4096 true = true := hB
+  janus_run [hmul]
+  generalize hk : s.mem.readLE 65544 8 = k at *
+  have hk' : ndef s.mem = k := hk
+  refine ⟨panicRet_of _ 0 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
+    rfl ?_ ?_, ?_, ?_⟩
+  · rw [P0_priv, P0_depth]; simp only [B, calleeStack, List.cons_append, List.nil_append]; janus_frame
+  · rw [P0_env]; unfold Env0; dsimp only
+    refine ⟨by simpa using hB, ?_, ?_, fun i hi => ?_, ?_⟩
+    · simp only [npan, rd, B]; model_simp; exact hnp
+    · simp only [ndef, rd, B]; model_simp; omega
+    · simp only [ndef, rd, B, recN, recTok, recConv, recAt] at hi ⊢
+      model_simp at hi
+      rw [Nat.mod_eq_of_lt (by omega)] at hi
+      by_cases hik : i = k
+      · subst hik; model_simp; omega
+      · have hik' : i < k := by omega
+        have := hrec i (by rw [hk']; omega)
+        simp only [recN, recTok, recConv, recAt, rd, B] at this
+        model_simp; exact this
+    · repeat' first | apply tableOK_w | exact htab
+      all_goals (simp only [tabAt, B, Nat.reduceAdd, Nat.reduceMul]; omega)
+  · rw [defers0_eq, defers0_eq, hk']
+    try simp only [ndef, rd, B]
+    try model_simp
+    rw [Nat.mod_eq_of_lt (by omega), Nat.min_eq_left (by omega), Nat.min_eq_left (by omega), recList_succ]
+    try model_simp
+    unfold decRec
+    simp only [recTok, recConv, recN, recSp, rd, recAt, B]
+    try model_simp
+    have hne : k * 96 + 66048 ≠ 0 := by omega
+    simp only [hne, false_or, ne_eq, not_true_eq_false, or_false, ite_false, show min 0 8 = 0 from rfl,
+      show PanicModel.recFns _ k 0 = [] from rfl, Nat.mod_eq_of_lt (BitVec.isLt _), List.cons_append,
+      List.nil_append, setReg]
+    have hm : (k * 96 + 66048) % 18446744073709551616 = k * 96 + 66048 := Nat.mod_eq_of_lt (by omega)
+    rw [hm, if_neg hne]; rfl
+  · refine ⟨?_, ?_, rfl, ?_⟩
+    · rw [P0_panics, P0_panics, panics0_eq, panics0_eq]; simp only [npan, rd, B]; model_simp
+    · rw [P0_saved, P0_saved, saved0_eq, saved0_eq]; simp only [rd, B]; model_simp
+    · rw [P0_room, P0_room, room0_eq, room0_eq, hk']; simp only [npan, ndef, rd, B]
+      model_simp
+      rw [Nat.mod_eq_of_lt (by omega), Nat.min_eq_left (by omega : k + 1 ≤ 8), Nat.min_eq_left (by omega : k ≤ 8),
+        capMin_succ]
+      model_simp
+      simp only [recN, rd, recAt, B]
+      model_simp
+      omega
+
+/-! ## `deferprocStack` -/
+
+set_option maxHeartbeats 0 in
+theorem deferprocStack_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (s : State)
+    (hpc : s.pc = BitVec.ofNat 64 eDeferprocStack) (hpre : PanicPre (P0 T RPa) 1 s) (hroom : 0 < room0 s.mem)
+    (hd : (s.regs 0).toNat + 48 ≤ 2 ^ 48) (hda : s.mem.accessible (s.regs 0).toNat 48 true = true)
+    (hdo : Outside (s.regs 0).toNat 48 (P0 T RPa).priv) :
+    ReachesRet p (s.regs 30) s (fun s' => PanicRet (P0 T RPa) 1 s s' ∧
+      defers0 s'.mem = { sp := s.sp.toNat, fns := [s.mem.readLE ((s.regs 0).toNat + 24) 8] } :: defers0 s.mem ∧
+      KeepsBut (P0 T RPa) (gOf s) 1 s.mem s'.mem) := by
+  apply reachesRet_transfer hp
+  obtain ⟨henv, -, ⟨h30a, h30b, hal, hst, h8, hwin, hacc⟩, hout⟩ := hpre
+  rw [P0_env] at henv
+  have henv' := henv
+  unfold Env0 at henv'
+  obtain ⟨hB, hnp, hnd, hrec, htab⟩ := henv'
+  obtain ⟨-, hnd8, -⟩ := room0_pos hroom
+  have hnd : s.mem.readLE 65544 8 < 8 := hnd8
+  have hmul : (BitVec.ofNat 64 (s.mem.readLE 65544 8) * 96#64).toNat = s.mem.readLE 65544 8 * 96 := by
+    rw [BitVec.toNat_mul, BitVec.toNat_ofNat, BitVec.toNat_ofNat]
+    rw [Nat.mod_eq_of_lt (a := s.mem.readLE 65544 8) (by omega)]; omega
+  have hB' : s.mem.accessible 65536 4096 true = true := hB
+  have hdr : s.mem.accessible ((s.regs 0).toNat + 24) 8 false = true :=
+    Janus.Contracts.IfaceModel.acc_read_of_write (Memory.accessible_mono _ hda (by omega) (by omega))
+  janus_run [hmul]
+  generalize hk : s.mem.readLE 65544 8 = k at *
+  have hk' : ndef s.mem = k := hk
+  refine ⟨panicRet_of _ 1 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
+    rfl ?_ ?_, ?_, ?_⟩
+  · rw [P0_priv, P0_depth]; simp only [B, calleeStack, List.cons_append, List.nil_append]; janus_frame
+  · rw [P0_env]; unfold Env0; dsimp only
+    refine ⟨by simpa using hB, ?_, ?_, fun i hi => ?_, ?_⟩
+    · simp only [npan, rd, B]; model_simp; exact hnp
+    · simp only [ndef, rd, B]; model_simp; omega
+    · simp only [ndef, rd, B, recN, recTok, recConv, recAt] at hi ⊢
+      model_simp at hi
+      rw [Nat.mod_eq_of_lt (by omega)] at hi
+      by_cases hik : i = k
+      · subst hik; model_simp; omega
+      · have hik' : i < k := by omega
+        have := hrec i (by rw [hk']; omega)
+        simp only [recN, recTok, recConv, recAt, rd, B] at this
+        model_simp; exact this
+    · repeat' first | apply tableOK_w | exact htab
+      all_goals (simp only [tabAt, B, Nat.reduceAdd, Nat.reduceMul]; omega)
+  · rw [defers0_eq, defers0_eq, hk']
+    try simp only [ndef, rd, B]
+    try model_simp
+    rw [Nat.mod_eq_of_lt (by omega), Nat.min_eq_left (by omega), Nat.min_eq_left (by omega), recList_succ]
+    try model_simp
+    unfold decRec
+    simp only [recTok, recConv, recN, recSp, rd, recAt, B]
+    try model_simp
+    simp only [true_or, ite_true, show min 1 8 = 1 from rfl, recFns_succ, recFn, rd, recAt, B,
+      show PanicModel.recFns _ k 0 = [] from rfl]
+    try model_simp
+    simp only [Nat.mod_eq_of_lt (BitVec.isLt _), List.map_cons, List.map_nil, List.cons_append, List.nil_append]
+    rw [Nat.mod_eq_of_lt (lt_of_lt_of_eq (Memory.readLE_lt _ _ 8) (by decide))]
+  · refine ⟨?_, ?_, rfl, ?_⟩
+    · rw [P0_panics, P0_panics, panics0_eq, panics0_eq]; simp only [npan, rd, B]; model_simp
+    · rw [P0_saved, P0_saved, saved0_eq, saved0_eq]; simp only [rd, B]; model_simp
+    · rw [P0_room, P0_room, room0_eq, room0_eq, hk']; simp only [npan, ndef, rd, B]
+      model_simp
+      rw [Nat.mod_eq_of_lt (by omega), Nat.min_eq_left (by omega : k + 1 ≤ 8), Nat.min_eq_left (by omega : k ≤ 8),
+        capMin_succ]
+      model_simp
+      simp only [recN, rd, recAt, B]
+      model_simp
+      omega
+
+/-! ## `deferprocat` -/
+
+/-- The top record of a chain that starts with a range-over-func record is a raw record with a
+token and no converted flag. -/
+theorem top_group {T : List FuncInfo} {m : Memory} (henv : Env0 T m) {r : DeferRec} {rest : List DeferRec}
+    {t : Nat} (h : defers0 m = r :: rest) (ht : r.token = some t) :
+    ∃ j, ndef m = j + 1 ∧ recTok m j ≠ 0 ∧ recConv m j = 0 ∧
+      r = { sp := recSp m j, fns := recFns m j (min (recN m j) 8), token := some (recTok m j) } ∧
+      rest = recList m j := by
+  unfold Env0 at henv
+  obtain ⟨-, -, hnd, hrec, -⟩ := henv
+  rw [defers0_eq] at h
+  cases hk : ndef m with
+  | zero => rw [hk] at h; simp [recList] at h
+  | succ j =>
+    rw [hk, Nat.min_eq_left (by omega), recList_succ] at h
+    have hj := hrec j (by omega)
+    unfold decRec at h
+    split at h
+    · rename_i hc
+      have h1 := hj.2 hc
+      obtain ⟨n, hn⟩ : ∃ n, min (recN m j) 8 = n + 1 := ⟨min (recN m j) 8 - 1, by omega⟩
+      rw [hn, recFns_succ] at h
+      simp only [List.map_cons, List.cons_append, List.cons.injEq] at h
+      rw [← h.1] at ht; simp at ht
+    · rename_i hc
+      simp only [not_or, ne_eq, Decidable.not_not] at hc
+      simp only [List.cons_append, List.nil_append, List.cons.injEq] at h
+      exact ⟨j, rfl, hc.1, hc.2, h.1.symm, h.2.symm⟩
+
+set_option maxHeartbeats 0 in
+theorem deferprocat_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (s : State)
+    (hpc : s.pc = BitVec.ofNat 64 eDeferprocat) (hpre : PanicPre (P0 T RPa) 2 s) (hroom : 0 < room0 s.mem)
+    (htop : ∃ r rest, defers0 s.mem = r :: rest ∧ r.token = some (s.regs 2).toNat) :
+    ReachesRet p (s.regs 30) s (fun s' => PanicRet (P0 T RPa) 2 s s' ∧
+      (∀ r rest, defers0 s.mem = r :: rest →
+        defers0 s'.mem = { r with fns := (s.regs 0).toNat :: r.fns } :: rest) ∧
+      KeepsBut (P0 T RPa) (gOf s) 1 s.mem s'.mem) := by
+  apply reachesRet_transfer hp
+  obtain ⟨henv, -, ⟨h30a, h30b, hal, hst, h8, hwin, hacc⟩, hout⟩ := hpre
+  rw [P0_env] at henv
+  obtain ⟨r, rest, hdr, hrt⟩ := htop
+  obtain ⟨j, hj, htok, hconv, hr, hrest⟩ := top_group henv hdr hrt
+  have henv' := henv
+  unfold Env0 at henv'
+  obtain ⟨hB, hnp, hnd, hrec, htab⟩ := henv'
+  have hcap := (room0_pos hroom).2.2
+  rw [hj, Nat.min_eq_left (by omega), capMin_succ] at hcap
+  have hnj : recN s.mem j < 8 := by omega
+  have hjn : s.mem.readLE 65544 8 = j + 1 := hj
+  have hnj' : s.mem.readLE (j * 96 + 66072) 8 < 8 := by
+    rw [show j * 96 + 66072 = 66048 + 96 * j + 24 by omega]; exact hnj
+  have hj8 : j < 8 := by omega
+  have hmul : (BitVec.ofNat 64 (j + 1) - 1#64) = BitVec.ofNat 64 j := by
+    apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
+  have hmul2 : (BitVec.ofNat 64 j * 96#64).toNat = j * 96 := by
+    rw [BitVec.toNat_mul, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; omega
+  have hB' : s.mem.accessible 65536 4096 true = true := hB
+  janus_run [hjn, hmul, hmul2]
+  generalize hn : s.mem.readLE (j * 96 + 66072) 8 = n at *
+  have hn' : recN s.mem j = n := by simp only [recN, rd, recAt, B]; rw [← hn]; congr 1; omega
+  refine ⟨panicRet_of _ 2 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
+    rfl ?_ ?_, ?_, ?_⟩
+  · rw [P0_priv, P0_depth]; simp only [B, calleeStack, List.cons_append, List.nil_append]; janus_frame
+  · rw [P0_env]; unfold Env0; dsimp only
+    refine ⟨by simpa using hB, ?_, ?_, fun i hi => ?_, ?_⟩
+    · simp only [npan, rd, B]; model_simp; exact hnp
+    · simp only [ndef, rd, B]; model_simp; exact hnd
+    · simp only [ndef, rd, B, recN, recTok, recConv, recAt] at hi ⊢
+      model_simp at hi
+      by_cases hij : i = j
+      · subst hij; model_simp; omega
+      · have := hrec i (by simp only [ndef, rd, B]; omega)
+        simp only [recN, recTok, recConv, recAt, rd, B] at this
+        have hij' : i < j := by omega
+        simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint]
+        exact this
+    · repeat' first | apply tableOK_w | exact htab
+      all_goals (simp only [tabAt, B, Nat.reduceAdd, Nat.reduceMul]; omega)
+  · intro r' rest' hdr'
+    rw [hdr] at hdr'
+    obtain ⟨rfl, rfl⟩ := List.cons.inj hdr'
+    rw [hr, hrest, defers0_eq]
+    try simp only [ndef, rd, B]
+    try model_simp
+    rw [hjn, Nat.min_eq_left (by omega), recList_succ]
+    rw [recList_w (k := j) (by simp only [recAt, B]; omega), recList_w (k := j) (by simp only [recAt, B]; omega)]
+    unfold decRec
+    have e1 : recTok ((s.mem.writeLE (j * 96 + (66080 + n * 8)) 8 (BitVec.toNat (s.regs 0))).writeLE
+        (j * 96 + 66072) 8 (n + 1)) j = recTok s.mem j := by
+      simp only [recTok, rd, recAt, B]; model_simp
+    have e2 : recConv ((s.mem.writeLE (j * 96 + (66080 + n * 8)) 8 (BitVec.toNat (s.regs 0))).writeLE
+        (j * 96 + 66072) 8 (n + 1)) j = recConv s.mem j := by
+      simp only [recConv, rd, recAt, B]; model_simp
+    have e3 : recSp ((s.mem.writeLE (j * 96 + (66080 + n * 8)) 8 (BitVec.toNat (s.regs 0))).writeLE
+        (j * 96 + 66072) 8 (n + 1)) j = recSp s.mem j := by
+      simp only [recSp, rd, recAt, B]; model_simp
+    have e4 : recN ((s.mem.writeLE (j * 96 + (66080 + n * 8)) 8 (BitVec.toNat (s.regs 0))).writeLE
+        (j * 96 + 66072) 8 (n + 1)) j = n + 1 := by
+      simp only [recN, rd, recAt, B]; model_simp; omega
+    have e5 : PanicModel.recFns ((s.mem.writeLE (j * 96 + (66080 + n * 8)) 8 (BitVec.toNat (s.regs 0))).writeLE
+        (j * 96 + 66072) 8 (n + 1)) j (n + 1) = (s.regs 0).toNat :: PanicModel.recFns s.mem j n := by
+      rw [recFns_succ, recFns_w j (by simp only [recAt, B]; omega) n (by omega),
+        recFns_slot j (by simp only [recAt, B]; omega)]
+      simp only [recFn, rd, recAt, B]; model_simp
+      rw [Nat.mod_eq_of_lt (BitVec.isLt _)]
+    rw [e1, e2, e3, e4, hn', Nat.min_eq_left (by omega : n + 1 ≤ 8), Nat.min_eq_left (by omega : n ≤ 8), e5]
+    simp only [htok, hconv, false_or, ne_eq, not_true_eq_false, ite_false, List.cons_append, List.nil_append]
+  · refine ⟨?_, ?_, rfl, ?_⟩
+    · rw [P0_panics, P0_panics, panics0_eq, panics0_eq]; simp only [npan, rd, B]; model_simp
+    · rw [P0_saved, P0_saved, saved0_eq, saved0_eq]; simp only [rd, B]; model_simp
+    · rw [P0_room, P0_room, room0_eq, room0_eq]; simp only [npan, ndef, rd, B]
+      model_simp
+      rw [hjn, Nat.min_eq_left (by omega : j + 1 ≤ 8), capMin_succ, capMin_succ,
+        capMin_w (k := j) (by simp only [recAt, B]; omega), capMin_w (k := j) (by simp only [recAt, B]; omega), hn']
+      simp only [recN, rd, recAt, B]
+      model_simp
+      omega
+
+
 end Janus.Contracts.PanicSat
