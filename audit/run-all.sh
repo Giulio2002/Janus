@@ -220,6 +220,18 @@ else
   printf '%-28s %-8s %s\n' "ASL.*" skipped "set JANUS_AUDIT_ASL=1 (builds JanusASL once, about an hour)"
 fi
 
+# Row RT-PRINT (R8): the print/println format specification Janus.Spec.Print against the Go 1.26
+# runtime, byte for byte, on both ISAs (audit/rt-print/run.sh: every integer kind at the
+# boundaries and at random, bools, strings, pointers, slices, interfaces, and RTPRINT_N random
+# float64 and float32 bit patterns, with complex numbers built from them).
+par_run 'echo "RT-PRINT (audit/rt-print/run.sh: Janus.Spec.Print vs the Go 1.26 runtime):"
+if rtp=$(audit/rt-print/run.sh 2>&1); then
+  echo "  $(tail -1 <<<"$rtp")"
+else
+  echo "  $(tail -1 <<<"$rtp")   <-- BROKEN"
+  broken+=(rt-print)
+fi'
+
 par_run 'echo "model controls (audit/model/Model.lean):"
 if lake env lean audit/model/Model.lean >/dev/null 2>&1; then
   echo "  Model.lean: all decide controls pass, including M1-M3 now faulting (blocked by F5)"

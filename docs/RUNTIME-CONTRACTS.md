@@ -573,3 +573,39 @@ contract is stuck where its precondition holds), `write_full`, `read_some`, `clo
 meets `SchedContract` and `ConvT64Contract`). Examples: `examples/proofs-sys/{arm64,amd64}/`
 (`WriteOut`: `syscall.Write`; `NowNano`: `time.Now().UnixNano()`; `Pid`: `syscall.Getpid`;
 `MustNonNeg`: a path ending in a trap), run by `scripts/verify-sys-examples.sh`.
+
+### `print`/`println` (`Janus/Contracts/Print.lean`, `Janus/Contracts/PrintAmd64.lean`, `Janus/Spec/Print.lean`)
+
+Go lowers `print`/`println` to `printlock`, one `print*` call per argument and `printunlock`; each
+`print*` formats into a buffer and calls `gwrite`, which records the bytes in the crash backlog
+(`recordForPanic`) and writes them to fd 2 (`writeErrData` → `write` → `write1`, one `write(2)` per
+piece). The proofs execute that path from the binary under the kernel semantics, so a theorem is a
+statement about the **fd-2 output trace**: `Print.Emits 2 pieces es` says the events `es` are what
+one `write(2, piece)` per piece may append (nothing on `-errno`, a prefix on a short write), and
+`Emits.full` gives the exact output when every write was complete.
+
+| contract | what it states | used by |
+|---|---|---|
+| `Print.Lock2Contract` / `Amd64.Print.Lock2Contract` | `runtime.lock2(l)` on a free mutex: returns with the key's lock bit set and `m.locks` one higher; every other change inside `rt` and the callee stack window (`AllocRet`/`AllocRet64`); precondition `LockPre rt 0` (the key and `m.locks` inside `rt`, apart; `g.m` outside) | `printlock` when the M's print count is 0 |
+| `Print.Unlock2Contract` / `Amd64.Print.Unlock2Contract` | `runtime.unlock2(l)` on a held mutex: the key's low byte cleared, `m.locks` one lower; precondition `LockPre rt 1` | `printunlock` when the count drops to 0 |
+| `Print.MemmoveContract` / `Amd64.Print.MemmoveContract` | `runtime.memmove(dst, src, n)` with disjoint ranges: memory changes only at `[dst, dst+n)`, which then holds the `n` bytes from `src` | `recordForPanic` (the copy into `printBacklog`) |
+
+Witnesses: `Janus.Contracts.PrintSat` (`lock2_satisfiable`, `unlock2_satisfiable`,
+`memmove_satisfiable`: a store/increment, a store/decrement and a byte-copy loop, each proved
+against its contract; the loop by induction). Each example also links the same code at the
+binary's contract addresses and proves `Witness.nonvacuous` (all hypotheses of `correctness`
+together) and `Witness.returns` (the guarantee reached from that state).
+
+Examples (`examples/print`, `examples/proofs-print/<isa>/`, generated from shared fragments by
+`scripts/gen-print-proofs.py`, verified by `scripts/verify-print-examples.sh`): arm64 `PrintX`
+(`println("x =", x)`: `"x = " ++ decimal(x) ++ "\n"`), `PrintBool` (`println(b)`), `PrintNeg`
+(`print(-17)`: `"-17"`), `PrintStr` (`println(s)`), each with `correctness` and `full_output`.
+amd64: the print path is proved up to `printbool` (`recordForPanic`, `gwrite`, `printstring`,
+`printnl`, `printbool`); `formatBase10` is in progress (`examples/proofs-print/amd64/wip`), and
+the amd64 examples are not written yet.
+
+The output formats of the remaining print functions (`printhex`, `printpointer`, `printslice`,
+`printeface`/`printiface`, `printfloat64/32`, `printcomplex128/64`) are specified in
+`Janus.Spec.Print` and checked against the Go 1.26 runtime by row RT-PRINT (`audit/rt-print`), but
+not yet proved from machine code.
+

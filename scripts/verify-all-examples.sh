@@ -35,6 +35,7 @@ scripts/build-examples.sh >/dev/null
 bash scripts/build-examples-amd64.sh >/dev/null 2>&1
 scripts/build-examples-asm.sh >/dev/null
 scripts/build-examples-sys.sh >/dev/null 2>&1
+scripts/build-examples-print.sh >/dev/null 2>&1
 [ -n "${JANUS_ROOT:-}" ] && (cd "$JANUS_ROOT" && lake build Janus >/dev/null)
 export JANUS_EXAMPLES_PREBUILT=1
 
@@ -177,6 +178,17 @@ for t in "${sys[@]}"; do
   par_run 'JANUS_EXAMPLES_SUMMARY="$tmp/sys-${t/\//-}" scripts/verify-sys-examples.sh "$t" >/dev/null 2>&1 || broken+=("sys:$t")
   cat "$tmp/sys-${t/\//-}" 2>/dev/null | sed "s/^/sys    /"'
 done
+# the print/println examples (examples/print, scripts/verify-print-examples.sh, R8): every generated
+# proof file of both ISAs
+prt=()
+for f in examples/proofs-print/*/*.lean; do
+  [ -f "$f" ] || continue
+  isa="$(basename "$(dirname "$f")")"; prt+=("$isa/$(basename "$f" .lean)")
+done
+for t in "${prt[@]}"; do
+  par_run 'JANUS_EXAMPLES_SUMMARY="$tmp/print-${t/\//-}" scripts/verify-print-examples.sh "$t" >/dev/null 2>&1 || broken+=("print:$t")
+  cat "$tmp/print-${t/\//-}" 2>/dev/null | sed "s/^/print  /"'
+done
 par_wait
 # The manifest: every item that passed (or was skipped as unchanged) in this run; the times of
 # the items that ran (the others keep their last time).
@@ -185,6 +197,6 @@ mv "$manifest.tmp" "$manifest"
 { [ -f "$times" ] && cat "$times"; cat "$tmp"/time-* 2>/dev/null; } |
   awk -F'\t' '{ t[$1] = $2 } END { for (k in t) printf "%s\t%s\n", k, t[k] }' | sort > "$times.tmp" || true
 mv "$times.tmp" "$times"
-echo "total: ${#arm64[@]} arm64 items, ${#amd64[@]} amd64 functions, ${#asm[@]} assembly items, ${#sys[@]} kernel examples, $(( $(date +%s) - wall ))s wall (-j $PAR_JOBS)${changed:+; --changed: unchanged items skipped, not a gate run}"
+echo "total: ${#arm64[@]} arm64 items, ${#amd64[@]} amd64 functions, ${#asm[@]} assembly items, ${#sys[@]} kernel examples, ${#prt[@]} print examples, $(( $(date +%s) - wall ))s wall (-j $PAR_JOBS)${changed:+; --changed: unchanged items skipped, not a gate run}"
 if [ ${#broken[@]} -gt 0 ]; then echo "FAILED: ${broken[*]}"; exit 1; fi
 echo "all ok"

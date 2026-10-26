@@ -17,12 +17,21 @@ fd 2's output.
 
 ## What is executed and what is a contract
 
-Everything above is plain Go (or Go assembly) and decodes, so it is **executed from the
-binary** in the proofs (`examples/proofs-print`): `printlock`, `printunlock`, `printstring`,
-`printsp`, `printnl`, `printbool`, `printuint`, `printint`, `printhex`, `printpointer`,
-`printuintptr`, `printslice`, `printeface`, `printiface`, `internal/strconv.formatBase10`,
-`gwrite`, `recordForPanic`, `writeErrData`, `write`, `write1`. Three runtime functions are
-contracts (`janus extract --contract`), stated here:
+The print path below `print`/`println` is plain Go (or Go assembly) and decodes, so the proofs
+(`examples/proofs-print`) **execute it from the binary**. Proved so far (arm64): `printlock`
+(print count 0, taking `debuglock` through `lock2`, and count ≥ 1), `printunlock` (count 1, through
+`unlock2`), `printstring`, `printnl`, `printbool`, `printuint` with
+`internal/strconv.formatBase10`, `printint`, `gwrite`, `recordForPanic`, `writeErrData`, `write`,
+`write1` (`SVC #0`). On amd64 the same functions are proved up to `printbool`; `formatBase10`,
+`printuint`, `printint`, `printlock`/`printunlock` with the mutex, and the top-level examples are
+in progress. `printsp`, `printhex`, `printpointer`, `printuintptr`, `printslice`, `printeface`,
+`printiface` and the floating-point printers (`printfloat64/32`, `printcomplex128/64`, through
+`internal/strconv`'s shortest formatting) are not proved yet: their output format is specified
+(`Janus.Spec.Print`: `fmtHex`, `fmtPointer`, `fmtSlice`, `fmtEface`, `fmtF64`, `fmtF32`,
+`fmtC128`, `fmtC64`) and differential-tested against the Go 1.26 runtime (`audit/rt-print`), but
+no theorem about the machine code relies on those specifications yet.
+
+Three runtime functions are contracts (`janus extract --contract`), stated here:
 
 * `runtime.lock2` / `runtime.unlock2`, the mutex under `printlock` (`Lock2Contract`,
   `Unlock2Contract`). Single-threaded, `printlock` only takes `runtime.debuglock` when the M's
@@ -31,13 +40,9 @@ contracts (`janus extract --contract`), stated here:
   runtime-owned ranges `rt`. Concurrency is out of scope; nothing here models a second thread.
 * `runtime.memmove` (`MemmoveContract`): the copy `recordForPanic` makes of every piece into the
   512-byte crash backlog `runtime.printBacklog`.
-* the float formatter `internal/strconv.genericFtoa` (`FtoaContract`), behind `printfloat64`,
-  `printfloat32`, `printcomplex128`, `printcomplex64`: shortest round-trip formatting (Ryū) is
-  long and its correctness is a theorem about the algorithm, so it is a contract whose output is
-  the exact Go 1.26 format `Janus.Spec.Print.fmtF64`/`fmtF32` (a readable specification,
-  differential-tested against the real runtime, `audit/rt-print`).
 
-Every contract has a `_satisfiable` witness (`Janus.Contracts.PrintSat`).
+Every contract has a `_satisfiable` witness (`Janus.Contracts.PrintSat`): machine code proved to
+meet it and a call state satisfying its precondition.
 
 ## The output
 
