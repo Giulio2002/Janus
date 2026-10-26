@@ -637,10 +637,10 @@ theorem gsum (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
 the recursion). -/
 theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (reloc : State → State → Prop) (hms : MorestackContract Extracted.program FT pool rt H reloc)
-    (henv : Env FT pool rt) (n : BitVec 64) :
-    EnsuresGrow Extracted.program reloc Extracted.entry [n] (Pre FT pool rt H)
+    (n : BitVec 64) :
+    EnsuresGrow Extracted.program reloc Extracted.entry [n] (fun s => Env FT pool rt ∧ Pre FT pool rt H s)
       (fun _ s' => s'.regs 0 = BitVec.ofNat 64 (sumTo n.toNat)) := by
-  intro ret hret s hs hpre
+  intro ret hret s hs ⟨henv, hpre⟩
   janus_intro hs
   have hg := gsum FT pool rt H reloc hms henv s (by rw [h_pc]; rfl) hpre
   rw [h_lr] at hg
@@ -780,7 +780,7 @@ theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : Rt
 grows the stack and returns `6`. -/
 theorem returns : GrownReturns (Extracted.program.withExit ret) (reloc FTs) s0
     (fun s' => s'.regs 0 = 6#64) :=
-  (correctness FTs pool rt H (reloc FTs) (contract _ FTs) env 3#64 ret hret s0 setup pre).mono
+  (correctness FTs pool rt H (reloc FTs) (contract _ FTs) 3#64 ret hret s0 setup ⟨env, pre⟩).mono
     fun s' h => by rw [h]; rfl
 
 end Witness

@@ -972,10 +972,10 @@ grows in its own prologue or in `holdCallee`'s — which moves `HoldPtr`'s frame
 `p` it holds there — it returns `*p + a[0] + a[1]` after the callee's store through `p`. -/
 theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (reloc : State → State → Prop) (hms : MorestackContract Extracted.program FT pool rt H reloc)
-    (henv : Env FT pool rt) (x : BitVec 64) :
-    EnsuresGrow Extracted.program reloc Extracted.entry [x] (PreH FT pool rt H)
+    (x : BitVec 64) :
+    EnsuresGrow Extracted.program reloc Extracted.entry [x] (fun s => Env FT pool rt ∧ PreH FT pool rt H s)
       (fun _ s' => s'.regs 0 = hres x) := by
-  intro ret hret s hs hpre
+  intro ret hret s hs ⟨henv, hpre⟩
   janus_intro hs
   have hg := hmain FT pool rt H reloc hms henv s (by rw [h_pc]; rfl) hpre
   rw [h_lr] at hg
@@ -1131,7 +1131,7 @@ theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : Rt
 through the adjusted pointer into the moved array — returns `17 + 16 + 16 = 49`. -/
 theorem returns : GrownReturns (Extracted.program.withExit ret) (reloc FTs) s0
     (fun s' => s'.regs 0 = 49#64) :=
-  (correctness FTs pool rt H (reloc FTs) (contract _ FTs) env 16#64 ret hret s0 setup pre).mono
+  (correctness FTs pool rt H (reloc FTs) (contract _ FTs) 16#64 ret hret s0 setup ⟨env, pre⟩).mono
     fun s' h => by rw [h]; rfl
 
 end Witness

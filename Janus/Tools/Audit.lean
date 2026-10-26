@@ -870,6 +870,13 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
         | some false =>
           let ok := (a.isAppOfArity `Janus.Program.link 2 || a.isAppOfArity `Janus.Amd64.Program.link 2) &&
             (a.getArg! 0).isConstOf `Extracted.program && isVar (a.getArg! 1).consumeMData
+          -- the `morestack` contracts are relations over the call state at a `morestack` stub:
+          -- there is no implementation code to link (the program is only consulted through
+          -- `stubAt`, which `link` does not change), so they may be stated about
+          -- `Extracted.program` itself
+          let noCode := (c == `Janus.Contracts.Stack.MorestackContract ||
+            c == `Janus.Contracts.StackAmd64.MorestackContract64) && a.isConstOf `Extracted.program
+          if noCode then continue
           unless ok do
             return some s!"assumes the runtime contract {c} about the program `{(← Meta.ppExpr a).pretty 10000}`, which is not `Extracted.program.link impl` for a variable `impl` of the statement (round 10 V1)"
           rtVars := rtVars.insert (a.getArg! 1).consumeMData.fvarId!

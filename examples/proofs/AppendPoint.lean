@@ -87,7 +87,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
     have hrd' : 0 < len.toNat * 24 → s.mem.accessible ptr.toNat (len.toNat * 24) false = true :=
       fun h => by rw [Nat.mul_comm]; exact hrd (by omega)
     janus_run [false_implies, implies_true, List.not_mem_nil, forall_const] until [Extracted.entry + 0x44] calls [hg]
-    rename_i r0 r1 r2 jk fl vr M1 hfr hpost
+    rename_i r0 r1 r2 jk fl vr M1 ex ep hfr hpost
     obtain ⟨hr1, hr2, hin, hlt, hacc, hcp, hz, -⟩ := hpost
     have hle := le_growCap 24 true (len.toNat + 1) cap.toNat (by decide)
     have hdj2 := InRanges.disjoint hin hout

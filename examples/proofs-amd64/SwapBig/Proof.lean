@@ -45,7 +45,7 @@ theorem correctness (a b : BitVec 64) :
   all_goals janus64_run
   all_goals intro i hi8; janus64_cases hi8
   all_goals janus64_simp
-  all_goals simp only [Nat.sub_self, Nat.add_sub_cancel_left, half0, half8, and_self,
+  all_goals try simp only [Nat.sub_self, Nat.add_sub_cancel_left, half0, half8, and_self,
     Nat.add_assoc, Nat.reduceAdd]
 
 end Proof
