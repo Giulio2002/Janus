@@ -809,4 +809,86 @@ theorem seg_rp_lh (u : State) (x18 : Nat) (hpc : u.pc = BitVec.ofNat 64 RPa)
       simp; omega
     janus_run [h18, hm, hk', hmul, hsh, hf']
 
+/-! ### Recovery -/
+
+theorem reachesRet_mono {p : Program} {ret : W64} {s : State} {Q Q' : State → Prop}
+    (h : ReachesRet p ret s Q) (hq : ∀ s', Q s' → Q' s') : ReachesRet p ret s Q' := by
+  obtain ⟨k, s', hk, h1, h2⟩ := h; exact ⟨k, s', hk, h1, hq _ h2⟩
+
+/-- How many panic entries remain after dropping, from the top, those started at or below `fsp`. -/
+def dropCount (m : Memory) (fsp : Nat) : Nat → Nat
+  | 0 => 0
+  | k + 1 => if rd m (panAt k + 16) ≤ fsp then dropCount m fsp k else k + 1
+
+theorem dropCount_le (m : Memory) (fsp : Nat) : ∀ k, dropCount m fsp k ≤ k
+  | 0 => Nat.le_refl _
+  | k + 1 => by
+    simp only [dropCount]; split
+    · have := dropCount_le m fsp k; omega
+    · exact Nat.le_refl _
+
+theorem panList_dropCount (m : Memory) (fsp : Nat) : ∀ k,
+    panList m (dropCount m fsp k) = (panList m k).dropWhile (·.start ≤ fsp)
+  | 0 => rfl
+  | k + 1 => by
+    rw [panList_succ]
+    simp only [dropCount, List.dropWhile_cons]
+    have hs : (decPan m k).start = rd m (panAt k + 16) := rfl
+    split
+    · rename_i h; rw [hs, decide_eq_true h]; exact panList_dropCount m fsp k
+    · rename_i h; rw [hs, decide_eq_false h]; rfl
+
+theorem dropCount_w {m : Memory} {fsp v : Nat} : ∀ k, k ≤ 8 →
+    dropCount (m.writeLE 65536 8 v) fsp k = dropCount m fsp k
+  | 0, _ => rfl
+  | k + 1, hk => by
+    simp only [dropCount]
+    rw [rd_w (by simp only [panAt, B]; omega), dropCount_w k (by omega)]
+
+set_option maxHeartbeats 0 in
+/-- The `DROP` loop. -/
+theorem seg_drop (fsp : Nat) (hfsp : fsp < 2 ^ 64) : ∀ k (d : State), d.pc = BitVec.ofNat 64 (E + 0x394) →
+    d.regs 6 = BitVec.ofNat 64 B → d.regs 1 = BitVec.ofNat 64 fsp → npan d.mem = k → k ≤ 8 →
+    d.mem.accessible B 0x1000 true = true →
+    ReachesRet qE (BitVec.ofNat 64 (E + 0x3bc)) d (fun d' => d'.sp = d.sp ∧ d'.regs 28 = d.regs 28 ∧
+      d'.regs 18 = d.regs 18 ∧ d'.regs 6 = BitVec.ofNat 64 B ∧ d'.regs 1 = BitVec.ofNat 64 fsp ∧
+      MemFrame d.mem d'.mem [(B, B + 8)] ∧ npan d'.mem = dropCount d.mem fsp k)
+  | 0, d, hpc, h6, h1, hk, _, hB => by
+    have hk' : d.mem.readLE 65536 8 = 0 := hk
+    have hB' : d.mem.accessible 65536 4096 true = true := hB
+    obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := d
+    dsimp only at *
+    simp only [E, B, Nat.reduceAdd] at hpc h6 ⊢
+    subst hpc
+    janus_run [hk', h6, h1]
+    exact ⟨MemFrame.refl _ _, rfl⟩
+  | k + 1, d, hpc, h6, h1, hk, hk8, hB => by
+    have hk' : d.mem.readLE 65536 8 = k + 1 := hk
+    have hB' : d.mem.accessible 65536 4096 true = true := hB
+    have hmul : (BitVec.ofNat 64 (k + 1) - 1#64) = BitVec.ofNat 64 k := by
+      apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
+    have hsh : (BitVec.ofNat 64 k <<< 5).toNat = 32 * k := by
+      rw [BitVec.toNat_shiftLeft, BitVec.toNat_ofNat]; rw [Nat.mod_eq_of_lt (by omega)]
+      rw [Nat.shiftLeft_eq]; omega
+    by_cases hs : rd d.mem (panAt k + 16) ≤ fsp
+    · -- pop and loop
+      have hs' : d.mem.readLE (65792 + (k * 32 + 16)) 8 ≤ fsp := by
+        rw [show 65792 + (k * 32 + 16) = panAt k + 16 by simp [panAt, B]; omega]; exact hs
+      have ih := seg_drop fsp hfsp k
+      obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := d
+      dsimp only at *
+      simp only [E, B, Nat.reduceAdd] at hpc h6 ⊢
+      subst hpc
+      janus_run [hk', h6, h1, hmul, hsh, hs'] until [0x300394]
+      refine reachesRet_mono (ih _ rfl (by simp [setReg, h6]) (by simp [setReg, h1])
+        (by show (cm.writeLE 65536 8 k).readLE 65536 8 = k; rw [Memory.readLE_writeLE_self]
+            exact Nat.mod_eq_of_lt (by omega)) (by omega) (by simpa using hB)) ?_
+      rintro d' ⟨h1', h2', h3', h4', h5', h6', h7'⟩
+      refine ⟨h1', by simpa [setReg] using h2', by simpa [setReg] using h3', h4', h5', ?_, ?_⟩
+      · exact (MemFrame.of_writeLE cm k (List.mem_singleton.2 rfl) (by simp) (by simp)).trans h6'
+          fun a n h => ⟨h, h⟩
+      · rw [h7', dropCount_w k (by omega)]
+        simp only [dropCount, if_pos hs]
+    · sorry
+
 end Janus.Contracts.PanicSat
