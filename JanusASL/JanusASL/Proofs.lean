@@ -44,6 +44,8 @@ import JanusASL.Proofs.FP.Run
 import JanusASL.Proofs.FPDecodeB
 import JanusASL.Proofs.FP.Sqrt
 import JanusASL.Proofs.FP.Exec2
+import JanusASL.Proofs.FP.IntLift
+import JanusASL.Proofs.FP.Ensures
 import JanusASL.Proofs.FPDecodeA
 import JanusASL.Proofs.FPChain.Basic
 

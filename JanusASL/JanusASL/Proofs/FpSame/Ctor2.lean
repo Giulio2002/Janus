@@ -5,7 +5,7 @@ import JanusASL.Proofs.FpSame.ExecC
 namespace JanusASL.FpS
 open Janus.Arm64
 
-macro "fp_same2" : tactic => `(tactic| (
+local macro "fp_same2" : tactic => `(tactic| (
   dsimp only [FpSame]
   repeat' (first | split | skip)
   all_goals simp only [writeZR_vregs, writeZR_fpcr, writeZR_fpsr, writeSP_vregs, writeSP_fpcr, writeSP_fpsr,

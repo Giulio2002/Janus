@@ -159,4 +159,17 @@ def report (marker : String) (p : Program) : IO Unit := do
   let n := p.segments.foldl (fun n s => n + s.words.length) 0
   IO.println s!"{marker}summary {n} {ps.length}"
 
+/-- The proved class of `w`, integer, branch or scalar floating-point: the words `run_agree_fp` handles. -/
+def classifyAll (w : Nat) : Option String :=
+  match classify w with
+  | some c => some c
+  | none => fpClassify w
+
+/-- Every word of `p` is in the proved subset (integer, branch or floating point), and its code and stubs are
+untagged. -/
+def coveredAll (p : Program) : Bool :=
+  p.segments.all (fun seg => decide (seg.base + 4 * seg.words.length < 2 ^ 56) &&
+      seg.words.all (fun w => (classifyAll w).isSome)) &&
+    p.stubs.all (fun st => decide (st.addr < 2 ^ 56))
+
 end JanusASL.Classify

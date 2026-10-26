@@ -76,7 +76,7 @@ theorem fcmp_agree {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft :
           (execute_aarch64_instrs_float_compare_uncond (decide (Janus.Arm64.bits w 4 3 % 2 = 1)) 32
             (Janus.Arm64.bits w 20 16) (Janus.Arm64.bits w 9 5)
             (decide (Janus.Arm64.bits w 4 3 / 2 % 2 = 1))).run (entrySt s w 272) := by
-        rw [run_DecodeA64_FP hw (by omega), run_FP_fcmp_0_0 hw (by omega) (by omega) (by omega) (by omega) e h21 h14 h10
+        rw [run_DecodeA64_FP hw (by omega), run_FP_fcmp hw (by omega) (by omega) (by omega) (by omega) h21 h14 h10
           (by omega) f (see_entry s _),
           show fld w 22 2 = 0#2 from BitVec.eq_of_toNat_eq (by rw [fld_toNat w 22 2 hw]; simp; omega),
           run_dec_fcmp_0, ha0, ha1, hrn, hrm]
@@ -93,7 +93,7 @@ theorem fcmp_agree {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft :
           (execute_aarch64_instrs_float_compare_uncond (decide (Janus.Arm64.bits w 4 3 % 2 = 1)) 32
             (Janus.Arm64.bits w 20 16) (Janus.Arm64.bits w 9 5)
             (decide (Janus.Arm64.bits w 4 3 / 2 % 2 = 1))).run (entrySt s w 273) := by
-        rw [run_DecodeA64_FP hw (by omega), run_FP_fcmp_0_1 hw (by omega) (by omega) (by omega) (by omega) e h21 h14 h10
+        rw [run_DecodeA64_FP hw (by omega), run_FP_fcmpe hw (by omega) (by omega) (by omega) (by omega) h21 h14 h10
           (by omega) f (see_entry s _),
           show fld w 22 2 = 0#2 from BitVec.eq_of_toNat_eq (by rw [fld_toNat w 22 2 hw]; simp; omega),
           run_dec_fcmpe_0, ha0, ha1, hrn, hrm]
@@ -110,7 +110,7 @@ theorem fcmp_agree {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft :
           (execute_aarch64_instrs_float_compare_uncond (decide (Janus.Arm64.bits w 4 3 % 2 = 1)) 64
             (Janus.Arm64.bits w 20 16) (Janus.Arm64.bits w 9 5)
             (decide (Janus.Arm64.bits w 4 3 / 2 % 2 = 1))).run (entrySt s w 272) := by
-        rw [run_DecodeA64_FP hw (by omega), run_FP_fcmp_1_0 hw (by omega) (by omega) (by omega) (by omega) e h21 h14 h10
+        rw [run_DecodeA64_FP hw (by omega), run_FP_fcmp hw (by omega) (by omega) (by omega) (by omega) h21 h14 h10
           (by omega) f (see_entry s _),
           show fld w 22 2 = 1#2 from BitVec.eq_of_toNat_eq (by rw [fld_toNat w 22 2 hw]; simp; omega),
           run_dec_fcmp_1, ha0, ha1, hrn, hrm]
@@ -127,7 +127,7 @@ theorem fcmp_agree {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft :
           (execute_aarch64_instrs_float_compare_uncond (decide (Janus.Arm64.bits w 4 3 % 2 = 1)) 64
             (Janus.Arm64.bits w 20 16) (Janus.Arm64.bits w 9 5)
             (decide (Janus.Arm64.bits w 4 3 / 2 % 2 = 1))).run (entrySt s w 273) := by
-        rw [run_DecodeA64_FP hw (by omega), run_FP_fcmp_1_1 hw (by omega) (by omega) (by omega) (by omega) e h21 h14 h10
+        rw [run_DecodeA64_FP hw (by omega), run_FP_fcmpe hw (by omega) (by omega) (by omega) (by omega) h21 h14 h10
           (by omega) f (see_entry s _),
           show fld w 22 2 = 1#2 from BitVec.eq_of_toNat_eq (by rw [fld_toNat w 22 2 hw]; simp; omega),
           run_dec_fcmpe_1, ha0, ha1, hrn, hrm]
