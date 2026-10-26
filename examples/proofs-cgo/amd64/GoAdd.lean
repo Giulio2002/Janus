@@ -142,7 +142,7 @@ theorem go_spec (x y : BitVec 64) :
     janus64_simp [h32, h80]
     refine ⟨by omega, ?_, by omega, by omega, by omega, by omega⟩
     janus64_disch
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, zh, kr, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   simp only [E, addFrameResult, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,
     ↓reduceIte, Nat.reduceEqDiff, h32, h80] at hmf h4 h5 h14 h15 hfs1 hfs2 hfsr' hfsg'
