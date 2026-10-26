@@ -406,7 +406,7 @@ theorem model : TypeAssert (Extracted.program.link implAt) cAddr R0 Htrue := by
   have hi : taInter s.mem (s.regs 0).toNat = ID := hdesc.2.2.2.1
   janus_run
   refine rtReturn_of R0 2 _ s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-    rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+    rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
   have := itabResult_R0 (g := s.regs 28) ⟨he1, he2, hd⟩ (s.regs 1).toNat
   refine ⟨?_, hdesc, rfl, rfl⟩
   simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]

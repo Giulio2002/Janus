@@ -47,7 +47,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     · exact Outside.of_sub hout (by omega) (by omega)
   all_goals try (simp [setRegF, keepABI_apply, MapAmd64.keepX15]; try omega)
   all_goals try (simp only [h32, Janus.Arm64.Memory.readLE_writeLE_self]; decide)
-  rintro s1 hpc1 ⟨r1, x1, y1, f1, m1, hs1, hfr1, henv1⟩
+  rintro s1 hpc1 ⟨r1, x1, y1, f1, m1, _, _, hs1, hfr1, henv1⟩
   subst hs1
   simp only [MapAmd64.calleeStack, setRegF_apply, reduceIte, Nat.reduceEqDiff, h32'] at hfr1
   have hi1 : m1.readLE ((s.regs 4).toNat - 16) 8 = 0 := by
@@ -66,7 +66,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     · exact Outside.of_sub hout (by omega) (by omega)
   all_goals try (simp [setRegF, keepABI_apply, MapAmd64.keepX15]; try omega)
   all_goals try (simp only [h32, Janus.Arm64.Memory.readLE_writeLE_self]; decide)
-  rintro s2 hpc2 ⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩
+  rintro s2 hpc2 ⟨r2, x2, y2, f2, m2, _, _, hs2, hfr2, henv2⟩
   subst hs2
   simp only [MapAmd64.calleeStack, setRegF_apply, reduceIte, Nat.reduceEqDiff, h32'] at hfr2
   janus64_run until [Extracted.program.contractAddr "runtime.deferreturn"]
@@ -79,7 +79,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     · exact Outside.of_sub hout (by omega) (by omega)
   all_goals try (simp [setRegF, keepABI_apply, MapAmd64.keepX15]; try omega)
   all_goals try (simp only [h32, Janus.Arm64.Memory.readLE_writeLE_self]; decide)
-  rintro s3 hpc3 ⟨r3, x3, y3, f3, m3, hs3, hfr3, henv3⟩
+  rintro s3 hpc3 ⟨r3, x3, y3, f3, m3, _, _, hs3, hfr3, henv3⟩
   subst hs3
   simp only [MapAmd64.calleeStack, setRegF_apply, reduceIte, Nat.reduceEqDiff, h32'] at hfr3
   janus64_run

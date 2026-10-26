@@ -155,7 +155,7 @@ theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat
       refine ⟨hsb, by rw [hacc]; exact hsa, ?_⟩
       simp only [MemAmd64.calleeStack, MapAmd64.calleeStack, setRegF, reduceIte, Nat.reduceEqDiff, hsp32,
         outside_cons, outside_nil, and_true]; omega
-    · intro s2 hpc2 ⟨r2, x2, y2, fl2, mx2, m2, hs2, hmx2, hfr2, henv2, hres2⟩
+    · intro s2 hpc2 ⟨r2, x2, y2, fl2, mx2, m2, _, _, hs2, hmx2, hfr2, henv2, hres2⟩
       subst hs2
       simp only [setRegF, reduceIte, Nat.reduceEqDiff, ← hp', hptr, hlen] at hres2
       rw [hm' _ _ hsp' (by omega)] at hres2

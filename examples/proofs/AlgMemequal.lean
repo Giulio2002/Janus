@@ -35,6 +35,7 @@ namespace Proof
 def Fin (S S' : State) (b : Bool) : Prop :=
   S'.sp = S.sp ∧ S'.mem = S.mem ∧ S'.regs 18 = S.regs 18 ∧ S'.regs 28 = S.regs 28 ∧
     S'.regs 29 = S.regs 29 ∧ S'.dczid = S.dczid ∧ S'.tpidr = S.tpidr ∧ S'.fpcr = S.fpcr ∧
+    S'.excl = S.excl ∧ S'.exclPass = S.exclPass ∧
     (S'.regs 0).toNat % 256 = b.toNat
 
 /-- Two reads are equal iff their bytes are. -/
@@ -111,7 +112,7 @@ theorem tail (S : State) (x y k : Nat) (hk : k < 16) (hpc : S.pc = BitVec.ofNat 
   all_goals
     janus_run [xor_eq_zero_iff, rd_mod1, rd_mod2, rd_mod4]
   all_goals
-    refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, ?_⟩
+    refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl, ?_⟩
     first
     | (refine fin_res (hw 8 (by omega) (by omega)) ?_ ?_ <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
     | (refine fin_res (hw 4 (by omega) (by omega)) ?_ ?_ <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
@@ -125,11 +126,12 @@ theorem tail (S : State) (x y k : Nat) (hk : k < 16) (hpc : S.pc = BitVec.ofNat 
 theorem Fin.of {S S1 S' : State} {b b' : Bool} (h : Fin S1 S' b) (hsp : S1.sp = S.sp)
     (hm : S1.mem = S.mem) (h18 : S1.regs 18 = S.regs 18) (h28 : S1.regs 28 = S.regs 28)
     (h29 : S1.regs 29 = S.regs 29) (hdz : S1.dczid = S.dczid) (htp : S1.tpidr = S.tpidr)
-    (hfc : S1.fpcr = S.fpcr) (hb : b = b') : Fin S S' b' := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+    (hfc : S1.fpcr = S.fpcr) (hb : b = b') (hex : S1.excl = S.excl := by first | rfl | simp_all)
+    (hep : S1.exclPass = S.exclPass := by first | rfl | simp_all) : Fin S S' b' := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, e1, e2, a9⟩ := h
   subst hb
   exact ⟨a1.trans hsp, a2.trans hm, a3.trans h18, a4.trans h28, a5.trans h29, a6.trans hdz,
-    a7.trans htp, a8.trans hfc, a9⟩
+    a7.trans htp, a8.trans hfc, e1.trans hex, e2.trans hep, a9⟩
 
 theorem rr_mono {p : Program} {ret : W64} {S : State} {Q Q' : State → Prop}
     (h : ReachesRet p ret S Q) (hQ : ∀ s', Q s' → Q' s') : ReachesRet p ret S Q' := by
@@ -179,10 +181,10 @@ theorem loop16 (j : Nat) : ∀ (S : State) (x y R : Nat), 1 ≤ j → R < 2 ^ 64
     | -- the last chunk, no tail: equal
       (have hj0 : j = 0 := by omega
        subst hj0
-       refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, ?_⟩
+       refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl, ?_⟩
        simp [setReg])
     | -- a word differs: not equal
-      (refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, ?_⟩
+      (refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl, ?_⟩
        rw [beq_false_of_ne ‹¬ (_ : Nat) = _›]
        simp [setReg])
     | -- the last chunk, then the tail
@@ -313,11 +315,11 @@ theorem loop64 (j : Nat) : ∀ (S : State) (x y R : Nat), 1 ≤ j → R < 2 ^ 64
     | -- the last chunk, nothing left: equal
       (have hj0 : j = 0 := by omega
        subst hj0
-       refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, ?_⟩
+       refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl, ?_⟩
        try rw [decide_eq_true ⟨‹_›, ‹_›⟩]
        simp [setReg, ‹R % 64 = 0›])
     | -- a word differs: not equal
-      (refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, ?_⟩
+      (refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl, ?_⟩
        clear ih
        simp_all [setReg])
     | -- the last chunk, then the rest (`chunk16`)
@@ -349,8 +351,8 @@ theorem rr_mono' {p : Program} {ret : W64} {S : State} {Q Q' : State → Prop}
 
 theorem eqRet_of_fin {d : Nat} {s s' : State} {b : Bool} (h : Fin s s' b) (hpc : s'.pc = s.regs 30) :
     EqRet d 0 s s' fun r => BoolRes r b := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
-  exact EqRet.intro a1 hpc a3 a4 a5 a6 a7 a8 (by rw [a2]; exact MemFrame.refl _ _) a9
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, e1, e2, a9⟩ := h
+  exact EqRet.intro a1 hpc a3 a4 a5 a6 a7 a8 (by rw [a2]; exact MemFrame.refl _ _) a9 e1 e2
 
 theorem regs_ofNat (s : State) (i : Nat) : s.regs i = BitVec.ofNat 64 (s.regs i).toNat := by simp
 

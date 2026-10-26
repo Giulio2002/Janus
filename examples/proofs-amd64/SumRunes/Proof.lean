@@ -364,7 +364,7 @@ theorem loop (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
           all_goals (try (janus64_simp; done))
           all_goals (try (janus64_simp; omega))
         all_goals
-          rename_i r0 r1 r2 jk fl xm yh M1 hfl hpost
+          rename_i r0 r1 r2 jk fl xm yh M1 zh kr hfl hpost
           rw [hbs] at hpost
           obtain ⟨hr0, hr1⟩ := hpost
           simp only [setRegF_apply, callRegs64_apply, Nat.reduceEqDiff, ↓reduceIte, List.getD_cons_zero,

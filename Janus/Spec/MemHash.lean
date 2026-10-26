@@ -121,6 +121,20 @@ theorem pinsrd_2 (h v : Nat) (hh : h < 2 ^ 64) :
     show ¬ (3 = 2) from by decide, ↓reduceIte] at hh ⊢
   omega
 
+/-- `pinsrq_hi` with the lane count evaluated (`ExecSSE.lanes 64 = ofElems 64 2`), the form the
+proof automation leaves since the integration of WP-E with WP-F/WP-G (a `Nat` division simproc
+in the stepping simp set evaluates `128 / 64`). -/
+theorem pinsrq_hi' (h v : Nat) :
+    (Janus.Arm64.ofElems 64 2 fun i => if i = 1 then v else Janus.Arm64.elem (h % 340282366920938463463374607431768211456) 64 i) %
+      340282366920938463463374607431768211456 = h % 2 ^ 64 + 2 ^ 64 * (v % 2 ^ 64) :=
+  pinsrq_hi h v
+
+/-- `pinsrd_2` with the lane count evaluated (`ofElems 32 4`), as `pinsrq_hi'`. -/
+theorem pinsrd_2' (h v : Nat) (hh : h < 2 ^ 64) :
+    (Janus.Arm64.ofElems 32 4 fun i => if i = 2 then v else Janus.Arm64.elem (h % 340282366920938463463374607431768211456) 32 i) %
+      340282366920938463463374607431768211456 = h % 2 ^ 64 + 2 ^ 64 * (v % 2 ^ 32) :=
+  pinsrd_2 h v hh
+
 /-- `MOVQ X0, AX` of a 128-bit value. -/
 theorem setWidth_ofNat_128 (x : Nat) : BitVec.setWidth 64 (BitVec.ofNat 128 x) = BitVec.ofNat 64 x := by
   apply BitVec.eq_of_toNat_eq

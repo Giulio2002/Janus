@@ -51,7 +51,7 @@ macro "inv_tac" : tactic => `(tactic| (
 
 /-- The final `Out` facts of a path that returns. -/
 macro "out_tac" : tactic => `(tactic| (
-  refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
   all_goals try (first | rfl | decide | (simp only [setReg_apply]; done) | (simp only [setReg_apply, Nat.reduceEqDiff, reduceIte]; done))))
 
 theorem one64 : vfpExpandImm binary64 112 % 340282366920938463463374607431768211456 = 4607182418800017408 := by
@@ -82,7 +82,8 @@ structure Inv (S : State) (a b c d : Nat) : Prop where
 /-- The return of `complex128div` from `S` with results `X` (`D0`) and `Y` (`D1`). -/
 def Out (S : State) (X Y : Option Nat) (s' : State) : Prop :=
   (s'.sp = S.sp ∧ s'.mem = S.mem ∧ s'.regs 18 = S.regs 18 ∧ s'.regs 28 = S.regs 28 ∧
-    s'.regs 29 = S.regs 29 ∧ s'.fpcr = 0 ∧ s'.tpidr = S.tpidr ∧ s'.dczid = S.dczid) ∧
+    s'.regs 29 = S.regs 29 ∧ s'.fpcr = 0 ∧ s'.tpidr = S.tpidr ∧ s'.dczid = S.dczid ∧
+    s'.excl = S.excl ∧ s'.exclPass = S.exclPass) ∧
   ResultIs binary64 X ((s'.vregs 0).toNat % 2 ^ 64) ∧ ResultIs binary64 Y ((s'.vregs 1).toNat % 2 ^ 64)
 
 set_option maxHeartbeats 0 in
@@ -98,7 +99,7 @@ theorem body1 (S : State) (a b c d : Nat) (hpc : S.pc = BitVec.ofNat 64 (cdivAdd
   have hb : b < 2 ^ 64 := h1 ▸ Nat.mod_lt _ (by decide)
   have hc : c < 2 ^ 64 := h2 ▸ Nat.mod_lt _ (by decide)
   janus_run [h0, h1, h2, h3, hr0, hr1, hf, hi3, fcmp_flags, eq64_self, m64, m63, copysign_or, copysign_or']
-  refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
   all_goals try (first | rfl | (simp only [setReg_apply]; done) | simp [hf])
   all_goals simp only [setVReg_apply, BitVec.toNat_ofNat, m64, Nat.mod_mod, infBits, reduceIte,
     Nat.reduceEqDiff, Nat.reduceMod, copysign_mod, Nat.reducePow, infE]
@@ -121,7 +122,7 @@ theorem body3 (S : State) (a b c d : Nat) (hpc : S.pc = BitVec.ofNat 64 (cdivAdd
   have hd : d < 2 ^ 64 := h3 ▸ Nat.mod_lt _ (by decide)
   janus_run [h0, h1, h2, h3, hr0, hr1, hf, fcmp_flags, eq64_self, m64, m63, copysign_or, copysign_or',
     isNaN_fpSub_self c hc, isNaN_fpSub_self d hd]
-  all_goals refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
+  all_goals refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
   all_goals try (first | rfl | (simp only [setReg_apply]; done) | simp [hf])
   all_goals simp only [setVReg_apply, BitVec.toNat_ofNat, m64, Nat.mod_mod, reduceIte,
     Nat.reduceEqDiff, Nat.reduceMod, copysign_mod, Nat.reducePow, infE]
@@ -152,7 +153,7 @@ theorem body2 (S : State) (a b c d : Nat) (hpc : S.pc = BitVec.ofNat 64 (cdivAdd
   have hd : d < 2 ^ 64 := h3 ▸ Nat.mod_lt _ (by decide)
   janus_run [h0, h1, h2, h3, hr0, hr1, hf, fcmp_flags, eq64_self, m64, m63, copysign_or, copysign_or',
     isNaN_fpSub_self a ha, isNaN_fpSub_self b hb, hi3]
-  all_goals refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
+  all_goals refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
   all_goals try (first | rfl | (simp only [setReg_apply]; done) | simp [hf])
   all_goals simp only [setVReg_apply, BitVec.toNat_ofNat, m64, Nat.mod_mod, reduceIte,
     Nat.reduceEqDiff, Nat.reduceMod, copysign_mod, Nat.reducePow, infE]
@@ -173,12 +174,14 @@ theorem out_mono {S S' : State} {X Y X' Y' : Option Nat} {r : W64}
     (h : ReachesRet Extracted.program r S' (Out S' X Y)) (hX : X = X') (hY : Y = Y')
     (hsp : S'.sp = S.sp) (hm : S'.mem = S.mem) (h18 : S'.regs 18 = S.regs 18)
     (h28 : S'.regs 28 = S.regs 28) (h29 : S'.regs 29 = S.regs 29)
-    (htp : S'.tpidr = S.tpidr) (hdz : S'.dczid = S.dczid) :
+    (htp : S'.tpidr = S.tpidr) (hdz : S'.dczid = S.dczid)
+    (hex : S'.excl = S.excl := by first | rfl | simp_all)
+    (hep : S'.exclPass = S.exclPass := by first | rfl | simp_all) :
     ReachesRet Extracted.program r S' (Out S X' Y') := by
   subst hX hY
-  obtain ⟨k, s', hs, hpc, ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩, h9, h10⟩ := h
+  obtain ⟨k, s', hs, hpc, ⟨h1, h2, h3, h4, h5, h6, h7, h8, e1, e2⟩, h9, h10⟩ := h
   exact ⟨k, s', hs, hpc, ⟨h1.trans hsp, h2.trans hm, h3.trans h18, h4.trans h28, h5.trans h29,
-    h6, h7.trans htp, h8.trans hdz⟩, h9, h10⟩
+    h6, h7.trans htp, h8.trans hdz, e1.trans hex, e2.trans hep⟩, h9, h10⟩
 
 set_option maxHeartbeats 0 in
 /-- The third case of the recovery (`(isInf(c) || isInf(d)) && isFinite(a) && isFinite(b)`), and
@@ -343,10 +346,9 @@ abbrev CRet (s s' : State) (X Y : Option Nat) : Prop :=
     ResultIs binary64 X ((v 0).toNat % 2 ^ 64) ∧ ResultIs binary64 Y ((v 1).toNat % 2 ^ 64)
 
 theorem out_cret {S : State} {X Y : Option Nat} (hf : S.fpcr = 0)
-    (h : ReachesRet Extracted.program (S.regs 30) S (Out S X Y))
-    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
+    (h : ReachesRet Extracted.program (S.regs 30) S (Out S X Y)) :
     ReachesRet Extracted.program (S.regs 30) S (fun s' => CRet S s' X Y) := by
-  obtain ⟨k, s', hs, hpc, ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩, h9, h10⟩ := h
+  obtain ⟨k, s', hs, hpc, ⟨h1, h2, h3, h4, h5, h6, h7, h8, hex, hep⟩, h9, h10⟩ := h
   refine ⟨k, s', hs, hpc, ⟨s'.regs, s'.flags, s'.vregs, s'.fpsr, ?_, h9, h10⟩⟩
   obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
   simp only at hpc h1 h2 h3 h4 h5 h6 h7 h8 hex hep ⊢

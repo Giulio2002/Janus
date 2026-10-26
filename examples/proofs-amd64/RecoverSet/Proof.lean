@@ -58,7 +58,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       ⟨PanicPre.of_within hc ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_, ?_, ?_⟩ ?_
     rotate_left 11
     · intro s1 hpc1 hpost
-      obtain ⟨⟨r1, x1, y1, f1, m1, hs1, hfr1, henv1⟩, hcalm1, -⟩ := hpost
+      obtain ⟨⟨r1, x1, y1, f1, m1, _, _, hs1, hfr1, henv1⟩, hcalm1, -⟩ := hpost
       obtain ⟨h0, h3, -⟩ := hcalm1 (hl.calm_frame _ _ _ (by simpa [setRegF] using hcalm)
         (Spec.Map.Agrees.of_window (lo := (s.regs 4).toNat - (P.depth + (P.depth + 96)))
           (hi := (s.regs 4).toNat + 32) (by janus_frame) (Outside.of_sub hout (by omega) (by omega))))
@@ -122,7 +122,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h72, e23, e48] at hcpc h2c h14c hloc hhic hpk hb0 hfrc h5c hcont
     simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint, Janus.Arm64.Memory.readLE_writeLE_self, e32] at hcpc h2c
     rw [show (func1A : Nat) % 256 ^ 8 = func1A by decide] at hcpc
-    obtain ⟨cr, crip, cfl, cxm, cm, cyh, cfs, cdf, cmx⟩ := c
+    obtain ⟨cr, crip, cfl, cxm, cm, cyh, cfs, cdf, cmx, cx87, cfw, czh, ckr⟩ := c
     dsimp only at hcpc h2c h14c hxc hdfc halc hloc hhic hrac hpk henvc hb0 hfrc h5c hcont
     subst hcpc hdfc
     have hgb : (cr 14).toNat + 16 + 8 ≤ 2 ^ 48 := by rw [h14c]; omega
@@ -133,7 +133,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       rw [hfrc.accessible]; simp only [Janus.Arm64.Memory.accessible_writeLE]; exact hst
     have hcl : Janus.Amd64.Tactic.ReachesRet (Extracted.program.link impl)
         (BitVec.ofNat 64 (cm.readLE (cr 4).toNat 8))
-        ⟨cr, BitVec.ofNat 64 func1A, cfl, cxm, cm, cyh, cfs, false, cmx⟩ (fun c' =>
+        ⟨cr, BitVec.ofNat 64 func1A, cfl, cxm, cm, cyh, cfs, false, cmx, cx87, cfw, czh, ckr⟩ (fun c' =>
           c'.regs 4 = cr 4 + 8 ∧ c'.regs 14 = cr 14 ∧ c'.regs 5 = cr 5 ∧ c'.xmm 15 = 0 ∧
           c'.df = false ∧ P.Env c'.mem ∧ P.Recovered c'.mem (s.regs 14).toNat ∧
           MemFrame cm c'.mem (P.priv ++ [((cr 4).toNat - 24 - P.depth, (cr 4).toNat),
@@ -165,7 +165,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       · exact Janus.Contracts.IfaceModel.acc_read_of_write
           (Janus.Arm64.Memory.accessible_mono _ hwin' (by omega) (by omega))
       intro G' hpcG hpost _ hpanI
-      obtain ⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩ := hpost
+      obtain ⟨r2, x2, y2, f2, m2, _, _, hs2, hfr2, henv2⟩ := hpost
       have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b = recoverRet := by
         decide
       have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
@@ -235,7 +235,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       · exact Outside.of_sub hout (by omega) (by omega)
     all_goals try (simp [setRegF, h72]; try omega)
     all_goals try (simp only [h72, Janus.Arm64.Memory.readLE_writeLE_self]; decide)
-    rintro D hpcD ⟨r4, x4, y4, f4, m4, hsD, hfrD, henvD⟩
+    rintro D hpcD ⟨r4, x4, y4, f4, m4, _, _, hsD, hfrD, henvD⟩
     subst hsD
     simp only [MapAmd64.calleeStack, setRegF_apply, reduceIte, Nat.reduceEqDiff, h72] at hfrD
     janus64_run

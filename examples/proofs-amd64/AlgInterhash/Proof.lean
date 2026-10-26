@@ -44,8 +44,8 @@ theorem retState_of {s s' : State} (hsp : s'.regs 4 = s.regs 4 + 8) (h5 : s'.reg
     (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s)
     (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
     (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
-    s' = retState s s'.regs s'.xmm s'.ymmHi s'.flags s'.mxcsr s'.mem := by
-  obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx, x8, fw⟩ := s'
+    s' = retState s s'.regs s'.xmm s'.ymmHi s'.flags s'.mxcsr s'.mem s'.zmmHi s'.kreg := by
+  obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx, x8, fw, zh, kr⟩ := s'
   simp only at hsp h5 h14 hx hrip hfs hdf hx87 hfw ⊢
   subst hrip hfs hdf hx87 hfw
   simp only [retState, State.mk.injEq, and_true, true_and]
@@ -202,8 +202,9 @@ theorem hRet_intro {H : Janus.Contracts.Hash.HashModel} {d nargs : Nat} {s s' : 
     (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s) (hfs : s'.fsBase = s.fsBase)
     (hdf : s'.df = s.df) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
     (hf : MemFrame s.mem s'.mem (H.priv ++ calleeStack s d nargs)) (he : H.Env s'.mem (s.regs 14))
-    (hp : P s'.regs) : HRet H d nargs s s' P :=
-  ⟨_, _, _, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf, hmx, hf, he, hp⟩
+    (hp : P s'.regs)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : HRet H d nargs s s' P :=
+  ⟨_, _, _, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hx87 hfw, hmx, hf, he, hp⟩
 
 /-- `TESTL $0x20` on the `TFlag` byte: bit 5, `TFlagDirectIface`. -/
 theorem tflag_key (x : Nat) : (BitVec.ofNat 8 x &&& 32#8 = 0#8) ↔ x.testBit 5 = false := by
@@ -313,7 +314,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (H : HashModel) (hH : H.La
               rw [Janus.Arm64.Memory.readLE_writeLE_self]; decide) (by decide) (by decide), ?_⟩ ?_
       · simp only [setRegF, reduceIte, Nat.reduceEqDiff, eT, eD, eA]
         rw [← hdata]; exact (hfr0 _ (hS _ _)).1 hhash
-      intro s1 hpc1 ⟨r, x, y, fl, mx, m1, hs1, hmx, hfr, he1, hres⟩
+      intro s1 hpc1 ⟨r, x, y, fl, mx, m1, _, _, hs1, hmx, hfr, he1, hres⟩
       subst hs1
       have hfr' := hfr
       simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, setRegF, reduceIte,

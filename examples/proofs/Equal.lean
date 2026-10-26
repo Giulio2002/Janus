@@ -104,13 +104,13 @@ theorem model : Efaceeq (Extracted.program.link implAt) cAddr R0 := by
   by_cases h0 : (s.regs 0).toNat = 0
   · janus_run
     refine rtReturn_of R0 3 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-      rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+      rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
     simp [setReg, efaceEqual, h0]
   · obtain ⟨-, htd, hx, hy⟩ := hok h0
     janus_run
     all_goals
       refine rtReturn_of R0 3 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-        rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+        rfl rfl rfl rfl rfl rfl (MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
       rw [htd, efaceEqual_R0 (g := s.regs 28) ⟨he1, he2, hd⟩]
       simp only [setReg_apply, reduceIte, Nat.reduceEqDiff]
       split

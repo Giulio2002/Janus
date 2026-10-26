@@ -59,7 +59,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : Rt
   have hs2' : 0 < min dl.toNat sl.toNat * 8 → s.mem.accessible sp.toNat (min dl.toNat sl.toNat * 8) false = true :=
     fun h => by rw [Nat.mul_comm]; exact hs2 (by omega)
   janus64_run [false_implies, implies_true, List.not_mem_nil, forall_const] calls [hc]
-  rename_i r0 r1 r2 jk fl xm yh M1 hfr hpost
+  rename_i r0 r1 r2 jk fl xm yh M1 zh kr hfr hpost
   obtain ⟨h0, hcp⟩ := hpost
   refine ⟨h0, fun i hi => ?_, by janus_frame⟩
   rw [hcp i (by omega)]

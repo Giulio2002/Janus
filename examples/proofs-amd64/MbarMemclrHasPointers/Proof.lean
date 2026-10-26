@@ -40,8 +40,8 @@ theorem retState_of {s s' : State} (hsp : s'.regs 4 = s.regs 4 + 8) (h5 : s'.reg
     (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s)
     (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
     (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
-    s' = retState s s'.regs s'.xmm s'.ymmHi s'.flags s'.mxcsr s'.mem := by
-  obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx, x8, fw⟩ := s'
+    s' = retState s s'.regs s'.xmm s'.ymmHi s'.flags s'.mxcsr s'.mem s'.zmmHi s'.kreg := by
+  obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx, x8, fw, zh, kr⟩ := s'
   simp only at hsp h5 h14 hx hrip hfs hdf hx87 hfw ⊢
   subst hrip hfs hdf hx87 hfw
   simp only [retState, State.mk.injEq, and_true, true_and]
@@ -139,8 +139,9 @@ theorem tRet_intro {M : Janus.Contracts.Mem.MemModel} {d nargs : Nat} {extra : L
     (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s) (hfs : s'.fsBase = s.fsBase)
     (hdf : s'.df = s.df) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
     (hf : MemFrame s.mem s'.mem (M.priv ++ calleeStack s d nargs ++ extra))
-    (he : M.Env s'.mem (s.regs 14)) (hp : P s'.mem) : TRet M d nargs extra s s' P :=
-  ⟨_, _, _, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf, hmx, hf, he, hp⟩
+    (he : M.Env s'.mem (s.regs 14)) (hp : P s'.mem)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : TRet M d nargs extra s s' P :=
+  ⟨_, _, _, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hx87 hfw, hmx, hf, he, hp⟩
 
 /-- The caller's frame then the callee's frame (with the private ranges `P` and the extra
 ranges `X` of a typed-memory contract) is the caller's frame (amd64). -/
@@ -250,7 +251,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MemModel) (hM : M.Law
   · simpa [setRegF] using hp8
   · simp [setRegF]
   · simpa [setRegF] using hn8
-  intro s1 hpc1 ⟨r1, x1, y1, fl1, mx1, m1, hs1, hmx1, hfr1, he1, _⟩
+  intro s1 hpc1 ⟨r1, x1, y1, fl1, mx1, m1, _, _, hs1, hmx1, hfr1, he1, _⟩
   subst hs1
   have hfr1' := hfr1
   have hF1 := frame_retx (nargs := 4) (X := []) (hS _)
@@ -281,7 +282,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MemModel) (hM : M.Law
     refine ⟨hD1, by rw [(hF1w _).accessible]; exact hD2, ?_, hD4, ?_⟩ <;>
       simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, outside_cons, outside_nil,
         and_true, setRegF, reduceIte, Nat.reduceEqDiff, hsp48] <;> omega
-  intro s2 hpc2 ⟨r, x, y, fl, mx, m2, hs2, hmx, hfr, he2, hz⟩
+  intro s2 hpc2 ⟨r, x, y, fl, mx, m2, _, _, hs2, hmx, hfr, he2, hz⟩
   subst hs2
   have hfr' := hfr
   have hF := frame_retx' (nargs := 2) (hF1w _)

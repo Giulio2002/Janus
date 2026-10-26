@@ -48,11 +48,12 @@ theorem wb64_post_intro {rt : List (Nat × Nat)} {n : Nat} {s : State} {r : Nat 
     (hr : r = fun i => if i = 4 then s.regs 4 + 8#64 else if i = 11 then buf else s.regs i)
     (hfr : MemFrame s.mem m (rt ++ [((s.regs 4).toNat - 120, (s.regs 4).toNat)]))
     (hw : WbSlots rt m buf.toNat n) :
-    ∃ (buf : W64) (f' : Flags) (x yh : Nat → BitVec 128) (m' : Arm64.Memory),
+    ∃ (buf : W64) (f' : Flags) (x yh : Nat → BitVec 128) (m' : Arm64.Memory)
+      (zh : Nat → BitVec 256) (kr : Nat → W64),
       { s with regs := r, rip := retAddrOf s, flags := f, mem := m } =
         { s with regs := fun i => if i = 4 then s.regs 4 + 8#64 else if i = 11 then buf else s.regs i,
                  rip := retAddrOf s, flags := f', xmm := fun i => if i = 15 then s.xmm 15 else x i,
-                 ymmHi := yh, mem := m' } ∧
+                 ymmHi := yh, mem := m', zmmHi := zh, kreg := kr } ∧
       MemFrame s.mem m' (rt ++ [((s.regs 4).toNat - 120, (s.regs 4).toNat)]) ∧ WbSlots rt m' buf.toNat n := by
   refine ⟨buf, f, s.xmm, s.ymmHi, m, s.zmmHi, s.kreg, ?_, hfr, hw⟩
   rw [hr]; congr 1; funext i; split <;> simp_all

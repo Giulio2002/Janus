@@ -43,7 +43,7 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
       (Extracted.program.contractAddr "runtime.typedmemmove") M wb d)
     (dst src : BitVec 64) :
     Ensures (Extracted.program.link impl) Extracted.entry [dst, src] (pre M wb d dst src)
-      (fun s s' => Copied s.mem s'.mem dst.toNat src.toNat 128 ∧
+      (fun s s' => Mem.Copied s.mem s'.mem dst.toNat src.toNat 128 ∧
         MemFrame s.mem s'.mem (M.priv ++ window d s ++ [(dst.toNat, dst.toNat + 128)])) := by
   intro ret hret s hs ⟨hc, henv, hgp, hpriv, hd, hto, hwb1, hwb2, hwbo, hwb, ⟨hS, hS'⟩, hso, ⟨hD, hD'⟩, hdo, hdp⟩
   have hc' := hc
@@ -180,7 +180,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (wb d ret : Nat) (
 
 /-- So the guarantee is reached: `DST + 128` receives the 128 bytes of `DST`. -/
 theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
-    ABIReturn s0 s' ∧ Copied s0.mem s'.mem (DST + 128) DST 128 :=
+    ABIReturn s0 s' ∧ Mem.Copied s0.mem s'.mem (DST + 128) DST 128 :=
   (correctness implAt M0 M0_laws WB 64 (model WB 64) dst src ret hret s0 setup hpre).mono
     fun _ h => ⟨h.1, h.2.1⟩
 

@@ -45,7 +45,7 @@ theorem correctness (p h : BitVec 64) :
       (Nat.xor_lt_two_pow (Janus.Spec.MemHash.readLE_lt64 _ _ 8 (by decide)) (Janus.Spec.MemHash.readLE_lt64 _ _ 4 (by decide))))]
   · rw [ite_eq_right (Janus.Spec.MemHash.readLE1_ne_zero hbr)]
     congr 1
-    simp only [Janus.Spec.MemHash.pinsrd_2 _ _ h.isLt, Janus.Spec.MemHash.setWidth_ofNat_128,
+    simp only [Janus.Spec.MemHash.pinsrd_2 _ _ h.isLt, Janus.Spec.MemHash.pinsrd_2' _ _ h.isLt, Janus.Spec.MemHash.setWidth_ofNat_128,
       Janus.Spec.AES.aesenc_eq, Janus.Spec.MemHash.aesHash32, Janus.Spec.MemHash.round']
     apply BitVec.eq_of_toNat_eq
     simp only [BitVec.toNat_ofNat, Nat.mod_mod]

@@ -93,7 +93,7 @@ theorem model : ConvT64 (Extracted.program.link implAt) cAddr R0 Htrue := by
   obtain ⟨⟨he1, he2, hd⟩, ⟨hg1, hg2, hg3⟩, ⟨hl1, hl2, hal, hd1, hd2, hd3, hst⟩, hout⟩ := hpre
   janus_run
   refine rtReturn_of R0 1 [] s _ _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg])
-    rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
+    rfl rfl rfl rfl rfl rfl ?_ ((show Env0 s.mem (s.regs 28) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [rtWrites, calleeStack, R0_priv, R0_depth, List.append_nil, List.cons_append,
       List.nil_append]
     janus_frame

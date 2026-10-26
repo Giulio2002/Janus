@@ -371,7 +371,7 @@ theorem loop (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
           | (simp only [BitVec.toNat_add, BitVec.toNat_ofNat]; omega)
       · janus64_run [false_implies, implies_true, List.not_mem_nil, forall_const, sw32_64, toInt_sw_byte,
           toInt_127_32] until [head] calls [hdec]
-        rename_i r0 r1 r2 jk fl xm yh M1 hfl hpost
+        rename_i r0 r1 r2 jk fl xm yh M1 zh kr hfl hpost
         have hfw : MemFrame (M0 s p n) ((S.mem.writeLE ((s.regs 4).toNat - 16) 8 (S.regs 2).toNat).writeLE
             ((s.regs 4).toNat - 48) 8 (crAddr + 0x45)) (R s) :=
           (hfr0.writeLE _ (r := ((s.regs 4).toNat - 4144, (s.regs 4).toNat - 8)) (by simp [R]) (by omega) (by omega)).writeLE

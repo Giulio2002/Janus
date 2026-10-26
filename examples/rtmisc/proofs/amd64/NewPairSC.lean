@@ -45,7 +45,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (H : Rt
   janus64_run until [Extracted.entry + 0x2e] calls [hsc]
   have hdj := InRanges.disjoint ‹InRanges _ 16 rt› hout
   janus64_run
-  rename_i ptr junk f x yh m hfr hin hle hacc h8 h16 hz htrue
+  rename_i ptr junk f x yh m zh kr hfr hin hle hacc h8 h16 hz htrue
   have hp := ptr.isLt
   refine ⟨_, rfl, hin, h16, hacc, ?_, ?_, ?_⟩
   · rw [Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega), Arm64.Memory.readLE_writeLE_self]

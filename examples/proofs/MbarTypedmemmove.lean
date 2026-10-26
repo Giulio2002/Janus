@@ -227,7 +227,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (M : MemModel) (d d' : Nat), M.La
 /-- `correctness` at `s0`. -/
 theorem returns : ReachesRet (Extracted.program.link implAt) (s0.regs 30) s0
     (fun s' => TRet M0 64 3 [((s0.regs 1).toNat, (s0.regs 1).toNat + typSize s0.mem (s0.regs 0).toNat)] s0 s'
-      fun m => Copied s0.mem m (s0.regs 1).toNat (s0.regs 2).toNat (typSize s0.mem (s0.regs 0).toNat)) :=
+      fun m => Mem.Copied s0.mem m (s0.regs 1).toNat (s0.regs 2).toNat (typSize s0.mem (s0.regs 0).toNat)) :=
   correctness implAt M0 M0_laws 64 16 (by decide) (by decide) (model 16) s0 rfl pre
 
 end Witness

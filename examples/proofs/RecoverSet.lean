@@ -125,7 +125,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self, e32] at hcpc h26
     have hcode : (func1A : Nat) % 256 ^ 8 = func1A := by decide
     rw [hcode] at hcpc
-    obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
+    obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs, cex, cep⟩ := c
     dsimp only at hcpc h26 h28 h18 h29 hcal hclo hchi h30a h30b hpk henvc hb0 hfrc hcont
     subst hcpc
     have hgb : (cr 28).toNat + 16 + 8 ≤ 2 ^ 48 := by rw [h28]; omega
@@ -141,7 +141,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       rw [hfrc.accessible]; simp only [Memory.accessible_writeLE]; exact hst
     -- the deferred closure, run until it returns into the runtime
     have hcl : ReachesRet (Extracted.program.link impl) (cr 30)
-        ⟨cr, csp, BitVec.ofNat 64 func1A, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ (fun c' =>
+        ⟨cr, csp, BitVec.ofNat 64 func1A, cfl, cm, cdz, cv, ctp, cfc, cfs, cex, cep⟩ (fun c' =>
           c'.sp = csp ∧ c'.regs 28 = cr 28 ∧ c'.regs 18 = cr 18 ∧ P.Env c'.mem ∧
           P.Recovered c'.mem (s.regs 28).toNat ∧
           MemFrame cm c'.mem (P.priv ++ [(csp.toNat - 32 - P.depth, csp.toNat),
