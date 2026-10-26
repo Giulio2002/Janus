@@ -54,7 +54,7 @@ theorem wb64_post_intro {rt : List (Nat × Nat)} {n : Nat} {s : State} {r : Nat 
                  rip := retAddrOf s, flags := f', xmm := fun i => if i = 15 then s.xmm 15 else x i,
                  ymmHi := yh, mem := m' } ∧
       MemFrame s.mem m' (rt ++ [((s.regs 4).toNat - 120, (s.regs 4).toNat)]) ∧ WbSlots rt m' buf.toNat n := by
-  refine ⟨buf, f, s.xmm, s.ymmHi, m, ?_, hfr, hw⟩
+  refine ⟨buf, f, s.xmm, s.ymmHi, m, s.zmmHi, s.kreg, ?_, hfr, hw⟩
   rw [hr]; congr 1; funext i; split <;> simp_all
 
 def core : Nat := segAddr Extracted.program "gcWriteBarrier"
@@ -108,8 +108,8 @@ macro "wb_entry" n:num : tactic => `(tactic| (
   refine rr_mono' (core_meets rt $n (by decide) (by decide) _ (by dsimp only; decide)
     ⟨by simpa [CallOK64, setRegF] using hcall, by simpa [Ready64, setRegF] using hH, ?_⟩) ?_
   · first | rfl | decide | simp [setRegF]
-  · rintro s' ⟨buf, f, x, yh, m, hs, hfr, hw⟩
-    refine ⟨buf, f, x, yh, m, ?_, by simpa [setRegF] using hfr, hw⟩
+  · rintro s' ⟨buf, f, x, yh, m, zh, kr, hs, hfr, hw⟩
+    refine ⟨buf, f, x, yh, m, zh, kr, ?_, by simpa [setRegF] using hfr, hw⟩
     rw [hs]
     dsimp only
     congr 1
@@ -233,7 +233,7 @@ theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
 /-- From that state (at `gcWriteBarrier1`) the real code returns, with `R11` the reserved slot. -/
 theorem returns : ReachesRet Extracted.program (retAddrOf s0) s0 fun s' =>
     ∃ buf : W64, s'.regs 11 = buf ∧ WbSlots rt s'.mem buf.toNat 1 :=
-  rr_mono' (wb1_meets rt s0 rfl ⟨callOK, ready 1 (by decide)⟩) fun s' ⟨buf, f, x, yh, m, hs, _, hw⟩ =>
+  rr_mono' (wb1_meets rt s0 rfl ⟨callOK, ready 1 (by decide)⟩) fun s' ⟨buf, f, x, yh, m, zh, kr, hs, _, hw⟩ =>
     ⟨buf, by rw [hs]; simp, by rw [hs]; exact hw⟩
 
 end Witness

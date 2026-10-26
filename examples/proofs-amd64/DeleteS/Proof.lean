@@ -64,7 +64,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (Nat × Nat)
   · simp only [setRegF, reduceIte, Nat.reduceEqDiff, calleeStack, hsp48, outside_cons,
       outside_nil, and_true]
     omega
-  · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hmap'⟩
+  · intro s' hpc' ⟨r, x, y, fl, m', _, _, hs', hfr, henv', hoth, hmap'⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.append_nil, setRegF, reduceIte, Nat.reduceEqDiff, hsp48] at hfr
     have hk := hfw.readLE kp.toNat kl.toNat (by simp only [outside_cons, outside_nil, and_true]; exact hko)

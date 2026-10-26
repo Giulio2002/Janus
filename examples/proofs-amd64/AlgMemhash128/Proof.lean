@@ -105,14 +105,14 @@ theorem correctness (impl : List Janus.Amd64.Segment) (H : HashModel) (hH : H.La
     refine Input.of_caller (hfw _) (by simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp40])
       (by decide) (by omega) hA1 hA2 ?_
     simp only [callerWindow, outside_cons, outside_nil, and_true, hn]; omega
-  intro s' hpc' ⟨r, x, y, fl, mx, m', hs', hmx, hfr, he', hres⟩
+  intro s' hpc' ⟨r, x, y, fl, mx, m', _, _, hs', hmx, hfr, he', hres⟩
   subst hs'
   simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, setRegF, reduceIte,
     Nat.reduceEqDiff, hsp40] at hfr
   simp only [setRegF, reduceIte, Nat.reduceEqDiff] at hres he'
   rw [(hfw _).readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; simp; omega)] at hres
   janus64_run
-  refine ⟨_, _, _, _, _, _, retState_of ?q1 ?q2 ?q3 ?q4 ?q5 ?q6 ?q7, ?q8, ?q9, ?q10, ?q11⟩
+  refine ⟨_, _, _, _, _, _, _, _, retState_of ?q1 ?q2 ?q3 ?q4 ?q5 ?q6 ?q7, ?q8, ?q9, ?q10, ?q11⟩
   case q7 => exact hdf.symm
   case q8 => simp only at hmx ⊢; exact hmx
   case q9 =>

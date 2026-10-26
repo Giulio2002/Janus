@@ -561,7 +561,7 @@ theorem go_spec (a b c d e f g h : BitVec 64) :
     janus64_simp [h80, h128]
     repeat' (apply And.intro)
     all_goals first | omega | janus64_disch | assumption
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, _, mx, x87, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, _, mx, x87, zh, kr, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   rename_i fsb
   simp only [E, res, args, fw, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,

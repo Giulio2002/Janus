@@ -95,7 +95,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (C : CheckptrModel) (hl : 
     rw [hl.base_frame _ _ _ hag]
     unfold NoStraddle at hns
     simpa using hns
-  · intro s' hpc' ⟨r, x', y, fl, m', hs', hfr, henv', _⟩
+  · intro s' hpc' ⟨r, x', y, fl, m', _, _, hs', hfr, henv', _⟩
     subst hs'
     simp only [rtWrites64, Contracts.MapAmd64.calleeStack, setRegF, reduceIte, Nat.reduceEqDiff, hsp40] at hfr
     janus64_run

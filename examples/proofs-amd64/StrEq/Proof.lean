@@ -62,7 +62,7 @@ theorem correctness (impl : List Segment) (d : Nat)
        MemAmd64.Input.of_caller hfw (by simp [setRegF, hsp40]) (by decide) (by omega)
          (by simpa [setRegF, h_a2] using hP2') (by simpa [setRegF, h_a2] using hP2)
          (by simpa [setRegF, h_a2] using ho2)⟩ ?_
-    intro s' hpc' ⟨r, x, y, fl, mx, m', hs', hmx, hfr, hres⟩
+    intro s' hpc' ⟨r, x, y, fl, mx, m', _, _, hs', hmx, hfr, hres⟩
     subst hs'
     simp only [MemAmd64.calleeStack, MapAmd64.calleeStack, setRegF, reduceIte,
       Nat.reduceEqDiff, hsp40] at hfr

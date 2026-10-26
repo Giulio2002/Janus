@@ -203,7 +203,7 @@ theorem go_spec (a b r : BitVec 64) :
       ⟨haa, by omega, by omega, by omega, by omega⟩, by omega, ⟨hba, by omega, by omega, by omega, by omega⟩,
       by omega, ⟨hra, by omega, by omega, by omega, by omega⟩, hx87, hfcw⟩
     janus64_disch
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, x87, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, x87, zh, kr, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   simp only [E, frameA, frameB, frameR, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,
     ↓reduceIte, Nat.reduceEqDiff, h32, h80] at hmf h4 h5 h14 h15 hfs1 hfs2 hfsr' hfsg'

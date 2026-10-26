@@ -91,7 +91,7 @@ theorem correctness (impl : List Segment) (H : HashModel) (hl : H.Laws) (d : Nat
       (by simpa [setRegF, h_a0] using (show p.toNat + 8 ≤ 2 ^ 48 by omega))
       (by simpa [setRegF, h_a0] using Janus.Arm64.Memory.accessible_mono _ hpa (Nat.le_refl _) (by omega))
       (by simpa [setRegF, h_a0] using hp8)
-  · intro s' hpc' ⟨r, x, y, fl, mx, m', hs', hmx, hfr, henv', hres⟩
+  · intro s' hpc' ⟨r, x, y, fl, mx, m', _, _, hs', hmx, hfr, henv', hres⟩
     subst hs'
     simp only [MemAmd64.calleeStack, MapAmd64.calleeStack, setRegF, reduceIte, Nat.reduceEqDiff, hsp32] at hfr
     simp only [setRegF, reduceIte, Nat.reduceEqDiff, h_a0, h_a1] at hres

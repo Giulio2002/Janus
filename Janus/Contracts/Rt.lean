@@ -180,8 +180,9 @@ def GuardOK64 (s : State) (adj : Nat) : Prop :=
 /-- The postcondition of `RtContract64`. -/
 @[reducible] def RtPost64 (rt : List (Nat × Nat)) (stack : Nat) (sp : RtSpec) (s s' : State) :
     Prop :=
-  ∃ (r0 r1 r2 : W64) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
-    s' = retState64 s junk [r0, r1, r2] f x yh m ∧
+  ∃ (r0 r1 r2 : W64) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
+    (zh : Nat → BitVec 256) (kr : Nat → W64),
+    s' = retState64 s junk [r0, r1, r2] f x yh m zh kr ∧
       MemFrame s.mem m (rtIf sp.rtWrites rt ++ calleeStack64 s stack sp.nargs ++
         sp.writes (argWords64 s sp.nargs) s.mem) ∧
       sp.post rt (argWords64 s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat m
@@ -198,7 +199,7 @@ theorem RtPost64.intro {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s
     (hq : sp.post rt (argWords64 s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 3).toNat (s'.regs 1).toNat s'.mem)
     (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
     RtPost64 rt stack sp s s' := by
-  refine ⟨s'.regs 0, s'.regs 3, s'.regs 1, s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, ?_, hf, hq⟩
+  refine ⟨s'.regs 0, s'.regs 3, s'.regs 1, s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, s'.zmmHi, s'.kreg, ?_, hf, hq⟩
   obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
   simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw ⊢
   subst hrip hfs hdf hmx hx87 hfw

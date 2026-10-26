@@ -53,8 +53,8 @@ attribute [janus64_exec] ExecEVEX.getZ ExecEVEX.rdV ExecEVEX.rdLow ExecEVEX.done
   ExecEVEX.EOp.suppress ExecEVEX.EUOp.suppress ExecEVEX.EOp.count ExecEVEX.pintElementwise ExecEVEX.rdK
   ExecEVEX.rdMasked ExecEVEX.stMasked ExecEVEX.icmp
 
-/-- The address function of an AVX-512 instruction, where it is applied. -/
-@[janus64_exec] theorem eaNat_apply (s : State) (next : W64) (a : Addr) : eaNat s next a = (ea s next a).toNat := rfl
+-- The address function of an AVX-512 instruction, where it is applied, is `eaNat_apply`
+-- (`Janus.Amd64.TacticSSE`, agent/x86crypto; agent/avx512 declared the same lemma here).
 
 /-- `allN` of a literal count, one element at a time (with literal indices, which `omega` reads). -/
 @[janus64_exec] theorem allN_pos (n : Nat) (f : Nat → Bool) (h : 0 < n) :

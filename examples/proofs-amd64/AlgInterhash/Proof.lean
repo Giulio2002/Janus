@@ -203,7 +203,7 @@ theorem hRet_intro {H : Janus.Contracts.Hash.HashModel} {d nargs : Nat} {s s' : 
     (hdf : s'.df = s.df) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
     (hf : MemFrame s.mem s'.mem (H.priv ++ calleeStack s d nargs)) (he : H.Env s'.mem (s.regs 14))
     (hp : P s'.regs) : HRet H d nargs s s' P :=
-  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf, hmx, hf, he, hp⟩
+  ⟨_, _, _, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf, hmx, hf, he, hp⟩
 
 /-- `TESTL $0x20` on the `TFlag` byte: bit 5, `TFlagDirectIface`. -/
 theorem tflag_key (x : Nat) : (BitVec.ofNat 8 x &&& 32#8 = 0#8) ↔ x.testBit 5 = false := by

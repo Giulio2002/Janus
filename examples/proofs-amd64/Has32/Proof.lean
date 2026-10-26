@@ -51,7 +51,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 32) 
         (by decide) (by decide), by simpa [setRegF] using hty, ?_⟩ ?_
   · simp only [setRegF]; simp only [reduceIte, Nat.reduceEqDiff]
     exact IsMap.frame hl hmap (Agrees.of_window hfw (Outside.of_sub hout (by omega) (by omega)))
-  · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hmap', ⟨hs1, hs2, hs3⟩⟩
+  · intro s' hpc' ⟨r, x, y, fl, m', _, _, hs', hfr, henv', hoth, hmap', ⟨hs1, hs2, hs3⟩⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.append_nil, setRegF, reduceIte, Nat.reduceEqDiff, hsp40] at hfr
     have hacc0 : s.mem.accessible (r 0).toNat 1 false = true := by

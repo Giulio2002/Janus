@@ -25,8 +25,9 @@ def cmpResult64 (s : State) : W64 :=
 
 /-- How `runtime.cmpstring` returns (amd64). -/
 @[reducible] def CmpRet64 (stack : Nat) (s s' : State) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Janus.Arm64.Memory),
-    s' = retState64 s junk [cmpResult64 s] f x yh m ∧ MemFrame s.mem m (calleeStack64 s stack 4)
+  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Janus.Arm64.Memory)
+    (zh : Nat → BitVec 256) (kr : Nat → W64),
+    s' = retState64 s junk [cmpResult64 s] f x yh m zh kr ∧ MemFrame s.mem m (calleeStack64 s stack 4)
 
 /-- `runtime.cmpstring` at `addr` of `p` (amd64), using at most `stack` bytes below `RSP`. -/
 def CmpstringContract64 (p : Janus.Amd64.Program) (addr stack : Nat) : Prop :=

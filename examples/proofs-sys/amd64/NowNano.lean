@@ -193,7 +193,7 @@ theorem correctness (rt : List (Nat × Nat)) :
     janus64_simp
     repeat' apply And.intro
     all_goals first | omega | janus_disch
-  rintro s₁ k₁ ⟨sec, nsec, msec, mnsec, hn, hsec, hmn, hmono, rfl, junk, f, x, yh, m, rfl, hf⟩
+  rintro s₁ k₁ ⟨sec, nsec, msec, mnsec, hn, hsec, hmn, hmono, rfl, junk, f, x, yh, m, zh, kr, rfl, hf⟩
   have hn31 : nsec < 2147483648 := by omega
   have h48 : (s.regs 4 - 48#64).toNat = (s.regs 4).toNat - 48 := by
     rw [BitVec.toNat_sub]; simp; omega

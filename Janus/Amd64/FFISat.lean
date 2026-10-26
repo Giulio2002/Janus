@@ -28,7 +28,7 @@ def goResumeState (s : State) (m : Memory) : State :=
 theorem goResume_goResumeState {s : State} {m : Memory} (ht : TlsG s)
     (hreg : m.regions = s.mem.regions) :
     GoResume s (goResumeState s m) (m.writeLE (s.fsBase.toNat - 8) 8 (s.regs regG).toNat) := by
-  refine ⟨_, s.flags, _, s.ymmHi, s.fsBase, s.mxcsr, rfl, by simp, by simp [GoABI.regFP], by simp [regG],
+  refine ⟨_, s.flags, _, s.ymmHi, s.fsBase, s.mxcsr, s.x87, s.zmmHi, s.kreg, rfl, by simp, by simp [GoABI.regFP], by simp [regG],
     by simp [xmmZero], ⟨ht.base, ?_, ?_⟩, rfl⟩
   · simp only [goResumeState, Janus.Arm64.Memory.accessible_writeLE]
     rw [Janus.Arm64.Memory.accessible_congr hreg]; exact ht.readable
@@ -64,6 +64,7 @@ theorem cgoEntry_cgoEntryState {p : Program} {s : State} {ret sp : Nat} (hret : 
     (hfree : ∀ r ∈ s.mem.regions, r.base + r.size ≤ sp - cgoCStack ∨ sp + 8 ≤ r.base) :
     CgoEntry p s (cgoEntryState s ret sp) ret where
   rip := rfl
+  x87 := rfl
   arg := by simp [cgoEntryState]
   retSlot := by
     have hsp : (BitVec.ofNat 64 sp).toNat = sp := by simp; omega
@@ -129,7 +130,7 @@ theorem cgoCall_satisfiable {p : Program} {s : State} {ret sp : Nat} (hret : Ret
 
 theorem callbackSpec_satisfiable (t : TLSImage) (fn : Nat) (G : State → Prop) (E : State → Memory) :
     (CallbackSpec t fn G E).Total := fun f s ⟨hf, _⟩ =>
-  ⟨_, hf, E s, ⟨fun i => if i = 4 then s.regs 4 + 8 else s.regs i, s.flags, s.xmm, s.ymmHi, s.mxcsr, rfl,
+  ⟨_, hf, E s, ⟨fun i => if i = 4 then s.regs 4 + 8 else s.regs i, s.flags, s.xmm, s.ymmHi, s.mxcsr, s.zmmHi, s.kreg, rfl,
     by simp, rfl⟩, ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩⟩
 
 /-! ## `cgocallback` -/
@@ -195,7 +196,7 @@ def cbResumeState (s u' : State) : State :=
                     regions := s.mem.regions } }
 
 theorem cbResumed_cbResumeState (t : TLSImage) (s u' : State) : CbResumed t s u' (cbResumeState s u') :=
-  ⟨_, ⟨_, s.flags, s.xmm, s.ymmHi, s.mxcsr, rfl, by simp, rfl⟩, rfl, fun _ _ => rfl⟩
+  ⟨_, ⟨_, s.flags, s.xmm, s.ymmHi, s.mxcsr, _, _, rfl, by simp, rfl⟩, rfl, fun _ _ => rfl⟩
 
 /-- Every allowed `cgocallback` has a result, for a total inner contract, an admissible return
 address and a goroutine stack at `sp` disjoint from the C memory (as every real callback has). -/

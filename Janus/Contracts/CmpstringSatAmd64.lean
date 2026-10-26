@@ -48,7 +48,7 @@ theorem link_eq : toy.link impl = prog := rfl
 theorem ret_of (s : State) (R : Nat → W64) (F : Flags) (hR0 : R 0 = cmpResult64 s)
     (h4 : R 4 = s.regs 4 + 8#64) (h5 : R 5 = s.regs 5) (h14 : R 14 = s.regs 14) :
     CmpRet64 16 s { s with regs := R, flags := F, rip := retAddrOf s } := by
-  refine ⟨R, F, s.xmm, s.ymmHi, s.mem, ?_, MemFrame.refl _ _⟩
+  refine ⟨R, F, s.xmm, s.ymmHi, s.mem, s.zmmHi, s.kreg, ?_, MemFrame.refl _ _⟩
   simp only [retState64]
   congr 1
   · funext i

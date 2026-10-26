@@ -78,7 +78,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (d : Nat)
       refine Input.of_caller (hfw _) (by simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp40])
         (by decide) (by omega) (by omega) (by rw [hlen]; exact hQ2) ?_
       simp only [callerWindow, outside_cons, outside_nil, and_true]; omega
-    intro s' hpc' ⟨r, x, y, fl, mx, m', hs', hmx, hfr, hres⟩
+    intro s' hpc' ⟨r, x, y, fl, mx, m', _, _, hs', hmx, hfr, hres⟩
     subst hs'
     simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, setRegF, reduceIte,
       Nat.reduceEqDiff, hsp40] at hfr

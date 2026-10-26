@@ -126,14 +126,14 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hR : R.L
     case ok =>
       simp only [setRegF, reduceIte, Nat.reduceEqDiff, et, ex, ey]
       exact Janus.Contracts.Iface.EqFrame.eqOK hfr0 hok1 (hwide _)
-    intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, he', hres⟩
+    intro s' hpc' ⟨r, x, y, fl, m', _, _, hs', hfr, he', hres⟩
     subst hs'
     simp only [Janus.Contracts.IfaceAmd64.rtWrites, Janus.Contracts.MapAmd64.calleeStack, setRegF,
       reduceIte, Nat.reduceEqDiff, hsp40, List.append_nil] at hfr
     simp only [setRegF, reduceIte, Nat.reduceEqDiff, et, ex, ey] at hres he'
     rw [Janus.Contracts.Iface.EqFrame.efaceEqual hfr0 (hwide _)] at hres
     janus64_run
-    refine ⟨_, _, _, _, _, _, retState_of ?q1 ?q2 ?q3 ?q4 ?q5 ?q6 ?q7, ?q8, ?q9, ?q10, ?q11⟩
+    refine ⟨_, _, _, _, _, _, _, _, retState_of ?q1 ?q2 ?q3 ?q4 ?q5 ?q6 ?q7, ?q8, ?q9, ?q10, ?q11⟩
     case q7 => exact hdf.symm
     case q8 => rfl
     case q9 =>
@@ -151,7 +151,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hR : R.L
       Janus.Contracts.MapAmd64.keepX15]
   · have htt : s.mem.readLE (s.regs 0).toNat 8 ≠ s.mem.readLE (s.regs 3).toNat 8 := by
       simp only [Nat.reducePow] at t0 t1; omega
-    refine ⟨_, _, _, _, _, _, retState_of ?r1 ?r2 ?r3 ?r4 ?r5 ?r6 ?r7, ?r8, ?r9, ?r10, ?r11⟩
+    refine ⟨_, _, _, _, _, _, _, _, retState_of ?r1 ?r2 ?r3 ?r4 ?r5 ?r6 ?r7, ?r8, ?r9, ?r10, ?r11⟩
     case r7 => exact hdf.symm
     case r8 => rfl
     case r9 => simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack]; janus_frame

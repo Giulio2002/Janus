@@ -68,7 +68,7 @@ theorem retState_of {s s' : State} (hsp : s'.regs 4 = s.regs 4 + 8) (h5 : s'.reg
     (h14 : s'.regs 14 = s.regs 14) (hx : s'.xmm 15 = s.xmm 15) (hrip : s'.rip = retAddrOf s)
     (hfs : s'.fsBase = s.fsBase) (hdf : s.df = false) (hdf' : s'.df = false)
     (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
-    s' = MemAmd64.retState s s'.regs s'.xmm s'.ymmHi s'.flags s'.mxcsr s'.mem := by
+    s' = MemAmd64.retState s s'.regs s'.xmm s'.ymmHi s'.flags s'.mxcsr s'.mem s'.zmmHi s'.kreg := by
   obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx, x8, fw⟩ := s'
   simp only at hsp h5 h14 hx hrip hfs hdf' hx87 hfw ⊢
   subst hrip hfs hdf' hx87 hfw
@@ -96,7 +96,7 @@ theorem ifaceRet_of {R : Janus.Spec.Type.IfaceModel} {d : Nat} {s s' : State} {P
     (hf : MemFrame s.mem s'.mem (R.priv ++ MemAmd64.calleeStack s d 2))
     (he : R.Env s'.mem (s.regs 14)) (hp : P s'.regs)
     (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : IfaceRet R d s s' P :=
-  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf' hx87 hfw, hmx, hf, he, hp⟩
+  ⟨_, _, _, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf' hx87 hfw, hmx, hf, he, hp⟩
 
 /-- The return of a model implementation as `TRet`. -/
 theorem tRet_of {M : MemModel} {d nargs : Nat} {extra : List (Nat × Nat)} {s s' : State}
@@ -107,7 +107,7 @@ theorem tRet_of {M : MemModel} {d nargs : Nat} {extra : List (Nat × Nat)} {s s'
     (hf : MemFrame s.mem s'.mem (M.priv ++ MemAmd64.calleeStack s d nargs ++ extra))
     (he : M.Env s'.mem (s.regs 14)) (hp : P s'.mem)
     (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : TRet M d nargs extra s s' P :=
-  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf' hx87 hfw, hmx, hf, he, hp⟩
+  ⟨_, _, _, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf' hx87 hfw, hmx, hf, he, hp⟩
 
 /-- The return of a model implementation as `EqRet`. -/
 theorem eqRet_of {d nargs : Nat} {s s' : State} {P : (Nat → W64) → Prop}

@@ -527,8 +527,9 @@ structure CallbackEntry (t : TLSImage) (p : Program) (s u : State) (ret : Nat) :
 `MXCSR` control bits and x87 control word kept; every other register, the flags and the vector
 registers arbitrary (an ABI0 callee); memory `m`. -/
 def CbResume (s s' : State) (m : Memory) : Prop :=
-  ∃ regs flags xmm ymmHi mx,
+  ∃ regs flags xmm ymmHi mx zh kr,
     s' = { s with regs := regs, rip := retAddrOf s, flags := flags, xmm := xmm, ymmHi := ymmHi,
+                  zmmHi := zh, kreg := kr,
                   mem := m, df := false, mxcsr := mx } ∧
     regs 4 = s.regs 4 + 8 ∧ mx.toNat / 64 = s.mxcsr.toNat / 64
 

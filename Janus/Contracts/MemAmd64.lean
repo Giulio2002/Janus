@@ -48,16 +48,16 @@ def EqPre (d nargs : Nat) (s : State) : Prop :=
 registers from `r`, `X15` kept and `X0`–`X14` from `x`, the upper halves `y`, the flags `fl`,
 `MXCSR` `mx`, memory `m`, at the return address. -/
 def retState (s : State) (r : Nat → W64) (x y : Nat → BitVec 128) (fl : Flags) (mx : BitVec 32)
-    (m : Janus.Arm64.Memory) : State :=
+    (m : Janus.Arm64.Memory) (zh : Nat → BitVec 256) (kr : Nat → W64) : State :=
   { s with regs := MapAmd64.keepABI s.regs r, xmm := MapAmd64.keepX15 s.xmm x, ymmHi := y,
-           flags := fl, mxcsr := mx, mem := m, rip := retAddrOf s }
+           flags := fl, mxcsr := mx, mem := m, rip := retAddrOf s, zmmHi := zh, kreg := kr }
 
 attribute [janus64_exec, janus64_post] retState
 
 /-- The return of an equality runtime call (amd64): `retState`, with the control bits of `MXCSR`
 kept, memory changed only in the callee's window, and `P r`. -/
 def EqRet (d nargs : Nat) (s s' : State) (P : (Nat → W64) → Prop) : Prop :=
-  ∃ r x y fl mx m, s' = retState s r x y fl mx m ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧
+  ∃ r x y fl mx m zh kr, s' = retState s r x y fl mx m zh kr ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧
     MemFrame s.mem m (calleeStack s d nargs) ∧ P r
 
 /-- An input of `n` bytes at `a` of a call at `s` (amd64). -/
@@ -131,7 +131,7 @@ def IfacePre (R : IfaceModel) (d : Nat) (s : State) : Prop :=
 
 /-- The return of an `interequal`/`nilinterequal` call (amd64). -/
 def IfaceRet (R : IfaceModel) (d : Nat) (s s' : State) (P : (Nat → W64) → Prop) : Prop :=
-  ∃ r x y fl mx m, s' = retState s r x y fl mx m ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧
+  ∃ r x y fl mx m zh kr, s' = retState s r x y fl mx m zh kr ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧
     MemFrame s.mem m (R.priv ++ calleeStack s d 2) ∧ R.Env m (s.regs 14) ∧ P r
 
 /-- **`runtime.nilinterequal(a, b)`** (`RAX = a`, `RBX = b`): as `Mem.Nilinterequal`. -/
@@ -184,7 +184,7 @@ def Dest (M : MemModel) (s : State) (d nargs a n : Nat) : Prop :=
 /-- The return of a typed-memory call (amd64). -/
 def TRet (M : MemModel) (d nargs : Nat) (extra : List (Nat × Nat)) (s s' : State)
     (P : Janus.Arm64.Memory → Prop) : Prop :=
-  ∃ r x y fl mx m, s' = retState s r x y fl mx m ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧
+  ∃ r x y fl mx m zh kr, s' = retState s r x y fl mx m zh kr ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧
     MemFrame s.mem m (M.priv ++ calleeStack s d nargs ++ extra) ∧ M.Env m (s.regs 14) ∧ P m
 
 /-- **`runtime.typedmemmove(typ, dst, src)`** (`RAX = typ`, `RBX = dst`, `RCX = src`). -/
@@ -254,7 +254,7 @@ theorem EqRet.intro {d nargs : Nat} {s s' : State} {P : (Nat → W64) → Prop}
     (hdf : s'.df = s.df) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
     (hf : MemFrame s.mem s'.mem (calleeStack s d nargs)) (hp : P s'.regs)
     (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : EqRet d nargs s s' P := by
-  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mxcsr, s'.mem, ?_, hmx, hf, hp⟩
+  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mxcsr, s'.mem, s'.zmmHi, s'.kreg, ?_, hmx, hf, hp⟩
   obtain ⟨r, rip, fl, xmm, mem, yh, fsb, df, mx, x8, fw⟩ := s'
   simp only at hsp h5 h14 hx hrip hfs hdf hx87 hfw ⊢
   subst hrip hfs hdf hx87 hfw

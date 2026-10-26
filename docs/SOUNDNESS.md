@@ -898,10 +898,18 @@ relies on beyond the SDM text:
   erased, the result of every WP-D and WP-F instruction is what it was before WP-G (the result
   from the state without AVX-512 state).
 * **Calls clobber the AVX-512 state.** Every trusted call contract that lets a callee return
-  (`GoABI0.Ret0`, `FFI.GoResume`, the map, interface and allocation contracts) leaves bits
-  511:256 of the `ZMM` registers and `K0`–`K7` unspecified: both Go ABIs treat them as scratch,
-  and the runtime does use them (the GC's span scanner writes `Z1`–`Z4` and `K1`). Contracts on
-  branches not yet merged need the same two existentials.
+  leaves bits 511:256 of the `ZMM` registers and `K0`–`K7` unspecified (two existentials): both
+  Go ABIs treat them as scratch, and the runtime does use them (the GC's span scanner writes
+  `Z1`–`Z4` and `K1`). On the integration of wave 1 that is every amd64 call-return contract:
+  `GoABI0.Ret0`, `FFI.GoResume` and `CbResume` (cgo and callbacks), the map, interface and
+  allocation contracts, the equality/hash/typed-memory returns (`MemAmd64.retState`: `EqRet`,
+  `IfaceRet`, `TRet`, `HRet`), `cmpstring` (`CmpRet64`), the string/slice specs (`RtPost64`), the
+  write barrier (`WbContract64`), the panic runtime (`PanicRet`), the remaining runtime
+  (`RTReturn64` of the instrumentation calls, the size-specialised allocator through `AllocRet64`,
+  the soft-float leaf `LeafRet64`) and the kernel's vDSO clock calls (`Site.timeNow`,
+  `Site.nanotime`). The C ABI's `CReturn` and the libc contracts state only what a C callee
+  preserves, so the AVX-512 state is unspecified there already. `_cgo_topofstack`
+  (`TopOfStack`, a few Go assembly instructions) keeps it.
 * **CPU features.** EVEX and opmask instructions execute whenever they occur: the model assumes
   AVX512F, AVX512BW, AVX512DQ, AVX512VL, AVX512VBMI (`VPERMB`, `VPERMI2B`, `VPERMT2B`),
   AVX512VBMI2 (`VPCOMPRESSB/W`, `VPEXPANDB/W`), AVX512_BITALG (`VPOPCNTB/W`),

@@ -71,8 +71,8 @@ theorem ret_of (s s' : Janus.Amd64.State) (res : List W64) (hrip : s'.rip = retA
     (h1 : s'.regs 1 = res.getD 2 (s'.regs 1)) (hx : s'.xmm 15 = s.xmm 15)
     (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr)
     (hx87 : s'.x87 = s.x87 := by rfl) (hfw : s'.fpucw = s.fpucw := by rfl) :
-    s' = retState64 s s'.regs res s'.flags s'.xmm s'.ymmHi s'.mem := by
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
+    s' = retState64 s s'.regs res s'.flags s'.xmm s'.ymmHi s'.mem s'.zmmHi s'.kreg := by
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw, zh, kr⟩ := s'
   simp only at hrip h4 h5 h14 h0 h3 h1 hx hfs hdf hmx hx87 hfw ⊢
   simp only [retState64]
   subst hrip hfs hdf hmx hx87 hfw
@@ -105,7 +105,7 @@ theorem newobject64_impl : NewobjectContract64 (toy.link (at0 heapCode)) A0 rt 4
   simp only [List.cons.injEq, and_true] at hargs
   subst hargs
   janus64_run
-  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
+  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
     (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
@@ -133,7 +133,7 @@ theorem mallocgc64_impl : MallocgcContract64 (toy.link (at0 heapCode)) A0 rt 409
   simp only [List.cons.injEq, and_true] at hargs
   obtain ⟨rfl, -, -⟩ := hargs
   janus64_run
-  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
+  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
     (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
@@ -156,7 +156,7 @@ theorem makeslice64_impl : MakesliceContract64 (toy.link (at0 heapCode)) A0 rt 4
   simp only [List.cons.injEq, and_true] at hargs
   obtain ⟨rfl, -, rfl⟩ := hargs
   janus64_run
-  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
+  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
     (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
@@ -190,7 +190,7 @@ theorem growslice64_impl : GrowsliceContract64 (toy.link (at0 growCode)) A0 rt 4
   simp only [growsliceArgs64, List.cons.injEq, and_true] at hargs
   obtain ⟨-, h1, h2, h3, -⟩ := hargs
   janus64_run
-  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, ret_of s _ _
+  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, _, _, ret_of s _ _
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
     (by simp [setRegF, heap]) (by simp [setRegF]) (by simp [setRegF, h1, h2, growCap8_1_0]) rfl rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩

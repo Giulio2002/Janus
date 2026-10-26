@@ -90,7 +90,7 @@ theorem correctness (impl : List Segment) (M : MemModel) (hl : M.Laws) (wb d : N
       · simp only [MemAmd64.calleeStack, MapAmd64.calleeStack, setRegF, reduceIte, Nat.reduceEqDiff, hsp32,
           outside_cons, outside_nil, and_true]; omega
       · simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp32, outside_cons, outside_nil, and_true]; omega
-    · intro s' hpc' ⟨r, x, y, fl, mx, m', hs', hmx, hfr, henv', hz⟩
+    · intro s' hpc' ⟨r, x, y, fl, mx, m', _, _, hs', hmx, hfr, henv', hz⟩
       subst hs'
       simp only [MemAmd64.calleeStack, MapAmd64.calleeStack, setRegF, reduceIte, Nat.reduceEqDiff, hsp32,
         h8n, h_a0] at hfr hz

@@ -182,7 +182,7 @@ theorem hRet_intro {H : Janus.Contracts.Hash.HashModel} {d nargs : Nat} {s s' : 
     (hdf : s'.df = s.df) (hmx : s'.mxcsr.toNat / 64 = s.mxcsr.toNat / 64)
     (hf : MemFrame s.mem s'.mem (H.priv ++ calleeStack s d nargs)) (he : H.Env s'.mem (s.regs 14))
     (hp : P s'.regs) : HRet H d nargs s s' P :=
-  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf, hmx, hf, he, hp⟩
+  ⟨_, _, _, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf, hmx, hf, he, hp⟩
 
 set_option maxHeartbeats 4000000 in
 /-- **`runtime.f64hash` (amd64) meets its contract**, given `runtime.rand`'s and `runtime.memhash`'s. -/
@@ -236,7 +236,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (H : HashModel) (hH : H.La
         (by simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp40]) (by rfl) (by exact hx) (by rfl)
         (by simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp40]
             rw [Janus.Arm64.Memory.readLE_writeLE_self]; decide) (by decide) (by decide)) ?_
-     intro s' hpc' ⟨r, x, y, fl, mx, m', hs', hmx, hfr, he', _⟩
+     intro s' hpc' ⟨r, x, y, fl, mx, m', _, _, hs', hmx, hfr, he', _⟩
      subst hs'
      have hfr0 := hfr
      simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, setRegF, reduceIte,
@@ -270,7 +270,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (H : HashModel) (hH : H.La
         (by simp only [setRegF, reduceIte, Nat.reduceEqDiff]; simpa using hA1)
         (by simp only [setRegF, reduceIte, Nat.reduceEqDiff]; simpa using hA2)
         (by simp only [setRegF, reduceIte, Nat.reduceEqDiff]; simpa using hA3'))⟩ ?_
-     intro s' hpc' ⟨r, x, y, fl, mx, m', hs', hmx, hfr, he', hres⟩
+     intro s' hpc' ⟨r, x, y, fl, mx, m', _, _, hs', hmx, hfr, he', hres⟩
      subst hs'
      have hfr0 := hfr
      simp only [calleeStack, Janus.Contracts.MapAmd64.calleeStack, setRegF, reduceIte,

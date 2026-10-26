@@ -343,13 +343,14 @@ abbrev CRet (s s' : State) (X Y : Option Nat) : Prop :=
     ResultIs binary64 X ((v 0).toNat % 2 ^ 64) ∧ ResultIs binary64 Y ((v 1).toNat % 2 ^ 64)
 
 theorem out_cret {S : State} {X Y : Option Nat} (hf : S.fpcr = 0)
-    (h : ReachesRet Extracted.program (S.regs 30) S (Out S X Y)) :
+    (h : ReachesRet Extracted.program (S.regs 30) S (Out S X Y))
+    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
     ReachesRet Extracted.program (S.regs 30) S (fun s' => CRet S s' X Y) := by
   obtain ⟨k, s', hs, hpc, ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩, h9, h10⟩ := h
   refine ⟨k, s', hs, hpc, ⟨s'.regs, s'.flags, s'.vregs, s'.fpsr, ?_, h9, h10⟩⟩
-  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
-  simp only at hpc h1 h2 h3 h4 h5 h6 h7 h8 ⊢
-  subst hpc h1 h2 h7 h8
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
+  simp only at hpc h1 h2 h3 h4 h5 h6 h7 h8 hex hep ⊢
+  subst hpc h1 h2 h7 h8 hex hep
   rw [h6, ← hf]
   congr
   funext i

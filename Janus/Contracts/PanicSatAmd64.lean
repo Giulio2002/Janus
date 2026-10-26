@@ -73,7 +73,7 @@ theorem panicRet_of (P : PanicRuntime) (nargs : Nat) (s s' : Janus.Amd64.State)
     (hfr : MemFrame s.mem s'.mem (P.priv ++ Contracts.MapAmd64.calleeStack s P.depth nargs))
     (henv : P.Env s'.mem)
     (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : PanicRet P nargs s s' := by
-  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, hfr, henv⟩
+  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, s'.zmmHi, s'.kreg, ?_, hfr, henv⟩
   obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
   simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw ⊢
   subst hrip hfs hdf hmx hx87 hfw

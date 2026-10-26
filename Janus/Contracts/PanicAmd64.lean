@@ -89,8 +89,8 @@ def PanicPre (P : PanicRuntime) (nargs : Nat) (s : State) : Prop :=
 everything else arbitrary, memory changed only in `P.priv` and the callee stack window, the
 runtime usable. -/
 def PanicRet (P : PanicRuntime) (nargs : Nat) (s s' : State) : Prop :=
-  ∃ r x y fl m, s' = { s with regs := MapAmd64.keepABI s.regs r, xmm := MapAmd64.keepX15 s.xmm x,
-                              ymmHi := y, flags := fl, mem := m, rip := retAddrOf s } ∧
+  ∃ r x y fl m zh kr, s' = { s with regs := MapAmd64.keepABI s.regs r, xmm := MapAmd64.keepX15 s.xmm x,
+                                    ymmHi := y, flags := fl, mem := m, rip := retAddrOf s, zmmHi := zh, kreg := kr } ∧
     MemFrame s.mem m (P.priv ++ MapAmd64.calleeStack s P.depth nargs) ∧ P.Env m
 
 /-- What a caller needs to call the panic runtime (amd64), as `IfaceAmd64.CallerOK` for `P`. -/

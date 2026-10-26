@@ -26,8 +26,8 @@ namespace Proof
 `H.Env` is an `HRet` return (amd64). -/
 theorem hRet_of_eqRet (H : HashModel) {d nargs : Nat} {s s' : State} {P : (Nat → W64) → Prop}
     (h : EqRet d nargs s s' P) (he : H.Env s'.mem (s.regs 14)) : HRet H d nargs s s' P := by
-  obtain ⟨r, x, y, fl, mx, m, rfl, hmx, hf, hp⟩ := h
-  exact ⟨r, x, y, fl, mx, m, rfl, hmx,
+  obtain ⟨r, x, y, fl, mx, m, zh, kr, rfl, hmx, hf, hp⟩ := h
+  exact ⟨r, x, y, fl, mx, m, zh, kr, rfl, hmx,
     hf.mono (fun a n h => by simp only [outside_append] at h; exact h.2), he, hp⟩
 
 theorem correctness (H : HashModel) (d : Nat) : Memhash0 Extracted.program Extracted.entry H d := by

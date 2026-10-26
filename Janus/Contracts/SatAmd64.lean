@@ -609,7 +609,7 @@ theorem wb_impl (n : Nat) (hn : n ≤ 8) : WbContract64 (toy.link (at0 wbCode)) 
   rw [link_at0]
   rintro s hpc ⟨⟨hra, hal, hsb, hsa, hacc⟩, -, hP⟩
   janus64_run
-  refine ⟨BitVec.ofNat 64 HEAP, s.flags, s.xmm, s.ymmHi, s.mem, ?_, MemFrame.refl _ _, ?_⟩
+  refine ⟨BitVec.ofNat 64 HEAP, s.flags, s.xmm, s.ymmHi, s.mem, s.zmmHi, s.kreg, ?_, MemFrame.refl _ _, ?_⟩
   · simp only [State.mk.injEq, and_true, true_and]
     constructor
     · funext i

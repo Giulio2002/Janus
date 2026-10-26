@@ -28,7 +28,7 @@ def HPre (H : HashModel) (d nargs : Nat) (s : State) : Prop :=
 /-- The return of a hashing runtime call (amd64), with the facts `P r` about the result
 registers `r`. -/
 def HRet (H : HashModel) (d nargs : Nat) (s s' : State) (P : (Nat → W64) → Prop) : Prop :=
-  ∃ r x y fl mx m, s' = MemAmd64.retState s r x y fl mx m ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧
+  ∃ r x y fl mx m zh kr, s' = MemAmd64.retState s r x y fl mx m zh kr ∧ mx.toNat / 64 = s.mxcsr.toNat / 64 ∧
     MemFrame s.mem m (H.priv ++ MemAmd64.calleeStack s d nargs) ∧ H.Env m (s.regs 14) ∧ P r
 
 /-- **`runtime.memhash(p, h, n)`** (`RAX = p`, `RBX = h`, `RCX = n`). -/

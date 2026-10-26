@@ -142,15 +142,16 @@ def SiteNext (E : KEnv) (s : State) (k : Kern) (s' : State) (k' : Kern) : Site �
       k.mono ≤ msec * 10 ^ 9 + mnsec ∧
       k' = { (k.emit (.clock 0 sec nsec)).emit (.clock 1 msec mnsec) with
               mono := msec * 10 ^ 9 + mnsec } ∧
-      ∃ junk f x yh m, s' = Contracts.retState64 s junk
+      ∃ junk f x yh m zh kr, s' = Contracts.retState64 s junk
           [BitVec.ofNat 64 sec, BitVec.ofNat 64 nsec, BitVec.ofNat 64 (msec * 10 ^ 9 + mnsec)]
-          f x yh m ∧
+          f x yh m zh kr ∧
         MemFrame s.mem m (E.rt ++ [((s.regs 4).toNat - E.stack, (s.regs 4).toNat)])
   | .nanotime => ∃ sec nsec, nsec < 10 ^ 9 ∧ k.mono ≤ sec * 10 ^ 9 + nsec ∧
       k' = { k.emit (.clock 1 sec nsec) with mono := sec * 10 ^ 9 + nsec } ∧
-      ∃ (regs : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
+      ∃ (regs : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
+        (zh : Nat → BitVec 256) (kr : Nat → W64),
         s' = { s with regs := regs, rip := retAddrOf s, flags := f, xmm := x, ymmHi := yh,
-                      mem := m } ∧
+                      mem := m, zmmHi := zh, kreg := kr } ∧
         regs 4 = s.regs 4 + 8 ∧ regs 5 = s.regs 5 ∧ regs 14 = s.regs 14 ∧
         MemFrame s.mem m (E.rt ++ [((s.regs 4).toNat - E.stack, (s.regs 4).toNat),
           ((s.regs 4).toNat + 8, (s.regs 4).toNat + 16)]) ∧
@@ -173,13 +174,13 @@ theorem SiteNext.total (E : KEnv) (s : State) (k : Kern) (site : Site) (h : Site
     | rdtscp => exact ⟨_, _, 0, 0, by decide, by decide, rfl, rfl⟩
   | timeNow =>
     refine ⟨_, _, 0, 0, k.mono, 0, by decide, by decide, by decide, ?_, rfl,
-      s.regs, s.flags, s.xmm, s.ymmHi, s.mem, rfl, MemFrame.refl _ _⟩
+      s.regs, s.flags, s.xmm, s.ymmHi, s.mem, s.zmmHi, s.kreg, rfl, MemFrame.refl _ _⟩
     have : 1 ≤ 10 ^ 9 := by decide
     exact Nat.le_add_right_of_le (Nat.le_mul_of_pos_right _ this)
   | nanotime =>
     refine ⟨_, _, k.mono, 0, by decide, ?_, rfl, fun i => if i = 4 then s.regs 4 + 8 else s.regs i,
       s.flags, s.xmm, s.ymmHi,
-      s.mem.writeLE ((s.regs 4).toNat + 8) 8 ((k.mono * 10 ^ 9 + 0) % 2 ^ 64), rfl,
+      s.mem.writeLE ((s.regs 4).toNat + 8) 8 ((k.mono * 10 ^ 9 + 0) % 2 ^ 64), s.zmmHi, s.kreg, rfl,
       by simp, by simp, by simp, ?_, ?_⟩
     · have : 1 ≤ 10 ^ 9 := by decide
       exact Nat.le_add_right_of_le (Nat.le_mul_of_pos_right _ this)

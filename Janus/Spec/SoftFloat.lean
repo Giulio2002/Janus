@@ -273,11 +273,12 @@ theorem leafRet_of (s s' : State) (v : BitVec 64) (hsp : s'.sp = s.sp) (hpc : s'
     (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29)
     (hm : s'.mem = s.mem) (hv : s'.vregs = s.vregs) (hdz : s'.dczid = s.dczid)
     (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
-    (h0 : s'.regs 0 = v) : LeafRet s s' v := by
+    (h0 : s'.regs 0 = v)
+    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) : LeafRet s s' v := by
   refine ⟨s'.regs, s'.flags, ?_, h0⟩
-  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s'
-  simp only at hsp hpc hdz htp hfc hfs h18 h28 h29 hm hv ⊢
-  subst hsp hpc hdz htp hfc hfs hm hv
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
+  simp only at hsp hpc hdz htp hfc hfs h18 h28 h29 hm hv hex hep ⊢
+  subst hsp hpc hdz htp hfc hfs hm hv hex hep
   congr
   funext i
   simp only [Contracts.Map.keepABI]

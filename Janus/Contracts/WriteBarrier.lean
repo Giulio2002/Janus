@@ -105,10 +105,12 @@ unspecified, memory changed only in `rt` and `[RSP - stack, RSP)`. -/
 def WbContract64 (p : Janus.Amd64.Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
     (H : RtReady) (n : Nat) : Prop :=
   Janus.Amd64.Tactic.Summary p addr (fun s => CallOK64 s stack 0 ∧ Ready64 H rt [n] s)
-    (fun s s' => ∃ (buf : W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
+    (fun s s' => ∃ (buf : W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
+        (zh : Nat → BitVec 256) (kr : Nat → W64),
       s' = { s with regs := fun i => if i = 4 then s.regs 4 + 8#64 else if i = 11 then buf else s.regs i,
                     rip := Janus.Amd64.Tactic.retAddrOf s, flags := f,
-                    xmm := fun i => if i = 15 then s.xmm 15 else x i, ymmHi := yh, mem := m } ∧
+                    xmm := fun i => if i = 15 then s.xmm 15 else x i, ymmHi := yh, mem := m,
+                    zmmHi := zh, kreg := kr } ∧
       MemFrame s.mem m (rt ++ [((s.regs 4).toNat - stack, (s.regs 4).toNat)]) ∧ WbSlots rt m buf.toNat n)
 
 end Janus.Contracts

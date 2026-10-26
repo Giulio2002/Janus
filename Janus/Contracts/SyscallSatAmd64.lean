@@ -19,7 +19,7 @@ theorem sched_witness64 (rt : List (Nat × Nat)) (stack : Nat) :
     Amd64.Kernel.SchedContract retProg64 0x1000 rt stack := by
   intro s hpc ⟨h1, h2, h3, h4, h5⟩
   janus64_run
-  refine ⟨0, s.regs, s.flags, s.xmm, s.ymmHi, s.mem, ?_, MemFrame.refl _ _, trivial⟩
+  refine ⟨0, s.regs, s.flags, s.xmm, s.ymmHi, s.mem, s.zmmHi, s.kreg, ?_, MemFrame.refl _ _, trivial⟩
   simp only [retState64, retAddrOf]
   congr 1
   · funext i
@@ -43,7 +43,7 @@ theorem convT64_witness64 (rt : List (Nat × Nat)) (stack : Nat) (hs : 16 ≤ st
   have hp : (s.regs 4 - 16#64).toNat = (s.regs 4).toNat - 16 := by
     rw [BitVec.toNat_sub]; simp; omega
   refine ⟨s.regs 4 - 16#64, s.regs, s.flags, s.xmm, s.ymmHi,
-    Arm64.Memory.writeLE s.mem ((s.regs 4).toNat - 16) 8 (s.regs 0).toNat, ?_, ?_, ?_⟩
+    Arm64.Memory.writeLE s.mem ((s.regs 4).toNat - 16) 8 (s.regs 0).toNat, s.zmmHi, s.kreg, ?_, ?_, ?_⟩
   · simp only [retState64, retAddrOf]
     congr 1
     · funext i

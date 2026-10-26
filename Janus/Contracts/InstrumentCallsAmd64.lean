@@ -73,8 +73,8 @@ attribute [janus64_exec, janus64_post] rtWrites64
 
 /-- The return of a runtime call from `s` to `s'` (amd64). -/
 def RTReturn64 (E : RtEnv) (nargs : Nat) (s s' : State) (P : (Nat → W64) → Janus.Arm64.Memory → Prop) : Prop :=
-  ∃ r x y fl m, s' = { s with regs := MapAmd64.keepABI s.regs r, xmm := MapAmd64.keepX15 s.xmm x,
-                              ymmHi := y, flags := fl, mem := m, rip := retAddrOf s } ∧
+  ∃ r x y fl m zh kr, s' = { s with regs := MapAmd64.keepABI s.regs r, xmm := MapAmd64.keepX15 s.xmm x,
+                                    ymmHi := y, flags := fl, mem := m, rip := retAddrOf s, zmmHi := zh, kreg := kr } ∧
     MemFrame s.mem m (rtWrites64 E s nargs) ∧ E.Env m (s.regs 14) ∧ P r m
 
 /-- A model implementation's return as `RTReturn64`. -/
@@ -83,11 +83,12 @@ theorem RTReturn64.intro (E : RtEnv) (nargs : Nat) (s s' : State)
     (h4 : s'.regs 4 = s.regs 4 + 8) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
     (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
     (hmx : s'.mxcsr = s.mxcsr) (hfr : MemFrame s.mem s'.mem (rtWrites64 E s nargs))
-    (henv : E.Env s'.mem (s.regs 14)) (hp : P s'.regs s'.mem) : RTReturn64 E nargs s s' P := by
-  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, hfr, henv, hp⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
-  simp only at hrip h4 h5 h14 hx hfs hdf hmx ⊢
-  subst hrip hfs hdf hmx
+    (henv : E.Env s'.mem (s.regs 14)) (hp : P s'.regs s'.mem)
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : RTReturn64 E nargs s s' P := by
+  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, s'.zmmHi, s'.kreg, ?_, hfr, henv, hp⟩
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
+  simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw ⊢
+  subst hrip hfs hdf hmx hx87 hfw
   congr
   · funext i
     simp only [MapAmd64.keepABI]

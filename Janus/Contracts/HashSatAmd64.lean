@@ -28,7 +28,7 @@ theorem hRet_of {H : HashModel} {d nargs : Nat} {s s' : State} {P : (Nat → W64
     (hf : MemFrame s.mem s'.mem (H.priv ++ MemAmd64.calleeStack s d nargs))
     (he : H.Env s'.mem (s.regs 14)) (hp : P s'.regs)
     (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : HRet H d nargs s s' P :=
-  ⟨_, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf' hx87 hfw, hmx, hf, he, hp⟩
+  ⟨_, _, _, _, _, _, _, _, retState_of hsp h5 h14 hx hrip hfs hdf hdf' hx87 hfw, hmx, hf, he, hp⟩
 
 /-- The witness call states satisfy `HPre` for `H0` (stack bound 64). -/
 theorem wstate_hPre (r : Nat → W64) (n : Nat) (hn : n ≤ 4) : HPre H0 64 n (wstate r) := by

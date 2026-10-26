@@ -194,7 +194,7 @@ theorem go_spec (a : BitVec 64) (b : BitVec 32) (c : BitVec 64) :
     janus64_simp [h40, h88]
     refine ⟨by omega, ⟨?_, by omega, by omega, by omega, by omega⟩, hm⟩
     janus64_disch
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, _, mx, x87, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, _, mx, x87, zh, kr, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   rename_i fsb
   simp only [E, res, fd, fs, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,

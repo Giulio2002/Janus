@@ -104,7 +104,7 @@ theorem correctness (impl : List Segment) (d : Nat)
     · exact hqsb
     · exact hqsa
     · simp only [MemAmd64.callerWindow, outside_cons, outside_nil, and_true]; exact hqso
-  · intro s' hpc' ⟨r, x, y, fl, mx, m', hs', hmx, hfr, hres⟩
+  · intro s' hpc' ⟨r, x, y, fl, mx, m', _, _, hs', hmx, hfr, hres⟩
     subst hs'
     simp only [MemAmd64.calleeStack, MapAmd64.calleeStack, setRegF, reduceIte, Nat.reduceEqDiff, hsp40] at hfr
     janus64_run

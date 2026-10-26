@@ -125,7 +125,8 @@ def WPost (a : BitVec 64) (t t' : State) : Prop :=
     (hi t.mem a.toNat)) t'.mem [((t.regs 4).toNat - 4096, (t.regs 4).toNat)]
 
 set_option maxHeartbeats 4000000 in
-theorem wrapper_spec (T a : BitVec 64) :
+theorem wrapper_spec (T a : BitVec 64)
+    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
     CEnsuresC Extracted.program (TopOfStack T) wrapper [a] (WPre a) (WPost a) := by
   intro ret hret t hs ⟨⟨hal, hb, htop, hacc⟩, ha, hfa, hd, hgb, hga, hgo, hgf⟩
   apply ReturnsC.of_reaches
@@ -150,9 +151,9 @@ theorem wrapper_spec (T a : BitVec 64) :
   janus64_run [spre_iff, fw, BitVec.toNat_ofNat, hfs, h72, bigMem] until [wrapper + 0x32]
     calls [summary (fw t.mem a.toNat 0) (fw t.mem a.toNat 1)]
   dsimp only at *
-  obtain ⟨regs', rip', fl', xm', mem', yh', fsb', df', mx', x87', fcw'⟩ := s'
+  obtain ⟨regs', rip', fl', xm', mem', yh', fsb', df', mx', x87', fcw', ex, ep⟩ := s'
   dsimp only at *
-  subst mem' fsb' rip'
+  subst mem' fsb' rip' hex hep
   simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, bigMem] at *
   have h4' : regs' 4 = t.regs 4 - 80#64 + 8 := by assumption
   have h3' : regs' 3 = a := by assumption
@@ -257,7 +258,7 @@ theorem go_spec (x y : BitVec 64) :
     janus64_simp [h56, h104]
     repeat' (apply And.intro)
     all_goals first | omega | janus64_disch | assumption
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, _, mx, x87, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, _, mx, x87, zh, kr, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   rename_i fsb
   simp only [E, lo, hi, fw, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,

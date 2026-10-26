@@ -610,13 +610,14 @@ abbrev CRet (s s' : State) (X Y : Option Nat) : Prop :=
     ResultIs binary64 X ((v 0).toNat % 2 ^ 64) ∧ ResultIs binary64 Y ((v 1).toNat % 2 ^ 64)
 
 theorem out_cret {S : State} {X Y : Option Nat}
-    (h : ReachesRet Extracted.program (retAddrOf S) S (Out S X Y)) :
+    (h : ReachesRet Extracted.program (retAddrOf S) S (Out S X Y))
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
     ReachesRet Extracted.program (retAddrOf S) S (fun s' => CRet S s' X Y) := by
   obtain ⟨k, s', hs, hpc, ⟨e4, e5, e14, em, ey, efs, edf, ex⟩, h9, h10⟩ := h
   refine ⟨k, s', hs, hpc, ⟨s'.regs, s'.flags, s'.xmm, s'.mxcsr, ?_, ex, h9, h10⟩⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx⟩ := s'
-  simp only at hpc e4 e5 e14 em ey efs edf ⊢
-  subst hpc em ey efs edf
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
+  simp only at hpc e4 e5 e14 em ey efs edf hx87 hfw ⊢
+  subst hpc em ey efs edf hx87 hfw
   congr
   funext i
   simp only [Contracts.MapAmd64.keepABI]

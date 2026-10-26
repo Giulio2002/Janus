@@ -38,19 +38,19 @@ def MallocgcTinySizeContract64 (n : Nat) (p : Janus.Amd64.Program) (addr : Nat)
 theorem MallocgcContract64.smallNoScanSC {n : Nat} {p : Janus.Amd64.Program} {addr : Nat}
     {rt : List (Nat × Nat)} {stack : Nat} {H : RtReady} (h : MallocgcContract64 p addr rt stack H) :
     MallocgcSmallNoScanSCContract64 n p addr rt stack H :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, x, yh, m, h1, h2, h3 (by have := hp.2.1; omega)⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3 (by have := hp.2.1; omega)⟩
 
 theorem MallocgcContract64.smallScanNoHeaderSC {n : Nat} {p : Janus.Amd64.Program} {addr : Nat}
     {rt : List (Nat × Nat)} {stack : Nat} {H : RtReady} (h : MallocgcContract64 p addr rt stack H) :
     MallocgcSmallScanNoHeaderSCContract64 n p addr rt stack H :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, x, yh, m, h1, h2, h3 hp.2.1⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3 hp.2.1⟩
 
 theorem MallocgcContract64.tinySize {n : Nat} {p : Janus.Amd64.Program} {addr : Nat}
     {rt : List (Nat × Nat)} {stack : Nat} {H : RtReady} (h : MallocgcContract64 p addr rt stack H) :
     MallocgcTinySizeContract64 n p addr rt stack H :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, x, yh, m, h1, h2, h3 (by obtain ⟨h0, -, hs, -⟩ := hp.2; omega)⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3 (by obtain ⟨h0, -, hs, -⟩ := hp.2; omega)⟩
 
 end Janus.Contracts

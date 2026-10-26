@@ -138,8 +138,9 @@ instruction. (In the `janus64_exec` simp set, as `ea` is.) -/
 def ea (s : State) (next : W64) (a : Addr) : W64 :=
   if a.fs then s.fsBase + eaOff s next a else eaOff s next a
 
-/-- `ea` as a natural number, the address function the AVX-512 executor receives (a named
-function, so that the proof automation rewrites it only where it is applied). -/
+/-- `ea` as a natural number, the address function the extension executors receive (`ExecSSE`,
+`ExecCrypto`, `ExecEVEX`; a named function, so that the proof automation rewrites it only where
+it is applied). Defined by both agent/x86crypto and agent/avx512, identically. -/
 def eaNat (s : State) (next : W64) (a : Addr) : Nat := (ea s next a).toNat
 
 def readLoc (s : State) (next : W64) (w : Nat) : Loc → Except Fault (BitVec w)
@@ -818,10 +819,6 @@ def sseArithOp (op : FPArith) (w : Nat) (c : FP.Ctl) (a b : Nat) : FP.XR :=
 
 /-! ## The executor -/
 
-/-- The linear address of a memory operand as a natural (`ea`), as a function of the operand: what
-the executors of the extension instructions (`ExecCrypto.exec`) take. A definition of its own
-so that the proof automation does not rewrite inside the unapplied function. -/
-def eaNat (s : State) (next : W64) (a : Addr) : Nat := (ea s next a).toNat
 /-- The `RFLAGS` image `PUSHFQ` pushes (WP-C): `CF` bit 0, `PF` 2, `AF` 4, `ZF` 6, `SF` 7, `DF` 10,
 `OF` 11, and the fixed user-mode bits `IF` (9) and bit 1 (`0x202`: Linux starts a process with
 exactly these system bits, and user code cannot change `IF`/`IOPL`; `TF`, `NT`, `AC` and `ID`
