@@ -42,4 +42,48 @@ def flagAddr : Nat :=
   adrpLdTarget (Extracted.entry + 0xa0) (segWord Extracted.program "example.com/rtmisc/live.Chain" 40)
     (segWord Extracted.program "example.com/rtmisc/live.Chain" 41) 2
 
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 0 in
+theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat × Nat))
+    (dp dl dc sp sl sc bx n : BitVec 64)
+    (hmv : MemmoveLive (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.memmove") 4096 R)
+    (hmk : MakesliceLiveContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.makeslice") 4096 R)
+    (hwb : WbLiveContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.gcWriteBarrier2") 4096 R 2) :
+    Ensures (Extracted.program.link impl) Extracted.entry [dp, dl, dc, sp, sl, sc, bx, n]
+      (fun s => GuardOK s 4144 ∧ StackOK s 4144 72 ∧ Extracted.program.DataLoaded s.mem ∧
+        Outside (s.sp.toNat - 4144) 4216 R.rt ∧ Apart ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 4144) 4216 ∧
+        Outside ((s.regs 28).toNat + 16) 8 R.rt ∧ s.mem.accessible flagAddr 4 false = true ∧
+        Outside u64Type 16 R.rt ∧
+        0 < n.toNat ∧ n.toNat < 2 ^ 40 ∧ dl.toNat < 2 ^ 40 ∧ sl.toNat < 2 ^ 40 ∧
+        R.ok (Extracted.program.contractAddr "runtime.makeslice") [u64Type, n.toNat, n.toNat] ∧
+        R.ok (Extracted.program.contractAddr "runtime.gcWriteBarrier2") [2] ∧
+        (∀ dst src k, R.ok (Extracted.program.contractAddr "runtime.memmove") [dst, src, k]) ∧
+        R.inv b L (s.regs 28).toNat (view R.rt L s.mem) ∧
+        (∀ r ∈ L, Outside r.1 (r.2 - r.1) [(s.sp.toNat - 4144, s.sp.toNat + 72)]) ∧
+        InRanges dp.toNat (8 * dl.toNat) L ∧ InRanges sp.toNat (8 * sl.toNat) L ∧ InRanges bx.toNat 16 L ∧
+        s.mem.accessible dp.toNat (8 * dl.toNat) true = true ∧ s.mem.accessible sp.toNat (8 * sl.toNat) false = true ∧
+        s.mem.accessible bx.toNat 16 true = true ∧
+        dp.toNat + 8 * dl.toNat ≤ 2 ^ 48 ∧ sp.toNat + 8 * sl.toNat ≤ 2 ^ 48 ∧
+        Apart dp.toNat (8 * dl.toNat) sp.toNat (8 * sl.toNat) ∧
+        Apart bx.toNat 16 dp.toNat (8 * dl.toNat) ∧ Apart bx.toNat 16 sp.toNat (8 * sl.toNat) ∧
+        blockSize (8 * n.toNat) true ≤ b)
+      (fun s s' => ∃ t : Nat, s'.mem.readLE bx.toNat 8 = t ∧ s'.mem.readLE (bx.toNat + 8) 8 = n.toNat ∧
+        InRanges t (blockSize (8 * n.toNat) true) R.rt ∧
+        Apart t (blockSize (8 * n.toNat) true) dp.toNat (8 * dl.toNat) ∧
+        Apart t (blockSize (8 * n.toNat) true) sp.toNat (8 * sl.toNat) ∧
+        Apart t (blockSize (8 * n.toNat) true) bx.toNat 16 ∧
+        ∃ L', b - blockSize (8 * n.toNat) true ≤ b - blockSize (8 * n.toNat) true ∧
+          R.inv (b - blockSize (8 * n.toNat) true) L' (s.regs 28).toNat (view R.rt L' s'.mem) ∧
+          InRanges t (blockSize (8 * n.toNat) true) L' ∧ InRanges dp.toNat (8 * dl.toNat) L' ∧
+          InRanges sp.toNat (8 * sl.toNat) L' ∧ InRanges bx.toNat 16 L' ∧
+          MemFrame s.mem s'.mem (R.rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 72),
+            (dp.toNat, dp.toNat + 8 * min dl.toNat sl.toNat), (bx.toNat, bx.toNat + 16)])) := by
+  intro ret hret s hs hpre
+  janus_intro hs
+  sorry
+
 end Proof
+
