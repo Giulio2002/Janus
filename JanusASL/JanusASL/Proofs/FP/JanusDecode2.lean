@@ -135,4 +135,12 @@ theorem decodeFpCvtInt_itof {w : Nat} (hft : (w / 2 ^ 22) % 4 < 2) (hop : (w / 2
   unfold decodeFpCvtInt
   rcases e2 with e | e <;> simp [e1, e, e3]
 
+
+theorem decodeFpCvtInt_ftoi {w : Nat} (hft : (w / 2 ^ 22) % 4 < 2) (hop : (w / 2 ^ 16) % 8 = 0 ∨ (w / 2 ^ 16) % 8 = 1) :
+    decodeFpCvtInt w = some (.fpCvtInt (bit w 31) (bits w 23 22) (bits w 20 19) (bits w 18 16) (bits w 9 5) (bits w 4 0)) := by
+  have e1 : ¬ bits w 23 22 ≥ 2 := by simp only [bits_def]; omega
+  have e2 : bits w 18 16 ≤ 1 := by simp only [bits_def]; omega
+  unfold decodeFpCvtInt
+  simp [e1, e2]
+
 end JanusASL.Proofs

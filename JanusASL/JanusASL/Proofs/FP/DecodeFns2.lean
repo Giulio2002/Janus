@@ -1,4 +1,5 @@
 import JanusASL.Proofs.FP.Conv
+import JanusASL.Proofs.FP.ConvInt
 import JanusASL.Proofs.FP.Agree
 
 /-! # The scalar integer to floating-point decode functions (SCVTF, UCVTF) -/
@@ -46,6 +47,38 @@ theorem run_dec_ucvtf_1 {js : Janus.Arm64.State} {st : SState} (hf : FPRel js st
   have hfcr := run_FPCR_read hf
   have hfn := hfn_fpcr js
   cfg_simp [hfcr, run_FPRoundingMode, hfn, run_undefined_bool, undefined_FPConvOp, undefined_FPRounding, run_internal_pick]
+  by_cases hs : sf = 1#1 <;> simp [hs] <;> rfl
+
+theorem run_dec_fcvtzs_0 (Rd Rn : BitVec 5) (sf : BitVec 1) (st : SState) :
+    (decode_fcvtzs_float_int_aarch64_instrs_float_convert_int Rd Rn 0#3 3#2 0#2 sf).run st =
+      (execute_aarch64_instrs_float_convert_int Rd.toNat 32 (if (sf == 1#1) = true then 64 else 32) Rn.toNat
+        FPConvOp.FPConvOp_CVT_FtoI 0 (aslRM .rz) false).run st := by
+  unfold decode_fcvtzs_float_int_aarch64_instrs_float_convert_int
+  cfg_simp [undefined_FPConvOp, undefined_FPRounding, run_undefined_bool, run_internal_pick]
+  by_cases hs : sf = 1#1 <;> simp [hs] <;> rfl
+
+theorem run_dec_fcvtzs_1 (Rd Rn : BitVec 5) (sf : BitVec 1) (st : SState) :
+    (decode_fcvtzs_float_int_aarch64_instrs_float_convert_int Rd Rn 0#3 3#2 1#2 sf).run st =
+      (execute_aarch64_instrs_float_convert_int Rd.toNat 64 (if (sf == 1#1) = true then 64 else 32) Rn.toNat
+        FPConvOp.FPConvOp_CVT_FtoI 0 (aslRM .rz) false).run st := by
+  unfold decode_fcvtzs_float_int_aarch64_instrs_float_convert_int
+  cfg_simp [undefined_FPConvOp, undefined_FPRounding, run_undefined_bool, run_internal_pick]
+  by_cases hs : sf = 1#1 <;> simp [hs] <;> rfl
+
+theorem run_dec_fcvtzu_0 (Rd Rn : BitVec 5) (sf : BitVec 1) (st : SState) :
+    (decode_fcvtzu_float_int_aarch64_instrs_float_convert_int Rd Rn 1#3 3#2 0#2 sf).run st =
+      (execute_aarch64_instrs_float_convert_int Rd.toNat 32 (if (sf == 1#1) = true then 64 else 32) Rn.toNat
+        FPConvOp.FPConvOp_CVT_FtoI 0 (aslRM .rz) true).run st := by
+  unfold decode_fcvtzu_float_int_aarch64_instrs_float_convert_int
+  cfg_simp [undefined_FPConvOp, undefined_FPRounding, run_undefined_bool, run_internal_pick]
+  by_cases hs : sf = 1#1 <;> simp [hs] <;> rfl
+
+theorem run_dec_fcvtzu_1 (Rd Rn : BitVec 5) (sf : BitVec 1) (st : SState) :
+    (decode_fcvtzu_float_int_aarch64_instrs_float_convert_int Rd Rn 1#3 3#2 1#2 sf).run st =
+      (execute_aarch64_instrs_float_convert_int Rd.toNat 64 (if (sf == 1#1) = true then 64 else 32) Rn.toNat
+        FPConvOp.FPConvOp_CVT_FtoI 0 (aslRM .rz) true).run st := by
+  unfold decode_fcvtzu_float_int_aarch64_instrs_float_convert_int
+  cfg_simp [undefined_FPConvOp, undefined_FPRounding, run_undefined_bool, run_internal_pick]
   by_cases hs : sf = 1#1 <;> simp [hs] <;> rfl
 
 end JanusASL.Proofs

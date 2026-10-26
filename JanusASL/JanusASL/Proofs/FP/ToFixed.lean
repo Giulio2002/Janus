@@ -627,4 +627,58 @@ theorem run_FPToFixed {N M : Nat} (hN : N = 32 ∨ N = 64) (hM : M = 32 ∨ M = 
     simp only [hnn2, ite_false, hnn, Bool.false_eq_true, hsat, ite_true, hPE, run_pure, EStateM.run_bind]
     fp_or_closeT
 
+theorem satQ_lt (M : Nat) (hM : 0 < M) (u : Bool) (i : Int) : (Janus.Arm64.FP.satQ M u i).1 < 2 ^ M := by
+  have hp : 0 < 2 ^ (M - 1) := Nat.two_pow_pos _
+  have h1 : 2 ^ M = 2 * 2 ^ (M - 1) := by rw [← Nat.pow_succ']; congr 1; omega
+  unfold Janus.Arm64.FP.satQ
+  cases u
+  · simp only [Bool.false_eq_true, ite_false]
+    split
+    · simp only; omega
+    · split
+      · simp only; omega
+      · simp only
+        have h0 : (0 : Int) ≤ i % (2 ^ M : Int) := Int.emod_nonneg _ (Int.ne_of_gt (Int.pow_pos (by decide)))
+        have h2 := Int.emod_lt_of_pos i (show (0 : Int) < 2 ^ M from Int.pow_pos (by decide))
+        rw [Int.toNat_lt h0]; simpa [Int.natCast_pow] using h2
+  · simp only [ite_true]
+    split
+    · simp only; omega
+    · split
+      · simp only; have := Nat.two_pow_pos M; omega
+      · simp only
+        rename_i ha hb
+        have hqq : (2 : Int) ^ M = ((2 ^ M : Nat) : Int) := by simp [Int.natCast_pow]
+        rw [Int.toNat_lt (by omega)]; rw [← hqq]; omega
+
+theorem fpToFixed_lt (f : Janus.Float.Fmt) (fpcr : Nat) (u : Bool) (rm : Janus.Float.RM) (M x : Nat) :
+    ExcLt (Janus.Arm64.FP.fpToFixed f fpcr u rm M x).2 := by
+  unfold Janus.Arm64.FP.fpToFixed
+  dsimp only
+  have hu := unpack_lt f fpcr (!Janus.Arm64.FP.ah fpcr) x
+  generalize Janus.Arm64.FP.unpack f fpcr (!Janus.Arm64.FP.ah fpcr) x = U at hu
+  rcases U with ⟨⟨t1, s1, v1⟩, x1⟩
+  simp only at hu ⊢
+  have hn : ExcLt (if t1.isNaN = true then Janus.Arm64.FP.raise Janus.Arm64.FP.IOC else { }) := by
+    split
+    · exact ExcLt.raise (by decide)
+    · exact ExcLt.empty
+  rcases v1 with ⟨n, ex⟩ | neg
+  · simp only
+    generalize (if n = 0 then (0, false) else Janus.Float.roundToInt rm s1 n.natAbs ex) = r
+    rcases r with ⟨i, inx⟩
+    generalize Janus.Arm64.FP.satQ M u i = q
+    rcases q with ⟨r, ovf⟩
+    simp only
+    refine ExcLt.append (ExcLt.append hu hn) ?_
+    split
+    · exact ExcLt.raise (by decide)
+    · split
+      · exact ExcLt.raise (by decide)
+      · exact ExcLt.empty
+  · simp only
+    generalize Janus.Arm64.FP.satQ M u (if neg = true then -(2 : Int) ^ (M + 1) else (2 : Int) ^ (M + 1)) = q
+    rcases q with ⟨r, ovf⟩
+    exact ExcLt.append (ExcLt.append hu hn) (ExcLt.raise (by decide))
+
 end JanusASL.Proofs
