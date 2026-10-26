@@ -318,17 +318,14 @@ theorem asl_bitfield {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100
     have e : bfOp w = .ubfm := by simp [bfOp, hk1]
     exact ⟨s2, hrun, e ▸ hrel, bt_cfg_after _ _ hfr⟩
 
-/-- **SBFM/BFM/UBFM** (and their aliases: ASR/LSL/LSR imm, SXT*/UXT*, BFI/BFXIL, SBFIZ/UBFX, ...):
-for every word of the encoding class that Janus decodes and every related pair of states, Janus'
-`step` and the generated ASL agree. -/
-theorem bitfield_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100110)
+theorem bitfield_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100110)
     (hop : (w / 2 ^ 29) % 4 ≠ 3) (hN : (w / 2 ^ 31) % 2 = (w / 2 ^ 22) % 2)
     (hsf : (w / 2 ^ 31) % 2 = 1 ∨ ((w / 2 ^ 16) % 64 < 32 ∧ (w / 2 ^ 10) % 64 < 32))
     (hdbm : (Janus.Arm64.decodeBitMasks (Janus.Arm64.bit w 22) (Janus.Arm64.bits w 15 10) (Janus.Arm64.bits w 21 16)
       false (if Janus.Arm64.bit w 31 then 64 else 32)).isSome = true)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   obtain ⟨p, hp⟩ := Option.isSome_iff_exists.mp hdbm
   have hp' : Janus.Arm64.decodeBitMasks (fld w 22 1 == 1#1) (fld w 10 6).toNat (fld w 16 6).toNat
       false (if fld w 31 1 == 1#1 then 64 else 32) = some p := by
@@ -340,7 +337,7 @@ theorem bitfield_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b1
   · rw [e1] at hrel
     have hrel' : Rel (js.setX (fld w 0 5).toNat (bfVal 64 js (bfOp w) (BitVec.ofNat 64 p.1) (BitVec.ofNat 64 p.2)
         (fld w 16 6).toNat (fld w 10 6).toNat (fld w 5 5).toNat (fld w 0 5).toNat)) s2 := hrel
-    refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (hpc _ _) ?_
+    refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (hpc _ _) ?_
     have hb : Janus.Arm64.bit w 31 = true := by rw [← fld_bit w 31 hw, e1]; rfl
     rw [Janus.Arm64.step_of_decode (decode_bitfield_class hw hc hop hN hsf hp)]
     simp only [hb, ite_true, ite_false, Bool.false_eq_true] at hp
@@ -351,7 +348,7 @@ theorem bitfield_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b1
   · rw [e1] at hrel
     have hrel' : Rel (js.setX (fld w 0 5).toNat (bfVal 32 js (bfOp w) (BitVec.ofNat 32 p.1) (BitVec.ofNat 32 p.2)
         (fld w 16 6).toNat (fld w 10 6).toNat (fld w 5 5).toNat (fld w 0 5).toNat)) s2 := hrel
-    refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (hpc _ _) ?_
+    refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (hpc _ _) ?_
     have hb : Janus.Arm64.bit w 31 = false := by rw [← fld_bit w 31 hw, e1]; rfl
     rw [Janus.Arm64.step_of_decode (decode_bitfield_class hw hc hop hN hsf hp)]
     simp only [hb, ite_true, ite_false, Bool.false_eq_true] at hp
@@ -359,5 +356,19 @@ theorem bitfield_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b1
     rw [bitfield_spec js _ _ _ _ _ _ hp]
     simp only [bits_eq_fld w 21 16 hw, bits_eq_fld w 15 10 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
     simp [Janus.Arm64.State.next, hpc]
+
+/-- **SBFM/BFM/UBFM** (and their aliases: ASR/LSL/LSR imm, SXT*/UXT*, BFI/BFXIL, SBFIZ/UBFX, ...):
+for every word of the encoding class that Janus decodes and every related pair of states, Janus'
+`step` and the generated ASL agree. -/
+theorem bitfield_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100110)
+    (hop : (w / 2 ^ 29) % 4 ≠ 3) (hN : (w / 2 ^ 31) % 2 = (w / 2 ^ 22) % 2)
+    (hsf : (w / 2 ^ 31) % 2 = 1 ∨ ((w / 2 ^ 16) % 64 < 32 ∧ (w / 2 ^ 10) % 64 < 32))
+    (hdbm : (Janus.Arm64.decodeBitMasks (Janus.Arm64.bit w 22) (Janus.Arm64.bits w 15 10) (Janus.Arm64.bits w 21 16)
+      false (if Janus.Arm64.bit w 31 then 64 else 32)).isSome = true)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := bitfield_agree_f (w := w) (hw := hw) (hc := hc) (hop := hop) (hN := hN) (hsf := hsf) (hdbm := hdbm) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

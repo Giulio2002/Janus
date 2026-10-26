@@ -493,13 +493,11 @@ theorem asl_ccmp_reg {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b11
       (fld w 16 5).toNat (fld_lt w 16 5) (fld_lt w 5 5) (fld w 12 4) (fld w 0 4) (fld w 30 1 == 1#1)
     exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
-/-- **condCmpReg (CCMN/CCMP)**: for every word of the encoding class and every related pair of states
-(with statistical profiling not sampling), Janus' `step` and the generated ASL agree. -/
-theorem condCmpReg_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b111010010)
+theorem condCmpReg_agree_f {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b111010010)
     (h2 : (w / 2 ^ 10) % 2 = 0) (h3 : (w / 2 ^ 4) % 2 = 0) (h4 : (w / 2 ^ 11) % 2 = 0)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hspe : s.regs.get? .SPESampleInFlight = some false) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   have hspec : ∀ N, (Janus.Arm64.execCondCmp js (fld w 30 1 == 1#1) (js.getX N (fld w 5 5).toNat)
       (js.getX N (fld w 16 5).toNat) (fld w 12 4).toNat (fld w 0 4).toNat).pc = js.pc := by
     intro N; unfold Janus.Arm64.execCondCmp; split <;> simp [Janus.Arm64.State.setFlags]
@@ -509,11 +507,21 @@ theorem condCmpReg_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 
   have e : F (if fld w 31 1 == 1#1 then 64 else 32) = if fld w 31 1 == 1#1 then F 64 else F 32 := by
     split <;> rfl
   have hrel' : Rel (if fld w 31 1 == 1#1 then F 64 else F 32) s2 := e ▸ hrel
-  refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
+  refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
   rw [Janus.Arm64.step_of_decode (decode_condCmpReg_class hw h1 h2 h3 h4)]
   simp only [Janus.Arm64.exec, ← fld_bit w 31 hw, ← fld_bit w 30 hw,
     bits_eq_fld w 20 16 hw, bits_eq_fld w 15 12 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 3 0 hw]
   split <;> simp_all [Janus.Arm64.State.next, Sail.BitVec.zeroExtend, F]
+
+/-- **condCmpReg (CCMN/CCMP)**: for every word of the encoding class and every related pair of states
+(with statistical profiling not sampling), Janus' `step` and the generated ASL agree. -/
+theorem condCmpReg_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b111010010)
+    (h2 : (w / 2 ^ 10) % 2 = 0) (h3 : (w / 2 ^ 4) % 2 = 0) (h4 : (w / 2 ^ 11) % 2 = 0)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hspe : s.regs.get? .SPESampleInFlight = some false) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := condCmpReg_agree_f (w := w) (hw := hw) (h1 := h1) (h2 := h2) (h3 := h3) (h4 := h4) (js := js) (s := s) (h := h) (hspe := hspe)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 set_option maxHeartbeats 8000000 in
 theorem asl_ccmp_imm {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b111010010)
@@ -545,13 +553,11 @@ theorem asl_ccmp_imm {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b11
       (fld w 0 4) (fld w 30 1 == 1#1)
     exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
-/-- **condCmpImm (CCMN/CCMP)**: for every word of the encoding class and every related pair of states
-(with statistical profiling not sampling), Janus' `step` and the generated ASL agree. -/
-theorem condCmpImm_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b111010010)
+theorem condCmpImm_agree_f {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b111010010)
     (h2 : (w / 2 ^ 10) % 2 = 0) (h3 : (w / 2 ^ 4) % 2 = 0) (h4 : (w / 2 ^ 11) % 2 = 1)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hspe : s.regs.get? .SPESampleInFlight = some false) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   have hspec : ∀ N, (Janus.Arm64.execCondCmp js (fld w 30 1 == 1#1) (js.getX N (fld w 5 5).toNat)
       (Sail.BitVec.zeroExtend (fld w 16 5) N) (fld w 12 4).toNat (fld w 0 4).toNat).pc = js.pc := by
     intro N; unfold Janus.Arm64.execCondCmp; split <;> simp [Janus.Arm64.State.setFlags]
@@ -561,10 +567,20 @@ theorem condCmpImm_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 
   have e : F (if fld w 31 1 == 1#1 then 64 else 32) = if fld w 31 1 == 1#1 then F 64 else F 32 := by
     split <;> rfl
   have hrel' : Rel (if fld w 31 1 == 1#1 then F 64 else F 32) s2 := e ▸ hrel
-  refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
+  refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
   rw [Janus.Arm64.step_of_decode (decode_condCmpImm_class hw h1 h2 h3 h4)]
   simp only [Janus.Arm64.exec, ← fld_bit w 31 hw, ← fld_bit w 30 hw,
     bits_eq_fld w 20 16 hw, bits_eq_fld w 15 12 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 3 0 hw]
   split <;> simp_all [Janus.Arm64.State.next, Sail.BitVec.zeroExtend, F]
+
+/-- **condCmpImm (CCMN/CCMP)**: for every word of the encoding class and every related pair of states
+(with statistical profiling not sampling), Janus' `step` and the generated ASL agree. -/
+theorem condCmpImm_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b111010010)
+    (h2 : (w / 2 ^ 10) % 2 = 0) (h3 : (w / 2 ^ 4) % 2 = 0) (h4 : (w / 2 ^ 11) % 2 = 1)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hspe : s.regs.get? .SPESampleInFlight = some false) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := condCmpImm_agree_f (w := w) (hw := hw) (h1 := h1) (h2 := h2) (h3 := h3) (h4 := h4) (js := js) (s := s) (h := h) (hspe := hspe)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

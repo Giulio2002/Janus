@@ -220,17 +220,24 @@ theorem spec_pc (js : Janus.Arm64.State) (w : Nat) : (aslAddSubImmSpec js w).pc 
   split <;> simp [Janus.Arm64.State.setX, Janus.Arm64.State.setXSP, Janus.Arm64.State.writeZR,
     Janus.Arm64.State.writeSP, Janus.Arm64.State.setFlags] <;> split <;> rfl
 
+theorem addSubImm_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100010)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
+  obtain ⟨s2, hrun, hrel, hbt⟩ := asl_addSubImm hw hc h (js.pc.toNat : Int)
+  refine step_agree_f h ⟨s2, hrun, hrel, hbt⟩ (spec_pc js w) ?_
+  rw [Janus.Arm64.step_of_decode (decode_addSubImm_class hw hc)]
+  simp only [Janus.Arm64.exec, spec_eq hw]
+  congr 1
+  split <;> simp [Janus.Arm64.State.next, ← spec_pc js w, spec_eq hw, *]
+
 /-- **ADD/ADDS/SUB/SUBS (immediate)**: for every word of the encoding class (bits 28:23 =
 `100010`) and every related pair of states, Janus' `step` and the generated ASL agree. -/
 theorem addSubImm_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100010)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
       (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
-  obtain ⟨s2, hrun, hrel, hbt⟩ := asl_addSubImm hw hc h (js.pc.toNat : Int)
-  refine step_agree h ⟨s2, hrun, hrel, hbt⟩ (spec_pc js w) ?_
-  rw [Janus.Arm64.step_of_decode (decode_addSubImm_class hw hc)]
-  simp only [Janus.Arm64.exec, spec_eq hw]
-  congr 1
-  split <;> simp [Janus.Arm64.State.next, ← spec_pc js w, spec_eq hw, *]
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := addSubImm_agree_f (w := w) (hw := hw) (hc := hc) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

@@ -118,7 +118,7 @@ theorem wit_rel (js : Janus.Arm64.State) : Rel js (wit js) where
   pc := by
     simp only [wit]
     rw [get?_set_ne _ _ (by decide)]; simp
-  pstate := ⟨witPState js.flags, by simp [wit], ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩⟩
+  pstate := ⟨witPState js.flags, by simp [wit], ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩⟩
 
 set_option maxRecDepth 100000 in
 theorem witFeatures_spec (f : Feature) : witFeatures[num_of_Feature f]! = cfgFeat f := by

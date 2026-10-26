@@ -422,12 +422,10 @@ theorem not_fld_eq0 (w i : Nat) (hw : w < 2 ^ 32) : (!(fld w i 1 == 0#1)) = Janu
   generalize fld w i 1 = x at this
   revert x; decide
 
-/-- **UDIV/SDIV**: for every word of the encoding class and every related pair of states, Janus'
-`step` and the generated ASL agree (including division by zero and `INT_MIN / -1`). -/
-theorem div_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011010110)
+theorem div_agree_f {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011010110)
     (h2 : (w / 2 ^ 11) % 32 = 1) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   obtain ⟨s2, hrun, hrel, hbt⟩ := asl_div hw h1 h2 h (js.pc.toNat : Int)
   have hpc : ∀ N sg rm rn rd, (Janus.Arm64.execDiv N js sg rm rn rd).pc = js.pc := by
     intro N sg rm rn rd
@@ -439,7 +437,7 @@ theorem div_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011
     else Janus.Arm64.execDiv 32 js (Janus.Arm64.bit w 10) (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat := by
     split <;> rfl
   rw [e] at hrel
-  refine step_agree h ⟨s2, hrun, hrel, hbt⟩ (by split <;> exact hpc _ _ _ _ _) ?_
+  refine step_agree_f h ⟨s2, hrun, hrel, hbt⟩ (by split <;> exact hpc _ _ _ _ _) ?_
   have p64 := hpc 64 (Janus.Arm64.bit w 10) (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat
   have p32 := hpc 32 (Janus.Arm64.bit w 10) (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat
   clear hpc
@@ -447,5 +445,14 @@ theorem div_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011
   simp only [Janus.Arm64.exec, ← fld_bit w 31 hw,
     bits_eq_fld w 20 16 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
   split <;> simp_all [Janus.Arm64.State.next]
+
+/-- **UDIV/SDIV**: for every word of the encoding class and every related pair of states, Janus'
+`step` and the generated ASL agree (including division by zero and `INT_MIN / -1`). -/
+theorem div_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011010110)
+    (h2 : (w / 2 ^ 11) % 32 = 1) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := div_agree_f (w := w) (hw := hw) (h1 := h1) (h2 := h2) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

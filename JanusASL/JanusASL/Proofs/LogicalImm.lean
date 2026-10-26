@@ -371,16 +371,13 @@ theorem asl_logicalImm {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b1
       (fld_lt w 0 5) (fld_lt w 5 5) (Janus.Arm64.LogicOp.ofBits (fld w 29 2).toNat) _
     exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
-/-- **AND/ORR/EOR/ANDS (immediate)**: for every word of the encoding class that Janus decodes
-(`N = 0` if `sf = 0`, and `DecodeBitMasks` defined) and every related pair of states, Janus'
-`step` and the generated ASL agree. -/
-theorem logicalImm_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100100)
+theorem logicalImm_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100100)
     (hsf : (w / 2 ^ 31) % 2 = 1 ∨ (w / 2 ^ 22) % 2 = 0)
     (hdbm : (Janus.Arm64.decodeBitMasks (Janus.Arm64.bit w 22) (Janus.Arm64.bits w 15 10) (Janus.Arm64.bits w 21 16)
       true (if Janus.Arm64.bit w 31 then 64 else 32)).isSome = true)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   obtain ⟨p, hp⟩ := Option.isSome_iff_exists.mp hdbm
   have hp' : Janus.Arm64.decodeBitMasks (fld w 22 1 == 1#1) (fld w 10 6).toNat (fld w 16 6).toNat
       true (if fld w 31 1 == 1#1 then 64 else 32) = some p := by
@@ -394,7 +391,7 @@ theorem logicalImm_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0
   · rw [e1] at hrel
     have hrel' : Rel (execLogicalImmV 64 js (Janus.Arm64.LogicOp.ofBits (fld w 29 2).toNat)
         (BitVec.ofNat 64 p.1) (fld w 5 5).toNat (fld w 0 5).toNat) s2 := hrel
-    refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (hpc _ _ _ _ _) ?_
+    refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (hpc _ _ _ _ _) ?_
     have hb : Janus.Arm64.bit w 31 = true := by rw [← fld_bit w 31 hw, e1]; rfl
     rw [Janus.Arm64.step_of_decode (decode_logicalImm_class hw hc hsf hp)]
     simp only [hb, ite_true, ite_false, Bool.false_eq_true] at hp
@@ -405,7 +402,7 @@ theorem logicalImm_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0
   · rw [e1] at hrel
     have hrel' : Rel (execLogicalImmV 32 js (Janus.Arm64.LogicOp.ofBits (fld w 29 2).toNat)
         (BitVec.ofNat 32 p.1) (fld w 5 5).toNat (fld w 0 5).toNat) s2 := hrel
-    refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (hpc _ _ _ _ _) ?_
+    refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (hpc _ _ _ _ _) ?_
     have hb : Janus.Arm64.bit w 31 = false := by rw [← fld_bit w 31 hw, e1]; rfl
     rw [Janus.Arm64.step_of_decode (decode_logicalImm_class hw hc hsf hp)]
     simp only [hb, ite_true, ite_false, Bool.false_eq_true] at hp
@@ -413,5 +410,18 @@ theorem logicalImm_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0
     rw [logicalImm_spec js _ _ _ _ _ _ hp]
     simp only [bits_eq_fld w 30 29 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
     simp [Janus.Arm64.State.next, hpc]
+
+/-- **AND/ORR/EOR/ANDS (immediate)**: for every word of the encoding class that Janus decodes
+(`N = 0` if `sf = 0`, and `DecodeBitMasks` defined) and every related pair of states, Janus'
+`step` and the generated ASL agree. -/
+theorem logicalImm_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100100)
+    (hsf : (w / 2 ^ 31) % 2 = 1 ∨ (w / 2 ^ 22) % 2 = 0)
+    (hdbm : (Janus.Arm64.decodeBitMasks (Janus.Arm64.bit w 22) (Janus.Arm64.bits w 15 10) (Janus.Arm64.bits w 21 16)
+      true (if Janus.Arm64.bit w 31 then 64 else 32)).isSome = true)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := logicalImm_agree_f (w := w) (hw := hw) (hc := hc) (hsf := hsf) (hdbm := hdbm) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

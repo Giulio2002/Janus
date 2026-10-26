@@ -134,12 +134,10 @@ theorem immp_eq (w : Nat) (hw : w < 2 ^ 32) :
     rw [← Nat.shiftLeft_eq, Nat.shiftLeft_add_eq_or_of_lt (by omega)]
   simp only [this, BitVec.toNat_ofNat, Nat.zero_mod, Nat.or_zero]; omega
 
-/-- **ADR/ADRP**: for every word of the encoding class and every related pair of states, Janus'
-`step` and the generated ASL agree. -/
-theorem pcrel_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 32 = 0b10000)
+theorem pcrel_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 32 = 0b10000)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   have hpc : ∀ rd (v : BitVec 64), (js.writeZR rd v).pc = js.pc := by
     intro rd v; simp [Janus.Arm64.State.writeZR]; split <;> rfl
   rcases (show (w / 2 ^ 31) % 2 = 0 ∨ (w / 2 ^ 31) % 2 = 1 by omega) with e | e
@@ -150,7 +148,7 @@ theorem pcrel_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 32 = 0b1000
     have hasl : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 := by
       rw [run_DecodeA64_DPImm hw (by omega), run_DataProcImm_adr_0 hw hc e (see_entry _ _), run_decode_adr_pcrel]
       exact hrun
-    refine step_agree h ⟨s2, hasl, hrel, bt_cfg_after _ _ hfr⟩ (hpc _ _) ?_
+    refine step_agree_f h ⟨s2, hasl, hrel, bt_cfg_after _ _ hfr⟩ (hpc _ _) ?_
     · rw [Janus.Arm64.step_of_decode (decode_pcrel_class hw hc)]
       simp only [Janus.Arm64.exec, hb, ← fld_bit w 31 hw, bits_eq_fld w 4 0 hw, Bool.false_eq_true, ite_false]
       rw [← fld_bit w 31 hw] at hb
@@ -162,10 +160,19 @@ theorem pcrel_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 32 = 0b1000
     have hasl : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2 := by
       rw [run_DecodeA64_DPImm hw (by omega), run_DataProcImm_adr_1 hw hc e (see_entry _ _), run_decode_adrp_pcrel]
       exact hrun
-    refine step_agree h ⟨s2, hasl, hrel, bt_cfg_after _ _ hfr⟩ (hpc _ _) ?_
+    refine step_agree_f h ⟨s2, hasl, hrel, bt_cfg_after _ _ hfr⟩ (hpc _ _) ?_
     · rw [Janus.Arm64.step_of_decode (decode_pcrel_class hw hc)]
       simp only [Janus.Arm64.exec, hb, bits_eq_fld w 4 0 hw, ite_true]
       rw [← fld_bit w 31 hw] at hb
       simp [hb, ← immp_eq w hw, Janus.Arm64.State.next, hpc]
+
+/-- **ADR/ADRP**: for every word of the encoding class and every related pair of states, Janus'
+`step` and the generated ASL agree. -/
+theorem pcrel_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 32 = 0b10000)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := pcrel_agree_f (w := w) (hw := hw) (hc := hc) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

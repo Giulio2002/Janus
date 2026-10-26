@@ -322,12 +322,10 @@ theorem asl_shiftv {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b001
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (Janus.Arm64.ShiftType.ofBits (fld w 10 2).toNat)
     exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
-/-- **LSLV/LSRV/ASRV/RORV**: for every word of the encoding class and every related pair of
-states, Janus' `step` and the generated ASL agree. -/
-theorem shiftV_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011010110)
+theorem shiftV_agree_f {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011010110)
     (h2 : (w / 2 ^ 12) % 16 = 0b0010) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execShiftV N js
     (Janus.Arm64.ShiftType.ofBits (fld w 10 2).toNat) (fld w 16 5).toNat (fld w 5 5).toNat (fld w 0 5).toNat
   have hspec : ∀ N, (F N).pc = js.pc := by
@@ -336,10 +334,19 @@ theorem shiftV_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0
   have e : F (if fld w 31 1 == 1#1 then 64 else 32) = if fld w 31 1 == 1#1 then F 64 else F 32 := by
     split <;> rfl
   have hrel' : Rel (if fld w 31 1 == 1#1 then F 64 else F 32) s2 := e ▸ hrel
-  refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
+  refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
   rw [Janus.Arm64.step_of_decode (decode_shiftV_class hw h1 h2)]
   simp only [Janus.Arm64.exec, ← fld_bit w 31 hw, bits_eq_fld w 11 10 hw, bits_eq_fld w 20 16 hw,
     bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
   split <;> simp_all [Janus.Arm64.State.next, F]
+
+/-- **LSLV/LSRV/ASRV/RORV**: for every word of the encoding class and every related pair of
+states, Janus' `step` and the generated ASL agree. -/
+theorem shiftV_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 1024 = 0b0011010110)
+    (h2 : (w / 2 ^ 12) % 16 = 0b0010) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := shiftV_agree_f (w := w) (hw := hw) (h1 := h1) (h2 := h2) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

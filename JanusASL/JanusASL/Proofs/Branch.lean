@@ -70,10 +70,11 @@ theorem run_execute_b {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hc :
     ∃ s', (execute_aarch64_instrs_branch_unconditional_immediate
         (if call then .BranchType_DIRCALL else .BranchType_DIR) off).run s = .ok () s' ∧
       Rel { (if call then js.writeZR 30 (js.pc + 4) else js) with pc := js.pc + off } s' ∧
-      s'.regs.get? .__BranchTaken = some true ∧ LinuxEL0Config s' := by
+      s'.regs.get? .__BranchTaken = some true ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   cases call
   · obtain ⟨s', hrun, hpc, hbt, htc⟩ := run_BranchTo hc (js.pc + off) ht .BranchType_DIR false
-    refine ⟨s', ?_, h.touches htc brRegs_ok hpc, hbt, hc.of_touches htc brRegs_not_cfg⟩
+    refine ⟨s', ?_, h.touches htc brRegs_ok hpc, hbt, hc.of_touches htc brRegs_not_cfg,
+      FPFrame.of_touches htc (by decide)⟩
     simp only [execute_aarch64_instrs_branch_unconditional_immediate, Bool.false_eq_true, ite_false, run_bind,
       run_pure, PC_read, run_readReg h.pc]
     simp only [show (BranchType.BranchType_DIR == BranchType.BranchType_DIRCALL) = false from rfl,
@@ -83,7 +84,8 @@ theorem run_execute_b {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hc :
     have hc1 := hc.setGpr (js.pc + 4#64) (d := 30) (by decide)
     have hpc1 : (setGpr s (js.pc + 4#64) 30).regs.get? ._PC = some js.pc := h1.pc
     obtain ⟨s', hrun, hpc, hbt, htc⟩ := run_BranchTo hc1 (js.pc + off) ht .BranchType_DIRCALL false
-    refine ⟨s', ?_, h1.touches htc brRegs_ok hpc, hbt, hc1.of_touches htc brRegs_not_cfg⟩
+    refine ⟨s', ?_, h1.touches htc brRegs_ok hpc, hbt, hc1.of_touches htc brRegs_not_cfg,
+      (FPFrame.setGpr s (js.pc + 4#64) (d := 30) (by decide)).trans (FPFrame.of_touches htc (by decide))⟩
     simp only [execute_aarch64_instrs_branch_unconditional_immediate, ite_true, run_bind,
       run_pure, PC_read, run_readReg h.pc]
     simp only [show (BranchType.BranchType_DIRCALL == BranchType.BranchType_DIRCALL) = true from rfl, ite_true,
@@ -167,6 +169,37 @@ theorem decode_b_class {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 26) % 32 = 0b0
   simp
 
 set_option maxHeartbeats 8000000 in
+theorem b_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 26) % 32 = 0b00101)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
+    (ht : (js.pc + Janus.Arm64.sext64 28 (Janus.Arm64.bits w 25 0 * 4)).toNat < 2 ^ 56) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
+  rw [← off26_eq w hw] at ht
+  have hcall := fld_bit w 31 hw
+  rcases (show (w / 2 ^ 31) % 2 = 0 ∨ (w / 2 ^ 31) % 2 = 1 by omega) with e | e
+  · obtain ⟨s2, hrun, hrel, hbt, hcf, hfp⟩ := run_execute_b (h.entry (BitVec.ofNat 32 w) 67)
+      (hcfg.stepEntry (BitVec.ofNat 32 w) 67) (fld w 31 1 == 1#1) _ ht
+    have hdec : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
+        .ok () s2 := by
+      rw [run_DecodeA64_BES hw (by omega), run_BranchExcSys_b_0 hw hc e (see_entry _ _), run_decode_b]
+      exact hrun
+    refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, hrel, hcf, (fpFrame_entry s _ _).trans hfp⟩
+    rw [Janus.Arm64.step_of_decode (decode_b_class hw hc)]
+    rw [← hcall]
+    simp only [Janus.Arm64.exec, off26_eq w hw]
+    split <;> rfl
+  · obtain ⟨s2, hrun, hrel, hbt, hcf, hfp⟩ := run_execute_b (h.entry (BitVec.ofNat 32 w) 68)
+      (hcfg.stepEntry (BitVec.ofNat 32 w) 68) (fld w 31 1 == 1#1) _ ht
+    have hdec : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
+        .ok () s2 := by
+      rw [run_DecodeA64_BES hw (by omega), run_BranchExcSys_b_1 hw hc e (see_entry _ _), run_decode_bl]
+      exact hrun
+    refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, hrel, hcf, (fpFrame_entry s _ _).trans hfp⟩
+    rw [Janus.Arm64.step_of_decode (decode_b_class hw hc)]
+    rw [← hcall]
+    simp only [Janus.Arm64.exec, off26_eq w hw]
+    split <;> rfl
+
 /-- **B, BL** (under `LinuxEL0Config`, to an untagged target): for every word of the class and
 every related pair of states, Janus' `step` and the generated ASL agree, and the configuration is
 preserved. -/
@@ -175,31 +208,8 @@ theorem b_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 26) % 32 = 0b00101)
     (ht : (js.pc + Janus.Arm64.sext64 28 (Janus.Arm64.bits w 25 0 * 4)).toNat < 2 ^ 56) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
       (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
-  rw [← off26_eq w hw] at ht
-  have hcall := fld_bit w 31 hw
-  rcases (show (w / 2 ^ 31) % 2 = 0 ∨ (w / 2 ^ 31) % 2 = 1 by omega) with e | e
-  · obtain ⟨s2, hrun, hrel, hbt, hcf⟩ := run_execute_b (h.entry (BitVec.ofNat 32 w) 67)
-      (hcfg.stepEntry (BitVec.ofNat 32 w) 67) (fld w 31 1 == 1#1) _ ht
-    have hdec : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
-        .ok () s2 := by
-      rw [run_DecodeA64_BES hw (by omega), run_BranchExcSys_b_0 hw hc e (see_entry _ _), run_decode_b]
-      exact hrun
-    refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, hrel, hcf⟩
-    rw [Janus.Arm64.step_of_decode (decode_b_class hw hc)]
-    rw [← hcall]
-    simp only [Janus.Arm64.exec, off26_eq w hw]
-    split <;> rfl
-  · obtain ⟨s2, hrun, hrel, hbt, hcf⟩ := run_execute_b (h.entry (BitVec.ofNat 32 w) 68)
-      (hcfg.stepEntry (BitVec.ofNat 32 w) 68) (fld w 31 1 == 1#1) _ ht
-    have hdec : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
-        .ok () s2 := by
-      rw [run_DecodeA64_BES hw (by omega), run_BranchExcSys_b_1 hw hc e (see_entry _ _), run_decode_bl]
-      exact hrun
-    refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, hrel, hcf⟩
-    rw [Janus.Arm64.step_of_decode (decode_b_class hw hc)]
-    rw [← hcall]
-    simp only [Janus.Arm64.exec, off26_eq w hw]
-    split <;> rfl
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := b_agree_f (w := w) (hw := hw) (hc := hc) (js := js) (s := s) (h := h) (hcfg := hcfg) (ht := ht)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 set_option maxHeartbeats 8000000 in
 /-- `__DecodeA64_BranchExcSys` on its encoding class reaches clause SEE 69 (`decode_b_cond_aarch64_instrs_branch_conditional_cond`). -/
@@ -257,15 +267,16 @@ theorem run_execute_bcond {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (
     ∃ s', (execute_aarch64_instrs_branch_conditional_cond cond off).run s = .ok () s' ∧
       (if Janus.Arm64.conditionHolds cond.toNat js.flags then
         Rel { js with pc := js.pc + off } s' ∧ s'.regs.get? .__BranchTaken = some true
-       else s' = s) ∧ LinuxEL0Config s' := by
+       else s' = s) ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   obtain ⟨p, hp, hps⟩ := h.pstate
   by_cases hcnd : Janus.Arm64.conditionHolds cond.toNat js.flags
   · obtain ⟨s', hrun, hpc, hbt, htc⟩ := run_BranchTo hc (js.pc + off) (ht hcnd) .BranchType_DIR true
-    refine ⟨s', ?_, by rw [if_pos hcnd]; exact ⟨h.touches htc brRegs_ok hpc, hbt⟩, hc.of_touches htc brRegs_not_cfg⟩
+    refine ⟨s', ?_, by rw [if_pos hcnd]; exact ⟨h.touches htc brRegs_ok hpc, hbt⟩, hc.of_touches htc brRegs_not_cfg,
+      FPFrame.of_touches htc (by decide)⟩
     simp only [execute_aarch64_instrs_branch_conditional_cond, run_bind, run_ConditionHolds hp hps, hcnd, ite_true,
       PC_read, run_readReg h.pc]
     exact hrun
-  · refine ⟨s, ?_, by rw [if_neg hcnd], hc⟩
+  · refine ⟨s, ?_, by rw [if_neg hcnd], hc, FPFrame.refl s⟩
     simp only [execute_aarch64_instrs_branch_conditional_cond, run_bind, run_ConditionHolds hp hps, hcnd,
       Bool.false_eq_true, ite_false]
     exact run_BranchNotTaken hc _ _
@@ -285,17 +296,15 @@ theorem decode_bcond_class {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 
   simp
 
 set_option maxHeartbeats 8000000 in
-/-- **B.cond** (under `LinuxEL0Config`, to an untagged target): Janus' `step` and the generated ASL
-agree, taken or not, and the configuration is preserved. -/
-theorem bcond_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b01010100)
+theorem bcond_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b01010100)
     (h4 : (w / 2 ^ 4) % 2 = 0)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
     (ht : Janus.Arm64.conditionHolds (Janus.Arm64.bits w 3 0) js.flags = true →
       (js.pc + Janus.Arm64.sext64 21 (Janus.Arm64.bits w 23 5 * 4)).toNat < 2 ^ 56) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   rw [← off19_eq w hw, bits_eq_fld w 3 0 hw] at ht
-  obtain ⟨s2, hrun, hres, hcf⟩ := run_execute_bcond (h.entry (BitVec.ofNat 32 w) 69)
+  obtain ⟨s2, hrun, hres, hcf, hfp⟩ := run_execute_bcond (h.entry (BitVec.ofNat 32 w) 69)
     (hcfg.stepEntry (BitVec.ofNat 32 w) 69) (fld w 0 4) _ ht
   have hdec : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
       .ok () s2 := by
@@ -307,16 +316,29 @@ theorem bcond_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b010
   split
   · next hcnd =>
     rw [if_pos hcnd] at hres
-    exact ⟨_, _, rfl, run_janus_step_taken _ h.pc hdec hres.2, hres.1, hcf⟩
+    exact ⟨_, _, rfl, run_janus_step_taken _ h.pc hdec hres.2, hres.1, hcf, (fpFrame_entry s _ _).trans hfp⟩
   · next hcnd =>
     rw [if_neg hcnd] at hres
     subst hres
     have hR := h.entry (BitVec.ofNat 32 w) 69
-    refine ⟨_, _, rfl, run_janus_step _ h.pc hdec ?_ hR.pc, hR.setPC _, ?_⟩
+    refine ⟨_, _, rfl, run_janus_step _ h.pc hdec ?_ hR.pc, hR.setPC _, ?_, ?_⟩
     · rw [get?_set_ne _ (r := .SEE) _ (by decide)]
       simp only [stepEntry]; repeat rw [get?_set_ne _ _ (by decide)]
       exact get?_set_BranchTaken _ _
     · exact hcf.of_touches (Touches.refl _ [._PC] |>.set _ _ (by decide)) (by decide)
+    · exact (fpFrame_entry s _ _).trans (FPFrame.set _ ._PC _ (by decide))
+
+/-- **B.cond** (under `LinuxEL0Config`, to an untagged target): Janus' `step` and the generated ASL
+agree, taken or not, and the configuration is preserved. -/
+theorem bcond_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b01010100)
+    (h4 : (w / 2 ^ 4) % 2 = 0)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
+    (ht : Janus.Arm64.conditionHolds (Janus.Arm64.bits w 3 0) js.flags = true →
+      (js.pc + Janus.Arm64.sext64 21 (Janus.Arm64.bits w 23 5 * 4)).toNat < 2 ^ 56) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := bcond_agree_f (w := w) (hw := hw) (hc := hc) (h4 := h4) (js := js) (s := s) (h := h) (hcfg := hcfg) (ht := ht)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 set_option maxHeartbeats 8000000 in
 /-- `__DecodeA64_BranchExcSys` on its encoding class reaches clause SEE 118 (`decode_cbz_aarch64_instrs_branch_conditional_compare`). -/
@@ -480,14 +502,15 @@ theorem run_execute_cb {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hc 
     ∃ s', (execute_aarch64_instrs_branch_conditional_compare N iszero off rt).run s = .ok () s' ∧
       (if decide (js.getX N rt = 0) == iszero then
         Rel { js with pc := js.pc + off } s' ∧ s'.regs.get? .__BranchTaken = some true
-       else s' = s) ∧ LinuxEL0Config s' := by
+       else s' = s) ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   by_cases hcnd : (decide (js.getX N rt = 0) == iszero) = true
   · obtain ⟨s', hrun, hpc, hbt, htc⟩ := run_BranchTo hc (js.pc + off) (ht hcnd) .BranchType_DIR true
-    refine ⟨s', ?_, by rw [if_pos hcnd]; exact ⟨h.touches htc brRegs_ok hpc, hbt⟩, hc.of_touches htc brRegs_not_cfg⟩
+    refine ⟨s', ?_, by rw [if_pos hcnd]; exact ⟨h.touches htc brRegs_ok hpc, hbt⟩, hc.of_touches htc brRegs_not_cfg,
+      FPFrame.of_touches htc (by decide)⟩
     simp only [execute_aarch64_instrs_branch_conditional_compare, run_bind, run_X_read_rel h hrt hN, isZero_eq,
       hcnd, ite_true, PC_read, run_readReg h.pc, run_pure]
     exact hrun
-  · refine ⟨s, ?_, by rw [if_neg hcnd], hc⟩
+  · refine ⟨s, ?_, by rw [if_neg hcnd], hc, FPFrame.refl s⟩
     simp only [execute_aarch64_instrs_branch_conditional_compare, run_bind, run_X_read_rel h hrt hN, isZero_eq,
       hcnd, Bool.false_eq_true, ite_false, run_pure]
     exact run_BranchNotTaken hc _ _
@@ -514,14 +537,13 @@ theorem decode_cb_class {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b
   simp
 
 set_option maxHeartbeats 8000000 in
-/-- **CBZ, CBNZ** (under `LinuxEL0Config`, to an untagged target). -/
-theorem cb_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011010)
+theorem cb_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011010)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
     (ht : ((if Janus.Arm64.bit w 31 then decide (js.getX 64 (Janus.Arm64.bits w 4 0) = 0)
         else decide (js.getX 32 (Janus.Arm64.bits w 4 0) = 0)) != Janus.Arm64.bit w 24) = true →
       (js.pc + Janus.Arm64.sext64 21 (Janus.Arm64.bits w 23 5 * 4)).toNat < 2 ^ 56) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   have hsf : (fld w 31 1 == 1#1) = Janus.Arm64.bit w 31 := fld_bit w 31 hw
   have hop : (fld w 24 1 == 0#1) = !Janus.Arm64.bit w 24 := by
     rw [← fld_bit w 24 hw]; have := fld_lt w 24 1; generalize fld w 24 1 = v at this; revert v; decide
@@ -538,7 +560,7 @@ theorem cb_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011010)
     · exact ⟨118, by rw [run_DecodeA64_BES hw (by omega), run_BranchExcSys_cb_0 hw hc e (see_entry _ _), run_decode_cbz]⟩
     · exact ⟨117, by rw [run_DecodeA64_BES hw (by omega), run_BranchExcSys_cb_1 hw hc e (see_entry _ _), run_decode_cbnz]⟩
   obtain ⟨n, hdec0⟩ := hsee
-  obtain ⟨s2, hrun, hres, hcf⟩ := run_execute_cb (h.entry (BitVec.ofNat 32 w) n)
+  obtain ⟨s2, hrun, hres, hcf, hfp⟩ := run_execute_cb (h.entry (BitVec.ofNat 32 w) n)
     (hcfg.stepEntry (BitVec.ofNat 32 w) n) (width_cases w) (fld_lt w 0 5) (fld w 24 1 == 0#1) _ ht
   have hdec := hdec0.trans hrun
   rw [Janus.Arm64.step_of_decode (decode_cb_class hw hc)]
@@ -547,15 +569,27 @@ theorem cb_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011010)
   by_cases hcnd : (decide (js.getX (if fld w 31 1 == 1#1 then 64 else 32) (fld w 0 5).toNat = 0) ==
       (fld w 24 1 == 0#1)) = true
   · rw [if_pos hcnd] at hres ⊢
-    exact ⟨_, _, rfl, run_janus_step_taken _ h.pc hdec hres.2, hres.1, hcf⟩
+    exact ⟨_, _, rfl, run_janus_step_taken _ h.pc hdec hres.2, hres.1, hcf, (fpFrame_entry s _ _).trans hfp⟩
   · rw [if_neg hcnd] at hres ⊢
     subst hres
     have hR := h.entry (BitVec.ofNat 32 w) n
-    refine ⟨_, _, rfl, run_janus_step _ h.pc hdec ?_ hR.pc, hR.setPC _, ?_⟩
+    refine ⟨_, _, rfl, run_janus_step _ h.pc hdec ?_ hR.pc, hR.setPC _, ?_, ?_⟩
     · rw [get?_set_ne _ (r := .SEE) _ (by decide)]
       simp only [stepEntry]; repeat rw [get?_set_ne _ _ (by decide)]
       exact get?_set_BranchTaken _ _
     · exact hcf.of_touches (Touches.refl _ [._PC] |>.set _ _ (by decide)) (by decide)
+    · exact (fpFrame_entry s _ _).trans (FPFrame.set _ ._PC _ (by decide))
+
+/-- **CBZ, CBNZ** (under `LinuxEL0Config`, to an untagged target). -/
+theorem cb_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011010)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
+    (ht : ((if Janus.Arm64.bit w 31 then decide (js.getX 64 (Janus.Arm64.bits w 4 0) = 0)
+        else decide (js.getX 32 (Janus.Arm64.bits w 4 0) = 0)) != Janus.Arm64.bit w 24) = true →
+      (js.pc + Janus.Arm64.sext64 21 (Janus.Arm64.bits w 23 5 * 4)).toNat < 2 ^ 56) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := cb_agree_f (w := w) (hw := hw) (hc := hc) (js := js) (s := s) (h := h) (hcfg := hcfg) (ht := ht)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 set_option maxHeartbeats 8000000 in
 /-- `__DecodeA64_BranchExcSys` on its encoding class reaches clause SEE 1010 (`decode_tbz_aarch64_instrs_branch_conditional_test`). -/
@@ -832,15 +866,16 @@ theorem run_execute_tb {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hc 
     ∃ s', (execute_aarch64_instrs_branch_conditional_test pos bv N off rt).run s = .ok () s' ∧
       (if (Sail.BitVec.access (js.getX N rt) pos == bv) then
         Rel { js with pc := js.pc + off } s' ∧ s'.regs.get? .__BranchTaken = some true
-       else s' = s) ∧ LinuxEL0Config s' := by
+       else s' = s) ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   have ha : (pos <b N) = true := by simp; omega
   by_cases hcnd : (Sail.BitVec.access (js.getX N rt) pos == bv) = true
   · obtain ⟨s', hrun, hpc, hbt, htc⟩ := run_BranchTo hc (js.pc + off) (ht hcnd) .BranchType_DIR true
-    refine ⟨s', ?_, by rw [if_pos hcnd]; exact ⟨h.touches htc brRegs_ok hpc, hbt⟩, hc.of_touches htc brRegs_not_cfg⟩
+    refine ⟨s', ?_, by rw [if_pos hcnd]; exact ⟨h.touches htc brRegs_ok hpc, hbt⟩, hc.of_touches htc brRegs_not_cfg,
+      FPFrame.of_touches htc (by decide)⟩
     simp only [execute_aarch64_instrs_branch_conditional_test, run_bind, run_X_read_rel h hrt hN,
       run_sail_assert_of ha, hcnd, ite_true, PC_read, run_readReg h.pc, run_pure]
     exact hrun
-  · refine ⟨s, ?_, by rw [if_neg hcnd], hc⟩
+  · refine ⟨s, ?_, by rw [if_neg hcnd], hc, FPFrame.refl s⟩
     simp only [execute_aarch64_instrs_branch_conditional_test, run_bind, run_X_read_rel h hrt hN,
       run_sail_assert_of ha, hcnd, Bool.false_eq_true, ite_false, run_pure]
     exact run_BranchNotTaken hc _ _
@@ -876,14 +911,13 @@ theorem decode_tb_class {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b
   simp
 
 set_option maxHeartbeats 8000000 in
-/-- **TBZ, TBNZ** (under `LinuxEL0Config`, to an untagged target). -/
-theorem tb_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011011)
+theorem tb_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011011)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
     (ht : ((js.readZR (Janus.Arm64.bits w 4 0)).getLsbD ((Janus.Arm64.bit w 31).toNat * 32 +
         Janus.Arm64.bits w 23 19) == Janus.Arm64.bit w 24) = true →
       (js.pc + Janus.Arm64.sext64 16 (Janus.Arm64.bits w 18 5 * 4)).toNat < 2 ^ 56) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   rw [← off14_eq w hw, bits_eq_fld w 4 0 hw] at ht
   have hsee : ∃ n : Int, (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
       (execute_aarch64_instrs_branch_conditional_test (fld w 31 1 ++ fld w 19 5).toNat (fld w 24 1)
@@ -923,7 +957,7 @@ theorem tb_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011011)
     have hb : fld w 24 1 = 0#1 ∨ fld w 24 1 = 1#1 := by generalize fld w 24 1 = b; revert b; decide
     rcases hb with hb | hb <;> rw [hb] <;> cases x.getLsbD q <;> rfl
   rw [key] at ht
-  obtain ⟨s2, hrun, hres, hcf⟩ := run_execute_tb (h.entry (BitVec.ofNat 32 w) n)
+  obtain ⟨s2, hrun, hres, hcf, hfp⟩ := run_execute_tb (h.entry (BitVec.ofNat 32 w) n)
     (hcfg.stepEntry (BitVec.ofNat 32 w) n) (width_cases w) (fld_lt w 0 5) hpos (fld w 24 1) _ ht
   have hdec := hdec0.trans hrun
   rw [Janus.Arm64.step_of_decode (decode_tb_class hw hc)]
@@ -932,15 +966,27 @@ theorem tb_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011011)
   by_cases hcnd : (Sail.BitVec.access (js.getX (if fld w 31 1 == 1#1 then 64 else 32) (fld w 0 5).toNat)
         (fld w 31 1 ++ fld w 19 5).toNat == fld w 24 1) = true
   · rw [if_pos hcnd] at hres ⊢
-    exact ⟨_, _, rfl, run_janus_step_taken _ h.pc hdec hres.2, hres.1, hcf⟩
+    exact ⟨_, _, rfl, run_janus_step_taken _ h.pc hdec hres.2, hres.1, hcf, (fpFrame_entry s _ _).trans hfp⟩
   · rw [if_neg hcnd] at hres ⊢
     subst hres
     have hR := h.entry (BitVec.ofNat 32 w) n
-    refine ⟨_, _, rfl, run_janus_step _ h.pc hdec ?_ hR.pc, hR.setPC _, ?_⟩
+    refine ⟨_, _, rfl, run_janus_step _ h.pc hdec ?_ hR.pc, hR.setPC _, ?_, ?_⟩
     · rw [get?_set_ne _ (r := .SEE) _ (by decide)]
       simp only [stepEntry]; repeat rw [get?_set_ne _ _ (by decide)]
       exact get?_set_BranchTaken _ _
     · exact hcf.of_touches (Touches.refl _ [._PC] |>.set _ _ (by decide)) (by decide)
+    · exact (fpFrame_entry s _ _).trans (FPFrame.set _ ._PC _ (by decide))
+
+/-- **TBZ, TBNZ** (under `LinuxEL0Config`, to an untagged target). -/
+theorem tb_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 25) % 64 = 0b011011)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
+    (ht : ((js.readZR (Janus.Arm64.bits w 4 0)).getLsbD ((Janus.Arm64.bit w 31).toNat * 32 +
+        Janus.Arm64.bits w 23 19) == Janus.Arm64.bit w 24) = true →
+      (js.pc + Janus.Arm64.sext64 16 (Janus.Arm64.bits w 18 5 * 4)).toNat < 2 ^ 56) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := tb_agree_f (w := w) (hw := hw) (hc := hc) (js := js) (s := s) (h := h) (hcfg := hcfg) (ht := ht)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 set_option maxHeartbeats 8000000 in
 /-- `__DecodeA64_BranchExcSys` on its encoding class reaches clause SEE 92 (`decode_br_aarch64_instrs_branch_unconditional_register`). -/
@@ -1084,7 +1130,7 @@ theorem run_execute_bru {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hc
     {n : Nat} (hn : n < 32) (ht : (js.readZR n).toNat < 2 ^ 56) :
     ∃ s', (execute_aarch64_instrs_branch_unconditional_register bt 0 n false false true).run s = .ok () s' ∧
       Rel { (if bt == .BranchType_INDCALL then js.writeZR 30 (js.pc + 4) else js) with pc := js.readZR n } s' ∧
-      s'.regs.get? .__BranchTaken = some true ∧ LinuxEL0Config s' := by
+      s'.regs.get? .__BranchTaken = some true ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   obtain ⟨p, hp, he, _, _⟩ := hc.pstate
   have hx := run_X_read_rel h hn (N := 64) (Or.inr rfl)
   simp only [Janus.Arm64.State.getX, BitVec.setWidth_eq] at hx
@@ -1093,7 +1139,8 @@ theorem run_execute_bru {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hc
     have hc1 := hc.of_touches hb (by decide)
     have h1 := h.set_other .BTypeNext 0b01#2 rfl (by decide) (by decide) (by decide)
     obtain ⟨s', hrun, hpc, hbt, htc⟩ := run_BranchTo hc1 (js.readZR n) ht .BranchType_INDIR false
-    refine ⟨s', ?_, ?_, hbt, hc1.of_touches htc brRegs_not_cfg⟩
+    refine ⟨s', ?_, ?_, hbt, hc1.of_touches htc brRegs_not_cfg,
+      (FPFrame.set s .BTypeNext 0b01#2 (by decide)).trans (FPFrame.of_touches htc (by decide))⟩
     · cfg_simp [execute_aarch64_instrs_branch_unconditional_register, undefined_GCSInstruction, run_internal_pick,
         hx, run_readReg hc.inGuarded, HaveGCS, run_IsFeatureImplemented hc, run_readReg hp, he]
       exact hrun
@@ -1110,7 +1157,9 @@ theorem run_execute_bru {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hc
     obtain ⟨s', hrun, hpc, hbt, htc⟩ := run_BranchTo hc1 (js.readZR n) ht .BranchType_INDCALL false
     have e3 : Sail.BitVec.addInt js.pc 4 = js.pc + 4#64 := by
       apply BitVec.eq_of_toNat_eq; simp [Sail.BitVec.addInt]
-    refine ⟨s', ?_, ?_, hbt, hc1.of_touches htc brRegs_not_cfg⟩
+    refine ⟨s', ?_, ?_, hbt, hc1.of_touches htc brRegs_not_cfg,
+      ((FPFrame.setGpr s (js.pc + 4#64) (d := 30) (by decide)).trans (FPFrame.set _ .BTypeNext 0b10#2 (by decide))).trans
+        (FPFrame.of_touches htc (by decide))⟩
     · cfg_simp [execute_aarch64_instrs_branch_unconditional_register, undefined_GCSInstruction, run_internal_pick,
         hx, HaveGCS, run_IsFeatureImplemented hc, run_readReg hp, he, run_GCSPCREnabled hc, PC_read,
         run_readReg h.pc, e3, hxs, run_readReg hpc0]
@@ -1121,7 +1170,8 @@ theorem run_execute_bru {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hc
     have hc1 := hc.of_touches hb (by decide)
     have h1 := h.set_other .BTypeNext 0b00#2 rfl (by decide) (by decide) (by decide)
     obtain ⟨s', hrun, hpc, hbt, htc⟩ := run_BranchTo hc1 (js.readZR n) ht .BranchType_RET false
-    refine ⟨s', ?_, ?_, hbt, hc1.of_touches htc brRegs_not_cfg⟩
+    refine ⟨s', ?_, ?_, hbt, hc1.of_touches htc brRegs_not_cfg,
+      (FPFrame.set s .BTypeNext 0b00#2 (by decide)).trans (FPFrame.of_touches htc (by decide))⟩
     · cfg_simp [execute_aarch64_instrs_branch_unconditional_register, undefined_GCSInstruction, run_internal_pick,
         hx, run_readReg hc.inGuarded, HaveGCS, run_IsFeatureImplemented hc, run_readReg hp, he, run_GCSPCREnabled hc]
       exact hrun
@@ -1176,15 +1226,14 @@ theorem decode_br_class {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304
   | _ + 32, hl => exact absurd hl (by omega)
 
 set_option maxHeartbeats 8000000 in
-/-- **BR** (under `LinuxEL0Config`, to an untagged, 4-byte aligned target). -/
-theorem br_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3508160) (h1 : w % 32 = 0)
+theorem br_agree_f {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3508160) (h1 : w % 32 = 0)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
     (ht : (js.readZR (Janus.Arm64.bits w 9 5)).toNat < 2 ^ 56)
     (hal : (js.readZR (Janus.Arm64.bits w 9 5)).toNat % 4 = 0) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   rw [bits_eq_fld w 9 5 hw] at ht hal
-  obtain ⟨s2, hrun, hrel, hbt, hcf⟩ := run_execute_bru (h.entry (BitVec.ofNat 32 w) 92)
+  obtain ⟨s2, hrun, hrel, hbt, hcf, hfp⟩ := run_execute_bru (h.entry (BitVec.ofNat 32 w) 92)
     (hcfg.stepEntry (BitVec.ofNat 32 w) 92) .BranchType_INDIR (by simp) (fld_lt w 5 5) ht
   have hdec : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
       .ok () s2 := by
@@ -1196,11 +1245,21 @@ theorem br_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3508
       fld_eq_of hw (show (w / 2 ^ 24) % 2 ^ 1 = 0 by omega)]
     rw [run_decode_br]
     exact hrun
-  refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, by simpa using hrel, hcf⟩
+  refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, by simpa using hrel, hcf, (fpFrame_entry s _ _).trans hfp⟩
   rw [Janus.Arm64.step_of_decode (decode_br_class hw h0 h1), bits_eq_fld w 9 5 hw]
   simp only [Janus.Arm64.exec, Janus.Arm64.branchReg]
   rw [if_neg (by omega), if_pos hal]
   try rfl
+
+/-- **BR** (under `LinuxEL0Config`, to an untagged, 4-byte aligned target). -/
+theorem br_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3508160) (h1 : w % 32 = 0)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
+    (ht : (js.readZR (Janus.Arm64.bits w 9 5)).toNat < 2 ^ 56)
+    (hal : (js.readZR (Janus.Arm64.bits w 9 5)).toNat % 4 = 0) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := br_agree_f (w := w) (hw := hw) (h0 := h0) (h1 := h1) (js := js) (s := s) (h := h) (hcfg := hcfg) (ht := ht) (hal := hal)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 theorem run_decode_blr (Rn : BitVec 5) (s : SState) :
     (decode_blr_aarch64_instrs_branch_unconditional_register 0#5 Rn 0#1 0#1 1#2 0#1).run s =
@@ -1250,15 +1309,14 @@ theorem decode_blr_class {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 419430
   | _ + 32, hl => exact absurd hl (by omega)
 
 set_option maxHeartbeats 8000000 in
-/-- **BLR** (under `LinuxEL0Config`, to an untagged, 4-byte aligned target). -/
-theorem blr_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3510208) (h1 : w % 32 = 0)
+theorem blr_agree_f {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3510208) (h1 : w % 32 = 0)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
     (ht : (js.readZR (Janus.Arm64.bits w 9 5)).toNat < 2 ^ 56)
     (hal : (js.readZR (Janus.Arm64.bits w 9 5)).toNat % 4 = 0) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   rw [bits_eq_fld w 9 5 hw] at ht hal
-  obtain ⟨s2, hrun, hrel, hbt, hcf⟩ := run_execute_bru (h.entry (BitVec.ofNat 32 w) 90)
+  obtain ⟨s2, hrun, hrel, hbt, hcf, hfp⟩ := run_execute_bru (h.entry (BitVec.ofNat 32 w) 90)
     (hcfg.stepEntry (BitVec.ofNat 32 w) 90) .BranchType_INDCALL (by simp) (fld_lt w 5 5) ht
   have hdec : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
       .ok () s2 := by
@@ -1270,11 +1328,21 @@ theorem blr_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 351
       fld_eq_of hw (show (w / 2 ^ 24) % 2 ^ 1 = 0 by omega)]
     rw [run_decode_blr]
     exact hrun
-  refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, by simpa using hrel, hcf⟩
+  refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, by simpa using hrel, hcf, (fpFrame_entry s _ _).trans hfp⟩
   rw [Janus.Arm64.step_of_decode (decode_blr_class hw h0 h1), bits_eq_fld w 9 5 hw]
   simp only [Janus.Arm64.exec, Janus.Arm64.branchReg]
   rw [if_neg (by omega), if_pos hal]
   try rfl
+
+/-- **BLR** (under `LinuxEL0Config`, to an untagged, 4-byte aligned target). -/
+theorem blr_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3510208) (h1 : w % 32 = 0)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
+    (ht : (js.readZR (Janus.Arm64.bits w 9 5)).toNat < 2 ^ 56)
+    (hal : (js.readZR (Janus.Arm64.bits w 9 5)).toNat % 4 = 0) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := blr_agree_f (w := w) (hw := hw) (h0 := h0) (h1 := h1) (js := js) (s := s) (h := h) (hcfg := hcfg) (ht := ht) (hal := hal)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 theorem run_decode_ret (Rn : BitVec 5) (s : SState) :
     (decode_ret_aarch64_instrs_branch_unconditional_register 0#5 Rn 0#1 0#1 2#2 0#1).run s =
@@ -1324,15 +1392,14 @@ theorem decode_ret_class {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 419430
   | _ + 32, hl => exact absurd hl (by omega)
 
 set_option maxHeartbeats 8000000 in
-/-- **RET** (under `LinuxEL0Config`, to an untagged, 4-byte aligned target). -/
-theorem ret_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3512256) (h1 : w % 32 = 0)
+theorem ret_agree_f {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3512256) (h1 : w % 32 = 0)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
     (ht : (js.readZR (Janus.Arm64.bits w 9 5)).toNat < 2 ^ 56)
     (hal : (js.readZR (Janus.Arm64.bits w 9 5)).toNat % 4 = 0) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' ∧ FPFrame s s' := by
   rw [bits_eq_fld w 9 5 hw] at ht hal
-  obtain ⟨s2, hrun, hrel, hbt, hcf⟩ := run_execute_bru (h.entry (BitVec.ofNat 32 w) 94)
+  obtain ⟨s2, hrun, hrel, hbt, hcf, hfp⟩ := run_execute_bru (h.entry (BitVec.ofNat 32 w) 94)
     (hcfg.stepEntry (BitVec.ofNat 32 w) 94) .BranchType_RET (by simp) (fld_lt w 5 5) ht
   have hdec : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
       .ok () s2 := by
@@ -1344,10 +1411,20 @@ theorem ret_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 351
       fld_eq_of hw (show (w / 2 ^ 24) % 2 ^ 1 = 0 by omega)]
     rw [run_decode_ret]
     exact hrun
-  refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, by simpa using hrel, hcf⟩
+  refine ⟨_, _, ?_, run_janus_step_taken _ h.pc hdec hbt, by simpa using hrel, hcf, (fpFrame_entry s _ _).trans hfp⟩
   rw [Janus.Arm64.step_of_decode (decode_ret_class hw h0 h1), bits_eq_fld w 9 5 hw]
   simp only [Janus.Arm64.exec, Janus.Arm64.branchReg]
   rw [if_neg (by omega), if_pos hal]
   try rfl
+
+/-- **RET** (under `LinuxEL0Config`, to an untagged, 4-byte aligned target). -/
+theorem ret_agree {w : Nat} (hw : w < 2 ^ 32) (h0 : (w / 2 ^ 10) % 4194304 = 3512256) (h1 : w % 32 = 0)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) (hcfg : LinuxEL0Config s)
+    (ht : (js.readZR (Janus.Arm64.bits w 9 5)).toNat < 2 ^ 56)
+    (hal : (js.readZR (Janus.Arm64.bits w 9 5)).toNat % 4 = 0) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ LinuxEL0Config s' := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := ret_agree_f (w := w) (hw := hw) (h0 := h0) (h1 := h1) (js := js) (s := s) (h := h) (hcfg := hcfg) (ht := ht) (hal := hal)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

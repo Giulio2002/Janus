@@ -101,9 +101,37 @@ theorem LinuxEL0Config.setGpr {s : SState} (h : LinuxEL0Config s) (v : BitVec 64
 
 
 /-- A step changed no configuration register other than (possibly) PSTATE. -/
-def CfgFrame (s s' : SState) : Prop := ∀ r ∈ cfgRegs, r ≠ .PSTATE → s'.regs.get? r = s.regs.get? r
+def CfgFrame0 (s s' : SState) : Prop := ∀ r ∈ cfgRegs, r ≠ .PSTATE → s'.regs.get? r = s.regs.get? r
 
-theorem LinuxEL0Config.of_frame {s s' : SState} (h : LinuxEL0Config s) (hf : CfgFrame s s')
+/-- The registers of the floating-point relation and configuration (`FPRel`, `FPConfig`; FP/Rel.lean,
+FP/Config.lean) other than PSTATE: the V registers, FPCR, FPSR, the trap and vector-length registers. -/
+def fpFrameRegs : List Register :=
+  [._Z, .FPCR, .FPSR, .CPACR_EL1, .CPTR_EL2, .CPTR_EL3, .ZCR_EL1, .ZCR_EL2, .ZCR_EL3, .SMCR_EL1, .SMCR_EL2,
+   .SMCR_EL3, .__max_implemented_smeveclen]
+
+/-- A step changed none of the floating-point registers. -/
+def FPFrame (s s' : SState) : Prop := ∀ r ∈ fpFrameRegs, s'.regs.get? r = s.regs.get? r
+
+theorem FPFrame.refl (s : SState) : FPFrame s s := fun _ _ => rfl
+
+theorem FPFrame.of_touches {s s' : SState} {rs : List Register} (ht : Touches s s' rs) (hd : ∀ r ∈ rs, r ∉ fpFrameRegs) :
+    FPFrame s s' := fun r hr => ht r (fun hm => hd r hm hr)
+
+theorem fpFrameRegs_not_gpr : ∀ r ∈ fpFrameRegs, isGprReg r = false := by decide
+
+theorem FPFrame.trans {s s' s'' : SState} (h1 : FPFrame s s') (h2 : FPFrame s' s'') : FPFrame s s'' :=
+  fun r hr => (h2 r hr).trans (h1 r hr)
+
+theorem FPFrame.setGpr (s : SState) (v : BitVec 64) {d : Nat} (hd : d < 31) : FPFrame s (setGpr s v d) :=
+  fun r hr => get?_setGpr s v hd r (fpFrameRegs_not_gpr r hr)
+
+theorem FPFrame.set (s : SState) (r : Register) (v : RegisterType r) (hr : r ∉ fpFrameRegs) : FPFrame s (s.set r v) :=
+  fun x hx => get?_set_ne s v (fun e => hr (e ▸ hx))
+
+/-- A step changed no configuration register other than (possibly) PSTATE, and no floating-point register. -/
+def CfgFrame (s s' : SState) : Prop := CfgFrame0 s s' ∧ FPFrame s s'
+
+theorem LinuxEL0Config.of_frame {s s' : SState} (h : LinuxEL0Config s) (hf : CfgFrame0 s s')
     (hp : ∃ p : ProcState, s'.regs.get? .PSTATE = some p ∧ p.EL = 0#2 ∧ p.nRW = 0#1 ∧ p.SP = 0#1) :
     LinuxEL0Config s' := by
   obtain ⟨v, hv, hfe⟩ := h.fi
