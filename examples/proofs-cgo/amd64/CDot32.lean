@@ -51,7 +51,7 @@ abbrev eexitHead : Nat := Extracted.entry + 0xe9
 abbrev DotPost (p q n : BitVec 64) (s s' : State) : Prop :=
   s'.regs 4 = s.regs 4 + 8 ∧ s'.regs 3 = s.regs 3 ∧ s'.regs 5 = s.regs 5 ∧
     s'.regs 12 = s.regs 12 ∧ s'.regs 13 = s.regs 13 ∧ s'.regs 14 = s.regs 14 ∧
-    s'.regs 15 = s.regs 15 ∧ s'.df = false ∧ s'.mxcsr = s.mxcsr ∧ s'.mem = s.mem ∧
+    s'.regs 15 = s.regs 15 ∧ s'.df = false ∧ s'.mxcsr = s.mxcsr ∧ s'.fpucw = s.fpucw ∧ s'.mem = s.mem ∧
     (s'.regs 0).toNat = dot32 s.mem p.toNat q.toNat n.toNat % 2 ^ 32
 
 /-- The precondition: the arguments, the two buffers, and the return address slot. -/
@@ -67,7 +67,7 @@ abbrev DotPre (p q n : BitVec 64) (s : State) : Prop :=
 abbrev Kept (s S : State) : Prop :=
   S.regs 4 = s.regs 4 ∧ S.mem = s.mem ∧ S.regs 3 = s.regs 3 ∧ S.regs 5 = s.regs 5 ∧
     S.regs 12 = s.regs 12 ∧ S.regs 13 = s.regs 13 ∧ S.regs 14 = s.regs 14 ∧
-    S.regs 15 = s.regs 15 ∧ S.df = s.df ∧ S.mxcsr = s.mxcsr ∧ S.regs 7 = s.regs 7 ∧
+    S.regs 15 = s.regs 15 ∧ S.df = s.df ∧ S.mxcsr = s.mxcsr ∧ S.fpucw = s.fpucw ∧ S.regs 7 = s.regs 7 ∧
     S.regs 6 = s.regs 6 ∧ S.regs 2 = s.regs 2
 
 /-- The scalar loop: at `tailHead` with `i` words done and `k` left. -/
@@ -81,16 +81,16 @@ theorem tail (p q n : BitVec 64) (s : State) (hpre : DotPre p q n s) :
   intro k
   induction k with
   | zero =>
-    intro S i hk hpc hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hS7, hS6, hS2⟩ hs
+    intro S i hk hpc hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6, hS2⟩ hs
     have hi : i = n.toNat := by omega
     subst hi
     janus64_run
-    janus64_simp [DotPost]
+    janus64_simp [DotPost, hfw]
     simpa using hs
   | succ k ih =>
-    intro S i hk hpc hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hS7, hS6, hS2⟩ hs
+    intro S i hk hpc hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6, hS2⟩ hs
     janus64_run until [tailHead]
-    apply ih _ (i + 1) (by omega) (by janus64_simp) ?_ (by simp only [Kept]; janus64_simp) ?_
+    apply ih _ (i + 1) (by omega) (by janus64_simp) ?_ (by simp only [Kept]; janus64_simp [hfw]) ?_
     · janus64_simp
     · janus64_simp [dot32_succ]
       simp only [BitVec.toNat_mul, BitVec.toNat_setWidth, BitVec.toNat_ofNat, Nat.mod_mod_of_dvd, Nat.mul_mod_mod, Nat.mod_mul_mod]
@@ -204,10 +204,10 @@ theorem eexit (p q n : BitVec 64) (s : State) (hpre : DotPre p q n s) (c T : Nat
   have hpre' := hpre
   obtain ⟨h7, h6, h2, hbp, hbq, haccp, haccq, hsb, hsa, hra, hdf0⟩ := hpre
   have hn : n.toNat < 2 ^ 64 := n.isLt
-  intro S hpc hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hS7, hS6, hS2⟩ ⟨l0, l1, l2, l3⟩
+  intro S hpc hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6, hS2⟩ ⟨l0, l1, l2, l3⟩
   janus64_run until [tailHead]
   apply tail p q n s hpre' (n.toNat - 4 * (n.toNat / 4)) _ (4 * (n.toNat / 4)) (by omega) (by janus64_simp)
-    (by janus64_simp) (by simp only [Kept]; janus64_simp)
+    (by janus64_simp) (by simp only [Kept]; janus64_simp [hfw])
   janus64_simp
   rw [← elem_32_zero]
   janus64_simp
@@ -233,18 +233,18 @@ theorem eloop (p q n : BitVec 64) (s : State) (hpre : DotPre p q n s) (c : Nat) 
   intro jj
   induction jj with
   | zero =>
-    intro S t ht hpc hS8 hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hS7, hS6, hS2⟩ ⟨l0, l1, l2, l3⟩
+    intro S t ht hpc hS8 hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6, hS2⟩ ⟨l0, l1, l2, l3⟩
     janus64_run until [eexitHead]
     apply eexit p q n s hpre' c (t + 1) (by omega) _ (by janus64_simp) (by janus64_simp)
-      (by simp only [Kept]; janus64_simp)
+      (by simp only [Kept]; janus64_simp [hfw])
     simp only [EAcc]
     janus64_simp [dotStride]
     rw [l0, l1, l2, l3, e1, e1, e2, e2, e3, e3, e0, e0]
     exact ⟨lane_step0 _ _ _ _, lane_step _ _ _, lane_step _ _ _, lane_step _ _ _⟩
   | succ jj ih =>
-    intro S t ht hpc hS8 hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hS7, hS6, hS2⟩ ⟨l0, l1, l2, l3⟩
+    intro S t ht hpc hS8 hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6, hS2⟩ ⟨l0, l1, l2, l3⟩
     janus64_run until [epiHead]
-    apply ih _ (t + 1) (by omega) (by janus64_simp) ?_ (by janus64_simp) (by simp only [Kept]; janus64_simp) ?_
+    apply ih _ (t + 1) (by omega) (by janus64_simp) ?_ (by janus64_simp) (by simp only [Kept]; janus64_simp [hfw]) ?_
     · janus64_simp
       apply BitVec.eq_of_toNat_eq; simp; omega
     · simp only [EAcc]
@@ -263,16 +263,16 @@ theorem afterRed (p q n : BitVec 64) (s : State) (hpre : DotPre p q n s) :
   have hpre' := hpre
   obtain ⟨h7, h6, h2, hbp, hbq, haccp, haccq, hsb, hsa, hra, hdf0⟩ := hpre
   have hn : n.toNat < 2 ^ 64 := n.isLt
-  intro S hpc hS1 hq ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hS7, hS6, hS2⟩ hs
+  intro S hpc hS1 hq ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6, hS2⟩ hs
   janus64_run until [epiHead, tailHead]
-  · janus64_simp [DotPost]
+  · janus64_simp [DotPost, hfw]
     rename_i hbr0
     have : n.toNat = 32 * (n.toNat / 32) := by omega
     rw [hs, ← this]
   · rename_i hbr0
     rw [test1c] at hbr
     apply tail p q n s hpre' (n.toNat - (32 * (n.toNat / 32) + 1)) _ (32 * (n.toNat / 32) + 1) (by omega)
-      (by janus64_simp) (by janus64_simp) (by simp only [Kept]; janus64_simp)
+      (by janus64_simp) (by janus64_simp) (by simp only [Kept]; janus64_simp [hfw])
     janus64_simp [dot32_succ]
     simp only [BitVec.toNat_mul, BitVec.toNat_setWidth, BitVec.toNat_ofNat, Nat.mul_mod_mod, Nat.mod_mul_mod]
     rw [Nat.mul_comm (32 * (n.toNat / 32)) 4, hs]
@@ -287,7 +287,7 @@ theorem afterRed (p q n : BitVec 64) (s : State) (hpre : DotPre p q n s) :
   · rename_i hbr0
     rw [test1c] at hbr
     apply eloop p q n s hpre' (32 * (n.toNat / 32)) ((4 * (n.toNat / 4) - 32 * (n.toNat / 32)) / 4 - 1) _ 0
-      (by omega) (by janus64_simp) (by janus64_simp) (by janus64_simp [and_neg4]) (by simp only [Kept]; janus64_simp)
+      (by omega) (by janus64_simp) (by janus64_simp) (by janus64_simp [and_neg4]) (by simp only [Kept]; janus64_simp [hfw])
     simp only [EAcc]
     janus64_simp [dotStride]
     have h0 : BitVec.toNat (S.regs 0) % 4294967296 < 2 ^ 32 := Nat.mod_lt _ (by decide)
@@ -304,9 +304,9 @@ theorem vexit (p q n : BitVec 64) (s : State) (hpre : DotPre p q n s) :
   have hpre' := hpre
   obtain ⟨h7, h6, h2, hbp, hbq, haccp, haccq, hsb, hsa, hra, hdf0⟩ := hpre
   have hn : n.toNat < 2 ^ 64 := n.isLt
-  intro S hpc hS1 hq ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hS7, hS6, hS2⟩ hacc'
+  intro S hpc hS1 hq ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6, hS2⟩ hacc'
   janus64_run until [redHead]
-  apply afterRed p q n s hpre' _ (by janus64_simp) (by janus64_simp) hq (by simp only [Kept]; janus64_simp)
+  apply afterRed p q n s hpre' _ (by janus64_simp) (by janus64_simp) hq (by simp only [Kept]; janus64_simp [hfw])
   janus64_simp
   rw [← elem_32_zero]
   janus64_simp
@@ -337,9 +337,9 @@ theorem vloop (p q n : BitVec 64) (s : State) (hpre : DotPre p q n s) :
   intro jj
   induction jj with
   | zero =>
-    intro S k hk hpc hS0 hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hS7, hS6, hS2⟩ hacc'
+    intro S k hk hpc hS0 hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6, hS2⟩ hacc'
     janus64_run until [exitHead]
-    apply vexit p q n s hpre' _ (by janus64_simp) (by janus64_simp) (by omega) (by simp only [Kept]; janus64_simp)
+    apply vexit p q n s hpre' _ (by janus64_simp) (by janus64_simp) (by omega) (by simp only [Kept]; janus64_simp [hfw])
     rw [← hk]
     intro j hj
     obtain ⟨a0, a1, a2, a3⟩ := hacc' j hj
@@ -357,9 +357,9 @@ theorem vloop (p q n : BitVec 64) (s : State) (hpre : DotPre p q n s) :
     · rw [e2, e2]; exact lane_step _ _ _
     · rw [e3, e3]; exact lane_step _ _ _
   | succ jj ih =>
-    intro S k hk hpc hS0 hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hS7, hS6, hS2⟩ hacc'
+    intro S k hk hpc hS0 hS1 ⟨h4, hm, h3, h5, h12, h13, h14, h15, hdf, hmx, hfw, hS7, hS6, hS2⟩ hacc'
     janus64_run until [vecHead]
-    apply ih _ (k + 1) (by omega) (by janus64_simp) ?_ (by janus64_simp) (by simp only [Kept]; janus64_simp) ?_
+    apply ih _ (k + 1) (by omega) (by janus64_simp) ?_ (by janus64_simp) (by simp only [Kept]; janus64_simp [hfw]) ?_
     · janus64_simp
       apply BitVec.eq_of_toNat_eq; simp; omega
     · intro j hj
@@ -388,17 +388,17 @@ theorem summary (p q n : BitVec 64) :
   · janus64_simp [DotPost, dot32_zero]
   · -- 4 ≤ n < 32: the epilogue from word 0
     apply eloop p q n s hpre' 0 (n.toNat / 4 - 1) _ 0 (by omega) (by janus64_simp) (by janus64_simp)
-      (by janus64_simp [and_neg4]) (by simp only [Kept]; janus64_simp)
+      (by janus64_simp [and_neg4]) (by simp only [Kept]; janus64_simp [hfw])
     simp only [EAcc]
     janus64_simp [dotStride, dot32_zero]
   · -- 32 ≤ n: the vector loop
     apply vloop p q n s hpre' (n.toNat / 32 - 1) _ 0 (by omega) (by janus64_simp) (by janus64_simp)
-      (by janus64_simp [and_neg32]) (by simp only [Kept]; janus64_simp)
+      (by janus64_simp [and_neg32]) (by simp only [Kept]; janus64_simp [hfw])
     intro j hj
     simp [State.ymm, ymmJoin, elem, dotStride, setXmmF]
   · -- 1 ≤ n ≤ 3: the scalar loop
     apply tail p q n s hpre' (n.toNat - 1) _ 1 (by omega) (by janus64_simp) (by janus64_simp)
-      (by simp only [Kept]; janus64_simp)
+      (by simp only [Kept]; janus64_simp [hfw])
     janus64_simp [dot32_succ, dot32_zero]
     simp only [BitVec.toNat_mul, BitVec.toNat_setWidth, BitVec.toNat_ofNat, Nat.mul_mod_mod, Nat.mod_mul_mod]
     have hA : s.mem.readLE p.toNat 4 < 2 ^ 32 := Janus.Arm64.Memory.readLE_lt _ _ _
@@ -427,7 +427,7 @@ theorem correctness (p q n : BitVec 64) :
       exact ⟨h0, h1, h2, hbp, hbq, haccp, haccq, hnw, Janus.Arm64.Memory.accessible_weaken _ hst,
         by rw [hr]; exact hret.user, hs.df⟩)
     (fun s s' _ h => by
-      obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11⟩ := h
-      exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, by rw [h9]⟩, h11, h10⟩)
+      obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12⟩ := h
+      exact ⟨⟨h1, h2, h3, h4, h5, h6, h7, h8, by rw [h9], h10⟩, h12, h11⟩)
 
 end Proof

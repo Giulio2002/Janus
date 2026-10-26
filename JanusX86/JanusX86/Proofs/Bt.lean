@@ -184,8 +184,8 @@ theorem decode_btba {bytes : List Nat} {p : Prefixes} {m : Nat} {rest : List Nat
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ ∃ v r4, readLE 1 r3 = some (v, r4) ∧ len = n + 2 + c + 1 ∧
       len ≤ 15 ∧ i = .bit .bt (osz p) (rmDst p (osz p) mm.rm) (.imm v) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hex := modrm_ext hmd
   obtain ⟨md, rg, ext, rm⟩ := mm
   simp only at hex; subst hex
@@ -230,8 +230,8 @@ theorem bt_ba_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86C
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     simp (config := {decide := true}) [twoByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc

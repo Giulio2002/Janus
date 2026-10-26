@@ -383,7 +383,10 @@ theorem lockP (h : PfxRel p x rex) (hr : p.rex = none) :
     PfxRel { p with lock := true } (_update_prefixes_lck x (BitVec.ofNat 8 0xF0)) 0#8 :=
   ⟨by simp [h.opr], by simp [h.rep], by simp, by simp [h.seg], by simp [h.adr], by simp [hr], h.repv⟩
 
-theorem nullSeg (h : PfxRel p x rex) (hr : p.rex = none) : PfxRel { p with seg := true } x 0#8 :=
+/-- A null segment override; `ds` (agent/x87: the override was `3E`, CET `NOTRACK`) is not seen
+by the Sail state either. -/
+theorem nullSeg (h : PfxRel p x rex) (hr : p.rex = none) {d : Bool} :
+    PfxRel { p with seg := true, ds := d } x 0#8 :=
   ⟨h.opr, h.rep, h.lck, h.seg, h.adr, by simp [hr], h.repv⟩
 
 theorem fsP (h : PfxRel p x rex) (hr : p.rex = none) :

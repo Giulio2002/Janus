@@ -202,8 +202,8 @@ theorem decode_rcx {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List Na
     (w = 32 ∨ w = 64) ∧ p.rep = 0 ∧ p.fs = false ∧ ∃ v r4, ((o = 0xC0 ∨ o = 0xC1) → readLE 1 r3 = some (v, r4)) ∧
       len = n + 1 + c + shK o ∧ len ≤ 15 ∧
       i = .rcx (decide (m / 8 % 8 = 2)) w (rmDst p w mm.rm) (shCnt o v) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp, hlk, Bool.false_eq_true] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp, hlk, Bool.false_eq_true] at hd
   have hex := modrm_ext hmd
   have hou : (if p.rex.getD 0 / 8 = 1 then 64 else if p.opsize = true then 16 else 32) = osz p := by
     simp [osz, rexW]
@@ -309,8 +309,8 @@ theorem rcx_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Con
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     rcases ho with rfl | rfl | rfl | rfl | rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc

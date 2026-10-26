@@ -332,6 +332,9 @@ theorem correctness (a n : BitVec 64) :
   janus_intro hs.call
   janus_data hd []
   have hr48 : ret < 2 ^ 48 := hret.user
+  -- the summary's `Outside` premise, unfolded as the integrated stepping simp set leaves it
+  have hout' := hout
+  simp only [outside_cons, outside_nil, and_true] at hout'
   janus_run [GoABI.regLR] calls [argmin_cmp a n]
   rename_i hpost
   obtain ⟨hc, hx, hmf⟩ := hpost

@@ -34,12 +34,37 @@ end JanusX86.Proofs
 namespace JanusX86.Proofs
 open X86Sail X86Sail.Functions
 
+/-- `decodeSys` (agent/syscall) only claims the bytes of its own instructions: none on any
+other first byte. -/
+theorem decodeSys_none_of {o : Nat} {r : List Nat}
+    (h : o ≠ 0x0F ∧ o ≠ 0xCC ∧ o ≠ 0xCD ∧ o ≠ 0xF4 ∧ o ≠ 0x9C ∧ o ≠ 0x9D) :
+    Janus.Amd64.decodeSys (o :: r) = none := by
+  obtain ⟨h1, h2, h3, h4, h5, h6⟩ := h
+  unfold Janus.Amd64.decodeSys
+  split <;> simp_all
+
+/-- `decodeSys` on a two-byte `0F` opcode other than its own. -/
+theorem decodeSys_none_0f {m : Nat} {r : List Nat}
+    (h : m ≠ 0x05 ∧ m ≠ 0xA2 ∧ m ≠ 0x01 ∧ m ≠ 0x31 ∧ m ≠ 0x0B) :
+    Janus.Amd64.decodeSys (0x0F :: m :: r) = none := by
+  obtain ⟨h1, h2, h3, h4, h5⟩ := h
+  unfold Janus.Amd64.decodeSys
+  split <;> simp_all
+
+/-- Discharges `decodeSys (o :: rest) = none` for the opcodes of the legacy proofs. -/
+macro "sys_none" : tactic => `(tactic| first
+  | exact decodeSys_none_of (by omega)
+  | exact decodeSys_none_0f (by omega)
+  | (simp only [Janus.Amd64.decodeSys]; done)
+  | (unfold Janus.Amd64.decodeSys; split <;> simp_all <;> omega))
+
 open Janus.Amd64.Decode in
 theorem parsePrefixes_head : ∀ (bs : List Nat) (p : Prefixes) (n : Nat) {p' o rest n'},
     parsePrefixes bs p n = some (p', o :: rest, n') → o ≠ 0xC4 → o ≠ 0xC5 →
-    ∃ b0 t, bs = b0 :: t ∧ b0 ≠ 0xC4 ∧ b0 ≠ 0xC5
-  | [], _, _, _, _, _, _, h, _, _ => by simp [parsePrefixes] at h
-  | b :: bs, p, n, p', o, rest, n', h, h4, h5 => by
+    Janus.Amd64.decodeSys (o :: rest) = none → o ≠ 0x62 →
+    ∃ b0 t, bs = b0 :: t ∧ b0 ≠ 0xC4 ∧ b0 ≠ 0xC5 ∧ Janus.Amd64.decodeSys (b0 :: t) = none ∧ b0 ≠ 0x62
+  | [], _, _, _, _, _, _, h, _, _, _, _ => by simp [parsePrefixes] at h
+  | b :: bs, p, n, p', o, rest, n', h, h4, h5, hs, h62 => by
     refine ⟨b, bs, rfl, ?_⟩
     revert h
     unfold parsePrefixes
@@ -47,10 +72,10 @@ theorem parsePrefixes_head : ∀ (bs : List Nat) (p : Prefixes) (n : Nat) {p' o 
     all_goals intro h
     all_goals first
       | (simp at h; done)
-      | omega
+      | (exact ⟨by omega, by omega, decodeSys_none_of (by omega), by omega⟩)
       | (simp only [Option.some.injEq, Prod.mk.injEq, List.cons.injEq] at h
-         obtain ⟨-, ⟨rfl, -⟩, -⟩ := h
-         exact ⟨h4, h5⟩)
+         obtain ⟨-, ⟨rfl, rfl⟩, -⟩ := h
+         exact ⟨h4, h5, hs, h62⟩)
 
 /-- The general-register number of a ModRM `r/m` field (with `REX.B`) and of its `reg` field
 (with `REX.R`). -/
@@ -91,8 +116,8 @@ theorem decode_eg_reg {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest : List
       i = .alu (aluOp (o / 8)) (if o % 2 = 0 then 8 else osz p)
         (regLocOf p.rex.isSome (if o % 2 = 0 then 8 else osz p) (rmNum p m))
         (.loc (regLocOf p.rex.isSome (if o % 2 = 0 then 8 else osz p) (regNum p m))) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hno : ¬ (o = 0x0F) := by omega
   have hc1 : o < 0x40 ∧ o % 8 < 6 := ⟨ho, by omega⟩
   have hf4 : ¬ (o % 8 = 4) := by omega

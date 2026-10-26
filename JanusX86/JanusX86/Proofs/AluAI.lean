@@ -233,8 +233,8 @@ theorem decode_ai {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat} 
       len = n + 1 + immBytes w ∧ len ≤ 15 ∧
       i = (if o < 0x40 then .alu (aluOp (o / 8)) w (.reg 0) (.imm (if w = 64 then sext 32 64 v else v))
         else .test w (.reg 0) (.imm (if w = 64 then sext 32 64 v else v))) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hno : ¬ (o = 0x0F) := by omega
   have hosz := osz_cases p
   rcases ho with ⟨ho1, ho2 | ho2⟩ | rfl | rfl

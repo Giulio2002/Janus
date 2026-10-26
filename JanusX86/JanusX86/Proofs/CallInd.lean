@@ -176,8 +176,8 @@ theorem decode_ffi {bytes : List Nat} {p : Prefixes} {m : Nat} {rest : List Nat}
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.rep = 0 ∧ p.opsize = false ∧ p.fs = false ∧ len = n + 1 + c ∧ len ≤ 15 ∧
       i = (if m / 8 % 8 = 2 then .callInd (rmDst p 64 mm.rm) else .jmpInd (rmDst p 64 mm.rm)) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp, hlk, Bool.false_eq_true] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp, hlk, Bool.false_eq_true] at hd
   have hex := modrm_ext hmd
   obtain ⟨md, rg, ext, rm⟩ := mm
   simp only at hex; subst hex
@@ -186,8 +186,8 @@ theorem decode_ffi {bytes : List Nat} {p : Prefixes} {m : Nat} {rest : List Nat}
     simp (config := {decide := true}) only [↓reduceIte, oneByte, hmd, true_and, and_true, he,
       false_and, and_false, or_false, false_or] at hd ⊢
     by_cases hl : 15 < n + 1 + c <;> by_cases hrp : p.rep = 0 <;> cases hf : p.fs <;> cases ho : p.opsize <;>
-      cases hs : p.seg <;> cases rm <;>
-      simp (config := {decide := true}) [hf, hl, hrp, ho, hs, finish, withFS, rmDst, rmLoc, regLocOf] at hd ⊢
+      cases hs : p.seg <;> cases hds : p.ds <;> cases rm <;>
+      simp (config := {decide := true}) [hf, hl, hrp, ho, hs, hds, notrack, finish, withFS, rmDst, rmLoc, regLocOf] at hd ⊢
   all_goals (obtain ⟨rfl, rfl⟩ := hd; first | exact ⟨by omega, rfl⟩ | exact ⟨rfl, by omega, rfl⟩)
 
 end JanusX86.Proofs
@@ -212,8 +212,8 @@ theorem jmp_ind_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X8
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     simp (config := {decide := true}) [oneByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc
@@ -265,8 +265,8 @@ theorem call_ind_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     simp (config := {decide := true}) [oneByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc

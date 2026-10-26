@@ -163,19 +163,23 @@ open Janus.Amd64 Janus.Amd64.Decode in
 theorem decode_call {bytes : List Nat} {p : Prefixes} {rest : List Nat} {n : Nat}
     (hpp : parsePrefixes bytes {} 0 = some (p, 0xE8 :: rest, n))
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
-    p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ p.opsize = false ∧ ∃ v r, readLE 4 rest = some (v, r) ∧
+    p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ ∃ v r, readLE 4 rest = some (v, r) ∧
       len = n + 1 + 4 ∧ len ≤ 15 ∧ i = .call (sext 32 64 v) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   cases hr : readLE 4 rest with
   | none => exfalso; simp (config := {decide := true}) [oneByte, hr] at hd
   | some vr =>
     obtain ⟨v, r⟩ := vr
     simp (config := {decide := true}) only [↓reduceIte, oneByte, hr, finish, true_and, and_true,
       false_and, and_false, or_false, false_or] at hd
+    -- agent/x87: `66` before `REX.W` on `CALL rel32` (the padded `call __tls_get_addr`) is accepted
+    -- (operand size 64 either way), so `66` is no longer excluded here; Sail ignores it as well
+    -- (`run_call_e8` holds for every prefix state)
     by_cases hl5 : 15 < n + 5 <;> by_cases hrp : p.rep = 0 <;> cases hf : p.fs <;>
       cases hk : p.lock <;> cases hos : p.opsize <;> cases hsg : p.seg <;>
-      simp (config := {decide := true}) [hf, hk, hl5, hrp, hos, hsg, lockable, withFS] at hd ⊢
+      by_cases hw : p.rex.getD 0 / 8 = 1 <;>
+      simp (config := {decide := true}) [hf, hk, hl5, hrp, hos, hsg, hw, lockable, withFS] at hd ⊢
     all_goals first | (simp at hd; done) | (obtain ⟨rfl, rfl⟩ := hd; first | exact ⟨v, r, rfl, rfl, by omega, rfl⟩ | exact ⟨rfl, by omega, rfl⟩ | (simp; omega))
 
 set_option maxRecDepth 100000 in
@@ -200,7 +204,7 @@ theorem call_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Co
   | none => simp [step, hd] at hstep
   | some il =>
   obtain ⟨i, len⟩ := il
-  obtain ⟨hlk, hfs, hrep, hos, v, r, hr, rfl, hlen, rfl⟩ := decode_call hpp hd
+  obtain ⟨hlk, hfs, hrep, v, r, hr, rfl, hlen, rfl⟩ := decode_call hpp hd
   rw [step_of_decode hd] at hstep
   have hdrop : bytes.drop n = 0xE8 :: rest := by simpa using parsePrefixes_drop _ _ _ hpp
   have hrip : s.regs.get? .rip = some (BitVec.ofNat 64 js.rip.toNat) := by
@@ -354,8 +358,8 @@ theorem decode_ret {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat}
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ p.opsize = false ∧ ∃ nimm, (o = 0xC2 → ∃ r, readLE 2 rest = some (nimm, r)) ∧
       (o = 0xC3 → nimm = 0) ∧ len = n + 1 + (if o = 0xC2 then 2 else 0) ∧ len ≤ 15 ∧ i = .ret nimm := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   rcases ho with rfl | rfl
   · simp (config := {decide := true}) only [↓reduceIte, oneByte, finish, true_and, and_true,
       false_and, and_false, or_false, false_or] at hd

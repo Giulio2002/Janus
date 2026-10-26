@@ -17,8 +17,8 @@ theorem decode_eg_mem_lock {bytes : List Nat} {p : Prefixes} {o m : Nat} {rest :
       i = .locked (.alu (aluOp (o / 8)) (if o % 2 = 0 then 8 else osz p) (.mem a)
         (.loc (regLocOf p.rex.isSome (if o % 2 = 0 then 8 else osz p) (regNum p m)))) a
         ((if o % 2 = 0 then 8 else osz p) / 8) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hno : ¬ (o = 0x0F) := by omega
   have hc1 : o < 0x40 ∧ o % 8 < 6 := ⟨ho, by omega⟩
   have hf4 : ¬ (o % 8 = 4) := by omega

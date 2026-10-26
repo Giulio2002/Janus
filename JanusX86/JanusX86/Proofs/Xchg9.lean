@@ -96,8 +96,8 @@ theorem decode_xchg9 {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Na
     (ho : (0x91 ≤ o ∧ o < 0x98) ∨ (o = 0x90 ∧ p.rex.getD 0 % 2 = 1))
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ len = n + 1 ∧ len ≤ 15 ∧ i = .xchg (osz p) (.reg 0) (.reg (rmNum p o)) := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   have hou : (if p.rex.getD 0 / 8 = 1 then 64 else if p.opsize = true then 16 else 32) = osz p := by
     simp [osz, rexW]
   have hrm : o - 0x90 + 8 * (p.rex.getD 0 % 2) = rmNum p o := by unfold rmNum; omega

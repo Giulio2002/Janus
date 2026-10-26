@@ -69,8 +69,8 @@ theorem decode_leave {bytes : List Nat} {p : Prefixes} {rest : List Nat} {n : Na
     (hpp : parsePrefixes bytes {} 0 = some (p, 0xC9 :: rest, n))
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
     p.lock = false ∧ p.opsize = false ∧ len = n + 1 ∧ len ≤ 15 ∧ i = .leave := by
-  obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-  simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+  obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+  simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
   simp (config := {decide := true}) only [↓reduceIte, oneByte, true_and, and_true, finish,
     false_and, and_false, or_false, false_or] at hd
   by_cases hl : 15 < n + 1 <;> by_cases hrp : p.rep = 0 <;> cases hf : p.fs <;> cases hk : p.lock <;>

@@ -716,8 +716,8 @@ theorem div_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Con
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     rcases ho with rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc
@@ -803,8 +803,8 @@ theorem div_de_agree {js : State} {s : SState} (hrel : Rel js s) (hcfg : X86Conf
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     rcases ho with rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc
@@ -1336,8 +1336,8 @@ theorem idiv_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Co
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     rcases ho with rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc
@@ -1407,8 +1407,8 @@ theorem idiv_de_agree {js : State} {s : SState} (hrel : Rel js s) (hcfg : X86Con
   cases hmd : modrm (p.rex.getD 0) (m :: rest) with
   | none =>
     exfalso
-    obtain ⟨b0, t, rfl, h4, h5⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega)
-    simp only [decode, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
+    obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
+    simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
     rcases ho with rfl | rfl <;> simp (config := {decide := true}) [oneByte, hmd] at hd
   | some mrc =>
   obtain ⟨mm, r3, c⟩ := mrc
