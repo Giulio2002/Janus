@@ -1,5 +1,6 @@
 import JanusASL.Proofs.FP.Sqrt
 import JanusASL.Proofs.FP.Exec2
+import JanusASL.Proofs.FP.Unpack2
 
 /-! # Float to integer conversion with rounding toward zero: the rational part of `FPToFixed`
 
@@ -294,5 +295,336 @@ theorem run_SatQ {M : Nat} (hM : M = 32 ∨ M = 64) (i : Int) (u : Bool) (s : SS
       · have h2' : ¬ (i <b 0) = true := by simpa using h2
         simp only [h2', ite_false, hq2, h2, h5, Bool.false_eq_true, decide_false]
         rw [subrange_eq hM, hq2, tn_small _ _ (by omega) (by rw [hq] at h1; omega)]
+
+theorem roundToInt_zero (rm : Janus.Float.RM) (neg : Bool) (e : Int) : Janus.Float.roundToInt rm neg 0 e = (0, false) := by
+  unfold Janus.Float.roundToInt
+  by_cases he : 0 ≤ e
+  · simp [he]
+  · simp [he, Janus.Float.roundUp]
+
+theorem satQ_zero (M : Nat) (u : Bool) (hM : 0 < M) : Janus.Arm64.FP.satQ M u 0 = (0, false) := by
+  have hp : 0 < 2 ^ (M - 1) := Nat.two_pow_pos _
+  have hq : 0 < 2 ^ M := Nat.two_pow_pos _
+  unfold Janus.Arm64.FP.satQ
+  cases u
+  · simp only [Bool.false_eq_true, ite_false]
+    have h1 : ¬ (0 : Int) < -(2 ^ (M - 1) : Int) := by have : (0 : Int) < 2 ^ (M - 1) := Int.pow_pos (by decide); omega
+    have h2 : ¬ (0 : Int) ≥ 2 ^ (M - 1) := by have : (0 : Int) < 2 ^ (M - 1) := Int.pow_pos (by decide); omega
+    have hpI : (0 : Int) ≤ 2 ^ (M - 1) := Int.le_of_lt (Int.pow_pos (by decide))
+    simp [h1, h2, hpI]
+  · simp only [ite_true]
+    have h2 : ¬ (0 : Int) ≥ 2 ^ M := by have : (0 : Int) < 2 ^ M := Int.pow_pos (by decide); omega
+    simp [h2]
+
+theorem satQ_far (M : Nat) (hM : 0 < M) (u : Bool) (i : Int)
+    (h : i ≥ 2 ^ (M + 1) ∨ i ≤ -(2 ^ (M + 1) : Int)) :
+    Janus.Arm64.FP.satQ M u i =
+      (if i < 0 then (if u then (0, true) else (2 ^ (M - 1), true))
+       else (if u then (2 ^ M - 1, true) else (2 ^ (M - 1) - 1, true))) := by
+  have hP : 0 < 2 ^ (M - 1) := Nat.two_pow_pos _
+  have h1 : 2 ^ M = 2 * 2 ^ (M - 1) := by rw [← Nat.pow_succ']; congr 1; omega
+  have h2 : 2 ^ (M + 1) = 4 * 2 ^ (M - 1) := by
+    rw [show M + 1 = (M - 1) + 2 by omega, Nat.pow_add]; omega
+  have e0 : ((2 : Int) ^ (M - 1)) = ((2 ^ (M - 1) : Nat) : Int) := by simp [Int.natCast_pow]
+  have e1 : ((2 : Int) ^ M) = ((2 ^ M : Nat) : Int) := by simp [Int.natCast_pow]
+  have e2 : ((2 : Int) ^ (M + 1)) = ((2 ^ (M + 1) : Nat) : Int) := by simp [Int.natCast_pow]
+  unfold Janus.Arm64.FP.satQ
+  rw [e0, e1] at *
+  rw [e2] at h
+  generalize 2 ^ (M - 1) = P at *
+  generalize 2 ^ M = Q at *
+  generalize 2 ^ (M + 1) = R at *
+  cases u
+  · simp only [Bool.false_eq_true, ite_false]
+    by_cases hn : i < 0
+    · have h3 : i < -(P : Int) := by omega
+      simp [hn, h3]
+    · have h3 : i ≥ (P : Int) := by omega
+      have h4 : ¬ i < -(P : Int) := by omega
+      simp [hn, h3, h4]
+  · simp only [ite_true]
+    by_cases hn : i < 0
+    · simp [hn]
+    · have h3 : i ≥ (Q : Int) := by omega
+      simp [hn, h3]
+
+theorem int_pow_cast (K : Nat) : (((2 : Int) ^ K : Int) : Rat) = (2 : Rat) ^ (K : Int) := by
+  rw [Rat.zpow_natCast, Rat.intCast_pow]; rfl
+
+theorem asl_trunc' (neg : Bool) (m : Nat) (e : Int) :
+    (sub_real (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e)
+        (to_real (round_down (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e))) = 0 ↔
+      (Janus.Float.roundToInt .rz neg m e).2 = false) ∧
+    (if ¬ sub_real (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e)
+        (to_real (round_down (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e))) = 0 ∧
+      round_down (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e) < 0
+     then round_down (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e) + 1
+     else round_down (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e)) =
+      (Janus.Float.roundToInt .rz neg m e).1 := by
+  obtain ⟨h1, h2⟩ := asl_trunc neg m e
+  generalize (sub_real (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e)
+        (to_real (round_down (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e)))) = err at h1 h2 ⊢
+  generalize round_down (if neg then -((m : Rat) * 2 ^ e) else (m : Rat) * 2 ^ e) = fl at h2 ⊢
+  generalize (Janus.Float.roundToInt .rz neg m e) = r at h1 h2 ⊢
+  refine ⟨?_, ?_⟩
+  · cases hr : r.2
+    · by_cases he : err = 0
+      · simp [he]
+      · rw [hr] at h1; simp [he] at h1
+    · by_cases he : err = 0
+      · rw [hr] at h1; simp [he] at h1
+      · simp [he]
+  · rw [← h2]
+    by_cases hc : ¬ err = 0 ∧ fl < 0
+    · have : (err != 0 && decide (fl < 0)) = true := by simp [hc.1, hc.2]
+      simp [hc, this]
+    · have : ¬ (err != 0 && decide (fl < 0)) = true := by
+        simp only [Bool.and_eq_true, bne_iff_ne, ne_eq, decide_eq_true_eq]; exact hc
+      simp [hc, this]
+
+set_option hygiene false in
+macro "fp_or_closeT" : tactic => `(tactic| (
+  simp only [d1, raise_direct, raise_proc, exc_empty_direct, exc_empty_proc, ofNat0,
+    BitVec.or_zero, BitVec.zero_or, ofNat_or, fpExcBit, Janus.Arm64.FP.IOC, Janus.Arm64.FP.IXC, Nat.pow_zero,
+    Nat.pow_one, Nat.reducePow, exc_append_proc, exc_append_direct] <;> ac_rfl))
+
+theorem unpack_proc_false (f : Janus.Float.Fmt) (fpcr x : Nat) :
+    (Janus.Arm64.FP.unpack f fpcr false x).2.proc = 0 := by
+  simp only [Janus.Arm64.FP.unpack]; split <;> (try split) <;> simp [Janus.Arm64.FP.raise]
+
+theorem run_FPUnpackE {N : Nat} (hN : N = 32 ∨ N = 64) {s : SState} (hc : LinuxEL0Config s) (x : BitVec N)
+    (fpcr v : BitVec 64) (e : Bool)
+    (hen : e = true → (Janus.Arm64.FP.unpack (fmtN N) fpcr.toNat true x.toNat).2.proc ≠ 0 → fpcr.getLsbD 15 = false) :
+    (FPUnpack__1 x fpcr e).run (s.set .FPSR v) =
+      let r := Janus.Arm64.FP.unpack (fmtN N) fpcr.toNat e x.toNat
+      .ok (aslFPType r.1.1, BitVec.ofBool r.1.2.1, valRat r.1.2.2) (s.set .FPSR (v ||| BitVec.ofNat 64 r.2.proc)) := by
+  cases e
+  · have hp := unpack_proc_false (fmtN N) fpcr.toNat x.toNat
+    simp only [hp, ofNat0, BitVec.or_zero]
+    rcases hN with rfl | rfl
+    · exact run_FPUnpack32_nox (hc.set_FPSR v) x fpcr
+    · exact run_FPUnpack64_nox (hc.set_FPSR v) x fpcr
+  · exact run_FPUnpackN hN hc x fpcr v (hen rfl)
+
+theorem unpack_nan_val (f : Janus.Float.Fmt) (fpcr : Nat) (e : Bool) (x : Nat)
+    (h : (Janus.Arm64.FP.unpack f fpcr e x).1.1.isNaN = true) :
+    (Janus.Arm64.FP.unpack f fpcr e x).1.2.2 = .num 0 0 := by
+  unfold Janus.Arm64.FP.unpack at h ⊢
+  generalize Janus.Float.classify f x = k at h ⊢
+  cases k <;> simp only [Janus.Arm64.FP.FPType.isNaN] at h ⊢ <;> (try simp at h)
+  by_cases hz : (Janus.Arm64.FP.fz fpcr = true ∧ Janus.Arm64.FP.ah fpcr = false) ∨ Janus.Arm64.FP.fiz fpcr = true
+  · simp [hz]
+  · simp [hz] at h
+
+theorem fpexc_eq (b : Bool) : (!(BitVec.ofBool b == 1#1)) = !b := by cases b <;> decide
+
+theorem run_FPToFixed {N M : Nat} (hN : N = 32 ∨ N = 64) (hM : M = 32 ∨ M = 64) {s : SState} (hc : LinuxEL0Config s)
+    (op : BitVec N) (u : Bool) (fpcr v : BitVec 64)
+    (hnt : NT fpcr.toNat (Janus.Arm64.FP.fpToFixed (fmtN N) fpcr.toNat u .rz M op.toNat).2) :
+    (FPToFixed op 0 u fpcr (aslRM .rz) M).run (s.set .FPSR v) =
+      let r := Janus.Arm64.FP.fpToFixed (fmtN N) fpcr.toNat u .rz M op.toNat
+      .ok (BitVec.ofNat M r.1) (s.set .FPSR (v ||| BitVec.ofNat 64 (r.2.proc ||| r.2.direct))) := by
+  have hN' : (Sail.BitVec.length op == 16 || (Sail.BitVec.length op == 32 || Sail.BitVec.length op == 64)) = true := by
+    simp only [Sail.BitVec.length]; rcases hN with rfl | rfl <;> decide
+  have hM' : (M == 16 || (M == 32 || M == 64)) = true := by rcases hM with rfl | rfl <;> decide
+  have h0 : ((0 : Int) ≥b 0) = true := by decide
+  have hrne : (aslRM .rz != FPRounding.FPRounding_ODD) = true := by decide
+  have hrz : aslRM .rz = FPRounding.FPRounding_ZERO := rfl
+  have hrne' : (FPRounding.FPRounding_ZERO != FPRounding.FPRounding_ODD) = true := by decide
+  have hahe : ∀ fpcr : BitVec 64, (!Janus.Arm64.FP.ah fpcr.toNat) = !decide (fpcr.toNat / 2 % 2 = 1) := by
+    intro fpcr; simp [Janus.Arm64.FP.ah, Janus.Arm64.FP.fpcrBit]
+  unfold FPToFixed
+  cfg_simp [undefined_FPType, undefined_real, run_internal_pick, run_undefined_bool, run_undefined_bitvector,
+    run_sail_assert_true, hN', hM', h0, hrne, HaveAltFP, run_IsFeatureImplemented (hc.set_FPSR v),
+    run_UsingAArch32 (hc.set_FPSR v), get_AH, hrz, hrne', fpexc_eq]
+  unfold Janus.Arm64.FP.fpToFixed at hnt ⊢
+  have d1 := unpack_direct' (fmtN N) fpcr.toNat (!Janus.Arm64.FP.ah fpcr.toNat) op.toNat
+  have sp1 := unpack_spec (fmtN N) fpcr.toNat (!Janus.Arm64.FP.ah fpcr.toNat) op.toNat
+  have nz1 := unpack_nzs (fmtN N) fpcr.toNat (!Janus.Arm64.FP.ah fpcr.toNat) op.toNat
+  have nn1 := unpack_nan_val (fmtN N) fpcr.toNat (!Janus.Arm64.FP.ah fpcr.toNat) op.toNat
+  have hUraw := fun v' hen => run_FPUnpackE hN hc op fpcr v' (!Janus.Arm64.FP.ah fpcr.toNat) hen
+  generalize hUe : Janus.Arm64.FP.unpack (fmtN N) fpcr.toNat (!Janus.Arm64.FP.ah fpcr.toNat) op.toNat = U at hnt d1 sp1 nz1 nn1 hUraw
+  rcases U with ⟨⟨t1, s1, v1⟩, x1⟩
+  simp only at hnt d1 sp1 nz1 nn1 hUraw
+  have mr0 : ∀ q : Rat, mult_real q (real_power 2 0) = q := by
+    intro q; simp [mult_real, real_power]
+  rcases v1 with ⟨n, ex⟩ | neg
+  case num =>
+    simp only at hnt ⊢
+    have hnt1 : NT fpcr.toNat x1 := nt_left (nt_left hnt)
+    have hU := fun v' => hUraw v' (fun he hne => by
+      have e1 : Janus.Arm64.FP.unpack (fmtN N) fpcr.toNat true op.toNat =
+          Janus.Arm64.FP.unpack (fmtN N) fpcr.toNat (!Janus.Arm64.FP.ah fpcr.toNat) op.toNat := by rw [he]
+      have h2 : NT fpcr.toNat (Janus.Arm64.FP.unpack (fmtN N) fpcr.toNat true op.toNat).2 := by rw [e1, hUe]; exact hnt1
+      exact nt_unpack h2 hne)
+    rw [← hahe fpcr]
+    simp only [hU, valRat_num, mr0]
+    have hq : (n : Rat) * 2 ^ ex = if decide (n < 0) = true then -((n.natAbs : Rat) * 2 ^ ex) else (n.natAbs : Rat) * 2 ^ ex := by
+      by_cases hn : n < 0
+      · have h1 : (n : Rat) = -((n.natAbs : Nat) : Rat) := by
+          have h2 : ((n.natAbs : Nat) : Int) = Neg.neg n := by omega
+          have := congrArg (fun z : Int => (z : Rat)) h2
+          simp only [Rat.intCast_natCast, Rat.intCast_neg] at this
+          rw [this, Rat.neg_neg]
+        simp only [hn, decide_true, ite_true]
+        rw [h1, Rat.neg_mul]
+      · have h1 : (n : Rat) = ((n.natAbs : Nat) : Rat) := by
+          have h2 : ((n.natAbs : Nat) : Int) = n := by omega
+          have := congrArg (fun z : Int => (z : Rat)) h2
+          simp only [Rat.intCast_natCast] at this
+          exact this.symm
+        simp only [hn, decide_false, ite_false, Bool.false_eq_true]
+        rw [h1]
+    have hRI : (if n = 0 then (0, false) else Janus.Float.roundToInt Janus.Float.RM.rz s1 n.natAbs ex) =
+        Janus.Float.roundToInt Janus.Float.RM.rz (decide (n < 0)) n.natAbs ex := by
+      by_cases hn0 : n = 0
+      · subst hn0; simp [roundToInt_zero]
+      · simp only [hn0, ite_false]
+        have ht : t1 = .nonzero ∨ t1 = .denormal := by
+          cases t1
+          · exact absurd (sp1.2.2 rfl) (by intro h; cases h; exact hn0 rfl)
+          · exact Or.inr rfl
+          · exact Or.inl rfl
+          · exfalso; obtain ⟨s', hh⟩ := sp1.1 rfl; cases hh
+          · exact absurd (nn1 rfl) (by intro h; cases h; exact hn0 rfl)
+          · exact absurd (nn1 rfl) (by intro h; cases h; exact hn0 rfl)
+        obtain ⟨n', e', hv, -, hs⟩ := nz1 ht
+        cases hv
+        rw [hs]
+    obtain ⟨hA, hB⟩ := asl_trunc' (decide (n < 0)) n.natAbs ex
+    rw [hq, hB]
+    simp only [hA, hRI]
+    generalize hJR : Janus.Float.roundToInt Janus.Float.RM.rz (decide (n < 0)) n.natAbs ex = JR
+    rcases JR with ⟨i, inx⟩
+    simp only [run_SatQ hM]
+    simp only [hRI] at hnt
+    rw [hJR] at hnt
+    have hE := nt_right hnt
+    have hEn := nt_right (nt_left hnt)
+    have hc0 : (Janus.Arm64.FP.satQ M u i).snd = true ∨ t1.isNaN = true →
+        fpcr.getLsbD (fpExcBit .FPExc_InvalidOp + 8) = false := by
+      intro hh
+      rcases hh with hh | hh
+      · simp only [hh, ite_true] at hE
+        exact getLsbD_of_testBit (nt_raise_ioc hE)
+      · simp only [hh, ite_true] at hEn
+        exact getLsbD_of_testBit (nt_raise_ioc hEn)
+    have hc4 : (Janus.Arm64.FP.satQ M u i).snd = false → inx = true →
+        fpcr.getLsbD (fpExcBit .FPExc_Inexact + 8) = false := by
+      intro hh hi
+      simp only [hh, hi, Bool.false_eq_true, ite_false, ite_true] at hE
+      exact getLsbD_of_testBit (nt_bit hE (k := 4) (by decide) (by decide))
+    have hnan_cases : t1.isNaN = true → (aslFPType t1 == FPType.FPType_SNaN) = true ∨
+        (aslFPType t1 == FPType.FPType_QNaN) = true := by
+      intro hh; cases t1 <;> first | exact absurd hh (by decide) | decide
+    have hnan_not : t1.isNaN = false → ¬ ((aslFPType t1 == FPType.FPType_SNaN) = true ∨
+        (aslFPType t1 == FPType.FPType_QNaN) = true) := by
+      intro hh; cases t1 <;> first | exact absurd hh (by decide) | decide
+    have hdir : ∀ (a b : Janus.Arm64.FP.Exc), a.direct = 0 → b.direct = 0 → (a +++ b).direct = 0 := by
+      intro a b ha hb; simp [exc_append_direct, ha, hb]
+    by_cases hnan : t1.isNaN = true
+    · obtain ⟨hn0, hex0⟩ : n = 0 ∧ ex = 0 := by
+        have := nn1 hnan
+        simpa using this
+      subst hn0; subst hex0
+      rw [Int.natAbs_zero, roundToInt_zero] at hJR
+      simp only [Prod.mk.injEq] at hJR
+      obtain ⟨hi0, hinx⟩ := hJR
+      subst hi0; subst hinx
+      have hsq := satQ_zero M u (by omega)
+      simp only [hsq]
+      have hcn := hnan_cases hnan
+      have hbit := hc0 (Or.inr hnan)
+      simp only [hcn, ite_true]
+      have hPE := run_PE_set (s := s) hc .FPExc_InvalidOp fpcr hbit (v ||| BitVec.ofNat 64 x1.proc)
+      simp only [hPE, hnan, ite_true, Bool.false_eq_true, ite_false, run_pure]
+      fp_or_closeT
+    · have hnan' : t1.isNaN = false := by simpa using hnan
+      have hnn := hnan_not hnan'
+      simp only [hnn, ite_false, hnan, Bool.false_eq_true, run_pure]
+      by_cases hs : (Janus.Arm64.FP.satQ M u i).snd = true
+      · have hbit := hc0 (Or.inl hs)
+        have hPE := run_PE_set (s := s) hc .FPExc_InvalidOp fpcr hbit (v ||| BitVec.ofNat 64 x1.proc)
+        simp only [hs, ite_true, hPE]
+        fp_or_closeT
+      · have hs' : (Janus.Arm64.FP.satQ M u i).snd = false := by simpa using hs
+        by_cases hi : inx = true
+        · have hbit := hc4 hs' hi
+          have hPE := run_PE_set (s := s) hc .FPExc_Inexact fpcr hbit (v ||| BitVec.ofNat 64 x1.proc)
+          simp only [hs', hi, Bool.false_eq_true, Bool.true_eq_false, ite_false, ite_true, hPE]
+          fp_or_closeT
+        · have hi' : inx = false := by simpa using hi
+          simp only [hs', hi', Bool.false_eq_true, ite_false, ite_true, run_pure]
+          fp_or_closeT
+  case inf =>
+    simp only at hnt ⊢
+    have hnt1 : NT fpcr.toNat x1 := nt_left (nt_left hnt)
+    have hU := fun v' => hUraw v' (fun he hne => by
+      have e1 : Janus.Arm64.FP.unpack (fmtN N) fpcr.toNat true op.toNat =
+          Janus.Arm64.FP.unpack (fmtN N) fpcr.toNat (!Janus.Arm64.FP.ah fpcr.toNat) op.toNat := by rw [he]
+      have h2 : NT fpcr.toNat (Janus.Arm64.FP.unpack (fmtN N) fpcr.toNat true op.toNat).2 := by rw [e1, hUe]; exact hnt1
+      exact nt_unpack h2 hne)
+    rw [← hahe fpcr]
+    simp only [hU]
+    have hti : t1 = .infinity := by
+      refine Classical.byContradiction fun hne => ?_
+      obtain ⟨n, e', h⟩ := sp1.2.1 hne
+      cases h
+    subst hti
+    have hbig : ((2 : Int) ^ 1000000) ≥ 2 ^ (M + 1) := by
+      have : 2 ^ (M + 1) ≤ 2 ^ 1000000 := Nat.pow_le_pow_right (by decide) (by rcases hM with rfl | rfl <;> decide)
+      have := Int.ofNat_le.mpr this
+      simpa [Int.natCast_pow] using this
+    generalize hKq : (1000000 : Nat) = K at hbig
+    have hvr : valRat (Janus.Float.Val.inf neg) = (((if neg = true then -(2 : Int) ^ K else (2 : Int) ^ K : Int)) : Rat) := by
+      cases neg
+      · simp only [valRat, Bool.false_eq_true, ite_false]
+        rw [int_pow_cast, ← hKq]; rfl
+      · simp only [valRat, ite_true, Rat.intCast_neg]
+        rw [int_pow_cast, ← hKq]; rfl
+    rw [hvr, mr0]
+    have hfl : round_down ((((if neg = true then -(2 : Int) ^ K else (2 : Int) ^ K : Int)) : Rat)) =
+        (if neg = true then -(2 : Int) ^ K else (2 : Int) ^ K) := by
+      simp only [round_down]; exact Rat.floor_intCast _
+    rw [hfl]
+    have herr : sub_real ((((if neg = true then -(2 : Int) ^ K else (2 : Int) ^ K : Int)) : Rat))
+        (to_real (if neg = true then -(2 : Int) ^ K else (2 : Int) ^ K)) = 0 := by
+      simp only [sub_real, to_real]; exact Rat.sub_self
+    simp only [herr, ne_eq, not_true_eq_false, false_and, ite_false, and_false, run_SatQ hM]
+    have hM0 : 0 < M := by omega
+    have hq1 : Janus.Arm64.FP.satQ M u (if neg = true then -(2 : Int) ^ K else (2 : Int) ^ K) =
+        Janus.Arm64.FP.satQ M u (if neg = true then -(2 : Int) ^ (M + 1) else (2 : Int) ^ (M + 1)) := by
+      cases neg
+      · simp only [Bool.false_eq_true, ite_false]
+        rw [satQ_far M hM0 u _ (Or.inl hbig), satQ_far M hM0 u _ (Or.inl (Int.le_refl _))]
+        have h1 : ¬ ((2 : Int) ^ K < 0) := Int.not_lt.mpr (Int.le_of_lt (Int.pow_pos (by decide)))
+        have h2 : ¬ ((2 : Int) ^ (M + 1) < 0) := Int.not_lt.mpr (Int.le_of_lt (Int.pow_pos (by decide)))
+        simp only [h1, h2]
+      · simp only [ite_true]
+        have hb2 : -(2 : Int) ^ K ≤ -(2 : Int) ^ (M + 1) := by omega
+        rw [satQ_far M hM0 u _ (Or.inr hb2), satQ_far M hM0 u _ (Or.inr (Int.le_refl _))]
+        have h1 : -(2 : Int) ^ K < 0 := by have : (0 : Int) < 2 ^ K := Int.pow_pos (by decide); omega
+        have h2 : -(2 : Int) ^ (M + 1) < 0 := by have : (0 : Int) < 2 ^ (M + 1) := Int.pow_pos (by decide); omega
+        simp only [h1, h2]
+    rw [hq1]
+    have hsat : (Janus.Arm64.FP.satQ M u (if neg = true then -(2 : Int) ^ (M + 1) else (2 : Int) ^ (M + 1))).snd = true := by
+      have hM0' : 0 < M := hM0
+      cases neg
+      · simp only [Bool.false_eq_true, ite_false]
+        rw [satQ_far M hM0 u _ (Or.inl (Int.le_refl _))]
+        have h2 : ¬ ((2 : Int) ^ (M + 1) < 0) := Int.not_lt.mpr (Int.le_of_lt (Int.pow_pos (by decide)))
+        simp only [h2, ite_false]; cases u <;> rfl
+      · simp only [ite_true]
+        rw [satQ_far M hM0 u _ (Or.inr (Int.le_refl _))]
+        have h2 : -(2 : Int) ^ (M + 1) < 0 := by have : (0 : Int) < 2 ^ (M + 1) := Int.pow_pos (by decide); omega
+        simp only [h2, ite_true]; cases u <;> rfl
+    have hbit : fpcr.getLsbD (fpExcBit .FPExc_InvalidOp + 8) = false :=
+      getLsbD_of_testBit (nt_raise_ioc (nt_right hnt))
+    have hPE := run_PE_set (s := s) hc .FPExc_InvalidOp fpcr hbit (v ||| BitVec.ofNat 64 x1.proc)
+    have hnn : Janus.Arm64.FP.FPType.infinity.isNaN = false := rfl
+    have hnn2 : ¬ ((aslFPType Janus.Arm64.FP.FPType.infinity == FPType.FPType_SNaN) = true ∨
+        (aslFPType Janus.Arm64.FP.FPType.infinity == FPType.FPType_QNaN) = true) := by decide
+    simp only [hnn2, ite_false, hnn, Bool.false_eq_true, hsat, ite_true, hPE, run_pure, EStateM.run_bind]
+    fp_or_closeT
 
 end JanusASL.Proofs
