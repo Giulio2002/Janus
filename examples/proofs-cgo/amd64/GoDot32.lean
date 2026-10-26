@@ -401,17 +401,17 @@ theorem cdot_summary (p q n : BitVec 64) :
   · janus64_simp [DotPost, dot32_zero]
   · -- 4 ≤ n < 32: the epilogue from word 0
     apply eloop p q n s hpre' 0 (n.toNat / 4 - 1) _ 0 (by omega) (by janus64_simp) (by janus64_simp)
-      (by janus64_simp [and_neg4]) (by simp only [Kept]; janus64_simp [hfw])
+      (by janus64_simp [and_neg4]) (by simp only [Kept]; janus64_simp)
     simp only [EAcc]
     janus64_simp [dotStride, dot32_zero]
   · -- 32 ≤ n: the vector loop
     apply vloop p q n s hpre' (n.toNat / 32 - 1) _ 0 (by omega) (by janus64_simp) (by janus64_simp)
-      (by janus64_simp [and_neg32]) (by simp only [Kept]; janus64_simp [hfw])
+      (by janus64_simp [and_neg32]) (by simp only [Kept]; janus64_simp)
     intro j hj
     simp [State.ymm, ymmJoin, elem, dotStride, setXmmF]
   · -- 1 ≤ n ≤ 3: the scalar loop
     apply tail p q n s hpre' (n.toNat - 1) _ 1 (by omega) (by janus64_simp) (by janus64_simp)
-      (by simp only [Kept]; janus64_simp [hfw])
+      (by simp only [Kept]; janus64_simp)
     janus64_simp [dot32_succ, dot32_zero]
     simp only [BitVec.toNat_mul, BitVec.toNat_setWidth, BitVec.toNat_ofNat, Nat.mul_mod_mod, Nat.mod_mul_mod]
     have hA : s.mem.readLE p.toNat 4 < 2 ^ 32 := Janus.Arm64.Memory.readLE_lt _ _ _
@@ -590,7 +590,7 @@ theorem go_spec (pa la ca pb lb cb : BitVec 64) :
     all_goals try omega
     · janus64_disch
     · exact Janus.Arm64.Memory.accessible_sub _ hqa (Or.inl rfl) (Nat.le_refl _) (by omega)
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, zh, kr, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, x87, zh, kr, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   simp only [E, frameA, frameB, frameN, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,
     ↓reduceIte, Nat.reduceEqDiff, h32, h80] at hmf h4 h5 h14 h15 hfs1 hfs2 hfsr' hfsg'
