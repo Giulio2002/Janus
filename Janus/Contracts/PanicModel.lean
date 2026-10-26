@@ -324,6 +324,37 @@ theorem saved0_eq (m : Memory) : saved0 m =
 theorem room0_eq (m : Memory) : room0 m = min (8 - npan m) (min (8 - ndef m) (capMin m (min (ndef m) 8))) := by
   unfold room0; rfl
 
+theorem panics0_top {m : Memory} {k : Nat} (h : npan m = k + 1) (hk : k < 8) :
+    panics0 m = decPan m k :: panList m k := by
+  rw [panics0_eq, h, Nat.min_eq_left (by omega)]; rfl
+
+theorem panics0_nil {m : Memory} (h : npan m = 0) : panics0 m = [] := by
+  rw [panics0_eq, h]; rfl
+
+/-- A store inside the panic entries `[panAt 0, panAt 8)` keeps everything but the panics. -/
+theorem env0_wpan {T : List FuncInfo} (h : panAt 0 ≤ a ∧ a + n ≤ panAt 8) (he : Env0 T m) :
+    Env0 T (m.writeLE a n v) := by
+  unfold Env0 at he ⊢
+  obtain ⟨hB, hp, hd, hr, ht⟩ := he
+  refine ⟨by rw [Memory.accessible_writeLE]; exact hB, ?_, ?_, fun i hi => ?_, tableOK_w (by simp only [panAt, recAt, tabAt, B] at *; omega) ht⟩
+  · rw [show npan (m.writeLE a n v) = npan m from rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega)]; exact hp
+  · rw [show ndef (m.writeLE a n v) = ndef m from rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega)]; exact hd
+  · rw [show ndef (m.writeLE a n v) = ndef m from rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega)] at hi
+    have := hr i hi
+    simp only [recN, recTok, recConv] at this ⊢
+    rw [rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega), rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega), rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega)]; exact this
+
+theorem defers0_wpan (h : panAt 0 ≤ a ∧ a + n ≤ panAt 8) : defers0 (m.writeLE a n v) = defers0 m := by
+  rw [defers0_eq, defers0_eq, show ndef (m.writeLE a n v) = ndef m from rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega),
+    recList_w _ (by simp only [panAt, recAt, tabAt, B] at *; omega)]
+
+theorem saved0_wpan (h : panAt 0 ≤ a ∧ a + n ≤ panAt 8) : saved0 (m.writeLE a n v) = saved0 m := by
+  rw [saved0_eq, saved0_eq, rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega), rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega), rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega)]
+
+theorem room0_wpan (h : panAt 0 ≤ a ∧ a + n ≤ panAt 8) : room0 (m.writeLE a n v) = room0 m := by
+  rw [room0_eq, room0_eq, show npan (m.writeLE a n v) = npan m from rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega),
+    show ndef (m.writeLE a n v) = ndef m from rd_w (by simp only [panAt, recAt, tabAt, B] at *; omega), capMin_w _ (by simp only [panAt, recAt, tabAt, B] at *; omega)]
+
 end writes
 
 end Janus.Contracts.PanicModel

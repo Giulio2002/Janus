@@ -11,7 +11,7 @@ address holds a three-instruction stub (`movz`/`movk`/`br x11`) jumping to the e
 contract's precondition; the examples' `Witness` sections instantiate it for their own linked
 program.
 
-See `docs/model/panic_model.s` for the assembly source of `engineCode`.
+See `docs/model/panic_model_arm64.s` for the assembly source of `engineCode`.
 -/
 
 namespace Janus.Contracts.PanicSat
@@ -23,53 +23,54 @@ open Janus.Contracts.PanicModel
 
 def engineCode : List Nat :=
   [0xd2a00026, 0xf94000c7, 0x910400c8, 0x8b071508, 0xf9000100, 0xf9000501, 0x910003e9, 0xf9000909,
-   0xf9000d1f, 0x910004e7, 0xf90000c7, 0xd280000a, 0x14000074, 0xd2a00026, 0xf94000c7, 0x910400c8,
+   0xf9000d1f, 0x910004e7, 0xf90000c7, 0xd280000a, 0x14000075, 0xd2a00026, 0xf94000c7, 0x910400c8,
    0x8b071508, 0xf900011f, 0xf900051f, 0x910003e9, 0xf9000909, 0xd2800029, 0xf9000d09, 0x910004e7,
-   0xf90000c7, 0xd280002a, 0x14000066, 0xd2a00026, 0x910003e9, 0xf94008c5, 0xf9400cce, 0xf94010cf,
+   0xf90000c7, 0xd280002a, 0x14000067, 0xd2a00026, 0x910003e9, 0xf94008c5, 0xf9400cce, 0xf94010cf,
    0xf90008df, 0xd101813f, 0xf90003e9, 0xf90007e9, 0xf9000bff, 0xd280004a, 0xf9000fea, 0xf90013e5,
-   0xf90017ee, 0xf9001bef, 0xf9001ff2, 0xf90023fe, 0xf90027fd, 0x1400007d, 0xd2a00026, 0xf94000c7,
-   0xb40001e7, 0xd10004e7, 0x910400c8, 0x8b071508, 0xf9400d00, 0xb5000140, 0xf94007a1, 0x10001422,
-   0xeb02003f, 0x540000c1, 0xd2800040, 0xf9000d00, 0xf9400100, 0xf9400501, 0xd65f03c0, 0xd2800000,
-   0xd2800001, 0xd65f03c0, 0xd2a00026, 0xf94004c7, 0xd2800c09, 0x9b097ce8, 0x8b060108, 0x91080108,
-   0x910003ea, 0xf900010a, 0xf900051f, 0xf900091f, 0xd280002b, 0xf9000d0b, 0xf9001100, 0x910004e7,
-   0xf90004c7, 0xd65f03c0, 0xf9400c00, 0xd2a00026, 0xf94004c7, 0xd2800c09, 0x9b097ce8, 0x8b060108,
+   0xf90017ee, 0xf9001bef, 0xf9001ff2, 0xf90023fe, 0xf90027fd, 0x1400007e, 0xd2a00026, 0xf94000c7,
+   0xb4000207, 0xd10004e7, 0x910400c8, 0x8b071508, 0xf9400d00, 0x92400400, 0xb5000140, 0xf94007a1,
+   0x10001422, 0xeb02003f, 0x540000c1, 0xd2800040, 0xf9000d00, 0xf9400100, 0xf9400501, 0xd65f03c0,
+   0xd2800000, 0xd2800001, 0xd65f03c0, 0xd2a00026, 0xf94004c7, 0xd2800c09, 0x9b097ce8, 0x8b060108,
    0x91080108, 0x910003ea, 0xf900010a, 0xf900051f, 0xf900091f, 0xd280002b, 0xf9000d0b, 0xf9001100,
-   0x910004e7, 0xf90004c7, 0xd65f03c0, 0xd2a00026, 0xf94004c7, 0xd2800c09, 0x9b097ce8, 0x8b060108,
-   0x91080108, 0x910003ea, 0xf900010a, 0xf9000508, 0xf900091f, 0xf9000d1f, 0x910004e7, 0xf90004c7,
-   0xd2800020, 0xaa0803e1, 0xd65f03c0, 0xd2a00026, 0xf94004c7, 0xd10004e7, 0xd2800c09, 0x9b097ce8,
-   0x8b060108, 0x91080108, 0xf9400d0a, 0x9100810b, 0xf82a7960, 0x9100054a, 0xf9000d0a, 0xd65f03c0,
-   0xd2a00026, 0xf94014c7, 0x911400c8, 0xb4000167, 0xf9400100, 0xeb0003df, 0x540000a3, 0xf9400501,
-   0x8b010001, 0xeb0103df, 0x540000a3, 0x9100e108, 0xd10004e7, 0x17fffff6, 0x14000000, 0x910003e9,
-   0xf9400901, 0x8b010122, 0xf9400d03, 0x8b030003, 0xf9401104, 0xd2800005, 0xd280000e, 0xd280000f,
-   0xb4000124, 0xd100204c, 0xf940150d, 0xcb0d018e, 0xf940190d, 0xcb0d018f, 0x394001cd, 0x3400004d,
-   0xd2800025, 0xd101813f, 0xf90003e9, 0xf90007e2, 0xf9000be3, 0xf9000fea, 0xf90013e5, 0xf90017ee,
-   0xf9001bef, 0xf9001ff2, 0xf94013e0, 0xb40001e0, 0xf94017e1, 0x39400022, 0x34000162, 0x5ac01043,
-   0x528003e4, 0x4b030083, 0x52800024, 0x1ac32084, 0x0a240042, 0x39000022, 0xf9401be5, 0xf86378ba,
-   0x1400001d, 0xf90013ff, 0xd2a00026, 0xf94004c7, 0xb4000807, 0xd10004e8, 0xd2800c00, 0x9b007d08,
-   0x8b060108, 0x91080108, 0xf9400100, 0xf94003e1, 0xeb01001f, 0x540006e1, 0xd2800020, 0xf9000900,
-   0xf9400d00, 0xb4000120, 0xd1000400, 0xf9000d00, 0x91008102, 0xf860785a, 0xb50000e0, 0xd10004e7,
-   0xf90004c7, 0x14000004, 0xd10004e7, 0xf90004c7, 0x17ffffd6, 0xf9400349, 0xd10023fd, 0xd63f0120,
-   0xf9401ff2, 0xf9400fe0, 0xb5fffa00, 0xd2a00026, 0xf94000c7, 0xd10004e7, 0x910400c8, 0x8b071508,
-   0xf9400d00, 0x360ff920, 0xf94003e1, 0xf94000c7, 0xb4000127, 0xd10004e7, 0x910400c8, 0x8b071508,
-   0xf9400900, 0xeb01001f, 0x54000068, 0xf90000c7, 0x17fffff7, 0xf90008df, 0xf94013e0, 0xb4000120,
-   0xf94017e2, 0x39400043, 0x340000c3, 0xd2800020, 0xf90008c0, 0xf9000cc2, 0xf9401be3, 0xf90010c3,
-   0xf9400be0, 0x9100003f, 0xd10023fd, 0xd61f0000, 0xf9400fe0, 0xf100081f, 0x540000a0, 0xf94007e1,
-   0x9100003f, 0x10fffae0, 0xd61f0000, 0xf94023fe, 0xf94027fd, 0xf94003e1, 0x9100003f, 0xd65f03c0]
+   0x910004e7, 0xf90004c7, 0xd65f03c0, 0xf9400c00, 0xd2a00026, 0xf94004c7, 0xd2800c09, 0x9b097ce8,
+   0x8b060108, 0x91080108, 0x910003ea, 0xf900010a, 0xf900051f, 0xf900091f, 0xd280002b, 0xf9000d0b,
+   0xf9001100, 0x910004e7, 0xf90004c7, 0xd65f03c0, 0xd2a00026, 0xf94004c7, 0xd2800c09, 0x9b097ce8,
+   0x8b060108, 0x91080108, 0x910003ea, 0xf900010a, 0xf9000508, 0xf900091f, 0xf9000d1f, 0x910004e7,
+   0xf90004c7, 0xd2800020, 0xaa0803e1, 0xd65f03c0, 0xd2a00026, 0xf94004c7, 0xd10004e7, 0xd2800c09,
+   0x9b097ce8, 0x8b060108, 0x91080108, 0xf9400d0a, 0x9100810b, 0xf82a7960, 0x9100054a, 0xf9000d0a,
+   0xd65f03c0, 0xd2a00026, 0xf94014c7, 0x911400c8, 0xb4000167, 0xf9400100, 0xeb0003df, 0x540000a3,
+   0xf9400501, 0x8b010001, 0xeb0103df, 0x540000a3, 0x9100e108, 0xd10004e7, 0x17fffff6, 0x14000000,
+   0x910003e9, 0xf9400901, 0x8b010122, 0xf9400d03, 0x8b030003, 0xf9401104, 0xd2800005, 0xd280000e,
+   0xd280000f, 0xb4000124, 0xd100204c, 0xf940150d, 0xcb0d018e, 0xf940190d, 0xcb0d018f, 0x394001cd,
+   0x3400004d, 0xd2800025, 0xd101813f, 0xf90003e9, 0xf90007e2, 0xf9000be3, 0xf9000fea, 0xf90013e5,
+   0xf90017ee, 0xf9001bef, 0xf9001ff2, 0xf94013e0, 0xb40001e0, 0xf94017e1, 0x39400022, 0x34000162,
+   0x5ac01043, 0x528003e4, 0x4b030083, 0x52800024, 0x1ac32084, 0x0a240042, 0x39000022, 0xf9401be5,
+   0xf86378ba, 0x1400001d, 0xf90013ff, 0xd2a00026, 0xf94004c7, 0xb4000807, 0xd10004e8, 0xd2800c00,
+   0x9b007d08, 0x8b060108, 0x91080108, 0xf9400100, 0xf94003e1, 0xeb01001f, 0x540006e1, 0xd2800020,
+   0xf9000900, 0xf9400d00, 0xb4000120, 0xd1000400, 0xf9000d00, 0x91008102, 0xf860785a, 0xb50000e0,
+   0xd10004e7, 0xf90004c7, 0x14000004, 0xd10004e7, 0xf90004c7, 0x17ffffd6, 0xf9400349, 0xd10023fd,
+   0xd63f0120, 0xf9401ff2, 0xf9400fe0, 0xb5fffa00, 0xd2a00026, 0xf94000c7, 0xd10004e7, 0x910400c8,
+   0x8b071508, 0xf9400d00, 0x360ff920, 0xf94003e1, 0xf94000c7, 0xb4000127, 0xd10004e7, 0x910400c8,
+   0x8b071508, 0xf9400900, 0xeb01001f, 0x54000068, 0xf90000c7, 0x17fffff7, 0xf90008df, 0xf94013e0,
+   0xb4000120, 0xf94017e2, 0x39400043, 0x340000c3, 0xd2800020, 0xf90008c0, 0xf9000cc2, 0xf9401be3,
+   0xf90010c3, 0xf9400be0, 0x9100003f, 0xd10023fd, 0xd61f0000, 0xf9400fe0, 0xf100081f, 0x540000a0,
+   0xf94007e1, 0x9100003f, 0x10fffae0, 0xd61f0000, 0xf94023fe, 0xf94027fd, 0xf94003e1, 0x9100003f,
+   0xd65f03c0]
 
 abbrev E : Nat := 0x300000
-/-- Entry points (offsets in `docs/model/panic_model.s`). -/
+/-- Entry points (offsets in `docs/model/panic_model_arm64.s`). -/
 abbrev eGopanic : Nat := E
 abbrev eGoexit : Nat := E + 0x34
 abbrev eDeferreturn : Nat := E + 0x6c
 abbrev eGorecover : Nat := E + 0xb8
-abbrev eDeferproc : Nat := E + 0x108
-abbrev eDeferprocStack : Nat := E + 0x148
-abbrev eDeferrangefunc : Nat := E + 0x18c
-abbrev eDeferprocat : Nat := E + 0x1cc
-abbrev eLookup : Nat := E + 0x200
-abbrev eLH : Nat := E + 0x2a8
+abbrev eDeferproc : Nat := E + 0x10c
+abbrev eDeferprocStack : Nat := E + 0x14c
+abbrev eDeferrangefunc : Nat := E + 0x190
+abbrev eDeferprocat : Nat := E + 0x1d0
+abbrev eLookup : Nat := E + 0x204
+abbrev eLH : Nat := E + 0x2ac
 /-- The return point of every deferred call the model makes. -/
-abbrev RPa : Nat := E + 0x360
+abbrev RPa : Nat := E + 0x364
 
 def engineSeg : Segment := { name := "panic-model", base := E, words := engineCode }
 
@@ -452,6 +453,81 @@ theorem deferprocat_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (s :
       simp only [recN, rd, recAt, B]
       model_simp
       omega
+
+
+/-! ## `gorecover` -/
+
+set_option maxHeartbeats 0 in
+theorem gorecover_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
+    GorecoverContract p eGorecover (P0 T RPa) := by
+  intro s hpc ⟨hpre, hfp, hfp'⟩
+  apply reachesRet_transfer hp
+  obtain ⟨henv, -, ⟨h30a, h30b, hal, hst, h8, hwin, hacc⟩, hout⟩ := hpre
+  rw [P0_env] at henv
+  have henv' := henv
+  unfold Env0 at henv'
+  obtain ⟨hB, hnp, hnd, hrec, htab⟩ := henv'
+  have hnp' : s.mem.readLE 65536 8 ≤ 8 := hnp
+  have hB' : s.mem.accessible 65536 4096 true = true := hB
+  janus_run
+  · -- no panic: nil
+    have h0 : panics0 s.mem = [] := panics0_nil (by simpa using ‹s.mem.readLE 65536 8 = 0›)
+    refine ⟨panicRet_of _ 0 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
+      rfl (MemFrame.refl _ _) (by rw [P0_env]; exact henv), Nat.le_refl _, fun _ => trivial,
+      fun r rs h => ?_⟩
+    rw [P0_panics, h0] at h; cases h
+  all_goals
+    generalize hnp : s.mem.readLE 65536 8 = np at *
+    obtain ⟨k, rfl⟩ : ∃ k, np = k + 1 := ⟨np - 1, by omega⟩
+    have hk8 : k < 8 := by omega
+    have htop : panics0 s.mem = decPan s.mem k :: panList s.mem k := panics0_top hnp hk8
+    simp only [Nat.add_sub_cancel] at *
+  · -- recover
+    have hw : panAt 0 ≤ 65792 + 32 * k + 24 ∧ 65792 + 32 * k + 24 + 8 ≤ panAt 8 := by
+      simp only [panAt, B]; omega
+    have htop' : panics0 (s.mem.writeLE (65792 + 32 * k + 24) 8 2) =
+        { decPan s.mem k with recovered := true } :: panList s.mem k := by
+      rw [panics0_top (k := k) (by simp only [npan, rd, B]; model_simp; exact hnp) hk8,
+        panList_w k (by simp only [panAt, B]; omega)]
+      congr 1
+      simp only [decPan, panAt, rd, B]
+      model_simp
+      have hf2 : s.mem.readLE (65792 + 32 * k + 24) 8 % 2 = 0 := by omega
+      simp [hf2]
+    refine ⟨panicRet_of _ 0 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
+      rfl ?_ ?_, ?_, ?_, rfl, ?_, ?_, ?_⟩
+    · rw [P0_priv, P0_depth]; simp only [B, calleeStack, List.cons_append, List.nil_append]; janus_frame
+    · rw [P0_env]; exact env0_wpan hw henv
+    · rw [P0_defers, P0_defers]; exact defers0_wpan hw
+    · rw [P0_saved, P0_saved]; exact saved0_wpan hw
+    · rw [P0_room, P0_room, room0_wpan hw]; exact Nat.le_refl _
+    · rintro (h | ⟨r, rs, h, hr⟩)
+      · rw [P0_panics, htop] at h; cases h
+      · rw [P0_panics, htop] at h; obtain ⟨rfl, rfl⟩ := List.cons.inj h
+        simp only [decPan, panAt, rd, B] at hr; exfalso
+        rcases hr with hr | hr <;> simp at hr <;> omega
+    · intro r rs h _ _ _ _
+      rw [P0_panics, htop] at h; obtain ⟨rfl, rfl⟩ := List.cons.inj h
+      refine ⟨by simp [decPan, panAt], by simp [decPan, panAt], ?_⟩
+      rw [P0_panics, htop']
+  · -- the caller is not the running deferred call: nil
+    refine ⟨panicRet_of _ 0 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
+      rfl (MemFrame.refl _ _) (by rw [P0_env]; exact henv), Nat.le_refl _, ?_, ?_⟩
+    · rintro (h | ⟨r, rs, h, hr⟩)
+      · rw [P0_panics, htop] at h; cases h
+      · rw [P0_panics, htop] at h; obtain ⟨rfl, rfl⟩ := List.cons.inj h
+        simp only [decPan, panAt, rd, B] at hr; exfalso
+        rcases hr with hr | hr <;> simp at hr <;> omega
+    · intro r rs _ _ _ _ hrp
+      exact absurd hrp ‹_›
+  · -- a Goexit or an already recovered panic: nil
+    refine ⟨panicRet_of _ 0 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
+      rfl (MemFrame.refl _ _) (by rw [P0_env]; exact henv), Nat.le_refl _, fun _ => trivial, ?_⟩
+    intro r rs h hg hr _ _
+    rw [P0_panics, htop] at h; obtain ⟨rfl, rfl⟩ := List.cons.inj h
+    simp only [decPan, panAt, rd, B] at hg hr
+    exfalso; simp at hg hr; omega
+
 
 
 end Janus.Contracts.PanicSat
