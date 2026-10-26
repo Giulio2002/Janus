@@ -38,7 +38,7 @@ about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
 | `janus-asl-check` | **566,027 agree, 17,729 gap, 0 MISMATCH** (slice with the scalar floating-point, crypto, CRC and permute decoders, vendored sha256 `cd26b412…`; FPCR/FPSR set from the case and FPSR compared after the step); `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 1 h with 12 tasks |
 | `janus-asl-check`, slice round 2 | **927,078 agree, 38,443 gap, 0 MISMATCH** on 965,521 cases of the corpus of agent/asl + agent/stxr (96833af, with main 4a75ac7) + agent/syscall + agent/neonfix (Advanced SIMD, exclusives, SVC/BRK/UDF, MRS/MSR of NZCV/FPSR/FPCR/DIT and the environment registers); vendored sha256 `fd9e1885…`; `LinuxEL0Config`/`FPConfig` and `UserMapped` hold on every case; 2 h 15 min with 12 tasks |
-| proofs | **81 audited theorems** (an explicit list in JanusASL/Audit.lean; audit/rt-asl/AuditStrict.lean prints the statements of 78 of them, plus `JanusASL.Verify.classify_sound`): the encoding-class `*_agree` theorems, the 4 FP rounding theorems (`rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64`), the 16 scalar floating-point encoding-class theorems (`fcmp_agree`, `fadd_agree`, `fsub_agree`, `fmul_agree`, `fdiv_agree`, `fmadd_agree`, `fmsub_agree`, `fnmadd_agree`, `fnmsub_agree`, `fsqrt_agree`, `fccmp_agree`, `scvtf_agree`, `ucvtf_agree`, `fcvtzs_agree`, `fcvtzu_agree`, `fcvt_agree`), `run_agree_fp`, `fpClassify_sound`, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
+| proofs | **84 audited theorems** (an explicit list in JanusASL/Audit.lean; audit/rt-asl/AuditStrict.lean prints the statements of 81 of them, plus `JanusASL.Verify.classify_sound`): the encoding-class `*_agree` theorems, the 4 FP rounding theorems (`rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64`), the 16 scalar floating-point encoding-class theorems (`fcmp_agree`, `fadd_agree`, `fsub_agree`, `fmul_agree`, `fdiv_agree`, `fmadd_agree`, `fmsub_agree`, `fnmadd_agree`, `fnmsub_agree`, `fsqrt_agree`, `fccmp_agree`, `scvtf_agree`, `ucvtf_agree`, `fcvtzs_agree`, `fcvtzu_agree`, `fcvt_agree`), `run_agree_fp`, `fpClassify_sound`, `classify_sound_fp`, `classifyAll_sound`, `Ensures.toASL_fp`, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
 | `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
 
 Agreement by corpus class (`agree` / `gap`):
@@ -297,6 +297,16 @@ completes with `Janus_OK` in states related the same way. Each floating-point cl
 word (the hypotheses of the `fpStepOK_<class>` theorem, verbatim) and `Verify.fpClassify_sound` turns
 `fpClassify w = some c` into `FPStepOK w`. A program all of whose words are `FPStepOK` and untagged
 runs the same way on both sides, with the four relations holding at the end or at a stub.
+
+Mixed programs (integer, branch and floating-point words together): `Rel` now carries
+`PState.sm = 0` (SVE streaming mode off), and `CfgFrame` carries `FPFrame` (the `_Z` registers, FPCR, FPSR,
+and the CPACR/CPTR/ZCR/SMCR configuration are unchanged by an integer step). Every integer and branch
+class has a strong `X_agree_f` theorem with that extra conclusion (the old `X_agree` statements are wrappers,
+unchanged) and, on the Janus side, `FpSame` (vregs, FPCR and FPSR unchanged, proved per integer
+constructor in `Proofs/FpSame/`). `FP/IntLift.lean` combines them into `fpStepOK_<class>` for all integer
+and branch classes, so `Classify.classifyAll`/`coveredAll` (integer, branch or FP word) are sound for
+`FPStepOK` (`classify_sound_fp`, `classifyAll_sound`, `coveredAll_*`), and `Ensures.toASL_fp` is
+`Ensures.toASL` for such programs with all four relations carried.
 
 Not covered: `.error _` outcomes, that is faults and out of fuel. There Janus is conservative
 and the ASL may continue.
