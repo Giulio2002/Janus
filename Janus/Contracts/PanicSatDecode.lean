@@ -526,4 +526,84 @@ theorem recov_frame {T : List FuncInfo} {m m' : Memory} (h : Env0 T m) (hf : Mem
   · rw [defers0_eq, defers0_eq, hnd]; exact recList_agree2 ha _ (Nat.min_le_right _ _)
   · rw [room0_eq, room0_eq, hnd, capMin_agree2 ha _ (Nat.min_le_right _ _)]; omega
 
+
+/-! ## Memory that agrees on the records, the table and `ndef` -/
+
+/-- `m'` reads like `m` at `ndef`, the table's header and the table, and the records. -/
+def RdSame (m m' : Memory) : Prop :=
+  ∀ a, (a = B + 8 ∨ (B + 0x28 ≤ a ∧ a + 8 ≤ B + 0x100) ∨ (B + 0x200 ≤ a ∧ a + 8 ≤ B + 0x1000)) → rd m' a = rd m a
+
+theorem RdSame.ndef {m m' : Memory} (h : RdSame m m') : ndef m' = ndef m := h _ (Or.inl rfl)
+
+theorem rd_same {m m' : Memory} (h : RdSame m m') {a : Nat}
+    (ha : a = B + 8 ∨ (B + 0x28 ≤ a ∧ a + 8 ≤ B + 0x100) ∨ (B + 0x200 ≤ a ∧ a + 8 ≤ B + 0x1000)) :
+    rd m' a = rd m a := h a ha
+
+theorem recFields_same {m m' : Memory} (h : RdSame m m') {i : Nat} (hi : i < 8) :
+    recSp m' i = recSp m i ∧ recTok m' i = recTok m i ∧ recConv m' i = recConv m i ∧
+      recN m' i = recN m i := by
+  simp only [recSp, recTok, recConv, recN, recAt]
+  refine ⟨rd_same h (by simp only [B]; omega), rd_same h (by simp only [B]; omega),
+    rd_same h (by simp only [B]; omega), rd_same h (by simp only [B]; omega)⟩
+
+theorem recFns_same {m m' : Memory} (h : RdSame m m') {i : Nat} (hi : i < 8) :
+    ∀ j, j ≤ 8 → PanicModel.recFns m' i j = PanicModel.recFns m i j
+  | 0, _ => rfl
+  | j + 1, hj => by
+    simp only [PanicModel.recFns, recFn, recAt]
+    rw [rd_same h (by simp only [B]; omega), recFns_same h hi j (by omega)]
+
+theorem decRec_same {m m' : Memory} (h : RdSame m m') {i : Nat} (hi : i < 8) : decRec m' i = decRec m i := by
+  obtain ⟨h1, h2, h3, h4⟩ := recFields_same h hi
+  simp only [decRec, h1, h2, h3, h4, recFns_same h hi _ (Nat.min_le_right _ _)]
+
+theorem recList_same {m m' : Memory} (h : RdSame m m') : ∀ k, k ≤ 8 → recList m' k = recList m k
+  | 0, _ => rfl
+  | k + 1, hk => by simp only [recList, decRec_same h (by omega : k < 8), recList_same h k (by omega)]
+
+theorem capMin_same {m m' : Memory} (h : RdSame m m') : ∀ k, k ≤ 8 → capMin m' k = capMin m k
+  | 0, _ => rfl
+  | k + 1, hk => by
+    simp only [capMin, (recFields_same h (by omega : k < 8)).2.2.2, capMin_same h k (by omega)]
+
+theorem tableOK_same {m m' : Memory} (h : RdSame m m') {T : List FuncInfo} (ht : TableOK m T) : TableOK m' T := by
+  obtain ⟨hl, hn, he⟩ := ht
+  refine ⟨hl, by rw [rd_same h (by simp only [B]; omega)]; exact hn, fun i hi => ?_⟩
+  obtain ⟨e1, e2, e3, e4, e5, e6, e7⟩ := he i hi
+  have hl16 := hl
+  have hb : ∀ k, k ≤ 48 → rd m' (tabAt i + k) = rd m (tabAt i + k) := fun k hk =>
+    rd_same h (by simp only [tabAt, B]; omega)
+  exact ⟨by rw [show tabAt i = tabAt i + 0 from rfl, hb 0 (by omega)]; exact e1,
+    by rw [hb 8 (by omega)]; exact e2, by rw [hb 16 (by omega)]; exact e3,
+    by rw [hb 24 (by omega)]; exact e4, by rw [hb 32 (by omega)]; exact e5,
+    by rw [hb 40 (by omega)]; exact e6, by rw [hb 48 (by omega)]; exact e7⟩
+
+
+theorem bundle3 {T : List FuncInfo} {m m' : Memory} (henv : Env0 T m) (hs : RdSame m m')
+    (hacc : m'.accessible B 0x1000 true = true) (hnp : npan m' ≤ 8) :
+    Env0 T m' ∧ defers0 m' = defers0 m ∧
+      room0 m' = min (8 - npan m') (min (8 - ndef m) (capMin m (min (ndef m) 8))) := by
+  have hnd := hs.ndef
+  refine ⟨?_, ?_, ?_⟩
+  · refine Env0.mk hacc hnp (by rw [hnd]; exact henv.ndef_le) (fun i hi => ?_) (tableOK_same hs henv.table)
+    rw [hnd] at hi
+    obtain ⟨-, h2, h3, h4⟩ := recFields_same hs (by have := henv.ndef_le; omega : i < 8)
+    rw [h2, h3, h4]; exact henv.rec i hi
+  · rw [defers0_eq, defers0_eq, hnd]; exact recList_same hs _ (Nat.min_le_right _ _)
+  · rw [room0_eq, hnd, capMin_same hs _ (Nat.min_le_right _ _)]
+
+theorem panList_frame {m m' : Memory} {ws : List (Nat × Nat)} (hf : MemFrame m m' ws) :
+    ∀ k, (∀ i, i < k → Outside (panAt i) 32 ws) → panList m' k = panList m k
+  | 0, _ => rfl
+  | k + 1, h => by
+    have ho := h k (by omega)
+    have hd : decPan m' k = decPan m k := by
+      simp only [decPan]
+      have r : ∀ d, d ≤ 24 → rd m' (panAt k + d) = rd m (panAt k + d) := fun d hd =>
+        hf.readLE _ _ (Outside.of_sub ho (by omega) (by omega))
+      have r0 := r 0 (by omega)
+      rw [Nat.add_zero] at r0
+      rw [r0, r 8 (by omega), r 16 (by omega), r 24 (by omega)]
+    simp only [panList, hd, panList_frame hf k (fun i hi => h i (by omega))]
+
 end Janus.Contracts.PanicSat
