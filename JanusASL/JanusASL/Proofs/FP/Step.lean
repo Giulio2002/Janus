@@ -24,7 +24,7 @@ theorem step_agree_fp {w : Nat} {js js1 : Janus.Arm64.State} {s : SState} (h : R
     (hrun : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) = .ok () s2)
     (hr : Rel js1 s2) (hfr : FPRel js1 s2)
     (hg : ∀ r, isGprReg r = false → r ∉ fpWriteRegs → s2.regs.get? r = (entrySt s w k).regs.get? r)
-    (hpc : js1.pc = js.pc) :
+    (hpc : js1.pc = js.pc) (hsm : SMZero s2) :
     (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK (s2.set ._PC (js.pc + 4)) ∧
       Rel js1.next (s2.set ._PC (js.pc + 4)) ∧ FPRel js1.next (s2.set ._PC (js.pc + 4)) ∧
       LinuxEL0Config (s2.set ._PC (js.pc + 4)) ∧ FPConfig (s2.set ._PC (js.pc + 4)) := by
@@ -43,8 +43,9 @@ theorem step_agree_fp {w : Nat} {js js1 : Janus.Arm64.State} {s : SState} (h : R
         (fun hm => by simp [fpWriteRegs] at hm; rcases hm with rfl | rfl | rfl <;> first | exact hne rfl | revert hr'; decide),
         entry_get s w k r (cfg_not_entry r hr')]
     · rw [get?_set_ne _ _ (by decide)]; exact hp
-  · refine hfc.of_eq fun r hr' => ?_
-    rw [get?_set_ne _ _ (fun e => by subst e; revert hr'; decide), hg r (by revert hr'; revert r; decide)
-      (by revert hr'; revert r; decide), entry_get s w k r (by revert hr'; revert r; decide)]
+  · refine hfc.of_eq3 (fun r hr' => ?_) ?_
+    · rw [get?_set_ne _ _ (fun e => by subst e; revert hr'; decide), hg r (by revert hr'; revert r; decide)
+        (by revert hr'; revert r; decide), entry_get s w k r (by revert hr'; revert r; decide)]
+    · obtain ⟨p, hp, hs⟩ := hsm; exact ⟨p, by rw [get?_set_ne _ _ (by decide)]; exact hp, hs⟩
 
 end JanusASL.Proofs

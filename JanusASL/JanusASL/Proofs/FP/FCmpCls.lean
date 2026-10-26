@@ -71,7 +71,7 @@ theorem fcmp_agree {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft :
       have hRe := h.entry (BitVec.ofNat 32 w) 272
       have hce : LinuxEL0Config (entrySt s w 272) := hc.of_eq fun r hr => entry_get s w 272 r (cfg_not_entry r hr)
       obtain ⟨hfe, hfce⟩ := fp_entry hf hfc w 272
-      obtain ⟨s2, hrun2, hr2, hfr2, hg2⟩ := run_exec_fcmp32 hRe hfe hce hfce hm32 hn32 hx
+      obtain ⟨s2, hrun2, hr2, hfr2, hg2, hsm2⟩ := run_exec_fcmp32 hRe hfe hce hfce hm32 hn32 hx
       have hdec2 : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
           (execute_aarch64_instrs_float_compare_uncond (decide (Janus.Arm64.bits w 4 3 % 2 = 1)) 32
             (Janus.Arm64.bits w 20 16) (Janus.Arm64.bits w 9 5)
@@ -82,13 +82,13 @@ theorem fcmp_agree {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft :
           run_dec_fcmp_0, ha0, ha1, hrn, hrm]
       obtain ⟨e1, e2, e3, e4, e5⟩ := step_agree_fp h hc hfc (k := 272) (hdec2.trans hrun2) hr2 hfr2
         (fun r _ hn => hg2 r (fun e => hn (by subst e; decide)) (fun e => hn (by subst e; decide)))
-        (execFpCmp_pc hx)
+        (execFpCmp_pc hx) hsm2
       exact ⟨_, e1, e2, e3, e4, e5⟩
     · -- ftype 0, fcmpe
       have hRe := h.entry (BitVec.ofNat 32 w) 273
       have hce : LinuxEL0Config (entrySt s w 273) := hc.of_eq fun r hr => entry_get s w 273 r (cfg_not_entry r hr)
       obtain ⟨hfe, hfce⟩ := fp_entry hf hfc w 273
-      obtain ⟨s2, hrun2, hr2, hfr2, hg2⟩ := run_exec_fcmp32 hRe hfe hce hfce hm32 hn32 hx
+      obtain ⟨s2, hrun2, hr2, hfr2, hg2, hsm2⟩ := run_exec_fcmp32 hRe hfe hce hfce hm32 hn32 hx
       have hdec2 : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
           (execute_aarch64_instrs_float_compare_uncond (decide (Janus.Arm64.bits w 4 3 % 2 = 1)) 32
             (Janus.Arm64.bits w 20 16) (Janus.Arm64.bits w 9 5)
@@ -99,13 +99,13 @@ theorem fcmp_agree {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft :
           run_dec_fcmpe_0, ha0, ha1, hrn, hrm]
       obtain ⟨e1, e2, e3, e4, e5⟩ := step_agree_fp h hc hfc (k := 273) (hdec2.trans hrun2) hr2 hfr2
         (fun r _ hn => hg2 r (fun e => hn (by subst e; decide)) (fun e => hn (by subst e; decide)))
-        (execFpCmp_pc hx)
+        (execFpCmp_pc hx) hsm2
       exact ⟨_, e1, e2, e3, e4, e5⟩
     · -- ftype 1, fcmp
       have hRe := h.entry (BitVec.ofNat 32 w) 272
       have hce : LinuxEL0Config (entrySt s w 272) := hc.of_eq fun r hr => entry_get s w 272 r (cfg_not_entry r hr)
       obtain ⟨hfe, hfce⟩ := fp_entry hf hfc w 272
-      obtain ⟨s2, hrun2, hr2, hfr2, hg2⟩ := run_exec_fcmp64 hRe hfe hce hfce hm32 hn32 hx
+      obtain ⟨s2, hrun2, hr2, hfr2, hg2, hsm2⟩ := run_exec_fcmp64 hRe hfe hce hfce hm32 hn32 hx
       have hdec2 : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
           (execute_aarch64_instrs_float_compare_uncond (decide (Janus.Arm64.bits w 4 3 % 2 = 1)) 64
             (Janus.Arm64.bits w 20 16) (Janus.Arm64.bits w 9 5)
@@ -116,13 +116,13 @@ theorem fcmp_agree {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft :
           run_dec_fcmp_1, ha0, ha1, hrn, hrm]
       obtain ⟨e1, e2, e3, e4, e5⟩ := step_agree_fp h hc hfc (k := 272) (hdec2.trans hrun2) hr2 hfr2
         (fun r _ hn => hg2 r (fun e => hn (by subst e; decide)) (fun e => hn (by subst e; decide)))
-        (execFpCmp_pc hx)
+        (execFpCmp_pc hx) hsm2
       exact ⟨_, e1, e2, e3, e4, e5⟩
     · -- ftype 1, fcmpe
       have hRe := h.entry (BitVec.ofNat 32 w) 273
       have hce : LinuxEL0Config (entrySt s w 273) := hc.of_eq fun r hr => entry_get s w 273 r (cfg_not_entry r hr)
       obtain ⟨hfe, hfce⟩ := fp_entry hf hfc w 273
-      obtain ⟨s2, hrun2, hr2, hfr2, hg2⟩ := run_exec_fcmp64 hRe hfe hce hfce hm32 hn32 hx
+      obtain ⟨s2, hrun2, hr2, hfr2, hg2, hsm2⟩ := run_exec_fcmp64 hRe hfe hce hfce hm32 hn32 hx
       have hdec2 : (__DecodeA64 (js.pc.toNat : Int) (BitVec.ofNat 32 w)).run (stepEntry s (BitVec.ofNat 32 w)) =
           (execute_aarch64_instrs_float_compare_uncond (decide (Janus.Arm64.bits w 4 3 % 2 = 1)) 64
             (Janus.Arm64.bits w 20 16) (Janus.Arm64.bits w 9 5)
@@ -133,7 +133,7 @@ theorem fcmp_agree {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft :
           run_dec_fcmpe_1, ha0, ha1, hrn, hrm]
       obtain ⟨e1, e2, e3, e4, e5⟩ := step_agree_fp h hc hfc (k := 273) (hdec2.trans hrun2) hr2 hfr2
         (fun r _ hn => hg2 r (fun e => hn (by subst e; decide)) (fun e => hn (by subst e; decide)))
-        (execFpCmp_pc hx)
+        (execFpCmp_pc hx) hsm2
       exact ⟨_, e1, e2, e3, e4, e5⟩
 
 end JanusASL.Proofs

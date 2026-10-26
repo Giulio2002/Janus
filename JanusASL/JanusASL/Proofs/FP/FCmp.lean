@@ -105,6 +105,12 @@ theorem Rel.of_same {js js' : Janus.Arm64.State} {s : SState} (h : Rel js s) (hr
 /-- PSTATE with `NZCV` from the 4-bit value `k`. -/
 def psNZCV (p : ProcState) (k : Nat) : ProcState := { p with N := BitVec.ofBool (k / 8 % 2 = 1), Z := BitVec.ofBool (k / 4 % 2 = 1), C := BitVec.ofBool (k / 2 % 2 = 1), V := BitVec.ofBool (k / 1 % 2 = 1) }
 
+theorem smz_psNZCV {s : SState} (hfc : FPConfig s) {p : ProcState} (hp : s.regs.get? .PSTATE = some p)
+    (t : SState) (k : Nat) : SMZero (t.set .PSTATE (psNZCV p k)) := by
+  obtain ⟨q, hq, hs⟩ := hfc.sm
+  rw [hp] at hq; cases hq
+  exact ⟨_, get?_set_self t .PSTATE _, by simp only [psNZCV]; exact hs⟩
+
 theorem psNZCV_eq (p : ProcState) (k : Nat) :
     psNZCV p k = { p with N := BitVec.ofBool (Janus.Arm64.flagsOfNzcv k).n, Z := BitVec.ofBool (Janus.Arm64.flagsOfNzcv k).z, C := BitVec.ofBool (Janus.Arm64.flagsOfNzcv k).c, V := BitVec.ofBool (Janus.Arm64.flagsOfNzcv k).v } := by
   simp [psNZCV, Janus.Arm64.flagsOfNzcv]
@@ -118,7 +124,7 @@ theorem run_exec_fcmp32 {js js1 : Janus.Arm64.State} {s : SState} (h : Rel js s)
     (hj : Janus.Arm64.execFpCmp js 0 rm opc rn = .ok js1) :
     ∃ s', (execute_aarch64_instrs_float_compare_uncond (decide (opc % 2 = 1)) 32 rm rn (decide (opc / 2 % 2 = 1))).run s =
         .ok () s' ∧ Rel js1 s' ∧ FPRel js1 s' ∧
-      (∀ r, r ≠ .PSTATE → r ≠ .FPSR → s'.regs.get? r = s.regs.get? r) := by
+      (∀ r, r ≠ .PSTATE → r ≠ .FPSR → s'.regs.get? r = s.regs.get? r) ∧ SMZero s' := by
   obtain ⟨p, hp, hpp⟩ := h.pstate
   unfold Janus.Arm64.execFpCmp Janus.Arm64.fpCommit at hj
   simp only [Janus.Arm64.ftypeFmt, Janus.Arm64.ftypeSize, ite_true] at hj
@@ -149,7 +155,7 @@ theorem run_exec_fcmp32 {js js1 : Janus.Arm64.State} {s : SState} (h : Rel js s)
       have hrd : r.2.direct = 0 := hr ▸ fpCompare_direct _ _ _ _ _
       have hrp : r.2.proc < 256 := hr ▸ fpCompare_proc_lt _ _ _ _ _
       refine ⟨(s.set .FPSR (js.fpsr.setWidth 64 ||| BitVec.ofNat 64 r.2.proc)).set .PSTATE (psNZCV p r.1),
-        ?_, ?_, ?_, ?_⟩
+        ?_, ?_, ?_, ?_, smz_psNZCV hfc hp _ _⟩
       · have hpv : ∀ v, (s.set .FPSR v).regs.get? .PSTATE = some p := fun v => (get?_set_ne s v (by decide)).trans hp
         cfg_simp [run_CheckFPEnabled64 hc hfc, run_V_read hf hn (w := 32) (by decide), run_FPZero s 32 (.inl rfl),
           run_FPCR_read hf, hcmp, hz, fun v => run_readReg (hpv v), nzcv_bit3, nzcv_bit2, nzcv_bit1, nzcv_bit0,
@@ -187,7 +193,7 @@ theorem run_exec_fcmp32 {js js1 : Janus.Arm64.State} {s : SState} (h : Rel js s)
       have hrd : r.2.direct = 0 := hr ▸ fpCompare_direct _ _ _ _ _
       have hrp : r.2.proc < 256 := hr ▸ fpCompare_proc_lt _ _ _ _ _
       refine ⟨(s.set .FPSR (js.fpsr.setWidth 64 ||| BitVec.ofNat 64 r.2.proc)).set .PSTATE (psNZCV p r.1),
-        ?_, ?_, ?_, ?_⟩
+        ?_, ?_, ?_, ?_, smz_psNZCV hfc hp _ _⟩
       · have hpv : ∀ v, (s.set .FPSR v).regs.get? .PSTATE = some p := fun v => (get?_set_ne s v (by decide)).trans hp
         cfg_simp [run_CheckFPEnabled64 hc hfc, run_V_read hf hn (w := 32) (by decide), run_V_read hf hm (w := 32) (by decide),
           run_FPCR_read hf, hcmp, hz, fun v => run_readReg (hpv v), nzcv_bit3, nzcv_bit2, nzcv_bit1, nzcv_bit0,
@@ -219,7 +225,7 @@ theorem run_exec_fcmp64 {js js1 : Janus.Arm64.State} {s : SState} (h : Rel js s)
     (hj : Janus.Arm64.execFpCmp js 1 rm opc rn = .ok js1) :
     ∃ s', (execute_aarch64_instrs_float_compare_uncond (decide (opc % 2 = 1)) 64 rm rn (decide (opc / 2 % 2 = 1))).run s =
         .ok () s' ∧ Rel js1 s' ∧ FPRel js1 s' ∧
-      (∀ r, r ≠ .PSTATE → r ≠ .FPSR → s'.regs.get? r = s.regs.get? r) := by
+      (∀ r, r ≠ .PSTATE → r ≠ .FPSR → s'.regs.get? r = s.regs.get? r) ∧ SMZero s' := by
   obtain ⟨p, hp, hpp⟩ := h.pstate
   unfold Janus.Arm64.execFpCmp Janus.Arm64.fpCommit at hj
   simp only [Janus.Arm64.ftypeFmt, Janus.Arm64.ftypeSize, Nat.one_ne_zero, ite_false] at hj
@@ -250,7 +256,7 @@ theorem run_exec_fcmp64 {js js1 : Janus.Arm64.State} {s : SState} (h : Rel js s)
       have hrd : r.2.direct = 0 := hr ▸ fpCompare_direct _ _ _ _ _
       have hrp : r.2.proc < 256 := hr ▸ fpCompare_proc_lt _ _ _ _ _
       refine ⟨(s.set .FPSR (js.fpsr.setWidth 64 ||| BitVec.ofNat 64 r.2.proc)).set .PSTATE (psNZCV p r.1),
-        ?_, ?_, ?_, ?_⟩
+        ?_, ?_, ?_, ?_, smz_psNZCV hfc hp _ _⟩
       · have hpv : ∀ v, (s.set .FPSR v).regs.get? .PSTATE = some p := fun v => (get?_set_ne s v (by decide)).trans hp
         cfg_simp [run_CheckFPEnabled64 hc hfc, run_V_read hf hn (w := 64) (by decide), run_FPZero s 64 (.inr rfl),
           run_FPCR_read hf, hcmp, hz, fun v => run_readReg (hpv v), nzcv_bit3, nzcv_bit2, nzcv_bit1, nzcv_bit0,
@@ -288,7 +294,7 @@ theorem run_exec_fcmp64 {js js1 : Janus.Arm64.State} {s : SState} (h : Rel js s)
       have hrd : r.2.direct = 0 := hr ▸ fpCompare_direct _ _ _ _ _
       have hrp : r.2.proc < 256 := hr ▸ fpCompare_proc_lt _ _ _ _ _
       refine ⟨(s.set .FPSR (js.fpsr.setWidth 64 ||| BitVec.ofNat 64 r.2.proc)).set .PSTATE (psNZCV p r.1),
-        ?_, ?_, ?_, ?_⟩
+        ?_, ?_, ?_, ?_, smz_psNZCV hfc hp _ _⟩
       · have hpv : ∀ v, (s.set .FPSR v).regs.get? .PSTATE = some p := fun v => (get?_set_ne s v (by decide)).trans hp
         cfg_simp [run_CheckFPEnabled64 hc hfc, run_V_read hf hn (w := 64) (by decide), run_V_read hf hm (w := 64) (by decide),
           run_FPCR_read hf, hcmp, hz, fun v => run_readReg (hpv v), nzcv_bit3, nzcv_bit2, nzcv_bit1, nzcv_bit0,

@@ -10,28 +10,49 @@ import JanusASL.Proofs.Config
 namespace JanusASL.Proofs
 open ArmASL ArmASL.Functions
 
+/-- Not in streaming mode (`PSTATE.SM = 0`): Linux runs a thread outside streaming SVE mode
+unless it enters it with `SMSTART`, which Janus does not decode. `FPRoundBase` reads it
+(`InStreamingMode`) for `trapped_UF`. -/
+def SMZero (s : SState) : Prop := ∃ p : ProcState, s.regs.get? .PSTATE = some p ∧ p.SM = 0#1
+
 structure FPConfig (s : SState) : Prop where
   cpacr1 : s.regs.get? .CPACR_EL1 = some 0x3330000#64
   cptr2 : s.regs.get? .CPTR_EL2 = some 0x22ff#64
   cptr3 : s.regs.get? .CPTR_EL3 = some 0x1100#64
+  sm : SMZero s
 
-/-- The FP configuration registers. -/
-def fpCfgRegs : List Register := [.CPACR_EL1, .CPTR_EL2, .CPTR_EL3]
+/-- The FP configuration registers (PSTATE for `SM`). -/
+def fpCfgRegs : List Register := [.CPACR_EL1, .CPTR_EL2, .CPTR_EL3, .PSTATE]
 
 theorem FPConfig.of_eq {s s' : SState} (h : FPConfig s) (e : ∀ r ∈ fpCfgRegs, s'.regs.get? r = s.regs.get? r) :
     FPConfig s' :=
   { cpacr1 := by rw [e _ (by decide)]; exact h.cpacr1
     cptr2 := by rw [e _ (by decide)]; exact h.cptr2
-    cptr3 := by rw [e _ (by decide)]; exact h.cptr3 }
+    cptr3 := by rw [e _ (by decide)]; exact h.cptr3
+    sm := by obtain ⟨p, hp, hs⟩ := h.sm; exact ⟨p, by rw [e _ (by decide)]; exact hp, hs⟩ }
+
+/-- `FPConfig` from the three enable registers and `SM` (when PSTATE was written). -/
+theorem FPConfig.of_eq3 {s s' : SState} (h : FPConfig s)
+    (e : ∀ r ∈ [Register.CPACR_EL1, .CPTR_EL2, .CPTR_EL3], s'.regs.get? r = s.regs.get? r) (hsm : SMZero s') :
+    FPConfig s' :=
+  { cpacr1 := by rw [e _ (by decide)]; exact h.cpacr1
+    cptr2 := by rw [e _ (by decide)]; exact h.cptr2
+    cptr3 := by rw [e _ (by decide)]; exact h.cptr3
+    sm := hsm }
 
 /-- `FPConfig` as a check (evaluated by `janus-asl-check` on every case's pre- and post-state). -/
 def fpCfgOk (s : SState) : Bool :=
   s.regs.get? .CPACR_EL1 == some 0x3330000#64 && s.regs.get? .CPTR_EL2 == some 0x22ff#64 &&
-  s.regs.get? .CPTR_EL3 == some 0x1100#64
+  s.regs.get? .CPTR_EL3 == some 0x1100#64 &&
+  (match s.regs.get? .PSTATE with | some p => p.SM == 0#1 | none => false)
 
 theorem fpCfgOk_sound {s : SState} (h : fpCfgOk s = true) : FPConfig s := by
   simp only [fpCfgOk, Bool.and_eq_true, beq_iff_eq] at h
-  exact ⟨h.1.1, h.1.2, h.2⟩
+  obtain ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩ := h
+  refine ⟨h1, h2, h3, ?_⟩
+  revert h4; cases hp : s.regs.get? .PSTATE with
+  | none => simp
+  | some p => intro h4; exact ⟨p, hp, by simpa using h4⟩
 
 theorem run_CheckFPEnabled64 {s : SState} (hc : LinuxEL0Config s) (hf : FPConfig s) :
     (CheckFPEnabled64 ()).run s = .ok () s := by
