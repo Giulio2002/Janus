@@ -55,8 +55,18 @@ def toyInv (tys : Tys) (b : Nat) (L : List (Nat × Nat)) (_g : Nat) (v : Memory)
     v.accessible WBUF 64 true = true ∧
     (∀ t ∈ tys, v.readLE t.1 8 = t.2.1 ∧ v.readLE (t.1 + 8) 8 = t.2.2)
 
+theorem toyInv.ext (tys : Tys) (b : Nat) (L : List (Nat × Nat)) (g : Nat) (v v' : Memory)
+    (hb : ∀ a, v'.bytes a = v.bytes a) (ha : ∀ a n w, v'.accessible a n w = v.accessible a n w)
+    (h : toyInv tys b L g v) : toyInv tys b L g v' := by
+  have hr : ∀ a n, v'.readLE a n = v.readLE a n := fun a n =>
+    Memory.readLE_congr fun i _ => hb _
+  obtain ⟨p, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10⟩ := h
+  exact ⟨p, by rw [hr]; exact h1, h2, h3, h4, h5, fun i a b' => by rw [hr]; exact h6 i a b',
+    by rw [ha]; exact h7, by rw [ha]; exact h8, by rw [ha]; exact h9,
+    fun t ht => by rw [hr, hr]; exact h10 t ht⟩
+
 /-- The toy as a `RtInv`; `ok` says which requests it serves. -/
-def toyR (tys : Tys) (ok : Nat → List Nat → Prop) : RtInv := ⟨toyInv tys, ok⟩
+def toyR (tys : Tys) (ok : Nat → List Nat → Prop) : RtInv := ⟨toyInv tys, ok, toyRt tys, toyInv.ext tys⟩
 
 theorem outside_of_forall {a n : Nat} {L : List (Nat × Nat)} (h : ∀ r ∈ L, a + n ≤ r.1 ∨ r.2 ≤ a) :
     Outside a n L := by

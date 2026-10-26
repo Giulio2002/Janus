@@ -1,5 +1,6 @@
 import Janus.Contracts.WriteBarrier
 import Janus.Contracts.MallocSC
+import Janus.Contracts.Mem
 
 /-!
 # Live allocation contracts: allocations and write barriers that compose over many calls (arm64)
@@ -10,6 +11,31 @@ runtime-owned ranges `rt`: a theorem cannot make a second call (its readiness is
 and the second object may overlap the first or overwrite what the caller stored into it. The
 *live* contracts of this file are stated so that a theorem can make any number of calls, a
 data-dependent number included, and keep every object it allocated.
+
+**The interface (stable; agent/pool codes against it).** ONE hypothesis `R : RtInv` is threaded
+through every runtime call of a function, whatever it calls:
+
+```
+structure RtInv where
+  inv : Nat → List (Nat × Nat) → Nat → Memory → Prop   -- budget, live set L, g, view
+  ok  : Nat → List Nat → Prop                          -- requests served, by (address, args)
+  rt  : List (Nat × Nat)                               -- the runtime's private ranges
+  ext : (inv depends only on bytes and accessibility)
+```
+
+Every contract is `∀ L b, Summary p addr pre post` over this `R` (no separate `rt`, no `MemModel`),
+its precondition has `LiveAt`/`LiveMemAt` (`R.ok`, `R.inv b L g (view R.rt L m)`, the live set and
+the callee's window apart, the window outside `R.rt`), and its postcondition keeps the memory
+frame (`MemFrame` in `R.rt` ∪ window ∪ destination, `LiveFrame` for `L`) and re-establishes
+`R.inv` (for `L ++ new objects` and the budget less the cost). The contracts: `MallocgcLiveContract`,
+`NewobjectLiveContract`, `MakesliceLiveContract`, `GrowsliceLiveContract`, the SC variants,
+`WbLiveContract` (`gcWriteBarrierN`), `RtLiveContract` (the string and slice specs, `rawstring`
+and the bulk barriers via `LiveSpec`), and the copies and clears `MemmoveLive`,
+`MemclrNoHeapPointersLive`, `TypedMemmoveLive`, `TypedMemclrLive`, `MemclrHasPointersLive`.
+A new runtime function (e.g. `sync.Pool` `Get`/`Put`) is a contract of the same shape: take `R`,
+state `LiveAt`-style preconditions, `MemFrame (R.rt ++ window ++ writes)`, `LiveFrame s.mem m L
+writes`, new objects `ApartAll _ _ L`, and `R.inv b' (L ++ adds) g (view R.rt (L ++ adds) m)`.
+The `Mem.MemModel` contracts are derived: `MemModel.ofRt R` and `MemmoveLive.toOld`.
 
 **The live set.** A ghost list `L` of byte ranges `[lo, hi)`: the heap objects the program holds
 (every object a live allocation returned is added to it). It is not stored anywhere; a theorem
@@ -172,6 +198,14 @@ the runtime's invariant for the budget `b`, the live set `L`, the goroutine `g` 
 structure RtInv where
   inv : Nat → List (Nat × Nat) → Nat → Memory → Prop
   ok : Nat → List Nat → Prop
+  /-- The runtime-owned ranges (heap arenas, `mcache`, `mspan`s, `m`, `p`, GC buffers, barrier
+  buffers, the runtime's own memory, the write-barrier flag): the only memory a runtime call may
+  change besides the callee's stack window and the caller-designated destination. -/
+  rt : List (Nat × Nat)
+  /-- The invariant depends only on what the memory holds: bytes and accessible ranges (so it
+  can be moved between two memories that agree on both, e.g. the views of `Agrees` memories). -/
+  ext : ∀ b L g (v v' : Memory), (∀ a, v'.bytes a = v.bytes a) →
+    (∀ a n w, v'.accessible a n w = v.accessible a n w) → inv b L g v → inv b L g v'
 
 /-- Every object of the live set lies outside the ranges `win` (a callee's stack window). -/
 def LiveSep (L win : List (Nat × Nat)) : Prop := ∀ r ∈ L, Outside r.1 (r.2 - r.1) win
@@ -405,25 +439,25 @@ outside the callee's window. -/
 holds for the live set `L` and the budget `b` (`R.inv`, about the view), the request's `cost`
 fits the budget, the live set is outside the callee's window `win` and the window outside the
 runtime-owned ranges (the caller keeps its frame outside `rt`, as in every example). -/
-@[reducible] def LiveAt (R : RtInv) (rt : List (Nat × Nat)) (addr : Nat) (args : List Nat)
+@[reducible] def LiveAt (R : RtInv) (addr : Nat) (args : List Nat)
     (L : List (Nat × Nat)) (b cost g : Nat) (m : Memory) (win : List (Nat × Nat)) : Prop :=
-  R.ok addr args ∧ R.inv b L g (view rt L m) ∧ cost ≤ b ∧ LiveSep L win ∧ LiveSep win rt
+  R.ok addr args ∧ R.inv b L g (view R.rt L m) ∧ cost ≤ b ∧ LiveSep L win ∧ LiveSep win R.rt
 
 /-- The shape of a live allocation contract's postcondition (arm64): the callee returned to `X30`
-(`retStateX`, results `res ptr`), memory changed only in `rt` and the callee's window and not in
+(`retStateX`, results `res ptr`), memory changed only in `R.rt` and the callee's window and not in
 the live objects, `Q m ptr` (the object, with its freshness for `L`), the object
 `[ptr, ptr + round)` outside the callee's window, and the invariant for the live set with the
 object and the budget less `cost`. -/
-@[reducible] def LiveAllocRet (R : RtInv) (rt : List (Nat × Nat)) (stack nargs : Nat)
+@[reducible] def LiveAllocRet (R : RtInv) (stack nargs : Nat)
     (res : W64 → List W64) (L : List (Nat × Nat)) (b cost round : Nat) (s s' : State)
     (Q : Memory → Nat → Prop) : Prop :=
   ∃ (ptr : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
     (ex : Option (Nat × Nat)) (ep : Nat → Bool),
     s' = retStateX s junk (res ptr) f v m ex ep ∧
-      MemFrame s.mem m (rt ++ calleeStack s stack nargs) ∧ LiveFrame s.mem m L [] ∧
+      MemFrame s.mem m (R.rt ++ calleeStack s stack nargs) ∧ LiveFrame s.mem m L [] ∧
       Q m ptr.toNat ∧ ApartAll ptr.toNat round (calleeStack s stack nargs) ∧
       R.inv (b - cost) (L ++ [(ptr.toNat, ptr.toNat + round)]) (s.regs 28).toNat
-        (view rt (L ++ [(ptr.toNat, ptr.toNat + round)]) m)
+        (view R.rt (L ++ [(ptr.toNat, ptr.toNat + round)]) m)
 
 /-! ### `mallocgc` -/
 
@@ -434,14 +468,14 @@ object and the budget less `cost`. -/
 /-- **`runtime.mallocgc(size, typ, needzero)`, live** (arm64): `MallocgcContract`'s object
 (fresh, aligned, zeroed as asked), also outside the live set, for as many calls as the budget
 allows (see the module documentation). -/
-def MallocgcLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+def MallocgcLiveContract (p : Program) (addr : Nat) (stack : Nat)
     (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => MallocgcPre stack s ∧ StackRoom s stack 3 ∧
-      LiveAt R rt addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
+      LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
         (s.regs 28).toNat s.mem (calleeStack s stack 3))
-    (fun s s' => LiveAllocRet R rt stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
-      s s' fun m ptr => 0 < (s.regs 0).toNat → mallocgcObj rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L)
+    (fun s s' => LiveAllocRet R stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
+      s s' fun m ptr => 0 < (s.regs 0).toNat → mallocgcObj R.rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L)
 
 /-! ### `newobject` -/
 
@@ -449,15 +483,15 @@ def MallocgcLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (st
   blockSize (typSize s.mem (s.regs 0).toNat) (typNoscan s.mem (s.regs 0).toNat)
 
 /-- **`runtime.newobject(typ)`, live** (arm64). -/
-def NewobjectLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+def NewobjectLiveContract (p : Program) (addr : Nat) (stack : Nat)
     (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => NewobjectPre stack s ∧ StackRoom s stack 1 ∧
-      LiveAt R rt addr [(s.regs 0).toNat] L b (newobjectRound s) (s.regs 28).toNat s.mem
+      LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound s) (s.regs 28).toNat s.mem
         (calleeStack s stack 1))
-    (fun s s' => LiveAllocRet R rt stack 1 (fun ptr => [ptr]) L b (newobjectRound s) (newobjectRound s)
+    (fun s s' => LiveAllocRet R stack 1 (fun ptr => [ptr]) L b (newobjectRound s) (newobjectRound s)
       s s' fun m ptr => 0 < typSize s.mem (s.regs 0).toNat →
-        newobjectObj rt s m ptr ∧ ApartAll ptr (newobjectRound s) L)
+        newobjectObj R.rt s m ptr ∧ ApartAll ptr (newobjectRound s) L)
 
 /-! ### `makeslice` -/
 
@@ -465,15 +499,15 @@ def NewobjectLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (s
   blockSize (typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat) (typNoscan s.mem (s.regs 0).toNat)
 
 /-- **`runtime.makeslice(et, len, cap)`, live** (arm64). -/
-def MakesliceLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+def MakesliceLiveContract (p : Program) (addr : Nat) (stack : Nat)
     (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => MakeslicePre stack s ∧ StackRoom s stack 3 ∧
-      LiveAt R rt addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (makesliceRound s)
+      LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (makesliceRound s)
         (s.regs 28).toNat s.mem (calleeStack s stack 3))
-    (fun s s' => LiveAllocRet R rt stack 3 (fun ptr => [ptr]) L b (makesliceRound s) (makesliceRound s)
+    (fun s s' => LiveAllocRet R stack 3 (fun ptr => [ptr]) L b (makesliceRound s) (makesliceRound s)
       s s' fun m ptr => 0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat →
-        makesliceObj rt s m ptr ∧ ApartAll ptr (makesliceRound s) L)
+        makesliceObj R.rt s m ptr ∧ ApartAll ptr (makesliceRound s) L)
 
 /-! ### `growslice` (8-byte pointer-free elements) -/
 
@@ -482,50 +516,50 @@ def MakesliceLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (s
 /-- **`runtime.growslice`, live** (arm64; 8-byte pointer-free elements, as `GrowsliceContract`):
 the new array holds the old elements and is outside the live set; the old array (in `L` if the
 caller holds it) keeps its contents, and stays in `L`. -/
-def GrowsliceLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
+def GrowsliceLiveContract (p : Program) (addr : Nat) (stack : Nat)
     (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => GrowslicePre stack s ∧ StackRoom s stack 5 ∧
-      LiveAt R rt addr (growsliceArgs s) L b (growsliceRound s) (s.regs 28).toNat s.mem
+      LiveAt R addr (growsliceArgs s) L b (growsliceRound s) (s.regs 28).toNat s.mem
         (calleeStack s stack 5))
-    (fun s s' => LiveAllocRet R rt stack 5
+    (fun s s' => LiveAllocRet R stack 5
       (fun ptr => [ptr, s.regs 1, BitVec.ofNat 64 (growCap8 (s.regs 1).toNat (s.regs 2).toNat)])
       L b (growsliceRound s) (growsliceRound s) s s' fun m ptr =>
-        growsliceObj rt s m ptr ∧ ApartAll ptr (growsliceRound s) L)
+        growsliceObj R.rt s m ptr ∧ ApartAll ptr (growsliceRound s) L)
 
 /-! ### Non-zero sizes -/
 
-theorem MallocgcLiveContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    {R : RtInv} (h : MallocgcLiveContract p addr rt stack R) (L : List (Nat × Nat)) (b : Nat) :
+theorem MallocgcLiveContract.pos {p : Program} {addr : Nat} {stack : Nat}
+    {R : RtInv} (h : MallocgcLiveContract p addr stack R) (L : List (Nat × Nat)) (b : Nat) :
     Summary p addr
       (fun s => (MallocgcPre stack s ∧ StackRoom s stack 3 ∧
-        LiveAt R rt addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
+        LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
           (s.regs 28).toNat s.mem (calleeStack s stack 3)) ∧ 0 < (s.regs 0).toNat)
-      (fun s s' => LiveAllocRet R rt stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
-        s s' fun m ptr => mallocgcObj rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L) :=
+      (fun s s' => LiveAllocRet R stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
+        s s' fun m ptr => mallocgcObj R.rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L) :=
   Summary.mono (h L b) (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3, h4, h5, h6⟩ =>
     ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3, h4 hp.2, h5, h6⟩
 
-theorem NewobjectLiveContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    {R : RtInv} (h : NewobjectLiveContract p addr rt stack R) (L : List (Nat × Nat)) (b : Nat) :
+theorem NewobjectLiveContract.pos {p : Program} {addr : Nat} {stack : Nat}
+    {R : RtInv} (h : NewobjectLiveContract p addr stack R) (L : List (Nat × Nat)) (b : Nat) :
     Summary p addr
       (fun s => (NewobjectPre stack s ∧ StackRoom s stack 1 ∧
-        LiveAt R rt addr [(s.regs 0).toNat] L b (newobjectRound s) (s.regs 28).toNat s.mem
+        LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound s) (s.regs 28).toNat s.mem
           (calleeStack s stack 1)) ∧ 0 < typSize s.mem (s.regs 0).toNat)
-      (fun s s' => LiveAllocRet R rt stack 1 (fun ptr => [ptr]) L b (newobjectRound s) (newobjectRound s)
-        s s' fun m ptr => newobjectObj rt s m ptr ∧ ApartAll ptr (newobjectRound s) L) :=
+      (fun s s' => LiveAllocRet R stack 1 (fun ptr => [ptr]) L b (newobjectRound s) (newobjectRound s)
+        s s' fun m ptr => newobjectObj R.rt s m ptr ∧ ApartAll ptr (newobjectRound s) L) :=
   Summary.mono (h L b) (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3, h4, h5, h6⟩ =>
     ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3, h4 hp.2, h5, h6⟩
 
-theorem MakesliceLiveContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    {R : RtInv} (h : MakesliceLiveContract p addr rt stack R) (L : List (Nat × Nat)) (b : Nat) :
+theorem MakesliceLiveContract.pos {p : Program} {addr : Nat} {stack : Nat}
+    {R : RtInv} (h : MakesliceLiveContract p addr stack R) (L : List (Nat × Nat)) (b : Nat) :
     Summary p addr
       (fun s => (MakeslicePre stack s ∧ StackRoom s stack 3 ∧
-        LiveAt R rt addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (makesliceRound s)
+        LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (makesliceRound s)
           (s.regs 28).toNat s.mem (calleeStack s stack 3)) ∧
         0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat)
-      (fun s s' => LiveAllocRet R rt stack 3 (fun ptr => [ptr]) L b (makesliceRound s) (makesliceRound s)
-        s s' fun m ptr => makesliceObj rt s m ptr ∧ ApartAll ptr (makesliceRound s) L) :=
+      (fun s s' => LiveAllocRet R stack 3 (fun ptr => [ptr]) L b (makesliceRound s) (makesliceRound s)
+        s s' fun m ptr => makesliceObj R.rt s m ptr ∧ ApartAll ptr (makesliceRound s) L) :=
   Summary.mono (h L b) (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3, h4, h5, h6⟩ =>
     ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3, h4 hp.2, h5, h6⟩
 
@@ -533,51 +567,51 @@ theorem MakesliceLiveContract.pos {p : Program} {addr : Nat} {rt : List (Nat × 
 
 /-- **`runtime.mallocgcSmallNoScanSC<n>`, live** (arm64): `MallocgcLiveContract` at the calls of
 the entry point (`NoScanArgs n`). -/
-def MallocgcSmallNoScanSCLiveContract (n : Nat) (p : Program) (addr : Nat) (rt : List (Nat × Nat))
+def MallocgcSmallNoScanSCLiveContract (n : Nat) (p : Program) (addr : Nat)
     (stack : Nat) (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => (MallocgcPre stack s ∧ StackRoom s stack 3 ∧
-      LiveAt R rt addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
+      LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
         (s.regs 28).toNat s.mem (calleeStack s stack 3)) ∧
       NoScanArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat)
-    (fun s s' => LiveAllocRet R rt stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
-      s s' fun m ptr => mallocgcObj rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L)
+    (fun s s' => LiveAllocRet R stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
+      s s' fun m ptr => mallocgcObj R.rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L)
 
 /-- **`runtime.mallocgcSmallScanNoHeaderSC<n>`, live** (arm64). -/
 def MallocgcSmallScanNoHeaderSCLiveContract (n : Nat) (p : Program) (addr : Nat)
-    (rt : List (Nat × Nat)) (stack : Nat) (R : RtInv) : Prop :=
-  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
-    (fun s => (MallocgcPre stack s ∧ StackRoom s stack 3 ∧
-      LiveAt R rt addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
-        (s.regs 28).toNat s.mem (calleeStack s stack 3)) ∧
-      ScanArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat)
-    (fun s s' => LiveAllocRet R rt stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
-      s s' fun m ptr => mallocgcObj rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L)
-
-/-- **`runtime.mallocgcTinySize<n>`, live** (arm64). -/
-def MallocgcTinySizeLiveContract (n : Nat) (p : Program) (addr : Nat) (rt : List (Nat × Nat))
     (stack : Nat) (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => (MallocgcPre stack s ∧ StackRoom s stack 3 ∧
-      LiveAt R rt addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
+      LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
+        (s.regs 28).toNat s.mem (calleeStack s stack 3)) ∧
+      ScanArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat)
+    (fun s s' => LiveAllocRet R stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
+      s s' fun m ptr => mallocgcObj R.rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L)
+
+/-- **`runtime.mallocgcTinySize<n>`, live** (arm64). -/
+def MallocgcTinySizeLiveContract (n : Nat) (p : Program) (addr : Nat)
+    (stack : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => (MallocgcPre stack s ∧ StackRoom s stack 3 ∧
+      LiveAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
         (s.regs 28).toNat s.mem (calleeStack s stack 3)) ∧
       TinyArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat)
-    (fun s s' => LiveAllocRet R rt stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
-      s s' fun m ptr => mallocgcObj rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L)
+    (fun s s' => LiveAllocRet R stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
+      s s' fun m ptr => mallocgcObj R.rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L)
 
 theorem MallocgcLiveContract.smallNoScanSC {n : Nat} {p : Program} {addr : Nat} {rt : List (Nat × Nat)}
-    {stack : Nat} {R : RtInv} (h : MallocgcLiveContract p addr rt stack R) :
-    MallocgcSmallNoScanSCLiveContract n p addr rt stack R := fun L b =>
+    {stack : Nat} {R : RtInv} (h : MallocgcLiveContract p addr stack R) :
+    MallocgcSmallNoScanSCLiveContract n p addr stack R := fun L b =>
   Summary.mono (h.pos L b) (fun _ h => ⟨h.1, by have := h.2.1; omega⟩) fun _ _ _ h => h
 
 theorem MallocgcLiveContract.smallScanNoHeaderSC {n : Nat} {p : Program} {addr : Nat}
-    {rt : List (Nat × Nat)} {stack : Nat} {R : RtInv} (h : MallocgcLiveContract p addr rt stack R) :
-    MallocgcSmallScanNoHeaderSCLiveContract n p addr rt stack R := fun L b =>
+    {stack : Nat} {R : RtInv} (h : MallocgcLiveContract p addr stack R) :
+    MallocgcSmallScanNoHeaderSCLiveContract n p addr stack R := fun L b =>
   Summary.mono (h.pos L b) (fun _ h => ⟨h.1, h.2.1⟩) fun _ _ _ h => h
 
 theorem MallocgcLiveContract.tinySize {n : Nat} {p : Program} {addr : Nat} {rt : List (Nat × Nat)}
-    {stack : Nat} {R : RtInv} (h : MallocgcLiveContract p addr rt stack R) :
-    MallocgcTinySizeLiveContract n p addr rt stack R := fun L b =>
+    {stack : Nat} {R : RtInv} (h : MallocgcLiveContract p addr stack R) :
+    MallocgcTinySizeLiveContract n p addr stack R := fun L b =>
   Summary.mono (h.pos L b) (fun _ h => ⟨h.1, by obtain ⟨h0, -, hs, -⟩ := h.2; omega⟩) fun _ _ _ h => h
 
 /-! ### The write barrier (`gcWriteBarrierN`) -/
@@ -593,22 +627,104 @@ attribute [janus_exec, janus_post] wbRetX
 
 /-- **`runtime.gcWriteBarrierN`, live** (arm64, `N = n`): as `WbContract`, from a call at which
 the invariant holds (with the barrier on or off: the contract does not mention the flag); the
-`8·n` slots it returns are inside `rt`, outside the live set and the stack window, the live
+`8·n` slots it returns are inside `R.rt`, outside the live set and the stack window, the live
 objects are unchanged, and the invariant holds again whatever the caller stores into the slots
 (`InvSlots`). The barrier allocates nothing: the budget is unchanged. -/
-def WbLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) (R : RtInv)
+def WbLiveContract (p : Program) (addr : Nat) (stack : Nat) (R : RtInv)
     (n : Nat) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
-    (fun s => CallOK s stack 0 ∧ R.ok addr [n] ∧ R.inv b L (s.regs 28).toNat (view rt L s.mem) ∧
+    (fun s => CallOK s stack 0 ∧ R.ok addr [n] ∧ R.inv b L (s.regs 28).toNat (view R.rt L s.mem) ∧
       LiveSep L [(s.sp.toNat - stack, s.sp.toNat - 8)] ∧
-      LiveSep [(s.sp.toNat - stack, s.sp.toNat - 8)] rt)
+      LiveSep [(s.sp.toNat - stack, s.sp.toNat - 8)] R.rt)
     (fun s s' => ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
         (ex : Option (Nat × Nat)) (ep : Nat → Bool),
       s' = wbRetX s junk buf f v m ex ep ∧
-      MemFrame s.mem m (rt ++ [(s.sp.toNat - stack, s.sp.toNat - 8)]) ∧ LiveFrame s.mem m L [] ∧
-      WbSlots rt m buf.toNat n ∧ ApartAll buf.toNat (8 * n) L ∧
+      MemFrame s.mem m (R.rt ++ [(s.sp.toNat - stack, s.sp.toNat - 8)]) ∧ LiveFrame s.mem m L [] ∧
+      WbSlots R.rt m buf.toNat n ∧ ApartAll buf.toNat (8 * n) L ∧
       ApartAll buf.toNat (8 * n) [(s.sp.toNat - stack, s.sp.toNat - 8)] ∧
-      InvSlots R b L (s.regs 28).toNat rt m buf.toNat n)
+      InvSlots R b L (s.regs 28).toNat R.rt m buf.toNat n)
+
+/-! ## Memory copies and clears (`memmove`, `memclrNoHeapPointers`, the typed variants)
+
+The same runtime hypothesis `R` is threaded through them. The destination `[a, a+n)` is either a
+live object (`InRanges a n L`) or caller memory outside the runtime (`Outside a n R.rt`), so a
+copy never changes the view (`view_writeLE_live`, `view_writeLE_out`): the invariant holds again
+for the same `L` and `b`. They allocate nothing (cost 0) and are indifferent to the write-barrier
+flag (the typed variants call `bulkBarrierPreWrite`, which touches runtime memory only). -/
+
+/-- The destination of a copy or clear in a call at `s` (`nargs` arguments, stack bound `d`):
+`n` writable bytes at `a`, below `2^48`, outside the callee's window, and either inside a live
+object or outside the runtime-owned ranges. -/
+def LiveDest (R : RtInv) (L : List (Nat × Nat)) (s : State) (d nargs a n : Nat) : Prop :=
+  a + n ≤ 2 ^ 48 ∧ s.mem.accessible a n true = true ∧ Outside a n (calleeStack s d nargs) ∧
+    (InRanges a n L ∨ Outside a n R.rt)
+
+/-- The return of a live copy or clear (arm64): as `Mem.TRet` (`Map.keepABI` registers, memory
+changed only in `R.rt`, the callee's window and the destination `extra`), the live objects
+unchanged except in `extra`, and the invariant again for the same `L` and `b`. -/
+def LiveMemRet (R : RtInv) (d nargs : Nat) (extra L : List (Nat × Nat)) (b : Nat) (s s' : State)
+    (P : Memory → Prop) : Prop :=
+  ∃ r v fl fs m, s' = { s with regs := Map.keepABI s.regs r, vregs := v, flags := fl, fpsr := fs,
+                               mem := m, pc := s.regs 30 } ∧
+    MemFrame s.mem m (R.rt ++ calleeStack s d nargs ++ extra) ∧ LiveFrame s.mem m L extra ∧
+    R.inv b L (s.regs 28).toNat (view R.rt L m) ∧ P m
+
+/-- The live part of a copy's precondition: served, invariant, live set and window apart. -/
+@[reducible] def LiveMemAt (R : RtInv) (addr : Nat) (args : List Nat) (L : List (Nat × Nat)) (b : Nat)
+    (s : State) (win : List (Nat × Nat)) : Prop :=
+  R.ok addr args ∧ R.inv b L (s.regs 28).toNat (view R.rt L s.mem) ∧ LiveSep L win ∧ LiveSep win R.rt
+
+/-- **`runtime.memmove(dst, src, n)`, live** (`X0 = dst`, `X1 = src`, `X2 = n`). -/
+def MemmoveLive (p : Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => Mem.EqPre d 3 s ∧
+      LiveMemAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s d 3) ∧
+      Mem.Input s d 3 (s.regs 1).toNat (s.regs 2).toNat ∧
+      LiveDest R L s d 3 (s.regs 0).toNat (s.regs 2).toNat)
+    (fun s s' => LiveMemRet R d 3 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 2).toNat)] L b s s'
+      fun m => Mem.Copied s.mem m (s.regs 0).toNat (s.regs 1).toNat (s.regs 2).toNat)
+
+/-- **`runtime.memclrNoHeapPointers(ptr, n)`, live** (`X0 = ptr`, `X1 = n`). -/
+def MemclrNoHeapPointersLive (p : Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => Mem.EqPre d 2 s ∧
+      LiveMemAt R addr [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s d 2) ∧
+      LiveDest R L s d 2 (s.regs 0).toNat (s.regs 1).toNat)
+    (fun s s' => LiveMemRet R d 2 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 1).toNat)] L b s s'
+      fun m => Mem.Zeroed m (s.regs 0).toNat (s.regs 1).toNat)
+
+/-- **`runtime.typedmemmove(typ, dst, src)`, live** (barrier on or off). -/
+def TypedMemmoveLive (p : Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => Mem.EqPre d 3 s ∧
+      LiveMemAt R addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s d 3) ∧
+      TypeOK s.mem (s.regs 0).toNat ∧ Outside (s.regs 0).toNat 16 (calleeStack s d 3) ∧
+      Mem.Input s d 3 (s.regs 2).toNat (typSize s.mem (s.regs 0).toNat) ∧
+      LiveDest R L s d 3 (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat))
+    (fun s s' => LiveMemRet R d 3
+      [((s.regs 1).toNat, (s.regs 1).toNat + typSize s.mem (s.regs 0).toNat)] L b s s'
+      fun m => Mem.Copied s.mem m (s.regs 1).toNat (s.regs 2).toNat (typSize s.mem (s.regs 0).toNat))
+
+/-- **`runtime.typedmemclr(typ, ptr)`, live**. -/
+def TypedMemclrLive (p : Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => Mem.EqPre d 2 s ∧
+      LiveMemAt R addr [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s d 2) ∧
+      TypeOK s.mem (s.regs 0).toNat ∧ Outside (s.regs 0).toNat 16 (calleeStack s d 2) ∧
+      LiveDest R L s d 2 (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat))
+    (fun s s' => LiveMemRet R d 2
+      [((s.regs 1).toNat, (s.regs 1).toNat + typSize s.mem (s.regs 0).toNat)] L b s s'
+      fun m => Mem.Zeroed m (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat))
+
+/-- **`runtime.memclrHasPointers(ptr, n)`, live** (both multiples of 8). -/
+def MemclrHasPointersLive (p : Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
+    (fun s => Mem.EqPre d 2 s ∧
+      LiveMemAt R addr [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s d 2) ∧
+      (s.regs 0).toNat % 8 = 0 ∧ (s.regs 1).toNat % 8 = 0 ∧
+      LiveDest R L s d 2 (s.regs 0).toNat (s.regs 1).toNat)
+    (fun s s' => LiveMemRet R d 2 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 1).toNat)] L b s s'
+      fun m => Mem.Zeroed m (s.regs 0).toNat (s.regs 1).toNat)
 
 /-! ## The string, slice and bulk-barrier specs, live -/
 
@@ -621,7 +737,7 @@ structure LiveSpec where
   keep : List Nat → Memory → Nat → Nat → Nat → List (Nat × Nat) := fun _ _ _ _ _ => []
 
 /-- The precondition of `RtLiveContract` (arm64). -/
-@[reducible] def RtLivePre (rt : List (Nat × Nat)) (stack : Nat) (R : RtInv) (sp : RtSpec) (ls : LiveSpec)
+@[reducible] def RtLivePre (stack : Nat) (R : RtInv) (sp : RtSpec) (ls : LiveSpec)
     (addr : Nat) (L : List (Nat × Nat)) (b : Nat) (s : State) : Prop :=
   CallOK s stack sp.nargs ∧ sp.pre (argWords s sp.nargs) s.mem ∧
     ReadsOutside (sp.reads (argWords s sp.nargs) s.mem) (calleeStack s stack sp.nargs) ∧
@@ -630,7 +746,7 @@ structure LiveSpec where
           Outside ((s.regs 28).toNat + 16) 8 (calleeStack s stack sp.nargs)
       | none => True) ∧
     StackRoom s stack sp.nargs ∧
-    LiveAt R rt addr (argWords s sp.nargs) L b (ls.cost (argWords s sp.nargs) s.mem) (s.regs 28).toNat
+    LiveAt R addr (argWords s sp.nargs) L b (ls.cost (argWords s sp.nargs) s.mem) (s.regs 28).toNat
       s.mem (calleeStack s stack sp.nargs)
 
 /-- The objects a live `RtSpec` call adds to the live set. -/
@@ -638,26 +754,26 @@ structure LiveSpec where
   ls.fresh a m r0 r1 r2 ++ ls.keep a m r0 r1 r2
 
 /-- The postcondition of `RtLiveContract` (arm64). -/
-@[reducible] def RtLivePost (rt : List (Nat × Nat)) (stack : Nat) (R : RtInv) (sp : RtSpec) (ls : LiveSpec)
+@[reducible] def RtLivePost (stack : Nat) (R : RtInv) (sp : RtSpec) (ls : LiveSpec)
     (L : List (Nat × Nat)) (b : Nat) (s s' : State) : Prop :=
   ∃ (r0 r1 r2 : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
     (ex : Option (Nat × Nat)) (ep : Nat → Bool),
     s' = retStateX s junk [r0, r1, r2] f v m ex ep ∧
-      MemFrame s.mem m (rtIf sp.rtWrites rt ++ calleeStack s stack sp.nargs ++
+      MemFrame s.mem m (rtIf sp.rtWrites R.rt ++ calleeStack s stack sp.nargs ++
         sp.writes (argWords s sp.nargs) s.mem) ∧
-      sp.post rt (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat m ∧
+      sp.post R.rt (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat m ∧
       LiveFrame s.mem m L (sp.writes (argWords s sp.nargs) s.mem) ∧
       FreshFrom (ls.fresh (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat) L ∧
       LiveApart (liveAdds ls (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat) (calleeStack s stack sp.nargs) ∧
       R.inv (b - ls.cost (argWords s sp.nargs) s.mem)
         (L ++ liveAdds ls (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat) (s.regs 28).toNat
-        (view rt (L ++ liveAdds ls (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat) m)
+        (view R.rt (L ++ liveAdds ls (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat) m)
 
 /-- **The live arm64 contract of the spec `sp`** (with the live data `ls`) at `addr`. -/
-def RtLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) (R : RtInv)
+def RtLiveContract (p : Program) (addr : Nat) (stack : Nat) (R : RtInv)
     (sp : RtSpec) (ls : LiveSpec) : Prop :=
-  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr (RtLivePre rt stack R sp ls addr L b)
-    (RtLivePost rt stack R sp ls L b)
+  ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr (RtLivePre stack R sp ls addr L b)
+    (RtLivePost stack R sp ls L b)
 
 /-! ### The live data of each spec -/
 
@@ -800,9 +916,9 @@ attribute [janus_exec, janus_post, janus64_exec, janus64_post] range0 strKeep by
 
 /-! ## The single-call contracts follow from the live ones
 
-A theorem proved against a round 9 contract (`NewobjectContract p addr rt stack H`, for every
+A theorem proved against a round 9 contract (`NewobjectContract p addr R.rt stack H`, for every
 `H`) holds under the live contract too: the live contract implies the single-call one for the
-readiness predicate `liveReady rt (LiveCall …)`, which holds at a call when, for **every** memory
+readiness predicate `liveReady R.rt (LiveCall …)`, which holds at a call when, for **every** memory
 the runtime sees as it does, the stack check falls through and the live part of the
 precondition holds for some live set and budget (`NewobjectLiveContract.ready`, …). So simple
 single-allocation proofs keep their short form (`H` at the entry, `janus_run calls [h]`). -/
@@ -818,11 +934,11 @@ def liveReady (rt : List (Nat × Nat)) (P : List Nat → Nat → Nat → Memory 
 
 /-- The runtime's stack check and the live part of a call's precondition (arm64), from its
 arguments, `g`, `SP` and memory, for some live set and budget. -/
-def LiveCall (R : RtInv) (rt : List (Nat × Nat)) (addr stack nargs : Nat)
+def LiveCall (R : RtInv) (addr stack nargs : Nat)
     (cost : List Nat → Memory → Nat) (args : List Nat) (g sp : Nat) (m : Memory) : Prop :=
   (g + 24 ≤ 2 ^ 48 ∧ m.accessible (g + 16) 8 false = true ∧ m.readLE (g + 16) 8 + stack < sp ∧
     Outside (g + 16) 8 (windowAt sp stack nargs)) ∧
-  ∃ L b, LiveAt R rt addr args L b (cost args m) g m (windowAt sp stack nargs)
+  ∃ L b, LiveAt R addr args L b (cost args m) g m (windowAt sp stack nargs)
 
 /-- A family of summaries, one per live set and budget, gives every summary whose precondition
 picks one and whose postcondition follows from that one's. -/
@@ -835,6 +951,17 @@ theorem Summary.of_live {p : Program} {addr : Nat} {pre : State → Prop} {post 
   obtain ⟨k, s', hst, hr, hq⟩ := h a b s hpc hl
   exact ⟨k, s', hst, hr, hpost a b s s' hl hq⟩
 
+/-- As `Summary.of_live`, with the choice of the family member made together with the
+postcondition's consequence (for a caller-side choice such as the empty live set). -/
+theorem Summary.of_live' {p : Program} {addr : Nat} {pre : State → Prop} {post : State → State → Prop}
+    {α β : Type} {lpre : α → β → State → Prop} {lpost : α → β → State → State → Prop}
+    (h : ∀ a b, Summary p addr (lpre a b) (lpost a b))
+    (hpre : ∀ s, pre s → ∃ a b, lpre a b s ∧ ∀ s', lpost a b s s' → post s s') : Summary p addr pre post := by
+  intro s hpc hp
+  obtain ⟨a, b, hl, hq⟩ := hpre s hp
+  obtain ⟨k, s', hst, hr, hq'⟩ := h a b s hpc hl
+  exact ⟨k, s', hst, hr, hq s' hq'⟩
+
 /-- The costs of the allocation contracts, from the argument words and the memory. -/
 def mallocgcCost (a : List Nat) (m : Memory) : Nat := blockSize (arg a 0) (arg a 1 == 0 || typNoscan m (arg a 1))
 def newobjectCost (a : List Nat) (m : Memory) : Nat := blockSize (typSize m (arg a 0)) (typNoscan m (arg a 0))
@@ -842,36 +969,36 @@ def makesliceCost (a : List Nat) (m : Memory) : Nat :=
   blockSize (typSize m (arg a 0) * arg a 2) (typNoscan m (arg a 0))
 def growsliceCost (a : List Nat) (_ : Memory) : Nat := 8 * growCap8 (arg a 1) (arg a 2)
 
-theorem MallocgcLiveContract.ready {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    {R : RtInv} (h : MallocgcLiveContract p addr rt stack R) :
-    MallocgcContract p addr rt stack (liveReady rt (LiveCall R rt addr stack 3 mallocgcCost)) :=
+theorem MallocgcLiveContract.ready {p : Program} {addr : Nat} {stack : Nat}
+    {R : RtInv} (h : MallocgcLiveContract p addr stack R) :
+    MallocgcContract p addr R.rt stack (liveReady R.rt (LiveCall R addr stack 3 mallocgcCost)) :=
   Summary.of_live h (fun s ⟨hpre, hH⟩ => by
       obtain ⟨⟨g1, g2, g3, g4⟩, L, b, hl⟩ := hH s.mem rfl
       exact ⟨L, b, hpre, ⟨⟨g1, g2, g3⟩, g4⟩, hl⟩)
     (fun _ _ _ _ _ ⟨ptr, j, f, v, m, ex, ep, h1, h2, _, h4, _⟩ =>
       ⟨ptr, j, f, v, m, ex, ep, h1, h2, fun hp => (h4 hp).1⟩)
 
-theorem NewobjectLiveContract.ready {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    {R : RtInv} (h : NewobjectLiveContract p addr rt stack R) :
-    NewobjectContract p addr rt stack (liveReady rt (LiveCall R rt addr stack 1 newobjectCost)) :=
+theorem NewobjectLiveContract.ready {p : Program} {addr : Nat} {stack : Nat}
+    {R : RtInv} (h : NewobjectLiveContract p addr stack R) :
+    NewobjectContract p addr R.rt stack (liveReady R.rt (LiveCall R addr stack 1 newobjectCost)) :=
   Summary.of_live h (fun s ⟨hpre, hH⟩ => by
       obtain ⟨⟨g1, g2, g3, g4⟩, L, b, hl⟩ := hH s.mem rfl
       exact ⟨L, b, hpre, ⟨⟨g1, g2, g3⟩, g4⟩, hl⟩)
     (fun _ _ _ _ _ ⟨ptr, j, f, v, m, ex, ep, h1, h2, _, h4, _⟩ =>
       ⟨ptr, j, f, v, m, ex, ep, h1, h2, fun hp => (h4 hp).1⟩)
 
-theorem MakesliceLiveContract.ready {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    {R : RtInv} (h : MakesliceLiveContract p addr rt stack R) :
-    MakesliceContract p addr rt stack (liveReady rt (LiveCall R rt addr stack 3 makesliceCost)) :=
+theorem MakesliceLiveContract.ready {p : Program} {addr : Nat} {stack : Nat}
+    {R : RtInv} (h : MakesliceLiveContract p addr stack R) :
+    MakesliceContract p addr R.rt stack (liveReady R.rt (LiveCall R addr stack 3 makesliceCost)) :=
   Summary.of_live h (fun s ⟨hpre, hH⟩ => by
       obtain ⟨⟨g1, g2, g3, g4⟩, L, b, hl⟩ := hH s.mem rfl
       exact ⟨L, b, hpre, ⟨⟨g1, g2, g3⟩, g4⟩, hl⟩)
     (fun _ _ _ _ _ ⟨ptr, j, f, v, m, ex, ep, h1, h2, _, h4, _⟩ =>
       ⟨ptr, j, f, v, m, ex, ep, h1, h2, fun hp => (h4 hp).1⟩)
 
-theorem GrowsliceLiveContract.ready {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    {R : RtInv} (h : GrowsliceLiveContract p addr rt stack R) :
-    GrowsliceContract p addr rt stack (liveReady rt (LiveCall R rt addr stack 5 growsliceCost)) :=
+theorem GrowsliceLiveContract.ready {p : Program} {addr : Nat} {stack : Nat}
+    {R : RtInv} (h : GrowsliceLiveContract p addr stack R) :
+    GrowsliceContract p addr R.rt stack (liveReady R.rt (LiveCall R addr stack 5 growsliceCost)) :=
   Summary.of_live h (fun s ⟨hpre, hH⟩ => by
       obtain ⟨⟨g1, g2, g3, g4⟩, L, b, hl⟩ := hH s.mem rfl
       exact ⟨L, b, hpre, ⟨⟨g1, g2, g3⟩, g4⟩, hl⟩)
@@ -879,32 +1006,75 @@ theorem GrowsliceLiveContract.ready {p : Program} {addr : Nat} {rt : List (Nat �
       ⟨ptr, j, f, v, m, ex, ep, h1, h2, h4.1⟩)
 
 /-- The live part of a write barrier's precondition (arm64). -/
-def LiveCallWb (R : RtInv) (rt : List (Nat × Nat)) (addr stack : Nat) (args : List Nat) (g sp : Nat)
+def LiveCallWb (R : RtInv) (addr stack : Nat) (args : List Nat) (g sp : Nat)
     (m : Memory) : Prop :=
-  ∃ L b, R.ok addr args ∧ R.inv b L g (view rt L m) ∧ LiveSep L [(sp - stack, sp - 8)] ∧
-    LiveSep [(sp - stack, sp - 8)] rt
+  ∃ L b, R.ok addr args ∧ R.inv b L g (view R.rt L m) ∧ LiveSep L [(sp - stack, sp - 8)] ∧
+    LiveSep [(sp - stack, sp - 8)] R.rt
 
-theorem WbLiveContract.ready {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    {R : RtInv} {n : Nat} (h : WbLiveContract p addr rt stack R n) :
-    WbContract p addr rt stack (liveReady rt (LiveCallWb R rt addr stack)) n :=
+theorem WbLiveContract.ready {p : Program} {addr : Nat} {stack : Nat}
+    {R : RtInv} {n : Nat} (h : WbLiveContract p addr stack R n) :
+    WbContract p addr R.rt stack (liveReady R.rt (LiveCallWb R addr stack)) n :=
   Summary.of_live h (fun s ⟨hc, hH⟩ => by
       obtain ⟨L, b, hl⟩ := hH s.mem rfl
       exact ⟨L, b, hc, hl⟩)
     (fun _ _ _ _ _ ⟨buf, j, f, v, m, ex, ep, h1, h2, _, h4, _⟩ => ⟨buf, j, f, v, m, ex, ep, h1, h2, h4⟩)
 
 /-- The live part of an `RtSpec` call's precondition (arm64). -/
-def LiveCallRt (R : RtInv) (rt : List (Nat × Nat)) (addr stack : Nat) (sp : RtSpec) (ls : LiveSpec) :
+def LiveCallRt (R : RtInv) (addr stack : Nat) (sp : RtSpec) (ls : LiveSpec) :
     List Nat → Nat → Nat → Memory → Prop :=
-  LiveCall R rt addr stack sp.nargs ls.cost
+  LiveCall R addr stack sp.nargs ls.cost
 
-theorem RtLiveContract.ready {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
-    {R : RtInv} {sp : RtSpec} {ls : LiveSpec} (h : RtLiveContract p addr rt stack R sp ls)
+theorem RtLiveContract.ready {p : Program} {addr : Nat} {stack : Nat}
+    {R : RtInv} {sp : RtSpec} {ls : LiveSpec} (h : RtLiveContract p addr stack R sp ls)
     (hr : sp.ready = true) :
-    RtContract p addr rt stack (liveReady rt (LiveCallRt R rt addr stack sp ls)) sp :=
+    RtContract p addr R.rt stack (liveReady R.rt (LiveCallRt R addr stack sp ls)) sp :=
   Summary.of_live h (fun s ⟨hc, hpre, hreads, hg, hH⟩ => by
       obtain ⟨⟨g1, g2, g3, g4⟩, L, b, hl⟩ := ready_of hr hH s.mem rfl
       exact ⟨L, b, hc, hpre, hreads, hg, ⟨⟨g1, g2, g3⟩, g4⟩, hl⟩)
     (fun _ _ _ _ _ ⟨r0, r1, r2, j, f, v, m, ex, ep, h1, h2, h3, _⟩ =>
       ⟨r0, r1, r2, j, f, v, m, ex, ep, h1, h2, h3⟩)
+
+/-! ### The `MemModel` contracts as derived lemmas
+
+`MemModel.ofRt R` is the round 10 model of the live runtime `R`: its private memory is `R.rt` and
+the environment holds when the invariant holds for the empty live set and some budget. The old
+contracts over it (`Mem.Memmove`, …, with the barrier off) follow from the live ones, for a runtime
+that serves every request at the function's address (`hok`). So a proof against `MemModel`
+contracts applies to a live runtime unchanged. -/
+
+open Janus.Spec.Map in
+/-- The `MemModel` of a live runtime. -/
+def MemModel.ofRt (R : RtInv) : Mem.MemModel where
+  Env m g := ∃ b, R.inv b [] g.toNat (view R.rt [] m)
+  priv := R.rt
+
+open Janus.Spec.Map in
+theorem MemModel.ofRt_laws (R : RtInv) : (MemModel.ofRt R).Laws where
+  env_frame m m' g := fun ⟨b, hb⟩ hag => ⟨b, R.ext b [] g.toNat _ _ (fun a => by
+    simp only [view]
+    by_cases h : inRs R.rt a = true
+    · have := hag.2 a (by
+        simp only [inRs, List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq] at h
+        obtain ⟨r, hr, h1, h2⟩ := h
+        exact ⟨r, hr, h1, by omega⟩)
+      simp [h, this]
+    · simp [h]) (fun a n w => by simp only [view_accessible]; exact hag.1 a n w) hb⟩
+
+/-- The callee's window is outside `rt` when `[sp - d, sp + 8 + 8·nargs)` is. -/
+theorem liveSep_win {rt : List (Nat × Nat)} {s : State} {d nargs : Nat}
+    (h : Outside (s.sp.toNat - d) (d + 8 + 8 * nargs) rt) : LiveSep (calleeStack s d nargs) rt := by
+  intro r hr
+  simp only [calleeStack, List.mem_cons, List.not_mem_nil, or_false] at hr
+  rcases hr with rfl | rfl
+  · exact h.of_sub (by omega) (by omega)
+  · exact h.of_sub (by omega) (by omega)
+
+/-- A live runtime's `Memmove` gives the `MemModel` one (for the barrier-independent contract). -/
+theorem MemmoveLive.toOld {p : Program} {addr d : Nat} {R : RtInv} (h : MemmoveLive p addr d R)
+    (hok : ∀ args, R.ok addr args) : Mem.Memmove p addr (MemModel.ofRt R) d :=
+  Summary.of_live' h
+    (fun s ⟨⟨b, hb⟩, hq, hwin, hin, ha, hacc, hw, hd⟩ => ⟨[], b, ⟨hq, ⟨hok _, hb, by simp, liveSep_win hwin⟩, hin,
+      ⟨ha, hacc, hw, Or.inr hd⟩⟩, fun _ ⟨r, v, fl, fs, m, hs, hf, _, hinv, hP⟩ =>
+        ⟨r, v, fl, fs, m, hs, hf, ⟨b, hinv⟩, hP⟩⟩)
 
 end Janus.Contracts
