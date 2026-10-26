@@ -1,5 +1,6 @@
 import Janus.Spec.Map
 import Janus.Amd64.TacticExt
+import Janus.Contracts.AllocAmd64
 
 /-!
 # Contracts of the Go map runtime (amd64)
@@ -37,6 +38,10 @@ def keepX15 (f x : Nat → W128) : Nat → W128 := fun i => if i = 15 then f 15 
 below the return-address slot, and the spill slots `[RSP + 8, RSP + 8 + 8·nargs)`. -/
 def calleeStack (s : State) (stack nargs : Nat) : List (Nat × Nat) :=
   [((s.regs 4).toNat - stack, (s.regs 4).toNat), ((s.regs 4).toNat + 8, (s.regs 4).toNat + 8 + 8 * nargs)]
+
+/-- The return-address slot `[RSP, RSP + 8)` of a call (amd64): the callee's `RET` reads it, so
+memory a call writes (the iterator struct of `mapIterStart`/`mapIterNext`) must not overlap it. -/
+def retSlot (s : State) : List (Nat × Nat) := [((s.regs 4).toNat, (s.regs 4).toNat + 8)]
 
 /-- What every map runtime call with `nargs` register arguments needs (amd64): the runtime
 environment (`M.Env`, with the goroutine in `R14`), the stack guard at least `M.depth` bytes
@@ -140,13 +145,26 @@ def Access2 (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (Bi
       IsMap M m (s.regs 3).toNat f ∧ SlotHolds M m (r 0).toNat ((f (s.regs 1)).getD 0) ∧
       (r 3).toNat % 256 = (f (s.regs 1)).isSome.toNat)
 
-/-- `runtime.mapassign_fast64(t, m, k)` on a non-nil map: returns a writable value slot `p` in
-the runtime's memory such that storing any `v` there (8 bytes) makes the map `f` with `k ↦ v`.
-The compiled `m[k] = v` performs exactly that store right after the call. -/
-def Assign (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) : Prop :=
+/-- The facts about the value slot `p` (`vs` bytes) an assignment returns (amd64), as
+`Map.AssignSlot`: writable, in the runtime's memory, and storing any `v` there makes the map
+`f` with `k ↦ v`, with the environment (goroutine `g`) intact and the other maps unchanged. -/
+def AssignSlot {K : Type} [DecidableEq K] (vs : Nat) (M : MapModel K (BitVec (8 * vs))) (mp : Nat)
+    (f : AMap K (BitVec (8 * vs))) (k : K) (g : W64) (p : Nat) (m : Janus.Arm64.Memory) : Prop :=
+  m.accessible p vs true = true ∧ InRanges p vs M.priv ∧
+    ∀ v : BitVec (8 * vs), M.Rep (m.writeLE p vs v.toNat) mp (f.set k v) ∧
+      M.Env (m.writeLE p vs v.toNat) g ∧ OthersKept M m (m.writeLE p vs v.toNat) mp
+
+/-- `runtime.mapassign_fast64(t, m, k)` on a non-nil map, **when the runtime is ready for the
+call** (`H`: `Contracts.Ready64 H M.priv args s`, round 9 C1; see `Map.Assign` for why it is
+needed): returns a writable value slot `p` in the runtime's memory such that storing any `v`
+there (8 bytes) makes the map `f` with `k ↦ v`. The compiled `m[k] = v` performs exactly that
+store right after the call. -/
+def Assign (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64))
+    (H : Contracts.RtReady) : Prop :=
   ∀ f, Janus.Amd64.Tactic.Summary p addr
     (fun s => RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ (s.regs 3).toNat ≠ 0 ∧
-      M.Rep s.mem (s.regs 3).toNat f)
+      M.Rep s.mem (s.regs 3).toNat f ∧
+      Contracts.Ready64 H M.priv [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s)
     (fun s s' => RTReturn M 3 [] (s.regs 3).toNat s s' fun r m =>
       m.accessible (r 0).toNat 8 true = true ∧ InRanges (r 0).toNat 8 M.priv ∧
       ∀ v : BitVec 64, M.Rep (m.writeLE (r 0).toNat 8 v.toNat) (s.regs 3).toNat (f.set (s.regs 1) v) ∧
@@ -168,10 +186,12 @@ def Clear {K V : Type} (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel K V)
     (fun s s' => RTReturn M 2 [] (s.regs 3).toNat s s' fun _ m =>
       IsMap M m (s.regs 3).toNat AMap.empty)
 
-/-- `runtime.makemap_small()`: returns a new, non-nil, empty map, distinct from every map that
-existed before. -/
-def MakeSmall {K V : Type} (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel K V) : Prop :=
-  Janus.Amd64.Tactic.Summary p addr (fun s => RTPre M 0 s)
+/-- `runtime.makemap_small()`, **when the runtime is ready for the call** (`H` with no
+arguments, `Contracts.Ready64`; see `Map.MakeSmall`): returns a new, non-nil, empty map,
+distinct from every map that existed before. -/
+def MakeSmall {K V : Type} (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel K V)
+    (H : Contracts.RtReady) : Prop :=
+  Janus.Amd64.Tactic.Summary p addr (fun s => RTPre M 0 s ∧ Contracts.Ready64 H M.priv [] s)
     (fun s s' => RTReturn M 0 [] 0 s s' fun r m =>
       (r 0).toNat ≠ 0 ∧ M.Rep m (r 0).toNat AMap.empty ∧
       ∀ mp f, M.Rep s.mem mp f → mp ≠ (r 0).toNat)
@@ -190,7 +210,9 @@ def IterStart (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (
   ∀ f, Janus.Amd64.Tactic.Summary p addr
     (fun s => RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 3).toNat f ∧
       s.mem.accessible (s.regs 1).toNat iterSize true = true ∧
-      Outside (s.regs 1).toNat iterSize M.priv)
+      Outside (s.regs 1).toNat iterSize M.priv ∧
+      Outside (s.regs 1).toNat iterSize (calleeStack s M.depth 3) ∧
+      Outside (s.regs 1).toNat iterSize (retSlot s))
     (fun s s' => RTReturn M 3 [((s.regs 1).toNat, (s.regs 1).toNat + iterSize)] (s.regs 3).toNat
       s s' fun _ m =>
       IsMap M m (s.regs 3).toNat f ∧ ∃ ks, Keys f ks ∧
@@ -201,7 +223,9 @@ produce, over a map that has not changed since the iteration started. -/
 def IterNext (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) : Prop :=
   ∀ mp f k ks, Janus.Amd64.Tactic.Summary p addr
     (fun s => RTPre M 1 s ∧ IsMap M s.mem mp f ∧ M.Iter s.mem (s.regs 0).toNat mp f (k :: ks) ∧
-      Outside (s.regs 0).toNat iterSize M.priv)
+      Outside (s.regs 0).toNat iterSize M.priv ∧
+      Outside (s.regs 0).toNat iterSize (calleeStack s M.depth 1) ∧
+      Outside (s.regs 0).toNat iterSize (retSlot s))
     (fun s s' => RTReturn M 1 [((s.regs 0).toNat, (s.regs 0).toNat + iterSize)] mp s s' fun _ m =>
       IsMap M m mp f ∧ M.Iter m (s.regs 0).toNat mp f ks ∧ View64 M m (s.regs 0).toNat f ks)
 
@@ -210,7 +234,8 @@ the key is the 16 bytes at `kp`, read little-endian. -/
 def Access2Ptr (p : Janus.Amd64.Program) (addr : Nat) (M : MapModel (BitVec 128) (BitVec 64)) : Prop :=
   ∀ f, Janus.Amd64.Tactic.Summary p addr
     (fun s => RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 3).toNat f ∧
-      s.mem.accessible (s.regs 1).toNat 16 false = true)
+      s.mem.accessible (s.regs 1).toNat 16 false = true ∧
+      Outside (s.regs 1).toNat 16 (calleeStack s M.depth 3))
     (fun s s' => RTReturn M 3 [] (s.regs 3).toNat s s' fun r m =>
       let k := BitVec.ofNat 128 (s.mem.readLE (s.regs 1).toNat 16)
       IsMap M m (s.regs 3).toNat f ∧ SlotHolds M m (r 0).toNat ((f k).getD 0) ∧

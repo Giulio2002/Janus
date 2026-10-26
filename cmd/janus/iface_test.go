@@ -118,26 +118,37 @@ func TestContractPinNeedsRuntimeFile(t *testing.T) {
 	}
 }
 
-// The names of the list are the interface runtime entry points of docs/COVERAGE.md and of the
-// contract library, and scripts/stubpins links every one (so gen-stubpins measures them).
+// The names of the list are the runtime entry points with a contract in the contract library
+// (the interface ones of agent/rtiface, the equality, hashing and typed-memory ones of
+// agent/eqhash, and the map ones of agent/maps2): each is described in Janus/Contracts (as `name(` or `runtime.name(`), and scripts/stubpins
+// links every one (so gen-stubpins measures them).
 func TestContractStubNames(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "stubpins", "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	lean, err := os.ReadFile(filepath.Join(repoRoot, "Janus", "Contracts", "Iface.lean"))
-	if err != nil {
-		t.Fatal(err)
+	files, err := filepath.Glob(filepath.Join(repoRoot, "Janus", "Contracts", "*.lean"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no contract library: %v", err)
 	}
-	if len(runtimeContractStubs) != 13 {
-		t.Errorf("%d interface contract stubs, want 13", len(runtimeContractStubs))
+	var lean strings.Builder
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lean.Write(b)
+	}
+	if len(runtimeContractStubs) != 74 {
+		t.Errorf("%d contract stubs, want 74 (13 interface + 37 equality/hash/typed-memory + 24 map)", len(runtimeContractStubs))
 	}
 	for name := range runtimeContractStubs {
 		if !strings.Contains(string(src), "//go:linkname s_"+strings.TrimPrefix(name, "runtime.")+" "+name+"\n") {
 			t.Errorf("scripts/stubpins does not link %s", name)
 		}
-		if !strings.Contains(string(lean), "`"+strings.TrimPrefix(name, "runtime.")+"(") {
-			t.Errorf("Janus/Contracts/Iface.lean does not describe %s", name)
+		short := strings.TrimPrefix(name, "runtime.")
+		if !strings.Contains(lean.String(), "`"+short+"(") && !strings.Contains(lean.String(), "`"+name+"(") {
+			t.Errorf("Janus/Contracts does not describe %s", name)
 		}
 	}
 }

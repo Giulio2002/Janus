@@ -28,7 +28,7 @@ if [ $# -gt 0 ]; then toolchains=("$@"); else
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 
 # scripts/stubpins/main.go: pull every listed stub by //go:linkname so the linker keeps it.
-names=$(grep -oE '"runtime\.[A-Za-z0-9_]+(\.abi0)?": true' cmd/janus/extract.go | cut -d'"' -f2 | grep -v '\.abi0$' | sort -u)
+names=$(grep -oE '"runtime\.[A-Za-z0-9_]+(\.abi0)?": *true' cmd/janus/extract.go | cut -d'"' -f2 | grep -v '\.abi0$' | sort -u)
 {
   cat <<'EOF'
 // Command stubpins references every runtime stub on Janus's list (cmd/janus/extract.go), so

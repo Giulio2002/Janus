@@ -157,13 +157,32 @@ def Access2 (p : Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) : 
       IsMap M m (s.regs 1).toNat f ∧ SlotHolds M m (r 0).toNat ((f (s.regs 2)).getD 0) ∧
       (r 1).toNat % 256 = (f (s.regs 2)).isSome.toNat)
 
-/-- `runtime.mapassign_fast64(t, m, k)` on a non-nil map: returns a writable value slot `p` in
-the runtime's memory such that storing any `v` there (8 bytes) makes the map `f` with `k ↦ v`.
-The compiled `m[k] = v` performs exactly that store right after the call. -/
-def Assign (p : Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) : Prop :=
+/-- The facts about the value slot `p` (`vs` bytes) an assignment returns, in the memory `m` after
+the call to `mapassign*` on the map at `mp` holding `f`, for the key `k`: `p` is writable and in
+the runtime's memory, and storing any `v` there makes the map `f` with `k ↦ v`, with the
+runtime environment (goroutine `g`) intact and the other maps unchanged. The compiled `m[k] = v`
+performs exactly that store right after the call. -/
+def AssignSlot {K : Type} [DecidableEq K] (vs : Nat) (M : MapModel K (BitVec (8 * vs))) (mp : Nat)
+    (f : AMap K (BitVec (8 * vs))) (k : K) (g : W64) (p : Nat) (m : Memory) : Prop :=
+  m.accessible p vs true = true ∧ InRanges p vs M.priv ∧
+    ∀ v : BitVec (8 * vs), M.Rep (m.writeLE p vs v.toNat) mp (f.set k v) ∧
+      M.Env (m.writeLE p vs v.toNat) g ∧ OthersKept M m (m.writeLE p vs v.toNat) mp
+
+/-- `runtime.mapassign_fast64(t, m, k)` on a non-nil map, **when the runtime is ready for the
+call** (`H`: `Contracts.Ready H M.priv args s`, round 9 C1): returns a writable value slot `p` in the runtime's memory such that
+storing any `v` there (8 bytes) makes the map `f` with `k ↦ v`. The compiled `m[k] = v`
+performs exactly that store right after the call.
+
+`mapassign` allocates (the first group of a small map, a bigger table when the map grows), so
+without `H` no code could meet the contract: from one non-nil map, repeated assignments of new
+keys would have to produce a map with `2^64` keys, whose count no header word holds
+(`audit/maps/model/Unsat.lean`, finding R3-C1); the real runtime throws `out of memory` long
+before. -/
+def Assign (p : Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) (H : RtReady) : Prop :=
   ∀ f, Summary p addr
     (fun s => RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ (s.regs 1).toNat ≠ 0 ∧
-      M.Rep s.mem (s.regs 1).toNat f)
+      M.Rep s.mem (s.regs 1).toNat f ∧
+      Ready H M.priv [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s)
     (fun s s' => RTReturn M 3 [] (s.regs 1).toNat s s' fun r m =>
       m.accessible (r 0).toNat 8 true = true ∧ InRanges (r 0).toNat 8 M.priv ∧
       ∀ v : BitVec 64, M.Rep (m.writeLE (r 0).toNat 8 v.toNat) (s.regs 1).toNat (f.set (s.regs 2) v) ∧
@@ -185,10 +204,13 @@ def Clear {K V : Type} (p : Program) (addr : Nat) (M : MapModel K V) : Prop :=
     (fun s s' => RTReturn M 2 [] (s.regs 1).toNat s s' fun _ m =>
       IsMap M m (s.regs 1).toNat AMap.empty)
 
-/-- `runtime.makemap_small()`: returns a new, non-nil, empty map, distinct from every map that
-existed before. -/
-def MakeSmall {K V : Type} (p : Program) (addr : Nat) (M : MapModel K V) : Prop :=
-  Summary p addr (fun s => RTPre M 0 s)
+/-- `runtime.makemap_small()`, **when the runtime is ready for the call** (`H` with no arguments,
+`Contracts.Ready`): returns a new, non-nil, empty map, distinct from every map that existed before.
+It allocates the header, so without `H` no code could meet it: every map lies below `2^48`
+(`MapModel.Laws.len`), so `2^48` calls cannot all return new maps (`audit/maps/model/Unsat.lean`,
+finding R3-C1). -/
+def MakeSmall {K V : Type} (p : Program) (addr : Nat) (M : MapModel K V) (H : RtReady) : Prop :=
+  Summary p addr (fun s => RTPre M 0 s ∧ Ready H M.priv [] s)
     (fun s s' => RTReturn M 0 [] 0 s s' fun r m =>
       (r 0).toNat ≠ 0 ∧ M.Rep m (r 0).toNat AMap.empty ∧
       ∀ mp f, M.Rep s.mem mp f → mp ≠ (r 0).toNat)
@@ -207,7 +229,8 @@ def IterStart (p : Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) 
   ∀ f, Summary p addr
     (fun s => RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 1).toNat f ∧
       s.mem.accessible (s.regs 2).toNat iterSize true = true ∧
-      Outside (s.regs 2).toNat iterSize M.priv)
+      Outside (s.regs 2).toNat iterSize M.priv ∧
+      Outside (s.regs 2).toNat iterSize (calleeStack s M.depth 3))
     (fun s s' => RTReturn M 3 [((s.regs 2).toNat, (s.regs 2).toNat + iterSize)] (s.regs 1).toNat
       s s' fun _ m =>
       IsMap M m (s.regs 1).toNat f ∧ ∃ ks, Keys f ks ∧
@@ -218,7 +241,8 @@ produce, over a map that has not changed since the iteration started. -/
 def IterNext (p : Program) (addr : Nat) (M : MapModel (BitVec 64) (BitVec 64)) : Prop :=
   ∀ mp f k ks, Summary p addr
     (fun s => RTPre M 1 s ∧ IsMap M s.mem mp f ∧ M.Iter s.mem (s.regs 0).toNat mp f (k :: ks) ∧
-      Outside (s.regs 0).toNat iterSize M.priv)
+      Outside (s.regs 0).toNat iterSize M.priv ∧
+      Outside (s.regs 0).toNat iterSize (calleeStack s M.depth 1))
     (fun s s' => RTReturn M 1 [((s.regs 0).toNat, (s.regs 0).toNat + iterSize)] mp s s' fun _ m =>
       IsMap M m mp f ∧ M.Iter m (s.regs 0).toNat mp f ks ∧ View64 M m (s.regs 0).toNat f ks)
 
@@ -227,7 +251,8 @@ the key is the 16 bytes at `kp`, read little-endian. -/
 def Access2Ptr (p : Program) (addr : Nat) (M : MapModel (BitVec 128) (BitVec 64)) : Prop :=
   ∀ f, Summary p addr
     (fun s => RTPre M 3 s ∧ M.Typ (s.regs 0).toNat ∧ IsMap M s.mem (s.regs 1).toNat f ∧
-      s.mem.accessible (s.regs 2).toNat 16 false = true)
+      s.mem.accessible (s.regs 2).toNat 16 false = true ∧
+      Outside (s.regs 2).toNat 16 (calleeStack s M.depth 3))
     (fun s s' => RTReturn M 3 [] (s.regs 1).toNat s s' fun r m =>
       let k := BitVec.ofNat 128 (s.mem.readLE (s.regs 2).toNat 16)
       IsMap M m (s.regs 1).toNat f ∧ SlotHolds M m (r 0).toNat ((f k).getD 0) ∧
