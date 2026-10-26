@@ -48,7 +48,8 @@ abbrev fspOf (s : State) : Nat := (s.regs regSP).toNat + 8
   page, inside the writable stack pools `pool`; `g`'s descriptor lies outside the pools;
 * the stack unwinds (`Chain Arch.amd64` from `(gluePcOf, fspOf)`): the runtime throws otherwise;
 * the grown stack fits `maxstacksize` (`newstack` throws `stack overflow` otherwise);
-* the runtime is ready to allocate the new stack (`H`). -/
+* the runtime is ready to allocate the new stack (`H`);
+* no word outside the stack pools and `rt` points into a stack (`NoStackPtr`). -/
 structure MorestackPre64 (p : Amd64.Program) (FT : FrameTable) (pool rt : List (Nat × Nat))
     (H : RtReady) (g lo hi : Nat) (s_m : State) : Prop where
   stub : ∃ name, p.stubAt s_m.rip.toNat = some ⟨name, s_m.rip.toNat, .morestack⟩
@@ -63,6 +64,7 @@ structure MorestackPre64 (p : Amd64.Program) (FT : FrameTable) (pool rt : List (
     2 * ((hi - fspOf s_m) + FT.maxspd (gluePcOf s_m) + stackGuard) ≤ maxstacksize
   code : FT.CodeOutside pool ∧ FT.Aligned
   ready : H [] g 0 (rtView rt s_m.mem)
+  noptr : NoStackPtr s_m.mem pool rt
 
 /-- `s'` is the resumed state after `newstack` grew the stack of the call state `s` (amd64) from
 `[lo, hi)` to `[lo', hi')`; an address `a` of the old stack is now at `a + hi' - hi`:

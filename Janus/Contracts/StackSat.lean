@@ -245,6 +245,16 @@ theorem mem0_desc : mem0.readLE G0 8 = SL ∧ mem0.readLE (G0 + 8) 8 = SH ∧
     mem0.readLE (G0 + 16) 8 = SL + stackGuard := by
   refine ⟨?_, ?_, ?_⟩ <;> decide
 
+/-- No word outside the pools and the descriptor points into a pool: the memory is zero there. -/
+theorem mem0_noptr : NoStackPtr mem0 pool rt := by
+  intro a ha
+  simp only [pool, rt, List.cons_append, List.nil_append, outside_cons, outside_nil, and_true] at ha
+  have e : mem0.readLE a 8 = ((((⟨fun _ => 0, []⟩ : Memory).writeLE G0 8 SL).writeLE (G0 + 8) 8 SH).writeLE
+      (G0 + 16) 8 (SL + stackGuard)).readLE a 8 := Memory.readLE_congr fun _ _ => rfl
+  rw [e, Memory.readLE_writeLE_of_disjoint _ _ (by omega), Memory.readLE_writeLE_of_disjoint _ _ (by omega),
+    Memory.readLE_writeLE_of_disjoint _ _ (by omega), readLE_zeros]
+  simp only [pool, outside_cons, outside_nil, and_true]; decide
+
 theorem s0_chain : Chain Arch.arm64 FT0 s0.mem SH (s0.regs 30).toNat s0.sp.toNat
     (some (s0.regs 3).toNat) [⟨GLUE, sp0, sp0⟩, ⟨RET0, sp0, sp0⟩] := by
   have e30 : (s0.regs 30).toNat = GLUE := by decide
@@ -263,7 +273,7 @@ theorem pre0 : MorestackPre toyP FT0 pool rt H G0 SL SH s0 := by
     by simp [pool, G0, SL, SH, BL, BH], ⟨by decide, by decide, by decide, by decide⟩,
     ⟨by decide, by decide, by decide⟩, by decide, ⟨⟨(SL, SH), by simp [pool], Nat.le_refl _, by decide⟩, ?_⟩,
     ⟨_, s0_chain⟩, ⟨by decide, by decide⟩,
-    ⟨fun pc hv => ?_, fun _ => rfl⟩, ⟨rfl, .inl ⟨?_, ?_⟩⟩⟩
+    ⟨fun pc hv => ?_, fun _ => rfl⟩, ⟨rfl, .inl ⟨?_, ?_⟩⟩, mem0_noptr⟩
   · intro r hr
     simp only [pool, List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hr
     rcases hr with rfl | rfl <;> exact ⟨by decide, by decide, by decide⟩

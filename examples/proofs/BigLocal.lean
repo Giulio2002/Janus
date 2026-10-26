@@ -107,7 +107,7 @@ def GPre (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (s : Stat
       framesCls Arch.arm64 FT fs (s.sp.toNat + 8) = false ∧
       framesCls Arch.arm64 FT fs (s.sp.toNat + 16) = false) ∧
     2 * (hi - lo) ≤ maxstacksize ∧ 2 * ((hi - s.sp.toNat) + 176 + stackGuard) ≤ maxstacksize ∧
-    FT.CodeOutside pool ∧ FT.Aligned ∧ H [] (s.regs 28).toNat 0 (rtView rt s.mem)
+    FT.CodeOutside pool ∧ FT.Aligned ∧ H [] (s.regs 28).toNat 0 (rtView rt s.mem) ∧ NoStackPtr s.mem pool rt
 
 /-- The growth path: from the prologue's `morestack` call, the contract resumes on a larger stack,
 the glue reloads `x` and `i` from the moved spill slots (copied unchanged: the stack maps call
@@ -201,7 +201,7 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
   intro ret hret s hs hpre
   janus_intro hs
   obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hfp, hinp, hpok, hrt,
-    ⟨fs, hch, hfsp, hc8, hc16⟩, hfit1, hfit2, hcode, hal, hH⟩ := hpre
+    ⟨fs, hch, hfsp, hc8, hc16⟩, hfit1, hfit2, hcode, hal, hH, hNP⟩ := hpre
   obtain ⟨hg24, hgacc, hglo, hghi, hgg⟩ := hgs
   simp only [gStackLo, gStackHi, gStackguard0, Nat.add_zero, stackGuard] at hglo hghi hgg
   have hacc : s.mem.accessible lo (hi - lo) true = true := hpok.accessible hinp
@@ -262,7 +262,7 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
     rw [← hmm]
     refine grow_branch FT pool rt H reloc hms ⟨hv, hst, hinj, hspd, hmx, ha0, ha1, hob⟩ x i ret hret
       (s.regs 28).toNat lo hi _ ⟨?_, ?_, ?_, hgo, ?_, ⟨hal1, hal2, hal3⟩, ?_, ⟨hinp, hpok.of_accessible haccm⟩,
-        ?_, ?_, ⟨hcode, hal⟩, ?_⟩ ?_ ?_ ?_ ?_ ?_ ?_
+        ?_, ?_, ⟨hcode, hal⟩, ?_, ?_⟩ ?_ ?_ ?_ ?_ ?_ ?_
     · exact ⟨_, rfl⟩
     · simp [setReg, regG]
     · refine ⟨hg24, by rw [haccm]; exact hgacc, ?_, ?_, ?_⟩ <;>
@@ -287,6 +287,8 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
       rw [hmm, rtView_writeLE (Outside.of_sub hrt (by omega) (by omega)),
         rtView_writeLE (Outside.of_sub hrt (by omega) (by omega))]
       exact hH
+    · rw [hmm]
+      exact (hNP.writeLE _ (InRanges.sub hinp (by omega) (by omega))).writeLE _ (InRanges.sub hinp (by omega) (by omega))
     · rfl
     · rfl
     · exact hhi
@@ -400,14 +402,15 @@ theorem pre : GPre FTb pool rt H s0 := by
   · rw [hsp]; decide
   · rfl
   · intro r hr
-    simp only [pool, List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hr
+    simp only [pool, List.mem_cons, List.not_mem_nil, or_false] at hr
     rcases hr with rfl | rfl <;> exact ⟨by decide, by decide, by decide⟩
   · have el : FTb.locals ret = [] := rfl
     have ea : FTb.args ret = [] := rfl
     have eo : FTb.objs ret = [] := rfl
     have e : Arch.arm64.fp FTb ret spw = spw := by
       show spw + FTb.spdelta ret = spw; rw [show FTb.spdelta ret = 0 from rfl, Nat.add_zero]
-    refine ⟨by simp [rt, SL, SH, G0], ⟨[⟨ret, spw, spw⟩], ?_, ?_, ?_, ?_⟩, by decide, by decide, code, laws.1, ?_⟩
+    refine ⟨by simp [rt, SL, SH, G0], ⟨[⟨ret, spw, spw⟩], ?_, ?_, ?_, ?_⟩, by decide, by decide, code, laws.1, ?_,
+      mem0_noptr⟩
     · rw [hsp, show (s0.regs 30).toNat = ret by decide]
       have := Chain.stop (A := Arch.arm64) (FT := FTb) (m := s0.mem) (hi := SH) (pc := ret) (sp := spw)
         (lr0 := none) rfl rfl rfl (by decide) (by rw [e]; decide)

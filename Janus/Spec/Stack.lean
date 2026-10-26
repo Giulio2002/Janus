@@ -309,6 +309,30 @@ def GStack (m : Memory) (g lo hi : Nat) : Prop :=
     m.readLE (g + gStackLo) 8 = lo ∧ m.readLE (g + gStackHi) 8 = hi ∧
     m.readLE (g + gStackguard0) 8 = lo + stackGuard
 
+/-- **No pointer into a goroutine stack lives outside the stacks** (Go's escape analysis: a
+pointer into a stack is never stored in the heap or in globals). No word of `m` outside the
+stack pools `pool` and the runtime's own memory `rt` points into a pool. `copystack` adjusts only
+the words of the stack, so such a word would be left pointing at the old stack; the `morestack`
+contract's precondition (`MorestackPre.noptr`) excludes it. -/
+def NoStackPtr (m : Memory) (pool rt : List (Nat × Nat)) : Prop :=
+  ∀ a, Outside a 8 (pool ++ rt) → Outside (m.readLE a 8) 1 pool
+
+/-- `NoStackPtr` survives any change inside the pools and the runtime's memory. -/
+theorem NoStackPtr.of_frame {m m' : Memory} {pool rt : List (Nat × Nat)} (h : NoStackPtr m pool rt)
+    (hf : MemFrame m m' (pool ++ rt)) : NoStackPtr m' pool rt :=
+  fun a ha => by rw [hf.readLE a 8 ha]; exact h a ha
+
+/-- `NoStackPtr` survives a store inside the pools (a store to the stack). -/
+theorem NoStackPtr.writeLE {m : Memory} {pool rt : List (Nat × Nat)} (h : NoStackPtr m pool rt)
+    {a k : Nat} (v : Nat) (hin : InRanges a k pool) : NoStackPtr (m.writeLE a k v) pool rt :=
+  h.of_frame ((MemFrame.refl m _).writeLE_inRanges v (hin.append_left rt))
+
+/-- Memory of zero bytes reads `0`. -/
+theorem readLE_zeros (rs : List Region) (a n : Nat) : (⟨fun _ => 0, rs⟩ : Memory).readLE a n = 0 := by
+  induction n generalizing a with
+  | zero => rfl
+  | succ n ih => rw [Memory.readLE_succ, ih]; rfl
+
 /-- `GStack` determines the stack bounds. -/
 theorem GStack.unique {m : Memory} {g lo hi lo' hi' : Nat} (h : GStack m g lo hi)
     (h' : GStack m g lo' hi') : lo = lo' ∧ hi = hi' := by
@@ -921,11 +945,10 @@ theorem runAt_mem {rs : List (Nat × Int)} (pc : Nat) : runAt rs pc = -1 ∨ ∃
       · left; exact h
       · right; exact ⟨y, List.mem_cons_of_mem _ hy, h⟩
 
-/-- The table built from fitting records and an `extra` table without maps or frames is aligned
-and satisfies `InFrame` on arm64. -/
+/-- The table built from fitting records and an `extra` table without frames or stack objects is
+aligned and satisfies `InFrame` on arm64. -/
 theorem FrameTable.ofRecs_laws_arm64 (rs : List FuncRec) (extra : FrameTable)
-    (hr : ∀ r ∈ rs, r.Fits) (hsd : ∀ pc, extra.spdelta pc = 0) (hl : ∀ pc, extra.locals pc = [])
-    (ho : ∀ pc, extra.objs pc = []) :
+    (hr : ∀ r ∈ rs, r.Fits) (hsd : ∀ pc, extra.spdelta pc = 0) (ho : ∀ pc, extra.objs pc = []) :
     (FrameTable.ofRecs rs extra).Aligned ∧ (FrameTable.ofRecs rs extra).InFrame Arch.arm64 := by
   have hv : ∀ r ∈ rs, ∀ pc, r.spdeltaAt pc % 8 = 0 ∧
       (r.spdeltaAt pc ≤ 24 ∨ 8 * (r.localsAt pc).length + 8 ≤ r.spdeltaAt pc) := by

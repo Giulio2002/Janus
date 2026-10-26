@@ -667,7 +667,8 @@ reads the moved frame as the move left it.
 every state at a prologue's `morestack` call satisfying `MorestackPre` (it is at a `.morestack`
 stub; `g = X28`/`R14` runs on `[lo, hi)` inside the writable stack pools `pool`, above the first
 page; the stack unwinds, `Chain`; the grown stack fits `maxstacksize`; the runtime is ready to
-allocate, `H`, round 9's readiness predicate, on the runtime-owned memory `rt`), the relation
+allocate, `H`, round 9's readiness predicate, on the runtime-owned memory `rt`; no word outside
+the stacks points into a stack, `NoStackPtr`), the relation
 `reloc` resumes in a `Grown` state: a larger stack inside the pools with room for the function's
 own `funcMaxSPDelta + stackGuard` below the resumed `SP` (exactly `newstack`, not room for an
 unbounded recursion), `SP`/`FP`/`g.stack`/`g.stackguard0` updated, the frames moved (`Moved`
@@ -687,14 +688,39 @@ toy stack allocator that meets `MorestackContract` for every program and frame t
 the frames, adjusts every stack-map pointer into the old stack and rewrites `g.stack`/
 `stackguard0` — and a call state satisfying the whole precondition (round 9's SAT row).
 
+**amd64** (`Janus/Contracts/StackAmd64.lean`). The same model with `Arch.amd64` (`fp = sp +
+spdelta + 8`, the return address at `fp - 8`, `varp = fp - 8`), and the amd64 call sequence:
+the prologue's tail spills the register arguments to `8(SP)`, `16(SP)`, … (the caller's argument
+area) and `CALL`s the stub, so at the stub `[RSP]` is the glue (`gobuf.pc`) and `RSP + 8` the
+function's stack pointer (`gobuf.sp`). `MorestackContract64` resumes in a `Grown64` state: at the
+glue, `RSP` moved, `RBP` adjusted (`adjustWord`, `adjustctxt` on `gobuf.bp`), `RDX = 0`
+(`morestack_noctxt`), `R14` kept, `X15 = 0`, the direction flag clear, `MXCSR`'s control bits
+kept; the copied region is `[RSP + 8, hi)` (the pushed glue address is not copied).
+`GrownReturns64`/`GrownRet64`/`GSummary64`/`EnsuresGrow64`/`grow_rec64` are the grown run, and
+`morestack64_satisfiable` (`Janus/Contracts/StackSatAmd64.lean`) reuses the toy allocator.
+
+**The stack maps come from the binary.** `janus extract --frames` decodes, for every extracted
+function, its pclntab record (`Extracted.frames : List FuncRec`: pc range, `FuncID`, flags,
+`funcMaxSPDelta`, the `pcsp` and `PCDATA_StackMapIndex` tables as pc-value runs, the args and
+locals pointer maps, the stack objects; `cmd/janus/frames.go`), and `janus check` re-derives it.
+A grown theorem assumes its frame table **agrees** with these records (`FrameTable.Agrees
+Extracted.frames`: at every pc inside an extracted function, the table's SP delta, largest frame,
+maps and objects are the record's), so the maps a proof relies on are the binary's; the witnesses
+build their table from the records (`FrameTable.ofRecs`), and `ofRecs_laws_arm64`/`_amd64` check
+by evaluation that the records keep their words inside the frame (`FrameTable.InFrame`).
+
 **What stays trusted** (see [SOUNDNESS.md](SOUNDNESS.md#stack-growth)): the `Moved`/`Chain`
 relocation is what `newstack`/`copystack` do, and in particular **the stack maps are correct**
-(the compiler's liveness information marks exactly the pointer slots). A precondition states that
-no pointer into the stack is held in non-stack memory (Go's escape analysis guarantees it): such
-a word is not among the moved bytes, so the moved memory says nothing about it.
+(the compiler's liveness information marks exactly the pointer slots; the tables are the binary's,
+`FrameTable.Agrees Extracted.frames`). A precondition states that no pointer into the stack is
+held in non-stack memory (`MorestackPre.noptr`, `NoStackPtr`; Go's escape analysis guarantees
+it): `copystack` does not adjust such a word.
 
-**Examples** (`examples/basic/zstack.go`; arm64 `examples/proofs/<Name>.lean`):
+**Examples** (`examples/basic/zstack.go`; arm64 `examples/proofs/<Name>.lean`, amd64
+`examples/proofs-amd64/<Name>/Proof.lean`; each with `Witness.nonvacuous` and `Witness.returns`):
 
 | Function | Shows |
 |---|---|
-| `BigLocal(x, i)` | a 176-byte frame whose prologue always grows on a small stack; returns `buf[0]` = `x` if `i&15 = 0` else `0`, on a stack of any size (`correctness`), with a witness whose frame does not fit (`Witness.no_room`, `.returns`) |
+| `BigLocal(x, i)` | a large frame (176 bytes on arm64, 168 on amd64) whose prologue always grows on a small stack; returns `buf[0]` = `x` if `i&15 = 0` else `0`, on a stack of any size (`correctness`), with a witness whose frame does not fit (`Witness.no_room`) |
+| `SumRec(n)` | recursion with growth at any depth: a grown callee summary (`GSummary.induction`) whose post states the move of the caller's frames, composed level by level (`Moved.trans'`, `mono_base`, `cls_congr`); the saved frame pointers adjusted, the spilled `n` copied; witness `SumRec(3)` from a stack where not even the first frame fits |
+| `HoldPtr(x)` | a pointer into the function's own frame (`p = &a[x&1]`, kept in a locals-map slot) held across a call (`holdCallee(p, x)`) whose frame grows the stack: the callee's spilled `p` (its args map) and the caller's slot are both adjusted, so the callee's store reaches the moved array and the caller reads it back through the adjusted `p`; witness `HoldPtr(16) = 49` with the growth inside the callee (`Witness.callee_grows`) |

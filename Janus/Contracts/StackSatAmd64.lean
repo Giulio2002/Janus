@@ -177,6 +177,19 @@ theorem mem0_desc : mem0.readLE G0 8 = SL ∧ mem0.readLE (G0 + 8) 8 = SH ∧
     mem0.readLE (G0 + 16) 8 = SL + stackGuard := by
   refine ⟨?_, ?_, ?_⟩ <;> decide
 
+/-- No word outside the pools and the descriptor points into a pool: the memory is zero there. -/
+theorem mem0_noptr : NoStackPtr mem0 pool rt := by
+  intro a ha
+  simp only [pool, rt, List.cons_append, List.nil_append, outside_cons, outside_nil, and_true] at ha
+  have e : mem0.readLE a 8 = ((((((⟨fun _ => 0, []⟩ : Memory).writeLE G0 8 SL).writeLE (G0 + 8) 8 SH).writeLE
+      (G0 + 16) 8 (SL + stackGuard)).writeLE sp0 8 GLUE).writeLE (sp0 + 8) 8 RET0).readLE a 8 :=
+    Arm64.Memory.readLE_congr fun _ _ => rfl
+  simp only [sp0, SH, SL, BL, BH, G0] at ha e ⊢
+  rw [e, Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega), Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
+    Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega), Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
+    Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega), readLE_zeros]
+  simp only [pool, outside_cons, outside_nil, and_true]; decide
+
 theorem s0_chain : Chain Arch.amd64 FT0 s0.mem SH (gluePcOf s0) (fspOf s0) none
     [⟨GLUE, sp0 + 8, sp0 + 16⟩, ⟨RET0, sp0 + 16, sp0 + 24⟩] := by
   have eg : gluePcOf s0 = GLUE := by decide
@@ -203,7 +216,7 @@ theorem pre0 : MorestackPre64 toyP FT0 pool rt H G0 SL SH s0 := by
     by simp [pool, G0, SL, SH, BL, BH], ⟨by decide, by decide, by decide, by decide⟩,
     ⟨by decide, by decide, by decide⟩, ⟨⟨(SL, SH), by simp [pool], Nat.le_refl _, by decide⟩, ?_⟩,
     ⟨_, s0_chain⟩, ⟨by decide, by decide⟩,
-    ⟨fun pc hv => ?_, fun _ => rfl⟩, ⟨rfl, .inl ⟨?_, ?_⟩⟩⟩
+    ⟨fun pc hv => ?_, fun _ => rfl⟩, ⟨rfl, .inl ⟨?_, ?_⟩⟩, mem0_noptr⟩
   · intro r hr
     simp only [pool, List.mem_cons, List.not_mem_nil, or_false] at hr
     rcases hr with rfl | rfl <;> exact ⟨by decide, by decide, by decide⟩

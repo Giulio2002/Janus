@@ -17,30 +17,37 @@ through (`GuardOK`, `StackGuardOK`), so the grown case — the `morestack` call 
   call** (the prologue's `JMP f`, which re-enters `f` — now with room). The whole goroutine stack
   moves, so the resumed `SP` is the old one plus the growth delta `δ = new.hi - old.hi`.
 
-* **The contract** `MorestackContract` states that transition as a `Tactic.Summary` of the
-  linked program at the `morestack_noctxt` contract address: from the prologue's call state it
-  "returns" (through `gogo`) to the saved return address `X30` in a state `Grown` — the frames
-  moved by some `δ > 0` (`Janus.Spec.Stack.Moved` along the unwinder's `Chain`), `SP`/`FP`
-  shifted, `g.stack`/`stackguard0` updated — with a **larger** stack that has room for the
-  function's own maximal frame (`newstack`: `newsize ≥ used + funcMaxSPDelta + stackGuard`). It
-  does not promise room for an unbounded recursion; a deep recursion grows again at the next
-  level (`growReenter`, by well-founded recursion on the stack's distance from `maxstacksize`).
+* **The contract** `MorestackContract p FT pool rt H reloc` states that transition as a relation
+  `reloc` on the stub state: from every call state at a `.morestack` stub satisfying
+  `MorestackPre`, `reloc` resumes in a state `Grown` — the frames moved by some `δ`
+  (`Janus.Spec.Stack.Moved` along the unwinder's `Chain`), `SP`/`FP` shifted, `g.stack`/
+  `stackguard0` updated, at the glue `X30` — with a **larger** stack that has room for the
+  function's own largest frame (`newstack`: `newsize ≥ used + funcMaxSPDelta + stackGuard`). It
+  does not promise room for an unbounded recursion: a deep recursion grows again at a later level
+  (`GSummary.induction`; `grow_rec`, well-founded recursion on the stack's distance from
+  `maxstacksize`).
 
 * **The grown run** `GrownReturns` is `Returns` through any number of `morestack` resumes: a run
   that either returns, or reaches `morestack`, grows, and continues from the resumed state. It is
   `Returns` exactly when the stack already has room. `EnsuresGrow` is the grown `Ensures`:
   the room precondition is dropped, the `morestack` contract assumed, and the conclusion holds
-  for a stack of any size, growth included.
+  for a stack of any size, growth included. `GrownRet`/`GSummary` are the grown `ReachesRet`/
+  `Summary` of a callee that may grow.
 
-* **The key lemma** `grownReturns_of_summary`: from a roomy `Summary` (`f` is correct on any
-  stack with room) and the `morestack` contract, `f` is correct on any stack — the relocation
-  invariance of `Janus.Spec.Stack.Moved`/`Chain` carries the `Summary`'s post across the move.
+* **Relocation invariance** (`Janus.Spec.Stack`: `Chain.mv`, `Chain.moved`, `framesCls_mv`,
+  `Moved.trans'`): the walk and the stack maps' classification of a moved stack are the old ones
+  shifted, and two moves compose into one. So "`f` is correct on any stack with room" (a roomy
+  `Summary`) plus the contract gives "`f` is correct, growth included": after the growth the glue
+  re-enters `f` on a stack with room, the arguments read back from the moved spill slots, and the
+  `Summary` applies (`examples/proofs/BigLocal.lean`, `grow_branch`); a callee's growth moves the
+  caller's frame, which the caller reads back through the move (`SumRec`, `HoldPtr`).
 
 **Trusted** (stated in `docs/SOUNDNESS.md`): the relocation `Moved`/`Chain` is what
 `newstack`/`copystack` do, and in particular the stack maps are correct (the compiler's
 liveness information marks exactly the pointer slots). Pointers into the stack held in non-stack
 memory are not adjusted; Go's escape analysis forbids them, and the contract's precondition
-states it (`NoStackPtrOutside`). See `Janus/Contracts/StackSat.lean` for satisfiability.
+states it (`MorestackPre.noptr`, `Janus.Spec.Stack.NoStackPtr`). See `Janus/Contracts/StackSat.lean` for
+satisfiability.
 -/
 
 namespace Janus.Contracts.Stack
@@ -109,7 +116,10 @@ theorem rtView_eq_of_frame {rt rs : List (Nat × Nat)} {m m' : Memory} (hf : Mem
 * the grown stack fits `maxstacksize` (`newstack` throws `stack overflow` otherwise): both the
   doubled stack and twice the used part plus the function's largest frame and the guard;
 * the runtime is ready to allocate the new stack (`H`, round 9's readiness predicate, on the
-  runtime-owned memory `rt`). -/
+  runtime-owned memory `rt`);
+* no word outside the stack pools and `rt` points into a stack (`NoStackPtr`: Go's escape
+  analysis keeps pointers into a stack out of the heap and the globals; `copystack` would leave
+  such a word pointing at the old stack). -/
 structure MorestackPre (p : Program) (FT : FrameTable) (pool rt : List (Nat × Nat))
     (H : RtReady) (g lo hi : Nat) (s_m : State) : Prop where
   stub : ∃ name, p.stubAt s_m.pc.toNat = some ⟨name, s_m.pc.toNat, .morestack⟩
@@ -126,6 +136,7 @@ structure MorestackPre (p : Program) (FT : FrameTable) (pool rt : List (Nat × N
     2 * ((hi - s_m.sp.toNat) + FT.maxspd (s_m.regs regLR).toNat + stackGuard) ≤ maxstacksize
   code : FT.CodeOutside pool ∧ FT.Aligned
   ready : H [] g 0 (rtView rt s_m.mem)
+  noptr : NoStackPtr s_m.mem pool rt
 
 /-- The words a growth at the prologue adjusts (arm64): the caller's saved frame pointer at
 `SP - 8` (`adjustctxt`, as `gobuf.bp = SP - 8`) and the words of the walk's frames. -/

@@ -113,7 +113,7 @@ def GPre (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (s : Stat
       framesCls Arch.amd64 FT fs ((s.regs 4).toNat + 8) = false ∧
       framesCls Arch.amd64 FT fs ((s.regs 4).toNat + 16) = false) ∧
     2 * (hi - lo) ≤ maxstacksize ∧ 2 * ((hi - (s.regs 4).toNat) + 168 + stackGuard) ≤ maxstacksize ∧
-    FT.CodeOutside pool ∧ FT.Aligned ∧ H [] (s.regs 14).toNat 0 (rtView rt s.mem)
+    FT.CodeOutside pool ∧ FT.Aligned ∧ H [] (s.regs 14).toNat 0 (rtView rt s.mem) ∧ NoStackPtr s.mem pool rt
 
 /-- The growth path, from the contract's precondition at the `morestack` stub: the contract
 resumes on a larger stack, the glue reloads `x` and `i` from the moved spill slots, and `summary`
@@ -210,7 +210,7 @@ theorem grow_entry (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     ∃ s_r, reloc S s_r ∧ GrownReturns64 (Extracted.program.withExit ret) reloc s_r
       (fun s' => s'.regs 0 = if i.toNat % 16 = 0 then x else 0) := by
   obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hinp, hpok, hrt,
-    ⟨fs, hch, hfsp, hc0, hc8, hc16⟩, hfit1, hfit2, hcode, hal, hH⟩ := hpre
+    ⟨fs, hch, hfsp, hc0, hc8, hc16⟩, hfit1, hfit2, hcode, hal, hH, hNP⟩ := hpre
   obtain ⟨hv, hst, hinj, hspd, hmx, hargs, hob⟩ := hFT
   obtain ⟨hg24, hgacc, hglo, hghi, hgg⟩ := hgs
   simp only [gStackLo, gStackHi, gStackguard0, Nat.add_zero] at hglo hghi hgg
@@ -260,7 +260,7 @@ theorem grow_entry (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
   have hr3 : (S.regs 4).toNat + 8 = (s.regs 4).toNat := by omega
   refine grow_branch FT pool rt H reloc hms ⟨hv, hst, hinj, hspd, hmx, hargs, hob⟩ x i ret hret
     (s.regs 14).toNat lo hi S ⟨hstub, by simp only [regG]; rw [h14], ?_, hgo, ?_, ?_,
-      ⟨hinp, hpok.of_accessible haccm⟩, ?_, ?_, ⟨hcode, hal⟩, ?_⟩ hglue (by omega) ?_ ?_ ?_ ?_
+      ⟨hinp, hpok.of_accessible haccm⟩, ?_, ?_, ⟨hcode, hal⟩, ?_, ?_⟩ hglue (by omega) ?_ ?_ ?_ ?_
   · refine ⟨hg24, by rw [haccm]; exact hgacc, ?_, ?_, ?_⟩ <;>
       simp only [gStackLo, gStackHi, gStackguard0, Nat.add_zero] <;>
       rw [hrdm _ _ (by omega) (by omega)]
@@ -275,6 +275,9 @@ theorem grow_entry (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
       rtView_writeLE (Outside.of_sub hrt (by omega) (by omega)),
       rtView_writeLE (Outside.of_sub hrt (by omega) (by omega))]
     exact hH
+  · rw [hmem, stubMem]
+    exact ((hNP.writeLE _ (hinp.sub (by omega) (by omega))).writeLE _ (hinp.sub (by omega) (by omega))).writeLE _
+      (hinp.sub (by omega) (by omega))
   · rw [hr3, hrdm _ _ (by omega) (by omega)]; exact h_ret
   · rw [show (S.regs 4).toNat + 16 = (s.regs 4).toNat + 8 by omega, hmem, stubMem,
       Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega), Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
@@ -303,7 +306,7 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
   have hpre' := hpre
   janus64_intro hs
   obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hinp, hpok, hrt,
-    -, hfit1, hfit2, hcode, hal, hH⟩ := hpre
+    -, hfit1, hfit2, hcode, hal, hH, -⟩ := hpre
   obtain ⟨hg24, hgacc, hglo, hghi, hgg⟩ := hgs
   simp only [gStackLo, gStackHi, gStackguard0, Nat.add_zero, stackGuard] at hglo hghi hgg
   have hacc : s.mem.accessible lo (hi - lo) true = true := hpok.accessible hinp
@@ -330,7 +333,7 @@ theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
 
 namespace Witness
 
-open Janus.Contracts.StackSat (G0 SL SH BL BH pool rt H mem0 mem0_desc)
+open Janus.Contracts.StackSat (G0 SL SH BL BH pool rt H mem0 mem0_desc mem0_noptr)
 open Janus.Contracts.StackSatAmd64 (reloc contract64)
 
 /-- The caller's return address. -/
@@ -435,7 +438,7 @@ theorem pre : GPre FTb pool rt H s0 := by
     have e : Arch.amd64.fp FTb ret (spw + 8) = spw + 16 := by
       show spw + 8 + FTb.spdelta ret + 8 = spw + 16; rw [show FTb.spdelta ret = 0 from rfl]
     refine ⟨by simp [rt, SL, SH, G0], ⟨[⟨ret, spw + 8, spw + 16⟩], ?_, ?_, ?_, ?_, ?_⟩, by decide, by decide, code,
-      laws.1, ?_⟩
+      laws.1, ?_, mem0_noptr.writeLE _ ⟨(SL, SH), by simp [pool], by decide, by decide⟩⟩
     · rw [hsp, hr]
       have := Chain.stop (A := Arch.amd64) (FT := FTb) (m := s0.mem) (hi := SH) (pc := ret) (sp := spw + 8)
         (lr0 := none) rfl rfl rfl (by decide) (by rw [e]; decide)

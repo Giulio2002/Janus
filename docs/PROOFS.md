@@ -253,7 +253,7 @@ stub), and combine "panics iff" from both directions with `Returns.not_panics`:
   · exact absurd hp (hret hy).not_panics
 ```
 
-### Stack growth, the grown case (`BigLocal`)
+### Stack growth, the grown case (`BigLocal`, `SumRec`, `HoldPtr`)
 
 The prologue's `morestack` branch — the grown case excluded by `GuardOK` above — is covered by
 the `morestack` contract (`Janus/Contracts/Stack.lean`, docs/RUNTIME-CONTRACTS.md "Stack
@@ -296,6 +296,31 @@ The non-vacuity witness (`Proof.Witness`) reuses the two-slot toy runtime of
 `Janus/Contracts/StackSat.lean` for the real binary's `morestack` stub, exhibits a call state
 whose frame does **not** fit (`Witness.no_room`), shows all hypotheses hold together
 (`nonvacuous`) and that the conclusion is reached (`returns`).
+
+**The frame table.** Extract with `--frames` (`scripts/example-targets.sh` adds it for the
+stack-growth examples): `Extracted.frames` then lists the binary's frame records, and the theorem
+assumes `hA : FT.Agrees Extracted.frames`. Read what you need at a pc into a small `TableOK`
+predicate with `hA _ (List.mem_cons_self ..) pc (by decide) (by decide)` — never `rw`/`simp`
+`Extracted.frames` (the auditor rejects a proof that declares its equation lemmas). The witness
+table is `FrameTable.ofRecs Extracted.frames extraT` (`ofRecs_agrees`, and `ofRecs_laws`/
+`ofRecs_laws_arm64`/`ofRecs_laws_amd64` check the records by `decide`).
+
+**Growth inside a callee** (`SumRec`, `HoldPtr`). State the callee as a grown summary
+`GSummary p reloc entry Pre Post` (`GSummary64` on amd64) whose `Post` says how the caller's
+memory moved: `∀ fs, Chain … fs → Moved (framesCls … fs) pool lo hi hi' base ex s.mem s'.mem`
+(the caller's walk, from the callee's argument area up, with the slots the callee may write in
+`ex`), plus the moved `SP`/`FP` and the new `GStack`. Use it with `GrownRet.call`; after the call
+read the caller's frame back through the move: a scalar slot with `Moved.readLE_scalar`, a slot the
+stack maps mark as a pointer into the stack with `Moved.readLE_ptr` (the value is adjusted — this is
+how `HoldPtr` finds `p` and `*p` on the moved stack), a return address with `Moved.readLE_word_out`
+(code is outside the pools). For recursion prove the summary with `GSummary.induction`, the
+induction hypothesis being the callee; when one level grows the stack itself, compose its move with
+the callee's (`Moved.mono_base`, `mono_ex'`, `cls_congr`/`cls_congr'`, `trans'`, `congr_src`). On
+amd64 the saved `RBP` is adjusted too (`adjustWord`); `Post` states it as `adjustWord lo hi hi' RBP`,
+which two moves compose (`adjustWord_trans`, under `BPOK`: the caller's `RBP` points into the
+stack or outside every stack). Every grown precondition carries `NoStackPtr s.mem pool rt` (no
+pointer into a stack outside the stacks), which the contract's `MorestackPre.noptr` needs; a store
+to the stack keeps it (`NoStackPtr.writeLE`), and so does a move (`NoStackPtr.of_frame`).
 
 ### Loops (`Sum`, `CopyWords`, `JanusTests/Tactic.lean`)
 

@@ -147,7 +147,7 @@ def PreC (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (s : Stat
       framesCls Arch.arm64 FT fs (s.sp.toNat + 16) = false) ∧
     (s.regs 0).toNat % 8 = 0 ∧ s.sp.toNat + 24 ≤ (s.regs 0).toNat ∧ (s.regs 0).toNat + 8 ≤ hi ∧
     2 * ((hi - s.sp.toNat) + 176 + 976) ≤ maxstacksize ∧
-    H [] (s.regs 28).toNat 0 (rtView rt s.mem)
+    H [] (s.regs 28).toNat 0 (rtView rt s.mem) ∧ NoStackPtr s.mem pool rt
 
 /-- What `holdCallee(p, x)` does, through a possible stack growth: it returns with the stack
 `[lo, hi)` grown to `[lo', hi')`, `SP`/`X29` moved, the caller's frames moved (`Moved` along the
@@ -173,7 +173,7 @@ theorem croom (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (hroom : s.mem.readLE ((s.regs 28).toNat + 16) 8 + 48 < s.sp.toNat) :
     GrownRet Extracted.program reloc (s.regs 30) s (PostC FT pool rt H s) := by
   obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hfp, hinp, hpok, hr4, hr48,
-    ⟨fs, hch, hfsp, hc8, hc16⟩, hp8, hp1, hp2, hfit, hH⟩ := hp
+    ⟨fs, hch, hfsp, hc8, hc16⟩, hp8, hp1, hp2, hfit, hH, -⟩ := hp
   obtain ⟨-, -, -, -, hPA⟩ := henv
   have hgs' := hgs
   obtain ⟨hg24, hgacc, hglo, hghi, hgg⟩ := hgs'
@@ -217,8 +217,8 @@ theorem cgrow (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (henv : Env FT pool rt) (s : State) (lo hi : Nat) (hgs : GStack s.mem (s.regs 28).toNat lo hi)
     (hgo : Outside (s.regs 28).toNat 24 pool) (h4k : 4096 ≤ lo) (hlo : lo + 8 ≤ s.sp.toNat)
     (hhi : s.sp.toNat + 24 ≤ hi) (hhi48 : hi ≤ 2 ^ 48) (hal1 : lo % 16 = 0) (hal2 : hi % 16 = 0)
-    (hal3 : s.sp.toNat % 16 = 0) (hfp : s.regs 29 = s.sp - 8) (hinp : InRanges lo (hi - lo) pool)
-    (hpok : PoolOK s.mem pool) (hr4 : (s.regs 30).toNat % 4 = 0) (hr48 : (s.regs 30).toNat < 2 ^ 48)
+    (hal3 : s.sp.toNat % 16 = 0) (_hfp : s.regs 29 = s.sp - 8) (hinp : InRanges lo (hi - lo) pool)
+    (_hpok : PoolOK s.mem pool) (hr4 : (s.regs 30).toNat % 4 = 0) (hr48 : (s.regs 30).toNat < 2 ^ 48)
     (fs : List Frame) (hch : Chain Arch.arm64 FT s.mem hi (s.regs 30).toNat s.sp.toNat none fs)
     (hfsp : ∀ f ∈ fs, f.sp = s.sp.toNat ∨ s.sp.toNat + 24 ≤ f.sp)
     (hc8 : framesCls Arch.arm64 FT fs (s.sp.toNat + 8) = false)
@@ -308,7 +308,7 @@ theorem cgrow (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
       h4k1, by omega, by omega, hhi48', hal1', hal2', by omega, ?_, hinp1, by rw [hemem]; exact hpok_r,
       by rw [he30]; exact hr4, by rw [he30]; exact hr48, ⟨_, hche, fun f hf => ?_, ?_, ?_⟩,
       by rw [hp_e]; omega, by rw [hp_e, hesp']; omega, by rw [hp_e]; omega,
-      by rw [hesp', show hi1 - (s.sp.toNat + hi1 - hi) = hi - s.sp.toNat by omega]; exact hfit, ?_⟩
+      by rw [hesp', show hi1 - (s.sp.toNat + hi1 - hi) = hi - s.sp.toNat by omega]; exact hfit, ?_, ?_⟩
     · rw [he29, hesp]; apply BitVec.eq_of_toNat_eq
       rw [BitVec.toNat_sub, hsp_r, BitVec.toNat_ofNat, show (8 : BitVec 64).toNat = 8 from rfl]; omega
     · obtain ⟨f0, hf0, rfl⟩ := List.mem_map.1 hf
@@ -319,6 +319,7 @@ theorem cgrow (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     · rw [hesp', show s.sp.toNat + hi1 - hi + 16 = (s.sp.toNat + 16) + hi1 - hi by omega, hcl _ (by omega)]
       exact hc16
     · rw [he28, hemem, ← h28, hm.greg]; exact hgr.ready
+    · rw [hemem]; exact hm.noptr.of_frame hgr.frame
   have hroome : s_e.mem.readLE ((s_e.regs 28).toNat + 16) 8 + 48 < s_e.sp.toNat := by
     rw [he28, hemem, ← h28, hm.greg, hge5, hesp']; omega
   refine GrownRet.of_steps hst ?_
@@ -381,7 +382,7 @@ theorem gcallee (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
   · exact croom FT pool rt H reloc henv s hpc hpre hroom
   · have hpre' := hpre
     obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hfp, hinp, hpok, hr4, hr48,
-      ⟨fs, hch, hfsp, hc8, hc16⟩, hp8, hp1, hp2, hfit, hH⟩ := hpre'
+      ⟨fs, hch, hfsp, hc8, hc16⟩, hp8, hp1, hp2, hfit, hH, hNP⟩ := hpre'
     have henv' := henv
     obtain ⟨hA, hIF, hAl, hCO, hPA⟩ := henv'
     have hT := ctable_of hA
@@ -421,7 +422,7 @@ theorem gcallee (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
         ⟨hinp, hpok.of_accessible fun a k w => by
           rw [hmm, Memory.accessible_writeLE, Memory.accessible_writeLE]⟩,
         ⟨⟨cGlue, s.sp.toNat, Arch.arm64.fp FT cGlue s.sp.toNat⟩ :: fs, ?_⟩, ⟨hfit1, ?_⟩,
-        ⟨hCO, hAl⟩, ?_⟩ ?_ ?_ rfl ?_ ?_ ?_ ?_
+        ⟨hCO, hAl⟩, ?_, ?_⟩ ?_ ?_ rfl ?_ ?_ ?_ ?_
     · rw [hmm]
       exact GStack.writeLE (GStack.writeLE hgs hgo (hinp.sub (by omega) (by omega))) hgo
         (hinp.sub (by omega) (by omega))
@@ -438,6 +439,8 @@ theorem gcallee (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
       rw [hmm, rtView_writeLE (hPA _ _ (hinp.sub (by omega) (by omega))),
         rtView_writeLE (hPA _ _ (hinp.sub (by omega) (by omega)))]
       simpa [setReg, regG] using hH
+    · show NoStackPtr mm pool rt
+      rw [hmm]; exact (hNP.writeLE _ (hinp.sub (by omega) (by omega))).writeLE _ (hinp.sub (by omega) (by omega))
     · simp [setReg] <;> rfl
     · simp [setReg]
     · simp [setReg]
@@ -594,7 +597,7 @@ def PreH (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (s : Stat
       (∀ f ∈ fs, f.sp = s.sp.toNat ∨ s.sp.toNat + 16 ≤ f.sp) ∧
       framesCls Arch.arm64 FT fs (s.sp.toNat + 8) = false) ∧
     2 * ((hi - s.sp.toNat) + 64 + 176 + 976) ≤ maxstacksize ∧
-    H [] (s.regs 28).toNat 0 (rtView rt s.mem)
+    H [] (s.regs 28).toNat 0 (rtView rt s.mem) ∧ NoStackPtr s.mem pool rt
 
 /-- What `HoldPtr(x)` returns. -/
 def PostH (s s' : State) : Prop := s'.regs 0 = hres (s.regs 0)
@@ -609,7 +612,7 @@ theorem hroomH (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (hp : PreH FT pool rt H t) (hroom : t.mem.readLE ((t.regs 28).toNat + 16) 8 < t.sp.toNat) :
     GrownRet Extracted.program reloc (t.regs 30) t (PostH t) := by
   obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hfp, hinp, hpok, hr4, hr48,
-    ⟨fs, hch, hfsp, hc8⟩, hfit, hH⟩ := hp
+    ⟨fs, hch, hfsp, hc8⟩, hfit, hH, hNP⟩ := hp
   have henv' := henv
   obtain ⟨hA, hIF, hAl, hCO, hPA⟩ := henv'
   have hT := htable_of hA
@@ -707,7 +710,7 @@ theorem hroomH (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
       by rw [hv30]; decide, by rw [hv30]; decide, ⟨_, hchv', fun f hf => ?_, ?_, ?_⟩,
       by rw [hpN]; rcases hpN1 with h | h <;> omega,
       by rw [hpN, hvspn]; rcases hpN1 with h | h <;> omega, by rw [hpN]; rcases hpN1 with h | h <;> omega,
-      hfitv, ?_⟩
+      hfitv, ?_, ?_⟩
     · rw [hv29, hvsp, hu_sp]
       apply BitVec.eq_of_toNat_eq
       rw [BitVec.toNat_sub, BitVec.toNat_sub, BitVec.toNat_sub, show (72 : BitVec 64).toNat = 72 from rfl,
@@ -725,6 +728,10 @@ theorem hroomH (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
         rtView_writeLE (hPA _ _ (hin _ _ (by omega) (by omega))),
         rtView_writeLE (hPA _ _ (hin _ _ (by omega) (by omega)))]
       exact hH
+    · rw [hvmem]; simp only [M1]
+      exact (((((hNP.writeLE _ (hin _ _ (by omega) (by omega))).writeLE _ (hin _ _ (by omega) (by omega))).writeLE _
+        (hin _ _ (by omega) (by omega))).writeLE _ (hin _ _ (by omega) (by omega))).writeLE _
+        (hin _ _ (by omega) (by omega))).writeLE _ (hin _ _ (by omega) (by rcases hpN1 with h | h <;> omega))
   refine GrownRet.of_steps hst1 (GrownRet.of_steps hst2
     (GrownRet.call (gcallee FT pool rt H reloc hms henv) hvpc hpv fun w hwpc hw => ?_))
   obtain ⟨lov, hiv, lo', hi', hgsv, hgsw, hsz, h4k', hal1', hal2', hhi48', hinp', hwsp, hw29,
@@ -799,11 +806,11 @@ set_option maxHeartbeats 2000000 in
 frame now fits, so `hroomH` applies on the larger stack. -/
 theorem hgrow (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (reloc : State → State → Prop) (hms : MorestackContract Extracted.program FT pool rt H reloc)
-    (henv : Env FT pool rt) (s : State) (lo hi : Nat) (hgs : GStack s.mem (s.regs 28).toNat lo hi)
+    (henv : Env FT pool rt) (s : State) (lo hi : Nat) (_hgs : GStack s.mem (s.regs 28).toNat lo hi)
     (hgo : Outside (s.regs 28).toNat 24 pool) (h4k : 4096 ≤ lo) (hlo : lo + 8 ≤ s.sp.toNat)
     (hhi : s.sp.toNat + 16 ≤ hi) (hhi48 : hi ≤ 2 ^ 48) (hal1 : lo % 16 = 0) (hal2 : hi % 16 = 0)
-    (hal3 : s.sp.toNat % 16 = 0) (hfp : s.regs 29 = s.sp - 8) (hinp : InRanges lo (hi - lo) pool)
-    (hpok : PoolOK s.mem pool) (hr4 : (s.regs 30).toNat % 4 = 0) (hr48 : (s.regs 30).toNat < 2 ^ 48)
+    (hal3 : s.sp.toNat % 16 = 0) (_hfp : s.regs 29 = s.sp - 8) (_hinp : InRanges lo (hi - lo) pool)
+    (_hpok : PoolOK s.mem pool) (hr4 : (s.regs 30).toNat % 4 = 0) (hr48 : (s.regs 30).toNat < 2 ^ 48)
     (fs : List Frame) (hch : Chain Arch.arm64 FT s.mem hi (s.regs 30).toNat s.sp.toNat none fs)
     (hfsp : ∀ f ∈ fs, f.sp = s.sp.toNat ∨ s.sp.toNat + 16 ≤ f.sp)
     (hc8 : framesCls Arch.arm64 FT fs (s.sp.toNat + 8) = false)
@@ -870,7 +877,7 @@ theorem hgrow (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     refine ⟨lo1, hi1, by rw [he28, hemem, ← h28, hm.greg]; exact hgr.gstack, by rw [he28]; exact hgo, h4k1,
       by omega, by omega, hhi48', hal1', hal2', by omega, ?_, hinp1, by rw [hemem]; exact hpok_r,
       by rw [he30]; exact hr4, by rw [he30]; exact hr48, ⟨_, hche, fun f hf => ?_, ?_⟩,
-      by rw [hesp', show hi1 - (s.sp.toNat + hi1 - hi) = hi - s.sp.toNat by omega]; exact hfit, ?_⟩
+      by rw [hesp', show hi1 - (s.sp.toNat + hi1 - hi) = hi - s.sp.toNat by omega]; exact hfit, ?_, ?_⟩
     · rw [he29, hesp]; apply BitVec.eq_of_toNat_eq
       rw [BitVec.toNat_sub, hsp_r, BitVec.toNat_ofNat, show (8 : BitVec 64).toNat = 8 from rfl]; omega
     · obtain ⟨f0, hf0, rfl⟩ := List.mem_map.1 hf
@@ -879,6 +886,7 @@ theorem hgrow (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     · rw [hesp', show s.sp.toNat + hi1 - hi + 8 = (s.sp.toNat + 8) + hi1 - hi by omega, hcl _ (by omega)]
       exact hc8
     · rw [he28, hemem, ← h28, hm.greg]; exact hgr.ready
+    · rw [hemem]; exact hm.noptr.of_frame hgr.frame
   have hroome : s_e.mem.readLE ((s_e.regs 28).toNat + 16) 8 < s_e.sp.toNat := by
     rw [he28, hemem, ← h28, hm.greg, hge5, hesp']; omega
   refine GrownRet.of_steps hst ?_
@@ -898,7 +906,7 @@ theorem hmain (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
   · exact hroomH FT pool rt H reloc hms henv s hpc hpre hroom
   · have hpre' := hpre
     obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hfp, hinp, hpok, hr4, hr48,
-      ⟨fs, hch, hfsp, hc8⟩, hfit, hH⟩ := hpre'
+      ⟨fs, hch, hfsp, hc8⟩, hfit, hH, hNP⟩ := hpre'
     have henv' := henv
     obtain ⟨hA, hIF, hAl, hCO, hPA⟩ := henv'
     have hT := htable_of hA
@@ -935,7 +943,7 @@ theorem hmain (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
         ⟨h4k, hlo, show s.sp.toNat + 8 ≤ hi by omega, hhi48⟩, ⟨hal1, hal2, hal3⟩, ?_,
         ⟨hinp, hpok.of_accessible fun a k w => by rw [hmm, Memory.accessible_writeLE]⟩,
         ⟨⟨hGlue, s.sp.toNat, Arch.arm64.fp FT hGlue s.sp.toNat⟩ :: fs, ?_⟩, ⟨hfit1, ?_⟩,
-        ⟨hCO, hAl⟩, ?_⟩ ?_ ?_ rfl ?_ ?_ ?_
+        ⟨hCO, hAl⟩, ?_, ?_⟩ ?_ ?_ rfl ?_ ?_ ?_
     · rw [hmm]; exact GStack.writeLE hgs hgo (hinp.sub (by omega) (by omega))
     · show (s.regs 29).toNat = s.sp.toNat - 8
       rw [hfp, BitVec.toNat_sub, show (8 : BitVec 64).toNat = 8 from rfl]; omega
@@ -948,6 +956,8 @@ theorem hmain (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     · show H [] _ 0 (rtView rt mm)
       rw [hmm, rtView_writeLE (hPA _ _ (hinp.sub (by omega) (by omega)))]
       simpa [setReg, regG] using hH
+    · show NoStackPtr mm pool rt
+      rw [hmm]; exact hNP.writeLE _ (hinp.sub (by omega) (by omega))
     · simp [setReg] <;> rfl
     · simp [setReg]
     · simp [setReg]
@@ -1015,7 +1025,7 @@ theorem laws : FTs.Aligned ∧ FTs.InFrame Arch.arm64 :=
       rcases List.mem_cons.1 hr with rfl | hr
       · exact ⟨rfl, by decide⟩
       · simp at hr)
-    (fun _ => rfl) (fun _ => rfl) (fun _ => rfl)
+    (fun _ => rfl) (fun _ => rfl)
 
 theorem code : FTs.CodeOutside pool := by
   intro pc hv
@@ -1031,7 +1041,7 @@ theorem code : FTs.CodeOutside pool := by
     have hm := List.mem_of_find?_eq_some h
     have hp := List.find?_some h
     simp only [decide_eq_true_eq] at hp
-    have hlt : pc < 0x91a00 := by
+    have hlt : pc < 2 ^ 32 := by
       rcases List.mem_cons.1 hm with rfl | hm
       · simp at hp; omega
       rcases List.mem_cons.1 hm with rfl | hm
@@ -1086,7 +1096,7 @@ theorem pre : PreH FTs pool rt H s0 := by
     show spw + FTs.spdelta ret = spw; rw [show FTs.spdelta ret = 0 from rfl, Nat.add_zero]
   refine ⟨SL, SH, ?_, ?_, by decide, ?_, ?_, by decide, by decide, by decide, ?_, rfl,
     ⟨(SL, SH), by simp [pool], Nat.le_refl _, by decide⟩, ?_, by rw [h30]; decide, by rw [h30]; decide,
-    ⟨[⟨ret, spw, spw⟩], ?_, ?_, ?_⟩, ?_, ?_⟩
+    ⟨[⟨ret, spw, spw⟩], ?_, ?_, ?_⟩, ?_, ?_, mem0_noptr⟩
   · rw [hg]; exact ⟨by decide, by decide, by simp only [gStackLo, Nat.add_zero]; exact d1, d2, d3⟩
   · rw [hg]; simp [pool, G0, SL, SH, BL, BH]
   · rw [hsp]; decide

@@ -530,15 +530,19 @@ statement about Go 1.26's `runtime.morestack_noctxt`/`morestack`/`newstack`/`cop
    copied. **The stack maps are correct** — the compiler's liveness information
    (`FUNCDATA_LocalsPointerMaps`, `FUNCDATA_ArgsPointerMaps`, `FUNCDATA_StackObjects`, indexed by
    `PCDATA_StackMapIndex`, read out of the pclntab) marks exactly the stack slots that hold
-   pointers at each safepoint. This is the one assumption the task names explicitly; it is what
-   the GC and the stack copier themselves rely on, and a `FrameTable` in a theorem is required
-   only to agree with it.
+   pointers at each safepoint. This is what the GC and the stack copier themselves rely on. A
+   theorem's `FrameTable` must **agree with the binary's own records** (`FrameTable.Agrees
+   Extracted.frames`): `janus extract --frames` decodes them from the pclntab (`cmd/janus/frames.go`;
+   `TestFramesRecords` compares the SP deltas with the compiler's `-S` frame sizes on both ISAs)
+   and `janus check` re-derives them, so what is trusted is the compiler's liveness analysis, not
+   a table a proof chose.
 2. **No pointer into the stack lives in non-stack memory.** Go's escape analysis guarantees that
    a pointer into a goroutine stack is never stored in the heap or in globals (such a value would
-   escape). The contract does not adjust any word outside the stack, and a theorem's precondition
-   states that the memory it grants holds no pointer into `[lo, hi)` (the moved memory says
-   nothing about such a word). A program that smuggled a stack pointer into non-stack memory
-   through `unsafe` is outside the model.
+   escape). The contract does not adjust any word outside the stack, and its precondition
+   requires that no word outside the stack pools and the runtime's own memory points into a pool
+   (`MorestackPre.noptr`/`MorestackPre64.noptr`, `Janus.Spec.Stack.NoStackPtr`); every grown
+   theorem carries it in its precondition. A program that smuggled a stack pointer into
+   non-stack memory through `unsafe` is outside the model.
 3. **The new stack.** `newstack` doubles the old size until the frame plus `stackGuard` fits
    (`funcMaxSPDelta(f) + stackGuard` below the resumed `SP`), throwing `stack overflow` past
    `maxstacksize`; the contract promises exactly that much room, inside the address space Go
@@ -548,10 +552,17 @@ statement about Go 1.26's `runtime.morestack_noctxt`/`morestack`/`newstack`/`cop
 4. **Resumption.** `gogo` restores `SP`, `FP`, `g`, `g.stack`, `g.stackguard0` (all moved by
    `delta`, `g` itself kept) and resumes at the saved return address — the prologue's glue after
    the `morestack` call — on the new stack. Every other register, the flags and the SIMD&FP
-   registers are arbitrary (the arguments are read back from the moved spill slots).
+   registers are arbitrary (the arguments are read back from the moved spill slots). On arm64
+   `X30 := gobuf.lr` (the function's return address, `X3` at the call), `X26 = 0`, `X18` kept, and
+   the caller's saved frame pointer at `SP - 8` is copied and adjusted (`adjustctxt`). On amd64
+   (`Janus/Contracts/StackAmd64.lean`) the copy starts at `gobuf.sp = RSP + 8` (the pushed glue
+   address is not copied), `RBP := adjust(gobuf.bp)`, `RDX = 0`, `R14` kept, and **`X15 = 0`, the
+   direction flag clear and `MXCSR`'s control bits kept** — `morestack` and `gogo` do not write
+   them and `newstack` is ABIInternal Go code, which keeps `X15` zero.
 
-`Janus/Contracts/StackSat.lean` proves the contract is satisfiable (a toy allocator that really
-performs the copy and the adjustment), so it is not vacuous. What stays outside the model:
+`Janus/Contracts/StackSat.lean` and `Janus/Contracts/StackSatAmd64.lean` prove the two contracts
+satisfiable (a toy allocator that really performs the copy and the adjustment,
+`morestack_satisfiable`, `morestack64_satisfiable`), so they are not vacuous. What stays outside the model:
 asynchronous preemption (`stackguard0 == stackPreempt`, a scheduler request from another thread),
 `stackForceMove`, GC stack scanning and stack **shrinking** (`shrinkstack`), and any pointer the
 escape analysis did not account for.
