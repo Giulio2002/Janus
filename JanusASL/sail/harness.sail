@@ -31,6 +31,9 @@ register __janus_impdef : string
  * instead of by stepping MSR at EL3 / ERET). */
 function janus_init() -> unit = {
     __InitSystem();
+    __janus_excl_valid = false;                         /* monitor open (CLREX) */
+    __janus_excl_addr = Zeros(56);
+    __janus_excl_size = 0;
     SCR_EL3 = Mk_SCR_EL3_Type(0x0000_0240_0603_0401);   /* NS RW API APK ATA EnSCXT HXEn EnTP2 */
     HCR_EL2 = Mk_HCR_EL2_Type(0x0000_0300_8000_0000);   /* RW API APK */
     HCRX_EL2 = Mk_HCRX_EL2_Type(0x0000_0000_0000_0800); /* MSCEn */

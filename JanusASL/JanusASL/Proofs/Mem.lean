@@ -178,9 +178,11 @@ def InRegion (m : Janus.Arm64.Memory) (a : Nat) (w : Bool) : Prop :=
 def MemRel (m : Janus.Arm64.Memory) (s : SState) : Prop :=
   ∀ a, InRegion m a false → s.mem.get? a = some (m.bytes a)
 
-/-- The registers `janus_step` writes before decoding (`stepEntry`). -/
+/-- The registers `janus_step` writes before decoding (`stepEntry`), and the harness's local
+exclusive monitor (janus_splice.sail), which a load-exclusive writes before its memory access. -/
 def stepEntryRegs : List Register :=
-  [.SEE, .__janus_exc_taken, .__BranchTaken, .__ExclusiveMonitorSet, .__ThisInstrEnc, .__ThisInstr, .__currentCond]
+  [.SEE, .__janus_exc_taken, .__BranchTaken, .__ExclusiveMonitorSet, .__ThisInstrEnc, .__ThisInstr, .__currentCond,
+    .__janus_excl_valid, .__janus_excl_addr, .__janus_excl_size]
 
 /-- What may change between the start of an instruction and one of its memory accesses: the
 general-purpose registers, SP, the step-entry registers, and bytes of the regions. -/

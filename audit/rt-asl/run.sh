@@ -30,9 +30,9 @@ row() { # row NAME EXPECT RESULT  (EXPECT ok|blocked|latent: RESULT must start w
 
 echo "== JanusASL (scripts/asl.sh prove)"
 if scripts/asl.sh prove > "$W/prove.log" 2>&1; then
-  row "asl-prove (59 theorems)" ok "ok ($(grep -o 'audited [0-9]* theorems' "$W/prove.log"))"
+  row "asl-prove (64 theorems)" ok "ok ($(grep -o 'audited [0-9]* theorems' "$W/prove.log"))"
 else
-  row "asl-prove (59 theorems)" ok "FAILED: $(tail -3 "$W/prove.log" | tr '\n' ' ')"
+  row "asl-prove (64 theorems)" ok "FAILED: $(tail -3 "$W/prove.log" | tr '\n' ' ')"
 fi
 
 lean_in_pkg() { (cd "$root/JanusASL" && lake env lean "$@"); }
@@ -51,13 +51,13 @@ fi
 echo "== A6: strict audit (names, kinds, axioms, reviewed statements)"
 lean_in_pkg "$here/AuditStrict.lean" > "$W/strict.log" 2>&1
 grep -o 'STMT .*' "$W/strict.log" > "$W/statements"
-if ! grep -q 'strict audit ok: 56 theorems' "$W/strict.log"; then
+if ! grep -q 'strict audit ok: 61 theorems' "$W/strict.log"; then
   row "A6 strict audit" ok "FAILED: $(grep -A5 'FAILED' "$W/strict.log" | tr '\n' ' ')"
 elif ! diff -q "$here/asl-statements.golden" "$W/statements" >/dev/null; then
   row "A6 statements = reviewed copy" ok "CHANGED (diff $here/asl-statements.golden; re-review, then update it)"
   diff "$here/asl-statements.golden" "$W/statements" | head -6
 else
-  row "A6 strict audit" ok "ok (56 theorems present, theorems, standard axioms)"
+  row "A6 strict audit" ok "ok (61 theorems present, theorems, standard axioms)"
   row "A6 statements = reviewed copy" ok "ok ($(wc -l < "$W/statements") statements unchanged)"
 fi
 
@@ -93,13 +93,15 @@ if [ -x "$DEPS/opam/sail-0.20.3-janus/bin/sail" ]; then
   ( cd "$W" && cp "$here/sail/patches.sail" lean/ && cd lean &&
     sail --lean patches.sail -o RtProbe --lean-output-dir "$W/lean/out" --lean-force-output > sail.log 2>&1 &&
     cd out/RtProbe &&
+    python3 -I "$root/JanusASL/sail/fakereal_sqrt.py" RtProbe/FakeReal.lean &&
+    python3 -I "$root/JanusASL/sail/sail_int_fix.py" "$(grep -rl '^def integer_update_subrange' --include=*.lean . | head -1)" &&
     sed -i "s#^git = .*#path = \"$root/JanusASL/.lake/packages/Sail\"#; /^rev = /d" lakefile.toml &&
     cp "$root/JanusASL/lean-toolchain" . && rm -f lake-manifest.json &&
     cp "$here/sail/Probe.lean" RtProbe/Probe.lean && memguard_lake build RtProbe > build.log 2>&1 &&
     lake env lean RtProbe/Probe.lean > "$W/lean/out.txt" 2>&1 ) || echo "Lean backend build failed (see $W/lean)"
   cmpk() { diff <(grep "^$1 " "$W/c/out") <(grep "^$1 " "$W/lean/out.txt") >/dev/null 2>&1; }
   if [ -s "$W/c/out" ] && [ -s "$W/lean/out.txt" ]; then
-    for k in probe onebit va vd vg vh vc ve rtz rpow; do
+    for k in probe onebit va vd vg vh vc ve rtz rpow rsq ius; do
       if cmpk "$k"; then row "A5 $k" ok "ok (Lean = C on $(grep -c "^$k " "$W/c/out") inputs)"
       else row "A5 $k" ok "DIFFERS from the C backend"; fi
     done
@@ -117,6 +119,26 @@ if [ -x "$DEPS/opam/sail-0.20.3-janus/bin/sail" ]; then
   else row "C2 shape in the sliced sources" blocked "FOUND $hits let/var-bound blocks: C2 may be reached"; fi
 else
   echo "   (skipped: no pinned toolchain at $DEPS; run scripts/asl.sh deps)"
+fi
+
+echo "== A5 fsqrt: FSQRT on the Lean model (sqrt_real replacement) against Sail's C backend"
+# audit/rt-asl/sqrt: ~7,000 FSQRT cases (binary32/64, every rounding mode, FZ, DN; exact squares,
+# denormals, near-midpoint roots, +-0, +-inf, negatives, NaN payloads), run by JanusASL's Lean model
+# (`janus-asl-check --dump-asl`) and by oracle-sail's driver (sail-arm through Sail's C backend);
+# V0-V31 and FPSR must be equal on every case.
+mkdir -p "$W/fsqrt"
+if python3 -I "$here/sqrt/gen_cases.py" > "$W/fsqrt/cases.jsonl" &&
+   scripts/oracle-sail.sh build > "$W/fsqrt/osb.log" 2>&1 &&
+   JANUS_SAIL_JOBS=8 "$root/oracle-sail/target/release/janus-oracle-sail" < "$W/fsqrt/cases.jsonl" > "$W/fsqrt/c.jsonl" &&
+   (cd "$root/JanusASL" && memguard_lake build janus-asl-check > "$W/fsqrt/build.log" 2>&1 &&
+    lake exe janus-asl-check --dump-asl "$W/fsqrt/cases.jsonl" > "$W/fsqrt/lean.jsonl" 2> "$W/fsqrt/lean.err"); then
+  if python3 -I "$here/sqrt/compare.py" "$W/fsqrt/cases.jsonl" "$W/fsqrt/lean.jsonl" "$W/fsqrt/c.jsonl" > "$W/fsqrt/cmp.txt"; then
+    row "A5 fsqrt (Lean = C)" ok "ok ($(head -1 "$W/fsqrt/cmp.txt"))"
+  else
+    row "A5 fsqrt (Lean = C)" ok "DIFFERS: $(head -3 "$W/fsqrt/cmp.txt" | tr '\n' ' ')"
+  fi
+else
+  row "A5 fsqrt (Lean = C)" ok "FAILED to run (see $W/fsqrt)"
 fi
 
 echo "== C1: concurrent janus verify (cmd/janus/concurrency_test.go)"
