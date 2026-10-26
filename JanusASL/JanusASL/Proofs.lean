@@ -35,6 +35,7 @@ import JanusASL.Proofs.FP.VSet
 import JanusASL.Proofs.FP.Exec
 import JanusASL.Proofs.FP.Unpack2
 import JanusASL.Proofs.FP.Div
+import JanusASL.Proofs.FP.Sqrt
 
 /-! # JanusASL proofs: Janus' `step` against the generated ASL, per encoding class
 
