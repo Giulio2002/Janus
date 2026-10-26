@@ -35,7 +35,7 @@ and the bulk barriers via `LiveSpec`), and the copies and clears `MemmoveLive`,
 A new runtime function (e.g. `sync.Pool` `Get`/`Put`) is a contract of the same shape: take `R`,
 state `LiveAt`-style preconditions, `MemFrame (R.rt ++ window ++ writes)`, `LiveFrame s.mem m L
 writes`, new objects `ApartAll _ _ L`, and `R.inv b' (L ++ adds) g (view R.rt (L ++ adds) m)`.
-The `Mem.MemModel` contracts are derived: `MemModel.ofRt R` and `MemmoveLive.toOld`.
+The `Mem.MemModel` family is kept as legacy contracts; `MemModel.ofRt R` states one over a live runtime's model. Every Go ABIInternal contract returns in `retStateX` (`retStateX_intro` proves a state is one); the barrier returns in `wbRetX`.
 
 **The live set.** A ghost list `L` of byte ranges `[lo, hi)`: the heap objects the program holds
 (every object a live allocation returned is added to it). It is not stored anywhere; a theorem
@@ -659,13 +659,14 @@ def LiveDest (R : RtInv) (L : List (Nat × Nat)) (s : State) (d nargs a n : Nat)
   a + n ≤ 2 ^ 48 ∧ s.mem.accessible a n true = true ∧ Outside a n (calleeStack s d nargs) ∧
     (InRanges a n L ∨ Outside a n R.rt)
 
-/-- The return of a live copy or clear (arm64): as `Mem.TRet` (`Map.keepABI` registers, memory
-changed only in `R.rt`, the callee's window and the destination `extra`), the live objects
-unchanged except in `extra`, and the invariant again for the same `L` and `b`. -/
+/-- The return of a live copy or clear (arm64): the canonical Go ABIInternal return state
+`retStateX` (no result registers), memory changed only in `R.rt`, the callee's window and the
+destination `extra`, the live objects unchanged except in `extra`, and the invariant again for the
+same `L` and `b`. -/
 def LiveMemRet (R : RtInv) (d nargs : Nat) (extra L : List (Nat × Nat)) (b : Nat) (s s' : State)
     (P : Memory → Prop) : Prop :=
-  ∃ r v fl fs m, s' = { s with regs := Map.keepABI s.regs r, vregs := v, flags := fl, fpsr := fs,
-                               mem := m, pc := s.regs 30 } ∧
+  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat))
+    (ep : Nat → Bool), s' = retStateX s junk [] f v m ex ep ∧
     MemFrame s.mem m (R.rt ++ calleeStack s d nargs ++ extra) ∧ LiveFrame s.mem m L extra ∧
     R.inv b L (s.regs 28).toNat (view R.rt L m) ∧ P m
 
@@ -1037,10 +1038,10 @@ theorem RtLiveContract.ready {p : Program} {addr : Nat} {stack : Nat}
 /-! ### The `MemModel` contracts as derived lemmas
 
 `MemModel.ofRt R` is the round 10 model of the live runtime `R`: its private memory is `R.rt` and
-the environment holds when the invariant holds for the empty live set and some budget. The old
-contracts over it (`Mem.Memmove`, …, with the barrier off) follow from the live ones, for a runtime
-that serves every request at the function's address (`hok`). So a proof against `MemModel`
-contracts applies to a live runtime unchanged. -/
+the environment holds when the invariant holds for the empty live set and some budget. The legacy
+contracts over it (`Mem.Memmove`, …) are NOT derived from the live ones: they state `excl` and
+`exclPass` unchanged and the barrier off, which a contract that leaves them unspecified (the
+arm64 rule) cannot imply. The live family replaces them for new proofs. -/
 
 open Janus.Spec.Map in
 /-- The `MemModel` of a live runtime. -/
@@ -1069,12 +1070,80 @@ theorem liveSep_win {rt : List (Nat × Nat)} {s : State} {d nargs : Nat}
   · exact h.of_sub (by omega) (by omega)
   · exact h.of_sub (by omega) (by omega)
 
-/-- A live runtime's `Memmove` gives the `MemModel` one (for the barrier-independent contract). -/
-theorem MemmoveLive.toOld {p : Program} {addr d : Nat} {R : RtInv} (h : MemmoveLive p addr d R)
-    (hok : ∀ args, R.ok addr args) : Mem.Memmove p addr (MemModel.ofRt R) d :=
-  Summary.of_live' h
-    (fun s ⟨⟨b, hb⟩, hq, hwin, hin, ha, hacc, hw, hd⟩ => ⟨[], b, ⟨hq, ⟨hok _, hb, by simp, liveSep_win hwin⟩, hin,
-      ⟨ha, hacc, hw, Or.inr hd⟩⟩, fun _ ⟨r, v, fl, fs, m, hs, hf, _, hinv, hP⟩ =>
-        ⟨r, v, fl, fs, m, hs, hf, ⟨b, hinv⟩, hP⟩⟩)
+/-- A state is `retStateX` of the call state when it returns to `X30` with `SP`, `X18`, `X28`,
+`X29`, the system registers and `FPSR` kept and the result registers as `res` (the converse of the
+definition, for proofs that run a callee's code). -/
+theorem retStateX_intro {s s' : State} {res : List W64} (hpc : s'.pc = s.regs 30) (hsp : s'.sp = s.sp)
+    (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29)
+    (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr)
+    (hfs : s'.fpsr = s.fpsr) (hres : ∀ i, i < res.length → s'.regs i = res.getD i 0) :
+    ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat))
+      (ep : Nat → Bool), s' = retStateX s junk res f v m ex ep := by
+  refine ⟨s'.regs, s'.flags, s'.vregs, s'.mem, s'.excl, s'.exclPass, ?_⟩
+  have hr : callRegs s.regs s'.regs res = s'.regs := by
+    funext i
+    simp only [callRegs]
+    by_cases h : i = 18 ∨ i = 28 ∨ i = 29
+    · rw [if_pos h]; rcases h with rfl | rfl | rfl <;> simp [h18, h28, h29]
+    · rw [if_neg h]
+      by_cases hi : i < res.length
+      · have := hres i hi
+        have e1 : res.getD i (s'.regs i) = res.getD i 0 := by
+          simp [List.getD, List.getElem?_eq_getElem hi]
+        rw [e1]; exact this.symm
+      · simp [List.getD, List.getElem?_eq_none (by omega : res.length ≤ i)]
+  cases s; cases s'
+  simp only [retStateX] at *
+  simp_all
+
+/-- A sub-range of a range of `rs` is in `rs` (a sub-slice of a slab of the live set). -/
+theorem InRanges.of_sub {a n b k : Nat} {rs : List (Nat × Nat)} (h : InRanges b k rs) (h1 : b ≤ a)
+    (h2 : a + n ≤ b + k) : InRanges a n rs := h.sub h1 h2
+
+/-! ## Removing objects from the live set
+
+When the program gives objects back (`sync.Pool.Put`: the runtime may reuse them), they leave the
+live set: `removeRanges L rs` drops every range of `rs` from `L`. A contract that gives objects
+back states its invariant for the shrunk set and the view of the same memory:
+`view R.rt (removeRanges L rs) m` agrees with `view R.rt L m` outside the removed ranges
+(`view_removeRanges`), so what the runtime sees changes exactly where the objects were. -/
+
+/-- `L` without the ranges `rs`. -/
+def removeRanges (L rs : List (Nat × Nat)) : List (Nat × Nat) := L.filter fun r => r ∉ rs
+
+@[simp] theorem removeRanges_nil (rs : List (Nat × Nat)) : removeRanges [] rs = [] := rfl
+@[simp] theorem removeRanges_append (L L' rs : List (Nat × Nat)) :
+    removeRanges (L ++ L') rs = removeRanges L rs ++ removeRanges L' rs := List.filter_append ..
+theorem removeRanges_self (o : Nat × Nat) : removeRanges [o] [o] = [] := by simp [removeRanges]
+theorem removeRanges_singleton_of_ne {o x : Nat × Nat} (h : x ≠ o) :
+    removeRanges [x] [o] = [x] := by simp [removeRanges, h]
+theorem removeRanges_of_notMem {L rs : List (Nat × Nat)} (h : ∀ r ∈ L, r ∉ rs) : removeRanges L rs = L :=
+  List.filter_eq_self.2 fun r hr => by simpa using h r hr
+
+/-- The shrunk live set is a sub-list of the old one. -/
+theorem removeRanges_subset (L rs : List (Nat × Nat)) : ∀ r ∈ removeRanges L rs, r ∈ L :=
+  fun r hr => (List.mem_filter.1 hr).1
+
+/-- Outside the removed objects the two live sets mask the same bytes. -/
+theorem inRs_removeRanges {L rs : List (Nat × Nat)} {a : Nat}
+    (h : inRs (L.filter fun r => r ∈ rs) a = false) : inRs (removeRanges L rs) a = inRs L a := by
+  rw [Bool.eq_iff_iff]
+  constructor
+  · intro h1
+    obtain ⟨r, hr, h2⟩ := List.any_eq_true.1 h1
+    exact List.any_eq_true.2 ⟨r, removeRanges_subset L rs r hr, h2⟩
+  · intro h1
+    obtain ⟨r, hr, h2⟩ := List.any_eq_true.1 h1
+    by_cases hm : r ∈ rs
+    · exfalso
+      have := List.any_eq_false.1 h r (List.mem_filter.2 ⟨hr, by simpa using hm⟩)
+      exact this h2
+    · exact List.any_eq_true.2 ⟨r, List.mem_filter.2 ⟨hr, by simpa using hm⟩, h2⟩
+
+/-- The view with objects given back agrees with the old view outside the removed ranges. -/
+theorem view_removeRanges (rt L rs : List (Nat × Nat)) (m : Memory) (a : Nat)
+    (h : inRs (L.filter fun r => r ∈ rs) a = false) :
+    (view rt (removeRanges L rs) m).bytes a = (view rt L m).bytes a := by
+  simp only [view, inRs_removeRanges h]
 
 end Janus.Contracts
