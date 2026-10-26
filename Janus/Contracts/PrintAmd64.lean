@@ -230,7 +230,7 @@ elab "kobl64" : tactic => do
   if let some (ty, lhs, _) := t.eq? then
     let ty ← whnfR ty
     if ty.isAppOfArity ``BitVec 1 then
-      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; simp only [Janus.Amd64.Tactic.setRegF_apply]; first | assumption | rfl) | rfl | (apply BitVec.eq_of_toNat_eq; simp [setRegF]; omega) | (simp [setRegF, callRegs64]) | (apply BitVec.eq_of_toNat_eq; simp [setRegF, callRegs64]; omega))); return
+      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; simp only [Janus.Amd64.Tactic.setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; try (first | with_reducible assumption | with_reducible rfl); done) | (dsimp only; simp only [Janus.Amd64.Tactic.setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_ofNat, BitVec.toNat_add, BitVec.toNat_sub]; try omega; done) | (dsimp only; simp only [Janus.Amd64.Tactic.setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp; try omega; done) | (apply BitVec.eq_of_toNat_eq; simp; try omega; done))); return
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
       run (← `(tactic| first | with_reducible assumption | (dsimp only; janus64_disch) | (janus64_simp; first | done | janus64_disch))); return
     if lhs.isAppOfArity ``Janus.Arm64.Memory.readLE 3 then
