@@ -1,9 +1,14 @@
 """Round 9 SAT row: every runtime contract defined in Janus/Contracts/*.lean (a `def … : Prop`
-whose body is a `Summary`, possibly under `∀`) must have a kernel-checked non-vacuity witness
+whose body is a `Summary`, possibly under `∀`), and every external-stub contract (a `def … :
+Contract`) there and in Janus/FFI.lean and Janus/Amd64/FFI.lean (K2: the trusted cgo, callback,
+libc and setjmp contracts), must have a kernel-checked non-vacuity witness
 `theorem <name>_satisfiable` in the framework module `Janus.Contracts.<File>Sat` (for
-`<File>Amd64.lean`: `<File>SatAmd64`), which Janus.lean must import, where <name> is the
+`<File>Amd64.lean`: `<File>SatAmd64`; for Janus/FFI.lean `Janus.FFISat`, for Janus/Amd64/FFI.lean
+`Janus.Amd64.FFISat`), which Janus.lean must import, where <name> is the
 contract's name with `Contract` removed and the first letter lower-cased
 (`NewobjectContract64` → `newobject64_satisfiable`, `Access1` → `access1_satisfiable`).
+Round 10: the witness's statement must name the contract and give a state, and only the tree
+under test is read.
 Contracts listed in audit/round9/sat-pending.txt are reported as OPEN (with their owner) instead
 of failing; any other missing witness fails the row.
 Usage: python3 -I audit/round9/sat_check.py ROOT"""
@@ -43,13 +48,17 @@ def tree_files():
 FILES = tree_files()
 print("SAT tree    %s (%d files)" % (root, len(FILES)))
 contracts = []
-for rel in sorted(r for r in FILES if r.startswith("Janus/Contracts/") and r.count("/") == 2):
-    f = rel.split("/")[-1]
-    if not f.endswith(".lean"):
-        continue
+external = set()   # `def … : Contract` (external stubs): witnessed by `.Total`
+srcs = [(rel.split("/")[-1], rel, "Janus.Contracts." + (rel.split("/")[-1][:-10] + "SatAmd64"
+         if rel.split("/")[-1][:-5].endswith("Amd64") else rel.split("/")[-1][:-5] + "Sat"))
+        for rel in sorted(FILES) if rel.startswith("Janus/Contracts/") and rel.count("/") == 2
+        and rel.endswith(".lean")]
+srcs += [(f, rel, mod) for f, rel, mod in [("FFI.lean", "Janus/FFI.lean", "Janus.FFISat"),
+         ("Amd64/FFI.lean", "Janus/Amd64/FFI.lean", "Janus.Amd64.FFISat")] if rel in FILES]
+for f, rel, satmod in srcs:
     lines = open(FILES[rel], encoding="utf-8").read().split("\n")
     for i, l in enumerate(lines):
-        m = re.match(r"^def ([A-Z][A-Za-z0-9]*)\b", l)
+        m = re.match(r"^def ([A-Z][A-Za-z0-9]*)(?![.\w])", l)
         if not m:
             continue
         body = []
@@ -58,11 +67,16 @@ for rel in sorted(r for r in FILES if r.startswith("Janus/Contracts/") and r.cou
             if l2.strip() == "":
                 break
         text = " ".join(body)
+        if re.search(r":\s*Contract\s*(where|:=)", text.split(":=", 1)[0] + ":=" if ":=" in text else text) or \
+                re.search(r":\s*Contract\s*where", text):
+            contracts.append((f, m.group(1), satmod))
+            external.add(m.group(1))
+            continue
         if not re.search(r":\s*Prop\s*:=", text):
             continue
         after = text.split(":=", 1)[1]
         if re.match(r"\s*(∀[^,]*,\s*)?([\w.]*\.)?Summary\b", after):
-            contracts.append((f, m.group(1)))
+            contracts.append((f, m.group(1), satmod))
 imports = set(re.findall(r"^import (\S+)", open(FILES["Janus.lean"], encoding="utf-8").read(), re.M))
 sat = {}
 for rel, p in FILES.items():
@@ -74,6 +88,26 @@ for rel, p in FILES.items():
                 # round 10: the witness must be about the contract (its statement names it and
                 # gives a state), not just a theorem of that name
                 sat.setdefault(m.group(1), []).append((mod, m.group(2)))
+
+# A witness statement is about contract c when it names c and gives a call state (`∃ … s`), or
+# names a definition of the framework whose body does (rtstr's `Sat.Satisfiable spec`), or, for
+# an external-stub contract (`: Contract`), states `(c …).Total` (every safe state has a successor).
+DEFS = {}
+for rel, p in FILES.items():
+    if rel.startswith("Janus/") and rel.endswith(".lean"):
+        for m in re.finditer(r"^def (\w+)\b(.*?)(?=^\S)", open(p, encoding="utf-8").read(), re.M | re.S):
+            DEFS.setdefault(m.group(1), []).append(m.group(2))
+def names_state(c, text):
+    return re.search(r"\b%s\b" % re.escape(c), text) and re.search(r"∃[^,]*\bs\b", text)
+def about(c, stmt):
+    if names_state(c, stmt):
+        return True
+    if c in external and re.search(r"\(%s\b.*\)\.Total|\b%s\.Total" % (re.escape(c), re.escape(c)), stmt, re.S):
+        return True
+    for d in set(re.findall(r"\b(?:\w+\.)*(\w+)\b", stmt)):
+        if d != c and any(names_state(c, b) for b in DEFS.get(d, [])):
+            return True
+    return False
 pending = {}
 pf = os.path.join(root, "audit", "round9", "sat-pending.txt")
 if os.path.isfile(pf) and not os.path.islink(pf):
@@ -83,13 +117,10 @@ if os.path.isfile(pf) and not os.path.islink(pf):
             name, owner = (l.split(None, 1) + [""])[:2]
             pending[name] = owner
 ok = missing = opened = 0
-for f, c in contracts:
-    w = c.replace("Contract", "")
+for f, c, satmod in contracts:
+    w = c.replace("Contract", "") or c
     w = w[0].lower() + w[1:]
-    stem = f[:-5]
-    satmod = "Janus.Contracts." + (stem[:-5] + "SatAmd64" if stem.endswith("Amd64") else stem + "Sat")
-    mods = [m for m, stmt in sat.get(w, []) if m in imports and m == satmod
-            and re.search(r"\b%s\b" % re.escape(c), stmt) and re.search(r"∃[^,]*\bs\b", stmt)]
+    mods = [m for m, stmt in sat.get(w, []) if m in imports and m == satmod and about(c, stmt)]
     if mods:
         ok += 1
         print("  SAT ok      %-22s %-20s %s_satisfiable (%s)" % (c, f, w, mods[0]))

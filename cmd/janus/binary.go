@@ -51,6 +51,8 @@ type Binary struct {
 	stubCache map[uint64]stubVerdict // classifyStub results by function address
 	pcln      *gosym.Table           // parsed .gopclntab (stub pins), nil until needed
 	pclnErr   error
+
+	cenv *cenvInfo // the C environment: PLT, GOT, TLS (cenv.go)
 }
 
 // section is an allocated ELF section. data is nil for SHT_NOBITS (.bss, .noptrbss).
@@ -295,6 +297,7 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 			b.Funcs[i].Size = end - b.Funcs[i].Addr
 		}
 	}
+	b.loadCEnv(f)
 	return b, nil
 }
 

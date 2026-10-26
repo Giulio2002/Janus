@@ -988,9 +988,9 @@ Linux:
    `X15 = 0`, `DF` clear, and `FS:-8 = g` for a possibly different thread's `FS`. All other
    registers, the flags, the vector registers and (amd64) the x87 FPU state are arbitrary. The goroutine may resume on
    another OS thread (`exitsyscall`'s slow path), so `TPIDR_EL0`/`FS` are arbitrary afterwards.
-4. *`_cgo_topofstack`.* During one cgo call it returns the same value every time (no callback into
-   Go moves the stack; callbacks are not modelled: the C code would have to reach `crosscall2`,
-   which is not extracted, so such a run cannot be proved). It preserves every other register and
+4. *`_cgo_topofstack`.* During one cgo call it returns the same value every time. This excludes
+   a callback into Go (`CgoCallback` below) that grows, and so moves, the goroutine stack during
+   the call: a Go → C → Go composition that calls back is outside this claim (no example does). It preserves every other register and
    writes only its frame (arm64: the 56 bytes below `SP`; amd64: nothing).
 5. *No concurrency.* As everywhere in Janus: no other goroutine or thread writes the granted
    memory during the call. The garbage collector does not move or modify objects that are
@@ -1024,3 +1024,30 @@ contract is stuck where its precondition holds), `write_full`, `read_some`, `clo
 meets `SchedContract` and `ConvT64Contract`). Examples: `examples/proofs-sys/{arm64,amd64}/`
 (`WriteOut`: `syscall.Write`; `NowNano`: `time.Now().UnixNano()`; `Pid`: `syscall.Getpid`;
 `MustNonNeg`: a path ending in a trap), run by `scripts/verify-sys-examples.sh`.
+**Callbacks (C → Go, `CgoCallback`; K2).** `runtime.cgocallback` (`.abi0`, pinned by content)
+is an external stub too. Trusted, both ISAs: `CgoCallback`, `CallbackEntry`, `CbResume`,
+`CbResumed`, `cbClobber` (amd64 also `CbStack`). As claims about the Go 1.26 runtime:
+
+1. *The Go call.* `cgocallback(fn, frame, ctxt)` (arguments at `[SP+8]`… / `[RSP+8]`…, as
+   `crosscall2` stores them) calls `fn(frame)` with the ABIInternal convention (`X0`/`RAX =
+   frame`, `X15 = 0` and `DF` clear on amd64) on the goroutine stack (`stackSep`: not C memory;
+   amd64 `goStack`: `cbGoStack = 4096` writable bytes below `RSP` and the return slot), returning
+   to an address outside the extracted code, on the same thread, with the C side's `MXCSR` and x87
+   control word (amd64) / `FPCR` (arm64).
+2. *C memory.* Before and after the Go call, the runtime changes no byte of the C state's memory
+   outside `cbClobber`: the C stack below `SP` (`cbStackScratch = 16384` bytes), the argument
+   slots and the TLS `g` slot (amd64: at `TLSImage.x64Addr fs "runtime.tlsg"`, from the
+   extraction).
+3. *The return.* `cgocallback` returns to `crosscall2` with `SP + 8`/`SP` restored, `DF` clear and
+   the `MXCSR` control bits kept (amd64); every other register, the flags and the vector
+   registers are arbitrary (ABI0), and the memory is the Go code's final memory on the C
+   state's accessible bytes (`CbResumed`).
+
+**libc (`Libc`, `SetJmp J`, `TlsGetAddr`; `Janus/Contracts/Libc.lean`, `LibcAmd64.lean`; K2).**
+External stubs `sym@plt`; trusted as glibc's behaviour on Linux, one `Spec` per function
+(FFI.md § 3.2–3.4): `memcpy`/`memmove`/`memset` (and `__*_chk`), `strlen`, `strcmp`, `malloc`,
+`free`, `_setjmp`, `longjmp`/`_longjmp`/`__longjmp_chk`, `__tls_get_addr`. Each needs at most
+`libcStack = 32768` bytes of stack below `SP` and keeps the callee-saved state, the thread
+pointer and the regions (but `malloc`/`free`). Witnesses: `libc_satisfiable`,
+`setJmp_satisfiable`, `jmpModel_satisfiable`, `tlsGetAddr_satisfiable` (`LibcSat`,
+`LibcSatAmd64`).

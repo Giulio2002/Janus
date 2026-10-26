@@ -98,7 +98,7 @@ theorem model : ConvT64 (Extracted.program.link implAt) cAddr R0 Htrue := by
   simp only [R0_depth, R0_priv, outside_cons, outside_nil, and_true] at hout hd1 hd2 hst
   janus64_run
   refine rtReturn_of R0 1 [] s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl ?_
+    (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl ?_
     ((show Env0 s.mem (s.regs 14) from ⟨he1, he2, hd⟩).writeLE _ (by simp [BOX])) ?_
   · simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, R0_priv, R0_depth,
       List.append_nil, List.cons_append, List.nil_append]

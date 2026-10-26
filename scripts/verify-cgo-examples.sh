@@ -16,7 +16,14 @@
 #   (AVX2-vectorised, artifacts/examples-cgo-avx-amd64): CDot32 GoDot32
 #   amd64 only (WP-J): a CET jump table (CSwitch), x87 long double (CLdMul), and
 #   Go MulLD -> c_ldmul -> ld_mul end to end (GoLdMul)
+#   The C environment (docs/FFI.md sections 2-4; binary artifacts/examples-cenv-<isa>):
+#     EBump (a writable global through the GOT; amd64: the --no-relax build), ETLS (a __thread
+#     variable, general dynamic as relaxed by the linker), ETLSIE (initial exec), EAtomic (an atomic
+#     RMW: LSE / LOCK XADD), ELibc (strlen, malloc, __memcpy_chk, memcpy, free through the PLT),
+#     ESetJmp (setjmp/longjmp), EArgMin (a call through a function pointer, CFuncIs), ECallGo
+#     (C -> an //export Go function, end to end under CgoCallback), EAlloca (alloca, stack probes)
 #
+# Every name maps to a symbol (sym) and, for the C environment, a binary (bin).
 # Usage: scripts/verify-cgo-examples.sh [isa/Name ...]   (default: all, e.g. arm64/GoAdd)
 # Writes artifacts/cgo/<isa>/<Name>/verified.json and a summary to artifacts/verify-cgo-examples.txt.
 set -euo pipefail
@@ -34,12 +41,19 @@ declare -A sym=(
   [GoVSum8]=example.com/cgo/cabi.VSum8
   [CSum32]=c_sum32 [GoSum32]=example.com/cgo/vec.Sum32
   [CDot32]=c_dot32 [GoDot32]=example.com/cgo/avx.Dot32
+  [EBump]=e_bump [ETLS]=e_tls_add [ETLSIE]=e_tls_ie_add [EAtomic]=e_atomic_inc [ELibc]=e_libc
+  [ESetJmp]=e_setjmp [EArgMin]=e_argmin_i64 [ECallGo]=e_callgo [EAlloca]=e_alloca
 )
-all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8)
-# the examples whose binary is the clang-built one
-declare -A clang=([CSum32]=1 [GoSum32]=1)
-# the examples whose binary is the clang -march=x86-64-v3 one
-declare -A avx=([CDot32]=1 [GoDot32]=1)
+# binaries other than artifacts/examples-cgo-<isa> (key isa/Name, or Name for both ISAs)
+declare -A bin=(
+  [EBump]=examples-cenv [amd64/EBump]=examples-cenv-norelax
+  [ETLS]=examples-cenv [ETLSIE]=examples-cenv [EAtomic]=examples-cenv [ELibc]=examples-cenv
+  [ESetJmp]=examples-cenv [EArgMin]=examples-cenv [ECallGo]=examples-cenv [EAlloca]=examples-cenv
+  [CSum32]=examples-cgo-clang [GoSum32]=examples-cgo-clang
+  [CDot32]=examples-cgo-avx [GoDot32]=examples-cgo-avx
+)
+all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8
+  EBump ETLS ETLSIE EAtomic ELibc ESetJmp EArgMin ECallGo EAlloca)
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
@@ -63,10 +77,8 @@ for target in "${names[@]}"; do
   # `runtime.convT64`, `convT32` and `convTnoptr` are only called on the dead
   # `if _Cgo_always_false` branch of the cgo wrappers: contracts (not extracted; the proofs show
   # the branch is never taken)
-  binary="artifacts/examples-cgo-$isa"
-  [ -n "${clang[$n]:-}" ] && binary="artifacts/examples-cgo-clang-$isa"
-  [ -n "${avx[$n]:-}" ] && binary="artifacts/examples-cgo-avx-$isa"
-  bin/janus extract "$binary" "${sym[$n]}" "$out" --contract runtime.convT64 \
+  b="${bin[$isa/$n]:-${bin[$n]:-examples-cgo}}"
+  bin/janus extract "artifacts/$b-$isa" "${sym[$n]}" "$out" --contract runtime.convT64 \
     --contract runtime.convT32 --contract runtime.convTnoptr >/dev/null 2>&1
   start=$(date +%s.%N)
   if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then

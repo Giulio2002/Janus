@@ -322,6 +322,7 @@ func renderLeanAmd64(x *Extraction) []byte {
 	sb.WriteString("]\n\n")
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
 	writeProgram(&sb, x, "Amd64.Program")
+	writeCEnv(&sb, x)
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())

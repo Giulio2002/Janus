@@ -325,6 +325,16 @@ func (b *Binary) canonAmd64(f Func) ([]byte, []stubRef, error) {
 			id, fn, fa := b.symIdentity(t)
 			refs = append(refs, stubRef{Off: p, Kind: kind, Target: id, Func: fn, FAddr: fa})
 		}
+		// The FS displacement of Go's TLS g slot (runtime.tlsg) is link-time layout like a
+		// PC-relative field: -8 when Go's is the only TLS variable, lower when cgo-linked C code
+		// has __thread variables of its own (cenv.go, goTLSDisp). It is masked and recorded as
+		// the identity "tls:runtime.tlsg".
+		if p, ok := b.tlsgDispOffset(code[off:off+inst.Len], inst); ok {
+			for k := 0; k < 4; k++ {
+				out[off+p+k] = 0
+			}
+			refs = append(refs, stubRef{Off: off + p, Kind: "tls", Target: "tls:runtime.tlsg"})
+		}
 		off += inst.Len
 	}
 	return out, refs, nil

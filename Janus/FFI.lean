@@ -45,6 +45,58 @@ vacuously), so a theorem assuming it would prove anything. A contract is instead
 semantics for the stub, and the only way to discharge one is a refinement proof.
 -/
 
+namespace Janus
+
+/-! ## The C environment of an extraction (both ISAs)
+
+`janus extract` renders two more definitions for C code (docs/FFI.md, section 2): `Extracted.cdata`,
+the writable C data objects (`.data`/`.bss`) the extracted C functions reference, directly or
+through a statically resolved GOT slot, and `Extracted.tls`, the executable's TLS segment, when an
+extracted function reads the thread pointer. They name addresses for theorems; they do not change
+the run. -/
+
+/-- A writable C data object: its symbol, address, size, and initial bytes (`.bss`: zero, `init`
+empty). Its run-time content is not fixed by the binary, so it is not part of
+`Program.DataLoaded`: a theorem states what it needs about it. -/
+structure CData where
+  name : String
+  base : Nat
+  size : Nat
+  bss : Bool
+  init : List Nat
+deriving Repr, Inhabited
+
+/-- The address of the object `name` (`0` if there is none). -/
+def CData.addr (ds : List CData) (name : String) : Nat :=
+  ((ds.find? (·.name == name)).map (·.base)).getD 0
+
+/-- The executable's TLS segment (`PT_TLS`: `p_memsz`, `p_align`, the `.tdata` bytes) and its
+`STT_TLS` symbols (name, offset in the segment, size). -/
+structure TLSImage where
+  size : Nat
+  align : Nat
+  init : List Nat
+  vars : List (String × Nat × Nat)
+deriving Repr, Inhabited
+
+/-- `n` rounded up to a multiple of `a` (`a ≤ 1`: `n`). -/
+def roundUp (n a : Nat) : Nat := if a ≤ 1 then n else (n + a - 1) / a * a
+
+/-- The offset of the variable `name` in the TLS segment (`0` if there is none). -/
+def TLSImage.varOff (t : TLSImage) (name : String) : Nat :=
+  ((t.vars.find? (·.1 == name)).map (·.2.1)).getD 0
+
+/-- The offset below the thread pointer (`FS`) of the executable's TLS block on x86-64 (ELF TLS
+variant II: the block ends at the thread control block). -/
+def TLSImage.x64Off (t : TLSImage) : Nat := roundUp t.size t.align
+
+/-- The address of the `__thread` variable `name` on x86-64, for the thread whose `FS` base is
+`fs`. -/
+def TLSImage.x64Addr (t : TLSImage) (fs : BitVec 64) (name : String) : Nat :=
+  fs.toNat - t.x64Off + t.varOff name
+
+end Janus
+
 namespace Janus.FFI
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.CABI
@@ -518,5 +570,467 @@ theorem CgoCall.refines {p : Program} {fn : Nat} {G : State → Prop} {E : State
     refine ⟨hf', ?_⟩
     have hq := (hC T (s.regs 1) ret he.retAddr t (hcall t ret he) (hpre s t ret hG he)).runsTo hrun
     exact hres.memFrame (hE s hG) (hacc s t ret t' hG he hcr hq.2) (hna s hG)
+
+
+/-! ## Combining contracts
+
+A C function may call several kinds of external functions (libc through the PLT, `setjmp`, a
+callback into Go). `C₁.plus C₂` allows the calls of both; `Contract.Disjoint` (the contracts
+name different functions) makes the parts refine separately. -/
+
+/-- The calls of `C₁` and of `C₂`. A result is one of the contract that allowed the call. -/
+def Contract.plus (C₁ C₂ : Contract) : Contract where
+  safe f s := C₁.safe f s ∨ C₂.safe f s
+  next f s s' := (C₁.safe f s ∧ C₁.next f s s') ∨ (C₂.safe f s ∧ C₂.next f s s')
+
+/-- `C` and `D` never allow the same function. -/
+def Contract.Disjoint (C D : Contract) : Prop := ∀ f s s', C.safe f s → D.safe f s' → False
+
+theorem Contract.Disjoint.symm {C D : Contract} (h : C.Disjoint D) : D.Disjoint C :=
+  fun f s s' h₁ h₂ => h f s' s h₂ h₁
+
+/-- Two contracts that only allow the functions named in `n₁` and `n₂`, disjoint lists, are
+disjoint. -/
+theorem Contract.disjoint_of_names {C D : Contract} (n₁ n₂ : List String)
+    (h₁ : ∀ f s, C.safe f s → f ∈ n₁) (h₂ : ∀ f s, D.safe f s → f ∈ n₂)
+    (hd : ∀ f, f ∈ n₁ → f ∈ n₂ → False) : C.Disjoint D :=
+  fun f s s' hc hd' => hd f (h₁ f s hc) (h₂ f s' hd')
+
+/-- A theorem under `C₁` holds under `C₁.plus C₂`. -/
+theorem Contract.Refines.plus_left {C₁ C₂ : Contract} (hd : C₂.Disjoint C₁) :
+    (C₁.plus C₂).Refines C₁ := fun f s h =>
+  ⟨.inl h, fun _ hn => hn.elim (fun h' => h'.2) (fun h' => (hd f s s h'.1 h).elim)⟩
+
+/-- A theorem under `C₂` holds under `C₁.plus C₂`. -/
+theorem Contract.Refines.plus_right {C₁ C₂ : Contract} (hd : C₁.Disjoint C₂) :
+    (C₁.plus C₂).Refines C₂ := fun f s h =>
+  ⟨.inr h, fun _ hn => hn.elim (fun h' => (hd f s s h'.1 h).elim) (fun h' => h'.2)⟩
+
+/-- Refine both parts of a sum. -/
+theorem Contract.Refines.plus {A₁ A₂ B₁ B₂ : Contract} (h₁ : A₁.Refines B₁) (h₂ : A₂.Refines B₂)
+    (d₁ : A₁.Disjoint B₂) (d₂ : A₂.Disjoint B₁) : (A₁.plus A₂).Refines (B₁.plus B₂) := by
+  intro f s hs
+  refine ⟨hs.elim (fun h => .inl (h₁ f s h).1) (fun h => .inr (h₂ f s h).1), fun s' hn => ?_⟩
+  rcases hn with ⟨ha, hn⟩ | ⟨ha, hn⟩
+  · rcases hs with hb | hb
+    · exact .inl ⟨hb, (h₁ f s hb).2 s' hn⟩
+    · exact (d₁ f s s ha hb).elim
+  · rcases hs with hb | hb
+    · exact (d₂ f s s ha hb).elim
+    · exact .inr ⟨hb, (h₂ f s hb).2 s' hn⟩
+
+/-- A contract is **total** when every call it allows has a result: a run reaching it continues
+(and a theorem under it is not vacuous there). Every contract of `Janus.FFI` and
+`Janus.Contracts.Libc` has a `…_satisfiable` theorem of this form or stronger. -/
+def Contract.Total (C : Contract) : Prop := ∀ f s, C.safe f s → ∃ s', C.next f s s'
+
+theorem Contract.Total.plus {C₁ C₂ : Contract} (h₁ : C₁.Total) (h₂ : C₂.Total) :
+    (C₁.plus C₂).Total := fun f s hs => hs.elim
+  (fun h => let ⟨s', h'⟩ := h₁ f s h; ⟨s', .inl ⟨h, h'⟩⟩)
+  (fun h => let ⟨s', h'⟩ := h₂ f s h; ⟨s', .inr ⟨h, h'⟩⟩)
+
+/-- Under a total contract, a run that returns (`ReturnsC`) has a final state. -/
+theorem ReturnsC.exists_runsTo {p : Program} {C : Contract} {P : State → Prop} {s : State}
+    (hC : C.Total) (h : ReturnsC p C P s) : ∃ s', RunsTo p C s s' ∧ P s' := by
+  induction h with
+  | exit hx hp => exact ⟨_, .exit hx, hp⟩
+  | step hx hs hf hst _ ih =>
+    obtain ⟨s', hr, hp⟩ := ih; exact ⟨s', .step hx hs hf hst hr, hp⟩
+  | @ext s st hx hs hk hsafe _ ih =>
+    obtain ⟨s₁, hn⟩ := hC st.name s hsafe
+    obtain ⟨s', hr, hp⟩ := ih s₁ hn
+    exact ⟨s', .ext hx hs hk hn hr, hp⟩
+
+theorem none_total : Contract.none.Total := fun _ _ h => h.elim
+
+/-! ## C function pointers
+
+A C function that calls through a function pointer (a `qsort` comparator, a callback) is proved
+for every pointer satisfying a **function-pointer hypothesis** `CFuncIs p f pre post`: the code at
+`f` behaves as a C function with precondition `pre` and postcondition `post` (a callee
+`Summary` that also restores what AAPCS64 requires). The theorem is stated over `p.link impl`
+for every `impl` (the code behind the pointer is not extracted), as for runtime contracts
+(docs/RUNTIME-CONTRACTS.md), so the hypothesis can hold: it is the C analogue of
+`Janus.Spec.FuncvalIs`, which names an extracted closure. A concrete function satisfying it
+(proved from its machine code) discharges it (`examples/proofs-cgo/*/EArgMin.lean`).
+
+At the indirect call (`BLR Xn`), `Reaches.blr_call` (`ReachesRet.blr_call`) replaces the call by
+the hypothesis: run `janus_run until [pc]` to the `BLR`, apply the lemma, and continue with
+`janus_run` from every state the callee may return in. -/
+
+/-- The code at `f` (a 4-aligned user address) is a C function: from every state at `f`
+satisfying `pre`, it returns to `X30` restoring `CReturn` and satisfying `post`. -/
+def CFuncIs (p : Program) (f : W64) (pre : State → Prop) (post : State → State → Prop) : Prop :=
+  f.toNat % 4 = 0 ∧ f.toNat < 2 ^ 48 ∧ Summary p f.toNat pre (fun s s' => CReturn s s' ∧ post s s')
+
+/-- The callee's entry state of `BLR Xrn` at `s`. -/
+def blrState (s : State) (rn : Nat) : State := { s.writeZR 30 (s.pc + 4) with pc := s.regs rn }
+
+@[simp] theorem blrState_pc (s : State) (rn : Nat) : (blrState s rn).pc = s.regs rn := rfl
+@[simp] theorem blrState_lr (s : State) (rn : Nat) : (blrState s rn).regs 30 = s.pc + 4 := by
+  simp [blrState, State.writeZR]
+
+theorem exec_blr {s : State} {rn : Nat} (hrn : rn ≠ 31) (hal : (s.regs rn).toNat % 4 = 0)
+    (hlt : (s.regs rn).toNat < 2 ^ 48) : exec (.blr rn) s = .ok (blrState s rn) := by
+  have h56 : ¬ (s.regs rn).toNat ≥ 2 ^ 56 := by omega
+  simp only [exec, State.readZR, if_neg hrn, branchReg, if_neg h56, if_pos hal]
+  have : (s.writeZR 30 (s.pc + 4)).regs rn = s.regs rn ∨ rn = 30 := by
+    by_cases h : rn = 30
+    · exact .inr h
+    · left; simp [State.writeZR, h]
+  rfl
+
+/-- An indirect call through a function pointer satisfying `CFuncIs`. -/
+theorem Reaches.blr_call {p : Program} {s : State} {Q : Outcome → Prop} {c w rn : Nat}
+    {pre : State → Prop} {post : State → State → Prop}
+    (hpc : s.pc = BitVec.ofNat 64 c) (hok : stepOK p c w (.blr rn) = true) (hrn : rn ≠ 31)
+    (hf : CFuncIs p (s.regs rn) pre post) (hpre : pre (blrState s rn))
+    (h : ∀ s', s'.pc = s.pc + 4 → CReturn (blrState s rn) s' → post (blrState s rn) s' →
+      Reaches p s' Q) : Reaches p s Q := by
+  obtain ⟨hal, hlt, hsum⟩ := hf
+  refine Reaches.step hpc hok (exec_blr hrn hal hlt) ?_
+  refine Reaches.call (entry := (s.regs rn).toNat) hsum (by simp) hpre fun s' hr hq => ?_
+  exact h s' (by rw [hr, blrState_lr]) hq.1 hq.2
+
+/-- `Reaches.blr_call` inside a callee (`ReachesRet`). -/
+theorem ReachesRet.blr_call {p : Program} {s : State} {ret : W64} {Q : State → Prop}
+    {c w rn : Nat} {pre : State → Prop} {post : State → State → Prop}
+    (hpc : s.pc = BitVec.ofNat 64 c) (hok : stepOK p c w (.blr rn) = true) (hrn : rn ≠ 31)
+    (hf : CFuncIs p (s.regs rn) pre post) (hpre : pre (blrState s rn))
+    (h : ∀ s', s'.pc = s.pc + 4 → CReturn (blrState s rn) s' → post (blrState s rn) s' →
+      ReachesRet p ret s' Q) : ReachesRet p ret s Q := by
+  obtain ⟨hal, hlt, hsum⟩ := hf
+  refine ReachesRet.step hpc hok (exec_blr hrn hal hlt) ?_
+  refine ReachesRet.call (entry := (s.regs rn).toNat) hsum (by simp) hpre fun s' hr hq => ?_
+  exact h s' (by rw [hr, blrState_lr]) hq.1 hq.2
+
+/-- A `CFuncIs` hypothesis about `p` holds in `p.withExit ret`. -/
+theorem CFuncIs.withExit {p : Program} {f : W64} {pre : State → Prop}
+    {post : State → State → Prop} {ret : Nat} (h : CFuncIs p f pre post) (hret : RetAddr p ret) :
+    CFuncIs (p.withExit ret) f pre post := ⟨h.1, h.2.1, h.2.2.withExit hret⟩
+
+/-! ## Callbacks: C calls an exported Go function (`//export`)
+
+For `//export F`, cgo generates a C function `F` (in `_cgo_export.c`) that packs its arguments
+into a frame and calls `crosscall2(_cgoexp_<hash>_F, &frame, size, ctxt)`; `crosscall2`
+(`runtime/cgo/asm_arm64.s`, assembly) saves the AAPCS64 callee-saved registers, loads `g`
+(`load_g`) and calls `runtime.cgocallback(fn, frame, ctxt)` (ABI0: the arguments at
+`[SP+8]`, `[SP+16]`, `[SP+24]`). `cgocallback` re-enters Go: it gets `g` from TLS (borrowing an
+`M` with `needm` on a thread Go did not create), switches from the system stack to the
+goroutine's stack (`X28 = g`), and calls `fn(frame)` with the Go ABIInternal convention; the
+Go function `_cgoexp_<hash>_F` unpacks the frame, calls `F` and stores the results in the frame;
+then `cgocallback` switches back and returns to `crosscall2`, which restores the callee-saved
+registers.
+
+Everything but `cgocallback` is machine code in the binary and is executed by the model: the
+C wrapper, `_cgo_wait_runtime_init_done`, `_cgo_release_context`, `crosscall2`, `load_g` and the
+Go function behind the export (the extractor follows its address, `cmd/janus/cenv.go`). The
+trusted contract `CgoCallback` describes `cgocallback`: it runs the Go function **in the
+model** from a Go call state (`CallbackEntry`) and resumes the C caller with the Go code's memory
+writes (`CbResumed`). `CallbackSpec` is the C-side assumption, and `CgoCallback.refines` the
+reverse composition theorem (as `CgoCall.refines` is for Go → C). -/
+
+/-- Bytes of the C (system) stack below `SP` that `cgocallback` may use for its own frames
+(`cgocallback` itself, `needm`, the `g0` frames on a thread Go did not create): the linker's
+bound on a chain of nosplit frames (`abi.StackNosplitBase`, 800 bytes) plus a margin, as for
+`cgoStackScratch`; `needm` and `dropm` are not nosplit but run on the system stack, which for a
+C thread is the thread's own stack (the theorem's C stack window must cover them:
+`cbStackScratch` bytes). -/
+def cbStackScratch : Nat := 16384
+
+/-- The bytes a `cgocallback` from the C state `s` may change besides what the Go code writes:
+the C stack below `SP` (`cbStackScratch` bytes), its ABI0 argument slots `[SP+8, SP+32)` (`[SP]`
+is the caller's, untouched), and Go's TLS `g` slot (`TPIDR_EL0 + 16`, which `cgocallback` points
+at the goroutine's `g`, `g0`, or nil around the call). -/
+def cbClobber (s : State) : List (Nat × Nat) :=
+  [(s.sp.toNat - cbStackScratch, s.sp.toNat), (s.sp.toNat + 8, s.sp.toNat + 32),
+   (s.tpidr.toNat + tlsGOffset, s.tpidr.toNat + tlsGOffset + 8)]
+
+/-- Memory of the C state `s` that `cgocallback` leaves alone: accessible in `s` and outside
+`cbClobber s`. -/
+def CbKept (s : State) (a n : Nat) (w : Bool) : Prop :=
+  s.mem.accessible a n w = true ∧ Outside a n (cbClobber s)
+
+/-- Bytes of the goroutine stack below `SP` that are not C memory (`CallbackEntry.stackSep`). -/
+def cbGoStack : Nat := 4096
+
+/-- The Go call state `u` that `cgocallback` makes from the C state `s` (at its entry: the ABI0
+call from `crosscall2`), returning to `ret` (inside `cgocallbackg1`, outside the extracted
+code). Trusted description (`runtime/asm_arm64.s`, `cgocallback`; `runtime/cgocall.go`,
+`cgocallbackg1`):
+
+* the ABIInternal call `fn(frame)`: `pc = [SP+8]`, `X0 = [SP+16]`, `X30 = ret`;
+* the goroutine stack is not C memory (`stackSep`, `goStack` bytes below `SP`);
+* C memory `cgocallback` leaves alone (`CbKept`) holds the same bytes and is accessible in the
+  same way (`kept`, `keptAcc`);
+* the same thread (`TPIDR_EL0`; a callback runs on the thread that called it), `DCZID_EL0` and
+  `FPCR` (no instruction of the runtime path writes `FPCR`).
+
+Every other register (`X28 = g` among them), the flags and the SIMD&FP registers are
+arbitrary: a theorem that needs facts about `g` or the goroutine stack (the stack check of a
+non-leaf Go function) states them as the readiness predicate `R` of `CgoCallback`. -/
+structure CallbackEntry (p : Program) (s u : State) (ret : Nat) : Prop where
+  pc : u.pc = BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 8) 8)
+  arg : u.regs 0 = BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 16) 8)
+  lr : u.regs GoABI.regLR = BitVec.ofNat 64 ret
+  retAddr : RetAddr p ret
+  stackSep : ∀ a n w, s.mem.accessible a n w = true →
+    Outside a n [(u.sp.toNat - cbGoStack, u.sp.toNat)]
+  kept : ∀ a n, CbKept s a n false → u.mem.readLE a n = s.mem.readLE a n
+  keptAcc : ∀ a n w, CbKept s a n w → u.mem.accessible a n w = true
+  tpidr : u.tpidr = s.tpidr
+  dczid : u.dczid = s.dczid
+  fpcr : u.fpcr = s.fpcr
+
+/-- How the C caller resumes after `cgocallback` returns: at `X30` (in `crosscall2`), with `SP`,
+`TPIDR_EL0`, `DCZID_EL0` and `FPCR` kept (an ABI0 callee: every general register, the flags,
+the SIMD&FP registers and `FPSR` arbitrary; `crosscall2` restores what AAPCS64 needs), and
+memory `m`. -/
+def CbResume (s s' : State) (m : Memory) : Prop :=
+  ∃ regs flags vregs fpsr,
+    s' = { s with regs := regs, pc := s.regs GoABI.regLR, flags := flags, mem := m,
+                  vregs := vregs, fpsr := fpsr }
+
+/-- The C caller resumes from the final Go state `u'`: memory with the regions of `s`, the Go
+code's result on C memory outside `cbClobber s`, the old bytes where `s` has no access, and
+arbitrary clobbered bytes. -/
+def CbResumed (s u' s' : State) : Prop :=
+  ∃ m, CbResume s s' m ∧ m.regions = s.mem.regions ∧
+    ∀ a, Outside a 1 (cbClobber s) →
+      m.bytes a = if s.mem.accessible a 1 false then u'.mem.bytes a else s.mem.bytes a
+
+/-- The **trusted** contract of `runtime.cgocallback` (arm64), for Go code that may itself call
+external functions under `Cin` (`Contract.none` when it calls none; `CgoCall p` when it calls
+C again) and the readiness predicate `R` on the Go call state (`fun _ => True` for a Go function
+that needs nothing of `g` or its stack, such as a leaf; otherwise e.g. its stack check): the C
+stack has `cbStackScratch` writable bytes below `SP` and the argument slots above, and for every
+Go call state `cgocallback` may make in which `R` holds, the Go function returns, restoring
+`SP`, `g` and `FP` (the ABIInternal return `cgocallbackg1` relies on); the possible results are
+the C states resumed from the final Go states (`CbResumed`). -/
+def CgoCallback (p : Program) (Cin : Contract) (R : State → Prop) : Contract where
+  safe f s := f = "runtime.cgocallback.abi0" ∧ CStack s cbStackScratch 32 ∧
+    ∀ u ret, CallbackEntry p s u ret → R u →
+      ReturnsC (p.withExit ret) Cin (ABIReturnC u) u
+  next f s s' := f = "runtime.cgocallback.abi0" ∧ ∃ u ret u', CallbackEntry p s u ret ∧ R u ∧
+    RunsTo (p.withExit ret) Cin u u' ∧ ABIReturnC u u' ∧ CbResumed s u' s'
+
+/-- The C-side assumption: `cgocallback` called (by `crosscall2`) with `fn = [SP+8]` the Go
+function at `fn`, in a state satisfying `G`, returns (`CbResume`) with memory that agrees with
+`E s` outside `cbClobber s`. -/
+def CallbackSpec (fn : Nat) (G : State → Prop) (E : State → Memory) : Contract where
+  safe f s := f = "runtime.cgocallback.abi0" ∧ s.mem.readLE (s.sp.toNat + 8) 8 = fn ∧ G s
+  next f s s' := f = "runtime.cgocallback.abi0" ∧ ∃ m, CbResume s s' m ∧ MemFrame (E s) m (cbClobber s)
+
+theorem CbResumed.memFrame {s u' s' : State} {E : Memory} (h : CbResumed s u' s')
+    (hE : E.regions = s.mem.regions)
+    (hacc : ∀ a, Outside a 1 (cbClobber s) → s.mem.accessible a 1 false = true →
+      u'.mem.bytes a = E.bytes a)
+    (hna : ∀ a, Outside a 1 (cbClobber s) → s.mem.accessible a 1 false = false →
+      s.mem.bytes a = E.bytes a) :
+    ∃ m, CbResume s s' m ∧ MemFrame E m (cbClobber s) := by
+  obtain ⟨m, hres, hreg, hb⟩ := h
+  refine ⟨m, hres, ⟨fun a n ho => readLE_congr fun i hi => ?_, fun a n w => ?_⟩⟩
+  · have ho1 := outside_one ho hi
+    rw [hb _ ho1]
+    cases hc : s.mem.accessible (a + i) 1 false
+    · simp only [Bool.false_eq_true, ite_false]; exact hna _ ho1 hc
+    · simp only [ite_true]; exact hacc _ ho1 hc
+  · simp only [Memory.accessible, hreg, hE]
+
+/-- **Reverse composition** (C → Go). If the Go function at `fn` satisfies `EnsuresC` under `Cin`
+for every frame address `a`, with a precondition that follows from `G`, the trusted entry facts
+and `R`, and a postcondition from which the C memory `E s` follows, then the trusted contract
+`CgoCallback p Cin R` refines the C-side assumption `CallbackSpec fn G E`: a C-side theorem under
+`CallbackSpec` plus the Go-side `EnsuresC` give the C theorem under `CgoCallback` alone. -/
+theorem CgoCallback.refines {p : Program} {Cin : Contract} {R : State → Prop} {fn : Nat}
+    {G : State → Prop} {E : State → Memory}
+    {pre : W64 → State → Prop} {post : W64 → State → State → Prop}
+    (hGo : ∀ a, EnsuresC p Cin fn [a] (pre a) (post a))
+    (hstack : ∀ s, G s → CStack s cbStackScratch 32)
+    (hpre : ∀ s u ret, G s → CallbackEntry p s u ret → R u →
+      pre (BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 16) 8)) u)
+    (hE : ∀ s, G s → (E s).regions = s.mem.regions)
+    (hacc : ∀ s u ret u', G s → CallbackEntry p s u ret → R u → ABIReturnC u u' →
+      post (BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 16) 8)) u u' →
+      ∀ a, Outside a 1 (cbClobber s) → s.mem.accessible a 1 false = true →
+        u'.mem.bytes a = (E s).bytes a)
+    (hna : ∀ s, G s → ∀ a, Outside a 1 (cbClobber s) → s.mem.accessible a 1 false = false →
+      s.mem.bytes a = (E s).bytes a) :
+    (CgoCallback p Cin R).Refines (CallbackSpec fn G E) := by
+  intro f s ⟨hf, hfn, hG⟩
+  have hfnv : BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 8) 8) = BitVec.ofNat 64 fn := by rw [hfn]
+  have hcall : ∀ u ret, CallbackEntry p s u ret →
+      CallSetup (p.withExit ret) fn [BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 16) 8)] u :=
+    fun u ret he => {
+      pc := by rw [he.pc, hfnv]
+      lr := by rw [he.lr]; rfl
+      args := fun i hi => by
+        have : i = 0 := by simp at hi; omega
+        subst this; simpa using he.arg }
+  refine ⟨⟨hf, hstack s hG, fun u ret he hR => ?_⟩, ?_⟩
+  · exact (hGo _ ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).mono fun _ h => h.1
+  · rintro s' ⟨hf', u, ret, u', he, hR, hrun, hab, hres⟩
+    refine ⟨hf', ?_⟩
+    have hq := (hGo _ ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).runsTo hrun
+    exact hres.memFrame (hE s hG) (hacc s u ret u' hG he hR hab hq.2) (hna s hG)
+
+/-! ## `alloca` and variable-length frames
+
+gcc allocates `alloca(n)` (and a VLA) by moving `SP` down by `n` rounded up to 16, after
+stack-clash probing: with `-fstack-clash-protection` (Ubuntu's default) it first moves `SP` down
+page by page (64 KiB on arm64, 4 KiB on amd64), storing to each new page, then by the rest. The
+rounding is done with masks; these lemmas turn them into arithmetic (`omega`), and `CStack.sub`
+moves a stack window with `SP`. -/
+
+theorem and_lowMask_eq_mod (x : BitVec 64) (k : Nat) (hk : k ≤ 64) :
+    (x &&& BitVec.ofNat 64 (2 ^ k - 1)).toNat = x.toNat % 2 ^ k := by
+  rw [BitVec.toNat_and, BitVec.toNat_ofNat]
+  have h1 : (2 ^ k - 1) % 2 ^ 64 = 2 ^ k - 1 := by
+    apply Nat.mod_eq_of_lt
+    have := Nat.pow_le_pow_right (by omega : 0 < 2) hk
+    omega
+  rw [h1, Nat.and_two_pow_sub_one_eq_mod]
+
+theorem and_highMask_eq (x : BitVec 64) (k : Nat) (hk : k ≤ 64) :
+    (x &&& BitVec.ofNat 64 (2 ^ 64 - 2 ^ k)).toNat = x.toNat / 2 ^ k * 2 ^ k := by
+  have h1 := Nat.one_le_two_pow (n := k)
+  have hle : 2 ^ k ≤ 2 ^ 64 := Nat.pow_le_pow_right (by omega) hk
+  have hm : (2 ^ 64 - 2 ^ k) % 2 ^ 64 = 2 ^ 64 - 2 ^ k := Nat.mod_eq_of_lt (by omega)
+  have hsplit : 2 ^ 64 - 2 ^ k = (2 ^ (64 - k) - 1) * 2 ^ k := by
+    rw [Nat.sub_mul, Nat.one_mul, ← Nat.pow_add, Nat.sub_add_cancel hk]
+  rw [BitVec.toNat_and, BitVec.toNat_ofNat, hm, hsplit]
+  apply Nat.eq_of_testBit_eq
+  intro i
+  rw [Nat.testBit_and, Nat.testBit_mul_two_pow, Nat.testBit_mul_two_pow, Nat.testBit_div_two_pow,
+    Nat.testBit_two_pow_sub_one]
+  by_cases hi : k ≤ i
+  · have he : i - k + k = i := Nat.sub_add_cancel hi
+    simp only [hi, decide_true, Bool.true_and, he]
+    by_cases h64 : i - k < 64 - k
+    · simp [h64]
+    · have : x.toNat.testBit i = false := Nat.testBit_lt_two_pow
+        (Nat.lt_of_lt_of_le x.isLt (Nat.pow_le_pow_right (by omega) (by omega)))
+      simp [h64, this]
+  · simp [hi]
+
+/-- `x & (2^k − 2^j)`: bits `j … k−1` of `x` (the size masks of `alloca`, e.g. `0xfff0`). -/
+theorem and_rangeMask_eq (x : BitVec 64) (j k : Nat) (hj : j ≤ k) (hk : k ≤ 64) :
+    (x &&& BitVec.ofNat 64 (2 ^ k - 2 ^ j)).toNat = x.toNat % 2 ^ k / 2 ^ j * 2 ^ j := by
+  have h1 := Nat.one_le_two_pow (n := j)
+  have hjk : 2 ^ j ≤ 2 ^ k := Nat.pow_le_pow_right (by omega) hj
+  have hle : 2 ^ k ≤ 2 ^ 64 := Nat.pow_le_pow_right (by omega) hk
+  have hm : (2 ^ k - 2 ^ j) % 2 ^ 64 = 2 ^ k - 2 ^ j := Nat.mod_eq_of_lt (by omega)
+  have hsplit : 2 ^ k - 2 ^ j = (2 ^ (k - j) - 1) * 2 ^ j := by
+    rw [Nat.sub_mul, Nat.one_mul, ← Nat.pow_add, Nat.sub_add_cancel hj]
+  rw [BitVec.toNat_and, BitVec.toNat_ofNat, hm, hsplit]
+  apply Nat.eq_of_testBit_eq
+  intro i
+  rw [Nat.testBit_and, Nat.testBit_mul_two_pow, Nat.testBit_mul_two_pow, Nat.testBit_div_two_pow,
+    Nat.testBit_two_pow_sub_one, Nat.testBit_mod_two_pow]
+  by_cases hi : j ≤ i
+  · have he : i - j + j = i := Nat.sub_add_cancel hi
+    simp only [hi, decide_true, Bool.true_and, he]
+    by_cases h2 : i - j < k - j
+    · have : i < k := by omega
+      simp [h2, this]
+    · have : ¬ i < k := by omega
+      simp [h2, this]
+  · simp [hi]
+
+/-- `LSL #3` as gcc's `UBFM` decodes (`lsl x1, x0, #3`): a rotation and a mask. -/
+theorem rot61 (n : BitVec 64) :
+    (n.rotateRight 61 &&& 18446744073709551608#64 &&& 18446744073709551615#64) = n <<< 3 := by
+  have m1 : ∀ i (h : i < 64), (18446744073709551608#64 : BitVec 64)[i] = decide (3 ≤ i) := by decide
+  have m2 : ∀ i (h : i < 64), (18446744073709551615#64 : BitVec 64)[i] = true := by decide
+  ext i hi
+  simp only [BitVec.getElem_and, BitVec.getElem_rotateRight, BitVec.getElem_shiftLeft, m1 i hi, m2 i hi]
+  by_cases h : i < 3
+  · simp [h]
+  · simp [h]; omega
+
+/-- A C stack window after `SP` moved down by `n` (a multiple of 16 inside the window). -/
+theorem CStack.sub {s : State} {below above n : Nat} (h : CStack s below above) (hn : n ≤ below)
+    (h16 : n % 16 = 0) {t : State} (hsp : t.sp.toNat = s.sp.toNat - n)
+    (hm : ∀ a k w, t.mem.accessible a k w = s.mem.accessible a k w) :
+    CStack t (below - n) (n + above) := by
+  obtain ⟨ha, hb, hc, hd⟩ := h
+  refine ⟨by omega, by omega, by omega, ?_⟩
+  rw [hsp, hm, show s.sp.toNat - n - (below - n) = s.sp.toNat - below by omega,
+    show below - n + (n + above) = below + above by omega]
+  exact hd
+
+/-- `CStack.sub` through a memory frame. -/
+theorem CStack.frame {s t : State} {below above n : Nat} {rs : List (Nat × Nat)}
+    (h : CStack s below above) (hn : n ≤ below) (h16 : n % 16 = 0)
+    (hsp : t.sp.toNat = s.sp.toNat - n) (hf : MemFrame s.mem t.mem rs) :
+    CStack t (below - n) (n + above) :=
+  CStack.sub h hn h16 hsp hf.accessible
+
+/-- A smaller window of a C stack window. -/
+theorem CStack.mono {s : State} {below above below' above' : Nat} (h : CStack s below above)
+    (h1 : below' ≤ below) (h2 : above' ≤ above) : CStack s below' above' := by
+  obtain ⟨ha, hb, hc, hd⟩ := h
+  exact ⟨ha, by omega, by omega, Memory.accessible_mono _ hd (by omega) (by omega)⟩
+
+/-- The low halves of `V8`–`V15` along two calls with no vector instruction in between (`b'` and
+`b` have the same `vregs`), in the form of `CReturn`'s goals. -/
+theorem _root_.Janus.CABI.CReturn.vlow_trans {a b b' c : State} (h₁ : CReturn a b) (h₂ : CReturn b' c)
+    (hb : b'.vregs = b.vregs) :
+    (c.vregs 8).toNat % 2 ^ 64 = (a.vregs 8).toNat % 2 ^ 64 ∧
+    (c.vregs 9).toNat % 2 ^ 64 = (a.vregs 9).toNat % 2 ^ 64 ∧
+    (c.vregs 10).toNat % 2 ^ 64 = (a.vregs 10).toNat % 2 ^ 64 ∧
+    (c.vregs 11).toNat % 2 ^ 64 = (a.vregs 11).toNat % 2 ^ 64 ∧
+    (c.vregs 12).toNat % 2 ^ 64 = (a.vregs 12).toNat % 2 ^ 64 ∧
+    (c.vregs 13).toNat % 2 ^ 64 = (a.vregs 13).toNat % 2 ^ 64 ∧
+    (c.vregs 14).toNat % 2 ^ 64 = (a.vregs 14).toNat % 2 ^ 64 ∧
+    (c.vregs 15).toNat % 2 ^ 64 = (a.vregs 15).toNat % 2 ^ 64 := by
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [h₂.v8, hb, h₁.v8]
+  · rw [h₂.v9, hb, h₁.v9]
+  · rw [h₂.v10, hb, h₁.v10]
+  · rw [h₂.v11, hb, h₁.v11]
+  · rw [h₂.v12, hb, h₁.v12]
+  · rw [h₂.v13, hb, h₁.v13]
+  · rw [h₂.v14, hb, h₁.v14]
+  · rw [h₂.v15, hb, h₁.v15]
+
+/-- `c` keeps the low halves of `V8`–`V15` of `a`. -/
+def VLow (a c : State) : Prop := ∀ i, 8 ≤ i → i < 16 → (c.vregs i).toNat % 2 ^ 64 = (a.vregs i).toNat % 2 ^ 64
+
+theorem _root_.Janus.CABI.CReturn.vlow {a b : State} (h : CReturn a b) : VLow a b := by
+  intro i h1 h2
+  have : i = 8 ∨ i = 9 ∨ i = 10 ∨ i = 11 ∨ i = 12 ∨ i = 13 ∨ i = 14 ∨ i = 15 := by omega
+  rcases this with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  · exact h.v8
+  · exact h.v9
+  · exact h.v10
+  · exact h.v11
+  · exact h.v12
+  · exact h.v13
+  · exact h.v14
+  · exact h.v15
+
+theorem VLow.trans {a b b' c : State} (h₁ : VLow a b) (h₂ : VLow b' c) (hb : b'.vregs = b.vregs) :
+    VLow a c := fun i h1 h2 => by rw [h₂ i h1 h2, hb, h₁ i h1 h2]
+
+theorem VLow.of_eq {a b : State} (h : b.vregs = a.vregs) : VLow a b := fun i _ _ => by rw [h]
+
+/-- The eight equations `CReturn` asks for. -/
+theorem VLow.goal {a c : State} (h : VLow a c) :
+    (c.vregs 8).toNat % 2 ^ 64 = (a.vregs 8).toNat % 2 ^ 64 ∧
+    (c.vregs 9).toNat % 2 ^ 64 = (a.vregs 9).toNat % 2 ^ 64 ∧
+    (c.vregs 10).toNat % 2 ^ 64 = (a.vregs 10).toNat % 2 ^ 64 ∧
+    (c.vregs 11).toNat % 2 ^ 64 = (a.vregs 11).toNat % 2 ^ 64 ∧
+    (c.vregs 12).toNat % 2 ^ 64 = (a.vregs 12).toNat % 2 ^ 64 ∧
+    (c.vregs 13).toNat % 2 ^ 64 = (a.vregs 13).toNat % 2 ^ 64 ∧
+    (c.vregs 14).toNat % 2 ^ 64 = (a.vregs 14).toNat % 2 ^ 64 ∧
+    (c.vregs 15).toNat % 2 ^ 64 = (a.vregs 15).toNat % 2 ^ 64 :=
+  ⟨h 8 (by omega) (by omega), h 9 (by omega) (by omega), h 10 (by omega) (by omega),
+   h 11 (by omega) (by omega), h 12 (by omega) (by omega), h 13 (by omega) (by omega),
+   h 14 (by omega) (by omega), h 15 (by omega) (by omega)⟩
+
+/-- `obtain_cret h`: the equations of `h : CReturn s s'` as hypotheses (for `janus_run`). -/
+macro "obtain_cret " h:term : tactic =>
+  `(tactic| obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _⟩ := $h)
 
 end Janus.FFI

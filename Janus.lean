@@ -10,6 +10,7 @@ import Janus.Eface
 import Janus.GoABI
 import Janus.CABI
 import Janus.FFI
+import Janus.FFISat
 import Janus.Tactic
 import Janus.Tactic.Addr
 import Janus.Tactic.Atomic
@@ -49,6 +50,7 @@ import Janus.Contracts.CmpstringSat
 import Janus.Contracts.CmpstringAmd64
 import Janus.Contracts.CmpstringSatAmd64
 import Janus.Amd64
+import Janus.Amd64.FFISat
 import Janus.Contracts.MapAmd64
 import Janus.Contracts.MapSat
 import Janus.Contracts.MapSatAmd64
@@ -89,6 +91,10 @@ import Janus.Contracts.HashSat
 import Janus.Contracts.MemSatAmd64
 import Janus.Contracts.HashSatAmd64
 import Janus.Spec.CRC32C
+import Janus.Contracts.Libc
+import Janus.Contracts.LibcSat
+import Janus.Contracts.LibcAmd64
+import Janus.Contracts.LibcSatAmd64
 import Janus.Tactic.ABI0
 import Janus.Contracts.Misc
 import Janus.Contracts.Instrument

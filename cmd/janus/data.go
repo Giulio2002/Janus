@@ -305,6 +305,8 @@ func collectData(b *Binary, refs []DataRef, extra ...DataRef) ([]DataSeg, []Skip
 		case !ok:
 			skip("unmapped")
 			continue
+		case sec.Writable && b.staticGOT(r.Target&^7) && r.Target%8 == 0:
+			// a GOT slot the dynamic linker never writes, read-only after RELRO (cenv.go)
 		case sec.Writable:
 			skip("writable")
 			continue
@@ -318,6 +320,8 @@ func collectData(b *Binary, refs []DataRef, extra ...DataRef) ([]DataSeg, []Skip
 		}
 		var sp span
 		switch {
+		case sec.Writable: // a static GOT slot
+			sp = span{b.gotName(r.Target), sec.Name, r.Target, r.Target + 8, true}
 		case sec.Exec: // literal pool word in .text
 			sp = span{fmt.Sprintf("%s+0x%x", sec.Name, r.Target-sec.Addr), sec.Name, r.Target, r.Target + 8, false}
 		case hasSym && sym.Size <= maxDataSymbol:

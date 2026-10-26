@@ -1373,8 +1373,9 @@ stack). For an execution whose granted regions overlap those, the theorem says n
 * *`X18` on arm64.* `EnsuresC` uses `ABIReturnC` (`SP`, `g`, `FP`) instead of `ABIReturn`: C code
   may use `X18` (a temporary in AAPCS64 on Linux) and `cgocall` does not restore it. Go code never
   reads it.
-* *Callbacks.* C calling back into Go (`crosscall2`, exported functions) is not covered: that
-  code is not extracted, so a run reaching it faults (`noCode`) and cannot be proved.
+* *Callbacks.* C calling back into Go goes through the trusted `CgoCallback` contract (below);
+  `crosscall2` (Go assembly), the cgo-generated C wrapper and the exported Go function are
+  extracted and executed.
 * *Safe by construction.* A contract stub is only passed with its `safe` predicate proved, and a
   `ReturnsC` proof covers *every* result its `next` relation allows. `CgoCall` requires the C run
   to terminate with the callee-saved registers restored for every admissible C call state.
@@ -1382,6 +1383,50 @@ stack). For an execution whose granted regions overlap those, the theorem says n
   address (where no code is copied) is false, so a theorem assuming one would be vacuous. The
   contract semantics avoids this: the only way to discharge `CgoSpec` is the refinement theorem
   `CgoCall.refines`.
+
+### The C environment (K2: `Janus.FFI`, `Janus.Contracts.Libc`, `cmd/janus/cenv.go`)
+
+What a C-environment theorem trusts, beyond the model:
+
+* **The extractor's ELF reading**, where a wrong answer is not caught by a proof:
+  * *PLT naming.* A stub `sym@plt` is created only for a canonical PLT sequence whose GOT slot is
+    the target of a `JUMP_SLOT` relocation naming `sym`; the theorem then assumes the dynamic
+    linker binds `sym` to the libc function the contract describes (symbol interposition,
+    `LD_PRELOAD` and a different libc are outside the statement).
+  * *Static GOT slots.* A slot in `PT_GNU_RELRO` with no dynamic relocation is copied as constant
+    read-only data. This trusts that no relocation (static or dynamic) the extractor does not
+    read changes it; `-z norelro` binaries have no such slots and their GOT loads fault.
+  * *TLS layout.* `Extracted.tls` and `TLSImage.a64Addr`/`x64Addr` encode the ELF TLS ABI
+    (variant I on arm64, variant II on amd64) for the executable's block; `TLSBlock` (a
+    precondition) states the block is in place, and on amd64 that the TCB's first word is its own
+    address. Blocks of `dlopen`ed modules are only reachable through `__tls_get_addr`/TLS
+    descriptors, whose contracts (`TlsGetAddr`, `TlsDescFn`) are hypotheses or trusted.
+  * *`checkCgoTLS`* (a finding of this package): the `cgocall` contracts put Go's TLS `g` slot at
+    `FS − 8` / `TPIDR_EL0 + 16`, which is wrong in a binary whose C code has `__thread`
+    variables (the linker moves `runtime.tlsg`). Such extractions are refused; the stub pins also
+    mask the TLS displacement so the pinned code is recognised in either layout.
+* **The libc contracts** (`Libc`, `SetJmp J`, `TlsGetAddr`): glibc on Linux, each function's
+  effect as stated in FFI.md § 3.2–3.4, with libc's stack use bounded by `libcStack = 32768`
+  bytes below `SP`. `malloc` returns fresh memory disjoint from every region of the state (the
+  model's address space is what the precondition granted, so a block may not overlap Go memory
+  or the stack). The heap **ghost tokens** (`heapToken`, at `2^48 + p`) are a proof device: no
+  instruction can access them (accesses need `< 2^48`), they only record which blocks `free` may
+  release. `setjmp`/`longjmp` are stated over every `jmp_buf` model with the `JmpModel` laws; the
+  theorem holds for glibc if glibc's (mangled) layout is one such model, which `locality` and
+  `unique` express (only the `jmp_buf` bytes matter, and they determine the context).
+* **The `cgocallback` contract** (`CgoCallback`): `runtime.cgocallback` (pinned by content)
+  enters the exported Go function as an ABIInternal call `fn(frame)` on a goroutine stack that is
+  not C memory (`CallbackEntry.stackSep`; `goStack` on amd64: `cbGoStack` writable bytes and the
+  return slot), leaves the C memory outside `cbClobber` (the C stack below `SP` — at most
+  `cbStackScratch = 16384` bytes —, its argument slots and the TLS `g` slot) as it was, and
+  returns to `crosscall2` with only `SP` (and the thread, `MXCSR`/x87 control word on amd64)
+  restored. The goroutine stack being outside the C state's memory is a modelling assumption: a
+  precondition that granted the goroutine's stack to the C code would not describe a real
+  execution. The Go side may itself only call stubs of its contract `Cin` (`Contract.none` in
+  the examples), and Go code with frames needs at most `cbGoStack` bytes (larger frames are not
+  covered).
+* **Function-pointer hypotheses** (`CFuncIs`) are hypotheses in the statement (discharged by a
+  proof of the concrete function, as `EArgMin.cmp_fn`), not trusted.
 
 **The C calling conventions** (`Janus.CABI`, `Janus.Amd64.CABI`, the `CEnsures`/`CEnsuresR`
 vocabulary) are specification definitions like `GoABI`. A `CEnsures`/`CEnsuresR` theorem is about

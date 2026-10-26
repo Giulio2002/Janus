@@ -74,10 +74,14 @@ type Extraction struct {
 	Data     []DataSeg     // read-only objects the code references, sorted by address
 	DataRefs []DataRef     // detected references, in code order
 	Skipped  []SkippedData // references whose target is not copied (writable, code, ...)
-	Lean     []byte
 	// BuildModes are the accepted instrumented build modes (buildmode.go), recorded in
 	// identity.json; nil for an ordinary build.
 	BuildModes []string
+	// The C environment (cenv.go): writable C data objects the C code references, and the TLS
+	// image when an extracted function reads the thread pointer.
+	CData []CData
+	TLS   *tlsImage
+	Lean  []byte
 }
 
 // Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)
@@ -130,9 +134,12 @@ var (
 	// C side of a cgo call calls), runtime.cgoUse and runtime.cgoKeepAlive (only on the dead
 	// `if _Cgo_always_false` branch of cgo wrappers; cgoKeepAlive with `#cgo noescape`, both
 	// throw if called). Their effects are the trusted contracts of Janus.FFI.
+	// runtime.cgocallback.abi0 is the C -> Go direction (//export): crosscall2, which the
+	// cgo-generated C wrapper of an exported Go function calls, calls it to re-enter Go
+	// (Janus.FFI.CgoCallback).
 	runtimeExternalStubs = map[string]bool{
 		"runtime.cgocall": true, "_cgo_topofstack": true, "_cgo_topofstack.abi0": true,
-		"runtime.cgoUse": true, "runtime.cgoKeepAlive": true,
+		"runtime.cgoUse": true, "runtime.cgoKeepAlive": true, "runtime.cgocallback.abi0": true,
 	}
 )
 
@@ -589,6 +596,7 @@ func renderLean(x *Extraction) []byte {
 	sb.WriteString("]\n\n")
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
 	writeProgram(&sb, x, "Program")
+	writeCEnv(&sb, x)
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())

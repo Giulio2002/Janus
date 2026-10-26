@@ -423,7 +423,7 @@ theorem model : InterfaceSwitch (Extracted.program.link implAt) cAddr R0 Htrue :
   all_goals
     janus64_run [hn]
     refine rtReturn_of R0 2 _ s _ _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF])
-      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
+      (by simp [setRegF]) rfl rfl (by simp [hdf]) rfl rfl (Janus.MemFrame.refl _ _) ⟨he1, he2, hd⟩ ?_
     simp only [setRegF, reduceIte, Nat.reduceEqDiff]
     refine ⟨?_, ?_, ?_, hdesc⟩
   all_goals (try rw [htd]) <;> (try rw [hsw]) <;> (try rw [htd] at hsw)
