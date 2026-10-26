@@ -20,36 +20,62 @@ structure FPConfig (s : SState) : Prop where
   cptr2 : s.regs.get? .CPTR_EL2 = some 0x22ff#64
   cptr3 : s.regs.get? .CPTR_EL3 = some 0x1100#64
   sm : SMZero s
+  zcr1 : s.regs.get? .ZCR_EL1 = some 0x3#64
+  zcr2 : s.regs.get? .ZCR_EL2 = some 0xf#64
+  zcr3 : s.regs.get? .ZCR_EL3 = some 0xf#64
+  smcr1 : s.regs.get? .SMCR_EL1 = some 0#64
+  smcr2 : s.regs.get? .SMCR_EL2 = some 0#64
+  smcr3 : s.regs.get? .SMCR_EL3 = some 0#64
+  smevl : s.regs.get? .__max_implemented_smeveclen = some 512
 
-/-- The FP configuration registers (PSTATE for `SM`). -/
-def fpCfgRegs : List Register := [.CPACR_EL1, .CPTR_EL2, .CPTR_EL3, .PSTATE]
+/-- The FP configuration registers (PSTATE for `SM`; the vector-length registers `V[]` reads). -/
+def fpCfgRegs : List Register := [.CPACR_EL1, .CPTR_EL2, .CPTR_EL3, .PSTATE, .ZCR_EL1, .ZCR_EL2, .ZCR_EL3,
+  .SMCR_EL1, .SMCR_EL2, .SMCR_EL3, .__max_implemented_smeveclen]
 
 theorem FPConfig.of_eq {s s' : SState} (h : FPConfig s) (e : ∀ r ∈ fpCfgRegs, s'.regs.get? r = s.regs.get? r) :
     FPConfig s' :=
   { cpacr1 := by rw [e _ (by decide)]; exact h.cpacr1
     cptr2 := by rw [e _ (by decide)]; exact h.cptr2
     cptr3 := by rw [e _ (by decide)]; exact h.cptr3
-    sm := by obtain ⟨p, hp, hs⟩ := h.sm; exact ⟨p, by rw [e _ (by decide)]; exact hp, hs⟩ }
+    sm := by obtain ⟨p, hp, hs⟩ := h.sm; exact ⟨p, by rw [e _ (by decide)]; exact hp, hs⟩
+    zcr1 := by rw [e _ (by decide)]; exact h.zcr1
+    zcr2 := by rw [e _ (by decide)]; exact h.zcr2
+    zcr3 := by rw [e _ (by decide)]; exact h.zcr3
+    smcr1 := by rw [e _ (by decide)]; exact h.smcr1
+    smcr2 := by rw [e _ (by decide)]; exact h.smcr2
+    smcr3 := by rw [e _ (by decide)]; exact h.smcr3
+    smevl := by rw [e _ (by decide)]; exact h.smevl }
 
 /-- `FPConfig` from the three enable registers and `SM` (when PSTATE was written). -/
 theorem FPConfig.of_eq3 {s s' : SState} (h : FPConfig s)
-    (e : ∀ r ∈ [Register.CPACR_EL1, .CPTR_EL2, .CPTR_EL3], s'.regs.get? r = s.regs.get? r) (hsm : SMZero s') :
+    (e : ∀ r ∈ [Register.CPACR_EL1, .CPTR_EL2, .CPTR_EL3, .ZCR_EL1, .ZCR_EL2, .ZCR_EL3, .SMCR_EL1, .SMCR_EL2,
+      .SMCR_EL3, .__max_implemented_smeveclen], s'.regs.get? r = s.regs.get? r) (hsm : SMZero s') :
     FPConfig s' :=
   { cpacr1 := by rw [e _ (by decide)]; exact h.cpacr1
     cptr2 := by rw [e _ (by decide)]; exact h.cptr2
     cptr3 := by rw [e _ (by decide)]; exact h.cptr3
-    sm := hsm }
+    sm := hsm
+    zcr1 := by rw [e _ (by decide)]; exact h.zcr1
+    zcr2 := by rw [e _ (by decide)]; exact h.zcr2
+    zcr3 := by rw [e _ (by decide)]; exact h.zcr3
+    smcr1 := by rw [e _ (by decide)]; exact h.smcr1
+    smcr2 := by rw [e _ (by decide)]; exact h.smcr2
+    smcr3 := by rw [e _ (by decide)]; exact h.smcr3
+    smevl := by rw [e _ (by decide)]; exact h.smevl }
 
 /-- `FPConfig` as a check (evaluated by `janus-asl-check` on every case's pre- and post-state). -/
 def fpCfgOk (s : SState) : Bool :=
   s.regs.get? .CPACR_EL1 == some 0x3330000#64 && s.regs.get? .CPTR_EL2 == some 0x22ff#64 &&
   s.regs.get? .CPTR_EL3 == some 0x1100#64 &&
-  (match s.regs.get? .PSTATE with | some p => p.SM == 0#1 | none => false)
+  (match s.regs.get? .PSTATE with | some p => p.SM == 0#1 | none => false) &&
+  s.regs.get? .ZCR_EL1 == some 0x3#64 && s.regs.get? .ZCR_EL2 == some 0xf#64 && s.regs.get? .ZCR_EL3 == some 0xf#64 &&
+  s.regs.get? .SMCR_EL1 == some 0#64 && s.regs.get? .SMCR_EL2 == some 0#64 && s.regs.get? .SMCR_EL3 == some 0#64 &&
+  s.regs.get? .__max_implemented_smeveclen == some 512
 
 theorem fpCfgOk_sound {s : SState} (h : fpCfgOk s = true) : FPConfig s := by
   simp only [fpCfgOk, Bool.and_eq_true, beq_iff_eq] at h
-  obtain ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩ := h
-  refine ⟨h1, h2, h3, ?_⟩
+  obtain ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨h1, h2⟩, h3⟩, h4⟩, z1⟩, z2⟩, z3⟩, m1⟩, m2⟩, m3⟩, sv⟩ := h
+  refine ⟨h1, h2, h3, ?_, z1, z2, z3, m1, m2, m3, sv⟩
   revert h4; cases hp : s.regs.get? .PSTATE with
   | none => simp
   | some p => intro h4; exact ⟨p, hp, by simpa using h4⟩

@@ -585,6 +585,27 @@ def main (args : List String) : IO UInt32 := do
     match runM (readReg Register.MDCR_EL2) base with
     | .ok (v, _) => IO.println s!"MDCR_EL2 = {hex v.toNat}"
     | .error e => IO.println s!"MDCR_EL2: {e}"
+    match runM (readReg Register.ZCR_EL1) base with
+    | .ok (v, _) => IO.println s!"ZCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"ZCR_EL1: {e}"
+    match runM (readReg Register.ZCR_EL2) base with
+    | .ok (v, _) => IO.println s!"ZCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"ZCR_EL2: {e}"
+    match runM (readReg Register.ZCR_EL3) base with
+    | .ok (v, _) => IO.println s!"ZCR_EL3 = {hex v.toNat}"
+    | .error e => IO.println s!"ZCR_EL3: {e}"
+    match runM (readReg Register.SMCR_EL1) base with
+    | .ok (v, _) => IO.println s!"SMCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"SMCR_EL1: {e}"
+    match runM (readReg Register.SMCR_EL2) base with
+    | .ok (v, _) => IO.println s!"SMCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"SMCR_EL2: {e}"
+    match runM (readReg Register.SMCR_EL3) base with
+    | .ok (v, _) => IO.println s!"SMCR_EL3 = {hex v.toNat}"
+    | .error e => IO.println s!"SMCR_EL3: {e}"
+    match runM (readReg Register.__max_implemented_smeveclen) base with
+    | .ok (v, _) => IO.println s!"__max_implemented_smeveclen = {v}"
+    | .error e => IO.println s!"__max_implemented_smeveclen: {e}"
     match runM (CreateAccDescGPR MemOp.MemOp_LOAD false false true) base with
     | .ok (acc, _) => IO.println s!"accdesc load: {repr acc}"
     | .error e => IO.println s!"accdesc: {e}"
