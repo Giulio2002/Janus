@@ -29,7 +29,7 @@ theorem gwrite_k (impl : List Amd64.Segment)
     (hsp : S.regs 4 = BitVec.ofNat 64 SP) (hg : S.regs 14 = BitVec.ofNat 64 G)
     (hx0 : S.regs 0 = BitVec.ofNat 64 ptr) (hx3 : S.regs 3 = BitVec.ofNat 64 len)
     (hx1 : S.regs 1 = BitVec.ofNat 64 cap) (hmpE : S.mem.readLE (G + 48) 8 = MP)
-    (hra : S.mem.readLE SP 8 < 2 ^ 47)
+    (hra : S.mem.readLE SP 8 < 2 ^ 47) (hx15 : S.xmm 15 = 0)
     (hal : SP % 8 = 0) (hb : 144 ≤ SP) (ha : SP + 24 ≤ 2 ^ 48)
     (hw : S.mem.accessible (SP - 144) 168 true = true)
     (hg0 : 0 < G) (hg1 : G + 256 ≤ 2 ^ 48) (hg2 : S.mem.accessible (G + 16) 8 false = true)
@@ -72,12 +72,55 @@ theorem gwrite_k (impl : List Amd64.Segment)
   janus_eval_nat h_bi : BI
   janus_eval_nat h_bl : BL
   janus_eval_nat h_ow : OW
-  simp only [h_pk, h_bi, h_bi, h_ow] at *
+  simp only [h_pk, h_bi, h_bl, h_ow] at *
   janus_eval_nat h_pk : PK
   janus_eval_nat h_bi : BI
+  janus_eval_nat h_bl : BL
   janus_eval_nat h_ow : OW
-  apply ReturnsK.of_reaches
-  janus64_run [hmpE, sep_cons, sep_nil, hl32, hl31] until [segAddr P "runtime.write1.abi0" + 0x13]
+  apply Amd64.Kernel.ReturnsK.of_reaches
+  janus64_run [hmpE, h_pk, h_bi, h_bl, h_ow, sep_cons, sep_nil, hl32, hl31] until [segAddr P "runtime.gwrite" + 0xd9, segAddr P "runtime.gwrite" + 0xef, segAddr P "runtime.gwrite" + 0xf5]
     calls [recordForPanic impl hmm]
-  all_goals trace_state
-  all_goals sorry
+  -- the return without a write (`len(b) = 0`)
+  · janus64_step
+    apply Amd64.Print.ReturnsK.to_reaches
+    apply hk
+    refine ⟨_, _, _, _, _, [], by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl], by janus_frame, ?_, ?_, ?_,
+      (Kern.appendTrace_nil K).symm, emits_fail _⟩
+    all_goals (dsimp only; janus64_simp; try omega)
+    rw [h_bi]; assumption
+  -- the `write(2, b, len)` system call in `write1`
+  refine ⟨.syscall, by kernel_site64, Or.inl ⟨⟨.write, by simp [sysOf, Sys.ofAmd64, setRegF], by decide, ?_⟩, ?_⟩⟩
+  · simp [Safe, Buf, Amd64.Kernel.argsOf, setRegF, Nat.mod_eq_of_lt (show ptr < 2 ^ 64 by omega),
+      Nat.mod_eq_of_lt (show len < 2 ^ 64 by omega)]
+    simp only [hl32, Nat.mod_eq_of_lt (show len < 2 ^ 64 by omega)]
+    right; janus64_disch
+  · rintro s' k' ⟨sc, m', r, r11, hsc, heff, rfl⟩
+    simp [sysOf, Sys.ofAmd64, setRegF] at hsc
+    subst hsc
+    simp only [Effect, Amd64.Kernel.argsOf, setRegF] at heff
+    obtain ⟨rfl, ⟨c, hc, rfl, rfl⟩ | ⟨⟨he1, he2⟩, rfl⟩⟩ := heff
+    all_goals name_reads
+    · apply Amd64.Kernel.ReturnsK.of_reaches
+      janus64_run [hmpE, h_pk, h_bi, h_bl, h_ow, sep_cons, sep_nil, hl32, hl31] until
+        [segAddr P "runtime.gwrite" + 0xd9, segAddr P "runtime.gwrite" + 0xef, segAddr P "runtime.gwrite" + 0xf5]
+      janus64_step
+      apply Amd64.Print.ReturnsK.to_reaches
+      apply hk
+      refine ⟨_, _, _, _, _, [_], by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, setXmmF, hx15], by simp only [h_bi, h_bl]; janus_frame, ?_, ?_, ?_, rfl, ?_⟩
+      · dsimp only; janus64_simp
+      · dsimp only; janus64_simp
+      · dsimp only; janus64_simp; rw [h_bi]; assumption
+      · simp [Nat.mod_eq_of_lt (show ptr < 2 ^ 64 by omega), Nat.mod_eq_of_lt (show len < 2 ^ 64 by omega),
+          hl32, setRegF] at hc ⊢
+        exact emits_of_eq (n := len) (by readbytes_frame) (by omega)
+    · apply Amd64.Kernel.ReturnsK.of_reaches
+      janus64_run [hmpE, h_pk, h_bi, h_bl, h_ow, sep_cons, sep_nil, hl32, hl31] until
+        [segAddr P "runtime.gwrite" + 0xd9, segAddr P "runtime.gwrite" + 0xef, segAddr P "runtime.gwrite" + 0xf5]
+      janus64_step
+      apply Amd64.Print.ReturnsK.to_reaches
+      apply hk
+      refine ⟨_, _, _, _, _, [], by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, setXmmF, hx15], by simp only [h_bi, h_bl]; janus_frame, ?_, ?_, ?_,
+        (Kern.appendTrace_nil _).symm, emits_fail _⟩
+      · dsimp only; janus64_simp
+      · dsimp only; janus64_simp
+      · dsimp only; janus64_simp; rw [h_bi]; assumption
