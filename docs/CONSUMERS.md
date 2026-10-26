@@ -330,3 +330,4 @@ their own. Dependencies whose build needs more than Lean (ProofWidgets' JavaScri
 do not import those parts; most of Mathlib below its widget-using tactics is fine. Lake configuration and Lean elaborators are
 executable code and run under the sandbox; verify only packages you trust enough to execute
 confined.
+See also [docs/MIGRATION.md](MIGRATION.md) for migrating proofs to wave 2.
