@@ -138,7 +138,6 @@ structure Inv0 (T : List FuncInfo) (m0 : Memory) (F : Frame) (items0 : List Item
   hi : F.sp + 8 ≤ 2 ^ 48
   acc : c.mem.accessible c.sp.toNat 96 true = true
   r28 : c.regs 28 = x28
-  r18 : c.regs 18 = x18
   spB : F.sp ≤ B ∨ B + 0x1000 + 96 ≤ F.sp
   fm : FrameMem c.mem F mode ph x18.toNat lr x29
   hlr : mode = .ret → lr % 4 = 0 ∧ lr < 2 ^ 48
@@ -163,13 +162,14 @@ theorem inRanges_tail {a n : Nat} {r : Nat × Nat} {rs : List (Nat × Nat)} (h :
 
 /-- The state after a deferred call returned (or after a nested panic left it): the invariant
 carries over, with the panic chain and the room the caller supplies. -/
-theorem Inv0.ret {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List Item} {ds0 : List DeferRec}
+theorem Inv0.ret' {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List Item} {ds0 : List DeferRec}
     {mode : DeferMode} {x28 x18 : W64} {lr x29 : Nat} {e e' : State} {ch : List PanicRec} {rm ph : Nat}
     (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e ch rm ph)
-    (hdr : DeferReturned (P0 T RPa) x28 x18 F.sp (frameKeep m0 F items0) e e')
+    (hsp : e'.sp = e.sp) (h28 : e'.regs 28 = x28)
+    (hag : Agrees e.mem e'.mem ((e.sp.toNat, F.sp) :: frameKeep m0 F items0))
+    (henv : Env0 T e'.mem) (hdef : defers0 e'.mem = defers0 e.mem) (hsav : saved0 e'.mem = saved0 e.mem)
     (ch' : List PanicRec) (rm' : Nat) (hpan : panics0 e'.mem = ch') (hroom : rm' ≤ room0 e'.mem) :
-    Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e' ch' rm' ph := by
-  obtain ⟨hpc, hsp, h28, h18, hag, henv, hdef, hsav, hrm⟩ := hdr
+    Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e' ch' rm' ph ∧ curItems e'.mem F ph = curItems e.mem F ph := by
   rw [frameKeep_eq] at hag
   have hagE : Agrees e.mem e'.mem (keepCore m0 F items0) := hag.mono' fun a n h =>
     inRanges_tail (h.append_right _)
@@ -187,7 +187,8 @@ theorem Inv0.ret {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List It
   have hfm := hI.fm
   have hsv : saved0 e'.mem = saved0 e.mem := hsav
   have hB := hI.sp
-  refine ⟨by rw [hsp]; exact hI.sp, hI.al, hI.hi, by rw [hsp, hag.accessible]; exact hI.acc, h28, h18, hI.spB,
+  refine ⟨?_, hci⟩
+  refine ⟨by rw [hsp]; exact hI.sp, hI.al, hI.hi, by rw [hsp, hag.accessible]; exact hI.acc, h28, hI.spB,
     ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, hI.hlr, hI.hbd, hI.hres, henv, hpan, hroom,
     fun hm => (saved0_none_iff _).1 (by rw [hsv]; exact (saved0_none_iff _).2 (hI.sv hm)),
     by rw [hdef']; exact hI.chn, hI.agr.trans hagE, hI.fo,
@@ -203,6 +204,15 @@ theorem Inv0.ret {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List It
   · rw [hfr 56 (by omega)]; exact hfm.w56
   · intro hm; rw [hfr 64 (by omega), hfr 72 (by omega)]; exact hfm.w64 hm
   · exact hfm.hph
+
+theorem Inv0.ret {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List Item} {ds0 : List DeferRec}
+    {mode : DeferMode} {x28 x18 : W64} {lr x29 : Nat} {e e' : State} {ch : List PanicRec} {rm ph : Nat}
+    (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e ch rm ph)
+    (hdr : DeferReturned (P0 T RPa) x28 x18 F.sp (frameKeep m0 F items0) e e')
+    (ch' : List PanicRec) (rm' : Nat) (hpan : panics0 e'.mem = ch') (hroom : rm' ≤ room0 e'.mem) :
+    Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e' ch' rm' ph ∧ curItems e'.mem F ph = curItems e.mem F ph := by
+  obtain ⟨hpc, hsp, h28, h18, hag, henv, hdef, hsav, hrm⟩ := hdr
+  exact hI.ret' hsp h28 hag henv hdef hsav ch' rm' hpan hroom
 
 /-! ## Facts the steps use -/
 
@@ -257,6 +267,7 @@ structure CallSt (p : Program) (T : List FuncInfo) (m0 : Memory) (F : Frame) (it
     (ch : List PanicRec) (rm ph : Nat) (it : Item) (rest : List Item) (e : State) : Prop where
   steps : ∃ k, Program.Steps p c k e
   call : DeferCall (P0 T RPa) x28 x18 F.sp it.fn e
+  r30 : e.regs 30 = BitVec.ofNat 64 RPa
   mf : MemFrame c.mem e.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F)
   bits : ∀ b ba sa, it.bits = some b → F.openAt = some (ba, sa) → e.mem.readLE ba 1 = b
   inv : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e ch rm ph
@@ -352,7 +363,7 @@ theorem FrameMem.congr {m m' : Memory} {F : Frame} {mode : DeferMode} {ph x18 lr
 records, its stack window and the `deferBits` byte; the caller supplies what changed in the model's
 own bookkeeping. -/
 theorem Inv0.step (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph) {e : State} (ph' : Nat)
-    (hsp : e.sp = c.sp) (h28 : e.regs 28 = c.regs 28) (h18 : e.regs 18 = c.regs 18)
+    (hsp : e.sp = c.sp) (h28 : e.regs 28 = c.regs 28)
     (hmf : MemFrame c.mem e.mem ([(B, B + 0x1000)] ++ rtWin (P0 T RPa) F ++ bitsWin F))
     (hfm : FrameMem e.mem F mode ph' x18.toNat lr x29)
     (henv : Env0 T e.mem) (hpan : panics0 e.mem = ch) (hroom : rm ≤ room0 e.mem)
@@ -362,7 +373,7 @@ theorem Inv0.step (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph) {
     (hits : ∀ it ∈ curItems e.mem F ph', it ∈ items0) :
     Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e ch rm ph' := by
   refine ⟨by rw [hsp]; exact hI.sp, hI.al, hI.hi, by rw [hsp, hmf.accessible]; exact hI.acc,
-    by rw [h28]; exact hI.r28, by rw [h18]; exact hI.r18, hI.spB, hfm, hI.hlr, hI.hbd, hI.hres, henv, hpan,
+    by rw [h28]; exact hI.r28, hI.spB, hfm, hI.hlr, hI.hbd, hI.hres, henv, hpan,
     hroom, hsv, hchn, ?_, hI.fo, hbs, hits⟩
   · refine hI.agr.trans (Agrees.of_memFrame hmf fun a ha => ?_)
     obtain ⟨r, hr, h1, h2⟩ := ha
@@ -373,7 +384,7 @@ theorem topBit_mem {b : Nat} (hb : b < 256) (hb0 : 0 < b) : topBit b ∈ openBit
   rw [openBits_top b hb hb0]; exact List.mem_cons_self
 
 theorem step_open (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
-    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph ≠ 0) {ba sa : Nat} (hF : F.openAt = some (ba, sa))
+    (hr18 : c.regs 18 = x18) (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph ≠ 0) {ba sa : Nat} (hF : F.openAt = some (ba, sa))
     (hb0 : 0 < c.mem.readLE ba 1) {it : Item} {rest : List Item} (hcur : curItems c.mem F ph = it :: rest) :
     ∃ e, CallSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph it rest e := by
   obtain ⟨hal, hsp, hsp96⟩ := hI.spw
@@ -427,9 +438,9 @@ theorem step_open (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr
     simp only [RPa, E, BitVec.toNat_ofNat]
   have henvE : Env0 T e.mem := by rw [hemem]; exact env0_of_outside hI.env b3
   have hesp' : e.sp.toNat = F.sp - 96 := by rw [hesp, hs]
-  refine ⟨e, ⟨⟨k, hk⟩, ?_, hmf, ?_, ?_, ?_, hcurE, hsv, ?_, ?_⟩⟩
+  refine ⟨e, ⟨⟨k, hk⟩, ?_, he30, hmf, ?_, ?_, ?_, hcurE, hsv, ?_, ?_⟩⟩
   · -- the call
-    refine ⟨?_, he26, by rw [he28]; exact hI.r28, by rw [he18]; exact hI.r18, ?_, ?_, ?_, ?_, ?_, ?_, henvE⟩
+    refine ⟨?_, he26, by rw [he28]; exact hI.r28, by rw [he18]; exact hr18, ?_, ?_, ?_, ?_, ?_, ?_, henvE⟩
     · rw [hpe, hread]
     · rw [he29, hesp]
     · rw [hesp']; omega
@@ -446,7 +457,7 @@ theorem step_open (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr
     obtain ⟨rfl, rfl⟩ := hF'
     rw [hrdb, ← hb']
   · -- the invariant
-    refine hI.step ph hesp (by rw [he28]) (by rw [he18]) hmf ?_ henvE hpan (by rw [hrm]; exact hI.room)
+    refine hI.step ph hesp (by rw [he28]) hmf ?_ henvE hpan (by rw [hrm]; exact hI.room)
       (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
     · refine hfm.congr fun k hk => ?_
       rw [hemem]
@@ -494,7 +505,7 @@ theorem mf_of_priv {m m' : Memory} {F : Frame} (h : MemFrame m m' [(B, B + 0x100
     simp only [outside_append, P0_priv] at ho; exact ho.1.1
 
 theorem step_rec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
-    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph = 0) {j n : Nat} (hnd : ndef c.mem = j + 1)
+    (hr18 : c.regs 18 = x18) (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph = 0) {j n : Nat} (hnd : ndef c.mem = j + 1)
     (hrs : recSp c.mem j = F.sp) (hn : recN c.mem j = n + 1) :
     ∃ e, CallSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph
       { fn := recFn c.mem j n, bits := none, chain := defers0 (recTake c.mem j n) }
@@ -533,8 +544,8 @@ theorem step_rec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr 
   have hdef : defers0 e.mem = defers0 (recTake c.mem j n) := by rw [hemem]
   have hcurE : curItems e.mem F 0 = recItems F.sp (defers0 (recTake c.mem j n)) := by
     rw [curItems_zero, hdef]
-  refine ⟨e, ⟨⟨k, hk⟩, ?_, hmf, ?_, ?_, hdef, hcurE, hsv, hrm, Or.inl ⟨rfl, rfl⟩⟩⟩
-  · refine ⟨?_, he26, by rw [he28]; exact hI.r28, by rw [he18]; exact hI.r18, ?_, ?_, ?_, ?_, ?_, ?_, henvE⟩
+  refine ⟨e, ⟨⟨k, hk⟩, ?_, he30, hmf, ?_, ?_, hdef, hcurE, hsv, hrm, Or.inl ⟨rfl, rfl⟩⟩⟩
+  · refine ⟨?_, he26, by rw [he28]; exact hI.r28, by rw [he18]; exact hr18, ?_, ?_, ?_, ?_, ?_, ?_, henvE⟩
     · rw [hpe, hemem]
     · rw [he29, hesp]
     · rw [hesp']; omega
@@ -543,7 +554,7 @@ theorem step_rec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr 
     · rw [he30, hRPa]; simp only [RPa, E]
     · rw [he30, hRPa]; simp only [RPa, E]; omega
   · intro b' ba' sa' hb'; simp at hb'
-  · refine hI.step 0 hesp (by rw [he28]) (by rw [he18]) hmf ?_ henvE hpan (Nat.le_trans hI.room hrm)
+  · refine hI.step 0 hesp (by rw [he28]) hmf ?_ henvE hpan (Nat.le_trans hI.room hrm)
       (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
     · refine hfm.congr fun k hk => ?_
       rw [hemem]
@@ -568,6 +579,7 @@ structure SilentSt (p : Program) (T : List FuncInfo) (m0 : Memory) (F : Frame) (
     (ch : List PanicRec) (rm ph ph2 : Nat) (c2 : State) : Prop where
   steps : ∃ k, Program.Steps p c k c2
   pc : c2.pc = BitVec.ofNat 64 eLH
+  r18 : c2.regs 18 = x18
   inv : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c2 ch rm ph2
   cur : curItems c2.mem F ph2 = curItems c.mem F ph
   mf : MemFrame c.mem c2.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F)
@@ -575,7 +587,7 @@ structure SilentSt (p : Program) (T : List FuncInfo) (m0 : Memory) (F : Frame) (
   meas : (if ph2 = 0 then 0 else 1) * 9 + ndef c2.mem < (if ph = 0 then 0 else 1) * 9 + ndef c.mem
 
 theorem step_torec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
-    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph ≠ 0) {ba sa : Nat} (hF : F.openAt = some (ba, sa))
+    (hr18 : c.regs 18 = x18) (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph ≠ 0) {ba sa : Nat} (hF : F.openAt = some (ba, sa))
     (hb : c.mem.readLE ba 1 = 0) :
     ∃ c2, SilentSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph 0 c2 := by
   obtain ⟨hal, hsp, hsp96⟩ := hI.spw
@@ -612,8 +624,8 @@ theorem step_torec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 l
     exact rd_w (by have := hI.spB; simp only [B] at *; omega)
   have hrdk : ∀ k, (k + 8 ≤ 32 ∨ 40 ≤ k) → c2.mem.readLE (F.sp - 96 + k) 8 = c.mem.readLE (F.sp - 96 + k) 8 := by
     intro k hk; rw [hm2]; exact Memory.readLE_writeLE_of_disjoint _ _ (by omega)
-  refine ⟨c2, ⟨⟨k1 + k2, hk1.trans hk2⟩, hpc2, ?_, hcur, hmf, hsv, ?_⟩⟩
-  · refine hI.step 0 (by rw [hsp2, hesp]) (by rw [hregs2, he28]) (by rw [hregs2, he18]) hmf ?_
+  refine ⟨c2, ⟨⟨k1 + k2, hk1.trans hk2⟩, hpc2, by rw [hregs2, he18]; exact hr18, ?_, hcur, hmf, hsv, ?_⟩⟩
+  · refine hI.step 0 (by rw [hsp2, hesp]) (by rw [hregs2, he28]) hmf ?_
       (by rw [hm2]; exact env0_of_outside hI.env hnb) hpan (by rw [hrm]; exact hI.room)
       (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
     · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, fun h => absurd rfl h⟩
@@ -644,7 +656,7 @@ theorem step_torec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 l
     · simp [h0]
 
 theorem step_pop (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
-    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph = 0) {j : Nat} (hnd : ndef c.mem = j + 1)
+    (hr18 : c.regs 18 = x18) (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph = 0) {j : Nat} (hnd : ndef c.mem = j + 1)
     (hrs : recSp c.mem j = F.sp) (hn : recN c.mem j = 0) :
     ∃ c2, SilentSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph ph c2 := by
   subst hph
@@ -675,8 +687,8 @@ theorem step_pop (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr 
     rw [hm2]; simp only [popMem, ndef, rd]; rw [Memory.readLE_writeLE_self]
     exact Nat.mod_eq_of_lt (by have : (256:Nat)^8 = 2^64 := by decide
                                omega)
-  refine ⟨c2, ⟨⟨k1 + k2, hk1.trans hk2⟩, hpc2, ?_, hcur, hmf, hsv, ?_⟩⟩
-  · refine hI.step 0 (by rw [hsp2, hesp]) (by rw [hregs2, he28]) (by rw [hregs2, he18]) hmf ?_
+  refine ⟨c2, ⟨⟨k1 + k2, hk1.trans hk2⟩, hpc2, by rw [hregs2, he18]; exact hr18, ?_, hcur, hmf, hsv, ?_⟩⟩
+  · refine hI.step 0 (by rw [hsp2, hesp]) (by rw [hregs2, he28]) hmf ?_
       (by rw [hm2]; exact env0_popMem hI.env hnd) hpan (Nat.le_trans hI.room hrm)
       (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
     · refine hfm.congr fun k hk => ?_
@@ -696,7 +708,7 @@ theorem step_pop (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr 
   · rw [hndef, hnd]; simp
 
 theorem step_fin (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
-    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph = 0)
+    (hr18 : c.regs 18 = x18) (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph = 0)
     (hend : ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ recSp c.mem j ≠ F.sp) :
     ∃ k d, Program.Steps p c k d ∧ d.mem = c.mem ∧ d.regs 28 = x28 ∧ d.regs 18 = x18 ∧
       (mode = .ret → d.pc = BitVec.ofNat 64 lr ∧ d.sp = BitVec.ofNat 64 F.sp ∧ d.regs 29 = BitVec.ofNat 64 x29) ∧
@@ -726,7 +738,7 @@ theorem step_fin (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr 
   have hseg := seg_fin c mode F.bound (c.mem.readLE (c.sp.toNat + 64) 8) (c.mem.readLE (c.sp.toNat + 72) 8) hpc hal hsp
     hI.acc hI.env.acc hw32 hend' hw24 hw8 hI.hbd rfl rfl hfsp hlrb
   obtain ⟨k, d, hk, hpd, hd1, hd2, hd3, hd4⟩ := reachesRet_transfer hp hseg
-  refine ⟨k, d, hk, hd1, by rw [hd2]; exact hI.r28, by rw [hd3]; exact hI.r18, fun hm => ?_, fun hm => ?_⟩
+  refine ⟨k, d, hk, hd1, by rw [hd2]; exact hI.r28, by rw [hd3]; exact hr18, fun hm => ?_, fun hm => ?_⟩
   · subst hm
     have h64 := (hfm.w64 rfl).1; have h72 := (hfm.w64 rfl).2
     rw [hs] at h64 h72
@@ -869,6 +881,58 @@ theorem step_recover (hp : EngineAt p) {u : State}
         have := hsv3; simp only [hph0, hb0, ne_eq, not_false_eq_true, and_self, if_true] at this
         obtain ⟨t1, t2, t3⟩ := this
         rw [if_neg (by rw [t1]; simp), t2, t3, hF]
+
+theorem panics0_cons {m : Memory} (h : Env0 T m) {r : PanicRec} {rs : List PanicRec}
+    (hp : panics0 m = r :: rs) : ∃ k, npan m = k + 1 ∧ k < 8 ∧ r = decPan m k ∧ rs = panList m k := by
+  rw [panics0_eq] at hp
+  have h8 := h.npan_le
+  cases hnp : npan m with
+  | zero => rw [hnp] at hp; simp [panList] at hp
+  | succ k =>
+    rw [hnp, Nat.min_eq_left (by rw [hnp] at h8; omega)] at hp
+    have := List.cons.inj hp
+    exact ⟨k, rfl, by rw [hnp] at h8; omega, this.1.symm, this.2.symm⟩
+
+theorem decPan_recovered (m : Memory) (k : Nat) :
+    (decPan m k).recovered = (rd m (panAt k + 24) / 2 % 2 == 1) := rfl
+
+/-- From `RP` back to the loop head (a call that left the panic chain alone). -/
+theorem step_rp (hp : EngineAt p) {u : State} (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 u ch rm ph)
+    (hpc : u.pc = BitVec.ofNat 64 RPa)
+    (hcase : mode ≠ .panic ∨ ∃ r rs, ch = r :: rs ∧ r.recovered = false) :
+    ∃ k c', Program.Steps p u k c' ∧ c'.pc = BitVec.ofNat 64 eLH ∧ c'.mem = u.mem ∧ c'.regs 18 = x18 ∧
+      Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c' ch rm ph := by
+  obtain ⟨hal, hsp, hsp96⟩ := hI.spw
+  have hs := hI.sp_eq
+  have hfm := hI.fm
+  have hw24 := hfm.w24
+  have hw56 := hfm.w56
+  rw [hs] at hw24 hw56
+  have hcase' : u.mem.readLE (u.sp.toNat + 24) 8 ≠ 0 ∨ (u.mem.readLE (u.sp.toNat + 24) 8 = 0 ∧
+      ∃ k, npan u.mem = k + 1 ∧ k < 8 ∧ rd u.mem (panAt k + 24) / 2 % 2 = 0) := by
+    cases mode with
+    | panic =>
+      right
+      refine ⟨by rw [hw24]; rfl, ?_⟩
+      rcases hcase with hc | ⟨r, rs, hch, hr⟩
+      · exact absurd rfl hc
+      · have := hI.pan; rw [hch] at this
+        obtain ⟨k, hk, hk8, hr', -⟩ := panics0_cons hI.env this
+        refine ⟨k, hk, hk8, ?_⟩
+        rw [hr', decPan_recovered] at hr
+        simp only [beq_eq_false_iff_ne, ne_eq] at hr
+        omega
+    | goexit => left; rw [hw24]; simp [modeCode]
+    | ret => left; rw [hw24]; simp [modeCode]
+  have hseg := seg_rp_lh u x18.toNat hpc hal hsp hI.acc hI.env.acc hw56 hcase'
+  obtain ⟨k, c', hk, hpc', hq⟩ := reachesRet_transfer hp hseg
+  obtain ⟨hm, hsp', h28, h18⟩ := hq
+  refine ⟨k, c', hk, hpc', hm, by rw [h18]; simp, ?_⟩
+  have := hI.step (c := u) (e := c') ph (by rw [hsp']) (by rw [h28]) (by rw [hm]; exact MemFrame.refl _ _)
+    (by rw [hm]; exact hfm) (by rw [hm]; exact hI.env) (by rw [hm]; exact hI.pan) (by rw [hm]; exact hI.room)
+    (fun h => by rw [hm]; exact hI.sv h) (by rw [hm]; exact hI.chn) (fun ba sa hF => by rw [hm]; exact hI.bsub ba sa hF)
+    (fun it hit => by rw [hm] at hit; exact hI.its it hit)
+  exact this
 
 end steps
 
