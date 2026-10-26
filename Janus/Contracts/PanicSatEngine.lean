@@ -341,7 +341,106 @@ theorem Inv0.step (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph) {
     obtain ⟨hr8, hro⟩ := hI.keep_apart r hr
     exact Outside.of_sub hro h1 (by omega)
 
+theorem topBit_mem {b : Nat} (hb : b < 256) (hb0 : 0 < b) : topBit b ∈ openBits b := by
+  rw [openBits_top b hb hb0]; exact List.mem_cons_self
+
+theorem step_open (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
+    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph ≠ 0) {ba sa : Nat} (hF : F.openAt = some (ba, sa))
+    (hb0 : 0 < c.mem.readLE ba 1) {it : Item} {rest : List Item} (hcur : curItems c.mem F ph = it :: rest) :
+    ∃ e, CallSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph it rest e := by
+  obtain ⟨hal, hsp, hsp96⟩ := hI.spw
+  have hcur' := curItems_open hph hF hb0
+  have hbl : c.mem.readLE ba 1 < 256 := by have := Memory.readLE_lt c.mem ba 1; simpa using this
+  rw [hcur'] at hcur
+  obtain ⟨hit, hrest⟩ := List.cons.inj hcur
+  have hmem : it ∈ items0 := hI.its it (by rw [hcur', ← hit]; exact List.mem_cons_self)
+  generalize hbb : c.mem.readLE ba 1 = b at *
+  have hti := topBit_mem hbl hb0
+  have hti' : topBit b ∈ openBits (c.mem.readLE ba 1) := by rw [hbb]; exact hti
+  obtain ⟨f1, f2, f3, f4, f5, f6⟩ := hI.item_facts hmem
+  obtain ⟨b1, b2, b3, b4, b5⟩ := hI.ba_facts hF
+  obtain ⟨s1, s2, s3, s4, s5⟩ := hI.slot_facts hF hti'
+  have hfm := hI.fm
+  have hs := hI.sp_eq
+  obtain ⟨w40, w48⟩ := hfm.w40 ba sa hF
+  have hw32 := hfm.w32
+  rw [hs] at w40 w48 hw32
+  have hfn : it.fn = c.mem.readLE (sa + 8 * topBit b) 8 := by rw [← hit]
+  have hseg := seg_open c ba sa b it.fn hpc hal hsp hI.acc (by rw [hw32]; exact hph) w40 w48 hbb hb0 b1 b2 s1 s2
+    hfn.symm f1 f2 (by omega) s3 (b5 it hmem) f4 f3
+  obtain ⟨k, e, hk, hpe, hq⟩ := reachesRet_transfer hp hseg
+  obtain ⟨hemem, hesp, he26, he28, he18, he29, he30⟩ := hq
+  have hflr : ba + 1 ≤ it.fn ∨ it.fn + 8 ≤ ba := (b5 it hmem).symm
+  have hread : e.mem.readLE it.fn 8 = c.mem.readLE it.fn 8 := by
+    rw [hemem]; exact Memory.readLE_writeLE_of_disjoint _ _ (by omega)
+  have hrdb : e.mem.readLE ba 1 = b % 2 ^ topBit b := by
+    rw [hemem, Memory.readLE_writeLE_self]
+    exact Nat.mod_eq_of_lt (by have : b % 2 ^ topBit b ≤ b := Nat.mod_le _ _
+                               simpa using (by omega : b % 2 ^ topBit b < 256))
+  have hag : Agrees c.mem e.mem [(B, B + 0x1000)] := by rw [hemem]; exact agrees_writeLE c.mem _ b3
+  have hl := P0_laws T RPa
+  have hmf : MemFrame c.mem e.mem ([(B, B + 0x1000)] ++ rtWin (P0 T RPa) F ++ bitsWin F) := by
+    rw [hemem]
+    exact MemFrame.of_writeLE c.mem _ (r := (ba, ba + 1))
+      (List.mem_append_right _ (by simp [bitsWin, hF])) (Nat.le_refl _) (Nat.le_refl _)
+  have hdef : defers0 e.mem = defers0 c.mem := hl.defers_frame _ _ 0 hag
+  have hpan : panics0 e.mem = ch := by rw [← hI.pan]; exact hl.panics_frame _ _ 0 hag
+  have hsv : saved0 e.mem = saved0 c.mem := hl.saved_frame _ _ 0 hag
+  have hrm : room0 e.mem = room0 c.mem := hl.room_frame _ _ 0 hag
+  have hcurE : curItems e.mem F ph = rest := by
+    rw [curItems_ne hph]
+    unfold frameItems; rw [hF]; simp only
+    rw [hrdb, hdef, ← hrest]
+    rw [openItems_congr (m := c.mem) (m' := e.mem) (b := b % 2 ^ topBit b) fun i hi => ?_]
+    have hi' : i ∈ openBits b := openBits_mod_sub b hbl hb0 i hi
+    obtain ⟨q1, q2, q3, q4, q5⟩ := hI.slot_facts hF (by rw [hbb]; exact hi')
+    rw [hemem]; exact Memory.readLE_writeLE_of_disjoint _ _ (by omega)
+  have hRPa : (BitVec.ofNat 64 RPa).toNat = RPa := by
+    simp only [RPa, E, BitVec.toNat_ofNat]
+  have henvE : Env0 T e.mem := by rw [hemem]; exact env0_of_outside hI.env b3
+  have hesp' : e.sp.toNat = F.sp - 96 := by rw [hesp, hs]
+  refine ⟨e, ⟨⟨k, hk⟩, ?_, hmf, ?_, ?_, ?_, hcurE, hsv, ?_, ?_⟩⟩
+  · -- the call
+    refine ⟨?_, he26, by rw [he28]; exact hI.r28, by rw [he18]; exact hI.r18, ?_, ?_, ?_, ?_, ?_, ?_, henvE⟩
+    · rw [hpe, hread]
+    · rw [he29, hesp]
+    · rw [hesp']; omega
+    · simp only [P0_depth]; rw [hesp']; omega
+    · rw [hesp']; omega
+    · rw [he30, hRPa]; simp only [RPa, E]
+    · rw [he30, hRPa]; simp only [RPa, E]; omega
+  · -- the deferBits byte at the call
+    intro b' ba' sa' hb' hF'
+    rw [← hit] at hb'
+    simp only [Option.some.injEq] at hb'
+    rw [hF] at hF'
+    simp only [Option.some.injEq, Prod.mk.injEq] at hF'
+    obtain ⟨rfl, rfl⟩ := hF'
+    rw [hrdb, ← hb']
+  · -- the invariant
+    refine hI.step ph hesp (by rw [he28]) (by rw [he18]) hmf ?_ henvE hpan (by rw [hrm]; exact hI.room)
+      (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
+    · refine hfm.congr fun k hk => ?_
+      rw [hemem]
+      exact Memory.readLE_writeLE_of_disjoint _ _ (by rw [hs]; omega)
+    · have := hI.sv hm
+      have h2 := (saved0_none_iff _).2 this
+      rw [← hsv] at h2
+      exact (saved0_none_iff _).1 h2
+    · rw [hdef]; exact hI.chn
+    · rw [hF] at hF'
+      simp only [Option.some.injEq, Prod.mk.injEq] at hF'
+      obtain ⟨rfl, rfl⟩ := hF'
+      rw [hrdb] at hi
+      exact hI.bsub ba sa hF i (by rw [hbb]; exact openBits_mod_sub b hbl hb0 i hi)
+    · rw [hcurE] at hit'
+      exact hI.its it' (by rw [hcur', hrest]; exact List.mem_cons_of_mem _ hit')
+  · rw [← hit]; exact hdef
+  · exact Nat.le_of_eq hrm.symm
+  · right; exact ⟨b % 2 ^ topBit b, ba, sa, by rw [← hit], hF, hph, hrdb⟩
+
 end steps
+
 
 
 
