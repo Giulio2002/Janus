@@ -49,7 +49,8 @@ theorem ReturnsK.to_reaches {p : Program} {E : KEnv} {post : State → Kern → 
 /-! ## Runtime contracts -/
 
 /-- What `lock2`/`unlock2` need at the call (amd64): as `Print.LockPre`, with the mutex in `RAX`
-and `g` in `R14`. -/
+and `g` in `R14`, and the return address slot `[RSP, RSP + 8)` outside `rt` (the `RET` reads it
+after the stores). -/
 def LockPre (rt : List (Nat × Nat)) (lo : Nat) (s : State) : Prop :=
   (s.regs 0).toNat + 8 ≤ 2 ^ 48 ∧ s.mem.accessible (s.regs 0).toNat 8 true = true ∧
     InRanges (s.regs 0).toNat 8 rt ∧
@@ -59,7 +60,8 @@ def LockPre (rt : List (Nat × Nat)) (lo : Nat) (s : State) : Prop :=
     s.mem.accessible (s.mem.readLE ((s.regs 14).toNat + gM) 8 + mLocks) 4 true = true ∧
     InRanges (s.mem.readLE ((s.regs 14).toNat + gM) 8 + mLocks) 4 rt ∧
     Apart (s.regs 0).toNat 8 (s.mem.readLE ((s.regs 14).toNat + gM) 8 + mLocks) 4 ∧
-    lo ≤ mLocksOf s.mem (s.regs 14).toNat ∧ mLocksOf s.mem (s.regs 14).toNat + 1 < 2 ^ 31
+    lo ≤ mLocksOf s.mem (s.regs 14).toNat ∧ mLocksOf s.mem (s.regs 14).toNat + 1 < 2 ^ 31 ∧
+    Outside (s.regs 4).toNat 8 rt
 
 /-- **`runtime.lock2(l)`** (amd64; `RAX = l`): as `Print.Lock2Contract` (the uncontended fast
 path: the key's lock bit set, `m.locks` one higher, every other change inside `rt` and the stack
@@ -79,14 +81,16 @@ def Unlock2Contract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack :
 
 /-- What `memmove(to, from, n)` needs here (amd64; `RAX = to`, `RBX = from`, `RCX = n`): the
 return address at `[RSP]` (`CallOK64 s 0 0`), `n` writable bytes at `to` and `n` readable bytes at
-`from`, below `2^48` and disjoint. -/
+`from`, below `2^48` and disjoint, and the destination apart from the return address slot (the
+`RET` reads it after the copy). -/
 def MemmovePre (s : State) : Prop :=
   CallOK64 s 0 0 ∧
     (s.regs 0).toNat + (s.regs 1).toNat ≤ 2 ^ 48 ∧ (s.regs 3).toNat + (s.regs 1).toNat ≤ 2 ^ 48 ∧
     s.mem.accessible (s.regs 0).toNat (s.regs 1).toNat true = true ∧
     s.mem.accessible (s.regs 3).toNat (s.regs 1).toNat false = true ∧
     ((s.regs 0).toNat + (s.regs 1).toNat ≤ (s.regs 3).toNat ∨
-      (s.regs 3).toNat + (s.regs 1).toNat ≤ (s.regs 0).toNat)
+      (s.regs 3).toNat + (s.regs 1).toNat ≤ (s.regs 0).toNat) ∧
+    ((s.regs 4).toNat + 8 ≤ (s.regs 0).toNat ∨ (s.regs 0).toNat + (s.regs 1).toNat ≤ (s.regs 4).toNat)
 
 /-- **`runtime.memmove(to, from, n)`** (amd64): returns (`retState64`, no result), memory changed
 only at `[to, to + n)`, which then holds the `n` bytes that were at `from`. -/

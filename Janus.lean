@@ -40,6 +40,7 @@ import Janus.Spec.Print
 import Janus.Contracts.Print
 import Janus.Contracts.PrintSat
 import Janus.Contracts.PrintAmd64
+import Janus.Contracts.PrintSatAmd64
 import Janus.Spec.Type
 import Janus.Contracts.Iface
 import Janus.Contracts.IfaceAmd64
