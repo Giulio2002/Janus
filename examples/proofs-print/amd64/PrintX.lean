@@ -118,7 +118,7 @@ macro "rfp_post" : tactic => `(tactic| (
   unfold RfpPost
   simp only [hsp, hg, hx0, hx1, hx3, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl, Nat.mod_eq_of_lt hgl,
     hmpE, h_bi, h_bl]
-  refine ⟨_, _, _, _, _, by ret_state64 [hsp, hsp', hbp', hg', hg, hx15, hfs, hdf, hmx, Nat.mod_eq_of_lt hspl], by janus_frame, ?_, ?_, ?_⟩ <;>
+  refine ⟨_, _, _, _, _, by ret_state64 [hsp, hsp', hbp', hg', hg, hx15, hfs, hdf, hmx, Nat.mod_eq_of_lt hspl, callRegs64_apply], by janus_frame, ?_, ?_, ?_⟩ <;>
     (dsimp only; janus64_simp; all_goals first | omega | (split <;> omega) | (simp only [h_bi] at hidx; exact hidx) | assumption)))
 
 set_option maxRecDepth 200000 in
@@ -258,7 +258,22 @@ theorem recordForPanic (impl : List Amd64.Segment)
         case refine_1 => dsimp only; rfl
         all_goals try (janus64_simp; done)
         all_goals try (janus64_simp; omega)
-  sorry
+  janus64_run [hmpE, zx8_chain, ofNat8_eq_zero_iff, hnz] until [segAddr P "runtime.recordForPanic" + 0xa1]
+    calls [printlock_held impl]
+  all_goals first
+    | refine loop _ _ 0 (Nat.le_refl _) (Nat.zero_le _) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    | (have hsp' := hsp; have hbp' : s.regs 5 = s.regs 5 := rfl; have hg' := hg
+       have hx15 : s.xmm 15 = s.xmm 15 := rfl; have hfs : s.fsBase = s.fsBase := rfl
+       have hdf : s.df = s.df := rfl; have hmx : s.mxcsr = s.mxcsr := rfl
+       have hidx := hbi2
+       rfp_post)
+  all_goals try simp only [h_bi]
+  all_goals try (simp only [h_bl]; janus_frame)
+  all_goals try (dsimp only; simp only [setRegF_apply, callRegs64_apply]; first | with_reducible assumption | with_reducible rfl)
+  all_goals try (dsimp only; simp only [setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_ofNat, BitVec.toNat_add, BitVec.toNat_sub]; omega)
+  all_goals try with_reducible assumption
+  all_goals try (janus64_simp; done)
+  all_goals try (janus64_simp; omega)
 
 
 
