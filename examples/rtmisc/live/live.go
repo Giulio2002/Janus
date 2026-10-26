@@ -35,3 +35,22 @@ func Rows(n, k int) [][]uint64 {
 	}
 	return out
 }
+
+// Box is a heap object with one pointer field.
+type Box struct {
+	P *uint64
+	N uint64
+}
+
+// Chain copies src into dst (memmove), allocates a slice t of n words (makeslice), copies src
+// into t (memmove), and records n in bx.N and stores &t[0] into bx.P (through the GC write barrier when it is enabled):
+// one runtime model threaded through memmove, makeslice, memmove and a barrier.
+//
+//go:noinline
+func Chain(dst, src []uint64, bx *Box, n int) {
+	copy(dst, src)
+	t := make([]uint64, n)
+	bx.N = uint64(n)
+	copy(t, src)
+	bx.P = &t[0]
+}

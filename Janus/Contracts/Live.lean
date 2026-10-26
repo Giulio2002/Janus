@@ -428,6 +428,27 @@ elab_rules : tactic | `(tactic| janus_live) => withMainContext do
     throwError "janus_live: no hypothesis gives{indentExpr t}"
   throwError "janus_live: not a live goal"
 
+/-- `janus_split_and`: split every hypothesis that is syntactically a conjunction (the `Apart` facts a
+live contract's postcondition normalises to), recursively. Cheap: no unfolding. -/
+syntax (name := janusSplitAnd) "janus_split_and" : tactic
+
+open Lean Meta Elab Tactic in
+@[tactic janusSplitAnd] def evalJanusSplitAnd : Tactic := fun _ => do
+  let mut g ← getMainGoal
+  repeat
+    let mut found := false
+    for d in ← g.withContext getLCtx do
+      if d.isImplementationDetail then continue
+      let ty ← g.withContext (instantiateMVars d.type)
+      if ty.isAppOfArity ``And 2 then
+        let gs ← g.cases d.fvarId
+        let some sg := gs[0]? | continue
+        g := sg.mvarId
+        found := true
+        break
+    unless found do break
+  replaceMainGoal [g]
+
 /-! ## arm64 -/
 
 /-- The runtime's stack checks fall through (arm64): `g.stackguard0 + stack < SP`, its word

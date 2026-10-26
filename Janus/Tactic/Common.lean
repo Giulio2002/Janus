@@ -74,6 +74,11 @@ def Apart (a n b k : Nat) : Prop := a + n ≤ b ∨ b + k ≤ a
 theorem Apart.symm {a n b k : Nat} (h : Apart a n b k) : Apart b k a n := by
   unfold Apart at *; omega
 
+/-- Shrinking either range keeps them apart. -/
+theorem Apart.mono {a n n' b k k' : Nat} (h : Apart a n b k) (h1 : n' ≤ n) (h2 : k' ≤ k) :
+    Apart a n' b k' := by
+  unfold Apart at *; omega
+
 /-- `[a, a+n)` lies inside one of the ranges `[lo, hi)` of `rs`. -/
 def InRanges (a n : Nat) (rs : List (Nat × Nat)) : Prop := ∃ r ∈ rs, r.1 ≤ a ∧ a + n ≤ r.2
 
@@ -174,6 +179,11 @@ variable {m m' m'' : Janus.Arm64.Memory} {L ws : List (Nat × Nat)}
 
 theorem refl (m : Janus.Arm64.Memory) (L ws : List (Nat × Nat)) : LiveFrame m m L ws :=
   ⟨fun _ _ _ _ => rfl⟩
+
+/-- With no written ranges: a read inside a live object is unchanged (the form of the rewrite
+rule, without the trivial `Outside a n []` side condition). -/
+theorem readLE_nil (h : LiveFrame m m' L []) (a n : Nat) (hin : InRanges a n L) :
+    m'.readLE a n = m.readLE a n := h.readLE a n hin trivial
 
 /-- Two calls in a row: the second keeps a live set that contains the first's (`sub`). -/
 theorem trans {L' : List (Nat × Nat)} (h : LiveFrame m m' L ws) (h' : LiveFrame m' m'' L' ws)
@@ -938,6 +948,8 @@ def restoredReg? (setR regs : Name) (e : Expr) : MetaM (Option (Expr × Expr × 
 set. -/
 def frameRules (d : LocalDecl) (ty : Expr) : MetaM (Array Expr) := do
   if ty.isAppOfArity ``Janus.LiveFrame 4 then
+    if (ty.getArg! 3).isAppOfArity ``List.nil 1 then
+      return #[← mkAppM ``Janus.LiveFrame.readLE_nil #[d.toExpr]]
     return #[← mkAppM ``Janus.LiveFrame.readLE #[d.toExpr]]
   unless ty.isAppOfArity ``Janus.MemFrame 3 do return #[]
   return #[← mkAppM ``Janus.MemFrame.readLE #[d.toExpr], ← mkAppM ``Janus.MemFrame.accessible #[d.toExpr]]
@@ -972,6 +984,19 @@ partial def reduceAccessible (g : MVarId) (fuel : Nat := 64) : MetaM MVarId := g
 where
   mkFunOfEq (rhs : Expr) : MetaM Expr := do
     return .lam `x (mkConst ``Bool) (mkApp3 (mkConst ``Eq [1]) (mkConst ``Bool) (.bvar 0) rhs) .default
+
+/-- Clear the propositional hypotheses that mention atoms the (arithmetic) goal does not: what an
+`omega`/`simp … at *` on a goal about a few addresses needs is small, and the contexts after
+several calls are large. -/
+def clearIrrelevant (g : MVarId) : MetaM MVarId := g.withContext do
+  let goalAtoms := arithAtoms (← instantiateMVars (← g.getType))
+  let mut toClear := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ← isProp ty do continue
+    unless (arithAtoms ty).all goalAtoms.contains do toClear := toClear.push d.fvarId
+  g.tryClearMany toClear
 
 /-- A side condition `Outside a n rs` (of a `MemFrame` read rule): unfold the literal list and
 prove each range condition by `omega`. -/
@@ -1012,11 +1037,32 @@ where
         catch _ => saved.restore
       return false
     let saved ← saveState
+    -- first with only the hypotheses about the goal's atoms (cheap: the contexts after several
+    -- calls are large, and `omega` splits on every disjunction in them), then with all
+    try
+      let g' ← clearIrrelevant g
+      let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic| omega)))
+      if gs.isEmpty then return true
+      saved.restore
+    catch _ => saved.restore
     try
       let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| omega)))
       if gs.isEmpty then return true
       saved.restore; omegaApart g
     catch _ => saved.restore; omegaApart g
+
+/-- Split the conjunctions among the hypotheses the call introduced (the `Apart` facts `simp`
+normalised from `ApartAll` are conjunctions), so that the dischargers see each fact. -/
+partial def splitNewConj (g : MVarId) (before : Array FVarId) : MetaM MVarId := do
+  let lctx ← g.withContext getLCtx
+  for d in lctx do
+    if d.isImplementationDetail || before.contains d.fvarId then continue
+    let ty ← g.withContext (instantiateMVars d.type)
+    if ty.isAppOfArity ``And 2 then
+      let gs ← g.cases d.fvarId
+      let some sg := gs[0]? | return g
+      return ← splitNewConj sg.mvarId before
+  return g
 
 /-- After a live contract's call: for every new `InRanges p n rs` hypothesis (an object the call
 returned inside the runtime-owned ranges) and every `Outside a k rs` hypothesis (caller data
@@ -1051,6 +1097,15 @@ def memProof (ty : Expr) (elems : List Expr) (i : Nat) : MetaM Expr := do
 /-- The arithmetic closer of `janus_frame`'s side goals. -/
 def frameArith (g : MVarId) : TacticM Bool := do
   let saved ← saveState
+  -- the goal's own atoms first (the contexts after several calls are large), then everything
+  try
+    let g' ← clearIrrelevant g
+    let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic|
+      ((try simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
+          BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *); omega))))
+    if gs.isEmpty then return true
+    saved.restore
+  catch _ => saved.restore
   try
     let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
       ((try simp only [Janus.outside_cons, Janus.outside_nil, and_true, BitVec.toNat_sub,
@@ -1123,6 +1178,15 @@ def tryInRanges (g : MVarId) (m0 m rs : Expr) : TacticM Bool := g.withContext do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
     unless ty.isAppOfArity ``Janus.InRanges 3 do continue
+    -- the hypothesis's ranges must be `rs` or one side of `l ++ r` (cheap syntactic filter)
+    let hl := ty.getArg! 2
+    let okList ← do
+      if ← withReducible (isDefEq hl rs) then pure true
+      else match (← instantiateMVars rs).getAppFnArgs with
+        | (``HAppend.hAppend, #[_, _, _, _, l, r]) =>
+          pure ((← withReducible (isDefEq hl l)) || (← withReducible (isDefEq hl r)))
+        | _ => pure false
+    unless okList do continue
     let saved ← saveState
     try
       let hinTy ← mkAppM ``Janus.InRanges #[m.getArg! 1, m.getArg! 2, rs]
@@ -1142,6 +1206,9 @@ def tryInRanges (g : MVarId) (m0 m rs : Expr) : TacticM Bool := g.withContext do
       return true
     catch e => trace[janus.disch] "tryInRanges: {e.toMessageData}"; saved.restore
   return false
+
+elab "janus_clear_irrel" : tactic => do
+  replaceMainGoal [← clearIrrelevant (← getMainGoal)]
 
 /-- Prove `MemFrame m₀ m rs`: peel the stores of `m` (each must fall inside one of the ranges),
 go through `MemFrame` hypotheses of the context (their ranges must be covered by `rs`), and end
@@ -1212,6 +1279,7 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
            simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true,
              and_imp]
            intros
+           janus_clear_irrel
            try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
              Nat.reduceMod] at *
            repeat' apply And.intro
