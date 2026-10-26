@@ -789,4 +789,22 @@ where
     rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (show x < 2 ^ 64 by omega)]
     exact and_sshr_lt x b hx hb
 
+/-- `CMP #0; CNEG … LT`: the magnitude of a signed 64-bit value. -/
+theorem cneg_toNat (v : BitVec 64) :
+    (if 0 ≤ v.toInt then v else ~~~v + 1#64).toNat = v.toInt.natAbs := by
+  rw [BitVec.toInt_eq_toNat_cond]
+  have hv := v.isLt
+  split
+  · rw [if_pos (by omega)]; omega
+  · rw [if_neg (by omega)]
+    rw [BitVec.toNat_add, BitVec.toNat_not]
+    simp
+    omega
+
+/-- `TBZ #63`: the sign bit. -/
+theorem getLsbD63 (v : BitVec 64) : v.getLsbD 63 = decide (9223372036854775808 ≤ v.toNat) := by
+  have h := BitVec.msb_eq_decide v
+  rw [BitVec.msb_eq_getLsbD_last] at h
+  simpa using h
+
 end Janus.Print
