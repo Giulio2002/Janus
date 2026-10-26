@@ -391,13 +391,17 @@ def bitsWin (F : Frame) : List (Nat × Nat) :=
   | some (ba, _) => [(ba, ba + 1)]
 
 /-- What the loop needs of the frame's memory: the `deferBits` byte writable, below `2^48` and
-outside `P.priv`, the pending slots readable; and of every call: its funcval readable, with an
+outside `P.priv`, the pending slots readable and apart from the `deferBits` byte (the runtime
+re-reads a slot after clearing the byte; the compiler gives them distinct stack slots), and every
+funcval apart from that byte; and of every call: its funcval readable, with an
 admissible code word (4-aligned, below `2^48`). -/
 def FrameOK (P : PanicRuntime) (m : Memory) (F : Frame) (items : List Item) : Prop :=
   (match F.openAt with
     | none => True
     | some (ba, sa) => ba + 1 ≤ 2 ^ 48 ∧ m.accessible ba 1 true = true ∧ Outside ba 1 P.priv ∧
-        ∀ i ∈ openBits (m.readLE ba 1), sa + 8 * i + 8 ≤ 2 ^ 48 ∧ m.accessible (sa + 8 * i) 8 false = true) ∧
+        (∀ i ∈ openBits (m.readLE ba 1), sa + 8 * i + 8 ≤ 2 ^ 48 ∧ m.accessible (sa + 8 * i) 8 false = true ∧
+          (sa + 8 * i + 8 ≤ ba ∨ ba + 1 ≤ sa + 8 * i)) ∧
+        ∀ it ∈ items, it.fn + 8 ≤ ba ∨ ba + 1 ≤ it.fn) ∧
   ∀ it ∈ items, it.fn + 8 ≤ 2 ^ 48 ∧ m.accessible it.fn 8 false = true ∧
     m.readLE it.fn 8 % 4 = 0 ∧ m.readLE it.fn 8 < 2 ^ 48
 

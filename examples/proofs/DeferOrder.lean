@@ -166,13 +166,16 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       · rw [hI, hF]
         unfold frame0
         refine ⟨⟨by omega, by rw [hSf.accessible]; exact Memory.accessible_mono _ hst (by omega) (by omega),
-          Outside.of_sub hout (by omega) (by omega), ?_⟩, ?_⟩
+          Outside.of_sub hout (by omega) (by omega), ?_, ?_⟩, ?_⟩
         · rw [hbits, hob]
           intro i hi
           simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
-          rcases hi with rfl | rfl | rfl <;> refine ⟨by omega, ?_⟩ <;> rw [hSf.accessible] <;>
+          rcases hi with rfl | rfl | rfl <;> refine ⟨by omega, ?_, by omega⟩ <;> rw [hSf.accessible] <;>
             exact Janus.Contracts.IfaceModel.acc_read_of_write
               (Memory.accessible_mono _ hst (by omega) (by omega))
+        · intro it hit
+          simp only [List.mem_cons, List.not_mem_nil, or_false] at hit
+          rcases hit with rfl | rfl | rfl <;> dsimp only <;> omega
         · intro it hit
           simp only [List.mem_cons, List.not_mem_nil, or_false] at hit
           rcases hit with rfl | rfl | rfl <;> dsimp only <;> refine ⟨by omega, ?_, ?_, ?_⟩ <;>

@@ -29,7 +29,7 @@ def engineCode : List Nat :=
    0xf90008df, 0xd101813f, 0xf90003e9, 0xf90007e9, 0xf9000bff, 0xd280004a, 0xf9000fea, 0xf90013e5,
    0xf90017ee, 0xf9001bef, 0xf9001ff2, 0xf90023fe, 0xf90027fd, 0x1400007e, 0xd2a00026, 0xf94000c7,
    0xb4000207, 0xd10004e7, 0x910400c8, 0x8b071508, 0xf9400d00, 0x92400400, 0xb5000140, 0xf94007a1,
-   0x10001422, 0xeb02003f, 0x540000c1, 0xd2800040, 0xf9000d00, 0xf9400100, 0xf9400501, 0xd65f03c0,
+   0x10001442, 0xeb02003f, 0x540000c1, 0xd2800040, 0xf9000d00, 0xf9400100, 0xf9400501, 0xd65f03c0,
    0xd2800000, 0xd2800001, 0xd65f03c0, 0xd2a00026, 0xf94004c7, 0xd2800c09, 0x9b097ce8, 0x8b060108,
    0x91080108, 0x910003ea, 0xf900010a, 0xf900051f, 0xf900091f, 0xd280002b, 0xf9000d0b, 0xf9001100,
    0x910004e7, 0xf90004c7, 0xd65f03c0, 0xf9400c00, 0xd2a00026, 0xf94004c7, 0xd2800c09, 0x9b097ce8,
@@ -43,19 +43,19 @@ def engineCode : List Nat :=
    0x910003e9, 0xf9400901, 0x8b010122, 0xf9400d03, 0x8b030003, 0xf9401104, 0xd2800005, 0xd280000e,
    0xd280000f, 0xb4000124, 0xd100204c, 0xf940150d, 0xcb0d018e, 0xf940190d, 0xcb0d018f, 0x394001cd,
    0x3400004d, 0xd2800025, 0xd101813f, 0xf90003e9, 0xf90007e2, 0xf9000be3, 0xf9000fea, 0xf90013e5,
-   0xf90017ee, 0xf9001bef, 0xf9001ff2, 0xf94013e0, 0xb40001e0, 0xf94017e1, 0x39400022, 0x34000162,
+   0xf90017ee, 0xf9001bef, 0xf9001ff2, 0xf94013e0, 0xb4000200, 0xf94017e1, 0x39400022, 0x34000162,
    0x5ac01043, 0x528003e4, 0x4b030083, 0x52800024, 0x1ac32084, 0x0a240042, 0x39000022, 0xf9401be5,
-   0xf86378ba, 0x1400001d, 0xf90013ff, 0xd2a00026, 0xf94004c7, 0xb4000807, 0xd10004e8, 0xd2800c00,
-   0x9b007d08, 0x8b060108, 0x91080108, 0xf9400100, 0xf94003e1, 0xeb01001f, 0x540006e1, 0xd2800020,
-   0xf9000900, 0xf9400d00, 0xb4000120, 0xd1000400, 0xf9000d00, 0x91008102, 0xf860785a, 0xb50000e0,
-   0xd10004e7, 0xf90004c7, 0x14000004, 0xd10004e7, 0xf90004c7, 0x17ffffd6, 0xf9400349, 0xd10023fd,
-   0xd63f0120, 0xf9401ff2, 0xf9400fe0, 0xb5fffa00, 0xd2a00026, 0xf94000c7, 0xd10004e7, 0x910400c8,
-   0x8b071508, 0xf9400d00, 0x360ff920, 0xf94003e1, 0xf94000c7, 0xb4000127, 0xd10004e7, 0x910400c8,
-   0x8b071508, 0xf9400900, 0xeb01001f, 0x54000068, 0xf90000c7, 0x17fffff7, 0xf90008df, 0xf94013e0,
-   0xb4000120, 0xf94017e2, 0x39400043, 0x340000c3, 0xd2800020, 0xf90008c0, 0xf9000cc2, 0xf9401be3,
-   0xf90010c3, 0xf9400be0, 0x9100003f, 0xd10023fd, 0xd61f0000, 0xf9400fe0, 0xf100081f, 0x540000a0,
-   0xf94007e1, 0x9100003f, 0x10fffae0, 0xd61f0000, 0xf94023fe, 0xf94027fd, 0xf94003e1, 0x9100003f,
-   0xd65f03c0]
+   0xf86378ba, 0x1400001e, 0xf90013ff, 0x17fffff0, 0xd2a00026, 0xf94004c7, 0xb4000807, 0xd10004e8,
+   0xd2800c00, 0x9b007d08, 0x8b060108, 0x91080108, 0xf9400100, 0xf94003e1, 0xeb01001f, 0x540006e1,
+   0xd2800020, 0xf9000900, 0xf9400d00, 0xb4000120, 0xd1000400, 0xf9000d00, 0x91008102, 0xf860785a,
+   0xb50000e0, 0xd10004e7, 0xf90004c7, 0x14000004, 0xd10004e7, 0xf90004c7, 0x17ffffd5, 0xf9400349,
+   0xd10023fd, 0xd63f0120, 0xf9401ff2, 0xf9400fe0, 0xb5fff9e0, 0xd2a00026, 0xf94000c7, 0xd10004e7,
+   0x910400c8, 0x8b071508, 0xf9400d00, 0x360ff900, 0xf94003e1, 0xf94000c7, 0xb4000127, 0xd10004e7,
+   0x910400c8, 0x8b071508, 0xf9400900, 0xeb01001f, 0x54000068, 0xf90000c7, 0x17fffff7, 0xf90008df,
+   0xf94013e0, 0xb4000120, 0xf94017e2, 0x39400043, 0x340000c3, 0xd2800020, 0xf90008c0, 0xf9000cc2,
+   0xf9401be3, 0xf90010c3, 0xf9400be0, 0x9100003f, 0xd10023fd, 0xd61f0000, 0xf9400fe0, 0xf100081f,
+   0x540000a0, 0xf94007e1, 0x9100003f, 0x10fffae0, 0xd61f0000, 0xf94023fe, 0xf94027fd, 0xf94003e1,
+   0x9100003f, 0xd65f03c0]
 
 abbrev E : Nat := 0x300000
 /-- Entry points (offsets in `docs/model/panic_model_arm64.s`). -/
@@ -69,8 +69,10 @@ abbrev eDeferrangefunc : Nat := E + 0x190
 abbrev eDeferprocat : Nat := E + 0x1d0
 abbrev eLookup : Nat := E + 0x204
 abbrev eLH : Nat := E + 0x2ac
+abbrev eCall : Nat := E + 0x35c
+abbrev eFin : Nat := E + 0x3f8
 /-- The return point of every deferred call the model makes. -/
-abbrev RPa : Nat := E + 0x364
+abbrev RPa : Nat := E + 0x368
 
 def engineSeg : Segment := { name := "panic-model", base := E, words := engineCode }
 
@@ -558,5 +560,77 @@ structure FrameMem (m : Memory) (F : Frame) (mode : DeferMode) (ph : Nat) (x18 l
   w56 : m.readLE (F.sp - 96 + 56) 8 = x18
   w64 : mode = .ret → m.readLE (F.sp - 96 + 64) 8 = lr ∧ m.readLE (F.sp - 96 + 72) 8 = x29
   hph : ph ≠ 0 → F.openAt.isSome
+
+/-! ### The open-coded step: the top `deferBits` bit -/
+
+/-- The index the model's `clz` computes for a byte `b` (the symbolic form of `31 - clz32 b`). -/
+def clzTop (b : Nat) : BitVec 64 := BitVec.setWidth 64
+  (31#32 - BitVec.setWidth 32 (BitVec.setWidth 64
+    (BitVec.ofNat 32 (clzNat 32 (BitVec.setWidth 32 (BitVec.ofNat 64 b)).toNat))))
+
+/-- The highest set bit of a non-zero byte. -/
+def topBit (b : Nat) : Nat := (openBits b).headD 0
+
+set_option maxRecDepth 100000 in
+theorem clzTop_eq : ∀ b, b < 256 → 0 < b → clzTop b = BitVec.ofNat 64 (topBit b) := by decide
+
+/-- The byte the model stores back (`bic`: the top bit cleared). -/
+def bicTop (b : Nat) : Nat := (BitVec.setWidth 64
+  (BitVec.setWidth 32 (BitVec.ofNat 64 b) &&& ~~~BitVec.setWidth 32 (BitVec.setWidth 64
+    (1#32 <<< ((BitVec.setWidth 32 (clzTop b)).toNat % 32))))).toNat
+
+set_option maxRecDepth 100000 in
+theorem bicTop_eq : ∀ b, b < 256 → 0 < b → bicTop b = b % 2 ^ topBit b := by decide
+
+set_option maxRecDepth 100000 in
+theorem openBits_top : ∀ b, b < 256 → 0 < b → openBits b = topBit b :: openBits (b % 2 ^ topBit b) := by decide
+
+set_option maxRecDepth 100000 in
+theorem openBits_mod_sub : ∀ b, b < 256 → 0 < b → ∀ i ∈ openBits (b % 2 ^ topBit b), i ∈ openBits b := by decide
+
+/-- The byte the model stores back for index `i`. -/
+def bicI (b i : Nat) : Nat := (BitVec.setWidth 64
+  (BitVec.setWidth 32 (BitVec.ofNat 64 b) &&& ~~~BitVec.setWidth 32 (BitVec.setWidth 64
+    (1#32 <<< ((BitVec.setWidth 32 (BitVec.ofNat 64 i)).toNat % 32))))).toNat
+
+set_option maxRecDepth 100000 in
+theorem bicI_eq : ∀ b, b < 256 → 0 < b → bicI b (topBit b) = b % 2 ^ topBit b := by decide
+
+set_option maxRecDepth 100000 in
+theorem topBit_lt : ∀ b, b < 256 → 0 < b → topBit b < 8 := by decide
+
+set_option maxHeartbeats 0 in
+/-- `LH` with open-coded defers pending: the model clears the top bit and calls the slot's closure. -/
+theorem seg_open (c : State) (ba sa b fn : Nat) (hpc : c.pc = BitVec.ofNat 64 eLH)
+    (hal : c.sp.toNat % 16 = 0) (hsp : c.sp.toNat + 104 ≤ 2 ^ 48)
+    (hacc : c.mem.accessible c.sp.toNat 96 true = true)
+    (hph : c.mem.readLE (c.sp.toNat + 32) 8 ≠ 0) (hba : c.mem.readLE (c.sp.toNat + 40) 8 = ba)
+    (hsa : c.mem.readLE (c.sp.toNat + 48) 8 = sa) (hb : c.mem.readLE ba 1 = b) (hb0 : 0 < b)
+    (hba2 : ba + 1 ≤ 2 ^ 48) (hbaa : c.mem.accessible ba 1 true = true)
+    (hsl : sa + 8 * topBit b + 8 ≤ 2 ^ 48) (hsla : c.mem.accessible (sa + 8 * topBit b) 8 false = true)
+    (hfn : c.mem.readLE (sa + 8 * topBit b) 8 = fn)
+    (hfa : fn + 8 ≤ 2 ^ 48) (hfaa : c.mem.accessible fn 8 false = true)
+    (hbaf : c.sp.toNat + 96 ≤ ba) (hsld : sa + 8 * topBit b + 8 ≤ ba ∨ ba + 1 ≤ sa + 8 * topBit b)
+    (hfd : fn + 8 ≤ ba ∨ ba + 1 ≤ fn) (hcw : c.mem.readLE fn 8 < 2 ^ 48) (hcw4 : c.mem.readLE fn 8 % 4 = 0) :
+    ReachesRet qE (BitVec.ofNat 64 (c.mem.readLE fn 8)) c (fun e =>
+      e.mem = c.mem.writeLE ba 1 (b % 2 ^ topBit b) ∧ e.sp = c.sp ∧ e.regs 26 = BitVec.ofNat 64 fn ∧
+      e.regs 28 = c.regs 28 ∧ e.regs 18 = c.regs 18 ∧ e.regs 29 = c.sp - 8 ∧
+      e.regs 30 = BitVec.ofNat 64 RPa) := by
+  have hbl : b < 256 := by rw [← hb]; exact lt_of_lt_of_eq (Memory.readLE_lt _ _ 1) (by decide)
+  have hci := clzTop_eq b hbl hb0
+  unfold clzTop at hci
+  have hbi := bicI_eq b hbl hb0
+  unfold bicI at hbi
+  have ht8 := topBit_lt b hbl hb0
+  generalize topBit b = i at *
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
+  dsimp only at *
+  simp only [eLH, E, Nat.reduceAdd] at hpc
+  subst hpc
+  have hfn' : cm.readLE (sa + i * 8) 8 = fn := by rw [show sa + i * 8 = sa + 8 * i by omega]; exact hfn
+  have hcw' : (cm.writeLE ba 1 (b % 2 ^ i)).readLE fn 8 = cm.readLE fn 8 :=
+    cm.readLE_writeLE_of_disjoint _ (by omega)
+  janus_run [hba, hsa, hb, hci, hbi, hfn', hcw']
+  done
 
 end Janus.Contracts.PanicSat

@@ -197,6 +197,7 @@ LH:     ldr x0, [sp, #32]
         ldr x26, [x5, x3, lsl #3]
         b CALL
 TOREC:  str xzr, [sp, #32]
+        b LH
 REC:    movz x6, #0x1, lsl #16
         ldr x7, [x6, #8]
         cbz x7, FIN
