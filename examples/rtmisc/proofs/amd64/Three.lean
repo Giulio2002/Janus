@@ -29,8 +29,6 @@ The write barrier flag is read from memory the runtime may have changed: the pro
 branches.
 -/
 
-open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
-
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts
 
 namespace Proof
@@ -77,7 +75,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (n x : Bit
   have hgb := hg.below
   have hnw2 := hg.noWrap
   have hgrd := hg.readable
-  simp only [regSP, regG, stackguard0Offset, stackguard0] at hgl hgb hnw2 hgrd hb ha hw hout hal hga hgr ⊢
+  simp only [regSP, Janus.Amd64.GoABI.regG, Janus.Amd64.GoABI.stackguard0Offset, Janus.Amd64.GoABI.stackguard0] at hgl hgb hnw2 hgrd hb ha hw hout hal hga hgr ⊢
   janus64_data hd [hw]
   janus_eval_nat h_u : u64Type
   janus_eval_nat h_c : cellType

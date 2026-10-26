@@ -266,8 +266,6 @@ theorem ApartAll.outside {a n : Nat} {rs : List (Nat × Nat)} (h : ApartAll a n 
 attribute [janus_post, janus64_post] Nat.add_sub_cancel_left
 -- The guard slot of `StackGuardOK` (the copy and clear contracts' `EqPre`) is reduced to raw terms.
 attribute [janus_exec, janus_post] Janus.GoABI.regG Janus.GoABI.stackguard0Offset Janus.GoABI.stackguard0
-attribute [janus64_exec, janus64_post] Janus.Amd64.GoABI.regG Janus.Amd64.GoABI.stackguard0Offset
-  Janus.Amd64.GoABI.stackguard0
 
 /-- Every range of `L` is `Apart` from `win` (as `LiveSep`, in the `ApartAll` form). -/
 def LiveApart (L win : List (Nat × Nat)) : Prop := ∀ r ∈ L, ApartAll r.1 (r.2 - r.1) win

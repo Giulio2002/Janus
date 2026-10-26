@@ -88,6 +88,42 @@ def MakesliceLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat)
       s s' fun m ptr => 0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat →
         makesliceObj64 R.rt s m ptr ∧ ApartAll ptr (makesliceRound64 s) L)
 
+/-! ### Non-zero sizes (amd64) -/
+
+theorem MallocgcLiveContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {stack : Nat} {R : RtInv}
+    (h : MallocgcLiveContract64 p addr stack R) (L : List (Nat × Nat)) (b : Nat) :
+    Summary p addr
+      (fun s => (MallocgcPre64 stack s ∧ StackRoom64 s stack 3 ∧
+        LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (mallocgcRound64 s)
+          (s.regs 14).toNat s.mem (liveWin64 s stack 3)) ∧ 0 < (s.regs 0).toNat)
+      (fun s s' => LiveAllocRet64 R stack 3 (fun ptr => [ptr]) L b (mallocgcRound64 s) (mallocgcRound64 s)
+        s s' fun m ptr => mallocgcObj64 R.rt s m ptr ∧ ApartAll ptr (mallocgcRound64 s) L) :=
+  Summary.mono (h L b) (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4, h5, h6⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4 hp.2, h5, h6⟩
+
+theorem NewobjectLiveContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {stack : Nat} {R : RtInv}
+    (h : NewobjectLiveContract64 p addr stack R) (L : List (Nat × Nat)) (b : Nat) :
+    Summary p addr
+      (fun s => (NewobjectPre64 stack s ∧ StackRoom64 s stack 1 ∧
+        LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound64 s) (s.regs 14).toNat s.mem
+          (liveWin64 s stack 1)) ∧ 0 < typSize s.mem (s.regs 0).toNat)
+      (fun s s' => LiveAllocRet64 R stack 1 (fun ptr => [ptr]) L b (newobjectRound64 s) (newobjectRound64 s)
+        s s' fun m ptr => newobjectObj64 R.rt s m ptr ∧ ApartAll ptr (newobjectRound64 s) L) :=
+  Summary.mono (h L b) (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4, h5, h6⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4 hp.2, h5, h6⟩
+
+theorem MakesliceLiveContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {stack : Nat} {R : RtInv}
+    (h : MakesliceLiveContract64 p addr stack R) (L : List (Nat × Nat)) (b : Nat) :
+    Summary p addr
+      (fun s => (MakeslicePre64 stack s ∧ StackRoom64 s stack 3 ∧
+        LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (makesliceRound64 s)
+          (s.regs 14).toNat s.mem (liveWin64 s stack 3)) ∧
+        0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat)
+      (fun s s' => LiveAllocRet64 R stack 3 (fun ptr => [ptr]) L b (makesliceRound64 s) (makesliceRound64 s)
+        s s' fun m ptr => makesliceObj64 R.rt s m ptr ∧ ApartAll ptr (makesliceRound64 s) L) :=
+  Summary.mono (h L b) (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4, h5, h6⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4 hp.2, h5, h6⟩
+
 /-- **`runtime.growslice`, live** (amd64; 8-byte pointer-free elements): as `GrowsliceLiveContract`
 (the old array stays in `L`). -/
 def GrowsliceLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) (R : RtInv) : Prop :=
@@ -156,12 +192,21 @@ theorem MallocgcLiveContract64.tinySize {n : Nat} {p : Janus.Amd64.Program} {add
 
 /-! ## The write barrier -/
 
+/-- The registers after `gcWriteBarrierN` (amd64): `RSP + 8`, `R11 = buf`, the rest kept. A named
+function (like `callRegs64`) so that the simp set applies it to one index at a time instead of
+expanding the nested register maps of a long run under the binder. -/
+def wbRegs64 (old : Nat → W64) (buf : W64) : Nat → W64 :=
+  fun i => if i = 4 then old 4 + 8#64 else if i = 11 then buf else old i
+
+@[janus64_exec, janus64_post] theorem wbRegs64_apply (old : Nat → W64) (buf : W64) (i : Nat) :
+    wbRegs64 old buf i = if i = 4 then old 4 + 8#64 else if i = 11 then buf else old i := rfl
+
 /-- The state `gcWriteBarrierN` returns in (amd64): `RSP + 8`, `R11 = buf`, every other general
 register, `X15`, `FS` and the direction flag kept, the flags, `X0`–`X14`, the upper halves and the
 AVX-512 state unspecified. -/
 def wbRetX64 (s : State) (buf : W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
     (zh : Nat → BitVec 256) (kr : Nat → W64) : State :=
-  { s with regs := fun i => if i = 4 then s.regs 4 + 8#64 else if i = 11 then buf else s.regs i,
+  { s with regs := wbRegs64 s.regs buf,
            rip := retAddrOf s, flags := f, xmm := fun i => if i = 15 then s.xmm 15 else x i,
            ymmHi := yh, mem := m, zmmHi := zh, kreg := kr }
 
