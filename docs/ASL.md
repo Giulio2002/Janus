@@ -126,6 +126,7 @@ retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to
 | SWP{A}{L}{B,H} | all valid | **proved**³ | `swp_agree` (LdStAtomicCls) |
 | CAS, CASP, PRFM | | tested | |
 | FCMP, FCMPE (S and D, register and `#0.0`) | all valid | **proved**⁴ | `fcmp_agree` (FP/FCmpCls) |
+| FPRoundBase (binary32, binary64; every rounding mode but ties-away, FZ/AH/UFE, overflow, underflow, inexact; traps of raised exceptions disabled) | all non-zero values | **proved**⁴ | `rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64` (FP/RoundBase, FP/RoundEq, FP/Round64): the generated `FPRoundBase__1` returns Janus' `fpRound` encoding and ORs its raised and directly set bits into FPSR |
 | the other scalar FP instructions, AdvSIMD, AES, SHA, CRC, PMULL, permutes, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
 
 "All valid" means all words of the group that Janus decodes. The theorems carry the decode
@@ -509,6 +510,12 @@ upstream (none has been filed):
    Every boundary FPRound tests for binary16/32/64 is a multiple of 2^-1100, so FPRound of it
    equals FPRound of the exact root (result and exceptions). The corpus FSQRT cases agree, and
    rt-asl rows A5 rsq and A5 fsqrt check it against Sail's C backend (docs/AUDIT-ASL.md, A5).
+8. **`integer_update_subrange`.** The Lean library's `set_slice_int` converts the integer to a bit
+   vector of the field's width before the update, so every bit outside the field was lost (Sail's
+   C and OCaml libraries update the integer in place). FPRoundBase's round-to-odd (FCVTXN) is the
+   one use in the slice. `scripts/asl.sh gen` replaces the generated definition mechanically
+   (JanusASL/sail/sail_int_fix.py) by `i - ((i / 2^lo) % 2^len) * 2^lo + x * 2^lo`; rt-asl row
+   A5 ius checks it against Sail's C backend, and the corpus FCVTXN cases agree.
 
 Bugs 4–6 each produced a model that compiled without complaint but gave wrong results. Only the
 corpus comparison found them. That comparison is the reason the check exists alongside the

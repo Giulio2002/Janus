@@ -30,9 +30,9 @@ row() { # row NAME EXPECT RESULT  (EXPECT ok|blocked|latent: RESULT must start w
 
 echo "== JanusASL (scripts/asl.sh prove)"
 if scripts/asl.sh prove > "$W/prove.log" 2>&1; then
-  row "asl-prove (60 theorems)" ok "ok ($(grep -o 'audited [0-9]* theorems' "$W/prove.log"))"
+  row "asl-prove (64 theorems)" ok "ok ($(grep -o 'audited [0-9]* theorems' "$W/prove.log"))"
 else
-  row "asl-prove (60 theorems)" ok "FAILED: $(tail -3 "$W/prove.log" | tr '\n' ' ')"
+  row "asl-prove (64 theorems)" ok "FAILED: $(tail -3 "$W/prove.log" | tr '\n' ' ')"
 fi
 
 lean_in_pkg() { (cd "$root/JanusASL" && lake env lean "$@"); }
@@ -51,13 +51,13 @@ fi
 echo "== A6: strict audit (names, kinds, axioms, reviewed statements)"
 lean_in_pkg "$here/AuditStrict.lean" > "$W/strict.log" 2>&1
 grep -o 'STMT .*' "$W/strict.log" > "$W/statements"
-if ! grep -q 'strict audit ok: 57 theorems' "$W/strict.log"; then
+if ! grep -q 'strict audit ok: 61 theorems' "$W/strict.log"; then
   row "A6 strict audit" ok "FAILED: $(grep -A5 'FAILED' "$W/strict.log" | tr '\n' ' ')"
 elif ! diff -q "$here/asl-statements.golden" "$W/statements" >/dev/null; then
   row "A6 statements = reviewed copy" ok "CHANGED (diff $here/asl-statements.golden; re-review, then update it)"
   diff "$here/asl-statements.golden" "$W/statements" | head -6
 else
-  row "A6 strict audit" ok "ok (57 theorems present, theorems, standard axioms)"
+  row "A6 strict audit" ok "ok (61 theorems present, theorems, standard axioms)"
   row "A6 statements = reviewed copy" ok "ok ($(wc -l < "$W/statements") statements unchanged)"
 fi
 
@@ -94,13 +94,14 @@ if [ -x "$DEPS/opam/sail-0.20.3-janus/bin/sail" ]; then
     sail --lean patches.sail -o RtProbe --lean-output-dir "$W/lean/out" --lean-force-output > sail.log 2>&1 &&
     cd out/RtProbe &&
     python3 -I "$root/JanusASL/sail/fakereal_sqrt.py" RtProbe/FakeReal.lean &&
+    python3 -I "$root/JanusASL/sail/sail_int_fix.py" "$(grep -rl '^def integer_update_subrange' --include=*.lean . | head -1)" &&
     sed -i "s#^git = .*#path = \"$root/JanusASL/.lake/packages/Sail\"#; /^rev = /d" lakefile.toml &&
     cp "$root/JanusASL/lean-toolchain" . && rm -f lake-manifest.json &&
     cp "$here/sail/Probe.lean" RtProbe/Probe.lean && memguard_lake build RtProbe > build.log 2>&1 &&
     lake env lean RtProbe/Probe.lean > "$W/lean/out.txt" 2>&1 ) || echo "Lean backend build failed (see $W/lean)"
   cmpk() { diff <(grep "^$1 " "$W/c/out") <(grep "^$1 " "$W/lean/out.txt") >/dev/null 2>&1; }
   if [ -s "$W/c/out" ] && [ -s "$W/lean/out.txt" ]; then
-    for k in probe onebit va vd vg vh vc ve rtz rpow rsq; do
+    for k in probe onebit va vd vg vh vc ve rtz rpow rsq ius; do
       if cmpk "$k"; then row "A5 $k" ok "ok (Lean = C on $(grep -c "^$k " "$W/c/out") inputs)"
       else row "A5 $k" ok "DIFFERS from the C backend"; fi
     done

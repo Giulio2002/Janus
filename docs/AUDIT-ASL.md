@@ -187,6 +187,7 @@ backend (built against the pinned lean-sail), and run on the same inputs:
 | `RoundTowardsZero(Real(a)/Real(b))` for 64-bit and 80-bit operands, negative cases, `INT_MIN/-1` | 6 (`Rat`) | 7 | yes |
 | `pow_real` with negative and positive exponents, negative base | 6 | 3 | yes |
 | `sqrt_real` (the replacement of JanusASL/sail/fakereal_sqrt.py, applied to the probe's `FakeReal.lean` as `scripts/asl.sh gen` does): `⌊√(a/b)·2^80⌋` for squares, non-squares, tiny and huge rationals | 7 (`sqrt_real`) | 30 | yes |
+| `integer_update_subrange` (the replacement of JanusASL/sail/sail_int_fix.py, applied to the probe's Lean output as `scripts/asl.sh gen` does; sail-arm's `prelude.sail` definition): bit 0, bits 7..4 and bits 63..60 replaced in 23 integers each (zero, small, 2^22 and 2^23 boundaries, negatives, ±2^63, 2^64 ± 1, ±2^100, a 97-bit value) | 8 (`integer_update_subrange`) | 69 | yes (row A5 ius) |
 
 `FakeReal.lean` was also read line by line. `round_down`/`round_up` are `Rat.floor`/`Rat.ceil`
 (Sail C: `mpq` floor/ceil). `abs`, comparisons and `to_real` are exact. `real_power x n` is

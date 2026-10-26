@@ -120,3 +120,16 @@ function vcat(v) = {
    iteration to 10^-30). */
 val rsq : (int, int) -> int
 function rsq(a, b) = floor(mult_real(sqrt(div_real(to_real(a), to_real(b))), pow_real(to_real(2), 80)))
+
+/* The integer_update_subrange replacement (JanusASL/sail/sail_int_fix.py; run.sh applies it to
+   this probe's Lean output as scripts/asl.sh gen does): bit 0, bits 7..4 and bits 63..60 of an
+   integer (two's complement, any sign and size) replaced, Lean against C. */
+/* sail-arm's prelude.sail:183-184, verbatim */
+val integer_update_subrange : forall 'm 'o, 0 <= 'o <= 'm. (int, int('m), int('o), bits('m - 'o + 1)) -> int
+function integer_update_subrange(i, hi, lo, x) = set_slice_int(hi - lo + 1, i, lo, x)
+
+val ius : (int, int) -> int
+function ius(k, i) =
+  if k == 0 then integer_update_subrange(i, 0, 0, 0b1)
+  else if k == 1 then integer_update_subrange(i, 7, 4, 0xA)
+  else integer_update_subrange(i, 63, 60, 0x5)
