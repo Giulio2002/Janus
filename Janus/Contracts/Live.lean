@@ -403,10 +403,11 @@ outside the callee's window. -/
 
 /-- The live part of a contract's precondition: the request is served (`R.ok`), the invariant
 holds for the live set `L` and the budget `b` (`R.inv`, about the view), the request's `cost`
-fits the budget and the live set is outside the callee's window `win`. -/
+fits the budget, the live set is outside the callee's window `win` and the window outside the
+runtime-owned ranges (the caller keeps its frame outside `rt`, as in every example). -/
 @[reducible] def LiveAt (R : RtInv) (rt : List (Nat × Nat)) (addr : Nat) (args : List Nat)
     (L : List (Nat × Nat)) (b cost g : Nat) (m : Memory) (win : List (Nat × Nat)) : Prop :=
-  R.ok addr args ∧ R.inv b L g (view rt L m) ∧ cost ≤ b ∧ LiveSep L win
+  R.ok addr args ∧ R.inv b L g (view rt L m) ∧ cost ≤ b ∧ LiveSep L win ∧ LiveSep win rt
 
 /-- The shape of a live allocation contract's postcondition (arm64): the callee returned to `X30`
 (`retStateX`, results `res ptr`), memory changed only in `rt` and the callee's window and not in
@@ -599,7 +600,8 @@ def WbLiveContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : 
     (n : Nat) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => CallOK s stack 0 ∧ R.ok addr [n] ∧ R.inv b L (s.regs 28).toNat (view rt L s.mem) ∧
-      LiveSep L [(s.sp.toNat - stack, s.sp.toNat - 8)])
+      LiveSep L [(s.sp.toNat - stack, s.sp.toNat - 8)] ∧
+      LiveSep [(s.sp.toNat - stack, s.sp.toNat - 8)] rt)
     (fun s s' => ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
         (ex : Option (Nat × Nat)) (ep : Nat → Bool),
       s' = wbRetX s junk buf f v m ex ep ∧
@@ -879,7 +881,8 @@ theorem GrowsliceLiveContract.ready {p : Program} {addr : Nat} {rt : List (Nat �
 /-- The live part of a write barrier's precondition (arm64). -/
 def LiveCallWb (R : RtInv) (rt : List (Nat × Nat)) (addr stack : Nat) (args : List Nat) (g sp : Nat)
     (m : Memory) : Prop :=
-  ∃ L b, R.ok addr args ∧ R.inv b L g (view rt L m) ∧ LiveSep L [(sp - stack, sp - 8)]
+  ∃ L b, R.ok addr args ∧ R.inv b L g (view rt L m) ∧ LiveSep L [(sp - stack, sp - 8)] ∧
+    LiveSep [(sp - stack, sp - 8)] rt
 
 theorem WbLiveContract.ready {p : Program} {addr : Nat} {rt : List (Nat × Nat)} {stack : Nat}
     {R : RtInv} {n : Nat} (h : WbLiveContract p addr rt stack R n) :
