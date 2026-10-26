@@ -509,7 +509,8 @@ def CbReady (k : Janus.FFI.CbStack) (t : TLSImage) (s : State) : Prop :=
 goroutine stack (trusted; see `Janus.FFI.CallbackEntry`): the ABIInternal call `fn(frame)`
 (`RIP = [RSP+8]`, `RAX = [RSP+16]`, `[RSP_u] = ret`, `X15 = 0`, `DF` clear); `R14` the
 goroutine's `g` (`m.curg`), its struct readable Go memory, the TLS `g` slot holding it; the
-goroutine stack (`gs` writable bytes below `RSP` and the return-address slot) not C memory, its
+goroutine stack (`gs` writable bytes below `RSP`, the return-address slot and the argument's
+spill slot) not C memory, its
 low end at least `gs` bytes below `RSP` (`g.stackguard0 + gs ≤ RSP + stackGuard`); the C memory
 left alone kept; the same thread, `MXCSR` and x87 control word. -/
 structure CallbackEntry (t : TLSImage) (p : Program) (gs : Nat) (s u : State) (ret : Nat) : Prop where
@@ -524,12 +525,13 @@ structure CallbackEntry (t : TLSImage) (p : Program) (gs : Nat) (s u : State) (r
   gSep : ∀ a n w, s.mem.accessible a n w = true →
     Outside a n [((u.regs 14).toNat, (u.regs 14).toNat + gStructSize)]
   tlsG : u.mem.readLE (tlsGSlot t u.fsBase) 8 = (u.regs 14).toNat
-  /-- The goroutine stack: `gs` writable bytes below `RSP` and the return-address slot. -/
-  goStack : gs ≤ (u.regs 4).toNat ∧ (u.regs 4).toNat + 8 ≤ 2 ^ 48 ∧
-    u.mem.accessible ((u.regs 4).toNat - gs) (gs + 8) true = true
+  /-- The goroutine stack: `gs` writable bytes below `RSP`, the return-address slot and the
+  spill slot of the frame argument above it (`[RSP+8, RSP+16)`, in `cgocallbackg1`'s frame). -/
+  goStack : gs ≤ (u.regs 4).toNat ∧ (u.regs 4).toNat + 16 ≤ 2 ^ 48 ∧
+    u.mem.accessible ((u.regs 4).toNat - gs) (gs + 16) true = true
   stackSep : ∀ a n w, s.mem.accessible a n w = true →
-    Outside a n [((u.regs 4).toNat - gs, (u.regs 4).toNat + 8)]
-  gOff : Outside (u.regs 14).toNat gStructSize [((u.regs 4).toNat - gs, (u.regs 4).toNat + 8)]
+    Outside a n [((u.regs 4).toNat - gs, (u.regs 4).toNat + 16)]
+  gOff : Outside (u.regs 14).toNat gStructSize [((u.regs 4).toNat - gs, (u.regs 4).toNat + 16)]
   guard : u.mem.readLE ((u.regs 14).toNat + 16) 8 + gs ≤ (u.regs 4).toNat + Janus.FFI.stackGuard
   kept : ∀ a n, CbKept t s a n false → u.mem.readLE a n = s.mem.readLE a n
   keptAcc : ∀ a n w, CbKept t s a n w → u.mem.accessible a n w = true

@@ -76,9 +76,10 @@ type Extraction struct {
 	Skipped  []SkippedData // references whose target is not copied (writable, code, ...)
 	// The C environment (cenv.go): writable C data objects the C code references, and the TLS
 	// image when an extracted function reads the thread pointer.
-	CData []CData
-	TLS   *tlsImage
-	Lean  []byte
+	CData  []CData
+	DynGOT []DynGOT
+	TLS    *tlsImage
+	Lean   []byte
 }
 
 // Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)

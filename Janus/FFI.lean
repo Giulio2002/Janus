@@ -71,6 +71,30 @@ deriving Repr, Inhabited
 def CData.addr (ds : List CData) (name : String) : Nat :=
   ((ds.find? (·.name == name)).map (·.base)).getD 0
 
+/-- A GOT slot the extracted C code reads that a **dynamic relocation** fills (`Extracted.dyngot`):
+the relocation's symbol, the slot's address, the relocation type (`R_AARCH64_GLOB_DAT` = 1025,
+`R_X86_64_GLOB_DAT` = 6, …) and its addend (`r_addend`, two's complement). The slot's run-time
+value is the dynamic linker's binding of the symbol, not a link-time constant, so it is not
+copied (unlike a static slot, `got:<symbol>`); a theorem states it with `GotBound`. -/
+structure DynGOT where
+  name : String
+  slot : Nat
+  rtype : Nat
+  addend : Nat
+deriving Repr, Inhabited
+
+/-- The address of the GOT slot of the relocation symbol `name` (`0` if there is none). -/
+def DynGOT.slotOf (ds : List DynGOT) (name : String) : Nat :=
+  ((ds.find? (·.name == name)).map (·.slot)).getD 0
+
+/-- **The dynamic linker bound `name` to `v`**: in memory `m`, the GOT slot of the relocation
+symbol `name` is readable (`PT_GNU_RELRO` makes it read-only after relocation) and holds `v`, the
+run-time address of `name` (plus the addend). A precondition, stated in terms of the symbol:
+a theorem quantifies over `v` and says what it needs of the object at `v`. -/
+def GotBound (ds : List DynGOT) (name : String) (v : Nat) (m : Janus.Arm64.Memory) : Prop :=
+  DynGOT.slotOf ds name + 8 ≤ 2 ^ 48 ∧ m.accessible (DynGOT.slotOf ds name) 8 false = true ∧
+    m.readLE (DynGOT.slotOf ds name) 8 = v
+
 /-- The executable's TLS segment (`PT_TLS`: `p_memsz`, `p_align`, the `.tdata` bytes) and its
 `STT_TLS` symbols (name, offset in the segment, size). -/
 structure TLSImage where

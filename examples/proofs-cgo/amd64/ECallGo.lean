@@ -169,7 +169,7 @@ theorem refines (k : Janus.FFI.CbStack) :
     obtain ⟨g1, g2, g3⟩ := he.goStack
     have hsep := he.stackSep _ _ _ hacc
     simp only [outside_cons, outside_nil, and_true] at hsep
-    refine ⟨by rw [hf]; exact hb, by rw [hf]; exact he.keptAcc _ _ _ ⟨hacc, hout⟩, g2,
+    refine ⟨by rw [hf]; exact hb, by rw [hf]; exact he.keptAcc _ _ _ ⟨hacc, hout⟩, by omega,
       Janus.Arm64.Memory.accessible_read_of_write _ (Janus.Arm64.Memory.accessible_mono _ g3 (by omega) (by omega)), ?_⟩
     rw [hf]; simp only [outside_cons, outside_nil, and_true] at hsep ⊢; omega
   · rintro S u ret u' ⟨-, -, hb, hacc, hout⟩ he - - hpost b hb' hbacc

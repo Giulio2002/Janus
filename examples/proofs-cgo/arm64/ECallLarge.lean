@@ -209,10 +209,9 @@ abbrev ctxf : Nat := CData.addr Extracted.cdata "cgo_context_function"
 def iscgo : Nat :=
   adrpLdTarget (segAddr Extracted.program "runtime.load_g.abi0")
     (segWord Extracted.program "runtime.load_g.abi0" 0) (segWord Extracted.program "runtime.load_g.abi0" 1) 0
-/-- The GOT slot of `__stack_chk_guard` (a dynamic relocation: not part of the extracted data). -/
-def gslot : Nat :=
-  adrpLdTarget (segAddr Extracted.program "GoLarge" + 0x14)
-    (segWord Extracted.program "GoLarge" 5) (segWord Extracted.program "GoLarge" 6) 3
+/-- The GOT slot of `__stack_chk_guard` (an `R_AARCH64_GLOB_DAT` relocation: the dynamic linker
+fills it; named by the relocation's symbol, `Extracted.dyngot`). -/
+def gslot : Nat := DynGOT.slotOf Extracted.dyngot "__stack_chk_guard"
 
 /-- The C stack `e_calllarge` needs: `GoLarge`'s and `crosscall2`'s frames (the stub at `SP - 256`)
 and `cgocallback`'s. -/

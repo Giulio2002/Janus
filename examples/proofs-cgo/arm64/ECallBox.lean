@@ -62,20 +62,21 @@ def boxType : Nat :=
 
 /-! ## The Go side -/
 
-/-- The allocator's readiness at the `newobject` call: the goroutine stack is apart from the
-runtime-owned memory, and `Ha` holds for `[boxType]`, the `g`, `SP - 80` (the two frames) and
-the runtime's view of the memory at the callback's entry. -/
+/-- The runtime's readiness at the Go entry: `box`'s type descriptor (Go read-only data, not
+C memory: the C side does not grant it) is in place, the goroutine stack is apart from it and
+from the runtime-owned memory, and the allocator is ready for the `newobject` call (`Ha` for
+`[boxType]`, the `g`, `SP - 80` (the two frames) and the runtime's view of the memory). -/
 def ROK (rt : List (Nat × Nat)) (Ha : RtReady) (u : State) : Prop :=
-  Outside (u.sp.toNat - gsBox) (gsBox + 16) rt ∧
+  TypeOK u.mem boxType ∧ typSize u.mem boxType = 8 ∧ typPtrBytes u.mem boxType = 0 ∧
+    Outside boxType 16 [(u.sp.toNat - gsBox, u.sp.toNat + 16)] ∧
+    Outside (u.sp.toNat - gsBox) (gsBox + 16) rt ∧
     Ha [boxType] (u.regs 28).toNat (u.sp.toNat - 80) (rtView rt u.mem)
 
 def GoPre (rt : List (Nat × Nat)) (Ha : RtReady) (a : W64) (u : State) : Prop :=
   GuardOK u 32 ∧ StackOK u gsBox 16 ∧
     Outside ((u.regs 28).toNat + 16) 8 [(u.sp.toNat - gsBox, u.sp.toNat + 16)] ∧
     a.toNat + 16 ≤ 2 ^ 48 ∧ u.mem.accessible a.toNat 16 true = true ∧
-    Outside a.toNat 16 [(u.sp.toNat - gsBox, u.sp.toNat + 16)] ∧ Outside a.toNat 16 rt ∧
-    TypeOK u.mem boxType ∧ typSize u.mem boxType = 8 ∧ typPtrBytes u.mem boxType = 0 ∧
-    Outside boxType 16 [(u.sp.toNat - gsBox, u.sp.toNat + 16)] ∧ ROK rt Ha u
+    Outside a.toNat 16 [(u.sp.toNat - gsBox, u.sp.toNat + 16)] ∧ Outside a.toNat 16 rt ∧ ROK rt Ha u
 
 /-- The frame's result slot holds `p0 + 1`; the rest of memory changes only inside the
 runtime-owned ranges and the goroutine stack. -/
@@ -125,10 +126,9 @@ abbrev ctxf : Nat := CData.addr Extracted.cdata "cgo_context_function"
 def iscgo : Nat :=
   adrpLdTarget (segAddr Extracted.program "runtime.load_g.abi0")
     (segWord Extracted.program "runtime.load_g.abi0" 0) (segWord Extracted.program "runtime.load_g.abi0" 1) 0
-/-- The GOT slot of `__stack_chk_guard` (a dynamic relocation: not part of the extracted data). -/
-def gslot : Nat :=
-  adrpLdTarget (segAddr Extracted.program "GoBox" + 0x14)
-    (segWord Extracted.program "GoBox" 5) (segWord Extracted.program "GoBox" 6) 3
+/-- The GOT slot of `__stack_chk_guard` (an `R_AARCH64_GLOB_DAT` relocation: the dynamic linker
+fills it; named by the relocation's symbol, `Extracted.dyngot`). -/
+def gslot : Nat := DynGOT.slotOf Extracted.dyngot "__stack_chk_guard"
 
 /-- The C stack `e_callbox` needs: `GoBox`'s and `crosscall2`'s frames (the stub at `SP - 256`)
 and `cgocallback`'s. -/
@@ -138,14 +138,11 @@ abbrev win : Nat := 256 + cbStackScratch
 def frameOf (S : State) : Nat := S.mem.readLE (S.sp.toNat + 16) 8
 
 /-- At the stub: the stack window, the callback's readiness, the frame (C memory), no C memory
-runtime-owned, and `box`'s type descriptor (read-only data the Go code passes to
-`newobject`). -/
+runtime-owned. -/
 def G (rt : List (Nat × Nat)) (k : CbStack) (S : State) : Prop :=
   CStack S cbStackScratch 32 ∧ k.Ready Extracted.tls S ∧ frameOf S + 16 ≤ 2 ^ 48 ∧
     S.mem.accessible (frameOf S) 16 true = true ∧ Outside (frameOf S) 16 (cbClobber Extracted.tls S) ∧
-    (∀ a n w, S.mem.accessible a n w = true → Outside a n rt) ∧
-    boxType + 16 ≤ 2 ^ 48 ∧ S.mem.accessible boxType 16 false = true ∧ S.mem.readLE boxType 8 = 8 ∧
-    S.mem.readLE (boxType + 8) 8 = 0 ∧ Outside boxType 16 (cbClobber Extracted.tls S)
+    (∀ a n w, S.mem.accessible a n w = true → Outside a n rt)
 
 def E (S : State) : Memory :=
   S.mem.writeLE (frameOf S + 8) 8 (S.mem.readLE (frameOf S) 8 + 1)
@@ -153,8 +150,13 @@ def E (S : State) : Memory :=
 /-- Go's TLS `g` slot of the thread. -/
 abbrev slot (s : State) : Nat := tlsGSlot Extracted.tls s.tpidr
 
+/-- The extraction without `box`'s type descriptor: the read-only data the C side needs (the C
+state does not grant the Go type descriptor; the Go side gets it from `ROK`). -/
+def CProg : Program :=
+  { Extracted.program with data := Extracted.program.data.filter (·.base != boxType) }
+
 def CPre (rt rtc : List (Nat × Nat)) (Hc : RtReady) (s : State) : Prop :=
-  Extracted.program.DataLoaded s.mem ∧ CStack s win 0 ∧
+  CProg.DataLoaded s.mem ∧ CStack s win 0 ∧
   s.mem.accessible rid 4 false = true ∧ s.mem.readLE rid 4 = 2 ∧
   s.mem.accessible ctxf 8 false = true ∧ s.mem.readLE ctxf 8 = 0 ∧
   s.mem.accessible iscgo 1 false = true ∧ Outside iscgo 1 [(s.sp.toNat - win, s.sp.toNat)] ∧
@@ -167,7 +169,7 @@ def CPre (rt rtc : List (Nat × Nat)) (Hc : RtReady) (s : State) : Prop :=
   Outside (slot s) 8 [(s.sp.toNat - win, s.sp.toNat)] ∧
   Outside gslot 8 [(slot s, slot s + 8)] ∧
   Outside (s.mem.readLE gslot 8) 8 [(slot s, slot s + 8)] ∧
-  Outside ctxf 8 [(slot s, slot s + 8)] ∧ Outside boxType 16 [(slot s, slot s + 8)] ∧
+  Outside ctxf 8 [(slot s, slot s + 8)] ∧
   (∀ a n w, s.mem.accessible a n w = true → Outside a n rt) ∧
   Outside (s.sp.toNat - win) win rtc ∧
   Hc [goFn, gsBox] (s.mem.readLE (slot s) 8) (s.sp.toNat - 256) (rtView rtc s.mem)
@@ -181,23 +183,21 @@ theorem c_spec (impl : List Segment) (rt rtc : List (Nat × Nat)) (Hc : RtReady)
       (CPre rt rtc Hc) (fun _ s' => s'.regs 0 = x + 1) := by
   intro ret hret s hs hpre
   obtain ⟨hd, ⟨hal, hb, ha, hw⟩, hra, hrv, hca, hcv, hia, hio, htb, hta, hga, hgpa, hro, hco, hgo, hgpo, hto, hgt,
-    hgpt, hct, hbt, hcrt, hrt, hH⟩ := hpre
+    hgpt, hct, hcrt, hrt, hH⟩ := hpre
   have et : Extracted.tls.a64Off + Extracted.tls.varOff "runtime.tls_g" =
       janus_eval% (Extracted.tls.a64Off + Extracted.tls.varOff "runtime.tls_g") := rfl
   have hsl : slot s = s.tpidr.toNat + janus_eval% (Extracted.tls.a64Off + Extracted.tls.varOff "runtime.tls_g") := by
     simp only [slot, tlsGSlot, TLSImage.a64Addr, Nat.add_assoc, et]
-  rw [hsl] at htb hta hto hgt hgpt hct hbt hH
+  rw [hsl] at htb hta hto hgt hgpt hct hH
   have e1 : rid = janus_eval% rid := rfl
   have e2 : ctxf = janus_eval% ctxf := rfl
   have e3 : iscgo = janus_eval% iscgo := rfl
   have e4 : gslot = janus_eval% gslot := rfl
-  have e5 : boxType = janus_eval% boxType := rfl
   rw [e1] at hra hrv hro
   rw [e2] at hca hcv hco hct
   rw [e3] at hia hio
   rw [e4] at hga hgpa hgo hgpo hgt hgpt
-  rw [e5] at hbt
-  simp only [outside_cons, outside_nil, and_true, win, cbStackScratch] at hro hco hgo hgpo hto hb hw hgt hgpt hct hio hbt
+  simp only [outside_cons, outside_nil, and_true, win, cbStackScratch] at hro hco hgo hgpo hto hb hw hgt hgpt hct hio
   simp only [win, cbStackScratch] at hrt
   have hv : ∀ (m : Memory) a n v, s.sp.toNat - 16640 ≤ a → a + n ≤ s.sp.toNat →
       rtView rtc (m.writeLE a n v) = rtView rtc m :=
@@ -216,14 +216,12 @@ theorem c_spec (impl : List Segment) (rt rtc : List (Nat × Nat)) (Hc : RtReady)
   all_goals try (rw [hgf]; janus_simp; done)
   all_goals try (
     simp only [G, frameOf, cbClobber, CStack, cbStackScratch, CbStack.Ready, cbk, tlsGSlot,
-      TLSImage.a64Addr, Nat.add_assoc, et, e5, outside_cons, outside_nil, and_true]
+      TLSImage.a64Addr, Nat.add_assoc, et, outside_cons, outside_nil, and_true]
     simp (disch := omega) only [hv]
     janus_simp
     rw [hgf] at hH
     exact ⟨⟨by omega, by omega, by omega, Memory.accessible_mono _ hw (by omega) (by omega)⟩, hH, by omega,
-      Memory.accessible_mono _ hw (by omega) (by omega), ⟨by omega, by omega, by omega⟩, hcrt,
-      Memory.accessible_mono _ ‹s.mem.accessible (janus_eval% boxType) 256 false = true› (by omega) (by omega),
-      by omega, by omega, by omega⟩)
+      Memory.accessible_mono _ hw (by omega) (by omega), ⟨by omega, by omega, by omega⟩, hcrt⟩)
   all_goals (rintro s' ⟨-, m, ⟨regs, flags, vregs, fpsr, excl, rfl⟩, hmf⟩)
   all_goals (simp only [E, frameOf, cbClobber, cbStackScratch, tlsGSlot, TLSImage.a64Addr, Nat.add_assoc, et,
     h256] at hmf)
@@ -246,27 +244,20 @@ theorem refines (impl : List Segment) (rt : List (Nat × Nat)) (Ha : RtReady)
       (CallbackSpec Extracted.tls goFn (G rt (cbk rtc Hc)) E) := by
   refine CgoCallback.refines (fun a => go_spec impl rt Ha hnew a) (fun S hG => hG.1) (fun S hG => hG.2.1) ?_
     (fun _ _ => rfl) ?_ ?_
-  · rintro S u ret ⟨-, -, hb, hacc, hout, hcrt, hbb, hba, hb8, hb0, hbo⟩ he hR
+  · rintro S u ret ⟨-, -, hb, hacc, hout, hcrt⟩ he hR
     have hf : (BitVec.ofNat 64 (S.mem.readLE (S.sp.toNat + 16) 8)).toNat = frameOf S := by
       rw [BitVec.toNat_ofNat]; exact Nat.mod_eq_of_lt (frame_lt S)
     have hsep := he.stackSep _ _ _ hacc
-    have hsepb := he.stackSep _ _ _ hba
     have hgo := he.gOff
-    have hk8 : u.mem.readLE boxType 8 = S.mem.readLE boxType 8 :=
-      he.kept _ _ ⟨Memory.accessible_mono _ hba (Nat.le_refl _) (by omega), Outside.of_sub hbo (Nat.le_refl _) (by omega)⟩
-    have hk0 : u.mem.readLE (boxType + 8) 8 = S.mem.readLE (boxType + 8) 8 :=
-      he.kept _ _ ⟨Memory.accessible_mono _ hba (by omega) (by omega), Outside.of_sub hbo (by omega) (by omega)⟩
-    simp only [cbk, gsBox] at hsep hsepb hgo
-    simp only [outside_cons, outside_nil, and_true] at hsep hsepb hgo
+    simp only [cbk, gsBox] at hsep hgo
+    simp only [outside_cons, outside_nil, and_true] at hsep hgo
     unfold GoPre
     rw [hf]
     refine ⟨he.guardOK (by simp only [cbk, gsBox, stackGuard]; decide), he.goStack, ?_, hb,
-      he.keptAcc _ _ _ ⟨hacc, hout⟩, ?_, hcrt _ _ _ hacc, ⟨hbb, he.keptAcc _ _ _ ⟨hba, hbo⟩⟩,
-      by simp only [typSize]; rw [hk8, hb8], by simp only [typPtrBytes]; rw [hk0, hb0], ?_, hR⟩
+      he.keptAcc _ _ _ ⟨hacc, hout⟩, ?_, hcrt _ _ _ hacc, hR⟩
     · simp only [outside_cons, outside_nil, and_true, gsBox, gStructSize] at hgo ⊢; omega
     · simp only [outside_cons, outside_nil, and_true, gsBox]; omega
-    · simp only [outside_cons, outside_nil, and_true, gsBox]; omega
-  · rintro S u ret u' ⟨-, -, hb, hacc, hout, hcrt, -⟩ he - - hpost b hb' hbacc
+  · rintro S u ret u' ⟨-, -, hb, hacc, hout, hcrt⟩ he - - hpost b hb' hbacc
     have hf : (BitVec.ofNat 64 (S.mem.readLE (S.sp.toNat + 16) 8)).toNat = frameOf S := by
       rw [BitVec.toNat_ofNat]; exact Nat.mod_eq_of_lt (frame_lt S)
     unfold GoPost at hpost

@@ -146,17 +146,17 @@ def cbState (t : TLSImage) (k : Nat) (s : State) (ret sp gp : Nat) : State :=
            xmm := fun i => if i = 15 then 0 else s.xmm i, df := false,
            mem := { bytes := (((s.mem.writeLE sp 8 ret).writeLE (gp + 16) 8 0).writeLE
                       (tlsGSlot t s.fsBase) 8 gp).bytes,
-                    regions := s.mem.regions ++ [⟨sp - k, k + 8, true⟩, ⟨gp, gStructSize, false⟩] } }
+                    regions := s.mem.regions ++ [⟨sp - k, k + 16, true⟩, ⟨gp, gStructSize, false⟩] } }
 
 /-- Room for the goroutine stack and the `g` struct outside the C memory, and a TLS `g` slot
 apart from the return-address slot and from `stackguard0` (as every real callback has). -/
 structure CbRoom (t : TLSImage) (k : Nat) (s : State) (sp gp : Nat) : Prop where
   lo : k ≤ sp
-  hi : sp + 8 ≤ 2 ^ 48
+  hi : sp + 16 ≤ 2 ^ 48
   ghi : gp + gStructSize ≤ 2 ^ 48
-  free : ∀ r ∈ s.mem.regions, (r.base + r.size ≤ sp - k ∨ sp + 8 ≤ r.base) ∧
+  free : ∀ r ∈ s.mem.regions, (r.base + r.size ≤ sp - k ∨ sp + 16 ≤ r.base) ∧
     (r.base + r.size ≤ gp ∨ gp + gStructSize ≤ r.base)
-  gapart : gp + gStructSize ≤ sp - k ∨ sp + 8 ≤ gp
+  gapart : gp + gStructSize ≤ sp - k ∨ sp + 16 ≤ gp
   slot : (tlsGSlot t s.fsBase + 8 ≤ gp + 16 ∨ gp + 24 ≤ tlsGSlot t s.fsBase) ∧
     (tlsGSlot t s.fsBase + 8 ≤ sp ∨ sp + 8 ≤ tlsGSlot t s.fsBase)
 
@@ -174,7 +174,7 @@ theorem callbackEntry_cbState {t : TLSImage} {p : Janus.Amd64.Program} {k ret sp
   have h4 : (cbState t k s ret sp gp).regs 4 = BitVec.ofNat 64 sp := by simp [cbState]
   have h14 : (cbState t k s ret sp gp).regs 14 = BitVec.ofNat 64 gp := by simp [cbState]
   have hsep : ∀ a n w, s.mem.accessible a n w = true →
-      (a + n ≤ sp - k ∨ sp + 8 ≤ a) ∧ (a + n ≤ gp ∨ gp + gStructSize ≤ a) := by
+      (a + n ≤ sp - k ∨ sp + 16 ≤ a) ∧ (a + n ≤ gp ∨ gp + gStructSize ≤ a) := by
     intro a n w hacc
     obtain ⟨⟨r, hr, h1, h2, -, -⟩, -⟩ := (Janus.Arm64.Memory.accessible_iff s.mem a n w).1 hacc
     obtain ⟨hf1, hf2⟩ := hfree r hr
@@ -203,7 +203,7 @@ theorem callbackEntry_cbState {t : TLSImage} {p : Janus.Amd64.Program} {k ret sp
       exact Nat.mod_eq_of_lt (by unfold gStructSize at hghi; omega)
     goStack := by
       rw [h4, hsp]
-      refine ⟨hlo, hhi, (Janus.Arm64.Memory.accessible_iff _ _ _ _).2 ⟨⟨⟨sp - k, k + 8, true⟩, ?_, by simp,
+      refine ⟨hlo, hhi, (Janus.Arm64.Memory.accessible_iff _ _ _ _).2 ⟨⟨⟨sp - k, k + 16, true⟩, ?_, by simp,
         by dsimp only; omega, by dsimp only; omega, Or.inr rfl⟩, fun _ r hr => ?_⟩⟩
       · simp [cbState]
       · simp only [cbState, List.mem_append, List.mem_cons, List.not_mem_nil, or_false] at hr

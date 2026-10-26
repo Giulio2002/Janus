@@ -374,6 +374,7 @@ func extractWith(b *Binary, sym string, maxFunctions int, contracts []string, ta
 		return nil, r.err
 	}
 	x.CData = collectCData(b, x)
+	x.DynGOT = collectDynGOT(b, x)
 	x.TLS = extractionTLS(b, x)
 	if err := checkCgoTLS(b, x); err != nil {
 		return nil, err

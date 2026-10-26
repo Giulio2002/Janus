@@ -289,7 +289,7 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintf(stderr, "Note: --contract %q matches no function the extraction calls directly.\n", pat)
 		}
 	}
-	printSkipped(stderr, x.Skipped)
+	printSkipped(stderr, x.Skipped, x.DynGOT)
 	for _, u := range x.Unresolved {
 		fmt.Fprintf(stderr, "Warning: branch at 0x%x targets 0x%x, which is in no known function; it is not extracted (Lean faults with noCode there).\n", u.From, u.Target)
 	}
@@ -297,8 +297,12 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 }
 
 // printSkipped warns about data references whose bytes are not copied, one line per target.
-func printSkipped(w io.Writer, skipped []SkippedData) {
+func printSkipped(w io.Writer, skipped []SkippedData, dyn []DynGOT) {
 	seen := map[uint64]bool{}
+	for _, d := range dyn {
+		seen[d.Slot] = true
+		fmt.Fprintf(w, "Note: the GOT slot 0x%x is filled by a dynamic relocation (type %d) of %s; it is not copied: Extracted.dyngot names it, and a theorem states its value with Janus.GotBound.\n", d.Slot, d.Type, d.Name)
+	}
 	for _, s := range skipped {
 		if seen[s.Target] {
 			continue

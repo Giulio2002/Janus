@@ -60,10 +60,9 @@ abbrev ctxf : Nat := CData.addr Extracted.cdata "cgo_context_function"
 def iscgo : Nat :=
   Janus.Spec.adrpLdTarget (segAddr Extracted.program "runtime.load_g.abi0")
     (Janus.Spec.segWord Extracted.program "runtime.load_g.abi0" 0) (Janus.Spec.segWord Extracted.program "runtime.load_g.abi0" 1) 0
-/-- The GOT slot of `__stack_chk_guard` (a dynamic relocation: not part of the extracted data). -/
-def gslot : Nat :=
-  Janus.Spec.adrpLdTarget (segAddr Extracted.program "GoTwice" + 0x14)
-    (Janus.Spec.segWord Extracted.program "GoTwice" 5) (Janus.Spec.segWord Extracted.program "GoTwice" 6) 3
+/-- The GOT slot of `__stack_chk_guard` (an `R_AARCH64_GLOB_DAT` relocation: the dynamic linker
+fills it; named by the relocation's symbol, `Extracted.dyngot`). -/
+def gslot : Nat := DynGOT.slotOf Extracted.dyngot "__stack_chk_guard"
 
 /-- The C stack `e_callgo` needs: its frames and `cgocallback`'s. -/
 abbrev win : Nat := 16656
