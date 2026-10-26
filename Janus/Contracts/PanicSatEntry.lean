@@ -535,6 +535,35 @@ theorem lookup_found (hp : EngineAt p) (T : List FuncInfo) (hT : TOK T) {mode : 
 
 end lf
 
+section gp
+variable {p : Program}
+
+theorem rdsame_of_frame {m m' : Memory} {ws : List (Nat × Nat)} (hf : MemFrame m m' ws)
+    (ho : ∀ a, (a = B + 8 ∨ (B + 0x28 ≤ a ∧ a + 8 ≤ B + 0x100) ∨ (B + 0x200 ≤ a ∧ a + 8 ≤ B + 0x1000)) →
+      Outside a 8 ws) : RdSame m m' := fun a ha => hf.readLE a 8 (ho a ha)
+
+/-- The end of the loop of `gopanic` or `Goexit`: the runtime unwinds past the frame. -/
+theorem left_fin (hp : EngineAt p) {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List Item}
+    {ds0 : List DeferRec} {mode : DeferMode} (hm : mode ≠ .ret) {x28 x18 : W64} {lr x29 : Nat} {c : State}
+    {ch : List PanicRec} {rm : Nat}
+    (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm 0)
+    (hpc : c.pc = BitVec.ofNat 64 eLH) (h18 : c.regs 18 = x18)
+    (hend : ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ recSp c.mem j ≠ F.sp) :
+    ∃ k d, Program.Steps p c k d ∧ LeftFrame (P0 T RPa) U0 x28 F ds0 ch rm c d := by
+  obtain ⟨k, d, hk, hmem, h28, h18d, -, hret⟩ := step_fin hp hI h18 hpc rfl hend
+  obtain ⟨hpcd, hspd⟩ := hret hm
+  have hfi := fin_items hI.env hend
+  refine ⟨k, d, hk, ⟨hpcd, hspd, ?_⟩, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [h28]; simp
+  · show panics0 d.mem = ch; rw [hmem]; exact hI.pan
+  · show defers0 d.mem = frameRest F.sp ds0
+    rw [hmem, ← hfi.2]; exact hI.chn
+  · rw [hmem]; exact MemFrame.refl _ _
+  · show Env0 T d.mem; rw [hmem]; exact hI.env
+  · show rm ≤ room0 d.mem; rw [hmem]; exact hI.room
+
+end gp
+
 section dr
 variable {p : Program} {T : List FuncInfo}
 
