@@ -122,9 +122,9 @@ theorem newobject_impl : NewobjectContract (toy.link (at0 heapCode)) A0 rt 4096 
   simp only [List.cons.injEq, and_true] at hargs
   subst hargs
   janus_run
-  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, ?_,
+  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
-  · simp only [retState]; rw [callRegs_heap]; rfl
+  · simp only [retStateX]; rw [callRegs_heap]; rfl
   · unfold typSize at hsz
     rw [readLE_rtView (hin.sub (Nat.le_refl _) (by omega))] at hsz
     change typSize s.mem (s.regs 0).toNat ≤ 32768 at hsz
@@ -152,9 +152,9 @@ theorem mallocgc_impl : MallocgcContract (toy.link (at0 heapCode)) A0 rt 4096 Hm
   simp only [List.cons.injEq, and_true] at hargs
   obtain ⟨rfl, -, -⟩ := hargs
   janus_run
-  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, ?_,
+  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
-  · simp only [retState]; rw [callRegs_heap]; rfl
+  · simp only [retStateX]; rw [callRegs_heap]; rfl
   · rw [show (BitVec.ofNat 64 heap).toNat = heap from rfl]
     exact fresh_heap _ _ hr (le_blockSize _ _)
       (blockSize_le_maxSmallSize _ _ (by simp only [maxSmallSize]; exact hsz))
@@ -179,9 +179,9 @@ theorem makeslice_impl : MakesliceContract (toy.link (at0 heapCode)) A0 rt 4096 
   simp only [List.cons.injEq, and_true] at hargs
   obtain ⟨rfl, -, rfl⟩ := hargs
   janus_run
-  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, ?_,
+  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
-  · simp only [retState]; rw [callRegs_heap]; rfl
+  · simp only [retStateX]; rw [callRegs_heap]; rfl
   · unfold typSize at hsz
     rw [readLE_rtView (hin.sub (Nat.le_refl _) (by omega))] at hsz
     change typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat ≤ 32768 at hsz
@@ -224,9 +224,9 @@ theorem growslice_impl : GrowsliceContract (toy.link (at0 growCode)) A0 rt 4096 
   simp only [growsliceArgs, List.cons.injEq, and_true] at hargs
   obtain ⟨-, h1, h2, h3, -⟩ := hargs
   janus_run
-  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, ?_,
+  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩
-  · simp only [retState]; rw [h1, h2, growCap8_1_0, callRegs_grow]; rfl
+  · simp only [retStateX]; rw [h1, h2, growCap8_1_0, callRegs_grow]; rfl
   · simp only [growsliceObj, h1, h2, h3, growCap8_1_0, show (BitVec.ofNat 64 heap).toNat = heap from rfl]
     exact ⟨fresh_heap _ _ hr (Nat.le_refl _) (by decide), fun i hi => absurd hi (by omega),
       fun i hi => absurd hi (by omega)⟩

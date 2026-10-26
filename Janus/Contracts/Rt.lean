@@ -24,7 +24,9 @@ numbers) and memory. `RtContract` (arm64) and `RtContract64` (amd64) turn an `Rt
   state, `Ready H rt args s` for the caller-quantified `H : RtReady`;
 * **the return**: to the return address, with `SP`, `g`, the frame pointer (and on arm64 `R18`)
   preserved, results `r₀, r₁, r₂` in the first three result registers (`X0–X2`; `RAX, RBX,
-  RCX`), every other register, the flags and the vector registers unspecified;
+  RCX`), every other register, the flags and the vector registers unspecified (on arm64 also
+  the exclusive monitor and the store-exclusive outcomes, `retStateX`; on amd64 the AVX-512
+  state);
 * **memory**: changed only inside the runtime-owned ranges `rt` (unless the spec says the function
   writes none, `rtWrites = false`), the callee's stack window and the spec's `writes args` (e.g.
   a caller's `tmpBuf`), regions unchanged, and the spec's `post` relates the old memory, the
@@ -111,8 +113,9 @@ def ReadsOutside (rs win : List (Nat × Nat)) : Prop := ∀ r ∈ rs, Outside r.
 
 /-- The postcondition of `RtContract` (arm64). -/
 @[reducible] def RtPost (rt : List (Nat × Nat)) (stack : Nat) (sp : RtSpec) (s s' : State) : Prop :=
-  ∃ (r0 r1 r2 : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-    s' = retState s junk [r0, r1, r2] f v m ∧
+  ∃ (r0 r1 r2 : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+    (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+    s' = retStateX s junk [r0, r1, r2] f v m ex ep ∧
       MemFrame s.mem m (rtIf sp.rtWrites rt ++ calleeStack s stack sp.nargs ++
         sp.writes (argWords s sp.nargs) s.mem) ∧
       sp.post rt (argWords s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat m
@@ -125,21 +128,20 @@ def RtContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat)
 
 /-- How a proof from a function's own code ends: the final state `s'` keeps `SP`, `R18`, `R28`,
 `R29` and the system registers, returns to `X30`, and its memory and results satisfy the
-spec; then it is `RtPost`. -/
+spec; then it is `RtPost` (the exclusive monitor may be anything). -/
 theorem RtPost.intro {rt : List (Nat × Nat)} {stack : Nat} {sp : RtSpec} {s s' : State}
     (hsp : s'.sp = s.sp) (hpc : s'.pc = s.regs 30) (h18 : s'.regs 18 = s.regs 18)
     (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid)
     (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
     (hf : MemFrame s.mem s'.mem (rtIf sp.rtWrites rt ++ calleeStack s stack sp.nargs ++
       sp.writes (argWords s sp.nargs) s.mem))
-    (hq : sp.post rt (argWords s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 1).toNat (s'.regs 2).toNat s'.mem)
-    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
+    (hq : sp.post rt (argWords s sp.nargs) s.mem (s'.regs 0).toNat (s'.regs 1).toNat (s'.regs 2).toNat s'.mem) :
     RtPost rt stack sp s s' := by
-  refine ⟨s'.regs 0, s'.regs 1, s'.regs 2, s'.regs, s'.flags, s'.vregs, s'.mem, ?_, hf, hq⟩
+  refine ⟨s'.regs 0, s'.regs 1, s'.regs 2, s'.regs, s'.flags, s'.vregs, s'.mem, s'.excl, s'.exclPass, ?_, hf, hq⟩
   obtain ⟨r, sp', pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
-  simp only at hsp hpc h18 h28 h29 hdz htp hfc hfs hex hep ⊢
-  subst hsp hpc hdz htp hfc hfs hex hep
-  simp only [retState, State.mk.injEq, and_true]
+  simp only at hsp hpc h18 h28 h29 hdz htp hfc hfs ⊢
+  subst hsp hpc hdz htp hfc hfs
+  simp only [retStateX, State.mk.injEq, and_true]
   funext i
   simp only [callRegs]
   split

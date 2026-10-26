@@ -21,8 +21,8 @@ theorem sched_witness (rt : List (Nat × Nat)) (stack : Nat) :
     SchedContract retProg 0x1000 rt stack := by
   intro s hpc ⟨h1, h2, h3, h4, h5, h6, h7⟩
   janus_run
-  refine ⟨0, s.regs, s.flags, s.vregs, s.mem, ?_, MemFrame.refl _ _, trivial⟩
-  simp only [retState]
+  refine ⟨0, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_, MemFrame.refl _ _, trivial⟩
+  simp only [retStateX]
   congr 1
   funext i
   simp only [callRegs]
@@ -39,8 +39,8 @@ theorem convT64_witness (rt : List (Nat × Nat)) (stack : Nat) (hs : 16 ≤ stac
   have hp : (s.sp - 16#64).toNat = s.sp.toNat - 16 := by
     rw [BitVec.toNat_sub]; simp; omega
   refine ⟨s.sp - 16#64, s.regs, s.flags, s.vregs,
-    s.mem.writeLE (BitVec.toNat s.sp - 16) 8 (BitVec.toNat (s.regs 0)), ?_, ?_, ?_⟩
-  · simp only [retState]
+    s.mem.writeLE (BitVec.toNat s.sp - 16) 8 (BitVec.toNat (s.regs 0)), s.excl, s.exclPass, ?_, ?_, ?_⟩
+  · simp only [retStateX]
     congr 1
     funext i
     cases i with

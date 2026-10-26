@@ -1246,7 +1246,7 @@ def stateHyps : MetaM (Array Expr) := do
       for n in [``GoABI.RetAddr.toNat_ofNat, ``GoABI.RetAddr.mod64, ``GoABI.RetAddr.user_eq] do
         out := out.push (← mkAppM n #[d.toExpr])
       continue
-    if ty.isAppOfArity ``Janus.MemFrame 3 then
+    if ty.isAppOfArity ``Janus.MemFrame 3 || ty.isAppOfArity ``Janus.LiveFrame 4 then
       out := out ++ (← Common.frameRules d ty); continue
     if d.userName.eraseMacroScopes == `hbr && (← isProp ty) then
       out := out.push d.toExpr; continue
@@ -1525,7 +1525,7 @@ where
 def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
   -- reducible transparency only in the closers: unfolding `Memory.accessible`/`readLE` of a
   -- symbolic memory to compare it with a hypothesis can take seconds
-  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | omega | janus64_disch)
+  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | omega | janus64_disch)
   let left ← Common.provePreCore (cleanOutcome cfg) closer g
   unless left.isEmpty do
     let st ← cfg.status.get
@@ -1536,8 +1536,8 @@ def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
 
 /-- Apply a callee summary at a call site: the goal continues from the callee's return state.
 The postcondition is split into hypotheses; an equation `s' = e` is substituted. -/
-def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee : String) :
-    TacticM (List MVarId) := g.withContext do
+def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee : String)
+    (mvs : Array Expr := #[]) : TacticM (List MVarId) := g.withContext do
   let sty ← instantiateMVars (← inferType hsum)
   let (``Summary, #[_, entry, pre, post]) := sty.getAppFnArgs |
     throwError "{tacName}: not a `Summary`:{indentExpr sty}"
@@ -1553,6 +1553,12 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let gs ← Common.applyFast g lem
   Common.setPhase cfg.status s!"proving the precondition of the summary of {callee}"
   provePre cfg hpreM.mvarId! callee
+  for mv in mvs do
+    unless ← mv.mvarId!.isAssigned do
+      throwError "{tacName}: at the entry of {callee}: the live set and budget of its live \
+        contract were not determined by the context (the precondition needs a hypothesis \
+        `RtInv.inv R b L g (view rt L m)` about the memory at the call, or one up to the write \
+        barrier's slots; see `Janus.Contracts.Live`)"
   let mut out := []
   for g' in gs do
     if ← g'.isAssigned then continue
@@ -1638,13 +1644,16 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
     cfg.status.modify fun st => { st with pc := some c, sym := Common.symOf syms c }
     if !allowStop && cfg.stops.contains c then return none
     -- a call to a function with a summary
-    if let some (_, hsum) := cfg.calls.find? (·.1 == c) then
+    if let some (_, hsum0) := cfg.calls.find? (·.1 == c) then
+      -- a live contract: its live set and budget as metavariables (see `parseCalls`)
+      let (mvs, _, _) ← forallMetaTelescope (← instantiateMVars (← inferType hsum0))
+      let hsum := mkAppN hsum0 mvs
       let hsum ← match hret? with
         | some hret => mkAppM ``Summary.withExit #[hsum, hret]
         | none => pure hsum
       let callee := (Common.symOf syms c).getD (hex c)
       cfg.status.modify fun st => { st with instr := some s!"(entry of {callee}, by its summary)" }
-      return some (← applySummary cfg g p s hsum hpc callee)
+      return some (← applySummary cfg g p s hsum hpc callee mvs)
     let cE := mkNatLit c
     if mode.isNone && c == exitA then
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
@@ -1836,6 +1845,9 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
   if t.isAppOfArity ``Janus.Outside 3 then
     if ← Common.dischargeOutside g then return
     throwError "janus64_disch: cannot prove{indentExpr t}"
+  if t.isAppOfArity ``Janus.InRanges 3 then
+    if ← Common.dischargeInRanges g then return
+    throwError "janus64_disch: cannot prove{indentExpr t}"
   if let some (_, lhs, _) := t.eq? then
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
       if ← dischargeAccessible g then return
@@ -1882,6 +1894,23 @@ def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) := do
       | some ty' => ty := ty'.headBeta
       | none => break
     let e ← if ty == ty0 then pure e else mkExpectedTypeHint e ty
+    -- a live contract (`Janus.Contracts.Live`: `∀ L b, Summary …`, the live set and the budget
+    -- quantified): its entry is that of the `Summary`; the quantifiers are instantiated with
+    -- metavariables at each call, which the precondition's live goals determine (`janus_live`)
+    let entry? ← forallTelescope ty fun xs body => do
+      if xs.isEmpty then return none
+      let mut b := body
+      for _ in [0:8] do
+        if b.isAppOf ``Summary then break
+        match ← unfoldDefinition? b with
+        | some b' => b := b'.headBeta
+        | none => break
+      let (``Summary, #[_, entry, _, _]) := b.getAppFnArgs | return none
+      if entry.hasAnyFVar (fun v => xs.any (·.fvarId! == v)) then return none
+      return some entry
+    if let some entry := entry? then
+      let some n ← evalNat entry | throwError "janus64_run calls: cannot evaluate the entry of {t}"
+      return (n, e)
     let (``Summary, #[_, entry, _, _]) := ty.getAppFnArgs |
       throwError "janus64_run calls: {t} is not a `Summary`: {ty0}"
     let some n ← evalNat entry | throwError "janus64_run calls: cannot evaluate the entry of {t}"
