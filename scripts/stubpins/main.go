@@ -103,6 +103,18 @@ func s_f64equal()
 //go:linkname s_f64hash runtime.f64hash
 func s_f64hash()
 
+//go:linkname s_fadd64 runtime.fadd64
+func s_fadd64()
+
+//go:linkname s_fdiv64 runtime.fdiv64
+func s_fdiv64()
+
+//go:linkname s_fmul64 runtime.fmul64
+func s_fmul64()
+
+//go:linkname s_fsub64 runtime.fsub64
+func s_fsub64()
+
 //go:linkname s_gopanic runtime.gopanic
 func s_gopanic()
 
@@ -171,6 +183,9 @@ func s_interfaceSwitch()
 
 //go:linkname s_interhash runtime.interhash
 func s_interhash()
+
+//go:linkname s_KeepAlive runtime.KeepAlive
+func s_KeepAlive()
 
 //go:linkname s_makemap runtime.makemap
 func s_makemap()
@@ -630,6 +645,10 @@ var keep = []func(){
 	s_f32hash,
 	s_f64equal,
 	s_f64hash,
+	s_fadd64,
+	s_fdiv64,
+	s_fmul64,
+	s_fsub64,
 	s_gopanic,
 	s_goPanicIndex,
 	s_goPanicIndexU,
@@ -653,6 +672,7 @@ var keep = []func(){
 	s_interequal,
 	s_interfaceSwitch,
 	s_interhash,
+	s_KeepAlive,
 	s_makemap,
 	s_makemap_small,
 	s_mallocgcSmallNoScanSC10,

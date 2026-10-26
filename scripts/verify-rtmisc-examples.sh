@@ -28,14 +28,26 @@ sym() {
     Widen) echo example.com/rtmisc/soft.Widen ;;
     CheckWord) echo example.com/rtmisc/checkptr.Word ;;
     NewPairSC) echo example.com/rtmisc/sc.NewPair ;;
+    SoftAdd|SoftMul|SoftDiv) echo "example.com/rtmisc/softf.${1#Soft}" ;;
+    KeepAlive) echo runtime.KeepAlive ;;
     *) echo "example.com/rtmisc.$1" ;;
   esac
 }
-bin() { case "$2" in NewPairSC) echo "artifacts/examples-rtmisc-sc-$1" ;; *) echo "artifacts/examples-rtmisc-$1" ;; esac; }
+bin() {
+  case "$2" in
+    NewPairSC) echo "artifacts/examples-rtmisc-sc-$1" ;;
+    SoftAdd|SoftMul|SoftDiv|KeepAlive) echo "artifacts/examples-rtmisc-softf-$1" ;;
+    *) echo "artifacts/examples-rtmisc-$1" ;;
+  esac
+}
 args() {
   case "$1" in
     CheckWord) printf '%s\n' --contract runtime.checkptrAlignment ;;
     NewPairSC) printf '%s\n' --contract 'runtime.mallocgcSmallNoScanSC*' ;;
+    SoftAdd) printf '%s\n' --contract runtime.fadd64 ;;
+    SoftMul) printf '%s\n' --contract runtime.fmul64 ;;
+    SoftDiv) printf '%s\n' --contract runtime.fdiv64 ;;
+    KeepAlive) printf '%s\n' --contract 'runtime.print*' ;;
   esac
 }
 names=("$@")

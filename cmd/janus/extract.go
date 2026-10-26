@@ -209,11 +209,14 @@ var runtimePanicContractStubs = map[string]bool{
 // rtmiscContractStubs are the further runtime functions a framework contract library describes
 // (docs/RUNTIME-CONTRACTS.md, "Remaining runtime"): the -d=checkptr checks and the cgo pointer
 // checks (Janus/Contracts/InstrumentCalls*.lean) and the size-specialised allocator entry points of
-// GOEXPERIMENT=sizespecializedmalloc (Janus/Contracts/MallocSC*.lean). They are pinned like the
-// interface contracts (checkContractPin) and belong to runtimeContractStubs.
+// GOEXPERIMENT=sizespecializedmalloc (Janus/Contracts/MallocSC*.lean), and runtime.KeepAlive and the
+// soft-float entry points fadd64, fsub64, fmul64, fdiv64 (Janus/Contracts/SoftFloat*.lean). They are
+// pinned like the interface contracts (checkContractPin) and belong to runtimeContractStubs.
 var rtmiscContractStubs = map[string]bool{
 	"runtime.checkptrAlignment": true, "runtime.checkptrArithmetic": true,
 	"runtime.cgoCheckPointer": true, "runtime.cgoCheckResult": true,
+	"runtime.KeepAlive": true, "runtime.fadd64": true, "runtime.fsub64": true,
+	"runtime.fmul64": true, "runtime.fdiv64": true,
 	"runtime.mallocgcSmallNoScanSC2": true, "runtime.mallocgcSmallNoScanSC3": true,
 	"runtime.mallocgcSmallNoScanSC4": true, "runtime.mallocgcSmallNoScanSC5": true,
 	"runtime.mallocgcSmallNoScanSC6": true, "runtime.mallocgcSmallNoScanSC7": true,

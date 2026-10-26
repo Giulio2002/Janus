@@ -877,7 +877,8 @@ runtime's machine code:
 | --- | --- | --- |
 | `complex128div` | executed: Smith's algorithm and the Annex G recovery, against `Janus.Float.cdiv` (IEEE operations, fused on arm64, unfused on amd64) | `Div` |
 | `f32to64` (`-d=softfloat`) | executed (with `fpack64`), equal to IEEE `convertFormat` (`cvt binary32 binary64`) for every input | `Widen` |
-| `KeepAlive` | an intrinsic: no call, the argument is only kept live | `LoadKeep` |
+| `KeepAlive` (direct call) | an intrinsic: no call, the argument is only kept live | `LoadKeep` |
+| `KeepAlive` (the function, reached through a function value) | executed: it returns without effect when `cgoAlwaysFalse` is false; proved to meet `KeepAliveContract` | `KeepAlive` |
 | `cgoNoCallback` | ordinary Go code (a store into `g`, a `panic` stub) | — |
 
 **Read-only data with known contents** (`Janus.Contracts.Misc`):
@@ -916,6 +917,11 @@ and exactly the counters of the blocks that ran incremented, nothing else writte
 | `cgoCheckPointer` | `CgoCheckPointer` / `…64` | the model's `ok` (the cgo pointer-passing rules; panic excluded) | — |
 | `cgoCheckResult` | `CgoCheckResult` / `…64` | the model's `resOK` | — |
 | `mallocgcSmallNoScanSC<n>`, `mallocgcSmallScanNoHeaderSC<n>`, `mallocgcTinySize<n>` (`GOEXPERIMENT=sizespecializedmalloc`) | `MallocgcSmallNoScanSCContract` & co. / `…64` | the `mallocgc` contract (`RtReady`, a fresh object of the class size) with the entry's fixed arguments | `NewPairSC` |
+| `fadd64` (`-d=softfloat`) | `SoftFaddContract` / `SoftFaddContract64` | the IEEE 754 sum, **if the exact sum is not tiny** (`AddTiny`) | `SoftAdd` |
+| `fsub64` | `SoftFsubContract` / `…64` | the IEEE difference, if the exact difference is not tiny (`SubTiny`) (the compiler never calls it: `a - b` is `fadd64(a, -b)`) | — |
+| `fmul64` | `SoftFmulContract` / `…64` | the IEEE product, if the exact product is not tiny (`MulTiny`) | `SoftMul` |
+| `fdiv64` | `SoftFdivContract` / `…64` | the IEEE quotient, if the exact quotient is not tiny (`DivTiny`) | `SoftDiv` |
+| `KeepAlive` | `KeepAliveContract` / `…64` | returns, changing only its frame, if `runtime.cgoAlwaysFalse` is false (`CgoAlwaysFalse`) and outside the callee's stack window | `KeepAlive` (the runtime's own code meets it) |
 
 The checks return when the operation is valid and otherwise throw or panic; the contracts
 describe the return and exclude the failure (a theorem therefore assumes the check passes). The
@@ -926,18 +932,52 @@ unchanged: each is `mallocgc` with a size, type and `needzero` that its size cla
 cgo wrappers and throw when called; they are classified like `cgocall` (`.external`), and a proof
 excludes the branch with `CgoAlwaysFalse`.
 
-**Soft float (`-d=softfloat`).** The arithmetic helpers decode and run in the model, and
-`f32to64` is proved equal to IEEE (`Widen`). The others are not given contracts:
+**Soft float (`-d=softfloat`) and `KeepAlive`** (`Janus/Contracts/SoftFloat.lean`,
+`SoftFloatAmd64.lean`, witnesses in `SoftFloatSat*.lean`). `f32to64` is proved equal to IEEE
+(`Widen`); `f64to32` and the conversions run as code. For `fadd64`, `fsub64`, `fmul64`, `fdiv64`
+the contracts specify **IEEE 754 binary64, round to nearest even** (`Janus.Float.add`, `sub`,
+`mul`, `div`; a NaN result is "some NaN", the runtime returns `0x7FF8000000000000`) with a
+precondition, because **Go's soft float is not IEEE 754 for subnormal results**:
 
-* `fadd64`/`fsub64` are **not IEEE 754**: when the exact sum of two operands of opposite signs
-  is subnormal, Go 1.26's `fadd64` returns a result off by a factor of two (65240 of 30M random
-  pairs; every mismatch has a subnormal IEEE result; e.g. `0x802fa1d354c1e77c + 0x00329934086c3cdd`
-  gives `0x00059094bc16923e`, IEEE `0x000b2129782d247c`; confirmed on the real runtime). A contract
-  "fadd64 is IEEE addition" would be false, and Janus states none; a theorem about code built
-  with `-d=softfloat` that adds floats must execute `fadd64` (it decodes) and can only conclude
-  the IEEE sum under a hypothesis excluding subnormal results.
-* `fmul64`, `fdiv64`, `f64to32` and the conversions matched IEEE on every tested input
-  (random tests against the IEEE core) but have no proof; they run as code like any other runtime function.
+* `fadd64` (hence `fsub64`) is wrong for many sums and differences whose exact result is
+  subnormal, including exact ones: `0x0170000000155555 + 0x816fffffffffffff` is
+  `0x00000000002aaaab` in Go 1.26's `fadd64` where IEEE (and the hardware) gives
+  `0x0000055555600000`; `0x80d0000000000014 + 0x00d0000000000003` is `0x8000000000000022`, IEEE
+  `0x8000000000011000`. Of 5,000,000 random operand pairs, 190,710 had a tiny exact sum and 72,859 of
+  them differ (`examples/rtmisc/softcheck`).
+* So **the contracts do not claim IEEE there**: the precondition excludes `AddTiny a b` (both
+  operands finite non-zero, the exact result non-zero and below `2^-1022` in magnitude). The
+  contract says nothing about what the runtime returns for those calls. `fmul64` and `fdiv64`
+  showed no deviation on 1,272,845 and 545,415 random draws with a tiny exact result, but they
+  keep the same precondition: sampling is not a proof, and a result in the normal range is what a
+  program wants.
+* Everywhere else the contracts claim the IEEE result: zero operands of either sign, infinities,
+  NaNs (NaN in, NaN out), overflow to infinity, subnormal operands, normal results. **This is
+  trusted, tested and pinned, not proved**: `scripts/softfloat-check.sh` (also
+  `TestSoftFloatRuntimeAgreesWithIEEE`) runs the runtime's own functions (`//go:linkname`) against
+  the hardware on random operands of every class and checks that every covered case agrees (5,000,000
+  pairs per operation in the measurement above: 0 disagreements) and that the tiny cases of `fadd64`
+  do disagree (so the precondition is needed). The functions are pinned to the code that was
+  tested (`rtmiscContractStubs`, `gen-stubpins.sh`).
+* The runtime ignores `FPCR`/`MXCSR`; the contracts require Go's floating-point environment
+  (`FPCR = 0`; `GoMXCSR`: round to nearest, exceptions masked, no `DAZ`/`FTZ`) so that the
+  satisfiability witness (`FMOV`/`FADD`/…, `MOVQ`/`ADDSD`/…: hardware floating point, proved
+  IEEE by `fpAdd_ieee` & co.) meets them. After the call `FPSR` and the `MXCSR` sticky flags are
+  unspecified.
+* The call frame is the usual one: a stack window of `softDepth = 256` bytes below `SP` (the
+  frames of `fdiv64` (80) and its callees `divlu` and `fpack64` are far smaller) and the argument
+  spill slots; `RTPre softEnv 2`, no runtime environment.
+* Compiled code calls only `fadd64` (`a - b` is `fadd64(a, b ^ signbit)`), `fmul64`, `fdiv64`;
+  `fsub64` is linked by the runtime's tests. `SoftAdd`, `SoftMul`, `SoftDiv` (`examples/rtmisc`,
+  `softf`, built with `-gcflags=…=-d=softfloat` into `artifacts/examples-rtmisc-softf-<isa>`)
+  prove a one-call function against the contracts for every operand pair outside the precondition's
+  exclusion, with `Witness.nonvacuous` / `Witness.returns`.
+* `runtime.KeepAlive` (`func KeepAlive(x any) { if cgoAlwaysFalse { println(x) } }`): a direct call
+  is the compiler intrinsic, so the function is only reached through a function value. Its
+  contract is a no-op with a frame: returns, changing only the stack window and the argument spill
+  slots, when `runtime.cgoAlwaysFalse` is `false` and not inside that window. The example
+  `KeepAlive` proves it **from the extracted code of `runtime.KeepAlive` itself**
+  (`--contract 'runtime.print*'` leaves out the dead print calls), on both ISAs.
 
 **Build modes** (docs/CLI.md "Build modes"): `-race`, `-msan`, `-asan` and `-d=libfuzzer` are
 rejected by `janus extract` with an error naming the mode (their instrumentation calls into the

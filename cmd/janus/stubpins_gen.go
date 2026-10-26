@@ -137,9 +137,26 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "29aba234d1a95bd179125fd10c7d8f62e74f30f0cc0862db38570c6fba9d5381", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
 			{Hash: "2e3de5dbbfa0dc7803158d7639242707cb4c0e07f6b3c7f913e39d455febecd8", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
+		"runtime.fadd64": {
+			{Hash: "228f9cd353d0256283aa917c88dbb0fc30974b7af30f1537cf1b5bb81482d804", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "4ade6b10b094079c4b45c21f6e8c0890aaec516e6f97c8fbf6d6734e13b4b77d", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: v3 v4
+			{Hash: "ab472e08c52c204724b81700b94e7ddcdbf5ddb65f653f33e9a0a6be23e7fecb", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2
+		},
+		"runtime.fdiv64": {
+			{Hash: "4cd17e10aaa22150dc2c09346850e615be90102c47dfc653dda36216a771a0e7", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
+			{Hash: "564852b711d8a3455bfcc1f5c51b5ddb95f1564701d9de550fcf60bfc1b34910", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
 		"runtime.findfunc": {
 			{Hash: "2f2d2afcddb3ea48f62ef070131689c8908398c109f7edb7cd1d59c67a2cd4e3", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "69e342a0a2941348f87d9864736464991467592e7205aa413ef3d116fa7c2dd0", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
+		},
+		"runtime.fmul64": {
+			{Hash: "32c0adfc9bea62ede2fa5c8e8ecf8f1d154d24260a47c7f2aae078033c96c150", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
+			{Hash: "5394f088d02371963dac956b1e3874b13ee8d1c3b62349bd9a040608813ee870", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.fsub64": {
+			{Hash: "16b47bf211ffdd038b82d3dd9c22daee90951e945a44dcd8e47eb4936cceb115", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "92254bac1d6742d318d5f7c91b59a4b5363950844ab2c51a19a61f15a379af4d", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
 		},
 		"runtime.funcNameForPrint": {
 			{Hash: "a6e33acb1f934ec4a2fc6438eab5fd283961f38f7b8cd0b4411e34b0e6a2c874", File: "runtime/traceback.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
@@ -228,6 +245,9 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.interhash": {
 			{Hash: "1298c715c1d78acaafb8677990119e88dd0995b67e8c443082426fec25db5400", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "7bd04a4cbcac097c4202fbfd5d6cf6b25225602b1446a4474ee962235ab0a102", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
+		},
+		"runtime.KeepAlive": {
+			{Hash: "fe591e1cb5f783768d81db2d3b3f787dfd6d324f995fe07b0a9ba9a0019cc7ea", File: "runtime/mfinal.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
 		"runtime.makemap": {
 			{Hash: "9739dadfd3ba9f8b956709454e5e70c7465067d79e3340036a319cde61563b7a", File: "runtime/map.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
@@ -1012,9 +1032,25 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "1c612fc0c24a9c7a36a5ace42c257f73efaf018a0b208c6df24dd19f1a6e908a", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
 			{Hash: "b122b47244dbb681a14cad8c2079da82e9a8c20d71e87916f446420723186dee", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
+		"runtime.fadd64": {
+			{Hash: "301ddd18ecbf46dad4edee9e59a6f00e9410dceb6717eb515961e8fc703d654b", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "80a263a2f5ecb39bf48b08ff603b5048a2f793914e3208d5d6660364f9619c08", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
+		},
+		"runtime.fdiv64": {
+			{Hash: "152f1d7ea64546961436cd275b7d29cfa851a2f6d520cb554822932b17cf1df7", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
+			{Hash: "53aa16bb41df019a2f7ddd6d1e3aa7f5acfdf44b8ba4d7804cd11b3635c501fd", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
 		"runtime.findfunc": {
 			{Hash: "b474d3fcdc3eb030d45b56ed78028bf2a852f98fc6edf0038fd66621777cfb40", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
 			{Hash: "fa889ad34efb2f5af89e56f724080233d627537d5aa4f5d52796ca06136d05e7", File: "runtime/symtab.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.fmul64": {
+			{Hash: "883ea9669aede5dfa5627abdb060dc85b90490f3649af1b086064b450037a477", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "d9d9c4935fd9ed515a65ca6fa7134ee704c9a4906ac1696acbd308f6402e5520", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
+		},
+		"runtime.fsub64": {
+			{Hash: "9878a8d056b3c5eae9de9d70e6232a75694d0c1d6ec936cfda70c5ef5c475a78", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
+			{Hash: "b505818871cf6880abd26770a0c2354dcdd8fcb6da95c8e887cfb9475ad57d21", File: "runtime/softfloat64.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 		"runtime.funcNameForPrint": {
 			{Hash: "dc19369c651ed1495ad5f516cecc0295e23b966c01dfb603074844c522f3f558", File: "runtime/traceback.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
@@ -1105,6 +1141,9 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.interhash": {
 			{Hash: "75732460978c39259fb446fcdc31b809909971e8583a6caa91460d6a1743e4fc", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
 			{Hash: "f105c27fa208e4f8b7b3a68e7591ba0388eff61516b0dac9ee8f488cc48265e6", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.KeepAlive": {
+			{Hash: "131709ccca5287cc851f0c3630bdc39e49162055a484ca6989fc1b59206833b6", File: "runtime/mfinal.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
 		},
 		"runtime.makemap": {
 			{Hash: "59193c94b3fc033f956545446b863c97432603b1dc22829617fe15ab6201d90f", File: "runtime/map.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
