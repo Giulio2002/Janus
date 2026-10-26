@@ -101,7 +101,9 @@ These are trusted, not proved.
    the model reports them as faults, and `NeverPanics` excludes faults too.
    The same pin authenticates the runtime functions a framework contract library describes
    (`runtimeContractStubs`: the interface runtime's `convT*`, `assertE2I(2)`, `typeAssert`,
-   `interfaceSwitch`, `efaceeq`, `ifaceeq`): a `--contract` that names one is accepted only if
+   `interfaceSwitch`, `efaceeq`, `ifaceeq`; equality, hashing, typed memory and the map runtime;
+   and, as `allocContractStubs`, the allocation, slice and write-barrier entries `mallocgc`,
+   `newobject`, `makeslice`, `growslice` and `gcWriteBarrier1`–`8`): a `--contract` that names one is accepted only if
    the function passes the checks above (its callees are identified by name only), and the
    extraction records it as `"pinned": true`, so the contract hypothesis of a theorem is about the
    runtime's own code. Other `--contract` names are not pinned (a contract over arbitrary code

@@ -73,6 +73,30 @@ func s_f64equal()
 //go:linkname s_f64hash runtime.f64hash
 func s_f64hash()
 
+//go:linkname s_gcWriteBarrier1 runtime.gcWriteBarrier1
+func s_gcWriteBarrier1()
+
+//go:linkname s_gcWriteBarrier2 runtime.gcWriteBarrier2
+func s_gcWriteBarrier2()
+
+//go:linkname s_gcWriteBarrier3 runtime.gcWriteBarrier3
+func s_gcWriteBarrier3()
+
+//go:linkname s_gcWriteBarrier4 runtime.gcWriteBarrier4
+func s_gcWriteBarrier4()
+
+//go:linkname s_gcWriteBarrier5 runtime.gcWriteBarrier5
+func s_gcWriteBarrier5()
+
+//go:linkname s_gcWriteBarrier6 runtime.gcWriteBarrier6
+func s_gcWriteBarrier6()
+
+//go:linkname s_gcWriteBarrier7 runtime.gcWriteBarrier7
+func s_gcWriteBarrier7()
+
+//go:linkname s_gcWriteBarrier8 runtime.gcWriteBarrier8
+func s_gcWriteBarrier8()
+
 //go:linkname s_gopanic runtime.gopanic
 func s_gopanic()
 
@@ -127,6 +151,9 @@ func s_goPanicSliceBU()
 //go:linkname s_goPanicSliceConvert runtime.goPanicSliceConvert
 func s_goPanicSliceConvert()
 
+//go:linkname s_growslice runtime.growslice
+func s_growslice()
+
 //go:linkname s_ifaceeq runtime.ifaceeq
 func s_ifaceeq()
 
@@ -144,6 +171,12 @@ func s_makemap()
 
 //go:linkname s_makemap_small runtime.makemap_small
 func s_makemap_small()
+
+//go:linkname s_makeslice runtime.makeslice
+func s_makeslice()
+
+//go:linkname s_mallocgc runtime.mallocgc
+func s_mallocgc()
 
 //go:linkname s_mapaccess1 runtime.mapaccess1
 func s_mapaccess1()
@@ -268,6 +301,9 @@ func s_memhash_varlen()
 //go:linkname s_memmove runtime.memmove
 func s_memmove()
 
+//go:linkname s_newobject runtime.newobject
+func s_newobject()
+
 //go:linkname s_nilinterequal runtime.nilinterequal
 func s_nilinterequal()
 
@@ -386,6 +422,14 @@ var keep = []func(){
 	s_f32hash,
 	s_f64equal,
 	s_f64hash,
+	s_gcWriteBarrier1,
+	s_gcWriteBarrier2,
+	s_gcWriteBarrier3,
+	s_gcWriteBarrier4,
+	s_gcWriteBarrier5,
+	s_gcWriteBarrier6,
+	s_gcWriteBarrier7,
+	s_gcWriteBarrier8,
 	s_gopanic,
 	s_goPanicIndex,
 	s_goPanicIndexU,
@@ -404,12 +448,15 @@ var keep = []func(){
 	s_goPanicSliceB,
 	s_goPanicSliceBU,
 	s_goPanicSliceConvert,
+	s_growslice,
 	s_ifaceeq,
 	s_interequal,
 	s_interfaceSwitch,
 	s_interhash,
 	s_makemap,
 	s_makemap_small,
+	s_makeslice,
+	s_mallocgc,
 	s_mapaccess1,
 	s_mapaccess1_fast32,
 	s_mapaccess1_fast64,
@@ -451,6 +498,7 @@ var keep = []func(){
 	s_memhash8,
 	s_memhash_varlen,
 	s_memmove,
+	s_newobject,
 	s_nilinterequal,
 	s_nilinterhash,
 	s_panicBounds,

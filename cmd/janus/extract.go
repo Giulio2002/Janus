@@ -183,6 +183,27 @@ var runtimeContractStubs = map[string]bool{
 	"runtime.mapassign_faststr": true, "runtime.mapdelete_faststr": true,
 }
 
+// allocContractStubs are the allocation, slice and write-barrier entry points a framework contract
+// library describes (Janus/Contracts/Alloc.lean, AllocAmd64.lean: MallocgcContract,
+// NewobjectContract, MakesliceContract, GrowsliceContract and their amd64 forms; the
+// gcWriteBarrierN entries, whose fast path the examples execute and which a write-barrier
+// contract may leave out with --contract 'runtime.gcWriteBarrier*'). They belong to
+// runtimeContractStubs (added at init), so a --contract that names one is pinned to the
+// runtime's code like memmove (checkContractPin), not trusted by name.
+var allocContractStubs = map[string]bool{
+	"runtime.mallocgc": true, "runtime.newobject": true, "runtime.makeslice": true,
+	"runtime.growslice":       true,
+	"runtime.gcWriteBarrier1": true, "runtime.gcWriteBarrier2": true, "runtime.gcWriteBarrier3": true,
+	"runtime.gcWriteBarrier4": true, "runtime.gcWriteBarrier5": true, "runtime.gcWriteBarrier6": true,
+	"runtime.gcWriteBarrier7": true, "runtime.gcWriteBarrier8": true,
+}
+
+func init() {
+	for n := range allocContractStubs {
+		runtimeContractStubs[n] = true
+	}
+}
+
 // stubKind classifies a linked symbol name as a runtime stub (name only; see classifyStub for
 // the checks that make the name trustworthy).
 func stubKind(name string) (StubKind, bool) {
