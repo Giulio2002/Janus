@@ -74,7 +74,10 @@ type Extraction struct {
 	Data     []DataSeg     // read-only objects the code references, sorted by address
 	DataRefs []DataRef     // detected references, in code order
 	Skipped  []SkippedData // references whose target is not copied (writable, code, ...)
-	Lean     []byte
+	// FuncInfos: the panic runtime's metadata of the extracted functions (funcdata.go), for
+	// extractions with a panic-runtime contract.
+	FuncInfos []FuncInfo
+	Lean      []byte
 }
 
 // Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)
@@ -160,7 +163,7 @@ var runtimeContractStubs = map[string]bool{
 var runtimePanicContractStubs = map[string]bool{
 	"runtime.gopanic": true, "runtime.gorecover": true, "runtime.deferproc": true,
 	"runtime.deferprocStack": true, "runtime.deferreturn": true, "runtime.deferprocat": true,
-	"runtime.deferrangefunc": true, "runtime.sigpanic": true,
+	"runtime.deferrangefunc": true, "runtime.sigpanic": true, "runtime.Goexit": true,
 }
 
 // stubKind classifies a linked symbol name as a runtime stub (name only; see classifyStub for
@@ -496,6 +499,7 @@ func renderLean(x *Extraction) []byte {
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
 	writeProgram(&sb, x, "Program")
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
+	writeFuncInfos(&sb, x.FuncInfos)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())
 }

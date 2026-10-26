@@ -61,6 +61,9 @@ func s_deferreturn()
 //go:linkname s_efaceeq runtime.efaceeq
 func s_efaceeq()
 
+//go:linkname s_Goexit runtime.Goexit
+func s_Goexit()
+
 //go:linkname s_gopanic runtime.gopanic
 func s_gopanic()
 
@@ -217,6 +220,7 @@ var keep = []func(){
 	s_deferrangefunc,
 	s_deferreturn,
 	s_efaceeq,
+	s_Goexit,
 	s_gopanic,
 	s_goPanicIndex,
 	s_goPanicIndexU,

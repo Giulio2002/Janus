@@ -19,3 +19,21 @@ func init() {
 	println(basic.PanicIf(n, ev), basic.DeferInc(&c, n), basic.RecoverSet(n, ev),
 		basic.IndexAt([]uint64{1, 2, 3}, int(n)-1), basic.LoadField(&basic.Cell{V: n}), c)
 }
+
+// The further panic/defer examples (examples/basic/zdefer.go), called on inputs that neither
+// panic nor exit.
+func init() {
+	Keep = append(Keep, basic.DeferOrder, basic.DeferMid, basic.DeferMix, basic.NestedPanic,
+		basic.NestedRecover, basic.GoexitDefer, basic.RangeDefer)
+	n := uint64(len(os.Args))
+	var c uint64
+	var ev any
+	println(basic.DeferOrder(&c, n, ev), basic.DeferMix(n, ev))
+	basic.RangeDefer()
+	if n > 100 {
+		basic.NestedPanic(&c, ev, ev)
+		println(basic.DeferMid(&c, ev), basic.NestedRecover(ev, ev))
+		basic.GoexitDefer(&c)
+	}
+	println(c)
+}

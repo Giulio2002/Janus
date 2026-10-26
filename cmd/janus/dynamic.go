@@ -373,6 +373,11 @@ func extractWith(b *Binary, sym string, maxFunctions int, contracts []string, ta
 	if r.err != nil {
 		return nil, r.err
 	}
+	fis, err := b.panicFuncInfos(x)
+	if err != nil {
+		return nil, err
+	}
+	x.FuncInfos = fis
 	if b.GOARCH == "amd64" {
 		x.Lean = renderLeanAmd64(x)
 	} else {
