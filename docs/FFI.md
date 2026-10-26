@@ -424,6 +424,7 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 | `GoBig` | Go `Big` → cgo → `k_big` (indirect result; the wrapper's stack protector) → Go returns the four words | ✓ | ✓ |
 | `GoVSum8` | Go `VSum8(a, …, h)` → cgo → `k_vsum8` → the variadic `k_vsum(8, a, …, h)` → Go returns the sum; the variadic call site (and `AL = 0`) is checked against the classification | ✓ | ✓ |
 | `CSwitch` | `c_switch(k, x)` (`cx87.c`): a dense switch compiled to a `.rodata` offset table and the CET dispatch `notrack jmp *%rax`, returns the case's value for every `k` | | ✓ |
+| `CRepRet` | `c_repret_umax(a, b)` (`cx87.c`, hand-written assembly in the perlasm style ending in `repz ret`, `F3 C3`): returns the unsigned maximum of `a` and `b` for all `a`, `b`; `Witness.nonvacuous` / `Witness.returns` for `c_repret_umax(3, 5)` | | ✓ |
 | `CLdMul` | `ld_mul(a, b)` (`long double`, x87): with `a`, `b` at `[RSP+8]`, `[RSP+24]` (System V class X87) and the x87 FPU idle (`X87.Idle`), returns with `ST(0)` = `X87.binop .mul 64 .rne a b` the only register in use; `ieee`: that is IEEE 754 multiplication on (15, 63) | | ✓ |
 | `GoLdMul` | Go `MulLD(a, b, r *[16]byte)` → cgo → `c_ldmul` → `ld_mul` → Go: the 10 bytes at `r` become the x87 product of the 10 bytes at `a` and `b`, under `CgoCall` only | | ✓ |
 | `CCount` | `c_count(p, n, c)` (package `example.com/cgo/neon`, auto-vectorised by gcc `-O2`: `CMEQ`/`ZIP`/`UADDW`/`ADDP` loop + scalar tail) returns the number of `i < n` with `p[i] = c`, memory unchanged | ✓ | – |

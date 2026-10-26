@@ -464,6 +464,36 @@ func Edges(r *rand.Rand, n int) []EdgeCase {
 		}
 		emit("endbr", []byte{0xF3, 0x0F, 0x1E, 0xFB}, Setup(r, []byte{0xF3, 0x0F, 0x1E, 0xFB}))
 	}
+	// (r) REP RET / BND RET (F3 C3, F2 C3: perlasm's branch-predictor idiom; the prefix is ignored
+	// by the CPU), with RET imm16, with a return address on the stack, with other prefixes and
+	// REX before/after, and with the stack pointer at the ends of the buffer
+	for round := 0; round < n; round++ {
+		var forms [][]byte
+		for _, rp := range []byte{0xF3, 0xF2} {
+			forms = append(forms, []byte{rp, 0xC3}, []byte{rp, 0xC2, 8, 0}, []byte{rp, 0xC2, 0, 0}, []byte{rp, 0xC2, 0xF8, 0xFF})
+			for _, x := range []byte{0x66, 0x40, 0x48, 0x2E, 0x3E, 0x64, 0xF3, 0xF2, 0xF0, 0x67} {
+				forms = append(forms, []byte{rp, x, 0xC3}, []byte{x, rp, 0xC3})
+			}
+		}
+		forms = append(forms, []byte{0xC3}, []byte{0xC2, 8, 0})
+		for _, b := range forms {
+			s := Setup(r, b)
+			sp := L.DataBase + uint64(r.IntN(L.DataSize-16))&^7
+			if r.IntN(8) == 0 {
+				offs := []uint64{L.DataSize - 8, L.DataSize - 4, L.DataSize, 0}
+				sp = L.DataBase + offs[r.IntN(len(offs))]
+			}
+			s.Regs[4] = sp
+			if sp >= L.DataBase && sp <= L.DataBase+L.DataSize-8 {
+				v := codeTarget(r)
+				s.Init = nil
+				for k := 0; k < 8; k++ {
+					s.Init = append(s.Init, [2]int{int(sp - L.DataBase + uint64(k)), int(v >> (8 * k) & 0xff)})
+				}
+			}
+			emit("repret", b, s)
+		}
+	}
 	// WP-C: the exact forms of the traps, the environment reads and PUSHFQ (POPFQ stays refused
 	// by the runner: a popped flag image poisons its single-step machinery; JanusTests/Amd64.lean
 	// pins the POPFQ semantics)

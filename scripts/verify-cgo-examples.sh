@@ -16,6 +16,7 @@
 #   (AVX2-vectorised, artifacts/examples-cgo-avx-amd64): CDot32 GoDot32
 #   amd64 only (WP-J): a CET jump table (CSwitch), x87 long double (CLdMul), and
 #   Go MulLD -> c_ldmul -> ld_mul end to end (GoLdMul)
+#   amd64 only (N2): hand-written assembly ending in `repz ret` (F3 C3), the perlasm idiom (CRepRet)
 #   The C environment (docs/FFI.md sections 2-4; binary artifacts/examples-cenv-<isa>):
 #     EBump (a writable global through the GOT; amd64: the --no-relax build), ETLS (a __thread
 #     variable, general dynamic as relaxed by the linker), ETLSIE (initial exec), EAtomic (an atomic
@@ -34,7 +35,7 @@ export PATH=/usr/local/go/bin:$PATH
 declare -A sym=(
   [CAdd]=c_add [CSum]=c_sum [CStore]=c_store [CCount]=c_count [GoCount]=example.com/cgo/neon.Count
   [GoAdd]=example.com/cgo.Add [GoSum]=example.com/cgo.Sum
-  [CSwitch]=c_switch [CLdMul]=ld_mul [GoLdMul]=example.com/cgo.MulLD
+  [CSwitch]=c_switch [CLdMul]=ld_mul [GoLdMul]=example.com/cgo.MulLD [CRepRet]=c_repret_umax
   [KStack10]=k_stack10 [KFP]=k_fp [KPMix]=k_pmix [KBig]=k_big [KVSum]=k_vsum
   [GoStack10]=example.com/cgo/cabi.Stack10 [GoFP]=example.com/cgo/cabi.FP
   [GoPMix]=example.com/cgo/cabi.PMix [GoBig]=example.com/cgo/cabi.Big
@@ -61,7 +62,7 @@ if [ ${#names[@]} -eq 0 ]; then
     [ "$isa" = arm64 ] && names+=("$isa/CCount" "$isa/GoCount")
   done
   names+=(amd64/CSum32 amd64/GoSum32 amd64/CDot32 amd64/GoDot32)
-  for n in CSwitch CLdMul GoLdMul; do names+=("amd64/$n"); done
+  for n in CSwitch CLdMul GoLdMul CRepRet; do names+=("amd64/$n"); done
 fi
 
 go build -o bin/janus ./cmd/janus
@@ -84,6 +85,16 @@ for target in "${names[@]}"; do
   if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-12s ok  %6.1fs\n' "$isa/$n" "$t" | tee -a "$summary"
+    # the non-vacuity witnesses (Proof.Witness.nonvacuous, Proof.Witness.returns) where there are some
+    if grep -q '^namespace Witness' "examples/proofs-cgo/$isa/$n.lean"; then
+      for thm in Proof.Witness.nonvacuous Proof.Witness.returns; do
+        if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --theorem "$thm" --janus-root . >> "$out/verify.log" 2>&1; then
+          printf '%-12s ok  (%s)\n' "$isa/$n" "$thm" | tee -a "$summary"
+        else
+          printf '%-12s FAILED %s (see %s/verify.log)\n' "$isa/$n" "$thm" "$out" | tee -a "$summary"; fail=1
+        fi
+      done
+    fi
   else
     printf '%-12s FAILED (see %s/verify.log)\n' "$isa/$n" "$out" | tee -a "$summary"
     tail -30 "$out/verify.log"

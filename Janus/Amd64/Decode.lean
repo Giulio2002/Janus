@@ -491,10 +491,14 @@ def oneByte (p : Prefixes) (op : Nat) (bs : List Nat) (n : Nat) : Option (Instr 
         else if op = 0xD0 ∨ op = 0xD1 then finish p .int (.shift s w dst (.imm 1)) len
         else finish p .int (.shift s w dst (.loc (.reg 1))) len
   else if op = 0xC2 then
+    -- `F3`/`F2` before a near RET are ignored by the CPU (`REP RET`, `BND RET`)
     match readLE 2 bs with
-    | some (v, _) => finish p .fixed (.ret v) (n + 3)
+    | some (v, _) => finish { p with rep := 0 } .fixed (.ret v) (n + 3)
     | none => none
-  else if op = 0xC3 then finish p .fixed (.ret 0) (n + 1)
+  else if op = 0xC3 then
+    -- `REP RET` (`F3 C3`, the AMD branch-predictor idiom of perlasm code) and `BND RET`
+    -- (`F2 C3`): the prefix has no effect on a near RET (SDM: `F3`/`F2` are ignored)
+    finish { p with rep := 0 } .fixed (.ret 0) (n + 1)
   else if op = 0xC6 ∨ op = 0xC7 then
     let w := if op = 0xC6 then 8 else osz
     withModRM fun m r len =>
