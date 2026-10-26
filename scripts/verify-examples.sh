@@ -86,7 +86,7 @@ verify_one() {
   if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
   st="$(mktemp -d)"
   start=$(date +%s.%N)
-  verify_theorems "$out" "examples/proofs/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"}
+  verify_theorems "$out" "examples/proofs/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"} || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)
   cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
   if [ "$(cat "$st/0.rc")" = 0 ]; then
