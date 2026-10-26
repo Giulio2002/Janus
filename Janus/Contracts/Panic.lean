@@ -501,9 +501,11 @@ def frameOf (fi : FuncInfo) (sp : Nat) (m : Memory) : Frame :=
 
 /-- The precondition of `runtime.gopanic(v)` (arm64) at its entry `s`, called from a frame of `fi`:
 the shared frame (`PanicPre`, two argument registers), `v` (`X0`, `X1`) not nil, room for its
-`_panic`, and the frame's memory as the loop needs it. -/
+`_panic`, the frame's `deferBits` byte readable (the runtime reads it to find the frame's open-coded
+defers), and the frame's memory as the loop needs it. -/
 def GopanicPre (P : PanicRuntime) (fi : FuncInfo) (s : State) : Prop :=
   PanicPre P 2 s ∧ (s.regs 0).toNat ≠ 0 ∧ 0 < P.room s.mem (gOf s) ∧
+    (fi.openDefer.isSome → s.mem.accessible (fi.bitsAt s.sp.toNat) 1 false = true) ∧
     FrameOK P s.mem (frameOf fi s.sp.toNat s.mem)
       (frameItems s.mem (frameOf fi s.sp.toNat s.mem) (P.defers s.mem (gOf s)))
 
@@ -529,6 +531,7 @@ def GopanicContract (p : Program) (addr : Nat) (P : PanicRuntime) (U : State →
 /-- The precondition of `runtime.Goexit()` (arm64) called from a frame of `fi`. -/
 def GoexitPre (P : PanicRuntime) (fi : FuncInfo) (s : State) : Prop :=
   PanicPre P 0 s ∧ 0 < P.room s.mem (gOf s) ∧
+    (fi.openDefer.isSome → s.mem.accessible (fi.bitsAt s.sp.toNat) 1 false = true) ∧
     FrameOK P s.mem (frameOf fi s.sp.toNat s.mem)
       (frameItems s.mem (frameOf fi s.sp.toNat s.mem) (P.defers s.mem (gOf s)))
 
