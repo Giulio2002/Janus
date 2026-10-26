@@ -149,7 +149,8 @@ macro "lt64" : tactic => `(tactic| first | exact Nat.mod_lt _ (by decide) | exac
 /-- The return of `complex128div` from `S` with results `X` (`X0`) and `Y` (`X1`). -/
 def Out (S : State) (X Y : Option Nat) (s' : State) : Prop :=
   (s'.regs 4 = S.regs 4 + 8#64 ∧ s'.regs 5 = S.regs 5 ∧ s'.regs 14 = S.regs 14 ∧ s'.mem = S.mem ∧
-    s'.ymmHi = S.ymmHi ∧ s'.fsBase = S.fsBase ∧ s'.df = S.df ∧ s'.xmm 15 = S.xmm 15) ∧
+    s'.ymmHi = S.ymmHi ∧ s'.fsBase = S.fsBase ∧ s'.df = S.df ∧ s'.xmm 15 = S.xmm 15 ∧
+    s'.x87 = S.x87 ∧ s'.fpucw = S.fpucw ∧ s'.zmmHi = S.zmmHi ∧ s'.kreg = S.kreg) ∧
   ResultIs binary64 X ((s'.xmm 0).toNat % 2 ^ 64) ∧ ResultIs binary64 Y ((s'.xmm 1).toNat % 2 ^ 64)
 
 /-- What the return needs: the return address readable and canonical, `MXCSR` default, `runtime.inf`. -/
@@ -196,7 +197,7 @@ macro "env_tac" hm:ident hra:ident hral:ident hsp:ident hinf:ident hdl:ident : t
 
 /-- `Out` macro for a path that returned. -/
 macro "out_tac" : tactic => `(tactic| (
-  refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
+  refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
   all_goals try (first | rfl | (simp only [setXmmF_apply, Nat.reduceEqDiff, reduceIte]; done) | (simp only [setRegF_apply]; done) | (simp only [setRegF_apply, Nat.reduceEqDiff, reduceIte]; done))))
 
 set_option maxHeartbeats 0 in
@@ -270,12 +271,16 @@ theorem out_mono {S S' : State} {X Y X' Y' : Option Nat} {r : W64}
     (h : ReachesRet Extracted.program r S' (Out S' X Y)) (hX : X = X') (hY : Y = Y')
     (h4 : S'.regs 4 = S.regs 4) (h5 : S'.regs 5 = S.regs 5) (h14 : S'.regs 14 = S.regs 14)
     (hm : S'.mem = S.mem) (hy : S'.ymmHi = S.ymmHi) (hfs : S'.fsBase = S.fsBase) (hdf : S'.df = S.df)
-    (hx : S'.xmm 15 = S.xmm 15) :
+    (hx : S'.xmm 15 = S.xmm 15) (hx87 : S'.x87 = S.x87 := by first | rfl | simp_all)
+    (hfw : S'.fpucw = S.fpucw := by first | rfl | simp_all)
+    (hzh : S'.zmmHi = S.zmmHi := by first | rfl | simp_all)
+    (hkr : S'.kreg = S.kreg := by first | rfl | simp_all) :
     ReachesRet Extracted.program r S' (Out S X' Y') := by
   subst hX hY
-  obtain ⟨k, s', hs, hpc, ⟨e1, e2, e3, e4, e5, e6, e7, e8⟩, h9, h10⟩ := h
+  obtain ⟨k, s', hs, hpc, ⟨e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12⟩, h9, h10⟩ := h
   exact ⟨k, s', hs, hpc, ⟨by rw [e1, h4], e2.trans h5, e3.trans h14, e4.trans hm, e5.trans hy,
-    e6.trans hfs, e7.trans hdf, e8.trans hx⟩, h9, h10⟩
+    e6.trans hfs, e7.trans hdf, e8.trans hx, e9.trans hx87, e10.trans hfw, e11.trans hzh,
+    e12.trans hkr⟩, h9, h10⟩
 
 /-- What the tests keep: the operands in `X0, X7, X2, X5`, the bits of `c`, `d` in `RCX`, `RDX`. -/
 structure Inv (S : State) (a b c d : Nat) : Prop where
@@ -610,14 +615,13 @@ abbrev CRet (s s' : State) (X Y : Option Nat) : Prop :=
     ResultIs binary64 X ((v 0).toNat % 2 ^ 64) ∧ ResultIs binary64 Y ((v 1).toNat % 2 ^ 64)
 
 theorem out_cret {S : State} {X Y : Option Nat}
-    (h : ReachesRet Extracted.program (retAddrOf S) S (Out S X Y))
-    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
+    (h : ReachesRet Extracted.program (retAddrOf S) S (Out S X Y)) :
     ReachesRet Extracted.program (retAddrOf S) S (fun s' => CRet S s' X Y) := by
-  obtain ⟨k, s', hs, hpc, ⟨e4, e5, e14, em, ey, efs, edf, ex⟩, h9, h10⟩ := h
+  obtain ⟨k, s', hs, hpc, ⟨e4, e5, e14, em, ey, efs, edf, ex, hx87, hfw, hzh, hkr⟩, h9, h10⟩ := h
   refine ⟨k, s', hs, hpc, ⟨s'.regs, s'.flags, s'.xmm, s'.mxcsr, ?_, ex, h9, h10⟩⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
-  simp only at hpc e4 e5 e14 em ey efs edf hx87 hfw ⊢
-  subst hpc em ey efs edf hx87 hfw
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw, zh, kr⟩ := s'
+  simp only at hpc e4 e5 e14 em ey efs edf hx87 hfw hzh hkr ⊢
+  subst hpc em ey efs edf hx87 hfw hzh hkr
   congr
   funext i
   simp only [Contracts.MapAmd64.keepABI]

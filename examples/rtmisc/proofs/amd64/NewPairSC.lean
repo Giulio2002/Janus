@@ -86,7 +86,7 @@ theorem model : MallocgcSmallNoScanSCContract64 2 (Extracted.program.link implAt
   obtain ⟨rfl, -, -⟩ := hargs
   change ReachesRet linked _ s _
   janus64_run
-  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, AllocSatAmd64.ret_of s _ [BitVec.ofNat 64 heap]
+  refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, _, _, AllocSatAmd64.ret_of s _ [BitVec.ofNat 64 heap]
     (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
     (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl,
     ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩

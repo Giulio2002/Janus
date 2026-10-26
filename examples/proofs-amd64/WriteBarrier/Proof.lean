@@ -65,10 +65,12 @@ set_option maxHeartbeats 4000000 in
 theorem core_meets (rt : List (Nat × Nat)) (n : Nat) (hn1 : 1 ≤ n) (hn8 : n ≤ 8) :
     Janus.Amd64.Tactic.Summary Extracted.program core
       (fun s => CallOK64 s 120 0 ∧ Ready64 (HRoom rt n) rt [n] s ∧ s.regs 11 = BitVec.ofNat 64 (8 * n))
-      (fun s s' => ∃ (buf : W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Arm64.Memory),
+      (fun s s' => ∃ (buf : W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Arm64.Memory)
+          (zh : Nat → BitVec 256) (kr : Nat → W64),
       s' = { s with regs := fun i => if i = 4 then s.regs 4 + 8#64 else if i = 11 then buf else s.regs i,
                     rip := retAddrOf s, flags := f,
-                    xmm := fun i => if i = 15 then s.xmm 15 else x i, ymmHi := yh, mem := m } ∧
+                    xmm := fun i => if i = 15 then s.xmm 15 else x i, ymmHi := yh, mem := m,
+                    zmmHi := zh, kreg := kr } ∧
       MemFrame s.mem m (rt ++ [((s.regs 4).toNat - 120, (s.regs 4).toNat)]) ∧ WbSlots rt m buf.toNat n) := by
   rintro s hpc ⟨⟨hra, hal, hsb, hsa, hacc⟩, hH, h11⟩
   obtain ⟨-, hg1, hg2, hm1, hm2, hp1, hp2, hn1, hn2, hn3, hroom, hend, hout⟩ := hH

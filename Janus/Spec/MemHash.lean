@@ -135,6 +135,19 @@ theorem pinsrd_2' (h v : Nat) (hh : h < 2 ^ 64) :
       340282366920938463463374607431768211456 = h % 2 ^ 64 + 2 ^ 64 * (v % 2 ^ 32) :=
   pinsrd_2 h v hh
 
+/-- `pinsrq_hi'` without the reduction modulo `2^128` (a lane image is below `2^128`), the form
+left once the stepping simp set has dropped it. -/
+theorem pinsrq_hi_eq (h v : Nat) :
+    (Janus.Arm64.ofElems 64 2 fun i => if i = 1 then v else Janus.Arm64.elem (h % 340282366920938463463374607431768211456) 64 i) =
+      h % 2 ^ 64 + 2 ^ 64 * (v % 2 ^ 64) := by
+  rw [← pinsrq_hi' h v, Nat.mod_eq_of_lt (Janus.Tactic.ofElems_lt 64 2 _)]
+
+/-- `pinsrd_2'` without the reduction modulo `2^128`, as `pinsrq_hi_eq`. -/
+theorem pinsrd_2_eq (h v : Nat) (hh : h < 2 ^ 64) :
+    (Janus.Arm64.ofElems 32 4 fun i => if i = 2 then v else Janus.Arm64.elem (h % 340282366920938463463374607431768211456) 32 i) =
+      h % 2 ^ 64 + 2 ^ 64 * (v % 2 ^ 32) := by
+  rw [← pinsrd_2' h v hh, Nat.mod_eq_of_lt (Janus.Tactic.ofElems_lt 32 4 _)]
+
 /-- `MOVQ X0, AX` of a 128-bit value. -/
 theorem setWidth_ofNat_128 (x : Nat) : BitVec.setWidth 64 (BitVec.ofNat 128 x) = BitVec.ofNat 64 x := by
   apply BitVec.eq_of_toNat_eq

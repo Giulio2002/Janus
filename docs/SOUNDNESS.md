@@ -1073,7 +1073,12 @@ base:
   other than a contract or the model laws (`R.Laws`, `M.Laws`) mentions one of those variables,
   and a dependency definition that applies a contract. Not checked: constraints the theorem's
   own precondition puts on them, and the numeric parameters (`stack`); read those like any
-  precondition.
+  precondition. Also admitted (integration of wave 1): premises that bound a model's stack
+  depth (`8 ≤ R.depth`, `R.depth + 48 ≤ d` with `d` a non-runtime variable of the statement),
+  which cannot pin a runtime argument; a conclusion that is a conjunction of contracts (a theorem
+  proving several, `gcWriteBarrier1..8`) claims each. A contract stated over runs instead of as a
+  `Summary` (`GopanicRecoverContract`) is recognised by its name `…Contract` and its `Program`
+  parameter.
 * **Readiness is per call** (round 10 V2, V3). A contract whose postcondition hands back all its
   precondition needs can be chained without bound from one state. For the map contracts that
   allocate and keep (`Assign`, `MakeSmall`), this contradicted `MapModel.Laws` outright
