@@ -34,7 +34,7 @@ verify_function() {
   if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.panics); fi
   if grep -q '^namespace Witness' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
   st="$(mktemp -d)"
-  verify_theorems "artifacts/amd64/$f" "examples/proofs-amd64/$f/Proof.lean" "$st" "${thms[@]}"
+  verify_theorems "artifacts/amd64/$f" "examples/proofs-amd64/$f/Proof.lean" "$st" "${thms[@]}" || true  # failures are in $st
   for ((i = 0; i < ${#thms[@]}; i++)); do
     if [ "$(cat "$st/$i.rc" 2>/dev/null)" = 0 ]; then
       printf '%-12s %-18s %s\n' "$f" "${thms[$i]}" "$(grep 'Axioms:' "$st/$i.log" | sed 's/^ *//')"

@@ -39,6 +39,10 @@ type testScheduler struct {
 	cond    *sync.Cond
 	running int
 	waiting map[*testing.T]float64
+	// holders: top-level tests that hold a slot. Their subtests run on the parent's slot instead
+	// of waiting for one, because a parent that waits for its parallel subtests (a t.Run group)
+	// while holding the last slot would otherwise deadlock (seen with testSlots = 1 under load).
+	holders map[string]int
 	// lastArrival: a free slot is granted only once no test has asked for one for settle, so that
 	// the tests the testing package releases together are all queued before the first grant.
 	lastArrival time.Time
@@ -47,7 +51,7 @@ type testScheduler struct {
 const settle = 100 * time.Millisecond
 
 var sched = func() *testScheduler {
-	s := &testScheduler{waiting: map[*testing.T]float64{}}
+	s := &testScheduler{waiting: map[*testing.T]float64{}, holders: map[string]int{}}
 	s.cond = sync.NewCond(&s.mu)
 	return s
 }()
@@ -72,6 +76,11 @@ func parallel(t *testing.T) func() {
 	t.Parallel()
 	s := sched
 	s.mu.Lock()
+	if i := strings.IndexByte(t.Name(), '/'); i > 0 && s.holders[t.Name()[:i]] > 0 {
+		// The top-level test holds a slot: run on it.
+		s.mu.Unlock()
+		return func() {}
+	}
 	s.waiting[t] = testPriority(t.Name())
 	s.lastArrival = time.Now()
 	time.AfterFunc(settle+5*time.Millisecond, func() { s.mu.Lock(); s.cond.Broadcast(); s.mu.Unlock() })
@@ -80,10 +89,16 @@ func parallel(t *testing.T) func() {
 	}
 	delete(s.waiting, t)
 	s.running++
+	top := t.Name()
+	if i := strings.IndexByte(top, '/'); i > 0 {
+		top = top[:i]
+	}
+	s.holders[top]++
 	s.cond.Broadcast() // the next best may take another free slot
 	s.mu.Unlock()
 	return func() {
 		s.mu.Lock()
+		s.holders[top]--
 		s.running--
 		s.cond.Broadcast()
 		s.mu.Unlock()
