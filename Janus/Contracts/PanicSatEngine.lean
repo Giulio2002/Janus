@@ -1101,6 +1101,26 @@ theorem engine_loop (hp : EngineAt p)
         exact (ihn _ hlt) c' ch' rm' ph' rfl hpc' h18' hI' hpm' |> fun h => by rw [hc'] at h; exact h
   exact fun c ch rm ph hn hpc h18 hI hpm => inner _ c ch rm ph (Nat.le_refl _) hn hpc h18 hI hpm
 
+/-- `Engine.of_prefix` for `deferreturn`, whose prefix clears the saved state. -/
+theorem Engine.of_prefix_ret {p : Program} {P : PanicRuntime} {U : State → Nat → Nat → Prop} {x28 x18 : W64}
+    {F : Frame} {keep : List (Nat × Nat)}
+    {Fin : List PanicRec → Nat → State → State → Prop} {c c' : State} {j : Nat}
+    (hFin : ∀ ch rm d, Fin ch rm c' d → Fin ch rm c d) (hst : Program.Steps p c j c')
+    (hm : MemFrame c.mem c'.mem (P.priv ++ rtWin P F ++ bitsWin F))
+    (hrp : P.rp c'.mem x28.toNat = P.rp c.mem x28.toNat) :
+    ∀ {ch : List PanicRec} {rm : Nat} {L : List Item},
+      Engine p P U x28 x18 F keep .ret Fin ch rm L c' → Engine p P U x28 x18 F keep .ret Fin ch rm L c
+  | _, _, [], h => by
+    rw [Engine_nil] at h ⊢
+    obtain ⟨k, d, hs, hf⟩ := h
+    exact ⟨j + k, d, hst.trans hs, hFin _ _ _ hf⟩
+  | _, _, it :: rest, h => by
+    rw [Engine_cons] at h ⊢
+    obtain ⟨k, e, hs, hcall, hmf, hb, hd, hpn, hrm, hrs, hcont, hnest⟩ := h
+    refine ⟨j + k, e, hst.trans hs, hcall, hm.trans hmf fun a n h => ⟨h, h⟩, hb, hd, hpn, hrm, ?_,
+      hcont, hnest⟩
+    rw [if_pos rfl] at hrs ⊢; exact ⟨hrs.1.trans hrp, hrs.2⟩
+
 end steps
 
 
