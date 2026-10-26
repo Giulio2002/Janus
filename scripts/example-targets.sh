@@ -51,4 +51,7 @@ case "$1" in
   DeferLoop|DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
   RecoverSet) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
       --contract runtime.deferreturn ;;
+  # the general defer/panic engine examples (examples/basic/zdefer.go): the panic runtime's
+  # functions they call, left out as pinned contracts (Janus/Contracts/Panic.lean)
+  DeferOrder) printf '%s\n' --contract runtime.gopanic --contract runtime.deferreturn ;;
 esac
