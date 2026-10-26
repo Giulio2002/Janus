@@ -29,7 +29,7 @@ import JanusASL.Proofs.LdStExcl
 import JanusASL.Proofs.LdStAtomicCls
 import JanusASL.Proofs.Witness
 import JanusASL.Proofs.FP.FCmpCls
-import JanusASL.Proofs.FP.RoundEq
+import JanusASL.Proofs.FP.Round64
 
 /-! # JanusASL proofs: Janus' `step` against the generated ASL, per encoding class
 
