@@ -211,6 +211,8 @@ Go 1.26.0. Proofs:
 | `A64CountByte` | the number of bytes of `b` equal to `c`, for every length, computed by the words gcc 15.2 `-O2` auto-vectorises a C loop into (`CMEQ`, `ZIP1`/`ZIP2`, `UADDW`/`UADDW2`, `ADDP`, then a scalar tail), behind an ABI0 shim | ✓ | |
 | `GlobalTable` | `tbl[i & 7]` of a writable global, provided by the precondition | ✓ | ✓ |
 | `Bump` | `counter += d` on a writable global, returns the new value | ✓ | ✓ |
+| `MulAlgo` | a writable threshold global: `1` if `n < 40` else `2` when `karatsubaCut`/`mulBias` hold their link-time values (`GlobalsInit`, `--global`), and the parametric form for every value they may hold | ✓ | ✓ |
+| `Double` | a flag global set at startup (like math/big's `hasADX`): `2x` for every value of the flag, both code paths | ✓ | ✓ |
 | `AtomicAdd` | `atomic.AddUint64(p, d)`: `*p += d`, returns the new value (LSE `LDADDAL` path, given `runtime.arm64HasATOMICS`) | ✓ | |
 | `AtomicMax` | `LDAR` + `CASAL` retry loop: returns the old `*p` and sets `*p = max(old, v)`; the loop runs once | ✓ | |
 | `CopyBlock` | `copy(dst[:], src[:])` of a 128-byte array through `runtime.memmove` | ✓ | |

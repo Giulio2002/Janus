@@ -74,7 +74,11 @@ type Extraction struct {
 	Data     []DataSeg     // read-only objects the code references, sorted by address
 	DataRefs []DataRef     // detected references, in code order
 	Skipped  []SkippedData // references whose target is not copied (writable, code, ...)
-	Lean     []byte
+	// Writable globals named by --global (globals.go): their link-time images, recorded in
+	// Program.globals; GlobalPatterns are the patterns as given (recorded in identity.json).
+	GlobalPatterns []string
+	Globals        []GlobalSeg
+	Lean           []byte
 }
 
 // Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)
@@ -540,7 +544,11 @@ func writeProgram(sb *strings.Builder, x *Extraction, ty string) {
 		writeContracts(sb, x.Contracts)
 		fields += ", contracts := contracts"
 	}
-	if len(x.Data) == 0 && len(x.Contracts) == 0 {
+	if len(x.Globals) > 0 {
+		writeGlobals(sb, x.Globals)
+		fields += ", globals := globals"
+	}
+	if len(x.Data) == 0 && len(x.Contracts) == 0 && len(x.Globals) == 0 {
 		fmt.Fprintf(sb, "def program : %s := { %s }\n\n", ty, fields)
 		return
 	}

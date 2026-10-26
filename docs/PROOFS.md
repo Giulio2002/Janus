@@ -527,6 +527,45 @@ precondition.
   ranges are tracked with interval lemmas (`ZeroOn`, `zeroOn_writeLE_zero`) rather than byte by
   byte.
 
+### Writable globals (`MulAlgo`, `Double`)
+
+A package variable is writable, so its value at a call is whatever the program stored. A theorem
+says which values it relies on, in one of three forms (`Janus/Spec/Globals.lean`, both ISAs),
+about the globals `janus extract --global SYM` recorded with their link-time images
+(`Extracted.program.globals`; see [CLI.md](CLI.md#extract), step 10):
+
+* **The link-time value**: `GlobalsInit Extracted.program.globals s.mem ["pkg.x", …]` (every
+  named global holds the bytes the ELF file gives it, `.bss` zero, in one writable region). Right
+  for a tuning constant nobody writes, such as math/big's `karatsubaThreshold`. Wrong for a
+  variable package initialisation sets (`internal/cpu.X86`, `hasADX`): its image is zero.
+* **Every value**: `GlobalIs Extracted.program.globals s.mem "pkg.x" v` (the whole global reads
+  `v`), or `GlobalBytesIs … "pkg.x" off k v` (bytes `[off, off+k)`, a field such as
+  `X86.HasADX` or the flag word of `runtime.writeBarrier`), with `v` a parameter of the theorem.
+  `GlobalsInit.globalIs` / `GlobalsInit.bytesIs` specialise such a theorem to the image, so the
+  initial-value theorem follows (`MulAlgo.correctness` from `MulAlgo.forAllValues`).
+* **The raw image** as a term: `globalImage Extracted.program.globals "pkg.x"` (the bytes),
+  `globalInitVal` (their little-endian value), `globalAddr` (the address, e.g. of
+  `runtime.zerobase`, which `[]byte{}` points to).
+
+In the proof, `h.elim rfl` (or `h.accessible rfl w`) turns the hypothesis into the facts the
+executor uses: the accessibility of the global's range and `s.mem.readLE base size = v`, with
+the literal address of the extraction:
+
+```lean
+  obtain ⟨hca, hcr⟩ := hc.elim rfl          -- hc : GlobalIs … "example.com/basic.karatsubaCut" cut
+  simp only at hca hcr                       -- s.mem.accessible 0x170448 8 true, s.mem.readLE 0x170448 8 = cut
+  have hca' := Memory.accessible_read_of_write _ hca
+  janus_run
+```
+
+A flag read by both paths of the code (`Double`: a shift when `useFast` is set, a loop when it
+is clear) needs no case split of its own: the executor branches on the byte it loads, and the
+theorem holds for every `v`. `GlobalBytesIs.flag_cases` gives the two cases explicitly when a
+proof needs them. **Non-vacuity**: `globalsInit_image gs m names (by decide) (by decide)` proves
+`GlobalsInit` for the memory `globalsImage gs m` (the image laid over `m`), so a witness state
+built on it shows the precondition satisfiable; `Double`'s witness also stores the flag set
+(`writeLE`) to show the other path is reachable.
+
 ### Multi-limb arithmetic (`Add256`, `AddLimbs`, `bench/…/MulAdd8*.lean`, `bench/…/Mul256.lean`)
 
 After running a multi-limb routine (`bits.Add64`/`bits.Mul64` chains, `uint256`-style code), the

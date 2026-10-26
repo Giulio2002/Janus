@@ -104,6 +104,10 @@ type Identity struct {
 	// when empty, so identities written before contracts existed keep their bytes.
 	ContractPatterns []string           `json:"contractPatterns,omitempty"`
 	Contracts        []identityContract `json:"contracts,omitempty"`
+	// GlobalPatterns are the --global patterns and Globals the writable symbols they matched,
+	// with their link-time images (Program.globals); omitted when empty.
+	GlobalPatterns []string         `json:"globalPatterns,omitempty"`
+	Globals        []identityGlobal `json:"globals,omitempty"`
 	Unresolved       []identityBranch   `json:"unresolvedBranches"`
 	Targets          []string           `json:"targets,omitempty"`
 	DynamicTargets   []identityTarget   `json:"dynamicTargets,omitempty"`
@@ -181,6 +185,8 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 	for _, c := range x.Contracts {
 		id.Contracts = append(id.Contracts, identityContract{c.Name, hex0x(c.Addr), c.Pinned})
 	}
+	id.GlobalPatterns = append([]string(nil), x.GlobalPatterns...)
+	id.Globals = identityGlobals(x.Globals)
 	for _, u := range x.Unresolved {
 		id.Unresolved = append(id.Unresolved, identityBranch{hex0x(u.From), hex0x(u.Target)})
 	}
@@ -254,6 +260,9 @@ func rerunExtract(id *Identity, outdir string) string {
 	if len(id.Targets) > 0 {
 		targets = fmt.Sprintf(" --targets %q", strings.Join(id.Targets, ","))
 	}
+	for _, g := range id.GlobalPatterns {
+		targets += fmt.Sprintf(" --global %q", g)
+	}
 	return fmt.Sprintf("Rerun janus extract %s %q %s%s with the intended binary, then rerun this command.",
 		displayPath(resolveBinary(outdir, id.Binary)), id.Symbol, displayPath(outdir), targets)
 }
@@ -322,7 +331,7 @@ func check(outdir, binOverride string) (*CheckResult, error) {
 			Stage: "extraction integrity", Next: rerunExtract(&id, outdir)}
 	}
 
-	x, err := extractWith(b, id.Symbol, id.MaxFunctions, id.ContractPatterns, id.Targets...)
+	x, err := extractGlobals(b, id.Symbol, id.MaxFunctions, id.ContractPatterns, id.GlobalPatterns, id.Targets...)
 	if err != nil {
 		d := err.(*diag)
 		d.Invalid = true

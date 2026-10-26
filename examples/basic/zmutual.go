@@ -65,3 +65,45 @@ func MulAlgo(n int) int {
 	}
 	return 2 + mulBias
 }
+
+// useFast stands for a CPU-feature flag such as math/big's hasADX: it is set at startup by
+// package initialisation, so its link-time image (.noptrbss, zero) says nothing about its value
+// at a call. cpuHint is the (writable, hence not constant-folded) input of that check.
+var useFast bool
+
+var cpuHint = "fast"
+
+func init() { useFast = fastCheck() }
+
+//go:noinline
+func fastCheck() bool { return len(cpuHint) > 3 }
+
+// Double returns 2x by one of two code paths chosen by the run-time flag useFast: a shift, or a
+// two-iteration addition loop. Both paths compute the same value.
+//
+//go:noinline
+func Double(x uint64) uint64 {
+	if useFast {
+		return x << 1
+	}
+	var s uint64
+	for i := 0; i < 2; i++ {
+		s += x
+	}
+	return s
+}
+
+// Tuning is a package-level struct reached through a pointer: the &Tuning{...} literal is an
+// anonymous static object (no symbol of its own), which `janus extract --global
+// 'example.com/basic.tuning->16'` copies by following the pointer in tuning's link-time image.
+type Tuning struct {
+	Cut  int
+	Bias int
+}
+
+var tuning = &Tuning{Cut: 32, Bias: 7}
+
+// TuningCut returns tuning.Cut.
+//
+//go:noinline
+func TuningCut() int { return tuning.Cut }

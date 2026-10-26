@@ -32,6 +32,7 @@ verify_function() {
   local f=$1 st i
   local -a thms=(Proof.correctness)
   if grep -q '^theorem panics' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.panics); fi
+  if grep -q '^theorem forAllValues' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.forAllValues); fi
   if grep -q '^namespace Witness' "examples/proofs-amd64/$f/Proof.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
   st="$(mktemp -d)"
   verify_theorems "artifacts/amd64/$f" "examples/proofs-amd64/$f/Proof.lean" "$st" "${thms[@]}" || true  # failures are in $st

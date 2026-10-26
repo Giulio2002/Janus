@@ -82,7 +82,7 @@ See docs/CLI.md.
 // parseArgs splits args into positionals and --flag value / --flag=value options.
 // repeatableFlags may be given more than once; their values are joined with "\n" (split them
 // with optsList).
-var repeatableFlags = map[string]bool{"contract": true, "targets": true}
+var repeatableFlags = map[string]bool{"contract": true, "targets": true, "global": true}
 
 // optsList returns the values of a repeatable option.
 func optsList(opts map[string]string, name string) []string {
@@ -210,7 +210,7 @@ func cmdList(args []string, stdout io.Writer) error {
 }
 
 func cmdExtract(args []string, stdout, stderr io.Writer) error {
-	pos, opts, err := parseArgs(args, "max-functions", "contract", "targets")
+	pos, opts, err := parseArgs(args, "max-functions", "contract", "targets", "global")
 	if err != nil {
 		return usageErr("%v", err)
 	}
@@ -232,7 +232,7 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	for _, v := range optsList(opts, "targets") {
 		targets = append(targets, parseTargets(v)...)
 	}
-	x, err := extractWith(b, sym, maxF, optsList(opts, "contract"), targets...)
+	x, err := extractGlobals(b, sym, maxF, optsList(opts, "contract"), optsList(opts, "global"), targets...)
 	if err != nil {
 		return err
 	}
@@ -271,6 +271,9 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	for _, d := range x.Data {
 		fmt.Fprintf(stdout, "  data  0x%x %4d bytes  %s (%s)\n", d.Base, len(d.Bytes), d.Name, d.Section)
 	}
+	for _, g := range x.Globals {
+		fmt.Fprintf(stdout, "  global 0x%x %4d bytes  %s (%s, link-time image; writable, see GlobalsInit)\n", g.Base, g.Size, g.Name, g.Section)
+	}
 	for _, t := range x.Dynamic {
 		how := map[string]string{"targets": "named by --targets", "itab": "method of " + t.From,
 			"funcval": "function of " + t.From, "code-address": "address computed at " + t.From}[t.Via]
@@ -289,7 +292,7 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintf(stderr, "Note: --contract %q matches no function the extraction calls directly.\n", pat)
 		}
 	}
-	printSkipped(stderr, x.Skipped)
+	printSkipped(stderr, x.Skipped, x.Globals...)
 	for _, u := range x.Unresolved {
 		fmt.Fprintf(stderr, "Warning: branch at 0x%x targets 0x%x, which is in no known function; it is not extracted (Lean faults with noCode there).\n", u.From, u.Target)
 	}
@@ -297,13 +300,17 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 }
 
 // printSkipped warns about data references whose bytes are not copied, one line per target.
-func printSkipped(w io.Writer, skipped []SkippedData) {
+func printSkipped(w io.Writer, skipped []SkippedData, globals ...GlobalSeg) {
 	seen := map[uint64]bool{}
 	for _, s := range skipped {
 		if seen[s.Target] {
 			continue
 		}
 		seen[s.Target] = true
+		if g, ok := globalContaining(globals, s.Target); ok && s.Reason == "writable" {
+			fmt.Fprintf(w, "Note: code at 0x%x references the writable global %s; its link-time image is recorded in Program.globals (--global), which a precondition may assume with GlobalsInit.\n", s.From, g.Name)
+			continue
+		}
 		what := fmt.Sprintf("0x%x", s.Target)
 		if s.Symbol != "" {
 			what += " (" + s.Symbol + ")"
@@ -341,6 +348,9 @@ func cmdCheck(args []string, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "  Functions: %d, stubs: %d, data objects: %d\n", len(id.Functions), len(id.Stubs), len(id.Data))
 	if len(id.Contracts) > 0 {
 		fmt.Fprintf(stdout, "  Runtime contracts (not extracted): %s\n", strings.Join(id.contractList(), ", "))
+	}
+	if len(id.Globals) > 0 {
+		fmt.Fprintf(stdout, "  Writable globals (link-time images): %s\n", strings.Join(id.globalList(), ", "))
 	}
 	fmt.Fprintf(stdout, "  Code: %s\n", displayPath(r.Extracted))
 	fmt.Fprintf(stdout, "  Manifest: %s\n", displayPath(filepath.Join(r.Outdir, "identity.json")))

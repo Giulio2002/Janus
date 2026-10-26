@@ -45,7 +45,7 @@ arm64=(MallocFast ClearWords A64IndexByte A64Crc32 A64CountByte CopyBlock AddLim
        LookupS InsertS DeleteS LookupK24 InsertK24 Has32 Set32 InsertPtr LookupPtr MakeHint
        ReverseArray RowsWith SwapBig DotBoth Find2D Fact Compose Shifts AlignUp TotalMeters TotalFeet
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
-       Mod IncTwice Bump GlobalTable Table MakeAdder IsEven CycA
+       Mod IncTwice Bump GlobalTable Table MakeAdder IsEven CycA MulAlgo Double
        Box AsHasher Classify Equal Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
        WrongAdd)
 . scripts/example-contracts.sh
