@@ -633,4 +633,74 @@ theorem seg_open (c : State) (ba sa b fn : Nat) (hpc : c.pc = BitVec.ofNat 64 eL
   janus_run [hba, hsa, hb, hci, hbi, hfn', hcw']
   done
 
+set_option maxHeartbeats 0 in
+/-- `LH` with the open-coded defers done: the model clears the phase and loops. -/
+theorem seg_torec (c : State) (ba : Nat) (hpc : c.pc = BitVec.ofNat 64 eLH)
+    (hal : c.sp.toNat % 16 = 0) (hsp : c.sp.toNat + 104 ≤ 2 ^ 48)
+    (hacc : c.mem.accessible c.sp.toNat 96 true = true)
+    (hph : c.mem.readLE (c.sp.toNat + 32) 8 ≠ 0) (hba : c.mem.readLE (c.sp.toNat + 40) 8 = ba)
+    (hb : c.mem.readLE ba 1 = 0) (hba2 : ba + 1 ≤ 2 ^ 48) (hbaa : c.mem.accessible ba 1 true = true) :
+    ReachesRet qE (BitVec.ofNat 64 (E + 0x2ec)) c (fun e => e.mem = c.mem.writeLE (c.sp.toNat + 32) 8 0 ∧
+      e.sp = c.sp ∧ e.regs 28 = c.regs 28 ∧ e.regs 18 = c.regs 18) := by
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
+  dsimp only at *
+  simp only [eLH, E, Nat.reduceAdd] at hpc ⊢
+  subst hpc
+  janus_run [hba, hb]
+
+set_option maxHeartbeats 0 in
+/-- The two `b LH` instructions (after `TOREC` and `POPREC`). -/
+theorem seg_back (c : State) (h : c.pc = BitVec.ofNat 64 (E + 0x2ec) ∨ c.pc = BitVec.ofNat 64 (E + 0x358)) :
+    ReachesRet qE (BitVec.ofNat 64 eLH) c (fun e => e.mem = c.mem ∧ e.sp = c.sp ∧ e.regs = c.regs) := by
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
+  dsimp only at *
+  simp only [eLH, E, Nat.reduceAdd] at h ⊢
+  rcases h with rfl | rfl <;> janus_run
+
+/-- The memory after the model took funcval `n` off the top record `j` (converted, its count
+decremented, popped when it was the last). -/
+def recTake (m : Memory) (j n : Nat) : Memory :=
+  if n = 0 then (((m.writeLE (j * 96 + 66064) 8 1).writeLE (j * 96 + 66072) 8 n).writeLE 65544 8 j)
+  else (m.writeLE (j * 96 + 66064) 8 1).writeLE (j * 96 + 66072) 8 n
+
+set_option maxHeartbeats 0 in
+/-- `LH` in the record phase with a funcval left in the frame's top record: the model takes it and
+calls it. -/
+theorem seg_rec_call (c : State) (j n fn : Nat) (hpc : c.pc = BitVec.ofNat 64 eLH)
+    (hal : c.sp.toNat % 16 = 0) (hsp : c.sp.toNat + 104 ≤ 2 ^ 48)
+    (hacc : c.mem.accessible c.sp.toNat 96 true = true) (hB : c.mem.accessible B 0x1000 true = true)
+    (hph : c.mem.readLE (c.sp.toNat + 32) 8 = 0) (hnd : ndef c.mem = j + 1) (hj : j < 8)
+    (hrs : recSp c.mem j = c.mem.readLE c.sp.toNat 8) (hn : recN c.mem j = n + 1) (hn8 : n < 8)
+    (hfn : recFn c.mem j n = fn) (hfa : fn + 8 ≤ 2 ^ 48)
+    (hfaa : c.mem.accessible fn 8 false = true)
+    (hcw : (recTake c.mem j n).readLE fn 8 < 2 ^ 48) (hcw4 : (recTake c.mem j n).readLE fn 8 % 4 = 0) :
+    ReachesRet qE (BitVec.ofNat 64 ((recTake c.mem j n).readLE fn 8)) c (fun e =>
+      e.mem = recTake c.mem j n ∧ e.sp = c.sp ∧ e.regs 26 = BitVec.ofNat 64 fn ∧
+      e.regs 28 = c.regs 28 ∧ e.regs 18 = c.regs 18 ∧ e.regs 29 = c.sp - 8 ∧
+      e.regs 30 = BitVec.ofNat 64 RPa) := by
+  have hnd' : c.mem.readLE 65544 8 = j + 1 := hnd
+  have hrs' : c.mem.readLE (j * 96 + 66048) 8 = c.mem.readLE c.sp.toNat 8 := by
+    rw [← hrs]; simp only [recSp, rd, recAt, B]; congr 1; omega
+  have hn' : c.mem.readLE (j * 96 + 66072) 8 = n + 1 := by
+    rw [← hn]; simp only [recN, rd, recAt, B]; congr 1; omega
+  have hmul : (BitVec.ofNat 64 (j + 1) - 1#64) = BitVec.ofNat 64 j := by
+    apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
+  have hmul2 : (BitVec.ofNat 64 j * 96#64).toNat = j * 96 := by
+    rw [BitVec.toNat_mul, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; omega
+  have hB' : c.mem.accessible 65536 4096 true = true := hB
+  have hfn1 : c.mem.readLE (j * 96 + 66080 + 8 * n) 8 = fn := by
+    rw [← hfn]; simp only [recFn, rd, recAt, B]; congr 1; omega
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
+  dsimp only at *
+  simp only [eLH, E, Nat.reduceAdd] at hpc
+  subst hpc
+  by_cases hn0 : n = 0
+  · subst hn0
+    simp only [Nat.mul_zero, Nat.add_zero] at hfn1
+    simp only [recTake, if_true, ite_true] at *
+    janus_run [hph, hnd', hrs', hn', hmul, hmul2, hfn1]
+  · simp only [recTake, hn0, if_false] at hcw hcw4 ⊢
+    janus_run [hph, hnd', hrs', hn', hmul, hmul2, hfn1]
+  all_goals sorry
+
 end Janus.Contracts.PanicSat
