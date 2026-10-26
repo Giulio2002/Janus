@@ -212,7 +212,7 @@ macro "kobl64_slow" : tactic => `(tactic| first
   | with_reducible rfl
   | with_reducible assumption
   | apart_mono
-  | (dsimp only; with_reducible assumption)
+  | ((try dsimp only); with_reducible assumption)
   | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega)
   | omega
   | (dsimp only; janus64_disch)
@@ -228,13 +228,13 @@ elab "kobl64" : tactic => do
   if t.isAppOfArity ``Janus.MemFrame 3 then
     run (← `(tactic| janus_frame)); return
   if let some (ty, lhs, _) := t.eq? then
-    let ty ← whnfR ty
+    let ty ← whnf ty
     if ty.isAppOfArity ``BitVec 1 then
-      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; simp only [Janus.Amd64.Tactic.setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; try (first | with_reducible assumption | with_reducible rfl); done) | (dsimp only; simp only [Janus.Amd64.Tactic.setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_ofNat, BitVec.toNat_add, BitVec.toNat_sub]; try omega; done) | (dsimp only; simp only [Janus.Amd64.Tactic.setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp; try omega; done) | (apply BitVec.eq_of_toNat_eq; simp; try omega; done))); return
+      run (← `(tactic| first | with_reducible rfl | ((try dsimp only); with_reducible assumption) | ((try dsimp only); simp only [Janus.Amd64.Tactic.setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; (try (first | with_reducible assumption | with_reducible rfl)); done) | ((try dsimp only); simp only [Janus.Amd64.Tactic.setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_ofNat, BitVec.toNat_add, BitVec.toNat_sub]; (try omega); done) | ((try dsimp only); simp only [Janus.Amd64.Tactic.setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp; (try omega); done) | (apply BitVec.eq_of_toNat_eq; simp; (try omega); done))); return
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
       run (← `(tactic| first | with_reducible assumption | (dsimp only; janus64_disch) | (janus64_simp; first | done | janus64_disch))); return
     if lhs.isAppOfArity ``Janus.Arm64.Memory.readLE 3 then
-      run (← `(tactic| first | with_reducible assumption | (dsimp only; with_reducible assumption) | (janus64_simp; first | done | with_reducible assumption | omega))); return
+      run (← `(tactic| first | with_reducible assumption | ((try dsimp only); with_reducible assumption) | (janus64_simp; first | done | with_reducible assumption | omega))); return
     if ty.isConstOf ``Nat then
       run (← `(tactic| first | with_reducible rfl | omega | (janus64_simp; first | done | omega))); return
   if t.isAppOfArity ``LE.le 4 || t.isAppOfArity ``LT.lt 4 then
