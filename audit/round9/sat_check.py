@@ -1,5 +1,6 @@
 """Round 9 SAT row: every runtime contract defined in Janus/Contracts/*.lean (a `def … : Prop`
-whose body is a `Summary`, possibly under `∀`), and every external-stub contract (a `def … :
+whose body is a `Summary`, possibly under `∀`, or whose name ends in `Contract` or `Contract64`, such as R7's
+`MorestackContract`, a relation over the prologue's `morestack` call states), and every external-stub contract (a `def … :
 Contract`) there and in Janus/FFI.lean and Janus/Amd64/FFI.lean (K2: the trusted cgo, callback,
 libc and setjmp contracts), must have a kernel-checked non-vacuity witness
 `theorem <name>_satisfiable` in the framework module `Janus.Contracts.<File>Sat` (for
@@ -75,7 +76,7 @@ for f, rel, satmod in srcs:
         if not re.search(r":\s*Prop\s*:=", text):
             continue
         after = text.split(":=", 1)[1]
-        if re.match(r"\s*(∀[^,]*,\s*)?([\w.]*\.)?Summary\b", after):
+        if re.match(r"\s*(∀[^,]*,\s*)?([\w.]*\.)?Summary\b", after) or re.search(r"Contract(64)?$", m.group(1)):
             contracts.append((f, m.group(1), satmod))
 imports = set(re.findall(r"^import (\S+)", open(FILES["Janus.lean"], encoding="utf-8").read(), re.M))
 sat = {}

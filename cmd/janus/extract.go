@@ -85,7 +85,11 @@ type Extraction struct {
 	// Program.globals; GlobalPatterns are the patterns as given (recorded in identity.json).
 	GlobalPatterns []string
 	Globals        []GlobalSeg
-	Lean           []byte
+	// Frames: --frames was given; FrameRecs are the extracted functions' pclntab frame records
+	// (frames.go), rendered as `Extracted.frames` for stack-growth theorems.
+	Frames    bool
+	FrameRecs []FrameRec
+	Lean      []byte
 }
 
 // Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)
@@ -622,6 +626,9 @@ func renderLean(x *Extraction) []byte {
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
 	writeProgram(&sb, x, "Program")
 	writeCEnv(&sb, x)
+	if x.Frames {
+		writeFrames(&sb, x.FrameRecs)
+	}
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())

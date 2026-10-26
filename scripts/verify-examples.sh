@@ -36,7 +36,8 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
      Box AsHasher Classify Equal IsEven CycA MulAlgo Double
      Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
-     I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird SpanSum MinF64 MaxF64 MinStr)
+     I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird SpanSum MinF64 MaxF64 MinStr
+     BigLocal SumRec HoldPtr)
 . scripts/example-contracts.sh
 # the runtime's equality, hashing and typed-memory functions verified from their code
 all+=($runtime_examples $runtime_examples_arm64_only)

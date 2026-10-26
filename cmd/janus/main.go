@@ -70,7 +70,7 @@ func displayPath(p string) string {
 
 const usage = `Usage:
   janus list <binary> [--filter SUBSTR]
-  janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]... [--targets SYM,...]
+  janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]... [--targets SYM,...] [--frames]
   janus check <outdir> [--binary PATH]
   janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH] [--asl]
   janus blockers <binary> <symbol>... [--max-functions N] [--contract SYM]... [--janus-root DIR] [--json FILE]
@@ -210,6 +210,16 @@ func cmdList(args []string, stdout io.Writer) error {
 }
 
 func cmdExtract(args []string, stdout, stderr io.Writer) error {
+	frames := false
+	var rest []string
+	for _, a := range args {
+		if a == "--frames" {
+			frames = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	args = rest
 	pos, opts, err := parseArgs(args, "max-functions", "contract", "targets", "global")
 	if err != nil {
 		return usageErr("%v", err)
@@ -235,6 +245,11 @@ func cmdExtract(args []string, stdout, stderr io.Writer) error {
 	x, err := extractGlobals(b, sym, maxF, optsList(opts, "contract"), optsList(opts, "global"), targets...)
 	if err != nil {
 		return err
+	}
+	if frames {
+		if err := applyFrames(x); err != nil {
+			return err
+		}
 	}
 	id := makeIdentity(x, binaryRef(outdir, binPath), maxF)
 	if err := writeArtifacts(outdir, x, id); err != nil {

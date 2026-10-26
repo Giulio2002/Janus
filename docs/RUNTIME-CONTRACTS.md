@@ -1063,3 +1063,101 @@ External stubs `sym@plt`; trusted as glibc's behaviour on Linux, one `Spec` per 
 pointer and the regions (but `malloc`/`free`). Witnesses: `libc_satisfiable`,
 `setJmp_satisfiable`, `jmpModel_satisfiable`, `tlsGetAddr_satisfiable` (`LibcSat`,
 `LibcSatAmd64`).
+
+### Stack growth (`Janus/Spec/Stack.lean`, `Janus/Contracts/Stack.lean`)
+
+Every Go function that is not `NOSPLIT` begins with a stack-growth check (`Janus.GoABI`,
+"Stack-growth prologue"): it compares `SP` with `g.stackguard0` and, when its frame does not
+fit, calls `runtime.morestack_noctxt`. Until R7 every theorem assumed the check falls through
+(`GuardOK`, `StackGuardOK`): the grown case — the `morestack` call — was excluded, and a run
+that reached it stopped at the `.morestack` stub (`GoABI.GrowsStack`). R7 removes that
+restriction. A theorem about `f` that holds "on any stack with room" (an ordinary `Summary`)
+plus the `morestack` contract gives "`f` is correct, stack growth included".
+
+**What `morestack`/`newstack`/`copystack` do** (Go 1.26 `runtime/stack.go`, `asm_arm64.s`,
+`asm_amd64.s`). `morestack` saves the goroutine's context (`gobuf`: `pc` = the instruction after
+the call, `sp`, `bp`, `lr`, `ctxt`) and calls `newstack` on the `g0` stack. `newstack` allocates
+a stack of `newsize` bytes (`oldsize·2`, doubled until `newsize - used ≥ funcMaxSPDelta(f) +
+stackGuard`; a request above `maxstacksize` throws `stack overflow`), and `copystack` copies the
+used part of the old stack to the new one and **adjusts every pointer into the old stack**:
+`adjustframe`/`adjustpointers` walk the frames with the unwinder (`traceback.go`) and, guided by
+the stack maps (the pclntab's `FUNCDATA_LocalsPointerMaps`, `FUNCDATA_ArgsPointerMaps`,
+`FUNCDATA_StackObjects`, selected by `PCDATA_StackMapIndex`), add `delta = new.hi - old.hi` to
+each word the maps mark as a pointer whose value lies in `[old.lo, old.hi)`; `adjustctxt` does the
+same for the saved frame pointer below `SP` on arm64. `g.stack`, `g.stackguard0`, `g.sched.sp`
+are updated and `gogo` resumes at the saved `pc` — the prologue's glue after the `morestack`
+call, which re-enters `f` on the larger stack. The whole goroutine stack moves, so the resumed
+`SP` is the old one plus `delta`.
+
+**The model** (`Janus/Spec/Stack.lean`, ISA-independent). `Moved cls pool lo hi hi' base ex m m'`
+relates the memory before and after a copy of `[base, hi)` of the stack `[lo, hi)` to the top
+`hi'`: a word `cls` marks as a pointer is adjusted by `hi' - hi` when its value is in the old
+stack and copied otherwise (`adjustWord`), every other byte is copied, and the ranges `ex` are
+left free. `Moved.trans` composes two moves into one — **the relocation invariance** that lets a
+move compose with the resumed run. `FrameTable` is the stack maps (abstract: theorems quantify
+over every table), `Chain` the unwinder's walk from the saved context, and `frameCls`/`framesCls`
+the words a frame / a walk adjusts. The key lemmas `frameCls_mv`, `framesCls_mv`, `Chain.mv` and
+`Chain.moved` prove the classification and the walk are relocation invariant, so the resumed run
+reads the moved frame as the move left it.
+
+**The contract** (`Janus/Contracts/Stack.lean`). `MorestackContract p FT pool rt H reloc`: from
+every state at a prologue's `morestack` call satisfying `MorestackPre` (it is at a `.morestack`
+stub; `g = X28`/`R14` runs on `[lo, hi)` inside the writable stack pools `pool`, above the first
+page; the stack unwinds, `Chain`; the grown stack fits `maxstacksize`; the runtime is ready to
+allocate, `H`, round 9's readiness predicate, on the runtime-owned memory `rt`; no word outside
+the stacks points into a stack, `NoStackPtr`), the relation
+`reloc` resumes in a `Grown` state: a larger stack inside the pools with room for the function's
+own `funcMaxSPDelta + stackGuard` below the resumed `SP` (exactly `newstack`, not room for an
+unbounded recursion), `SP`/`FP`/`g.stack`/`g.stackguard0` updated, the frames moved (`Moved`
+along the `Chain`), `H` re-established, resumed at the glue. `morestack`/`morestack_noctxt` are
+already **pinned** as `.morestack` stubs (`cmd/janus` `runtimeMorestackStubs`, `classifyStub`,
+`stubpins_gen.go`), so the contract hypothesis is about the Go runtime's own `morestack`.
+
+**The grown run.** `GrownReturns p reloc s post` is `Returns` through any number of `morestack`
+resumes; `EnsuresGrow` is the grown `Ensures`, with the room precondition dropped. For a callee
+that may grow, `GrownRet`/`GSummary` are the grown `ReachesRet`/`Summary` (with `bind`, `call`
+and `GSummary.induction` for recursion). `grow_rec` is the well-founded recursion on the stack's
+distance from `maxstacksize`: a growth makes the stack strictly larger, so after finitely many
+it has room and the roomy `Summary` applies.
+
+**Satisfiability** (`Janus/Contracts/StackSat.lean`). `morestack_satisfiable` exhibits a two-slot
+toy stack allocator that meets `MorestackContract` for every program and frame table — it copies
+the frames, adjusts every stack-map pointer into the old stack and rewrites `g.stack`/
+`stackguard0` — and a call state satisfying the whole precondition (round 9's SAT row).
+
+**amd64** (`Janus/Contracts/StackAmd64.lean`). The same model with `Arch.amd64` (`fp = sp +
+spdelta + 8`, the return address at `fp - 8`, `varp = fp - 8`), and the amd64 call sequence:
+the prologue's tail spills the register arguments to `8(SP)`, `16(SP)`, … (the caller's argument
+area) and `CALL`s the stub, so at the stub `[RSP]` is the glue (`gobuf.pc`) and `RSP + 8` the
+function's stack pointer (`gobuf.sp`). `MorestackContract64` resumes in a `Grown64` state: at the
+glue, `RSP` moved, `RBP` adjusted (`adjustWord`, `adjustctxt` on `gobuf.bp`), `RDX = 0`
+(`morestack_noctxt`), `R14` kept, `X15 = 0`, the direction flag clear, `MXCSR`'s control bits
+kept; the copied region is `[RSP + 8, hi)` (the pushed glue address is not copied).
+`GrownReturns64`/`GrownRet64`/`GSummary64`/`EnsuresGrow64`/`grow_rec64` are the grown run, and
+`morestack64_satisfiable` (`Janus/Contracts/StackSatAmd64.lean`) reuses the toy allocator.
+
+**The stack maps come from the binary.** `janus extract --frames` decodes, for every extracted
+function, its pclntab record (`Extracted.frames : List FuncRec`: pc range, `FuncID`, flags,
+`funcMaxSPDelta`, the `pcsp` and `PCDATA_StackMapIndex` tables as pc-value runs, the args and
+locals pointer maps, the stack objects; `cmd/janus/frames.go`), and `janus check` re-derives it.
+A grown theorem assumes its frame table **agrees** with these records (`FrameTable.Agrees
+Extracted.frames`: at every pc inside an extracted function, the table's SP delta, largest frame,
+maps and objects are the record's), so the maps a proof relies on are the binary's; the witnesses
+build their table from the records (`FrameTable.ofRecs`), and `ofRecs_laws_arm64`/`_amd64` check
+by evaluation that the records keep their words inside the frame (`FrameTable.InFrame`).
+
+**What stays trusted** (see [SOUNDNESS.md](SOUNDNESS.md#stack-growth)): the `Moved`/`Chain`
+relocation is what `newstack`/`copystack` do, and in particular **the stack maps are correct**
+(the compiler's liveness information marks exactly the pointer slots; the tables are the binary's,
+`FrameTable.Agrees Extracted.frames`). A precondition states that no pointer into the stack is
+held in non-stack memory (`MorestackPre.noptr`, `NoStackPtr`; Go's escape analysis guarantees
+it): `copystack` does not adjust such a word.
+
+**Examples** (`examples/basic/zstack.go`; arm64 `examples/proofs/<Name>.lean`, amd64
+`examples/proofs-amd64/<Name>/Proof.lean`; each with `Witness.nonvacuous` and `Witness.returns`):
+
+| Function | Shows |
+|---|---|
+| `BigLocal(x, i)` | a large frame (176 bytes on arm64, 168 on amd64) whose prologue always grows on a small stack; returns `buf[0]` = `x` if `i&15 = 0` else `0`, on a stack of any size (`correctness`), with a witness whose frame does not fit (`Witness.no_room`) |
+| `SumRec(n)` | recursion with growth at any depth: a grown callee summary (`GSummary.induction`) whose post states the move of the caller's frames, composed level by level (`Moved.trans'`, `mono_base`, `cls_congr`); the saved frame pointers adjusted, the spilled `n` copied; witness `SumRec(3)` from a stack where not even the first frame fits |
+| `HoldPtr(x)` | a pointer into the function's own frame (`p = &a[x&1]`, kept in a locals-map slot) held across a call (`holdCallee(p, x)`) whose frame grows the stack: the callee's spilled `p` (its args map) and the caller's slot are both adjusted, so the callee's store reaches the moved array and the caller reads it back through the adjusted `p`; witness `HoldPtr(16) = 49` with the growth inside the callee (`Witness.callee_grows`) |

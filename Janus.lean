@@ -61,6 +61,10 @@ import Janus.Contracts.SyscallSatAmd64
 import Janus.Spec.Type
 import Janus.Spec.Panic
 import Janus.Contracts.Iface
+import Janus.Contracts.Stack
+import Janus.Contracts.StackSat
+import Janus.Contracts.StackAmd64
+import Janus.Contracts.StackSatAmd64
 import Janus.Contracts.Panic
 import Janus.Contracts.PanicAmd64
 import Janus.Contracts.PanicSat
@@ -95,6 +99,7 @@ import Janus.Contracts.Libc
 import Janus.Contracts.LibcSat
 import Janus.Contracts.LibcAmd64
 import Janus.Contracts.LibcSatAmd64
+import Janus.Spec.Stack
 import Janus.Tactic.ABI0
 import Janus.Contracts.Misc
 import Janus.Contracts.Instrument
