@@ -75,18 +75,21 @@ def wbRegs (old junk : Nat → W64) (buf : W64) : Nat → W64 :=
     wbRegs old junk buf i = if i = 25 then buf else if i = 16 ∨ i = 17 ∨ i = 27 then junk i else old i := rfl
 
 /-- `8·n` bytes for the barrier to fill: inside `rt`, writable, 8-aligned. -/
-def WbSlots (rt : List (Nat × Nat)) (m : Memory) (buf n : Nat) : Prop :=
+@[reducible] def WbSlots (rt : List (Nat × Nat)) (m : Memory) (buf n : Nat) : Prop :=
   InRanges buf (8 * n) rt ∧ buf + 8 * n ≤ 2 ^ 48 ∧ m.accessible buf (8 * n) true = true ∧ buf % 8 = 0
 
 /-- **`runtime.gcWriteBarrierN`** (arm64, `N = n`): from a call (`BL`, return address in `X30`,
 `SP` 16-aligned, `[SP - stack, SP)` writable) at which the runtime is ready (`Ready H rt [n]`),
 it returns to `X30` with `R25` = the address of `8·n` fresh buffer bytes (`WbSlots`),
-registers as `wbRegs`, memory changed only in `rt` and `[SP - stack, SP - 8)`. -/
+registers as `wbRegs`, memory changed only in `rt` and `[SP - stack, SP - 8)`, the exclusive
+monitor and the store-exclusive outcomes unspecified (`wbBufFlush` is Go code). -/
 def WbContract (p : Program) (addr : Nat) (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady)
     (n : Nat) : Prop :=
   Tactic.Summary p addr (fun s => CallOK s stack 0 ∧ Ready H rt [n] s)
-    (fun s s' => ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-      s' = { s with regs := wbRegs s.regs junk buf, pc := s.regs 30, flags := f, vregs := v, mem := m } ∧
+    (fun s s' => ∃ (buf : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+        (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+      s' = { s with regs := wbRegs s.regs junk buf, pc := s.regs 30, flags := f, vregs := v, mem := m,
+                    excl := ex, exclPass := ep } ∧
       MemFrame s.mem m (rt ++ [(s.sp.toNat - stack, s.sp.toNat - 8)]) ∧ WbSlots rt m buf.toNat n)
 
 end Janus.Contracts

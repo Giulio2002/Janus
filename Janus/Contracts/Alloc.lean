@@ -458,6 +458,17 @@ def retState (s : State) (junk : Nat → W64) (res : List W64) (f : Flags)
 
 attribute [janus_exec, janus_post] retState calleeStack
 
+/-- The state a runtime contract returns in (arm64): `retState`, and the exclusive monitor and
+the store-exclusive outcome stream unspecified (`ex`, `ep`): the callee may run load- and
+store-exclusives (the runtime's locks and atomics), and an exception return (a context switch)
+clears the monitor, so a contract promises nothing about them. -/
+def retStateX (s : State) (junk : Nat → W64) (res : List W64) (f : Flags) (v : Nat → BitVec 128)
+    (m : Memory) (ex : Option (Nat × Nat)) (ep : Nat → Bool) : State :=
+  { s with regs := callRegs s.regs junk res, pc := s.regs 30, flags := f, vregs := v, mem := m,
+           excl := ex, exclPass := ep }
+
+attribute [janus_exec, janus_post] retStateX
+
 /-- The readiness hypothesis of an arm64 contract at the call state `s` (round 9 C1): `H` holds
 for the call's arguments `args`, the current `g` (`R28`), `SP` and the runtime's memory
 (`rtView rt s.mem`). -/
@@ -480,11 +491,13 @@ attribute [janus_exec, janus_post] true_implies
 /-- The shape of an allocation contract's postcondition (arm64): the callee returned to `X30`
 in `retState s junk (res ptr) f v m` for some pointer `ptr`, unspecified registers, flags and
 SIMD&FP registers, and memory `m` that differs from `s.mem` only inside the runtime-owned
-ranges `rt` and the callee's stack window, and `Q m ptr` holds. -/
+ranges `rt` and the callee's stack window, and `Q m ptr` holds; the exclusive monitor and the
+store-exclusive outcomes unspecified (`retStateX`). -/
 @[reducible] def AllocRet (rt : List (Nat × Nat)) (stack nargs : Nat) (res : W64 → List W64)
     (s s' : State) (Q : Memory → Nat → Prop) : Prop :=
-  ∃ (ptr : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-    s' = retState s junk (res ptr) f v m ∧ MemFrame s.mem m (rt ++ calleeStack s stack nargs) ∧
+  ∃ (ptr : W64) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory)
+    (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+    s' = retStateX s junk (res ptr) f v m ex ep ∧ MemFrame s.mem m (rt ++ calleeStack s stack nargs) ∧
       Q m ptr.toNat
 
 /-- The precondition of `runtime.mallocgc` (arm64): see `MallocgcContract`. -/
@@ -520,8 +533,8 @@ theorem MallocgcContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)}
     Summary p addr (fun s => (MallocgcPre stack s ∧
         Ready H rt [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s) ∧ 0 < (s.regs 0).toNat)
       (fun s s' => AllocRet rt stack 3 (fun ptr => [ptr]) s s' (mallocgcObj rt s)) :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, v, m, h1, h2, h3 hp.2⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3 hp.2⟩
 
 /-- The precondition of `runtime.newobject` (arm64): see `NewobjectContract`. -/
 def NewobjectPre (stack : Nat) (s : State) : Prop :=
@@ -548,8 +561,8 @@ theorem NewobjectContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)
     Summary p addr (fun s => (NewobjectPre stack s ∧ Ready H rt [(s.regs 0).toNat] s) ∧
       0 < typSize s.mem (s.regs 0).toNat)
       (fun s s' => AllocRet rt stack 1 (fun ptr => [ptr]) s s' (newobjectObj rt s)) :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, v, m, h1, h2, h3 hp.2⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3 hp.2⟩
 
 /-- The precondition of `runtime.makeslice` (arm64): see `MakesliceContract`. -/
 def MakeslicePre (stack : Nat) (s : State) : Prop :=
@@ -584,8 +597,8 @@ theorem MakesliceContract.pos {p : Program} {addr : Nat} {rt : List (Nat × Nat)
         Ready H rt [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] s) ∧
         0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat)
       (fun s s' => AllocRet rt stack 3 (fun ptr => [ptr]) s s' (makesliceObj rt s)) :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, v, m, h1, h2, h3 hp.2⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3 hp.2⟩
 
 /-- The capacity `growslice` returns for 8-byte elements without pointers. -/
 def growCap8 (newLen oldCap : Nat) : Nat := roundupsize (nextslicecap newLen oldCap * 8) true / 8

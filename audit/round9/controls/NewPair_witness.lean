@@ -57,9 +57,9 @@ theorem hnew : NewobjectContract (Extracted.program.link impl)
   subst hargs
   change ReachesRet linked _ s _
   janus_run
-  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, ?_, ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩,
+  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_, ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩,
     fun hpos => ?_⟩
-  · simp only [retState]; rw [callRegs_eq]; rfl
+  · simp only [retStateX]; rw [callRegs_eq]; rfl
   · unfold typSize at hsz
     rw [readLE_rtView (hin.sub (Nat.le_refl _) (by omega))] at hsz
     change typSize s.mem (s.regs 0).toNat ≤ 32768 at hsz

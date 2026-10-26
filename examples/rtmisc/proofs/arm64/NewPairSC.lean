@@ -110,8 +110,8 @@ theorem model : MallocgcSmallNoScanSCContract 2 (Extracted.program.link implAt)
   obtain ⟨hsz', -, -⟩ := hargs
   change ReachesRet linked _ s _
   janus_run
-  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, ?_, ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩
-  · simp only [retState]; rw [callRegs_eq]; rfl
+  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_, ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩
+  · simp only [retStateX]; rw [callRegs_eq]; rfl
   · have hs : (s.regs 0).toNat ≤ 32768 := by omega
     have hb := blockSize_le_maxSmallSize (s.regs 0).toNat
       ((s.regs 1).toNat == 0 || typNoscan s.mem (s.regs 1).toNat) hs

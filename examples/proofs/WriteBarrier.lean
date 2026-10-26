@@ -125,7 +125,7 @@ macro "wb_entry" n:num : tactic => `(tactic| (
   refine rr_mono' (core_meets rt $n (by decide) (by decide) _ (by dsimp only; decide) ⟨hcall, hH, ?_⟩) ?_
   · first | rfl | decide | simp [setReg]
   · rintro s' ⟨buf, junk, f, v, m, hs', hfr, hw⟩
-    refine ⟨buf, junk, f, v, m, ?_, hfr, hw⟩
+    refine ⟨buf, junk, f, v, m, s.excl, s.exclPass, ?_, hfr, hw⟩
     rw [hs']
     simp only [wbRegs_setReg25]
     rfl))

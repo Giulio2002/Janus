@@ -112,3 +112,8 @@ import Janus.Contracts.MallocSC
 import Janus.Contracts.MallocSCAmd64
 import Janus.Contracts.MallocSCSat
 import Janus.Contracts.MallocSCSatAmd64
+import Janus.Contracts.Live
+import Janus.Contracts.LiveToy
+import Janus.Contracts.LiveCost
+import Janus.Contracts.LiveAmd64
+import Janus.Contracts.LiveSat

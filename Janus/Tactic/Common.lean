@@ -142,6 +142,54 @@ theorem mono {rs' : List (Nat × Nat)} (h : MemFrame m m' rs)
   ⟨fun b n hb => h.readLE b n (sub b n hb), h.accessible⟩
 
 end MemFrame
+
+/-- A range inside `rs` and a range outside `rs` are `Apart` (the form the dischargers use one
+fact at a time). -/
+theorem InRanges.apart {a n b k : Nat} {rs : List (Nat × Nat)} (hin : InRanges a n rs)
+    (hout : Outside b k rs) : Apart b k a n := by
+  obtain ⟨r, hr, h1, h2⟩ := hin
+  have := MemFrame.outside_mem hout hr
+  unfold Apart; omega
+
+theorem InRanges.cons_head {a n lo hi : Nat} (rs : List (Nat × Nat)) (h1 : lo ≤ a) (h2 : a + n ≤ hi) :
+    InRanges a n ((lo, hi) :: rs) := ⟨(lo, hi), List.mem_cons_self .., h1, h2⟩
+
+theorem InRanges.cons_tail {a n : Nat} {rs : List (Nat × Nat)} (r : Nat × Nat) (h : InRanges a n rs) :
+    InRanges a n (r :: rs) := by
+  obtain ⟨r', hr, h1, h2⟩ := h; exact ⟨r', List.mem_cons_of_mem _ hr, h1, h2⟩
+
+/-- `m'` agrees with `m` on the objects of the **live set** `L` (ranges `[lo, hi)`), except where
+they overlap the ranges `ws` the callee writes on purpose (e.g. the destination of a copy): every
+read inside one live object and outside `ws` is the same. This is the memory part of a live
+runtime contract (`Janus.Contracts.Live`): an allocation or a write barrier changes runtime
+memory, but not the objects the program holds. In the caller, `janus_run`/`janus64_run` use a
+hypothesis `hl : LiveFrame m₀ m L ws` as the rewrite rule `hl.readLE` (side conditions
+`InRanges a n L` and `Outside a n ws`). -/
+structure LiveFrame (m m' : Janus.Arm64.Memory) (L ws : List (Nat × Nat)) : Prop where
+  readLE : ∀ a n, InRanges a n L → Outside a n ws → m'.readLE a n = m.readLE a n
+
+namespace LiveFrame
+
+variable {m m' m'' : Janus.Arm64.Memory} {L ws : List (Nat × Nat)}
+
+theorem refl (m : Janus.Arm64.Memory) (L ws : List (Nat × Nat)) : LiveFrame m m L ws :=
+  ⟨fun _ _ _ _ => rfl⟩
+
+/-- Two calls in a row: the second keeps a live set that contains the first's (`sub`). -/
+theorem trans {L' : List (Nat × Nat)} (h : LiveFrame m m' L ws) (h' : LiveFrame m' m'' L' ws)
+    (sub : ∀ a n, InRanges a n L → InRanges a n L') : LiveFrame m m'' L ws :=
+  ⟨fun a n hin hout => by rw [h'.readLE a n (sub a n hin) hout, h.readLE a n hin hout]⟩
+
+/-- A store outside the live objects (or inside `ws`) keeps the frame. -/
+theorem writeLE (h : LiveFrame m m' L ws) {a k : Nat} (v : Nat) (hout : Outside a k L) :
+    LiveFrame m (m'.writeLE a k v) L ws :=
+  ⟨fun b n hin hw => by
+    obtain ⟨r, hr, h1, h2⟩ := hin
+    have := MemFrame.outside_mem hout hr
+    rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega)]
+    exact h.readLE b n ⟨r, hr, h1, h2⟩ hw⟩
+
+end LiveFrame
 end Janus
 
 namespace Janus.Tactic.Common
@@ -183,26 +231,50 @@ def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
   -- only disjunctions (the read-over-write and frame side conditions) are worth it
   unless gty.consumeMData.isAppOfArity ``Or 2 do return false
   let goalAtoms := arithAtoms gty
-  -- relevant `Apart` facts: every atom of their two ranges occurs in the goal
-  let mut cands := #[]
-  let mut toClear := #[]
+  -- relevant `Apart` facts: every atom of their two start addresses occurs in the goal
+  let mut full := #[]
+  let part : Array (FVarId × Array Expr) := #[]
+  let mut aparts := #[]
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
     if ty.isAppOfArity ``Janus.Apart 4 then
+      aparts := aparts.push d.fvarId
       let hAtoms := arithAtoms (ty.getArg! 2) (arithAtoms (ty.getArg! 0))
-      if hAtoms.all goalAtoms.contains then cands := cands.push d.fvarId
-      else toClear := toClear.push d.fvarId
-      continue
-    -- keep only the arithmetic facts about the goal's atoms, so that each `omega` is small
-    if ← isProp ty then
-      unless (arithAtoms ty).all goalAtoms.contains do toClear := toClear.push d.fvarId
-  if cands.isEmpty then return false
-  let saved ← saveState
-  let g' ← try g.tryClearMany toClear catch _ => pure g
-  for fv in cands do
+      if hAtoms.all goalAtoms.contains then full := full.push (d.fvarId, hAtoms)
+  if full.isEmpty && part.isEmpty then return false
+  -- the arithmetic hypotheses and their atoms
+  let mut hyps := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail || aparts.contains d.fvarId then continue
+    let ty ← instantiateMVars d.type
+    if ← isProp ty then hyps := hyps.push (d.fvarId, arithAtoms ty)
+  for (fv, _) in full ++ part do
+    let aty ← instantiateMVars (← fv.getType)
+    -- the atoms of the two ranges, lengths included
+    let hAtoms := arithAtoms (aty.getArg! 3) (arithAtoms (aty.getArg! 2)
+      (arithAtoms (aty.getArg! 1) (arithAtoms (aty.getArg! 0))))
+    let mut atoms := goalAtoms ++ hAtoms
+    -- when a range has atoms the goal does not (an object's symbolic size), two rounds of the
+    -- hypotheses about them (e.g. `8·n ≤ round`, `0 < n`)
+    if !(hAtoms.all goalAtoms.contains) then
+      for _ in [0:2] do
+        let mut more := #[]
+        for (_, ha) in hyps do
+          if ha.size ≤ 4 && ha.any (fun a => atoms.contains a && !goalAtoms.contains a && a.nat?.isNone) then
+            more := more ++ ha
+        atoms := atoms ++ more
+    -- keep only the arithmetic facts about these atoms, so that each `omega` is small
+    let mut toClear := #[]
+    for d in ← getLCtx do
+      if d.isImplementationDetail || d.fvarId == fv then continue
+      if aparts.contains d.fvarId then toClear := toClear.push d.fvarId; continue
+      let ty ← instantiateMVars d.type
+      if ← isProp ty then
+        unless (arithAtoms ty).all atoms.contains do toClear := toClear.push d.fvarId
     let saved' ← saveState
     try
+      let g' ← try g.tryClearMany toClear catch _ => pure g
       let h ← Term.exprToSyntax (mkFVar fv)
       let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic|
         (have h' : _ := $h
@@ -211,10 +283,8 @@ def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
       if gs.isEmpty then return true
       saved'.restore
     catch _ => saved'.restore
-  saved.restore
   return false
 
-/-- `0x…` -/
 def hex (n : Nat) : String := "0x" ++ String.ofList (Nat.toDigits 16 n)
 
 /-! ## Status of the step in progress -/
@@ -867,6 +937,8 @@ def restoredReg? (setR regs : Name) (e : Expr) : MetaM (Option (Expr × Expr × 
 /-- The rewrite rules of a `MemFrame` hypothesis (`readLE`, `accessible`), for the state simp
 set. -/
 def frameRules (d : LocalDecl) (ty : Expr) : MetaM (Array Expr) := do
+  if ty.isAppOfArity ``Janus.LiveFrame 4 then
+    return #[← mkAppM ``Janus.LiveFrame.readLE #[d.toExpr]]
   unless ty.isAppOfArity ``Janus.MemFrame 3 do return #[]
   return #[← mkAppM ``Janus.MemFrame.readLE #[d.toExpr], ← mkAppM ``Janus.MemFrame.accessible #[d.toExpr]]
 
@@ -946,6 +1018,27 @@ where
       saved.restore; omegaApart g
     catch _ => saved.restore; omegaApart g
 
+/-- After a live contract's call: for every new `InRanges p n rs` hypothesis (an object the call
+returned inside the runtime-owned ranges) and every `Outside a k rs` hypothesis (caller data
+outside them), add `Apart a k p n`, so that the read-over-write side conditions see the object
+apart from the caller's frame, `g`, type descriptors (`janus_apart`, one fact at a time). -/
+def addApartFacts (g : MVarId) (before : Array FVarId) : MetaM MVarId := g.withContext do
+  let mut ins := #[]
+  let mut outs := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if ty.isAppOfArity ``Janus.InRanges 3 && !before.contains d.fvarId then ins := ins.push (d, ty)
+    else if ty.isAppOfArity ``Janus.Outside 3 then outs := outs.push (d, ty)
+  let mut g := g
+  for (di, ti) in ins do
+    for (do_, to) in outs do
+      unless ← withReducible (isDefEq (ti.getArg! 2) (to.getArg! 2)) do continue
+      let pf ← mkAppM ``Janus.InRanges.apart #[di.toExpr, do_.toExpr]
+      let (_, g') ← (← g.assert `h_apart (← inferType pf) pf).intro1P
+      g := g'
+  return g
+
 /-- `rs[i] ∈ rs` for a list literal `rs = [e₀, …]`. -/
 def memProof (ty : Expr) (elems : List Expr) (i : Nat) : MetaM Expr := do
   match elems, i with
@@ -965,6 +1058,62 @@ def frameArith (g : MVarId) : TacticM Bool := do
     if gs.isEmpty then return true
     saved.restore; omegaApart g
   catch _ => saved.restore; omegaApart g
+
+/-- A side condition `InRanges a n rs` (of a `LiveFrame` read rule, or of the view lemmas of
+`Janus.Contracts.Live`): `[a, a+n)` inside one range of `rs`. For `l ++ r` either side; for a
+literal `(lo, hi) :: rest` the head by `omega` or the rest; for anything else (a variable such as a
+live set or the runtime-owned ranges) a hypothesis `InRanges b k rs` with `[a, a+n) ⊆ [b, b+k)`. -/
+partial def dischargeInRanges (g : MVarId) (fuel : Nat := 32) : TacticM Bool := g.withContext do
+  if fuel = 0 then return false
+  let t ← whnfR (← instantiateMVars (← g.getType))
+  unless t.isAppOfArity ``Janus.InRanges 3 do return false
+  let a := t.getArg! 0
+  let n := t.getArg! 1
+  let rs ← whnfR (← instantiateMVars (t.getArg! 2))
+  let arith (lhs rhs : Expr) : TacticM (Option Expr) := do
+    let m ← mkFreshExprSyntheticOpaqueMVar (← mkAppM ``LE.le #[lhs, rhs])
+    if ← frameArith m.mvarId! then return some m else return none
+  -- hypotheses first (cheap, and the only way for a variable)
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.InRanges 3 do continue
+    unless ← withReducible (isDefEq (ty.getArg! 2) (t.getArg! 2)) do continue
+    let saved ← saveState
+    let b := ty.getArg! 0
+    let k := ty.getArg! 1
+    let some h1 ← arith b a | saved.restore; continue
+    let some h2 ← arith (← mkAppM ``HAdd.hAdd #[a, n]) (← mkAppM ``HAdd.hAdd #[b, k]) | saved.restore; continue
+    g.assign (← mkAppM ``Janus.InRanges.sub #[d.toExpr, h1, h2])
+    return true
+  match rs.getAppFnArgs with
+  | (``HAppend.hAppend, #[_, _, _, _, l, r]) =>
+    let saved ← saveState
+    let gr ← mkFreshExprSyntheticOpaqueMVar (← mkAppM ``Janus.InRanges #[a, n, r])
+    if ← dischargeInRanges gr.mvarId! (fuel - 1) then
+      g.assign (← mkAppM ``Janus.InRanges.append_right #[l, gr]); return true
+    saved.restore
+    let gl ← mkFreshExprSyntheticOpaqueMVar (← mkAppM ``Janus.InRanges #[a, n, l])
+    if ← dischargeInRanges gl.mvarId! (fuel - 1) then
+      g.assign (← mkAppM ``Janus.InRanges.append_left #[gl, r]); return true
+    saved.restore
+    return false
+  | (``List.cons, #[_, hd, tl]) =>
+    let saved ← saveState
+    let hd ← whnfR hd
+    if hd.isAppOfArity ``Prod.mk 4 then
+      let lo := hd.getArg! 2
+      let hi := hd.getArg! 3
+      if let some h1 ← arith lo a then
+        if let some h2 ← arith (← mkAppM ``HAdd.hAdd #[a, n]) hi then
+          g.assign (← mkAppM ``Janus.InRanges.cons_head #[tl, h1, h2]); return true
+    saved.restore
+    let gt ← mkFreshExprSyntheticOpaqueMVar (← mkAppM ``Janus.InRanges #[a, n, tl])
+    if ← dischargeInRanges gt.mvarId! (fuel - 1) then
+      g.assign (← mkAppM ``Janus.InRanges.cons_tail #[hd, gt]); return true
+    saved.restore
+    return false
+  | _ => return false
 
 /-- Peel the store `m = m'.writeLE a k v` of a `MemFrame m₀ m rs` goal using a hypothesis
 `InRanges b k' rs'` (with `rs'` contained in `rs`, e.g. `rs = rs' ++ …`, and `[a, a+k) ⊆ [b, b+k')`
@@ -1073,6 +1222,12 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
     g.assign (← mkAppM ``Janus.MemFrame.trans #[hm, d.toExpr, sub])
     return ← proveFrame hm.mvarId! (fuel - 1)
   throwError "janus_frame: cannot relate the memory{indentExpr m}\nto{indentExpr m0}\n(no store to peel, and no `MemFrame` hypothesis about it whose ranges are covered)"
+
+/-- `janus_live`: close a live-runtime goal of a callee precondition (`RtInv.inv R b L g v`,
+`RtInv.ok R a args`) from the context. Declared here so that the executors' precondition closers
+can name it; its elaborator is `Janus.Contracts.Live`'s (without that module it fails, and the
+closers go on). -/
+syntax "janus_live" : tactic
 
 /-- `janus_apart`: `omega` with the `Apart` hypotheses of the context, one at a time. -/
 elab "janus_apart" : tactic => do
