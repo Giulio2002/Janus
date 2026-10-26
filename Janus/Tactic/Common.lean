@@ -143,6 +143,14 @@ theorem mono {rs' : List (Nat × Nat)} (h : MemFrame m m' rs)
 
 end MemFrame
 
+/-- A range inside `rs` and a range outside `rs` are `Apart` (the form the dischargers use one
+fact at a time). -/
+theorem InRanges.apart {a n b k : Nat} {rs : List (Nat × Nat)} (hin : InRanges a n rs)
+    (hout : Outside b k rs) : Apart b k a n := by
+  obtain ⟨r, hr, h1, h2⟩ := hin
+  have := MemFrame.outside_mem hout hr
+  unfold Apart; omega
+
 theorem InRanges.cons_head {a n lo hi : Nat} (rs : List (Nat × Nat)) (h1 : lo ≤ a) (h2 : a + n ≤ hi) :
     InRanges a n ((lo, hi) :: rs) := ⟨(lo, hi), List.mem_cons_self .., h1, h2⟩
 
@@ -223,26 +231,50 @@ def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
   -- only disjunctions (the read-over-write and frame side conditions) are worth it
   unless gty.consumeMData.isAppOfArity ``Or 2 do return false
   let goalAtoms := arithAtoms gty
-  -- relevant `Apart` facts: every atom of their two ranges occurs in the goal
-  let mut cands := #[]
-  let mut toClear := #[]
+  -- relevant `Apart` facts: every atom of their two start addresses occurs in the goal
+  let mut full := #[]
+  let part : Array (FVarId × Array Expr) := #[]
+  let mut aparts := #[]
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
     if ty.isAppOfArity ``Janus.Apart 4 then
+      aparts := aparts.push d.fvarId
       let hAtoms := arithAtoms (ty.getArg! 2) (arithAtoms (ty.getArg! 0))
-      if hAtoms.all goalAtoms.contains then cands := cands.push d.fvarId
-      else toClear := toClear.push d.fvarId
-      continue
-    -- keep only the arithmetic facts about the goal's atoms, so that each `omega` is small
-    if ← isProp ty then
-      unless (arithAtoms ty).all goalAtoms.contains do toClear := toClear.push d.fvarId
-  if cands.isEmpty then return false
-  let saved ← saveState
-  let g' ← try g.tryClearMany toClear catch _ => pure g
-  for fv in cands do
+      if hAtoms.all goalAtoms.contains then full := full.push (d.fvarId, hAtoms)
+  if full.isEmpty && part.isEmpty then return false
+  -- the arithmetic hypotheses and their atoms
+  let mut hyps := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail || aparts.contains d.fvarId then continue
+    let ty ← instantiateMVars d.type
+    if ← isProp ty then hyps := hyps.push (d.fvarId, arithAtoms ty)
+  for (fv, _) in full ++ part do
+    let aty ← instantiateMVars (← fv.getType)
+    -- the atoms of the two ranges, lengths included
+    let hAtoms := arithAtoms (aty.getArg! 3) (arithAtoms (aty.getArg! 2)
+      (arithAtoms (aty.getArg! 1) (arithAtoms (aty.getArg! 0))))
+    let mut atoms := goalAtoms ++ hAtoms
+    -- when a range has atoms the goal does not (an object's symbolic size), two rounds of the
+    -- hypotheses about them (e.g. `8·n ≤ round`, `0 < n`)
+    if !(hAtoms.all goalAtoms.contains) then
+      for _ in [0:2] do
+        let mut more := #[]
+        for (_, ha) in hyps do
+          if ha.size ≤ 4 && ha.any (fun a => atoms.contains a && !goalAtoms.contains a && a.nat?.isNone) then
+            more := more ++ ha
+        atoms := atoms ++ more
+    -- keep only the arithmetic facts about these atoms, so that each `omega` is small
+    let mut toClear := #[]
+    for d in ← getLCtx do
+      if d.isImplementationDetail || d.fvarId == fv then continue
+      if aparts.contains d.fvarId then toClear := toClear.push d.fvarId; continue
+      let ty ← instantiateMVars d.type
+      if ← isProp ty then
+        unless (arithAtoms ty).all atoms.contains do toClear := toClear.push d.fvarId
     let saved' ← saveState
     try
+      let g' ← try g.tryClearMany toClear catch _ => pure g
       let h ← Term.exprToSyntax (mkFVar fv)
       let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic|
         (have h' : _ := $h
@@ -251,10 +283,8 @@ def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
       if gs.isEmpty then return true
       saved'.restore
     catch _ => saved'.restore
-  saved.restore
   return false
 
-/-- `0x…` -/
 def hex (n : Nat) : String := "0x" ++ String.ofList (Nat.toDigits 16 n)
 
 /-! ## Status of the step in progress -/
@@ -987,6 +1017,27 @@ where
       if gs.isEmpty then return true
       saved.restore; omegaApart g
     catch _ => saved.restore; omegaApart g
+
+/-- After a live contract's call: for every new `InRanges p n rs` hypothesis (an object the call
+returned inside the runtime-owned ranges) and every `Outside a k rs` hypothesis (caller data
+outside them), add `Apart a k p n`, so that the read-over-write side conditions see the object
+apart from the caller's frame, `g`, type descriptors (`janus_apart`, one fact at a time). -/
+def addApartFacts (g : MVarId) (before : Array FVarId) : MetaM MVarId := g.withContext do
+  let mut ins := #[]
+  let mut outs := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if ty.isAppOfArity ``Janus.InRanges 3 && !before.contains d.fvarId then ins := ins.push (d, ty)
+    else if ty.isAppOfArity ``Janus.Outside 3 then outs := outs.push (d, ty)
+  let mut g := g
+  for (di, ti) in ins do
+    for (do_, to) in outs do
+      unless ← withReducible (isDefEq (ti.getArg! 2) (to.getArg! 2)) do continue
+      let pf ← mkAppM ``Janus.InRanges.apart #[di.toExpr, do_.toExpr]
+      let (_, g') ← (← g.assert `h_apart (← inferType pf) pf).intro1P
+      g := g'
+  return g
 
 /-- `rs[i] ∈ rs` for a list literal `rs = [e₀, …]`. -/
 def memProof (ty : Expr) (elems : List Expr) (i : Nat) : MetaM Expr := do

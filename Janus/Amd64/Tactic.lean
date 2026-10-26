@@ -1565,7 +1565,9 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
     let before ← g'.withContext do return (← getLCtx).getFVarIds
     let (fv, g'') ← g'.introNP 3
     let g'' ← Common.destructPost g'' fv[0]! fv[1]! fv[2]!
-    out := out ++ [← normFrames cfg g'' before]
+    let g'' ← normFrames cfg g'' before
+    let g'' ← if mvs.isEmpty then pure g'' else Common.addApartFacts g'' before
+    out := out ++ [g'']
   return out
 where
   /-- Simplify the callee's `MemFrame` hypotheses and the other propositions its postcondition
