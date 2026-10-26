@@ -22,6 +22,14 @@ namespace Janus.Contracts
 
 open Janus Janus.Amd64 Janus.Amd64.Tactic Janus.Spec
 
+/-- The window a live amd64 contract keeps the live set and the new objects apart from, and
+requires outside `R.rt`: the callee's stack (`calleeStack64`) and the return-address slot
+`[RSP, RSP + 8)` (the caller's own `RET` reads it after the call). -/
+@[reducible] def liveWin64 (s : State) (stack nargs : Nat) : List (Nat × Nat) :=
+  calleeStack64 s stack nargs ++ [((s.regs 4).toNat, (s.regs 4).toNat + 8)]
+
+attribute [janus64_exec, janus64_post] liveWin64
+
 /-- The runtime's stack check falls through (amd64): `g.stackguard0 + stack < RSP`, its word
 outside the callee's window. -/
 @[reducible] def StackRoom64 (s : State) (stack nargs : Nat) : Prop :=
@@ -35,7 +43,7 @@ outside the callee's window. -/
     (zh : Nat → BitVec 256) (kr : Nat → W64),
     s' = retState64 s junk (res ptr) f x yh m zh kr ∧
       MemFrame s.mem m (R.rt ++ calleeStack64 s stack nargs) ∧ LiveFrame s.mem m L [] ∧
-      Q m ptr.toNat ∧ ApartAll ptr.toNat round (calleeStack64 s stack nargs) ∧
+      Q m ptr.toNat ∧ ApartAll ptr.toNat round (liveWin64 s stack nargs) ∧
       R.inv (b - cost) (L ++ [(ptr.toNat, ptr.toNat + round)]) (s.regs 14).toNat
         (view R.rt (L ++ [(ptr.toNat, ptr.toNat + round)]) m)
 
@@ -54,7 +62,8 @@ def MallocgcLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) 
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => MallocgcPre64 stack s ∧ StackRoom64 s stack 3 ∧
       LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (mallocgcRound64 s)
-        (s.regs 14).toNat s.mem (calleeStack64 s stack 3))
+        (s.regs 14).toNat s.mem
+        (liveWin64 s stack 3))
     (fun s s' => LiveAllocRet64 R stack 3 (fun ptr => [ptr]) L b (mallocgcRound64 s) (mallocgcRound64 s)
       s s' fun m ptr => 0 < (s.regs 0).toNat → mallocgcObj64 R.rt s m ptr ∧ ApartAll ptr (mallocgcRound64 s) L)
 
@@ -63,7 +72,7 @@ def NewobjectLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat)
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => NewobjectPre64 stack s ∧ StackRoom64 s stack 1 ∧
       LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound64 s) (s.regs 14).toNat s.mem
-        (calleeStack64 s stack 1))
+        (liveWin64 s stack 1))
     (fun s s' => LiveAllocRet64 R stack 1 (fun ptr => [ptr]) L b (newobjectRound64 s) (newobjectRound64 s)
       s s' fun m ptr => 0 < typSize s.mem (s.regs 0).toNat →
         newobjectObj64 R.rt s m ptr ∧ ApartAll ptr (newobjectRound64 s) L)
@@ -73,10 +82,47 @@ def MakesliceLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat)
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => MakeslicePre64 stack s ∧ StackRoom64 s stack 3 ∧
       LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (makesliceRound64 s)
-        (s.regs 14).toNat s.mem (calleeStack64 s stack 3))
+        (s.regs 14).toNat s.mem
+        (liveWin64 s stack 3))
     (fun s s' => LiveAllocRet64 R stack 3 (fun ptr => [ptr]) L b (makesliceRound64 s) (makesliceRound64 s)
       s s' fun m ptr => 0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat →
         makesliceObj64 R.rt s m ptr ∧ ApartAll ptr (makesliceRound64 s) L)
+
+/-! ### Non-zero sizes (amd64) -/
+
+theorem MallocgcLiveContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {stack : Nat} {R : RtInv}
+    (h : MallocgcLiveContract64 p addr stack R) (L : List (Nat × Nat)) (b : Nat) :
+    Summary p addr
+      (fun s => (MallocgcPre64 stack s ∧ StackRoom64 s stack 3 ∧
+        LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (mallocgcRound64 s)
+          (s.regs 14).toNat s.mem (liveWin64 s stack 3)) ∧ 0 < (s.regs 0).toNat)
+      (fun s s' => LiveAllocRet64 R stack 3 (fun ptr => [ptr]) L b (mallocgcRound64 s) (mallocgcRound64 s)
+        s s' fun m ptr => mallocgcObj64 R.rt s m ptr ∧ ApartAll ptr (mallocgcRound64 s) L) :=
+  Summary.mono (h L b) (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4, h5, h6⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4 hp.2, h5, h6⟩
+
+theorem NewobjectLiveContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {stack : Nat} {R : RtInv}
+    (h : NewobjectLiveContract64 p addr stack R) (L : List (Nat × Nat)) (b : Nat) :
+    Summary p addr
+      (fun s => (NewobjectPre64 stack s ∧ StackRoom64 s stack 1 ∧
+        LiveAt R addr [(s.regs 0).toNat] L b (newobjectRound64 s) (s.regs 14).toNat s.mem
+          (liveWin64 s stack 1)) ∧ 0 < typSize s.mem (s.regs 0).toNat)
+      (fun s s' => LiveAllocRet64 R stack 1 (fun ptr => [ptr]) L b (newobjectRound64 s) (newobjectRound64 s)
+        s s' fun m ptr => newobjectObj64 R.rt s m ptr ∧ ApartAll ptr (newobjectRound64 s) L) :=
+  Summary.mono (h L b) (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4, h5, h6⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4 hp.2, h5, h6⟩
+
+theorem MakesliceLiveContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {stack : Nat} {R : RtInv}
+    (h : MakesliceLiveContract64 p addr stack R) (L : List (Nat × Nat)) (b : Nat) :
+    Summary p addr
+      (fun s => (MakeslicePre64 stack s ∧ StackRoom64 s stack 3 ∧
+        LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (makesliceRound64 s)
+          (s.regs 14).toNat s.mem (liveWin64 s stack 3)) ∧
+        0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat)
+      (fun s s' => LiveAllocRet64 R stack 3 (fun ptr => [ptr]) L b (makesliceRound64 s) (makesliceRound64 s)
+        s s' fun m ptr => makesliceObj64 R.rt s m ptr ∧ ApartAll ptr (makesliceRound64 s) L) :=
+  Summary.mono (h L b) (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4, h5, h6⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3, h4 hp.2, h5, h6⟩
 
 /-- **`runtime.growslice`, live** (amd64; 8-byte pointer-free elements): as `GrowsliceLiveContract`
 (the old array stays in `L`). -/
@@ -84,7 +130,7 @@ def GrowsliceLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat)
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => GrowslicePre64 stack s ∧ StackRoom64 s stack 5 ∧
       LiveAt R addr (growsliceArgs64 s) L b (growsliceRound64 s) (s.regs 14).toNat s.mem
-        (calleeStack64 s stack 5))
+        (liveWin64 s stack 5))
     (fun s s' => LiveAllocRet64 R stack 5
       (fun ptr => [ptr, s.regs 3, BitVec.ofNat 64 (growCap8 (s.regs 3).toNat (s.regs 1).toNat)])
       L b (growsliceRound64 s) (growsliceRound64 s) s s' fun m ptr =>
@@ -96,7 +142,8 @@ def MallocgcSmallNoScanSCLiveContract64 (n : Nat) (p : Janus.Amd64.Program) (add
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => (MallocgcPre64 stack s ∧ StackRoom64 s stack 3 ∧
       LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (mallocgcRound64 s)
-        (s.regs 14).toNat s.mem (calleeStack64 s stack 3)) ∧
+        (s.regs 14).toNat s.mem
+        (liveWin64 s stack 3)) ∧
       NoScanArgs n s.mem (s.regs 0).toNat (s.regs 3).toNat)
     (fun s s' => LiveAllocRet64 R stack 3 (fun ptr => [ptr]) L b (mallocgcRound64 s) (mallocgcRound64 s)
       s s' fun m ptr => mallocgcObj64 R.rt s m ptr ∧ ApartAll ptr (mallocgcRound64 s) L)
@@ -107,7 +154,8 @@ def MallocgcSmallScanNoHeaderSCLiveContract64 (n : Nat) (p : Janus.Amd64.Program
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => (MallocgcPre64 stack s ∧ StackRoom64 s stack 3 ∧
       LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (mallocgcRound64 s)
-        (s.regs 14).toNat s.mem (calleeStack64 s stack 3)) ∧
+        (s.regs 14).toNat s.mem
+        (liveWin64 s stack 3)) ∧
       ScanArgs n s.mem (s.regs 0).toNat (s.regs 3).toNat)
     (fun s s' => LiveAllocRet64 R stack 3 (fun ptr => [ptr]) L b (mallocgcRound64 s) (mallocgcRound64 s)
       s s' fun m ptr => mallocgcObj64 R.rt s m ptr ∧ ApartAll ptr (mallocgcRound64 s) L)
@@ -118,7 +166,8 @@ def MallocgcTinySizeLiveContract64 (n : Nat) (p : Janus.Amd64.Program) (addr : N
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => (MallocgcPre64 stack s ∧ StackRoom64 s stack 3 ∧
       LiveAt R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b (mallocgcRound64 s)
-        (s.regs 14).toNat s.mem (calleeStack64 s stack 3)) ∧
+        (s.regs 14).toNat s.mem
+        (liveWin64 s stack 3)) ∧
       TinyArgs n s.mem (s.regs 0).toNat (s.regs 3).toNat)
     (fun s s' => LiveAllocRet64 R stack 3 (fun ptr => [ptr]) L b (mallocgcRound64 s) (mallocgcRound64 s)
       s s' fun m ptr => mallocgcObj64 R.rt s m ptr ∧ ApartAll ptr (mallocgcRound64 s) L)
@@ -143,12 +192,21 @@ theorem MallocgcLiveContract64.tinySize {n : Nat} {p : Janus.Amd64.Program} {add
 
 /-! ## The write barrier -/
 
+/-- The registers after `gcWriteBarrierN` (amd64): `RSP + 8`, `R11 = buf`, the rest kept. A named
+function (like `callRegs64`) so that the simp set applies it to one index at a time instead of
+expanding the nested register maps of a long run under the binder. -/
+def wbRegs64 (old : Nat → W64) (buf : W64) : Nat → W64 :=
+  fun i => if i = 4 then old 4 + 8#64 else if i = 11 then buf else old i
+
+@[janus64_exec, janus64_post] theorem wbRegs64_apply (old : Nat → W64) (buf : W64) (i : Nat) :
+    wbRegs64 old buf i = if i = 4 then old 4 + 8#64 else if i = 11 then buf else old i := rfl
+
 /-- The state `gcWriteBarrierN` returns in (amd64): `RSP + 8`, `R11 = buf`, every other general
 register, `X15`, `FS` and the direction flag kept, the flags, `X0`–`X14`, the upper halves and the
 AVX-512 state unspecified. -/
 def wbRetX64 (s : State) (buf : W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
     (zh : Nat → BitVec 256) (kr : Nat → W64) : State :=
-  { s with regs := fun i => if i = 4 then s.regs 4 + 8#64 else if i = 11 then buf else s.regs i,
+  { s with regs := wbRegs64 s.regs buf,
            rip := retAddrOf s, flags := f, xmm := fun i => if i = 15 then s.xmm 15 else x i,
            ymmHi := yh, mem := m, zmmHi := zh, kreg := kr }
 
@@ -158,14 +216,14 @@ attribute [janus64_exec, janus64_post] wbRetX64
 def WbLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) (R : RtInv) (n : Nat) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => CallOK64 s stack 0 ∧ R.ok addr [n] ∧ R.inv b L (s.regs 14).toNat (view R.rt L s.mem) ∧
-      LiveSep L [((s.regs 4).toNat - stack, (s.regs 4).toNat)] ∧
-      LiveSep [((s.regs 4).toNat - stack, (s.regs 4).toNat)] R.rt)
+      LiveSep L [((s.regs 4).toNat - stack, (s.regs 4).toNat + 8)] ∧
+      LiveSep [((s.regs 4).toNat - stack, (s.regs 4).toNat + 8)] R.rt)
     (fun s s' => ∃ (buf : W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
         (zh : Nat → BitVec 256) (kr : Nat → W64),
       s' = wbRetX64 s buf f x yh m zh kr ∧
       MemFrame s.mem m (R.rt ++ [((s.regs 4).toNat - stack, (s.regs 4).toNat)]) ∧ LiveFrame s.mem m L [] ∧
       WbSlots R.rt m buf.toNat n ∧ ApartAll buf.toNat (8 * n) L ∧
-      ApartAll buf.toNat (8 * n) [((s.regs 4).toNat - stack, (s.regs 4).toNat)] ∧
+      ApartAll buf.toNat (8 * n) [((s.regs 4).toNat - stack, (s.regs 4).toNat + 8)] ∧
       InvSlots R b L (s.regs 14).toNat R.rt m buf.toNat n)
 
 /-! ## The string, slice and bulk-barrier specs -/
@@ -180,7 +238,7 @@ def WbLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) (R : R
       | none => True) ∧
     StackRoom64 s stack sp.nargs ∧
     LiveAt R addr (argWords64 s sp.nargs) L b (ls.cost (argWords64 s sp.nargs) s.mem) (s.regs 14).toNat
-      s.mem (calleeStack64 s stack sp.nargs)
+      s.mem (liveWin64 s stack sp.nargs)
 
 /-- The postcondition of `RtLiveContract64`. -/
 @[reducible] def RtLivePost64 (stack : Nat) (R : RtInv) (sp : RtSpec) (ls : LiveSpec)
@@ -194,7 +252,7 @@ def WbLiveContract64 (p : Janus.Amd64.Program) (addr : Nat) (stack : Nat) (R : R
       LiveFrame s.mem m L (sp.writes (argWords64 s sp.nargs) s.mem) ∧
       FreshFrom (ls.fresh (argWords64 s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat) L ∧
       LiveApart (liveAdds ls (argWords64 s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat)
-        (calleeStack64 s stack sp.nargs) ∧
+        (liveWin64 s stack sp.nargs) ∧
       R.inv (b - ls.cost (argWords64 s sp.nargs) s.mem)
         (L ++ liveAdds ls (argWords64 s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat) (s.regs 14).toNat
         (view R.rt (L ++ liveAdds ls (argWords64 s sp.nargs) s.mem r0.toNat r1.toNat r2.toNat) m)
@@ -211,12 +269,12 @@ As arm64 `MemmoveLive` etc.: `RAX = dst`, `RBX = src`, `RCX = n` (`memmove`); th
 live object or outside `R.rt`, and also outside the return-address slot. -/
 
 /-- The destination of a copy or clear (amd64). -/
-def LiveDest64 (R : RtInv) (L : List (Nat × Nat)) (s : State) (d nargs a n : Nat) : Prop :=
+@[reducible] def LiveDest64 (R : RtInv) (L : List (Nat × Nat)) (s : State) (d nargs a n : Nat) : Prop :=
   a + n ≤ 2 ^ 48 ∧ s.mem.accessible a n true = true ∧ Outside a n (calleeStack64 s d nargs) ∧
     (InRanges a n L ∨ Outside a n R.rt) ∧ Outside a n [((s.regs 4).toNat, (s.regs 4).toNat + 8)]
 
 /-- The return of a live copy or clear (amd64): `retState64` without result registers. -/
-def LiveMemRet64 (R : RtInv) (d nargs : Nat) (extra L : List (Nat × Nat)) (b : Nat) (s s' : State)
+@[reducible] def LiveMemRet64 (R : RtInv) (d nargs : Nat) (extra L : List (Nat × Nat)) (b : Nat) (s s' : State)
     (P : Memory → Prop) : Prop :=
   ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
     (zh : Nat → BitVec 256) (kr : Nat → W64), s' = retState64 s junk [] f x yh m zh kr ∧
@@ -234,7 +292,7 @@ def LiveMemRet64 (R : RtInv) (d nargs : Nat) (extra L : List (Nat × Nat)) (b : 
 def MemmoveLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => MemPre64 d 3 s ∧
-      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b s (calleeStack64 s d 3) ∧
+      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b s (liveWin64 s d 3) ∧
       MemAmd64.Input s d 3 (s.regs 3).toNat (s.regs 1).toNat ∧
       LiveDest64 R L s d 3 (s.regs 0).toNat (s.regs 1).toNat)
     (fun s s' => LiveMemRet64 R d 3 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 1).toNat)] L b s s'
@@ -244,7 +302,7 @@ def MemmoveLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtInv) :
 def MemclrNoHeapPointersLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => MemPre64 d 2 s ∧
-      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat] L b s (calleeStack64 s d 2) ∧
+      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat] L b s (liveWin64 s d 2) ∧
       LiveDest64 R L s d 2 (s.regs 0).toNat (s.regs 3).toNat)
     (fun s s' => LiveMemRet64 R d 2 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 3).toNat)] L b s s'
       fun m => Mem.Zeroed m (s.regs 0).toNat (s.regs 3).toNat)
@@ -253,7 +311,7 @@ def MemclrNoHeapPointersLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) 
 def TypedMemmoveLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => MemPre64 d 3 s ∧
-      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b s (calleeStack64 s d 3) ∧
+      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] L b s (liveWin64 s d 3) ∧
       TypeOK s.mem (s.regs 0).toNat ∧ Outside (s.regs 0).toNat 16 (calleeStack64 s d 3) ∧
       MemAmd64.Input s d 3 (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat) ∧
       LiveDest64 R L s d 3 (s.regs 3).toNat (typSize s.mem (s.regs 0).toNat))
@@ -265,7 +323,7 @@ def TypedMemmoveLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtI
 def TypedMemclrLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => MemPre64 d 2 s ∧
-      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat] L b s (calleeStack64 s d 2) ∧
+      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat] L b s (liveWin64 s d 2) ∧
       TypeOK s.mem (s.regs 0).toNat ∧ Outside (s.regs 0).toNat 16 (calleeStack64 s d 2) ∧
       LiveDest64 R L s d 2 (s.regs 3).toNat (typSize s.mem (s.regs 0).toNat))
     (fun s s' => LiveMemRet64 R d 2
@@ -276,27 +334,22 @@ def TypedMemclrLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtIn
 def MemclrHasPointersLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R : RtInv) : Prop :=
   ∀ (L : List (Nat × Nat)) (b : Nat), Summary p addr
     (fun s => MemPre64 d 2 s ∧
-      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat] L b s (calleeStack64 s d 2) ∧
+      LiveMemAt64 R addr [(s.regs 0).toNat, (s.regs 3).toNat] L b s (liveWin64 s d 2) ∧
       (s.regs 0).toNat % 8 = 0 ∧ (s.regs 3).toNat % 8 = 0 ∧
       LiveDest64 R L s d 2 (s.regs 0).toNat (s.regs 3).toNat)
     (fun s s' => LiveMemRet64 R d 2 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 3).toNat)] L b s s'
       fun m => Mem.Zeroed m (s.regs 0).toNat (s.regs 3).toNat)
 
-/-- A state is `retState64` of the call state when it returns to the return address with
-`RSP + 8`, `RBP`, `R14`, `X15`, the direction flag, `FS` and `MXCSR` kept and the result
-registers `RAX, RBX, RCX` as `res` (a result register past `res`'s length is unconstrained). The
-converse of the definition, for proofs that run a callee's code. -/
-theorem retState64_intro {s s' : State} {res : List W64} (hrip : s'.rip = retAddrOf s)
+/-- `retState64`, from the final fields, with every hypothesis explicit (`x87`/`fpucw` as
+equations: carry them in a `Keep64` conjunct, see `retState64_of_keep`). -/
+theorem retState64_eq {s s' : State} {res : List W64} (hrip : s'.rip = retAddrOf s)
     (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
     (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
     (hmx : s'.mxcsr = s.mxcsr)
     (h0 : s'.regs 0 = res.getD 0 (s'.regs 0)) (h1 : s'.regs 3 = res.getD 1 (s'.regs 3))
     (h2 : s'.regs 1 = res.getD 2 (s'.regs 1))
-    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all)
-    (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
-    ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
-      (zh : Nat → BitVec 256) (kr : Nat → W64), s' = retState64 s junk res f x yh m zh kr := by
-  refine ⟨s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, s'.zmmHi, s'.kreg, ?_⟩
+    (hx87 : s'.x87 = s.x87) (hfw : s'.fpucw = s.fpucw) :
+    s' = retState64 s s'.regs res s'.flags s'.xmm s'.ymmHi s'.mem s'.zmmHi s'.kreg := by
   obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
   simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw h0 h1 h2 ⊢
   subst hrip hfs hdf hmx hx87 hfw
@@ -319,5 +372,57 @@ theorem retState64_intro {s s' : State} {res : List W64} (hrip : s'.rip = retAdd
     split
     · rename_i hi; subst hi; exact hx
     · rfl
+
+/-- A state is `retState64` of the call state when it returns to the return address with
+`RSP + 8`, `RBP`, `R14`, `X15`, the direction flag, `FS` and `MXCSR` kept and the result
+registers `RAX, RBX, RCX` as `res` (a result register past `res`'s length is unconstrained). The
+converse of the definition, for proofs that run a callee's code. -/
+theorem retState64_intro {s s' : State} {res : List W64} (hrip : s'.rip = retAddrOf s)
+    (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
+    (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
+    (hmx : s'.mxcsr = s.mxcsr)
+    (h0 : s'.regs 0 = res.getD 0 (s'.regs 0)) (h1 : s'.regs 3 = res.getD 1 (s'.regs 3))
+    (h2 : s'.regs 1 = res.getD 2 (s'.regs 1))
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all)
+    (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
+    ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
+      (zh : Nat → BitVec 256) (kr : Nat → W64), s' = retState64 s junk res f x yh m zh kr :=
+  ⟨s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, s'.zmmHi, s'.kreg,
+    retState64_eq hrip h4 h5 h14 hx hfs hdf hmx h0 h1 h2 hx87 hfw⟩
+
+/-- **The fields a Go function keeps** (amd64): the x87 state and control word, the `FS` base and the
+direction flag. A loop invariant carries ONE `Keep64 s t` conjunct instead of one equation per
+field (the `x87`/`fpucw` equations of `retState64_intro` cannot be closed by `rfl` on a symbolic loop
+state); `retState64_of_keep` consumes it. -/
+def Keep64 (s t : State) : Prop :=
+  t.x87 = s.x87 ∧ t.fpucw = s.fpucw ∧ t.fsBase = s.fsBase ∧ t.df = s.df
+
+theorem Keep64.refl (s : State) : Keep64 s s := ⟨rfl, rfl, rfl, rfl⟩
+
+theorem Keep64.trans {s t u : State} (h : Keep64 s t) (h' : Keep64 t u) : Keep64 s u :=
+  ⟨h'.1.trans h.1, h'.2.1.trans h.2.1, h'.2.2.1.trans h.2.2.1, h'.2.2.2.trans h.2.2.2⟩
+
+/-- One instruction keeps the bundle: its own equations are `rfl` for a register, flag, memory or
+vector update (no decoded instruction writes these fields). -/
+theorem Keep64.step {s t u : State} (h : Keep64 s t) (h1 : u.x87 = t.x87) (h2 : u.fpucw = t.fpucw)
+    (h3 : u.fsBase = t.fsBase) (h4 : u.df = t.df) : Keep64 s u :=
+  Keep64.trans h ⟨h1, h2, h3, h4⟩
+
+/-- Close `Keep64 s t'` from `Keep64 s t` for a state `t'` built from `t` by updates. -/
+macro "janus64_keep" : tactic => `(tactic| first
+  | assumption
+  | exact Keep64.refl _
+  | (refine Keep64.step (by assumption) ?_ ?_ ?_ ?_ <;> simp))
+
+/-- **`retState64`, from the final fields.** A state that returns to the return address with the
+stack, `RBP`, `R14`, `X15`, `MXCSR` and the `Keep64` fields kept and the result registers `res` IS
+`retState64 s` with its own registers, flags, vector state and memory as the witnesses. -/
+theorem retState64_of_keep {s s' : State} {res : List W64} (hrip : s'.rip = retAddrOf s)
+    (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
+    (hx : s'.xmm 15 = s.xmm 15) (hmx : s'.mxcsr = s.mxcsr) (hk : Keep64 s s')
+    (h0 : s'.regs 0 = res.getD 0 (s'.regs 0)) (h1 : s'.regs 3 = res.getD 1 (s'.regs 3))
+    (h2 : s'.regs 1 = res.getD 2 (s'.regs 1)) :
+    s' = retState64 s s'.regs res s'.flags s'.xmm s'.ymmHi s'.mem s'.zmmHi s'.kreg :=
+  retState64_eq hrip h4 h5 h14 hx hk.2.2.1 hk.2.2.2 hmx h0 h1 h2 hk.1 hk.2.1
 
 end Janus.Contracts

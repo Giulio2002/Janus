@@ -874,6 +874,8 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
   if t.isAppOfArity ``Janus.InRanges 3 then
     if ← Common.dischargeInRanges g then return
     throwError "janus_disch: cannot prove{indentExpr t}"
+  if t.isForall then
+    if ← Common.dischargeLiveForall g then return
   if let some (_, lhs, _) := t.eq? then
     if lhs.isAppOfArity ``Memory.accessible 4 then
       if ← dischargeAccessible g then return
@@ -890,11 +892,24 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
   | some true => return
   | some false => throwError "janus_disch: carry bound does not hold for all limb values"
   | none => pure ()
-  evalTactic (← `(tactic| first
-    | janus_apart
-    | janus_omega
-    | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
-        Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
+  -- first with the hypotheses about the goal's atoms only (the contexts after several calls are
+  -- large and `omega` splits on every disjunction), then with all of them
+  let saved ← saveState
+  try
+    replaceMainGoal [← Common.clearIrrelevant (← getMainGoal)]
+    evalTactic (← `(tactic| first
+      | janus_apart
+      | janus_omega
+      | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
+          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
+    if !(← getUnsolvedGoals).isEmpty then throwError "janus_disch: pruned attempt left goals"
+  catch _ =>
+    saved.restore
+    evalTactic (← `(tactic| first
+      | janus_apart
+      | janus_omega
+      | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
+          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
 
 /-! ## Arithmetic -/
 

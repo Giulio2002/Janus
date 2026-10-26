@@ -210,6 +210,13 @@ structure RtInv where
 /-- Every object of the live set lies outside the ranges `win` (a callee's stack window). -/
 def LiveSep (L win : List (Nat × Nat)) : Prop := ∀ r ∈ L, Outside r.1 (r.2 - r.1) win
 
+/-- The `min` that `CMP`+`CSEL` (arm64) computes on two lengths: after the executor reduces the
+signed comparison of two values below `2^63` to a comparison of their `toNat`s, the selected word
+is the smaller one. Used by the `copy` builtin, whose length is `min(len dst, len src)`. -/
+@[simp, janus_exec, janus_post, janus64_exec, janus64_post] theorem toNat_ite_intLt (a b : BitVec 64) :
+    (if ((a.toNat : Int) < (b.toNat : Int)) then a else b).toNat = min a.toNat b.toNat := by
+  split <;> omega
+
 @[simp, janus_exec, janus_post, janus64_exec, janus64_post] theorem liveSep_nil
     (win : List (Nat × Nat)) : LiveSep [] win = True := by simp [LiveSep]
 @[simp, janus_exec, janus_post, janus64_exec, janus64_post] theorem liveSep_cons (lo hi : Nat)
@@ -226,6 +233,15 @@ as one `Apart` fact per range (the dischargers use them one at a time, `janus_ap
 of disjunctions that `omega` would case-split on. The postconditions of the live contracts state
 their disjointness facts this way. -/
 def ApartAll (a n : Nat) (rs : List (Nat × Nat)) : Prop := ∀ r ∈ rs, Apart a n r.1 (r.2 - r.1)
+
+/-- A new object apart from all of `L` is apart from every object inside `L`, as the unfolded disjunction (the
+tactics add this fact for each such pair, for `omega`). -/
+theorem ApartAll.apart_of_inRanges {a n b k : Nat} {L : List (Nat × Nat)} (h : ApartAll a n L)
+    (hi : InRanges b k L) : a + n ≤ b ∨ b + k ≤ a := by
+  obtain ⟨r, hr, h1, h2⟩ := hi
+  have := h r hr
+  unfold Apart at *
+  omega
 
 @[simp, janus_exec, janus_post, janus64_exec, janus64_post] theorem apartAll_nil (a n : Nat) :
     ApartAll a n [] = True := by simp [ApartAll]
@@ -248,6 +264,8 @@ theorem ApartAll.outside {a n : Nat} {rs : List (Nat × Nat)} (h : ApartAll a n 
     exact ⟨by omega, ih fun r hr => h r (List.mem_cons_of_mem _ hr)⟩
 
 attribute [janus_post, janus64_post] Nat.add_sub_cancel_left
+-- The guard slot of `StackGuardOK` (the copy and clear contracts' `EqPre`) is reduced to raw terms.
+attribute [janus_exec, janus_post] Janus.GoABI.regG Janus.GoABI.stackguard0Offset Janus.GoABI.stackguard0
 
 /-- Every range of `L` is `Apart` from `win` (as `LiveSep`, in the `ApartAll` form). -/
 def LiveApart (L win : List (Nat × Nat)) : Prop := ∀ r ∈ L, ApartAll r.1 (r.2 - r.1) win
@@ -322,7 +340,9 @@ def liveEq (e1 e2 : Expr) : TacticM (Option Expr) := do
   let m ← mkFreshExprSyntheticOpaqueMVar (← mkEq e1 e2)
   let saved ← saveState
   try
-    let gs ← Tactic.run m.mvarId! <| withoutRecover (evalTactic (← `(tactic|
+    -- only the hypotheses about the goal's atoms (the context after several calls is large)
+    let gm ← Common.clearIrrelevant m.mvarId!
+    let gs ← Tactic.run gm <| withoutRecover (evalTactic (← `(tactic|
       first | omega | (simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat,
         Nat.reducePow, Nat.reduceMod] at *; omega))))
     if gs.isEmpty then return some m
@@ -400,8 +420,9 @@ elab_rules : tactic | `(tactic| janus_live) => withMainContext do
               evalTactic (← `(tactic| (apply $hstx; janus_frame)))
             else
               evalTactic (← `(tactic| with_reducible exact $hstx))
+          unless gs.isEmpty do trace[janus.disch] "janus_live: {d.userName}: goals left{indentD (MessageData.joinSep (gs.map toMessageData) "\n")}"
           pure gs.isEmpty
-        catch _ => pure false
+        catch e => trace[janus.disch] "janus_live: {d.userName}: {e.toMessageData}"; pure false
       unless ok do saved.restore; continue
       g.assign (← mkAppM ``RtInv.inv_congr #[g2, hb, hg, ← mkEqRefl vG])
       replaceMainGoal []
@@ -413,6 +434,21 @@ elab_rules : tactic | `(tactic| janus_live) => withMainContext do
       let some d := d | continue
       if d.isImplementationDetail then continue
       let ty ← instantiateMVars d.type
+      -- a universally quantified request (`∀ dst src k, R.ok a [dst, src, k]`): instantiate it
+      if ty.isForall then
+        let saved ← saveState
+        let (ms, _, body) ← forallMetaTelescopeReducing ty
+        let body ← instantiateMVars body
+        if let some (R1, as1) := okParts? body then
+          let b' := mkAppN (mkConst ``RtInv.ok) (#[R1] ++ as1)
+          if ← isDefEq b' (← instantiateMVars (← g.getType)) then
+            let ms ← ms.mapM instantiateMVars
+            if ms.all (fun m => !m.isMVar) then
+              g.assign (mkAppN d.toExpr ms)
+              replaceMainGoal []
+              return
+        saved.restore
+        continue
       let some (R1, _) := okParts? ty | continue
       let saved ← saveState
       unless ← isDefEq R1 R do saved.restore; continue
@@ -426,7 +462,37 @@ elab_rules : tactic | `(tactic| janus_live) => withMainContext do
       if ok then replaceMainGoal []; return
       saved.restore
     throwError "janus_live: no hypothesis gives{indentExpr t}"
+  -- a live destination: inside a live object, or outside the runtime's ranges
+  if t.isAppOfArity ``Or 2 then
+    let saved ← saveState
+    try
+      evalTactic (← `(tactic| (refine Or.inl ?_; janus_live_disch)))
+      return
+    catch _ => saved.restore
+    evalTactic (← `(tactic| (refine Or.inr ?_; janus_live_disch)))
+    return
   throwError "janus_live: not a live goal"
+
+/-- `janus_split_and`: split every hypothesis that is syntactically a conjunction (the `Apart` facts a
+live contract's postcondition normalises to), recursively. Cheap: no unfolding. -/
+syntax (name := janusSplitAnd) "janus_split_and" : tactic
+
+open Lean Meta Elab Tactic in
+@[tactic janusSplitAnd] def evalJanusSplitAnd : Tactic := fun _ => do
+  let mut g ← getMainGoal
+  repeat
+    let mut found := false
+    for d in ← g.withContext getLCtx do
+      if d.isImplementationDetail then continue
+      let ty ← g.withContext (instantiateMVars d.type)
+      if ty.isAppOfArity ``And 2 then
+        let gs ← g.cases d.fvarId
+        let some sg := gs[0]? | continue
+        g := sg.mvarId
+        found := true
+        break
+    unless found do break
+  replaceMainGoal [g]
 
 /-! ## arm64 -/
 
@@ -655,7 +721,7 @@ flag (the typed variants call `bulkBarrierPreWrite`, which touches runtime memor
 /-- The destination of a copy or clear in a call at `s` (`nargs` arguments, stack bound `d`):
 `n` writable bytes at `a`, below `2^48`, outside the callee's window, and either inside a live
 object or outside the runtime-owned ranges. -/
-def LiveDest (R : RtInv) (L : List (Nat × Nat)) (s : State) (d nargs a n : Nat) : Prop :=
+@[reducible] def LiveDest (R : RtInv) (L : List (Nat × Nat)) (s : State) (d nargs a n : Nat) : Prop :=
   a + n ≤ 2 ^ 48 ∧ s.mem.accessible a n true = true ∧ Outside a n (calleeStack s d nargs) ∧
     (InRanges a n L ∨ Outside a n R.rt)
 
@@ -663,7 +729,7 @@ def LiveDest (R : RtInv) (L : List (Nat × Nat)) (s : State) (d nargs a n : Nat)
 `retStateX` (no result registers), memory changed only in `R.rt`, the callee's window and the
 destination `extra`, the live objects unchanged except in `extra`, and the invariant again for the
 same `L` and `b`. -/
-def LiveMemRet (R : RtInv) (d nargs : Nat) (extra L : List (Nat × Nat)) (b : Nat) (s s' : State)
+@[reducible] def LiveMemRet (R : RtInv) (d nargs : Nat) (extra L : List (Nat × Nat)) (b : Nat) (s s' : State)
     (P : Memory → Prop) : Prop :=
   ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat))
     (ep : Nat → Bool), s' = retStateX s junk [] f v m ex ep ∧
@@ -1073,13 +1139,11 @@ theorem liveSep_win {rt : List (Nat × Nat)} {s : State} {d nargs : Nat}
 /-- A state is `retStateX` of the call state when it returns to `X30` with `SP`, `X18`, `X28`,
 `X29`, the system registers and `FPSR` kept and the result registers as `res` (the converse of the
 definition, for proofs that run a callee's code). -/
-theorem retStateX_intro {s s' : State} {res : List W64} (hpc : s'.pc = s.regs 30) (hsp : s'.sp = s.sp)
+theorem retStateX_eq {s s' : State} {res : List W64} (hpc : s'.pc = s.regs 30) (hsp : s'.sp = s.sp)
     (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29)
     (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr)
     (hfs : s'.fpsr = s.fpsr) (hres : ∀ i, i < res.length → s'.regs i = res.getD i 0) :
-    ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat))
-      (ep : Nat → Bool), s' = retStateX s junk res f v m ex ep := by
-  refine ⟨s'.regs, s'.flags, s'.vregs, s'.mem, s'.excl, s'.exclPass, ?_⟩
+    s' = retStateX s s'.regs res s'.flags s'.vregs s'.mem s'.excl s'.exclPass := by
   have hr : callRegs s.regs s'.regs res = s'.regs := by
     funext i
     simp only [callRegs]
@@ -1095,6 +1159,50 @@ theorem retStateX_intro {s s' : State} {res : List W64} (hpc : s'.pc = s.regs 30
   cases s; cases s'
   simp only [retStateX] at *
   simp_all
+
+theorem retStateX_intro {s s' : State} {res : List W64} (hpc : s'.pc = s.regs 30) (hsp : s'.sp = s.sp)
+    (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29)
+    (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr) (hfc : s'.fpcr = s.fpcr)
+    (hfs : s'.fpsr = s.fpsr) (hres : ∀ i, i < res.length → s'.regs i = res.getD i 0) :
+    ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat))
+      (ep : Nat → Bool), s' = retStateX s junk res f v m ex ep := by
+  exact ⟨s'.regs, s'.flags, s'.vregs, s'.mem, s'.excl, s'.exclPass, retStateX_eq hpc hsp h18 h28 h29 hdz htp hfc hfs hres⟩
+
+/-- **The fields a Go function keeps** (arm64): the system registers `DCZID`, `TPIDR`, `FPCR`, `FPSR`
+and the registers `X18` (platform) and `X28` (`g`). A loop invariant carries ONE `KeepX s t`
+conjunct instead of one equation per field; `retStateX_of_keep` consumes it. -/
+def KeepX (s t : State) : Prop :=
+  t.dczid = s.dczid ∧ t.tpidr = s.tpidr ∧ t.fpcr = s.fpcr ∧ t.fpsr = s.fpsr ∧
+    t.regs 18 = s.regs 18 ∧ t.regs 28 = s.regs 28
+
+theorem KeepX.refl (s : State) : KeepX s s := ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+theorem KeepX.trans {s t u : State} (h : KeepX s t) (h' : KeepX t u) : KeepX s u :=
+  ⟨h'.1.trans h.1, h'.2.1.trans h.2.1, h'.2.2.1.trans h.2.2.1, h'.2.2.2.1.trans h.2.2.2.1,
+    h'.2.2.2.2.1.trans h.2.2.2.2.1, h'.2.2.2.2.2.trans h.2.2.2.2.2⟩
+
+/-- An instruction (any state update that leaves these fields alone) keeps them: given the loop
+invariant `KeepX s t` and the step's own equations `u.f = t.f` (`rfl` for a register, flag or memory
+update), `KeepX s u`. The tactic `janus_keep` closes such goals. -/
+theorem KeepX.step {s t u : State} (h : KeepX s t) (h1 : u.dczid = t.dczid) (h2 : u.tpidr = t.tpidr)
+    (h3 : u.fpcr = t.fpcr) (h4 : u.fpsr = t.fpsr) (h5 : u.regs 18 = t.regs 18)
+    (h6 : u.regs 28 = t.regs 28) : KeepX s u :=
+  KeepX.trans h ⟨h1, h2, h3, h4, h5, h6⟩
+
+/-- `KeepX s t` for a state `t` built from a state `t₀` with `KeepX s t₀` by updating fields. -/
+macro "janus_keep" : tactic => `(tactic| first
+  | assumption
+  | exact KeepX.refl _
+  | (refine KeepX.step (by assumption) ?_ ?_ ?_ ?_ ?_ ?_ <;> simp))
+
+/-- **`retStateX`, from the final fields.** If a state returns to `X30` with `SP` and `X29` kept, the
+`KeepX` fields kept and the result registers as `res`, it IS `retStateX s` with its own registers,
+flags, vector registers, memory and exclusive monitor as the witnesses (the form a consumer needs to
+match a contract's postcondition: no existential to destructure). -/
+theorem retStateX_of_keep {s s' : State} {res : List W64} (hpc : s'.pc = s.regs 30) (hsp : s'.sp = s.sp)
+    (h29 : s'.regs 29 = s.regs 29) (hk : KeepX s s') (hres : ∀ i, i < res.length → s'.regs i = res.getD i 0) :
+    s' = retStateX s s'.regs res s'.flags s'.vregs s'.mem s'.excl s'.exclPass :=
+  retStateX_eq hpc hsp hk.2.2.2.2.1 hk.2.2.2.2.2 h29 hk.1 hk.2.1 hk.2.2.1 hk.2.2.2.1 hres
 
 /-- A sub-range of a range of `rs` is in `rs` (a sub-slice of a slab of the live set). -/
 theorem InRanges.of_sub {a n b k : Nat} {rs : List (Nat × Nat)} (h : InRanges b k rs) (h1 : b ≤ a)
