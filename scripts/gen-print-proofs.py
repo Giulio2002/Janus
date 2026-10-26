@@ -13,13 +13,13 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # the fragments each example needs, in order (its callees' lemmas before their callers')
 EXAMPLES = {
     "PrintX":    ["00-head", "10-printlock", "20-recordForPanic", "30-gwrite", "40-printstring",
-                  "50-printnl", "70-printuint", "90-lock"],
+                  "50-printnl", "70-printuint", "90-lock", "95-witness"],
     "PrintBool": ["00-head", "10-printlock", "20-recordForPanic", "30-gwrite", "40-printstring",
-                  "50-printnl", "60-printbool", "90-lock"],
+                  "50-printnl", "60-printbool", "90-lock", "95-witness"],
     "PrintNeg":  ["00-head", "10-printlock", "20-recordForPanic", "30-gwrite", "70-printuint",
-                  "80-printint", "90-lock"],
+                  "80-printint", "90-lock", "95-witness"],
     "PrintStr":  ["00-head", "10-printlock", "20-recordForPanic", "30-gwrite", "40-printstring",
-                  "50-printnl", "90-lock"],
+                  "50-printnl", "90-lock", "95-witness"],
 }
 def build(isa, name, frags):
     d = os.path.join(root, "examples", "proofs-print", isa, "src")

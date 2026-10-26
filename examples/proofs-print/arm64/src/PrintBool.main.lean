@@ -132,3 +132,47 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
     case hsp => apply BitVec.eq_of_toNat_eq; simp; omega
     case hx0 => simp [setReg, callRegs, Nat.mod_eq_of_lt (show b.toNat < 256 by omega)]
     all_goals kobl
+
+/-- **Full output**: if fd 2 grew by as many bytes as the pieces hold, it grew by exactly them. -/
+theorem full_output (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
+    (hl : Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024)
+    (hu : Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024)
+    (hmm : MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove")) (b : Bool) :
+    EnsuresK (P.link impl) E Extracted.entry [BitVec.ofNat 64 b.toNat]
+      (fun s _ => PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 16 256 s ∧ P.DataLoaded s.mem ∧
+        DataOutside P rt)
+      (fun s k _ k' => (k'.output 2).length = (k.output 2).length + (Janus.Spec.Print.fmtBool b ++ [10#8]).length →
+        k'.output 2 = k.output 2 ++ (Janus.Spec.Print.fmtBool b ++ [10#8])) := by
+  intro ret hret s k hs hpre
+  refine (correctness impl rt E hl hu hmm b ret hret s k hs hpre).mono ?_ (fun _ _ h => h)
+  rintro s' k' ⟨habi, es, rfl, hem⟩
+  refine ⟨habi, fun hlen => ?_⟩
+  have h := hem.full (k := k) (by simpa [List.append_assoc] using hlen)
+  simpa [List.append_assoc] using h
+
+namespace Witness
+
+theorem setup : CallSetup ((P.link implAt).withExit ret) Extracted.entry [BitVec.ofNat 64 true.toNat] (wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) :=
+  ⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩
+
+/-- All hypotheses of `correctness` hold together: the witness code at the three contract
+addresses, the ranges `wrt`, an admissible return address and a call state ready to print. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : Nat) (s : State),
+    Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
+    Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
+    MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
+    RetAddr (P.link impl) ret ∧ CallSetup ((P.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 true.toNat] s ∧
+    (PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 16 256 s ∧ P.DataLoaded s.mem ∧ DataOutside P rt) :=
+  ⟨implAt, wrt, ret, wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0), lock2_model wrt 1024, unlock2_model wrt 1024, memmove_model,
+    hret, setup, ⟨ready _ 16 (Or.inl rfl), wmem_data, wrt_data⟩⟩
+
+/-- So the guarantee is reached: from the witness state, for every kernel, `println(true)` returns and the trace gains what the two writes may append. -/
+theorem returns (E : KEnv) (k : Kern) :
+    ReturnsK ((P.link implAt).withExit ret) E
+      (fun s' k' => FFI.ABIReturnC (wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) s' ∧
+        ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.fmtBool true, [10#8]] es)
+      (fun _ _ => False) (wstate (fun i => if i = 0 then BitVec.ofNat 64 true.toNat else 0)) k :=
+  correctness implAt wrt E (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model true ret hret _ k setup
+    (⟨ready _ 16 (Or.inl rfl), wmem_data, wrt_data⟩)
+
+end Witness

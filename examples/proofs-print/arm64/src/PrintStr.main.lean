@@ -125,3 +125,71 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
     case hsp => apply BitVec.eq_of_toNat_eq; simp; omega
     all_goals try simp only [h_pk, h_bi, h_bl, h_ow]
     all_goals kobl
+
+/-- **Full output**: if fd 2 grew by as many bytes as the pieces hold, it grew by exactly them. -/
+theorem full_output (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
+    (hl : Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024)
+    (hu : Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024)
+    (hmm : MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove")) (ptr len : BitVec 64) :
+    EnsuresK (P.link impl) E Extracted.entry [ptr, len]
+      (fun s _ => PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 24 256 s ∧ P.DataLoaded s.mem ∧
+        DataOutside P rt ∧ s.mem.accessible ptr.toNat len.toNat false = true ∧
+        ptr.toNat + len.toNat ≤ 2 ^ 48 ∧ len.toNat < 2 ^ 31 ∧ Outside ptr.toNat len.toNat rt ∧
+        Sep ptr.toNat len.toNat [(s.sp.toNat - 1088, 1112),
+          (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 264, 16), (BI, 8), (BL, 512)])
+      (fun s k _ k' => (k'.output 2).length = (k.output 2).length + (readBytes s.mem ptr.toNat len.toNat ++ [10#8]).length →
+        k'.output 2 = k.output 2 ++ (readBytes s.mem ptr.toNat len.toNat ++ [10#8])) := by
+  intro ret hret s k hs hpre
+  refine (correctness impl rt E hl hu hmm ptr len ret hret s k hs hpre).mono ?_ (fun _ _ h => h)
+  rintro s' k' ⟨habi, es, rfl, hem⟩
+  refine ⟨habi, fun hlen => ?_⟩
+  have h := hem.full (k := k) (by simpa [List.append_assoc] using hlen)
+  simpa [List.append_assoc] using h
+
+namespace Witness
+
+theorem str_facts :
+    (wstate fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0).mem.accessible
+        (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat false = true ∧
+      (BitVec.ofNat 64 NL : BitVec 64).toNat + (1#64 : BitVec 64).toNat ≤ 2 ^ 48 ∧
+      (1#64 : BitVec 64).toNat < 2 ^ 31 ∧
+      Outside (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat wrt ∧
+      Sep (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat
+        [((wstate fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0).sp.toNat - 1088, 1112),
+        ((wstate fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0).mem.readLE
+          (((wstate fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0).regs 28).toNat + 48) 8 + 264, 16),
+        (BI, 8), (BL, 512)] := by
+  simp only [sep_cons, sep_nil, and_true, wrt, outside_cons, outside_nil, Apart]
+  repeat' apply And.intro
+  all_goals decide +kernel
+
+theorem setup : CallSetup ((P.link implAt).withExit ret) Extracted.entry [BitVec.ofNat 64 NL, 1#64] (wstate (fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0)) :=
+  ⟨rfl, rfl, by intro i h; simp at h; rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl <;> rfl⟩
+
+/-- All hypotheses of `correctness` hold together: the witness code at the three contract
+addresses, the ranges `wrt`, an admissible return address and a call state ready to print. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : Nat) (s : State),
+    Lock2Contract (P.link impl) (P.contractAddr "runtime.lock2") rt 1024 ∧
+    Unlock2Contract (P.link impl) (P.contractAddr "runtime.unlock2") rt 1024 ∧
+    MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove") ∧
+    RetAddr (P.link impl) ret ∧ CallSetup ((P.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 NL, 1#64] s ∧
+    (PrintReady ⟨PK, BI, BL, OW, DL⟩ rt 1088 24 256 s ∧ P.DataLoaded s.mem ∧
+      DataOutside P rt ∧ s.mem.accessible (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat false = true ∧
+      (BitVec.ofNat 64 NL : BitVec 64).toNat + (1#64 : BitVec 64).toNat ≤ 2 ^ 48 ∧ (1#64 : BitVec 64).toNat < 2 ^ 31 ∧
+      Outside (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat rt ∧
+      Sep (BitVec.ofNat 64 NL : BitVec 64).toNat (1#64 : BitVec 64).toNat [(s.sp.toNat - 1088, 1112),
+        (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 264, 16), (BI, 8), (BL, 512)]) :=
+  ⟨implAt, wrt, ret, wstate (fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0), lock2_model wrt 1024, unlock2_model wrt 1024, memmove_model,
+    hret, setup, ⟨ready _ 24 (Or.inr rfl), wmem_data, wrt_data, str_facts⟩⟩
+
+/-- So the guarantee is reached: from the witness state, for every kernel, `println(s)` for the one-byte string at the program's `"\n"` returns and the trace gains what the two writes may append. -/
+theorem returns (E : KEnv) (k : Kern) :
+    ReturnsK ((P.link implAt).withExit ret) E
+      (fun s' k' => FFI.ABIReturnC (wstate (fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0)) s' ∧
+        ∃ es, k' = k.appendTrace es ∧
+          Emits 2 [readBytes wmem NL 1, [10#8]] es)
+      (fun _ _ => False) (wstate (fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0)) k :=
+  correctness implAt wrt E (lock2_model wrt 1024) (unlock2_model wrt 1024) memmove_model (BitVec.ofNat 64 NL) 1#64 ret hret _ k setup
+    (⟨ready _ 24 (Or.inr rfl), wmem_data, wrt_data, str_facts⟩)
+
+end Witness
