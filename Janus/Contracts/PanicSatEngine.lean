@@ -1024,6 +1024,83 @@ theorem engine_call (hp : EngineAt p)
     exact Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' u c' d (by rw [hmem']; exact MemFrame.refl _ _) hf)
       hk' (by rw [hmem']; exact MemFrame.refl _ _) (by rw [hmem']) rfl hnx
 
+/-- The model engine's loop meets `Panic.Engine`, for every list of deferred calls. -/
+theorem engine_loop (hp : EngineAt p)
+    {Fin : List PanicRec → Nat → State → State → Prop}
+    (hFin : ∀ (ch : List PanicRec) (rm : Nat) (c c' d : State),
+      MemFrame c.mem c'.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F) → Fin ch rm c' d → Fin ch rm c d)
+    (hfin : ∀ (c : State) (ch : List PanicRec) (rm : Nat), c.pc = BitVec.ofNat 64 eLH → c.regs 18 = x18 →
+      Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm 0 → PanOK mode ch →
+      (ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ recSp c.mem j ≠ F.sp) → ∃ k d, Program.Steps p c k d ∧ Fin ch rm c d) :
+    ∀ (n : Nat) (c : State) (ch : List PanicRec) (rm ph : Nat), (curItems c.mem F ph).length = n →
+      c.pc = BitVec.ofNat 64 eLH → c.regs 18 = x18 → Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph →
+      PanOK mode ch →
+      Engine p (P0 T RPa) U0 x28 x18 F (frameKeep m0 F items0) mode Fin ch rm (curItems c.mem F ph) c := by
+  intro n
+  induction n using Nat.strongRecOn with
+  | ind n ihn =>
+  have inner : ∀ (m : Nat) (c : State) (ch : List PanicRec) (rm ph : Nat),
+      (if ph = 0 then 0 else 1) * 9 + ndef c.mem ≤ m → (curItems c.mem F ph).length = n →
+      c.pc = BitVec.ofNat 64 eLH → c.regs 18 = x18 → Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph →
+      PanOK mode ch →
+      Engine p (P0 T RPa) U0 x28 x18 F (frameKeep m0 F items0) mode Fin ch rm (curItems c.mem F ph) c := by
+    intro m
+    induction m using Nat.strongRecOn with
+    | ind m ihm =>
+    intro c ch rm ph hm hn hpc h18 hI hpm
+    have silent : ∀ (ph2 : Nat) (c2 : State),
+        SilentSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph ph2 c2 →
+        Engine p (P0 T RPa) U0 x28 x18 F (frameKeep m0 F items0) mode Fin ch rm (curItems c.mem F ph) c := by
+      intro ph2 c2 ss
+      obtain ⟨⟨j, hj⟩, hpc2, hr182, hinv2, hcur2, hmf2, hsv2, hmeas⟩ := ss
+      have := ihm _ (by omega) c2 ch rm ph2 (Nat.le_refl _) (by rw [hcur2]; exact hn) hpc2 hr182 hinv2 hpm
+      rw [hcur2] at this
+      exact Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' c c2 d hmf2 hf) hj hmf2 hsv2 rfl this
+    have finc : (ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ recSp c.mem j ≠ F.sp) → ph = 0 →
+        Engine p (P0 T RPa) U0 x28 x18 F (frameKeep m0 F items0) mode Fin ch rm (curItems c.mem F ph) c := by
+      intro hend hph0
+      subst hph0
+      rw [curItems_zero, (fin_items hI.env hend).1, Engine_nil]
+      exact hfin c ch rm hpc h18 hI hpm hend
+    by_cases hph0 : ph = 0
+    · subst hph0
+      by_cases hnd : ndef c.mem = 0
+      · exact finc (Or.inl hnd) rfl
+      · obtain ⟨j, hj⟩ : ∃ j, ndef c.mem = j + 1 := ⟨ndef c.mem - 1, by omega⟩
+        by_cases hrs : recSp c.mem j = F.sp
+        · cases hnn : recN c.mem j with
+          | zero =>
+            obtain ⟨c2, ss⟩ := step_pop hp hI h18 hpc rfl hj hrs hnn
+            exact silent 0 c2 ss
+          | succ n0 =>
+            obtain ⟨e, cs⟩ := step_rec hp hI h18 hpc rfl hj hrs hnn
+            have hcur := (curItems_zero c.mem F).trans (rec_call_items hI.env hj hrs hnn)
+            rw [hcur]
+            refine engine_call hp hFin hI hpm cs ?_
+            intro c' ch' rm' ph' hpc' h18' hI' hpm' hc'
+            have hlt : (curItems c'.mem F ph').length < n := by
+              rw [hc', ← hn, hcur]; simp
+            exact (ihn _ hlt) c' ch' rm' ph' rfl hpc' h18' hI' hpm' |> fun h => by rw [hc'] at h; exact h
+        · exact finc (Or.inr ⟨j, hj, hrs⟩) rfl
+    · obtain ⟨⟨ba, sa⟩, hF⟩ : ∃ q, F.openAt = some q := by
+        have hsome := hI.fm.hph hph0
+        cases hq : F.openAt with
+        | none => rw [hq] at hsome; simp at hsome
+        | some q => exact ⟨q, rfl⟩
+      by_cases hb : c.mem.readLE ba 1 = 0
+      · obtain ⟨c2, ss⟩ := step_torec hp hI h18 hpc hph0 hF hb
+        exact silent 0 c2 ss
+      · have hb0 : 0 < c.mem.readLE ba 1 := Nat.pos_of_ne_zero hb
+        have hcur := curItems_open hph0 hF hb0
+        obtain ⟨e, cs⟩ := step_open hp hI h18 hpc hph0 hF hb0 hcur
+        rw [hcur]
+        refine engine_call hp hFin hI hpm cs ?_
+        intro c' ch' rm' ph' hpc' h18' hI' hpm' hc'
+        have hlt : (curItems c'.mem F ph').length < n := by
+          rw [hc', ← hn, hcur]; simp
+        exact (ihn _ hlt) c' ch' rm' ph' rfl hpc' h18' hI' hpm' |> fun h => by rw [hc'] at h; exact h
+  exact fun c ch rm ph hn hpc h18 hI hpm => inner _ c ch rm ph (Nat.le_refl _) hn hpc h18 hI hpm
+
 end steps
 
 
