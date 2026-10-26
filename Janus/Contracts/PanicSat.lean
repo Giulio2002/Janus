@@ -530,4 +530,33 @@ theorem gorecover_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
 
 
 
+/-! ## The loop (`LH`)
+
+At the loop head the model's frame (96 bytes at `msp = F.sp - 96`) holds `F.sp`, `F.bound`,
+`F.resume`, the mode, the phase (open-coded defers still to run, or records), the `deferBits` and
+slot addresses and the caller's `X18` (and, for `deferreturn`, the return address and `X29`). The
+calls still to make are `frameItems` of the current memory, for the frame with or without its
+open-coded part. -/
+
+def modeCode : DeferMode → Nat
+  | .panic => 0 | .goexit => 1 | .ret => 2
+
+/-- The frame the loop is still running: without its open-coded part once the phase is `0`. -/
+def phF (F : Frame) (ph : Nat) : Frame := if ph = 0 then { F with openAt := none } else F
+
+/-- The calls still to make at a loop state with memory `m` and phase `ph`. -/
+def curItems (m : Memory) (F : Frame) (ph : Nat) : List Item := frameItems m (phF F ph) (defers0 m)
+
+/-- The model's frame in memory `m` (at `msp = F.sp - 96`). -/
+structure FrameMem (m : Memory) (F : Frame) (mode : DeferMode) (ph : Nat) (x18 lr x29 : Nat) : Prop where
+  w0 : m.readLE (F.sp - 96) 8 = F.sp
+  w8 : m.readLE (F.sp - 96 + 8) 8 = F.bound
+  w16 : m.readLE (F.sp - 96 + 16) 8 = F.resume
+  w24 : m.readLE (F.sp - 96 + 24) 8 = modeCode mode
+  w32 : m.readLE (F.sp - 96 + 32) 8 = ph
+  w40 : ∀ ba sa, F.openAt = some (ba, sa) → m.readLE (F.sp - 96 + 40) 8 = ba ∧ m.readLE (F.sp - 96 + 48) 8 = sa
+  w56 : m.readLE (F.sp - 96 + 56) 8 = x18
+  w64 : mode = .ret → m.readLE (F.sp - 96 + 64) 8 = lr ∧ m.readLE (F.sp - 96 + 72) 8 = x29
+  hph : ph ≠ 0 → F.openAt.isSome
+
 end Janus.Contracts.PanicSat

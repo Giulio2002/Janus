@@ -689,6 +689,43 @@ theorem Engine_cons {p : Program} {P : PanicRuntime} {U : State → Nat → Nat 
         Engine p P U x28 x18 F keep mode Fin (r2 :: ch) (rm - 1) rest u) := by
   simp only [Engine]
 
+/-- The loop over a frame's calls is closed under a runtime prefix that writes only the loop's own
+memory and keeps `saved` and `rp` (the model runtime's silent steps between calls). -/
+theorem Engine.of_prefix {p : Program} {P : PanicRuntime} {U : State → Nat → Nat → Prop} {x28 x18 : W64}
+    {F : Frame} {keep : List (Nat × Nat)} {mode : DeferMode}
+    {Fin : List PanicRec → Nat → State → State → Prop} {c c' : State} {j : Nat}
+    (hFin : ∀ ch rm d, Fin ch rm c' d → Fin ch rm c d) (hst : Program.Steps p c j c')
+    (hm : MemFrame c.mem c'.mem (P.priv ++ rtWin P F ++ bitsWin F))
+    (hsaved : P.saved c'.mem x28.toNat = P.saved c.mem x28.toNat)
+    (hrp : P.rp c'.mem x28.toNat = P.rp c.mem x28.toNat) :
+    ∀ {ch : List PanicRec} {rm : Nat} {L : List Item},
+      Engine p P U x28 x18 F keep mode Fin ch rm L c' → Engine p P U x28 x18 F keep mode Fin ch rm L c
+  | _, _, [], h => by
+    rw [Engine_nil] at h ⊢
+    obtain ⟨k, d, hs, hf⟩ := h
+    exact ⟨j + k, d, hst.trans hs, hFin _ _ _ hf⟩
+  | _, _, it :: rest, h => by
+    rw [Engine_cons] at h ⊢
+    obtain ⟨k, e, hs, hcall, hmf, hb, hd, hpn, hrm, hrs, hcont, hnest⟩ := h
+    refine ⟨j + k, e, hst.trans hs, hcall, hm.trans hmf fun a n h => ⟨h, h⟩, hb, hd, hpn, hrm, ?_,
+      hcont, hnest⟩
+    split
+    · rename_i hmode; rw [if_pos hmode] at hrs; exact ⟨hrs.1.trans hrp, hrs.2⟩
+    · rename_i hmode; rw [if_neg hmode] at hrs; exact ⟨hrs.1, hrs.2.trans hsaved⟩
+
+theorem LeftFrame.prefix {P : PanicRuntime} {U : State → Nat → Nat → Prop} {x28 : W64} {F : Frame}
+    {ds : List DeferRec} {c c' : State} (hm : MemFrame c.mem c'.mem (P.priv ++ rtWin P F ++ bitsWin F))
+    {ch : List PanicRec} {rm : Nat} {d : State} (h : LeftFrame P U x28 F ds ch rm c' d) :
+    LeftFrame P U x28 F ds ch rm c d := by
+  obtain ⟨h1, h2, h3, h4, h5, h6⟩ := h
+  exact ⟨h1, h2, h3, hm.trans h4 fun a n h => ⟨h, h⟩, h5, h6⟩
+
+theorem RetFin.prefix {P : PanicRuntime} {s : State} {ds : List DeferRec} {c c' : State}
+    (hm : MemFrame c.mem c'.mem (P.priv ++ rtWin P (retFrame P s) ++ bitsWin (retFrame P s)))
+    {ch : List PanicRec} {rm : Nat} {d : State} (h : RetFin P s ds ch rm c' d) : RetFin P s ds ch rm c d := by
+  obtain ⟨h1, h2, h3, h4, h5, h6, h7⟩ := h
+  exact ⟨h1, h2, h3, h4, h5, hm.trans h6 fun a n h => ⟨h, h⟩, h7⟩
+
 /-- `runtime.panicrangestate(state)`: always panics (a range-over-func misuse); reaching it is a
 panic with a `runtime.Error` of kind `rangeState`. Stated through `goClass` (it is a panic
 stub). -/
