@@ -489,6 +489,10 @@ theorem twice_mod32' (x : Nat) (h : x < 100) : (x + (x + 1)) % 4294967296 = x * 
 
 theorem twice_mod32 (x : Nat) (h : x < 100) : (x + x + 1) % 4294967296 = x * 2 + 1 := by omega
 
+theorem and_sshr_20 (x : Nat) (hx : x < 20) :
+    BitVec.ofNat 64 x &&& (BitVec.ofNat 64 x - 20#64).sshiftRight 63 = BitVec.ofNat 64 x :=
+  and_sshr_lt_bv x 20 hx (by decide)
+
 theorem ubfiz1_31 (x : BitVec 64) : (x.rotateRight 63).toNat &&& 4294967294 = x.toNat % 2 ^ 31 * 2 := by
   rw [natAnd_toNat _ _ (by decide), and2_of_and3,
     ubfm_shl x 63 31 1 _ _ (by decide) (by decide) (by decide) (by decide) (by decide)]
@@ -514,13 +518,13 @@ macro "chunk_digits" : tactic => `(tactic| (
     show a + (i - 6) = a + (i - 9) + 3 by omega, show a + (i - 5) = a + (i - 9) + 4 by omega,
     show a + (i - 8) = a + (i - 9) + 1 by omega, show a + (i - 7) = a + (i - 9) + 2 by omega,
     show 20 - (i - 9) = 20 - i + 9 by omega, chunk_bytes, show a + (i - 9) + 9 = a + i by omega]
-  congr 1
+  rw [List.append_cancel_right_eq]
   simp (disch := omega) only [ofNat8_smalls_mod, twice_mod32', smalls_hi, smalls_lo]
   simp only [digits9, List.range_succ, List.range_zero, List.map, List.reverse_nil, List.reverse_cons,
     List.nil_append, List.cons_append, Nat.div_div_eq_div_mul, Nat.reducePow, Nat.reduceMul, Nat.pow_zero,
     Nat.div_one, List.cons.injEq, and_true]
   repeat' apply And.intro
-  all_goals first | trivial | (congr 1; omega)))
+  all_goals first | exact True.intro | exact congrArg Janus.Spec.Print.digit (by omega)))
 
 set_option hygiene false in
 macro "fin_eq" : tactic => `(tactic| first | rfl | (simp [setReg, callRegs, hg', h18, h_rd2, hsp', hsp, hdz, htp, hfc, hfs]; done))
@@ -551,6 +555,7 @@ theorem formatBase10 (impl : List Segment) :
   have hx2' : s.regs 2 = 20#64 := by apply BitVec.eq_of_toNat_eq; simp [hx2]
   have hspl := s.sp.isLt
   have hul := (s.regs 3).isLt
+  have hx0l := (s.regs 0).isLt
   generalize s.sp.toNat = SP at *
   generalize (s.regs 0).toNat = a at *
   generalize (s.regs 3).toNat = u at *
@@ -597,7 +602,7 @@ theorem formatBase10 (impl : List Segment) :
         omega
       refine ⟨junk, f, v, m, by rw [hi'], hfm, ?_⟩
       rw [hi', hrb, hlen', List.append_assoc]
-      congr 1
+      rw [List.append_cancel_left_eq]
       dsimp only
       rw [show a + (i - 1) = a + (i - 2) + 1 by omega, show 20 - (i - 2) = 20 - i + 2 by omega,
         readBytes_two_writes, show a + (i - 2) + 2 = a + i by omega,
@@ -659,7 +664,7 @@ theorem formatBase10 (impl : List Segment) :
     · janus_run [lsr29, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow] until
         [segAddr P "internal/strconv.formatBase10" + 0x118]
       refine tail U _ i h29 hlen hi20 ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-      all_goals first | rfl | assumption | (simp only [setReg_apply]; first | assumption | rfl)
+      all_goals first | rfl | (with_reducible assumption) | (simp only [setReg_apply]; assumption)
     · have hi9 : 9 ≤ i := by
         have := length_decimal_ge 8 U (by omega)
         omega
@@ -685,7 +690,7 @@ theorem formatBase10 (impl : List Segment) :
                i - 9 - (Janus.Spec.Print.decimal (U / 1000000000)).length := by omega
            refine ⟨junk, f, v, m, by rw [hi'], hfm, ?_⟩
            rw [hi', hrb, hc, List.append_assoc]
-           congr 1
+           rw [List.append_cancel_left_eq]
            dsimp only
            chunk_digits)
         | skip
@@ -706,7 +711,7 @@ theorem formatBase10 (impl : List Segment) :
   have hsep4 : SP - 24 + 40 ≤ 823223 ∨ 823223 + 200 ≤ SP - 24 := ap4
   janus_run until [segAddr P "internal/strconv.formatBase10" + 0x28]
   refine ReachesRet.mono' (outer u _ 20 (length_decimal_le 19 u (by omega)) (Nat.le_refl _) ?_ ?_ ?_ ?_ ?_
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ hul) ?_
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ hul) ?_
   all_goals try kobl
   all_goals try (intro j hj; janus_simp; first | done | exact h_sm j hj)
   all_goals try (dsimp only; simp only [setReg_apply]; apply BitVec.eq_of_toNat_eq; simp; omega)
@@ -714,11 +719,93 @@ theorem formatBase10 (impl : List Segment) :
   have hl20 := length_decimal_le 19 u (by omega)
   refine ⟨20 - (Janus.Spec.Print.decimal u).length, junk, f, v, m, ?_, by omega, ?_, ?_⟩
   · simp only [hsp, hx0, hx3, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl]
-    sorry
-  · simpa [hsp, hx0, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl] using hfm
+  · simpa [hsp, hx0, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl, Nat.mod_eq_of_lt hx0l] using hfm
   · rw [show 20 - (20 - (Janus.Spec.Print.decimal u).length) = (Janus.Spec.Print.decimal u).length by omega] at hrb ⊢
-    simp at hrb
-    sorry
+    simp only [readBytes_zero, Nat.sub_self, List.append_nil] at hrb
+    simpa [hx0, hx3, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hx0l, Nat.mod_eq_of_lt hul] using hrb
+
+/-! ## `printuint(v)` -/
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 40000000 in
+theorem printuint_k (impl : List Segment)
+    (hmm : MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove")) (E : KEnv)
+    (ret : Nat) (hret : RetAddr (P.link impl) ret) (S : State) (K : Kern)
+    (SP G MP u : Nat)
+    (hpc : S.pc = BitVec.ofNat 64 (segAddr P "runtime.printuint"))
+    (hsp : S.sp = BitVec.ofNat 64 SP) (hg : S.regs 28 = BitVec.ofNat 64 G)
+    (hx0 : S.regs 0 = BitVec.ofNat 64 u) (hul : u < 2 ^ 64)
+    (hmpE : S.mem.readLE (G + 48) 8 = MP)
+    (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 30).toNat < 2 ^ 48)
+    (hal : SP % 16 = 0) (hb : 248 ≤ SP) (ha : SP + 8 ≤ 2 ^ 48)
+    (hw : S.mem.accessible (SP - 248) 256 true = true)
+    (hg0 : 0 < G) (hg1 : G + 256 ≤ 2 ^ 48) (hg2 : S.mem.accessible (G + 16) 8 false = true)
+    (hg3 : S.mem.readLE (G + 16) 8 + 208 < SP)
+    (hgm : S.mem.accessible (G + 48) 8 false = true)
+    (hwb : S.mem.accessible (G + 232) 16 false = true) (h_rd_wb : S.mem.readLE (G + 232) 8 = 0)
+    (hm1 : MP + 280 ≤ 2 ^ 48) (hm2 : S.mem.accessible (MP + 264) 16 true = true)
+    (h_rd_dy : S.mem.readLE (MP + 268) 4 = 0)
+    (hc1 : 1 ≤ S.mem.readLE (MP + 279) 1) (hc2 : S.mem.readLE (MP + 279) 1 ≤ 125)
+    (hpk : S.mem.accessible PK 4 false = true) (hbi : S.mem.accessible BI 8 true = true)
+    (hbi2 : S.mem.readLE BI 8 < 512) (hbl : S.mem.accessible BL 512 true = true)
+    (how : S.mem.accessible OW 8 false = true) (h_rd_ow : S.mem.readLE OW 8 = 0)
+    (a1 : Apart (SP - 248) 256 (G + 16) 8) (a2 : Apart (SP - 248) 256 (G + 48) 8)
+    (a3 : Apart (SP - 248) 256 (G + 232) 16) (a4 : Apart (SP - 248) 256 (MP + 264) 16)
+    (a6 : Apart (SP - 248) 256 PK 4) (a7 : Apart (SP - 248) 256 BI 8) (a8 : Apart (SP - 248) 256 BL 512) (a9 : Apart (SP - 248) 256 OW 8)
+    (b1 : Apart (MP + 264) 16 (G + 16) 8) (b2 : Apart (MP + 264) 16 (G + 48) 8)
+    (b3 : Apart (MP + 264) 16 (G + 232) 16) (b5 : Apart (MP + 264) 16 PK 4)
+    (b6 : Apart (MP + 264) 16 BI 8) (b7 : Apart (MP + 264) 16 BL 512) (b8 : Apart (MP + 264) 16 OW 8)
+    (d1 : Apart (G + 16) 8 BI 8) (d2 : Apart (G + 16) 8 BL 512)
+    (d3 : Apart (G + 48) 8 BI 8) (d4 : Apart (G + 48) 8 BL 512)
+    (d5 : Apart (G + 232) 16 BI 8) (d6 : Apart (G + 232) 16 BL 512)
+    (hsm : S.mem.accessible SM 200 false = true)
+    (h_rdsm : ∀ j, j < 200 → S.mem.readLE (SM + j) 1 = smallsByte j)
+    (aS : Apart (SP - 248) 256 SM 200)
+    (Q : State → Kern → Prop) (X : Nat → Kern → Prop)
+    (hk : ∀ S' K', PPost [(SP - 248, SP - 8), (SP + 8, SP + 8), (MP + 264, MP + 268), (MP + 279, MP + 280), (BI, BI + 8), (BL, BL + 512)] MP [Janus.Spec.Print.decimal u] S K S' K' →
+      ReturnsK ((P.link impl).withExit ret) E Q X S' K') :
+    ReturnsK ((P.link impl).withExit ret) E Q X S K := by
+  -- PROOF printuint_k
+  have hspl : SP < 2 ^ 64 := by omega
+  janus_eval_nat h_bi : BI
+  janus_eval_nat h_sm : SM
+  rw [h_sm] at hsm h_rdsm aS
+  apply ReturnsK.of_reaches
+  janus_run [hmpE] until [segAddr P "internal/strconv.formatBase10"]
+  refine Reaches.call (Summary.withExit (formatBase10 impl) hret) rfl ?_ (fun s' hr hpost => ?_)
+  · refine ⟨?_, ?_, ⟨?_, ?_, ?_, ?_⟩, ⟨?_, ?_, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    all_goals try kobl
+    all_goals try (rw [h_sm])
+    all_goals try kobl
+    all_goals try (intro j hj; janus_simp; first | done | exact h_rdsm j hj)
+  · obtain ⟨i, junk, f, v, m, rfl, hi, hfm, hrb⟩ := hpost
+    revert hi hfm hrb
+    janus_simp
+    intro hi hfm hrb
+    have hi19 : i < 20 := by
+      have := congrArg List.length hrb
+      simp only [length_readBytes] at this
+      have := Janus.Spec.Print.length_decimal_pos u
+      omega
+    janus_run [hmpE, and_sshr_20] until [segAddr P "runtime.gwrite"]
+    apply ReturnsK.to_reaches
+    apply gwrite_k impl hmm E ret hret _ K (SP - 80) G MP (SP - 28 + i) (20 - i) (20 - i)
+    case hk =>
+      rintro S' K' ⟨junk', f', v', m', es, rfl, hf', h_rd_c, h_rd_l, hbi', rfl, hem⟩
+      apply ReturnsK.of_reaches
+      janus_run [hmpE] until [segAddr P "runtime.printuint" + 0x6c]
+      janus_step
+      apply ReturnsK.to_reaches
+      apply hk
+      refine ⟨_, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
+      · janus_simp
+      · janus_simp
+      · janus_simp; assumption
+      · have h := hem
+        dsimp only at h
+        rw [hrb] at h
+        exact h
+    all_goals kobl
 
 
 

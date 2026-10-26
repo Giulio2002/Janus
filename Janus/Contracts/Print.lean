@@ -499,14 +499,15 @@ elab "kobl" : tactic => do
   let t ← whnfR (← instantiateMVars (← g.getType))
   let run (stx : TSyntax `tactic) : TacticM Unit := evalTactic stx
   if t.isAppOfArity ``Janus.Apart 4 then
-    run (← `(tactic| first | with_reducible assumption | apart_mono)); return
+    run (← `(tactic| first | with_reducible assumption | apart_mono | (janus_simp; first | with_reducible assumption | apart_mono | (unfold Janus.Apart; omega)))); return
   if t.isAppOfArity ``Janus.MemFrame 3 then
     run (← `(tactic| janus_frame)); return
   if let some (ty, lhs, _) := t.eq? then
+    let ty ← whnfR ty
     if ty.isAppOfArity ``BitVec 1 then
-      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp [setReg]; omega))); return
+      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; simp only [Janus.Tactic.setReg_apply]; first | assumption | rfl) | rfl | (dsimp only; simp only [Janus.Tactic.setReg_apply]; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp [setReg]; omega))); return
     if lhs.isAppOfArity ``Memory.accessible 4 then
-      run (← `(tactic| first | with_reducible assumption | (dsimp only; janus_disch))); return
+      run (← `(tactic| first | with_reducible assumption | (dsimp only; janus_disch) | (janus_simp; first | done | janus_disch))); return
     if lhs.isAppOfArity ``Memory.readLE 3 then
       run (← `(tactic| first | with_reducible assumption | (dsimp only; with_reducible assumption) | (janus_simp; first | done | with_reducible assumption | omega))); return
     if ty.isConstOf ``Nat then
@@ -775,5 +776,17 @@ theorem chunk_bytes (m : Memory) (p n w0 w1 w2 w3 w4 w5 w6 w7 w8 : Nat) :
       List.map_cons, List.map_nil, Memory.writeLE]
     simp +arith
   · repeat rw [readBytes_writeLE (by omega)]
+
+/-- `and_sshr_lt` at the bit-vector level. -/
+theorem and_sshr_lt_bv (x b : Nat) (hx : x < b) (hb : b ≤ 9223372036854775808) :
+    BitVec.ofNat 64 x &&& (BitVec.ofNat 64 x - BitVec.ofNat 64 b).sshiftRight 63 = BitVec.ofNat 64 x := by
+  apply BitVec.eq_of_toNat_eq
+  rw [BitVec.toNat_and, and_sshr_lt' x b hx hb]
+where
+  and_sshr_lt' (x b : Nat) (hx : x < b) (hb : b ≤ 9223372036854775808) :
+      (BitVec.ofNat 64 x).toNat &&& ((BitVec.ofNat 64 x - BitVec.ofNat 64 b).sshiftRight 63).toNat =
+        (BitVec.ofNat 64 x).toNat := by
+    rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (show x < 2 ^ 64 by omega)]
+    exact and_sshr_lt x b hx hb
 
 end Janus.Print
