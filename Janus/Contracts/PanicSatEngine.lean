@@ -667,6 +667,48 @@ theorem step_pop (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr 
     · rw [hcur] at hit'; exact hI.its it' hit'
   · rw [hndef, hnd]; simp
 
+theorem step_fin (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
+    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph = 0)
+    (hend : ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ recSp c.mem j ≠ F.sp) :
+    ∃ k d, Program.Steps p c k d ∧ d.mem = c.mem ∧ d.regs 28 = x28 ∧ d.regs 18 = x18 ∧
+      (mode = .ret → d.pc = BitVec.ofNat 64 lr ∧ d.sp = BitVec.ofNat 64 F.sp ∧ d.regs 29 = BitVec.ofNat 64 x29) ∧
+      (mode ≠ .ret → d.pc = BitVec.ofNat 64 RPa ∧ d.sp = BitVec.ofNat 64 F.bound) := by
+  subst hph
+  obtain ⟨hal, hsp, hsp96⟩ := hI.spw
+  have hs := hI.sp_eq
+  have hfm := hI.fm
+  have hw0 := hfm.w0
+  have hw32 := hfm.w32
+  have hw8 := hfm.w8
+  have hw24 := hfm.w24
+  rw [hs] at hw0 hw32 hw8 hw24
+  have hend' : ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ j < 8 ∧ recSp c.mem j ≠ c.mem.readLE c.sp.toNat 8 := by
+    rcases hend with h | ⟨j, hj, hne⟩
+    · exact Or.inl h
+    · exact Or.inr ⟨j, hj, by have := hI.env.ndef_le; omega, by rw [hw0]; exact hne⟩
+  have hlrb : mode = .ret → c.mem.readLE (c.sp.toNat + 64) 8 % 4 = 0 ∧ c.mem.readLE (c.sp.toNat + 64) 8 < 2 ^ 48 := by
+    intro hm
+    have h := (hfm.w64 hm).1
+    rw [hs] at h
+    rw [h]; exact hI.hlr hm
+  have hfsp : c.mem.readLE c.sp.toNat 8 < 2 ^ 64 := by
+    have := Memory.readLE_lt c.mem c.sp.toNat 8
+    have h : (256:Nat)^8 = 2^64 := by decide
+    omega
+  have hseg := seg_fin c mode F.bound (c.mem.readLE (c.sp.toNat + 64) 8) (c.mem.readLE (c.sp.toNat + 72) 8) hpc hal hsp
+    hI.acc hI.env.acc hw32 hend' hw24 hw8 hI.hbd rfl rfl hfsp hlrb
+  obtain ⟨k, d, hk, hpd, hd1, hd2, hd3, hd4⟩ := reachesRet_transfer hp hseg
+  refine ⟨k, d, hk, hd1, by rw [hd2]; exact hI.r28, by rw [hd3]; exact hI.r18, fun hm => ?_, fun hm => ?_⟩
+  · subst hm
+    have h64 := (hfm.w64 rfl).1; have h72 := (hfm.w64 rfl).2
+    rw [hs] at h64 h72
+    simp only [reduceIte] at hpd hd4
+    rw [h64] at hpd; rw [h72] at hd4; rw [hw0] at hd4
+    exact ⟨hpd, hd4.1, hd4.2⟩
+  · have hne : ¬ mode = .ret := hm
+    simp only [hne, reduceIte] at hpd hd4
+    exact ⟨hpd, hd4⟩
+
 end steps
 
 
