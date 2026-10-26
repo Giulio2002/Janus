@@ -902,4 +902,109 @@ theorem newobjectD_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat →
   janus_run
   exact finish_newobjectD hty pre
 
+
+def makesliceCodeD : List Nat :=
+  [0xd2a00809, 0xf9400003, 0x9b027c63, 0xd2800804, 0x9b047c63, 0xf9400120, 0x8b03000a, 0xf900012a, 0xd65f03c0]
+def mallocgcCodeD : List Nat :=
+  [0xd2a00809, 0xd2800804, 0x9b047c03, 0xf9400120, 0x8b03000a, 0xf900012a, 0xd65f03c0]
+
+def makesliceFinalD (s : State) : State :=
+  { s with
+    regs := setReg (setReg (setReg (setReg (setReg s.regs 0 (BitVec.ofNat 64 (s.mem.readLE BUMP 8))) 3
+      (BitVec.ofNat 64 (s.mem.readLE (s.regs 0).toNat 8) * s.regs 2 * 64#64)) 4 64#64) 9 (BitVec.ofNat 64 BUMP)) 10
+      (BitVec.ofNat 64 (s.mem.readLE BUMP 8) + BitVec.ofNat 64 (s.mem.readLE (s.regs 0).toNat 8) * s.regs 2 * 64#64),
+    pc := s.regs 30,
+    mem := s.mem.writeLE BUMP 8 (s.mem.readLE BUMP 8 +
+      s.mem.readLE (s.regs 0).toNat 8 * (s.regs 2).toNat * 64 % 2 ^ 64) }
+
+theorem makesliceFinalD_ret (s : State) (p : Nat) (hp : s.mem.readLE BUMP 8 = p) :
+    makesliceFinalD s = retStateX s (makesliceFinalD s).regs [BitVec.ofNat 64 p] s.flags s.vregs
+      (s.mem.writeLE BUMP 8 (p + s.mem.readLE (s.regs 0).toNat 8 * (s.regs 2).toNat * 64 % 2 ^ 64))
+      s.excl s.exclPass := by
+  subst hp
+  simp only [retStateX]
+  rw [callRegs_final s.regs _ (BitVec.ofNat 64 (s.mem.readLE BUMP 8)) (by simp [makesliceFinalD, setReg])
+    (by simp [makesliceFinalD, setReg]) (by simp [makesliceFinalD, setReg]) (by simp [makesliceFinalD, setReg])]
+  rfl
+
+theorem finish_makesliceD {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr b : Nat}
+    {L : List (Nat × Nat)} {s : State}
+    (pre : MakeslicePre 4096 s ∧ StackRoom s 4096 3 ∧
+      LiveAt (toyR tys ok) addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (makesliceRound s)
+        (s.regs 28).toNat s.mem (calleeStack s 4096 3)) :
+    LiveAllocRet (toyR tys ok) 4096 3 (fun ptr => [ptr]) L b (makesliceRound s) (makesliceRound s) s
+      (makesliceFinalD s) fun m ptr => 0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat →
+        makesliceObj (toyR tys ok).rt s m ptr ∧ ApartAll ptr (makesliceRound s) L := by
+  obtain ⟨⟨-, -, -, -, hmax⟩, -, hok, hinv, hcost, hLs, hWs⟩ := pre
+  simp only [typSize, maxAlloc] at hmax
+  have hmod : s.mem.readLE (s.regs 0).toNat 8 * (s.regs 2).toNat * 64 % 2 ^ 64 =
+      64 * (s.mem.readLE (s.regs 0).toNat 8 * (s.regs 2).toNat) := by
+    generalize s.mem.readLE (s.regs 0).toNat 8 * (s.regs 2).toNat = X at hmax ⊢
+    omega
+  have hK : makesliceRound s ≤ 64 * (s.mem.readLE (s.regs 0).toNat 8 * (s.regs 2).toNat) := blockSize_le64 _ _
+  have hKX : s.mem.readLE (s.regs 0).toNat 8 * (s.regs 2).toNat ≤ makesliceRound s := AllocSat.le_blockSize _ _
+  refine bump_ret hty (A := 64 * (s.mem.readLE (s.regs 0).toNat 8 * (s.regs 2).toNat)) (by omega) hK (by omega)
+    rfl rfl hcost hinv hWs _ _
+    (fun p hp => ?_) (fun p h1 h2' hend hz hacc hap _ => ⟨toy_fresh h1 h2' hend hz hacc _ hKX _ _, hap⟩)
+  have := makesliceFinalD_ret s p hp
+  rw [hmod] at this
+  exact this
+
+set_option maxRecDepth 20000 in
+theorem makesliceD_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop) :
+    MakesliceLiveContract (toy.link (at0 makesliceCodeD)) A0 4096 (toyR tys ok) := by
+  rw [link_at0]
+  intro L b s hpc pre
+  have hacB' := bump_acc pre.2.2.2.1
+  have ⟨⟨h30a, h30b, hq1, hq2, hq3, hq4, hq5⟩, hq6, hq7⟩ := pre.1
+  obtain ⟨hT1, hT2⟩ := hq6
+  janus_run
+  exact finish_makesliceD hty pre
+
+def mallocgcFinalD (s : State) : State :=
+  { s with
+    regs := setReg (setReg (setReg (setReg (setReg s.regs 0 (BitVec.ofNat 64 (s.mem.readLE BUMP 8))) 3
+      (s.regs 0 * 64#64)) 4 64#64) 9 (BitVec.ofNat 64 BUMP)) 10
+      (BitVec.ofNat 64 (s.mem.readLE BUMP 8) + s.regs 0 * 64#64),
+    pc := s.regs 30,
+    mem := s.mem.writeLE BUMP 8 (s.mem.readLE BUMP 8 + (s.regs 0).toNat * 64 % 2 ^ 64) }
+
+theorem mallocgcFinalD_ret (s : State) (p : Nat) (hp : s.mem.readLE BUMP 8 = p) :
+    mallocgcFinalD s = retStateX s (mallocgcFinalD s).regs [BitVec.ofNat 64 p] s.flags s.vregs
+      (s.mem.writeLE BUMP 8 (p + (s.regs 0).toNat * 64 % 2 ^ 64)) s.excl s.exclPass := by
+  subst hp
+  simp only [retStateX]
+  rw [callRegs_final s.regs _ (BitVec.ofNat 64 (s.mem.readLE BUMP 8)) (by simp [mallocgcFinalD, setReg])
+    (by simp [mallocgcFinalD, setReg]) (by simp [mallocgcFinalD, setReg]) (by simp [mallocgcFinalD, setReg])]
+  rfl
+
+theorem finish_mallocgcD {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr b : Nat}
+    {L : List (Nat × Nat)} {s : State}
+    (pre : MallocgcPre 4096 s ∧ StackRoom s 4096 3 ∧
+      LiveAt (toyR tys ok) addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
+        (s.regs 28).toNat s.mem (calleeStack s 4096 3)) :
+    LiveAllocRet (toyR tys ok) 4096 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s) s
+      (mallocgcFinalD s) fun m ptr => 0 < (s.regs 0).toNat →
+        mallocgcObj (toyR tys ok).rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L := by
+  obtain ⟨⟨-, hmax, -⟩, -, hok, hinv, hcost, hLs, hWs⟩ := pre
+  simp only [maxAlloc] at hmax
+  have hmod : (s.regs 0).toNat * 64 % 2 ^ 64 = 64 * (s.regs 0).toNat := by omega
+  have hK : mallocgcRound s ≤ 64 * (s.regs 0).toNat := blockSize_le64 _ _
+  have hKX : (s.regs 0).toNat ≤ mallocgcRound s := AllocSat.le_blockSize _ _
+  refine bump_ret hty (A := 64 * (s.regs 0).toNat) (by omega) hK (by omega) rfl rfl hcost hinv hWs _ _
+    (fun p hp => ?_) (fun p h1 h2' hend hz hacc hap _ => ⟨toy_fresh h1 h2' hend hz hacc _ hKX _ _, hap⟩)
+  have := mallocgcFinalD_ret s p hp
+  rw [hmod] at this
+  exact this
+
+set_option maxRecDepth 20000 in
+theorem mallocgcD_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop) :
+    MallocgcLiveContract (toy.link (at0 mallocgcCodeD)) A0 4096 (toyR tys ok) := by
+  rw [link_at0]
+  intro L b s hpc pre
+  have hacB' := bump_acc pre.2.2.2.1
+  have ⟨⟨h30a, h30b, _, _, _, _, _⟩, _, _⟩ := pre.1
+  janus_run
+  exact finish_mallocgcD hty pre
+
 end Janus.Contracts.LiveSat
