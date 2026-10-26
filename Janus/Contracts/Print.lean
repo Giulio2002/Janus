@@ -1,4 +1,5 @@
 import Janus.Contracts.Syscall
+import Janus.Spec.Print
 
 /-!
 # `print` and `println` (arm64; R8)
@@ -499,9 +500,11 @@ elab "kobl" : tactic => do
   let run (stx : TSyntax `tactic) : TacticM Unit := evalTactic stx
   if t.isAppOfArity ``Janus.Apart 4 then
     run (← `(tactic| first | with_reducible assumption | apart_mono)); return
+  if t.isAppOfArity ``Janus.MemFrame 3 then
+    run (← `(tactic| janus_frame)); return
   if let some (ty, lhs, _) := t.eq? then
     if ty.isAppOfArity ``BitVec 1 then
-      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega))); return
+      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp [setReg]; omega))); return
     if lhs.isAppOfArity ``Memory.accessible 4 then
       run (← `(tactic| first | with_reducible assumption | (dsimp only; janus_disch))); return
     if lhs.isAppOfArity ``Memory.readLE 3 then
@@ -527,10 +530,9 @@ macro "readbytes_frame" : tactic => `(tactic| (
 
 /-! ### Bitfield moves (`UBFM`: `LSR`, `UBFX`, `LSL`, `UBFIZ` by an immediate)
 
-The model executes `UBFM` as a rotation and two masks. `reduceUbfm` (a simproc for
-`janus_run [reduceUbfm]`) rewrites `x.rotateRight r &&& M &&& T` with literal `r`, `M`, `T` of the
-two shapes the instructions produce into arithmetic on `x.toNat` (`ubfm_low`: a shift right and a
-low mask; `ubfm_shl`: a mask and a shift left), with its side conditions decided on the literals. -/
+The model executes `UBFM` as a rotation and two masks: `x.rotateRight r &&& M &&& T`. Instances of
+`ubfm_low` (a shift right and a low mask) and `ubfm_shl` (a mask and a shift left), with their side
+conditions decided on the literals, rewrite each shape a proof meets into arithmetic on `x.toNat`. -/
 
 /-- `LSR`/`UBFX`: bits `r … r + w - 1` of `x`. -/
 theorem ubfm_low (x : BitVec 64) (r w M T : Nat) (hrw : r + w ≤ 64) (hT : T = 2 ^ w - 1)
@@ -600,75 +602,6 @@ theorem natAnd_toNat (y : BitVec 64) (T : Nat) (hT : T < 2 ^ 64) :
     y.toNat &&& T = (y &&& BitVec.ofNat 64 T).toNat := by
   simp [BitVec.toNat_and, Nat.mod_eq_of_lt hT]
 
-open Lean Meta in
-/-- The proof of `x.rotateRight r &&& M &&& T = rhs` (`ubfm_low`/`ubfm_shl`, side conditions
-decided on the literals), or `none`. -/
-def ubfmEq (x : Expr) (r M T : Nat) : MetaM (Option (Expr × Expr)) := do
-  if T == 0 then return none
-  let close (lem : Expr) : MetaM (Option (Expr × Expr)) := do
-    let ty ← inferType lem
-    let (hs, _, concl) ← forallMetaTelescopeReducing ty
-    for h in hs do
-      let pf ← try mkDecideProof (← inferType h) catch _ => return none
-      unless (← isDefEq h pf) do return none
-    let some (_, _, rhs) := (← instantiateMVars concl).eq? | return none
-    return some (rhs, ← instantiateMVars (mkAppN lem hs))
-  if (T + 1) &&& T == 0 then
-    let wv := Nat.log2 (T + 1)
-    if r + wv ≤ 64 && M % 2 ^ wv == 2 ^ wv - 1 then
-      return ← close (mkAppN (mkConst ``ubfm_low) #[x, mkNatLit r, mkNatLit wv, mkNatLit M, mkNatLit T])
-    return none
-  let s := (List.range 64).find? (fun i => T.testBit i) |>.getD 0
-  let hi := T / 2 ^ s
-  if s == 0 || (hi + 1) &&& hi != 0 then return none
-  let wv := Nat.log2 (hi + 1)
-  if r == 64 - s && wv + s ≤ 64 && M / 2 ^ s % 2 ^ wv == 2 ^ wv - 1 then
-    return ← close (mkAppN (mkConst ``ubfm_shl) #[x, mkNatLit r, mkNatLit wv, mkNatLit s, mkNatLit M,
-      mkNatLit T])
-  return none
-
-open Lean Meta in
-/-- `x.rotateRight r &&& M &&& T` (literal `r`, `M`, `T`). -/
-simproc_decl reduceUbfm ((BitVec.rotateRight _ _ &&& _) &&& _) := fun e => do
-  let_expr HAnd.hAnd _ _ _ _ a c2 := e | return .continue
-  let_expr HAnd.hAnd _ _ _ _ rot c1 := a | return .continue
-  let_expr BitVec.rotateRight w x r := rot | return .continue
-  let some 64 ← Nat.fromExpr? w | return .continue
-  let some r ← Nat.fromExpr? r | return .continue
-  let some ⟨64, M⟩ ← getBitVecValue? c1 | return .continue
-  let some ⟨64, T⟩ ← getBitVecValue? c2 | return .continue
-  let some (rhs, pf) ← ubfmEq x r M.toNat T.toNat | return .continue
-  return .visit { expr := rhs, proof? := some pf }
-
-open Lean Meta in
-/-- `x.rotateRight r &&& T` (literal `r`, `T`: the all-ones mask was simplified away). -/
-simproc_decl reduceUbfm2 (BitVec.rotateRight _ _ &&& _) := fun e => do
-  let_expr HAnd.hAnd _ _ _ _ rot c2 := e | return .continue
-  let_expr BitVec.rotateRight w x r := rot | return .continue
-  let some 64 ← Nat.fromExpr? w | return .continue
-  let some r ← Nat.fromExpr? r | return .continue
-  let some ⟨64, T⟩ ← getBitVecValue? c2 | return .continue
-  let some (rhs, pf) ← ubfmEq x r 18446744073709551615 T.toNat | return .continue
-  let pf ← mkEqTrans (mkApp2 (mkConst ``and2_of_and3) rot (mkNatLit T.toNat)) pf
-  return .visit { expr := rhs, proof? := some pf }
-
-open Lean Meta in
-/-- `(x.rotateRight r).toNat &&& T` (literal `r`, `T < 2^64`). -/
-simproc_decl reduceUbfmNat (BitVec.toNat (BitVec.rotateRight _ _) &&& _) := fun e => do
-  let_expr HAnd.hAnd _ _ _ _ tn c2 := e | return .continue
-  let_expr BitVec.toNat _ rot := tn | return .continue
-  let_expr BitVec.rotateRight w x r := rot | return .continue
-  let some 64 ← Nat.fromExpr? w | return .continue
-  let some r ← Nat.fromExpr? r | return .continue
-  let some T ← Nat.fromExpr? c2 | return .continue
-  unless T < 2 ^ 64 do return .continue
-  let some (rhs, pf) ← ubfmEq x r 18446744073709551615 T | return .continue
-  let pf2 ← mkEqTrans (mkApp2 (mkConst ``and2_of_and3) rot (mkNatLit T)) pf
-  let hT ← mkDecideProof (← mkLt (mkNatLit T) (mkNatLit (2 ^ 64)))
-  let pf1 := mkApp3 (mkConst ``natAnd_toNat) rot (mkNatLit T) hT
-  let pf ← mkEqTrans pf1 (← mkCongrArg (mkApp (mkConst ``BitVec.toNat) (mkNatLit 64)) pf2)
-  return .visit { expr := ← mkAppM ``BitVec.toNat #[rhs], proof? := some pf }
-
 /-! ### Division by constants (the compiler's magic multiplications in `formatBase10`) -/
 
 /-- `x / 50` for `x < 2^31` as the multiply-and-shift of 32-bit code. -/
@@ -708,5 +641,139 @@ theorem magic1e9 (x : Nat) (h : x < 2 ^ 64) :
   rw [Nat.mod_eq_of_lt (show x / 2 < 9223372036854775808 by omega), Nat.div_div_eq_div_mul,
     show 18446744073709551616 * 268435456 = 2 ^ 92 by decide, magic5e8 (x / 2) (by omega)]
   omega
+
+/-! ### Bytes written one at a time -/
+
+theorem readBytes_add (m : Memory) (a n k : Nat) :
+    readBytes m a (n + k) = readBytes m a n ++ readBytes m (a + n) k := by
+  unfold readBytes
+  rw [List.range_add, List.map_append, List.map_map]
+  congr 1
+  apply List.map_congr_left; intro i _; simp [Function.comp, Nat.add_assoc]
+theorem readBytes_succ (m : Memory) (a n : Nat) :
+    readBytes m a (n + 1) = m.bytes a :: readBytes m (a + 1) n := by
+  rw [Nat.add_comm, readBytes_add]; simp [readBytes]
+theorem bytes_writeLE1_self (m : Memory) (p v : Nat) : (m.writeLE p 1 v).bytes p = BitVec.ofNat 8 v := by
+  simp [Memory.writeLE]
+theorem bytes_writeLE1_ne (m : Memory) (p q v : Nat) (h : p ≠ q) : (m.writeLE p 1 v).bytes q = m.bytes q := by
+  simp [Memory.writeLE]; omega
+
+theorem ReachesRet.mono' {p : Program} {ret : W64} {s : State} {Q Q' : State → Prop}
+    (h : ReachesRet p ret s Q) (hQ : ∀ s', Q s' → Q' s') : ReachesRet p ret s Q' := by
+  obtain ⟨k, s', hs, hr, hq⟩ := h
+  exact ⟨k, s', hs, hr, hQ s' hq⟩
+
+/-- Two bytes written in a row, read back with what follows them. -/
+theorem readBytes_two_writes (m : Memory) (p n v0 v1 : Nat) :
+    readBytes ((m.writeLE p 1 v0).writeLE (p + 1) 1 v1) p (n + 2) =
+      [BitVec.ofNat 8 v0, BitVec.ofNat 8 v1] ++ readBytes m (p + 2) n := by
+  rw [readBytes_succ, readBytes_succ]
+  rw [bytes_writeLE1_ne _ _ _ _ (by omega), bytes_writeLE1_self, bytes_writeLE1_self,
+    show p + 1 + 1 = p + 2 by omega, readBytes_writeLE (by omega), readBytes_writeLE (by omega)]
+  rfl
+
+theorem readBytes_two_writes' (m : Memory) (p n v0 v1 : Nat) :
+    readBytes ((m.writeLE (p + 1) 1 v1).writeLE p 1 v0) p (n + 2) =
+      [BitVec.ofNat 8 v0, BitVec.ofNat 8 v1] ++ readBytes m (p + 2) n := by
+  rw [readBytes_succ, readBytes_succ]
+  rw [bytes_writeLE1_self, bytes_writeLE1_ne _ _ _ _ (by omega), bytes_writeLE1_self,
+    show p + 1 + 1 = p + 2 by omega, readBytes_writeLE (by omega), readBytes_writeLE (by omega)]
+  rfl
+theorem readBytes_one_write (m : Memory) (p n v : Nat) :
+    readBytes (m.writeLE p 1 v) p (n + 1) = [BitVec.ofNat 8 v] ++ readBytes m (p + 1) n := by
+  rw [readBytes_succ, bytes_writeLE1_self, readBytes_writeLE (by omega)]
+  rfl
+theorem eq_retState_res {s s' : State} {r : BitVec 64} (h0 : s'.regs 0 = r) (h18 : s'.regs 18 = s.regs 18)
+    (h28 : s'.regs 28 = s.regs 28) (h29 : s'.regs 29 = s.regs 29) (hsp : s'.sp = s.sp)
+    (hpc : s'.pc = s.regs 30) (hd : s'.dczid = s.dczid) (ht : s'.tpidr = s.tpidr)
+    (hc : s'.fpcr = s.fpcr) (hs : s'.fpsr = s.fpsr) :
+    s' = retState s s'.regs [r] s'.flags s'.vregs s'.mem := by
+  cases s'
+  simp only [retState] at *
+  subst hsp hpc hd ht hc hs
+  congr 1
+  funext i
+  simp only [callRegs]
+  split
+  · rename_i h; rcases h with rfl | rfl | rfl <;> assumption
+  · rcases i with _ | i
+    · simpa using h0
+    · simp
+
+/-- `ret_state_res r [h, …]`: `s' = retState s ?junk [r] ?f ?v ?m` for a state literal `s'` whose
+`X0` is `r`. -/
+macro "ret_state_res" " [" hs:Lean.Parser.Tactic.simpLemma,* "]" : tactic => `(tactic|
+  exact eq_retState_res (by simp [setReg, $hs,*]) (by simp [setReg, callRegs, $hs,*])
+    (by simp [setReg, callRegs, $hs,*]) (by simp [setReg, callRegs, $hs,*])
+    (by simp [$hs,*]) (by simp [$hs,*]) (by simp [$hs,*]) (by simp [$hs,*]) (by simp [$hs,*])
+    (by simp [$hs,*]))
+
+/-! ### Decimal digits in chunks of nine (`formatBase10`) -/
+
+section
+open Janus.Spec.Print
+
+theorem length_decimal_ge : ∀ k n, 10 ^ k ≤ n → k + 1 ≤ (decimal n).length
+  | 0, n, _ => length_decimal_pos n
+  | k + 1, n, h => by
+    have h10 : 10 ≤ n := Nat.le_trans (Nat.pow_le_pow_right (show 10 > 0 by decide) (by omega : 1 ≤ k + 1)) h
+    rw [decimal_ge10 h10]
+    have := length_decimal_ge k (n / 10) (by rw [Nat.le_div_iff_mul_le (by decide)]; rw [Nat.pow_succ] at h; exact h)
+    simp; omega
+/-- The nine digits of a chunk of `formatBase10`, zero-padded. -/
+def digits9 (v : Nat) : List (BitVec 8) :=
+  (List.range 9).reverse.map fun k => digit (v / 10 ^ k % 10)
+theorem decimal_chunk (U : Nat) (h : 1000000000 ≤ U) :
+    decimal U = decimal (U / 1000000000) ++ digits9 (U % 1000000000) := by
+  have e : ∀ n, 10 ≤ n → decimal n = decimal (n / 10) ++ [digit (n % 10)] := fun n h => decimal_ge10 h
+  rw [e U (by omega), e (U / 10) (by omega), e (U / 10 / 10) (by omega), e (U / 10 / 10 / 10) (by omega),
+    e (U / 10 / 10 / 10 / 10) (by omega), e (U / 10 / 10 / 10 / 10 / 10) (by omega),
+    e (U / 10 / 10 / 10 / 10 / 10 / 10) (by omega), e (U / 10 / 10 / 10 / 10 / 10 / 10 / 10) (by omega),
+    e (U / 10 / 10 / 10 / 10 / 10 / 10 / 10 / 10) (by omega)]
+  simp only [digits9, List.range_succ, List.range_zero, List.reverse_append, List.append_assoc, List.map,
+    List.reverse_nil, List.reverse_cons, List.nil_append, List.cons_append, List.singleton_append]
+  simp only [Nat.div_div_eq_div_mul, Nat.reduceMul, Nat.reducePow, Nat.pow_zero, Nat.div_one]
+  congr 1
+  simp only [List.cons.injEq, and_true]
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> (congr 1; omega)
+
+theorem length_decimal_le : ∀ k n, n < 10 ^ (k + 1) → (decimal n).length ≤ k + 1
+  | 0, n, h => by rw [decimal_lt10 (by simpa using h)]; simp
+  | k + 1, n, h => by
+    by_cases h10 : n < 10
+    · rw [decimal_lt10 h10]; simp
+    · rw [decimal_ge10 (by omega)]
+      have := length_decimal_le k (n / 10) (by rw [Nat.div_lt_iff_lt_mul (by decide)]; rw [Nat.pow_succ] at h; exact h)
+      simp; omega
+
+theorem decimal_nine (U : Nat) (h1 : 100000000 ≤ U) (h2 : U < 1000000000) : decimal U = digits9 U := by
+  have e : ∀ n, 10 ≤ n → decimal n = decimal (n / 10) ++ [digit (n % 10)] := fun n h => decimal_ge10 h
+  rw [e U (by omega), e (U / 10) (by omega), e (U / 10 / 10) (by omega), e (U / 10 / 10 / 10) (by omega),
+    e (U / 10 / 10 / 10 / 10) (by omega), e (U / 10 / 10 / 10 / 10 / 10) (by omega),
+    e (U / 10 / 10 / 10 / 10 / 10 / 10) (by omega), e (U / 10 / 10 / 10 / 10 / 10 / 10 / 10) (by omega),
+    decimal_lt10 (show U / 10 / 10 / 10 / 10 / 10 / 10 / 10 / 10 < 10 by omega)]
+  simp only [digits9, List.range_succ, List.range_zero, List.append_assoc, List.map,
+    List.reverse_nil, List.reverse_cons, List.nil_append, List.cons_append]
+  simp only [Nat.div_div_eq_div_mul, Nat.reduceMul, Nat.reducePow, Nat.pow_zero, Nat.div_one]
+  simp only [List.cons.injEq, and_true]
+  repeat' apply And.intro
+  all_goals (congr 1; omega)
+
+end
+
+/-- The nine bytes of a `formatBase10` chunk, in the order its loop writes them, read back. -/
+theorem chunk_bytes (m : Memory) (p n w0 w1 w2 w3 w4 w5 w6 w7 w8 : Nat) :
+    readBytes (((((((((m.writeLE (p + 7) 1 w7).writeLE (p + 8) 1 w8).writeLE (p + 5) 1 w5).writeLE
+      (p + 6) 1 w6).writeLE (p + 3) 1 w3).writeLE (p + 4) 1 w4).writeLE (p + 1) 1 w1).writeLE
+      (p + 2) 1 w2).writeLE p 1 w0) p (n + 9) =
+      [BitVec.ofNat 8 w0, BitVec.ofNat 8 w1, BitVec.ofNat 8 w2, BitVec.ofNat 8 w3, BitVec.ofNat 8 w4,
+        BitVec.ofNat 8 w5, BitVec.ofNat 8 w6, BitVec.ofNat 8 w7, BitVec.ofNat 8 w8] ++
+        readBytes m (p + 9) n := by
+  rw [show n + 9 = 9 + n by omega, readBytes_add]
+  congr 1
+  · simp only [readBytes, List.range_succ, List.range_zero, List.map, List.nil_append, List.map_append,
+      List.map_cons, List.map_nil, Memory.writeLE]
+    simp +arith
+  · repeat rw [readBytes_writeLE (by omega)]
 
 end Janus.Print
