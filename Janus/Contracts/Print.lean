@@ -508,7 +508,7 @@ elab "kobl" : tactic => do
   if let some (ty, lhs, _) := t.eq? then
     let ty ← whnfR ty
     if ty.isAppOfArity ``BitVec 1 then
-      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; simp only [Janus.Tactic.setReg_apply]; first | assumption | rfl) | rfl | (dsimp only; simp only [Janus.Tactic.setReg_apply]; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp [setReg]; omega))); return
+      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; simp only [Janus.Tactic.setReg_apply]; first | assumption | rfl) | rfl | (dsimp only; simp only [Janus.Tactic.setReg_apply]; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp [setReg]; omega) | (simp [setReg, callRegs]) | (simp [setReg, callRegs, BitVec.ofNat_toNat]) | (apply BitVec.eq_of_toNat_eq; simp; omega))); return
     if lhs.isAppOfArity ``Memory.accessible 4 then
       run (← `(tactic| first | with_reducible assumption | (dsimp only; janus_disch) | (janus_simp; first | done | janus_disch))); return
     if lhs.isAppOfArity ``Memory.readLE 3 then
@@ -842,7 +842,7 @@ def PrintReady (A : PrintGlobals) (rt : List (Nat × Nat)) (below above adj : Na
   -- the M: `locks`, `dying`, the print count (0: outside any print)
   MP + 280 ≤ 2 ^ 48 ∧ s.mem.accessible (MP + mLocks) 16 true = true ∧
   s.mem.readLE (MP + mDying) 4 = 0 ∧ s.mem.readLE (MP + mPrintlock) 1 = 0 ∧
-  s.mem.readLE (MP + mLocks) 4 + 3 < 2 ^ 31 ∧
+  s.mem.readLE (MP + mLocks) 4 + 4 < 2 ^ 31 ∧
   -- the globals: not panicking-dependent, the backlog index in range, no `overrideWrite`,
   -- `debuglock` free
   s.mem.accessible A.pk 4 false = true ∧ s.mem.accessible A.bi 8 true = true ∧
@@ -860,6 +860,44 @@ def PrintReady (A : PrintGlobals) (rt : List (Nat × Nat)) (below above adj : Na
   Sep (MP + mLocks) 16 [(G + 16, 8), (G + gM, 8), (G + gWritebuf, 16), (A.pk, 4), (A.bi, 8),
     (A.bl, 512), (A.ow, 8), (A.dl, 8)] ∧
   Sep (G + 16) 8 [(A.bi, 8), (A.bl, 512), (A.dl, 8)] ∧ Sep (G + gM) 8 [(A.bi, 8), (A.bl, 512), (A.dl, 8)] ∧
-  Sep (G + gWritebuf) 16 [(A.bi, 8), (A.bl, 512), (A.dl, 8)]
+  Sep (G + gWritebuf) 16 [(A.bi, 8), (A.bl, 512), (A.dl, 8)] ∧ Sep A.dl 8 [(A.bi, 8), (A.bl, 512)]
+
+/-- The runtime-owned ranges `rt` miss the program's read-only data (the strings and tables the
+print functions read): a contract's frame (`MemFrame … rt`) then keeps them. -/
+def DataOutside (p : Program) (rt : List (Nat × Nat)) : Prop :=
+  ∀ d ∈ p.data, Outside d.base d.bytes.length rt
+
+theorem DataOutside.of_dataRead {p : Program} {rt : List (Nat × Nat)} (h : DataOutside p rt)
+    {a n : Nat} (hv : (dataRead p a n).isSome = true) : Outside a n rt := by
+  unfold dataRead at hv
+  cases hd : dataSegAt p a n with
+  | none => rw [hd] at hv; cases hv
+  | some d =>
+    unfold dataSegAt at hd
+    have hm := List.mem_of_find?_eq_some hd
+    have hp := List.find?_some hd
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at hp
+    exact Outside.of_sub (h d hm) hp.1 hp.2
+
+/-- The bytes of the program's read-only data at `[a, a+n)`, from `DataLoaded` (the side
+conditions are closed on literals by `decide +kernel`). -/
+theorem readBytes_data {p : Program} {m : Memory} (h : p.DataLoaded m) (a n : Nat) (bs : Bytes)
+    (hs : ∀ i, i < n → (dataRead p (a + i) 1).isSome = true)
+    (hv : (List.range n).map (fun i => dataReadD p (a + i) 1) = bs.map BitVec.toNat) :
+    readBytes m a n = bs := by
+  have hl : bs.length = n := by
+    have := congrArg List.length hv; simp at this; omega
+  apply List.ext_getElem (by simp [readBytes, hl])
+  intro i h1 h2
+  simp only [readBytes, List.getElem_map, List.getElem_range]
+  have hi : i < n := by simpa [readBytes] using h1
+  have e := readLE_dataReadD h (a + i) 1 (hs i hi)
+  rw [Memory.readLE_one] at e
+  have e2 := congrArg (·[i]?) hv
+  simp only [List.getElem?_map, List.getElem?_range hi, Option.map_some] at e2
+  rw [List.getElem?_eq_getElem h2] at e2
+  simp only [Option.map_some, Option.some.injEq] at e2
+  apply BitVec.eq_of_toNat_eq
+  rw [e, e2]
 
 end Janus.Print
