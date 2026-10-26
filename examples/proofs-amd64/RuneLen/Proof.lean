@@ -11,8 +11,8 @@ outside it, the call returns, obeys the ABI, and `RAX` is `countRunes (bytes of 
 
 In three layers, all from the binary's code: `decoderune_meets` (as in
 `examples/proofs-amd64/SumRunes`), `countrunes_meets` (the loop of `runtime.countrunes` through
-`decoderune`'s contract) and `correctness` (RuneLen through `countrunes`' contract);
-`runtime_correctness` combines them, so nothing is assumed. `countrunes_satisfiable` is the
+`decoderune`'s contract) and `correctness_of_contract` (RuneLen through `countrunes`' contract);
+`correctness` combines them, so nothing is assumed. `countrunes_satisfiable` is the
 contract's witness and `Witness` gives a concrete call state.
 -/
 
@@ -312,23 +312,25 @@ theorem loop (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
       S.rip = BitVec.ofNat 64 head → S.regs 0 = p → S.regs 3 = n →
       S.regs 4 = s.regs 4 - 40#64 → S.regs 14 = s.regs 14 → S.regs 5 = s.regs 4 - 8#64 →
       S.xmm 15 = s.xmm 15 → S.df = s.df → S.fsBase = s.fsBase → S.mxcsr = s.mxcsr →
+      S.x87 = s.x87 → S.fpucw = s.fpucw →
       MemFrame (M0 s p n) S.mem (R s) →
       ReachesRet Extracted.program (retAddrOf s) S fun s' =>
         s'.rip = retAddrOf s ∧ s'.regs 4 = s.regs 4 + 8#64 ∧ s'.regs 5 = s.regs 5 ∧
         s'.regs 14 = s.regs 14 ∧ s'.xmm 15 = s.xmm 15 ∧ s'.fsBase = s.fsBase ∧ s'.df = s.df ∧
-        s'.mxcsr = s.mxcsr ∧ MemFrame (M0 s p n) s'.mem (R s) ∧ (s'.regs 0).toNat = T := by
+        s'.mxcsr = s.mxcsr ∧ s'.x87 = s.x87 ∧ s'.fpucw = s.fpucw ∧
+        MemFrame (M0 s p n) s'.mem (R s) ∧ (s'.regs 0).toNat = T := by
   intro fuel
   induction fuel with
   | zero =>
-    intro S T hT hf hk hck hpc h0 h3 hsp h14 h5 hx hdf hfs hmx hfr
+    intro S T hT hf hk hck hpc h0 h3 hsp h14 h5 hx hdf hfs hmx hx87 hfpu hfr
     have hfr0 := hfr
     simp only [M0, R] at hfr
     janus64_run
-    refine ⟨hfs, hfr0, ?_⟩
+    refine ⟨hfs, hx87, hfpu, hfr0, ?_⟩
     rw [← hT, runesFrom_of_le _ _ (by simp; omega)]
     simp
   | succ fuel ih =>
-    intro S T hT hf hk hck hpc h0 h3 hsp h14 h5 hx hdf hfs hmx hfr
+    intro S T hT hf hk hck hpc h0 h3 hsp h14 h5 hx hdf hfs hmx hx87 hfpu hfr
     have hfr0 := hfr
     have hbs : strBytes S.mem p.toNat n.toNat = strBytes s.mem p.toNat n.toNat := by
       rw [strBytes_of_frame hfr (by
@@ -340,7 +342,7 @@ theorem loop (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
     simp only [M0, R] at hfr
     by_cases hkn : (S.regs 1).toNat = n.toNat
     · janus64_run
-      refine ⟨hfs, hfr0, ?_⟩
+      refine ⟨hfs, hx87, hfpu, hfr0, ?_⟩
       rw [← hT, runesFrom_of_le _ _ (by simp; omega)]
       simp
     · have hr := hp2 (by omega)
@@ -415,10 +417,10 @@ theorem countrunes_meets (rt : List (Nat × Nat)) (H : RtReady) (stack : Nat) (h
     (by omega) (by omega) hp1 hp2 (by omega) (by omega) (by omega) hra (s.regs 3).toNat _ _ rfl
     (by simp [setRegF_apply]) (by simp [setRegF_apply]) (by simp [setRegF_apply]) (by janus64_simp)
     (by janus64_simp) (by janus64_simp) (by janus64_simp) (by janus64_simp) (by janus64_simp)
-    (by janus64_simp) (by janus64_simp) (by janus64_simp) (by janus64_simp) ?_) ?_
+    (by janus64_simp) (by janus64_simp) (by janus64_simp) (by janus64_simp) rfl rfl ?_) ?_
   · simp only [M0, R]; exact MemFrame.refl _ _
-  · rintro s' ⟨hrip, h4, h5, h14, hx, hfs, hdf, hmx, hfr, h0⟩
-    refine RtPost64.intro hrip h4 h5 h14 hx hfs hdf hmx ?_ ?_
+  · rintro s' ⟨hrip, h4, h5, h14, hx, hfs, hdf, hmx, hx87, hfpu, hfr, h0⟩
+    refine RtPost64.intro hrip h4 h5 h14 hx hfs hdf hmx ?_ ?_ hx87 hfpu
     · have h1 : MemFrame s.mem (M0 s (s.regs 0) (s.regs 3)) [((s.regs 4).toNat - stack, (s.regs 4).toNat),
           ((s.regs 4).toNat + 8, (s.regs 4).toNat + 8 + 8 * 2)] := by
         simp only [M0]
@@ -453,7 +455,7 @@ def Pre (p n : BitVec 64) (s : State) : Prop :=
 set_option maxRecDepth 20000 in
 set_option maxHeartbeats 4000000 in
 /-- **RuneLen, from `countrunes`' contract.** -/
-theorem correctness (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
+theorem correctness_of_contract (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
     (hc : RtContract64 Extracted.program crAddr rt 4144 H countrunesSpec) :
     Ensures Extracted.program Extracted.entry [p, n] (Pre p n)
       (fun s s' => (s'.regs 0).toNat = countRunes (strBytes s.mem p.toNat n.toNat)) := by
@@ -468,10 +470,10 @@ theorem correctness (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
   all_goals assumption
 
 /-- **RuneLen, with the runtime's own `countrunes` and `decoderune`**: nothing assumed. -/
-theorem runtime_correctness (p n : BitVec 64) :
+theorem correctness (p n : BitVec 64) :
     Ensures Extracted.program Extracted.entry [p, n] (Pre p n)
       (fun s s' => (s'.regs 0).toNat = countRunes (strBytes s.mem p.toNat n.toNat)) :=
-  correctness [] (fun _ _ _ _ => True) p n (countrunes_meets [] _ 4144 (Nat.le_refl _))
+  correctness_of_contract [] (fun _ _ _ _ => True) p n (countrunes_meets [] _ 4144 (Nat.le_refl _))
 
 /-! ## Non-vacuity -/
 
@@ -501,15 +503,15 @@ theorem pre : Pre 0 0 s0 := by
   have hw : mem0.accessible (wsp - 0x2000) 0x2100 true = true := by decide
   exact Arm64.Memory.accessible_mono _ hw (by decide) (by decide)
 
-/-- All hypotheses of `runtime_correctness` are satisfiable together. -/
+/-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
     CallSetup (Extracted.program.withExit ret) Extracted.entry [0, 0] s ∧ Pre 0 0 s :=
   ⟨ret, s0, hret, setup, pre⟩
 
-/-- The witness call returns, with the conclusion of `runtime_correctness`. -/
+/-- The witness call returns, with the conclusion of `correctness`. -/
 theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = countRunes (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
-  runtime_correctness 0 0 ret hret s0 setup pre
+  correctness 0 0 ret hret s0 setup pre
 
 end Witness
 

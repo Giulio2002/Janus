@@ -9,11 +9,11 @@ import Extracted
 `[RSP-4144, RSP+24)` writable, the string readable and outside the window and `g`'s guard word
 outside it, the call returns, obeys the ABI, and `RAX` is `sumRunes (bytes of s)`.
 
-In two layers: `correctness` from `decoderune`'s contract (`RtContract64 … decoderuneSpec`), and
+In two layers: `correctness_of_contract` from `decoderune`'s contract (`RtContract64 … decoderuneSpec`), and
 `decoderune_meets`, which proves that the runtime's own `decoderune` (extracted with SumRunes)
 meets it, from its machine code: one symbolic run over its 25 paths, with the 32-bit signed
 compares (`cond_sub_le32`, `cond_sub_g32`), the masked index (`mask_k`) and the rune assembled by
-`ANDL`/`SHLL`/`ORL` (`r2a`, `r3a`, `r4a`) restated arithmetically. `runtime_correctness` combines
+`ANDL`/`SHLL`/`ORL` (`r2a`, `r3a`, `r4a`) restated arithmetically. `correctness` combines
 the two; nothing is assumed, and `Witness` gives a concrete call state.
 -/
 
@@ -407,7 +407,7 @@ def Pre (p n : BitVec 64) (s : State) : Prop :=
 set_option maxRecDepth 20000 in
 set_option maxHeartbeats 4000000 in
 /-- **SumRunes, from `decoderune`'s contract.** -/
-theorem correctness (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
+theorem correctness_of_contract (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
     (hdec : RtContract64 Extracted.program decAddr rt 4096 H decoderuneSpec) :
     Ensures Extracted.program Extracted.entry [p, n] (Pre p n)
       (fun s s' => (s'.regs 0).toNat = sumRunes (strBytes s.mem p.toNat n.toNat)) := by
@@ -428,10 +428,10 @@ theorem correctness (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
   exact MemFrame.refl _ _
 
 /-- **SumRunes, with the runtime's own `decoderune`**: nothing assumed. -/
-theorem runtime_correctness (p n : BitVec 64) :
+theorem correctness (p n : BitVec 64) :
     Ensures Extracted.program Extracted.entry [p, n] (Pre p n)
       (fun s s' => (s'.regs 0).toNat = sumRunes (strBytes s.mem p.toNat n.toNat)) :=
-  correctness [] (fun _ _ _ _ => True) p n (decoderune_meets [] 4096 _ (by decide))
+  correctness_of_contract [] (fun _ _ _ _ => True) p n (decoderune_meets [] 4096 _ (by decide))
 
 /-! ## Non-vacuity -/
 
@@ -461,15 +461,15 @@ theorem pre : Pre 0 0 s0 := by
   have hw : mem0.accessible (wsp - 0x2000) 0x2100 true = true := by decide
   exact Arm64.Memory.accessible_mono _ hw (by decide) (by decide)
 
-/-- All hypotheses of `runtime_correctness` are satisfiable together. -/
+/-- All hypotheses of `correctness` are satisfiable together. -/
 theorem nonvacuous : ∃ (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
     CallSetup (Extracted.program.withExit ret) Extracted.entry [0, 0] s ∧ Pre 0 0 s :=
   ⟨ret, s0, hret, setup, pre⟩
 
-/-- The witness call returns, with the conclusion of `runtime_correctness`. -/
+/-- The witness call returns, with the conclusion of `correctness`. -/
 theorem returns : Returns (Extracted.program.withExit ret) s0 fun s' =>
     ABIReturn s0 s' ∧ (s'.regs 0).toNat = sumRunes (strBytes s0.mem (0 : BitVec 64).toNat (0 : BitVec 64).toNat) :=
-  runtime_correctness 0 0 ret hret s0 setup pre
+  correctness 0 0 ret hret s0 setup pre
 
 end Witness
 
