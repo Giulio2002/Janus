@@ -149,7 +149,6 @@ structure Inv0 (T : List FuncInfo) (m0 : Memory) (F : Frame) (items0 : List Item
   room : rm ≤ room0 c.mem
   sv : mode = .ret → rd c.mem (B + 0x10) = 0
   chn : frameRest F.sp (defers0 c.mem) = frameRest F.sp ds0
-  pm : mode = .panic → ∃ r rs, ch = r :: rs ∧ r.recovered = false ∧ r.goexit = false
   agr : Agrees m0 c.mem (keepCore m0 F items0)
   fo : FrameOK (P0 T RPa) m0 F items0
   bsub : ∀ ba sa, F.openAt = some (ba, sa) → ∀ i ∈ openBits (c.mem.readLE ba 1), i ∈ openBits (m0.readLE ba 1)
@@ -168,8 +167,7 @@ theorem Inv0.ret {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List It
     {mode : DeferMode} {x28 x18 : W64} {lr x29 : Nat} {e e' : State} {ch : List PanicRec} {rm ph : Nat}
     (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e ch rm ph)
     (hdr : DeferReturned (P0 T RPa) x28 x18 F.sp (frameKeep m0 F items0) e e')
-    (ch' : List PanicRec) (rm' : Nat) (hpan : panics0 e'.mem = ch') (hroom : rm' ≤ room0 e'.mem)
-    (hpm : mode = .panic → ∃ r rs, ch' = r :: rs ∧ r.recovered = false ∧ r.goexit = false) :
+    (ch' : List PanicRec) (rm' : Nat) (hpan : panics0 e'.mem = ch') (hroom : rm' ≤ room0 e'.mem) :
     Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e' ch' rm' ph := by
   obtain ⟨hpc, hsp, h28, h18, hag, henv, hdef, hsav, hrm⟩ := hdr
   rw [frameKeep_eq] at hag
@@ -192,7 +190,7 @@ theorem Inv0.ret {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List It
   refine ⟨by rw [hsp]; exact hI.sp, hI.al, hI.hi, by rw [hsp, hag.accessible]; exact hI.acc, h28, h18, hI.spB,
     ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, hI.hlr, hI.hbd, hI.hres, henv, hpan, hroom,
     fun hm => (saved0_none_iff _).1 (by rw [hsv]; exact (saved0_none_iff _).2 (hI.sv hm)),
-    by rw [hdef']; exact hI.chn, hpm, hI.agr.trans hagE, hI.fo,
+    by rw [hdef']; exact hI.chn, hI.agr.trans hagE, hI.fo,
     fun ba sa hF i hi => hI.bsub ba sa hF i (by rw [← hbyte ba sa hF]; exact hi),
     fun it hit => hI.its it (by rw [← hci]; exact hit)⟩
   · rw [show F.sp - 96 = F.sp - 96 + 0 from rfl, hfr 0 (by omega)]; exact hfm.w0
@@ -365,8 +363,7 @@ theorem Inv0.step (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph) {
     Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 e ch rm ph' := by
   refine ⟨by rw [hsp]; exact hI.sp, hI.al, hI.hi, by rw [hsp, hmf.accessible]; exact hI.acc,
     by rw [h28]; exact hI.r28, by rw [h18]; exact hI.r18, hI.spB, hfm, hI.hlr, hI.hbd, hI.hres, henv, hpan,
-    hroom, hsv, hchn, ?_, ?_, hI.fo, hbs, hits⟩
-  · intro hm; exact hI.pm hm
+    hroom, hsv, hchn, ?_, hI.fo, hbs, hits⟩
   · refine hI.agr.trans (Agrees.of_memFrame hmf fun a ha => ?_)
     obtain ⟨r, hr, h1, h2⟩ := ha
     obtain ⟨hr8, hro⟩ := hI.keep_apart r hr
@@ -739,6 +736,139 @@ theorem step_fin (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr 
   · have hne : ¬ mode = .ret := hm
     simp only [hne, reduceIte] at hpd hd4
     exact ⟨hpd, hd4⟩
+
+theorem step_recover (hp : EngineAt p) {u : State}
+    (hI : Inv0 T m0 F items0 ds0 .panic x28 x18 lr x29 u ch rm ph)
+    (hpc : u.pc = BitVec.ofNat 64 RPa) {k : Nat} (hk : npan u.mem = k + 1) (hk8 : k < 8)
+    (hf : rd u.mem (panAt k + 24) / 2 % 2 = 1) :
+    ∃ k' d, Program.Steps p u k' d ∧ d.pc = BitVec.ofNat 64 F.resume ∧ d.sp = BitVec.ofNat 64 F.sp ∧
+      d.regs 29 = d.sp - 8 ∧ d.regs 28 = x28 ∧ d.regs 18 = x18 ∧
+      MemFrame u.mem d.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F) ∧ Env0 T d.mem ∧
+      panics0 d.mem = (panics0 u.mem).dropWhile (·.start ≤ F.sp) ∧ defers0 d.mem = defers0 u.mem ∧
+      room0 u.mem ≤ room0 d.mem ∧
+      ((ph ≠ 0 ∧ ∃ ba sa, F.openAt = some (ba, sa) ∧ u.mem.readLE ba 1 ≠ 0) ∧ saved0 d.mem = F.openAt ∨
+        ¬ (ph ≠ 0 ∧ ∃ ba sa, F.openAt = some (ba, sa) ∧ u.mem.readLE ba 1 ≠ 0) ∧ saved0 d.mem = none) := by
+  obtain ⟨hal, hsp, hsp96⟩ := hI.spw
+  have hs := hI.sp_eq
+  have hfm := hI.fm
+  have hw0 := hfm.w0
+  have hw16 := hfm.w16
+  have hw24 := hfm.w24
+  have hw32 := hfm.w32
+  have hw56 := hfm.w56
+  rw [hs] at hw0 hw16 hw24 hw32 hw56
+  have hmode : u.mem.readLE (u.sp.toNat + 24) 8 = 0 := by rw [hw24]; rfl
+  have hfsp64 : F.sp < 2 ^ 64 := by have := hI.hi; omega
+  -- RP to DROP
+  have h1 := seg_rp_rec u x18.toNat k hpc hal hsp hI.acc hI.env.acc hw56 hmode hk hk8 hf
+  obtain ⟨k1, d1, hk1, hpd1, hq1⟩ := reachesRet_transfer hp h1
+  obtain ⟨hm1, hsp1, h281, h181, h61, h11⟩ := hq1
+  rw [hw0] at h11
+  -- DROP
+  have h2 := seg_drop F.sp hfsp64 (k + 1) d1 hpd1 h61 h11 (by rw [hm1]; exact hk) (by omega)
+    (by rw [hm1]; exact hI.env.acc)
+  obtain ⟨k2, d2, hk2, hpd2, hq2⟩ := reachesRet_transfer hp h2
+  obtain ⟨hsp2, h282, h182, h62, h12, hmf2, hnp2⟩ := hq2
+  rw [hm1] at hmf2 hnp2
+  have hspB := hI.spB
+  have hfrOut : ∀ kk, kk + 8 ≤ 96 → Outside (u.sp.toNat + kk) 8 [(B, B + 8)] := by
+    intro kk hk; simp only [outside_cons, outside_nil, and_true]; simp only [B] at *; omega
+  have hsp21 : d2.sp = u.sp := by rw [hsp2, hsp1]
+  have hrdf : ∀ kk, kk + 8 ≤ 96 → d2.mem.readLE (u.sp.toNat + kk) 8 = u.mem.readLE (u.sp.toNat + kk) 8 :=
+    fun kk hk => hmf2.readLE _ _ (hfrOut kk hk)
+  have hres : d2.mem.readLE (d2.sp.toNat + 16) 8 = F.resume := by
+    rw [hsp21, hrdf 16 (by omega)]; exact hw16
+  have hph' : d2.mem.readLE (d2.sp.toNat + 32) 8 = ph := by
+    rw [hsp21, hrdf 32 (by omega)]; exact hw32
+  have hb256' : d2.mem.readLE (d2.mem.readLE (d2.sp.toNat + 40) 8) 1 < 256 := by
+    have := Memory.readLE_lt d2.mem (d2.mem.readLE (d2.sp.toNat + 40) 8) 1; simpa using this
+  have hsa64 : d2.mem.readLE (d2.sp.toNat + 48) 8 < 2 ^ 64 := by
+    have := Memory.readLE_lt d2.mem (d2.sp.toNat + 48) 8
+    have h : (256:Nat)^8 = 2^64 := by decide
+    omega
+  have hph64 : ph < 2 ^ 64 := by
+    rw [← hw32]
+    have := Memory.readLE_lt u.mem (u.sp.toNat + 32) 8
+    have h : (256:Nat)^8 = 2^64 := by decide
+    omega
+  have h3 := seg_dropped d2 F.sp F.resume ph (d2.mem.readLE (d2.sp.toNat + 40) 8)
+    (d2.mem.readLE (d2.sp.toNat + 48) 8) hpd2 h62 h12 (by rw [hsp21]; exact hal) (by rw [hsp21]; omega)
+    (by rw [hmf2.accessible, hsp21]; exact hI.acc) (by rw [hmf2.accessible]; exact hI.env.acc) hres
+    hI.hres.1 hI.hres.2 hph' rfl rfl (fun hne => by
+      have hsome := hfm.hph hne
+      obtain ⟨⟨ba, sa⟩, hF⟩ : ∃ q, F.openAt = some q := by
+        cases hq : F.openAt with
+        | none => rw [hq] at hsome; simp at hsome
+        | some q => exact ⟨q, rfl⟩
+      obtain ⟨w40, w48⟩ := hfm.w40 ba sa hF
+      rw [hs] at w40 w48
+      have hba : d2.mem.readLE (d2.sp.toNat + 40) 8 = ba := by rw [hsp21, hrdf 40 (by omega)]; exact w40
+      obtain ⟨b1, b2, b3, b4, -⟩ := hI.ba_facts hF
+      rw [hba]
+      refine ⟨b1, by rw [hmf2.accessible]; exact Memory.accessible_weaken _ b2, ?_⟩
+      have := b3; simp only [outside_cons, outside_nil, and_true] at this; omega)
+    hfsp64 hph64 hsa64 hb256' (by rw [hsp21]; simp only [B] at *; omega)
+  obtain ⟨k3, d3, hk3, hpd3, hq3⟩ := reachesRet_transfer hp h3
+  obtain ⟨hsp3, h293, h283, h183, hmf3, hsv3⟩ := hq3
+  have hsub3 : ∀ a n, Outside a n RecWords → Outside a n [(B, B + 8)] ∧ Outside a n [(B + 0x10, B + 0x28)] := by
+    intro a n h; simp only [RecWords, outside_cons, outside_nil, and_true] at h ⊢; exact h
+  have hfRec : MemFrame u.mem d3.mem RecWords := hmf2.trans hmf3 hsub3
+  have hnpd3 : npan d3.mem = npan d2.mem := by
+    simp only [npan]
+    exact hmf3.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; simp only [B]; omega)
+  have hnpd2 : npan d2.mem = dropCount u.mem F.sp (k + 1) := hnp2
+  have hD := dropCount_le u.mem F.sp (k + 1)
+  have hrec := recov_frame hI.env hfRec (by rw [hnpd3, hnpd2, hk]; exact hD)
+  have hx18 : BitVec.ofNat 64 x18.toNat = x18 := by simp
+  have hmfr : MemFrame u.mem d3.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F) := hfRec.mono fun a n h => by
+    simp only [outside_append, P0_priv, outside_cons, outside_nil, and_true, RecWords] at h ⊢
+    have := h.1; simp only [B] at *; omega
+  have hmfr' : MemFrame u.mem d3.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F) := hmfr
+  refine ⟨k1 + (k2 + k3), d3, hk1.trans (hk2.trans hk3), hpd3, hsp3, h293, ?_, ?_, hmfr', hrec.1, ?_, hrec.2.1,
+    hrec.2.2.1, ?_⟩
+  · rw [h283, h282, h281]; exact hI.r28
+  · rw [h183, h182, h181]; exact hx18.trans rfl
+  · rw [panics0_eq, panics0_eq, hnpd3, hnpd2, hk]
+    have hmin1 : min (k + 1) 8 = k + 1 := Nat.min_eq_left (by omega)
+    have hmin2 : min (dropCount u.mem F.sp (k + 1)) 8 = dropCount u.mem F.sp (k + 1) := Nat.min_eq_left (by omega)
+    rw [hmin1, hmin2, hrec.2.2.2 _ (by omega)]
+    exact panList_dropCount u.mem F.sp (k + 1)
+  · -- the saved state
+    by_cases hph0 : ph = 0
+    · right
+      refine ⟨fun h => h.1 hph0, ?_⟩
+      rw [saved0_eq]
+      have := hsv3; simp only [hph0, ne_eq, not_true_eq_false, false_and, if_false] at this
+      rw [this]; simp
+    · obtain ⟨⟨ba, sa⟩, hF⟩ : ∃ q, F.openAt = some q := by
+        have hsome := hfm.hph hph0
+        cases hq : F.openAt with
+        | none => rw [hq] at hsome; simp at hsome
+        | some q => exact ⟨q, rfl⟩
+      obtain ⟨w40, w48⟩ := hfm.w40 ba sa hF
+      rw [hs] at w40 w48
+      have hba : d2.mem.readLE (d2.sp.toNat + 40) 8 = ba := by rw [hsp21, hrdf 40 (by omega)]; exact w40
+      have hsa : d2.mem.readLE (d2.sp.toNat + 48) 8 = sa := by rw [hsp21, hrdf 48 (by omega)]; exact w48
+      obtain ⟨b1, b2, b3, b4, -⟩ := hI.ba_facts hF
+      have hbyte : d2.mem.readLE ba 1 = u.mem.readLE ba 1 := by
+        refine hmf2.readLE _ _ ?_
+        have := b3; simp only [outside_cons, outside_nil, and_true] at this ⊢; simp only [B] at *; omega
+      rw [hba, hsa, hbyte] at hsv3
+      by_cases hb0 : u.mem.readLE ba 1 = 0
+      · right
+        refine ⟨fun h => ?_, ?_⟩
+        · obtain ⟨-, ba', sa', hF', hne⟩ := h
+          rw [hF] at hF'; simp only [Option.some.injEq, Prod.mk.injEq] at hF'
+          obtain ⟨rfl, rfl⟩ := hF'; exact hne hb0
+        · rw [saved0_eq]
+          have := hsv3; simp only [hph0, hb0, ne_eq, not_false_eq_true, true_and, not_true_eq_false, if_false] at this
+          rw [this]; simp
+      · left
+        refine ⟨⟨hph0, ba, sa, hF, hb0⟩, ?_⟩
+        rw [saved0_eq]
+        have := hsv3; simp only [hph0, hb0, ne_eq, not_false_eq_true, and_self, if_true] at this
+        obtain ⟨t1, t2, t3⟩ := this
+        rw [if_neg (by rw [t1]; simp), t2, t3, hF]
 
 end steps
 
