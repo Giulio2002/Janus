@@ -31,7 +31,36 @@ var (
 	objRe          = regexp.MustCompile(`"runtime\.([A-Za-z0-9_]+)"`)
 	runtimeRe      = regexp.MustCompile(`runtime\.([A-Za-z_][A-Za-z0-9_]*)`)
 	contractFlagRe = regexp.MustCompile(`--contract runtime\.([A-Za-z0-9_]+)`)
+	// A contract file may name its entry point without the "runtime." prefix: `makeslice(et, len, cap)`
+	// or `growslice` in a doc comment, or the assembler spelling runtime·name. Only names that are
+	// entry points are taken (checked against entries by the caller), so ordinary words in backticks
+	// are not mistaken for contracts.
+	bareRe = regexp.MustCompile("`(?:runtime[.\u00b7])?([A-Za-z_][A-Za-z0-9_]*)[`(]|runtime\u00b7([A-Za-z_][A-Za-z0-9_]*)")
 )
+
+// specNames lists the entry points a contract file names: runtime.NAME anywhere, and the bare
+// spellings of bareRe when NAME is a known entry point.
+func specNames(src string, entries map[string]*entry) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(n string) {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	for _, m := range runtimeRe.FindAllStringSubmatch(src, -1) {
+		add(m[1])
+	}
+	for _, m := range bareRe.FindAllStringSubmatch(src, -1) {
+		for _, n := range m[1:] {
+			if _, ok := entries[n]; ok {
+				add(n)
+			}
+		}
+	}
+	return out
+}
 
 func category(n string) string {
 	has := func(p ...string) bool {
@@ -271,9 +300,10 @@ func cmdRuntime(args []string) {
 		for _, f := range gitFiles(*repo, br) {
 			isSpec := strings.HasPrefix(f, "Janus/Contracts/") || f == "Janus/FFI.lean" || f == "Janus/Amd64/FFI.lean"
 			if isSpec && strings.HasSuffix(f, ".lean") {
-				for _, m := range runtimeRe.FindAllStringSubmatch(gitShow(*repo, br, f), -1) {
-					if have[m[1]] == "" {
-						have[m[1]] = "contract (" + strings.TrimPrefix(f, "Janus/") + ")"
+				src := gitShow(*repo, br, f)
+				for _, n := range specNames(src, entries) {
+					if have[n] == "" {
+						have[n] = "contract (" + strings.TrimPrefix(f, "Janus/") + ")"
 					}
 				}
 			}

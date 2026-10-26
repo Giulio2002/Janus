@@ -145,3 +145,24 @@ func TestParseGlobalPattern(t *testing.T) {
 		}
 	}
 }
+
+// The runtime's own writable globals: runtime.zerobase and runtime.writeBarrier (zero-filled
+// .noptrbss in the image) and the CPU-feature table internal/cpu.ARM64, which startup code
+// overwrites; the image is recorded, and a theorem about them quantifies over their values
+// (GlobalIs) rather than assuming it.
+func TestGlobalRuntimeVars(t *testing.T) {
+	dir := mustExtract(t, "example.com/basic.MulAlgo",
+		"--global", "runtime.zerobase", "--global", "runtime.writeBarrier", "--global", "internal/cpu.ARM64")
+	id := readIdentity(t, dir)
+	if len(id.Globals) != 3 {
+		t.Fatalf("globals %+v", id.Globals)
+	}
+	for _, g := range id.Globals {
+		if g.Section != ".noptrbss" || g.Sha256 != "" || g.Size == 0 {
+			t.Errorf("%s: %+v (zero at load, no file bytes)", g.Name, g)
+		}
+	}
+	if code, _, stderr := runJanus(t, "check", dir); code != 0 {
+		t.Fatalf("check: %s", stderr)
+	}
+}
