@@ -229,6 +229,8 @@ partial def arithAtoms (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   if e.isAppOfArity ``HAdd.hAdd 6 || e.isAppOfArity ``HSub.hSub 6 || e.isAppOfArity ``HMul.hMul 6 ||
       e.isAppOfArity ``HDiv.hDiv 6 || e.isAppOfArity ``HMod.hMod 6 then
     arithAtoms (e.getArg! 5) (arithAtoms (e.getArg! 4) acc)
+  else if e.isAppOfArity ``Min.min 4 || e.isAppOfArity ``Max.max 4 then
+    arithAtoms (e.getArg! 3) (arithAtoms (e.getArg! 2) acc)
   else if e.isAppOfArity ``OfNat.ofNat 3 || e.isRawNatLit then acc
   else if e.isAppOfArity ``LE.le 4 || e.isAppOfArity ``LT.lt 4 || e.isAppOfArity ``Eq 3 then
     arithAtoms (e.getArg! (e.getAppNumArgs - 1)) (arithAtoms (e.getArg! (e.getAppNumArgs - 2)) acc)
@@ -998,6 +1000,27 @@ def clearIrrelevant (g : MVarId) : MetaM MVarId := g.withContext do
     unless (arithAtoms ty).all goalAtoms.contains do toClear := toClear.push d.fvarId
   g.tryClearMany toClear
 
+/-- Like `clearIrrelevant`, but the atoms of the small hypotheses that touch the goal count as the
+goal's too (one more hop): a block's size `k` linking `Apart a n t k` and `8·m ≤ k` to the goal. -/
+def clearIrrelevant2 (g : MVarId) : MetaM MVarId := g.withContext do
+  let goalAtoms := arithAtoms (← instantiateMVars (← g.getType))
+  let mut expanded := goalAtoms
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ← isProp ty do continue
+    let atoms := arithAtoms ty
+    if atoms.size ≤ 8 && atoms.any goalAtoms.contains then
+      for a in atoms do
+        unless expanded.contains a do expanded := expanded.push a
+  let mut toClear := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ← isProp ty do continue
+    unless (arithAtoms ty).all expanded.contains do toClear := toClear.push d.fvarId
+  g.tryClearMany toClear
+
 /-- A side condition `Outside a n rs` (of a `MemFrame` read rule): unfold the literal list and
 prove each range condition by `omega`. -/
 def dischargeOutside (g : MVarId) : TacticM Bool := do
@@ -1069,6 +1092,15 @@ partial def splitNewConj (g : MVarId) (before : Array FVarId) : MetaM MVarId := 
       return ← splitNewConj sg.mvarId before
   return g
 
+/-- The `ApartAll a n L` facts of a hypothesis `e : ty`, also inside conjunctions (projections). -/
+partial def collectApartAll (e ty : Expr) (fuel : Nat) : MetaM (Array (Expr × Expr)) := do
+  if ty.isAppOfArity `Janus.Contracts.ApartAll 3 then return #[(e, ty)]
+  if fuel > 0 && ty.isAppOfArity ``And 2 then
+    let l ← collectApartAll (← mkAppM ``And.left #[e]) (ty.getArg! 0) (fuel - 1)
+    let r ← collectApartAll (← mkAppM ``And.right #[e]) (ty.getArg! 1) (fuel - 1)
+    return l ++ r
+  return #[]
+
 /-- After a live contract's call: for every new `InRanges p n rs` hypothesis (an object the call
 returned inside the runtime-owned ranges) and every `Outside a k rs` hypothesis (caller data
 outside them), add `Apart a k p n`, so that the read-over-write side conditions see the object
@@ -1087,6 +1119,24 @@ def addApartFacts (g : MVarId) (before : Array FVarId) : MetaM MVarId := g.withC
       unless ← withReducible (isDefEq (ti.getArg! 2) (to.getArg! 2)) do continue
       let pf ← mkAppM ``Janus.InRanges.apart #[di.toExpr, do_.toExpr]
       let (_, g') ← (← g.assert `h_apart (← inferType pf) pf).intro1P
+      g := g'
+  -- a new object `ApartAll a n L` (a live call's) against every `InRanges b k L` of the context:
+  -- `Apart a n b k` (the caller's live objects), so that equalities of pointers are refuted
+  let mut aps : Array (Expr × Expr) := #[]
+  let mut allIns : Array (Expr × Expr) := #[]
+  for d in ← g.withContext getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← g.withContext (instantiateMVars d.type)
+    if !before.contains d.fvarId then
+      -- a call's postcondition may state `ApartAll a n L` inside a conjunction
+      for (e, t) in ← collectApartAll d.toExpr ty 4 do aps := aps.push (e, t)
+    if ty.isAppOfArity ``Janus.InRanges 3 then allIns := allIns.push (d.toExpr, ty)
+  for (da, ta) in aps do
+    for (di, ti) in allIns do
+      let ok ← g.withContext <| withReducible (isDefEq (ta.getArg! 2) (ti.getArg! 2))
+      unless ok do continue
+      let pf ← g.withContext <| mkAppM `Janus.Contracts.ApartAll.apart_of_inRanges #[da, di]
+      let (_, g') ← (← g.assert `h_apartL (← g.withContext (inferType pf)) pf).intro1P
       g := g'
   return g
 
@@ -1177,6 +1227,15 @@ partial def dischargeInRanges (g : MVarId) (fuel : Nat := 32) : TacticM Bool := 
 
 elab "janus_clear_irrel" : tactic => do
   replaceMainGoal [← clearIrrelevant (← getMainGoal)]
+
+/-- `janus_clear_irrel` with one more hop of atoms. -/
+elab "janus_clear_irrel2" : tactic => do
+  replaceMainGoal [← clearIrrelevant2 (← getMainGoal)]
+
+/-- `Apart a n b k` for every pair `InRanges b k rs`, `Outside a n rs` of the context (`omega` needs
+the facts, not the lists). -/
+elab "janus_apart_facts" : tactic => do
+  replaceMainGoal [← addApartFacts (← getMainGoal) #[]]
 
 /-- Peel the store `m = m'.writeLE a k v` of a `MemFrame m₀ m rs` goal using a hypothesis
 `InRanges b k' rs'` (with `rs'` contained in `rs`, e.g. `rs = rs' ++ …`, and `[a, a+k) ⊆ [b, b+k')`
@@ -1320,7 +1379,9 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
            simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true,
              and_imp]
            intros
-           janus_clear_irrel
+           janus_apart_facts
+           try simp only [Janus.Apart] at *
+           janus_clear_irrel2
            try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
              Nat.reduceMod] at *
            repeat' apply And.intro

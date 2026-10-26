@@ -224,12 +224,12 @@ As arm64 `MemmoveLive` etc.: `RAX = dst`, `RBX = src`, `RCX = n` (`memmove`); th
 live object or outside `R.rt`, and also outside the return-address slot. -/
 
 /-- The destination of a copy or clear (amd64). -/
-def LiveDest64 (R : RtInv) (L : List (Nat × Nat)) (s : State) (d nargs a n : Nat) : Prop :=
+@[reducible] def LiveDest64 (R : RtInv) (L : List (Nat × Nat)) (s : State) (d nargs a n : Nat) : Prop :=
   a + n ≤ 2 ^ 48 ∧ s.mem.accessible a n true = true ∧ Outside a n (calleeStack64 s d nargs) ∧
     (InRanges a n L ∨ Outside a n R.rt) ∧ Outside a n [((s.regs 4).toNat, (s.regs 4).toNat + 8)]
 
 /-- The return of a live copy or clear (amd64): `retState64` without result registers. -/
-def LiveMemRet64 (R : RtInv) (d nargs : Nat) (extra L : List (Nat × Nat)) (b : Nat) (s s' : State)
+@[reducible] def LiveMemRet64 (R : RtInv) (d nargs : Nat) (extra L : List (Nat × Nat)) (b : Nat) (s s' : State)
     (P : Memory → Prop) : Prop :=
   ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
     (zh : Nat → BitVec 256) (kr : Nat → W64), s' = retState64 s junk [] f x yh m zh kr ∧
@@ -295,21 +295,16 @@ def MemclrHasPointersLive64 (p : Janus.Amd64.Program) (addr : Nat) (d : Nat) (R 
     (fun s s' => LiveMemRet64 R d 2 [((s.regs 0).toNat, (s.regs 0).toNat + (s.regs 3).toNat)] L b s s'
       fun m => Mem.Zeroed m (s.regs 0).toNat (s.regs 3).toNat)
 
-/-- A state is `retState64` of the call state when it returns to the return address with
-`RSP + 8`, `RBP`, `R14`, `X15`, the direction flag, `FS` and `MXCSR` kept and the result
-registers `RAX, RBX, RCX` as `res` (a result register past `res`'s length is unconstrained). The
-converse of the definition, for proofs that run a callee's code. -/
-theorem retState64_intro {s s' : State} {res : List W64} (hrip : s'.rip = retAddrOf s)
+/-- `retState64`, from the final fields, with every hypothesis explicit (`x87`/`fpucw` as
+equations: carry them in a `Keep64` conjunct, see `retState64_of_keep`). -/
+theorem retState64_eq {s s' : State} {res : List W64} (hrip : s'.rip = retAddrOf s)
     (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
     (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
     (hmx : s'.mxcsr = s.mxcsr)
     (h0 : s'.regs 0 = res.getD 0 (s'.regs 0)) (h1 : s'.regs 3 = res.getD 1 (s'.regs 3))
     (h2 : s'.regs 1 = res.getD 2 (s'.regs 1))
-    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all)
-    (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
-    ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
-      (zh : Nat → BitVec 256) (kr : Nat → W64), s' = retState64 s junk res f x yh m zh kr := by
-  refine ⟨s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, s'.zmmHi, s'.kreg, ?_⟩
+    (hx87 : s'.x87 = s.x87) (hfw : s'.fpucw = s.fpucw) :
+    s' = retState64 s s'.regs res s'.flags s'.xmm s'.ymmHi s'.mem s'.zmmHi s'.kreg := by
   obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
   simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw h0 h1 h2 ⊢
   subst hrip hfs hdf hmx hx87 hfw
@@ -332,5 +327,57 @@ theorem retState64_intro {s s' : State} {res : List W64} (hrip : s'.rip = retAdd
     split
     · rename_i hi; subst hi; exact hx
     · rfl
+
+/-- A state is `retState64` of the call state when it returns to the return address with
+`RSP + 8`, `RBP`, `R14`, `X15`, the direction flag, `FS` and `MXCSR` kept and the result
+registers `RAX, RBX, RCX` as `res` (a result register past `res`'s length is unconstrained). The
+converse of the definition, for proofs that run a callee's code. -/
+theorem retState64_intro {s s' : State} {res : List W64} (hrip : s'.rip = retAddrOf s)
+    (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
+    (hx : s'.xmm 15 = s.xmm 15) (hfs : s'.fsBase = s.fsBase) (hdf : s'.df = s.df)
+    (hmx : s'.mxcsr = s.mxcsr)
+    (h0 : s'.regs 0 = res.getD 0 (s'.regs 0)) (h1 : s'.regs 3 = res.getD 1 (s'.regs 3))
+    (h2 : s'.regs 1 = res.getD 2 (s'.regs 1))
+    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all)
+    (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) :
+    ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
+      (zh : Nat → BitVec 256) (kr : Nat → W64), s' = retState64 s junk res f x yh m zh kr :=
+  ⟨s'.regs, s'.flags, s'.xmm, s'.ymmHi, s'.mem, s'.zmmHi, s'.kreg,
+    retState64_eq hrip h4 h5 h14 hx hfs hdf hmx h0 h1 h2 hx87 hfw⟩
+
+/-- **The fields a Go function keeps** (amd64): the x87 state and control word, the `FS` base and the
+direction flag. A loop invariant carries ONE `Keep64 s t` conjunct instead of one equation per
+field (the `x87`/`fpucw` equations of `retState64_intro` cannot be closed by `rfl` on a symbolic loop
+state); `retState64_of_keep` consumes it. -/
+def Keep64 (s t : State) : Prop :=
+  t.x87 = s.x87 ∧ t.fpucw = s.fpucw ∧ t.fsBase = s.fsBase ∧ t.df = s.df
+
+theorem Keep64.refl (s : State) : Keep64 s s := ⟨rfl, rfl, rfl, rfl⟩
+
+theorem Keep64.trans {s t u : State} (h : Keep64 s t) (h' : Keep64 t u) : Keep64 s u :=
+  ⟨h'.1.trans h.1, h'.2.1.trans h.2.1, h'.2.2.1.trans h.2.2.1, h'.2.2.2.trans h.2.2.2⟩
+
+/-- One instruction keeps the bundle: its own equations are `rfl` for a register, flag, memory or
+vector update (no decoded instruction writes these fields). -/
+theorem Keep64.step {s t u : State} (h : Keep64 s t) (h1 : u.x87 = t.x87) (h2 : u.fpucw = t.fpucw)
+    (h3 : u.fsBase = t.fsBase) (h4 : u.df = t.df) : Keep64 s u :=
+  Keep64.trans h ⟨h1, h2, h3, h4⟩
+
+/-- Close `Keep64 s t'` from `Keep64 s t` for a state `t'` built from `t` by updates. -/
+macro "janus64_keep" : tactic => `(tactic| first
+  | assumption
+  | exact Keep64.refl _
+  | (refine Keep64.step (by assumption) ?_ ?_ ?_ ?_ <;> simp))
+
+/-- **`retState64`, from the final fields.** A state that returns to the return address with the
+stack, `RBP`, `R14`, `X15`, `MXCSR` and the `Keep64` fields kept and the result registers `res` IS
+`retState64 s` with its own registers, flags, vector state and memory as the witnesses. -/
+theorem retState64_of_keep {s s' : State} {res : List W64} (hrip : s'.rip = retAddrOf s)
+    (h4 : s'.regs 4 = s.regs 4 + 8#64) (h5 : s'.regs 5 = s.regs 5) (h14 : s'.regs 14 = s.regs 14)
+    (hx : s'.xmm 15 = s.xmm 15) (hmx : s'.mxcsr = s.mxcsr) (hk : Keep64 s s')
+    (h0 : s'.regs 0 = res.getD 0 (s'.regs 0)) (h1 : s'.regs 3 = res.getD 1 (s'.regs 3))
+    (h2 : s'.regs 1 = res.getD 2 (s'.regs 1)) :
+    s' = retState64 s s'.regs res s'.flags s'.xmm s'.ymmHi s'.mem s'.zmmHi s'.kreg :=
+  retState64_eq hrip h4 h5 h14 hx hk.2.2.1 hk.2.2.2 hmx h0 h1 h2 hk.1 hk.2.1
 
 end Janus.Contracts

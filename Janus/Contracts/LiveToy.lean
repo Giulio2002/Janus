@@ -235,4 +235,27 @@ theorem toyInv_init {m : Memory} {b g : Nat} (hb : 64 * b ≤ 0x10000)
   · rw [hv _ _ (inRanges_bump [])]; exact hbump
   · rw [hv _ _ (inRanges_heap (n := 1) hi (by omega)), Memory.readLE_one, hz i hi hi']; rfl
 
+
+/-- The invariant at the start of a program that already owns live objects `L` below the bump
+pointer `p0` (a memory built by hand for a witness; `tys` empty). -/
+theorem toyInv_init_live {m : Memory} {b g p0 : Nat} {L : List (Nat × Nat)} (hb : p0 + 64 * b ≤ HEND)
+    (hp : HEAP ≤ p0) (hal : p0 % 16 = 0) (hL : ∀ r ∈ L, HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p0)
+    (hbump : m.readLE BUMP 8 = p0) (hz : ∀ i, p0 ≤ i → i < HEND → m.bytes i = 0)
+    (h1 : m.accessible HEAP 0x10000 true = true) (h2 : m.accessible BUMP 8 true = true)
+    (h3 : m.accessible WBUF 64 true = true) : toyInv [] b L g (view (toyRt []) L m) := by
+  refine ⟨p0, ?_, hp, hal, hb, hL, fun i hi hi' => ?_, by rw [view_accessible]; exact h1,
+    by rw [view_accessible]; exact h2, by rw [view_accessible]; exact h3, fun t ht => absurd ht (by simp)⟩
+  · rw [readLE_view (inRanges_bump []) ?_]
+    · exact hbump
+    · apply outside_of_forall
+      intro r hr
+      have := hL r hr
+      left; simp only [BUMP, HEAP] at *; omega
+  · rw [readLE_view (inRanges_heap (n := 1) (by omega) (by omega)) ?_, Memory.readLE_one, hz i hi hi']
+    · rfl
+    · apply outside_of_forall
+      intro r hr
+      have := hL r hr
+      right; omega
+
 end Janus.Contracts.Toy
