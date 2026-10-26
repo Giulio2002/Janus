@@ -38,6 +38,7 @@ import Janus.Spec.Panic
 import Janus.Contracts.Iface
 import Janus.Contracts.Panic
 import Janus.Contracts.PanicAmd64
+import Janus.Contracts.PanicModel
 import Janus.Contracts.PanicSat
 import Janus.Contracts.PanicSatAmd64
 import Janus.Contracts.IfaceAmd64

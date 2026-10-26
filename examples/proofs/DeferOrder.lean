@@ -134,8 +134,10 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       rw [hgS]; exact hl.defers_frame _ _ _ hag
     have hdsS' : ∀ d ∈ P.defers S.mem (gOf S), S.sp.toNat < d.sp := by
       intro d hd; rw [hdsS] at hd; have := hds d hd; omega
-    obtain ⟨hrecs, hrest⟩ := frameRecs_above hdsS'
-    rw [hSsp] at hrecs hrest
+    obtain ⟨-, hrest⟩ := frameRecs_above hdsS'
+    rw [hSsp] at hrest
+    have hri : recItems (s.sp.toNat - 128) (P.defers S.mem (gOf S)) = [] :=
+      recItems_above (by rw [← hSsp]; exact hdsS')
     have hF : frameOf fi S.sp.toNat S.mem = frame0 s := by
       have e3 : s.sp.toNat - 128 + 128 = s.sp.toNat := by omega
       simp only [frameOf, FuncInfo.bound, FuncInfo.bitsAt, FuncInfo.slotsAt,
@@ -153,8 +155,8 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       have e3 : s.sp.toNat - 32 + 8 * 0 = s.sp.toNat - 32 := by omega
       rw [hF]
       unfold frame0
-      simp only [frameItems, openItems, hbits, hob, List.map_cons, List.map_nil, hSsp, hrecs,
-        recItems_nil, List.append_nil, e1, e2, e3, hsl0, hsl1, hsl2, Nat.reducePow, Nat.reduceMod]
+      simp only [frameItems, openItems, hbits, hob, List.map_cons, List.map_nil, hri,
+        List.append_nil, e1, e2, e3, hsl0, hsl1, hsl2, Nat.reducePow, Nat.reduceMod]
     refine GopanicContract.apply (fi := fi) hpan hSpc (by rw [hS30]; rfl) ?_ ?_
     · refine ⟨PanicPre.of_within hc (hSf.mono fun a n h => by
           simp only [outside_append] at h; exact h.2) (hl.env_frame _ _ henv hag) (by omega) (by omega)

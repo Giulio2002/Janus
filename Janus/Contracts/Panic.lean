@@ -346,15 +346,19 @@ structure Item where
   chain : List DeferRec
 deriving DecidableEq, Repr
 
-/-- The defer chain while a frame's record calls `fs` are still to run: one plain record each
-(`deferconvert`), then the rest of the chain. -/
-def restChain (sp : Nat) (fs : List Nat) (rest : List DeferRec) : List DeferRec :=
-  fs.map (fun f => ({ sp := sp, fns := [f] } : DeferRec)) ++ rest
-
-/-- The calls of a frame's records `fs`, each with the chain at its call. -/
-def recItems (sp : Nat) (rest : List DeferRec) : List Nat → List Item
+/-- The calls of one record's funcvals `fs` (the record already popped; a range-over-func record
+converted by `deferconvert` into one plain record per call, `rs` the chain below it), each with
+the chain at its call: the record's calls still to run, as plain records, then `rs`. -/
+def fnItems (sp : Nat) (rs : List DeferRec) : List Nat → List Item
   | [] => []
-  | f :: fs => { fn := f, bits := none, chain := restChain sp fs rest } :: recItems sp rest fs
+  | f :: fs => { fn := f, bits := none, chain := fs.map (fun g => ({ sp := sp, fns := [g] } : DeferRec)) ++ rs } ::
+      fnItems sp rs fs
+
+/-- The calls of the records of frame `sp` at the top of the chain, in order (`nextDefer`'s
+`Recheck` loop: a record of the frame is popped, a range-over-func one converted first). -/
+def recItems (sp : Nat) : List DeferRec → List Item
+  | [] => []
+  | r :: rs => if r.sp = sp then fnItems sp rs r.fns ++ recItems sp rs else []
 
 /-- The calls of the open-coded defers pending in the byte `b` (slots from `sa`). -/
 def openItems (m : Memory) (sa b : Nat) (ds : List DeferRec) : List Item :=
@@ -365,7 +369,7 @@ def frameItems (m : Memory) (F : Frame) (ds : List DeferRec) : List Item :=
   (match F.openAt with
     | none => []
     | some (ba, sa) => openItems m sa (m.readLE ba 1) ds) ++
-  recItems F.sp (frameRest F.sp ds) (recFns F.sp ds)
+  recItems F.sp ds
 
 /-- The memory the runtime reads again between calls, which the deferred calls must leave alone:
 the `deferBits` byte, the slots of the pending open-coded defers, and the first word (the code
@@ -642,7 +646,15 @@ theorem frameRecs_above {sp : Nat} {ds : List DeferRec} (h : ∀ d ∈ ds, sp < 
       have := h d (List.mem_cons_self ..); simp only [beq_eq_false_iff_ne, ne_eq]; omega
     simp [recFns, frameRecs, frameRest, List.takeWhile, List.dropWhile, hd]
 
-@[simp] theorem recItems_nil (sp : Nat) (rest : List DeferRec) : recItems sp rest [] = [] := rfl
+@[simp] theorem recItems_nil (sp : Nat) : recItems sp [] = [] := rfl
+
+/-- A frame none of whose records is on top of the chain makes no record calls. -/
+theorem recItems_above {sp : Nat} {ds : List DeferRec} (h : ∀ d ∈ ds, sp < d.sp) : recItems sp ds = [] := by
+  cases ds with
+  | nil => rfl
+  | cons d ds =>
+    have : d.sp ≠ sp := by have := h d (List.mem_cons_self ..); omega
+    simp [recItems, this]
 
 theorem Engine_nil {p : Program} {P : PanicRuntime} {U : State → Nat → Nat → Prop} {x28 x18 : W64}
     {F : Frame} {keep : List (Nat × Nat)} {mode : DeferMode}
