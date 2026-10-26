@@ -51,7 +51,8 @@ for target in "${names[@]}"; do
   out="artifacts/sys/$isa/$n"
   mapfile -t args < <(sys_args "$n")
   mkdir -p "$out"
-  bin/janus extract "artifacts/examples-sys-$isa" "example.com/sys.$n" "$out" ${args[@]+"${args[@]}"} >/dev/null 2>&1
+  b="artifacts/examples-sys-$isa"; case "$n" in AESField|SVEField) b="artifacts/examples-sys-idreg-$isa" ;; esac
+  bin/janus extract "$b" "example.com/sys.$n" "$out" ${args[@]+"${args[@]}"} >/dev/null 2>&1
   : > "$out/verify.log"
   start=$(date +%s.%N)
   ok=1
