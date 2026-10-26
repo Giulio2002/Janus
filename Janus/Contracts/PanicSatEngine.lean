@@ -615,6 +615,58 @@ theorem step_torec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 l
     · exact absurd h0 hph
     · simp [h0]
 
+theorem step_pop (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
+    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph = 0) {j : Nat} (hnd : ndef c.mem = j + 1)
+    (hrs : recSp c.mem j = F.sp) (hn : recN c.mem j = 0) :
+    ∃ c2, SilentSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph ph c2 := by
+  subst hph
+  obtain ⟨hal, hsp, hsp96⟩ := hI.spw
+  have hj : j < 8 := by have := hI.env.ndef_le; omega
+  have hs := hI.sp_eq
+  have hfm := hI.fm
+  have hw0 := hfm.w0
+  have hw32 := hfm.w32
+  rw [hs] at hw0 hw32
+  have hseg := seg_rec_pop c j hpc hal hsp hI.acc hI.env.acc hw32 hnd hj (by rw [hrs, hw0]) hn
+  obtain ⟨k1, e, hk1, hpe, hq⟩ := reachesRet_transfer hp hseg
+  obtain ⟨hemem, hesp, he28, he18⟩ := hq
+  have hback := seg_back e (Or.inr hpe)
+  obtain ⟨k2, c2, hk2, hpc2, hq2⟩ := reachesRet_transfer hp hback
+  obtain ⟨hmem2, hsp2, hregs2⟩ := hq2
+  have hm2 : c2.mem = popMem c.mem j := by rw [hmem2, hemem, popMem_eq]
+  have hfr := popMem_frame c.mem hj
+  have hfr2 : MemFrame c.mem c2.mem [(B, B + 0x1000)] := by rw [hm2]; exact hfr
+  have hmf := mf_of_priv (T := T) (F := F) hfr2
+  have hpan : panics0 c2.mem = ch := by rw [hm2, panics0_popMem hj]; exact hI.pan
+  have hsv : saved0 c2.mem = saved0 c.mem := by rw [hm2]; exact saved0_popMem hj
+  have hrm : room0 c.mem ≤ room0 c2.mem := by rw [hm2]; exact room0_popMem hI.env hnd
+  have hit := pop_items hI.env hnd hrs hn
+  have hcur : curItems c2.mem F 0 = curItems c.mem F 0 := by
+    rw [curItems_zero, curItems_zero, hm2, hit.1]
+  have hndef : ndef c2.mem = j := by
+    rw [hm2]; simp only [popMem, ndef, rd]; rw [Memory.readLE_writeLE_self]
+    exact Nat.mod_eq_of_lt (by have : (256:Nat)^8 = 2^64 := by decide
+                               omega)
+  refine ⟨c2, ⟨⟨k1 + k2, hk1.trans hk2⟩, hpc2, ?_, hcur, hmf, hsv, ?_⟩⟩
+  · refine hI.step 0 (by rw [hsp2, hesp]) (by rw [hregs2, he28]) (by rw [hregs2, he18]) hmf ?_
+      (by rw [hm2]; exact env0_popMem hI.env hnd) hpan (Nat.le_trans hI.room hrm)
+      (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
+    · refine hfm.congr fun k hk => ?_
+      rw [hm2]
+      exact hfr.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; rw [hs]; have := hI.spB; omega)
+    · have := hI.sv hm
+      have h2 := (saved0_none_iff _).2 this
+      rw [← hsv] at h2
+      exact (saved0_none_iff _).1 h2
+    · rw [← hI.chn, hm2, ← hit.2]
+    · have hbr : c2.mem.readLE ba' 1 = c.mem.readLE ba' 1 := by
+        rw [hm2]; exact hfr.readLE _ _ (by
+          have := (hI.ba_facts hF').2.2.1
+          simpa using this)
+      exact hI.bsub ba' sa' hF' i (by rw [← hbr]; exact hi)
+    · rw [hcur] at hit'; exact hI.its it' hit'
+  · rw [hndef, hnd]; simp
+
 end steps
 
 
