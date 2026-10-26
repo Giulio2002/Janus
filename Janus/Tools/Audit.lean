@@ -732,10 +732,20 @@ partial def bodyIsSummary : Expr → Bool
   | .lam _ _ b _ | .forallE _ _ b _ | .mdata _ b => bodyIsSummary b
   | e => summaryHeads.any e.isAppOf
 
+partial def binderDomains : Expr → Array Expr → Array Expr
+  | .forallE _ d b _, acc => binderDomains b (acc.push d)
+  | .mdata _ b, acc => binderDomains b acc
+  | _, acc => acc
+
 /-- Is `c` a runtime contract of the framework? -/
 def isRuntimeContract (env : Environment) (c : Name) : Bool :=
   (`Janus.Contracts).isPrefixOf c && match env.find? c with
-    | some (.defnInfo d) => bodyIsSummary d.value
+    | some (.defnInfo d) => bodyIsSummary d.value ||
+        -- a contract stated over runs rather than as a `Summary` (agent/panic's
+        -- `GopanicRecoverContract`: a call that does not return but resumes elsewhere), named
+        -- `…Contract` by convention, about a program
+        ((c.getString!.endsWith "Contract") && (binderDomains d.type #[]).any fun t =>
+          t.consumeMData.isConstOf `Janus.Program || t.consumeMData.isConstOf `Janus.Amd64.Program)
     | _ => false
 
 /-- The kind of a contract parameter, from its declared type: a runtime parameter (`H`, `rt`, a
@@ -749,10 +759,6 @@ def contractParamKind (ty : Expr) : Option Bool :=
   else if ty.isConstOf `Janus.Program || ty.isConstOf `Janus.Amd64.Program then some false
   else none
 
-partial def binderDomains : Expr → Array Expr → Array Expr
-  | .forallE _ d b _, acc => binderDomains b (acc.push d)
-  | .mdata _ b, acc => binderDomains b acc
-  | _, acc => acc
 
 /-- The runtime-contract applications in `e` (outermost first). With `claims`, the subterms under
 an `∃` are skipped: a contract there is claimed (a witness theorem's), not assumed. -/
@@ -780,6 +786,29 @@ partial def conclParts (env : Environment) (e : Expr) : Array Expr :=
   else match e.getAppFn with
     | .const c _ => if isRuntimeContract env c then #[] else #[e]
     | _ => #[e]
+
+/-- A premise that bounds the stack depth of a runtime model (the `depth` field of
+`IfaceModel`, `MapModel`, …) and mentions the runtime variables only there: `n ≤ R.depth` /
+`n < R.depth` with a closed `n` (a model may always be given a larger stack bound, which only
+weakens its contracts), or `R.depth + k ≤ d` / `<` where `d` mentions a variable of the
+statement that is not a runtime one and no runtime variable outside `.depth` (satisfiable for
+every model by the choice of `d`). Such side conditions cannot pin a contract's runtime argument
+(round 10 V1's concern); they read like any numeric precondition. -/
+def depthBound (bound : Std.HashSet FVarId) (rtVars : Std.HashSet FVarId) (t : Expr) : Bool :=
+  let isDepth (e : Expr) : Bool := match e.consumeMData with
+    | .app (.const f _) x => f.getString! == "depth" && x.isFVar && rtVars.contains x.fvarId!
+    | .proj _ _ x => x.isFVar && rtVars.contains x.fvarId!
+    | _ => false
+  -- `e` with every `X.depth` of a runtime variable replaced by a constant
+  let strip (e : Expr) : Expr := e.replace fun sub => if isDepth sub then some (mkConst ``Nat.zero) else none
+  let hasDepth (e : Expr) : Bool := (e.find? isDepth).isSome
+  let rtFree (e : Expr) : Bool := !(strip e).hasAnyFVar (rtVars.contains ·)
+  if (t.isAppOfArity ``LE.le 4 || t.isAppOfArity ``LT.lt 4) && (t.getArg! 0).isConstOf ``Nat then
+    let a := t.getArg! 2; let b := t.getArg! 3
+    (hasDepth b && rtFree b && !a.hasFVar && !hasDepth a) ||
+      (hasDepth a && rtFree a && !hasDepth b && !b.hasAnyFVar (rtVars.contains ·) &&
+        b.hasAnyFVar (fun v => bound.contains v && !rtVars.contains v))
+  else false
 
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment). -/
 def checkContractHyps (ty : Expr) : MetaM (Option String) := do
@@ -829,7 +858,7 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
         | _ => false
       let isLaws := (t'.isAppOfArity `Janus.Spec.Type.IfaceModel.Laws 1 ||
           t'.isAppOfArity `Janus.Spec.Map.MapModel.Laws 3) && isVar t'.appArg!.consumeMData
-      unless isContract || isLaws do
+      unless isContract || isLaws || depthBound bound rtVars t' do
         return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}), which constrains a runtime variable of a contract hypothesis; only the contracts and the model laws may mention them (round 10 V1)"
     return none
 
