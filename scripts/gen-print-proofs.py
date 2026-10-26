@@ -28,6 +28,9 @@ def build(isa, name, frags):
     if not os.path.exists(main):
         return None
     mtxt = open(main, encoding="utf-8").read()
+    # an example whose own part is still empty (the amd64 port in progress) is not generated
+    if not mtxt.split("-- BODY", 1)[-1].strip():
+        return None
     # the main fragment starts with its module doc (after `import Extracted`)
     for f in frags:
         p = os.path.join(d, f + ".lean")

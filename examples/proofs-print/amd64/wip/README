@@ -1,0 +1,4 @@
+Work in progress, not compiled or verified: the amd64 proof of internal/strconv.formatBase10.
+Its final-chunk loop (`tail`) is complete. The outer 9-digit chunk loop (`outer`) and the entry
+still contain `sorry`, so the file is kept out of examples/proofs-print/amd64/src (no `.lean`
+extension: the axiom guard and the generator do not see it) until it is finished.

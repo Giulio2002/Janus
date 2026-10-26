@@ -52,6 +52,32 @@ theorem div100_magic64 (x : Nat) (h : x < 2 ^ 32) :
   rw [e, mul_lsr37 (x / 2) (by omega)]
   congr 1; omega
 
+/-- `SHRQ $1`, `MULQ` by `0x89705f4136b4a598` (the high half), `SHRQ $28`: `U / 10^9`. -/
+theorem div1e9_64 (U : Nat) (hU : U < 2 ^ 64) :
+    BitVec.ofNat 64 (9903520314283042200 * (BitVec.ofNat 64 U >>> 1).toNat / 18446744073709551616) >>> 28 =
+      BitVec.ofNat 64 (U / 1000000000) := by
+  have e1 : (BitVec.ofNat 64 U >>> 1).toNat = U / 2 := by
+    simp [BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, Nat.mod_eq_of_lt hU]
+  apply BitVec.eq_of_toNat_eq
+  rw [BitVec.toNat_ushiftRight, e1, BitVec.toNat_ofNat, BitVec.toNat_ofNat, Nat.shiftRight_eq_div_pow,
+    Nat.mod_eq_of_lt (show 9903520314283042200 * (U / 2) / 18446744073709551616 < 2 ^ 64 by omega),
+    Nat.mod_eq_of_lt (show U / 1000000000 < 2 ^ 64 by omega), Nat.div_div_eq_div_mul,
+    show (18446744073709551616 : Nat) * 2 ^ 28 = 2 ^ 92 by decide, Nat.mul_comm, magic5e8 (U / 2) (by omega)]
+  omega
+
+/-- `IMULQ $10^9` and `SUBQ`: `U % 10^9`. -/
+theorem mod1e9_64 (U : Nat) (hU : U < 2 ^ 64) :
+    BitVec.ofNat 64 U - BitVec.ofNat 64 (U / 1000000000) * 1000000000#64 = BitVec.ofNat 64 (U % 1000000000) := by
+  rw [show (1000000000#64 : BitVec 64) = BitVec.ofNat 64 1000000000 from rfl, BitVec.ofNat_mul_ofNat]
+  apply BitVec.eq_of_toNat_eq
+  rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat, BitVec.toNat_ofNat]
+  omega
+
+/-- The remainder after `/ 100` (32-bit `IMULL $100`, `SUBL`). -/
+theorem mod100_32 (x : Nat) (h : x < 2 ^ 32) :
+    (4294967296 - x / 100 * 100 % 4294967296 + x % 4294967296) % 4294967296 = x % 100 := by
+  omega
+
 theorem mul100_32 (q : Nat) (h : q * 100 < 2 ^ 32) :
     (BitVec.setWidth 32 (BitVec.ofNat 64 q) * 100#32).toNat = q * 100 := by
   simp only [BitVec.toNat_mul, BitVec.toNat_setWidth, BitVec.toNat_ofNat]
@@ -199,4 +225,41 @@ theorem formatBase10 (impl : List Amd64.Segment) :
           show ((lo + lo) % 4294967296 + 1) % 4294967296 + SMv = SMv + (lo * 2 + 1) by omega,
           show (lo % 4294967296 + lo % 4294967296) % 4294967296 + SMv = SMv + lo * 2 by omega,
           h_sm _ (by omega), h_sm _ (by omega), smalls_hi _ (by omega), smalls_lo _ (by omega)]
+  have outer : ∀ U (S : State) (i : Nat), (Janus.Spec.Print.decimal U).length ≤ i →
+      i ≤ 20 → S.rip = BitVec.ofNat 64 (segAddr P "internal/strconv.formatBase10" + 0x17) →
+      S.regs 4 = BitVec.ofNat 64 SP - 8#64 → S.regs 5 = BitVec.ofNat 64 SP - 8#64 →
+      S.regs 0 = BitVec.ofNat 64 a → S.regs 3 = BitVec.ofNat 64 i →
+      S.regs 1 = 20#64 → S.regs 7 = BitVec.ofNat 64 U → S.regs 14 = s.regs 14 →
+      MemFrame s.mem S.mem [(SP - 8, SP), (SP + 8, SP + 16), (a, a + 20)] →
+      S.mem.readLE (SP - 8) 8 = (s.regs 5).toNat →
+      S.xmm 15 = s.xmm 15 → S.fsBase = s.fsBase → S.df = s.df → S.mxcsr = s.mxcsr →
+      (∀ j, j < 200 → S.mem.readLE (SMv + j) 1 = smallsByte j) → U < 2 ^ 64 →
+      ReachesRet (P.link impl) (retAddrOf s) S (FbTail s SP a i U S.mem) := by
+    intro U
+    induction U using Nat.strongRecOn with
+    | _ U ih =>
+    intro S i hlen hi20 hpc' hsp' hbp' h0 h3 h1 h7 hg' hf h_rd1 hx15 hfs hdf hmx h_rdsm hU
+    by_cases h29 : U < 2 ^ 29
+    · have hs : BitVec.ofNat 64 U >>> 29 = 0#64 := by
+        apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow]; omega
+      janus64_run [hs] until [segAddr P "internal/strconv.formatBase10" + 0x109]
+      all_goals trace_state
+      all_goals sorry
+    · have hi9 : 9 ≤ i := by
+        have := length_decimal_ge 8 U (by omega)
+        omega
+      have hs : (BitVec.ofNat 64 U >>> 29 = 0#64) = False := by
+        simp only [eq_iff_iff, iff_false]; intro h; have := congrArg BitVec.toNat h
+        simp [BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow] at this; omega
+      have hy : U % 1000000000 < 1000000000 := Nat.mod_lt _ (by decide)
+      generalize hyv : U % 1000000000 = y at *
+      janus64_run [hlit, hs, div1e9_64 U hU, mod1e9_64 U hU, hyv,
+          div100_magic64 y (by omega), div100_magic64 (y / 100) (by omega),
+          div100_magic64 (y / 100 / 100) (by omega), div100_magic64 (y / 100 / 100 / 100) (by omega),
+          mul100_32 (y / 100) (by omega), mul100_32 (y / 100 / 100) (by omega),
+          mul100_32 (y / 100 / 100 / 100) (by omega), mul100_32 (y / 100 / 100 / 100 / 100) (by omega),
+          mod100_32 y (by omega), mod100_32 (y / 100) (by omega), mod100_32 (y / 100 / 100) (by omega),
+          mod100_32 (y / 100 / 100 / 100) (by omega)] until [segAddr P "internal/strconv.formatBase10" + 0x17]
+      all_goals trace_state
+      all_goals sorry
   sorry
