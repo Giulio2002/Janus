@@ -1,7 +1,7 @@
 import Extracted
 
 /-!
-# `Three(n, x)`: two slices and a cell, a barrier store, and an unbounded-allocation-safe contract (arm64)
+# `Three(n, x)`: two slices and a cell, a barrier store, and allocation contracts that compose (arm64)
 
 ```go
 type Cell struct{ P *uint64; N uint64 }

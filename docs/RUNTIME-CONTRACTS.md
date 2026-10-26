@@ -306,7 +306,7 @@ read-only data. The examples' `Witness.nonvacuous` use them.
 | Function | Guarantee |
 |---|---|
 | `Three(n, x)` | `makeslice` A; `A[0] = x`; `newobject` C and `makeslice` B; `C.P = &B[0]` through the barrier: A unchanged, A, B, C pairwise disjoint, in `R.rt`, the invariant for `[A, C, B]` |
-| `Rows(n, k)` | `n` allocations in a loop, each stored into the outer slice through the barrier: for all `n` the rows are pairwise disjoint, disjoint from the outer slice, and `out[j]` is row `j` |
+| `List(n)` | a loop with one `newobject` and one barrier store per iteration, for all `n`: the invariant carries the live set and the budget `b - 16·i`; the result is `nil` for `n = 0`, else a 16-byte node in `R.rt` whose `V` field is `n - 1`; memory changed only in `R.rt` and the stack window |
 | `Chain(dst, src, bx, n)` | `memmove`, `makeslice`, `memmove`, a barrier store, with the single hypothesis `R` threaded through all four |
 
 <a id="dynamic-calls"></a>

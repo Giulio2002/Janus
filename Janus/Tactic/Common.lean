@@ -1025,11 +1025,16 @@ where
       for d in ← getLCtx do
         if d.isImplementationDetail then continue
         let ty ← instantiateMVars d.type
-        unless ty.isAppOfArity ``Janus.Outside 3 do continue
+        -- `Outside b k rs`, or `ApartAll b k rs` (`Janus.Contracts.ApartAll`, from a live contract's
+        -- postcondition: the same fact as a list of `Apart`s)
+        let isApartAll := ty.isAppOfArity `Janus.Contracts.ApartAll 3
+        unless ty.isAppOfArity ``Janus.Outside 3 || isApartAll do continue
         unless ← withReducible (isDefEq (ty.getArg! 2) rs) do continue
         let saved ← saveState
         try
-          let h ← Term.exprToSyntax d.toExpr
+          let h ← if isApartAll then
+              Term.exprToSyntax (← mkAppM `Janus.Contracts.ApartAll.outside #[d.toExpr])
+            else Term.exprToSyntax d.toExpr
           let gs ← Tactic.run g <| withoutRecover do
             evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> omega)))
           if gs.isEmpty then return true

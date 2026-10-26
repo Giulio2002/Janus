@@ -322,7 +322,9 @@ def liveEq (e1 e2 : Expr) : TacticM (Option Expr) := do
   let m ← mkFreshExprSyntheticOpaqueMVar (← mkEq e1 e2)
   let saved ← saveState
   try
-    let gs ← Tactic.run m.mvarId! <| withoutRecover (evalTactic (← `(tactic|
+    -- only the hypotheses about the goal's atoms (the context after several calls is large)
+    let gm ← Common.clearIrrelevant m.mvarId!
+    let gs ← Tactic.run gm <| withoutRecover (evalTactic (← `(tactic|
       first | omega | (simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat,
         Nat.reducePow, Nat.reduceMod] at *; omega))))
     if gs.isEmpty then return some m
