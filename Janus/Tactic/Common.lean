@@ -911,11 +911,20 @@ where
 def dischargeApart (g : MVarId) : TacticM Bool := g.withContext do
   let t ← instantiateMVars (← g.getType)
   unless t.isAppOfArity ``Janus.Apart 4 do return false
+  let ga := t.getArg! 0; let gn := t.getArg! 1; let gb := t.getArg! 2; let gk := t.getArg! 3
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
     unless ty.isAppOfArity ``Janus.Apart 4 do continue
+    let ha := ty.getArg! 0; let hn := ty.getArg! 1; let hb := ty.getArg! 2; let hk := ty.getArg! 3
+    -- an exact match
+    if (← withReducible (isDefEq ty t)) then
+      g.assign d.toExpr; return true
     for symm in [false, true] do
+      -- candidates: one of the two ranges is the goal's (syntactically), so only the other
+      -- needs a containment by `omega`
+      let (a, n, b, k) := if symm then (hb, hk, ha, hn) else (ha, hn, hb, hk)
+      unless (a == ga && n == gn) || (b == gb && k == gk) do continue
       let saved ← saveState
       try
         let h ← Term.exprToSyntax d.toExpr

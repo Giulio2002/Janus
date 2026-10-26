@@ -28,6 +28,15 @@ def OW : Nat := adrpLdTarget (segAddr P "runtime.write" + 12)
   (segWord P "runtime.write" 3) (segWord P "runtime.write" 4) 3
 
 
+/-- The string `"\n"` `printnl` prints (`ADRP`+`ADD`). -/
+def NL : Nat := adrpLdTarget (segAddr P "runtime.printnl" + 24)
+  (segWord P "runtime.printnl" 6) (segWord P "runtime.printnl" 7) 0
+/-- The strings `"true"` and `"false"` `printbool` prints. -/
+def TR : Nat := adrpLdTarget (segAddr P "runtime.printbool" + 28)
+  (segWord P "runtime.printbool" 7) (segWord P "runtime.printbool" 8) 0
+def FA : Nat := adrpLdTarget (segAddr P "runtime.printbool" + 48)
+  (segWord P "runtime.printbool" 12) (segWord P "runtime.printbool" 13) 0
+
 /-- `runtime.printlock` with the M's print count already `c ≥ 1`: no `lock2`. -/
 theorem printlock_held (impl : List Segment) :
     Summary (P.link impl) (segAddr P "runtime.printlock")
@@ -220,6 +229,19 @@ theorem recordForPanic (impl : List Segment)
   all_goals try (janus_simp; omega)
   all_goals try assumption
 
+/-- What a print function guarantees, from its call state `S`, `K` to its return state `S'`, `K'`:
+the return (`retState`), memory changed only in `W` (its stack window and arguments, the M's
+`locks` and print count, the backlog and its index), the M's print count and `m.locks` as they were,
+the backlog index in range, and the trace extended by what one `write(2, b)` per piece `b` of `bs`
+may append. -/
+@[reducible] def PPost (W : List (Nat × Nat)) (MP : Nat) (bs : List Bytes) (S : State) (K : Kern)
+    (S' : State) (K' : Kern) : Prop :=
+  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (es : List Event),
+    S' = retState S junk [] f v m ∧ MemFrame S.mem m W ∧
+    m.readLE (MP + 279) 1 = S.mem.readLE (MP + 279) 1 ∧
+    m.readLE (MP + 264) 4 = S.mem.readLE (MP + 264) 4 ∧ m.readLE BI 8 < 512 ∧
+    K' = K.appendTrace es ∧ Emits 2 bs es
+
 /-! ## `gwrite(b)`: one `write(2, b)` (kernel level) -/
 
 /-- What `gwrite(b)` guarantees, from the call state `S`, `K` to the return state `S'`, `K'`:
@@ -323,11 +345,7 @@ theorem gwrite_k (impl : List Segment)
       · janus_simp; rw [h_bi]; assumption
       · simp [Nat.mod_eq_of_lt (show ptr < 2 ^ 64 by omega), Nat.mod_eq_of_lt (show len < 2 ^ 64 by omega),
           hl32] at hc ⊢
-        refine emits_of_eq ?_ (by omega)
-        repeat (first
-          | refine (readBytes_writeLE (by janus_disch)).trans ?_
-          | refine (MemFrame.readBytes_eq (by assumption) (by janus_disch)).trans ?_)
-        rfl
+        exact emits_of_eq (by readbytes_frame) (by omega)
     · apply ReturnsK.of_reaches
       janus_run [hmpE, h_pk, h_bi, h_bl, h_ow, sep_cons, sep_nil, hl32, hl31, addWithCarry_c] until
         [segAddr P "runtime.writeErrData" + 0x70, segAddr P "runtime.gwrite" + 0xac, segAddr P "runtime.gwrite" + 0xc8, segAddr P "runtime.gwrite" + 0xd4]
@@ -339,5 +357,131 @@ theorem gwrite_k (impl : List Segment)
       · janus_simp
       · janus_simp
       · janus_simp; rw [h_bi]; assumption
+
+/-! ## `printstring(s)` -/
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 40000000 in
+theorem printstring_k (impl : List Segment)
+    (hmm : MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove")) (E : KEnv)
+    (ret : Nat) (hret : RetAddr (P.link impl) ret) (S : State) (K : Kern)
+    (SP G MP ptr len : Nat)
+    (hpc : S.pc = BitVec.ofNat 64 (segAddr P "runtime.printstring"))
+    (hsp : S.sp = BitVec.ofNat 64 SP) (hg : S.regs 28 = BitVec.ofNat 64 G)
+    (hx0 : S.regs 0 = BitVec.ofNat 64 ptr) (hx1 : S.regs 1 = BitVec.ofNat 64 len)
+    (hmpE : S.mem.readLE (G + 48) 8 = MP)
+    (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 30).toNat < 2 ^ 48)
+    (hal : SP % 16 = 0) (hb : 232 ≤ SP) (ha : SP + 16 ≤ 2 ^ 48)
+    (hw : S.mem.accessible (SP - 232) 248 true = true)
+    (hg0 : 0 < G) (hg1 : G + 256 ≤ 2 ^ 48) (hg2 : S.mem.accessible (G + 16) 8 false = true)
+    (hg3 : S.mem.readLE (G + 16) 8 + 192 < SP)
+    (hgm : S.mem.accessible (G + 48) 8 false = true)
+    (hwb : S.mem.accessible (G + 232) 16 false = true) (h_rd_wb : S.mem.readLE (G + 232) 8 = 0)
+    (hm1 : MP + 280 ≤ 2 ^ 48) (hm2 : S.mem.accessible (MP + 264) 16 true = true)
+    (h_rd_dy : S.mem.readLE (MP + 268) 4 = 0)
+    (hc1 : 1 ≤ S.mem.readLE (MP + 279) 1) (hc2 : S.mem.readLE (MP + 279) 1 ≤ 125)
+    (hpk : S.mem.accessible PK 4 false = true) (hbi : S.mem.accessible BI 8 true = true)
+    (hbi2 : S.mem.readLE BI 8 < 512) (hbl : S.mem.accessible BL 512 true = true)
+    (how : S.mem.accessible OW 8 false = true) (h_rd_ow : S.mem.readLE OW 8 = 0)
+    (a1 : Apart (SP - 232) 248 (G + 16) 8) (a2 : Apart (SP - 232) 248 (G + 48) 8)
+    (a3 : Apart (SP - 232) 248 (G + 232) 16) (a4 : Apart (SP - 232) 248 (MP + 264) 16)
+    (a6 : Apart (SP - 232) 248 PK 4) (a7 : Apart (SP - 232) 248 BI 8) (a8 : Apart (SP - 232) 248 BL 512) (a9 : Apart (SP - 232) 248 OW 8)
+    (b1 : Apart (MP + 264) 16 (G + 16) 8) (b2 : Apart (MP + 264) 16 (G + 48) 8)
+    (b3 : Apart (MP + 264) 16 (G + 232) 16) (b5 : Apart (MP + 264) 16 PK 4)
+    (b6 : Apart (MP + 264) 16 BI 8) (b7 : Apart (MP + 264) 16 BL 512) (b8 : Apart (MP + 264) 16 OW 8)
+    (d1 : Apart (G + 16) 8 BI 8) (d2 : Apart (G + 16) 8 BL 512)
+    (d3 : Apart (G + 48) 8 BI 8) (d4 : Apart (G + 48) 8 BL 512)
+    (d5 : Apart (G + 232) 16 BI 8) (d6 : Apart (G + 232) 16 BL 512)
+    (hpl : ptr + len ≤ 2 ^ 48) (hl31 : len < 2 ^ 31)
+    (hbuf : S.mem.accessible ptr len false = true)
+    (a5 : Apart (SP - 232) 248 ptr len) (b4 : Apart (MP + 264) 16 ptr len)
+    (c1 : Apart ptr len BI 8) (c2 : Apart ptr len BL 512)
+    (Q : State → Kern → Prop) (X : Nat → Kern → Prop)
+    (hk : ∀ S' K', PPost [(SP - 232, SP - 8), (SP + 8, SP + 16), (MP + 264, MP + 268), (MP + 279, MP + 280), (BI, BI + 8), (BL, BL + 512)] MP [readBytes S.mem ptr len] S K S' K' →
+      ReturnsK ((P.link impl).withExit ret) E Q X S' K') :
+    ReturnsK ((P.link impl).withExit ret) E Q X S K := by
+  -- PROOF printstring_k
+  have hspl : SP < 2 ^ 64 := by omega
+  janus_eval_nat h_bi : BI
+  apply ReturnsK.of_reaches
+  janus_run [hmpE] until [segAddr P "runtime.gwrite"]
+  apply ReturnsK.to_reaches
+  apply gwrite_k impl hmm E ret hret _ K (SP - 64) G MP ptr len len
+  case hk =>
+    rintro S' K' ⟨junk, f, v, m, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
+    apply ReturnsK.of_reaches
+    janus_run [hmpE] until [segAddr P "runtime.printstring" + 0x34]
+    janus_step
+    apply ReturnsK.to_reaches
+    apply hk
+    refine ⟨_, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
+    · janus_simp
+    · janus_simp
+    · janus_simp; assumption
+    · exact emits_congr hem (by dsimp only; readbytes_frame)
+  all_goals kobl
+
+/-! ## `printnl()` -/
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 40000000 in
+theorem printnl_k (impl : List Segment)
+    (hmm : MemmoveContract (P.link impl) (P.contractAddr "runtime.memmove")) (E : KEnv)
+    (ret : Nat) (hret : RetAddr (P.link impl) ret) (S : State) (K : Kern)
+    (SP G MP : Nat)
+    (hpc : S.pc = BitVec.ofNat 64 (segAddr P "runtime.printnl"))
+    (hsp : S.sp = BitVec.ofNat 64 SP) (hg : S.regs 28 = BitVec.ofNat 64 G)
+    (hmpE : S.mem.readLE (G + 48) 8 = MP)
+    (h30a : (S.regs 30).toNat % 4 = 0) (h30b : (S.regs 30).toNat < 2 ^ 48)
+    (hal : SP % 16 = 0) (hb : 264 ≤ SP) (ha : SP + 8 ≤ 2 ^ 48)
+    (hw : S.mem.accessible (SP - 264) 272 true = true)
+    (hg0 : 0 < G) (hg1 : G + 256 ≤ 2 ^ 48) (hg2 : S.mem.accessible (G + 16) 8 false = true)
+    (hg3 : S.mem.readLE (G + 16) 8 + 224 < SP)
+    (hgm : S.mem.accessible (G + 48) 8 false = true)
+    (hwb : S.mem.accessible (G + 232) 16 false = true) (h_rd_wb : S.mem.readLE (G + 232) 8 = 0)
+    (hm1 : MP + 280 ≤ 2 ^ 48) (hm2 : S.mem.accessible (MP + 264) 16 true = true)
+    (h_rd_dy : S.mem.readLE (MP + 268) 4 = 0)
+    (hc1 : 1 ≤ S.mem.readLE (MP + 279) 1) (hc2 : S.mem.readLE (MP + 279) 1 ≤ 125)
+    (hpk : S.mem.accessible PK 4 false = true) (hbi : S.mem.accessible BI 8 true = true)
+    (hbi2 : S.mem.readLE BI 8 < 512) (hbl : S.mem.accessible BL 512 true = true)
+    (how : S.mem.accessible OW 8 false = true) (h_rd_ow : S.mem.readLE OW 8 = 0)
+    (a1 : Apart (SP - 264) 272 (G + 16) 8) (a2 : Apart (SP - 264) 272 (G + 48) 8)
+    (a3 : Apart (SP - 264) 272 (G + 232) 16) (a4 : Apart (SP - 264) 272 (MP + 264) 16)
+    (a6 : Apart (SP - 264) 272 PK 4) (a7 : Apart (SP - 264) 272 BI 8) (a8 : Apart (SP - 264) 272 BL 512) (a9 : Apart (SP - 264) 272 OW 8)
+    (b1 : Apart (MP + 264) 16 (G + 16) 8) (b2 : Apart (MP + 264) 16 (G + 48) 8)
+    (b3 : Apart (MP + 264) 16 (G + 232) 16) (b5 : Apart (MP + 264) 16 PK 4)
+    (b6 : Apart (MP + 264) 16 BI 8) (b7 : Apart (MP + 264) 16 BL 512) (b8 : Apart (MP + 264) 16 OW 8)
+    (d1 : Apart (G + 16) 8 BI 8) (d2 : Apart (G + 16) 8 BL 512)
+    (d3 : Apart (G + 48) 8 BI 8) (d4 : Apart (G + 48) 8 BL 512)
+    (d5 : Apart (G + 232) 16 BI 8) (d6 : Apart (G + 232) 16 BL 512)
+    (hpl : NL + 1 ≤ 2 ^ 48) (hl31 : 1 < 2 ^ 31)
+    (hbuf : S.mem.accessible NL 1 false = true)
+    (a5 : Apart (SP - 264) 272 NL 1) (b4 : Apart (MP + 264) 16 NL 1)
+    (c1 : Apart NL 1 BI 8) (c2 : Apart NL 1 BL 512)
+    (Q : State → Kern → Prop) (X : Nat → Kern → Prop)
+    (hk : ∀ S' K', PPost [(SP - 264, SP - 8), (SP + 8, SP + 8), (MP + 264, MP + 268), (MP + 279, MP + 280), (BI, BI + 8), (BL, BL + 512)] MP [readBytes S.mem NL 1] S K S' K' →
+      ReturnsK ((P.link impl).withExit ret) E Q X S' K') :
+    ReturnsK ((P.link impl).withExit ret) E Q X S K := by
+  -- PROOF printnl_k
+  have hspl : SP < 2 ^ 64 := by omega
+  janus_eval_nat h_bi : BI
+  janus_eval_nat h_nl : NL
+  apply ReturnsK.of_reaches
+  janus_run [hmpE, h_nl] until [segAddr P "runtime.printstring"]
+  apply ReturnsK.to_reaches
+  apply printstring_k impl hmm E ret hret _ K (SP - 32) G MP NL 1
+  case hk =>
+    rintro S' K' ⟨junk, f, v, m, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
+    apply ReturnsK.of_reaches
+    janus_run [hmpE] until [segAddr P "runtime.printnl" + 0x30]
+    janus_step
+    apply ReturnsK.to_reaches
+    apply hk
+    refine ⟨_, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
+    · janus_simp
+    · janus_simp
+    · janus_simp; assumption
+    · exact emits_congr hem (by dsimp only; readbytes_frame)
+  all_goals kobl
 
 end Proof

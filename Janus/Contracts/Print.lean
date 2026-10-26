@@ -470,4 +470,59 @@ theorem emits_of_eq {m : Memory} {a n c : Nat} {b : Bytes} (h : readBytes m a n 
     Emits 2 [b] [.write 2 (readBytes m a c)] := by
   rw [← h]; exact emits_write m a n c hc
 
+open Lean Elab Tactic Meta in
+/-- `apart_mono`: an `Apart` goal from a wider `Apart` hypothesis (`Common.dischargeApart`). -/
+elab "apart_mono" : tactic => do
+  let g ← getMainGoal
+  unless ← Janus.Tactic.Common.dischargeApart g do throwError "apart_mono: no wider `Apart` fact"
+  replaceMainGoal []
+
+/-- `kobl`: close one obligation of a continuation lemma applied at a call site (the call state
+is a literal): `rfl`/an assumption (after reducing the state's projections); an `Apart` fact from
+a wider one; a register or `SP` equation (`toNat` and `omega`); arithmetic (`omega`); a memory
+read or accessibility fact through the stores and frames (`janus_simp`, the discharger). -/
+macro "kobl_slow" : tactic => `(tactic| first
+  | with_reducible rfl
+  | with_reducible assumption
+  | apart_mono
+  | (dsimp only; with_reducible assumption)
+  | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega)
+  | omega
+  | (dsimp only; janus_disch)
+  | (janus_simp; first | done | with_reducible assumption | omega))
+
+open Lean Elab Tactic Meta in
+/-- `kobl`: one obligation of a continuation lemma at a call site, by its shape (see `kobl_slow`). -/
+elab "kobl" : tactic => do
+  let g ← getMainGoal
+  let t ← whnfR (← instantiateMVars (← g.getType))
+  let run (stx : TSyntax `tactic) : TacticM Unit := evalTactic stx
+  if t.isAppOfArity ``Janus.Apart 4 then
+    run (← `(tactic| first | with_reducible assumption | apart_mono)); return
+  if let some (ty, lhs, _) := t.eq? then
+    if ty.isAppOfArity ``BitVec 1 then
+      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega))); return
+    if lhs.isAppOfArity ``Memory.accessible 4 then
+      run (← `(tactic| first | with_reducible assumption | (dsimp only; janus_disch))); return
+    if lhs.isAppOfArity ``Memory.readLE 3 then
+      run (← `(tactic| first | with_reducible assumption | (dsimp only; with_reducible assumption) | (janus_simp; first | done | with_reducible assumption | omega))); return
+    if ty.isConstOf ``Nat then
+      run (← `(tactic| first | with_reducible rfl | omega | (janus_simp; first | done | omega))); return
+  if t.isAppOfArity ``LE.le 4 || t.isAppOfArity ``LT.lt 4 then
+    run (← `(tactic| first | omega | (janus_simp; first | done | omega))); return
+  run (← `(tactic| kobl_slow))
+
+theorem emits_congr {m m' : Memory} {a n : Nat} {es : List Event}
+    (h : Emits 2 [readBytes m a n] es) (heq : readBytes m a n = readBytes m' a n) :
+    Emits 2 [readBytes m' a n] es := heq ▸ h
+
+set_option hygiene false in
+/-- `readBytes m a n = readBytes m₀ a n` through the stores and memory frames between them (the
+side conditions by the discharger). -/
+macro "readbytes_frame" : tactic => `(tactic| (
+  repeat (first
+    | refine (readBytes_writeLE (by janus_disch)).trans ?_
+    | refine (MemFrame.readBytes_eq (by assumption) (by janus_disch)).trans ?_)
+  rfl))
+
 end Janus.Print
