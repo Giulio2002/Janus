@@ -21,3 +21,6 @@ int e_setjmp(int v);                     /* setjmp / longjmp */
 int64_t e_alloca(size_t n);              /* alloca */
 uint32_t e_atomic_inc(uint32_t *p);      /* GCC __atomic (arm64: the outline-atomics helper) */
 int64_t e_callgo(int64_t x);             /* calls the exported Go function GoTwice */
+int64_t e_callbox(int64_t x);          /* calls the exported Go function GoBox (allocates) */
+int64_t e_calllarge(int64_t x);        /* calls the exported Go function GoLarge (a 4.8 KB frame) */
+char *e_env_at(size_t i);              /* environ[i]: a GOT slot with a dynamic relocation */

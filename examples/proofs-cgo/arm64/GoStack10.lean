@@ -232,7 +232,7 @@ theorem go_spec (a b c d e f g h i j : BitVec 64) :
     janus_simp [h104, h160]
     refine ⟨by omega, ?_, by omega, by omega, by omega, by omega⟩
     janus_disch
-  rintro s' ⟨-, m, ⟨regs, fl, vr, tp, fs, rfl, hg, hfp⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, vr, tp, fs, ex, rfl, hg, hfp⟩, hmf⟩
   simp only [E, res, fw, fi, cgoClobber, GoABI.regG, GoABI.regFP, cgoStackScratch, gStructSize,
     tlsGOffset, setReg_apply, ↓reduceIte, Nat.reduceEqDiff, h104, h160] at hmf hg hfp
   apply ReturnsC.of_reaches

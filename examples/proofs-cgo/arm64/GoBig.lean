@@ -275,7 +275,7 @@ theorem go_spec (x y : BitVec 64) :
     janus_simp [h56, h112]
     repeat' (apply And.intro)
     all_goals first | omega | janus_disch | assumption
-  rintro s' ⟨-, m, ⟨regs, fl, vr, tp, fs', rfl, hg, hfp⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, vr, tp, fs', ex, rfl, hg, hfp⟩, hmf⟩
   simp only [E, lo, hi, fw, cgoClobber, GoABI.regG, GoABI.regFP, cgoStackScratch, gStructSize,
     tlsGOffset, setReg_apply, ↓reduceIte, Nat.reduceEqDiff, h56, h112] at hmf hg hfp
   apply ReturnsC.of_reaches
