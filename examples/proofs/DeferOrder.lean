@@ -161,16 +161,24 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     · refine ⟨PanicPre.of_within hc (hSf.mono fun a n h => by
           simp only [outside_append] at h; exact h.2) (hl.env_frame _ _ henv hag) (by omega) (by omega)
           (by rw [hSsp]; omega) hS28 (by rw [hS30]; decide) (by rw [hS30]; decide),
-        by rw [hS0]; exact hne, ?_, ?_⟩
+        by rw [hS0]; exact hne, ?_, ?_, ?_⟩
       · rw [hgS, hl.room_frame _ _ _ hag]; exact hroom
+      · intro _
+        have e : fi.bitsAt S.sp.toNat = s.sp.toNat - 89 := by
+          simp only [FuncInfo.bitsAt, FuncInfo.varp, f_frame, f_od, hSsp, Option.map_some, Option.getD_some]; omega
+        rw [e]
+        refine ⟨?_, Outside.of_sub hout (by omega) (by omega)⟩
+        rw [hSf.accessible]
+        exact Memory.accessible_weaken _ (Memory.accessible_mono _ hst (by omega) (by omega))
       · rw [hI, hF]
         unfold frame0
         refine ⟨⟨by omega, by rw [hSf.accessible]; exact Memory.accessible_mono _ hst (by omega) (by omega),
-          Outside.of_sub hout (by omega) (by omega), ?_, ?_⟩, ?_⟩
+          Outside.of_sub hout (by omega) (by omega), by dsimp only; omega, ?_, ?_⟩, ?_⟩
         · rw [hbits, hob]
           intro i hi
           simp only [List.mem_cons, List.not_mem_nil, or_false] at hi
-          rcases hi with rfl | rfl | rfl <;> refine ⟨by omega, ?_, by omega⟩ <;> rw [hSf.accessible] <;>
+          rcases hi with rfl | rfl | rfl <;> refine ⟨by omega, ?_, by omega, by dsimp only; omega, Outside.of_sub hout (by omega) (by omega)⟩ <;>
+            rw [hSf.accessible] <;>
             exact Janus.Contracts.IfaceModel.acc_read_of_write
               (Memory.accessible_mono _ hst (by omega) (by omega))
         · intro it hit
@@ -178,8 +186,10 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
           rcases hit with rfl | rfl | rfl <;> dsimp only <;> omega
         · intro it hit
           simp only [List.mem_cons, List.not_mem_nil, or_false] at hit
-          rcases hit with rfl | rfl | rfl <;> dsimp only <;> refine ⟨by omega, ?_, ?_, ?_⟩ <;>
+          rcases hit with rfl | rfl | rfl <;> dsimp only <;> refine ⟨by omega, ?_, ?_, ?_, ?_, ?_⟩ <;>
             first
+            | (exact Outside.of_sub hout (by omega) (by omega))
+            | omega
             | (rw [hSf.accessible]; exact Janus.Contracts.IfaceModel.acc_read_of_write
                 (Memory.accessible_mono _ hst (by omega) (by omega)))
             | (simp only [hfv1, hfv2, hfv3]; try decide)
