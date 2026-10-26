@@ -460,7 +460,7 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 | `EArgMin` | `e_argmin(a, n, cmp)` for **every** comparator meeting `CFuncIs` (a call through a function pointer), and `e_argmin_i64`, which passes the proved `e_cmp_i64` | ✓ | ✓ |
 | `ECallGo` | `e_callgo(x)` → the `//export` wrapper `GoTwice` → `crosscall2` → `cgocallback` → the Go function → back: returns `2x + 1`, under `CgoCallback` only | ✓ | ✓ |
 | `EAlloca` | `e_alloca(n)`: an `alloca`'d array (stack-clash probes, the stack protector), returns `0 + … + (n − 1)` for every `n` | ✓ | ✓ |
-| `ECallBox` | `e_callbox(x)` → `GoBox`: the Go side checks its stack through `g`, calls `newBox` (a second stack check), which allocates with `runtime.newobject` (a contract, `NewobjectContract`); returns `x + 1` under `CgoCallback` with an 8192-byte goroutine stack and the allocator's readiness `ROK` | ✓ | – |
+| `ECallBox` | `e_callbox(x)` → `GoBox`: the Go side checks its stack through `g`, calls `newBox` (a second stack check), which allocates with `runtime.newobject` (a contract, `NewobjectContract`, amd64 `NewobjectContract64`); returns `x + 1` under `CgoCallback` with an 8192-byte goroutine stack and the allocator's readiness `ROK` (amd64: also an 8-aligned `RSP`, which the `cgocallback` model does not state) | ✓ | ✓ |
 | `ECallLarge` | `e_calllarge(x)` → `GoLarge`: a 4848-byte Go frame (the large-frame stack check, a 75-iteration zeroing loop on arm64 / `REP STOSQ` on amd64); returns `3x` under `CgoCallback` with an 8192-byte goroutine stack | ✓ | ✓ |
 | `EEnv` | `e_env_at(i)`: `environ[i]` through a GOT slot with a dynamic relocation, its value the precondition `GotBound Extracted.dyngot "environ" v` | ✓ | ✓ |
 

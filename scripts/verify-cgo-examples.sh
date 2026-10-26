@@ -16,7 +16,7 @@
 #     RMW: LSE / LOCK XADD), ELibc (strlen, malloc, __memcpy_chk, memcpy, free through the PLT),
 #     ESetJmp (setjmp/longjmp), EArgMin (a call through a function pointer, CFuncIs), ECallGo
 #     (C -> an //export Go function, end to end under CgoCallback), EAlloca (alloca, stack probes),
-#     ECallBox (arm64: a callback whose Go code calls a Go function and allocates, newobject as a
+#     ECallBox (a callback whose Go code calls a Go function and allocates, newobject as a
 #     contract), ECallLarge (a callback with a 4848-byte Go frame, an 8192-byte goroutine stack),
 #     EEnv (environ through a GOT slot with a dynamic relocation, GotBound); EAtomic covers both
 #     paths of the arm64 outline-atomics helper (LSE, and LL/SC under the progress hypothesis)
@@ -56,12 +56,12 @@ declare -A bin=(
 # extra extraction options (key isa/Name or Name): runtime functions taken as contracts
 declare -A xargs=([ECallBox]="--contract runtime.newobject")
 all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8
-  EBump ETLS ETLSIE EAtomic ELibc ESetJmp EArgMin ECallGo EAlloca ECallLarge EEnv)
+  EBump ETLS ETLSIE EAtomic ELibc ESetJmp EArgMin ECallGo EAlloca ECallBox ECallLarge EEnv)
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
     for n in "${all[@]}"; do names+=("$isa/$n"); done
-    [ "$isa" = arm64 ] && names+=("$isa/CCount" "$isa/GoCount" "$isa/ECallBox")
+    [ "$isa" = arm64 ] && names+=("$isa/CCount" "$isa/GoCount")
   done
   names+=(amd64/CSum32 amd64/GoSum32)
 fi
