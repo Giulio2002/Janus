@@ -759,7 +759,7 @@ them: their witness is the runtime's own code. `examples/proofs/SumRunes.lean` p
 machine code of `runtime.decoderune` meets `decoderuneSpec` (`decoderune_meets`), and
 `examples/proofs/RuneLen.lean` that `runtime.countrunes` (with the `decoderune` it calls) meets
 `countrunesSpec`; both then prove their example end to end with nothing assumed
-(`runtime_correctness`). `examples/proofs/WriteBarrier.lean` proves that the real
+(`correctness`; the contract-assuming layer is `correctness_of_contract`). `examples/proofs/WriteBarrier.lean` proves that the real
 `gcWriteBarrier1..8` meet `WbContract` for the readiness `HRoom` (the P's buffer has room; the
 flush `wbBufFlush` stays out as a contract and is never reached). The amd64 counterparts are in
 `examples/proofs-amd64/`.

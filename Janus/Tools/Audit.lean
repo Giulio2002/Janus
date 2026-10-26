@@ -771,6 +771,16 @@ partial def contractApps (env : Environment) (e : Expr) (acc : Array Expr := #[]
   | .mdata _ b | .proj _ _ b => contractApps env b acc claims
   | _ => acc
 
+/-- The parts of a conclusion that are checked like premises: the conclusion itself, except that
+a conjunction is split and a part that is itself a runtime contract (a claim the theorem proves)
+is exempt. -/
+partial def conclParts (env : Environment) (e : Expr) : Array Expr :=
+  let e := e.consumeMData
+  if e.isAppOfArity ``And 2 then conclParts env (e.getArg! 0) ++ conclParts env (e.getArg! 1)
+  else match e.getAppFn with
+    | .const c _ => if isRuntimeContract env c then #[] else #[e]
+    | _ => #[e]
+
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment). -/
 def checkContractHyps (ty : Expr) : MetaM (Option String) := do
   let env ← getEnv
@@ -784,9 +794,9 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
     let isVar (a : Expr) : Bool := a.isFVar && bound.contains a.fvarId!
     -- a contract assumed inside the conclusion (say, in an `Ensures` precondition) is checked
     -- too; only a conclusion that is itself a contract (a theorem proving one) is exempt
-    let concl := match body.consumeMData.getAppFn with
-      | .const c _ => if isRuntimeContract env c then #[] else #[body]
-      | _ => #[body]
+    -- (nor is each conjunct of a conclusion that is a conjunction: a theorem proving several
+    -- contracts at once, e.g. `gcWriteBarrier1..8`, assumes none of them)
+    let concl := conclParts env body
     let apps := premises.foldl (fun acc (_, t) => contractApps env t acc) #[] ++
       concl.foldl (fun acc t => contractApps env t acc (claims := true)) #[]
     for app in apps do
