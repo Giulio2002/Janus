@@ -25,25 +25,37 @@ func SumRec(n uint64) uint64 {
 	return n + SumRec(n-1)
 }
 
-// holdCallee has a large frame, so a call to it grows the stack when it is small.
+// holdCallee has a 176-byte frame, so a call to it grows a small stack. It stores buf[0] through
+// p: x when x&15 = 0, else 0.
 //
 //go:noinline
-func holdCallee(p *uint64, x uint64) uint64 {
-	var buf [40]uint64
-	buf[x%40] = *p
-	*p = x
-	return buf[x%40]
+func holdCallee(p *uint64, x uint64) {
+	var buf [20]uint64
+	buf[x&15] = x
+	*p = buf[0]
 }
 
-// HoldPtr keeps a pointer to its own stack frame (p = &a[i]) across a call that grows the
-// stack. copystack adjusts the stored pointer, so *p is still a[i] after the growth.
+// pick returns p when x is even, else q.
+//
+//go:noinline
+func pick(p, q *uint64, x uint64) *uint64 {
+	if x&1 == 0 {
+		return p
+	}
+	return q
+}
+
+// HoldPtr keeps p, a pointer into its own frame (&a[x&1], returned by pick), in its frame
+// across a call that grows the stack. copystack adjusts p (a pointer slot of HoldPtr's frame)
+// and the callee's pointer argument, so the callee's store and the reads after the call reach
+// the moved array.
 //
 //go:noinline
 func HoldPtr(x uint64) uint64 {
 	var a [2]uint64
 	a[0] = x
 	a[1] = x + 1
-	p := &a[x&1]
-	y := holdCallee(p, x+2)
-	return *p + y + a[0]
+	p := pick(&a[0], &a[1], x)
+	holdCallee(p, x)
+	return *p + a[0] + a[1]
 }

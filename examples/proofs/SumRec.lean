@@ -172,23 +172,6 @@ def Post (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady) (s s' : S
         (s.sp.toNat - 8) [(s.sp.toNat + 8, s.sp.toNat + 16)] s.mem s'.mem) ∧
     MemFrame s.mem s'.mem (pool ++ rt) ∧ H [] (s.regs 28).toNat 0 (rtView rt s'.mem)
 
-/-- `GStack` determines the stack bounds. -/
-theorem GStack.unique {m : Memory} {g lo hi lo' hi' : Nat} (h : GStack m g lo hi)
-    (h' : GStack m g lo' hi') : lo = lo' ∧ hi = hi' := by
-  obtain ⟨-, -, a1, a2, -⟩ := h; obtain ⟨-, -, b1, b2, -⟩ := h'
-  exact ⟨a1.symm.trans b1, a2.symm.trans b2⟩
-
-/-- A store inside the pools keeps the goroutine's descriptor (outside the pools). -/
-theorem GStack.writeLE {m : Memory} {g lo hi a k v : Nat} {pool : List (Nat × Nat)}
-    (h : GStack m g lo hi) (hg : Outside g 24 pool) (hin : InRanges a k pool) :
-    GStack (m.writeLE a k v) g lo hi := by
-  obtain ⟨h1, h2, h3, h4, h5⟩ := h
-  have hd := InRanges.disjoint hin hg
-  refine ⟨h1, by rw [Memory.accessible_writeLE]; exact h2, ?_, ?_, ?_⟩
-  · rw [Memory.readLE_writeLE_of_disjoint _ _ (by simp only [gStackLo]; omega)]; exact h3
-  · rw [Memory.readLE_writeLE_of_disjoint _ _ (by simp only [gStackHi]; omega)]; exact h4
-  · rw [Memory.readLE_writeLE_of_disjoint _ _ (by simp only [gStackguard0]; omega)]; exact h5
-
 /-- A bitmap with no bits set marks nothing. -/
 theorem bitsAt_false {bs : List Bool} (h : ∀ j, bs.getD j false = false) (b : Int) (a : Nat) :
     bitsAt b bs a = false := by

@@ -66,6 +66,35 @@ theorem PoolOK.of_accessible {m m' : Memory} {pool : List (Nat × Nat)} (h : Poo
     (hacc : ∀ a n w, m'.accessible a n w = m.accessible a n w) : PoolOK m' pool :=
   fun r hr => by obtain ⟨h1, h2, h3⟩ := h r hr; exact ⟨h1, h2, by rw [hacc]; exact h3⟩
 
+/-- A store inside the pools keeps the goroutine's descriptor (outside the pools). -/
+theorem _root_.Janus.Spec.Stack.GStack.writeLE {m : Memory} {g lo hi a k v : Nat} {pool : List (Nat × Nat)}
+    (h : GStack m g lo hi) (hg : Outside g 24 pool) (hin : InRanges a k pool) :
+    GStack (m.writeLE a k v) g lo hi := by
+  obtain ⟨h1, h2, h3, h4, h5⟩ := h
+  have hd := InRanges.disjoint hin hg
+  refine ⟨h1, by rw [Memory.accessible_writeLE]; exact h2, ?_, ?_, ?_⟩
+  · rw [Memory.readLE_writeLE_of_disjoint _ _ (by simp only [gStackLo]; omega)]; exact h3
+  · rw [Memory.readLE_writeLE_of_disjoint _ _ (by simp only [gStackHi]; omega)]; exact h4
+  · rw [Memory.readLE_writeLE_of_disjoint _ _ (by simp only [gStackguard0]; omega)]; exact h5
+
+/-- The runtime's view is unchanged by a frame of changes outside the runtime-owned memory that
+keeps the regions. -/
+theorem rtView_eq_of_frame {rt rs : List (Nat × Nat)} {m m' : Memory} (hf : MemFrame m m' rs)
+    (hreg : m'.regions = m.regions) (hout : ∀ a, InRanges a 1 rt → Outside a 1 rs) :
+    rtView rt m' = rtView rt m := by
+  unfold rtView
+  rw [hreg]
+  congr 1
+  funext a
+  split
+  · rename_i ha
+    obtain ⟨r, hr, hx⟩ := List.any_eq_true.1 ha
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at hx
+    have := hf.readLE a 1 (hout a ⟨r, hr, hx.1, by omega⟩)
+    simp only [Memory.readLE, Nat.mul_zero, Nat.add_zero] at this
+    exact BitVec.eq_of_toNat_eq this
+  · rfl
+
 /-- The precondition of the `morestack` call in a function's prologue (arm64), at the state
 `s_m` reached by the prologue's `BL runtime.morestack_noctxt`:
 

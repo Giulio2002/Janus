@@ -236,6 +236,29 @@ theorem cls_congr {cls' : Nat → Bool} (h : Moved cls pool lo hi hi' base ex m 
   · have := h.aligned.1
     rw [hc _ (by omega) (by omega)] at h3; exact h.byte a h1 h2 h3 hx
 
+/-- A byte outside word-aligned ranges lies in a word outside them. -/
+theorem _root_.Janus.Spec.Stack.outside_word {ex : List (Nat × Nat)} (hal : ∀ r ∈ ex, r.1 % 8 = 0 ∧ r.2 % 8 = 0)
+    {a : Nat} (ha : Outside a 1 ex) : Outside (a - a % 8) 8 ex := by
+  induction ex with
+  | nil => trivial
+  | cons r ex ih =>
+    obtain ⟨r1, r2⟩ := r
+    simp only [outside_cons] at ha ⊢
+    have := hal (r1, r2) (List.mem_cons_self ..)
+    exact ⟨by simp only at this; omega, ih (fun r hr => hal r (List.mem_cons_of_mem _ hr)) ha.2⟩
+
+/-- Two classifications that agree on the region's words outside the (word-aligned) exceptions
+give the same relation: the relation says nothing about the words of `ex`. -/
+theorem cls_congr' {cls' : Nat → Bool} (h : Moved cls pool lo hi hi' base ex m m')
+    (hal : ∀ r ∈ ex, r.1 % 8 = 0 ∧ r.2 % 8 = 0)
+    (hc : ∀ a, base ≤ a → a < hi → a % 8 = 0 → Outside a 8 ex → cls' a = cls a) :
+    Moved cls' pool lo hi hi' base ex m m' := by
+  have hb := h.aligned.1
+  have hw : ∀ a, Outside a 1 ex → Outside (a - a % 8) 8 ex := fun a ha => outside_word hal ha
+  refine ⟨h.aligned, h.grows, fun a h1 h2 h3 h4 hx => ?_, fun a h1 h2 h3 hx => ?_⟩
+  · rw [hc a h1 (by omega) h3 hx] at h4; exact h.ptr a h1 h2 h3 h4 hx
+  · rw [hc _ (by omega) (by omega) (by omega) (hw a hx)] at h3; exact h.byte a h1 h2 h3 hx
+
 /-- **Two moves compose into one**, with the exceptions of both: the result leaves free `ex₃`,
 which must cover `ex` and the preimage of the second move's `ex₂`. -/
 theorem trans' {cls₂ : Nat → Bool} {ex₂ ex₃ : List (Nat × Nat)} {lo₂ hi₃ : Nat} {m'' : Memory}
@@ -285,6 +308,28 @@ def GStack (m : Memory) (g lo hi : Nat) : Prop :=
   g + 24 ≤ 2 ^ 48 ∧ m.accessible g 24 false = true ∧
     m.readLE (g + gStackLo) 8 = lo ∧ m.readLE (g + gStackHi) 8 = hi ∧
     m.readLE (g + gStackguard0) 8 = lo + stackGuard
+
+/-- `GStack` determines the stack bounds. -/
+theorem GStack.unique {m : Memory} {g lo hi lo' hi' : Nat} (h : GStack m g lo hi)
+    (h' : GStack m g lo' hi') : lo = lo' ∧ hi = hi' := by
+  obtain ⟨-, -, a1, a2, -⟩ := h; obtain ⟨-, -, b1, b2, -⟩ := h'
+  exact ⟨a1.symm.trans b1, a2.symm.trans b2⟩
+
+/-- A byte outside a frame's ranges is unchanged. -/
+theorem _root_.Janus.MemFrame.bytes {m m' : Memory} {rs : List (Nat × Nat)} (h : MemFrame m m' rs)
+    {a : Nat} (ha : Outside a 1 rs) : m'.bytes a = m.bytes a := by
+  have := h.readLE a 1 ha
+  simp only [Memory.readLE, Nat.mul_zero, Nat.add_zero] at this
+  exact BitVec.eq_of_toNat_eq this
+
+/-- The descriptor survives changes outside it. -/
+theorem GStack.of_frame {m m' : Memory} {g lo hi : Nat} {rs : List (Nat × Nat)} (h : GStack m g lo hi)
+    (hf : MemFrame m m' rs) (hg : Outside g 24 rs) : GStack m' g lo hi := by
+  obtain ⟨h1, h2, h3, h4, h5⟩ := h
+  refine ⟨h1, by rw [hf.accessible]; exact h2, ?_, ?_, ?_⟩
+  · rw [hf.readLE _ _ (Outside.of_sub hg (by simp [gStackLo]) (by simp [gStackLo]))]; exact h3
+  · rw [hf.readLE _ _ (Outside.of_sub hg (by simp [gStackHi]) (by simp [gStackHi]))]; exact h4
+  · rw [hf.readLE _ _ (Outside.of_sub hg (by simp [gStackguard0]) (by simp [gStackguard0]))]; exact h5
 
 /-! ## The frame table (the pclntab's stack maps) -/
 
@@ -814,6 +859,98 @@ theorem FrameTable.ofRecs_laws (A : Arch) (rs : List FuncRec) (extra : FrameTabl
     · rw [h3]; exact ha pc
   · rcases FrameTable.ofRecs_spec rs extra pc with ⟨r, hm, -, -, -, h4⟩ | ⟨-, -, -, h4⟩
     · rw [h4]; exact (hr r hm).2.2.1
+    · rw [h4]; exact ho pc
+
+/-- **arm64 frames keep their words above their stack pointer**, for a table whose frames are
+aligned, whose locals maps fit inside the frame whenever `getStackMap` reads them (a frame of at
+most 24 bytes has its locals ignored: `varp - sp ≤ minLocals`), and which has no stack objects. -/
+theorem FrameTable.inFrame_arm64 (FT : FrameTable) (hal : FT.Aligned)
+    (hfit : ∀ pc, FT.spdelta pc ≤ 24 ∨ 8 * (FT.locals pc).length + 8 ≤ FT.spdelta pc)
+    (ho : ∀ pc, FT.objs pc = []) : FT.InFrame Arch.arm64 := by
+  intro pc sp a h
+  have h8 := hal pc
+  have hb : ∀ (b : Int) (bs : List Bool), (a : Int) < b → bitsAt b bs a = false := by
+    intro b bs hlt; simp only [bitsAt]; rw [decide_eq_false (by omega)]; rfl
+  have hfp : Arch.arm64.fp FT pc sp = sp + FT.spdelta pc := rfl
+  have harg : Arch.arm64.argp (sp + FT.spdelta pc) = sp + FT.spdelta pc + 8 := rfl
+  have hml : Arch.arm64.minLocals = 16 := rfl
+  have ha : bitsAt ((sp + FT.spdelta pc + 8 : Nat) : Int) (FT.args pc) a = false := hb _ _ (by omega)
+  by_cases hz : FT.spdelta pc = 0
+  · have hv : Arch.arm64.varp sp (sp + FT.spdelta pc) = sp := by simp [Arch.varp, hz]
+    simp only [frameCls, hfp, hv, harg, hml, ho, List.any_nil, Bool.or_false, ha]
+    have e1 : (a == sp) = false := by simp; omega
+    have e2 : decide (16 + sp < sp) = false := decide_eq_false (by omega)
+    rw [e1, e2]; simp
+  · have hv : Arch.arm64.varp sp (sp + FT.spdelta pc) = sp + FT.spdelta pc - 8 := by
+      simp only [Arch.varp]; rw [if_pos (by omega)]
+    simp only [frameCls, hfp, hv, harg, hml, ho, List.any_nil, Bool.or_false, ha]
+    have e1 : (a == sp + FT.spdelta pc - 8) = false := by simp; omega
+    rw [e1, Bool.and_false, Bool.false_or]
+    rcases hfit pc with h1 | h1
+    · rw [decide_eq_false (by omega)]; rfl
+    · rw [hb (((sp + FT.spdelta pc - 8 : Nat) : Int) - 8 * ((FT.locals pc).length : Int)) _ (by omega),
+        Bool.and_false]
+
+/-- The longest locals map of a record. -/
+def FuncRec.maxLocals (r : FuncRec) : Nat := r.localMaps.foldr (fun m n => max m.length n) 0
+
+theorem FuncRec.length_localsAt (r : FuncRec) (pc : Nat) : (r.localsAt pc).length ≤ r.maxLocals := by
+  unfold FuncRec.localsAt FuncRec.maxLocals
+  rw [List.getD_eq_getElem?_getD]
+  generalize r.mapIdx pc = i
+  induction r.localMaps generalizing i with
+  | nil => simp
+  | cons m ms ih =>
+    cases i with
+    | zero => simp only [List.getElem?_cons_zero, Option.getD_some, List.foldr_cons]; exact Nat.le_max_left _ _
+    | succ i => simp only [List.getElem?_cons_succ, List.foldr_cons]; exact Nat.le_trans (ih i) (Nat.le_max_right _ _)
+
+/-- A record's frames fit its locals maps and it has no stack objects (checked by evaluation on
+the binary's record). -/
+def FuncRec.Fits (r : FuncRec) : Prop :=
+  r.objs = [] ∧ ∀ x ∈ r.pcsp, x.2.toNat % 8 = 0 ∧ (x.2.toNat ≤ 24 ∨ 8 * r.maxLocals + 8 ≤ x.2.toNat)
+
+theorem runAt_mem {rs : List (Nat × Int)} (pc : Nat) : runAt rs pc = -1 ∨ ∃ x ∈ rs, runAt rs pc = x.2 := by
+  induction rs with
+  | nil => left; rfl
+  | cons x rs ih =>
+    simp only [runAt]
+    split
+    · right; exact ⟨x, List.mem_cons_self .., rfl⟩
+    · rcases ih with h | ⟨y, hy, h⟩
+      · left; exact h
+      · right; exact ⟨y, List.mem_cons_of_mem _ hy, h⟩
+
+/-- The table built from fitting records and an `extra` table without maps or frames is aligned
+and satisfies `InFrame` on arm64. -/
+theorem FrameTable.ofRecs_laws_arm64 (rs : List FuncRec) (extra : FrameTable)
+    (hr : ∀ r ∈ rs, r.Fits) (hsd : ∀ pc, extra.spdelta pc = 0) (hl : ∀ pc, extra.locals pc = [])
+    (ho : ∀ pc, extra.objs pc = []) :
+    (FrameTable.ofRecs rs extra).Aligned ∧ (FrameTable.ofRecs rs extra).InFrame Arch.arm64 := by
+  have hv : ∀ r ∈ rs, ∀ pc, r.spdeltaAt pc % 8 = 0 ∧
+      (r.spdeltaAt pc ≤ 24 ∨ 8 * (r.localsAt pc).length + 8 ≤ r.spdeltaAt pc) := by
+    intro r hm pc
+    have hl' := r.length_localsAt pc
+    unfold FuncRec.spdeltaAt
+    rcases runAt_mem (rs := r.pcsp) pc with h | ⟨x, hx, h⟩
+    · rw [h]; exact ⟨rfl, .inl (by decide)⟩
+    · rw [h]
+      obtain ⟨h1, h2⟩ := (hr r hm).2 x hx
+      refine ⟨h1, ?_⟩
+      rcases h2 with h2 | h2
+      · exact .inl h2
+      · exact .inr (by omega)
+  have hal' : (FrameTable.ofRecs rs extra).Aligned := by
+    intro pc
+    rcases FrameTable.ofRecs_spec rs extra pc with ⟨r, hm, h1, -⟩ | ⟨h1, -⟩
+    · rw [h1]; exact (hv r hm pc).1
+    · rw [h1, hsd]
+  refine ⟨hal', FrameTable.inFrame_arm64 _ hal' (fun pc => ?_) (fun pc => ?_)⟩
+  · rcases FrameTable.ofRecs_spec rs extra pc with ⟨r, hm, h1, h2, -⟩ | ⟨h1, h2, -⟩
+    · rw [h1, h2]; exact (hv r hm pc).2
+    · rw [h1, hsd]; left; decide
+  · rcases FrameTable.ofRecs_spec rs extra pc with ⟨r, hm, -, -, -, h4⟩ | ⟨-, -, -, h4⟩
+    · rw [h4]; exact (hr r hm).1
     · rw [h4]; exact ho pc
 
 end Janus.Spec.Stack
