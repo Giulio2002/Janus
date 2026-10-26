@@ -388,4 +388,48 @@ theorem room0_popMem {T : List FuncInfo} {m : Memory} (h : Env0 T m) {j : Nat} (
   rw [hnd] at hcap ⊢
   omega
 
+theorem frameRest_pl_map (sp : Nat) (rs : List DeferRec) :
+    ∀ fs : List Nat, frameRest sp ((fs.map (pl sp)) ++ rs) = frameRest sp rs
+  | [] => rfl
+  | f :: fs => by
+    have ih := frameRest_pl_map sp rs fs
+    simpa [frameRest, List.dropWhile, pl] using ih
+
+theorem rec_call_rest {T : List FuncInfo} {m : Memory} (h : Env0 T m) {j n sp : Nat}
+    (hnd : ndef m = j + 1) (hrs : recSp m j = sp) (hn : recN m j = n + 1) :
+    frameRest sp (defers0 m) = frameRest sp (defers0 (recTake m j n)) := by
+  have hn8 : n + 1 ≤ 8 := by have := (h.rec j (by omega)).1; omega
+  have hd := defers0_top h hnd
+  have ht := defers0_recTake h hnd hn
+  rw [hd]
+  rw [hrs] at ht
+  by_cases hp : recTok m j = 0 ∨ recConv m j ≠ 0
+  · rw [decRec_plain hp (by omega), hn, recFns_succ, hrs]
+    simp only [List.map_cons, List.cons_append]
+    rw [ht]; simp [frameRest, List.dropWhile, pl]
+  · rw [decRec_rf hp (by omega), hn, recFns_succ, hrs]
+    simp only [List.singleton_append]
+    rw [ht, frameRest_pl_map]; simp [frameRest, List.dropWhile]
+
+/-! ## The open-coded part -/
+
+theorem openItems_congr {m m' : Memory} {sa b : Nat} {ds : List DeferRec}
+    (h : ∀ i ∈ openBits b, m'.readLE (sa + 8 * i) 8 = m.readLE (sa + 8 * i) 8) :
+    openItems m' sa b ds = openItems m sa b ds := by
+  unfold openItems
+  exact List.map_congr_left fun i hi => by simp only [h i hi]
+
+set_option maxRecDepth 100000 in
+theorem openBits_le_top : ∀ b, b < 256 → ∀ i ∈ openBits b, i ≤ topBit b := by decide
+
+theorem openItems_top {m : Memory} {sa b : Nat} {ds : List DeferRec} (hb : b < 256) (hb0 : 0 < b) :
+    openItems m sa b ds = { fn := m.readLE (sa + 8 * topBit b) 8, bits := some (b % 2 ^ topBit b), chain := ds } ::
+      openItems m sa (b % 2 ^ topBit b) ds := by
+  unfold openItems
+  rw [openBits_top b hb hb0, List.map_cons]
+  congr 1
+  refine List.map_congr_left fun i hi => ?_
+  have := openBits_le_top b hb i (openBits_mod_sub b hb hb0 i hi)
+  simp only [Nat.mod_mod_of_dvd _ (Nat.pow_dvd_pow 2 this)]
+
 end Janus.Contracts.PanicSat
