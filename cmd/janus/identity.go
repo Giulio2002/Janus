@@ -106,17 +106,17 @@ type Identity struct {
 	Contracts        []identityContract `json:"contracts,omitempty"`
 	// GlobalPatterns are the --global patterns and Globals the writable symbols they matched,
 	// with their link-time images (Program.globals); omitted when empty.
-	GlobalPatterns []string         `json:"globalPatterns,omitempty"`
-	Globals        []identityGlobal `json:"globals,omitempty"`
-	Unresolved       []identityBranch   `json:"unresolvedBranches"`
-	Targets          []string           `json:"targets,omitempty"`
-	DynamicTargets   []identityTarget   `json:"dynamicTargets,omitempty"`
-	OmittedCalls     []identityOmitted  `json:"omittedCalls,omitempty"`
-	Data             []identityData     `json:"data"`
-	DataRefs         []identityDataRef  `json:"dataReferences"`
-	SkippedData      []identitySkipped  `json:"skippedData"`
-	Extracted        string             `json:"extracted"`
-	ExtractedSha256  string             `json:"extractedSha256"`
+	GlobalPatterns  []string          `json:"globalPatterns,omitempty"`
+	Globals         []identityGlobal  `json:"globals,omitempty"`
+	Unresolved      []identityBranch  `json:"unresolvedBranches"`
+	Targets         []string          `json:"targets,omitempty"`
+	DynamicTargets  []identityTarget  `json:"dynamicTargets,omitempty"`
+	OmittedCalls    []identityOmitted `json:"omittedCalls,omitempty"`
+	Data            []identityData    `json:"data"`
+	DataRefs        []identityDataRef `json:"dataReferences"`
+	SkippedData     []identitySkipped `json:"skippedData"`
+	Extracted       string            `json:"extracted"`
+	ExtractedSha256 string            `json:"extractedSha256"`
 }
 
 func hex0x(v uint64) string { return fmt.Sprintf("0x%x", v) }
