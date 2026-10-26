@@ -45,11 +45,11 @@ abbrev B : Nat := 0x10000
 /-- A 64-bit word of `m`. -/
 abbrev rd (m : Memory) (a : Nat) : Nat := m.readLE a 8
 
-def npan (m : Memory) : Nat := rd m B
-def ndef (m : Memory) : Nat := rd m (B + 8)
-def panAt (i : Nat) : Nat := B + 0x100 + 32 * i
-def recAt (i : Nat) : Nat := B + 0x200 + 96 * i
-def tabAt (i : Nat) : Nat := B + 0x500 + 56 * i
+abbrev npan (m : Memory) : Nat := rd m B
+abbrev ndef (m : Memory) : Nat := rd m (B + 8)
+abbrev panAt (i : Nat) : Nat := B + 0x100 + 32 * i
+abbrev recAt (i : Nat) : Nat := B + 0x200 + 96 * i
+abbrev tabAt (i : Nat) : Nat := B + 0x500 + 56 * i
 
 /-- Panic entry `i`. -/
 def decPan (m : Memory) (i : Nat) : PanicRec :=
@@ -300,6 +300,20 @@ theorem tableOK_w {T : List FuncInfo} (h : a + n ≤ B + 0x28 ∨ (B + 0x30 ≤ 
     by rw [hb 8 (by omega)]; exact e2, by rw [hb 16 (by omega)]; exact e3,
     by rw [hb 24 (by omega)]; exact e4, by rw [hb 32 (by omega)]; exact e5,
     by rw [hb 40 (by omega)]; exact e6, by rw [hb 48 (by omega)]; exact e7⟩
+
+theorem readLE_writeLE_same' {a n v b : Nat} (h : b = a) : (m.writeLE a n v).readLE b n = v % 256 ^ n := by
+  rw [h]; exact m.readLE_writeLE_self a n v
+
+theorem panList_succ (m : Memory) (k : Nat) : panList m (k + 1) = decPan m k :: panList m k := rfl
+theorem recList_succ (m : Memory) (k : Nat) : recList m (k + 1) = decRec m k ++ recList m k := rfl
+theorem recFns_succ (m : Memory) (i j : Nat) : recFns m i (j + 1) = recFn m i j :: recFns m i j := rfl
+theorem capMin_succ (m : Memory) (k : Nat) : capMin m (k + 1) = min (8 - recN m k) (capMin m k) := rfl
+theorem panics0_eq (m : Memory) : panics0 m = panList m (min (npan m) 8) := by unfold panics0; rfl
+theorem defers0_eq (m : Memory) : defers0 m = recList m (min (ndef m) 8) := by unfold defers0; rfl
+theorem saved0_eq (m : Memory) : saved0 m =
+    if rd m (B + 0x10) = 0 then none else some (rd m (B + 0x18), rd m (B + 0x20)) := by unfold saved0; rfl
+theorem room0_eq (m : Memory) : room0 m = min (8 - npan m) (min (8 - ndef m) (capMin m (min (ndef m) 8))) := by
+  unfold room0; rfl
 
 end writes
 
