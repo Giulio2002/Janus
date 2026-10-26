@@ -34,7 +34,7 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      Triangle GotoSum Find2D RowsWith Log2 TotalMeters TotalFeet Fact SumBelow ReverseArray DivMod10
      SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
      Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
-     Box AsHasher Classify Equal
+     Box AsHasher Classify Equal IsEven CycA MulAlgo Double
      Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
      I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird SpanSum MinF64 MaxF64 MinStr)
 . scripts/example-contracts.sh
@@ -85,7 +85,7 @@ verify_one() {
   # reached); up to two verified at once (scripts/lib/theorems.sh).
   local -a thms=(Proof.correctness)
   local thm i st
-  for thm in $(grep -oE '^theorem (exact|saturation|faults|anyCPU)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
+  for thm in $(grep -oE '^theorem (exact|saturation|faults|anyCPU|forAllValues)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
   if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
   st="$(mktemp -d)"
   start=$(date +%s.%N)

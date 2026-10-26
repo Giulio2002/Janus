@@ -49,7 +49,7 @@ arm64=(MallocFast RuneLen SumRunes ClearWords A64IndexByte A64Crc32 A64CountByte
        PanicIf DeferInc IndexAt LoadField DeferTwice RecoverSet
        ReverseArray RowsWith SwapBig DotBoth Find2D Fact Compose Shifts AlignUp TotalMeters TotalFeet
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
-       Mod IncTwice Bump GlobalTable Table MakeAdder
+       Mod IncTwice Bump GlobalTable Table MakeAdder IsEven CycA MulAlgo Double
        SpanSum MinStr I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird MinF64 MaxF64
        Box AsHasher Classify Equal Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
        WrongAdd)

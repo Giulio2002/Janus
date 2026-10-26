@@ -12,6 +12,9 @@ case "$1" in
   # dictionary (examples/basic/zconstructs.go)
   TotalMeters) printf '%s\n' --targets example.com/basic.Meters.Scale ;;
   TotalFeet) printf '%s\n' --targets example.com/basic.Feet.Scale ;;
+  # writable globals with their link-time images (Janus/Spec/Globals.lean, examples/basic/zmutual.go)
+  MulAlgo) printf '%s\n' --global example.com/basic.karatsubaCut --global example.com/basic.mulBias ;;
+  Double) printf '%s\n' --global example.com/basic.useFast ;;
   # heap allocation (docs/RUNTIME-CONTRACTS.md): the runtime functions left out as contracts
   NewPair|MakeSlice|AppendOne|MakeAdder)
     printf '%s\n' --contract runtime.mallocgc --contract runtime.newobject \

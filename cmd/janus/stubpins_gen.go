@@ -153,8 +153,26 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.gcWriteBarrier1": {
 			{Hash: "27dd9bfa0df0bf577c4a7e6c49b0d430d1c87c925208bb41467b47b1c3c86c98", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
+		"runtime.gcWriteBarrier2": {
+			{Hash: "dabe7f9e6ead925d0eddbcb11fa487c47f6ea6fe09b47bd608e3099c6cb7117a", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
+		},
 		"runtime.gcWriteBarrier3": {
 			{Hash: "240613a8c9e616d438895f627c7c9f78e04c2037e4b51c703a1ced5eeae56d9c", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
+		},
+		"runtime.gcWriteBarrier4": {
+			{Hash: "bf5b0d98865d078d79711cc4a524c941933975386d110882c92ab6b6b8df51cb", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
+		},
+		"runtime.gcWriteBarrier5": {
+			{Hash: "40a4860b7eb3aca6bf954728166f9bea053aea2e25d416f862fa612da9b7a7e6", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
+		},
+		"runtime.gcWriteBarrier6": {
+			{Hash: "d223f5cd72ea6829276f8bf6ce9c06777775dbb7b60a790a4ca5dc40f8fcadde", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
+		},
+		"runtime.gcWriteBarrier7": {
+			{Hash: "35b2b49b2ff4bc569fbfd948930c1e094dd0cf187cdb3cdaa443dc71c6df1e57", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
+		},
+		"runtime.gcWriteBarrier8": {
+			{Hash: "3611832b9298e8b18da60f4db695982aaea3f3493994002ae625a6b5ebb80b56", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
 		"runtime.goPanicIndex": {
 			{Hash: "4531f8bc556e4d8aa54dade2271cb601ab6a2ed31a2355849e24f5502d3e1ed3", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
@@ -214,6 +232,11 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.gorecover": {
 			{Hash: "20fae59294e241561010f2bcd8495ef53c04d05623b1ee7e6d1f1d5cf23ad227", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
+		"runtime.growslice": {
+			{Hash: "02dd21f2bd95c74301bd5f760145fbdc8c2f34c9329abf1cd1bfacc9e13a50bd", File: "runtime/slice.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2
+			{Hash: "163a231c857cc1de5e84ad43b72b841e2a443fe97687b5ab9b86906a82e72b5d", File: "runtime/slice.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "d501c7514b25ef86264e3e7e7dc7cf17bcf96d9869d49b4067544eef2fdefbd3", File: "runtime/slice.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: v3 v4
+		},
 		"runtime.ifaceeq": {
 			{Hash: "2157236137dc32d07c37b5bb97992142d95c8da3ff2af7dc81d967e99d4eee97", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
 			{Hash: "4fadc47ae57da9537daeb61798e611b0ae16110e3983287e3be35f8c3d289014", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
@@ -235,6 +258,15 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.makemap_small": {
 			{Hash: "9c4a40b9bf10a7a47c9d55c9deaedf7c4e7fda2650fce34120fb73428d3c7e9e", File: "runtime/map.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
 			{Hash: "cfce4ef7d0d674d300b807471be3583facd071887422fba8a27bd8a4ff845b4c", File: "runtime/map.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.makeslice": {
+			{Hash: "114788b7acaa4a1c0ac0c97fb2933cfa5ecd3ae9e629b2d4873192a314b67389", File: "runtime/slice.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
+			{Hash: "881b325e1ebb8d3805b6a02aa8ef03555a056ebbb7cfcd1c6122c5da613f4e30", File: "runtime/slice.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.mallocgc": {
+			{Hash: "886c8b8f0016d5e06abcf845d5bf4913e3de0afddc2d7c5c3a6b8f6725c27b13", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: scexp
+			{Hash: "8cff73664d7787e531b983b5b195d7a89d8c80fc09f85be54a76f8f92870bfb2", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "d81e96d38ac54859ac7be01c2455a715281e0b0dcdf4319a29ce6790e34644ef", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 		"runtime.mallocgcSmallNoScanSC10": {
 			{Hash: "154f33f2580295a2a73a9ecfa72b533be8a045d0a53efd01e188791c47dbd702", File: "runtime/malloc_generated.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2
@@ -1028,8 +1060,26 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.gcWriteBarrier1": {
 			{Hash: "d5351177caaafd6818d05a7f99d2f601499f08ec5220bfc0525f920cb856c8c0", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
 		},
+		"runtime.gcWriteBarrier2": {
+			{Hash: "6c6ec017dd5b75601c18c6016ae138138ea8a7d57eb4567c053bd8116876d8ce", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
+		},
 		"runtime.gcWriteBarrier3": {
 			{Hash: "5f368571d857fe0b655e25c2d19ae472dbd9953a770ab27358fbc4a74361af3b", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
+		},
+		"runtime.gcWriteBarrier4": {
+			{Hash: "1ae337b4b15a5ac608dc4e74627651d748ff3ad121883d933e2126622f7311e9", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
+		},
+		"runtime.gcWriteBarrier5": {
+			{Hash: "571b50bf96173fdb62bd9ca8dde5c32e07c9b6566650395389ea038c56389178", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
+		},
+		"runtime.gcWriteBarrier6": {
+			{Hash: "029fa30490954fd802a5b95532b7c1245f81d64d81a4573473d59b938bc86840", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
+		},
+		"runtime.gcWriteBarrier7": {
+			{Hash: "4cc0c87602dd6a5fbfce5599d6becca9b2aeb51a33cf55efdd8aa3740c7296bc", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
+		},
+		"runtime.gcWriteBarrier8": {
+			{Hash: "7a5991acb6c56b2f4fea90d40aae93074b6ec000fe24f7fb79a0c46cdb47a9f9", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
 		},
 		"runtime.goPanicIndex": {
 			{Hash: "513c748cca5e52923b969dbc69c8d032e18f5a09e6c10cc03a75791dccaf6e60", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
@@ -1090,6 +1140,10 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.gorecover": {
 			{Hash: "7312fd17b6272aebbc988e28d56f78ea104d1cc603cdd32f37beec3bc85591dc", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
 		},
+		"runtime.growslice": {
+			{Hash: "9892c1ad39e5feaaa91a4aa88c2b1caa6f05affc7a5a5a823f4c485e9155a024", File: "runtime/slice.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
+			{Hash: "9c842c0fd0e3c6599d8a0cbd4110779f05f11b762f53a7081d42b07f59e895fc", File: "runtime/slice.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
 		"runtime.ifaceeq": {
 			{Hash: "b02e10dc11b6f47be4eed14ba57201224d022f10ba082b64a93ef92d841427ca", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 			{Hash: "ddad7bd9cc89ea4dc41ca57ec7052362bc275cbc624f6d9a7ffd6b881df01d51", File: "runtime/alg.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
@@ -1112,6 +1166,15 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.makemap_small": {
 			{Hash: "77394fbf3bd518927679b7f8f437bc97dd69c222d3fb14e99e697702e808b35d", File: "runtime/map.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
 			{Hash: "b7f756fe7ef0e8c7badd6aa3d3b83aafe7eeaf7401d6a315fa10983573782ec5", File: "runtime/map.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.makeslice": {
+			{Hash: "50cafd2fbf305687eff7ce7a6eaf103e9c38e34357b6bc3be4c00d814c9b0eb5", File: "runtime/slice.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
+			{Hash: "af9dcda88e4cc0e5b5ccdbfa452ceca878b3466bd8fc0b5eaae3717bbdc06045", File: "runtime/slice.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"runtime.mallocgc": {
+			{Hash: "110748120b5806bdb59358259d5719206e6e7f5fb1cabcfa83b2875ecf0d5327", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+			{Hash: "5cde19aaee1f14937c5a52a4aa88f70dd352d617ca21ce3189f8fa372d283751", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "887552717b67bc7a55e26cb13898d438c06eeb15142d07b1dc5de04589c154bb", File: "runtime/malloc.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: scexp
 		},
 		"runtime.mallocgcSmallNoScanSC10": {
 			{Hash: "3ca159dcc144e4dcece63e87c328c311c764fd5f5ea5151ec904c79067680ebf", File: "runtime/malloc_generated.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0

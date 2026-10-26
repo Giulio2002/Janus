@@ -211,6 +211,8 @@ Go 1.26.0. Proofs:
 | `A64CountByte` | the number of bytes of `b` equal to `c`, for every length, computed by the words gcc 15.2 `-O2` auto-vectorises a C loop into (`CMEQ`, `ZIP1`/`ZIP2`, `UADDW`/`UADDW2`, `ADDP`, then a scalar tail), behind an ABI0 shim | ✓ | |
 | `GlobalTable` | `tbl[i & 7]` of a writable global, provided by the precondition | ✓ | ✓ |
 | `Bump` | `counter += d` on a writable global, returns the new value | ✓ | ✓ |
+| `MulAlgo` | a writable threshold global: `1` if `n < 40` else `2` when `karatsubaCut`/`mulBias` hold their link-time values (`GlobalsInit`, `--global`), and the parametric form for every value they may hold | ✓ | ✓ |
+| `Double` | a flag global set at startup (like math/big's `hasADX`): `2x` for every value of the flag, both code paths | ✓ | ✓ |
 | `AtomicAdd` | `atomic.AddUint64(p, d)`: `*p += d`, returns the new value (LSE `LDADDAL` path, given `runtime.arm64HasATOMICS`) | ✓ | |
 | `AtomicMax` | `LDAR` + `CASAL` retry loop: returns the old `*p` and sets `*p = max(old, v)`; the loop runs once | ✓ | |
 | `CopyBlock` | `copy(dst[:], src[:])` of a 128-byte array through `runtime.memmove` | ✓ | |
@@ -246,6 +248,8 @@ Go 1.26.0. Proofs:
 | `Log2` | a condition-only `for`: `⌊log₂ x⌋` (`2^r ≤ x < 2^(r+1)`), `0` for `x = 0` | ✓ | ✓ |
 | `TotalMeters`, `TotalFeet` | two instantiations of one generic function sharing the GC-shape body `total[go.shape.uint64]`, each reaching its `Scale` method through its dictionary: `100·(a+b)`, `30·(a+b)` | ✓ | ✓ |
 | `Fact` | recursion: `n! mod 2^64`, by induction over the recursive calls (given stack for `n + 1` frames) | ✓ | ✓ |
+| `IsEven`, `IsOdd` | mutual recursion: `1` iff `n` is even (odd), by `Summary.induction_mutual` over both members | ✓ | ✓ |
+| `CycA`, `CycB`, `CycC` | a 3-cycle of calls with three different frame sizes, by a weighted shared measure | ✓ | ✓ |
 | `SumBelow` | range over an `int`: `0 + … + (n-1)`, nothing for `n ≤ 0` | ✓ | ✓ |
 | `IterSum` | range over a function iterator (inlined, no runtime call): the same sum | ✓ | ✓ |
 | `ReverseArray` | array value semantics and range over an array: `out[i] = in[3-i]`, also for `out = in` | ✓ | ✓ |

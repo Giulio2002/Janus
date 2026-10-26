@@ -69,7 +69,7 @@ stripped, they come from the Go `.gopclntab` (`debug/gosym`) instead; the header
 ## Extract
 
 ```sh
-janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...] [--contract SYM]...
+janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...] [--contract SYM]... [--global SYM]...
 janus extract artifacts/examples-arm64 example.com/basic.Get artifacts/Get
 ```
 
@@ -163,6 +163,25 @@ Extraction:
 
    A dynamic target that matches a `--contract` pattern becomes a contract instead of being
    copied, and `--contract` takes precedence over the built-in omission of `runtime.deferreturn`.
+10. Copies the **link-time images of writable globals** named by `--global SYM` (repeatable; an
+    exact name or a glob as for `--contract`, e.g. `'math/big.*Threshold'`): for each writable data
+    symbol (`.data`, `.noptrdata`, `.bss`, `.noptrbss`; it must lie in one writable section that a
+    writable `PT_LOAD` maps from the file, or for `NOBITS` zero-fills past the file image), its
+    address, size and file bytes (none for `.bss`/`.noptrbss`: the loader zeroes them), as
+    `def globals : List GlobalSegment` (and `globals := globals` in `program`; omitted without
+    `--global`, so other extractions are unchanged) and in `identity.json` (`globalPatterns`,
+    `globals`: name, address, size, section, SHA-256 of the bytes). A read-only symbol, an unknown
+    name, a stripped binary (no `.symtab`) or two partly overlapping symbols are errors. A
+    **pointer chain** `SYM[+OFF]->SIZE…` follows the pointer the link-time image of `SYM` holds at
+    offset `OFF` (default 0) to `SIZE` writable bytes, and records them as a global named by the
+    chain itself: a package-level `&T{…}` or a slice literal is an anonymous static object with no
+    symbol of its own (`'math/big.intOne->32'` is the `Int` that `intOne` points to,
+    `'math/big.intOne->32+8->8'` the word its `abs` slice holds, the same bytes as
+    `'math/big.natOne->8'`). A reference the code makes to a recorded global is reported with a
+    `Note:` instead of the writable-data warning. Theorems use the list through
+    `Janus.Spec.GlobalsInit` / `GlobalIs` / `GlobalBytesIs` ([PROOFS.md](PROOFS.md#writable-globals-mulalgo-double));
+    the images are checked by `janus check` like the code, and `janus-audit` rejects a statement
+    that names a global the extraction does not record.
 
 Outputs, written into `<outdir>` (created if needed); any old `verified.json` there is removed:
 

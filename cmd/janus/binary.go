@@ -44,6 +44,7 @@ type Binary struct {
 	goText uint64
 
 	sections []section // allocated sections (in memory at run time), sorted by address
+	loads    []loadSeg // the PT_LOAD program headers (globals.go: where .bss is zero-filled)
 	dataSyms []Func    // non-function symbols with a size (data objects), sorted by address
 	markers  []Func    // zero-size object symbols (go:string.*, runtime.rodata, ...), sorted by address
 
@@ -223,6 +224,11 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 	}
 	b.textAddr = text.Addr
 	b.goText = text.Addr
+	for _, p := range f.Progs {
+		if p.Type == elf.PT_LOAD {
+			b.loads = append(b.loads, loadSeg{Vaddr: p.Vaddr, Filesz: p.Filesz, Memsz: p.Memsz, Writable: p.Flags&elf.PF_W != 0})
+		}
+	}
 
 	for _, s := range f.Sections {
 		if s.Flags&elf.SHF_ALLOC == 0 || s.Size == 0 {

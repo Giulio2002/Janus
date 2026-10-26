@@ -34,6 +34,9 @@ structure Program where
   copied, as `(name, address)`. They do not change the run (no code there: `noCode`); see
   `Janus.Program.contracts` and docs/RUNTIME-CONTRACTS.md. -/
   contracts : List (String × Nat) := []
+  /-- Writable globals named by `janus extract --global SYM`, with their link-time images (see
+  `Janus.Program.globals`, `Janus.Spec.GlobalsInit`). -/
+  globals : List Janus.GlobalSegment := []
 deriving Repr, Inhabited
 
 /-- How a run ends when it does not fault. -/
@@ -99,6 +102,10 @@ theorem fetch_link {p : Program} (impl : List Segment) {pc : Nat} {bs : List Nat
     (p.link impl).contracts = p.contracts := rfl
 @[simp] theorem stubs_link (p : Program) (impl : List Segment) :
     (p.link impl).stubs = p.stubs := rfl
+@[simp] theorem globals_link (p : Program) (impl : List Segment) :
+    (p.link impl).globals = p.globals := rfl
+@[simp] theorem globals_withExit (p : Program) (ret : Nat) :
+    (p.withExit ret).globals = p.globals := rfl
 
 /-- Run for at most `fuel` instructions. -/
 def run (p : Program) : Nat → State → Except Fault Outcome

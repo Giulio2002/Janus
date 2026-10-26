@@ -81,7 +81,11 @@ type Extraction struct {
 	// image when an extracted function reads the thread pointer.
 	CData []CData
 	TLS   *tlsImage
-	Lean  []byte
+	// Writable globals named by --global (globals.go): their link-time images, recorded in
+	// Program.globals; GlobalPatterns are the patterns as given (recorded in identity.json).
+	GlobalPatterns []string
+	Globals        []GlobalSeg
+	Lean           []byte
 }
 
 // Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)
@@ -251,6 +255,27 @@ var rtmiscContractStubs = map[string]bool{
 
 func init() {
 	for n := range rtmiscContractStubs {
+		runtimeContractStubs[n] = true
+	}
+}
+
+// allocContractStubs are the allocation, slice and write-barrier entry points a framework contract
+// library describes (Janus/Contracts/Alloc.lean, AllocAmd64.lean: MallocgcContract,
+// NewobjectContract, MakesliceContract, GrowsliceContract and their amd64 forms; the
+// gcWriteBarrierN entries, whose fast path the examples execute and which a write-barrier
+// contract may leave out with --contract 'runtime.gcWriteBarrier*'). They belong to
+// runtimeContractStubs (added at init), so a --contract that names one is pinned to the
+// runtime's code like memmove (checkContractPin), not trusted by name.
+var allocContractStubs = map[string]bool{
+	"runtime.mallocgc": true, "runtime.newobject": true, "runtime.makeslice": true,
+	"runtime.growslice":       true,
+	"runtime.gcWriteBarrier1": true, "runtime.gcWriteBarrier2": true, "runtime.gcWriteBarrier3": true,
+	"runtime.gcWriteBarrier4": true, "runtime.gcWriteBarrier5": true, "runtime.gcWriteBarrier6": true,
+	"runtime.gcWriteBarrier7": true, "runtime.gcWriteBarrier8": true,
+}
+
+func init() {
+	for n := range allocContractStubs {
 		runtimeContractStubs[n] = true
 	}
 }
@@ -626,7 +651,11 @@ func writeProgram(sb *strings.Builder, x *Extraction, ty string) {
 		writeContracts(sb, x.Contracts)
 		fields += ", contracts := contracts"
 	}
-	if len(x.Data) == 0 && len(x.Contracts) == 0 {
+	if len(x.Globals) > 0 {
+		writeGlobals(sb, x.Globals)
+		fields += ", globals := globals"
+	}
+	if len(x.Data) == 0 && len(x.Contracts) == 0 && len(x.Globals) == 0 {
 		fmt.Fprintf(sb, "def program : %s := { %s }\n\n", ty, fields)
 		return
 	}

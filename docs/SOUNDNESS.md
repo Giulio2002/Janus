@@ -41,7 +41,10 @@ These are trusted, not proved.
    symbol's `[addr, addr+size)` in `.text` and copying its little-endian 32-bit words (trailing
    zero padding words are dropped). `janus verify` re-runs this copy against the binary
    (checked by SHA-256) and compares it byte for byte with `Extracted.lean`, so a stale or
-   edited extraction is rejected. The copy itself and the symbol table lookup are trusted.
+   edited extraction is rejected. The copy itself and the symbol table lookup are trusted. The
+   same holds for the read-only data and for the link-time images of the writable globals named
+   by `--global` (`cmd/janus/globals.go`: the symbol lookup, the section and `PT_LOAD` checks and
+   the byte copy, and for a pointer chain the little-endian pointer read from the copied image).
 3. **Stub classification**: the extractor treats as `panic` stubs the go1.26 runtime's panic
    functions and as `morestack` stubs `runtime.morestack.abi0`/`runtime.morestack_noctxt.abi0`,
    by exact ELF symbol name, only in a binary with a symbol table and only when the name is
@@ -101,7 +104,9 @@ These are trusted, not proved.
    the model reports them as faults, and `NeverPanics` excludes faults too.
    The same pin authenticates the runtime functions a framework contract library describes
    (`runtimeContractStubs`: the interface runtime's `convT*`, `assertE2I(2)`, `typeAssert`,
-   `interfaceSwitch`, `efaceeq`, `ifaceeq`): a `--contract` that names one is accepted only if
+   `interfaceSwitch`, `efaceeq`, `ifaceeq`; equality, hashing, typed memory and the map runtime;
+   and, as `allocContractStubs`, the allocation, slice and write-barrier entries `mallocgc`,
+   `newobject`, `makeslice`, `growslice` and `gcWriteBarrier1`–`8`): a `--contract` that names one is accepted only if
    the function passes the checks above (its callees are identified by name only), and the
    extraction records it as `"pinned": true`, so the contract hypothesis of a theorem is about the
    runtime's own code. Other `--contract` names are not pinned (a contract over arbitrary code
@@ -506,9 +511,19 @@ about executions outside it.
   `s.mem`. Read-only constants the code loads (`.rodata`, literal pools) are copied by the
   extractor into `Program.data`; a theorem that needs them assumes `Program.DataLoaded`
   (memory holds exactly those bytes in a read-only region). Writable globals (`.data`,
-  `.bss`, `.noptrdata`, `.noptrbss`) are never copied, because their contents are not fixed
-  by the binary: a proof that touches one must list it as an ordinary region in its
-  precondition. Self-modifying code is not modelled, and stores never change the fetched code.
+  `.bss`, `.noptrdata`, `.noptrbss`) are never copied into `Program.data`, because their
+  contents at a call are not fixed by the binary: a proof that touches one lists it as a region
+  in its precondition. `janus extract --global SYM` records a writable global's **link-time
+  image** (its file bytes, zero for `.bss`) in `Program.globals`, by the same trusted byte copy;
+  the list does not change the run, and only a theorem that assumes `Janus.Spec.GlobalsInit`
+  (memory holds exactly those bytes, in a writable region) depends on it. That assumption is the
+  state of a program that has not written the variable: it is **not** the value after package
+  initialisation for a variable an `init` function or a non-constant initialiser sets
+  (`internal/cpu.X86`, math/big's `hasADX`, `runtime.writeBarrier`, all zero in the image); for
+  those a theorem quantifies over the value (`GlobalIs`, `GlobalBytesIs` with the value a
+  parameter). A precondition naming a global the extraction does not record would be
+  unsatisfiable; `janus-audit` rejects it (round 8 I1), and `globalsInit_image` shows the
+  predicate holds in the image itself (each example's `Witness.nonvacuous`). Self-modifying code is not modelled, and stores never change the fetched code.
 * **The return address.** Specifications quantify over every admissible return address (see
   "The return address" above), so the extracted placeholder `exitAddr := 0` never matters. A
   theorem stated directly on `Extracted.program` (without `withExit` and a universally

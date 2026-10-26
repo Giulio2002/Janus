@@ -95,6 +95,18 @@ Tools for contract proofs (all untrusted automation, re-checked by the kernel):
 
 ### 4. What a contract hypothesis means for trust
 
+Every runtime function a framework contract describes is **pinned to its code** when
+`--contract` names it (`runtimeContractStubs` in `cmd/janus/extract.go`, checked by
+`checkContractPin`): the interface, equality, hashing, typed-memory and map runtime, and the
+allocation, slice and write-barrier entries `runtime.mallocgc`, `newobject`, `makeslice`,
+`growslice` and `gcWriteBarrier1`–`8` (`allocContractStubs`). Its normalized code must be one of
+the hashes `scripts/gen-stubpins.sh` measured for the pinned toolchains, so the contract
+hypothesis is about the Go runtime's own function, not about whatever code a binary placed under
+that name. `audit/roundfw/run-roundfw.sh` (rows `P_*`) changes one byte of each of those five
+functions on both ISAs and checks that the extraction is rejected, and that the unchanged binary
+records `"pinned": true`. (`runtime.typehash` stays unpinned: its jump table makes its
+normalized code differ between programs.)
+
 A verified theorem with a contract hypothesis says: *if* the runtime function behaves as the
 contract says (in the model), *then* the function under proof meets its specification. It
 says nothing about the runtime. Read the contract definition as part of the statement; it lives
