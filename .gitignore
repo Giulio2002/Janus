@@ -16,3 +16,4 @@ audit/*/bin/
 audit/*/work/
 /cmd/janus/janus
 audit/round10/scratch-*/
+/janus
