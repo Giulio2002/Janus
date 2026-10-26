@@ -948,7 +948,8 @@ way the call may end the loop goes on (or recovers). -/
 theorem engine_call (hp : EngineAt p)
     {Fin : List PanicRec → Nat → State → State → Prop}
     (hFin : ∀ (ch : List PanicRec) (rm : Nat) (c c' d : State),
-      MemFrame c.mem c'.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F) → Fin ch rm c' d → Fin ch rm c d)
+      MemFrame c.mem c'.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F) →
+      saved0 c'.mem = saved0 c.mem → Fin ch rm c' d → Fin ch rm c d)
     (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph) (hpm : PanOK mode ch)
     {it : Item} {rest : List Item} {e : State}
     (cs : CallSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph it rest e)
@@ -978,7 +979,7 @@ theorem engine_call (hp : EngineAt p)
             | goexit => left; simp
             | ret => left; simp)
       have hnx := IH c' ch rm ph hpc' hr18' hI'' hpm (by rw [hmem', hci]; exact cs.cur)
-      refine Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' e' c' d (by rw [hmem']; exact MemFrame.refl _ _) hf)
+      refine Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' e' c' d (by rw [hmem']; exact MemFrame.refl _ _) (by rw [hmem']) hf)
         hk' (by rw [hmem']; exact MemFrame.refl _ _) (by rw [hmem']) rfl hnx
     · subst hmode
       have hq' : panics0 e'.mem = { r with recovered := true } :: rs := hq
@@ -1024,14 +1025,15 @@ theorem engine_call (hp : EngineAt p)
     have hpm2 : PanOK .panic (r2 :: ch) := fun _ => ⟨r2, ch, rfl, hrc, hgx⟩
     obtain ⟨k', c', hk', hpc', hmem', hr18', hI''⟩ := step_rp hp hI' hUpc (Or.inr ⟨r2, ch, rfl, hrc⟩)
     have hnx := IH c' (r2 :: ch) (rm - 1) ph hpc' hr18' hI'' hpm2 (by rw [hmem', hci]; exact cs.cur)
-    exact Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' u c' d (by rw [hmem']; exact MemFrame.refl _ _) hf)
+    exact Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' u c' d (by rw [hmem']; exact MemFrame.refl _ _) (by rw [hmem']) hf)
       hk' (by rw [hmem']; exact MemFrame.refl _ _) (by rw [hmem']) rfl hnx
 
 /-- The model engine's loop meets `Panic.Engine`, for every list of deferred calls. -/
 theorem engine_loop (hp : EngineAt p)
     {Fin : List PanicRec → Nat → State → State → Prop}
     (hFin : ∀ (ch : List PanicRec) (rm : Nat) (c c' d : State),
-      MemFrame c.mem c'.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F) → Fin ch rm c' d → Fin ch rm c d)
+      MemFrame c.mem c'.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F) →
+      saved0 c'.mem = saved0 c.mem → Fin ch rm c' d → Fin ch rm c d)
     (hfin : ∀ (c : State) (ch : List PanicRec) (rm : Nat), c.pc = BitVec.ofNat 64 eLH → c.regs 18 = x18 →
       Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm 0 → PanOK mode ch →
       (ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ recSp c.mem j ≠ F.sp) → ∃ k d, Program.Steps p c k d ∧ Fin ch rm c d) :
@@ -1058,7 +1060,7 @@ theorem engine_loop (hp : EngineAt p)
       obtain ⟨⟨j, hj⟩, hpc2, hr182, hinv2, hcur2, hmf2, hsv2, hmeas⟩ := ss
       have := ihm _ (by omega) c2 ch rm ph2 (Nat.le_refl _) (by rw [hcur2]; exact hn) hpc2 hr182 hinv2 hpm
       rw [hcur2] at this
-      exact Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' c c2 d hmf2 hf) hj hmf2 hsv2 rfl this
+      exact Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' c c2 d hmf2 hsv2 hf) hj hmf2 hsv2 rfl this
     have finc : (ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ recSp c.mem j ≠ F.sp) → ph = 0 →
         Engine p (P0 T RPa) U0 x28 x18 F (frameKeep m0 F items0) mode Fin ch rm (curItems c.mem F ph) c := by
       intro hend hph0

@@ -484,11 +484,13 @@ def Engine (p : Program) (P : PanicRuntime) (U : State → Nat → Nat → Prop)
 
 /-- The end of a panic's or `Goexit`'s loop over frame `F` (entered with defer chain `ds`): the
 runtime unwinds past the frame (`U d g F.bound`) with the panic chain `ch`, the frame's records
-popped, memory changed only in `P.priv`, its window and the `deferBits` byte. -/
+popped, memory changed only in `P.priv`, its window and the `deferBits` byte, the saved
+open-coded state kept. -/
 def LeftFrame (P : PanicRuntime) (U : State → Nat → Nat → Prop) (x28 : W64) (F : Frame)
     (ds : List DeferRec) (ch : List PanicRec) (rm : Nat) (c d : State) : Prop :=
   U d x28.toNat F.bound ∧ P.panics d.mem x28.toNat = ch ∧ P.defers d.mem x28.toNat = frameRest F.sp ds ∧
-    MemFrame c.mem d.mem (P.priv ++ rtWin P F ++ bitsWin F) ∧ P.Env d.mem ∧ rm ≤ P.room d.mem x28.toNat
+    MemFrame c.mem d.mem (P.priv ++ rtWin P F ++ bitsWin F) ∧ P.Env d.mem ∧ rm ≤ P.room d.mem x28.toNat ∧
+    P.saved d.mem x28.toNat = P.saved c.mem x28.toNat
 
 /-- The frame of `fi` at `SP = sp` as the runtime finds it when a panic or `Goexit` reaches it:
 it runs open-coded defers iff the function has `FUNCDATA_OpenCodedDeferInfo` and its `deferBits`
@@ -727,10 +729,11 @@ theorem Engine.of_prefix {p : Program} {P : PanicRuntime} {U : State → Nat →
 
 theorem LeftFrame.prefix {P : PanicRuntime} {U : State → Nat → Nat → Prop} {x28 : W64} {F : Frame}
     {ds : List DeferRec} {c c' : State} (hm : MemFrame c.mem c'.mem (P.priv ++ rtWin P F ++ bitsWin F))
+    (hsv : P.saved c'.mem x28.toNat = P.saved c.mem x28.toNat)
     {ch : List PanicRec} {rm : Nat} {d : State} (h : LeftFrame P U x28 F ds ch rm c' d) :
     LeftFrame P U x28 F ds ch rm c d := by
-  obtain ⟨h1, h2, h3, h4, h5, h6⟩ := h
-  exact ⟨h1, h2, h3, hm.trans h4 fun a n h => ⟨h, h⟩, h5, h6⟩
+  obtain ⟨h1, h2, h3, h4, h5, h6, h7⟩ := h
+  exact ⟨h1, h2, h3, hm.trans h4 fun a n h => ⟨h, h⟩, h5, h6, h7.trans hsv⟩
 
 theorem RetFin.prefix {P : PanicRuntime} {s : State} {ds : List DeferRec} {c c' : State}
     (hm : MemFrame c.mem c'.mem (P.priv ++ rtWin P (retFrame P s) ++ bitsWin (retFrame P s)))

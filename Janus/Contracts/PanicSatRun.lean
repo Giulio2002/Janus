@@ -142,11 +142,11 @@ theorem gopanic_run (hp : EngineAt p) (T : List FuncInfo) (hT : TOK T) :
     (items0 := frameItems s.mem (frameOf fi s.sp.toNat s.mem) (defers0 s.mem)) (ds0 := defers0 s.mem) (mode := .panic)
     (x28 := s.regs 28) (x18 := s.regs 18) (lr := 0) (x29 := 0) hp
     (Fin := LeftFrame (P0 T RPa) U0 (s.regs 28) (frameOf fi s.sp.toNat s.mem) ((P0 T RPa).defers s.mem (gOf s)))
-    (fun ch rm c c' d hm hf => LeftFrame.prefix hm hf)
+    (fun ch rm c c' d hm hsv hf => LeftFrame.prefix hm hsv hf)
     (fun c ch rm hpc h18 hI _ hend => left_fin hp (by decide) hI hpc h18 hend) _ c _ _ _ rfl hcpc
     (by rw [hc18, h181]) hI (fun _ => ⟨_, _, rfl, rfl, rfl⟩)
   rw [hcur] at hloop
-  exact Engine.of_prefix (fun ch rm d hf => LeftFrame.prefix hmf hf) (hkp.trans hkl) hmf hsvc rfl hloop
+  exact Engine.of_prefix (fun ch rm d hf => LeftFrame.prefix hmf hsvc hf) (hkp.trans hkl) hmf hsvc rfl hloop
 
 
 set_option maxHeartbeats 0 in
@@ -277,11 +277,11 @@ theorem goexit_run (hp : EngineAt p) (T : List FuncInfo) (hT : TOK T) :
     (items0 := frameItems s.mem (frameOf fi s.sp.toNat s.mem) (defers0 s.mem)) (ds0 := defers0 s.mem) (mode := .goexit)
     (x28 := s.regs 28) (x18 := s.regs 18) (lr := 0) (x29 := 0) hp
     (Fin := LeftFrame (P0 T RPa) U0 (s.regs 28) (frameOf fi s.sp.toNat s.mem) ((P0 T RPa).defers s.mem (gOf s)))
-    (fun ch rm c c' d hm hf => LeftFrame.prefix hm hf)
+    (fun ch rm c c' d hm hsv hf => LeftFrame.prefix hm hsv hf)
     (fun c ch rm hpc h18 hI _ hend => left_fin hp (by decide) hI hpc h18 hend) _ c _ _ _ rfl hcpc
     (by rw [hc18, h181]) hI (fun h => absurd h (by decide))
   rw [hcur] at hloop
-  exact Engine.of_prefix (fun ch rm d hf => LeftFrame.prefix hmf hf) (hkp.trans hkl) hmf hsvc rfl hloop
+  exact Engine.of_prefix (fun ch rm d hf => LeftFrame.prefix hmf hsvc hf) (hkp.trans hkl) hmf hsvc rfl hloop
 
 end gp
 

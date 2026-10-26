@@ -555,7 +555,7 @@ theorem left_fin (hp : EngineAt p) {T : List FuncInfo} {m0 : Memory} {F : Frame}
   obtain ⟨k, d, hk, hmem, h28, h18d, -, hret⟩ := step_fin hp hI h18 hpc rfl hend
   obtain ⟨hpcd, hspd⟩ := hret hm
   have hfi := fin_items hI.env hend
-  refine ⟨k, d, hk, ⟨hpcd, hspd, ?_⟩, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨k, d, hk, ⟨hpcd, hspd, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · rw [h28]; simp
   · show panics0 d.mem = ch; rw [hmem]; exact hI.pan
   · show defers0 d.mem = frameRest F.sp ds0
@@ -563,6 +563,7 @@ theorem left_fin (hp : EngineAt p) {T : List FuncInfo} {m0 : Memory} {F : Frame}
   · rw [hmem]; exact MemFrame.refl _ _
   · show Env0 T d.mem; rw [hmem]; exact hI.env
   · show rm ≤ room0 d.mem; rw [hmem]; exact hI.room
+  · show saved0 d.mem = saved0 c.mem; rw [hmem]
 
 end gp
 
@@ -680,7 +681,7 @@ theorem deferreturn_run (hp : EngineAt p) :
     (items0 := frameItems s.mem (retFrame (P0 T RPa) s) (defers0 s.mem)) (ds0 := defers0 s.mem) (mode := .ret)
     (x28 := s.regs 28) (x18 := s.regs 18) (lr := (s.regs 30).toNat) (x29 := (s.regs 29).toNat) hp
     (Fin := RetFin (P0 T RPa) s ((P0 T RPa).defers s.mem (gOf s)))
-    (fun ch rm c c' d hm hf => RetFin.prefix hm hf)
+    (fun ch rm c c' d hm _ hf => RetFin.prefix hm hf)
     (fun c ch rm hpc h18 hI _ hend => dr_fin hp s hI hpc h18 hend) _ c (panics0 s.mem) (room0 s.mem)
     (rd s.mem (B + 0x10)) rfl hcpc hc18 hI (fun h => absurd h (by decide))
   rw [hcur] at hloop

@@ -114,14 +114,14 @@ theorem gopanic_at {p : Program} {A : Nat} {T : List FuncInfo} (hs : StubAt p A 
     (h : GopanicContract p eGopanic (P0 T RPa) U0 T) : GopanicContract p A (P0 T RPa) U0 T := by
   intro s fi hpc hfind hpre
   exact Engine.of_prefix (c := s) (c' := { s with pc := BitVec.ofNat 64 eGopanic })
-    (fun ch rm d hf => LeftFrame.prefix (MemFrame.refl _ _) hf) (hs s hpc)
+    (fun ch rm d hf => LeftFrame.prefix (MemFrame.refl _ _) rfl hf) (hs s hpc)
     (MemFrame.refl _ _) rfl rfl (h { s with pc := BitVec.ofNat 64 eGopanic } fi rfl hfind (GopanicPre.pc _ hpre))
 
 theorem goexit_at {p : Program} {A : Nat} {T : List FuncInfo} (hs : StubAt p A eGoexit)
     (h : GoexitContract p eGoexit (P0 T RPa) U0 T) : GoexitContract p A (P0 T RPa) U0 T := by
   intro s fi hpc hfind hpre
   exact Engine.of_prefix (c := s) (c' := { s with pc := BitVec.ofNat 64 eGoexit })
-    (fun ch rm d hf => LeftFrame.prefix (MemFrame.refl _ _) hf) (hs s hpc)
+    (fun ch rm d hf => LeftFrame.prefix (MemFrame.refl _ _) rfl hf) (hs s hpc)
     (MemFrame.refl _ _) rfl rfl (h { s with pc := BitVec.ofNat 64 eGoexit } fi rfl hfind (GoexitPre.pc _ hpre))
 
 theorem deferreturn_at {p : Program} {A : Nat} {T : List FuncInfo} (hs : StubAt p A eDeferreturn)

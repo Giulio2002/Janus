@@ -334,7 +334,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
         exact ⟨hpo, by omega, by omega, by omega, by omega, by omega, by omega, by omega, by omega⟩)
     have hE3 := (hcont3 f3 hdr3).1 (hpf3.trans hpn3)
     rw [Engine_nil] at hE3
-    obtain ⟨k4, d, hst4, hU, hpd, -, hfrd, -, -⟩ := hE3
+    obtain ⟨k4, d, hst4, hU, hpd, -, hfrd, -, -, -⟩ := hE3
     refine GoReturns.leave (v := ⟨etyp.toNat, edata.toNat⟩) (hst4.withExit hret.fetch_none) ?_ ?_
     · have hg' : gOf s = (S.regs 28).toNat := by simp only [gOf, hS28]
       have hU' := hU; rw [← hg'] at hU'
