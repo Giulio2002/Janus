@@ -179,11 +179,12 @@ for t in "${sys[@]}"; do
   cat "$tmp/sys-${t/\//-}" 2>/dev/null | sed "s/^/sys    /"'
 done
 # the print/println examples (examples/print, scripts/verify-print-examples.sh, R8): every generated
-# proof file of both ISAs
+# example module of both ISAs
 prt=()
-for f in examples/proofs-print/*/*.lean; do
+for f in examples/proofs-print/PrintProofs/*/*.lean; do
   [ -f "$f" ] || continue
-  isa="$(basename "$(dirname "$f")")"; prt+=("$isa/$(basename "$f" .lean)")
+  case "$(basename "$f")" in Fn*) continue;; esac
+  isa="$(basename "$(dirname "$f")")"; prt+=("${isa,,}/$(basename "$f" .lean)")
 done
 for t in "${prt[@]}"; do
   par_run 'JANUS_EXAMPLES_SUMMARY="$tmp/print-${t/\//-}" scripts/verify-print-examples.sh "$t" >/dev/null 2>&1 || broken+=("print:$t")
