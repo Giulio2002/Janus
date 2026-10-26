@@ -79,8 +79,9 @@ type Extraction struct {
 	BuildModes []string
 	// The C environment (cenv.go): writable C data objects the C code references, and the TLS
 	// image when an extracted function reads the thread pointer.
-	CData []CData
-	TLS   *tlsImage
+	CData  []CData
+	DynGOT []DynGOT
+	TLS    *tlsImage
 	// Writable globals named by --global (globals.go): their link-time images, recorded in
 	// Program.globals; GlobalPatterns are the patterns as given (recorded in identity.json).
 	GlobalPatterns []string

@@ -14,6 +14,35 @@ import "unsafe"
 //export GoTwice
 func GoTwice(x C.int64_t) C.int64_t { return 2 * x }
 
+// box is a heap cell (newBox allocates one).
+type box struct{ v int64 }
+
+// newBox returns a fresh heap cell holding v (runtime.newobject).
+//
+//go:noinline
+func newBox(v int64) *box { return &box{v} }
+
+// GoBox returns x + 1, read back from the heap cell a Go function allocates. C calls it
+// (e_callbox).
+//
+//export GoBox
+func GoBox(x C.int64_t) C.int64_t { return C.int64_t(newBox(int64(x)).v + 1) }
+
+// fill stores x and 2x in the two slots of a that x selects.
+//
+//go:noinline
+func fill(a *[600]int64, x int64) { a[x&7] = x; a[(x+1)&7] = 2 * x }
+
+// GoLarge returns 3x through a 4800-byte array on its stack: a frame over 4096 bytes. C calls
+// it (e_calllarge).
+//
+//export GoLarge
+func GoLarge(x C.int64_t) C.int64_t {
+	var a [600]int64
+	fill(&a, int64(x))
+	return C.int64_t(a[x&7] + a[(x+1)&7])
+}
+
 // Bump adds x * e_scale to the C global e_counter and returns it.
 func Bump(x int64) int64 { return int64(C.e_bump(C.int64_t(x))) }
 
@@ -52,3 +81,13 @@ func AtomicInc(p *uint32) uint32 { return uint32(C.e_atomic_inc((*C.uint32_t)(un
 
 // CallGo returns e_callgo(x) = GoTwice(x) + 1: Go calls C, which calls back into Go.
 func CallGo(x int64) int64 { return int64(C.e_callgo(C.int64_t(x))) }
+
+// CallBox returns e_callbox(x) = GoBox(x) = x + 1: Go calls C, which calls back into Go code that
+// allocates.
+func CallBox(x int64) int64 { return int64(C.e_callbox(C.int64_t(x))) }
+
+// CallLarge returns e_calllarge(x) = GoLarge(x) = 3x: a callback with a frame over 4096 bytes.
+func CallLarge(x int64) int64 { return int64(C.e_calllarge(C.int64_t(x))) }
+
+// EnvAt returns environ[i] (as an address), read by C through the GOT.
+func EnvAt(i uint64) uintptr { return uintptr(unsafe.Pointer(C.e_env_at(C.size_t(i)))) }

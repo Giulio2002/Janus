@@ -62,7 +62,7 @@ theorem correctness (J : JmpModel) (v : BitVec 64) :
   rintro s1 ⟨m, hmr, hmb, hhold, h1⟩
   simp only [setReg_apply, ↓reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.reduceMod, Nat.reducePow,
     jmpBufSize] at hmb hhold hmr
-  have hmf0 := memFrame_of_bytes (d := 5968984) (n := 312) hmr hmb
+  have hmf0 := memFrame_of_bytes (d := janus_eval% env) (n := 312) hmr hmb
   have F0 := memFrame_trans (m₀ := s.mem) (rs := [(s.sp.toNat - 32, s.sp.toNat)]) (by janus_frame) hmf0
   have V1 := h1.cret
   obtain ⟨hpc1, hx01, hcr1, htp1, hdz1, hreg1, hmf1⟩ := h1

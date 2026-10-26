@@ -120,7 +120,7 @@ def mallocSpec : Spec where
   name := "malloc@plt"
   safe s := LibcCall s
   next s s' := LibcRet s s' s.mem (· = 0) ∨
-    ∃ p junk, p ≠ 0 ∧ p % 16 = 0 ∧ Fresh s.mem p (s.regs 7).toNat ∧
+    ∃ p junk, p ≠ 0 ∧ p % 16 = 0 ∧ Janus.Contracts.Libc.Fresh s.mem p (s.regs 7).toNat ∧
       LibcRet s s' (heapAlloc s.mem p (s.regs 7).toNat junk) (· = BitVec.ofNat 64 p)
 
 def freeSpec : Spec where

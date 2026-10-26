@@ -673,14 +673,8 @@ the thread pointer: local-exec (`MRS TPIDR_EL0` plus `ADD #:tprel_hi12:`/`#:tpre
 initial-exec relaxed to `MOVZ`/`MOVK` of the offset, and general-dynamic (TLSDESC) relaxed to the
 same. These are ordinary instructions; what the theorem needs is where the block is
 (`TLSBlock`). An unrelaxed TLS descriptor call (a shared object, or a variable of another module)
-calls the descriptor's function: `TlsDescFn`. -/
-
-/-- The offset of the executable's TLS block from the thread pointer. -/
-def _root_.Janus.TLSImage.a64Off (t : TLSImage) : Nat := roundUp 16 t.align
-
-/-- The address of the `__thread` variable `name` of the thread whose pointer is `tp`. -/
-def _root_.Janus.TLSImage.a64Addr (t : TLSImage) (tp : W64) (name : String) : Nat :=
-  tp.toNat + t.a64Off + t.varOff name
+calls the descriptor's function: `TlsDescFn`. The block's place is `TLSImage.a64Off` and a
+variable's address `TLSImage.a64Addr` (defined in `Janus.FFI`). -/
 
 /-- The **TLS-block contract**: in state `s`, the thread's TLS block of the executable is
 writable memory at `TPIDR_EL0 + a64Off`, of the segment's size, below `2^48`. -/

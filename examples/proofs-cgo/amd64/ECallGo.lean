@@ -17,7 +17,9 @@ RBP R12–R15`, passes `fn`, `frame`, `ctxt` at `[RSP]`, `[RSP+8]`, `[RSP+16]` a
 
 **Guarantee (`correctness`).** For every `x`, every System V call of `e_callgo` in a state where
 the runtime is initialised (`runtime_init_done = 2`, no context function), the guard `%fs:0x28`
-is readable and the C stack has room for the frames and `cgocallback`'s scratch, returns `2x + 1
+is readable, the C stack has room for the frames and `cgocallback`'s scratch and lies outside
+the runtime-owned memory `rt`, and the runtime is ready to enter the Go code with a 4096-byte
+goroutine stack (`H`, for every readiness predicate `H`), returns `2x + 1
 (mod 2^64)` restoring the callee-saved state, **under the trusted contract `CgoCallback`
 alone** (for this binary's TLS image: Go's `g` slot is `runtime.tlsg` at `FS − 24`, the C code
 having `__thread` variables).
@@ -30,7 +32,7 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.CABI Janus.Amd64.Tactic Jan
 
 namespace Proof
 
-abbrev goFn : Nat := segAddr Extracted.program "_cgoexp_4a03c2e7d4cf_GoTwice"
+abbrev goFn : Nat := exportAddr Extracted.program "GoTwice"
 
 /-! ## The Go side -/
 
@@ -63,14 +65,18 @@ abbrev win : Nat := 168 + cbStackScratch
 /-- The frame `crosscall2` passes (`[RSP+16]` at `cgocallback`). -/
 def frameOf (S : State) : Nat := S.mem.readLE ((S.regs 4).toNat + 16) 8
 
-def G (S : State) : Prop :=
-  CbStack S ∧ frameOf S + 16 ≤ 2 ^ 48 ∧ S.mem.accessible (frameOf S) 16 true = true ∧
+/-- The goroutine stack the callback gets: 4096 bytes, under the readiness `H` of the runtime
+memory `rt`. -/
+def cbk (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) : Janus.FFI.CbStack := ⟨cbGoStack, rt, H⟩
+
+def G (k : Janus.FFI.CbStack) (S : State) : Prop :=
+  CbStack S ∧ CbReady k Extracted.tls S ∧ frameOf S + 16 ≤ 2 ^ 48 ∧ S.mem.accessible (frameOf S) 16 true = true ∧
     Outside (frameOf S) 16 (cbClobber Extracted.tls S)
 
 def E (S : State) : Janus.Arm64.Memory :=
   S.mem.writeLE (frameOf S + 8) 8 (2 * S.mem.readLE (frameOf S) 8)
 
-def CPre (s : State) : Prop :=
+def CPre (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (s : State) : Prop :=
   Extracted.program.DataLoaded s.mem ∧ CStack s win 8 ∧
   s.mem.accessible rid 4 false = true ∧ s.mem.readLE rid 4 = 2 ∧
   s.mem.accessible ctxf 8 false = true ∧ s.mem.readLE ctxf 8 = 0 ∧
@@ -80,15 +86,25 @@ def CPre (s : State) : Prop :=
   Outside (s.fsBase.toNat + 40) 8 [((s.regs 4).toNat - win, (s.regs 4).toNat + 8)] ∧
   Outside (s.fsBase.toNat - 24) 8 [((s.regs 4).toNat - win, (s.regs 4).toNat + 8)] ∧
   Outside ctxf 8 [(s.fsBase.toNat - 24, s.fsBase.toNat - 16)] ∧
-  Outside rid 4 [(s.fsBase.toNat - 24, s.fsBase.toNat - 16)]
+  Outside rid 4 [(s.fsBase.toNat - 24, s.fsBase.toNat - 16)] ∧
+  Outside ((s.regs 4).toNat - win) win rt ∧
+  H [goFn, cbGoStack] (s.mem.readLE (tlsGSlot Extracted.tls s.fsBase) 8) ((s.regs 4).toNat - 168)
+    (Janus.Contracts.rtView rt s.mem)
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 8000000 in
-theorem c_spec (x : W64) :
-    CEnsuresC Extracted.program (CallbackSpec Extracted.tls goFn G E) Extracted.entry [x] CPre
-      (fun _ s' => s'.regs 0 = 2 * x + 1) := by
+theorem c_spec (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : W64) :
+    CEnsuresC Extracted.program (CallbackSpec Extracted.tls goFn (G (cbk rt H)) E) Extracted.entry [x]
+      (CPre rt H) (fun _ s' => s'.regs 0 = 2 * x + 1) := by
   intro ret hret s hs hpre
-  obtain ⟨hd, ⟨hal, hb, ha, hw⟩, hra, hrv, hca, hcv, hfb, hfl, hga, hro, hco, hgo, hto, hct, hrt⟩ := hpre
+  obtain ⟨hd, ⟨hal, hb, ha, hw⟩, hra, hrv, hca, hcv, hfb, hfl, hga, hro, hco, hgo, hto, hct, hrt, hrtw, hH⟩ := hpre
+  have et1 : Extracted.tls.x64Off = janus_eval% Extracted.tls.x64Off := rfl
+  have et2 : Extracted.tls.varOff "runtime.tlsg" = janus_eval% (Extracted.tls.varOff "runtime.tlsg") := rfl
+  simp only [tlsGSlot, TLSImage.x64Addr, et1, et2] at hH
+  simp only [win, cbStackScratch] at hrtw
+  have hv : ∀ (m : Janus.Arm64.Memory) a n v, (s.regs 4).toNat - (168 + 16384) ≤ a → a + n ≤ (s.regs 4).toNat →
+      Janus.Contracts.rtView rt (m.writeLE a n v) = Janus.Contracts.rtView rt m :=
+    fun _ _ _ _ h1 h2 => Janus.Contracts.rtView_writeLE (Outside.of_sub hrtw h1 (by omega))
   have e1 : rid = janus_eval% rid := rfl
   have e2 : ctxf = janus_eval% ctxf := rfl
   rw [e1] at hra hrv hro hrt
@@ -106,17 +122,17 @@ theorem c_spec (x : W64) :
   have hgf : goFn = janus_eval% goFn := rfl
   have h72 : ((s.regs 4).toNat - 72) % 16 = 0 := by omega
   janus64_run [h72]
-  have et1 : Extracted.tls.x64Off = janus_eval% Extracted.tls.x64Off := rfl
-  have et2 : Extracted.tls.varOff "runtime.tlsg" = janus_eval% (Extracted.tls.varOff "runtime.tlsg") := rfl
   refine ⟨⟨rfl, ?_, ?_⟩, ?_⟩
   · janus64_simp
-  · simp only [G, frameOf, cbClobber, CbStack, cbStackScratch, TLSImage.x64Addr, et1, et2, outside_cons,
-      outside_nil, and_true]
+  · simp only [G, frameOf, cbClobber, CbStack, cbStackScratch, CbReady, cbk, tlsGSlot, TLSImage.x64Addr, et1, et2,
+      outside_cons, outside_nil, and_true]
+    simp (disch := omega) only [hv]
     janus64_simp
-    exact ⟨⟨by omega, by omega, Janus.Arm64.Memory.accessible_mono _ hw (by omega) (by omega)⟩, by omega,
+    rw [hgf] at hH
+    exact ⟨⟨by omega, by omega, Janus.Arm64.Memory.accessible_mono _ hw (by omega) (by omega)⟩, hH, by omega,
       Janus.Arm64.Memory.accessible_mono _ hw (by omega) (by omega), by omega, by omega, by omega⟩
   · rintro s' ⟨-, m, ⟨regs, flags, xmm, ymmHi, mx, zh, kr, rfl, hr4, hmx⟩, hmf⟩
-    simp only [E, frameOf, cbClobber, cbStackScratch, TLSImage.x64Addr, et1, et2, setRegF_apply, ↓reduceIte,
+    simp only [E, frameOf, cbClobber, cbStackScratch, tlsGSlot, TLSImage.x64Addr, et1, et2, setRegF_apply, ↓reduceIte,
       Nat.reduceEqDiff] at hmf
     have h168 : (s.regs 4 - 168#64).toNat = (s.regs 4).toNat - 168 := by
       rw [BitVec.toNat_sub]; simp only [BitVec.toNat_ofNat]; omega
@@ -142,20 +158,21 @@ theorem c_spec (x : W64) :
 theorem frame_lt (S : State) : frameOf S < 2 ^ 64 :=
   Nat.lt_of_lt_of_le (Janus.Arm64.Memory.readLE_lt _ _ _) (by decide)
 
-theorem refines :
-    (CgoCallback Extracted.tls Extracted.program Contract.none (fun _ => True)).Refines
-      (CallbackSpec Extracted.tls goFn G E) := by
-  refine CgoCallback.refines (fun a => go_spec a) (fun S hG => hG.1) ?_ (fun _ _ => rfl) ?_ ?_
-  · rintro S u ret ⟨-, hb, hacc, hout⟩ he -
+theorem refines (k : Janus.FFI.CbStack) :
+    (CgoCallback Extracted.tls Extracted.program Contract.none (fun _ => True) k).Refines
+      (CallbackSpec Extracted.tls goFn (G k) E) := by
+  refine CgoCallback.refines (fun a => go_spec a) (fun S hG => hG.1) (fun S hG => hG.2.1) ?_
+    (fun _ _ => rfl) ?_ ?_
+  · rintro S u ret ⟨-, -, hb, hacc, hout⟩ he -
     have hf : (BitVec.ofNat 64 (S.mem.readLE ((S.regs 4).toNat + 16) 8)).toNat = frameOf S := by
       rw [BitVec.toNat_ofNat]; exact Nat.mod_eq_of_lt (frame_lt S)
     obtain ⟨g1, g2, g3⟩ := he.goStack
     have hsep := he.stackSep _ _ _ hacc
     simp only [outside_cons, outside_nil, and_true] at hsep
-    refine ⟨by rw [hf]; exact hb, by rw [hf]; exact he.keptAcc _ _ _ ⟨hacc, hout⟩, g2,
+    refine ⟨by rw [hf]; exact hb, by rw [hf]; exact he.keptAcc _ _ _ ⟨hacc, hout⟩, by omega,
       Janus.Arm64.Memory.accessible_read_of_write _ (Janus.Arm64.Memory.accessible_mono _ g3 (by omega) (by omega)), ?_⟩
-    rw [hf]; simp only [outside_cons, outside_nil, and_true, cbGoStack] at hsep ⊢; omega
-  · rintro S u ret u' ⟨-, hb, hacc, hout⟩ he - - hpost b hb' hbacc
+    rw [hf]; simp only [outside_cons, outside_nil, and_true] at hsep ⊢; omega
+  · rintro S u ret u' ⟨-, -, hb, hacc, hout⟩ he - - hpost b hb' hbacc
     have hf : (BitVec.ofNat 64 (S.mem.readLE ((S.regs 4).toNat + 16) 8)).toNat = frameOf S := by
       rw [BitVec.toNat_ofNat]; exact Nat.mod_eq_of_lt (frame_lt S)
     unfold GoPost at hpost
@@ -169,16 +186,17 @@ theorem refines :
     · have := he.kept b 1 ⟨hbacc, hb'⟩
       simp only [Janus.Arm64.Memory.readLE_one] at this
       exact BitVec.eq_of_toNat_eq this
-  · rintro S ⟨-, hb, hacc, hout⟩ b _ hna
+  · rintro S ⟨-, -, hb, hacc, hout⟩ b _ hna
     rw [E, Janus.Arm64.Memory.bytes_writeLE, ite_eq_right]
     intro ⟨h1, h2⟩
     have := Janus.Arm64.Memory.accessible_sub _ hacc (Or.inl rfl) (a := b) (n := 1) (by omega) (by omega)
     rw [this] at hna; cases hna
 
 /-- **`e_callgo` end to end** (amd64), under the trusted `cgocallback` contract only. -/
-theorem correctness (x : W64) :
-    CEnsuresC Extracted.program (CgoCallback Extracted.tls Extracted.program Contract.none (fun _ => True))
-      Extracted.entry [x] CPre (fun _ s' => s'.regs 0 = 2 * x + 1) :=
-  (c_spec x).refine refines
+theorem correctness (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : W64) :
+    CEnsuresC Extracted.program
+      (CgoCallback Extracted.tls Extracted.program Contract.none (fun _ => True) (cbk rt H))
+      Extracted.entry [x] (CPre rt H) (fun _ s' => s'.regs 0 = 2 * x + 1) :=
+  (c_spec rt H x).refine (refines _)
 
 end Proof

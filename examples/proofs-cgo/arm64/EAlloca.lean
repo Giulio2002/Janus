@@ -35,10 +35,9 @@ namespace Proof
 def T (n : Nat) : Nat := (8 * n + 23) / 16 * 16
 def big (n : Nat) : Nat := (8 * n + 23) / 65536 * 65536
 
-/-- The GOT slot of `__stack_chk_guard` (a dynamic relocation: not extracted data). -/
-def gslot : Nat :=
-  Janus.Spec.adrpLdTarget (Extracted.entry + 4) (Janus.Spec.segWord Extracted.program "e_alloca" 1)
-    (Janus.Spec.segWord Extracted.program "e_alloca" 2) 3
+/-- The GOT slot of `__stack_chk_guard` (an `R_AARCH64_GLOB_DAT` relocation: the dynamic linker
+fills it; named by the relocation's symbol, `Extracted.dyngot`). -/
+def gslot : Nat := DynGOT.slotOf Extracted.dyngot "__stack_chk_guard"
 
 def Pre (n : BitVec 64) (s : State) : Prop :=
   n.toNat < 2 ^ 59 ∧ CStack s (48 + T n.toNat) 0 ∧

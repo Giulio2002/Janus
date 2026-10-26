@@ -1037,23 +1037,50 @@ meets `SchedContract` and `ConvT64Contract`). Examples: `examples/proofs-sys/{ar
 (`WriteOut`: `syscall.Write`; `NowNano`: `time.Now().UnixNano()`; `Pid`: `syscall.Getpid`;
 `MustNonNeg`: a path ending in a trap), run by `scripts/verify-sys-examples.sh`.
 **Callbacks (C → Go, `CgoCallback`; K2).** `runtime.cgocallback` (`.abi0`, pinned by content)
-is an external stub too. Trusted, both ISAs: `CgoCallback`, `CallbackEntry`, `CbResume`,
-`CbResumed`, `cbClobber` (amd64 also `CbStack`). As claims about the Go 1.26 runtime:
+is an external stub too. Trusted, both ISAs: `CgoCallback t p Cin R k`, `CallbackEntry`,
+`CbResume`, `CbResumed`, `cbClobber`, `tlsGSlot`, `stackGuard` (amd64 also `CbStack`, `CbReady`;
+arm64 `CbStack.Ready`). As claims about the Go 1.26 runtime (`runtime/asm_arm64.s`,
+`runtime/asm_amd64.s`: `cgocallback`; `runtime/cgocall.go`: `cgocallbackg`, `cgocallbackg1`):
 
-1. *The Go call.* `cgocallback(fn, frame, ctxt)` (arguments at `[SP+8]`… / `[RSP+8]`…, as
-   `crosscall2` stores them) calls `fn(frame)` with the ABIInternal convention (`X0`/`RAX =
-   frame`, `X15 = 0` and `DF` clear on amd64) on the goroutine stack (`stackSep`: not C memory;
-   amd64 `goStack`: `cbGoStack = 4096` writable bytes below `RSP` and the return slot), returning
-   to an address outside the extracted code, on the same thread, with the C side's `MXCSR` and x87
-   control word (amd64) / `FPCR` (arm64).
-2. *C memory.* Before and after the Go call, the runtime changes no byte of the C state's memory
+1. *The re-entry.* `cgocallback` loads `g` from the TLS `g` slot (`tlsGSlot t`: `runtime.tls_g` /
+   `runtime.tlsg` of the extraction's `TLSImage`; `needm` borrows an extra `M` when it is nil),
+   takes `m.curg`, points the TLS slot at it (`tlsG`), moves `X28`/`R14` to it (`gReg`: its
+   struct readable Go memory, not C memory, `gSep`, and off its own stack, `gOff`), switches `SP`
+   to the goroutine stack and, through `cgocallbackg` (`exitsyscall`) and `cgocallbackg1`, calls
+   `fn(frame)` with the ABIInternal convention (`X0`/`RAX = frame`, `X15 = 0` and `DF` clear on
+   amd64), returning to an address outside the extracted code, on the same thread, with the C
+   side's `MXCSR` and x87 control word (amd64) / `FPCR` (arm64).
+2. *The goroutine stack* (`goStack`, `stackSep`, `guard`). `k.size` writable bytes below the Go
+   call's `SP` and the slots above it (arm64: the frame argument's spill slot, `[SP, SP+16)`;
+   amd64: the return-address and spill slots, `[RSP, RSP+16)`), none of them C memory, and
+   `g.stackguard0 + k.size ≤ SP + stackGuard` (`stackGuard = 928`, `stackguard0 = stack.lo +
+   stackGuard`): the stack's low end is at least `k.size` bytes below `SP`, so the Go code's stack
+   checks pass for frames up to about `k.size − 800` bytes (`CallbackEntry.guardOK`) and its
+   frames fit. This is a claim only **under the readiness** `k.ready` (`CbStack`, round 9 C1
+   style): the contract requires `k.ready [fn, k.size] g SP (rtView k.rt mem)` at the stub, with
+   `g` the TLS slot's value. The real runtime meets it for `ready := "the goroutine
+   `cgocallback` switches to has (or `morestack` can give it, up to `maxstacksize`) `k.size`
+   bytes of stack below the entry, and no preemption request is pending"`; a goroutine whose
+   stack is too small grows it on demand (`morestack` copies the stack and re-runs the
+   function), which the model describes as the entry on the larger stack. A theorem quantifies
+   over `ready` and assumes it at its entry.
+3. *C memory.* Before and after the Go call, the runtime changes no byte of the C state's memory
    outside `cbClobber`: the C stack below `SP` (`cbStackScratch = 16384` bytes), the argument
-   slots and the TLS `g` slot (amd64: at `TLSImage.x64Addr fs "runtime.tlsg"`, from the
-   extraction).
-3. *The return.* `cgocallback` returns to `crosscall2` with `SP + 8`/`SP` restored, `DF` clear and
-   the `MXCSR` control bits kept (amd64); every other register, the flags and the vector
-   registers are arbitrary (ABI0), and the memory is the Go code's final memory on the C
-   state's accessible bytes (`CbResumed`).
+   slots and the TLS `g` slot.
+4. *The return.* `cgocallback` returns to `crosscall2` with `SP + 8`/`SP` restored, `DF` clear and
+   the `MXCSR` control bits kept (amd64); every other register, the flags, the vector registers
+   and (arm64) the exclusive monitor are arbitrary (ABI0), and the memory is the Go code's final
+   memory on the C state's accessible bytes (`CbResumed`).
+5. *Readiness of the Go code* (`R`). Facts the Go code needs of the runtime beyond the above (an
+   allocator's readiness at its calls, Go read-only data such as a type descriptor) are the
+   readiness predicate `R` on the Go call state: the theorem covers the executions in which `R`
+   holds at the entry (`ECallBox`: `ROK`).
+
+Witnesses: `cgoCallback_satisfiable` (for every `k`, given `CbRoom`: room for the goroutine stack
+and the `g` struct outside the C memory) and `cgoCallback_satisfiable_of` (a readiness `R` that
+holds at the witness entry), `callbackSpec_satisfiable` (`Janus.FFISat`, `Janus.Amd64.FFISat`).
+`AVX-512`: the amd64 `CbResume` leaves `xmm`/`ymmHi` arbitrary; the `zmmHi`/`kreg` fields of
+agent/avx512 are not in this tree, and must be added to its existentials when they are.
 
 **libc (`Libc`, `SetJmp J`, `TlsGetAddr`; `Janus/Contracts/Libc.lean`, `LibcAmd64.lean`; K2).**
 External stubs `sym@plt`; trusted as glibc's behaviour on Linux, one `Spec` per function

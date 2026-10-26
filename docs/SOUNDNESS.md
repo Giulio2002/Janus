@@ -1480,6 +1480,12 @@ What a C-environment theorem trusts, beyond the model:
   * *Static GOT slots.* A slot in `PT_GNU_RELRO` with no dynamic relocation is copied as constant
     read-only data. This trusts that no relocation (static or dynamic) the extractor does not
     read changes it; `-z norelro` binaries have no such slots and their GOT loads fault.
+  * *Dynamic GOT slots.* A slot that is the `r_offset` of a dynamic relocation naming a symbol is
+    not copied; it is listed in `Extracted.dyngot` under that symbol, and a theorem states its
+    value as the precondition `GotBound Extracted.dyngot "sym" v` (for every `v`). Naming the
+    slot by the symbol is extraction (a wrong name would make the theorem's precondition about
+    the wrong symbol, which `janus check` recomputes from the relocation table); its value is
+    never assumed.
   * *TLS layout.* `Extracted.tls` and `TLSImage.a64Addr`/`x64Addr` encode the ELF TLS ABI
     (variant I on arm64, variant II on amd64) for the executable's block; `TLSBlock` (a
     precondition) states the block is in place, and on amd64 that the TCB's first word is its own
@@ -1498,17 +1504,25 @@ What a C-environment theorem trusts, beyond the model:
   release. `setjmp`/`longjmp` are stated over every `jmp_buf` model with the `JmpModel` laws; the
   theorem holds for glibc if glibc's (mangled) layout is one such model, which `locality` and
   `unique` express (only the `jmp_buf` bytes matter, and they determine the context).
-* **The `cgocallback` contract** (`CgoCallback`): `runtime.cgocallback` (pinned by content)
-  enters the exported Go function as an ABIInternal call `fn(frame)` on a goroutine stack that is
-  not C memory (`CallbackEntry.stackSep`; `goStack` on amd64: `cbGoStack` writable bytes and the
-  return slot), leaves the C memory outside `cbClobber` (the C stack below `SP` — at most
-  `cbStackScratch = 16384` bytes —, its argument slots and the TLS `g` slot) as it was, and
-  returns to `crosscall2` with only `SP` (and the thread, `MXCSR`/x87 control word on amd64)
-  restored. The goroutine stack being outside the C state's memory is a modelling assumption: a
-  precondition that granted the goroutine's stack to the C code would not describe a real
-  execution. The Go side may itself only call stubs of its contract `Cin` (`Contract.none` in
-  the examples), and Go code with frames needs at most `cbGoStack` bytes (larger frames are not
-  covered).
+* **The `cgocallback` contract** (`CgoCallback t p Cin R k`): `runtime.cgocallback` (pinned by
+  content) loads `g` from the TLS `g` slot of the extraction's `TLSImage` (`tlsGSlot`, both
+  ISAs), switches to `m.curg` (`X28`/`R14`, its struct readable Go memory apart from C memory and
+  from its stack, the TLS slot pointing at it) and its stack, and enters the exported Go function
+  as an ABIInternal call `fn(frame)` with `k.size` writable bytes of goroutine stack below `SP`
+  that are not C memory, and `stackguard0 + k.size ≤ SP + 928` (`CallbackEntry`); it leaves the C
+  memory outside `cbClobber` (the C stack below `SP` — at most `cbStackScratch = 16384` bytes —,
+  its argument slots and the TLS `g` slot) as it was, and returns to `crosscall2` with only `SP`
+  (and the thread, `MXCSR`/x87 control word on amd64) restored; the exclusive monitor is
+  arbitrary afterwards (arm64). The goroutine stack size is claimed only **under the readiness**
+  `k.ready` at the stub (`CbStack`, as the allocator's `RtReady`), which the theorem assumes:
+  the real runtime meets it while it can give the goroutine `k.size` bytes (growing its stack by
+  `morestack`, which re-runs the function on the copied stack, up to `maxstacksize`) and no
+  preemption is pending. Facts the Go code needs beyond that (an allocator's readiness, Go
+  read-only data) are the readiness `R` of the Go entry, and the theorem covers the executions in
+  which `R` holds there (`ECallBox`). The goroutine stack and the `g` struct being outside the C
+  state's memory is a modelling assumption: a precondition that granted them to the C code would
+  not describe a real execution. The Go side may itself only call stubs of its contract `Cin`
+  (`Contract.none` in the examples) and contracts it states as hypotheses (`NewobjectContract`).
 * **Function-pointer hypotheses** (`CFuncIs`) are hypotheses in the statement (discharged by a
   proof of the concrete function, as `EArgMin.cmp_fn`), not trusted.
 
