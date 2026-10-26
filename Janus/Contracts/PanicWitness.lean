@@ -131,4 +131,108 @@ theorem deferreturn_at {p : Program} {A : Nat} {T : List FuncInfo} (hs : StubAt 
     (fun ch rm d hf => RetFin.prefix (MemFrame.refl _ _) hf) (hs s hpc)
     (MemFrame.refl _ _) rfl (h { s with pc := BitVec.ofNat 64 eDeferreturn } rfl (DeferreturnPre.pc _ hpre))
 
+/-! ## Linking the engine into a program -/
+
+theorem fetchIn_skip {l : List Segment} {pc : Nat}
+    (h : ∀ seg ∈ l, ¬ (seg.base ≤ pc ∧ (pc - seg.base) % 4 = 0 ∧ (pc - seg.base) / 4 < seg.words.length)) :
+    Program.fetchIn l pc = none := by
+  induction l with
+  | nil => rfl
+  | cons seg rest ih =>
+    simp only [Program.fetchIn]
+    have h1 := h seg (List.mem_cons_self)
+    have hrest : Program.fetchIn rest pc = none := ih fun sg hsg => h sg (List.mem_cons_of_mem _ hsg)
+    split
+    · rename_i hc
+      split
+      · rename_i w hw
+        exfalso; apply h1
+        refine ⟨hc.1, hc.2, ?_⟩
+        rcases Nat.lt_or_ge ((pc - seg.base) / 4) seg.words.length with hlt | hge
+        · exact hlt
+        · have : seg.words[(pc - seg.base) / 4]? = none := List.getElem?_eq_none hge
+          rw [this] at hw; cases hw
+      · exact hrest
+    · exact hrest
+
+theorem fetchIn_append_skip {l₁ : List Segment} (l₂ : List Segment) {pc : Nat}
+    (h : ∀ seg ∈ l₁, ¬ (seg.base ≤ pc ∧ (pc - seg.base) % 4 = 0 ∧ (pc - seg.base) / 4 < seg.words.length)) :
+    Program.fetchIn (l₁ ++ l₂) pc = Program.fetchIn l₂ pc := by
+  induction l₁ with
+  | nil => rfl
+  | cons seg rest ih =>
+    simp only [List.cons_append, Program.fetchIn]
+    have h1 := h seg (List.mem_cons_self)
+    split
+    · rename_i hc
+      split
+      · rename_i w hw
+        exfalso; apply h1
+        refine ⟨hc.1, hc.2, ?_⟩
+        rcases Nat.lt_or_ge ((pc - seg.base) / 4) seg.words.length with hlt | hge
+        · exact hlt
+        · have : seg.words[(pc - seg.base) / 4]? = none := List.getElem?_eq_none hge
+          rw [this] at hw; cases hw
+      · exact ih fun sg hsg => h sg (List.mem_cons_of_mem _ hsg)
+    · exact ih fun sg hsg => h sg (List.mem_cons_of_mem _ hsg)
+
+theorem fetchIn_hit {seg : Segment} {rest : List Segment} {pc w : Nat} (h1 : seg.base ≤ pc)
+    (h2 : (pc - seg.base) % 4 = 0) (h3 : seg.words[(pc - seg.base) / 4]? = some w) :
+    Program.fetchIn (seg :: rest) pc = some w := by
+  simp only [Program.fetchIn, h3]
+  rw [if_pos ⟨h1, h2⟩]
+
+theorem fetchIn_hit_only {seg : Segment} {pc w : Nat} (h : Program.fetchIn [seg] pc = some w) :
+    seg.base ≤ pc ∧ (pc - seg.base) % 4 = 0 ∧ seg.words[(pc - seg.base) / 4]? = some w := by
+  simp only [Program.fetchIn] at h
+  split at h
+  · rename_i hc
+    split at h
+    · rename_i w' hw'
+      cases h
+      exact ⟨hc.1, hc.2, hw'⟩
+    · simp [Program.fetchIn] at h
+  · simp [Program.fetchIn] at h
+
+/-- The engine is part of `base.link (engineSeg :: rest)` when `base` has nothing where the engine
+is (its segments, stubs and exit address lie outside the engine's code). -/
+theorem EngineAt.of_link {base : Program} {rest : List Segment}
+    (hseg : ∀ seg ∈ base.segments, seg.base + 4 * seg.words.length ≤ E ∨ E + 4 * engineCode.length ≤ seg.base)
+    (hstub : ∀ st ∈ base.stubs, st.addr < E ∨ E + 4 * engineCode.length ≤ st.addr)
+    (hexit : base.exitAddr < E ∨ E + 4 * engineCode.length ≤ base.exitAddr) :
+    EngineAt (base.link (engineSeg :: rest)) := by
+  intro pc w hq
+  have hq' : E ≤ pc ∧ (pc - E) % 4 = 0 ∧ engineCode[(pc - E) / 4]? = some w :=
+    fetchIn_hit_only (seg := engineSeg) hq
+  obtain ⟨h1, h2, h3⟩ := hq'
+  have hlt : (pc - E) / 4 < engineCode.length := by
+    rcases Nat.lt_or_ge ((pc - E) / 4) engineCode.length with hh | hh
+    · exact hh
+    · have := List.getElem?_eq_none (l := engineCode) hh
+      rw [this] at h3; cases h3
+  refine ⟨?_, ?_, ?_⟩
+  · show Program.fetchIn (base.segments ++ engineSeg :: rest) pc = some w
+    rw [fetchIn_append_skip]
+    · exact fetchIn_hit (seg := engineSeg) h1 h2 h3
+    · intro seg hseg' ⟨a, b, c⟩
+      rcases hseg seg hseg' with h | h <;> omega
+  · show base.stubs.find? (·.addr = pc) = none
+    rw [List.find?_eq_none]
+    intro st hst
+    simp only [decide_eq_true_eq]
+    intro heq
+    rcases hstub st hst with h | h <;> omega
+  · show pc ≠ base.exitAddr
+    intro heq
+    rcases hexit with h | h <;> omega
+
+/-- The branch segment for the contract `name` of `prog`, to the entry `tgt`. -/
+def stubSeg (prog : Program) (name : String) (tgt : Nat) : Segment :=
+  { name := name, base := prog.contractAddr name, words := [stubWord (prog.contractAddr name) tgt] }
+
+/-- The code to link into a program: the engine, and a branch to its entry at each of the named
+contract addresses. -/
+def panicImpl (prog : Program) (cs : List (String × Nat)) : List Segment :=
+  engineSeg :: cs.map (fun c => stubSeg prog c.1 c.2)
+
 end Janus.Contracts.PanicSat
