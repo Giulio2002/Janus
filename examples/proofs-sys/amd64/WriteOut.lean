@@ -20,8 +20,9 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janu
 
 namespace Proof
 
-/-- `syscall.errEAGAIN`, `errEINVAL`, `errENOENT` (`.data`, 16 bytes each, contiguous). -/
-def errVars : Nat := 0x54fc80
+/-- `syscall.errEAGAIN`, `errEINVAL`, `errENOENT` (`.data`, 16 bytes each, contiguous), read off the
+`MOVQ syscall.errEAGAIN(SB), DX` at `syscall.write+0x68`. -/
+def errVars : Nat := ripTarget Extracted.program (segAddr Extracted.program "syscall.write" + 0x68)
 
 set_option hygiene false in
 /-- After the `write` system call: the two kernel outcomes, each run on to the return. -/
@@ -73,7 +74,9 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KE
   have hgb := hg.below
   have hnw2 := hg.noWrap
   have hgr := hg.readable
-  simp only [regSP, regG, stackguard0Offset, stackguard0, errVars] at hgl hgb hnw2 hgr hb ha hw hout hal herr hed ⊢
+  janus_eval_nat hE : errVars
+  simp only [regSP, regG, stackguard0Offset, stackguard0, hE] at hgl hgb hnw2 hgr hb ha hw hout hal herr hed ⊢
+  clear hE
   apply Amd64.Kernel.ReturnsK.of_reaches
   janus64_intro hs
   janus64_run calls [hent, hexit, hconv]
