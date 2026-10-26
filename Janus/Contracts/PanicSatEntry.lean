@@ -99,6 +99,58 @@ theorem seg_dr_entry (s : State) (hpc : s.pc = BitVec.ofNat 64 eDeferreturn)
   · janus_frame
 
 
+set_option maxHeartbeats 0 in
+/-- The entry of `gopanic`: the `_panic` for `v` is pushed. -/
+theorem seg_gp_push (s : State) (k : Nat) (hpc : s.pc = BitVec.ofNat 64 eGopanic)
+    (hB : s.mem.accessible B 0x1000 true = true) (hk : npan s.mem = k) (hk8 : k < 8) :
+    ReachesRet qE (BitVec.ofNat 64 eLookup) s (fun d => d.sp = s.sp ∧ d.regs 28 = s.regs 28 ∧ d.regs 18 = s.regs 18 ∧
+      d.regs 30 = s.regs 30 ∧ d.regs 10 = 0 ∧ MemFrame s.mem d.mem [(B, B + 8), (panAt k, panAt k + 32)] ∧
+      npan d.mem = k + 1 ∧ rd d.mem (panAt k) = (s.regs 0).toNat ∧ rd d.mem (panAt k + 8) = (s.regs 1).toNat ∧
+      rd d.mem (panAt k + 16) = s.sp.toNat ∧ rd d.mem (panAt k + 24) = 0) := by
+  have hB' : s.mem.accessible 65536 4096 true = true := hB
+  have hk' : s.mem.readLE 65536 8 = k := hk
+  have hmul : (BitVec.ofNat 64 k <<< 5).toNat = 32 * k := by
+    rw [BitVec.toNat_shiftLeft, BitVec.toNat_ofNat]; rw [Nat.mod_eq_of_lt (by omega)]
+    rw [Nat.shiftLeft_eq]; omega
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := s
+  dsimp only at *
+  simp only [eGopanic, eLookup, E, B, Nat.reduceAdd] at hpc ⊢
+  subst hpc
+  janus_run [(show cm.readLE 65536 8 = k from hk'), hmul]
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · simp only [panAt, B]; janus_frame
+  all_goals
+    simp only [rd, panAt, B]
+    model_simp
+    try (apply Nat.mod_eq_of_lt; have := BitVec.isLt (cr 0); have := BitVec.isLt (cr 1); have := BitVec.isLt csp; omega)
+
+
+set_option maxHeartbeats 0 in
+/-- The entry of `Goexit`: the `_panic` with `goexit` set is pushed. -/
+theorem seg_ge_push (s : State) (k : Nat) (hpc : s.pc = BitVec.ofNat 64 eGoexit)
+    (hB : s.mem.accessible B 0x1000 true = true) (hk : npan s.mem = k) (hk8 : k < 8) :
+    ReachesRet qE (BitVec.ofNat 64 eLookup) s (fun d => d.sp = s.sp ∧ d.regs 28 = s.regs 28 ∧ d.regs 18 = s.regs 18 ∧
+      d.regs 30 = s.regs 30 ∧ d.regs 10 = 1 ∧ MemFrame s.mem d.mem [(B, B + 8), (panAt k, panAt k + 32)] ∧
+      npan d.mem = k + 1 ∧ rd d.mem (panAt k) = 0 ∧ rd d.mem (panAt k + 8) = 0 ∧
+      rd d.mem (panAt k + 16) = s.sp.toNat ∧ rd d.mem (panAt k + 24) = 1) := by
+  have hB' : s.mem.accessible 65536 4096 true = true := hB
+  have hk' : s.mem.readLE 65536 8 = k := hk
+  have hmul : (BitVec.ofNat 64 k <<< 5).toNat = 32 * k := by
+    rw [BitVec.toNat_shiftLeft, BitVec.toNat_ofNat]; rw [Nat.mod_eq_of_lt (by omega)]
+    rw [Nat.shiftLeft_eq]; omega
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := s
+  dsimp only at *
+  simp only [eGoexit, eLookup, E, B, Nat.reduceAdd] at hpc ⊢
+  subst hpc
+  janus_run [(show cm.readLE 65536 8 = k from hk'), hmul]
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · simp only [panAt, B]; janus_frame
+  all_goals
+    simp only [rd, panAt, B]
+    model_simp
+    try (apply Nat.mod_eq_of_lt; have := BitVec.isLt csp; omega)
+
+
 section dr
 variable {p : Program} {T : List FuncInfo}
 
