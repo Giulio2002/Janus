@@ -19,6 +19,37 @@ theorem _root_.Janus.Spec.Map.Agrees.mono' {m m' : Memory} {rs rs' : List (Nat �
   ⟨h.1, fun a ha => h.2 a (by
     have := hs a 1 ha; exact this)⟩
 
+theorem pan_mul (k : Nat) : (BitVec.ofNat 64 (k + 1) - 1#64) = BitVec.ofNat 64 k := by
+  apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
+
+theorem pan_shl (k : Nat) (hk : k < 8) : (BitVec.ofNat 64 k <<< 5).toNat = 32 * k := by
+  rw [BitVec.toNat_shiftLeft, BitVec.toNat_ofNat]; rw [Nat.mod_eq_of_lt (by omega)]
+  rw [Nat.shiftLeft_eq]; omega
+
+theorem pan_bit1 (m : Memory) (k : Nat) (hf : rd m (panAt k + 24) / 2 % 2 = 1) :
+    (BitVec.ofNat 64 (m.readLE (65792 + (k * 32 + 24)) 8)).getLsbD 1 = true := by
+  have : m.readLE (65792 + (k * 32 + 24)) 8 / 2 % 2 = 1 := by
+    rw [show 65792 + (k * 32 + 24) = panAt k + 24 by simp only [panAt, B]; omega]; exact hf
+  simp only [BitVec.getLsbD_ofNat, Nat.testBit, Nat.shiftRight_eq_div_pow]
+  simp; omega
+
+set_option maxHeartbeats 0 in
+/-- `RP` after a deferred call that recovered the panic: down to the start of `DROP`. -/
+theorem seg_rp_rec (u : State) (x18 k : Nat) (hpc : u.pc = BitVec.ofNat 64 RPa)
+    (hal : u.sp.toNat % 16 = 0) (hsp : u.sp.toNat + 104 ≤ 2 ^ 48)
+    (hacc : u.mem.accessible u.sp.toNat 96 true = true) (hB : u.mem.accessible B 0x1000 true = true)
+    (h18 : u.mem.readLE (u.sp.toNat + 56) 8 = x18) (hmode : u.mem.readLE (u.sp.toNat + 24) 8 = 0)
+    (hk : npan u.mem = k + 1) (hk8 : k < 8) (hf : rd u.mem (panAt k + 24) / 2 % 2 = 1) :
+    ReachesRet qE (BitVec.ofNat 64 (E + 0x394)) u (fun d => d.mem = u.mem ∧ d.sp = u.sp ∧
+      d.regs 28 = u.regs 28 ∧ d.regs 18 = BitVec.ofNat 64 x18 ∧ d.regs 6 = BitVec.ofNat 64 B ∧
+      d.regs 1 = BitVec.ofNat 64 (u.mem.readLE u.sp.toNat 8)) := by
+  have hB' : u.mem.accessible 65536 4096 true = true := hB
+  obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := u
+  dsimp only at *
+  simp only [RPa, E, B, Nat.reduceAdd] at hpc ⊢
+  subst hpc
+  janus_run [h18, hmode, (show cm.readLE 65536 8 = k + 1 from hk), pan_mul k, pan_shl k hk8, pan_bit1 cm k hf, Bool.true_beq, Bool.false_eq_true]
+
 /-- The ranges of memory the runtime reads again between deferred calls, other than the
 `deferBits` byte: the pending slots and the funcvals' code words. -/
 def keepCore (m : Memory) (F : Frame) (items : List Item) : List (Nat × Nat) :=

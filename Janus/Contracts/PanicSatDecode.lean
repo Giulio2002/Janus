@@ -10,7 +10,7 @@ How one step of the model engine's loop (`PanicSatLoop`) changes the chain `defe
 namespace Janus.Contracts.PanicSat
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Panic
-open Janus.Contracts.PanicModel
+open Janus.Contracts.PanicModel Janus.Spec.Map
 
 /-! ## The invariant `Env0`, taken apart -/
 
@@ -431,5 +431,99 @@ theorem openItems_top {m : Memory} {sa b : Nat} {ds : List DeferRec} (hb : b < 2
   refine List.map_congr_left fun i hi => ?_
   have := openBits_le_top b hb i (openBits_mod_sub b hb hb0 i hi)
   simp only [Nat.mod_mod_of_dvd _ (Nat.pow_dvd_pow 2 this)]
+
+
+/-! ## The records are read from the words a recovery leaves alone -/
+
+/-- The words of the model's bookkeeping a recovery does not write (`npan` and the saved state are
+the two it does). -/
+def R2 : List (Nat × Nat) := [(B + 8, B + 0x10), (B + 0x28, B + 0x1000)]
+
+theorem rd_agree2 {m m' : Memory} (h : Agrees m m' R2) {a : Nat} (h1 : B + 0x28 ≤ a)
+    (h2 : a + 8 ≤ B + 0x1000) : rd m' a = rd m a :=
+  h.readLE ⟨(B + 0x28, B + 0x1000), by simp [R2], h1, h2⟩
+
+theorem decPan_agree2 {m m' : Memory} (h : Agrees m m' R2) {i : Nat} (hi : i < 8) :
+    decPan m' i = decPan m i := by
+  simp only [decPan, panAt]
+  rw [rd_agree2 h (by simp [B]; omega) (by simp [B]; omega), rd_agree2 h (by simp [B]; omega) (by simp [B]; omega),
+    rd_agree2 h (by simp [B]; omega) (by simp [B]; omega), rd_agree2 h (by simp [B]; omega) (by simp [B]; omega)]
+
+theorem panList_agree2 {m m' : Memory} (h : Agrees m m' R2) :
+    ∀ k, k ≤ 8 → panList m' k = panList m k
+  | 0, _ => rfl
+  | k + 1, hk => by simp only [panList, decPan_agree2 h (by omega : k < 8), panList_agree2 h k (by omega)]
+
+theorem recFields_agree2 {m m' : Memory} (h : Agrees m m' R2) {i : Nat} (hi : i < 8) :
+    recSp m' i = recSp m i ∧ recTok m' i = recTok m i ∧ recConv m' i = recConv m i ∧
+      recN m' i = recN m i := by
+  simp only [recSp, recTok, recConv, recN, recAt]
+  refine ⟨rd_agree2 h (by simp [B]; omega) (by simp [B]; omega), rd_agree2 h (by simp [B]; omega) (by simp [B]; omega),
+    rd_agree2 h (by simp [B]; omega) (by simp [B]; omega), rd_agree2 h (by simp [B]; omega) (by simp [B]; omega)⟩
+
+theorem recFns_agree2 {m m' : Memory} (h : Agrees m m' R2) {i : Nat} (hi : i < 8) :
+    ∀ j, j ≤ 8 → recFns m' i j = recFns m i j
+  | 0, _ => rfl
+  | j + 1, hj => by
+    simp only [PanicModel.recFns, recFn, recAt]
+    rw [rd_agree2 h (by simp [B]; omega) (by simp [B]; omega), recFns_agree2 h hi j (by omega)]
+
+theorem decRec_agree2 {m m' : Memory} (h : Agrees m m' R2) {i : Nat} (hi : i < 8) :
+    decRec m' i = decRec m i := by
+  obtain ⟨h1, h2, h3, h4⟩ := recFields_agree2 h hi
+  simp only [decRec, h1, h2, h3, h4, recFns_agree2 h hi _ (Nat.min_le_right _ _)]
+
+theorem recList_agree2 {m m' : Memory} (h : Agrees m m' R2) :
+    ∀ k, k ≤ 8 → recList m' k = recList m k
+  | 0, _ => rfl
+  | k + 1, hk => by simp only [recList, decRec_agree2 h (by omega : k < 8), recList_agree2 h k (by omega)]
+
+theorem capMin_agree2 {m m' : Memory} (h : Agrees m m' R2) :
+    ∀ k, k ≤ 8 → capMin m' k = capMin m k
+  | 0, _ => rfl
+  | k + 1, hk => by
+    simp only [capMin, (recFields_agree2 h (by omega : k < 8)).2.2.2, capMin_agree2 h k (by omega)]
+
+theorem tableOK_agree2 {m m' : Memory} (h : Agrees m m' R2) {T : List FuncInfo}
+    (ht : TableOK m T) : TableOK m' T := by
+  obtain ⟨hl, hn, he⟩ := ht
+  refine ⟨hl, by rw [rd_agree2 h (by simp [B]) (by simp [B])]; exact hn, fun i hi => ?_⟩
+  obtain ⟨e1, e2, e3, e4, e5, e6, e7⟩ := he i hi
+  have hb : ∀ k, k ≤ 48 → rd m' (tabAt i + k) = rd m (tabAt i + k) := fun k hk =>
+    rd_agree2 h (by simp only [tabAt, B]; omega) (by simp only [tabAt, B]; omega)
+  exact ⟨by rw [show tabAt i = tabAt i + 0 from rfl, hb 0 (by omega)]; exact e1,
+    by rw [hb 8 (by omega)]; exact e2, by rw [hb 16 (by omega)]; exact e3,
+    by rw [hb 24 (by omega)]; exact e4, by rw [hb 32 (by omega)]; exact e5,
+    by rw [hb 40 (by omega)]; exact e6, by rw [hb 48 (by omega)]; exact e7⟩
+
+
+
+/-- The two words a recovery writes (`npan` and the saved state). -/
+def RecWords : List (Nat × Nat) := [(B, B + 8), (B + 0x10, B + 0x28)]
+
+theorem agrees2_of_frame {m m' : Memory} (hf : MemFrame m m' RecWords) : Agrees m m' R2 :=
+  Agrees.of_memFrame hf fun a ha => by
+    obtain ⟨r, hr, h1, h2⟩ := ha
+    simp only [R2, List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hr
+    simp only [RecWords, outside_cons, outside_nil, and_true]
+    rcases hr with rfl | rfl <;> simp only [B] at * <;> omega
+
+theorem ndef_agree2 {m m' : Memory} (h : Agrees m m' R2) : ndef m' = ndef m :=
+  h.readLE ⟨(B + 8, B + 0x10), by simp [R2], by simp [B], by simp [B]⟩
+
+theorem recov_frame {T : List FuncInfo} {m m' : Memory} (h : Env0 T m) (hf : MemFrame m m' RecWords)
+    (hnp : npan m' ≤ npan m) :
+    Env0 T m' ∧ defers0 m' = defers0 m ∧ room0 m ≤ room0 m' ∧ (∀ k, k ≤ 8 → panList m' k = panList m k) := by
+  have ha := agrees2_of_frame hf
+  have hnd := ndef_agree2 ha
+  have hnp8 := h.npan_le
+  refine ⟨?_, ?_, ?_, fun k hk => panList_agree2 ha k hk⟩
+  · refine Env0.mk (by rw [hf.accessible]; exact h.acc) (by omega) (by rw [hnd]; exact h.ndef_le) (fun i hi => ?_)
+      (tableOK_agree2 ha h.table)
+    rw [hnd] at hi
+    obtain ⟨-, h2, h3, h4⟩ := recFields_agree2 ha (by have := h.ndef_le; omega : i < 8)
+    rw [h2, h3, h4]; exact h.rec i hi
+  · rw [defers0_eq, defers0_eq, hnd]; exact recList_agree2 ha _ (Nat.min_le_right _ _)
+  · rw [room0_eq, room0_eq, hnd, capMin_agree2 ha _ (Nat.min_le_right _ _)]; omega
 
 end Janus.Contracts.PanicSat
