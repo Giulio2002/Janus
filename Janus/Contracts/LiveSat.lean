@@ -730,4 +730,101 @@ theorem typedmemclr8_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat �
   rw [h8]
   exact liveMemRet_store rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hd4 hLm.2.1 (zeroed_store _ _)
 
+
+theorem cb_out_win (r : Nat → W64) (k : Nat) (hk : k ≤ 5) (a n : Nat) (h1 : CB ≤ a) :
+    Outside a n (calleeStack (wstate r) 4096 k) := by
+  simp only [calleeStack, wsp_eq, wspn, outside_cons, outside_nil, and_true]
+  simp only [wsp, CB] at *
+  omega
+
+theorem cb_out_rt (a n : Nat) (h1 : CB ≤ a) : Outside a n (toyRt tys0) := by
+  simp only [toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, HEAP, HEND, BUMP, WBUF,
+    tyA, tyB, tyC, CB] at *
+  omega
+
+theorem wguardE (r : Nat → W64) (n : Nat) (hn : n ≤ 5) : Mem.EqPre 4096 n (wstate r) := by
+  have h := wguard r n hn
+  exact ⟨(guardOK_iff _ _).1 h.1, wcallOK r n hn, h.2⟩
+
+def okMove : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [CB, CB + 0x100, 8]
+
+theorem memmoveLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+    MemmoveLive (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      Mem.EqPre 4096 3 s ∧
+      LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s 4096 3) ∧
+      Mem.Input s 4096 3 (s.regs 1).toNat (s.regs 2).toNat ∧
+      LiveDest R L s 4096 3 (s.regs 0).toNat (s.regs 2).toNat := by
+  refine ⟨at0 memmoveCode, toyR tys0 okMove, memmove8_impl tys0 okMove ?_, [], 0x8000, wst [CB, CB + 0x100, 8], rfl,
+    wguardE _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 3 (by omega)⟩,
+    ⟨by decide, by decide, cb_out_win _ 3 (by omega) _ _ (by decide)⟩,
+    ⟨by decide, by decide, cb_out_win _ 3 (by omega) _ _ (by decide), Or.inr (cb_out_rt _ _ (by decide))⟩⟩
+  · rintro args ⟨-, rfl⟩
+    exact ⟨CB, CB + 0x100, rfl⟩
+
+
+def okClr : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [CB, 8]
+
+theorem memclrNoHeapPointersLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+    MemclrNoHeapPointersLive (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      Mem.EqPre 4096 2 s ∧
+      LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s 4096 2) ∧
+      LiveDest R L s 4096 2 (s.regs 0).toNat (s.regs 1).toNat := by
+  refine ⟨at0 memclrCode, toyR tys0 okClr, memclr8_impl tys0 okClr ?_, [], 0x8000, wst [CB, 8], rfl,
+    wguardE _ 2 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 2 (by omega)⟩,
+    ⟨by decide, by decide, cb_out_win _ 2 (by omega) _ _ (by decide), Or.inr (cb_out_rt _ _ (by decide))⟩⟩
+  rintro args ⟨-, rfl⟩
+  exact ⟨CB, rfl⟩
+
+theorem memclrHasPointersLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+    MemclrHasPointersLive (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      Mem.EqPre 4096 2 s ∧
+      LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s 4096 2) ∧
+      (s.regs 0).toNat % 8 = 0 ∧ (s.regs 1).toNat % 8 = 0 ∧
+      LiveDest R L s 4096 2 (s.regs 0).toNat (s.regs 1).toNat := by
+  refine ⟨at0 memclrCode, toyR tys0 okClr, memclrHasPointers8_impl tys0 okClr ?_, [], 0x8000, wst [CB, 8], rfl,
+    wguardE _ 2 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 2 (by omega)⟩, by decide, by decide,
+    ⟨by decide, by decide, cb_out_win _ 2 (by omega) _ _ (by decide), Or.inr (cb_out_rt _ _ (by decide))⟩⟩
+  rintro args ⟨-, rfl⟩
+  exact ⟨CB, rfl⟩
+
+def okTMove : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [tyB, CB, CB + 0x100]
+def okTClr : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [tyB, CB]
+
+theorem typedmemmoveLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+    TypedMemmoveLive (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      Mem.EqPre 4096 3 s ∧
+      LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b s (calleeStack s 4096 3) ∧
+      TypeOK s.mem (s.regs 0).toNat ∧ Outside (s.regs 0).toNat 16 (calleeStack s 4096 3) ∧
+      Mem.Input s 4096 3 (s.regs 2).toNat (typSize s.mem (s.regs 0).toNat) ∧
+      LiveDest R L s 4096 3 (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat) := by
+  refine ⟨at0 typedmemmoveCode, toyR tys0 okTMove, typedmemmove8_impl tys0 tysOK0 okTMove ?_, [], 0x8000,
+    wst [tyB, CB, CB + 0x100], rfl, wguardE _ 3 (by omega),
+    ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 3 (by omega)⟩, ⟨by decide, by decide⟩, ?_,
+    ⟨by decide, by decide, cb_out_win _ 3 (by omega) _ _ (by decide)⟩,
+    ⟨by decide, by decide, cb_out_win _ 3 (by omega) _ _ (by decide), Or.inr (cb_out_rt _ _ (by decide))⟩⟩
+  · rintro args ⟨-, rfl⟩
+    exact ⟨(tyB, 8, 0), by simp [tys0], CB, CB + 0x100, rfl, rfl⟩
+  · simp only [calleeStack, wsp_eq, wspn, outside_cons, outside_nil, and_true, wst, wstate]
+    simp only [wsp, tyB]; decide
+
+theorem typedmemclrLive_satisfiable : ∃ (impl : List Segment) (R : RtInv),
+    TypedMemclrLive (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      Mem.EqPre 4096 2 s ∧
+      LiveMemAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat] L b s (calleeStack s 4096 2) ∧
+      TypeOK s.mem (s.regs 0).toNat ∧ Outside (s.regs 0).toNat 16 (calleeStack s 4096 2) ∧
+      LiveDest R L s 4096 2 (s.regs 1).toNat (typSize s.mem (s.regs 0).toNat) := by
+  refine ⟨at0 typedmemclrCode, toyR tys0 okTClr, typedmemclr8_impl tys0 tysOK0 okTClr ?_, [], 0x8000,
+    wst [tyB, CB], rfl, wguardE _ 2 (by omega),
+    ⟨⟨rfl, by decide⟩, wmem_inv 0, by simp, wwin _ 2 (by omega)⟩, ⟨by decide, by decide⟩, ?_,
+    ⟨by decide, by decide, cb_out_win _ 2 (by omega) _ _ (by decide), Or.inr (cb_out_rt _ _ (by decide))⟩⟩
+  · rintro args ⟨-, rfl⟩
+    exact ⟨(tyB, 8, 0), by simp [tys0], CB, rfl, rfl⟩
+  · simp only [calleeStack, wsp_eq, wspn, outside_cons, outside_nil, and_true, wst, wstate]
+    simp only [wsp, tyB]; decide
+
 end Janus.Contracts.LiveSat
