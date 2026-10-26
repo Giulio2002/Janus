@@ -198,9 +198,7 @@ theorem seg_lk_next (c : State) (ptr e sz ra : Nat) (hpc : c.pc = BitVec.ofNat 6
   subst hpc
   rcases hn with hn | hn
   · janus_run [he, hs, h8, h30, hn]
-    all_goals sorry
   · janus_run [he, hs, h8, h30, (show ¬ ra < e by omega), (show ¬ ra < e + sz by omega)]
-    all_goals sorry
 
 theorem rr_bind {p : Program} {t1 t2 : W64} {s : State} {Q1 Q2 : State → Prop}
     (h : ReachesRet p t1 s Q1) (hk : ∀ s', s'.pc = t1 → Q1 s' → ReachesRet p t2 s' Q2) : ReachesRet p t2 s Q2 := by
@@ -387,7 +385,6 @@ theorem seg_lk_entry (c : State) (hpc : c.pc = BitVec.ofNat 64 eLookup)
   simp only [eLookup, E, Nat.reduceAdd] at hpc ⊢
   subst hpc
   janus_run
-  all_goals sorry
 
 /-- What the model's table search needs of the function table. -/
 def TOK (T : List FuncInfo) : Prop :=
