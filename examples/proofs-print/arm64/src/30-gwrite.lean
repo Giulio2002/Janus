@@ -114,7 +114,7 @@ theorem gwrite_k (impl : List Segment)
       · janus_simp; rw [h_bi]; assumption
       · simp [Nat.mod_eq_of_lt (show ptr < 2 ^ 64 by omega), Nat.mod_eq_of_lt (show len < 2 ^ 64 by omega),
           hl32] at hc ⊢
-        exact emits_of_eq (by readbytes_frame) (by omega)
+        exact emits_of_eq (n := len) (by readbytes_frame) (by omega)
     · apply ReturnsK.of_reaches
       janus_run [hmpE, h_pk, h_bi, h_bl, h_ow, sep_cons, sep_nil, hl32, hl31, addWithCarry_c] until
         [segAddr P "runtime.writeErrData" + 0x70, segAddr P "runtime.gwrite" + 0xac, segAddr P "runtime.gwrite" + 0xc8, segAddr P "runtime.gwrite" + 0xd4]
