@@ -14,12 +14,14 @@ word at `BUMP`, the address `p` of the next free byte. It is the runtime of a pr
 frees:
 
 * `toyInv tys b L g v` (the invariant, about the view `v` of the runtime's memory): `v[BUMP] = p`,
-  `HEAP ≤ p`, `p` 16-aligned, `p + b ≤ HEND` (the budget `b` fits), every live object lies in
+  `HEAP ≤ p`, `p` 16-aligned, `p + 64·b ≤ HEND` (the budget `b` fits, with slack: a request of `K`
+  bytes may advance the pointer by up to `64·K`, which lets the allocators of the examples compute
+  their advance from the request, `64·size`, without knowing its size class), every live object lies in
   `[HEAP, p)`, the heap from `p` on is zero, the heap, `BUMP` and the barrier buffer `WBUF`
   are writable, and the type descriptors `tys` (`(addr, Size_, PtrBytes)`) read as they say. The
   invariant does not look at the buffer's contents, so it holds whatever the caller stores there;
-* an allocation of `K` bytes (16-aligned) returns `p` and stores `p + K` at `BUMP`
-  (`toy_alloc`): fresh, zeroed, apart from `L`, and the invariant holds again for `L ++ [(p, p+K)]`
+* an allocation of `K` bytes (`K ≤ A ≤ 64·K`, `A` a multiple of 16) returns `p` and stores `p + A` at
+  `BUMP` (`toy_alloc`): fresh, zeroed, apart from `L`, and the invariant holds again for `L ++ [(p, p+K)]`
   and the budget `b - K`.
 -/
 
@@ -217,5 +219,20 @@ theorem toy_fresh {tys : Tys} {m' : Memory} {p K : Nat} (hp : HEAP ≤ p) (hp16 
 /-- A block in the runtime-owned ranges is apart from a window outside them. -/
 theorem apart_win {rt win : List (Nat × Nat)} {p K : Nat} (hin : InRanges p K rt)
     (hw : LiveSep win rt) : ApartAll p K win := fun r hr => (hin.apart (hw r hr)).symm
+
+/-- The invariant at the start of a program: the bump cell holds `HEAP`, the heap is zero and
+writable (a memory built by hand for a witness; `tys` empty, as for descriptors in read-only
+data). -/
+theorem toyInv_init {m : Memory} {b g : Nat} (hb : 64 * b ≤ 0x10000)
+    (hbump : m.readLE BUMP 8 = HEAP) (hz : ∀ i, HEAP ≤ i → i < HEND → m.bytes i = 0)
+    (h1 : m.accessible HEAP 0x10000 true = true) (h2 : m.accessible BUMP 8 true = true)
+    (h3 : m.accessible WBUF 64 true = true) : toyInv [] b [] g (view (toyRt []) [] m) := by
+  have hv : ∀ a n, InRanges a n (toyRt []) → (view (toyRt []) [] m).readLE a n = m.readLE a n := fun a n h =>
+    readLE_view h trivial
+  refine ⟨HEAP, ?_, Nat.le_refl _, by decide, by simp only [HEND, HEAP] at *; omega, fun r hr => absurd hr (by simp),
+    fun i hi hi' => ?_, by rw [view_accessible]; exact h1, by rw [view_accessible]; exact h2,
+    by rw [view_accessible]; exact h3, fun t ht => absurd ht (by simp)⟩
+  · rw [hv _ _ (inRanges_bump [])]; exact hbump
+  · rw [hv _ _ (inRanges_heap (n := 1) hi (by omega)), Memory.readLE_one, hz i hi hi']; rfl
 
 end Janus.Contracts.Toy

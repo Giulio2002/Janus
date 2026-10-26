@@ -874,6 +874,8 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
   if t.isAppOfArity ``Janus.InRanges 3 then
     if ← Common.dischargeInRanges g then return
     throwError "janus_disch: cannot prove{indentExpr t}"
+  if t.isForall then
+    if ← Common.dischargeLiveForall g then return
   if let some (_, lhs, _) := t.eq? then
     if lhs.isAppOfArity ``Memory.accessible 4 then
       if ← dischargeAccessible g then return

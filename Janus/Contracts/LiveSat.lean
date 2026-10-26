@@ -473,9 +473,7 @@ theorem wb_post {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {
       ApartAll buf.toNat (8 * n) [(s.sp.toNat - 4096, s.sp.toNat - 8)] ∧
       InvSlots (toyR tys ok) b L (s.regs 28).toNat (toyR tys ok).rt m buf.toNat n := by
   have hinvT : toyInv tys b L (s.regs 28).toNat (view (toyRt tys) L s.mem) := hinv
-  have hinvT : toyInv tys b L (s.regs 28).toNat (view (toyRt tys) L s.mem) := hinv
   have hb : (4194560#64 : W64).toNat = WBUF := by decide
-  obtain ⟨p, -, -, -, -, hL, -, -, -, hacW, -⟩ := hinvT
   have ⟨p, _, _, _, _, hL, _, _, _, hacW, _⟩ := hinvT
   refine ⟨4194560#64, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_, MemFrame.refl _ _,
     LiveFrame.refl _ _ _, ?_, ?_, ?_, ?_⟩

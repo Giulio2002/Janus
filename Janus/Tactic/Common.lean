@@ -1210,6 +1210,42 @@ def tryInRanges (g : MVarId) (m0 m rs : Expr) : TacticM Bool := g.withContext do
     catch e => trace[janus.disch] "tryInRanges: {e.toMessageData}"; saved.restore
   return false
 
+/-- A side condition `∀ r, r ∈ L → P r` over a live set `L` (what `LiveSep L win` becomes after
+`simp`): introduce `r` and `r ∈ L`, instantiate every hypothesis `∀ r', r' ∈ L → Q r'` of the
+context at them (unfolding `Apart`), and close the arithmetic by `omega`. -/
+def dischargeLiveForall (g : MVarId) : TacticM Bool := do
+  let t ← whnfR (← instantiateMVars (← g.getType))
+  unless t.isForall do return false
+  let saved ← saveState
+  try
+    let (r, g1) ← g.intro1
+    let (hr, g2) ← g1.intro1
+    let L? ← g2.withContext do
+      let ty ← instantiateMVars (← hr.getType)
+      pure (if ty.isAppOfArity ``Membership.mem 5 then some (ty.getArg! 3) else none)
+    let some L := L? | saved.restore; return false
+    let mut g3 := g2
+    for d in ← g2.withContext getLCtx do
+      if d.isImplementationDetail || d.fvarId == r || d.fvarId == hr then continue
+      let ty ← g2.withContext (instantiateMVars d.type)
+      unless ty.isForall do continue
+      let ok ← g2.withContext do
+        try
+          let app ← mkAppM' d.toExpr #[mkFVar r, mkFVar hr]
+          let aty ← instantiateMVars (← inferType app)
+          pure (some (app, aty))
+        catch _ => pure none
+      let some (app, aty) := ok | continue
+      -- keep it only if it is about the same list
+      let (_, g4) ← (← g3.assert `h_live aty app).intro1P
+      g3 := g4
+    let gs ← Tactic.run g3 <| withoutRecover (evalTactic (← `(tactic|
+      (try simp only [Janus.Apart, Janus.outside_cons, Janus.outside_nil, and_true] at *
+       omega))))
+    if gs.isEmpty then return true
+    saved.restore; return false
+  catch _ => saved.restore; return false
+
 /-- Prove `MemFrame m₀ m rs`: peel the stores of `m` (each must fall inside one of the ranges),
 go through `MemFrame` hypotheses of the context (their ranges must be covered by `rs`), and end
 with `MemFrame.refl` when the memory is `m₀`. -/
@@ -1283,7 +1319,7 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
            try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
              Nat.reduceMod] at *
            repeat' apply And.intro
-           all_goals first | assumption | omega))))
+           all_goals first | omega | assumption))))
         pure gs.isEmpty
       catch _ => pure false
     unless ok do saved.restore; continue

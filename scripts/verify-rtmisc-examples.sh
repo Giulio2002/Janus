@@ -28,14 +28,14 @@ sym() {
     Widen) echo example.com/rtmisc/soft.Widen ;;
     CheckWord) echo example.com/rtmisc/checkptr.Word ;;
     NewPairSC) echo example.com/rtmisc/sc.NewPair ;;
-    Three|Rows|Chain) echo "example.com/rtmisc/live.$1" ;;
+    Three|List|Chain) echo "example.com/rtmisc/live.$1" ;;
     *) echo "example.com/rtmisc.$1" ;;
   esac
 }
 bin() {
   case "$2" in
     NewPairSC) echo "artifacts/examples-rtmisc-sc-$1" ;;
-    Three|Rows|Chain) echo "artifacts/examples-rtmisc-live-$1" ;;
+    Three|List|Chain) echo "artifacts/examples-rtmisc-live-$1" ;;
     *) echo "artifacts/examples-rtmisc-$1" ;;
   esac
 }
@@ -46,7 +46,7 @@ args() {
     # the live allocation examples (Janus/Contracts/Live.lean): the allocator and the barrier
     Three) printf '%s\n' --contract runtime.makeslice --contract runtime.newobject \
       --contract runtime.gcWriteBarrier2 ;;
-    Rows) printf '%s\n' --contract runtime.makeslice --contract runtime.gcWriteBarrier2 ;;
+    List) printf '%s\n' --contract runtime.newobject --contract runtime.gcWriteBarrier1 ;;
     Chain) printf '%s\n' --contract runtime.memmove --contract runtime.makeslice --contract runtime.gcWriteBarrier2 ;;
   esac
 }
