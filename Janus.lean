@@ -36,6 +36,7 @@ import Janus.Contracts.Syscall
 import Janus.Contracts.SyscallAmd64
 import Janus.Contracts.SyscallSat
 import Janus.Contracts.SyscallSatAmd64
+import Janus.Spec.Print
 import Janus.Contracts.Print
 import Janus.Spec.Type
 import Janus.Contracts.Iface

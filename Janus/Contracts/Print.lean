@@ -525,4 +525,188 @@ macro "readbytes_frame" : tactic => `(tactic| (
     | refine (MemFrame.readBytes_eq (by assumption) (by janus_disch)).trans ?_)
   rfl))
 
+/-! ### Bitfield moves (`UBFM`: `LSR`, `UBFX`, `LSL`, `UBFIZ` by an immediate)
+
+The model executes `UBFM` as a rotation and two masks. `reduceUbfm` (a simproc for
+`janus_run [reduceUbfm]`) rewrites `x.rotateRight r &&& M &&& T` with literal `r`, `M`, `T` of the
+two shapes the instructions produce into arithmetic on `x.toNat` (`ubfm_low`: a shift right and a
+low mask; `ubfm_shl`: a mask and a shift left), with its side conditions decided on the literals. -/
+
+/-- `LSR`/`UBFX`: bits `r … r + w - 1` of `x`. -/
+theorem ubfm_low (x : BitVec 64) (r w M T : Nat) (hrw : r + w ≤ 64) (hT : T = 2 ^ w - 1)
+    (hM : M % 2 ^ w = 2 ^ w - 1) :
+    x.rotateRight r &&& BitVec.ofNat 64 M &&& BitVec.ofNat 64 T =
+      BitVec.ofNat 64 (x.toNat / 2 ^ r % 2 ^ w) := by
+  subst hT
+  apply BitVec.eq_of_getLsbD_eq
+  intro i hi
+  simp only [BitVec.getLsbD_and, BitVec.getLsbD_ofNat, BitVec.getLsbD_rotateRight, hi,
+    decide_true, Bool.true_and]
+  have hM' : ∀ j, j < w → M.testBit j = true := by
+    intro j hj
+    have := Nat.testBit_mod_two_pow M w j
+    rw [hM, Nat.testBit_two_pow_sub_one] at this
+    simp [hj] at this; exact this
+  rw [Nat.testBit_mod_two_pow, Nat.testBit_two_pow_sub_one, Nat.testBit_div_two_pow]
+  by_cases h : i < w
+  · simp only [h, decide_true, Bool.and_true, hM' i h, Bool.true_and]
+    rw [Nat.mod_eq_of_lt (show r < 64 by omega), if_pos (by omega), Nat.add_comm]
+    rfl
+  · simp [h]
+
+/-- `LSL`/`UBFIZ`: the low `w` bits of `x`, shifted left by `s`. -/
+theorem ubfm_shl (x : BitVec 64) (r w s M T : Nat) (hr : r = 64 - s) (hs : 0 < s) (hws : w + s ≤ 64)
+    (hT : T = (2 ^ w - 1) * 2 ^ s) (hM : M / 2 ^ s % 2 ^ w = 2 ^ w - 1) :
+    x.rotateRight r &&& BitVec.ofNat 64 M &&& BitVec.ofNat 64 T =
+      BitVec.ofNat 64 (x.toNat % 2 ^ w * 2 ^ s) := by
+  subst hT hr
+  apply BitVec.eq_of_getLsbD_eq
+  intro i hi
+  simp only [BitVec.getLsbD_and, BitVec.getLsbD_ofNat, BitVec.getLsbD_rotateRight, hi,
+    decide_true, Bool.true_and]
+  have hT' : ∀ j, ((2 ^ w - 1) * 2 ^ s).testBit j = (decide (s ≤ j) && decide (j < s + w)) := by
+    intro j
+    rw [← Nat.shiftLeft_eq, Nat.testBit_shiftLeft, Nat.testBit_two_pow_sub_one]
+    by_cases h : s ≤ j <;> simp [h] <;> omega
+  have hM' : ∀ j, s ≤ j → j < s + w → M.testBit j = true := by
+    intro j h1 h2
+    have := Nat.testBit_mod_two_pow (M / 2 ^ s) w (j - s)
+    rw [hM, Nat.testBit_two_pow_sub_one, Nat.testBit_div_two_pow] at this
+    simp [show j - s < w by omega, show j - s + s = j by omega] at this; exact this
+  rw [hT', ← Nat.shiftLeft_eq, Nat.testBit_shiftLeft, Nat.testBit_mod_two_pow]
+  by_cases h : s ≤ i ∧ i < s + w
+  · obtain ⟨h1, h2⟩ := h
+    simp only [h1, h2, decide_true, Bool.and_true, hM' i h1 h2, Bool.true_and, ge_iff_le,
+      show i - s < w by omega]
+    rw [Nat.mod_eq_of_lt (show 64 - s < 64 by omega), if_neg (by omega)]
+    rw [show i - (64 - (64 - s)) = i - s by omega]
+    rfl
+  · rcases Decidable.not_and_iff_or_not.mp h with h | h
+    · simp [h]
+    · have : ¬ (i - s < w) ∨ ¬ s ≤ i := by omega
+      rcases this with h' | h' <;> simp [h, h']
+
+theorem and_allOnes64 (y : BitVec 64) : y &&& BitVec.ofNat 64 18446744073709551615 = y := by
+  apply BitVec.eq_of_toNat_eq
+  simp only [BitVec.toNat_and, BitVec.toNat_ofNat]
+  rw [show (18446744073709551615 : Nat) % 2 ^ 64 = 2 ^ 64 - 1 from rfl, Nat.and_two_pow_sub_one_eq_mod]
+  exact Nat.mod_eq_of_lt y.isLt
+
+theorem and2_of_and3 (y : BitVec 64) (T : Nat) :
+    y &&& BitVec.ofNat 64 T = y &&& BitVec.ofNat 64 18446744073709551615 &&& BitVec.ofNat 64 T := by
+  rw [and_allOnes64]
+
+theorem natAnd_toNat (y : BitVec 64) (T : Nat) (hT : T < 2 ^ 64) :
+    y.toNat &&& T = (y &&& BitVec.ofNat 64 T).toNat := by
+  simp [BitVec.toNat_and, Nat.mod_eq_of_lt hT]
+
+open Lean Meta in
+/-- The proof of `x.rotateRight r &&& M &&& T = rhs` (`ubfm_low`/`ubfm_shl`, side conditions
+decided on the literals), or `none`. -/
+def ubfmEq (x : Expr) (r M T : Nat) : MetaM (Option (Expr × Expr)) := do
+  if T == 0 then return none
+  let close (lem : Expr) : MetaM (Option (Expr × Expr)) := do
+    let ty ← inferType lem
+    let (hs, _, concl) ← forallMetaTelescopeReducing ty
+    for h in hs do
+      let pf ← try mkDecideProof (← inferType h) catch _ => return none
+      unless (← isDefEq h pf) do return none
+    let some (_, _, rhs) := (← instantiateMVars concl).eq? | return none
+    return some (rhs, ← instantiateMVars (mkAppN lem hs))
+  if (T + 1) &&& T == 0 then
+    let wv := Nat.log2 (T + 1)
+    if r + wv ≤ 64 && M % 2 ^ wv == 2 ^ wv - 1 then
+      return ← close (mkAppN (mkConst ``ubfm_low) #[x, mkNatLit r, mkNatLit wv, mkNatLit M, mkNatLit T])
+    return none
+  let s := (List.range 64).find? (fun i => T.testBit i) |>.getD 0
+  let hi := T / 2 ^ s
+  if s == 0 || (hi + 1) &&& hi != 0 then return none
+  let wv := Nat.log2 (hi + 1)
+  if r == 64 - s && wv + s ≤ 64 && M / 2 ^ s % 2 ^ wv == 2 ^ wv - 1 then
+    return ← close (mkAppN (mkConst ``ubfm_shl) #[x, mkNatLit r, mkNatLit wv, mkNatLit s, mkNatLit M,
+      mkNatLit T])
+  return none
+
+open Lean Meta in
+/-- `x.rotateRight r &&& M &&& T` (literal `r`, `M`, `T`). -/
+simproc_decl reduceUbfm ((BitVec.rotateRight _ _ &&& _) &&& _) := fun e => do
+  let_expr HAnd.hAnd _ _ _ _ a c2 := e | return .continue
+  let_expr HAnd.hAnd _ _ _ _ rot c1 := a | return .continue
+  let_expr BitVec.rotateRight w x r := rot | return .continue
+  let some 64 ← Nat.fromExpr? w | return .continue
+  let some r ← Nat.fromExpr? r | return .continue
+  let some ⟨64, M⟩ ← getBitVecValue? c1 | return .continue
+  let some ⟨64, T⟩ ← getBitVecValue? c2 | return .continue
+  let some (rhs, pf) ← ubfmEq x r M.toNat T.toNat | return .continue
+  return .visit { expr := rhs, proof? := some pf }
+
+open Lean Meta in
+/-- `x.rotateRight r &&& T` (literal `r`, `T`: the all-ones mask was simplified away). -/
+simproc_decl reduceUbfm2 (BitVec.rotateRight _ _ &&& _) := fun e => do
+  let_expr HAnd.hAnd _ _ _ _ rot c2 := e | return .continue
+  let_expr BitVec.rotateRight w x r := rot | return .continue
+  let some 64 ← Nat.fromExpr? w | return .continue
+  let some r ← Nat.fromExpr? r | return .continue
+  let some ⟨64, T⟩ ← getBitVecValue? c2 | return .continue
+  let some (rhs, pf) ← ubfmEq x r 18446744073709551615 T.toNat | return .continue
+  let pf ← mkEqTrans (mkApp2 (mkConst ``and2_of_and3) rot (mkNatLit T.toNat)) pf
+  return .visit { expr := rhs, proof? := some pf }
+
+open Lean Meta in
+/-- `(x.rotateRight r).toNat &&& T` (literal `r`, `T < 2^64`). -/
+simproc_decl reduceUbfmNat (BitVec.toNat (BitVec.rotateRight _ _) &&& _) := fun e => do
+  let_expr HAnd.hAnd _ _ _ _ tn c2 := e | return .continue
+  let_expr BitVec.toNat _ rot := tn | return .continue
+  let_expr BitVec.rotateRight w x r := rot | return .continue
+  let some 64 ← Nat.fromExpr? w | return .continue
+  let some r ← Nat.fromExpr? r | return .continue
+  let some T ← Nat.fromExpr? c2 | return .continue
+  unless T < 2 ^ 64 do return .continue
+  let some (rhs, pf) ← ubfmEq x r 18446744073709551615 T | return .continue
+  let pf2 ← mkEqTrans (mkApp2 (mkConst ``and2_of_and3) rot (mkNatLit T)) pf
+  let hT ← mkDecideProof (← mkLt (mkNatLit T) (mkNatLit (2 ^ 64)))
+  let pf1 := mkApp3 (mkConst ``natAnd_toNat) rot (mkNatLit T) hT
+  let pf ← mkEqTrans pf1 (← mkCongrArg (mkApp (mkConst ``BitVec.toNat) (mkNatLit 64)) pf2)
+  return .visit { expr := ← mkAppM ``BitVec.toNat #[rhs], proof? := some pf }
+
+/-! ### Division by constants (the compiler's magic multiplications in `formatBase10`) -/
+
+/-- `x / 50` for `x < 2^31` as the multiply-and-shift of 32-bit code. -/
+theorem magic50 (y : Nat) (h : y < 2^31) : y * 2748779070 / 137438953472 = y / 50 := by
+  have h1 := Nat.div_add_mod y 50
+  have h2 := Nat.mod_lt y (show 50 > 0 by decide)
+  generalize y / 50 = q at *
+  generalize y % 50 = r at *
+  subst h1
+  omega
+/-- `UBFX #1, #31`, `MUL`, `LSR #37`: `x / 100` for 32-bit `x`. -/
+theorem magic100 (x : Nat) (h : x < 2^32) :
+    x / 2 % 2147483648 * 2748779070 / 137438953472 % 134217728 = x / 100 := by
+  rw [Nat.mod_eq_of_lt (show x / 2 < 2147483648 by omega), magic50 (x / 2) (by omega)]
+  omega
+/-- `LSR #1`, `UMULH`, `LSR #28`: `y / 5·10^8`, i.e. `x / 10^9` for `y = x / 2`. -/
+theorem magic5e8 (y : Nat) (h : y < 2^63) : y * 9903520314283042200 / 2^92 = y / 500000000 := by
+  have h1 := Nat.div_add_mod y 500000000
+  have h2 := Nat.mod_lt y (show 500000000 > 0 by decide)
+  generalize y / 500000000 = q at *
+  generalize y % 500000000 = r at *
+  subst h1
+  omega
+
+/-- `UMULH` by a literal (the model's 128-bit product). -/
+theorem umulh_lit (x : BitVec 64) (c : Nat) (hc : c < 2 ^ 64) :
+    (BitVec.extractLsb' 64 64 (x.setWidth 128 * BitVec.ofNat 128 c)).toNat =
+      x.toNat * c / 2 ^ 64 := by
+  have h := Janus.Tactic.umulh_toNat x (BitVec.ofNat 64 c)
+  have e : (BitVec.ofNat 64 c).setWidth 128 = BitVec.ofNat 128 c := by
+    apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_setWidth]; omega
+  rw [e] at h; rw [h]; simp; rw [Nat.mod_eq_of_lt hc]
+/-- `x / 10^9` as `formatBase10` computes it. -/
+theorem magic1e9 (x : Nat) (h : x < 2 ^ 64) :
+    x / 2 % 9223372036854775808 * 9903520314283042200 / 18446744073709551616 / 268435456 %
+      68719476736 = x / 1000000000 := by
+  rw [Nat.mod_eq_of_lt (show x / 2 < 9223372036854775808 by omega), Nat.div_div_eq_div_mul,
+    show 18446744073709551616 * 268435456 = 2 ^ 92 by decide, magic5e8 (x / 2) (by omega)]
+  omega
+
 end Janus.Print
