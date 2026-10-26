@@ -439,6 +439,101 @@ theorem step_open (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr
   · exact Nat.le_of_eq hrm.symm
   · right; exact ⟨b % 2 ^ topBit b, ba, sa, by rw [← hit], hF, hph, hrdb⟩
 
+theorem recTake_frame (m : Memory) {j : Nat} (hj : j < 8) (n : Nat) : MemFrame m (recTake m j n) [(B, B + 0x1000)] := by
+  rw [recTake_eq]
+  have h1 : MemFrame m (m.writeLE (recAt j + 16) 8 1) [(B, B + 0x1000)] :=
+    MemFrame.of_writeLE m 1 (r := (B, B + 0x1000)) (List.mem_singleton.2 rfl)
+      (by simp only [recAt, B]; omega) (by simp only [recAt, B]; omega)
+  have h2 := h1.writeLE (a := recAt j + 24) (k := 8) 0 (r := (B, B + 0x1000)) (List.mem_singleton.2 rfl)
+    (by simp only [recAt, B]; omega) (by simp only [recAt, B]; omega)
+  split
+  · exact h2.writeLE (a := B + 8) (k := 8) j (r := (B, B + 0x1000)) (List.mem_singleton.2 rfl)
+      (by simp only [B]; omega) (by simp only [B]; omega)
+  · exact (h1.writeLE (a := recAt j + 24) (k := 8) n (r := (B, B + 0x1000)) (List.mem_singleton.2 rfl)
+      (by simp only [recAt, B]; omega) (by simp only [recAt, B]; omega))
+
+theorem popMem_frame (m : Memory) {j : Nat} (hj : j < 8) : MemFrame m (popMem m j) [(B, B + 0x1000)] := by
+  unfold popMem
+  have h1 : MemFrame m (m.writeLE (recAt j + 16) 8 1) [(B, B + 0x1000)] :=
+    MemFrame.of_writeLE m 1 (r := (B, B + 0x1000)) (List.mem_singleton.2 rfl)
+      (by simp only [recAt, B]; omega) (by simp only [recAt, B]; omega)
+  exact h1.writeLE (a := B + 8) (k := 8) j (r := (B, B + 0x1000)) (List.mem_singleton.2 rfl)
+    (by simp only [B]; omega) (by simp only [B]; omega)
+
+theorem mf_of_priv {m m' : Memory} {F : Frame} (h : MemFrame m m' [(B, B + 0x1000)]) :
+    MemFrame m m' ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F) :=
+  h.mono fun a n ho => by
+    simp only [outside_append, P0_priv] at ho; exact ho.1.1
+
+theorem step_rec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
+    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph = 0) {j n : Nat} (hnd : ndef c.mem = j + 1)
+    (hrs : recSp c.mem j = F.sp) (hn : recN c.mem j = n + 1) :
+    ∃ e, CallSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph
+      { fn := recFn c.mem j n, bits := none, chain := defers0 (recTake c.mem j n) }
+      (recItems F.sp (defers0 (recTake c.mem j n))) e := by
+  subst hph
+  obtain ⟨hal, hsp, hsp96⟩ := hI.spw
+  have hj : j < 8 := by have := hI.env.ndef_le; omega
+  have hn8 : n < 8 := by have := (hI.env.rec j (by omega)).1; omega
+  have hcur := rec_call_items hI.env hnd hrs hn
+  have hcur0 := (curItems_zero c.mem F).trans hcur
+  have hmem : ({ fn := recFn c.mem j n, bits := none, chain := defers0 (recTake c.mem j n) } : Item) ∈ items0 :=
+    hI.its _ (by rw [hcur0]; exact List.mem_cons_self)
+  obtain ⟨f1, f2, f3, f4, f5, f6⟩ := hI.item_facts hmem
+  simp only at f1 f2 f3 f4 f5 f6
+  have hs := hI.sp_eq
+  have hfm := hI.fm
+  have hw0 := hfm.w0
+  have hw32 := hfm.w32
+  rw [hs] at hw0 hw32
+  have hfr := recTake_frame c.mem hj n
+  have hfnr : (recTake c.mem j n).readLE (recFn c.mem j n) 8 = c.mem.readLE (recFn c.mem j n) 8 :=
+    hfr.readLE _ _ (by simpa using f5)
+  have hseg := seg_rec_call c j n (recFn c.mem j n) hpc hal hsp hI.acc hI.env.acc hw32 hnd hj
+    (by rw [hrs, hw0]) hn hn8 rfl f1 f2 (by rw [hfnr]; exact f4) (by rw [hfnr]; exact f3)
+  obtain ⟨k, e, hk, hpe, hq⟩ := reachesRet_transfer hp hseg
+  obtain ⟨hemem, hesp, he26, he28, he18, he29, he30⟩ := hq
+  have hl := P0_laws T RPa
+  have hRPa : (BitVec.ofNat 64 RPa).toNat = RPa := by
+    simp only [RPa, E, BitVec.toNat_ofNat]
+  have hesp' : e.sp.toNat = F.sp - 96 := by rw [hesp, hs]
+  have henvE : Env0 T e.mem := by rw [hemem]; exact env0_recTake hI.env hnd hn
+  have hmf := mf_of_priv (T := T) (F := F) (hemem ▸ hfr)
+  have hpan : panics0 e.mem = ch := by rw [hemem, panics0_recTake hj]; exact hI.pan
+  have hsv : saved0 e.mem = saved0 c.mem := by rw [hemem]; exact saved0_recTake hj
+  have hrm : room0 c.mem ≤ room0 e.mem := by rw [hemem]; exact room0_recTake hI.env hnd hn
+  have hdef : defers0 e.mem = defers0 (recTake c.mem j n) := by rw [hemem]
+  have hcurE : curItems e.mem F 0 = recItems F.sp (defers0 (recTake c.mem j n)) := by
+    rw [curItems_zero, hdef]
+  refine ⟨e, ⟨⟨k, hk⟩, ?_, hmf, ?_, ?_, hdef, hcurE, hsv, hrm, Or.inl ⟨rfl, rfl⟩⟩⟩
+  · refine ⟨?_, he26, by rw [he28]; exact hI.r28, by rw [he18]; exact hI.r18, ?_, ?_, ?_, ?_, ?_, ?_, henvE⟩
+    · rw [hpe, hemem]
+    · rw [he29, hesp]
+    · rw [hesp']; omega
+    · simp only [P0_depth]; rw [hesp']; omega
+    · rw [hesp']; omega
+    · rw [he30, hRPa]; simp only [RPa, E]
+    · rw [he30, hRPa]; simp only [RPa, E]; omega
+  · intro b' ba' sa' hb'; simp at hb'
+  · refine hI.step 0 hesp (by rw [he28]) (by rw [he18]) hmf ?_ henvE hpan (Nat.le_trans hI.room hrm)
+      (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
+    · refine hfm.congr fun k hk => ?_
+      rw [hemem]
+      exact hfr.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; rw [hs]; have := hI.spB; omega)
+    · have := hI.sv hm
+      have h2 := (saved0_none_iff _).2 this
+      rw [← hsv] at h2
+      exact (saved0_none_iff _).1 h2
+    · rw [hdef, ← rec_call_rest hI.env hnd hrs hn]; exact hI.chn
+    · have hbr : e.mem.readLE ba' 1 = c.mem.readLE ba' 1 := by
+        rw [hemem]; exact hfr.readLE _ _ (by
+          have := (hI.ba_facts hF').2.2.1
+          simpa using this)
+      exact hI.bsub ba' sa' hF' i (by rw [← hbr]; exact hi)
+    · rw [hcurE] at hit'
+      have := hI.its it' (by rw [hcur0]; exact List.mem_cons_of_mem _ hit')
+      exact this
+
 end steps
 
 
