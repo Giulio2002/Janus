@@ -137,7 +137,9 @@ var (
 )
 
 // runtimeContractStubs are the runtime functions whose behaviour a framework contract library
-// states (Janus/Contracts/Iface.lean, IfaceAmd64.lean: the interface runtime of Go 1.26). When a
+// states (Janus/Contracts/Iface.lean, IfaceAmd64.lean: the interface runtime of Go 1.26;
+// Janus/Contracts/Mem.lean, Hash.lean and their amd64 files: equality, hashing and typed memory;
+// Janus/Contracts/Map.lean, MapVar.lean, MapStr.lean and their amd64 files: the map runtime). When a
 // --contract pattern matches one, the extractor pins it like a stub (checkContractPin): the
 // pclntab names it in package runtime, in the toolchain's file, and its normalized code is the
 // runtime's (stubpins_gen.go). A binary whose function of that name is not the runtime's is an
@@ -150,6 +152,35 @@ var runtimeContractStubs = map[string]bool{
 	"runtime.convTslice": true, "runtime.assertE2I": true, "runtime.assertE2I2": true,
 	"runtime.typeAssert": true, "runtime.interfaceSwitch": true, "runtime.efaceeq": true,
 	"runtime.ifaceeq": true,
+	// equality (Janus/Contracts/Mem.lean, MemAmd64.lean)
+	"runtime.memequal": true, "runtime.memequal0": true, "runtime.memequal8": true,
+	"runtime.memequal16": true, "runtime.memequal32": true, "runtime.memequal64": true,
+	"runtime.memequal128": true, "runtime.memequal_varlen": true, "runtime.f32equal": true,
+	"runtime.f64equal": true, "runtime.c64equal": true, "runtime.c128equal": true,
+	"runtime.strequal": true, "runtime.interequal": true, "runtime.nilinterequal": true,
+	// typed memory and the functions it calls (Mem.lean, MemAmd64.lean)
+	"runtime.typedmemmove": true, "runtime.typedmemclr": true, "runtime.memclrHasPointers": true,
+	"runtime.memmove": true, "runtime.memclrNoHeapPointers": true,
+	"runtime.bulkBarrierPreWrite": true,
+	// hashing (Janus/Contracts/Hash.lean, HashAmd64.lean)
+	"runtime.memhash": true, "runtime.memhash0": true, "runtime.memhash8": true,
+	"runtime.memhash16": true, "runtime.memhash32": true, "runtime.memhash64": true,
+	"runtime.memhash128": true, "runtime.memhash_varlen": true, "runtime.strhash": true,
+	"runtime.f32hash": true, "runtime.f64hash": true, "runtime.c64hash": true,
+	"runtime.c128hash": true, "runtime.interhash": true, "runtime.nilinterhash": true,
+	"runtime.rand": true, // (typehash is not pinned: its jump table makes its normalized code differ between programs)
+	// the map runtime (Janus/Contracts/Map.lean, MapVar.lean, MapStr.lean and their amd64 files)
+	"runtime.makemap": true, "runtime.makemap_small": true, "runtime.mapclear": true,
+	"runtime.mapIterStart": true, "runtime.mapIterNext": true,
+	"runtime.mapaccess1": true, "runtime.mapaccess2": true, "runtime.mapassign": true,
+	"runtime.mapdelete": true, "runtime.mapaccess1_fat": true, "runtime.mapaccess2_fat": true,
+	"runtime.mapaccess1_fast32": true, "runtime.mapaccess2_fast32": true,
+	"runtime.mapassign_fast32": true, "runtime.mapdelete_fast32": true,
+	"runtime.mapaccess1_fast64": true, "runtime.mapaccess2_fast64": true,
+	"runtime.mapassign_fast64": true, "runtime.mapdelete_fast64": true,
+	"runtime.mapassign_fast64ptr": true,
+	"runtime.mapaccess1_faststr":  true, "runtime.mapaccess2_faststr": true,
+	"runtime.mapassign_faststr": true, "runtime.mapdelete_faststr": true,
 }
 
 // runtimePanicContractStubs are the panic/defer/recover runtime functions whose behaviour a

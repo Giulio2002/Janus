@@ -254,7 +254,7 @@ of the closure at each exit, executed like any other code (`DeferAdd`, `DeferInc
 `runtime.deferreturn` call such functions contain is reached only after a recovered panic; without
 `--contract runtime.deferreturn` it is not extracted (`omittedCalls` in `identity.json`).
 
-### Maps (`Janus/Spec/Map.lean`, `Janus/Contracts/Map.lean`, `Janus/Contracts/MapAmd64.lean`)
+### Maps (`Janus/Spec/Map.lean`, `Janus/Contracts/Map.lean`, `MapVar.lean`, `MapStr.lean` and their `…Amd64.lean` files)
 
 Go 1.26 maps are Swiss tables (`internal/runtime/maps`). The compiler lowers map operations to
 calls of linknamed runtime functions; a map theorem leaves those out with `--contract` and takes
@@ -305,11 +305,79 @@ and `addr = Extracted.program.contractAddr "runtime.…"`):
 | `clear(m)` | `runtime.mapclear(t, m)` | `Clear` | `AMap.empty` |
 | `for k, v := range m` | `runtime.mapIterStart(t, m, it)`, `runtime.mapIterNext(it)` | `IterStart`, `IterNext` | none; see below |
 | `v, ok := m[*kp]` (`[16]byte` key) | `runtime.mapaccess2(t, m, kp)` | `Access2Ptr` | as `Access2`, key = the 16 bytes at `kp` |
+| `make(map[K]V, n)` (`n` not a constant `≤ 8`) | `runtime.makemap(t, n, nil)` | `MakeMap` | a fresh non-nil `AMap.empty` |
+| `v := m[*kp]`, other keys (e.g. `[24]byte`) | `runtime.mapaccess1(t, m, kp)` | `Access1G` | as `Access1`, key = `keyAt` of the `n` bytes at `kp` |
+| `v, ok := m[*kp]` | `runtime.mapaccess2(t, m, kp)` | `Access2G` | as `Access2` |
+| `m[*kp] = v` | `runtime.mapassign(t, m, kp)` + a store | `AssignG` | `AssignSlot`: storing `v` makes `f.set key v` |
+| `delete(m, *kp)` | `runtime.mapdelete(t, m, kp)` | `DeleteG` | `f.erase key` |
+| `v := m[k]`, `V` over 1024 bytes | `runtime.mapaccess1_fat(t, m, kp, zero)` | `Access1Fat` | the value's slot, or the caller's `zero` |
+| `v, ok := m[k]`, `V` over 1024 bytes | `runtime.mapaccess2_fat(t, m, kp, zero)` | `Access2Fat` | as `Access1Fat`, plus `ok` |
+| `v := m[k]` / `v, ok := m[k]` (4-byte key) | `runtime.mapaccess1_fast32`, `runtime.mapaccess2_fast32` | `Access1F32`, `Access2F32` | key = `W2` / `ECX` |
+| `m[k] = v` (4-byte key) | `runtime.mapassign_fast32(t, m, k)` + a store | `AssignF32` | `AssignSlot` |
+| `delete(m, k)` (4-byte key) | `runtime.mapdelete_fast32(t, m, k)` | `DeleteF32` | `f.erase k` |
+| `m[p] = v` (pointer key) | `runtime.mapassign_fast64ptr(t, m, p)` + a store | `Assign64Ptr` | `AssignSlot`; lookups use `Access1`/`Access2` on the same model |
+| `v := m[k]` (string key) | `runtime.mapaccess1_faststr(t, m, k)` | `Access1Str` (`Access1Str64`) | key = `strKey`: the string's length and bytes |
+| `v, ok := m[k]` (string key) | `runtime.mapaccess2_faststr(t, m, k)` | `Access2Str` (`Access2Str64`) | as `Access2` |
+| `m[k] = v` (string key) | `runtime.mapassign_faststr(t, m, k)` + a store | `AssignStr` (`AssignStr64`) | `AssignSlot`; the key's bytes must be the runtime's (`StrOwned`) |
+| `delete(m, k)` (string key) | `runtime.mapdelete_faststr(t, m, k)` | `DeleteStr` (`DeleteStr64`) | `f.erase (strKey …)` |
 | `len(m)` | inline load | `MapModel.Laws.len` | |
+
+**One abstract map for every entry point.** All of them are stated on the same `M : MapModel K V`
+for a map type, so a theorem that mixes entry points (`mapassign_fast64ptr` and
+`mapaccess1_fast64` on a `map[*T]int`, `mapassign` and `mapaccess1` on a `map[[24]byte]int`)
+uses one model. The new contracts take the value size `vs` (`V = BitVec (8 · vs)`, the slot's
+little-endian contents: `vs = 1` for `bool`, `vs = 8` for `int`, so `BitVec (8 · 8)` is the
+`BitVec 64` of the older contracts) and the key decoding of their entry point: `BitVec 64` for
+`_fast64`/`_fast64ptr`, `BitVec 32` for `_fast32` (`key32`: the low half of the register),
+`strKey` (length and bytes) for `_faststr`, `keyAt` (the `n` key bytes, little-endian) for the
+generic entry points.
+
+**Generic keys, through the key type's hash and equality.** `mapaccess1`/`mapaccess2`/`mapassign`/
+`mapdelete` hash the key with `t.Hasher(key, m.seed)` and compare with `t.Key.Equal`, so which
+keys are equal is decided by those functions. The generic contracts are stated for key types of
+regular memory (`KeyRegular (rtView M.priv s.mem) t n`: the descriptor's key type has `Size_ = n`
+and `TFlagRegularMemory`, read in the runtime's memory, where descriptors live). For them `Equal`
+is `memequal` of the `n` bytes and the hash is the seeded byte hash of R4 (`HashModel.regHash`, an
+uninterpreted function of the seed and the bytes; `HashModel.Laws.regular`), so equal keys are
+exactly equal bytes and the abstract key is `keyAt`. Keys with floats, strings or interfaces
+inside are not covered by these contracts (their abstract key is not their bytes).
+
+**Readiness of allocating entry points (finding R3-C1).** `makemap_small`, `makemap` and every
+`mapassign*` allocate. Before R3 `Assign` and `MakeSmall` promised to succeed from every state
+satisfying `RTPre`, and `RTPre` comes back after every call (`M.Env` holds again): from one non-nil
+map, `2^64` assignments of new keys would build a map whose count no header word holds
+(`MapModel.Laws.len`), and `2^48 + 1` calls of `makemap_small` would need that many distinct map
+addresses below `2^48`. `audit/maps/model/Unsat.lean` proves both old contracts false, on both
+ISAs, for every call state whose guard word lies outside what the call may write
+(`old_assign_unsat`, `old_makeSmall_unsat`, `…64`), and `old_*_vacuous` show that every theorem's
+`CallerOK` provides that condition: `Insert`, `InsertGet` and `NewMap` were vacuous. The real
+runtime throws `out of memory` long before. Now each allocating contract takes the round-9
+readiness predicate `H : RtReady` and requires `Contracts.Ready H M.priv args s` (amd64:
+`Ready64`): `H` sees the arguments (for `mapassign` also the key's value, for `mapassign_faststr`
+its header), the goroutine, `SP` and the runtime's memory (`rtView M.priv`). A theorem assumes
+`H` at its entry for the one allocating call it makes. The read-only entry points (lookups,
+`delete`, `clear`, iteration) do not allocate and keep the perpetual `M.Env`.
+
+**Other fixes of R3.** `Access2Ptr`, every generic and string access (`KeyIn`, `StrIn`) and
+`IterStart`/`IterNext` require the key or the iterator struct outside the callee's stack window
+(`calleeStack`): the runtime's frames overwrite that window, so a key there would be read after
+it changed, and the pre-R3 `Access2Ptr`/`IterStart`/`IterNext` promised more than the runtime
+does. On amd64 the iterator must also miss the return-address slot `[RSP, RSP + 8)` (`retSlot`),
+which the callee's `RET` reads after storing into the iterator.
+
+**Satisfiability.** Every map contract, old and new, on both ISAs, has a kernel-checked
+`<contract>_satisfiable` (`Janus/Contracts/MapSat.lean`, `MapVarSat.lean`, `MapStrSat.lean` and
+their `…Amd64` files; round 9's SAT row): toy models from `Janus/Contracts/MapModel0.lean` (`ME`:
+one empty non-nil map; `MC`: one map of at most one entry, with readiness `HAssign`/`HMake`),
+machine code proved to meet the contract for them, and a call state, with a non-nil map, that
+satisfies the whole precondition. Two contracts constrain what a model can be: `IterNext` does not
+say the iterator struct is writable (a model's `Iter` must imply it, `MapSat.MEI`), and
+`AssignStr`'s key may lie anywhere in the runtime's memory, so a readiness predicate excludes keys
+overlapping the map's own storage (`MapStrSat.HAssignS`), as the real runtime's readiness does.
 
 The common shape, `RTPre` and `RTReturn`:
 
-* **pre**: `M.Env` with the goroutine (`X28` / `R14`), the stack guard at least `M.depth` bytes
+* **pre**: `M.Env` with the goroutine (`X28` / `R14`), for allocating calls the readiness `H`, the stack guard at least `M.depth` bytes
   below `SP`, the stack window `[SP - M.depth, SP + 8 + 8·nargs)` writable and outside `M.priv`,
   an admissible return address (`X30` 4-aligned below `2^48`; on amd64 the word at `[RSP]` below
   `2^47`, which `RET` needs, plus `X15 = 0` and `DF` clear), and
@@ -363,11 +431,17 @@ by an indirect `BLR`, directory and table probing), and the reading of Go 1.26's
 `SwissSmall` (a property of the maps the runtime builds that is not proved here). `H2` tags are not
 part of `SwissSmall` because the small-map lookup does not read them.
 
-**Examples** (`examples/basic/maps.go`; arm64 `examples/proofs/<Name>.lean`, amd64
+**Examples** (`examples/basic/maps.go`, `maps2.go`; arm64 `examples/proofs/<Name>.lean`, amd64
 `examples/proofs-amd64/<Name>/Proof.lean`): `Lookup`, `Insert`, `InsertGet` (two contracts; the
 read-back returns `v`), `Delete`, `SumValues` (iteration, every order), `CountKeys` (no contract),
 `LookupKey16` (generic `mapaccess2`), `NewMap`, `ClearMap`, and `MapAccess1Small` (the runtime
-function itself, extracted as `runtime.mapaccess1_fast64`).
+function itself, extracted as `runtime.mapaccess1_fast64`); R3: `LookupS`, `InsertS`, `DeleteS`
+(`map[string]uint64`, `_faststr`), `LookupK24`, `InsertK24` (`map[[24]byte]uint64`, generic),
+`Has32`, `Set32` (`map[uint32]bool`, `_fast32`, 1-byte values), `InsertPtr`, `LookupPtr`
+(`map[*PNode]uint64`, `_fast64ptr` and `_fast64` on one model), `MakeHint` (`makemap` with a
+hint). The R3 examples and `SumValues` each prove `Witness.nonvacuous`: a model, code meeting the
+contracts, a readiness predicate where needed and a call state with a non-nil map satisfying the
+whole precondition.
 
 ### Interfaces (`Janus/Spec/Type.lean`, `Janus/Contracts/Iface.lean`, `Janus/Contracts/IfaceAmd64.lean`)
 
@@ -572,6 +646,90 @@ frames whose deferred calls have run or that have none).
 | `LoadField(c)` | a nil receiver faults, which is a panic with `P.err .mem` (the `sigpanic` path) |
 | `DeferTwice()` | two heap `defer` records in a loop (`deferproc`, `deferreturn`); the call returns |
 | `RecoverSet(x, e)` | `recover()` in a deferred closure turns `panic(e)` into a return of the named result `7` |
+
+### Equality, hashing and typed memory (`Janus/Contracts/Mem.lean`, `Hash.lean`, `MapStr.lean`, `MemAmd64.lean`, `HashAmd64.lean`)
+
+Go compares values with `runtime.memequal` (inline `==` on arrays and strings) and with the types'
+equality functions (`Type.Equal`, used by the map and interface runtime and by compiler-generated
+`type:.eq.T`), hashes map keys with the types' hash functions (`Type.Hasher`, `type:.hash.T`),
+and copies or clears pointerful memory with `typedmemmove`, `typedmemclr` and
+`memclrHasPointers`. A theorem leaves them out with `--contract` and takes their contract.
+
+| Runtime function | arm64 / amd64 contract | Result |
+| --- | --- | --- |
+| `memequal(a, b, n)` | `Mem.Memequal`, `MemAmd64.Memequal` | `n` bytes at `a` and `b` agree |
+| `memequal0/8/16/32/64/128(a, b)` | `MemequalN 0/1/2/4/8/16` | the `k` bytes agree |
+| `memequal_varlen(a, b)` | `MemequalVarlen` | as `memequal`, size from the closure (`8(X26)` / `8(RDX)`) |
+| `f32equal`, `f64equal` | `Fequal binary32 4`, `Fequal binary64 8` | `feq`: IEEE `==` (`NaN != NaN`, `+0 == -0`) |
+| `c64equal`, `c128equal` | `Cequal …` | both parts `feq` |
+| `strequal` | `Strequal` | `strEq`: equal lengths and bytes |
+| `interequal`, `nilinterequal` | `Interequal`, `Nilinterequal` (over R2's `IfaceModel`) | equal first words and `ifaceeq`/`efaceeq` |
+| `memhash(p, h, n)`, `memhash8/16/128`, `memhash_varlen` | `Hash.Memhash`, `MemhashN`, `MemhashVarlen` | `H.mem h n v` |
+| `memhash0`, `memhash32`, `memhash64` | `Memhash0`, `Memhash32`, `Memhash64` | `h`; `H.mem32 h v`; `H.mem64 h v` |
+| `strhash(p, h)` | `Strhash` | `H.mem h len bytes` |
+| `f32hash`, `f64hash` | `Fhash …` | `FHashIs`: `±0 ↦ c1·(c0 ^ h)`, NaN ↦ `c1·(c0 ^ h ^ rand())`, else `H.mem h k x` |
+| `c64hash`, `c128hash` | `Chash …` | real part, then imaginary part |
+| `interhash`, `nilinterhash` | `Interhash`, `Nilinterhash` | `h` for nil, else `c1 · r`, `r` a `typehash` result |
+| `typehash(t, p, h)` | `Typehash` | some `H.TypeHash t m p h r` |
+| `rand()` | `Rand` | anything |
+| `typedmemmove(typ, dst, src)` | `TypedMemmove` (write barrier off) | `dst` gets the `typ.Size_` bytes of `src` |
+| `typedmemclr(typ, ptr)`, `memclrHasPointers(ptr, n)` | `TypedMemclr`, `MemclrHasPointers` (write barrier off) | zero bytes |
+| `memmove`, `memclrNoHeapPointers`, `bulkBarrierPreWrite` | `Memmove`, `MemclrNoHeapPointers`, `BulkBarrierOff` | the callees of the typed-memory functions |
+| `mapaccess2_faststr(t, m, key)` | `MapStr.Access2Str`, `Access2Str64` | `Map.Access2` keyed by the string's content `strKey` |
+
+**The seeded hash is a model.** Every theorem quantifies over `H : HashModel`: the byte hashes are
+uninterpreted functions of the seed and the bytes (the process's AES key schedule or `hashkey`,
+fixed by `H.Env`), so a proof can only use what every hash satisfies. The laws are theorems
+(`Janus/Contracts/HashLaws.lean`): equal floats have equal encodings unless both are zeros
+(`feq_eq`), so they hash alike (`fhashIs_of_feq`, with `+0`/`-0` explicitly by `fhashIs_zeros`); a
+NaN may hash to any value (`fhashIs_nan`: `c1` is odd, so `rand()` reaches every hash); equal
+strings hash alike (`strhash_of_strEq`). `HashFKey` uses them to prove, for the compiler-generated
+hash of a struct key, that keys equal under the generated `==` (`EqFKey`) have the same possible
+hashes: the law a map lookup relies on.
+
+**The frame.** As the map and interface contracts: the call returns to its return address with
+the ABI's preserved registers (and `FPCR`, `MXCSR`'s control bits), memory changed only in the
+callee's stack window `[SP - d, SP - 8)` (amd64 `[RSP - d, RSP)`), the argument spill slots, the
+model's private memory (`M.priv`, `H.priv`, `R.priv`; never for the pure equality functions) and
+the destination of a typed-memory call. Every precondition asks for the stack guard `d` below
+`SP`, the window writable, the guard word `16(g)` outside the callee's window (and, with a
+model, outside its private memory: a second runtime call after a first one must still find it),
+and every input readable, below `2^48` and outside the callee's window (the callee writes its
+frame before it reads). `memequal` has no spill slots (`nargs = 0`): the runtime's `memequal` is
+`NOFRAME`, and its callers (`strequal`, `memequal_varlen`, compiled `==`) leave no room for them.
+On amd64 a destination must also avoid the return-address slot.
+
+**The write barrier is a parameter.** `TypedMemmove`, `TypedMemclr` and `MemclrHasPointers` take
+the address `wb` of `runtime.writeBarrier` and require the flag off (`WriteBarrierOff`, the
+negation of agent/rtstr's `WriteBarrierOn`); the flag-on behaviour (the barrier buffer) is work
+package R5's.
+
+**Pinning.** All these functions except `typehash` are in `runtimeContractStubs`: a `--contract`
+naming one is checked to be the Go runtime's code (`checkContractPin`); `memequal` and
+`memequal_varlen` live in `internal/bytealg`, `mapaccess2_faststr` in `internal/runtime/maps`
+(`runtimeFuncDir`). `typehash` compiles a jump table whose normalized code differs between
+programs, so it is identified by name only.
+
+**Satisfiability.** `Janus/Contracts/MemSat.lean`, `HashSat.lean` (and `…Amd64.lean`) give, for
+every contract, model code proved to satisfy it for the models `EqHashModel.M0` (typed memory),
+`H0` (every hash is its seed), `IfaceModel.R0`, and a state satisfying the precondition;
+`MapStr.access2Str_satisfiable` for the map lookup (model `MS0`, nil maps). The examples' witnesses
+place that code behind a branch at the contract's address (`EqHashModel.branchWord`, `jmpBytes`,
+`Summary.of_codeIn`).
+
+**What is proved rather than assumed.** The runtime's own code of the equality, hash and
+typed-memory functions is proved to meet these contracts, given the contracts of what it calls
+(`examples/proofs/Alg*.lean`, `Mbar*.lean`; amd64 `examples/proofs-amd64/Alg*/`, `Mbar*/`), and on
+arm64 `runtime.memequal` itself for every length (`AlgMemequal`). Still assumed: `memhash`,
+`memhash32`, `memhash64`, `strhash` (assembly with an AES path), `typehash`, `rand`, `memmove`,
+`memclrNoHeapPointers`, `bulkBarrierPreWrite`, `mapaccess2_faststr`, and on amd64 `memequal` and
+`memequal_varlen` (both run `memeqbody`, which reads around short inputs).
+
+**Examples** (`examples/basic/rteq.go`; both ISAs): `Eq32` (`[32]byte` `==`, `memequal` executed),
+`StrEq` (`s == t`), `F64Eq` (`==` on `float64`, `+0 == -0`, NaN), `CopyTrees` (copy of a
+pointerful array through `typedmemmove`, write barrier off), `ClearTrees` (`clear` of a `[]*T`
+through `memclrHasPointers`), `LookupStr` (`map[string]uint64` lookup), `HashFKey` and `EqFKey`
+(the compiler-generated hash and `==` of a struct key, with the equal-keys-equal-hashes law).
 
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 

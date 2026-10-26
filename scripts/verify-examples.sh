@@ -29,11 +29,16 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      PanicIf DeferInc IndexAt LoadField DeferTwice RecoverSet
      NewPair MakeSlice AppendOne SetNext MallocFast
      Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
-     Box AsHasher Classify Equal
+     LookupS InsertS DeleteS LookupK24 InsertK24 Has32 Set32 InsertPtr LookupPtr MakeHint
      Triangle GotoSum Find2D RowsWith Log2 TotalMeters TotalFeet Fact SumBelow ReverseArray DivMod10
      SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
      Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
+     Box AsHasher Classify Equal
+     Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
      BigLocal SumRec HoldPtr)
+. scripts/example-contracts.sh
+# the runtime's equality, hashing and typed-memory functions verified from their code
+all+=($runtime_examples $runtime_examples_arm64_only)
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${all[@]}" WrongAdd)
 
@@ -83,7 +88,7 @@ verify_one() {
   if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
   st="$(mktemp -d)"
   start=$(date +%s.%N)
-  verify_theorems "$out" "examples/proofs/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"}
+  verify_theorems "$out" "examples/proofs/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"} || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)
   cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
   if [ "$(cat "$st/0.rc")" = 0 ]; then

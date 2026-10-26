@@ -48,7 +48,11 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 128) (BitVec 64)
   · simp only [setReg_apply]; simp only [reduceIte, Nat.reduceEqDiff]
     exact IsMap.frame hl hmap (Agrees.of_window (lo := s.sp.toNat - (M.depth + 48)) (hi := s.sp.toNat + 0)
       (by janus_frame) (Outside.of_sub hout (by omega) (by omega)))
-  · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, Memory.accessible_writeLE]; exact hk1
+  · have hsp : (s.sp - 48#64).toNat = s.sp.toNat - 48 := by
+      rw [BitVec.toNat_sub_of_le (by simp only [BitVec.le_def, BitVec.toNat_ofNat]; omega)]; rfl
+    simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, Memory.accessible_writeLE, calleeStack, hsp,
+      outside_cons, outside_nil, and_true]
+    exact ⟨hk1, by omega, by omega⟩
   · intro s' hpc' ⟨r, v, fl, m', hs', hfr, henv', hoth, hmap', ⟨hs1, hs2, hs3⟩, hok⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.append_nil] at hfr
