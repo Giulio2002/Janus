@@ -651,6 +651,25 @@ theorem unpack_nz (f : Janus.Float.Fmt) (fpcr : Nat) (e : Bool) (x : Nat)
   · obtain ⟨n, e', hv, hn⟩ := key (Or.inr hk)
     exact ⟨n, ⟨e', hv⟩, hn⟩
 
+theorem unpack_nzs (f : Janus.Float.Fmt) (fpcr : Nat) (e : Bool) (x : Nat)
+    (h : (Janus.Arm64.FP.unpack f fpcr e x).1.1 = .nonzero ∨ (Janus.Arm64.FP.unpack f fpcr e x).1.1 = .denormal) :
+    ∃ n e', (Janus.Arm64.FP.unpack f fpcr e x).1.2.2 = .num n e' ∧ n ≠ 0 ∧ (Janus.Arm64.FP.unpack f fpcr e x).1.2.1 = decide (n < 0) := by
+  unfold Janus.Arm64.FP.unpack at h ⊢
+  have key : ∀ hk : Janus.Float.classify f x = .subnormal ∨ Janus.Float.classify f x = .normal,
+      ∃ n e', Janus.Float.valueOf f x = .num n e' ∧ n ≠ 0 ∧ Janus.Float.signOf f x = decide (n < 0) := by
+    intro hk
+    have hm := mantOf_ne f x hk
+    unfold Janus.Float.valueOf
+    rcases hk with hk | hk <;> simp only [hk] <;> refine ⟨_, _, rfl, ?_, ?_⟩ <;> by_cases hs : Janus.Float.signOf f x = true <;> simp [hs] <;> omega
+  cases hk : Janus.Float.classify f x <;> simp only [hk] at h ⊢ <;> (try simp at h ⊢)
+  · by_cases hcnd : Janus.Arm64.FP.fz fpcr = true ∧ Janus.Arm64.FP.ah fpcr = false ∨ Janus.Arm64.FP.fiz fpcr = true
+    · simp only [hcnd, ite_true] at h; simp at h
+    · simp only [hcnd, ite_false]
+      obtain ⟨n, e', hv, hn, hs⟩ := key (Or.inl hk)
+      exact ⟨n, ⟨e', hv⟩, hn, hs⟩
+  · obtain ⟨n, e', hv, hn, hs⟩ := key (Or.inr hk)
+    exact ⟨n, ⟨e', hv⟩, hn, hs⟩
+
 theorem processNaNs_none {f : Janus.Float.Fmt} {fpcr : Nat} {t1 t2 : Janus.Arm64.FP.FPType} {a b : Nat}
     (h : Janus.Arm64.FP.processNaNs f fpcr t1 t2 a b = none) :
     t1 ≠ .snan ∧ t1 ≠ .qnan ∧ t2 ≠ .snan ∧ t2 ≠ .qnan := by
