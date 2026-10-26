@@ -967,12 +967,41 @@ no concurrent GC, no preemption):
   is the runtime's: the extractor pins every one of these functions except `typehash`, whose jump
   table makes its normalized code program-dependent (`runtimeContractStubs`, `runtimeFuncDir` for
   the ones `internal/bytealg` and `internal/runtime/maps` define). Every contract is satisfiable
-  (`Janus/Contracts/MemSat.lean`, `HashSat.lean`, `MapStr.lean` and the amd64 files: models
+  (`Janus/Contracts/MemSat.lean`, `HashSat.lean`, `MapStrSat.lean` and the amd64 files: models
   `M0`, `H0`, `R0`, `MS0`, code and a state), and every example proves its hypotheses jointly
   satisfiable and its conclusion reached (`Proof.Witness.nonvacuous`, `.returns`). **Proved from
   the machine code rather than assumed** (`examples/proofs/Alg*.lean`, `Mbar*.lean`,
   `examples/proofs-amd64/Alg*/`, `Mbar*/`): the runtime's own equality, hash and typed-memory
   functions meet their contracts given the contracts of their callees.
+* **Maps** (`Janus/Spec/Map.lean`, `Janus/Contracts/Map.lean`, `MapVar.lean`, `MapStr.lean` and
+  their amd64 files; docs/RUNTIME-CONTRACTS.md, "Maps"). The contracts of `makemap_small`,
+  `makemap`, `mapaccess1`, `mapaccess2`, `mapassign`, `mapdelete`, `mapaccess1_fat`,
+  `mapaccess2_fat`, the `_fast32`, `_fast64`, `_fast64ptr` and `_faststr` entry points,
+  `mapclear`, `mapIterStart` and `mapIterNext`, as `Summary`s over an abstract model
+  `M : MapModel K V` that the theorem quantifies over (`Rep`, `Iter`, `Typ`, `Env`, `priv`,
+  `depth`). Trusted, as claims about the Go 1.26 runtime: (1) each contract's effect on the
+  abstract map (`AMap`), the same model for every entry point of a map type; (2) the laws
+  `M.Laws` (the representation lives in `M.priv`, the header's first word is `len`, finitely
+  many keys); (3) **readiness of the allocating calls** (`makemap*`, `mapassign*`): they take
+  `H : RtReady` like the allocation contracts (finding R3-C1: without it the old `Assign` and
+  `MakeSmall` were false for every implementation, `audit/maps/model/Unsat.lean`, so `Insert`,
+  `InsertGet` and `NewMap` were vacuous), one allocating map call per theorem; the read-only
+  entry points keep the perpetual `M.Env`; (4) the key semantics of each entry point: 8- and
+  4-byte words, string content (`strKey`; a key stored by `mapassign_faststr` must lie in the
+  runtime's memory, `StrOwned`, since the map keeps pointing to it), and for the generic entry
+  points `n` bytes of a `TFlagRegularMemory` key type (`KeyRegular`, read from the descriptor in
+  the runtime's memory), which R4's hash and equality laws justify; key types with floats,
+  strings or interfaces inside are not covered; (5) keys and iterator structs outside the
+  callee's stack window (and on amd64 the iterator off the return-address slot); (6) no
+  modification of a map during a `range` over it, no nil-map assignment (it panics), no
+  stack-allocated `makemap` header, and the concurrent-access checks (`fatal`) unreachable in
+  the single-threaded model. The code is the runtime's: the extractor pins all 24 map entry
+  points like stubs (`runtimeContractStubs`; `runtimeFuncDir` for the ones `internal/runtime/maps`
+  defines). Every contract is satisfiable (`Janus/Contracts/MapSat.lean`, `MapVarSat.lean`,
+  `MapStrSat.lean`, the amd64 files; models `ME`, `MC` of `MapModel0.lean`, code and a state with
+  a non-nil map), and every R3 example (and `SumValues`) proves its hypotheses jointly
+  satisfiable (`Proof.Witness.nonvacuous`). **Proved from the machine code rather than assumed:**
+  `mapaccess1_fast64` on small maps (`MapAccess1Small`, both ISAs).
 * **Write barriers** need no contract: the barrier's fast path (`runtime.gcWriteBarrier2`,
   `gcWriteBarrier`, the buffer append) is extracted and executed. Only the buffer flush
   `runtime.wbBufFlush` is left out, and the examples' precondition (the P's `wbBuf` has room)

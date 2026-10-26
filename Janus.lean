@@ -45,7 +45,16 @@ import Janus.Contracts.HashAmd64
 import Janus.Contracts.EqHashModel
 import Janus.Contracts.HashLaws
 import Janus.Contracts.MapStr
+import Janus.Contracts.MapStrAmd64
 import Janus.Contracts.MapStrSat
+import Janus.Contracts.MapStrSatAmd64
+import Janus.Contracts.MapVar
+import Janus.Contracts.MapVarAmd64
+import Janus.Contracts.MapModel0
+import Janus.Contracts.MapSat
+import Janus.Contracts.MapVarSat
+import Janus.Contracts.MapSatAmd64
+import Janus.Contracts.MapVarSatAmd64
 import Janus.Contracts.MemSat
 import Janus.Contracts.HashSat
 import Janus.Contracts.MemSatAmd64

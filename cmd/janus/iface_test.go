@@ -119,8 +119,8 @@ func TestContractPinNeedsRuntimeFile(t *testing.T) {
 }
 
 // The names of the list are the runtime entry points with a contract in the contract library
-// (the interface ones of agent/rtiface and the equality, hashing, typed-memory and string-key map
-// ones of agent/eqhash): each is described in Janus/Contracts (as `name(` or `runtime.name(`), and scripts/stubpins
+// (the interface ones of agent/rtiface, the equality, hashing and typed-memory ones of
+// agent/eqhash, and the map ones of agent/maps2): each is described in Janus/Contracts (as `name(` or `runtime.name(`), and scripts/stubpins
 // links every one (so gen-stubpins measures them).
 func TestContractStubNames(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "stubpins", "main.go"))
@@ -139,8 +139,8 @@ func TestContractStubNames(t *testing.T) {
 		}
 		lean.Write(b)
 	}
-	if len(runtimeContractStubs) != 51 {
-		t.Errorf("%d contract stubs, want 51 (13 interface + 38 equality/hash/typed-memory/map)", len(runtimeContractStubs))
+	if len(runtimeContractStubs) != 74 {
+		t.Errorf("%d contract stubs, want 74 (13 interface + 37 equality/hash/typed-memory + 24 map)", len(runtimeContractStubs))
 	}
 	for name := range runtimeContractStubs {
 		if !strings.Contains(string(src), "//go:linkname s_"+strings.TrimPrefix(name, "runtime.")+" "+name+"\n") {

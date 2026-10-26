@@ -139,8 +139,77 @@ func s_interfaceSwitch()
 //go:linkname s_interhash runtime.interhash
 func s_interhash()
 
+//go:linkname s_makemap runtime.makemap
+func s_makemap()
+
+//go:linkname s_makemap_small runtime.makemap_small
+func s_makemap_small()
+
+//go:linkname s_mapaccess1 runtime.mapaccess1
+func s_mapaccess1()
+
+//go:linkname s_mapaccess1_fast32 runtime.mapaccess1_fast32
+func s_mapaccess1_fast32()
+
+//go:linkname s_mapaccess1_fast64 runtime.mapaccess1_fast64
+func s_mapaccess1_fast64()
+
+//go:linkname s_mapaccess1_faststr runtime.mapaccess1_faststr
+func s_mapaccess1_faststr()
+
+//go:linkname s_mapaccess1_fat runtime.mapaccess1_fat
+func s_mapaccess1_fat()
+
+//go:linkname s_mapaccess2 runtime.mapaccess2
+func s_mapaccess2()
+
+//go:linkname s_mapaccess2_fast32 runtime.mapaccess2_fast32
+func s_mapaccess2_fast32()
+
+//go:linkname s_mapaccess2_fast64 runtime.mapaccess2_fast64
+func s_mapaccess2_fast64()
+
 //go:linkname s_mapaccess2_faststr runtime.mapaccess2_faststr
 func s_mapaccess2_faststr()
+
+//go:linkname s_mapaccess2_fat runtime.mapaccess2_fat
+func s_mapaccess2_fat()
+
+//go:linkname s_mapassign runtime.mapassign
+func s_mapassign()
+
+//go:linkname s_mapassign_fast32 runtime.mapassign_fast32
+func s_mapassign_fast32()
+
+//go:linkname s_mapassign_fast64 runtime.mapassign_fast64
+func s_mapassign_fast64()
+
+//go:linkname s_mapassign_fast64ptr runtime.mapassign_fast64ptr
+func s_mapassign_fast64ptr()
+
+//go:linkname s_mapassign_faststr runtime.mapassign_faststr
+func s_mapassign_faststr()
+
+//go:linkname s_mapclear runtime.mapclear
+func s_mapclear()
+
+//go:linkname s_mapdelete runtime.mapdelete
+func s_mapdelete()
+
+//go:linkname s_mapdelete_fast32 runtime.mapdelete_fast32
+func s_mapdelete_fast32()
+
+//go:linkname s_mapdelete_fast64 runtime.mapdelete_fast64
+func s_mapdelete_fast64()
+
+//go:linkname s_mapdelete_faststr runtime.mapdelete_faststr
+func s_mapdelete_faststr()
+
+//go:linkname s_mapIterNext runtime.mapIterNext
+func s_mapIterNext()
+
+//go:linkname s_mapIterStart runtime.mapIterStart
+func s_mapIterStart()
 
 //go:linkname s_memclrHasPointers runtime.memclrHasPointers
 func s_memclrHasPointers()
@@ -204,6 +273,9 @@ func s_nilinterequal()
 
 //go:linkname s_nilinterhash runtime.nilinterhash
 func s_nilinterhash()
+
+//go:linkname s_panicBounds runtime.panicBounds
+func s_panicBounds()
 
 //go:linkname s_panicBounds32 runtime.panicBounds32
 func s_panicBounds32()
@@ -336,7 +408,30 @@ var keep = []func(){
 	s_interequal,
 	s_interfaceSwitch,
 	s_interhash,
+	s_makemap,
+	s_makemap_small,
+	s_mapaccess1,
+	s_mapaccess1_fast32,
+	s_mapaccess1_fast64,
+	s_mapaccess1_faststr,
+	s_mapaccess1_fat,
+	s_mapaccess2,
+	s_mapaccess2_fast32,
+	s_mapaccess2_fast64,
 	s_mapaccess2_faststr,
+	s_mapaccess2_fat,
+	s_mapassign,
+	s_mapassign_fast32,
+	s_mapassign_fast64,
+	s_mapassign_fast64ptr,
+	s_mapassign_faststr,
+	s_mapclear,
+	s_mapdelete,
+	s_mapdelete_fast32,
+	s_mapdelete_fast64,
+	s_mapdelete_faststr,
+	s_mapIterNext,
+	s_mapIterStart,
 	s_memclrHasPointers,
 	s_memclrNoHeapPointers,
 	s_memequal,
@@ -358,6 +453,7 @@ var keep = []func(){
 	s_memmove,
 	s_nilinterequal,
 	s_nilinterhash,
+	s_panicBounds,
 	s_panicBounds32,
 	s_panicBounds32X,
 	s_panicBounds64,

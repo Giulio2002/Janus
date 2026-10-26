@@ -97,7 +97,10 @@ theorem loop (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (hl : 
             hl.iter_writeLE _ _ _ _ _ (by simp only [outside_append, outside_cons, outside_nil, and_true, iterSize]; exact ⟨ho112, by omega⟩)]
           exact hit,
        by simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, hsp104, iterSize]
-          exact Outside.of_sub hout (by omega) (by omega)⟩ ?_
+          exact Outside.of_sub hout (by omega) (by omega),
+       by simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, calleeStack,
+            hsp160, outside_cons, outside_nil, and_true]
+          omega⟩ ?_
     intro s' hpc' ⟨r, vr, fl, m'', hs', hfr2, henv2, hoth, hmap2, hit2, hv2⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.cons_append, List.nil_append, hsp160, setReg_apply,
@@ -159,7 +162,7 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
   janus_run until [Extracted.program.contractAddr "runtime.mapIterStart"]
   refine Reaches.call (Summary.withExit (hstart f) hret) rfl
     ⟨RTPre.of_caller hl hc (by janus_frame) (by simp; omega) rfl (by simp [setReg]) (by simp [setReg])
-      (by decide) (by decide), by simpa [setReg] using hty, ?_, ?_, ?_⟩ ?_
+      (by decide) (by decide), by simpa [setReg] using hty, ?_, ?_, ?_, ?_⟩ ?_
   · simp only [setReg_apply]; simp only [reduceIte, Nat.reduceEqDiff]
     exact IsMap.frame hl hmap (Agrees.of_window (lo := s.sp.toNat - (M.depth + 160))
       (hi := s.sp.toNat + 0) (by janus_frame) (Outside.of_sub hout (by omega) (by omega)))
@@ -167,6 +170,9 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
     exact Memory.accessible_mono _ hst (by omega) (by omega)
   · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, hsp104, iterSize]
     exact Outside.of_sub hout (by omega) (by omega)
+  · simp only [setReg_apply, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, calleeStack, hsp160,
+      outside_cons, outside_nil, and_true]
+    omega
   · intro s' hpc' ⟨r, vr, fl, m', hs', hfr, henv', hoth, hmap', ks, hks, hit, hv⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.cons_append, List.nil_append, hsp160, setReg_apply,
@@ -184,5 +190,154 @@ theorem correctness (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64))
     simp only [outside_append, outside_cons, outside_nil, and_true, iterSize] at h ⊢
     obtain ⟨hp, h1, h2⟩ := h
     exact ⟨⟨hp, h1, h2⟩, ⟨hp, by omega, by omega⟩, by omega⟩
+
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+The model `MapSat.MEI` (one empty, non-nil map at `MP`; iterators with at most one key left and
+a writable iterator struct), code meeting `IterStart` (`str xzr, [x2]; ret` at `A0`) and
+`IterNext` (`str xzr, [x0]; ret` at `A0 + 8`) for it, each reached from its contract's address
+by a branch, and a call `SumValues(MP)`: `correctness` applies (`returns`: the sum is `0`). -/
+
+namespace Witness
+
+open Janus.Contracts.EqHashModel Janus.Contracts.IfaceSat Janus.Contracts.IfaceModel
+  Janus.Contracts.MapModel0 Janus.Contracts.MapSat
+
+/-- Both implementations: `IterStart` at `A0`, `IterNext` at `A0 + 8`. -/
+def iterCode : List Nat := [0xf900005f, 0xd65f03c0, 0xf900001f, 0xd65f03c0]
+
+/-- `IterStart` for `MEI` (the iteration over the empty map ends at once). -/
+theorem start_impl : IterStart (toy.link (at0 iterCode)) A0 (MEI (BitVec 64)) := by
+  rw [link_at0]
+  intro f s hpc hpre
+  obtain ⟨⟨hze, hg, hc, hout⟩, -, hmap, hit, hip, hic⟩ := hpre
+  obtain ⟨hl1, hl2, -⟩ := hc
+  have hf := ME_empty (K := BitVec 64) hmap
+  subst hf
+  have hip8 : Outside (s.regs 2).toNat 8 (MEI (BitVec 64)).priv :=
+    Outside.of_sub hip (by omega) (by simp [iterSize])
+  have hw : s.mem.accessible (s.regs 2).toNat 8 true = true :=
+    Memory.accessible_mono _ hit (Nat.le_refl _) (by simp [iterSize])
+  janus_run
+  have ha := agrees_writeLE s.mem 0 hip8
+  refine mapReturn_of (MEI _) 3 _ _ s _ _ rfl rfl rfl rfl rfl rfl rfl rfl rfl ?_
+    (ZEnv.frame hze ha) (fun _ _ _ h => (MEI_laws _).rep_frame _ _ _ _ h ha)
+    ⟨IsMap.frame (MEI_laws _) hmap ha, [], keys_empty,
+      ⟨Nat.zero_le _, by rw [Memory.accessible_writeLE]; exact hit⟩, ?_⟩
+  · simp only [rtWrites, List.append_assoc]
+    exact (MemFrame.refl _ _).writeLE_inRanges _
+      ⟨((s.regs 2).toNat, (s.regs 2).toNat + iterSize), by simp, Nat.le_refl _, by simp [iterSize]⟩
+  · show (s.mem.writeLE (s.regs 2).toNat 8 _).readLE (s.regs 2).toNat 8 = 0
+    rw [Memory.readLE_writeLE_self]
+
+/-- `IterNext` for `MEI` (one key left: the iteration ends). -/
+theorem next_impl : IterNext (toy.link (at0 iterCode)) (A0 + 8) (MEI (BitVec 64)) := by
+  rw [link_at0]
+  intro mp f k ks s hpc hpre
+  obtain ⟨⟨hze, hg, hc, hout⟩, hmap, ⟨hlen, hit⟩, hip, hic⟩ := hpre
+  obtain ⟨hl1, hl2, -⟩ := hc
+  have hks : ks = [] := by cases ks <;> simp_all
+  subst hks
+  have hip8 : Outside (s.regs 0).toNat 8 (MEI (BitVec 64)).priv :=
+    Outside.of_sub hip (by omega) (by simp [iterSize])
+  have hw : s.mem.accessible (s.regs 0).toNat 8 true = true :=
+    Memory.accessible_mono _ hit (Nat.le_refl _) (by simp [iterSize])
+  janus_run
+  have ha := agrees_writeLE s.mem 0 hip8
+  refine mapReturn_of (MEI _) 1 _ _ s _ _ rfl rfl rfl rfl rfl rfl rfl rfl rfl ?_
+    (ZEnv.frame hze ha) (fun _ _ _ h => (MEI_laws _).rep_frame _ _ _ _ h ha)
+    ⟨IsMap.frame (MEI_laws _) hmap ha, ⟨Nat.zero_le _, by rw [Memory.accessible_writeLE]; exact hit⟩, ?_⟩
+  · simp only [rtWrites, List.append_assoc]
+    exact (MemFrame.refl _ _).writeLE_inRanges _
+      ⟨((s.regs 0).toNat, (s.regs 0).toNat + iterSize), by simp, Nat.le_refl _, by simp [iterSize]⟩
+  · show (s.mem.writeLE (s.regs 0).toNat 8 _).readLE (s.regs 0).toNat 8 = 0
+    rw [Memory.readLE_writeLE_self]
+
+def sAddr : Nat := Extracted.program.contractAddr "runtime.mapIterStart"
+def nAddr : Nat := Extracted.program.contractAddr "runtime.mapIterNext"
+
+def trampS : Segment := { name := "trampS", base := sAddr, words := [branchWord sAddr A0] }
+def trampN : Segment := { name := "trampN", base := nAddr, words := [branchWord nAddr (A0 + 8)] }
+def model0 : Segment := { name := "model", base := A0, words := iterCode }
+def implAt : List Segment := [trampS, trampN, model0]
+
+theorem link_eq : Extracted.program.link implAt = (Extracted.program.link [trampS, trampN]).link [model0] := by
+  simp [Program.link, implAt]
+
+theorem codeIn : CodeIn (segProg model0) (Extracted.program.link implAt) := by
+  rw [link_eq]; exact codeIn_link _ model0 (by decide)
+
+theorem modelS : IterStart (Extracted.program.link implAt) sAddr (MEI (BitVec 64)) := by
+  have hA : IterStart (Extracted.program.link implAt) A0 (MEI (BitVec 64)) :=
+    fun f => Summary.of_codeIn codeIn (start_impl f)
+  intro f s hpc hpre
+  rw [link_eq] at hA ⊢
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s
+  janus_eval_nat hC : sAddr
+  simp only [hC] at hpc
+  subst hpc
+  janus_run until [A0]
+  obtain ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
+  exact hA f _ rfl ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+
+theorem modelN : IterNext (Extracted.program.link implAt) nAddr (MEI (BitVec 64)) := by
+  have hA : IterNext (Extracted.program.link implAt) (A0 + 8) (MEI (BitVec 64)) :=
+    fun mp f k ks => Summary.of_codeIn codeIn (next_impl mp f k ks)
+  intro mp f k ks s hpc hpre
+  rw [link_eq] at hA ⊢
+  obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs⟩ := s
+  janus_eval_nat hC : nAddr
+  simp only [hC] at hpc
+  subst hpc
+  janus_run until [A0 + 8]
+  obtain ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩ := hpre
+  exact hA mp f k ks _ rfl ⟨⟨he, ⟨g1, g2, g3⟩, hrest⟩, hrest'⟩
+
+def ret : Nat := wret
+
+theorem hret : RetAddr (Extracted.program.link implAt) ret := RetAddr.of_check (by decide)
+
+def mv : BitVec 64 := BitVec.ofNat 64 MP
+
+/-- The witness call state: `SumValues(MP)`. -/
+def s0 : State :=
+  { regs := fun i => if i = 0 then mv
+      else if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mmem }
+
+theorem setup : CallSetup ((Extracted.program.link implAt).withExit ret) Extracted.entry [mv] s0 :=
+  ⟨rfl, rfl, by
+    intro i h; simp at h
+    rcases (by omega : i = 0) with rfl; rfl⟩
+
+theorem pre0 : CallerOK (MEI (BitVec 64)) s0 160 0 ∧ (MEI (BitVec 64)).Typ mapType ∧
+    IsMap (MEI (BitVec 64)) s0.mem mv.toNat AMap.empty := by
+  refine ⟨⟨mmem_zenv, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide,
+    by decide, by decide, ?_, ?_, ?_⟩, trivial, (isMap_of_ne (by decide)).2 (mmem_rep _)⟩
+  · simp only [MEI_priv, MEI_depth, priv0, outside_cons, outside_nil, and_true]; decide
+  · unfold Disjoint; decide
+  · simp only [MEI_priv, priv0, outside_cons, outside_nil, and_true]; decide
+
+/-- All hypotheses of `correctness` are satisfiable together, with a non-nil map. -/
+theorem nonvacuous : ∃ (impl : List Segment) (M : MapModel (BitVec 64) (BitVec 64)) (ret : Nat)
+    (s : State) (m : BitVec 64) (f : AMap (BitVec 64) (BitVec 64)),
+    M.Laws ∧ IterStart (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterStart") M ∧
+    IterNext (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.mapIterNext") M ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [m] s ∧ m.toNat ≠ 0 ∧
+    (CallerOK M s 160 0 ∧ M.Typ mapType ∧ IsMap M s.mem m.toNat f) :=
+  ⟨implAt, MEI _, ret, s0, mv, AMap.empty, MEI_laws _, modelS, modelN, hret, setup, by decide, pre0⟩
+
+/-- So the guarantee is reached: the sum over the empty map is `0`. -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ s'.regs 0 = 0 := by
+  refine (correctness implAt (MEI _) (MEI_laws _) modelS modelN mv AMap.empty ret hret s0 setup
+    pre0).mono ?_
+  intro s' h
+  refine ⟨h.1, BitVec.eq_of_toNat_eq ?_⟩
+  rw [h.2 [] keys_empty]; rfl
+
+end Witness
 
 end Proof
