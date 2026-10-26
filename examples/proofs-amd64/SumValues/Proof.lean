@@ -95,7 +95,7 @@ theorem loop (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) (BitVec
        by simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, retSlot, hsp144,
             outside_cons, outside_nil, and_true]
           omega⟩ ?_
-    intro s' hpc' ⟨r, x, y, fl, m'', hs', hfr2, henv2, hoth, hmap2, hit2, hv2⟩
+    intro s' hpc' ⟨r, x, y, fl, m'', _, _, hs', hfr2, henv2, hoth, hmap2, hit2, hv2⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.cons_append, List.nil_append, setRegF, reduceIte,
       Nat.reduceEqDiff, hsp144, hsp104] at hfr2
@@ -163,7 +163,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
   · simp only [setRegF, reduceIte, Nat.reduceEqDiff, hsp104, iterSize, retSlot, hsp144,
       outside_cons, outside_nil, and_true]
     omega
-  · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hmap', ks, hks, hit, hv⟩
+  · intro s' hpc' ⟨r, x, y, fl, m', _, _, hs', hfr, henv', hoth, hmap', ks, hks, hit, hv⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.cons_append, List.nil_append, setRegF, reduceIte,
       Nat.reduceEqDiff, hsp144, hsp104] at hfr hit hv henv' hmap'

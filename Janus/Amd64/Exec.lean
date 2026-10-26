@@ -8,6 +8,7 @@ import Janus.Amd64.X87Exec
 import Janus.Amd64.ExecSSE
 import Janus.Amd64.ExecCrypto
 import Janus.Amd64.ExecAVX
+import Janus.Amd64.ExecEVEX
 
 /-!
 # x86-64 execution semantics for the supported subset
@@ -40,7 +41,9 @@ Each case follows the Intel SDM Vol. 2 `Operation` and `Flags Affected` sections
 * Vector registers (`State.xmm` = bits 127:0, `State.ymmHi` = bits 255:128): a legacy-SSE
   instruction writes only `xmm` (bits 255:128 preserved, SDM Vol. 1 §14.1.3); a VEX.128
   instruction writes `xmm` and zeroes `ymmHi` of its destination register; a VEX.256 one writes
-  both (`State.setV`). VEX memory operands need no alignment except for `VMOVDQA`/`VMOVNTDQ`
+  both (`State.setV`); a VEX write also zeroes bits 511:256 (`State.zmmHi`, AVX-512). `VZEROUPPER`
+  zeroes bits 511:128 of `ZMM0`–`ZMM15` (not `ZMM16`–`ZMM31`). EVEX instructions are
+  `Janus.Amd64.ExecEVEX`. VEX memory operands need no alignment except for `VMOVDQA`/`VMOVNTDQ`
   (`l/8` bytes, else `misaligned`). Vector values are naturals `< 2^l`, little-endian, so byte
   `i` is `v / 256^i % 256`.
 * An `FS`-relative memory operand is at `fsBase + ea` (mod `2^64`).
@@ -84,13 +87,17 @@ def setXmm (s : State) (n : Nat) (v : W128) : State :=
 def setYmmHi (s : State) (n : Nat) (v : W128) : State :=
   { s with ymmHi := fun i => if i = n then v else s.ymmHi i }
 
+/-- Bits 511:256 of `ZMMn` (AVX-512). -/
+def setZmmHi (s : State) (n : Nat) (v : BitVec 256) : State :=
+  { s with zmmHi := fun i => if i = n then v else s.zmmHi i }
+
 /-- Bits `l-1:0` of `YMMn` (`l ∈ {128, 256}`) as a natural number. -/
 def getV (s : State) (l n : Nat) : Nat := if l = 256 then s.ymm n else (s.xmm n).toNat
 
 /-- A VEX write of the `l`-bit value `v` to `YMMn`: bits 127:0 from `v`, bits 255:128 from `v`
-for `l = 256`, zeroed for `l = 128`. -/
+for `l = 256`, zeroed for `l = 128`; bits 511:256 of `ZMMn` zeroed. -/
 def setV (s : State) (l n v : Nat) : State :=
-  (s.setXmm n (BitVec.ofNat 128 v)).setYmmHi n (if l = 256 then BitVec.ofNat 128 (v / 2 ^ 128) else 0)
+  ((s.setXmm n (BitVec.ofNat 128 v)).setYmmHi n (if l = 256 then BitVec.ofNat 128 (v / 2 ^ 128) else 0)).setZmmHi n 0
 
 /-- The low `w` bits of register `r`. -/
 def getReg (s : State) (w r : Nat) : BitVec w := (s.regs r).setWidth w
@@ -130,6 +137,10 @@ instruction. (In the `janus64_exec` simp set, as `ea` is.) -/
 /-- The linear address of `a`: `eaOff`, plus the `FS` base for an `FS`-relative operand. -/
 def ea (s : State) (next : W64) (a : Addr) : W64 :=
   if a.fs then s.fsBase + eaOff s next a else eaOff s next a
+
+/-- `ea` as a natural number, the address function the AVX-512 executor receives (a named
+function, so that the proof automation rewrites it only where it is applied). -/
+def eaNat (s : State) (next : W64) (a : Addr) : Nat := (ea s next a).toNat
 
 def readLoc (s : State) (next : W64) (w : Nat) : Loc → Except Fault (BitVec w)
   | .reg r => .ok (s.getReg w r)
@@ -1039,7 +1050,9 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
     match b with
     | .error e => .error e
     | .ok b => .ok ((s.setV l dst (replBytes (l / 8) b)).setRip next)
-  | .vzeroupper => .ok ({ s with ymmHi := fun _ => 0 }.setRip next)
+  | .vzeroupper =>
+    .ok ({ s with ymmHi := fun i => if i < 16 then 0 else s.ymmHi i,
+                  zmmHi := fun i => if i < 16 then 0 else s.zmmHi i }.setRip next)
   | .movdq w toX x g =>
     if toX then
       match readLoc s next w g with
@@ -1234,6 +1247,7 @@ def exec (i : Instr) (len : Nat) (s : State) : Except Fault State :=
   | .sse i => ExecSSE.exec s next pc (eaNat s next) i
   | .crypto i => ExecCrypto.exec s next pc (eaNat s next) i
   | .avx i => ExecAVX.exec s next pc (fun a => (ea s next a).toNat) i
+  | .evex i => ExecEVEX.exec s next pc (eaNat s next) i
 
 /-- Decode and execute the instruction at the start of `bytes` (the code at `s.rip`). -/
 def step (bytes : List Nat) (s : State) : Except Fault State :=

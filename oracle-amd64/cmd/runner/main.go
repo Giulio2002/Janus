@@ -53,6 +53,7 @@ func restorer()
 func resume()
 func addrs() (handler, restorer uintptr)
 func cpuid(eax, ecx uint32) (a, b, c, d uint32)
+func xgetbv0() uint64
 
 const (
 	sigILL  = 4
@@ -94,7 +95,11 @@ const (
 // encoding order RAX RCX RDX RBX RSP RBP RSI RDI R8..R15 -> gregs index
 var gregOf = [16]int{gRAX, gRCX, gRDX, gRBX, gRSP, gRBP, gRSI, gRDI, gR8, gR9, gR10, gR11, gR12, gR13, gR14, gR15}
 
-var ctx, code, data []byte
+var ctx, ctx2, code, data []byte
+
+// use512: the host has AVX-512F with the opmask/ZMM state enabled in XCR0, so the runner loads
+// and captures ZMM0-31 and K0-K7 (Ctx2Page).
+var use512 bool
 
 func mmapFixed(addr uint64, size int, prot int) []byte {
 	p, _, errno := syscall.Syscall6(syscall.SYS_MMAP, uintptr(addr), uintptr(size), uintptr(prot),
@@ -152,6 +157,30 @@ func parseHex128(s string) ([16]byte, error) {
 }
 
 func hex64(v uint64) string { return "0x" + strconv.FormatUint(v, 16) }
+
+// parseHexN returns the little-endian n bytes of a hex value of at most 8n bits.
+func parseHexN(s string, n int) ([]byte, error) {
+	out := make([]byte, n)
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+	v, ok := new(big.Int).SetString(s, 16)
+	if !ok || v.Sign() < 0 || v.BitLen() > 8*n {
+		return out, fmt.Errorf("bad %d-byte value %q", n, s)
+	}
+	b := v.FillBytes(make([]byte, n)) // big-endian
+	for i := 0; i < n; i++ {
+		out[i] = b[n-1-i]
+	}
+	return out, nil
+}
+
+// hexN renders the little-endian bytes b as a hex number.
+func hexN(b []byte) string {
+	be := make([]byte, len(b))
+	for i := range b {
+		be[i] = b[len(b)-1-i]
+	}
+	return "0x" + new(big.Int).SetBytes(be).Text(16)
+}
 
 func hex128(b []byte) string {
 	be := make([]byte, 16)
@@ -266,6 +295,32 @@ func runCase(c *L.Case, seq int64) L.HW {
 		}
 		copy(ctx[L.CtxInYMMH+16*i:], y[:])
 	}
+	if use512 {
+		for _, f := range []struct {
+			vals  []string
+			n, sz int
+			off   int
+			name  string
+		}{{c.ZMMH, 16, 32, L.Ctx2InZMMH, "zmmh"}, {c.ZMMX, 16, 64, L.Ctx2InZMMX, "zmmx"}, {c.K, 8, 8, L.Ctx2InK, "k"}} {
+			if len(f.vals) != 0 && len(f.vals) != f.n {
+				r.Status, r.Note = "error", fmt.Sprintf("%s must have %d entries", f.name, f.n)
+				return r
+			}
+			for i := 0; i < f.n; i++ {
+				b := make([]byte, f.sz)
+				if len(f.vals) == f.n {
+					if b, err = parseHexN(f.vals[i], f.sz); err != nil {
+						r.Status, r.Note = "error", err.Error()
+						return r
+					}
+				}
+				copy(ctx2[f.off+f.sz*i:], b)
+			}
+		}
+	} else if len(c.ZMMH)+len(c.ZMMX)+len(c.K) != 0 {
+		r.Status, r.Note = "error", "AVX-512 state given but the host has no AVX-512"
+		return r
+	}
 	var fsBase uint64
 	if c.FSBase != "" {
 		fsBase, err = parseHex(c.FSBase)
@@ -328,6 +383,11 @@ func runCase(c *L.Case, seq int64) L.HW {
 					} else {
 						clear(ctx[L.CtxInYMMH : L.CtxInYMMH+256])
 					}
+					if use512 {
+						copyComp(xbv, 5, L.Ctx2OutK, L.Ctx2InK, 64)
+						copyComp(xbv, 6, L.Ctx2OutZMMH, L.Ctx2InZMMH, 512)
+						copyComp(xbv, 7, L.Ctx2OutZMMX, L.Ctx2InZMMX, 1024)
+					}
 				}
 			}
 			if m := get64(ctx, L.CtxOutMXCSR); m != ^uint64(0) {
@@ -384,6 +444,11 @@ func runCase(c *L.Case, seq int64) L.HW {
 				} else {
 					r.YMMH[i] = "0x0"
 				}
+			}
+			if use512 {
+				r.ZMMH = outComp(xbv, 6, L.Ctx2OutZMMH, 16, 32)
+				r.ZMMX = outComp(xbv, 7, L.Ctx2OutZMMX, 16, 64)
+				r.K = outComp(xbv, 5, L.Ctx2OutK, 8, 8)
 			}
 		}
 	}
@@ -476,6 +541,30 @@ func capturedX87() L.X87State {
 	return x
 }
 
+// copyComp re-enters a case from captured state: XSAVE component bit of xbv set → the captured
+// bytes, clear → the initial (zero) state.
+func copyComp(xbv uint64, bit uint, out, in, n int) {
+	if xbv>>bit&1 != 0 {
+		copy(ctx2[in:in+n], ctx2[out:out+n])
+	} else {
+		clear(ctx2[in : in+n])
+	}
+}
+
+// outComp renders captured XSAVE component bytes as k values of sz bytes (zero when the
+// component is in its initial state).
+func outComp(xbv uint64, bit uint, off, k, sz int) []string {
+	out := make([]string, k)
+	for i := 0; i < k; i++ {
+		if xbv>>bit&1 != 0 {
+			out[i] = hexN(ctx2[off+sz*i : off+sz*i+sz])
+		} else {
+			out[i] = "0x0"
+		}
+	}
+	return out
+}
+
 // checkCPU makes sure the trampoline's RDFSBASE/WRFSBASE (FSGSBASE, enabled by the kernel:
 // AT_HWCAP2 bit 1) and VINSERTI128 (AVX2) are available, and that the signal frame's XSAVE
 // layout has YMM_Hi128 where the handler reads it.
@@ -502,6 +591,17 @@ func checkCPU() {
 			L.XsaveYMMHOffset, ebx7&(1<<5) != 0, ebx)
 		os.Exit(2)
 	}
+	// AVX-512F with the opmask, ZMM_Hi256 and Hi16_ZMM state enabled by the OS (XCR0 bits 5-7)
+	if _, _, ecx1, _ := cpuid(1, 0); ebx7&(1<<16) != 0 && ecx1&(1<<27) != 0 && xgetbv0()&0xE0 == 0xE0 {
+		_, o5, _, _ := cpuid(0xD, 5)
+		_, o6, _, _ := cpuid(0xD, 6)
+		_, o7, _, _ := cpuid(0xD, 7)
+		if o5 != L.XsaveOpmaskOffset || o6 != L.XsaveZMMHOffset || o7 != L.XsaveHi16Offset {
+			fmt.Fprintf(os.Stderr, "runner: unexpected AVX-512 XSAVE offsets %d %d %d\n", o5, o6, o7)
+			os.Exit(2)
+		}
+		use512 = os.Getenv("JANUS_ORACLE_NO512") == ""
+	}
 }
 
 func main() {
@@ -520,6 +620,10 @@ func main() {
 
 	const rwx = syscall.PROT_READ | syscall.PROT_WRITE | syscall.PROT_EXEC
 	ctx = mmapFixed(L.CtxPage, L.PageSize, syscall.PROT_READ|syscall.PROT_WRITE)
+	ctx2 = mmapFixed(L.Ctx2Page, L.PageSize, syscall.PROT_READ|syscall.PROT_WRITE)
+	if use512 {
+		put64(ctx2, L.Ctx2Use512, 1)
+	}
 	code = mmapFixed(L.CodePage, L.PageSize, rwx)
 	data = mmapFixed(L.DataBase, L.DataSize, syscall.PROT_READ|syscall.PROT_WRITE)
 	installHandlers()

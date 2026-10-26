@@ -53,7 +53,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 128)
   · simp only [setRegF, reduceIte, Nat.reduceEqDiff, Arm64.Memory.accessible_writeLE, calleeStack, hsp40,
       outside_cons, outside_nil, and_true]
     exact ⟨hk2, by omega, by omega⟩
-  · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hmap', ⟨hs1, hs2, hs3⟩, hok⟩
+  · intro s' hpc' ⟨r, x, y, fl, m', _, _, hs', hfr, henv', hoth, hmap', ⟨hs1, hs2, hs3⟩, hok⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.append_nil, setRegF, reduceIte, Nat.reduceEqDiff, hsp40] at hfr
     have hacc0 : s.mem.accessible (r 0).toNat 8 false = true := by

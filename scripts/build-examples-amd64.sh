@@ -59,6 +59,20 @@ echo "built $root/artifacts/examples-amd64-avx"
 for f in $(cat "$root"/examples/basic/avx/*.go | grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}'); do
   "$root/bin/janus" extract "$root/artifacts/examples-amd64-avx" "example.com/basic/avx.$f" "$root/artifacts/amd64/$f"
 done
+# The AVX-512 examples (examples/basic/avx512: Go functions calling AVX-512 Go assembly, WP-G),
+# in a binary of their own so that the other binaries do not change.
+(cd "$root/examples/basic" &&
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-amd64-avx512" ./avx512/cmd)
+echo "built $root/artifacts/examples-amd64-avx512"
+for f in $(cat "$root"/examples/basic/avx512/*.go | grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}'); do
+  "$root/bin/janus" extract "$root/artifacts/examples-amd64-avx512" "example.com/basic/avx512.$f" "$root/artifacts/amd64/$f"
+done
+# A GC span-scan kernel verified on its own (examples/proofs-amd64/ExpandAVX512_2, WP-G): the
+# static assembly function internal/runtime/gc/scan.expandAVX512_2, from the package's test binary.
+(cd "$root" &&
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -trimpath -buildvcs=false -o "$root/artifacts/examples-amd64-scan.test" internal/runtime/gc/scan)
+echo "built $root/artifacts/examples-amd64-scan.test"
+"$root/bin/janus" extract "$root/artifacts/examples-amd64-scan.test" expandAVX512_2 "$root/artifacts/amd64/ExpandAVX512_2"
 # A runtime function verified on its own (examples/proofs-amd64/MapAccess1Small).
 "$root/bin/janus" extract "$root/artifacts/examples-amd64" runtime.mapaccess1_fast64 "$root/artifacts/amd64/MapAccess1Small"
 # The runtime's equality, hashing and typed-memory functions verified on their own, and the

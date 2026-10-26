@@ -28,6 +28,24 @@ type State struct {
 	MXCSRSet bool
 	// X87 is the case's x87 state (nil: the FNINIT state).
 	X87 *L.X87State
+	// The AVX-512 state (WP-G): bits 511:256 of ZMM0-15 (four 64-bit words, low first), ZMM16-31
+	// (eight words) and K0-K7; rendered only when nonzero.
+	ZMMH [16][4]uint64
+	ZMMX [16][8]uint64
+	K    [8]uint64
+}
+
+// hexWords renders little-endian 64-bit words as one hex number.
+func hexWords(w []uint64) string {
+	n := len(w)
+	for n > 1 && w[n-1] == 0 {
+		n--
+	}
+	s := fmt.Sprintf("%#x", w[n-1])
+	for i := n - 2; i >= 0; i-- {
+		s += fmt.Sprintf("%016x", w[i])
+	}
+	return s
 }
 
 // SetMXCSR sets the case's MXCSR.
@@ -69,6 +87,20 @@ func Case(id int, class string, b []byte, s State) L.Case {
 	}
 	if s.FSBase != 0 {
 		c.FSBase = hex64(s.FSBase)
+	}
+	nz512 := s.K != [8]uint64{}
+	for i := 0; i < 16; i++ {
+		nz512 = nz512 || s.ZMMH[i] != [4]uint64{} || s.ZMMX[i] != [8]uint64{}
+	}
+	if nz512 {
+		c.ZMMH, c.ZMMX, c.K = make([]string, 16), make([]string, 16), make([]string, 8)
+		for i := 0; i < 16; i++ {
+			c.ZMMH[i] = hexWords(s.ZMMH[i][:])
+			c.ZMMX[i] = hexWords(s.ZMMX[i][:])
+		}
+		for i := 0; i < 8; i++ {
+			c.K[i] = hex64(s.K[i])
+		}
 	}
 	if s.MXCSRSet && s.MXCSR != L.DefaultMXCSR {
 		c.MXCSR = hex64(uint64(s.MXCSR))

@@ -589,7 +589,7 @@ theorem go_spec (pa la ca pb lb cb : BitVec 64) :
     all_goals try omega
     · janus64_disch
     · exact Janus.Arm64.Memory.accessible_sub _ hqa (Or.inl rfl) (Nat.le_refl _) (by omega)
-  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, xm, yh, fs, mx, zh, kr, rfl, h4, h5, h14, h15, ⟨⟨hfs1, hfs2⟩, hfsr', hfsg'⟩, -⟩, hmf⟩
   simp only [E, frameA, frameB, frameN, cgoClobber, Janus.Amd64.GoABI.regSP, Janus.Amd64.GoABI.regG,
     Janus.Amd64.GoABI.regFP, Janus.Amd64.GoABI.xmmZero, cgoStackScratch, gStructSize, setRegF,
     ↓reduceIte, Nat.reduceEqDiff, h32, h80] at hmf h4 h5 h14 h15 hfs1 hfs2 hfsr' hfsg'

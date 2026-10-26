@@ -14,9 +14,10 @@ proofs.
 | SSE packed instructions (WP-D): AST, decoder, semantics | `Janus/Amd64/InstrSSE.lean`, `Janus/Amd64/DecodeSSE.lean` (hook in `Decode.decodeLegacy`), `Janus/Amd64/ExecSSE.lean` (hook `Instr.sse` in `exec`) |
 | x86 crypto extensions (WP-E): AST, decoder, semantics | `Janus/Amd64/InstrCrypto.lean`, `Janus/Amd64/DecodeCrypto.lean` (hook in `Decode.decodeLegacy`, after `DecodeSSE`), `Janus/Amd64/ExecCrypto.lean` (hook `Instr.crypto` in `exec`); FIPS-197 specification and the instruction lemmas in `Janus/Spec/AES.lean`, Go's AES hash in `Janus/Spec/MemHash.lean` |
 | AVX/AVX2/FMA3/F16C on VEX-128/256 (WP-F): AST, decoder, semantics | `Janus/Amd64/InstrAVX.lean`, `Janus/Amd64/DecodeAVX.lean` (hook in `decode`, after `Decode.vexOp`), `Janus/Amd64/ExecAVX.lean` (hook `Instr.avx` in `exec`) |
+| AVX-512 (WP-G): EVEX, ZMM0–31, K0–7, the VEX opmask instructions, VEX `VPCLMULQDQ`/GFNI | `Janus/Amd64/InstrEVEX.lean`, `Janus/Amd64/DecodeEVEX.lean` (hooks in `decode`: `62`, and after `DecodeAVX.vex`), `Janus/Amd64/ExecEVEX.lean` (hook `Instr.evex` in `exec`), `Janus/Amd64/TacticEVEX.lean` (stepping, the zero-upper and compatibility theorems) |
 | programs, runner, run lemmas | `Janus/Amd64/Program.lean`, `Janus/Amd64/Run.lean` |
 | Go ABIInternal on amd64, specs | `Janus/Amd64/GoABI.lean` |
-| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas), `Janus/Amd64/TacticAVX2.lean` (stepping `ExecAVX`, the zero-upper theorems, 256-bit element lemmas, `dot32`) |
+| proof automation | `Janus/Amd64/Tactic.lean`, `Janus/Amd64/TacticAttr.lean`, `Janus/Amd64/TacticExt.lean` (string instructions, block copies and fills), `Janus/Amd64/TacticAVX.lean` (vector operands, byte-mask lemmas, overlapping copies), `Janus/Amd64/TacticSSE.lean` (stepping `ExecSSE`, element lemmas), `Janus/Amd64/TacticAVX2.lean` (stepping `ExecAVX`, the zero-upper theorems, 256-bit element lemmas, `dot32`), `Janus/Amd64/TacticEVEX.lean` (stepping `ExecEVEX`, 512-bit re-assembly, the EVEX zero-upper rule, VEX/SSE on the AVX-512 state, WP-D/WP-F compatibility) |
 | extractor | `cmd/janus/amd64.go` (plus small dispatch edits) |
 | differential oracle | `oracle-amd64/`, `Oracle/Amd64Main.lean`, `docs/ORACLE-AMD64.md` |
 | tests | `JanusTests/Amd64.lean`, `cmd/janus/amd64_test.go` |
@@ -31,9 +32,11 @@ R8..R15`), `RIP`, the six status flags, the direction flag `df`, `YMM0`–`YMM15
 specification quantifies over them like over any other field. Keeping the upper lanes in a
 field of their own matches the architecture: a legacy-SSE instruction writes only `xmm`
 (bits 255:128 preserved, SDM Vol. 1 §14.1.3), a VEX.128 instruction writes `xmm` and zeroes
-`ymmHi` of its destination, a VEX.256 one writes both. The AVX-512 state (`ZMM` bits 511:256,
-`ZMM16`–`31`, mask registers) is not modelled; no modelled instruction reads it, VEX instructions
-only zero it. Memory is the
+`ymmHi` of its destination, a VEX.256 one writes both. The AVX-512 state (WP-G) extends the split
+upward: `zmmHi n` is bits 511:256 of `ZMMn`, indices 16–31 of `xmm`/`ymmHi`/`zmmHi` are
+`ZMM16`–`ZMM31`, and `kreg` holds the opmask registers `K0`–`K7` (both default to zero). Legacy SSE
+leaves all of it alone, a VEX write zeroes bits 511:`VL` of its destination, an EVEX write of `l`
+bits zeroes bits 511:`l`; `VZEROUPPER`/`VZEROALL` affect `ZMM0`–`ZMM15` only. Memory is the
 checked byte memory shared with arm64 (`Janus.Arm64.Memory`): every access must lie inside one
 caller-provided region that ends at or below `2^48`, and a store needs a writable region and
 must not touch any read-only one. The bound is shared with arm64 and is sound for amd64 too:
@@ -73,7 +76,7 @@ handles legacy prefixes, REX, the one- and two-byte opcode maps, ModRM, SIB, RIP
   FBSTP`), `FFREE`/`FFREEP`, the reserved aliases (`D9 D8+i`, `DC D0+i`, ...), the
   transcendental and remainder instructions (`FSIN FCOS FPTAN FPATAN F2XM1 FYL2X FYL2XP1 FPREM
   FPREM1 FSCALE FRNDINT FXTRACT FINCSTP FDECSTP`) and the constants other than `FLD1`/`FLDZ`;
-* EVEX and XOP, and the VEX instructions not listed below (WP-F's list: `Janus/Amd64/DecodeAVX.lean`
+* XOP, the EVEX instructions outside WP-G's list (below), and the VEX instructions not listed below (WP-F's list: `Janus/Amd64/DecodeAVX.lean`
   and below); VEX after any other prefix
   (`66 F2 F3 F0 REX` make it `#UD`; segment overrides are rejected too); a VEX instruction with
   a field the SDM reserves set (`VEX.vvvv ≠ 1111` where it is unused, `VEX.W1` on
@@ -136,6 +139,31 @@ variable shifts `VPSLLVD/Q VPSRLVD/Q VPSRAVD`; the gathers `VPGATHERDD/DQ/QD/QQ`
 PS/PD` at both lengths; `VZEROALL`; F16C `VCVTPH2PS`, `VCVTPS2PH`. With them every VEX blocker of
 the C corpus at `-O3 -march=x86-64-v3` is gone, and of a 773-function AVX2-intrinsics corpus
 (llama.cpp's ggml) too (`docs/COVERAGE.md`).
+
+**AVX-512 (WP-G)** (`Janus/Amd64/{InstrEVEX,DecodeEVEX,ExecEVEX}.lean`): EVEX (`62`, maps 1–3)
+with 32 registers, vector lengths 128/256/512, write masks with merging and zeroing (`{z}`),
+embedded broadcast (`{1toN}`), compressed `disp8·N` displacements by tuple type, embedded rounding
+(`{er}`) and `{sae}`, and fault suppression for masked memory operands. Instructions: the moves
+`VMOVDQU8/16/32/64`, `VMOVDQA32/64`, `VMOVUPS/PD`, `VMOVAPS/PD` (load, store, register; masked);
+`VPANDD/Q VPANDND/Q VPORD/Q VPXORD/Q` and the `PS`/`PD` logic forms; `VPTERNLOGD/Q`; the EVEX
+forms of WP-D's packed integer operations (`VPADD*`, `VPSUB*`, saturating, `VPAVG*`,
+`VPMULL*` incl. `VPMULLQ`, `VPMULH*`, `VPMULUDQ`/`VPMULDQ`, `VPMADD*`, `VPSADBW`, `VPMIN*`/`VPMAX*`
+at all widths, `VPABS*`, `VPUNPCK*`, `VPACK*`, `VPSHUFB`, the shifts by `xmm/m128` and by `imm8`
+incl. `VPSRAQ`, `VPSLLDQ`/`VPSRLDQ`, `VPSHUFD/HW/LW`, `VPALIGNR`); `VPROLD/Q`, `VPRORD/Q`,
+`VPROLVD/Q`, `VPRORVD/Q`, `VPSLLV*`/`VPSRLV*`/`VPSRAV*` (W, D, Q); `VPERMB/W/D/Q`, `VPERMPS/PD`,
+`VPERMI2B/W/D/Q/PS/PD`, `VPERMT2B/W/D/Q/PS/PD`, `VPERMQ/PD imm8`, `VALIGND/Q`,
+`VSHUFI/F32X4/64X2`; `VPOPCNTB/W/D/Q`; `VPCOMPRESSB/W/D/Q` and `VPEXPANDB/W/D/Q` (register and
+memory); `VPCMP[U]B/W/D/Q`, `VPCMPEQ*`, `VPCMPGT*`, `VPTESTM*`, `VPTESTNM*` into a mask;
+`VPBLENDMB/W/D/Q`, `VBLENDMPS/PD`; `VEXTRACTF/I32X4/64X2/32X8/64X4`, `VINSERTF/I...`;
+`VPBROADCASTB/W/D/Q` (from `xmm/m` and from a general register), `VBROADCASTSS/SD`,
+`VBROADCASTF/I32X2/32X4/64X2/32X8/64X4`; `VPMOVSX/ZX`; `VADD/SUB/MUL/DIV/MIN/MAX/SQRT PS/PD` with
+`{er}`/`{sae}`, `VCMPPS/PD` into a mask; `VGF2P8AFFINEQB`, `VGF2P8AFFINEINVQB`, `VGF2P8MULB`;
+`VPCLMULQDQ` (EVEX and VEX.128/256); and the VEX opmask instructions `KMOVB/W/D/Q` (mask, general
+register, memory), `KAND KANDN KOR KXOR KXNOR KADD KNOT` (B/W/D/Q), `KSHIFTL/R`, `KORTEST`,
+`KTEST`, `KUNPCKBW/WD/DQ`. That is every AVX-512 instruction of Go 1.26's std (the 29
+`internal/runtime/gc/scan` kernels, `hash/crc32.ieeeCLMUL`, `runtime.asyncPreempt`'s state save
+and restore; `docs/COVERAGE.md`). The CPU features this assumes are listed in
+`docs/SOUNDNESS.md` (AVX-512 section).
 
 **SSE packed instructions (WP-D)**, legacy-encoded on `XMM` (`Janus/Amd64/{InstrSSE,DecodeSSE,
 ExecSSE}.lean`): SSE2 integer `PADDB/W/D/Q PSUBB/W/D/Q PADDS/PADDUS/PSUBS/PSUBUS B/W PMULLW
@@ -303,6 +331,26 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
   completion, which updates the destination and mask for the elements done before the fault, is
   only visible to a signal handler, and a fault ends a Janus execution); destination, index and
   mask registers must differ (`#UD`, rejected).
+* **AVX-512 (WP-G).** `ExecEVEX` extends the same machinery to 512 bits rather than copying it:
+  `ExecAVX.perLane` now covers four 128-bit lanes, so every WP-D in-lane operation and every
+  WP-F width-generic one (`pintV`, `pimmV`, `pshiftV`, `shufV`, `shiftvV`, `pmovxV`) runs at
+  `l = 512`; an EVEX.128/256 register write is exactly WP-F's VEX write (`setZ_128`, `setZ_256`).
+  The new parts are the write mask (`merge`: element `i` of `e` bits from the result where bit `i`
+  of `K[k]` is set, else zero `{z}` or the old element; no mask writes the whole result),
+  broadcasts (`rdV`: one element replicated), fault suppression (`rdMasked`/`stMasked`: a masked
+  full-width operand of an element-wise instruction is accessed element by element, masked-off
+  elements unchecked; everything else is accessed in full), `VPCOMPRESS`/`VPEXPAND` (only the packed
+  elements are written/read), the opmask instructions on `State.kreg`, the GF(2⁸) operations
+  (`gfAffine`, `gfMul`, `gfInv` = `x²⁵⁴`, modulo `x⁸+x⁴+x³+x+1`), `VPTERNLOG` (the `OR` of the
+  minterms `imm8` selects), the carry-less multiply (`clmulN`), and `{er}`/`{sae}` for the packed
+  floating point. **The EVEX zero-upper rule** (`Janus.Amd64.Tactic.exec_evex_zero_upper`): every
+  register an AVX-512 instruction writes at `l < 512` bits has bits 511:`l` zero afterwards; a VEX
+  write zeroes bits 511:256 (`exec_avx_zero_zmm`); legacy SSE changes no AVX-512 state
+  (`exec_sse_preserves_avx512`); and `sse_compat`/`avx_compat` show that WP-D's and WP-F's
+  results, with the AVX-512 state erased, are what they were before it was added.
+  `JanusTests/AVX512.lean` has the decode known answers (GNU `as` and the Go std encodings), masked
+  merging and zeroing, `VPCOMPRESSQ`, `VPERMB`, `VPTERNLOGQ`, the GF(2⁸) identities (`0x53⁻¹ =
+  0xCA`), `KORTEST`, and the zero-upper rule on literals and for every state.
 * **CPU-feature globals.** `runtime.memmove` reads `runtime.memmoveBits` and
   `runtime.memclrNoHeapPointers` reads `internal/cpu.X86.HasERMS`/`HasAVX2`, which Go sets at
   start-up from `CPUID`. They live in `.noptrbss`, so the extractor does not copy them; a
@@ -430,6 +478,11 @@ blockers` works on amd64 binaries, judging each x86asm-found instruction with `J
     process on a CPU that has the features. A theorem that quantifies over them (such as
     `Equal64`) also covers states in which they claim AVX2 on a CPU without it; such states do
     not occur in a Go process.
+  - the CPU implements the AVX-512 features of WP-G (AVX512F/BW/DQ/VL, VBMI, VBMI2, BITALG,
+    VPOPCNTDQ, GFNI, VPCLMULQDQ; `docs/SOUNDNESS.md`) and the OS has enabled the opmask and ZMM
+    state, whenever an EVEX or opmask instruction executes. Go's runtime and `hash/crc32` execute
+    them only behind `internal/cpu` flags (`X86.HasAVX512*`); `Search64` and `ExpandAVX512_2` are
+    about such a CPU.
 * **Vendor neutrality.** Where Intel and AMD document different results or flags, the model
   takes the undefined side (fault or `none`). A proof cannot depend on the vendor.
 * **Not modelled:**
@@ -628,6 +681,16 @@ products per iteration into four YMM accumulators, a `VEXTRACTI128`/`VPSHUFD` re
 epilogue, a scalar tail; `dot32`, for every length) and `GoDot32` (`Dot32(a, b []uint32)` → cgo →
 that loop → Go, under the trusted `CgoCall`) are in `examples/proofs-cgo/amd64` (binary
 `artifacts/examples-cgo-avx-amd64`, the package's `#cgo CFLAGS: -O3 -march=x86-64-v3`).
+
+Two are about AVX-512 (WP-G). `Search64` is in `artifacts/examples-amd64-avx512`
+(`examples/basic/avx512`, a Go function calling an AVX-512 Go assembly function, ABI0, built
+`GOAMD64=v1` into a binary of its own); `ExpandAVX512_2` is a function of Go's own runtime,
+extracted from the `internal/runtime/gc/scan` test binary (`artifacts/examples-amd64-scan.test`).
+
+| function | theorem |
+|---|---|
+| `Search64` | `Search64(p, nq, c)` for **every** `nq ≤ 8`: the index of the first of the `8·nq` bytes at `p` equal to `c`, 64 if none (`firstIdx`), with only those `8·nq` bytes readable: `KMOVB` of the qword mask, a masked zeroing `VMOVDQU64` load (fault suppression: only the selected qwords are accessed), `VPBROADCASTB zmm, r32`, `BZHIQ`/`KMOVQ` byte mask, `VPCMPEQB` into `K2` under `K3`, `KMOVQ`, `TZCNTQ`, `VZEROUPPER` |
+| `ExpandAVX512_2` | `internal/runtime/gc/scan.expandAVX512_2`, the GC span scanner's bitmap expander for size class 2 (custom convention: the 64-byte packed bitmap at `[AX]`, results in `Z1`/`Z2`; a `Summary`): bit `j` of `Z1` is bit `j/2` of the input and bit `j` of `Z2` bit `256 + j/2`, for every `j < 512` (`Expanded`), through `VMOVDQU64` table loads, `VPERMB` and `VGF2P8AFFINEQB`; the tables are the binary's `.rodata` (`DataLoaded`) |
 
 Three more are about `artifacts/examples-amd64-v3`: `examples/basic/v3` built with
 `GOAMD64=v3` into a binary of its own (so the v1 binary above does not change), extracted by the

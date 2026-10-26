@@ -67,7 +67,12 @@ type Case struct {
 	YMMH []string `json:"ymmh,omitempty"`
 	// FSBase is the FS segment base (hex, canonical, below 2^47); absent = 0.
 	FSBase string `json:"fsbase,omitempty"`
-	Seed   uint64 `json:"seed"`
+	// ZMMH are bits 511:256 of ZMM0-15 (hex 256-bit), ZMMX the full ZMM16-31 (hex 512-bit),
+	// K the opmask registers K0-K7 (hex 64-bit) (AVX-512, WP-G); absent = all zero.
+	ZMMH []string `json:"zmmh,omitempty"`
+	ZMMX []string `json:"zmmx,omitempty"`
+	K    []string `json:"k,omitempty"`
+	Seed uint64   `json:"seed"`
 	// Init overrides buffer bytes after the pattern is applied: (offset, value) pairs, in
 	// order. Used to plant return addresses / popped values. Absent = pattern only.
 	Init [][2]int `json:"init,omitempty"`
@@ -120,6 +125,12 @@ type HW struct {
 	// frame says the AVX state is in its initial configuration); absent if the frame has no
 	// XSAVE area.
 	YMMH []string `json:"ymmh,omitempty"`
+	// ZMMH, ZMMX, K: the AVX-512 state (as in Case) from the XSAVE area's opmask, ZMM_Hi256
+	// and Hi16_ZMM components (zero when XSTATE_BV says initial); absent if the host or the
+	// runner does not capture it.
+	ZMMH []string `json:"zmmh,omitempty"`
+	ZMMX []string `json:"zmmx,omitempty"`
+	K    []string `json:"k,omitempty"`
 	Mem  [][2]int `json:"mem,omitempty"` // (offset, new byte) for every changed byte
 	Note string   `json:"note,omitempty"`
 	// Iters is the number of times the runner re-entered a REP string instruction (one
@@ -150,6 +161,9 @@ type Model struct {
 	DF      bool     `json:"df,omitempty"` // the direction flag after the instruction
 	XMM     []string `json:"xmm,omitempty"`
 	YMMH    []string `json:"ymmh,omitempty"`
+	ZMMH    []string `json:"zmmh,omitempty"`
+	ZMMX    []string `json:"zmmx,omitempty"`
+	K       []string `json:"k,omitempty"`
 	Mem     [][2]int `json:"mem,omitempty"`
 	MXCSR   string   `json:"mxcsr,omitempty"` // State.mxcsr after the instruction (hex)
 	// X87 after the instruction (State.x87); FSWDefined is the mask of FSW bits the model
@@ -181,6 +195,27 @@ const (
 	CtxInHasX87 = 2088 // 1: FXRSTOR64 the image at CtxInX87 before entry
 	CtxInX87    = 2112 // a 512-byte FXSAVE image (16-byte aligned): the case's x87 state, MXCSR, XMM0-15
 	CtxOutX87   = 2624 // bytes 0..159 of the signal frame's fxsave area (FCW, FSW, FTW, ..., ST0-ST7)
+)
+
+// Offsets (bytes) inside Ctx2Page, the second context page (AVX-512 state, WP-G). Must match
+// cmd/runner/trampoline_amd64.s.
+const (
+	Ctx2Page    = CtxPage + PageSize
+	Ctx2InZMMH  = 0    // bits 511:256 of zmm0..zmm15 (32 bytes each), loaded with VINSERTI64X4
+	Ctx2InZMMX  = 512  // zmm16..zmm31 (64 bytes each), VMOVDQU64
+	Ctx2InK     = 1536 // k0..k7 (8 bytes each), KMOVQ
+	Ctx2OutZMMH = 2048 // from the XSAVE area's ZMM_Hi256 component
+	Ctx2OutZMMX = 2560 // from the Hi16_ZMM component
+	Ctx2OutK    = 3584 // from the opmask component
+	Ctx2Use512  = 3648 // 1: load and capture the AVX-512 state (the host has AVX-512F)
+)
+
+// The standard-format XSAVE offsets of the opmask, ZMM_Hi256 and Hi16_ZMM components
+// (CPUID.(EAX=0DH,ECX=5/6/7).EBX; checked by the runner at start-up when it uses them).
+const (
+	XsaveOpmaskOffset = 1088
+	XsaveZMMHOffset   = 1152
+	XsaveHi16Offset   = 1664
 )
 
 // XsaveYMMHOffset is the offset of the YMM_Hi128 component in the standard (non-compacted)

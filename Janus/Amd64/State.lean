@@ -24,9 +24,17 @@ The shared contract between the ISA model (`Decode`, `Exec`), the program loader
   paths of `memmove`, `memclrNoHeapPointers` and `internal/bytealg`. Keeping the upper lanes in
   their own field means a legacy-SSE instruction, which preserves bits 255:128 (SDM Vol. 1
   §14.1.3), simply does not touch `ymmHi`; a VEX.128 instruction zeroes `ymmHi` of its
-  destination and a VEX.256 one writes both. The AVX-512 state (`ZMM` bits 511:256,
-  `ZMM16`–`ZMM31`, the mask registers) is not modelled: no modelled instruction reads it (VEX
-  instructions only zero it, which is unobservable to the model).
+  destination and a VEX.256 one writes both.
+* The 512-bit AVX-512 registers `ZMM0`–`ZMM31` (WP-G) extend that split upward: `xmm n` and
+  `ymmHi n` are bits 127:0 and 255:128 of `ZMMn` for every `n < 32` (`XMM16`–`XMM31` and
+  `YMM16`–`YMM31` are reached only by EVEX instructions), and `zmmHi n` is bits 511:256, so
+  `ZMMn = zmmHi n ++ ymmHi n ++ xmm n` (`State.zmm`). Legacy SSE preserves bits 511:128, a VEX
+  instruction zeroes bits 511:`VL` of its destination (`VL` = 128 or 256: the hardware's
+  `MAX_VL` is 512) and an EVEX instruction writes bits `VL-1:0` and zeroes bits 511:`VL`
+  (`ExecEVEX.setZ`). `VZEROUPPER`/`VZEROALL` act on `ZMM0`–`ZMM15` only.
+* The eight 64-bit opmask registers `K0`–`K7` are `kreg` (AVX-512: written by `KMOV*`, the mask
+  logic instructions and the compares into a mask; read as a write mask by EVEX instructions,
+  where `K0` means "no masking").
 * `fsBase` is the base address of the `FS` segment (`IA32_FS_BASE`, set by the kernel for the
   thread: Go keeps the TLS block, with the `g` slot at `FS:-8`, there). An `FS`-prefixed memory
   operand is at `fsBase + effective address (mod 2^64)` and goes through the same checked
@@ -88,6 +96,10 @@ structure State where
   `0x037F` (round to nearest, 64-bit precision, all exceptions masked) is the value Linux gives
   a new process. -/
   fpucw : BitVec 16 := 0x037F
+  /-- Bits 511:256 of `ZMM0`–`ZMM31` (AVX-512). -/
+  zmmHi : Nat → BitVec 256 := fun _ => 0
+  /-- The opmask registers `K0`–`K7` (AVX-512). -/
+  kreg : Nat → W64 := fun _ => 0
 
 instance : Inhabited State :=
   ⟨{ regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩,
@@ -98,6 +110,9 @@ def ymmJoin (hi lo : W128) : Nat := hi.toNat * 2 ^ 128 + lo.toNat
 
 /-- The full 256-bit register `YMMn` (`ymmHi n ++ xmm n`), as a natural number. -/
 def State.ymm (s : State) (n : Nat) : Nat := ymmJoin (s.ymmHi n) (s.xmm n)
+
+/-- The full 512-bit register `ZMMn` (`zmmHi n ++ ymmHi n ++ xmm n`), as a natural number. -/
+def State.zmm (s : State) (n : Nat) : Nat := (s.zmmHi n).toNat * 2 ^ 256 + s.ymm n
 
 /-- Reasons execution stops without a defined architectural result. -/
 inductive Fault where
@@ -116,7 +131,8 @@ inductive Fault where
   | undefinedResult (pc : Nat)
   /-- `#DE`: division by zero or quotient overflow at `pc`. -/
   | divideError (pc : Nat)
-  /-- `#GP` for a misaligned 16-byte SSE or 16/32-byte AVX memory operand at `addr`. -/
+  /-- `#GP` for a misaligned 16-byte SSE, 16/32-byte AVX or 16/32/64-byte AVX-512 memory operand
+  at `addr`. -/
   | misaligned (addr : Nat)
   /-- A branch to `target`, which is not a canonical lower-half (user) address `< 2^47`. -/
   | badTarget (target : Nat)

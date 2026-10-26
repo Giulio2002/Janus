@@ -212,7 +212,7 @@ theorem loop (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws) (H
       simp (disch := janus64_disch) only [Janus.Contracts.rtView_writeLE]
       have e1 : (s.regs 4 - 48#64).toNat = (s.regs 4).toNat - 48 := by bv_omega
       simpa [e1] using hH
-    · intro s' hpc' ⟨r, x', y, fl, m', hs', hfr, henv', hcase, hitab, _, hdesc2⟩
+    · intro s' hpc' ⟨r, x', y, fl, m', _, _, hs', hfr, henv', hcase, hitab, _, hdesc2⟩
       subst hs'
       simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, setRegF, reduceIte,
         Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, h0, hsp48, hsp48', ← hD] at hfr hcase hdesc2

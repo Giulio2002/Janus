@@ -21,3 +21,4 @@ import JanusTests.SSE
 import JanusTests.X86Crypto
 import JanusTests.Crypto
 import JanusTests.AVX
+import JanusTests.AVX512

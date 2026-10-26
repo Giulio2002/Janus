@@ -16,6 +16,7 @@ package main
 import (
 	"bufio"
 	"debug/elf"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -152,6 +153,10 @@ func cmdGen(args []string) {
 	sseOnly := fs.Bool("sse-only", false, "generate only the SSE packed specs of WP-D (gen.SSESpecs, the SSE edge families)")
 	cryptoOnly := fs.Bool("crypto-only", false, "generate only the x86 crypto-extension specs of WP-E (gen.CryptoSpecs, the crypto edge families)")
 	avxOnly := fs.Bool("avx-only", false, "generate only the AVX/AVX2/FMA3 specs of WP-F (gen.AVXSpecs, the AVX edge families)")
+	avx512Only := fs.Bool("avx512-only", false, "generate only the AVX-512 specs of WP-G (gen.Evex512Specs, the EVEX opcode sweep, -evex-harvest)")
+	sweep := fs.Int("sweep", 4, "with -avx512-only: random EVEX encodings per (map, pp, opcode) of the sweep")
+	evexHarvest := fs.String("evex-harvest", "", "with -avx512-only: a file of real EVEX/VEX encodings (hex, one per line, optional class after a tab)")
+	evexK := fs.Int("evex-k", 24, "with -avx512-only: states per harvested encoding")
 	nEdge := fs.Int("edge", 400, "rounds of the hand-targeted edge families (gen.Edges)")
 	seed := fs.Uint64("seed", 1, "random seed")
 	out := fs.String("o", "gen.jsonl", "output")
@@ -185,6 +190,11 @@ func cmdGen(args []string) {
 		avxN = *n
 	} else if *fpOnly || *v3Only || *sseOnly || *cryptoOnly || *x87Only {
 		avxSpecs = nil
+	}
+	if *avx512Only {
+		specs, vexSpecs, v3VexSpecs, avxSpecs = nil, nil, nil, nil
+		*nEdge, *ng = 0, 0
+		genAVX512(r, cw, *n, *sweep, *evexHarvest, *evexK)
 	}
 	if *x87Only {
 		specs, vexSpecs, v3VexSpecs = nil, nil, nil
@@ -486,4 +496,54 @@ func hasFSPrefix(b []byte) bool {
 		return false
 	}
 	return false
+}
+
+// genAVX512 writes the WP-G cases: n encodings of every targeted spec (FP ones under fpK MXCSR
+// settings), the opcode sweep, and k states of every harvested encoding.
+func genAVX512(r *rand.Rand, cw *caseWriter, n, sweep int, harvest string, k int) {
+	for _, sp := range gen.Evex512Specs {
+		for i := 0; i < n; i++ {
+			b, inf := gen.Evex512Targeted(r, sp)
+			if !gen.OK(b) {
+				continue
+			}
+			s := gen.Evex512Setup(r, b, inf, gen.IsEvexFP(sp))
+			cw.emit("gen/"+gen.EvexClass(sp, b), b, s)
+		}
+	}
+	for mp := 0; mp < 8; mp++ {
+		for pp := 0; pp < 4; pp++ {
+			for op := 0; op < 256; op++ {
+				for i := 0; i < sweep; i++ {
+					b := gen.EvexSweep(r, byte(mp), byte(pp), byte(op))
+					s := gen.Evex512Setup(r, b, gen.EvexInfo(b), r.IntN(4) == 0)
+					cw.emit(fmt.Sprintf("sweep/evex/%d.%d", mp, pp), b, s)
+				}
+			}
+		}
+	}
+	if harvest == "" {
+		return
+	}
+	data, err := os.ReadFile(harvest)
+	if err != nil {
+		die("%v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Split(strings.TrimSpace(line), "\t")
+		if len(f) == 0 || f[0] == "" {
+			continue
+		}
+		b, err := hex.DecodeString(f[0])
+		if err != nil || len(b) == 0 || len(b) > 15 || !gen.OK(b) {
+			continue
+		}
+		cls := "harvest-evex"
+		if len(f) > 1 {
+			cls += "/" + f[1]
+		}
+		for j := 0; j < k; j++ {
+			cw.emit(cls, b, gen.Evex512Setup(r, b, gen.EvexInfo(b), false))
+		}
+	}
 }

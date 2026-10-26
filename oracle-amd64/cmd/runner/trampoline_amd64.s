@@ -2,6 +2,8 @@
 
 // CtxPage = layout.CtxPage = 0x10_0000_0000 - 0x10_0000. Offsets: layout.Ctx*.
 #define CTX $0xFFFF00000
+// Ctx2Page = layout.Ctx2Page = CtxPage + 0x1000 (the AVX-512 state). Offsets: layout.Ctx2*.
+#define CTX2 $0xFFFF01000
 
 // func callPage()
 // Saves the host's callee state and FS base in the context page, sets the case's FS base,
@@ -63,6 +65,52 @@ nox87:
 	VINSERTI128	$1, 1744(R15), Y13, Y13
 	VINSERTI128	$1, 1760(R15), Y14, Y14
 	VINSERTI128	$1, 1776(R15), Y15, Y15
+	// AVX-512 (WP-G, when the host has it: Ctx2Use512): bits 511:256 of ZMM0-15 (VINSERTI64X4,
+	// after the VEX VINSERTI128 above, which zeroes them), ZMM16-31 and K0-K7
+	MOVQ	CTX2, R14
+	CMPQ	3648(R14), $0
+	JEQ	no512
+	VINSERTI64X4	$1, 0(R14), Z0, Z0
+	VINSERTI64X4	$1, 32(R14), Z1, Z1
+	VINSERTI64X4	$1, 64(R14), Z2, Z2
+	VINSERTI64X4	$1, 96(R14), Z3, Z3
+	VINSERTI64X4	$1, 128(R14), Z4, Z4
+	VINSERTI64X4	$1, 160(R14), Z5, Z5
+	VINSERTI64X4	$1, 192(R14), Z6, Z6
+	VINSERTI64X4	$1, 224(R14), Z7, Z7
+	VINSERTI64X4	$1, 256(R14), Z8, Z8
+	VINSERTI64X4	$1, 288(R14), Z9, Z9
+	VINSERTI64X4	$1, 320(R14), Z10, Z10
+	VINSERTI64X4	$1, 352(R14), Z11, Z11
+	VINSERTI64X4	$1, 384(R14), Z12, Z12
+	VINSERTI64X4	$1, 416(R14), Z13, Z13
+	VINSERTI64X4	$1, 448(R14), Z14, Z14
+	VINSERTI64X4	$1, 480(R14), Z15, Z15
+	VMOVDQU64	512(R14), Z16
+	VMOVDQU64	576(R14), Z17
+	VMOVDQU64	640(R14), Z18
+	VMOVDQU64	704(R14), Z19
+	VMOVDQU64	768(R14), Z20
+	VMOVDQU64	832(R14), Z21
+	VMOVDQU64	896(R14), Z22
+	VMOVDQU64	960(R14), Z23
+	VMOVDQU64	1024(R14), Z24
+	VMOVDQU64	1088(R14), Z25
+	VMOVDQU64	1152(R14), Z26
+	VMOVDQU64	1216(R14), Z27
+	VMOVDQU64	1280(R14), Z28
+	VMOVDQU64	1344(R14), Z29
+	VMOVDQU64	1408(R14), Z30
+	VMOVDQU64	1472(R14), Z31
+	KMOVQ	1536(R14), K0
+	KMOVQ	1544(R14), K1
+	KMOVQ	1552(R14), K2
+	KMOVQ	1560(R14), K3
+	KMOVQ	1568(R14), K4
+	KMOVQ	1576(R14), K5
+	KMOVQ	1584(R14), K6
+	KMOVQ	1592(R14), K7
+no512:
 	// the case's MXCSR: from here to the instruction under test only integer moves and
 	// IRETQ execute, so no SSE floating-point exception can be raised before TestPC
 	LDMXCSR	2072(R15)
@@ -156,6 +204,31 @@ yloop:
 	ADDQ	$8, DI
 	DECQ	CX
 	JNZ	yloop
+	// AVX-512: the opmask, ZMM_Hi256 and Hi16_ZMM components (standard offsets 1088, 1152,
+	// 1664, checked at start-up), when the runner uses them (Ctx2Use512)
+	MOVQ	CTX2, DI
+	CMPQ	3648(DI), $0
+	JEQ	noxsave
+	LEAQ	1088(SI), R8
+	LEAQ	3584(DI), R9
+	MOVQ	$8, CX
+kloop:
+	MOVQ	(R8), BX
+	MOVQ	BX, (R9)
+	ADDQ	$8, R8
+	ADDQ	$8, R9
+	DECQ	CX
+	JNZ	kloop
+	LEAQ	1152(SI), R8
+	LEAQ	2048(DI), R9
+	MOVQ	$192, CX
+zloop:
+	MOVQ	(R8), BX
+	MOVQ	BX, (R9)
+	ADDQ	$8, R8
+	ADDQ	$8, R9
+	DECQ	CX
+	JNZ	zloop
 noxsave:
 	MOVW	$0x37F, 0(SI)   // FCW: default
 	MOVW	$0, 2(SI)       // FSW
@@ -207,6 +280,15 @@ TEXT ·addrs(SB),NOSPLIT,$0-16
 	MOVQ	AX, handler+0(FP)
 	LEAQ	·restorer(SB), AX
 	MOVQ	AX, restorer+8(FP)
+	RET
+
+// func xgetbv0() uint64 (XCR0)
+TEXT ·xgetbv0(SB),NOSPLIT,$0-8
+	MOVL	$0, CX
+	XGETBV
+	SHLQ	$32, DX
+	ORQ	DX, AX
+	MOVQ	AX, ret+0(FP)
 	RET
 
 // func cpuid(eax, ecx uint32) (a, b, c, d uint32)

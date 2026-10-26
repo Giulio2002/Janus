@@ -70,8 +70,8 @@ theorem rtReturn_of (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (
     (hfr : MemFrame s.mem s'.mem (Contracts.IfaceAmd64.rtWrites R s nargs ++ extra))
     (henv : R.Env s'.mem (s.regs 14)) (hp : P s'.regs s'.mem) (hx87 : s'.x87 = s.x87 := by rfl) :
     RTReturn R nargs extra s s' P := by
-  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, hfr, henv, hp⟩
-  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
+  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, s'.zmmHi, s'.kreg, ?_, hfr, henv, hp⟩
+  obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw, zh, kr⟩ := s'
   simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw ⊢
   subst hrip hfs hdf hmx hx87 hfw
   congr

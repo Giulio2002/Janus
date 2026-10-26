@@ -228,8 +228,8 @@ theorem correctness (t : Nat) (heap : Nat × Nat) :
   have hag : Agrees s.mem s'.mem (smallModel t zeroVal (lo, hi)).priv := by
     rw [hmem]
     exact agrees_writeLE _ _ (Outside.of_sub hout (by omega) (by omega))
-  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
+  refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, s'.zmmHi, s'.kreg, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw, zh, kr⟩ := s'
     simp only at hsp hpc' hfs hdf hmx hfw hx87 h5 h14 hx ⊢
     subst hpc' hfs hdf hmx hfw hx87
     congr

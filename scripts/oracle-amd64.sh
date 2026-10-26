@@ -29,6 +29,11 @@
 #                                      SHA-NI, ADX): their specs and edge families, plus every such
 #                                      instruction harvested from the std test binaries with crypto
 #                                      assembly (CRYPTO_K states each, default 12)
+#   scripts/oracle-amd64.sh avx512     the AVX-512 instructions of WP-G only (EVEX with ZMM0-31 and
+#                                      K0-K7, the VEX opmask instructions, VPCLMULQDQ, GFNI): the
+#                                      targeted specs, an EVEX opcode sweep and every distinct
+#                                      EVEX/opmask encoding of the scan/crc32/runtime test binaries
+#                                      (EVEX_K states each, default 24; SWEEP, default 4)
 #   scripts/oracle-amd64.sh avx        the AVX/AVX2/FMA3 instructions of WP-F only (VEX-128/256 on
 #                                      YMM): their specs and edge families, plus every such
 #                                      instruction harvested from GOAMD64=v3 std test binaries with
@@ -95,13 +100,15 @@ case "$mode" in
   sse)   N="${N:-600}"; GROUP=0 ;;
   crypto) N="${N:-600}"; GROUP=0 ;;
   avx)   N="${N:-600}"; GROUP=0 ;;
-  *) echo "usage: $0 selftest|quick|full|fp|v3|x87|sse|crypto|avx" >&2; exit 2 ;;
+  avx512) N="${N:-300}"; GROUP=0 ;;
+  *) echo "usage: $0 selftest|quick|full|fp|v3|x87|sse|crypto|avx|avx512" >&2; exit 2 ;;
 esac
 fpk=()
 [ -n "${FPK:-}" ] && fpk=(-fpk "$FPK")
 v3re='^(andn|blsr|blsmsk|blsi|bextr|bzhi|shlx|shrx|sarx|rorx|mulx|pdep|pext|movbe|pshufb|psignb|vfn?m(add|sub)(132|213|231)s[sd])$'
 v3pkgs="math math/big strconv internal/strconv internal/runtime/maps encoding/binary math/bits reflect internal/abi math/rand runtime"
 cryptopkgs="runtime crypto/aes crypto/cipher crypto/sha256 crypto/sha1 math/big crypto/internal/fips140/bigmod crypto/internal/fips140/aes/gcm crypto/rsa"
+avx512pkgs="internal/runtime/gc/scan hash/crc32 runtime"
 avxpkgs="crypto/sha256 crypto/sha1 crypto/sha512 crypto/tls bytes strings math internal/bytealg"
 ssepkgs="internal/chacha8rand hash/crc32 bytes strings crypto/internal/fips140/nistec crypto/aes crypto/sha256 crypto/sha1 crypto/cipher math"
 if [ "$mode" = fp ]; then
@@ -119,6 +126,24 @@ elif [ "$mode" = sse ]; then
 elif [ "$mode" = crypto ]; then
   echo "== generate (x86 crypto extensions, WP-E: $N encodings per spec, $((N / 2)) edge rounds)"
   "$bin/oracle" gen -crypto-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"
+elif [ "$mode" = avx512 ]; then
+  echo "== harvest the WP-G (AVX-512, opmask, VPCLMULQDQ, GFNI) instructions of the std test binaries"
+  corpus="$bin/corpus-avx512"
+  mkdir -p "$corpus"
+  (cd "$root/oracle-amd64" &&
+    for p in $avx512pkgs; do
+      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -c -o "$corpus/${p//\//_}.test" "$p"
+    done)
+  # x86asm does not know EVEX: GNU objdump lists the instructions (one per line, all bytes)
+  for f in "$corpus"/*.test; do
+    objdump -d --insn-width=15 --no-addresses "$f"
+  done | awk -F'\t' 'NF >= 3 { b = $2; gsub(/ /, "", b); split($3, m, " ");
+      if (b ~ /^62/ || m[1] ~ /^k(mov|and|or|xor|xnor|not|shift|test|ortest|add|unpck)/ || m[1] ~ /^vpclmul|^vgf2p8/)
+        print b "\t" m[1] }' | sort -u > "$OUT/evex-harvest.txt"
+  echo "$(wc -l < "$OUT/evex-harvest.txt") distinct encodings"
+  echo "== generate (AVX-512, WP-G: $N encodings per spec, EVEX opcode sweep ${SWEEP:-4} each, ${EVEX_K:-24} states per harvested encoding)"
+  "$bin/oracle" gen -avx512-only -n "$N" -sweep "${SWEEP:-4}" -evex-harvest "$OUT/evex-harvest.txt" \
+    -evex-k "${EVEX_K:-24}" -seed "$SEED" -o "$OUT/gen.jsonl"
 elif [ "$mode" = avx ]; then
   echo "== generate (AVX/AVX2/FMA3, WP-F: $N encodings per spec, $((N / 4)) edge rounds)"
   "$bin/oracle" gen -avx-only -n "$N" -seed "$SEED" "${fpk[@]}" -o "$OUT/gen.jsonl"

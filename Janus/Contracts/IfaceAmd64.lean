@@ -93,8 +93,9 @@ attribute [janus64_exec, janus64_post] rtWrites
 facts `P r m` about the result registers `r` and the new memory `m`. -/
 def RTReturn (R : IfaceModel) (nargs : Nat) (extra : List (Nat × Nat)) (s s' : State)
     (P : (Nat → W64) → Janus.Arm64.Memory → Prop) : Prop :=
-  ∃ r x y fl m, s' = { s with regs := MapAmd64.keepABI s.regs r, xmm := MapAmd64.keepX15 s.xmm x,
-                              ymmHi := y, flags := fl, mem := m, rip := retAddrOf s } ∧
+  ∃ r x y fl m zh kr,
+    s' = { s with regs := MapAmd64.keepABI s.regs r, xmm := MapAmd64.keepX15 s.xmm x,
+                  ymmHi := y, flags := fl, mem := m, rip := retAddrOf s, zmmHi := zh, kreg := kr } ∧
     MemFrame s.mem m (rtWrites R s nargs ++ extra) ∧ R.Env m (s.regs 14) ∧ P r m
 
 /-- `SETcc r8` into the low byte of a register, read back as the low byte. -/

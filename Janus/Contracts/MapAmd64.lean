@@ -119,8 +119,9 @@ def OthersKept {K V : Type} (M : MapModel K V) (m m' : Memory) (except : Nat) : 
 facts `P r m` about the result registers `r` and the new memory `m`. -/
 def RTReturn {K V : Type} (M : MapModel K V) (nargs : Nat) (extra : List (Nat × Nat))
     (except : Nat) (s s' : State) (P : (Nat → W64) → Memory → Prop) : Prop :=
-  ∃ r x y fl m, s' = { s with regs := keepABI s.regs r, xmm := keepX15 s.xmm x, ymmHi := y,
-                              flags := fl, mem := m, rip := retAddrOf s } ∧
+  ∃ r x y fl m zh kr,
+    s' = { s with regs := keepABI s.regs r, xmm := keepX15 s.xmm x, ymmHi := y,
+                  flags := fl, mem := m, rip := retAddrOf s, zmmHi := zh, kreg := kr } ∧
     MemFrame s.mem m (rtWrites M s nargs ++ extra) ∧ M.Env m (s.regs 14) ∧
     OthersKept M s.mem m except ∧ P r m
 

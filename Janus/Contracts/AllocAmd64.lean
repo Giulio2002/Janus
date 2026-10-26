@@ -71,12 +71,14 @@ def CallOK64 (s : State) (stack nargs : Nat) : Prop :=
     s.mem.accessible ((s.regs 4).toNat - stack) (stack + 8 + 8 * nargs) true = true
 
 /-- The state a call returns in (amd64): registers by `callRegs64`, `rip` = the return address,
-flags, `X0`–`X14`, the `YMM` upper halves and memory as given; `X15`, `FS` base and the direction
-flag unchanged. -/
+flags, `X0`–`X14`, the `YMM` upper halves, the AVX-512 state (`ZMM` bits 511:256, `K0`–`K7`) and
+memory as given; `X15`, `FS` base and the direction flag unchanged. -/
 def retState64 (s : State) (junk : Nat → W64) (res : List W64) (f : Flags)
-    (x : Nat → BitVec 128) (yh : Nat → BitVec 128) (m : Memory) : State :=
+    (x : Nat → BitVec 128) (yh : Nat → BitVec 128) (m : Memory) (zh : Nat → BitVec 256)
+    (kr : Nat → W64) : State :=
   { s with regs := callRegs64 s.regs junk res, rip := retAddrOf s, flags := f,
-           xmm := fun i => if i = 15 then s.xmm 15 else x i, ymmHi := yh, mem := m }
+           xmm := fun i => if i = 15 then s.xmm 15 else x i, ymmHi := yh, mem := m, zmmHi := zh,
+           kreg := kr }
 
 attribute [janus64_exec, janus64_post] retState64 calleeStack64
 
@@ -92,8 +94,9 @@ attribute [janus64_exec, janus64_post] rtView_writeLE
 /-- The shape of an allocation contract's postcondition (amd64), as `AllocRet`. -/
 @[reducible] def AllocRet64 (rt : List (Nat × Nat)) (stack nargs : Nat) (res : W64 → List W64)
     (s s' : State) (Q : Memory → Nat → Prop) : Prop :=
-  ∃ (ptr : W64) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
-    s' = retState64 s junk (res ptr) f x yh m ∧
+  ∃ (ptr : W64) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory)
+    (zh : Nat → BitVec 256) (kr : Nat → W64),
+    s' = retState64 s junk (res ptr) f x yh m zh kr ∧
       MemFrame s.mem m (rt ++ calleeStack64 s stack nargs) ∧ Q m ptr.toNat
 
 /-! Arguments: `RAX = regs 0`, `RBX = regs 3`, `RCX = regs 1`, `RDI = regs 7`, `RSI = regs 6`. -/
@@ -125,8 +128,8 @@ theorem MallocgcContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : List
     Summary p addr (fun s => (MallocgcPre64 stack s ∧
         Ready64 H rt [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s) ∧ 0 < (s.regs 0).toNat)
       (fun s s' => AllocRet64 rt stack 3 (fun ptr => [ptr]) s s' (mallocgcObj64 rt s)) :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, x, yh, m, h1, h2, h3 hp.2⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3 hp.2⟩
 
 /-- The precondition of `runtime.newobject` (amd64; `RAX = typ`). -/
 def NewobjectPre64 (stack : Nat) (s : State) : Prop :=
@@ -150,8 +153,8 @@ theorem NewobjectContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : Lis
     Summary p addr (fun s => (NewobjectPre64 stack s ∧ Ready64 H rt [(s.regs 0).toNat] s) ∧
       0 < typSize s.mem (s.regs 0).toNat)
       (fun s s' => AllocRet64 rt stack 1 (fun ptr => [ptr]) s s' (newobjectObj64 rt s)) :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, x, yh, m, h1, h2, h3 hp.2⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3 hp.2⟩
 
 /-- The precondition of `runtime.makeslice` (amd64; `RAX = et`, `RBX = len`, `RCX = cap`). -/
 def MakeslicePre64 (stack : Nat) (s : State) : Prop :=
@@ -181,8 +184,8 @@ theorem MakesliceContract64.pos {p : Janus.Amd64.Program} {addr : Nat} {rt : Lis
         Ready64 H rt [(s.regs 0).toNat, (s.regs 3).toNat, (s.regs 1).toNat] s) ∧
         0 < typSize s.mem (s.regs 0).toNat * (s.regs 1).toNat)
       (fun s s' => AllocRet64 rt stack 3 (fun ptr => [ptr]) s s' (makesliceObj64 rt s)) :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, x, yh, m, h1, h2, h3 hp.2⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, x, yh, m, zh, kr, h1, h2, h3 hp.2⟩
 
 /-- The arguments of `runtime.growslice` for 8-byte pointer-free elements (amd64;
 `RAX = oldPtr`, `RBX = newLen`, `RCX = oldCap`, `RDI = num`, `RSI = et`). -/

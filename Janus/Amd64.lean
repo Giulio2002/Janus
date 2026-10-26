@@ -21,3 +21,4 @@ import Janus.Amd64.TacticSSE
 import Janus.Amd64.TacticCrypto
 import Janus.Spec.MemHash
 import Janus.Amd64.TacticAVX2
+import Janus.Amd64.TacticEVEX

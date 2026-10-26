@@ -56,7 +56,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.L
   · simp only [Janus.Contracts.Ready64, setRegF, reduceIte, Nat.reduceEqDiff]
     simp (disch := janus64_disch) only [Janus.Contracts.rtView_writeLE]
     simpa [hsp24, h_a0] using hH
-  intro s' hpc' ⟨r, x', y, fl, m', hs', hfr, henv', hbox⟩
+  intro s' hpc' ⟨r, x', y, fl, m', _, _, hs', hfr, henv', hbox⟩
   subst hs'
   simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, List.append_nil, setRegF,
     reduceIte, Nat.reduceEqDiff, hsp24] at hfr

@@ -46,7 +46,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
   · simp only [Contracts.Ready64, setRegF, reduceIte, Nat.reduceEqDiff, hsp16]
     repeat rw [Contracts.rtView_writeLE (Outside.of_sub hout (by omega) (by omega))]
     exact hH
-  · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hnz, hrep, hfresh⟩
+  · intro s' hpc' ⟨r, x, y, fl, m', _, _, hs', hfr, henv', hoth, hnz, hrep, hfresh⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.append_nil, setRegF, reduceIte, Nat.reduceEqDiff, hsp16] at hfr
     janus64_run

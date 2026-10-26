@@ -2,6 +2,7 @@ import Janus.Amd64.X87
 import Janus.Amd64.InstrSSE
 import Janus.Amd64.InstrCrypto
 import Janus.Amd64.InstrAVX
+import Janus.Amd64.InstrEVEX
 
 /-!
 # x86-64 instruction AST (supported subset)
@@ -337,6 +338,9 @@ inductive Instr where
   | crypto (i : CryptoI XLoc Loc)
   /-- The AVX/AVX2/FMA3 instructions of WP-F (`Janus.Amd64.InstrAVX`, `DecodeAVX`, `ExecAVX`). -/
   | avx (i : AvxI XLoc Loc Addr)
+  /-- The AVX-512 instructions of WP-G (`Janus.Amd64.InstrEVEX`): EVEX, the VEX opmask
+  instructions, VEX `VPCLMULQDQ` and GFNI. -/
+  | evex (i : EvexI XLoc Loc Addr)
 deriving Repr, DecidableEq, Inhabited
 
 end Janus.Amd64

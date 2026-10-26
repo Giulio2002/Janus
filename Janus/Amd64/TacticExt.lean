@@ -213,7 +213,8 @@ theorem State.ext' {s t : State} (h1 : s.regs = t.regs) (h2 : s.rip = t.rip) (h3
     (h4 : s.xmm = t.xmm) (h5 : s.mem = t.mem) (h6 : s.ymmHi = t.ymmHi := by rfl)
     (h7 : s.fsBase = t.fsBase := by rfl) (h8 : s.df = t.df := by rfl)
     (h9 : s.mxcsr = t.mxcsr := by rfl) (h10 : s.x87 = t.x87 := by rfl)
-    (h11 : s.fpucw = t.fpucw := by rfl) : s = t := by
+    (h11 : s.fpucw = t.fpucw := by rfl) (h12 : s.zmmHi = t.zmmHi := by rfl)
+    (h13 : s.kreg = t.kreg := by rfl) : s = t := by
   cases s; cases t; simp_all
 
 private theorem acc_head {m : Memory} {a sz k : Nat} {w : Bool} (h : m.accessible a (sz * (k + 1)) w = true) :
