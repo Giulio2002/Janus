@@ -561,6 +561,24 @@ def simpCached (cref : IO.Ref StepCache) (ctx : Simp.Context) (simprocs : Simp.S
     { sc with caches := caches.push (key, s.cache) }
   return r
 
+/-- Recursive side-condition discharge. The tactic discharger `d` (`janus_disch`/`janus64_disch`)
+runs first; a side condition it cannot prove is then simplified with the simp context of the run
+itself, so that a conditional lemma (`shr_ofNat : a < 2^64 → …`) is discharged by the other facts of
+the set (`readLE_lt_8 : m.readLE a 8 < 2^64`) and the lemmas the caller passed. Bounded: Lean's
+`discharge?'` stops at `maxDischargeDepth` (default 2), so a discharge inside the fallback gets at
+most one more level and a lemma whose condition needs itself cannot loop. Closed conditions (decided
+by `d`), `Outside` and `accessible` conditions (own dischargers) are never retried. -/
+def withRecursiveDisch (d : Simp.Discharge) : Simp.Discharge := fun e => do
+  if let some p ← d e then return some p
+  let e ← instantiateMVars e.cleanupAnnotations
+  if e.hasMVar || !e.hasFVar then return none
+  if e.isAppOfArity ``Janus.Outside 3 then return none
+  if let some (_, lhs, _) := e.eq? then
+    if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then return none
+  unless (← Meta.isProp e) do return none
+  let r ← Simp.simp e
+  if r.expr.isTrue then return some (← mkOfEqTrue (← r.getProof)) else return none
+
 /-- Look up or build (with `mk`) the simp context of simp set `set` for the current local
 context, and run `k` with it. -/
 def withCachedCtx (cref : IO.Ref StepCache) (set : Name)
@@ -575,7 +593,7 @@ def withCachedCtx (cref : IO.Ref StepCache) (set : Name)
         let ctxs := if sc.ctxs.size ≥ 16 then sc.ctxs.extract 1 sc.ctxs.size else sc.ctxs
         { sc with ctxs := ctxs.push (key, set, c, sp, dw) }
       pure (c, sp, dw)
-  dw.with fun d? => k ctx simprocs d?
+  dw.with fun d? => k ctx simprocs (d?.map withRecursiveDisch)
 
 /-! ## Closed side conditions
 

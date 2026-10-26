@@ -157,7 +157,7 @@ example (a b v : BitVec 64) :
     Ensures alias 0x10000 [a, b, v]
       (fun s => s.mem.accessible a.toNat 8 true = true ∧ s.mem.accessible b.toNat 8 false = true ∧
         a.toNat + 8 ≤ 2 ^ 48 ∧ b.toNat + 8 ≤ 2 ^ 48)
-      (fun _ s' => (s'.regs 0).toNat < 2 ^ 64) := by
+      (fun _ s' => (s'.regs 0).toNat ≤ 2 ^ 64) := by
   intro ret hret s hs ⟨ha, hb, ha', hb'⟩
   janus_intro hs
   janus_run

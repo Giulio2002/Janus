@@ -201,6 +201,28 @@ example (x : BitVec 64) :
   simp only [regSP] at hacc hle hnw
   janus64_run
 
+/-! ## Side conditions of the caller's lemmas
+
+`MOVQ (AX), AX; SHRQ $3, AX; RET`. `shr_ofNat` evaluates a shift of `BitVec.ofNat 64 a`, but only
+for `a < 2^64`; for `a = readLE …` that bound is `readLE_lt_8`, a fact of the simp set, and
+`janus64_run [shr_ofNat]` discharges the side condition with it. -/
+
+theorem shr_ofNat (a n : Nat) (h : a < 2 ^ 64) : (BitVec.ofNat 64 a >>> n).toNat = a / 2 ^ n := by
+  simp [BitVec.toNat_ushiftRight, Nat.mod_eq_of_lt h, Nat.shiftRight_eq_div_pow]
+
+def shrProg : Program :=
+  { segments := [⟨"f", 0x1000, [0x48, 0x8b, 0x00, 0x48, 0xc1, 0xe8, 0x03, 0xc3]⟩], stubs := [],
+    exitAddr := 0 }
+
+example (p : BitVec 64) :
+    Ensures shrProg 0x1000 [p]
+      (fun s => StackWritable s 0 8 ∧ s.mem.accessible p.toNat 8 false = true ∧ p.toNat + 8 ≤ 2 ^ 48)
+      (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 / 8) := by
+  intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hp, hp'⟩
+  janus64_intro hs
+  simp only [regSP] at hacc hle hnw
+  janus64_run [shr_ofNat]
+
 example : RetAddr retProg 0x2000 := RetAddr.of_check (by decide)
 example : ¬ RetAddr retProg 0x1000 := fun h => h.ne_of_fetch (pc := 0x1000) (w := [0xc3]) rfl rfl
 example : ¬ RetAddr retProg (2 ^ 47) := fun h => by have := h.user; omega

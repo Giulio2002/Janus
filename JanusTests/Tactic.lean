@@ -977,4 +977,47 @@ theorem diamond_spec (x y z : W64) :
   set_option janus.merge true in janus_run until [0x70028]
   · janus_run
 
+/-! ## Side conditions of the caller's lemmas
+
+`ldr x0, [x0]; lsr x0, x0, #3; ret`. The simp set rewrites the shift to a rotation of
+`BitVec.ofNat 64 (readLE …)`; `lsr3_ofNat` evaluates that, but only for `a < 2^64`. That bound
+is not a hypothesis: it is `readLE_lt_8`, a fact of the simp set, and `janus_run [lsr3_ofNat]`
+proves the side condition from it (the discharger simplifies side conditions with the set of
+the run). Before, the run stopped with the lemma unapplied and the bound left to the caller. -/
+
+theorem lsr3_ofNat (a : Nat) (h : a < 2 ^ 64) :
+    ((BitVec.ofNat 64 a).rotateRight 3).toNat % 2305843009213693952 = a / 8 := by
+  have : (BitVec.ofNat 64 a).rotateRight 3 = (BitVec.ofNat 64 a) >>> 3 ||| (BitVec.ofNat 64 a) <<< 61 := by
+    simp [BitVec.rotateRight, BitVec.rotateRightAux]
+  rw [this]
+  simp [BitVec.toNat_or, BitVec.toNat_ushiftRight, BitVec.toNat_shiftLeft, Nat.mod_eq_of_lt h]
+  rw [Nat.shiftLeft_eq, Nat.shiftRight_eq_div_pow, show (2305843009213693952 : Nat) = 2 ^ 61 by decide,
+    Nat.or_mod_two_pow]
+  have h1 : a * 2 ^ 61 % 18446744073709551616 % 2 ^ 61 = 0 := by omega
+  rw [h1, Nat.or_zero]
+  omega
+
+def lsrp : Program where
+  segments := [{ name := "lsr", base := 0x50000, words := [0xf9400000, 0xd343fc00, 0xd65f03c0] }]
+  stubs := []
+  exitAddr := 0
+
+theorem lsr_spec (p : W64) :
+    Ensures lsrp 0x50000 [p] (fun s => Ptr s.mem p 8 false)
+      (fun s s' => (s'.regs 0).toNat = s.mem.readLE p.toNat 8 / 8) := by
+  intro ret hret s hs ⟨hp, hp'⟩
+  janus_intro hs
+  janus_run [lsr3_ofNat]
+
+/-! ## Disjoint writes commute
+
+`writeLE_comm` (a permutation lemma, not in the default simp sets: it would reorder the write
+chains that existing contracts state) sorts a chain of disjoint writes, so two orders of the
+same writes simplify to one normal form. -/
+
+example (m : Memory) (u v w : Nat) :
+    ((m.writeLE 0x10 8 u).writeLE 0x30 4 v).writeLE 0x20 8 w =
+      ((m.writeLE 0x20 8 w).writeLE 0x10 8 u).writeLE 0x30 4 v := by
+  simp (disch := decide) only [writeLE_comm]
+
 end JanusTests.Tactic

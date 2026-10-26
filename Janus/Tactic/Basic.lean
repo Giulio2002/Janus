@@ -600,6 +600,15 @@ attribute [janus_exec, janus_post, janus_acc] Memory.accessible_writeLE Memory.r
     (h : a = b) : (m.writeLE a n v).readLE b n = v % 256 ^ n := by
   subst h; exact Memory.readLE_writeLE_self m a n v
 
+/-- Writes to disjoint ranges commute. A permutation lemma (simp rewrites with it only towards
+the smaller term, so it cannot loop) but deliberately NOT in `janus_exec`/`janus_post`: sorting the
+write chain changes the memory terms the existing contract proofs state (MapSat, IfaceSat, …).
+Pass it where wanted: `janus_run [writeLE_comm]`. -/
+theorem writeLE_comm (m : Memory) {a n b k : Nat} (v w : Nat)
+    (h : a + n ≤ b ∨ b + k ≤ a) :
+    (m.writeLE a n v).writeLE b k w = (m.writeLE b k w).writeLE a n v :=
+  Memory.writeLE_comm m v w h
+
 theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat) (h1 : a ≤ b)
     (h2 : b + k ≤ a + n) : (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Memory.readLE_writeLE_inside m v h1 h2
@@ -616,6 +625,17 @@ theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat) (h1 : a ≤
 @[janus_exec, janus_post] theorem readLE_mod_1 (m : Memory) (a : Nat) :
     m.readLE a 1 % 256 = m.readLE a 1 :=
   Nat.mod_eq_of_lt (Memory.readLE_lt m a 1)
+
+/-- Bounds of reads, as simp lemmas: they let the side-condition discharger of the simp sets
+(`Common.withRecursiveDisch`) prove `m.readLE a 8 < 2^64` for a conditional lemma. -/
+@[janus_exec, janus_post] theorem readLE_lt_8 (m : Memory) (a : Nat) :
+    m.readLE a 8 < 18446744073709551616 := Memory.readLE_lt m a 8
+@[janus_exec, janus_post] theorem readLE_lt_4 (m : Memory) (a : Nat) :
+    m.readLE a 4 < 4294967296 := Memory.readLE_lt m a 4
+@[janus_exec, janus_post] theorem readLE_lt_2 (m : Memory) (a : Nat) :
+    m.readLE a 2 < 65536 := Memory.readLE_lt m a 2
+@[janus_exec, janus_post] theorem readLE_lt_1 (m : Memory) (a : Nat) :
+    m.readLE a 1 < 256 := Memory.readLE_lt m a 1
 
 @[janus_exec, janus_post] theorem writeLE_mod_8 (m : Memory) (a v : Nat) :
     m.writeLE a 8 (v % 18446744073709551616) = m.writeLE a 8 v := Memory.writeLE_mod m a 8 v

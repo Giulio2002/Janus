@@ -102,4 +102,24 @@ example (m : Memory) (a : Nat) (h : m.accessible a 16 true = true) :
 
 example (m : Memory) (a : Nat) : m.readLE a 8 < 2 ^ 64 := Memory.readLE_lt m a 8
 
+/-- Disjoint writes commute, for arbitrary widths and values. -/
+example (m : Memory) (a n b k v w : Nat) (h : a + n ≤ b ∨ b + k ≤ a) :
+    (m.writeLE a n v).writeLE b k w = (m.writeLE b k w).writeLE a n v :=
+  Memory.writeLE_comm m v w h
+
+example (m : Memory) (v w : Nat) :
+    (m.writeLE 0x10 8 v).writeLE 0x20 4 w = (m.writeLE 0x20 4 w).writeLE 0x10 8 v :=
+  Memory.writeLE_comm m v w (by decide)
+
+/-- Overlapping writes do not commute, so the side condition is needed. -/
+example : (m0.writeLE 0x1000 2 0x0102).writeLE 0x1001 1 0x03 ≠
+    (m0.writeLE 0x1001 1 0x03).writeLE 0x1000 2 0x0102 := by
+  intro h
+  have := congrArg (fun m : Memory => m.readLE 0x1001 1) h
+  revert this; decide
+
+/-- Read after a disjoint write. -/
+example (m : Memory) (a b v : Nat) (h : b + 8 ≤ a) : (m.writeLE a 4 v).readLE b 8 = m.readLE b 8 :=
+  Memory.readLE_writeLE_of_disjoint m v (Or.inl h)
+
 end JanusTests.MemoryLemmas
