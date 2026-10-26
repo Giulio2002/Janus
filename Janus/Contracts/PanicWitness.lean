@@ -235,4 +235,32 @@ contract addresses. -/
 def panicImpl (prog : Program) (cs : List (String × Nat)) : List Segment :=
   engineSeg :: cs.map (fun c => stubSeg prog c.1 c.2)
 
+/-! ## A witness memory: the model's table for `T` -/
+
+instance (m : Memory) (i : Nat) (f : FuncInfo) : Decidable (TabEntry m i f) := by
+  unfold TabEntry; infer_instance
+
+
+/-- The 64-bit words `(address, value)` of the model's private memory for the function table `T`
+(everything else is zero). -/
+def tabWords (T : List FuncInfo) : List (Nat × Nat) :=
+  (B + 0x28, T.length) :: (List.range T.length).flatMap fun i =>
+    match T[i]? with
+    | none => []
+    | some f => [(tabAt i, f.entry), (tabAt i + 8, f.size), (tabAt i + 16, f.frame),
+        (tabAt i + 24, f.deferreturn), (tabAt i + 32, if f.openDefer.isSome then 1 else 0),
+        (tabAt i + 40, (f.openDefer.map (·.1)).getD 0), (tabAt i + 48, (f.openDefer.map (·.2)).getD 0)]
+
+/-- The byte at `a` of the memory holding the 64-bit words `ws`. -/
+def wordByte (ws : List (Nat × Nat)) (a : Nat) : BitVec 8 :=
+  match ws.find? (fun w => decide (w.1 ≤ a ∧ a < w.1 + 8)) with
+  | some w => BitVec.ofNat 8 (w.2 / 2 ^ (8 * (a - w.1)))
+  | none => 0
+
+/-- The witness memory: the model's private memory `[0x10000, 0x11000)` (writable), a stack
+`[0x40000, 0x50000)` (writable), the goroutine `[0x50000, 0x50100)` (read-only); the bytes are
+zero except the words `ws`. -/
+def witMem (ws : List (Nat × Nat)) : Memory :=
+  ⟨wordByte ws, [⟨0x10000, 0x1000, true⟩, ⟨0x40000, 0x10000, true⟩, ⟨0x50000, 0x100, false⟩]⟩
+
 end Janus.Contracts.PanicSat

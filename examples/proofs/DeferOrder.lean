@@ -348,4 +348,115 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       rfl
 
 
+/-! ## Non-vacuity
+
+The theorem's hypotheses hold together: the model engine of `Janus.Contracts.PanicSat` (code that
+`Janus.Contracts.PanicSatRun` proves meets the `gopanic` contract in every program that contains
+it), linked into `DeferOrder`'s program with a branch to it at the `runtime.gopanic` address, and a
+call state — an `any` of type word `1`, `x = 11` — in the precondition; the call panics. -/
+
+namespace Witness
+
+open Janus.Contracts.PanicSat Janus.Contracts.PanicModel
+
+abbrev T0 : List FuncInfo := Extracted.funcs
+
+/-- The panic runtime: the model, with the funcs table of this binary. -/
+abbrev PW : PanicRuntime := P0 T0 RPa
+
+def gA : Nat := Extracted.program.contractAddr "runtime.gopanic"
+
+/-- The code linked next to `DeferOrder`: the model engine and the branch to it at `runtime.gopanic`. -/
+def implW : List Segment := panicImpl Extracted.program [("runtime.gopanic", eGopanic)]
+
+theorem tok : TOK T0 := by
+  unfold TOK T0 Extracted.funcs
+  decide
+
+theorem engineAt : EngineAt (Extracted.program.link implW) :=
+  EngineAt.of_link (rest := _) (by decide) (by decide) (by decide)
+
+theorem stubAt : StubAt (Extracted.program.link implW) gA eGopanic :=
+  StubAt.of_decode (w := stubWord gA eGopanic) (imm := (eGopanic - gA) / 4) (by decide) (by decide) (by decide)
+    (by decide) (by decide) (by decide)
+
+theorem hpan : GopanicContract (Extracted.program.link implW) gA PW U0 T0 :=
+  gopanic_at stubAt (gopanic_run engineAt T0 tok)
+
+def wmW : Memory := witMem (tabWords T0)
+
+def wg : Nat := 0x50000
+def wsp : Nat := 0x48000
+def pA : Nat := 0x41000
+def ret : Nat := 0x200000
+
+theorem env_w : Env0 T0 wmW := by
+  unfold Env0
+  have hnd : ndef wmW = 0 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · omega
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+theorem hret : RetAddr (Extracted.program.link implW) ret := RetAddr.of_check (by decide)
+
+def s0 : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 ret
+      else if i = 29 then BitVec.ofNat 64 (wsp - 8) else if i = 0 then BitVec.ofNat 64 pA
+      else if i = 1 then 11#64 else if i = 2 then 1#64 else 0,
+    sp := BitVec.ofNat 64 wsp, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := wmW }
+
+theorem setup : CallSetup ((Extracted.program.link implW).withExit ret) Extracted.entry
+    [BitVec.ofNat 64 pA, 11#64, 1#64, 0#64] s0 := by
+  refine ⟨rfl, rfl, fun i h => ?_⟩
+  simp at h; rcases (by omega : i = 0 ∨ i = 1 ∨ i = 2 ∨ i = 3) with rfl | rfl | rfl | rfl <;> rfl
+
+theorem pre : PanicCallerOK PW s0 128 40 := by
+  refine ⟨env_w, ⟨by decide, by decide, by decide⟩, by decide, by decide, by decide, by decide, by decide, ?_, ?_, ?_⟩
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · unfold Spec.Disjoint; decide
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+
+theorem pre' : PanicCallerOK PW s0 128 40 ∧ Ptr s0.mem (BitVec.ofNat 64 pA) 8 true ∧
+    Spec.Disjoint (BitVec.ofNat 64 pA).toNat 8 (s0.sp.toNat - (PW.depth + 128)) (PW.depth + 128 + 40) ∧
+    Outside (BitVec.ofNat 64 pA).toNat 8 PW.priv ∧ (1#64 : BitVec 64).toNat ≠ 0 ∧
+    0 < PW.room s0.mem (gOf s0) ∧ ∀ d ∈ PW.defers s0.mem (gOf s0), s0.sp.toNat ≤ d.sp := by
+  refine ⟨pre, ⟨by decide, by decide⟩, ?_, ?_, by decide, ?_, ?_⟩
+  · unfold Spec.Disjoint; decide
+  · simp only [P0_priv, outside_cons, outside_nil, and_true]; decide
+  · show 0 < room0 wmW
+    rw [room0_eq]; decide
+  · intro d hd
+    have hnd : ndef wmW = 0 := by decide
+    have : defers0 wmW = [] := by rw [defers0_eq, hnd]; rfl
+    exact absurd hd (by rw [show PW.defers s0.mem (gOf s0) = defers0 wmW from rfl, this]; simp)
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (U : State → Nat → Nat → Prop) (ret : Nat)
+    (s : State), P.Laws ∧
+    GopanicContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.gopanic") P U Extracted.funcs ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry
+      [BitVec.ofNat 64 pA, 11#64, 1#64, 0#64] s ∧
+    (PanicCallerOK P s 128 40 ∧ Ptr s.mem (BitVec.ofNat 64 pA) 8 true ∧
+      Spec.Disjoint (BitVec.ofNat 64 pA).toNat 8 (s.sp.toNat - (P.depth + 128)) (P.depth + 128 + 40) ∧
+      Outside (BitVec.ofNat 64 pA).toNat 8 P.priv ∧ (1#64 : BitVec 64).toNat ≠ 0 ∧
+      0 < P.room s.mem (gOf s) ∧ ∀ d ∈ P.defers s.mem (gOf s), s.sp.toNat ≤ d.sp) :=
+  ⟨implW, PW, U0, ret, s0, P0_laws T0 RPa, hpan, hret, setup, pre'⟩
+
+/-- So the guarantee is reached: with `x = 11` `DeferOrder` panics with `e`, after the three
+deferred calls ran in LIFO order. -/
+theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClassU PW U0 s0) s0 fun o =>
+    match o with
+    | .returned s' => ABIReturn s0 s' ∧ ((11#64 : BitVec 64).toNat ≤ 10 ∧ (s'.regs 0).toNat = (11#64 : BitVec 64).toNat ∧
+        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order (s0.mem.readLE (BitVec.ofNat 64 pA).toNat 8))
+    | .panicked v s' => 10 < (11#64 : BitVec 64).toNat ∧ v = ⟨(1#64 : BitVec 64).toNat, (0#64 : BitVec 64).toNat⟩ ∧
+        s'.mem.readLE (BitVec.ofNat 64 pA).toNat 8 = order (s0.mem.readLE (BitVec.ofNat 64 pA).toNat 8)
+    | .goexited _ => False :=
+  correctness implW PW (P0_laws T0 RPa) U0 hpan (BitVec.ofNat 64 pA) 11#64 1#64 0#64 ret hret s0 setup pre'
+
+end Witness
+
 end Proof
