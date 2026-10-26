@@ -178,137 +178,6 @@ func s_makemap()
 //go:linkname s_makemap_small runtime.makemap_small
 func s_makemap_small()
 
-//go:linkname s_mapaccess1 runtime.mapaccess1
-func s_mapaccess1()
-
-//go:linkname s_mapaccess1_fast32 runtime.mapaccess1_fast32
-func s_mapaccess1_fast32()
-
-//go:linkname s_mapaccess1_fast64 runtime.mapaccess1_fast64
-func s_mapaccess1_fast64()
-
-//go:linkname s_mapaccess1_faststr runtime.mapaccess1_faststr
-func s_mapaccess1_faststr()
-
-//go:linkname s_mapaccess1_fat runtime.mapaccess1_fat
-func s_mapaccess1_fat()
-
-//go:linkname s_mapaccess2 runtime.mapaccess2
-func s_mapaccess2()
-
-//go:linkname s_mapaccess2_fast32 runtime.mapaccess2_fast32
-func s_mapaccess2_fast32()
-
-//go:linkname s_mapaccess2_fast64 runtime.mapaccess2_fast64
-func s_mapaccess2_fast64()
-
-//go:linkname s_mapaccess2_faststr runtime.mapaccess2_faststr
-func s_mapaccess2_faststr()
-
-//go:linkname s_mapaccess2_fat runtime.mapaccess2_fat
-func s_mapaccess2_fat()
-
-//go:linkname s_mapassign runtime.mapassign
-func s_mapassign()
-
-//go:linkname s_mapassign_fast32 runtime.mapassign_fast32
-func s_mapassign_fast32()
-
-//go:linkname s_mapassign_fast64 runtime.mapassign_fast64
-func s_mapassign_fast64()
-
-//go:linkname s_mapassign_fast64ptr runtime.mapassign_fast64ptr
-func s_mapassign_fast64ptr()
-
-//go:linkname s_mapassign_faststr runtime.mapassign_faststr
-func s_mapassign_faststr()
-
-//go:linkname s_mapclear runtime.mapclear
-func s_mapclear()
-
-//go:linkname s_mapdelete runtime.mapdelete
-func s_mapdelete()
-
-//go:linkname s_mapdelete_fast32 runtime.mapdelete_fast32
-func s_mapdelete_fast32()
-
-//go:linkname s_mapdelete_fast64 runtime.mapdelete_fast64
-func s_mapdelete_fast64()
-
-//go:linkname s_mapdelete_faststr runtime.mapdelete_faststr
-func s_mapdelete_faststr()
-
-//go:linkname s_mapIterNext runtime.mapIterNext
-func s_mapIterNext()
-
-//go:linkname s_mapIterStart runtime.mapIterStart
-func s_mapIterStart()
-
-//go:linkname s_memclrHasPointers runtime.memclrHasPointers
-func s_memclrHasPointers()
-
-//go:linkname s_memclrNoHeapPointers runtime.memclrNoHeapPointers
-func s_memclrNoHeapPointers()
-
-//go:linkname s_memequal runtime.memequal
-func s_memequal()
-
-//go:linkname s_memequal0 runtime.memequal0
-func s_memequal0()
-
-//go:linkname s_memequal128 runtime.memequal128
-func s_memequal128()
-
-//go:linkname s_memequal16 runtime.memequal16
-func s_memequal16()
-
-//go:linkname s_memequal32 runtime.memequal32
-func s_memequal32()
-
-//go:linkname s_memequal64 runtime.memequal64
-func s_memequal64()
-
-//go:linkname s_memequal8 runtime.memequal8
-func s_memequal8()
-
-//go:linkname s_memequal_varlen runtime.memequal_varlen
-func s_memequal_varlen()
-
-//go:linkname s_memhash runtime.memhash
-func s_memhash()
-
-//go:linkname s_memhash0 runtime.memhash0
-func s_memhash0()
-
-//go:linkname s_memhash128 runtime.memhash128
-func s_memhash128()
-
-//go:linkname s_memhash16 runtime.memhash16
-func s_memhash16()
-
-//go:linkname s_memhash32 runtime.memhash32
-func s_memhash32()
-
-//go:linkname s_memhash64 runtime.memhash64
-func s_memhash64()
-
-//go:linkname s_memhash8 runtime.memhash8
-func s_memhash8()
-
-//go:linkname s_memhash_varlen runtime.memhash_varlen
-func s_memhash_varlen()
-
-//go:linkname s_memmove runtime.memmove
-func s_memmove()
-
-//go:linkname s_nilinterequal runtime.nilinterequal
-func s_nilinterequal()
-
-//go:linkname s_nilinterhash runtime.nilinterhash
-func s_nilinterhash()
-
-//go:linkname s_panicBounds runtime.panicBounds
-func s_panicBounds()
 //go:linkname s_mallocgcSmallNoScanSC10 runtime.mallocgcSmallNoScanSC10
 func s_mallocgcSmallNoScanSC10()
 
@@ -507,6 +376,138 @@ func s_mallocgcTinySize8()
 //go:linkname s_mallocgcTinySize9 runtime.mallocgcTinySize9
 func s_mallocgcTinySize9()
 
+//go:linkname s_mapaccess1 runtime.mapaccess1
+func s_mapaccess1()
+
+//go:linkname s_mapaccess1_fast32 runtime.mapaccess1_fast32
+func s_mapaccess1_fast32()
+
+//go:linkname s_mapaccess1_fast64 runtime.mapaccess1_fast64
+func s_mapaccess1_fast64()
+
+//go:linkname s_mapaccess1_faststr runtime.mapaccess1_faststr
+func s_mapaccess1_faststr()
+
+//go:linkname s_mapaccess1_fat runtime.mapaccess1_fat
+func s_mapaccess1_fat()
+
+//go:linkname s_mapaccess2 runtime.mapaccess2
+func s_mapaccess2()
+
+//go:linkname s_mapaccess2_fast32 runtime.mapaccess2_fast32
+func s_mapaccess2_fast32()
+
+//go:linkname s_mapaccess2_fast64 runtime.mapaccess2_fast64
+func s_mapaccess2_fast64()
+
+//go:linkname s_mapaccess2_faststr runtime.mapaccess2_faststr
+func s_mapaccess2_faststr()
+
+//go:linkname s_mapaccess2_fat runtime.mapaccess2_fat
+func s_mapaccess2_fat()
+
+//go:linkname s_mapassign runtime.mapassign
+func s_mapassign()
+
+//go:linkname s_mapassign_fast32 runtime.mapassign_fast32
+func s_mapassign_fast32()
+
+//go:linkname s_mapassign_fast64 runtime.mapassign_fast64
+func s_mapassign_fast64()
+
+//go:linkname s_mapassign_fast64ptr runtime.mapassign_fast64ptr
+func s_mapassign_fast64ptr()
+
+//go:linkname s_mapassign_faststr runtime.mapassign_faststr
+func s_mapassign_faststr()
+
+//go:linkname s_mapclear runtime.mapclear
+func s_mapclear()
+
+//go:linkname s_mapdelete runtime.mapdelete
+func s_mapdelete()
+
+//go:linkname s_mapdelete_fast32 runtime.mapdelete_fast32
+func s_mapdelete_fast32()
+
+//go:linkname s_mapdelete_fast64 runtime.mapdelete_fast64
+func s_mapdelete_fast64()
+
+//go:linkname s_mapdelete_faststr runtime.mapdelete_faststr
+func s_mapdelete_faststr()
+
+//go:linkname s_mapIterNext runtime.mapIterNext
+func s_mapIterNext()
+
+//go:linkname s_mapIterStart runtime.mapIterStart
+func s_mapIterStart()
+
+//go:linkname s_memclrHasPointers runtime.memclrHasPointers
+func s_memclrHasPointers()
+
+//go:linkname s_memclrNoHeapPointers runtime.memclrNoHeapPointers
+func s_memclrNoHeapPointers()
+
+//go:linkname s_memequal runtime.memequal
+func s_memequal()
+
+//go:linkname s_memequal0 runtime.memequal0
+func s_memequal0()
+
+//go:linkname s_memequal128 runtime.memequal128
+func s_memequal128()
+
+//go:linkname s_memequal16 runtime.memequal16
+func s_memequal16()
+
+//go:linkname s_memequal32 runtime.memequal32
+func s_memequal32()
+
+//go:linkname s_memequal64 runtime.memequal64
+func s_memequal64()
+
+//go:linkname s_memequal8 runtime.memequal8
+func s_memequal8()
+
+//go:linkname s_memequal_varlen runtime.memequal_varlen
+func s_memequal_varlen()
+
+//go:linkname s_memhash runtime.memhash
+func s_memhash()
+
+//go:linkname s_memhash0 runtime.memhash0
+func s_memhash0()
+
+//go:linkname s_memhash128 runtime.memhash128
+func s_memhash128()
+
+//go:linkname s_memhash16 runtime.memhash16
+func s_memhash16()
+
+//go:linkname s_memhash32 runtime.memhash32
+func s_memhash32()
+
+//go:linkname s_memhash64 runtime.memhash64
+func s_memhash64()
+
+//go:linkname s_memhash8 runtime.memhash8
+func s_memhash8()
+
+//go:linkname s_memhash_varlen runtime.memhash_varlen
+func s_memhash_varlen()
+
+//go:linkname s_memmove runtime.memmove
+func s_memmove()
+
+//go:linkname s_nilinterequal runtime.nilinterequal
+func s_nilinterequal()
+
+//go:linkname s_nilinterhash runtime.nilinterhash
+func s_nilinterhash()
+
+//go:linkname s_panicBounds runtime.panicBounds
+func s_panicBounds()
+
 //go:linkname s_panicBounds32 runtime.panicBounds32
 func s_panicBounds32()
 
@@ -579,13 +580,14 @@ func s_panicwrap()
 //go:linkname s_rand runtime.rand
 func s_rand()
 
+//go:linkname s_sigpanic runtime.sigpanic
+func s_sigpanic()
+
 //go:linkname s_strequal runtime.strequal
 func s_strequal()
 
 //go:linkname s_strhash runtime.strhash
 func s_strhash()
-//go:linkname s_sigpanic runtime.sigpanic
-func s_sigpanic()
 
 //go:linkname s_typeAssert runtime.typeAssert
 func s_typeAssert()
@@ -653,50 +655,6 @@ var keep = []func(){
 	s_interhash,
 	s_makemap,
 	s_makemap_small,
-	s_mapaccess1,
-	s_mapaccess1_fast32,
-	s_mapaccess1_fast64,
-	s_mapaccess1_faststr,
-	s_mapaccess1_fat,
-	s_mapaccess2,
-	s_mapaccess2_fast32,
-	s_mapaccess2_fast64,
-	s_mapaccess2_faststr,
-	s_mapaccess2_fat,
-	s_mapassign,
-	s_mapassign_fast32,
-	s_mapassign_fast64,
-	s_mapassign_fast64ptr,
-	s_mapassign_faststr,
-	s_mapclear,
-	s_mapdelete,
-	s_mapdelete_fast32,
-	s_mapdelete_fast64,
-	s_mapdelete_faststr,
-	s_mapIterNext,
-	s_mapIterStart,
-	s_memclrHasPointers,
-	s_memclrNoHeapPointers,
-	s_memequal,
-	s_memequal0,
-	s_memequal128,
-	s_memequal16,
-	s_memequal32,
-	s_memequal64,
-	s_memequal8,
-	s_memequal_varlen,
-	s_memhash,
-	s_memhash0,
-	s_memhash128,
-	s_memhash16,
-	s_memhash32,
-	s_memhash64,
-	s_memhash8,
-	s_memhash_varlen,
-	s_memmove,
-	s_nilinterequal,
-	s_nilinterhash,
-	s_panicBounds,
 	s_mallocgcSmallNoScanSC10,
 	s_mallocgcSmallNoScanSC11,
 	s_mallocgcSmallNoScanSC12,
@@ -763,6 +721,50 @@ var keep = []func(){
 	s_mallocgcTinySize7,
 	s_mallocgcTinySize8,
 	s_mallocgcTinySize9,
+	s_mapaccess1,
+	s_mapaccess1_fast32,
+	s_mapaccess1_fast64,
+	s_mapaccess1_faststr,
+	s_mapaccess1_fat,
+	s_mapaccess2,
+	s_mapaccess2_fast32,
+	s_mapaccess2_fast64,
+	s_mapaccess2_faststr,
+	s_mapaccess2_fat,
+	s_mapassign,
+	s_mapassign_fast32,
+	s_mapassign_fast64,
+	s_mapassign_fast64ptr,
+	s_mapassign_faststr,
+	s_mapclear,
+	s_mapdelete,
+	s_mapdelete_fast32,
+	s_mapdelete_fast64,
+	s_mapdelete_faststr,
+	s_mapIterNext,
+	s_mapIterStart,
+	s_memclrHasPointers,
+	s_memclrNoHeapPointers,
+	s_memequal,
+	s_memequal0,
+	s_memequal128,
+	s_memequal16,
+	s_memequal32,
+	s_memequal64,
+	s_memequal8,
+	s_memequal_varlen,
+	s_memhash,
+	s_memhash0,
+	s_memhash128,
+	s_memhash16,
+	s_memhash32,
+	s_memhash64,
+	s_memhash8,
+	s_memhash_varlen,
+	s_memmove,
+	s_nilinterequal,
+	s_nilinterhash,
+	s_panicBounds,
 	s_panicBounds32,
 	s_panicBounds32X,
 	s_panicBounds64,
@@ -787,9 +789,9 @@ var keep = []func(){
 	s_panicunsafestringnilptr,
 	s_panicwrap,
 	s_rand,
+	s_sigpanic,
 	s_strequal,
 	s_strhash,
-	s_sigpanic,
 	s_typeAssert,
 	s_typedmemclr,
 	s_typedmemmove,
