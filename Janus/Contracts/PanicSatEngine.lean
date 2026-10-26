@@ -300,13 +300,12 @@ theorem outside_of_forall {a n : Nat} : ∀ {rs : List (Nat × Nat)}, (∀ r ∈
 
 /-- Every range the runtime reads again is apart from what the loop writes (the model's records,
 its stack window below the frame, the `deferBits` byte). -/
-theorem Inv0.keep_apart (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph) :
+theorem keep_apart_fo {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List Item}
+    (hfo : FrameOK (P0 T RPa) m0 F items0) :
     ∀ r ∈ keepCore m0 F items0, r.2 = r.1 + 8 ∧
       Outside r.1 8 ([(B, B + 0x1000)] ++ rtWin (P0 T RPa) F ++ bitsWin F) := by
   intro r hr
   unfold keepCore at hr
-  have hfo := hI.fo
-  have hsp96 := hI.sp
   rcases List.mem_append.1 hr with hr | hr
   · -- a pending slot
     cases hF : F.openAt with
@@ -342,6 +341,10 @@ theorem Inv0.keep_apart (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm
         simp only [bitsWin, hF, outside_cons, outside_nil, and_true]
         omega
     rw [outside_append, outside_append]; exact ⟨⟨f5, o2⟩, o3⟩
+
+theorem Inv0.keep_apart (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph) :
+    ∀ r ∈ keepCore m0 F items0, r.2 = r.1 + 8 ∧
+      Outside r.1 8 ([(B, B + 0x1000)] ++ rtWin (P0 T RPa) F ++ bitsWin F) := keep_apart_fo hI.fo
 
 theorem FrameMem.congr {m m' : Memory} {F : Frame} {mode : DeferMode} {ph x18 lr x29 : Nat}
     (h : FrameMem m F mode ph x18 lr x29)
