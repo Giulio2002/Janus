@@ -1170,6 +1170,9 @@ partial def dischargeInRanges (g : MVarId) (fuel : Nat := 32) : TacticM Bool := 
     return false
   | _ => return false
 
+elab "janus_clear_irrel" : tactic => do
+  replaceMainGoal [← clearIrrelevant (← getMainGoal)]
+
 /-- Peel the store `m = m'.writeLE a k v` of a `MemFrame m₀ m rs` goal using a hypothesis
 `InRanges b k' rs'` (with `rs'` contained in `rs`, e.g. `rs = rs' ++ …`, and `[a, a+k) ⊆ [b, b+k')`
 by omega); on success the main goal is `MemFrame m₀ m' rs`. -/
@@ -1194,9 +1197,9 @@ def tryInRanges (g : MVarId) (m0 m rs : Expr) : TacticM Bool := g.withContext do
       let h ← Term.exprToSyntax d.toExpr
       let gs ← Tactic.run hin.mvarId! <| withoutRecover (evalTactic (← `(tactic|
         exact Janus.InRanges.of_subset
-          (Janus.InRanges.sub $h (by first | omega | (simp only [BitVec.toNat_sub,
+          (Janus.InRanges.sub $h (by first | (janus_clear_irrel; omega) | omega | (simp only [BitVec.toNat_sub,
               BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *; omega))
-            (by first | omega | (simp only [BitVec.toNat_sub, BitVec.toNat_add,
+            (by first | (janus_clear_irrel; omega) | omega | (simp only [BitVec.toNat_sub, BitVec.toNat_add,
               BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *; omega)))
           (by intro r hr; simp [List.mem_append, hr]))))
       unless gs.isEmpty do saved.restore; continue
@@ -1206,9 +1209,6 @@ def tryInRanges (g : MVarId) (m0 m rs : Expr) : TacticM Bool := g.withContext do
       return true
     catch e => trace[janus.disch] "tryInRanges: {e.toMessageData}"; saved.restore
   return false
-
-elab "janus_clear_irrel" : tactic => do
-  replaceMainGoal [← clearIrrelevant (← getMainGoal)]
 
 /-- Prove `MemFrame m₀ m rs`: peel the stores of `m` (each must fall inside one of the ranges),
 go through `MemFrame` hypotheses of the context (their ranges must be covered by `rs`), and end

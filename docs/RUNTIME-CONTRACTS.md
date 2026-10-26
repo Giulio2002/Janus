@@ -220,6 +220,95 @@ reserved address space.
 **What is proved about the allocator itself.** See `examples/proofs/MallocFast.lean` and
 [SOUNDNESS.md](SOUNDNESS.md#runtime-contracts).
 
+### Live runtime contracts: many calls, one hypothesis (`Janus/Contracts/Live.lean`, `LiveAmd64.lean`, `LiveCost.lean`, `LiveToy.lean`)
+
+The contracts above are for **one** call: `H` is assumed for the call, never re-established, and the
+allocator may change any byte of `rt`, including the objects the caller already owns. A function
+that allocates twice, in a loop, or interleaves `memmove`, `makeslice`, a barrier store and so on
+needs the **live** contracts, which a theorem can chain without bound.
+
+**The interface (stable).** ONE hypothesis `R : RtInv` is threaded through every runtime call:
+
+```lean
+structure RtInv where
+  inv : Nat → List (Nat × Nat) → Nat → Memory → Prop   -- budget b, live set L, goroutine g, view
+  ok  : Nat → List Nat → Prop                          -- the requests served, by (address, args)
+  rt  : List (Nat × Nat)                               -- the runtime's private ranges
+  ext : …                                              -- inv depends only on bytes and accessibility
+```
+
+`L` is a ghost list of owned ranges (the objects the program holds) and
+`view R.rt L m` is the memory as the runtime sees it: the bytes inside `R.rt` and outside `L`,
+every other byte zero. The program's own stores (outside `R.rt`, or into `L`) never change the
+view (`view_writeLE_out`, `view_writeLE_live`).
+
+Every contract is `∀ L b, Summary p addr pre post`, named `<Function>LiveContract` (arm64) and
+`<Function>LiveContract64` (amd64):
+
+| Function | Contract (arm64 / amd64 `…64`) |
+|---|---|
+| `mallocgc`, `newobject`, `makeslice`, `growslice` | `MallocgcLiveContract`, `NewobjectLiveContract`, `MakesliceLiveContract`, `GrowsliceLiveContract` |
+| size-specialised `mallocgc` | `MallocgcSmallNoScanSCLiveContract n`, `MallocgcSmallScanNoHeaderSCLiveContract n`, `MallocgcTinySizeLiveContract n` |
+| `gcWriteBarrierN` | `WbLiveContract p addr stack R n` |
+| strings, slices, bulk barriers (every `RtSpec`) | `RtLiveContract p addr stack R sp ls` with a `LiveSpec` (cost, fresh objects, kept results) |
+| `memmove`, `memclrNoHeapPointers` | `MemmoveLive`, `MemclrNoHeapPointersLive` |
+| `typedmemmove`, `typedmemclr`, `memclrHasPointers` | `TypedMemmoveLive`, `TypedMemclrLive`, `MemclrHasPointersLive` |
+
+**Precondition.** The call's ABI part, `StackRoom` (the stack check falls through), and
+`LiveAt R addr args L b cost g m win`: `R.ok addr args`, `R.inv b L g (view R.rt L m)`,
+`cost ≤ b` (the request fits the budget), `LiveSep L win` (the live objects are outside the
+callee's stack window `win`) and `LiveSep win R.rt` (the caller's frame is outside the
+runtime-owned ranges; on amd64 `win` includes the return-address slot).
+
+**Postcondition.** The function returns in the canonical Go ABIInternal state (`retStateX`, arm64,
+`excl`/`exclPass` unspecified; `retState64`, amd64, `zmmHi`/`kreg` unspecified; `retStateX_intro`
+and `retState64_intro` prove a state is one), with
+
+* the new object `[ptr, ptr + round)` inside `R.rt`, **disjoint from `L`** and from the stack
+  window (`ApartAll`), fresh as in `Fresh`;
+* memory changed only in `R.rt` and the callee's window (`MemFrame`), and **not in the live
+  objects** (`LiveFrame s.mem m L ws`: every read inside an object of `L` is unchanged, except
+  in the ranges `ws` the function writes on purpose);
+* `R.inv (b - cost) (L ++ [obj]) g (view R.rt (L ++ [obj]) m)`: the invariant again, for the
+  larger live set and the smaller budget. This **establishes the next call's precondition**.
+
+Barriers and copies cost nothing. `gcWriteBarrierN` returns `8·N` buffer slots outside `L`; the
+invariant holds for **every** content the caller stores there (`InvSlots`). A copy's destination
+is a live object or caller memory outside `R.rt` (`LiveDest`), so the view and the invariant are
+unchanged. No contract mentions `runtime.writeBarrier.enabled`: after any call it is unknown and a
+theorem covers both branches of the inline test.
+
+**Costs** (`LiveCost.lean`): `blockSize_le : blockSize n b ≤ 2n + 24`, `nextslicecap_le`,
+`growsliceRound_le : 8·growCap8 newLen oldCap ≤ 32·newLen + 3096`, the per-contract round bounds,
+and `RtInv.relax` (a summary can state `∃ b', b - bound ≤ b' ∧ R.inv b' …` without `R.inv` being
+monotone in `b`). **Giving objects back** (`sync.Pool.Put`): `removeRanges L rs`, with
+`view_removeRanges`. `InRanges.of_sub` and the dischargers (`janus_live_disch`) treat a sub-range of
+a live object as in the live set.
+
+**Tactics.** `janus_run calls [h]` takes a `∀ L b` summary (`hmk.pos` for the non-zero-size
+specialisation) and instantiates `L` and `b` with `janus_live` from the invariant of the previous
+call; after the call `Apart` facts between the new object and every `Outside … R.rt` fact are
+added (`addApartFacts`), `janus_split_and` splits the conjunctions of `Apart` facts the
+postcondition normalises to, and `janus_simp`/`janus_frame` close the memory goals.
+
+**Compatibility.** The single-call contracts follow from the live ones (`….ready`), so a proof
+against them applies to a live runtime unchanged. The legacy `MemModel` contracts do not
+(`excl` unchanged, barrier off); `MemModel.ofRt R` states one over a live runtime's model.
+
+**Satisfiability** (`LiveSat.lean`, `LiveSatAmd64.lean`, round 9 SAT): a bump allocator over a
+64 KiB heap (`LiveToy.lean`: invariant `toyInv`, `toy_alloc`), with arm64 and amd64 code for every
+function, meets every contract for every live set and budget; the allocators read the size from the
+type descriptor (advance `64·size`, within the invariant's slack), so descriptors may lie in
+read-only data. The examples' `Witness.nonvacuous` use them.
+
+**Examples** (`examples/rtmisc/live/live.go`; `examples/rtmisc/proofs/{arm64,amd64}`):
+
+| Function | Guarantee |
+|---|---|
+| `Three(n, x)` | `makeslice` A; `A[0] = x`; `newobject` C and `makeslice` B; `C.P = &B[0]` through the barrier: A unchanged, A, B, C pairwise disjoint, in `R.rt`, the invariant for `[A, C, B]` |
+| `Rows(n, k)` | `n` allocations in a loop, each stored into the outer slice through the barrier: for all `n` the rows are pairwise disjoint, disjoint from the outer slice, and `out[j]` is row `j` |
+| `Chain(dst, src, bx, n)` | `memmove`, `makeslice`, `memmove`, a barrier store, with the single hypothesis `R` threaded through all four |
+
 <a id="dynamic-calls"></a>
 
 ### Dynamic calls (interface methods, closures, method values, `defer`)

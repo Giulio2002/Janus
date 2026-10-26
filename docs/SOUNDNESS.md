@@ -1294,6 +1294,74 @@ no concurrent GC, no preemption):
   canonical user address); without it no code could return and the contract would be
   unsatisfiable.
 
+### Live allocation (FR-1: `Janus/Contracts/Live.lean`, `LiveAmd64.lean`, `LiveToy.lean`)
+
+The single-call allocation contracts above cannot be composed: readiness is assumed for each call
+separately, and each call may change any byte of `rt`, including the objects the caller already
+owns. The *live* contracts replace them for any function that allocates more than once, or a
+data-dependent number of times. What a theorem about such a function means, and what it trusts:
+
+* **The runtime model is one hypothesis `R : RtInv`** (`inv`, `ok`, `rt`, `ext`), threaded through
+  every runtime call of the function (allocation, `growslice`, the write barriers, the string and
+  slice specs, `memmove`/`memclr` and the typed variants, and whatever else a consumer states in
+  the same shape). `R.inv b L g v` is the runtime's invariant for the budget `b`, the ghost live
+  set `L` (the heap objects the program holds), the goroutine `g` and `v = view R.rt L m`, the
+  runtime's memory with the live objects masked out. The theorem quantifies over `R`, `L` and `b`;
+  it holds of the real binary exactly when the real runtime meets the contracts for *some* `R`
+  that holds at the theorem's entry.
+* **Trust item: the collector frees no object of `L` while the program holds it.** The program
+  adds an object to `L` when a contract returns it and removes it only where a contract says so
+  (`removeRanges`). The contracts say that an allocation returns an object *disjoint from `L`*
+  and leaves the bytes of `L` unchanged (`LiveFrame`). For the real Go 1.26 runtime this is the
+  statement that (i) the heap is non-moving, (ii) the collector reclaims only objects unreachable
+  from the roots, and the program keeps every object of `L` reachable (in registers, on its stack
+  or through a pointer stored in another live object, which is what a type-correct Go program
+  does), (iii) neither the collector nor the allocator writes to a reachable object's bytes
+  except through the program's own stores and the write barrier's buffer (runtime memory), and
+  (iv) the runtime's behaviour does not depend on the bytes of the live objects beyond what a
+  type-correct Go program stores there (valid pointers or nil in pointer slots). Items (i) to
+  (iv) are the *same* assumption as "Go's garbage collector is correct", written once in `R.inv`;
+  nothing in Lean checks them, and a theorem proved against a runtime that violates them
+  (a moving collector, a collector that frees held objects) says nothing.
+* **Single-threaded.** As for every Janus theorem: no other goroutine, no concurrent collector
+  thread, no signal handler runs between the instructions of the function. A concurrent mark phase
+  that writes to runtime memory is outside the model; the contracts cover its *effects on the
+  function's view* only through "memory changes only in `R.rt` and the callee's window".
+* **The budget `b`.** A heap is finite; no code can hand out unboundedly many disjoint objects
+  (round 10 V2). Every allocating call costs its block size and the theorem assumes a budget
+  covering all of its calls (a data-dependent sum, bounded linearly by `LiveCost`). `R.inv`
+  need not be monotone in `b`: a summary hands back `∃ b', b - bound ≤ b' ∧ R.inv b' …`
+  (`RtInv.relax`). What the real runtime's `inv` says about `b` is "this much more can be
+  allocated before an out-of-memory throw"; a program whose allocations exceed it throws, which no
+  contract returns from.
+* **`R.ok addr args`** says which requests the runtime serves (for the real runtime, every request
+  the precondition admits; for the toy witnesses a restriction to the arguments they implement).
+  The theorem assumes it at each call's arguments.
+* **The write barrier.** `runtime.writeBarrier.enabled` is runtime memory (inside `R.rt`): after any
+  call that may write `R.rt` its value is unknown, and a theorem covers both branches of the
+  inline test. None of the contracts mentions the flag; they hold with the barrier on or off.
+  `gcWriteBarrierN` returns `8·N` buffer bytes outside `L` and the stack window that the caller
+  fills; the invariant holds for **every** content of those slots (`InvSlots`), and the `STP`
+  into them is a store into the view.
+* **`growslice` keeps the old array in `L`.** The runtime does not free it (only the collector
+  does, once it is unreachable), and the caller may still hold the old slice; dropping it from
+  `L` would let a later allocation reuse it, which the real runtime does only after the collector
+  found it unreachable, and would require `R.inv` to be monotone in `L`, which a contract for an
+  arbitrary runtime cannot state. The new array is disjoint from it and holds its elements.
+* **The caller's frame is outside `R.rt`** (`LiveSep win R.rt`, precondition of every contract);
+  on amd64 the return-address slot is part of the window.
+* **Registers.** Every Go ABIInternal live contract returns in the canonical state `retStateX`
+  (arm64: `excl`/`exclPass` unspecified) or `retState64` (amd64: `zmmHi`/`kreg` unspecified, `X15`,
+  `FS` and the direction flag kept); the barrier returns in `wbRetX`/`wbRetX64` (its own ABI).
+* **Satisfiability.** Every live contract has a kernel-checked witness (`LiveSat`, `LiveSatAmd64`,
+  round 9 SAT row): a *bump allocator* (`LiveToy`) with code for each function, an invariant
+  `toyInv` that holds for every live set and budget (not one call), and a call state. The toy
+  shows the contracts are not vacuous and composable; it is not the Go runtime.
+* **Legacy `MemModel` contracts** (`Mem.Memmove`, …) are *not* derived from the live ones: they
+  state `excl`/`exclPass` unchanged and the barrier off, which a contract that leaves them
+  unspecified cannot imply. `MemModel.ofRt R` states one over a live runtime's model; new proofs
+  use the live family.
+
 ## Dynamic calls, closures and `defer`
 
 An indirect call (`BLR`/`BR`; amd64 `CALL`/`JMP` through a register or memory) jumps to the value
