@@ -263,4 +263,14 @@ zero except the words `ws`. -/
 def witMem (ws : List (Nat × Nat)) : Memory :=
   ⟨wordByte ws, [⟨0x10000, 0x1000, true⟩, ⟨0x40000, 0x10000, true⟩, ⟨0x50000, 0x100, false⟩]⟩
 
+
+/-- `witMem` with the program's read-only data in place: each data segment is a read-only region
+holding its bytes. -/
+def witMemD (ws : List (Nat × Nat)) (ds : List DataSegment) : Memory :=
+  ⟨fun a => match ds.find? (fun d => decide (d.base ≤ a ∧ a < d.base + d.bytes.length)) with
+      | some d => BitVec.ofNat 8 (d.bytes.getD (a - d.base) 0)
+      | none => wordByte ws a,
+    [⟨0x10000, 0x1000, true⟩, ⟨0x40000, 0x10000, true⟩, ⟨0x50000, 0x100, false⟩] ++
+      ds.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+
 end Janus.Contracts.PanicSat

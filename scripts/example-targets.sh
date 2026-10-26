@@ -48,7 +48,9 @@ case "$1" in
   # need no extra arguments (they reach runtime.gopanic / runtime.panicBounds as panic stubs, or
   # fault); DeferInc's open-coded closure is inferred. The heap-defer and recover functions leave
   # the Go 1.26 panic runtime out as pinned contracts (Janus/Contracts/Panic.lean).
-  DeferLoop|DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
+  DeferLoop) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
+  DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn \
+      --targets example.com/basic.DeferTwice.func1 ;;
   RecoverSet) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
       --contract runtime.deferreturn ;;
   # the general defer/panic engine examples (examples/basic/zdefer.go): the panic runtime's
