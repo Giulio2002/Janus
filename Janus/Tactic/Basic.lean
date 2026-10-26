@@ -612,6 +612,15 @@ attribute [janus_exec, janus_post, janus_acc] Memory.accessible_writeLE Memory.r
     (h : a = b) : (m.writeLE a n v).readLE b n = v % 256 ^ n := by
   subst h; exact Memory.readLE_writeLE_self m a n v
 
+/-- Writes to disjoint ranges commute. A permutation lemma (simp rewrites with it only towards
+the smaller term, so it cannot loop) but deliberately NOT in `janus_exec`/`janus_post`: sorting the
+write chain changes the memory terms the existing contract proofs state (MapSat, IfaceSat, …).
+Pass it where wanted: `janus_run [writeLE_comm]`. -/
+theorem writeLE_comm (m : Memory) {a n b k : Nat} (v w : Nat)
+    (h : a + n ≤ b ∨ b + k ≤ a) :
+    (m.writeLE a n v).writeLE b k w = (m.writeLE b k w).writeLE a n v :=
+  Memory.writeLE_comm m v w h
+
 theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat) (h1 : a ≤ b)
     (h2 : b + k ≤ a + n) : (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Memory.readLE_writeLE_inside m v h1 h2
@@ -629,12 +638,51 @@ theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat) (h1 : a ≤
     m.readLE a 1 % 256 = m.readLE a 1 :=
   Nat.mod_eq_of_lt (Memory.readLE_lt m a 1)
 
+/-- Bounds of reads, as simp lemmas: they let the side-condition discharger of the simp sets
+(`Common.withRecursiveDisch`) prove `m.readLE a 8 < 2^64` for a conditional lemma. -/
+@[janus_exec, janus_post] theorem readLE_lt_8 (m : Memory) (a : Nat) :
+    m.readLE a 8 < 18446744073709551616 := Memory.readLE_lt m a 8
+@[janus_exec, janus_post] theorem readLE_lt_4 (m : Memory) (a : Nat) :
+    m.readLE a 4 < 4294967296 := Memory.readLE_lt m a 4
+@[janus_exec, janus_post] theorem readLE_lt_2 (m : Memory) (a : Nat) :
+    m.readLE a 2 < 65536 := Memory.readLE_lt m a 2
+@[janus_exec, janus_post] theorem readLE_lt_1 (m : Memory) (a : Nat) :
+    m.readLE a 1 < 256 := Memory.readLE_lt m a 1
+
 @[janus_exec, janus_post] theorem writeLE_mod_8 (m : Memory) (a v : Nat) :
     m.writeLE a 8 (v % 18446744073709551616) = m.writeLE a 8 v := Memory.writeLE_mod m a 8 v
 @[janus_exec, janus_post] theorem writeLE_mod_4 (m : Memory) (a v : Nat) :
     m.writeLE a 4 (v % 4294967296) = m.writeLE a 4 v := Memory.writeLE_mod m a 4 v
 @[janus_exec, janus_post] theorem writeLE_mod_1 (m : Memory) (a v : Nat) :
     m.writeLE a 1 (v % 256) = m.writeLE a 1 v := Memory.writeLE_mod m a 1 v
+
+/-! ## Large literals times a carry stay out of the kernel's `Nat.mul`
+
+`BitVec.ofNat 64 (c.toNat * 18446744073709551615)` (a Boolean carry times `2^64 - 1`, e.g. from
+`sbb`-style masks) makes the kernel unfold `Nat.mul` on the literal when `c` is not a numeral:
+a recursion of depth `2^64`. Rewriting the Boolean away (`if c then … else 0`), and
+`x * (2^64-1)` to `-x`, never presents such a term to `whnf`. -/
+
+theorem ofNat_toNat_mul (b : Bool) (n : Nat) :
+    BitVec.ofNat 64 (b.toNat * n) = if b then BitVec.ofNat 64 n else 0#64 := by
+  cases b <;> simp
+
+theorem ofNat_mul_toNat (b : Bool) (n : Nat) :
+    BitVec.ofNat 64 (n * b.toNat) = if b then BitVec.ofNat 64 n else 0#64 := by
+  cases b <;> simp
+
+theorem ofNat_mul_allones (x : Nat) :
+    BitVec.ofNat 64 (x * 18446744073709551615) = -BitVec.ofNat 64 x := by
+  apply BitVec.eq_of_toNat_eq
+  simp only [BitVec.toNat_ofNat, BitVec.toNat_neg]
+  omega
+
+theorem ofNat_allones_mul (x : Nat) :
+    BitVec.ofNat 64 (18446744073709551615 * x) = -BitVec.ofNat 64 x := by
+  rw [Nat.mul_comm]; exact ofNat_mul_allones x
+
+attribute [janus_exec high, janus_post high] ofNat_toNat_mul ofNat_mul_toNat
+attribute [janus_exec, janus_post] ofNat_mul_allones ofNat_allones_mul
 
 /-! ## Arithmetic normalisation (addresses and values) -/
 

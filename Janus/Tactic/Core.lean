@@ -906,7 +906,7 @@ elab "janus_arith" : tactic => do
   if ← Janus.Carry.tryCarry then return
   Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus_arith_norm]))
-  evalTactic (← `(tactic| omega))
+  evalTactic (← `(tactic| first | omega | (janus_decide_split; all_goals omega)))
 
 /-! ## Syntax -/
 

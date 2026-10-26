@@ -821,11 +821,38 @@ attribute [janus64_exec, janus64_post] Janus.Arm64.Memory.accessible_writeLE
     (h : a = b) : (m.writeLE a n v).readLE b n = v % 256 ^ n := by
   subst h; exact Janus.Arm64.Memory.readLE_writeLE_self m a n v
 
+/-- Writes to disjoint ranges commute. A permutation lemma (no loop) but deliberately NOT in the
+default simp sets, which would reorder the write chains the contract proofs state; pass it where
+wanted: `janus64_run [writeLE_comm]`. -/
+theorem writeLE_comm (m : Memory) {a n b k : Nat} (v w : Nat)
+    (h : a + n ≤ b ∨ b + k ≤ a) :
+    (m.writeLE a n v).writeLE b k w = (m.writeLE b k w).writeLE a n v :=
+  Janus.Arm64.Memory.writeLE_comm m v w h
+
 /-- A read entirely inside an earlier write (e.g. one word of a 16-byte `MOVUPS` store). -/
 @[janus64_exec, janus64_post] theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat)
     (h1 : a ≤ b) (h2 : b + k ≤ a + n) (h3 : k < n) :
     (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Janus.Arm64.Memory.readLE_writeLE_inside m v h1 h2
+
+/-- Large literals times a carry stay out of the kernel's `Nat.mul` (see `Janus.Tactic.ofNat_toNat_mul`). -/
+@[janus64_exec high, janus64_post high] theorem ofNat_toNat_mul (b : Bool) (n : Nat) :
+    BitVec.ofNat 64 (b.toNat * n) = if b then BitVec.ofNat 64 n else 0#64 := by
+  cases b <;> simp
+
+@[janus64_exec high, janus64_post high] theorem ofNat_mul_toNat (b : Bool) (n : Nat) :
+    BitVec.ofNat 64 (n * b.toNat) = if b then BitVec.ofNat 64 n else 0#64 := by
+  cases b <;> simp
+
+@[janus64_exec, janus64_post] theorem ofNat_mul_allones (x : Nat) :
+    BitVec.ofNat 64 (x * 18446744073709551615) = -BitVec.ofNat 64 x := by
+  apply BitVec.eq_of_toNat_eq
+  simp only [BitVec.toNat_ofNat, BitVec.toNat_neg]
+  omega
+
+@[janus64_exec, janus64_post] theorem ofNat_allones_mul (x : Nat) :
+    BitVec.ofNat 64 (18446744073709551615 * x) = -BitVec.ofNat 64 x := by
+  rw [Nat.mul_comm]; exact ofNat_mul_allones x
 
 @[janus64_exec, janus64_post] theorem readLE_mod_8 (m : Memory) (a : Nat) :
     m.readLE a 8 % 18446744073709551616 = m.readLE a 8 :=
@@ -838,6 +865,19 @@ attribute [janus64_exec, janus64_post] Janus.Arm64.Memory.accessible_writeLE
 @[janus64_exec, janus64_post] theorem readLE_mod_1 (m : Memory) (a : Nat) :
     m.readLE a 1 % 256 = m.readLE a 1 :=
   Nat.mod_eq_of_lt (Janus.Arm64.Memory.readLE_lt m a 1)
+
+/-- Bounds of reads, as simp lemmas: they let the side-condition discharger of the simp sets
+(`Common.withRecursiveDisch`) prove `m.readLE a 8 < 2^64` for a conditional lemma. -/
+@[janus64_exec, janus64_post] theorem readLE_lt_8 (m : Memory) (a : Nat) :
+    m.readLE a 8 < 18446744073709551616 := Janus.Arm64.Memory.readLE_lt m a 8
+@[janus64_exec, janus64_post] theorem readLE_lt_4 (m : Memory) (a : Nat) :
+    m.readLE a 4 < 4294967296 := Janus.Arm64.Memory.readLE_lt m a 4
+@[janus64_exec, janus64_post] theorem readLE_lt_2 (m : Memory) (a : Nat) :
+    m.readLE a 2 < 65536 := Janus.Arm64.Memory.readLE_lt m a 2
+@[janus64_exec, janus64_post] theorem readLE_lt_1 (m : Memory) (a : Nat) :
+    m.readLE a 1 < 256 := Janus.Arm64.Memory.readLE_lt m a 1
+@[janus64_exec, janus64_post] theorem readLE_lt_16 (m : Memory) (a : Nat) :
+    m.readLE a 16 < 340282366920938463463374607431768211456 := Janus.Arm64.Memory.readLE_lt m a 16
 
 @[janus64_exec, janus64_post] theorem writeLE_mod_16 (m : Memory) (a v : Nat) :
     m.writeLE a 16 (v % 340282366920938463463374607431768211456) = m.writeLE a 16 v :=
@@ -1959,7 +1999,7 @@ elab "janus64_arith" : tactic => do
   if ← Janus.Carry.tryCarry then return
   Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus64_arith_norm]))
-  evalTactic (← `(tactic| omega))
+  evalTactic (← `(tactic| first | omega | (janus_decide_split; all_goals omega)))
 
 /-- Evaluate the layout-independent address terms `segAddr p "f"`, `dataBase p i` and
 `ripTarget p pc` (and `Extracted`-style definitions of literals) to literals everywhere, so that

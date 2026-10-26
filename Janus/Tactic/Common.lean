@@ -631,6 +631,24 @@ def simpCached (cref : IO.Ref StepCache) (ctx : Simp.Context) (simprocs : Simp.S
     { sc with caches := caches.push (key, s.cache) }
   return r
 
+/-- Recursive side-condition discharge. The tactic discharger `d` (`janus_disch`/`janus64_disch`)
+runs first; a side condition it cannot prove is then simplified with the simp context of the run
+itself, so that a conditional lemma (`shr_ofNat : a < 2^64 → …`) is discharged by the other facts of
+the set (`readLE_lt_8 : m.readLE a 8 < 2^64`) and the lemmas the caller passed. Bounded: Lean's
+`discharge?'` stops at `maxDischargeDepth` (default 2), so a discharge inside the fallback gets at
+most one more level and a lemma whose condition needs itself cannot loop. Closed conditions (decided
+by `d`), `Outside` and `accessible` conditions (own dischargers) are never retried. -/
+def withRecursiveDisch (d : Simp.Discharge) : Simp.Discharge := fun e => do
+  if let some p ← d e then return some p
+  let e ← instantiateMVars e.cleanupAnnotations
+  if e.hasMVar || !e.hasFVar then return none
+  if e.isAppOfArity ``Janus.Outside 3 then return none
+  if let some (_, lhs, _) := e.eq? then
+    if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then return none
+  unless (← Meta.isProp e) do return none
+  let r ← Simp.simp e
+  if r.expr.isTrue then return some (← mkOfEqTrue (← r.getProof)) else return none
+
 /-- Look up or build (with `mk`) the simp context of simp set `set` for the current local
 context, and run `k` with it. -/
 def withCachedCtx (cref : IO.Ref StepCache) (set : Name)
@@ -645,7 +663,7 @@ def withCachedCtx (cref : IO.Ref StepCache) (set : Name)
         let ctxs := if sc.ctxs.size ≥ 16 then sc.ctxs.extract 1 sc.ctxs.size else sc.ctxs
         { sc with ctxs := ctxs.push (key, set, c, sp, dw) }
       pure (c, sp, dw)
-  dw.with fun d? => k ctx simprocs d?
+  dw.with fun d? => k ctx simprocs (d?.map withRecursiveDisch)
 
 /-! ## Closed side conditions
 
@@ -1334,6 +1352,52 @@ def addReadLEBounds : TacticM Unit := withMainContext do
         (← mkAppM ``Janus.Arm64.Memory.readLE_lt #[e.getArg! 0, e.getArg! 1, e.getArg! 2]) ty
       let (_, g') ← (← g.assert `h_rd ty pf).intro1P
       replaceMainGoal [g']
+
+/-- The propositions `p` of `decide p` in `e`. -/
+partial def collectDecide (e : Expr) (acc : Array Expr) : Array Expr :=
+  match e with
+  | .app f a =>
+    let acc := if e.isAppOfArity ``Decidable.decide 2 && !(e.getArg! 0).hasLooseBVars &&
+        !acc.contains (e.getArg! 0) then acc.push (e.getArg! 0) else acc
+    collectDecide a (collectDecide f acc)
+  | .lam _ t b _ | .forallE _ t b _ => collectDecide b (collectDecide t acc)
+  | .letE _ t v b _ => collectDecide b (collectDecide v (collectDecide t acc))
+  | .mdata _ b => collectDecide b acc
+  | .proj _ _ b => collectDecide b acc
+  | _ => acc
+
+/-- Case split on every `p` of a `decide p` (at most 5, in the goal and the hypotheses) and
+evaluate the Booleans in each case: carries `(decide p).toNat` that come from case splits become
+`0`/`1`, so `omega` closes the cases. Fails if there is no `decide`. -/
+elab "janus_decide_split" : tactic => withMainContext do
+  let mut tys := #[← instantiateMVars (← getMainTarget)]
+  for d in ← getLCtx do
+    if !d.isImplementationDetail then tys := tys.push (← instantiateMVars d.type)
+  let mut ps : Array Expr := #[]
+  for t in tys do ps := collectDecide t ps
+  let props := (ps.filter fun p => !p.hasMVar).extract 0 5
+  let props := props
+  if props.isEmpty then throwError "janus_decide_split: no `decide` in the goal"
+  for p in props do
+    let mut out : List MVarId := []
+    for g in ← getGoals do
+      let hdp := mkIdent `hdp
+      let gs ← Tactic.run g <| withoutRecover do
+        evalTactic (← `(tactic| rcases (Classical.em $(← Term.exprToSyntax p)) with $hdp:ident | $hdp:ident))
+      for g1 in gs do
+        setGoals [g1]
+        let g2 ← withMainContext do
+          let stx ← `(tactic| simp only [$hdp:ident, decide_true, decide_false, Bool.toNat_true,
+            Bool.toNat_false, decide_eq_true_eq, decide_eq_false_iff_not])
+          let r ← mkSimpContext stx (eraseLocal := false)
+          let keep := (← getLCtx).foldl (init := #[]) fun acc d =>
+            if d.isImplementationDetail || d.userName == `hdp then acc else acc.push d.fvarId
+          try
+            let (res, _) ← simpGoal g1 r.ctx r.simprocs (fvarIdsToSimp := keep)
+            pure (res.map (·.2))
+          catch _ => pure (some g1)
+        if let some g2 := g2 then out := out ++ [g2]
+    setGoals out
 
 /-! ## Robustness to the shape of `State` -/
 

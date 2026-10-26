@@ -225,6 +225,19 @@ theorem readLE_writeLE_of_disjoint {a n b k : Nat} (v : Nat) (h : b + k ≤ a �
     (m.writeLE a n v).readLE b k = m.readLE b k :=
   readLE_congr (fun i hi => bytes_writeLE_outside _ (by omega))
 
+/-- Writes to non-overlapping ranges commute, for arbitrary widths and values. -/
+theorem writeLE_comm {a n b k : Nat} (v w : Nat) (h : a + n ≤ b ∨ b + k ≤ a) :
+    (m.writeLE a n v).writeLE b k w = (m.writeLE b k w).writeLE a n v := by
+  cases m with
+  | mk bytes regions =>
+  simp only [writeLE, Memory.mk.injEq, and_true]
+  funext x
+  by_cases h1 : b ≤ x ∧ x < b + k
+  · rw [ite_eq_left h1, ite_eq_right (by omega), ite_eq_left h1]
+  · by_cases h2 : a ≤ x ∧ x < a + n
+    · rw [ite_eq_right h1, ite_eq_left h2, ite_eq_right h1, ite_eq_left h2]
+    · rw [ite_eq_right h1, ite_eq_right h2, ite_eq_right h1, ite_eq_right h2]
+
 /-- A read entirely inside a write sees the corresponding slice of the written value. -/
 theorem readLE_writeLE_inside {a n b k : Nat} (v : Nat) (h1 : a ≤ b) (h2 : b + k ≤ a + n) :
     (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k := by
