@@ -56,6 +56,8 @@ case "$1" in
   # the general defer/panic engine examples (examples/basic/zdefer.go): the panic runtime's
   # functions they call, left out as pinned contracts (Janus/Contracts/Panic.lean)
   DeferOrder) printf '%s\n' --contract runtime.gopanic --contract runtime.deferreturn ;;
+  NestedPanic) printf '%s\n' --contract runtime.gopanic --contract runtime.deferreturn \
+      --targets example.com/basic.NestedPanic.func1 --targets example.com/basic.NestedPanic.func2 ;;
   DeferMix) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.gopanic \
       --contract runtime.deferreturn --targets example.com/basic.accAdd1 \
       --targets example.com/basic.accAdd2 ;;
