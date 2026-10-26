@@ -51,4 +51,46 @@ theorem correctness (i : W64) (v : Nat) :
   janus64_run
   rw [Nat.mul_comm]
 
+namespace Witness
+
+/-- The witness: `environ` at `VAR`, its pointer array at `ARR`, the stack at `SP0` (its
+return-address slot holding `RET`, where there is no code). -/
+def VAR : Nat := 0x100000
+def ARR : Nat := 0x200000
+def SP0 : Nat := 0x300008
+def RET : Nat := 0x1000
+abbrev slot : Nat := DynGOT.slotOf Extracted.dyngot "environ"
+
+/-- Little-endian byte `j` of `v`. -/
+def byteOf (v j : Nat) : BitVec 8 := BitVec.ofNat 8 (v / 256 ^ j)
+
+/-- The witness memory: the GOT slot holds `VAR`, `environ` holds `ARR`, `ARR[0] = 0`, the
+return-address slot holds `RET`. -/
+def mem0 : Janus.Arm64.Memory :=
+  ⟨fun a => if slot ≤ a ∧ a < slot + 8 then byteOf VAR (a - slot)
+      else if VAR ≤ a ∧ a < VAR + 8 then byteOf ARR (a - VAR)
+      else if SP0 ≤ a ∧ a < SP0 + 8 then byteOf RET (a - SP0) else 0,
+   [⟨slot, 8, false⟩, ⟨VAR, 8, false⟩, ⟨ARR, 8, false⟩, ⟨SP0, 8, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 4 then BitVec.ofNat 64 SP0 else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := mem0 }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [0#64] s0 :=
+  ⟨rfl, by decide +kernel, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+
+theorem pre : Pre 0#64 VAR s0 := by
+  refine ⟨⟨by decide, by decide, by decide, by decide +kernel⟩, ⟨by decide +kernel, by decide +kernel,
+    by decide +kernel⟩, by decide, by decide +kernel, by decide +kernel, by decide +kernel⟩
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (i : W64) (v ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [i] s ∧ Pre i v s :=
+  ⟨0#64, VAR, RET, s0, hret, call, pre⟩
+
+end Witness
+
 end Proof

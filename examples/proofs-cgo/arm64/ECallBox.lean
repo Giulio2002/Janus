@@ -295,4 +295,146 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (Ha : RtReady
       Extracted.entry [x] (CPre rt rtc Hc) (fun _ s' => s'.regs 0 = x + 1) :=
   (c_spec impl rt rtc Hc x).refine (refines impl rt Ha hnew rtc Hc)
 
+namespace Witness
+
+open Janus.Contracts.AllocSat (heap heapCode HeapReady le_blockSize callRegs_heap)
+
+/-! ### An allocator: `AllocSat`'s toy at `runtime.newobject`'s address -/
+
+/-- `runtime.newobject`'s address. -/
+abbrev cA : Nat := Extracted.program.contractAddr "runtime.newobject"
+/-- The toy allocator (`MOVZ X0, #0x10000`; `RET`: it returns `heap`) at that address. -/
+def implAt : List Segment := [{ name := "model", base := cA, words := heapCode }]
+/-- The program linked with it, as a closed program. -/
+def linked : Program := { Extracted.program with segments := Extracted.program.segments ++ implAt }
+theorem linked_eq : Extracted.program.link implAt = linked := rfl
+/-- The runtime-owned memory: the toy heap and `box`'s type descriptor. -/
+def rtW : List (Nat × Nat) := [(heap, heap + 0x10000), (boxType, boxType + 16)]
+/-- The allocator's readiness: the heap writable and zero, the request `[boxType]`, an 8-byte
+type, all as the runtime sees them. -/
+def HaW : RtReady := fun args _ _ v => HeapReady v ∧ args = [boxType] ∧ typSize v boxType = 8
+
+theorem freshW {m : Memory} {size round : Nat} (zero hdr : Bool)
+    (hr : HeapReady (rtView rtW m)) (hsz : size ≤ round) (hround : round ≤ 32768) :
+    Fresh rtW m heap size round zero hdr := by
+  obtain ⟨hacc, hz⟩ := hr
+  rw [rtView_accessible] at hacc
+  have hz' := ZeroBytes.of_rtView hz ⟨(heap, heap + 0x10000), by simp [rtW], Nat.le_refl _, Nat.le_refl _⟩
+  refine ⟨⟨(heap, heap + 0x10000), by simp [rtW], Nat.le_refl _, by simp only [heap]; omega⟩,
+    by simp only [heap]; omega, Memory.accessible_mono _ hacc (Nat.le_refl _) (by omega),
+    fun _ => by decide, fun _ _ => by decide, fun _ => fun i hi => hz' i (by omega), hsz⟩
+
+theorem newobject_impl : NewobjectContract (Extracted.program.link implAt) cA rtW 4096 HaW := by
+  rw [linked_eq]
+  have hc : cA = janus_eval% cA := rfl
+  intro s hpc ⟨⟨⟨h30a, h30b, _, _, _, _, _⟩, _, _⟩, hr, hargs, hsz⟩
+  simp only [List.cons.injEq, and_true] at hargs
+  rw [hc] at hpc
+  janus_run
+  refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, ?_,
+    ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
+  · simp only [retState]; rw [callRegs_heap]; rfl
+  · have hin : InRanges boxType 16 rtW := ⟨(boxType, boxType + 16), by simp [rtW], Nat.le_refl _, Nat.le_refl _⟩
+    unfold typSize at hsz
+    rw [readLE_rtView (hin.sub (Nat.le_refl _) (by omega))] at hsz
+    rw [show (BitVec.ofNat 64 heap).toNat = heap from rfl]
+    have hsz' : typSize s.mem (s.regs 0).toNat ≤ 32768 := by
+      unfold typSize; rw [hargs]; omega
+    exact freshW _ _ hr (le_blockSize _ _) (blockSize_le_maxSmallSize _ _ (by simp only [maxSmallSize]; exact hsz'))
+
+/-! ### The C call -/
+
+/-- A byte of the C side's read-only data (`CProg`: without `box`'s type descriptor). -/
+def dbyte (a : Nat) : Option Nat :=
+  CProg.data.findSome? fun d =>
+    if d.base ≤ a ∧ a < d.base + d.bytes.length then d.bytes[a - d.base]? else none
+
+def byteOf (v j : Nat) : Nat := v / 256 ^ j % 256
+
+def SP0 : Nat := 0x1000000
+def TP : Nat := 0x800000
+def GUARD : Nat := 0x900000
+def RET : Nat := 0x1000
+
+def cregions : List Region :=
+  [⟨rid, 4, true⟩, ⟨ctxf, 8, true⟩, ⟨iscgo, 1, true⟩, ⟨TP + 16, 8, true⟩, ⟨gslot, 8, false⟩,
+     ⟨GUARD, 8, false⟩, ⟨SP0 - win, win, true⟩] ++
+    CProg.data.map fun d => ⟨d.base, d.bytes.length, false⟩
+
+def mem0 : Memory :=
+  ⟨fun a => BitVec.ofNat 8 ((dbyte a).getD
+      (if a = rid then 2 else if gslot ≤ a ∧ a < gslot + 8 then byteOf GUARD (a - gslot) else 0)),
+    cregions⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then 7#64 else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 SP0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mem0, tpidr := BitVec.ofNat 64 TP }
+
+theorem hret : RetAddr (Extracted.program.link implAt) RET := RetAddr.of_check (by decide +kernel)
+
+theorem call : CCall ((Extracted.program.link implAt).withExit RET) Extracted.entry [7#64] s0 :=
+  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+
+theorem data : CProg.DataLoaded mem0 := by
+  unfold Program.DataLoaded; decide +kernel
+
+/-- No C memory is runtime-owned: every region is apart from the toy heap and the type
+descriptor. -/
+theorem apart : ∀ r ∈ cregions, (r.base + r.size ≤ heap ∨ heap + 0x10000 ≤ r.base) ∧
+    (r.base + r.size ≤ boxType ∨ boxType + 16 ≤ r.base) := by decide +kernel
+
+theorem notRt : ∀ a n w, mem0.accessible a n w = true → Outside a n rtW := by
+  intro a n w h
+  obtain ⟨⟨r, hr, h1, h2, -, -⟩, -⟩ := (Memory.accessible_iff mem0 a n w).1 h
+  have := apart r hr
+  simp only [rtW, outside_cons, outside_nil, and_true]
+  omega
+
+set_option maxRecDepth 100000 in
+theorem pre : CPre rtW [] (fun _ _ _ _ => True) s0 := by
+  refine ⟨data, ?_⟩
+  repeat' (first | exact trivial | exact notRt | apply And.intro)
+  all_goals first
+    | decide +kernel
+    | (simp only [outside_cons, outside_nil, and_true]; decide +kernel)
+    | trivial
+
+/-! ### A Go entry in which the runtime is ready (`ROK`) -/
+
+/-- The Go entry's memory: the toy heap (writable, zero) and `box`'s type descriptor
+(`Size_ = 8`, `PtrBytes = 0`), the goroutine stack at `USP`. -/
+def USP : Nat := 0x2000000
+def umem : Memory :=
+  ⟨fun a => if a = boxType then 8 else 0,
+    [⟨heap, 0x10000, true⟩, ⟨boxType, 16, false⟩, ⟨USP - gsBox, gsBox + 16, true⟩]⟩
+
+def u0 : State :=
+  { regs := fun _ => 0, sp := BitVec.ofNat 64 USP, pc := 0, flags := ⟨false, false, false, false⟩,
+    mem := umem }
+
+theorem rok : ROK rtW HaW u0 := by
+  refine ⟨⟨by decide, by decide +kernel⟩, by decide +kernel, by decide +kernel, ?_, ?_,
+    ⟨⟨by decide +kernel, fun i hi => ?_⟩, rfl, by decide +kernel⟩⟩
+  · simp only [outside_cons, outside_nil, and_true]; decide +kernel
+  · simp only [rtW, outside_cons, outside_nil, and_true]; decide +kernel
+  · show (if _ then umem.bytes (heap + i) else 0) = 0
+    split
+    · show (if heap + i = boxType then (8 : Byte) else 0) = 0
+      have hb : boxType = janus_eval% boxType := rfl
+      rw [if_neg (by rw [hb]; simp only [heap]; omega)]
+    · rfl
+
+/-- All hypotheses of `correctness` hold together: an allocator meeting the contract with its
+readiness, the C call's precondition, and a Go entry where the callback's readiness `ROK` holds. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (Ha : RtReady)
+    (rtc : List (Nat × Nat)) (Hc : RtReady) (x : W64) (ret : Nat) (s : State),
+    NewobjectContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.newobject") rt 4096 Ha ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CCall ((Extracted.program.link impl).withExit ret) Extracted.entry [x] s ∧ CPre rt rtc Hc s ∧
+    ∃ u, ROK rt Ha u :=
+  ⟨implAt, rtW, HaW, [], fun _ _ _ _ => True, 7#64, RET, s0, newobject_impl, hret, call, pre, u0, rok⟩
+
+end Witness
+
 end Proof

@@ -117,4 +117,40 @@ theorem correctness (p : BitVec 64) :
   simp only [BitVec.toNat_setWidth, BitVec.toNat_add, BitVec.toNat_ofNat]
   omega
 
+namespace Witness
+
+/-- The witness: a CPU without LSE (the flag at `lse` is `0`), so the LL/SC path runs; the
+counter at `P`, the stack at `SP0`, the return address `RET` (no code there), and a stream of
+store-exclusive outcomes whose first attempt passes. -/
+def P : Nat := 0x100000
+def SP0 : Nat := 0x300000
+def RET : Nat := 0x1000
+
+def mem0 : Memory := ⟨fun _ => 0, [⟨P, 4, true⟩, ⟨lse, 1, false⟩, ⟨SP0 - 16, 16, true⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 P else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 SP0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mem0, exclPass := fun _ => true }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [BitVec.ofNat 64 P] s0 :=
+  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+
+/-- All hypotheses of `correctness` hold together, on the LL/SC path (flag clear, progress
+hypothesis met). -/
+theorem nonvacuous : ∃ (p : W64) (ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [p] s ∧
+    (p.toNat % 4 = 0 ∧ p.toNat + 4 ≤ 2 ^ 48 ∧ s.mem.accessible p.toNat 4 true = true ∧
+      s.mem.accessible lse 1 false = true ∧ (s.mem.readLE lse 1 ≠ 0 ∨ ∃ k, s.exclPass k = true) ∧
+      CStack s 16 0 ∧ Outside p.toNat 4 [(s.sp.toNat - 16, s.sp.toNat)] ∧
+      Outside lse 1 [(s.sp.toNat - 16, s.sp.toNat)]) ∧ s.mem.readLE lse 1 = 0 :=
+  ⟨_, RET, s0, hret, call, ⟨by decide, by decide, by decide +kernel, by decide +kernel,
+    Or.inr ⟨0, rfl⟩, ⟨by decide, by decide, by decide, by decide +kernel⟩,
+    by simp only [outside_cons, outside_nil, and_true]; decide +kernel,
+    by simp only [outside_cons, outside_nil, and_true]; decide +kernel⟩, by decide +kernel⟩
+
+end Witness
+
 end Proof

@@ -209,9 +209,17 @@ a proof fail) or named in the trusted base ([SOUNDNESS.md](SOUNDNESS.md)):
 * **Static GOT slots.** `-fPIC` code (cgo compiles with it) loads the address of a global from
   the GOT (`ADRP; LDR [x, :got_lo12:sym]`; `mov sym@GOTPCREL(%rip)`). A slot that lies in
   `PT_GNU_RELRO` and has no dynamic relocation holds a link-time constant: it is copied as
-  read-only data (`got:sym`, `DataLoaded`). A slot with a dynamic relocation is not copied (its
-  value is the dynamic linker's), so a load from it faults unless a precondition provides it. When
-  the slot holds a code address (a function pointer), the extractor follows it.
+  read-only data (`got:sym`, `DataLoaded`). When the slot holds a code address (a function
+  pointer), the extractor follows it.
+* **GOT slots with a dynamic relocation** (`R_AARCH64_GLOB_DAT`/`R_X86_64_GLOB_DAT` for a libc
+  variable such as `environ`, `stderr`, `__stack_chk_guard`): the slot's value is the dynamic
+  linker's binding of the symbol, not in the file, so it is not copied. The extractor lists every
+  such slot the C code reads as `Extracted.dyngot : List DynGOT` (the relocation's symbol, the
+  slot, the relocation type, the addend) and the theorem states the value as a precondition in
+  terms of the symbol: `GotBound Extracted.dyngot "environ" v s.mem` (the slot of `environ` is
+  readable and holds `v`), quantified over `v`; `DynGOT.slotOf Extracted.dyngot "sym"` names the
+  slot (`EEnv`, and the stack protector's `__stack_chk_guard` in `ECallGo`, `ECallBox`,
+  `ECallLarge`, `EAlloca`).
 * **Writable C data** (`.data`/`.bss` objects the C code references, directly or through a GOT
   slot) is listed as `Extracted.cdata : List CData` (name, address, size, initial bytes): not
   copied into the program (it is memory the precondition provides) but named, so proofs refer to
@@ -229,8 +237,8 @@ a proof fail) or named in the trusted base ([SOUNDNESS.md](SOUNDNESS.md)):
   `TPIDR_EL0 + 16`), which holds only when the binary's C code has no `__thread` variables of its
   own (otherwise the linker moves `runtime.tlsg`/`runtime.tls_g` and that place is a C variable).
   An extraction that reaches `runtime.cgocall` in a binary where the slot is elsewhere is refused,
-  so the contract can never describe the wrong slot. (The amd64 `cgocallback` contract takes the
-  slot from `TLSImage` and works in such binaries: `ECallGo`.)
+  so the contract can never describe the wrong slot. (The `cgocallback` contracts take the slot
+  from `TLSImage` on both ISAs, `tlsGSlot`, and work in such binaries: `ECallGo`.)
 
 libc functions are external stubs through their PLT entries; the contracts of section 3.2 give
 them meaning.
@@ -325,10 +333,13 @@ dynamic `SP` change) make the proofs (`EAlloca`) for every size.
 Every trusted contract has a `_satisfiable` witness (audit round 9's SAT row scans these files):
 `libc_satisfiable`, `setJmp_satisfiable`, `jmpModel_satisfiable`, `tlsGetAddr_satisfiable`,
 `tlsDescFn_satisfiable` (`Janus.Contracts.LibcSat`, `LibcSatAmd64`), and `cgoCall_satisfiable`,
-`cgoCallback_satisfiable`, `callbackSpec_satisfiable`, `cgoSpec_satisfiable`,
-`topOfStack_satisfiable` (`Janus.FFISat`, `Janus.Amd64.FFISat`). The cgo ones take the
-hypotheses every real call meets (an admissible return address, a system / goroutine stack
-disjoint from the other memory, the TLS `g` slot).
+`cgoCallback_satisfiable` (every goroutine stack size and readiness `k`), `cgoCallback_satisfiable_of`
+(a readiness `R` of the Go entry that holds at the witness), `callbackSpec_satisfiable`,
+`cgoSpec_satisfiable`, `topOfStack_satisfiable` (`Janus.FFISat`, `Janus.Amd64.FFISat`). The cgo
+ones take the hypotheses every real call meets (an admissible return address, a system /
+goroutine stack and a `g` struct disjoint from the other memory, `CbRoom`, the TLS `g` slot). The
+examples of sections 4.1 and 5 with a `Witness` namespace also show their own hypotheses
+satisfiable together (`Proof.Witness.nonvacuous`, verified by `scripts/verify-cgo-examples.sh`).
 
 **Why not a `Summary` hypothesis.** A `Summary p addr pre post` about the extracted program at
 the address of `cgocall`, where there is no code, is false (or only vacuously true), so a theorem
@@ -377,21 +388,37 @@ and only `CgoCall`/`TopOfStack` remain assumed.
 saves the callee-saved registers and calls `runtime.cgocallback` (an external stub, pinned by
 content):
 
-* **`CgoCallback p Cin R`, the trusted contract.** At the stub (`[SP+8]`/`[RSP+8]` = `fn`, the
-  frame at `[SP+16]`), for every Go call state `cgocallback` may make (`CallbackEntry`: the
-  ABIInternal call `fn(frame)` on a goroutine stack that is not C memory, with the C memory it
-  leaves alone kept, on the same thread) the Go code, **run by the model on `p`** under `Cin`,
-  returns (`ABIReturn`); the C side resumes after the call (`CbResume`: at the return address with
-  `SP` restored; every other register arbitrary, as for an ABI0 callee) with the Go code's writes
-  to C memory (`CbResumed`; the clobbered bytes — the C stack below `SP`, the argument slots,
-  the TLS `g` slot — arbitrary). The amd64 contract takes the extraction's `TLSImage` (Go's `g`
-  slot is `runtime.tlsg`, at `FS − 8` only without C `__thread` variables) and has no alignment
-  requirement at the stub (`crosscall2` leaves `RSP ≡ 0 mod 16`).
+* **`CgoCallback t p Cin R k`, the trusted contract** (`t` the extraction's `TLSImage`). At the
+  stub (`[SP+8]`/`[RSP+8]` = `fn`, the frame at `[SP+16]`), when the runtime is ready (`k.Ready`,
+  below), for every Go call state `cgocallback` may make (`CallbackEntry t p k.size`) in which `R`
+  holds, the Go code, **run by the model on `p`** under `Cin`, returns (`ABIReturnC`/`ABIReturn`);
+  the C side resumes after the call (`CbResume`: at the return address with `SP` restored; every
+  other register arbitrary, as for an ABI0 callee) with the Go code's writes to C memory
+  (`CbResumed`; the clobbered bytes — the C stack below `SP`, the argument slots, the TLS `g`
+  slot — arbitrary). `CallbackEntry` follows `cgocallback`'s code:
+  * **`g`**: `X28`/`R14` is the goroutine `cgocallback` switched to (`m.curg`, found from the TLS
+    `g` slot `tlsGSlot t`, which it then points at it: `tlsG`); its struct is readable Go memory,
+    neither C memory nor on the goroutine stack (`gReg`, `gSep`, `gOff`);
+  * **the goroutine stack**: `SP` (16-aligned on arm64) with `k.size` writable bytes below it and
+    the frame argument's slots above, none of them C memory (`goStack`, `stackSep`), and
+    `g.stackguard0 + k.size ≤ SP + stackGuard` (`guard`; `stackGuard = 928`), so the Go code's
+    stack checks pass for frames of up to about `k.size − 800` bytes (`CallbackEntry.guardOK`);
+  * the ABIInternal call `fn(frame)`, the C memory left alone, the same thread and FP control.
+* **The goroutine stack size is a parameter with a readiness** (`CbStack`: `size`, `rt`,
+  `ready`, as `RtReady` for the allocator): the contract requires `k.ready [fn, k.size] g SP
+  (rtView k.rt mem)` at the stub (`g` the TLS slot's value). The real runtime meets it for `ready`
+  := "the goroutine has, or `morestack` can grow it to, `k.size` bytes below the entry, with no
+  preemption pending"; a theorem quantifies over `ready` and assumes it at its entry, and the C
+  code's own stores outside `rt` keep it (`rtView_writeLE`). `ECallGo` uses 4096 bytes
+  (`cbGoStack`), `ECallBox` and `ECallLarge` 8192.
 * **`CallbackSpec fn G E`, the C-side assumption**, as `CgoSpec`: the callback of `fn` in a state
   satisfying `G` resumes with memory `E s` outside the clobber.
 * **Reverse composition** `CgoCallback.refines` (both ISAs): the Go function's `EnsuresC` and
-  the facts linking `G`/`E` to it give `(CgoCallback p Cin R).Refines (CallbackSpec fn G E)`, so
-  a C-side proof under the assumption becomes one under the trusted contract only (`ECallGo`).
+  the facts linking `G`/`E` to it (including the stub's readiness) give
+  `(CgoCallback t p Cin R k).Refines (CallbackSpec t fn G E)`, so a C-side proof under the
+  assumption becomes one under the trusted contract only (`ECallGo`, `ECallBox`, `ECallLarge`).
+* **`exportAddr p "F"`** names the Go function behind `//export F` (`_cgoexp_<hash>_F`) by the
+  shape of its name, since cgo's hash changes with the package's files.
 
 ## 5. Examples (`examples/cgo`, `examples/proofs-cgo`)
 
@@ -427,12 +454,20 @@ them through cgo. The package `example.com/cgo/cabi` (`cabi/kabi.c`, `cabi/kvcal
 | `EBump` | `e_bump(x)`: a writable global (`.bss`, `.data`) through static GOT slots (`-fPIC`; amd64: the `--no-relax` build keeps the GOT loads) | ✓ | ✓ |
 | `ETLS` | `e_tls_add(x)`: a `__thread` variable, general dynamic (relaxed to local exec by the linker), checked against `TLSImage` | ✓ | ✓ |
 | `ETLSIE` | `e_tls_ie_add(x)`: a `__thread` variable, initial exec | ✓ | ✓ |
-| `EAtomic` | `e_atomic_inc(p)`: `__atomic_add_fetch` (arm64: libgcc's outline atomic `__aarch64_ldadd4_acq_rel`, its LSE path; amd64: `LOCK XADD`) | ✓ | ✓ |
+| `EAtomic` | `e_atomic_inc(p)`: `__atomic_add_fetch` (arm64: libgcc's outline atomic `__aarch64_ldadd4_acq_rel` on **both** paths: `LDADDAL` with LSE, and the `LDAXR`/`STLXR` loop under the progress hypothesis `∃ k, s.exclPass k = true`; amd64: `LOCK XADD`) | ✓ | ✓ |
 | `ELibc` | `e_libc(s, d)`: `strlen`, `malloc`, `__memcpy_chk`, `memcpy`, `free` through the PLT under `Libc`; the heap block is freed, accessibility restored | ✓ | ✓ |
 | `ESetJmp` | `e_setjmp(v)`: `_setjmp`, then `__longjmp_chk` from a callee back into it (a non-local return), under `SetJmp J` for every `jmp_buf` model | ✓ | ✓ |
 | `EArgMin` | `e_argmin(a, n, cmp)` for **every** comparator meeting `CFuncIs` (a call through a function pointer), and `e_argmin_i64`, which passes the proved `e_cmp_i64` | ✓ | ✓ |
 | `ECallGo` | `e_callgo(x)` → the `//export` wrapper `GoTwice` → `crosscall2` → `cgocallback` → the Go function → back: returns `2x + 1`, under `CgoCallback` only | ✓ | ✓ |
 | `EAlloca` | `e_alloca(n)`: an `alloca`'d array (stack-clash probes, the stack protector), returns `0 + … + (n − 1)` for every `n` | ✓ | ✓ |
+| `ECallBox` | `e_callbox(x)` → `GoBox`: the Go side checks its stack through `g`, calls `newBox` (a second stack check), which allocates with `runtime.newobject` (a contract, `NewobjectContract`); returns `x + 1` under `CgoCallback` with an 8192-byte goroutine stack and the allocator's readiness `ROK` | ✓ | – |
+| `ECallLarge` | `e_calllarge(x)` → `GoLarge`: a 4848-byte Go frame (the large-frame stack check, a 75-iteration zeroing loop on arm64 / `REP STOSQ` on amd64); returns `3x` under `CgoCallback` with an 8192-byte goroutine stack | ✓ | ✓ |
+| `EEnv` | `e_env_at(i)`: `environ[i]` through a GOT slot with a dynamic relocation, its value the precondition `GotBound Extracted.dyngot "environ" v` | ✓ | ✓ |
+
+`ECallBox`, `ECallLarge`, `EEnv` and `EAtomic` (arm64, on its LL/SC path) also prove
+`Witness.nonvacuous`: concrete states (and, for `ECallBox`, a toy allocator meeting
+`NewobjectContract` placed at `runtime.newobject` and a Go entry where `ROK` holds) satisfying all
+their hypotheses.
 
 The C environment examples are in `examples/cgo/cenv` (`cenv.c`, `cenv.go`), built into
 `artifacts/examples-cenv-<isa>` (and `examples-cenv-norelax-amd64`, linked with `-Wl,--no-relax`)

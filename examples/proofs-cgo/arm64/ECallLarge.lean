@@ -365,4 +365,62 @@ theorem correctness (rtc : List (Nat × Nat)) (Hc : RtReady) (x : W64) :
       Extracted.entry [x] (CPre rtc Hc) (fun _ s' => s'.regs 0 = 3 * x) :=
   (c_spec rtc Hc x).refine (refines _ rfl)
 
+namespace Witness
+
+/-- A byte of the program's read-only data, if `a` is in one of its objects. -/
+def dbyte (a : Nat) : Option Nat :=
+  Extracted.program.data.findSome? fun d =>
+    if d.base ≤ a ∧ a < d.base + d.bytes.length then d.bytes[a - d.base]? else none
+
+/-- Little-endian byte `j` of `v`. -/
+def byteOf (v j : Nat) : Nat := v / 256 ^ j % 256
+
+/-- The witness call: the C stack ends at `SP0`, the thread pointer is `TP`, the guard at
+`GUARD`, the return address `RET` (no code there). -/
+def SP0 : Nat := 0x1000000
+def TP : Nat := 0x800000
+def GUARD : Nat := 0x900000
+def RET : Nat := 0x1000
+
+/-- The witness memory: the read-only data in read-only regions, `runtime_init_done = 2`, no
+context function, `runtime.iscgo`, the TLS `g` slot, the guard's GOT slot holding `GUARD`, the
+guard, and the C stack. -/
+def mem0 : Memory :=
+  ⟨fun a => BitVec.ofNat 8 ((dbyte a).getD
+      (if a = rid then 2 else if gslot ≤ a ∧ a < gslot + 8 then byteOf GUARD (a - gslot) else 0)),
+    [⟨rid, 4, true⟩, ⟨ctxf, 8, true⟩, ⟨iscgo, 1, true⟩, ⟨TP + 16, 8, true⟩, ⟨gslot, 8, false⟩,
+     ⟨GUARD, 8, false⟩, ⟨SP0 - win, win, true⟩] ++
+      Extracted.program.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then 7#64 else if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 SP0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mem0, tpidr := BitVec.ofNat 64 TP }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [7#64] s0 :=
+  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+
+theorem data : Extracted.program.DataLoaded mem0 := by
+  unfold Program.DataLoaded; decide +kernel
+
+set_option maxRecDepth 100000 in
+theorem pre : CPre [] (fun _ _ _ _ => True) s0 := by
+  refine ⟨data, ?_⟩
+  repeat' (first | exact trivial | apply And.intro)
+  all_goals first
+    | decide +kernel
+    | (simp only [outside_cons, outside_nil, and_true]; decide +kernel)
+    | trivial
+
+/-- All hypotheses of `correctness` hold together (for the readiness that always holds and no
+runtime-owned memory). -/
+theorem nonvacuous : ∃ (rtc : List (Nat × Nat)) (Hc : RtReady) (x : W64) (ret : Nat) (s : State),
+    RetAddr Extracted.program ret ∧ CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
+      CPre rtc Hc s :=
+  ⟨[], fun _ _ _ _ => True, 7#64, RET, s0, hret, call, pre⟩
+
+end Witness
+
 end Proof

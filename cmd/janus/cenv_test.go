@@ -106,6 +106,22 @@ func TestCEnvExtraction(t *testing.T) {
 		t.Error("Extracted.lean has no cdata")
 	}
 
+	// a GOT slot with a dynamic relocation (R_*_GLOB_DAT of libc's environ): not copied, named
+	x = cenvExtract(t, b, "e_env_at")
+	if !slices.ContainsFunc(x.DynGOT, func(d DynGOT) bool { return d.Name == "environ" && d.Slot%8 == 0 }) {
+		t.Errorf("e_env_at: dyngot %+v lacks environ", x.DynGOT)
+	}
+	for _, d := range x.Data {
+		for _, g := range x.DynGOT {
+			if d.Base <= g.Slot && g.Slot < d.Base+uint64(len(d.Bytes)) {
+				t.Errorf("e_env_at: the dynamic GOT slot 0x%x is copied as data (%s)", g.Slot, d.Name)
+			}
+		}
+	}
+	if !strings.Contains(string(x.Lean), "def dyngot : List DynGOT") {
+		t.Error("Extracted.lean has no dyngot")
+	}
+
 	// a function pointer passed as an immediate (mov $e_cmp_i64, %rdx)
 	x = cenvExtract(t, b, "e_argmin_i64")
 	if !slices.Contains(cenvSegNames(x), "e_cmp_i64") {

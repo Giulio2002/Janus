@@ -15,7 +15,13 @@
 #     variable, general dynamic as relaxed by the linker), ETLSIE (initial exec), EAtomic (an atomic
 #     RMW: LSE / LOCK XADD), ELibc (strlen, malloc, __memcpy_chk, memcpy, free through the PLT),
 #     ESetJmp (setjmp/longjmp), EArgMin (a call through a function pointer, CFuncIs), ECallGo
-#     (C -> an //export Go function, end to end under CgoCallback), EAlloca (alloca, stack probes)
+#     (C -> an //export Go function, end to end under CgoCallback), EAlloca (alloca, stack probes),
+#     ECallBox (arm64: a callback whose Go code calls a Go function and allocates, newobject as a
+#     contract), ECallLarge (a callback with a 4848-byte Go frame, an 8192-byte goroutine stack),
+#     EEnv (environ through a GOT slot with a dynamic relocation, GotBound); EAtomic covers both
+#     paths of the arm64 outline-atomics helper (LSE, and LL/SC under the progress hypothesis)
+#   A proof with `namespace Witness` also has `Proof.Witness.nonvacuous` verified (its hypotheses
+#   hold together).
 #   amd64 only, C compiled by clang -O2 (SSE2-vectorised,
 #   artifacts/examples-cgo-clang-amd64):                 CSum32 GoSum32
 #
@@ -36,6 +42,7 @@ declare -A sym=(
   [GoVSum8]=example.com/cgo/cabi.VSum8
   [EBump]=e_bump [ETLS]=e_tls_add [ETLSIE]=e_tls_ie_add [EAtomic]=e_atomic_inc [ELibc]=e_libc
   [ESetJmp]=e_setjmp [EArgMin]=e_argmin_i64 [ECallGo]=e_callgo [EAlloca]=e_alloca
+  [ECallBox]=e_callbox [ECallLarge]=e_calllarge [EEnv]=e_env_at
   [CSum32]=c_sum32 [GoSum32]=example.com/cgo/vec.Sum32
 )
 # binaries other than artifacts/examples-cgo-<isa> (key isa/Name, or Name for both ISAs)
@@ -43,15 +50,18 @@ declare -A bin=(
   [EBump]=examples-cenv [amd64/EBump]=examples-cenv-norelax
   [ETLS]=examples-cenv [ETLSIE]=examples-cenv [EAtomic]=examples-cenv [ELibc]=examples-cenv
   [ESetJmp]=examples-cenv [EArgMin]=examples-cenv [ECallGo]=examples-cenv [EAlloca]=examples-cenv
+  [ECallBox]=examples-cenv [ECallLarge]=examples-cenv [EEnv]=examples-cenv
   [CSum32]=examples-cgo-clang [GoSum32]=examples-cgo-clang
 )
+# extra extraction options (key isa/Name or Name): runtime functions taken as contracts
+declare -A xargs=([ECallBox]="--contract runtime.newobject")
 all=(CAdd CSum CStore GoAdd GoSum KStack10 KFP KPMix KBig KVSum GoStack10 GoFP GoPMix GoBig GoVSum8
-  EBump ETLS ETLSIE EAtomic ELibc ESetJmp EArgMin ECallGo EAlloca)
+  EBump ETLS ETLSIE EAtomic ELibc ESetJmp EArgMin ECallGo EAlloca ECallLarge EEnv)
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
     for n in "${all[@]}"; do names+=("$isa/$n"); done
-    [ "$isa" = arm64 ] && names+=("$isa/CCount" "$isa/GoCount")
+    [ "$isa" = arm64 ] && names+=("$isa/CCount" "$isa/GoCount" "$isa/ECallBox")
   done
   names+=(amd64/CSum32 amd64/GoSum32)
 fi
@@ -71,11 +81,21 @@ for target in "${names[@]}"; do
   # the branch is never taken)
   b="${bin[$isa/$n]:-${bin[$n]:-examples-cgo}}"
   bin/janus extract "artifacts/$b-$isa" "${sym[$n]}" "$out" --contract runtime.convT64 \
-    --contract runtime.convT32 --contract runtime.convTnoptr >/dev/null 2>&1
+    --contract runtime.convT32 --contract runtime.convTnoptr ${xargs[$isa/$n]:-${xargs[$n]:-}} >/dev/null 2>&1
   start=$(date +%s.%N)
   if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-12s ok  %6.1fs\n' "$isa/$n" "$t" | tee -a "$summary"
+    if grep -q '^namespace Witness' "examples/proofs-cgo/$isa/$n.lean"; then
+      if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --theorem Proof.Witness.nonvacuous \
+          --janus-root . > "$out/verify-witness.log" 2>&1; then
+        printf '%-12s ok  (Proof.Witness.nonvacuous)\n' "$isa/$n" | tee -a "$summary"
+      else
+        printf '%-12s FAILED Proof.Witness.nonvacuous (see %s/verify-witness.log)\n' "$isa/$n" "$out" | tee -a "$summary"
+        tail -30 "$out/verify-witness.log"
+        fail=1
+      fi
+    fi
   else
     printf '%-12s FAILED (see %s/verify.log)\n' "$isa/$n" "$out" | tee -a "$summary"
     tail -30 "$out/verify.log"

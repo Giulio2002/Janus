@@ -45,4 +45,49 @@ theorem correctness (i : W64) (v : Nat) :
   subst hsv
   janus_run
 
+namespace Witness
+
+/-- The witness: `environ` at `VAR`, its pointer array at `ARR`, the stack at `SP0`, the return
+address `RET` (no code there). -/
+def VAR : Nat := 0x100000
+def ARR : Nat := 0x200000
+def SP0 : Nat := 0x300000
+def RET : Nat := 0x1000
+abbrev slot : Nat := DynGOT.slotOf Extracted.dyngot "environ"
+
+/-- Little-endian byte `j` of `v`. -/
+def byteOf (v j : Nat) : Byte := BitVec.ofNat 8 (v / 256 ^ j)
+
+/-- The witness memory: the GOT slot holds `VAR`, `environ` holds `ARR`, `ARR[0] = 0`. -/
+def mem0 : Memory :=
+  ⟨fun a => if slot ≤ a ∧ a < slot + 8 then byteOf VAR (a - slot)
+      else if VAR ≤ a ∧ a < VAR + 8 then byteOf ARR (a - VAR) else 0,
+   [⟨slot, 8, false⟩, ⟨VAR, 8, false⟩, ⟨ARR, 8, false⟩]⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 30 then BitVec.ofNat 64 RET else 0,
+    sp := BitVec.ofNat 64 SP0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [0#64] s0 :=
+  ⟨⟨rfl, rfl, by intro i h; simp at h; subst h; rfl⟩, by decide, by decide⟩
+
+theorem pre : Pre 0#64 VAR s0 := by
+  refine ⟨⟨by decide +kernel, by decide +kernel, by decide +kernel⟩, by decide, by decide +kernel,
+    by decide +kernel, by decide +kernel⟩
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (i : W64) (v ret : Nat) (s : State), RetAddr Extracted.program ret ∧
+    CCall (Extracted.program.withExit ret) Extracted.entry [i] s ∧ Pre i v s :=
+  ⟨0#64, VAR, RET, s0, hret, call, pre⟩
+
+/-- So the guarantee is reached: `e_env_at(0)` returns `environ[0]` (here `0`). -/
+theorem returns : GoABI.Returns (Extracted.program.withExit RET) s0 fun s' =>
+    CReturn s0 s' ∧ (s'.regs 0).toNat = s0.mem.readLE (envp s0.mem VAR + 8 * (0#64).toNat) 8 ∧ s'.mem = s0.mem :=
+  correctness 0#64 VAR RET hret s0 call pre
+
+end Witness
+
 end Proof

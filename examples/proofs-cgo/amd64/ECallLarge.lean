@@ -225,4 +225,56 @@ theorem correctness (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : 
       Extracted.entry [x] (CPre rt H) (fun _ s' => s'.regs 0 = 3 * x) :=
   (c_spec rt H x).refine (refines _ rfl)
 
+namespace Witness
+
+/-- A byte of the program's read-only data, if `a` is in one of its objects. -/
+def dbyte (a : Nat) : Option Nat :=
+  Extracted.program.data.findSome? fun d =>
+    if d.base ≤ a ∧ a < d.base + d.bytes.length then d.bytes[a - d.base]? else none
+
+/-- Little-endian byte `j` of `v`. -/
+def byteOf (v j : Nat) : Nat := v / 256 ^ j % 256
+
+/-- The witness call: `RSP = SP0` (its slot holding `RET`, where there is no code), `FS = FS0`. -/
+def SP0 : Nat := 0x1000008
+def FS0 : Nat := 0x800000
+def RET : Nat := 0x1000
+
+def mem0 : Janus.Arm64.Memory :=
+  ⟨fun a => BitVec.ofNat 8 ((dbyte a).getD
+      (if a = rid then 2 else if SP0 ≤ a ∧ a < SP0 + 8 then byteOf RET (a - SP0) else 0)),
+    [⟨rid, 4, true⟩, ⟨ctxf, 8, true⟩, ⟨FS0 - 24, 8, true⟩, ⟨FS0 + 40, 8, false⟩,
+     ⟨SP0 - win, win + 8, true⟩] ++
+      Extracted.program.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 7 then 7#64 else if i = 4 then BitVec.ofNat 64 SP0 else 0,
+    rip := BitVec.ofNat 64 Extracted.entry, flags := ⟨none, none, none, none, none, none⟩,
+    xmm := fun _ => 0, mem := mem0, fsBase := BitVec.ofNat 64 FS0 }
+
+theorem hret : RetAddr Extracted.program RET := RetAddr.of_check (by decide +kernel)
+
+theorem call : CCall (Extracted.program.withExit RET) Extracted.entry [7#64] s0 :=
+  ⟨rfl, by decide +kernel, by decide, by intro i h; simp at h; subst h; rfl, by decide, rfl⟩
+
+theorem data : Extracted.program.DataLoaded mem0 := by
+  unfold Amd64.Program.DataLoaded; decide +kernel
+
+set_option maxRecDepth 100000 in
+theorem pre : CPre [] (fun _ _ _ _ => True) s0 := by
+  refine ⟨data, ?_⟩
+  repeat' (first | exact trivial | apply And.intro)
+  all_goals first
+    | decide +kernel
+    | (simp only [outside_cons, outside_nil, and_true]; decide +kernel)
+    | trivial
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (H : Janus.Contracts.RtReady) (x : W64) (ret : Nat) (s : State),
+    RetAddr Extracted.program ret ∧ CCall (Extracted.program.withExit ret) Extracted.entry [x] s ∧
+      CPre rt H s :=
+  ⟨[], fun _ _ _ _ => True, 7#64, RET, s0, hret, call, pre⟩
+
+end Witness
+
 end Proof
