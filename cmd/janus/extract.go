@@ -75,6 +75,9 @@ type Extraction struct {
 	DataRefs []DataRef     // detected references, in code order
 	Skipped  []SkippedData // references whose target is not copied (writable, code, ...)
 	Lean     []byte
+	// BuildModes are the accepted instrumented build modes (buildmode.go), recorded in
+	// identity.json; nil for an ordinary build.
+	BuildModes []string
 }
 
 // Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)
@@ -124,18 +127,20 @@ var (
 	}
 	// The cgo boundary (Janus/FFI.lean): runtime.cgocall (the Go -> C call: stack switch to g0,
 	// entersyscall/exitsyscall, the C call through asmcgocall), _cgo_topofstack (Go assembly the
-	// C side of a cgo call calls) and runtime.cgoUse (only on the dead `if _Cgo_always_false`
-	// branch of cgo wrappers). Their effects are the trusted contracts of Janus.FFI.
+	// C side of a cgo call calls), runtime.cgoUse and runtime.cgoKeepAlive (only on the dead
+	// `if _Cgo_always_false` branch of cgo wrappers; cgoKeepAlive with `#cgo noescape`, both
+	// throw if called). Their effects are the trusted contracts of Janus.FFI.
 	runtimeExternalStubs = map[string]bool{
 		"runtime.cgocall": true, "_cgo_topofstack": true, "_cgo_topofstack.abi0": true,
-		"runtime.cgoUse": true,
+		"runtime.cgoUse": true, "runtime.cgoKeepAlive": true,
 	}
 )
 
 // runtimeContractStubs are the runtime functions whose behaviour a framework contract library
 // states (Janus/Contracts/Iface.lean, IfaceAmd64.lean: the interface runtime of Go 1.26;
 // Janus/Contracts/Mem.lean, Hash.lean and their amd64 files: equality, hashing and typed memory;
-// Janus/Contracts/Map.lean, MapVar.lean, MapStr.lean and their amd64 files: the map runtime). When a
+// Janus/Contracts/Map.lean, MapVar.lean, MapStr.lean and their amd64 files: the map runtime; and
+// rtmiscContractStubs below, added at init). When a
 // --contract pattern matches one, the extractor pins it like a stub (checkContractPin): the
 // pclntab names it in package runtime, in the toolchain's file, and its normalized code is the
 // runtime's (stubpins_gen.go). A binary whose function of that name is not the runtime's is an
@@ -192,6 +197,55 @@ var runtimePanicContractStubs = map[string]bool{
 	"runtime.gopanic": true, "runtime.gorecover": true, "runtime.deferproc": true,
 	"runtime.deferprocStack": true, "runtime.deferreturn": true, "runtime.deferprocat": true,
 	"runtime.deferrangefunc": true, "runtime.sigpanic": true,
+}
+
+// rtmiscContractStubs are the further runtime functions a framework contract library describes
+// (docs/RUNTIME-CONTRACTS.md, "Remaining runtime"): the -d=checkptr checks and the cgo pointer
+// checks (Janus/Contracts/InstrumentCalls*.lean) and the size-specialised allocator entry points of
+// GOEXPERIMENT=sizespecializedmalloc (Janus/Contracts/MallocSC*.lean). They are pinned like the
+// interface contracts (checkContractPin) and belong to runtimeContractStubs.
+var rtmiscContractStubs = map[string]bool{
+	"runtime.checkptrAlignment": true, "runtime.checkptrArithmetic": true,
+	"runtime.cgoCheckPointer": true, "runtime.cgoCheckResult": true,
+	"runtime.mallocgcSmallNoScanSC2": true, "runtime.mallocgcSmallNoScanSC3": true,
+	"runtime.mallocgcSmallNoScanSC4": true, "runtime.mallocgcSmallNoScanSC5": true,
+	"runtime.mallocgcSmallNoScanSC6": true, "runtime.mallocgcSmallNoScanSC7": true,
+	"runtime.mallocgcSmallNoScanSC8": true, "runtime.mallocgcSmallNoScanSC9": true,
+	"runtime.mallocgcSmallNoScanSC10": true, "runtime.mallocgcSmallNoScanSC11": true,
+	"runtime.mallocgcSmallNoScanSC12": true, "runtime.mallocgcSmallNoScanSC13": true,
+	"runtime.mallocgcSmallNoScanSC14": true, "runtime.mallocgcSmallNoScanSC15": true,
+	"runtime.mallocgcSmallNoScanSC16": true, "runtime.mallocgcSmallNoScanSC17": true,
+	"runtime.mallocgcSmallNoScanSC18": true, "runtime.mallocgcSmallNoScanSC19": true,
+	"runtime.mallocgcSmallNoScanSC20": true, "runtime.mallocgcSmallNoScanSC21": true,
+	"runtime.mallocgcSmallNoScanSC22": true, "runtime.mallocgcSmallNoScanSC23": true,
+	"runtime.mallocgcSmallNoScanSC24": true, "runtime.mallocgcSmallNoScanSC25": true,
+	"runtime.mallocgcSmallNoScanSC26": true, "runtime.mallocgcSmallScanNoHeaderSC1": true,
+	"runtime.mallocgcSmallScanNoHeaderSC2": true, "runtime.mallocgcSmallScanNoHeaderSC3": true,
+	"runtime.mallocgcSmallScanNoHeaderSC4": true, "runtime.mallocgcSmallScanNoHeaderSC5": true,
+	"runtime.mallocgcSmallScanNoHeaderSC6": true, "runtime.mallocgcSmallScanNoHeaderSC7": true,
+	"runtime.mallocgcSmallScanNoHeaderSC8": true, "runtime.mallocgcSmallScanNoHeaderSC9": true,
+	"runtime.mallocgcSmallScanNoHeaderSC10": true, "runtime.mallocgcSmallScanNoHeaderSC11": true,
+	"runtime.mallocgcSmallScanNoHeaderSC12": true, "runtime.mallocgcSmallScanNoHeaderSC13": true,
+	"runtime.mallocgcSmallScanNoHeaderSC14": true, "runtime.mallocgcSmallScanNoHeaderSC15": true,
+	"runtime.mallocgcSmallScanNoHeaderSC16": true, "runtime.mallocgcSmallScanNoHeaderSC17": true,
+	"runtime.mallocgcSmallScanNoHeaderSC18": true, "runtime.mallocgcSmallScanNoHeaderSC19": true,
+	"runtime.mallocgcSmallScanNoHeaderSC20": true, "runtime.mallocgcSmallScanNoHeaderSC21": true,
+	"runtime.mallocgcSmallScanNoHeaderSC22": true, "runtime.mallocgcSmallScanNoHeaderSC23": true,
+	"runtime.mallocgcSmallScanNoHeaderSC24": true, "runtime.mallocgcSmallScanNoHeaderSC25": true,
+	"runtime.mallocgcSmallScanNoHeaderSC26": true, "runtime.mallocgcTinySize1": true,
+	"runtime.mallocgcTinySize2": true, "runtime.mallocgcTinySize3": true,
+	"runtime.mallocgcTinySize4": true, "runtime.mallocgcTinySize5": true,
+	"runtime.mallocgcTinySize6": true, "runtime.mallocgcTinySize7": true,
+	"runtime.mallocgcTinySize8": true, "runtime.mallocgcTinySize9": true,
+	"runtime.mallocgcTinySize10": true, "runtime.mallocgcTinySize11": true,
+	"runtime.mallocgcTinySize12": true, "runtime.mallocgcTinySize13": true,
+	"runtime.mallocgcTinySize14": true, "runtime.mallocgcTinySize15": true,
+}
+
+func init() {
+	for n := range rtmiscContractStubs {
+		runtimeContractStubs[n] = true
+	}
 }
 
 // stubKind classifies a linked symbol name as a runtime stub (name only; see classifyStub for

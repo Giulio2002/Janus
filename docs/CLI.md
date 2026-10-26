@@ -86,7 +86,9 @@ Extraction:
    not `ET_DYN`), Go build information present (`debug/buildinfo`), `GOOS=linux`, `GOARCH=arm64`.
    A position-independent executable is rejected (`Stage: binary validation`): the model records
    link-time addresses, which a PIE does not run at. Build with `go build` (non-PIE; e.g.
-   `CGO_ENABLED=0`), not `-buildmode=pie`.
+   `CGO_ENABLED=0`), not `-buildmode=pie`. Then detects the **instrumented build modes**
+   (`-race`, `-msan`, `-asan`, `-d=libfuzzer`, `-cover`, `-d=checkptr`, `-spectre=ret`) and
+   rejects or records them before anything is extracted; see [Build modes](#build-modes).
 2. Finds the symbol (exact, case-sensitive name as printed by `list`; ambiguous names fail).
 3. Copies the function's raw 32-bit little-endian words from `.text`. Words are never
    translated. Trailing zero words (the linker's `udf #0` padding up to the next function) are
@@ -254,7 +256,9 @@ copied words after trimming. Extractions with dynamic targets also record `targe
 `--targets` list, which `janus check` re-applies), `dynamicTargets` (each added function with
 `via` = `targets`, `itab`, `funcval` or `code-address` and `from`, the itab/funcval symbol or the
 instruction computing the address) and `omittedCalls` (direct calls not followed, with the
-reason); these fields are absent when empty. For `HashWith` extracted with both itabs:
+reason); these fields are absent when empty. A binary built in an accepted instrumented mode
+records `buildModes` (`"cover"`, `"checkptr"`, `"spectre=ret"`; see [Build modes](#build-modes)),
+absent for an ordinary build. For `HashWith` extracted with both itabs:
 
 ```json
   "targets": [ "go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher",
@@ -333,6 +337,61 @@ Above 2048 bytes in total, each object becomes `def data<i> : DataSegment` (with
 A proof about such a program assumes `Program.DataLoaded Extracted.program s.mem` (the bytes are
 in memory, inside a non-writable region). `check` regenerates the data along with the words, so
 an edited byte or a dropped object is rejected.
+
+### Build modes
+
+Some `go build` flags rewrite the compiled code. `extract` (and so `check` and `verify`, which
+regenerate the extraction) detects them from the binary: from the ELF symbol tables (`.symtab`,
+`.dynsym`, or the pclntab's functions), the section headers and the build settings of
+`debug/buildinfo`. It then rejects the binary or accepts it; nothing is silently extracted as if
+the build were ordinary (`cmd/janus/buildmode.go`).
+
+| mode | detected by | decision |
+| --- | --- | --- |
+| `-race` | `runtime.racefuncenter`, `runtime.raceread` or `__tsan_init`, or the setting `-race=true` | rejected |
+| `-msan` | `runtime.msanread` or `__msan_init`, or `-msan=true` | rejected |
+| `-asan` | `runtime.asanread` or `__asan_init`, or `-asan=true` | rejected |
+| `-gcflags=-d=libfuzzer` | `runtime.libfuzzerTraceCmp*`, `runtime.libfuzzerTraceConstCmp*`, `runtime.libfuzzerHookStrCmp`, `runtime.libfuzzerHookEqualFold`, a `__sancov_cntrs` section or its `__start___sancov_cntrs` symbol | rejected |
+| `-cover` | `runtime.covctrs` < `runtime.ecovctrs` (both are in every binary; the counters lie between them), `runtime.addCovMeta`, or `-cover=true` | accepted, `"cover"` |
+| `-gcflags=-d=checkptr` | the extraction copies `runtime.checkptrAlignment` or `runtime.checkptrArithmetic`, or records one as a contract | accepted, `"checkptr"` |
+| `-gcflags=-spectre=ret` (amd64; the arm64 compiler rejects it) | a retpoline thunk `runtime.retpolineAX` … `runtime.retpolineR15` | accepted, `"spectre=ret"` |
+
+A symbol name matches with or without its `.abi0`/`.abiinternal` suffix. The rejected modes are
+binary-wide: the whole program's semantics rely on the instrumented C runtime, so the binary is
+rejected before anything is extracted, even for an entry function that does not itself call the
+instrumentation. They print (`Stage: code extraction`, `Next: Rebuild the program without <flag>
+(the same go build command without the flag) and extract from that binary.`):
+
+```text
+Error: built with -race: the race detector instruments every memory access with calls into the ThreadSanitizer runtime (runtime.raceread, ...); concurrency is out of scope for Janus (docs/SOUNDNESS.md). Rebuild without -race.
+Error: built with -msan: every load and store calls the MemorySanitizer C runtime (runtime.msanread -> __msan_read_go) through the cgo boundary, whose shadow memory, reports and aborts Janus does not model. A Janus proof already establishes that every access stays inside the memory the precondition grants, which is what the sanitizer checks dynamically: verify the binary built without -msan.
+Error: built with -asan: every load and store calls the AddressSanitizer C runtime (runtime.asanread -> __asan_read_go) through the cgo boundary, whose shadow memory, reports and aborts Janus does not model. A Janus proof already establishes that every access stays inside the memory the precondition grants, which is what the sanitizer checks dynamically: verify the binary built without -asan.
+Error: built with -d=libfuzzer: comparisons call libFuzzer's C hooks (runtime.libfuzzerTraceCmp*, __sanitizer_cov_trace_cmp*) and the 8-bit coverage counters live in the libFuzzer section __sancov_cntrs; a libFuzzer build is a c-archive for libFuzzer's C driver, not a Go program Janus verifies. Verify the binary built without -d=libfuzzer.
+```
+
+(`-race`, `-msan` and `-asan` also turn on `-d=checkptr`; the rejection comes first.)
+
+The accepted modes are recorded in `identity.json` as `buildModes`, in the order `cover`,
+`checkptr`, `spectre=ret` (absent for an ordinary build, whose identity is unchanged), and
+`check` regenerates them. `-cover` and `-spectre=ret` are binary-wide, so they are recorded for
+every function extracted from such a binary; `checkptr` only when the extracted code reaches a
+check. `extract` prints one line per mode on stderr:
+
+```text
+note: built with -cover: coverage counter updates are ordinary stores into the package's counter variable; a theorem states them (Janus/Contracts/Instrument.lean, CovBlock)
+note: built with -d=checkptr: the code calls the runtime's pointer checks (runtime.checkptrAlignment, runtime.checkptrArithmetic), which are extracted as code unless --contract names them
+note: built with -spectre=ret: indirect calls go through the runtime's retpoline thunks, which are executed like any other code; their targets are dynamic call targets (--targets)
+```
+
+* `-cover`: the counter updates are ordinary stores of the covered function into the package's
+  counter variable (writable `.noptrbss`, which the extractor does not copy; it reports the
+  references as `skippedData`). A theorem states them, with the counter bytes writable in its
+  precondition (`CovBlock`).
+* `-d=checkptr`: the checks are ordinary runtime code, copied like any other callee, or
+  contracts when `--contract` names them.
+* `-spectre=ret`: an indirect `CALL` goes to the thunk of its register, ordinary runtime assembly
+  that the extraction copies and executes (an indirect jump to the register); the jump's targets
+  are dynamic call targets, as for any indirect call.
 
 ## Check
 
@@ -427,6 +486,10 @@ Verified: Proof.correctness
   Statement:
     Proof.correctness : Extracted.entry = Extracted.entry
 ```
+
+`verify` first runs `check`, which regenerates the extraction, so the [build-mode](#build-modes)
+detection applies again: a binary built with `-race`, `-msan`, `-asan` or `-d=libfuzzer` is
+rejected (`Invalid: built with …`), and the recorded `buildModes` must match.
 
 Defaults: `--proof <outdir>/Proof.lean`, `--theorem Proof.correctness`. The Janus Lean framework
 is the copy **embedded in the `janus` binary** (see [the framework](#framework), [install

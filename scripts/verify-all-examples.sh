@@ -2,7 +2,7 @@
 # Verify every arm64 example proof (with the WrongAdd demonstration), every amd64 example
 # theorem and the Go assembly (ABI0) examples of both ISAs in one pool of parallel jobs:
 # scripts/verify-examples.sh, scripts/verify-amd64-examples.sh and
-# scripts/verify-asm-examples.sh one item at a time, longest first (by the times measured in the
+# scripts/verify-asm-examples.sh and scripts/verify-rtmisc-examples.sh one item at a time, longest first (by the times measured in the
 # last run, artifacts/verify-all-examples.times; a built-in order before the first run), so that
 # the long proofs overlap the rest instead of ending the run alone.
 # Usage: scripts/verify-all-examples.sh [-j N] [--changed]
@@ -35,6 +35,7 @@ scripts/build-examples.sh >/dev/null
 bash scripts/build-examples-amd64.sh >/dev/null 2>&1
 scripts/build-examples-asm.sh >/dev/null
 scripts/build-examples-sys.sh >/dev/null 2>&1
+scripts/build-examples-rtmisc.sh >/dev/null
 [ -n "${JANUS_ROOT:-}" ] && (cd "$JANUS_ROOT" && lake build Janus >/dev/null)
 export JANUS_EXAMPLES_PREBUILT=1
 
@@ -62,6 +63,9 @@ items=()
 for n in "${arm64[@]}"; do items+=("arm64:$n"); done
 for f in "${amd64[@]}"; do items+=("amd64:$f"); done
 for t in "${asm[@]}"; do items+=("asm:$t"); done
+rtmisc=()
+for f in examples/rtmisc/proofs/*/*.lean; do rtmisc+=("$(basename "$(dirname "$f")")/$(basename "$f" .lean)"); done
+for t in "${rtmisc[@]}"; do items+=("rtmisc:$t"); done
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -169,6 +173,17 @@ run_item() {
       fi
       sed "s/^/asm    /" "$tmp/asm-${n//\//_}" 2>/dev/null || true
       ;;
+    rtmisc)
+      # (always run: no --changed hash for the remaining-runtime examples)
+      s=$(date +%s.%N)
+      if JANUS_EXAMPLES_SUMMARY="$tmp/rtmisc-${n//\//_}" scripts/verify-rtmisc-examples.sh -j 1 "$n" >/dev/null 2>&1; then
+        secs=$(echo "$(date +%s.%N) - $s" | bc)
+        item_done "$it" "" "$secs"
+      else
+        broken+=("$it")
+      fi
+      sed "s/^/rtmisc /" "$tmp/rtmisc-${n//\//_}" 2>/dev/null || true
+      ;;
   esac
   return 0
 }
@@ -191,6 +206,6 @@ mv "$manifest.tmp" "$manifest"
 { [ -f "$times" ] && cat "$times"; cat "$tmp"/time-* 2>/dev/null; } |
   awk -F'\t' '{ t[$1] = $2 } END { for (k in t) printf "%s\t%s\n", k, t[k] }' | sort > "$times.tmp" || true
 mv "$times.tmp" "$times"
-echo "total: ${#arm64[@]} arm64 items, ${#amd64[@]} amd64 functions, ${#asm[@]} assembly items, ${#sys[@]} kernel examples, $(( $(date +%s) - wall ))s wall (-j $PAR_JOBS)${changed:+; --changed: unchanged items skipped, not a gate run}"
+echo "total: ${#arm64[@]} arm64 items, ${#amd64[@]} amd64 functions, ${#asm[@]} assembly items, ${#sys[@]} kernel examples, ${#rtmisc[@]} remaining-runtime items, $(( $(date +%s) - wall ))s wall (-j $PAR_JOBS)${changed:+; --changed: unchanged items skipped, not a gate run}"
 if [ ${#broken[@]} -gt 0 ]; then echo "FAILED: ${broken[*]}"; exit 1; fi
 echo "all ok"

@@ -60,6 +60,9 @@ modes() {
   local common=("default||" "trimpath||-trimpath" "nodwarf||-trimpath -ldflags=-w" "pie||-trimpath -buildmode=pie"
                 "noopt||-trimpath -gcflags=all=-N_-l")
   printf '%s\n' "${common[@]}"
+  # the size-specialised allocator's entry points (Janus/Contracts/MallocSC.lean) as the
+  # experiment compiles them
+  printf '%s\n' "scexp|GOEXPERIMENT=sizespecializedmalloc|-trimpath"
   if [ "$1" = arm64 ]; then printf '%s\n' "v8.1|GOARM64=v8.1|-trimpath" "v9.0|GOARM64=v9.0|-trimpath"
   else printf '%s\n' "v2|GOAMD64=v2|-trimpath" "v3|GOAMD64=v3|-trimpath" "v4|GOAMD64=v4|-trimpath"; fi
 }
@@ -122,7 +125,8 @@ out="$tmp/stubpins_gen.go"
   echo
   echo "// stubPins: per GOARCH and linked name, the accepted (normalized SHA-256, GOROOT/src file)"
   echo "// pairs, each with the toolchains and build modes it was measured in (modes: default; trimpath;"
-  echo "// nodwarf, -ldflags=-w; noopt, -gcflags=all=-N -l; v8.1/v9.0, GOARM64; v2/v3/v4, GOAMD64)."
+  echo "// nodwarf, -ldflags=-w; noopt, -gcflags=all=-N -l; scexp, GOEXPERIMENT=sizespecializedmalloc;"
+  echo "// v8.1/v9.0, GOARM64; v2/v3/v4, GOAMD64)."
   echo "var stubPins = map[string]map[string][]stubPin{"
   for arch in amd64 arm64; do
     echo "	\"$arch\": {"

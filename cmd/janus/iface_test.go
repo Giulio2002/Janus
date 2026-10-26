@@ -139,10 +139,13 @@ func TestContractStubNames(t *testing.T) {
 		}
 		lean.Write(b)
 	}
-	if len(runtimeContractStubs) != 74 {
-		t.Errorf("%d contract stubs, want 74 (13 interface + 37 equality/hash/typed-memory + 24 map)", len(runtimeContractStubs))
+	if len(runtimeContractStubs) != 74+len(rtmiscContractStubs) {
+		t.Errorf("%d contract stubs, want 74 (13 interface + 37 equality/hash/typed-memory + 24 map) + %d rtmisc", len(runtimeContractStubs), len(rtmiscContractStubs))
 	}
 	for name := range runtimeContractStubs {
+		if rtmiscContractStubs[name] {
+			continue // checked by TestRtmiscContractStubNames
+		}
 		if !strings.Contains(string(src), "//go:linkname s_"+strings.TrimPrefix(name, "runtime.")+" "+name+"\n") {
 			t.Errorf("scripts/stubpins does not link %s", name)
 		}

@@ -50,7 +50,7 @@ the cache.
 | 1. compiler-generated wrappers / Go test code | 100% / 100% (99.40% / 97.09% before A) | 100% / 100% (99.98% before WP-B) | 100% / 100% (99.60% / 99.16% before WP-B) |
 | 2. runtime entry points with a contract, stub or proof (main + branches) | 126 of 309 names (39 on main; agent/rtiface adds 15, agent/eqhash 34, agent/maps2 14, agent/panic 7; agent/rtstr's string/slice contracts not yet counted) | same | same |
 | 2. … of the 191 linked on arm64/amd64: still missing | 86 (12 of them concurrency, excluded) | | |
-| 3. language constructs with a proved example | 72 of 75 rows (3 have none on either ISA; agent/constructs closes 20, agent/rtiface 4, agent/eqhash 1, agent/constructs2 2 and string ordering, agent/panic 2 and the nil-dereference panic, agent/rtstr 3) | | |
+| 3. language constructs with a proved example | 73 of 75 rows (2 have none on either ISA; agent/constructs closes 20, agent/rtiface 4, agent/eqhash 1, agent/constructs2 2 and string ordering, agent/panic 2 and the nil-dereference panic, agent/rtstr 3, agent/rtmisc 1: complex numbers) | | |
 | 5. C corpus functions that fully decode, cgo default `-O2` (gcc / clang) | **100% / 100%** (all six configurations, WP-I; 93.6% / 86.2% before) | **100% / 100%** with WP-D and WP-J, also at `-O0`/`-O3` (83.6% / 78.0% before: SSE2 packed; then x87, `NOTRACK`, the TLS call) | `-O3 -march=x86-64-v3`: **96.4% / 98.2%** with WP-F alone (59.1% / 58.7% before), the rest WP-J's: 100% / 100% expected with both, not yet re-measured together |
 
 Main findings:
@@ -440,6 +440,20 @@ Full table: `artifacts/coverage/runtime.tsv`.
     `emptyTypeAssertCache` / `emptyInterfaceSwitchCache` (the cache model `TACacheOK.empty`,
     `ISCacheOK.empty`).
 
+**R9 (agent/rtmisc), not yet in the table above** (docs/RUNTIME-CONTRACTS.md, "Remaining
+runtime"): executed by proved examples on both ISAs, `complex128div` (against `cdiv`, fused on arm64, unfused on amd64; the Annex G recoveries are also evaluated, `annexG_*`) and
+`f32to64` (`-d=softfloat`); `KeepAlive` (an intrinsic, no call); the data objects `staticuint64s`
+(proved from the extracted bytes), `zeroVal`, `inf`, `cgoAlwaysFalse` (stated hypotheses); the CPU
+feature flags as a hypothesis quantified over the flag's value (`x86HasPOPCNT` proved for both
+values on amd64); contracts pinned and proved satisfiable for `checkptrAlignment`,
+`checkptrArithmetic`, `cgoCheckPointer`, `cgoCheckResult` and the 66 `mallocgcSmallNoScanSC<n>`,
+`mallocgcSmallScanNoHeaderSC<n>`, `mallocgcTinySize<n>` entries of
+`GOEXPERIMENT=sizespecializedmalloc`; `cgoKeepAlive` as an external stub like `cgoUse`;
+`cgoNoCallback` is ordinary code. `-cover` counters are stated (`CovBlock`); `-race`, `-msan`,
+`-asan`, `-d=libfuzzer` are rejected by `janus extract`. Left: `fadd64`/`fsub64` are not IEEE
+(subnormal results off by a factor of two in Go 1.26), so they get no contract; `fmul64`, `fdiv64`,
+`f64to32` and the other soft-float helpers run as code but have no proof against IEEE.
+
 **Missing: no contract, stub or proof on any branch, and linked by std** (86; the 12
 concurrency names are excluded, which leaves **74 in scope**):
 
@@ -575,7 +589,7 @@ amd64 proof of the existing `A64IndexByte`.
 | int ↔ float, float32 ↔ float64 | `I64ToF64`, `U64ToF64` (`fromInt`, exact below `2^53`), `F64ToI64` (truncation; `FCVTZS` saturation), `F64ToF32`, `F32ToF64` (`convertFormat`, widening exact) (constructs2) | same (constructs2; `uint64 → float64` through Go's sticky-halving sequence, `CVTTSD2SQ`'s integer indefinite) | `Janus/Float/Convert.lean`, `Janus/{Arm64,Amd64}/FloatConvert.lean` |
 | float → uint64 | `F64ToU64` (main) | same | FP decoder |
 | float bits, float arithmetic | `Abs`, `AddF64`, `Dot3` (main) | same | FP decoder |
-| complex numbers | none | none | FP; `complex128div` |
+| complex numbers | `Div` (examples/rtmisc, R9) | `Div` (examples/rtmisc, R9) | — |
 | `unsafe.Pointer` | `GoSum` (ffi) | same | – |
 | `uintptr` arithmetic | `AlignUp` (constructs) | same (constructs) | – |
 | interface boxing (`convT*`) | `Box` (rtiface) | same | `convT64` contract (`convT`, `convT16/32`, `convTstring`, `convTslice`, `convTnoptr` contracts too) |
@@ -597,7 +611,7 @@ amd64 proof of the existing `A64IndexByte`.
 | goroutines, channels, select, `sync` | excluded (concurrency) | excluded | – |
 
 Not covered on any branch or architecture (with agent/constructs, agent/rtiface, agent/eqhash,
-agent/constructs2, agent/rtstr and agent/panic): complex numbers; the grown-stack case; `//export`
+agent/constructs2, agent/rtstr, agent/panic and agent/rtmisc): the grown-stack case; `//export`
 callbacks. Within covered rows these forms still have no example: a range-over-func body with
 `break`, `return` or `defer` (`deferrangefunc`), and `MallocFast` on amd64. `A64IndexByte` on
 amd64 covers the AVX2 path only: the SSE path runs `BSF` on a zero mask, which the model treats

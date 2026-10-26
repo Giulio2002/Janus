@@ -1192,6 +1192,33 @@ no concurrent GC, no preemption):
   during GC (`gcmarknewobject`, write barrier on), heap profiling (`profilealloc`), the GC trigger
   (`gcTrigger.test`, `gcStart`) and the debug hooks (`debug.malloc`). Contracts that rely on
   these paths (the allocation contracts above, used by `NewPair` & co.) remain assumptions.
+* **Remaining runtime (R9)** (docs/RUNTIME-CONTRACTS.md, "Remaining runtime"). Trusted, as claims
+  about the Go 1.26 runtime:
+  1. *Data objects.* `runtime.zeroVal` holds 1024 zero bytes, `runtime.inf` the word `+∞`,
+     `runtime.cgoAlwaysFalse` the byte `0` whenever user code runs (`ZeroVal`, `RuntimeInf`,
+     `CgoAlwaysFalse`, stated as hypotheses at the address the code reads, since the extractor
+     does not copy writable data). `runtime.staticuint64s` is read-only and extracted: its
+     contents are proved, not assumed.
+  2. *CPU feature flags.* A theorem takes a flag's value as a parameter and holds for both values
+     (`CpuFlag`). The model executes every instruction it decodes on any CPU; a `true` flag case
+     is meaningful for the real machine exactly when `internal/cpu` sets the flag only on CPUs
+     that implement the guarded instructions (which it does from `CPUID`/`HWCAP`).
+  3. *Checks and the size-specialised allocator.* `CheckptrAlignment`, `CheckptrArithmetic`,
+     `CgoCheckPointer`, `CgoCheckResult` (and the amd64 forms) state that the runtime's check
+     returns, changing only runtime-private memory and its stack window, when it passes; the
+     conditions are the runtime's own (`AlignOK`, `ArithOK`) over the abstract `checkptrBase`, or,
+     for cgo, the abstract predicates of `CgoCheckModel`. `MallocgcSmallNoScanSCContract` & co.
+     are the `RtReady` `mallocgc` contract at the entry's fixed size class. All are pinned to the
+     runtime's code and proved satisfiable.
+  4. *Build modes.* `-cover`, `-d=checkptr`, `-spectre=ret` and `GOEXPERIMENT=sizespecializedmalloc`
+     builds are accepted (the instrumentation is ordinary code, or calls pinned contracts);
+     `-race`, `-msan`, `-asan`, `-d=libfuzzer` are rejected by the extractor, which detects them from
+     the binary's symbols (the sanitizer runtimes' entry points), sections and `debug/buildinfo`
+     settings. Their semantics depend on the sanitizer runtimes' shadow state, which the model does
+     not have; a binary that hides those markers is outside what the detection covers.
+  5. *Soft float.* Nothing about `-d=softfloat` is assumed: `f32to64` is proved; Go's `fadd64`
+     does not implement IEEE 754 for subnormal results (RUNTIME-CONTRACTS.md), so no contract
+     claims it does.
 * **amd64**: every amd64 contract requires the return address at `[RSP]` below `2^47` (a
   canonical user address); without it no code could return and the contract would be
   unsatisfiable.
