@@ -207,6 +207,7 @@ def LockPre (rt : List (Nat × Nat)) (lo : Nat) (s : State) : Prop :=
     s.mem.readLE ((s.regs 28).toNat + gM) 8 + mLocks + 4 ≤ 2 ^ 48 ∧
     s.mem.accessible (s.mem.readLE ((s.regs 28).toNat + gM) 8 + mLocks) 4 true = true ∧
     InRanges (s.mem.readLE ((s.regs 28).toNat + gM) 8 + mLocks) 4 rt ∧
+    Apart (s.regs 0).toNat 8 (s.mem.readLE ((s.regs 28).toNat + gM) 8 + mLocks) 4 ∧
     lo ≤ mLocksOf s.mem (s.regs 28).toNat ∧ mLocksOf s.mem (s.regs 28).toNat + 1 < 2 ^ 31
 
 /-- **`runtime.lock2(l)`** (arm64; `X0 = l`), called by `printlock` on `runtime.debuglock` when
