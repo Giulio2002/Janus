@@ -390,20 +390,23 @@ def bitsWin (F : Frame) : List (Nat × Nat) :=
   | none => []
   | some (ba, _) => [(ba, ba + 1)]
 
-/-- What the loop needs of the frame's memory: the `deferBits` byte writable, below `2^48` and
-outside `P.priv`, the pending slots readable and apart from the `deferBits` byte (the runtime
-re-reads a slot after clearing the byte; the compiler gives them distinct stack slots), and every
-funcval apart from that byte; and of every call: its funcval readable, with an
-admissible code word (4-aligned, below `2^48`). -/
+/-- What the loop needs of the frame's memory: the `deferBits` byte writable, below `2^48`, outside
+`P.priv` and in the frame (at or above its `SP`: the runtime's own stack window is below), the
+pending slots readable and apart from the `deferBits` byte (the runtime re-reads a slot after
+clearing the byte; the compiler gives them distinct stack slots), in the frame and outside
+`P.priv`, and every funcval apart from that byte; and of every call: its funcval readable, with an
+admissible code word (4-aligned, below `2^48`), outside `P.priv` and outside the runtime's stack
+window below the frame (a funcval is a global, a heap closure or a closure in the frame). -/
 def FrameOK (P : PanicRuntime) (m : Memory) (F : Frame) (items : List Item) : Prop :=
   (match F.openAt with
     | none => True
-    | some (ba, sa) => ba + 1 ≤ 2 ^ 48 ∧ m.accessible ba 1 true = true ∧ Outside ba 1 P.priv ∧
+    | some (ba, sa) => ba + 1 ≤ 2 ^ 48 ∧ m.accessible ba 1 true = true ∧ Outside ba 1 P.priv ∧ F.sp ≤ ba ∧
         (∀ i ∈ openBits (m.readLE ba 1), sa + 8 * i + 8 ≤ 2 ^ 48 ∧ m.accessible (sa + 8 * i) 8 false = true ∧
-          (sa + 8 * i + 8 ≤ ba ∨ ba + 1 ≤ sa + 8 * i)) ∧
+          (sa + 8 * i + 8 ≤ ba ∨ ba + 1 ≤ sa + 8 * i) ∧ F.sp ≤ sa + 8 * i ∧ Outside (sa + 8 * i) 8 P.priv) ∧
         ∀ it ∈ items, it.fn + 8 ≤ ba ∨ ba + 1 ≤ it.fn) ∧
   ∀ it ∈ items, it.fn + 8 ≤ 2 ^ 48 ∧ m.accessible it.fn 8 false = true ∧
-    m.readLE it.fn 8 % 4 = 0 ∧ m.readLE it.fn 8 < 2 ^ 48
+    m.readLE it.fn 8 % 4 = 0 ∧ m.readLE it.fn 8 < 2 ^ 48 ∧ Outside it.fn 8 P.priv ∧
+    (it.fn + 8 ≤ F.sp - P.depth ∨ F.sp ≤ it.fn)
 
 /-- A deferred call as the runtime makes it (arm64): control at the funcval's code word with the
 closure context `X26` = the funcval, the goroutine `X28` and platform register `X18` of the
