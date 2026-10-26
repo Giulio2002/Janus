@@ -158,13 +158,13 @@ theorem argmin_loop (impl : List Amd64.Segment) (lt : BitVec 64 → BitVec 64 �
         at hcr1 hpc1 hpo hmf1
       obtain ⟨c1sp, c1bx, c1bp, c112, c113, c114, c115, c1df, c1mx, c1cw⟩ := hcr1
       have hb1 : best lt (word s.mem a.toNat) (i - 1) < n.toNat := by omega
-      have hw0 : ∀ j, j < n.toNat → (Janus.Arm64.Memory.writeLE S.mem ((s.regs 4).toNat - 48) 8 4858923).readLE
+      have hw0 : ∀ j, j < n.toNat → (Janus.Arm64.Memory.writeLE S.mem ((s.regs 4).toNat - 48) 8 (janus_eval% (argminE + 0x3b))).readLE
           (a.toNat + 8 * j) 8 = s.mem.readLE (a.toNat + 8 * j) 8 := fun j hj => by
         rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint, hm.readLE _ _ (by simp; omega)]
         omega
       rw [hw0 i (by omega), hw0 _ hb1] at hpo
       janus64_run [m1, m2, m3, m4, m5]
-      have hwf : MemFrame S.mem (Janus.Arm64.Memory.writeLE S.mem ((s.regs 4).toNat - 48) 8 4858923)
+      have hwf : MemFrame S.mem (Janus.Arm64.Memory.writeLE S.mem ((s.regs 4).toNat - 48) 8 (janus_eval% (argminE + 0x3b)))
           [((s.regs 4).toNat - 48, (s.regs 4).toNat - 48 + 8)] :=
         Janus.Contracts.Libc.memFrame_of_bytes rfl fun _ h => Janus.Arm64.Memory.bytes_writeLE_outside _ (by omega)
       refine ⟨⟨rfl, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_⟩
@@ -217,13 +217,13 @@ theorem argmin_loop (impl : List Amd64.Segment) (lt : BitVec 64 → BitVec 64 �
         at hcr1 hpc1 hpo hmf1
       obtain ⟨c1sp, c1bx, c1bp, c112, c113, c114, c115, c1df, c1mx, c1cw⟩ := hcr1
       have hb1 : best lt (word s.mem a.toNat) (i - 1) < n.toNat := by omega
-      have hw0 : ∀ j, j < n.toNat → (Janus.Arm64.Memory.writeLE S.mem ((s.regs 4).toNat - 48) 8 4858923).readLE
+      have hw0 : ∀ j, j < n.toNat → (Janus.Arm64.Memory.writeLE S.mem ((s.regs 4).toNat - 48) 8 (janus_eval% (argminE + 0x3b))).readLE
           (a.toNat + 8 * j) 8 = s.mem.readLE (a.toNat + 8 * j) 8 := fun j hj => by
         rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint, hm.readLE _ _ (by simp; omega)]
         omega
       rw [hw0 i (by omega), hw0 _ hb1] at hpo
       janus64_run [m1, m2, m3, m4, m5] until [janus_eval% head]
-      have hwf : MemFrame S.mem (Janus.Arm64.Memory.writeLE S.mem ((s.regs 4).toNat - 48) 8 4858923)
+      have hwf : MemFrame S.mem (Janus.Arm64.Memory.writeLE S.mem ((s.regs 4).toNat - 48) 8 (janus_eval% (argminE + 0x3b)))
           [((s.regs 4).toNat - 48, (s.regs 4).toNat - 48 + 8)] :=
         Janus.Contracts.Libc.memFrame_of_bytes rfl fun _ h => Janus.Arm64.Memory.bytes_writeLE_outside _ (by omega)
       have hF := memFrame_widen (rs' := [((s.regs 4).toNat - (48 + K), (s.regs 4).toNat)])

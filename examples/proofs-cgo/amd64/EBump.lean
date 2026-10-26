@@ -54,14 +54,14 @@ theorem correctness (x : BitVec 64) :
   simp only [Disjoint, BitVec.toNat_ofNat, Nat.reduceMod] at hdj
   janus64_data hd []
   janus64_run
-  have hr := Janus.Arm64.Memory.readLE_lt s.mem 5798136 8
-  have hmul : (BitVec.ofNat 64 (Janus.Arm64.Memory.readLE s.mem 5798136 8) * x).toNat =
-      x.toNat * Janus.Arm64.Memory.readLE s.mem 5798136 8 % 2 ^ 64 := by
-    rw [BitVec.toNat_mul, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (a := Janus.Arm64.Memory.readLE s.mem 5798136 8)
+  have hr := Janus.Arm64.Memory.readLE_lt s.mem (janus_eval% scale) 8
+  have hmul : (BitVec.ofNat 64 (Janus.Arm64.Memory.readLE s.mem (janus_eval% scale) 8) * x).toNat =
+      x.toNat * Janus.Arm64.Memory.readLE s.mem (janus_eval% scale) 8 % 2 ^ 64 := by
+    rw [BitVec.toNat_mul, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (a := Janus.Arm64.Memory.readLE s.mem (janus_eval% scale) 8)
       (by simpa using hr), Nat.mul_comm]
   simp only [bumped, e1, e2, hmul]
   refine ⟨?_, writeLE8_congr _ _ ?_⟩ <;>
-  · generalize x.toNat * Janus.Arm64.Memory.readLE s.mem 5798136 8 = t
+  · generalize x.toNat * Janus.Arm64.Memory.readLE s.mem (janus_eval% scale) 8 = t
     omega
 
 end Proof
