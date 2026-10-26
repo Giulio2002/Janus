@@ -934,6 +934,96 @@ theorem step_rp (hp : EngineAt p) {u : State} (hI : Inv0 T m0 F items0 ds0 mode 
     (fun it hit => by rw [hm] at hit; exact hI.its it hit)
   exact this
 
+/-- The panic chain's top entry is not recovered or a goexit (what the loop needs of `ch` in panic mode). -/
+def PanOK (mode : DeferMode) (ch : List PanicRec) : Prop :=
+  mode = .panic → ∃ r rs, ch = r :: rs ∧ r.recovered = false ∧ r.goexit = false
+
+theorem ofNat_toNat_self (x : W64) : BitVec.ofNat 64 x.toNat = x := by simp
+
+/-- A deferred call, and everything after it: the model engine's loop reaches the call, and for every
+way the call may end the loop goes on (or recovers). -/
+theorem engine_call (hp : EngineAt p)
+    {Fin : List PanicRec → Nat → State → State → Prop}
+    (hFin : ∀ (ch : List PanicRec) (rm : Nat) (c c' d : State),
+      MemFrame c.mem c'.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F) → Fin ch rm c' d → Fin ch rm c d)
+    (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph) (hpm : PanOK mode ch)
+    {it : Item} {rest : List Item} {e : State}
+    (cs : CallSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph it rest e)
+    (IH : ∀ (c' : State) (ch' : List PanicRec) (rm' ph' : Nat), c'.pc = BitVec.ofNat 64 eLH → c'.regs 18 = x18 →
+      Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c' ch' rm' ph' → PanOK mode ch' → curItems c'.mem F ph' = rest →
+      Engine p (P0 T RPa) U0 x28 x18 F (frameKeep m0 F items0) mode Fin ch' rm' rest c') :
+    Engine p (P0 T RPa) U0 x28 x18 F (frameKeep m0 F items0) mode Fin ch rm (it :: rest) c := by
+  rw [Engine_cons]
+  obtain ⟨k, hk⟩ := cs.steps
+  have hRP : ∀ e' : State, e'.pc = e.regs 30 → e'.pc = BitVec.ofNat 64 RPa := fun e' h => by rw [h, cs.r30]
+  refine ⟨k, e, hk, cs.call, cs.mf, cs.bits, cs.chain, cs.inv.pan, cs.inv.room, ?_, ?_, ?_⟩
+  · -- the return point and the saved state
+    split
+    · rename_i hret
+      refine ⟨rfl, (saved0_none_iff _).2 (cs.inv.sv hret)⟩
+    · refine ⟨?_, cs.sv⟩
+      show RPa = (e.regs 30).toNat
+      rw [cs.r30]; simp only [RPa, E, BitVec.toNat_ofNat]
+  · -- the call returned
+    intro e' hdr
+    have hroomE : room0 e.mem ≤ room0 e'.mem := hdr.2.2.2.2.2.2.2.2
+    refine ⟨fun hpan' => ?_, fun hmode r rs hch hq _ => ?_⟩
+    · obtain ⟨hI', hci⟩ := cs.inv.ret hdr ch rm hpan' (Nat.le_trans cs.inv.room hroomE)
+      obtain ⟨k', c', hk', hpc', hmem', hr18', hI''⟩ := step_rp hp hI' (hRP e' hdr.1)
+        (by cases hmode : mode with
+            | panic => right; obtain ⟨r, rs, h1, h2, -⟩ := hpm hmode; exact ⟨r, rs, h1, h2⟩
+            | goexit => left; simp
+            | ret => left; simp)
+      have hnx := IH c' ch rm ph hpc' hr18' hI'' hpm (by rw [hmem', hci]; exact cs.cur)
+      refine Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' e' c' d (by rw [hmem']; exact MemFrame.refl _ _) hf)
+        hk' (by rw [hmem']; exact MemFrame.refl _ _) (by rw [hmem']) rfl hnx
+    · subst hmode
+      have hq' : panics0 e'.mem = { r with recovered := true } :: rs := hq
+      obtain ⟨hI', hci⟩ := cs.inv.ret hdr _ rm hq' (Nat.le_trans cs.inv.room hroomE)
+      obtain ⟨kk, hk1, hk8, hrr, -⟩ := panics0_cons hI'.env hq'
+      have hflag : rd e'.mem (panAt kk + 24) / 2 % 2 = 1 := by
+        have h := congrArg PanicRec.recovered hrr
+        rw [decPan_recovered] at h
+        simpa using h.symm
+      obtain ⟨k', d, hk', hpcd, hsp', hr29, hr28, hr18d, hmf, henvd, hpand, hdefd, hroomd, hsvd⟩ :=
+        step_recover hp hI' (hRP e' hdr.1) hk1 hk8 hflag
+      refine ⟨k', d, hk', hpcd, hsp', hr29, hr28, hr18d, hmf, henvd, hpand, hdefd, ?_, hroomd⟩
+      show saved0 d.mem = _
+      rcases cs.recov with ⟨hb, hph0⟩ | ⟨b, ba, sa, hb, hF, hphne, hrdb⟩
+      · have : it.bits.getD 0 = 0 := by rw [hb]; rfl
+        rw [if_pos this]
+        rcases hsvd with ⟨⟨hph, -⟩, -⟩ | ⟨-, h⟩
+        · exact absurd hph0 hph
+        · exact h
+      · have hbyte : e'.mem.readLE ba 1 = b := by
+          have := hdr.2.2.2.2.1.readLE (inRanges_tail (by rw [frameKeep_eq]; exact inRanges_bits hF (keepCore m0 F items0)))
+          rw [this]; exact hrdb
+        by_cases hb0 : b = 0
+        · have hg : it.bits.getD 0 = 0 := by rw [hb]; simpa using hb0
+          rw [if_pos hg]
+          rcases hsvd with ⟨⟨-, ba', sa', hF', hne⟩, -⟩ | ⟨-, h⟩
+          · rw [hF] at hF'; simp only [Option.some.injEq, Prod.mk.injEq] at hF'
+            obtain ⟨rfl, rfl⟩ := hF'; exact absurd (hbyte.trans hb0) hne
+          · exact h
+        · have hg : ¬ it.bits.getD 0 = 0 := by rw [hb]; simpa using hb0
+          rw [if_neg hg]
+          rcases hsvd with ⟨-, h⟩ | ⟨hn, -⟩
+          · exact h
+          · exact absurd ⟨hphne, ba, sa, hF, by rw [hbyte]; exact hb0⟩ hn
+  · -- a nested panic
+    intro hmode u r2 hU hag henv hdef hsav hpan2 hgx hrc hstart hroom
+    subst hmode
+    obtain ⟨hUpc, hUsp, hU28⟩ := hU
+    have hesp : e.sp.toNat < 2 ^ 64 := e.sp.isLt
+    have hroom' : rm ≤ room0 u.mem + 1 := hroom
+    obtain ⟨hI', hci⟩ := cs.inv.ret' (e' := u) (by rw [hUsp]; simp) (by rw [hU28]; simp) hag henv hdef hsav
+      (r2 :: ch) (rm - 1) hpan2 (by omega)
+    have hpm2 : PanOK .panic (r2 :: ch) := fun _ => ⟨r2, ch, rfl, hrc, hgx⟩
+    obtain ⟨k', c', hk', hpc', hmem', hr18', hI''⟩ := step_rp hp hI' hUpc (Or.inr ⟨r2, ch, rfl, hrc⟩)
+    have hnx := IH c' (r2 :: ch) (rm - 1) ph hpc' hr18' hI'' hpm2 (by rw [hmem', hci]; exact cs.cur)
+    exact Engine.of_prefix (fun ch' rm' d hf => hFin ch' rm' u c' d (by rw [hmem']; exact MemFrame.refl _ _) hf)
+      hk' (by rw [hmem']; exact MemFrame.refl _ _) (by rw [hmem']) rfl hnx
+
 end steps
 
 
