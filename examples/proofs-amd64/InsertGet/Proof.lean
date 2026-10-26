@@ -50,7 +50,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
   · simp only [setRegF]; simp only [reduceIte, Nat.reduceEqDiff]
     exact hl.rep_frame _ _ _ _ hmap (Agrees.of_window (lo := (s.regs 4).toNat - (M.depth + 40))
       (hi := (s.regs 4).toNat + 32) (by janus_frame) (Outside.of_sub hout (by omega) (by omega)))
-  · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hoth, hw, hin, hset⟩
+  · intro s' hpc' ⟨r, x, y, fl, m', _, _, hs', hfr, henv', hoth, hw, hin, hset⟩
     subst hs'
     simp only [rtWrites, calleeStack, List.append_nil, setRegF, reduceIte, Nat.reduceEqDiff, hsp40] at hfr
     simp only [setRegF, reduceIte, Nat.reduceEqDiff] at hset
@@ -75,7 +75,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (M : MapModel (BitVec 64) 
        by simpa [setRegF] using hty, ?_⟩ ?_
     · simp only [setRegF, keepABI_apply]; simp only [reduceIte, Nat.reduceEqDiff]
       exact (isMap_of_ne hm0).2 (by rw [hl.rep_writeLE _ _ _ ho40]; exact (hset v).1)
-    · intro s'' hpc'' ⟨r2, x2, y2, fl2, m'', hs'', hfr2, henv2, hoth2, hmap2, ⟨hs1, hs2, hs3⟩⟩
+    · intro s'' hpc'' ⟨r2, x2, y2, fl2, m'', _, _, hs'', hfr2, henv2, hoth2, hmap2, ⟨hs1, hs2, hs3⟩⟩
       subst hs''
       simp only [rtWrites, calleeStack, List.append_nil, setRegF, keepABI_apply, reduceIte,
         Nat.reduceEqDiff, hsp40] at hfr2

@@ -48,7 +48,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.L
     (RTPre.of_caller hl hc (by janus_frame) (by simp [setRegF, hsp24]) (by simp [setRegF])
       (by simpa using hs.zero) (by simpa using hs.df)
       (by simp [setRegF, hsp24, Arm64.Memory.readLE_writeLE_self]) (by decide) (by decide)) ?_
-  intro s' hpc' ⟨r, x', y, fl, m', hs', hfr, henv', hbox⟩
+  intro s' hpc' ⟨r, x', y, fl, m', _, _, hs', hfr, henv', hbox⟩
   subst hs'
   simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, List.append_nil, setRegF,
     reduceIte, Nat.reduceEqDiff, hsp24] at hfr

@@ -57,7 +57,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.L
         (by simp [setRegF, hsp40, Arm64.Memory.readLE_writeLE_self]) (by decide) (by decide), ?_⟩ ?_
     · simp only [setRegF, reduceIte, Nat.reduceEqDiff, h_a0, h_a1, h_a3]
       exact EqFrame.eqOK hok2 hok1 (by simp only [window]; janus_frame)
-    · intro s' hpc' ⟨r, x, y, fl, m', hs', hfr, henv', hres⟩
+    · intro s' hpc' ⟨r, x, y, fl, m', _, _, hs', hfr, henv', hres⟩
       subst hs'
       simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, List.append_nil,
         setRegF, reduceIte, Nat.reduceEqDiff, hsp40] at hfr

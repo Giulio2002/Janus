@@ -119,7 +119,7 @@ theorem miss (impl : List Janus.Amd64.Segment) (R : IfaceModel) (hl : R.Laws)
   · simp only [setRegF, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, h0, ← hD]
     intro _; refine ⟨hty, Or.inl ?_⟩
     exact (taCanFail_frame (m := s.mem) (by janus_frame) hdo'').trans hcf
-  · intro s' hpc' ⟨r, x', y, fl, m', hs', hfr, henv', hres, hdesc2, hinter2, hcf2⟩
+  · intro s' hpc' ⟨r, x', y, fl, m', _, _, hs', hfr, henv', hres, hdesc2, hinter2, hcf2⟩
     subst hs'
     simp only [Contracts.IfaceAmd64.rtWrites, Contracts.MapAmd64.calleeStack, setRegF, reduceIte,
       Nat.reduceEqDiff, BitVec.toNat_ofNat, hd64, h0, hsp40, hsp40', ← hD] at hfr hres hdesc2 hinter2 hcf2
