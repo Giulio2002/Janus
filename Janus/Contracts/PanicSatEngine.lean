@@ -534,6 +534,87 @@ theorem step_rec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr 
       have := hI.its it' (by rw [hcur0]; exact List.mem_cons_of_mem _ hit')
       exact this
 
+/-- A silent step of the loop (`TOREC`, `POPREC`): control returns to the loop head, nothing is called. -/
+structure SilentSt (p : Program) (T : List FuncInfo) (m0 : Memory) (F : Frame) (items0 : List Item)
+    (ds0 : List DeferRec) (mode : DeferMode) (x28 x18 : W64) (lr x29 : Nat) (c : State)
+    (ch : List PanicRec) (rm ph ph2 : Nat) (c2 : State) : Prop where
+  steps : ∃ k, Program.Steps p c k c2
+  pc : c2.pc = BitVec.ofNat 64 eLH
+  inv : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c2 ch rm ph2
+  cur : curItems c2.mem F ph2 = curItems c.mem F ph
+  mf : MemFrame c.mem c2.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F)
+  sv : saved0 c2.mem = saved0 c.mem
+  meas : (if ph2 = 0 then 0 else 1) * 9 + ndef c2.mem < (if ph = 0 then 0 else 1) * 9 + ndef c.mem
+
+theorem step_torec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph)
+    (hpc : c.pc = BitVec.ofNat 64 eLH) (hph : ph ≠ 0) {ba sa : Nat} (hF : F.openAt = some (ba, sa))
+    (hb : c.mem.readLE ba 1 = 0) :
+    ∃ c2, SilentSt p T m0 F items0 ds0 mode x28 x18 lr x29 c ch rm ph 0 c2 := by
+  obtain ⟨hal, hsp, hsp96⟩ := hI.spw
+  obtain ⟨b1, b2, b3, b4, b5⟩ := hI.ba_facts hF
+  have hs := hI.sp_eq
+  have hfm := hI.fm
+  obtain ⟨w40, w48⟩ := hfm.w40 ba sa hF
+  have hw32 := hfm.w32
+  rw [hs] at w40 w48 hw32
+  have hseg := seg_torec c ba hpc hal hsp hI.acc (by rw [hw32]; exact hph) w40 hb b1 b2
+  have hseg2 := reachesRet_mono hseg fun e he => he
+  obtain ⟨k1, e, hk1, hpe, hq⟩ := reachesRet_transfer hp hseg
+  obtain ⟨hemem, hesp, he28, he18⟩ := hq
+  have hback := seg_back e (Or.inl hpe)
+  obtain ⟨k2, c2, hk2, hpc2, hq2⟩ := reachesRet_transfer hp hback
+  obtain ⟨hmem2, hsp2, hregs2⟩ := hq2
+  have hl := P0_laws T RPa
+  have hnb : Outside (c.sp.toNat + 32) 8 [(B, B + 0x1000)] := by
+    simp only [outside_cons, outside_nil, and_true]; have := hI.spB; omega
+  have hm2 : c2.mem = c.mem.writeLE (c.sp.toNat + 32) 8 0 := by rw [hmem2, hemem]
+  have hag : Agrees c.mem c2.mem [(B, B + 0x1000)] := by rw [hm2]; exact agrees_writeLE c.mem _ hnb
+  have hmf : MemFrame c.mem c2.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F ++ bitsWin F) := by
+    rw [hm2]
+    exact MemFrame.of_writeLE c.mem _ (r := (F.sp - 256, F.sp - 8))
+      (List.mem_append_left _ (List.mem_append_right _ (by simp [rtWin, P0_depth]))) (by omega) (by omega)
+  have hdef : defers0 c2.mem = defers0 c.mem := hl.defers_frame _ _ 0 hag
+  have hpan : panics0 c2.mem = ch := by rw [← hI.pan]; exact hl.panics_frame _ _ 0 hag
+  have hsv : saved0 c2.mem = saved0 c.mem := hl.saved_frame _ _ 0 hag
+  have hrm : room0 c2.mem = room0 c.mem := hl.room_frame _ _ 0 hag
+  have hcur : curItems c2.mem F 0 = curItems c.mem F ph := by
+    rw [curItems_zero, curItems_open_zero hph hF hb, hdef]
+  have hndef : ndef c2.mem = ndef c.mem := by
+    simp only [ndef]; rw [hm2]
+    exact rd_w (by have := hI.spB; simp only [B] at *; omega)
+  have hrdk : ∀ k, (k + 8 ≤ 32 ∨ 40 ≤ k) → c2.mem.readLE (F.sp - 96 + k) 8 = c.mem.readLE (F.sp - 96 + k) 8 := by
+    intro k hk; rw [hm2]; exact Memory.readLE_writeLE_of_disjoint _ _ (by omega)
+  refine ⟨c2, ⟨⟨k1 + k2, hk1.trans hk2⟩, hpc2, ?_, hcur, hmf, hsv, ?_⟩⟩
+  · refine hI.step 0 (by rw [hsp2, hesp]) (by rw [hregs2, he28]) (by rw [hregs2, he18]) hmf ?_
+      (by rw [hm2]; exact env0_of_outside hI.env hnb) hpan (by rw [hrm]; exact hI.room)
+      (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
+    · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, fun h => absurd rfl h⟩
+      · have := hrdk 0 (Or.inl (by omega)); simpa using this.trans hfm.w0
+      · exact (hrdk 8 (Or.inl (by omega))).trans hfm.w8
+      · exact (hrdk 16 (Or.inl (by omega))).trans hfm.w16
+      · exact (hrdk 24 (Or.inl (by omega))).trans hfm.w24
+      · show c2.mem.readLE (F.sp - 96 + 32) 8 = 0
+        rw [hm2, hs]; rw [Memory.readLE_writeLE_self]
+      · intro ba' sa' hF'
+        exact ⟨(hrdk 40 (Or.inr (by omega))).trans (hfm.w40 ba' sa' hF').1,
+          (hrdk 48 (Or.inr (by omega))).trans (hfm.w40 ba' sa' hF').2⟩
+      · exact (hrdk 56 (Or.inr (by omega))).trans hfm.w56
+      · intro hm
+        exact ⟨(hrdk 64 (Or.inr (by omega))).trans (hfm.w64 hm).1,
+          (hrdk 72 (Or.inr (by omega))).trans (hfm.w64 hm).2⟩
+    · have := hI.sv hm
+      have h2 := (saved0_none_iff _).2 this
+      rw [← hsv] at h2
+      exact (saved0_none_iff _).1 h2
+    · rw [hdef]; exact hI.chn
+    · have hbr : c2.mem.readLE ba' 1 = c.mem.readLE ba' 1 := by
+        rw [hm2]; exact Memory.readLE_writeLE_of_disjoint _ _ (by have := (hI.ba_facts hF').2.2.2.1; omega)
+      exact hI.bsub ba' sa' hF' i (by rw [← hbr]; exact hi)
+    · rw [hcur] at hit'; exact hI.its it' hit'
+  · rw [hndef]; by_cases h0 : ph = 0
+    · exact absurd h0 hph
+    · simp [h0]
+
 end steps
 
 
