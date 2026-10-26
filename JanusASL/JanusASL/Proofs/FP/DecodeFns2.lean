@@ -1,5 +1,6 @@
 import JanusASL.Proofs.FP.Conv
 import JanusASL.Proofs.FP.ConvInt
+import JanusASL.Proofs.FP.ExecFcvt
 import JanusASL.Proofs.FP.Agree
 
 /-! # The scalar integer to floating-point decode functions (SCVTF, UCVTF) -/
@@ -80,5 +81,19 @@ theorem run_dec_fcvtzu_1 (Rd Rn : BitVec 5) (sf : BitVec 1) (st : SState) :
   unfold decode_fcvtzu_float_int_aarch64_instrs_float_convert_int
   cfg_simp [undefined_FPConvOp, undefined_FPRounding, run_undefined_bool, run_internal_pick]
   by_cases hs : sf = 1#1 <;> simp [hs] <;> rfl
+
+theorem run_dec_fcvt_sd (Rd Rn : BitVec 5) (st : SState) :
+    (decode_fcvt_float_aarch64_instrs_float_convert_fp Rd Rn 1#2 0#2).run st =
+      (execute_aarch64_instrs_float_convert_fp Rd.toNat 64 Rn.toNat 32).run st := by
+  unfold decode_fcvt_float_aarch64_instrs_float_convert_fp
+  cfg_simp
+  all_goals rfl
+
+theorem run_dec_fcvt_ds (Rd Rn : BitVec 5) (st : SState) :
+    (decode_fcvt_float_aarch64_instrs_float_convert_fp Rd Rn 0#2 1#2).run st =
+      (execute_aarch64_instrs_float_convert_fp Rd.toNat 32 Rn.toNat 64).run st := by
+  unfold decode_fcvt_float_aarch64_instrs_float_convert_fp
+  cfg_simp
+  all_goals rfl
 
 end JanusASL.Proofs

@@ -143,4 +143,33 @@ theorem decodeFpCvtInt_ftoi {w : Nat} (hft : (w / 2 ^ 22) % 4 < 2) (hop : (w / 2
   unfold decodeFpCvtInt
   simp [e1, e2]
 
+
+theorem decodeFloat_fpDP1_cvt {w : Nat} (hw : w < 2 ^ 32) (htop : w / 2 ^ 24 = 0x1E) (hft : (w / 2 ^ 22) % 4 < 2)
+    (h21 : (w / 2 ^ 21) % 2 = 1) (h10 : (w / 2 ^ 10) % 32 = 16)
+    (hop : ((w / 2 ^ 15) % 64 = 4 ∧ (w / 2 ^ 22) % 4 = 1) ∨ ((w / 2 ^ 15) % 64 = 5 ∧ (w / 2 ^ 22) % 4 = 0)) :
+    decodeFloat w = some (.fpDP1 (bits w 23 22) (bits w 20 15) (bits w 9 5) (bits w 4 0)) := by
+  have e1 : ¬ bits w 23 22 ≥ 2 := by simp only [bits_def]; omega
+  have e2 : (w &&& 0xFF000000 = 0x1F000000) = False := by
+    apply propext; constructor
+    · intro h; have := and_top_byte h; rw [htop] at this; exact absurd this (by decide)
+    · intro h; exact h.elim
+  have e3 := mask_FF200000 hw htop h21
+  have e4 : bits w 11 10 = 0 := by simp only [bits_def]; omega
+  have e5 : bits w 14 10 = 0b10000 := by simp only [bits_def]; omega
+  have e6 : (decide (bits w 20 15 ≤ 3) || ((decide (bits w 20 15 = 4) || decide (bits w 20 15 = 5)) &&
+      decide (bits w 20 15 - 4 ≠ bits w 23 22)) || (decide (8 ≤ bits w 20 15) && decide (bits w 20 15 ≤ 15) &&
+      decide (bits w 20 15 ≠ 13))) = true := by
+    simp only [bits_def]
+    rcases hop with ⟨a, b⟩ | ⟨a, b⟩
+    · have : (w / 2 ^ 15) % 2 ^ (20 + 1 - 15) = 4 := by simpa using a
+      have hb : (w / 2 ^ 22) % 2 ^ (23 + 1 - 22) = 1 := by simpa using b
+      simp [this, hb]
+    · have : (w / 2 ^ 15) % 2 ^ (20 + 1 - 15) = 5 := by simpa using a
+      have hb : (w / 2 ^ 22) % 2 ^ (23 + 1 - 22) = 0 := by simpa using b
+      simp [this, hb]
+  unfold decodeFloat
+  simp only [e1, ite_false, e2, e3, ite_true, e4, e5]
+  simp only [e6]
+  simp
+
 end JanusASL.Proofs
