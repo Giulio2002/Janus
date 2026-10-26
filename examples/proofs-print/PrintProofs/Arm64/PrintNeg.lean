@@ -141,7 +141,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : N
 /-- So the guarantee is reached: from the witness state, for every kernel, `print(-17)` returns
 and the trace gains what `write(2, "-17")` may append. -/
 theorem returns (E : KEnv) (k : Kern) :
-    ReturnsK ((P.link implAt).withExit ret) E
+    ReturnsK ((Extracted.program.link implAt).withExit ret) E
       (fun s' k' => FFI.ABIReturnC (wstate fun _ => 0) s' ∧
         ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.ofString "-17"] es)
       (fun _ _ => False) (wstate fun _ => 0) k := by
