@@ -36,6 +36,8 @@ import JanusASL.Proofs.FP.Exec
 import JanusASL.Proofs.FP.Unpack2
 import JanusASL.Proofs.FP.Div
 import JanusASL.Proofs.FP.AgreeArith
+import JanusASL.Proofs.FP.AgreeCcmp
+import JanusASL.Proofs.FPDecodeB
 import JanusASL.Proofs.FP.Sqrt
 import JanusASL.Proofs.FP.Exec2
 import JanusASL.Proofs.FPDecodeA
