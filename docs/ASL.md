@@ -38,7 +38,7 @@ about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
 | `janus-asl-check` | **566,027 agree, 17,729 gap, 0 MISMATCH** (slice with the scalar floating-point, crypto, CRC and permute decoders, vendored sha256 `cd26b412…`; FPCR/FPSR set from the case and FPSR compared after the step); `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 1 h with 12 tasks |
 | `janus-asl-check`, slice round 2 | **927,078 agree, 38,443 gap, 0 MISMATCH** on 965,521 cases of the corpus of agent/asl + agent/stxr (96833af, with main 4a75ac7) + agent/syscall + agent/neonfix (Advanced SIMD, exclusives, SVC/BRK/UDF, MRS/MSR of NZCV/FPSR/FPCR/DIT and the environment registers); vendored sha256 `fd9e1885…`; `LinuxEL0Config`/`FPConfig` and `UserMapped` hold on every case; 2 h 15 min with 12 tasks |
-| proofs | **64 audited theorems** (an explicit list in JanusASL/Audit.lean; audit/rt-asl/AuditStrict.lean prints the statements of 61 of them, plus `JanusASL.Verify.classify_sound`): the encoding-class `*_agree` theorems, the 4 FP rounding theorems (`rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64`), `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
+| proofs | **81 audited theorems** (an explicit list in JanusASL/Audit.lean; audit/rt-asl/AuditStrict.lean prints the statements of 78 of them, plus `JanusASL.Verify.classify_sound`): the encoding-class `*_agree` theorems, the 4 FP rounding theorems (`rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64`), the 16 scalar floating-point encoding-class theorems (`fcmp_agree`, `fadd_agree`, `fsub_agree`, `fmul_agree`, `fdiv_agree`, `fmadd_agree`, `fmsub_agree`, `fnmadd_agree`, `fnmsub_agree`, `fsqrt_agree`, `fccmp_agree`, `scvtf_agree`, `ucvtf_agree`, `fcvtzs_agree`, `fcvtzu_agree`, `fcvt_agree`), `run_agree_fp`, `fpClassify_sound`, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
 | `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
 
 Agreement by corpus class (`agree` / `gap`):
@@ -127,7 +127,14 @@ retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to
 | CAS, CASP, PRFM | | tested | |
 | FCMP, FCMPE (S and D, register and `#0.0`) | all valid | **proved**⁴ | `fcmp_agree` (FP/FCmpCls) |
 | FPRoundBase (binary32, binary64; every rounding mode but ties-away, FZ/AH/UFE, overflow, underflow, inexact; traps of raised exceptions disabled) | all non-zero values | **proved**⁴ | `rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64` (FP/RoundBase, FP/RoundEq, FP/Round64): the generated `FPRoundBase__1` returns Janus' `fpRound` encoding and ORs its raised and directly set bits into FPSR |
-| the other scalar FP instructions, AdvSIMD, AES, SHA, CRC, PMULL, permutes, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
+| FADD, FSUB, FMUL, FDIV (S and D) | all valid | **proved**⁴ | `fadd_agree`, `fsub_agree`, `fmul_agree`, `fdiv_agree` (FP/AgreeArith) |
+| FMADD, FMSUB, FNMADD, FNMSUB (S and D) | all valid | **proved**⁴ | `fmadd_agree`, `fmsub_agree`, `fnmadd_agree`, `fnmsub_agree` (FP/AgreeArith) |
+| FSQRT (S and D) | all valid | **proved**⁴ | `fsqrt_agree` (FP/AgreeArith; FP/Sqrt, FP/SqrtSide) |
+| FCCMP, FCCMPE (S and D) | all valid | **proved**⁴ | `fccmp_agree` (FP/AgreeCcmp) |
+| SCVTF, UCVTF (W or X to S or D, rounding from FPCR) | all valid | **proved**⁴ | `scvtf_agree`, `ucvtf_agree` (FP/AgreeConv) |
+| FCVTZS, FCVTZU (S or D to W or X) | all valid | **proved**⁴ | `fcvtzs_agree`, `fcvtzu_agree` (FP/AgreeFcvtz) |
+| FCVT (S to D, D to S) | all valid | **proved**⁴ | `fcvt_agree` (FP/AgreeFcvt) |
+| the other scalar FP instructions (FMAX/FMIN/FMAXNM/FMINNM/FNMUL, FABS, FNEG, FMOV, FRINT*, FCSEL, other FCVT rounding modes, conversions to and from fixed point, half precision), AdvSIMD, AES, SHA, CRC, PMULL, permutes, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
 
 "All valid" means all words of the group that Janus decodes. The theorems carry the decode
 conditions as hypotheses, for example `shift ≠ 11` and `imm6 < 32` when `sf = 0`. In those
@@ -281,6 +288,15 @@ starting state, the ASL run matches the Janus run. If `p.run fuel js = .ok (.ret
 then `aslRun p fuel s = .returned s'` with `Rel js' s'` and `LinuxEL0Config s'`. If
 `.ok (.stub name kind js')`, then `aslRun` ends at the same stub, related. PC tracking through
 branches is part of `Rel`.
+
+**`run_agree_fp`** (FP/Run.lean) is `run_agree` for the scalar floating-point classes. `FPStepOK w` is
+`StepOK w` with `FPRel` and `FPConfig` carried: from states related under `Rel`, `FPRel`,
+`LinuxEL0Config` and `FPConfig`, whenever Janus steps `w` to a state with an untagged PC, the ASL step
+completes with `Janus_OK` in states related the same way. Each floating-point class gives
+`fpStepOK_<class>` (the `*_agree` theorem of the class), `Classify.fpClassify` names the class of a
+word (the hypotheses of the `fpStepOK_<class>` theorem, verbatim) and `Verify.fpClassify_sound` turns
+`fpClassify w = some c` into `FPStepOK w`. A program all of whose words are `FPStepOK` and untagged
+runs the same way on both sides, with the four relations holding at the end or at a stub.
 
 Not covered: `.error _` outcomes, that is faults and out of fuel. There Janus is conservative
 and the ASL may continue.

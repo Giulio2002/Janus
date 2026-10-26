@@ -41,6 +41,9 @@ def expected : List Name := [
   ``JanusASL.Proofs.ldumax_agree, ``JanusASL.Proofs.ldumin_agree, ``JanusASL.Proofs.swp_agree,
   -- scalar floating point (FPRel, FPConfig)
   ``JanusASL.Proofs.fcmp_agree,
+  -- scalar floating-point arithmetic, compares and conversions (single and double precision)
+  ``JanusASL.Proofs.fadd_agree, ``JanusASL.Proofs.fsub_agree, ``JanusASL.Proofs.fmul_agree, ``JanusASL.Proofs.fdiv_agree, ``JanusASL.Proofs.fmadd_agree, ``JanusASL.Proofs.fmsub_agree, ``JanusASL.Proofs.fnmadd_agree, ``JanusASL.Proofs.fnmsub_agree, ``JanusASL.Proofs.fsqrt_agree, ``JanusASL.Proofs.fccmp_agree, ``JanusASL.Proofs.scvtf_agree, ``JanusASL.Proofs.ucvtf_agree, ``JanusASL.Proofs.fcvtzs_agree, ``JanusASL.Proofs.fcvtzu_agree, ``JanusASL.Proofs.fcvt_agree,
+  ``JanusASL.Proofs.run_agree_fp, ``JanusASL.Verify.fpClassify_sound,
   -- FPRoundBase (binary32/binary64) against Janus' fpRound
   ``JanusASL.Proofs.rb32Of_eq, ``JanusASL.Proofs.rb64Of_eq, ``JanusASL.Proofs.run_FPRoundBase32,
   ``JanusASL.Proofs.run_FPRoundBase64,
