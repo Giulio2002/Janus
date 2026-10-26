@@ -599,7 +599,7 @@ def MallocgcTinySizeLiveContract (n : Nat) (p : Program) (addr : Nat)
     (fun s s' => LiveAllocRet R stack 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s)
       s s' fun m ptr => mallocgcObj R.rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L)
 
-theorem MallocgcLiveContract.smallNoScanSC {n : Nat} {p : Program} {addr : Nat} {rt : List (Nat × Nat)}
+theorem MallocgcLiveContract.smallNoScanSC {n : Nat} {p : Program} {addr : Nat}
     {stack : Nat} {R : RtInv} (h : MallocgcLiveContract p addr stack R) :
     MallocgcSmallNoScanSCLiveContract n p addr stack R := fun L b =>
   Summary.mono (h.pos L b) (fun _ h => ⟨h.1, by have := h.2.1; omega⟩) fun _ _ _ h => h
@@ -609,7 +609,7 @@ theorem MallocgcLiveContract.smallScanNoHeaderSC {n : Nat} {p : Program} {addr :
     MallocgcSmallScanNoHeaderSCLiveContract n p addr stack R := fun L b =>
   Summary.mono (h.pos L b) (fun _ h => ⟨h.1, h.2.1⟩) fun _ _ _ h => h
 
-theorem MallocgcLiveContract.tinySize {n : Nat} {p : Program} {addr : Nat} {rt : List (Nat × Nat)}
+theorem MallocgcLiveContract.tinySize {n : Nat} {p : Program} {addr : Nat}
     {stack : Nat} {R : RtInv} (h : MallocgcLiveContract p addr stack R) :
     MallocgcTinySizeLiveContract n p addr stack R := fun L b =>
   Summary.mono (h.pos L b) (fun _ h => ⟨h.1, by obtain ⟨h0, -, hs, -⟩ := h.2; omega⟩) fun _ _ _ h => h

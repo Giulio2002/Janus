@@ -28,40 +28,40 @@ def bumpFinal (s : State) (K : Nat) : State :=
       (BitVec.ofNat 64 (s.mem.readLE BUMP 8) + BitVec.ofNat 64 K),
     pc := s.regs 30, mem := s.mem.writeLE BUMP 8 (s.mem.readLE BUMP 8 + K) }
 
-theorem bumpFinal_ret (s : State) (K : Nat) (p : Nat) (hp : s.mem.readLE BUMP 8 = p) :
-    bumpFinal s K = retStateX s (bumpFinal s K).regs [BitVec.ofNat 64 p] s.flags s.vregs
-      (s.mem.writeLE BUMP 8 (p + K)) s.excl s.exclPass := by
+theorem bumpFinal_ret (s : State) (A : Nat) (p : Nat) (hp : s.mem.readLE BUMP 8 = p) :
+    bumpFinal s A = retStateX s (bumpFinal s A).regs [BitVec.ofNat 64 p] s.flags s.vregs
+      (s.mem.writeLE BUMP 8 (p + A)) s.excl s.exclPass := by
   subst hp
-  have : (bumpFinal s K).regs = setReg (setReg (setReg s.regs 0 (BitVec.ofNat 64 (s.mem.readLE BUMP 8))) 9
-      (BitVec.ofNat 64 BUMP)) 10 (BitVec.ofNat 64 (s.mem.readLE BUMP 8) + BitVec.ofNat 64 K) := rfl
+  have : (bumpFinal s A).regs = setReg (setReg (setReg s.regs 0 (BitVec.ofNat 64 (s.mem.readLE BUMP 8))) 9
+      (BitVec.ofNat 64 BUMP)) 10 (BitVec.ofNat 64 (s.mem.readLE BUMP 8) + BitVec.ofNat 64 A) := rfl
   rw [this]
   simp only [retStateX]; rw [callRegs_bump]; rfl
 
 /-- What every bump-allocating contract returns: from the invariant. `fin` is the state the
 code returns in (`hfin`: `retStateX` with results `res ptr`). -/
-theorem bump_ret {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {K stack nargs cost round b : Nat}
-    {L : List (Nat × Nat)} {s : State} (hK : K % 16 = 0) (hc : cost = K) (hr : round = K) (hb : K ≤ b)
+theorem bump_ret {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {K A stack nargs cost round b : Nat}
+    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K) (hc : cost = K) (hr : round = K) (hb : K ≤ b)
     (hinv : (toyR tys ok).inv b L (s.regs 28).toNat (view (toyR tys ok).rt L s.mem))
     (hWs : LiveSep (calleeStack s stack nargs) (toyR tys ok).rt)
     (res : W64 → List W64) (fin : State)
     (hfin : ∀ p, s.mem.readLE BUMP 8 = p → fin = retStateX s fin.regs (res (BitVec.ofNat 64 p)) s.flags s.vregs
-      (s.mem.writeLE BUMP 8 (p + K)) s.excl s.exclPass)
+      (s.mem.writeLE BUMP 8 (p + A)) s.excl s.exclPass)
     {Q : Memory → Nat → Prop}
     (hQ : ∀ p, HEAP ≤ p → p % 16 = 0 → p + K ≤ HEND →
-      ZeroBytes (s.mem.writeLE BUMP 8 (p + K)) p K →
-      (s.mem.writeLE BUMP 8 (p + K)).accessible p K true = true → ApartAll p K L →
-      Q (s.mem.writeLE BUMP 8 (p + K)) p) :
+      ZeroBytes (s.mem.writeLE BUMP 8 (p + A)) p K →
+      (s.mem.writeLE BUMP 8 (p + A)).accessible p K true = true → ApartAll p K L →
+      Q (s.mem.writeLE BUMP 8 (p + A)) p) :
     LiveAllocRet (toyR tys ok) stack nargs res L b cost round s fin Q := by
   rw [hc, hr]
   have hinvT : toyInv tys b L (s.regs 28).toNat (view (toyRt tys) L s.mem) := hinv
-  obtain ⟨p, hpm, h1, h2, hend, hfr, hlf, hap, hz, hacc, hinv'⟩ := toy_alloc hty hK hb hinvT
+  obtain ⟨p, hpm, h1, h2, hendA, hfr, hlf, hap, hz, hacc, hinv'⟩ := toy_alloc hty hA hKA hA2 hb hinvT
   have hp : (BitVec.ofNat 64 p).toNat = p := by
-    rw [BitVec.toNat_ofNat]; apply Nat.mod_eq_of_lt; simp only [HEND] at hend; omega
-  refine ⟨BitVec.ofNat 64 p, fin.regs, s.flags, s.vregs, s.mem.writeLE BUMP 8 (p + K), s.excl, s.exclPass,
+    rw [BitVec.toNat_ofNat]; apply Nat.mod_eq_of_lt; simp only [HEND] at hendA; omega
+  refine ⟨BitVec.ofNat 64 p, fin.regs, s.flags, s.vregs, s.mem.writeLE BUMP 8 (p + A), s.excl, s.exclPass,
     hfin p hpm, ?_, hlf, ?_, ?_, ?_⟩
   · exact hfr.mono fun a n h => by simp only [outside_append] at h ⊢; exact h.1
-  · simp only [hp]; exact hQ p h1 h2 hend hz hacc hap
-  · simp only [hp]; exact apart_win (inRanges_heap (by omega) hend) hWs
+  · simp only [hp]; exact hQ p h1 h2 (by omega) hz hacc hap
+  · simp only [hp]; exact apart_win (inRanges_heap (by omega) (by omega : p + K ≤ HEND)) hWs
   · simp only [hp]; exact hinv'
 
 /-- The bump pointer's cell is writable, from the invariant (for the run). -/
@@ -70,14 +70,14 @@ theorem bump_acc {tys : Tys} {ok : Nat → List Nat → Prop} {b : Nat} {L : Lis
   obtain ⟨p, -, -, -, -, -, -, -, h, -⟩ := h
   exact h
 
-theorem finish_newobject {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr K b : Nat}
-    {L : List (Nat × Nat)} {s : State} (hK : K % 16 = 0)
+theorem finish_newobject {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr K A b : Nat}
+    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K)
     (hok' : ∀ args, ok addr args → ∃ t ∈ tys, args = [t.1] ∧ blockSize t.2.1 (t.2.2 == 0) = K)
     (pre : NewobjectPre 4096 s ∧ StackRoom s 4096 1 ∧
       LiveAt (toyR tys ok) addr [(s.regs 0).toNat] L b (newobjectRound s) (s.regs 28).toNat s.mem
         (calleeStack s 4096 1)) :
     LiveAllocRet (toyR tys ok) 4096 1 (fun ptr => [ptr]) L b (newobjectRound s) (newobjectRound s) s
-      (bumpFinal s K) fun m ptr => 0 < typSize s.mem (s.regs 0).toNat →
+      (bumpFinal s A) fun m ptr => 0 < typSize s.mem (s.regs 0).toNat →
         newobjectObj (toyR tys ok).rt s m ptr ∧ ApartAll ptr (newobjectRound s) L := by
   obtain ⟨-, -, hok, hinv, hcost, hLs, hWs⟩ := pre
   obtain ⟨t, ht, hargs, hbs⟩ := hok' _ hok
@@ -87,7 +87,7 @@ theorem finish_newobject {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat �
   have hR : newobjectRound s = K := by
     simp only [newobjectRound, typSize, typNoscan, typPtrBytes, h0, hrd.1, hrd.2]; exact hbs
   rw [hR] at hcost ⊢
-  refine bump_ret hty hK rfl rfl hcost hinv hWs _ _ (fun p hp => bumpFinal_ret s K p hp) (fun p h1 h2 hend hz hacc hap _ => ⟨?_, hap⟩)
+  refine bump_ret hty hA hKA hA2 rfl rfl hcost hinv hWs _ _ (fun p hp => bumpFinal_ret s A p hp) (fun p h1 h2 hend hz hacc hap _ => ⟨?_, hap⟩)
   simp only [newobjectObj, typSize, typNoscan, typPtrBytes, h0, hrd.1, hrd.2, hbs]
   exact toy_fresh h1 h2 hend hz hacc _ (hbs ▸ AllocSat.le_blockSize _ _) _ _
 
@@ -100,18 +100,18 @@ theorem newobject16_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat �
   have hacB' := bump_acc pre.2.2.2.1
   have ⟨⟨h30a, h30b, _, _, _, _, _⟩, _, _⟩ := pre.1
   janus_run
-  exact finish_newobject hty (by omega) hok' pre
+  exact finish_newobject hty (by omega) (by omega) (by omega) hok' pre
 
 
-theorem finish_makeslice {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr K b : Nat}
-    {L : List (Nat × Nat)} {s : State} (hK : K % 16 = 0)
+theorem finish_makeslice {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr K A b : Nat}
+    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K)
     (hok' : ∀ args, ok addr args → ∃ t ∈ tys, ∃ l c, args = [t.1, l, c] ∧
       blockSize (t.2.1 * c) (t.2.2 == 0) = K)
     (pre : MakeslicePre 4096 s ∧ StackRoom s 4096 3 ∧
       LiveAt (toyR tys ok) addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (makesliceRound s)
         (s.regs 28).toNat s.mem (calleeStack s 4096 3)) :
     LiveAllocRet (toyR tys ok) 4096 3 (fun ptr => [ptr]) L b (makesliceRound s) (makesliceRound s) s
-      (bumpFinal s K) fun m ptr => 0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat →
+      (bumpFinal s A) fun m ptr => 0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat →
         makesliceObj (toyR tys ok).rt s m ptr ∧ ApartAll ptr (makesliceRound s) L := by
   obtain ⟨-, -, hok, hinv, hcost, hLs, hWs⟩ := pre
   obtain ⟨t, ht, l, c, hargs, hbs⟩ := hok' _ hok
@@ -122,29 +122,47 @@ theorem finish_makeslice {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat �
   have hR : makesliceRound s = K := by
     simp only [makesliceRound, typSize, typNoscan, typPtrBytes, h0, h2, hrd.1, hrd.2]; exact hbs
   rw [hR] at hcost ⊢
-  refine bump_ret hty hK rfl rfl hcost hinv hWs _ _ (fun p hp => bumpFinal_ret s K p hp) (fun p h1 h2' hend hz hacc hap _ => ⟨?_, hap⟩)
+  refine bump_ret hty hA hKA hA2 rfl rfl hcost hinv hWs _ _ (fun p hp => bumpFinal_ret s A p hp) (fun p h1 h2' hend hz hacc hap _ => ⟨?_, hap⟩)
   simp only [makesliceObj, typSize, typNoscan, typPtrBytes, h0, h2, hrd.1, hrd.2, hbs]
   exact toy_fresh h1 h2' hend hz hacc _ (hbs ▸ AllocSat.le_blockSize _ _) _ _
 
-theorem finish_mallocgc {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr K b : Nat}
-    {L : List (Nat × Nat)} {s : State} (hK : K % 16 = 0)
-    (hok' : ∀ args, ok addr args → ∃ sz nz, args = [sz, 0, nz] ∧ blockSize sz true = K)
+theorem finish_mallocgc {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr K A b : Nat}
+    {L : List (Nat × Nat)} {s : State} (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K)
+    (hok' : ∀ args, ok addr args → ∃ sz typ nz, args = [sz, typ, nz] ∧
+      ((typ = 0 ∧ blockSize sz true = K) ∨ ∃ t ∈ tys, t.1 = typ ∧ typ ≠ 0 ∧ blockSize sz (t.2.2 == 0) = K))
     (pre : MallocgcPre 4096 s ∧ StackRoom s 4096 3 ∧
       LiveAt (toyR tys ok) addr [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
         (s.regs 28).toNat s.mem (calleeStack s 4096 3)) :
     LiveAllocRet (toyR tys ok) 4096 3 (fun ptr => [ptr]) L b (mallocgcRound s) (mallocgcRound s) s
-      (bumpFinal s K) fun m ptr => 0 < (s.regs 0).toNat →
+      (bumpFinal s A) fun m ptr => 0 < (s.regs 0).toNat →
         mallocgcObj (toyR tys ok).rt s m ptr ∧ ApartAll ptr (mallocgcRound s) L := by
   obtain ⟨-, -, hok, hinv, hcost, hLs, hWs⟩ := pre
-  obtain ⟨sz, nz, hargs, hbs⟩ := hok' _ hok
+  obtain ⟨sz, typ, nz, hargs, hcase⟩ := hok' _ hok
   simp only [List.cons.injEq, and_true] at hargs
   obtain ⟨h0, h1', -⟩ := hargs
-  have hR : mallocgcRound s = K := by
-    simp only [mallocgcRound, h0, h1']; exact hbs
+  have hinvT : toyInv tys b L (s.regs 28).toNat (view (toyRt tys) L s.mem) := hinv
+  -- the block and the object, for both kinds of request
+  have key : mallocgcRound s = K ∧ (blockSize sz ((s.regs 1).toNat == 0 || typNoscan s.mem (s.regs 1).toNat)
+      = K) := by
+    rcases hcase with ⟨ht0, hbs⟩ | ⟨t, ht, ht1, hne, hbs⟩
+    · have : (s.regs 1).toNat = 0 := by rw [h1', ht0]
+      simp only [mallocgcRound, h0, this, beq_self_eq_true, Bool.true_or]; exact ⟨hbs, hbs⟩
+    · have hrd := toy_ty_read hty hinvT ht
+      have e1 : (s.regs 1).toNat = t.1 := by rw [h1', ht1]
+      have e2 : typNoscan s.mem (s.regs 1).toNat = (t.2.2 == 0) := by
+        simp only [typNoscan, typPtrBytes, e1, hrd.2]
+      have e3 : ((s.regs 1).toNat == 0 || typNoscan s.mem (s.regs 1).toNat) = (t.2.2 == 0) := by
+        rw [e2]
+        have : (s.regs 1).toNat ≠ 0 := by rw [h1']; exact hne
+        simp [this]
+      simp only [mallocgcRound, h0, e3]; exact ⟨hbs, by rw [h0, e3] at *; exact hbs⟩
+  obtain ⟨hR, hB⟩ := key
   rw [hR] at hcost ⊢
-  refine bump_ret hty hK rfl rfl hcost hinv hWs _ _ (fun p hp => bumpFinal_ret s K p hp) (fun p h1 h2' hend hz hacc hap _ => ⟨?_, hap⟩)
-  simp only [mallocgcObj, mallocHdr, h0, h1', beq_self_eq_true, Bool.true_or, hbs]
-  exact toy_fresh h1 h2' hend hz hacc _ (hbs ▸ AllocSat.le_blockSize _ _) _ _
+  refine bump_ret hty hA hKA hA2 rfl rfl hcost hinv hWs _ _ (fun p hp => bumpFinal_ret s A p hp)
+    (fun p h1 h2' hend hz hacc hap _ => ⟨?_, hap⟩)
+  simp only [mallocgcObj, mallocHdr, h0]
+  rw [hB]
+  exact toy_fresh h1 h2' hend hz hacc _ (hB ▸ h0 ▸ AllocSat.le_blockSize _ _) _ _
 
 set_option maxRecDepth 20000 in
 theorem makeslice16_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop)
@@ -155,19 +173,22 @@ theorem makeslice16_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat �
   have hacB' := bump_acc pre.2.2.2.1
   have ⟨⟨h30a, h30b, _, _, _, _, _⟩, _, _⟩ := pre.1
   janus_run
-  exact finish_makeslice hty (by omega) hok' pre
+  exact finish_makeslice hty (by omega) (by omega) (by omega) hok' pre
 
 
 set_option maxRecDepth 20000 in
-theorem mallocgc16_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop)
-    (hok' : ∀ args, ok A0 args → ∃ sz nz, args = [sz, 0, nz] ∧ blockSize sz true = 16) :
+/-- The toy `mallocgc`: advances the bump pointer by 16 for a request of `K ∈ [8, 16]` bytes. -/
+theorem mallocgc16_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop) {K : Nat}
+    (hK1 : 8 ≤ K) (hK2 : K ≤ 16)
+    (hok' : ∀ args, ok A0 args → ∃ sz typ nz, args = [sz, typ, nz] ∧
+      ((typ = 0 ∧ blockSize sz true = K) ∨ ∃ t ∈ tys, t.1 = typ ∧ typ ≠ 0 ∧ blockSize sz (t.2.2 == 0) = K)) :
     MallocgcLiveContract (toy.link (at0 (bumpCode 16))) A0 4096 (toyR tys ok) := by
   rw [link_at0]
   intro L b s hpc pre
   have hacB' := bump_acc pre.2.2.2.1
   have ⟨⟨h30a, h30b, _, _, _, _, _⟩, _, _⟩ := pre.1
   janus_run
-  exact finish_mallocgc hty (by omega) hok' pre
+  exact finish_mallocgc (A := 16) hty (by omega) (by omega) (by omega) hok' pre
 
 /-! ### `growslice` -/
 
@@ -210,7 +231,7 @@ theorem finish_growslice {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat �
   have hg : growCap8 2 0 = 2 := by decide
   have hR : growsliceRound s = 16 := by simp only [growsliceRound, h1, h2, hg]
   rw [hR] at hcost ⊢
-  refine bump_ret hty (by omega) rfl rfl hcost hinv hWs _ _ (fun p hp => ?_) (fun p h1' h2' hend hz hacc hap => ⟨?_, hap⟩)
+  refine bump_ret hty (A := 16) (by omega) (by omega) (by omega) rfl rfl hcost hinv hWs _ _ (fun p hp => ?_) (fun p h1' h2' hend hz hacc hap => ⟨?_, hap⟩)
   · have := growFinal_ret s p hp
     simp only [h1, h2, hg] at this ⊢
     exact this
@@ -233,17 +254,20 @@ theorem growslice16_impl (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat �
 def tyA : Nat := 0x30000
 def tyB : Nat := 0x30010
 /-- The descriptors: 16 bytes without pointers, 8 bytes without pointers. -/
-def tys0 : Tys := [(tyA, 16, 0), (tyB, 8, 0)]
+def tyC : Nat := 0x30020
+/-- A 16-byte type with pointers (`PtrBytes = 8`). -/
+def tys0 : Tys := [(tyA, 16, 0), (tyB, 8, 0), (tyC, 16, 8)]
 def wsp : Nat := 0x200000
 def wg : Nat := 0x300000
 def wret : Nat := 0x1000
 
 def wbytes (a : Nat) : Byte :=
-  if a = BUMP + 2 then 0x50 else if a = tyA then 16 else if a = tyB then 8 else 0
+  if a = BUMP + 2 then 0x50 else if a = tyA then 16 else if a = tyB then 8 else if a = tyC then 16
+  else if a = tyC + 8 then 8 else 0
 
 /-- The witness memory: stack, `g`, the descriptors, the bump cell and buffer, the heap. -/
 def wmem : Memory :=
-  ⟨wbytes, [⟨wsp - 4096, 4096 + 64, true⟩, ⟨wg, 0x100, false⟩, ⟨tyA, 32, false⟩, ⟨BUMP, 0x200, true⟩,
+  ⟨wbytes, [⟨wsp - 4096, 4096 + 64, true⟩, ⟨wg, 0x100, false⟩, ⟨tyA, 48, false⟩, ⟨BUMP, 0x200, true⟩,
     ⟨HEAP, 0x10000, true⟩]⟩
 
 def wstate (r : Nat → W64) : State :=
@@ -254,22 +278,25 @@ def wstate (r : Nat → W64) : State :=
 theorem tysOK0 : TysOK tys0 := by
   intro t ht
   simp only [tys0, List.mem_cons, List.not_mem_nil, or_false] at ht
-  rcases ht with rfl | rfl <;> simp [tyA, tyB, BUMP]
+  rcases ht with rfl | rfl | rfl <;> simp [tyA, tyB, tyC, BUMP]
 
-theorem wmem_inv (g : Nat) : toyInv tys0 0x10000 [] g (view (toyRt tys0) [] wmem) := by
+theorem wmem_inv (g : Nat) : toyInv tys0 0x8000 [] g (view (toyRt tys0) [] wmem) := by
   refine ⟨HEAP, by decide, Nat.le_refl _, by decide, by decide, fun r hr => absurd hr (by simp),
     fun i hi hi' => ?_, by decide, by decide, by decide, fun t ht => ?_⟩
   · rw [Memory.readLE_one]
     have : (view (toyRt tys0) [] wmem).bytes i = 0 := by
       simp only [view, wmem, wbytes]
       split
-      · rw [if_neg (by simp only [BUMP, tyA, tyB, HEAP, HEND] at *; omega),
-          if_neg (by simp only [BUMP, tyA, tyB, HEAP, HEND] at *; omega),
-          if_neg (by simp only [BUMP, tyA, tyB, HEAP, HEND] at *; omega)]
+      · have e1 : i ≠ BUMP + 2 := by simp only [BUMP, HEAP, HEND] at *; omega
+        have e2 : i ≠ tyA := by simp only [tyA, HEAP, HEND] at *; omega
+        have e3 : i ≠ tyB := by simp only [tyB, HEAP, HEND] at *; omega
+        have e4 : i ≠ tyC := by simp only [tyC, HEAP, HEND] at *; omega
+        have e5 : i ≠ tyC + 8 := by simp only [tyC, HEAP, HEND] at *; omega
+        simp [e1, e2, e3, e4, e5]
       · rfl
     rw [this]; rfl
   · simp only [tys0, List.mem_cons, List.not_mem_nil, or_false] at ht
-    rcases ht with rfl | rfl <;> exact ⟨by decide, by decide⟩
+    rcases ht with rfl | rfl | rfl <;> exact ⟨by decide, by decide⟩
 
 
 theorem w28 (r : Nat → W64) : (wstate r).regs 28 = BitVec.ofNat 64 wg := by simp [wstate]
@@ -297,7 +324,7 @@ theorem wwin (r : Nat → W64) (n : Nat) (hn : n ≤ 5) :
   simp only [calleeStack, wsp_eq, wspn, List.mem_cons, List.not_mem_nil, or_false] at hx
   rcases hx with rfl | rfl <;>
     simp only [toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, wsp, HEAP, HEND, BUMP, WBUF,
-      tyA, tyB] <;> omega
+      tyA, tyB, tyC] <;> omega
 
 theorem wTypeOK : TypeOK wmem tyA := ⟨by decide, by decide⟩
 
@@ -311,7 +338,7 @@ theorem newobject_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       0 < typSize s.mem (s.regs 0).toNat := by
   have h0 : ((wstate fun i => if i = 0 then BitVec.ofNat 64 tyA else 0).regs 0).toNat = tyA := by
     simp [wstate]; decide
-  refine ⟨at0 (bumpCode 16), toyR tys0 okNew, newobject16_impl tys0 tysOK0 okNew ?_, [], 0x10000,
+  refine ⟨at0 (bumpCode 16), toyR tys0 okNew, newobject16_impl tys0 tysOK0 okNew ?_, [], 0x8000,
     wstate (fun i => if i = 0 then BitVec.ofNat 64 tyA else 0), rfl,
     ⟨wcallOK _ 1 (by omega), by rw [h0, wmem_eq]; exact wTypeOK, by rw [h0, wmem_eq]; decide⟩,
     wguard _ 1 (by omega), ⟨by rw [h0]; exact ⟨rfl, rfl⟩, wmem_inv 0, by simp only [newobjectRound, h0, wmem_eq]; decide,
@@ -334,14 +361,14 @@ theorem makeslice_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (makesliceRound s)
         (s.regs 28).toNat s.mem (calleeStack s 4096 3) ∧
       0 < typSize s.mem (s.regs 0).toNat * (s.regs 2).toNat := by
-  refine ⟨at0 (bumpCode 16), toyR tys0 okMake, makeslice16_impl tys0 tysOK0 okMake ?_, [], 0x10000,
+  refine ⟨at0 (bumpCode 16), toyR tys0 okMake, makeslice16_impl tys0 tysOK0 okMake ?_, [], 0x8000,
     wst [tyB, 2, 2], rfl, ⟨wst_wcallOK _ 3 (by omega), ⟨by decide, by decide⟩, by decide, by decide, by decide⟩,
     wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp,
       wwin _ 3 (by omega)⟩, by decide⟩
   · rintro args ⟨-, rfl⟩
     exact ⟨(tyB, 8, 0), by simp [tys0], 2, 2, rfl, by decide⟩
 
-def okMalloc : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [16, 0, 1]
+def okMalloc : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [16, tyB, 1]
 
 theorem mallocgc_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     MallocgcLiveContract (toy.link impl) A0 4096 R ∧
@@ -350,12 +377,12 @@ theorem mallocgc_satisfiable : ∃ (impl : List Segment) (R : RtInv),
       LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
         (s.regs 28).toNat s.mem (calleeStack s 4096 3) ∧
       0 < (s.regs 0).toNat := by
-  refine ⟨at0 (bumpCode 16), toyR tys0 okMalloc, mallocgc16_impl tys0 tysOK0 okMalloc ?_, [], 0x10000,
-    wst [16, 0, 1], rfl, ⟨wst_wcallOK _ 3 (by omega), by decide, Or.inl (by decide)⟩,
+  refine ⟨at0 (bumpCode 16), toyR tys0 okMalloc, mallocgc16_impl tys0 tysOK0 okMalloc (K := 16) (by omega) (by omega) ?_, [], 0x8000,
+    wst [16, tyB, 1], rfl, ⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
     wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp,
       wwin _ 3 (by omega)⟩, by decide⟩
   · rintro args ⟨-, rfl⟩
-    exact ⟨16, 1, rfl, by decide⟩
+    exact ⟨16, tyB, 1, rfl, Or.inr ⟨(tyB, 8, 0), by simp [tys0], rfl, by decide, by decide⟩⟩
 
 def okGrow : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [HEAP, 2, 0, 2, tyB]
 
@@ -364,12 +391,61 @@ theorem growslice_satisfiable : ∃ (impl : List Segment) (R : RtInv),
     ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
       GrowslicePre 4096 s ∧ StackRoom s 4096 5 ∧
       LiveAt R A0 (growsliceArgs s) L b (growsliceRound s) (s.regs 28).toNat s.mem (calleeStack s 4096 5) := by
-  refine ⟨growCode16 |> at0, toyR tys0 okGrow, growslice16_impl tys0 tysOK0 okGrow ?_, [], 0x10000,
+  refine ⟨growCode16 |> at0, toyR tys0 okGrow, growslice16_impl tys0 tysOK0 okGrow ?_, [], 0x8000,
     wst [HEAP, 2, 0, 2, tyB], rfl, ⟨⟨wst_wcallOK _ 5 (by omega), ⟨by decide, by decide⟩, by decide, by decide,
       by decide, by decide, by decide, by decide⟩, fun h => absurd h (by decide)⟩,
     wguard _ 5 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp,
       wwin _ 5 (by omega)⟩⟩
   · rintro args ⟨-, rfl⟩
     exact ⟨HEAP, tyB, rfl⟩
+
+
+def okScan : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [16, tyC, 1]
+def okTiny : Nat → List Nat → Prop := fun a args => a = A0 ∧ args = [8, tyB, 1]
+
+theorem mallocgcSmallNoScanSCLive_satisfiable : ∃ (n : Nat) (impl : List Segment) (R : RtInv),
+    MallocgcSmallNoScanSCLiveContract n (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      (MallocgcPre 4096 s ∧ StackRoom s 4096 3 ∧
+        LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
+          (s.regs 28).toNat s.mem (calleeStack s 4096 3)) ∧
+      NoScanArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat := by
+  refine ⟨2, at0 (bumpCode 16), toyR tys0 okMalloc,
+    (mallocgc16_impl tys0 tysOK0 okMalloc (K := 16) (by omega) (by omega) ?_).smallNoScanSC, [], 0x8000,
+    wst [16, tyB, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
+      wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 3 (by omega)⟩⟩, ?_⟩
+  · rintro args ⟨-, rfl⟩
+    exact ⟨16, tyB, 1, rfl, Or.inr ⟨(tyB, 8, 0), by simp [tys0], rfl, by decide, by decide⟩⟩
+  · unfold NoScanArgs; refine ⟨by decide, by decide, by decide, by decide, by decide⟩
+
+theorem mallocgcSmallScanNoHeaderSCLive_satisfiable : ∃ (n : Nat) (impl : List Segment) (R : RtInv),
+    MallocgcSmallScanNoHeaderSCLiveContract n (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      (MallocgcPre 4096 s ∧ StackRoom s 4096 3 ∧
+        LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
+          (s.regs 28).toNat s.mem (calleeStack s 4096 3)) ∧
+      ScanArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat := by
+  refine ⟨2, at0 (bumpCode 16), toyR tys0 okScan,
+    (mallocgc16_impl tys0 tysOK0 okScan (K := 16) (by omega) (by omega) ?_).smallScanNoHeaderSC, [], 0x8000,
+    wst [16, tyC, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
+      wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 3 (by omega)⟩⟩, ?_⟩
+  · rintro args ⟨-, rfl⟩
+    exact ⟨16, tyC, 1, rfl, Or.inr ⟨(tyC, 16, 8), by simp [tys0], rfl, by decide, by decide⟩⟩
+  · unfold ScanArgs; refine ⟨by decide, by decide, by decide, by decide, by decide⟩
+
+theorem mallocgcTinySizeLive_satisfiable : ∃ (n : Nat) (impl : List Segment) (R : RtInv),
+    MallocgcTinySizeLiveContract n (toy.link impl) A0 4096 R ∧
+    ∃ (L : List (Nat × Nat)) (b : Nat) (s : State), s.pc = BitVec.ofNat 64 A0 ∧
+      (MallocgcPre 4096 s ∧ StackRoom s 4096 3 ∧
+        LiveAt R A0 [(s.regs 0).toNat, (s.regs 1).toNat, (s.regs 2).toNat] L b (mallocgcRound s)
+          (s.regs 28).toNat s.mem (calleeStack s 4096 3)) ∧
+      TinyArgs n s.mem (s.regs 0).toNat (s.regs 1).toNat := by
+  refine ⟨8, at0 (bumpCode 16), toyR tys0 okTiny,
+    (mallocgc16_impl tys0 tysOK0 okTiny (K := 8) (by omega) (by omega) ?_).tinySize, [], 0x8000,
+    wst [8, tyB, 1], rfl, ⟨⟨wst_wcallOK _ 3 (by omega), by decide, Or.inr ⟨⟨by decide, by decide⟩, fun h => by revert h; decide⟩⟩,
+      wguard _ 3 (by omega), ⟨⟨rfl, by decide⟩, wmem_inv 0, by decide, by simp, wwin _ 3 (by omega)⟩⟩, ?_⟩
+  · rintro args ⟨-, rfl⟩
+    exact ⟨8, tyB, 1, rfl, Or.inr ⟨(tyB, 8, 0), by simp [tys0], rfl, by decide, by decide⟩⟩
+  · unfold TinyArgs; refine ⟨by decide, by decide, by decide, by decide, by decide⟩
 
 end Janus.Contracts.LiveSat

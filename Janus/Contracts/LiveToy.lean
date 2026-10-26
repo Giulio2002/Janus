@@ -48,7 +48,7 @@ def TysOK (tys : Tys) : Prop :=
 
 /-- The toy runtime's invariant. -/
 def toyInv (tys : Tys) (b : Nat) (L : List (Nat × Nat)) (_g : Nat) (v : Memory) : Prop :=
-  ∃ p, v.readLE BUMP 8 = p ∧ HEAP ≤ p ∧ p % 16 = 0 ∧ p + b ≤ HEND ∧
+  ∃ p, v.readLE BUMP 8 = p ∧ HEAP ≤ p ∧ p % 16 = 0 ∧ p + 2 * b ≤ HEND ∧
     (∀ r ∈ L, HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p) ∧
     (∀ i, p ≤ i → i < HEND → v.readLE i 1 = 0) ∧
     v.accessible HEAP 0x10000 true = true ∧ v.accessible BUMP 8 true = true ∧
@@ -137,29 +137,30 @@ for `L` and `b`, the bump pointer `p` (memory's word at `BUMP`) names a block `[
 once `p + K` is stored at `BUMP` (`m'`), is a fresh zeroed object of the heap outside `L`; memory
 changed only in the runtime's ranges, not in the live objects, and the invariant holds for the
 live set with the block and the budget `b - K`. -/
-theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K : Nat} {L : List (Nat × Nat)} {g : Nat} {m : Memory}
-    (hK : K % 16 = 0) (hb : K ≤ b) (h : toyInv tys b L g (view (toyRt tys) L m)) :
-    ∃ p, m.readLE BUMP 8 = p ∧ HEAP ≤ p ∧ p % 16 = 0 ∧ p + K ≤ HEND ∧
-      MemFrame m (m.writeLE BUMP 8 (p + K)) (toyRt tys) ∧
-      LiveFrame m (m.writeLE BUMP 8 (p + K)) L [] ∧
-      ApartAll p K L ∧ ZeroBytes (m.writeLE BUMP 8 (p + K)) p K ∧
-      (m.writeLE BUMP 8 (p + K)).accessible p K true = true ∧
+theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K A : Nat} {L : List (Nat × Nat)} {g : Nat} {m : Memory}
+    (hA : A % 16 = 0) (hKA : K ≤ A) (hA2 : A ≤ 2 * K) (hb : K ≤ b) (h : toyInv tys b L g (view (toyRt tys) L m)) :
+    ∃ p, m.readLE BUMP 8 = p ∧ HEAP ≤ p ∧ p % 16 = 0 ∧ p + A ≤ HEND ∧
+      MemFrame m (m.writeLE BUMP 8 (p + A)) (toyRt tys) ∧
+      LiveFrame m (m.writeLE BUMP 8 (p + A)) L [] ∧
+      ApartAll p K L ∧ ZeroBytes (m.writeLE BUMP 8 (p + A)) p K ∧
+      (m.writeLE BUMP 8 (p + A)).accessible p K true = true ∧
       toyInv tys (b - K) (L ++ [(p, p + K)]) g
-        (view (toyRt tys) (L ++ [(p, p + K)]) (m.writeLE BUMP 8 (p + K))) := by
+        (view (toyRt tys) (L ++ [(p, p + K)]) (m.writeLE BUMP 8 (p + A))) := by
   obtain ⟨p, hp, h1, h2, h3, hL, hz, hac, hacB, hacW, hT⟩ := h
   have hbump : BUMP + 8 ≤ HEAP := by simp [BUMP, HEAP]
   have hpm : m.readLE BUMP 8 = p := by
     rw [← readLE_view (rt := toyRt tys) (L := L) (inRanges_bump tys) (outside_live hL (by omega))]; exact hp
-  have hend : p + K ≤ HEND := by omega
+  have hend : p + A ≤ HEND := by omega
+  have hendK : p + K ≤ HEND := by omega
   have hHE : HEND = HEAP + 0x10000 := rfl
-  have hlt : p + K < 2 ^ 64 := by simp only [HEND, HEAP] at *; omega
-  have hfr : MemFrame m (m.writeLE BUMP 8 (p + K)) (toyRt tys) :=
+  have hlt : p + A < 2 ^ 64 := by simp only [HEND, HEAP] at *; omega
+  have hfr : MemFrame m (m.writeLE BUMP 8 (p + A)) (toyRt tys) :=
     MemFrame.of_writeLE m _ (r := (BUMP, BUMP + 8)) (by simp [toyRt]) (Nat.le_refl _) (Nat.le_refl _)
   have hrd : ∀ i, p ≤ i → i < HEND → m.readLE i 1 = 0 := fun i hi hi' => by
     rw [← readLE_view (rt := toyRt tys) (L := L) (inRanges_heap (n := 1) (by omega) (by omega))
       (outside_live_above hL hi)]
     exact hz i hi hi'
-  have hwr : ∀ i, HEAP ≤ i → (m.writeLE BUMP 8 (p + K)).readLE i 1 = m.readLE i 1 := fun i hi =>
+  have hwr : ∀ i, HEAP ≤ i → (m.writeLE BUMP 8 (p + A)).readLE i 1 = m.readLE i 1 := fun i hi =>
     Memory.readLE_writeLE_of_disjoint _ _ (by simp only [BUMP, HEAP] at *; omega)
   refine ⟨p, hpm, h1, h2, hend, hfr, ⟨fun a n hin hw => ?_⟩, ?_, fun i hi => ?_, ?_, ?_⟩
   · obtain ⟨r, hr, r1, r2⟩ := hin
@@ -171,21 +172,21 @@ theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K : Nat} {L : List (Nat × Na
     omega
   · have := hwr (p + i) (by omega)
     have h0 := hrd (p + i) (by omega) (by omega)
-    have : (m.writeLE BUMP 8 (p + K)).readLE (p + i) 1 = 0 := by rw [hwr _ (by omega)]; exact h0
+    have : (m.writeLE BUMP 8 (p + A)).readLE (p + i) 1 = 0 := by rw [hwr _ (by omega)]; exact h0
     rw [Memory.readLE_one] at this
     exact BitVec.eq_of_toNat_eq (by simpa using this)
   · rw [hfr.accessible, ← view_accessible (toyRt tys) L m]
-    have h2' : p + K ≤ HEAP + 65536 := Nat.le_trans hend (Nat.le_of_eq hHE)
+    have h2' : p + K ≤ HEAP + 65536 := Nat.le_trans hendK (Nat.le_of_eq hHE)
     exact Memory.accessible_mono (view (toyRt tys) L m) hac h1 h2'
-  · have hL' : ∀ r ∈ L ++ [(p, p + K)], HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p + K := by
+  · have hL' : ∀ r ∈ L ++ [(p, p + K)], HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p + A := by
       intro r hr
       rcases List.mem_append.1 hr with hr | hr
       · have := hL r hr; omega
       · rw [List.mem_singleton] at hr; subst hr; simp only []; omega
     have hv : ∀ a n, InRanges a n (toyRt tys) → Outside a n (L ++ [(p, p + K)]) →
-        (view (toyRt tys) (L ++ [(p, p + K)]) (m.writeLE BUMP 8 (p + K))).readLE a n =
-          (m.writeLE BUMP 8 (p + K)).readLE a n := fun a n h1 h2 => readLE_view h1 h2
-    refine ⟨p + K, ?_, by omega, by omega, by omega, hL', fun i hi hi' => ?_, ?_, ?_, ?_, fun t ht => ?_⟩
+        (view (toyRt tys) (L ++ [(p, p + K)]) (m.writeLE BUMP 8 (p + A))).readLE a n =
+          (m.writeLE BUMP 8 (p + A)).readLE a n := fun a n h1 h2 => readLE_view h1 h2
+    refine ⟨p + A, ?_, by omega, by omega, by omega, hL', fun i hi hi' => ?_, ?_, ?_, ?_, fun t ht => ?_⟩
     · rw [hv _ _ (inRanges_bump tys) (outside_live hL' (by omega)), Memory.readLE_writeLE_self,
         Nat.mod_eq_of_lt (by simpa using hlt)]
     · rw [hv _ _ (inRanges_heap (n := 1) (by omega) (by omega))
