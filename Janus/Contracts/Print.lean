@@ -142,6 +142,14 @@ theorem _root_.Janus.Kernel.Kern.output_appendTrace (k : Kern) (es : List Event)
     (k.appendTrace es).output fd = k.output fd ++ outputOf fd es := by
   simp [Kern.appendTrace, Kern.output, outputOf_append]
 
+/-- **Full output**, on a kernel state: if the output of `fd` grew by as many bytes as the pieces
+hold, it grew by exactly their concatenation. -/
+theorem Emits.full {fd : Nat} {k : Kern} {bs : List Bytes} {es : List Event} (h : Emits fd bs es)
+    (hl : ((k.appendTrace es).output fd).length = (k.output fd).length + bs.flatten.length) :
+    (k.appendTrace es).output fd = k.output fd ++ bs.flatten := by
+  rw [Kern.output_appendTrace] at hl ⊢
+  rw [h.output_eq (by simp only [List.length_append] at hl; omega)]
+
 /-! ## Running a kernel-level callee
 
 A function whose run reaches a `.syscall` stub (`gwrite` and every `print*` above it) cannot be a

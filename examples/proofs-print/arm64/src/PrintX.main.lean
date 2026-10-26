@@ -133,12 +133,11 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
             janus_run
             refine ⟨es1 ++ es2 ++ es3, by simp only [Kern.appendTrace_append, List.append_assoc], ?_⟩
             dsimp only at hem1 hem3
-            simp only [h_xs, h_nl] at hem1 hem3
-            have hx1 : readBytes m1 784977 4 = Janus.Spec.Print.ofString "x = " := by
-              rw [show readBytes m1 784977 4 = readBytes s.mem 784977 4 by readbytes_frame]
+            have hx1 : readBytes m1 XS 4 = Janus.Spec.Print.ofString "x = " := by
+              rw [h_xs, show readBytes m1 _ 4 = readBytes s.mem _ 4 by readbytes_frame]
               exact readBytes_data hd _ _ _ (by decide +kernel) (by decide +kernel)
-            have hn3 : readBytes m3 826136 1 = [10#8] := by
-              rw [show readBytes m3 826136 1 = readBytes s.mem 826136 1 by readbytes_frame]
+            have hn3 : readBytes m3 NL 1 = [10#8] := by
+              rw [h_nl, show readBytes m3 _ 1 = readBytes s.mem _ 1 by readbytes_frame]
               exact readBytes_data hd _ _ _ (by decide +kernel) (by decide +kernel)
             rw [hx1] at hem1
             rw [hn3] at hem3
@@ -147,9 +146,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
         all_goals kobl
       all_goals try simp only [h_pk, h_bi, h_bl, h_ow, h_sm]
       all_goals try (intro j hj; janus_simp; first | done | exact readLE_of_dataRead hd (by rw [← h_sm]; exact smalls_data j hj))
-      all_goals try kobl
-      all_goals trace_state
-      all_goals sorry
+      all_goals kobl
     case hsp => apply BitVec.eq_of_toNat_eq; simp; omega
     all_goals try simp only [h_pk, h_bi, h_bl, h_ow, h_xs]
     all_goals kobl
