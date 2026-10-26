@@ -115,8 +115,7 @@ def WPost (a : BitVec 64) (t t' : State) : Prop :=
   MemFrame (t.mem.writeLE (a.toNat + 24) 8 (res t.mem a.toNat)) t'.mem
     [(t.sp.toNat - 4096, t.sp.toNat)]
 
-theorem wrapper_spec (T a : BitVec 64)
-    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
+theorem wrapper_spec (T a : BitVec 64) :
     CEnsuresC Extracted.program (TopOfStack T) wrapper [a] (WPre a) (WPost a) := by
   intro ret hret t hs ⟨⟨hal, hb, htop, hacc⟩, ha, hfa, hd, hf⟩
   apply ReturnsC.of_reaches
@@ -134,9 +133,9 @@ theorem wrapper_spec (T a : BitVec 64)
   janus_run [spre_iff, h48, fd, fs, BitVec.toNat_ofNat, hf] until [wrapper + 0x28]
     calls [summary (fd t.mem a.toNat 0) (fs t.mem a.toNat) (fd t.mem a.toNat 2)]
   dsimp only at *
-  obtain ⟨regs', sp', pc', fl', mem', dz', vr', tp', fc', fsr', ex, ep⟩ := s'
+  obtain ⟨regs', sp', pc', fl', mem', dz', vr', tp', fc', fsr'⟩ := s'
   dsimp only at *
-  subst sp' pc' mem' fc' hex hep
+  subst sp' pc' mem' fc'
   simp only [setReg_apply, ↓reduceIte, Nat.reduceEqDiff] at *
   have h19' : regs' 19 = a := by assumption
   have h20' : regs' 20 = T := by assumption

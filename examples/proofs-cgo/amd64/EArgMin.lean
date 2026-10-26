@@ -307,6 +307,9 @@ theorem correctness (a n : BitVec 64) :
   have h_a1 : s.regs 6 = n := hs.reg (i := 1) (by simp)
   have hr47 : ret < 2 ^ 47 := hret.user
   simp only [CABI.regSP, Amd64.Program.withExit] at hsa hsb hsc hsw h_ret
+  -- the summary's `Outside` premise, unfolded as the integrated stepping simp set leaves it
+  have hout' := hout
+  simp only [outside_cons, outside_nil, and_true] at hout'
   janus64_run calls [argmin_cmp a n]
   rename_i hpost
   obtain ⟨hc, hx, hmf⟩ := hpost
