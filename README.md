@@ -242,6 +242,8 @@ Go 1.26.0. Proofs:
 | `Log2` | a condition-only `for`: `⌊log₂ x⌋` (`2^r ≤ x < 2^(r+1)`), `0` for `x = 0` | ✓ | ✓ |
 | `TotalMeters`, `TotalFeet` | two instantiations of one generic function sharing the GC-shape body `total[go.shape.uint64]`, each reaching its `Scale` method through its dictionary: `100·(a+b)`, `30·(a+b)` | ✓ | ✓ |
 | `Fact` | recursion: `n! mod 2^64`, by induction over the recursive calls (given stack for `n + 1` frames) | ✓ | ✓ |
+| `IsEven`, `IsOdd` | mutual recursion: `1` iff `n` is even (odd), by `Summary.induction_mutual` over both members | ✓ | ✓ |
+| `CycA`, `CycB`, `CycC` | a 3-cycle of calls with three different frame sizes, by a weighted shared measure | ✓ | ✓ |
 | `SumBelow` | range over an `int`: `0 + … + (n-1)`, nothing for `n ≤ 0` | ✓ | ✓ |
 | `IterSum` | range over a function iterator (inlined, no runtime call): the same sum | ✓ | ✓ |
 | `ReverseArray` | array value semantics and range over an array: `out[i] = in[3-i]`, also for `out = in` | ✓ | ✓ |

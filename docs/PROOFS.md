@@ -361,6 +361,47 @@ theorem summary : Summary Extracted.program Extracted.entry Pre Post := by
 The stack hypotheses say that the stack already has room for every frame; the grown-stack case
 (`morestack`) is not covered.
 
+### Mutual recursion (`IsEven`, `CycA`)
+
+When functions call each other (a strongly connected component of the call graph: `IsEven` and
+`IsOdd`, or a Karatsuba-style family where the multiplication entry calls the recursive kernel,
+which calls the entry again on halves), no member's summary can be proved first.
+`Summary.induction_mutual μ` (both ISAs, in the same files) proves all of them at once. The
+members are indexed by any type (an inductive with one constructor per member), each with its
+entry, `pre`, `post` and its own measure `μ i s : Nat` on a shared scale; in the case
+`μ i s = n` the induction hypothesis `ih j` is the summary of **every** member `j` for the states
+with `μ j s < n`:
+
+```lean
+inductive Member | even | odd
+def entryOf : Member → Nat
+  | .even => segAddr Extracted.program "example.com/basic.IsEven"
+  | .odd => segAddr Extracted.program "example.com/basic.IsOdd"
+
+theorem summary : ∀ i, Summary Extracted.program (entryOf i) Pre (Post i) := by
+  apply Summary.induction_mutual (fun _ s => (s.regs 0).toNat)
+  intro n ih i s hpc ⟨…, hn⟩
+  -- the callee summaries, with their entries as the executor sees them
+  have ihE : Summary Extracted.program (segAddr Extracted.program "example.com/basic.IsEven") _ _ := ih .even
+  have ihO : Summary Extracted.program (segAddr Extracted.program "example.com/basic.IsOdd") _ _ := ih .odd
+  cases i
+  · simp only [entryOf] at hpc; janus_step; janus_run calls [ihO]; …
+  · simp only [entryOf] at hpc; janus_step; janus_run calls [ihE]; …
+```
+
+* Every call inside the component must decrease the measure. When a member calls another with
+  the same argument (`CycA(n)` → `CycB(n)` → `CycC(n, …)` → `CycA(n-1)`), weight the members:
+  `μ` is `3n + 2`, `3n + 1`, `3n`. `Summary.induction_mutual_wf` takes any well-founded relation
+  instead (a lexicographic measure, say).
+* Per-member preconditions and frames (`below`, `adj`, `frame` in `CycA.lean`) are functions
+  of the member; members with different frame sizes need different stack windows. Simplify the
+  `ih` hypotheses with those definitions (`simp only [Pre, adj, below, …] at ihA ihB ihC`) and
+  pass the frame and result functions to the executor (`janus_run [frame, result] calls [ihB]`)
+  so that the callee's `MemFrame` and result are read at the call site.
+* A statement must not mention the member type (the audit allows only plain definitions in a
+  statement): state each member's `Ensures` with its own precondition (`PreA`, `PreB`, …), as
+  `CycA.lean`'s `correctness` does, and prove it from the summary with `Summary.returns`.
+
 ### Go assembly and ABI0 calls (`examples/asm`)
 
 An assembly function (`f.abi0`) takes its arguments from the caller's frame, so its theorem is

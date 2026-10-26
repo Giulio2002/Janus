@@ -44,4 +44,57 @@ theorem Summary.returns {p : Program} {entry ret : Nat} {pre : State → Prop}
   refine Reaches.call (hsum.withExit hret) hpc hpre fun s' hr hp => ?_
   exact Reaches.exit_withExit hret (by rw [hr]; exact hra) (hq s' hp)
 
+/-! ## Mutual recursion: a family of entries with a shared measure
+
+A strongly connected component of the call graph (`isEven`/`isOdd`; math/big's {`nat.mul`,
+`karatsuba`, `(*Int).mul`}) has several entries that call each other. `Summary.induction_mutual`
+proves one summary per member, indexed by any type `ι` (an inductive with one constructor per
+member, or `Fin k`), by strong induction on a shared measure: member `i` at entry state `s` has
+measure `μ i s : Nat`, and in the case `μ i s = n` the induction hypothesis `ih j` is the summary
+of **every** member `j` for the states with `μ j s < n`. So each call inside the component, to
+itself or to another member, must strictly decrease the measure; a call to another member at the
+"same" argument is handled by weighting the members (`3·n + 2`, `3·n + 1`, `3·n` for a 3-cycle that
+decreases `n` once per round). `Summary.induction_mutual_wf` is the same over any well-founded
+relation (a lexicographic measure, say). Both are theorems from the definition of `Summary`; no
+axiom beyond the allow-list is used.
+
+Inside the proof of member `i`, `janus_run calls [ih j₁, ih j₂, …]` uses the hypotheses at the
+calls, exactly like `Summary.induction`'s `ih` (the executor proves each callee precondition,
+including the decrease of the measure). See `examples/proofs/IsEven.lean`, `CycA.lean` and their
+amd64 counterparts. -/
+
+/-- Mutual strong induction over a well-founded relation `r` on the measure values. -/
+theorem Summary.induction_mutual_wf {p : Program} {ι : Sort _} {α : Sort _} {r : α → α → Prop}
+    (hwf : WellFounded r) {entry : ι → Nat} {pre : ι → State → Prop}
+    {post : ι → State → State → Prop} (μ : ι → State → α)
+    (step : ∀ a, (∀ j, Summary p (entry j) (fun s => pre j s ∧ r (μ j s) a) (post j)) →
+      ∀ i, Summary p (entry i) (fun s => pre i s ∧ μ i s = a) (post i)) :
+    ∀ i, Summary p (entry i) (pre i) (post i) := by
+  have h : ∀ a, ∀ i, Summary p (entry i) (fun s => pre i s ∧ μ i s = a) (post i) := by
+    intro a
+    induction a using hwf.induction with
+    | _ a ih =>
+      exact step a fun j s hpc ⟨hp, hlt⟩ => ih (μ j s) hlt j s hpc ⟨hp, rfl⟩
+  intro i s hpc hp
+  exact h (μ i s) i s hpc ⟨hp, rfl⟩
+
+/-- Mutual strong induction on a shared natural-number measure: to prove the summary of member
+`i` for the states of measure `n`, the summaries of all members may be used for every state of
+smaller measure. -/
+theorem Summary.induction_mutual {p : Program} {ι : Sort _} {entry : ι → Nat}
+    {pre : ι → State → Prop} {post : ι → State → State → Prop} (μ : ι → State → Nat)
+    (step : ∀ n, (∀ j, Summary p (entry j) (fun s => pre j s ∧ μ j s < n) (post j)) →
+      ∀ i, Summary p (entry i) (fun s => pre i s ∧ μ i s = n) (post i)) :
+    ∀ i, Summary p (entry i) (pre i) (post i) :=
+  Summary.induction_mutual_wf (r := (· < ·)) Nat.lt_wfRel.wf μ step
+
+/-- The single-entry `Summary.induction` is the one-member case of `Summary.induction_mutual`. -/
+example {p : Program} {entry : Nat} {pre : State → Prop} {post : State → State → Prop}
+    (μ : State → Nat)
+    (step : ∀ n, Summary p entry (fun s => pre s ∧ μ s < n) post →
+      Summary p entry (fun s => pre s ∧ μ s = n) post) :
+    Summary p entry pre post :=
+  Summary.induction_mutual (ι := Unit) (entry := fun _ => entry) (pre := fun _ => pre)
+    (post := fun _ => post) (fun _ => μ) (fun n ih _ => step n (ih ())) ()
+
 end Janus.Amd64.Tactic
