@@ -1198,6 +1198,52 @@ def addReadLEBounds : TacticM Unit := withMainContext do
       let (_, g') ← (← g.assert `h_rd ty pf).intro1P
       replaceMainGoal [g']
 
+/-- The propositions `p` of `decide p` in `e`. -/
+partial def collectDecide (e : Expr) (acc : Array Expr) : Array Expr :=
+  match e with
+  | .app f a =>
+    let acc := if e.isAppOfArity ``Decidable.decide 2 && !(e.getArg! 0).hasLooseBVars &&
+        !acc.contains (e.getArg! 0) then acc.push (e.getArg! 0) else acc
+    collectDecide a (collectDecide f acc)
+  | .lam _ t b _ | .forallE _ t b _ => collectDecide b (collectDecide t acc)
+  | .letE _ t v b _ => collectDecide b (collectDecide v (collectDecide t acc))
+  | .mdata _ b => collectDecide b acc
+  | .proj _ _ b => collectDecide b acc
+  | _ => acc
+
+/-- Case split on every `p` of a `decide p` (at most 5, in the goal and the hypotheses) and
+evaluate the Booleans in each case: carries `(decide p).toNat` that come from case splits become
+`0`/`1`, so `omega` closes the cases. Fails if there is no `decide`. -/
+elab "janus_decide_split" : tactic => withMainContext do
+  let mut tys := #[← instantiateMVars (← getMainTarget)]
+  for d in ← getLCtx do
+    if !d.isImplementationDetail then tys := tys.push (← instantiateMVars d.type)
+  let mut ps : Array Expr := #[]
+  for t in tys do ps := collectDecide t ps
+  let props := (ps.filter fun p => !p.hasMVar).extract 0 5
+  let props := props
+  if props.isEmpty then throwError "janus_decide_split: no `decide` in the goal"
+  for p in props do
+    let mut out : List MVarId := []
+    for g in ← getGoals do
+      let hdp := mkIdent `hdp
+      let gs ← Tactic.run g <| withoutRecover do
+        evalTactic (← `(tactic| rcases (Classical.em $(← Term.exprToSyntax p)) with $hdp:ident | $hdp:ident))
+      for g1 in gs do
+        setGoals [g1]
+        let g2 ← withMainContext do
+          let stx ← `(tactic| simp only [$hdp:ident, decide_true, decide_false, Bool.toNat_true,
+            Bool.toNat_false, decide_eq_true_eq, decide_eq_false_iff_not])
+          let r ← mkSimpContext stx (eraseLocal := false)
+          let keep := (← getLCtx).foldl (init := #[]) fun acc d =>
+            if d.isImplementationDetail || d.userName == `hdp then acc else acc.push d.fvarId
+          try
+            let (res, _) ← simpGoal g1 r.ctx r.simprocs (fvarIdsToSimp := keep)
+            pure (res.map (·.2))
+          catch _ => pure (some g1)
+        if let some g2 := g2 then out := out ++ [g2]
+    setGoals out
+
 /-! ## Robustness to the shape of `State` -/
 
 /-- For a structure `S` with field `f`: `(number of fields, index of f)`. Used to read the pc

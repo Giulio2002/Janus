@@ -1020,4 +1020,25 @@ example (m : Memory) (u v w : Nat) :
       ((m.writeLE 0x20 8 w).writeLE 0x10 8 u).writeLE 0x30 4 v := by
   simp (disch := decide) only [writeLE_comm]
 
+/-! ## Carries times large literals; `decide` carries from case splits
+
+`BitVec.ofNat 64 (c.toNat * 18446744073709551615)` has the kernel unfold `Nat.mul` on the literal
+(recursion depth `2^64`) when `c` is not a numeral; the simp sets rewrite the Boolean away
+(`ofNat_toNat_mul`) and `x * (2^64-1)` to `-x`. `janus_arith` case-splits on the propositions of
+`decide p` (`janus_decide_split`) so that carry chains with `(decide p).toNat` close. -/
+
+example (a b : Nat) : BitVec.ofNat 64 ((decide (a < b)).toNat * 18446744073709551615) =
+    if a < b then 18446744073709551615#64 else 0#64 := by
+  simp only [janus_post, decide_eq_true_eq]
+
+example (x : Nat) : BitVec.ofNat 64 (x * 18446744073709551615) = -BitVec.ofNat 64 x := by
+  simp only [janus_post]
+
+example (a b c : Nat) (h : (decide (a < b)).toNat = c) : c = 1 ∨ a ≥ b := by
+  janus_arith
+
+example (a b : Nat) (ha : a < 2 ^ 64) (hb : b < 2 ^ 64) (c : Nat) (hc : (decide (2 ^ 64 ≤ a + b)).toNat = c) :
+    (a + b) % 2 ^ 64 + 2 ^ 64 * c = a + b := by
+  janus_arith
+
 end JanusTests.Tactic

@@ -644,6 +644,34 @@ theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat) (h1 : a ≤
 @[janus_exec, janus_post] theorem writeLE_mod_1 (m : Memory) (a v : Nat) :
     m.writeLE a 1 (v % 256) = m.writeLE a 1 v := Memory.writeLE_mod m a 1 v
 
+/-! ## Large literals times a carry stay out of the kernel's `Nat.mul`
+
+`BitVec.ofNat 64 (c.toNat * 18446744073709551615)` (a Boolean carry times `2^64 - 1`, e.g. from
+`sbb`-style masks) makes the kernel unfold `Nat.mul` on the literal when `c` is not a numeral:
+a recursion of depth `2^64`. Rewriting the Boolean away (`if c then … else 0`), and
+`x * (2^64-1)` to `-x`, never presents such a term to `whnf`. -/
+
+theorem ofNat_toNat_mul (b : Bool) (n : Nat) :
+    BitVec.ofNat 64 (b.toNat * n) = if b then BitVec.ofNat 64 n else 0#64 := by
+  cases b <;> simp
+
+theorem ofNat_mul_toNat (b : Bool) (n : Nat) :
+    BitVec.ofNat 64 (n * b.toNat) = if b then BitVec.ofNat 64 n else 0#64 := by
+  cases b <;> simp
+
+theorem ofNat_mul_allones (x : Nat) :
+    BitVec.ofNat 64 (x * 18446744073709551615) = -BitVec.ofNat 64 x := by
+  apply BitVec.eq_of_toNat_eq
+  simp only [BitVec.toNat_ofNat, BitVec.toNat_neg]
+  omega
+
+theorem ofNat_allones_mul (x : Nat) :
+    BitVec.ofNat 64 (18446744073709551615 * x) = -BitVec.ofNat 64 x := by
+  rw [Nat.mul_comm]; exact ofNat_mul_allones x
+
+attribute [janus_exec high, janus_post high] ofNat_toNat_mul ofNat_mul_toNat
+attribute [janus_exec, janus_post] ofNat_mul_allones ofNat_allones_mul
+
 /-! ## Arithmetic normalisation (addresses and values) -/
 
 /-- `2^64` as the literal simp normalises it to. -/
