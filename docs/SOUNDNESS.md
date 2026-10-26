@@ -1287,9 +1287,18 @@ no concurrent GC, no preemption):
      the binary's symbols (the sanitizer runtimes' entry points), sections and `debug/buildinfo`
      settings. Their semantics depend on the sanitizer runtimes' shadow state, which the model does
      not have; a binary that hides those markers is outside what the detection covers.
-  5. *Soft float.* Nothing about `-d=softfloat` is assumed: `f32to64` is proved; Go's `fadd64`
-     does not implement IEEE 754 for subnormal results (RUNTIME-CONTRACTS.md), so no contract
-     claims it does.
+  5. *Soft float and `KeepAlive`.* `f32to64` is proved. `fadd64`, `fsub64`, `fmul64`, `fdiv64` have
+     contracts (`Janus.Contracts.SoftFloat`, `SoftFloatAmd64`) that say IEEE 754 binary64
+     round-to-nearest-even **only where the exact result is not tiny** (finite non-zero operands
+     whose exact sum, product or quotient is below `2^-1022` are excluded by the precondition):
+     Go's `fadd64` does not implement IEEE 754 for subnormal results (RUNTIME-CONTRACTS.md), so
+     no contract claims it does. The claim for the other cases (zeros, infinities, NaNs, overflow,
+     normal results) is trusted: it is tested against the hardware on millions of random operands
+     of every class (`scripts/softfloat-check.sh`), not derived from the runtime's code, and the
+     function is pinned to the code that was tested. The contracts also require Go's `FPCR` /
+     `MXCSR` controls, which the runtime ignores (the satisfiability witness is hardware
+     floating point). `runtime.KeepAlive` (reached through a function value; direct calls are an
+     intrinsic) is proved to meet its contract from its own code.
 * **amd64**: every amd64 contract requires the return address at `[RSP]` below `2^47` (a
   canonical user address); without it no code could return and the contract would be
   unsatisfiable.
@@ -1479,7 +1488,8 @@ callers that violate the convention.
 ## The kernel trust boundary (system calls, environment reads, traps)
 
 Go programs reach Linux through `SVC #0` / `SYSCALL`, read time and identification registers
-(`MRS CNTVCT_EL0`, `CNTFRQ_EL0`, `MIDR_EL1`, `DIT`; `CPUID`, `XGETBV`, `RDTSC(P)`), and call the
+(`MRS CNTVCT_EL0`, `CNTFRQ_EL0`, `MIDR_EL1`, `DIT`, the feature-ID registers `ID_AA64*_EL1`; `CPUID`,
+`XGETBV`, `RDTSC(P)`), and call the
 clock functions of the vDSO (code the kernel maps into the process, not part of the binary).
 None of these has a result the user-mode state determines. The design (WP-C,
 `Janus/Contracts/Syscall.lean`, `Janus/Contracts/SyscallAmd64.lean`):
@@ -1518,6 +1528,15 @@ None of these has a result the user-mode state determines. The design (WP-C,
     and `madvise` may change every byte of the advised pages;
   * `CLOCK_MONOTONIC` and `CNTVCT_EL0` never go back; the wall clock, `MIDR_EL1`, `CPUID`,
     `RDTSC` are arbitrary (a thread may migrate between cores);
+  * the feature-ID registers `MRS Xt, S3_0_C0_C<4..7>_<op2>` (`ID_AA64ISAR0/1/2_EL1`,
+    `ID_AA64PFR0/1_EL1`, `ID_AA64ZFR0_EL1`, `ID_AA64MMFR0..4_EL1`, `ID_AA64DFR0/1_EL1`, the
+    reserved ones that read as zero, ...) return an **arbitrary 64-bit value**
+    (`Site.mrs (.idreg crm op2)`; the event is `.env "ID_AA64ISAR0_EL1" v`): Linux emulates them
+    at EL0 (`HWCAP_CPUID`) with the CPU's value after masking the fields it does not expose, but
+    the model does not assume which fields, so a proof assumes no CPU feature unless it states
+    one as a hypothesis on the event; `Kern.idregOK` (default true) says Linux emulates them,
+    otherwise they are `SIGILL`. `MRS` of the other registers of the ID space (`MPIDR_EL1`,
+    `REVIDR_EL1`, ...) stays rejected;
   * the vDSO wrappers may write the runtime-owned memory `KEnv.rt` (the `m`'s `vdsoPC`/`vdsoSP`,
     the `g0` and `gsignal` stacks) and `KEnv.stack` bytes below `SP`, and return with every
     register except `SP`, `g` and `FP` arbitrary (arm64 `EnsuresK` therefore uses `ABIReturnC`,

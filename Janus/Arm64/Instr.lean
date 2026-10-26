@@ -32,11 +32,14 @@ namespace Janus.Arm64
 
 /-- The system registers whose value comes from the execution environment, read by `MRS`
 (`Instr.mrsEnv`; WP-C, `Janus.Kernel`): the virtual counter `CNTVCT_EL0`, its frequency
-`CNTFRQ_EL0`, the CPU's `MIDR_EL1` (emulated by Linux for EL0) and `PSTATE.DIT`. -/
+`CNTFRQ_EL0`, the CPU's `MIDR_EL1` (emulated by Linux for EL0), the feature-ID registers
+`ID_AA64*_EL1` (`idreg crm op2`: `S3_0_C0_C<crm>_<op2>`, `crm ∈ 4..7`, the 64-bit ID registers that Linux traps and
+emulates at EL0 with sanitised values) and `PSTATE.DIT`. -/
 inductive EnvReg where
   | cntvct
   | cntfrq
   | midr
+  | idreg (crm op2 : Nat)
   | dit
 deriving Repr, DecidableEq, Inhabited
 

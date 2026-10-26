@@ -187,6 +187,21 @@ example : decode 0xd53be040 = some (.mrsEnv .cntvct 0) := by decide   -- mrs x0,
 example : decode 0xd53be003 = some (.mrsEnv .cntfrq 3) := by decide   -- mrs x3, cntfrq_el0
 example : decode 0xd5380001 = some (.mrsEnv .midr 1) := by decide   -- mrs x1, midr_el1
 example : decode 0xd53b42a0 = some (.mrsEnv .dit 0) := by decide   -- mrs x0, dit
+-- the feature-ID registers (N5): Linux traps and emulates them at EL0; the value is arbitrary
+example : decode 0xd5380600 = some (.mrsEnv (.idreg 6 0) 0) := by decide   -- mrs x0, id_aa64isar0_el1
+example : decode 0xd5380625 = some (.mrsEnv (.idreg 6 1) 5) := by decide   -- mrs x5, id_aa64isar1_el1
+example : decode 0xd5380640 = some (.mrsEnv (.idreg 6 2) 0) := by decide   -- mrs x0, id_aa64isar2_el1
+example : decode 0xd5380400 = some (.mrsEnv (.idreg 4 0) 0) := by decide   -- mrs x0, id_aa64pfr0_el1
+example : decode 0xd5380420 = some (.mrsEnv (.idreg 4 1) 0) := by decide   -- mrs x0, id_aa64pfr1_el1
+example : decode 0xd5380480 = some (.mrsEnv (.idreg 4 4) 0) := by decide   -- mrs x0, id_aa64zfr0_el1
+example : decode 0xd5380700 = some (.mrsEnv (.idreg 7 0) 0) := by decide   -- mrs x0, id_aa64mmfr0_el1
+example : decode 0xd53807e3 = some (.mrsEnv (.idreg 7 7) 3) := by decide   -- mrs x3, s3_0_c0_c7_7 (reserved, RAZ)
+example : decode 0xd5380100 = none := by decide   -- mrs x0, id_pfr0_el1 (AArch32 ID, CRm = 1): not exposed
+example : decode 0xd53800a0 = none := by decide   -- mrs x0, mpidr_el1: not emulated at EL0
+example : decode 0xd5380800 = none := by decide   -- CRm = 8: not the ID space
+example : decode 0xd5390600 = none := by decide   -- op1 = 1
+example : decode 0xd5381600 = none := by decide   -- CRn = 1
+example : decode 0xd5180600 = none := by decide   -- msr id_aa64isar0_el1: not writable
 example : decode 0xd51b42a0 = some (.msrDitReg 0) := by decide   -- msr dit, x0
 example : decode 0xd503415f = some (.msrDitImm 1) := by decide   -- msr dit, #1
 example : decode 0xd503405f = some (.msrDitImm 0) := by decide   -- msr dit, #0

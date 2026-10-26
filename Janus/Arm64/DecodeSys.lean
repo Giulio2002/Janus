@@ -17,7 +17,11 @@ the main decoder (`Janus.Arm64.Decode`) only carries two one-line hooks:
 * **Environment registers.** `MRS Xt, CNTVCT_EL0` (`0xD53BE040`), `MRS Xt, CNTFRQ_EL0`
   (`0xD53BE000`), `MRS Xt, MIDR_EL1` (`0xD5380000`, emulated by Linux for EL0 when the CPU
   feature `CPUID` is reported), `MRS Xt, DIT` (`0xD53B42A0`), `MSR DIT, Xt` (`0xD51B42A0`) and
-  `MSR DIT, #imm` (`0xD503405F | CRm << 8`, `CRm ∈ {0, 1}`). They execute as `Fault.kernel`; the
+  `MSR DIT, #imm` (`0xD503405F | CRm << 8`, `CRm ∈ {0, 1}`). The feature-ID registers
+  `MRS Xt, S3_0_C0_C<4..7>_<op2>` (`0xD5380000 | CRm << 8 | op2 << 5`: `ID_AA64ISAR0/1/2_EL1`,
+  `ID_AA64PFR0/1_EL1`, `ID_AA64ZFR0_EL1`, `ID_AA64MMFR0..4_EL1`, `ID_AA64DFR0/1_EL1`, ...) are
+  trapped and emulated by Linux (`HWCAP_CPUID`) with sanitised values; they read as an
+  arbitrary value (`Janus.Kernel.Site.mrs (.idreg ..)`). They execute as `Fault.kernel`; the
   environment contract of `Janus.Kernel` gives their result.
 * **Flag images** (the arm64 counterpart of `PUSHFQ`/`POPFQ`, used by `runtime.asyncPreempt`):
   `MRS`/`MSR` of `NZCV` (`0xD53B4200`/`0xD51B4200`) and `FPSR` (`0xD53B4420`/`0xD51B4420`), which
@@ -36,6 +40,11 @@ def decodeSys (w : Nat) : Option Instr :=
   else if w &&& 0xFFFFFFE0 = 0xD53BE040 then some (.mrsEnv .cntvct (bits w 4 0))
   else if w &&& 0xFFFFFFE0 = 0xD53BE000 then some (.mrsEnv .cntfrq (bits w 4 0))
   else if w &&& 0xFFFFFFE0 = 0xD5380000 then some (.mrsEnv .midr (bits w 4 0))
+  -- the 64-bit ID registers `S3_0_C0_C<4..7>_<op2>` (ID_AA64PFR*, ID_AA64ZFR0, ID_AA64DFR*,
+  -- ID_AA64ISAR*, ID_AA64MMFR*, and the reserved ones of that range, which read as zero): Linux
+  -- emulates the reads (Documentation/arch/arm64/cpu-feature-registers.rst)
+  else if w &&& 0xFFFFF000 = 0xD5380000 ∧ 4 ≤ bits w 11 8 ∧ bits w 11 8 ≤ 7 then
+    some (.mrsEnv (.idreg (bits w 11 8) (bits w 7 5)) (bits w 4 0))
   else if w &&& 0xFFFFFFE0 = 0xD53B42A0 then some (.mrsEnv .dit (bits w 4 0))
   else if w &&& 0xFFFFFFE0 = 0xD51B42A0 then some (.msrDitReg (bits w 4 0))
   else if w = 0xD503405F then some (.msrDitImm 0)

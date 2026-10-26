@@ -136,6 +136,9 @@ structure Kern where
   dit : Bool := false
   /-- Linux emulates `MRS MIDR_EL1` at EL0 (`HWCAP_CPUID`); otherwise it is `SIGILL`. -/
   midrOK : Bool := true
+  /-- Linux emulates the feature-ID register reads `MRS Xt, S3_0_C0_C<4..7>_<op2>` at EL0
+  (`HWCAP_CPUID`, kernel 4.11 or later); otherwise they are `SIGILL`. -/
+  idregOK : Bool := true
   /-- The CPU implements `FEAT_DIT`; otherwise `MRS`/`MSR DIT` are `SIGILL`. -/
   ditOK : Bool := true
   /-- amd64: `RDTSC`/`RDTSCP` are allowed at CPL 3 (`CR4.TSD = 0`, `PR_SET_TSC`). -/
@@ -358,6 +361,30 @@ def Effect (sc : Sys) (a : Nat → Nat) (k : Kern) (m : Memory) (k' : Kern) (m' 
 
 /-! ## arm64: the stub sites -/
 
+/-- The name `.env` events give the feature-ID register `S3_0_C0_C<crm>_<op2>`: the Arm name for the
+ones x/sys/cpu, `internal/cpu` and cpuid-style code read, the generic encoding for the rest.
+A read returns an ARBITRARY 64-bit value (Linux's sanitised view of the CPU, which a proof must not
+assume): a theorem about the code states what it needs of the value as a hypothesis on the
+event it reads, or concludes something that holds for every value. -/
+def idRegName (crm op2 : Nat) : String :=
+  match crm, op2 with
+  | 4, 0 => "ID_AA64PFR0_EL1"
+  | 4, 1 => "ID_AA64PFR1_EL1"
+  | 4, 4 => "ID_AA64ZFR0_EL1"
+  | 5, 0 => "ID_AA64DFR0_EL1"
+  | 5, 1 => "ID_AA64DFR1_EL1"
+  | 5, 4 => "ID_AA64AFR0_EL1"
+  | 5, 5 => "ID_AA64AFR1_EL1"
+  | 6, 0 => "ID_AA64ISAR0_EL1"
+  | 6, 1 => "ID_AA64ISAR1_EL1"
+  | 6, 2 => "ID_AA64ISAR2_EL1"
+  | 7, 0 => "ID_AA64MMFR0_EL1"
+  | 7, 1 => "ID_AA64MMFR1_EL1"
+  | 7, 2 => "ID_AA64MMFR2_EL1"
+  | 7, 3 => "ID_AA64MMFR3_EL1"
+  | 7, 4 => "ID_AA64MMFR4_EL1"
+  | _, _ => s!"S3_0_C0_C{crm}_{op2}"
+
 /-- What a `.syscall` stub stands for. -/
 inductive Site where
   /-- `SVC #0`. -/
@@ -429,6 +456,10 @@ structure KEnv where
   rt : List (Nat × Nat)
   stack : Nat
 
+/-- Linux emulates the feature-ID register reads of EL0 code in the kernel state `k`
+(`Kern.idregOK`): the hypothesis a theorem about code that reads `ID_AA64*_EL1` states. -/
+def IdRegsEmulated (k : Kern) : Prop := k.idregOK = true
+
 /-- The system call `X8` names. -/
 def svcSys (s : State) : Option Sys := Sys.ofArm64 (s.regs 8).toNat
 
@@ -459,6 +490,7 @@ def SiteSafe (E : KEnv) (s : State) (k : Kern) : Site → Prop
   | .mrs .cntvct _ => True
   | .mrs .cntfrq _ => True
   | .mrs .midr _ => k.midrOK = true
+  | .mrs (.idreg _ _) _ => k.idregOK = true
   | .mrs .dit _ => k.ditOK = true
   | .ditImm b => k.ditOK = true ∧ b ≤ 1
   | .ditReg _ => k.ditOK = true
@@ -474,6 +506,8 @@ def SiteNext (E : KEnv) (s : State) (k : Kern) (s' : State) (k' : Kern) : Site �
       s' = (s.writeZR rt (BitVec.ofNat 64 v)).next
   | .mrs .cntfrq rt => k' = k ∧ s' = (s.writeZR rt (BitVec.ofNat 64 k.cntfrq)).next
   | .mrs .midr rt => ∃ v, v < 2 ^ 32 ∧ k' = k.emit (.env "MIDR_EL1" v) ∧
+      s' = (s.writeZR rt (BitVec.ofNat 64 v)).next
+  | .mrs (.idreg crm op2) rt => ∃ v, v < 2 ^ 64 ∧ k' = k.emit (.env (idRegName crm op2) v) ∧
       s' = (s.writeZR rt (BitVec.ofNat 64 v)).next
   | .mrs .dit rt => k' = k ∧ s' = (s.writeZR rt (if k.dit then BitVec.ofNat 64 (2 ^ 24) else 0)).next
   | .ditImm b => k' = { k with dit := b == 1 } ∧ s' = s.next
@@ -808,6 +842,7 @@ theorem SiteNext.total (E : KEnv) (s : State) (k : Kern) (site : Site) (h : Site
     | cntvct => exact ⟨_, _, k.cntvct, Nat.le_refl _, rfl, rfl⟩
     | cntfrq => exact ⟨_, _, rfl, rfl⟩
     | midr => exact ⟨_, _, 0, by decide, rfl, rfl⟩
+    | idreg crm op2 => exact ⟨_, _, 0, by decide, rfl, rfl⟩
     | dit => exact ⟨_, _, rfl, rfl⟩
   | ditImm b => exact ⟨_, _, rfl, rfl⟩
   | ditReg rt => exact ⟨_, _, rfl, rfl⟩

@@ -263,7 +263,7 @@ func fpsrDiff(hw, model uint64) string {
 }
 
 // compareEnv checks a hardware result of an environment instruction (MRS of CNTVCT_EL0,
-// CNTFRQ_EL0, MIDR_EL1 or DIT; MSR DIT) against the frame of its environment contract: the
+// CNTFRQ_EL0, MIDR_EL1, DIT or a feature-ID register; MSR DIT) against the frame of its environment contract: the
 // destination register is the only general register that may change (MIDR_EL1: a 32-bit value;
 // DIT: only bit 24), and SP, NZCV, the vector registers, FPCR/FPSR and memory are unchanged,
 // with pc + 4.
@@ -280,6 +280,9 @@ func compareEnv(c *L.Case, h *L.HW, v Verdict) Verdict {
 		free, kind, mask = rt, "env/midr", 0xFFFFFFFF
 	case w&0xFFFFFFE0 == 0xD53B42A0:
 		free, kind, mask = rt, "env/dit", 1<<24
+	case w&0xFFFFF000 == 0xD5380000 && (w>>8)&0xF >= 4 && (w>>8)&0xF <= 7:
+		// the feature-ID registers: any 64-bit value (Janus.Kernel.Site.mrs (.idreg crm op2))
+		free, kind = rt, "env/idreg"
 	}
 	for i := 0; i < 31; i++ {
 		hv := hexv(h.X[i])
