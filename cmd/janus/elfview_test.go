@@ -28,7 +28,8 @@ type synth struct {
 	preinit      []uint64
 	syms         []synthSym
 	textOffDelta uint64
-	textFlags    uint64 // when nonzero, replaces .text sh_flags
+	machine      elf.Machine // default EM_X86_64
+	textFlags    uint64      // when nonzero, replaces .text sh_flags
 }
 
 type synthSym struct {
@@ -181,7 +182,11 @@ func (o synth) build() []byte {
 	// ELF header
 	copy(d, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
 	le.PutUint16(d[16:], uint16(elf.ET_EXEC))
-	le.PutUint16(d[18:], uint16(elf.EM_X86_64))
+	m := o.machine
+	if m == 0 {
+		m = elf.EM_X86_64
+	}
+	le.PutUint16(d[18:], uint16(m))
 	le.PutUint32(d[20:], 1)
 	le.PutUint64(d[24:], 0x401000)
 	le.PutUint64(d[32:], 0x40)
@@ -339,4 +344,14 @@ func TestElfInitArrayWarnings(t *testing.T) {
 	if err != nil || len(w) != 1 || !strings.Contains(w[0], ".preinit_array") {
 		t.Fatalf("preinit_array: err=%v warnings=%v", err, w)
 	}
+}
+
+// Segments that are disjoint at 4 KiB but share a 64 KiB page overlap on arm64 kernels with
+// 64 KiB pages (the default layout puts all three PT_LOADs in one 64 KiB page); on x86-64,
+// where the page size is 4 KiB, the same layout is fine.
+func TestElfLargePageOverlapArm64(t *testing.T) {
+	if _, err := checkAll(t, synth{}.build()); err != nil {
+		t.Fatalf("amd64 4 KiB-disjoint layout: %v", err)
+	}
+	wantReject(t, "arm64 shared 64k page", synth{machine: elf.EM_AARCH64}, "overlaps an earlier PT_LOAD")
 }

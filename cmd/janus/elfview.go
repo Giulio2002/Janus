@@ -19,13 +19,23 @@ import (
 	"os"
 )
 
-const loadPage = 4096 // the smallest page size a Linux kernel maps with; overlap is checked at this granularity
+// loadPageSize is the largest page size Linux can map PT_LOADs with for the ISA: 64 KiB on
+// arm64 (4/16/64 KiB kernels exist), 4 KiB on x86-64 (huge pages do not apply to binfmt_elf
+// PT_LOAD mappings). Overlap and offset/vaddr congruence are checked at this granularity, so two
+// segments that share a page on any supported kernel are rejected.
+func loadPageSize(m elf.Machine) uint64 {
+	if m == elf.EM_AARCH64 {
+		return 1 << 16
+	}
+	return 1 << 12
+}
 
 type loadSeg struct {
 	Off, Vaddr, Filesz, Memsz, Flags, Align uint64
 }
 
 type loaderView struct {
+	gran uint64 // loadPageSize of the ISA
 	data []byte
 	segs []loadSeg // PT_LOAD entries in table order
 }
@@ -37,21 +47,21 @@ func elfDiag(msg, next string) *diag {
 	return &diag{Msg: msg, Stage: "binary validation", Next: next}
 }
 
-func pageDown(x uint64) uint64 { return x &^ (loadPage - 1) }
-func pageUp(x uint64) uint64   { return (x + loadPage - 1) &^ (loadPage - 1) }
+func (lv *loaderView) pageDown(x uint64) uint64 { return x &^ (lv.gran - 1) }
+func (lv *loaderView) pageUp(x uint64) uint64   { return (x + lv.gran - 1) &^ (lv.gran - 1) }
 
 // newLoaderView builds the loader map and rejects malformed PT_LOAD tables:
 //
 //	L1  p_filesz <= p_memsz
 //	L2  the file bytes [p_offset, p_offset+p_filesz) lie inside the file; no address overflow
-//	L3  p_offset ≡ p_vaddr (mod 4096), and if p_align > 1 it is a power of two with
+//	L3  p_offset ≡ p_vaddr (mod the ISA's largest page size, loadPageSize), and if p_align > 1 it is a power of two with
 //	    p_offset ≡ p_vaddr (mod p_align) (the kernel maps whole pages at a file offset)
-//	L4  no two PT_LOADs overlap, at 4 KiB page granularity over [p_vaddr, p_vaddr+p_memsz)
+//	L4  no two PT_LOADs overlap, at loadPageSize granularity (64 KiB arm64, 4 KiB amd64) over [p_vaddr, p_vaddr+p_memsz)
 //	    (the kernel maps whole pages, so a shared page is an overlap)
 //	L5  no PT_LOAD is both writable and executable
 //	L6  at least one PT_LOAD
 func newLoaderView(f *elf.File, data []byte, path string) (*loaderView, error) {
-	lv := &loaderView{data: data}
+	lv := &loaderView{data: data, gran: loadPageSize(f.Machine)}
 	for i, p := range f.Progs {
 		if p.Type != elf.PT_LOAD {
 			continue
@@ -67,10 +77,10 @@ func newLoaderView(f *elf.File, data []byte, path string) (*loaderView, error) {
 		if s.Off+s.Filesz < s.Off || s.Off+s.Filesz > uint64(len(data)) {
 			return nil, bad("maps file bytes beyond the end of the file")
 		}
-		if s.Vaddr+s.Memsz < s.Vaddr || pageUp(s.Vaddr+s.Memsz) < s.Vaddr {
+		if s.Vaddr+s.Memsz < s.Vaddr || lv.pageUp(s.Vaddr+s.Memsz) < s.Vaddr {
 			return nil, bad("wraps the address space")
 		}
-		if s.Off%loadPage != s.Vaddr%loadPage {
+		if s.Off%lv.gran != s.Vaddr%lv.gran {
 			return nil, bad("has p_offset and p_vaddr that are not congruent modulo the page size")
 		}
 		if s.Align > 1 && (s.Align&(s.Align-1) != 0 || s.Off%s.Align != s.Vaddr%s.Align) {
@@ -79,9 +89,9 @@ func newLoaderView(f *elf.File, data []byte, path string) (*loaderView, error) {
 		if s.Flags&uint64(elf.PF_W) != 0 && s.Flags&uint64(elf.PF_X) != 0 {
 			return nil, bad("is writable and executable")
 		}
-		lo, hi := pageDown(s.Vaddr), pageUp(s.Vaddr+s.Memsz)
+		lo, hi := lv.pageDown(s.Vaddr), lv.pageUp(s.Vaddr+s.Memsz)
 		for j, o := range lv.segs {
-			olo, ohi := pageDown(o.Vaddr), pageUp(o.Vaddr+o.Memsz)
+			olo, ohi := lv.pageDown(o.Vaddr), lv.pageUp(o.Vaddr+o.Memsz)
 			if lo < ohi && olo < hi && s.Memsz > 0 && o.Memsz > 0 {
 				return nil, bad(fmt.Sprintf("overlaps an earlier PT_LOAD (#%d, vaddr 0x%x, memsz 0x%x) at page granularity; the kernel would map the later one over the earlier, so the extracted bytes could differ from the executed ones", j, o.Vaddr, o.Memsz))
 			}
@@ -183,7 +193,7 @@ func validateSegments(f *elf.File, data []byte, path string) (*loaderView, error
 			continue
 		}
 		for _, g := range lv.segs {
-			if g.Flags&uint64(elf.PF_W) != 0 && pageDown(s.Addr) < pageUp(g.Vaddr+g.Memsz) && pageDown(g.Vaddr) < pageUp(s.Addr+s.Size) {
+			if g.Flags&uint64(elf.PF_W) != 0 && lv.pageDown(s.Addr) < lv.pageUp(g.Vaddr+g.Memsz) && lv.pageDown(g.Vaddr) < lv.pageUp(s.Addr+s.Size) {
 				return nil, elfDiag(fmt.Sprintf("a writable PT_LOAD (vaddr 0x%x, memsz 0x%x) overlaps the executable section %s of %s; code must be in a non-writable segment", g.Vaddr, g.Memsz, s.Name, path), "")
 			}
 		}

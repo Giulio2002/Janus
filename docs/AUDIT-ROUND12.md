@@ -12,7 +12,7 @@ into code or rodata), RELRO and symbol-range checks. The exact list and the out-
 assumptions are in docs/SOUNDNESS.md "ELF loader semantics".
 
 Rows (`audit/round12/run-round12.sh`, both ISAs on the Add example): O1 overlap with 4 KiB and
-64 KiB `p_align` and a 16-byte unaligned overlap (each also run under qemu to show the overlapping
+64 KiB `p_align`, a 16-byte unaligned overlap and (arm64) segments disjoint at 4 KiB that share a 64 KiB page (each also run under qemu to show the overlapping
 mapping really executes), H1 section header at another file offset, H2 `filesz > memsz`, H3 W+X,
 H4 misaligned, C1 the unmodified binary still verifies, D1 the synthetic-ELF unit tests
 (`cmd/janus/elfview_test.go`: relocations into code/rodata, IRELATIVE, DT_TEXTREL, DF_TEXTREL,

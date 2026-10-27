@@ -12,6 +12,8 @@ Every mode starts from SRC, a Go example binary, and edits only headers or appen
   secoff      advance the .text section header's sh_offset by 4 (program headers untouched)
   filesz      make the text PT_LOAD's p_filesz > p_memsz
   wx          make the text PT_LOAD writable+executable
+  share64k    append a read-only PT_LOAD that is disjoint from every other at 4 KiB but shares a
+              64 KiB page with the last one (arm64 kernels with 64 KiB pages map them over each other)
   misalign    move the text PT_LOAD's p_vaddr by 0x10 so offset and vaddr are not congruent
 """
 import os, struct, sys
@@ -24,6 +26,21 @@ def main():
     phoff = struct.unpack_from("<Q", d, 32)[0]; phn = struct.unpack_from("<H", d, 56)[0]
     ph = [list(struct.unpack_from("<IIQQQQQQ", d, phoff + 56 * i)) for i in range(phn)]
     # fields: type flags off vaddr paddr filesz memsz align
+    if mode == "share64k":
+        top = max(p[3] + p[6] for p in ph if p[0] == 1)
+        nv = (top + 0xFFF) & ~0xFFF
+        assert nv % 0x10000 != 0, "no room in the last 64 KiB page"
+        off = (len(d) + 0xFFFF) // 0x10000 * 0x10000 + nv % 0x10000
+        d += b"\0" * (off - len(d)) + b"\0" * 0x1000
+        new_phoff = (len(d) + 7) // 8 * 8
+        d += b"\0" * (new_phoff - len(d))
+        for p in ph:
+            d += struct.pack("<IIQQQQQQ", *p)
+        d += struct.pack("<IIQQQQQQ", 1, 4, off, nv, nv, 0x1000, 0x1000, 0x1000)
+        struct.pack_into("<Q", d, 32, new_phoff); struct.pack_into("<H", d, 56, phn + 1)
+        open(dst, "wb").write(d); os.chmod(dst, 0o755)
+        print(f"wrote {dst}: mode {mode}")
+        return
     cov = [i for i, p in enumerate(ph) if p[0] == 1 and p[3] <= vaddr < p[3] + p[5]]
     assert len(cov) == 1, cov
     ci = cov[0]; c = ph[ci]
@@ -40,7 +57,7 @@ def main():
         size = 16 if mode == "overlap-sub" else 0x1000
         body = page[base - pg:base - pg + size]
         # place the new bytes at a file offset congruent to the vaddr modulo the alignment
-        a = max(align, 0x1000)
+        a = max(align, 0x10000)  # congruent modulo 64 KiB too, so only the overlap is wrong
         off = (len(d) + a - 1) // a * a + (base % a)
         d += b"\0" * (off - len(d)); d += body
         new_phoff = (len(d) + 7) // 8 * 8

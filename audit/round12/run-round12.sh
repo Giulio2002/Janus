@@ -64,6 +64,8 @@ for isa in arm64 amd64; do
   attack $isa filesz H2_filesz_gt_memsz "p_filesz > p_memsz"
   attack $isa wx H3_writable_exec "writable and executable"
   attack $isa misalign H4_misaligned "not congruent"
+  # disjoint at 4 KiB but sharing a 64 KiB page: an overlap on arm64 kernels with 64 KiB pages
+  [ $isa = arm64 ] && attack $isa share64k P1_share_64k_page "overlaps an earlier PT_LOAD"
   echo "== C ($isa): control"
   bin=artifacts/examples-$isa
   if [ $isa = arm64 ]; then

@@ -1607,10 +1607,10 @@ from its file image) and not from `sh_offset`. What Janus rejects (each is a `bi
 error):
 
 * **L1** `p_filesz > p_memsz`; **L2** file bytes past the end of the file, or address wrap-around;
-  **L3** `p_offset` and `p_vaddr` not congruent modulo 4096, or `p_align > 1` that is not a power of
+  **L3** `p_offset` and `p_vaddr` not congruent modulo the ISA's largest page size (64 KiB on arm64, 4 KiB on x86-64), or `p_align > 1` that is not a power of
   two or with `p_offset % p_align != p_vaddr % p_align` (the kernel maps whole pages at an
-  offset); **L4** any two `PT_LOAD` ranges `[p_vaddr, p_vaddr+p_memsz)` that overlap at 4 KiB page
-  granularity (the O1 attack: an appended page plus an overlapping later `PT_LOAD` runs different
+  offset); **L4** any two `PT_LOAD` ranges `[p_vaddr, p_vaddr+p_memsz)` that overlap at the
+  page-size granularity (the O1 attack: an appended page plus an overlapping later `PT_LOAD` runs different
   code from the one the section headers describe; Go's linker and gcc/ld never produce overlaps,
   and with none accepted the "later wins" resolution can never decide anything); **L5** a `PT_LOAD`
   that is writable and executable; **L6** no `PT_LOAD`.
@@ -1650,9 +1650,6 @@ extracted function run on the loaded image as described above, nothing else):
 * the kernel, the hardware and the emulator: that `binfmt_elf` behaves as described, that page
   protections are enforced, that the file is not changed between extraction and execution
   (extraction records the binary's SHA-256 and `check` re-reads it);
-* kernels with a page size above 4 KiB where two `PT_LOAD`s that do not overlap at 4 KiB do
-  share a larger page: Go's arm64 linker aligns segments to 64 KiB, and the check does not
-  model the larger page.
 
 ## What the theorem does not say
 
