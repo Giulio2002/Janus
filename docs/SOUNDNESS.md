@@ -1804,3 +1804,5 @@ covered by the convention: a theorem about it needs a precondition describing th
   fault).
 * Nothing about the Go source. If the compiler miscompiled it, the theorem is about the
   miscompiled code, which is the point.
+
+* **Hardware-oracle-only instruction classes.** x87, scalar FP, AES/PCLMUL/SHA, BMI/FMA, SSSE3/SSE4, AVX/AVX2 and AVX-512 are cross-checked against hardware oracles only, because the Sail x86 model has no semantics for them.
