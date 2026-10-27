@@ -641,9 +641,9 @@ size (8) is the prologue and epilogue value and the body's value is the frame si
 | `DeferTwice()` | two heap `defer` records in a loop (`deferproc`, `deferreturn`); the call returns |
 | `RecoverSet(x, e)` | `recover()` in a deferred closure turns `panic(e)` into a return of the named result `7` |
 | `DeferOrder(x)` | `panic(x)` with three open-coded defers: the deferred calls run last to first (both ISAs) |
-| `DeferMix(n)` | a loop's heap records and open-coded defers on one frame, in order, with `deferreturn` (arm64) |
+| `DeferMix(n)` | a loop's heap records and open-coded defers on one frame, in order, with `deferreturn` (both ISAs) |
 | `GoexitDefer(n)` | `runtime.Goexit()` runs the deferred calls and unwinds past the frame; `recover()` finds no panic (both ISAs) |
-| `RangeDefer(n)` | `defer` in a range-over-func body (`deferrangefunc`, `deferprocat`, `deferreturn`) (arm64) |
+| `RangeDefer(n)` | `defer` in a range-over-func body (`deferrangefunc`, `deferprocat`, `deferreturn`) (both ISAs) |
 | `NestedPanic(x)` | a deferred call panics again: the first panic is aborted, the second unwinds through the rest (both ISAs) |
 | `NestedRecover(x)` | a deferred call panics again and a later deferred call recovers the second panic (both ISAs) |
 
