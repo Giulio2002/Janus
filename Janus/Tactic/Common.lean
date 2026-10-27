@@ -1363,7 +1363,7 @@ def dischargeLiveForall (g : MVarId) : TacticM Bool := do
       let (_, g4) ← (← g3.assert `h_live aty app).intro1P
       g3 := g4
     let gs ← Tactic.run g3 <| withoutRecover (evalTactic (← `(tactic|
-      (try simp only [Janus.Apart, Janus.outside_cons, Janus.outside_nil, and_true] at *
+      (try simp only [Janus.Apart, Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true] at *
        omega))))
     if gs.isEmpty then return true
     saved.restore; return false
@@ -1438,13 +1438,23 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
            simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true,
              and_imp]
            intros
-           janus_apart_facts
-           try simp only [Janus.Apart] at *
-           janus_clear_irrel2
-           try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
-             Nat.reduceMod] at *
-           repeat' apply And.intro
-           all_goals first | omega | assumption))))
+           first
+           | (try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
+                Nat.reduceMod] at *
+              repeat' apply And.intro
+              all_goals first | assumption | omega)
+           | (janus_clear_irrel
+              try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
+                Nat.reduceMod] at *
+              repeat' apply And.intro
+              all_goals first | omega | assumption)
+           | (janus_apart_facts
+              try simp only [Janus.Apart] at *
+              janus_clear_irrel2
+              try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
+                Nat.reduceMod] at *
+              repeat' apply And.intro
+              all_goals first | omega | assumption)))))
         pure gs.isEmpty
       catch _ => pure false
     unless ok do saved.restore; continue

@@ -60,6 +60,7 @@ args() {
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
   for f in examples/rtmisc/proofs/*/*.lean; do names+=("$(basename "$(dirname "$f")")/$(basename "$f" .lean)"); done
+  for f in examples/rtmisc/proofs/*/*/lakefile.toml; do d="$(dirname "$f")"; names+=("$(basename "$(dirname "$d")")/$(basename "$d")"); done
 fi
 
 # JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): bin/janus and the binaries exist.
@@ -80,6 +81,24 @@ verify_one() {
   mapfile -t xargs < <(args "$n")
   bin/janus extract "$(bin "$isa" "$n")" "$(sym "$n")" "$out" ${xargs[@]+"${xargs[@]}"} >/dev/null 2>&1
   start=$(date +%s.%N)
+  if [ -f "examples/rtmisc/proofs/$isa/$n/lakefile.toml" ]; then
+    # a split example: a Lake package (examples/rtmisc/proofs/<isa>/<Name>/), one module per
+    # runtime-call segment; the root module <Pkg>.lean names the package
+    local d="examples/rtmisc/proofs/$isa/$n" pkg ok=1
+    pkg="$(basename "$(ls "$d"/*.lean | head -1)" .lean)"
+    : > "$out/verify.log"
+    for spec in "Main:$pkg.correctness" "Witness:$pkg.Witness.nonvacuous" "Witness:$pkg.Witness.returns"; do
+      if bin/janus verify "$out" --proof "$d/$pkg/${spec%%:*}.lean" --proof-root "$d" --theorem "${spec#*:}" --janus-root . >> "$out/verify.log" 2>&1; then
+        t=$(echo "$(date +%s.%N) - $start" | bc)
+        printf '%-18s ok  %6.1fs (%s)\n' "$isa/$n" "$t" "${spec#*:}" | tee -a "$lines/${isa}_$n"
+      else
+        ok=0
+        printf '%-18s FAILED %s (see %s/verify.log)\n' "$isa/$n" "${spec#*:}" "$out" | tee -a "$lines/${isa}_$n"
+      fi
+    done
+    [ "$ok" = 1 ] || tail -30 "$out/verify.log"
+    return 0
+  fi
   if bin/janus verify "$out" --proof "examples/rtmisc/proofs/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-18s ok  %6.1fs\n' "$isa/$n" "$t" | tee "$lines/${isa}_$n"

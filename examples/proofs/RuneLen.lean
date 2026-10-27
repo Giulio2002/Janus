@@ -264,6 +264,7 @@ theorem loop (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
       S.pc = BitVec.ofNat 64 head → S.regs 0 = p → S.regs 1 = n →
       S.sp = s.sp - 48#64 → S.regs 28 = s.regs 28 → S.regs 29 = s.sp - 56#64 → S.regs 18 = s.regs 18 →
       S.dczid = s.dczid → S.tpidr = s.tpidr → S.fpcr = s.fpcr → S.fpsr = s.fpsr →
+      
       MemFrame (M0 s (s.regs 30).toNat p n) S.mem (R s) →
       ReachesRet Extracted.program (s.regs 30) S fun s' =>
         s'.sp = s.sp ∧ s'.pc = s.regs 30 ∧ s'.regs 18 = s.regs 18 ∧ s'.regs 28 = s.regs 28 ∧

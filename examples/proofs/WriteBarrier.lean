@@ -255,7 +255,7 @@ theorem nonvacuous : ∃ (rt : List (Nat × Nat)) (s : State),
 /-- From that state (at `gcWriteBarrier1`) the real code returns, with `R25` the reserved slot. -/
 theorem returns : ReachesRet Extracted.program (s0.regs 30) s0 fun s' =>
     s'.pc = s0.regs 30 ∧ ∃ buf : W64, s'.regs 25 = buf ∧ WbSlots rt s'.mem buf.toNat 1 :=
-  rr_mono' (wb1_meets rt s0 rfl ⟨callOK 1, ready 1 (by decide)⟩) fun s' ⟨buf, junk, f, v, m, ex, ep, hs, _, hw⟩ =>
+  rr_mono' (wb1_meets rt s0 rfl ⟨callOK 1, ready 1 (by decide)⟩) fun s' ⟨buf, junk, f, v, m, _, _, hs, _, hw⟩ =>
     ⟨by rw [hs], buf, by rw [hs]; simp [wbRegs], by rw [hs]; exact hw⟩
 
 end Witness

@@ -221,11 +221,11 @@ def dataByte (a : Nat) : Option Byte :=
 def bytes0 (a : Nat) : Byte :=
   match dataByte a with
   | some v => v
-  | none => if a = BUMP + 2 then 0x50 else 0
+  | none => if a = BUMP + 3 then 0x10 else 0
 
 def mem0 : Memory :=
   ⟨bytes0, [⟨sp0 - 4168, 4184, true⟩, ⟨g0, 0x100, false⟩, ⟨flagAddr, 8, false⟩, ⟨BUMP, 0x200, true⟩,
-    ⟨HEAP, 0x10000, true⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+    ⟨HEAP, HSIZE, true⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
 
 def s0 : State :=
   { regs := fun i => if i = 0 then 3 else if i = 28 then BitVec.ofNat 64 g0
