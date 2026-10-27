@@ -53,7 +53,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   refine ReachesRet.done rfl ?_
   refine GoReturns.name fun S hS => ?_
   have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") := by rw [hS]; rfl
-  have hS30 : S.regs 30 = BitVec.ofNat 64 598012 := by rw [hS] <;> rfl
+  have hS30 : S.regs 30 = BitVec.ofNat 64 604204 := by rw [hS] <;> rfl
   have hS0 : S.regs 0 = e1t := by rw [hS] <;> simp [setReg]
   have hS1 : S.regs 1 = e1d := by rw [hS] <;> simp [setReg]
   have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> simp [setReg]
@@ -234,7 +234,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS21 : S2.regs 1 = e2d := by rw [hS2]; simp [setReg, hcap2d']
   have hS228 : S2.regs 28 = s.regs 28 := by rw [hS2]; simp [setReg]; exact hS28'
   have hS218 : S2.regs 18 = s.regs 18 := by rw [hS2]; simp [setReg]; exact hS18'
-  have hS230 : S2.regs 30 = BitVec.ofNat 64 598112 := by rw [hS2] <;> rfl
+  have hS230 : S2.regs 30 = BitVec.ofNat 64 604304 := by rw [hS2] <;> rfl
   have hS2pc : S2.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") := by rw [hS2] <;> rfl
   have hgS2 : gOf S2 = gOf s := by simp only [gOf, hS228]
   have hS2fW : MemFrame s.mem S2.mem (P.priv ++ [(s.sp.toNat - (P.depth + (P.depth + 128)), s.sp.toNat + 48)]) :=

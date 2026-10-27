@@ -54,7 +54,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   refine ReachesRet.done rfl ?_
   refine GoReturns.name fun S hS => ?_
   have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.Goexit") := by rw [hS]; rfl
-  have hS30 : S.regs 30 = BitVec.ofNat 64 598516 := by rw [hS] <;> rfl
+  have hS30 : S.regs 30 = BitVec.ofNat 64 604708 := by rw [hS] <;> rfl
   have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> simp [setReg]
   have hS18 : S.regs 18 = s.regs 18 := by rw [hS] <;> simp [setReg]
   have hSsp : S.sp.toNat = s.sp.toNat - 48 := by

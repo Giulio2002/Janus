@@ -91,7 +91,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     refine ReachesRet.done rfl ?_
     refine GoReturns.name fun S hS => ?_
     have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") := by rw [hS]; rfl
-    have hS30 : S.regs 30 = 593104#64 := by rw [hS] <;> rfl
+    have hS30 : S.regs 30 = 599296#64 := by rw [hS] <;> rfl
     have hS0 : S.regs 0 = etyp := by rw [hS] <;> simp [setReg]
     have hS1 : S.regs 1 = edata := by rw [hS] <;> simp [setReg]
     have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> simp [setReg]
@@ -264,7 +264,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
         intro G' hpcG hpost
         obtain ⟨⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2', hrp2, hrm2, hnil2, hpanI⟩ := hpost
         have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
-        have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36 = 593204 := by decide
+        have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36 = 599396 := by decide
         have agG : ∀ m, MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 112)), s.sp.toNat + 32)] →
             Map.Agrees e.mem m P.priv := fun m hf =>
           Map.Agrees.of_window hf (Outside.of_sub hout (by omega) (by omega))
@@ -272,7 +272,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
           have := hrs1.1
           simpa [hS28, gOf] using this
         have hpanI' := hpanI { arg := ⟨etyp.toNat, edata.toNat⟩, start := s.sp.toNat - 80 } []
-        have hw' : ¬ P.wrapper 593204 := by rw [← hsegf]; exact hw
+        have hw' : ¬ P.wrapper 599396 := by rw [← hsegf]; exact hw
         have key : ∀ m g, g = (s.regs 28).toNat →
             MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 112)), s.sp.toNat + 32)] →
             P.panics m g = [{ arg := ⟨etyp.toNat, edata.toNat⟩, start := s.sp.toNat - 80 }] := by
@@ -392,7 +392,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     have hDspn : D.sp.toNat = s.sp.toNat - 80 := by
       rw [hDsp, BitVec.toNat_ofNat]; apply Nat.mod_eq_of_lt; have := s.sp.isLt; omega
     have hD28 : D.regs 28 = s.regs 28 := by rw [hD]; simp [setReg]
-    have hD30 : D.regs 30 = 593112#64 := by rw [hD]; simp [setReg]
+    have hD30 : D.regs 30 = 599304#64 := by rw [hD]; simp [setReg]
     have hDpc : D.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") := by rw [hD]; rfl
     have hgD : gOf D = gOf s := by simp only [gOf, hD28]
     dsimp only at hdpan hddef hdsv hdroom

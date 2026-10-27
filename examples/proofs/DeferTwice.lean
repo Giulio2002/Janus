@@ -69,7 +69,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS0 : S.regs 0 = BitVec.ofNat 64 fvA := by rw [hS] <;> rfl
   have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> rfl
   have hS18 : S.regs 18 = s.regs 18 := by rw [hS] <;> rfl
-  have hS30 : S.regs 30 = BitVec.ofNat 64 593552 := by rw [hS] <;> rfl
+  have hS30 : S.regs 30 = BitVec.ofNat 64 599744 := by rw [hS] <;> rfl
   have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferproc") := by rw [hS] <;> rfl
   have hgS : gOf S = gOf s := by simp only [gOf, hS28]
   have hagS : Map.Agrees s.mem S.mem P.priv := hagw _ hSf
@@ -109,7 +109,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS2f : MemFrame m1 S2.mem [(s.sp.toNat - (P.depth + 32), s.sp.toNat)] := by rw [hS2]; janus_frame
   have hS20 : S2.regs 0 = BitVec.ofNat 64 fvA := by rw [hS2] <;> rfl
   have hS228 : S2.regs 28 = s.regs 28 := by rw [hS2] <;> rfl
-  have hS230 : S2.regs 30 = BitVec.ofNat 64 593552 := by rw [hS2] <;> rfl
+  have hS230 : S2.regs 30 = BitVec.ofNat 64 599744 := by rw [hS2] <;> rfl
   have hS2pc : S2.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferproc") := by rw [hS2] <;> rfl
   have hgS2 : gOf S2 = gOf s := by simp only [gOf, hS228]
   have hS2fW : MemFrame s.mem S2.mem (P.priv ++ [(s.sp.toNat - (P.depth + 32), s.sp.toNat)]) :=
@@ -232,7 +232,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   rw [hF] at hSD hfrD
   simp only [rtWin, bitsWin, List.append_nil, hS3spn] at hSD
   subst hS3
-  have hdpc' : d.pc = 593576#64 := by rw [hdpc] <;> rfl
+  have hdpc' : d.pc = 599768#64 := by rw [hdpc] <;> rfl
   have hdsp' : d.sp = s.sp - 32#64 := by rw [hdsp] <;> rfl
   have hd29' : d.regs 29 = s.sp - 40#64 := by rw [hd29] <;> rfl
   have hd28' : d.regs 28 = s.regs 28 := by rw [hd28] <;> rfl

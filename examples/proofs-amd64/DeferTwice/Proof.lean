@@ -89,7 +89,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hagS : Spec.Map.Agrees s.mem S.mem P.priv := hagw _ hSf
   have hSfW : MemFrame s.mem S.mem (P.priv ++ [((s.regs 4).toNat - (P.depth + 32), (s.regs 4).toNat + 8)]) :=
     hSf.mono fun a n h => by simp only [outside_append] at h; exact h.2
-  have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4742679 := by
+  have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4746615 := by
     rw [hS]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h32', Janus.Arm64.Memory.readLE_writeLE_self]
   have hS_i : S.mem.readLE ((s.regs 4).toNat - 16) 8 = 0 := by
     rw [hS]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -159,7 +159,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hagS2 : Spec.Map.Agrees m1 S2.mem P.priv :=
     Spec.Map.Agrees.of_window (lo := (s.regs 4).toNat - (P.depth + 32)) (hi := (s.regs 4).toNat + 8) hS2f
       (Outside.of_sub hout (by omega) (by omega))
-  have hS2ra : S2.mem.readLE (S2.regs 4).toNat 8 = 4742679 := by
+  have hS2ra : S2.mem.readLE (S2.regs 4).toNat 8 = 4746615 := by
     rw [hS2]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h32', Janus.Arm64.Memory.readLE_writeLE_self]
   have hS2i : S2.mem.readLE ((s.regs 4).toNat - 16) 8 = 1 := by
     rw [hS2]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -220,7 +220,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hagS3 : Spec.Map.Agrees m2 S3.mem P.priv :=
     Spec.Map.Agrees.of_window (lo := (s.regs 4).toNat - (P.depth + 32)) (hi := (s.regs 4).toNat + 8) hS3f
       (Outside.of_sub hout (by omega) (by omega))
-  have hS3ra : S3.mem.readLE (S3.regs 4).toNat 8 = 4742697 := by
+  have hS3ra : S3.mem.readLE (S3.regs 4).toNat 8 = 4746633 := by
     rw [hS3]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h32', Janus.Arm64.Memory.readLE_writeLE_self]
   have hr8_3 : S3.mem.readLE ((s.regs 4).toNat - 8) 8 = (s.regs 5).toNat := by
     rw [hS3]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -327,7 +327,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hdacc8 : d.mem.accessible ((s.regs 4).toNat - 8) 16 true = true := by
     rw [hSD.accessible, hS3fW.accessible]
     exact Janus.Arm64.Memory.accessible_mono _ hst (by omega) (by omega)
-  have hdpc' : d.rip = BitVec.ofNat 64 4742697 := by
+  have hdpc' : d.rip = BitVec.ofNat 64 4746633 := by
     apply BitVec.eq_of_toNat_eq
     rw [hdpc, hS3ra, BitVec.toNat_ofNat]
   have hd4 : d.regs 4 = s.regs 4 - 24#64 := by
