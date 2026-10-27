@@ -89,7 +89,7 @@ const (
 )
 
 // loadCEnv reads the PLT, the dynamic relocations, PT_GNU_RELRO, PT_TLS and the Go text range.
-func (b *Binary) loadCEnv(f *elf.File) {
+func (b *Binary) loadCEnv(f *elf.File, lv *loaderView, path string) error {
 	ci := &cenvInfo{plt: map[uint64]string{}}
 	b.cenv = ci
 	for _, p := range f.Progs {
@@ -99,10 +99,11 @@ func (b *Binary) loadCEnv(f *elf.File) {
 		case elf.PT_TLS:
 			img := &tlsImage{Size: p.Memsz, Align: p.Align}
 			if p.Filesz > 0 {
-				buf := make([]byte, p.Filesz)
-				if _, err := p.ReadAt(buf, 0); err == nil {
-					img.Init = buf
+				buf, err := lv.read(p.Vaddr, p.Filesz)
+				if err != nil {
+					return elfDiag(path+": the PT_TLS image is not file-backed by a PT_LOAD: "+err.Error(), "")
 				}
+				img.Init = buf
 			}
 			ci.tls = img
 		}
@@ -137,9 +138,9 @@ func (b *Binary) loadCEnv(f *elf.File) {
 		if s.Type != elf.SHT_RELA || s.Flags&elf.SHF_ALLOC == 0 {
 			continue
 		}
-		data, err := s.Data()
+		data, err := lv.sectionBytes(s, path)
 		if err != nil {
-			continue
+			return err
 		}
 		for off := 0; off+24 <= len(data); off += 24 {
 			rOff := binary.LittleEndian.Uint64(data[off:])
@@ -157,9 +158,9 @@ func (b *Binary) loadCEnv(f *elf.File) {
 		if s.Name != ".plt" && s.Name != ".plt.sec" {
 			continue
 		}
-		data, err := s.Data()
+		data, err := lv.sectionBytes(s, path)
 		if err != nil {
-			continue
+			return err
 		}
 		if f.Machine == elf.EM_AARCH64 {
 			pltArm64(ci, slots, s.Addr, data)
@@ -167,6 +168,7 @@ func (b *Binary) loadCEnv(f *elf.File) {
 			pltAmd64(ci, slots, s.Name, s.Addr, data)
 		}
 	}
+	return nil
 }
 
 // pltArm64 names the canonical 16-byte entries of an arm64 .plt (after its 32-byte header).

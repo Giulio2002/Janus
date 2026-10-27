@@ -11,7 +11,7 @@ import (
 // header, but the kernel loads by program header (PT_LOAD) and ignores section headers. A
 // binary whose `.text` section header points at a different file offset than the executable
 // PT_LOAD maps still runs the real code, yet Janus would read (and prove about) the wrong
-// bytes. validateSegments rejects such a section/segment disagreement.
+// bytes. validateSegments (elfview.go) rejects such a section/segment disagreement.
 
 // tamperTextOffset copies src to a temp file and advances the `.text` section header's file
 // offset by delta, leaving every program header untouched (so the loaded image is unchanged).
