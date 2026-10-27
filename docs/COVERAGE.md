@@ -396,7 +396,7 @@ actually be compared on, per class:
 |---|---|
 | integer, flags, branches, stack, shifts, strings | compared state for state (227 classes in `full`); proved (46 theorems) for the main classes |
 | SSE2 packed integer and FP moves/shuffles/converts | 95 classes compared (`sse`: 54,326 agree); D9 (`MOVDDUP`/`MOVSLDUP`) is a model defect |
-| SSE scalar FP, SSSE3, SSE4.1/4.2, SSE3 horizontal | no semantics in the model (`not translated` / `Opcode Unimplemented`): hardware oracle only |
+| SSE scalar FP, SSSE3 and SSE4.1/4.2 (the `0F 38`/`0F 3A` maps), PXOR/PAND/POR/PCMPEQB/PMOVMSKB | no semantics in the model (`not translated` / `Opcode Unimplemented`): hardware oracle only |
 | x87 (`D8-DF`), AES-NI/PCLMUL/SHA, BMI/FMA/MOVBE, VEX AVX/AVX2, EVEX AVX-512 | the model has no semantics (every arm is `Opcode Unimplemented in x86isa!` or the VEX/EVEX maps stub): hardware oracle only |
 
 ## 2. Runtime entry points
