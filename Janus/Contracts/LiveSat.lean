@@ -260,7 +260,7 @@ def tyC : Nat := 0x30020
 /-- A 16-byte type with pointers (`PtrBytes = 8`). -/
 def tys0 : Tys := [(tyA, 16, 0), (tyB, 8, 0), (tyC, 16, 8)]
 /-- The caller's buffer (outside the runtime's ranges) for the copies. -/
-def CB : Nat := 0x20000000
+def CB : Nat := 0x30000000
 def wsp : Nat := 0x200000
 def wg : Nat := 0x300000
 def wret : Nat := 0x1000

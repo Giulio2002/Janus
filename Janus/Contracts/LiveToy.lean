@@ -9,7 +9,7 @@ invariant `R : RtInv`. Their non-vacuity witnesses (`LiveSat`, `LiveSatAmd64`) a
 live set and budget, not only for one call. This file is that runtime's invariant and the facts
 about it that do not depend on the instruction set.
 
-The toy runtime is a **bump allocator** over the 4 MiB heap `[HEAP, HEND)`: its only state is the
+The toy runtime is a **bump allocator** over the 256 MiB heap `[HEAP, HEND)`: its only state is the
 word at `BUMP`, the address `p` of the next free byte. It is the runtime of a program that never
 frees:
 
@@ -35,9 +35,9 @@ def BUMP : Nat := 0x400000
 def WBUF : Nat := 0x400100
 /-- The heap `[HEAP, HEND)`. -/
 def HEAP : Nat := 0x10000000
-/-- The heap size: 4 MiB, so budgets up to `2^16` bytes (`64·b ≤ HSIZE`) are admitted, above the
+/-- The heap size: 256 MiB, so budgets up to `2^22` bytes (`64·b ≤ HSIZE`, the factor 64 is the invariant's slack) are admitted, above the
 block sizes of realistic allocations (a few KiB). -/
-def HSIZE : Nat := 0x400000
+def HSIZE : Nat := 0x10000000
 def HEND : Nat := HEAP + HSIZE
 
 /-- Type descriptors: `(addr, Size_, PtrBytes)`. -/
