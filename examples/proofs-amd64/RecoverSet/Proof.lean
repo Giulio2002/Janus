@@ -24,9 +24,9 @@ local macro "recoverRet" : term =>
   `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b))
 local macro "resumeA" : term => `(janus_eval% (Extracted.entry + 0x86))
 
+set_option maxHeartbeats 0 in
 /-- The deferred closure `RecoverSet.func1` run by the runtime during a panic: it calls `recover()`,
 which returns the panic's value, so it sets the named result to `7` and returns. -/
-set_option maxHeartbeats 0 in
 theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.Laws)
     (hrec : GorecoverContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.gorecover") P)

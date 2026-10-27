@@ -7,9 +7,9 @@ Model code for the panic runtime `PanicModel.P0` (one segment, the "engine", at 
 with an entry for each runtime function), proved to meet every arm64 panic contract of
 `Janus.Contracts.Panic` in **every** program that contains the engine (`EngineAt`): a contract
 address holds a three-instruction stub (`movz`/`movk`/`br x11`) jumping to the engine. The
-`<contract>_satisfiable` theorems instantiate this for a toy program, with a call state in the
-contract's precondition; the examples' `Witness` sections instantiate it for their own linked
-program.
+`<contract>_satisfiable` theorems (end of this file, and `PanicWitness` for the engine contracts)
+instantiate this for the engine alone as a program, with a call state in the contract's
+precondition; the examples' `Witness` sections instantiate it for their own linked program.
 
 See `docs/model/panic_model_arm64.s` for the assembly source of `engineCode`.
 -/
@@ -531,6 +531,155 @@ theorem gorecover_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
     exfalso; simp at hg hr; omega
 
 
+/-! ## The contracts are satisfiable
 
+For each returning contract: the model `P0 []` (laws hold), the engine alone as the program (the
+contract's address is its entry in the engine), and a call state in the contract's precondition. -/
+
+theorem fetchIn_single_base (seg : Segment) {pc w : Nat} (h : Program.fetchIn [seg] pc = some w) :
+    seg.base ≤ pc := by
+  simp only [Program.fetchIn] at h
+  by_cases hc : seg.base ≤ pc ∧ (pc - seg.base) % 4 = 0
+  · exact hc.1
+  · rw [if_neg hc] at h
+    cases h
+
+theorem fetch_qE {pc : Nat} {w : Nat} (h : qE.fetch pc = some w) : E ≤ pc :=
+  fetchIn_single_base engineSeg h
+
+theorem engineAt_qE : EngineAt qE := by
+  intro pc w h
+  refine ⟨h, rfl, ?_⟩
+  have := fetch_qE h
+  show pc ≠ 0
+  simp only [E] at this; omega
+
+def swg : Nat := 0x50000
+def swsp : Nat := 0x48000
+def sret : Nat := 0x200000
+
+/-- The witness memory: the model's range writable, a stack `[0x40000, 0x50000)` writable, the
+goroutine `[0x50000, 0x50100)` readable; every byte `0` but the words `ws`. -/
+def smem (f : Nat → BitVec 8) : Memory :=
+  ⟨f, [⟨0x10000, 0x1000, true⟩, ⟨0x40000, 0x10000, true⟩, ⟨0x50000, 0x100, false⟩]⟩
+
+/-- The witness call state at `pc`: goroutine in `X28`, return address in `X30`, the stack pointer
+`swsp`. -/
+def sstate (pc : Nat) (m : Memory) (x0 x1 : Nat) : State :=
+  { regs := fun i => if i = 28 then BitVec.ofNat 64 swg else if i = 30 then BitVec.ofNat 64 sret
+      else if i = 29 then BitVec.ofNat 64 (swsp - 8) else if i = 0 then BitVec.ofNat 64 x0
+      else if i = 1 then BitVec.ofNat 64 x1 else 0,
+    sp := BitVec.ofNat 64 swsp, pc := BitVec.ofNat 64 pc, flags := ⟨false, false, false, false⟩, mem := m }
+
+theorem sstate_pre {T : List FuncInfo} {m : Memory} (nargs : Nat) (hn : nargs ≤ 2) (pc x0 x1 : Nat)
+    (henv : Env0 T m) (hg0 : m.readLE (swg + 16) 8 = 0)
+    (hgr : m.accessible (swg + 16) 8 false = true)
+    (hst : m.accessible (swsp - 256) (256 + 8 + 16) true = true) :
+    PanicPre (P0 T RPa) nargs (sstate pc m x0 x1) := by
+  have hsp : (sstate pc m x0 x1).sp = BitVec.ofNat 64 swsp := rfl
+  have hg28 : (sstate pc m x0 x1).regs 28 = BitVec.ofNat 64 swg := rfl
+  have h30 : (sstate pc m x0 x1).regs 30 = BitVec.ofNat 64 sret := rfl
+  have hm : (sstate pc m x0 x1).mem = m := rfl
+  have hgn : (BitVec.ofNat 64 swg).toNat = swg := by decide
+  have hspn : (BitVec.ofNat 64 swsp).toNat = swsp := by decide
+  refine ⟨henv, ⟨?_, ?_, ?_⟩, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩
+  · simp only [regG, stackguard0Offset, hg28, hgn]; decide
+  · simp only [regG, stackguard0Offset, hg28, hm, hgn]; exact hgr
+  · simp only [stackguard0, regG, stackguard0Offset, hg28, hm, hsp, P0_depth, hgn, hspn, hg0]
+    simp only [swsp]; omega
+  · simp only [h30]; decide
+  · simp only [h30]; decide
+  · simp only [hsp, hspn]; decide
+  · simp only [hsp, hspn, P0_depth]; decide
+  · simp only [P0_depth]; omega
+  · simp only [hsp, hspn, P0_depth]; simp only [swsp]; omega
+  · simp only [hsp, hspn, hm, P0_depth]
+    refine Memory.accessible_mono _ hst ?_ ?_
+    · simp [swsp]
+    · simp only [swsp]; omega
+  · simp only [hsp, hspn, P0_priv, P0_depth, outside_cons, outside_nil, and_true]
+    simp only [swsp, B]; omega
+
+theorem reachesRet_mono {p : Program} {ret : W64} {s : State} {Q Q' : State → Prop}
+    (h : ReachesRet p ret s Q) (hq : ∀ s', Q s' → Q' s') : ReachesRet p ret s Q' := by
+  obtain ⟨k, s', hk, h1, h2⟩ := h; exact ⟨k, s', hk, h1, hq _ h2⟩
+
+theorem PanicRet.toW {P : PanicRuntime} {n : Nat} {s s' : State} (extra : List (Nat × Nat))
+    (h : PanicRet P n s s') : PanicRetW P n extra s s' := by
+  obtain ⟨junk, f, v, m, hs, hf, he⟩ := h
+  exact ⟨junk, f, v, m, hs, hf.mono fun a k ho => by
+    simp only [outside_append] at ho ⊢; exact ho.1, he⟩
+
+/-- The zero witness memory. -/
+def zmem : Memory := smem (fun _ => 0)
+
+theorem env_z : Env0 [] zmem := by
+  unfold Env0
+  have hnd : ndef zmem = 0 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · omega
+  · unfold TableOK
+    exact ⟨by decide, by decide, fun i hi => absurd hi (by simp)⟩
+
+theorem room_z : 0 < room0 zmem := by rw [room0_eq]; decide
+
+theorem pre_z (nargs : Nat) (hn : nargs ≤ 2) (pc x0 x1 : Nat) : PanicPre (P0 [] RPa) nargs (sstate pc zmem x0 x1) :=
+  sstate_pre nargs hn pc x0 x1 env_z (by decide) (by decide) (by decide)
+
+theorem deferproc_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat), P.Laws ∧
+    DeferprocContract p A P ∧ ∃ s, s.pc = BitVec.ofNat 64 A ∧ PanicPre P 1 s ∧ 0 < P.room s.mem (gOf s) :=
+  ⟨P0 [] RPa, qE, eDeferproc, P0_laws [] RPa,
+    fun s hpc hpre => deferproc_run engineAt_qE [] s hpc hpre.1 hpre.2,
+    sstate eDeferproc zmem 0 0, rfl, pre_z 1 (by decide) _ 0 0, room_z⟩
+
+theorem deferprocStack_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat), P.Laws ∧
+    DeferprocStackContract p A P ∧ ∃ s, s.pc = BitVec.ofNat 64 A ∧ PanicPre P 1 s ∧
+      0 < P.room s.mem (gOf s) ∧ (s.regs 0).toNat + 48 ≤ 2 ^ 48 ∧
+      s.mem.accessible (s.regs 0).toNat 48 true = true ∧ Outside (s.regs 0).toNat 48 P.priv :=
+  ⟨P0 [] RPa, qE, eDeferprocStack, P0_laws [] RPa,
+    fun s hpc hpre => reachesRet_mono
+      (deferprocStack_run engineAt_qE [] s hpc hpre.1 hpre.2.1 hpre.2.2.1 hpre.2.2.2.1 hpre.2.2.2.2)
+      fun s' h => ⟨PanicRet.toW _ h.1, h.2.1, h.2.2⟩,
+    sstate eDeferprocStack zmem 0x41000 0, rfl, pre_z 1 (by decide) _ 0x41000 0, room_z, by decide, by decide,
+    by simp only [P0_priv, outside_cons, outside_nil, and_true]; decide⟩
+
+theorem deferrangefunc_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat), P.Laws ∧
+    DeferrangefuncContract p A P ∧ ∃ s, s.pc = BitVec.ofNat 64 A ∧ PanicPre P 0 s ∧ 0 < P.room s.mem (gOf s) :=
+  ⟨P0 [] RPa, qE, eDeferrangefunc, P0_laws [] RPa,
+    fun s hpc hpre => deferrangefunc_run engineAt_qE [] s hpc hpre.1 hpre.2,
+    sstate eDeferrangefunc zmem 0 0, rfl, pre_z 0 (by decide) _ 0 0, room_z⟩
+
+theorem gorecover_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat), P.Laws ∧
+    GorecoverContract p A P ∧ ∃ s, s.pc = BitVec.ofNat 64 A ∧ PanicPre P 0 s ∧
+      s.mem.accessible ((s.regs 29).toNat + 8) 8 false = true ∧ (s.regs 29).toNat + 16 ≤ 2 ^ 48 :=
+  ⟨P0 [] RPa, qE, eGorecover, P0_laws [] RPa, gorecover_run engineAt_qE [],
+    sstate eGorecover zmem 0 0, rfl, pre_z 0 (by decide) _ 0 0, by decide, by decide⟩
+
+/-- A witness memory with one `_defer` record (a range-over-func list with the token `5`). -/
+def tmem : Memory := smem (fun a => if a = B + 8 then 1 else if a = B + 0x208 then 5 else 0)
+
+theorem env_t : Env0 [] tmem := by
+  unfold Env0
+  have hnd : ndef tmem = 1 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · rw [hnd] at hi
+    have : i = 0 := by omega
+    subst this
+    exact ⟨by decide, fun h => by exfalso; revert h; decide⟩
+  · unfold TableOK
+    exact ⟨by decide, by decide, fun i hi => absurd hi (by simp)⟩
+
+theorem deferprocat_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat), P.Laws ∧
+    DeferprocatContract p A P ∧ ∃ s, s.pc = BitVec.ofNat 64 A ∧ PanicPre P 2 s ∧ 0 < P.room s.mem (gOf s) ∧
+      ∃ r rest, P.defers s.mem (gOf s) = r :: rest ∧ r.token = some (s.regs 1).toNat := by
+  refine ⟨P0 [] RPa, qE, eDeferprocat, P0_laws [] RPa,
+    fun s hpc hpre => deferprocat_run engineAt_qE [] s hpc hpre.1 hpre.2.1 hpre.2.2,
+    sstate eDeferprocat tmem 0 5, rfl, sstate_pre 2 (by decide) _ 0 5 env_t (by decide) (by decide) (by decide),
+    ?_, ?_⟩
+  · show 0 < room0 tmem
+    rw [room0_eq]; decide
+  · refine ⟨{ sp := 0, fns := [], token := some 5 }, [], ?_, rfl⟩
+    show defers0 tmem = _
+    rw [defers0_eq]; decide
 
 end Janus.Contracts.PanicSat

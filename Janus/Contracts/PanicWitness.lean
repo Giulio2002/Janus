@@ -27,12 +27,6 @@ theorem deferrangefunc_contract {p : Program} (hp : EngineAt p) (T : List FuncIn
     DeferrangefuncContract p eDeferrangefunc (P0 T RPa) :=
   fun s hpc hpre => deferrangefunc_run hp T s hpc hpre.1 hpre.2
 
-theorem PanicRet.toW {P : PanicRuntime} {n : Nat} {s s' : State} (extra : List (Nat × Nat))
-    (h : PanicRet P n s s') : PanicRetW P n extra s s' := by
-  obtain ⟨junk, f, v, m, hs, hf, he⟩ := h
-  exact ⟨junk, f, v, m, hs, hf.mono fun a k ho => by
-    simp only [outside_append] at ho ⊢; exact ho.1, he⟩
-
 theorem deferprocStack_contract {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
     DeferprocStackContract p eDeferprocStack (P0 T RPa) := fun s hpc hpre =>
   reachesRet_mono (deferprocStack_run hp T s hpc hpre.1 hpre.2.1 hpre.2.2.1 hpre.2.2.2.1 hpre.2.2.2.2)
@@ -272,5 +266,66 @@ def witMemD (ws : List (Nat × Nat)) (ds : List DataSegment) : Memory :=
       | none => wordByte ws a,
     [⟨0x10000, 0x1000, true⟩, ⟨0x40000, 0x10000, true⟩, ⟨0x50000, 0x100, false⟩] ++
       ds.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+
+/-! ## The engine contracts are satisfiable
+
+`gopanic`, `Goexit` and `deferreturn` of a function that has no deferred calls pending: the engine
+alone as the program, the model's function table `gT` (one function covering the return address),
+and a call state in the contract's precondition. (The examples show the contracts with deferred
+calls pending: their `Witness` sections.) -/
+
+/-- A one-function table: the function containing the return address `sret`. -/
+def gT : List FuncInfo :=
+  [{ name := "f", entry := 0x200000, size := 0x100, frame := 0x20, deferreturn := 0x40, openDefer := none }]
+
+theorem gT_tok : TOK gT := by
+  unfold TOK gT
+  decide
+
+def gmem : Memory := witMem (tabWords gT)
+
+theorem env_g : Env0 gT gmem := by
+  unfold Env0
+  have hnd : ndef gmem = 0 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · omega
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+theorem room_g : 0 < room0 gmem := by rw [room0_eq]; decide
+
+theorem defers_g : defers0 gmem = [] := by
+  have hnd : ndef gmem = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_g : saved0 gmem = none := by rw [saved0_eq]; decide
+
+theorem pre_g (nargs : Nat) (hn : nargs ≤ 2) (pc x0 x1 : Nat) : PanicPre (P0 gT RPa) nargs (sstate pc gmem x0 x1) :=
+  sstate_pre nargs hn pc x0 x1 env_g (by decide) (by decide) (by decide)
+
+theorem gopanic_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat) (U : State → Nat → Nat → Prop)
+    (T : List FuncInfo), P.Laws ∧ GopanicContract p A P U T ∧ ∃ s fi, s.pc = BitVec.ofNat 64 A ∧
+      FuncInfo.find T (s.regs 30).toNat = some fi ∧ GopanicPre P fi s := by
+  refine ⟨P0 gT RPa, qE, eGopanic, U0, gT, P0_laws gT RPa, gopanic_run engineAt_qE gT gT_tok,
+    sstate eGopanic gmem 1 0, FuncInfo.named gT "f", rfl, by decide, ?_⟩
+  refine ⟨pre_g 2 (by decide) _ 1 0, by decide, room_g, fun h => absurd h (by decide), ?_⟩
+  show FrameOK (P0 gT RPa) gmem _ _
+  simp [frameOf, frameItems, recItems, FuncInfo.named, gT, P0_defers, sstate, defers_g, FrameOK]
+
+theorem goexit_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat) (U : State → Nat → Nat → Prop)
+    (T : List FuncInfo), P.Laws ∧ GoexitContract p A P U T ∧ ∃ s fi, s.pc = BitVec.ofNat 64 A ∧
+      FuncInfo.find T (s.regs 30).toNat = some fi ∧ GoexitPre P fi s := by
+  refine ⟨P0 gT RPa, qE, eGoexit, U0, gT, P0_laws gT RPa, goexit_run engineAt_qE gT gT_tok,
+    sstate eGoexit gmem 0 0, FuncInfo.named gT "f", rfl, by decide, ?_⟩
+  refine ⟨pre_g 0 (by decide) _ 0 0, room_g, fun h => absurd h (by decide), ?_⟩
+  show FrameOK (P0 gT RPa) gmem _ _
+  simp [frameOf, frameItems, recItems, FuncInfo.named, gT, P0_defers, sstate, defers_g, FrameOK]
+
+theorem deferreturn_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat) (U : State → Nat → Nat → Prop),
+    P.Laws ∧ DeferreturnContract p A P U ∧ ∃ s, s.pc = BitVec.ofNat 64 A ∧ DeferreturnPre P s := by
+  refine ⟨P0 gT RPa, qE, eDeferreturn, U0, P0_laws gT RPa, deferreturn_run engineAt_qE,
+    sstate eDeferreturn gmem 0 0, rfl, pre_g 0 (by decide) _ 0 0, ?_⟩
+  show FrameOK (P0 gT RPa) gmem _ _
+  simp [retFrame, frameItems, recItems, P0_defers, P0_saved, sstate, defers_g, saved_g, gOf, FrameOK]
 
 end Janus.Contracts.PanicSat

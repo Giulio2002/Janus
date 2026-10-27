@@ -291,10 +291,6 @@ theorem seg_rp_lh (u : State) (x18 : Nat) (hpc : u.pc = BitVec.ofNat 64 RPa)
 
 /-! ### Recovery -/
 
-theorem reachesRet_mono {p : Program} {ret : W64} {s : State} {Q Q' : State → Prop}
-    (h : ReachesRet p ret s Q) (hq : ∀ s', Q s' → Q' s') : ReachesRet p ret s Q' := by
-  obtain ⟨k, s', hk, h1, h2⟩ := h; exact ⟨k, s', hk, h1, hq _ h2⟩
-
 /-- How many panic entries remain after dropping, from the top, those started at or below `fsp`. -/
 def dropCount (m : Memory) (fsp : Nat) : Nat → Nat
   | 0 => 0

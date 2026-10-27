@@ -46,12 +46,6 @@ theorem deferrangefunc_contract {p : Program} (hp : EngineAt p) (T : List FuncIn
     DeferrangefuncContract p eDeferrangefunc (P0 T RPa) :=
   fun s hpc hpre => deferrangefunc_run hp T s hpc hpre.1 hpre.2
 
-theorem PanicRet.toW {P : PanicRuntime} {n : Nat} {s s' : State} (extra : List (Nat × Nat))
-    (h : PanicRet P n s s') : PanicRetW P n extra s s' := by
-  obtain ⟨r, x, y, fl, m, hs, hf, he⟩ := h
-  exact ⟨r, x, y, fl, m, hs, hf.mono fun a k ho => by
-    simp only [outside_append] at ho ⊢; exact ho.1, he⟩
-
 theorem deferprocStack_contract {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
     DeferprocStackContract p eDeferprocStack (P0 T RPa) := fun s hpc hpre =>
   reachesRet_mono (deferprocStack_run hp T s hpc hpre.1 hpre.2.1 hpre.2.2.1 hpre.2.2.2.1 hpre.2.2.2.2)
@@ -218,5 +212,74 @@ theorem accessible_of_dataRead {p : Program} {m : Memory} (h : p.DataLoaded m) {
     simp only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hreg
     obtain ⟨r, hr, ⟨⟨⟨hb, he⟩, hw⟩, _⟩⟩ := hreg
     exact Janus.Arm64.Memory.accessible_of_mem m hr (by omega) (by omega) hw
+
+/-! ## The engine contracts are satisfiable
+
+`gopanic`, `Goexit` and `deferreturn` of a function that has no deferred calls pending: the engine
+alone as the program, the model's function table `gT` (one function covering the return address
+`sret`), and a call state in the contract's precondition. (The examples show the contracts with
+deferred calls pending: their `Witness` sections.) -/
+
+def sret : Nat := 0x200000
+
+/-- A one-function table: the function containing the return address `sret`. -/
+def gT : List Spec.FuncInfo :=
+  [{ name := "f", entry := 0x200000, size := 0x100, frame := 0x20, deferreturn := 0x40, openDefer := none }]
+
+theorem gT_tok : TOK gT := by
+  unfold TOK gT
+  decide
+
+/-- The witness memory: the table and the return address `sret` at `[swsp]`. -/
+def gmem : Janus.Arm64.Memory := Janus.Contracts.PanicSat.witMem (Janus.Contracts.PanicSat.tabWords gT ++ [(swsp, sret)])
+
+theorem env_g : Env0 gT gmem := by
+  unfold Env0
+  have hnd : ndef gmem = 0 := by decide
+  refine ⟨by decide, by decide, by decide, fun i hi => ?_, ?_⟩
+  · omega
+  · unfold TableOK
+    exact ⟨by decide, by decide, by decide⟩
+
+theorem room_g : 0 < room0 gmem := by rw [room0_eq]; decide
+
+theorem defers_g : defers0 gmem = [] := by
+  have hnd : ndef gmem = 0 := by decide
+  rw [defers0_eq, hnd]; rfl
+
+theorem saved_g : saved0 gmem = none := by rw [saved0_eq]; decide
+
+theorem pre_g (nargs : Nat) (hn : nargs ≤ 2) (pc x0 x1 : Nat) :
+    PanicAmd64.PanicPre (P0 gT RPa) nargs (sstate pc gmem x0 x1) :=
+  sstate_pre nargs hn pc x0 x1 env_g (by decide) (by decide) (by decide) (by decide)
+
+theorem gopanic_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat) (U : State → Nat → Nat → Prop)
+    (T : List Spec.FuncInfo), P.Laws ∧ PanicAmd64.GopanicContract p A P U T ∧ ∃ s fi, s.rip = BitVec.ofNat 64 A ∧
+      Spec.FuncInfo.find T (s.mem.readLE (s.regs 4).toNat 8) = some fi ∧ PanicAmd64.GopanicPre P fi s := by
+  refine ⟨P0 gT RPa, qE, eGopanic, U1, gT, P0_laws gT RPa, gopanic_run engineAt_qE gT gT_tok,
+    sstate eGopanic gmem 1 0, Spec.FuncInfo.named gT "f", rfl, by decide, ?_⟩
+  refine ⟨pre_g 2 (by decide) _ 1 0, by decide, room_g, fun h => absurd h (by decide), ?_⟩
+  show PanicAmd64.FrameOK (P0 gT RPa) gmem _ _
+  simp [PanicAmd64.frameOf, Panic.frameOf, Panic.frameItems, Panic.recItems, Spec.FuncInfo.named, gT,
+    P0_defers, sstate, defers_g, PanicAmd64.FrameOK, Panic.FrameOK]
+
+theorem goexit_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat) (U : State → Nat → Nat → Prop)
+    (T : List Spec.FuncInfo), P.Laws ∧ PanicAmd64.GoexitContract p A P U T ∧ ∃ s fi, s.rip = BitVec.ofNat 64 A ∧
+      Spec.FuncInfo.find T (s.mem.readLE (s.regs 4).toNat 8) = some fi ∧ PanicAmd64.GoexitPre P fi s := by
+  refine ⟨P0 gT RPa, qE, eGoexit, U1, gT, P0_laws gT RPa, goexit_run engineAt_qE gT gT_tok,
+    sstate eGoexit gmem 0 0, Spec.FuncInfo.named gT "f", rfl, by decide, ?_⟩
+  refine ⟨pre_g 0 (by decide) _ 0 0, room_g, fun h => absurd h (by decide), ?_⟩
+  show PanicAmd64.FrameOK (P0 gT RPa) gmem _ _
+  simp [PanicAmd64.frameOf, Panic.frameOf, Panic.frameItems, Panic.recItems, Spec.FuncInfo.named, gT,
+    P0_defers, sstate, defers_g, PanicAmd64.FrameOK, Panic.FrameOK]
+
+theorem deferreturn_satisfiable : ∃ (P : PanicRuntime) (p : Program) (A : Nat)
+    (U : State → Nat → Nat → Prop), P.Laws ∧ PanicAmd64.DeferreturnContract p A P U ∧
+      ∃ s, s.rip = BitVec.ofNat 64 A ∧ PanicAmd64.DeferreturnPre P s := by
+  refine ⟨P0 gT RPa, qE, eDeferreturn, U1, P0_laws gT RPa, deferreturn_run engineAt_qE,
+    sstate eDeferreturn gmem 0 0, rfl, pre_g 0 (by decide) _ 0 0, ?_⟩
+  show PanicAmd64.FrameOK (P0 gT RPa) gmem _ _
+  simp [PanicAmd64.retFrame, Panic.frameItems, Panic.recItems, P0_defers, P0_saved, sstate, defers_g, saved_g,
+    PanicAmd64.gOf, PanicAmd64.FrameOK, Panic.FrameOK]
 
 end Janus.Contracts.PanicSatAmd64

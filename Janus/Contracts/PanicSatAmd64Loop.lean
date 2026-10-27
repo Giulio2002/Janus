@@ -34,10 +34,6 @@ theorem btrTop_eq : ∀ b, b < 256 → 0 < b →
 theorem rl64 (m : Memory) (a : Nat) : m.readLE a 8 < 18446744073709551616 := by
   have := Janus.Arm64.Memory.readLE_lt m a 8; simpa using this
 
-theorem reachesRet_mono {p : Program} {ret : W64} {s : State} {Q Q' : State → Prop}
-    (h : ReachesRet p ret s Q) (hq : ∀ s', Q s' → Q' s') : ReachesRet p ret s Q' := by
-  obtain ⟨k, s', hk, h1, h2⟩ := h; exact ⟨k, s', hk, h1, hq _ h2⟩
-
 abbrev rsp (c : State) : Nat := (c.regs 4).toNat
 
 set_option maxHeartbeats 0 in
