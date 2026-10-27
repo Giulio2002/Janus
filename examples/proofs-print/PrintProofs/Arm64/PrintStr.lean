@@ -157,7 +157,8 @@ theorem returns (E : KEnv) (k : Kern) :
         ∃ es, k' = k.appendTrace es ∧
           Emits 2 [readBytes wmem NL 1, [10#8]] es)
       (fun _ _ => False) (wstate (fun i => if i = 0 then BitVec.ofNat 64 NL else if i = 1 then 1#64 else 0)) k := by
-  rw [nl_eq, implAt_eq, wstate_eq, wmem_eq]
+  rw [implAt_eq, wstate_eq]
+  rw [nl_eq, wmem_eq]
   exact (((equiv.sim PrintFn.Witness.implAt).withExit ret).symm).returnsK (PrintFn.Str.Witness.returns E k)
 
 end Witness

@@ -78,7 +78,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
   have h := PrintFn.Neg.correctness impl rt E (Lock2Contract.of_equiv equiv impl rt 1024 hl) (Unlock2Contract.of_equiv equiv impl rt 1024 hu) (MemmoveContract.of_equiv equiv impl hmm) 
   refine Janus.Kernel.EnsuresK.of_equiv equiv impl h (fun s k hp => ?_) (fun _ _ _ _ hq => hq)
   rw [← pk_eq, ← bi_eq, ← bl_eq, ← ow_eq, ← dl_eq]
-  exact ⟨hp.1, equiv.dataLoaded hp.2.1, Janus.Print.DataOutside.of_equiv equiv hp.2.2.1⟩
+  exact ⟨hp.1, equiv.dataLoaded hp.2.1, Janus.Print.DataOutside.of_equiv equiv hp.2.2⟩
 
 
 /-- **Full output**: if fd 2 grew by as many bytes as the pieces hold, it grew by exactly them. -/
@@ -135,7 +135,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (ret : N
     MemmoveContract.of_equiv equiv.symm impl h3, equiv.symm.retAddr impl h4, ?_, ?_⟩
   · exact ⟨h5.pc, h5.lr, h5.args⟩
   · rw [pk_eq, bi_eq, bl_eq, ow_eq, dl_eq]
-    exact ⟨hp.1, equiv.symm.dataLoaded hp.2.1, Janus.Print.DataOutside.of_equiv equiv.symm hp.2.2.1⟩
+    exact ⟨hp.1, equiv.symm.dataLoaded hp.2.1, Janus.Print.DataOutside.of_equiv equiv.symm hp.2.2⟩
 
 
 /-- So the guarantee is reached: from the witness state, for every kernel, `print(-17)` returns
@@ -145,7 +145,8 @@ theorem returns (E : KEnv) (k : Kern) :
       (fun s' k' => FFI.ABIReturnC (wstate fun _ => 0) s' ∧
         ∃ es, k' = k.appendTrace es ∧ Emits 2 [Janus.Spec.Print.ofString "-17"] es)
       (fun _ _ => False) (wstate fun _ => 0) k := by
-  rw [implAt_eq, wstate_eq, wmem_eq]
+  rw [implAt_eq, wstate_eq]
+  
   exact (((equiv.sim PrintFn.Witness.implAt).withExit ret).symm).returnsK (PrintFn.Neg.Witness.returns E k)
 
 end Witness
