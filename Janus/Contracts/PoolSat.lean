@@ -49,6 +49,27 @@ theorem toyInv_drop {tys : Tys} (hty : TysOK tys) {b : Nat} {L L' : List (Nat ×
     exact hr
 
 
+/-- The invariant at the start of a program with no live objects, for a runtime with descriptors
+`tys` (a memory built by hand for a witness: the bump cell holds `HEAP`, the heap is zero and
+writable, and the descriptors read as `tys` says). -/
+theorem toyInv_init_tys {tys : Tys} (hty : TysOK tys) {m : Memory} {b g : Nat} (hb : 64 * b ≤ HSIZE)
+    (hbump : m.readLE BUMP 8 = HEAP) (hz : ∀ i, HEAP ≤ i → i < HEND → m.bytes i = 0)
+    (h1 : m.accessible HEAP HSIZE true = true) (h2 : m.accessible BUMP 8 true = true)
+    (h3 : m.accessible WBUF 64 true = true)
+    (hT : ∀ t ∈ tys, m.readLE t.1 8 = t.2.1 ∧ m.readLE (t.1 + 8) 8 = t.2.2) :
+    toyInv tys b [] g (view (toyRt tys) [] m) := by
+  have hv : ∀ a n, InRanges a n (toyRt tys) → (view (toyRt tys) [] m).readLE a n = m.readLE a n :=
+    fun a n h => readLE_view h trivial
+  refine ⟨HEAP, ?_, Nat.le_refl _, by decide, by simp only [HEND, HEAP, HSIZE] at *; omega,
+    fun r hr => absurd hr (by simp), fun i hi hi' => ?_, by rw [view_accessible]; exact h1,
+    by rw [view_accessible]; exact h2, by rw [view_accessible]; exact h3, fun t ht => ?_⟩
+  · rw [hv _ _ (inRanges_bump tys)]; exact hbump
+  · rw [hv _ _ (inRanges_heap (n := 1) hi (by omega)), Memory.readLE_one, hz i hi hi']; rfl
+  · have := hty t ht
+    rw [hv _ _ (inRanges_ty ht (n := 8) (by omega)),
+      hv (t.1 + 8) 8 (InRanges.sub (inRanges_ty ht (n := 16) (by omega)) (by omega) (by omega))]
+    exact hT t ht
+
 /-! ## `newobject` of a 24- or 32-byte descriptor, `growslice(p, 1, 0, 1, et)` -/
 
 set_option maxRecDepth 20000 in

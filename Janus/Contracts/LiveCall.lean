@@ -221,4 +221,14 @@ theorem memPre_of {R : RtInv} {S : State} {stack nargs : Nat} {addr : Nat} {args
     Mem.EqPre stack nargs S ∧ LiveMemAt R addr args L b S (calleeStack S stack nargs) :=
   ⟨⟨(Janus.Spec.guardOK_iff _ _).1 h.2.1.1, h.1, h.2.1.2⟩, h.2.2.1, h.2.2.2.1, h.2.2.2.2.2.1, h.2.2.2.2.2.2⟩
 
+/-- A `sync.Pool` struct (40 bytes at `P`) covered by three runtime ranges (the witnesses' toy
+runtime has only descriptor-sized ranges) is apart from a nonempty window outside them. -/
+theorem pool_disjoint {rt : List (Nat × Nat)} {lo hi P : Nat} (h1 : InRanges P 16 rt)
+    (h2 : InRanges (P + 16) 16 rt) (h3 : InRanges (P + 32) 8 rt) (hw : Outside lo (hi - lo) rt)
+    (hlt : lo < hi) : lo + (hi - lo) ≤ P ∨ P + 40 ≤ lo := by
+  have a1 := InRanges.disjoint h1 hw
+  have a2 := InRanges.disjoint h2 hw
+  have a3 := InRanges.disjoint h3 hw
+  omega
+
 end Janus.Contracts

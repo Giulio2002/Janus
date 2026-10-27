@@ -137,3 +137,4 @@ import Janus.Spec.Pool
 import Janus.Contracts.LiveCall
 import Janus.Contracts.Pool
 import Janus.Contracts.PoolAmd64
+import Janus.Contracts.PoolSat
