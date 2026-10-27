@@ -1,5 +1,6 @@
 import Janus
 import PrintProofs.Arm64.Equiv
+import Janus.Contracts.PrintAmd64
 
 /-!
 # Programs with the same code in a different order (amd64)
@@ -210,3 +211,30 @@ theorem _root_.Janus.Amd64.Kernel.EnsuresK.of_equiv {p q : Program} (h : Equiv p
   exact this.mono (fun s' k' ⟨a, b⟩ => ⟨a, hpost _ _ _ _ b⟩) (fun _ _ x => x)
 
 end Janus.Amd64.Program
+
+namespace Janus.Amd64.Print
+
+open Janus Janus.Amd64 Janus.Amd64.Program
+
+theorem Lock2Contract.of_equiv {p q : Amd64.Program} (h : Equiv p q) (impl : List Amd64.Segment)
+    (rt : List (Nat × Nat)) (stack : Nat)
+    (hl : Lock2Contract (p.link impl) (p.contractAddr "runtime.lock2") rt stack) :
+    Lock2Contract (q.link impl) (q.contractAddr "runtime.lock2") rt stack := by
+  rw [← h.contractAddr]; exact (h.sim impl).summary hl
+
+theorem Unlock2Contract.of_equiv {p q : Amd64.Program} (h : Equiv p q) (impl : List Amd64.Segment)
+    (rt : List (Nat × Nat)) (stack : Nat)
+    (hl : Unlock2Contract (p.link impl) (p.contractAddr "runtime.unlock2") rt stack) :
+    Unlock2Contract (q.link impl) (q.contractAddr "runtime.unlock2") rt stack := by
+  rw [← h.contractAddr]; exact (h.sim impl).summary hl
+
+theorem MemmoveContract.of_equiv {p q : Amd64.Program} (h : Equiv p q) (impl : List Amd64.Segment)
+    (hl : MemmoveContract (p.link impl) (p.contractAddr "runtime.memmove")) :
+    MemmoveContract (q.link impl) (q.contractAddr "runtime.memmove") := by
+  rw [← h.contractAddr]; exact (h.sim impl).summary hl
+
+theorem DataOutside.of_equiv {p q : Amd64.Program} (h : Equiv p q) {rt : List (Nat × Nat)}
+    (hd : DataOutside p rt) : DataOutside q rt := by
+  unfold DataOutside at *; rw [← h.data]; exact hd
+
+end Janus.Amd64.Print
