@@ -1,4 +1,4 @@
-import PrintProofs.Amd64.FnGwrite
+import PrintProofs.Amd64.FnPrintstring
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts Janus.Kernel
   Janus.Amd64.Kernel Janus.Print Janus.Amd64.Print

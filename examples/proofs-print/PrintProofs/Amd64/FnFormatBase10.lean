@@ -90,6 +90,40 @@ theorem mul100_32 (q : Nat) (h : q * 100 < 2 ^ 32) :
   simp only [BitVec.toNat_mul, BitVec.toNat_setWidth, BitVec.toNat_ofNat]
   omega
 
+/-- The nine bytes of a chunk, written at any addresses that are `base + k` (the code computes them
+modulo `2^64`), read back. -/
+theorem chunk_bytes' (m : Memory) (base n q0 q1 q2 q3 q4 q5 q6 q7 q8 w0 w1 w2 w3 w4 w5 w6 w7 w8 : Nat)
+    (h0 : q0 = base) (h1 : q1 = base + 1) (h2 : q2 = base + 2) (h3 : q3 = base + 3) (h4 : q4 = base + 4)
+    (h5 : q5 = base + 5) (h6 : q6 = base + 6) (h7 : q7 = base + 7) (h8 : q8 = base + 8) :
+    readBytes (((((((((m.writeLE q7 1 w7).writeLE q8 1 w8).writeLE q5 1 w5).writeLE q6 1 w6).writeLE
+      q3 1 w3).writeLE q4 1 w4).writeLE q1 1 w1).writeLE q2 1 w2).writeLE q0 1 w0) base (n + 9) =
+      [BitVec.ofNat 8 w0, BitVec.ofNat 8 w1, BitVec.ofNat 8 w2, BitVec.ofNat 8 w3, BitVec.ofNat 8 w4,
+        BitVec.ofNat 8 w5, BitVec.ofNat 8 w6, BitVec.ofNat 8 w7, BitVec.ofNat 8 w8] ++
+        readBytes m (base + 9) n := by
+  subst h0 h1 h2 h3 h4 h5 h6 h7 h8
+  exact chunk_bytes m base n w0 w1 w2 w3 w4 w5 w6 w7 w8
+
+theorem two_mul32 (x : Nat) (h : x < 2 ^ 31) : (x + x) % 4294967296 = x * 2 := by omega
+theorem two_mul32' (x : Nat) (h : x < 2 ^ 31) : ((x + x) % 4294967296 + 1) % 4294967296 = x * 2 + 1 := by omega
+
+theorem ofNat8_smallsByte_mod (j : Nat) (h : j < 200) :
+    BitVec.ofNat 8 (smallsByte j % 256) = BitVec.ofNat 8 (smallsByte j) := by
+  rw [smallsByte_mod256 j h]
+
+set_option hygiene false in
+/-- The nine digit bytes of a chunk (`chunk_bytes'`) against `digits9`. -/
+macro "chunk_digits64" : tactic => `(tactic| (
+  rw [chunk_bytes' _ (a + (i - 9)) (20 - i) _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+    (by omega) (by omega) (by omega) (by omega) (by omega) (by omega) (by omega) (by omega) (by omega)]
+  rw [show a + (i - 9) + 9 = a + i by omega]
+  rw [List.append_cancel_right_eq]
+  simp (disch := omega) only [h_sm', two_mul32, two_mul32', ofNat8_smallsByte_mod, smalls_hi, smalls_lo]
+  simp only [digits9, List.range_succ, List.range_zero, List.map, List.reverse_nil, List.reverse_cons,
+    List.nil_append, List.cons_append, Nat.div_div_eq_div_mul, Nat.reducePow, Nat.reduceMul, Nat.pow_zero,
+    Nat.div_one, List.cons.injEq, and_true]
+  repeat' apply And.intro
+  all_goals first | exact True.intro | exact congrArg Janus.Spec.Print.digit (by omega)))
+
 /-- What the rest of `formatBase10` from the final chunk's loop head guarantees: it returns
 `i - |decimal lo|` with the digits of `lo` written in front of the bytes already at `[a + i, a + 20)`. -/
 def FbTail (s : State) (SP a i lo : Nat) (m0 : Memory) (s' : State) : Prop :=
@@ -140,6 +174,8 @@ theorem formatBase10 (impl : List Amd64.Segment) :
   rw [h_smv] at hSMb
   rw [hSMv] at h_sm hsma ap3 ap4
   clear h_smv hSMv
+  have h_sm' : ∀ j, j < 200 → s.mem.readLE (j + SMv) 1 = smallsByte j := fun j hj => by
+    rw [Nat.add_comm]; exact h_sm j hj
   have tail : ∀ lo (S : State) (i : Nat), lo < 2 ^ 29 → (Janus.Spec.Print.decimal lo).length ≤ i →
       i ≤ 20 → S.rip = BitVec.ofNat 64 (segAddr P "internal/strconv.formatBase10" + 0x109) →
       S.regs 4 = BitVec.ofNat 64 SP - 8#64 → S.regs 5 = BitVec.ofNat 64 SP - 8#64 →
@@ -269,16 +305,40 @@ theorem formatBase10 (impl : List Amd64.Segment) :
       have w1_6 : (i - 2 - 2 - 2 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 2 - 2 - 1) := by omega
       have w2_6 : (i - 2 - 2 - 2 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 2 - 2 - 2) := by omega
       have w1_8 : (i - 2 - 2 - 2 - 2 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 2 - 2 - 2 - 1) := by omega
+      have w1_4' : (i - 4 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 4 - 1) := by omega
+      have w2_4' : (i - 4 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 4 - 2) := by omega
+      have w1_6' : (i - 6 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 6 - 1) := by omega
+      have w2_6' : (i - 6 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 6 - 2) := by omega
+      have w1_8' : (i - 8 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 8 - 1) := by omega
+      have w2_8' : (i - 8 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 8 - 2) := by omega
       generalize hyv : U % 1000000000 = y at *
-      janus64_run [hlit, hs, div1e9_64 U hU, mod1e9_64 U hU, hyv, w1_0, w2_0, w1_2, w2_2, w1_4, w2_4, w1_6, w2_6, w1_8,
+      janus64_run [hlit, hs, div1e9_64 U hU, mod1e9_64 U hU, hyv, w1_0, w2_0, w1_2, w2_2, w1_4, w2_4, w1_6, w2_6, w1_8, w1_4', w2_4', w1_6', w2_6', w1_8',
           div100_magic64 y (by omega), div100_magic64 (y / 100) (by omega),
           div100_magic64 (y / 100 / 100) (by omega), div100_magic64 (y / 100 / 100 / 100) (by omega),
           mul100_32 (y / 100) (by omega), mul100_32 (y / 100 / 100) (by omega),
           mul100_32 (y / 100 / 100 / 100) (by omega), mul100_32 (y / 100 / 100 / 100 / 100) (by omega),
           mod100_32 y (by omega), mod100_32 (y / 100) (by omega), mod100_32 (y / 100 / 100) (by omega),
           mod100_32 (y / 100 / 100 / 100) (by omega)] until [segAddr P "internal/strconv.formatBase10" + 0x17]
-      all_goals trace_state
-      all_goals sorry
+      · -- the last chunk (`U < 10^9`): return
+        have hc := decimal_nine U (by omega) (by omega)
+        unfold FbTail
+        refine ⟨_, _, _, _, _, ?eq, ?fr, ?rb⟩
+        case eq =>
+          refine eq_retState64 [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal U).length)] ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+          all_goals first
+            | (simp [setRegF, retAddrOf, hsp, hg', hx15, hfs, hdf, hmx, Nat.mod_eq_of_lt hspl]; done)
+            | (simp only [setRegF, hc, digits9, List.length_map, List.length_reverse, List.length_range,
+                List.getD_cons_zero, reduceIte]; apply BitVec.eq_of_toNat_eq; simp; omega)
+            | rfl
+        case fr => janus_frame
+        case rb =>
+          rw [hc]
+          simp only [digits9, List.length_map, List.length_reverse, List.length_range]
+          rw [show U % 1000000000 = U by omega] at *
+          chunk_digits64
+      · -- back at the loop head: the next chunk
+        trace_state
+        sorry
   sorry
 
 end PrintFn
