@@ -40,15 +40,14 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       39 64 (Extracted.entry + 0x84))
     (hrec : GorecoverContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gorecover") P)
     (hdr : DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P)
-    (hw : ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x24))
     (x etyp edata : BitVec 64) :
     EnsuresGo (Extracted.program.link impl) Extracted.entry [x, etyp, edata]
       (fun s => PanicCallerOK P s (P.depth + 112) 32 ∧ P.Calm s.mem (s.regs 28).toNat ∧
-        etyp.toNat ≠ 0)
+        etyp.toNat ≠ 0 ∧ ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x24))
       (fun _ => goClass P)
       (fun _ s' => (s'.regs 0).toNat = if x.toNat ≤ 10 then x.toNat else 7)
       (fun _ _ _ => False) := by
-  intro ret hret s hs ⟨hc, hcalm, hne⟩
+  intro ret hret s hs ⟨hc, hcalm, hne, hw⟩
   have hc' := hc
   obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus_intro hs
@@ -395,19 +394,19 @@ theorem nonvacuous : ∃ (impl : List Segment) (P : PanicRuntime) (ret : Nat) (s
       (Extracted.program.contractAddr "runtime.gorecover") P ∧
     DeferreturnContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.deferreturn") P ∧
-    ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x24) ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64, 1#64, 0#64] s ∧
-    (PanicCallerOK P s (P.depth + 112) 32 ∧ P.Calm s.mem (s.regs 28).toNat ∧ (1#64 : BitVec 64).toNat ≠ 0) :=
-  ⟨implAt, P0, ret, s0, P0_laws, gopanic_model, gorecover_model, ret_model, id, hret, setup, pre⟩
+    (PanicCallerOK P s (P.depth + 112) 32 ∧ P.Calm s.mem (s.regs 28).toNat ∧ (1#64 : BitVec 64).toNat ≠ 0 ∧
+      ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x24)) :=
+  ⟨implAt, P0, ret, s0, P0_laws, gopanic_model, gorecover_model, ret_model, hret, setup, ⟨pre.1, pre.2.1, pre.2.2, id⟩⟩
 
 theorem returns : GoReturns ((Extracted.program.link implAt).withExit ret) (goClass P0) s0 fun o =>
     match o with
     | .returned s' => ABIReturn s0 s' ∧
         (s'.regs 0).toNat = if (42#64 : BitVec 64).toNat ≤ 10 then (42#64 : BitVec 64).toNat else 7
     | .panicked _ _ => False :=
-  correctness implAt P0 P0_laws gopanic_model gorecover_model ret_model id 42#64 1#64 0#64 ret hret s0
-    setup pre
+  correctness implAt P0 P0_laws gopanic_model gorecover_model ret_model 42#64 1#64 0#64 ret hret s0
+    setup ⟨pre.1, pre.2.1, pre.2.2, id⟩
 
 end Witness
 
