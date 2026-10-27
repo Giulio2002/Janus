@@ -56,6 +56,7 @@ import Janus.Contracts.PanicSatAmd64EntrySegs
 import Janus.Contracts.PanicSatAmd64Lookup
 import Janus.Contracts.PanicSatAmd64Entry
 import Janus.Contracts.PanicSatAmd64Run
+import Janus.Contracts.PanicWitnessAmd64
 import Janus.Contracts.IfaceAmd64
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat
