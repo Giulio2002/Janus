@@ -1,0 +1,19 @@
+# An example consumer package: proofs about example.com/basic in their own Lake package,
+# depending on the janus Lean library. See README.md and docs/CONSUMERS.md.
+name = "chainAmd"
+defaultTargets = ["ChainAmd"]
+
+# In this repository the dependency is the checkout itself. A package of your own pins a
+# commit instead (see README.md):
+#   [[require]]
+#   name = "janus"
+#   git = "https://github.com/Giulio2002/Janus"
+#   rev = "<40-hex commit>"
+[[require]]
+name = "janus"
+path = "../../../../.."
+
+# ChainAmd.lean imports the extraction-independent modules; the theorem modules
+# (ChainAmd.Add, ChainAmd.Max) import Extracted and are checked by janus verify.
+[[lean_lib]]
+name = "ChainAmd"

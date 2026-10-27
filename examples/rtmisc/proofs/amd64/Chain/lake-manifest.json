@@ -1,0 +1,13 @@
+{"version": "1.2.0",
+ "packagesDir": ".lake/packages",
+ "packages":
+ [{"type": "path",
+   "scope": "",
+   "name": "janus",
+   "manifestFile": "lake-manifest.json",
+   "inherited": false,
+   "dir": "../../../../..",
+   "configFile": "lakefile.toml"}],
+ "name": "chainAmd",
+ "lakeDir": ".lake",
+ "fixedToolchain": false}
