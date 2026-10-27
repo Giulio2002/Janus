@@ -182,7 +182,7 @@ def SailResult.tag : SailResult → String
 
 def statusMask : Nat := 0x8D5   -- CF PF AF ZF SF OF
 
-/-- The pre-state of a case: registers, flags (status flags, DF, and the reserved bit 1), RIP,
+/-- The pre-state of a case: registers, flags (status flags, DF, the reserved bit 1 and IF: a Linux user process runs with `IF` set, which `PUSHFQ` pushes, as Janus' `rflagsImage`), RIP,
 YMM0-15, FS base, code page and data buffer. -/
 def preState (base : SState) (c : Case) : Except String SState := do
   let mem0 := (List.range dataSize).foldl
@@ -193,7 +193,7 @@ def preState (base : SState) (c : Case) : Except String SState := do
   let setup : SailM Unit := do
     for i in [0:16] do
       janus_set_gpr (BitVec.ofNat 4 i) (BitVec.ofNat 64 c.regs[i]!)
-    janus_set_rflags (BitVec.ofNat 32 ((c.rflags &&& (statusMask ||| 0x400)) ||| 2))
+    janus_set_rflags (BitVec.ofNat 32 ((c.rflags &&& (statusMask ||| 0x400)) ||| 0x202))
     janus_set_rip (BitVec.ofNat 64 testPC)
     for i in [0:16] do
       janus_set_ymm (BitVec.ofNat 4 i) (BitVec.ofNat 256 (c.ymmh[i]! * 2 ^ 128 + c.xmm[i]!))
@@ -347,6 +347,7 @@ def defectClass (c : Case) (i : Janus.Amd64.Instr) (why : String) : String :=
   | .movdq _ true _ _ => "D4 movd-movq-to-xmm-no-zero-extension"
   | .movq .. => "D4 movd-movq-to-xmm-no-zero-extension"
   | .movs true _ | .stos true _ => "D5 rep-string"
+  | .sse (.movdup .ddup ..) | .sse (.movdup .sldup ..) => "D9 movddup-movsldup-dispatch-to-movlps"
   | _ => s!"unclassified {why.takeWhile (· != ':')}"
 
 /-! ## Comparison -/
@@ -381,7 +382,7 @@ def diffOk (j : JanusOk) (s0 s1 : SailOk) : Option String :=
 
 def isUnimplemented (m : String) : Bool :=
   (m.splitOn "Unimplemented").length > 1 || (m.splitOn "not translated").length > 1 ||
-  (m.splitOn "janus-excluded: VEX").length > 1
+  (m.splitOn "janus-excluded: VEX").length > 1 || (m.splitOn "janus-excluded: EVEX").length > 1
 
 def isExcluded (m : String) : Bool := (m.splitOn "janus-excluded").length > 1
 

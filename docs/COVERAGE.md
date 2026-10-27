@@ -381,6 +381,24 @@ else. Programs built with `GOARM64=v8.1` or later have no fallback; the default 
 Package A closed it (exclusive monitor and environment choice); the `anyCPU` theorems of
 `AtomicAdd` and `AtomicMax` prove both paths of the default build.
 
+### 1.5 Independent formal cross-check of the amd64 model (JanusX86, 2026-10-27)
+
+`scripts/x86formal.sh check` runs Janus' `step` and the Sail x86 model (ACL2 X86isa) side by side
+(`docs/X86FORMAL.md`). The vendored Sail slice used to keep only the opcodes of the first,
+integer decoder, so every SSE, SSSE3, SSE4, x87, crypto, BMI and AVX-512 case that the current
+decoder accepts was reported as "janus decodes, the slice excludes it": 452,644 such verdicts over
+the 3,293,526 cases of the `full`, `sse`, `x87`, `fp`, `v3`, `crypto`, `avx` and `avx512` corpora
+(162,406 on the older 697,542-case corpus). The slice now keeps every arm of the one- and two-byte
+opcode maps: **0 MISMATCH and no slice-exclusion verdict on any corpus**. What the Sail model can
+actually be compared on, per class:
+
+| class | against the Sail model |
+|---|---|
+| integer, flags, branches, stack, shifts, strings | compared state for state (227 classes in `full`); proved (46 theorems) for the main classes |
+| SSE2 packed integer and FP moves/shuffles/converts | 95 classes compared (`sse`: 54,326 agree); D9 (`MOVDDUP`/`MOVSLDUP`) is a model defect |
+| SSE scalar FP, SSSE3 and SSE4.1/4.2 (the `0F 38`/`0F 3A` maps), PXOR/PAND/POR/PCMPEQB/PMOVMSKB | no semantics in the model (`not translated` / `Opcode Unimplemented`): hardware oracle only |
+| x87 (`D8-DF`), AES-NI/PCLMUL/SHA, BMI/FMA/MOVBE, VEX AVX/AVX2, EVEX AVX-512 | the model has no semantics (every arm is `Opcode Unimplemented in x86isa!` or the VEX/EVEX maps stub): hardware oracle only |
+
 ## 2. Runtime entry points
 
 The list holds every runtime function or variable the compiler can reference, 309 names:

@@ -54,11 +54,11 @@ for f in os.listdir(src):
 stats = {}
 
 
-def edit(fname, fn):
+def edit(fname, fn, noop_ok=False):
     p = os.path.join(out, fname)
     s = open(p).read()
     s2 = fn(s)
-    assert s2 != s, fname
+    assert noop_ok or s2 != s, fname
     open(p, "w").write(s2)
 
 
@@ -93,9 +93,10 @@ def slice_dispatch(s, func, which, label):
     return s[:mstart] + "\n".join(head + new) + s[mend:]
 
 
-edit("step.sail", lambda s: slice_dispatch(s, "one_byte_opcode_execute", "one", "one-byte"))
+# noop_ok: with a keep list that covers a whole map nothing is replaced (keep.txt)
+edit("step.sail", lambda s: slice_dispatch(s, "one_byte_opcode_execute", "one", "one-byte"), noop_ok=True)
 edit("two_byte_opcodes_dispatch.sail",
-     lambda s: slice_dispatch(s, "two_byte_opcode_execute", "two", "two-byte 0F"))
+     lambda s: slice_dispatch(s, "two_byte_opcode_execute", "two", "two-byte 0F"), noop_ok=True)
 
 
 def stub_function(s, func, msg):
