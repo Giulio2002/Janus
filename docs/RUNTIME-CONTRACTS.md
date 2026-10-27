@@ -1096,7 +1096,7 @@ standard library keep scratch objects in a `sync.Pool`. Its methods are concurre
 to package `sync`'s code like a runtime stub, `cmd/janus/stubpins_gen.go`, so the concurrency
 internals are not extracted) and takes their contract. The contracts have the shape of the live
 allocation and write-barrier contracts (a ghost live set `L`, one runtime invariant `R : RtInv`
-over the memory with `L` masked out; `Janus/Contracts/LiveLocal.lean`, agent/alloc2's interface):
+over the memory with `L` masked out; `Janus/Contracts/Live.lean`, `LiveAmd64.lean`):
 
 | Go source | Function | Contract | Result |
 | --- | --- | --- | --- |
@@ -1138,15 +1138,14 @@ memory the invariant accounts for, so the call costs the caller no budget).
 
 **Satisfiability.** `poolGetLive_satisfiable`, `poolPutLive_satisfiable` (`PoolSat`, `PoolSatAmd64`):
 machine code for `Get` (returns nil: an empty pool) and `Put` (drops its argument: a pool may drop
-what it is given) that meets the contract for the bump-allocator model of
-`Janus/Contracts/LiveLocalSat.lean`, and a call state that satisfies the whole precondition. The
-live allocation, barrier and clear contracts the examples use have witnesses on the same model
-(`newobjectLive_satisfiable`, `growsliceLive_satisfiable`, `wbLive_satisfiable`,
-`memclrNoHeapPointersLive_satisfiable`, in `LiveLocalSat` / `LiveLocalSatAmd64`: the local copy of
-agent/alloc2's interface, replaced by its witnesses on merge). The example proofs'
-`Witness.nonvacuous` and `Witness.returns` show that every hypothesis of the guarantee holds
-together (one runtime serving all six contracts, a call state with an empty live set) and the
-guarantee is reached (`ScratchSum(3, 5) = 6`; `StackGrow(1) = 1`).
+what it is given) that meets the contract for the toy bump-allocator runtime `toyR` of
+`Janus/Contracts/LiveToy.lean` (the runtime of the live contracts' own witnesses,
+`LiveSat`/`LiveSatAmd64`), and a call state that satisfies the whole precondition. `PoolSat` and
+`PoolSatAmd64` also hold the small toys the examples' witnesses need on the same runtime
+(a `growslice(p, 1, 0, 1, et)` and the invariant for a live set that drops ranges, `toyInv_drop`).
+The example proofs' `Witness.nonvacuous` and `Witness.returns` show that every hypothesis of the
+guarantee holds together (one runtime serving all six contracts, a call state with an empty live
+set) and the guarantee is reached (`ScratchSum(3, 5) = 6`; `StackGrow(1) = 1`).
 
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 
