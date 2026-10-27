@@ -748,8 +748,9 @@ def isRuntimeContract (env : Environment) (c : Name) : Bool :=
           t.consumeMData.isConstOf `Janus.Program || t.consumeMData.isConstOf `Janus.Amd64.Program)
     | _ => false
 
-/-- Is `ty` a plain scalar data type (`Nat`, `Int`, `Bool`, `Fin n`, `BitVec n`, `UIntN`)? -/
+/-- Is `ty` a plain scalar data type or a universe (`Nat`, `Int`, `Bool`, `Fin n`, `BitVec n`, `UIntN`)? -/
 def isScalarParamType (ty : Expr) : Bool :=
+  ty.isSort ||  -- a type argument (`K`, `V` of `MapModel K V`): data, not a runtime object
   ty.isConstOf ``Nat || ty.isConstOf ``Int || ty.isConstOf ``Bool || ty.isAppOf ``Fin ||
   ty.isAppOf ``BitVec || ty.isConstOf ``UInt8 || ty.isConstOf ``UInt16 || ty.isConstOf ``UInt32 ||
   ty.isConstOf ``UInt64
@@ -772,6 +773,29 @@ def contractParamKind (ty : Expr) : Option Bool :=
   else if isScalarParamType ty then none
   else some true
 
+
+/-- The explicit allow-list of the default-deny rule (round 11): the types of contract arguments
+that are not runtime objects but the framework's own description of WHICH runtime function (or
+float format) the contract is about: `RtSpec` (`concatstringSpec 2`) and `Fmt` (`binary32`). The
+framework proves each such spec satisfiable (`Janus.Contracts.RtSat`), so the argument may be a
+closed term, but only one built from the framework's own imported constants: no variable, no
+lambda, no constructor application and no constant defined in the proof file, which could
+describe an impossible function (and make the contract false). -/
+def frameworkConstParamType (ty : Expr) : Bool :=
+  let ty := ty.consumeMData
+  ty.isConstOf `Janus.Contracts.RtSpec || ty.isConstOf `Janus.Float.Fmt
+
+/-- Is `a` a closed term of imported constants only (the framework's, core's; nothing defined in the proof file) (see `frameworkConstParamType`)? -/
+def isFrameworkConstArg (env : Environment) (a : Expr) : Bool :=
+  !a.hasFVar && !a.hasLooseBVars && !a.hasMVar &&
+  (a.find? fun sub => match sub with
+    | .lam .. | .forallE .. | .letE .. | .proj .. => true
+    | .const c _ =>
+        (env.getModuleIdxFor? c).isNone ||
+        (match env.find? c with
+          | some (.ctorInfo _) => true
+          | _ => false)
+    | _ => false).isNone
 
 /-- The runtime-contract applications in `e` (outermost first). With `claims`, the subterms under
 an `∃` are skipped: a contract there is claimed (a witness theorem's), not assumed. -/
@@ -850,6 +874,10 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
         return some s!"applies the runtime contract {c} partially (round 10 V1)"
       for i in [0:doms.size] do
         let a := args[i]!.consumeMData
+        if frameworkConstParamType doms[i]! then
+          unless isFrameworkConstArg env a do
+            return some s!"assumes the runtime contract {c} for the argument `{(← Meta.ppExpr a).pretty 10000}`, which is not a closed term of the framework's own constants: the function or format a contract describes cannot be chosen by the statement (round 11)"
+          continue
         match contractParamKind doms[i]! with
         | some true =>
           unless isVar a do

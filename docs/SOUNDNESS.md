@@ -1091,8 +1091,11 @@ base:
   `BitVec`, `UIntN`: an entry address, stack bound, count) may be anything, and EVERY other
   argument is a runtime parameter that must be a variable bound by the statement, not a `let`, not
   instantiated, and mentioned by no premise except runtime contracts, `….Laws M` of a framework
-  model, and the stack-depth bounds above. A new model type is therefore covered with no change to
-  the auditor. Regression rows: `audit/round11/` (closed `HashModel`, `HashModel` pinned by
+  model, and the stack-depth bounds above. Type arguments (`K`, `V`) are data. The explicit
+  allow-list: `RtSpec` (`concatstringSpec 2`) and `Fmt` (`binary32`) name WHICH runtime function or
+  float format a contract describes; they may be closed, but only terms of imported constants (no
+  lambda, constructor or constant defined in the proof file). A new model type is therefore covered
+  with no change to the auditor. Regression rows: `audit/round11/` (closed `HashModel`, `HashModel` pinned by
   `H = H0`, closed `PanicRuntime`, `CheckptrModel` pinned by a premise, with the honest theorems
   as controls and the unsatisfiability of the closed models kernel-checked).
 * **Readiness is per call** (round 10 V2, V3). A contract whose postcondition hands back all its
