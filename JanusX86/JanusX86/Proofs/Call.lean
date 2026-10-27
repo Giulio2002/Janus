@@ -356,7 +356,7 @@ open Janus.Amd64 Janus.Amd64.Decode in
 theorem decode_ret {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat} {n : Nat}
     (hpp : parsePrefixes bytes {} 0 = some (p, o :: rest, n)) (ho : o = 0xC3 ∨ o = 0xC2)
     {i : Instr} {len : Nat} (hd : decode bytes = some (i, len)) :
-    p.lock = false ∧ p.fs = false ∧ p.rep = 0 ∧ p.opsize = false ∧ ∃ nimm, (o = 0xC2 → ∃ r, readLE 2 rest = some (nimm, r)) ∧
+    p.lock = false ∧ p.fs = false ∧ p.opsize = false ∧ ∃ nimm, (o = 0xC2 → ∃ r, readLE 2 rest = some (nimm, r)) ∧
       (o = 0xC3 → nimm = 0) ∧ len = n + 1 + (if o = 0xC2 then 2 else 0) ∧ len ≤ 15 ∧ i = .ret nimm := by
   obtain ⟨b0, t, rfl, h4, h5, hsys, h62⟩ := parsePrefixes_head _ _ _ hpp (by omega) (by omega) (by sys_none) (by omega)
   simp only [decode, hsys, h62, h4, h5, false_or, ↓reduceIte, decodeLegacy, hpp] at hd
@@ -366,7 +366,7 @@ theorem decode_ret {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat}
     by_cases hl : 15 < n + 1 <;> by_cases hrp : p.rep = 0 <;> cases hf : p.fs <;>
       cases hk : p.lock <;> cases hos : p.opsize <;> cases hsg : p.seg <;>
       simp (config := {decide := true}) [hf, hk, hl, hrp, hos, hsg, lockable, withFS] at hd
-    all_goals (obtain ⟨rfl, rfl⟩ := hd; refine ⟨?_, ?_, ?_, ?_, 0, fun h => absurd h (by decide), fun _ => rfl,
+    all_goals (obtain ⟨rfl, rfl⟩ := hd; refine ⟨?_, ?_, ?_, 0, fun h => absurd h (by decide), fun _ => rfl,
       by simp, by omega, rfl⟩ <;> first | rfl | assumption)
   · cases hr : readLE 2 rest with
     | none => exfalso; simp (config := {decide := true}) [oneByte, hr] at hd
@@ -377,7 +377,7 @@ theorem decode_ret {bytes : List Nat} {p : Prefixes} {o : Nat} {rest : List Nat}
       by_cases hl : 15 < n + 3 <;> by_cases hrp : p.rep = 0 <;> cases hf : p.fs <;>
         cases hk : p.lock <;> cases hos : p.opsize <;> cases hsg : p.seg <;>
         simp (config := {decide := true}) [hf, hk, hl, hrp, hos, hsg, lockable, withFS] at hd
-      all_goals (obtain ⟨rfl, rfl⟩ := hd; refine ⟨?_, ?_, ?_, ?_, v, fun _ => ⟨r, rfl⟩, fun h => absurd h (by decide),
+      all_goals (obtain ⟨rfl, rfl⟩ := hd; refine ⟨?_, ?_, ?_, v, fun _ => ⟨r, rfl⟩, fun h => absurd h (by decide),
         by simp, by omega, rfl⟩ <;> first | rfl | assumption)
 
 set_option maxRecDepth 100000 in
@@ -406,7 +406,7 @@ theorem ret_agree {js js' : State} {s : SState} (hrel : Rel js s) (hcfg : X86Con
   | none => simp [step, hd] at hstep
   | some il =>
   obtain ⟨i, len⟩ := il
-  obtain ⟨hlk, hfs, hrep, hos, nimm, himm, h0, rfl, hlen, rfl⟩ := decode_ret hpp ho hd
+  obtain ⟨hlk, hfs, hos, nimm, himm, h0, rfl, hlen, rfl⟩ := decode_ret hpp ho hd
   have hsp' : (js.regs 4).toNat + 8 + nimm < 2 ^ 47 := by
     have : nimm < 2 ^ 16 := by
       rcases ho with rfl | rfl

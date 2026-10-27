@@ -9,6 +9,8 @@
 #   NowNano      time.Now().UnixNano(): the wall-clock reading of the vDSO clock contract
 #   Pid          syscall.Getpid(): a raw system call
 #   MustNonNeg   a path that ends in a breakpoint trap (Kernel.Traps) and one that returns
+#   AESField, SVEField  (arm64 only, N5) fields of ID_AA64ISAR0_EL1 / ID_AA64PFR0_EL1: the
+#                feature-ID register read is an arbitrary 64-bit value (Kernel.Site.mrs .idreg)
 #
 # Usage: scripts/verify-sys-examples.sh [isa/Name ...]   (default: all, e.g. arm64/WriteOut)
 # Writes artifacts/sys/<isa>/<Name>/verified.json and a summary to artifacts/verify-sys-examples.txt.
@@ -23,6 +25,7 @@ if [ ${#names[@]} -eq 0 ]; then
   for isa in arm64 amd64; do
     for n in "${all[@]}"; do names+=("$isa/$n"); done
   done
+  names+=(arm64/AESField arm64/SVEField)
 fi
 
 # the extraction arguments of an example: the runtime contracts it leaves out
@@ -48,7 +51,8 @@ for target in "${names[@]}"; do
   out="artifacts/sys/$isa/$n"
   mapfile -t args < <(sys_args "$n")
   mkdir -p "$out"
-  bin/janus extract "artifacts/examples-sys-$isa" "example.com/sys.$n" "$out" ${args[@]+"${args[@]}"} >/dev/null 2>&1
+  b="artifacts/examples-sys-$isa"; case "$n" in AESField|SVEField) b="artifacts/examples-sys-idreg-$isa" ;; esac
+  bin/janus extract "$b" "example.com/sys.$n" "$out" ${args[@]+"${args[@]}"} >/dev/null 2>&1
   : > "$out/verify.log"
   start=$(date +%s.%N)
   ok=1
@@ -58,6 +62,15 @@ for target in "${names[@]}"; do
       ok=0; echo "  $isa/$n: Proof.$thm FAILED"
     fi
   done
+  # the non-vacuity witnesses (Proof.Witness.nonvacuous, Proof.Witness.returns) where there are some
+  if grep -q '^namespace Witness' "examples/proofs-sys/$isa/$n.lean"; then
+    for thm in Proof.Witness.nonvacuous Proof.Witness.returns; do
+      if ! bin/janus verify "$out" --proof "examples/proofs-sys/$isa/$n.lean" --theorem "$thm" \
+          ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
+        ok=0; echo "  $isa/$n: $thm FAILED"
+      fi
+    done
+  fi
   t=$(echo "$(date +%s.%N) - $start" | bc)
   if [ $ok = 1 ]; then
     printf '%-18s ok  %6.1fs\n' "$isa/$n" "$t" | tee -a "$summary"

@@ -7,3 +7,5 @@ typedef struct { unsigned char b[16]; } ld16;
 long double ld_mul(long double a, long double b);
 void c_ldmul(const ld16 *a, const ld16 *b, ld16 *r);
 uint64_t c_switch(uint64_t k, uint64_t x);
+/* amd64 only (hand-written assembly ending in `repz ret`) */
+uint64_t c_repret_umax(uint64_t a, uint64_t b);

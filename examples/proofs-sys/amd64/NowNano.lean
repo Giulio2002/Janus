@@ -21,8 +21,8 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janu
 namespace Proof
 
 /-- `time.startNano` and `time.Local` (writable globals `time.Now` reads). -/
-def startNano : Nat := 0x575260
-def timeLocal : Nat := 0x54fb40
+def startNano : Nat := ripTarget Extracted.program (segAddr Extracted.program "time.Now" + 0x18)
+def timeLocal : Nat := ripTarget Extracted.program (segAddr Extracted.program "time.Now" + 0x47)
 
 theorem sx (n : Nat) (h : n < 2 ^ 31) :
     BitVec.signExtend 64 (BitVec.setWidth 32 (BitVec.ofNat 64 n)) = BitVec.ofNat 64 n := by
@@ -184,7 +184,9 @@ theorem correctness (rt : List (Nat × Nat)) :
   have hgb := hg.below
   have hnw2 := hg.noWrap
   have hgr := hg.readable
-  simp only [regSP, regG, stackguard0Offset, stackguard0, startNano, timeLocal] at hgl hgb hnw2 hgr hb ha hw hout hal hsn hloc ⊢
+  janus_eval_nat hS : startNano
+  janus_eval_nat hL : timeLocal
+  simp only [regSP, regG, stackguard0Offset, stackguard0, hS, hL] at hgl hgb hnw2 hgr hb ha hw hout hal hsn hloc ⊢
   apply Amd64.Kernel.ReturnsK.of_reaches
   janus64_intro hs
   janus64_run

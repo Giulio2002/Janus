@@ -200,6 +200,16 @@ registers, `FPCR`/`FPSR` and memory are unchanged, and execution continues at `p
 | `reserved`: agree, both fault (`SIGILL` / `undecodable`, the rest of the space) | 1,846 |
 | `sys.env`: agree with the contract frame (`CNTVCT_EL0` 1,077, `CNTFRQ_EL0` 1,083, `MIDR_EL1` 1,129, `DIT` 1,012, `MSR DIT` 1,331) | 5,632 |
 | `sys.env`: model-gap (`MSR DIT, #imm` with `CRm ≥ 2`, rejected) | 1,868 |
+
+**Feature-ID registers (N5, 2026-10-26).** `sys.env` also generates `MRS Xt, S3_0_C0_C<4..7>_<op2>` (the
+`ID_AA64*_EL1` registers Linux emulates at EL0), and the comparator (`compareEnv`, kind
+`env/idreg`) checks that the hardware changes only the destination register (any 64-bit value:
+the model's contract returns an arbitrary value, `Janus.Kernel.Site.mrs (.idreg crm op2)`), SP, NZCV,
+the vector registers, `FPCR`/`FPSR` and memory unchanged, and continues at `pc + 4`.
+Run under qemu-aarch64 (user mode, which emulates the ID registers; its values are not real
+hardware, which is why the contract is "arbitrary"), `gen -only '^sys\.env$' -n 4000`: 4,000 cases,
+**0 MISMATCH**; 917 `env/idreg` agree (the other agreeing kinds are the existing ones; the 773 model-gaps
+are `MSR DIT, #imm` with `CRm >= 2`, as before).
 ## Sequence mode
 
 A case with a `words` field (added by the rt-model audit) lays the words out from `TestPC`; the

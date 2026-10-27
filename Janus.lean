@@ -113,6 +113,10 @@ import Janus.Contracts.InstrumentCalls
 import Janus.Contracts.InstrumentCallsAmd64
 import Janus.Contracts.InstrumentCallsSat
 import Janus.Contracts.InstrumentCallsSatAmd64
+import Janus.Contracts.SoftFloat
+import Janus.Contracts.SoftFloatAmd64
+import Janus.Contracts.SoftFloatSat
+import Janus.Contracts.SoftFloatSatAmd64
 import Janus.Contracts.MallocSC
 import Janus.Contracts.MallocSCAmd64
 import Janus.Contracts.MallocSCSat

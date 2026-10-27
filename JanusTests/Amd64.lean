@@ -21,6 +21,14 @@ example : decode [0x48, 0x01, 0xd8] = some (.alu .add 64 (.reg 0) (.loc (.reg 3)
 example : decode [0x48, 0x11, 0xc8] = some (.alu .adc 64 (.reg 0) (.loc (.reg 1)), 3) := by decide
 -- ret
 example : decode [0xc3] = some (.ret 0, 1) := by decide
+-- REP RET / BND RET: the F3/F2 prefix is ignored by the CPU; other prefixes stay rejected
+example : decode [0xf3, 0xc3] = some (.ret 0, 2) := by decide
+example : decode [0xf2, 0xc3] = some (.ret 0, 2) := by decide
+example : decode [0xf3, 0xc2, 0x08, 0x00] = some (.ret 8, 4) := by decide
+example : decode [0xf2, 0xc2, 0x10, 0x00] = some (.ret 16, 4) := by decide
+example : decode [0x66, 0xc3] = none := by decide
+example : decode [0xf3, 0x66, 0xc3] = none := by decide
+example : decode [0xf3, 0xf2, 0xc3] = none := by decide
 -- cmp rsp, QWORD PTR [r14+0x10]
 example : decode [0x49, 0x3b, 0x66, 0x10] =
     some (.alu .cmp 64 (.reg 4) (.loc (.mem ⟨some 14, none, 0, 16, false, false⟩)), 4) := by decide

@@ -37,7 +37,9 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 namespace Proof
 
 /-- `syscall.errEAGAIN`, `errEINVAL`, `errENOENT` (`.data`, 16 bytes each, contiguous). -/
-def errVars : Nat := 0x163c60
+def errVars : Nat :=
+  adrpLdTarget (segAddr Extracted.program "syscall.write" + 4 * 27)
+    (segWord Extracted.program "syscall.write" 27) (segWord Extracted.program "syscall.write" 28) 0
 
 set_option hygiene false in
 /-- After the `write` system call: the two kernel outcomes (some bytes written, or `-errno`),
@@ -86,7 +88,8 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
           s'.regs 0 = BitVec.ofNat 64 c ∧ s'.regs 1 = 0 ∧ s'.regs 2 = 0) ∨
         (k' = k ∧ s'.regs 0 = BitVec.ofNat 64 (2 ^ 64 - 1))) := by
   intro ret hret s k hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hout, hbuf, hlen, hbo, hbd, hgd, herr, hed⟩
-  simp only [errVars] at herr hed
+  janus_eval_nat hE : errVars
+  simp only [hE] at herr hed
   apply ReturnsK.of_reaches
   janus_intro hs
   janus_run calls [hent, hexit, hconv]

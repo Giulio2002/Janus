@@ -246,6 +246,40 @@ The harvested classes include `cmov`, `setcc`, `lea`, `imul`, `mul`, `div`/`idiv
 `movsx`/`movzx`/`movsxd`, `cqo`/`cdqe`, `bswap`, `bsr`, `ror`, `leave`, `push`/`pop` and the
 `ENDBR64`/`nopw` forms. `scripts/oracle-amd64.sh full` now adds this C corpus to the harvest.
 
+### `REP RET` and `BND RET` (2026-10-26)
+
+`F3 C3` (`REP RET`, `repz ret`) is the AMD branch-predictor idiom of perlasm/OpenSSL-style assembly: the
+CPU executes the `F3` prefix on a near `RET` as nothing (Intel SDM: `F3`/`F2` on `RET` have no
+effect; `F2 C3` is `BND RET`). It ends 98 of the 785 functions of the C libraries cgo links in the
+large application measured in [GAPS.md](GAPS.md), and the decoder rejected it. `Janus.Amd64.Decode`
+now decodes `F3`/`F2` before `C3` and `C2 imm16` (with the REX prefixes the decoder already accepts
+there) as `RET` / `RET imm16`; `66`, segment overrides, a second `F2`/`F3` and the other prefix
+combinations stay rejected. The new `edge/repret` family (20,000 cases per run) puts both prefixes
+on `C3` and `C2 imm16` (`imm16` = 0, 8, -8), with a valid return address on the stack, with the stack
+pointer at the ends of the buffer, and with every other prefix before or after the `F3`/`F2`.
+
+| run | cases | agree | model-gap | **MISMATCH** |
+|---|---:|---:|---:|---:|
+| `quick`, `SEED=1`, with `edge/repret` | 1,017,804 | 862,856 | 154,947 | **0** |
+| of which `edge/repret` | 20,000 | 7,519 (4,347 decoded forms: 4,032 return, 315 fault identically; 721 plain `C3`/`C2`; 2,451 rejected forms that fault on both sides) | 12,481 (11,949 rejected prefix combinations that the hardware executes as a `RET`: `66 F3 C3`, `2E F3 C3`, `F3 F2 C3`, REX before the `F3`, ...; 532 returns to an address outside the code page, as for a plain `RET`) | **0** |
+
+The model-gap rows are conservative: the decoder refuses the form. `F0 F3 C3` (`LOCK` with `REP RET`)
+is `SIGILL` on both sides.
+
+**Against the Sail x86 model** (`scripts/x86formal.sh`, [X86FORMAL.md](X86FORMAL.md)): the proof
+`JanusX86.Proofs.Call.ret_agree` (Janus' `RET`/`RET imm16` against Sail's `x86_ret`, for every
+prefix list the decoder accepts) no longer needs `p.rep = 0`: the Sail `x86_ret` does not look at
+the repeat prefix, so `F3 C3` agrees with it exactly as `C3` does. `scripts/x86formal.sh prove`
+passes (46 audited theorems; axioms `propext`, `Classical.choice`, `Quot.sound` only).
+`scripts/x86formal.sh check` on the corpus above gives, for the 20,000 `edge/repret` cases: 8,440
+agree (4,702 decoded or plain returns, state for state; 2,840 both reject; 532 bad targets and 366
+unmapped stacks that fault on both sides), 11,560 gaps (Janus refuses a prefix combination that the
+model executes: `janus-undecodable/sail-ok` 10,709, `/sail-memory` 851), and **0 MISMATCH**. (The same run reports 162,406 `MISMATCH` over the whole corpus, all
+of the kind "janus decodes, the slice excludes it": the SSE, SSSE3, SSE4, x87 and similar classes
+that integ/wave1's decoder accepts and the vendored Sail slice does not contain
+(`one-byte opcode 0xd9`, `two-byte 0F opcode 0x38`, ...). They are independent of this change and of
+the corpus: that check was written for the integer corpus of the first decoder.)
+
 ### GOAMD64=v3 extensions (2026-10-25)
 
 BMI1 (`ANDN BLSR BLSMSK BLSI BEXTR`), BMI2 (`SHLX SHRX SARX RORX MULX BZHI PDEP PEXT`), `MOVBE`,

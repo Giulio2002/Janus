@@ -136,6 +136,17 @@ retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to
 | FCVT (S to D, D to S) | all valid | **proved**⁴ | `fcvt_agree` (FP/AgreeFcvt) |
 | the other scalar FP instructions (FMAX/FMIN/FMAXNM/FMINNM/FNMUL, FABS, FNEG, FMOV, FRINT*, FCSEL, other FCVT rounding modes, conversions to and from fixed point, half precision), AdvSIMD, AES, SHA, CRC, PMULL, permutes, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
 
+**System register reads that are not in the table.** `MRS Xt, ID_AA64ISAR0_EL1` and the other
+feature-ID registers (`ID_AA64ISAR1/2`, `ID_AA64PFR0/1`, `ID_AA64ZFR0`, `ID_AA64MMFR0..4`,
+`ID_AA64DFR0/1`, N5 in [GAPS.md](GAPS.md)) are decoded by Janus as environment reads
+(`Instr.mrsEnv (.idreg crm op2)`, like `MIDR_EL1`, `CNTVCT_EL0`, `DIT`): they execute as
+`Fault.kernel` and the kernel contract `Janus.Kernel.Site.mrs` gives an **arbitrary** 64-bit result.
+They are deliberately not in the ASL system-register list (`janus_sysreg_splice.sail` keeps only
+`DCZID_EL0` and `TPIDR_EL0`): the ASL model's `AArch64_SysRegRead` returns the value of a CPU
+configuration for them, which no theorem should assume, and at EL0 the access is UNDEFINED
+(trapped to the kernel), which is exactly the event the kernel contract stands for. The ASL
+cross-check therefore says nothing about them, and nothing about them is claimed from it.
+
 "All valid" means all words of the group that Janus decodes. The theorems carry the decode
 conditions as hypotheses, for example `shift ≠ 11` and `imm6 < 32` when `sf = 0`. In those
 excluded cases Janus' decoder rejects the word and the ASL raises UNDEFINED, which the test

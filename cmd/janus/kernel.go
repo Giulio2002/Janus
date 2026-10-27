@@ -101,6 +101,8 @@ func arm64SysName(w uint32) (string, StubKind) {
 		return "env:CNTFRQ_EL0", stubSyscall
 	case w&0xFFFFFFE0 == 0xD5380000:
 		return "env:MIDR_EL1", stubSyscall
+	case w&0xFFFFF000 == 0xD5380000 && (w>>8)&0xF >= 4 && (w>>8)&0xF <= 7:
+		return fmt.Sprintf("env:ID_S3_0_C0_C%d_%d", (w>>8)&0xF, (w>>5)&7), stubSyscall
 	case w&0xFFFFFFE0 == 0xD53B42A0:
 		return "env:DIT", stubSyscall
 	case w&0xFFFFFFE0 == 0xD51B42A0, w == 0xD503405F, w == 0xD503415F:

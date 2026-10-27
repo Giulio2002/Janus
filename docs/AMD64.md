@@ -67,7 +67,10 @@ handles legacy prefixes, REX, the one- and two-byte opcode maps, ModRM, SIB, RIP
   before `REX.W` on `CALL rel32` (`66 66 48 E8`, the padded `call __tls_get_addr` of the
   general-dynamic TLS sequence: `REX.W` fixes the operand size at 64 bits on both vendors);
 * `F2`/`F3` except where they select an instruction (`F3` is `REP` on `MOVS`/`STOS`; `F2`
-  and segment overrides on string instructions are rejected);
+  and segment overrides on string instructions are rejected) or are ignored: `F3 C3` (`REP RET`,
+  the AMD branch-predictor idiom of perlasm code) and `F2 C3` (`BND RET`), and the same before
+  `C2 imm16`, decode as `RET` / `RET imm16` (the CPU ignores the prefix on a near `RET`; the amd64
+  oracle's `edge/repret` family checks it against hardware, [ORACLE-AMD64.md](ORACLE-AMD64.md));
 * segment overrides on branches (hints), except `3E` (CET `NOTRACK`) on the indirect
   `JMP`/`CALL r/m` (`FF /4`, `FF /2`), which executes as the plain branch (see below);
 * on the x87 escape opcodes `D8`–`DF`: `66`, `F2`/`F3` and `REX.W` (they select the
