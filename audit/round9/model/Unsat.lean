@@ -49,7 +49,7 @@ theorem newobject_unsat (p : Program) (addr : Nat) (rt : List (Nat × Nat)) :
   intro h
   unfold OldNewobjectContract Summary at h
   have h1 := h (bigState addr) rfl (bigPre addr)
-  obtain ⟨k, s', -, -, ptr, junk, f, v, m, -, hfr, hq⟩ := h1
+  obtain ⟨k, s', -, -, ptr, junk, f, v, m, ex, ep, -, hfr, hq⟩ := h1
   have hq' := hq (by rw [bigSize]; decide)
   have hacc := hq'.2.2.1
   rw [hfr.accessible] at hacc

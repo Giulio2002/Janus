@@ -34,7 +34,7 @@ theorem unsat (p : Program) (addr : Nat) (rt : List (Nat × Nat)) :
     simp only [ite_true, show (30 = 0) = False by decide, ite_false,
       show (BitVec.ofNat 64 T).toNat = T by decide, bigSize0]
     decide
-  obtain ⟨k, s', -, -, ptr, junk, f, v, m, -, hfr, hq⟩ := h (bigState addr) rfl hpre
+  obtain ⟨k, s', -, -, ptr, junk, f, v, m, ex, ep, -, hfr, hq⟩ := h (bigState addr) rfl hpre
   have e1 : (bigState addr).mem = bigMem := rfl
   have e2 : ((bigState addr).regs 0).toNat = T := by simp [bigState]; decide
   have hq' := hq (by rw [e1, e2, bigSize0]; decide)
