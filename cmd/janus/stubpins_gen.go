@@ -191,6 +191,9 @@ var stubPins = map[string]map[string][]stubPin{
 		"runtime.gcWriteBarrier8": {
 			{Hash: "3611832b9298e8b18da60f4db695982aaea3f3493994002ae625a6b5ebb80b56", File: "runtime/asm_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
+		"runtime.Goexit": {
+			{Hash: "33372a1b41f79ac5dd8be87b76dab9d8e6c5e0762b8c453e3f4fdf5d8f26dce6", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
+		},
 		"runtime.goPanicIndex": {
 			{Hash: "4531f8bc556e4d8aa54dade2271cb601ab6a2ed31a2355849e24f5502d3e1ed3", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
@@ -933,16 +936,16 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "0dab0eeca510a69716817848ebb865d7c627524057235ebdf1966cea0264072d", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
 			{Hash: "a5278f27db8be22c8e565af0b6792b296004add7cf5e6f94b9befc41ce16a4bb", File: "runtime/mbarrier.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
-		"time.now": {
-			{Hash: "e9920b149274acb45eca252df5b2fff83e07a379f8a9d44a20f033c59194e224", File: "runtime/time_linux_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
-		},
 		"sync.(*Pool).Get": {
-			{Hash: "13fe3512a133a12bb9b959ccec79161c249272f8b7919ba374a5a603a0c3c322", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "13fe3512a133a12bb9b959ccec79161c249272f8b7919ba374a5a603a0c3c322", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
 			{Hash: "458f434d194f50de21864df9766f9852fc61d0fcb6a7797cfa7a258885a9371e", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 		"sync.(*Pool).Put": {
 			{Hash: "100984d8a51256949ce85fdd76e84cab5af5e2603f96ac3b63b994721421e6ef", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
-			{Hash: "9aa4825b7117a441eeffa0dd83cc9970d49aa59aa1644f2457987f4dda80e8da", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "9aa4825b7117a441eeffa0dd83cc9970d49aa59aa1644f2457987f4dda80e8da", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v2 v3 v4
+		},
+		"time.now": {
+			{Hash: "e9920b149274acb45eca252df5b2fff83e07a379f8a9d44a20f033c59194e224", File: "runtime/time_linux_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
 	},
 	"arm64": {
@@ -1124,6 +1127,9 @@ var stubPins = map[string]map[string][]stubPin{
 		},
 		"runtime.gcWriteBarrier8": {
 			{Hash: "7a5991acb6c56b2f4fea90d40aae93074b6ec000fe24f7fb79a0c46cdb47a9f9", File: "runtime/asm_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
+		},
+		"runtime.Goexit": {
+			{Hash: "87667edf069ff29fe23a6ad58f888c6b5d2e03481505379c847e6b4ac0978ee7", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
 		},
 		"runtime.goPanicIndex": {
 			{Hash: "513c748cca5e52923b969dbc69c8d032e18f5a09e6c10cc03a75791dccaf6e60", File: "runtime/panic.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
@@ -1767,11 +1773,11 @@ var stubPins = map[string]map[string][]stubPin{
 			{Hash: "1c56310b9a675474508462a22c2532eb5909281440c32279737f5beb4c6711bd", File: "runtime/sys_linux_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
 		},
 		"sync.(*Pool).Get": {
-			{Hash: "7226f1e051f76dba53f65819a60676eb4835430a6dfaad24165aa8e7e475772d", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+			{Hash: "7226f1e051f76dba53f65819a60676eb4835430a6dfaad24165aa8e7e475772d", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
 			{Hash: "ea0054321edabd1ad36cba1dd8e6c26fc2461002388b9264127ecbe39962466f", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 		"sync.(*Pool).Put": {
-			{Hash: "60ab4d01b49cba0ba06e9d2234c0eea4656aca2bc785bf8c6b714927978d9dd1", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+			{Hash: "60ab4d01b49cba0ba06e9d2234c0eea4656aca2bc785bf8c6b714927978d9dd1", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf scexp v8.1 v9.0
 			{Hash: "f3486c16a1dee5218e59ba39f59846dead0d222dfd5fea88846e10babe9e31bc", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 	},

@@ -52,6 +52,12 @@ def evilGoABI : IO String := do
       | [_, c] => a ++ "/-- Weaken the outcomes of an `EnsuresGo`. -/" ++ c
       | _ => s
     | _ => s
+  -- ... and `Ensures.toGoX` (the `EnsuresGoX` compatibility lemma) does too
+  let s := match s.splitOn "/-- Every `Ensures` theorem is an `EnsuresGoX` theorem that neither panics nor exits. -/" with
+    | [a, b] => match b.splitOn "/-- Weaken the outcomes of an `EnsuresGoX`. -/" with
+      | [_, c] => a ++ "/-- Weaken the outcomes of an `EnsuresGoX`. -/" ++ c
+      | _ => s
+    | _ => s
   match s.splitOn "/-! ### `Ensures` -/" with
   | [a, b] => match b.splitOn "/-! ### Return addresses -/" with
     | [_, c] => return a ++ "/-! ### Return addresses -/" ++ c

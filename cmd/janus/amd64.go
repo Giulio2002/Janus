@@ -480,6 +480,7 @@ func renderLeanAmd64(x *Extraction) []byte {
 		writeFrames(&sb, x.FrameRecs)
 	}
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
+	writeFuncInfos(&sb, x.FuncInfos)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())
 }

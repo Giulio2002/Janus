@@ -47,7 +47,7 @@ arm64=(MallocFast RuneLen SumRunes ClearWords A64IndexByte A64Crc32 A64CountByte
        Lookup Insert InsertGet Delete SumValues CountKeys LookupKey16 NewMap ClearMap MapAccess1Small
        LookupS InsertS DeleteS LookupK24 InsertK24 Has32 Set32 InsertPtr LookupPtr MakeHint
        Concat ToBytes FromBytes AppendPoint CopyNodes WriteBarrier
-       PanicIf DeferInc IndexAt LoadField DeferTwice RecoverSet
+       PanicIf DeferInc IndexAt LoadField DeferTwice RecoverSet DeferOrder DeferMix GoexitDefer RangeDefer NestedPanic NestedRecover
        ReverseArray RowsWith SwapBig DotBoth Find2D Fact Compose Shifts AlignUp TotalMeters TotalFeet
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
        Mod IncTwice Bump GlobalTable Table MakeAdder IsEven CycA MulAlgo Double BigLocal SumRec HoldPtr

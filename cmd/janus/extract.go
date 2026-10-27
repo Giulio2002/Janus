@@ -90,6 +90,9 @@ type Extraction struct {
 	// (frames.go), rendered as `Extracted.frames` for stack-growth theorems.
 	Frames    bool
 	FrameRecs []FrameRec
+	// FuncInfos: the panic runtime's metadata of the extracted functions (funcdata.go), for
+	// extractions with a panic-runtime contract.
+	FuncInfos []FuncInfo
 	Lean      []byte
 }
 
@@ -227,7 +230,7 @@ func contractStubPackage(name string) string {
 var runtimePanicContractStubs = map[string]bool{
 	"runtime.gopanic": true, "runtime.gorecover": true, "runtime.deferproc": true,
 	"runtime.deferprocStack": true, "runtime.deferreturn": true, "runtime.deferprocat": true,
-	"runtime.deferrangefunc": true, "runtime.sigpanic": true,
+	"runtime.deferrangefunc": true, "runtime.sigpanic": true, "runtime.Goexit": true,
 }
 
 // rtmiscContractStubs are the further runtime functions a framework contract library describes
@@ -649,6 +652,7 @@ func renderLean(x *Extraction) []byte {
 		writeFrames(&sb, x.FrameRecs)
 	}
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
+	writeFuncInfos(&sb, x.FuncInfos)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())
 }

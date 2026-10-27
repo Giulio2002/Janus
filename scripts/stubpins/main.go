@@ -140,6 +140,9 @@ func s_gcWriteBarrier7()
 //go:linkname s_gcWriteBarrier8 runtime.gcWriteBarrier8
 func s_gcWriteBarrier8()
 
+//go:linkname s_Goexit runtime.Goexit
+func s_Goexit()
+
 //go:linkname s_gopanic runtime.gopanic
 func s_gopanic()
 
@@ -694,6 +697,7 @@ var keep = []func(){
 	s_gcWriteBarrier6,
 	s_gcWriteBarrier7,
 	s_gcWriteBarrier8,
+	s_Goexit,
 	s_gopanic,
 	s_goPanicIndex,
 	s_goPanicIndexU,

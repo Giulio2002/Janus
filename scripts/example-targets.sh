@@ -85,7 +85,9 @@ case "$1" in
   # need no extra arguments (they reach runtime.gopanic / runtime.panicBounds as panic stubs, or
   # fault); DeferInc's open-coded closure is inferred. The heap-defer and recover functions leave
   # the Go 1.26 panic runtime out as pinned contracts (Janus/Contracts/Panic.lean).
-  DeferLoop|DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
+  DeferLoop) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
+  DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn \
+      --targets example.com/basic.DeferTwice.func1 ;;
   RecoverSet) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
       --contract runtime.deferreturn ;;
   # the equality, hashing and typed-memory examples (examples/basic/rteq.go;
@@ -111,4 +113,20 @@ case "$1" in
   MbarTypedmemmove) printf '%s\n' --contract runtime.memmove --contract runtime.bulkBarrierPreWrite ;;
   MbarTypedmemclr|MbarMemclrHasPointers) printf '%s\n' --contract runtime.memclrNoHeapPointers \
       --contract runtime.bulkBarrierPreWrite ;;
+  # the general defer/panic engine examples (examples/basic/zdefer.go): the panic runtime's
+  # functions they call, left out as pinned contracts (Janus/Contracts/Panic.lean)
+  DeferOrder) printf '%s\n' --contract runtime.gopanic --contract runtime.deferreturn ;;
+  NestedPanic) printf '%s\n' --contract runtime.gopanic --contract runtime.deferreturn \
+      --targets example.com/basic.NestedPanic.func1 --targets example.com/basic.NestedPanic.func2 ;;
+  NestedRecover) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
+      --contract runtime.deferreturn --targets example.com/basic.NestedRecover.func1 \
+      --targets example.com/basic.NestedRecover.func2 ;;
+  DeferMix) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.gopanic \
+      --contract runtime.deferreturn --targets example.com/basic.accAdd1 \
+      --targets example.com/basic.accAdd2 ;;
+  GoexitDefer) printf '%s\n' --contract runtime.Goexit --contract runtime.gorecover \
+      --contract runtime.deferreturn ;;
+  RangeDefer) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferrangefunc \
+      --contract runtime.deferreturn --targets example.com/basic.accAdd1 \
+      --targets example.com/basic.accAdd2 --targets example.com/basic.count2 ;;
 esac
