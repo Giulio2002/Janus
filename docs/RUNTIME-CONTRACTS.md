@@ -644,8 +644,8 @@ size (8) is the prologue and epilogue value and the body's value is the frame si
 | `DeferMix(n)` | a loop's heap records and open-coded defers on one frame, in order, with `deferreturn` (arm64) |
 | `GoexitDefer(n)` | `runtime.Goexit()` runs the deferred calls and unwinds past the frame; `recover()` finds no panic (both ISAs) |
 | `RangeDefer(n)` | `defer` in a range-over-func body (`deferrangefunc`, `deferprocat`, `deferreturn`) (arm64) |
-| `NestedPanic(x)` | a deferred call panics again: the first panic is aborted, the second unwinds through the rest (arm64) |
-| `NestedRecover(x)` | a deferred call panics again and a later deferred call recovers the second panic (arm64) |
+| `NestedPanic(x)` | a deferred call panics again: the first panic is aborted, the second unwinds through the rest (both ISAs) |
+| `NestedRecover(x)` | a deferred call panics again and a later deferred call recovers the second panic (both ISAs) |
 
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 
