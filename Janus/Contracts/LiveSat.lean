@@ -58,7 +58,7 @@ theorem bump_ret {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} 
   have hinvT : toyInv tys b L (s.regs 28).toNat (view (toyRt tys) L s.mem) := hinv
   obtain ⟨p, hpm, h1, h2, hendA, hfr, hlf, hap, hz, hacc, hinv'⟩ := toy_alloc hty hA hKA hA2 hb hinvT
   have hp : (BitVec.ofNat 64 p).toNat = p := by
-    rw [BitVec.toNat_ofNat]; apply Nat.mod_eq_of_lt; simp only [HEND] at hendA; omega
+    rw [BitVec.toNat_ofNat]; apply Nat.mod_eq_of_lt; simp only [HEND, HEAP, HSIZE] at hendA; omega
   refine ⟨BitVec.ofNat 64 p, fin.regs, s.flags, s.vregs, s.mem.writeLE BUMP 8 (p + A), s.excl, s.exclPass,
     hfin p hpm, ?_, hlf, ?_, ?_, ?_⟩
   · exact hfr.mono fun a n h => by simp only [outside_append] at h ⊢; exact h.1
@@ -260,19 +260,19 @@ def tyC : Nat := 0x30020
 /-- A 16-byte type with pointers (`PtrBytes = 8`). -/
 def tys0 : Tys := [(tyA, 16, 0), (tyB, 8, 0), (tyC, 16, 8)]
 /-- The caller's buffer (outside the runtime's ranges) for the copies. -/
-def CB : Nat := 0x600000
+def CB : Nat := 0x20000000
 def wsp : Nat := 0x200000
 def wg : Nat := 0x300000
 def wret : Nat := 0x1000
 
 def wbytes (a : Nat) : Byte :=
-  if a = BUMP + 2 then 0x50 else if a = tyA then 16 else if a = tyB then 8 else if a = tyC then 16
+  if a = BUMP + 3 then 0x10 else if a = tyA then 16 else if a = tyB then 8 else if a = tyC then 16
   else if a = tyC + 8 then 8 else 0
 
 /-- The witness memory: stack, `g`, the descriptors, the bump cell and buffer, the heap. -/
 def wmem : Memory :=
   ⟨wbytes, [⟨wsp - 4096, 4096 + 64, true⟩, ⟨wg, 0x100, false⟩, ⟨tyA, 48, false⟩, ⟨BUMP, 0x200, true⟩,
-    ⟨HEAP, 0x10000, true⟩, ⟨CB, 0x200, true⟩]⟩
+    ⟨HEAP, HSIZE, true⟩, ⟨CB, 0x200, true⟩]⟩
 
 def wstate (r : Nat → W64) : State :=
   { regs := fun i => if i = 28 then BitVec.ofNat 64 wg else if i = 30 then BitVec.ofNat 64 wret else r i,
@@ -291,7 +291,7 @@ theorem wmem_inv (g : Nat) : toyInv tys0 0x400 [] g (view (toyRt tys0) [] wmem) 
     have : (view (toyRt tys0) [] wmem).bytes i = 0 := by
       simp only [view, wmem, wbytes]
       split
-      · have e1 : i ≠ BUMP + 2 := by simp only [BUMP, HEAP, HEND] at *; omega
+      · have e1 : i ≠ BUMP + 3 := by simp only [BUMP, HEAP, HEND, HSIZE] at *; omega
         have e2 : i ≠ tyA := by simp only [tyA, HEAP, HEND] at *; omega
         have e3 : i ≠ tyB := by simp only [tyB, HEAP, HEND] at *; omega
         have e4 : i ≠ tyC := by simp only [tyC, HEAP, HEND] at *; omega
@@ -737,7 +737,7 @@ theorem cb_out_win (r : Nat → W64) (k : Nat) (hk : k ≤ 5) (a n : Nat) (h1 : 
   omega
 
 theorem cb_out_rt (a n : Nat) (h1 : CB ≤ a) : Outside a n (toyRt tys0) := by
-  simp only [toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, HEAP, HEND, BUMP, WBUF,
+  simp only [toyRt, tys0, outside_cons, outside_nil, outside_append, List.map, and_true, HEAP, HEND, HSIZE, BUMP, WBUF,
     tyA, tyB, tyC, CB] at *
   omega
 

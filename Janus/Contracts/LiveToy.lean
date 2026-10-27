@@ -9,7 +9,7 @@ invariant `R : RtInv`. Their non-vacuity witnesses (`LiveSat`, `LiveSatAmd64`) a
 live set and budget, not only for one call. This file is that runtime's invariant and the facts
 about it that do not depend on the instruction set.
 
-The toy runtime is a **bump allocator** over the 64 KiB heap `[HEAP, HEND)`: its only state is the
+The toy runtime is a **bump allocator** over the 4 MiB heap `[HEAP, HEND)`: its only state is the
 word at `BUMP`, the address `p` of the next free byte. It is the runtime of a program that never
 frees:
 
@@ -34,8 +34,11 @@ def BUMP : Nat := 0x400000
 /-- The write barrier's buffer (64 bytes: `gcWriteBarrier1 … 8`). -/
 def WBUF : Nat := 0x400100
 /-- The heap `[HEAP, HEND)`. -/
-def HEAP : Nat := 0x500000
-def HEND : Nat := 0x510000
+def HEAP : Nat := 0x10000000
+/-- The heap size: 4 MiB, so budgets up to `2^16` bytes (`64·b ≤ HSIZE`) are admitted, above the
+block sizes of realistic allocations (a few KiB). -/
+def HSIZE : Nat := 0x400000
+def HEND : Nat := HEAP + HSIZE
 
 /-- Type descriptors: `(addr, Size_, PtrBytes)`. -/
 abbrev Tys := List (Nat × Nat × Nat)
@@ -53,7 +56,7 @@ def toyInv (tys : Tys) (b : Nat) (L : List (Nat × Nat)) (_g : Nat) (v : Memory)
   ∃ p, v.readLE BUMP 8 = p ∧ HEAP ≤ p ∧ p % 16 = 0 ∧ p + 64 * b ≤ HEND ∧
     (∀ r ∈ L, HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p) ∧
     (∀ i, p ≤ i → i < HEND → v.readLE i 1 = 0) ∧
-    v.accessible HEAP 0x10000 true = true ∧ v.accessible BUMP 8 true = true ∧
+    v.accessible HEAP HSIZE true = true ∧ v.accessible BUMP 8 true = true ∧
     v.accessible WBUF 64 true = true ∧
     (∀ t ∈ tys, v.readLE t.1 8 = t.2.1 ∧ v.readLE (t.1 + 8) 8 = t.2.2)
 
@@ -129,9 +132,9 @@ theorem toy_ty_read {tys : Tys} (hty : TysOK tys) {b : Nat} {L : List (Nat × Na
   obtain ⟨p, -, -, -, -, hL, -, -, -, -, h9⟩ := h
   have := hty t ht
   have h1 := h9 t ht
-  rw [readLE_view (inRanges_ty ht (n := 8) (by omega)) (outside_live hL (by simp only [BUMP, HEAP] at *; omega))] at h1
+  rw [readLE_view (inRanges_ty ht (n := 8) (by omega)) (outside_live hL (by simp only [BUMP, HEAP, HSIZE] at *; omega))] at h1
   rw [readLE_view (a := t.1 + 8) (InRanges.sub (inRanges_ty ht (n := 16) (by omega)) (by omega) (by omega))
-    (outside_live hL (by simp only [BUMP, HEAP] at *; omega))] at h1
+    (outside_live hL (by simp only [BUMP, HEAP, HSIZE] at *; omega))] at h1
   exact h1
 
 /-- **An allocation of `K` bytes** (`K` a multiple of 16 within the budget): from the invariant
@@ -154,8 +157,8 @@ theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K A : Nat} {L : List (Nat × 
     rw [← readLE_view (rt := toyRt tys) (L := L) (inRanges_bump tys) (outside_live hL (by omega))]; exact hp
   have hend : p + A ≤ HEND := by omega
   have hendK : p + K ≤ HEND := by omega
-  have hHE : HEND = HEAP + 0x10000 := rfl
-  have hlt : p + A < 2 ^ 64 := by simp only [HEND, HEAP] at *; omega
+  have hHE : HEND = HEAP + HSIZE := rfl
+  have hlt : p + A < 2 ^ 64 := by simp only [HEND, HEAP, HSIZE] at *; omega
   have hfr : MemFrame m (m.writeLE BUMP 8 (p + A)) (toyRt tys) :=
     MemFrame.of_writeLE m _ (r := (BUMP, BUMP + 8)) (by simp [toyRt]) (Nat.le_refl _) (Nat.le_refl _)
   have hrd : ∀ i, p ≤ i → i < HEND → m.readLE i 1 = 0 := fun i hi hi' => by
@@ -163,11 +166,11 @@ theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K A : Nat} {L : List (Nat × 
       (outside_live_above hL hi)]
     exact hz i hi hi'
   have hwr : ∀ i, HEAP ≤ i → (m.writeLE BUMP 8 (p + A)).readLE i 1 = m.readLE i 1 := fun i hi =>
-    Memory.readLE_writeLE_of_disjoint _ _ (by simp only [BUMP, HEAP] at *; omega)
+    Memory.readLE_writeLE_of_disjoint _ _ (by simp only [BUMP, HEAP, HSIZE] at *; omega)
   refine ⟨p, hpm, h1, h2, hend, hfr, ⟨fun a n hin hw => ?_⟩, ?_, fun i hi => ?_, ?_, ?_⟩
   · obtain ⟨r, hr, r1, r2⟩ := hin
     have := hL r hr
-    exact Memory.readLE_writeLE_of_disjoint _ _ (by simp only [BUMP, HEAP] at *; omega)
+    exact Memory.readLE_writeLE_of_disjoint _ _ (by simp only [BUMP, HEAP, HSIZE] at *; omega)
   · intro r hr
     have := hL r hr
     show p + K ≤ r.1 ∨ r.1 + (r.2 - r.1) ≤ p
@@ -178,7 +181,7 @@ theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K A : Nat} {L : List (Nat × 
     rw [Memory.readLE_one] at this
     exact BitVec.eq_of_toNat_eq (by simpa using this)
   · rw [hfr.accessible, ← view_accessible (toyRt tys) L m]
-    have h2' : p + K ≤ HEAP + 65536 := Nat.le_trans hendK (Nat.le_of_eq hHE)
+    have h2' : p + K ≤ HEAP + HSIZE := Nat.le_trans hendK (Nat.le_of_eq hHE)
     exact Memory.accessible_mono (view (toyRt tys) L m) hac h1 h2'
   · have hL' : ∀ r ∈ L ++ [(p, p + K)], HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p + A := by
       intro r hr
@@ -201,11 +204,11 @@ theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K A : Nat} {L : List (Nat × 
       have e1 := (toy_ty_read hty (b := b) (L := L) (g := g) (m := m)
         ⟨p, hp, h1, h2, h3, hL, hz, hac, hacB, hacW, hT⟩ ht)
       refine ⟨?_, ?_⟩
-      · rw [hv _ _ (inRanges_ty ht (n := 8) (by omega)) (outside_live hL' (by simp only [BUMP, HEAP] at *; omega)),
+      · rw [hv _ _ (inRanges_ty ht (n := 8) (by omega)) (outside_live hL' (by simp only [BUMP, HEAP, HSIZE] at *; omega)),
           Memory.readLE_writeLE_of_disjoint _ _ (by simp only [BUMP] at *; omega)]
         exact e1.1
       · rw [hv _ _ (InRanges.sub (inRanges_ty ht (n := 16) (by omega)) (by omega) (by omega))
-          (outside_live hL' (by simp only [BUMP, HEAP] at *; omega)),
+          (outside_live hL' (by simp only [BUMP, HEAP, HSIZE] at *; omega)),
           Memory.readLE_writeLE_of_disjoint _ _ (by simp only [BUMP] at *; omega)]
         exact e1.2
 
@@ -213,7 +216,7 @@ theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K A : Nat} {L : List (Nat × 
 theorem toy_fresh {tys : Tys} {m' : Memory} {p K : Nat} (hp : HEAP ≤ p) (hp16 : p % 16 = 0)
     (hend : p + K ≤ HEND) (hz : ZeroBytes m' p K) (hacc : m'.accessible p K true = true)
     (size : Nat) (hs : size ≤ K) (zero hdr : Bool) : Fresh (toyRt tys) m' p size K zero hdr := by
-  refine ⟨inRanges_heap hp hend, by simp only [HEND] at hend; omega, hacc, fun _ => by omega,
+  refine ⟨inRanges_heap hp hend, by simp only [HEND, HEAP, HSIZE] at hend; omega, hacc, fun _ => by omega,
     fun _ _ => hp16, fun _ i hi => hz i (by omega), hs⟩
 
 /-- A block in the runtime-owned ranges is apart from a window outside them. -/
@@ -223,13 +226,13 @@ theorem apart_win {rt win : List (Nat × Nat)} {p K : Nat} (hin : InRanges p K r
 /-- The invariant at the start of a program: the bump cell holds `HEAP`, the heap is zero and
 writable (a memory built by hand for a witness; `tys` empty, as for descriptors in read-only
 data). -/
-theorem toyInv_init {m : Memory} {b g : Nat} (hb : 64 * b ≤ 0x10000)
+theorem toyInv_init {m : Memory} {b g : Nat} (hb : 64 * b ≤ HSIZE)
     (hbump : m.readLE BUMP 8 = HEAP) (hz : ∀ i, HEAP ≤ i → i < HEND → m.bytes i = 0)
-    (h1 : m.accessible HEAP 0x10000 true = true) (h2 : m.accessible BUMP 8 true = true)
+    (h1 : m.accessible HEAP HSIZE true = true) (h2 : m.accessible BUMP 8 true = true)
     (h3 : m.accessible WBUF 64 true = true) : toyInv [] b [] g (view (toyRt []) [] m) := by
   have hv : ∀ a n, InRanges a n (toyRt []) → (view (toyRt []) [] m).readLE a n = m.readLE a n := fun a n h =>
     readLE_view h trivial
-  refine ⟨HEAP, ?_, Nat.le_refl _, by decide, by simp only [HEND, HEAP] at *; omega, fun r hr => absurd hr (by simp),
+  refine ⟨HEAP, ?_, Nat.le_refl _, by decide, by simp only [HEND, HEAP, HSIZE] at *; omega, fun r hr => absurd hr (by simp),
     fun i hi hi' => ?_, by rw [view_accessible]; exact h1, by rw [view_accessible]; exact h2,
     by rw [view_accessible]; exact h3, fun t ht => absurd ht (by simp)⟩
   · rw [hv _ _ (inRanges_bump [])]; exact hbump
@@ -241,7 +244,7 @@ pointer `p0` (a memory built by hand for a witness; `tys` empty). -/
 theorem toyInv_init_live {m : Memory} {b g p0 : Nat} {L : List (Nat × Nat)} (hb : p0 + 64 * b ≤ HEND)
     (hp : HEAP ≤ p0) (hal : p0 % 16 = 0) (hL : ∀ r ∈ L, HEAP ≤ r.1 ∧ r.1 ≤ r.2 ∧ r.2 ≤ p0)
     (hbump : m.readLE BUMP 8 = p0) (hz : ∀ i, p0 ≤ i → i < HEND → m.bytes i = 0)
-    (h1 : m.accessible HEAP 0x10000 true = true) (h2 : m.accessible BUMP 8 true = true)
+    (h1 : m.accessible HEAP HSIZE true = true) (h2 : m.accessible BUMP 8 true = true)
     (h3 : m.accessible WBUF 64 true = true) : toyInv [] b L g (view (toyRt []) L m) := by
   refine ⟨p0, ?_, hp, hal, hb, hL, fun i hi hi' => ?_, by rw [view_accessible]; exact h1,
     by rw [view_accessible]; exact h2, by rw [view_accessible]; exact h3, fun t ht => absurd ht (by simp)⟩
@@ -250,7 +253,7 @@ theorem toyInv_init_live {m : Memory} {b g p0 : Nat} {L : List (Nat × Nat)} (hb
     · apply outside_of_forall
       intro r hr
       have := hL r hr
-      left; simp only [BUMP, HEAP] at *; omega
+      left; simp only [BUMP, HEAP, HSIZE] at *; omega
   · rw [readLE_view (inRanges_heap (n := 1) (by omega) (by omega)) ?_, Memory.readLE_one, hz i hi hi']
     · rfl
     · apply outside_of_forall

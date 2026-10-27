@@ -105,12 +105,12 @@ address `ret = 0x1000` is at `[RSP]`. -/
 def bytes0 (a : Nat) : Arm64.Byte :=
   match dataByte a with
   | some v => v
-  | none => if a = BUMP then 0x30 else if a = BUMP + 2 then 0x50 else if a = srcP then 0x55
+  | none => if a = BUMP then 0x30 else if a = BUMP + 3 then 0x10 else if a = srcP then 0x55
     else if a = sp0 + 1 then 0x10 else 0
 
 def mem0 : Memory :=
   ⟨bytes0, [⟨sp0 - 4144, 4216, true⟩, ⟨g0, 0x100, false⟩, ⟨flagAddr, 8, false⟩, ⟨BUMP, 0x200, true⟩,
-    ⟨HEAP, 0x10000, true⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+    ⟨HEAP, HSIZE, true⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
 
 def s0 : Amd64.State :=
   { regs := fun i => if i = 0 then BitVec.ofNat 64 dstP else if i = 3 then 1 else if i = 1 then 1

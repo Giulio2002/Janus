@@ -44,7 +44,7 @@ theorem bump_ret64 {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop
   have hinvT : toyInv tys b L (s.regs 14).toNat (view (toyRt tys) L s.mem) := hinv
   obtain ⟨p, hpm, h1, h2, hendA, hfr, hlf, hap, hz, hacc, hinv'⟩ := toy_alloc hty hA hKA hA2 hb hinvT
   have hp : (BitVec.ofNat 64 p).toNat = p := by
-    rw [BitVec.toNat_ofNat]; apply Nat.mod_eq_of_lt; simp only [HEND] at hendA; omega
+    rw [BitVec.toNat_ofNat]; apply Nat.mod_eq_of_lt; simp only [HEND, HEAP, HSIZE] at hendA; omega
   obtain ⟨e0, e3, e1, hm⟩ := hres p hpm
   have hfin := AllocSatAmd64.ret_of s fin (res (BitVec.ofNat 64 p)) hrip h4 h5 h14 e0 e3 e1 hx hfs hdf hmx hx87 hfw
   rw [hm] at hfin

@@ -94,11 +94,11 @@ def dataByte (a : Nat) : Option Arm64.Byte :=
 def bytes0 (a : Nat) : Arm64.Byte :=
   match dataByte a with
   | some v => v
-  | none => if a = BUMP + 2 then 0x50 else if a = sp0 + 1 then 0x10 else 0
+  | none => if a = BUMP + 3 then 0x10 else if a = sp0 + 1 then 0x10 else 0
 
 def mem0 : Memory :=
   ⟨bytes0, [⟨sp0 - 4152, 4176, true⟩, ⟨g0, 0x100, false⟩, ⟨flagAddr, 8, false⟩, ⟨BUMP, 0x200, true⟩,
-    ⟨HEAP, 0x10000, true⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+    ⟨HEAP, HSIZE, true⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
 
 def s0 : Amd64.State :=
   { regs := fun i => if i = 0 then 2 else if i = 3 then 7 else if i = 4 then BitVec.ofNat 64 sp0

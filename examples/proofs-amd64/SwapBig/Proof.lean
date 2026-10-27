@@ -27,6 +27,16 @@ theorem half0 (m : Memory) (a : Nat) :
 theorem half8 (m : Memory) (a : Nat) :
     m.readLE a 16 / 256 ^ 8 % 18446744073709551616 = m.readLE (a + 8) 8 := half m a 8 8 rfl (by omega)
 
+/-- The same, with the power evaluated and the (redundant) modulus dropped, as the simp set leaves it. -/
+theorem half8' (m : Memory) (a : Nat) :
+    m.readLE a 16 / 18446744073709551616 = m.readLE (a + 8) 8 := by
+  have := half8 m a
+  rw [show (256 : Nat) ^ 8 = 18446744073709551616 from rfl] at this
+  rw [← this]
+  exact (Nat.mod_eq_of_lt (by
+    have := Janus.Arm64.Memory.readLE_lt m a 16
+    omega)).symm
+
 set_option maxHeartbeats 4000000 in
 theorem correctness (a b : BitVec 64) :
     Ensures Extracted.program Extracted.entry [a, b]
@@ -45,7 +55,7 @@ theorem correctness (a b : BitVec 64) :
   all_goals janus64_run
   all_goals intro i hi8; janus64_cases hi8
   all_goals janus64_simp
-  all_goals simp only [Nat.sub_self, Nat.add_sub_cancel_left, half0, half8, and_self,
+  all_goals try simp only [Nat.sub_self, Nat.add_sub_cancel_left, half0, half8, half8', and_self,
     Nat.add_assoc, Nat.reduceAdd]
 
 end Proof

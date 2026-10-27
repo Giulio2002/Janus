@@ -52,7 +52,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady)
   janus_run until [Extracted.entry + 0x34] calls [hsc]
   have hdj := InRanges.disjoint ‹InRanges _ 16 rt› hout
   janus_run
-  rename_i ptr junk f v m hfr hin hle hacc h8 h16 hz htrue
+  rename_i ptr junk f v m exn epn hfr hin hle hacc h8 h16 hz htrue
   have hp := ptr.isLt
   refine ⟨_, rfl, hin, h16, hacc, ?_, ?_, ?_⟩
   rotate_left 2
