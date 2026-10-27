@@ -201,4 +201,22 @@ def panicImpl (prog : Program) (cs : List (String × Nat)) : List Janus.Amd64.Se
 def wg : Nat := 0x50000
 def wsp : Nat := 0x4ff00
 
+/-! ## Read-only data -/
+
+/-- A data object of the program is readable (the amd64 twin of `Janus.Tactic.accessible_of_dataRead`). -/
+theorem accessible_of_dataRead {p : Program} {m : Memory} (h : p.DataLoaded m) {a n : Nat}
+    (hv : (dataRead p a n).isSome = true) : m.accessible a n false = true := by
+  unfold dataRead at hv
+  cases hd : dataSegAt p a n with
+  | none => rw [hd] at hv; cases hv
+  | some d =>
+    unfold dataSegAt at hd
+    have hmem := List.mem_of_find?_eq_some hd
+    have hp := List.find?_some hd
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at hp
+    obtain ⟨hreg, _⟩ := h d hmem
+    simp only [List.any_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hreg
+    obtain ⟨r, hr, ⟨⟨⟨hb, he⟩, hw⟩, _⟩⟩ := hreg
+    exact Janus.Arm64.Memory.accessible_of_mem m hr (by omega) (by omega) hw
+
 end Janus.Contracts.PanicSatAmd64
