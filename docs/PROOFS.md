@@ -642,7 +642,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (a b : BitVec
   `MallocFast` relates eight objects (stack, `g`, `m`, `p`, `mcache`, `mspan`, the runtime
   globals, the slot) this way.
 
-### Panics, defer and recover (`PanicIf`, `DeferInc`, `IndexAt`, `LoadField`, `DeferTwice`, `RecoverSet`)
+### Panics, defer and recover (`PanicIf`, `DeferInc`, `IndexAt`, `LoadField`, `DeferTwice`, `RecoverSet`, `DeferOrder`, `DeferMix`, `GoexitDefer`, `RangeDefer`, `NestedPanic`, `NestedRecover`)
 
 State a function that may panic as an `EnsuresGo` (docs/RUNTIME-CONTRACTS.md, "Panics, defer,
 recover"): a postcondition for the return and one for the panic value, with the classification
@@ -670,20 +670,37 @@ theorem correctness (P : PanicRuntime) (x etyp edata : BitVec 64) :
   is below `0x1000`). A function that never panics proves `fun _ _ _ => False` for the panic case,
   and every existing `Ensures` lifts with `Ensures.toGo`.
 * **Heap defers** (`DeferTwice`): extract with `--contract 'runtime.deferproc*' --contract
-  runtime.deferreturn` (`scripts/example-targets.sh`) and step over each call with
+  runtime.deferreturn` (`scripts/example-targets.sh`) and step over each `deferproc` call with
   `janus_run until [Extracted.program.contractAddr "runtime.deferproc"]` then
-  `Reaches.call (Summary.withExit hdp hret) rfl ⟨…⟩ ?_`. The precondition at a call site comes
-  from `PanicCallerOK P s frame above` in the theorem's precondition via `PanicPre.of_within`
-  (the stack window and `P.Env` after the frame's own stores, by `janus_frame` and
-  `hl.env_frame`).
+  `ReachesRet.call hdp rfl ⟨…⟩ ?_` (the precondition at a call site comes from
+  `PanicCallerOK P s frame above` via `PanicPre.of_within`: the stack window and `P.Env` after the
+  frame's own stores, by `janus_frame` and `hl.env_frame`). At the exit's `deferreturn`, name the
+  call state (`ReachesRet.name`), compute the frame (`retFrame P S`) and its pending calls
+  (`frameItems`: the records `deferproc` pushed, read off the `P.defers` facts the contracts gave),
+  show `FrameOK` (the funcval readable, below `2^48`, outside the runtime's memory and the stack
+  window), and `DeferreturnContract.apply hdr hpc ⟨hpre, hFO⟩` hands over the engine
+  (`Engine_cons`): for each call take the `DeferCall` state, run the extracted closure to its
+  return, turn that into `DeferReturned` (`DeferReturned.of_same` when the closure changed no
+  memory) and continue with the engine's next clause until `Engine_nil` gives `RetFin`.
 * **`recover`** (`RecoverSet`): the theorem takes the `gopanic`, `gorecover` and `deferreturn`
-  contracts, the funcdata offsets of the frame (read off the disassembly: the `strb` that
-  sets `deferBits`, the closure slot, the `deferreturn` call) and `¬ P.wrapper (pc)` for the
-  closure's call to `gorecover`. At `gopanic`, `GopanicRecoverContract.reaches hpan hret rfl ⟨…⟩`
-  hands over a closure-entry state `c`; destructure it (`obtain ⟨cr, csp, cpc, …⟩ := c; subst`),
-  run the extracted closure to its return (a `ReachesRet` that is then fed to the contract's
-  continuation) and continue at the resume state.
-* **Code addresses as values** (the closure's entry, the return point after `BL runtime.gorecover`,
+  contracts, the function table (`Extracted.funcs`, the funcdata the extractor read) and
+  `¬ P.wrapper (pc)` for the closure's call to `gorecover`. At `gopanic`,
+  `GopanicContract.apply hpan hpc hfind ⟨…⟩` hands over the engine for the frame
+  (`frameOf fi sp m`, with the `deferBits` byte and slot of the open-coded defer); take the
+  `DeferCall` state of the closure, run the extracted closure up to its call of `gorecover`
+  (`ReachesRet.call hrec`), use the contract's panic-marking clause, finish the closure and feed
+  its return state to the engine's `Recovers` clause; the resume state continues at the
+  function's `deferreturn` call (a second `DeferreturnContract.apply`, with `P.saved` the
+  defers `recovery` left pending).
+* **Several defers, `Goexit`, nested panics** (`DeferOrder`, `DeferMix`, `GoexitDefer`,
+  `RangeDefer`, `NestedPanic`, `NestedRecover`): the same engine; the order of the calls is
+  `frameItems` (the open-coded defers' bits from the highest, then the records), proved by
+  `simp [frameItems, openItems, recItems, fnItems]` after the memory facts are known. A closure
+  that panics again takes `GopanicContract.apply` a second time inside its own `ReachesRet`: the
+  inner engine ends in `LeftFrame` (`U`), which is the outer engine's nested clause's hypothesis
+  (`hnest rfl d r2 …`). Split a long proof into lemma modules (the segment lemmas of a repeated
+  closure are shared between `NestedPanic` and `NestedRecover`) to keep the compile loop short.
+* **Code addresses as values** (the closure's entry, the return point after the call of `gorecover`,
   the resume site, the resume address a model `gopanic` loads) are written as
   `janus_eval% (segAddr Extracted.program "pkg.F.func1" + off)` / `janus_eval% (Extracted.entry +
   off)` (local macros in `RecoverSet`), never as literals, so a relinked binary needs no edit.

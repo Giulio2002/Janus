@@ -202,11 +202,23 @@ func (b *Binary) funcInfo(t *pclnFuncs, f Func) (FuncInfo, error) {
 	if err != nil {
 		return fi, fmt.Errorf("%s: pcsp: %v", f.Name, err)
 	}
+	// On amd64 the frame pointer is pushed first (SP delta 8) and popped last, so the delta
+	// takes the value 8 in the prologue and the epilogue and the frame size in the body: the
+	// frame size is the one other value.
+	var maxv int64
+	for _, v := range vals {
+		if v[2] > maxv {
+			maxv = v[2]
+		}
+	}
 	for _, v := range vals {
 		if v[2] < 0 {
 			return fi, fmt.Errorf("%s: negative pcsp value %d", f.Name, v[2])
 		}
 		if v[2] != 0 {
+			if b.GOARCH == "amd64" && v[2] == 8 && maxv > 8 {
+				continue
+			}
 			if fi.Frame != 0 && uint64(v[2]) != fi.Frame {
 				return fi, fmt.Errorf("%s: pcsp takes two non-zero values (%d, %d); the panic contracts need one frame size", f.Name, fi.Frame, v[2])
 			}

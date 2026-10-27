@@ -16,12 +16,15 @@ open-coded defers; a hardware fault is turned into a panic by the signal handler
   of its kind; a nil-dereference fault panics with the nil-pointer error (the `sigpanic` path);
 * `GoReturns.of_reaches` — a bridge from the `Reaches` goal the `janus_run` tactic discharges to
   a `GoReturns` outcome (used by every example);
-* the control-flow contracts, each a `Summary` or `GoReturns` of the linked program at the
-  runtime function's address, over the model `P` (and, for `deferreturn`, the deferred closures'
-  own summaries): `DeferprocContract`, `DeferprocStackContract`, `DeferreturnContract`,
-  `DeferprocatContract`, `DeferrangefuncContract`, `GorecoverContract`, `GopanicRecoverContract`,
-  `SigpanicContract`, `PanicrangestateContract`, each with a satisfiability theorem in
-  `Janus.Contracts.PanicSat`.
+* the control-flow contracts, each a `Summary` or a statement about the deferred calls the runtime
+  makes, of the linked program at the runtime function's address, over the model `P`:
+  `DeferprocContract`, `DeferprocStackContract`, `DeferprocatContract`, `DeferrangefuncContract`,
+  `GorecoverContract` (summaries), and the general defer/panic engine, `GopanicContract`,
+  `GoexitContract` and `DeferreturnContract`: for a frame's pending deferred calls (open-coded
+  and heap records) they say how the runtime makes each call, what each call may do (return, panic
+  again, recover) and what the runtime does after it (go on to the next call, resume the frame at
+  its `deferreturn` call, or unwind past the frame). Each has a satisfiability theorem in
+  `Janus.Contracts.PanicSat` (the model engine, `docs/model/panic_model_arm64.s`, meets it).
 
 See docs/RUNTIME-CONTRACTS.md, "Panics, defer, recover".
 -/

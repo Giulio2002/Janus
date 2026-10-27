@@ -503,6 +503,30 @@ theorem DeferReturned.of_window {P : PanicRuntime} (hl : P.Laws) {g : W64} {fsp 
     hl.defers_frame _ _ _ hp, hl.saved_frame _ _ _ hp, (hl.room_frame _ _ _ hp).symm ▸ Nat.le_refl _⟩,
     hl.panics_frame _ _ _ hp⟩
 
+/-- The empty range at `0` is outside every list of ranges. -/
+theorem outside_zero : ∀ rs : List (Nat × Nat), Outside 0 0 rs
+  | [] => trivial
+  | (lo, hi) :: rs => ⟨Or.inl (by omega), outside_zero rs⟩
+
+/-- A deferred call that changed nothing in memory and returned (`RET`) as `DeferReturned` says (the
+chain of panics and the record chain are those at the call). -/
+theorem DeferReturned.of_same {P : PanicRuntime} (hl : P.Laws) {g : W64} {fsp : Nat}
+    {keep : List (Nat × Nat)} {e e' : State} (hpc : e'.rip.toNat = e.mem.readLE (e.regs 4).toNat 8)
+    (hsp : e'.regs 4 = e.regs 4 + 8) (hg : e'.regs 14 = g) (hbp : e'.regs 5 = e.regs 5)
+    (hx : e'.xmm 15 = 0) (hdf : e'.df = false) (hm : e'.mem = e.mem) (henv : P.Env e.mem) :
+    DeferReturned P g fsp keep e e' ∧ P.panics e'.mem g.toNat = P.panics e.mem g.toNat :=
+  DeferReturned.of_window hl hpc hsp hg hbp hx hdf henv (lo := 0) (hi := 0)
+    (by rw [hm]; exact MemFrame.refl _ _) (outside_zero _)
+
+/-- Run to a call of a contract (`ReachesRet` with the contract's address as the target), then
+continue at the call with a `GoReturns`. -/
+theorem _root_.Janus.Amd64.GoABI.GoReturns.of_reachesRet_exit {p : Janus.Amd64.Program}
+    {C : GoClass} {s : State} {tgt : W64} {ret : Nat} {Q : GoOutcome → Prop} (hret : p.fetch ret = none)
+    (h : ReachesRet p tgt s (fun s' => GoReturns (p.withExit ret) C s' Q)) :
+    GoReturns (p.withExit ret) C s Q := by
+  obtain ⟨k, s', hk, -, hq⟩ := h
+  exact GoReturns.of_steps (hk.withExit hret) hq
+
 theorem Engine_nil {p : Janus.Amd64.Program} {P : PanicRuntime} {U : State → Nat → Nat → Prop} {g : W64}
     {F : Frame} {keep : List (Nat × Nat)} {mode : DeferMode}
     {Fin : List PanicRec → Nat → State → State → Prop} {ch : List PanicRec} {rm : Nat} {c : State} :
@@ -573,11 +597,6 @@ theorem RetFin.prefix {P : PanicRuntime} {s : State} {ds : List DeferRec} {c c' 
     {ch : List PanicRec} {rm : Nat} {d : State} (h : RetFin P s ds ch rm c' d) : RetFin P s ds ch rm c d := by
   obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13⟩ := h
   exact ⟨h1, h2, h3, h4, h5, h6, hm.trans h7 fun a n h => ⟨h, h⟩, h8, h9, h10, h11, h12, h13⟩
-
-/-- The empty range at `0` is outside every list of ranges. -/
-theorem outside_zero : ∀ rs : List (Nat × Nat), Outside 0 0 rs
-  | [] => trivial
-  | (lo, hi) :: rs => ⟨Or.inl (by omega), outside_zero rs⟩
 
 theorem panicrangestate_panics (P : PanicRuntime) (s : State) :
     (goClass P).atStub "runtime.panicrangestate" s (P.err ErrKind.rangeState) :=
