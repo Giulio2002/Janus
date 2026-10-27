@@ -178,8 +178,8 @@ rw [BitVec.toNat_ofNat]  →  simp only [BitVec.toNat_ofNat]
 -- or state the hypothesis in the normalised form, e.g. `if c then x else 0#64` / `-BitVec.ofNat 64 x`
 -- instead of `BitVec.ofNat 64 (c.toNat * x)`.
 -- 3. A `have : m.readLE a 8 < 2^64 := …` that is now unused: delete it (it is a simp lemma).
--- 4. A timeout in a proof that is now slower: pass the old shape explicitly, `janus_run [-readLE_lt_8]`
---    (simp's `-lemma` erases a default), or split the run with `until [pc]`.
+-- 4. A timeout in a proof that is now slower: split the run with `janus_run until [pc]` (a smaller
+--    step per call), or raise `maxHeartbeats` for that theorem.
 ```
 
 All in-repo examples were re-verified under these sets (the wave-2 gate); the ones that needed
