@@ -1352,7 +1352,9 @@ data-dependent number of times. What a theorem about such a function means, and 
   on amd64 the return-address slot is part of the window.
 * **Registers.** Every Go ABIInternal live contract returns in the canonical state `retStateX`
   (arm64: `excl`/`exclPass` unspecified) or `retState64` (amd64: `zmmHi`/`kreg` unspecified, `X15`,
-  `FS` and the direction flag kept); the barrier returns in `wbRetX`/`wbRetX64` (its own ABI).
+  `FS` and the direction flag kept); the barrier returns in `wbRetX`/`wbRetX64` (its own ABI). A loop invariant carries one `KeepX`/`Keep64` bundle (the fields a Go function keeps: system
+  registers and `X18`/`X28` on arm64; `x87`, `fpucw`, `FS`, the direction flag on amd64), and
+  `retStateX_of_keep`/`retState64_of_keep` turn it into the canonical return state.
 * **Satisfiability.** Every live contract has a kernel-checked witness (`LiveSat`, `LiveSatAmd64`,
   round 9 SAT row): a *bump allocator* (`LiveToy`) with code for each function, an invariant
   `toyInv` that holds for every live set and budget (not one call), and a call state. The toy
