@@ -30,11 +30,23 @@ namespace Proof
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.PanicAmd64
 open Janus.Contracts.MapAmd64 (keepABI_apply)
 open Janus.Contracts.Panic (Item recItems frameItems fnItems frameKeep bitsWin recItems_above Frame
+
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_count2_34" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.count2" + 34))
+local macro "loc_count2_53" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.count2" + 53))
+local macro "loc_RangeDefer_19" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer" + 19))
+local macro "loc_RangeDefer_70" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer" + 70))
+local macro "loc_RangeDefer_92" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer" + 92))
+local macro "loc_RangeDefer_range1_0" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 0))
+local macro "loc_RangeDefer_range1_74" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 74))
+local macro "loc_RangeDefer_range1_88" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 88))
+local macro "loc_RangeDefer_range1_110" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 110))
   frameRecs_above)
 open Janus.Spec (openBits)
 
 /-- The address of `example.com/basic.Acc` (`.noptrbss`; the extractor does not copy it). -/
-local macro "accA" : term => `((5799072 : Nat))
+local macro "accA" : term => `(janus_eval% (ripTarget Extracted.program (segAddr Extracted.program "example.com/basic.accAdd2")))
 local macro "bodyA" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1"))
 local macro "count2A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.count2"))
 
@@ -189,7 +201,7 @@ theorem body1 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
   have hSsp : S.regs 4 = BitVec.ofNat 64 ((s.regs 4).toNat - 88) - 56#64 := by rw [hS] <;> simp [setRegF]
   have hSspn : (S.regs 4).toNat = (s.regs 4).toNat - 144 := by rw [hSsp]; exact h144
   have hS5 : S.regs 5 = BitVec.ofNat 64 ((s.regs 4).toNat - 88) - 8#64 := by rw [hS] <;> simp [setRegF]
-  have hS0 : S.regs 0 = 4969480#64 := by rw [hS] <;> simp [setRegF]
+  have hS0 : S.regs 0 = (BitVec.ofNat 64 fvA) := by rw [hS] <;> simp [setRegF]
   have hS1 : S.regs 1 = BitVec.ofNat 64 td := by rw [hS] <;> simp [setRegF]
   have hS14 : S.regs 14 = s.regs 14 := by rw [hS] <;> simp [setRegF]
   have hSx : S.xmm 15 = 0 := by rw [hS]; exact hx15
@@ -201,13 +213,13 @@ theorem body1 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
     rw [hS]; janus_frame
   have hSmem : S.mem = (((((Janus.Arm64.Memory.writeLE cm ((s.regs 4).toNat - 96) 8 (cr 5).toNat).writeLE
       ((s.regs 4).toNat - 105) 1 0).writeLE ((s.regs 4).toNat - 48) 8 2).writeLE
-      ((s.regs 4).toNat - 104) 8 ((s.regs 4).toNat - 48)).writeLE ((s.regs 4).toNat - 144) 8 4748330) := by
+      ((s.regs 4).toNat - 104) 8 ((s.regs 4).toNat - 48)).writeLE ((s.regs 4).toNat - 144) 8 loc_RangeDefer_range1_74) := by
     rw [hS]
     simp only [show (s.regs 4).toNat - 88 - 8 = (s.regs 4).toNat - 96 by omega,
       show (s.regs 4).toNat - 88 - 17 = (s.regs 4).toNat - 105 by omega,
       show (s.regs 4).toNat - 88 - 16 = (s.regs 4).toNat - 104 by omega,
       show (s.regs 4).toNat - 88 - 56 = (s.regs 4).toNat - 144 by omega]
-  have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4748330 := by
+  have hSra : S.mem.readLE (S.regs 4).toNat 8 = loc_RangeDefer_range1_74 := by
     rw [hSmem, hSspn, Janus.Arm64.Memory.readLE_writeLE_self]
   have hgS : gOf S = gOf s := by simp only [gOf, hS14]
   have hSf1 : MemFrame cm S.mem [((s.regs 4).toNat - (P.depth + 144), (s.regs 4).toNat + 8)] :=
@@ -277,7 +289,7 @@ theorem body1 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
   janus64_run [hslot1, hflag1] until [Extracted.program.contractAddr "runtime.deferreturn"]
   refine ReachesRet.name fun S3 hS3 => ?_
   have hS3mem : S3.mem = (((Janus.Arm64.Memory.writeLE m1 ((s.regs 4).toNat - 48) 8 1).writeLE
-      ((s.regs 4).toNat - 105) 1 1).writeLE ((s.regs 4).toNat - 144) 8 4748366) := by
+      ((s.regs 4).toNat - 105) 1 1).writeLE ((s.regs 4).toNat - 144) 8 loc_RangeDefer_range1_110) := by
     rw [hS3]
     simp only [show (s.regs 4).toNat - 88 - 17 = (s.regs 4).toNat - 105 by omega,
       show (s.regs 4).toNat - 88 - 56 = (s.regs 4).toNat - 144 by omega]
@@ -301,7 +313,7 @@ theorem body1 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
       (Outside.of_sub hout (by omega) (by omega))
   have hS3fW : MemFrame s.mem S3.mem (P.priv ++ [((s.regs 4).toNat - (P.depth + 144), (s.regs 4).toNat + 8)]) :=
     hW1.trans hS3f1 fun a n h => ⟨h, by simp only [outside_append] at h; exact h.2⟩
-  have hS3ra : S3.mem.readLE (S3.regs 4).toNat 8 = 4748366 := by
+  have hS3ra : S3.mem.readLE (S3.regs 4).toNat 8 = loc_RangeDefer_range1_110 := by
     rw [hS3mem, hS3spn, Janus.Arm64.Memory.readLE_writeLE_self]
   have hpre3 : PanicPre P 0 S3 := PanicPre.of_within hc hS3fW (hl.env_frame _ _ henv1 hagS3) (by omega) (by omega)
     (by rw [hS3spn]; omega) hS314 hS3x hS3df (by rw [hS3ra]; decide)
@@ -329,7 +341,7 @@ theorem body1 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
   obtain ⟨dr, dpc, dfl, dxm, dm, dyh, dfs, ddf, dmx⟩ := d
   dsimp only at hdpc hdsp hd14 hd5 hdx hddf hdfr hdenv hdpan hddef hdsv hdrp hdrm
   rw [hS3ra] at hdpc
-  have hdpc' : dpc = BitVec.ofNat 64 4748366 := by
+  have hdpc' : dpc = BitVec.ofNat 64 loc_RangeDefer_range1_110 := by
     apply BitVec.eq_of_toNat_eq; rw [hdpc, BitVec.toNat_ofNat]
   subst hdpc' hddf
   rw [hF3] at hdfr
@@ -488,7 +500,7 @@ theorem body2 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
   have hSsp : S.regs 4 = BitVec.ofNat 64 ((s.regs 4).toNat - 88) - 56#64 := by rw [hS] <;> simp [setRegF]
   have hSspn : (S.regs 4).toNat = (s.regs 4).toNat - 144 := by rw [hSsp]; exact h144
   have hS5 : S.regs 5 = BitVec.ofNat 64 ((s.regs 4).toNat - 88) - 8#64 := by rw [hS] <;> simp [setRegF]
-  have hS0 : S.regs 0 = 4969488#64 := by rw [hS] <;> simp [setRegF]
+  have hS0 : S.regs 0 = (BitVec.ofNat 64 (fvA + 8)) := by rw [hS] <;> simp [setRegF]
   have hS1 : S.regs 1 = BitVec.ofNat 64 td := by rw [hS] <;> simp [setRegF]
   have hS14 : S.regs 14 = s.regs 14 := by rw [hS] <;> simp [setRegF]
   have hSx : S.xmm 15 = 0 := by rw [hS]; exact hx15
@@ -500,13 +512,13 @@ theorem body2 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
     rw [hS]; janus_frame
   have hSmem : S.mem = (((((Janus.Arm64.Memory.writeLE cm ((s.regs 4).toNat - 96) 8 (cr 5).toNat).writeLE
       ((s.regs 4).toNat - 105) 1 0).writeLE ((s.regs 4).toNat - 48) 8 2).writeLE
-      ((s.regs 4).toNat - 104) 8 ((s.regs 4).toNat - 48)).writeLE ((s.regs 4).toNat - 144) 8 4748344) := by
+      ((s.regs 4).toNat - 104) 8 ((s.regs 4).toNat - 48)).writeLE ((s.regs 4).toNat - 144) 8 loc_RangeDefer_range1_88) := by
     rw [hS]
     simp only [show (s.regs 4).toNat - 88 - 8 = (s.regs 4).toNat - 96 by omega,
       show (s.regs 4).toNat - 88 - 17 = (s.regs 4).toNat - 105 by omega,
       show (s.regs 4).toNat - 88 - 16 = (s.regs 4).toNat - 104 by omega,
       show (s.regs 4).toNat - 88 - 56 = (s.regs 4).toNat - 144 by omega]
-  have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4748344 := by
+  have hSra : S.mem.readLE (S.regs 4).toNat 8 = loc_RangeDefer_range1_88 := by
     rw [hSmem, hSspn, Janus.Arm64.Memory.readLE_writeLE_self]
   have hgS : gOf S = gOf s := by simp only [gOf, hS14]
   have hSf1 : MemFrame cm S.mem [((s.regs 4).toNat - (P.depth + 144), (s.regs 4).toNat + 8)] :=
@@ -576,7 +588,7 @@ theorem body2 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
   janus64_run [hslot1, hflag1] until [Extracted.program.contractAddr "runtime.deferreturn"]
   refine ReachesRet.name fun S3 hS3 => ?_
   have hS3mem : S3.mem = (((Janus.Arm64.Memory.writeLE m1 ((s.regs 4).toNat - 48) 8 1).writeLE
-      ((s.regs 4).toNat - 105) 1 1).writeLE ((s.regs 4).toNat - 144) 8 4748366) := by
+      ((s.regs 4).toNat - 105) 1 1).writeLE ((s.regs 4).toNat - 144) 8 loc_RangeDefer_range1_110) := by
     rw [hS3]
     simp only [show (s.regs 4).toNat - 88 - 17 = (s.regs 4).toNat - 105 by omega,
       show (s.regs 4).toNat - 88 - 56 = (s.regs 4).toNat - 144 by omega]
@@ -600,7 +612,7 @@ theorem body2 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
       (Outside.of_sub hout (by omega) (by omega))
   have hS3fW : MemFrame s.mem S3.mem (P.priv ++ [((s.regs 4).toNat - (P.depth + 144), (s.regs 4).toNat + 8)]) :=
     hW1.trans hS3f1 fun a n h => ⟨h, by simp only [outside_append] at h; exact h.2⟩
-  have hS3ra : S3.mem.readLE (S3.regs 4).toNat 8 = 4748366 := by
+  have hS3ra : S3.mem.readLE (S3.regs 4).toNat 8 = loc_RangeDefer_range1_110 := by
     rw [hS3mem, hS3spn, Janus.Arm64.Memory.readLE_writeLE_self]
   have hpre3 : PanicPre P 0 S3 := PanicPre.of_within hc hS3fW (hl.env_frame _ _ henv1 hagS3) (by omega) (by omega)
     (by rw [hS3spn]; omega) hS314 hS3x hS3df (by rw [hS3ra]; decide)
@@ -628,7 +640,7 @@ theorem body2 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
   obtain ⟨dr, dpc, dfl, dxm, dm, dyh, dfs, ddf, dmx⟩ := d
   dsimp only at hdpc hdsp hd14 hd5 hdx hddf hdfr hdenv hdpan hddef hdsv hdrp hdrm
   rw [hS3ra] at hdpc
-  have hdpc' : dpc = BitVec.ofNat 64 4748366 := by
+  have hdpc' : dpc = BitVec.ofNat 64 loc_RangeDefer_range1_110 := by
     apply BitVec.eq_of_toNat_eq; rw [hdpc, BitVec.toNat_ofNat]
   subst hdpc' hddf
   rw [hF3] at hdfr
@@ -730,7 +742,7 @@ theorem body2 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
 twice; the state `1`, the token's `any` and the record the token heads. -/
 def CPre (P : Spec.PanicRuntime) (s e : State) (tt td : Nat) (rest : List Spec.DeferRec) : Prop :=
   e.regs 0 = BitVec.ofNat 64 ((s.regs 4).toNat - 40) ∧ e.regs 14 = s.regs 14 ∧ e.xmm 15 = 0 ∧ e.df = false ∧
-    e.regs 4 = BitVec.ofNat 64 ((s.regs 4).toNat - 64) ∧ e.mem.readLE ((s.regs 4).toNat - 64) 8 = 4748198 ∧
+    e.regs 4 = BitVec.ofNat 64 ((s.regs 4).toNat - 64) ∧ e.mem.readLE ((s.regs 4).toNat - 64) 8 = loc_RangeDefer_70 ∧
     MemFrame s.mem e.mem (P.priv ++ [((s.regs 4).toNat - (P.depth + 144), (s.regs 4).toNat + 8)]) ∧
     P.Env e.mem ∧ e.mem.readLE ((s.regs 4).toNat - 40) 8 = bodyA ∧
     e.mem.readLE ((s.regs 4).toNat - 32) 8 = (s.regs 4).toNat - 48 ∧
@@ -802,7 +814,7 @@ theorem count2_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
   have h88 : (BitVec.ofNat 64 ((s.regs 4).toNat - 64) - 24#64).toNat = (s.regs 4).toNat - 88 := by
     rw [BitVec.toNat_sub, BitVec.toNat_ofNat]; simp; omega
   have hS1mem : S1.mem = (((Janus.Arm64.Memory.writeLE cm ((s.regs 4).toNat - 72) 8 (cr 5).toNat).writeLE
-      ((s.regs 4).toNat - 56) 8 ((s.regs 4).toNat - 40)).writeLE ((s.regs 4).toNat - 88) 8 4748066) := by
+      ((s.regs 4).toNat - 56) 8 ((s.regs 4).toNat - 40)).writeLE ((s.regs 4).toNat - 88) 8 loc_count2_34) := by
     rw [hS1]
     simp only [show (s.regs 4).toNat - 64 - 8 = (s.regs 4).toNat - 72 by omega,
       show (s.regs 4).toNat - 64 + 8 = (s.regs 4).toNat - 56 by omega,
@@ -828,7 +840,7 @@ theorem count2_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
   have hcl : ∀ a, a ≥ (s.regs 4).toNat - 40 → S1.mem.readLE a 8 = cm.readLE a 8 := by
     intro a ha
     rw [hS1mem]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
-  have hbody1 := body1 impl P hl U hat hdr s hc 4748066 (by decide) tt td htt htd [] rest
+  have hbody1 := body1 impl P hl U hat hdr s hc loc_count2_34 (by decide) tt td htt htd [] rest
   refine ReachesRet.call hbody1 (by rw [hS1]) ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, hS1fW, hl.env_frame _ _ henv hagS1,
     ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ ?_
   · rw [hS1]; simp [setRegF]
@@ -848,14 +860,14 @@ theorem count2_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
   · rw [hl.room_frame _ _ _ hagS1]; omega
   intro e1 hpc1 hq1
   obtain ⟨hp1, hs1sp, hs114, hs15, hx1, hdf1, hr01, hf1, henv1, hd1, hsv1, hpn1, hrm1, hst11⟩ := hq1
-  have hS1ra : S1.mem.readLE (S1.regs 4).toNat 8 = 4748066 := by
+  have hS1ra : S1.mem.readLE (S1.regs 4).toNat 8 = loc_count2_34 := by
     rw [hS1sp, hS1mem]; simp only [BitVec.toNat_ofNat]
     rw [Nat.mod_eq_of_lt (by omega), Janus.Arm64.Memory.readLE_writeLE_self]
   have hs1sp' : e1.regs 4 = BitVec.ofNat 64 ((s.regs 4).toNat - 80) := by
     rw [hs1sp, hS1sp]; apply BitVec.eq_of_toNat_eq
     rw [BitVec.toNat_add, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
   have hs1g : e1.regs 14 = s.regs 14 := by rw [hs114, hS1]; simp [setRegF]
-  have hs1ip : e1.rip = BitVec.ofNat 64 4748066 := by
+  have hs1ip : e1.rip = BitVec.ofNat 64 loc_count2_34 := by
     rw [hp1, retAddrOf, hS1ra]
   have hs1rbp : e1.regs 5 = BitVec.ofNat 64 ((s.regs 4).toNat - 64) - 8#64 := by
     rw [hs15, hS1]; simp [setRegF]
@@ -885,7 +897,7 @@ theorem count2_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
     simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
       Janus.Arm64.Memory.readLE_writeLE_self]
     exact Nat.mod_eq_of_lt (cr 5).isLt
-  have hret64 : e1.mem.readLE ((s.regs 4).toNat - 64) 8 = 4748198 := by
+  have hret64 : e1.mem.readLE ((s.regs 4).toNat - 64) 8 = loc_RangeDefer_70 := by
     rw [hF1 _ _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega), hS1mem]
     simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]; exact hret
   obtain ⟨dr1, dpc1, dfl1, dxm1, dm1, dyh1, dfs1, ddf1, dmx1⟩ := e1
@@ -912,7 +924,7 @@ theorem count2_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
   rw [hdr1']
   janus64_run [hspill24, hcb1] until [bodyA]
   refine ReachesRet.name fun S2 hS2 => ?_
-  have hS2mem : S2.mem = Janus.Arm64.Memory.writeLE dm1 ((s.regs 4).toNat - 88) 8 4748085 := by
+  have hS2mem : S2.mem = Janus.Arm64.Memory.writeLE dm1 ((s.regs 4).toNat - 88) 8 loc_count2_53 := by
     rw [hS2]; simp only [show (s.regs 4).toNat - 80 - 8 = (s.regs 4).toNat - 88 by omega]
   have hS2sp : S2.regs 4 = BitVec.ofNat 64 ((s.regs 4).toNat - 88) := by
     apply BitVec.eq_of_toNat_eq
@@ -935,7 +947,7 @@ theorem count2_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
   have hS2d : ∀ a, a ≥ (s.regs 4).toNat - 80 → S2.mem.readLE a 8 = dm1.readLE a 8 := by
     intro a ha
     rw [hS2mem]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint]
-  have hbody2 := body2 impl P hl U hat hdr s hc 4748085 (by decide) tt td htt htd [fvA] rest
+  have hbody2 := body2 impl P hl U hat hdr s hc loc_count2_53 (by decide) tt td htt htd [fvA] rest
   refine ReachesRet.call hbody2 (by rw [hS2]) ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, hS2fW, hl.env_frame _ _ henv1 hagS2,
     ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ ?_
   · rw [hS2]; simp [setRegF]
@@ -957,10 +969,10 @@ theorem count2_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
     omega
   intro e2 hpc2 hq2
   obtain ⟨hp2, hs2sp, hs214, hs25, hx2, hdf2, hr02, hf2, henv2, hd2, hsv2, hpn2, hrm2, hst22⟩ := hq2
-  have hS2ra : S2.mem.readLE (S2.regs 4).toNat 8 = 4748085 := by
+  have hS2ra : S2.mem.readLE (S2.regs 4).toNat 8 = loc_count2_53 := by
     rw [hS2sp, hS2mem]; simp only [BitVec.toNat_ofNat]
     rw [Nat.mod_eq_of_lt (by omega), Janus.Arm64.Memory.readLE_writeLE_self]
-  have hs2ip : e2.rip = BitVec.ofNat 64 4748085 := by rw [hp2, retAddrOf, hS2ra]
+  have hs2ip : e2.rip = BitVec.ofNat 64 loc_count2_53 := by rw [hp2, retAddrOf, hS2ra]
   have hs2sp' : e2.regs 4 = BitVec.ofNat 64 ((s.regs 4).toNat - 80) := by
     rw [hs2sp, hS2sp]; apply BitVec.eq_of_toNat_eq
     rw [BitVec.toNat_add, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
@@ -974,7 +986,7 @@ theorem count2_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
   have hrbp72' : e2.mem.readLE ((s.regs 4).toNat - 72) 8 = (cr 5).toNat := by
     rw [hF2 _ _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega), hS2d _ (by omega)]
     exact hrbp72
-  have hret64' : e2.mem.readLE ((s.regs 4).toNat - 64) 8 = 4748198 := by
+  have hret64' : e2.mem.readLE ((s.regs 4).toNat - 64) 8 = loc_RangeDefer_70 := by
     rw [hF2 _ _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega), hS2d _ (by omega)]
     exact hret64
   have hcM : MemFrame cm e2.mem (P.priv ++ [((s.regs 4).toNat - (P.depth + 144), (s.regs 4).toNat - 64),
@@ -1017,9 +1029,9 @@ theorem count2_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
           · rw [if_neg h0]
   have hrbp72'' : dm2.readLE ((s.regs 4).toNat - 80 + 8) 8 = (cr 5).toNat := by
     rw [show (s.regs 4).toNat - 80 + 8 = (s.regs 4).toNat - 72 by omega]; exact hrbp72'
-  have hret64'' : dm2.readLE ((s.regs 4).toNat - 80 + 16) 8 = 4748198 := by
+  have hret64'' : dm2.readLE ((s.regs 4).toNat - 80 + 16) 8 = loc_RangeDefer_70 := by
     rw [show (s.regs 4).toNat - 80 + 16 = (s.regs 4).toNat - 64 by omega]; exact hret64'
-  have hret64c : cm.readLE ((s.regs 4).toNat - 64) 8 = 4748198 := hret
+  have hret64c : cm.readLE ((s.regs 4).toNat - 64) 8 = loc_RangeDefer_70 := hret
   rw [hdr2']
   janus64_run [hrbp72'', hret64'', hret64c]
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_, hcM, henv2, hd2, hsv2, ?_, ?_, hst22⟩
@@ -1101,7 +1113,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hSpc : S.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferrangefunc") := by
     rw [hS] <;> rfl
   have hSmem : S.mem = (Janus.Arm64.Memory.writeLE s.mem ((s.regs 4).toNat - 8) 8 (s.regs 5).toNat).writeLE
-      ((s.regs 4).toNat - 64) 8 4748147 := by rw [hS]
+      ((s.regs 4).toNat - 64) 8 loc_RangeDefer_19 := by rw [hS]
   have hSf : MemFrame s.mem S.mem [((s.regs 4).toNat - 64, (s.regs 4).toNat - 56),
       ((s.regs 4).toNat - 8, (s.regs 4).toNat)] := by
     rw [hSmem]; janus_frame
@@ -1109,7 +1121,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     hSf.mono fun a n h => by
       simp only [outside_append, outside_cons, outside_nil, and_true] at h ⊢; obtain ⟨h1, h2⟩ := h
       exact ⟨by omega, by omega⟩
-  have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4748147 := by
+  have hSra : S.mem.readLE (S.regs 4).toNat 8 = loc_RangeDefer_19 := by
     rw [hSmem, hSspn, Janus.Arm64.Memory.readLE_writeLE_self]
   have hgS : gOf S = gOf s := by simp only [gOf, hS14]
   have hSf1 : MemFrame s.mem S.mem [((s.regs 4).toNat - (P.depth + 144), (s.regs 4).toNat + 8)] :=
@@ -1156,9 +1168,9 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   janus64_run until [count2A]
   refine ReachesRet.name fun S2 hS2 => ?_
   have hS2mem : S2.mem = (((((Janus.Arm64.Memory.writeLE m1 ((s.regs 4).toNat - 48) 8 1).writeLE
-      ((s.regs 4).toNat - 40) 8 4748256).writeLE ((s.regs 4).toNat - 32) 8 ((s.regs 4).toNat - 48)).writeLE
+      ((s.regs 4).toNat - 40) 8 loc_RangeDefer_range1_0).writeLE ((s.regs 4).toNat - 32) 8 ((s.regs 4).toNat - 48)).writeLE
       ((s.regs 4).toNat - 24) 8 (r1 0).toNat).writeLE ((s.regs 4).toNat - 16) 8 (r1 3).toNat).writeLE
-      ((s.regs 4).toNat - 64) 8 4748198 := by rw [hS2]
+      ((s.regs 4).toNat - 64) 8 loc_RangeDefer_70 := by rw [hS2]
   have hS2sp : S2.regs 4 = s.regs 4 - 64#64 := by rw [hS2] <;> simp [setRegF]
   have hS2spn : (S2.regs 4).toNat = (s.regs 4).toNat - 64 := by rw [hS2sp]; exact h64
   have hS214 : S2.regs 14 = s.regs 14 := by rw [hS2] <;> simp [setRegF, MapAmd64.keepABI, hS14]
@@ -1211,9 +1223,9 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   · rw [hl.room_frame _ _ _ hagS2]; omega
   intro e' hpc' hq'
   obtain ⟨hp', hs'sp, hs'14, hs'5, hx', hdf', hf', henv', hd', hsv', hpn', hrm', hst'⟩ := hq'
-  have hS2ra : S2.mem.readLE (S2.regs 4).toNat 8 = 4748198 := by
+  have hS2ra : S2.mem.readLE (S2.regs 4).toNat 8 = loc_RangeDefer_70 := by
     rw [hS2spn, hS2mem, Janus.Arm64.Memory.readLE_writeLE_self]
-  have hs'ip : e'.rip = BitVec.ofNat 64 4748198 := by rw [hp', retAddrOf, hS2ra]
+  have hs'ip : e'.rip = BitVec.ofNat 64 loc_RangeDefer_70 := by rw [hp', retAddrOf, hS2ra]
   have hs'sp' : e'.regs 4 = BitVec.ofNat 64 ((s.regs 4).toNat - 56) := by
     rw [hs'sp, hS2sp]; apply BitVec.eq_of_toNat_eq
     rw [BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_ofNat]; simp; omega
@@ -1256,7 +1268,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   refine ReachesRet.done rfl ?_
   refine GoReturns.name fun D hD => ?_
   have hDmem : D.mem = (Janus.Arm64.Memory.writeLE dm ((s.regs 4).toNat - 48) 8 3).writeLE
-      ((s.regs 4).toNat - 64) 8 4748220 := by
+      ((s.regs 4).toNat - 64) 8 loc_RangeDefer_92 := by
     rw [hD]
     simp only [show (s.regs 4).toNat - 56 + 8 = (s.regs 4).toNat - 48 by omega,
       show (s.regs 4).toNat - 56 - 8 = (s.regs 4).toNat - 64 by omega]
@@ -1270,7 +1282,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hDpc : D.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") := by
     rw [hD] <;> rfl
   have hgD : gOf D = gOf s := by simp only [gOf, hD14]
-  have hDra : D.mem.readLE (D.regs 4).toNat 8 = 4748220 := by
+  have hDra : D.mem.readLE (D.regs 4).toNat 8 = loc_RangeDefer_92 := by
     rw [hDmem, hDspn, Janus.Arm64.Memory.readLE_writeLE_self]
   have hDf : MemFrame dm D.mem [((s.regs 4).toNat - 64, (s.regs 4).toNat - 56),
       ((s.regs 4).toNat - 48, (s.regs 4).toNat - 40)] := by
@@ -1439,7 +1451,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   obtain ⟨er, erip, efl, exm, em, eyh, efs, edf, emx⟩ := d2
   dsimp only at hfpc hfsp hf14 hf5 hfx hfdf hfmf hfenv
   rw [hDra] at hfpc
-  have hepc : erip = BitVec.ofNat 64 4748220 := by
+  have hepc : erip = BitVec.ofNat 64 loc_RangeDefer_92 := by
     apply BitVec.eq_of_toNat_eq; rw [hfpc, BitVec.toNat_ofNat]
   subst hepc hfdf
   have he4 : er 4 = BitVec.ofNat 64 ((s.regs 4).toNat - 56) := by
@@ -1509,7 +1521,7 @@ that state (`returns`). -/
 
 namespace Witness
 
-open Janus.Contracts.PanicSat (tabWords witMemD)
+open Janus.Contracts.PanicSat (tabWords witMemD witRet witArg)
 open Janus.Contracts.PanicSatAmd64
 open Janus.Contracts.PanicModel
 
@@ -1559,7 +1571,7 @@ theorem hat : DeferprocatContract (Extracted.program.link implW) paA PW :=
 theorem hdr : DeferreturnContract (Extracted.program.link implW) drA PW U1 :=
   deferreturn_at stubDr (deferreturn_run (T := T0) engineAt)
 
-def ret : Nat := 0x200000
+abbrev ret : Nat := witRet
 
 /-- The witness memory, with `Acc` a writable word and the return address `ret` at `[wsp]`. -/
 def wm : Janus.Arm64.Memory :=

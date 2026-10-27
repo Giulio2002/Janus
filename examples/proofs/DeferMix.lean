@@ -31,8 +31,15 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 
 namespace Proof
 
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_DeferMix_60" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferMix" + 60))
+local macro "loc_DeferMix_120" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferMix" + 120))
+local macro "loc_DeferMix_144" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferMix" + 144))
+local macro "loc_DeferMix_172" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferMix" + 172))
+
 /-- The address of `example.com/basic.Acc` (`.noptrbss`; the extractor does not copy it). -/
-local macro "accA" : term => `((1704856 : Nat))
+local macro "accA" : term => `(janus_eval% (adrpLdTarget (segAddr Extracted.program "example.com/basic.accAdd1") (segWord Extracted.program "example.com/basic.accAdd1" 0) (segWord Extracted.program "example.com/basic.accAdd1" 1) 3))
 
 local macro "fvA" : term => `(janus_eval% (Extracted.program.data.head!.base))
 local macro "accAdd1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.accAdd1"))
@@ -172,7 +179,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     have hS0n : (S.regs 0).toNat = s.sp.toNat - 56 := by rw [hS0, BitVec.toNat_sub]; simp; omega
     have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> rfl
     have hS18 : S.regs 18 = s.regs 18 := by rw [hS] <;> rfl
-    have hS30 : S.regs 30 = BitVec.ofNat 64 603932 := by rw [hS] <;> rfl
+    have hS30 : S.regs 30 = BitVec.ofNat 64 loc_DeferMix_60 := by rw [hS] <;> rfl
     have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferprocStack") := by rw [hS] <;> rfl
     have hgS : gOf S = gOf s := by simp only [gOf, hS28]
     have hagS : Map.Agrees s.mem S.mem P.priv := hagw _ hSf
@@ -200,7 +207,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       exact Memory.accessible_mono _ hst (by omega) (by omega)
     · rw [hS0n]; exact Outside.of_sub hout (by omega) (by omega)
     intro s1 hpc1 hq1
-    obtain ⟨⟨j1, f1, v1, m1, hs1, hfr1, henv1⟩, hdef1, hpan1, hsav1, hrp1, hroom1⟩ := hq1
+    obtain ⟨⟨j1, f1, v1, m1, ex1, ep1, hs1, hfr1, henv1⟩, hdef1, hpan1, hsav1, hrp1, hroom1⟩ := hq1
     have hm1 : s1.mem = m1 := by rw [hs1]; rfl
     have hd1 : P.defers m1 (gOf s) = { sp := s.sp.toNat - 96, fns := [fvA] } :: P.defers s.mem (gOf s) := by
       have := hdef1; rw [hm1, hgS, hSspn, hfn0, hl.defers_frame _ _ _ hagS] at this; exact this
@@ -241,7 +248,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     have hS20 : S2.regs 0 = BitVec.ofNat 64 (fvA + 8) := by rw [hS2] <;> rfl
     have hS228 : S2.regs 28 = s.regs 28 := by rw [hS2] <;> rfl
     have hS218 : S2.regs 18 = s.regs 18 := by rw [hS2] <;> rfl
-    have hS230 : S2.regs 30 = BitVec.ofNat 64 603992 := by rw [hS2] <;> rfl
+    have hS230 : S2.regs 30 = BitVec.ofNat 64 loc_DeferMix_120 := by rw [hS2] <;> rfl
     have hS2pc : S2.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferproc") := by rw [hS2] <;> rfl
     have hS2i : S2.mem.readLE (s.sp.toNat - 64) 8 = 0 := by
       rw [hS2]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
@@ -255,7 +262,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
         (by rw [hS2spn]; omega) hS228 (by rw [hS230]; decide) (by rw [hS230]; decide),
       by rw [hgS2, hl.room_frame _ _ _ hagS2]; omega⟩ ?_
     intro s2 hpc2 hq2
-    obtain ⟨⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩, hdef2, hpan2, hsav2, hrp2, hroom2⟩ := hq2
+    obtain ⟨⟨j2, f2, v2, m2, ex2, ep2, hs2, hfr2, henv2⟩, hdef2, hpan2, hsav2, hrp2, hroom2⟩ := hq2
     have hm2 : s2.mem = m2 := by rw [hs2]; rfl
     have hS20n : (S2.regs 0).toNat = fvA + 8 := by rw [hS20]; simp
     have hd2 : P.defers m2 (gOf s) = { sp := s.sp.toNat - 96, fns := [fvA + 8] } ::
@@ -289,7 +296,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     have hS30 : S3.regs 0 = BitVec.ofNat 64 (fvA + 8) := by rw [hS3] <;> rfl
     have hS328 : S3.regs 28 = s.regs 28 := by rw [hS3] <;> rfl
     have hS318 : S3.regs 18 = s.regs 18 := by rw [hS3] <;> rfl
-    have hS330 : S3.regs 30 = BitVec.ofNat 64 603992 := by rw [hS3] <;> rfl
+    have hS330 : S3.regs 30 = BitVec.ofNat 64 loc_DeferMix_120 := by rw [hS3] <;> rfl
     have hS3pc : S3.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferproc") := by rw [hS3] <;> rfl
     have hS3i : S3.mem.readLE (s.sp.toNat - 64) 8 = 1 := by
       rw [hS3]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
@@ -303,7 +310,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
         (by rw [hS3spn]; omega) hS328 (by rw [hS330]; decide) (by rw [hS330]; decide),
       by rw [hgS3, hl.room_frame _ _ _ hagS3]; omega⟩ ?_
     intro s3 hpc3 hq3
-    obtain ⟨⟨j3, f3, v3, m3, hs3, hfr3, henv3⟩, hdef3, hpan3, hsav3, hrp3, hroom3⟩ := hq3
+    obtain ⟨⟨j3, f3, v3, m3, ex3, ep3, hs3, hfr3, henv3⟩, hdef3, hpan3, hsav3, hrp3, hroom3⟩ := hq3
     have hm3 : s3.mem = m3 := by rw [hs3]; rfl
     have hS30n : (S3.regs 0).toNat = fvA + 8 := by rw [hS30]; simp
     have hd3 : P.defers m3 (gOf s) = { sp := s.sp.toNat - 96, fns := [fvA + 8] } :: { sp := s.sp.toNat - 96, fns := [fvA + 8] } ::
@@ -360,7 +367,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     have hDf : MemFrame S.mem D.mem [(s.sp.toNat - 72, s.sp.toNat - 72 + 8)] := by rw [hD]; janus_frame
     have hD28 : D.regs 28 = s.regs 28 := by rw [hD]; simp [setReg]; exact hS28
     have hD18 : D.regs 18 = s.regs 18 := by rw [hD]; simp [setReg]; exact hS18
-    have hD30 : D.regs 30 = BitVec.ofNat 64 604016 := by rw [hD]; simp [setReg]
+    have hD30 : D.regs 30 = BitVec.ofNat 64 loc_DeferMix_144 := by rw [hD]; simp [setReg]
     have hDpc : D.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") := by rw [hD] <;> rfl
     have hgD : gOf D = gOf s := by simp only [gOf, hD28]
     have hDfW : MemFrame s.mem D.mem (P.priv ++ [(s.sp.toNat - (P.depth + 96), s.sp.toNat + 32)]) :=
@@ -526,7 +533,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     obtain ⟨k4, d, hst4, hdpc, hdsp, hd28, hd18, hd29, hfrD, henvD, -⟩ := hE3
     refine GoReturns.of_steps (hst4.withExit hret.fetch_none) ?_
     rw [hF] at hfrD
-    have hdpc' : d.pc = BitVec.ofNat 64 604016 := by rw [hdpc, hD30]
+    have hdpc' : d.pc = BitVec.ofNat 64 loc_DeferMix_144 := by rw [hdpc, hD30]
     have hdsp' : d.sp = s.sp - 96#64 := by rw [hdsp, hDsp]
     have hd28' : d.regs 28 = s.regs 28 := by rw [hd28, hD28]
     have hd18' : d.regs 18 = s.regs 18 := by rw [hd18, hD18]
@@ -582,7 +589,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     have hG1 : G.regs 1 = edata := by rw [hG]; simp [setReg]
     have hG28 : G.regs 28 = s.regs 28 := by rw [hG]; simp [setReg]; exact hS28
     have hG18 : G.regs 18 = s.regs 18 := by rw [hG]; simp [setReg]; exact hS18
-    have hG30 : G.regs 30 = BitVec.ofNat 64 604044 := by rw [hG]; simp [setReg]
+    have hG30 : G.regs 30 = BitVec.ofNat 64 loc_DeferMix_172 := by rw [hG]; simp [setReg]
     have hGpc : G.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") := by rw [hG] <;> rfl
     have hGm : G.mem = S.mem := by rw [hG]
     have hgG : gOf G = gOf s := by simp only [gOf, hG28]
@@ -825,9 +832,7 @@ def wm : Memory :=
   ⟨(witMemD (tabWords T0) Extracted.data).bytes,
     (witMemD (tabWords T0) Extracted.data).regions ++ [⟨accA, 8, true⟩]⟩
 
-def wg : Nat := 0x50000
-def wsp : Nat := 0x48000
-def ret : Nat := 0x200000
+abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wm := by
   unfold Env0

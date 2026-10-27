@@ -22,6 +22,11 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 
 namespace Proof
 
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_NestedPanic_124" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic" + 124))
+local macro "loc_NestedPanic_func2_32" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic.func2" + 32))
+
 local macro "func1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic.func1"))
 local macro "func2A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic.func2"))
 
@@ -53,7 +58,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   refine ReachesRet.done rfl ?_
   refine GoReturns.name fun S hS => ?_
   have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") := by rw [hS]; rfl
-  have hS30 : S.regs 30 = BitVec.ofNat 64 604204 := by rw [hS] <;> rfl
+  have hS30 : S.regs 30 = BitVec.ofNat 64 loc_NestedPanic_124 := by rw [hS] <;> rfl
   have hS0 : S.regs 0 = e1t := by rw [hS] <;> simp [setReg]
   have hS1 : S.regs 1 = e1d := by rw [hS] <;> simp [setReg]
   have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> simp [setReg]
@@ -234,7 +239,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS21 : S2.regs 1 = e2d := by rw [hS2]; simp [setReg, hcap2d']
   have hS228 : S2.regs 28 = s.regs 28 := by rw [hS2]; simp [setReg]; exact hS28'
   have hS218 : S2.regs 18 = s.regs 18 := by rw [hS2]; simp [setReg]; exact hS18'
-  have hS230 : S2.regs 30 = BitVec.ofNat 64 604304 := by rw [hS2] <;> rfl
+  have hS230 : S2.regs 30 = BitVec.ofNat 64 loc_NestedPanic_func2_32 := by rw [hS2] <;> rfl
   have hS2pc : S2.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") := by rw [hS2] <;> rfl
   have hgS2 : gOf S2 = gOf s := by simp only [gOf, hS228]
   have hS2fW : MemFrame s.mem S2.mem (P.priv ++ [(s.sp.toNat - (P.depth + (P.depth + 128)), s.sp.toNat + 48)]) :=
@@ -418,10 +423,8 @@ theorem hpan : GopanicContract (Extracted.program.link implW) gA PW U0 T0 :=
 
 def wmW : Memory := witMem (tabWords T0)
 
-def wg : Nat := 0x50000
-def wsp : Nat := 0x48000
-def pA : Nat := 0x41000
-def ret : Nat := 0x200000
+abbrev pA : Nat := witArg
+abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wmW := by
   unfold Env0

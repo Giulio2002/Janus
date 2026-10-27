@@ -21,6 +21,11 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 
 namespace Proof
 
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_DeferTwice_64" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice" + 64))
+local macro "loc_DeferTwice_88" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice" + 88))
+
 local macro "fvA" : term => `(janus_eval% (Extracted.program.data.head!.base))
 local macro "func1A" : term =>
   `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice.func1"))
@@ -69,7 +74,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS0 : S.regs 0 = BitVec.ofNat 64 fvA := by rw [hS] <;> rfl
   have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> rfl
   have hS18 : S.regs 18 = s.regs 18 := by rw [hS] <;> rfl
-  have hS30 : S.regs 30 = BitVec.ofNat 64 599744 := by rw [hS] <;> rfl
+  have hS30 : S.regs 30 = BitVec.ofNat 64 loc_DeferTwice_64 := by rw [hS] <;> rfl
   have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferproc") := by rw [hS] <;> rfl
   have hgS : gOf S = gOf s := by simp only [gOf, hS28]
   have hagS : Map.Agrees s.mem S.mem P.priv := hagw _ hSf
@@ -79,7 +84,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       (by rw [hSspn]; omega) hS28 (by rw [hS30]; decide) (by rw [hS30]; decide),
     by rw [hgS, hl.room_frame _ _ _ hagS]; omega⟩ ?_
   intro s1 hpc1 hq1
-  obtain ⟨⟨j1, f1, v1, m1, hs1, hfr1, henv1⟩, hdef1, hpan1, hsav1, hrp1, hroom1⟩ := hq1
+  obtain ⟨⟨j1, f1, v1, m1, ex1, ep1, hs1, hfr1, henv1⟩, hdef1, hpan1, hsav1, hrp1, hroom1⟩ := hq1
   have hm1 : s1.mem = m1 := by rw [hs1]; rfl
   have hS0n : (S.regs 0).toNat = fvA := by rw [hS0]; simp
   have hd1 : P.defers m1 (gOf s) = { sp := s.sp.toNat - 32, fns := [fvA] } :: P.defers s.mem (gOf s) := by
@@ -109,7 +114,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS2f : MemFrame m1 S2.mem [(s.sp.toNat - (P.depth + 32), s.sp.toNat)] := by rw [hS2]; janus_frame
   have hS20 : S2.regs 0 = BitVec.ofNat 64 fvA := by rw [hS2] <;> rfl
   have hS228 : S2.regs 28 = s.regs 28 := by rw [hS2] <;> rfl
-  have hS230 : S2.regs 30 = BitVec.ofNat 64 599744 := by rw [hS2] <;> rfl
+  have hS230 : S2.regs 30 = BitVec.ofNat 64 loc_DeferTwice_64 := by rw [hS2] <;> rfl
   have hS2pc : S2.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferproc") := by rw [hS2] <;> rfl
   have hgS2 : gOf S2 = gOf s := by simp only [gOf, hS228]
   have hS2fW : MemFrame s.mem S2.mem (P.priv ++ [(s.sp.toNat - (P.depth + 32), s.sp.toNat)]) :=
@@ -121,7 +126,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       (by rw [hS2spn]; omega) hS228 (by rw [hS230]; decide) (by rw [hS230]; decide),
     by rw [hgS2, hl.room_frame _ _ _ hagS2]; omega⟩ ?_
   intro s2 hpc2 hq2
-  obtain ⟨⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩, hdef2, hpan2, hsav2, hrp2, hroom2⟩ := hq2
+  obtain ⟨⟨j2, f2, v2, m2, ex2, ep2, hs2, hfr2, henv2⟩, hdef2, hpan2, hsav2, hrp2, hroom2⟩ := hq2
   have hm2 : s2.mem = m2 := by rw [hs2]; rfl
   have hS20n : (S2.regs 0).toNat = fvA := by rw [hS20]; simp
   have hd2 : P.defers m2 (gOf s) = { sp := s.sp.toNat - 32, fns := [fvA] } ::
@@ -232,7 +237,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   rw [hF] at hSD hfrD
   simp only [rtWin, bitsWin, List.append_nil, hS3spn] at hSD
   subst hS3
-  have hdpc' : d.pc = 599768#64 := by rw [hdpc] <;> rfl
+  have hdpc' : d.pc = (BitVec.ofNat 64 loc_DeferTwice_88) := by rw [hdpc] <;> rfl
   have hdsp' : d.sp = s.sp - 32#64 := by rw [hdsp] <;> rfl
   have hd29' : d.regs 29 = s.sp - 40#64 := by rw [hd29] <;> rfl
   have hd28' : d.regs 28 = s.regs 28 := by rw [hd28] <;> rfl
@@ -300,9 +305,7 @@ theorem hdr : DeferreturnContract (Extracted.program.link implW) drA PW U0 :=
 
 def wm : Memory := witMemD (tabWords T0) Extracted.data
 
-def wg : Nat := 0x50000
-def wsp : Nat := 0x48000
-def ret : Nat := 0x200000
+abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wm := by
   unfold Env0

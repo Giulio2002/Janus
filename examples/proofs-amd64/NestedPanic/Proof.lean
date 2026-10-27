@@ -24,6 +24,10 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janu
 open Janus.Contracts.Panic (frameItems openItems frameKeep bitsWin recItems recItems_above Frame frameRecs_above)
 open Janus.Spec (openBits)
 
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_NestedPanic_133" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic" + 133))
+
 local macro "func1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic.func1"))
 local macro "func2A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic.func2"))
 
@@ -129,7 +133,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hSdf : S.df = false := by rw [hS]
   have hSf : MemFrame s.mem S.mem [((s.regs 4).toNat - (P.depth + (P.depth + 120)), (s.regs 4).toNat + 48)] := by
     rw [hS]; janus_frame
-  have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4747237 := by
+  have hSra : S.mem.readLE (S.regs 4).toNat 8 = loc_NestedPanic_133 := by
     rw [hS]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h96, Janus.Arm64.Memory.readLE_writeLE_self]
   have hbits : S.mem.readLE ((s.regs 4).toNat - 65) 1 = 3 := by
     rw [hS]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -458,7 +462,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
 
 namespace Witness
 
-open Janus.Contracts.PanicSat (tabWords witMem)
+open Janus.Contracts.PanicSat (tabWords witMem witRet witArg)
 open Janus.Contracts.PanicSatAmd64
 open Janus.Contracts.PanicModel
 
@@ -488,10 +492,10 @@ theorem stubAt : StubAt (Extracted.program.link implW) gA eGopanic :=
 theorem hpan : GopanicContract (Extracted.program.link implW) gA PW U1 T0 :=
   gopanic_at stubAt (gopanic_run engineAt T0 tok)
 
-def pA : Nat := 0x41000
-def ret : Nat := 0x200000
+abbrev pA : Nat := witArg
+abbrev ret : Nat := witRet
 
-/-- Memory: the model's table and runtime range writable, a stack `[0x40000, 0x50000)` holding the
+/-- Memory: the model's table and runtime range writable, a stack (a region of the witness memory) holding the
 return address `ret` at `[wsp]` (and `*pA`), the goroutine readable. -/
 def wmW : Janus.Arm64.Memory := witMem (tabWords T0 ++ [(wsp, ret)])
 

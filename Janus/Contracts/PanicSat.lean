@@ -111,14 +111,13 @@ theorem panicRet_of (P : PanicRuntime) (nargs : Nat) (s s' : State) (hsp : s'.sp
     (hpc : s'.pc = s.regs 30) (h18 : s'.regs 18 = s.regs 18) (h28 : s'.regs 28 = s.regs 28)
     (h29 : s'.regs 29 = s.regs 29) (hdz : s'.dczid = s.dczid) (htp : s'.tpidr = s.tpidr)
     (hfc : s'.fpcr = s.fpcr) (hfs : s'.fpsr = s.fpsr)
-    (hfr : MemFrame s.mem s'.mem (P.priv ++ calleeStack s P.depth nargs)) (henv : P.Env s'.mem)
-    (hex : s'.excl = s.excl := by first | rfl | simp_all) (hep : s'.exclPass = s.exclPass := by first | rfl | simp_all) :
+    (hfr : MemFrame s.mem s'.mem (P.priv ++ calleeStack s P.depth nargs)) (henv : P.Env s'.mem) :
     PanicRet P nargs s s' := by
-  refine ⟨s'.regs, s'.flags, s'.vregs, s'.mem, ?_, hfr, henv⟩
+  refine ⟨s'.regs, s'.flags, s'.vregs, s'.mem, s'.excl, s'.exclPass, ?_, hfr, henv⟩
   obtain ⟨r, sp, pc, fl, mem, dz, vr, tp, fc, fs, ex, ep⟩ := s'
-  simp only at hsp hpc hdz htp hfc hfs h18 h28 h29 hex hep ⊢
-  subst hsp hpc hdz htp hfc hfs hex hep
-  simp only [retState]
+  simp only at hsp hpc hdz htp hfc hfs h18 h28 h29 ⊢
+  subst hsp hpc hdz htp hfc hfs
+  simp only [retStateX]
   congr
   funext i
   simp only [callRegs_apply, List.getD_nil]
@@ -607,8 +606,8 @@ theorem reachesRet_mono {p : Program} {ret : W64} {s : State} {Q Q' : State → 
 
 theorem PanicRet.toW {P : PanicRuntime} {n : Nat} {s s' : State} (extra : List (Nat × Nat))
     (h : PanicRet P n s s') : PanicRetW P n extra s s' := by
-  obtain ⟨junk, f, v, m, hs, hf, he⟩ := h
-  exact ⟨junk, f, v, m, hs, hf.mono fun a k ho => by
+  obtain ⟨junk, f, v, m, ex, ep, hs, hf, he⟩ := h
+  exact ⟨junk, f, v, m, ex, ep, hs, hf.mono fun a k ho => by
     simp only [outside_append] at ho ⊢; exact ho.1, he⟩
 
 /-- The zero witness memory. -/

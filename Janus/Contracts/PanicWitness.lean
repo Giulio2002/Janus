@@ -254,6 +254,13 @@ def wordByte (ws : List (Nat × Nat)) (a : Nat) : BitVec 8 :=
 /-- The witness memory: the model's private memory `[0x10000, 0x11000)` (writable), a stack
 `[0x40000, 0x50000)` (writable), the goroutine `[0x50000, 0x50100)` (read-only); the bytes are
 zero except the words `ws`. -/
+/-- The witnesses' return address: a code address outside every region of `witMem`, so that the
+program's `ret` instruction leaves the extracted code (`RetAddr`). -/
+def witRet : Nat := 0x200000
+
+/-- An address inside the witnesses' stack (a pointer argument a witness points at). -/
+def witArg : Nat := 0x41000
+
 def witMem (ws : List (Nat × Nat)) : Memory :=
   ⟨wordByte ws, [⟨0x10000, 0x1000, true⟩, ⟨0x40000, 0x10000, true⟩, ⟨0x50000, 0x100, false⟩]⟩
 
