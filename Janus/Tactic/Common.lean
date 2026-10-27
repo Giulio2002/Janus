@@ -236,6 +236,11 @@ partial def arithAtoms (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
     arithAtoms (e.getArg! (e.getAppNumArgs - 1)) (arithAtoms (e.getArg! (e.getAppNumArgs - 2)) acc)
   else if e.isAppOfArity ``Or 2 || e.isAppOfArity ``And 2 then
     arithAtoms (e.getArg! 1) (arithAtoms (e.getArg! 0) acc)
+  -- a negated or `≠` fact (`¬ x = 0`, `x ≠ 0`) is about the atoms of its comparison, not an atom
+  -- itself: `clearIrrelevant` must keep it when those atoms occur in the goal
+  else if e.isAppOfArity ``Not 1 then arithAtoms (e.getArg! 0) acc
+  else if e.isAppOfArity ``Ne 3 then
+    arithAtoms (e.getArg! 2) (arithAtoms (e.getArg! 1) acc)
   else if acc.contains e then acc else acc.push e
 
 def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
