@@ -1092,9 +1092,15 @@ base:
   argument is a runtime parameter that must be a variable bound by the statement, not a `let`, not
   instantiated, and mentioned by no premise except runtime contracts, `….Laws M` of a framework
   model, and the stack-depth bounds above. Type arguments (`K`, `V`) are data. The explicit
-  allow-list: `RtSpec` (`concatstringSpec 2`) and `Fmt` (`binary32`) name WHICH runtime function or
-  float format a contract describes; they may be closed, but only terms of imported constants (no
-  lambda, constructor or constant defined in the proof file). A new model type is therefore covered
+  allow-list is a NAMED list of framework constants (`frameworkSpecs`, `frameworkFmts` in
+  `Janus/Tools/Audit.lean`): the `RtSpec` argument of `RtContract` (`concatstringSpec 2`,
+  `growsliceSpec`, … the specs `Janus.Contracts.RtSat` proves satisfiable) and the `Fmt` argument of
+  `Fhash` (`binary32`, `binary64`) name WHICH runtime function or format a contract describes. Not
+  "any imported constant of that type": `default : Fmt` is imported and describes a format with no
+  bits (`A1c`); a lambda, a structure literal or update, or a proof-file `def` is rejected too
+  (`A1a`, `A1b`, `A1b2`). An alias is judged by what the audit sees after unfolding, so an `abbrev`
+  of a listed spec is accepted exactly because it is that spec (`A1d`), and of a bad one is not
+  (`A1d2`). A new model type is therefore covered
   with no change to the auditor. Regression rows: `audit/round11/` (closed `HashModel`, `HashModel` pinned by
   `H = H0`, closed `PanicRuntime`, `CheckptrModel` pinned by a premise, with the honest theorems
   as controls and the unsatisfiability of the closed models kernel-checked).

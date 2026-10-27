@@ -25,7 +25,7 @@ extract() {
   mapfile -t tg < <(scripts/example-targets.sh "$1")
   "$J" extract artifacts/examples-arm64 "$(example_symbol "$1")" "$W/$1" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 }
-for f in DeferTwice AlgMemhash16 RecoverSet; do extract "$f"; done
+for f in DeferTwice AlgMemhash16 RecoverSet Concat HashFKey; do extract "$f"; done
 # K1: the checkptr example (examples/rtmisc), whose binary has its own build
 [ -f artifacts/examples-rtmisc-arm64 ] || scripts/build-examples-rtmisc.sh >/dev/null
 "$J" extract artifacts/examples-rtmisc-arm64 example.com/rtmisc/checkptr.Word "$W/CheckWord" --contract runtime.checkptrAlignment >/dev/null 2>&1 || exit 1
@@ -61,6 +61,16 @@ v examples/proofs/AlgMemhash16.lean "$W/AlgMemhash16"; row L1_ctl_AlgMemhash16_H
 v examples/proofs/DeferTwice.lean "$W/DeferTwice"; row L1_ctl_DeferTwice_PanicRuntime_var Verified 'PanicRuntime'
 v examples/proofs/RecoverSet.lean "$W/RecoverSet"; row L1_ctl_RecoverSet_PanicRuntime_var Verified 'PanicRuntime'
 v examples/rtmisc/proofs/arm64/CheckWord.lean "$W/CheckWord"; row L1_ctl_CheckWord_CheckptrModel_var Verified 'CheckptrModel'
+
+echo "== A1: the allow-list (RtSpec / Fmt arguments) is a NAMED list of framework constants"
+for a in A1a_proof_defined_spec:Concat A1b_inline_spec_lambda:Concat A1b2_structure_update_of_listed_spec:Concat \
+         A1c_imported_default_fmt:HashFKey A1d2_abbrev_of_bad_spec:Concat; do
+  f=${a%%:*}; d=${a##*:}
+  v $A/$f.lean "$W/$d"; row "$f" blocked 'round 11' 'named'
+done
+v $A/A1d_abbrev_alias.lean "$W/Concat"; row A1d_ctl_alias_unfolding_to_listed_spec Verified
+v examples/proofs/Concat.lean "$W/Concat"; row A1_ctl_Concat_concatstringSpec Verified 'concatstringSpec'
+v examples/proofs/HashFKey.lean "$W/HashFKey"; row A1_ctl_HashFKey_binary64 Verified 'binary64'
 
 echo "== L1 model rows: the closed-model contracts really hold of no program (kernel-checked)"
 for m in H1a_unsat_closed_H P1a_unsat_closed_P; do
