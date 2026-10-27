@@ -35,7 +35,11 @@ theorem mid2 (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat ×
       (view R.rt (L ++ [((S.regs 0).toNat, (S.regs 0).toNat + blockSize (8 * n.toNat) true)]) S.mem)) :
     Reaches ((Extracted.program.link impl).withExit ret) S
       (IsReturn fun s' => ABIReturn s s' ∧ Post R b dp dl sp sl bx n s s') := by
+  have hsplt := sp.isLt
+  have hdplt := dp.isLt
+  have hbxlt := bx.isLt
   obtain ⟨t, h0⟩ : ∃ t, S.regs 0 = t := ⟨_, rfl⟩
+  have htlt := t.isLt
   rw [h0] at htR hacc hbt hat1 hat2 hat3 hinv
   have hpre' := hpre
   obtain ⟨hg, ⟨hb', ha, hw⟩, hal, hd, hout, hga, hgr, hflag, hty1, hn, hn2, hdl0, hsl0, hdl, hsl,
@@ -64,7 +68,8 @@ theorem mid2 (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat ×
   have hobx := hOut _ _ hinb
   have hodp := hOut _ _ hind
   have hosp := hOut _ _ hins
-  clear hd hflag hty1 hok1 hok2 hok3 hn hn2 hdl0 hsl0 hdl hsl hbud hinv0 hap1 hap2 hap3
+  have hne : ¬ ((18446744073709551616 - sp.toNat + t.toNat) % 18446744073709551616 = 0) := by omega
+  clear hd hflag hty1 hok1 hok2 hok3 hn2 hdl hsl hbud hinv0 hap1 hap2 hap3
   janus64_run until [pcTail] calls [hmv]
   all_goals (refine tail impl R b L dp dl sp sl bx n ret hret s hwb hpre _ ?_ t ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
   all_goals (try unfold Rel)
@@ -76,7 +81,8 @@ theorem mid2 (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat ×
     | exact htR
     | (with_reducible assumption)
     | janus_live
-    | (janus_simp; done)
+    | (janus64_simp; done)
+    | (janus64_simp; bv_omega)
     | janus_frame
     | skip
 

@@ -78,7 +78,7 @@ theorem tail (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat ×
     | exact InRanges.append_left hind _
     | exact InRanges.append_left hins _
     | exact InRanges.append_left hinb _
-    | (janus_simp; done)
+    | (janus64_simp; done)
     | janus_frame
 
 end ChainAmd

@@ -1304,7 +1304,7 @@ def dischargeLiveForall (g : MVarId) : TacticM Bool := do
       let (_, g4) ← (← g3.assert `h_live aty app).intro1P
       g3 := g4
     let gs ← Tactic.run g3 <| withoutRecover (evalTactic (← `(tactic|
-      (try simp only [Janus.Apart, Janus.outside_cons, Janus.outside_nil, and_true] at *
+      (try simp only [Janus.Apart, Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true] at *
        omega))))
     if gs.isEmpty then return true
     saved.restore; return false

@@ -61,19 +61,11 @@ theorem mid1 (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List (Nat ×
   all_goals (refine mid2 impl R b L dp dl sp sl bx n ret hret s hmv hwb hpre _ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
   all_goals (try unfold Rel)
   all_goals (repeat' refine And.intro ?_ ?_)
-  all_goals (try janus_simp)
+  all_goals (try janus64_simp)
   all_goals first
     | (with_reducible assumption)
     | (unfold Apart; with_reducible assumption)
-    | exact MemFrame.trans hfr ‹MemFrame S.mem _ _› (by
-        intro a n h
-        refine ⟨h, ?_⟩
-        revert h
-        simp only [Janus.outside_cons, Janus.outside_nil, Janus.outside_append, and_true, and_imp]
-        intros
-        janus_clear_irrel2
-        repeat' apply And.intro
-        all_goals first | omega | assumption)
+    | janus_frame
     | janus_live
 
 end ChainAmd

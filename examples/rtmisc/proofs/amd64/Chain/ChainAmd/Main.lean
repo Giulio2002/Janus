@@ -72,7 +72,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
   all_goals (refine mid1 impl R b L dp dl sp sl bx n ret hret s hmv hmk hwb hpre _ ?_ ?_ ?_ ?_)
   all_goals (try unfold Rel)
   all_goals (repeat' refine And.intro ?_ ?_)
-  all_goals (try janus_simp)
+  all_goals (try janus64_simp)
   all_goals first
     | (with_reducible assumption)
     | janus_live
