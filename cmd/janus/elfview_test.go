@@ -320,6 +320,11 @@ func TestElfSymbolRangeRejections(t *testing.T) {
 	if _, err := checkAll(t, ok.build()); err != nil {
 		t.Fatalf("sane symbols: %v", err)
 	}
+	// a boundary marker starting exactly at the section end (Go's __stop_ symbols) is fine
+	if _, err := checkAll(t, synth{syms: []synthSym{{"__stop_x", 0x401100, 1, obj, secText}}}.build()); err != nil {
+		t.Fatalf("end-of-section marker: %v", err)
+	}
+	wantReject(t, "symbol past the section end", synth{syms: []synthSym{{"x", 0x401101, 1, obj, secText}}}, "lies outside its section")
 	wantReject(t, "func past .text", synth{syms: []synthSym{{"f", 0x4010f8, 0x10, fn, secText}}}, "lies outside its section .text")
 	wantReject(t, "func below .text", synth{syms: []synthSym{{"f", 0x400f00, 0x10, fn, secText}}}, "lies outside its section .text")
 	wantReject(t, "object in wrong section", synth{syms: []synthSym{{"g", 0x402000, 8, obj, secData}}}, "lies outside its section .data")

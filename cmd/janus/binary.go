@@ -338,7 +338,11 @@ func checkSymbolRange(f *elf.File, s elf.Symbol, path string) error {
 	if sec.Flags&elf.SHF_TLS != 0 || sec.Flags&elf.SHF_ALLOC == 0 {
 		return nil
 	}
-	if s.Value < sec.Addr || s.Value+s.Size < s.Value || s.Value+s.Size > sec.Addr+sec.Size {
+	// A symbol that starts exactly at the section's end is a boundary marker (the Go linker's
+	// runtime.__stop___sancov_cntrs, size 1): it names no byte of the section. Anything else
+	// must lie inside.
+	end := sec.Addr + sec.Size
+	if s.Value < sec.Addr || s.Value > end || (s.Value < end && (s.Value+s.Size < s.Value || s.Value+s.Size > end)) {
 		return elfDiag(fmt.Sprintf("symbol %s of %s (value 0x%x, size 0x%x) lies outside its section %s [0x%x, 0x%x)", s.Name, path, s.Value, s.Size, sec.Name, sec.Addr, sec.Addr+sec.Size), "")
 	}
 	return nil

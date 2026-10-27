@@ -1630,7 +1630,8 @@ error):
   not verified: see below.)
 * **Y1** a defined `STT_FUNC` or sized `STT_OBJECT` symbol (non-TLS) whose
   `[st_value, st_value+st_size)` leaves the allocated section named by its `st_shndx`, or names a
-  nonexistent section. The same function name at two addresses is reported by `janus` as an
+  nonexistent section. (A symbol starting exactly at the section's end, such as Go's
+  `runtime.__stop___sancov_cntrs`, is a boundary marker and is accepted.) The same function name at two addresses is reported by `janus` as an
   ambiguity (`Symbol ... is ambiguous`) and never silently resolved.
 * **W1 (warning on stderr, not a rejection)** a non-empty `.preinit_array`, or an `.init_array`
   entry that is not in an executable section of the binary: constructors run before `main` and
