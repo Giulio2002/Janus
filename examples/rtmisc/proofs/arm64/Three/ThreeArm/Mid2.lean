@@ -29,13 +29,13 @@ theorem mid2 (impl : List Segment) (R : RtInv) (b : Nat) (n x : BitVec 64) (ret 
     (hRa : InRanges pa (blockSize (8 * n.toNat) true) R.rt) (hRc : InRanges pc 16 R.rt)
     (hac : Apart pa (blockSize (8 * n.toNat) true) pc 16)
     (hLa : InRanges pa (blockSize (8 * n.toNat) true)
-      [(pa, pa + blockSize (8 * n.toNat) true), (pc, pc + 16)])
-    (hLc : InRanges pc 16 [(pa, pa + blockSize (8 * n.toNat) true), (pc, pc + 16)])
-    (hLs : ∀ r ∈ [(pa, pa + blockSize (8 * n.toNat) true), (pc, pc + 16)],
+      ([(pa, pa + blockSize (8 * n.toNat) true)] ++ [(pc, pc + 16)]))
+    (hLc : InRanges pc 16 ([(pa, pa + blockSize (8 * n.toNat) true)] ++ [(pc, pc + 16)]))
+    (hLs : ∀ r ∈ ([(pa, pa + blockSize (8 * n.toNat) true)] ++ [(pc, pc + 16)]),
       Outside r.1 (r.2 - r.1) [(s.sp.toNat - 4168, s.sp.toNat + 24)])
     (hinv : R.inv (b - blockSize (8 * n.toNat) true - 16)
-      [(pa, pa + blockSize (8 * n.toNat) true), (pc, pc + 16)] (s.regs 28).toNat
-      (view R.rt [(pa, pa + blockSize (8 * n.toNat) true), (pc, pc + 16)] S.mem)) :
+      ([(pa, pa + blockSize (8 * n.toNat) true)] ++ [(pc, pc + 16)]) (s.regs 28).toNat
+      (view R.rt ([(pa, pa + blockSize (8 * n.toNat) true)] ++ [(pc, pc + 16)]) S.mem)) :
     Reaches ((Extracted.program.link impl).withExit ret) S
       (IsReturn fun s' => ABIReturn s s' ∧ Post R n x s s') := by
   have hpre' := hpre
@@ -64,7 +64,8 @@ theorem mid2 (impl : List Segment) (R : RtInv) (b : Nat) (n x : BitVec 64) (ret 
     | (unfold Apart; with_reducible assumption)
     | (janus_clear_irrel2; omega)
     | (unfold Apart; janus_split_and; try simp only [Apart, Nat.add_sub_cancel_left] at *; janus_clear_irrel2; omega)
-    | (set_option trace.janus.disch true in janus_live)
+    | janus_live
+    | assumption
     | janus_frame
 
 end ThreeArm
