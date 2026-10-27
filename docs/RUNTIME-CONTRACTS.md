@@ -1085,6 +1085,69 @@ rejected by `janus extract` with an error naming the mode (their instrumentation
 sanitizer runtimes, outside the model, or is concurrency tooling); `-cover`, `-d=checkptr` and
 `-spectre=ret` are accepted and recorded in `identity.json` (`buildModes`), with a note.
 
+### `sync.Pool` (`Janus/Contracts/Pool.lean`, `PoolAmd64.lean`; witnesses `PoolSat.lean`, `PoolSatAmd64.lean`)
+
+`math/big` (`nat.expNN`, `div`, `mul`, `sqr` and their deferred `stack.free`) and much of the
+standard library keep scratch objects in a `sync.Pool`. Its methods are concurrency code: `Get` and
+`Put` pin the goroutine to its P (`runtime_procPin`), use a lock-free per-P deque (`poolDequeue`,
+`poolChain`), steal from other Ps (`getSlow`) and register a new pool under the `allPools` mutex
+(`pinSlow`). A theorem about a caller leaves the two methods out
+(`janus extract --contract 'sync.(*Pool).Get' --contract 'sync.(*Pool).Put'`; the extractor pins both
+to package `sync`'s code like a runtime stub, `cmd/janus/stubpins_gen.go`, so the concurrency
+internals are not extracted) and takes their contract. The contracts have the shape of the live
+allocation and write-barrier contracts (a ghost live set `L`, one runtime invariant `R : RtInv`
+over the memory with `L` masked out; `Janus/Contracts/LiveLocal.lean`, agent/alloc2's interface):
+
+| Go source | Function | Contract | Result |
+| --- | --- | --- | --- |
+| `x := p.Get()` | `sync.(*Pool).Get()` (arm64 `X0 = p`, result `X0`/`X1`; amd64 `RAX = p`, result `RAX`/`RBX`) | `PoolGetLive` | nil, or `(T, d)`: an object `d` of the shape `Sh` the pool's user fixes, with **arbitrary contents**, **caller-owned** |
+| `p.Put(x)` | `sync.(*Pool).Put()` (arm64 `X0`, `X1`, `X2`; amd64 `RAX`, `RBX`, `RCX`) | `PoolPutLive` | the caller gives the object's ranges back |
+
+**Ownership, not content.** The contracts do not say which value a `Get` returns or what the pool
+holds. `Get` returns nil (`X0 = X1 = 0`, the invariant kept) or an element `(T, d)` of the pool's
+element type `T`: `Sh m d rs` says that `d` is an object that owns the ranges `rs` (for `math/big`'s
+stack, `SliceObj B`: a 24-byte slice header and its backing array, `len ≤ cap ≤ B`; for a pool of
+fixed buffers, the buffer). Those ranges are **fresh** for the caller's live set (`FreshFrom rs L`:
+apart from every object it holds), apart from the callee's stack window, inside the runtime-owned
+ranges `R.rt` (like an allocator's result: the caller keeps its frame outside `R.rt`) and **added to
+`L`**: the invariant holds for `L ++ rs`. `Put` takes `x = (T, d)` with `Sh s.mem d rs` and
+`rs ⊆ L`, and afterwards the invariant holds for `dropAll L rs`: the caller no longer owns the
+object and the pool may hand it out again. **Neither call touches the caller's memory**: memory
+changes only inside `R.rt` and the callee's stack window, and every object of `L` reads as before
+(`LiveFrame`; for `Put` that includes the object being given back).
+
+**Composition.** A theorem calls `Get`, then any number of allocations (`NewobjectLiveContract`,
+`GrowsliceLiveContract`), write barriers (`WbLiveContract`), clears (`MemclrNoHeapPointersLive`) and
+pool calls, then `Put`, threading `L` and the budget: every call returns the invariant for the next
+live set. `examples/proofs/ScratchSum.lean` (`Get`, `new` on the nil path, `Put`) and
+`examples/proofs/StackGrow.lean` (`Get`, `new`, `slices.Grow` into the object through `growslice`,
+`memclrNoHeapPointers` and `gcWriteBarrier2`, a deferred `Put`) are the worked examples, on both
+ISAs. A function that grows the pooled slice leaves the old backing array in `L` (the collector,
+not the program, frees it); the theorem's result says so (`∃ ex, FreshFrom ex L ∧ R.inv … (L ++ ex)`).
+
+**What a real runtime must satisfy** (the trusted part, docs/SOUNDNESS.md, "The single-threaded
+assumption"): `R.ok get [p]` holds for the pools the program uses; `R.inv` says that every object a
+pool holds has the shape `Sh` and lies outside the live set, which is exactly what `Put`'s
+precondition hands over (the pool's user must put nothing else into it); `New` is nil (`Get` reads
+the word at offset 32 of the pool and a pool with `New` set is a call this contract says nothing
+about; both calls keep it); `p` is not used by another goroutine during the call. `R.rt` includes
+the pool's struct, the per-P arrays and chains, the P's write-barrier buffer (the barrier the calls
+execute when they store an interface into a `poolLocal` is part of the call) and the heap the pool
+allocates from (`pinSlow`, `poolChain.pushHead`: the allocation a `Get`/`Put` makes inside is runtime
+memory the invariant accounts for, so the call costs the caller no budget).
+
+**Satisfiability.** `poolGetLive_satisfiable`, `poolPutLive_satisfiable` (`PoolSat`, `PoolSatAmd64`):
+machine code for `Get` (returns nil: an empty pool) and `Put` (drops its argument: a pool may drop
+what it is given) that meets the contract for the bump-allocator model of
+`Janus/Contracts/LiveLocalSat.lean`, and a call state that satisfies the whole precondition. The
+live allocation, barrier and clear contracts the examples use have witnesses on the same model
+(`newobjectLive_satisfiable`, `growsliceLive_satisfiable`, `wbLive_satisfiable`,
+`memclrNoHeapPointersLive_satisfiable`, in `LiveLocalSat` / `LiveLocalSatAmd64`: the local copy of
+agent/alloc2's interface, replaced by its witnesses on merge). The example proofs'
+`Witness.nonvacuous` and `Witness.returns` show that every hypothesis of the guarantee holds
+together (one runtime serving all six contracts, a call state with an empty live set) and the
+guarantee is reached (`ScratchSum(3, 5) = 6`; `StackGrow(1) = 1`).
+
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 
 The Go → C boundary does not use the linked-code `Summary` mechanism above. The trusted part has

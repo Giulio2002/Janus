@@ -285,6 +285,8 @@ Go 1.26.0. Proofs:
 | `CopyTrees`, `ClearTrees` | copying / clearing pointerful memory through `typedmemmove` / `memclrHasPointers`, write barrier off | ✓ | ✓ |
 | `LookupStr` | `m[k]` on a `map[string]uint64`, keyed by the string's content (`mapaccess2_faststr` contract) | ✓ | ✓ |
 | `HashFKey`, `EqFKey` | the compiler-generated hash and `==` of a struct key: keys equal under `==` hash alike (the seeded hash as an uninterpreted function with its laws) | ✓ | ✓ |
+| `ScratchSum` | a pooled scratch buffer: `Get`, `new` on a miss, `Put`; returns `a ^ b` (the buffer is scratch), the pool's owned object is caller-owned between the calls and the runtime's invariant holds again for the same live set, through the `sync.(*Pool).Get` / `Put` and `runtime.newobject` contracts ([RUNTIME-CONTRACTS.md](docs/RUNTIME-CONTRACTS.md), "sync.Pool") | ✓ | ✓ |
+| `StackGrow` | `math/big`'s pattern: `Get` a pooled stack, `new` on a miss, `slices.Grow` into it (`growslice`, `memclrNoHeapPointers`, the GC write barrier), deferred `Put`: returns the stack's capacity (`cap` if `n ≤ cap`, else Go's growth rule), no live object changed, the runtime's invariant again | ✓ | ✓ |
 | `Alg*`, `Mbar*` | the runtime's own equality, hash and typed-memory functions (`memequal8`, `f64equal`, `strequal`, `f64hash`, `typedmemmove`, …) meet their contracts, from their machine code | ✓ | ✓ |
 | `WrongAdd` | the subtracting `Add` **violates** the `Add` spec (a proved counterexample) | ✓ | |
 | `BitMix` | `GOAMD64=v3` (`examples/basic/v3`): `(x &^ y) ^ (x & (x-1)) ^ (y << (n & 63))` through BMI `ANDN`, `SHLX`, `BLSR` | | ✓ |
