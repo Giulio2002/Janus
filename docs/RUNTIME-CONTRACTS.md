@@ -597,6 +597,14 @@ frame's `_defer` records and their functions (`deferproc`, `deferprocStack`, `de
   `gopanic` and `Goexit`, `RetFin` (return to the caller with the platform registers as at
   entry, the frame's records popped, `P.saved` cleared) for `deferreturn`.
 
+On amd64 the calls are `CALL`s: the closure's entry `RSP` points at its return address inside the
+runtime (`RPa`), `RDX` holds the funcval, `R14` the goroutine, `X15 = 0` and the direction flag is
+clear; `RBP` is not part of `DeferCall` (it is restored by the call, `DeferReturned`), and a nested
+panic's unwinding pops the closure's return address (`U s g b` has `RSP = b + 8`). The frame's `SP`
+is `RSP + 8` at the runtime function's entry and `bound` is the caller's entry `RSP`. `FrameOK`
+additionally requires every funcval's code word to be a canonical user address (`< 2^47`), which the
+indirect call needs.
+
 `GopanicContract.apply`, `GoexitContract.apply` and `DeferreturnContract.apply` hand a proof the
 engine at a call `S` of the runtime function, and the proof continues from the closure's entry by
 running the extracted closure (the engine's `DeferCall` state) and showing what it does; a
@@ -632,9 +640,9 @@ size (8) is the prologue and epilogue value and the body's value is the frame si
 | `LoadField(c)` | a nil receiver faults, which is a panic with `P.err .mem` (the `sigpanic` path) |
 | `DeferTwice()` | two heap `defer` records in a loop (`deferproc`, `deferreturn`); the call returns |
 | `RecoverSet(x, e)` | `recover()` in a deferred closure turns `panic(e)` into a return of the named result `7` |
-| `DeferOrder(x)` | `panic(x)` with three open-coded defers: the deferred calls run last to first (arm64) |
+| `DeferOrder(x)` | `panic(x)` with three open-coded defers: the deferred calls run last to first (both ISAs) |
 | `DeferMix(n)` | a loop's heap records and open-coded defers on one frame, in order, with `deferreturn` (arm64) |
-| `GoexitDefer(n)` | `runtime.Goexit()` runs the deferred calls and unwinds past the frame; `recover()` finds no panic (arm64) |
+| `GoexitDefer(n)` | `runtime.Goexit()` runs the deferred calls and unwinds past the frame; `recover()` finds no panic (both ISAs) |
 | `RangeDefer(n)` | `defer` in a range-over-func body (`deferrangefunc`, `deferprocat`, `deferreturn`) (arm64) |
 | `NestedPanic(x)` | a deferred call panics again: the first panic is aborted, the second unwinds through the rest (arm64) |
 | `NestedRecover(x)` | a deferred call panics again and a later deferred call recovers the second panic (arm64) |
