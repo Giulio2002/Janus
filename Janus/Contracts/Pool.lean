@@ -1,6 +1,6 @@
 import Janus.Spec.Pool
 import Janus.Contracts.Map
-import Janus.Contracts.LiveLocal
+import Janus.Contracts.Live
 
 /-!
 # Contracts of `sync.Pool` for one goroutine (arm64)
@@ -34,9 +34,8 @@ reads as before, the object being put included) and neither allocates anything t
 (the pool's own allocations, `pinSlow` and `poolChain.pushHead`, are runtime memory).
 
 **The live set and the invariant.** The statement has the shape of the live allocation and
-write-barrier contracts (agent/alloc2's `Janus.Contracts.Live`, 2b92acc; here its local copy
-`Janus.Contracts.LiveLocal`: `RtInv`, `view`, `LiveFrame`, `LiveAt`, `FreshFrom`, `LiveSep`
-come from there). A ghost list `L` holds the caller's live ranges; `R : RtInv` is the runtime's
+write-barrier contracts (`Janus.Contracts.Live`: `RtInv`, `view`, `LiveFrame`, `LiveAt`,
+`FreshFrom`, `LiveSep` come from there). A ghost list `L` holds the caller's live ranges; `R : RtInv` is the runtime's
 invariant over the memory as the runtime sees it (`view R.rt L m`: the runtime-owned ranges `R.rt`
 with the caller's live set masked out). A theorem calls `Get`, then any number of allocations,
 write barriers and pool calls, then `Put`, threading `L`, because every call returns the
@@ -56,8 +55,8 @@ into arbitrary Go code. `PoolGetLive` requires the `New` word (offset 32) to be 
 this contract says nothing about.
 
 **Frame.** Both contracts return to `X30` with `SP`, `X18`, `X28` (`g`) and `X29` preserved,
-every other general register, the SIMD registers and the flags arbitrary (the exclusive-monitor
-state is unspecified too, like every arm64 call), and bytes changed only in `rt` and in the
+every other general register, the SIMD registers and the flags arbitrary (the exclusive monitor
+and its outcome stream `excl`, `exclPass` are unspecified too, like every arm64 call: `retStateX`), and bytes changed only in `rt` and in the
 callee's stack window (at most `stack` bytes below `SP`, never the caller's frame-pointer slot
 `[SP-8, SP)`, and the argument spill slots `[SP+8, SP+8+8·nargs)`). The pool's own memory (the
 pool's struct, the per-P arrays and chains, the P's write-barrier buffer: the barrier the calls
@@ -68,22 +67,6 @@ namespace Janus.Contracts.Pool
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Spec.Map Janus.Spec.Pool
   Janus.Contracts
-
-/-! ## Marked: the part that comes from agent/alloc2's interface (`LiveLocal`)
-
-Everything below that mentions `RtInv`, `view`, `LiveFrame`, `LiveAt`, `LiveSep`, `FreshFrom` or
-`StackRoom` is stated in the interface of `Janus.Contracts.LiveLocal`, the local copy of
-agent/alloc2's `Janus.Contracts.Live`: when it lands, the merge replaces that import and drops
-the `LiveLocal` qualifier, and nothing else in this file changes.
-
-agent/alloc2 is unifying all runtime contracts under one runtime model (the runtime's private
-ranges, the live set `L` and the invariant over the masked view, merging `MemModel`'s `Env`/`priv`).
-The pool contracts are already in that form: they take the model's invariant (`R.inv`, with `rt`
-and `view`), add the returned object to `L` (`Get`) or remove it (`Put`, `dropAll`), preserve the
-invariant, and mention the model only through `R.inv`, `R.ok`, `R.rt` and `view`. When the unified
-structure lands, `R : RtInv` and `rt` become its fields; the statements do not otherwise change. -/
-
-open Janus.Contracts.LiveLocal
 
 /-! ## Shapes of pooled objects -/
 
@@ -132,12 +115,14 @@ theorem mem_dropAll_of {L rs : List (Nat × Nat)} {r : Nat × Nat} (h : r ∈ L)
 
 /-- The return of a live pool call from `s` to `s'` (arm64): to `X30` with `SP`, `X18`, `X28`,
 `X29` kept and everything else as `Map.keepABI`, memory changed only in `rt` and the callee's
-window, none of the live objects of `L` changed, and `P r m` about the result registers and the
+window, the exclusive monitor unspecified (`ex`, `ep`), none of the live objects of `L` changed, and `P r m` about the result registers and the
 new memory. -/
 def LiveRet (R : RtInv) (stack nargs : Nat) (L : List (Nat × Nat)) (s s' : State)
     (P : (Nat → W64) → Memory → Prop) : Prop :=
-  ∃ r v fl m, s' = { s with regs := Map.keepABI s.regs r, vregs := v, flags := fl, mem := m,
-                            pc := s.regs 30 } ∧
+  ∃ (r : Nat → W64) (v : Nat → BitVec 128) (fl : Flags) (m : Memory) (ex : Option (Nat × Nat))
+    (ep : Nat → Bool),
+    s' = { s with regs := Map.keepABI s.regs r, vregs := v, flags := fl, mem := m, pc := s.regs 30,
+                  excl := ex, exclPass := ep } ∧
     MemFrame s.mem m (R.rt ++ calleeStack s stack nargs) ∧ LiveFrame s.mem m L [] ∧ P r m
 
 attribute [janus_exec, janus_post] LiveRet

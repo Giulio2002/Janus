@@ -1,14 +1,14 @@
+import Janus.Contracts.Live
 import Janus.Contracts.Pool
 
 /-!
 # Call-site tools for the live contracts
 
-Not part of agent/alloc2's interface: small lemmas for the proofs of functions that call live
-contracts from a stack window `[lo, hi)` they own (the example proofs use them; they are stated
-over `Janus.Contracts.LiveLocal`'s `LiveSep`, so they move with it on merge).
+Small lemmas for the proofs of functions that call live contracts from a stack window `[lo, hi)`
+they own (the `sync.Pool` example proofs use them).
 -/
 
-namespace Janus.Contracts.LiveLocal
+namespace Janus.Contracts
 
 open Janus Janus.Arm64 Janus.Contracts
 
@@ -115,9 +115,14 @@ theorem keep_read {rt cs : List (Nat × Nat)} {m m' : Memory} {lo hi x k : Nat}
     simp only [outside_append]
     exact ⟨Outside.of_sub (hwrt _ (List.mem_singleton_self _)) h1 (by simp only; omega), hcs⟩)
 
-end Janus.Contracts.LiveLocal
+end Janus.Contracts
 
 namespace Janus
+
+/-- A frame that writes outside `L` is a live frame. -/
+theorem LiveFrame.of_memFrame {m m' : Janus.Arm64.Memory} {L ws : List (Nat × Nat)} {rs : List (Nat × Nat)}
+    (h : MemFrame m m' rs) (ho : ∀ a n, InRanges a n L → Outside a n rs) : LiveFrame m m' L ws :=
+  ⟨fun a n hin _ => h.readLE a n (ho a n hin)⟩
 
 /-- A frame widened by more ranges. -/
 theorem MemFrame.widen {m m' : Janus.Arm64.Memory} {ws : List (Nat × Nat)} (h : MemFrame m m' ws)
@@ -126,7 +131,7 @@ theorem MemFrame.widen {m m' : Janus.Arm64.Memory} {ws : List (Nat × Nat)} (h :
 
 end Janus
 
-namespace Janus.Contracts.LiveLocal
+namespace Janus.Contracts
 
 open Janus Janus.Arm64 Janus.Contracts
 
@@ -216,4 +221,4 @@ theorem memPre_of {R : RtInv} {S : State} {stack nargs : Nat} {addr : Nat} {args
     Mem.EqPre stack nargs S ∧ LiveMemAt R addr args L b S (calleeStack S stack nargs) :=
   ⟨⟨(Janus.Spec.guardOK_iff _ _).1 h.2.1.1, h.1, h.2.1.2⟩, h.2.2.1, h.2.2.2.1, h.2.2.2.2.2.1, h.2.2.2.2.2.2⟩
 
-end Janus.Contracts.LiveLocal
+end Janus.Contracts
