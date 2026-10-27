@@ -868,6 +868,9 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
     -- hypotheses: simp enters `if` branches with the branch condition as a hypothesis, and
     -- proving e.g. `29 < 16` there would make the register-sorting lemma loop.
     throwError "janus_disch: closed goal is false:{indentExpr t}"
+  if t.isAppOfArity ``Janus.Apart 4 then
+    if ← Common.dischargeApart g then return
+    throwError "janus_disch: cannot prove{indentExpr t}"
   if t.isAppOfArity ``Janus.Outside 3 then
     if ← Common.dischargeOutside g then return
     throwError "janus_disch: cannot prove{indentExpr t}"

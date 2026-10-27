@@ -79,6 +79,11 @@ theorem Apart.mono {a n n' b k k' : Nat} (h : Apart a n b k) (h1 : n' ≤ n) (h2
     Apart a n' b k' := by
   unfold Apart at *; omega
 
+/-- Sub-ranges of apart ranges are apart. -/
+theorem Apart.sub {a n b k a' n' b' k' : Nat} (h : Apart a n b k) (h1 : a ≤ a') (h2 : a' + n' ≤ a + n)
+    (h3 : b ≤ b') (h4 : b' + k' ≤ b + k) : Apart a' n' b' k' := by
+  unfold Apart at *; omega
+
 /-- `[a, a+n)` lies inside one of the ranges `[lo, hi)` of `rs`. -/
 def InRanges (a n : Nat) (rs : List (Nat × Nat)) : Prop := ∃ r ∈ rs, r.1 ≤ a ∧ a + n ≤ r.2
 
@@ -1043,6 +1048,37 @@ def clearIrrelevant2 (g : MVarId) : MetaM MVarId := g.withContext do
     unless ← isProp ty do continue
     unless (arithAtoms ty).all expanded.contains do toClear := toClear.push d.fvarId
   g.tryClearMany toClear
+
+/-- A side condition `Apart a n b k` (e.g. part of a callee's precondition): from a hypothesis
+`Apart a' n' b' k'` (or its mirror) of which it is a sub-range pair, the containments by `omega`. -/
+def dischargeApart (g : MVarId) : TacticM Bool := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  unless t.isAppOfArity ``Janus.Apart 4 do return false
+  let ga := t.getArg! 0; let gn := t.getArg! 1; let gb := t.getArg! 2; let gk := t.getArg! 3
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ty.isAppOfArity ``Janus.Apart 4 do continue
+    let ha := ty.getArg! 0; let hn := ty.getArg! 1; let hb := ty.getArg! 2; let hk := ty.getArg! 3
+    -- an exact match
+    if (← withReducible (isDefEq ty t)) then
+      g.assign d.toExpr; return true
+    for symm in [false, true] do
+      -- candidates: one of the two ranges is the goal's (syntactically), so only the other
+      -- needs a containment by `omega`
+      let (a, n, b, k) := if symm then (hb, hk, ha, hn) else (ha, hn, hb, hk)
+      unless (a == ga && n == gn) || (b == gb && k == gk) do continue
+      let saved ← saveState
+      try
+        let h ← Term.exprToSyntax d.toExpr
+        let gs ← Tactic.run g <| withoutRecover do
+          if symm then evalTactic (← `(tactic| refine Janus.Apart.sub (Janus.Apart.symm $h) ?_ ?_ ?_ ?_))
+          else evalTactic (← `(tactic| refine Janus.Apart.sub $h ?_ ?_ ?_ ?_))
+          evalTactic (← `(tactic| all_goals omega))
+        if gs.isEmpty then return true
+        saved.restore
+      catch _ => saved.restore
+  return false
 
 /-- A side condition `Outside a n rs` (of a `MemFrame` read rule): unfold the literal list and
 prove each range condition by `omega`. -/

@@ -115,7 +115,12 @@ These are trusted, not proved.
    `external` stubs (the cgo boundary): a run ends there too, and only the contract semantics of
    `Janus.FFI` (`ReturnsC`, with the contract named in the statement) continues past them; see
    "FFI (cgo)" below.
-4. **The Lean kernel**, plus the verifier's hashing, process execution, axiom audit and
+4. **Runtime contracts and specifications stated as hypotheses or definitions**: every
+   `--contract` function's `Summary` (docs/RUNTIME-CONTRACTS.md; for `print`/`println`:
+   `lock2`, `unlock2`, `memmove`), and the output format specification `Janus.Spec.Print`
+   of the print functions not yet proved from machine code (differential-tested only, row
+   RT-PRINT; see [`print`/`println`](#printprintln-r8)).
+5. **The Lean kernel**, plus the verifier's hashing, process execution, axiom audit and
    statement audit (`Janus/Tools/Audit.lean`, including Lean's parser, elaborator and
    pretty-printer as used by the round-trip check above). The auditor and `leanchecker` load
    `.olean` files written by the sandboxed (untrusted) compile; Lean's `.olean` loader does not
@@ -124,7 +129,7 @@ These are trusted, not proved.
    audit allows only `propext`, `Quot.sound` and `Classical.choice`. It rejects `sorryAx`,
    `Lean.ofReduceBool` and `Lean.trustCompiler`, so `native_decide` and `bv_decide` cannot be
    used. `leanchecker` independently replays the environment (below).
-5. **The Lean toolchain's own library** (`Init`, `Std`, `Lean`, `Lake`, shipped with the
+6. **The Lean toolchain's own library** (`Init`, `Std`, `Lean`, `Lake`, shipped with the
    toolchain and read-only to every sandboxed process) and the **trusted framework build**: the
    framework's `.olean` files compiled by `janus` itself from the framework sources it carries,
    outside the sandbox, once per framework version (`janus verify --fresh` rebuilds them).
@@ -1721,6 +1726,38 @@ None of these has a result the user-mode state determines. The design (WP-C,
   docs/ORACLE.md and docs/ORACLE-AMD64.md). `SVC`/`SYSCALL` are not run natively. `PUSHFQ` pushes
   `0x202` plus the status flags and `DF`; `POPFQ` faults (`Fault.systemFlag`) if it would set
   `TF`, `NT`, `AC` or `ID`, which the model does not track.
+
+## `print`/`println` (R8)
+
+The print examples (`examples/proofs-print`, both ISAs) execute the whole print path from the binary
+(`printlock`, `printstring`, `printuint`/`formatBase10`, `printint`, `printbool`, `printnl`,
+`gwrite`, `recordForPanic`, `writeErrData`, `write`, `write1`) down to the `write(2, …)` system
+call. What is trusted beyond the model and the kernel contract (`Kernel.Effect .write`):
+
+* **Three runtime contracts** (`Janus/Contracts/Print.lean`, `PrintAmd64.lean`): `lock2`/`unlock2`
+  (the uncontended fast path of `debuglock`, the only path single-threaded code can take) and
+  `memmove` (the copy into the crash backlog). They are hypotheses of every theorem, satisfiable
+  (`Janus.Contracts.PrintSat`, `PrintSatAmd64`: witness machine code proved to meet each, and a call
+  state meeting its precondition) and jointly satisfiable with each example's precondition
+  (`Proof.Witness.nonvacuous`, with the witness code linked at the binary's contract addresses).
+  Concurrency is out of scope: a second thread holding `debuglock` is not modelled.
+* **The output specification** `Janus.Spec.Print` (decimal integers, `fmtBool`, and the hex,
+  pointer, slice, interface and floating-point formats) is a Lean definition of what Go 1.26
+  prints. For the proved examples the spec is only `decimal`/`fmtInt`/`fmtBool`/string bytes, and
+  the theorems connect it to the machine code. The remaining formats (`fmtHex`, `fmtPointer`,
+  `fmtSlice`, `fmtEface`, `fmtF64`, `fmtF32`, `fmtC128`, `fmtC64`) are **not connected to any
+  machine-code theorem yet**. Their only evidence is the differential test row RT-PRINT
+  (`audit/rt-print`, in `audit/run-all.sh`): every format against the real Go 1.26 runtime on both
+  ISAs, byte for byte (1,427,971 cases, 0 mismatches at the default corpus).
+* **The shared code.** The proofs about the print functions are about `PrintCode.program` (the
+  functions of all four examples as one program); each example proves that its own extraction has
+  the same code (`Program.Equiv`: segments up to order, none overlapping, same stubs, data and
+  contracts, by `decide`, checked by the kernel) and transports the theorems. Nothing here is
+  trusted: `PrintProofs.<Isa>.Equiv` is an ordinary proof about the framework's definitions.
+* **The runtime state** a print needs (`Print.PrintReady`, amd64 `Amd64.Print.PrintReady`) is a
+  precondition. It covers not panicking-dependent paths (`m.dying = 0`), no `writebuf`, no
+  `overrideWrite`, the M's print count 0 and the free `debuglock`, and the globals' and the M's
+  fields apart from each other and outside the runtime-owned ranges.
 
 ## Go assembly (ABI0)
 
