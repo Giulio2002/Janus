@@ -309,6 +309,15 @@ read-only data. The examples' `Witness.nonvacuous` use them.
 | `List(n)` | a loop with one `newobject` and one barrier store per iteration, for all `n`: the invariant carries the live set and the budget `b - 16·i`; the result is `nil` for `n = 0`, else a 16-byte node in `R.rt` whose `V` field is `n - 1`; memory changed only in `R.rt` and the stack window |
 | `Chain(dst, src, bx, n)` | `memmove`, `makeslice`, `memmove`, a barrier store, with the single hypothesis `R` threaded through all four |
 
+`Three` and `Chain` are **split** into a Lake package per ISA and function
+(`examples/rtmisc/proofs/<isa>/<Name>/`, module root `ThreeArm`/`ThreeAmd`/`ChainArm`/`ChainAmd`):
+one module per runtime-call segment (`Tail`, `Mid2`, `Mid1`, `Main`, each one `Reaches` lemma about
+the same `R`, composed by a short main theorem `correctness`), `Defs` for the statement pieces
+(`Pre`, `Post`, `Rel`) and `Witness`. Verify with `janus verify --proof-root`
+(`scripts/verify-rtmisc-examples.sh` does it): a single elaboration that carried the context of all
+four calls needed more than 20 GiB, a module per segment stays far below that. `List` stays a
+single file.
+
 <a id="dynamic-calls"></a>
 
 ### Dynamic calls (interface methods, closures, method values, `defer`)
