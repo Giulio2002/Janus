@@ -66,7 +66,7 @@ theorem printuint_k (impl : List Amd64.Segment)
     all_goals try (intro j hj; janus64_simp; first | done | exact h_rdsm j hj)
     all_goals try kobl64
     all_goals try (janus64_simp; first | done | apart_mono | (unfold Apart at *; omega))
-  · obtain ⟨i, junk, f, x, yh, m, rfl, hi, hfm, hrb⟩ := hpost
+  · obtain ⟨i, junk, f, x, yh, m, zh, kr, rfl, hi, hfm, hrb⟩ := hpost
     revert hi hfm hrb
     janus64_simp
     intro hi hfm hrb
@@ -83,7 +83,7 @@ theorem printuint_k (impl : List Amd64.Segment)
     apply Amd64.Print.ReturnsK.to_reaches
     apply gwrite_k impl hmm E ret hret _ K (SP - 72) G MP (SP - 28 + i) (20 - i) (20 - i)
     case hk =>
-      rintro S' K' ⟨junk', f', x', yh', m', es, rfl, hf', h_rd_c, h_rd_l, hbi', rfl, hem⟩
+      rintro S' K' ⟨junk', f', x', yh', m', zh', kr', es, rfl, hf', h_rd_c, h_rd_l, hbi', rfl, hem⟩
       simp only [h_bi, h_bl] at hf' hbi'
       have hfa1 : MemFrame S.mem m [(SP - 232, SP)] :=
         MemFrame.trans (rs := [(SP - 80, SP)]) (by janus_frame) hfm (by
@@ -110,7 +110,7 @@ theorem printuint_k (impl : List Amd64.Segment)
       janus64_step
       apply Amd64.Print.ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, _, es, by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, callRegs64_apply, hx15, h_rbp], by simp only [h_bi, h_bl] at hfa ⊢; exact hfa, ?_, ?_, ?_, rfl, ?_⟩
+      refine ⟨_, _, _, _, _, _, _, es, by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, callRegs64_apply, hx15, h_rbp], by simp only [h_bi, h_bl] at hfa ⊢; exact hfa, ?_, ?_, ?_, rfl, ?_⟩
       · dsimp only; janus64_simp
       · dsimp only; janus64_simp
       · dsimp only; janus64_simp; first | assumption | (rw [h_bi]; assumption) | (rw [h_bi] at hbi'; assumption)

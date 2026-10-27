@@ -127,8 +127,8 @@ theorem and_sshr_21 (x : Nat) (h1 : 1 ≤ x) (hx : x < 21) :
 /-- What the rest of `formatBase10` from the final chunk's loop head guarantees: it returns
 `i - |decimal lo|` with the digits of `lo` written in front of the bytes already at `[a + i, a + 20)`. -/
 def FbTail (s : State) (SP a i lo : Nat) (m0 : Memory) (s' : State) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
-    s' = retState64 s junk [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length)] f x yh m ∧
+  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory) (zh : Nat → BitVec 256) (kr : Nat → W64),
+    s' = retState64 s junk [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length)] f x yh m zh kr ∧
     MemFrame s.mem m [(SP - 8, SP), (SP + 8, SP + 16), (a, a + 20)] ∧
     readBytes m (a + (i - (Janus.Spec.Print.decimal lo).length))
         (20 - (i - (Janus.Spec.Print.decimal lo).length)) =

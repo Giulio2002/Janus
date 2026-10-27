@@ -40,8 +40,8 @@ def RfpPre (s : State) : Prop :=
 argument spill slots, the M's `locks` and print count (restored), the backlog and its index (kept
 in range). -/
 @[reducible] def RfpPost (s s' : State) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
-    s' = retState64 s junk [] f x yh m ∧
+  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory) (zh : Nat → BitVec 256) (kr : Nat → W64),
+    s' = retState64 s junk [] f x yh m zh kr ∧
     MemFrame s.mem m [((s.regs 4).toNat - 80, (s.regs 4).toNat), ((s.regs 4).toNat + 8, (s.regs 4).toNat + 32),
       (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264, s.mem.readLE ((s.regs 14).toNat + 48) 8 + 268),
       (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 279, s.mem.readLE ((s.regs 14).toNat + 48) 8 + 280),
@@ -58,7 +58,7 @@ macro "rfp_post" : tactic => `(tactic| (
   unfold RfpPost
   simp only [hsp, hg, hx0, hx1, hx3, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl, Nat.mod_eq_of_lt hgl,
     hmpE, h_bi, h_bl]
-  refine ⟨_, _, _, _, _, by ret_state64 [hsp, hsp', hbp', hg', hg, hx15, hfs, hdf, hmx, Nat.mod_eq_of_lt hspl, callRegs64_apply], by janus_frame, ?_, ?_, ?_⟩ <;>
+  refine ⟨_, _, _, _, _, _, _, by ret_state64 [hsp, hsp', hbp', hg', hg, hx15, hfs, hdf, hmx, hx87, hfw, Nat.mod_eq_of_lt hspl, callRegs64_apply], by janus_frame, ?_, ?_, ?_⟩ <;>
     (dsimp only; janus64_simp; all_goals first | omega | (split <;> omega) | (simp only [h_bi] at hidx; exact hidx) | assumption)))
 
 set_option maxRecDepth 200000 in
@@ -109,16 +109,16 @@ theorem recordForPanic (impl : List Amd64.Segment)
       S.mem.readLE (MP + 279) 1 = s.mem.readLE (MP + 279) 1 + 1 →
       S.mem.readLE (MP + 264) 4 = s.mem.readLE (MP + 264) 4 →
       S.mem.readLE BI 8 < 512 →
-      S.xmm 15 = s.xmm 15 → S.fsBase = s.fsBase → S.df = s.df → S.mxcsr = s.mxcsr →
+      S.xmm 15 = s.xmm 15 → S.fsBase = s.fsBase → S.df = s.df → S.mxcsr = s.mxcsr → S.x87 = s.x87 → S.fpucw = s.fpucw →
       ReachesRet (P.link impl) (retAddrOf s) S (RfpPost s) := by
     intro k
     induction k with
     | zero =>
-      intro S i hk hi hpc' hsp' hbp' hg' h0 h7 h2 h6 hf h_rd1 h_rd2 h_rd3 h_rd4 h_rd5 h_rd6 hidx hx15 hfs hdf hmx
+      intro S i hk hi hpc' hsp' hbp' hg' h0 h7 h2 h6 hf h_rd1 h_rd2 h_rd3 h_rd4 h_rd5 h_rd6 hidx hx15 hfs hdf hmx hx87 hfw
       janus64_run [hmpE, zx8_chain, ofNat8_eq_zero_iff, hnz]
       all_goals rfp_post
     | succ k ih =>
-      intro S i hk hi hpc' hsp' hbp' hg' h0 h7 h2 h6 hf h_rd1 h_rd2 h_rd3 h_rd4 h_rd5 h_rd6 hidx hx15 hfs hdf hmx
+      intro S i hk hi hpc' hsp' hbp' hg' h0 h7 h2 h6 hf h_rd1 h_rd2 h_rd3 h_rd4 h_rd5 h_rd6 hidx hx15 hfs hdf hmx hx87 hfw
       simp only [h_bi] at *
       janus_eval_nat h_bi : BI
       by_cases hle : len ≤ i
@@ -177,7 +177,7 @@ theorem recordForPanic (impl : List Amd64.Segment)
           e1b, e2b, e6, e7, e6', e7', BitVec.zero_ushiftRight, andmask512_nat, e8, hne, e9, e10, hlit]
           until [segAddr P "runtime.recordForPanic" + 0xa1] calls [hmm]
         clear hlit e9 e10 e8 e6 e6' hne e1 e1b e2 e2b e3 e4 e5 e7 e7'
-        all_goals refine ih _ len (by omega) (Nat.le_refl _) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+        all_goals refine ih _ len (by omega) (Nat.le_refl _) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
         all_goals try (rw [hBLv]; janus_frame)
         all_goals try (dsimp only; simp only [setRegF_apply, callRegs64_apply]; first | with_reducible assumption | with_reducible rfl)
         all_goals try (dsimp only; simp only [setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_ofNat, BitVec.toNat_add, BitVec.toNat_sub]; omega)
@@ -189,7 +189,7 @@ theorem recordForPanic (impl : List Amd64.Segment)
           e1b, e2b, e6, e7, e6', e7', BitVec.zero_ushiftRight, andmask512_nat, e8, hne, e9, e10, hlit, e11]
           until [segAddr P "runtime.recordForPanic" + 0xa1] calls [hmm]
         clear hlit e11 e9 e10 e8 e6 e6' hne e1 e1b e2 e2b e3 e4 e5 e7 e7'
-        all_goals refine ih _ (i + (512 - S.mem.readLE BI 8)) (by rw [h_bi]; omega) (by rw [h_bi]; omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+        all_goals refine ih _ (i + (512 - S.mem.readLE BI 8)) (by rw [h_bi]; omega) (by rw [h_bi]; omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
         all_goals try (rw [h_bi]; dsimp only; simp only [setRegF_apply, callRegs64_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_ofNat, BitVec.toNat_add, BitVec.toNat_sub]; omega)
         all_goals try (rw [hBLv]; janus_frame)
         all_goals try (dsimp only; simp only [setRegF_apply, callRegs64_apply]; first | with_reducible assumption | with_reducible rfl)
@@ -201,10 +201,10 @@ theorem recordForPanic (impl : List Amd64.Segment)
   janus64_run [hmpE, zx8_chain, ofNat8_eq_zero_iff, hnz] until [segAddr P "runtime.recordForPanic" + 0xa1]
     calls [printlock_held impl]
   all_goals first
-    | refine loop _ _ 0 (Nat.le_refl _) (Nat.zero_le _) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    | refine loop _ _ 0 (Nat.le_refl _) (Nat.zero_le _) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
     | (have hsp' := hsp; have hbp' : s.regs 5 = s.regs 5 := rfl; have hg' := hg
        have hx15 : s.xmm 15 = s.xmm 15 := rfl; have hfs : s.fsBase = s.fsBase := rfl
-       have hdf : s.df = s.df := rfl; have hmx : s.mxcsr = s.mxcsr := rfl
+       have hdf : s.df = s.df := rfl; have hmx : s.mxcsr = s.mxcsr := rfl; have hx87 : s.x87 = s.x87 := rfl; have hfw : s.fpucw = s.fpucw := rfl
        have hidx := hbi2
        rfp_post)
   all_goals try simp only [h_bi]

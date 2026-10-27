@@ -81,7 +81,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KE
       janus64_simp
       refine ⟨?_, ?_, ?_, ?_⟩ <;> apart_mono
     all_goals first | kobl64 | (janus64_simp; exact Outside.of_sub ho1 (by omega) (by omega))
-  · obtain ⟨junk1, f1, x1, yh1, m1, rfl, hfr1, h_rd_c1, h_rd_l1, hheld1⟩ := hpost1
+  · obtain ⟨junk1, f1, x1, yh1, m1, zh1, kr1, rfl, hfr1, h_rd_c1, h_rd_l1, hheld1⟩ := hpost1
     revert hfr1 h_rd_c1 h_rd_l1 hheld1
     janus64_simp
     intro hfr1 h_rd_c1 h_rd_l1 hheld1
@@ -90,7 +90,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KE
     apply printstring_k impl hmm E ret hret _ k ((s.regs 4).toNat - 32) (s.regs 14).toNat
       (s.mem.readLE ((s.regs 14).toNat + 48) 8) ptr.toNat len.toNat
     case hk =>
-      rintro S2 K2 ⟨junk2, f2, x2, yh2, m2, es1, rfl, hfr2, h_rd_c2, h_rd_l2, hbi2', rfl, hem1⟩
+      rintro S2 K2 ⟨junk2, f2, x2, yh2, m2, zh2, kr2, es1, rfl, hfr2, h_rd_c2, h_rd_l2, hbi2', rfl, hem1⟩
       dsimp only at hfr2 h_rd_c2 h_rd_l2 hbi2'
       simp only [h_bi, h_bl] at hfr2 hbi2'
       apply Amd64.Kernel.ReturnsK.of_reaches
@@ -99,7 +99,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KE
       apply printnl_k impl hmm E ret hret _ _ ((s.regs 4).toNat - 32) (s.regs 14).toNat
         (s.mem.readLE ((s.regs 14).toNat + 48) 8)
       case hk =>
-        rintro S3 K3 ⟨junk3, f3, x3, yh3, m3, es2, rfl, hfr3, h_rd_c3, h_rd_l3, hbi3', rfl, hem2⟩
+        rintro S3 K3 ⟨junk3, f3, x3, yh3, m3, zh3, kr3, es2, rfl, hfr3, h_rd_c3, h_rd_l3, hbi3', rfl, hem2⟩
         dsimp only at hfr3 h_rd_c3 h_rd_l3 hbi3'
         simp only [h_bi, h_bl] at hfr3 hbi3'
         apply Amd64.Kernel.ReturnsK.of_reaches
@@ -115,7 +115,7 @@ theorem correctness (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (E : KE
             janus64_simp
             refine ⟨?_, ?_, ?_, ?_⟩ <;> apart_mono
           all_goals first | kobl64 | (janus64_simp; exact Outside.of_sub ho1 (by omega) (by omega))
-        · obtain ⟨junk5, f5, x5, yh5, m5, rfl, hfr5, h_rd_c5, h_rd_l5, hkey5⟩ := hpost5
+        · obtain ⟨junk5, f5, x5, yh5, m5, zh5, kr5, rfl, hfr5, h_rd_c5, h_rd_l5, hkey5⟩ := hpost5
           revert hfr5 h_rd_c5 h_rd_l5 hkey5
           janus64_simp
           intro hfr5 h_rd_c5 h_rd_l5 hkey5

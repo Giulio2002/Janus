@@ -54,7 +54,7 @@ theorem fb_inner (impl : List Amd64.Segment) (ret : W64) (SMv a i Y D : Nat) (M0
           S'.regs 7 = BitVec.ofNat 64 a → S'.regs 6 = BitVec.ofNat 64 (Y / 100 ^ 4) →
           S'.regs 2 = BitVec.ofNat 64 D → S'.regs 1 = 20#64 →
           (∀ r, r = 4 ∨ r = 5 ∨ r = 14 → S'.regs r = S.regs r) → S'.xmm 15 = S.xmm 15 →
-          S'.fsBase = S.fsBase → S'.df = S.df → S'.mxcsr = S.mxcsr →
+          S'.fsBase = S.fsBase → S'.df = S.df → S'.mxcsr = S.mxcsr → S'.x87 = S.x87 → S'.fpucw = S.fpucw →
           MemFrame M0 S'.mem [(a, a + 20)] →
           readBytes S'.mem (a + (i - 8)) (8 + (20 - i)) = pairsOf Y 4 ++ readBytes M0 (a + i) (20 - i) →
           ReachesRet (P.link impl) ret S' Q) →
@@ -66,7 +66,7 @@ theorem fb_inner (impl : List Amd64.Segment) (ret : W64) (SMv a i Y D : Nat) (M0
     have hk4 : k = 4 := by omega
     subst hk4
     janus64_run until [segAddr P "internal/strconv.formatBase10" + 0xbe]
-    refine hQ _ rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ hf hrb
+    refine hQ _ rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ hf hrb
     all_goals first
       | exact h0
       | (dsimp only; first | rfl | assumption | (rw [hx]; rfl) | (simp [h3]; done) | (simp [h7]; done) | (simp [h6, hx]; done) | (simp [h2]; done) | (simp [h1]; done))
@@ -102,11 +102,13 @@ theorem fb_inner (impl : List Amd64.Segment) (ret : W64) (SMv a i Y D : Nat) (M0
         show (x % 100 * 2 + 1) % 4294967296 + SMv = SMv + (x % 100 * 2 + 1) by omega, h_sm _ (by omega)]
       simp only [List.cons.injEq, and_true]
       exact ⟨smalls_hi _ hr100, smalls_lo _ hr100⟩
-    · intro S' h1' h2' h3' h4' h5' h6' h7' hr hx15 hfs hdf hmx hf' hrb'
-      refine hQ S' h1' h2' h3' h4' h5' h6' h7' (fun r hr' => ?_) ?_ ?_ ?_ ?_ hf' hrb'
+    · intro S' h1' h2' h3' h4' h5' h6' h7' hr hx15 hfs hdf hmx hx87 hfw hf' hrb'
+      refine hQ S' h1' h2' h3' h4' h5' h6' h7' (fun r hr' => ?_) ?_ ?_ ?_ ?_ ?_ ?_ hf' hrb'
       · rw [hr r hr']; rcases hr' with rfl | rfl | rfl <;> simp [setRegF_apply]
       · rw [hx15]
       · rw [hfs]
       · rw [hdf]
       · rw [hmx]
+      · rw [hx87]
+      · rw [hfw]
 end PrintFn

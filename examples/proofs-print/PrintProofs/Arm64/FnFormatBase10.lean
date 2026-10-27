@@ -150,8 +150,8 @@ theorem ubfiz1_31 (x : BitVec 64) : (x.rotateRight 63).toNat &&& 4294967294 = x.
 /-- What the rest of `formatBase10` from the final chunk's loop head guarantees: it returns
 `i - |decimal lo|` with the digits of `lo` written in front of the bytes already at `[a + i, a + 20)`. -/
 def FbTail (s : State) (SP a i lo : Nat) (m0 : Memory) (s' : State) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-    s' = retState s junk [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length)] f v m ∧
+  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+    s' = retStateX s junk [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length)] f v m ex ep ∧
     MemFrame s.mem m [(SP - 24, SP - 8), (SP + 8, SP + 16), (a, a + 20)] ∧
     readBytes m (a + (i - (Janus.Spec.Print.decimal lo).length))
         (20 - (i - (Janus.Spec.Print.decimal lo).length)) =
@@ -188,8 +188,8 @@ theorem formatBase10 (impl : List Segment) :
         s.mem.accessible SM 200 false = true ∧ Apart (s.regs 0).toNat 20 SM 200 ∧
         Apart (s.sp.toNat - 24) 40 SM 200 ∧
         ∀ j, j < 200 → s.mem.readLE (SM + j) 1 = smallsByte j)
-      (fun s s' => ∃ (i : Nat) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-        s' = retState s junk [BitVec.ofNat 64 i] f v m ∧ i ≤ 20 ∧
+      (fun s s' => ∃ (i : Nat) (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+        s' = retStateX s junk [BitVec.ofNat 64 i] f v m ex ep ∧ i ≤ 20 ∧
         MemFrame s.mem m [(s.sp.toNat - 24, s.sp.toNat - 8), (s.sp.toNat + 8, s.sp.toNat + 16),
           ((s.regs 0).toNat, (s.regs 0).toNat + 20)] ∧
         readBytes m ((s.regs 0).toNat + i) (20 - i) = Janus.Spec.Print.decimal (s.regs 3).toNat) := by
@@ -241,13 +241,13 @@ theorem formatBase10 (impl : List Segment) :
       all_goals try kobl
       all_goals try (intro j hj; janus_simp; first | done | exact h_rdsm j hj)
       all_goals try (dsimp only; simp only [setReg_apply]; apply BitVec.eq_of_toNat_eq; simp; omega)
-      rintro s' ⟨junk, f, v, m, rfl, hfm, hrb⟩
+      rintro s' ⟨junk, f, v, m, ex, ep, rfl, hfm, hrb⟩
       unfold FbTail
       have hl : (Janus.Spec.Print.decimal lo).length = (Janus.Spec.Print.decimal (lo / 100)).length + 2 := by
         rw [hlen']; simp
       have hi' : i - (Janus.Spec.Print.decimal lo).length = i - 2 - (Janus.Spec.Print.decimal (lo / 100)).length := by
         omega
-      refine ⟨junk, f, v, m, by rw [hi'], hfm, ?_⟩
+      refine ⟨junk, f, v, m, ex, ep, by rw [hi'], hfm, ?_⟩
       rw [hi', hrb, hlen', List.append_assoc]
       rw [List.append_cancel_left_eq]
       dsimp only
@@ -262,7 +262,7 @@ theorem formatBase10 (impl : List Segment) :
         janus_run [ubfx1_31, lsr37, mul_lsr37, div2_div50, ubfiz1_31, BitVec.toNat_setWidth,
           BitVec.toNat_mul, mod100_w, mod100_w', mod100_idx, twice_mod32, lo_idx]
         unfold FbTail
-        refine ⟨_, _, _, _, by
+        refine ⟨_, _, _, _, _, _, by
           refine eq_retState_res (r := BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length))
             ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ <;>
           first | fin_eq | (simp only [setReg_apply, hl, List.length_cons, List.length_nil]; apply BitVec.eq_of_toNat_eq; simp; omega),
@@ -279,7 +279,7 @@ theorem formatBase10 (impl : List Segment) :
         janus_run [ubfx1_31, lsr37, mul_lsr37, div2_div50, ubfiz1_31, BitVec.toNat_setWidth,
           BitVec.toNat_mul, mod100_w, mod100_w', mod100_idx, twice_mod32, lo_idx]
         unfold FbTail
-        refine ⟨_, _, _, _, by
+        refine ⟨_, _, _, _, _, _, by
           refine eq_retState_res (r := BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length))
             ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ <;>
           first | fin_eq | (simp only [setReg_apply, hl, List.length_cons, List.length_nil]; apply BitVec.eq_of_toNat_eq; simp; omega),
@@ -328,14 +328,14 @@ theorem formatBase10 (impl : List Segment) :
            all_goals try kobl
            all_goals try (intro j hj; janus_simp; first | done | exact h_rdsm j hj)
            all_goals try (dsimp only; simp only [setReg_apply]; apply BitVec.eq_of_toNat_eq; simp; omega)
-           rintro s' ⟨junk, f, v, m, rfl, hfm, hrb⟩
+           rintro s' ⟨junk, f, v, m, ex, ep, rfl, hfm, hrb⟩
            unfold FbTail
            have hc := decimal_chunk U (by omega)
            have hl : (Janus.Spec.Print.decimal U).length =
                (Janus.Spec.Print.decimal (U / 1000000000)).length + 9 := by rw [hc]; simp [digits9]
            have hi' : i - (Janus.Spec.Print.decimal U).length =
                i - 9 - (Janus.Spec.Print.decimal (U / 1000000000)).length := by omega
-           refine ⟨junk, f, v, m, by rw [hi'], hfm, ?_⟩
+           refine ⟨junk, f, v, m, ex, ep, by rw [hi'], hfm, ?_⟩
            rw [hi', hrb, hc, List.append_assoc]
            rw [List.append_cancel_left_eq]
            dsimp only
@@ -345,7 +345,7 @@ theorem formatBase10 (impl : List Segment) :
       all_goals
         unfold FbTail
         have hc := decimal_nine U (by omega) (by omega)
-        refine ⟨_, _, _, _, by
+        refine ⟨_, _, _, _, _, _, by
           refine eq_retState_res (r := BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal U).length))
             ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ <;>
           first | fin_eq | (simp only [setReg_apply, hc, digits9, List.length_map, List.length_reverse, List.length_range]; apply BitVec.eq_of_toNat_eq; simp; omega),
@@ -362,9 +362,9 @@ theorem formatBase10 (impl : List Segment) :
   all_goals try kobl
   all_goals try (intro j hj; janus_simp; first | done | exact h_sm j hj)
   all_goals try (dsimp only; simp only [setReg_apply]; apply BitVec.eq_of_toNat_eq; simp; omega)
-  rintro s' ⟨junk, f, v, m, rfl, hfm, hrb⟩
+  rintro s' ⟨junk, f, v, m, ex, ep, rfl, hfm, hrb⟩
   have hl20 := length_decimal_le 19 u (by omega)
-  refine ⟨20 - (Janus.Spec.Print.decimal u).length, junk, f, v, m, ?_, by omega, ?_, ?_⟩
+  refine ⟨20 - (Janus.Spec.Print.decimal u).length, junk, f, v, m, ex, ep, ?_, by omega, ?_, ?_⟩
   · simp only [hsp, hx0, hx3, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl]
   · simpa [hsp, hx0, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl, Nat.mod_eq_of_lt hx0l] using hfm
   · rw [show 20 - (20 - (Janus.Spec.Print.decimal u).length) = (Janus.Spec.Print.decimal u).length by omega] at hrb ⊢

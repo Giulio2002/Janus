@@ -31,8 +31,8 @@ theorem printlock_free (impl : List Segment) (rt : List (Nat × Nat)) (LS : Nat)
         Apart ((s.regs 28).toNat + 48) 8 (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 264) 16 ∧
         Sep (s.sp.toNat - (LS + 32)) (LS + 32) [((s.regs 28).toNat + 16, 8), ((s.regs 28).toNat + 48, 8),
           (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 264, 16), (DL, 8)])
-      (fun s s' => ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-        s' = retState s junk [] f v m ∧
+      (fun s s' => ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+        s' = retStateX s junk [] f v m ex ep ∧
         MemFrame s.mem m (rt ++ [(s.sp.toNat - (LS + 32), s.sp.toNat - 8),
           (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 264, s.mem.readLE ((s.regs 28).toNat + 48) 8 + 268),
           (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 279, s.mem.readLE ((s.regs 28).toNat + 48) 8 + 280)]) ∧
@@ -57,11 +57,11 @@ theorem printlock_free (impl : List Segment) (rt : List (Nat × Nat)) (LS : Nat)
   have hlt2 : s.mem.readLE (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 264) 4 < 2147483648 := by omega
   janus_run [rotateRight_zero64, sext8_and255, ofNat_and255, setWidth32_ofNat, ofNat32_eq_zero,
     sext32_add_mod, sext8_add_mod, sext8_add_mod', hlt, hlt2, hc0] calls [hl]
-  rename_i _ _ _ _ m hfr hheld hlk _
+  rename_i _ _ _ _ m _ _ hfr hheld hlk _
   have e1 : m.readLE ((s.regs 28).toNat + 48) 8 = s.mem.readLE ((s.regs 28).toNat + 48) 8 := by
     janus_simp
   rw [e1] at hlk
-  refine ⟨_, _, _, _, by ret_state, by janus_frame, ?_, ?_, ?_⟩
+  refine ⟨_, _, _, _, _, _, by ret_state, by janus_frame, ?_, ?_, ?_⟩
   all_goals janus_simp
   · rw [hlk]; split <;> omega
   · exact hheld
@@ -90,8 +90,8 @@ theorem printunlock_last (impl : List Segment) (rt : List (Nat × Nat)) (LS : Na
         Apart ((s.regs 28).toNat + 48) 8 (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 264) 16 ∧
         Sep (s.sp.toNat - (LS + 32)) (LS + 32) [((s.regs 28).toNat + 16, 8), ((s.regs 28).toNat + 48, 8),
           (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 264, 16), (DL, 8)])
-      (fun s s' => ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-        s' = retState s junk [] f v m ∧
+      (fun s s' => ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+        s' = retStateX s junk [] f v m ex ep ∧
         MemFrame s.mem m (rt ++ [(s.sp.toNat - (LS + 32), s.sp.toNat - 8),
           (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 279, s.mem.readLE ((s.regs 28).toNat + 48) 8 + 280)]) ∧
         m.readLE (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 279) 1 = 0 ∧
@@ -113,11 +113,11 @@ theorem printunlock_last (impl : List Segment) (rt : List (Nat × Nat)) (LS : Na
   have hlt : s.mem.readLE (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 279) 1 < 128 := by omega
   janus_run [rotateRight_zero64, sext8_and255, ofNat_and255, setWidth32_ofNat, ofNat32_eq_zero,
     sext32_add_mod, sext8_add_mod, sext8_add_mod', hlt, hc0] calls [hu]
-  rename_i _ _ _ _ m hfr hkey hlk _
+  rename_i _ _ _ _ m _ _ hfr hkey hlk _
   have e1 : m.readLE ((s.regs 28).toNat + 48) 8 = s.mem.readLE ((s.regs 28).toNat + 48) 8 := by
     janus_simp
   rw [e1] at hlk
-  refine ⟨_, _, _, _, by ret_state, by janus_frame, ?_, ?_, ?_⟩
+  refine ⟨_, _, _, _, _, _, by ret_state, by janus_frame, ?_, ?_, ?_⟩
   all_goals janus_simp
   · exact hlk
   · exact hkey

@@ -80,7 +80,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
       janus_simp
       refine ⟨?_, ?_, ?_, ?_⟩ <;> apart_mono
     all_goals kobl
-  · obtain ⟨junk1, f1, v1, m1, rfl, hfr1, h_rd_c1, h_rd_l1, hheld1⟩ := hpost1
+  · obtain ⟨junk1, f1, v1, m1, ex1, ep1, rfl, hfr1, h_rd_c1, h_rd_l1, hheld1⟩ := hpost1
     revert hfr1 h_rd_c1 h_rd_l1 hheld1
     janus_simp
     intro hfr1 h_rd_c1 h_rd_l1 hheld1
@@ -89,7 +89,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
     apply printstring_k impl hmm E ret hret _ k (s.sp.toNat - 32) (s.regs 28).toNat
       (s.mem.readLE ((s.regs 28).toNat + 48) 8) ptr.toNat len.toNat
     case hk =>
-      rintro S2 K2 ⟨junk2, f2, v2, m2, es1, rfl, hfr2, h_rd_c2, h_rd_l2, hbi2', rfl, hem1⟩
+      rintro S2 K2 ⟨junk2, f2, v2, m2, ex2, ep2, es1, rfl, hfr2, h_rd_c2, h_rd_l2, hbi2', rfl, hem1⟩
       dsimp only at hfr2 h_rd_c2 h_rd_l2 hbi2'
       simp only [h_bi, h_bl] at hfr2 hbi2'
       apply ReturnsK.of_reaches
@@ -98,7 +98,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
       apply printnl_k impl hmm E ret hret _ _ (s.sp.toNat - 32) (s.regs 28).toNat
         (s.mem.readLE ((s.regs 28).toNat + 48) 8)
       case hk =>
-        rintro S3 K3 ⟨junk3, f3, v3, m3, es2, rfl, hfr3, h_rd_c3, h_rd_l3, hbi3', rfl, hem2⟩
+        rintro S3 K3 ⟨junk3, f3, v3, m3, ex3, ep3, es2, rfl, hfr3, h_rd_c3, h_rd_l3, hbi3', rfl, hem2⟩
         dsimp only at hfr3 h_rd_c3 h_rd_l3 hbi3'
         simp only [h_bi, h_bl] at hfr3 hbi3'
         apply ReturnsK.of_reaches
@@ -114,7 +114,7 @@ theorem correctness (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
             janus_simp
             refine ⟨?_, ?_, ?_, ?_⟩ <;> apart_mono
           all_goals kobl
-        · obtain ⟨junk5, f5, v5, m5, rfl, hfr5, h_rd_c5, h_rd_l5, hkey5⟩ := hpost5
+        · obtain ⟨junk5, f5, v5, m5, ex5, ep5, rfl, hfr5, h_rd_c5, h_rd_l5, hkey5⟩ := hpost5
           revert hfr5 h_rd_c5 h_rd_l5 hkey5
           janus_simp
           intro hfr5 h_rd_c5 h_rd_l5 hkey5

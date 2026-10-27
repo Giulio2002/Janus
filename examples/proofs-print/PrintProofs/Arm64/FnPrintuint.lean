@@ -59,7 +59,7 @@ theorem printuint_k (impl : List Segment)
     all_goals try (rw [h_sm])
     all_goals try kobl
     all_goals try (intro j hj; janus_simp; first | done | exact h_rdsm j hj)
-  · obtain ⟨i, junk, f, v, m, rfl, hi, hfm, hrb⟩ := hpost
+  · obtain ⟨i, junk, f, v, m, ex, ep, rfl, hi, hfm, hrb⟩ := hpost
     revert hi hfm hrb
     janus_simp
     intro hi hfm hrb
@@ -72,13 +72,13 @@ theorem printuint_k (impl : List Segment)
     apply ReturnsK.to_reaches
     apply gwrite_k impl hmm E ret hret _ K (SP - 80) G MP (SP - 28 + i) (20 - i) (20 - i)
     case hk =>
-      rintro S' K' ⟨junk', f', v', m', es, rfl, hf', h_rd_c, h_rd_l, hbi', rfl, hem⟩
+      rintro S' K' ⟨junk', f', v', m', ex', ep', es, rfl, hf', h_rd_c, h_rd_l, hbi', rfl, hem⟩
       apply ReturnsK.of_reaches
       janus_run [hmpE] until [segAddr P "runtime.printuint" + 0x6c]
       janus_step
       apply ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
+      refine ⟨_, _, _, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
       · janus_simp
       · janus_simp
       · janus_simp; assumption

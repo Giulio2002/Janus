@@ -11,8 +11,8 @@ the backlog index in range, and the trace extended by what one `write(2, b)` per
 may append. -/
 @[reducible] def PPost (W : List (Nat × Nat)) (MP : Nat) (bs : List Bytes) (S : State) (K : Kern)
     (S' : State) (K' : Kern) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (es : List Event),
-    S' = retState S junk [] f v m ∧ MemFrame S.mem m W ∧
+  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat)) (ep : Nat → Bool) (es : List Event),
+    S' = retStateX S junk [] f v m ex ep ∧ MemFrame S.mem m W ∧
     m.readLE (MP + 279) 1 = S.mem.readLE (MP + 279) 1 ∧
     m.readLE (MP + 264) 4 = S.mem.readLE (MP + 264) 4 ∧ m.readLE BI 8 < 512 ∧
     K' = K.appendTrace es ∧ Emits 2 bs es
@@ -23,8 +23,8 @@ may append. -/
 the return (`retState`), memory changed only in `gwW`, the M's print count and `m.locks` as they
 were, the backlog index in range, and the trace extended by what one `write(2, b)` may append. -/
 def GwPost (SP MP ptr len : Nat) (S : State) (K : Kern) (S' : State) (K' : Kern) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (es : List Event),
-    S' = retState S junk [] f v m ∧
+  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat)) (ep : Nat → Bool) (es : List Event),
+    S' = retStateX S junk [] f v m ex ep ∧
     MemFrame S.mem m [(SP - 168, SP - 8), (SP + 8, SP + 24), (MP + 264, MP + 268),
       (MP + 279, MP + 280), (BI, BI + 8), (BL, BL + 512)] ∧
     m.readLE (MP + 279) 1 = S.mem.readLE (MP + 279) 1 ∧
@@ -92,7 +92,7 @@ theorem gwrite_k (impl : List Segment)
   · janus_step
     apply ReturnsK.to_reaches
     apply hk
-    refine ⟨_, _, _, _, [], by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_,
+    refine ⟨_, _, _, _, _, _, [], by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_,
       (Kern.appendTrace_nil K).symm, emits_fail _⟩
     · janus_simp
     · janus_simp
@@ -114,7 +114,7 @@ theorem gwrite_k (impl : List Segment)
       janus_step
       apply ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, [_], by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
+      refine ⟨_, _, _, _, _, _, [_], by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
       · janus_simp
       · janus_simp
       · janus_simp; rw [h_bi]; assumption
@@ -127,7 +127,7 @@ theorem gwrite_k (impl : List Segment)
       janus_step
       apply ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, [], by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_,
+      refine ⟨_, _, _, _, _, _, [], by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_,
         (Kern.appendTrace_nil _).symm, emits_fail _⟩
       · janus_simp
       · janus_simp

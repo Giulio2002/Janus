@@ -17,8 +17,8 @@ theorem formatBase10 (impl : List Amd64.Segment) :
         s.mem.accessible SM 200 false = true ∧ Apart (s.regs 0).toNat 20 SM 200 ∧
         Apart ((s.regs 4).toNat - 8) 24 SM 200 ∧
         ∀ j, j < 200 → s.mem.readLE (SM + j) 1 = smallsByte j)
-      (fun s s' => ∃ (i : Nat) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
-        s' = retState64 s junk [BitVec.ofNat 64 i] f x yh m ∧ i ≤ 20 ∧
+      (fun s s' => ∃ (i : Nat) (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory) (zh : Nat → BitVec 256) (kr : Nat → W64),
+        s' = retState64 s junk [BitVec.ofNat 64 i] f x yh m zh kr ∧ i ≤ 20 ∧
         MemFrame s.mem m [((s.regs 4).toNat - 8, (s.regs 4).toNat), ((s.regs 4).toNat + 8, (s.regs 4).toNat + 16),
           ((s.regs 0).toNat, (s.regs 0).toNat + 20)] ∧
         readBytes m ((s.regs 0).toNat + i) (20 - i) = Janus.Spec.Print.decimal (s.regs 7).toNat) := by
@@ -54,13 +54,13 @@ theorem formatBase10 (impl : List Amd64.Segment) :
       S.regs 1 = 20#64 → S.regs 2 = BitVec.ofNat 64 lo → S.regs 14 = s.regs 14 →
       MemFrame s.mem S.mem [(SP - 8, SP), (SP + 8, SP + 16), (a, a + 20)] →
       S.mem.readLE (SP - 8) 8 = (s.regs 5).toNat →
-      S.xmm 15 = s.xmm 15 → S.fsBase = s.fsBase → S.df = s.df → S.mxcsr = s.mxcsr →
+      S.xmm 15 = s.xmm 15 → S.fsBase = s.fsBase → S.df = s.df → S.mxcsr = s.mxcsr → S.x87 = s.x87 → S.fpucw = s.fpucw →
       (∀ j, j < 200 → S.mem.readLE (SMv + j) 1 = smallsByte j) →
       ReachesRet (P.link impl) (retAddrOf s) S (FbTail s SP a i lo S.mem) := by
     intro lo
     induction lo using Nat.strongRecOn with
     | _ lo ih =>
-    intro S i hlo hlen hi20 hpc' hsp' hbp' h0 h3 h1 h2 hg' hf h_rd1 hx15 hfs hdf hmx h_rdsm
+    intro S i hlo hlen hi20 hpc' hsp' hbp' h0 h3 h1 h2 hg' hf h_rd1 hx15 hfs hdf hmx hx87 hfw h_rdsm
     by_cases h100 : 100 ≤ lo
     · have hl3 : 3 ≤ i := by
         have := Janus.Spec.Print.decimal_append_two h100
@@ -72,18 +72,18 @@ theorem formatBase10 (impl : List Amd64.Segment) :
       janus64_run [hlit, div100_magic64 lo (by omega), mul100_32 (lo / 100) (by omega), ea2, ea1, em] until [segAddr P "internal/strconv.formatBase10" + 0x109]
       have hlen' := Janus.Spec.Print.decimal_append_two h100
       refine Janus.Amd64.Tactic.ReachesRet.mono (ih (lo / 100) (Nat.div_lt_self (by omega) (by decide)) _ (i - 2)
-        (by omega) ?_ (by omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_) ?_
+        (by omega) ?_ (by omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_) ?_
       · rw [hlen'] at hlen; simp at hlen; omega
       case refine_2 => dsimp only; rfl
       all_goals try kobl64
       all_goals try (intro j hj; janus64_simp; first | done | exact h_rdsm j hj)
-      rintro s' ⟨junk, f, x, yh, m, rfl, hfm, hrb⟩
+      rintro s' ⟨junk, f, x, yh, m, zh, kr, rfl, hfm, hrb⟩
       unfold FbTail
       have hl : (Janus.Spec.Print.decimal lo).length = (Janus.Spec.Print.decimal (lo / 100)).length + 2 := by
         rw [hlen']; simp
       have hi' : i - (Janus.Spec.Print.decimal lo).length = i - 2 - (Janus.Spec.Print.decimal (lo / 100)).length := by
         omega
-      refine ⟨junk, f, x, yh, m, by rw [hi'], hfm, ?_⟩
+      refine ⟨junk, f, x, yh, m, zh, kr, by rw [hi'], hfm, ?_⟩
       rw [hi', hrb, hlen', List.append_assoc]
       rw [List.append_cancel_left_eq]
       dsimp only
@@ -103,11 +103,11 @@ theorem formatBase10 (impl : List Amd64.Segment) :
         have ea1 : (i + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 1) := by omega
         janus64_run [hlit, ea1]
         unfold FbTail
-        refine ⟨?_, ?_, ?_, ?_, ?_, ?eq, ?fr, ?_⟩
+        refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?eq, ?fr, ?_⟩
         case eq =>
-          refine eq_retState64 [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length)] ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+          refine eq_retState64 [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length)] ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
           all_goals first
-            | (simp [setRegF, retAddrOf, hsp, hg', hx15, hfs, hdf, hmx, Nat.mod_eq_of_lt hspl]; done)
+            | (simp [setRegF, retAddrOf, hsp, hg', hx15, hfs, hdf, hmx, hx87, hfw, Nat.mod_eq_of_lt hspl]; done)
             | (simp only [setRegF, hl, List.length_cons, List.length_nil, List.getD_cons_zero, reduceIte]; apply BitVec.eq_of_toNat_eq; simp; omega)
             | rfl
         case fr => janus_frame
@@ -127,11 +127,11 @@ theorem formatBase10 (impl : List Amd64.Segment) :
         have ea2 : (i + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2) := by omega
         janus64_run [hlit, ea1, ea2]
         unfold FbTail
-        refine ⟨?_, ?_, ?_, ?_, ?_, ?eq, ?fr, ?_⟩
+        refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?eq, ?fr, ?_⟩
         case eq =>
-          refine eq_retState64 [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length)] ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+          refine eq_retState64 [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length)] ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
           all_goals first
-            | (simp [setRegF, retAddrOf, hsp, hg', hx15, hfs, hdf, hmx, Nat.mod_eq_of_lt hspl]; done)
+            | (simp [setRegF, retAddrOf, hsp, hg', hx15, hfs, hdf, hmx, hx87, hfw, Nat.mod_eq_of_lt hspl]; done)
             | (simp only [setRegF, hl, List.length_cons, List.length_nil, List.getD_cons_zero, reduceIte]; apply BitVec.eq_of_toNat_eq; simp; omega)
             | rfl
         case fr => janus_frame
@@ -152,18 +152,18 @@ theorem formatBase10 (impl : List Amd64.Segment) :
       S.regs 1 = 20#64 → S.regs 7 = BitVec.ofNat 64 U → S.regs 14 = s.regs 14 →
       MemFrame s.mem S.mem [(SP - 8, SP), (SP + 8, SP + 16), (a, a + 20)] →
       S.mem.readLE (SP - 8) 8 = (s.regs 5).toNat →
-      S.xmm 15 = s.xmm 15 → S.fsBase = s.fsBase → S.df = s.df → S.mxcsr = s.mxcsr →
+      S.xmm 15 = s.xmm 15 → S.fsBase = s.fsBase → S.df = s.df → S.mxcsr = s.mxcsr → S.x87 = s.x87 → S.fpucw = s.fpucw →
       (∀ j, j < 200 → S.mem.readLE (SMv + j) 1 = smallsByte j) → U < 2 ^ 64 →
       ReachesRet (P.link impl) (retAddrOf s) S (FbTail s SP a i U S.mem) := by
     intro U
     induction U using Nat.strongRecOn with
     | _ U ih =>
-    intro S i hlen hi20 hpc' hsp' hbp' h0 h3 h1 h7 hg' hf h_rd1 hx15 hfs hdf hmx h_rdsm hU
+    intro S i hlen hi20 hpc' hsp' hbp' h0 h3 h1 h7 hg' hf h_rd1 hx15 hfs hdf hmx hx87 hfw h_rdsm hU
     by_cases h29 : U < 2 ^ 29
     · have hs : BitVec.ofNat 64 U >>> 29 = 0#64 := by
         apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow]; omega
       janus64_run [hs] until [segAddr P "internal/strconv.formatBase10" + 0x109]
-      refine tail U _ i h29 hlen hi20 ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+      refine tail U _ i h29 hlen hi20 ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
       all_goals first | rfl | (with_reducible assumption) | (simp only [setRegF_apply]; assumption)
     · have hi9 : 9 ≤ i := by
         have := length_decimal_ge 8 U (by omega)
@@ -183,7 +183,7 @@ theorem formatBase10 (impl : List Amd64.Segment) :
       all_goals try (dsimp only; rfl)
       all_goals try (dsimp only; exact MemFrame.refl _ _)
       all_goals try (dsimp only; simp [pairsOf_zero]; done)
-      rintro S' hpc' h0' h3' h7' h6' h2' h1' hr hx15' hfs' hdf' hmx' hf' hrb'
+      rintro S' hpc' h0' h3' h7' h6' h2' h1' hr hx15' hfs' hdf' hmx' hx87' hfw' hf' hrb'
       dsimp only at hr hx15' hfs' hdf' hmx'
       have hz4 : y / 100 ^ 4 < 10 := by show y / 100000000 < 10; omega
       obtain ⟨z, hz⟩ : ∃ z, y / 100 ^ 4 = z := ⟨_, rfl⟩
@@ -221,11 +221,11 @@ theorem formatBase10 (impl : List Amd64.Segment) :
         subst hUy
         have hlen9 : (Janus.Spec.Print.decimal y).length = 9 := by rw [hc]; simp [digits9]
         unfold FbTail
-        refine ⟨?_, ?_, ?_, ?_, ?_, ?eq, ?fr, ?rb⟩
+        refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?eq, ?fr, ?rb⟩
         case eq =>
-          refine eq_retState64 [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal y).length)] ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+          refine eq_retState64 [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal y).length)] ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
           all_goals first
-            | (simp [setRegF, retAddrOf, hsp, hS14, hx15S, hfsS, hdf', hmx', Nat.mod_eq_of_lt hspl]; done)
+            | (simp [setRegF, retAddrOf, hsp, hS14, hx15S, hfsS, hdf', hmx', hx87', hfw', hx87, hfw, hmx, hdf, Nat.mod_eq_of_lt hspl]; done)
             | (simp only [setRegF, hlen9, List.getD_cons_zero, reduceIte]; apply BitVec.eq_of_toNat_eq; simp; omega)
             | rfl
         case fr => janus_frame
@@ -239,18 +239,18 @@ theorem formatBase10 (impl : List Amd64.Segment) :
         have hl : (Janus.Spec.Print.decimal U).length = (Janus.Spec.Print.decimal (U / 1000000000)).length + 9 := by
           rw [hc]; simp [digits9]
         refine Janus.Amd64.Tactic.ReachesRet.mono (ih (U / 1000000000) hDl _ (i - 9) (by omega) (by omega)
-          ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ (by omega)) ?_
-        all_goals try (dsimp only; simp [setRegF_apply, hS4, hS5, hS14, hx15S, hfsS, hdf', hmx', h1']; done)
+          ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ (by omega)) ?_
+        all_goals try (dsimp only; simp [setRegF_apply, hS4, hS5, hS14, hx15S, hfsS, hdf', hmx', hx87', hfw', hx87, hfw, hmx, hdf, h1']; done)
         all_goals try rfl
         all_goals try (dsimp only; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_sub]; omega)
         all_goals try janus_frame
         all_goals try (dsimp only; rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by unfold Apart at ap1; omega)]; exact hrd1)
         all_goals (first | (intro j hj; dsimp only; rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega)]; rw [hf'.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; exact h_sm0 j hj) | skip)
-        rintro s' ⟨junk, f, x, yh, m, rfl, hfm, hrb⟩
+        rintro s' ⟨junk, f, x, yh, m, zh, kr, rfl, hfm, hrb⟩
         unfold FbTail
         have hi' : i - (Janus.Spec.Print.decimal U).length = i - 9 - (Janus.Spec.Print.decimal (U / 1000000000)).length := by
           omega
-        refine ⟨junk, f, x, yh, m, by rw [hi'], hfm, ?_⟩
+        refine ⟨junk, f, x, yh, m, zh, kr, by rw [hi'], hfm, ?_⟩
         rw [hi', hrb, hc, List.append_assoc]
         rw [List.append_cancel_left_eq]
         dsimp only
@@ -259,7 +259,7 @@ theorem formatBase10 (impl : List Amd64.Segment) :
   -- the entry: the prologue, then the loop head with `i = 20`
   janus64_run until [segAddr P "internal/strconv.formatBase10" + 0x17]
   refine Janus.Amd64.Tactic.ReachesRet.mono (outer u _ 20 (length_decimal_le 19 u (by omega)) (Nat.le_refl _)
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ hul) ?_
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ hul) ?_
   all_goals try (dsimp only; simp [setRegF_apply, hsp, hx0, hx3', hx1', hx7]; done)
   all_goals try rfl
   all_goals try janus_frame
@@ -267,13 +267,13 @@ theorem formatBase10 (impl : List Amd64.Segment) :
     Janus.Arm64.Memory.readLE_writeLE_self]; exact Nat.mod_eq_of_lt (by have := (s.regs 5).isLt; simpa using this))
   all_goals try (intro j hj; dsimp only; rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by unfold Apart at ap4; omega),
       Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by unfold Apart at ap4; omega)]; exact h_sm j hj)
-  rintro s' ⟨junk, f, x, yh, m, rfl, hfm, hrb⟩
+  rintro s' ⟨junk, f, x, yh, m, zh, kr, rfl, hfm, hrb⟩
   have e4 : (s.regs 4).toNat = SP := by rw [hsp, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl]
   have e0 : (s.regs 0).toNat = a := by rw [hx0, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hx0l]
   have e7 : (s.regs 7).toNat = u := by rw [hx7, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hul]
   simp only [e4, e0, e7]
   have hl20 := length_decimal_le 19 u (by omega)
-  refine ⟨20 - (Janus.Spec.Print.decimal u).length, junk, f, x, yh, m, ?_, by omega, hfm, ?_⟩
+  refine ⟨20 - (Janus.Spec.Print.decimal u).length, junk, f, x, yh, m, zh, kr, ?_, by omega, hfm, ?_⟩
   · rfl
   · rw [show 20 - (20 - (Janus.Spec.Print.decimal u).length) = (Janus.Spec.Print.decimal u).length by omega] at hrb ⊢
     simp only [readBytes_zero, Nat.sub_self, List.append_nil] at hrb

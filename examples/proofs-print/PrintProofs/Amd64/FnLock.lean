@@ -32,8 +32,8 @@ theorem printlock_free (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (LS 
         Apart ((s.regs 14).toNat + 48) 8 (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264) 16 ∧
         Sep ((s.regs 4).toNat - (LS + 32)) (LS + 32 + 8) [((s.regs 14).toNat + 16, 8), ((s.regs 14).toNat + 48, 8),
           (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264, 16), (DL, 8)])
-      (fun s s' => ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
-        s' = retState64 s junk [] f x yh m ∧
+      (fun s s' => ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory) (zh : Nat → BitVec 256) (kr : Nat → W64),
+        s' = retState64 s junk [] f x yh m zh kr ∧
         MemFrame s.mem m (rt ++ [((s.regs 4).toNat - (LS + 32), (s.regs 4).toNat),
           (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264, s.mem.readLE ((s.regs 14).toNat + 48) 8 + 268),
           (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 279, s.mem.readLE ((s.regs 14).toNat + 48) 8 + 280)]) ∧
@@ -57,11 +57,11 @@ theorem printlock_free (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (LS 
   have hnz : (s.mem.readLE (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 279) 1 % 256 = 0) = True := by
     simp only [eq_iff_iff, iff_true]; omega
   janus64_run [zx8_chain, ofNat8_eq_zero_iff, hnz, gM, mLocks, mLocksOf, lockHeld] calls [hl]
-  rename_i _ _ _ _ _ m hfr hheld hlk
+  rename_i _ _ _ _ _ m _ _ hfr hheld hlk
   have e1 : m.readLE ((s.regs 14).toNat + 48) 8 = s.mem.readLE ((s.regs 14).toNat + 48) 8 := by
     janus64_simp
   rw [e1] at hlk
-  refine ⟨_, _, _, _, _, by ret_state64 [callRegs64_apply], by janus_frame, ?_, ?_, ?_⟩
+  refine ⟨_, _, _, _, _, _, _, by ret_state64 [callRegs64_apply], by janus_frame, ?_, ?_, ?_⟩
   all_goals dsimp only
   all_goals janus64_simp
   all_goals first | omega | exact hheld | exact hkey
@@ -93,8 +93,8 @@ theorem printunlock_last (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (L
         Apart ((s.regs 14).toNat + 48) 8 (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264) 16 ∧
         Sep ((s.regs 4).toNat - (LS + 24)) (LS + 24 + 8) [((s.regs 14).toNat + 16, 8), ((s.regs 14).toNat + 48, 8),
           (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 264, 16), (DL, 8)])
-      (fun s s' => ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
-        s' = retState64 s junk [] f x yh m ∧
+      (fun s s' => ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory) (zh : Nat → BitVec 256) (kr : Nat → W64),
+        s' = retState64 s junk [] f x yh m zh kr ∧
         MemFrame s.mem m (rt ++ [((s.regs 4).toNat - (LS + 24), (s.regs 4).toNat),
           (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 279, s.mem.readLE ((s.regs 14).toNat + 48) 8 + 280)]) ∧
         m.readLE (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 279) 1 = 0 ∧
@@ -117,11 +117,11 @@ theorem printunlock_last (impl : List Amd64.Segment) (rt : List (Nat × Nat)) (L
   have hnz : (s.mem.readLE (s.mem.readLE ((s.regs 14).toNat + 48) 8 + 279) 1 % 256 = 1) = True := by
     simp only [eq_iff_iff, iff_true]; omega
   janus64_run [zx8_chain, ofNat8_eq_zero_iff, hnz, gM, mLocks, mLocksOf, lockHeld] calls [hu]
-  rename_i _ _ _ _ _ m hfr hkey hlk
+  rename_i _ _ _ _ _ m _ _ hfr hkey hlk
   have e1 : m.readLE ((s.regs 14).toNat + 48) 8 = s.mem.readLE ((s.regs 14).toNat + 48) 8 := by
     janus64_simp
   rw [e1] at hlk
-  refine ⟨_, _, _, _, _, by ret_state64 [callRegs64_apply], by janus_frame, ?_, ?_⟩
+  refine ⟨_, _, _, _, _, _, _, by ret_state64 [callRegs64_apply], by janus_frame, ?_, ?_⟩
   all_goals dsimp only
   all_goals janus64_simp
   all_goals first | omega | exact hheld | exact hkey

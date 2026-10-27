@@ -42,7 +42,7 @@ theorem lock2_model (rt : List (Nat × Nat)) (stack : Nat) :
   have hd2 := hin2.disjoint hgo
   unfold Apart at hap
   janus_run
-  refine ⟨0, _, _, _, _, by ret_state, by janus_frame, ?_, ?_⟩
+  refine ⟨0, _, _, _, _, _, _, by ret_state, by janus_frame, ?_, ?_⟩
   all_goals janus_simp
   simp only [BitVec.toNat_setWidth, BitVec.toNat_add, BitVec.toNat_ofNat]
   omega
@@ -57,7 +57,7 @@ theorem unlock2_model (rt : List (Nat × Nat)) (stack : Nat) :
   have hd2 := hin2.disjoint hgo
   unfold Apart at hap
   janus_run
-  refine ⟨0, _, _, _, _, by ret_state, by janus_frame, ?_, ?_⟩
+  refine ⟨0, _, _, _, _, _, _, by ret_state, by janus_frame, ?_, ?_⟩
   all_goals janus_simp
   simp only [BitVec.toNat_setWidth, BitVec.toNat_sub, BitVec.toNat_ofNat]
   omega
@@ -75,8 +75,8 @@ theorem mm_loop (s0 : State) (h30a : (s0.regs 30).toNat % 4 = 0) (h30b : (s0.reg
       MemFrame s0.mem S.mem [(D, D + N)] →
       readBytes S.mem D (N - k) = readBytes s0.mem Sr (N - k) →
       ReachesRet linked (s0.regs regLR) S (fun s' =>
-        ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-          s' = retState s0 junk [] f v m ∧ MemFrame s0.mem m [(D, D + N)] ∧
+        ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+          s' = retStateX s0 junk [] f v m ex ep ∧ MemFrame s0.mem m [(D, D + N)] ∧
           readBytes m D N = readBytes s0.mem Sr N) := by
   intro k
   induction k with
@@ -88,7 +88,7 @@ theorem mm_loop (s0 : State) (h30a : (s0.regs 30).toNat % 4 = 0) (h30b : (s0.reg
     by_cases hk0 : k = 0
     · subst hk0
       janus_run
-      refine ⟨_, _, _, _, by ret_state [h18, h28, h29, hsp, hdz, htp, hfc, hfs], by janus_frame, ?_⟩
+      refine ⟨_, _, _, _, _, _, by ret_state [h18, h28, h29, hsp, hdz, htp, hfc, hfs], by janus_frame, ?_⟩
       simpa using hrb'
     · janus_run until [MM + 4]
       refine ih _ (by omega) (by omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
@@ -103,7 +103,7 @@ theorem memmove_model : MemmoveContract (P.link implAt) (P.contractAddr "runtime
   intro s hpc ⟨h30a, h30b, hD, hS, hwd, hrs, hdisj⟩
   by_cases hN : (s.regs 2).toNat = 0
   · janus_run
-    refine ⟨_, _, _, _, by ret_state, ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩
+    refine ⟨_, _, _, _, _, _, by ret_state, ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩
     simp [hN, readBytes]
   · have hx0 : s.regs 0 = BitVec.ofNat 64 ((s.regs 0).toNat + ((s.regs 2).toNat - (s.regs 2).toNat)) := by simp
     have hx1 : s.regs 1 = BitVec.ofNat 64 ((s.regs 1).toNat + ((s.regs 2).toNat - (s.regs 2).toNat)) := by simp

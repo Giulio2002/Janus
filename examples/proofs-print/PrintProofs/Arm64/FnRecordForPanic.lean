@@ -36,8 +36,8 @@ def RfpPre (s : State) : Prop :=
 /-- What `recordForPanic` guarantees: the return, memory changed only in its stack window, the
 M's `locks` and print count (restored), the backlog and its index (kept in range). -/
 @[reducible] def RfpPost (s s' : State) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-    s' = retState s junk [] f v m ∧
+  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat)) (ep : Nat → Bool),
+    s' = retStateX s junk [] f v m ex ep ∧
     MemFrame s.mem m [(s.sp.toNat - 104, s.sp.toNat - 8), (s.sp.toNat + 8, s.sp.toNat + 32),
       (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 264, s.mem.readLE ((s.regs 28).toNat + 48) 8 + 268),
       (s.mem.readLE ((s.regs 28).toNat + 48) 8 + 279, s.mem.readLE ((s.regs 28).toNat + 48) 8 + 280),
@@ -54,7 +54,7 @@ macro "rfp_post" : tactic => `(tactic| (
   unfold RfpPost
   simp only [hsp, hg, hx0, hx1, hx2, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl, Nat.mod_eq_of_lt hgl,
     hmpE, h_bi, h_bl]
-  refine ⟨_, _, _, _, by ret_state [hg, hg', h18, hsp, hsp', hdz, htp, hfc, hfs], by janus_frame, ?_, ?_, ?_⟩ <;>
+  refine ⟨_, _, _, _, _, _, by ret_state [hg, hg', h18, hsp, hsp', hdz, htp, hfc, hfs], by janus_frame, ?_, ?_, ?_⟩ <;>
     (janus_simp; first | janus_omega | (split <;> janus_omega) | skip)))
 
 set_option maxRecDepth 20000 in

@@ -71,13 +71,13 @@ theorem printbool_k (impl : List Amd64.Segment)
     apply Amd64.Print.ReturnsK.to_reaches
     apply printstring_k impl hmm E ret hret _ K (SP - 32) G MP FA 5
     case hk =>
-      rintro S' K' ⟨junk, f, x, yh, m, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
+      rintro S' K' ⟨junk, f, x, yh, m, zh, kr, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
       apply Amd64.Kernel.ReturnsK.of_reaches
       janus64_run [hmpE] until [segAddr P "runtime.printbool" + 0x3d]
       janus64_step
       apply Amd64.Print.ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, _, es, by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, callRegs64_apply, hx15], ?fr, ?_, ?_, ?_, rfl, ?_⟩
+      refine ⟨_, _, _, _, _, _, _, es, by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, callRegs64_apply, hx15], ?fr, ?_, ?_, ?_, rfl, ?_⟩
       case fr =>
         simp only [h_bi, h_bl] at hf ⊢
         refine MemFrame.trans (rs := [(SP - 232, SP)]) ?_ hf ?_
@@ -95,13 +95,13 @@ theorem printbool_k (impl : List Amd64.Segment)
     apply Amd64.Print.ReturnsK.to_reaches
     apply printstring_k impl hmm E ret hret _ K (SP - 32) G MP TR 4
     case hk =>
-      rintro S' K' ⟨junk, f, x, yh, m, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
+      rintro S' K' ⟨junk, f, x, yh, m, zh, kr, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
       apply Amd64.Kernel.ReturnsK.of_reaches
       janus64_run [hmpE] until [segAddr P "runtime.printbool" + 0x3d]
       janus64_step
       apply Amd64.Print.ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, _, es, by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, callRegs64_apply, hx15], ?fr, ?_, ?_, ?_, rfl, ?_⟩
+      refine ⟨_, _, _, _, _, _, _, es, by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, callRegs64_apply, hx15], ?fr, ?_, ?_, ?_, rfl, ?_⟩
       case fr =>
         simp only [h_bi, h_bl] at hf ⊢
         refine MemFrame.trans (rs := [(SP - 232, SP)]) ?_ hf ?_

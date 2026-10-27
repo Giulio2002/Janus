@@ -47,7 +47,7 @@ theorem lock2_model (rt : List (Nat × Nat)) (stack : Nat) :
   obtain ⟨hr1, hr2, hr3, hr4, hr5⟩ := hc
   unfold Apart at hap
   janus64_run
-  refine ⟨0, _, _, _, _, _, by ret_state64 [], by janus_frame, ?_, ?_⟩
+  refine ⟨0, _, _, _, _, _, _, _, by ret_state64 [], by janus_frame, ?_, ?_⟩
   all_goals (try unfold lockHeld)
   all_goals janus64_simp
   all_goals omega
@@ -65,7 +65,7 @@ theorem unlock2_model (rt : List (Nat × Nat)) (stack : Nat) :
   obtain ⟨hr1, hr2, hr3, hr4, hr5⟩ := hc
   unfold Apart at hap
   janus64_run
-  refine ⟨0, _, _, _, _, _, by ret_state64 [], by janus_frame, ?_, ?_⟩
+  refine ⟨0, _, _, _, _, _, _, _, by ret_state64 [], by janus_frame, ?_, ?_⟩
   all_goals (try unfold lockHeld)
   all_goals janus64_simp
   all_goals omega
@@ -79,30 +79,30 @@ theorem mm_loop (s0 : State) (hc : CallOK64 s0 0 0)
     ∀ k (S : State), 0 < k → k ≤ N →
       S.rip = BitVec.ofNat 64 (MM + 5) → S.regs 0 = BitVec.ofNat 64 (D + (N - k)) →
       S.regs 3 = BitVec.ofNat 64 (Sr + (N - k)) → S.regs 1 = BitVec.ofNat 64 k →
-      S.regs 4 = s0.regs 4 → S.fsBase = s0.fsBase → S.df = s0.df → S.mxcsr = s0.mxcsr →
+      S.regs 4 = s0.regs 4 → S.fsBase = s0.fsBase → S.df = s0.df → S.mxcsr = s0.mxcsr → S.x87 = s0.x87 → S.fpucw = s0.fpucw →
       S.xmm 15 = s0.xmm 15 → S.regs 5 = s0.regs 5 → S.regs 14 = s0.regs 14 →
       MemFrame s0.mem S.mem [(D, D + N)] →
       readBytes S.mem D (N - k) = readBytes s0.mem Sr (N - k) →
       ReachesRet linked (retAddrOf s0) S (fun s' =>
-        ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
-          s' = retState64 s0 junk [] f x yh m ∧ MemFrame s0.mem m [(D, D + N)] ∧
+        ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory) (zh : Nat → BitVec 256) (kr : Nat → W64),
+          s' = retState64 s0 junk [] f x yh m zh kr ∧ MemFrame s0.mem m [(D, D + N)] ∧
           readBytes m D N = readBytes s0.mem Sr N) := by
   obtain ⟨hr1, hr2, hr3, hr4, hr5⟩ := hc
   intro k
   induction k with
   | zero => intro S hk; omega
   | succ k ih =>
-    intro S _ hk hpc h0 h1 h2 h4 hfs hdf hmx hx15 h5 h14 hf hrb
+    intro S _ hk hpc h0 h1 h2 h4 hfs hdf hmx hx87 hfw hx15 h5 h14 hf hrb
     have hrb' := Janus.Print.Sat.readBytes_copy_step S.mem s0.mem D Sr (N - (k + 1)) hrb
     rw [show N - (k + 1) + 1 = N - k by omega] at hrb'
     by_cases hk0 : k = 0
     · subst hk0
       janus64_run
-      refine ⟨_, _, _, _, _, by ret_state64 [h4, h5, h14, hfs, hdf, hmx, hx15], by janus_frame, ?_⟩
+      refine ⟨_, _, _, _, _, _, _, by ret_state64 [h4, h5, h14, hfs, hdf, hmx, hx87, hfw, hx15], by janus_frame, ?_⟩
       have hb8 := (s0.mem.bytes (Sr + (N - 1))).isLt
       simpa [Nat.mod_eq_of_lt (show (s0.mem.bytes (Sr + (N - 1))).toNat < 18446744073709551616 by omega)] using hrb'
     · janus64_run until [MM + 5]
-      refine ih _ (by omega) (by omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+      refine ih _ (by omega) (by omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
       all_goals try (simp only [setRegF_apply]; first | assumption | rfl)
       all_goals try (apply BitVec.eq_of_toNat_eq; simp [setRegF]; omega)
       all_goals try janus_frame
@@ -118,11 +118,11 @@ theorem memmove_model : MemmoveContract (P.link implAt) (P.contractAddr "runtime
   obtain ⟨hr1, hr2, hr3, hr4, hr5⟩ := hc
   by_cases hN : (s.regs 1).toNat = 0
   · janus64_run
-    refine ⟨_, _, _, _, _, by ret_state64 [], ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩
+    refine ⟨_, _, _, _, _, _, _, by ret_state64 [], ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, ?_⟩
     simp [readBytes]
   · janus64_run until [MM + 5]
     refine mm_loop s hc' _ _ _ hD hS hwd hrs hdisj hsp (s.regs 1).toNat _ (by omega) (Nat.le_refl _)
-      ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+      ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
     all_goals (try dsimp only)
     all_goals first
       | rfl

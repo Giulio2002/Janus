@@ -11,8 +11,8 @@ namespace PrintFn
 `write(2, b)` per piece `b` of `bs` may append. -/
 @[reducible] def PPost (W : List (Nat × Nat)) (MP : Nat) (bs : List Bytes) (S : State) (K : Kern)
     (S' : State) (K' : Kern) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory) (es : List Event),
-    S' = retState64 S junk [] f x yh m ∧ MemFrame S.mem m W ∧
+  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory) (zh : Nat → BitVec 256) (kr : Nat → W64) (es : List Event),
+    S' = retState64 S junk [] f x yh m zh kr ∧ MemFrame S.mem m W ∧
     m.readLE (MP + 279) 1 = S.mem.readLE (MP + 279) 1 ∧
     m.readLE (MP + 264) 4 = S.mem.readLE (MP + 264) 4 ∧ m.readLE BI 8 < 512 ∧
     K' = K.appendTrace es ∧ Emits 2 bs es
@@ -91,7 +91,7 @@ theorem gwrite_k (impl : List Amd64.Segment)
   · janus64_step
     apply Amd64.Print.ReturnsK.to_reaches
     apply hk
-    refine ⟨_, _, _, _, _, [], by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl], by janus_frame, ?_, ?_, ?_,
+    refine ⟨_, _, _, _, _, _, _, [], by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl], by janus_frame, ?_, ?_, ?_,
       (Kern.appendTrace_nil K).symm, emits_fail _⟩
     all_goals (dsimp only; janus64_simp; try omega)
     rw [h_bi]; assumption
@@ -113,7 +113,7 @@ theorem gwrite_k (impl : List Amd64.Segment)
       janus64_step
       apply Amd64.Print.ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, _, [_], by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, setXmmF, hx15], by simp only [h_bi, h_bl]; janus_frame, ?_, ?_, ?_, rfl, ?_⟩
+      refine ⟨_, _, _, _, _, _, _, [_], by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, setXmmF, hx15], by simp only [h_bi, h_bl]; janus_frame, ?_, ?_, ?_, rfl, ?_⟩
       · dsimp only; janus64_simp
       · dsimp only; janus64_simp
       · dsimp only; janus64_simp; rw [h_bi]; assumption
@@ -126,7 +126,7 @@ theorem gwrite_k (impl : List Amd64.Segment)
       janus64_step
       apply Amd64.Print.ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, _, [], by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, setXmmF, hx15], by simp only [h_bi, h_bl]; janus_frame, ?_, ?_, ?_,
+      refine ⟨_, _, _, _, _, _, _, [], by ret_state64 [hsp, hg, Nat.mod_eq_of_lt hspl, setXmmF, hx15], by simp only [h_bi, h_bl]; janus_frame, ?_, ?_, ?_,
         (Kern.appendTrace_nil _).symm, emits_fail _⟩
       · dsimp only; janus64_simp
       · dsimp only; janus64_simp

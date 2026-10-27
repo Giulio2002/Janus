@@ -62,13 +62,13 @@ theorem printbool_k (impl : List Segment)
     apply ReturnsK.to_reaches
     apply printstring_k impl hmm E ret hret _ K (SP - 32) G MP FA 5
     case hk =>
-      rintro S' K' ⟨junk, f, v, m, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
+      rintro S' K' ⟨junk, f, v, m, ex, ep, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
       apply ReturnsK.of_reaches
       janus_run [hmpE] until [segAddr P "runtime.printbool" + 0x48]
       janus_step
       apply ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
+      refine ⟨_, _, _, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
       · janus_simp
       · janus_simp
       · janus_simp; assumption
@@ -78,13 +78,13 @@ theorem printbool_k (impl : List Segment)
     apply ReturnsK.to_reaches
     apply printstring_k impl hmm E ret hret _ K (SP - 32) G MP TR 4
     case hk =>
-      rintro S' K' ⟨junk, f, v, m, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
+      rintro S' K' ⟨junk, f, v, m, ex, ep, es, rfl, hf, h_rd_c, h_rd_l, hbi', rfl, hem⟩
       apply ReturnsK.of_reaches
       janus_run [hmpE] until [segAddr P "runtime.printbool" + 0x48]
       janus_step
       apply ReturnsK.to_reaches
       apply hk
-      refine ⟨_, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
+      refine ⟨_, _, _, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
       · janus_simp
       · janus_simp
       · janus_simp; assumption
