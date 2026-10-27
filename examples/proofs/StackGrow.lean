@@ -1369,7 +1369,6 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
       repeat rw [Memory.readLE_writeLE_of_disjoint (h := by omega)]
       rw [Memory.readLE_writeLE_self]
       try first | exact Nat.mod_eq_of_lt (s.regs 29).isLt | exact Nat.mod_eq_of_lt (by omega)
-  trace_state
   rcases hcase with ⟨hr0, hr1, hinvG⟩ | ⟨rs, hr0, hSh, hfresh, hinrt, hsep, hinvG⟩
   · -- nothing in the pool: a new stack
     have hr0' : r 0 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using hr0)
