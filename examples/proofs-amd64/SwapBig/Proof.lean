@@ -27,6 +27,12 @@ theorem half0 (m : Memory) (a : Nat) :
 theorem half8 (m : Memory) (a : Nat) :
     m.readLE a 16 / 256 ^ 8 % 18446744073709551616 = m.readLE (a + 8) 8 := half m a 8 8 rfl (by omega)
 
+/-- `half8` once the default simp set has dropped the redundant `% 2^64` of a 64-bit read. -/
+theorem half8' (m : Memory) (a : Nat) :
+    m.readLE a 16 / 18446744073709551616 = m.readLE (a + 8) 8 := by
+  have h := Janus.Arm64.Memory.readLE_div m a 16 8 (by omega)
+  simpa using h
+
 set_option maxHeartbeats 4000000 in
 theorem correctness (a b : BitVec 64) :
     Ensures Extracted.program Extracted.entry [a, b]
@@ -45,7 +51,7 @@ theorem correctness (a b : BitVec 64) :
   all_goals janus64_run
   all_goals intro i hi8; janus64_cases hi8
   all_goals janus64_simp
-  all_goals try simp only [Nat.sub_self, Nat.add_sub_cancel_left, half0, half8, and_self,
+  all_goals try simp only [Nat.sub_self, Nat.add_sub_cancel_left, half0, half8, half8', and_self,
     Nat.add_assoc, Nat.reduceAdd]
 
 end Proof
