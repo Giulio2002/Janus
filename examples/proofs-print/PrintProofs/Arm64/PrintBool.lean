@@ -25,7 +25,7 @@ abbrev P := Extracted.program
 
 /-- The code the proofs of `PrintProofs.Arm64.Fn*` and `MainBool` are about, `PrintCode.program`, has the
 same code as `Extracted.program` (the segments in another order): the guarantees transport. -/
-theorem equiv : Program.Equiv P PrintCode.program :=
+theorem equiv : Janus.Program.Equiv P PrintCode.program :=
   ⟨by decide +kernel, by decide +kernel, rfl, rfl, rfl, rfl⟩
 
 /-! ## The runtime's print globals (`.noptrbss`/`.bss`), at the addresses the code computes -/

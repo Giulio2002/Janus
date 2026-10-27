@@ -38,8 +38,10 @@ if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   go build -o bin/janus ./cmd/janus
   scripts/build-examples-print.sh >/dev/null
 fi
-# PrintProofs/<Isa>/Code.lean is the code of the binary (a stale file fails the run)
+# PrintProofs/<Isa>/Code.lean is the code of the binary, and the example modules are generated from
+# the Main modules (a stale file fails the run)
 python3 -I scripts/gen-print-code.py --check
+for i in arm64 amd64; do python3 -I scripts/gen-print-examples.py --check $i; done
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
 

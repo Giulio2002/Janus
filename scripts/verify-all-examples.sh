@@ -183,7 +183,7 @@ done
 prt=()
 for f in examples/proofs-print/PrintProofs/*/*.lean; do
   [ -f "$f" ] || continue
-  case "$(basename "$f")" in Fn*) continue;; esac
+  case "$(basename "$f" .lean)" in PrintX|PrintBool|PrintNeg|PrintStr) ;; *) continue;; esac
   isa="$(basename "$(dirname "$f")")"; prt+=("${isa,,}/$(basename "$f" .lean)")
 done
 for t in "${prt[@]}"; do
