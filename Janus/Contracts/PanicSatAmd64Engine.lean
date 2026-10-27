@@ -46,13 +46,14 @@ structure Inv0 (T : List FuncInfo) (m0 : Memory) (F : Frame) (items0 : List Item
   h112 : 112 ≤ F.sp
   acc : c.mem.accessible (F.sp - 112) 104 true = true
   r14 : c.regs 14 = g
-  r5 : c.regs 5 = bp
+  r5 : mode = .ret → c.regs 5 = bp
   x15 : c.xmm 15 = 0
   dfc : c.df = false
   spB : F.sp ≤ B ∨ B + 0x1000 + 112 ≤ F.sp
   fm : FrameMem c.mem F mode ph lr
   hlr : mode = .ret → lr < 2 ^ 47 ∧ c.mem.accessible (F.sp - 8) 8 false = true
   hbd : F.bound + 8 < 2 ^ 64
+  hbl : F.sp ≤ F.bound
   hres : F.resume < 2 ^ 47
   env : Env0 T c.mem
   pan : panics0 c.mem = ch
@@ -73,7 +74,7 @@ carries over, with the panic chain and the room the caller supplies. -/
 theorem Inv0.ret' {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List Item} {ds0 : List DeferRec}
     {mode : DeferMode} {g bp : W64} {lr : Nat} {e e' : State} {ch : List PanicRec} {rm ph : Nat}
     (hI : Inv0 T m0 F items0 ds0 mode g bp lr e ch rm ph) (he : (e.regs 4).toNat + 112 = F.sp)
-    (h14 : e'.regs 14 = g) (h5 : e'.regs 5 = bp) (hx : e'.xmm 15 = 0) (hdf : e'.df = false)
+    (h14 : e'.regs 14 = g) (h5 : mode = .ret → e'.regs 5 = bp) (hx : e'.xmm 15 = 0) (hdf : e'.df = false)
     (hag : Agrees e.mem e'.mem (((e.regs 4).toNat + 8, F.sp) :: frameKeep m0 F items0))
     (henv : Env0 T e'.mem) (hdef : defers0 e'.mem = defers0 e.mem) (hsav : saved0 e'.mem = saved0 e.mem)
     (ch' : List PanicRec) (rm' : Nat) (hpan : panics0 e'.mem = ch') (hroom : rm' ≤ room0 e'.mem) :
@@ -92,7 +93,7 @@ theorem Inv0.ret' {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List I
     curItems_congr hdef fun ba sa hF _ => ⟨hbyte ba sa hF, hsl ba sa hF⟩
   have hfm := hI.fm
   refine ⟨⟨hI.al, hI.hi, hI.h112, by rw [hag.accessible]; exact hI.acc, h14, h5, hx, hdf, hI.spB,
-    ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, hI.hbd, hI.hres, henv, hpan, hroom,
+    ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, hI.hbd, hI.hbl, hI.hres, henv, hpan, hroom,
     fun hm => (saved0_none_iff _).1 (by rw [hsav]; exact (saved0_none_iff _).2 (hI.sv hm)),
     by rw [hdef]; exact hI.chn, hI.agr.trans hagE, hI.fo,
     fun ba sa hF i hi => hI.bsub ba sa hF i (by rw [← hbyte ba sa hF]; exact hi),
@@ -113,7 +114,7 @@ theorem Inv0.ret' {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List I
 theorem Inv0.ret {T : List FuncInfo} {m0 : Memory} {F : Frame} {items0 : List Item} {ds0 : List DeferRec}
     {mode : DeferMode} {g bp : W64} {lr : Nat} {e e' : State} {ch : List PanicRec} {rm ph : Nat}
     (hI : Inv0 T m0 F items0 ds0 mode g bp lr e ch rm ph) (he : (e.regs 4).toNat + 112 = F.sp)
-    (hdr : DeferReturned (P0 T RPa) g F.sp (frameKeep m0 F items0) e e') (h5 : e'.regs 5 = bp)
+    (hdr : DeferReturned (P0 T RPa) g F.sp (frameKeep m0 F items0) e e') (h5 : mode = .ret → e'.regs 5 = bp)
     (ch' : List PanicRec) (rm' : Nat) (hpan : panics0 e'.mem = ch') (hroom : rm' ≤ room0 e'.mem) :
     Inv0 T m0 F items0 ds0 mode g bp lr e' ch' rm' ph ∧ curItems e'.mem F ph = curItems e.mem F ph := by
   obtain ⟨hpc, hsp, h14, hbp, hx, hdf, hag, henv, hdef, hsav, hrm⟩ := hdr
@@ -251,7 +252,7 @@ theorem FrameMem.congr {m m' : Memory} {F : Frame} {mode : DeferMode} {ph lr : N
 records, its stack window and the `deferBits` byte; the caller supplies what changed in the model's
 own bookkeeping. -/
 theorem Inv0.step (hI : Inv0 T m0 F items0 ds0 mode g bp lr c ch rm ph) {e : State} (ph' : Nat)
-    (h14 : e.regs 14 = g) (h5 : e.regs 5 = bp) (hx : e.xmm 15 = 0) (hdf : e.df = false)
+    (h14 : e.regs 14 = g) (h5 : mode = .ret → e.regs 5 = bp) (hx : e.xmm 15 = 0) (hdf : e.df = false)
     (hmf : MemFrame c.mem e.mem ([(B, B + 0x1000)] ++ rtWin (P0 T RPa) F ++ bitsWin F))
     (hfm : FrameMem e.mem F mode ph' lr)
     (henv : Env0 T e.mem) (hpan : panics0 e.mem = ch) (hroom : rm ≤ room0 e.mem)
@@ -261,7 +262,7 @@ theorem Inv0.step (hI : Inv0 T m0 F items0 ds0 mode g bp lr c ch rm ph) {e : Sta
     (hits : ∀ it ∈ curItems e.mem F ph', it ∈ items0) :
     Inv0 T m0 F items0 ds0 mode g bp lr e ch rm ph' := by
   refine ⟨hI.al, hI.hi, hI.h112, by rw [hmf.accessible]; exact hI.acc, h14, h5, hx, hdf, hI.spB, hfm,
-    fun hm => ⟨(hI.hlr hm).1, by rw [hmf.accessible]; exact (hI.hlr hm).2⟩, hI.hbd, hI.hres, henv, hpan,
+    fun hm => ⟨(hI.hlr hm).1, by rw [hmf.accessible]; exact (hI.hlr hm).2⟩, hI.hbd, hI.hbl, hI.hres, henv, hpan,
     hroom, hsv, hchn, ?_, hI.fo, hbs, hits⟩
   · refine hI.agr.trans (Agrees.of_memFrame hmf fun a ha => ?_)
     obtain ⟨r, hr, h1, h2⟩ := ha
@@ -288,5 +289,14 @@ structure CallSt (p : Program) (T : List FuncInfo) (m0 : Memory) (F : Frame) (it
     (∃ b ba sa, it.bits = some b ∧ F.openAt = some (ba, sa) ∧ ph ≠ 0 ∧ e.mem.readLE ba 1 = b)
 
 end steps
+
+end Janus.Contracts.PanicSatAmd64
+
+namespace Janus.Contracts.PanicSatAmd64
+
+/-- The model `U` the loop uses: `U0` and the state the inner panic's unwinding leaves
+(`X15 = 0`, direction flag clear). -/
+def U1 (u : Janus.Amd64.State) (g b : Nat) : Prop :=
+  U0 u g b ∧ u.xmm 15 = 0 ∧ u.df = false
 
 end Janus.Contracts.PanicSatAmd64

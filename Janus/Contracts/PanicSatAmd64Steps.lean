@@ -117,7 +117,7 @@ theorem step_open (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode g bp lr c 
     obtain ⟨rfl, rfl⟩ := hF'
     rw [hrdb, ← hb']
   · -- the invariant
-    refine hI.step ph (by rw [he14]; exact hI.r14) (by rw [he5]; exact hI.r5) (by rw [hex]; exact hI.x15)
+    refine hI.step ph (by rw [he14]; exact hI.r14) (fun hm => by rw [he5]; exact hI.r5 hm) (by rw [hex]; exact hI.x15)
       (by rw [hedf]; exact hI.dfc) hmf ?_ henvE hpan (by rw [hrm]; exact hI.room)
       (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
     · refine hfm.congr fun k hk => ?_
@@ -217,7 +217,7 @@ theorem step_rec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode g bp lr c c
     · rw [hpe, hread, hfnr]
     · simp only [P0_depth]; omega
   · intro b' ba' sa' hb'; simp at hb'
-  · refine hI.step 0 (by rw [he14]; exact hI.r14) (by rw [he5]; exact hI.r5) (by rw [hex]; exact hI.x15)
+  · refine hI.step 0 (by rw [he14]; exact hI.r14) (fun hm => by rw [he5]; exact hI.r5 hm) (by rw [hex]; exact hI.x15)
       (by rw [hedf]; exact hI.dfc) hmf ?_ henvE hpan (Nat.le_trans hI.room hrm)
       (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
     · refine hfm.congr fun k hk => ?_
@@ -300,7 +300,7 @@ theorem step_torec (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode g bp lr c
   have hcx : c2.xmm 15 = c.xmm 15 := by rw [hxmm2, hesx]
   have hcdf : c2.df = c.df := by rw [hdf2, hesdf]
   refine ⟨c2, ⟨⟨k1 + k2, hk1.trans hk2⟩, hpc2, by rw [hc4]; exact hL, ?_, hcur, hmf, hsv, ?_⟩⟩
-  · refine hI.step 0 (by rw [hc14]; exact hI.r14) (by rw [hc5]; exact hI.r5) (by rw [hcx]; exact hI.x15)
+  · refine hI.step 0 (by rw [hc14]; exact hI.r14) (fun hm => by rw [hc5]; exact hI.r5 hm) (by rw [hcx]; exact hI.x15)
       (by rw [hcdf]; exact hI.dfc) hmf ?_
       (by rw [hm2]; exact env0_of_outside hI.env hnb) hpan (by rw [hrm]; exact hI.room)
       (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
@@ -368,7 +368,7 @@ theorem step_pop (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode g bp lr c c
   have hcx : c2.xmm 15 = c.xmm 15 := by rw [hxmm2, hesx]
   have hcdf : c2.df = c.df := by rw [hdf2, hesdf]
   refine ⟨c2, ⟨⟨k1 + k2, hk1.trans hk2⟩, hpc2, by rw [hc4]; exact hL, ?_, hcur, hmf, hsv, ?_⟩⟩
-  · refine hI.step 0 (by rw [hc14]; exact hI.r14) (by rw [hc5]; exact hI.r5) (by rw [hcx]; exact hI.x15)
+  · refine hI.step 0 (by rw [hc14]; exact hI.r14) (fun hm => by rw [hc5]; exact hI.r5 hm) (by rw [hcx]; exact hI.x15)
       (by rw [hcdf]; exact hI.dfc) hmf ?_
       (by rw [hm2]; exact env0_popMem hI.env hnd) hpan (Nat.le_trans hI.room hrm)
       (fun hm => ?_) ?_ (fun ba' sa' hF' i hi => ?_) (fun it' hit' => ?_)
@@ -397,7 +397,7 @@ theorem add104_ofNat (x : W64) (n : Nat) (hx : x.toNat + 104 = n) (hn : n < 2 ^ 
 theorem step_fin (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode g bp lr c ch rm ph)
     (hL : (c.regs 4).toNat + 104 = F.sp) (hpc : c.rip = BitVec.ofNat 64 eLH) (hph : ph = 0)
     (hend : ndef c.mem = 0 ∨ ∃ j, ndef c.mem = j + 1 ∧ recSp c.mem j ≠ F.sp) :
-    ∃ k d, Janus.Amd64.Program.Steps p c k d ∧ d.mem = c.mem ∧ d.regs 5 = bp ∧ d.regs 14 = g ∧
+    ∃ k d, Janus.Amd64.Program.Steps p c k d ∧ d.mem = c.mem ∧ (mode = .ret → d.regs 5 = bp) ∧ d.regs 14 = g ∧
       d.xmm 15 = 0 ∧ d.df = false ∧
       (mode = .ret → d.rip = BitVec.ofNat 64 lr ∧ d.regs 4 = BitVec.ofNat 64 F.sp) ∧
       (mode ≠ .ret → d.rip = BitVec.ofNat 64 RPa ∧ d.regs 4 = BitVec.ofNat 64 (F.bound + 8)) := by
@@ -425,7 +425,7 @@ theorem step_fin (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode g bp lr c c
     exact ⟨h1, by rw [show (c.regs 4).toNat + 96 = F.sp - 8 by omega]; exact h2⟩
   have hseg := seg_fin c mode F.bound hpc hal hsp h8 hacc hI.env.acc hw32 hend' hw24 hw8 hI.hbd hlrb
   obtain ⟨k, d, hk, hpd, hd1, hd2, hd3, hd4, hd5, hd6⟩ := reachesRet_transfer hp hseg
-  refine ⟨k, d, hk, hd1, by rw [hd2]; exact hI.r5, by rw [hd3]; exact hI.r14, by rw [hd4]; exact hI.x15,
+  refine ⟨k, d, hk, hd1, (fun hm => by rw [hd2]; exact hI.r5 hm), by rw [hd3]; exact hI.r14, by rw [hd4]; exact hI.x15,
     by rw [hd5]; exact hI.dfc, fun hm => ?_, fun hm => ?_⟩
   · subst hm
     have h96 := hfm.w96 rfl
@@ -437,6 +437,187 @@ theorem step_fin (hp : EngineAt p) (hI : Inv0 T m0 F items0 ds0 mode g bp lr c c
   · have hne : ¬ mode = .ret := hm
     simp only [hne, reduceIte] at hpd hd6
     exact ⟨hpd, hd6⟩
+
+theorem step_recover (hp : EngineAt p) {u : State}
+    (hI : Inv0 T m0 F items0 ds0 .panic g bp lr u ch rm ph)
+    (hL : (u.regs 4).toNat + 104 = F.sp) (hpc : u.rip = BitVec.ofNat 64 RPa)
+    {k : Nat} (hk : npan u.mem = k + 1) (hk8 : k < 8) (hf : rd u.mem (panAt k + 24) / 2 % 2 = 1) :
+    ∃ k' d, Janus.Amd64.Program.Steps p u k' d ∧ d.rip = BitVec.ofNat 64 F.resume ∧
+      d.regs 4 = BitVec.ofNat 64 F.sp ∧ d.regs 5 = BitVec.ofNat 64 (F.bound - 8) ∧ d.regs 14 = g ∧
+      d.xmm 15 = 0 ∧ d.df = false ∧
+      MemFrame u.mem d.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F) ∧ Env0 T d.mem ∧
+      panics0 d.mem = (panics0 u.mem).dropWhile (·.start ≤ F.sp) ∧ defers0 d.mem = defers0 u.mem ∧
+      room0 u.mem ≤ room0 d.mem ∧
+      (((ph ≠ 0 ∧ ∃ ba sa, F.openAt = some (ba, sa) ∧ u.mem.readLE ba 1 ≠ 0) ∧ saved0 d.mem = F.openAt) ∨
+        (¬ (ph ≠ 0 ∧ ∃ ba sa, F.openAt = some (ba, sa) ∧ u.mem.readLE ba 1 ≠ 0) ∧ saved0 d.mem = none)) := by
+  obtain ⟨hal, hsp, h8⟩ := hI.spw hL
+  have hacc := hI.acc' hL
+  have hs : F.sp - 104 = (u.regs 4).toNat := by omega
+  have hfm := hI.fm
+  have hw0 := hfm.w0
+  have hw8 := hfm.w8
+  have hw16 := hfm.w16
+  have hw24 := hfm.w24
+  have hw32 := hfm.w32
+  rw [hs] at hw0 hw8 hw16 hw24 hw32
+  have hmode : u.mem.readLE ((u.regs 4).toNat + 24) 8 = 0 := by rw [hw24]; rfl
+  have hfsp64 : F.sp < 2 ^ 64 := by have := hI.hi; omega
+  have hspB : (u.regs 4).toNat + 104 ≤ B ∨ B + 0x1000 ≤ (u.regs 4).toNat := by
+    have := hI.spB; simp only [B] at *; omega
+  -- RP to DROP
+  have h1 := seg_rp_rec u k hpc hal hsp h8 hacc hI.env.acc hmode hk hk8 hf
+  obtain ⟨k1, d1, hk1, hpd1, hm1, hsm1, h81, h61⟩ := reachesRet_transfer hp h1
+  obtain ⟨hs4, hs5, hs14, hsx, hsdf⟩ := hsm1
+  rw [hw0] at h61
+  -- DROP
+  have h2 := seg_drop F.sp hfsp64 (k + 1) d1 hpd1 h81 h61 (by rw [hm1]; exact hk) (by omega)
+    (by rw [hm1]; exact hI.env.acc)
+  obtain ⟨k2, d2, hk2, hpd2, hsm2, h82, h62, hmf2, hnp2⟩ := reachesRet_transfer hp h2
+  obtain ⟨hs4', hs5', hs14', hsx', hsdf'⟩ := hsm2
+  rw [hm1] at hmf2 hnp2
+  have hfrOut : ∀ kk, kk + 8 ≤ 104 → Outside ((u.regs 4).toNat + kk) 8 [(B, B + 8)] := by
+    intro kk hk; simp only [outside_cons, outside_nil, and_true]; simp only [B] at *; omega
+  have hsp21 : d2.regs 4 = u.regs 4 := by rw [hs4', hs4]
+  have hrdf : ∀ kk, kk + 8 ≤ 104 → d2.mem.readLE ((u.regs 4).toNat + kk) 8 = u.mem.readLE ((u.regs 4).toNat + kk) 8 :=
+    fun kk hk => hmf2.readLE _ _ (hfrOut kk hk)
+  have hres : d2.mem.readLE ((d2.regs 4).toNat + 16) 8 = F.resume := by
+    rw [hsp21, hrdf 16 (by omega)]; exact hw16
+  have hbdd : d2.mem.readLE ((d2.regs 4).toNat + 8) 8 = F.bound := by
+    rw [hsp21, hrdf 8 (by omega)]; exact hw8
+  have hph' : d2.mem.readLE ((d2.regs 4).toNat + 32) 8 = ph := by
+    rw [hsp21, hrdf 32 (by omega)]; exact hw32
+  have hb256' : d2.mem.readLE (d2.mem.readLE ((d2.regs 4).toNat + 40) 8) 1 < 256 := by
+    have := Janus.Arm64.Memory.readLE_lt d2.mem (d2.mem.readLE ((d2.regs 4).toNat + 40) 8) 1; simpa using this
+  have hsa64 : d2.mem.readLE ((d2.regs 4).toNat + 48) 8 < 2 ^ 64 := by
+    have := Janus.Arm64.Memory.readLE_lt d2.mem ((d2.regs 4).toNat + 48) 8
+    have h : (256:Nat)^8 = 2^64 := by decide
+    omega
+  have hph64 : ph < 2 ^ 64 := by
+    rw [← hw32]
+    have := Janus.Arm64.Memory.readLE_lt u.mem ((u.regs 4).toNat + 32) 8
+    have h : (256:Nat)^8 = 2^64 := by decide
+    omega
+  have hbl := hI.hbl
+  have hd2sp : (d2.regs 4).toNat = (u.regs 4).toNat := by rw [hsp21]
+  have h3 := seg_dropped d2 F.sp F.bound F.resume ph (d2.mem.readLE ((d2.regs 4).toNat + 40) 8)
+    (d2.mem.readLE ((d2.regs 4).toNat + 48) 8) hpd2 h82 h62 (by show (d2.regs 4).toNat % 8 = 0; rw [hd2sp]; exact hal)
+    (by show (d2.regs 4).toNat + 104 ≤ 2 ^ 48; rw [hd2sp]; omega)
+    (by show 8 ≤ (d2.regs 4).toNat; rw [hd2sp]; omega)
+    (by show d2.mem.accessible ((d2.regs 4).toNat - 8) 104 true = true
+        rw [hmf2.accessible, hd2sp]; exact hI.acc' hL) (by rw [hmf2.accessible]; exact hI.env.acc)
+    hres hI.hres hbdd (by omega) (by have := hI.hbd; omega) hph' rfl rfl (fun hne => by
+      have hsome := hfm.hph hne
+      obtain ⟨⟨ba, sa⟩, hF⟩ : ∃ q, F.openAt = some q := by
+        cases hq : F.openAt with
+        | none => rw [hq] at hsome; simp at hsome
+        | some q => exact ⟨q, rfl⟩
+      obtain ⟨w40, w48⟩ := hfm.w40 ba sa hF
+      rw [hs] at w40 w48
+      have hba : d2.mem.readLE ((d2.regs 4).toNat + 40) 8 = ba := by rw [hsp21, hrdf 40 (by omega)]; exact w40
+      obtain ⟨b1, b2, b3, b4, -⟩ := hI.ba_facts hF
+      rw [hba]
+      refine ⟨b1, by rw [hmf2.accessible]; exact Janus.Arm64.Memory.accessible_weaken _ b2, ?_⟩
+      have := b3; simp only [outside_cons, outside_nil, and_true] at this; omega)
+    hfsp64 hph64 hsa64 hb256'
+    (by show (d2.regs 4).toNat + 104 ≤ B ∨ B + 0x1000 ≤ (d2.regs 4).toNat; rw [hd2sp]; exact hspB)
+  obtain ⟨k3, d3, hk3, hpd3, hq3⟩ := reachesRet_transfer hp h3
+  obtain ⟨h4_3, h5_3, h14_3, hx_3, hdf_3, hmf3, hsv3⟩ := hq3
+  have hsub3 : ∀ a n, Outside a n RecWords → Outside a n [(B, B + 8)] ∧ Outside a n [(B + 0x10, B + 0x28)] := by
+    intro a n h; simp only [RecWords, outside_cons, outside_nil, and_true] at h ⊢; exact h
+  have hfRec : MemFrame u.mem d3.mem RecWords := hmf2.trans hmf3 hsub3
+  have hnpd3 : npan d3.mem = npan d2.mem := by
+    simp only [npan]
+    exact hmf3.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; simp only [B]; omega)
+  have hnpd2 : npan d2.mem = dropCount u.mem F.sp (k + 1) := hnp2
+  have hD := dropCount_le u.mem F.sp (k + 1)
+  have hrec := recov_frame hI.env hfRec (by rw [hnpd3, hnpd2, hk]; exact hD)
+  have hmfr : MemFrame u.mem d3.mem ((P0 T RPa).priv ++ rtWin (P0 T RPa) F) := hfRec.mono fun a n h => by
+    simp only [outside_append, P0_priv, outside_cons, outside_nil, and_true, RecWords] at h ⊢
+    have := h.1; simp only [B] at *; omega
+  refine ⟨k1 + (k2 + k3), d3, hk1.trans (hk2.trans hk3), hpd3, h4_3, h5_3, ?_, ?_, ?_, hmfr, hrec.1, ?_, hrec.2.1,
+    hrec.2.2.1, ?_⟩
+  · rw [h14_3, hs14', hs14]; exact hI.r14
+  · rw [hx_3, hsx', hsx]; exact hI.x15
+  · rw [hdf_3, hsdf', hsdf]; exact hI.dfc
+  · rw [panics0_eq, panics0_eq, hnpd3, hnpd2, hk]
+    have hmin1 : min (k + 1) 8 = k + 1 := Nat.min_eq_left (by omega)
+    have hmin2 : min (dropCount u.mem F.sp (k + 1)) 8 = dropCount u.mem F.sp (k + 1) := Nat.min_eq_left (by omega)
+    rw [hmin1, hmin2, hrec.2.2.2 _ (by omega)]
+    exact panList_dropCount u.mem F.sp (k + 1)
+  · -- the saved state
+    by_cases hph0 : ph = 0
+    · right
+      refine ⟨fun h => h.1 hph0, ?_⟩
+      rw [saved0_eq]
+      have := hsv3; simp only [hph0, ne_eq, not_true_eq_false, false_and, if_false] at this
+      rw [this]; simp
+    · obtain ⟨⟨ba, sa⟩, hF⟩ : ∃ q, F.openAt = some q := by
+        have hsome := hfm.hph hph0
+        cases hq : F.openAt with
+        | none => rw [hq] at hsome; simp at hsome
+        | some q => exact ⟨q, rfl⟩
+      obtain ⟨w40, w48⟩ := hfm.w40 ba sa hF
+      rw [hs] at w40 w48
+      have hba : d2.mem.readLE ((d2.regs 4).toNat + 40) 8 = ba := by rw [hsp21, hrdf 40 (by omega)]; exact w40
+      have hsa : d2.mem.readLE ((d2.regs 4).toNat + 48) 8 = sa := by rw [hsp21, hrdf 48 (by omega)]; exact w48
+      obtain ⟨b1, b2, b3, b4, -⟩ := hI.ba_facts hF
+      have hbyte : d2.mem.readLE ba 1 = u.mem.readLE ba 1 := by
+        refine hmf2.readLE _ _ ?_
+        have := b3; simp only [outside_cons, outside_nil, and_true] at this ⊢; simp only [B] at *; omega
+      rw [hba, hsa, hbyte] at hsv3
+      by_cases hb0 : u.mem.readLE ba 1 = 0
+      · right
+        refine ⟨fun h => ?_, ?_⟩
+        · obtain ⟨-, ba', sa', hF', hne⟩ := h
+          rw [hF] at hF'; simp only [Option.some.injEq, Prod.mk.injEq] at hF'
+          obtain ⟨rfl, rfl⟩ := hF'; exact hne hb0
+        · rw [saved0_eq]
+          have := hsv3; simp only [hph0, hb0, ne_eq, not_false_eq_true, true_and, not_true_eq_false, if_false] at this
+          rw [this]; simp
+      · left
+        refine ⟨⟨hph0, ba, sa, hF, hb0⟩, ?_⟩
+        rw [saved0_eq]
+        have := hsv3; simp only [hph0, hb0, ne_eq, not_false_eq_true, and_self, if_true] at this
+        obtain ⟨t1, t2, t3⟩ := this
+        rw [if_neg (by rw [t1]; simp), t2, t3, hF]
+
+/-- From `RP` back to the loop head (a call that left the panic chain alone). -/
+theorem step_rp (hp : EngineAt p) {u : State} (hI : Inv0 T m0 F items0 ds0 mode g bp lr u ch rm ph)
+    (hL : (u.regs 4).toNat + 104 = F.sp) (hpc : u.rip = BitVec.ofNat 64 RPa)
+    (hcase : mode ≠ .panic ∨ ∃ r rs, ch = r :: rs ∧ r.recovered = false) :
+    ∃ k c', Janus.Amd64.Program.Steps p u k c' ∧ c'.rip = BitVec.ofNat 64 eLH ∧ c'.mem = u.mem ∧
+      (c'.regs 4).toNat + 104 = F.sp ∧ Inv0 T m0 F items0 ds0 mode g bp lr c' ch rm ph := by
+  obtain ⟨hal, hsp, h8⟩ := hI.spw hL
+  have hacc := hI.acc' hL
+  have hs : F.sp - 104 = (u.regs 4).toNat := by omega
+  have hfm := hI.fm
+  have hw24 := hfm.w24
+  rw [hs] at hw24
+  have hcase' : u.mem.readLE ((u.regs 4).toNat + 24) 8 ≠ 0 ∨ (u.mem.readLE ((u.regs 4).toNat + 24) 8 = 0 ∧
+      ∃ k, npan u.mem = k + 1 ∧ k < 8 ∧ rd u.mem (panAt k + 24) / 2 % 2 = 0) := by
+    cases mode with
+    | panic =>
+      right
+      refine ⟨by rw [hw24]; rfl, ?_⟩
+      rcases hcase with hc | ⟨r, rs, hch, hr⟩
+      · exact absurd rfl hc
+      · have := hI.pan; rw [hch] at this
+        obtain ⟨k, hk, hk8, hr', -⟩ := panics0_cons hI.env this
+        refine ⟨k, hk, hk8, ?_⟩
+        rw [hr', decPan_recovered] at hr
+        simp only [beq_eq_false_iff_ne, ne_eq] at hr
+        omega
+    | goexit => left; rw [hw24]; simp [modeCode]
+    | ret => left; rw [hw24]; simp [modeCode]
+  have hseg := seg_rp_lh u hpc hal hsp h8 hacc hI.env.acc hcase'
+  obtain ⟨k, c', hk, hpc', hm, hsm⟩ := reachesRet_transfer hp hseg
+  obtain ⟨hs4, hs5, hs14, hsx, hsdf⟩ := hsm
+  refine ⟨k, c', hk, hpc', hm, by rw [hs4]; exact hL, ?_⟩
+  exact hI.step (c := u) (e := c') ph (by rw [hs14]; exact hI.r14) (fun h => by rw [hs5]; exact hI.r5 h)
+    (by rw [hsx]; exact hI.x15) (by rw [hsdf]; exact hI.dfc) (by rw [hm]; exact MemFrame.refl _ _)
+    (by rw [hm]; exact hfm) (by rw [hm]; exact hI.env) (by rw [hm]; exact hI.pan) (by rw [hm]; exact hI.room)
+    (fun h => by rw [hm]; exact hI.sv h) (by rw [hm]; exact hI.chn) (fun ba sa hF => by rw [hm]; exact hI.bsub ba sa hF)
+    (fun it hit => by rw [hm] at hit; exact hI.its it hit)
 
 end steps
 
