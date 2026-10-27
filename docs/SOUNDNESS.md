@@ -1104,7 +1104,7 @@ None of these has a result the user-mode state determines. The design (WP-C,
 
 ## `print`/`println` (R8)
 
-The print examples (`examples/proofs-print`) execute the whole print path from the binary
+The print examples (`examples/proofs-print`, both ISAs) execute the whole print path from the binary
 (`printlock`, `printstring`, `printuint`/`formatBase10`, `printint`, `printbool`, `printnl`,
 `gwrite`, `recordForPanic`, `writeErrData`, `write`, `write1`) down to the `write(2, …)` system
 call. What is trusted beyond the model and the kernel contract (`Kernel.Effect .write`):
@@ -1112,8 +1112,8 @@ call. What is trusted beyond the model and the kernel contract (`Kernel.Effect .
 * **Three runtime contracts** (`Janus/Contracts/Print.lean`, `PrintAmd64.lean`): `lock2`/`unlock2`
   (the uncontended fast path of `debuglock`, the only path single-threaded code can take) and
   `memmove` (the copy into the crash backlog). They are hypotheses of every theorem, satisfiable
-  (`Janus.Contracts.PrintSat`: witness machine code proved to meet each, and a call state meeting
-  its precondition) and jointly satisfiable with each example's precondition
+  (`Janus.Contracts.PrintSat`, `PrintSatAmd64`: witness machine code proved to meet each, and a call
+  state meeting its precondition) and jointly satisfiable with each example's precondition
   (`Proof.Witness.nonvacuous`, with the witness code linked at the binary's contract addresses).
   Concurrency is out of scope: a second thread holding `debuglock` is not modelled.
 * **The output specification** `Janus.Spec.Print` (decimal integers, `fmtBool`, and the hex,
@@ -1124,6 +1124,11 @@ call. What is trusted beyond the model and the kernel contract (`Kernel.Effect .
   machine-code theorem yet**. Their only evidence is the differential test row RT-PRINT
   (`audit/rt-print`, in `audit/run-all.sh`): every format against the real Go 1.26 runtime on both
   ISAs, byte for byte (1,427,971 cases, 0 mismatches at the default corpus).
+* **The shared code.** The proofs about the print functions are about `PrintCode.program` (the
+  functions of all four examples as one program); each example proves that its own extraction has
+  the same code (`Program.Equiv`: segments up to order, none overlapping, same stubs, data and
+  contracts, by `decide`, checked by the kernel) and transports the theorems. Nothing here is
+  trusted: `PrintProofs.<Isa>.Equiv` is an ordinary proof about the framework's definitions.
 * **The runtime state** a print needs (`Print.PrintReady`, amd64 `Amd64.Print.PrintReady`) is a
   precondition. It covers not panicking-dependent paths (`m.dying = 0`), no `writebuf`, no
   `overrideWrite`, the M's print count 0 and the free `debuglock`, and the globals' and the M's
