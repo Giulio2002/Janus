@@ -65,6 +65,8 @@ for f in "${amd64[@]}"; do items+=("amd64:$f"); done
 for t in "${asm[@]}"; do items+=("asm:$t"); done
 rtmisc=()
 for f in examples/rtmisc/proofs/*/*.lean; do rtmisc+=("$(basename "$(dirname "$f")")/$(basename "$f" .lean)"); done
+# split examples: a Lake package per function, one module per runtime-call segment
+for f in examples/rtmisc/proofs/*/*/lakefile.toml; do d="$(dirname "$f")"; rtmisc+=("$(basename "$(dirname "$d")")/$(basename "$d")"); done
 for t in "${rtmisc[@]}"; do items+=("rtmisc:$t"); done
 
 tmp="$(mktemp -d)"
