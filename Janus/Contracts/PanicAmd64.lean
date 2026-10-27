@@ -179,8 +179,13 @@ theorem PanicPre.of_within {P : PanicRuntime} {s S : State} {frame above nargs :
 
 
 open Janus.Contracts.Panic (Frame Item DeferMode fnItems recItems openItems frameItems frameKeep bitsWin
-  FrameOK KeepsBut frameRecs_above recItems_above)
+  KeepsBut frameRecs_above recItems_above)
 open Janus.Spec (frameRest frameRecs recFns)
+
+/-- The frame's memory as the loop needs it (see `Janus.Contracts.Panic.FrameOK`), and every deferred
+call's code word a canonical user address (`< 2^47`), which the indirect call needs. -/
+def FrameOK (P : PanicRuntime) (m : Memory) (F : Frame) (items : List Item) : Prop :=
+  Janus.Contracts.Panic.FrameOK P m F items ∧ ∀ it ∈ items, m.readLE it.fn 8 < 2 ^ 47
 
 /-- The goroutine of an amd64 Go state: `R14`. -/
 abbrev gOf (s : State) : Nat := (s.regs 14).toNat

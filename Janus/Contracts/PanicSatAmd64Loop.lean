@@ -55,7 +55,7 @@ theorem seg_open (c : State) (ba sa b fn : Nat) (hpc : c.rip = BitVec.ofNat 64 e
     ReachesRet qE (BitVec.ofNat 64 (c.mem.readLE fn 8)) c (fun e =>
       e.mem = (c.mem.writeLE ba 1 (b % 2 ^ topBit b)).writeLE (rsp c - 8) 8 RPa ∧
       e.regs 4 = c.regs 4 - 8 ∧ e.regs 2 = BitVec.ofNat 64 fn ∧ e.regs 14 = c.regs 14 ∧
-      e.xmm 15 = c.xmm 15 ∧ e.df = c.df) := by
+      e.regs 5 = c.regs 5 ∧ e.xmm 15 = c.xmm 15 ∧ e.df = c.df) := by
   have hbl : b < 256 := by rw [← hb]; exact lt_of_lt_of_eq (Janus.Arm64.Memory.readLE_lt _ _ 1) (by decide)
   have hb0' := hb0
   obtain ⟨cr, cpc, cfl, cx, cm, cy, cfs, cdf, cmx⟩ := c
