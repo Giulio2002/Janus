@@ -193,7 +193,7 @@ structure World (impl : List Segment) (R : RtInv) (B : Nat) (n : BitVec 64) (L :
   wrt : LiveSep [(s.sp.toNat - 4288, s.sp.toNat + 24)] R.rt
   wL : LiveSep L [(s.sp.toNat - 4288, s.sp.toNat + 24)]
   rt0 : ∀ r ∈ R.rt, 0 < r.1
-  pin : s.sp.toNat - 4288 + (s.sp.toNat + 24 - (s.sp.toNat - 4288)) ≤ poolAddr ∨ poolAddr + 40 ≤ s.sp.toNat - 4288
+  pin : poolAddr + 40 ≤ s.sp.toNat - 4288 ∨ s.sp.toNat + 24 ≤ poolAddr
   sin : Outside stkType 16 R.rt
   sL : Outside stkType 16 [(s.sp.toNat - 4288, s.sp.toNat + 24)]
   u64 : Outside u64Type 16 R.rt
@@ -1279,8 +1279,8 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
         Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4288, s.sp.toNat + 24) :: R.rt) ∧
         LiveSep [(s.sp.toNat - 4288, s.sp.toNat + 24)] R.rt ∧
         LiveSep L [(s.sp.toNat - 4288, s.sp.toNat + 24)] ∧
-        (∀ r ∈ R.rt, 0 < r.1) ∧ InRanges poolAddr 16 R.rt ∧ InRanges (poolAddr + 16) 16 R.rt ∧
-        InRanges (poolAddr + 32) 8 R.rt ∧ Outside stkType 16 R.rt ∧
+        (∀ r ∈ R.rt, 0 < r.1) ∧ (poolAddr + 40 ≤ s.sp.toNat - 4288 ∨ s.sp.toNat + 24 ≤ poolAddr) ∧
+        Outside stkType 16 R.rt ∧
         Outside u64Type 16 R.rt ∧ s.mem.accessible wbFlag 4 false = true ∧
         R.ok (Extracted.program.contractAddr "sync.(*Pool).Get") [poolAddr] ∧
         R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [poolAddr] ∧
@@ -1295,7 +1295,7 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
         (∀ c, c ≤ B → c < n.toNat → 24 + 8 * growCap8 n.toNat c ≤ bud) ∧
         (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B))
       (fun s s' => Post R B n L bud s s') := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hpin2, hpin3, hsin, hu64,
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hsin, hu64,
     hfacc, hokG, hokP, hokN, hokGr, hokClr, hokWb, hnew0, hinv, hn40, hb24, hbud, hcapB⟩
   janus_intro hs
   janus_data hd [hw4]
@@ -1317,21 +1317,18 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
     rw [hU]; exact Memory.accessible_sub _ h_data2 (Or.inl rfl) (Nat.le_refl _) (by omega)
   have hu64W : Outside u64Type 16 [(s.sp.toNat - 4288, s.sp.toNat + 24)] := by
     rw [hU]; simp only [outside_cons, outside_nil, and_true]; omega
-  have hpinW : s.sp.toNat - 4288 + (s.sp.toNat + 24 - (s.sp.toNat - 4288)) ≤ poolAddr ∨
-      poolAddr + 40 ≤ s.sp.toNat - 4288 :=
-    pool_disjoint hpin hpin2 hpin3 (hwrt _ (List.mem_singleton_self _)) (by omega)
   have W : World impl R B n L bud ret s :=
     ⟨hget, hput, hnew, hgrow, hclr, hwb, hRty, hret, h_lr, hg1, hg2, hg3, hal, hb4, ha4, hw4, hgo, hwrt, hwL, hrt0,
-      hpinW, hsin, hsL, hu64, hfacc, hokG, hokP, hokN, hokGr, hokClr, hokWb, hnew0, hu64v, hu64acc, hu64W, hfl,
+      hpin, hsin, hsL, hu64, hfacc, hokG, hokP, hokN, hokGr, hokClr, hokWb, hnew0, hu64v, hu64acc, hu64W, hfl,
       hinv, hn40, hbud, hcapB, hB40⟩
   have W0 := W
   have hsp144 : (s.sp - 144#64).toNat = s.sp.toNat - 144 := by
     rw [BitVec.toNat_sub_of_le (by simp only [BitVec.le_def, BitVec.toNat_ofNat]; omega)]; rfl
-  rw [hP] at hpinW hokG hokP hnew0
+  rw [hP] at hpin hokG hokP hnew0
   have hstkacc : s.mem.accessible stkType 16 false = true := by
     rw [hSt]; exact Memory.accessible_sub _ h_data3 (Or.inl rfl) (Nat.le_refl _) (by omega)
   clear h_rodata h_data0 h_data1 h_data2 h_data3 h_data4 h_ddisj0_0 h_ddisj0_1 h_ddisj0_2 h_ddisj0_3 h_ddisj0_4
-  have hpw := hpinW
+  have hpw := hpin
   have hgo' := hgo
   simp only [outside_cons, outside_nil, and_true] at hgo'
   have key1 : ∀ S : State, MemFrame s.mem S.mem [(s.sp.toNat - 4288, s.sp.toNat + 24)] →
@@ -1492,3 +1489,339 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
       hS01 hF1 hLF1 hdrt hSh hfresh hinrt hL2W hinvG (Nat.le_refl _) (by omega)
 
 
+
+/-! ## Non-vacuity: every hypothesis of `correctness` holds together
+
+The live runtime `R` is the toy bump allocator of `Janus.Contracts.LiveToy` (`toyR`), whose
+runtime-owned ranges are the heap, the bump cell, the barrier buffer and the type descriptors
+`tys`: nothing else: `stack`'s descriptor and the barrier's enable word are data of the binary. Its `Get` returns nil, its `Put` drops its argument, its `newobject` and
+`growslice` hand out the next bytes of the heap, its `memclrNoHeapPointers` clears the 8 bytes of
+the one request and its barrier returns the buffer (code at the six contract addresses). With them
+`correctness` applies to a call state of `StackGrow(1)` with an empty live set (`nonvacuous`), and
+the call returns `1` with the guarantee (`returns`). -/
+
+namespace Witness
+
+open Janus.Contracts.Toy Janus.Contracts.LiveSat Janus.Contracts.PoolSat
+
+set_option maxRecDepth 100000
+
+def P : Nat := janus_eval% poolAddr
+def sT : Nat := janus_eval% stkType
+def pT : Nat := janus_eval% ptrType
+def uT : Nat := janus_eval% u64Type
+def wF : Nat := janus_eval% wbFlag
+def cG : Nat := janus_eval% (Extracted.program.contractAddr "sync.(*Pool).Get")
+def cP : Nat := janus_eval% (Extracted.program.contractAddr "sync.(*Pool).Put")
+def cN : Nat := janus_eval% (Extracted.program.contractAddr "runtime.newobject")
+def cGr : Nat := janus_eval% (Extracted.program.contractAddr "runtime.growslice")
+def cM : Nat := janus_eval% (Extracted.program.contractAddr "runtime.memclrNoHeapPointers")
+def cW : Nat := janus_eval% (Extracted.program.contractAddr "runtime.gcWriteBarrier2")
+
+theorem hP : poolAddr = P := by unfold P; decide
+theorem hTy : stkType = sT := by unfold sT; decide
+theorem hPT : ptrType = pT := by unfold pT; decide
+theorem aG : Extracted.program.contractAddr "sync.(*Pool).Get" = cG := by decide
+theorem aP : Extracted.program.contractAddr "sync.(*Pool).Put" = cP := by decide
+theorem aN : Extracted.program.contractAddr "runtime.newobject" = cN := by decide
+theorem hU : u64Type = uT := by unfold uT; decide
+theorem hWF : wbFlag = wF := by unfold wF; decide
+theorem aGr : Extracted.program.contractAddr "runtime.growslice" = cGr := by decide
+theorem aM : Extracted.program.contractAddr "runtime.memclrNoHeapPointers" = cM := by decide
+theorem aW : Extracted.program.contractAddr "runtime.gcWriteBarrier2" = cW := by decide
+
+/-- The toy runtime has no type descriptors of its own. -/
+def tys : Tys := []
+
+theorem tysOK : TysOK tys := fun t ht => absurd ht (by simp [tys])
+
+/-- The requests it serves. -/
+def ok : Nat → List Nat → Prop := fun a args =>
+  (a = cG ∧ args = [P]) ∨ (a = cP ∧ args = [P]) ∨ (a = cN ∧ args = [sT]) ∨
+  (a = cGr ∧ ∃ q et, args = [q, 1, 0, 1, et]) ∨ (a = cM ∧ ∃ q, args = [q, 8]) ∨ (a = cW ∧ args = [2])
+
+def R : RtInv := toyR tys ok
+
+/-- The model code at the three contract addresses. -/
+def implAt : List Segment :=
+  [{ name := "model.Get", base := cG, words := getCode },
+   { name := "model.Put", base := cP, words := putCode },
+   { name := "model.newobject", base := cN, words := newobjectCodeD },
+   { name := "model.growslice", base := cGr, words := growCode8 },
+   { name := "model.memclr", base := cM, words := memclrCode },
+   { name := "model.wb", base := cW, words := wbCode }]
+
+def linked : Program := Extracted.program.link implAt
+
+set_option maxRecDepth 20000 in
+theorem hget : PoolGetLive linked cG 4096 R pT (SliceObj 1) := by
+  refine poolGetLive_of_run tys ok linked cG pT (SliceObj 1) ?_
+  intro s hpc h30 h30'
+  change ReachesRet linked _ s _
+  janus_run
+  exact getFinal_eq s
+
+set_option maxRecDepth 20000 in
+theorem hput : PoolPutLive linked cP 4096 R pT (SliceObj 1) := by
+  refine poolPutLive_of_run tys tysOK ok linked cP pT (SliceObj 1) ?_
+  intro s hpc h30 h30'
+  change ReachesRet linked _ s _
+  janus_run
+  rfl
+
+set_option maxRecDepth 20000 in
+theorem hnew : NewobjectLiveContract linked cN 4096 R := by
+  intro L b s hpc pre
+  have hacB' := bump_acc pre.2.2.2.1
+  have ⟨⟨h30a, h30b, hq1, hq2, hq3, hq4, hq5⟩, hq6, hq7⟩ := pre.1
+  obtain ⟨hT1, hT2⟩ := hq6
+  change ReachesRet linked _ s _
+  janus_run
+  exact finish_newobjectD tysOK pre
+
+set_option maxRecDepth 20000 in
+theorem hgrow : GrowsliceLiveContract linked cGr 4096 R := by
+  intro L b s hpc pre
+  have hacB' := bump_acc pre.2.2.2.1
+  have ⟨⟨⟨h30a, h30b, _, _, _, _, _⟩, _, _, _, _, _, _, _⟩, _⟩ := pre.1
+  change ReachesRet linked _ s _
+  janus_run
+  refine finish_growslice8 tysOK ?_ pre
+  intro args h
+  simp only [R, toyR, ok] at h
+  rcases h with ⟨h1, -⟩ | ⟨h1, -⟩ | ⟨h1, -⟩ | ⟨-, h⟩ | ⟨h1, -⟩ | ⟨h1, -⟩
+  · exact absurd h1 (by decide)
+  · exact absurd h1 (by decide)
+  · exact absurd h1 (by decide)
+  · exact h
+  · exact absurd h1 (by decide)
+  · exact absurd h1 (by decide)
+
+set_option maxRecDepth 20000 in
+theorem hclr : MemclrNoHeapPointersLive linked cM 4096 R := by
+  intro L b s hpc pre
+  obtain ⟨⟨_, ⟨h30a, h30b, _, _, _, _, _⟩, _⟩, hLm, ⟨hd1, hd2, hd3, hd4⟩⟩ := pre
+  have h8 : (s.regs 1).toNat = 8 := by
+    have h := hLm.1
+    simp only [R, toyR, ok] at h
+    rcases h with ⟨h1, -⟩ | ⟨h1, -⟩ | ⟨h1, -⟩ | ⟨h1, -⟩ | ⟨-, d, h⟩ | ⟨h1, -⟩
+    · exact absurd h1 (by decide)
+    · exact absurd h1 (by decide)
+    · exact absurd h1 (by decide)
+    · exact absurd h1 (by decide)
+    · simp only [List.cons.injEq, and_true] at h; exact h.2
+    · exact absurd h1 (by decide)
+  rw [h8] at hd2 hd4
+  change ReachesRet linked _ s _
+  janus_run
+  rw [h8]
+  exact liveMemRet_store rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl hd4 hLm.2.1 (zeroed_store _ _)
+
+set_option maxRecDepth 20000 in
+theorem hwb : WbLiveContract linked cW 4096 R 2 := by
+  intro L b s hpc pre
+  have ⟨⟨h30a, h30b, _⟩, _⟩ := pre
+  change ReachesRet linked _ s _
+  janus_run
+  have h := wb_post (tys := tys) (ok := ok) tysOK (n := 2) (b := b) (L := L) (s := s) (by omega) pre.2.2.1 pre.2.2.2.2
+  simp only [wbFinal, wbRetX, apartAll_cons, apartAll_nil, and_true, show 8 * 2 = 16 from rfl] at h
+  exact h
+
+/-! ### The call state -/
+
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x100000
+def g0 : Nat := 0x200000
+
+def dataByte (a : Nat) : Option Byte :=
+  match Extracted.data.find? (fun d => decide (d.base ≤ a) && decide (a < d.base + d.bytes.length)) with
+  | some d => some (BitVec.ofNat 8 (d.bytes.getD (a - d.base) 0))
+  | none => none
+
+/-- The data segments, and the bump cell `HEAP`; zero elsewhere. -/
+def bytes0 (a : Nat) : Byte :=
+  match dataByte a with
+  | some v => v
+  | none => if a = BUMP + 3 then 0x10 else 0
+
+def mem0 : Memory :=
+  ⟨bytes0, [⟨sp0 - 4288, 4312, true⟩, ⟨g0, 0x100, false⟩, ⟨P, 40, true⟩, ⟨wF, 4, false⟩, ⟨BUMP, 0x200, true⟩,
+    ⟨HEAP, HSIZE, true⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then 1 else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩, mem := mem0 }
+
+theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (linked.withExit ret) Extracted.entry [1] s0 :=
+  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+
+set_option maxHeartbeats 16000000 in
+set_option maxRecDepth 100000 in
+theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
+  unfold Program.DataLoaded
+  decide
+
+theorem dataByte_none (a : Nat) (ha : 0x500000 ≤ a) : dataByte a = none := by
+  unfold dataByte
+  have : Extracted.data.find? (fun d => decide (d.base ≤ a) && decide (a < d.base + d.bytes.length)) = none := by
+    rw [List.find?_eq_none]
+    intro d hd
+    have h2 : d.base + d.bytes.length < 0x500000 := by
+      have : ∀ d' ∈ Extracted.data, d'.base + d'.bytes.length < 0x500000 := by decide
+      exact this d hd
+    simp only [Bool.not_eq_true, Bool.and_eq_false_iff, decide_eq_false_iff_not]
+    right; omega
+  rw [this]
+
+theorem inv0 : R.inv 0x400 [] (s0.regs 28).toNat (view R.rt [] s0.mem) := by
+  refine toyInv_init_tys tysOK (m := s0.mem) (b := 0x400) (g := (s0.regs 28).toNat) (by decide) (by decide)
+    (fun i hi hi' => ?_) (by decide) (by decide) (by decide) (fun t ht => absurd ht (by simp [tys]))
+  show bytes0 i = 0
+  simp only [bytes0, dataByte_none i (by simp only [HEAP] at hi; omega)]
+  rw [if_neg (by simp only [BUMP, HEAP] at *; omega)]
+
+theorem s0_sp : s0.sp.toNat = sp0 := by simp [s0, sp0]
+theorem s0_g : (s0.regs 28).toNat = g0 := by simp [s0, g0]
+
+theorem hP' : P = 1547840 := by unfold P; decide
+theorem hs' : sT = 738112 := by unfold sT; decide
+theorem hu' : uT = 701312 := by unfold uT; decide
+theorem hw' : wF = 1705440 := by unfold wF; decide
+
+set_option maxRecDepth 100000 in
+theorem pre : GuardOK s0 4288 ∧ StackOK s0 4288 24 ∧ Extracted.program.DataLoaded s0.mem ∧
+    Outside ((s0.regs 28).toNat + 16) 8 ((s0.sp.toNat - 4288, s0.sp.toNat + 24) :: R.rt) ∧
+    LiveSep [(s0.sp.toNat - 4288, s0.sp.toNat + 24)] R.rt ∧
+    LiveSep [] [(s0.sp.toNat - 4288, s0.sp.toNat + 24)] ∧
+    (∀ r ∈ R.rt, 0 < r.1) ∧ (poolAddr + 40 ≤ s0.sp.toNat - 4288 ∨ s0.sp.toNat + 24 ≤ poolAddr) ∧
+    Outside stkType 16 R.rt ∧ Outside u64Type 16 R.rt ∧ s0.mem.accessible wbFlag 4 false = true ∧
+    R.ok (Extracted.program.contractAddr "sync.(*Pool).Get") [poolAddr] ∧
+    R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [poolAddr] ∧
+    R.ok (Extracted.program.contractAddr "runtime.newobject") [stkType] ∧
+    (∀ p c, c ≤ 1 → c < (1#64).toNat →
+      R.ok (Extracted.program.contractAddr "runtime.growslice")
+        [p, (1#64).toNat, c, (1#64).toNat - c, u64Type]) ∧
+    (∀ q c, c ≤ 1 → c < (1#64).toNat →
+      R.ok (Extracted.program.contractAddr "runtime.memclrNoHeapPointers")
+        [q + 8 * c, 8 * ((1#64).toNat - c)]) ∧
+    R.ok (Extracted.program.contractAddr "runtime.gcWriteBarrier2") [2] ∧
+    s0.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
+    R.inv 0x400 [] (s0.regs 28).toNat (view R.rt [] s0.mem) ∧ (1#64).toNat < 2 ^ 40 ∧ 24 ≤ 0x400 ∧
+    (∀ c, c ≤ 1 → c < (1#64).toNat → 24 + 8 * growCap8 (1#64).toNat c ≤ 0x400) ∧
+    (∀ c, c ≤ 1 → c < (1#64).toNat → growCap8 (1#64).toNat c ≤ 1) := by
+  rw [hP, hTy, hU, hWF, aG, aP, aN, aGr, aM, aW, s0_sp, s0_g]
+  have hrt : R.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64)] := rfl
+  refine ⟨by unfold GuardOK; decide, by unfold StackOK; decide, dataLoaded, ?_, ?_, by simp, ?_, ?_, ?_, ?_,
+    ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, inv0, by decide, by decide, ?_, ?_⟩
+  · rw [hrt]; simp only [outside_cons, outside_nil, and_true, hs', hw', g0, sp0, HEAP, HEND, HSIZE, BUMP, WBUF]; decide
+  · rw [hrt]; simp only [liveSep_cons, liveSep_nil, outside_cons, outside_nil, and_true, hs', hw', g0, sp0, HEAP, HEND, HSIZE, BUMP, WBUF]; decide
+  · intro r hr
+    rw [hrt] at hr
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hr
+    rcases hr with rfl | rfl | rfl <;> simp only [HEAP, BUMP, WBUF] <;> omega
+  · simp only [sp0, hP']; decide
+  · rw [hs', hrt]; simp only [outside_cons, outside_nil, and_true, HEAP, HEND, HSIZE, BUMP, WBUF]; decide
+  · rw [hu', hrt]; simp only [outside_cons, outside_nil, and_true, HEAP, HEND, HSIZE, BUMP, WBUF]; decide
+  · rw [hw']; decide
+  · exact Or.inl ⟨rfl, rfl⟩
+  · exact Or.inr (Or.inl ⟨rfl, rfl⟩)
+  · exact Or.inr (Or.inr (Or.inl ⟨rfl, rfl⟩))
+  · intro p c hc hc'
+    have : c = 0 := by simp at hc'; omega
+    subst this
+    exact Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, p, uT, by simp⟩)))
+  · intro q c hc hc'
+    have : c = 0 := by simp at hc'; omega
+    subst this
+    exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨rfl, q, by simp⟩))))
+  · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr ⟨rfl, rfl⟩))))
+  · rw [hP']; unfold newOffset; decide
+  · intro c hc hc'
+    have : c = 0 := by simp at hc'; omega
+    subst this
+    decide
+  · intro c hc hc'
+    have : c = 0 := by simp at hc'; omega
+    subst this
+    decide
+
+theorem hfl' : ∀ b L g v, R.inv b L g v → Outside wbFlag 4 L := by
+  intro b L g v h
+  obtain ⟨p, -, -, -, -, hL, -⟩ := h
+  rw [hWF]
+  exact outside_live hL (by simp only [HEAP, hw']; omega)
+
+/-- All hypotheses of `correctness` hold together. -/
+theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (B : Nat) (ret : Nat) (s : State)
+    (L : List (Nat × Nat)) (bud : Nat) (n : BitVec 64),
+    B < 2 ^ 40 ∧
+    (PoolGetLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Get") 4096 R
+      ptrType (SliceObj B) ∧
+    PoolPutLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Put") 4096 R
+      ptrType (SliceObj B) ∧
+    NewobjectLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.newobject")
+      4096 R ∧
+    GrowsliceLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.growslice")
+      4096 R ∧
+    MemclrNoHeapPointersLive (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") 4096 R ∧
+    WbLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gcWriteBarrier2")
+      4096 R 2) ∧
+    (∀ b L g v, R.inv b L g v → Outside wbFlag 4 L) ∧
+    (RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s) ∧
+    ((GuardOK s 4288 ∧ StackOK s 4288 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4288, s.sp.toNat + 24) :: R.rt) ∧
+      LiveSep [(s.sp.toNat - 4288, s.sp.toNat + 24)] R.rt ∧
+      LiveSep L [(s.sp.toNat - 4288, s.sp.toNat + 24)] ∧
+      (∀ r ∈ R.rt, 0 < r.1) ∧ (poolAddr + 40 ≤ s.sp.toNat - 4288 ∨ s.sp.toNat + 24 ≤ poolAddr)) ∧
+      (Outside stkType 16 R.rt ∧ Outside u64Type 16 R.rt ∧
+      s.mem.accessible wbFlag 4 false = true ∧
+      R.ok (Extracted.program.contractAddr "sync.(*Pool).Get") [poolAddr] ∧
+      R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [poolAddr] ∧
+      R.ok (Extracted.program.contractAddr "runtime.newobject") [stkType] ∧
+      (∀ p c, c ≤ B → c < n.toNat →
+        R.ok (Extracted.program.contractAddr "runtime.growslice") [p, n.toNat, c, n.toNat - c, u64Type])) ∧
+      ((∀ q c, c ≤ B → c < n.toNat →
+        R.ok (Extracted.program.contractAddr "runtime.memclrNoHeapPointers")
+          [q + 8 * c, 8 * (n.toNat - c)]) ∧
+      R.ok (Extracted.program.contractAddr "runtime.gcWriteBarrier2") [2] ∧
+      s.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
+      R.inv bud L (s.regs 28).toNat (view R.rt L s.mem) ∧ n.toNat < 2 ^ 40 ∧ 24 ≤ bud ∧
+      (∀ c, c ≤ B → c < n.toNat → 24 + 8 * growCap8 n.toNat c ≤ bud) ∧
+      (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B))) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22,
+    a23⟩ := pre
+  refine ⟨implAt, R, 1, ret, s0, [], 0x400, 1, by decide, ⟨?_, ?_, ?_, ?_, ?_, ?_⟩, hfl', ⟨hret, setup⟩,
+    ⟨⟨a1, a2, a3, a4, a5, a6, a7, a8⟩, ⟨a9, a10, a11, a12, a13, a14, a15⟩,
+      ⟨a16, a17, a18, a19, a20, a21, a22, a23⟩⟩⟩
+  · rw [aG, hPT]; exact hget
+  · rw [aP, hPT]; exact hput
+  · rw [aN]; exact hnew
+  · rw [aGr]; exact hgrow
+  · rw [aM]; exact hclr
+  · rw [aW]; exact hwb
+
+/-- So the guarantee is reached: `StackGrow(1)` returns `1`, the capacity of the grown stack, with the
+runtime's invariant again for the live set extended by `ex` (the abandoned array). -/
+theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun s' =>
+    ABIReturn s0 s' ∧ (s'.regs 0).toNat = 1 ∧
+      ∃ xs b', FreshFrom xs [] ∧ b' ≤ 0x400 ∧
+        MemFrame s0.mem s'.mem (R.rt ++ [(s0.sp.toNat - 4288, s0.sp.toNat + 24)]) ∧
+        LiveFrame s0.mem s'.mem [] [] ∧ R.inv b' ([] ++ xs) (s0.regs 28).toNat (view R.rt ([] ++ xs) s'.mem) := by
+  have h := correctness implAt R 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+    (by rw [aN]; exact hnew) (by rw [aGr]; exact hgrow) (by rw [aM]; exact hclr) (by rw [aW]; exact hwb)
+    hfl' 1 [] 0x400 ret hret s0 setup pre
+  refine Returns.mono h fun s' ⟨hab, cap0, hc, hres, xs, b', hfr, hb, hF, hLF, hinv⟩ => ⟨hab, ?_, xs, b', hfr, hb, hF, hLF, hinv⟩
+  have : cap0 = 0 ∨ cap0 = 1 := by omega
+  rcases this with rfl | rfl
+  · rw [hres]; simp; decide
+  · rw [hres]; simp
+
+end Witness
+
+end Proof
