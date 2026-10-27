@@ -138,3 +138,49 @@ theorem foo (R : RtInv) (h : TypedMemmoveLive p addr d R) ...
 * `Stub` kinds `syscall` and `trap`: a `match` over the stub kind needs those alternatives
   (`| syscall => ... | trap => ...`).
 * Regenerate extractions: `identity.json` records `globals`, `frames`, `buildModes` when used.
+
+## 7. Tactic changes in wave 2
+
+`janus_run`, `janus_simp`, `janus64_run`, `janus64_simp` (and the `janus_arith` / `omega` step they
+close with) use stronger default simp sets (agent/tac). Proofs that verified before can break in
+three ways: a step that is now redundant ("No goals to be solved"), a `rw` whose pattern arrives
+already normalised, and, rarely, a timeout.
+
+**What is new in the default sets** (`Janus/Tactic/Basic.lean`, `Janus/Amd64/Tactic.lean`):
+
+* Read bounds, in `janus_exec`/`janus_post` (and the `janus64_` sets):
+  `readLE_lt_8 : m.readLE a 8 < 2^64`, `readLE_lt_4`, `readLE_lt_2`, `readLE_lt_1` (amd64 also
+  `readLE_lt_16`). A hypothesis `h : m.readLE a 8 < 2^64` you stated by hand is now closed by the
+  simp set.
+* Side-condition discharge: a conditional simp lemma (`shr_ofNat : a < 2^64 → …`) whose condition
+  the tactic discharger cannot prove is simplified once more with the run's own simp set
+  (`withRecursiveDisch`, depth bounded), so the lemma fires where it used to be left unrewritten.
+  Passing the discharging fact in the `janus_run [ … ]` list is no longer needed.
+* Carry normal forms (`janus_exec high`): `BitVec.ofNat 64 (b.toNat * n)` and `… (n * b.toNat)`
+  become `if b then BitVec.ofNat 64 n else 0#64` (`ofNat_toNat_mul`, `ofNat_mul_toNat`), and
+  `BitVec.ofNat 64 (x * 18446744073709551615)` becomes `-BitVec.ofNat 64 x`
+  (`ofNat_mul_allones`, `ofNat_allones_mul`). A goal that used to contain `c.toNat * 2^64-1` now
+  shows the `if`/negation form.
+* `janus_arith`'s closing step is `first | omega | (janus_decide_split; all_goals omega)`: it case
+  splits on up to five `decide p` in the goal and hypotheses.
+* `writeLE_comm` (writes to disjoint ranges commute) exists but is **not** in the default sets;
+  pass it as `janus_run [writeLE_comm]` to sort a write chain.
+
+**Fix patterns.**
+
+```lean
+-- 1. "No goals to be solved": a step after `janus_run`/`janus_simp` is redundant. Drop it, or make it optional.
+janus_run
+simp only [foo]          -- error: no goals          →  delete, or  `try simp only [foo]`
+all_goals simp only [Nat.sub_self, half0]   →   all_goals try simp only [Nat.sub_self, half0]
+-- 2. `rw` fails because the term arrives normalised: use `simp only` (matches up to the normal form)
+rw [BitVec.toNat_ofNat]  →  simp only [BitVec.toNat_ofNat]
+-- or state the hypothesis in the normalised form, e.g. `if c then x else 0#64` / `-BitVec.ofNat 64 x`
+-- instead of `BitVec.ofNat 64 (c.toNat * x)`.
+-- 3. A `have : m.readLE a 8 < 2^64 := …` that is now unused: delete it (it is a simp lemma).
+-- 4. A timeout in a proof that is now slower: pass the old shape explicitly, `janus_run [-readLE_lt_8]`
+--    (simp's `-lemma` erases a default), or split the run with `until [pc]`.
+```
+
+All in-repo examples were re-verified under these sets (the wave-2 gate); the ones that needed
+edits (`SwapBig` amd64: `all_goals try simp only …`) show the pattern.
