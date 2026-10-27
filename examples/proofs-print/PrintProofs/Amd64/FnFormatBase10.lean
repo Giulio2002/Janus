@@ -1,138 +1,9 @@
-import PrintProofs.Amd64.FnHead
+import PrintProofs.Amd64.FnFmtInner
 
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Contracts Janus.Kernel
   Janus.Amd64.Kernel Janus.Print Janus.Amd64.Print
 
 namespace PrintFn
-
-/-! ## `internal/strconv.formatBase10` -/
-
-/-- The table `internal/strconv.smalls` ("00010203…99", `LEAQ` in `formatBase10`). -/
-def SM : Nat := ripTarget P (segAddr P "internal/strconv.formatBase10" + 0x91)
-
-/-- Byte `j` of `smalls`: the two decimal digits of every number below 100, in order. -/
-def smallsByte (j : Nat) : Nat := if j % 2 = 0 then 48 + j / 20 else 48 + j / 2 % 10
-
-theorem smalls_data : ∀ j, j < 200 → dataRead P (SM + j) 1 = some (smallsByte j) := by
-  janus_eval_nat h : SM
-  rw [h]
-  have hall : (List.range 200).all (fun j => dataRead P (SM + j) 1 == some (smallsByte j)) = true := by
-    rw [h]; decide +kernel
-  intro j hj
-  have := List.all_eq_true.mp hall j (List.mem_range.mpr hj)
-  rw [h] at this
-  simpa using this
-
-theorem smalls_hi (k : Nat) (hk : k < 100) :
-    BitVec.ofNat 8 (smallsByte (k * 2)) = Janus.Spec.Print.digit (k / 10) := by
-  unfold smallsByte Janus.Spec.Print.digit
-  rw [if_pos (by omega)]; congr 1; omega
-
-theorem smalls_lo (k : Nat) (hk : k < 100) :
-    BitVec.ofNat 8 (smallsByte (k * 2 + 1)) = Janus.Spec.Print.digit (k % 10) := by
-  unfold smallsByte Janus.Spec.Print.digit
-  rw [if_neg (by omega)]; congr 1; omega
-
-theorem smallsByte_mod256 (j : Nat) (h : j < 200) : smallsByte j % 256 = smallsByte j := by
-  unfold smallsByte; split <;> omega
-
-/-! The magic multiplications of `formatBase10` (at the bit-vector level: `simp` with
-`BitVec.toNat_mul` and `BitVec.toNat_ofNat` does not terminate on these products). -/
-
-theorem mul_lsr37 (y : Nat) (h : y < 2 ^ 31) :
-    (BitVec.ofNat 64 y * 2748779070#64) >>> 37 = BitVec.ofNat 64 (y / 50) := by
-  apply BitVec.eq_of_toNat_eq
-  rw [BitVec.toNat_ushiftRight, BitVec.toNat_mul, BitVec.toNat_ofNat, BitVec.toNat_ofNat,
-    Nat.shiftRight_eq_div_pow, BitVec.toNat_ofNat,
-    Nat.mod_eq_of_lt (show y < 2 ^ 64 by omega), Nat.mod_eq_of_lt (show 2748779070 < 2 ^ 64 by decide),
-    Nat.mod_eq_of_lt (show y * 2748779070 < 2 ^ 64 by omega), Nat.mod_eq_of_lt (show y / 50 < 2 ^ 64 by omega)]
-  exact magic50 y h
-
-/-- `MOVL` (zero-extend the low 32 bits), `SHRQ $1`, `IMULQ $0xa3d70a3e`, `SHRQ $37`: `x / 100`. -/
-theorem div100_magic64 (x : Nat) (h : x < 2 ^ 32) :
-    (BitVec.setWidth 64 (BitVec.setWidth 32 (BitVec.ofNat 64 x)) >>> 1 * 2748779070#64) >>> 37 =
-      BitVec.ofNat 64 (x / 100) := by
-  have e : BitVec.setWidth 64 (BitVec.setWidth 32 (BitVec.ofNat 64 x)) >>> 1 = BitVec.ofNat 64 (x / 2) := by
-    apply BitVec.eq_of_toNat_eq
-    simp only [BitVec.toNat_ushiftRight, BitVec.toNat_setWidth, BitVec.toNat_ofNat, Nat.shiftRight_eq_div_pow]
-    omega
-  rw [e, mul_lsr37 (x / 2) (by omega)]
-  congr 1; omega
-
-/-- `SHRQ $1`, `MULQ` by `0x89705f4136b4a598` (the high half), `SHRQ $28`: `U / 10^9`. -/
-theorem div1e9_64 (U : Nat) (hU : U < 2 ^ 64) :
-    BitVec.ofNat 64 (9903520314283042200 * (BitVec.ofNat 64 U >>> 1).toNat / 18446744073709551616) >>> 28 =
-      BitVec.ofNat 64 (U / 1000000000) := by
-  have e1 : (BitVec.ofNat 64 U >>> 1).toNat = U / 2 := by
-    simp [BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow, Nat.mod_eq_of_lt hU]
-  apply BitVec.eq_of_toNat_eq
-  rw [BitVec.toNat_ushiftRight, e1, BitVec.toNat_ofNat, BitVec.toNat_ofNat, Nat.shiftRight_eq_div_pow,
-    Nat.mod_eq_of_lt (show 9903520314283042200 * (U / 2) / 18446744073709551616 < 2 ^ 64 by omega),
-    Nat.mod_eq_of_lt (show U / 1000000000 < 2 ^ 64 by omega), Nat.div_div_eq_div_mul,
-    show (18446744073709551616 : Nat) * 2 ^ 28 = 2 ^ 92 by decide, Nat.mul_comm, magic5e8 (U / 2) (by omega)]
-  omega
-
-/-- `IMULQ $10^9` and `SUBQ`: `U % 10^9`. -/
-theorem mod1e9_64 (U : Nat) (hU : U < 2 ^ 64) :
-    BitVec.ofNat 64 U - BitVec.ofNat 64 (U / 1000000000) * 1000000000#64 = BitVec.ofNat 64 (U % 1000000000) := by
-  rw [show (1000000000#64 : BitVec 64) = BitVec.ofNat 64 1000000000 from rfl, BitVec.ofNat_mul_ofNat]
-  apply BitVec.eq_of_toNat_eq
-  rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat, BitVec.toNat_ofNat]
-  omega
-
-/-- The remainder after `/ 100` (32-bit `IMULL $100`, `SUBL`). -/
-theorem mod100_32 (x : Nat) (h : x < 2 ^ 32) :
-    (4294967296 - x / 100 * 100 % 4294967296 + x % 4294967296) % 4294967296 = x % 100 := by
-  omega
-
-theorem mul100_32 (q : Nat) (h : q * 100 < 2 ^ 32) :
-    (BitVec.setWidth 32 (BitVec.ofNat 64 q) * 100#32).toNat = q * 100 := by
-  simp only [BitVec.toNat_mul, BitVec.toNat_setWidth, BitVec.toNat_ofNat]
-  omega
-
-/-- The nine bytes of a chunk, written at any addresses that are `base + k` (the code computes them
-modulo `2^64`), read back. -/
-theorem chunk_bytes' (m : Memory) (base n q0 q1 q2 q3 q4 q5 q6 q7 q8 w0 w1 w2 w3 w4 w5 w6 w7 w8 : Nat)
-    (h0 : q0 = base) (h1 : q1 = base + 1) (h2 : q2 = base + 2) (h3 : q3 = base + 3) (h4 : q4 = base + 4)
-    (h5 : q5 = base + 5) (h6 : q6 = base + 6) (h7 : q7 = base + 7) (h8 : q8 = base + 8) :
-    readBytes (((((((((m.writeLE q7 1 w7).writeLE q8 1 w8).writeLE q5 1 w5).writeLE q6 1 w6).writeLE
-      q3 1 w3).writeLE q4 1 w4).writeLE q1 1 w1).writeLE q2 1 w2).writeLE q0 1 w0) base (n + 9) =
-      [BitVec.ofNat 8 w0, BitVec.ofNat 8 w1, BitVec.ofNat 8 w2, BitVec.ofNat 8 w3, BitVec.ofNat 8 w4,
-        BitVec.ofNat 8 w5, BitVec.ofNat 8 w6, BitVec.ofNat 8 w7, BitVec.ofNat 8 w8] ++
-        readBytes m (base + 9) n := by
-  subst h0 h1 h2 h3 h4 h5 h6 h7 h8
-  exact chunk_bytes m base n w0 w1 w2 w3 w4 w5 w6 w7 w8
-
-theorem two_mul32 (x : Nat) (h : x < 2 ^ 31) : (x + x) % 4294967296 = x * 2 := by omega
-theorem two_mul32' (x : Nat) (h : x < 2 ^ 31) : ((x + x) % 4294967296 + 1) % 4294967296 = x * 2 + 1 := by omega
-
-theorem ofNat8_smallsByte_mod (j : Nat) (h : j < 200) :
-    BitVec.ofNat 8 (smallsByte j % 256) = BitVec.ofNat 8 (smallsByte j) := by
-  rw [smallsByte_mod256 j h]
-
-set_option hygiene false in
-/-- The nine digit bytes of a chunk (`chunk_bytes'`) against `digits9`. -/
-macro "chunk_digits64" : tactic => `(tactic| (
-  rw [chunk_bytes' _ (a + (i - 9)) (20 - i) _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
-    (by omega) (by omega) (by omega) (by omega) (by omega) (by omega) (by omega) (by omega) (by omega)]
-  rw [show a + (i - 9) + 9 = a + i by omega]
-  rw [List.append_cancel_right_eq]
-  simp (disch := omega) only [h_sm', two_mul32, two_mul32', ofNat8_smallsByte_mod, smalls_hi, smalls_lo]
-  simp only [digits9, List.range_succ, List.range_zero, List.map, List.reverse_nil, List.reverse_cons,
-    List.nil_append, List.cons_append, Nat.div_div_eq_div_mul, Nat.reducePow, Nat.reduceMul, Nat.pow_zero,
-    Nat.div_one, List.cons.injEq, and_true]
-  repeat' apply And.intro
-  all_goals first | exact True.intro | exact congrArg Janus.Spec.Print.digit (by omega)))
-
-/-- What the rest of `formatBase10` from the final chunk's loop head guarantees: it returns
-`i - |decimal lo|` with the digits of `lo` written in front of the bytes already at `[a + i, a + 20)`. -/
-def FbTail (s : State) (SP a i lo : Nat) (m0 : Memory) (s' : State) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (x yh : Nat → BitVec 128) (m : Memory),
-    s' = retState64 s junk [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal lo).length)] f x yh m ∧
-    MemFrame s.mem m [(SP - 8, SP), (SP + 8, SP + 16), (a, a + 20)] ∧
-    readBytes m (a + (i - (Janus.Spec.Print.decimal lo).length))
-        (20 - (i - (Janus.Spec.Print.decimal lo).length)) =
-      Janus.Spec.Print.decimal lo ++ readBytes m0 (a + i) (20 - i)
 
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 40000000 in
@@ -218,10 +89,13 @@ theorem formatBase10 (impl : List Amd64.Segment) :
       dsimp only
       rw [show a + (i - 1) = a + (i - 2) + 1 by omega, show 20 - (i - 2) = 20 - i + 2 by omega,
         readBytes_two_writes, show a + (i - 2) + 2 = a + i by omega,
-        show (lo % 100 + lo % 100) % 4294967296 = lo % 100 * 2 by omega,
-        show (lo % 100 * 2 + 1) % 4294967296 + SMv = SMv + (lo % 100 * 2 + 1) by omega,
-        h_sm _ (by omega), smallsByte_mod256 _ (by omega),
-        smalls_hi _ (by omega), smalls_lo _ (by omega), Nat.mod_mod_of_dvd _ (by decide)]
+        show (lo % 100 + lo % 100) % 4294967296 = lo % 100 * 2 by omega]
+      congr 1
+      simp only [List.cons.injEq, and_true]
+      have e1 := bhi (lo % 100 * 2) (lo % 100) (by omega) rfl
+      have e2 := blo ((lo % 100 * 2 + 1) % 4294967296) (lo % 100) (by omega) (by omega)
+      rw [Nat.mod_mod_of_dvd _ (by decide : 10 ∣ 100)] at e2
+      exact ⟨e1, e2⟩
     · by_cases h10 : lo < 10
       · have hl : Janus.Spec.Print.decimal lo = [Janus.Spec.Print.digit lo] :=
           Janus.Spec.Print.decimal_lt10 h10
@@ -240,9 +114,11 @@ theorem formatBase10 (impl : List Amd64.Segment) :
         rw [hl]
         simp only [List.length_cons, List.length_nil, Nat.zero_add]
         rw [show 20 - (i - 1) = 20 - i + 1 by omega, readBytes_one_write,
-          show a + (i - 1) + 1 = a + i by omega,
-          show ((lo + lo) % 4294967296 + 1) % 4294967296 + SMv = SMv + (lo * 2 + 1) by omega,
-          h_sm _ (by omega), smalls_lo _ (by omega), Nat.mod_eq_of_lt h10]
+          show a + (i - 1) + 1 = a + i by omega]
+        congr 1
+        simp only [List.cons.injEq, and_true]
+        have e := blo (((lo + lo) % 4294967296 + 1) % 4294967296) lo (by omega) (by omega)
+        rwa [Nat.mod_eq_of_lt h10] at e
       · have hl : Janus.Spec.Print.decimal lo =
             [Janus.Spec.Print.digit (lo / 10), Janus.Spec.Print.digit (lo % 10)] := by
           rw [Janus.Spec.Print.decimal_ge10 (by omega), Janus.Spec.Print.decimal_lt10 (by omega)]; rfl
@@ -264,10 +140,11 @@ theorem formatBase10 (impl : List Amd64.Segment) :
         rw [show i - (1 + 1) = i - 1 - 1 by omega,
           show a + (i - 1) = a + (i - 1 - 1) + 1 by omega,
           show 20 - (i - 1 - 1) = 20 - i + 2 by omega, readBytes_two_writes',
-          show a + (i - 1 - 1) + 2 = a + i by omega,
-          show ((lo + lo) % 4294967296 + 1) % 4294967296 + SMv = SMv + (lo * 2 + 1) by omega,
-          show (lo % 4294967296 + lo % 4294967296) % 4294967296 + SMv = SMv + lo * 2 by omega,
-          h_sm _ (by omega), h_sm _ (by omega), smalls_hi _ (by omega), smalls_lo _ (by omega)]
+          show a + (i - 1 - 1) + 2 = a + i by omega]
+        congr 1
+        simp only [List.cons.injEq, and_true]
+        exact ⟨bhi ((lo % 4294967296 + lo % 4294967296) % 4294967296) lo (by omega) (by omega),
+          blo (((lo + lo) % 4294967296 + 1) % 4294967296) lo (by omega) (by omega)⟩
   have outer : ∀ U (S : State) (i : Nat), (Janus.Spec.Print.decimal U).length ≤ i →
       i ≤ 20 → S.rip = BitVec.ofNat 64 (segAddr P "internal/strconv.formatBase10" + 0x17) →
       S.regs 4 = BitVec.ofNat 64 SP - 8#64 → S.regs 5 = BitVec.ofNat 64 SP - 8#64 →
@@ -294,51 +171,110 @@ theorem formatBase10 (impl : List Amd64.Segment) :
       have hs : (BitVec.ofNat 64 U >>> 29 = 0#64) = False := by
         simp only [eq_iff_iff, iff_false]; intro h; have := congrArg BitVec.toNat h
         simp [BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow] at this; omega
-      have hy : U % 1000000000 < 1000000000 := Nat.mod_lt _ (by decide)
-      -- the nine byte addresses, as the code computes them (`rbx + rdi - k` modulo 2^64)
-      have w1_0 : (i + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 1) := by omega
-      have w2_0 : (i + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2) := by omega
-      have w1_2 : (i - 2 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 1) := by omega
-      have w2_2 : (i - 2 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 2) := by omega
-      have w1_4 : (i - 2 - 2 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 2 - 1) := by omega
-      have w2_4 : (i - 2 - 2 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 2 - 2) := by omega
-      have w1_6 : (i - 2 - 2 - 2 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 2 - 2 - 1) := by omega
-      have w2_6 : (i - 2 - 2 - 2 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 2 - 2 - 2) := by omega
-      have w1_8 : (i - 2 - 2 - 2 - 2 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 2 - 2 - 2 - 2 - 1) := by omega
-      have w1_4' : (i - 4 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 4 - 1) := by omega
-      have w2_4' : (i - 4 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 4 - 2) := by omega
-      have w1_6' : (i - 6 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 6 - 1) := by omega
-      have w2_6' : (i - 6 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 6 - 2) := by omega
-      have w1_8' : (i - 8 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 8 - 1) := by omega
-      have w2_8' : (i - 8 + (18446744073709551614 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 8 - 2) := by omega
-      generalize hyv : U % 1000000000 = y at *
-      janus64_run [hlit, hs, div1e9_64 U hU, mod1e9_64 U hU, hyv, w1_0, w2_0, w1_2, w2_2, w1_4, w2_4, w1_6, w2_6, w1_8, w1_4', w2_4', w1_6', w2_6', w1_8',
-          div100_magic64 y (by omega), div100_magic64 (y / 100) (by omega),
-          div100_magic64 (y / 100 / 100) (by omega), div100_magic64 (y / 100 / 100 / 100) (by omega),
-          mul100_32 (y / 100) (by omega), mul100_32 (y / 100 / 100) (by omega),
-          mul100_32 (y / 100 / 100 / 100) (by omega), mul100_32 (y / 100 / 100 / 100 / 100) (by omega),
-          mod100_32 y (by omega), mod100_32 (y / 100) (by omega), mod100_32 (y / 100 / 100) (by omega),
-          mod100_32 (y / 100 / 100 / 100) (by omega)] until [segAddr P "internal/strconv.formatBase10" + 0x17]
+      obtain ⟨y, hyv⟩ : ∃ y, U % 1000000000 = y := ⟨_, rfl⟩
+      have hyl : y < 1000000000 := by omega
+      have hap0 : a + 20 ≤ SMv ∨ SMv + 200 ≤ a := ap3
+      have hacc0 : S.mem.accessible a 20 true = true := by rw [hf.accessible]; exact hacc
+      have hsma0 : S.mem.accessible SMv 200 false = true := by rw [hf.accessible]; exact hsma
+      janus64_run [hlit, hs, div1e9_64 U hU, mod1e9_64 U hU, hyv] until [segAddr P "internal/strconv.formatBase10" + 0x60]
+      refine fb_inner impl (retAddrOf s) SMv a i y (U / 1000000000) S.mem hi9 hi20 hyl (by omega) hlit hSMb hab hap0
+        hacc0 hsma0 h_rdsm 4 0 rfl _ y (by simp) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ _ ?_
+      all_goals try (dsimp only; simp [setRegF_apply, h3, h1]; done)
+      all_goals try (dsimp only; rfl)
+      all_goals try (dsimp only; exact MemFrame.refl _ _)
+      all_goals try (dsimp only; simp [pairsOf_zero]; done)
+      rintro S' hpc' h0' h3' h7' h6' h2' h1' hr hx15' hfs' hdf' hmx' hf' hrb'
+      dsimp only at hr hx15' hfs' hdf' hmx'
+      have hz4 : y / 100 ^ 4 < 10 := by show y / 100000000 < 10; omega
+      obtain ⟨z, hz⟩ : ∃ z, y / 100 ^ 4 = z := ⟨_, rfl⟩
+      rw [hz] at h6'
+      rw [hz] at hz4
+      have hzy : z = y / 100000000 := hz.symm
+      have e1 : (i - 8 + (18446744073709551615 + a) % 18446744073709551616) % 18446744073709551616 = a + (i - 9) := by omega
+      have hS4 : S'.regs 4 = BitVec.ofNat 64 SP - 8#64 := by
+        have := hr 4 (Or.inl rfl); simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff] at this; rw [this]; exact hsp'
+      have hS5 : S'.regs 5 = BitVec.ofNat 64 SP - 8#64 := by
+        have := hr 5 (Or.inr (Or.inl rfl)); simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff] at this; rw [this]; exact hbp'
+      have hS14 : S'.regs 14 = s.regs 14 := by
+        have := hr 14 (Or.inr (Or.inr rfl)); simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff] at this; rw [this]; exact hg'
+      have hfS : MemFrame s.mem S'.mem [(SP - 8, SP), (SP + 8, SP + 16), (a, a + 20)] :=
+        MemFrame.trans hf hf' (by
+          intro a' n h; simp only [outside_cons, outside_nil, and_true] at h ⊢; omega)
+      have hrd1 : S'.mem.readLE (SP - 8) 8 = (s.regs 5).toNat := by
+        rw [hf'.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; unfold Apart at ap1; omega)]; exact h_rd1
+      have h_sm0 : ∀ j, j < 200 → S.mem.readLE (SMv + j) 1 = smallsByte j := h_rdsm
+      have hs8 : S'.mem.readLE (SMv + (z * 2 + 1)) 1 = smallsByte (z * 2 + 1) := by
+        rw [hf'.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; exact h_sm0 _ (by omega)
+      have hK : readBytes (S'.mem.writeLE (a + (i - 9)) 1 (smallsByte (((z + z) % 4294967296 + 1) % 4294967296) % 256))
+          (a + (i - 9)) (9 + (20 - i)) = digits9 y ++ readBytes S.mem (a + i) (20 - i) := by
+        rw [show 9 + (20 - i) = (8 + (20 - i)) + 1 by omega, readBytes_one_write,
+          show a + (i - 9) + 1 = a + (i - 8) by omega, hrb', digits9_eq, List.cons_append]
+        congr 1
+        have e := blo (((z + z) % 4294967296 + 1) % 4294967296) z (by omega) (by omega)
+        rw [e, hzy]
+      have hx15S : S'.xmm 15 = s.xmm 15 := hx15'.trans hx15
+      have hfsS : S'.fsBase = s.fsBase := hfs'.trans hfs
+      janus64_run [hlit, e1, hs8] until [segAddr P "internal/strconv.formatBase10" + 0x17]
       · -- the last chunk (`U < 10^9`): return
         have hc := decimal_nine U (by omega) (by omega)
+        have hUy : y = U := by omega
+        subst hUy
+        have hlen9 : (Janus.Spec.Print.decimal y).length = 9 := by rw [hc]; simp [digits9]
         unfold FbTail
-        refine ⟨_, _, _, _, _, ?eq, ?fr, ?rb⟩
+        refine ⟨?_, ?_, ?_, ?_, ?_, ?eq, ?fr, ?rb⟩
         case eq =>
-          refine eq_retState64 [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal U).length)] ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+          refine eq_retState64 [BitVec.ofNat 64 (i - (Janus.Spec.Print.decimal y).length)] ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
           all_goals first
-            | (simp [setRegF, retAddrOf, hsp, hg', hx15, hfs, hdf, hmx, Nat.mod_eq_of_lt hspl]; done)
-            | (simp only [setRegF, hc, digits9, List.length_map, List.length_reverse, List.length_range,
-                List.getD_cons_zero, reduceIte]; apply BitVec.eq_of_toNat_eq; simp; omega)
+            | (simp [setRegF, retAddrOf, hsp, hS14, hx15S, hfsS, hdf', hmx', Nat.mod_eq_of_lt hspl]; done)
+            | (simp only [setRegF, hlen9, List.getD_cons_zero, reduceIte]; apply BitVec.eq_of_toNat_eq; simp; omega)
             | rfl
         case fr => janus_frame
         case rb =>
-          rw [hc]
-          simp only [digits9, List.length_map, List.length_reverse, List.length_range]
-          rw [show U % 1000000000 = U by omega] at *
-          chunk_digits64
+          dsimp only
+          rw [hlen9, hc, show 20 - (i - 9) = 9 + (20 - i) by omega]
+          exact hK
       · -- back at the loop head: the next chunk
-        trace_state
-        sorry
-  sorry
-
-end PrintFn
+        have hDl : U / 1000000000 < U := Nat.div_lt_self (by omega) (by decide)
+        have hc := decimal_chunk U (by omega)
+        have hl : (Janus.Spec.Print.decimal U).length = (Janus.Spec.Print.decimal (U / 1000000000)).length + 9 := by
+          rw [hc]; simp [digits9]
+        refine Janus.Amd64.Tactic.ReachesRet.mono (ih (U / 1000000000) hDl _ (i - 9) (by omega) (by omega)
+          ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ (by omega)) ?_
+        all_goals try (dsimp only; simp [setRegF_apply, hS4, hS5, hS14, hx15S, hfsS, hdf', hmx', h1']; done)
+        all_goals try rfl
+        all_goals try (dsimp only; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_sub]; omega)
+        all_goals try janus_frame
+        all_goals try (dsimp only; rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by unfold Apart at ap1; omega)]; exact hrd1)
+        all_goals (first | (intro j hj; dsimp only; rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega)]; rw [hf'.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; exact h_sm0 j hj) | skip)
+        rintro s' ⟨junk, f, x, yh, m, rfl, hfm, hrb⟩
+        unfold FbTail
+        have hi' : i - (Janus.Spec.Print.decimal U).length = i - 9 - (Janus.Spec.Print.decimal (U / 1000000000)).length := by
+          omega
+        refine ⟨junk, f, x, yh, m, by rw [hi'], hfm, ?_⟩
+        rw [hi', hrb, hc, List.append_assoc]
+        rw [List.append_cancel_left_eq]
+        dsimp only
+        rw [show 20 - (i - 9) = 9 + (20 - i) by omega, hyv]
+        exact hK
+  -- the entry: the prologue, then the loop head with `i = 20`
+  janus64_run until [segAddr P "internal/strconv.formatBase10" + 0x17]
+  refine Janus.Amd64.Tactic.ReachesRet.mono (outer u _ 20 (length_decimal_le 19 u (by omega)) (Nat.le_refl _)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ hul) ?_
+  all_goals try (dsimp only; simp [setRegF_apply, hsp, hx0, hx3', hx1', hx7]; done)
+  all_goals try rfl
+  all_goals try janus_frame
+  all_goals try (dsimp only; rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
+    Janus.Arm64.Memory.readLE_writeLE_self]; exact Nat.mod_eq_of_lt (by have := (s.regs 5).isLt; simpa using this))
+  all_goals try (intro j hj; dsimp only; rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by unfold Apart at ap4; omega),
+      Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by unfold Apart at ap4; omega)]; exact h_sm j hj)
+  rintro s' ⟨junk, f, x, yh, m, rfl, hfm, hrb⟩
+  have e4 : (s.regs 4).toNat = SP := by rw [hsp, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hspl]
+  have e0 : (s.regs 0).toNat = a := by rw [hx0, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hx0l]
+  have e7 : (s.regs 7).toNat = u := by rw [hx7, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hul]
+  simp only [e4, e0, e7]
+  have hl20 := length_decimal_le 19 u (by omega)
+  refine ⟨20 - (Janus.Spec.Print.decimal u).length, junk, f, x, yh, m, ?_, by omega, hfm, ?_⟩
+  · rfl
+  · rw [show 20 - (20 - (Janus.Spec.Print.decimal u).length) = (Janus.Spec.Print.decimal u).length by omega] at hrb ⊢
+    simp only [readBytes_zero, Nat.sub_self, List.append_nil] at hrb
+    simpa using hrb
