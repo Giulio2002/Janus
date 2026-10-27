@@ -48,6 +48,7 @@ import Janus.Contracts.PanicSatEntry
 import Janus.Contracts.PanicSatRun
 import Janus.Contracts.PanicWitness
 import Janus.Contracts.PanicSatAmd64
+import Janus.Contracts.PanicSatAmd64Loop
 import Janus.Contracts.IfaceAmd64
 import Janus.Contracts.IfaceModel
 import Janus.Contracts.IfaceSat

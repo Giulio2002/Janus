@@ -272,7 +272,7 @@ FIN:    mov     rax, [rsp+24]
         cmp     rax, 2
         je      RETFIN
         mov     rcx, [rsp+8]
-        mov     rsp, rcx
+        lea     rsp, [rcx+8]
         lea     rax, [rip+RP]
         jmp     rax
 RETFIN: add     rsp, 96
