@@ -145,15 +145,14 @@ theorem correctness (impl : List Segment) (R : RtInv)
       4096 R ptrType BufObj)
     (hnew : NewobjectLiveContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") 4096 R)
-    (hRty : ∀ b L g v, R.inv b L g v → v.readLE bufType 8 = 32 ∧ v.readLE (bufType + 8) 8 = 0)
     (a b : BitVec 64) (L : List (Nat × Nat)) (bud : Nat) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b]
       (fun s => GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
         Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4144, s.sp.toNat + 24) :: R.rt) ∧
         LiveSep [(s.sp.toNat - 4144, s.sp.toNat + 24)] R.rt ∧
         LiveSep L [(s.sp.toNat - 4144, s.sp.toNat + 24)] ∧
-        (∀ r ∈ R.rt, 0 < r.1) ∧ InRanges poolAddr 16 R.rt ∧ InRanges (poolAddr + 16) 16 R.rt ∧ InRanges (poolAddr + 32) 8 R.rt ∧
-        InRanges bufType 16 R.rt ∧ Outside bufType 16 L ∧
+        (∀ r ∈ R.rt, 0 < r.1) ∧ (poolAddr + 40 ≤ s.sp.toNat - 4144 ∨ s.sp.toNat + 24 ≤ poolAddr) ∧
+        Outside bufType 16 R.rt ∧
         R.ok (Extracted.program.contractAddr "sync.(*Pool).Get") [poolAddr] ∧
         R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [poolAddr] ∧
         R.ok (Extracted.program.contractAddr "runtime.newobject") [bufType] ∧
@@ -163,19 +162,23 @@ theorem correctness (impl : List Segment) (R : RtInv)
         ∃ d b', (b' = bud ∨ b' = bud - 32) ∧
           MemFrame s.mem s'.mem (R.rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24), (d, d + 32)]) ∧
           LiveFrame s.mem s'.mem L [] ∧ R.inv b' L (s.regs 28).toNat (view R.rt L s'.mem)) := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hpin2, hpin3, hbin, hbL, hokG, hokP, hokN,
+  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hbin, hokG, hokP, hokN,
     hnew0, hinv, hbud⟩
   janus_intro hs
   janus_eval_nat hP : poolAddr
   janus_eval_nat hT : ptrType
   janus_eval_nat hB : bufType
-  rw [hP] at hpin hpin2 hpin3 hokG hokP hnew0
-  rw [hB] at hbin hbL hRty
+  rw [hP] at hpin hokG hokP hnew0
+  rw [hB] at hbin
   janus_data hd [hw4]
+  have hdesc : s.mem.readLE 737984 8 = 32 ∧ s.mem.readLE (737984 + 8) 8 = 0 :=
+    ⟨by rw [h_rodata 737984 8 (by decide +kernel)]; decide +kernel,
+      by rw [h_rodata (737984 + 8) 8 (by decide +kernel)]; decide +kernel⟩
+  have hbW : Outside 737984 16 [(s.sp.toNat - 4144, s.sp.toNat + 24)] := by
+    simp only [outside_cons, outside_nil, and_true]; omega
   have hsp48 : (s.sp - 48#64).toNat = s.sp.toNat - 48 := by
     rw [BitVec.toNat_sub_of_le (by simp only [BitVec.le_def, BitVec.toNat_ofNat]; omega)]; rfl
-  have hpw := pool_disjoint hpin hpin2 hpin3 (hwrt _ (List.mem_singleton_self _)) (by simp only; omega)
-  simp only at hpw
+  have hpw := hpin
   have hgo' := hgo
   simp only [outside_cons, outside_nil, and_true] at hgo'
   have key1 : ∀ S : State, MemFrame s.mem S.mem [(s.sp.toNat - 4144, s.sp.toNat + 24)] →
@@ -212,13 +215,14 @@ theorem correctness (impl : List Segment) (R : RtInv)
     have hr0' : r 0 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using hr0)
     have hr1' : r 1 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using hr1)
     -- the descriptor of `scratch` (32 bytes, no pointers), as the runtime's invariant has it
-    have hdesc := hRty _ _ _ _ hinvG
+    have hoB : ∀ a k, 737984 ≤ a → a + k ≤ 737984 + 16 →
+        Outside a k (R.rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)]) := fun a k h1 h2 => by
+      simp only [outside_append]
+      exact ⟨Outside.of_sub hbin h1 h2, Outside.of_sub hbW h1 h2⟩
     have hsz : m1.readLE 737984 8 = 32 := by
-      rw [← readLE_view (rt := R.rt) (L := L) (m := m1) (hbin.sub (Nat.le_refl _) (by omega))
-        (Outside.of_sub hbL (Nat.le_refl _) (by omega))]; exact hdesc.1
+      rw [hF1.readLE _ _ (hoB _ _ (Nat.le_refl _) (by omega))]; exact hdesc.1
     have hpb : m1.readLE (737984 + 8) 8 = 0 := by
-      rw [← readLE_view (rt := R.rt) (L := L) (m := m1) (hbin.sub (a := 737984 + 8) (n := 8) (by omega) (by omega))
-        (Outside.of_sub hbL (a := 737984 + 8) (n := 8) (by omega) (by omega))]; exact hdesc.2
+      rw [hF1.readLE _ _ (hoB _ _ (by omega) (by omega))]; exact hdesc.2
     janus_run until [Extracted.program.contractAddr "runtime.newobject"]
     have key2 : ∀ S : State, S.mem = m1 → S.regs 28 = s.regs 28 → S.sp.toNat + 48 = s.sp.toNat →
         (S.regs 30).toNat % 4 = 0 → (S.regs 30).toNat < 2 ^ 48 → (S.regs 0).toNat = 737984 →
@@ -448,15 +452,13 @@ theorem correctness (impl : List Segment) (R : RtInv)
       LiveFrame.trans hLF1 (LiveFrame.trans (LiveFrame.of_win hstq hLsepQ) hlf3
         (fun a n h => h.append_left _)) (fun _ _ h => h), hinv3⟩
 
-
 /-! ## Non-vacuity: every hypothesis of `correctness` holds together
 
 The live runtime `R` is the toy bump allocator of `Janus.Contracts.LiveToy` (`toyR`), whose
-runtime-owned ranges are the heap, the bump cell, the barrier buffer and the type descriptors
-`tys`: `scratch`'s descriptor and the three words-ranges of the pool's struct (the toy has
-descriptor-sized ranges only, which is why the statement covers the pool by three ranges). Its
-`Get` returns nil, its `Put` drops its argument and its `newobject` hands out the next 32 bytes of
-the heap (code at the three contract addresses). With them `correctness` applies to a call state of
+runtime-owned ranges are the heap, the bump cell and the barrier buffer; `scratch`'s descriptor
+is read-only data of the binary. Its `Get` returns nil, its `Put` drops its argument and its
+`newobject` hands out the next `64 · Size_` bytes of the heap (code at the three contract
+addresses). With them `correctness` applies to a call state of
 `ScratchSum(3, 5)` with an empty live set (`nonvacuous`), and the call returns `3 ^ 5` with the
 guarantee (`returns`). -/
 
@@ -480,14 +482,10 @@ theorem aG : Extracted.program.contractAddr "sync.(*Pool).Get" = cG := by decide
 theorem aP : Extracted.program.contractAddr "sync.(*Pool).Put" = cP := by decide
 theorem aN : Extracted.program.contractAddr "runtime.newobject" = cN := by decide
 
-/-- The descriptors of the toy runtime: `scratch` (32 bytes, no pointers) and the pool's struct
-(40 bytes, zero), as three descriptor-sized ranges. -/
-def tys : Tys := [(bT, 32, 0), (P, 0, 0), (P + 16, 0, 0), (P + 32, 0, 0)]
+/-- The toy runtime has no type descriptors of its own. -/
+def tys : Tys := []
 
-theorem tysOK : TysOK tys := by
-  intro t ht
-  simp only [tys, List.mem_cons, List.not_mem_nil, or_false] at ht
-  rcases ht with rfl | rfl | rfl | rfl <;> exact ⟨by decide, by decide, by decide⟩
+theorem tysOK : TysOK tys := fun t ht => absurd ht (by simp [tys])
 
 /-- The requests it serves. -/
 def ok : Nat → List Nat → Prop := fun a args =>
@@ -499,7 +497,7 @@ def R : RtInv := toyR tys ok
 def implAt : List Segment :=
   [{ name := "model.Get", base := cG, words := getCode },
    { name := "model.Put", base := cP, words := putCode },
-   { name := "model.newobject", base := cN, words := bumpCode 32 }]
+   { name := "model.newobject", base := cN, words := newobjectCodeD }]
 
 def linked : Program := Extracted.program.link implAt
 
@@ -523,16 +521,11 @@ set_option maxRecDepth 20000 in
 theorem hnew : NewobjectLiveContract linked cN 4096 R := by
   intro L b s hpc pre
   have hacB' := bump_acc pre.2.2.2.1
-  have ⟨⟨h30a, h30b, _, _, _, _, _⟩, _, _⟩ := pre.1
+  have ⟨⟨h30a, h30b, hq1, hq2, hq3, hq4, hq5⟩, hq6, hq7⟩ := pre.1
+  obtain ⟨hT1, hT2⟩ := hq6
   change ReachesRet linked _ s _
   janus_run
-  refine finish_newobject tysOK (K := 32) (by omega) (by omega) (by omega) ?_ pre
-  intro args h
-  simp only [R, toyR, ok] at h
-  rcases h with ⟨h1, -⟩ | ⟨h1, -⟩ | ⟨-, h⟩
-  · exact absurd h1 (by decide)
-  · exact absurd h1 (by decide)
-  · exact ⟨(bT, 32, 0), by simp [tys], h, by decide⟩
+  exact finish_newobjectD tysOK pre
 
 /-! ### The call state -/
 
@@ -566,6 +559,7 @@ theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
 theorem setup : CallSetup (linked.withExit ret) Extracted.entry [3, 5] s0 :=
   ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
 
+set_option maxHeartbeats 16000000 in
 set_option maxRecDepth 100000 in
 theorem dataLoaded : Extracted.program.DataLoaded s0.mem := by
   unfold Program.DataLoaded
@@ -585,12 +579,10 @@ theorem dataByte_none (a : Nat) (ha : 0x500000 ≤ a) : dataByte a = none := by
 
 theorem inv0 : R.inv 0x400 [] (s0.regs 28).toNat (view R.rt [] s0.mem) := by
   refine toyInv_init_tys tysOK (m := s0.mem) (b := 0x400) (g := (s0.regs 28).toNat) (by decide) (by decide)
-    (fun i hi hi' => ?_) (by decide) (by decide) (by decide) (fun t ht => ?_)
-  · show bytes0 i = 0
-    simp only [bytes0, dataByte_none i (by simp only [HEAP] at hi; omega)]
-    rw [if_neg (by simp only [BUMP, HEAP] at *; omega)]
-  · simp only [tys, List.mem_cons, List.not_mem_nil, or_false] at ht
-    rcases ht with rfl | rfl | rfl | rfl <;> exact ⟨by decide, by decide⟩
+    (fun i hi hi' => ?_) (by decide) (by decide) (by decide) (fun t ht => absurd ht (by simp [tys]))
+  show bytes0 i = 0
+  simp only [bytes0, dataByte_none i (by simp only [HEAP] at hi; omega)]
+  rw [if_neg (by simp only [BUMP, HEAP] at *; omega)]
 
 theorem s0_sp : s0.sp.toNat = sp0 := by simp [s0, sp0]
 theorem s0_g : (s0.regs 28).toNat = g0 := by simp [s0, g0]
@@ -603,29 +595,25 @@ theorem pre : GuardOK s0 4144 ∧ StackOK s0 4144 24 ∧ Extracted.program.DataL
     Outside ((s0.regs 28).toNat + 16) 8 ((s0.sp.toNat - 4144, s0.sp.toNat + 24) :: R.rt) ∧
     LiveSep [(s0.sp.toNat - 4144, s0.sp.toNat + 24)] R.rt ∧
     LiveSep [] [(s0.sp.toNat - 4144, s0.sp.toNat + 24)] ∧
-    (∀ r ∈ R.rt, 0 < r.1) ∧ InRanges poolAddr 16 R.rt ∧ InRanges (poolAddr + 16) 16 R.rt ∧
-    InRanges (poolAddr + 32) 8 R.rt ∧ InRanges bufType 16 R.rt ∧ Outside bufType 16 [] ∧
+    (∀ r ∈ R.rt, 0 < r.1) ∧ (poolAddr + 40 ≤ s0.sp.toNat - 4144 ∨ s0.sp.toNat + 24 ≤ poolAddr) ∧
+    Outside bufType 16 R.rt ∧
     R.ok (Extracted.program.contractAddr "sync.(*Pool).Get") [poolAddr] ∧
     R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [poolAddr] ∧
     R.ok (Extracted.program.contractAddr "runtime.newobject") [bufType] ∧
     s0.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
     R.inv 0x400 [] (s0.regs 28).toNat (view R.rt [] s0.mem) ∧ 32 ≤ 0x400 := by
   rw [hP, hTy, aG, aP, aN, s0_sp, s0_g]
-  have hrt : R.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64), (bT, bT + 16), (P, P + 16),
-      (P + 16, P + 16 + 16), (P + 32, P + 32 + 16)] := rfl
-  refine ⟨by unfold GuardOK; decide, by unfold StackOK; decide, dataLoaded, ?_, ?_, by simp, ?_,
-    ⟨(P, P + 16), ?_, Nat.le_refl _, by omega⟩, ⟨(P + 16, P + 32), ?_, Nat.le_refl _, by omega⟩,
-    ⟨(P + 32, P + 48), ?_, Nat.le_refl _, by omega⟩, ⟨(bT, bT + 16), ?_, Nat.le_refl _, Nat.le_refl _⟩,
-    trivial, ?_, ?_, ?_, ?_, inv0, by decide⟩
+  have hrt : R.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64)] := rfl
+  refine ⟨by unfold GuardOK; decide, by unfold StackOK; decide, dataLoaded, ?_, ?_, by simp, ?_, ?_, ?_,
+    ?_, ?_, ?_, ?_, inv0, by decide⟩
   · rw [hrt]; simp only [outside_cons, outside_nil, and_true, hP', hb', g0, sp0, HEAP, HEND, HSIZE, BUMP, WBUF]; decide
   · rw [hrt]; simp only [liveSep_cons, liveSep_nil, outside_cons, outside_nil, and_true, hP', hb', g0, sp0, HEAP, HEND, HSIZE, BUMP, WBUF]; decide
   · intro r hr
     rw [hrt] at hr
     simp only [List.mem_cons, List.not_mem_nil, or_false] at hr
-    rcases hr with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp only [HEAP, BUMP, WBUF, hP', hb'] <;> omega
-  all_goals first
-    | (rw [hrt]; simp)
-    | skip
+    rcases hr with rfl | rfl | rfl <;> simp only [HEAP, BUMP, WBUF] <;> omega
+  · simp only [sp0]; decide
+  · rw [hb', hrt]; simp only [outside_cons, outside_nil, and_true, HEAP, HEND, HSIZE, BUMP, WBUF]; decide
   · exact Or.inl ⟨rfl, rfl⟩
   · exact Or.inr (Or.inl ⟨rfl, rfl⟩)
   · exact Or.inr (Or.inr ⟨rfl, rfl⟩)
@@ -640,28 +628,23 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (ret : Nat) (s : Stat
       ptrType BufObj ∧
     NewobjectLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.newobject")
       4096 R ∧
-    (∀ b L g v, R.inv b L g v → v.readLE bufType 8 = 32 ∧ v.readLE (bufType + 8) 8 = 0) ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
     (GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4144, s.sp.toNat + 24) :: R.rt) ∧
       LiveSep [(s.sp.toNat - 4144, s.sp.toNat + 24)] R.rt ∧
       LiveSep L [(s.sp.toNat - 4144, s.sp.toNat + 24)] ∧
-      (∀ r ∈ R.rt, 0 < r.1) ∧ InRanges poolAddr 16 R.rt ∧ InRanges (poolAddr + 16) 16 R.rt ∧
-      InRanges (poolAddr + 32) 8 R.rt ∧ InRanges bufType 16 R.rt ∧
-      Outside bufType 16 L ∧
+      (∀ r ∈ R.rt, 0 < r.1) ∧ (poolAddr + 40 ≤ s.sp.toNat - 4144 ∨ s.sp.toNat + 24 ≤ poolAddr) ∧
+      Outside bufType 16 R.rt ∧
       R.ok (Extracted.program.contractAddr "sync.(*Pool).Get") [poolAddr] ∧
       R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [poolAddr] ∧
       R.ok (Extracted.program.contractAddr "runtime.newobject") [bufType] ∧
       s.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
       R.inv bud L (s.regs 28).toNat (view R.rt L s.mem) ∧ 32 ≤ bud) := by
-  refine ⟨implAt, R, ret, s0, [], 0x400, ?_, ?_, ?_, ?_, hret, setup, pre⟩
+  refine ⟨implAt, R, ret, s0, [], 0x400, ?_, ?_, ?_, hret, setup, pre⟩
   · rw [aG, hPT]; exact hget
   · rw [aP, hPT]; exact hput
   · rw [aN]; exact hnew
-  · intro b L g v h
-    obtain ⟨p, -, -, -, -, -, -, -, -, -, hT⟩ := h
-    rw [hTy]; exact hT (bT, 32, 0) (by simp [tys])
 
 /-- So the guarantee is reached: `ScratchSum(3, 5)` returns `3 ^ 5 = 6`, with the runtime's invariant
 again for the same (empty) live set. -/
@@ -671,11 +654,7 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
         MemFrame s0.mem s'.mem (R.rt ++ [(s0.sp.toNat - 4144, s0.sp.toNat + 24), (d, d + 32)]) ∧
         LiveFrame s0.mem s'.mem [] [] ∧ R.inv b' [] (s0.regs 28).toNat (view R.rt [] s'.mem) := by
   have h := correctness implAt R (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
-    (by rw [aN]; exact hnew)
-    (by
-      intro b L g v h
-      obtain ⟨p, -, -, -, -, -, -, -, -, -, hT⟩ := h
-      rw [hTy]; exact hT (bT, 32, 0) (by simp [tys])) 3 5 [] 0x400
+    (by rw [aN]; exact hnew) 3 5 [] 0x400
     ret hret s0 setup pre
   exact h
 
