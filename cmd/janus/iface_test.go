@@ -185,7 +185,7 @@ func TestContractPinSyncPool(t *testing.T) {
 	for _, c := range id.Contracts {
 		pinned[c.Name] = c.Pinned
 	}
-	if len(id.Contracts) != 3 || !pinned["sync.(*Pool).Get"] || !pinned["sync.(*Pool).Put"] || pinned["runtime.newobject"] {
+	if len(id.Contracts) != 3 || !pinned["sync.(*Pool).Get"] || !pinned["sync.(*Pool).Put"] || !pinned["runtime.newobject"] {
 		t.Fatalf("contracts %+v", id.Contracts)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "identity.json"))
