@@ -30,6 +30,8 @@ namespace Proof
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.PanicAmd64
 open Janus.Contracts.MapAmd64 (keepABI_apply)
 open Janus.Contracts.Panic (Item recItems frameItems fnItems frameKeep bitsWin recItems_above Frame
+  frameRecs_above)
+open Janus.Spec (openBits)
 
 /-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
 binary needs no edit. -/
@@ -42,8 +44,6 @@ local macro "loc_RangeDefer_range1_0" : term => `(janus_eval% (segAddr Extracted
 local macro "loc_RangeDefer_range1_74" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 74))
 local macro "loc_RangeDefer_range1_88" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 88))
 local macro "loc_RangeDefer_range1_110" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 110))
-  frameRecs_above)
-open Janus.Spec (openBits)
 
 /-- The address of `example.com/basic.Acc` (`.noptrbss`; the extractor does not copy it). -/
 local macro "accA" : term => `(janus_eval% (ripTarget Extracted.program (segAddr Extracted.program "example.com/basic.accAdd2")))
@@ -252,7 +252,7 @@ theorem body1 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
     by rw [hgS, hl.room_frame _ _ _ hagS]; omega, ?_⟩ ?_
   · rw [hdefS]; exact ⟨_, _, rfl, by rw [hS1]; simp [Nat.mod_eq_of_lt htd]⟩
   intro s1 hpc1 hq1
-  obtain ⟨⟨r1, x1, y1, f1, m1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
+  obtain ⟨⟨r1, x1, y1, f1, m1, zhm1, krm1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
   have hm1 : s1.mem = m1 := by rw [hs1]
   have hd1 : P.defers m1 (gOf s) = { sp := (s.regs 4).toNat - 56, fns := fvA :: fns0, token := some td } :: rest := by
     have hh := hdef1 _ _ hdefS
@@ -551,7 +551,7 @@ theorem body2 (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl : P.
     by rw [hgS, hl.room_frame _ _ _ hagS]; omega, ?_⟩ ?_
   · rw [hdefS]; exact ⟨_, _, rfl, by rw [hS1]; simp [Nat.mod_eq_of_lt htd]⟩
   intro s1 hpc1 hq1
-  obtain ⟨⟨r1, x1, y1, f1, m1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
+  obtain ⟨⟨r1, x1, y1, f1, m1, zhm1, krm1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
   have hm1 : s1.mem = m1 := by rw [hs1]
   have hd1 : P.defers m1 (gOf s) = { sp := (s.regs 4).toNat - 56, fns := (fvA + 8) :: fns0, token := some td } :: rest := by
     have hh := hdef1 _ _ hdefS
@@ -1131,7 +1131,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       (by rw [hSspn]; omega) hS14 hSx hSdf (by rw [hSra]; decide),
     by rw [hgS, hl.room_frame _ _ _ hagS]; omega⟩ ?_
   intro s1 hpc1 hq1
-  obtain ⟨⟨r1, x1, y1, f1, m1, hs1, hfr1, henv1⟩, hx0, hdef1, hkeep1⟩ := hq1
+  obtain ⟨⟨r1, x1, y1, f1, m1, zhm1, krm1, hs1, hfr1, henv1⟩, hx0, hdef1, hkeep1⟩ := hq1
   have hm1 : s1.mem = m1 := by rw [hs1]
   simp only [MapAmd64.calleeStack, hSspn] at hfr1
   have hW1 : MemFrame s.mem m1 (P.priv ++ [((s.regs 4).toNat - (P.depth + 144), (s.regs 4).toNat + 8)]) :=

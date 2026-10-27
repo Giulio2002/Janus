@@ -21,6 +21,8 @@ local macro "loc_RecoverSet_133" : term => `(janus_eval% (segAddr Extracted.prog
 local macro "loc_RecoverSet_139" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet" + 139))
 local macro "loc_RecoverSet_func1_27" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 27))
 
+
+
 /-! Code addresses are evaluated from the extraction (`janus_eval%`), so a relinked binary needs
 no edit: the deferred closure's entry, its return point after `CALL runtime.gorecover`, and the
 `deferreturn` call the runtime resumes at. -/
@@ -115,7 +117,7 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   · rw [hG5n, show (cr 4).toNat - 8 + 8 = (cr 4).toNat by omega]; exact hGacc
   · rw [hG5n]; omega
   intro G2 hpc2 hpost
-  obtain ⟨⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
+  obtain ⟨⟨r2, x2, y2, f2, m2, zhm2, krm2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
   have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b = loc_RecoverSet_func1_27 := by decide
   have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
   have hpanG : P.panics G.mem (gOf G) = [{ arg := ⟨etyp, edata⟩, start := (s.regs 4).toNat - 64 }] := by
@@ -195,7 +197,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       ⟨PanicPre.of_within hc ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_, ?_, ?_⟩ ?_
     rotate_left 11
     · intro s1 hpc1 hpost
-      obtain ⟨⟨r1, x1, y1, f1, m1, hs1, hfr1, henv1⟩, -, -, -, -, hnil1, -⟩ := hpost
+      obtain ⟨⟨r1, x1, y1, f1, m1, zhm1, krm1, hs1, hfr1, henv1⟩, -, -, -, -, hnil1, -⟩ := hpost
       obtain ⟨h0, h3, -⟩ := hnil1 (Or.inl (hl.calm_frame _ _ _ (by simpa [setRegF, gOf] using hcalm)
         (Spec.Map.Agrees.of_window (lo := (s.regs 4).toNat - (P.depth + (P.depth + 96)))
           (hi := (s.regs 4).toNat + 32) (by janus_frame) (Outside.of_sub hout (by omega) (by omega)))))

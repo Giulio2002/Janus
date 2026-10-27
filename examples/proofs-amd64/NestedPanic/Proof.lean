@@ -28,6 +28,8 @@ open Janus.Spec (openBits)
 binary needs no edit. -/
 local macro "loc_NestedPanic_133" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic" + 133))
 
+
+
 local macro "func1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic.func1"))
 local macro "func2A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic.func2"))
 

@@ -29,6 +29,8 @@ binary needs no edit. -/
 local macro "loc_GoexitDefer_69" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer" + 69))
 local macro "loc_GoexitDefer_func1_27" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer.func1" + 27))
 
+
+
 local macro "func1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer.func1"))
 local macro "recoverRet" : term =>
   `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer.func1" + 0x1b))
@@ -118,7 +120,7 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   · rw [hG5n, show (cr 4).toNat - 8 + 8 = (cr 4).toNat by omega]; exact hGacc
   · rw [hG5n]; omega
   intro G2 hpc2 hpost
-  obtain ⟨⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
+  obtain ⟨⟨r2, x2, y2, f2, m2, zhm2, krm2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
   have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
   obtain ⟨r, rs, hr, hgx⟩ := hpan
   have hpanG : P.panics G.mem (gOf G) = r :: rs := by

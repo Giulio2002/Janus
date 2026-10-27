@@ -17,6 +17,8 @@ binary needs no edit. -/
 local macro "loc_DeferTwice_55" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice" + 55))
 local macro "loc_DeferTwice_73" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice" + 73))
 
+
+
 local macro "fvA" : term => `(janus_eval% (Extracted.program.data.head!.base))
 local macro "func1A" : term =>
   `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice.func1"))
@@ -103,7 +105,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       (by omega) hS14 hSx hSdf (by rw [hSra]; decide),
     by rw [hgS, hl.room_frame _ _ _ hagS]; omega⟩ ?_
   intro s1 hpc1 hq1
-  obtain ⟨⟨r1, x1, y1, f1, m1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
+  obtain ⟨⟨r1, x1, y1, f1, m1, zhm1, krm1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
   have hm1 : s1.mem = m1 := by rw [hs1]
   have hS0n : (S.regs 0).toNat = fvA := by rw [hS0]; simp
   have hfsp : fspOf S = (s.regs 4).toNat - 24 := by simp only [fspOf, hSspn]; omega
@@ -173,7 +175,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       (by omega) hS214 hS2x hS2df (by rw [hS2ra]; decide),
     by rw [hgS2, hl.room_frame _ _ _ hagS2]; omega⟩ ?_
   intro s2 hpc2 hq2
-  obtain ⟨⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩, hdef2, hkeep2⟩ := hq2
+  obtain ⟨⟨r2, x2, y2, f2, m2, zhm2, krm2, hs2, hfr2, henv2⟩, hdef2, hkeep2⟩ := hq2
   have hm2 : s2.mem = m2 := by rw [hs2]
   have hS20n : (S2.regs 0).toNat = fvA := by rw [hS20]; simp
   have hfsp2 : fspOf S2 = (s.regs 4).toNat - 24 := by simp only [fspOf, hS2spn]; omega

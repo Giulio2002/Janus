@@ -32,6 +32,8 @@ local macro "loc_NestedRecover_140" : term => `(janus_eval% (segAddr Extracted.p
 local macro "loc_NestedRecover_146" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedRecover" + 146))
 local macro "loc_NestedRecover_func1_27" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedRecover.func1" + 27))
 
+
+
 local macro "func1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedRecover.func1"))
 local macro "func2A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedRecover.func2"))
 local macro "resumeA" : term => `(janus_eval% (Extracted.entry + 0x8d))
@@ -156,7 +158,7 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   · rw [hG5n, show (cr 4).toNat - 8 + 8 = (cr 4).toNat by omega]; exact hGacc
   · rw [hG5n]; omega
   intro G2 hpc2 hpost
-  obtain ⟨⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
+  obtain ⟨⟨r2, x2, y2, f2, m2, zhm2, krm2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
   have hsegf : segAddr Extracted.program "example.com/basic.NestedRecover.func1" + 0x1b = loc_NestedRecover_func1_27 := by decide
   have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
   have hpanG : P.panics G.mem (gOf G) = [{ arg := ⟨etyp, edata⟩, start := st }, B] := by

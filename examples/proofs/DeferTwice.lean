@@ -21,6 +21,7 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 
 namespace Proof
 
+
 /-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
 binary needs no edit. -/
 local macro "loc_DeferTwice_64" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice" + 64))
@@ -305,6 +306,8 @@ theorem hdr : DeferreturnContract (Extracted.program.link implW) drA PW U0 :=
 
 def wm : Memory := witMemD (tabWords T0) Extracted.data
 
+abbrev wg : Nat := witG
+abbrev wsp : Nat := witSP
 abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wm := by

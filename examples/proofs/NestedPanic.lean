@@ -22,6 +22,7 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 
 namespace Proof
 
+
 /-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
 binary needs no edit. -/
 local macro "loc_NestedPanic_124" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedPanic" + 124))
@@ -424,6 +425,8 @@ theorem hpan : GopanicContract (Extracted.program.link implW) gA PW U0 T0 :=
 def wmW : Memory := witMem (tabWords T0)
 
 abbrev pA : Nat := witArg
+abbrev wg : Nat := witG
+abbrev wsp : Nat := witSP
 abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wmW := by

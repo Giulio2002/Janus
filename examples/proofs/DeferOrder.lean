@@ -386,6 +386,8 @@ theorem hpan : GopanicContract (Extracted.program.link implW) gA PW U0 T0 :=
 def wmW : Memory := witMem (tabWords T0)
 
 abbrev pA : Nat := witArg
+abbrev wg : Nat := witG
+abbrev wsp : Nat := witSP
 abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wmW := by

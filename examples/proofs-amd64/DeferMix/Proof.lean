@@ -35,6 +35,8 @@ namespace Proof
 open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janus.Contracts.PanicAmd64
 open Janus.Contracts.MapAmd64 (keepABI_apply)
 open Janus.Contracts.Panic (Item recItems frameItems fnItems frameKeep bitsWin recItems_above Frame
+  frameRecs_above)
+open Janus.Spec (openBits)
 
 /-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
 binary needs no edit. -/
@@ -43,8 +45,6 @@ local macro "loc_DeferMix_120" : term => `(janus_eval% (segAddr Extracted.progra
 local macro "loc_DeferMix_122" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferMix" + 122))
 local macro "loc_DeferMix_144" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferMix" + 144))
 local macro "loc_DeferMix_170" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferMix" + 170))
-  frameRecs_above)
-open Janus.Spec (openBits)
 
 /-- The address of `example.com/basic.Acc` (`.noptrbss`; the extractor does not copy it). -/
 local macro "accA" : term => `(janus_eval% (ripTarget Extracted.program (segAddr Extracted.program "example.com/basic.accAdd2")))
@@ -232,7 +232,7 @@ theorem prefix_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
     exact Janus.Arm64.Memory.accessible_mono _ hst (by omega) (by omega)
   · rw [hS0n]; exact Outside.of_sub hout (by omega) (by omega)
   intro s1 hpc1 hq1
-  obtain ⟨⟨r1, x1, y1, f1, m1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
+  obtain ⟨⟨r1, x1, y1, f1, m1, zhm1, krm1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
   have hm1 : s1.mem = m1 := by rw [hs1]
   have hfsp : fspOf S = (s.regs 4).toNat - 88 := by simp only [fspOf, hSspn]; omega
   have hd1 : P.defers m1 (gOf s) = { sp := (s.regs 4).toNat - 88, fns := [fvA] } :: P.defers s.mem (gOf s) := by
@@ -295,7 +295,7 @@ theorem prefix_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
       (by omega) hS214 hS2x hS2df (by rw [hS2ra]; decide),
     by rw [hgS2, hl.room_frame _ _ _ hagS2]; omega⟩ ?_
   intro s2 hpc2 hq2
-  obtain ⟨⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩, hdef2, hkeep2⟩ := hq2
+  obtain ⟨⟨r2, x2, y2, f2, m2, zhm2, krm2, hs2, hfr2, henv2⟩, hdef2, hkeep2⟩ := hq2
   have hm2 : s2.mem = m2 := by rw [hs2]
   have hS20n : (S2.regs 0).toNat = fvA + 8 := by rw [hS20]; simp
   have hfsp2 : fspOf S2 = (s.regs 4).toNat - 88 := by simp only [fspOf, hS2spn]; omega
@@ -353,7 +353,7 @@ theorem prefix_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (hl
       (by omega) hS314 hS3x hS3df (by rw [hS3ra]; decide),
     by rw [hgS3, hl.room_frame _ _ _ hagS3]; omega⟩ ?_
   intro s3 hpc3 hq3
-  obtain ⟨⟨r3, x3, y3, f3, m3, hs3, hfr3, henv3⟩, hdef3, hkeep3⟩ := hq3
+  obtain ⟨⟨r3, x3, y3, f3, m3, zhm3, krm3, hs3, hfr3, henv3⟩, hdef3, hkeep3⟩ := hq3
   have hm3 : s3.mem = m3 := by rw [hs3]
   have hS30n : (S3.regs 0).toNat = fvA + 8 := by rw [hS30]; simp
   have hfsp3 : fspOf S3 = (s.regs 4).toNat - 88 := by simp only [fspOf, hS3spn]; omega
