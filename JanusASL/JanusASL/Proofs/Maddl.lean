@@ -697,6 +697,20 @@ theorem asl_maddl {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b10011
       (fld_lt w 10 5) (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 15 1 == 1#1) (fld w 23 1 == 1#1)
     exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
+theorem maddl_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b10011011)
+    (h2 : (w / 2 ^ 21) % 4 = 1) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
+  obtain ⟨s2, hrun, hrel, hbt⟩ := asl_maddl hw hc h2 h (js.pc.toNat : Int)
+  have hpc : ∀ u o rm ra rn rd, (Janus.Arm64.execMaddl js u o rm ra rn rd).pc = js.pc := by
+    intro u o rm ra rn rd
+    simp [Janus.Arm64.execMaddl, Janus.Arm64.State.setX, Janus.Arm64.State.writeZR]; split <;> rfl
+  refine step_agree_f h ⟨s2, hrun, hrel, hbt⟩ (hpc _ _ _ _ _ _) ?_
+  rw [Janus.Arm64.step_of_decode (decode_maddl_class hw hc h2)]
+  simp only [Janus.Arm64.exec, ← fld_bit w 23 hw, ← fld_bit w 15 hw,
+    bits_eq_fld w 20 16 hw, bits_eq_fld w 14 10 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
+  simp [Janus.Arm64.State.next, hpc]
+
 /-- **SMADDL/SMSUBL/UMADDL/UMSUBL**: for every word of the encoding class (bits 31:24 =
 `10011011`, bits 22:21 = `01`) and every related pair of states, Janus' `step` and the generated
 ASL agree. -/
@@ -704,14 +718,7 @@ theorem maddl_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 24) % 256 = 0b100
     (h2 : (w / 2 ^ 21) % 4 = 1) {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
       (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
-  obtain ⟨s2, hrun, hrel, hbt⟩ := asl_maddl hw hc h2 h (js.pc.toNat : Int)
-  have hpc : ∀ u o rm ra rn rd, (Janus.Arm64.execMaddl js u o rm ra rn rd).pc = js.pc := by
-    intro u o rm ra rn rd
-    simp [Janus.Arm64.execMaddl, Janus.Arm64.State.setX, Janus.Arm64.State.writeZR]; split <;> rfl
-  refine step_agree h ⟨s2, hrun, hrel, hbt⟩ (hpc _ _ _ _ _ _) ?_
-  rw [Janus.Arm64.step_of_decode (decode_maddl_class hw hc h2)]
-  simp only [Janus.Arm64.exec, ← fld_bit w 23 hw, ← fld_bit w 15 hw,
-    bits_eq_fld w 20 16 hw, bits_eq_fld w 14 10 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
-  simp [Janus.Arm64.State.next, hpc]
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := maddl_agree_f (w := w) (hw := hw) (hc := hc) (h2 := h2) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

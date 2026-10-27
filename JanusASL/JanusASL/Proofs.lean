@@ -35,7 +35,19 @@ import JanusASL.Proofs.FP.VSet
 import JanusASL.Proofs.FP.Exec
 import JanusASL.Proofs.FP.Unpack2
 import JanusASL.Proofs.FP.Div
+import JanusASL.Proofs.FP.AgreeArith
+import JanusASL.Proofs.FP.AgreeCcmp
+import JanusASL.Proofs.FP.AgreeConv
+import JanusASL.Proofs.FP.AgreeFcvtz
+import JanusASL.Proofs.FP.AgreeFcvt
+import JanusASL.Proofs.FP.Run
+import JanusASL.Proofs.FPDecodeB
 import JanusASL.Proofs.FP.Sqrt
+import JanusASL.Proofs.FP.Exec2
+import JanusASL.Proofs.FP.IntLift
+import JanusASL.Proofs.FP.Ensures
+import JanusASL.Proofs.FPDecodeA
+import JanusASL.Proofs.FPChain.Basic
 
 /-! # JanusASL proofs: Janus' `step` against the generated ASL, per encoding class
 

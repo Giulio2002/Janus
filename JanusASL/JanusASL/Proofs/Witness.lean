@@ -81,7 +81,7 @@ theorem witness_rel : Rel witnessJs witnessState where
   sp := by simp [witnessState, wRegs, witnessJs, Std.ExtDHashMap.get?_insert]
   pc := by simp [witnessState, wRegs, witnessJs, Std.ExtDHashMap.get?_insert]
   pstate := ⟨wPState, by simp [witnessState, wRegs, Std.ExtDHashMap.get?_insert],
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩⟩
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩⟩
 
 theorem witness_memRel : MemRel witnessJs.mem witnessState := by
   intro a ha

@@ -178,13 +178,30 @@ def main():
         print("  have s%d : Sail.BitVec.access (BitVec.ofNat 32 w) %d = 1#1 := access_ofNat32 _ _ (by decide) (by omega)"
               % (i, i))
         names.append("s%d" % i)
-    print("  rw [%s]" % fn_name)
-    print("  simp only [run_bind, %s, Bool.and_false, Bool.false_and, Bool.and_true, andM, toBool, run_pure,"
-          % ", ".join(names))
-    print("    run_readReg hs, Bool.false_eq_true, ite_false, decide_true, ite_true, run_writeReg,%s"
-          % (" bne_self_eq_false, Bool.or_false," if sbo else ""))
-    print("    show ((-1 : Int) < %d) = True from by decide]" % see)
-    print("  all_goals rfl")
+    if sbo:
+        print("  rw [%s]" % fn_name)
+        print("  simp only [run_bind, %s, Bool.and_false, Bool.false_and, Bool.and_true, andM, toBool, run_pure,"
+              % ", ".join(names))
+        print("    run_readReg hs, Bool.false_eq_true, ite_false, decide_true, ite_true, run_writeReg,%s"
+              % (" bne_self_eq_false, Bool.or_false," if sbo else ""))
+        print("    show ((-1 : Int) < %d) = True from by decide]" % see)
+        print("  all_goals rfl")
+    else:
+        # one skip step per earlier clause (`chain_skip`), then `chain_take` for the reached clause: each step is a
+        # head unification, so the proof does not traverse the (megabyte-sized) remainder of the decode chain
+        print("  unfold %s" % fn_name)
+        def hv(nm_list):
+            return ", ".join(nm_list + ["Bool.and_false", "Bool.false_and", "Bool.and_true", "Bool.true_and"])
+        skip_names = {}
+        for idx2, (conj2, see2, callee2, _b2, _sbo2) in enumerate(cl[:idx]):
+            ds2 = [decide(c, fx) for c in conj2]
+            k = ds2.index(False)
+            nm = [n for n, cj, v in haves if cj == conj2[k] and v is False][0]
+            print("  refine (congrArg (fun m => EStateM.run m s) (chain_skip _ (by simp only [%s]) _ _ _)).trans ?_" % hv([nm]))
+        tnames = ["t%d_%d" % (idx, k) for k in range(len(conj))]
+        print("  refine (chain_take _ (by simp only [%s]) _ (by decide) hs _ _).trans ?_" % hv(tnames))
+        print("  simp only [run_bind, run_pure, run_writeReg]")
+        print("  all_goals rfl")
     print("-- clause index %d of %d" % (idx, len(cl)), file=sys.stderr)
 
 
