@@ -34,6 +34,140 @@ abbrev W2 (P : PanicRuntime) (s : State) : List (Nat × Nat) :=
 
 set_option maxHeartbeats 0 in
 set_option maxRecDepth 20000 in
+/-- The deferred closure `NestedRecover.func1` run by the runtime while the nested panic (value
+`(et, ed)`, started at `st`) unwinds on top of the aborted `(bt, bd)` panic: its `recover()` returns
+the top panic's value, so it sets the named result to `7`; the top panic is marked recovered. -/
+theorem closure_run (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
+    (hrec : GorecoverContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.gorecover") P)
+    (s e : State) (hc : PanicCallerOK P s (P.depth + 144) 40) (et ed bt bd st : Nat)
+    (hne2 : et ≠ 0) (hw : ¬ P.wrapper (segAddr Extracted.program "example.com/basic.NestedRecover.func1" + 0x24))
+    (hpc1 : e.pc = BitVec.ofNat 64 func1A) (h26 : e.regs 26 = BitVec.ofNat 64 (s.sp.toNat - 40)) (h29 : e.regs 29 = e.sp - 8#64) (hS28e : e.regs 28 = s.regs 28)
+    (hal1 : e.sp.toNat % 16 = 0) (hlo1 : s.sp.toNat - 112 - P.depth ≤ e.sp.toNat)
+    (hhi1 : e.sp.toNat + 16 ≤ s.sp.toNat - 112)
+    (hl30a : (e.regs 30).toNat % 4 = 0) (hl30b : (e.regs 30).toNat < 2 ^ 48)
+    (henv1 : P.Env e.mem)
+    (hW_e : MemFrame s.mem e.mem (P.priv ++ [(s.sp.toNat - (P.depth + (P.depth + 144)), s.sp.toNat + 40)]))
+    (hm_cap : e.mem.readLE (s.sp.toNat - 40 + 8) 8 = s.sp.toNat - 72)
+    (hpn1' : P.panics e.mem (gOf s) = [{ arg := ⟨et, ed⟩, start := st }, { arg := ⟨bt, bd⟩, start := s.sp.toNat - 112 }])
+    (hrpe0 : P.rp e.mem (gOf s) = (e.regs 30).toNat) :
+    ReachesRet (Extracted.program.link impl) (e.regs 30) e (fun c' =>
+      c'.pc = e.regs 30 ∧ c'.sp = e.sp ∧ c'.regs 28 = e.regs 28 ∧ c'.regs 18 = e.regs 18 ∧ P.Env c'.mem ∧
+      P.panics c'.mem (gOf s) =
+        [{ arg := ⟨et, ed⟩, start := st, recovered := true }, { arg := ⟨bt, bd⟩, start := s.sp.toNat - 112 }] ∧
+      P.defers c'.mem (gOf s) = P.defers e.mem (gOf s) ∧
+      P.saved c'.mem (gOf s) = P.saved e.mem (gOf s) ∧ P.room e.mem (gOf s) ≤ P.room c'.mem (gOf s) ∧
+      MemFrame e.mem c'.mem (P.priv ++ [(e.sp.toNat - 32 - P.depth, e.sp.toNat),
+        (s.sp.toNat - 72, s.sp.toNat - 64)]) ∧
+      c'.mem.readLE (s.sp.toNat - 72) 8 = 7) := by
+  have hc' := hc
+  obtain ⟨henv, ⟨hg1, hg2, hg3⟩, hal, hd8, hd, hb, hst, hout, hgd, hgo⟩ := hc'
+  simp only [regG, stackguard0Offset, stackguard0, Spec.Disjoint] at hg1 hg2 hg3 hgd
+  have hgv : e.mem.readLE ((s.regs 28).toNat + 16) 8 = s.mem.readLE ((s.regs 28).toNat + 16) 8 := by
+    rw [hW_e.readLE _ _ (by
+      simp only [outside_append, outside_cons, outside_nil, and_true]
+      refine ⟨hgo, by omega⟩)]
+  have hga : e.mem.accessible ((s.regs 28).toNat + 16) 8 false = true := by
+    rw [hW_e.accessible]; exact hg2
+  have hwin' : e.mem.accessible (s.sp.toNat - (P.depth + (P.depth + 144))) (P.depth + (P.depth + 144) + 40) true = true := by
+    rw [hW_e.accessible]; exact hst
+  have hS28 : e.regs 28 = s.regs 28 := hS28e
+  rw [show (e.regs 28) = e.regs 28 from rfl]
+  have hpc1 := hpc1
+  janus_run until [Extracted.program.contractAddr "runtime.gorecover"]
+  refine ReachesRet.call hrec rfl
+    ⟨PanicPre.of_within hc ?hf ?henv ?hlo ?hhi ?hal (by simp [setReg]; exact hS28e) ?hlr ?hlr', ?hga, ?hgb⟩ ?cont
+  case hf => simp only [List.cons_append, List.nil_append]; janus_frame
+  case henv =>
+    apply hl.env_frame _ _ henv1
+    apply Map.Agrees.of_window (lo := s.sp.toNat - (P.depth + (P.depth + 144))) (hi := s.sp.toNat + 40)
+    · janus_frame
+    · exact Outside.of_sub hout (by omega) (by omega)
+  case hlo => simp [setReg]; omega
+  case hhi => simp [setReg]; omega
+  case hal => simp [setReg]; omega
+  case hlr => simp [setReg]
+  case hlr' => simp [setReg]
+  case hga =>
+    simp [setReg]
+    exact Janus.Contracts.IfaceModel.acc_read_of_write
+      (Memory.accessible_mono _ hwin' (by omega) (by omega))
+  case hgb => simp [setReg]; omega
+  case cont =>
+    intro G' hpcG hpost
+    obtain ⟨⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2', hrp2, hrm2, hnil2, hpanI⟩ := hpost
+    have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
+    have hsegf : segAddr Extracted.program "example.com/basic.NestedRecover.func1" + 36 = 598404 := by decide
+    have agG : ∀ m, MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 144)), s.sp.toNat + 40)] →
+        Map.Agrees e.mem m P.priv := fun m hf =>
+      Map.Agrees.of_window hf (Outside.of_sub hout (by omega) (by omega))
+    have hrpe := hrpe0
+    have hpanI' := hpanI { arg := ⟨et, ed⟩, start := st } [{ arg := ⟨bt, bd⟩, start := s.sp.toNat - 112 }]
+    have hw' : ¬ P.wrapper 598404 := by rw [← hsegf]; exact hw
+    have key : ∀ m g, g = (s.regs 28).toNat →
+        MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 144)), s.sp.toNat + 40)] →
+        P.panics m g = [{ arg := ⟨et, ed⟩, start := st }, { arg := ⟨bt, bd⟩, start := s.sp.toNat - 112 }] := by
+      intro m g hg hf
+      rw [hg]; exact (hl.panics_frame _ _ _ (agG m hf)).trans hpn1'
+    obtain ⟨hr0, hr1, hrec2⟩ := hpanI' (key _ _ (by dsimp only [gOf]; simp [setReg, hS28e]) (by janus_frame)) rfl rfl
+      (by dsimp only; simpa [setReg] using hw') (by
+        have hes : 40 ≤ e.sp.toNat ∧ e.sp.toNat % 16 = 0 := ⟨by omega, hal1⟩
+        have h40 : (e.sp - 40#64).toNat = e.sp.toNat - 40 := by
+          rw [BitVec.toNat_sub]; simp; omega
+        have hrpm : P.rp e.mem (gOf s) = (e.regs 30).toNat := hrpe
+        have hrp' : ∀ m, MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 144)), s.sp.toNat + 40)] →
+            P.rp m (gOf s) = (e.regs 30).toNat := fun m hf => by
+          rw [hl.rp_frame _ _ _ (agG m hf)]; exact hrpm
+        have hrp'' : ∀ m g, g = (s.regs 28).toNat →
+            MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 144)), s.sp.toNat + 40)] →
+            P.rp m g = (e.regs 30).toNat := fun m g hg hf => by rw [hg]; exact hrp' m hf
+        dsimp only
+        simp only [setReg_apply, Nat.reduceEqDiff, reduceIte, h40]
+        have hrd : (((e.mem.writeLE (BitVec.toNat e.sp - 32) 8 (BitVec.toNat (e.regs 30))).writeLE
+            (BitVec.toNat e.sp - 40) 8 (BitVec.toNat e.sp - 8)).writeLE (BitVec.toNat e.sp - 16) 8
+            (e.mem.readLE (BitVec.toNat s.sp - 40 + 8) 8)).readLE (BitVec.toNat e.sp - 40 + 8) 8 =
+            (e.regs 30).toNat := by
+          rw [show BitVec.toNat e.sp - 40 + 8 = BitVec.toNat e.sp - 32 by omega]
+          simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
+          exact Nat.mod_eq_of_lt (by have : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
+                                     have := (e.regs 30).isLt; omega)
+        rw [hrd]
+        exact (hrp'' _ _ (by dsimp only [gOf]; simp [setReg, hS28e]) (by janus_frame)).symm)
+    subst hs2
+    have h32 : (e.sp - 32#64).toNat = e.sp.toNat - 32 := by rw [BitVec.toNat_sub]; simp; omega
+    simp only [calleeStack, h32, retState, callRegs_apply, List.getD_nil, setReg_apply, reduceIte,
+      Nat.reduceEqDiff] at hfr2 hr0 hr1 hrec2 henv2
+    have hj0 : j2 0 ≠ 0 := fun h => hne2 (by rw [← hr0, h]; rfl)
+    have hcap' : e.mem.readLE (BitVec.toNat s.sp - 40 + 8) 8 = s.sp.toNat - 72 := by
+      exact hm_cap
+    have hacc7 : m2.accessible (s.sp.toNat - 72) 8 true = true := by
+      rw [hfr2.accessible]; simp only [Memory.accessible_writeLE]
+      exact Memory.accessible_mono _ hwin' (by omega) (by omega)
+    janus_run [hcap']
+    have hag7 : Map.Agrees m2 (m2.writeLE (s.sp.toNat - 72) 8 7) P.priv :=
+      Map.Agrees.of_window (lo := s.sp.toNat - 72) (hi := s.sp.toNat - 40) (by janus_frame)
+        (Outside.of_sub hout (by omega) (by omega))
+    have hG : ∀ T : State, T.regs 28 = s.regs 28 → gOf T = gOf s := fun T h => by simp only [gOf, h]
+    simp only [retState] at hdf2 hsv2' hrp2 hrm2
+    rw [hG _ (by simp [setReg, hS28e])] at hdf2 hsv2' hrm2 hrec2
+    have hagX : Map.Agrees e.mem
+        (((e.mem.writeLE (BitVec.toNat e.sp - 32) 8 (BitVec.toNat (e.regs 30))).writeLE (BitVec.toNat e.sp - 40) 8
+            (BitVec.toNat e.sp - 8)).writeLE (BitVec.toNat e.sp - 16) 8 (e.mem.readLE (BitVec.toNat s.sp - 40 + 8) 8))
+        P.priv :=
+      Map.Agrees.of_window (lo := e.sp.toNat - 32 - P.depth) (hi := e.sp.toNat) (by janus_frame)
+        (Outside.of_sub hout (by omega) (by omega))
+    have hp2' : P.panics (m2.writeLE (BitVec.toNat s.sp - 72) 8 7) (gOf s) =
+        [{ arg := ⟨et, ed⟩, start := st, recovered := true }, { arg := ⟨bt, bd⟩, start := s.sp.toNat - 112 }] := by
+      rw [hl.panics_frame _ _ _ hag7]; exact hrec2
+    refine ⟨hl.env_frame _ _ henv2 hag7, hp2', ?_, ?_, ?_, ?_⟩
+    · rw [hl.defers_frame _ _ _ hag7]; rw [hdf2]; exact hl.defers_frame _ _ _ hagX
+    · rw [hl.saved_frame _ _ _ hag7]; rw [hsv2']; exact hl.saved_frame _ _ _ hagX
+    · rw [hl.room_frame _ _ _ hag7]; exact Nat.le_trans (Nat.le_of_eq (hl.room_frame _ _ _ hagX).symm) hrm2
+    · try simp only [List.cons_append, List.nil_append]
+      janus_frame
+
+set_option maxHeartbeats 0 in
+set_option maxRecDepth 20000 in
 theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     (U : State → Nat → Nat → Prop)
     (hpan : GopanicContract (Extracted.program.link impl)
@@ -386,107 +520,11 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     rw [hW_e.accessible]; exact hst
   have hsegf : segAddr Extracted.program "example.com/basic.NestedRecover.func1" + 36 = 598404 := by decide
   rw [hm_fv] at hpc1
-  have hcl : ReachesRet (Extracted.program.link impl) (e.regs 30) e (fun c' =>
-      c'.pc = e.regs 30 ∧ c'.sp = e.sp ∧ c'.regs 28 = e.regs 28 ∧ c'.regs 18 = e.regs 18 ∧ P.Env c'.mem ∧
-      P.panics c'.mem (gOf s) =
-        [{ arg := ⟨e2t.toNat, e2d.toNat⟩, start := eA.sp.toNat - 32, recovered := true }, { arg := ⟨e1t.toNat, e1d.toNat⟩, start := s.sp.toNat - 112 }] ∧ P.defers c'.mem (gOf s) = P.defers e.mem (gOf s) ∧
-      P.saved c'.mem (gOf s) = P.saved e.mem (gOf s) ∧ P.room e.mem (gOf s) ≤ P.room c'.mem (gOf s) ∧
-      MemFrame e.mem c'.mem (P.priv ++ [(e.sp.toNat - 32 - P.depth, e.sp.toNat),
-        (s.sp.toNat - 72, s.sp.toNat - 64)]) ∧
-      c'.mem.readLE (s.sp.toNat - 72) 8 = 7) := by
-    janus_run until [Extracted.program.contractAddr "runtime.gorecover"]
-    refine ReachesRet.call hrec rfl
-      ⟨PanicPre.of_within hc ?hf ?henv ?hlo ?hhi ?hal (by simp [setReg]; exact hS28') ?hlr ?hlr', ?hga, ?hgb⟩ ?cont
-    case hf => simp only [List.cons_append, List.nil_append]; janus_frame
-    case henv =>
-      apply hl.env_frame _ _ henv1
-      apply Map.Agrees.of_window (lo := s.sp.toNat - (P.depth + (P.depth + 144))) (hi := s.sp.toNat + 40)
-      · janus_frame
-      · exact Outside.of_sub hout (by omega) (by omega)
-    case hlo => simp [setReg]; omega
-    case hhi => simp [setReg]; omega
-    case hal => simp [setReg]; omega
-    case hlr => simp [setReg]
-    case hlr' => simp [setReg]
-    case hga =>
-      simp [setReg]
-      exact Janus.Contracts.IfaceModel.acc_read_of_write
-        (Memory.accessible_mono _ hwin' (by omega) (by omega))
-    case hgb => simp [setReg]; omega
-    case cont =>
-      intro G' hpcG hpost
-      obtain ⟨⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2', hrp2, hrm2, hnil2, hpanI⟩ := hpost
-      have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
-      have hsegf : segAddr Extracted.program "example.com/basic.NestedRecover.func1" + 36 = 598404 := by decide
-      have agG : ∀ m, MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 144)), s.sp.toNat + 40)] →
-          Map.Agrees e.mem m P.priv := fun m hf =>
-        Map.Agrees.of_window hf (Outside.of_sub hout (by omega) (by omega))
-      have hrpe : P.rp e.mem (gOf s) = (e.regs 30).toNat := by
-        have := hrs1.1
-        simpa [hS28, gOf] using this
-      have hpanI' := hpanI { arg := ⟨e2t.toNat, e2d.toNat⟩, start := eA.sp.toNat - 32 } [{ arg := ⟨e1t.toNat, e1d.toNat⟩, start := s.sp.toNat - 112 }]
-      have hw' : ¬ P.wrapper 598404 := by rw [← hsegf]; exact hw
-      have key : ∀ m g, g = (s.regs 28).toNat →
-          MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 144)), s.sp.toNat + 40)] →
-          P.panics m g = [{ arg := ⟨e2t.toNat, e2d.toNat⟩, start := eA.sp.toNat - 32 }, { arg := ⟨e1t.toNat, e1d.toNat⟩, start := s.sp.toNat - 112 }] := by
-        intro m g hg hf
-        rw [hg]; exact (hl.panics_frame _ _ _ (agG m hf)).trans hpn1'
-      obtain ⟨hr0, hr1, hrec2⟩ := hpanI' (key _ _ (by dsimp only [gOf]; simp [setReg, hS28']) (by janus_frame)) rfl rfl
-        (by dsimp only; simpa [setReg] using hw') (by
-          have hes : 40 ≤ e.sp.toNat ∧ e.sp.toNat % 16 = 0 := ⟨by omega, hal1⟩
-          have h40 : (e.sp - 40#64).toNat = e.sp.toNat - 40 := by
-            rw [BitVec.toNat_sub]; simp; omega
-          have hrpm : P.rp e.mem (gOf s) = (e.regs 30).toNat := hrpe
-          have hrp' : ∀ m, MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 144)), s.sp.toNat + 40)] →
-              P.rp m (gOf s) = (e.regs 30).toNat := fun m hf => by
-            rw [hl.rp_frame _ _ _ (agG m hf)]; exact hrpm
-          have hrp'' : ∀ m g, g = (s.regs 28).toNat →
-              MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 144)), s.sp.toNat + 40)] →
-              P.rp m g = (e.regs 30).toNat := fun m g hg hf => by rw [hg]; exact hrp' m hf
-          dsimp only
-          simp only [setReg_apply, Nat.reduceEqDiff, reduceIte, h40]
-          have hrd : (((e.mem.writeLE (BitVec.toNat e.sp - 32) 8 (BitVec.toNat (e.regs 30))).writeLE
-              (BitVec.toNat e.sp - 40) 8 (BitVec.toNat e.sp - 8)).writeLE (BitVec.toNat e.sp - 16) 8
-              (S.mem.readLE (BitVec.toNat s.sp - 40 + 8) 8)).readLE (BitVec.toNat e.sp - 40 + 8) 8 =
-              (e.regs 30).toNat := by
-            rw [show BitVec.toNat e.sp - 40 + 8 = BitVec.toNat e.sp - 32 by omega]
-            simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
-            exact Nat.mod_eq_of_lt (by have : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
-                                       have := (e.regs 30).isLt; omega)
-          rw [hrd]
-          exact (hrp'' _ _ (by dsimp only [gOf]; simp [setReg, hS28']) (by janus_frame)).symm)
-      subst hs2
-      have h32 : (e.sp - 32#64).toNat = e.sp.toNat - 32 := by rw [BitVec.toNat_sub]; simp; omega
-      simp only [calleeStack, h32, retState, callRegs_apply, List.getD_nil, setReg_apply, reduceIte,
-        Nat.reduceEqDiff] at hfr2 hr0 hr1 hrec2 henv2
-      have hj0 : j2 0 ≠ 0 := fun h => hne2 (by rw [← hr0, h]; rfl)
-      have hcap' : S.mem.readLE (BitVec.toNat s.sp - 40 + 8) 8 = s.sp.toNat - 72 := by
-        rw [show BitVec.toNat s.sp - 40 + 8 = BitVec.toNat s.sp - 32 by omega]; exact hcap1
-      have hacc7 : m2.accessible (s.sp.toNat - 72) 8 true = true := by
-        rw [hfr2.accessible]; simp only [Memory.accessible_writeLE]
-        exact Memory.accessible_mono _ hwin' (by omega) (by omega)
-      janus_run [hcap']
-      have hag7 : Map.Agrees m2 (m2.writeLE (s.sp.toNat - 72) 8 7) P.priv :=
-        Map.Agrees.of_window (lo := s.sp.toNat - 72) (hi := s.sp.toNat - 40) (by janus_frame)
-          (Outside.of_sub hout (by omega) (by omega))
-      have hG : ∀ T : State, T.regs 28 = s.regs 28 → gOf T = gOf s := fun T h => by simp only [gOf, h]
-      simp only [retState] at hdf2 hsv2' hrp2 hrm2
-      rw [hG _ (by simp [setReg, hS28'])] at hdf2 hsv2' hrm2 hrec2
-      have hagX : Map.Agrees e.mem
-          (((e.mem.writeLE (BitVec.toNat e.sp - 32) 8 (BitVec.toNat (e.regs 30))).writeLE (BitVec.toNat e.sp - 40) 8
-              (BitVec.toNat e.sp - 8)).writeLE (BitVec.toNat e.sp - 16) 8 (S.mem.readLE (BitVec.toNat s.sp - 40 + 8) 8))
-          P.priv :=
-        Map.Agrees.of_window (lo := e.sp.toNat - 32 - P.depth) (hi := e.sp.toNat) (by janus_frame)
-          (Outside.of_sub hout (by omega) (by omega))
-      have hp2' : P.panics (m2.writeLE (BitVec.toNat s.sp - 72) 8 7) (gOf s) =
-          [{ arg := ⟨e2t.toNat, e2d.toNat⟩, start := eA.sp.toNat - 32, recovered := true }, { arg := ⟨e1t.toNat, e1d.toNat⟩, start := s.sp.toNat - 112 }] := by
-        rw [hl.panics_frame _ _ _ hag7]; exact hrec2
-      refine ⟨hl.env_frame _ _ henv2 hag7, hp2', ?_, ?_, ?_, ?_⟩
-      · rw [hl.defers_frame _ _ _ hag7]; rw [hdf2]; exact hl.defers_frame _ _ _ hagX
-      · rw [hl.saved_frame _ _ _ hag7]; rw [hsv2']; exact hl.saved_frame _ _ _ hagX
-      · rw [hl.room_frame _ _ _ hag7]; exact Nat.le_trans (Nat.le_of_eq (hl.room_frame _ _ _ hagX).symm) hrm2
-      · try simp only [List.cons_append, List.nil_append]
-        janus_frame
+  have hrpe : P.rp e.mem (gOf s) = (e.regs 30).toNat := by
+    have := hrs1.1
+    simpa [hS28, gOf] using this
+  have hcl := closure_run impl P hl hrec s e hc e2t.toNat e2d.toNat e1t.toNat e1d.toNat (eA.sp.toNat - 32)
+    hne2 hw hpc1 h26 h29 hS28' hal1 (by omega) (by omega) h30a h30b henv1 hW_e hm_cap hpn1' hrpe
   obtain ⟨k2, c', hst2, -, hcpc, hcsp, hc28, hc18, hcenv, hcpan, hcdef, hcsv, hcrm, hcfr, hc7⟩ := hcl
   refine GoReturns.of_steps (hst2.withExit hret.fetch_none) ?_
   have hagc : Map.Agrees e.mem c'.mem ((e.sp.toNat, s.sp.toNat - 112) ::
