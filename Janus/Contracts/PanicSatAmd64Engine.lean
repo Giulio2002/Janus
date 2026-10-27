@@ -42,7 +42,7 @@ the defer chain then. -/
 structure Inv0 (T : List FuncInfo) (m0 : Memory) (F : Frame) (items0 : List Item) (ds0 : List DeferRec)
     (mode : DeferMode) (g bp : W64) (lr : Nat) (c : State) (ch : List PanicRec) (rm ph : Nat) : Prop where
   al : F.sp % 8 = 0
-  hi : F.sp + 8 ≤ 2 ^ 48
+  hi : F.sp ≤ 2 ^ 48
   h112 : 112 ≤ F.sp
   acc : c.mem.accessible (F.sp - 112) 104 true = true
   r14 : c.regs 14 = g
