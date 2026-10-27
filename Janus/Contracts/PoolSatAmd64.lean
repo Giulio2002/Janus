@@ -172,4 +172,59 @@ theorem poolPutLive_satisfiable : ∃ (R : RtInv) (T : Nat) (Sh : PoolShape) (im
     rfl, (pstate_pre 3 (Or.inr rfl)).1, (pstate_pre 3 (Or.inr rfl)).2.1, by decide, rfl, fun _ h => h,
     (pstate_pre 3 (Or.inr rfl)).2.2⟩
 
+/-! ## `growslice(p, 1, 0, 1, et)` -/
+
+/-- `mov r9d, BUMP; mov rax,[r9]; lea r10,[rax+16]; mov [r9],r10; mov ecx, 1; ret`. -/
+def growCode8 : List Nat :=
+  [0x41, 0xb9, 0x00, 0x00, 0x40, 0x00, 0x49, 0x8b, 0x01, 0x4c, 0x8d, 0x50, 0x10, 0x4d, 0x89, 0x11,
+   0xb9, 0x01, 0x00, 0x00, 0x00, 0xc3]
+
+theorem finish_growslice8 {tys : Tys} (hty : TysOK tys) {ok : Nat → List Nat → Prop} {addr b : Nat}
+    {L : List (Nat × Nat)} {s : State} (fin : State)
+    (hrip : fin.rip = retAddrOf s) (h4 : fin.regs 4 = s.regs 4 + 8#64) (h5 : fin.regs 5 = s.regs 5)
+    (h14 : fin.regs 14 = s.regs 14) (hx : fin.xmm 15 = s.xmm 15) (hfs : fin.fsBase = s.fsBase)
+    (hdf : fin.df = s.df) (hmx : fin.mxcsr = s.mxcsr) (hx87 : fin.x87 = s.x87) (hfw : fin.fpucw = s.fpucw)
+    (h0 : fin.regs 0 = BitVec.ofNat 64 (s.mem.readLE BUMP 8)) (h3 : fin.regs 3 = s.regs 3)
+    (h1 : fin.regs 1 = 1#64)
+    (hmem : fin.mem = s.mem.writeLE BUMP 8 (s.mem.readLE BUMP 8 + 16))
+    (hok' : ∀ args, ok addr args → ∃ p et, args = [p, 1, 0, 1, et])
+    (pre : GrowslicePre64 4096 s ∧ StackRoom64 s 4096 5 ∧
+      LiveAt (toyR tys ok) addr (growsliceArgs64 s) L b (growsliceRound64 s) (s.regs 14).toNat s.mem
+        (liveWin64 s 4096 5)) :
+    LiveAllocRet64 (toyR tys ok) 4096 5
+      (fun ptr => [ptr, s.regs 3, BitVec.ofNat 64 (growCap8 (s.regs 3).toNat (s.regs 1).toNat)])
+      L b (growsliceRound64 s) (growsliceRound64 s) s fin fun m ptr =>
+        growsliceObj64 (toyR tys ok).rt s m ptr ∧ ApartAll ptr (growsliceRound64 s) L := by
+  obtain ⟨-, -, hok, hinv, hcost, hLs, hWs⟩ := pre
+  obtain ⟨p0, et, hargs⟩ := hok' _ hok
+  simp only [growsliceArgs64, List.cons.injEq, and_true] at hargs
+  obtain ⟨-, e3, e1, e7, -⟩ := hargs
+  have hg : growCap8 1 0 = 1 := by decide
+  have hR : growsliceRound64 s = 8 := by simp only [growsliceRound64, e3, e1, hg]
+  rw [hR] at hcost ⊢
+  refine bump_ret64 hty (A := 16) (by omega) (by omega) (by omega) rfl rfl hcost hinv hWs _ fin
+    hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw (fun p hp => ⟨?_, ?_, ?_, ?_⟩)
+    (fun p h1' h2' hend hz hacc hap => ⟨?_, hap⟩)
+  · rw [h0, hp]; simp
+  · simp [h3]
+  · simp only [e3, e1, hg]; simpa using h1
+  · rw [hmem, hp]
+  · simp only [growsliceObj64, e3, e1, e7, hg]
+    refine ⟨toy_fresh h1' h2' hend hz hacc _ (by omega) _ _, fun i hi => absurd hi (by omega),
+      fun i hi => absurd hi (by omega)⟩
+
+set_option maxRecDepth 20000 in
+theorem growslice8_impl64 (tys : Tys) (hty : TysOK tys) (ok : Nat → List Nat → Prop)
+    (hok' : ∀ args, ok A0 args → ∃ p et, args = [p, 1, 0, 1, et]) :
+    GrowsliceLiveContract64 (toy.link (at0 growCode8)) A0 4096 (toyR tys ok) := by
+  rw [link_at0]
+  intro L b s hpc pre
+  have hacB' := bump_acc pre.2.2.2.1
+  have ⟨⟨⟨hra, hal, h3, h4, h5⟩, _, _, _, _, _, _, _⟩, _⟩ := pre.1
+  have hap := bump_apart64 pre.2.2.2.2.2.2
+  janus64_run
+  exact finish_growslice8 hty _ (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
+    (by simp) (by simp) (by simp) (by simp) rfl rfl (by simp [setRegF, BUMP]) (by simp [setRegF])
+    (by simp [setRegF]) (by simp [BUMP]) hok' pre
+
 end Janus.Contracts.PoolSatAmd64
