@@ -1,0 +1,3 @@
+-- The library root. Every module of this package imports `Extracted` (supplied by `janus verify`
+-- from an artifact directory), so none is built by `lake build`; check them with `janus verify`
+-- (see scripts/verify-rtmisc-examples.sh).
