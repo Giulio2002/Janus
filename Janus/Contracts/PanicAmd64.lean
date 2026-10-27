@@ -260,18 +260,18 @@ def GorecoverContract (p : Janus.Amd64.Program) (addr : Nat) (P : PanicRuntime) 
 The loop of `Janus.Contracts.Panic.Engine`, with the amd64 conventions (see there for the account
 of the loop). -/
 
-/-- The runtime's stack window below the frame (amd64): `[F.sp - 8 - P.depth, F.sp - 8)`, below the
+/-- The runtime's stack window below the frame (amd64): `[F.sp - P.depth, F.sp - 8)`, below the
 return-address slot of the call into the runtime. -/
-def rtWin (P : PanicRuntime) (F : Frame) : List (Nat × Nat) := [(F.sp - 8 - P.depth, F.sp - 8)]
+def rtWin (P : PanicRuntime) (F : Frame) : List (Nat × Nat) := [(F.sp - P.depth, F.sp - 8)]
 
 /-- A deferred call as the runtime makes it (amd64): control at the funcval's code word, the closure
 context `RDX` = the funcval, `R14` the goroutine, `X15 = 0`, the direction flag clear, an 8-aligned
-`RSP` pointing at the return address, at most `P.depth` bytes below the frame's return-address slot
+`RSP` pointing at the return address, at most `P.depth` bytes below the frame's `SP`
 and below it, with an admissible return point there, the runtime usable. -/
 def DeferCall (P : PanicRuntime) (g : W64) (fsp fn : Nat) (e : State) : Prop :=
   e.rip = BitVec.ofNat 64 (e.mem.readLE fn 8) ∧ e.regs 2 = BitVec.ofNat 64 fn ∧ e.regs 14 = g ∧
     e.xmm 15 = 0 ∧ e.df = false ∧ (e.regs 4).toNat % 8 = 0 ∧
-    fsp - 8 - P.depth ≤ (e.regs 4).toNat ∧ (e.regs 4).toNat + 16 ≤ fsp ∧
+    fsp - P.depth ≤ (e.regs 4).toNat ∧ (e.regs 4).toNat + 16 ≤ fsp ∧
     e.mem.readLE (e.regs 4).toNat 8 < 2 ^ 47 ∧ P.Env e.mem
 
 /-- A deferred call `e` returned normally in `e'` (amd64): at its return point with `RSP` popped,
