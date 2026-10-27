@@ -105,6 +105,25 @@ theorem blo (w r : Nat) (hr : r < 100) (hw : w = r * 2 + 1) :
     BitVec.ofNat 8 (smallsByte w % 256) = Janus.Spec.Print.digit (r % 10) := by
   subst hw; rw [smallsByte_mod256 _ (by omega)]; exact smalls_lo r hr
 
+theorem neg_sub_20 (b : Nat) (hb : b ≤ 20) :
+    0#64 - (BitVec.ofNat 64 b - 20#64) = BitVec.ofNat 64 (20 - b) := by
+  apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_sub]; omega
+
+/-! ## `printuint(v)` -/
+
+theorem neg_sub_21 (b : Nat) (hb : b ≤ 20) :
+    0#64 - (BitVec.ofNat 64 b - 21#64) = BitVec.ofNat 64 (21 - b) := by
+  apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_sub]; omega
+
+theorem and_sshr_21 (x : Nat) (h1 : 1 ≤ x) (hx : x < 21) :
+    BitVec.ofNat 64 x - 1#64 &&& (BitVec.ofNat 64 x - 21#64).sshiftRight 63 = BitVec.ofNat 64 (x - 1) := by
+  have e1 : BitVec.ofNat 64 x - 1#64 = BitVec.ofNat 64 (x - 1) := by
+    apply BitVec.eq_of_toNat_eq; simp; omega
+  have e2 : BitVec.ofNat 64 x - 21#64 = BitVec.ofNat 64 (x - 1) - BitVec.ofNat 64 20 := by
+    apply BitVec.eq_of_toNat_eq; simp; omega
+  rw [e1, e2]
+  exact and_sshr_lt_bv (x - 1) 20 (by omega) (by decide)
+
 /-- What the rest of `formatBase10` from the final chunk's loop head guarantees: it returns
 `i - |decimal lo|` with the digits of `lo` written in front of the bytes already at `[a + i, a + 20)`. -/
 def FbTail (s : State) (SP a i lo : Nat) (m0 : Memory) (s' : State) : Prop :=

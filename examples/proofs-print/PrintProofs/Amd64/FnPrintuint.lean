@@ -6,12 +6,6 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec Janus.Con
 
 namespace PrintFn
 
-theorem neg_sub_20 (b : Nat) (hb : b ≤ 20) :
-    0#64 - (BitVec.ofNat 64 b - 20#64) = BitVec.ofNat 64 (20 - b) := by
-  apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_sub]; omega
-
-/-! ## `printuint(v)` -/
-
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 40000000 in
 theorem printuint_k (impl : List Amd64.Segment)
