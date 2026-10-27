@@ -496,4 +496,6 @@ leaves none.
 | [ORACLE.md](docs/ORACLE.md), [ORACLE-SAIL.md](docs/ORACLE-SAIL.md), [ORACLE-AMD64.md](docs/ORACLE-AMD64.md) | The differential oracles and their results |
 | [AUDIT.md](docs/AUDIT.md) | The red-team audit of `janus verify` and its fixes |
 
-<!-- No LICENSE file exists in the repository yet, so no license is stated here. -->
+## License
+
+Janus is released under the [MIT License](LICENSE).
