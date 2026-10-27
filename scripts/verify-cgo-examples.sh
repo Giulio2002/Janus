@@ -98,6 +98,8 @@ for target in "${names[@]}"; do
     # the non-vacuity witnesses (Proof.Witness.nonvacuous, Proof.Witness.returns) where there are some
     if grep -q '^namespace Witness' "examples/proofs-cgo/$isa/$n.lean"; then
       for thm in Proof.Witness.nonvacuous Proof.Witness.returns; do
+        # `returns` only where the proof states it
+        [ "$thm" = Proof.Witness.returns ] && ! grep -q '^theorem returns' "examples/proofs-cgo/$isa/$n.lean" && continue
         if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --theorem "$thm" --janus-root . >> "$out/verify.log" 2>&1; then
           printf '%-12s ok  (%s)\n' "$isa/$n" "$thm" | tee -a "$summary"
         else
