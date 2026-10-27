@@ -178,14 +178,27 @@ func (r *reacher) tooMany() error {
 	for _, q := range r.queue {
 		names = append(names, q.Name)
 	}
+	// the reached functions a framework contract describes (sync.(*Pool).Get, the map and
+	// interface runtime, ...): leaving them out with --contract is usually what is meant
+	var withContract []string
+	for _, n := range names {
+		if runtimeContractStubs[n] && n != r.x.Entry.Name {
+			withContract = append(withContract, "--contract '"+n+"'")
+		}
+	}
 	if len(names) > 20 {
 		names = append(names[:20], fmt.Sprintf("... and %d more", len(names)-20))
+	}
+	next := "Raise the limit with --max-functions N if this is intended, or extract a smaller function."
+	if len(withContract) > 0 {
+		next = "It reaches functions a framework contract describes (docs/RUNTIME-CONTRACTS.md); leave them out with " +
+			strings.Join(uniq(withContract), " ") + ". Otherwise raise the limit with --max-functions N if this is intended, or extract a smaller function."
 	}
 	return &diag{
 		Msg: fmt.Sprintf("%s reaches more than %d functions by direct branches:\n    %s",
 			r.x.Entry.Name, r.maxF, strings.Join(names, "\n    ")),
 		Stage: "code extraction",
-		Next:  "Raise the limit with --max-functions N if this is intended, or extract a smaller function.",
+		Next:  next,
 	}
 }
 

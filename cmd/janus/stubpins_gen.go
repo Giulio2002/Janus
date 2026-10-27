@@ -936,6 +936,14 @@ var stubPins = map[string]map[string][]stubPin{
 		"time.now": {
 			{Hash: "e9920b149274acb45eca252df5b2fff83e07a379f8a9d44a20f033c59194e224", File: "runtime/time_linux_amd64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v2 v3 v4
 		},
+		"sync.(*Pool).Get": {
+			{Hash: "13fe3512a133a12bb9b959ccec79161c249272f8b7919ba374a5a603a0c3c322", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+			{Hash: "458f434d194f50de21864df9766f9852fc61d0fcb6a7797cfa7a258885a9371e", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"sync.(*Pool).Put": {
+			{Hash: "100984d8a51256949ce85fdd76e84cab5af5e2603f96ac3b63b994721421e6ef", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+			{Hash: "9aa4825b7117a441eeffa0dd83cc9970d49aa59aa1644f2457987f4dda80e8da", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v2 v3 v4
+		},
 	},
 	"arm64": {
 		"_cgo_topofstack": {
@@ -1757,6 +1765,14 @@ var stubPins = map[string]map[string][]stubPin{
 		},
 		"runtime.walltime.abi0": {
 			{Hash: "1c56310b9a675474508462a22c2532eb5909281440c32279737f5beb4c6711bd", File: "runtime/sys_linux_arm64.s"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf noopt scexp v8.1 v9.0
+		},
+		"sync.(*Pool).Get": {
+			{Hash: "7226f1e051f76dba53f65819a60676eb4835430a6dfaad24165aa8e7e475772d", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+			{Hash: "ea0054321edabd1ad36cba1dd8e6c26fc2461002388b9264127ecbe39962466f", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
+		},
+		"sync.(*Pool).Put": {
+			{Hash: "60ab4d01b49cba0ba06e9d2234c0eea4656aca2bc785bf8c6b714927978d9dd1", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: default trimpath nodwarf v8.1 v9.0
+			{Hash: "f3486c16a1dee5218e59ba39f59846dead0d222dfd5fea88846e10babe9e31bc", File: "sync/pool.go"}, // go1.26.0 go1.26.5 go1.26.8 go1.26.10: noopt
 		},
 	},
 }

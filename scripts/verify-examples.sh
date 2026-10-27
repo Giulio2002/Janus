@@ -34,7 +34,7 @@ all=(Add Max Add128 Mul64 Add256 Div Get AddThree Sum SetOne256 HexDigit AddLimb
      Triangle GotoSum Find2D RowsWith Log2 TotalMeters TotalFeet Fact SumBelow ReverseArray DivMod10
      SwapBig Compose DotBoth BitMerge Shifts MinMax ClearArray IterSum Sum3 AlignUp Slice3
      Slice2 Mod IncTwice Bump GlobalTable Table MakeAdder
-     Box AsHasher Classify Equal IsEven CycA MulAlgo Double
+     Box AsHasher Classify Equal ScratchSum StackGrow IsEven CycA MulAlgo Double
      Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
      I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird SpanSum MinF64 MaxF64 MinStr
      BigLocal SumRec HoldPtr)

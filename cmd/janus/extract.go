@@ -155,10 +155,11 @@ var (
 // runtimeContractStubs are the runtime functions whose behaviour a framework contract library
 // states (Janus/Contracts/Iface.lean, IfaceAmd64.lean: the interface runtime of Go 1.26;
 // Janus/Contracts/Mem.lean, Hash.lean and their amd64 files: equality, hashing and typed memory;
-// Janus/Contracts/Map.lean, MapVar.lean, MapStr.lean and their amd64 files: the map runtime; and
+// Janus/Contracts/Map.lean, MapVar.lean, MapStr.lean and their amd64 files: the map runtime;
+// Janus/Contracts/Pool.lean, PoolAmd64.lean: sync.Pool's Get and Put; and
 // rtmiscContractStubs below, added at init). When a
 // --contract pattern matches one, the extractor pins it like a stub (checkContractPin): the
-// pclntab names it in package runtime, in the toolchain's file, and its normalized code is the
+// pclntab names it in package runtime (sync for the pool, contractStubPackage), in the toolchain's file, and its normalized code is the
 // runtime's (stubpins_gen.go). A binary whose function of that name is not the runtime's is an
 // extraction error, so a theorem's contract hypothesis is about the Go runtime's own code. The
 // functions they call (mallocgc, getitab, typedmemmove, the types' equality functions, ...)
@@ -198,6 +199,20 @@ var runtimeContractStubs = map[string]bool{
 	"runtime.mapassign_fast64ptr": true,
 	"runtime.mapaccess1_faststr":  true, "runtime.mapaccess2_faststr": true,
 	"runtime.mapassign_faststr": true, "runtime.mapdelete_faststr": true,
+	// sync.Pool for a single goroutine (Janus/Contracts/Pool.lean, PoolAmd64.lean): Get and Put
+	// are pinned to package sync's code (contractStubPackage); the concurrency internals they
+	// call (runtime_procPin, poolDequeue, poolChain, the allPools mutex, getSlow, pinSlow) are
+	// then not extracted.
+	"sync.(*Pool).Get": true, "sync.(*Pool).Put": true,
+}
+
+// contractStubPackage is the package a function of runtimeContractStubs must be in, by its
+// pclntab name: runtime, except for sync.(*Pool).Get and Put (package sync, sync/pool.go).
+func contractStubPackage(name string) string {
+	if strings.HasPrefix(name, "sync.") {
+		return "sync"
+	}
+	return "runtime"
 }
 
 // runtimePanicContractStubs are the panic/defer/recover runtime functions whose behaviour a

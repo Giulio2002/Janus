@@ -7,6 +7,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	_ "unsafe" // for go:linkname
 )
 
@@ -865,4 +866,9 @@ var keep = []func(){
 	s_typedmemmove,
 }
 
-func main() { fmt.Println(len(keep)) }
+var keepMethods = []any{
+	(*sync.Pool).Get,
+	(*sync.Pool).Put,
+}
+
+func main() { fmt.Println(len(keep), len(keepMethods)) }

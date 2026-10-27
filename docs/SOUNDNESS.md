@@ -1449,6 +1449,48 @@ data-dependent number of times. What a theorem about such a function means, and 
   unspecified cannot imply. `MemModel.ofRt R` states one over a live runtime's model; new proofs
   use the live family.
 
+### The single-threaded assumption
+
+The model has one instruction stream and one memory, and a theorem about a function that calls a
+runtime contract (the allocation contracts, the write barrier, `memclrNoHeapPointers`,
+`sync.(*Pool).Get` and `Put`) holds of the real binary for the executions in which, **from the
+function's entry to its return**:
+
+1. *No other thread of execution touches memory the function or its contracts use.* No other
+   goroutine, OS thread, signal handler, GC worker or finalizer reads or writes a byte of the
+   function's stack window (`[SP - k, SP + a)` in the statement), of the runtime-owned ranges `R.rt`
+   (the ranges the contracts may change), or of an object of the live set `L`. The contracts say
+   what the callee changes (`MemFrame`, `LiveFrame`); a concurrent writer could change any byte
+   outside that, and the theorem would not describe the run.
+2. *No other goroutine uses a pool the function uses.* No other goroutine calls `Get` or `Put` on
+   the pool, or otherwise changes its memory (`local`, `localSize`, `victim`, `New`), between the
+   function's entry and its return. `PoolGetLive` returns an object the pool no longer holds and
+   `PoolPutLive` hands one over; with a concurrent user the pool's content at the next call is not
+   what the invariant `R.inv` of the previous call says. (The real `sync.Pool` is safe for
+   concurrent use; the contract states what one goroutine sees, and that is what the theorem needs.)
+3. *No asynchronous preemption.* The examples assume that the word `g.stackguard0` is outside
+   `R.rt` and the window (`Outside (g + 16) 8 …`) and read it at the prologue of each callee
+   (`StackRoom`): the runtime poisons `stackguard0` to preempt a goroutine (`stackPreempt`, signal
+   `SIGURG`), after which the next prologue would enter `morestack`. A theorem is about runs in
+   which `stackguard0` keeps the value the statement reads (`GuardOK`) at every call, and the
+   goroutine stack does not move (as for the allocation contracts).
+4. *Stop-the-world points are inside calls.* A garbage collection that starts or finishes during
+   a call may free what the contract allows it to free and clears the pools (`poolCleanup`); the
+   contracts allow both (`Get` may return nil, `Put` may drop the object), and the invariant
+   `R.inv` covers the heap. A collection that moves the caller's stack, or frees an object of the
+   live set `L`, is outside the model: the caller must keep its objects reachable (they are
+   on its frame or in `L`).
+
+What the assumption does **not** restrict: the goroutine may move between Ps and between OS
+threads between and inside calls (the contracts do not mention a `P`); other goroutines may run
+anywhere on memory that is none of the above (their own stacks, other pools, other objects); the
+function may be called from many goroutines at once, each with its own stack window, each theorem
+instance for the executions in which the four conditions hold for that call.
+
+Violating a condition does not make the proof unsound in the kernel (the theorem is true of the
+model); it makes the model's runs different from the machine's, so the theorem says nothing about
+the machine's. The conditions are part of the statement's reading, not of its text.
+
 ## Dynamic calls, closures and `defer`
 
 An indirect call (`BLR`/`BR`; amd64 `CALL`/`JMP` through a register or memory) jumps to the value

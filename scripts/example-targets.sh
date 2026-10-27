@@ -68,6 +68,13 @@ case "$1" in
   # the interface examples (examples/basic/iface.go): the Go 1.26 interface runtime entry points
   # they call (Janus/Contracts/Iface.lean, IfaceAmd64.lean; pinned to the runtime's code), and
   # the static itab the assertion and switch theorems name
+  # the sync.Pool example (examples/basic/zpool.go): Get and Put (Janus/Contracts/Pool.lean,
+  # PoolAmd64.lean; pinned to package sync's code) and the allocation of a new buffer
+  ScratchSum) printf '%s\n' --contract 'sync.(*Pool).Get' --contract 'sync.(*Pool).Put' \
+      --contract runtime.newobject ;;
+  StackGrow) printf '%s\n' --contract 'sync.(*Pool).Get' --contract 'sync.(*Pool).Put' \
+      --contract runtime.newobject --contract runtime.growslice --contract 'runtime.gcWriteBarrier*' \
+      --contract runtime.memclrNoHeapPointers ;;
   Box) printf '%s\n' --contract runtime.convT64 ;;
   AsHasher) printf '%s\n' --contract runtime.typeAssert --targets \
       'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher' ;;

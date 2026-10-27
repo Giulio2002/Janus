@@ -52,7 +52,7 @@ arm64=(MallocFast RuneLen SumRunes ClearWords A64IndexByte A64Crc32 A64CountByte
        Slice3 Slice2 Sum3 Triangle GotoSum Log2 SumBelow IterSum DivMod10 BitMerge MinMax ClearArray
        Mod IncTwice Bump GlobalTable Table MakeAdder IsEven CycA MulAlgo Double BigLocal SumRec HoldPtr
        SpanSum MinStr I64ToF64 F64ToI64 U64ToF64 F64ToF32 F32ToF64 LoadThird MinF64 MaxF64
-       Box AsHasher Classify Equal Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
+       Box AsHasher Classify Equal ScratchSum StackGrow Eq32 StrEq F64Eq CopyTrees ClearTrees LookupStr HashFKey EqFKey
        WrongAdd)
 . scripts/example-contracts.sh
 arm64+=($runtime_examples $runtime_examples_arm64_only)
