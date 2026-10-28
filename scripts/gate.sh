@@ -152,6 +152,22 @@ fi
 export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
 
 # ---- phase 2: lanes
+# The JanusASL / JanusX86 / oracle lanes run lake in packages that depend on the framework by path: such a
+# lake REPLAYS (rewrites) Janus/*.olean in the framework build it is pointed at, and a verification that
+# reads .lake/build at that moment fails ("changed after the proof compile", a missing .olean). They
+# therefore work in a private copy of the sources (and a copy of the finished framework build), so the
+# prebuilt build the verify, go test and audit lanes read is never written after the prebuild. Their own
+# package builds (JanusASL/.lake, JanusX86/.lake, oracle-sail/target) and artifacts/ are shared by
+# symlink: only these lanes use the former, and artifacts/ is read-only to them.
+tree="$out/tree"
+if selected x86 || selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go; then
+  mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
+  rsync -a --exclude=/.git --exclude=/artifacts --exclude=/audit/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake \
+    --exclude=/oracle-sail/target --exclude=/bin ./ "$tree"/ || { echo "gate: cannot copy the sources for the isolated lanes"; exit 1; }
+  ln -sfn "$root/artifacts" "$tree/artifacts"; ln -sfn "$root/JanusASL/.lake" "$tree/JanusASL/.lake"
+  ln -sfn "$root/JanusX86/.lake" "$tree/JanusX86/.lake"; ln -sfn "$root/oracle-sail/target" "$tree/oracle-sail/target"
+  mkdir -p "$tree/bin"; cp -f bin/janus "$tree/bin/janus"
+fi
 lane_times="$root/artifacts/gate/lane-times"
 shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2
 rt_needs_asl="asl-build"
@@ -175,13 +191,13 @@ JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
 add gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
 add rounds "audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
-add x86 "scripts/x86formal.sh prove"
-add asl-build "scripts/asl.sh build"
-add sail-build "scripts/oracle-sail.sh build"
+add x86 "cd '$tree' && scripts/x86formal.sh prove"
+add asl-build "cd '$tree' && scripts/asl.sh build"
+add sail-build "cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
   nd=""
   case "$g" in btf|go) ;; fsqrt) nd="$(needs asl-build sail-build)" ;; *) nd="$(needs asl-build)" ;; esac
-  add "rtasl-$g" "audit/rt-asl/run.sh $g" "$nd"
+  add "rtasl-$g" "cd '$tree' && audit/rt-asl/run.sh $g" "$nd"
 done
 # stream the verify lane's own result lines as they are written
 tailpid=""
