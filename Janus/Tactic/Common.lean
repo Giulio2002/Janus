@@ -1442,19 +1442,19 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
            | (try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
                 Nat.reduceMod] at *
               repeat' apply And.intro
-              all_goals first | assumption | omega)
+              all_goals first | (with_reducible assumption) | omega)
            | (janus_clear_irrel
               try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
                 Nat.reduceMod] at *
               repeat' apply And.intro
-              all_goals first | omega | assumption)
+              all_goals first | omega | (with_reducible assumption))
            | (janus_apart_facts
               try simp only [Janus.Apart] at *
               janus_clear_irrel2
               try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
                 Nat.reduceMod] at *
               repeat' apply And.intro
-              all_goals first | omega | assumption)))))
+              all_goals first | omega | (with_reducible assumption))))))
         pure gs.isEmpty
       catch _ => pure false
     unless ok do saved.restore; continue

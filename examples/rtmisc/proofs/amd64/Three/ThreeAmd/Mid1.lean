@@ -63,7 +63,7 @@ theorem mid1 (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (n x : BitVec 64)
   janus64_run until [pcS2] calls [hnew.pos]
   all_goals (refine mid2 impl R b n x ret hret s hmk hwb hpre _ ?_ ?_ pa.toNat ?pcv ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
   all_goals (try unfold Rel)
-  all_goals (try (simp only [Nat.add_sub_cancel_left]; exact rfl))
+  all_goals (try (simp only [Nat.add_sub_cancel_left]; with_reducible rfl))
   all_goals (repeat' refine And.intro ?_ ?_)
   all_goals (try janus64_simp)
   all_goals first
