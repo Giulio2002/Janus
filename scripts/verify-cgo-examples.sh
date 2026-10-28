@@ -128,7 +128,7 @@ verify_one() {
   start=$(date +%s.%N)
   verify_theorems "$out" "$proof" "$st" "${thms[@]}" -- --janus-root . || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)
-  cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
+  { [ -f "$st/all.log" ] && cat "$st/all.log" || cat "$st"/[0-9]*.log; } > "$out/verify.log" 2>/dev/null || true
   if [ "$(cat "$st/0.rc" 2>/dev/null)" = 0 ]; then
     printf '%-12s ok  %6.1fs\n' "$target" "$t" | tee "$lines/${isa}_$n"
     for ((i = 1; i < ${#thms[@]}; i++)); do

@@ -63,6 +63,7 @@ export PATH=/usr/local/go/bin:$PATH
 memguard_self "$@"
 
 orig_args=("$@")
+sbfile="${JANUS_SPEED_BASELINE:-$root/scripts/speed-baseline.tsv}"
 jobs_n="${JANUS_JOBS:-2}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -254,15 +255,15 @@ python3 -I "$root/scripts/gate-report.py" "$tlf" || true
 speed_rc=0
 if [ "$sbmode" = record ]; then
   if [ -z "$partial" ] && [ "$lanes_rc" = 0 ]; then
-    python3 -I "$root/scripts/gate-speedcheck.py" update "$tlf" "$root/scripts/speed-baseline.tsv" "$out/verify"
-    echo "speed check: baseline RECORDED in scripts/speed-baseline.tsv (commit it after reviewing); no comparison made"
+    python3 -I "$root/scripts/gate-speedcheck.py" update "$tlf" "$sbfile" "$out/verify"
+    echo "speed check: baseline RECORDED in $sbfile (commit it after reviewing); no comparison made"
   else
     echo "speed check: baseline NOT recorded (record needs a passing full run)"
   fi
-elif [ -f "$root/scripts/speed-baseline.tsv" ]; then
-  python3 -I "$root/scripts/gate-speedcheck.py" check "$tlf" "$root/scripts/speed-baseline.tsv" "$out/verify" || speed_rc=$?
+elif [ -f "$sbfile" ]; then
+  python3 -I "$root/scripts/gate-speedcheck.py" check "$tlf" "$sbfile" "$out/verify" || speed_rc=$?
 else
-  echo "!!!! speed check NOT enforced: no scripts/speed-baseline.tsv (record one with --speed-baseline record after a green full gate) !!!!"
+  echo "!!!! speed check NOT enforced: no baseline file $sbfile (record one with --speed-baseline record after a green full gate) !!!!"
 fi
 [ "$speed_rc" = 0 ] || lanes_rc=1
 echo

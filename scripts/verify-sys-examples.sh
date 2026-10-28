@@ -86,7 +86,7 @@ verify_one() {
   start=$(date +%s.%N)
   verify_theorems "$out" "examples/proofs-sys/$isa/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"} || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)
-  cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
+  { [ -f "$st/all.log" ] && cat "$st/all.log" || cat "$st"/[0-9]*.log; } > "$out/verify.log" 2>/dev/null || true
   local ok=1
   for ((i = 0; i < ${#thms[@]}; i++)); do
     if [ "$(cat "$st/$i.rc" 2>/dev/null)" != 0 ]; then ok=0; echo "  $target: ${thms[$i]} FAILED"; fi
