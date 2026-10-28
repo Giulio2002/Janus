@@ -23,7 +23,7 @@ import (
 // disabled by --fresh-framework). An unsafe directory is an error, never a silent fallback.
 func externalVerdictStore(opts map[string]string) (verdictStore, bool, error) {
 	dir := os.Getenv("JANUS_VERDICT_CACHE")
-	if dir == "" || opts["fresh-framework"] != "" {
+	if dir == "" || dir == "off" || opts["fresh-framework"] != "" {
 		return verdictStore{}, false, nil
 	}
 	if !filepath.IsAbs(dir) {
@@ -45,7 +45,7 @@ func externalVerdictStore(opts map[string]string) (verdictStore, bool, error) {
 // verdictStoreDir is the directory sandboxed processes must not see ("" when none).
 func verdictStoreDir() string {
 	d := os.Getenv("JANUS_VERDICT_CACHE")
-	if d == "" || !filepath.IsAbs(d) {
+	if d == "" || d == "off" || !filepath.IsAbs(d) {
 		return ""
 	}
 	return d
