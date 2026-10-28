@@ -239,7 +239,7 @@ func summarizeLeanErrors(out string, limit int) string {
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	args, flags := takeBoolFlags(args, "json", "fresh", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
-	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root")
+	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
 	}
@@ -265,7 +265,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 		opts["allow-path-deps"] = "true"
 	}
 	outdir := pos[0]
-	if strings.Contains(opts["theorem"], "\n") || strings.Contains(opts["theorem"], "::") {
+	if strings.Contains(opts["theorem"], "\n") || strings.Contains(opts["theorem"], "::") || opts["results"] != "" {
 		return cmdVerifyMany(outdir, opts, flags, stdout, stderr)
 	}
 	r, err := verifyAndReport(outdir, opts, stderr)
@@ -1189,29 +1189,40 @@ func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool,
 	}
 	failed := 0
 	var aslErr error
-	if flags["json"] {
-		mj := multiJSON{Schema: 1}
-		for _, o := range outs {
-			it := multiJSONItem{Theorem: o.Theorem, Status: "verified", Report: o.Report}
-			if o.Err != nil {
-				f := toFailureJSON(o.Err)
-				it.Status, it.Failure = "failed", &f
-				failed++
-			} else if aslErr == nil {
-				aslErr = aslDiagOf(o.Report.ASL)
-			}
-			mj.Results = append(mj.Results, it)
+	mj := multiJSON{Schema: 1}
+	for _, o := range outs {
+		it := multiJSONItem{Theorem: o.Theorem, Status: "verified", Report: o.Report}
+		if o.Err != nil {
+			f := toFailureJSON(o.Err)
+			it.Status, it.Failure = "failed", &f
+			failed++
+		} else if aslErr == nil {
+			aslErr = aslDiagOf(o.Report.ASL)
 		}
+		mj.Results = append(mj.Results, it)
+	}
+	// --results FILE: the per-theorem outcomes, written by this process (a proof cannot write
+	// it: the sandbox is read-only outside the work directory). scripts/lib/theorems.sh reads
+	// each theorem's status from it.
+	if opts["results"] != "" {
+		b, _ := json.MarshalIndent(mj, "", "  ")
+		if err := os.WriteFile(opts["results"], append(b, '\n'), 0o644); err != nil {
+			return jsonFailure(stdout, flags["json"], &diag{Msg: fmt.Sprintf("Cannot write %s: %v", opts["results"], err), Stage: "writing report"})
+		}
+	}
+	if flags["json"] {
 		b, _ := json.MarshalIndent(mj, "", "  ")
 		fmt.Fprintf(stdout, "%s\n", b)
 	} else {
+		// One block per theorem, each introduced by a "=== NAME: verified|FAILED ===" line (in this
+		// order, on standard output) so a log can be split per theorem.
 		for i, o := range outs {
 			if o.Err != nil {
-				failed++
-				fmt.Fprintf(stderr, "FAIL %s\n", termSafe(o.Theorem))
-				printDiag(stderr, o.Err)
+				fmt.Fprintf(stdout, "=== %s: FAILED ===\n", termSafe(o.Theorem))
+				printDiag(stdout, o.Err)
 				continue
 			}
+			fmt.Fprintf(stdout, "=== %s: verified ===\n", termSafe(o.Theorem))
 			rp := filepath.Join(outdir, verifiedDir, o.Theorem+".json")
 			if len(outs) == 1 {
 				rp = filepath.Join(outdir, "verified.json")
