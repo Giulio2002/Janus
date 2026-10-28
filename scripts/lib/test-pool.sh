@@ -66,4 +66,5 @@ for w in "BLOCKED +dep-c" "BLOCKED +dep-u" "BLOCKED +dep-cyc1" "BLOCKED +dep-cyc
   grep -Eq "$w" "$t/out2" && ok "needs: $w" || { bad "needs: no $w"; cat "$t/out2"; }
 done
 [ "$rc" = 1 ] && ok "blocked items fail the pool" || bad "deps rc=$rc"
+[ "$fail" = 0 ] && echo "all checks passed"
 exit $fail

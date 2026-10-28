@@ -8,6 +8,8 @@
 #   -p PARALLEL   `go test -parallel` of each shard (default 1: the shards are the parallelism, so the
 #                 total number of test slots is SHARDS x PARALLEL; $JANUS_GOTEST_PARALLEL)
 #   --plan        print the assignment (shard, estimated seconds, tests) and the checks below, run nothing
+#   --run ERE     development subset: only the tests whose name matches ERE (the partition check is then
+#                 against that list; scripts/gate.sh --gotest-run). Not a gate run.
 #   --outdir DIR  per-shard logs and the result (default artifacts/gate/gotest)
 #
 # The plan: `go test -list` gives the full list of tests (Test*, Example* and Fuzz* functions; benchmarks
@@ -29,12 +31,13 @@ cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
-nshards="" par="${JANUS_GOTEST_PARALLEL:-1}" plan="" outdir="$root/artifacts/gate/gotest"
+run="" nshards="" par="${JANUS_GOTEST_PARALLEL:-1}" plan="" outdir="$root/artifacts/gate/gotest"
 while [ $# -gt 0 ]; do
   case "$1" in
     -n) nshards="$2"; shift 2 ;;
     -p) par="$2"; shift 2 ;;
     --plan) plan=1; shift ;;
+    --run) run="$2"; shift 2 ;;
     --outdir) outdir="$2"; shift 2 ;;
     *) echo "usage: scripts/gotest-shards.sh [-n SHARDS] [-p PARALLEL] [--plan] [--outdir DIR]" >&2; exit 2 ;;
   esac
@@ -50,6 +53,7 @@ mkdir -p "$outdir"; rm -f "$outdir"/shard-*.log "$outdir"/shard-*.rc "$outdir"/p
 for pkg in $(go list ./cmd/...); do
   go test -list '.*' "$pkg" 2>/dev/null | grep -E '^(Test|Example|Fuzz)' | sed "s|^|$pkg\t|" >> "$outdir/all.txt" || true
 done
+if [ -n "$run" ]; then grep -E -e "$run" <(cut -f2 "$outdir/all.txt") > /dev/null && awk -F'\t' -v re="$run" '$2 ~ re' "$outdir/all.txt" > "$outdir/all.tmp" && mv "$outdir/all.tmp" "$outdir/all.txt"; fi
 [ -s "$outdir/all.txt" ] || { echo "gotest-shards: no tests listed"; exit 1; }
 total=$(wc -l < "$outdir/all.txt")
 if [ "$(cut -f2 "$outdir/all.txt" | sort | uniq -d | wc -l)" -ne 0 ]; then

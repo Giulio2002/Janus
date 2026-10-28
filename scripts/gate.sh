@@ -10,6 +10,10 @@
 #   --lanes N   lanes at once (default $JANUS_LANES, else N + 1: the verify pool and N others). Lanes are
 #               queued longest first by their time in the last run (artifacts/gate/lane-times).
 #   --changed   development only (scripts/verify-all-examples.sh --changed): not a gate run.
+#   --filter ERE   verify lane: only the items whose id matches (scripts/verify-all-examples.sh --filter)
+#   --gotest-run ERE   go test lane: only the tests whose name matches
+#   --rounds LIST  audit lane: only these rounds (audit/run-rounds.sh, e.g. "r2 r3")
+#   --update-baseline  after a passing FULL run, rewrite scripts/speed-baseline.tsv from its timeline
 #   --only/--skip  stage lists (names below); a partial run says PARTIAL and writes no lane times.
 #   --out DIR   logs and the timeline (default artifacts/gate/<UTC timestamp>, linked as artifacts/gate/latest)
 #
@@ -50,7 +54,7 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/memguard.sh"
 memguard_self "$@"
 
-jobs_n="${JANUS_JOBS:-2}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out=""
+jobs_n="${JANUS_JOBS:-2}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -j|--jobs) jobs_n="${2:?-j needs a number}"; shift 2 ;;
@@ -60,6 +64,10 @@ while [ $# -gt 0 ]; do
     --only) only="${2:?}"; shift 2 ;;
     --skip) skip="${2:?}"; shift 2 ;;
     --out) out="${2:?}"; shift 2 ;;
+    --filter) vfilter="${2:?}"; shift 2 ;;
+    --gotest-run) gtrun="${2:?}"; shift 2 ;;
+    --rounds) rounds="${2:?}"; shift 2 ;;
+    --update-baseline) upd=1; shift ;;
     -h|--help) sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 0 ;;
     *) echo "usage: scripts/gate.sh [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
   esac
@@ -79,7 +87,7 @@ selected() { # NAME: is the stage selected?
   return 0
 }
 partial=""
-{ [ -n "$only" ] || [ -n "$skip" ] || [ -n "$changed" ]; } && partial=1
+{ [ -n "$only" ] || [ -n "$skip" ] || [ -n "$changed" ] || [ -n "$vfilter" ] || [ -n "$gtrun" ] || [ -n "$rounds" ]; } && partial=1
 
 # ---- admission (RULES.md)
 load1=$(awk '{ print int($1) }' /proc/loadavg); memk=$(par_mem_available_kb)
@@ -162,10 +170,10 @@ add() { # NAME CODE [NEEDS]
 }
 # a lane needs its prerequisite only when that stage is part of this run
 needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; done; echo "$r"; }
-add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed}"
+add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${vfilter:+--filter '$vfilter'}"
 JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
-add gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards --outdir '$out/gotest'"
-add rounds "audit/run-rounds.sh"
+add gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
+add rounds "audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
 add x86 "scripts/x86formal.sh prove"
 add asl-build "scripts/asl.sh build"
@@ -197,6 +205,18 @@ fi
 gate_t1=$(now)
 tl_stage stage gate "$gate_t0" "$gate_t1" "$lanes_rc"
 python3 -I "$root/scripts/gate-report.py" "$tlf" || true
+# the speed-regression check (on top of every other check): scripts/gate-speedcheck.py, committed baseline
+# scripts/speed-baseline.tsv; a regression fails the gate whatever the host load
+speed_rc=0
+if [ -f "$root/scripts/speed-baseline.tsv" ]; then
+  python3 -I "$root/scripts/gate-speedcheck.py" check "$tlf" "$root/scripts/speed-baseline.tsv" "$out/verify" || speed_rc=$?
+else
+  echo "speed check: no scripts/speed-baseline.tsv yet (create it with --update-baseline after a passing full run)"
+fi
+if [ -n "$upd" ] && [ -z "$partial" ] && [ "$lanes_rc" = 0 ]; then
+  python3 -I "$root/scripts/gate-speedcheck.py" update "$tlf" "$root/scripts/speed-baseline.tsv" "$out/verify"
+fi
+[ "$speed_rc" = 0 ] || lanes_rc=1
 echo
 if [ "$lanes_rc" = 0 ]; then
   echo "GATE PASS$([ -n "$partial" ] && echo ' (PARTIAL RUN: not a full gate)') in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)")"

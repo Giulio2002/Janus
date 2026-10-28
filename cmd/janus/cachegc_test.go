@@ -857,3 +857,19 @@ func TestItemTimeoutLib(t *testing.T) {
 		t.Fatalf("scripts/lib/test-itemtimeout.sh: %v\n%s", err, out)
 	}
 }
+
+// TestPoolLib and TestSpeedcheckLib run the self-tests of the gate's work queue (scripts/lib/pool.sh:
+// longest first, streamed PASS/FAIL/TIMEOUT lines, failure and missing results fail the pool, needs)
+// and of the speed-regression check (scripts/gate-speedcheck.py).
+func TestPoolLib(t *testing.T) { runLibSelfTest(t, "test-pool.sh") }
+
+func TestSpeedcheckLib(t *testing.T) { runLibSelfTest(t, "test-speedcheck.sh") }
+
+func runLibSelfTest(t *testing.T, name string) {
+	t.Helper()
+	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "lib", name))
+	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "all checks passed") {
+		t.Fatalf("scripts/lib/%s: %v\n%s", name, err, out)
+	}
+}
