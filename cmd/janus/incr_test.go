@@ -745,12 +745,12 @@ func TestLeanImports(t *testing.T) {
 func TestIncrEnvRelevance(t *testing.T) {
 	for _, n := range []string{"JANUS_ITEM_TIMEOUT", "JANUS_JOB_MEM", "JANUS_ROOT", "JANUS_VERIFIER_ID", "JANUS_RESULT_CACHE", "JANUS_CACHE_DIR",
 		"LEAN_NUM_THREADS", "LEAN_PATH", "LAKE_HOME", "ELAN_HOME", "GOFLAGS", "GOOS", "GOARCH", "GOAMD64", "GOTOOLCHAIN", "CGO_ENABLED", "CGO_CFLAGS",
-		"MEMCAP_MAX", "KEEP"} {
+		"MEMCAP_MAX", "KEEP", "JANUS_SCRIPT_MEM_MAX", "JANUS_MEM_MAX", "JANUS_LAKE_JOB_MEM"} {
 		if !incrEnvRelevant(n) {
 			t.Errorf("%s must be part of the key", n)
 		}
 	}
-	for _, n := range []string{"JANUS_JOBS", "JANUS_POOL_DIR", "JANUS_GATE_PG", "JANUS_EXAMPLES_SUMMARY", "GOCACHE", "GOPATH", "HOME", "PATH", "USER"} {
+	for _, n := range []string{"JANUS_JOBS", "JANUS_POOL_DIR", "JANUS_GATE_PG", "JANUS_MEMGUARD_CGROUP", "JANUS_INCR_PRECHECK", "JANUS_EXAMPLES_SUMMARY", "GOCACHE", "GOPATH", "HOME", "PATH", "USER"} {
 		if incrEnvRelevant(n) {
 			t.Errorf("%s must not be part of the key", n)
 		}

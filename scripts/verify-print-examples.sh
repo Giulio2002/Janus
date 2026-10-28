@@ -70,6 +70,7 @@ else
   trap 'rm -rf "$snap"' EXIT
   cp -r examples/proofs-print/. "$snap"/
 fi
+. scripts/lib/incr.sh
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-print-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
@@ -85,6 +86,14 @@ verify_one() {
   for m in "${all[@]}"; do [ "$m" = "$n" ] || others="${others:+$others,}example.com/print.$m"; done
   bin/janus extract "artifacts/examples-print-$isa" "example.com/print.$n" "$out" --targets "$others" \
     --contract runtime.lock2 --contract runtime.unlock2 --contract runtime.memmove >/dev/null 2>&1
+  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs.
+  # The package is the consumer workspace of the proof: its sources (the live tree: the snapshot is a copy
+  # of it), checked against the embedded framework and the checkout its lakefile depends on.
+  local -a ispec=(--fw embedded --fw dir:. --pkg examples/proofs-print --proof "examples/proofs-print/PrintProofs/${isa^}/$n.lean"
+    --art "$out" --arg "sym:example.com/print.$n" --arg "targets:$others" --arg thm:correctness --arg thm:full_output
+    --arg thm:Witness.nonvacuous --arg thm:Witness.returns)
+  [ -z "${JANUS_ROOT:-}" ] || ispec+=(--arg "janus-root:$JANUS_ROOT")
+  if incr_begin "print:$target" print "${ispec[@]}"; then echo "$INCR_MSG" | tee "$lines/${isa}_$n"; return 0; fi
   : > "$out/verify.log"
   start=$(date +%s.%N)
   ok=1
@@ -103,6 +112,7 @@ verify_one() {
     tail -30 "$out/verify.log"
     broken+=("print:$target")
   fi
+  incr_end "print:$target" print "$((1 - ok))" "$t" "${ispec[@]}"
   return 0
 }
 for target in "${names[@]}"; do

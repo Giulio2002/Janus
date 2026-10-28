@@ -76,7 +76,8 @@ type incrSpec struct {
 	Pins     []string
 	Scripts  []string
 	Args     []string
-	Tree     string // a lane: every non-excluded file of this git working tree
+	Virtual  []string // modules the item generates itself from its hashed inputs (WrongAdd's Extracted)
+	Tree     string   // a lane: every non-excluded file of this git working tree
 	TreeExcl []string
 	Host     bool // the machine is an input (lanes whose result can depend on the hardware)
 	Full     bool // the full verifier identity (Go and the embedded Lean) instead of the Go-only one
@@ -197,7 +198,7 @@ var incrEnvSkip = map[string]bool{
 	"JANUS_EXAMPLES_SUMMARY": true, "JANUS_EXAMPLES_PREBUILT": true, "JANUS_PRINT_SNAPSHOT": true,
 	"JANUS_GATE_PG": true, "JANUS_GATE_PREBUILT": true, "JANUS_GATE_FORCE": true, "JANUS_GATE_INCREMENTAL": true,
 	"JANUS_SPEED_BASELINE": true, "JANUS_INCR": true, "JANUS_INCR_RECORD": true, "JANUS_INCR_EXPLAIN": true,
-	"JANUS_INCR_NOTE": true, "JANUS_GOTEST_PARALLEL": true, "JANUS_AUDIT_BIN": true, "JANUS_AUDIT_PREBUILT": true,
+	"JANUS_INCR_NOTE": true, "JANUS_INCR_PRECHECK": true, "JANUS_MEMGUARD_CGROUP": true, "JANUS_PRECHECK_JOBS": true, "JANUS_GOTEST_PARALLEL": true, "JANUS_AUDIT_BIN": true, "JANUS_AUDIT_PREBUILT": true,
 	"GOCACHE": true, "GOMODCACHE": true, "GOPATH": true, "GOTMPDIR": true, "GOENV": true,
 }
 
@@ -350,7 +351,11 @@ type incrProvider struct {
 }
 
 // closure resolves the transitive imports of the root sources.
-func (c *incrCtx) closure(roots []string, rootSrc map[string][]byte, provs []incrProvider, needOlean func(mod string) bool) (lines []string, err error) {
+func (c *incrCtx) closure(roots []string, rootSrc map[string][]byte, provs []incrProvider, needOlean func(mod string) bool, virtual ...string) (lines []string, err error) {
+	virt := map[string]bool{}
+	for _, v := range virtual {
+		virt[v] = true
+	}
 	type item struct {
 		mod string
 		src []byte
@@ -377,6 +382,10 @@ func (c *incrCtx) closure(roots []string, rootSrc map[string][]byte, provs []inc
 		queue = queue[1:]
 		if isCoreModule(it.mod) {
 			out = append(out, "core "+it.mod)
+			continue
+		}
+		if virt[it.mod] {
+			out = append(out, "virtual "+it.mod)
 			continue
 		}
 		rel := strings.ReplaceAll(it.mod, ".", "/") + ".lean"
@@ -637,7 +646,7 @@ func (c *incrCtx) compute(sp *incrSpec) (string, []incrComp) {
 	var comps []incrComp
 	add := func(x incrComp) { comps = append(comps, x) }
 	add(okComp("schema", "", []string{incrKeyHeader, fmt.Sprint(incrSchema)}))
-	add(okComp("item", sp.ID+" ("+sp.Kind+")", append([]string{"id " + sp.ID, "kind " + sp.Kind}, prefixed("arg ", sp.Args)...)))
+	add(okComp("item", sp.ID+" ("+sp.Kind+")", append(append([]string{"id " + sp.ID, "kind " + sp.Kind}, prefixed("arg ", sp.Args)...), prefixed("virtual ", sp.Virtual)...)))
 	envl := incrEnvLines(c.environ)
 	add(okComp("env", fmt.Sprintf("%d variables", len(envl)), envl))
 	if v, err := c.verifier(sp.Full); err != nil {
@@ -805,7 +814,7 @@ func (c *incrCtx) fwComps(sp *incrSpec, mode string, add func(incrComp)) {
 		}
 	}
 	if len(rootNames) > 0 {
-		ls, err := c.closure(rootNames, roots, provs, nil)
+		ls, err := c.closure(rootNames, roots, provs, nil, sp.Virtual...)
 		if err != nil {
 			add(errComp("fw:"+mode+":closure", err))
 		} else {
@@ -1006,6 +1015,8 @@ func parseIncrFlags(args []string) (sp *incrSpec, opts map[string]string, err er
 			sp.Scripts = append(sp.Scripts, v)
 		case "--arg":
 			sp.Args = append(sp.Args, v)
+		case "--virtual":
+			sp.Virtual = append(sp.Virtual, v)
 		case "--tree":
 			sp.Tree = v
 		case "--tree-exclude":

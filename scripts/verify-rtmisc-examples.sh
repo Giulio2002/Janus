@@ -70,6 +70,7 @@ if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   scripts/build-examples-rtmisc.sh >/dev/null
 fi
 
+. scripts/lib/incr.sh
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-rtmisc-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
@@ -81,6 +82,17 @@ verify_one() {
   out="artifacts/rtmisc/$isa/$n"
   mapfile -t xargs < <(args "$n")
   bin/janus extract "$(bin "$isa" "$n")" "$(sym "$n")" "$out" ${xargs[@]+"${xargs[@]}"} >/dev/null 2>&1
+  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  local -a ispec=(--fw dir:. --art "$out" --arg "sym:$(sym "$n")") ia
+  for ia in ${xargs[@]+"${xargs[@]}"}; do ispec+=(--arg "extract:$ia"); done
+  if [ -f "examples/rtmisc/proofs/$isa/$n/lakefile.toml" ]; then
+    # a split example: a Lake package, checked against the checkout and the embedded framework
+    ispec+=(--fw embedded --pkg "examples/rtmisc/proofs/$isa/$n" --arg split)
+  else
+    ispec+=(--proof "examples/rtmisc/proofs/$isa/$n.lean")
+    if grep -q '^namespace Witness' "examples/rtmisc/proofs/$isa/$n.lean"; then ispec+=(--arg witness); fi
+  fi
+  if incr_begin "rtmisc:$target" rtmisc "${ispec[@]}"; then echo "$INCR_MSG" | tee "$lines/${isa}_$n"; return 0; fi
   start=$(date +%s.%N)
   if [ -f "examples/rtmisc/proofs/$isa/$n/lakefile.toml" ]; then
     # a split example: a Lake package (examples/rtmisc/proofs/<isa>/<Name>/), one module per
@@ -109,6 +121,7 @@ verify_one() {
     done
     rm -f "$res"
     [ "$ok" = 1 ] || tail -30 "$out/verify.log"
+    incr_end "rtmisc:$target" rtmisc "$((1 - ok))" "$t" "${ispec[@]}"
     return 0
   fi
   # correctness and, where the proof has them, the non-vacuity witnesses: one janus run, one
@@ -120,6 +133,7 @@ verify_one() {
   verify_theorems "$out" "examples/rtmisc/proofs/$isa/$n.lean" "$st" "${thms[@]}" -- --janus-root . || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)
   cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
+  local item_rc=0
   if [ "$(cat "$st/0.rc")" = 0 ]; then
     printf '%-18s ok  %6.1fs\n' "$isa/$n" "$t" | tee "$lines/${isa}_$n"
     for ((i = 1; i < ${#thms[@]}; i++)); do
@@ -127,12 +141,15 @@ verify_one() {
         printf '%-18s ok  (%s)\n' "$isa/$n" "${thms[$i]}" | tee -a "$lines/${isa}_$n"
       else
         printf '%-18s FAILED %s (see %s/verify.log)\n' "$isa/$n" "${thms[$i]}" "$out" | tee -a "$lines/${isa}_$n"
+        item_rc=1
       fi
     done
   else
     printf '%-18s FAILED (see %s/verify.log)\n' "$isa/$n" "$out" | tee "$lines/${isa}_$n"
     tail -30 "$st/0.log"
+    item_rc=1
   fi
+  incr_end "rtmisc:$target" rtmisc "$item_rc" "$t" "${ispec[@]}"
   rm -rf "$st"
 }
 

@@ -57,6 +57,7 @@ fi
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
 . scripts/lib/theorems.sh
+. scripts/lib/incr.sh
 
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-sys-examples.txt}"
 : > "$summary"
@@ -82,6 +83,12 @@ verify_one() {
     printf '%-18s FAILED (no theorem found in examples/proofs-sys/%s/%s.lean)\n' "$target" "$isa" "$n" | tee "$lines/${isa}_$n"
     broken+=("sys:$target"); return 0
   fi
+  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  local -a ispec=($(incr_fw_embedded) --proof "examples/proofs-sys/$isa/$n.lean" --art "$out" --arg "sym:example.com/sys.$n")
+  local a
+  for a in ${args[@]+"${args[@]}"}; do ispec+=(--arg "extract:$a"); done
+  for a in "${thms[@]}"; do ispec+=(--arg "thm:$a"); done
+  if incr_begin "sys:$target" sys "${ispec[@]}"; then echo "$INCR_MSG" | tee "$lines/${isa}_$n"; return 0; fi
   st="$(mktemp -d)"
   start=$(date +%s.%N)
   verify_theorems "$out" "examples/proofs-sys/$isa/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"} || true  # failures are in $st
@@ -98,6 +105,7 @@ verify_one() {
     tail -30 "$out/verify.log"
     broken+=("sys:$target")
   fi
+  incr_end "sys:$target" sys "$((1 - ok))" "$t" "${ispec[@]}"
   rm -rf "$st"
   return 0
 }

@@ -13,6 +13,14 @@
 #   --filter ERE   verify lane: only the items whose id matches (scripts/verify-all-examples.sh --filter)
 #   --gotest-run ERE   go test lane: only the tests whose name matches
 #   --rounds LIST  audit lane: only these rounds (audit/run-rounds.sh, e.g. "r2 r3")
+#   --incremental  (or JANUS_GATE_INCREMENTAL=1) skip every item and lane for which the record of a PASS exists
+#               whose key is identical: a content hash of every input of the item (cmd/janus/incr.go,
+#               scripts/lib/incr.sh, docs/TESTING.md "Incremental gate"). Anything else runs, in full. The DEFAULT is
+#               a FULL run, which stays mandatory before every push to main and nightly; an incremental run says
+#               INCREMENTAL in its verdict and lists every item and lane as RAN or SKIPPED with the time, host and
+#               commit of the PASS a skip replays. The prebuild, the build lanes and the axiom guard always run.
+#   --explain ITEM  print the key components of an item (arm64:Add, cgo:amd64/CAdd, ...) or a lane (lane:gotest,
+#               lane:rounds, ...) with their hashes, whether a record exists, and exit; nothing is run or recorded.
 #   --speed-baseline record|enforce   `enforce` (default): compare with scripts/speed-baseline.tsv (fail on a
 #               >1.5x item or total; with no file, "speed check NOT enforced: no baseline" is printed loudly
 #               in the summary). `record`: after a passing FULL run write the baseline from the run (only
@@ -60,11 +68,21 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/pool.sh"
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=lib/incr.sh
+. "$root/scripts/lib/incr.sh"
 memguard_self "$@"
 
+# the lane-specific arguments of a lane's skip key (everything else comes from incr_lane)
+lane_spec() {
+  case "$1" in
+    gotest) local sh=${jobs_n:-2}; [ "$sh" -ge 2 ] 2>/dev/null || sh=2
+      printf '%s\n' --arg "run:${gtrun:-}" --arg "shards:$sh" ;;
+    rounds) printf '%s\n' --arg "rounds:${rounds:-}" ;;
+  esac
+}
 orig_args=("$@")
 sbfile="${JANUS_SPEED_BASELINE:-$root/scripts/speed-baseline.tsv}"
-jobs_n="${JANUS_JOBS:-2}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce
+jobs_n="${JANUS_JOBS:-2}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce incremental="${JANUS_GATE_INCREMENTAL:-}" explain_item=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -j|--jobs) jobs_n="${2:?-j needs a number}"; shift 2 ;;
@@ -77,17 +95,32 @@ while [ $# -gt 0 ]; do
     --filter) vfilter="${2:?}"; shift 2 ;;
     --gotest-run) gtrun="${2:?}"; shift 2 ;;
     --rounds) rounds="${2:?}"; shift 2 ;;
+    --incremental) incremental=1; shift ;;
+    --explain) explain_item="${2:?--explain needs an item (e.g. arm64:Add) or a lane (e.g. lane:gotest)}"; shift 2 ;;
     --update-baseline) sbmode=record; shift ;;
     --speed-baseline) sbmode="${2:?}"; shift 2 ;;
     -h|--help) sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 0 ;;
     *) echo "usage: scripts/gate.sh [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
   esac
 done
+if [ -n "$explain_item" ]; then
+  # --explain: no prebuild, no admission, no run; reads the prebuilt state of an earlier run
+  export JANUS_INCR_EXPLAIN=1
+  case "$explain_item" in
+    lane:*) lname="${explain_item#lane:}"
+      incr_lane "$lname" true $(lane_spec "$lname"); exit 0 ;;
+    *) exec scripts/verify-all-examples.sh --cgo --explain --filter "^${explain_item//./\\.}\$" ;;
+  esac
+fi
 [ "$jobs_n" != auto ] || jobs_n=$(par_default_jobs)
 case "$jobs_n" in ''|*[!0-9]*|0) echo "gate: -j needs a positive number (got '$jobs_n')" >&2; exit 2 ;; esac
 [ -n "$lanes_n" ] || lanes_n=$((jobs_n + 1))
 case "$lanes_n" in ''|*[!0-9]*|0) echo "gate: --lanes needs a positive number (got '$lanes_n')" >&2; exit 2 ;; esac
 export JANUS_JOBS=$jobs_n
+# incremental skipping is opt-in (the default is a full run); recording the passes is always on, so a full run
+# feeds the next incremental one
+export JANUS_INCR_RECORD=1
+if [ -n "$incremental" ]; then export JANUS_GATE_INCREMENTAL=1; else unset JANUS_GATE_INCREMENTAL; fi
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
 
 stages_all=(verify gotest rounds axiom x86 asl-build sail-build rtasl-prove rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go)
@@ -211,14 +244,20 @@ add() { # NAME CODE [NEEDS]
   selected "$1" || return 0
   pool_add "$1" "$2" "$1" "${3:-}"
 }
+# addc: a lane that may be skipped on the record of an identical PASS (incr_lane: scripts/lib/incr.sh)
+addc() { # NAME CODE [NEEDS]
+  local spec
+  spec="$(lane_spec "$1" | while IFS= read -r l; do printf ' %q' "$l"; done)"
+  add "$1" "incr_lane $(printf '%q' "$1") $(printf '%q' "$2")$spec" "${3:-}"
+}
 # a lane needs its prerequisite only when that stage is part of this run
 needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; done; echo "$r"; }
-add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${vfilter:+--filter '$vfilter'}"
+add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
 JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
-add gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
-add rounds "audit/run-rounds.sh $rounds"
+addc gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
+addc rounds "audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
-add x86 "cd '$tree_x86' && scripts/x86formal.sh prove"
+addc x86 "cd '$tree_x86' && scripts/x86formal.sh prove"
 add asl-build "cd '$tree' && scripts/asl.sh build"
 add sail-build "cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
@@ -226,7 +265,7 @@ for g in prove rel strict replay btf probes fsqrt go; do
   # rtasl-prove (scripts/asl.sh prove) builds JanusASL; two lakes in one package race, so every other lake-using
   # group runs after it (as in audit/rt-asl/run.sh, where prove is the first group)
   case "$g" in prove) nd="$(needs asl-build)" ;; btf|go) ;; fsqrt) nd="$(needs rtasl-prove sail-build)" ;; *) nd="$(needs rtasl-prove)" ;; esac
-  add "rtasl-$g" "cd '$tree' && audit/rt-asl/run.sh $g" "$nd"
+  addc "rtasl-$g" "cd '$tree' && audit/rt-asl/run.sh $g" "$nd"
 done
 # stream the verify lane's own result lines as they are written
 tailpid=""
@@ -268,7 +307,7 @@ fi
 [ "$speed_rc" = 0 ] || lanes_rc=1
 echo
 if [ "$lanes_rc" = 0 ]; then
-  echo "GATE PASS$([ -n "$partial" ] && echo ' (PARTIAL RUN: not a full gate)') in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)")"
+  echo "GATE PASS$([ -n "$partial" ] && echo ' (PARTIAL RUN: not a full gate)')$([ -n "$incremental" ] && echo ' (INCREMENTAL: items and lanes with a record of an identical PASS were skipped, see the RAN/SKIPPED report; the full cold gate is still required before a push to main)') in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)")"
   exit 0
 fi
 echo "GATE FAIL in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)"): ${POOL_FAILED[*]}"

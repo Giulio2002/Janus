@@ -25,6 +25,7 @@ if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
 fi
 broken=()
 . scripts/lib/theorems.sh
+. scripts/lib/incr.sh
 # verify_function F: every theorem of examples/proofs-amd64/F (correctness, Div's and Get's
 # `panics`, the non-vacuity witnesses: the hypotheses hold together and the conclusion is
 # reached), up to two at once (scripts/lib/theorems.sh); printed in order.
@@ -41,16 +42,25 @@ verify_function() {
   for c in $(grep -oE '^theorem corollary[A-Za-z0-9_]*' "examples/proofs-amd64/$f/Proof.lean" | awk '{print $2}'); do
     thms+=("Proof.$c")
   done
+  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  local -a ispec=($(incr_fw_embedded) --proof "examples/proofs-amd64/$f/Proof.lean" --art "artifacts/amd64/$f")
+  local thm_a item_rc=0 t0
+  for thm_a in "${thms[@]}"; do ispec+=(--arg "thm:$thm_a"); done
+  if incr_begin "amd64:$f" amd64 "${ispec[@]}"; then
+    printf '%s\n' "$INCR_MSG"; return 0
+  fi
+  t0=$(date +%s.%N)
   st="$(mktemp -d)"
   verify_theorems "artifacts/amd64/$f" "examples/proofs-amd64/$f/Proof.lean" "$st" "${thms[@]}" || true  # failures are in $st
   for ((i = 0; i < ${#thms[@]}; i++)); do
     if [ "$(cat "$st/$i.rc" 2>/dev/null)" = 0 ]; then
       printf '%-12s %-18s %s\n' "$f" "${thms[$i]}" "$(grep 'Axioms:' "$st/$i.log" | sed 's/^ *//')"
     else
-      printf '%-12s %-18s FAILED\n%s\n' "$f" "${thms[$i]}" "$(cat "$st/$i.log" 2>/dev/null)"; broken+=("$f.${thms[$i]}")
+      printf '%-12s %-18s FAILED\n%s\n' "$f" "${thms[$i]}" "$(cat "$st/$i.log" 2>/dev/null)"; broken+=("$f.${thms[$i]}"); item_rc=1
     fi
   done
   rm -rf "$st"
+  incr_end "amd64:$f" amd64 "$item_rc" "$(echo "$(date +%s.%N) - $t0" | bc)" "${ispec[@]}"
   return 0
 }
 funcs=("$@")
