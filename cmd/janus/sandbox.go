@@ -276,6 +276,12 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 				a = append(a, "--tmpfs", rc)
 			}
 		}
+		// So is the gate-private framework verdict store and its key (verdictstore.go).
+		if vd := verdictStoreDir(); vd != "" {
+			if st, err := os.Stat(vd); err == nil && st.IsDir() {
+				a = append(a, "--tmpfs", vd)
+			}
+		}
 		a = append(a, "--chdir", workDir, "--")
 		a = append(a, argv...)
 		cmd := s.newCmd(s.bwrap, a...)
@@ -410,6 +416,11 @@ ro:
 	// script stops if it cannot).
 	if st, err := os.Stat(resultCacheDir()); err == nil && st.IsDir() {
 		w("mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs " + shQuote(filepath.Clean(resultCacheDir())))
+	}
+	if vd := verdictStoreDir(); vd != "" {
+		if st, err := os.Stat(vd); err == nil && st.IsDir() {
+			w("mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs " + shQuote(filepath.Clean(vd)))
+		}
 	}
 	w("cd " + shQuote(workDir))
 	w(`exec "$@"`)

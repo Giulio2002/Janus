@@ -238,7 +238,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
+	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -251,6 +251,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	if flags["unsafe-no-sandbox"] {
 		opts["unsafe-no-sandbox"] = "true"
+	}
+	if flags["fresh-framework"] {
+		opts["fresh-framework"] = "true"
 	}
 	if flags["replay-fresh"] {
 		opts["replay-fresh"] = "true"
@@ -719,10 +722,24 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// runs, and the pins it covers are re-checked after every step), but written only by a
 	// sandboxed run; --fresh neither reads nor writes it.
 	fwKey := frameworkVerdictKey(tc.cacheID(), fwPins)
+	// The verdict store: the replay cache of the cache root, or with --fresh and a gate-private
+	// store (JANUS_VERDICT_CACHE, verdictstore.go) that store, so that a gate's --fresh rows
+	// replay one framework build once. Recording needs a sandbox either way.
+	vstore := defaultVerdictStore()
 	fwRead := opts["fresh"] == ""
+	fwWrite := replayCacheOK(sb, opts)
+	if opts["fresh"] != "" {
+		ext, ok, err := externalVerdictStore(opts)
+		if err != nil {
+			return err
+		}
+		if ok {
+			vstore, fwRead, fwWrite = ext, true, sb.mode != "none"
+		}
+	}
 	fwHave, fwLease := false, (*fileLock)(nil)
 	if fwRead {
-		fwHave, fwLease = lookupFrameworkVerdict(fwKey)
+		fwHave, fwLease = vstore.lookup(fwKey)
 	}
 	var earlyFw *fwReplay
 	if tc.hasChecker {
@@ -736,9 +753,9 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		}
 		if err == nil {
 			fwPath := tc.leanPathEnv(janusLibDir)
-			earlyFw = startFrameworkReplay(tc.leanchecker, func(argv ...string) (string, error) {
+			earlyFw = startFrameworkReplayIn(vstore, tc.leanchecker, func(argv ...string) (string, error) {
 				return runLeanProtected(sb, tc, fwRunDir, nil, []string{janusLibDir}, fwPath, argv...)
-			}, fwKey, fwPins, fwHave, fwLease, fwRead, replayCacheOK(sb, opts))
+			}, fwKey, fwPins, fwHave, fwLease, fwRead, fwWrite)
 			defer earlyFw.release()
 		}
 	}

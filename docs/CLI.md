@@ -486,7 +486,7 @@ name; …`). The classification is informational and untrusted, like reachabilit
 
 ```sh
 janus verify <outdir> [--proof FILE] [--theorem NAME]... [--proof-root PKG [--allow-path-deps]] [--results FILE] [--json]
-             [--fresh] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox] [--asl]
+             [--fresh] [--fresh-framework] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox] [--asl]
 janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 ```
 
@@ -520,7 +520,9 @@ library, Mathlib) when every one of them, transitively, is a git dependency pinn
 ([details](CONSUMERS.md#extra-dependencies)). `--allow-path-deps` additionally accepts local
 path dependencies other than janus, copied as they are and recorded as `"type": "path"` (not
 pinned). `--json` prints the report as JSON; `--fresh` rebuilds the framework/caches from
-scratch (and replays every module, ignoring the replay cache); `--replay-fresh` additionally
+scratch (and replays every module, ignoring the replay cache); `--fresh-framework` additionally ignores the gate-private framework verdict store
+(`JANUS_VERDICT_CACHE=<private dir>`, docs/SOUNDNESS.md "Gate-private framework verdicts"), which
+lets `--fresh` verifications of one gate share one replay of an identical framework build; `--replay-fresh` additionally
 replays the theorem's module with `leanchecker --fresh`, re-checking its whole environment,
 Lean core included, from an empty environment (slow: minutes).
 

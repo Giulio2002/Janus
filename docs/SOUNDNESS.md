@@ -345,6 +345,24 @@ covers what it must, and everything reused is either re-measured or content-boun
 
 Measured effect and the per-stage table: docs/TESTING.md ("J1").
 
+### Gate-private framework verdicts (J1c)
+
+`--fresh` bypasses every cache, the framework replay verdict included, so each `--fresh`
+verification of a gate (the audit rounds run dozens) replayed the whole framework with
+`leanchecker Janus`. With `JANUS_VERDICT_CACHE=<dir>` the framework verdict of a `--fresh`
+verification is read from and recorded in that directory instead of the cache root; nothing else
+`--fresh` bypasses is enabled (no result cache, no per-module replay cache, no trusted-compile
+cache). The verdict is the replay cache's own: an HMAC-authenticated marker named by the toolchain
+identity (`cacheID`: lean and leanchecker hashes, library stat data) and the SHA-256 of every
+framework module-data file, so a framework with one changed, added or removed module, or another
+toolchain, has another key and is replayed; a rejection never depends on a cached pass
+(`TestJ1cVerdictStoreKeyedByPinsAndToolchain`). The store directory must be a real directory of
+mode 0700 owned by the user (an unsafe one stops the verification, it is not ignored), holds its
+own 32-byte key (mode 0600), is mounted as an empty tmpfs inside the sandbox like the result
+cache, and is written only by a sandboxed run. A marker made under another key, planted or empty is
+a miss (`TestJ1cVerdictStoreAuthentic`). `--fresh-framework` ignores the store, for a row that tests
+the framework replay itself. `audit/run-rounds.sh` creates one store per run.
+
 ### Verification-result cache
 
 A successful `janus verify` of a single proof file (not `--proof-root`) is recorded in

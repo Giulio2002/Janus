@@ -109,12 +109,17 @@ func resultCacheOK(sb *sandbox, opts map[string]string) bool {
 
 // resultKey returns the per-cache HMAC key, creating it (32 random bytes, mode 0600) on first use.
 func resultHMACKey() ([]byte, error) {
-	dir := resultCacheDir()
 	// round 8 C1: the key authenticates every entry (results and trusted compiles); it must be
 	// ours alone. The root is checked before anything is created under it.
 	if err := checkCacheRoot(); err != nil {
 		return nil, err
 	}
+	return hmacKeyInDir(resultCacheDir())
+}
+
+// hmacKeyInDir is the key of the private directory dir (created 0700 with a 32-byte key of mode
+// 0600 on first use). A directory or key that others can read or write is refused.
+func hmacKeyInDir(dir string) ([]byte, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
