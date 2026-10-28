@@ -86,6 +86,8 @@ if [ -z "${SAIL_CACHE+x}" ]; then
   else SAIL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/janus/asl"; fi
 fi
 [ "$SAIL_CACHE" = off ] && SAIL_CACHE=""
+# JANUS_ASL_CACHE=0 (also off/no/false): the opt-out for a forced cold build (the full gate before a push to main)
+case "${JANUS_ASL_CACHE:-}" in 0|off|no|false) SAIL_CACHE="" ;; esac
 
 sail_cache_key() {  # sail_cache_key MODEL_CPP_OR_EMPTY
   local mf=()

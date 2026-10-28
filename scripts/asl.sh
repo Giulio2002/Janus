@@ -40,6 +40,7 @@
 #                      (ASL_CACHE/mods, JanusASL/tools/asl_mod_cache.py): one entry per module,
 #                      keyed by what Lake traces (source, imports' keys, package settings,
 #                      toolchain), restored before and published after the JanusASL build.
+#   JANUS_ASL_CACHE=0  force a cold build: neither reads nor writes the cache (also off/no/false)
 #   ASL_CACHE_READONLY=1   use the cache but never write to it
 #   ASL_CACHE_MAX      size budget of ASL_CACHE (default 15G; off: none), kept after every publish
 #                      by `asl_mod_cache.py gc` (least recently restored first; unreferenced
@@ -73,6 +74,9 @@ if [ "${ASL_CACHE-unset}" = unset ]; then
   else ASL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/janus/asl"; fi
 fi
 [ "$ASL_CACHE" = off ] && ASL_CACHE=""
+# JANUS_ASL_CACHE=0 (also off/no/false) forces a cold build and publishes nothing: the full gate before a
+# push to main uses it. It wins over ASL_CACHE.
+case "${JANUS_ASL_CACHE:-}" in 0|off|no|false) ASL_CACHE="" ;; esac
 export ASL_CACHE
 
 # ---- pins (keep in sync with docs/ASL.md) ----
