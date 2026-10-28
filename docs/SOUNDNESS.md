@@ -1155,6 +1155,31 @@ base:
   proving several, `gcWriteBarrier1..8`) claims each. A contract stated over runs instead of as a
   `Summary` (`GopanicRecoverContract`) is recognised by its name `…Contract` and its `Program`
   parameter.
+* **Every runtime argument is a free variable, whatever its type** (round 11, red-team 11a L1a/H1a/P1a/K1a).
+  Round 10 V1 recognised the runtime parameters by a list of types (`RtReady`, `IfaceModel`,
+  `MapModel`, `List (Nat × Nat)`), so a contract over any later model type (`MemModel`, `HashModel`,
+  `PanicRuntime`, `CheckptrModel`, `CgoCheckModel`, and on the live-contract branches `RtInv`,
+  `PoolShape`) escaped the rule: a proof could pin `R := closed {inv := True, rt := [] …}` or
+  state `hP : M = M0` / `hCb : ∀ m g q, C.base m g q = 0`, the contract became unsatisfiable (or
+  the straddle precondition vanished), and `janus verify` printed Verified for a false claim. The
+  rule is now default-deny (`contractParamKind` in `Janus/Tools/Audit.lean`): in a runtime contract
+  the program must be `Extracted.program.link impl`, a scalar (`Nat`, `Int`, `Bool`, `Fin`,
+  `BitVec`, `UIntN`: an entry address, stack bound, count) may be anything, and EVERY other
+  argument is a runtime parameter that must be a variable bound by the statement, not a `let`, not
+  instantiated, and mentioned by no premise except runtime contracts, `….Laws M` of a framework
+  model, and the stack-depth bounds above. Type arguments (`K`, `V`) are data. The explicit
+  allow-list is a NAMED list of framework constants (`frameworkSpecs`, `frameworkFmts` in
+  `Janus/Tools/Audit.lean`): the `RtSpec` argument of `RtContract` (`concatstringSpec 2`,
+  `growsliceSpec`, … the specs `Janus.Contracts.RtSat` proves satisfiable) and the `Fmt` argument of
+  `Fhash` (`binary32`, `binary64`) name WHICH runtime function or format a contract describes. Not
+  "any imported constant of that type": `default : Fmt` is imported and describes a format with no
+  bits (`A1c`); a lambda, a structure literal or update, or a proof-file `def` is rejected too
+  (`A1a`, `A1b`, `A1b2`). An alias is judged by what the audit sees after unfolding, so an `abbrev`
+  of a listed spec is accepted exactly because it is that spec (`A1d`), and of a bad one is not
+  (`A1d2`). A new model type is therefore covered
+  with no change to the auditor. Regression rows: `audit/round11/` (closed `HashModel`, `HashModel` pinned by
+  `H = H0`, closed `PanicRuntime`, `CheckptrModel` pinned by a premise, with the honest theorems
+  as controls and the unsatisfiability of the closed models kernel-checked).
 * **Readiness is per call** (round 10 V2, V3). A contract whose postcondition hands back all its
   precondition needs can be chained without bound from one state. For the map contracts that
   allocate and keep (`Assign`, `MakeSmall`), this contradicted `MapModel.Laws` outright

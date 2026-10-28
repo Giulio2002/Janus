@@ -168,16 +168,16 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       (Extracted.program.contractAddr "runtime.gorecover") P)
     (hdr : DeferreturnContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.deferreturn") P U)
-    (hw : ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b))
     (x etyp edata : BitVec 64) :
     EnsuresGo (Extracted.program.link impl) Extracted.entry [x, etyp, edata]
       (fun s => PanicCallerOK P s (P.depth + 96) 32 ∧ P.Calm s.mem (s.regs 14).toNat ∧
         etyp.toNat ≠ 0 ∧ 0 < P.room s.mem (gOf s) ∧
-        ∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp)
+        (∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp) ∧
+        ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b))
       (fun _ => goClass P)
       (fun _ s' => (s'.regs 0).toNat = if x.toNat ≤ 10 then x.toNat else 7)
       (fun _ _ _ => False) := by
-  intro ret hret s hs ⟨hc, hcalm, hne, hroom, hds⟩
+  intro ret hret s hs ⟨hc, hcalm, hne, hroom, hds, hw⟩
   have hc' := hc
   obtain ⟨henv, hg, hal, hd, hb, hst, hout, hgd, hgo⟩ := hc'
   janus64_intro hs
@@ -696,12 +696,12 @@ theorem nonvacuous : ∃ (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntim
       Extracted.funcs ∧
     GorecoverContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gorecover") P ∧
     DeferreturnContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.deferreturn") P U ∧
-    ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b) ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [42#64, 1#64, 0#64] s ∧
     (PanicCallerOK P s (P.depth + 96) 32 ∧ P.Calm s.mem (s.regs 14).toNat ∧ (1#64 : BitVec 64).toNat ≠ 0 ∧
-      0 < P.room s.mem (gOf s) ∧ ∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp) :=
-  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hpan, hrec, hdr, id, hret, setup, pre⟩
+      0 < P.room s.mem (gOf s) ∧ (∀ d ∈ P.defers s.mem (gOf s), (s.regs regSP).toNat ≤ d.sp) ∧
+      ¬ P.wrapper (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 0x1b)) :=
+  ⟨implW, PW, U1, ret, s0, P0_laws T0 RPa, hpan, hrec, hdr, hret, setup, by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩⟩
 
 /-- So the guarantee is reached: with `x = 42` `RecoverSet` panics, recovers, and returns `7`. -/
 theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goClass PW) s0 fun o =>
@@ -710,7 +710,7 @@ theorem returns : GoReturns ((Extracted.program.link implW).withExit ret) (goCla
         (s'.regs 0).toNat = if (42#64 : BitVec 64).toNat ≤ 10 then (42#64 : BitVec 64).toNat else 7
     | .panicked _ _ => False
     | .goexited _ => False :=
-  correctness implW PW (P0_laws T0 RPa) U1 hpan hrec hdr id 42#64 1#64 0#64 ret hret s0 setup pre
+  correctness implW PW (P0_laws T0 RPa) U1 hpan hrec hdr 42#64 1#64 0#64 ret hret s0 setup (by obtain ⟨a, b, c, d, e⟩ := pre; exact ⟨a, b, c, d, e, id⟩)
 
 end Witness
 

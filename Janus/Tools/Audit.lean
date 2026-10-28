@@ -773,17 +773,75 @@ def isRuntimeContract (env : Environment) (c : Name) : Bool :=
           t.consumeMData.isConstOf `Janus.Program || t.consumeMData.isConstOf `Janus.Amd64.Program)
     | _ => false
 
-/-- The kind of a contract parameter, from its declared type: a runtime parameter (`H`, `rt`, a
-model), the program (which must be `Extracted.program.link impl`), or anything else. -/
+/-- Is `ty` a plain scalar data type or a universe (`Nat`, `Int`, `Bool`, `Fin n`, `BitVec n`, `UIntN`)? -/
+def isScalarParamType (ty : Expr) : Bool :=
+  ty.isSort ||  -- a type argument (`K`, `V` of `MapModel K V`): data, not a runtime object
+  ty.isConstOf ``Nat || ty.isConstOf ``Int || ty.isConstOf ``Bool || ty.isAppOf ``Fin ||
+  ty.isAppOf ``BitVec || ty.isConstOf ``UInt8 || ty.isConstOf ``UInt16 || ty.isConstOf ``UInt32 ||
+  ty.isConstOf ``UInt64
+
+/-- The kind of a contract parameter, from its declared type: `some false` the program (which must
+be `Extracted.program.link impl`), `none` a scalar (an entry address, a stack size, a count: a
+number the statement may fix to a literal, which only specialises the claim), and `some true` a
+runtime parameter (`H`, `rt`, a model, an invariant), which must be a variable of the statement.
+
+Round 11: this is DEFAULT-DENY, not a whitelist of known runtime types. Round 10 listed `RtReady`,
+`IfaceModel`, `MapModel` and `List (Nat × Nat)`, so every runtime-model type added later
+(`MemModel`, `HashModel`, `PanicRuntime`, `CheckptrModel`, `CgoCheckModel`, `RtInv`, `PoolShape`, …)
+escaped, and a proof could pin it to a closed model (`inv := True`, `rt := []`), making the contract
+unsatisfiable and the claim vacuous. Now every parameter that is neither the program nor a scalar
+number is a runtime parameter, whatever its type, so a new contract type is covered with no change
+here. -/
 def contractParamKind (ty : Expr) : Option Bool :=
   let ty := ty.consumeMData
-  if ty.isConstOf `Janus.Contracts.RtReady || ty.isConstOf `Janus.Spec.Type.IfaceModel ||
-      ty.isAppOf `Janus.Spec.Map.MapModel then some true
-  else if ty.isAppOfArity ``List 1 && (ty.getArg! 0).isAppOfArity ``Prod 2 &&
-      ((ty.getArg! 0).getArg! 0).isConstOf ``Nat && ((ty.getArg! 0).getArg! 1).isConstOf ``Nat then some true
-  else if ty.isConstOf `Janus.Program || ty.isConstOf `Janus.Amd64.Program then some false
+  if ty.isConstOf `Janus.Program || ty.isConstOf `Janus.Amd64.Program then some false
+  else if isScalarParamType ty then none
+  else some true
+
+
+/-- The explicit allow-list of the default-deny rule (round 11): the framework's own descriptions
+of WHICH runtime function a contract is about (`RtSpec`: `concatstringSpec 2`) or which float
+format (`Fmt`: `binary32`). Such an argument is not a runtime object the theorem quantifies; it is
+part of the contract's identity, and the framework proves each listed spec satisfiable
+(`Janus.Contracts.RtSat`, `Sat`). The list is NAMED: only these constants (the spec applications
+`concatstringSpec k`, `concatbyteSpec k` with a numeral `k`), never "any imported constant of the
+right type": `default : Fmt` (`⟨0, 0⟩`) or a structure update of a listed spec is imported or
+built from imported parts too, and describes an impossible function or format. A proof-file
+`def`/`abbrev` alias is not accepted either (only the constant itself, which a `notation` or
+`local notation` expands to at parse time). -/
+def frameworkSpecs : List Name :=
+  [`concatstringsSpec, `concatbytesSpec, `slicebytetostringSpec, `slicebytetostringtmpSpec,
+   `stringtoslicebyteSpec, `stringtosliceruneSpec, `slicerunetostringSpec, `intstringSpec,
+   `decoderuneSpec, `countrunesSpec, `gostringSpec, `gostringnSpec, `gobytesSpec, `growsliceSpec,
+   `growsliceNoAliasSpec, `growsliceBufSpec, `growsliceBufNoAliasSpec, `makeslicecopySpec,
+   `moveSliceSpec, `moveSliceNoScanSpec, `moveSliceNoCapSpec, `moveSliceNoCapNoScanSpec,
+   `slicecopySpec, `typedslicecopySpec, `wbZeroSpec, `wbMoveSpec].map (`Janus.Contracts ++ ·)
+
+def frameworkSpecsNat : List Name :=
+  [`concatstringSpec, `concatbyteSpec].map (`Janus.Contracts ++ ·)
+
+def frameworkFmts : List Name := [`Janus.Float.binary32, `Janus.Float.binary64]
+
+/-- Which allow-listed type is `ty`: `some true` for `RtSpec`, `some false` for `Fmt`. -/
+def frameworkConstParamType (ty : Expr) : Option Bool :=
+  let ty := ty.consumeMData
+  if ty.isConstOf `Janus.Contracts.RtSpec then some true
+  else if ty.isConstOf `Janus.Float.Fmt then some false
   else none
 
+/-- Is `a` one of the named framework constants (see `frameworkSpecs`)? -/
+def isFrameworkConstArg (env : Environment) (isSpec : Bool) (a : Expr) : Bool :=
+  let a := a.consumeMData
+  let imported (c : Name) : Bool := (env.getModuleIdxFor? c).isSome
+  if isSpec then
+    match a with
+    | .const c _ => frameworkSpecs.contains c && imported c
+    | .app (.const c _) k =>
+        frameworkSpecsNat.contains c && imported c && (k.nat?.isSome || k.rawNatLit?.isSome)
+    | _ => false
+  else match a with
+    | .const c _ => frameworkFmts.contains c && imported c
+    | _ => false
 
 /-- The runtime-contract applications in `e` (outermost first). With `claims`, the subterms under
 an `∃` are skipped: a contract there is claimed (a witness theorem's), not assumed. -/
@@ -862,10 +920,14 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
         return some s!"applies the runtime contract {c} partially (round 10 V1)"
       for i in [0:doms.size] do
         let a := args[i]!.consumeMData
+        if let some isSpec := frameworkConstParamType doms[i]! then
+          unless isFrameworkConstArg env isSpec a do
+            return some s!"assumes the runtime contract {c} for the argument `{(← Meta.ppExpr a).pretty 10000}`, which is not one of the framework's named {if isSpec then "runtime-function specs (`concatstringSpec 2`, `growsliceSpec`, …)" else "float formats (`binary32`, `binary64`)"}: the function or format a contract describes cannot be chosen by the statement, not even from imported parts such as `default` (round 11)"
+          continue
         match contractParamKind doms[i]! with
         | some true =>
           unless isVar a do
-            return some s!"assumes the runtime contract {c} for the runtime argument `{(← Meta.ppExpr a).pretty 10000}`, which is not a variable of the statement: a contract is an assumption about the runtime only when the theorem quantifies its code, runtime-owned memory, readiness predicate and models; a closed choice (such as `fun _ _ _ _ => True` or `[]`) can make it false for every implementation and the theorem vacuous (round 10 V1)"
+            return some s!"assumes the runtime contract {c} for the runtime argument `{(← Meta.ppExpr a).pretty 10000}`, which is not a variable of the statement: a contract is an assumption about the runtime only when the theorem quantifies its code, runtime-owned memory, readiness predicate and models; a closed choice (such as `fun _ _ _ _ => True`, `[]` or a concrete model) can make it false for every implementation and the theorem vacuous (round 10 V1; round 11: every contract argument that is not the program or a number is a runtime parameter, whatever its type)"
           rtVars := rtVars.insert a.fvarId!
         | some false =>
           let ok := (a.isAppOfArity `Janus.Program.link 2 || a.isAppOfArity `Janus.Amd64.Program.link 2) &&
@@ -888,10 +950,15 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
       let isContract := match t'.getAppFn with
         | .const c _ => isRuntimeContract env c
         | _ => false
-      let isLaws := (t'.isAppOfArity `Janus.Spec.Type.IfaceModel.Laws 1 ||
-          t'.isAppOfArity `Janus.Spec.Map.MapModel.Laws 3) && isVar t'.appArg!.consumeMData
+      -- the laws of a model: `….Laws M` for a framework model (`IfaceModel`, `MapModel`,
+      -- `MemModel`, `HashModel`, …) with `M` a variable and no runtime variable elsewhere
+      let isLaws := match t'.getAppFn with
+        | .const c _ => (`Janus).isPrefixOf c && c.getString! == "Laws" && t'.getAppNumArgs ≥ 1 &&
+            isVar t'.appArg!.consumeMData &&
+            !t'.getAppArgs.pop.any (·.hasAnyFVar (rtVars.contains ·))
+        | _ => false
       unless isContract || isLaws || depthBound bound rtVars t' do
-        return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}), which constrains a runtime variable of a contract hypothesis; only the contracts and the model laws may mention them (round 10 V1)"
+        return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}), which constrains a runtime variable of a contract hypothesis; only the contracts and the model laws may mention them (round 10 V1, round 11)"
     return none
 
 /-- Round 7 (K1): is `ty` (up to reducible unfolding) one of `Nat`, `Int`, or a wrapping
