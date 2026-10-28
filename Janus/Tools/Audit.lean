@@ -912,6 +912,20 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
           rtVars := rtVars.insert (a.getArg! 1).consumeMData.fvarId!
         | none => pure ()
     if rtVars.isEmpty then return none
+    -- Round 13: the discipline covers EVERY binder, of any sort. A binder that is not a Prop
+    -- (a `Type`/`Sort u` binder: `PLift (H = …)`, `{u : Unit // H = …}`, `ULift (PLift …)`, a
+    -- proof-local `def Pin H : Type := …`, a structure bundling a pin) is not inspected as a
+    -- premise, yet carries one as soon as its type mentions a runtime variable. The runtime
+    -- variables themselves (free binders) and binders that mention none keep their treatment;
+    -- everything else is rejected, whatever it wraps. (Occurrence of the variable in the binder's
+    -- type, after `instantiateMVars`, is what makes unfolding irrelevant: a definition can only
+    -- reach the bound `H` through an argument.)
+    for x in xs do
+      if rtVars.contains x.fvarId! then continue
+      let t ← instantiateMVars (← Meta.inferType x)
+      if ← Meta.isProp t then continue
+      if t.hasAnyFVar (rtVars.contains ·) then
+        return some s!"has the non-Prop binder `{(← x.fvarId!.getUserName)} : {(← Meta.ppExpr t).pretty 10000}` whose type mentions a runtime variable of a contract hypothesis: a binder of any sort (`PLift`, `ULift`, `Subtype`, `Sigma`, a structure, a proof-local `def …: Type`) could carry a constraint on the runtime that only the contracts and the model laws may state; put such a condition in the precondition instead (round 13)"
     for (x, t) in premises do
       unless t.hasAnyFVar (rtVars.contains ·) do continue
       let t' := t.consumeMData
