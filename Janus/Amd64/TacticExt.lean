@@ -172,15 +172,32 @@ theorem bv_and_ofNat_mask (m c : Nat) (h : m < 2 ^ 64) (hc : c + 1 < 2 ^ 64) (hp
 /-! ## `REP STOS` and `REP MOVS` -/
 
 /-- The memory after `k` element stores of `v` (`sz` bytes each) at `a`, `a + sz`, …. -/
-def fillLE (M : Memory) (a sz v : Nat) : Nat → Memory
+def fillLEDef (M : Memory) (a sz v : Nat) : Nat → Memory
   | 0 => M
-  | k + 1 => fillLE (M.writeLE a sz v) (a + sz) sz v k
+  | k + 1 => fillLEDef (M.writeLE a sz v) (a + sz) sz v k
+
+/-- `fillLEDef`, made opaque to the kernel: it is the `Classical.choose` of the existence of that
+value, so no definitional check can unfold it (a literal `k` such as `600` otherwise makes the
+kernel unfold 600 nested stores whenever it compares two memory terms; the proofs only use the
+equations `fillLE_zero`/`fillLE_succ`). -/
+noncomputable def fillLE (M : Memory) (a sz v k : Nat) : Memory :=
+  Classical.choose (⟨fillLEDef M a sz v k, rfl⟩ : ∃ m, m = fillLEDef M a sz v k)
+
+theorem fillLE_eq (M : Memory) (a sz v k : Nat) : fillLE M a sz v k = fillLEDef M a sz v k :=
+  Classical.choose_spec (⟨fillLEDef M a sz v k, rfl⟩ : ∃ m, m = fillLEDef M a sz v k)
+
+theorem fillLE_zero (M : Memory) (a sz v : Nat) : fillLE M a sz v 0 = M := by
+  rw [fillLE_eq]; rfl
+
+theorem fillLE_succ (M : Memory) (a sz v k : Nat) :
+    fillLE M a sz v (k + 1) = fillLE (M.writeLE a sz v) (a + sz) sz v k := by
+  rw [fillLE_eq, fillLE_eq]; rfl
 
 @[janus64_exec, janus64_post] theorem regions_fillLE (M : Memory) (a sz v k : Nat) :
     (fillLE M a sz v k).regions = M.regions := by
   induction k generalizing M a with
-  | zero => rfl
-  | succ k ih => exact ih _ _
+  | zero => rw [fillLE_zero]
+  | succ k ih => rw [fillLE_succ]; exact ih _ _
 
 @[janus64_exec, janus64_post] theorem accessible_fillLE (M : Memory) (a sz v k b n : Nat) (w : Bool) :
     (fillLE M a sz v k).accessible b n w = M.accessible b n w :=
@@ -190,9 +207,9 @@ def fillLE (M : Memory) (a sz v : Nat) : Nat → Memory
 theorem bytes_fillLE_zero (M : Memory) (a sz k x : Nat) :
     (fillLE M a sz 0 k).bytes x = if a ≤ x ∧ x < a + sz * k then 0 else M.bytes x := by
   induction k generalizing M a with
-  | zero => simp only [fillLE, Nat.mul_zero, Nat.add_zero]; rw [ite_eq_right (by omega)]
+  | zero => simp only [fillLE_zero, Nat.mul_zero, Nat.add_zero]; rw [ite_eq_right (by omega)]
   | succ k ih =>
-    simp only [fillLE, ih, Janus.Arm64.Memory.bytes_writeLE, Nat.zero_div, Nat.mul_succ]
+    simp only [fillLE_succ, ih, Janus.Arm64.Memory.bytes_writeLE, Nat.zero_div, Nat.mul_succ]
     by_cases h1 : a + sz ≤ x ∧ x < a + sz + sz * k <;> by_cases h2 : a ≤ x ∧ x < a + sz <;>
       by_cases h3 : a ≤ x ∧ x < a + (sz * k + sz) <;>
       simp only [h1, h2, h3, ite_false] <;> first | rfl | omega
@@ -203,9 +220,9 @@ theorem zeroed_fillLE (M : Memory) (a sz k : Nat) : Zeroed M (fillLE M a sz 0 k)
 theorem readLE_fillLE_disjoint (M : Memory) (a sz v k b n : Nat)
     (h : b + n ≤ a ∨ a + sz * k ≤ b) : (fillLE M a sz v k).readLE b n = M.readLE b n := by
   induction k generalizing M a with
-  | zero => rfl
+  | zero => rw [fillLE_zero]
   | succ k ih =>
-    simp only [fillLE]
+    simp only [fillLE_succ]
     rw [ih _ _ (by rw [Nat.mul_succ] at h; omega),
       Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by rw [Nat.mul_succ] at h; omega)]
 
@@ -232,7 +249,7 @@ theorem stosIter_ok (sz v k : Nat) (t : State) (a : Nat) (h7 : t.regs 7 = BitVec
       (BitVec.ofNat 64 (a + sz * k))) := by
   induction k generalizing t a with
   | zero =>
-    simp only [stosIter, fillLE, Nat.mul_zero, Nat.add_zero, Except.ok.injEq]
+    simp only [stosIter, fillLE_zero, Nat.mul_zero, Nat.add_zero, Except.ok.injEq]
     refine State.ext' ?_ rfl rfl rfl rfl
     funext i; simp only [State.setReg]; split <;> simp_all
   | succ k ih =>
@@ -249,7 +266,7 @@ theorem stosIter_ok (sz v k : Nat) (t : State) (a : Nat) (h7 : t.regs 7 = BitVec
     · funext i; simp only [State.setReg]; split
       · congr 1; rw [Nat.mul_succ]; omega
       · rfl
-    · simp [State.setReg, fillLE]
+    · simp [State.setReg, fillLE_succ]
 
 /-- The memory after `k` `MOVS` element steps from `b` to `a` (`sz` bytes each). -/
 def copyLE (M : Memory) (a b sz : Nat) : Nat → Memory
