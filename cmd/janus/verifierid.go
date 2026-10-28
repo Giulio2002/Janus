@@ -114,7 +114,15 @@ var sourceMarkers = []string{"go.mod", "go.sum", "framework.go", "cmd/janus/main
 
 // verifierIdentity returns the content identity of the build b, or the reason it cannot be
 // established exactly (the caller then uses the executable's hash).
-func verifierIdentity(b buildSnapshot) (string, error) {
+func verifierIdentity(b buildSnapshot) (string, error) { return verifierIdentityScope(b, true) }
+
+// verifierIdentityScope is verifierIdentity with the Lean trees optional. With lean=false the
+// identity covers the Go side only (the Go sources, the dependencies, the build settings), not
+// the embedded Lean framework and JanusASL: the incremental gate (incr.go) keys the Lean side
+// itself, per item, by the transitive import closure of what the item imports, so that an edit
+// of a framework module the item does not import does not change its key. The two identities
+// are distinct strings (a Go-only identity never equals a full one).
+func verifierIdentityScope(b buildSnapshot, lean bool) (string, error) {
 	if b.Testing {
 		return "", fmt.Errorf("a test binary")
 	}
@@ -152,7 +160,11 @@ func verifierIdentity(b buildSnapshot) (string, error) {
 	}
 
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\nschema %d\ngo %s\npath %s\nmain %s\n", verifierIDVersion, resultCacheSchema, bi.GoVersion, bi.Path, bi.Main.Path)
+	scope := "full"
+	if !lean {
+		scope = "go-only"
+	}
+	fmt.Fprintf(h, "%s\nscope %s\nschema %d\ngo %s\npath %s\nmain %s\n", verifierIDVersion, scope, resultCacheSchema, bi.GoVersion, bi.Path, bi.Main.Path)
 	keys := make([]string, 0, len(settings))
 	for k := range settings {
 		if k == "vcs" || strings.HasPrefix(k, "vcs.") {
@@ -201,6 +213,9 @@ func verifierIdentity(b buildSnapshot) (string, error) {
 	if _, err := hashTree(h, "src", b.Sources, identityGoFile); err != nil {
 		return "", err
 	}
+	if !lean {
+		return hex.EncodeToString(h.Sum(nil)), nil
+	}
 	if n, err := hashTree(h, "framework", b.Framework, nil); err != nil || n == 0 {
 		return "", fmt.Errorf("embedded Lean framework unreadable or empty (%v)", err)
 	}
@@ -224,9 +239,16 @@ func goModModule(gomod []byte) string {
 // executable's bytes when the identity cannot be established, or "" when neither can (no cache).
 // why is the reason for a fallback.
 func verifierComponentFor(b buildSnapshot, exeSha func() string) (comp, why string) {
+	return verifierComponentScope(b, exeSha, true)
+}
+
+// verifierComponentScope is verifierComponentFor for the full (lean=true) or the Go-only identity.
+// The fallback is the executable's bytes in both cases: they cover the embedded Lean as well, so
+// a fallback is never less strict.
+func verifierComponentScope(b buildSnapshot, exeSha func() string, lean bool) (comp, why string) {
 	if os.Getenv("JANUS_VERIFIER_ID") == "exe" {
 		why = "JANUS_VERIFIER_ID=exe"
-	} else if id, err := verifierIdentity(b); err == nil {
+	} else if id, err := verifierIdentityScope(b, lean); err == nil {
 		return "src:" + id, ""
 	} else {
 		why = err.Error()
