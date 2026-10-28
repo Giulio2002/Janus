@@ -84,6 +84,22 @@ def wrapAddr : Nat :=
   adrpLdTarget (Extracted.entry + 0x68) (segWord Extracted.program "example.com/basic.StackGrow" 26)
     (segWord Extracted.program "example.com/basic.StackGrow" 27) 0
 
+
+/-! Code and data addresses are evaluated from the extraction (`janus_eval%`), never copied: a
+relinked binary needs no edit. -/
+local macro "wrapN" : term => `(janus_eval% wrapAddr)
+local macro "poolN" : term => `(janus_eval% poolAddr)
+local macro "typN" : term => `(janus_eval% ptrType)
+local macro "wbN" : term => `(janus_eval% wbFlag)
+local macro "stkN" : term => `(janus_eval% stkType)
+local macro "u64N" : term => `(janus_eval% u64Type)
+local macro "pcAt68" : term => `(janus_eval% (Extracted.entry + 0x68))
+local macro "pcAtec" : term => `(janus_eval% (Extracted.entry + 0xec))
+local macro "pcAt11c" : term => `(janus_eval% (Extracted.entry + 0x11c))
+local macro "pcAt128" : term => `(janus_eval% (Extracted.entry + 0x128))
+local macro "pcAt144" : term => `(janus_eval% (Extracted.entry + 0x144))
+local macro "pcAt15c" : term => `(janus_eval% (Extracted.entry + 0x15c))
+
 /-- The frame bookkeeping tactic: a goal `Outside a n X → Outside a n Y ∧ …` about lists of the form
 `rt ++ [ranges]` is arithmetic over the atom `Outside a n rt`. -/
 macro "frame_sub" : tactic =>
@@ -260,10 +276,10 @@ set_option maxRecDepth 40000 in
 theorem tail2 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : List (Nat × Nat)}
     {bud ret : Nat} {s : State} (W : World impl R B n L bud ret s)
     (S : State) (m2 : Memory) (d capN newp cap0 b2 : Nat) (L2 ex : List (Nat × Nat))
-    (hpc : S.pc = 603556#64) (hmem : S.mem = m2) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
+    (hpc : S.pc = (BitVec.ofNat 64 (pcAt144))) (hmem : S.mem = m2) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
     (hx18 : S.regs 18 = s.regs 18) (hx1 : (S.regs 1).toNat = d) (hx2 : (S.regs 2).toNat = capN)
     (hx5 : (S.regs 5).toNat = newp)
-    (hSl : Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat m2)
+    (hSl : Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat m2)
     (hF : MemFrame s.mem m2 (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]))
     (hLF : LiveFrame s.mem m2 L [])
     (hdrt : InRanges d 24 R.rt) (hLd : LiveSep L [(d, d + 24)]) (hH : HdrOK B d newp capN m2)
@@ -319,9 +335,9 @@ theorem tail2 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
         (BitVec.toNat (S.regs 5)) (List.mem_singleton_self _) (Nat.le_refl _) (by simp))) (fun r hr => Or.inr (by
           simp only [List.mem_singleton] at hr; rw [hr]
           exact ⟨(BitVec.toNat (S.regs 1), BitVec.toNat (S.regs 1) + 24), hdL, Nat.le_refl _, by simp⟩)) hinv
-  have hqP : S.mem.readLE (s.sp.toNat - 48 + 8) 8 = 1547840 := by
+  have hqP : S.mem.readLE (s.sp.toNat - 48 + 8) 8 = (poolN) := by
     have := hSl2; rwa [show s.sp.toNat - 40 = s.sp.toNat - 48 + 8 by omega] at this
-  have hqT : S.mem.readLE (s.sp.toNat - 48 + 16) 8 = 685248 := by
+  have hqT : S.mem.readLE (s.sp.toNat - 48 + 16) 8 = (typN) := by
     have := hSl3; rwa [show s.sp.toNat - 32 = s.sp.toNat - 48 + 16 by omega] at this
   have hqD : S.mem.readLE (s.sp.toNat - 48 + 24) 8 = BitVec.toNat (S.regs 1) := by
     have := hSl4; rwa [show s.sp.toNat - 24 = s.sp.toNat - 48 + 24 by omega] at this
@@ -333,7 +349,7 @@ theorem tail2 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
       MemFrame (S.mem.writeLE (BitVec.toNat (S.regs 1)) 8 (BitVec.toNat (S.regs 5))) S3.mem
         [(s.sp.toNat - 4288, s.sp.toNat + 24)] →
       S3.regs 28 = s.regs 28 → S3.sp.toNat + 192 = s.sp.toNat → (S3.regs 30).toNat % 4 = 0 →
-      (S3.regs 30).toNat < 2 ^ 48 → (S3.regs 0).toNat = 1547840 → (S3.regs 1).toNat = 685248 →
+      (S3.regs 30).toNat < 2 ^ 48 → (S3.regs 0).toNat = (poolN) → (S3.regs 1).toNat = (typN) →
       (S3.regs 2).toNat = BitVec.toNat (S.regs 1) →
       CallOK S3 4096 3 ∧ StackRoom S3 4096 3 ∧ (S3.regs 1).toNat = ptrType ∧
         SliceObj B S3.mem (S3.regs 2).toNat (rsOf (BitVec.toNat (S.regs 1)) (BitVec.toNat (S.regs 5)) (BitVec.toNat (S.regs 2))) ∧ (∀ r ∈ rsOf (BitVec.toNat (S.regs 1)) (BitVec.toNat (S.regs 5)) (BitVec.toNat (S.regs 2)), r ∈ L2) ∧
@@ -367,7 +383,7 @@ theorem tail2 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
   simp only [calleeStack, setReg_apply, reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.reducePow,
     Nat.reduceMod, hsp192] at hfr3 hlf3 hns3 hinv3
   rw [hdrop, hg] at hinv3
-  have hSlS3 := Slots.step (spc := s.sp.toNat - 192) (k := 3) (fn := 603664) (pool := 1547840) (T := 685248)
+  have hSlS3 := Slots.step (spc := s.sp.toNat - 192) (k := 3) (fn := (wrapN)) (pool := (poolN)) (T := (typN))
     (d := BitVec.toNat (S.regs 1)) (n := n.toNat) (ret := ret) (fp := (s.regs 29).toNat) hwrt hb4 (by omega)
     (Or.inr (by omega)) (by omega) (by
       exact ((((hSlAll.of_write _ _ _ (fun x hx => by omega)).of_write _ _ _ (fun x hx => by omega)).of_write _ _ _
@@ -379,7 +395,7 @@ theorem tail2 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
     repeat rw [Memory.readLE_writeLE_of_disjoint (h := by omega)]
     rw [Memory.readLE_writeLE_self]
     exact Nat.mod_eq_of_lt (S.regs 2).isLt
-  have eLR : m4.readLE (s.sp.toNat - 192) 8 = 603580 := by
+  have eLR : m4.readLE (s.sp.toNat - 192) 8 = (pcAt15c) := by
     rw [keep_read hwrt hfr3 (by omega) (by omega) (by simp only [outside_cons, outside_nil, and_true]; omega)]
     repeat rw [Memory.readLE_writeLE_of_disjoint (h := by omega)]
     rw [Memory.readLE_writeLE_self]
@@ -418,10 +434,10 @@ set_option maxRecDepth 40000 in
 theorem tail1 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : List (Nat × Nat)}
     {bud ret : Nat} {s : State} (W : World impl R B n L bud ret s)
     (S : State) (m1 : Memory) (d capN newp cap0 b2 : Nat) (L2 ex : List (Nat × Nat))
-    (hpc : S.pc = 603528#64) (hmem : S.mem = m1) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
+    (hpc : S.pc = (BitVec.ofNat 64 (pcAt128))) (hmem : S.mem = m1) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
     (hx18 : S.regs 18 = s.regs 18) (hx1 : (S.regs 1).toNat = d) (hx2 : (S.regs 2).toNat = capN)
     (hx5 : (S.regs 5).toNat = newp)
-    (hSl : Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat m1)
+    (hSl : Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat m1)
     (hF : MemFrame s.mem m1 (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]))
     (hLF : LiveFrame s.mem m1 L [])
     (hdrt : InRanges d 24 R.rt) (hLd : LiveSep L [(d, d + 24)])
@@ -463,7 +479,7 @@ theorem tail1 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
     rw [hmA]
     exact ((MemFrame.refl S.mem [(d, d + 24)]).writeLE 0 (List.mem_singleton_self _) (by omega) (by simp <;> omega)).writeLE
       capN (List.mem_singleton_self _) (by simp <;> omega) (by simp <;> omega)
-  have hSlA : Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat mA := by
+  have hSlA : Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat mA := by
     rw [hmA]
     exact (hSl.of_write _ _ _ (fun x hx => by omega)).of_write _ _ _ (fun x hx => by omega)
   have hHA : HdrOK B d newp capN mA := by
@@ -482,17 +498,17 @@ theorem tail1 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
     rw [hx1]; exact Memory.accessible_mono _ hdacc24 (by omega) (by omega)
   have hdaccf : S.mem.accessible (S.regs 1).toNat 8 false = true := by
     rw [hx1]; exact Memory.accessible_sub _ hdacc24 (Or.inl rfl) (Nat.le_refl _) (by omega)
-  have hflag : S.mem.accessible 1705440 4 false = true := by rw [hF.accessible]; exact hfacc
+  have hflag : S.mem.accessible (wbN) 4 false = true := by rw [hF.accessible]; exact hfacc
   have hflo := hfl _ _ _ _ hinv
   rw [hFl] at hflo
   have hflD := MemFrame.outside_mem hflo hdL
   simp only at hflD
-  have hflD' : 1705440 + 4 ≤ (S.regs 1).toNat ∨ (S.regs 1).toNat + 24 ≤ 1705440 := by rw [hx1]; exact hflD
+  have hflD' : (wbN) + 4 ≤ (S.regs 1).toNat ∨ (S.regs 1).toNat + 24 ≤ (wbN) := by rw [hx1]; exact hflD
   have hpack := Hid.mk (And.intro hF (And.intro hLF (And.intro hrs (And.intro hdL (And.intro hLsub (And.intro hrsrt (And.intro hL2W (And.intro hinv (And.intro hdrop (And.intro hfresh (And.intro hb2 (And.intro hcap0 (And.intro hcapN (And.intro hLd (And.intro hdrt (And.intro hSl (And.intro harr (And.intro hFA (And.intro hLFA (And.intro hSlA (And.intro hHA (And.intro hinvA (And.intro hmA hAacc)))))))))))))))))))))))
   have hpack2 := Hid.mk (And.intro hwb (And.intro hokWb (And.intro hput hRty)))
   clear hF hLF hrs hdL hLsub hrsrt hL2W hinv hdrop hfresh hb2 hcap0 hcapN hLd hdrt hSl harr hFA hLFA hSlA hHA hinvA
   clear hmA hAacc hwb hokWb hput hRty hget hnew hgrow hclr hokP hokG hokN hokGr hokClr hfl hinv0 hsin hsL hu64 hfacc hpin hdLsep
-  janus_run [hdacc24, hdacc8a, hdacc8b, hdaccf, hflag, hsp, hg] until [Extracted.program.contractAddr "runtime.gcWriteBarrier2", 603556]
+  janus_run [hdacc24, hdacc8a, hdacc8b, hdaccf, hflag, hsp, hg] until [Extracted.program.contractAddr "runtime.gcWriteBarrier2", (pcAt144)]
   · -- the barrier is off
     obtain ⟨hF, hLF, hrs, hdL, hLsub, hrsrt, hL2W, hinv, hdrop, hfresh, hb2, hcap0, hcapN, hLd, hdrt, hSl, harr,
       hFA, hLFA, hSlA, hHA, hinvA, hmA, hAacc⟩ := hpack.get
@@ -537,14 +553,14 @@ theorem tail1 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
       Memory.accessible_mono _ hacc16 (Nat.le_refl _) (by omega)
     have hacc8b : m'.accessible (buf.toNat + 8) 8 true = true :=
       Memory.accessible_mono _ hacc16 (by omega) (by omega)
-    have hSlM : Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat m' :=
+    have hSlM : Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat m' :=
       Slots.step (spc := s.sp.toNat - 144) (k := 0) hwrt hb4 (by omega) (Or.inl rfl) (by omega) hSlA
         (hfr2.mono (fun a n h => by
           simp only [outside_append, outside_cons, outside_nil, and_true] at h ⊢; exact ⟨h.1, h.2.1⟩))
     have hinvS' : InvSlots R b2 L2 (s.regs 28).toNat R.rt m' buf.toNat 2 := by
       simpa [InvSlots, setReg, hg] using hinvS
     have post : ∀ x1 x2 : Nat,
-        Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat
+        Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat
           ((m'.writeLE buf.toNat 8 x1).writeLE (buf.toNat + 8) 8 x2) ∧
         MemFrame s.mem ((m'.writeLE buf.toNat 8 x1).writeLE (buf.toNat + 8) 8 x2)
           (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]) ∧
@@ -597,7 +613,7 @@ theorem tail1 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
           (show buf.toNat ≤ buf.toNat + 8 by omega) (show buf.toNat + 8 + 8 ≤ buf.toNat + 8 * 2 by omega))
     have hpost := Hid.mk post
     clear post hSlM hinvS' hinvS hapL hapW hsl3 hsl4 hsl2 hsl1 hlf2 hfr2 hFA hLFA hSlA hHA hinvA hF hLF hSl hAacc hmA
-    janus_run [hacc8a, hacc8b, hbuf64] until [603556]
+    janus_run [hacc8a, hacc8b, hbuf64] until [(pcAt144)]
     obtain ⟨hSl2, hF2, hLF2, hH2, hinv2⟩ := hpost.get _ _
     exact tail2 W0 _ _ d capN newp cap0 b2 L2 ex rfl rfl rfl (by simp [wbRetX, wbRegs_apply, setReg, hg])
       (by simp [wbRetX, wbRegs_apply, setReg, hx18]) (by simp [wbRetX, wbRegs_apply, setReg, hx1])
@@ -611,11 +627,11 @@ set_option maxRecDepth 40000 in
 theorem afterClr {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : List (Nat × Nat)}
     {bud ret : Nat} {s : State} (W : World impl R B n L bud ret s)
     (S : State) (m1 : Memory) (d capN newp cap0 b2 : Nat) (L2 ex : List (Nat × Nat))
-    (hpc : S.pc = 603516#64) (hmem : S.mem = m1) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
+    (hpc : S.pc = (BitVec.ofNat 64 (pcAt11c))) (hmem : S.mem = m1) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
     (hx18 : S.regs 18 = s.regs 18)
     (e88 : m1.readLE (s.sp.toNat - 56) 8 = d) (e64 : m1.readLE (s.sp.toNat - 80) 8 = capN)
     (e80 : m1.readLE (s.sp.toNat - 64) 8 = newp)
-    (hSl : Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat m1)
+    (hSl : Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat m1)
     (hF : MemFrame s.mem m1 (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]))
     (hLF : LiveFrame s.mem m1 L [])
     (hdrt : InRanges d 24 R.rt) (hLd : LiveSep L [(d, d + 24)])
@@ -650,7 +666,7 @@ theorem afterClr {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L 
     (And.intro hrsrt (And.intro hL2W (And.intro hinv (And.intro hdrop (And.intro hfresh hcapN))))))))))))))))
   clear hF hLF hSl hdrt hLd hP hdacc24 harr hrs hdL hLsub hrsrt hL2W hinv hdrop hfresh hcapN W
   have hdd := hd64
-  janus_run [e88, e64, e80, hg, hsp144] until [603528]
+  janus_run [e88, e64, e80, hg, hsp144] until [(pcAt128)]
   obtain ⟨hF, hLF, hSl, hdrt, hLd, hP, hdacc24, harr, hrs, hdL, hLsub, hrsrt, hL2W, hinv, hdrop, hfresh, hcapN⟩ :=
     hpack.get
   have hcn64 : capN < 2 ^ 64 := by have := hP.2.2.2.1; have := hP.2.2.2.2.1; omega
@@ -666,13 +682,13 @@ set_option maxRecDepth 40000 in
 theorem afterGrow {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : List (Nat × Nat)}
     {bud ret : Nat} {s : State} (W : World impl R B n L bud ret s)
     (S : State) (m : Memory) (d capN newp cap0 b3 : Nat) (L2 ex : List (Nat × Nat))
-    (hpc : S.pc = 603468#64) (hmem : S.mem = m) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
+    (hpc : S.pc = (BitVec.ofNat 64 (pcAtec))) (hmem : S.mem = m) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
     (hx18 : S.regs 18 = s.regs 18) (hx0 : (S.regs 0).toNat = newp) (hx1 : (S.regs 1).toNat = n.toNat)
     (hx2 : (S.regs 2).toNat = capN) (hcn : capN = growCap8 n.toNat cap0) (hcn' : cap0 < n.toNat)
     (hcap0 : cap0 ≤ B)
     (s72 : m.readLE (s.sp.toNat - 72) 8 = n.toNat - cap0) (s64 : m.readLE (s.sp.toNat - 80) 8 = cap0)
     (s56 : m.readLE (s.sp.toNat - 56) 8 = d)
-    (hSl : Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat m)
+    (hSl : Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat m)
     (hF : MemFrame s.mem m (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]))
     (hLF : LiveFrame s.mem m L [])
     (hdrt : InRanges d 24 R.rt) (hLd : LiveSep L [(d, d + 24)]) (hdacc24 : m.accessible d 24 true = true)
@@ -791,7 +807,7 @@ theorem afterGrow {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L
       LiveFrame S2.mem m' (L2 ++ [(newp, newp + 8 * capN)]) [((S2.regs 0).toNat, (S2.regs 0).toNat + (S2.regs 1).toNat)] →
       R.inv b3 (L2 ++ [(newp, newp + 8 * capN)]) (S2.regs 28).toNat
         (view R.rt (L2 ++ [(newp, newp + 8 * capN)]) m') →
-      Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat m' ∧
+      Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat m' ∧
         MemFrame s.mem m' (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]) ∧ LiveFrame s.mem m' L [] ∧
         m'.accessible d 24 true = true ∧ (0 < capN → m'.accessible newp (8 * capN) true = true) ∧
         m'.readLE (s.sp.toNat - 56) 8 = d ∧ m'.readLE (s.sp.toNat - 80) 8 = capN ∧
@@ -810,7 +826,7 @@ theorem afterGrow {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L
         exact ⟨h, outside_of_inRanges_rt h.1 hex⟩)
     have hm2 : MemFrame memS S2.mem [(s.sp.toNat - 4288, s.sp.toNat + 24)] := by
       rw [hmS2]; janus_frame
-    have hSlS2 : Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat S2.mem := by
+    have hSlS2 : Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat S2.mem := by
       rw [hmS2]
       exact (hSlAll.of_write _ _ _ (fun x hx => by omega)).of_write _ _ _ (fun x hx => by omega)
     refine ⟨Slots.step (spc := s.sp.toNat - 144) (k := 2) hwrt hb4 (by omega) (Or.inl rfl) (by omega) hSlS2 hfr3',
@@ -917,7 +933,7 @@ theorem testbit63 (x : Nat) (h : x < 2 ^ 40) : ¬((BitVec.ofNat 64 x).getLsbD 63
 /-- The closure `{StackGrow.deferwrap1, &stackPool, *stack, s}` at `sp0 - 48`, the pointer to it at
 `sp0 - 16` and the "defer armed" byte (`StackGrow+0x70 … 0x98`). -/
 def stores1 (m : Memory) (sp d : Nat) : Memory :=
-  (((((m.writeLE (sp - 48) 8 603664).writeLE (sp - 40) 8 1547840).writeLE (sp - 32) 8 685248).writeLE
+  (((((m.writeLE (sp - 48) 8 (wrapN)).writeLE (sp - 40) 8 (poolN)).writeLE (sp - 32) 8 (typN)).writeLE
     (sp - 24) 8 d).writeLE (sp - 16) 8 (sp - 48)).writeLE (sp - 89) 1 1
 
 /-- ... and the spills before the `growslice` call: `s`, `oldCap`, `num` (`StackGrow+0xb8 … 0xcc`). -/
@@ -936,7 +952,7 @@ theorem stores2_frame (m : Memory) (sp d c n : Nat) (hb : 4288 ≤ sp) :
 theorem stores1_slots {m : Memory} {sp d n ret fp : Nat} (hsp : 152 ≤ sp) (hsp48 : sp < 2 ^ 48) (hd : d < 2 ^ 48)
     (h0 : m.readLE (sp - 144) 8 = ret % 2 ^ 64) (h1 : m.readLE (sp - 152) 8 = fp)
     (h2 : m.readLE (sp + 8) 8 = n) :
-    Slots sp 603664 1547840 685248 d n ret fp (stores1 m sp d) := by
+    Slots sp (wrapN) (poolN) (typN) d n ret fp (stores1 m sp d) := by
   unfold stores1
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · repeat rw [Memory.readLE_writeLE_of_disjoint (h := by omega)]
@@ -957,8 +973,8 @@ theorem stores1_slots {m : Memory} {sp d n ret fp : Nat} (hsp : 152 ≤ sp) (hsp
     exact h1
 
 theorem stores2_slots {m : Memory} {sp d c n nn ret fp : Nat}
-    (h : Slots sp 603664 1547840 685248 d nn ret fp (stores1 m sp d)) (hsp : 152 ≤ sp) :
-    Slots sp 603664 1547840 685248 d nn ret fp (stores2 m sp d c n) := by
+    (h : Slots sp (wrapN) (poolN) (typN) d nn ret fp (stores1 m sp d)) (hsp : 152 ≤ sp) :
+    Slots sp (wrapN) (poolN) (typN) d nn ret fp (stores2 m sp d c n) := by
   unfold stores2
   exact ((h.of_write _ _ _ (fun x hx => by omega)).of_write _ _ _ (fun x hx => by omega)).of_write _ _ _
     (fun x hx => by omega)
@@ -970,8 +986,8 @@ set_option maxRecDepth 40000 in
 theorem tail0 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : List (Nat × Nat)}
     {bud ret : Nat} {s : State} (W : World impl R B n L bud ret s)
     (S : State) (m : Memory) (d b2 : Nat) (rs : List (Nat × Nat))
-    (hpc : S.pc = 603336#64) (hmem : S.mem = m) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
-    (hx18 : S.regs 18 = s.regs 18) (hx1 : (S.regs 1).toNat = d) (hx2 : S.regs 2 = 685248#64)
+    (hpc : S.pc = (BitVec.ofNat 64 (pcAt68))) (hmem : S.mem = m) (hsp : S.sp = s.sp - 144#64) (hg : S.regs 28 = s.regs 28)
+    (hx18 : S.regs 18 = s.regs 18) (hx1 : (S.regs 1).toNat = d) (hx2 : S.regs 2 = (BitVec.ofNat 64 (typN)))
     (hS0 : m.readLE (s.sp.toNat - 144) 8 = ret % 2 ^ 64 ∧ m.readLE (s.sp.toNat - 152) 8 = (s.regs 29).toNat ∧
       m.readLE (s.sp.toNat + 8) 8 = n.toNat)
     (hF : MemFrame s.mem m (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]))
@@ -1042,7 +1058,7 @@ theorem tail0 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
   have hpack2 := Hid.mk (And.intro hget (And.intro hput (And.intro hnew (And.intro hgrow (And.intro hclr (And.intro hwb (And.intro hRty (And.intro hokG (And.intro hokP (And.intro hokN (And.intro hokGr (And.intro hokClr (And.intro hokWb (And.intro hu64v (And.intro hu64acc (And.intro hu64W (And.intro hfl (And.intro hfacc hu64))))))))))))))))))
   clear hF hLF hrsrt hL2W hinv hb2 hb2' hdrt hdacc24 hS0 hdisj harr hfreshrs hLd hLnot hlen0e hfr' hdA
   clear hget hput hnew hgrow hclr hwb hRty hokG hokP hokN hokGr hokClr hokWb hu64v hu64acc hu64W hfl hfacc hu64 hinv0 hsin hsL hpin hnew0
-  janus_run [hwS, hdaccf, hdaccx, hdaccf2, hsp, hg, hx1', hx2] until [603528, Extracted.program.contractAddr "runtime.growslice", Extracted.program.contractAddr "runtime.memclrNoHeapPointers"]
+  janus_run [hwS, hdaccf, hdaccx, hdaccf2, hsp, hg, hx1', hx2] until [(pcAt128), Extracted.program.contractAddr "runtime.growslice", Extracted.program.contractAddr "runtime.memclrNoHeapPointers"]
   · -- `n < 0`: impossible
     obtain ⟨-, -, -, -, -, -, -, -, -, ⟨-, -, hn0⟩, -, -, -, -, -, -⟩ := hpack.get
     exfalso
@@ -1094,14 +1110,14 @@ theorem tail0 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
     have key : ∀ S3 : State, S3.mem = stores2 S.mem s.sp.toNat d cap0 n.toNat → S3.regs 28 = s.regs 28 →
         S3.sp.toNat + 144 = s.sp.toNat → (S3.regs 30).toNat % 4 = 0 → (S3.regs 30).toNat < 2 ^ 48 →
         (S3.regs 0).toNat = ptr0 → (S3.regs 1).toNat = n.toNat → (S3.regs 2).toNat = cap0 →
-        (S3.regs 3).toNat = n.toNat - cap0 → (S3.regs 4).toNat = 701312 →
+        (S3.regs 3).toNat = n.toNat - cap0 → (S3.regs 4).toNat = (u64N) →
         GrowslicePre 4096 S3 ∧ StackRoom S3 4096 5 ∧
           LiveAt R (Extracted.program.contractAddr "runtime.growslice") (growsliceArgs S3) (L ++ rsOf d ptr0 cap0) b2
             (growsliceRound S3) (S3.regs 28).toNat S3.mem (calleeStack S3 4096 5) := by
       intro S3 hm3 hg3' hsp3 h30a h30b hr0 hr1 hr2 hr3 hr4
       have hmm : MemFrame S.mem S3.mem [(s.sp.toNat - 4288, s.sp.toNat + 24)] := by rw [hm3]; exact hm2
       have hF3 : MemFrame s.mem S3.mem (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]) := by rw [hm3]; exact hF2
-      have hargs : growsliceArgs S3 = [ptr0, n.toNat, cap0, n.toNat - cap0, 701312] := by
+      have hargs : growsliceArgs S3 = [ptr0, n.toNat, cap0, n.toNat - cap0, (u64N)] := by
         simp only [growsliceArgs, hr0, hr1, hr2, hr3, hr4]
       have hround : growsliceRound S3 = 8 * growCap8 n.toNat cap0 := by
         simp only [growsliceRound, hr1, hr2]
@@ -1112,7 +1128,7 @@ theorem tail0 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
         (by rw [show s.sp.toNat + 24 - (s.sp.toNat - 4288) = 4288 + 24 by omega]; exact hw4) hwrt hL2W
         (by rw [hargs, ← hU]; exact hokGr ptr0 cap0 hcB hbr) (by rw [hg3']; exact RtInv.inv_frame hmm hwrt hinv)
         (by rw [hround]; omega)
-      have hu64o : Outside 701312 16 (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]) := by
+      have hu64o : Outside (u64N) 16 (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]) := by
         simp only [outside_append]
         exact ⟨hu64, hu64W⟩
       refine ⟨⟨⟨h.1, ⟨by omega, ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_⟩, ?_⟩, h.2.1, h.2.2⟩
@@ -1135,7 +1151,7 @@ theorem tail0 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
     have post : ∀ (S3 : State) (ptr : W64) (junk : Nat → W64) (f3 : Flags) (v3 : Nat → BitVec 128) (m3 : Memory)
         (ex3 : Option (Nat × Nat)) (ep3 : Nat → Bool),
         S3.mem = stores2 S.mem s.sp.toNat d cap0 n.toNat → S3.sp = s.sp - 144#64 → S3.regs 28 = s.regs 28 →
-        S3.regs 18 = s.regs 18 → S3.regs 30 = 603468#64 → (S3.regs 0).toNat = ptr0 → (S3.regs 1).toNat = n.toNat →
+        S3.regs 18 = s.regs 18 → S3.regs 30 = (BitVec.ofNat 64 (pcAtec)) → (S3.regs 0).toNat = ptr0 → (S3.regs 1).toNat = n.toNat →
         (S3.regs 2).toNat = cap0 → (S3.regs 3).toNat = n.toNat - cap0 →
         MemFrame S3.mem m3 (R.rt ++ calleeStack S3 4096 5) → LiveFrame S3.mem m3 (L ++ rsOf d ptr0 cap0) [] →
         (growsliceObj R.rt S3 m3 ptr.toNat ∧ ApartAll ptr.toNat (growsliceRound S3) (L ++ rsOf d ptr0 cap0)) →
@@ -1154,7 +1170,7 @@ theorem tail0 {impl : List Segment} {R : RtInv} {B : Nat} {n : BitVec 64} {L : L
       have hcpos : 0 < growCap8 n.toNat cap0 := by have := le_growCap8 n.toNat cap0; omega
       have hn8 : ptr.toNat % 8 = 0 := hal8 (Or.inr (by omega))
       have hmm : MemFrame S.mem S3.mem [(s.sp.toNat - 4288, s.sp.toNat + 24)] := by rw [hm3]; exact hm2
-      have hSlS3 : Slots s.sp.toNat 603664 1547840 685248 d n.toNat ret (s.regs 29).toNat S3.mem := by
+      have hSlS3 : Slots s.sp.toNat (wrapN) (poolN) (typN) d n.toNat ret (s.regs 29).toNat S3.mem := by
         rw [hm3]; exact hSl2
       have hF3 : MemFrame s.mem S3.mem (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]) := by rw [hm3]; exact hF2
       have hLF3 : LiveFrame s.mem S3.mem L [] := by rw [hm3]; exact hLF2
@@ -1259,11 +1275,11 @@ theorem sliceObj_zero {B p : Nat} {m : Memory} (hB : B < 2 ^ 40) (h0 : 0 < p) (h
 
 set_option maxHeartbeats 16000000 in
 set_option maxRecDepth 40000 in
-theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 40)
+theorem correctness (impl : List Segment) (R : RtInv) (S : PoolShape) (B : Nat) (hB40 : B < 2 ^ 40)
     (hget : PoolGetLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Get")
-      4096 R ptrType (SliceObj B))
+      4096 R ptrType S)
     (hput : PoolPutLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Put")
-      4096 R ptrType (SliceObj B))
+      4096 R ptrType S)
     (hnew : NewobjectLiveContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") 4096 R)
     (hgrow : GrowsliceLiveContract (Extracted.program.link impl)
@@ -1272,10 +1288,9 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
       (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") 4096 R)
     (hwb : WbLiveContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.gcWriteBarrier2") 4096 R 2)
-    (hfl : ∀ b L g v, R.inv b L g v → Outside wbFlag 4 L)
     (n : BitVec 64) (L : List (Nat × Nat)) (bud : Nat) :
     Ensures (Extracted.program.link impl) Extracted.entry [n]
-      (fun s => GuardOK s 4288 ∧ StackOK s 4288 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      (fun s => (S = SliceObj B ∧ (∀ b L g v, R.inv b L g v → Outside wbFlag 4 L)) ∧ (GuardOK s 4288 ∧ StackOK s 4288 24 ∧ Extracted.program.DataLoaded s.mem ∧
         Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4288, s.sp.toNat + 24) :: R.rt) ∧
         LiveSep [(s.sp.toNat - 4288, s.sp.toNat + 24)] R.rt ∧
         LiveSep L [(s.sp.toNat - 4288, s.sp.toNat + 24)] ∧
@@ -1293,10 +1308,11 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
         s.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
         R.inv bud L (s.regs 28).toNat (view R.rt L s.mem) ∧ n.toNat < 2 ^ 40 ∧ 24 ≤ bud ∧
         (∀ c, c ≤ B → c < n.toNat → 24 + 8 * growCap8 n.toNat c ≤ bud) ∧
-        (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B))
+        (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B)))
       (fun s s' => Post R B n L bud s s') := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hsin, hu64,
+  intro ret hret s hs ⟨⟨hS, hfl⟩, ⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hsin, hu64,
     hfacc, hokG, hokP, hokN, hokGr, hokClr, hokWb, hnew0, hinv, hn40, hb24, hbud, hcapB⟩
+  subst hS
   janus_intro hs
   janus_data hd [hw4]
   janus_eval_nat hP : poolAddr
@@ -1305,14 +1321,14 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
   janus_eval_nat hU : u64Type
   have hRty : s.mem.readLE stkType 8 = 24 ∧ s.mem.readLE (stkType + 8) 8 = 8 := by
     rw [hSt]
-    exact ⟨by rw [h_rodata 738112 8 (by decide +kernel)]; decide +kernel,
-      by rw [h_rodata (738112 + 8) 8 (by decide +kernel)]; decide +kernel⟩
+    exact ⟨by rw [h_rodata (stkN) 8 (by decide +kernel)]; decide +kernel,
+      by rw [h_rodata ((stkN) + 8) 8 (by decide +kernel)]; decide +kernel⟩
   have hsL : Outside stkType 16 [(s.sp.toNat - 4288, s.sp.toNat + 24)] := by
     rw [hSt]; simp only [outside_cons, outside_nil, and_true]; omega
   have hu64v : s.mem.readLE u64Type 8 = 8 ∧ s.mem.readLE (u64Type + 8) 8 = 0 := by
     rw [hU]
-    exact ⟨by rw [h_rodata 701312 8 (by decide +kernel)]; decide +kernel,
-      by rw [h_rodata (701312 + 8) 8 (by decide +kernel)]; decide +kernel⟩
+    exact ⟨by rw [h_rodata (u64N) 8 (by decide +kernel)]; decide +kernel,
+      by rw [h_rodata ((u64N) + 8) 8 (by decide +kernel)]; decide +kernel⟩
   have hu64acc : s.mem.accessible u64Type 16 false = true := by
     rw [hU]; exact Memory.accessible_sub _ h_data2 (Or.inl rfl) (Nat.le_refl _) (by omega)
   have hu64W : Outside u64Type 16 [(s.sp.toNat - 4288, s.sp.toNat + 24)] := by
@@ -1333,8 +1349,8 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
   simp only [outside_cons, outside_nil, and_true] at hgo'
   have key1 : ∀ S : State, MemFrame s.mem S.mem [(s.sp.toNat - 4288, s.sp.toNat + 24)] →
       S.regs 28 = s.regs 28 → S.sp.toNat + 144 = s.sp.toNat → (S.regs 30).toNat % 4 = 0 →
-      (S.regs 30).toNat < 2 ^ 48 → (S.regs 0).toNat = 1547840 →
-      CallOK S 4096 1 ∧ StackRoom S 4096 1 ∧ S.mem.readLE (1547840 + newOffset) 8 = 0 ∧
+      (S.regs 30).toNat < 2 ^ 48 → (S.regs 0).toNat = (poolN) →
+      CallOK S 4096 1 ∧ StackRoom S 4096 1 ∧ S.mem.readLE ((poolN) + newOffset) 8 = 0 ∧
       LiveAt R (Extracted.program.contractAddr "sync.(*Pool).Get") [(S.regs 0).toNat] L bud 0
         (S.regs 28).toNat S.mem (calleeStack S 4096 1) := by
     intro S hf hg hsp h30a h30b h0
@@ -1375,19 +1391,19 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
     have hr1' : r 1 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using hr1)
     have hdesc := hRty
     rw [hSt] at hdesc
-    have hsin' : Outside 738112 16 R.rt := by rw [← hSt]; exact hsin
-    have hsL' : Outside 738112 16 [(s.sp.toNat - 4288, s.sp.toNat + 24)] := by rw [← hSt]; exact hsL
-    have hoS : ∀ a k, 738112 ≤ a → a + k ≤ 738112 + 16 →
+    have hsin' : Outside (stkN) 16 R.rt := by rw [← hSt]; exact hsin
+    have hsL' : Outside (stkN) 16 [(s.sp.toNat - 4288, s.sp.toNat + 24)] := by rw [← hSt]; exact hsL
+    have hoS : ∀ a k, (stkN) ≤ a → a + k ≤ (stkN) + 16 →
         Outside a k (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]) := fun a k h1 h2 => by
       simp only [outside_append]
       exact ⟨Outside.of_sub hsin' h1 h2, Outside.of_sub hsL' h1 h2⟩
-    have hsz : m1.readLE 738112 8 = 24 := by
+    have hsz : m1.readLE (stkN) 8 = 24 := by
       rw [hF1.readLE _ _ (hoS _ _ (Nat.le_refl _) (by omega))]; exact hdesc.1
-    have hpb : m1.readLE (738112 + 8) 8 = 8 := by
+    have hpb : m1.readLE ((stkN) + 8) 8 = 8 := by
       rw [hF1.readLE _ _ (hoS _ _ (by omega) (by omega))]; exact hdesc.2
     janus_run until [Extracted.program.contractAddr "runtime.newobject"]
     have key2 : ∀ S : State, S.mem = m1 → S.regs 28 = s.regs 28 → S.sp.toNat + 144 = s.sp.toNat →
-        (S.regs 30).toNat % 4 = 0 → (S.regs 30).toNat < 2 ^ 48 → (S.regs 0).toNat = 738112 →
+        (S.regs 30).toNat % 4 = 0 → (S.regs 30).toNat < 2 ^ 48 → (S.regs 0).toNat = (stkN) →
         (NewobjectPre 4096 S ∧ StackRoom S 4096 1 ∧
           LiveAt R (Extracted.program.contractAddr "runtime.newobject") [(S.regs 0).toNat] L bud
             (newobjectRound S) (S.regs 28).toNat S.mem (calleeStack S 4096 1)) ∧
@@ -1454,7 +1470,7 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
       (And.intro hL2W (And.intro hfreshrs hinv2)))))))
     clear hpc2 hS02 hF2 hLF2 hSh2 hrsrt hL2W hfreshrs hinv2 hfr2 hlf2 hapL hapS hin hzero hacc hpd hF1 hLF1 hfr1 hlf1 hS01
     clear key1 key2 hdesc hsz hpb hinvG hns1 hgo hgo'
-    janus_run until [603336]
+    janus_run until [(pcAt68)]
     obtain ⟨hS02, hF2, hLF2, hSh2, hrsrt, hL2W, hfreshrs, hinv2⟩ := hpack.get
     exact tail0 W0 _ m2 ptr.toNat (bud - 24) [(ptr.toNat, ptr.toNat + 24)] (by simp [setReg]) rfl rfl
       (by simp [setReg, retStateX, callRegs_apply, Map.keepABI_apply]) (by simp [setReg, retStateX, callRegs_apply, Map.keepABI_apply])
@@ -1462,7 +1478,7 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
       hS02 hF2 hLF2 (by simpa only [Nat.add_sub_cancel_left] using hrsrt _ (List.mem_singleton_self _)) hSh2 hfreshrs hrsrt
       hL2W hinv2 (by omega) (by omega)
   · -- a pooled stack
-    have hr0' : r 0 = 685248#64 := BitVec.eq_of_toNat_eq (by simpa [hT] using hr0)
+    have hr0' : r 0 = (BitVec.ofNat 64 (typN)) := BitVec.eq_of_toNat_eq (by simpa [hT] using hr0)
     have hd0 := hSh.1
     have hr1' : r 1 ≠ 0#64 := fun h => by simp [h] at hd0
     have hrsE := hSh.2.2.2.2.2.2.2.2.2.2.2
@@ -1479,7 +1495,7 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 
     have hpack := Hid.mk (And.intro hS01 (And.intro hF1 (And.intro hLF1 (And.intro hdrt (And.intro hSh
       (And.intro hfresh (And.intro hinrt (And.intro hL2W hinvG))))))))
     clear hpc1 hS01 hF1 hLF1 hdrt hSh hfresh hinrt hL2W hinvG hsep hns1 hfr1 hlf1 key1 hrsE hgo hgo'
-    janus_run until [603336]
+    janus_run until [(pcAt68)]
     obtain ⟨hS01, hF1, hLF1, hdrt, hSh, hfresh, hinrt, hL2W, hinvG⟩ := hpack.get
     exact tail0 W0 _ m1 (BitVec.toNat (r 1)) bud rs (by simp [setReg]) rfl rfl
       (by simp [setReg, retStateX, callRegs_apply, Map.keepABI_apply])
@@ -1686,10 +1702,10 @@ theorem inv0 : R.inv 0x400 [] (s0.regs 28).toNat (view R.rt [] s0.mem) := by
 theorem s0_sp : s0.sp.toNat = sp0 := by simp [s0, sp0]
 theorem s0_g : (s0.regs 28).toNat = g0 := by simp [s0, g0]
 
-theorem hP' : P = 1547840 := by unfold P; decide
-theorem hs' : sT = 738112 := by unfold sT; decide
-theorem hu' : uT = 701312 := by unfold uT; decide
-theorem hw' : wF = 1705440 := by unfold wF; decide
+theorem hP' : P = (poolN) := by unfold P; decide
+theorem hs' : sT = (stkN) := by unfold sT; decide
+theorem hu' : uT = (u64N) := by unfold uT; decide
+theorem hw' : wF = (wbN) := by unfold wF; decide
 
 set_option maxRecDepth 100000 in
 theorem pre : GuardOK s0 4288 ∧ StackOK s0 4288 24 ∧ Extracted.program.DataLoaded s0.mem ∧
@@ -1770,10 +1786,9 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (B : Nat) (ret : Nat)
       (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") 4096 R ∧
     WbLiveContract (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gcWriteBarrier2")
       4096 R 2) ∧
-    (∀ b L g v, R.inv b L g v → Outside wbFlag 4 L) ∧
     (RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s) ∧
-    ((GuardOK s 4288 ∧ StackOK s 4288 24 ∧ Extracted.program.DataLoaded s.mem ∧
+    (((SliceObj B = SliceObj B ∧ (∀ b L g v, R.inv b L g v → Outside wbFlag 4 L)) ∧ GuardOK s 4288 ∧ StackOK s 4288 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4288, s.sp.toNat + 24) :: R.rt) ∧
       LiveSep [(s.sp.toNat - 4288, s.sp.toNat + 24)] R.rt ∧
       LiveSep L [(s.sp.toNat - 4288, s.sp.toNat + 24)] ∧
@@ -1795,8 +1810,8 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (B : Nat) (ret : Nat)
       (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B))) := by
   obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22,
     a23⟩ := pre
-  refine ⟨implAt, R, 1, ret, s0, [], 0x400, 1, by decide, ⟨?_, ?_, ?_, ?_, ?_, ?_⟩, hfl', ⟨hret, setup⟩,
-    ⟨⟨a1, a2, a3, a4, a5, a6, a7, a8⟩, ⟨a9, a10, a11, a12, a13, a14, a15⟩,
+  refine ⟨implAt, R, 1, ret, s0, [], 0x400, 1, by decide, ⟨?_, ?_, ?_, ?_, ?_, ?_⟩, ⟨hret, setup⟩,
+    ⟨⟨⟨rfl, hfl'⟩, a1, a2, a3, a4, a5, a6, a7, a8⟩, ⟨a9, a10, a11, a12, a13, a14, a15⟩,
       ⟨a16, a17, a18, a19, a20, a21, a22, a23⟩⟩⟩
   · rw [aG, hPT]; exact hget
   · rw [aP, hPT]; exact hput
@@ -1812,9 +1827,9 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
       ∃ xs b', FreshFrom xs [] ∧ b' ≤ 0x400 ∧
         MemFrame s0.mem s'.mem (R.rt ++ [(s0.sp.toNat - 4288, s0.sp.toNat + 24)]) ∧
         LiveFrame s0.mem s'.mem [] [] ∧ R.inv b' ([] ++ xs) (s0.regs 28).toNat (view R.rt ([] ++ xs) s'.mem) := by
-  have h := correctness implAt R 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+  have h := correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
     (by rw [aN]; exact hnew) (by rw [aGr]; exact hgrow) (by rw [aM]; exact hclr) (by rw [aW]; exact hwb)
-    hfl' 1 [] 0x400 ret hret s0 setup pre
+    1 [] 0x400 ret hret s0 setup ⟨⟨rfl, hfl'⟩, pre⟩
   refine Returns.mono h fun s' ⟨hab, cap0, hc, hres, xs, b', hfr, hb, hF, hLF, hinv⟩ => ⟨hab, ?_, xs, b', hfr, hb, hF, hLF, hinv⟩
   have : cap0 = 0 ∨ cap0 = 1 := by omega
   rcases this with rfl | rfl

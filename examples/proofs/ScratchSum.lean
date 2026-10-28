@@ -69,6 +69,10 @@ def bufType : Nat :=
   adrpLdTarget (Extracted.entry + 0x44) (segWord Extracted.program "example.com/basic.ScratchSum" 17)
     (segWord Extracted.program "example.com/basic.ScratchSum" 18) 0
 
+/-- The type descriptor's address, evaluated from the extraction (never copied). -/
+local macro "typN" : term => `(janus_eval% ptrType)
+local macro "bufN" : term => `(janus_eval% bufType)
+
 /-- The shape of a pooled `*scratch`: 32 writable bytes at a non-nil, 8-aligned address, owning
 exactly that range. Its contents are arbitrary. -/
 def BufObj : PoolShape := fun m d rs =>
@@ -138,16 +142,16 @@ theorem StackFacts.step {rt : List (Nat × Nat)} {sp0 a b ret fp n : Nat} {m m' 
 
 set_option maxHeartbeats 8000000 in
 set_option maxRecDepth 20000 in
-theorem correctness (impl : List Segment) (R : RtInv)
+theorem correctness (impl : List Segment) (R : RtInv) (B : PoolShape)
     (hget : PoolGetLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Get")
-      4096 R ptrType BufObj)
+      4096 R ptrType B)
     (hput : PoolPutLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Put")
-      4096 R ptrType BufObj)
+      4096 R ptrType B)
     (hnew : NewobjectLiveContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") 4096 R)
     (a b : BitVec 64) (L : List (Nat × Nat)) (bud : Nat) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b]
-      (fun s => GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      (fun s => B = BufObj ∧ GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
         Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4144, s.sp.toNat + 24) :: R.rt) ∧
         LiveSep [(s.sp.toNat - 4144, s.sp.toNat + 24)] R.rt ∧
         LiveSep L [(s.sp.toNat - 4144, s.sp.toNat + 24)] ∧
@@ -162,8 +166,9 @@ theorem correctness (impl : List Segment) (R : RtInv)
         ∃ d b', (b' = bud ∨ b' = bud - 32) ∧
           MemFrame s.mem s'.mem (R.rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24), (d, d + 32)]) ∧
           LiveFrame s.mem s'.mem L [] ∧ R.inv b' L (s.regs 28).toNat (view R.rt L s'.mem)) := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hbin, hokG, hokP, hokN,
+  intro ret hret s hs ⟨hB, ⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hbin, hokG, hokP, hokN,
     hnew0, hinv, hbud⟩
+  subst hB
   janus_intro hs
   janus_eval_nat hP : poolAddr
   janus_eval_nat hT : ptrType
@@ -171,10 +176,10 @@ theorem correctness (impl : List Segment) (R : RtInv)
   rw [hP] at hpin hokG hokP hnew0
   rw [hB] at hbin
   janus_data hd [hw4]
-  have hdesc : s.mem.readLE 737984 8 = 32 ∧ s.mem.readLE (737984 + 8) 8 = 0 :=
-    ⟨by rw [h_rodata 737984 8 (by decide +kernel)]; decide +kernel,
-      by rw [h_rodata (737984 + 8) 8 (by decide +kernel)]; decide +kernel⟩
-  have hbW : Outside 737984 16 [(s.sp.toNat - 4144, s.sp.toNat + 24)] := by
+  have hdesc : s.mem.readLE (bufN) 8 = 32 ∧ s.mem.readLE ((bufN) + 8) 8 = 0 :=
+    ⟨by rw [h_rodata (bufN) 8 (by decide +kernel)]; decide +kernel,
+      by rw [h_rodata ((bufN) + 8) 8 (by decide +kernel)]; decide +kernel⟩
+  have hbW : Outside (bufN) 16 [(s.sp.toNat - 4144, s.sp.toNat + 24)] := by
     simp only [outside_cons, outside_nil, and_true]; omega
   have hsp48 : (s.sp - 48#64).toNat = s.sp.toNat - 48 := by
     rw [BitVec.toNat_sub_of_le (by simp only [BitVec.le_def, BitVec.toNat_ofNat]; omega)]; rfl
@@ -215,17 +220,17 @@ theorem correctness (impl : List Segment) (R : RtInv)
     have hr0' : r 0 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using hr0)
     have hr1' : r 1 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using hr1)
     -- the descriptor of `scratch` (32 bytes, no pointers), as the runtime's invariant has it
-    have hoB : ∀ a k, 737984 ≤ a → a + k ≤ 737984 + 16 →
+    have hoB : ∀ a k, (bufN) ≤ a → a + k ≤ (bufN) + 16 →
         Outside a k (R.rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24)]) := fun a k h1 h2 => by
       simp only [outside_append]
       exact ⟨Outside.of_sub hbin h1 h2, Outside.of_sub hbW h1 h2⟩
-    have hsz : m1.readLE 737984 8 = 32 := by
+    have hsz : m1.readLE (bufN) 8 = 32 := by
       rw [hF1.readLE _ _ (hoB _ _ (Nat.le_refl _) (by omega))]; exact hdesc.1
-    have hpb : m1.readLE (737984 + 8) 8 = 0 := by
+    have hpb : m1.readLE ((bufN) + 8) 8 = 0 := by
       rw [hF1.readLE _ _ (hoB _ _ (by omega) (by omega))]; exact hdesc.2
     janus_run until [Extracted.program.contractAddr "runtime.newobject"]
     have key2 : ∀ S : State, S.mem = m1 → S.regs 28 = s.regs 28 → S.sp.toNat + 48 = s.sp.toNat →
-        (S.regs 30).toNat % 4 = 0 → (S.regs 30).toNat < 2 ^ 48 → (S.regs 0).toNat = 737984 →
+        (S.regs 30).toNat % 4 = 0 → (S.regs 30).toNat < 2 ^ 48 → (S.regs 0).toNat = (bufN) →
         (NewobjectPre 4096 S ∧ StackRoom S 4096 1 ∧
           LiveAt R (Extracted.program.contractAddr "runtime.newobject") [(S.regs 0).toNat] L bud
             (newobjectRound S) (S.regs 28).toNat S.mem (calleeStack S 4096 1)) ∧
@@ -357,7 +362,7 @@ theorem correctness (impl : List Segment) (R : RtInv)
   · -- a pooled buffer
     obtain ⟨hd0, hd8, hd48, hdacc, hrs⟩ := hSh
     subst hrs
-    have hr0' : r 0 = 685184#64 := BitVec.eq_of_toNat_eq (by simpa [hT] using hr0)
+    have hr0' : r 0 = (BitVec.ofNat 64 (typN)) := BitVec.eq_of_toNat_eq (by simpa [hT] using hr0)
     have hr1' : r 1 ≠ 0#64 := fun h => by simp [h] at hd0
     have hin := hinrt _ (List.mem_singleton_self _)
     simp only [Nat.add_sub_cancel_left] at hin
@@ -588,7 +593,7 @@ theorem s0_sp : s0.sp.toNat = sp0 := by simp [s0, sp0]
 theorem s0_g : (s0.regs 28).toNat = g0 := by simp [s0, g0]
 
 theorem hP' : P = 1547776 := by unfold P; decide
-theorem hb' : bT = 737984 := by unfold bT; decide
+theorem hb' : bT = (bufN) := by unfold bT; decide
 
 set_option maxRecDepth 100000 in
 theorem pre : GuardOK s0 4144 ∧ StackOK s0 4144 24 ∧ Extracted.program.DataLoaded s0.mem ∧
@@ -630,7 +635,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (ret : Nat) (s : Stat
       4096 R ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
-    (GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+    (BufObj = BufObj ∧ GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4144, s.sp.toNat + 24) :: R.rt) ∧
       LiveSep [(s.sp.toNat - 4144, s.sp.toNat + 24)] R.rt ∧
       LiveSep L [(s.sp.toNat - 4144, s.sp.toNat + 24)] ∧
@@ -641,7 +646,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (ret : Nat) (s : Stat
       R.ok (Extracted.program.contractAddr "runtime.newobject") [bufType] ∧
       s.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
       R.inv bud L (s.regs 28).toNat (view R.rt L s.mem) ∧ 32 ≤ bud) := by
-  refine ⟨implAt, R, ret, s0, [], 0x400, ?_, ?_, ?_, hret, setup, pre⟩
+  refine ⟨implAt, R, ret, s0, [], 0x400, ?_, ?_, ?_, hret, setup, ⟨rfl, pre⟩⟩
   · rw [aG, hPT]; exact hget
   · rw [aP, hPT]; exact hput
   · rw [aN]; exact hnew
@@ -653,9 +658,9 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
       ∃ d b', (b' = 0x400 ∨ b' = 0x400 - 32) ∧
         MemFrame s0.mem s'.mem (R.rt ++ [(s0.sp.toNat - 4144, s0.sp.toNat + 24), (d, d + 32)]) ∧
         LiveFrame s0.mem s'.mem [] [] ∧ R.inv b' [] (s0.regs 28).toNat (view R.rt [] s'.mem) := by
-  have h := correctness implAt R (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+  have h := correctness implAt R BufObj (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
     (by rw [aN]; exact hnew) 3 5 [] 0x400
-    ret hret s0 setup pre
+    ret hret s0 setup ⟨rfl, pre⟩
   exact h
 
 end Witness

@@ -924,57 +924,123 @@ func (r *consumerRequest) prepare() error {
 
 // verifyConsumer is janus verify with --proof-root: one request, one group.
 func verifyConsumer(outdir string, opts map[string]string, stderr io.Writer) (*verifiedReport, error) {
+	o := verifyConsumerMany(outdir, opts, []thmSpec{{Proof: opts["proof"], Theorem: opts["theorem"]}}, stderr)[0]
+	return o.Report, o.Err
+}
+
+// thmSpec is one theorem to verify: the proof file (inside the --proof-root package) it is in,
+// and its name. An empty Proof stands for --proof.
+type thmSpec struct{ Proof, Theorem string }
+
+// verifyConsumerMany is janus verify with --proof-root and several theorems, possibly in
+// different modules of the package: ONE snapshot, ONE workspace and ONE Lake build of all the
+// modules (verifyGroup, the path janus verify-batch uses for requests sharing an extraction), then
+// each theorem's own audit, kernel replay of its closure and report. A request that fails alone
+// (an unknown theorem, a failing audit) does not affect the others; a failure of a shared step
+// (the lakefile, a pin, the build of a module they all import) fails every request it covers.
+func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, stderr io.Writer) []thmOutcome {
+	outs := make([]thmOutcome, len(specs))
+	reqs := make([]*consumerRequest, len(specs))
+	var live []int
+	seen := map[[2]string]bool{}
+	for i, sp := range specs {
+		proof := sp.Proof
+		if proof == "" {
+			proof = opts["proof"]
+		}
+		reqs[i] = &consumerRequest{Outdir: outdir, Proof: proof, Theorem: sp.Theorem, Binary: opts["binary"]}
+		if err := reqs[i].prepare(); err != nil {
+			outs[i] = thmOutcome{Theorem: reqs[i].Theorem, Err: err}
+			continue
+		}
+		outs[i].Theorem = reqs[i].Theorem
+		k := [2]string{reqs[i].Proof, reqs[i].Theorem}
+		if seen[k] {
+			outs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("Theorem %s of %s is listed more than once.", reqs[i].Theorem, displayPath(reqs[i].Proof)),
+				Stage: "proof selection", Next: "List each theorem once."}
+			continue
+		}
+		seen[k] = true
+		live = append(live, i)
+	}
+	if len(live) == 0 {
+		return outs
+	}
+	failLive := func(err error) []thmOutcome {
+		for _, i := range live {
+			if outs[i].Report == nil && outs[i].Err == nil {
+				outs[i].Err = err
+			}
+		}
+		return outs
+	}
 	fw, err := loadFramework(opts["janus-root"])
 	if err != nil {
-		return nil, err
-	}
-	req := &consumerRequest{Outdir: outdir, Proof: opts["proof"], Theorem: opts["theorem"], Binary: opts["binary"]}
-	if err := req.prepare(); err != nil {
-		return nil, err
+		return failLive(err)
 	}
 	lake, err := findLake()
 	if err != nil {
-		return nil, err
+		return failLive(err)
 	}
 	sb, err := detectSandbox(opts["unsafe-no-sandbox"] != "")
 	if err != nil {
-		return nil, err
+		return failLive(err)
 	}
 	lease, err := fw.frameworkBase(lake, stderr)
 	if err != nil {
-		return nil, err
+		return failLive(err)
 	}
 	tc, err := findToolchain(lake, lease.dir)
 	lease.release()
 	if err != nil {
-		return nil, err
+		return failLive(err)
 	}
 	var asl *aslBuild
 	if opts["asl"] != "" {
 		if asl, err = buildASLFor(fw, "", lake, stderr); err != nil {
-			return nil, err
+			return failLive(err)
 		}
 		defer asl.release()
 	}
 	pkg, err := loadConsumer(opts["proof-root"], fw, []string{outdir}, loadOpts{AllowPathDeps: opts["allow-path-deps"] != "", SB: sb})
 	if err != nil {
-		return nil, err
+		return failLive(err)
 	}
-	if req.rel, err = pkg.proofRel(req.Proof); err != nil {
-		return nil, err
+	// Every request must share the one extraction (they all read the same outdir; checked again
+	// per request after the build) and its proof must be a file of the snapshot.
+	var group []*consumerRequest
+	var groupIdx []int
+	for _, i := range live {
+		r := reqs[i]
+		if r.rel, err = pkg.proofRel(r.Proof); err != nil {
+			outs[i].Err = err
+			continue
+		}
+		if !bytes.Equal(pkg.Files[r.rel], r.proofSrc) {
+			outs[i].Err = &diag{Invalid: true, Msg: "The proof changed while the package was read.", Stage: "stale input", Next: "Rerun janus verify."}
+			continue
+		}
+		group = append(group, r)
+		groupIdx = append(groupIdx, i)
 	}
-	if !bytes.Equal(pkg.Files[req.rel], req.proofSrc) {
-		return nil, &diag{Invalid: true, Msg: "The proof changed while the package was read.", Stage: "stale input", Next: "Rerun janus verify."}
+	if len(group) == 0 {
+		return outs
 	}
-	ws, err := openWorkspace(fw, pkg, req.cr.Lean, opts["fresh"] != "", lake, sb, tc, stderr)
+	ws, err := openWorkspace(fw, pkg, group[0].cr.Lean, opts["fresh"] != "", lake, sb, tc, stderr)
 	if err != nil {
-		return nil, err
+		for _, i := range groupIdx {
+			outs[i].Err = err
+		}
+		return outs
 	}
 	defer ws.close()
 	ws.replayFresh = opts["replay-fresh"] != ""
 	ws.asl = asl
-	verifyGroup(fw, pkg, ws, []*consumerRequest{req})
-	return req.Report, req.Err
+	verifyGroup(fw, pkg, ws, group)
+	for k, i := range groupIdx {
+		outs[i].Report, outs[i].Err = group[k].Report, group[k].Err
+	}
+	return outs
 }
 
 // verifyGroup verifies requests that share one extraction (identical Extracted.lean) in one
@@ -997,8 +1063,12 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	// One build of every proof module of the group (sandboxed: lakefile and modules are
 	// untrusted).
 	targets := []string{"build", "--no-ansi"}
+	seenRel := map[string]bool{}
 	for _, r := range reqs {
-		targets = append(targets, r.rel)
+		if !seenRel[r.rel] {
+			seenRel[r.rel] = true
+			targets = append(targets, r.rel)
+		}
 	}
 	_, buildOut, _ := ws.run(targets...)
 	rebuilt := append(builtModules(buildOut), ws.prepBuilt...)

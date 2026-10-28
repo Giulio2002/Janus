@@ -37,7 +37,7 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.CABI Janus.Amd64.Tactic Jan
 
 namespace Proof
 
-abbrev wrapper : Nat := segAddr Extracted.program "_cgo_2306a0143858_Cfunc_c_ldmul"
+abbrev wrapper : Nat := segAddr Extracted.program "_cgo_ad79fd856801_Cfunc_c_ldmul"
 
 abbrev frameA (m : Memory) (a : Nat) : Nat := m.readLE a 8
 abbrev frameB (m : Memory) (a : Nat) : Nat := m.readLE (a + 8) 8

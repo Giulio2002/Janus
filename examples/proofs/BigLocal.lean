@@ -194,11 +194,12 @@ theorem grow_branch (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
 /-- **`BigLocal` is correct on a stack of any size, stack growth included.** -/
 theorem correctness (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (reloc : State → State → Prop) (hms : MorestackContract Extracted.program FT pool rt H reloc)
-    (hA : FT.Agrees Extracted.frames) (x i : BitVec 64) :
-    EnsuresGrow Extracted.program reloc Extracted.entry [x, i] (GPre FT pool rt H)
+    (x i : BitVec 64) :
+    EnsuresGrow Extracted.program reloc Extracted.entry [x, i]
+      (fun s => FT.Agrees Extracted.frames ∧ GPre FT pool rt H s)
       (fun _ s' => s'.regs 0 = if i.toNat % 16 = 0 then x else 0) := by
+  intro ret hret s hs ⟨hA, hpre⟩
   have hFT := tableOK_of hA
-  intro ret hret s hs hpre
   janus_intro hs
   obtain ⟨lo, hi, hgs, hgo, h4k, hlo, hhi, hhi48, hal1, hal2, hal3, hfp, hinp, hpok, hrt,
     ⟨fs, hch, hfsp, hc8, hc16⟩, hfit1, hfit2, hcode, hal, hH, hNP⟩ := hpre
@@ -425,17 +426,17 @@ theorem pre : GPre FTb pool rt H s0 := by
 /-- All hypotheses of `correctness` hold together, for a call whose frame does not fit. -/
 theorem nonvacuous : ∃ (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     (reloc : State → State → Prop) (ret : Nat) (s : State),
-    MorestackContract Extracted.program FT pool rt H reloc ∧ FT.Agrees Extracted.frames ∧
+    MorestackContract Extracted.program FT pool rt H reloc ∧
     RetAddr Extracted.program ret ∧
     CallSetup (Extracted.program.withExit ret) Extracted.entry [7#64, 0#64] s ∧
-    GPre FT pool rt H s ∧ ¬ GuardOK s 48 :=
-  ⟨FTb, pool, rt, H, reloc FTb, ret, s0, contract _ FTb, agrees, hret, setup, pre, no_room⟩
+    (FT.Agrees Extracted.frames ∧ GPre FT pool rt H s) ∧ ¬ GuardOK s 48 :=
+  ⟨FTb, pool, rt, H, reloc FTb, ret, s0, contract _ FTb, hret, setup, ⟨agrees, pre⟩, no_room⟩
 
 /-- So the guarantee is reached: from a stack where the frame does not fit, `BigLocal(7, 0)`
 grows the stack and returns `7`. -/
 theorem returns : GrownReturns (Extracted.program.withExit ret) (reloc FTb) s0
     (fun s' => s'.regs 0 = 7#64) :=
-  (correctness FTb pool rt H (reloc FTb) (contract _ FTb) agrees 7#64 0#64 ret hret s0 setup pre).mono
+  (correctness FTb pool rt H (reloc FTb) (contract _ FTb) 7#64 0#64 ret hret s0 setup ⟨agrees, pre⟩).mono
     (fun s' h => by simpa using h)
 
 end Witness
