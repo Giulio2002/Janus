@@ -105,3 +105,40 @@ func TestRT09IncrDirIsUnderTheHiddenResultDir(t *testing.T) {
 		t.Fatalf("incrDir %s is outside resultCacheDir %s", incrDir(), resultCacheDir())
 	}
 }
+
+// The build-cache (ASL/Sail) HMAC key lives in the cache root, which sandboxes expose read-only: it must be
+// covered, in both modes.
+func TestRT09BuildCacheKeyIsHiddenFromTheSandbox(t *testing.T) {
+	for _, mode := range []string{"bwrap", "unshare"} {
+		t.Run(mode, func(t *testing.T) {
+			newIncrFx(t)
+			kf := filepath.Join(cacheRoot(), "asl-cache.key")
+			if err := os.WriteFile(kf, bytes.Repeat([]byte{0x5a}, 32), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var sb *sandbox
+			if mode == "bwrap" {
+				p, err := exec.LookPath("bwrap")
+				if err != nil {
+					t.Skip("no bwrap")
+				}
+				sb = &sandbox{mode: "bwrap", bwrap: p}
+			} else {
+				if _, err := exec.LookPath("unshare"); err != nil {
+					t.Skip("no unshare")
+				}
+				sb = &sandbox{mode: "unshare"}
+			}
+			if err := sb.selfTest(); err != nil {
+				t.Skipf("%s unavailable: %v", mode, err)
+			}
+			base, _ := janusRunBase()
+			ws, _ := os.MkdirTemp(base, "rt9k-")
+			defer os.RemoveAll(ws)
+			out, _ := sb.command(ws, nil, []string{"/bin/sh", "-c", "cat " + shQuote(kf) + " 2>/dev/null | od -An -c | head -2; echo END"}, os.Environ()).CombinedOutput()
+			if strings.Contains(string(out), "Z") {
+				t.Errorf("%s: the build-cache HMAC key is readable from the sandbox: %q", mode, out)
+			}
+		})
+	}
+}
