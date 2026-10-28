@@ -85,10 +85,33 @@ longest first using `testDurations` in `cmd/janus/order_test.go`, and checks tha
 list (fails if a test is unassigned or twice); afterwards it checks from the `-v` output that each
 shard reported a result for exactly its tests.
 
+**Lane memory limits.** memguard's per-job default (24G) applies inside the outer `memcap` unless
+`JANUS_MEM_MAX` is set, and the ASL build OOM'd at 24 GiB once, so `gate.sh` sets an explicit per-lane limit
+(`JANUS_GATE_MEM_<LANE>`, e.g. `JANUS_GATE_MEM_ASL_BUILD=64G`, overrides it):
+
+| lane | per-job limit | measured peak (acc1 timelines, `-j 2`) |
+|---|---|---|
+| `asl-build`, `sail-build`, `rtasl-*` | 48G | asl-build 11.2 GiB in its logged jobs, one cold build job OOM'd at 24 GiB (FpSame.ExecC) |
+| `x86` | 24G | 11.2 GiB |
+| `rounds` | 24G (its lanes have their own 20G cgroups) | 1.2 GiB per job |
+| `gotest`, `axiom` | 24G | 14.3 GiB (profile) / negligible |
+| `verify` | none set: each item bounds itself (10G slots; print rows 24G) | items 0.2-6.1 GiB, print 10-14 GiB |
+
+These are per-job ceilings, not reservations. The outer cap is `memguard_self`'s `max(limit, MemAvailable - 40 GiB)`;
+the simultaneous peaks are what count: measured asl-build + x86 + rounds + verify pool at `-j 2` ~ 30-45 GiB, far
+inside it. At a higher `-j` the verify pool adds ~10 GiB per slot (the admission check in `parallel.sh` keeps
+40 GiB free).
+
+**Kept trees.** The isolated lake-lane trees are `artifacts/gate/trees/<hash of HEAD tree + uncommitted diff>/{x86,asl}`.
+They are removed when the gate passes, kept (path reported) when it fails or is cancelled, and reused by a
+rerun of the same sources (`scripts/lib/test-gatelanes.sh` tests limits, keep, reuse, removal). A second run on the
+same sources waits (flock). `ASL_CACHE`, or `JANUS_ASL_CACHE` as an alias, is forwarded to `scripts/asl.sh`; the
+content-addressed cache of `agent/speed-asl` is not final, so this is only the hook.
+
 **Cancel.** A gate run is its own process group (`setsid`); `<out>/pgid` holds the id. Cancel one run with
 `kill -- -$(cat <out>/pgid)` (or stop its memcap scope) and nothing else; never kill by name or pattern, other
 gates share the host (`scripts/lib/test-pgcancel.sh`). The Lake-writing lanes (x86, asl, oracle, rt-asl) work in
-private source copies (`<out>/tree-x86`, `<out>/tree-asl`, about 0.85 GiB each, removed at exit and on cancel),
+private source copies (`artifacts/gate/trees/<hash>/x86` and `/asl`, about 0.85 GiB each, see "Kept trees"),
 because a `lake` in JanusX86/JanusASL replays the framework's `.olean` files it depends on by path; the verify,
 go test and audit lanes read the prebuilt framework build, which is never written after the prebuild.
 
