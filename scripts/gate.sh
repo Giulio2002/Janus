@@ -61,6 +61,7 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/memguard.sh"
 memguard_self "$@"
 
+orig_args=("$@")
 jobs_n="${JANUS_JOBS:-2}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -115,7 +116,7 @@ tlf="$out/timeline.jsonl"; : > "$tlf"
 # Own process group (setsid, once): every child of this run is in it, and a cancel is `kill -- -PGID`.
 if [ "${JANUS_GATE_PG:-}" != "$out" ]; then
   export JANUS_GATE_PG="$out"
-  exec setsid --wait "$0" "$@" --out "$out"
+  exec setsid --wait "$0" "${orig_args[@]}" --out "$out"
 fi
 echo "$$" > "$out/pgid"
 echo "gate: process group $$ (cancel: kill -- -$$)"
