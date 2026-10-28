@@ -36,6 +36,59 @@ Tools for measuring:
   (cgroup `memory.peak`, the peak sum of the resident sets of all its processes, and the largest
   single process).
 
+## The gate driver (`scripts/gate.sh`)
+
+One command runs every check of the gate: `scripts/gate.sh [-j N] [--lanes N]` (under `memcap`). It
+prebuilds once, then runs every stage as a parallel lane that reads the prebuilt outputs.
+
+**Phase 1, prebuild (once).** `go build bin/janus` (and `audit/bin/janus-rounds`, the audit lanes'
+copy), `lake build` plus `lake build Janus Janus.Tools.Audit janus-audit`, the example binaries of every
+suite (`scripts/build-examples{,-amd64,-asm,-sys,-rtmisc,-print,-cgo}.sh`, in parallel), and the
+framework build and replay verdict (a first verification of the Add example). The later stages run with
+`JANUS_EXAMPLES_PREBUILT=1` / `JANUS_GATE_PREBUILT=1` and rebuild nothing.
+
+**Phase 2, lanes.** Queued longest first by their time in the last run (`artifacts/gate/lane-times`;
+built-in estimates before the first run), at most `--lanes` at once (default `-j + 1`: the verify pool
+and `-j` others):
+
+| lane | what it runs |
+|---|---|
+| `verify` | `scripts/verify-all-examples.sh --cgo`: ONE queue (`scripts/lib/pool.sh`) of every arm64, amd64, asm, rtmisc, sys, print and cgo item, longest first by the recorded `.times` (unknown items first) |
+| `gotest` | `scripts/gotest-shards.sh`: `go test -count=1 -timeout 7000s ./cmd/...` in duration-balanced shards |
+| `rounds` | `audit/run-rounds.sh` (all audit rounds) |
+| `axiom` | `scripts/ci-axiom-guard.sh` |
+| `x86` | `scripts/x86formal.sh prove` |
+| `asl-build`, `sail-build` | `scripts/asl.sh build` (set `ASL_CACHE`), `scripts/oracle-sail.sh build` |
+| `rtasl-prove`, `-rel`, `-strict`, `-replay`, `-btf`, `-probes`, `-fsqrt`, `-go` | `audit/rt-asl/run.sh GROUP`: the red-team round ASL, one lane per group (`run.sh` without arguments still runs them all, in order) |
+
+**Concurrency.** `-j N` / `JANUS_JOBS` (default **2**, the shared-box rule; `auto` uses the formula of
+`scripts/lib/parallel.sh`) is the number of verify items at once; the go test shards (`max(2, N)`, one
+test slot each) and the audit lanes (`N`) scale with it. `--lanes` / `JANUS_LANES` caps the lanes.
+`LEAN_NUM_THREADS` is capped at 4. The gate refuses to start at load >= 70, MemAvailable < 40 GiB or
+< 60 GiB free (`JANUS_GATE_FORCE=1` overrides). `--only/--skip` and `--changed` give a PARTIAL run.
+
+**One queue.** `verify-all-examples.sh` queues arm64, amd64, asm, rtmisc, sys, print (and with `--cgo`
+the cgo) items in one pool; the cgo, sys and print scripts take `-j` and `--list` and still run
+standalone. Their theorems go through `verify_theorems` (`scripts/lib/theorems.sh`), like arm64/amd64.
+
+**Streamed output.** Each item prints `[done/total] PASS|FAIL|TIMEOUT|SKIP|BLOCKED  id  wall` the moment it
+finishes (with the last 30 log lines on a failure), a `-- pool ...: done/total, running [id elapsed, ...]`
+line every minute, and the verify lane's lines are echoed live. Every item's full log is kept (verify:
+`<out>/verify/<id>.log`; lanes: `<out>/lanes/<name>.log`).
+
+**Verdict.** A failed, timed-out, blocked or missing item or lane fails the gate (exit 1), exactly as
+before; item timeouts (`JANUS_ITEM_TIMEOUT`), the audit, kernel replay, pins and sandbox are those of the
+scripts being run.
+
+**go test shards.** `scripts/gotest-shards.sh` lists every test (`go test -list`), deals them to the shards
+longest first using `testDurations` in `cmd/janus/order_test.go`, and checks that the shards partition the
+list (fails if a test is unassigned or twice); afterwards it checks from the `-v` output that each
+shard reported a result for exactly its tests.
+
+**Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
+has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
+`python3 -I scripts/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.
+
 ## Gate speed (2026-10-25): profile, changes, before/after
 
 The merge gate and every agent's regression run are `go test ./cmd/...`,
