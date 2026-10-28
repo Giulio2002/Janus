@@ -61,9 +61,15 @@ extra=()
 # verify a snapshot of the proof package (a sibling of examples/proofs-print, so that its path
 # dependency on the framework resolves the same way): editing the sources while a run is in
 # progress does not make it fail with "sources changed during verification"
-snap="$(mktemp -d "$root/examples/.print-proofs.XXXXXX")"
-trap 'rm -rf "$snap"' EXIT
-cp -r examples/proofs-print/. "$snap"/
+# (JANUS_PRINT_SNAPSHOT=DIR: scripts/verify-all-examples.sh made one snapshot for all its print items,
+# so that they share the consumer workspace and the lemma modules built in it)
+if [ -n "${JANUS_PRINT_SNAPSHOT:-}" ] && [ -d "$JANUS_PRINT_SNAPSHOT/PrintProofs" ]; then
+  snap="$JANUS_PRINT_SNAPSHOT"
+else
+  snap="$(mktemp -d "$root/examples/.print-proofs.XXXXXX")"
+  trap 'rm -rf "$snap"' EXIT
+  cp -r examples/proofs-print/. "$snap"/
+fi
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-print-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"

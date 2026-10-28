@@ -98,7 +98,11 @@ sys=(); prt=(); cgorows=()
 mapfile -t sys < <(scripts/verify-sys-examples.sh --list)
 mapfile -t prt < <(scripts/verify-print-examples.sh --list)
 for t in "${sys[@]}"; do items+=("sys:$t"); done
-for t in "${prt[@]}"; do items+=("print:$t"); done
+# the print rows of one ISA are one item, run one after the other in one snapshot of the proof package:
+# they share the lemma modules built in its consumer workspace (a row of its own would build them again)
+for isa in arm64 amd64; do
+  printf '%s\n' "${prt[@]}" | grep -q "^$isa/" && items+=("print:$isa")
+done
 if [ -n "$cgo" ]; then
   mapfile -t cgorows < <(scripts/verify-cgo-examples.sh --list)
   for t in "${cgorows[@]}"; do items+=("cgo:$t"); done
@@ -202,7 +206,9 @@ run_item() {
       return $rc
       ;;
     print)
-      JANUS_EXAMPLES_SUMMARY="$tmp/print-${n//\//_}" scripts/verify-print-examples.sh "$n" || rc=$?
+      local -a prow
+      mapfile -t prow < <(printf '%s\n' "${prt[@]}" | grep "^$n/")
+      JANUS_EXAMPLES_SUMMARY="$tmp/print-$n" scripts/verify-print-examples.sh "${prow[@]}" || rc=$?
       return $rc
       ;;
     cgo)
@@ -213,6 +219,15 @@ run_item() {
   echo "run_item: unknown kind $kind"; return 2
 }
 
+# one snapshot of the print proof package for all print items (see scripts/verify-print-examples.sh)
+if [ ${#prt[@]} -gt 0 ]; then
+  JANUS_PRINT_SNAPSHOT="$(mktemp -d "$root/examples/.print-proofs.XXXXXX")"
+  export JANUS_PRINT_SNAPSHOT
+  cp -r examples/proofs-print/. "$JANUS_PRINT_SNAPSHOT"/
+  trap 'rm -rf "$tmp" "$JANUS_PRINT_SNAPSHOT"' EXIT
+fi
+# a pool item runs under a cgroup memory limit (the print proofs need more than 10 GiB for their lemma modules)
+export JANUS_JOB_MEM="${JANUS_JOB_MEM:-24G}"
 pooldir="${JANUS_POOL_DIR:-$root/artifacts/verify-all-logs}"
 rm -rf "$pooldir"
 pool_init verify "$PAR_JOBS" "$pooldir"
