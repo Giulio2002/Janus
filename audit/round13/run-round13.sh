@@ -50,5 +50,30 @@ echo "== C: controls"
 v examples/proofs/NewPair.lean "$W/NewPair"; row C0_ctl_NewPair Verified 'NewobjectContract'
 v $A/C1_ctl_harmless_type_binder.lean "$W/NewPair"; row C1_ctl_type_binders_without_runtime_vars Verified 'NewobjectContract'
 
+# F: the extraction's own constants (`Extracted.funcs`, the panic contracts' function table) are an
+# allowed contract argument ONLY as exactly that constant, and `janus check` re-derives it from the
+# binary. Needs the panic extraction (cmd/janus/funcdata.go, wave 2); skipped before that exists.
+if [ -f cmd/janus/funcdata.go ]; then
+  echo "== F1: Extracted.funcs is allowed only as exactly the generated constant"
+  mapfile -t tg < <(scripts/example-targets.sh DeferOrder)
+  "$J" extract artifacts/examples-arm64 "$(example_symbol DeferOrder)" "$W/DeferOrder" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
+  for f in F1a_funcs_empty F1b_funcs_proof_defined F1c_funcs_tail F1d_funcs_take F1e_funcs_let_alias F1f_funcs_append_nil F1g_funcs_abbrev_alias; do
+    v $A/$f.lean "$W/DeferOrder"; row "$f" blocked 'runtime'
+  done
+  v $R/controls/C2_ctl_DeferOrder_funcs.lean "$W/DeferOrder"; row C2_ctl_DeferOrder_honest_panic Verified 'GopanicContract'
+  # a tampered Extracted.lean with a fake funcs table: janus check (and verify) must reject it
+  cp -r "$W/DeferOrder" "$W/DeferOrder-tampered"
+  if grep -q '^def funcs' "$W/DeferOrder-tampered/Extracted.lean"; then
+    sed -i '/^def funcs/,/^$/ s/\(entry := \|Entry := \)[0-9]*/\10/' "$W/DeferOrder-tampered/Extracted.lean"
+    sed -i '/^def funcs/ s/:= \[.*/:= []/' "$W/DeferOrder-tampered/Extracted.lean"
+  fi
+  cmp -s "$W/DeferOrder/Extracted.lean" "$W/DeferOrder-tampered/Extracted.lean" && echo "  (tamper did not change the file)" && broken+=(F2_tamper_noop)
+  out="$("$J" check "$W/DeferOrder-tampered" 2>&1)"; rc=$?
+  [ $rc != 0 ]; check_row=$?
+  if [ $check_row = 0 ]; then printf '  %-40s ok       janus check rejects the fake funcs table\n' F2_tampered_funcs_check
+  else printf '  %-40s FAILED   check accepted a fake funcs table   <-- BROKEN\n' F2_tampered_funcs_check; broken+=(F2_tampered_funcs_check); fi
+  v $R/controls/C2_ctl_DeferOrder_funcs.lean "$W/DeferOrder-tampered"; row F2_tampered_funcs_verify blocked
+fi
+
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
 echo "round13: all rows as expected"
