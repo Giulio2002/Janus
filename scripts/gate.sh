@@ -163,6 +163,7 @@ tl_stage() { # KIND NAME START END RC
   printf '{"kind":"%s","name":"%s","start":%.3f,"end":%.3f,"wall":%.3f,"rc":%s}\n' "$1" "$2" "$3" "$4" "$(echo "$4 - $3" | bc)" "$5" >> "$tlf"
 }
 gate_t0=$(now)
+export JANUS_GATE_T0=$gate_t0
 sha="$(git rev-parse --short HEAD 2>/dev/null || echo '?')$(git diff --quiet HEAD 2>/dev/null || echo '+dirty')"
 printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGiB":%s,"cores":%s,"start":%.3f,"partial":%s}\n' \
   "$sha" "$jobs_n" "$lanes_n" "$load1" "$((memk / 1048576))" "$(nproc)" "$gate_t0" "$([ -n "$partial" ] && echo true || echo false)" >> "$tlf"

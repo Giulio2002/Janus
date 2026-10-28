@@ -837,3 +837,18 @@ func TestIncrNarrowImportsStillDependOnTheCleanEnvironment(t *testing.T) {
 	x.fwFiles["Janus/Unused.lean"] = []byte("import Janus.C\n-- edit\n")
 	x.wantSkip()
 }
+
+// A cmd/ edit changes the verifier identity: the item misses, unless a PASS was recorded under the NEW identity
+// (the gate's prebuild warm-up verifies Add with the freshly built binary and records it: a legitimate skip).
+func TestIncrVerifierEditMissesUnlessRecordedUnderTheNewIdentity(t *testing.T) {
+	x := newIncrFx(t)
+	x.pass() // recorded by the old verifier
+	x.verifier = "src:edited-cmd"
+	x.wantRun() // the old PASS says nothing about the edited verifier
+	x.pass()    // the new verifier then passes the item itself (e.g. the prebuild warm-up)
+	x.wantSkip()
+	x.verifier = "src:v1"
+	x.wantSkip() // the old record is still there for the old verifier
+	x.verifier = "src:another"
+	x.wantRun()
+}

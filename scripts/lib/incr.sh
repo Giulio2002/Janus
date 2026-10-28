@@ -79,8 +79,14 @@ $id  skipped (unchanged: --explain only; nothing was verified)"
   [ "${#INCR_KEY}" = 64 ] || INCR_KEY=""
   if [ "$verdict" = SKIP ] && [ -n "$INCR_KEY" ] && incr_enabled; then
     # ' skipped (unchanged' is the marker scripts/lib/pool.sh counts as a skipped (not run) item
-    printf -v INCR_MSG '%s  skipped (unchanged: incremental; recorded PASS of %s on %s at %s, %ss then; key %s)' \
-      "$id" "$f3" "$f4" "$f5" "$f6" "${INCR_KEY:0:12}"
+    local this=""
+    # a PASS recorded since this gate run began was recorded by its own prebuild warm-up (a verification of Add
+    # with the freshly built binary): legitimate, and labelled
+    if [ -n "${JANUS_GATE_T0:-}" ] && [ "$(date -u -d "$f3" +%s 2>/dev/null || echo 0)" -ge "${JANUS_GATE_T0%.*}" ]; then
+      this="recorded this run by prebuild; "
+    fi
+    printf -v INCR_MSG '%s  skipped (unchanged: incremental; %srecorded PASS of %s on %s at %s, %ss then; key %s)' \
+      "$id" "$this" "$f3" "$f4" "$f5" "$f6" "${INCR_KEY:0:12}"
     return 0
   fi
   ! incr_prechecking || exit 90
