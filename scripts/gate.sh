@@ -145,7 +145,7 @@ step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
   return $rc
 }
 pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit; }
-pre_gobin() { go build -o bin/janus ./cmd/janus; }
+pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
 pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 p0=$(now); pre_fail=0

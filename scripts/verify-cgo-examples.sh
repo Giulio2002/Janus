@@ -93,7 +93,7 @@ names=("$@")
 [ ${#names[@]} -gt 0 ] || mapfile -t names < <(default_rows)
 
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
-  go build -o bin/janus ./cmd/janus
+  CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
   scripts/build-examples-cgo.sh >/dev/null
   lake build Janus >/dev/null
 fi

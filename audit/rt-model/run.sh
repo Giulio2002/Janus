@@ -22,7 +22,7 @@ work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 fail=0
 
 echo "== build janus + oracle drivers + Lean models"
-go build -o "$work/janus" ./cmd/janus
+CGO_ENABLED=0 go build -o "$work/janus" ./cmd/janus
 (cd oracle-amd64 && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o bin/runner ./cmd/runner && CGO_ENABLED=0 go build -o bin/oracle ./cmd/oracle)
 (cd oracle       && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/runner ./cmd/runner && CGO_ENABLED=0 go build -o bin/oracle ./cmd/oracle)
 lake build janus-oracle janus-oracle-amd64 >/dev/null

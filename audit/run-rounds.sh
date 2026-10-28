@@ -50,7 +50,7 @@ if [ "${JANUS_GATE_PREBUILT:-}" = 1 ]; then
   # scripts/gate.sh built (once) audit/bin/janus-rounds, the framework, the auditor and both ISAs' example binaries
   [ -x audit/bin/janus-rounds ] || { echo "JANUS_GATE_PREBUILT=1 but audit/bin/janus-rounds is missing"; exit 1; }
 else
-  go build -o audit/bin/janus-rounds ./cmd/janus || exit 1
+  CGO_ENABLED=0 go build -o audit/bin/janus-rounds ./cmd/janus || exit 1
   memguard_lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed (fix the Lean library first)"; exit 1; }
   [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null || exit 1
   { [ -f artifacts/examples-amd64 ] && [ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ]; } ||

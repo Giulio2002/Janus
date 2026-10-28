@@ -49,7 +49,7 @@ done
 # JANUS_EXAMPLES_PREBUILT=1 (scripts/gate.sh): bin/janus, the examples' binaries and the framework
 # build exist already (built once by the gate); nothing is rebuilt.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
-  go build -o bin/janus ./cmd/janus
+  CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
   scripts/build-examples.sh >/dev/null
   bash scripts/build-examples-amd64.sh >/dev/null 2>&1
   scripts/build-examples-asm.sh >/dev/null

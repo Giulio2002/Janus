@@ -170,6 +170,35 @@ verdict in `v1/replay/framework/<key>`, and reuses it:
   or renaming a module changes the pin set; another toolchain changes `cacheID`. A verdict can
   therefore never be reused for other bytes (no stale verdict after a framework edit), and a
   verdict for an identical rebuild (same bytes) is correctly the same verdict.
+* **Verifier identity.** Keying on the executable's bytes meant that every checkout, built in its
+  own directory, had its own cache. The key now names the verifier by `src:<sha256>` when janus can
+  establish exactly what it was built from, else by `exe:<sha256 of the executable>` as before.
+  `src:` is computed by the executable itself (`cmd/janus/verifierid.go`, `janus verifier-id`)
+  from data the Go toolchain embedded at build time: every non-test `.go` file of the repository
+  root and of `cmd/janus`, `go.mod` and `go.sum` (`go:embed`, so a changed, added or overlaid file
+  is what is hashed); the embedded Lean framework and JanusASL package; the content hashes
+  (`go.sum` h1) of every linked dependency module, which must be present in the embedded `go.sum`
+  and must not be replaced by a local path or vendored; the Go toolchain version, which must be
+  that of the running binary; every recorded build setting (`GOOS`, `GOARCH`, their levels,
+  `-tags`, `-ldflags`, `-gcflags`, `-asmflags`, `-trimpath`, sanitizers, `GOEXPERIMENT`,
+  `DefaultGODEBUG`, `CGO_*`, build mode); and the cache schema version. The VCS revision and time
+  are not hashed (identical sources on two branches must share), but a build from a modified VCS
+  tree is refused. The identity falls back to `exe:` for a `go test` binary, a missing or foreign
+  build information (`go run` of files, another package path or module), cgo enabled (the C
+  compiler is not part of the build information, so the gate scripts build with `CGO_ENABLED=0`),
+  a compiler other than gc, a dependency without a verifiable hash, a toolchain version that
+  differs from the runtime's, or an embedded source set that lacks the expected files or disagrees
+  with the build information. `JANUS_VERIFIER_ID=exe` forces the fallback. A test enforces that
+  every module package the command links is embedded. Reasoning: the key is only ever a name
+  for "an identical verifier", and the identity is a hash of the inputs of the build, so two
+  binaries share it only if built from the same bytes of source, by the same toolchain, with the
+  same settings; a binary built from other source differs in the embedded files it hashes, and one
+  built from the same source with other flags or toolchain differs in the settings or version.
+  What the identity trusts, as the executable key did: the Go toolchain and module cache
+  are what their version and `go.sum` say (the go command verifies downloaded modules against
+  `go.sum`), and nobody substitutes a compiler that miscompiles the same version.
+  A same-user attacker who can rewrite the sources or the module cache before building controls
+  the verifier anyway, with either key.
 * **Authenticity.** The verdict file holds an HMAC-SHA256 of `framework` and the key under the
   cache's hidden key (`v1/result/.key`, mode 0600 in a 0700 directory, the round-8 checks of
   `checkCacheRoot`/`readPrivateFile` apply; sandboxed processes see an empty tmpfs there). It is
@@ -278,13 +307,14 @@ A successful `janus verify` of a single proof file (not `--proof-root`) is recor
 instead of compiling, auditing and replaying again. This makes the cache part of the trusted
 base. What it relies on:
 
-* **Key.** The SHA-256 of every input the outcome depends on: the janus executable itself (all
-  verifier logic and the embedded framework), the framework (its sources' hash and source,
-  the build directory, the SHA-256 of every compiled framework module and of the compiled
-  auditor), the toolchain's identity (version, the SHA-256 of `lean` and `leanchecker`, and
+* **Key.** The SHA-256 of every input the outcome depends on: the verifier (its identity, see
+  "Verifier identity" below: a content hash of the source janus was built from, or the
+  executable's bytes), the framework (its sources' hash and source, the SHA-256 of every compiled
+  framework module and of the compiled auditor), the toolchain's identity (version, the SHA-256 of `lean` and `leanchecker`, and
   the metadata of every file under `bin/` and `lib/lean/`, `libleanshared.so` included: see
   "Toolchain identity" above), the sandbox mode, the theorem and options, the
-  artifact, proof and binary paths, the bytes of `Extracted.lean` and `identity.json`, the
+  proof and binary paths relative to the artifact directory (what the report records; absolute
+  checkout paths are not keyed, so identical items of different checkouts share an entry), the bytes of `Extracted.lean` and `identity.json`, the
   binary's SHA-256 (verified against the binary by the same extraction check every run starts
   with) and the proof's bytes. A single-file proof can import only `Extracted`, the framework and
   Lean core, so these bytes are its whole import closure. The key is computed by the trusted
@@ -294,7 +324,9 @@ base. What it relies on:
   sandboxed, non-`--fresh` run, and each is authenticated with HMAC-SHA256 under a random 32-byte
   key created on first use (mode 0600, in the result directory, which must be private: see
   "The cache root must be private" above). The same key authenticates the trusted-compile
-  manifests. An entry whose report or key does not verify is ignored: the verification runs.
+  manifests. An entry whose report or key does not verify (a modified, truncated, re-keyed, copied
+  or symlinked entry, or one authenticated under another key) is ignored: the verification runs. The
+  cache is an optimisation, never an authority: a corrupt or tampered entry is a miss, never a pass.
 * **Isolation.** The result directory, key included, is not visible to sandboxed code at all:
   bubblewrap and the unshare fallback mount an empty tmpfs over it (the unshare script stops if
   it cannot), on top of the read-only cache. A proof or a lakefile can neither read the key nor

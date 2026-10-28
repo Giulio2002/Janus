@@ -20,7 +20,7 @@ par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
 # JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): already built and extracted.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
-  [ -x bin/janus ] || go build -o bin/janus ./cmd/janus
+  [ -x bin/janus ] || CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
   bash scripts/build-examples-amd64.sh
 fi
 broken=()
