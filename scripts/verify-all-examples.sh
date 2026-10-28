@@ -96,11 +96,7 @@ sys=(); prt=(); cgorows=()
 mapfile -t sys < <(scripts/verify-sys-examples.sh --list)
 mapfile -t prt < <(scripts/verify-print-examples.sh --list)
 for t in "${sys[@]}"; do items+=("sys:$t"); done
-# the print rows of one ISA are one item, run one after the other in one snapshot of the proof package:
-# they share the lemma modules built in its consumer workspace (a row of its own would build them again)
-for isa in arm64 amd64; do
-  printf '%s\n' "${prt[@]}" | grep -q "^$isa/" && items+=("print:$isa")
-done
+for t in "${prt[@]}"; do items+=("print:$t"); done
 if [ -n "$cgo" ]; then
   mapfile -t cgorows < <(scripts/verify-cgo-examples.sh --list)
   for t in "${cgorows[@]}"; do items+=("cgo:$t"); done
@@ -204,9 +200,7 @@ run_item() {
       return $rc
       ;;
     print)
-      local -a prow
-      mapfile -t prow < <(printf '%s\n' "${prt[@]}" | grep "^$n/")
-      JANUS_EXAMPLES_SUMMARY="$tmp/print-$n" scripts/verify-print-examples.sh "${prow[@]}" || rc=$?
+      JANUS_EXAMPLES_SUMMARY="$tmp/print-${n//\//_}" scripts/verify-print-examples.sh "$n" || rc=$?
       return $rc
       ;;
     cgo)
@@ -231,7 +225,14 @@ pooldir="${JANUS_POOL_DIR:-$root/artifacts/verify-all-logs}"
 rm -rf "$pooldir"
 pool_init verify "$PAR_JOBS" "$pooldir"
 pool_times "$times"
-for it in "${items[@]}"; do pool_add "$it" "run_item \"$it\""; done
+for it in "${items[@]}"; do
+  needs=""
+  # the first print row of an ISA builds the lemma modules every row of that ISA imports (in the shared
+  # snapshot's consumer workspace); the other rows start when it is done and reuse them, instead of
+  # building the same modules at the same time
+  case "$it" in print:*/PrintBool|print:*/PrintNeg|print:*/PrintStr) needs="${it%/*}/PrintX" ;; esac
+  pool_add "$it" "run_item \"$it\"" "$it" "$needs"
+done
 pool_rc=0
 pool_run || pool_rc=$?
 broken=(${POOL_FAILED[@]+"${POOL_FAILED[@]}"})

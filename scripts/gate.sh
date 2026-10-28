@@ -36,8 +36,8 @@
 #   rounds      audit/run-rounds.sh (all audit rounds, themselves parallel lanes)
 #   axiom       scripts/ci-axiom-guard.sh
 #   x86         scripts/x86formal.sh prove
-#   asl-build   scripts/asl.sh build (JanusASL, the ArmASL model; $ASL_CACHE), sail-build: scripts/oracle-sail.sh build
-#   rtasl-prove rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go
+#   sail-build  scripts/oracle-sail.sh build (the Sail C oracle used by rtasl-fsqrt)
+#   rtasl-prove (builds JanusASL first: set $ASL_CACHE; the others wait for it) rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go
 #               audit/rt-asl/run.sh GROUP: the red-team round ASL, one lane per group
 # The verdict is strict: a failed, timed-out or missing item or lane fails the gate (exit 1). Item timeouts
 # (JANUS_ITEM_TIMEOUT), the audit, the kernel replay, the pins and every other check are those of the
@@ -88,7 +88,7 @@ case "$lanes_n" in ''|*[!0-9]*|0) echo "gate: --lanes needs a positive number (g
 export JANUS_JOBS=$jobs_n
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
 
-stages_all=(verify gotest rounds axiom x86 asl-build sail-build rtasl-prove rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go)
+stages_all=(verify gotest rounds axiom x86 sail-build rtasl-prove rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go)
 selected() { # NAME: is the stage selected?
   local n=$1
   if [ -n "$only" ]; then case ",$only," in *",$n,"*) ;; *) return 1 ;; esac; fi
@@ -191,7 +191,7 @@ mktree() { # DIR: a private copy of the sources and of the finished framework bu
 tree_x86="$out/tree-x86" tree="$out/tree-asl"
 mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
 selected x86 && mktree "$tree_x86"
-if selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go || selected rtasl-fsqrt || selected rtasl-replay; then mktree "$tree"; fi
+if selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go || selected rtasl-fsqrt || selected rtasl-replay; then mktree "$tree"; fi
 peak_tree=$(du -sm "$out"/tree-* 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
 echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed at the end)"
 lane_times="$root/artifacts/gate/lane-times"
@@ -200,7 +200,7 @@ pool_init gate "$lanes_n" "$out/lanes"
 POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
 export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too
 # an estimate for the first run (seconds, the profile's measurements); later runs use their own
-declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]=900 [sail-build]=300 [axiom]=1
+declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [sail-build]=300 [axiom]=1
   [rtasl-probes]=1200 [rtasl-replay]=900 [rtasl-prove]=600 [rtasl-fsqrt]=600 [rtasl-go]=400 [rtasl-rel]=120 [rtasl-strict]=120 [rtasl-btf]=5)
 for k in "${!est[@]}"; do POOL_SECS[$k]=${est[$k]}; done
 pool_times "$lane_times"
@@ -217,11 +217,12 @@ add gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--ru
 add rounds "audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
 add x86 "cd '$tree_x86' && scripts/x86formal.sh prove"
-add asl-build "cd '$tree' && scripts/asl.sh build"
 add sail-build "cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
   nd=""
-  case "$g" in btf|go) ;; fsqrt) nd="$(needs asl-build sail-build)" ;; *) nd="$(needs asl-build)" ;; esac
+  # rtasl-prove (scripts/asl.sh prove) builds JanusASL; two lakes in one package race, so every other lake-using
+  # group runs after it (as in audit/rt-asl/run.sh, where prove is the first group)
+  case "$g" in prove|btf|go) ;; fsqrt) nd="$(needs rtasl-prove sail-build)" ;; *) nd="$(needs rtasl-prove)" ;; esac
   add "rtasl-$g" "cd '$tree' && audit/rt-asl/run.sh $g" "$nd"
 done
 # stream the verify lane's own result lines as they are written
