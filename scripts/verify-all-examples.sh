@@ -32,8 +32,6 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/parallel.sh"
 # shellcheck source=lib/pool.sh
 . "$root/scripts/lib/pool.sh"
-# shellcheck source=lib/memguard.sh
-. "$root/scripts/lib/memguard.sh"
 par_init "$@"
 changed=""
 cgo=""
@@ -226,8 +224,9 @@ if [ ${#prt[@]} -gt 0 ]; then
   cp -r examples/proofs-print/. "$JANUS_PRINT_SNAPSHOT"/
   trap 'rm -rf "$tmp" "$JANUS_PRINT_SNAPSHOT"' EXIT
 fi
-# a pool item runs under a cgroup memory limit (the print proofs need more than 10 GiB for their lemma modules)
-export JANUS_JOB_MEM="${JANUS_JOB_MEM:-24G}"
+# (no per-item cgroup: every item's script bounds its own janus jobs, as before; a print row runs several
+# Lean jobs at once and needs far more than one pool slot's budget)
+POOL_GUARD=0
 pooldir="${JANUS_POOL_DIR:-$root/artifacts/verify-all-logs}"
 rm -rf "$pooldir"
 pool_init verify "$PAR_JOBS" "$pooldir"
