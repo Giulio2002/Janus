@@ -196,11 +196,11 @@ run_item() {
       return $rc
       ;;
     sys)
-      JANUS_EXAMPLES_SUMMARY="$tmp/sys-${n//\//_}" scripts/verify-sys-examples.sh "$n" || rc=$?
+      JANUS_EXAMPLES_SUMMARY="$tmp/sys-${n//\//_}" scripts/verify-sys-examples.sh -j 1 "$n" || rc=$?
       return $rc
       ;;
     print)
-      JANUS_EXAMPLES_SUMMARY="$tmp/print-${n//\//_}" scripts/verify-print-examples.sh "$n" || rc=$?
+      JANUS_EXAMPLES_SUMMARY="$tmp/print-${n//\//_}" scripts/verify-print-examples.sh -j 1 "$n" || rc=$?
       return $rc
       ;;
     cgo)
