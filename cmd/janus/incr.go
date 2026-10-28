@@ -92,15 +92,16 @@ type incrComp struct {
 
 // incrCtx is everything the key reads from the machine; the tests replace the fields.
 type incrCtx struct {
-	root     string
-	environ  []string
-	verifier func(full bool) (string, error)
-	embedded func() (*framework, error)
-	loadDir  func(dir string) (*framework, error)
-	build    func(fw *framework) (string, error) // the framework build root (holds .lake)
-	tchain   func(root string) (*toolchain, error)
-	host     func() string
-	memo     map[string]string
+	root      string
+	environ   []string
+	verifier  func(full bool) (string, error)
+	embedded  func() (*framework, error)
+	loadDir   func(dir string) (*framework, error)
+	build     func(fw *framework) (string, error) // the framework build root (holds .lake)
+	tchain    func(root string) (*toolchain, error)
+	host      func() string
+	memo      map[string]string
+	linkDepth int
 }
 
 func newIncrCtx(root string) *incrCtx {
@@ -299,9 +300,15 @@ func leanImports(src []byte) ([]string, error) {
 	if err := skip(); err != nil {
 		return nil, err
 	}
-	save := i
-	if w := word(); w != "prelude" {
-		i = save
+	// the header is: optional `module` (the Lean module system), optional `prelude`, then the imports
+	for _, kw := range []string{"module", "prelude"} {
+		if err := skip(); err != nil {
+			return nil, err
+		}
+		save := i
+		if w := word(); w != kw {
+			i = save
+		}
 	}
 	for {
 		if err := skip(); err != nil {
@@ -495,7 +502,44 @@ func (c *incrCtx) hashDir(dir string, skip func(rel string, d fs.DirEntry) bool,
 			if err != nil {
 				return err
 			}
-			ls = append(ls, "link "+rel+" -> "+t)
+			// the link's target is an input too (Lake and Lean read through it): hash what it names
+			ti, err := os.Stat(p)
+			if err != nil {
+				return fmt.Errorf("%s is a link that cannot be followed: %v", rel, err)
+			}
+			if ti.IsDir() {
+				if c.linkDepth >= 8 {
+					return fmt.Errorf("%s: links to directories nested too deep (a loop?)", rel)
+				}
+				real, err := filepath.EvalSymlinks(p)
+				if err != nil {
+					return err
+				}
+				c.linkDepth++
+				sub, err := c.hashDir(real, skip, content)
+				c.linkDepth--
+				if err != nil {
+					return fmt.Errorf("%s (link): %v", rel, err)
+				}
+				ls = append(ls, fmt.Sprintf("linkdir %q -> %q", rel, t))
+				for _, l := range sub {
+					ls = append(ls, fmt.Sprintf("linkdir %q: %s", rel, l))
+				}
+				return nil
+			}
+			if !ti.Mode().IsRegular() {
+				return fmt.Errorf("%s is a link to something that is not a regular file or directory", rel)
+			}
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			if content != nil {
+				if b, err = content(rel, b); err != nil {
+					return err
+				}
+			}
+			ls = append(ls, fmt.Sprintf("link %q -> %q %s", rel, t, sha256Hex(b)))
 			return nil
 		}
 		if !d.Type().IsRegular() {
@@ -510,7 +554,7 @@ func (c *incrCtx) hashDir(dir string, skip func(rel string, d fs.DirEntry) bool,
 				return err
 			}
 		}
-		ls = append(ls, "file "+rel+" "+sha256Hex(b))
+		ls = append(ls, fmt.Sprintf("file %q %s", rel, sha256Hex(b)))
 		return nil
 	})
 	if err != nil {
