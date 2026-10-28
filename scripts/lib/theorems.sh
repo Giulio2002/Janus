@@ -18,6 +18,14 @@
 # instead of racing the first one's reports.
 . "$(dirname "${BASH_SOURCE[0]}")/itemtimeout.sh"
 
+# theorem_verified RESULTS THEOREM: succeeds iff the results file janus wrote (--results) records
+# THEOREM as verified (and no results file, an unreadable one or a missing jq means: not verified).
+theorem_verified() {
+  [ -s "$1" ] && command -v jq >/dev/null &&
+    jq -e --arg t "$2" '.schema == 1 and ([.results[] | select(.theorem == $t and .status == "verified")] | length) == 1' \
+      "$1" >/dev/null 2>&1
+}
+
 verify_theorems() {
   local out=$1 proof=$2 st=$3 i=0 thm
   shift 3
@@ -46,11 +54,7 @@ verify_theorems() {
   for ((i = 0; i < ${#thms[@]}; i++)); do
     thm=${thms[$i]}
     trc=$rc; [ "$trc" != 0 ] || trc=1   # no verdict for this theorem unless the results file gives one
-    if [ -s "$st/results.json" ] && command -v jq >/dev/null &&
-       jq -e --arg t "$thm" '.schema == 1 and ([.results[] | select(.theorem == $t and .status == "verified")] | length) == 1' \
-         "$st/results.json" >/dev/null 2>&1; then
-      trc=0
-    fi
+    ! theorem_verified "$st/results.json" "$thm" || trc=0
     # this theorem's block of the output (introduced by "=== NAME: ..."); a failure also shows the
     # lines before the first block (the run's own messages, a timeout notice)
     {
