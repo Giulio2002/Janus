@@ -93,7 +93,7 @@ func startAuditServe(sb *sandbox, tc *toolchain, scratchDir string, protected []
 			cmd.Stdin = r
 			cmd.WaitDelay = 5 * time.Second // a cancelled auditor's descendants must not hold stop up
 			ran := make(chan error, 1)
-			go func() { ran <- guardRun(cmd) }()
+			go func() { ran <- guardRunCtx(cmd, ctx) }()
 			select {
 			case g, ok := <-j.goCh:
 				if ok {

@@ -33,6 +33,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -523,7 +524,7 @@ func (e *memKillError) Error() string {
 }
 func (e *memKillError) Unwrap() error { return e.err }
 
-func recordMem(ev memEvent) {
+func recordMemEvent(ev memEvent) {
 	if os.Getenv("JANUS_MEMGUARD_LOG") != "" {
 		k := ""
 		if ev.Killed {
@@ -660,7 +661,18 @@ func captureTail(cmd *exec.Cmd) func() string {
 }
 
 // guardRun runs cmd (not yet started) under the memory guard, like cmd.Run.
-func guardRun(cmd *exec.Cmd) error {
+func guardRun(cmd *exec.Cmd) error { return guardRunCtx(cmd, nil) }
+
+// guardRunCtx is guardRun for a command that ctx may cancel (a prestarted auditor whose
+// verification ended first, auditserve.go): a job that ends because ctx was cancelled is neither a
+// memory event nor a guard failure, and returns its plain error.
+func guardRunCtx(cmd *exec.Cmd, ctx context.Context) error {
+	cancelled := func() bool { return ctx != nil && ctx.Err() != nil }
+	recordMem := func(ev memEvent) {
+		if !cancelled() {
+			recordMemEvent(ev)
+		}
+	}
 	g := currentGuard()
 	label := jobLabel(cmd)
 	switch g.mech {
@@ -683,7 +695,7 @@ func guardRun(cmd *exec.Cmd) error {
 		peak, lim, killed := cgroupStats(d)
 		ev := memEvent{Label: label, Limit: lim, Peak: peak, Killed: killed}
 		recordMem(ev)
-		if killed {
+		if killed && !cancelled() {
 			return &memKillError{ev: ev, err: runErr}
 		}
 		return runErr
@@ -723,13 +735,16 @@ func guardRun(cmd *exec.Cmd) error {
 			if i := strings.LastIndexByte(t, '\n'); i >= 0 {
 				t = t[i+1:]
 			}
+			if cancelled() {
+				return runErr
+			}
 			ev := memEvent{Label: label, Limit: g.limit, GuardErr: fmt.Sprintf("systemd-run: %v: %s", runErr, t)}
 			recordMem(ev)
 			return &memKillError{ev: ev, err: runErr}
 		}
 		ev := memEvent{Label: label, Limit: st.Limit, Peak: st.Peak, Killed: st.Killed}
 		recordMem(ev)
-		if st.Killed {
+		if st.Killed && !cancelled() {
 			return &memKillError{ev: ev, err: runErr}
 		}
 		return runErr
@@ -749,7 +764,7 @@ func guardRun(cmd *exec.Cmd) error {
 			strings.Contains(out, "failed to create thread") || strings.Contains(out, "Cannot allocate memory"))
 		ev := memEvent{Label: label, Limit: g.limit, Peak: peak, Killed: killed}
 		recordMem(ev)
-		if killed {
+		if killed && !cancelled() {
 			return &memKillError{ev: ev, err: runErr}
 		}
 		return runErr

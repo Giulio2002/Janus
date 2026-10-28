@@ -25,6 +25,10 @@ func j1Report(t *testing.T, dir string) map[string]any {
 	for _, k := range []string{"timestamp", "memoryGuard", "cached", "cachedFrom"} {
 		delete(m, k)
 	}
+	// which modules the replay cache covered depends on what ran before, not on the auditor
+	if kr, ok := m["kernelReplay"].(map[string]any); ok {
+		delete(kr, "cached")
+	}
 	return m
 }
 
