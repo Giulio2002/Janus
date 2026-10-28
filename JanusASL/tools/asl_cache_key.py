@@ -76,7 +76,16 @@ def env_inputs():
     return {k: os.environ[k] for k in ENV_KEYS if k in os.environ}
 
 
+_TC_MEMO = {}
+
+
 def toolchain_content(cwd):
+    if cwd not in _TC_MEMO:
+        _TC_MEMO[cwd] = _toolchain_content(cwd)
+    return _TC_MEMO[cwd]
+
+
+def _toolchain_content(cwd):
     """What the toolchain that `lean` resolves to in cwd (elan) consists of, by content: the SHA-256 of
     its driver binaries and of every core .olean (Init, Std, Lean, Lake), plus `lean --version`.
     Lake additionally checks every import's content through its traces; this closes the other
