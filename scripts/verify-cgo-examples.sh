@@ -76,11 +76,15 @@ if [ ${#names[@]} -eq 0 ]; then
   for n in CSwitch CLdMul GoLdMul CRepRet; do names+=("amd64/$n"); done
 fi
 
-go build -o bin/janus ./cmd/janus
-scripts/build-examples-cgo.sh >/dev/null
-lake build Janus >/dev/null
+# JANUS_EXAMPLES_PREBUILT=1: bin/janus, the example binaries and the framework are built already
+# (parallel lanes over disjoint rows share them); JANUS_EXAMPLES_SUMMARY: a summary file of its own
+if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
+  go build -o bin/janus ./cmd/janus
+  scripts/build-examples-cgo.sh >/dev/null
+  lake build Janus >/dev/null
+fi
 
-summary="$root/artifacts/verify-cgo-examples.txt"
+summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-cgo-examples.txt}"
 : > "$summary"
 fail=0
 for target in "${names[@]}"; do
