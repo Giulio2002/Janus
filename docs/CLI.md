@@ -639,8 +639,10 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
    trusted directory first on `LEAN_PATH`. Errors are summarised as `Lean errors (N):` with paths
    mapped back to the original files; the full output follows under `Details:` (`proof
    checking`). The proof may import `Extracted`, `Janus` and Lean/Std modules.
-6. **Audit** with `janus-audit` (sandboxed): it imports `Extracted`, `JanusTrusted` and `Proof`
-   without running their initializers, checks the theorem is a `theorem` in the proof module,
+6. **Audit** with `janus-audit` (sandboxed; started in `--serve` mode before the proof compile so
+   that its clean environment is built meanwhile, and given its request once the proof has compiled
+   and the pins have been checked, docs/SOUNDNESS.md "Verify fixed overhead"): it imports
+   `Extracted`, `JanusTrusted` and `Proof` without running their initializers, checks the theorem is a `theorem` in the proof module,
    checks `Extracted.program`/`entry` are defeq to `JanusTrusted`, enforces the statement rules
    above, collects transitive axioms (`collectAxioms`), pretty-prints the statement in the
    clean environment, checks its instance arguments and that the printed text re-elaborates to

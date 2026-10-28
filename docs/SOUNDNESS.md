@@ -234,7 +234,8 @@ detected.
 calls, compiled by the Lean toolchain together with the framework build, outside the sandbox. Its
 SHA-256 is part of the framework build's ready stamp (a changed executable makes the build "not
 ready" and it is relinked) and it is hashed again right before it runs, with nothing untrusted
-running between that check and its start. The Lean compiler that produced it is part of the
+running between that check and its start (a prestarted auditor, see "Verify fixed overhead", is
+started from the file the readiness check hashed and hashed again while it runs). The Lean compiler that produced it is part of the
 toolchain (item 5).
 
 **The trusted-compile cache** (`v1/trusted`) holds compiled `Extracted`/`JanusTrusted` modules
@@ -270,6 +271,79 @@ Cache files (entries, manifests, the key) are opened with `O_NOFOLLOW`. A violat
 `janus verify` with an `Invalid` diagnostic (stage `cache safety`) naming the path and what is
 wrong, never a silent miss: another user who can write the root could choose the key and forge a
 `Cached: Verified` report, or plant a framework build or a trusted compile.
+
+### Verify fixed overhead (J1): what is reused, and why that is sound
+
+A verification of a trivial proof used to spend ~5.7 s outside the proof compile, the audit and the
+replay themselves: hashing the same ~450 MB framework build and the ~230 MB auditor many times,
+two Lake processes to find the toolchain, and an auditor that built its clean environment only
+after the proof had compiled. None of the checks was removed; each one is made once, where it
+covers what it must, and everything reused is either re-measured or content-bound.
+
+* **The pins are the readiness check's measurements.** `framework.ready` (under the shared
+  lock) already hashes every framework module-data file and compares them with the build's stamp,
+  and hashes the auditor against the stamp; it used to throw those hashes away and verify hashed
+  the same files again. Now the hashes it measured are the framework pins (`frameworkReady`), with
+  the same stamp comparison, the same lock, and no step between the measurement and the use. A
+  `--fresh` build, an `--asl` run (whose Lake build may touch the framework before it is pinned)
+  and a framework built by the same call are measured by verify itself as before. The three reads
+  of the readiness check (sources, module data, auditor) run at once.
+* **Pin checks, and when they run.** A check re-hashes the framework build, the trusted build and
+  the proof's build (all of them, as before) and compares with the pins. It runs after every step
+  that could have changed them: after the trusted compile *when a Lean process ran* (a cached
+  trusted compile ran none since the framework was pinned, and its pins are the hashes the cache
+  entry was verified against, so the check after the proof compile compares the files on disk with
+  those), after the proof compile, after the audit *together with* the kernel replays of the
+  verification's own modules (one check after both have ended, instead of one after each), and after
+  a replay only if one ran after that check (modules the early replays and the cache did not cover,
+  `--replay-fresh`). A check after a step that did not run is the check before it.
+* **Replay keys use pinned hashes.** A module's replay key hashes its module-data files and its
+  imports' keys. The hashes are now taken from the pins of the library the module resolved from
+  (`closureCheck` has already required that it resolved from the framework, the trusted build, the
+  proof's build or the toolchain), not read a second time. The digests are the same SHA-256 of the
+  same bytes, so keys and cache entries are unchanged, and the pins are checked after the replay
+  that uses them. A file that is not pinned (a dependency's module) is read as before.
+* **The trusted-compile cache** is unchanged in what it trusts (authentic manifest, every file
+  hashed against it); the pins of a hit are the manifest's hashes. An entry whose data was damaged
+  after it was stored is a miss and the next store replaces it (it used to stay unusable).
+* **Early replay markers are per module.** `leanchecker` is run for `Extracted`, `JanusTrusted`
+  and `Proof` alongside the audit. A marker (HMAC-authenticated like the replay markers, in the
+  replay cache) now names one module and the pins of the libraries its replay reads: the framework
+  and trusted builds for the two trusted modules, those and the proof's build for the proof. A
+  new proof of an already verified extraction therefore replays only the proof. The trusted
+  modules' markers do not depend on the proof's directory: in every verification that is accepted
+  `closureCheck` has required their closure (Extracted and JanusTrusted included) to resolve from
+  the framework, the trusted build or the toolchain. A forged, planted, stale or damaged marker is a
+  miss (the module is replayed); a failed replay writes none.
+* **Prestarted auditors.** The compiled auditor builds a clean environment (it imports only
+  `Extracted` and `Janus`, with initializers, to print the statement) that does not depend on the
+  proof. `janus-audit --serve` builds it while the proof compiles, then reads one request line
+  (theorem, proof module, nonce marker, final search path) and runs the unchanged audit, with the
+  proof's closure read after the request. The audit logic, its output and the sandbox are the same
+  (`Audit.lean`'s `runImplCore` is `runImpl` with the prebuilt environment); what moves is *when*
+  the clean environment is built. Constraints that keep it sound: (i) the auditor is started only
+  with a sandbox, from the file the readiness check hashed, before any untrusted step; (ii) until the
+  request its `LEAN_PATH` holds only the framework build, the trusted build and the toolchain, so
+  nothing the proof compile writes can be read into the clean environment; the proof's directory
+  is added by the request, which is sent only after the proof compile has ended and the pins have
+  been checked; (iii) the marker is sent with the request, after the untrusted step; (iv) the
+  auditor executable is hashed once more while the audit runs and must still be the recorded one
+  before the result is used (a running executable cannot be written to); (v) the clean environment
+  is built with initializers enabled and the flag is cleared by `withImporting` before the proof's
+  closure is read, exactly as before (the proof's `initialize` blocks never run: the row
+  `TestJ1ServeInitializerNotRun`); (vi) a failed or cancelled verification ends the prestarted
+  auditors (their input closes, their context is cancelled) and waits for them. `--unsafe-no-sandbox`
+  and `JANUS_AUDIT_PRESTART=off` use the classic invocation after the proof compile.
+* **The toolchain without Lake.** `lake env lean --version` and `--print-prefix` started two Lake
+  processes. The `lean` next to the `lake` executable, run in the project root, is the same
+  toolchain (elan resolves both from `lean-toolchain`; in a toolchain's `bin/` they are siblings);
+  its `--print-prefix` names the prefix, whose `bin/lean --version` gives the version.
+  `LEAN_SYSROOT` (which Lake honours), a missing sibling or any failure falls back to Lake
+  (`TestJ1ToolchainDirectMatchesLake` compares the two).
+* **Streaming hashes** (`fasthash.go`): the same SHA-256, with pooled buffers instead of reading
+  whole files.
+
+Measured effect and the per-stage table: docs/TESTING.md ("J1").
 
 ### Verification-result cache
 

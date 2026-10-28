@@ -9,6 +9,14 @@ script passes to `JanusAudit.run`, and prints the same record. `janus verify` ru
 with the verification's `LEAN_PATH`. `janus-audit --asl …` runs the ASL corollary audit
 (`JanusAudit.runASLImpl`) of `janus verify --asl` the same way.
 
+`janus-audit --serve <trusted module>` is the same audit in two steps (`janus verify` starts it
+before the proof compiles): it first builds the clean environment (`JanusAudit.prepareClean`: it
+imports only the framework and `Extracted`, which do not depend on the proof), then reads one
+request line `<theorem>\t<proof module>\t<marker>\t<LEAN_PATH>` from its standard input and runs
+`JanusAudit.runImplCore` with that environment. The request's `LEAN_PATH` is the one the classic
+invocation has (it adds the proof's directory); until then the search path holds no directory the
+proof can write. End of input before a request ends the process (status 3) without an audit.
+
 Compiled rather than elaborated: the auditor's own code runs natively instead of in the
 interpreter, and the process starts with no imported modules, so the audited and the clean
 environment map their `.olean` files instead of copying the ones the `Audit.lean` header has
