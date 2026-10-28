@@ -33,6 +33,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -69,9 +70,18 @@ func currentBuild() buildSnapshot {
 	return buildSnapshot{Info: bi, Sources: janus.GoSources, Framework: janus.Framework, ASL: janus.ASL, Testing: testing.Testing(), RuntimeVersion: runtime.Version()}
 }
 
-// identityFile is a source file of the Go build, as hashed.
+// identityGoFile is a source file of the Go build, as hashed: go.mod, go.sum, the Go files of the root
+// package, and EVERY file of cmd/janus that has an extension (.go, but also .s, headers, .syso: all are
+// compiled in with cgo disabled), test files excluded. A file without an extension (a stray built
+// executable) is not a build input.
 func identityGoFile(p string) bool {
-	return !strings.HasSuffix(p, "_test.go") && (strings.HasSuffix(p, ".go") || p == "go.mod" || p == "go.sum")
+	if strings.HasSuffix(p, "_test.go") {
+		return false
+	}
+	if strings.HasPrefix(p, "cmd/janus/") {
+		return strings.Contains(filepath.Base(p), ".")
+	}
+	return strings.HasSuffix(p, ".go") || strings.HasSuffix(p, ".s") || strings.HasSuffix(p, ".h") || p == "go.mod" || p == "go.sum"
 }
 
 func hashPut(h io.Writer, tag string, b []byte) {

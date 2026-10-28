@@ -29,5 +29,10 @@ var ASL embed.FS
 // directory it was built in (docs/SOUNDNESS.md, "Result-cache verifier identity"). A new Go
 // package imported by cmd/janus from this module must be added here; a test enforces that.
 //
-//go:embed go.mod go.sum *.go cmd/janus/*.go
+// Every file of cmd/janus is embedded (not only *.go): assembly files (.s), headers they include and
+// .syso objects are compiled with cgo disabled too, and an edit of one is an edit of the verifier. The
+// root package has only Go source; identity_sentinel.s/.h make the patterns for its assembly files and
+// headers match, so that adding one is embedded (and hashed) rather than silently ignored.
+//
+//go:embed go.mod go.sum *.go *.s *.h cmd/janus
 var GoSources embed.FS

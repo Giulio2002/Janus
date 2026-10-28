@@ -640,7 +640,7 @@ func TestResultEntryTamperIsMiss(t *testing.T) {
 func copyTreeForBuild(t *testing.T, dst string) {
 	t.Helper()
 	// Only what the command is built from; no .git, no .lake.
-	items := []string{"go.mod", "go.sum", "framework.go", "lakefile.toml", "lake-manifest.json", "lean-toolchain", "Janus.lean", "Janus", "JanusASL", "cmd"}
+	items := []string{"go.mod", "go.sum", "framework.go", "identity_sentinel.s", "identity_sentinel.h", "lakefile.toml", "lake-manifest.json", "lean-toolchain", "Janus.lean", "Janus", "JanusASL", "cmd"}
 	for _, it := range items {
 		cmd := exec.Command("cp", "-a", filepath.Join(repoRoot, it), dst+"/")
 		if out, err := cmd.CombinedOutput(); err != nil {
