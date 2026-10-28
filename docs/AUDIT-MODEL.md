@@ -108,15 +108,14 @@ binary (internal link, `-linkmode=external` + cgo, stripped `-s -w`, `-trimpath`
 the `examples-amd64`/`examples-arm64` binaries) still loads and extracts. PIE (`ET_DYN`) is
 still rejected earlier, as before.
 
-### Residual
+### Residual (closed in round 12)
 
-`validateSegments` accepts a section as long as *some* `PT_LOAD` maps it consistently. A
-pathological binary with **overlapping** `PT_LOAD` segments that map the same virtual address to
-two different file offsets could, in principle, satisfy the check on the first segment while the
-kernel keeps the last mapping. The Go toolchain never emits overlapping `PT_LOAD`s, and this is
-squarely in the "binary as adversary" region the threat model excludes; it is noted here rather
-than handled. The check does close the realistic gap (a corrupted or hand-edited section header,
-or an unusual external linker layout) and strictly strengthens the trusted copy.
+The first version of `validateSegments` accepted a section once the *first* `PT_LOAD` covered
+it, so a later overlapping `PT_LOAD` (which the kernel maps last) could change the executed code
+while extraction read the original bytes; red-team 11b confirmed a false `Verified` (O1). Round 12
+(`audit/round12/`, docs/SOUNDNESS.md "ELF loader semantics") rejects overlapping, malformed and
+W+X `PT_LOAD`s, reads every extracted byte through the loader's address map and cross-checks every
+section against it.
 
 ---
 

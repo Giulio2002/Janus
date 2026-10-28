@@ -33,8 +33,8 @@ type GlobalSeg struct {
 	Bytes   []byte // the file bytes; nil for a NOBITS section (zero at load)
 }
 
-// loadSeg is a PT_LOAD program header.
-type loadSeg struct {
+// globalLoad is a PT_LOAD program header (the loader view of elfview.go is loadSeg).
+type globalLoad struct {
 	Vaddr, Filesz, Memsz uint64
 	Writable             bool
 }
