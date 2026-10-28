@@ -22,6 +22,14 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janu
 open Janus.Contracts.Panic (frameItems openItems frameKeep bitsWin recItems recItems_above Frame)
 open Janus.Spec (openBits)
 
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_DeferOrder_236" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferOrder" + 236))
+local macro "loc_DeferOrder_func3_18" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferOrder.func3" + 18))
+local macro "loc_DeferOrder_func2_18" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferOrder.func2" + 18))
+
+
+
 local macro "func1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferOrder.func1"))
 local macro "func2A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferOrder.func2"))
 local macro "func3A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferOrder.func3"))
@@ -103,7 +111,7 @@ theorem cl2 (impl : List Janus.Amd64.Segment) (e : State) (p : BitVec 64) (a v :
   rw [hcr]
   have hvlt : v < 2 ^ 64 := by
     rw [← hv]; have := Janus.Arm64.Memory.readLE_lt cm p.toNat 8; simpa using this
-  janus64_run [hcap, hv, hpn] until [4746386]
+  janus64_run [hcap, hv, hpn] until [loc_DeferOrder_func2_18]
   generalize hw : (BitVec.ofNat 64 v + BitVec.ofNat 64 v + (BitVec.ofNat 64 v + BitVec.ofNat 64 v) <<< 2 + 2#64) = w
   have hwn : w.toNat = digit 2 v := by
     rw [← hw]
@@ -137,7 +145,7 @@ theorem cl3 (impl : List Janus.Amd64.Segment) (e : State) (p : BitVec 64) (a v :
   rw [hcr]
   have hvlt : v < 2 ^ 64 := by
     rw [← hv]; have := Janus.Arm64.Memory.readLE_lt cm p.toNat 8; simpa using this
-  janus64_run [hcap, hv, hpn] until [4746354]
+  janus64_run [hcap, hv, hpn] until [loc_DeferOrder_func3_18]
   generalize hw : (BitVec.ofNat 64 v + BitVec.ofNat 64 v + (BitVec.ofNat 64 v + BitVec.ofNat 64 v) <<< 2 + 3#64) = w
   have hwn : w.toNat = digit 3 v := by
     rw [← hw]
@@ -196,7 +204,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     have hSdf : S.df = false := by rw [hS]
     have hSf : MemFrame s.mem S.mem [((s.regs 4).toNat - (P.depth + 120), (s.regs 4).toNat + 40)] := by
       rw [hS]; janus_frame
-    have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4746252 := by
+    have hSra : S.mem.readLE (S.regs 4).toNat 8 = loc_DeferOrder_236 := by
       rw [hS]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h120, Janus.Arm64.Memory.readLE_writeLE_self]
     have hbits : S.mem.readLE ((s.regs 4).toNat - 89) 1 = 7 := by
       rw [hS]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -483,7 +491,7 @@ of type word `1`, `x = 11` — in the precondition; the call panics. -/
 
 namespace Witness
 
-open Janus.Contracts.PanicSat (tabWords witMem)
+open Janus.Contracts.PanicSat (tabWords witMem witRet witArg)
 open Janus.Contracts.PanicSatAmd64
 open Janus.Contracts.PanicModel
 
@@ -513,10 +521,10 @@ theorem stubAt : StubAt (Extracted.program.link implW) gA eGopanic :=
 theorem hpan : GopanicContract (Extracted.program.link implW) gA PW U1 T0 :=
   gopanic_at stubAt (gopanic_run engineAt T0 tok)
 
-def pA : Nat := 0x41000
-def ret : Nat := 0x200000
+abbrev pA : Nat := witArg
+abbrev ret : Nat := witRet
 
-/-- Memory: the model's table and runtime range writable, a stack `[0x40000, 0x50000)` holding the
+/-- Memory: the model's table and runtime range writable, a stack (a region of the witness memory) holding the
 return address `ret` at `[wsp]` (and `*pA`), the goroutine readable. -/
 def wmW : Janus.Arm64.Memory := witMem (tabWords T0 ++ [(wsp, ret)])
 

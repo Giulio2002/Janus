@@ -12,6 +12,13 @@ open Janus Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Contracts Janu
 open Janus.Contracts.MapAmd64 (keepABI_apply)
 open Janus.Contracts.Panic (Item recItems frameItems fnItems frameKeep bitsWin recItems_above)
 
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_DeferTwice_55" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice" + 55))
+local macro "loc_DeferTwice_73" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice" + 73))
+
+
+
 local macro "fvA" : term => `(janus_eval% (Extracted.program.data.head!.base))
 local macro "func1A" : term =>
   `(janus_eval% (segAddr Extracted.program "example.com/basic.DeferTwice.func1"))
@@ -89,7 +96,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hagS : Spec.Map.Agrees s.mem S.mem P.priv := hagw _ hSf
   have hSfW : MemFrame s.mem S.mem (P.priv ++ [((s.regs 4).toNat - (P.depth + 32), (s.regs 4).toNat + 8)]) :=
     hSf.mono fun a n h => by simp only [outside_append] at h; exact h.2
-  have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4746615 := by
+  have hSra : S.mem.readLE (S.regs 4).toNat 8 = loc_DeferTwice_55 := by
     rw [hS]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h32', Janus.Arm64.Memory.readLE_writeLE_self]
   have hS_i : S.mem.readLE ((s.regs 4).toNat - 16) 8 = 0 := by
     rw [hS]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -98,7 +105,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       (by omega) hS14 hSx hSdf (by rw [hSra]; decide),
     by rw [hgS, hl.room_frame _ _ _ hagS]; omega⟩ ?_
   intro s1 hpc1 hq1
-  obtain ⟨⟨r1, x1, y1, f1, m1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
+  obtain ⟨⟨r1, x1, y1, f1, m1, zhm1, krm1, hs1, hfr1, henv1⟩, hdef1, hkeep1⟩ := hq1
   have hm1 : s1.mem = m1 := by rw [hs1]
   have hS0n : (S.regs 0).toNat = fvA := by rw [hS0]; simp
   have hfsp : fspOf S = (s.regs 4).toNat - 24 := by simp only [fspOf, hSspn]; omega
@@ -159,7 +166,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hagS2 : Spec.Map.Agrees m1 S2.mem P.priv :=
     Spec.Map.Agrees.of_window (lo := (s.regs 4).toNat - (P.depth + 32)) (hi := (s.regs 4).toNat + 8) hS2f
       (Outside.of_sub hout (by omega) (by omega))
-  have hS2ra : S2.mem.readLE (S2.regs 4).toNat 8 = 4746615 := by
+  have hS2ra : S2.mem.readLE (S2.regs 4).toNat 8 = loc_DeferTwice_55 := by
     rw [hS2]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h32', Janus.Arm64.Memory.readLE_writeLE_self]
   have hS2i : S2.mem.readLE ((s.regs 4).toNat - 16) 8 = 1 := by
     rw [hS2]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -168,7 +175,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
       (by omega) hS214 hS2x hS2df (by rw [hS2ra]; decide),
     by rw [hgS2, hl.room_frame _ _ _ hagS2]; omega⟩ ?_
   intro s2 hpc2 hq2
-  obtain ⟨⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩, hdef2, hkeep2⟩ := hq2
+  obtain ⟨⟨r2, x2, y2, f2, m2, zhm2, krm2, hs2, hfr2, henv2⟩, hdef2, hkeep2⟩ := hq2
   have hm2 : s2.mem = m2 := by rw [hs2]
   have hS20n : (S2.regs 0).toNat = fvA := by rw [hS20]; simp
   have hfsp2 : fspOf S2 = (s.regs 4).toNat - 24 := by simp only [fspOf, hS2spn]; omega
@@ -220,7 +227,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hagS3 : Spec.Map.Agrees m2 S3.mem P.priv :=
     Spec.Map.Agrees.of_window (lo := (s.regs 4).toNat - (P.depth + 32)) (hi := (s.regs 4).toNat + 8) hS3f
       (Outside.of_sub hout (by omega) (by omega))
-  have hS3ra : S3.mem.readLE (S3.regs 4).toNat 8 = 4746633 := by
+  have hS3ra : S3.mem.readLE (S3.regs 4).toNat 8 = loc_DeferTwice_73 := by
     rw [hS3]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h32', Janus.Arm64.Memory.readLE_writeLE_self]
   have hr8_3 : S3.mem.readLE ((s.regs 4).toNat - 8) 8 = (s.regs 5).toNat := by
     rw [hS3]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -327,7 +334,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hdacc8 : d.mem.accessible ((s.regs 4).toNat - 8) 16 true = true := by
     rw [hSD.accessible, hS3fW.accessible]
     exact Janus.Arm64.Memory.accessible_mono _ hst (by omega) (by omega)
-  have hdpc' : d.rip = BitVec.ofNat 64 4746633 := by
+  have hdpc' : d.rip = BitVec.ofNat 64 loc_DeferTwice_73 := by
     apply BitVec.eq_of_toNat_eq
     rw [hdpc, hS3ra, BitVec.toNat_ofNat]
   have hd4 : d.regs 4 = s.regs 4 - 24#64 := by
@@ -355,7 +362,7 @@ the two contract addresses, and a call state satisfying the precondition: so `co
 
 namespace Witness
 
-open Janus.Contracts.PanicSat (tabWords witMemD)
+open Janus.Contracts.PanicSat (tabWords witMemD witRet witArg)
 open Janus.Contracts.PanicSatAmd64
 open Janus.Contracts.PanicModel
 
@@ -396,9 +403,9 @@ theorem hdp : DeferprocContract (Extracted.program.link implW) dpA PW :=
 theorem hdr : DeferreturnContract (Extracted.program.link implW) drA PW U1 :=
   deferreturn_at stubDr (deferreturn_run (T := T0) engineAt)
 
-def ret : Nat := 0x200000
+abbrev ret : Nat := witRet
 
-/-- Memory: the model's table and runtime range writable, a stack `[0x40000, 0x50000)` holding the
+/-- Memory: the model's table and runtime range writable, a stack (a region of the witness memory) holding the
 return address `ret` at `[wsp]`, the goroutine readable, the program's read-only data in place. -/
 def wm : Janus.Arm64.Memory := witMemD (tabWords T0 ++ [(wsp, ret)]) Extracted.data
 

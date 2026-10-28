@@ -30,8 +30,21 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 
 namespace Proof
 
+
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_count2_44" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.count2" + 44))
+local macro "loc_count2_64" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.count2" + 64))
+local macro "loc_RangeDefer_28" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer" + 28))
+local macro "loc_RangeDefer_72" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer" + 72))
+local macro "loc_RangeDefer_96" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer" + 96))
+local macro "loc_RangeDefer_range1_0" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 0))
+local macro "loc_RangeDefer_range1_80" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 80))
+local macro "loc_RangeDefer_range1_96" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 96))
+local macro "loc_RangeDefer_range1_120" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1" + 120))
+
 /-- The address of `example.com/basic.Acc` (`.noptrbss`; the extractor does not copy it). -/
-local macro "accA" : term => `((1704856 : Nat))
+local macro "accA" : term => `(janus_eval% (adrpLdTarget (segAddr Extracted.program "example.com/basic.accAdd1") (segWord Extracted.program "example.com/basic.accAdd1" 0) (segWord Extracted.program "example.com/basic.accAdd1" 1) 3))
 local macro "fvA" : term => `(janus_eval% (Extracted.program.data.head!.base))
 local macro "bodyA" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RangeDefer-range1"))
 
@@ -157,7 +170,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hSf : MemFrame s.mem S.mem [(s.sp.toNat - (P.depth + 160), s.sp.toNat)] := by rw [hS]; janus_frame
   have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> rfl
   have hS18 : S.regs 18 = s.regs 18 := by rw [hS] <;> rfl
-  have hS30 : S.regs 30 = BitVec.ofNat 64 605020 := by rw [hS] <;> rfl
+  have hS30 : S.regs 30 = BitVec.ofNat 64 loc_RangeDefer_28 := by rw [hS] <;> rfl
   have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferrangefunc") := by rw [hS] <;> rfl
   have hgS : gOf S = gOf s := by simp only [gOf, hS28]
   have hagS : Map.Agrees s.mem S.mem P.priv := hagw _ hSf
@@ -167,7 +180,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       (by rw [hSspn]; omega) hS28 (by rw [hS30]; decide) (by rw [hS30]; decide),
     by rw [hgS, hl.room_frame _ _ _ hagS]; omega⟩ ?_
   intro s1 hpc1 hq1
-  obtain ⟨⟨j1, f1, v1, m1, hs1, hfr1, henv1⟩, hx0, hdef1, hpan1, hsav1, hrp1, hroom1⟩ := hq1
+  obtain ⟨⟨j1, f1, v1, m1, ex1, ep1, hs1, hfr1, henv1⟩, hx0, hdef1, hpan1, hsav1, hrp1, hroom1⟩ := hq1
   have hm1 : s1.mem = m1 := by rw [hs1]; rfl
   have hstep : ∀ (S : State) (m : Memory) (ex : List (Nat × Nat)) (nargs : Nat),
       MemFrame s.mem S.mem (P.priv ++ [(s.sp.toNat - (P.depth + 160), s.sp.toNat)]) →
@@ -194,7 +207,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     rw [hW1.accessible]; exact hst
   have hd1 : P.defers m1 (gOf s) = { sp := s.sp.toNat - 64, fns := [], token := some (j1 1).toNat } ::
       P.defers s.mem (gOf s) := by
-    have hr1 : s1.regs 1 = j1 1 := by rw [hs1]; simp [retState, callRegs_apply]
+    have hr1 : s1.regs 1 = j1 1 := by rw [hs1]; simp [retStateX, callRegs_apply]
     have := hdef1; rw [hm1, hgS, hSspn, hl.defers_frame _ _ _ hagS, hr1] at this
     exact this
   have hrm1 : P.room s.mem (gOf s) ≤ P.room m1 (gOf s) + 1 := by
@@ -227,7 +240,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS2f : MemFrame m1 S2.mem [(s.sp.toNat - (P.depth + 160), s.sp.toNat)] := by rw [hS2]; janus_frame
   have hS228 : S2.regs 28 = s.regs 28 := by rw [hS2] <;> rfl
   have hS218 : S2.regs 18 = s.regs 18 := by rw [hS2] <;> rfl
-  have hS230 : S2.regs 30 = BitVec.ofNat 64 605232 := by rw [hS2] <;> rfl
+  have hS230 : S2.regs 30 = BitVec.ofNat 64 loc_RangeDefer_range1_80 := by rw [hS2] <;> rfl
   have hS20 : S2.regs 0 = BitVec.ofNat 64 fvA := by rw [hS2] <;> rfl
   have hS22 : S2.regs 2 = j1 1 := by rw [hS2] <;> simp [setReg]
   have hS2pc : S2.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferprocat") := by rw [hS2] <;> rfl
@@ -246,19 +259,19 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hk_bfp2 : S2.mem.readLE (s.sp.toNat - 168) 8 = s.sp.toNat - 104 := by
     rw [hS2]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
     all_goals first | (rw [h256]; exact Nat.mod_eq_of_lt (by have := s.sp.isLt; omega)) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 0).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 1).isLt) | (rw [h256]; decide)
-  have hk_blr2 : S2.mem.readLE (s.sp.toNat - 160) 8 = 604924 := by
+  have hk_blr2 : S2.mem.readLE (s.sp.toNat - 160) 8 = loc_count2_44 := by
     rw [hS2]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
     all_goals first | (rw [h256]; exact Nat.mod_eq_of_lt (by have := s.sp.isLt; omega)) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 0).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 1).isLt) | (rw [h256]; decide)
   have hk_c02 : S2.mem.readLE (s.sp.toNat - 56) 8 = s.sp.toNat - 40 := by
     rw [hS2]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
     all_goals first | (rw [h256]; exact Nat.mod_eq_of_lt (by have := s.sp.isLt; omega)) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 0).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 1).isLt) | (rw [h256]; decide)
-  have hk_clr2 : S2.mem.readLE (s.sp.toNat - 96) 8 = 605064 := by
+  have hk_clr2 : S2.mem.readLE (s.sp.toNat - 96) 8 = loc_RangeDefer_72 := by
     rw [hS2]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
     all_goals first | (rw [h256]; exact Nat.mod_eq_of_lt (by have := s.sp.isLt; omega)) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 0).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 1).isLt) | (rw [h256]; decide)
   have hk_cfp2 : S2.mem.readLE (s.sp.toNat - 104) 8 = s.sp.toNat - 72 := by
     rw [hS2]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
     all_goals first | (rw [h256]; exact Nat.mod_eq_of_lt (by have := s.sp.isLt; omega)) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 0).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 1).isLt) | (rw [h256]; decide)
-  have hk_code2 : S2.mem.readLE (s.sp.toNat - 40) 8 = 605152 := by
+  have hk_code2 : S2.mem.readLE (s.sp.toNat - 40) 8 = loc_RangeDefer_range1_0 := by
     rw [hS2]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
     all_goals first | (rw [h256]; exact Nat.mod_eq_of_lt (by have := s.sp.isLt; omega)) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 0).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 1).isLt) | (rw [h256]; decide)
   have hk_cst2 : S2.mem.readLE (s.sp.toNat - 32) 8 = s.sp.toNat - 48 := by
@@ -280,7 +293,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   · rw [hgS2, hl.defers_frame _ _ _ hagS2, hd1]
     exact ⟨_, _, rfl, by rw [hS22]⟩
   intro s2 hpc2 hq2
-  obtain ⟨⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩, hdef2, hpan2, hsav2, hrp2, hroom2⟩ := hq2
+  obtain ⟨⟨j2, f2, v2, m2, ex2, ep2, hs2, hfr2, henv2⟩, hdef2, hpan2, hsav2, hrp2, hroom2⟩ := hq2
   have hm2 : s2.mem = m2 := by rw [hs2]; rfl
   have hfr2e : MemFrame S2.mem m2 (P.priv ++ calleeStack S2 P.depth 2 ++ []) := by simpa using hfr2
   have hS20n : (S2.regs 0).toNat = fvA := by rw [hS20]; simp
@@ -305,19 +318,19 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hk_bfp3 : m2.readLE (s.sp.toNat - 168) 8 = s.sp.toNat - 104 := by
     rw [keep8 hfr2e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_bfp2
-  have hk_blr3 : m2.readLE (s.sp.toNat - 160) 8 = 604924 := by
+  have hk_blr3 : m2.readLE (s.sp.toNat - 160) 8 = loc_count2_44 := by
     rw [keep8 hfr2e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_blr2
   have hk_c03 : m2.readLE (s.sp.toNat - 56) 8 = s.sp.toNat - 40 := by
     rw [keep8 hfr2e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_c02
-  have hk_clr3 : m2.readLE (s.sp.toNat - 96) 8 = 605064 := by
+  have hk_clr3 : m2.readLE (s.sp.toNat - 96) 8 = loc_RangeDefer_72 := by
     rw [keep8 hfr2e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_clr2
   have hk_cfp3 : m2.readLE (s.sp.toNat - 104) 8 = s.sp.toNat - 72 := by
     rw [keep8 hfr2e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_cfp2
-  have hk_code3 : m2.readLE (s.sp.toNat - 40) 8 = 605152 := by
+  have hk_code3 : m2.readLE (s.sp.toNat - 40) 8 = loc_RangeDefer_range1_0 := by
     rw [keep8 hfr2e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_code2
   have hk_cst3 : m2.readLE (s.sp.toNat - 32) 8 = s.sp.toNat - 48 := by
@@ -345,7 +358,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS3f : MemFrame m2 S3.mem [(s.sp.toNat - (P.depth + 160), s.sp.toNat)] := by rw [hS3]; janus_frame
   have hS328 : S3.regs 28 = s.regs 28 := by rw [hS3] <;> rfl
   have hS318 : S3.regs 18 = s.regs 18 := by rw [hS3] <;> rfl
-  have hS330 : S3.regs 30 = BitVec.ofNat 64 605272 := by rw [hS3] <;> rfl
+  have hS330 : S3.regs 30 = BitVec.ofNat 64 loc_RangeDefer_range1_120 := by rw [hS3] <;> rfl
   have hS329 : S3.regs 29 = s.sp - 168#64 := by rw [hS3] <;> rfl
   have hS3pc : S3.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") := by rw [hS3] <;> rfl
   have hgS3 : gOf S3 = gOf s := by simp only [gOf, hS328]
@@ -403,11 +416,11 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       exact ⟨h1, by omega⟩⟩
   have hbfp4 : dm.readLE (s.sp.toNat - 168) 8 = s.sp.toNat - 104 := by
     rw [hdm8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_bfp3
-  have hblr4 : dm.readLE (s.sp.toNat - 160) 8 = 604924 := by
+  have hblr4 : dm.readLE (s.sp.toNat - 160) 8 = loc_count2_44 := by
     rw [hdm8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_blr3
   have hc04 : dm.readLE (s.sp.toNat - 56) 8 = s.sp.toNat - 40 := by
     rw [hdm8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_c03
-  have hcode4 : dm.readLE (s.sp.toNat - 40) 8 = 605152 := by
+  have hcode4 : dm.readLE (s.sp.toNat - 40) 8 = loc_RangeDefer_range1_0 := by
     rw [hdm8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_code3
   have hcst4 : dm.readLE (s.sp.toNat - 32) 8 = s.sp.toNat - 48 := by
     rw [hdm8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_cst3
@@ -415,7 +428,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     rw [hdm8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_t03
   have ht14 : dm.readLE (s.sp.toNat - 16) 8 = (j1 1).toNat := by
     rw [hdm8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_t13
-  have hclr4 : dm.readLE (s.sp.toNat - 96) 8 = 605064 := by
+  have hclr4 : dm.readLE (s.sp.toNat - 96) 8 = loc_RangeDefer_72 := by
     rw [hdm8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_clr3
   have hcfp4 : dm.readLE (s.sp.toNat - 104) 8 = s.sp.toNat - 72 := by
     rw [hdm8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_cfp3
@@ -471,7 +484,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS4f : MemFrame dm S4.mem [(s.sp.toNat - (P.depth + 160), s.sp.toNat)] := by rw [hS4]; janus_frame
   have hS428 : S4.regs 28 = s.regs 28 := by rw [hS4] <;> rfl
   have hS418 : S4.regs 18 = s.regs 18 := by rw [hS4] <;> rfl
-  have hS430 : S4.regs 30 = BitVec.ofNat 64 605248 := by rw [hS4] <;> rfl
+  have hS430 : S4.regs 30 = BitVec.ofNat 64 loc_RangeDefer_range1_96 := by rw [hS4] <;> rfl
   have hS40 : S4.regs 0 = BitVec.ofNat 64 (fvA + 8) := by rw [hS4] <;> rfl
   have hS42 : S4.regs 2 = j1 1 := by rw [hS4] <;> simp [setReg]
   have hS4pc : S4.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferprocat") := by rw [hS4] <;> rfl
@@ -490,16 +503,16 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hk_bfp5 : S4.mem.readLE (s.sp.toNat - 168) 8 = s.sp.toNat - 104 := by
     rw [hS4]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
     all_goals first | (rw [h256]; exact Nat.mod_eq_of_lt (by have := s.sp.isLt; omega)) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 0).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 1).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (s.regs 29).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (by omega)) | (rw [h256]; decide)
-  have hk_blr5 : S4.mem.readLE (s.sp.toNat - 160) 8 = 604944 := by
+  have hk_blr5 : S4.mem.readLE (s.sp.toNat - 160) 8 = loc_count2_64 := by
     rw [hS4]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint, Memory.readLE_writeLE_self]
     all_goals first | (rw [h256]; exact Nat.mod_eq_of_lt (by have := s.sp.isLt; omega)) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 0).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (j1 1).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (s.regs 29).isLt) | (rw [h256]; exact Nat.mod_eq_of_lt (by omega)) | (rw [h256]; decide)
   have hk_c05 : S4.mem.readLE (s.sp.toNat - 56) 8 = s.sp.toNat - 40 := by
     rw [hS4]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint]; exact hc04
-  have hk_clr5 : S4.mem.readLE (s.sp.toNat - 96) 8 = 605064 := by
+  have hk_clr5 : S4.mem.readLE (s.sp.toNat - 96) 8 = loc_RangeDefer_72 := by
     rw [hS4]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint]; exact hclr4
   have hk_cfp5 : S4.mem.readLE (s.sp.toNat - 104) 8 = s.sp.toNat - 72 := by
     rw [hS4]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint]; exact hcfp4
-  have hk_code5 : S4.mem.readLE (s.sp.toNat - 40) 8 = 605152 := by
+  have hk_code5 : S4.mem.readLE (s.sp.toNat - 40) 8 = loc_RangeDefer_range1_0 := by
     rw [hS4]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint]; exact hcode4
   have hk_cst5 : S4.mem.readLE (s.sp.toNat - 32) 8 = s.sp.toNat - 48 := by
     rw [hS4]; simp (disch := omega) only [Memory.readLE_writeLE_of_disjoint]; exact hcst4
@@ -522,7 +535,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   · rw [hgS4, hl.defers_frame _ _ _ hagS4, hdd]
     exact ⟨_, _, rfl, by rw [hS42]⟩
   intro s4 hpc4 hq4
-  obtain ⟨⟨j4, f4, v4, m4, hs4, hfr4, henv4⟩, hdef4, hpan4, hsav4, hrp4, hroom4⟩ := hq4
+  obtain ⟨⟨j4, f4, v4, m4, ex4, ep4, hs4, hfr4, henv4⟩, hdef4, hpan4, hsav4, hrp4, hroom4⟩ := hq4
   have hm4 : s4.mem = m4 := by rw [hs4]; rfl
   have hfr4e : MemFrame S4.mem m4 (P.priv ++ calleeStack S4 P.depth 2 ++ []) := by simpa using hfr4
   have hS40n : (S4.regs 0).toNat = fvA + 8 := by rw [hS40]; simp
@@ -547,19 +560,19 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hk_bfp6 : m4.readLE (s.sp.toNat - 168) 8 = s.sp.toNat - 104 := by
     rw [keep8 hfr4e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_bfp5
-  have hk_blr6 : m4.readLE (s.sp.toNat - 160) 8 = 604944 := by
+  have hk_blr6 : m4.readLE (s.sp.toNat - 160) 8 = loc_count2_64 := by
     rw [keep8 hfr4e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_blr5
   have hk_c06 : m4.readLE (s.sp.toNat - 56) 8 = s.sp.toNat - 40 := by
     rw [keep8 hfr4e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_c05
-  have hk_clr6 : m4.readLE (s.sp.toNat - 96) 8 = 605064 := by
+  have hk_clr6 : m4.readLE (s.sp.toNat - 96) 8 = loc_RangeDefer_72 := by
     rw [keep8 hfr4e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_clr5
   have hk_cfp6 : m4.readLE (s.sp.toNat - 104) 8 = s.sp.toNat - 72 := by
     rw [keep8 hfr4e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_cfp5
-  have hk_code6 : m4.readLE (s.sp.toNat - 40) 8 = 605152 := by
+  have hk_code6 : m4.readLE (s.sp.toNat - 40) 8 = loc_RangeDefer_range1_0 := by
     rw [keep8 hfr4e (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by simp only [outside_nil])]
     exact hk_code5
   have hk_cst6 : m4.readLE (s.sp.toNat - 32) 8 = s.sp.toNat - 48 := by
@@ -587,7 +600,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hS5f : MemFrame m4 S5.mem [(s.sp.toNat - (P.depth + 160), s.sp.toNat)] := by rw [hS5]; janus_frame
   have hS528 : S5.regs 28 = s.regs 28 := by rw [hS5] <;> rfl
   have hS518 : S5.regs 18 = s.regs 18 := by rw [hS5] <;> rfl
-  have hS530 : S5.regs 30 = BitVec.ofNat 64 605272 := by rw [hS5] <;> rfl
+  have hS530 : S5.regs 30 = BitVec.ofNat 64 loc_RangeDefer_range1_120 := by rw [hS5] <;> rfl
   have hS529 : S5.regs 29 = s.sp - 168#64 := by rw [hS5] <;> rfl
   have hS5pc : S5.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") := by rw [hS5] <;> rfl
   have hgS5 : gOf S5 = gOf s := by simp only [gOf, hS528]
@@ -646,9 +659,9 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       exact ⟨h1, by omega⟩⟩
   have hbfp7 : em.readLE (s.sp.toNat - 168) 8 = s.sp.toNat - 104 := by
     rw [hem8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_bfp6
-  have hblr7 : em.readLE (s.sp.toNat - 160) 8 = 604944 := by
+  have hblr7 : em.readLE (s.sp.toNat - 160) 8 = loc_count2_64 := by
     rw [hem8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_blr6
-  have hclr7 : em.readLE (s.sp.toNat - 96) 8 = 605064 := by
+  have hclr7 : em.readLE (s.sp.toNat - 96) 8 = loc_RangeDefer_72 := by
     rw [hem8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_clr6
   have hcfp7 : em.readLE (s.sp.toNat - 104) 8 = s.sp.toNat - 72 := by
     rw [hem8 _ (Outside.of_sub hout (by omega) (by omega)) (by omega) (by omega) (by omega)]; exact hk_cfp6
@@ -702,7 +715,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   have hF6f : MemFrame em S6.mem [(s.sp.toNat - 48, s.sp.toNat - 48 + 8)] := by rw [hS6]; janus_frame
   have hF628 : S6.regs 28 = s.regs 28 := by rw [hS6]; simp [setReg]
   have hF618 : S6.regs 18 = s.regs 18 := by rw [hS6]; simp [setReg]
-  have hF630 : S6.regs 30 = BitVec.ofNat 64 605088 := by rw [hS6]; simp [setReg]
+  have hF630 : S6.regs 30 = BitVec.ofNat 64 loc_RangeDefer_96 := by rw [hS6]; simp [setReg]
   have hF629 : S6.regs 29 = s.sp - 72#64 := by
     rw [hS6]; simp [setReg]
     apply BitVec.eq_of_toNat_eq; simp only [BitVec.toNat_sub, BitVec.toNat_ofNat]; omega
@@ -940,9 +953,9 @@ def wm : Memory :=
   ⟨(witMemD (tabWords T0) Extracted.data).bytes,
     (witMemD (tabWords T0) Extracted.data).regions ++ [⟨accA, 8, true⟩]⟩
 
-def wg : Nat := 0x50000
-def wsp : Nat := 0x48000
-def ret : Nat := 0x200000
+abbrev wg : Nat := witG
+abbrev wsp : Nat := witSP
+abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wm := by
   unfold Env0

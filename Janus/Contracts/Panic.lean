@@ -115,9 +115,10 @@ The panic/defer/recover runtime functions are left out with `--contract` (pinned
 runtime's code, `cmd/janus` `runtimePanicContractStubs`); a theorem states each one's effect as a
 `Summary` (the ones that return to their caller) or a `GoReturns` (the ones that transfer control
 elsewhere) of the linked program, over the model `P`. The frame is the allocator's
-(`Janus.Contracts.CallOK`, `calleeStack`, `retState`): the ABI-preserved registers are kept,
-every other register / flag / vector register is arbitrary, and memory changes only in the
-runtime's own memory `P.priv` and the callee's stack window. -/
+(`Janus.Contracts.CallOK`, `calleeStack`, `retStateX`): the ABI-preserved registers are kept,
+every other register / flag / vector register is arbitrary, the exclusive monitor and the
+store-exclusive outcomes are unspecified (the runtime's locks and atomics use exclusives), and memory
+changes only in the runtime's own memory `P.priv` and the callee's stack window. -/
 
 open Janus.Contracts
 
@@ -125,8 +126,9 @@ open Janus.Contracts
 registers (`SP`, `X18`, `X28`, `X29`) are preserved, everything else is arbitrary, memory
 changes only in `P.priv` and the callee stack window, and the runtime is usable again. -/
 def PanicRet (P : PanicRuntime) (nargs : Nat) (s s' : State) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-    s' = retState s junk [] f v m ∧ MemFrame s.mem m (P.priv ++ calleeStack s P.depth nargs) ∧
+  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat))
+    (ep : Nat → Bool),
+    s' = retStateX s junk [] f v m ex ep ∧ MemFrame s.mem m (P.priv ++ calleeStack s P.depth nargs) ∧
       P.Env m
 
 /-- The precondition every returning panic-runtime call shares (arm64): the runtime usable, the
@@ -241,8 +243,9 @@ def KeepsBut (P : PanicRuntime) (g used : Nat) (m m' : Memory) : Prop :=
 /-- A panic-runtime call returns (arm64) with the frame of `PanicRet`, and may also write the
 ranges `extra` (a `_defer` record on the caller's stack). -/
 def PanicRetW (P : PanicRuntime) (nargs : Nat) (extra : List (Nat × Nat)) (s s' : State) : Prop :=
-  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory),
-    s' = retState s junk [] f v m ∧ MemFrame s.mem m (P.priv ++ calleeStack s P.depth nargs ++ extra) ∧
+  ∃ (junk : Nat → W64) (f : Flags) (v : Nat → BitVec 128) (m : Memory) (ex : Option (Nat × Nat))
+    (ep : Nat → Bool),
+    s' = retStateX s junk [] f v m ex ep ∧ MemFrame s.mem m (P.priv ++ calleeStack s P.depth nargs ++ extra) ∧
       P.Env m
 
 /-- `runtime.deferproc(fn)` (Go 1.26 `panic.go`, `X0` = the funcval): records a heap `_defer` for

@@ -21,6 +21,11 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 
 namespace Proof
 
+
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_GoexitDefer_68" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer" + 68))
+
 local macro "func1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer.func1"))
 local macro "recoverRet" : term =>
   `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer.func1" + 0x24))
@@ -54,7 +59,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
   refine ReachesRet.done rfl ?_
   refine GoReturns.name fun S hS => ?_
   have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.Goexit") := by rw [hS]; rfl
-  have hS30 : S.regs 30 = BitVec.ofNat 64 604708 := by rw [hS] <;> rfl
+  have hS30 : S.regs 30 = BitVec.ofNat 64 loc_GoexitDefer_68 := by rw [hS] <;> rfl
   have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> simp [setReg]
   have hS18 : S.regs 18 = s.regs 18 := by rw [hS] <;> simp [setReg]
   have hSsp : S.sp.toNat = s.sp.toNat - 48 := by
@@ -224,7 +229,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     case hgb => simp [setReg]; omega
     case cont =>
       intro G' hpcG hpost
-      obtain ⟨⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2', hrp2, hrm2, hnil2, -⟩ := hpost
+      obtain ⟨⟨j2, f2, v2, m2, ex2, ep2, hs2, hfr2, henv2⟩, hdf2, hsv2', hrp2, hrm2, hnil2, -⟩ := hpost
       have agG : ∀ m, MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 80)), s.sp.toNat + 16)] →
           Map.Agrees e.mem m P.priv := fun m hf =>
         Map.Agrees.of_window hf (Outside.of_sub hout (by omega) (by omega))
@@ -237,7 +242,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
         hkey _ _ (by dsimp only [gOf]; simp [setReg, hS28']) (by janus_frame), Or.inl hgx⟩)
       subst hs2
       have h32 : (e.sp - 32#64).toNat = e.sp.toNat - 32 := by rw [BitVec.toNat_sub]; simp; omega
-      simp only [calleeStack, h32, retState, callRegs_apply, List.getD_nil, setReg_apply, reduceIte,
+      simp only [calleeStack, h32, retStateX, callRegs_apply, List.getD_nil, setReg_apply, reduceIte,
         Nat.reduceEqDiff] at hfr2 h0 h1 henv2 hpanI
       have hcap' : S.mem.readLE (BitVec.toNat s.sp - 32 + 8) 8 = p.toNat := by
         rw [show BitVec.toNat s.sp - 32 + 8 = BitVec.toNat s.sp - 24 by omega]; exact hcap
@@ -259,7 +264,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       have hag7 : Map.Agrees m2 (m2.writeLE p.toNat 8 (s.mem.readLE p.toNat 8 + 1)) P.priv :=
         Map.agrees_writeLE m2 _ hpo
       have hG : ∀ T : State, T.regs 28 = s.regs 28 → gOf T = gOf s := fun T h => by simp only [gOf, h]
-      simp only [retState] at hdf2 hsv2' hrp2 hrm2
+      simp only [retStateX] at hdf2 hsv2' hrp2 hrm2
       rw [hG _ (by simp [setReg, hS28'])] at hdf2 hsv2' hrm2 hpanI
       have hagX : Map.Agrees e.mem
           (((e.mem.writeLE (BitVec.toNat e.sp - 32) 8 (BitVec.toNat (e.regs 30))).writeLE (BitVec.toNat e.sp - 40) 8
@@ -359,10 +364,10 @@ theorem hrec : GorecoverContract (Extracted.program.link implW) rcA PW :=
 
 def wmW : Memory := witMem (tabWords T0)
 
-def wg : Nat := 0x50000
-def wsp : Nat := 0x48000
-def pA : Nat := 0x41000
-def ret : Nat := 0x200000
+abbrev pA : Nat := witArg
+abbrev wg : Nat := witG
+abbrev wsp : Nat := witSP
+abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wmW := by
   unfold Env0

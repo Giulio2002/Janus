@@ -24,6 +24,13 @@ open Janus.Contracts.MapAmd64 (keepABI_apply)
 open Janus.Contracts.Panic (frameItems openItems frameKeep bitsWin recItems recItems_above)
 open Janus.Spec (openBits)
 
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_GoexitDefer_69" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer" + 69))
+local macro "loc_GoexitDefer_func1_27" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer.func1" + 27))
+
+
+
 local macro "func1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer.func1"))
 local macro "recoverRet" : term =>
   `(janus_eval% (segAddr Extracted.program "example.com/basic.GoexitDefer.func1" + 0x1b))
@@ -93,7 +100,7 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hGdf : G.df = false := by rw [hG]
   have hGpc : G.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gorecover") := by rw [hG] <;> rfl
   have hGf : MemFrame cm G.mem [((cr 4).toNat - 24, (cr 4).toNat)] := by rw [hG]; janus_frame
-  have hGra : G.mem.readLE (G.regs 4).toNat 8 = 4747963 := by
+  have hGra : G.mem.readLE (G.regs 4).toNat 8 = loc_GoexitDefer_func1_27 := by
     rw [hG]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, hc24, Janus.Arm64.Memory.readLE_writeLE_self]
   have hgG : gOf G = (s.regs 14).toNat := by simp only [gOf, hG14]
   have hGfW : MemFrame s.mem G.mem
@@ -113,7 +120,7 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   · rw [hG5n, show (cr 4).toNat - 8 + 8 = (cr 4).toNat by omega]; exact hGacc
   · rw [hG5n]; omega
   intro G2 hpc2 hpost
-  obtain ⟨⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
+  obtain ⟨⟨r2, x2, y2, f2, m2, zhm2, krm2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
   have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
   obtain ⟨r, rs, hr, hgx⟩ := hpan
   have hpanG : P.panics G.mem (gOf G) = r :: rs := by
@@ -132,7 +139,7 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     exact h.trans (hl.panics_frame _ _ _ hagG)
   simp only [MapAmd64.calleeStack, setRegF_apply, reduceIte, Nat.reduceEqDiff, hGspn, keepABI_apply] at hfr2 h0 h3 henv2
   have h0' : r2 0 = 0 := by simpa [keepABI_apply] using h0
-  have hGra' : G.mem.readLE ((cr 4).toNat - 24) 8 = 4747963 := by rw [← hGspn]; exact hGra
+  have hGra' : G.mem.readLE ((cr 4).toNat - 24) 8 = loc_GoexitDefer_func1_27 := by rw [← hGspn]; exact hGra
   have hcap' : cm.readLE ((s.regs 4).toNat - 32 + 8) 8 = p.toNat := by
     rw [show (s.regs 4).toNat - 32 + 8 = (s.regs 4).toNat - 24 by omega]; exact hcap
   have hpv2 : m2.readLE p.toNat 8 = s.mem.readLE p.toNat 8 := by
@@ -207,7 +214,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hSdf : S.df = false := by rw [hS]
   have hSf : MemFrame s.mem S.mem [((s.regs 4).toNat - (P.depth + (P.depth + 64)), (s.regs 4).toNat + 16)] := by
     rw [hS]; janus_frame
-  have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4747845 := by
+  have hSra : S.mem.readLE (S.regs 4).toNat 8 = loc_GoexitDefer_69 := by
     rw [hS]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h48, Janus.Arm64.Memory.readLE_writeLE_self]
   have hbits : S.mem.readLE ((s.regs 4).toNat - 33) 1 = 1 := by
     rw [hS]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -397,7 +404,7 @@ terminates the goroutine from that state (`returns`). -/
 
 namespace Witness
 
-open Janus.Contracts.PanicSat (tabWords witMem)
+open Janus.Contracts.PanicSat (tabWords witMem witRet witArg)
 open Janus.Contracts.PanicSatAmd64
 open Janus.Contracts.PanicModel
 
@@ -438,10 +445,10 @@ theorem hge : GoexitContract (Extracted.program.link implW) geA PW U1 T0 :=
 theorem hrec : GorecoverContract (Extracted.program.link implW) rcA PW :=
   gorecover_at stubRc (gorecover_run engineAt T0)
 
-def pA : Nat := 0x41000
-def ret : Nat := 0x200000
+abbrev pA : Nat := witArg
+abbrev ret : Nat := witRet
 
-/-- Memory: the model's table and runtime range writable, a stack `[0x40000, 0x50000)` holding the
+/-- Memory: the model's table and runtime range writable, a stack (a region of the witness memory) holding the
 return address `ret` at `[wsp]` (and `*pA`), the goroutine readable. -/
 def wmW : Janus.Arm64.Memory := witMem (tabWords T0 ++ [(wsp, ret)])
 

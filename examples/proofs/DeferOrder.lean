@@ -385,10 +385,10 @@ theorem hpan : GopanicContract (Extracted.program.link implW) gA PW U0 T0 :=
 
 def wmW : Memory := witMem (tabWords T0)
 
-def wg : Nat := 0x50000
-def wsp : Nat := 0x48000
-def pA : Nat := 0x41000
-def ret : Nat := 0x200000
+abbrev pA : Nat := witArg
+abbrev wg : Nat := witG
+abbrev wsp : Nat := witSP
+abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wmW := by
   unfold Env0

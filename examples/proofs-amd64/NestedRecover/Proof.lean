@@ -26,6 +26,14 @@ open Janus.Contracts.MapAmd64 (keepABI_apply)
 open Janus.Contracts.Panic (frameItems openItems frameKeep bitsWin recItems recItems_above Frame frameRecs_above)
 open Janus.Spec (openBits)
 
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_NestedRecover_140" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedRecover" + 140))
+local macro "loc_NestedRecover_146" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedRecover" + 146))
+local macro "loc_NestedRecover_func1_27" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedRecover.func1" + 27))
+
+
+
 local macro "func1A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedRecover.func1"))
 local macro "func2A" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.NestedRecover.func2"))
 local macro "resumeA" : term => `(janus_eval% (Extracted.entry + 0x8d))
@@ -130,7 +138,7 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hGdf : G.df = false := by rw [hG]
   have hGpc : G.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gorecover") := by rw [hG] <;> rfl
   have hGf : MemFrame cm G.mem [((cr 4).toNat - 24, (cr 4).toNat)] := by rw [hG]; janus_frame
-  have hGra : G.mem.readLE (G.regs 4).toNat 8 = 4747739 := by
+  have hGra : G.mem.readLE (G.regs 4).toNat 8 = loc_NestedRecover_func1_27 := by
     rw [hG]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, hc24, Janus.Arm64.Memory.readLE_writeLE_self]
   have hgG : gOf G = (s.regs 14).toNat := by simp only [gOf, hG14]
   have hGfW : MemFrame s.mem G.mem
@@ -150,8 +158,8 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   · rw [hG5n, show (cr 4).toNat - 8 + 8 = (cr 4).toNat by omega]; exact hGacc
   · rw [hG5n]; omega
   intro G2 hpc2 hpost
-  obtain ⟨⟨r2, x2, y2, f2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
-  have hsegf : segAddr Extracted.program "example.com/basic.NestedRecover.func1" + 0x1b = 4747739 := by decide
+  obtain ⟨⟨r2, x2, y2, f2, m2, zhm2, krm2, hs2, hfr2, henv2⟩, hdf2, hsv2, hrp2, hrm2, hnil2, hpanI⟩ := hpost
+  have hsegf : segAddr Extracted.program "example.com/basic.NestedRecover.func1" + 0x1b = loc_NestedRecover_func1_27 := by decide
   have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
   have hpanG : P.panics G.mem (gOf G) = [{ arg := ⟨etyp, edata⟩, start := st }, B] := by
     rw [hgG, hl.panics_frame _ _ _ hagG]; exact hpan
@@ -172,7 +180,7 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     have h := hrec2; rw [hgG] at h; exact h
   simp only [MapAmd64.calleeStack, setRegF_apply, reduceIte, Nat.reduceEqDiff, hGspn, keepABI_apply] at hfr2 hr0 hr1 henv2
   have hj0 : r2 0 ≠ 0 := fun h => hne (by rw [← hr0, h]; rfl)
-  have hGra' : G.mem.readLE ((cr 4).toNat - 24) 8 = 4747739 := by rw [← hGspn]; exact hGra
+  have hGra' : G.mem.readLE ((cr 4).toNat - 24) 8 = loc_NestedRecover_func1_27 := by rw [← hGspn]; exact hGra
   clear hpanI hnil2 hpanG hrpG hGacc hGra hGfW hGx hGdf hGpc hG14 hG5 hG5n hGsp hGspn hgG hdf2 hsv2 hrp2 hrm2 hpc2 hrec2
   subst hG
   have hcap' : cm.readLE ((s.regs 4).toNat - 40 + 8) 8 = (s.regs 4).toNat - 72 := by
@@ -243,7 +251,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hSdf : S.df = false := by rw [hS]
   have hSf : MemFrame s.mem S.mem [((s.regs 4).toNat - (P.depth + (P.depth + 128)), (s.regs 4).toNat + 40)] := by
     rw [hS]; janus_frame
-  have hSra : S.mem.readLE (S.regs 4).toNat 8 = 4747564 := by
+  have hSra : S.mem.readLE (S.regs 4).toNat 8 = loc_NestedRecover_140 := by
     rw [hS]; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff, h104, Janus.Arm64.Memory.readLE_writeLE_self]
   have hbits : S.mem.readLE ((s.regs 4).toNat - 73) 1 = 3 := by
     rw [hS]; simp (disch := omega) only [Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -649,7 +657,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   refine GoReturns.name fun D hD => ?_
   have h104' : (s.regs 4 - 104#64).toNat = (s.regs 4).toNat - 104 := by
     rw [BitVec.toNat_sub]; simp; omega
-  have hDm : D.mem = Janus.Arm64.Memory.writeLE dm ((s.regs 4).toNat - 104) 8 4747570 := by rw [hD]
+  have hDm : D.mem = Janus.Arm64.Memory.writeLE dm ((s.regs 4).toNat - 104) 8 loc_NestedRecover_146 := by rw [hD]
   have hDsp : D.regs 4 = s.regs 4 - 104#64 := by rw [hD] <;> simp [setRegF]
   have hDspn : (D.regs 4).toNat = (s.regs 4).toNat - 104 := by rw [hDsp]; exact h104'
   have hD14 : D.regs 14 = s.regs 14 := by rw [hD] <;> simp [setRegF]
@@ -658,7 +666,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hDdf : D.df = false := by rw [hD]
   have hDpc : D.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") := by rw [hD] <;> rfl
   have hgD : gOf D = gOf s := by simp only [gOf, hD14]
-  have hDra : D.mem.readLE (D.regs 4).toNat 8 = 4747570 := by
+  have hDra : D.mem.readLE (D.regs 4).toNat 8 = loc_NestedRecover_146 := by
     rw [hDm, hDspn, Janus.Arm64.Memory.readLE_writeLE_self]
   have hagD : Spec.Map.Agrees dm D.mem P.priv := by
     rw [hDm]
@@ -680,7 +688,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   have hWD' : MemFrame s.mem D.mem
       (P.priv ++ [((s.regs 4).toNat - (P.depth + (P.depth + 128)), (s.regs 4).toNat + 40)]) := by
     rw [hDm]
-    exact hWD.writeLE (a := (s.regs 4).toNat - 104) (k := 8) 4747570
+    exact hWD.writeLE (a := (s.regs 4).toNat - 104) (k := 8) loc_NestedRecover_146
       (r := ((s.regs 4).toNat - (P.depth + (P.depth + 128)), (s.regs 4).toNat + 40))
       (List.mem_append_right _ (List.mem_singleton.2 rfl)) (by omega) (by omega)
   have hsvD : P.saved D.mem (gOf D) = none := by
@@ -714,7 +722,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   obtain ⟨er, erip, efl, exm, em, eyh, efs, edf, emx⟩ := d2
   dsimp only at hfpc hfsp' hf14 hf5 hfx hfdf hfmf hfenv
   rw [hDra] at hfpc
-  have hepc : erip = BitVec.ofNat 64 4747570 := by
+  have hepc : erip = BitVec.ofNat 64 loc_NestedRecover_146 := by
     apply BitVec.eq_of_toNat_eq; rw [hfpc, BitVec.toNat_ofNat]
   subst hepc hfdf
   have he4v : er 4 = s.regs 4 - 96#64 := by
@@ -770,7 +778,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
 
 namespace Witness
 
-open Janus.Contracts.PanicSat (tabWords witMem)
+open Janus.Contracts.PanicSat (tabWords witMem witRet witArg)
 open Janus.Contracts.PanicSatAmd64
 open Janus.Contracts.PanicModel
 
@@ -821,9 +829,9 @@ theorem hrec : GorecoverContract (Extracted.program.link implW) rA PW :=
 theorem hdr : DeferreturnContract (Extracted.program.link implW) dA PW U1 :=
   deferreturn_at stubD (deferreturn_run (T := T0) engineAt)
 
-def ret : Nat := 0x200000
+abbrev ret : Nat := witRet
 
-/-- Memory: the model's table and runtime range writable, a stack `[0x40000, 0x50000)` holding the
+/-- Memory: the model's table and runtime range writable, a stack (a region of the witness memory) holding the
 return address `ret` at `[wsp]`, the goroutine readable. -/
 def wmW : Janus.Arm64.Memory := witMem (tabWords T0 ++ [(wsp, ret)])
 

@@ -25,6 +25,13 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 
 namespace Proof
 
+
+/-! Code addresses are read off the extraction (`janus_eval%`), never copied: a relinked
+binary needs no edit. -/
+local macro "loc_RecoverSet_128" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet" + 128))
+local macro "loc_RecoverSet_136" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet" + 136))
+local macro "loc_RecoverSet_func1_36" : term => `(janus_eval% (segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36))
+
 /-! Code addresses are evaluated from the extraction (`janus_eval%`), so a relinked binary needs
 no edit: the deferred closure's entry, its return point after `BL runtime.gorecover`, and the
 `deferreturn` call the runtime resumes at. -/
@@ -60,13 +67,13 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     janus_run until [Extracted.program.contractAddr "runtime.gorecover"]
     refine Reaches.call (Summary.withExit hrec hret) rfl ⟨?_, ?_, ?_⟩ ?_
     rotate_left 3
-    · rintro s1 hpc1 ⟨⟨j1, f1, v1, m1, hs1, hfr1, henv1⟩, -, -, -, -, hnil1, -⟩
+    · rintro s1 hpc1 ⟨⟨j1, f1, v1, m1, ex1, ep1, hs1, hfr1, henv1⟩, -, -, -, -, hnil1, -⟩
       obtain ⟨h0, h1, -⟩ := hnil1 (Or.inl (hl.calm_frame _ _ _ hcalm
         (Map.Agrees.of_window (lo := s.sp.toNat - (P.depth + (P.depth + 112))) (hi := s.sp.toNat + 32)
           (by janus_frame) (Outside.of_sub hout (by omega) (by omega)))))
       subst hs1
       simp only [calleeStack] at hfr1
-      simp only [retState, callRegs_apply, List.getD_nil] at h0 h1
+      simp only [retStateX, callRegs_apply, List.getD_nil] at h0 h1
       janus_run
       all_goals first | (simp [hx]; done) | (exfalso; simp_all)
     · refine PanicPre.of_within hc ?_ ?_ ?_ ?_ ?_ rfl ?_ ?_
@@ -91,7 +98,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     refine ReachesRet.done rfl ?_
     refine GoReturns.name fun S hS => ?_
     have hSpc : S.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.gopanic") := by rw [hS]; rfl
-    have hS30 : S.regs 30 = 599296#64 := by rw [hS] <;> rfl
+    have hS30 : S.regs 30 = (BitVec.ofNat 64 loc_RecoverSet_128) := by rw [hS] <;> rfl
     have hS0 : S.regs 0 = etyp := by rw [hS] <;> simp [setReg]
     have hS1 : S.regs 1 = edata := by rw [hS] <;> simp [setReg]
     have hS28 : S.regs 28 = s.regs 28 := by rw [hS] <;> simp [setReg]
@@ -262,9 +269,9 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
       case hgb => simp [setReg]; omega
       case cont =>
         intro G' hpcG hpost
-        obtain ⟨⟨j2, f2, v2, m2, hs2, hfr2, henv2⟩, hdf2, hsv2', hrp2, hrm2, hnil2, hpanI⟩ := hpost
+        obtain ⟨⟨j2, f2, v2, m2, ex2, ep2, hs2, hfr2, henv2⟩, hdf2, hsv2', hrp2, hrm2, hnil2, hpanI⟩ := hpost
         have h64 : (256 : Nat) ^ 8 = 2 ^ 64 := by decide
-        have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36 = 599396 := by decide
+        have hsegf : segAddr Extracted.program "example.com/basic.RecoverSet.func1" + 36 = loc_RecoverSet_func1_36 := by decide
         have agG : ∀ m, MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 112)), s.sp.toNat + 32)] →
             Map.Agrees e.mem m P.priv := fun m hf =>
           Map.Agrees.of_window hf (Outside.of_sub hout (by omega) (by omega))
@@ -272,7 +279,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
           have := hrs1.1
           simpa [hS28, gOf] using this
         have hpanI' := hpanI { arg := ⟨etyp.toNat, edata.toNat⟩, start := s.sp.toNat - 80 } []
-        have hw' : ¬ P.wrapper 599396 := by rw [← hsegf]; exact hw
+        have hw' : ¬ P.wrapper loc_RecoverSet_func1_36 := by rw [← hsegf]; exact hw
         have key : ∀ m g, g = (s.regs 28).toNat →
             MemFrame e.mem m [(s.sp.toNat - (P.depth + (P.depth + 112)), s.sp.toNat + 32)] →
             P.panics m g = [{ arg := ⟨etyp.toNat, edata.toNat⟩, start := s.sp.toNat - 80 }] := by
@@ -304,7 +311,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
             exact (hrp'' _ _ (by dsimp only [gOf]; simp [setReg, hS28']) (by janus_frame)).symm)
         subst hs2
         have h32 : (e.sp - 32#64).toNat = e.sp.toNat - 32 := by rw [BitVec.toNat_sub]; simp; omega
-        simp only [calleeStack, h32, retState, callRegs_apply, List.getD_nil, setReg_apply, reduceIte,
+        simp only [calleeStack, h32, retStateX, callRegs_apply, List.getD_nil, setReg_apply, reduceIte,
           Nat.reduceEqDiff] at hfr2 hr0 hr1 hrec2 henv2
         have hj0 : j2 0 ≠ 0 := fun h => hne (by rw [← hr0, h]; rfl)
         have hcap' : S.mem.readLE (BitVec.toNat s.sp - 32 + 8) 8 = s.sp.toNat - 40 := by
@@ -317,7 +324,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
           Map.Agrees.of_window (lo := s.sp.toNat - 40) (hi := s.sp.toNat - 32) (by janus_frame)
             (Outside.of_sub hout (by omega) (by omega))
         have hG : ∀ T : State, T.regs 28 = s.regs 28 → gOf T = gOf s := fun T h => by simp only [gOf, h]
-        simp only [retState] at hdf2 hsv2' hrp2 hrm2
+        simp only [retStateX] at hdf2 hsv2' hrp2 hrm2
         rw [hG _ (by simp [setReg, hS28'])] at hdf2 hsv2' hrm2 hrec2
         have hagX : Map.Agrees e.mem
             (((e.mem.writeLE (BitVec.toNat e.sp - 32) 8 (BitVec.toNat (e.regs 30))).writeLE (BitVec.toNat e.sp - 40) 8
@@ -392,7 +399,7 @@ theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
     have hDspn : D.sp.toNat = s.sp.toNat - 80 := by
       rw [hDsp, BitVec.toNat_ofNat]; apply Nat.mod_eq_of_lt; have := s.sp.isLt; omega
     have hD28 : D.regs 28 = s.regs 28 := by rw [hD]; simp [setReg]
-    have hD30 : D.regs 30 = 599304#64 := by rw [hD]; simp [setReg]
+    have hD30 : D.regs 30 = (BitVec.ofNat 64 loc_RecoverSet_136) := by rw [hD]; simp [setReg]
     have hDpc : D.pc = BitVec.ofNat 64 (Extracted.program.contractAddr "runtime.deferreturn") := by rw [hD]; rfl
     have hgD : gOf D = gOf s := by simp only [gOf, hD28]
     dsimp only at hdpan hddef hdsv hdroom
@@ -541,9 +548,9 @@ theorem hdr : DeferreturnContract (Extracted.program.link implW) dA PW U0 :=
 
 def wmW : Memory := witMem (tabWords T0)
 
-def wg : Nat := 0x50000
-def wsp : Nat := 0x48000
-def ret : Nat := 0x200000
+abbrev wg : Nat := witG
+abbrev wsp : Nat := witSP
+abbrev ret : Nat := witRet
 
 theorem env_w : Env0 T0 wmW := by
   unfold Env0
