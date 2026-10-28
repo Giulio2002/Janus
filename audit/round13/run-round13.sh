@@ -42,6 +42,7 @@ row() {
 }
 v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
+if [ "${JANUS_ROUND13_ONLY:-}" != F ]; then
 echo "== B1: a non-Prop binder (any sort) mentioning a runtime variable is rejected BY THIS RULE"
 for f in P1a_plift_pin_H P1b_subtype_pin_H P1c_ulift_pin_rt P1d_sigma_pin_H P6b_local_def_in_type_universe; do
   v $A/$f.lean "$W/NewPair"; row "$f" blocked 'round 13' 'non-Prop binder'
@@ -50,6 +51,7 @@ echo "== C: controls"
 v examples/proofs/NewPair.lean "$W/NewPair"; row C0_ctl_NewPair Verified 'NewobjectContract'
 v $A/C1_ctl_harmless_type_binder.lean "$W/NewPair"; row C1_ctl_type_binders_without_runtime_vars Verified 'NewobjectContract'
 
+fi
 # F: the extraction's own constants (`Extracted.funcs`, the panic contracts' function table) are an
 # allowed contract argument ONLY as exactly that constant, and `janus check` re-derives it from the
 # binary. Needs the panic extraction (cmd/janus/funcdata.go, wave 2); skipped before that exists.
@@ -57,9 +59,12 @@ if [ -f cmd/janus/funcdata.go ]; then
   echo "== F1: Extracted.funcs is allowed only as exactly the generated constant"
   mapfile -t tg < <(scripts/example-targets.sh DeferOrder)
   "$J" extract artifacts/examples-arm64 "$(example_symbol DeferOrder)" "$W/DeferOrder" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
-  for f in F1a_funcs_empty F1b_funcs_proof_defined F1c_funcs_tail F1d_funcs_take F1e_funcs_let_alias F1f_funcs_append_nil F1g_funcs_abbrev_alias; do
+  for f in F1a_funcs_empty F1b_funcs_proof_defined F1c_funcs_tail F1d_funcs_take F1e_funcs_let_alias F1f_funcs_append_nil; do
     v $A/$f.lean "$W/DeferOrder"; row "$f" blocked 'runtime'
   done
+  # a reducible alias unfolds to exactly the generated constant (like the round-11 A1d control): the rule
+  # accepts it, and only the placeholder proof's `sorry` is then refused
+  v $A/F1g_funcs_abbrev_alias.lean "$W/DeferOrder"; row F1g_ctl_abbrev_alias_is_the_constant blocked 'sorryAx'
   v $R/controls/C2_ctl_DeferOrder_funcs.lean "$W/DeferOrder"; row C2_ctl_DeferOrder_honest_panic Verified 'GopanicContract'
   # a tampered Extracted.lean with a fake funcs table: janus check (and verify) must reject it
   cp -r "$W/DeferOrder" "$W/DeferOrder-tampered"
