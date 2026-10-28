@@ -102,6 +102,23 @@ load is printed with the verdict but never excuses a regression. Without the fil
 derives a provisional file from a times file (not enforced). Update procedure: after an intended speed change,
 re-record on a green full gate and say why in the commit message.
 
+**Old gate vs new gate (nothing dropped).**
+
+| old check (pgate.sh / pg3.sh / RULES.md) | new gate |
+|---|---|
+| `lake build` | prebuild `lake` (`lake build`, then `lake build Janus Janus.Tools.Audit janus-audit`) |
+| `go test -timeout 7000s -parallel 2 ./cmd/...` | lane `gotest`: same tests, `-count=1 -timeout 7000s`, sharded; partition checked before and after |
+| `scripts/ci-axiom-guard.sh` | lane `axiom` |
+| `scripts/verify-all-examples.sh` (arm64, amd64, asm, rtmisc, sys, print) | lane `verify` (same items, same theorems, same Witness theorems) |
+| `scripts/verify-cgo-examples.sh` (64 rows, correctness and Witness) | lane `verify`, `--cgo` items |
+| `scripts/verify-sys-examples.sh` (10 rows) | lane `verify`, sys items (the full default list, 2 more rows than the old verify-all had) |
+| `scripts/verify-print-examples.sh` | lane `verify`, print items |
+| `audit/run-rounds.sh` | lane `rounds` |
+| `audit/rt-asl/run.sh` (asl prove, A1-A3, A6, A7, A8, A5/C2, fsqrt, C1) | lanes `asl-build` + `rtasl-*` (one per group; same rows, same expectations) |
+| `scripts/x86formal.sh prove` | lane `x86` |
+| item timeouts (`JANUS_ITEM_TIMEOUT`), audit, kernel replay, pins, sandbox, Witness theorems | unchanged: the same scripts and `janus verify` run them |
+| (new) speed regression check, timeline, streamed results | on top of the above |
+
 **Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
 `python3 -I scripts/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.
