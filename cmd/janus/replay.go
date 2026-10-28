@@ -325,7 +325,7 @@ func planReplayPinned(resolved map[string]string, graph map[string][]string, too
 		}
 		visiting[m] = true
 		h := sha256.New()
-		fmt.Fprintf(h, "janus-replay-v1\n%s\n%s\n", toolchainVersion, m)
+		fmt.Fprintf(h, "janus-replay-v2\n%q\n%q\n", toolchainVersion, m)
 		for _, ext := range []string{"", ".server", ".private"} {
 			f := olean + ext
 			if sum, ok := known[f]; ok {
@@ -342,14 +342,14 @@ func planReplayPinned(resolved map[string]string, graph map[string][]string, too
 		}
 		for _, i := range imps {
 			if isCoreModule(i) {
-				fmt.Fprintf(h, "core %s\n", i)
+				fmt.Fprintf(h, "core %q\n", i)
 				continue
 			}
 			k, err := key(i)
 			if err != nil {
 				return "", err
 			}
-			fmt.Fprintf(h, "import %s %s\n", i, k)
+			fmt.Fprintf(h, "import %q %q\n", i, k)
 		}
 		k := hex.EncodeToString(h.Sum(nil))
 		p.keys[m] = k
@@ -525,7 +525,7 @@ func (p *replayPlan) lockTarget(mods []string) func() {
 	}
 	h := sha256.New()
 	for _, m := range mods {
-		fmt.Fprintf(h, "%s %s\n", m, p.keys[m])
+		fmt.Fprintf(h, "%q %q\n", m, p.keys[m])
 	}
 	return lockReplayKey(hex.EncodeToString(h.Sum(nil)))
 }

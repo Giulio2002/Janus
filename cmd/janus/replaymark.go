@@ -35,11 +35,11 @@ import (
 // markerMAC authenticates a replay marker of kind for key under hk.
 func markerMAC(hk []byte, kind, key string) string {
 	m := hmac.New(sha256.New, hk)
-	fmt.Fprintf(m, "janus-replay-marker-v2\n%s\n%s\n", kind, key)
+	fmt.Fprintf(m, "janus-replay-marker-v3\n%q\n%q\n", kind, key)
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-const markerHeader = "janus-replay-marker-v2 "
+const markerHeader = "janus-replay-marker-v3 "
 
 // markerOK reports whether the marker file at path is an authentic marker of kind for key: a
 // regular file of this user (not a link), whose first line carries the MAC janus wrote. A missing,
@@ -87,7 +87,7 @@ func moduleMarkerPath(k string) string { return filepath.Join(replayCacheDir(), 
 // another key.
 func frameworkVerdictKey(tcID string, fw *pinnedLib) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-framework-replay-v1\n%s\n%s\n", tcID, pinsDigest(fw.want))
+	fmt.Fprintf(h, "janus-framework-replay-v2\n%q\n%q\n", tcID, pinsDigest(fw.want))
 	return hex.EncodeToString(h.Sum(nil))
 }
 

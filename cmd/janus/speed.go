@@ -38,7 +38,7 @@ func pinsDigest(p pins) string {
 	sort.Strings(keys)
 	h := sha256.New()
 	for _, k := range keys {
-		fmt.Fprintf(h, "%s %s\n", k, p[k])
+		fmt.Fprintf(h, "%q %q\n", k, p[k])
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -50,8 +50,8 @@ func trustedCacheDir() string { return filepath.Join(cacheRoot(), "v1", "trusted
 // binary), the framework build's module data (its pins) and the bytes of both sources.
 func trustedCacheKey(tc *toolchain, fw *pinnedLib, extracted, janusTrusted []byte) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-trusted-compile-v1\n%s\n%s\n", tc.cacheID(), tc.lean)
-	fmt.Fprintf(h, "framework %s\n", pinsDigest(fw.want))
+	fmt.Fprintf(h, "janus-trusted-compile-v1\n%q\n%q\n", tc.cacheID(), tc.lean)
+	fmt.Fprintf(h, "framework %q\n", pinsDigest(fw.want))
 	fmt.Fprintf(h, "Extracted.lean %s\nJanusTrusted.lean %s\n", sha256Hex(extracted), sha256Hex(janusTrusted))
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -67,7 +67,7 @@ type trustedManifest struct {
 // trustedMAC authenticates a trusted-compile manifest (key and file pins) under hk.
 func trustedMAC(hk []byte, key string, files pins) string {
 	m := hmac.New(sha256.New, hk)
-	fmt.Fprintf(m, "janus-trusted-compile-entry-v1\n%s\n%s\n", key, pinsDigest(files))
+	fmt.Fprintf(m, "janus-trusted-compile-entry-v1\n%q\n%q\n", key, pinsDigest(files))
 	return hex.EncodeToString(m.Sum(nil))
 }
 
@@ -227,9 +227,9 @@ type earlyReplay struct {
 // trusted build or the toolchain.
 func earlyReplayMarker(tcVersion, mod string, libs ...*pinnedLib) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-early-replay-v2\n%s\n%s\n", tcVersion, mod)
+	fmt.Fprintf(h, "janus-early-replay-v3\n%q\n%q\n", tcVersion, mod)
 	for _, l := range libs {
-		fmt.Fprintf(h, "%s %s\n", l.who, pinsDigest(l.want))
+		fmt.Fprintf(h, "%q %q\n", l.who, pinsDigest(l.want))
 	}
 	k := hex.EncodeToString(h.Sum(nil))
 	return filepath.Join(replayCacheDir(), "early", k[:2], k)

@@ -519,3 +519,20 @@ func TestJ1AuditServeMoreThanTheBound(t *testing.T) {
 		t.Fatal("requests did not complete (deadlock)")
 	}
 }
+
+// Digests frame their fields: pin sets that differ only by a space or newline inside a path give
+// different digests.
+func TestJ1DigestFraming(t *testing.T) {
+	a := pins{"A B": "c"}
+	b := pins{"A": "B c"}
+	c := pins{"A\nB": "c"}
+	if pinsDigest(a) == pinsDigest(b) || pinsDigest(a) == pinsDigest(c) || pinsDigest(b) == pinsDigest(c) {
+		t.Fatal("ambiguous pin digest")
+	}
+	if earlyReplayMarker("tc", "m", &pinnedLib{who: "x y", want: a}) == earlyReplayMarker("tc", "m", &pinnedLib{who: "x", want: pins{"y " + "A B": "c"}}) {
+		t.Fatal("ambiguous early marker")
+	}
+	if markerMAC([]byte("k"), "a b", "c") == markerMAC([]byte("k"), "a", "b c") {
+		t.Fatal("ambiguous marker MAC")
+	}
+}
