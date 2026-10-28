@@ -230,7 +230,7 @@ for it in "${items[@]}"; do
   # the first print row of an ISA builds the lemma modules every row of that ISA imports (in the shared
   # snapshot's consumer workspace); the other rows start when it is done and reuse them, instead of
   # building the same modules at the same time
-  case "$it" in print:*/PrintBool|print:*/PrintNeg|print:*/PrintStr) needs="${it%/*}/PrintX" ;; esac
+  case "$it" in print:*/PrintBool|print:*/PrintNeg|print:*/PrintStr) needs="${it%/*}/PrintX"; printf '%s\n' "${items[@]}" | grep -qx "$needs" || needs="" ;; esac
   pool_add "$it" "run_item \"$it\"" "$it" "$needs"
 done
 pool_rc=0
