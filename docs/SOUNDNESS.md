@@ -374,6 +374,104 @@ not accept with an empty cache:
   when control reaches it. A missed callee can make a theorem unprovable. It cannot make a
   false theorem provable.
 
+## Build caches (the ASL model, the JanusASL modules, the Sail oracle driver)
+
+`scripts/asl.sh`, `scripts/oracle-sail.sh` and `audit/rt-asl/run.sh` reuse build outputs through a
+content-addressed cache (`ASL_CACHE`, on by default: `/srv/janus-asl-cache` if it exists, else
+`~/.cache/janus/asl`; `ASL_CACHE=off` disables it, `SAIL_CACHE` overrides it for the driver). This
+section says what is cached and why a stale, forged or tampered entry cannot produce a pass.
+
+**What is cached: build outputs only, never a verdict.** Three kinds of entry:
+
+* `armasl`: the compiled Arm ASL model (`ArmASL.olean`/`.ilean`/`.trace`/C/objects) and the
+  `lean-sail` package, as `lake build ArmASL` leaves them;
+* `mod`: the build outputs of one Lean module of the JanusASL package or of the Janus framework
+  (`.olean`, `.ilean`, `.trace`, `.hash`, C and objects);
+* `sail`: the one binary `oracle-sail/target/release/janus-oracle-sail` (the Sail C model driver).
+
+No check result, no theorem, no audit output and no replay marker is cached by this layer. Every
+check still runs on every invocation: `scripts/asl.sh prove` still has Lake check every JanusASL
+module against the restored `.olean`s and runs `JanusASL/Audit.lean` (the axiom audit);
+`scripts/asl.sh replay` still runs `leanchecker` over every module (the kernel re-checks every
+declaration); `audit/rt-asl/run.sh` still runs every group (A1-A8, the probes, FSQRT, the
+concurrency tests), the FSQRT and probe rows now using a cached build of the *program under test*,
+not a cached outcome. A restored `.olean` is the same bytes that a build of the same inputs
+produces (the key below), and the kernel replay re-checks them anyway.
+
+**The key is a hash of every input.** An entry lives at a path named by the SHA-256 of
+(`JanusASL/tools/asl_cache_key.py`, `asl_mod_cache.py`, `oracle-sail/cache_key.py`):
+
+* the sources: the vendored model tarball's digest, each module's source file by content, the
+  Sail driver's `Cargo.toml`/`Cargo.lock`/`src/**`, the pinned crate revision and model digest,
+  the model instrumenter, the splitter (the generator/translator code; `scripts/asl.sh gen` is
+  checked against the vendored tarball separately);
+* the transitive imports, by content: a module's key contains its imports' keys, so an edit to any
+  imported Lean module changes the key of every dependent (and nothing else);
+* the toolchain by content: `lean --version`, the SHA-256 of the `lean`, `lake`, `leanc`,
+  `leanchecker`, `clang`, `leantar` binaries, of `libleanshared.so` and of every core `.olean`
+  (Init, Std, Lean, Lake); for the driver `rustc -vV`, `cargo -V`, the C++ compiler's version and
+  the system `libgmp`'s digest;
+* the build configuration: the parsed lakefiles (every setting that reaches a Lean or C command
+  line, an unknown setting included), the lake manifest's `lean-sail` entry, the cargo flags and
+  any cargo config;
+* the environment variables that reach those tools (`LEAN_*`, `LAKE_*`, `CC`, `CXX`, `CFLAGS`,
+  `CXXFLAGS`, `CPPFLAGS`, `LDFLAGS`, `RUSTFLAGS`, `CARGO_*`, ...), the machine architecture and
+  the version of the scheme.
+
+An input that is not in the key does not reach the outputs (the reasoning is in the three tools'
+docstrings and docs/ASL.md "Build cache"); the default for an unknown setting is to key it. Lake
+also remains the judge for `mod` and `armasl` entries: a restored module whose trace differs from
+the one Lake computes here is rebuilt.
+
+**Every entry is signed, and every use verifies it.** An entry holds `MANIFEST.sha256` (the SHA-256
+of every produced file) and `MANIFEST.hmac`, an HMAC-SHA256 of the manifest, the entry kind and
+the entry id, under a per-user key (`~/.cache/janus/asl-cache.key`, 32 random bytes, mode 0600 in a
+0700 directory, owned by the user, not a symlink, created atomically; `JANUS_CACHE_KEY_DIR`
+relocates it; cf. `resultHMACKey`, the key of the verification-result cache). On a use
+(`scripts/lib/bcache.py fetch`, `asl_mod_cache.py restore`):
+
+1. the manifest's HMAC is verified (constant time): a missing, empty, wrong or foreign-key HMAC, or
+   a manifest moved to another id or kind, rejects the entry;
+2. each file in the manifest must be a regular file inside the entry (no symlink, no `..`), is
+   copied to the consumer's tree, and the SHA-256 *of the copy* is compared with the manifest, so
+   a file altered before or during the copy is caught, and no later change to the cache can
+   influence the consumer's copy;
+3. any failure (missing file, wrong hash, unsafe path, unusable key, unreadable entry) deletes
+   everything it copied and reports "rejected": the build runs from source (Lake builds the
+   module; cargo builds the driver) and the next publish replaces the bad entry. A rejected or
+   missing entry therefore costs time, never changes a verdict. There is no "trust anyway" path:
+   an entry without a valid HMAC is not used even if all its hashes match, and an unusable key
+   disables the cache for that run (with a message) rather than skipping the check.
+
+The consumer's copy is writable and separate from the cache, whose files are mode 0444, so a
+consumer (Lake, a test) can never mutate the cache; the working tree may be edited freely and is
+re-verified or re-copied on the next use.
+
+**Writes are atomic and serialised.** An entry is built in a temporary directory beside it,
+signed, and renamed into place under the entry's exclusive `flock`; readers hold it shared, and
+the collector removes an entry only under it taken exclusively, so a reader sees a whole entry or
+none and two gates racing on one key end with one valid entry (`scripts/lib/test-bcache.sh`:
+eight concurrent store/fetch loops, six concurrent replacers of an invalid entry). An existing
+entry is kept only if its manifest verifies; otherwise it is quarantined and replaced.
+
+**What the HMAC does and does not give.** It stops anything that can write the cache directory but
+cannot read the user's key (another user, a sandboxed build step, bit rot, a half-copied tree, an
+old unsigned cache from before this layer) from supplying build outputs: such an entry is rejected
+and rebuilt. It does not protect against a process running as the same user, which can read the key
+(the same boundary as the result cache); against that, and against a compromised toolchain, the
+defence is unchanged: `leanchecker` replays every JanusASL module, `janus verify` kernel-checks
+and replays every user proof, and the axiom guard audits every theorem. The cache stays an
+optimisation of build outputs that those checks consume, never a source of verdicts.
+
+**Tests** (`scripts/lib/test-bcache.sh`, seconds, no build tools): a tampered binary, a tampered
+`.olean`, a deleted file, a file swapped for a symlink, a tampered manifest (also with the file hash
+recomputed), a manifest with a path outside the entry, a wrong, empty or missing HMAC, an entry
+signed under another key, an entry moved to another id or kind: each is rejected, copies nothing,
+and is replaced by the next build; a changed source, lockfile, flag, environment variable, toolchain
+or lakefile option changes the key; the per-module cache rejects a tampered `.olean`, an unsigned
+entry and a tampered manifest and leaves no output for Lake to trust; concurrent builds end
+consistent.
+
 ## The ASL corollary (`janus verify --asl`)
 
 `--asl` adds a second, separate guarantee: the verified `Ensures` theorem, transferred to Arm's
