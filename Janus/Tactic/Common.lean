@@ -1015,6 +1015,71 @@ where
   mkFunOfEq (rhs : Expr) : MetaM Expr := do
     return .lam `x (mkConst ``Bool) (mkApp3 (mkConst ``Eq [1]) (mkConst ``Bool) (.bvar 0) rhs) .default
 
+/-! ## Sparse omega
+
+`omega` case-splits on every disjunctive hypothesis of the context (the aliasing preconditions
+`Apart`/`Outside` unfold to such disjunctions), and after several calls there are dozens: a goal
+that needs none or two of them still pays for all. `omegaSparse` is `omega` with the disjunctions
+cleared (fast, and fails fast), then with exactly one relevant disjunction split, then with two.
+Dropping hypotheses cannot make a wrong goal provable; it can only make `omega` fail, and the
+callers then fall back to the full context. -/
+
+def omegaSparse (g : MVarId) : TacticM Bool := g.withContext do
+  let gty ← instantiateMVars (← g.getType)
+  let goalAtoms := arithAtoms gty
+  let mut ors : Array (FVarId × Array Expr) := #[]
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    if (← isProp ty) then
+      let ty' ← whnfR ty
+      if ty'.consumeMData.isAppOfArity ``Or 2 then ors := ors.push (d.fvarId, arithAtoms ty')
+  let saved ← saveState
+  let tryOmega (keep : Array FVarId) : TacticM Bool := do
+    let toClear := (ors.map (·.1)).filter (!keep.contains ·)
+    let g' ← g.tryClearMany toClear
+    try
+      let gs ← Tactic.run g' <| withoutRecover do
+        g'.withContext do
+          let mut tac ← `(tactic| omega)
+          for sp in (if keep.size > 2 then #[] else keep).reverse do
+            let h := mkIdent (← sp.getUserName)
+            tac ← `(tactic| (rcases $h:ident with $h:ident | $h:ident <;> $tac))
+          evalTactic tac
+      if gs.isEmpty then return true
+      saved.restore; return false
+    catch _ => saved.restore; return false
+  if ← tryOmega #[] then return true
+  let rel := ors.filter fun (_, as) => as.any goalAtoms.contains
+  for (h, _) in rel do
+    if ← tryOmega #[h] then return true
+  for i in [0:rel.size] do
+    for j in [i+1:rel.size] do
+      if ← tryOmega #[rel[i]!.1, rel[j]!.1] then return true
+  -- all disjunctions connected to the goal through shared atoms (transitively): the others are
+  -- cleared. `omega` splits on these itself.
+  let mut seen := goalAtoms
+  let mut changed := true
+  while changed do
+    changed := false
+    for d in ← getLCtx do
+      if d.isImplementationDetail then continue
+      let ty ← instantiateMVars d.type
+      unless ← isProp ty do continue
+      let as := arithAtoms (← whnfR ty)
+      if as.any seen.contains then
+        for a in as do
+          unless seen.contains a do seen := seen.push a; changed := true
+  let conn := ors.filter fun (_, as) => as.any seen.contains
+  if conn.size > rel.size && conn.size < ors.size then
+    if ← tryOmega (conn.map (·.1)) then return true
+  return false
+
+elab "janus_omega_sparse" : tactic => do
+  let g ← getMainGoal
+  unless ← omegaSparse g do throwError "janus_omega_sparse: no proof with at most two disjunctions"
+  replaceMainGoal []
+
 /-- Clear the propositional hypotheses that mention atoms the (arithmetic) goal does not: what an
 `omega`/`simp … at *` on a goal about a few addresses needs is small, and the contexts after
 several calls are large. -/
@@ -1442,7 +1507,7 @@ partial def proveFrame (g : MVarId) (fuel : Nat := 256) : TacticM Unit := g.with
            | (try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
                 Nat.reduceMod] at *
               repeat' apply And.intro
-              all_goals first | (with_reducible assumption) | omega)
+              all_goals first | (with_reducible assumption) | janus_omega_sparse | omega)
            | (janus_clear_irrel
               try simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat, Nat.reducePow,
                 Nat.reduceMod] at *
@@ -1851,6 +1916,16 @@ def accessibleOrder (lhs : Expr) : MetaM (Array LocalDecl) := do
     if fv.toList.any addrFVars.contains then first := first.push d else rest := rest.push d
   return first ++ rest
 
+/-- `janus_close`: the recommended closer for the side goals of a proof script. It tries, cheapest
+first: `with_reducible rfl`, `with_reducible assumption`, `omega` with the disjunctions of the
+context cleared and then with one or two of them split (`janus_omega_sparse`), and finally the
+full `omega`. Unlike a hand-written `first | rfl | assumption | omega`, no alternative unfolds
+definitions at default transparency (which takes tens of seconds on a large state term) and the
+full-context `omega` is the last resort. Every alternative is an ordinary tactic: the kernel
+checks what it builds. -/
+macro "janus_close" : tactic =>
+  `(tactic| first | (with_reducible rfl) | (with_reducible assumption) | janus_omega_sparse | omega)
+
 /-! ## Focused `omega`
 
 Side conditions (address disjointness, no-wrap facts) are usually consequences of the few
@@ -1902,7 +1977,10 @@ elab "janus_omega" : tactic => do
   | some false => throwError "janus_omega: the address fact contradicts its own offsets"
   | none => pure ()
   let t0 ← IO.monoNanosNow
-  if ← omegaFocused g then
+  if ← omegaSparse g then
+    trace[janus.omega] "sparse {((← IO.monoNanosNow) - t0) / 1000000} ms: {← g.getType}"
+    replaceMainGoal []
+  else if ← omegaFocused g then
     trace[janus.omega] "focused {((← IO.monoNanosNow) - t0) / 1000000} ms: {← g.getType}"
     replaceMainGoal []
   else
