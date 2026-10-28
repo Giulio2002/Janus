@@ -340,6 +340,22 @@ theorem Reaches.repStos {p : Program} {ret : Nat} {t : State} {Q : Outcome → P
   simp only [exec, ite_true, hdf, Bool.false_eq_true, ite_false, h1', stosIter_ok _ _ _ t a h7 hacc hnw]
   rw [hdf] at h; exact h
 
+/-- `Reaches.repStos` with the filled memory abstracted: the continuation gets a memory `F` and
+`F = fillLE …`, so a proof that only needs `F`'s read/accessibility facts (`readLE_fillLE_disjoint`,
+`accessible_fillLE` through the equation) never has the 600-step `fillLE` in its goal, and the
+kernel never has a reason to unfold it. -/
+theorem Reaches.repStos_abs {p : Program} {ret : Nat} {t : State} {Q : Outcome → Prop} {c len w : Nat}
+    (hret : GoABI.RetAddr p ret) (hpc : t.rip = BitVec.ofNat 64 c)
+    (hok : stepOKAt p c (.stos true w) len = true) (a k : Nat) (hdf : t.df = false)
+    (h7 : t.regs 7 = BitVec.ofNat 64 a) (h1 : t.regs 1 = BitVec.ofNat 64 k) (hk : k < 2 ^ 64)
+    (hacc : t.mem.accessible a (w / 8 * k) true = true) (hnw : a + w / 8 * k < 2 ^ 64)
+    (h : ∀ F : Memory, F = fillLE t.mem a (w / 8) (t.getReg w 0).toNat k →
+      Reaches (p.withExit ret)
+      ((({ t with mem := F }.setReg 7 (BitVec.ofNat 64 (a + w / 8 * k))).setReg 1 0).setRip
+        (BitVec.ofNat 64 ((t.rip.toNat + len) % 2 ^ 64))) Q) :
+    Reaches (p.withExit ret) t Q :=
+  Reaches.repStos hret hpc hok a k hdf h7 h1 hk hacc hnw (h _ rfl)
+
 theorem Reaches.repMovs {p : Program} {ret : Nat} {t : State} {Q : Outcome → Prop} {c len w : Nat}
     (hret : GoABI.RetAddr p ret) (hpc : t.rip = BitVec.ofNat 64 c)
     (hok : stepOKAt p c (.movs true w) len = true) (a b k : Nat) (hdf : t.df = false)

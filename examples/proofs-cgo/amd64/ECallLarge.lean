@@ -31,17 +31,23 @@ theorem go_spec (a : W64) : EnsuresC Extracted.program Contract.none goFn [a] (G
   janus64_run until [janus_eval% stosSite]
   have h7 : (u.regs 4 - 4824#64) = BitVec.ofNat 64 ((u.regs 4).toNat - 4824) := by
     apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; omega
-  refine Reaches.repStos hret (c := janus_eval% stosSite) (len := 3) (w := 64) rfl rfl
+  refine Reaches.repStos_abs hret (c := janus_eval% stosSite) (len := 3) (w := 64) rfl rfl
     ((u.regs 4).toNat - 4824) 600 (by simpa using hu.df) (by simp [setRegF, h7]) (by simp [setRegF]) (by omega)
-    (by exact Janus.Arm64.Memory.accessible_mono _ (by simpa using hw) (by omega) (by omega)) (by omega) ?_
-  have hacc : ∀ b n w, (fillLE ((((Janus.Arm64.Memory.writeLE u.mem ((u.regs 4).toNat - 8) 8 (u.regs 5).toNat).writeLE
+    (by exact Janus.Arm64.Memory.accessible_mono _ (by simpa using hw) (by omega) (by omega)) (by omega)
+    (fun F hFdef => ?_)
+  -- the filled memory is the abstract `F` (`Reaches.repStos_abs`): only its two facts below are
+  -- used, and the kernel never unfolds the 600-step `fillLE`
+  dsimp only at hFdef ⊢
+  have hacc : ∀ b n w, F.accessible b n w = u.mem.accessible b n w := by
+    intro b n w; rw [hFdef, accessible_fillLE]; simp only [Janus.Arm64.Memory.accessible_writeLE]
+  have hFr : ∀ b n, (b + n ≤ (u.regs 4).toNat - 4824 ∨ (u.regs 4).toNat - 4824 + 8 * 600 ≤ b) →
+      F.readLE b n = ((((Janus.Arm64.Memory.writeLE u.mem ((u.regs 4).toNat - 8) 8 (u.regs 5).toNat).writeLE
       ((u.regs 4).toNat + 8) 8 a.toNat).writeLE ((u.regs 4).toNat - 16) 8 (u.mem.readLE a.toNat 8 % 8)).writeLE
-      ((u.regs 4).toNat - 24) 8 ((u.mem.readLE a.toNat 8 + 1) % 8)) ((u.regs 4).toNat - 4824) 8 0 600).accessible
-      b n w = u.mem.accessible b n w := by
-    intro b n w; rw [accessible_fillLE]; simp only [Janus.Arm64.Memory.accessible_writeLE]
+      ((u.regs 4).toNat - 24) 8 ((u.mem.readLE a.toNat 8 + 1) % 8)).readLE b n := by
+    intro b n h; rw [hFdef]; exact readLE_fillLE_disjoint _ _ _ _ _ _ _ h
   have hF := (hacc _ _ _).trans hw
   have hFa := (hacc _ _ _).trans haw
-  janus64_run [readLE_fillLE_disjoint]
+  janus64_run [hFr]
   unfold GoPost
   rw [show 3 * u.mem.readLE a.toNat 8 = u.mem.readLE a.toNat 8 +
     (u.mem.readLE a.toNat 8 + u.mem.readLE a.toNat 8) by omega]
@@ -52,7 +58,7 @@ theorem go_spec (a : W64) : EnsuresC Extracted.program Contract.none goFn [a] (G
     intro m
     rw [← Janus.Arm64.Memory.writeLE_mod m _ 8 (_ + _ % _),
       ← Janus.Arm64.Memory.writeLE_mod m _ 8 (u.mem.readLE a.toNat 8 + _)]
-    congr 1; omega
+    with_reducible congr 1; omega
   rw [hv]
   apply MemFrame.writeLE_both
   refine ⟨fun b n hb => ?_, fun b n w => ?_⟩
@@ -62,7 +68,7 @@ theorem go_spec (a : W64) : EnsuresC Extracted.program Contract.none goFn [a] (G
     rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
       Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
       Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
-      readLE_fillLE_disjoint _ _ _ _ _ _ _ (by omega)]
+      hFr _ _ (by omega)]
     simp (disch := omega) only [Janus.Tactic.readLE_writeLE_disjoint]
   · rw [Janus.Arm64.Memory.accessible_writeLE, Janus.Arm64.Memory.accessible_writeLE,
       Janus.Arm64.Memory.accessible_writeLE, hacc]
