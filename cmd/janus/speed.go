@@ -38,7 +38,7 @@ func pinsDigest(p pins) string {
 	sort.Strings(keys)
 	h := sha256.New()
 	for _, k := range keys {
-		fmt.Fprintf(h, "%s %s\n", k, p[k])
+		fmt.Fprintf(h, "%q %q\n", k, p[k])
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
