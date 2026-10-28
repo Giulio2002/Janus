@@ -647,7 +647,7 @@ func TestVerify(t *testing.T) {
 			})
 		}
 	})
-	if code, _, stderr := verify(good, "--theorem", "Proof.correctness\n#eval 1"); code != 1 || !strings.Contains(stderr, "not a plain dotted Lean name") {
+	if code, _, stderr := verify(good, "--theorem", "Proof.correctness\n#eval 1"); code != 1 || !strings.Contains(stderr, "newline") {
 		t.Fatalf("theorem injection: %d %s", code, stderr)
 	}
 }

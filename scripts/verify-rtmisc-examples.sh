@@ -12,7 +12,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-. "$root/scripts/lib/itemtimeout.sh"
+. "$root/scripts/lib/theorems.sh"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
@@ -88,34 +88,52 @@ verify_one() {
     local d="examples/rtmisc/proofs/$isa/$n" pkg ok=1
     pkg="$(basename "$(ls "$d"/*.lean | head -1)" .lean)"
     : > "$out/verify.log"
+    # One janus run for the package: the module chain (Defs, Tail, ..., Main, Witness) is built
+    # once in one workspace and the three theorems are each audited, replayed and reported from
+    # it (before: three runs, each rebuilding the whole chain). Each theorem's status comes from
+    # the results file janus writes, so one failing theorem does not hide the others.
+    local res spec rc=0 targs=()
+    res="$(mktemp)"
     for spec in "Main:$pkg.correctness" "Witness:$pkg.Witness.nonvacuous" "Witness:$pkg.Witness.returns"; do
-      if jv "$out" --proof "$d/$pkg/${spec%%:*}.lean" --proof-root "$d" --theorem "${spec#*:}" --janus-root . >> "$out/verify.log" 2>&1; then
-        t=$(echo "$(date +%s.%N) - $start" | bc)
+      targs+=(--theorem "$d/$pkg/${spec%%:*}.lean::${spec#*:}")
+    done
+    jv "$out" --proof-root "$d" "${targs[@]}" --results "$res" --janus-root . > "$out/verify.log" 2>&1 || rc=$?
+    t=$(echo "$(date +%s.%N) - $start" | bc)
+    for spec in "Main:$pkg.correctness" "Witness:$pkg.Witness.nonvacuous" "Witness:$pkg.Witness.returns"; do
+      if theorem_verified "$res" "${spec#*:}"; then
         printf '%-18s ok  %6.1fs (%s)\n' "$isa/$n" "$t" "${spec#*:}" | tee -a "$lines/${isa}_$n"
       else
         ok=0
         printf '%-18s FAILED %s (see %s/verify.log)\n' "$isa/$n" "${spec#*:}" "$out" | tee -a "$lines/${isa}_$n"
       fi
     done
+    rm -f "$res"
     [ "$ok" = 1 ] || tail -30 "$out/verify.log"
     return 0
   fi
-  if jv "$out" --proof "examples/rtmisc/proofs/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then
-    t=$(echo "$(date +%s.%N) - $start" | bc)
+  # correctness and, where the proof has them, the non-vacuity witnesses: one janus run, one
+  # compile of the proof (scripts/lib/theorems.sh)
+  local -a thms=(Proof.correctness)
+  local st i
+  if grep -q '^namespace Witness' "examples/rtmisc/proofs/$isa/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
+  st="$(mktemp -d)"
+  verify_theorems "$out" "examples/rtmisc/proofs/$isa/$n.lean" "$st" "${thms[@]}" -- --janus-root . || true  # failures are in $st
+  t=$(echo "$(date +%s.%N) - $start" | bc)
+  cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
+  if [ "$(cat "$st/0.rc")" = 0 ]; then
     printf '%-18s ok  %6.1fs\n' "$isa/$n" "$t" | tee "$lines/${isa}_$n"
-    if grep -q '^namespace Witness' "examples/rtmisc/proofs/$isa/$n.lean"; then
-      for thm in Proof.Witness.nonvacuous Proof.Witness.returns; do
-        if jv "$out" --proof "examples/rtmisc/proofs/$isa/$n.lean" --theorem "$thm" --janus-root . >> "$out/verify.log" 2>&1; then
-          printf '%-18s ok  (%s)\n' "$isa/$n" "$thm" | tee -a "$lines/${isa}_$n"
-        else
-          printf '%-18s FAILED %s (see %s/verify.log)\n' "$isa/$n" "$thm" "$out" | tee -a "$lines/${isa}_$n"
-        fi
-      done
-    fi
+    for ((i = 1; i < ${#thms[@]}; i++)); do
+      if [ "$(cat "$st/$i.rc")" = 0 ]; then
+        printf '%-18s ok  (%s)\n' "$isa/$n" "${thms[$i]}" | tee -a "$lines/${isa}_$n"
+      else
+        printf '%-18s FAILED %s (see %s/verify.log)\n' "$isa/$n" "${thms[$i]}" "$out" | tee -a "$lines/${isa}_$n"
+      fi
+    done
   else
     printf '%-18s FAILED (see %s/verify.log)\n' "$isa/$n" "$out" | tee "$lines/${isa}_$n"
-    tail -30 "$out/verify.log"
+    tail -30 "$st/0.log"
   fi
+  rm -rf "$st"
 }
 
 for target in "${names[@]}"; do
