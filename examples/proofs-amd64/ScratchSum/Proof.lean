@@ -162,7 +162,7 @@ theorem putTail (impl : List Amd64.Segment) (R : RtInv)
       4096 R ptrType BufObj)
     (ret : Nat) (hret : RetAddr (Extracted.program.link impl) ret) (s S : State) (a b : BitVec 64)
     (L : List (Nat × Nat)) (bud bd d : Nat) (mP : Arm64.Memory)
-    (hP : poolAddr = 5701056) (hT : ptrType = 4822144)
+    (hP : poolAddr = 5709280) (hT : ptrType = 4822144)
     (hg1 : (s.regs 14).toNat + 16 + 8 ≤ 2 ^ 48)
     (hg2 : s.mem.accessible ((s.regs 14).toNat + 16) 8 false = true)
     (hg3 : s.mem.readLE ((s.regs 14).toNat + 16) 8 + 4136 < (s.regs 4).toNat)
@@ -171,15 +171,15 @@ theorem putTail (impl : List Amd64.Segment) (R : RtInv)
     (hal : (s.regs 4).toNat % 8 = 0) (hb4 : 4136 ≤ (s.regs 4).toNat)
     (hgo : Outside ((s.regs 14).toNat + 16) 8 (((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24) :: R.rt))
     (hwrt : LiveSep [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] R.rt)
-    (hokP : R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [5701056])
+    (hokP : R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [5709280])
     (hbd : bd = bud ∨ bd = bud - 32)
     (hrip : S.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "sync.(*Pool).Put"))
-    (hS0 : S.regs 0 = 5701056#64) (hS3 : S.regs 3 = 4822144#64) (hS1 : S.regs 1 = BitVec.ofNat 64 d)
+    (hS0 : S.regs 0 = 5709280#64) (hS3 : S.regs 3 = 4822144#64) (hS1 : S.regs 1 = BitVec.ofNat 64 d)
     (hS4 : S.regs 4 = s.regs 4 - 40#64) (hS5 : S.regs 5 = s.regs 4 - 8#64) (hSg : S.regs 14 = s.regs 14)
     (hSx : S.xmm 15 = s.xmm 15) (hSmem : S.mem = mP) (hd64 : d < 2 ^ 64)
     (hFP : MemFrame s.mem mP (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]))
     (hLFP : LiveFrame s.mem mP L [])
-    (hra : mP.readLE ((s.regs 4).toNat - 40) 8 = 4752087)
+    (hra : mP.readLE ((s.regs 4).toNat - 40) 8 = 4755287)
     (hsh : BufObj mP d [(d, d + 32)])
     (hwL1 : LiveSep (L ++ [(d, d + 32)]) [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)])
     (hLd : ∀ x ∈ L, x ∉ [(d, d + 32)])
@@ -207,11 +207,11 @@ theorem putTail (impl : List Amd64.Segment) (R : RtInv)
   have hret4 := hret.user
   have hw3 : m3.accessible ((s.regs 4).toNat - 4136) (4136 + 24) true = true := by
     rw [hfr3.accessible, hFP.accessible]; exact hw4
-  have hra' : S.mem.readLE (S.regs 4).toNat 8 = 4752087 := by rw [hS4n]; exact hra
+  have hra' : S.mem.readLE (S.regs 4).toNat 8 = 4755287 := by rw [hS4n]; exact hra
   have hpack := Hid.mk (And.intro hFP (And.intro hLFP (And.intro hlf3 (And.intro hfr3 (And.intro hsh
     (And.intro hinv3 hinv))))))
   clear hFP hLFP hlf3 hfr3 hsh hinv3 hinv hput hns3 hs3 hSF hwL1 hLd
-  have hra2 : S.mem.readLE (s.regs 4 - 40#64).toNat 8 = 4752087 := by rw [hsp40]; exact hra
+  have hra2 : S.mem.readLE (s.regs 4 - 40#64).toNat 8 = 4755287 := by rw [hsp40]; exact hra
   janus64_run [hA3, hB3, hLR3, hFP3, hra', hra2, hw3]
   obtain ⟨hFP, hLFP, hlf3, hfr3, hsh, hinv3, hinv⟩ := hpack.get
   refine ⟨d, bd, hbd, MemFrame.trans hFP hfr3 (by frame_sub),
@@ -272,9 +272,9 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
   have hgo' := hgo
   simp only [outside_cons, outside_nil, and_true] at hgo'
   have key1 : ∀ S : State, MemFrame s.mem S.mem [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] →
-      S.regs 14 = s.regs 14 → (S.regs 4).toNat + 40 = (s.regs 4).toNat → (S.regs 0).toNat = 5701056 →
+      S.regs 14 = s.regs 14 → (S.regs 4).toNat + 40 = (s.regs 4).toNat → (S.regs 0).toNat = 5709280 →
       S.mem.readLE (S.regs 4).toNat 8 < 2 ^ 47 →
-      CallOK64 S 4096 1 ∧ StackRoom64 S 4096 1 ∧ S.mem.readLE (5701056 + newOffset) 8 = 0 ∧
+      CallOK64 S 4096 1 ∧ StackRoom64 S 4096 1 ∧ S.mem.readLE (5709280 + newOffset) 8 = 0 ∧
       LiveAt R (Extracted.program.contractAddr "sync.(*Pool).Get") [(S.regs 0).toNat] L bud 0
         (S.regs 14).toNat S.mem (liveWin64 S 4096 1) := by
     intro S hf hg' hsp h0 hra
@@ -334,14 +334,14 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
       rw [hF1.readLE _ _ (hoB _ _ (Nat.le_refl _) (by omega))]; exact hdesc.1
     have hpb : m1.readLE (4874656 + 8) 8 = 0 := by
       rw [hF1.readLE _ _ (hoB _ _ (by omega) (by omega))]; exact hdesc.2
-    have hmC : MemFrame m1 (m1.writeLE ((s.regs 4).toNat - 40) 8 4752039)
+    have hmC : MemFrame m1 (m1.writeLE ((s.regs 4).toNat - 40) 8 4755239)
         [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] := by janus_frame
-    have hsz2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 4752039).readLE 4874656 8 = 32 := by
+    have hsz2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 4755239).readLE 4874656 8 = 32 := by
       rw [hmC.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; exact hsz
-    have hpb2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 4752039).readLE (4874656 + 8) 8 = 0 := by
+    have hpb2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 4755239).readLE (4874656 + 8) 8 = 0 := by
       rw [hmC.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; exact hpb
     janus64_run until [Extracted.program.contractAddr "runtime.newobject"]
-    have key2 : ∀ S : State, S.mem = m1.writeLE ((s.regs 4).toNat - 40) 8 4752039 → S.regs 14 = s.regs 14 →
+    have key2 : ∀ S : State, S.mem = m1.writeLE ((s.regs 4).toNat - 40) 8 4755239 → S.regs 14 = s.regs 14 →
         (S.regs 4).toNat + 40 = (s.regs 4).toNat → (S.regs 0).toNat = 4874656 →
         (NewobjectPre64 4096 S ∧ StackRoom64 S 4096 1 ∧
           LiveAt R (Extracted.program.contractAddr "runtime.newobject") [(S.regs 0).toNat] L bud
@@ -395,7 +395,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
         (fun a n h => ⟨h, h⟩)
     have hLF2 : LiveFrame s.mem m2 L [] :=
       LiveFrame.trans (LiveFrame.trans hLF1 (LiveFrame.of_win hmC hwL) (fun _ _ h => h)) hlf2 (fun _ _ h => h)
-    have hSF2 := StackFacts.step (n := 1) hwrt hb4 (by omega) (hSF1.ret (by omega) 4752039) hfr2
+    have hSF2 := StackFacts.step (n := 1) hwrt hb4 (by omega) (hSF1.ret (by omega) 4755239) hfr2
     obtain ⟨hA2, hB2, hLR2, hFP2⟩ := hSF2
     have hw2 : m2.accessible ((s.regs 4).toNat - 4136) (4136 + 24) true = true := by
       rw [hF2.accessible]; exact hw4
@@ -419,17 +419,17 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
     janus64_run [hA2, hB2, hLR2, hFP2, hw2] until [Extracted.program.contractAddr "sync.(*Pool).Put"]
     obtain ⟨hF2, hLF2, hinv2, hacc8', hacc8b', hapL, hnm, hLsepQ, hin, hSF1, hw2', hacc⟩ := hpack.get
     have hFP : MemFrame s.mem (((m2.writeLE ptr.toNat 8 a.toNat).writeLE (ptr.toNat + 8) 8 b.toNat).writeLE
-        ((s.regs 4).toNat - 40) 8 4752087) (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]) :=
+        ((s.regs 4).toNat - 40) 8 4755287) (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]) :=
       ((hF2.writeLE_inRanges _ ((hin.sub (a := ptr.toNat) (n := 8) (Nat.le_refl _) (by omega)).append_left _)).writeLE_inRanges _
         ((hin.sub (a := ptr.toNat + 8) (n := 8) (by omega) (by omega)).append_left _)).writeLE_inRanges _
         ⟨((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24), List.mem_append_right _ (List.mem_singleton_self _),
           by omega, by simp only; omega⟩
     have hstq : MemFrame m2 (((m2.writeLE ptr.toNat 8 a.toNat).writeLE (ptr.toNat + 8) 8 b.toNat).writeLE
-        ((s.regs 4).toNat - 40) 8 4752087)
+        ((s.regs 4).toNat - 40) 8 4755287)
         [(ptr.toNat, ptr.toNat + 32), ((s.regs 4).toNat - 40, (s.regs 4).toNat - 32)] :=
       by
         refine MemFrame.writeLE_inRanges (MemFrame.writeLE_inRanges (MemFrame.writeLE_inRanges
-          (MemFrame.refl m2 _) a.toNat ?_) b.toNat ?_) 4752087 ?_
+          (MemFrame.refl m2 _) a.toNat ?_) b.toNat ?_) 4755287 ?_
         · exact ⟨(ptr.toNat, ptr.toNat + 32), List.mem_cons_self .., Nat.le_refl _, by simp only; omega⟩
         · exact ⟨(ptr.toNat, ptr.toNat + 32), List.mem_cons_self .., by simp only; omega, by simp only; omega⟩
         · exact ⟨((s.regs 4).toNat - 40, (s.regs 4).toNat - 32), List.mem_cons_of_mem _ (List.mem_singleton_self _),
@@ -442,7 +442,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
       omega
     have hSFP : StackFacts (s.regs 4).toNat a.toNat b.toNat ret (s.regs 5).toNat
         (((m2.writeLE ptr.toNat 8 a.toNat).writeLE (ptr.toNat + 8) 8 b.toNat).writeLE
-        ((s.regs 4).toNat - 40) 8 4752087) := by
+        ((s.regs 4).toNat - 40) 8 4755287) := by
       refine ⟨?_, ?_, ?_, ?_⟩
       · repeat rw [Arm64.Memory.readLE_writeLE_of_disjoint (h := by omega)]
         exact hA2
@@ -509,7 +509,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
     obtain ⟨hF1, hLF1, hinvG, hapL, hnm, hLsepQ, hin, hdacc, hw1'⟩ := hpack.get
     have hSFP : StackFacts (s.regs 4).toNat a.toNat b.toNat ret (s.regs 5).toNat
         (((m1.writeLE (BitVec.toNat (r 3)) 8 a.toNat).writeLE (BitVec.toNat (r 3) + 8) 8 b.toNat).writeLE
-        ((s.regs 4).toNat - 40) 8 4752087) := by
+        ((s.regs 4).toNat - 40) 8 4755287) := by
       refine ⟨?_, ?_, ?_, ?_⟩
       · repeat rw [Arm64.Memory.readLE_writeLE_of_disjoint (h := by omega)]
         exact hA1
@@ -520,18 +520,18 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
       · repeat rw [Arm64.Memory.readLE_writeLE_of_disjoint (h := by omega)]
         exact hFP1
     have hFP : MemFrame s.mem (((m1.writeLE (BitVec.toNat (r 3)) 8 a.toNat).writeLE (BitVec.toNat (r 3) + 8) 8
-        b.toNat).writeLE ((s.regs 4).toNat - 40) 8 4752087)
+        b.toNat).writeLE ((s.regs 4).toNat - 40) 8 4755287)
         (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]) :=
       ((hF1.writeLE_inRanges _ ((hin.sub (a := BitVec.toNat (r 3)) (n := 8) (Nat.le_refl _) (by omega)).append_left _)).writeLE_inRanges _
         ((hin.sub (a := BitVec.toNat (r 3) + 8) (n := 8) (by omega) (by omega)).append_left _)).writeLE_inRanges _
         ⟨((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24), List.mem_append_right _ (List.mem_singleton_self _),
           by omega, by simp only; omega⟩
     have hstq : MemFrame m1 (((m1.writeLE (BitVec.toNat (r 3)) 8 a.toNat).writeLE (BitVec.toNat (r 3) + 8) 8
-        b.toNat).writeLE ((s.regs 4).toNat - 40) 8 4752087)
+        b.toNat).writeLE ((s.regs 4).toNat - 40) 8 4755287)
         [(BitVec.toNat (r 3), BitVec.toNat (r 3) + 32), ((s.regs 4).toNat - 40, (s.regs 4).toNat - 32)] :=
       by
         refine MemFrame.writeLE_inRanges (MemFrame.writeLE_inRanges (MemFrame.writeLE_inRanges
-          (MemFrame.refl m1 _) a.toNat ?_) b.toNat ?_) 4752087 ?_
+          (MemFrame.refl m1 _) a.toNat ?_) b.toNat ?_) 4755287 ?_
         · exact ⟨(BitVec.toNat (r 3), BitVec.toNat (r 3) + 32), List.mem_cons_self .., Nat.le_refl _, by simp only; omega⟩
         · exact ⟨(BitVec.toNat (r 3), BitVec.toNat (r 3) + 32), List.mem_cons_self .., by simp only; omega, by simp only; omega⟩
         · exact ⟨((s.regs 4).toNat - 40, (s.regs 4).toNat - 32), List.mem_cons_of_mem _ (List.mem_singleton_self _),
@@ -722,7 +722,7 @@ theorem inv0 : R.inv 0x400 [] (s0.regs 14).toNat (view R.rt [] s0.mem) := by
 theorem s0_sp : (s0.regs 4).toNat = sp0 := by simp [s0, sp0]
 theorem s0_g : (s0.regs 14).toNat = g0 := by simp [s0, g0]
 
-theorem hP' : P = 5701056 := by unfold P; decide
+theorem hP' : P = 5709280 := by unfold P; decide
 theorem hb' : bT = 4874656 := by unfold bT; decide
 
 set_option maxRecDepth 100000 in
