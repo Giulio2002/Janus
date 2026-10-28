@@ -1608,6 +1608,75 @@ the extraction identity, Lean), plus the reading of `CallSetup0` above. The runt
 assembly that switches stacks or goroutines (`systemstack`, `mcall`, `gogo`, `asmcgocall`) is not
 covered by the convention: a theorem about it needs a precondition describing those states.
 
+## ELF loader semantics
+
+Janus extracts from the executable's **section headers**, but a theorem is about the bytes that
+**execute**, which the kernel decides from the **program headers**. The two are different
+descriptions of the file and an adversary controls both. Janus therefore assumes exactly the
+following loader (`cmd/janus/elfview.go`, `validateSegments`, `checkDynamic`, `checkSymbolRange`,
+called from `loadBinary` before any byte is copied; regression rows `audit/round12/`).
+
+**Assumed loader: Linux `binfmt_elf`, `ET_EXEC` (non-PIE), static or dynamically linked.**
+`PT_LOAD` entries are mapped in program-header-table order at their fixed `p_vaddr`, whole pages
+at a time, from file offset `p_offset`; the bytes between `p_filesz` and `p_memsz` are zero;
+a later mapping replaces an earlier one (qemu-user does the same; newer kernels fail with
+`MAP_FIXED_NOREPLACE` instead, which cannot make a verified binary run different code). Section
+headers, `.symtab` and `PT_NOTE` are never consulted. A dynamically linked `ET_EXEC` is loaded the
+same way; `PT_INTERP`'s interpreter maps elsewhere (see "out of the threat model"). `ET_DYN`
+(PIE) is rejected, as before.
+
+Every extracted byte (`.text`, rodata, literal pools, `.gopclntab`, the `GlobalsInit` images of
+writable data, `PT_TLS` images, PLT/relocation tables, symbol-derived ranges) is read **through the
+loader map** (`loaderView.read`: last `PT_LOAD` in table order containing the address, bytes taken
+from its file image) and not from `sh_offset`. What Janus rejects (each is a `binary validation`
+error):
+
+* **L1** `p_filesz > p_memsz`; **L2** file bytes past the end of the file, or address wrap-around;
+  **L3** `p_offset` and `p_vaddr` not congruent modulo the ISA's largest page size (64 KiB on arm64, 4 KiB on x86-64), or `p_align > 1` that is not a power of
+  two or with `p_offset % p_align != p_vaddr % p_align` (the kernel maps whole pages at an
+  offset); **L4** any two `PT_LOAD` ranges `[p_vaddr, p_vaddr+p_memsz)` that overlap at the
+  page-size granularity (the O1 attack: an appended page plus an overlapping later `PT_LOAD` runs different
+  code from the one the section headers describe; Go's linker and gcc/ld never produce overlaps,
+  and with none accepted the "later wins" resolution can never decide anything); **L5** a `PT_LOAD`
+  that is writable and executable; **L6** no `PT_LOAD`.
+* **S1** an allocated, file-backed section whose bytes at `sh_offset` differ from the bytes the
+  loader maps at `sh_addr` (including one not inside the file image of a `PT_LOAD`, or compressed).
+  **S2** an executable section not in a `PF_X`, non-`PF_W` segment, or sharing a page with a
+  writable `PT_LOAD`. **S3** an allocated `NOBITS` section (not TLS) outside the zero-fill part of a
+  segment. **S4** a `PT_TLS`, `PT_DYNAMIC` or `PT_INTERP` image that differs from the loader's
+  bytes. **S5** a `PT_GNU_RELRO` not inside one `PT_LOAD`, or covering an executable section.
+* **D1** `DT_TEXTREL`, `DF_TEXTREL`, any `SHT_REL`/`DT_REL`/`PLTREL=REL` table. **D2** any dynamic
+  relocation (`SHT_RELA` sections and the `DT_RELA`/`DT_JMPREL` tables the dynamic linker
+  actually applies, `IRELATIVE`/ifunc included) whose 8-byte target touches an executable section,
+  any allocated section without `SHF_WRITE` (rodata, plt, ...), or lies outside every writable
+  `PT_LOAD`. Relocations may only write GOT/data slots. Janus is deliberately coarse here: it does
+  not know which ranges a given proof reads, so all code and read-only data are protected.
+  (An `IRELATIVE` resolver is code that runs before `main`; its *slot* is checked, its code is
+  not verified: see below.)
+* **Y1** a defined `STT_FUNC` or sized `STT_OBJECT` symbol (non-TLS) whose
+  `[st_value, st_value+st_size)` leaves the allocated section named by its `st_shndx`, or names a
+  nonexistent section. (A symbol starting exactly at the section's end, such as Go's
+  `runtime.__stop___sancov_cntrs`, is a boundary marker and is accepted.) The same function name at two addresses is reported by `janus` as an
+  ambiguity (`Symbol ... is ambiguous`) and never silently resolved.
+* **W1 (warning on stderr, not a rejection)** a non-empty `.preinit_array`, or an `.init_array`
+  entry that is not in an executable section of the binary: constructors run before `main` and
+  Janus does not extract them.
+
+**Out of the threat model** (the assumption is that none of these happens; a theorem is about the
+extracted function run on the loaded image as described above, nothing else):
+
+* code that modifies verified code or read-only data at run time: constructors in
+  `.init_array`/`.preinit_array`/`DT_INIT`, `IRELATIVE` resolvers, signal handlers or the program
+  itself calling `mprotect`/`mmap(PROT_WRITE)` on text, JIT, self-modifying code. Janus rejects
+  load-time patching it can see statically (D1, D2, L5, S2) and warns on foreign constructors
+  (W1); it does **not** decompile constructors or detect run-time `mprotect`;
+* a custom `PT_INTERP` (a hostile dynamic loader), `LD_PRELOAD`/`LD_LIBRARY_PATH` and
+  symbol interposition, which change which code a PLT call reaches (the C-environment contracts
+  model PLT calls only as their stated libc contracts);
+* the kernel, the hardware and the emulator: that `binfmt_elf` behaves as described, that page
+  protections are enforced, that the file is not changed between extraction and execution
+  (extraction records the binary's SHA-256 and `check` re-reads it);
+
 ## What the theorem does not say
 
 * Nothing about callers other than those satisfying `CallSetup` and the stated precondition.

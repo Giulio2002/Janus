@@ -68,60 +68,6 @@ type section struct {
 
 func (s section) End() uint64 { return s.Addr + s.Size }
 
-// validateSegments checks that every file-backed allocated section (the bytes the extractor
-// copies: .text, .rodata, literal pools, .gopclntab, ...) is backed by a PT_LOAD segment that
-// maps it with a consistent file-offset -> virtual-address delta, and that the segment holding
-// `.text` is executable. The kernel loads only through PT_LOAD, so this makes the bytes Janus
-// reads at a virtual address equal to the bytes that execute there. A mismatch (a lying section
-// header, which a normal `go build` never produces) is rejected. See docs/AUDIT-MODEL.md EX1.
-func validateSegments(f *elf.File, path string) error {
-	// covers reports whether PT_LOAD p maps the [addr, addr+size) / [off, off+size) range of a
-	// section with a single consistent delta (off - p.Off == addr - p.Vaddr), inside the file
-	// image of the segment (Filesz, not Memsz: we only read file bytes).
-	covers := func(p *elf.Prog, addr, off, size uint64) bool {
-		if p.Type != elf.PT_LOAD {
-			return false
-		}
-		if off < p.Off || off+size > p.Off+p.Filesz {
-			return false
-		}
-		if addr < p.Vaddr || addr+size > p.Vaddr+p.Filesz {
-			return false
-		}
-		return off-p.Off == addr-p.Vaddr
-	}
-	for _, s := range f.Sections {
-		// Only sections with file bytes the extractor can read: allocated, not NOBITS (.bss),
-		// nonzero. NOBITS sections carry no file content and are never copied.
-		if s.Flags&elf.SHF_ALLOC == 0 || s.Type == elf.SHT_NOBITS || s.Size == 0 {
-			continue
-		}
-		var seg *elf.Prog
-		for _, p := range f.Progs {
-			if covers(p, s.Addr, s.Offset, s.Size) {
-				seg = p
-				break
-			}
-		}
-		if seg == nil {
-			return &diag{
-				Msg: fmt.Sprintf("section %s of %s (vaddr 0x%x, file offset 0x%x, size 0x%x) is not covered by a PT_LOAD segment with a matching file-to-address mapping; the bytes the kernel maps at that address would differ from the section's bytes, so Janus would reason about code or data that does not execute",
-					s.Name, path, s.Addr, s.Offset, s.Size),
-				Stage: "binary validation",
-				Next:  "Use an unmodified executable produced by go build (the section and segment headers must agree).",
-			}
-		}
-		if s.Name == ".text" && seg.Flags&elf.PF_X == 0 {
-			return &diag{
-				Msg:   fmt.Sprintf(".text of %s is mapped by a non-executable PT_LOAD segment; it is not the executed code", path),
-				Stage: "binary validation",
-				Next:  "Use an unmodified executable produced by go build.",
-			}
-		}
-	}
-	return nil
-}
-
 // loadBinary reads and validates path. Failures are diagnostics (*diag).
 func loadBinary(path string) (*Binary, error) { return loadBinaryMode(path, false) }
 
@@ -214,12 +160,20 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 	// is covered by a PT_LOAD whose file->vaddr mapping matches the section, with `.text`
 	// executable, so the byte at any vaddr Janus reads equals the byte the kernel maps there.
 	// (rt-model, docs/AUDIT-MODEL.md EX1.)
-	if err := validateSegments(f, path); err != nil {
+	lv, err := validateSegments(f, data, path)
+	if err != nil {
 		return nil, err
 	}
-	if b.text, err = text.Data(); err != nil {
-		return nil, &diag{Msg: fmt.Sprintf("cannot read .text of %s: %v", path, err), Stage: "binary validation",
-			Next: "Use an unmodified executable produced by go build."}
+	warns, err := checkDynamic(f, lv, path)
+	if err != nil {
+		return nil, err
+	}
+	warnAll(warns)
+	if b.text, err = lv.sectionBytes(text, path); err != nil {
+		return nil, err
+	}
+	if text.Flags&elf.SHF_EXECINSTR == 0 {
+		return nil, elfDiag(path+": .text is not an executable section", "")
 	}
 	b.textAddr = text.Addr
 	b.goText = text.Addr
@@ -231,9 +185,8 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 		sec := section{Name: s.Name, Addr: s.Addr, Size: s.Size, Writable: s.Flags&elf.SHF_WRITE != 0,
 			Exec: s.Flags&elf.SHF_EXECINSTR != 0, NoBits: s.Type == elf.SHT_NOBITS}
 		if !sec.NoBits {
-			if sec.data, err = s.Data(); err != nil || uint64(len(sec.data)) != s.Size {
-				return nil, &diag{Msg: fmt.Sprintf("cannot read section %s of %s: %v", s.Name, path, err), Stage: "binary validation",
-					Next: "Use an unmodified executable produced by go build."}
+			if sec.data, err = lv.sectionBytes(s, path); err != nil {
+				return nil, err
 			}
 		}
 		b.sections = append(b.sections, sec)
@@ -252,6 +205,9 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 			if s.Name == "runtime.text" && s.Section != elf.SHN_UNDEF {
 				b.goText = s.Value
 			}
+			if err := checkSymbolRange(f, s, path); err != nil {
+				return nil, err
+			}
 			if t := elf.ST_TYPE(s.Info); (t == elf.STT_OBJECT || t == elf.STT_NOTYPE) && s.Size > 0 &&
 				s.Section != elf.SHN_UNDEF && s.Section < elf.SHN_LORESERVE {
 				b.dataSyms = append(b.dataSyms, Func{Name: s.Name, Addr: s.Value, Size: s.Size})
@@ -266,7 +222,7 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 		}
 	} else if pcln := f.Section(".gopclntab"); pcln != nil {
 		b.SymbolSource = "pclntab"
-		pdata, err := pcln.Data()
+		pdata, err := lv.sectionBytes(pcln, path)
 		if err == nil {
 			var tab *gosym.Table
 			tab, err = gosym.NewTable(nil, gosym.NewLineTable(pdata, text.Addr))
@@ -297,7 +253,9 @@ func loadBinaryMode(path string, allowPIE bool) (*Binary, error) {
 			b.Funcs[i].Size = end - b.Funcs[i].Addr
 		}
 	}
-	b.loadCEnv(f)
+	if err := b.loadCEnv(f, lv, path); err != nil {
+		return nil, err
+	}
 	return b, nil
 }
 
@@ -361,4 +319,31 @@ func (b *Binary) words(f Func) ([]uint32, error) {
 		n--
 	}
 	return ws[:n], nil
+}
+
+// checkSymbolRange (symbol-table sanity): a defined function or sized (non-zero st_size) data-object symbol must
+// lie inside the section its st_shndx names (st_value >= sh_addr, st_value+st_size <= sh_addr+sh_size),
+// so a symbol cannot make Janus extract bytes from outside the section it claims. TLS symbols
+// (offsets) and absolute/common symbols are exempt. Duplicate function names at different
+// addresses are reported by Binary.lookup as an ambiguity.
+func checkSymbolRange(f *elf.File, s elf.Symbol, path string) error {
+	t := elf.ST_TYPE(s.Info)
+	if (t != elf.STT_FUNC && t != elf.STT_OBJECT) || s.Section == elf.SHN_UNDEF || s.Section >= elf.SHN_LORESERVE || s.Size == 0 {
+		return nil
+	}
+	if int(s.Section) >= len(f.Sections) {
+		return elfDiag(fmt.Sprintf("symbol %s of %s names section index %d which does not exist", s.Name, path, s.Section), "")
+	}
+	sec := f.Sections[s.Section]
+	if sec.Flags&elf.SHF_TLS != 0 || sec.Flags&elf.SHF_ALLOC == 0 {
+		return nil
+	}
+	// A symbol that starts exactly at the section's end is a boundary marker (the Go linker's
+	// runtime.__stop___sancov_cntrs, size 1): it names no byte of the section. Anything else
+	// must lie inside.
+	end := sec.Addr + sec.Size
+	if s.Value < sec.Addr || s.Value > end || (s.Value < end && (s.Value+s.Size < s.Value || s.Value+s.Size > end)) {
+		return elfDiag(fmt.Sprintf("symbol %s of %s (value 0x%x, size 0x%x) lies outside its section %s [0x%x, 0x%x)", s.Name, path, s.Value, s.Size, sec.Name, sec.Addr, sec.Addr+sec.Size), "")
+	}
+	return nil
 }
