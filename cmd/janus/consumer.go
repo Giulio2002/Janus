@@ -1063,8 +1063,12 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	// One build of every proof module of the group (sandboxed: lakefile and modules are
 	// untrusted).
 	targets := []string{"build", "--no-ansi"}
+	seenRel := map[string]bool{}
 	for _, r := range reqs {
-		targets = append(targets, r.rel)
+		if !seenRel[r.rel] {
+			seenRel[r.rel] = true
+			targets = append(targets, r.rel)
+		}
 	}
 	_, buildOut, _ := ws.run(targets...)
 	rebuilt := append(builtModules(buildOut), ws.prepBuilt...)
