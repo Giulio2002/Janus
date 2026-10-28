@@ -184,9 +184,18 @@ Changes:
   (`scripts/lib/parallel.sh`; 8 here, unchanged 1 on a CI runner);
 * the pool is ordered **longest first by the last run's measured times** (an item without a time
   goes first; the built-in order before the first run);
-* the theorems of one proof file run up to two at once (`scripts/lib/theorems.sh`): each is the
-  same complete `janus verify` as before, the extra ones in a sibling copy of the extraction (so
-  that each run writes its own `verified.json`; the main directory keeps the correctness theorem's);
+* **one compile per proof file** (`scripts/lib/theorems.sh`): all theorems of a proof file (correctness,
+  the extra ones, the non-vacuity witnesses) are verified by ONE `janus verify --theorem A --theorem B ...`
+  run. The proof is compiled once (before, once per theorem: 654 compiles for 332 files), and the extraction check,
+  the trusted compile, the pins and the framework replay verdict are done once; each theorem still gets
+  its own audit (statement, kind, axiom allow-list), kernel replay of its closure, result-cache entry and
+  report (`verified/<Theorem>.json`; the first theorem's is also `verified.json`). Per-theorem status
+  and log (`STATUSDIR/<i>.rc`, `.log`) come from the run's `--results` file, so a failing theorem fails alone
+  and cannot be masked by (or mask) the others; a timeout or crash of the run fails all of them. Nothing is
+  weakened: the same checks run for the same theorem, minus the repeated compile and fixed costs. The split
+  rtmisc packages (Three, Chain) build their module chain once in one workspace and check
+  `Main:correctness`, `Witness:nonvacuous` and `Witness:returns` from it (`--proof-root` with
+  `--theorem PROOF.lean::NAME`), instead of three runs rebuilding the chain;
 * `--changed` (development only, never the gate): skips every item whose inputs (its extraction,
   proof file and extraction arguments, the framework sources and the toolchain) are byte-identical
   to its last passing run in this checkout (`artifacts/verify-all-examples.manifest`, written by
