@@ -50,4 +50,20 @@ grep -q '^-- pool toy:' "$t/out" && ok "progress line printed" || bad "no progre
 # concurrency bound
 mx=0; cur=0; while read -r l; do if [ "$l" = x ]; then cur=$((cur+1)); else cur=$((cur-1)); fi; [ $cur -gt $mx ] && mx=$cur; done < "$t/running"
 [ "$mx" -le 2 ] && ok "at most 2 items at once" || bad "saw $mx at once"
+
+# needs: an item runs after the items it needs passed; an item whose need failed is BLOCKED (a failure)
+pool_init deps 2 "$t/state2"
+pool_add dep-b 'echo b >> '"$t"'/dorder' "" "dep-a"
+pool_add dep-a 'sleep 1; echo a >> '"$t"'/dorder'
+pool_add dep-c 'echo c' "" "dep-bad"
+pool_add dep-bad 'exit 1'
+pool_add dep-u 'echo u' "" "nonexistent"
+pool_add dep-cyc1 'echo x' "" "dep-cyc2"
+pool_add dep-cyc2 'echo x' "" "dep-cyc1"
+rc=0; pool_run > "$t/out2" 2>&1 || rc=$?
+[ "$(tr '\n' ' ' < "$t/dorder")" = "a b " ] && ok "needs: b ran after a" || bad "needs order: $(cat "$t/dorder")"
+for w in "BLOCKED +dep-c" "BLOCKED +dep-u" "BLOCKED +dep-cyc1" "BLOCKED +dep-cyc2" "FAIL +dep-bad"; do
+  grep -Eq "$w" "$t/out2" && ok "needs: $w" || { bad "needs: no $w"; cat "$t/out2"; }
+done
+[ "$rc" = 1 ] && ok "blocked items fail the pool" || bad "deps rc=$rc"
 exit $fail

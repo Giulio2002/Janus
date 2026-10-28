@@ -9,9 +9,12 @@
 #                                  (full per-item logs are kept there).
 #   pool_times FILE                longest-first order from the walls recorded in FILE ("ID<TAB>seconds");
 #                                  an item without a recorded wall goes first (it may be the longest).
-#   pool_add ID CODE [COSTKEY]     queue an item: CODE is shell code run in a subshell (it sees the
+#   pool_add ID CODE [COSTKEY [NEEDS]]
+#                                  queue an item: CODE is shell code run in a subshell (it sees the
 #                                  functions and variables defined so far); its exit status is the
 #                                  item's verdict. COSTKEY (default ID) is the key into the times file.
+#                                  NEEDS: space-separated ids of items that must have passed first; the
+#                                  item waits for them and is reported BLOCKED (a failure) if one did not.
 #   pool_run                       run the queue to the end. Each item's result line (PASS / FAIL /
 #                                  TIMEOUT / MISSING + wall seconds) is printed the moment it finishes, a
 #                                  progress line (done/total, the running items with elapsed time) every
@@ -26,7 +29,7 @@
 
 pool_init() {
   POOL_NAME="$1"; POOL_JOBS="$2"; POOL_DIR="$3"
-  POOL_IDS=(); POOL_CODES=(); POOL_KEYS=(); POOL_FAILED=()
+  POOL_IDS=(); POOL_CODES=(); POOL_KEYS=(); POOL_NEEDS=(); POOL_FAILED=()
   declare -gA POOL_SECS=()
   mkdir -p "$POOL_DIR"
   POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
@@ -38,8 +41,8 @@ pool_times() { # FILE
   while IFS=$'\t' read -r k v; do POOL_SECS[$k]=$v; done < "$1"
 }
 
-pool_add() { # ID CODE [COSTKEY]
-  POOL_IDS+=("$1"); POOL_CODES+=("$2"); POOL_KEYS+=("${3:-$1}")
+pool_add() { # ID CODE [COSTKEY [NEEDS]]
+  POOL_IDS+=("$1"); POOL_CODES+=("$2"); POOL_KEYS+=("${3:-$1}"); POOL_NEEDS+=("${4:-}")
 }
 
 _pool_file() { local f="${1//\//_}"; echo "${f//:/_}"; }
@@ -81,7 +84,10 @@ _pool_spawn() { # INDEX
 pool_run() {
   local total=${#POOL_IDS[@]} i k n
   local -a order=() running=() POOL_T0=() POOL_PID=()
-  local done_n=0 next=0 failed_n=0 skip_n=0 wall0 lastprog
+  local done_n=0 failed_n=0 skip_n=0 wall0 lastprog pick ready blocked
+  local -A started=() known=()
+  local -A STATUS=()
+  for ((i = 0; i < total; i++)); do known[${POOL_IDS[$i]}]=1; done
   wall0=$(_pool_now); lastprog=$wall0
   # longest first; an item with no recorded wall first (99999), then the original order
   mapfile -t order < <(for ((i = 0; i < total; i++)); do
@@ -89,16 +95,53 @@ pool_run() {
     done | sort -t$'\t' -k1,1gr -k2,2n | cut -f2)
   echo "pool $POOL_NAME: $total items, -j $POOL_JOBS (longest first; $(for k in "${POOL_KEYS[@]}"; do [ -n "${POOL_SECS[$k]:-}" ] || echo x; done | wc -l) without a recorded time go first)"
   while [ "$done_n" -lt "$total" ]; do
-    # launch while there is a free slot and memory for another job
-    while [ "$next" -lt "$total" ] && [ "${#running[@]}" -lt "$POOL_JOBS" ]; do
+    # launch while there is a free slot and memory for another job: the first queued item (in
+    # longest-first order) whose needs have passed
+    while [ "${#running[@]}" -lt "$POOL_JOBS" ]; do
       if [ "${#running[@]}" -gt 0 ] &&
          [ "$(par_mem_available_kb)" -lt $(( ${POOL_MEM_HEADROOM_KB:-$PAR_HEADROOM_KB} + ${POOL_JOB_MEM_KB:-$PAR_JOB_MEM_KB} )) ]; then
         break
       fi
-      i=${order[$next]}; next=$((next + 1))
+      pick=""
+      for ((k = 0; k < total; k++)); do
+        i=${order[$k]}
+        [ -z "${started[$i]:-}" ] || continue
+        ready=1; blocked=""
+        for n in ${POOL_NEEDS[$i]}; do
+          case "${STATUS[$n]:-}" in
+            PASS|SKIP) ;;
+            "") ready=""; [ -n "${known[$n]:-}" ] || blocked="$n (unknown item)" ;;
+            *) blocked="$n"; break ;;
+          esac
+        done
+        if [ -n "$blocked" ]; then pick=$i; break; fi
+        [ -n "$ready" ] || continue
+        pick=$i; break
+      done
+      [ -n "$pick" ] || break
+      i=$pick; started[$i]=1
+      if [ -n "$blocked" ]; then
+        # a need failed (or does not exist): the item does not run
+        done_n=$((done_n + 1)); failed_n=$((failed_n + 1)); POOL_FAILED+=("${POOL_IDS[$i]}"); STATUS[${POOL_IDS[$i]}]=BLOCKED
+        printf '[%*d/%d] %-7s %-34s %9s  (needs %s)\n' "${#total}" "$done_n" "$total" BLOCKED "${POOL_IDS[$i]}" - "$blocked"
+        if [ -n "${POOL_TIMELINE:-}" ]; then
+          printf '{"kind":"item","pool":"%s","id":"%s","status":"BLOCKED","rc":-1,"start":%.3f,"end":%.3f,"wall":0}\n' \
+            "$(_pool_json "$POOL_NAME")" "$(_pool_json "${POOL_IDS[$i]}")" "$(_pool_now)" "$(_pool_now)" >> "$POOL_TIMELINE"
+        fi
+        continue
+      fi
       _pool_spawn "$i"
       running+=("$i")
     done
+    if [ "${#running[@]}" -eq 0 ] && [ "$done_n" -lt "$total" ]; then
+      # nothing runs and nothing can start: the remaining needs form a cycle
+      for ((k = 0; k < total; k++)); do
+        [ -z "${started[$k]:-}" ] || continue
+        started[$k]=1; done_n=$((done_n + 1)); failed_n=$((failed_n + 1)); POOL_FAILED+=("${POOL_IDS[$k]}")
+        printf '[%*d/%d] %-7s %-34s %9s  (needs can never be met)\n' "${#total}" "$done_n" "$total" BLOCKED "${POOL_IDS[$k]}" -
+      done
+      break
+    fi
     # reap
     local -a still=()
     for i in "${running[@]}"; do
@@ -118,6 +161,7 @@ pool_run() {
         if grep -q ' skipped (unchanged' "$POOL_DIR/$f.log" 2>/dev/null; then label=SKIP; skip_n=$((skip_n + 1)); else label=PASS; fi
       elif [ "$st" = 124 ] || grep -q '^TIMEOUT:' "$POOL_DIR/$f.log" 2>/dev/null; then label=TIMEOUT
       else label=FAIL; fi
+      STATUS[$id]=$label
       if [ "$label" = PASS ]; then printf '%s\t%.1f\n' "${POOL_KEYS[$i]}" "$wall" > "$POOL_DIR/$f.time"; fi
       if [ "$label" != PASS ] && [ "$label" != SKIP ]; then
         POOL_FAILED+=("$id"); failed_n=$((failed_n + 1))
