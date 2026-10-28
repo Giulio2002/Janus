@@ -819,3 +819,21 @@ func TestVerifierIdentityGoOnlyScope(t *testing.T) {
 		}
 	}
 }
+
+// The auditor's clean environment imports the whole `Janus` library whatever the proof imports, so a proof
+// that imports only a narrow module still depends on every module of `Janus`.
+func TestIncrNarrowImportsStillDependOnTheCleanEnvironment(t *testing.T) {
+	x := newIncrFx(t)
+	wr(t, filepath.Join(x.root, "proofs/P.lean"), "import Janus.C\nimport Extracted\n")
+	wr(t, filepath.Join(x.root, "art/Extracted.lean"), "import Janus.C\nnamespace Extracted\nend Extracted\n")
+	x.pass()
+	x.wantSkip()
+	x.fwFiles["Janus/E.lean"] = []byte("prelude\n-- edit, reachable only through the umbrella\n")
+	x.wantRun()
+	x = newIncrFx(t)
+	wr(t, filepath.Join(x.root, "proofs/P.lean"), "import Janus.C\nimport Extracted\n")
+	wr(t, filepath.Join(x.root, "art/Extracted.lean"), "import Janus.C\nnamespace Extracted\nend Extracted\n")
+	x.pass()
+	x.fwFiles["Janus/Unused.lean"] = []byte("import Janus.C\n-- edit\n")
+	x.wantSkip()
+}

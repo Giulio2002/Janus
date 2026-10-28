@@ -782,6 +782,9 @@ func (c *incrCtx) fwComps(sp *incrSpec, mode string, add func(incrComp)) {
 	var rootNames []string
 	addRoot := func(name string, b []byte) { roots[name] = b; rootNames = append(rootNames, name) }
 	provs := []incrProvider{fp}
+	// The auditor's clean environment always imports the whole `Janus` library, whatever the proof imports
+	// (Janus/Tools/Audit.lean, `cleanEnv`): so every verdict depends on its closure.
+	addRoot("implicit: the auditor's clean environment imports Janus", []byte("import Janus\n"))
 	for _, f := range sp.Proofs {
 		b, err := os.ReadFile(c.abs(f))
 		if err != nil {
