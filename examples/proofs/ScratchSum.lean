@@ -142,16 +142,16 @@ theorem StackFacts.step {rt : List (Nat × Nat)} {sp0 a b ret fp n : Nat} {m m' 
 
 set_option maxHeartbeats 8000000 in
 set_option maxRecDepth 20000 in
-theorem correctness (impl : List Segment) (R : RtInv)
+theorem correctness (impl : List Segment) (R : RtInv) (B : PoolShape)
     (hget : PoolGetLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Get")
-      4096 R ptrType BufObj)
+      4096 R ptrType B)
     (hput : PoolPutLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Put")
-      4096 R ptrType BufObj)
+      4096 R ptrType B)
     (hnew : NewobjectLiveContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") 4096 R)
     (a b : BitVec 64) (L : List (Nat × Nat)) (bud : Nat) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b]
-      (fun s => GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      (fun s => B = BufObj ∧ GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
         Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4144, s.sp.toNat + 24) :: R.rt) ∧
         LiveSep [(s.sp.toNat - 4144, s.sp.toNat + 24)] R.rt ∧
         LiveSep L [(s.sp.toNat - 4144, s.sp.toNat + 24)] ∧
@@ -166,8 +166,9 @@ theorem correctness (impl : List Segment) (R : RtInv)
         ∃ d b', (b' = bud ∨ b' = bud - 32) ∧
           MemFrame s.mem s'.mem (R.rt ++ [(s.sp.toNat - 4144, s.sp.toNat + 24), (d, d + 32)]) ∧
           LiveFrame s.mem s'.mem L [] ∧ R.inv b' L (s.regs 28).toNat (view R.rt L s'.mem)) := by
-  intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hbin, hokG, hokP, hokN,
+  intro ret hret s hs ⟨hB, ⟨hg1, hg2, hg3⟩, ⟨hal, hb4, ha4, hw4⟩, hd, hgo, hwrt, hwL, hrt0, hpin, hbin, hokG, hokP, hokN,
     hnew0, hinv, hbud⟩
+  subst hB
   janus_intro hs
   janus_eval_nat hP : poolAddr
   janus_eval_nat hT : ptrType
@@ -634,7 +635,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (ret : Nat) (s : Stat
       4096 R ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
-    (GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
+    (BufObj = BufObj ∧ GuardOK s 4144 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 28).toNat + 16) 8 ((s.sp.toNat - 4144, s.sp.toNat + 24) :: R.rt) ∧
       LiveSep [(s.sp.toNat - 4144, s.sp.toNat + 24)] R.rt ∧
       LiveSep L [(s.sp.toNat - 4144, s.sp.toNat + 24)] ∧
@@ -645,7 +646,7 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (ret : Nat) (s : Stat
       R.ok (Extracted.program.contractAddr "runtime.newobject") [bufType] ∧
       s.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
       R.inv bud L (s.regs 28).toNat (view R.rt L s.mem) ∧ 32 ≤ bud) := by
-  refine ⟨implAt, R, ret, s0, [], 0x400, ?_, ?_, ?_, hret, setup, pre⟩
+  refine ⟨implAt, R, ret, s0, [], 0x400, ?_, ?_, ?_, hret, setup, ⟨rfl, pre⟩⟩
   · rw [aG, hPT]; exact hget
   · rw [aP, hPT]; exact hput
   · rw [aN]; exact hnew
@@ -657,9 +658,9 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
       ∃ d b', (b' = 0x400 ∨ b' = 0x400 - 32) ∧
         MemFrame s0.mem s'.mem (R.rt ++ [(s0.sp.toNat - 4144, s0.sp.toNat + 24), (d, d + 32)]) ∧
         LiveFrame s0.mem s'.mem [] [] ∧ R.inv b' [] (s0.regs 28).toNat (view R.rt [] s'.mem) := by
-  have h := correctness implAt R (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+  have h := correctness implAt R BufObj (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
     (by rw [aN]; exact hnew) 3 5 [] 0x400
-    ret hret s0 setup pre
+    ret hret s0 setup ⟨rfl, pre⟩
   exact h
 
 end Witness

@@ -1393,11 +1393,11 @@ theorem tail0 {impl : List Amd64.Segment} {R : RtInv} {B : Nat} {n : BitVec 64} 
         hfr3 hlf3 hobj hapS hinv3
 set_option maxHeartbeats 2000000 in
 set_option maxRecDepth 40000 in
-theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : Nat) (hB40 : B < 2 ^ 40)
+theorem correctness (impl : List Amd64.Segment) (R : RtInv) (S : PoolShape) (B : Nat) (hB40 : B < 2 ^ 40)
     (hget : PoolAmd64.PoolGetLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Get")
-      4096 R ptrType (SliceObj B))
+      4096 R ptrType S)
     (hput : PoolAmd64.PoolPutLive (Extracted.program.link impl) (Extracted.program.contractAddr "sync.(*Pool).Put")
-      4096 R ptrType (SliceObj B))
+      4096 R ptrType S)
     (hnew : NewobjectLiveContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.newobject") 4096 R)
     (hgrow : GrowsliceLiveContract64 (Extracted.program.link impl)
@@ -1406,10 +1406,9 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : Nat) (hB40 : B 
       (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") 4096 R)
     (hwb : WbLiveContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.gcWriteBarrier2") 4096 R 2)
-    (hfl : ∀ b L g v, R.inv b L g v → Outside wbFlag 4 L)
     (n : BitVec 64) (L : List (Nat × Nat)) (bud : Nat) :
     Ensures (Extracted.program.link impl) Extracted.entry [n]
-      (fun s => StackGuardOK s 4280 ∧ StackWritable s 4280 16 ∧ (s.regs 4).toNat % 8 = 0 ∧ Extracted.program.DataLoaded s.mem ∧
+      (fun s => (S = SliceObj B ∧ (∀ b L g v, R.inv b L g v → Outside wbFlag 4 L)) ∧ (StackGuardOK s 4280 ∧ StackWritable s 4280 16 ∧ (s.regs 4).toNat % 8 = 0 ∧ Extracted.program.DataLoaded s.mem ∧
         Outside ((s.regs 14).toNat + 16) 8 (((s.regs 4).toNat - 4280, (s.regs 4).toNat + 16) :: R.rt) ∧
         LiveSep [((s.regs 4).toNat - 4280, (s.regs 4).toNat + 16)] R.rt ∧
         LiveSep L [((s.regs 4).toNat - 4280, (s.regs 4).toNat + 16)] ∧
@@ -1426,10 +1425,11 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : Nat) (hB40 : B 
         s.mem.readLE (poolAddr + newOffset) 8 = 0 ∧
         R.inv bud L (s.regs 14).toNat (view R.rt L s.mem) ∧ n.toNat < 2 ^ 40 ∧ 24 ≤ bud ∧
         (∀ c, c ≤ B → c < n.toNat → 24 + 8 * growCap8 n.toNat c ≤ bud) ∧
-        (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B))
+        (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B)))
       (fun s s' => Post R B n L bud s s') := by
-  intro ret hret s hs ⟨hg, ⟨hb4, ha4, hw4⟩, hal, hd, hgo, hwrt, hwL, hrt0, hpin, hsin, hu64,
+  intro ret hret s hs ⟨⟨hS, hfl⟩, hg, ⟨hb4, ha4, hw4⟩, hal, hd, hgo, hwrt, hwL, hrt0, hpin, hsin, hu64,
     hfacc, hokG, hokP, hokN, hokGr, hokClr, hokWb, hnew0, hinv, hn40, hb24, hbud, hcapB⟩
+  subst hS
   janus64_intro hs
   have hg1 := hg.noWrap
   have hg2 := hg.readable
@@ -1972,10 +1972,9 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (B : Nat) (ret 
       (Extracted.program.contractAddr "runtime.memclrNoHeapPointers") 4096 R ∧
     WbLiveContract64 (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.gcWriteBarrier2")
       4096 R 2) ∧
-    (∀ b L g v, R.inv b L g v → Outside wbFlag 4 L) ∧
     (RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [n] s) ∧
-    ((StackGuardOK s 4280 ∧ StackWritable s 4280 16 ∧ (s.regs 4).toNat % 8 = 0 ∧
+    (((SliceObj B = SliceObj B ∧ (∀ b L g v, R.inv b L g v → Outside wbFlag 4 L)) ∧ StackGuardOK s 4280 ∧ StackWritable s 4280 16 ∧ (s.regs 4).toNat % 8 = 0 ∧
       Extracted.program.DataLoaded s.mem ∧
       Outside ((s.regs 14).toNat + 16) 8 (((s.regs 4).toNat - 4280, (s.regs 4).toNat + 16) :: R.rt) ∧
       LiveSep [((s.regs 4).toNat - 4280, (s.regs 4).toNat + 16)] R.rt ∧
@@ -1997,8 +1996,8 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (B : Nat) (ret 
       (∀ c, c ≤ B → c < n.toNat → growCap8 n.toNat c ≤ B))) := by
   obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22,
     a23, a24⟩ := pre
-  refine ⟨implAt, R, 1, ret, s0, [], 0x400, 1, by decide, ⟨?_, ?_, ?_, ?_, ?_, ?_⟩, hfl', ⟨hret, setup⟩,
-    ⟨⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩, ⟨a10, a11, a12, a13, a14, a15, a16⟩,
+  refine ⟨implAt, R, 1, ret, s0, [], 0x400, 1, by decide, ⟨?_, ?_, ?_, ?_, ?_, ?_⟩, ⟨hret, setup⟩,
+    ⟨⟨⟨rfl, hfl'⟩, a1, a2, a3, a4, a5, a6, a7, a8, a9⟩, ⟨a10, a11, a12, a13, a14, a15, a16⟩,
       ⟨a17, a18, a19, a20, a21, a22, a23, a24⟩⟩⟩
   · rw [aG, hPT]; exact hget
   · rw [aP, hPT]; exact hput
@@ -2015,9 +2014,9 @@ theorem returns : Returns ((Extracted.program.link implAt).withExit ret) s0 fun 
         MemFrame s0.mem s'.mem (R.rt ++ [((s0.regs 4).toNat - 4280, (s0.regs 4).toNat + 16)]) ∧
         LiveFrame s0.mem s'.mem [] [] ∧
         R.inv b' ([] ++ xs) (s0.regs 14).toNat (view R.rt ([] ++ xs) s'.mem) := by
-  have h := correctness implAt R 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
+  have h := correctness implAt R (SliceObj 1) 1 (by decide) (by rw [aG, hPT]; exact hget) (by rw [aP, hPT]; exact hput)
     (by rw [aN]; exact hnew) (by rw [aGr]; exact hgrow) (by rw [aM]; exact hclr) (by rw [aW]; exact hwb)
-    hfl' 1 [] 0x400 ret hret s0 setup pre
+    1 [] 0x400 ret hret s0 setup ⟨⟨rfl, hfl'⟩, pre⟩
   refine Returns.mono h fun s' ⟨hab, cap0, hc, hres, xs, b', hfr, hb, hF, hLF, hinv⟩ =>
     ⟨hab, ?_, xs, b', hfr, hb, hF, hLF, hinv⟩
   have : cap0 = 0 ∨ cap0 = 1 := by omega
