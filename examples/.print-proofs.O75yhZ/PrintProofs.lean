@@ -1,2 +1,0 @@
--- The library root of the print example proofs. Every module under PrintProofs imports `Extracted`
--- (supplied by `janus verify`), so they are built by janus, not by `lake build`.
