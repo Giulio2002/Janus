@@ -193,6 +193,11 @@ selected x86 && mktree "$tree_x86"
 if selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go || selected rtasl-fsqrt || selected rtasl-replay; then mktree "$tree"; fi
 peak_tree=$(du -sm "$out"/tree-* 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
 echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed at the end)"
+lane_times="$root/artifacts/gate/lane-times"
+shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2
+pool_init gate "$lanes_n" "$out/lanes"
+POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
+export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too
 # an estimate for the first run (seconds, the profile's measurements); later runs use their own
 declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]=900 [sail-build]=300 [axiom]=1
   [rtasl-probes]=1200 [rtasl-replay]=900 [rtasl-prove]=600 [rtasl-fsqrt]=600 [rtasl-go]=400 [rtasl-rel]=120 [rtasl-strict]=120 [rtasl-btf]=5)
