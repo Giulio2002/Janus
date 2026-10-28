@@ -83,7 +83,7 @@ partial=""
 
 # ---- admission (RULES.md)
 load1=$(awk '{ print int($1) }' /proc/loadavg); memk=$(par_mem_available_kb)
-free_g=$(df -P --output=avail -BG "$root" | tail -1 | tr -dc 0-9)
+free_g=$(df --output=avail -BG "$root" | tail -1 | tr -dc 0-9)
 if [ "${JANUS_GATE_FORCE:-}" != 1 ]; then
   if [ "$load1" -ge 70 ] || [ "$memk" -lt $((40 * 1024 * 1024)) ] || [ "${free_g:-0}" -lt 60 ]; then
     echo "gate: host too busy (load $load1, MemAvailable $((memk / 1048576)) GiB, $free_g GiB free): need load < 70, >= 40 GiB, >= 60 GiB free (JANUS_GATE_FORCE=1 overrides)" >&2
