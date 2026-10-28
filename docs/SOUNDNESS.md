@@ -2218,3 +2218,16 @@ extracted function run on the loaded image as described above, nothing else):
   miscompiled code, which is the point.
 
 * **Hardware-oracle-only instruction classes.** x87, scalar FP, AES/PCLMUL/SHA, BMI/FMA, SSSE3/SSE4, AVX/AVX2 and AVX-512 are cross-checked against hardware oracles only, because the Sail x86 model has no semantics for them.
+
+## Kernel-opaque `fillLE` (proof-automation helper, not part of the model)
+
+`Janus.Amd64.fillLE` (Janus/Amd64/TacticExt.lean) is the closed form `janus64_run` uses for the
+memory after a `REP STOS`. It is a helper of the proof automation: the instruction semantics
+(`stosIter` in Janus/Amd64/Exec.lean) does not mention it, and it is in no pinned or audited
+trusted-spec file. It was a structural recursion, which made the kernel unfold `k` nested stores
+(`k = 600`: 584 s) whenever it compared two memory terms. It is now `Classical.choose` of the
+existence of the structural value (`fillLEStructural`), with the proved equivalence
+`fillLE_eq_structural : fillLE M a sz v k = fillLEStructural M a sz v k` and the equations
+`fillLE_zero`/`fillLE_succ`. Axioms: unchanged (`Classical.choice` is already allowed). Nothing is
+computed from `fillLE` (no `decide`/`#eval`); `stosIter_ok` still proves `stosIter` equals the
+state with `fillLE`, so the meaning of the semantics is unchanged.

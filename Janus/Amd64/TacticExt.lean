@@ -172,26 +172,26 @@ theorem bv_and_ofNat_mask (m c : Nat) (h : m < 2 ^ 64) (hc : c + 1 < 2 ^ 64) (hp
 /-! ## `REP STOS` and `REP MOVS` -/
 
 /-- The memory after `k` element stores of `v` (`sz` bytes each) at `a`, `a + sz`, …. -/
-def fillLEDef (M : Memory) (a sz v : Nat) : Nat → Memory
+def fillLEStructural (M : Memory) (a sz v : Nat) : Nat → Memory
   | 0 => M
-  | k + 1 => fillLEDef (M.writeLE a sz v) (a + sz) sz v k
+  | k + 1 => fillLEStructural (M.writeLE a sz v) (a + sz) sz v k
 
-/-- `fillLEDef`, made opaque to the kernel: it is the `Classical.choose` of the existence of that
+/-- `fillLEStructural`, made opaque to the kernel: it is the `Classical.choose` of the existence of that
 value, so no definitional check can unfold it (a literal `k` such as `600` otherwise makes the
 kernel unfold 600 nested stores whenever it compares two memory terms; the proofs only use the
 equations `fillLE_zero`/`fillLE_succ`). -/
 noncomputable def fillLE (M : Memory) (a sz v k : Nat) : Memory :=
-  Classical.choose (⟨fillLEDef M a sz v k, rfl⟩ : ∃ m, m = fillLEDef M a sz v k)
+  Classical.choose (⟨fillLEStructural M a sz v k, rfl⟩ : ∃ m, m = fillLEStructural M a sz v k)
 
-theorem fillLE_eq (M : Memory) (a sz v k : Nat) : fillLE M a sz v k = fillLEDef M a sz v k :=
-  Classical.choose_spec (⟨fillLEDef M a sz v k, rfl⟩ : ∃ m, m = fillLEDef M a sz v k)
+theorem fillLE_eq_structural (M : Memory) (a sz v k : Nat) : fillLE M a sz v k = fillLEStructural M a sz v k :=
+  Classical.choose_spec (⟨fillLEStructural M a sz v k, rfl⟩ : ∃ m, m = fillLEStructural M a sz v k)
 
 theorem fillLE_zero (M : Memory) (a sz v : Nat) : fillLE M a sz v 0 = M := by
-  rw [fillLE_eq]; rfl
+  rw [fillLE_eq_structural]; rfl
 
 theorem fillLE_succ (M : Memory) (a sz v k : Nat) :
     fillLE M a sz v (k + 1) = fillLE (M.writeLE a sz v) (a + sz) sz v k := by
-  rw [fillLE_eq, fillLE_eq]; rfl
+  rw [fillLE_eq_structural, fillLE_eq_structural]; rfl
 
 @[janus64_exec, janus64_post] theorem regions_fillLE (M : Memory) (a sz v k : Nat) :
     (fillLE M a sz v k).regions = M.regions := by
