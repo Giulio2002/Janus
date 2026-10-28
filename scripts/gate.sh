@@ -209,8 +209,8 @@ flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($
 mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
 selected x86 && mktree "$tree_x86"
 if selected testlane || selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go || selected rtasl-fsqrt || selected rtasl-replay; then mktree "$tree"; fi
-peak_tree=$(du -sm "$out"/tree-* 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
-echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed at the end)"
+peak_tree=$(du -sm "$treebase"/x86 "$treebase"/asl 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
+echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed when the gate passes, kept otherwise: $treebase)"
 lane_times="$root/artifacts/gate/lane-times"
 shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2
 pool_init gate "$lanes_n" "$out/lanes"
