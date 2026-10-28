@@ -425,7 +425,7 @@ the one Lake computes here is rebuilt.
 
 **Every entry is signed, and every use verifies it.** An entry holds `MANIFEST.sha256` (the SHA-256
 of every produced file) and `MANIFEST.hmac`, an HMAC-SHA256 of the manifest, the entry kind and
-the entry id, under a per-user key (`~/.cache/janus/asl-cache.key`, 32 random bytes, mode 0600 in a
+the entry id, under a per-user key (`~/.cache/janus/asl-cache-key/asl-cache.key`, 32 random bytes, mode 0600 in a
 0700 directory, owned by the user, not a symlink, created atomically; `JANUS_CACHE_KEY_DIR`
 relocates it; cf. `resultHMACKey`, the key of the verification-result cache). On a use
 (`scripts/lib/bcache.py fetch`, `asl_mod_cache.py restore`):

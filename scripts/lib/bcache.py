@@ -29,7 +29,7 @@ and replaced.
     bcache.py key-path                                          where the per-user key lives
 
 KIND is armasl (CACHE/<id>), sail (CACHE/sail/<id>) or mod (CACHE/mods/<id[:2]>/<id>).
-The HMAC key: $JANUS_CACHE_KEY_DIR/asl-cache.key, default ~/.cache/janus/asl-cache.key (32 random
+The HMAC key: $JANUS_CACHE_KEY_DIR/asl-cache.key, default ~/.cache/janus/asl-cache-key/asl-cache.key (32 random
 bytes, mode 0600, directory 0700, ours, not a symlink; created atomically on first use). When it
 cannot be read or created safely, the cache is not used at all (exit 4: the caller builds).
 """
@@ -65,7 +65,7 @@ def key_dir():
     d = os.environ.get("JANUS_CACHE_KEY_DIR")
     if d:
         return d
-    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"), "janus")
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"), "janus", "asl-cache-key")
 
 
 def key_path():

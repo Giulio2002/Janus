@@ -32,7 +32,7 @@
 #                      toolchain by content, the lean-sail manifest entry, the lakefile settings that
 #                      reach ArmASL's modules, the compiler environment, the machine), carry a
 #                      SHA-256 manifest AND an HMAC of it under a per-user key
-#                      (scripts/lib/bcache.py; ~/.cache/janus/asl-cache.key), both checked on every
+#                      (scripts/lib/bcache.py; ~/.cache/janus/asl-cache-key/asl-cache.key), both checked on every
 #                      copy, and are published atomically under a per-key lock, so worktrees and CI
 #                      runners share one build of the ~45 min model. A missing, unsigned, tampered
 #                      or incomplete entry is rebuilt from source, never used.
