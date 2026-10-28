@@ -14,6 +14,8 @@
 # STATUSDIR/<i>.log and STATUSDIR/<i>.rc hold the output and exit status of theorem i (0-based).
 # The extra theorems of an example (the non-vacuity witnesses, F64ToU64's `exact`, ...) used to
 # run one after the other, each compiling the same proof again: Classify's three took 3 x 170 s.
+. "$(dirname "${BASH_SOURCE[0]}")/itemtimeout.sh"
+
 verify_theorems() {
   local out=$1 proof=$2 st=$3 i=0 thm dir
   shift 3
@@ -39,8 +41,9 @@ verify_theorems() {
       cp -r "$out"/. "$dir"/; rm -f "$dir/verified.json"
     fi
     ( rc=0
-      bin/janus verify "$dir" --proof "$proof" --theorem "$thm" ${args[@]+"${args[@]}"} > "$st/$i.log" 2>&1 || rc=$?
+      jv "$dir" --proof "$proof" --theorem "$thm" ${args[@]+"${args[@]}"} > "$st/$i.log" 2>&1 || rc=$?
       echo "$rc" > "$st/$i.rc"
+      [ "$rc" != 124 ] || echo "TIMEOUT: $dir --theorem $thm" >&2
       [ "$dir" = "$out" ] || rm -rf "$dir" ) &
     i=$((i + 1))
     while [ "$(jobs -rp | wc -l)" -ge "${JANUS_THEOREM_JOBS:-2}" ]; do wait -n || true; done

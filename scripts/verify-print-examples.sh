@@ -22,6 +22,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
+. "$root/scripts/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
 
 all=(PrintX PrintBool PrintNeg PrintStr)
@@ -68,7 +69,7 @@ for target in "${names[@]}"; do
   start=$(date +%s.%N)
   ok=1
   for thm in correctness full_output Witness.nonvacuous Witness.returns; do
-    if ! bin/janus verify "$out" --proof "$snap/PrintProofs/${isa^}/$n.lean" --proof-root "$snap" \
+    if ! jv "$out" --proof "$snap/PrintProofs/${isa^}/$n.lean" --proof-root "$snap" \
         --theorem "Proof.$thm" \
         ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
       ok=0; echo "  $isa/$n: Proof.$thm FAILED"

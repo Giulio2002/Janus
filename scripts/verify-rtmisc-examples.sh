@@ -12,6 +12,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
+. "$root/scripts/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
@@ -88,7 +89,7 @@ verify_one() {
     pkg="$(basename "$(ls "$d"/*.lean | head -1)" .lean)"
     : > "$out/verify.log"
     for spec in "Main:$pkg.correctness" "Witness:$pkg.Witness.nonvacuous" "Witness:$pkg.Witness.returns"; do
-      if bin/janus verify "$out" --proof "$d/$pkg/${spec%%:*}.lean" --proof-root "$d" --theorem "${spec#*:}" --janus-root . >> "$out/verify.log" 2>&1; then
+      if jv "$out" --proof "$d/$pkg/${spec%%:*}.lean" --proof-root "$d" --theorem "${spec#*:}" --janus-root . >> "$out/verify.log" 2>&1; then
         t=$(echo "$(date +%s.%N) - $start" | bc)
         printf '%-18s ok  %6.1fs (%s)\n' "$isa/$n" "$t" "${spec#*:}" | tee -a "$lines/${isa}_$n"
       else
@@ -99,12 +100,12 @@ verify_one() {
     [ "$ok" = 1 ] || tail -30 "$out/verify.log"
     return 0
   fi
-  if bin/janus verify "$out" --proof "examples/rtmisc/proofs/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then
+  if jv "$out" --proof "examples/rtmisc/proofs/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-18s ok  %6.1fs\n' "$isa/$n" "$t" | tee "$lines/${isa}_$n"
     if grep -q '^namespace Witness' "examples/rtmisc/proofs/$isa/$n.lean"; then
       for thm in Proof.Witness.nonvacuous Proof.Witness.returns; do
-        if bin/janus verify "$out" --proof "examples/rtmisc/proofs/$isa/$n.lean" --theorem "$thm" --janus-root . >> "$out/verify.log" 2>&1; then
+        if jv "$out" --proof "examples/rtmisc/proofs/$isa/$n.lean" --theorem "$thm" --janus-root . >> "$out/verify.log" 2>&1; then
           printf '%-18s ok  (%s)\n' "$isa/$n" "$thm" | tee -a "$lines/${isa}_$n"
         else
           printf '%-18s FAILED %s (see %s/verify.log)\n' "$isa/$n" "$thm" "$out" | tee -a "$lines/${isa}_$n"

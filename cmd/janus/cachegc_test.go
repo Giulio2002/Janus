@@ -843,3 +843,17 @@ func TestTheoremsLib(t *testing.T) {
 		t.Fatalf("scripts/lib/test-theorems.sh: %v\n%s", err, out)
 	}
 }
+
+// TestItemTimeoutLib runs the self-test of scripts/lib/itemtimeout.sh (jv, the per-item wall-clock
+// limit of the verify-* scripts): a hung `janus verify` is killed, fails with status 124 and
+// prints TIMEOUT, and the other theorems of the example are not affected.
+func TestItemTimeoutLib(t *testing.T) {
+	if _, err := exec.LookPath("flock"); err != nil {
+		t.Skip("flock not installed")
+	}
+	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "lib", "test-itemtimeout.sh"))
+	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "all checks passed") {
+		t.Fatalf("scripts/lib/test-itemtimeout.sh: %v\n%s", err, out)
+	}
+}

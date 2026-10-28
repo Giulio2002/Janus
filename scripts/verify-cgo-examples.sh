@@ -36,6 +36,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
+. "$root/scripts/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
 
 declare -A sym=(
@@ -92,7 +93,7 @@ for target in "${names[@]}"; do
   bin/janus extract "artifacts/$b-$isa" "${sym[$n]}" "$out" --contract runtime.convT64 \
     --contract runtime.convT32 --contract runtime.convTnoptr ${xargs[$isa/$n]:-${xargs[$n]:-}} >/dev/null 2>&1
   start=$(date +%s.%N)
-  if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then
+  if jv "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-12s ok  %6.1fs\n' "$isa/$n" "$t" | tee -a "$summary"
     # the non-vacuity witnesses (Proof.Witness.nonvacuous, Proof.Witness.returns) where there are some
@@ -100,7 +101,7 @@ for target in "${names[@]}"; do
       for thm in Proof.Witness.nonvacuous Proof.Witness.returns; do
         # `returns` only where the proof states it
         [ "$thm" = Proof.Witness.returns ] && ! grep -q '^theorem returns' "examples/proofs-cgo/$isa/$n.lean" && continue
-        if bin/janus verify "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --theorem "$thm" --janus-root . >> "$out/verify.log" 2>&1; then
+        if jv "$out" --proof "examples/proofs-cgo/$isa/$n.lean" --theorem "$thm" --janus-root . >> "$out/verify.log" 2>&1; then
           printf '%-12s ok  (%s)\n' "$isa/$n" "$thm" | tee -a "$summary"
         else
           printf '%-12s FAILED %s (see %s/verify.log)\n' "$isa/$n" "$thm" "$out" | tee -a "$summary"; fail=1

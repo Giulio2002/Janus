@@ -739,3 +739,7 @@ The whole run (21 verifications, one at a time) peaked at 4.9 GiB in its script 
 Every example is far below the 24 GiB default. The largest jobs are the ClearWords proof
 (4.8 GiB) and the cold framework replay (3.0 GiB), so the default leaves about 5x headroom. A 10G parallel slot holds a cold
 verify with room to spare.
+
+## Per-item time limit
+
+The verify-* scripts run every `janus verify` through `jv` (scripts/lib/itemtimeout.sh) under `JANUS_ITEM_TIMEOUT` seconds (default 2700; 0 disables). A hung proof is killed, reported as `TIMEOUT:` in its log, and counts as a failure; the run continues.
