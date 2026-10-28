@@ -69,6 +69,8 @@ here="$pkg/sail"
 # The build cache is on by default (docs/SOUNDNESS.md "Build caches"): ASL_CACHE=<dir> picks it,
 # ASL_CACHE=off (or empty) disables it, unset means /srv/janus-asl-cache if that exists, else
 # ~/.cache/janus/asl. Entries are content-keyed, HMAC-signed and hash-checked on every use.
+# JANUS_ASL_CACHE=<dir> is an alias of ASL_CACHE (scripts/gate.sh forwards it); 0/off/no/false is the opt-out below.
+case "${JANUS_ASL_CACHE:-}" in ''|0|off|no|false) ;; *) : "${ASL_CACHE:=$JANUS_ASL_CACHE}" ;; esac
 if [ "${ASL_CACHE-unset}" = unset ]; then
   if [ -d /srv/janus-asl-cache ]; then ASL_CACHE=/srv/janus-asl-cache
   else ASL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/janus/asl"; fi

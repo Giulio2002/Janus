@@ -80,6 +80,7 @@ model_dir() {
 # SAIL_CACHE_READONLY=1 never writes.
 SAIL_CARGO_FLAGS="--release --locked"
 SAIL_DRIVER_REL=target/release/janus-oracle-sail
+case "${JANUS_ASL_CACHE:-}" in ''|0|off|no|false) ;; *) : "${ASL_CACHE:=$JANUS_ASL_CACHE}" ;; esac
 if [ -z "${SAIL_CACHE+x}" ]; then
   if [ -n "${ASL_CACHE+x}" ]; then SAIL_CACHE="$ASL_CACHE"
   elif [ -d /srv/janus-asl-cache ]; then SAIL_CACHE=/srv/janus-asl-cache
