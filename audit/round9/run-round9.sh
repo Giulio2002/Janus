@@ -143,7 +143,7 @@ for mg in prlimit systemd-user none bogus; do
   out="$(JANUS_MEMGUARD=$mg JANUS_MEM_MAX=300M "$J" verify --fresh --janus-root "$root" --proof audit/round7/attacks/H1a_binder_lookalike_vacuous.lean "$W/Add" 2>&1)"
   row "MG_attack_JANUS_MEMGUARD=$mg" blocked
 done
-out="$(JANUS_MEMGUARD=prlimit "$J" verify --fresh --janus-root "$root" --proof examples/proofs/Add.lean "$W/Add" 2>&1)"
+out="$(JANUS_MEMGUARD=prlimit "$J" verify --fresh --fresh-framework --janus-root "$root" --proof examples/proofs/Add.lean "$W/Add" 2>&1)"
 row MG_ctl_Add_prlimit Verified
 
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
