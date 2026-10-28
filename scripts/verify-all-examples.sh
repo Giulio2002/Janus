@@ -14,6 +14,8 @@
 # Usage: scripts/verify-all-examples.sh [-j N] [--changed] [--cgo]
 #   -j N        jobs at once (default and memory admission: scripts/lib/parallel.sh).
 #   --cgo       also verify the cgo rows (examples/proofs-cgo) in the same queue.
+#   --filter ERE   development only: queue just the items whose id ("arm64:Add", "cgo:amd64/CAdd", ...)
+#               matches the regular expression; not a gate run.
 #   --changed   development mode, NOT a gate run: skip every item whose inputs are byte-identical
 #               to those of its last passing run in this checkout (artifacts/verify-all-examples.manifest):
 #               its extraction (Extracted.lean, identity.json), its proof file, its extraction
@@ -35,11 +37,14 @@ export PATH=/usr/local/go/bin:$PATH
 par_init "$@"
 changed=""
 cgo=""
-for a in ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}; do
-  case "$a" in
+filter=""
+args=(${PAR_ARGS[@]+"${PAR_ARGS[@]}"})
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[$i]}" in
     --changed) changed=1 ;;
     --cgo) cgo=1 ;;
-    *) echo "usage: scripts/verify-all-examples.sh [-j N] [--changed] [--cgo]" >&2; exit 2 ;;
+    --filter) i=$((i + 1)); filter="${args[$i]:?--filter needs a regular expression}" ;;
+    *) echo "usage: scripts/verify-all-examples.sh [-j N] [--changed] [--cgo] [--filter ERE]" >&2; exit 2 ;;
   esac
 done
 
@@ -99,6 +104,10 @@ if [ -n "$cgo" ]; then
   for t in "${cgorows[@]}"; do items+=("cgo:$t"); done
 fi
 
+if [ -n "$filter" ]; then
+  mapfile -t items < <(printf '%s\n' "${items[@]}" | grep -E -e "$filter" || true)
+  echo "verify-all-examples: --filter '$filter': ${#items[@]} items (development only, not a gate run)"
+fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 broken=()
