@@ -113,12 +113,7 @@ func pinLib(dir string, keep func(mod string) bool) (pins, error) {
 		go func() {
 			defer wg.Done()
 			for i := range next {
-				b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(files[i])))
-				if err != nil {
-					errs[i] = err
-					continue
-				}
-				sums[i] = sha256Hex(b)
+				sums[i], errs[i] = fileSha256Hex(filepath.Join(dir, filepath.FromSlash(files[i])))
 			}
 		}()
 	}
@@ -208,6 +203,17 @@ func (ps pinSet) check(stage string) error {
 	return nil
 }
 
+// absHashes maps the absolute path of every pinned module-data file to its pinned SHA-256.
+func (ps pinSet) absHashes() map[string]string {
+	m := map[string]string{}
+	for _, l := range ps {
+		for rel, h := range l.want {
+			m[filepath.Join(l.dir, filepath.FromSlash(rel))] = h
+		}
+	}
+	return m
+}
+
 // frameworkPins pins the module-data files of a trusted framework library build that belong to
 // framework modules: Janus.* modules with a source file in the framework (files). A stray
 // Janus.* olean without a framework source is not pinned, so it can never pass as framework.
@@ -290,6 +296,15 @@ func replayCacheDir() string { return filepath.Join(cacheRoot(), "v1", "replay")
 // of every module-data file Lean loads for it and, recursively, the keys of its imports, so a
 // cached result is reused only if nothing it was checked against changed.
 func planReplay(resolved map[string]string, graph map[string][]string, toolchainVersion string, useCache bool) (*replayPlan, error) {
+	return planReplayPinned(resolved, graph, toolchainVersion, useCache, nil)
+}
+
+// planReplayPinned is planReplay with the SHA-256 of module-data files already measured (known:
+// absolute file path -> hash, from the pins of the verification). A key then uses the pinned
+// hash of a file instead of reading and hashing it again (J1): the pins are re-checked after the
+// replay, so the pinned bytes are the bytes Lean loaded; the digest is the same one, so the
+// keys (and the cache entries) are unchanged. A file that is not in known is read as before.
+func planReplayPinned(resolved map[string]string, graph map[string][]string, toolchainVersion string, useCache bool, known map[string]string) (*replayPlan, error) {
 	p := &replayPlan{keys: map[string]string{}, cacheOn: useCache}
 	for m := range resolved {
 		p.modules = append(p.modules, m)
@@ -313,8 +328,10 @@ func planReplay(resolved map[string]string, graph map[string][]string, toolchain
 		fmt.Fprintf(h, "janus-replay-v1\n%s\n%s\n", toolchainVersion, m)
 		for _, ext := range []string{"", ".server", ".private"} {
 			f := olean + ext
-			if b, err := os.ReadFile(f); err == nil {
-				fmt.Fprintf(h, "part %q %s\n", ext, sha256Hex(b))
+			if sum, ok := known[f]; ok {
+				fmt.Fprintf(h, "part %q %s\n", ext, sum)
+			} else if sum, err := fileSha256Hex(f); err == nil {
+				fmt.Fprintf(h, "part %q %s\n", ext, sum)
 			} else if ext == "" {
 				return "", err
 			}

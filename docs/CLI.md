@@ -486,7 +486,7 @@ name; …`). The classification is informational and untrusted, like reachabilit
 
 ```sh
 janus verify <outdir> [--proof FILE] [--theorem NAME]... [--proof-root PKG [--allow-path-deps]] [--results FILE] [--json]
-             [--fresh] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox] [--asl]
+             [--fresh] [--fresh-framework] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox] [--asl]
 janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 ```
 
@@ -520,7 +520,9 @@ library, Mathlib) when every one of them, transitively, is a git dependency pinn
 ([details](CONSUMERS.md#extra-dependencies)). `--allow-path-deps` additionally accepts local
 path dependencies other than janus, copied as they are and recorded as `"type": "path"` (not
 pinned). `--json` prints the report as JSON; `--fresh` rebuilds the framework/caches from
-scratch (and replays every module, ignoring the replay cache); `--replay-fresh` additionally
+scratch (and replays every module, ignoring the replay cache); `--fresh-framework` additionally ignores the gate-private framework verdict store
+(`JANUS_VERDICT_CACHE=<private dir>`, docs/SOUNDNESS.md "Gate-private framework verdicts"), which
+lets `--fresh` verifications of one gate share one replay of an identical framework build; `--replay-fresh` additionally
 replays the theorem's module with `leanchecker --fresh`, re-checking its whole environment,
 Lean core included, from an empty environment (slow: minutes).
 
@@ -639,8 +641,10 @@ Steps; any failure prints `Invalid:` with its stage and exits `1`:
    trusted directory first on `LEAN_PATH`. Errors are summarised as `Lean errors (N):` with paths
    mapped back to the original files; the full output follows under `Details:` (`proof
    checking`). The proof may import `Extracted`, `Janus` and Lean/Std modules.
-6. **Audit** with `janus-audit` (sandboxed): it imports `Extracted`, `JanusTrusted` and `Proof`
-   without running their initializers, checks the theorem is a `theorem` in the proof module,
+6. **Audit** with `janus-audit` (sandboxed; started in `--serve` mode before the proof compile so
+   that its clean environment is built meanwhile, and given its request once the proof has compiled
+   and the pins have been checked, docs/SOUNDNESS.md "Verify fixed overhead"): it imports
+   `Extracted`, `JanusTrusted` and `Proof` without running their initializers, checks the theorem is a `theorem` in the proof module,
    checks `Extracted.program`/`entry` are defeq to `JanusTrusted`, enforces the statement rules
    above, collects transitive axioms (`collectAxioms`), pretty-prints the statement in the
    clean environment, checks its instance arguments and that the printed text re-elaborates to

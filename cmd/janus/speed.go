@@ -92,19 +92,21 @@ func readTrustedManifest(entry, key string) (trustedManifest, bool) {
 
 // loadTrustedCache copies a cached trusted compile into dir (which holds only the two
 // sources). It reports whether it did; any missing or mismatching file is a miss, and the
-// partial copy is removed.
-func loadTrustedCache(key, dir string) bool {
+// partial copy is removed. The returned pins are the manifest's hashes, each of which the data
+// written was verified against: they pin the loaded files without hashing them again (the
+// later pin checks compare the files on disk with them).
+func loadTrustedCache(key, dir string) (pins, bool) {
 	entry := filepath.Join(trustedCacheDir(), key[:2], key)
 	m, ok := readTrustedManifest(entry, key)
 	if !ok {
-		return false
+		return nil, false
 	}
 	var copied []string
-	undo := func() bool {
+	undo := func() (pins, bool) {
 		for _, p := range copied {
 			_ = os.Remove(p)
 		}
-		return false
+		return nil, false
 	}
 	for rel, want := range m.Files {
 		if filepath.Base(rel) != rel || !isModuleData(rel) {
@@ -121,6 +123,22 @@ func loadTrustedCache(key, dir string) bool {
 		copied = append(copied, dst)
 	}
 	touchHit(entry)
+	return m.Files, true
+}
+
+// trustedEntryIntact: every file the authentic manifest lists is in the entry with the recorded
+// hash. An entry that is not (a data file damaged after it was stored) would otherwise make its
+// key miss on every run; storeTrustedCache replaces it.
+func trustedEntryIntact(entry string, m trustedManifest) bool {
+	for rel, want := range m.Files {
+		if filepath.Base(rel) != rel || !isModuleData(rel) {
+			return false
+		}
+		data, err := readPrivateFile(filepath.Join(entry, rel), false)
+		if err != nil || sha256Hex(data) != want {
+			return false
+		}
+	}
 	return true
 }
 
@@ -130,7 +148,7 @@ func storeTrustedCache(key, dir string, files pins) {
 	parent := filepath.Join(trustedCacheDir(), key[:2])
 	final := filepath.Join(parent, key)
 	if _, err := os.Lstat(final); err == nil {
-		if _, ok := readTrustedManifest(final, key); ok {
+		if m, ok := readTrustedManifest(final, key); ok && trustedEntryIntact(final, m) {
 			return
 		}
 		// An entry that is not authentic would otherwise make this key miss forever: move it
@@ -189,20 +207,27 @@ func compileBoth(compile func(mod string) (string, error), mods ...string) ([]st
 }
 
 // earlyReplay is the kernel replay of the per-verification modules, started before the audit.
+// Each module has its own marker (earlyReplayMarker): a module whose marker is authentic is not
+// replayed again (J1: a new proof of an already verified extraction replays only the proof, not
+// Extracted and JanusTrusted as well).
 type earlyReplay struct {
-	mods []string
-	wg   sync.WaitGroup
-	err  error
-	out  string
-	ran  bool
+	mods    []string // the modules replayed by this run (their marker was missing)
+	markers map[string]string
+	wg      sync.WaitGroup
+	err     error
+	out     string
+	ran     bool
 }
 
-// earlyReplayMarker names a passing early replay of exactly these module bytes (the trusted and
-// proof pins), the framework build and toolchain, so a re-verification of the same proof does
-// not start it again (the main replay then finds every module in the replay cache).
-func earlyReplayMarker(tcVersion string, libs ...*pinnedLib) string {
+// earlyReplayMarker names a passing early replay of module mod in exactly this context: the
+// toolchain, and the pins of the libraries the replay reads (the framework build, the trusted
+// build and, for the proof module, the proof's build). The trusted modules read nothing of the
+// proof's directory in any run that is accepted: closureCheck requires every module of the
+// audited closure, Extracted's and JanusTrusted's included, to come from the framework, the
+// trusted build or the toolchain.
+func earlyReplayMarker(tcVersion, mod string, libs ...*pinnedLib) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-early-replay-v1\n%s\n", tcVersion)
+	fmt.Fprintf(h, "janus-early-replay-v2\n%s\n%s\n", tcVersion, mod)
 	for _, l := range libs {
 		fmt.Fprintf(h, "%s %s\n", l.who, pinsDigest(l.want))
 	}
@@ -211,19 +236,20 @@ func earlyReplayMarker(tcVersion string, libs ...*pinnedLib) string {
 }
 
 // startEarlyReplay runs `leanchecker m` for each of mods (one process each, at once, as the
-// main replay does for its targets) through run in the background, unless marker exists (with
-// the cache on).
-func startEarlyReplay(checker string, run func(argv ...string) (string, error), mods []string, marker string, cacheOn bool) *earlyReplay {
-	e := &earlyReplay{mods: mods}
-	if cacheOn {
-		if markerOK(marker, "early", filepath.Base(marker)) {
-			touchHit(marker)
-			return e
-		}
-	}
-	e.ran = true
+// main replay does for its targets) through run in the background, unless the module's marker
+// (markers[m]) exists (with the cache on).
+func startEarlyReplay(checker string, run func(argv ...string) (string, error), mods []string, markers map[string]string, cacheOn bool) *earlyReplay {
+	e := &earlyReplay{markers: markers}
 	var mu sync.Mutex
 	for _, m := range mods {
+		if cacheOn {
+			if mk := markers[m]; markerOK(mk, "early", filepath.Base(mk)) {
+				touchHit(mk)
+				continue
+			}
+		}
+		e.mods = append(e.mods, m)
+		e.ran = true
 		e.wg.Add(1)
 		go func(m string) {
 			defer e.wg.Done()
@@ -248,7 +274,7 @@ func (e *earlyReplay) wait() {
 
 // apply marks the early-replayed modules that the plan replays as passed in this run (only if
 // the early replay passed; on failure the plan replays them itself and reports the failure).
-func (e *earlyReplay) apply(p *replayPlan, marker string) {
+func (e *earlyReplay) apply(p *replayPlan) {
 	if e == nil || !e.ran {
 		return
 	}
@@ -278,6 +304,10 @@ func (e *earlyReplay) apply(p *replayPlan, marker string) {
 	}
 	p.record(covered)
 	if p.cacheOn {
-		writeMarker(marker, "early", filepath.Base(marker), "early replay passed")
+		for _, m := range e.mods {
+			if mk := e.markers[m]; mk != "" {
+				writeMarker(mk, "early", filepath.Base(mk), "early replay passed: "+m)
+			}
+		}
 	}
 }

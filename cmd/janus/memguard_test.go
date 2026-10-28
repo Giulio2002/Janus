@@ -242,7 +242,7 @@ func TestMemGuardBadLimit(t *testing.T) {
 // report) is a resource-limit failure, never the job's own (meaningless) error.
 func TestMemGuardFailureDiag(t *testing.T) {
 	mark := memMark()
-	recordMem(memEvent{Label: "lean Proof.lean", Limit: 1 << 30, GuardErr: "systemd-run: exit status 1: Failed to start transient scope unit"})
+	recordMemEvent(memEvent{Label: "lean Proof.lean", Limit: 1 << 30, GuardErr: "systemd-run: exit status 1: Failed to start transient scope unit"})
 	_, err := memOutcome(mark, &verifiedReport{}, &diag{Stage: "proof checking", Msg: "Lean rejected the proof"})
 	d, ok := err.(*diag)
 	if !ok || d.Stage != "resource limit" || !strings.Contains(d.Msg, "could not run lean Proof.lean") || !strings.Contains(d.Msg, "transient scope") {
@@ -250,7 +250,7 @@ func TestMemGuardFailureDiag(t *testing.T) {
 	}
 	// A clean run records the guard and the peak in the report.
 	mark = memMark()
-	recordMem(memEvent{Label: "lean Proof.lean", Limit: 1 << 30, Peak: 300 << 20})
+	recordMemEvent(memEvent{Label: "lean Proof.lean", Limit: 1 << 30, Peak: 300 << 20})
 	r, err := memOutcome(mark, &verifiedReport{}, nil)
 	if err != nil || r.MemoryGuard == nil || r.MemoryGuard.PeakBytes != 300<<20 || r.MemoryGuard.Jobs != 1 {
 		t.Fatalf("%v %+v", err, r.MemoryGuard)

@@ -58,6 +58,16 @@ else
 fi
 export JANUS_AUDIT_BIN="$root/audit/bin/janus-rounds" JANUS_AUDIT_PREBUILT=1
 export JANUS_JOBS="${JANUS_LANE_JOBS:-2}"
+# The rows run with --fresh and each in a private cache, so each used to replay the whole framework
+# (`leanchecker Janus`, minutes under load). One gate-private verdict store (mode 0700, its own key,
+# hidden from the sandbox) lets them share that replay: its entries are named by the toolchain and
+# the SHA-256 of every framework module-data file, so a framework build that differs in any module
+# (the tampered ones the rows test) is replayed; `--fresh-framework` ignores the store.
+if [ -z "${JANUS_VERDICT_CACHE:-}" ]; then
+  verdicts="$(mktemp -d "${TMPDIR:-/tmp}/janus-verdicts.XXXXXX")" || exit 1
+  trap 'rm -rf "$verdicts"' EXIT
+  export JANUS_VERDICT_CACHE="$verdicts/store"
+fi
 echo "audit lanes: ${lanes[*]} (-j $PAR_JOBS lanes, -j $JANUS_JOBS rows each); built in $(( $(date +%s) - wall ))s"
 
 broken=()

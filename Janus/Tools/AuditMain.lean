@@ -9,6 +9,14 @@ script passes to `JanusAudit.run`, and prints the same record. `janus verify` ru
 with the verification's `LEAN_PATH`. `janus-audit --asl …` runs the ASL corollary audit
 (`JanusAudit.runASLImpl`) of `janus verify --asl` the same way.
 
+`janus-audit --serve <trusted module>` is the same audit in two steps (`janus verify` starts it
+before the proof compiles): it first builds the clean environment (`JanusAudit.prepareClean`: it
+imports only the framework and `Extracted`, which do not depend on the proof), then reads one
+request line `<theorem>\t<proof module>\t<marker>\t<LEAN_PATH>` from its standard input and runs
+`JanusAudit.runImplCore` with that environment. The request's `LEAN_PATH` is the one the classic
+invocation has (it adds the proof's directory); until then the search path holds no directory the
+proof can write. End of input before a request ends the process (status 3) without an audit.
+
 Compiled rather than elaborated: the auditor's own code runs natively instead of in the
 interpreter, and the process starts with no imported modules, so the audited and the clean
 environment map their `.olean` files instead of copying the ones the `Audit.lean` header has
@@ -25,6 +33,23 @@ def main (args : List String) : IO UInt32 := do
     | none => findSysroot
   initSearchPath sysroot
   match args with
+  | "--serve" :: trusted :: depRoots =>
+    -- `janus verify`: build the clean environment now (the proof is still compiling), then read
+    -- one request line `<theorem>\t<proof module>\t<marker>\t<LEAN_PATH>` and audit exactly as
+    -- the classic invocation does. The search path of the clean environment holds the framework
+    -- and the trusted builds; the request installs the final one (with the proof's directory).
+    -- No request (end of input) is not an audit: nothing is printed.
+    let pre ← unsafe JanusAudit.prepareClean
+    let line ← (← IO.getStdin).getLine
+    if line.isEmpty then return 3
+    match ((line.splitOn "\n").head!.splitOn "\t") with
+    | [thm, proofMod, marker, leanPath] =>
+      searchPathRef.set ((System.SearchPath.parse leanPath) ++ [sysroot / "lib" / "lean"])
+      unsafe JanusAudit.runImplCore thm proofMod marker trusted depRoots.toArray (some pre)
+      return 0
+    | _ =>
+      IO.eprintln "janus-audit --serve: bad request"
+      return 2
   | "--asl" :: userThm :: proofMod :: corThm :: corMod :: marker :: trusted :: words :: depRoots =>
     -- `janus verify --asl`: the ASL corollary audit (`JanusAudit.runASLImpl`)
     unsafe JanusAudit.runASLImpl userThm proofMod corThm corMod marker trusted words depRoots.toArray
@@ -33,5 +58,5 @@ def main (args : List String) : IO UInt32 := do
     unsafe JanusAudit.runImpl thm proofMod marker trusted depRoots.toArray
     return 0
   | _ =>
-    IO.eprintln "usage: janus-audit <theorem> <proof module> <marker> <trusted module> [<dependency root> ...]\n       janus-audit --asl <theorem> <proof module> <corollary> <corollary module> <marker> <trusted module> <coverage theorem> [<dependency root> ...]"
+    IO.eprintln "usage: janus-audit <theorem> <proof module> <marker> <trusted module> [<dependency root> ...]\n       janus-audit --serve <trusted module> [<dependency root> ...]   (one request line on stdin)\n       janus-audit --asl <theorem> <proof module> <corollary> <corollary module> <marker> <trusted module> <coverage theorem> [<dependency root> ...]"
     return 2
