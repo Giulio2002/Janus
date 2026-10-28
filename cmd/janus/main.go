@@ -4,7 +4,7 @@
 //	janus list <binary> [--filter SUBSTR]
 //	janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]... [--targets SYM,...]
 //	janus check <outdir> [--binary PATH]
-//	janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH] [--asl]
+//	janus verify <outdir> [--proof FILE] [--theorem NAME]... [--janus-root DIR] [--binary PATH] [--asl]
 //	janus blockers <binary> <symbol>... [--max-functions N] [--janus-root DIR] [--json FILE]
 //
 // Exit code 0 on success, 1 on failure; diagnostics go to standard error.
@@ -72,7 +72,7 @@ const usage = `Usage:
   janus list <binary> [--filter SUBSTR]
   janus extract <binary> <symbol> <outdir> [--max-functions N] [--contract SYM]... [--targets SYM,...] [--frames]
   janus check <outdir> [--binary PATH]
-  janus verify <outdir> [--proof FILE] [--theorem NAME] [--janus-root DIR] [--binary PATH] [--asl]
+  janus verify <outdir> [--proof FILE] [--theorem NAME]... [--janus-root DIR] [--binary PATH] [--asl]
   janus blockers <binary> <symbol>... [--max-functions N] [--contract SYM]... [--janus-root DIR] [--json FILE]
   janus version
 ` + extraUsage + `
@@ -82,7 +82,7 @@ See docs/CLI.md.
 // parseArgs splits args into positionals and --flag value / --flag=value options.
 // repeatableFlags may be given more than once; their values are joined with "\n" (split them
 // with optsList).
-var repeatableFlags = map[string]bool{"contract": true, "targets": true, "global": true}
+var repeatableFlags = map[string]bool{"contract": true, "targets": true, "global": true, "theorem": true}
 
 // optsList returns the values of a repeatable option.
 func optsList(opts map[string]string, name string) []string {
@@ -121,10 +121,10 @@ func parseArgs(args []string, valueFlags ...string) ([]string, map[string]string
 			i++
 			val = args[i]
 		}
+		if repeatableFlags[name] && strings.Contains(val, "\n") {
+			return nil, nil, fmt.Errorf("option --%s value contains a newline", name)
+		}
 		if prev, ok := opts[name]; ok && repeatableFlags[name] {
-			if strings.Contains(val, "\n") {
-				return nil, nil, fmt.Errorf("option --%s value contains a newline", name)
-			}
 			val = prev + "\n" + val
 		}
 		opts[name] = val

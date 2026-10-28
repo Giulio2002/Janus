@@ -257,7 +257,7 @@ func writeArtifacts(outdir string, x *Extraction, id *Identity) error {
 		return err
 	}
 	// A new extraction invalidates any earlier verification of this directory.
-	_ = os.Remove(filepath.Join(outdir, "verified.json"))
+	_ = withdrawReports(outdir)
 	if err := os.WriteFile(filepath.Join(outdir, "Extracted.lean"), x.Lean, 0o644); err != nil {
 		return err
 	}
