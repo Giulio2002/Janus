@@ -610,6 +610,19 @@ func memGuardConfigErr() error {
 	return nil
 }
 
+// memGuardEnvErr is memGuardConfigErr without waiting for the guard's detection: the only
+// configuration error is an unparsable JANUS_MEM_MAX, which needs the environment alone.
+func memGuardEnvErr() error {
+	v := strings.TrimSpace(os.Getenv("JANUS_MEM_MAX"))
+	if v == "" || strings.EqualFold(v, "off") {
+		return nil
+	}
+	if _, err := parseMemSize(v); err != nil {
+		return &diag{Invalid: true, Stage: "resource limit", Msg: err.Error(), Next: "Set JANUS_MEM_MAX to a size (16G, 1500M) or off."}
+	}
+	return nil
+}
+
 // tailWriter forwards to w and keeps the last bytes written (to recognise Lean's own
 // out-of-memory message under prlimit).
 type tailWriter struct {

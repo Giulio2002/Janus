@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -96,6 +97,9 @@ func (tc *toolchain) cacheID() string {
 }
 
 func findToolchain(lake, root string) (*toolchain, error) {
+	if tc := findToolchainDirect(lake, root); tc != nil {
+		return tc, nil
+	}
 	lr := &leanRunner{lake: lake, root: root}
 	// The two queries are independent; run them at once.
 	var version string
@@ -125,6 +129,66 @@ func findToolchain(lake, root string) (*toolchain, error) {
 		tc.hasChecker = true
 	}
 	return tc, nil
+}
+
+// findToolchainDirect finds the toolchain `lake env lean` would run without starting Lake (J1:
+// two Lake processes, each loading the workspace, cost ~0.2 s of every verification). The `lean`
+// next to the `lake` executable, run in the project root, is the same toolchain Lake selects:
+// with an elan shim both are resolved by elan from the root's lean-toolchain file, and in a
+// toolchain's own bin/ they are siblings. Its --print-prefix names the toolchain; lean and
+// leanchecker are then the prefix's, and the version is that lean's own. It returns nil (use
+// Lake) unless every step is plain: LEAN_SYSROOT set (Lake would honour it), no sibling lean, a
+// prefix without bin/lean, or any failure.
+func findToolchainDirect(lake, root string) *toolchain {
+	if os.Getenv("LEAN_SYSROOT") != "" || os.Getenv("JANUS_TOOLCHAIN_VIA_LAKE") != "" {
+		return nil
+	}
+	shimLean := filepath.Join(filepath.Dir(lake), "lean")
+	if st, err := os.Stat(shimLean); err != nil || !st.Mode().IsRegular() {
+		return nil
+	}
+	q := func(prog string, dir string, args ...string) (string, bool) {
+		cmd := exec.Command(prog, args...)
+		cmd.Dir = dir
+		env := []string{}
+		for _, e := range os.Environ() {
+			if !strings.HasPrefix(e, "LEAN_PATH=") {
+				env = append(env, e)
+			}
+		}
+		cmd.Env = env
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		if guardRun(cmd) != nil {
+			return "", false
+		}
+		return out.String(), true
+	}
+	prefix, ok := q(shimLean, root, "--print-prefix")
+	pfx := strings.TrimSpace(prefix)
+	if !ok || pfx == "" || strings.ContainsRune(pfx, '\n') || !filepath.IsAbs(pfx) {
+		return nil
+	}
+	lean := filepath.Join(pfx, "bin", "lean")
+	if st, err := os.Stat(lean); err != nil || !st.Mode().IsRegular() {
+		return nil
+	}
+	version, ok := q(lean, root, "--version")
+	if !ok || strings.TrimSpace(version) == "" {
+		return nil
+	}
+	tc := &toolchain{
+		lean:        lean,
+		leanchecker: filepath.Join(pfx, "bin", "leanchecker"),
+		sysroot:     pfx,
+		libDir:      filepath.Join(pfx, "lib", "lean"),
+		version:     strings.TrimSpace(version),
+	}
+	if _, err := os.Stat(tc.leanchecker); err == nil {
+		tc.hasChecker = true
+	}
+	return tc
 }
 
 // janusTrustedSource renames the module namespace of a generated Extracted.lean so an
