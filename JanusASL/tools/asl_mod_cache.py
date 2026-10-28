@@ -87,8 +87,17 @@ import subprocess
 import sys
 import tempfile
 
-SCHEME = "janusasl-module-cache-v1"
+SCHEME = "janusasl-module-cache-v2"
 CORE = {"Init", "Std", "Lean", "Lake"}
+
+
+def load_bcache(root):
+    """scripts/lib/bcache.py: the integrity layer (per-user HMAC key, signed manifests)."""
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("bcache", os.path.join(root, "scripts", "lib", "bcache.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def sha_bytes(b):
@@ -179,6 +188,7 @@ def lakefile_path(d):
 class Keys:
     def __init__(self, root):
         self.root = os.path.abspath(root)
+        self.bc = load_bcache(self.root)
         pkgdir = os.path.join(self.root, "JanusASL")
         self.akey = load_armasl_key(self.root)
         self.pkgs = [Pkg("janusasl", pkgdir, "JanusASL", reduced_lakefile(self.akey, lakefile_path(pkgdir))),
@@ -194,6 +204,7 @@ class Keys:
         self.common = {
             "scheme": SCHEME, "toolchain": tc, "toolchain.JanusASL": tcj, "lean": ver, "machine": platform.machine(),
             "extraDepTargets": {p.name: p.cfg.get("extraDepTargets", p.cfg.get("whole")) for p in self.pkgs},
+            "toolchain.content": self.akey.toolchain_content(pkgdir), "env": self.akey.env_inputs(),
         }
         self.armasl = self.akey.sha(self.akey.canonical(self.akey.inputs(self.root)).encode())[:32]
         with open(os.path.join(pkgdir, "lake-manifest.json")) as f:
@@ -315,6 +326,11 @@ def read_manifest(e):
 
 def restore(ks, cache):
     hit = miss = same = bad = 0
+    try:
+        ks.bc.hmac_key()
+    except ks.bc.CacheError as ex:
+        print("asl module cache: %s; not using the cache (Lake builds everything)" % ex, file=sys.stderr)
+        return
     for mod in ks.modules():
         k = ks.key(mod)
         if k is None:
@@ -327,7 +343,7 @@ def restore(ks, cache):
         # Shared while copying: the collector never removes an entry being read.
         lk = lock_path(e + ".lock", shared=True)
         try:
-            r = restore_one(p, mod, e)
+            r = restore_one(ks, p, mod, k, e)
         finally:
             lk.close()
         if r == "miss":
@@ -337,40 +353,65 @@ def restore(ks, cache):
             touch_use(e)
         elif r == "bad":
             bad += 1
+            quarantine(e, cache)
         else:
             hit += 1
             touch_use(e)
     print("asl module cache: restored %d modules, %d already current, %d not cached, %d rejected (%s)" % (hit, same, miss, bad, cache))
 
 
-def restore_one(p, mod, e):
-    """Copy the entry e of mod into p's build (the caller holds e's lock shared). Any failure
-    (a file that does not match the manifest, or cannot be read) removes every output of mod, so
-    that no copied trace can vouch for an output that was not copied: Lake then builds it."""
+def quarantine(e, cache):
+    """Move a rejected entry out of the way (under its exclusive lock, without waiting), so that the
+    next publish stores a fresh one. Failing to is harmless: the entry is rejected again."""
+    lk = lock_path(e + ".lock", shared=False, block=False)
+    if lk is None:
+        return
+    try:
+        if os.path.isdir(e):
+            q = tempfile.mkdtemp(prefix=".bad-", dir=os.path.dirname(e))
+            os.rename(e, os.path.join(q, "entry"))
+            shutil.rmtree(q, ignore_errors=True)
+    except OSError:
+        pass
+    finally:
+        lk.close()
+
+
+def restore_one(ks, p, mod, key, e):
+    """Copy the entry e of mod into p's build (the caller holds e's lock shared). The manifest must
+    carry a valid HMAC; every copied file is hashed and compared with it. Any failure (no HMAC, a
+    wrong one, a file that does not match, cannot be read, or is not a regular file) removes every
+    output of mod, so that no copied trace can vouch for an output that was not copied: Lake then
+    builds it."""
+    bc = ks.bc
     if not os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
         return "miss"
-    man = read_manifest(e)
-    # tree/<package>/<path relative to the package dir>
-    if all(os.path.isfile(os.path.join(p.dir, rel)) and sha_file(os.path.join(p.dir, rel)) == h
-           for rel, h in ((r.split("/", 1)[1], h) for r, h in man.items())):
-        return "same"
     copied = []
     why = None
     try:
-        for r, h in man.items():
-            rel = r.split("/", 1)[1]
+        man = bc.read_signed_manifest("mod", key, e)
+        # tree/<package>/<path relative to the package dir>
+        rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items()}
+        if all(os.path.isfile(os.path.join(p.dir, rel)) and not os.path.islink(os.path.join(p.dir, rel))
+               and sha_file(os.path.join(p.dir, rel)) == h for rel, (_, h) in rels.items()):
+            return "same"
+        for rel, (r, h) in rels.items():
             src, dst = os.path.join(e, "tree", r), os.path.join(p.dir, rel)
+            bc._regular(src)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             tmp = dst + ".asl-cache-tmp"
-            shutil.copy2(src, tmp)
+            fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, "rb") as fi, open(tmp, "wb") as fo:
+                shutil.copyfileobj(fi, fo, 1 << 20)
+            os.chmod(tmp, (os.stat(src).st_mode & 0o111) | 0o644)
             if sha_file(tmp) != h:
                 os.unlink(tmp)
                 why = "a copied file does not match the entry's manifest"
                 break
             os.replace(tmp, dst)
             copied.append(dst)
-    except OSError as ex:
-        why = "cannot copy the entry (%s)" % ex
+    except (OSError, bc.CacheError) as ex:
+        why = "entry rejected (%s)" % ex
     if why is None:
         return "hit"
     for d in copied + [os.path.join(p.dir, x) for x in outputs(p, mod)]:
@@ -395,8 +436,24 @@ def closure(ks, roots):
     return seen
 
 
+def entry_present(ks, k, e):
+    """A cheap check that an existing entry is worth keeping: its manifest verifies and every file
+    exists with the manifest's size class (regular file). Content is verified on every restore."""
+    try:
+        man = ks.bc.read_signed_manifest("mod", k, e)
+        return all(os.path.isfile(os.path.join(e, "tree", r)) and not os.path.islink(os.path.join(e, "tree", r))
+                   for r in man)
+    except (OSError, ks.bc.CacheError):
+        return False
+
+
 def publish(ks, cache, roots):
     stored = present = skipped = 0
+    try:
+        ks.bc.hmac_key()
+    except ks.bc.CacheError as ex:
+        print("asl module cache: %s; not storing" % ex, file=sys.stderr)
+        return
     mods = closure(ks, roots) if roots else set(ks.modules())
     os.makedirs(os.path.join(cache, "mods"), exist_ok=True)
     for mod in sorted(mods):
@@ -405,7 +462,7 @@ def publish(ks, cache, roots):
             continue
         p = ks.pkg_of(mod)
         e = entry_dir(cache, k)
-        if os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
+        if os.path.isfile(os.path.join(e, "MANIFEST.sha256")) and entry_present(ks, k, e):
             present += 1
             continue
         outs = outputs(p, mod)
@@ -416,22 +473,34 @@ def publish(ks, cache, roots):
             continue
         os.makedirs(os.path.dirname(e), exist_ok=True)
         with lock_path(e + ".lock", shared=False):
-            if os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
-                present += 1
-                continue
+            if os.path.isdir(e):
+                if entry_present(ks, k, e):
+                    present += 1
+                    continue
+                q = tempfile.mkdtemp(prefix=".bad-", dir=os.path.dirname(e))
+                os.rename(e, os.path.join(q, "entry"))
+                shutil.rmtree(q, ignore_errors=True)
             tmp = tempfile.mkdtemp(prefix=".tmp-", dir=os.path.dirname(e))
-            lines = []
-            for rel in outs:
-                r = p.name + "/" + rel.replace(os.sep, "/")
-                dst = os.path.join(tmp, "tree", r)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(os.path.join(p.dir, rel), dst)
-                lines.append("%s  %s\n" % (sha_file(dst), r))
-            with open(os.path.join(tmp, "MANIFEST.sha256"), "w") as f:
-                f.writelines(sorted(lines))
-            with open(os.path.join(tmp, "INPUTS.json"), "w") as f:
-                json.dump(ks.inputs_of.get(mod), f, sort_keys=True, indent=1)
-            os.rename(tmp, e)
+            try:
+                lines = []
+                for rel in outs:
+                    r = p.name + "/" + rel.replace(os.sep, "/")
+                    dst = os.path.join(tmp, "tree", r)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(os.path.join(p.dir, rel), dst)
+                    os.chmod(dst, (os.stat(os.path.join(p.dir, rel)).st_mode & 0o111) | 0o444)
+                    lines.append("%s  %s\n" % (sha_file(dst), r))
+                data = "".join(sorted(lines)).encode()
+                with open(os.path.join(tmp, "MANIFEST.sha256"), "wb") as f:
+                    f.write(data)
+                with open(os.path.join(tmp, "MANIFEST.hmac"), "w") as f:
+                    f.write(ks.bc.mac("mod", k, data) + "\n")
+                with open(os.path.join(tmp, "INPUTS.json"), "w") as f:
+                    json.dump(ks.inputs_of.get(mod), f, sort_keys=True, indent=1)
+                os.rename(tmp, e)
+            except BaseException:
+                shutil.rmtree(tmp, ignore_errors=True)
+                raise
             stored += 1
     print("asl module cache: stored %d modules, %d already cached, %d not built (%s)" % (stored, present, skipped, cache))
 
@@ -500,6 +569,11 @@ def scan(cache):
         q = os.path.join(cache, n)
         if ARMASL_RE.match(n) and os.path.isdir(q) and not os.path.islink(q):
             out.append(Entry("armasl", q, n))
+    sail = os.path.join(cache, "sail")
+    for n in sorted(os.listdir(sail)) if os.path.isdir(sail) and not os.path.islink(sail) else []:
+        q = os.path.join(sail, n)
+        if MOD_RE.match(n) and os.path.isdir(q) and not os.path.islink(q):
+            out.append(Entry("sail", q, n))
     mods = os.path.join(cache, "mods")
     for sh in sorted(os.listdir(mods)) if os.path.isdir(mods) else []:
         sd = os.path.join(mods, sh)
@@ -513,22 +587,10 @@ def scan(cache):
 
 
 def checkout_armasl_keys(root):
-    """The checkout's ArmASL keys: the current one (asl_cache_key.py) and the legacy one that
-    scripts/asl.sh still reads (asl_cache_legacy_key)."""
+    """The checkout's ArmASL key (asl_cache_key.py). The pre-HMAC keys are not kept: nothing reads
+    their entries any more."""
     akey = load_armasl_key(root)
-    keys = {akey.sha(akey.canonical(akey.inputs(root)).encode())[:32]}
-    pkg = os.path.join(root, "JanusASL")
-    try:
-        h = hashlib.sha256()
-        for f in (os.path.join(pkg, "vendor", "ArmASL.tar.gz.sha256"), os.path.join(root, "lean-toolchain"),
-                  os.path.join(pkg, "lakefile.toml"), os.path.join(pkg, "lake-manifest.json"),
-                  os.path.join(pkg, "sail", "split_lean.py")):
-            with open(f, "rb") as fh:
-                h.update(fh.read())
-        keys.add(h.hexdigest()[:32])
-    except OSError:
-        pass
-    return keys
+    return {akey.sha(akey.canonical(akey.inputs(root)).encode())[:32]}
 
 
 def evict(e, cache, cutoff, dry, trash):
@@ -590,13 +652,13 @@ def gc(cache, budget, root=None, grace=3600, dry=False, now=None):
         unreferenced()
     # Leftovers of interrupted collections and publishes (older than a day).
     if not dry:
-        for d in [cache, os.path.join(cache, "mods")] + [os.path.join(cache, "mods", x) for x in
+        for d in [cache, os.path.join(cache, "sail"), os.path.join(cache, "mods")] + [os.path.join(cache, "mods", x) for x in
                                                           (os.listdir(os.path.join(cache, "mods")) if os.path.isdir(os.path.join(cache, "mods")) else [])]:
             if not os.path.isdir(d):
                 continue
             for n in os.listdir(d):
                 q = os.path.join(d, n)
-                if (n.startswith(".gc-trash-") or n.startswith(".tmp-")) and os.path.isdir(q) and q != trash[0]:
+                if (n.startswith((".gc-trash-", ".tmp-", ".bad-"))) and os.path.isdir(q) and q != trash[0]:
                     try:
                         if os.lstat(q).st_mtime < now - 86400:
                             shutil.rmtree(q, ignore_errors=True)

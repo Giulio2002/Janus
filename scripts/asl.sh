@@ -23,17 +23,19 @@
 #            MISMATCH verdicts in mismatches.jsonl; scripts/lib/artifacts.sh). CASES may be
 #            compressed (.zst next to the named file).
 #   JOBS     parallel tasks for the check (default nproc)
-#   ASL_CACHE          a shared ArmASL build cache (a directory; off by default). Before building,
+#   ASL_CACHE          the shared build cache (a directory; default /srv/janus-asl-cache if it exists,
+#                      else ~/.cache/janus/asl; "off" or empty disables it). Before building,
 #                      the generated model's build (and the lean-sail package) is copied from
 #                      the cache entry for this model and toolchain, if there is one; after a
-#                      build, it is stored there if not. Entries are keyed by exactly what the
-#                      ArmASL outputs depend on (JanusASL/tools/asl_cache_key.py: the vendored
-#                      tarball, the toolchain, the lean-sail manifest entry, the splitter and the
-#                      lakefile settings that reach ArmASL's modules, not the rest of the lakefile),
-#                      carry a SHA-256 manifest that is checked on every copy, and are
-#                      published atomically, so worktrees and CI runners share one build of the
-#                      ~45 min model. The cache must be writable only by users you trust: its
-#                      oleans are what the JanusASL proofs are checked against.
+#                      build, it is stored there if not. Entries are keyed by a hash of every input
+#                      (JanusASL/tools/asl_cache_key.py: the vendored tarball, the splitter, the
+#                      toolchain by content, the lean-sail manifest entry, the lakefile settings that
+#                      reach ArmASL's modules, the compiler environment, the machine), carry a
+#                      SHA-256 manifest AND an HMAC of it under a per-user key
+#                      (scripts/lib/bcache.py; ~/.cache/janus/asl-cache.key), both checked on every
+#                      copy, and are published atomically under a per-key lock, so worktrees and CI
+#                      runners share one build of the ~45 min model. A missing, unsigned, tampered
+#                      or incomplete entry is rebuilt from source, never used.
 #                      The same directory also caches every JanusASL and Janus module's build
 #                      (ASL_CACHE/mods, JanusASL/tools/asl_mod_cache.py): one entry per module,
 #                      keyed by what Lake traces (source, imports' keys, package settings,
@@ -62,6 +64,16 @@ OUT="${OUT:-$root/artifacts/asl}"
 JOBS="${JOBS:-$(nproc)}"
 pkg="$root/JanusASL"
 here="$pkg/sail"
+
+# The build cache is on by default (docs/SOUNDNESS.md "Build caches"): ASL_CACHE=<dir> picks it,
+# ASL_CACHE=off (or empty) disables it, unset means /srv/janus-asl-cache if that exists, else
+# ~/.cache/janus/asl. Entries are content-keyed, HMAC-signed and hash-checked on every use.
+if [ "${ASL_CACHE-unset}" = unset ]; then
+  if [ -d /srv/janus-asl-cache ]; then ASL_CACHE=/srv/janus-asl-cache
+  else ASL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/janus/asl"; fi
+fi
+[ "$ASL_CACHE" = off ] && ASL_CACHE=""
+export ASL_CACHE
 
 # ---- pins (keep in sync with docs/ASL.md) ----
 SAIL_URL=https://github.com/rems-project/sail
@@ -153,62 +165,42 @@ asl_cache_key() {
   python3 -I "$pkg/tools/asl_cache_key.py" "$root"
 }
 
-# The key before scheme v2 (whole lakefile and manifest): still read, never written. Its inputs are
-# a superset of the v2 key's, so an entry under it is valid for this checkout too.
-asl_cache_legacy_key() {
-  { cat "$VENDOR.sha256"; cat "$root/lean-toolchain"; cat "$pkg/lakefile.toml" "$pkg/lake-manifest.json" "$here/split_lean.py"; } |
-    sha256sum | cut -c1-32
-}
-
-# The ArmASL build outputs and the lean-sail package, relative to $pkg/.lake.
-asl_cache_paths() {
+# The ArmASL build outputs and the lean-sail package, as files relative to $pkg/.lake (NUL-separated).
+asl_cache_files() {
   (cd "$pkg/.lake" && for p in packages/Sail build/lib/lean/ArmASL build/lib/lean/ArmASL.* build/ir/ArmASL build/ir/ArmASL.*; do
-    [ -e "$p" ] && echo "$p"; done) || true
+    [ -e "$p" ] && find "$p" -type f -print0; done) || true
 }
 
+# Restore the entry for this model and toolchain into $pkg/.lake: the entry's HMAC (under the
+# per-user key, scripts/lib/bcache.py) and the SHA-256 of every copied file are checked; anything
+# wrong (no entry, unsigned or tampered entry, missing file, no usable key) leaves nothing copied
+# and the model is built from source by the lake call that follows. A rejected entry is replaced by
+# the publish after that build.
 cache_restore() {
   [ -n "${ASL_CACHE:-}" ] || return 0
-  local e; e="$ASL_CACHE/$(asl_cache_key)"
-  if [ ! -f "$e/MANIFEST.sha256" ] && [ -f "$pkg/lakefile.toml" ] && [ -f "$ASL_CACHE/$(asl_cache_legacy_key)/MANIFEST.sha256" ]; then
-    e="$ASL_CACHE/$(asl_cache_legacy_key)"
-  fi
-  [ -f "$e/MANIFEST.sha256" ] || { echo "asl cache: no entry for this model and toolchain ($e)"; return 0; }
-  # The entry's lock, shared while it is read: the collector (asl_mod_cache.py gc) removes an
-  # entry only under its lock taken exclusively, and a publisher replaces one only under it.
-  exec 8>>"$e.lock"; flock -s 8
-  [ -f "$e/MANIFEST.sha256" ] || { flock -u 8; echo "asl cache: the entry $e was just removed; building instead"; return 0; }
-  touch "$e.use" 2>/dev/null || true  # its last use (the collector's LRU)
-  if [ -f "$pkg/.lake/build/lib/lean/ArmASL.olean" ] && (cd "$pkg/.lake" && sha256sum -c --quiet --status "$e/MANIFEST.sha256" 2>/dev/null); then
-    flock -u 8; echo "asl cache: the ArmASL build already matches $e"; return 0
-  fi
-  echo "asl cache: copying the ArmASL build from $e"
+  local key rc=0 out
+  key=$(asl_cache_key)
   mkdir -p "$pkg/.lake"
-  (cd "$e/tree" && tar -cf - .) | (cd "$pkg/.lake" && tar -xf -)
-  (cd "$pkg/.lake" && sha256sum -c --quiet "$e/MANIFEST.sha256") ||
-    { echo "asl cache: the copy does not match the entry's manifest; building instead" >&2
-      (cd "$pkg/.lake" && rm -rf packages/Sail build/lib/lean/ArmASL build/lib/lean/ArmASL.* build/ir/ArmASL build/ir/ArmASL.*); }
-  flock -u 8
+  out=$(python3 -I "$root/scripts/lib/bcache.py" fetch armasl "$ASL_CACHE" "$key" "$pkg/.lake") || rc=$?
+  case $rc in
+    0) echo "asl cache: ArmASL $key: $out ($ASL_CACHE)" ;;
+    2) echo "asl cache: no entry for ArmASL $key ($ASL_CACHE); building" ;;
+    3) echo "asl cache: the entry for ArmASL $key was REJECTED (above); building from source" ;;
+    *) echo "asl cache: not usable here (above); building from source" ;;
+  esac
+  return 0
 }
 
 cache_publish() {
   [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
-  local key e tmp
-  key=$(asl_cache_key); e="$ASL_CACHE/$key"
+  local key inp rc=0 out
+  key=$(asl_cache_key)
   mkdir -p "$ASL_CACHE" || return 0
-  # One publisher per key at a time; an entry that has the C sources too is not replaced.
-  exec 9>"$ASL_CACHE/$key.lock"
-  flock 9
-  if [ -f "$e/MANIFEST.sha256" ] && { [ ! -d "$pkg/.lake/build/ir/ArmASL" ] || [ -d "$e/tree/build/ir/ArmASL" ]; }; then
-    flock -u 9; return 0
-  fi
-  tmp=$(mktemp -d "$ASL_CACHE/.tmp-$key.XXXXXX")
-  mkdir -p "$tmp/tree"
-  (cd "$pkg/.lake" && asl_cache_paths | tar -cf - -T -) | (cd "$tmp/tree" && tar -xf -)
-  (cd "$tmp/tree" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$tmp/MANIFEST.sha256"
-  rm -rf "$e.old"; [ -d "$e" ] && mv "$e" "$e.old"
-  mv "$tmp" "$e" && rm -rf "$e.old"
-  echo "asl cache: stored the ArmASL build in $e"
-  flock -u 9
+  inp=$(mktemp "${TMPDIR:-/tmp}/asl-cache-inputs.XXXXXX")
+  python3 -I "$pkg/tools/asl_cache_key.py" "$root" --show > "$inp"
+  out=$(asl_cache_files | python3 -I "$root/scripts/lib/bcache.py" store armasl "$ASL_CACHE" "$key" "$pkg/.lake" --inputs "$inp") || rc=$?
+  rm -f "$inp"
+  [ $rc = 0 ] && echo "asl cache: ArmASL $key: $out" || echo "asl cache: not stored (rc $rc)"
   cache_gc
 }
 

@@ -25,6 +25,9 @@ Lake does not trace but that still reach the outputs (weak arguments, leanc argu
         with the options of the first library that claims it), in file order;
   * the package-level extraDepTargets of the janus package (`path = ".."`): Lake mixes the
     transitive dependencies' extraDepTargets into every module trace;
+  * the content of the toolchain `lean` resolves to in JanusASL/ (driver binaries, libleanshared and
+    every core .olean, by SHA-256; `lean --version`), the environment variables that reach the
+    compilers (ENV_KEYS) and the machine architecture;
   * the version of this key scheme (SCHEME).
 
 What is left out, and why it cannot change the ArmASL outputs:
@@ -45,9 +48,10 @@ instead (conservative: any change is a miss).
 import hashlib
 import json
 import os
+import platform
 import sys
 
-SCHEME = "armasl-cache-key-v2"
+SCHEME = "armasl-cache-key-v3"
 
 # Package-level settings that cannot reach a lean/leanc command line or a module trace.
 PKG_IGNORED = {
@@ -60,6 +64,50 @@ PKG_IGNORED = {
 }
 
 MODEL = "ArmASL"
+
+# Environment variables that can reach lean, leanc, lake or the C compiler they run. They are keyed
+# by value (an unset variable is absent), so a build under another compiler or flags is another key.
+ENV_KEYS = ["LEAN_CC", "LEAN_CXX", "LEAN_SYSROOT", "LEAN_PATH", "LEAN_SRC_PATH", "LEAN_ABORT_ON_PANIC",
+            "LAKE_HOME", "LAKE_OVERRIDE_LEAN", "LAKE_NO_CACHE", "ELAN_TOOLCHAIN", "CC", "CXX", "CFLAGS",
+            "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LIBRARY_PATH", "C_INCLUDE_PATH", "CPATH"]
+
+
+def env_inputs():
+    return {k: os.environ[k] for k in ENV_KEYS if k in os.environ}
+
+
+def toolchain_content(cwd):
+    """What the toolchain that `lean` resolves to in cwd (elan) consists of, by content: the SHA-256 of
+    its driver binaries and of every core .olean (Init, Std, Lean, Lake), plus `lean --version`.
+    Lake additionally checks every import's content through its traces; this closes the other
+    direction (a swapped compiler or core library under an unchanged lean-toolchain name)."""
+    import subprocess
+    try:
+        ver = subprocess.run(["lean", "--version"], cwd=cwd, capture_output=True, text=True, timeout=120).stdout.strip()
+        prefix = subprocess.run(["lean", "--print-prefix"], cwd=cwd, capture_output=True, text=True, timeout=120).stdout.strip()
+    except Exception:
+        return {"unavailable": True}
+    out = {"version": ver}
+    if not prefix or not os.path.isdir(prefix):
+        out["prefix"] = "missing"
+        return out
+    h = hashlib.sha256()
+    n = 0
+    files = [os.path.join(prefix, "bin", b) for b in ("lean", "lake", "leanc", "leanchecker", "clang", "leantar")]
+    files.append(os.path.join(prefix, "lib", "lean", "libleanshared.so"))
+    for top in ("lib/lean",):
+        for d, dirs, fs in os.walk(os.path.join(prefix, top)):
+            dirs.sort()
+            files += [os.path.join(d, f) for f in sorted(fs) if f.endswith(".olean")]
+    for f in files:
+        try:
+            h.update(os.path.relpath(f, prefix).encode() + b"\0" + sha(read(f)).encode() + b"\0")
+            n += 1
+        except OSError:
+            h.update(b"missing\0")
+    out["files"] = n
+    out["sha256"] = h.hexdigest()
+    return out
 
 
 def claims_model(value):
@@ -90,6 +138,9 @@ def inputs(root):
         "splitter": sha(read(os.path.join(pkg, "sail", "split_lean.py"))),
         "toolchain": read(os.path.join(root, "lean-toolchain")).decode().strip(),
         "toolchain.JanusASL": read(os.path.join(pkg, "lean-toolchain")).decode().strip(),
+        "toolchain.content": toolchain_content(pkg),
+        "env": env_inputs(),
+        "machine": platform.machine(),
     }
     manifest = json.loads(read(os.path.join(pkg, "lake-manifest.json")))
     out["manifest.packagesDir"] = manifest.get("packagesDir")

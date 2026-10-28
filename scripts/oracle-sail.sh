@@ -70,7 +70,69 @@ model_dir() {
   fi
 }
 
+# ---- build cache for the driver (docs/SOUNDNESS.md "Build caches") ----
+# The driver is a pure function of the pinned crate and model, the instrumenter, oracle-sail's
+# sources and lockfile, the Rust and C++ toolchains and their environment (oracle-sail/cache_key.py).
+# Its cache entry (scripts/lib/bcache.py kind "sail") holds the one binary, a SHA-256 manifest and an
+# HMAC of it under the per-user key; both are checked on every use, and an entry that fails either is
+# ignored and replaced by a rebuild. SAIL_CACHE=<dir> picks the directory (default: $ASL_CACHE, else
+# /srv/janus-asl-cache if it exists, else ~/.cache/janus/asl); SAIL_CACHE=off disables it;
+# SAIL_CACHE_READONLY=1 never writes.
+SAIL_CARGO_FLAGS="--release --locked"
+SAIL_DRIVER_REL=target/release/janus-oracle-sail
+if [ -z "${SAIL_CACHE+x}" ]; then
+  if [ -n "${ASL_CACHE+x}" ]; then SAIL_CACHE="$ASL_CACHE"
+  elif [ -d /srv/janus-asl-cache ]; then SAIL_CACHE=/srv/janus-asl-cache
+  else SAIL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/janus/asl"; fi
+fi
+[ "$SAIL_CACHE" = off ] && SAIL_CACHE=""
+
+sail_cache_key() {  # sail_cache_key MODEL_CPP_OR_EMPTY
+  local mf=()
+  [ -n "$1" ] && mf=(--model-file "$1")
+  python3 -I "$here/cache_key.py" "$root" "${mf[@]}" --pins "crate_rev=$CRATE_REV" "crate_model_gz_sha256=$CRATE_MODEL_GZ_SHA256" \
+    "sail_model=$SAIL_MODEL" "cargo_flags=$SAIL_CARGO_FLAGS" "sail_arm_rev=$SAIL_ARM_REV" "sail_version=$SAIL_VERSION"
+}
+
 do_build() {
+  local ckey="" crc=0 cout inp
+  if [ -n "$SAIL_CACHE" ]; then
+    if [ "$SAIL_MODEL" = regen ]; then
+      local rm_="$DEPS/sail-arm-${SAIL_ARM_REV:0:7}/arm-v9.4-a/cpp/model.cpp"
+      [ -f "$rm_" ] && ckey=$(sail_cache_key "$rm_") || true
+    else
+      ckey=$(sail_cache_key "")
+    fi
+  fi
+  if [ -n "$ckey" ]; then
+    mkdir -p "$here/target/release"
+    cout=$(python3 -I "$root/scripts/lib/bcache.py" fetch sail "$SAIL_CACHE" "$ckey" "$here") || crc=$?
+    case $crc in
+      0) echo "sail cache: driver $ckey: $cout ($SAIL_CACHE)" ;;
+      2) echo "sail cache: no entry for driver $ckey ($SAIL_CACHE); building" ;;
+      3) echo "sail cache: the entry for driver $ckey was REJECTED (above); building from source" ;;
+      *) echo "sail cache: not usable here (above); building from source" ;;
+    esac
+  fi
+  if [ "$crc" != 0 ] || [ -z "$ckey" ]; then
+    do_build_driver
+    if [ -n "$ckey" ] && [ "${SAIL_CACHE_READONLY:-0}" != 1 ] && [ -f "$here/$SAIL_DRIVER_REL" ]; then
+      mkdir -p "$SAIL_CACHE"
+      inp=$(mktemp "${TMPDIR:-/tmp}/sail-cache-inputs.XXXXXX")
+      python3 -I "$here/cache_key.py" "$root" --show --pins "crate_rev=$CRATE_REV" "sail_model=$SAIL_MODEL" > "$inp" || true
+      cout=$(printf '%s\0' "$SAIL_DRIVER_REL" | python3 -I "$root/scripts/lib/bcache.py" store sail "$SAIL_CACHE" "$ckey" "$here" --inputs "$inp") &&
+        echo "sail cache: driver $ckey: $cout" || echo "sail cache: not stored"
+      rm -f "$inp"
+    fi
+  fi
+  # The qemu oracle CLI (its comparator is shared) and the framework's oracle: incremental builds.
+  mkdir -p "$here/bin"
+  (cd "$root/oracle" && go build -o "$here/bin/oracle" ./cmd/oracle)
+  (cd "$root" && memguard_lake build janus-oracle >/dev/null) ||
+    echo "warning: lake build janus-oracle failed; using the existing $root/.lake/build/bin/janus-oracle" >&2
+}
+
+do_build_driver() {
   fetch_crate
   local plain
   case "$SAIL_MODEL" in
@@ -90,12 +152,7 @@ do_build() {
   model_dir "$plain" "$inst"
   (cd "$here" &&
     AARCH64_ORACLE_SAIL_MODEL_C="$inst/model.cpp" \
-      cargo build --release --locked)
-  # The qemu oracle CLI (its comparator is shared).
-  mkdir -p "$here/bin"
-  (cd "$root/oracle" && go build -o "$here/bin/oracle" ./cmd/oracle)
-  (cd "$root" && memguard_lake build janus-oracle >/dev/null) ||
-    echo "warning: lake build janus-oracle failed; using the existing $root/.lake/build/bin/janus-oracle" >&2
+      cargo build $SAIL_CARGO_FLAGS)
 }
 
 sail_bin="$here/target/release/janus-oracle-sail"
