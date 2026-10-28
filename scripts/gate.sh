@@ -122,10 +122,18 @@ if [ "${JANUS_GATE_PG:-}" != "$out" ]; then
 fi
 echo "$$" > "$out/pgid"
 echo "gate: process group $$ (cancel: kill -- -$$)"
-cleanup() { rm -rf "$out/tree-x86" "$out/tree-asl"; }
-cancel() { trap '' TERM INT; echo "gate: cancelled"; kill -TERM -- -$$ 2>/dev/null; cleanup; exit 143; }
+# The isolated lake-lane source copies live under artifacts/gate/trees/<source hash>/ (not in the run's out
+# dir): removed when the gate PASSES, kept when it fails or is cancelled (their cold builds are hours), and
+# reused by a rerun of the same sources (same hash: git tree + uncommitted diff).
+srchash="$( { git rev-parse 'HEAD^{tree}' 2>/dev/null; git diff HEAD 2>/dev/null; git ls-files -o --exclude-standard 2>/dev/null | sort | xargs -r sha256sum 2>/dev/null; } | sha256sum | cut -c1-16)"
+treebase="$root/artifacts/gate/trees/$srchash"
+cleanup() {
+  local rc=${1:-$?}
+  if [ "$rc" = 0 ]; then rm -rf "$treebase"; else [ ! -d "$treebase" ] || echo "gate: isolated lake-lane trees KEPT for a rerun of the same sources: $treebase"; fi
+}
+cancel() { trap '' TERM INT; echo "gate: cancelled"; kill -TERM -- -$$ 2>/dev/null; trap - EXIT; cleanup 143; exit 143; }
 trap cancel TERM INT
-trap cleanup EXIT
+trap 'cleanup $?' EXIT
 tl_stage() { # KIND NAME START END RC
   printf '{"kind":"%s","name":"%s","start":%.3f,"end":%.3f,"wall":%.3f,"rc":%s}\n' "$1" "$2" "$3" "$4" "$(echo "$4 - $3" | bc)" "$5" >> "$tlf"
 }
@@ -181,21 +189,28 @@ export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
 # prebuilt build the verify, go test and audit lanes read is never written after the prebuild. Their own
 # package builds (JanusASL/.lake, JanusX86/.lake, oracle-sail/target) and artifacts/ are shared by
 # symlink: only these lanes use the former, and artifacts/ is read-only to them.
-mktree() { # DIR: a private copy of the sources and of the finished framework build
+mktree() { # DIR: a private copy of the sources and of the finished framework build (kept when present: same hash)
+  if [ -f "$1/.gate-tree-ready" ]; then echo "gate: reusing $1"; return 0; fi
   mkdir -p "$1"
   rsync -a --exclude=/.git --exclude=/artifacts --exclude=/audit/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake \
     --exclude=/oracle-sail/target --exclude=/bin ./ "$1"/ || { echo "gate: cannot copy the sources to $1"; exit 1; }
   ln -sfn "$root/artifacts" "$1/artifacts"; ln -sfn "$root/JanusASL/.lake" "$1/JanusASL/.lake"
   ln -sfn "$root/JanusX86/.lake" "$1/JanusX86/.lake"; ln -sfn "$root/oracle-sail/target" "$1/oracle-sail/target"
-  mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"
+  mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"; : > "$1/.gate-tree-ready"
 }
 # x86 has a tree of its own, the JanusASL/oracle/rt-asl lanes another: two lakes in one tree race on its .oleans
-tree_x86="$out/tree-x86" tree="$out/tree-asl"
+tree_x86="$treebase/x86" tree="$treebase/asl"
+mkdir -p "$treebase"
+exec {treelock}>"$treebase.lock"
+flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($treebase); wait for it"; exit 1; }
+# the JanusASL cache hook (scripts/asl.sh ASL_CACHE; agent/speed-asl's JANUS_ASL_CACHE is accepted as an alias;
+# its interface is not final, this only forwards the directory)
+[ -n "${ASL_CACHE:-}" ] || { [ -z "${JANUS_ASL_CACHE:-}" ] || export ASL_CACHE="$JANUS_ASL_CACHE"; }
 mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
 selected x86 && mktree "$tree_x86"
-if selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go || selected rtasl-fsqrt || selected rtasl-replay; then mktree "$tree"; fi
-peak_tree=$(du -sm "$out"/tree-* 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
-echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed at the end)"
+if selected testlane || selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go || selected rtasl-fsqrt || selected rtasl-replay; then mktree "$tree"; fi
+peak_tree=$(du -sm "$treebase"/x86 "$treebase"/asl 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
+echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed when the gate passes, kept otherwise: $treebase)"
 lane_times="$root/artifacts/gate/lane-times"
 shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2
 pool_init gate "$lanes_n" "$out/lanes"
@@ -207,8 +222,16 @@ declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]
 for k in "${!est[@]}"; do POOL_SECS[$k]=${est[$k]}; done
 pool_times "$lane_times"
 POOL_SECS[verify]=99999
+# Per-lane memory limit (memguard's per-job default of 24G applies inside the outer cap unless JANUS_MEM_MAX is
+# set): measured peaks in docs/TESTING.md "Lane memory limits". JANUS_GATE_MEM_<LANE> (e.g. JANUS_GATE_MEM_ASL_BUILD=64G) overrides.
+declare -A lanemem=([asl-build]=48G [sail-build]=48G [x86]=24G [gotest]=24G [rounds]=24G [axiom]=24G [testlane]=48G)
+for g in prove rel strict replay btf probes fsqrt go; do lanemem[rtasl-$g]=48G; done
 add() { # NAME CODE [NEEDS]
   selected "$1" || return 0
+  local v="JANUS_GATE_MEM_${1//-/_}"; v="${v^^}"
+  local m="${!v:-${lanemem[$1]:-}}"
+  # (verify: no JANUS_MEM_MAX, its items bound themselves as before)
+  [ -z "$m" ] || set -- "$1" "export JANUS_MEM_MAX=$m; $2" "${3:-}"
   pool_add "$1" "$2" "$1" "${3:-}"
 }
 # a lane needs its prerequisite only when that stage is part of this run
@@ -218,6 +241,8 @@ JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
 add gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
 add rounds "audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
+# (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
+[ -z "${JANUS_GATE_TEST_LANE:-}" ] || add testlane "cd '$tree' && $JANUS_GATE_TEST_LANE"
 add x86 "cd '$tree_x86' && scripts/x86formal.sh prove"
 add asl-build "cd '$tree' && scripts/asl.sh build"
 add sail-build "cd '$tree' && scripts/oracle-sail.sh build"
