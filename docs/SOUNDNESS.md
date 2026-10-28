@@ -1957,3 +1957,16 @@ existence of the structural value (`fillLEStructural`), with the proved equivale
 `fillLE_zero`/`fillLE_succ`. Axioms: unchanged (`Classical.choice` is already allowed). Nothing is
 computed from `fillLE` (no `decide`/`#eval`); `stosIter_ok` still proves `stosIter` equals the
 state with `fillLE`, so the meaning of the semantics is unchanged.
+
+## `omegaSparse` / `janus_omega_sparse` / `janus_close` (proof automation only)
+
+`omegaSparse` (Janus/Tactic/Common.lean) runs the ordinary `omega` on the goal with some
+disjunctive hypotheses cleared (all of them; then one or two that share an atom with the goal; then
+all that are connected to the goal through shared atoms), splitting the chosen ones with `rcases`.
+`janus_close` is the macro `first | with_reducible rfl | with_reducible assumption |
+janus_omega_sparse | omega`. These are tactics: they only choose which hypotheses `omega` sees and
+in which order alternatives are tried, so a proof is accepted only if the kernel accepts the term
+`omega`/`rcases` built. Clearing hypotheses can only make `omega` fail, in which case the next
+alternative (ending in the unrestricted `omega`) runs. The trusted base, the axioms and the
+statements are unchanged. Motivation: after several calls the context holds dozens of aliasing
+disjunctions and a full-context `omega` splits on all of them (36 s per `S.sp % 16 = 0` side goal).
