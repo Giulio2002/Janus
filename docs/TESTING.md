@@ -117,6 +117,8 @@ re-record on a green full gate and say why in the commit message.
 | `audit/rt-asl/run.sh` (asl prove, A1-A3, A6, A7, A8, A5/C2, fsqrt, C1) | lanes `asl-build` + `rtasl-*` (one per group; same rows, same expectations) |
 | `scripts/x86formal.sh prove` | lane `x86` |
 | item timeouts (`JANUS_ITEM_TIMEOUT`), audit, kernel replay, pins, sandbox, Witness theorems | unchanged: the same scripts and `janus verify` run them |
+| `x86formal.sh prove` "twice" (profile A.1) | pgate.sh and pg3.sh contain ONE `x86formal.sh prove` step (the profile's two entries are two runs of it, not two targets; there is no x86b step in either script) |
+| anything else in pgate.sh / pg3.sh (oracle.sh, oracle-sail.sh as a step, `asl.sh` check/oracle, coverage.sh, cabi-probe.sh, build-examples checks) | not steps of either script. Their builds that the covered checks need are in the prebuild (`oracle-sail.sh build` for `rtasl-fsqrt`, `asl.sh build`); the standalone corpora checks (`oracle*.sh full`, `asl.sh check`, `coverage.sh`, `cabi-probe.sh`) were not in the old gate and are not added |
 | (new) speed regression check, timeline, streamed results | on top of the above |
 
 **Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
