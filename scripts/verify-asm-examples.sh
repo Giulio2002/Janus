@@ -16,6 +16,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
+. "$root/scripts/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
@@ -54,7 +55,7 @@ verify_one() {
   out="artifacts/asm/$isa/$n"
   bin/janus extract "artifacts/examples-asm-$isa" "${sym[$n]}" "$out" >/dev/null
   start=$(date +%s.%N)
-  if bin/janus verify "$out" --proof "examples/asm/proofs/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1 &&
+  if jv "$out" --proof "examples/asm/proofs/$isa/$n.lean" --janus-root . > "$out/verify.log" 2>&1 &&
       ! grep -q '^Warning: the entry function follows' "$out/verify.log"; then
     t=$(echo "$(date +%s.%N) - $start" | bc)
     printf '%-17s ok  %6.1fs  %s\n' "$isa/$n" "$t" "$(grep -m1 '  Entry:' "$out/verify.log" | sed 's/^ *Entry: //')" | tee "$lines/${isa}_$n"

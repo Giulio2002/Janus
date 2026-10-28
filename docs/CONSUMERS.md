@@ -333,3 +333,14 @@ their own. Dependencies whose build needs more than Lean (ProofWidgets' JavaScri
 do not import those parts; most of Mathlib below its widget-using tactics is fine. Lake configuration and Lean elaborators are
 executable code and run under the sandbox; verify only packages you trust enough to execute
 confined.
+See also [docs/MIGRATION.md](MIGRATION.md) for migrating proofs to wave 2.
+
+## Limitation: user-defined structures in theorem statements
+
+`janus verify` and `janus verify-batch` reject a theorem statement that mentions a user-defined
+`structure` (or `class`/`inductive`) declared in the proof file or the consumer package: the
+statement must be readable from the framework's definitions alone, and the verifier reports the
+definition as "not a plain def or theorem". Workaround: state the theorem with **plain `def`s**
+(abbreviations of framework types, predicates as `def P (s : State) : Prop := ...`), and bundle
+several values with `Prod`/`Sigma` (or an `∃`/`∧` of the fields) instead of a custom structure.
+A structure may still be used inside the proof, as long as the statement does not mention it.

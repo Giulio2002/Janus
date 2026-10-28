@@ -37,7 +37,8 @@ about the ASL, bound to the binary ([below](#janus-verify---asl-the-corollary-of
 |---|---|
 | corpus | `artifacts/oracle/cases.jsonl` from `scripts/oracle.sh full`: 583,756 cases (qemu: 0 MISMATCH) |
 | `janus-asl-check` | **566,027 agree, 17,729 gap, 0 MISMATCH** (slice with the scalar floating-point, crypto, CRC and permute decoders, vendored sha256 `cd26b412…`; FPCR/FPSR set from the case and FPSR compared after the step); `LinuxEL0Config` holds on the base state and on all 583,756 cases' pre- and post-states; `UserMapped` holds on the base sweep and on every case's pre-state points; about 1 h with 12 tasks |
-| proofs | **55 audited theorems** plus `JanusASL.Verify.classify_sound` (an explicit list in JanusASL/Audit.lean and audit/rt-asl/AuditStrict.lean, with every statement printed): 48 encoding-class `*_agree` theorems, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
+| `janus-asl-check`, slice round 2 | **927,078 agree, 38,443 gap, 0 MISMATCH** on 965,521 cases of the corpus of agent/asl + agent/stxr (96833af, with main 4a75ac7) + agent/syscall + agent/neonfix (Advanced SIMD, exclusives, SVC/BRK/UDF, MRS/MSR of NZCV/FPSR/FPCR/DIT and the environment registers); vendored sha256 `fd9e1885…`; `LinuxEL0Config`/`FPConfig` and `UserMapped` hold on every case; 2 h 15 min with 12 tasks |
+| proofs | **84 audited theorems** (an explicit list in JanusASL/Audit.lean; audit/rt-asl/AuditStrict.lean prints the statements of 81 of them, plus `JanusASL.Verify.classify_sound`): the encoding-class `*_agree` theorems, the 4 FP rounding theorems (`rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64`), the 16 scalar floating-point encoding-class theorems (`fcmp_agree`, `fadd_agree`, `fsub_agree`, `fmul_agree`, `fdiv_agree`, `fmadd_agree`, `fmsub_agree`, `fnmadd_agree`, `fnmsub_agree`, `fsqrt_agree`, `fccmp_agree`, `scvtf_agree`, `ucvtf_agree`, `fcvtzs_agree`, `fcvtzu_agree`, `fcvt_agree`), `run_agree_fp`, `fpClassify_sound`, `classify_sound_fp`, `classifyAll_sound`, `Ensures.toASL_fp`, `step_agree`, `run_agree`, `Ensures.toASL`, `StepOK.of_agree`, the 3 witness theorems (`witness_hyps`, `witness_ldr_asl`, `witness_str_asl`); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only. The four example transfers (`Add`, `Max`, `Mul64`, `Add128`) are no longer hand-copied: `janus verify --asl` derives them from the artifacts |
 | `janus verify --asl` | the ASL corollaries of the shipped `Add`, `Max`, `Mul64` and `Add128` proofs, derived from their artifacts, audited and kernel-replayed (`scripts/asl.sh verify`, `TestASLExamples`) |
 
 Agreement by corpus class (`agree` / `gap`):
@@ -124,7 +125,27 @@ retry and the PC update of `__InstructionExecute`, and it maps ASL exceptions to
 | LD<op>{A}{L}{B,H}, op = ADD, CLR, EOR, SET, SMAX, SMIN, UMAX, UMIN (and the ST<op> aliases, `Rt = 11111`) | all valid | **proved**³ | `ldadd_agree`, `ldclr_agree`, `ldeor_agree`, `ldset_agree`, `ldsmax_agree`, `ldsmin_agree`, `ldumax_agree`, `ldumin_agree` (LdStAtomicCls; LdStAtomic, MemAtomic) |
 | SWP{A}{L}{B,H} | all valid | **proved**³ | `swp_agree` (LdStAtomicCls) |
 | CAS, CASP, PRFM | | tested | |
-| AdvSIMD/FP, AES, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
+| FCMP, FCMPE (S and D, register and `#0.0`) | all valid | **proved**⁴ | `fcmp_agree` (FP/FCmpCls) |
+| FPRoundBase (binary32, binary64; every rounding mode but ties-away, FZ/AH/UFE, overflow, underflow, inexact; traps of raised exceptions disabled) | all non-zero values | **proved**⁴ | `rb32Of_eq`, `rb64Of_eq`, `run_FPRoundBase32`, `run_FPRoundBase64` (FP/RoundBase, FP/RoundEq, FP/Round64): the generated `FPRoundBase__1` returns Janus' `fpRound` encoding and ORs its raised and directly set bits into FPSR |
+| FADD, FSUB, FMUL, FDIV (S and D) | all valid | **proved**⁴ | `fadd_agree`, `fsub_agree`, `fmul_agree`, `fdiv_agree` (FP/AgreeArith) |
+| FMADD, FMSUB, FNMADD, FNMSUB (S and D) | all valid | **proved**⁴ | `fmadd_agree`, `fmsub_agree`, `fnmadd_agree`, `fnmsub_agree` (FP/AgreeArith) |
+| FSQRT (S and D) | all valid | **proved**⁴ | `fsqrt_agree` (FP/AgreeArith; FP/Sqrt, FP/SqrtSide) |
+| FCCMP, FCCMPE (S and D) | all valid | **proved**⁴ | `fccmp_agree` (FP/AgreeCcmp) |
+| SCVTF, UCVTF (W or X to S or D, rounding from FPCR) | all valid | **proved**⁴ | `scvtf_agree`, `ucvtf_agree` (FP/AgreeConv) |
+| FCVTZS, FCVTZU (S or D to W or X) | all valid | **proved**⁴ | `fcvtzs_agree`, `fcvtzu_agree` (FP/AgreeFcvtz) |
+| FCVT (S to D, D to S) | all valid | **proved**⁴ | `fcvt_agree` (FP/AgreeFcvt) |
+| the other scalar FP instructions (FMAX/FMIN/FMAXNM/FMINNM/FNMUL, FABS, FNEG, FMOV, FRINT*, FCSEL, other FCVT rounding modes, conversions to and from fixed point, half precision), AdvSIMD, AES, SHA, CRC, PMULL, permutes, system (MRS/MSR TPIDR_EL0, DCZID_EL0, DC ZVA, HINT, barriers) | | tested | |
+
+**System register reads that are not in the table.** `MRS Xt, ID_AA64ISAR0_EL1` and the other
+feature-ID registers (`ID_AA64ISAR1/2`, `ID_AA64PFR0/1`, `ID_AA64ZFR0`, `ID_AA64MMFR0..4`,
+`ID_AA64DFR0/1`, N5 in [GAPS.md](GAPS.md)) are decoded by Janus as environment reads
+(`Instr.mrsEnv (.idreg crm op2)`, like `MIDR_EL1`, `CNTVCT_EL0`, `DIT`): they execute as
+`Fault.kernel` and the kernel contract `Janus.Kernel.Site.mrs` gives an **arbitrary** 64-bit result.
+They are deliberately not in the ASL system-register list (`janus_sysreg_splice.sail` keeps only
+`DCZID_EL0` and `TPIDR_EL0`): the ASL model's `AArch64_SysRegRead` returns the value of a CPU
+configuration for them, which no theorem should assume, and at EL0 the access is UNDEFINED
+(trapped to the kernel), which is exactly the event the kernel contract stands for. The ASL
+cross-check therefore says nothing about them, and nothing about them is claimed from it.
 
 "All valid" means all words of the group that Janus decodes. The theorems carry the decode
 conditions as hypotheses, for example `shift ≠ 11` and `imm6 < 32` when `sf = 0`. In those
@@ -143,6 +164,37 @@ Janus steps successfully (`step w js = .ok js'`): the ASL step completes with `J
 state `s'` with `Rel js' s'`, `MemRel js'.mem s'` and `LinuxEL0Config s'`. Where Janus faults
 (outside its allocation, read-only, SP misaligned) nothing is claimed; the check compares those
 cases with the ASL's exceptions.
+
+⁴ Under `Rel`, `FPRel js s`, `LinuxEL0Config s` and `FPConfig s` (below), for words Janus steps
+successfully: the ASL step completes with `Janus_OK` in a state `s'` with `Rel js' s'`,
+`FPRel js' s'`, `LinuxEL0Config s'` and `FPConfig s'`. Where Janus faults (a raised floating-point
+exception whose trap FPCR enables) nothing is claimed.
+
+### Scalar floating point (FP/*.lean)
+
+`FPRel js s` relates the floating-point state: `_Z[i]` holds Janus' `V[i]` in its low 128 bits, and
+`FPCR`/`FPSR` hold Janus' `fpcr`/`fpsr` zero-extended; Janus' FPCR has its RES0 bits (3–7, 14,
+27–31) clear, so the ASL's `FPCR_read` (which masks them, with the configuration's
+IMPLEMENTATION DEFINED choices: every exception's trap implemented, FPSCR.LEN/STRIDE not RAZ,
+FP/ImpDef.lean) returns it unchanged. `FPConfig s`: CPACR_EL1, CPTR_EL2 and CPTR_EL3 hold the
+check's values (FP enabled at EL0, no EL2/EL3 trap) and `PSTATE.SM = 0` (not in streaming mode;
+`FPRoundBase` reads it); `janus-asl-check` evaluates it (`fpCfgOk`)
+with `LinuxEL0Config` on the base state and every case's pre- and post-state.
+
+The library layer is proved against Janus' `Janus.Arm64.FP` (`Float.lean`): `FPUnpack` (the
+classification, the exact value as a rational, `FPCR.FZ`/`FIZ`/`AH` flushing with IDC) for
+binary32 and binary64 (FP/Unpack.lean), the value comparisons (`eq_real`/`lt_real` on the
+rationals against Janus' dyadic `Val.eq`/`Val.lt`, with the ASL's infinities `±2^1000000` above
+every finite value, FP/Value.lean), `FPProcessException` (the cumulative FPSR bit when the trap
+is disabled), `FPProcessDenorms` and `FPCompare` (FP/Compare.lean). An exception that Janus raises
+without trapping has its FPCR enable bit clear, which is all the ASL's trap test needs.
+
+The ASL's `while` loops (FPRoundBase normalizes the mantissa with two) are `Lean.Loop.forIn`, which
+Lean unfolds for monads with a `Lean.Order.MonadTail` instance. Decision: JanusASL/Proofs/Loop.lean
+adds that instance for `EStateM` (a flat order per initial state; no axioms beyond the standard
+three) and the lemma `forIn_loop_pure` for loops with a pure body. This is reasoning about the
+existing definitions only: no generated definition, and nothing in the generator or the vendored
+slice, changes.
 
 ### Loads and stores (Mem.lean, MemWrite.lean, LdSt*.lean)
 
@@ -247,6 +299,25 @@ starting state, the ASL run matches the Janus run. If `p.run fuel js = .ok (.ret
 then `aslRun p fuel s = .returned s'` with `Rel js' s'` and `LinuxEL0Config s'`. If
 `.ok (.stub name kind js')`, then `aslRun` ends at the same stub, related. PC tracking through
 branches is part of `Rel`.
+
+**`run_agree_fp`** (FP/Run.lean) is `run_agree` for the scalar floating-point classes. `FPStepOK w` is
+`StepOK w` with `FPRel` and `FPConfig` carried: from states related under `Rel`, `FPRel`,
+`LinuxEL0Config` and `FPConfig`, whenever Janus steps `w` to a state with an untagged PC, the ASL step
+completes with `Janus_OK` in states related the same way. Each floating-point class gives
+`fpStepOK_<class>` (the `*_agree` theorem of the class), `Classify.fpClassify` names the class of a
+word (the hypotheses of the `fpStepOK_<class>` theorem, verbatim) and `Verify.fpClassify_sound` turns
+`fpClassify w = some c` into `FPStepOK w`. A program all of whose words are `FPStepOK` and untagged
+runs the same way on both sides, with the four relations holding at the end or at a stub.
+
+Mixed programs (integer, branch and floating-point words together): `Rel` now carries
+`PState.sm = 0` (SVE streaming mode off), and `CfgFrame` carries `FPFrame` (the `_Z` registers, FPCR, FPSR,
+and the CPACR/CPTR/ZCR/SMCR configuration are unchanged by an integer step). Every integer and branch
+class has a strong `X_agree_f` theorem with that extra conclusion (the old `X_agree` statements are wrappers,
+unchanged) and, on the Janus side, `FpSame` (vregs, FPCR and FPSR unchanged, proved per integer
+constructor in `Proofs/FpSame/`). `FP/IntLift.lean` combines them into `fpStepOK_<class>` for all integer
+and branch classes, so `Classify.classifyAll`/`coveredAll` (integer, branch or FP word) are sound for
+`FPStepOK` (`classify_sound_fp`, `classifyAll_sound`, `coveredAll_*`), and `Ensures.toASL_fp` is
+`Ensures.toASL` for such programs with all four relations carried.
 
 Not covered: `.error _` outcomes, that is faults and out of fuel. There Janus is conservative
 and the ASL may continue.
@@ -475,7 +546,14 @@ upstream (none has been filed):
    mechanically (JanusASL/sail/fakereal_sqrt.py) by the round-to-odd approximation at absolute
    precision 2^-1100: `m/2^1100` when `m = ⌊√x·2^1100⌋` is exact, `(2m+1)/2^1101` otherwise.
    Every boundary FPRound tests for binary16/32/64 is a multiple of 2^-1100, so FPRound of it
-   equals FPRound of the exact root (result and exceptions). The corpus FSQRT cases agree.
+   equals FPRound of the exact root (result and exceptions). The corpus FSQRT cases agree, and
+   rt-asl rows A5 rsq and A5 fsqrt check it against Sail's C backend (docs/AUDIT-ASL.md, A5).
+8. **`integer_update_subrange`.** The Lean library's `set_slice_int` converts the integer to a bit
+   vector of the field's width before the update, so every bit outside the field was lost (Sail's
+   C and OCaml libraries update the integer in place). FPRoundBase's round-to-odd (FCVTXN) is the
+   one use in the slice. `scripts/asl.sh gen` replaces the generated definition mechanically
+   (JanusASL/sail/sail_int_fix.py) by `i - ((i / 2^lo) % 2^len) * 2^lo + x * 2^lo`; rt-asl row
+   A5 ius checks it against Sail's C backend, and the corpus FCVTXN cases agree.
 
 Bugs 4–6 each produced a model that compiled without complaint but gave wrong results. Only the
 corpus comparison found them. That comparison is the reason the check exists alongside the
@@ -489,18 +567,35 @@ The whole arm-v9.4-a model does not fit in Lean: the full `BranchExcSys` decode 
 * **`slice.py`** works on sail-arm's source files. It keeps every decode-clause *pattern* of the
   classes DataProcImm, BranchExcSys, LoadStore, DataProcReg and DataProcFPSIMD, so the decode
   if-chains stay exactly as Arm wrote them. It keeps the *bodies* of the decode functions in
-  `keep.txt`, which lists 417 functions: the integer instructions, atomics, CAS/CASP, LDAR/STLR/LDAPR,
-  exclusives, PRFM/PRFUM/RPRFM, CLREX, MRS, SYS, HINT, the SIMD set Janus decodes, the scalar
-  floating-point instructions (not the fixed-point or half-precision forms, which Janus rejects),
-  and SHA1/SHA256/SHA512, EOR3/RAX1/XAR/BCAX, PMULL, CRC32/CRC32C and ZIP/UZP/TRN. Every other
+  `keep.txt`, which lists 789 functions: the integer instructions, atomics, CAS/CASP, LDAR/STLR/LDAPR,
+  the exclusives (LDXR/LDAXR/LDXP/LDAXP, STXR/STLXR/STXP/STLXP, CLREX), PRFM/PRFUM/RPRFM, MRS,
+  MSR (register and immediate), SYS, HINT, SVC, BRK, UDF (the Reserved class), every Advanced
+  SIMD and SIMD&FP encoding except the FP16 and BF16 ones (including DotProd, I8MM, RDM, FHM,
+  FCMA, FRINTTS, SM3/SM4 and LRCPC3, which Janus does not decode yet), the scalar floating-point
+  instructions and the scalar fixed-point conversions, and SHA1/SHA256/SHA512,
+  EOR3/RAX1/XAR/BCAX, PMULL, CRC32/CRC32C and ZIP/UZP/TRN. Every other
   clause body becomes `throw(Error_ImplementationDefined("janus-excluded …"))`. The script also
   empties the AArch32, SVE and SME decoders, and turns 22 literal-pattern clauses into bit-list
   patterns. Literal patterns are what blew `BranchExcSys` up to 207 MB.
 * **Splices.** `janus_splice.sail`: `AArch64_TakeException` records the exception type, syndrome
   and fault address, then throws `Error_ExceptionTaken`, so the harness can compare faults.
   `janus_pac_splice.sail`: the PAC nibble substitutions use `Slice` (the originals did not
-  translate). `janus_sysreg_splice.sail`: the auto-generated system register read and SYS-op
-  dispatch keep only DCZID_EL0, TPIDR_EL0 and DC ZVA. Every other register is janus-excluded.
+  translate). `janus_sysreg_splice.sail`: the auto-generated system register read (MRS), write (MSR)
+  and SYS-op dispatch keep only DCZID_EL0, TPIDR_EL0, NZCV, FPSR, FPCR, DIT, CNTVCT_EL0,
+  CNTFRQ_EL0 and MIDR_EL1 (read), NZCV, FPSR, FPCR and DIT (write) and DC ZVA. Every other
+  register is janus-excluded. `janus_splice.sail` also gives the harness a **local exclusive
+  monitor**: sail-arm stubs `IsExclusiveLocal` to TRUE (impdefs.sail), so every store-exclusive
+  passed, even in the Open Access state where the architecture requires it to fail.
+  `MarkExclusiveLocal` now records the marked bytes, `IsExclusiveLocal` compares against them,
+  `ClearExclusiveLocal` opens the monitor, and `janus_init` starts open (the native runner's
+  CLREX). `IsExclusiveGlobal` and `AArch64_IsExclusiveVA` stay TRUE (one PE).
+* **`sail_int_fix.py`** (after generation): the Lean library's `set_slice_int` converts the integer
+  to a bit vector of the field's width before updating it, so `integer_update_subrange` lost every
+  other bit (Sail's C and OCaml libraries update the integer in place). Its one use in the slice is
+  FPRoundBase's round-to-odd (`int_mant<0> = '1'`, FCVTXN), which returned an all-ones mantissa.
+  The script replaces the generated definition with the arithmetic one,
+  `i - ((i / 2^lo) % 2^len) * 2^lo + x * 2^lo`; janus-asl-check compares every FCVTXN case of the
+  corpus (19 MISMATCH before, 0 after).
 * **`plugin/sail_plugin_janus.ml`** is a Sail plugin (`--janus-lean`). It slices the type-checked
   AST by call graph from the roots in `roots.txt` (the harness entry points), keeping the
   standard library, and then runs the normal Lean rewrites and printer.
@@ -931,6 +1026,16 @@ A regression of bug 5 or bug 6 would therefore most likely break the proof build
 Earlier iterations found, and fixed in the harness or slice: TTBR0 register aliasing (an "Out of
 Memory Range at 0" walk), encodings excluded by mistake, and RPRFM missing from `keep.txt`. None
 of these was a Janus bug. No case so far has shown Janus disagreeing with the ASL.
+
+Slice round 2 (the Advanced SIMD, exclusive, system and trap decoders) started at **10,537
+MISMATCH**, none of them a Janus bug: 3,750 decode functions still excluded (DUP element/scalar,
+FP vector arithmetic and reductions, scalar shifts and compares); 2,800 store-exclusives that the
+stubbed Sail monitor passed in the Open Access state (Janus fails them, as the architecture
+requires; fixed by the harness monitor above); 3,005 UDF words, where the ASL's UNDEFINED and
+Janus' SIGILL trap are the same outcome (now `agree udf-undefined`); 809 `MSR FPSR` cases where
+Sail stores the RES0 bits written and Janus makes them RAZ/WI, both allowed (FPSR is now compared
+on its implemented bits, `Check.fpsrImpl`); and 19 FCVTXN cases from the `set_slice_int` bug of
+the Lean library (`sail_int_fix.py`).
 
 ## Trust story
 

@@ -125,6 +125,7 @@ theorem tail (p n c : BitVec 64) (s : State) (hpre : CountPre p n c s) :
 
 theorem ite255_and1 (P : Prop) [Decidable P] : ((if P then 255 else 0) &&& 1 : Nat) = if P then 1 else 0 := by
   split <;> rfl
+set_option maxHeartbeats 1000000 in
 
 /-- The vector loop at `vhead` (`ldr q31, [x4], #16`): after `k` blocks the two 64-bit lanes of
 `v26` add up to the count of the first `16 k` bytes (modulo `2^64`). -/

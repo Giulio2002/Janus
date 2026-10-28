@@ -821,11 +821,38 @@ attribute [janus64_exec, janus64_post] Janus.Arm64.Memory.accessible_writeLE
     (h : a = b) : (m.writeLE a n v).readLE b n = v % 256 ^ n := by
   subst h; exact Janus.Arm64.Memory.readLE_writeLE_self m a n v
 
+/-- Writes to disjoint ranges commute. A permutation lemma (no loop) but deliberately NOT in the
+default simp sets, which would reorder the write chains the contract proofs state; pass it where
+wanted: `janus64_run [writeLE_comm]`. -/
+theorem writeLE_comm (m : Memory) {a n b k : Nat} (v w : Nat)
+    (h : a + n ≤ b ∨ b + k ≤ a) :
+    (m.writeLE a n v).writeLE b k w = (m.writeLE b k w).writeLE a n v :=
+  Janus.Arm64.Memory.writeLE_comm m v w h
+
 /-- A read entirely inside an earlier write (e.g. one word of a 16-byte `MOVUPS` store). -/
 @[janus64_exec, janus64_post] theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat)
     (h1 : a ≤ b) (h2 : b + k ≤ a + n) (h3 : k < n) :
     (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Janus.Arm64.Memory.readLE_writeLE_inside m v h1 h2
+
+/-- Large literals times a carry stay out of the kernel's `Nat.mul` (see `Janus.Tactic.ofNat_toNat_mul`). -/
+@[janus64_exec high, janus64_post high] theorem ofNat_toNat_mul (b : Bool) (n : Nat) :
+    BitVec.ofNat 64 (b.toNat * n) = if b then BitVec.ofNat 64 n else 0#64 := by
+  cases b <;> simp
+
+@[janus64_exec high, janus64_post high] theorem ofNat_mul_toNat (b : Bool) (n : Nat) :
+    BitVec.ofNat 64 (n * b.toNat) = if b then BitVec.ofNat 64 n else 0#64 := by
+  cases b <;> simp
+
+@[janus64_exec, janus64_post] theorem ofNat_mul_allones (x : Nat) :
+    BitVec.ofNat 64 (x * 18446744073709551615) = -BitVec.ofNat 64 x := by
+  apply BitVec.eq_of_toNat_eq
+  simp only [BitVec.toNat_ofNat, BitVec.toNat_neg]
+  omega
+
+@[janus64_exec, janus64_post] theorem ofNat_allones_mul (x : Nat) :
+    BitVec.ofNat 64 (18446744073709551615 * x) = -BitVec.ofNat 64 x := by
+  rw [Nat.mul_comm]; exact ofNat_mul_allones x
 
 @[janus64_exec, janus64_post] theorem readLE_mod_8 (m : Memory) (a : Nat) :
     m.readLE a 8 % 18446744073709551616 = m.readLE a 8 :=
@@ -838,6 +865,19 @@ attribute [janus64_exec, janus64_post] Janus.Arm64.Memory.accessible_writeLE
 @[janus64_exec, janus64_post] theorem readLE_mod_1 (m : Memory) (a : Nat) :
     m.readLE a 1 % 256 = m.readLE a 1 :=
   Nat.mod_eq_of_lt (Janus.Arm64.Memory.readLE_lt m a 1)
+
+/-- Bounds of reads, as simp lemmas: they let the side-condition discharger of the simp sets
+(`Common.withRecursiveDisch`) prove `m.readLE a 8 < 2^64` for a conditional lemma. -/
+@[janus64_exec, janus64_post] theorem readLE_lt_8 (m : Memory) (a : Nat) :
+    m.readLE a 8 < 18446744073709551616 := Janus.Arm64.Memory.readLE_lt m a 8
+@[janus64_exec, janus64_post] theorem readLE_lt_4 (m : Memory) (a : Nat) :
+    m.readLE a 4 < 4294967296 := Janus.Arm64.Memory.readLE_lt m a 4
+@[janus64_exec, janus64_post] theorem readLE_lt_2 (m : Memory) (a : Nat) :
+    m.readLE a 2 < 65536 := Janus.Arm64.Memory.readLE_lt m a 2
+@[janus64_exec, janus64_post] theorem readLE_lt_1 (m : Memory) (a : Nat) :
+    m.readLE a 1 < 256 := Janus.Arm64.Memory.readLE_lt m a 1
+@[janus64_exec, janus64_post] theorem readLE_lt_16 (m : Memory) (a : Nat) :
+    m.readLE a 16 < 340282366920938463463374607431768211456 := Janus.Arm64.Memory.readLE_lt m a 16
 
 @[janus64_exec, janus64_post] theorem writeLE_mod_16 (m : Memory) (a v : Nat) :
     m.writeLE a 16 (v % 340282366920938463463374607431768211456) = m.writeLE a 16 v :=
@@ -1246,7 +1286,7 @@ def stateHyps : MetaM (Array Expr) := do
       for n in [``GoABI.RetAddr.toNat_ofNat, ``GoABI.RetAddr.mod64, ``GoABI.RetAddr.user_eq] do
         out := out.push (← mkAppM n #[d.toExpr])
       continue
-    if ty.isAppOfArity ``Janus.MemFrame 3 then
+    if ty.isAppOfArity ``Janus.MemFrame 3 || ty.isAppOfArity ``Janus.LiveFrame 4 then
       out := out ++ (← Common.frameRules d ty); continue
     if d.userName.eraseMacroScopes == `hbr && (← isProp ty) then
       out := out.push d.toExpr; continue
@@ -1525,7 +1565,7 @@ where
 def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
   -- reducible transparency only in the closers: unfolding `Memory.accessible`/`readLE` of a
   -- symbolic memory to compare it with a hypothesis can take seconds
-  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | omega | janus64_disch)
+  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | omega | janus64_disch)
   let left ← Common.provePreCore (cleanOutcome cfg) closer g
   unless left.isEmpty do
     let st ← cfg.status.get
@@ -1536,8 +1576,8 @@ def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
 
 /-- Apply a callee summary at a call site: the goal continues from the callee's return state.
 The postcondition is split into hypotheses; an equation `s' = e` is substituted. -/
-def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee : String) :
-    TacticM (List MVarId) := g.withContext do
+def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee : String)
+    (mvs : Array Expr := #[]) : TacticM (List MVarId) := g.withContext do
   let sty ← instantiateMVars (← inferType hsum)
   let (``Summary, #[_, entry, pre, post]) := sty.getAppFnArgs |
     throwError "{tacName}: not a `Summary`:{indentExpr sty}"
@@ -1553,13 +1593,21 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let gs ← Common.applyFast g lem
   Common.setPhase cfg.status s!"proving the precondition of the summary of {callee}"
   provePre cfg hpreM.mvarId! callee
+  for mv in mvs do
+    unless ← mv.mvarId!.isAssigned do
+      throwError "{tacName}: at the entry of {callee}: the live set and budget of its live \
+        contract were not determined by the context (the precondition needs a hypothesis \
+        `RtInv.inv R b L g (view rt L m)` about the memory at the call, or one up to the write \
+        barrier's slots; see `Janus.Contracts.Live`)"
   let mut out := []
   for g' in gs do
     if ← g'.isAssigned then continue
     let before ← g'.withContext do return (← getLCtx).getFVarIds
     let (fv, g'') ← g'.introNP 3
     let g'' ← Common.destructPost g'' fv[0]! fv[1]! fv[2]!
-    out := out ++ [← normFrames cfg g'' before]
+    let g'' ← normFrames cfg g'' before
+    let g'' ← if mvs.isEmpty then pure g'' else Common.addApartFacts g'' before
+    out := out ++ [g'']
   return out
 where
   /-- Simplify the callee's `MemFrame` hypotheses and the other propositions its postcondition
@@ -1638,13 +1686,16 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
     cfg.status.modify fun st => { st with pc := some c, sym := Common.symOf syms c }
     if !allowStop && cfg.stops.contains c then return none
     -- a call to a function with a summary
-    if let some (_, hsum) := cfg.calls.find? (·.1 == c) then
+    if let some (_, hsum0) := cfg.calls.find? (·.1 == c) then
+      -- a live contract: its live set and budget as metavariables (see `parseCalls`)
+      let (mvs, _, _) ← forallMetaTelescope (← instantiateMVars (← inferType hsum0))
+      let hsum := mkAppN hsum0 mvs
       let hsum ← match hret? with
         | some hret => mkAppM ``Summary.withExit #[hsum, hret]
         | none => pure hsum
       let callee := (Common.symOf syms c).getD (hex c)
       cfg.status.modify fun st => { st with instr := some s!"(entry of {callee}, by its summary)" }
-      return some (← applySummary cfg g p s hsum hpc callee)
+      return some (← applySummary cfg g p s hsum hpc callee mvs)
     let cE := mkNatLit c
     if mode.isNone && c == exitA then
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
@@ -1836,6 +1887,11 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
   if t.isAppOfArity ``Janus.Outside 3 then
     if ← Common.dischargeOutside g then return
     throwError "janus64_disch: cannot prove{indentExpr t}"
+  if t.isAppOfArity ``Janus.InRanges 3 then
+    if ← Common.dischargeInRanges g then return
+    throwError "janus64_disch: cannot prove{indentExpr t}"
+  if t.isForall then
+    if ← Common.dischargeLiveForall g then return
   if let some (_, lhs, _) := t.eq? then
     if lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 then
       if ← dischargeAccessible g then return
@@ -1882,6 +1938,23 @@ def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) := do
       | some ty' => ty := ty'.headBeta
       | none => break
     let e ← if ty == ty0 then pure e else mkExpectedTypeHint e ty
+    -- a live contract (`Janus.Contracts.Live`: `∀ L b, Summary …`, the live set and the budget
+    -- quantified): its entry is that of the `Summary`; the quantifiers are instantiated with
+    -- metavariables at each call, which the precondition's live goals determine (`janus_live`)
+    let entry? ← forallTelescope ty fun xs body => do
+      if xs.isEmpty then return none
+      let mut b := body
+      for _ in [0:8] do
+        if b.isAppOf ``Summary then break
+        match ← unfoldDefinition? b with
+        | some b' => b := b'.headBeta
+        | none => break
+      let (``Summary, #[_, entry, _, _]) := b.getAppFnArgs | return none
+      if entry.hasAnyFVar (fun v => xs.any (·.fvarId! == v)) then return none
+      return some entry
+    if let some entry := entry? then
+      let some n ← evalNat entry | throwError "janus64_run calls: cannot evaluate the entry of {t}"
+      return (n, e)
     let (``Summary, #[_, entry, _, _]) := ty.getAppFnArgs |
       throwError "janus64_run calls: {t} is not a `Summary`: {ty0}"
     let some n ← evalNat entry | throwError "janus64_run calls: cannot evaluate the entry of {t}"
@@ -1928,7 +2001,7 @@ elab "janus64_arith" : tactic => do
   if ← Janus.Carry.tryCarry then return
   Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus64_arith_norm]))
-  evalTactic (← `(tactic| omega))
+  evalTactic (← `(tactic| first | omega | (janus_decide_split; all_goals omega)))
 
 /-- Evaluate the layout-independent address terms `segAddr p "f"`, `dataBase p i` and
 `ripTarget p pc` (and `Extracted`-style definitions of literals) to literals everywhere, so that

@@ -50,8 +50,10 @@ Step by step, for `janus extract <binary> <symbol> <outdir>` followed by `janus 
    data (`ADRP`+`ADD`/`LDR` on arm64, `[rip+d]` on amd64).
 3. **Copy** (trusted). For each function, copy the raw bytes of `[addr, addr+size)` from `.text`:
    little-endian 32-bit words on arm64 (trailing zero padding dropped), raw bytes on amd64. Copy the
-   referenced read-only data byte for byte. Writable globals are never copied: their run-time
-   contents are not fixed by the binary.
+   referenced read-only data byte for byte. Writable globals are not copied as data: their
+   run-time contents are not fixed by the binary. Only their link-time images, for the symbols
+   `--global` names, are recorded in `Program.globals` (`globals.go`), which a theorem may assume
+   with `Janus.Spec.GlobalsInit`.
 4. **Render** `Extracted.lean` (a `Program` value: segments, stubs, data, entry address) and
    `identity.json` (binary SHA-256, extractor version, symbol, functions, stubs, data, and the SHA-256
    of `Extracted.lean`).
@@ -240,6 +242,7 @@ imports `Extracted` either way.
 | `Janus.Arm64.MemoryLemmas`, `Janus.Run` | read-over-write, frame and fuel lemmas (proved) | no |
 | `Janus.GoABI` | ABIInternal on arm64: `CallSetup`, `RetAddr`, `ABIReturn`, outcome predicates, `Ensures` | definitions are part of every statement |
 | `Janus.Spec.Basic` | `Ptr`, `Disjoint`, `Aliasing`, `OnlyWrites`, `val256`, `StackOK`, … | definitions are part of every statement |
+| `Janus.Spec.Globals` | `GlobalsInit`, `GlobalIs`, `GlobalBytesIs`, `globalImage`: writable globals and their link-time images (both ISAs) | definitions are part of every statement that uses them |
 | `Janus.Spec.Dynamic` | `ItabIs`, `FuncvalIs`, `ClosureCtx`: which code a dynamic call reaches (both ISAs) | definitions are part of every statement that uses them |
 | `Janus.Tactic.Dynamic` | `janus_dyn` | no |
 | `Janus.Tactic.{Attr,Basic,Core,Data}` | `Reaches`, `Summary`, `janus_run`, `janus_data`, simp sets | no |
@@ -261,6 +264,7 @@ on an ASL-derived check).
 | `extract.go`, `amd64.go` | the byte copy and `Extracted.lean` rendering | **yes** (copy) |
 | `branch.go`, reachability in `amd64.go` | which callees to copy | no |
 | `data.go` | read-only data references (untrusted) and their byte copy (trusted) | partly |
+| `globals.go` | `--global`: writable globals' link-time images (symbol lookup, section checks, byte copy) | **yes** |
 | `dynamic.go` | dynamic call targets (`--targets`, inferred), the reachability driver for both ISAs | no |
 | `identity.go` | `identity.json`, `janus check` (regenerate and byte-compare) | **yes** |
 | `verify.go`, `leanjob.go` | the verify pipeline: trusted copies, proof build, audit, replay, hashes, report | **yes** |

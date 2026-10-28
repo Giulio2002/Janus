@@ -39,6 +39,15 @@ def expected : List Name := [
   ``JanusASL.Proofs.ldadd_agree, ``JanusASL.Proofs.ldclr_agree, ``JanusASL.Proofs.ldeor_agree,
   ``JanusASL.Proofs.ldset_agree, ``JanusASL.Proofs.ldsmax_agree, ``JanusASL.Proofs.ldsmin_agree,
   ``JanusASL.Proofs.ldumax_agree, ``JanusASL.Proofs.ldumin_agree, ``JanusASL.Proofs.swp_agree,
+  -- scalar floating point (FPRel, FPConfig)
+  ``JanusASL.Proofs.fcmp_agree,
+  -- scalar floating-point arithmetic, compares and conversions (single and double precision)
+  ``JanusASL.Proofs.fadd_agree, ``JanusASL.Proofs.fsub_agree, ``JanusASL.Proofs.fmul_agree, ``JanusASL.Proofs.fdiv_agree, ``JanusASL.Proofs.fmadd_agree, ``JanusASL.Proofs.fmsub_agree, ``JanusASL.Proofs.fnmadd_agree, ``JanusASL.Proofs.fnmsub_agree, ``JanusASL.Proofs.fsqrt_agree, ``JanusASL.Proofs.fccmp_agree, ``JanusASL.Proofs.scvtf_agree, ``JanusASL.Proofs.ucvtf_agree, ``JanusASL.Proofs.fcvtzs_agree, ``JanusASL.Proofs.fcvtzu_agree, ``JanusASL.Proofs.fcvt_agree,
+  ``JanusASL.Proofs.run_agree_fp, ``JanusASL.Verify.fpClassify_sound,
+  ``JanusASL.Verify.classify_sound_fp, ``JanusASL.Verify.classifyAll_sound, ``JanusASL.Proofs.Ensures.toASL_fp,
+  -- FPRoundBase (binary32/binary64) against Janus' fpRound
+  ``JanusASL.Proofs.rb32Of_eq, ``JanusASL.Proofs.rb64Of_eq, ``JanusASL.Proofs.run_FPRoundBase32,
+  ``JanusASL.Proofs.run_FPRoundBase64,
   -- a concrete state satisfying Rel, MemRel and LinuxEL0Config, with LDR/STR instantiated on it
   ``JanusASL.Proofs.witness_hyps, ``JanusASL.Proofs.witness_ldr_asl, ``JanusASL.Proofs.witness_str_asl,
   -- assembly and whole runs

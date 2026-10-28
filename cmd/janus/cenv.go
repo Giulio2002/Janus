@@ -50,11 +50,29 @@ import (
 
 // cenvInfo is what loadCEnv reads from the ELF file.
 type cenvInfo struct {
-	plt    map[uint64]string // PLT entry -> "symbol@plt"
-	dynRel []uint64          // r_offset of every dynamic relocation, sorted
-	relro  [2]uint64         // PT_GNU_RELRO [start, end), or zero
-	goText [2]uint64         // [runtime.text, runtime.etext), or zero
-	tls    *tlsImage         // PT_TLS, or nil
+	plt    map[uint64]string   // PLT entry -> "symbol@plt"
+	dynRel []uint64            // r_offset of every dynamic relocation, sorted
+	dynSym map[uint64]dynReloc // r_offset -> the relocation (its symbol, type, addend)
+	relro  [2]uint64           // PT_GNU_RELRO [start, end), or zero
+	goText [2]uint64           // [runtime.text, runtime.etext), or zero
+	tls    *tlsImage           // PT_TLS, or nil
+}
+
+// dynReloc is one dynamic relocation: its symbol (empty for none), type and addend.
+type dynReloc struct {
+	Sym    string
+	Type   uint32
+	Addend uint64
+}
+
+// DynGOT is a GOT slot the extracted C code reads that a dynamic relocation fills
+// (Janus.DynGOT): its value is the dynamic linker's, so it is not copied; a theorem states it as
+// a precondition in terms of the relocation's symbol (Janus.GotBound).
+type DynGOT struct {
+	Name   string // the relocation's symbol
+	Slot   uint64
+	Type   uint32 // R_AARCH64_GLOB_DAT (1025), R_X86_64_GLOB_DAT (6), ...
+	Addend uint64 // r_addend (two's complement)
 }
 
 // tlsImage is the executable's TLS segment (module 1, static TLS).
@@ -90,7 +108,7 @@ const (
 
 // loadCEnv reads the PLT, the dynamic relocations, PT_GNU_RELRO, PT_TLS and the Go text range.
 func (b *Binary) loadCEnv(f *elf.File, lv *loaderView, path string) error {
-	ci := &cenvInfo{plt: map[uint64]string{}}
+	ci := &cenvInfo{plt: map[uint64]string{}, dynSym: map[uint64]dynReloc{}}
 	b.cenv = ci
 	for _, p := range f.Progs {
 		switch p.Type {
@@ -146,6 +164,11 @@ func (b *Binary) loadCEnv(f *elf.File, lv *loaderView, path string) error {
 			rOff := binary.LittleEndian.Uint64(data[off:])
 			info := binary.LittleEndian.Uint64(data[off+8:])
 			ci.dynRel = append(ci.dynRel, rOff)
+			rel := dynReloc{Type: uint32(info), Addend: binary.LittleEndian.Uint64(data[off+16:])}
+			if k := int(info >> 32); k >= 1 && k <= len(dsyms) {
+				rel.Sym = dsyms[k-1].Name
+			}
+			ci.dynSym[rOff] = rel
 			if uint32(info) == jumpSlot {
 				if k := int(info >> 32); k >= 1 && k <= len(dsyms) && dsyms[k-1].Name != "" {
 					slots[rOff] = dsyms[k-1].Name
@@ -420,6 +443,35 @@ func collectCData(b *Binary, x *Extraction) []CData {
 	return out
 }
 
+// collectDynGOT lists the GOT slots with a dynamic relocation that the extracted C functions
+// read (an 8-aligned .got slot whose r_offset is the slot and whose relocation names a symbol),
+// sorted by address. Not copied: the slot's run-time value is the dynamic linker's binding of
+// the symbol, which a theorem states as a precondition (Janus.GotBound).
+func collectDynGOT(b *Binary, x *Extraction) []DynGOT {
+	if b.cenv == nil {
+		return nil
+	}
+	seen := map[uint64]bool{}
+	var out []DynGOT
+	for _, r := range x.DataRefs {
+		if b.isGoCode(r.From) || r.Target%8 != 0 || seen[r.Target] {
+			continue
+		}
+		sec, ok := b.sectionOf(r.Target)
+		if !ok || sec.Name != ".got" || b.staticGOT(r.Target) {
+			continue
+		}
+		rel, ok := b.cenv.dynSym[r.Target]
+		if !ok || rel.Sym == "" {
+			continue
+		}
+		seen[r.Target] = true
+		out = append(out, DynGOT{Name: rel.Sym, Slot: r.Target, Type: rel.Type, Addend: rel.Addend})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
+	return out
+}
+
 // extractionTLS is the TLS image to render: the binary's, when an extracted function reads the
 // thread pointer.
 func extractionTLS(b *Binary, x *Extraction) *tlsImage {
@@ -452,9 +504,20 @@ func writeBytesList(sb *strings.Builder, bs []byte, indent string) {
 	sb.WriteString("]")
 }
 
-// writeCEnv renders `def cdata` and `def tls` (only when present, so that other extractions are
-// byte-identical to earlier ones).
+// writeCEnv renders `def cdata`, `def dyngot` and `def tls` (only when present, so that other
+// extractions are byte-identical to earlier ones).
 func writeCEnv(sb *strings.Builder, x *Extraction) {
+	if len(x.DynGOT) > 0 {
+		sb.WriteString("/-- GOT slots the extracted C code reads that a dynamic relocation fills (not copied: their\nrun-time value is the dynamic linker's binding of the symbol; see `Janus.GotBound`). -/\n")
+		sb.WriteString("def dyngot : List DynGOT := [")
+		for i, d := range x.DynGOT {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			fmt.Fprintf(sb, "\n  { name := %s, slot := 0x%x, rtype := %d, addend := %d }", leanString(d.Name), d.Slot, d.Type, d.Addend)
+		}
+		sb.WriteString(" ]\n\n")
+	}
 	if len(x.CData) > 0 {
 		sb.WriteString("/-- Writable C data objects the extracted C code references (`.data`/`.bss`), with their\ninitial bytes (`.bss`: zero). Not loaded by `Program.DataLoaded`. -/\n")
 		sb.WriteString("def cdata : List CData := [")

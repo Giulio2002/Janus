@@ -29,8 +29,12 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus
 namespace Proof
 
 /-- `time.startNano` and `time.Local` (writable globals `time.Now` reads). -/
-def startNano : Nat := 0x18f820
-def timeLocal : Nat := 0x163b20
+def startNano : Nat :=
+  adrpLdTarget (segAddr Extracted.program "time.Now" + 4 * 8)
+    (segWord Extracted.program "time.Now" 8) (segWord Extracted.program "time.Now" 9) 3
+def timeLocal : Nat :=
+  adrpLdTarget (segAddr Extracted.program "time.Now" + 4 * 21)
+    (segWord Extracted.program "time.Now" 21) (segWord Extracted.program "time.Now" 22) 3
 
 theorem rr0 (x : BitVec 64) : x.rotateRight 0 = x := by
   simp [BitVec.rotateRight, BitVec.rotateRightAux]
@@ -151,7 +155,9 @@ theorem correctness (rt : List (Nat × Nat)) :
         k.mono ≤ msec * 10 ^ 9 + mnsec ∧ k'.mono = msec * 10 ^ 9 + mnsec ∧
         s'.regs 0 = BitVec.ofNat 64 (sec * 10 ^ 9 + nsec)) := by
   intro ret hret s k hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb, ha, hw⟩, hout, hb1, hb2, hb3, hgd, hsn, hloc⟩
-  simp only [startNano, timeLocal] at hsn hloc
+  janus_eval_nat hS : startNano
+  janus_eval_nat hL : timeLocal
+  simp only [hS, hL] at hsn hloc
   apply ReturnsK.of_reaches
   janus_intro hs
   janus_run

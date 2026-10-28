@@ -70,6 +70,23 @@ structure DataSegment where
   bytes : List Nat
 deriving Repr, Inhabited
 
+/-- A writable global variable as the linker laid it out (`janus extract --global SYM`): the
+symbol's address and size and its **link-time image**, the bytes of `.data`/`.noptrdata` the
+binary file holds for it (`init`), or none for `.bss`/`.noptrbss` (which the loader zeroes).
+Bytes of `[base, base + size)` past `init.length` are zero (`GlobalSegment.byte`). Unlike
+`DataSegment`, nothing says memory holds these bytes at a call: the program may have stored
+anything there. A theorem that relies on the initial value says so with
+`Janus.Spec.GlobalsInit` (docs/PROOFS.md, "Writable globals"). -/
+structure GlobalSegment where
+  name : String
+  base : Nat
+  size : Nat
+  init : List Nat := []
+deriving Repr, Inhabited, DecidableEq
+
+/-- Byte `i` of the global's link-time image (`0` past the file bytes: `.bss`). -/
+def GlobalSegment.byte (g : GlobalSegment) (i : Nat) : Nat := g.init.getD i 0
+
 structure Program where
   segments : List Segment
   stubs : List Stub
@@ -86,6 +103,9 @@ structure Program where
   states the function's behaviour as a hypothesis (a `Tactic.Summary`, see
   docs/RUNTIME-CONTRACTS.md). -/
   contracts : List (String × Nat) := []
+  /-- Writable globals named by `janus extract --global SYM`, with their link-time images. Like
+  `contracts`, the list does not change the run; `Janus.Spec.GlobalsInit` reads it. -/
+  globals : List GlobalSegment := []
 deriving Repr, Inhabited
 
 /-- How a run ends when it does not fault. -/
@@ -160,6 +180,10 @@ theorem fetch_link {p : Program} (impl : List Segment) {pc w : Nat} (h : p.fetch
     (p.link impl).contracts = p.contracts := rfl
 @[simp] theorem stubs_link (p : Program) (impl : List Segment) :
     (p.link impl).stubs = p.stubs := rfl
+@[simp] theorem globals_link (p : Program) (impl : List Segment) :
+    (p.link impl).globals = p.globals := rfl
+@[simp] theorem globals_withExit (p : Program) (ret : Nat) :
+    (p.withExit ret).globals = p.globals := rfl
 
 /-- Run for at most `fuel` instructions. -/
 def run (p : Program) : Nat → State → Except Fault Outcome

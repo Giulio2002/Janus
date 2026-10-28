@@ -297,14 +297,11 @@ theorem asl_moveWide {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100
     have e : mwOp w = .movk := by simp [mwOp, hk]
     exact ⟨s2, hrun, e ▸ hrel, bt_cfg_after _ _ hfr⟩
 
-/-- **MOVN/MOVZ/MOVK**: for every word of the encoding class (bits 28:23 = `100101`, `opc ≠ 01`,
-`hw<1> = 0` when `sf = 0`) and every related pair of states, Janus' `step` and the generated ASL
-agree. -/
-theorem moveWide_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100101)
+theorem moveWide_agree_f {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100101)
     (hop : (w / 2 ^ 29) % 4 ≠ 1) (hsf : (w / 2 ^ 31) % 2 = 1 ∨ (w / 2 ^ 22) % 2 = 0)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execMoveWide N js (mwOp w)
     (fld w 21 2).toNat (fld w 5 16).toNat (fld w 0 5).toNat
   have hspec : ∀ N, (F N).pc = js.pc := by
@@ -314,10 +311,21 @@ theorem moveWide_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b1
   have e : F (if fld w 31 1 == 1#1 then 64 else 32) = if fld w 31 1 == 1#1 then F 64 else F 32 := by
     split <;> rfl
   have hrel' : Rel (if fld w 31 1 == 1#1 then F 64 else F 32) s2 := e ▸ hrel
-  refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
+  refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
   rw [Janus.Arm64.step_of_decode (decode_moveWide_class hw hc hop hsf)]
   simp only [Janus.Arm64.exec, ← fld_bit w 31 hw,
     bits_eq_fld w 22 21 hw, bits_eq_fld w 20 5 hw, bits_eq_fld w 4 0 hw]
   split <;> simp_all [Janus.Arm64.State.next, F]
+
+/-- **MOVN/MOVZ/MOVK**: for every word of the encoding class (bits 28:23 = `100101`, `opc ≠ 01`,
+`hw<1> = 0` when `sf = 0`) and every related pair of states, Janus' `step` and the generated ASL
+agree. -/
+theorem moveWide_agree {w : Nat} (hw : w < 2 ^ 32) (hc : (w / 2 ^ 23) % 64 = 0b100101)
+    (hop : (w / 2 ^ 29) % 4 ≠ 1) (hsf : (w / 2 ^ 31) % 2 = 1 ∨ (w / 2 ^ 22) % 2 = 0)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := moveWide_agree_f (w := w) (hw := hw) (hc := hc) (hop := hop) (hsf := hsf) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

@@ -473,15 +473,21 @@ A Go-level execution of a program ends when ordinary steps reach one of:
   (`Janus.Contracts.Panic`) supply this and hand control back as another `GoReturns` from the
   resume point (`GoReturns.of_steps`).
 
+* a state where a **`runtime.Goexit`** has run every deferred call of the frame and goes on
+  terminating the goroutine (`atExit s'`, outcome `.goexited s'`): the call never returns, and
+  no `recover` can stop it.
+
 The classifiers are parameters, supplied by the panic library from the runtime model a theorem
 quantifies over; they are part of the printed statement. Existing theorems are unaffected:
-`Ensures.toGo` turns every `Ensures` into an `EnsuresGo` whose panic outcomes are impossible. -/
+`Ensures.toGo` turns every `Ensures` into an `EnsuresGo` whose panic outcomes are impossible, and
+`EnsuresGo` (two outcomes) is `EnsuresGoX` (three) with the `Goexit` outcome ruled out. -/
 
-/-- How a Go call ends: it returns in state `s`, or a panic with value `v` leaves its frame in
-state `s`. -/
+/-- How a Go call ends: it returns in state `s`, a panic with value `v` leaves its frame in
+state `s`, or a `runtime.Goexit` leaves its frame in state `s` (the goroutine terminates). -/
 inductive GoOutcome where
   | returned (s : State)
   | panicked (v : Eface) (s : State)
+  | goexited (s : State)
 deriving Inhabited
 
 /-- The instruction at `s.pc` (ordinary code: not the exit, not a stub) stops with fault `e`. -/
@@ -491,11 +497,14 @@ def FaultsAt (p : Program) (s : State) (e : Fault) : Prop :=
 
 /-- How a reached state is classified at the Go level: a panic stub (`atStub name s v`), a
 faulting instruction delivered as a panic (`atFault s e v`), or a point where a deferred/recovered
-panic already left the frame with value `v` (`atLeave s v`). -/
+panic already left the frame with value `v` (`atLeave s v`), or a point where a
+`runtime.Goexit` already left the frame (`atExit s`; `False` unless a classifier says otherwise,
+so every classifier written before `Goexit` was modelled keeps its meaning). -/
 structure GoClass where
   atStub : String → State → Eface → Prop
   atFault : State → Fault → Eface → Prop
   atLeave : State → Eface → Prop
+  atExit : State → Prop := fun _ => False
 
 /-- From `s`, ordinary steps reach a Go-level outcome classified by `C`, and the outcome
 satisfies `Q`. -/
@@ -505,7 +514,8 @@ def GoReturns (p : Program) (C : GoClass) (s : State) (Q : GoOutcome → Prop) :
      (∃ st v, p.stubAt s'.rip.toNat = some st ∧ st.kind = .panic ∧ C.atStub st.name s' v ∧
         Q (.panicked v s')) ∨
      (∃ e v, FaultsAt p s' e ∧ C.atFault s' e v ∧ Q (.panicked v s')) ∨
-     (∃ v, C.atLeave s' v ∧ Q (.panicked v s')))
+     (∃ v, C.atLeave s' v ∧ Q (.panicked v s')) ∨
+     (C.atExit s' ∧ Q (.goexited s')))
 
 /-- Go function contract with panics: for every admissible return address and every call state
 satisfying `pre`, the call either returns (obeying the ABI, with `ret s₀ s₁`) or panics with a
@@ -518,6 +528,19 @@ def EnsuresGo (p : Program) (entry : Nat) (args : List W64) (pre : State → Pro
       match o with
       | .returned s' => ABIReturn s s' ∧ ret s s'
       | .panicked v s' => pan s v s'
+      | .goexited _ => False
+
+/-- `EnsuresGo` with the third outcome: a `runtime.Goexit` that leaves the call's frame in state
+`s₁` satisfies `gox s₀ s₁` (the goroutine terminates; the call never returns). -/
+def EnsuresGoX (p : Program) (entry : Nat) (args : List W64) (pre : State → Prop)
+    (C : State → GoClass) (ret : State → State → Prop) (pan : State → Eface → State → Prop)
+    (gox : State → State → Prop) : Prop :=
+  ∀ r, RetAddr p r → ∀ s, CallSetup (p.withExit r) entry args s → pre s →
+    GoReturns (p.withExit r) (C s) s fun o =>
+      match o with
+      | .returned s' => ABIReturn s s' ∧ ret s s'
+      | .panicked v s' => pan s v s'
+      | .goexited s' => gox s s'
 
 section GoLemmas
 
@@ -602,15 +625,21 @@ theorem GoReturns.fault {s s' : State} {k : Nat} {e : Fault} {v : Eface} {Q : Go
 /-- A deferred/recovered panic that already left the frame establishes the panic outcome. -/
 theorem GoReturns.leave {s s' : State} {k : Nat} {v : Eface} {Q : GoOutcome → Prop}
     (h : Program.Steps p s k s') (hc : C.atLeave s' v) (hq : Q (.panicked v s')) :
-    GoReturns p C s Q := ⟨k, s', h, .inr (.inr (.inr ⟨v, hc, hq⟩))⟩
+    GoReturns p C s Q := ⟨k, s', h, .inr (.inr (.inr (.inl ⟨v, hc, hq⟩)))⟩
+
+/-- A `Goexit` that already left the frame establishes the `Goexit` outcome. -/
+theorem GoReturns.goexit {s s' : State} {k : Nat} {Q : GoOutcome → Prop}
+    (h : Program.Steps p s k s') (hc : C.atExit s') (hq : Q (.goexited s')) :
+    GoReturns p C s Q := ⟨k, s', h, .inr (.inr (.inr (.inr ⟨hc, hq⟩)))⟩
 
 theorem GoReturns.mono {s : State} {Q Q' : GoOutcome → Prop} (h : GoReturns p C s Q)
     (hq : ∀ o, Q o → Q' o) : GoReturns p C s Q' := by
-  obtain ⟨k, s', hk, h | ⟨st, v, h⟩ | ⟨e, v, h⟩ | ⟨v, h⟩⟩ := h
+  obtain ⟨k, s', hk, h | ⟨st, v, h⟩ | ⟨e, v, h⟩ | ⟨v, h⟩ | h⟩ := h
   · exact ⟨k, s', hk, .inl ⟨h.1, hq _ h.2⟩⟩
   · exact ⟨k, s', hk, .inr (.inl ⟨st, v, h.1, h.2.1, h.2.2.1, hq _ h.2.2.2⟩)⟩
   · exact ⟨k, s', hk, .inr (.inr (.inl ⟨e, v, h.1, h.2.1, hq _ h.2.2⟩))⟩
-  · exact ⟨k, s', hk, .inr (.inr (.inr ⟨v, h.1, hq _ h.2⟩))⟩
+  · exact ⟨k, s', hk, .inr (.inr (.inr (.inl ⟨v, h.1, hq _ h.2⟩)))⟩
+  · exact ⟨k, s', hk, .inr (.inr (.inr (.inr ⟨h.1, hq _ h.2⟩)))⟩
 
 /-- **Compatibility.** Every `Ensures` theorem is an `EnsuresGo` theorem in which the call never
 panics, for any classification. -/
@@ -630,6 +659,37 @@ theorem EnsuresGo.mono {entry : Nat} {args : List W64} {pre pre' : State → Pro
   cases o with
   | returned s' => exact ⟨ho.1, hret _ _ hp ho.2⟩
   | panicked v s' => exact hpan _ _ _ hp ho
+  | goexited s' => exact ho
+
+/-- An `EnsuresGo` theorem is an `EnsuresGoX` theorem whose `Goexit` outcome is impossible. -/
+theorem EnsuresGo.toX {entry : Nat} {args : List W64} {pre : State → Prop} {Cl : State → GoClass}
+    {ret : State → State → Prop} {pan : State → Eface → State → Prop}
+    (h : EnsuresGo p entry args pre Cl ret pan) :
+    EnsuresGoX p entry args pre Cl ret pan (fun _ _ => False) := by
+  intro r hr s hs hp
+  refine (h r hr s hs hp).mono fun o ho => ?_
+  cases o <;> exact ho
+
+/-- Every `Ensures` theorem is an `EnsuresGoX` theorem that neither panics nor exits. -/
+theorem Ensures.toGoX {entry : Nat} {args : List W64} {pre : State → Prop}
+    {post : State → State → Prop} (h : Ensures p entry args pre post) (C : State → GoClass) :
+    EnsuresGoX p entry args pre C post (fun _ _ _ => False) (fun _ _ => False) :=
+  (Ensures.toGo h C).toX
+
+/-- Weaken the outcomes of an `EnsuresGoX`. -/
+theorem EnsuresGoX.mono {entry : Nat} {args : List W64} {pre pre' : State → Prop}
+    {Cl : State → GoClass} {ret ret' : State → State → Prop} {pan pan' : State → Eface → State → Prop}
+    {gox gox' : State → State → Prop}
+    (h : EnsuresGoX p entry args pre Cl ret pan gox) (hpre : ∀ s, pre' s → pre s)
+    (hret : ∀ s s', pre' s → ret s s' → ret' s s') (hpan : ∀ s v s', pre' s → pan s v s' → pan' s v s')
+    (hgox : ∀ s s', pre' s → gox s s' → gox' s s') :
+    EnsuresGoX p entry args pre' Cl ret' pan' gox' := by
+  intro r hr s hs hp
+  refine (h r hr s hs (hpre s hp)).mono fun o ho => ?_
+  cases o with
+  | returned s' => exact ⟨ho.1, hret _ _ hp ho.2⟩
+  | panicked v s' => exact hpan _ _ _ hp ho
+  | goexited s' => exact hgox _ _ hp ho
 
 end GoLemmas
 

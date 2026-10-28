@@ -466,8 +466,12 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 	}
 	rel, _ := goRootFile(file)
 	pkg := stubPackage(pname, rel)
-	if _, isStub := stubKindFor(b.GOARCH, f.Name); (isStub || runtimeContractStubs[f.Name]) && !stubPkgDirOK(f.Name, pkg, "runtime") {
-		return fmt.Errorf("the pclntab places %s in package %q, not runtime", pname, pkg)
+	want := "runtime"
+	if _, isStub := stubKindFor(b.GOARCH, f.Name); !isStub && runtimeContractStubs[f.Name] {
+		want = contractStubPackage(f.Name)
+	}
+	if _, isStub := stubKindFor(b.GOARCH, f.Name); (isStub || runtimeContractStubs[f.Name]) && !stubPkgDirOK(f.Name, pkg, want) {
+		return fmt.Errorf("the pclntab places %s in package %q, not %s", pname, pkg, want)
 	}
 	canon, refs, err := b.stubCanon(f)
 	if err != nil {
@@ -509,7 +513,8 @@ func (b *Binary) checkStubPin(f Func, visiting map[uint64]bool) error {
 
 // checkContractPin checks a function named by --contract that is one of runtimeContractStubs:
 // it must be the Go runtime's function of that name (checkStubPin's checks: the pclntab name,
-// package runtime, the toolchain's file, a pinned normalized code hash). Its callees are not
+// package runtime, or sync for sync.(*Pool).Get/Put, the toolchain's file, a pinned normalized
+// code hash). Its callees are not
 // followed (identified by name only, like a helper's).
 func (b *Binary) checkContractPin(g Func) error {
 	if b.SymbolSource != "symtab" {
@@ -521,7 +526,7 @@ func (b *Binary) checkContractPin(g Func) error {
 	}
 	if err := b.checkStubPin(g, map[uint64]bool{}); err != nil {
 		return &diag{
-			Msg: fmt.Sprintf("--contract names %s at 0x%x, but that function is not the Go runtime's %s: %v. The framework's runtime contracts (Janus/Contracts/Iface.lean, Mem.lean, Hash.lean, Map*.lean, InstrumentCalls.lean, MallocSC.lean) state what the runtime's function does, so Janus leaves out only the runtime's code (pinned like a stub, docs/SOUNDNESS.md)",
+			Msg: fmt.Sprintf("--contract names %s at 0x%x, but that function is not the Go runtime's %s: %v. The framework's runtime contracts (Janus/Contracts/Iface.lean, Mem.lean, Hash.lean, Map*.lean, Pool.lean, InstrumentCalls.lean, MallocSC.lean) state what the runtime's function does, so Janus leaves out only the runtime's code (pinned like a stub, docs/SOUNDNESS.md)",
 				g.Name, g.Addr, g.Name, err),
 			Stage: "code extraction",
 			Next:  "If the binary was built by a Go toolchain Janus does not pin yet (" + stubPinToolchains + "), add it to scripts/gen-stubpins.sh and regenerate cmd/janus/stubpins_gen.go; otherwise remove the function that reuses a runtime function's name.",

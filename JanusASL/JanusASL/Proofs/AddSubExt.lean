@@ -381,14 +381,11 @@ theorem asl_addSubExt {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b01
         (fld w 10 3).toNat) (fld w 29 1 == 1#1) (fld w 30 1 == 1#1)
     exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
-/-- **ADD/ADDS/SUB/SUBS (extended register)**: for every word of the encoding class that Janus
-decodes (`opt = 00`, `imm3 ≤ 4`) and every related pair of states, Janus' `step` and the
-generated ASL agree. -/
-theorem addSubExt_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b01011)
+theorem addSubExt_agree_f {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b01011)
     (h2 : (w / 2 ^ 21) % 8 = 1) (h3 : (w / 2 ^ 10) % 8 ≤ 4)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execAddSubExt N js (fld w 30 1 == 1#1)
     (fld w 29 1 == 1#1) (fld w 16 5).toNat (Janus.Arm64.ExtendType.ofBits (fld w 13 3).toNat)
     (fld w 10 3).toNat (fld w 5 5).toNat (fld w 0 5).toNat
@@ -400,10 +397,21 @@ theorem addSubExt_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b
   have e : F (if fld w 31 1 == 1#1 then 64 else 32) = if fld w 31 1 == 1#1 then F 64 else F 32 := by
     split <;> rfl
   have hrel' : Rel (if fld w 31 1 == 1#1 then F 64 else F 32) s2 := e ▸ hrel
-  refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
+  refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
   rw [Janus.Arm64.step_of_decode (decode_addSubExt_class hw h1 h2 h3)]
   simp only [Janus.Arm64.exec, ← fld_bit w 31 hw, ← fld_bit w 30 hw, ← fld_bit w 29 hw,
     bits_eq_fld w 15 13 hw, bits_eq_fld w 20 16 hw, bits_eq_fld w 12 10 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
   split <;> simp_all [Janus.Arm64.State.next, F]
+
+/-- **ADD/ADDS/SUB/SUBS (extended register)**: for every word of the encoding class that Janus
+decodes (`opt = 00`, `imm3 ≤ 4`) and every related pair of states, Janus' `step` and the
+generated ASL agree. -/
+theorem addSubExt_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b01011)
+    (h2 : (w / 2 ^ 21) % 8 = 1) (h3 : (w / 2 ^ 10) % 8 ≤ 4)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := addSubExt_agree_f (w := w) (hw := hw) (h1 := h1) (h2 := h2) (h3 := h3) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

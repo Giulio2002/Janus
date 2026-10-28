@@ -73,14 +73,14 @@ theorem correctness (J : JmpModel64) (v : BitVec 64) :
   rintro s1 ⟨m, hmr, hmb, hhold, h1⟩
   simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, BitVec.toNat_ofNat, Nat.reduceMod, Nat.reducePow,
     jmpBufSize64] at hmb hhold hmr
-  have hmf0 := memFrame_of_bytes (d := 5951104) (n := 200) hmr hmb
+  have hmf0 := memFrame_of_bytes (d := janus_eval% env) (n := 200) hmr hmb
   obtain ⟨hpc1, hx01, hcr1, hfs1, hreg1, hmf1⟩ := h1
   simp only [cReturn_iff, retAddrOf_eq, setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, h32, libcStack, Nat.reducePow,
     Janus.Arm64.Memory.readLE_writeLE_self] at hcr1 hpc1 hx01 hmf1 hreg1 hfs1
   obtain ⟨c1sp, c1bx, c1bp, c112, c113, c114, c115, c1df, c1mx, c1cw⟩ := hcr1
   have hch1 : ∀ a k, (s.regs 4).toNat - 32 ≤ a → a + k ≤ (s.regs 4).toNat + 8 →
       s1.mem.readLE a k = ((Janus.Arm64.Memory.writeLE s.mem ((s.regs 4).toNat - 16) 4 (v.toNat % 4294967296)).writeLE
-        ((s.regs 4).toNat - 32) 8 4859128).readLE a k := fun a k h1 h2 => by
+        ((s.regs 4).toNat - 32) 8 (janus_eval% (Extracted.entry + 0x18))).readLE a k := fun a k h1 h2 => by
     rw [hmf1.readLE a k (by simp; omega), hmf0.readLE a k (by simp; omega)]
   have rd16 : s1.mem.readLE ((s.regs 4).toNat - 16) 4 = v.toNat % 4294967296 := by
     rw [hch1 _ _ (by omega) (by omega), Janus.Arm64.Memory.readLE_writeLE_of_disjoint,
@@ -118,8 +118,9 @@ theorem correctness (J : JmpModel64) (v : BitVec 64) :
       rw [BitVec.toNat_sub]; simp only [BitVec.toNat_ofNat]; omega
     have hloc : ∀ i, i < jmpBufSize64 →
         (((Janus.Arm64.Memory.writeLE s1.mem ((s.regs 4).toNat - 12) 4 0).writeLE ((s.regs 4).toNat - 32) 8
-          4859165).writeLE ((s.regs 4).toNat - 40) 8 0 |>.writeLE ((s.regs 4).toNat - 48) 8 4858740).bytes
-            (5951104 + i) = m.bytes (5951104 + i) := fun i hi => by
+          (janus_eval% (Extracted.entry + 0x3d))).writeLE ((s.regs 4).toNat - 40) 8 0 |>.writeLE ((s.regs 4).toNat - 48) 8
+          (janus_eval% (segAddr Extracted.program "e_thrower" + 0x14))).bytes
+            ((janus_eval% env) + i) = m.bytes ((janus_eval% env) + i) := fun i hi => by
       simp only [jmpBufSize64] at hi
       rw [Janus.Arm64.Memory.bytes_writeLE_outside, Janus.Arm64.Memory.bytes_writeLE_outside,
         Janus.Arm64.Memory.bytes_writeLE_outside, Janus.Arm64.Memory.bytes_writeLE_outside,

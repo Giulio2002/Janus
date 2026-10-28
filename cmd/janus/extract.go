@@ -79,9 +79,21 @@ type Extraction struct {
 	BuildModes []string
 	// The C environment (cenv.go): writable C data objects the C code references, and the TLS
 	// image when an extracted function reads the thread pointer.
-	CData []CData
-	TLS   *tlsImage
-	Lean  []byte
+	CData  []CData
+	DynGOT []DynGOT
+	TLS    *tlsImage
+	// Writable globals named by --global (globals.go): their link-time images, recorded in
+	// Program.globals; GlobalPatterns are the patterns as given (recorded in identity.json).
+	GlobalPatterns []string
+	Globals        []GlobalSeg
+	// Frames: --frames was given; FrameRecs are the extracted functions' pclntab frame records
+	// (frames.go), rendered as `Extracted.frames` for stack-growth theorems.
+	Frames    bool
+	FrameRecs []FrameRec
+	// FuncInfos: the panic runtime's metadata of the extracted functions (funcdata.go), for
+	// extractions with a panic-runtime contract.
+	FuncInfos []FuncInfo
+	Lean      []byte
 }
 
 // Round 7 G1: the runtime functions Janus treats as stubs, by their exact linked (ELF .symtab)
@@ -146,10 +158,11 @@ var (
 // runtimeContractStubs are the runtime functions whose behaviour a framework contract library
 // states (Janus/Contracts/Iface.lean, IfaceAmd64.lean: the interface runtime of Go 1.26;
 // Janus/Contracts/Mem.lean, Hash.lean and their amd64 files: equality, hashing and typed memory;
-// Janus/Contracts/Map.lean, MapVar.lean, MapStr.lean and their amd64 files: the map runtime; and
+// Janus/Contracts/Map.lean, MapVar.lean, MapStr.lean and their amd64 files: the map runtime;
+// Janus/Contracts/Pool.lean, PoolAmd64.lean: sync.Pool's Get and Put; and
 // rtmiscContractStubs below, added at init). When a
 // --contract pattern matches one, the extractor pins it like a stub (checkContractPin): the
-// pclntab names it in package runtime, in the toolchain's file, and its normalized code is the
+// pclntab names it in package runtime (sync for the pool, contractStubPackage), in the toolchain's file, and its normalized code is the
 // runtime's (stubpins_gen.go). A binary whose function of that name is not the runtime's is an
 // extraction error, so a theorem's contract hypothesis is about the Go runtime's own code. The
 // functions they call (mallocgc, getitab, typedmemmove, the types' equality functions, ...)
@@ -189,6 +202,20 @@ var runtimeContractStubs = map[string]bool{
 	"runtime.mapassign_fast64ptr": true,
 	"runtime.mapaccess1_faststr":  true, "runtime.mapaccess2_faststr": true,
 	"runtime.mapassign_faststr": true, "runtime.mapdelete_faststr": true,
+	// sync.Pool for a single goroutine (Janus/Contracts/Pool.lean, PoolAmd64.lean): Get and Put
+	// are pinned to package sync's code (contractStubPackage); the concurrency internals they
+	// call (runtime_procPin, poolDequeue, poolChain, the allPools mutex, getSlow, pinSlow) are
+	// then not extracted.
+	"sync.(*Pool).Get": true, "sync.(*Pool).Put": true,
+}
+
+// contractStubPackage is the package a function of runtimeContractStubs must be in, by its
+// pclntab name: runtime, except for sync.(*Pool).Get and Put (package sync, sync/pool.go).
+func contractStubPackage(name string) string {
+	if strings.HasPrefix(name, "sync.") {
+		return "sync"
+	}
+	return "runtime"
 }
 
 // runtimePanicContractStubs are the panic/defer/recover runtime functions whose behaviour a
@@ -203,17 +230,20 @@ var runtimeContractStubs = map[string]bool{
 var runtimePanicContractStubs = map[string]bool{
 	"runtime.gopanic": true, "runtime.gorecover": true, "runtime.deferproc": true,
 	"runtime.deferprocStack": true, "runtime.deferreturn": true, "runtime.deferprocat": true,
-	"runtime.deferrangefunc": true, "runtime.sigpanic": true,
+	"runtime.deferrangefunc": true, "runtime.sigpanic": true, "runtime.Goexit": true,
 }
 
 // rtmiscContractStubs are the further runtime functions a framework contract library describes
 // (docs/RUNTIME-CONTRACTS.md, "Remaining runtime"): the -d=checkptr checks and the cgo pointer
 // checks (Janus/Contracts/InstrumentCalls*.lean) and the size-specialised allocator entry points of
-// GOEXPERIMENT=sizespecializedmalloc (Janus/Contracts/MallocSC*.lean). They are pinned like the
-// interface contracts (checkContractPin) and belong to runtimeContractStubs.
+// GOEXPERIMENT=sizespecializedmalloc (Janus/Contracts/MallocSC*.lean), and runtime.KeepAlive and the
+// soft-float entry points fadd64, fsub64, fmul64, fdiv64 (Janus/Contracts/SoftFloat*.lean). They are
+// pinned like the interface contracts (checkContractPin) and belong to runtimeContractStubs.
 var rtmiscContractStubs = map[string]bool{
 	"runtime.checkptrAlignment": true, "runtime.checkptrArithmetic": true,
 	"runtime.cgoCheckPointer": true, "runtime.cgoCheckResult": true,
+	"runtime.KeepAlive": true, "runtime.fadd64": true, "runtime.fsub64": true,
+	"runtime.fmul64": true, "runtime.fdiv64": true,
 	"runtime.mallocgcSmallNoScanSC2": true, "runtime.mallocgcSmallNoScanSC3": true,
 	"runtime.mallocgcSmallNoScanSC4": true, "runtime.mallocgcSmallNoScanSC5": true,
 	"runtime.mallocgcSmallNoScanSC6": true, "runtime.mallocgcSmallNoScanSC7": true,
@@ -251,6 +281,27 @@ var rtmiscContractStubs = map[string]bool{
 
 func init() {
 	for n := range rtmiscContractStubs {
+		runtimeContractStubs[n] = true
+	}
+}
+
+// allocContractStubs are the allocation, slice and write-barrier entry points a framework contract
+// library describes (Janus/Contracts/Alloc.lean, AllocAmd64.lean: MallocgcContract,
+// NewobjectContract, MakesliceContract, GrowsliceContract and their amd64 forms; the
+// gcWriteBarrierN entries, whose fast path the examples execute and which a write-barrier
+// contract may leave out with --contract 'runtime.gcWriteBarrier*'). They belong to
+// runtimeContractStubs (added at init), so a --contract that names one is pinned to the
+// runtime's code like memmove (checkContractPin), not trusted by name.
+var allocContractStubs = map[string]bool{
+	"runtime.mallocgc": true, "runtime.newobject": true, "runtime.makeslice": true,
+	"runtime.growslice":       true,
+	"runtime.gcWriteBarrier1": true, "runtime.gcWriteBarrier2": true, "runtime.gcWriteBarrier3": true,
+	"runtime.gcWriteBarrier4": true, "runtime.gcWriteBarrier5": true, "runtime.gcWriteBarrier6": true,
+	"runtime.gcWriteBarrier7": true, "runtime.gcWriteBarrier8": true,
+}
+
+func init() {
+	for n := range allocContractStubs {
 		runtimeContractStubs[n] = true
 	}
 }
@@ -597,7 +648,11 @@ func renderLean(x *Extraction) []byte {
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
 	writeProgram(&sb, x, "Program")
 	writeCEnv(&sb, x)
+	if x.Frames {
+		writeFrames(&sb, x.FrameRecs)
+	}
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
+	writeFuncInfos(&sb, x.FuncInfos)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())
 }
@@ -626,7 +681,11 @@ func writeProgram(sb *strings.Builder, x *Extraction, ty string) {
 		writeContracts(sb, x.Contracts)
 		fields += ", contracts := contracts"
 	}
-	if len(x.Data) == 0 && len(x.Contracts) == 0 {
+	if len(x.Globals) > 0 {
+		writeGlobals(sb, x.Globals)
+		fields += ", globals := globals"
+	}
+	if len(x.Data) == 0 && len(x.Contracts) == 0 && len(x.Globals) == 0 {
 		fmt.Fprintf(sb, "def program : %s := { %s }\n\n", ty, fields)
 		return
 	}

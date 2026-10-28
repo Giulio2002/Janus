@@ -69,7 +69,7 @@ stripped, they come from the Go `.gopclntab` (`debug/gosym`) instead; the header
 ## Extract
 
 ```sh
-janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...] [--contract SYM]...
+janus extract <binary> <symbol> <outdir> [--max-functions N] [--targets SYM,...] [--contract SYM]... [--global SYM]...
 janus extract artifacts/examples-arm64 example.com/basic.Get artifacts/Get
 ```
 
@@ -163,6 +163,25 @@ Extraction:
 
    A dynamic target that matches a `--contract` pattern becomes a contract instead of being
    copied, and `--contract` takes precedence over the built-in omission of `runtime.deferreturn`.
+10. Copies the **link-time images of writable globals** named by `--global SYM` (repeatable; an
+    exact name or a glob as for `--contract`, e.g. `'math/big.*Threshold'`): for each writable data
+    symbol (`.data`, `.noptrdata`, `.bss`, `.noptrbss`; it must lie in one writable section that a
+    writable `PT_LOAD` maps from the file, or for `NOBITS` zero-fills past the file image), its
+    address, size and file bytes (none for `.bss`/`.noptrbss`: the loader zeroes them), as
+    `def globals : List GlobalSegment` (and `globals := globals` in `program`; omitted without
+    `--global`, so other extractions are unchanged) and in `identity.json` (`globalPatterns`,
+    `globals`: name, address, size, section, SHA-256 of the bytes). A read-only symbol, an unknown
+    name, a stripped binary (no `.symtab`) or two partly overlapping symbols are errors. A
+    **pointer chain** `SYM[+OFF]->SIZE…` follows the pointer the link-time image of `SYM` holds at
+    offset `OFF` (default 0) to `SIZE` writable bytes, and records them as a global named by the
+    chain itself: a package-level `&T{…}` or a slice literal is an anonymous static object with no
+    symbol of its own (`'math/big.intOne->32'` is the `Int` that `intOne` points to,
+    `'math/big.intOne->32+8->8'` the word its `abs` slice holds, the same bytes as
+    `'math/big.natOne->8'`). A reference the code makes to a recorded global is reported with a
+    `Note:` instead of the writable-data warning. Theorems use the list through
+    `Janus.Spec.GlobalsInit` / `GlobalIs` / `GlobalBytesIs` ([PROOFS.md](PROOFS.md#writable-globals-mulalgo-double));
+    the images are checked by `janus check` like the code, and `janus-audit` rejects a statement
+    that names a global the extraction does not record.
 
 Outputs, written into `<outdir>` (created if needed); any old `verified.json` there is removed:
 
@@ -466,7 +485,7 @@ name; …`). The classification is informational and untrusted, like reachabilit
 ## Verify
 
 ```sh
-janus verify <outdir> [--proof FILE] [--theorem NAME] [--proof-root PKG [--allow-path-deps]] [--json]
+janus verify <outdir> [--proof FILE] [--theorem NAME]... [--proof-root PKG [--allow-path-deps]] [--results FILE] [--json]
              [--fresh] [--replay-fresh] [--janus-root DIR] [--binary PATH] [--unsafe-no-sandbox] [--asl]
 janus verify artifacts/Get --proof cmd/janus/testdata/Trivial.lean
 ```
@@ -504,6 +523,36 @@ pinned). `--json` prints the report as JSON; `--fresh` rebuilds the framework/ca
 scratch (and replays every module, ignoring the replay cache); `--replay-fresh` additionally
 replays the theorem's module with `leanchecker --fresh`, re-checking its whole environment,
 Lean core included, from an empty environment (slow: minutes).
+
+**Several theorems in one run.** `--theorem` may be repeated (`--theorem Proof.correctness
+--theorem Proof.Witness.nonvacuous --theorem Proof.Witness.returns`). The proof file is compiled
+**once**, and the extraction check, the trusted compile of `Extracted`/`JanusTrusted`, the sandbox,
+the framework pins and the framework replay verdict are done once. Then **every theorem gets its
+own complete checks**: its own audit (kind, statement identity, the axiom allow-list), its own
+result-cache key and entry, the kernel replay of its import closure (theorems with the same closure
+share one replay, which is of modules and covers every theorem in them), and its own report. A
+theorem fails alone (false, `sorry`, an extra axiom, a failed audit, an unknown name); a failure of
+a shared step (the proof does not compile, a pinned build changed, the kernel rejects a module)
+fails every theorem it covers. The exit status is 1 if any theorem failed; each failure is printed
+under a `=== NAME: FAILED ===` line and the verified ones under `=== NAME: verified ===`. A theorem
+may be listed once; a name that is not a plain ASCII dotted Lean name fails on its own.
+
+Reports. Each theorem that passed has its report, the same content a run of that theorem alone
+writes, in `<outdir>/verified/<Theorem.Name>.json`; if the **first** theorem of the list passed its
+report is also `<outdir>/verified.json` (so `janus explain <outdir>` and the single-theorem readers
+keep working; no other theorem is ever recorded there). Every run first withdraws `verified.json`
+and the old `verified/*.json`, so a report file exists exactly for the theorems that passed this
+run. A one-theorem run writes only `verified.json`, as before. `--results FILE` writes
+`{"schema":1,"results":[{"theorem":…,"status":"verified"|"failed","report":…|"failure":…}]}` with
+every theorem's outcome (written by `janus` itself, outside the sandbox; `scripts/lib/theorems.sh`
+reads statuses from it); `--json` prints the same object.
+
+With `--proof-root` the theorems may be in different modules of the package: write them
+`PROOF.lean::Theorem.Name` (a plain `Theorem.Name` uses `--proof`). They share one snapshot, one
+workspace and one Lake build of all the modules (the path `verify-batch` uses for requests with the
+same extraction), then each is audited, replayed and reported on its own. Two theorems with the
+same name (in different files) cannot be in one run (they would share `verified/<name>.json`).
+`verify-batch` stays the tool for requests with separate output directories.
 
 `--asl` additionally derives the theorem's **ASL corollary**: the same statement about Arm's ASL
 (the Sail arm-v9.4-a model translated to Lean), from `JanusASL`'s `Ensures.toASL` applied to the

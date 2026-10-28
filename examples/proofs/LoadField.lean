@@ -32,7 +32,7 @@ theorem correctness (P : PanicRuntime) :
   have hpcn : s.pc.toNat = Extracted.entry := by
     rw [hpc, BitVec.toNat_ofNat]; rfl
   -- the load at the entry faults (nil dereference)
-  have hfetch : (Extracted.program.withExit ret).fetch s.pc.toNat = some 0xf9400000 := by
+  have hfetch : (Extracted.program.withExit ret).fetch s.pc.toNat = some (segWord Extracted.program "example.com/basic.LoadField" 0) := by
     rw [hpcn]; rfl
   have hmi : memIndexed s 0 (BitVec.ofNat 64 (0 * 2 ^ 3)) false false
       (fun s a => memSingle s 3 1 0 a) = .error (.outsideAllocation 0 8) := by
@@ -41,14 +41,14 @@ theorem correctness (P : PanicRuntime) :
     rw [show ((0#64 : BitVec 64) + BitVec.ofNat 64 (0 * 2 ^ 3)).toNat = 0 from by decide,
       show (2 : Nat) ^ 3 = 8 from rfl, hna]
     rfl
-  have hstep : Arm64.step 0xf9400000 s = .error (.outsideAllocation 0 8) := by
+  have hstep : Arm64.step (segWord Extracted.program "example.com/basic.LoadField" 0) s = .error (.outsideAllocation 0 8) := by
     rw [step_of_decode (i := .ldstUImm 3 1 0 0 0) (by decide)]
     simp only [exec, hmi]
-  refine GoReturns.fault (Program.Steps.refl s) ⟨?_, ?_, 0xf9400000, hfetch, hstep⟩
+  refine GoReturns.fault (Program.Steps.refl s) ⟨?_, ?_, (segWord Extracted.program "example.com/basic.LoadField" 0), hfetch, hstep⟩
     (goClass_nil P s (by decide)) rfl
   · -- the entry pc is not the (external) return address
     rw [hpcn, Program.exitAddr_withExit]
-    exact hret.ne_of_fetch (pc := Extracted.entry) (w := 0xf9400000) (by rfl)
+    exact hret.ne_of_fetch (pc := Extracted.entry) (w := (segWord Extracted.program "example.com/basic.LoadField" 0)) (by rfl)
   · -- no stub at the entry
     rw [hpcn]; rfl
 

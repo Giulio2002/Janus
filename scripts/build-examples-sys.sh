@@ -16,4 +16,5 @@ mkdir -p "$root/artifacts"
 cd "$root/examples/sys"
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-sys-arm64" ./cmd
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-sys-amd64" ./cmd
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-sys-idreg-arm64" ./idregcmd
 echo "built $root/artifacts/examples-sys-arm64 $root/artifacts/examples-sys-amd64"

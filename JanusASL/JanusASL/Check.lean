@@ -1,6 +1,7 @@
 import ArmASL
 import Janus
 import JanusASL.Proofs.Mem
+import JanusASL.Proofs.FP.Config
 import Lean.Data.Json
 
 /-!
@@ -338,12 +339,12 @@ def runAsl (base : SState) (c : Case) : AslResult × Bool × Bool := Id.run do
   match runM setup s0 with
   | .error e => return (.error s!"setup: {e}", false, false)
   | .ok ((), s1) =>
-  let pre := JanusASL.Proofs.cfgOk s1
+  let pre := JanusASL.Proofs.cfgOk s1 && JanusASL.Proofs.fpCfgOk s1
   let um := userMappedCase s1 c.seed
   match runM (janus_step (BitVec.ofNat 32 c.word)) s1 with
   | .error e => return (.error e, pre, um)
   | .ok (r, s2) =>
-  let cfg := pre && JanusASL.Proofs.cfgOk s2
+  let cfg := pre && JanusASL.Proofs.cfgOk s2 && JanusASL.Proofs.fpCfgOk s2
   match r with
   | .Janus_OK =>
     let readBack : SailM (Array Nat × Nat × Nat × Nat × Array Nat × Nat) := do
@@ -417,6 +418,19 @@ def dfsc (syn : Nat) : Nat := syn % 64
 def isAlignmentDfsc (d : Nat) : Bool := d == 0x21
 def isTranslationOrPermission (d : Nat) : Bool := d / 4 == 1 || d / 4 == 2 || d / 4 == 3 || d == 0
 
+/-- The implemented FPSR bits: N Z C V (31:28), QC (27), IDC (7), IXC UFC OFC DZC IOC (4:0).
+The others are RES0. Sail stores whatever `MSR FPSR` writes in the 64-bit register (it does not
+model RES0 fields), while an implementation may make them RAZ/WI, as Janus does; so FPSR is
+compared on the implemented bits. -/
+def fpsrImpl : Nat := 0xF800009F
+
+/-- `UDF #imm` (permanently UNDEFINED; agent/syscall decodes it as a trap with SIGILL, 4):
+the ASL's UNDEFINED is the same outcome. Matched on the fault's `repr` so that the check also
+builds against a Janus without that constructor. -/
+def isUdfTrap {α : Type} [Repr α] (f : α) : Bool :=
+  let r := (repr f).pretty
+  r.takeWhile (· != ' ') == "Janus.Arm64.Fault.trap" && (r.splitOn " ").getLast? == some "4"
+
 open Janus.Arm64 in
 def compare (dczid : Nat) (c : Case) (asl : AslResult) : Verdict :=
   match Janus.Arm64.step c.word (janusInit dczid c), asl with
@@ -425,6 +439,8 @@ def compare (dczid : Nat) (c : Case) (asl : AslResult) : Verdict :=
   | .error (.undecodable _ _), .error e => .gap s!"janus-undecodable/asl-error:{e}"
   | .error (.undecodable _ _), _ => .gap "janus-undecodable"
   | _, .impdef s => .mismatch s!"janus decodes, ASL: {s}"
+  | .error f, .undefined =>
+    if isUdfTrap f then .agree "udf-undefined" else .mismatch "janus decodes an UNDEFINED encoding"
   | _, .undefined => .mismatch "janus decodes an UNDEFINED encoding"
   | _, .unpredictable => .mismatch "janus decodes a (CONSTRAINED) UNPREDICTABLE case"
   | _, .other s => .mismatch s!"ASL: {s}"
@@ -441,7 +457,8 @@ def compare (dczid : Nat) (c : Case) (asl : AslResult) : Verdict :=
     else if jmem != mem then .mismatch s!"memory: janus {jmem} asl {mem}"
     else if (List.range 32).map (fun i => (s.vregs i).toNat) != vs.toList then
       .mismatch s!"V: janus {(List.range 32).map fun i => hex (s.vregs i).toNat} asl {vs.toList.map hex}"
-    else if s.fpsr.toNat ≠ fpsr then .mismatch s!"FPSR: janus {hex s.fpsr.toNat} asl {hex fpsr}"
+    else if s.fpsr.toNat ≠ fpsr &&& fpsrImpl then
+      .mismatch s!"FPSR: janus {hex s.fpsr.toNat} asl {hex fpsr} (implemented bits {hex (fpsr &&& fpsrImpl)})"
     else if !stray.isEmpty then .mismatch s!"ASL wrote outside the data buffer: {stray.take 4 |>.map hex}"
     else .agree "ok"
   | .ok _, .exception ty syn va => .mismatch s!"janus completes, ASL takes {excName ty} (ISS {hex syn}, va {hex va})"
@@ -568,6 +585,27 @@ def main (args : List String) : IO UInt32 := do
     match runM (readReg Register.MDCR_EL2) base with
     | .ok (v, _) => IO.println s!"MDCR_EL2 = {hex v.toNat}"
     | .error e => IO.println s!"MDCR_EL2: {e}"
+    match runM (readReg Register.ZCR_EL1) base with
+    | .ok (v, _) => IO.println s!"ZCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"ZCR_EL1: {e}"
+    match runM (readReg Register.ZCR_EL2) base with
+    | .ok (v, _) => IO.println s!"ZCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"ZCR_EL2: {e}"
+    match runM (readReg Register.ZCR_EL3) base with
+    | .ok (v, _) => IO.println s!"ZCR_EL3 = {hex v.toNat}"
+    | .error e => IO.println s!"ZCR_EL3: {e}"
+    match runM (readReg Register.SMCR_EL1) base with
+    | .ok (v, _) => IO.println s!"SMCR_EL1 = {hex v.toNat}"
+    | .error e => IO.println s!"SMCR_EL1: {e}"
+    match runM (readReg Register.SMCR_EL2) base with
+    | .ok (v, _) => IO.println s!"SMCR_EL2 = {hex v.toNat}"
+    | .error e => IO.println s!"SMCR_EL2: {e}"
+    match runM (readReg Register.SMCR_EL3) base with
+    | .ok (v, _) => IO.println s!"SMCR_EL3 = {hex v.toNat}"
+    | .error e => IO.println s!"SMCR_EL3: {e}"
+    match runM (readReg Register.__max_implemented_smeveclen) base with
+    | .ok (v, _) => IO.println s!"__max_implemented_smeveclen = {v}"
+    | .error e => IO.println s!"__max_implemented_smeveclen: {e}"
     match runM (CreateAccDescGPR MemOp.MemOp_LOAD false false true) base with
     | .ok (acc, _) => IO.println s!"accdesc load: {repr acc}"
     | .error e => IO.println s!"accdesc: {e}"
@@ -583,6 +621,28 @@ def main (args : List String) : IO UInt32 := do
         IO.println s!"{nm}: fault {repr d.fault.statuscode} pa {hex d.paddress.address.toNat} {repr d.paddress.paspace} memtype {repr d.memattrs.memtype} inner {d.memattrs.inner.attrs} outer {d.memattrs.outer.attrs} tags {repr d.memattrs.tags} tagchecked {tc}"
       | .error e => IO.println s!"{nm}: {e}"
     return 0
+  if path == "--dump-asl" then
+    -- The ASL side only, one JSON line per case (V0-V31, FPSR, outcome), for comparing the Lean
+    -- model with Sail's C backend (audit/rt-asl/sqrt: FSQRT and the `sqrt_real` replacement).
+    let cases ← IO.FS.lines out
+    for l in cases do
+      let l := l.trimAscii.toString
+      if l == "" then continue
+      match parseCase l with
+      | .error e => throw (IO.userError s!"bad case: {e}")
+      | .ok c =>
+        let (r, _, _) := runAsl base c
+        let j := match r with
+          | .ok _ _ _ _ _ _ vs fpsr => Json.mkObj [("id", c.id), ("status", "ok"),
+              ("v", Json.arr (vs.map fun x => Json.str (hex x))), ("fpsr", hex fpsr)]
+          | .exception ty syn _ => Json.mkObj [("id", c.id), ("status", s!"exception {excName ty} {hex syn}")]
+          | .undefined => Json.mkObj [("id", c.id), ("status", "undefined")]
+          | .unpredictable => Json.mkObj [("id", c.id), ("status", "unpredictable")]
+          | .impdef s => Json.mkObj [("id", c.id), ("status", s!"impdef {s}")]
+          | .other s => Json.mkObj [("id", c.id), ("status", s!"other {s}")]
+          | .error s => Json.mkObj [("id", c.id), ("status", s!"error {s}")]
+        IO.println j.compress
+    return 0
   -- The corpus (about 1 GB of JSON lines) is streamed: cases are read, run and written in
   -- batches of `jobs * 256`, one batch running while the next is read, so memory is bounded by
   -- two batches whatever the corpus size. Verdicts are written in corpus order, as before.
@@ -590,7 +650,7 @@ def main (args : List String) : IO UInt32 := do
   let h ← IO.FS.Handle.mk out .write
   IO.eprintln s!"janus-asl-check: streaming {path}, {jobs} tasks"
   let batch := jobs * 256
-  let baseCfg := JanusASL.Proofs.cfgOk base
+  let baseCfg := JanusASL.Proofs.cfgOk base && JanusASL.Proofs.fpCfgOk base
   let umBase := userMappedBase base
   let spawn (cases : Array Case) : List (Task (Array (Case × Verdict × Bool × Bool))) :=
     let chunk := (cases.size + jobs - 1) / jobs
@@ -642,6 +702,6 @@ def main (args : List String) : IO UInt32 := do
   for (k, n) in kinds.toList.mergeSort (fun a b => a.2 ≥ b.2) do
     IO.println s!"{n}\t{k}"
   IO.println s!"cases {total}  agree {agree}  gap {gap}  MISMATCH {mism}"
-  IO.println s!"LinuxEL0Config: base {baseCfg}, cases violating it (pre- or post-state) {cfgBad}"
+  IO.println s!"LinuxEL0Config and FPConfig: base {baseCfg}, cases violating them (pre- or post-state) {cfgBad}"
   IO.println s!"UserMapped (data buffer): base sweep {umBase}, cases violating it (pre-state points) {umBad}"
   return if mism = 0 && baseCfg && cfgBad = 0 && umBase && umBad = 0 then 0 else 1

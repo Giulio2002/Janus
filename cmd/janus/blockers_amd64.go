@@ -109,6 +109,8 @@ func blockersAmd64(b *Binary, syms []string, maxF int, contracts []string, exe, 
 				dis := x86asm.GNUSyntax(in.Inst, in.PC, nil)
 				if key == "f30f1efa" {
 					dis = "endbr64"
+				} else if in.Inst.Op == 0 {
+					dis = "(unknown to x86asm; length measured, see fallbackLenAmd64)"
 				}
 				is = append(is, inst{fn: s.Name, pc: in.PC, query: q, x86len: in.Inst.Len, disasm: dis, key: key})
 				all[q] = true

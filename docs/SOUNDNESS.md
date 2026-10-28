@@ -41,7 +41,10 @@ These are trusted, not proved.
    symbol's `[addr, addr+size)` in `.text` and copying its little-endian 32-bit words (trailing
    zero padding words are dropped). `janus verify` re-runs this copy against the binary
    (checked by SHA-256) and compares it byte for byte with `Extracted.lean`, so a stale or
-   edited extraction is rejected. The copy itself and the symbol table lookup are trusted.
+   edited extraction is rejected. The copy itself and the symbol table lookup are trusted. The
+   same holds for the read-only data and for the link-time images of the writable globals named
+   by `--global` (`cmd/janus/globals.go`: the symbol lookup, the section and `PT_LOAD` checks and
+   the byte copy, and for a pointer chain the little-endian pointer read from the copied image).
 3. **Stub classification**: the extractor treats as `panic` stubs the go1.26 runtime's panic
    functions and as `morestack` stubs `runtime.morestack.abi0`/`runtime.morestack_noctxt.abi0`,
    by exact ELF symbol name, only in a binary with a symbol table and only when the name is
@@ -101,7 +104,9 @@ These are trusted, not proved.
    the model reports them as faults, and `NeverPanics` excludes faults too.
    The same pin authenticates the runtime functions a framework contract library describes
    (`runtimeContractStubs`: the interface runtime's `convT*`, `assertE2I(2)`, `typeAssert`,
-   `interfaceSwitch`, `efaceeq`, `ifaceeq`): a `--contract` that names one is accepted only if
+   `interfaceSwitch`, `efaceeq`, `ifaceeq`; equality, hashing, typed memory and the map runtime;
+   and, as `allocContractStubs`, the allocation, slice and write-barrier entries `mallocgc`,
+   `newobject`, `makeslice`, `growslice` and `gcWriteBarrier1`–`8`): a `--contract` that names one is accepted only if
    the function passes the checks above (its callees are identified by name only), and the
    extraction records it as `"pinned": true`, so the contract hypothesis of a theorem is about the
    runtime's own code. Other `--contract` names are not pinned (a contract over arbitrary code
@@ -110,7 +115,12 @@ These are trusted, not proved.
    `external` stubs (the cgo boundary): a run ends there too, and only the contract semantics of
    `Janus.FFI` (`ReturnsC`, with the contract named in the statement) continues past them; see
    "FFI (cgo)" below.
-4. **The Lean kernel**, plus the verifier's hashing, process execution, axiom audit and
+4. **Runtime contracts and specifications stated as hypotheses or definitions**: every
+   `--contract` function's `Summary` (docs/RUNTIME-CONTRACTS.md; for `print`/`println`:
+   `lock2`, `unlock2`, `memmove`), and the output format specification `Janus.Spec.Print`
+   of the print functions not yet proved from machine code (differential-tested only, row
+   RT-PRINT; see [`print`/`println`](#printprintln-r8)).
+5. **The Lean kernel**, plus the verifier's hashing, process execution, axiom audit and
    statement audit (`Janus/Tools/Audit.lean`, including Lean's parser, elaborator and
    pretty-printer as used by the round-trip check above). The auditor and `leanchecker` load
    `.olean` files written by the sandboxed (untrusted) compile; Lean's `.olean` loader does not
@@ -119,7 +129,7 @@ These are trusted, not proved.
    audit allows only `propext`, `Quot.sound` and `Classical.choice`. It rejects `sorryAx`,
    `Lean.ofReduceBool` and `Lean.trustCompiler`, so `native_decide` and `bv_decide` cannot be
    used. `leanchecker` independently replays the environment (below).
-5. **The Lean toolchain's own library** (`Init`, `Std`, `Lean`, `Lake`, shipped with the
+6. **The Lean toolchain's own library** (`Init`, `Std`, `Lean`, `Lake`, shipped with the
    toolchain and read-only to every sandboxed process) and the **trusted framework build**: the
    framework's `.olean` files compiled by `janus` itself from the framework sources it carries,
    outside the sandbox, once per framework version (`janus verify --fresh` rebuilds them).
@@ -473,13 +483,15 @@ about executions outside it.
 * **No signals, no asynchronous preemption, no interrupts.** Go's signal-based async
   preemption, profiling signals and injected calls (`sigpanic`) are not modelled (except that a
   store-exclusive may fail at any time, which is how an interrupt would show up there).
-* **No runtime interaction.** No GC (write barriers, stack scanning, moving stacks), no
-  scheduler, no stack growth (calls into the runtime can be assumed as contracts instead of
-  executed: see "Runtime contracts" below). Reaching `runtime.morestack*` ends the run as a `morestack`
-  outcome, and it is not a return. Calls into other runtime functions only work if they were
-  extracted and their code is in the supported subset. They then run in the same idealised
-  model. Functions with a stack-check prologue need `GoABI.StackGuardOK s k` (g readable,
-  `stackguard0 + k < SP`) for the prologue to fall through.
+* **No runtime interaction.** No GC (write barriers, stack scanning), no scheduler (calls into
+  the runtime can be assumed as contracts instead of executed: see "Runtime contracts" below).
+  Calls into other runtime functions only work if they were extracted and their code is in the
+  supported subset. They then run in the same idealised model. Functions with a stack-check
+  prologue need `GoABI.StackGuardOK s k` (g readable, `stackguard0 + k < SP`) for the prologue
+  to fall through; **since R7 the grown case is covered too**, under the `morestack` contract
+  (`EnsuresGrow`/`GrownReturns`, "Stack growth" below), so a theorem need not assume the stack
+  has room. A plain `Returns`/`Ensures` theorem still ends the run at the `.morestack` stub,
+  which is not a return (`GoABI.GrowsStack`).
 * **User mode only (EL0).** There are no system registers beyond NZCV and the read-only
   `DCZID_EL0` (`State.dczid`) and `TPIDR_EL0` (`State.tpidr`, see below), no exceptions and no
   page tables. `SP` alignment checking (SCTLR_EL1.SA0, as Linux configures it) is modelled as a
@@ -506,9 +518,19 @@ about executions outside it.
   `s.mem`. Read-only constants the code loads (`.rodata`, literal pools) are copied by the
   extractor into `Program.data`; a theorem that needs them assumes `Program.DataLoaded`
   (memory holds exactly those bytes in a read-only region). Writable globals (`.data`,
-  `.bss`, `.noptrdata`, `.noptrbss`) are never copied, because their contents are not fixed
-  by the binary: a proof that touches one must list it as an ordinary region in its
-  precondition. Self-modifying code is not modelled, and stores never change the fetched code.
+  `.bss`, `.noptrdata`, `.noptrbss`) are never copied into `Program.data`, because their
+  contents at a call are not fixed by the binary: a proof that touches one lists it as a region
+  in its precondition. `janus extract --global SYM` records a writable global's **link-time
+  image** (its file bytes, zero for `.bss`) in `Program.globals`, by the same trusted byte copy;
+  the list does not change the run, and only a theorem that assumes `Janus.Spec.GlobalsInit`
+  (memory holds exactly those bytes, in a writable region) depends on it. That assumption is the
+  state of a program that has not written the variable: it is **not** the value after package
+  initialisation for a variable an `init` function or a non-constant initialiser sets
+  (`internal/cpu.X86`, math/big's `hasADX`, `runtime.writeBarrier`, all zero in the image); for
+  those a theorem quantifies over the value (`GlobalIs`, `GlobalBytesIs` with the value a
+  parameter). A precondition naming a global the extraction does not record would be
+  unsatisfiable; `janus-audit` rejects it (round 8 I1), and `globalsInit_image` shows the
+  predicate holds in the image itself (each example's `Witness.nonvacuous`). Self-modifying code is not modelled, and stores never change the fetched code.
 * **The return address.** Specifications quantify over every admissible return address (see
   "The return address" above), so the extracted placeholder `exitAddr := 0` never matters. A
   theorem stated directly on `Extracted.program` (without `withExit` and a universally
@@ -528,6 +550,60 @@ about executions outside it.
 * **Fixed binary.** A theorem is about one binary, identified by SHA-256. Rebuilding with
   another compiler version, other flags or another linker layout invalidates it. `janus check`
   detects this.
+
+<a id="stack-growth"></a>
+
+## Stack growth (R7)
+
+A theorem proved with `EnsuresGrow`/`GrownReturns` (`Janus/Contracts/Stack.lean`) holds on a
+goroutine stack of any size, the function-prologue `runtime.morestack` call included, *if* the
+runtime grows the stack as the `morestack` contract says. That contract is **trusted**; it is a
+statement about Go 1.26's `runtime.morestack_noctxt`/`morestack`/`newstack`/`copystack`/`gogo`
+(`runtime/stack.go`, `asm_arm64.s`, `asm_amd64.s`), read as follows.
+
+1. **The copy and the pointer adjustment.** `newstack` allocates a new stack and `copystack`
+   copies the used frames to it and adds `delta = new.hi - old.hi` to every word that points
+   into the old stack `[lo, hi)`. Janus models exactly this (`Janus.Spec.Stack.Moved` along the
+   unwinder's `Chain`): a word the stack maps mark as a pointer is adjusted, every other byte is
+   copied. **The stack maps are correct** — the compiler's liveness information
+   (`FUNCDATA_LocalsPointerMaps`, `FUNCDATA_ArgsPointerMaps`, `FUNCDATA_StackObjects`, indexed by
+   `PCDATA_StackMapIndex`, read out of the pclntab) marks exactly the stack slots that hold
+   pointers at each safepoint. This is what the GC and the stack copier themselves rely on. A
+   theorem's `FrameTable` must **agree with the binary's own records** (`FrameTable.Agrees
+   Extracted.frames`): `janus extract --frames` decodes them from the pclntab (`cmd/janus/frames.go`;
+   `TestFramesRecords` compares the SP deltas with the compiler's `-S` frame sizes on both ISAs)
+   and `janus check` re-derives them, so what is trusted is the compiler's liveness analysis, not
+   a table a proof chose.
+2. **No pointer into the stack lives in non-stack memory.** Go's escape analysis guarantees that
+   a pointer into a goroutine stack is never stored in the heap or in globals (such a value would
+   escape). The contract does not adjust any word outside the stack, and its precondition
+   requires that no word outside the stack pools and the runtime's own memory points into a pool
+   (`MorestackPre.noptr`/`MorestackPre64.noptr`, `Janus.Spec.Stack.NoStackPtr`); every grown
+   theorem carries it in its precondition. A program that smuggled a stack pointer into
+   non-stack memory through `unsafe` is outside the model.
+3. **The new stack.** `newstack` doubles the old size until the frame plus `stackGuard` fits
+   (`funcMaxSPDelta(f) + stackGuard` below the resumed `SP`), throwing `stack overflow` past
+   `maxstacksize`; the contract promises exactly that much room, inside the address space Go
+   reserves for goroutine stacks. The runtime's own state (a free stack to allocate, no
+   preemption request, no GC assist that parks) is round 9's readiness predicate `H`, assumed at
+   the call and re-established after it.
+4. **Resumption.** `gogo` restores `SP`, `FP`, `g`, `g.stack`, `g.stackguard0` (all moved by
+   `delta`, `g` itself kept) and resumes at the saved return address — the prologue's glue after
+   the `morestack` call — on the new stack. Every other register, the flags and the SIMD&FP
+   registers are arbitrary (the arguments are read back from the moved spill slots). On arm64
+   `X30 := gobuf.lr` (the function's return address, `X3` at the call), `X26 = 0`, `X18` kept, and
+   the caller's saved frame pointer at `SP - 8` is copied and adjusted (`adjustctxt`). On amd64
+   (`Janus/Contracts/StackAmd64.lean`) the copy starts at `gobuf.sp = RSP + 8` (the pushed glue
+   address is not copied), `RBP := adjust(gobuf.bp)`, `RDX = 0`, `R14` kept, and **`X15 = 0`, the
+   direction flag clear and `MXCSR`'s control bits kept** — `morestack` and `gogo` do not write
+   them and `newstack` is ABIInternal Go code, which keeps `X15` zero.
+
+`Janus/Contracts/StackSat.lean` and `Janus/Contracts/StackSatAmd64.lean` prove the two contracts
+satisfiable (a toy allocator that really performs the copy and the adjustment,
+`morestack_satisfiable`, `morestack64_satisfiable`), so they are not vacuous. What stays outside the model:
+asynchronous preemption (`stackguard0 == stackPreempt`, a scheduler request from another thread),
+`stackForceMove`, GC stack scanning and stack **shrinking** (`shrinkstack`), and any pointer the
+escape analysis did not account for.
 
 ## Atomics, exclusives and system registers
 
@@ -1312,12 +1388,133 @@ no concurrent GC, no preemption):
      the binary's symbols (the sanitizer runtimes' entry points), sections and `debug/buildinfo`
      settings. Their semantics depend on the sanitizer runtimes' shadow state, which the model does
      not have; a binary that hides those markers is outside what the detection covers.
-  5. *Soft float.* Nothing about `-d=softfloat` is assumed: `f32to64` is proved; Go's `fadd64`
-     does not implement IEEE 754 for subnormal results (RUNTIME-CONTRACTS.md), so no contract
-     claims it does.
+  5. *Soft float and `KeepAlive`.* `f32to64` is proved. `fadd64`, `fsub64`, `fmul64`, `fdiv64` have
+     contracts (`Janus.Contracts.SoftFloat`, `SoftFloatAmd64`) that say IEEE 754 binary64
+     round-to-nearest-even **only where the exact result is not tiny** (finite non-zero operands
+     whose exact sum, product or quotient is below `2^-1022` are excluded by the precondition):
+     Go's `fadd64` does not implement IEEE 754 for subnormal results (RUNTIME-CONTRACTS.md), so
+     no contract claims it does. The claim for the other cases (zeros, infinities, NaNs, overflow,
+     normal results) is trusted: it is tested against the hardware on millions of random operands
+     of every class (`scripts/softfloat-check.sh`), not derived from the runtime's code, and the
+     function is pinned to the code that was tested. The contracts also require Go's `FPCR` /
+     `MXCSR` controls, which the runtime ignores (the satisfiability witness is hardware
+     floating point). `runtime.KeepAlive` (reached through a function value; direct calls are an
+     intrinsic) is proved to meet its contract from its own code.
 * **amd64**: every amd64 contract requires the return address at `[RSP]` below `2^47` (a
   canonical user address); without it no code could return and the contract would be
   unsatisfiable.
+
+### Live allocation (FR-1: `Janus/Contracts/Live.lean`, `LiveAmd64.lean`, `LiveToy.lean`)
+
+The single-call allocation contracts above cannot be composed: readiness is assumed for each call
+separately, and each call may change any byte of `rt`, including the objects the caller already
+owns. The *live* contracts replace them for any function that allocates more than once, or a
+data-dependent number of times. What a theorem about such a function means, and what it trusts:
+
+* **The runtime model is one hypothesis `R : RtInv`** (`inv`, `ok`, `rt`, `ext`), threaded through
+  every runtime call of the function (allocation, `growslice`, the write barriers, the string and
+  slice specs, `memmove`/`memclr` and the typed variants, and whatever else a consumer states in
+  the same shape). `R.inv b L g v` is the runtime's invariant for the budget `b`, the ghost live
+  set `L` (the heap objects the program holds), the goroutine `g` and `v = view R.rt L m`, the
+  runtime's memory with the live objects masked out. The theorem quantifies over `R`, `L` and `b`;
+  it holds of the real binary exactly when the real runtime meets the contracts for *some* `R`
+  that holds at the theorem's entry.
+* **Trust item: the collector frees no object of `L` while the program holds it.** The program
+  adds an object to `L` when a contract returns it and removes it only where a contract says so
+  (`removeRanges`). The contracts say that an allocation returns an object *disjoint from `L`*
+  and leaves the bytes of `L` unchanged (`LiveFrame`). For the real Go 1.26 runtime this is the
+  statement that (i) the heap is non-moving, (ii) the collector reclaims only objects unreachable
+  from the roots, and the program keeps every object of `L` reachable (in registers, on its stack
+  or through a pointer stored in another live object, which is what a type-correct Go program
+  does), (iii) neither the collector nor the allocator writes to a reachable object's bytes
+  except through the program's own stores and the write barrier's buffer (runtime memory), and
+  (iv) the runtime's behaviour does not depend on the bytes of the live objects beyond what a
+  type-correct Go program stores there (valid pointers or nil in pointer slots). Items (i) to
+  (iv) are the *same* assumption as "Go's garbage collector is correct", written once in `R.inv`;
+  nothing in Lean checks them, and a theorem proved against a runtime that violates them
+  (a moving collector, a collector that frees held objects) says nothing.
+* **Single-threaded.** As for every Janus theorem: no other goroutine, no concurrent collector
+  thread, no signal handler runs between the instructions of the function. A concurrent mark phase
+  that writes to runtime memory is outside the model; the contracts cover its *effects on the
+  function's view* only through "memory changes only in `R.rt` and the callee's window".
+* **The budget `b`.** A heap is finite; no code can hand out unboundedly many disjoint objects
+  (round 10 V2). Every allocating call costs its block size and the theorem assumes a budget
+  covering all of its calls (a data-dependent sum, bounded linearly by `LiveCost`). `R.inv`
+  need not be monotone in `b`: a summary hands back `∃ b', b - bound ≤ b' ∧ R.inv b' …`
+  (`RtInv.relax`). What the real runtime's `inv` says about `b` is "this much more can be
+  allocated before an out-of-memory throw"; a program whose allocations exceed it throws, which no
+  contract returns from.
+* **`R.ok addr args`** says which requests the runtime serves (for the real runtime, every request
+  the precondition admits; for the toy witnesses a restriction to the arguments they implement).
+  The theorem assumes it at each call's arguments.
+* **The write barrier.** `runtime.writeBarrier.enabled` is runtime memory (inside `R.rt`): after any
+  call that may write `R.rt` its value is unknown, and a theorem covers both branches of the
+  inline test. None of the contracts mentions the flag; they hold with the barrier on or off.
+  `gcWriteBarrierN` returns `8·N` buffer bytes outside `L` and the stack window that the caller
+  fills; the invariant holds for **every** content of those slots (`InvSlots`), and the `STP`
+  into them is a store into the view.
+* **`growslice` keeps the old array in `L`.** The runtime does not free it (only the collector
+  does, once it is unreachable), and the caller may still hold the old slice; dropping it from
+  `L` would let a later allocation reuse it, which the real runtime does only after the collector
+  found it unreachable, and would require `R.inv` to be monotone in `L`, which a contract for an
+  arbitrary runtime cannot state. The new array is disjoint from it and holds its elements.
+* **The caller's frame is outside `R.rt`** (`LiveSep win R.rt`, precondition of every contract);
+  on amd64 the return-address slot is part of the window.
+* **Registers.** Every Go ABIInternal live contract returns in the canonical state `retStateX`
+  (arm64: `excl`/`exclPass` unspecified) or `retState64` (amd64: `zmmHi`/`kreg` unspecified, `X15`,
+  `FS` and the direction flag kept); the barrier returns in `wbRetX`/`wbRetX64` (its own ABI). A loop invariant carries one `KeepX`/`Keep64` bundle (the fields a Go function keeps: system
+  registers and `X18`/`X28` on arm64; `x87`, `fpucw`, `FS`, the direction flag on amd64), and
+  `retStateX_of_keep`/`retState64_of_keep` turn it into the canonical return state.
+* **Satisfiability.** Every live contract has a kernel-checked witness (`LiveSat`, `LiveSatAmd64`,
+  round 9 SAT row): a *bump allocator* (`LiveToy`) with code for each function, an invariant
+  `toyInv` that holds for every live set and budget (not one call), and a call state. The toy
+  shows the contracts are not vacuous and composable; it is not the Go runtime.
+* **Legacy `MemModel` contracts** (`Mem.Memmove`, …) are *not* derived from the live ones: they
+  state `excl`/`exclPass` unchanged and the barrier off, which a contract that leaves them
+  unspecified cannot imply. `MemModel.ofRt R` states one over a live runtime's model; new proofs
+  use the live family.
+
+### The single-threaded assumption
+
+The model has one instruction stream and one memory, and a theorem about a function that calls a
+runtime contract (the allocation contracts, the write barrier, `memclrNoHeapPointers`,
+`sync.(*Pool).Get` and `Put`) holds of the real binary for the executions in which, **from the
+function's entry to its return**:
+
+1. *No other thread of execution touches memory the function or its contracts use.* No other
+   goroutine, OS thread, signal handler, GC worker or finalizer reads or writes a byte of the
+   function's stack window (`[SP - k, SP + a)` in the statement), of the runtime-owned ranges `R.rt`
+   (the ranges the contracts may change), or of an object of the live set `L`. The contracts say
+   what the callee changes (`MemFrame`, `LiveFrame`); a concurrent writer could change any byte
+   outside that, and the theorem would not describe the run.
+2. *No other goroutine uses a pool the function uses.* No other goroutine calls `Get` or `Put` on
+   the pool, or otherwise changes its memory (`local`, `localSize`, `victim`, `New`), between the
+   function's entry and its return. `PoolGetLive` returns an object the pool no longer holds and
+   `PoolPutLive` hands one over; with a concurrent user the pool's content at the next call is not
+   what the invariant `R.inv` of the previous call says. (The real `sync.Pool` is safe for
+   concurrent use; the contract states what one goroutine sees, and that is what the theorem needs.)
+3. *No asynchronous preemption.* The examples assume that the word `g.stackguard0` is outside
+   `R.rt` and the window (`Outside (g + 16) 8 …`) and read it at the prologue of each callee
+   (`StackRoom`): the runtime poisons `stackguard0` to preempt a goroutine (`stackPreempt`, signal
+   `SIGURG`), after which the next prologue would enter `morestack`. A theorem is about runs in
+   which `stackguard0` keeps the value the statement reads (`GuardOK`) at every call, and the
+   goroutine stack does not move (as for the allocation contracts).
+4. *Stop-the-world points are inside calls.* A garbage collection that starts or finishes during
+   a call may free what the contract allows it to free and clears the pools (`poolCleanup`); the
+   contracts allow both (`Get` may return nil, `Put` may drop the object), and the invariant
+   `R.inv` covers the heap. A collection that moves the caller's stack, or frees an object of the
+   live set `L`, is outside the model: the caller must keep its objects reachable (they are
+   on its frame or in `L`).
+
+What the assumption does **not** restrict: the goroutine may move between Ps and between OS
+threads between and inside calls (the contracts do not mention a `P`); other goroutines may run
+anywhere on memory that is none of the above (their own stacks, other pools, other objects); the
+function may be called from many goroutines at once, each with its own stack window, each theorem
+instance for the executions in which the four conditions hold for that call.
+
+Violating a condition does not make the proof unsound in the kernel (the theorem is true of the
+model); it makes the model's runs different from the machine's, so the theorem says nothing about
+the machine's. The conditions are part of the statement's reading, not of its text.
 
 ## Dynamic calls, closures and `defer`
 
@@ -1434,6 +1631,12 @@ What a C-environment theorem trusts, beyond the model:
   * *Static GOT slots.* A slot in `PT_GNU_RELRO` with no dynamic relocation is copied as constant
     read-only data. This trusts that no relocation (static or dynamic) the extractor does not
     read changes it; `-z norelro` binaries have no such slots and their GOT loads fault.
+  * *Dynamic GOT slots.* A slot that is the `r_offset` of a dynamic relocation naming a symbol is
+    not copied; it is listed in `Extracted.dyngot` under that symbol, and a theorem states its
+    value as the precondition `GotBound Extracted.dyngot "sym" v` (for every `v`). Naming the
+    slot by the symbol is extraction (a wrong name would make the theorem's precondition about
+    the wrong symbol, which `janus check` recomputes from the relocation table); its value is
+    never assumed.
   * *TLS layout.* `Extracted.tls` and `TLSImage.a64Addr`/`x64Addr` encode the ELF TLS ABI
     (variant I on arm64, variant II on amd64) for the executable's block; `TLSBlock` (a
     precondition) states the block is in place, and on amd64 that the TCB's first word is its own
@@ -1452,17 +1655,25 @@ What a C-environment theorem trusts, beyond the model:
   release. `setjmp`/`longjmp` are stated over every `jmp_buf` model with the `JmpModel` laws; the
   theorem holds for glibc if glibc's (mangled) layout is one such model, which `locality` and
   `unique` express (only the `jmp_buf` bytes matter, and they determine the context).
-* **The `cgocallback` contract** (`CgoCallback`): `runtime.cgocallback` (pinned by content)
-  enters the exported Go function as an ABIInternal call `fn(frame)` on a goroutine stack that is
-  not C memory (`CallbackEntry.stackSep`; `goStack` on amd64: `cbGoStack` writable bytes and the
-  return slot), leaves the C memory outside `cbClobber` (the C stack below `SP` — at most
-  `cbStackScratch = 16384` bytes —, its argument slots and the TLS `g` slot) as it was, and
-  returns to `crosscall2` with only `SP` (and the thread, `MXCSR`/x87 control word on amd64)
-  restored. The goroutine stack being outside the C state's memory is a modelling assumption: a
-  precondition that granted the goroutine's stack to the C code would not describe a real
-  execution. The Go side may itself only call stubs of its contract `Cin` (`Contract.none` in
-  the examples), and Go code with frames needs at most `cbGoStack` bytes (larger frames are not
-  covered).
+* **The `cgocallback` contract** (`CgoCallback t p Cin R k`): `runtime.cgocallback` (pinned by
+  content) loads `g` from the TLS `g` slot of the extraction's `TLSImage` (`tlsGSlot`, both
+  ISAs), switches to `m.curg` (`X28`/`R14`, its struct readable Go memory apart from C memory and
+  from its stack, the TLS slot pointing at it) and its stack, and enters the exported Go function
+  as an ABIInternal call `fn(frame)` with `k.size` writable bytes of goroutine stack below `SP`
+  that are not C memory, and `stackguard0 + k.size ≤ SP + 928` (`CallbackEntry`); it leaves the C
+  memory outside `cbClobber` (the C stack below `SP` — at most `cbStackScratch = 16384` bytes —,
+  its argument slots and the TLS `g` slot) as it was, and returns to `crosscall2` with only `SP`
+  (and the thread, `MXCSR`/x87 control word on amd64) restored; the exclusive monitor is
+  arbitrary afterwards (arm64). The goroutine stack size is claimed only **under the readiness**
+  `k.ready` at the stub (`CbStack`, as the allocator's `RtReady`), which the theorem assumes:
+  the real runtime meets it while it can give the goroutine `k.size` bytes (growing its stack by
+  `morestack`, which re-runs the function on the copied stack, up to `maxstacksize`) and no
+  preemption is pending. Facts the Go code needs beyond that (an allocator's readiness, Go
+  read-only data) are the readiness `R` of the Go entry, and the theorem covers the executions in
+  which `R` holds there (`ECallBox`). The goroutine stack and the `g` struct being outside the C
+  state's memory is a modelling assumption: a precondition that granted them to the C code would
+  not describe a real execution. The Go side may itself only call stubs of its contract `Cin`
+  (`Contract.none` in the examples) and contracts it states as hypotheses (`NewobjectContract`).
 * **Function-pointer hypotheses** (`CFuncIs`) are hypotheses in the statement (discharged by a
   proof of the concrete function, as `EArgMin.cmp_fn`), not trusted.
 
@@ -1504,7 +1715,8 @@ callers that violate the convention.
 ## The kernel trust boundary (system calls, environment reads, traps)
 
 Go programs reach Linux through `SVC #0` / `SYSCALL`, read time and identification registers
-(`MRS CNTVCT_EL0`, `CNTFRQ_EL0`, `MIDR_EL1`, `DIT`; `CPUID`, `XGETBV`, `RDTSC(P)`), and call the
+(`MRS CNTVCT_EL0`, `CNTFRQ_EL0`, `MIDR_EL1`, `DIT`, the feature-ID registers `ID_AA64*_EL1`; `CPUID`,
+`XGETBV`, `RDTSC(P)`), and call the
 clock functions of the vDSO (code the kernel maps into the process, not part of the binary).
 None of these has a result the user-mode state determines. The design (WP-C,
 `Janus/Contracts/Syscall.lean`, `Janus/Contracts/SyscallAmd64.lean`):
@@ -1543,6 +1755,15 @@ None of these has a result the user-mode state determines. The design (WP-C,
     and `madvise` may change every byte of the advised pages;
   * `CLOCK_MONOTONIC` and `CNTVCT_EL0` never go back; the wall clock, `MIDR_EL1`, `CPUID`,
     `RDTSC` are arbitrary (a thread may migrate between cores);
+  * the feature-ID registers `MRS Xt, S3_0_C0_C<4..7>_<op2>` (`ID_AA64ISAR0/1/2_EL1`,
+    `ID_AA64PFR0/1_EL1`, `ID_AA64ZFR0_EL1`, `ID_AA64MMFR0..4_EL1`, `ID_AA64DFR0/1_EL1`, the
+    reserved ones that read as zero, ...) return an **arbitrary 64-bit value**
+    (`Site.mrs (.idreg crm op2)`; the event is `.env "ID_AA64ISAR0_EL1" v`): Linux emulates them
+    at EL0 (`HWCAP_CPUID`) with the CPU's value after masking the fields it does not expose, but
+    the model does not assume which fields, so a proof assumes no CPU feature unless it states
+    one as a hypothesis on the event; `Kern.idregOK` (default true) says Linux emulates them,
+    otherwise they are `SIGILL`. `MRS` of the other registers of the ID space (`MPIDR_EL1`,
+    `REVIDR_EL1`, ...) stays rejected;
   * the vDSO wrappers may write the runtime-owned memory `KEnv.rt` (the `m`'s `vdsoPC`/`vdsoSP`,
     the `g0` and `gsignal` stacks) and `KEnv.stack` bytes below `SP`, and return with every
     register except `SP`, `g` and `FP` arbitrary (arm64 `EnsuresK` therefore uses `ABIReturnC`,
@@ -1574,6 +1795,38 @@ None of these has a result the user-mode state determines. The design (WP-C,
   docs/ORACLE.md and docs/ORACLE-AMD64.md). `SVC`/`SYSCALL` are not run natively. `PUSHFQ` pushes
   `0x202` plus the status flags and `DF`; `POPFQ` faults (`Fault.systemFlag`) if it would set
   `TF`, `NT`, `AC` or `ID`, which the model does not track.
+
+## `print`/`println` (R8)
+
+The print examples (`examples/proofs-print`, both ISAs) execute the whole print path from the binary
+(`printlock`, `printstring`, `printuint`/`formatBase10`, `printint`, `printbool`, `printnl`,
+`gwrite`, `recordForPanic`, `writeErrData`, `write`, `write1`) down to the `write(2, …)` system
+call. What is trusted beyond the model and the kernel contract (`Kernel.Effect .write`):
+
+* **Three runtime contracts** (`Janus/Contracts/Print.lean`, `PrintAmd64.lean`): `lock2`/`unlock2`
+  (the uncontended fast path of `debuglock`, the only path single-threaded code can take) and
+  `memmove` (the copy into the crash backlog). They are hypotheses of every theorem, satisfiable
+  (`Janus.Contracts.PrintSat`, `PrintSatAmd64`: witness machine code proved to meet each, and a call
+  state meeting its precondition) and jointly satisfiable with each example's precondition
+  (`Proof.Witness.nonvacuous`, with the witness code linked at the binary's contract addresses).
+  Concurrency is out of scope: a second thread holding `debuglock` is not modelled.
+* **The output specification** `Janus.Spec.Print` (decimal integers, `fmtBool`, and the hex,
+  pointer, slice, interface and floating-point formats) is a Lean definition of what Go 1.26
+  prints. For the proved examples the spec is only `decimal`/`fmtInt`/`fmtBool`/string bytes, and
+  the theorems connect it to the machine code. The remaining formats (`fmtHex`, `fmtPointer`,
+  `fmtSlice`, `fmtEface`, `fmtF64`, `fmtF32`, `fmtC128`, `fmtC64`) are **not connected to any
+  machine-code theorem yet**. Their only evidence is the differential test row RT-PRINT
+  (`audit/rt-print`, in `audit/run-all.sh`): every format against the real Go 1.26 runtime on both
+  ISAs, byte for byte (1,427,971 cases, 0 mismatches at the default corpus).
+* **The shared code.** The proofs about the print functions are about `PrintCode.program` (the
+  functions of all four examples as one program); each example proves that its own extraction has
+  the same code (`Program.Equiv`: segments up to order, none overlapping, same stubs, data and
+  contracts, by `decide`, checked by the kernel) and transports the theorems. Nothing here is
+  trusted: `PrintProofs.<Isa>.Equiv` is an ordinary proof about the framework's definitions.
+* **The runtime state** a print needs (`Print.PrintReady`, amd64 `Amd64.Print.PrintReady`) is a
+  precondition. It covers not panicking-dependent paths (`m.dying = 0`), no `writebuf`, no
+  `overrideWrite`, the M's print count 0 and the free `debuglock`, and the globals' and the M's
+  fields apart from each other and outside the runtime-owned ranges.
 
 ## Go assembly (ABI0)
 
@@ -1689,3 +1942,5 @@ extracted function run on the loaded image as described above, nothing else):
   fault).
 * Nothing about the Go source. If the compiler miscompiled it, the theorem is about the
   miscompiled code, which is the point.
+
+* **Hardware-oracle-only instruction classes.** x87, scalar FP, AES/PCLMUL/SHA, BMI/FMA, SSSE3/SSE4, AVX/AVX2 and AVX-512 are cross-checked against hardware oracles only, because the Sail x86 model has no semantics for them.

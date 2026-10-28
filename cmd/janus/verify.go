@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -238,7 +239,7 @@ func summarizeLeanErrors(out string, limit int) string {
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	args, flags := takeBoolFlags(args, "json", "fresh", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
-	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root")
+	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
 	}
@@ -264,6 +265,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 		opts["allow-path-deps"] = "true"
 	}
 	outdir := pos[0]
+	if strings.Contains(opts["theorem"], "\n") || strings.Contains(opts["theorem"], "::") || opts["results"] != "" {
+		return cmdVerifyMany(outdir, opts, flags, stdout, stderr)
+	}
 	r, err := verifyAndReport(outdir, opts, stderr)
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], err)
@@ -326,6 +330,10 @@ func writeReport(reportPath string, r *verifiedReport) error {
 }
 
 func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
+	printVerifiedAt(stdout, outdir, filepath.Join(outdir, "verified.json"), r)
+}
+
+func printVerifiedAt(stdout io.Writer, outdir, reportPath string, r *verifiedReport) {
 	fmt.Fprintf(stdout, "Verified: %s\n", termSafe(r.Theorem))
 	fmt.Fprintf(stdout, "  Module: %s (%s)\n", r.MainModule, r.GoVersion)
 	if desc := describeEntry(r.EntryABI, r.EntrySource); desc != "" {
@@ -387,7 +395,7 @@ func printVerified(stdout io.Writer, outdir string, r *verifiedReport) {
 		fmt.Fprintf(stdout, "  Trap sites: %s (.trap stubs: a run reaching one ends in a trap, Kernel.Traps)\n",
 			termSafe(strings.Join(r.Traps, ", ")))
 	}
-	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(filepath.Join(outdir, "verified.json")))
+	fmt.Fprintf(stdout, "  Report: %s\n", displayPath(reportPath))
 	fmt.Fprintln(stdout, "  Statement:")
 	fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(termSafe(r.Statement), "\n", "\n    "))
 	printDefinitions(stdout, r.Definitions)
@@ -459,14 +467,66 @@ func moduleList(mods []string) string {
 	return fmt.Sprintf("%s, … and %d more; %d modules", strings.Join(mods[:10], ", "), len(mods)-10, len(mods))
 }
 
+// thmOutcome is the outcome of one theorem of a verification: its report, or why it failed.
+type thmOutcome struct {
+	Theorem string
+	Report  *verifiedReport
+	Err     error
+}
+
+// verify verifies one theorem (opts["theorem"], default Proof.correctness) of a proof file.
 func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedReport, error) {
 	thm := opts["theorem"]
 	if thm == "" {
 		thm = defaultTheorem
 	}
-	if !theoremNameRE.MatchString(thm) {
-		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("%q is not a plain dotted Lean name.", thm), Stage: "proof selection",
-			Next: "Pass --theorem Namespace.name."}
+	o := verifyMany(outdir, opts, []string{thm}, stderr)[0]
+	return o.Report, o.Err
+}
+
+// verifyMany verifies several theorems of ONE proof file in one run: the extraction check, the
+// toolchain/sandbox/framework steps, the trusted compile and the proof compile happen once; every
+// theorem then gets its own audit (axiom check included), its own result-cache entry and the
+// kernel replay of its import closure (shared only by theorems whose closures are identical, as
+// the replay is of modules, not of theorems). A theorem's outcome never depends on the others':
+// a failing theorem fails alone, while a failure of a shared step (the proof does not compile, a
+// pin changed, the kernel rejects a module) fails every theorem that step covers.
+func verifyMany(outdir string, opts map[string]string, thms []string, stderr io.Writer) []thmOutcome {
+	outs := make([]thmOutcome, len(thms))
+	seen := map[string]bool{}
+	for i, t := range thms {
+		outs[i].Theorem = t
+		switch {
+		case !theoremNameRE.MatchString(t):
+			outs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("%q is not a plain dotted Lean name.", t), Stage: "proof selection",
+				Next: "Pass --theorem Namespace.name."}
+		case seen[t]:
+			outs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("Theorem %s is listed more than once.", t), Stage: "proof selection",
+				Next: "List each theorem once."}
+		}
+		seen[t] = true
+	}
+	if err := verifyShared(outdir, opts, outs, stderr); err != nil {
+		for i := range outs {
+			if outs[i].Report == nil && outs[i].Err == nil {
+				outs[i].Err = err
+			}
+		}
+	}
+	return outs
+}
+
+// verifyShared is verifyMany's body. It fills outs (entries that already have an Err are skipped)
+// and returns the error of a shared step, which applies to every entry still without outcome.
+func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stderr io.Writer) error {
+	var todo []int
+	for i := range outs {
+		if outs[i].Err == nil {
+			todo = append(todo, i)
+		}
+	}
+	if len(todo) == 0 {
+		return nil
 	}
 	proofPath := opts["proof"]
 	if proofPath == "" {
@@ -478,32 +538,32 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	// 1. Extraction integrity.
 	cr, err := check(outdir, opts["binary"])
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tm.mark("extraction check")
 	proofSrc, err := os.ReadFile(proofPath)
 	if err != nil {
-		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read proof %s: %v", displayPath(proofPath), err),
+		return &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read proof %s: %v", displayPath(proofPath), err),
 			Stage: "proof selection", Next: "Pass --proof path/to/Proof.lean (default: <outdir>/Proof.lean)."}
 	}
 
 	// 2. Toolchain, sandbox and the trusted Janus library build.
 	fw, err := loadFramework(opts["janus-root"])
 	if err != nil {
-		return nil, err
+		return err
 	}
 	lake, err := findLake()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	sb, err := detectSandbox(opts["unsafe-no-sandbox"] != "")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tm.mark("sandbox self-test")
 	root, cleanup, err := fw.libraryRoot(lake, opts["fresh"] != "", stderr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer cleanup()
 	// The compiled auditor (janus-audit) of this framework build, and the SHA-256 its build
@@ -514,13 +574,13 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		auditExeSha = regularFileSha(auditExe)
 	}
 	if auditExeSha == "" {
-		return nil, &diag{Invalid: true, Stage: "Janus library build",
+		return &diag{Invalid: true, Stage: "Janus library build",
 			Msg: "The framework build in " + displayPath(root) + " records no auditor executable."}
 	}
 	tm.mark("framework build check")
 	tc, err := findToolchain(lake, root)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	// --asl: the trusted JanusASL build, before the framework is pinned (its Lake build may check
 	// the framework's traces).
@@ -531,7 +591,7 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 			aslRoot = "" // not the temporary --fresh build: the cached base (byte-identical)
 		}
 		if asl, err = buildASLFor(fw, aslRoot, lake, stderr); err != nil {
-			return nil, err
+			return err
 		}
 		defer asl.release()
 	}
@@ -541,32 +601,59 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	// re-verified after every untrusted step, the audit and the replay (R1).
 	fwPins, err := frameworkPins(janusLibDir, fw.Files)
 	if err != nil || len(fwPins.want) == 0 {
-		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read the framework build %s: %v", displayPath(janusLibDir), err), Stage: "Janus library build"}
+		return &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read the framework build %s: %v", displayPath(janusLibDir), err), Stage: "Janus library build"}
 	}
 	pinned := pinSet{fwPins}
 	tm.mark("framework pins")
 
 	// The recorded result of an identical earlier verification (resultcache.go), if any.
 	idBytes0, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
-	cacheIn := &resultInputs{fw: fw, root: root, fwPins: fwPins, auditExeSha: auditExeSha, tc: tc, sb: sb,
-		thm: thm, outdir: outdir, proof: proofPath, opts: opts, extracted: cr.Lean, identity: idBytes0,
+	cacheIn := resultInputs{fw: fw, root: root, fwPins: fwPins, auditExeSha: auditExeSha, tc: tc, sb: sb,
+		outdir: outdir, proof: proofPath, opts: opts, extracted: cr.Lean, identity: idBytes0,
 		binPath: cr.BinPath, binarySha: cr.Identity.BinarySha256, proofSrc: proofSrc}
-	resultKey := ""
+	// One result-cache key per theorem: each binds its own theorem name (and every other input),
+	// so an entry recorded for one theorem can never answer for another.
+	resultKeys := make([]string, len(outs))
 	if resultCacheOK(sb, opts) {
 		// Created before any sandboxed step, so the sandbox's tmpfs always covers it.
+		keyOK := false
 		if _, err := resultHMACKey(); err == nil {
-			resultKey = cacheIn.key()
+			keyOK = true
 		} else if d, ok := err.(*diag); ok {
-			return nil, d // round 8 C1: an unsafe cache is an error, not a silent miss
+			return d // round 8 C1: an unsafe cache is an error, not a silent miss
 		}
-		if prev := lookupResult(resultKey); prev != nil {
-			// The inputs must still be the ones the key was computed from.
+		prevs := make([]*verifiedReport, len(outs))
+		anyHit := false
+		for _, i := range todo {
+			if !keyOK {
+				break
+			}
+			in := cacheIn
+			in.thm = outs[i].Theorem
+			resultKeys[i] = in.key()
+			if prevs[i] = lookupResult(resultKeys[i]); prevs[i] != nil {
+				anyHit = true
+			}
+		}
+		if anyHit {
+			// The inputs must still be the ones the keys were computed from.
 			cr2, err := check(outdir, opts["binary"])
 			proofNow, perr := os.ReadFile(proofPath)
 			idNow, _ := os.ReadFile(filepath.Join(outdir, "identity.json"))
 			if err == nil && perr == nil && bytes.Equal(cr2.Lean, cr.Lean) && bytes.Equal(proofNow, proofSrc) && bytes.Equal(idNow, idBytes0) {
+				var rest []int
+				for _, i := range todo {
+					if prevs[i] != nil {
+						outs[i].Report = cachedReport(prevs[i], fw, root)
+					} else {
+						rest = append(rest, i)
+					}
+				}
+				todo = rest
 				tm.mark("result cache hit")
-				return cachedReport(prev, fw, root), nil
+				if len(todo) == 0 {
+					return nil
+				}
 			}
 		}
 		tm.mark("result cache miss")
@@ -612,18 +699,18 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	// compiled by us (no proof code), kept read-only for the untrusted steps.
 	runBase, err := janusRunBase()
 	if err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
 	trustedDir, err := os.MkdirTemp(runBase, "trusted-")
 	if err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
 	defer os.RemoveAll(trustedDir)
 	if err := os.WriteFile(filepath.Join(trustedDir, "Extracted.lean"), cr.Lean, 0o644); err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
 	if err := os.WriteFile(filepath.Join(trustedDir, "JanusTrusted.lean"), janusTrustedSource(cr.Lean), 0o644); err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
 	trustedPath := tc.leanPathEnv(trustedDir, janusLibDir)
 	compileTrusted := func(mod string) (string, error) {
@@ -639,11 +726,11 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	if !trustedHit {
 		outs, errs := compileBoth(compileTrusted, "Extracted", "JanusTrusted")
 		if out, err := outs[0], errs[0]; err != nil {
-			return nil, &diag{Invalid: true, Msg: "Lean rejected the extracted program " + displayPath(cr.Extracted) + ".\n" + summarizeLeanErrors(out, 2000),
+			return &diag{Invalid: true, Msg: "Lean rejected the extracted program " + displayPath(cr.Extracted) + ".\n" + summarizeLeanErrors(out, 2000),
 				Stage: "extraction elaboration", Next: "Check that the Janus library matches this extractor version.", Details: out}
 		}
 		if out, err := outs[1], errs[1]; err != nil {
-			return nil, &diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
+			return &diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
 				Stage: "extraction elaboration", Details: out}
 		}
 	}
@@ -654,14 +741,14 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	}
 	trustedPins, err := newPinnedLib("the trusted Extracted/JanusTrusted build", trustedDir, nil)
 	if err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
 	if cacheOK && !trustedHit {
 		storeTrustedCache(tkey, trustedDir, trustedPins.want)
 	}
 	pinned = append(pinned, trustedPins)
 	if err := pinned.check("the trusted compile"); err != nil {
-		return nil, err
+		return err
 	}
 	tm.mark("trusted pins")
 
@@ -669,19 +756,19 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	// sandboxed, untrusted lean processes.
 	workDir, err := os.MkdirTemp(runBase, "work-")
 	if err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
 	defer os.RemoveAll(workDir)
 	_ = os.Chmod(workDir, 0o700)
 	if err := os.WriteFile(filepath.Join(workDir, "Proof.lean"), proofSrc, 0o644); err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
 	proofPathEnv := tc.leanPathEnv(trustedDir, janusLibDir, workDir)
 	searchDirs := []string{trustedDir, janusLibDir, workDir, tc.libDir}
 	if err := noForeignModule(map[string]string{
 		"Extracted": trustedDir, "JanusTrusted": trustedDir, "Proof": workDir,
 	}, searchDirs); err != nil {
-		return nil, err
+		return err
 	}
 	mapPaths := func(s string) string {
 		s = strings.ReplaceAll(s, filepath.Join(workDir, "Proof.lean"), displayPath(proofPath))
@@ -702,29 +789,28 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 		if s := summarizeLeanErrors(out, 2000); s != "" {
 			msg += "\n" + s
 		}
-		return nil, &diag{Invalid: true, Msg: msg, Stage: "proof checking",
-			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + thm + ".", Details: out}
+		return &diag{Invalid: true, Msg: msg, Stage: "proof checking",
+			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + strings.Join(thmNames(outs, todo), ", ") + ".", Details: out}
 	}
 	tm.mark("proof compile")
 	if err := pinned.check("the proof compile"); err != nil {
-		return nil, err
+		return err
 	}
 	// The proof's outputs (Proof.olean and anything else the compile left in the work dir) are
 	// pinned from here on: the audit and the replay must see the same bytes.
 	proofPins, err := newPinnedLib("the proof build", workDir, nil)
 	if err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
 	pinned = append(pinned, proofPins)
 	if _, ok := proofPins.want["Proof.olean"]; !ok {
-		return nil, &diag{Invalid: true, Msg: "The proof compile produced no Proof.olean.", Stage: "proof build integrity"}
+		return &diag{Invalid: true, Msg: "The proof compile produced no Proof.olean.", Stage: "proof build integrity"}
 	}
 
 	// 5. Theorem, axiom and statement audit by the trusted janus-audit (no proof code runs).
-	marker := "janus-audit-" + newNonce() + ": "
 	auditDir, err := os.MkdirTemp(runBase, "audit-")
 	if err != nil {
-		return nil, &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
 	}
 	defer os.RemoveAll(auditDir)
 	tm.mark("pins after proof")
@@ -744,58 +830,118 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	// The auditor executable must be the one its trusted build recorded; nothing untrusted runs
 	// between this check and its start (the proof compile has ended).
 	if got := regularFileSha(auditExe); got != auditExeSha {
-		return nil, &diag{Invalid: true, Stage: "framework integrity",
+		return &diag{Invalid: true, Stage: "framework integrity",
 			Msg:  fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(auditExe), short(auditExeSha), short(got)),
 			Next: "Something other than janus wrote to the framework build; janus rebuilds it on the next run."}
 	}
-	// It runs JanusAudit.runImpl with the arguments the trusted Audit.lean script would pass
-	// to JanusAudit.run (auditScript, used by the consumer path).
-	auditOut, _ := runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv,
-		auditExe, thm, "Proof", marker, "JanusTrusted")
+	// Each theorem is audited by the trusted janus-audit (no proof code runs), concurrently: the
+	// auditor is a separate process per theorem, with its own nonce marker, on the same pinned
+	// build. It runs JanusAudit.runImpl with the arguments the trusted Audit.lean script would
+	// pass to JanusAudit.run (auditScript, used by the consumer path).
+	markers := make([]string, len(outs))
+	auditOuts := make([]string, len(outs))
+	var awg sync.WaitGroup
+	asem := make(chan struct{}, 4)
+	for _, i := range todo {
+		markers[i] = "janus-audit-" + newNonce() + ": "
+		awg.Add(1)
+		go func(i int) {
+			defer awg.Done()
+			asem <- struct{}{}
+			defer func() { <-asem }()
+			auditOuts[i], _ = runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv,
+				auditExe, outs[i].Theorem, "Proof", markers[i], "JanusTrusted")
+		}(i)
+	}
+	awg.Wait()
 	tm.mark("audit")
 	if err := pinned.check("the audit"); err != nil {
-		return nil, err
+		return err
 	}
 	tm.mark("pins after audit")
-	ar, err := parseAuditRecord(mapPaths(auditOut), marker)
-	if err != nil {
-		return nil, err
+	ars := make([]*auditResult, len(outs))
+	var audited []int
+	byName := map[string]int{}
+	for _, i := range todo {
+		ar, err := parseAuditRecord(mapPaths(auditOuts[i]), markers[i])
+		if err != nil {
+			outs[i].Err = err
+			continue
+		}
+		// Two requested names that resolve to one declaration would be one theorem reported twice.
+		if j, dup := byName[ar.Name]; dup {
+			outs[i].Err = &diag{Invalid: true, Msg: fmt.Sprintf("%s and %s are the same theorem (%s).", outs[j].Theorem, outs[i].Theorem, ar.Name),
+				Stage: "proof selection", Next: "List each theorem once."}
+			continue
+		}
+		byName[ar.Name] = i
+		ars[i] = ar
+		audited = append(audited, i)
+	}
+	if len(audited) == 0 {
+		return nil
 	}
 
-	// 6. Independent kernel replay (leanchecker), sandboxed, of every non-core module of the
-	// theorem's import closure; the closure's modules must come from their trusted homes.
-	resolved, err := closureCheck(ar.Modules, searchDirs, tc.libDir, fwPins,
-		map[string]string{"Extracted": trustedDir, "JanusTrusted": trustedDir, "Proof": workDir})
-	if err != nil {
-		return nil, err
+	// 6. Independent kernel replay (leanchecker), sandboxed, of every non-core module of each
+	// theorem's import closure; the closure's modules must come from their trusted homes. The
+	// replay is of modules: theorems with the same closure (all of one proof file) share one.
+	homes := map[string]string{"Extracted": trustedDir, "JanusTrusted": trustedDir, "Proof": workDir}
+	type replayOutcome struct {
+		kr  kernelReplay
+		err error
 	}
-	kr := kernelReplay{Tool: "leanchecker", Modules: []string{}}
-	if !tc.hasChecker {
-		kr.Status = "unavailable"
-		kr.Note = "leanchecker not found in the Lean toolchain"
-	} else {
-		plan, err := planReplay(resolved, importGraph(ar.Imports), tc.cacheID(), replayCacheOK(sb, opts))
-		if err != nil {
-			return nil, err
+	replays := map[string]replayOutcome{}
+	krs := make([]kernelReplay, len(outs))
+	var replayed []int
+	for _, i := range audited {
+		ar := ars[i]
+		set := append([]string{}, ar.Modules...)
+		sort.Strings(set)
+		setKey := strings.Join(set, "\n")
+		ro, done := replays[setKey]
+		if !done {
+			ro = func() replayOutcome {
+				resolved, err := closureCheck(ar.Modules, searchDirs, tc.libDir, fwPins, homes)
+				if err != nil {
+					return replayOutcome{err: err}
+				}
+				kr := kernelReplay{Tool: "leanchecker", Modules: []string{}}
+				if !tc.hasChecker {
+					kr.Status = "unavailable"
+					kr.Note = "leanchecker not found in the Lean toolchain"
+					return replayOutcome{kr: kr}
+				}
+				plan, err := planReplay(resolved, importGraph(ar.Imports), tc.cacheID(), replayCacheOK(sb, opts))
+				if err != nil {
+					return replayOutcome{err: err}
+				}
+				early.apply(plan, earlyMarker)
+				earlyFw.apply(plan, fwPins)
+				tm.mark("early replay wait")
+				if out, err := plan.replay(tc.leanchecker, replayRun, plan.modules); err != nil {
+					return replayOutcome{err: replayDiag(mapPaths(out))}
+				}
+				fresh := ""
+				if opts["replay-fresh"] != "" {
+					if out, err := plan.replayFresh(tc.leanchecker, replayRun, "Proof"); err != nil {
+						return replayOutcome{err: replayDiag(mapPaths(out))}
+					}
+					fresh = "Proof"
+				}
+				return replayOutcome{kr: plan.report(plan.modules, fresh)}
+			}()
+			replays[setKey] = ro
 		}
-		early.apply(plan, earlyMarker)
-		earlyFw.apply(plan, fwPins)
-		tm.mark("early replay wait")
-		if out, err := plan.replay(tc.leanchecker, replayRun, plan.modules); err != nil {
-			return nil, replayDiag(mapPaths(out))
+		if ro.err != nil {
+			outs[i].Err = ro.err
+			continue
 		}
-		fresh := ""
-		if opts["replay-fresh"] != "" {
-			if out, err := plan.replayFresh(tc.leanchecker, replayRun, "Proof"); err != nil {
-				return nil, replayDiag(mapPaths(out))
-			}
-			fresh = "Proof"
-		}
-		kr = plan.report(plan.modules, fresh)
+		krs[i] = ro.kr
+		replayed = append(replayed, i)
 	}
 	tm.mark("kernel replay")
 	if err := pinned.check("the kernel replay"); err != nil {
-		return nil, err
+		return err
 	}
 	tm.mark("pins after replay")
 
@@ -804,23 +950,26 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	if err != nil {
 		d := err.(*diag)
 		d.Msg = "Artifacts changed during verification: " + d.Msg
-		return nil, d
+		return d
 	}
 	proofNow, err := os.ReadFile(proofPath)
 	if err != nil || !bytes.Equal(proofNow, proofSrc) || !bytes.Equal(cr2.Lean, cr.Lean) {
-		return nil, &diag{Invalid: true, Msg: "The proof or Extracted.lean changed during verification.", Stage: "stale input",
+		return &diag{Invalid: true, Msg: "The proof or Extracted.lean changed during verification.", Stage: "stale input",
 			Next: "Rerun janus verify."}
 	}
 
-	// 8. --asl: the ASL corollary (its outcome is recorded; it never fails the theorem above).
-	var aslRep *aslReport
+	// 8. --asl: the ASL corollary of each theorem (its outcome is recorded; it never fails the
+	// theorem).
+	aslReps := make([]*aslReport, len(outs))
 	if asl != nil {
-		aslRep = runASLStage(&aslEnv{sb: sb, tc: tc, build: asl, runBase: runBase,
-			trustedDirs: []string{trustedDir, janusLibDir}, searchDirs: []string{trustedDir, janusLibDir, workDir},
-			protected: append(append([]string{}, protected...), workDir), pinned: pinned, framework: fwPins,
-			homes:   map[string]string{"Extracted": trustedDir, "JanusTrusted": trustedDir, "Proof": workDir},
-			theorem: ar.Name, proofModule: "Proof", replayCache: replayCacheOK(sb, opts), replayFresh: opts["replay-fresh"] != "",
-			mapPaths: mapPaths, auditExe: auditExe, auditExeSha: auditExeSha})
+		for _, i := range replayed {
+			aslReps[i] = runASLStage(&aslEnv{sb: sb, tc: tc, build: asl, runBase: runBase,
+				trustedDirs: []string{trustedDir, janusLibDir}, searchDirs: []string{trustedDir, janusLibDir, workDir},
+				protected: append(append([]string{}, protected...), workDir), pinned: pinned, framework: fwPins,
+				homes:   homes,
+				theorem: ars[i].Name, proofModule: "Proof", replayCache: replayCacheOK(sb, opts), replayFresh: opts["replay-fresh"] != "",
+				mapPaths: mapPaths, auditExe: auditExe, auditExeSha: auditExeSha})
+		}
 	}
 
 	tm.mark("final input check")
@@ -830,46 +979,59 @@ func verify(outdir string, opts map[string]string, stderr io.Writer) (*verifiedR
 	if fi.Modified {
 		commit += "+dirty"
 	}
-	report := &verifiedReport{
-		ASL:               aslRep,
-		Schema:            1,
-		Theorem:           ar.Name,
-		Kind:              ar.Kind,
-		Module:            ar.Module,
-		Statement:         ar.Statement,
-		StatementExplicit: ar.StatementExplicit,
-		Axioms:            ar.Axioms,
-		AllowedAxioms:     allowedAxioms,
-		KernelReplay:      kr,
-		Proof:             binaryRef(outdir, proofPath),
-		ProofSha256:       sha256Hex(proofSrc),
-		Extracted:         "Extracted.lean",
-		ExtractedSha256:   sha256Hex(cr.Lean),
-		IdentitySha256:    sha256Hex(idBytes),
-		Binary:            binaryRef(outdir, cr.BinPath),
-		BinarySha256:      cr.Identity.BinarySha256,
-		Symbol:            cr.Identity.Symbol,
-		Address:           cr.Identity.Address,
-		EntryABI:          cr.Identity.EntryABI,
-		EntrySource:       cr.Identity.EntrySource,
-		GoVersion:         cr.Identity.GoVersion,
-		MainModule:        cr.Identity.MainModule,
-		LeanVersion:       tc.version,
-		JanusRoot:         root,
-		JanusCommit:       commit,
-		ExtractorVersion:  extractorVersion,
-		Timestamp:         time.Now().UTC().Format(time.RFC3339),
-		Framework:         fi,
-		Sandbox:           sb.info(),
-		Definitions:       ar.Definitions,
-		Contracts:         cr.Identity.contractList(),
-		Notes:             ar.Notes,
+	for _, i := range replayed {
+		ar := ars[i]
+		report := &verifiedReport{
+			ASL:               aslReps[i],
+			Schema:            1,
+			Theorem:           ar.Name,
+			Kind:              ar.Kind,
+			Module:            ar.Module,
+			Statement:         ar.Statement,
+			StatementExplicit: ar.StatementExplicit,
+			Axioms:            ar.Axioms,
+			AllowedAxioms:     allowedAxioms,
+			KernelReplay:      krs[i],
+			Proof:             binaryRef(outdir, proofPath),
+			ProofSha256:       sha256Hex(proofSrc),
+			Extracted:         "Extracted.lean",
+			ExtractedSha256:   sha256Hex(cr.Lean),
+			IdentitySha256:    sha256Hex(idBytes),
+			Binary:            binaryRef(outdir, cr.BinPath),
+			BinarySha256:      cr.Identity.BinarySha256,
+			Symbol:            cr.Identity.Symbol,
+			Address:           cr.Identity.Address,
+			EntryABI:          cr.Identity.EntryABI,
+			EntrySource:       cr.Identity.EntrySource,
+			GoVersion:         cr.Identity.GoVersion,
+			MainModule:        cr.Identity.MainModule,
+			LeanVersion:       tc.version,
+			JanusRoot:         root,
+			JanusCommit:       commit,
+			ExtractorVersion:  extractorVersion,
+			Timestamp:         time.Now().UTC().Format(time.RFC3339),
+			Framework:         fi,
+			Sandbox:           sb.info(),
+			Definitions:       ar.Definitions,
+			Contracts:         cr.Identity.contractList(),
+			Notes:             ar.Notes,
+		}
+		report.Kernel, report.Traps = cr.Identity.kernelLists()
+		if resultKeys[i] != "" && bytes.Equal(idBytes, idBytes0) {
+			storeResult(resultKeys[i], report)
+		}
+		outs[i].Report = report
 	}
-	report.Kernel, report.Traps = cr.Identity.kernelLists()
-	if resultKey != "" && bytes.Equal(idBytes, idBytes0) {
-		storeResult(resultKey, report)
+	return nil
+}
+
+// thmNames lists the theorem names of outs[idx].
+func thmNames(outs []thmOutcome, idx []int) []string {
+	var n []string
+	for _, i := range idx {
+		n = append(n, outs[i].Theorem)
 	}
-	return report, nil
+	return n
 }
 
 // parseAuditJSON parses the auditor's record and enforces the axiom allow-list. The auditor
@@ -960,4 +1122,208 @@ func classifyAuditError(msg, full string) error {
 		d.Next = "The statement may mention only core, Janus, Extracted and plain proof-local definitions."
 	}
 	return d
+}
+
+// Several theorems in one run (janus verify --theorem A --theorem B ...).
+//
+// Output layout. Every theorem that passes gets its own report, byte-for-byte what a run of that
+// theorem alone writes: <outdir>/verified/<Theorem.Name>.json. When the first theorem of the
+// list passes, its report is also written to <outdir>/verified.json, so the readers of the
+// single-theorem layout (janus explain <outdir>, scripts) keep working; no other theorem is ever
+// recorded there. Every attempt starts by withdrawing verified.json and the verified/ directory's
+// reports, and a failed theorem leaves no report of its own, so a file exists exactly for the
+// theorems that passed this run. A one-theorem run uses only verified.json, as before.
+// With --proof-root a theorem may be written PROOF.lean::Theorem.Name to name its module.
+
+const verifiedDir = "verified"
+
+// parseTheoremSpecs turns the --theorem values into specs, rejecting duplicates and, for
+// anything but a --proof-root package, module-qualified entries.
+func parseTheoremSpecs(opts map[string]string) ([]thmSpec, error) {
+	vals := optsList(opts, "theorem")
+	if len(vals) == 0 {
+		vals = []string{defaultTheorem}
+	}
+	var specs []thmSpec
+	names := map[string]bool{}
+	for _, v := range vals {
+		sp := thmSpec{Theorem: v}
+		if p, t, ok := strings.Cut(v, "::"); ok {
+			if opts["proof-root"] == "" {
+				return nil, usageErr("--theorem %s: PROOF.lean::NAME needs --proof-root (a single proof file takes --proof)", v)
+			}
+			sp = thmSpec{Proof: p, Theorem: t}
+		}
+		if sp.Theorem == "" {
+			sp.Theorem = defaultTheorem
+		}
+		if names[sp.Theorem] {
+			return nil, usageErr("theorem %s is listed more than once (each theorem's report is verified/%s.json)", sp.Theorem, sp.Theorem)
+		}
+		names[sp.Theorem] = true
+		specs = append(specs, sp)
+	}
+	return specs, nil
+}
+
+type multiJSON struct {
+	Schema  int             `json:"schema"`
+	Results []multiJSONItem `json:"results"`
+}
+
+type multiJSONItem struct {
+	Theorem string          `json:"theorem"`
+	Status  string          `json:"status"` // "verified" or "failed"
+	Report  *verifiedReport `json:"report,omitempty"`
+	Failure *failureJSON    `json:"failure,omitempty"`
+}
+
+func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool, stdout, stderr io.Writer) error {
+	specs, err := parseTheoremSpecs(opts)
+	if err != nil {
+		return jsonFailure(stdout, flags["json"], err)
+	}
+	outs, err := verifyAndReportMany(outdir, opts, specs, stderr)
+	if err != nil {
+		return jsonFailure(stdout, flags["json"], err)
+	}
+	failed := 0
+	var aslErr error
+	mj := multiJSON{Schema: 1}
+	for _, o := range outs {
+		it := multiJSONItem{Theorem: o.Theorem, Status: "verified", Report: o.Report}
+		if o.Err != nil {
+			f := toFailureJSON(o.Err)
+			it.Status, it.Failure = "failed", &f
+			failed++
+		} else if aslErr == nil {
+			aslErr = aslDiagOf(o.Report.ASL)
+		}
+		mj.Results = append(mj.Results, it)
+	}
+	// --results FILE: the per-theorem outcomes, written by this process (a proof cannot write
+	// it: the sandbox is read-only outside the work directory). scripts/lib/theorems.sh reads
+	// each theorem's status from it.
+	if opts["results"] != "" {
+		b, _ := json.MarshalIndent(mj, "", "  ")
+		if err := os.WriteFile(opts["results"], append(b, '\n'), 0o644); err != nil {
+			return jsonFailure(stdout, flags["json"], &diag{Msg: fmt.Sprintf("Cannot write %s: %v", opts["results"], err), Stage: "writing report"})
+		}
+	}
+	if flags["json"] {
+		b, _ := json.MarshalIndent(mj, "", "  ")
+		fmt.Fprintf(stdout, "%s\n", b)
+	} else {
+		// One block per theorem, each introduced by a "=== NAME: verified|FAILED ===" line (in this
+		// order, on standard output) so a log can be split per theorem.
+		for i, o := range outs {
+			if o.Err != nil {
+				fmt.Fprintf(stdout, "=== %s: FAILED ===\n", termSafe(o.Theorem))
+				printDiag(stdout, o.Err)
+				continue
+			}
+			fmt.Fprintf(stdout, "=== %s: verified ===\n", termSafe(o.Theorem))
+			rp := filepath.Join(outdir, verifiedDir, o.Theorem+".json")
+			if len(outs) == 1 {
+				rp = filepath.Join(outdir, "verified.json")
+			}
+			printVerifiedAt(stdout, outdir, rp, o.Report)
+			printASL(stdout, o.Report.ASL)
+			if i == 0 && len(outs) > 1 {
+				fmt.Fprintf(stdout, "  Report (also): %s\n", displayPath(filepath.Join(outdir, "verified.json")))
+			}
+			if !strings.Contains(o.Report.Statement, "Extracted.") {
+				fmt.Fprintln(stderr, "Warning: the statement of "+termSafe(o.Theorem)+" does not mention any Extracted definition; it says nothing about the extracted code.")
+			}
+			if w := abiMismatch(o.Report.Statement, statementABI(o.Report.Symbol, o.Report.EntryABI)); w != "" {
+				fmt.Fprintln(stderr, w)
+			}
+			if aslErr == nil {
+				aslErr = aslDiagOf(o.Report.ASL)
+			}
+		}
+	}
+	if failed > 0 {
+		return &diag{Invalid: true, Msg: fmt.Sprintf("%d of %d theorem(s) failed.", failed, len(outs)), Stage: "verify",
+			Next: "See the FAIL blocks above (each theorem is checked on its own; the others are unaffected)."}
+	}
+	return aslErr
+}
+
+// withdrawReports removes the reports of an earlier run: verified.json and the *.json reports of
+// verified/ (the directory itself too, when that leaves it empty).
+func withdrawReports(outdir string) error {
+	rm := func(p string) error {
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return &diag{Invalid: true, Msg: fmt.Sprintf("Cannot remove stale %s: %v", displayPath(p), err), Stage: "writing report"}
+		}
+		return nil
+	}
+	if err := rm(filepath.Join(outdir, "verified.json")); err != nil {
+		return err
+	}
+	dir := filepath.Join(outdir, verifiedDir)
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, e := range ents {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			if err := rm(filepath.Join(dir, e.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	_ = os.Remove(dir)
+	return nil
+}
+
+// verifyAndReportMany is verifyAndReport for several theorems; see the layout above. The error
+// is non-nil only when the run could not start; each theorem's own failure is in its outcome.
+func verifyAndReportMany(outdir string, opts map[string]string, specs []thmSpec, stderr io.Writer) ([]thmOutcome, error) {
+	if err := withdrawReports(outdir); err != nil {
+		return nil, err
+	}
+	if err := memGuardConfigErr(); err != nil {
+		return nil, err
+	}
+	logMemGuard(stderr)
+	mark := memMark()
+	var outs []thmOutcome
+	if opts["proof-root"] != "" {
+		outs = verifyConsumerMany(outdir, opts, specs, stderr)
+	} else {
+		thms := make([]string, len(specs))
+		for i, sp := range specs {
+			thms[i] = sp.Theorem
+		}
+		outs = verifyMany(outdir, opts, thms, stderr)
+	}
+	for i := range outs {
+		outs[i].Report, outs[i].Err = memOutcome(mark, outs[i].Report, outs[i].Err)
+		if outs[i].Err != nil {
+			outs[i].Report = nil
+		}
+	}
+	for i := range outs {
+		o := &outs[i]
+		if o.Report == nil {
+			continue
+		}
+		var werr error
+		if len(outs) == 1 {
+			werr = writeReport(filepath.Join(outdir, "verified.json"), o.Report)
+		} else {
+			if werr = os.MkdirAll(filepath.Join(outdir, verifiedDir), 0o755); werr == nil {
+				werr = writeReport(filepath.Join(outdir, verifiedDir, o.Theorem+".json"), o.Report)
+			}
+			if werr == nil && i == 0 {
+				werr = writeReport(filepath.Join(outdir, "verified.json"), o.Report)
+			}
+		}
+		if werr != nil {
+			o.Report, o.Err = nil, werr
+		}
+	}
+	return outs, nil
 }

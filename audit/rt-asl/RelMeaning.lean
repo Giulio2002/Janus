@@ -118,7 +118,7 @@ theorem wit_rel (js : Janus.Arm64.State) : Rel js (wit js) where
   pc := by
     simp only [wit]
     rw [get?_set_ne _ _ (by decide)]; simp
-  pstate := ⟨witPState js.flags, by simp [wit], ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩⟩
+  pstate := ⟨witPState js.flags, by simp [wit], ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩⟩
 
 set_option maxRecDepth 100000 in
 theorem witFeatures_spec (f : Feature) : witFeatures[num_of_Feature f]! = cfgFeat f := by
@@ -212,14 +212,14 @@ theorem bit_ofBool (b : BitVec 1) : b = BitVec.ofBool (b == 1#1) := by revert b;
 
 theorem ofSail_rel {s : SState} (hg : ∀ i < 31, ∃ v, gprVal s i = some v) {sp pc : BitVec 64}
     (hsp : s.regs.get? .SP_EL0 = some sp) (hpc : s.regs.get? ._PC = some pc)
-    {p : ProcState} (hp : s.regs.get? .PSTATE = some p) (he : p.EL = 0#2) (hn : p.nRW = 0#1) (hs : p.SP = 0#1) :
+    {p : ProcState} (hp : s.regs.get? .PSTATE = some p) (he : p.EL = 0#2) (hn : p.nRW = 0#1) (hs : p.SP = 0#1) (hsm : p.SM = 0#1) :
     Rel (ofSail s) s where
   gpr i hi := by obtain ⟨v, hv⟩ := hg i hi; simp [ofSail, hv]
   sp := by simp [ofSail, hsp]
   pc := by simp [ofSail, hpc]
   pstate := ⟨p, hp, by
     simp only [ofSail, hp]
-    exact ⟨hs, he, hn, bit_ofBool _, bit_ofBool _, bit_ofBool _, bit_ofBool _⟩⟩
+    exact ⟨hs, he, hn, bit_ofBool _, bit_ofBool _, bit_ofBool _, bit_ofBool _, hsm⟩⟩
 
 /-- **A3.** `Add` under the ASL with no Janus state in the statement: from every Sail state in
 `LinuxEL0Config` holding a Go call of `Add` (X0 = x, X1 = y, X30 = ret, PC = entry; every GPR,
@@ -228,11 +228,12 @@ theorem Add_pure_asl (x y : BitVec 64) {ret : Nat} (hret : RetAddr AddProg.progr
     (s : SState) (hc : LinuxEL0Config s) (hg : ∀ i < 31, ∃ v, gprVal s i = some v) {sp : BitVec 64}
     (hsp : s.regs.get? .SP_EL0 = some sp) (h0 : gprVal s 0 = some x) (h1 : gprVal s 1 = some y)
     (h30 : gprVal s 30 = some (BitVec.ofNat 64 ret))
-    (hpc : s.regs.get? ._PC = some (BitVec.ofNat 64 AddProg.entry)) :
+    (hpc : s.regs.get? ._PC = some (BitVec.ofNat 64 AddProg.entry))
+    (hsm : ∀ p : ProcState, s.regs.get? .PSTATE = some p → p.SM = 0#1) :
     ∃ fuel s', aslRun (AddProg.program.withExit ret) fuel s = .returned s' ∧
       ∃ r, gprVal s' 0 = some r ∧ r.toNat = (x.toNat + y.toNat) % 2 ^ 64 := by
   obtain ⟨p, hp, he, hn, hs⟩ := hc.pstate
-  have hr := ofSail_rel hg hsp hpc hp he hn hs
+  have hr := ofSail_rel hg hsp hpc hp he hn hs (hsm p hp)
   have hcs : CallSetup (AddProg.program.withExit ret) AddProg.entry [x, y] (ofSail s) :=
     { pc := by simp [ofSail, hpc]
       lr := by simp [ofSail, regLR, h30, Program.withExit]

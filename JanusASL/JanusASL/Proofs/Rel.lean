@@ -54,6 +54,9 @@ structure PState (f : Janus.Arm64.Flags) (p : ProcState) : Prop where
   z : p.Z = BitVec.ofBool f.z
   c : p.C = BitVec.ofBool f.c
   v : p.V = BitVec.ofBool f.v
+  /-- Not in streaming mode (`PSTATE.SM = 0`): the floating-point and vector registers are those of the
+  ordinary scalar/NEON state. -/
+  sm : p.SM = 0#1
 
 structure Rel (js : Janus.Arm64.State) (s : SState) : Prop where
   gpr : ∀ i < 31, gprVal s i = some (js.regs i)
@@ -518,7 +521,7 @@ theorem Rel.setFlags {js : Janus.Arm64.State} {s : SState} (h : Rel js s) {p : P
   pstate := by
     obtain ⟨q, hq, hpq⟩ := h.pstate
     rw [hp] at hq; cases hq
-    exact ⟨_, get?_set_self .., hpq.sp, hpq.el, hpq.nrw, rfl, rfl, rfl, rfl⟩
+    exact ⟨_, get?_set_self .., hpq.sp, hpq.el, hpq.nrw, rfl, rfl, rfl, rfl, hpq.sm⟩
 
 @[simp] theorem SState.set_set (s : SState) (r : Register) (a b : RegisterType r) :
     (s.set r a).set r b = s.set r b := by

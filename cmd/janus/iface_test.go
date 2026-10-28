@@ -40,7 +40,8 @@ func TestContractPinHonest(t *testing.T) {
 }
 
 // The examples' extractions record the pinned contract, check regenerates it, and the report
-// marks it pinned; a contract outside the list (newobject) is not marked.
+// marks it pinned; a contract outside the list (wbBufFlush) is not marked, and newobject (an
+// allocation contract, round N7) is.
 func TestContractPinRecorded(t *testing.T) {
 	for _, c := range []struct{ sym, contract string }{
 		{"example.com/basic.Box", "runtime.convT64"},
@@ -58,10 +59,14 @@ func TestContractPinRecorded(t *testing.T) {
 			t.Fatalf("check %s: %d\n%s\n%s", c.sym, code, out, stderr)
 		}
 	}
-	dir := mustExtract(t, "example.com/basic.NewPair", "--contract", "runtime.newobject")
+	dir := mustExtract(t, "example.com/basic.SetNext", "--contract", "runtime.wbBufFlush")
 	raw, _ := os.ReadFile(filepath.Join(dir, "identity.json"))
-	if strings.Contains(string(raw), "pinned") {
-		t.Fatalf("an unpinned contract is marked pinned:\n%s", raw)
+	if !strings.Contains(string(raw), "runtime.wbBufFlush") || strings.Contains(string(raw), "pinned") {
+		t.Fatalf("an unpinned contract is marked pinned (or missing):\n%s", raw)
+	}
+	id := readIdentity(t, mustExtract(t, "example.com/basic.NewPair", "--contract", "runtime.newobject"))
+	if len(id.Contracts) != 1 || !id.Contracts[0].Pinned {
+		t.Fatalf("newobject is not pinned: %+v", id.Contracts)
 	}
 }
 
@@ -120,7 +125,7 @@ func TestContractPinNeedsRuntimeFile(t *testing.T) {
 
 // The names of the list are the runtime entry points with a contract in the contract library
 // (the interface ones of agent/rtiface, the equality, hashing and typed-memory ones of
-// agent/eqhash, and the map ones of agent/maps2): each is described in Janus/Contracts (as `name(` or `runtime.name(`), and scripts/stubpins
+// agent/eqhash, the map ones of agent/maps2, and sync.(*Pool).Get/Put): each is described in Janus/Contracts (as `name(` or `runtime.name(`), and scripts/stubpins
 // links every one (so gen-stubpins measures them).
 func TestContractStubNames(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "stubpins", "main.go"))
@@ -139,19 +144,79 @@ func TestContractStubNames(t *testing.T) {
 		}
 		lean.Write(b)
 	}
-	if len(runtimeContractStubs) != 74+len(rtmiscContractStubs) {
-		t.Errorf("%d contract stubs, want 74 (13 interface + 37 equality/hash/typed-memory + 24 map) + %d rtmisc", len(runtimeContractStubs), len(rtmiscContractStubs))
+	if len(runtimeContractStubs) != 88+len(rtmiscContractStubs) {
+		t.Errorf("%d contract stubs, want 88 (13 interface + 37 equality/hash/typed-memory + 24 map + 12 allocation/write barrier + 2 sync.Pool) + %d rtmisc", len(runtimeContractStubs), len(rtmiscContractStubs))
 	}
 	for name := range runtimeContractStubs {
 		if rtmiscContractStubs[name] {
 			continue // checked by TestRtmiscContractStubNames
 		}
-		if !strings.Contains(string(src), "//go:linkname s_"+strings.TrimPrefix(name, "runtime.")+" "+name+"\n") {
+		if m, ok := strings.CutPrefix(name, "sync.(*Pool)."); ok {
+			// a method: referenced as a method expression
+			if contractStubPackage(name) != "sync" || !strings.Contains(string(src), "\t(*sync.Pool)."+m+",\n") {
+				t.Errorf("scripts/stubpins does not reference %s", name)
+			}
+		} else if contractStubPackage(name) != "runtime" ||
+			!strings.Contains(string(src), "//go:linkname s_"+strings.TrimPrefix(name, "runtime.")+" "+name+"\n") {
 			t.Errorf("scripts/stubpins does not link %s", name)
 		}
 		short := strings.TrimPrefix(name, "runtime.")
+		// The write-barrier entries are pinned so that a --contract naming one is the runtime's
+		// code; their fast path is executed by the examples (SetNext), and the contract that
+		// leaves them out is not part of this library.
+		if strings.HasPrefix(short, "gcWriteBarrier") {
+			continue
+		}
 		if !strings.Contains(lean.String(), "`"+short+"(") && !strings.Contains(lean.String(), "`"+name+"(") {
 			t.Errorf("Janus/Contracts does not describe %s", name)
 		}
+	}
+}
+
+// sync.(*Pool).Get and Put (Janus/Contracts/Pool.lean): the extraction of the pool example
+// with them as contracts records both as pinned (to package sync's code), copies no sync
+// internals, and check regenerates it; without them the sync internals are followed, and the
+// limit diagnostic names the two contracts.
+func TestContractPinSyncPool(t *testing.T) {
+	dir := mustExtract(t, "example.com/basic.ScratchSum", "--contract", "runtime.newobject",
+		"--contract", "sync.(*Pool).Get", "--contract", "sync.(*Pool).Put")
+	id := readIdentity(t, dir)
+	pinned := map[string]bool{}
+	for _, c := range id.Contracts {
+		pinned[c.Name] = c.Pinned
+	}
+	if len(id.Contracts) != 3 || !pinned["sync.(*Pool).Get"] || !pinned["sync.(*Pool).Put"] || !pinned["runtime.newobject"] {
+		t.Fatalf("contracts %+v", id.Contracts)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, internal := range []string{"runtime_procPin", "poolDequeue", "poolChain", "getSlow", "pinSlow", "lockSlow"} {
+		if strings.Contains(string(raw), internal) {
+			t.Errorf("the extraction copies %s:\n%s", internal, raw)
+		}
+	}
+	if code, out, stderr := runJanus(t, "check", dir); code != 0 || !strings.Contains(out, "sync.(*Pool).Get @ ") ||
+		!strings.Contains(out, "(pinned)") {
+		t.Fatalf("check: %d\n%s\n%s", code, out, stderr)
+	}
+	code, _, stderr := runJanus(t, "extract", exampleBin, "example.com/basic.ScratchSum",
+		filepath.Join(t.TempDir(), "x"), "--contract", "runtime.newobject")
+	if code == 0 || !strings.Contains(stderr, "--contract 'sync.(*Pool).Get'") ||
+		!strings.Contains(stderr, "--contract 'sync.(*Pool).Put'") {
+		t.Errorf("extract without the pool contracts: code %d\n%s", code, stderr)
+	}
+	// the pin needs package sync: a pclntab that places Get elsewhere is rejected
+	b := loadT(t, exampleBin)
+	f := funcNamed(t, b, "sync.(*Pool).Get")
+	for i := range b.sections {
+		if b.sections[i].Name == ".gopclntab" {
+			d := b.sections[i].data
+			copy(d, bytes.ReplaceAll(d, []byte("sync/pool.go"), []byte("synX/pool.go")))
+		}
+	}
+	if err := b.checkContractPin(f); err == nil || !strings.Contains(err.Error(), `in file "synX/pool.go"`) {
+		t.Errorf("wrong pclntab file: %v", err)
 	}
 }

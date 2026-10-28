@@ -387,7 +387,7 @@ theorem go_spec (ptr len cap c : BitVec 64) :
     refine ⟨by omega, ⟨?_, by omega, by omega, by omega, by omega⟩, by omega, hpa, by omega, by omega,
       by omega, by omega⟩
     janus_disch
-  rintro s' ⟨-, m, ⟨regs, fl, vr, tp, fs, rfl, hg, hfp⟩, hmf⟩
+  rintro s' ⟨-, m, ⟨regs, fl, vr, tp, fs, ex, rfl, hg, hfp⟩, hmf⟩
   simp only [E, frameCount, frameP, frameN, frameC, cgoClobber, GoABI.regG, GoABI.regFP, cgoStackScratch, gStructSize,
     tlsGOffset, setReg_apply, ↓reduceIte, Nat.reduceEqDiff, h40, h96] at hmf hg hfp
   apply ReturnsC.of_reaches

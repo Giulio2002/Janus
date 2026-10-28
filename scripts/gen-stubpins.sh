@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Generate cmd/janus/stubpins_gen.go: the code of every runtime stub Janus models as an outcome
-# (and of the functions those stubs call), per architecture, as built by pinned Go toolchains.
+# (and of the functions those stubs call), and of every function a framework contract describes
+# (runtimeContractStubs: runtime entry points, and sync.(*Pool).Get/Put), per architecture, as
+# built by pinned Go toolchains.
 # See cmd/janus/stubpin.go and docs/SOUNDNESS.md (stub classification).
 #
 # For every toolchain, architecture and build mode below it builds the example program
@@ -29,6 +31,9 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 
 # scripts/stubpins/main.go: pull every listed stub by //go:linkname so the linker keeps it.
 names=$(grep -oE '"runtime\.[A-Za-z0-9_]+(\.abi0)?": *true' cmd/janus/extract.go | cut -d'"' -f2 | grep -v '\.abi0$' | sort -u)
+# the contract stubs outside package runtime (sync.(*Pool).Get, Put): referenced as method
+# expressions, so the linker keeps them
+methods=$(grep -oE '"sync\.\(\*Pool\)\.[A-Za-z0-9_]+": *true' cmd/janus/extract.go | cut -d'"' -f2 | sed 's/^sync\.(\*Pool)\.//' | sort -u)
 {
   cat <<'EOF'
 // Command stubpins references every runtime stub on Janus's list (cmd/janus/extract.go), so
@@ -40,13 +45,15 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	_ "unsafe" // for go:linkname
 )
 
 EOF
   for n in $names; do echo "//go:linkname s_${n#runtime.} $n"; echo "func s_${n#runtime.}()"; echo; done
   echo "var keep = []func(){"; for n in $names; do echo "	s_${n#runtime.},"; done; echo "}"
-  echo; echo 'func main() { fmt.Println(len(keep)) }'
+  echo; echo "var keepMethods = []any{"; for n in $methods; do echo "	(*sync.Pool).$n,"; done; echo "}"
+  echo; echo 'func main() { fmt.Println(len(keep), len(keepMethods)) }'
 } >"$tmp/main.go"
 if [ $check = 1 ]; then cmp -s "$tmp/main.go" scripts/stubpins/main.go || { echo "scripts/stubpins/main.go is stale"; exit 1; }
 else cp "$tmp/main.go" scripts/stubpins/main.go; fi

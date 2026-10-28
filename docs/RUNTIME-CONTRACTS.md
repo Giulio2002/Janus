@@ -95,6 +95,18 @@ Tools for contract proofs (all untrusted automation, re-checked by the kernel):
 
 ### 4. What a contract hypothesis means for trust
 
+Every runtime function a framework contract describes is **pinned to its code** when
+`--contract` names it (`runtimeContractStubs` in `cmd/janus/extract.go`, checked by
+`checkContractPin`): the interface, equality, hashing, typed-memory and map runtime, and the
+allocation, slice and write-barrier entries `runtime.mallocgc`, `newobject`, `makeslice`,
+`growslice` and `gcWriteBarrier1`–`8` (`allocContractStubs`). Its normalized code must be one of
+the hashes `scripts/gen-stubpins.sh` measured for the pinned toolchains, so the contract
+hypothesis is about the Go runtime's own function, not about whatever code a binary placed under
+that name. `audit/roundfw/run-roundfw.sh` (rows `P_*`) changes one byte of each of those five
+functions on both ISAs and checks that the extraction is rejected, and that the unchanged binary
+records `"pinned": true`. (`runtime.typehash` stays unpinned: its jump table makes its
+normalized code differ between programs.)
+
 A verified theorem with a contract hypothesis says: *if* the runtime function behaves as the
 contract says (in the model), *then* the function under proof meets its specification. It
 says nothing about the runtime. Read the contract definition as part of the statement; it lives
@@ -219,6 +231,104 @@ reserved address space.
 
 **What is proved about the allocator itself.** See `examples/proofs/MallocFast.lean` and
 [SOUNDNESS.md](SOUNDNESS.md#runtime-contracts).
+
+### Live runtime contracts: many calls, one hypothesis (`Janus/Contracts/Live.lean`, `LiveAmd64.lean`, `LiveCost.lean`, `LiveToy.lean`)
+
+The contracts above are for **one** call: `H` is assumed for the call, never re-established, and the
+allocator may change any byte of `rt`, including the objects the caller already owns. A function
+that allocates twice, in a loop, or interleaves `memmove`, `makeslice`, a barrier store and so on
+needs the **live** contracts, which a theorem can chain without bound.
+
+**The interface (stable).** ONE hypothesis `R : RtInv` is threaded through every runtime call:
+
+```lean
+structure RtInv where
+  inv : Nat → List (Nat × Nat) → Nat → Memory → Prop   -- budget b, live set L, goroutine g, view
+  ok  : Nat → List Nat → Prop                          -- the requests served, by (address, args)
+  rt  : List (Nat × Nat)                               -- the runtime's private ranges
+  ext : …                                              -- inv depends only on bytes and accessibility
+```
+
+`L` is a ghost list of owned ranges (the objects the program holds) and
+`view R.rt L m` is the memory as the runtime sees it: the bytes inside `R.rt` and outside `L`,
+every other byte zero. The program's own stores (outside `R.rt`, or into `L`) never change the
+view (`view_writeLE_out`, `view_writeLE_live`).
+
+Every contract is `∀ L b, Summary p addr pre post`, named `<Function>LiveContract` (arm64) and
+`<Function>LiveContract64` (amd64):
+
+| Function | Contract (arm64 / amd64 `…64`) |
+|---|---|
+| `mallocgc`, `newobject`, `makeslice`, `growslice` | `MallocgcLiveContract`, `NewobjectLiveContract`, `MakesliceLiveContract`, `GrowsliceLiveContract` |
+| size-specialised `mallocgc` | `MallocgcSmallNoScanSCLiveContract n`, `MallocgcSmallScanNoHeaderSCLiveContract n`, `MallocgcTinySizeLiveContract n` |
+| `gcWriteBarrierN` | `WbLiveContract p addr stack R n` |
+| strings, slices, bulk barriers (every `RtSpec`) | `RtLiveContract p addr stack R sp ls` with a `LiveSpec` (cost, fresh objects, kept results) |
+| `memmove`, `memclrNoHeapPointers` | `MemmoveLive`, `MemclrNoHeapPointersLive` |
+| `typedmemmove`, `typedmemclr`, `memclrHasPointers` | `TypedMemmoveLive`, `TypedMemclrLive`, `MemclrHasPointersLive` |
+
+**Precondition.** The call's ABI part, `StackRoom` (the stack check falls through), and
+`LiveAt R addr args L b cost g m win`: `R.ok addr args`, `R.inv b L g (view R.rt L m)`,
+`cost ≤ b` (the request fits the budget), `LiveSep L win` (the live objects are outside the
+callee's stack window `win`) and `LiveSep win R.rt` (the caller's frame is outside the
+runtime-owned ranges; on amd64 `win` includes the return-address slot).
+
+**Postcondition.** The function returns in the canonical Go ABIInternal state (`retStateX`, arm64,
+`excl`/`exclPass` unspecified; `retState64`, amd64, `zmmHi`/`kreg` unspecified; `retStateX_intro`
+and `retState64_intro` prove a state is one), with
+
+* the new object `[ptr, ptr + round)` inside `R.rt`, **disjoint from `L`** and from the stack
+  window (`ApartAll`), fresh as in `Fresh`;
+* memory changed only in `R.rt` and the callee's window (`MemFrame`), and **not in the live
+  objects** (`LiveFrame s.mem m L ws`: every read inside an object of `L` is unchanged, except
+  in the ranges `ws` the function writes on purpose);
+* `R.inv (b - cost) (L ++ [obj]) g (view R.rt (L ++ [obj]) m)`: the invariant again, for the
+  larger live set and the smaller budget. This **establishes the next call's precondition**.
+
+Barriers and copies cost nothing. `gcWriteBarrierN` returns `8·N` buffer slots outside `L`; the
+invariant holds for **every** content the caller stores there (`InvSlots`). A copy's destination
+is a live object or caller memory outside `R.rt` (`LiveDest`), so the view and the invariant are
+unchanged. No contract mentions `runtime.writeBarrier.enabled`: after any call it is unknown and a
+theorem covers both branches of the inline test.
+
+**Costs** (`LiveCost.lean`): `blockSize_le : blockSize n b ≤ 2n + 24`, `nextslicecap_le`,
+`growsliceRound_le : 8·growCap8 newLen oldCap ≤ 32·newLen + 3096`, the per-contract round bounds,
+and `RtInv.relax` (a summary can state `∃ b', b - bound ≤ b' ∧ R.inv b' …` without `R.inv` being
+monotone in `b`). **Giving objects back** (`sync.Pool.Put`): `removeRanges L rs`, with
+`view_removeRanges`. `InRanges.of_sub` and the dischargers (`janus_live_disch`) treat a sub-range of
+a live object as in the live set.
+
+**Tactics.** `janus_run calls [h]` takes a `∀ L b` summary (`hmk.pos` for the non-zero-size
+specialisation) and instantiates `L` and `b` with `janus_live` from the invariant of the previous
+call; after the call `Apart` facts between the new object and every `Outside … R.rt` fact are
+added (`addApartFacts`), `janus_split_and` splits the conjunctions of `Apart` facts the
+postcondition normalises to, and `janus_simp`/`janus_frame` close the memory goals.
+
+**Compatibility.** The single-call contracts follow from the live ones (`….ready`), so a proof
+against them applies to a live runtime unchanged. The legacy `MemModel` contracts do not
+(`excl` unchanged, barrier off); `MemModel.ofRt R` states one over a live runtime's model.
+
+**Satisfiability** (`LiveSat.lean`, `LiveSatAmd64.lean`, round 9 SAT): a bump allocator over a
+64 KiB heap (`LiveToy.lean`: invariant `toyInv`, `toy_alloc`), with arm64 and amd64 code for every
+function, meets every contract for every live set and budget; the allocators read the size from the
+type descriptor (advance `64·size`, within the invariant's slack), so descriptors may lie in
+read-only data. The examples' `Witness.nonvacuous` use them.
+
+**Examples** (`examples/rtmisc/live/live.go`; `examples/rtmisc/proofs/{arm64,amd64}`):
+
+| Function | Guarantee |
+|---|---|
+| `Three(n, x)` | `makeslice` A; `A[0] = x`; `newobject` C and `makeslice` B; `C.P = &B[0]` through the barrier: A unchanged, A, B, C pairwise disjoint, in `R.rt`, the invariant for `[A, C, B]` |
+| `List(n)` | a loop with one `newobject` and one barrier store per iteration, for all `n`: the invariant carries the live set and the budget `b - 16·i`; the result is `nil` for `n = 0`, else a 16-byte node in `R.rt` whose `V` field is `n - 1`; memory changed only in `R.rt` and the stack window |
+| `Chain(dst, src, bx, n)` | `memmove`, `makeslice`, `memmove`, a barrier store, with the single hypothesis `R` threaded through all four |
+
+`Three` and `Chain` are **split** into a Lake package per ISA and function
+(`examples/rtmisc/proofs/<isa>/<Name>/`, module root `ThreeArm`/`ThreeAmd`/`ChainArm`/`ChainAmd`):
+one module per runtime-call segment (`Tail`, `Mid2`, `Mid1`, `Main`, each one `Reaches` lemma about
+the same `R`, composed by a short main theorem `correctness`), `Defs` for the statement pieces
+(`Pre`, `Post`, `Rel`) and `Witness`. Verify with `janus verify --proof-root`
+(`scripts/verify-rtmisc-examples.sh` does it): a single elaboration that carried the context of all
+four calls needed more than 20 GiB, a module per segment stays far below that. `List` stays a
+single file.
 
 <a id="dynamic-calls"></a>
 
@@ -799,13 +909,16 @@ outcome is impossible, so nothing earlier changes.
 | --- | --- |
 | `P.err k` | the `runtime.Error` value of kind `k : ErrKind` (`bounds`, `divide`, `shift`, `mem`, `dottype`, `rangeState`, …): a non-nil `error`, distinct per kind |
 | `P.Env m`, `P.priv`, `P.depth` | the runtime usable; its memory (the `_panic`/`_defer` records, the deferpool, the error descriptors); the stack it may use |
-| `P.Panicking m g v rp` | goroutine `g` runs an active, unrecovered panic with value `v`; its current deferred call returns to `rp` inside `gopanic` |
-| `P.Calm m g` | no panic is active (`g._panic == nil`) |
-| `P.Recovered m g` | the current panic was recovered |
+| `P.panics m g` | goroutine `g`'s `_panic` chain in `m`: `PanicRec`s (`arg`, `start` = the `SP` of the frame that called `gopanic`, `goexit`, `recovered`), the active panic first |
+| `P.defers m g` | `g`'s `_defer` chain: `DeferRec`s (`sp` = the frame the record belongs to, `fns`, an optional range-over-func `token`), the most recent first |
+| `P.saved m g` | the open-coded defers a recovery left pending for `deferreturn` (`gp.param`'s `savedOpenDeferState`: the frame's `deferBits` and slot addresses) |
+| `P.rp m g` | the return point (inside `gopanic`/`Goexit`) of the deferred call the active panic runs: `recover` succeeds only in a function called directly from there |
+| `P.room m g` | how many more records the runtime can take for `g` without failing (the allocation that would throw `out of memory`) |
 | `P.wrapper pc` | `pc` is in a compiler wrapper (`abi.FuncIDWrapper`), which `recover` skips |
 
-The laws: the error values are non-nil and injective; `Env`, `Panicking`, `Calm`, `Recovered`
-live in `P.priv` (memory changes elsewhere keep them); a calm goroutine is not panicking.
+(`P.Calm m g` is `P.panics m g = []`; `P.Panicking` and `P.Recovered` are defined from `P.panics`
+and `P.rp`.) The laws: the error values are non-nil and injective; `Env` and every list above live
+in `P.priv` (memory changes elsewhere keep them).
 
 **Classification (`goClass P`).** Reaching `runtime.gopanic` panics with the `any` the compiler put
 in the argument registers (arm64 `X0`/`X1`, amd64 `RAX`/`RBX`). Reaching a `runtime.panic*` stub
@@ -815,6 +928,15 @@ panics with `P.err (panicStubErr name)`: `panicBounds`/`goPanicIndex*`/`goPanicS
 `panicmakeslicelen/cap`, `panicunsafe*`, `panicwrap`, `panicrangestate` → `rangeState`. A memory
 fault at an address below `0x1000` (the signal handler's `sigcode1 < 0x1000` → `panicmem`) panics
 with `P.err .mem`; on amd64 a `#DE` panics with `P.err .divide`.
+
+**Unwinding (`goClassU P U s₀`).** The engine's `Fin` for a panic or `Goexit` ends in a state `d`
+with `U d g b` (the runtime unwinds past the frame whose caller's entry `SP` is `b`). A theorem
+whose function does not recover classifies that state with `goClassU P U s₀`: `atLeave` is "the
+runtime unwinds past the call's own frame from here (`U s g s₀.SP`) with the active panic `r`" and
+the panic value is `r.arg`; `atExit` is the same for a `Goexit`, and `GoReturns` has a `.goexit`
+outcome (`Janus.GoABI.GoOutcome.goexit`) the run reaches there. `U` is the model the engine's
+satisfiability proof instantiates (`U1` on amd64, `U0` on arm64: the state at the deferred call's
+return point in `gopanic` with `SP` the frame's `bound`).
 
 **Contracts.** The control-flow runtime functions are left out with `--contract` and **pinned** to
 the runtime's code (`runtimePanicContractStubs` in `cmd/janus`: `gopanic`, `gorecover`,
@@ -828,9 +950,10 @@ code proved to meet the contract, and a call state in the precondition):
 | `defer f()` in a loop | `deferproc(fn)` | `DeferprocContract` | returns; the record lives in `P.priv` |
 | `defer` with a stack record | `deferprocStack(d)` | `DeferprocStackContract` | returns |
 | `defer` in a range-over-func body | `deferprocat(fn, frame)`, `deferrangefunc()` | `DeferprocatContract`, `DeferrangefuncContract` | return |
-| function exit with defer records | `deferreturn()` | `DeferreturnContract` | runs the frame's deferred calls and returns; effects confined to `P.priv` and the callee window |
+| function exit with defer records, or after a recovered panic | `deferreturn()` | `DeferreturnContract` | the same engine in `ret` mode: runs the open-coded defers a recovery left pending (`P.saved`), then the frame's heap records, and returns to the caller; effects confined to `P.priv`, the callee window and the frame's `deferBits` byte |
 | `recover()` | `gorecover()` | `GorecoverContract` | `nil` when `P.Calm`; the panic value (and `P.Recovered`) when called directly by the running deferred call: the caller is not a wrapper and its frame's saved return address, `[FP + 8]` on the frame-pointer chain, is that call's return point |
-| `panic(v)` with a recovering open-coded defer | `gopanic(v)` | `GopanicRecoverContract` | calls the frame's deferred closure (funcval from the frame slot, `X26`, `P.Panicking`); for every state the closure may return in with the panic recovered, resumes the frame at its `deferreturn` site with `SP`/`X29` restored and `P.Calm` |
+| `panic(v)` | `gopanic(v)` | `GopanicContract` | the general panic engine (below): runs the frame's pending deferred calls (open-coded and heap records) in order, for each call every way it may end; recovers (resumes the frame at its `deferreturn` call), or unwinds past the frame (`U`) |
+| `runtime.Goexit()` | `Goexit()` | `GoexitContract` | the same engine in `goexit` mode: runs the frame's deferred calls and unwinds past the frame; a deferred `recover()` finds no panic to recover |
 | range-over-func misuse | `panicrangestate(s)` | `panicrangestate_panics` (stub) | panics with `P.err .rangeState` |
 
 Every returning contract has the frame of the other runtime contracts (`PanicPre`, `PanicRet`:
@@ -839,19 +962,74 @@ callee stack window, `P.Env` again). A caller states `PanicCallerOK P s frame ab
 interface runtime's `CallerOK` for `P`); `PanicPre.of_caller` / `of_frame` give the contract's
 precondition at a call site.
 
-**`gopanic` is a continuation.** It is the one contract that hands control to user code: it says
-the runtime reaches the closure's entry (a state the theorem continues from by running the
-extracted closure), and that from **every** state the closure may return in — `SP`, `X18`, `X28`
-restored, the runtime's stack between the closure's `SP` and the frame's kept, the panic recovered
-— control reaches the frame's `deferreturn` site. A closure that does not recover gets no promise.
-The frame's `deferBits` offset, slot offset and `deferreturn` site (funcdata
-`FUNCDATA_OpenCodedDeferInfo` and `_func.deferreturn`) are parameters of the contract, i.e. part of
-the printed statement.
+**The engine (`GopanicContract`, `GoexitContract`, `DeferreturnContract`).** The three are one
+statement about one loop, `Engine p P U g F keep mode Fin ch rm items c`
+(`Janus.Contracts.Panic.Engine`, and `PanicAmd64.Engine` for amd64). The frame `F` is what
+`runtime.gopanic` finds by walking to the caller (`frameOf fi sp m`: its `SP`, `bound` — the
+caller's entry `SP`, where a panic that leaves the frame continues —, `resume` — its `deferreturn`
+call —, and the `deferBits` byte and slot addresses when the function has open-coded defers
+(`FUNCDATA_OpenCodedDeferInfo`) and some are pending); the function table `T` is the funcdata the
+extractor reads (`Extracted.funcs`: the frame size, `_func.deferreturn`, the open-coded defer
+offsets), part of the printed statement. The loop's `items` are the frame's pending deferred
+calls in the order the runtime runs them: the open-coded defers from the highest bit of the
+`deferBits` byte down (`deferBits` is cleared bit by bit, as `runOpenDeferFrame` does), then the
+frame's `_defer` records and their functions (`deferproc`, `deferprocStack`, `deferrangefunc`+
+`deferprocat`), the record popped before its last call. For each call the engine says:
 
-**What is out of scope.** Nested panics (a panic while another is running), `Goexit`, frames with
-several pending defers in the `gopanic` contract (one pending open-coded defer is covered), and
-panics that propagate out of a frame with pending deferred calls (the panic outcome is stated for
-frames whose deferred calls have run or that have none).
+* the runtime **makes the call** (`DeferCall`): control at the funcval's code word with the
+  closure-context register holding the funcval, the goroutine and platform registers of the
+  frame's code, an aligned stack at most `P.depth` bytes below the frame and with room for the
+  call's own frame, and an admissible return point inside `gopanic`; memory changed only in
+  `P.priv`, the runtime's stack window below the frame and the frame's `deferBits` byte, and the
+  panic chain and defer chain are the engine's (`P.panics`, `P.defers` at the call);
+* for **every** way the call may end the loop goes on. If it **returns** (`DeferReturned`: the
+  stack above its return address, the memory the loop reads again, and the platform registers
+  as at the call, the runtime usable, the chains as at the call) and the panic is not recovered,
+  the next call is made; if `recover()` marked the panic recovered (`gorecover`), the runtime
+  **resumes the frame** at its `deferreturn` call (`Recovers`: `SP`/`RSP` and the frame pointer
+  restored, memory changed only in `P.priv` and its window, the panics started at or below the
+  frame dropped, the open-coded defers still pending left for `deferreturn` in `P.saved`); a call
+  that **panics again** — a nested `gopanic` — leaves the closure's frame by the inner panic's own
+  unwinding (`U`, the model of "the inner panic's `gopanic` unwound past the closure's frame"), the
+  outer panic is marked aborted and the loop **goes on** with the next call and the chain
+  `r2 :: ch` (the nested panic's own `gopanic` contract supplies this `U` state); a call that
+  does anything else (an infinite loop, `Goexit`, a fault) gets no promise;
+* when no call is left, `Fin` holds: `LeftFrame` (the runtime unwinds past the frame: `U d g
+  F.bound`, the panic chain as left, the frame's records popped, the saved state kept) for
+  `gopanic` and `Goexit`, `RetFin` (return to the caller with the platform registers as at
+  entry, the frame's records popped, `P.saved` cleared) for `deferreturn`.
+
+On amd64 the calls are `CALL`s: the closure's entry `RSP` points at its return address inside the
+runtime (`RPa`), `RDX` holds the funcval, `R14` the goroutine, `X15 = 0` and the direction flag is
+clear; `RBP` is not part of `DeferCall` (it is restored by the call, `DeferReturned`), and a nested
+panic's unwinding pops the closure's return address (`U s g b` has `RSP = b + 8`). The frame's `SP`
+is `RSP + 8` at the runtime function's entry and `bound` is the caller's entry `RSP`. `FrameOK`
+additionally requires every funcval's code word to be a canonical user address (`< 2^47`), which the
+indirect call needs.
+
+`GopanicContract.apply`, `GoexitContract.apply` and `DeferreturnContract.apply` hand a proof the
+engine at a call `S` of the runtime function, and the proof continues from the closure's entry by
+running the extracted closure (the engine's `DeferCall` state) and showing what it does; a
+deferred closure that calls `recover()` uses `GorecoverContract` at its call, and a closure that
+panics uses `GopanicContract` again (`NestedPanic`, `NestedRecover`). The contracts are
+**satisfiable**: `Janus.Contracts.PanicSat` (arm64, model code `docs/model/panic_model_arm64.s`)
+and `Janus.Contracts.PanicSatAmd64` (amd64, `docs/model/panic_model_amd64.s`) prove that the model
+engine meets each of them at its own entry points for every function table meeting the model's
+side conditions (`TOK`), by an induction over the loop (`engine_loop`) with one lemma per step
+(open-coded call, record call, silent steps, end of the loop, return from a call, recovery,
+nested panic); `Janus.Contracts.PanicWitness` and `PanicWitnessAmd64` link the engine into a
+concrete program with a branch to it at each contract address (`panicImpl`, `StubAt`, `EngineAt`),
+which is how each example's `Witness` section shows that its hypotheses hold together.
+
+**What is out of scope.** A deferred call that does not return, panic or recover (no promise); a
+deferred call that panics while `deferreturn` runs it (`ret` mode has no nested clause: the engine
+is silent about the new panic's unwinding through the `deferreturn`'s caller); `recover()` in a
+deferred call's callee (it returns `nil`, as in Go: only the deferred call itself recovers);
+`runtime.Goexit` inside a panicking goroutine's deferred call whose panic is then recovered
+(the engine takes `Goexit` as its own mode and the nested clause requires the new panic not to
+be a `Goexit`); `GODEBUG=panicnil`; `runtime.Breakpoint`. Frames whose `pcsp` table takes more
+than one frame size (on arm64) are rejected by the extractor; on amd64 the pushed frame pointer's
+size (8) is the prologue and epilogue value and the body's value is the frame size.
 
 **Examples** (`examples/basic/rtpanic.go`; arm64 `examples/proofs/<Name>.lean`, amd64
 `examples/proofs-amd64/<Name>/Proof.lean`):
@@ -877,7 +1055,8 @@ runtime's machine code:
 | --- | --- | --- |
 | `complex128div` | executed: Smith's algorithm and the Annex G recovery, against `Janus.Float.cdiv` (IEEE operations, fused on arm64, unfused on amd64) | `Div` |
 | `f32to64` (`-d=softfloat`) | executed (with `fpack64`), equal to IEEE `convertFormat` (`cvt binary32 binary64`) for every input | `Widen` |
-| `KeepAlive` | an intrinsic: no call, the argument is only kept live | `LoadKeep` |
+| `KeepAlive` (direct call) | an intrinsic: no call, the argument is only kept live | `LoadKeep` |
+| `KeepAlive` (the function, reached through a function value) | executed: it returns without effect when `cgoAlwaysFalse` is false; proved to meet `KeepAliveContract` | `KeepAlive` |
 | `cgoNoCallback` | ordinary Go code (a store into `g`, a `panic` stub) | — |
 
 **Read-only data with known contents** (`Janus.Contracts.Misc`):
@@ -916,6 +1095,11 @@ and exactly the counters of the blocks that ran incremented, nothing else writte
 | `cgoCheckPointer` | `CgoCheckPointer` / `…64` | the model's `ok` (the cgo pointer-passing rules; panic excluded) | — |
 | `cgoCheckResult` | `CgoCheckResult` / `…64` | the model's `resOK` | — |
 | `mallocgcSmallNoScanSC<n>`, `mallocgcSmallScanNoHeaderSC<n>`, `mallocgcTinySize<n>` (`GOEXPERIMENT=sizespecializedmalloc`) | `MallocgcSmallNoScanSCContract` & co. / `…64` | the `mallocgc` contract (`RtReady`, a fresh object of the class size) with the entry's fixed arguments | `NewPairSC` |
+| `fadd64` (`-d=softfloat`) | `SoftFaddContract` / `SoftFaddContract64` | the IEEE 754 sum, **if the exact sum is not tiny** (`AddTiny`) | `SoftAdd` |
+| `fsub64` | `SoftFsubContract` / `…64` | the IEEE difference, if the exact difference is not tiny (`SubTiny`) (the compiler never calls it: `a - b` is `fadd64(a, -b)`) | — |
+| `fmul64` | `SoftFmulContract` / `…64` | the IEEE product, if the exact product is not tiny (`MulTiny`) | `SoftMul` |
+| `fdiv64` | `SoftFdivContract` / `…64` | the IEEE quotient, if the exact quotient is not tiny (`DivTiny`) | `SoftDiv` |
+| `KeepAlive` | `KeepAliveContract` / `…64` | returns, changing only its frame, if `runtime.cgoAlwaysFalse` is false (`CgoAlwaysFalse`) and outside the callee's stack window | `KeepAlive` (the runtime's own code meets it) |
 
 The checks return when the operation is valid and otherwise throw or panic; the contracts
 describe the return and exclude the failure (a theorem therefore assumes the check passes). The
@@ -926,23 +1110,125 @@ unchanged: each is `mallocgc` with a size, type and `needzero` that its size cla
 cgo wrappers and throw when called; they are classified like `cgocall` (`.external`), and a proof
 excludes the branch with `CgoAlwaysFalse`.
 
-**Soft float (`-d=softfloat`).** The arithmetic helpers decode and run in the model, and
-`f32to64` is proved equal to IEEE (`Widen`). The others are not given contracts:
+**Soft float (`-d=softfloat`) and `KeepAlive`** (`Janus/Contracts/SoftFloat.lean`,
+`SoftFloatAmd64.lean`, witnesses in `SoftFloatSat*.lean`). `f32to64` is proved equal to IEEE
+(`Widen`); `f64to32` and the conversions run as code. For `fadd64`, `fsub64`, `fmul64`, `fdiv64`
+the contracts specify **IEEE 754 binary64, round to nearest even** (`Janus.Float.add`, `sub`,
+`mul`, `div`; a NaN result is "some NaN", the runtime returns `0x7FF8000000000000`) with a
+precondition, because **Go's soft float is not IEEE 754 for subnormal results**:
 
-* `fadd64`/`fsub64` are **not IEEE 754**: when the exact sum of two operands of opposite signs
-  is subnormal, Go 1.26's `fadd64` returns a result off by a factor of two (65240 of 30M random
-  pairs; every mismatch has a subnormal IEEE result; e.g. `0x802fa1d354c1e77c + 0x00329934086c3cdd`
-  gives `0x00059094bc16923e`, IEEE `0x000b2129782d247c`; confirmed on the real runtime). A contract
-  "fadd64 is IEEE addition" would be false, and Janus states none; a theorem about code built
-  with `-d=softfloat` that adds floats must execute `fadd64` (it decodes) and can only conclude
-  the IEEE sum under a hypothesis excluding subnormal results.
-* `fmul64`, `fdiv64`, `f64to32` and the conversions matched IEEE on every tested input
-  (random tests against the IEEE core) but have no proof; they run as code like any other runtime function.
+* `fadd64` (hence `fsub64`) is wrong for many sums and differences whose exact result is
+  subnormal, including exact ones: `0x0170000000155555 + 0x816fffffffffffff` is
+  `0x00000000002aaaab` in Go 1.26's `fadd64` where IEEE (and the hardware) gives
+  `0x0000055555600000`; `0x80d0000000000014 + 0x00d0000000000003` is `0x8000000000000022`, IEEE
+  `0x8000000000011000`. Of 5,000,000 random operand pairs, 190,710 had a tiny exact sum and 72,859 of
+  them differ (`examples/rtmisc/softcheck`).
+* So **the contracts do not claim IEEE there**: the precondition excludes `AddTiny a b` (both
+  operands finite non-zero, the exact result non-zero and below `2^-1022` in magnitude). The
+  contract says nothing about what the runtime returns for those calls. `fmul64` and `fdiv64`
+  showed no deviation on 1,272,845 and 545,415 random draws with a tiny exact result, but they
+  keep the same precondition: sampling is not a proof, and a result in the normal range is what a
+  program wants.
+* Everywhere else the contracts claim the IEEE result: zero operands of either sign, infinities,
+  NaNs (NaN in, NaN out), overflow to infinity, subnormal operands, normal results. **This is
+  trusted, tested and pinned, not proved**: `scripts/softfloat-check.sh` (also
+  `TestSoftFloatRuntimeAgreesWithIEEE`) runs the runtime's own functions (`//go:linkname`) against
+  the hardware on random operands of every class and checks that every covered case agrees (5,000,000
+  pairs per operation in the measurement above: 0 disagreements) and that the tiny cases of `fadd64`
+  do disagree (so the precondition is needed). The functions are pinned to the code that was
+  tested (`rtmiscContractStubs`, `gen-stubpins.sh`).
+* The runtime ignores `FPCR`/`MXCSR`; the contracts require Go's floating-point environment
+  (`FPCR = 0`; `GoMXCSR`: round to nearest, exceptions masked, no `DAZ`/`FTZ`) so that the
+  satisfiability witness (`FMOV`/`FADD`/…, `MOVQ`/`ADDSD`/…: hardware floating point, proved
+  IEEE by `fpAdd_ieee` & co.) meets them. After the call `FPSR` and the `MXCSR` sticky flags are
+  unspecified.
+* The call frame is the usual one: a stack window of `softDepth = 256` bytes below `SP` (the
+  frames of `fdiv64` (80) and its callees `divlu` and `fpack64` are far smaller) and the argument
+  spill slots; `RTPre softEnv 2`, no runtime environment.
+* Compiled code calls only `fadd64` (`a - b` is `fadd64(a, b ^ signbit)`), `fmul64`, `fdiv64`;
+  `fsub64` is linked by the runtime's tests. `SoftAdd`, `SoftMul`, `SoftDiv` (`examples/rtmisc`,
+  `softf`, built with `-gcflags=…=-d=softfloat` into `artifacts/examples-rtmisc-softf-<isa>`)
+  prove a one-call function against the contracts for every operand pair outside the precondition's
+  exclusion, with `Witness.nonvacuous` / `Witness.returns`.
+* `runtime.KeepAlive` (`func KeepAlive(x any) { if cgoAlwaysFalse { println(x) } }`): a direct call
+  is the compiler intrinsic, so the function is only reached through a function value. Its
+  contract is a no-op with a frame: returns, changing only the stack window and the argument spill
+  slots, when `runtime.cgoAlwaysFalse` is `false` and not inside that window. The example
+  `KeepAlive` proves it **from the extracted code of `runtime.KeepAlive` itself**
+  (`--contract 'runtime.print*'` leaves out the dead print calls), on both ISAs.
 
 **Build modes** (docs/CLI.md "Build modes"): `-race`, `-msan`, `-asan` and `-d=libfuzzer` are
 rejected by `janus extract` with an error naming the mode (their instrumentation calls into the
 sanitizer runtimes, outside the model, or is concurrency tooling); `-cover`, `-d=checkptr` and
 `-spectre=ret` are accepted and recorded in `identity.json` (`buildModes`), with a note.
+
+### `sync.Pool` (`Janus/Contracts/Pool.lean`, `PoolAmd64.lean`; witnesses `PoolSat.lean`, `PoolSatAmd64.lean`)
+
+`math/big` (`nat.expNN`, `div`, `mul`, `sqr` and their deferred `stack.free`) and much of the
+standard library keep scratch objects in a `sync.Pool`. Its methods are concurrency code: `Get` and
+`Put` pin the goroutine to its P (`runtime_procPin`), use a lock-free per-P deque (`poolDequeue`,
+`poolChain`), steal from other Ps (`getSlow`) and register a new pool under the `allPools` mutex
+(`pinSlow`). A theorem about a caller leaves the two methods out
+(`janus extract --contract 'sync.(*Pool).Get' --contract 'sync.(*Pool).Put'`; the extractor pins both
+to package `sync`'s code like a runtime stub, `cmd/janus/stubpins_gen.go`, so the concurrency
+internals are not extracted) and takes their contract. The contracts have the shape of the live
+allocation and write-barrier contracts (a ghost live set `L`, one runtime invariant `R : RtInv`
+over the memory with `L` masked out; `Janus/Contracts/Live.lean`, `LiveAmd64.lean`):
+
+| Go source | Function | Contract | Result |
+| --- | --- | --- | --- |
+| `x := p.Get()` | `sync.(*Pool).Get()` (arm64 `X0 = p`, result `X0`/`X1`; amd64 `RAX = p`, result `RAX`/`RBX`) | `PoolGetLive` | nil, or `(T, d)`: an object `d` of the shape `Sh` the pool's user fixes, with **arbitrary contents**, **caller-owned** |
+| `p.Put(x)` | `sync.(*Pool).Put()` (arm64 `X0`, `X1`, `X2`; amd64 `RAX`, `RBX`, `RCX`) | `PoolPutLive` | the caller gives the object's ranges back |
+
+**Ownership, not content.** The contracts do not say which value a `Get` returns or what the pool
+holds. `Get` returns nil (`X0 = X1 = 0`, the invariant kept) or an element `(T, d)` of the pool's
+element type `T`: `Sh m d rs` says that `d` is an object that owns the ranges `rs` (for `math/big`'s
+stack, `SliceObj B`: a 24-byte slice header and its backing array, `len ≤ cap ≤ B`; for a pool of
+fixed buffers, the buffer). Those ranges are **fresh** for the caller's live set (`FreshFrom rs L`:
+apart from every object it holds), apart from the callee's stack window, inside the runtime-owned
+ranges `R.rt` (like an allocator's result: the caller keeps its frame outside `R.rt`) and **added to
+`L`**: the invariant holds for `L ++ rs`. `Put` takes `x = (T, d)` with `Sh s.mem d rs` and
+`rs ⊆ L`, and afterwards the invariant holds for `dropAll L rs`: the caller no longer owns the
+object and the pool may hand it out again. **Neither call touches the caller's memory**: memory
+changes only inside `R.rt` and the callee's stack window, and every object of `L` reads as before
+(`LiveFrame`; for `Put` that includes the object being given back).
+
+**Composition.** A theorem calls `Get`, then any number of allocations (`NewobjectLiveContract`,
+`GrowsliceLiveContract`), write barriers (`WbLiveContract`), clears (`MemclrNoHeapPointersLive`) and
+pool calls, then `Put`, threading `L` and the budget: every call returns the invariant for the next
+live set. `examples/proofs/ScratchSum.lean` (`Get`, `new` on the nil path, `Put`) and
+`examples/proofs/StackGrow.lean` (`Get`, `new`, `slices.Grow` into the object through `growslice`,
+`memclrNoHeapPointers` and `gcWriteBarrier2`, a deferred `Put`) are the worked examples, on both
+ISAs. A function that grows the pooled slice leaves the old backing array in `L` (the collector,
+not the program, frees it); the theorem's result says so (`∃ ex, FreshFrom ex L ∧ R.inv … (L ++ ex)`).
+
+**What a real runtime must satisfy** (the trusted part, docs/SOUNDNESS.md, "The single-threaded
+assumption"): `R.ok get [p]` holds for the pools the program uses; `R.inv` says that every object a
+pool holds has the shape `Sh` and lies outside the live set, which is exactly what `Put`'s
+precondition hands over (the pool's user must put nothing else into it); `New` is nil (`Get` reads
+the word at offset 32 of the pool and a pool with `New` set is a call this contract says nothing
+about; both calls keep it); `p` is not used by another goroutine during the call. `R.rt` includes
+the pool's struct, the per-P arrays and chains, the P's write-barrier buffer (the barrier the calls
+execute when they store an interface into a `poolLocal` is part of the call) and the heap the pool
+allocates from (`pinSlow`, `poolChain.pushHead`: the allocation a `Get`/`Put` makes inside is runtime
+memory the invariant accounts for, so the call costs the caller no budget).
+
+**Satisfiability.** `poolGetLive_satisfiable`, `poolPutLive_satisfiable` (`PoolSat`, `PoolSatAmd64`):
+machine code for `Get` (returns nil: an empty pool) and `Put` (drops its argument: a pool may drop
+what it is given) that meets the contract for the toy bump-allocator runtime `toyR` of
+`Janus/Contracts/LiveToy.lean` (the runtime of the live contracts' own witnesses,
+`LiveSat`/`LiveSatAmd64`), and a call state that satisfies the whole precondition. `PoolSat` and
+`PoolSatAmd64` also hold the small toys the examples' witnesses need on the same runtime
+(a `growslice(p, 1, 0, 1, et)` and the invariant for a live set that drops ranges, `toyInv_drop`).
+The example proofs' `Witness.nonvacuous` and `Witness.returns` show that every hypothesis of the
+guarantee holds together (one runtime serving all six contracts, a call state with an empty live
+set) and the guarantee is reached (`ScratchSum(3, 5) = 6`; `StackGrow(1) = 1`).
+| `DeferOrder(x)` | `panic(x)` with three open-coded defers: the deferred calls run last to first (both ISAs) |
+| `DeferMix(n)` | a loop's heap records and open-coded defers on one frame, in order, with `deferreturn` (both ISAs) |
+| `GoexitDefer(n)` | `runtime.Goexit()` runs the deferred calls and unwinds past the frame; `recover()` finds no panic (both ISAs) |
+| `RangeDefer(n)` | `defer` in a range-over-func body (`deferrangefunc`, `deferprocat`, `deferreturn`) (both ISAs) |
+| `NestedPanic(x)` | a deferred call panics again: the first panic is aborted, the second unwinds through the rest (both ISAs) |
+| `NestedRecover(x)` | a deferred call panics again and a later deferred call recovers the second panic (both ISAs) |
 
 ### FFI (cgo) (`Janus/FFI.lean`, `Janus/Amd64/FFI.lean`)
 
@@ -1025,23 +1311,50 @@ meets `SchedContract` and `ConvT64Contract`). Examples: `examples/proofs-sys/{ar
 (`WriteOut`: `syscall.Write`; `NowNano`: `time.Now().UnixNano()`; `Pid`: `syscall.Getpid`;
 `MustNonNeg`: a path ending in a trap), run by `scripts/verify-sys-examples.sh`.
 **Callbacks (C → Go, `CgoCallback`; K2).** `runtime.cgocallback` (`.abi0`, pinned by content)
-is an external stub too. Trusted, both ISAs: `CgoCallback`, `CallbackEntry`, `CbResume`,
-`CbResumed`, `cbClobber` (amd64 also `CbStack`). As claims about the Go 1.26 runtime:
+is an external stub too. Trusted, both ISAs: `CgoCallback t p Cin R k`, `CallbackEntry`,
+`CbResume`, `CbResumed`, `cbClobber`, `tlsGSlot`, `stackGuard` (amd64 also `CbStack`, `CbReady`;
+arm64 `CbStack.Ready`). As claims about the Go 1.26 runtime (`runtime/asm_arm64.s`,
+`runtime/asm_amd64.s`: `cgocallback`; `runtime/cgocall.go`: `cgocallbackg`, `cgocallbackg1`):
 
-1. *The Go call.* `cgocallback(fn, frame, ctxt)` (arguments at `[SP+8]`… / `[RSP+8]`…, as
-   `crosscall2` stores them) calls `fn(frame)` with the ABIInternal convention (`X0`/`RAX =
-   frame`, `X15 = 0` and `DF` clear on amd64) on the goroutine stack (`stackSep`: not C memory;
-   amd64 `goStack`: `cbGoStack = 4096` writable bytes below `RSP` and the return slot), returning
-   to an address outside the extracted code, on the same thread, with the C side's `MXCSR` and x87
-   control word (amd64) / `FPCR` (arm64).
-2. *C memory.* Before and after the Go call, the runtime changes no byte of the C state's memory
+1. *The re-entry.* `cgocallback` loads `g` from the TLS `g` slot (`tlsGSlot t`: `runtime.tls_g` /
+   `runtime.tlsg` of the extraction's `TLSImage`; `needm` borrows an extra `M` when it is nil),
+   takes `m.curg`, points the TLS slot at it (`tlsG`), moves `X28`/`R14` to it (`gReg`: its
+   struct readable Go memory, not C memory, `gSep`, and off its own stack, `gOff`), switches `SP`
+   to the goroutine stack and, through `cgocallbackg` (`exitsyscall`) and `cgocallbackg1`, calls
+   `fn(frame)` with the ABIInternal convention (`X0`/`RAX = frame`, `X15 = 0` and `DF` clear on
+   amd64), returning to an address outside the extracted code, on the same thread, with the C
+   side's `MXCSR` and x87 control word (amd64) / `FPCR` (arm64).
+2. *The goroutine stack* (`goStack`, `stackSep`, `guard`). `k.size` writable bytes below the Go
+   call's `SP` and the slots above it (arm64: the frame argument's spill slot, `[SP, SP+16)`;
+   amd64: the return-address and spill slots, `[RSP, RSP+16)`), none of them C memory, and
+   `g.stackguard0 + k.size ≤ SP + stackGuard` (`stackGuard = 928`, `stackguard0 = stack.lo +
+   stackGuard`): the stack's low end is at least `k.size` bytes below `SP`, so the Go code's stack
+   checks pass for frames up to about `k.size − 800` bytes (`CallbackEntry.guardOK`) and its
+   frames fit. This is a claim only **under the readiness** `k.ready` (`CbStack`, round 9 C1
+   style): the contract requires `k.ready [fn, k.size] g SP (rtView k.rt mem)` at the stub, with
+   `g` the TLS slot's value. The real runtime meets it for `ready := "the goroutine
+   `cgocallback` switches to has (or `morestack` can give it, up to `maxstacksize`) `k.size`
+   bytes of stack below the entry, and no preemption request is pending"`; a goroutine whose
+   stack is too small grows it on demand (`morestack` copies the stack and re-runs the
+   function), which the model describes as the entry on the larger stack. A theorem quantifies
+   over `ready` and assumes it at its entry.
+3. *C memory.* Before and after the Go call, the runtime changes no byte of the C state's memory
    outside `cbClobber`: the C stack below `SP` (`cbStackScratch = 16384` bytes), the argument
-   slots and the TLS `g` slot (amd64: at `TLSImage.x64Addr fs "runtime.tlsg"`, from the
-   extraction).
-3. *The return.* `cgocallback` returns to `crosscall2` with `SP + 8`/`SP` restored, `DF` clear and
-   the `MXCSR` control bits kept (amd64); every other register, the flags and the vector
-   registers are arbitrary (ABI0), and the memory is the Go code's final memory on the C
-   state's accessible bytes (`CbResumed`).
+   slots and the TLS `g` slot.
+4. *The return.* `cgocallback` returns to `crosscall2` with `SP + 8`/`SP` restored, `DF` clear and
+   the `MXCSR` control bits kept (amd64); every other register, the flags, the vector registers
+   and (arm64) the exclusive monitor are arbitrary (ABI0), and the memory is the Go code's final
+   memory on the C state's accessible bytes (`CbResumed`).
+5. *Readiness of the Go code* (`R`). Facts the Go code needs of the runtime beyond the above (an
+   allocator's readiness at its calls, Go read-only data such as a type descriptor) are the
+   readiness predicate `R` on the Go call state: the theorem covers the executions in which `R`
+   holds at the entry (`ECallBox`: `ROK`).
+
+Witnesses: `cgoCallback_satisfiable` (for every `k`, given `CbRoom`: room for the goroutine stack
+and the `g` struct outside the C memory) and `cgoCallback_satisfiable_of` (a readiness `R` that
+holds at the witness entry), `callbackSpec_satisfiable` (`Janus.FFISat`, `Janus.Amd64.FFISat`).
+`AVX-512`: the amd64 `CbResume` leaves `xmm`/`ymmHi` arbitrary; the `zmmHi`/`kreg` fields of
+agent/avx512 are not in this tree, and must be added to its existentials when they are.
 
 **libc (`Libc`, `SetJmp J`, `TlsGetAddr`; `Janus/Contracts/Libc.lean`, `LibcAmd64.lean`; K2).**
 External stubs `sym@plt`; trusted as glibc's behaviour on Linux, one `Spec` per function
@@ -1051,3 +1364,158 @@ External stubs `sym@plt`; trusted as glibc's behaviour on Linux, one `Spec` per 
 pointer and the regions (but `malloc`/`free`). Witnesses: `libc_satisfiable`,
 `setJmp_satisfiable`, `jmpModel_satisfiable`, `tlsGetAddr_satisfiable` (`LibcSat`,
 `LibcSatAmd64`).
+
+### Stack growth (`Janus/Spec/Stack.lean`, `Janus/Contracts/Stack.lean`)
+
+Every Go function that is not `NOSPLIT` begins with a stack-growth check (`Janus.GoABI`,
+"Stack-growth prologue"): it compares `SP` with `g.stackguard0` and, when its frame does not
+fit, calls `runtime.morestack_noctxt`. Until R7 every theorem assumed the check falls through
+(`GuardOK`, `StackGuardOK`): the grown case — the `morestack` call — was excluded, and a run
+that reached it stopped at the `.morestack` stub (`GoABI.GrowsStack`). R7 removes that
+restriction. A theorem about `f` that holds "on any stack with room" (an ordinary `Summary`)
+plus the `morestack` contract gives "`f` is correct, stack growth included".
+
+**What `morestack`/`newstack`/`copystack` do** (Go 1.26 `runtime/stack.go`, `asm_arm64.s`,
+`asm_amd64.s`). `morestack` saves the goroutine's context (`gobuf`: `pc` = the instruction after
+the call, `sp`, `bp`, `lr`, `ctxt`) and calls `newstack` on the `g0` stack. `newstack` allocates
+a stack of `newsize` bytes (`oldsize·2`, doubled until `newsize - used ≥ funcMaxSPDelta(f) +
+stackGuard`; a request above `maxstacksize` throws `stack overflow`), and `copystack` copies the
+used part of the old stack to the new one and **adjusts every pointer into the old stack**:
+`adjustframe`/`adjustpointers` walk the frames with the unwinder (`traceback.go`) and, guided by
+the stack maps (the pclntab's `FUNCDATA_LocalsPointerMaps`, `FUNCDATA_ArgsPointerMaps`,
+`FUNCDATA_StackObjects`, selected by `PCDATA_StackMapIndex`), add `delta = new.hi - old.hi` to
+each word the maps mark as a pointer whose value lies in `[old.lo, old.hi)`; `adjustctxt` does the
+same for the saved frame pointer below `SP` on arm64. `g.stack`, `g.stackguard0`, `g.sched.sp`
+are updated and `gogo` resumes at the saved `pc` — the prologue's glue after the `morestack`
+call, which re-enters `f` on the larger stack. The whole goroutine stack moves, so the resumed
+`SP` is the old one plus `delta`.
+
+**The model** (`Janus/Spec/Stack.lean`, ISA-independent). `Moved cls pool lo hi hi' base ex m m'`
+relates the memory before and after a copy of `[base, hi)` of the stack `[lo, hi)` to the top
+`hi'`: a word `cls` marks as a pointer is adjusted by `hi' - hi` when its value is in the old
+stack and copied otherwise (`adjustWord`), every other byte is copied, and the ranges `ex` are
+left free. `Moved.trans` composes two moves into one — **the relocation invariance** that lets a
+move compose with the resumed run. `FrameTable` is the stack maps (abstract: theorems quantify
+over every table), `Chain` the unwinder's walk from the saved context, and `frameCls`/`framesCls`
+the words a frame / a walk adjusts. The key lemmas `frameCls_mv`, `framesCls_mv`, `Chain.mv` and
+`Chain.moved` prove the classification and the walk are relocation invariant, so the resumed run
+reads the moved frame as the move left it.
+
+**The contract** (`Janus/Contracts/Stack.lean`). `MorestackContract p FT pool rt H reloc`: from
+every state at a prologue's `morestack` call satisfying `MorestackPre` (it is at a `.morestack`
+stub; `g = X28`/`R14` runs on `[lo, hi)` inside the writable stack pools `pool`, above the first
+page; the stack unwinds, `Chain`; the grown stack fits `maxstacksize`; the runtime is ready to
+allocate, `H`, round 9's readiness predicate, on the runtime-owned memory `rt`; no word outside
+the stacks points into a stack, `NoStackPtr`), the relation
+`reloc` resumes in a `Grown` state: a larger stack inside the pools with room for the function's
+own `funcMaxSPDelta + stackGuard` below the resumed `SP` (exactly `newstack`, not room for an
+unbounded recursion), `SP`/`FP`/`g.stack`/`g.stackguard0` updated, the frames moved (`Moved`
+along the `Chain`), `H` re-established, resumed at the glue. `morestack`/`morestack_noctxt` are
+already **pinned** as `.morestack` stubs (`cmd/janus` `runtimeMorestackStubs`, `classifyStub`,
+`stubpins_gen.go`), so the contract hypothesis is about the Go runtime's own `morestack`.
+
+**The grown run.** `GrownReturns p reloc s post` is `Returns` through any number of `morestack`
+resumes; `EnsuresGrow` is the grown `Ensures`, with the room precondition dropped. For a callee
+that may grow, `GrownRet`/`GSummary` are the grown `ReachesRet`/`Summary` (with `bind`, `call`
+and `GSummary.induction` for recursion). `grow_rec` is the well-founded recursion on the stack's
+distance from `maxstacksize`: a growth makes the stack strictly larger, so after finitely many
+it has room and the roomy `Summary` applies.
+
+**Satisfiability** (`Janus/Contracts/StackSat.lean`). `morestack_satisfiable` exhibits a two-slot
+toy stack allocator that meets `MorestackContract` for every program and frame table — it copies
+the frames, adjusts every stack-map pointer into the old stack and rewrites `g.stack`/
+`stackguard0` — and a call state satisfying the whole precondition (round 9's SAT row).
+
+**amd64** (`Janus/Contracts/StackAmd64.lean`). The same model with `Arch.amd64` (`fp = sp +
+spdelta + 8`, the return address at `fp - 8`, `varp = fp - 8`), and the amd64 call sequence:
+the prologue's tail spills the register arguments to `8(SP)`, `16(SP)`, … (the caller's argument
+area) and `CALL`s the stub, so at the stub `[RSP]` is the glue (`gobuf.pc`) and `RSP + 8` the
+function's stack pointer (`gobuf.sp`). `MorestackContract64` resumes in a `Grown64` state: at the
+glue, `RSP` moved, `RBP` adjusted (`adjustWord`, `adjustctxt` on `gobuf.bp`), `RDX = 0`
+(`morestack_noctxt`), `R14` kept, `X15 = 0`, the direction flag clear, `MXCSR`'s control bits
+kept; the copied region is `[RSP + 8, hi)` (the pushed glue address is not copied).
+`GrownReturns64`/`GrownRet64`/`GSummary64`/`EnsuresGrow64`/`grow_rec64` are the grown run, and
+`morestack64_satisfiable` (`Janus/Contracts/StackSatAmd64.lean`) reuses the toy allocator.
+
+**The stack maps come from the binary.** `janus extract --frames` decodes, for every extracted
+function, its pclntab record (`Extracted.frames : List FuncRec`: pc range, `FuncID`, flags,
+`funcMaxSPDelta`, the `pcsp` and `PCDATA_StackMapIndex` tables as pc-value runs, the args and
+locals pointer maps, the stack objects; `cmd/janus/frames.go`), and `janus check` re-derives it.
+A grown theorem assumes its frame table **agrees** with these records (`FrameTable.Agrees
+Extracted.frames`: at every pc inside an extracted function, the table's SP delta, largest frame,
+maps and objects are the record's), so the maps a proof relies on are the binary's; the witnesses
+build their table from the records (`FrameTable.ofRecs`), and `ofRecs_laws_arm64`/`_amd64` check
+by evaluation that the records keep their words inside the frame (`FrameTable.InFrame`).
+
+**What stays trusted** (see [SOUNDNESS.md](SOUNDNESS.md#stack-growth)): the `Moved`/`Chain`
+relocation is what `newstack`/`copystack` do, and in particular **the stack maps are correct**
+(the compiler's liveness information marks exactly the pointer slots; the tables are the binary's,
+`FrameTable.Agrees Extracted.frames`). A precondition states that no pointer into the stack is
+held in non-stack memory (`MorestackPre.noptr`, `NoStackPtr`; Go's escape analysis guarantees
+it): `copystack` does not adjust such a word.
+
+**Examples** (`examples/basic/zstack.go`; arm64 `examples/proofs/<Name>.lean`, amd64
+`examples/proofs-amd64/<Name>/Proof.lean`; each with `Witness.nonvacuous` and `Witness.returns`):
+
+| Function | Shows |
+|---|---|
+| `BigLocal(x, i)` | a large frame (176 bytes on arm64, 168 on amd64) whose prologue always grows on a small stack; returns `buf[0]` = `x` if `i&15 = 0` else `0`, on a stack of any size (`correctness`), with a witness whose frame does not fit (`Witness.no_room`) |
+| `SumRec(n)` | recursion with growth at any depth: a grown callee summary (`GSummary.induction`) whose post states the move of the caller's frames, composed level by level (`Moved.trans'`, `mono_base`, `cls_congr`); the saved frame pointers adjusted, the spilled `n` copied; witness `SumRec(3)` from a stack where not even the first frame fits |
+| `HoldPtr(x)` | a pointer into the function's own frame (`p = &a[x&1]`, kept in a locals-map slot) held across a call (`holdCallee(p, x)`) whose frame grows the stack: the callee's spilled `p` (its args map) and the caller's slot are both adjusted, so the callee's store reaches the moved array and the caller reads it back through the adjusted `p`; witness `HoldPtr(16) = 49` with the growth inside the callee (`Witness.callee_grows`) |
+
+
+### `print`/`println` (`Janus/Contracts/Print.lean`, `Janus/Contracts/PrintAmd64.lean`, `Janus/Spec/Print.lean`)
+
+Go lowers `print`/`println` to `printlock`, one `print*` call per argument and `printunlock`; each
+`print*` formats into a buffer and calls `gwrite`, which records the bytes in the crash backlog
+(`recordForPanic`) and writes them to fd 2 (`writeErrData` → `write` → `write1`, one `write(2)` per
+piece). The proofs execute that path from the binary under the kernel semantics, so a theorem is a
+statement about the **fd-2 output trace**: `Print.Emits 2 pieces es` says the events `es` are what
+one `write(2, piece)` per piece may append (nothing on `-errno`, a prefix on a short write), and
+`Emits.full` gives the exact output when every write was complete.
+
+| contract | what it states | used by |
+|---|---|---|
+| `Print.Lock2Contract` / `Amd64.Print.Lock2Contract` | `runtime.lock2(l)` on a free mutex: returns with the key's lock bit set and `m.locks` one higher; every other change inside `rt` and the callee stack window (`AllocRet`/`AllocRet64`); precondition `LockPre rt 0` (the key and `m.locks` inside `rt`, apart; `g.m` outside) | `printlock` when the M's print count is 0 |
+| `Print.Unlock2Contract` / `Amd64.Print.Unlock2Contract` | `runtime.unlock2(l)` on a held mutex: the key's low byte cleared, `m.locks` one lower; precondition `LockPre rt 1` | `printunlock` when the count drops to 0 |
+| `Print.MemmoveContract` / `Amd64.Print.MemmoveContract` | `runtime.memmove(dst, src, n)` with disjoint ranges: memory changes only at `[dst, dst+n)`, which then holds the `n` bytes from `src` | `recordForPanic` (the copy into `printBacklog`) |
+
+Witnesses: `Janus.Contracts.PrintSat` and `Janus.Contracts.PrintSatAmd64` (`lock2_satisfiable`,
+`unlock2_satisfiable`, `memmove_satisfiable`: a store/increment, a store/decrement and a byte-copy
+loop, each proved against its contract; the loop by induction). Each example also links the same
+code at the binary's contract addresses and proves `Witness.nonvacuous` (all hypotheses of
+`correctness` together) and `Witness.returns` (the guarantee reached from that state). The amd64
+`LockPre`/`MemmovePre` also ask that the return-address slot `[RSP]` lie outside the ranges the
+callee may write (the `RET` reads it after the stores).
+
+Examples (`examples/print`, `examples/proofs-print`): `PrintX` (`println("x =", x)`:
+`"x = " ++ decimal(x) ++ "\n"`), `PrintBool` (`println(b)`), `PrintNeg` (`print(-17)`: `"-17"`) and
+`PrintStr` (`println(s)`), on **both** arm64 and amd64, each with `correctness`, `full_output`,
+`Witness.nonvacuous` and `Witness.returns`; the print functions they run from the binary are
+`printlock`, `printunlock`, `printstring`, `printnl`, `printbool`, `printuint`, `printint`,
+`internal/strconv.formatBase10`, `gwrite`, `recordForPanic`, `writeErrData`, `write`, `write1`.
+
+The proofs are a consumer package (`examples/proofs-print`, [CONSUMERS.md](CONSUMERS.md)), built so
+that every expensive proof is checked once and shared:
+
+* `PrintProofs.<Isa>.Code`: the code of all four examples as one `PrintCode.program` (generated by
+  `scripts/gen-print-code.py` from the extraction of `PrintX` with the other entry points as
+  `--targets`);
+* `PrintProofs.<Isa>.Fn*`: one module per print function (a `Summary` or a continuation lemma), the
+  `formatBase10` chunk loops and the inner two-digit loop (`FnFmtInner`, proved once against the
+  bytes it writes), the lock paths and the witness;
+* `PrintProofs.<Isa>.Main*`: each example's theorems about `PrintCode.program`;
+* `PrintProofs.<Isa>.Print*`: the example modules `janus verify` checks, generated by
+  `scripts/gen-print-examples.py`: they prove that the example's own `Extracted.program` has the same
+  code as `PrintCode.program` (`Program.Equiv`, by `decide`: the same segments in another order,
+  none overlapping, `PrintProofs.<Isa>.Equiv`) and transport the Main theorems.
+
+`scripts/verify-print-examples.sh` extracts each example with the others as `--targets` and verifies
+the four theorems of its module with `janus verify --proof-root`; the Fn/Main modules are built once
+per extraction and the four theorems of an example share that build and the kernel replay.
+
+The output formats of the remaining print functions (`printhex`, `printpointer`, `printslice`,
+`printeface`/`printiface`, `printfloat64/32`, `printcomplex128/64`) are specified in
+`Janus.Spec.Print` and checked against the Go 1.26 runtime by row RT-PRINT (`audit/rt-print`), but
+not yet proved from machine code.
+

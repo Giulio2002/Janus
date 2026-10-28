@@ -3,6 +3,9 @@
 # dynamic call targets its theorem states, or the runtime contracts it leaves out (docs/PROOFS.md, "Dynamic calls"). Nothing for most
 # functions. Used by scripts/verify-examples.sh and scripts/build-examples-amd64.sh.
 case "$1" in
+  # stack growth (R7, docs/RUNTIME-CONTRACTS.md "Stack growth"): the functions' pclntab frame
+  # records (SP deltas, stack maps), which the theorems' frame tables agree with
+  BigLocal|SumRec|HoldPtr) printf '%s\n' --frames ;;
   HashWith) # the static itabs of the two Hasher implementations
     printf '%s\n' --targets \
       'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher,go:itab.*example.com/basic.RotHasher,example.com/basic.Hasher' ;;
@@ -12,6 +15,9 @@ case "$1" in
   # dictionary (examples/basic/zconstructs.go)
   TotalMeters) printf '%s\n' --targets example.com/basic.Meters.Scale ;;
   TotalFeet) printf '%s\n' --targets example.com/basic.Feet.Scale ;;
+  # writable globals with their link-time images (Janus/Spec/Globals.lean, examples/basic/zmutual.go)
+  MulAlgo) printf '%s\n' --global example.com/basic.karatsubaCut --global example.com/basic.mulBias ;;
+  Double) printf '%s\n' --global example.com/basic.useFast ;;
   # heap allocation (docs/RUNTIME-CONTRACTS.md): the runtime functions left out as contracts
   NewPair|MakeSlice|AppendOne|MakeAdder)
     printf '%s\n' --contract runtime.mallocgc --contract runtime.newobject \
@@ -62,12 +68,28 @@ case "$1" in
   # the interface examples (examples/basic/iface.go): the Go 1.26 interface runtime entry points
   # they call (Janus/Contracts/Iface.lean, IfaceAmd64.lean; pinned to the runtime's code), and
   # the static itab the assertion and switch theorems name
+  # the sync.Pool example (examples/basic/zpool.go): Get and Put (Janus/Contracts/Pool.lean,
+  # PoolAmd64.lean; pinned to package sync's code) and the allocation of a new buffer
+  ScratchSum) printf '%s\n' --contract 'sync.(*Pool).Get' --contract 'sync.(*Pool).Put' \
+      --contract runtime.newobject ;;
+  StackGrow) printf '%s\n' --contract 'sync.(*Pool).Get' --contract 'sync.(*Pool).Put' \
+      --contract runtime.newobject --contract runtime.growslice --contract 'runtime.gcWriteBarrier*' \
+      --contract runtime.memclrNoHeapPointers ;;
   Box) printf '%s\n' --contract runtime.convT64 ;;
   AsHasher) printf '%s\n' --contract runtime.typeAssert --targets \
       'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher' ;;
   Classify) printf '%s\n' --contract runtime.interfaceSwitch --targets \
       'go:itab.*example.com/basic.MulHasher,example.com/basic.Hasher' ;;
   Equal) printf '%s\n' --contract runtime.efaceeq ;;
+  # the panic/defer/recover examples (examples/basic/rtpanic.go): PanicIf, IndexAt and LoadField
+  # need no extra arguments (they reach runtime.gopanic / runtime.panicBounds as panic stubs, or
+  # fault); DeferInc's open-coded closure is inferred. The heap-defer and recover functions leave
+  # the Go 1.26 panic runtime out as pinned contracts (Janus/Contracts/Panic.lean).
+  DeferLoop) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
+  DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn \
+      --targets example.com/basic.DeferTwice.func1 ;;
+  RecoverSet) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
+      --contract runtime.deferreturn ;;
   # the equality, hashing and typed-memory examples (examples/basic/rteq.go;
   # Janus/Contracts/Mem*.lean, Hash*.lean; pinned to the runtime's code)
   StrEq) printf '%s\n' --contract runtime.memequal ;;
@@ -91,11 +113,20 @@ case "$1" in
   MbarTypedmemmove) printf '%s\n' --contract runtime.memmove --contract runtime.bulkBarrierPreWrite ;;
   MbarTypedmemclr|MbarMemclrHasPointers) printf '%s\n' --contract runtime.memclrNoHeapPointers \
       --contract runtime.bulkBarrierPreWrite ;;
-  # the panic/defer/recover examples (examples/basic/rtpanic.go): PanicIf, IndexAt and LoadField
-  # need no extra arguments (they reach runtime.gopanic / runtime.panicBounds as panic stubs, or
-  # fault); DeferInc's open-coded closure is inferred. The heap-defer and recover functions leave
-  # the Go 1.26 panic runtime out as pinned contracts (Janus/Contracts/Panic.lean).
-  DeferLoop|DeferTwice) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferreturn ;;
-  RecoverSet) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
+  # the general defer/panic engine examples (examples/basic/zdefer.go): the panic runtime's
+  # functions they call, left out as pinned contracts (Janus/Contracts/Panic.lean)
+  DeferOrder) printf '%s\n' --contract runtime.gopanic --contract runtime.deferreturn ;;
+  NestedPanic) printf '%s\n' --contract runtime.gopanic --contract runtime.deferreturn \
+      --targets example.com/basic.NestedPanic.func1 --targets example.com/basic.NestedPanic.func2 ;;
+  NestedRecover) printf '%s\n' --contract runtime.gopanic --contract runtime.gorecover \
+      --contract runtime.deferreturn --targets example.com/basic.NestedRecover.func1 \
+      --targets example.com/basic.NestedRecover.func2 ;;
+  DeferMix) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.gopanic \
+      --contract runtime.deferreturn --targets example.com/basic.accAdd1 \
+      --targets example.com/basic.accAdd2 ;;
+  GoexitDefer) printf '%s\n' --contract runtime.Goexit --contract runtime.gorecover \
       --contract runtime.deferreturn ;;
+  RangeDefer) printf '%s\n' --contract 'runtime.deferproc*' --contract runtime.deferrangefunc \
+      --contract runtime.deferreturn --targets example.com/basic.accAdd1 \
+      --targets example.com/basic.accAdd2 --targets example.com/basic.count2 ;;
 esac

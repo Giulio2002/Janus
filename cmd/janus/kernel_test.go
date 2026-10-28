@@ -15,6 +15,9 @@ func TestInsnStubsArm64(t *testing.T) {
 		0xd2801588, // movz x8, #172
 		0xd4000001, // svc #0
 		0xd53be040, // mrs x0, cntvct_el0
+		0xd5380600, // mrs x0, id_aa64isar0_el1
+		0xd5380480, // mrs x0, id_aa64zfr0_el1
+		0xd53800a0, // mrs x0, mpidr_el1: not emulated, no stub
 		0xd4200000, // brk #0
 		0x0000beef, // udf #0xbeef (in-function)
 		0xd503415f, // msr dit, #1
@@ -25,7 +28,8 @@ func TestInsnStubsArm64(t *testing.T) {
 	got := insnStubsArm64(seg)
 	want := []insnStub{
 		{"syscall", 0x1004, stubSyscall}, {"env:CNTVCT_EL0", 0x1008, stubSyscall},
-		{"trap:BRK", 0x100c, stubTrap}, {"trap:UDF", 0x1010, stubTrap}, {"env:MSR_DIT", 0x1014, stubSyscall},
+		{"env:ID_S3_0_C0_C6_0", 0x100c, stubSyscall}, {"env:ID_S3_0_C0_C4_4", 0x1010, stubSyscall},
+		{"trap:BRK", 0x1018, stubTrap}, {"trap:UDF", 0x101c, stubTrap}, {"env:MSR_DIT", 0x1020, stubSyscall},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)

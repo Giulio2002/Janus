@@ -10,7 +10,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-dirs=(Janus JanusTests examples/proofs examples/proofs-amd64 examples/asm/proofs examples/proofs-cgo)
+dirs=(Janus JanusTests examples/proofs examples/proofs-amd64 examples/asm/proofs examples/proofs-cgo examples/proofs-print)
 existing=()
 for d in "${dirs[@]}"; do [ -d "$d" ] && existing+=("$d"); done
 [ "${#existing[@]}" -eq 0 ] && { echo "axiom guard: nothing to scan"; exit 0; }

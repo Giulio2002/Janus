@@ -3,7 +3,7 @@
 `docs/ORACLE-AMD64.md` checks `Janus.Amd64.step` against the host CPU. JanusX86 adds an
 independent formal reference: the x86-64 ISA model of ACL2 X86isa, as translated to Sail by
 rems-project/sail-x86-from-acl2, compiled to Lean by Sail's Lean backend and sliced to the
-opcodes Janus decodes. It is the amd64 counterpart of JanusASL (`docs/ASL.md`). Then:
+opcodes of the one- and two-byte maps (the whole of both maps since 2026-10-27, below). It is the amd64 counterpart of JanusASL (`docs/ASL.md`). Then:
 
 * `lake exe janus-x86-check` runs the generated model and Janus `step` side by side in compiled
   Lean, on the whole amd64 oracle corpus, and compares both with the recorded hardware results.
@@ -44,12 +44,40 @@ the amd64 model or JanusX86.
 | lean-sail | v7, `8fc8e29d7a62f832346cc7548953e44ec17bc271` |
 | vendored model | `JanusX86/vendor/X86Sail.tar.gz` (+ `.sha256`); `gen` reproduces it byte for byte |
 
-## Results
+## Results (2026-10-27, the slice of the whole one- and two-byte maps)
+
+| corpus | cases | agree | gap | sail-defect | MISMATCH | `janus decodes, the slice excludes it` before |
+|---|---:|---:|---:|---:|---:|---:|
+| `full` | 505,715 | 389,933 | 111,815 | 3,967 | **0** | 787 |
+| `sse` (SSE2/SSE3/SSSE3/SSE4 packed) | 863,656 | 54,326 | 806,921 | 2,409 | **0** | 351,786 |
+| `x87` | 125,344 | 4,119 | 121,225 | 0 | **0** | 7,037 |
+| `fp` (SSE scalar FP) | 551,478 | 0 | 551,478 | 0 | **0** | 0 |
+| `v3` (BMI, FMA3, MOVBE, PSHUFB) | 217,698 | 0 | 217,698 | 0 | **0** | 14,249 |
+| `crypto` (AES-NI, PCLMULQDQ, SHA-NI, ADX) | 98,745 | 0 | 98,745 | 0 | **0** | 42,311 |
+| `avx` (VEX AVX/AVX2/FMA3) | 797,454 | 0 | 797,454 | 0 | **0** | 0 (VEX was already a gap) |
+| `avx512` | 133,436 | 0 | 133,436 | 0 | **0** | 36,474 |
+| **total** | 3,293,526 | 448,378 | 2,838,772 | 6,376 | **0** | **452,644** |
+
+(The older 697,542-case corpus, which the previous run used, was the integer corpus of the first
+decoder: it reported 162,406 such verdicts against the current decoder.) Before the change, the
+`sse` corpus had 41 agreeing cases; with the whole maps in the slice, 95 SSE instruction
+classes are checked against the Sail model state for state: `ADDSUBPS/PD HADDPS/PD HSUBPS/PD`,
+`CVTDQ2PS/PD CVT(T)PS2DQ CVT(T)PD2DQ`, `LDDQU`, `MOVDDUP/MOVSLDUP/MOVSHDUP`
+(D9), `MOVLPS/PD MOVHPS/PD MOVLHPS MOVHLPS`, `MOVMSKPS/PD`, `MOVNTDQ/PS/PD/I`, `MASKMOVDQU`,
+`PACK*`, `PADD* PSUB*` (all widths, saturating), `PAVG* PCMPEQ* PCMPGT*`, `PEXTRW PINSRW`,
+`PMADDWD PMAX* PMIN* PMUL*`, `PSADBW`, `PSHUFHW`, every `PSLL/PSRL/PSRA` form, `PUNPCK*`,
+`RCPPS RSQRTPS`, `SHUFPS/PD`, `UNPCK*`. What stays a gap is what X86isa does not implement
+(SSE4.1/4.2, SSSE3, SSE scalar FP, x87, crypto, BMI, FMA, VEX/EVEX); see below. Gap kinds on the
+`sse` corpus: `Translation error: two-byte opcode … not translated` 455,568 (the `0F 38` and
+`0F 3A` maps and the FP arms), `Opcode Unimplemented in x86isa!` 340,604, 10,749 other (Janus
+refuses a misaligned or unmapped operand where the model runs, or the reverse).
+
+### Summary
 
 | | |
 |---|---|
-| corpus | `artifacts/oracle-amd64/cases.jsonl` from `scripts/oracle-amd64.sh full`: 697,542 cases, with the hardware results in `hw.jsonl` (native oracle: 0 MISMATCH) |
-| `janus-x86-check` | **457,456 agree, 229,037 gap, 11,049 sail-defect, 0 MISMATCH**; `X86Config` holds on every case's pre- and post-state; about 4.5 min on 48 cores |
+| corpora | `scripts/oracle-amd64.sh full` (505,715 cases) and the class runs `fp` (551,478), `v3` (217,698), `x87` (125,344), `sse` (863,656), `crypto` (98,745), `avx` (797,454) and `avx512` (133,436): 3,293,526 cases in all, each with the hardware results of the same run (`hw.jsonl`; native oracle: 0 MISMATCH) |
+| `janus-x86-check` | **0 MISMATCH on every corpus**; `X86Config` holds on every case's pre- and post-state. Before the slice covered the whole maps: 452,644 `janus decodes, the slice excludes it` verdicts over these corpora (below). After: none |
 | proofs | the audited class theorems listed below (an explicit list in `JanusX86/Audit.lean`, every statement printed); no `sorry`, no `native_decide`, no `bv_decide`; axioms: `propext`, `Classical.choice`, `Quot.sound` only |
 
 The check runs the model twice per case, with the undefined-value source (`janus_undef`, below)
@@ -60,11 +88,25 @@ Janus leaves undefined is not compared). A verdict is:
   the vector registers Janus models and every byte of Janus' memory; or both reject (fault,
   divide error, non-canonical target).
 * **gap**: Janus refuses (undecodable, outside its allocation, misaligned locked access,
-  undefined result) or the model does (an opcode the slice excludes, or that X86isa does not
-  implement). A gap never hides a wrong answer.
+  undefined result) or the model does (an opcode that X86isa does not implement, or a VEX/EVEX
+  instruction). `janus decodes, the slice excludes it` is a MISMATCH: since 2026-10-27 no
+  one- or two-byte arm is excluded, so it cannot occur for a legacy-encoded instruction. A gap never hides a wrong answer.
 * **sail-defect**: Janus and the model disagree, **Janus agrees with the hardware result** of the
-  same case, and the difference is one of the known model defects D1–D6 below (D7 and D8, found by proof, do not occur in the corpus).
+  same case, and the difference is one of the known model defects D1–D6 and D9 below (D7 and D8, found by proof, do not occur in the corpus).
 * **MISMATCH**: anything else. `janus-x86-check` exits with code 1 if it finds any.
+
+Check changes with the full-map slice: the EVEX stub (`janus-excluded: EVEX`) is a gap like the
+VEX one; the Sail harness starts with `RFLAGS.IF` set (`0x202`, as a Linux user process and as
+Janus' `rflagsImage`: `PUSHFQ` pushes it, and the hardware pushes it too, plus the `TF` the
+single-stepping runner sets, which is why the verdict had been a MISMATCH on the 27 `PUSHFQ` cases
+the newly kept `0x9C` arm exposed); and four `REP` string cases whose recorded hardware result was a
+single iteration (`rcx` 0x7f of 0x80) were re-run natively (`oracle run` on the same cases: the
+runner re-enters the instruction, `rcx = 0`, as Janus): the stored `hw.jsonl` was stale, so the
+check was run with a fresh `hw.jsonl` of `cases.jsonl`. Every other newly reachable arm either
+agrees, is unimplemented in the model, or is D9.
+
+The counts below (D1–D8 and the gap kinds) are from the earlier 697,542-case run, before the
+whole maps were sliced; the table above has the current ones.
 
 Gaps by kind (`artifacts/x86formal/summary.txt`): `janus-undecodable/*` 128,941 (bytes outside
 the Janus subset), `sail-unimplemented` 51,980 (opcodes X86isa does not implement, below),
@@ -86,6 +128,8 @@ Each was found by the check, and in each the hardware result of the case (the na
 | D6 ror-cf-from-bit-0 | 287 | `ROR` with count ≥ 2 | takes `CF` from bit 0 of the result (`ror_spec_*`, count ≥ 2 branch) | `CF` = the most significant bit of the result (SDM `ROR`) | `4a c0 cb 82`: flags janus 0xc0, sail 0xc1 |
 | D7 noncanonical-rsp (found by proof) | 0 | `RET`/`RET imm16` (`C3/C2`), `POP r` (`58–5F`), `LEAVE` (`C9`) | the new `RSP` goes through `add_to_sptr`, which stops with the model error `:NON-CANONICAL-STACK-ADDRESS` when it is not canonical (`RSP + 8 + imm16`; `RSP + 8`; `RBP + 8`) | `RSP` takes the 64-bit value; a non-canonical stack pointer faults only at the next stack access | not in the corpus (needs `RSP`/`RBP` near `2^47`); `ret_agree` assumes `RSP + 8 + 2^16 ≤ 2^47`, `pop_agree` `RSP + 8 < 2^47`, `leave_agree` `RBP + 8 < 2^47` |
 | D8 shld-shrd-cl-rip-relative (found by proof) | 0 | `SHLD/SHRD r/m, r, CL` (`0F A5/AD`) with a RIP-relative memory operand | `x86_shld_shrd` always tells the r/m decoder that one immediate byte follows (`num_imm_bytes = 1`), so a RIP-relative address is one byte too far for the `CL` forms | the address is relative to the end of the instruction, which has no immediate (SDM 2.2.1.6) | not in the corpus (Go emits only register forms); `shd_agree` excludes RIP-relative operands of `A5/AD` |
+
+| D9 movddup-movsldup-dispatch-to-movlps | 2,411 | `MOVDDUP xmm, xmm/m64` (`F2 0F 12`), `MOVSLDUP xmm, xmm/m128` (`F3 0F 12`) | the `0F 12` dispatch arm calls `x86_movlps_movlpd_op_en_rm` for the `F2` and `F3` mandatory prefixes too (X86isa has no `MOVDDUP`/`MOVSLDUP` semantics): the low quadword of the destination is replaced by the memory quadword, nothing is duplicated | the low quadword duplicated into both halves (`MOVDDUP`), dwords `0 0 2 2` of the source (`MOVSLDUP`) | `f2 4b 0f 12 ea`: `ymm5` janus …ff00000008000000ff00000008, sail keeps the upper quadword; found by the full-map slice (the arm was excluded before) |
 
 D5 is a difference of granularity rather than a wrong result (X86isa models one iteration);
 the others are wrong results. D7 and D8 were found while proving the class theorems, not by the
@@ -232,7 +276,13 @@ The proofs relate Janus to **the generated Lean**, not to X86isa's ACL2 text. Tr
 3. **The slice and its edits** (`JanusX86/sail/slice.py`, `keep.txt`, `harness.sail`,
    `termination_measures.sail`, `JanusX86Extras.lean`). Kept dispatch arms are verbatim; every other
    arm of the one- and two-byte opcode maps becomes `x86_model_error "janus-excluded: …"`, so a
-   byte sequence Janus decodes that lands on an excluded arm is reported, not hidden. The edits:
+   byte sequence Janus decodes that lands on an excluded arm is reported, not hidden. The slice used to keep only the opcodes
+   Janus decodes; since 2026-10-27 `keep.txt` is `one 00-FF` / `two 00-FF`: every arm of both maps
+   is kept verbatim (each excluded arm of the old list was a `janus decodes, the slice excludes it`
+   verdict on the SSE, SSSE3, SSE4, x87, crypto, BMI and AVX-512 cases, 452,644 in the corpora
+   above), and an arm the model does not implement is its own `x86_model_error("Opcode Unimplemented
+   in x86isa!")`. The generated Lean grows from 3.2 MB to 5.0 MB (`X86Sail/Part12` 2.8 MB to 4.6 MB,
+   elaborated in 29 s, compiled in 69 s; no module exceeds 100 s). The edits:
    VEX/EVEX dispatch replaced by a model error (X86isa implements no VEX instruction anyway);
    `x86_fault` raises an `Efault` exception the harness maps to `Janus_Fault`; the model's
    undefined-value oracle (`undef_read_logic`) reads the `janus_undef` register, which the

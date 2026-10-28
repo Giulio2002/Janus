@@ -72,19 +72,19 @@ specialised entry point that behaves as `mallocgc` meets it. -/
 theorem MallocgcContract.smallNoScanSC {n : Nat} {p : Program} {addr : Nat} {rt : List (Nat × Nat)}
     {stack : Nat} {H : RtReady} (h : MallocgcContract p addr rt stack H) :
     MallocgcSmallNoScanSCContract n p addr rt stack H :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, v, m, h1, h2, h3 (by have := hp.2.1; omega)⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3 (by have := hp.2.1; omega)⟩
 
 theorem MallocgcContract.smallScanNoHeaderSC {n : Nat} {p : Program} {addr : Nat}
     {rt : List (Nat × Nat)} {stack : Nat} {H : RtReady} (h : MallocgcContract p addr rt stack H) :
     MallocgcSmallScanNoHeaderSCContract n p addr rt stack H :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, v, m, h1, h2, h3 hp.2.1⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3 hp.2.1⟩
 
 theorem MallocgcContract.tinySize {n : Nat} {p : Program} {addr : Nat} {rt : List (Nat × Nat)}
     {stack : Nat} {H : RtReady} (h : MallocgcContract p addr rt stack H) :
     MallocgcTinySizeContract n p addr rt stack H :=
-  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, h1, h2, h3⟩ =>
-    ⟨ptr, j, f, v, m, h1, h2, h3 (by obtain ⟨h0, -, hs, -⟩ := hp.2; omega)⟩
+  Summary.mono h (fun _ h => h.1) fun _ _ hp ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3⟩ =>
+    ⟨ptr, j, f, v, m, ex, ep, h1, h2, h3 (by obtain ⟨h0, -, hs, -⟩ := hp.2; omega)⟩
 
 end Janus.Contracts

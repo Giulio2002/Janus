@@ -571,7 +571,9 @@ var Targeted = map[string]func(r *rand.Rand) uint32{
 	// WP-C: the environment registers (the model faults with `kernel`; the comparator checks the
 	// hardware result against the environment contract's frame) and the traps.
 	"sys.env": func(r *rand.Rand) uint32 {
-		switch r.IntN(7) {
+		switch r.IntN(9) {
+		case 7, 8: // the feature-ID registers: S3_0_C0_C<4..7>_<op2>, any op2
+			return 0xD5380000 | (4+u(r, 2))<<8 | u(r, 3)<<5 | reg(r)
 		case 0:
 			return 0xD53BE040 | reg(r) // MRS Xt, CNTVCT_EL0
 		case 1:

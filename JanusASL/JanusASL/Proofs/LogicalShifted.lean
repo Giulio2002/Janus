@@ -753,13 +753,11 @@ theorem asl_logical_shifted {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 
       (Janus.Arm64.ShiftType.ofBits (fld w 22 2).toNat) hamt (fld w 21 1 == 1#1)
     exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
-/-- **AND/BIC/ORR/ORN/EOR/EON/ANDS/BICS (shifted register)**: for every word Janus decodes in this
-class and every related pair of states, Janus' `step` and the generated ASL agree. -/
-theorem logicalShifted_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b01010)
+theorem logicalShifted_agree_f {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b01010)
     (h4 : (w / 2 ^ 31) % 2 = 1 ∨ (w / 2 ^ 10) % 64 < 32)
     {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
-      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
   let F : Nat → Janus.Arm64.State := fun N => Janus.Arm64.execLogicalShifted N js
     (Janus.Arm64.LogicOp.ofBits (fld w 29 2).toNat) (Janus.Arm64.ShiftType.ofBits (fld w 22 2).toNat)
     (fld w 21 1 == 1#1) (fld w 16 5).toNat (fld w 10 6).toNat (fld w 5 5).toNat (fld w 0 5).toNat
@@ -770,10 +768,20 @@ theorem logicalShifted_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32
   have e : F (if fld w 31 1 == 1#1 then 64 else 32) = if fld w 31 1 == 1#1 then F 64 else F 32 := by
     split <;> rfl
   have hrel' : Rel (if fld w 31 1 == 1#1 then F 64 else F 32) s2 := e ▸ hrel
-  refine step_agree h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
+  refine step_agree_f h ⟨s2, hrun, hrel', hbt⟩ (by split <;> exact hspec _) ?_
   rw [Janus.Arm64.step_of_decode (decode_logicalShifted_class hw h1 h4)]
   simp only [Janus.Arm64.exec, ← fld_bit w 31 hw, ← fld_bit w 21 hw, bits_eq_fld w 30 29 hw,
     bits_eq_fld w 23 22 hw, bits_eq_fld w 20 16 hw, bits_eq_fld w 15 10 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
   split <;> simp_all [Janus.Arm64.State.next, F]
+
+/-- **AND/BIC/ORR/ORN/EOR/EON/ANDS/BICS (shifted register)**: for every word Janus decodes in this
+class and every related pair of states, Janus' `step` and the generated ASL agree. -/
+theorem logicalShifted_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 24) % 32 = 0b01010)
+    (h4 : (w / 2 ^ 31) % 2 = 1 ∨ (w / 2 ^ 10) % 64 < 32)
+    {js : Janus.Arm64.State} {s : SState} (h : Rel js s) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := logicalShifted_agree_f (w := w) (hw := hw) (h1 := h1) (h4 := h4) (js := js) (s := s) (h := h)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

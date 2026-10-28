@@ -107,15 +107,21 @@ type Identity struct {
 	ContractPatterns []string           `json:"contractPatterns,omitempty"`
 	Contracts        []identityContract `json:"contracts,omitempty"`
 	BuildModes       []string           `json:"buildModes,omitempty"`
-	Unresolved       []identityBranch   `json:"unresolvedBranches"`
-	Targets          []string           `json:"targets,omitempty"`
-	DynamicTargets   []identityTarget   `json:"dynamicTargets,omitempty"`
-	OmittedCalls     []identityOmitted  `json:"omittedCalls,omitempty"`
-	Data             []identityData     `json:"data"`
-	DataRefs         []identityDataRef  `json:"dataReferences"`
-	SkippedData      []identitySkipped  `json:"skippedData"`
-	Extracted        string             `json:"extracted"`
-	ExtractedSha256  string             `json:"extractedSha256"`
+	// GlobalPatterns are the --global patterns and Globals the writable symbols they matched,
+	// with their link-time images (Program.globals); omitted when empty.
+	GlobalPatterns []string          `json:"globalPatterns,omitempty"`
+	Globals        []identityGlobal  `json:"globals,omitempty"`
+	Unresolved     []identityBranch  `json:"unresolvedBranches"`
+	Targets        []string          `json:"targets,omitempty"`
+	DynamicTargets []identityTarget  `json:"dynamicTargets,omitempty"`
+	OmittedCalls   []identityOmitted `json:"omittedCalls,omitempty"`
+	Data           []identityData    `json:"data"`
+	DataRefs       []identityDataRef `json:"dataReferences"`
+	SkippedData    []identitySkipped `json:"skippedData"`
+	// Frames: the extraction renders the functions' pclntab frame records (--frames, R7).
+	Frames          bool   `json:"frames,omitempty"`
+	Extracted       string `json:"extracted"`
+	ExtractedSha256 string `json:"extractedSha256"`
 }
 
 func hex0x(v uint64) string { return fmt.Sprintf("0x%x", v) }
@@ -182,9 +188,12 @@ func makeIdentity(x *Extraction, binRef string, maxFunctions int) *Identity {
 	}
 	id.ContractPatterns = append([]string(nil), x.ContractPatterns...)
 	id.BuildModes = append([]string(nil), x.BuildModes...)
+	id.Frames = x.Frames
 	for _, c := range x.Contracts {
 		id.Contracts = append(id.Contracts, identityContract{c.Name, hex0x(c.Addr), c.Pinned})
 	}
+	id.GlobalPatterns = append([]string(nil), x.GlobalPatterns...)
+	id.Globals = identityGlobals(x.Globals)
 	for _, u := range x.Unresolved {
 		id.Unresolved = append(id.Unresolved, identityBranch{hex0x(u.From), hex0x(u.Target)})
 	}
@@ -248,7 +257,7 @@ func writeArtifacts(outdir string, x *Extraction, id *Identity) error {
 		return err
 	}
 	// A new extraction invalidates any earlier verification of this directory.
-	_ = os.Remove(filepath.Join(outdir, "verified.json"))
+	_ = withdrawReports(outdir)
 	if err := os.WriteFile(filepath.Join(outdir, "Extracted.lean"), x.Lean, 0o644); err != nil {
 		return err
 	}
@@ -271,6 +280,12 @@ func rerunExtract(id *Identity, outdir string) string {
 	targets := ""
 	if len(id.Targets) > 0 {
 		targets = fmt.Sprintf(" --targets %q", strings.Join(id.Targets, ","))
+	}
+	for _, g := range id.GlobalPatterns {
+		targets += fmt.Sprintf(" --global %q", g)
+	}
+	if id.Frames {
+		targets += " --frames"
 	}
 	return fmt.Sprintf("Rerun janus extract %s %q %s%s with the intended binary, then rerun this command.",
 		displayPath(resolveBinary(outdir, id.Binary)), id.Symbol, displayPath(outdir), targets)
@@ -340,11 +355,18 @@ func check(outdir, binOverride string) (*CheckResult, error) {
 			Stage: "extraction integrity", Next: rerunExtract(&id, outdir)}
 	}
 
-	x, err := extractWith(b, id.Symbol, id.MaxFunctions, id.ContractPatterns, id.Targets...)
+	x, err := extractGlobals(b, id.Symbol, id.MaxFunctions, id.ContractPatterns, id.GlobalPatterns, id.Targets...)
 	if err != nil {
 		d := err.(*diag)
 		d.Invalid = true
 		return nil, d
+	}
+	if id.Frames {
+		if err := applyFrames(x); err != nil {
+			d := err.(*diag)
+			d.Invalid = true
+			return nil, d
+		}
 	}
 	if !bytes.Equal(x.Lean, saved) {
 		return nil, &diag{Invalid: true,

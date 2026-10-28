@@ -264,25 +264,25 @@ theorem loop (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
       S.pc = BitVec.ofNat 64 head → S.regs 0 = p → S.regs 1 = n →
       S.sp = s.sp - 48#64 → S.regs 28 = s.regs 28 → S.regs 29 = s.sp - 56#64 → S.regs 18 = s.regs 18 →
       S.dczid = s.dczid → S.tpidr = s.tpidr → S.fpcr = s.fpcr → S.fpsr = s.fpsr →
-      S.excl = s.excl → S.exclPass = s.exclPass →
+      
       MemFrame (M0 s (s.regs 30).toNat p n) S.mem (R s) →
       ReachesRet Extracted.program (s.regs 30) S fun s' =>
         s'.sp = s.sp ∧ s'.pc = s.regs 30 ∧ s'.regs 18 = s.regs 18 ∧ s'.regs 28 = s.regs 28 ∧
         s'.regs 29 = s.regs 29 ∧ s'.dczid = s.dczid ∧ s'.tpidr = s.tpidr ∧ s'.fpcr = s.fpcr ∧
-        s'.fpsr = s.fpsr ∧ s'.excl = s.excl ∧ s'.exclPass = s.exclPass ∧
+        s'.fpsr = s.fpsr ∧
         MemFrame (M0 s (s.regs 30).toNat p n) s'.mem (R s) ∧ (s'.regs 0).toNat = T := by
   intro fuel
   induction fuel with
   | zero =>
-    intro S T hT hf hk hck hpc h0 h1 hsp h28 h29 h18 hdz htp hfc hfs hex hep hfr
+    intro S T hT hf hk hck hpc h0 h1 hsp h28 h29 h18 hdz htp hfc hfs hfr
     have hfr0 := hfr
     simp only [M0, R] at hfr
     janus_run
-    refine ⟨hdz, htp, hex, hep, hfr0, ?_⟩
+    refine ⟨hdz, htp, hfr0, ?_⟩
     rw [← hT, runesFrom_of_le _ _ (by simp; omega)]
     simp
   | succ fuel ih =>
-    intro S T hT hf hk hck hpc h0 h1 hsp h28 h29 h18 hdz htp hfc hfs hex hep hfr
+    intro S T hT hf hk hck hpc h0 h1 hsp h28 h29 h18 hdz htp hfc hfs hfr
     have hfr0 := hfr
     have hbs : strBytes S.mem p.toNat n.toNat = strBytes s.mem p.toNat n.toNat := by
       rw [strBytes_of_frame hfr (by
@@ -294,7 +294,7 @@ theorem loop (rt : List (Nat × Nat)) (H : RtReady) (p n : BitVec 64)
     simp only [M0, R] at hfr
     by_cases hkn : (S.regs 2).toNat = n.toNat
     · janus_run
-      refine ⟨hdz, htp, hex, hep, hfr0, ?_⟩
+      refine ⟨hdz, htp, hfr0, ?_⟩
       rw [← hT, runesFrom_of_le _ _ (by simp; omega)]
       simp
     · have hr := hp2 (by omega)
@@ -368,10 +368,10 @@ theorem countrunes_meets (rt : List (Nat × Nat)) (H : RtReady) (stack : Nat) (h
   refine rr_mono' (loop rt H (s.regs 0) (s.regs 1) hdec s stack hst hg1 hg2 (by omega) hgs1 hgs2 hal hsb
     (by omega) hacc hp1 hp2 hpo1 hpo2 (by omega) ⟨hra, hrb⟩ (s.regs 1).toNat _ _ rfl (by simp [setReg])
     (by simp [setReg]) (by simp [setReg]) rfl (by simp [setReg]) (by simp [setReg]) rfl (by simp [setReg])
-    (by simp [setReg]) (by simp [setReg]) rfl rfl rfl rfl rfl rfl ?_) ?_
+    (by simp [setReg]) (by simp [setReg]) rfl rfl rfl rfl ?_) ?_
   · simp only [M0, R]; exact MemFrame.refl _ _
-  · rintro s' ⟨hsp, hpc', h18, h28, h29, hdz, htp, hfc, hfs, hex, hep, hfr, h0⟩
-    refine RtPost.intro hsp hpc' h18 h28 h29 hdz htp hfc hfs ?_ ?_ hex hep
+  · rintro s' ⟨hsp, hpc', h18, h28, h29, hdz, htp, hfc, hfs, hfr, h0⟩
+    refine RtPost.intro hsp hpc' h18 h28 h29 hdz htp hfc hfs ?_ ?_
     · have h1 : MemFrame s.mem (M0 s (s.regs 30).toNat (s.regs 0) (s.regs 1)) [(s.sp.toNat - stack, s.sp.toNat - 8),
           (s.sp.toNat + 8, s.sp.toNat + 8 + 8 * 2)] := by
         simp only [M0]

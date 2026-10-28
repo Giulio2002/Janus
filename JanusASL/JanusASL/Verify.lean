@@ -1,5 +1,7 @@
 import JanusASL.Classify
 import JanusASL.Proofs.Run
+import JanusASL.Proofs.FP.Run
+import JanusASL.Proofs.FP.IntLift
 import JanusASL.Proofs.Examples
 import Janus.Tools.Audit
 
@@ -102,6 +104,45 @@ theorem classify_sound {w : Nat} {c : String} (h : classify w = some c) : StepOK
   · exact stepOK_ret hw hc.1 hc.2
   cases h
 
+
+/-- `fpClassify` is sound: a classified floating-point word is `FPStepOK`. -/
+theorem fpClassify_sound {w : Nat} {c : String} (h : fpClassify w = some c) : FPStepOK w := by
+  rw [fpClassify] at h
+  obtain ⟨hw, h⟩ := ite_none h
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fcmp hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2.1 hc.2.2.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fmul hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fdiv hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fadd hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fsub hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fmadd hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fmsub hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fnmadd hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fnmsub hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fsqrt hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fccmp hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fcvt hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_scvtf hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_ucvtf hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fcvtzs hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_fcvtzu hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2.1 hc.2.2.2.2.2
+  cases h
+
 theorem covered_words (p : Program) (h : covered p = true) :
     ∀ w ∈ p.segments.flatMap (·.words), StepOK w := by
   intro w hw
@@ -122,6 +163,103 @@ theorem covered_stubs (p : Program) (h : covered p = true) : ∀ st ∈ p.stubs,
   intro st hs
   simp only [covered, Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq] at h
   exact h.2 st hs
+
+theorem classify_sound_fp {w : Nat} {c : String} (h : classify w = some c) : FPStepOK w := by
+  rw [classify] at h
+  obtain ⟨hw, h⟩ := ite_none h
+  rcases ite_some h with hc | h
+  · exact fpStepOK_addSubImm hw hc
+  rcases ite_some h with hc | h
+  · exact fpStepOK_addSubShifted hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_addSubExt hw hc.1 hc.2.1 hc.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_addSubCarry hw hc.1 hc.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_logicalShifted hw hc.1 hc.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_logicalImm hw hc.1 hc.2.1 hc.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_moveWide hw hc.1 hc.2.1 hc.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_bitfield hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_extr hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2.1 hc.2.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_pcrel hw hc
+  rcases ite_some h with hc | h
+  · exact fpStepOK_condSel hw hc.1 hc.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_condCmpReg hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_condCmpImm hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_madd hw hc
+  rcases ite_some h with hc | h
+  · exact fpStepOK_maddl hw hc.1 hc.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_mulh hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_div hw hc.1 hc.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_shiftV hw hc.1 hc.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_rbit hw hc.1 hc.2.1 hc.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_clz hw hc.1 hc.2.1 hc.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_cls hw hc.1 hc.2.1 hc.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_rev16 hw hc.1 hc.2.1 hc.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_rev32 hw hc.1 hc.2.1 hc.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_rev64 hw hc.1 hc.2.1 hc.2.2.1 hc.2.2.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_b hw hc
+  rcases ite_some h with hc | h
+  · exact fpStepOK_bcond hw hc.1 hc.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_cb hw hc
+  rcases ite_some h with hc | h
+  · exact fpStepOK_tb hw hc
+  rcases ite_some h with hc | h
+  · exact fpStepOK_br hw hc.1 hc.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_blr hw hc.1 hc.2
+  rcases ite_some h with hc | h
+  · exact fpStepOK_ret hw hc.1 hc.2
+  cases h
+
+
+/-- `fpClassify` is sound: a classified floating-point word is `FPStepOK`. -/
+theorem classifyAll_sound {w : Nat} {c : String} (h : classifyAll w = some c) : FPStepOK w := by
+  unfold classifyAll at h
+  cases hc : classify w with
+  | some c' => exact classify_sound_fp hc
+  | none => rw [hc] at h; exact fpClassify_sound h
+
+theorem coveredAll_words (p : Program) (h : coveredAll p = true) :
+    ∀ w ∈ p.segments.flatMap (·.words), FPStepOK w := by
+  intro w hw
+  obtain ⟨seg, hs, hws⟩ := List.mem_flatMap.mp hw
+  simp only [coveredAll, Bool.and_eq_true, List.all_eq_true] at h
+  have := ((h.1 seg hs).2 w hws)
+  cases hc : classifyAll w with
+  | none => rw [hc] at this; cases this
+  | some c => exact classifyAll_sound hc
+
+theorem coveredAll_code (p : Program) (h : coveredAll p = true) :
+    ∀ seg ∈ p.segments, seg.base + 4 * seg.words.length < 2 ^ 56 := by
+  intro seg hs
+  simp only [coveredAll, Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq] at h
+  exact (h.1 seg hs).1
+
+theorem coveredAll_stubs (p : Program) (h : coveredAll p = true) : ∀ st ∈ p.stubs, st.addr < 2 ^ 56 := by
+  intro st hs
+  simp only [coveredAll, Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq] at h
+  exact h.2 st hs
+
 
 open Lean Elab Command in
 /-- `janus_asl_corollary C of T using W`: add the theorem `C` whose type and proof are

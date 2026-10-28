@@ -14,6 +14,7 @@ package main
 // faults). Neither can make a false theorem provable.
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
 
@@ -55,10 +56,29 @@ func sweepAmd64(code []byte, base uint64) []amd64Inst {
 			continue
 		}
 		inst, err := x86asm.Decode(code[off:], 64)
-		if err != nil || inst.Len == 0 || inst.Op == 0 || code[off] == 0x62 {
-			// EVEX (AVX-512, which this x86asm does not know at all) and the VEX encodings it
-			// does not know (the opmask instructions): length from the encoding, and a
-			// RIP-relative operand kept for the data references
+		win := code[off:min(len(code), off+15)]
+		// x86asm returns a bare prefix (Op 0, length 1) for an opcode it does not know, and
+		// for VEX forms a wrong length (VZEROUPPER as 5 bytes) or a RIP-relative operand
+		// without its base: a VEX/EVEX instruction always takes the measured length and
+		// operand, an unknown one the fallback.
+		vex := false
+		if p := amd64PrefixEnd(win); p < len(win) && (win[p] == 0xC4 || win[p] == 0xC5 || win[p] == 0x62) {
+			vex = true
+		}
+		if err != nil || inst.Len == 0 || inst.Op == 0 || vex {
+			// EVEX (AVX-512, which this x86asm does not know at all), the VEX encodings it
+			// does not know (the opmask instructions) and the unknown 0F 38 / 0F 3A opcodes:
+			// length from the encoding, and a RIP-relative operand kept for the data
+			// references
+			if l, rip, disp := fallbackLenAmd64(win); l > 0 {
+				in := x86asm.Inst{Op: 0, Len: l}
+				if rip {
+					in.Args[0] = x86asm.Mem{Base: x86asm.RIP, Disp: disp}
+				}
+				out = append(out, amd64Inst{PC: base + uint64(off), Inst: in})
+				off += l
+				continue
+			}
 			if n, disp, rip := vexLenRIP(code[off:]); n > 0 {
 				in := x86asm.Inst{Len: n}
 				if rip {
@@ -183,6 +203,139 @@ func vexLenRIP(b []byte) (int, int64, bool) {
 		return 0, 0, false
 	}
 	return l, disp, rip
+}
+
+// fallbackLenAmd64 measures an instruction x86asm cannot decode: its length (0 if no rule
+// applies), and whether its memory operand is RIP-relative, with the displacement. It never
+// assigns a meaning; the Lean decoder decodes (or rejects) the copied bytes on its own.
+func fallbackLenAmd64(b []byte) (int, bool, int64) {
+	p := amd64PrefixEnd(b)
+	if p < len(b) && (b[p] == 0xC4 || b[p] == 0xC5 || b[p] == 0x62) {
+		if l, mpos := amd64VexLen(b[p:]); l > 0 {
+			rip, disp := amd64RipOperand(b[p:], mpos)
+			return p + l, rip, disp
+		}
+		return 0, false, 0
+	}
+	q := p
+	if q < len(b) && b[q] >= 0x40 && b[q] <= 0x4F { // REX
+		q++
+	}
+	if q+3 > len(b) || b[q] != 0x0F || (b[q+1] != 0x38 && b[q+1] != 0x3A) {
+		return 0, false, 0
+	}
+	m := amd64ModrmLen(b[q+3:])
+	if m == 0 {
+		return 0, false, 0
+	}
+	l := q + 3 + m
+	if b[q+1] == 0x3A {
+		l++ // imm8
+	}
+	if l > len(b) || l > 15 {
+		return 0, false, 0
+	}
+	rip, disp := amd64RipOperand(b, q+3)
+	return l, rip, disp
+}
+
+// amd64PrefixEnd is the index after the legacy prefixes at b[0].
+func amd64PrefixEnd(b []byte) int {
+	i := 0
+	for i < len(b) && i < 14 {
+		switch b[i] {
+		case 0x66, 0x67, 0xF2, 0xF3, 0x2E, 0x3E, 0x26, 0x36, 0x64, 0x65, 0xF0:
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+// amd64ModrmLen is the length of the ModRM byte at b[0] with its SIB and displacement
+// (64-bit addressing), 0 if b is too short.
+func amd64ModrmLen(b []byte) int {
+	if len(b) == 0 {
+		return 0
+	}
+	modrm := b[0]
+	l := 1
+	mod, rm := modrm>>6, modrm&7
+	if mod != 3 {
+		if rm == 4 {
+			if len(b) <= l {
+				return 0
+			}
+			sib := b[l]
+			l++
+			if mod == 0 && sib&7 == 5 {
+				l += 4
+			}
+		}
+		switch mod {
+		case 0:
+			if rm == 5 {
+				l += 4
+			}
+		case 1:
+			l++
+		case 2:
+			l += 4
+		}
+	}
+	if l > len(b) {
+		return 0
+	}
+	return l
+}
+
+// amd64VexLen is the length of the VEX (C5, C4) or EVEX (62) instruction at b[0], and the index
+// of its ModRM byte; 0 if b is too short. Immediates: map 3 (0F 3A) always has an imm8, and the
+// map-1 shift-by-immediate (71-73), compare (C2) and insert/extract/shuffle (C4-C6) forms.
+func amd64VexLen(b []byte) (int, int) {
+	var mp, n int
+	switch {
+	case len(b) >= 2 && b[0] == 0xC5:
+		mp, n = 1, 2
+	case len(b) >= 3 && b[0] == 0xC4:
+		mp, n = int(b[1]&0x1F), 3
+	case len(b) >= 4 && b[0] == 0x62:
+		mp, n = int(b[1]&0x07), 4
+	default:
+		return 0, 0
+	}
+	if len(b) < n+1 {
+		return 0, 0
+	}
+	op := b[n]
+	if mp == 1 && op == 0x77 { // VZEROUPPER / VZEROALL: no ModRM
+		return n + 1, 0
+	}
+	m := amd64ModrmLen(b[n+1:])
+	if m == 0 {
+		return 0, 0
+	}
+	l := n + 1 + m
+	switch {
+	case mp == 3:
+		l++
+	case mp == 1 && (op >= 0x70 && op <= 0x73 || op == 0xC2 || op == 0xC4 || op == 0xC5 || op == 0xC6):
+		l++
+	}
+	if l > len(b) || l > 15 {
+		return 0, 0
+	}
+	return l, n + 1
+}
+
+// amd64RipOperand reports whether the ModRM byte at b[mpos] encodes [rip+disp32], and the
+// displacement.
+func amd64RipOperand(b []byte, mpos int) (bool, int64) {
+	if mpos <= 0 || mpos+5 > len(b) || b[mpos]&0xC7 != 0x05 {
+		return false, 0
+	}
+	return true, int64(int32(binary.LittleEndian.Uint32(b[mpos+1:])))
 }
 
 // amd64BranchTarget returns the target of a direct (relative) JMP, Jcc, CALL, LOOP or
@@ -323,7 +476,11 @@ func renderLeanAmd64(x *Extraction) []byte {
 	sb.WriteString("def exitAddr : Nat := 0\n\n")
 	writeProgram(&sb, x, "Amd64.Program")
 	writeCEnv(&sb, x)
+	if x.Frames {
+		writeFrames(&sb, x.FrameRecs)
+	}
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
+	writeFuncInfos(&sb, x.FuncInfos)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())
 }

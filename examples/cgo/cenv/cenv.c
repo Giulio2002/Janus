@@ -2,6 +2,7 @@
 #include <setjmp.h>
 #include <stdlib.h>
 #include <string.h>
+extern char **environ;
 
 #include "cenv.h"
 #include "_cgo_export.h"
@@ -76,3 +77,12 @@ uint32_t e_atomic_inc(uint32_t *p) { return __atomic_add_fetch(p, 1, __ATOMIC_AC
 
 /* GoTwice(x) + 1: calls back into Go. */
 int64_t e_callgo(int64_t x) { return GoTwice(x) + 1; }
+
+/* GoBox(x): calls back into Go, whose code calls a Go function that allocates. */
+int64_t e_callbox(int64_t x) { return GoBox(x); }
+
+/* GoLarge(x): calls back into Go, whose frame is over 4096 bytes. */
+int64_t e_calllarge(int64_t x) { return GoLarge(x); }
+
+/* environ[i]: a libc variable, read through a GOT slot the dynamic linker fills. */
+char *e_env_at(size_t i) { return environ[i]; }

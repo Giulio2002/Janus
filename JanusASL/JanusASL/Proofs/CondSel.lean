@@ -504,6 +504,21 @@ theorem asl_condsel {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b011
       (fld_lt w 0 5) (fld_lt w 16 5) (fld_lt w 5 5) (fld w 12 4) (fld w 10 1 == 1#1) (fld w 30 1 == 1#1)
     exact ⟨s2, hrun, hrel, bt_cfg_after _ _ hfr⟩
 
+theorem condSel_agree_f {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b011010100)
+    (h2 : (w / 2 ^ 11) % 2 = 0) {js : Janus.Arm64.State} {s : SState} (h : Rel js s)
+    (hspe : s.regs.get? .SPESampleInFlight = some false) :
+    ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
+      (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') ∧ FPFrame s s' := by
+  have hspec : ∀ N, (Janus.Arm64.execCondSel N js (fld w 30 1 == 1#1) (fld w 16 5).toNat (fld w 12 4).toNat
+      (fld w 10 1 == 1#1) (fld w 5 5).toNat (fld w 0 5).toNat).pc = js.pc := by
+    intro N; unfold Janus.Arm64.execCondSel; dsimp only
+    simp [Janus.Arm64.State.setX, Janus.Arm64.State.writeZR]; split <;> rfl
+  refine step_agree_f h (asl_condsel hw h1 h2 h hspe _) (by split <;> exact hspec _) ?_
+  rw [Janus.Arm64.step_of_decode (decode_condSel_class hw h1 h2)]
+  simp only [Janus.Arm64.exec, ← fld_bit w 31 hw, ← fld_bit w 30 hw, ← fld_bit w 10 hw,
+    bits_eq_fld w 20 16 hw, bits_eq_fld w 15 12 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
+  split <;> simp_all [Janus.Arm64.State.next]
+
 /-- **CSEL/CSINC/CSINV/CSNEG**: for every word of the encoding class and every related pair of
 states (with statistical profiling not sampling), Janus' `step` and the generated ASL agree. -/
 theorem condSel_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b011010100)
@@ -511,14 +526,7 @@ theorem condSel_agree {w : Nat} (hw : w < 2 ^ 32) (h1 : (w / 2 ^ 21) % 512 = 0b0
     (hspe : s.regs.get? .SPESampleInFlight = some false) :
     ∃ js' s', Janus.Arm64.step w js = .ok js' ∧
       (janus_step (BitVec.ofNat 32 w)).run s = .ok .Janus_OK s' ∧ Rel js' s' ∧ (LinuxEL0Config s → LinuxEL0Config s') := by
-  have hspec : ∀ N, (Janus.Arm64.execCondSel N js (fld w 30 1 == 1#1) (fld w 16 5).toNat (fld w 12 4).toNat
-      (fld w 10 1 == 1#1) (fld w 5 5).toNat (fld w 0 5).toNat).pc = js.pc := by
-    intro N; unfold Janus.Arm64.execCondSel; dsimp only
-    simp [Janus.Arm64.State.setX, Janus.Arm64.State.writeZR]; split <;> rfl
-  refine step_agree h (asl_condsel hw h1 h2 h hspe _) (by split <;> exact hspec _) ?_
-  rw [Janus.Arm64.step_of_decode (decode_condSel_class hw h1 h2)]
-  simp only [Janus.Arm64.exec, ← fld_bit w 31 hw, ← fld_bit w 30 hw, ← fld_bit w 10 hw,
-    bits_eq_fld w 20 16 hw, bits_eq_fld w 15 12 hw, bits_eq_fld w 9 5 hw, bits_eq_fld w 4 0 hw]
-  split <;> simp_all [Janus.Arm64.State.next]
+  obtain ⟨js', s', h1, h2, h3, h4, -⟩ := condSel_agree_f (w := w) (hw := hw) (h1 := h1) (h2 := h2) (js := js) (s := s) (h := h) (hspe := hspe)
+  exact ⟨js', s', h1, h2, h3, h4⟩
 
 end JanusASL.Proofs

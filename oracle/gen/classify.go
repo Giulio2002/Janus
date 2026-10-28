@@ -62,8 +62,10 @@ func Classify(w uint32) string {
 		case w&0xFFFFF01F == 0xD503301F: // CLREX, DSB, DMB, ISB, SB
 			return "sys.barrier"
 		case w&0xFFFFFFE0 == 0xD53BE040, w&0xFFFFFFE0 == 0xD53BE000, w&0xFFFFFFE0 == 0xD5380000,
-			w&0xFFFFFFE0 == 0xD53B42A0, w&0xFFFFFFE0 == 0xD51B42A0, w&0xFFFFF0FF == 0xD503405F:
-			// the environment registers of WP-C: MRS CNTVCT_EL0/CNTFRQ_EL0/MIDR_EL1/DIT, MSR DIT
+			w&0xFFFFFFE0 == 0xD53B42A0, w&0xFFFFFFE0 == 0xD51B42A0, w&0xFFFFF0FF == 0xD503405F,
+			w&0xFFFFF000 == 0xD5380000 && (w>>8)&0xF >= 4 && (w>>8)&0xF <= 7:
+			// the environment registers of WP-C: MRS CNTVCT_EL0/CNTFRQ_EL0/MIDR_EL1/DIT, MSR DIT,
+			// and (N5) the feature-ID registers MRS ID_AA64*_EL1 (S3_0_C0_C<4..7>_<op2>)
 			return "sys.env"
 		case w&0xFFFFFFE0 == 0xD53B4200, w&0xFFFFFFE0 == 0xD51B4200, w&0xFFFFFFE0 == 0xD53B4420,
 			w&0xFFFFFFE0 == 0xD51B4420:

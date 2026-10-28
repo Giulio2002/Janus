@@ -119,7 +119,7 @@ theorem correctness (src d : BitVec 64) (n : Nat) :
     obtain ⟨c2sp, c2bx, c2bp, c212, c213, c214, c215, c2df, c2mx, c2cw⟩ := hcr2
     have hn48 := hstr.1
     have hpb := hfr.1
-    have hacc1' : ∀ a k w, (Janus.Arm64.Memory.writeLE s1.mem ((s.regs 4).toNat - 48) 8 4859027).accessible a k w =
+    have hacc1' : ∀ a k w, (Janus.Arm64.Memory.writeLE s1.mem ((s.regs 4).toNat - 48) 8 (janus_eval% (Extracted.entry + 0x23))).accessible a k w =
         s.mem.accessible a k w := fun a k w => by rw [Janus.Arm64.Memory.accessible_writeLE, hacc1]
     -- the block is away from the stack, the string and `d`
     have hpst : p + (n' + 1) ≤ (s.regs 4).toNat - (32768 + 48) ∨ (s.regs 4).toNat + 8 ≤ p := by

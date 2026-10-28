@@ -27,3 +27,22 @@ uint64_t c_switch(uint64_t k, uint64_t x) {
 	default: return k + x;
 	}
 }
+
+#if defined(__x86_64__)
+/* Hand-written assembly in the perlasm (OpenSSL) style, as it appears in the C libraries cgo
+ * links: the AMD branch-predictor idiom `repz ret` (F3 C3, "REP RET") ends the function. The CPU
+ * ignores the F3 prefix on a near RET. unsigned max(a, b). See
+ * examples/proofs-cgo/amd64/CRepRet.lean. */
+__asm__(
+	".text\n\t"
+	".globl c_repret_umax\n\t"
+	".type c_repret_umax,@function\n"
+	"c_repret_umax:\n\t"
+	"movq %rsi,%rax\n\t"
+	"cmpq %rsi,%rdi\n\t"
+	"jbe 1f\n\t"
+	"movq %rdi,%rax\n"
+	"1:\n\t"
+	"repz ret\n\t"
+	".size c_repret_umax,.-c_repret_umax\n");
+#endif

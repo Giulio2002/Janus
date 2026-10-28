@@ -571,11 +571,11 @@ argument must be `Extracted.program` (`.data`) up to definitional equality. -/
 `Extracted.program` (`.prog`) or `Extracted.program.data` (`.data`), the name (or index) argument,
 and the lookup it performs. -/
 inductive SymArg where
-  | data | prog
+  | data | prog | globals
   deriving BEq
 
 inductive SymKind where
-  | dataName | itabName | segName | dataIndex | contractName
+  | dataName | itabName | segName | dataIndex | contractName | globalName | globalNames
   deriving BEq
 
 def symbolFns : List (Name × SymArg × Nat × Nat × SymKind) :=
@@ -591,7 +591,17 @@ def symbolFns : List (Name × SymArg × Nat × Nat × SymKind) :=
    (`Janus.Amd64.Tactic.dataBase, .prog, 0, 1, .dataIndex),
    -- round 9 (I1g): a contract address looked up by a name that is not a recorded contract is 0
    (`Janus.Program.contractAddr, .prog, 0, 1, .contractName),
-   (`Janus.Amd64.Program.contractAddr, .prog, 0, 1, .contractName)]
+   (`Janus.Amd64.Program.contractAddr, .prog, 0, 1, .contractName),
+   -- writable globals (`janus extract --global`, Janus/Spec/Globals.lean): a name that is not a
+   -- recorded global makes `GlobalsInit`/`GlobalIs` false (the statement vacuous) or the
+   -- address 0
+   (`Janus.Spec.GlobalsInit, .globals, 0, 2, .globalNames),
+   (`Janus.Spec.GlobalIs, .globals, 0, 2, .globalName),
+   (`Janus.Spec.globalNamed, .globals, 0, 1, .globalName),
+   (`Janus.Spec.globalAddr, .globals, 0, 1, .globalName),
+   (`Janus.Spec.GlobalBytesIs, .globals, 0, 2, .globalName),
+   (`Janus.Spec.globalImage, .globals, 0, 1, .globalName),
+   (`Janus.Spec.globalInitVal, .globals, 0, 1, .globalName)]
 
 /-- The elements of a closed list term, by weak-head reduction. -/
 partial def listElems (e : Expr) (acc : Array Expr := #[]) : MetaM (Array Expr) := do
@@ -620,6 +630,8 @@ structure SymTable where
   dataNames : Array String
   segNames : Array String
   contractNames : Array String
+  globals : Expr
+  globalNames : Array String
 
 def symTable : MetaM SymTable := do
   let prog := mkConst `Extracted.program
@@ -634,8 +646,9 @@ def symTable : MetaM SymTable := do
     match ← strLit? (← Meta.mkProjection c `fst) with
     | some s => pure s
     | none => throwError "a contract of Extracted.program has no literal name"
+  let globals ← Meta.mkProjection prog `globals
   return { prog, data, segs, dataNames := ← names data, segNames := ← names segs,
-           contractNames := contracts }
+           contractNames := contracts, globals, globalNames := ← names globals }
 
 /-- Expand the proof-local definitions `locals` everywhere in `e` (beta-reducing their
 applications), so a name passed through an `abbrev` or a definition's parameter is seen at its
@@ -662,18 +675,28 @@ partial def checkSymbolRefs (tbl : SymTable) (e : Expr) : MetaM (Option String) 
       if let some (_, which, ai, ni, kind) := symbolFns.find? (·.1 == c) then
         if args.size ≤ max ai ni then
           return some s!"uses {c} without its name argument (round 8 I1: every object name must be a literal of the extracted program)"
-        let target := if which == .data then tbl.data else tbl.prog
+        let target := if which == .data then tbl.data else if which == .globals then tbl.globals else tbl.prog
         let arg := args[ai]!
         let argOk ← try
-            if which == .data then Meta.isDefEq arg target
+            if which == .data || which == .globals then Meta.isDefEq arg target
             else Meta.isDefEq (← Meta.mkProjection arg `segments) tbl.segs <&&>
               Meta.isDefEq (← Meta.mkProjection arg `data) tbl.data
           catch _ => pure false
         unless argOk do
-          let what := if which == .data then "Extracted.program.data" else "Extracted.program"
+          let what := if which == .data then "Extracted.program.data"
+            else if which == .globals then "Extracted.program.globals" else "Extracted.program"
           return some s!"passes `{(← Meta.ppExpr arg).pretty 10000}` to {c}, which is not {what}; object names are looked up in the extracted program only (round 8 I1)"
         let nameArg := args[ni]!
-        if kind == .dataIndex then
+        if kind == .globalNames then
+          let elems ← try some <$> listElems nameArg catch _ => pure none
+          let some elems := elems
+            | return some s!"uses {c} with the name list `{(← Meta.ppExpr nameArg).pretty 10000}`, which is not a literal list (round 8 I1: object names must be literals)"
+          for el in elems do
+            let some s ← strLit? el
+              | return some s!"uses {c} with the name `{(← Meta.ppExpr el).pretty 10000}`, which is not a string literal (round 8 I1)"
+            unless tbl.globalNames.contains s do
+              return some s!"uses {c} with the name {String.quote s}, but the extracted program has no writable global (`janus extract --global`) of that name, so the precondition is unsatisfiable and the statement vacuous (a misspelt or lookalike name, round 8 I1)"
+        else if kind == .dataIndex then
           let i? ← (Meta.evalNat (← instantiateMVars nameArg)).run
           match i? with
           | some i =>
@@ -685,10 +708,12 @@ partial def checkSymbolRefs (tbl : SymTable) (e : Expr) : MetaM (Option String) 
           let some s ← strLit? nameArg
             | return some s!"uses {c} with the name `{(← Meta.ppExpr nameArg).pretty 10000}`, which is not a string literal (round 8 I1: object names must be literals, so the report shows exactly which object is meant)"
           let known := if kind == .segName then tbl.segNames
-            else if kind == .contractName then tbl.contractNames else tbl.dataNames
+            else if kind == .contractName then tbl.contractNames
+            else if kind == .globalName then tbl.globalNames else tbl.dataNames
           unless known.contains s do
             let what := if kind == .segName then "function"
-              else if kind == .contractName then "runtime contract (`janus extract --contract`)" else "data object"
+              else if kind == .contractName then "runtime contract (`janus extract --contract`)"
+              else if kind == .globalName then "writable global (`janus extract --global`)" else "data object"
             return some s!"uses {c} with the name {String.quote s}, but the extracted program has no {what} of that name, so the lookup silently defaults (`False` or `0`) and the statement is vacuous or about another value while it reads as a claim about that object (a misspelt or lookalike name, round 8 I1)"
           if kind == .itabName && !s.startsWith "go:itab." then
             return some s!"uses {c} with the data object {String.quote s}, which is not a static itab (go:itab.*T,I) (round 8 I1)"
@@ -899,6 +924,14 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
           unless isFrameworkConstArg env isSpec a do
             return some s!"assumes the runtime contract {c} for the argument `{(← Meta.ppExpr a).pretty 10000}`, which is not one of the framework's named {if isSpec then "runtime-function specs (`concatstringSpec 2`, `growsliceSpec`, …)" else "float formats (`binary32`, `binary64`)"}: the function or format a contract describes cannot be chosen by the statement, not even from imported parts such as `default` (round 11)"
           continue
+        -- the extraction's own function metadata (`Extracted.funcs : List Spec.FuncInfo`, the panic
+        -- runtime's view of the extracted functions, read from the binary's pclntab): like
+        -- `Extracted.program` it is generated by `janus extract` and re-derived by `janus check`, so the
+        -- statement cannot choose it; any other value of that type is a runtime parameter
+        if (doms[i]!.consumeMData.isApp && doms[i]!.consumeMData.isAppOf ``List) &&
+            (doms[i]!.consumeMData.getArg! 0).consumeMData.isConstOf `Janus.Spec.FuncInfo &&
+            a.isConstOf `Extracted.funcs then
+          continue
         match contractParamKind doms[i]! with
         | some true =>
           unless isVar a do
@@ -907,6 +940,13 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
         | some false =>
           let ok := (a.isAppOfArity `Janus.Program.link 2 || a.isAppOfArity `Janus.Amd64.Program.link 2) &&
             (a.getArg! 0).isConstOf `Extracted.program && isVar (a.getArg! 1).consumeMData
+          -- the `morestack` contracts are relations over the call state at a `morestack` stub:
+          -- there is no implementation code to link (the program is only consulted through
+          -- `stubAt`, which `link` does not change), so they may be stated about
+          -- `Extracted.program` itself
+          let noCode := (c == `Janus.Contracts.Stack.MorestackContract ||
+            c == `Janus.Contracts.StackAmd64.MorestackContract64) && a.isConstOf `Extracted.program
+          if noCode then continue
           unless ok do
             return some s!"assumes the runtime contract {c} about the program `{(← Meta.ppExpr a).pretty 10000}`, which is not `Extracted.program.link impl` for a variable `impl` of the statement (round 10 V1)"
           rtVars := rtVars.insert (a.getArg! 1).consumeMData.fvarId!

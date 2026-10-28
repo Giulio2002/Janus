@@ -1,10 +1,11 @@
 """Round 9 SAT row: every runtime contract defined in Janus/Contracts/*.lean (a `def … : Prop`
-whose body is a `Summary`, possibly under `∀`), and every external-stub contract (a `def … :
+whose body is a `Summary`, possibly under `∀`, or whose name ends in `Contract` or `Contract64`, such as R7's
+`MorestackContract`, a relation over the prologue's `morestack` call states), and every external-stub contract (a `def … :
 Contract`) there and in Janus/FFI.lean and Janus/Amd64/FFI.lean (K2: the trusted cgo, callback,
 libc and setjmp contracts), must have a kernel-checked non-vacuity witness
 `theorem <name>_satisfiable` in the framework module `Janus.Contracts.<File>Sat` (for
 `<File>Amd64.lean`: `<File>SatAmd64`; for Janus/FFI.lean `Janus.FFISat`, for Janus/Amd64/FFI.lean
-`Janus.Amd64.FFISat`), which Janus.lean must import, where <name> is the
+`Janus.Amd64.FFISat`; the panic engine contracts' in `PanicWitness`/`PanicWitnessAmd64`), which Janus.lean must import, where <name> is the
 contract's name with `Contract` removed and the first letter lower-cased
 (`NewobjectContract64` → `newobject64_satisfiable`, `Access1` → `access1_satisfiable`).
 Round 10: the witness's statement must name the contract and give a state, and only the tree
@@ -75,7 +76,7 @@ for f, rel, satmod in srcs:
         if not re.search(r":\s*Prop\s*:=", text):
             continue
         after = text.split(":=", 1)[1]
-        if re.match(r"\s*(∀[^,]*,\s*)?([\w.]*\.)?Summary\b", after):
+        if re.match(r"\s*(∀[^,]*,\s*)?([\w.]*\.)?Summary\b", after) or re.search(r"Contract(64)?$", m.group(1)):
             contracts.append((f, m.group(1), satmod))
 imports = set(re.findall(r"^import (\S+)", open(FILES["Janus.lean"], encoding="utf-8").read(), re.M))
 sat = {}
@@ -120,7 +121,11 @@ ok = missing = opened = 0
 for f, c, satmod in contracts:
     w = c.replace("Contract", "") or c
     w = w[0].lower() + w[1:]
-    mods = [m for m, stmt in sat.get(w, []) if m in imports and m == satmod and about(c, stmt)]
+    # the witnesses of the panic engine contracts live in `PanicWitness[Amd64]` (the engine's code is
+    # part of their statement); every other file's in `<File>Sat[Amd64]`
+    wmod = satmod[:-len("SatAmd64")] + "WitnessAmd64" if satmod.endswith("SatAmd64") else (
+        satmod[:-len("Sat")] + "Witness" if satmod.endswith("Sat") else satmod)
+    mods = [m for m, stmt in sat.get(w, []) if m in imports and m in (satmod, wmod) and about(c, stmt)]
     if mods:
         ok += 1
         print("  SAT ok      %-22s %-20s %s_satisfiable (%s)" % (c, f, w, mods[0]))

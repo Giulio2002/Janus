@@ -1,5 +1,6 @@
 import Janus.Tactic
 import Janus.CABI
+import Janus.Contracts.Alloc
 
 /-!
 # FFI: contracts for external functions, and the cgo boundary (arm64)
@@ -70,6 +71,30 @@ deriving Repr, Inhabited
 def CData.addr (ds : List CData) (name : String) : Nat :=
   ((ds.find? (·.name == name)).map (·.base)).getD 0
 
+/-- A GOT slot the extracted C code reads that a **dynamic relocation** fills (`Extracted.dyngot`):
+the relocation's symbol, the slot's address, the relocation type (`R_AARCH64_GLOB_DAT` = 1025,
+`R_X86_64_GLOB_DAT` = 6, …) and its addend (`r_addend`, two's complement). The slot's run-time
+value is the dynamic linker's binding of the symbol, not a link-time constant, so it is not
+copied (unlike a static slot, `got:<symbol>`); a theorem states it with `GotBound`. -/
+structure DynGOT where
+  name : String
+  slot : Nat
+  rtype : Nat
+  addend : Nat
+deriving Repr, Inhabited
+
+/-- The address of the GOT slot of the relocation symbol `name` (`0` if there is none). -/
+def DynGOT.slotOf (ds : List DynGOT) (name : String) : Nat :=
+  ((ds.find? (·.name == name)).map (·.slot)).getD 0
+
+/-- **The dynamic linker bound `name` to `v`**: in memory `m`, the GOT slot of the relocation
+symbol `name` is readable (`PT_GNU_RELRO` makes it read-only after relocation) and holds `v`, the
+run-time address of `name` (plus the addend). A precondition, stated in terms of the symbol:
+a theorem quantifies over `v` and says what it needs of the object at `v`. -/
+def GotBound (ds : List DynGOT) (name : String) (v : Nat) (m : Janus.Arm64.Memory) : Prop :=
+  DynGOT.slotOf ds name + 8 ≤ 2 ^ 48 ∧ m.accessible (DynGOT.slotOf ds name) 8 false = true ∧
+    m.readLE (DynGOT.slotOf ds name) 8 = v
+
 /-- The executable's TLS segment (`PT_TLS`: `p_memsz`, `p_align`, the `.tdata` bytes) and its
 `STT_TLS` symbols (name, offset in the segment, size). -/
 structure TLSImage where
@@ -94,6 +119,14 @@ def TLSImage.x64Off (t : TLSImage) : Nat := roundUp t.size t.align
 `fs`. -/
 def TLSImage.x64Addr (t : TLSImage) (fs : BitVec 64) (name : String) : Nat :=
   fs.toNat - t.x64Off + t.varOff name
+
+/-- The offset of the executable's TLS block from the thread pointer on AArch64 (ELF TLS variant
+I: the 16-byte thread control block, rounded up to the segment's alignment). -/
+def TLSImage.a64Off (t : TLSImage) : Nat := roundUp 16 t.align
+
+/-- The address of the `__thread` variable `name` of the thread whose pointer is `tp` (AArch64). -/
+def TLSImage.a64Addr (t : TLSImage) (tp : BitVec 64) (name : String) : Nat :=
+  tp.toNat + t.a64Off + t.varOff name
 
 end Janus
 
@@ -397,14 +430,16 @@ def cgoClobber (s : State) : List (Nat × Nat) :=
 
 /-- How the Go caller resumes after `cgocall` returns: at the return address `X30`, with `SP`,
 `g` (`X28`) and `FP` (`X29`) restored, the same `DCZID_EL0`, and memory `m` (every other
-register, the flags, the SIMD&FP registers and `TPIDR_EL0` arbitrary: `cgocall` is an ordinary
-Go call, and the goroutine may resume on another thread). `FPCR` is preserved (the C code
+register, the flags, the SIMD&FP registers, `TPIDR_EL0` and the exclusive monitor arbitrary:
+`cgocall` is an ordinary Go call, the C code and the runtime may leave the monitor marking bytes
+of their own, and the goroutine may resume on another thread; the store-exclusive outcome stream
+`exclPass` continues). `FPCR` is preserved (the C code
 restores it, `CReturn.fpcr`); `FPSR` is arbitrary: its cumulative exception flags are sticky
 and C floating point may set them. -/
 def GoResume (s s' : State) (m : Memory) : Prop :=
-  ∃ regs flags vregs tpidr fpsr,
+  ∃ regs flags vregs tpidr fpsr excl,
     s' = { s with regs := regs, pc := s.regs GoABI.regLR, flags := flags, mem := m,
-                  vregs := vregs, tpidr := tpidr, fpsr := fpsr } ∧
+                  vregs := vregs, tpidr := tpidr, fpsr := fpsr, excl := excl } ∧
     regs regG = s.regs regG ∧ regs GoABI.regFP = s.regs GoABI.regFP
 
 /-- The cgo contract a Go-side theorem assumes: `runtime.cgocall` called with `X0 = fn` in a
@@ -730,6 +765,13 @@ model** from a Go call state (`CallbackEntry`) and resumes the C caller with the
 writes (`CbResumed`). `CallbackSpec` is the C-side assumption, and `CgoCallback.refines` the
 reverse composition theorem (as `CgoCall.refines` is for Go → C). -/
 
+/-- The entry of the Go function behind `//export F` in the extraction `p`: the segment
+`_cgoexp_<hash>_F`, found by the shape of its name (cgo's 12-hex-digit `<hash>` is derived from
+the package's files, so it changes when they do; `0` if there is none). -/
+def exportAddr (p : Program) (F : String) : Nat :=
+  ((p.segments.find? fun sg => "_cgoexp_".toList.isPrefixOf sg.name.toList &&
+      sg.name.toList.drop 21 == F.toList).map (·.base)).getD 0
+
 /-- Bytes of the C (system) stack below `SP` that `cgocallback` may use for its own frames
 (`cgocallback` itself, `needm`, the `g0` frames on a thread Go did not create): the linker's
 bound on a chain of nosplit frames (`abi.StackNosplitBase`, 800 bytes) plus a margin, as for
@@ -738,96 +780,170 @@ C thread is the thread's own stack (the theorem's C stack window must cover them
 `cbStackScratch` bytes). -/
 def cbStackScratch : Nat := 16384
 
+/-- Go's TLS `g` slot of the thread whose `TPIDR_EL0` is `tp`, in the executable's TLS image `t`:
+the variable `runtime.tls_g` (variant I: `TPIDR_EL0 + roundUp 16 align + off`). The Go linker
+puts it at offset 0 of the executable's block, so it is `TPIDR_EL0 + 16` when the segment's
+alignment is at most 16; it moves when the C code's `__thread` variables come first, which is why
+the callback contract takes the extraction's `TLSImage`. `load_g` (executed by the model in
+`crosscall2`) and `cgocallback` (trusted) read it. -/
+def tlsGSlot (t : TLSImage) (tp : W64) : Nat := t.a64Addr tp "runtime.tls_g"
+
 /-- The bytes a `cgocallback` from the C state `s` may change besides what the Go code writes:
 the C stack below `SP` (`cbStackScratch` bytes), its ABI0 argument slots `[SP+8, SP+32)` (`[SP]`
-is the caller's, untouched), and Go's TLS `g` slot (`TPIDR_EL0 + 16`, which `cgocallback` points
-at the goroutine's `g`, `g0`, or nil around the call). -/
-def cbClobber (s : State) : List (Nat × Nat) :=
+is the caller's, untouched), and Go's TLS `g` slot (`tlsGSlot`, which `cgocallback` points at
+the goroutine's `g`, `g0`, or nil around the call). -/
+def cbClobber (t : TLSImage) (s : State) : List (Nat × Nat) :=
   [(s.sp.toNat - cbStackScratch, s.sp.toNat), (s.sp.toNat + 8, s.sp.toNat + 32),
-   (s.tpidr.toNat + tlsGOffset, s.tpidr.toNat + tlsGOffset + 8)]
+   (tlsGSlot t s.tpidr, tlsGSlot t s.tpidr + 8)]
 
 /-- Memory of the C state `s` that `cgocallback` leaves alone: accessible in `s` and outside
-`cbClobber s`. -/
-def CbKept (s : State) (a n : Nat) (w : Bool) : Prop :=
-  s.mem.accessible a n w = true ∧ Outside a n (cbClobber s)
+`cbClobber t s`. -/
+def CbKept (t : TLSImage) (s : State) (a n : Nat) (w : Bool) : Prop :=
+  s.mem.accessible a n w = true ∧ Outside a n (cbClobber t s)
 
-/-- Bytes of the goroutine stack below `SP` that are not C memory (`CallbackEntry.stackSep`). -/
+/-- The goroutine stack of the examples whose Go side needs little: 4096 bytes. -/
 def cbGoStack : Nat := 4096
 
-/-- The Go call state `u` that `cgocallback` makes from the C state `s` (at its entry: the ABI0
-call from `crosscall2`), returning to `ret` (inside `cgocallbackg1`, outside the extracted
-code). Trusted description (`runtime/asm_arm64.s`, `cgocallback`; `runtime/cgocall.go`,
-`cgocallbackg1`):
+/-- `runtime.stackGuard` of Go 1.26.0 on linux (non-race): `abi.StackNosplitBase` (800) +
+`abi.StackSmall` (128). A goroutine's `stackguard0` is `stack.lo + stackGuard` while no
+preemption is requested. -/
+def stackGuard : Nat := 928
 
-* the ABIInternal call `fn(frame)`: `pc = [SP+8]`, `X0 = [SP+16]`, `X30 = ret`;
-* the goroutine stack is not C memory (`stackSep`, `goStack` bytes below `SP`);
+/-- The goroutine stack `cgocallback` enters the Go code with, and the runtime readiness under
+which it does so (round 9 C1 style, as `Janus.Contracts.RtReady` for the allocator):
+
+* `size`: bytes of goroutine stack below the Go call's `SP` (`CallbackEntry.goStack`, with the
+  stack guard of `CallbackEntry.guard`). A Go function with a frame of `F` bytes passes its
+  stack check when `F + stackGuard - StackSmall < size` (so `size > F + 800`), and its frame and
+  the nosplit frames below it fit.
+* `ready`: the readiness predicate, applied at the stub to `[fn, size]`, the `g` that
+  `cgocallback`'s `load_g` reads (the TLS `g` slot), `SP`, and the memory as the runtime owns it
+  (`rtView rt`). The real runtime meets the contract for `ready := "from this runtime state, the
+  goroutine `cgocallback` switches to (`m.curg`, or the extra `M`'s on a C thread) has `size`
+  bytes of stack below the entry, growing it if needed, and no preemption request pending"`: a
+  goroutine stack is grown on demand (`morestack` copies it to a larger one and re-runs the
+  function) up to `maxstacksize` (1 GB), so this holds whenever the runtime can allocate that
+  stack. A theorem quantifies over `ready` and assumes it at its entry for the callback it
+  makes; the C code's own stores (outside `rt`) do not change it (`rtView_writeLE`). -/
+structure CbStack where
+  size : Nat
+  rt : List (Nat × Nat)
+  ready : Janus.Contracts.RtReady
+
+/-- The readiness of `k` at the stub state `s` (see `CbStack`). -/
+def CbStack.Ready (k : CbStack) (t : TLSImage) (s : State) : Prop :=
+  k.ready [s.mem.readLE (s.sp.toNat + 8) 8, k.size] (s.mem.readLE (tlsGSlot t s.tpidr) 8)
+    s.sp.toNat (Janus.Contracts.rtView k.rt s.mem)
+
+/-- The Go call state `u` that `cgocallback` makes from the C state `s` (at its entry: the ABI0
+call from `crosscall2`), with `gs` bytes of goroutine stack, returning to `ret` (inside
+`cgocallbackg1`, outside the extracted code). Trusted description (`runtime/asm_arm64.s`,
+`cgocallback`; `runtime/cgocall.go`, `cgocallbackg`, `cgocallbackg1`), following the code:
+
+* `cgocallback` loads `g` from the TLS slot (`load_g`; `needm` borrows an extra `M` when it is
+  nil), takes `m.curg`, points the TLS slot at it (`save_g`) and moves `X28` to it, switches `SP`
+  to the goroutine's saved stack pointer (`g.sched.sp`, minus its frame) and calls
+  `cgocallbackg`, which leaves the system call (`exitsyscall`, restoring `stackguard0`) and calls
+  `cgocallbackg1`, which calls `fn(frame)`:
+  * the ABIInternal call `fn(frame)`: `pc = [SP+8]`, `X0 = [SP+16]`, `X30 = ret`;
+  * `g` (`gReg`, `tlsG`): `X28` is the goroutine's `g`, its struct readable, Go memory (not C
+    memory: `gSep`; not on the goroutine stack: `gOff`), and the TLS slot holds it;
+  * the goroutine stack (`goStack`, `stackSep`): `SP` 16-aligned, `gs` writable bytes below it and
+    the frame's spill slot above it (`[SP, SP+16)`), none of them C memory;
+  * the stack guard (`guard`): `g.stackguard0 + gs ≤ SP + stackGuard`, i.e. the stack's low end
+    (`stackguard0 - stackGuard`) is at least `gs` bytes below `SP` (no pending preemption,
+    whose `stackPreempt` guard would send every check to `morestack`);
 * C memory `cgocallback` leaves alone (`CbKept`) holds the same bytes and is accessible in the
   same way (`kept`, `keptAcc`);
 * the same thread (`TPIDR_EL0`; a callback runs on the thread that called it), `DCZID_EL0` and
   `FPCR` (no instruction of the runtime path writes `FPCR`).
 
-Every other register (`X28 = g` among them), the flags and the SIMD&FP registers are
-arbitrary: a theorem that needs facts about `g` or the goroutine stack (the stack check of a
-non-leaf Go function) states them as the readiness predicate `R` of `CgoCallback`. -/
-structure CallbackEntry (p : Program) (s u : State) (ret : Nat) : Prop where
+Every other register, the flags, the SIMD&FP registers and the exclusive monitor are arbitrary;
+further facts the Go code needs (an allocator's readiness at its calls) are the readiness
+predicate `R` of `CgoCallback`. -/
+structure CallbackEntry (t : TLSImage) (p : Program) (gs : Nat) (s u : State) (ret : Nat) : Prop where
   pc : u.pc = BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 8) 8)
   arg : u.regs 0 = BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 16) 8)
   lr : u.regs GoABI.regLR = BitVec.ofNat 64 ret
   retAddr : RetAddr p ret
+  gReg : (u.regs 28).toNat + gStructSize ≤ 2 ^ 48 ∧
+    u.mem.accessible (u.regs 28).toNat gStructSize false = true
+  gSep : ∀ a n w, s.mem.accessible a n w = true →
+    Outside a n [((u.regs 28).toNat, (u.regs 28).toNat + gStructSize)]
+  tlsG : u.mem.readLE (tlsGSlot t u.tpidr) 8 = (u.regs 28).toNat
+  goStack : u.sp.toNat % 16 = 0 ∧ gs ≤ u.sp.toNat ∧ u.sp.toNat + 16 ≤ 2 ^ 48 ∧
+    u.mem.accessible (u.sp.toNat - gs) (gs + 16) true = true
   stackSep : ∀ a n w, s.mem.accessible a n w = true →
-    Outside a n [(u.sp.toNat - cbGoStack, u.sp.toNat)]
-  kept : ∀ a n, CbKept s a n false → u.mem.readLE a n = s.mem.readLE a n
-  keptAcc : ∀ a n w, CbKept s a n w → u.mem.accessible a n w = true
+    Outside a n [(u.sp.toNat - gs, u.sp.toNat + 16)]
+  gOff : Outside (u.regs 28).toNat gStructSize [(u.sp.toNat - gs, u.sp.toNat + 16)]
+  guard : u.mem.readLE ((u.regs 28).toNat + 16) 8 + gs ≤ u.sp.toNat + stackGuard
+  kept : ∀ a n, CbKept t s a n false → u.mem.readLE a n = s.mem.readLE a n
+  keptAcc : ∀ a n w, CbKept t s a n w → u.mem.accessible a n w = true
   tpidr : u.tpidr = s.tpidr
   dczid : u.dczid = s.dczid
   fpcr : u.fpcr = s.fpcr
 
+/-- The Go code's stack check passes at the entry `u` for a frame adjustment `adj` (the
+prologue compares `SP - adj` with `stackguard0`) when `adj + stackGuard < gs`: `GuardOK u adj`. -/
+theorem CallbackEntry.guardOK {t : TLSImage} {p : Program} {gs : Nat} {s u : State} {ret : Nat}
+    (he : CallbackEntry t p gs s u ret) {adj : Nat} (hadj : adj + stackGuard < gs) :
+    Janus.Spec.GuardOK u adj := by
+  obtain ⟨h1, h2⟩ := he.gReg
+  have hg := he.guard
+  refine ⟨by unfold gStructSize at h1; omega, Memory.accessible_sub _ h2 (by simp) (by omega)
+    (by unfold gStructSize; omega), by omega⟩
+
 /-- How the C caller resumes after `cgocallback` returns: at `X30` (in `crosscall2`), with `SP`,
 `TPIDR_EL0`, `DCZID_EL0` and `FPCR` kept (an ABI0 callee: every general register, the flags,
-the SIMD&FP registers and `FPSR` arbitrary; `crosscall2` restores what AAPCS64 needs), and
-memory `m`. -/
+the SIMD&FP registers, `FPSR` and the exclusive monitor arbitrary; `crosscall2` restores what
+AAPCS64 needs), and memory `m`. The store-exclusive outcome stream (`exclPass`) continues: the
+callback's own store-exclusives are the Go state's (`u`, arbitrary). -/
 def CbResume (s s' : State) (m : Memory) : Prop :=
-  ∃ regs flags vregs fpsr,
+  ∃ regs flags vregs fpsr excl,
     s' = { s with regs := regs, pc := s.regs GoABI.regLR, flags := flags, mem := m,
-                  vregs := vregs, fpsr := fpsr }
+                  vregs := vregs, fpsr := fpsr, excl := excl }
 
 /-- The C caller resumes from the final Go state `u'`: memory with the regions of `s`, the Go
-code's result on C memory outside `cbClobber s`, the old bytes where `s` has no access, and
+code's result on C memory outside `cbClobber t s`, the old bytes where `s` has no access, and
 arbitrary clobbered bytes. -/
-def CbResumed (s u' s' : State) : Prop :=
+def CbResumed (t : TLSImage) (s u' s' : State) : Prop :=
   ∃ m, CbResume s s' m ∧ m.regions = s.mem.regions ∧
-    ∀ a, Outside a 1 (cbClobber s) →
+    ∀ a, Outside a 1 (cbClobber t s) →
       m.bytes a = if s.mem.accessible a 1 false then u'.mem.bytes a else s.mem.bytes a
 
-/-- The **trusted** contract of `runtime.cgocallback` (arm64), for Go code that may itself call
-external functions under `Cin` (`Contract.none` when it calls none; `CgoCall p` when it calls
-C again) and the readiness predicate `R` on the Go call state (`fun _ => True` for a Go function
-that needs nothing of `g` or its stack, such as a leaf; otherwise e.g. its stack check): the C
-stack has `cbStackScratch` writable bytes below `SP` and the argument slots above, and for every
-Go call state `cgocallback` may make in which `R` holds, the Go function returns, restoring
-`SP`, `g` and `FP` (the ABIInternal return `cgocallbackg1` relies on); the possible results are
-the C states resumed from the final Go states (`CbResumed`). -/
-def CgoCallback (p : Program) (Cin : Contract) (R : State → Prop) : Contract where
-  safe f s := f = "runtime.cgocallback.abi0" ∧ CStack s cbStackScratch 32 ∧
-    ∀ u ret, CallbackEntry p s u ret → R u →
+/-- The **trusted** contract of `runtime.cgocallback` (arm64), for the executable's TLS image
+`t`, Go code that may itself call external functions under `Cin` (`Contract.none` when it calls
+none; `CgoCall p` when it calls C again), the readiness predicate `R` on the Go call state
+(`fun _ => True` for Go code that needs nothing of the runtime beyond `CallbackEntry`; otherwise
+e.g. an allocator's readiness at its calls) and the goroutine stack `k` (`CbStack`): the C stack
+has `cbStackScratch` writable bytes below `SP` and the argument slots above, the runtime is ready
+(`k.Ready t s`), and for every Go call state `cgocallback` may make with `k.size` bytes of
+goroutine stack in which `R` holds, the Go function returns, restoring `SP`, `g` and `FP` (the
+ABIInternal return `cgocallbackg1` relies on); the possible results are the C states resumed
+from the final Go states (`CbResumed`). -/
+def CgoCallback (t : TLSImage) (p : Program) (Cin : Contract) (R : State → Prop) (k : CbStack) :
+    Contract where
+  safe f s := f = "runtime.cgocallback.abi0" ∧ CStack s cbStackScratch 32 ∧ k.Ready t s ∧
+    ∀ u ret, CallbackEntry t p k.size s u ret → R u →
       ReturnsC (p.withExit ret) Cin (ABIReturnC u) u
-  next f s s' := f = "runtime.cgocallback.abi0" ∧ ∃ u ret u', CallbackEntry p s u ret ∧ R u ∧
-    RunsTo (p.withExit ret) Cin u u' ∧ ABIReturnC u u' ∧ CbResumed s u' s'
+  next f s s' := f = "runtime.cgocallback.abi0" ∧ ∃ u ret u', CallbackEntry t p k.size s u ret ∧
+    R u ∧ RunsTo (p.withExit ret) Cin u u' ∧ ABIReturnC u u' ∧ CbResumed t s u' s'
 
 /-- The C-side assumption: `cgocallback` called (by `crosscall2`) with `fn = [SP+8]` the Go
 function at `fn`, in a state satisfying `G`, returns (`CbResume`) with memory that agrees with
-`E s` outside `cbClobber s`. -/
-def CallbackSpec (fn : Nat) (G : State → Prop) (E : State → Memory) : Contract where
+`E s` outside `cbClobber t s`. -/
+def CallbackSpec (t : TLSImage) (fn : Nat) (G : State → Prop) (E : State → Memory) : Contract where
   safe f s := f = "runtime.cgocallback.abi0" ∧ s.mem.readLE (s.sp.toNat + 8) 8 = fn ∧ G s
-  next f s s' := f = "runtime.cgocallback.abi0" ∧ ∃ m, CbResume s s' m ∧ MemFrame (E s) m (cbClobber s)
+  next f s s' := f = "runtime.cgocallback.abi0" ∧
+    ∃ m, CbResume s s' m ∧ MemFrame (E s) m (cbClobber t s)
 
-theorem CbResumed.memFrame {s u' s' : State} {E : Memory} (h : CbResumed s u' s')
+theorem CbResumed.memFrame {t : TLSImage} {s u' s' : State} {E : Memory} (h : CbResumed t s u' s')
     (hE : E.regions = s.mem.regions)
-    (hacc : ∀ a, Outside a 1 (cbClobber s) → s.mem.accessible a 1 false = true →
+    (hacc : ∀ a, Outside a 1 (cbClobber t s) → s.mem.accessible a 1 false = true →
       u'.mem.bytes a = E.bytes a)
-    (hna : ∀ a, Outside a 1 (cbClobber s) → s.mem.accessible a 1 false = false →
+    (hna : ∀ a, Outside a 1 (cbClobber t s) → s.mem.accessible a 1 false = false →
       s.mem.bytes a = E.bytes a) :
-    ∃ m, CbResume s s' m ∧ MemFrame E m (cbClobber s) := by
+    ∃ m, CbResume s s' m ∧ MemFrame E m (cbClobber t s) := by
   obtain ⟨m, hres, hreg, hb⟩ := h
   refine ⟨m, hres, ⟨fun a n ho => readLE_congr fun i hi => ?_, fun a n w => ?_⟩⟩
   · have ho1 := outside_one ho hi
@@ -839,27 +955,29 @@ theorem CbResumed.memFrame {s u' s' : State} {E : Memory} (h : CbResumed s u' s'
 
 /-- **Reverse composition** (C → Go). If the Go function at `fn` satisfies `EnsuresC` under `Cin`
 for every frame address `a`, with a precondition that follows from `G`, the trusted entry facts
-and `R`, and a postcondition from which the C memory `E s` follows, then the trusted contract
-`CgoCallback p Cin R` refines the C-side assumption `CallbackSpec fn G E`: a C-side theorem under
-`CallbackSpec` plus the Go-side `EnsuresC` give the C theorem under `CgoCallback` alone. -/
-theorem CgoCallback.refines {p : Program} {Cin : Contract} {R : State → Prop} {fn : Nat}
-    {G : State → Prop} {E : State → Memory}
+and `R`, and a postcondition from which the C memory `E s` follows, and `G` gives the stub's
+stack window and the runtime's readiness, then the trusted contract `CgoCallback t p Cin R k`
+refines the C-side assumption `CallbackSpec t fn G E`: a C-side theorem under `CallbackSpec` plus
+the Go-side `EnsuresC` give the C theorem under `CgoCallback` alone. -/
+theorem CgoCallback.refines {t : TLSImage} {p : Program} {Cin : Contract} {R : State → Prop}
+    {k : CbStack} {fn : Nat} {G : State → Prop} {E : State → Memory}
     {pre : W64 → State → Prop} {post : W64 → State → State → Prop}
     (hGo : ∀ a, EnsuresC p Cin fn [a] (pre a) (post a))
     (hstack : ∀ s, G s → CStack s cbStackScratch 32)
-    (hpre : ∀ s u ret, G s → CallbackEntry p s u ret → R u →
+    (hready : ∀ s, G s → k.Ready t s)
+    (hpre : ∀ s u ret, G s → CallbackEntry t p k.size s u ret → R u →
       pre (BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 16) 8)) u)
     (hE : ∀ s, G s → (E s).regions = s.mem.regions)
-    (hacc : ∀ s u ret u', G s → CallbackEntry p s u ret → R u → ABIReturnC u u' →
+    (hacc : ∀ s u ret u', G s → CallbackEntry t p k.size s u ret → R u → ABIReturnC u u' →
       post (BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 16) 8)) u u' →
-      ∀ a, Outside a 1 (cbClobber s) → s.mem.accessible a 1 false = true →
+      ∀ a, Outside a 1 (cbClobber t s) → s.mem.accessible a 1 false = true →
         u'.mem.bytes a = (E s).bytes a)
-    (hna : ∀ s, G s → ∀ a, Outside a 1 (cbClobber s) → s.mem.accessible a 1 false = false →
+    (hna : ∀ s, G s → ∀ a, Outside a 1 (cbClobber t s) → s.mem.accessible a 1 false = false →
       s.mem.bytes a = (E s).bytes a) :
-    (CgoCallback p Cin R).Refines (CallbackSpec fn G E) := by
+    (CgoCallback t p Cin R k).Refines (CallbackSpec t fn G E) := by
   intro f s ⟨hf, hfn, hG⟩
   have hfnv : BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 8) 8) = BitVec.ofNat 64 fn := by rw [hfn]
-  have hcall : ∀ u ret, CallbackEntry p s u ret →
+  have hcall : ∀ u ret, CallbackEntry t p k.size s u ret →
       CallSetup (p.withExit ret) fn [BitVec.ofNat 64 (s.mem.readLE (s.sp.toNat + 16) 8)] u :=
     fun u ret he => {
       pc := by rw [he.pc, hfnv]
@@ -867,7 +985,7 @@ theorem CgoCallback.refines {p : Program} {Cin : Contract} {R : State → Prop} 
       args := fun i hi => by
         have : i = 0 := by simp at hi; omega
         subst this; simpa using he.arg }
-  refine ⟨⟨hf, hstack s hG, fun u ret he hR => ?_⟩, ?_⟩
+  refine ⟨⟨hf, hstack s hG, hready s hG, fun u ret he hR => ?_⟩, ?_⟩
   · exact (hGo _ ret he.retAddr u (hcall u ret he) (hpre s u ret hG he hR)).mono fun _ h => h.1
   · rintro s' ⟨hf', u, ret, u', he, hR, hrun, hab, hres⟩
     refine ⟨hf', ?_⟩
