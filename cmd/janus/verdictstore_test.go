@@ -111,3 +111,35 @@ func TestJ1cVerdictStoreSafety(t *testing.T) {
 		t.Error("a store that is a link was accepted")
 	}
 }
+
+// (a) the key covers the leanchecker binary and the toolchain library, not only the modules; (c)
+// a failed replay records nothing, so only a pass is ever reused.
+func TestJ1cVerdictKeyCoversCheckerAndOnlyPassesAreStored(t *testing.T) {
+	newVerdictDir(t)
+	vs, _, _ := externalVerdictStore(map[string]string{"fresh": "true"})
+	tc := fakeToolchain(t)
+	fw := &pinnedLib{want: pins{"Janus.olean": "aa"}}
+	k0 := frameworkVerdictKey(tc.cacheID(), fw)
+	writeBytes(t, tc.leanchecker, []byte("#!other-checker"))
+	k1 := frameworkVerdictKey(newFakeTC(tc.sysroot).cacheID(), fw)
+	if k0 == k1 {
+		t.Error("a changed leanchecker binary kept the verdict key")
+	}
+	writeBytes(t, filepath.Join(tc.sysroot, "lib/lean/Init/Prelude.olean"), []byte("PRELUDE"))
+	if frameworkVerdictKey(newFakeTC(tc.sysroot).cacheID(), fw) == k1 {
+		t.Error("a changed toolchain library kept the verdict key")
+	}
+	// a failing replay stores no verdict, for this key or any other
+	f := startFrameworkReplayIn(vs, "leanchecker", func(argv ...string) (string, error) { return "bad", os.ErrInvalid }, k1, fw, false, nil, true, true)
+	f.wait()
+	if f.err == nil || vs.has(k1) || vs.has(k0) {
+		t.Fatalf("failed replay: err %v, verdict stored %v", f.err, vs.has(k1))
+	}
+	// a pass stores a verdict for its own key only
+	f = startFrameworkReplayIn(vs, "leanchecker", func(argv ...string) (string, error) { return "", nil }, k1, fw, false, nil, true, true)
+	f.wait()
+	f.release()
+	if !vs.has(k1) || vs.has(k0) {
+		t.Errorf("a pass: own key %v, other key %v", vs.has(k1), vs.has(k0))
+	}
+}
