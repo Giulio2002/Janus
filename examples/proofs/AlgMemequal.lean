@@ -114,11 +114,11 @@ theorem tail (S : State) (x y k : Nat) (hk : k < 16) (hpc : S.pc = BitVec.ofNat 
   all_goals
     refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl, ?_⟩
     first
-    | (refine fin_res (hw 8 (by omega) (by omega)) ?_ ?_ <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
-    | (refine fin_res (hw 4 (by omega) (by omega)) ?_ ?_ <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
-    | (refine fin_res h3 ?_ ?_ <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
-    | (refine fin_res (hw 2 (by omega) (by omega)) ?_ ?_ <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
-    | (refine fin_res (hw 1 (by omega) (by omega)) ?_ ?_ <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
+    | ((with_reducible (refine fin_res (hw 8 (by omega) (by omega)) ?_ ?_)) <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
+    | ((with_reducible (refine fin_res (hw 4 (by omega) (by omega)) ?_ ?_)) <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
+    | ((with_reducible (refine fin_res h3 ?_ ?_)) <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
+    | ((with_reducible (refine fin_res (hw 2 (by omega) (by omega)) ?_ ?_)) <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
+    | ((with_reducible (refine fin_res (hw 1 (by omega) (by omega)) ?_ ?_)) <;> clear hw h3 <;> intro hP <;> simp_all [setReg])
     | (simp [setReg])
 
 
@@ -126,8 +126,8 @@ theorem tail (S : State) (x y k : Nat) (hk : k < 16) (hpc : S.pc = BitVec.ofNat 
 theorem Fin.of {S S1 S' : State} {b b' : Bool} (h : Fin S1 S' b) (hsp : S1.sp = S.sp)
     (hm : S1.mem = S.mem) (h18 : S1.regs 18 = S.regs 18) (h28 : S1.regs 28 = S.regs 28)
     (h29 : S1.regs 29 = S.regs 29) (hdz : S1.dczid = S.dczid) (htp : S1.tpidr = S.tpidr)
-    (hfc : S1.fpcr = S.fpcr) (hb : b = b') (hex : S1.excl = S.excl := by first | rfl | simp_all)
-    (hep : S1.exclPass = S.exclPass := by first | rfl | simp_all) : Fin S S' b' := by
+    (hfc : S1.fpcr = S.fpcr) (hb : b = b') (hex : S1.excl = S.excl := by first | with_reducible rfl | simp_all)
+    (hep : S1.exclPass = S.exclPass := by first | with_reducible rfl | simp_all) : Fin S S' b' := by
   obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, e1, e2, a9⟩ := h
   subst hb
   exact ⟨a1.trans hsp, a2.trans hm, a3.trans h18, a4.trans h28, a5.trans h29, a6.trans hdz,
@@ -202,7 +202,7 @@ theorem loop16 (j : Nat) : ∀ (S : State) (x y R : Nat), 1 ≤ j → R < 2 ^ 64
     | -- the next chunk
       (refine rr_mono (ih _ (x + 16) (y + 16) R (by omega) hR rfl
          (by simp [setReg, ofNat_add16]) (by simp [setReg, ofNat_add16]) (by simp [setReg, h2])
-         (by simp [setReg, h6]; congr 1; omega) (by omega) (by omega)
+         (by simp [setReg, h6]; with_reducible congr 1; omega) (by omega) (by omega)
          (Memory.accessible_mono _ hax (by omega) (by omega))
          (Memory.accessible_mono _ hay (by omega) (by omega))
          (by simpa [setReg] using hl1) (by simpa [setReg] using hl2)) ?_
@@ -337,7 +337,7 @@ theorem loop64 (j : Nat) : ∀ (S : State) (x y R : Nat), 1 ≤ j → R < 2 ^ 64
     | -- the next chunk
       (refine rr_mono (ih _ (x + 64) (y + 64) R (by omega) hR rfl
          (by simp [setReg, ofNat_add64]) (by simp [setReg, ofNat_add64]) (by simp [setReg, h2])
-         (by simp [setReg, h6]; congr 1; omega) (by omega) (by omega)
+         (by simp [setReg, h6]; with_reducible congr 1; omega) (by omega) (by omega)
          (Memory.accessible_mono _ hax (by omega) (by omega))
          (Memory.accessible_mono _ hay (by omega) (by omega))
          (by simpa [setReg] using hl1) (by simpa [setReg] using hl2)) ?_
