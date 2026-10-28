@@ -350,6 +350,58 @@ group-writable cache root, a symbolic link among the cache directories and a 064
 the unit rows for the toolchain identity. Every row must be blocked. There is no long-lived verification daemon (`janus serve`): docs/TESTING.md
 explains why it would not pay for the trusted state it would add.
 
+### Incremental gate records
+
+`janus incr` (`cmd/janus/incr.go`, `scripts/lib/incr.sh`) lets the merge gate (`scripts/gate.sh --incremental`,
+`scripts/verify-all-examples.sh --incremental`) skip an item when it has the record of a PASS of exactly
+the same inputs. The default is a FULL run that skips nothing, and the full cold gate stays mandatory before every push to
+main and nightly. A skip is never a new proof: it replays a verification that the kernel, the auditor
+and the replay checked in full with identical inputs; every item that runs is checked in full, unchanged.
+What it relies on:
+
+* **Key.** The SHA-256 of named components, each a content hash: the item (id, kind, its arguments: the
+  theorems it checks, the extraction options); the environment variables that can change an outcome (every
+  `JANUS_*`, `LEAN*`, `LAKE*`, `ELAN*`, `GO*`, `CGO_*`, memory-limit and `KEEP` variable except those that only
+  name an output location or a degree of parallelism); the **verifier** (the Go-only variant of the
+  identity of "Result-cache verifier identity": the Go source, `go.mod`/`go.sum`, the dependencies and every
+  build setting janus was built with, or the executable's bytes when that cannot be established; the
+  embedded Lean is keyed per item instead); the toolchain (version, the bytes of `lean` and `leanchecker`, the
+  metadata of its library files); the framework the item is checked against (embedded in the binary, and/or
+  a checkout for `--janus-root`): `lakefile.toml`, `lake-manifest.json`, `lean-toolchain`, **the
+  transitive import closure of the item's modules computed from their actual `import` lines** (the proof
+  files, the item's package, its extraction), with the source of every module and the compiled module data
+  (`.olean`, `.olean.server`, `.olean.private`, `.ir`) of every framework module in it, and the auditor (the
+  sources and compiled modules of `Janus.Tools.Audit`/`AuditMain` with their closure and the SHA-256 of
+  the compiled `janus-audit`); the proof files; package directories (every file); the extraction (every file
+  of the artifact directory except the verifier's own outputs, `identity.json` without its `binary`
+  path, and the binary it names, read and checked against `binarySha256`); other inputs (binaries); the pins
+  (`cmd/janus/stubpins_gen.go` and its generator); and the gate scripts and libraries that run the item.
+  Lanes (go test, the audit rounds, x86formal, the rt-asl groups) are keyed by every file of the working
+  tree except documentation, the full verifier identity, the machine, and the prebuilt example binaries.
+  Components are length-framed, so no two different inputs hash alike by concatenation.
+* **Fail closed.** Anything that cannot be read, parsed or hashed makes the item unkeyed, and an unkeyed
+  item always runs: an `import` the header parser cannot read exactly, a module found in no source root or
+  in two, a framework module without compiled data, a missing file, a binary that is not the one
+  `identity.json` names, `JANUS_ROOT` set while the item uses the embedded framework, a toolchain without
+  `leanchecker` (the replay would be skipped), a verifier that cannot be identified, a tree that is not a
+  git working tree. An unknown framework mode is an error, not a default.
+* **Records.** Written only by `janus incr record`, which `scripts/lib/incr.sh` calls after an item
+  ran, and only for exit status 0 with a key, recomputed after the run, equal to the key computed before
+  it (an input that changed while the item ran is never recorded). A run that failed or timed out writes nothing and
+  withdraws any earlier record of its key. Each record is authenticated with HMAC-SHA256 under the per-user
+  key of the result cache (a different domain from result entries: `janus-incr-record-v1`, over the
+  key and the exact bytes of the record body) and stored in `v1/result/.incr/`, which is private (0700, files
+  0600, owner checked, `O_NOFOLLOW`) and, like the rest of `v1/result`, invisible to sandboxed code. A record that is missing,
+  unparsable, has trailing data or unknown fields, is truncated, was modified, was copied to another
+  key's path, was authenticated under another key or another domain, or is not a `pass` of its own key
+  is a miss.
+* **Not a trust shortcut for the whole gate.** The prebuild (framework build, the replay verdict
+  of the whole framework by a first verification, example builds), the axiom guard, and the build lanes
+  always run. The per-item key covers what the item imports; a failure in a framework module the item does not
+  import is found by those stages.
+* **Out of scope**, as for the result cache: code running as the same user outside the sandbox can write
+  records. `docs/TESTING.md` "Incremental gate" lists the attacks tried (`cmd/janus/incr_test.go`).
+
 ### Cache eviction
 
 The cache collector (`janus cache gc`, and automatically after `verify`, `verify-batch` and

@@ -106,6 +106,45 @@ re-record on a green full gate and say why in the commit message.
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
 `python3 -I scripts/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.
 
+## Incremental gate (`--incremental`)
+
+**The default is a FULL run.** `scripts/gate.sh` and `scripts/verify-all-examples.sh` skip nothing unless asked; the
+full cold gate stays **mandatory before every push to main and nightly**. `scripts/gate.sh --incremental` (or
+`JANUS_GATE_INCREMENTAL=1`; `verify-all-examples.sh --incremental`, `--changed` is an alias) is for the merge gate of a
+branch: it skips an item or lane only on the record of a PASS whose key is identical. Every item that runs is checked
+in full, and the prebuild, the build lanes and the axiom guard always run. Every full run (and every incremental run)
+records the passes it sees, so a full gate feeds the next incremental one. Design and trust argument:
+docs/SOUNDNESS.md "Incremental gate records"; code: `cmd/janus/incr.go` (`janus incr check|record|explain`),
+`scripts/lib/incr.sh`.
+
+**What an item's key hashes** (all by content): the item and its arguments; the relevant environment
+(`JANUS_*` except output/parallelism variables, `LEAN*`, `LAKE*`, `GO*`, `CGO_*`, memory limits, ...); the verifier
+identity (Go-only variant, `cmd/janus/verifierid.go`); the Lean toolchain; the framework configuration and the
+**transitive import closure** of the item's modules (sources and compiled module data of every framework module it
+imports, found by following the real `import` lines); the auditor (sources, compiled modules, `janus-audit`) and
+`leanchecker`; the proof file(s), package and extraction (`Extracted.lean`, `identity.json`, the binary); the pins; the
+gate scripts and libraries. Lanes (`gotest`, `rounds`, `x86`, `rtasl-*`) hash the whole working tree except `docs/`,
+`assets/` and `*.md` (docs/SOUNDNESS.md is hashed, an audit row reads it), plus the machine.
+
+**Reading the result.** Every item prints `skipped (unchanged: incremental; recorded PASS of <time> on <host> at <commit>,
+<s>s then; key <hash>)` or its usual result line. The verify lane prints an `incremental report` (RAN or SKIPPED for
+every item, totals) and the gate report prints `RAN / SKIPPED` for every item and lane. The verdict says `GATE PASS
+(INCREMENTAL: ...)`.
+
+**Debugging a miss.** `scripts/gate.sh --explain arm64:Add` (also `cgo:amd64/CAdd`, `lane:gotest`) prints every key
+component with its hash, the key, and whether a record exists; run it before and after a change and diff the two
+outputs (`bin/janus incr explain ... --verbose` also lists the closure module by module). It reads the state of an
+earlier run and runs and records nothing.
+
+**What the tests attack** (`cmd/janus/incr_test.go`, `go test -run Incr ./cmd/janus`): an edit of each input class
+(proof, an imported module one and three levels deep, its compiled data, the toolchain string and binaries, the
+verifier identity, the auditor's source/module/executable, the pins, the scripts, each relevant environment
+variable, the extraction and its binary, the item's arguments) is a miss; an edit of a framework module the item
+does not import, of the verifier's own output files or of documentation is a skip; a tampered, truncated,
+re-keyed, copied, foreign-key, wrong-domain, symlinked or trailing-garbage record is a miss; a record from a
+failed run is never written and withdraws an older one; inputs that change during the run are not recorded; an
+input that cannot be hashed makes the item always run; key framings do not collide.
+
 ## Gate speed (2026-10-25): profile, changes, before/after
 
 The merge gate and every agent's regression run are `go test ./cmd/...`,
