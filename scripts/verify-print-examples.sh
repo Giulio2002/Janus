@@ -16,7 +16,9 @@
 # modules once per extraction and the four theorems of an example share that build (and the kernel
 # replay). Every example proves `correctness`, `full_output`, `Witness.nonvacuous` (all hypotheses
 # satisfiable together, with witness code at the contract addresses) and `Witness.returns`.
-# Usage: scripts/verify-print-examples.sh [isa/Name ...]   (default: all, e.g. arm64/PrintX)
+# Usage: scripts/verify-print-examples.sh [-j N] [--list] [isa/Name ...]   (default: all, e.g. arm64/PrintX)
+#   -j N     rows at once (default: $JANUS_JOBS, else see scripts/lib/parallel.sh)
+#   --list   print the default rows, one per line, and exit (scripts/verify-all-examples.sh queues them).
 # Writes artifacts/print/<isa>/<Name>/verified.json and a summary to
 # artifacts/verify-print-examples.txt.
 set -euo pipefail
@@ -24,16 +26,26 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 . "$root/scripts/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
+# shellcheck source=lib/parallel.sh
+. "$root/scripts/lib/parallel.sh"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
 
 all=(PrintX PrintBool PrintNeg PrintStr)
-names=("$@")
-if [ ${#names[@]} -eq 0 ]; then
+default_rows() {
+  local isa n
   for isa in arm64 amd64; do
     for n in "${all[@]}"; do
-      [ -f "examples/proofs-print/PrintProofs/${isa^}/$n.lean" ] && names+=("$isa/$n")
+      [ ! -f "examples/proofs-print/PrintProofs/${isa^}/$n.lean" ] || echo "$isa/$n"
     done
   done
-fi
+}
+if [ "${1:-}" = --list ]; then default_rows; exit 0; fi
+memguard_self "$@"
+par_init "$@"
+set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
+names=("$@")
+[ ${#names[@]} -gt 0 ] || mapfile -t names < <(default_rows)
 
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
   go build -o bin/janus ./cmd/janus
@@ -54,8 +66,10 @@ trap 'rm -rf "$snap"' EXIT
 cp -r examples/proofs-print/. "$snap"/
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-print-examples.txt}"
 : > "$summary"
-fail=0
-for target in "${names[@]}"; do
+lines="$(mktemp -d)"
+broken=()
+verify_one() {
+  local target=$1 isa n out others m start t ok thm
   isa="${target%%/*}"; n="${target#*/}"
   out="artifacts/print/$isa/$n"
   mkdir -p "$out"
@@ -72,17 +86,27 @@ for target in "${names[@]}"; do
     if ! jv "$out" --proof "$snap/PrintProofs/${isa^}/$n.lean" --proof-root "$snap" \
         --theorem "Proof.$thm" \
         ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
-      ok=0; echo "  $isa/$n: Proof.$thm FAILED"
+      ok=0; echo "  $target: Proof.$thm FAILED"
     fi
   done
   t=$(echo "$(date +%s.%N) - $start" | bc)
   if [ $ok = 1 ]; then
-    printf '%-18s ok  %6.1fs\n' "$isa/$n" "$t" | tee -a "$summary"
+    printf '%-18s ok  %6.1fs\n' "$target" "$t" | tee "$lines/${isa}_$n"
   else
-    printf '%-18s FAILED (see %s/verify.log)\n' "$isa/$n" "$out" | tee -a "$summary"
+    printf '%-18s FAILED (see %s/verify.log)\n' "$target" "$out" | tee "$lines/${isa}_$n"
     tail -30 "$out/verify.log"
-    fail=1
+    broken+=("print:$target")
   fi
+  return 0
+}
+for target in "${names[@]}"; do
+  par_run 'verify_one "$target"'
 done
+par_wait
+for target in "${names[@]}"; do
+  f="$lines/${target%%/*}_${target#*/}"
+  if [ -f "$f" ]; then cat "$f" >> "$summary"; else echo "$target  FAILED (no result)" >> "$summary"; broken+=("print:$target"); fi
+done
+rm -rf "$lines"
 cat "$summary"
-exit $fail
+[ ${#broken[@]} -eq 0 ] && ! grep -q FAILED "$summary"

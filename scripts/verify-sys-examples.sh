@@ -12,22 +12,35 @@
 #   AESField, SVEField  (arm64 only, N5) fields of ID_AA64ISAR0_EL1 / ID_AA64PFR0_EL1: the
 #                feature-ID register read is an arbitrary 64-bit value (Kernel.Site.mrs .idreg)
 #
-# Usage: scripts/verify-sys-examples.sh [isa/Name ...]   (default: all, e.g. arm64/WriteOut)
+# Usage: scripts/verify-sys-examples.sh [-j N] [--list] [isa/Name ...]   (default: all, e.g. arm64/WriteOut)
+#   -j N     rows at once (default: $JANUS_JOBS, else see scripts/lib/parallel.sh); the theorems of one
+#            row run up to two at once (scripts/lib/theorems.sh).
+#   --list   print the default rows, one per line, and exit (scripts/verify-all-examples.sh queues them).
 # Writes artifacts/sys/<isa>/<Name>/verified.json and a summary to artifacts/verify-sys-examples.txt.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 . "$root/scripts/lib/itemtimeout.sh"
 export PATH=/usr/local/go/bin:$PATH
+# shellcheck source=lib/parallel.sh
+. "$root/scripts/lib/parallel.sh"
+# shellcheck source=lib/memguard.sh
+. "$root/scripts/lib/memguard.sh"
 
 all=(WriteOut NowNano Pid MustNonNeg)
-names=("$@")
-if [ ${#names[@]} -eq 0 ]; then
+default_rows() {
+  local isa n
   for isa in arm64 amd64; do
-    for n in "${all[@]}"; do names+=("$isa/$n"); done
+    for n in "${all[@]}"; do echo "$isa/$n"; done
   done
-  names+=(arm64/AESField arm64/SVEField)
-fi
+  echo arm64/AESField; echo arm64/SVEField
+}
+if [ "${1:-}" = --list ]; then default_rows; exit 0; fi
+memguard_self "$@"
+par_init "$@"
+set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}
+names=("$@")
+[ ${#names[@]} -gt 0 ] || mapfile -t names < <(default_rows)
 
 # the extraction arguments of an example: the runtime contracts it leaves out
 sys_args() {
@@ -43,43 +56,61 @@ if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
 fi
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
+. scripts/lib/theorems.sh
 
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-sys-examples.txt}"
 : > "$summary"
-fail=0
-for target in "${names[@]}"; do
+lines="$(mktemp -d)"
+broken=()
+
+# verify_one ISA/NAME: extract the row, verify its theorems (the main ones, then the non-vacuity
+# witnesses where there are some), up to two at once; prints its result line (kept in $lines).
+verify_one() {
+  local target=$1 isa n out b start t st i
   isa="${target%%/*}"; n="${target#*/}"
   out="artifacts/sys/$isa/$n"
+  local -a args=() thms=()
   mapfile -t args < <(sys_args "$n")
   mkdir -p "$out"
   b="artifacts/examples-sys-$isa"; case "$n" in AESField|SVEField) b="artifacts/examples-sys-idreg-$isa" ;; esac
   bin/janus extract "$b" "example.com/sys.$n" "$out" ${args[@]+"${args[@]}"} >/dev/null 2>&1
-  : > "$out/verify.log"
-  start=$(date +%s.%N)
-  ok=1
-  for thm in $(grep -oE '^theorem (correctness|traps|full_write)' "examples/proofs-sys/$isa/$n.lean" | awk '{print $2}'); do
-    if ! jv "$out" --proof "examples/proofs-sys/$isa/$n.lean" --theorem "Proof.$thm" \
-        ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
-      ok=0; echo "  $isa/$n: Proof.$thm FAILED"
-    fi
-  done
+  local thm
+  for thm in $(grep -oE '^theorem (correctness|traps|full_write)' "examples/proofs-sys/$isa/$n.lean" | awk '{print $2}'); do thms+=("Proof.$thm"); done
   # the non-vacuity witnesses (Proof.Witness.nonvacuous, Proof.Witness.returns) where there are some
-  if grep -q '^namespace Witness' "examples/proofs-sys/$isa/$n.lean"; then
-    for thm in Proof.Witness.nonvacuous Proof.Witness.returns; do
-      if ! jv "$out" --proof "examples/proofs-sys/$isa/$n.lean" --theorem "$thm" \
-          ${extra[@]+"${extra[@]}"} >> "$out/verify.log" 2>&1; then
-        ok=0; echo "  $isa/$n: $thm FAILED"
-      fi
-    done
+  if grep -q '^namespace Witness' "examples/proofs-sys/$isa/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
+  if [ ${#thms[@]} -eq 0 ]; then
+    printf '%-18s FAILED (no theorem found in examples/proofs-sys/%s/%s.lean)\n' "$target" "$isa" "$n" | tee "$lines/${isa}_$n"
+    broken+=("sys:$target"); return 0
   fi
+  st="$(mktemp -d)"
+  start=$(date +%s.%N)
+  verify_theorems "$out" "examples/proofs-sys/$isa/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"} || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)
+  cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
+  local ok=1
+  for ((i = 0; i < ${#thms[@]}; i++)); do
+    if [ "$(cat "$st/$i.rc" 2>/dev/null)" != 0 ]; then ok=0; echo "  $target: ${thms[$i]} FAILED"; fi
+  done
   if [ $ok = 1 ]; then
-    printf '%-18s ok  %6.1fs\n' "$isa/$n" "$t" | tee -a "$summary"
+    printf '%-18s ok  %6.1fs\n' "$target" "$t" | tee "$lines/${isa}_$n"
   else
-    printf '%-18s FAILED (see %s/verify.log)\n' "$isa/$n" "$out" | tee -a "$summary"
+    printf '%-18s FAILED (see %s/verify.log)\n' "$target" "$out" | tee "$lines/${isa}_$n"
     tail -30 "$out/verify.log"
-    fail=1
+    broken+=("sys:$target")
   fi
+  rm -rf "$st"
+  return 0
+}
+
+for target in "${names[@]}"; do
+  par_run 'verify_one "$target"'
 done
+par_wait
+for target in "${names[@]}"; do
+  f="$lines/${target%%/*}_${target#*/}"
+  if [ -f "$f" ]; then cat "$f" >> "$summary"; else echo "$target  FAILED (no result)" >> "$summary"; broken+=("sys:$target"); fi
+done
+rm -rf "$lines"
+echo
 cat "$summary"
-exit $fail
+[ ${#broken[@]} -eq 0 ] && ! grep -q FAILED "$summary"
