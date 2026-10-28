@@ -54,8 +54,11 @@ for ((i = 0; i < ${#args[@]}; i++)); do
 done
 # the incremental gate (scripts/lib/incr.sh): skipping is opt-in; recording the passes is the default
 [ -z "$changed" ] || export JANUS_GATE_INCREMENTAL=1
-[ -z "$explain" ] || export JANUS_INCR_EXPLAIN=1
+if [ -n "$explain" ]; then export JANUS_INCR_EXPLAIN=1; else unset JANUS_INCR_EXPLAIN JANUS_INCR_PRECHECK; fi
 export JANUS_INCR_RECORD="${JANUS_INCR_RECORD:-1}"
+# records are written only for a clean tree that does not change during the run (scripts/lib/incr.sh)
+. scripts/lib/incr.sh
+incr_tree_pin
 
 # JANUS_EXAMPLES_PREBUILT=1 (scripts/gate.sh): bin/janus, the examples' binaries and the framework
 # build exist already (built once by the gate); nothing is rebuilt.

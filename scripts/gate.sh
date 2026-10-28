@@ -103,6 +103,11 @@ while [ $# -gt 0 ]; do
     *) echo "usage: scripts/gate.sh [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
   esac
 done
+if [ -z "$explain_item" ]; then
+  # --explain mode and the pre-check mode make incr_begin report "skipped" without verifying anything: a variable
+  # left in the environment must never reach a verifying gate
+  unset JANUS_INCR_EXPLAIN JANUS_INCR_PRECHECK
+fi
 if [ -n "$explain_item" ]; then
   # --explain: no prebuild, no admission, no run; reads the prebuilt state of an earlier run
   export JANUS_INCR_EXPLAIN=1
@@ -120,6 +125,8 @@ export JANUS_JOBS=$jobs_n
 # incremental skipping is opt-in (the default is a full run); recording the passes is always on, so a full run
 # feeds the next incremental one
 export JANUS_INCR_RECORD=1
+# records are written only for a clean tree that does not change during the run (scripts/lib/incr.sh)
+unset JANUS_GATE_TREE0; incr_tree_pin
 if [ -n "$incremental" ]; then export JANUS_GATE_INCREMENTAL=1; else unset JANUS_GATE_INCREMENTAL; fi
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
 

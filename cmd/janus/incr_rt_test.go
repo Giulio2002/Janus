@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -871,4 +872,19 @@ func TestRT12PartialLaneArgumentsAreInTheKey(t *testing.T) {
 	x.wantSkip()
 	x.sp.Args = []string{"lane:gotest", "run:", "shards:2"}
 	x.wantRun()
+}
+
+// the shell side of the red team: scripts/lib/test-rt-incr.sh (explain/pre-check variables, the tree pin,
+// failed items, script coverage, the go configuration of lanes)
+func TestRTIncrScripts(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "lib", "test-rt-incr.sh"))
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil || bytes.Contains(out, []byte("\nFAIL ")) || bytes.HasPrefix(out, []byte("FAIL ")) {
+		t.Fatalf("scripts/lib/test-rt-incr.sh: %v\n%s", err, out)
+	}
 }

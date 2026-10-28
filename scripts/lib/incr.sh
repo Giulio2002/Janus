@@ -55,6 +55,34 @@ incr_script_flags() {
 # the pins: the stub pins (also compiled into the verifier) and their generator
 incr_pin_flags() { printf '%s\n' --pin cmd/janus/stubpins_gen.go --pin scripts/gen-stubpins.sh --pin scripts/stubpins/main.go; }
 
+# ---- the tree pin: records are written only for a run of a CLEAN tree that did not change while it ran.
+# A key is computed from the live tree, but some items verify a copy made earlier (the print snapshot, the
+# isolated lake trees of the lane copies): an edit between the copy and the key would record a PASS of
+# content that was never verified. So a record needs (a) a clean git tree (no tracked change, no untracked
+# non-ignored file) when the gate started, and (b) the same tree stamp (path, size, mtime, ctime, inode of every
+# non-ignored file, and HEAD) when the record is written. Skipping does not need it (a skip is for the exact
+# content the key names).
+incr_tree_stamp() {
+  {
+    git rev-parse HEAD 2>/dev/null
+    git ls-files -z -c -o --exclude-standard 2>/dev/null | grep -zv -e '\.pyc$' -e '__pycache__/' |
+      xargs -0 -r stat -c '%n %s %.9Y %.9Z %i' 2>/dev/null
+  } | sha256sum | cut -d' ' -f1
+}
+incr_tree_clean() {
+  git rev-parse --git-dir >/dev/null 2>&1 || return 1
+  [ -z "$(git status --porcelain --untracked-files=all 2>/dev/null | grep -v -e '\.pyc$' -e '__pycache__/')" ]
+}
+# incr_tree_pin: call once, at the start of a gate (scripts/gate.sh, scripts/verify-all-examples.sh); idempotent
+incr_tree_pin() {
+  [ -z "${JANUS_GATE_TREE0:-}" ] || return 0
+  if incr_tree_clean; then JANUS_GATE_TREE0=$(incr_tree_stamp); else JANUS_GATE_TREE0=dirty; fi
+  export JANUS_GATE_TREE0
+}
+incr_tree_ok() {
+  [ -n "${JANUS_GATE_TREE0:-}" ] && [ "$JANUS_GATE_TREE0" != dirty ] && [ "$(incr_tree_stamp)" = "$JANUS_GATE_TREE0" ]
+}
+
 INCR_KEY=""
 INCR_STARTED=""
 INCR_MSG=""
@@ -98,6 +126,11 @@ incr_end() { # ID KIND RC SECS SPEC...
   shift 4
   incr_recording || return 0
   [ -x bin/janus ] || return 0
+  # a record needs a clean tree that did not change since the gate started (see incr_tree_pin)
+  if [ "$rc" = 0 ] && ! incr_tree_ok; then
+    echo "incr: not recorded: the working tree was dirty when the gate started or changed while it ran (a record must describe what was verified)"
+    return 0
+  fi
   local -a flags=()
   mapfile -t flags < <(incr_script_flags "$kind"; incr_pin_flags)
   bin/janus incr record --id "$id" --kind "$kind" --rc "$rc" --wall "$secs" --pre-key "$INCR_KEY" \
@@ -138,7 +171,13 @@ incr_lane() {
   shift 2
   if ! incr_active; then eval "$code"; return $?; fi
   local -a spec=(--no-fw --full-verifier --host --tree . --tree-exclude docs/ --tree-exclude assets/ --tree-exclude '*.md'
-    --tree-exclude LICENSE --tree-exclude artifacts/ "$@" --arg "lane:$name" --arg "go:$(go version 2>/dev/null)" --file docs/SOUNDNESS.md)
+    --tree-exclude LICENSE --tree-exclude artifacts/ "$@" --arg "lane:$name" --arg "go:$(go version 2>/dev/null)" --file docs/SOUNDNESS.md
+    # the Go configuration the lane builds under: GOENV/GOMODCACHE are not in the environment part of the key,
+    # so its settings (the go env file can set GOFLAGS, tags, GOEXPERIMENT...), the file and go.work are keyed here
+    --arg "goenv:$(go env -json 2>/dev/null)" --arg "goenvfile:$(cat "$(go env GOENV 2>/dev/null)" 2>/dev/null)")
+  local gw
+  gw="$(go env GOWORK 2>/dev/null)"
+  if [ -n "$gw" ] && [ "$gw" != off ]; then spec+=(--file "$gw"); [ ! -f "$gw.sum" ] || spec+=(--file "$gw.sum"); fi
   # the prebuilt binaries every lane reads
   for f in artifacts/examples-*; do [ ! -f "$f" ] || spec+=(--file "$f"); done
   if incr_begin "lane:$name" lane "${spec[@]}"; then echo "$INCR_MSG"; return 0; fi
