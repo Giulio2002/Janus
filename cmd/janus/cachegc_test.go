@@ -865,6 +865,9 @@ func TestPoolLib(t *testing.T) { runLibSelfTest(t, "test-pool.sh") }
 
 func TestSpeedcheckLib(t *testing.T) { runLibSelfTest(t, "test-speedcheck.sh") }
 
+// TestGateCancelLib: the gate cancels through its own process group only (two runs, one cancelled).
+func TestGateCancelLib(t *testing.T) { runLibSelfTest(t, "test-pgcancel.sh") }
+
 func runLibSelfTest(t *testing.T, name string) {
 	t.Helper()
 	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "lib", name))

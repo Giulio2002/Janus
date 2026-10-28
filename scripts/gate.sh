@@ -13,7 +13,14 @@
 #   --filter ERE   verify lane: only the items whose id matches (scripts/verify-all-examples.sh --filter)
 #   --gotest-run ERE   go test lane: only the tests whose name matches
 #   --rounds LIST  audit lane: only these rounds (audit/run-rounds.sh, e.g. "r2 r3")
-#   --update-baseline  after a passing FULL run, rewrite scripts/speed-baseline.tsv from its timeline
+#   --speed-baseline record|enforce   `enforce` (default): compare with scripts/speed-baseline.tsv (fail on a
+#               >1.5x item or total; with no file, "speed check NOT enforced: no baseline" is printed loudly
+#               in the summary). `record`: after a passing FULL run write the baseline from the run (only
+#               items that PASSED; the host load is in its header); commit it after a green full gate.
+#
+# Cancel a run: it is its own process group, and writes the group id to <out>/pgid; cancel with
+#   kill -- -$(cat <out>/pgid)
+# (or stop its memcap scope). Never kill by name or pattern: other gates share this host.
 #   --only/--skip  stage lists (names below); a partial run says PARTIAL and writes no lane times.
 #   --out DIR   logs and the timeline (default artifacts/gate/<UTC timestamp>, linked as artifacts/gate/latest)
 #
@@ -54,7 +61,7 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/memguard.sh"
 memguard_self "$@"
 
-jobs_n="${JANUS_JOBS:-2}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd=""
+jobs_n="${JANUS_JOBS:-2}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce
 while [ $# -gt 0 ]; do
   case "$1" in
     -j|--jobs) jobs_n="${2:?-j needs a number}"; shift 2 ;;
@@ -67,7 +74,8 @@ while [ $# -gt 0 ]; do
     --filter) vfilter="${2:?}"; shift 2 ;;
     --gotest-run) gtrun="${2:?}"; shift 2 ;;
     --rounds) rounds="${2:?}"; shift 2 ;;
-    --update-baseline) upd=1; shift ;;
+    --update-baseline) sbmode=record; shift ;;
+    --speed-baseline) sbmode="${2:?}"; shift 2 ;;
     -h|--help) sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 0 ;;
     *) echo "usage: scripts/gate.sh [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
   esac
@@ -104,6 +112,17 @@ now() { date +%s.%N; }
 mkdir -p "$out/prebuild" "$out/lanes" "$out/verify"
 ln -sfn "$out" "$root/artifacts/gate/latest" 2>/dev/null || true
 tlf="$out/timeline.jsonl"; : > "$tlf"
+# Own process group (setsid, once): every child of this run is in it, and a cancel is `kill -- -PGID`.
+if [ "${JANUS_GATE_PG:-}" != "$out" ]; then
+  export JANUS_GATE_PG="$out"
+  exec setsid --wait "$0" "$@" --out "$out"
+fi
+echo "$$" > "$out/pgid"
+echo "gate: process group $$ (cancel: kill -- -$$)"
+cleanup() { rm -rf "$out/tree-x86" "$out/tree-asl"; }
+cancel() { trap '' TERM INT; echo "gate: cancelled"; kill -TERM -- -$$ 2>/dev/null; cleanup; exit 143; }
+trap cancel TERM INT
+trap cleanup EXIT
 tl_stage() { # KIND NAME START END RC
   printf '{"kind":"%s","name":"%s","start":%.3f,"end":%.3f,"wall":%.3f,"rc":%s}\n' "$1" "$2" "$3" "$4" "$(echo "$4 - $3" | bc)" "$5" >> "$tlf"
 }
@@ -159,21 +178,21 @@ export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
 # prebuilt build the verify, go test and audit lanes read is never written after the prebuild. Their own
 # package builds (JanusASL/.lake, JanusX86/.lake, oracle-sail/target) and artifacts/ are shared by
 # symlink: only these lanes use the former, and artifacts/ is read-only to them.
-tree="$out/tree"
-if selected x86 || selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go; then
-  mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
+mktree() { # DIR: a private copy of the sources and of the finished framework build
+  mkdir -p "$1"
   rsync -a --exclude=/.git --exclude=/artifacts --exclude=/audit/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake \
-    --exclude=/oracle-sail/target --exclude=/bin ./ "$tree"/ || { echo "gate: cannot copy the sources for the isolated lanes"; exit 1; }
-  ln -sfn "$root/artifacts" "$tree/artifacts"; ln -sfn "$root/JanusASL/.lake" "$tree/JanusASL/.lake"
-  ln -sfn "$root/JanusX86/.lake" "$tree/JanusX86/.lake"; ln -sfn "$root/oracle-sail/target" "$tree/oracle-sail/target"
-  mkdir -p "$tree/bin"; cp -f bin/janus "$tree/bin/janus"
-fi
-lane_times="$root/artifacts/gate/lane-times"
-shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2
-rt_needs_asl="asl-build"
-pool_init gate "$lanes_n" "$out/lanes"
-POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
-export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too
+    --exclude=/oracle-sail/target --exclude=/bin ./ "$1"/ || { echo "gate: cannot copy the sources to $1"; exit 1; }
+  ln -sfn "$root/artifacts" "$1/artifacts"; ln -sfn "$root/JanusASL/.lake" "$1/JanusASL/.lake"
+  ln -sfn "$root/JanusX86/.lake" "$1/JanusX86/.lake"; ln -sfn "$root/oracle-sail/target" "$1/oracle-sail/target"
+  mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"
+}
+# x86 has a tree of its own, the JanusASL/oracle/rt-asl lanes another: two lakes in one tree race on its .oleans
+tree_x86="$out/tree-x86" tree="$out/tree-asl"
+mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
+selected x86 && mktree "$tree_x86"
+if selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go || selected rtasl-fsqrt || selected rtasl-replay; then mktree "$tree"; fi
+peak_tree=$(du -sm "$out"/tree-* 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
+echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed at the end)"
 # an estimate for the first run (seconds, the profile's measurements); later runs use their own
 declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]=900 [sail-build]=300 [axiom]=1
   [rtasl-probes]=1200 [rtasl-replay]=900 [rtasl-prove]=600 [rtasl-fsqrt]=600 [rtasl-go]=400 [rtasl-rel]=120 [rtasl-strict]=120 [rtasl-btf]=5)
@@ -191,7 +210,7 @@ JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
 add gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
 add rounds "audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
-add x86 "cd '$tree' && scripts/x86formal.sh prove"
+add x86 "cd '$tree_x86' && scripts/x86formal.sh prove"
 add asl-build "cd '$tree' && scripts/asl.sh build"
 add sail-build "cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
@@ -224,13 +243,17 @@ python3 -I "$root/scripts/gate-report.py" "$tlf" || true
 # the speed-regression check (on top of every other check): scripts/gate-speedcheck.py, committed baseline
 # scripts/speed-baseline.tsv; a regression fails the gate whatever the host load
 speed_rc=0
-if [ -f "$root/scripts/speed-baseline.tsv" ]; then
+if [ "$sbmode" = record ]; then
+  if [ -z "$partial" ] && [ "$lanes_rc" = 0 ]; then
+    python3 -I "$root/scripts/gate-speedcheck.py" update "$tlf" "$root/scripts/speed-baseline.tsv" "$out/verify"
+    echo "speed check: baseline RECORDED in scripts/speed-baseline.tsv (commit it after reviewing); no comparison made"
+  else
+    echo "speed check: baseline NOT recorded (record needs a passing full run)"
+  fi
+elif [ -f "$root/scripts/speed-baseline.tsv" ]; then
   python3 -I "$root/scripts/gate-speedcheck.py" check "$tlf" "$root/scripts/speed-baseline.tsv" "$out/verify" || speed_rc=$?
 else
-  echo "speed check: no scripts/speed-baseline.tsv yet (create it with --update-baseline after a passing full run)"
-fi
-if [ -n "$upd" ] && [ -z "$partial" ] && [ "$lanes_rc" = 0 ]; then
-  python3 -I "$root/scripts/gate-speedcheck.py" update "$tlf" "$root/scripts/speed-baseline.tsv" "$out/verify"
+  echo "!!!! speed check NOT enforced: no scripts/speed-baseline.tsv (record one with --speed-baseline record after a green full gate) !!!!"
 fi
 [ "$speed_rc" = 0 ] || lanes_rc=1
 echo

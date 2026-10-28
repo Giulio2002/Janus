@@ -2,6 +2,7 @@
 """Speed-regression check of a gate run (on top of every other check, never instead of one).
 
   python3 -I scripts/gate-speedcheck.py check  TIMELINE BASELINE [LOGDIR]
+  python3 -I scripts/gate-speedcheck.py seed   TIMES OUT   (provisional baseline from artifacts/verify-all-examples.times)
   python3 -I scripts/gate-speedcheck.py update TIMELINE BASELINE [LOGDIR]   (rewrite BASELINE from a run)
 
 TIMELINE is <gate out>/timeline.jsonl; BASELINE is the committed scripts/speed-baseline.tsv
@@ -68,7 +69,19 @@ def read_base(path):
             b[k] = (float(w), float(m))
     return b
 
+def seed(times, out):
+    """Provisional baseline from a verify-all-examples.times file ("id<TAB>seconds"); peak memory unknown (0)."""
+    with open(out, "w") as f:
+        f.write("# PROVISIONAL speed baseline derived from %s (not recorded by a gate run; do not enforce)\n" % times)
+        for l in sorted(open(times)):
+            k, w = l.rstrip("\n").split("\t")[:2]
+            f.write("%s\t%.1f\t0.00\n" % (k, float(w)))
+    print("provisional baseline written to %s" % out)
+    return 0
+
 def main():
+    if sys.argv[1] == "seed":
+        return seed(sys.argv[2], sys.argv[3])
     mode, tl, base = sys.argv[1:4]
     rows = load_tl(tl)
     logdir = sys.argv[4] if len(sys.argv) > 4 else os.path.join(os.path.dirname(tl), "verify")

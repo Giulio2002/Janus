@@ -85,6 +85,23 @@ longest first using `testDurations` in `cmd/janus/order_test.go`, and checks tha
 list (fails if a test is unassigned or twice); afterwards it checks from the `-v` output that each
 shard reported a result for exactly its tests.
 
+**Cancel.** A gate run is its own process group (`setsid`); `<out>/pgid` holds the id. Cancel one run with
+`kill -- -$(cat <out>/pgid)` (or stop its memcap scope) and nothing else; never kill by name or pattern, other
+gates share the host (`scripts/lib/test-pgcancel.sh`). The Lake-writing lanes (x86, asl, oracle, rt-asl) work in
+private source copies (`<out>/tree-x86`, `<out>/tree-asl`, about 0.85 GiB each, removed at exit and on cancel),
+because a `lake` in JanusX86/JanusASL replays the framework's `.olean` files it depends on by path; the verify,
+go test and audit lanes read the prebuilt framework build, which is never written after the prebuild.
+
+**Speed baseline.** `scripts/speed-baseline.tsv` (id, wall seconds, peak GiB per verify item and lane) is recorded
+by a green full gate: `scripts/gate.sh --speed-baseline record` (only items that PASSED; header has commit, -j, host
+load), reviewed and committed. Enforced by default (`--speed-baseline enforce`): an item that PASSED but took more
+than max(1.5 x baseline, baseline + 10 s), or a total pool work above 1.5 x, fails the gate with the item,
+baseline, measured time and ratio; new items are listed, not failed; peak-memory growth is a warning. The host
+load is printed with the verdict but never excuses a regression. Without the file the summary says
+`speed check NOT enforced: no baseline`. `python3 -I scripts/gate-speedcheck.py seed artifacts/verify-all-examples.times OUT`
+derives a provisional file from a times file (not enforced). Update procedure: after an intended speed change,
+re-record on a green full gate and say why in the commit message.
+
 **Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
 `python3 -I scripts/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.
