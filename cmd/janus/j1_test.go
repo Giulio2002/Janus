@@ -13,9 +13,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // j1StampedFramework lays out a framework build the way a stamped one is: the sources in dir, the
@@ -391,5 +394,128 @@ func TestJ1TrustedCacheSelfHeals(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(dst, "Extracted.olean")); string(b) != string(data) {
 		t.Fatalf("replaced entry holds %q", b)
+	}
+}
+
+// fakeAuditor writes a shell script that speaks the `janus-audit --serve` protocol: it announces
+// itself in pidFile, waits for one request line on standard input and answers with the marker
+// and the request it received; without a request (end of input) it exits with status 3 and prints
+// nothing.
+func fakeAuditor(t *testing.T, pidFile string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "janus-audit")
+	script := "#!/bin/sh\n" +
+		"echo $$ >> " + shQuote(pidFile) + "\n" +
+		"if [ \"$1\" != --serve ]; then echo bad-invocation; exit 2; fi\n" +
+		"if IFS= read -r line; then\n" +
+		"  marker=$(printf '%s' \"$line\" | cut -f3)\n" +
+		"  printf '%s%s\\n' \"$marker\" \"$line\"\n" +
+		"else\n  exit 3\nfi\n"
+	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func j1ServeFixture(t *testing.T) (*toolchain, string) {
+	t.Helper()
+	tc := fakeToolchain(t)
+	return tc, t.TempDir()
+}
+
+// A prestarted auditor gets its request after it has started, and its output is the answer; the
+// request carries the theorem, the proof module, the marker and the final search path.
+func TestJ1AuditServeRequest(t *testing.T) {
+	tc, scratch := j1ServeFixture(t)
+	pids := filepath.Join(scratch, "pids")
+	exe := fakeAuditor(t, pids)
+	sb := &sandbox{mode: "none"}
+	as := startAuditServe(sb, tc, scratch, nil, exe, "JanusTrusted", "/serve/path", "/full/path:/work", []string{"Proof.correctness", "Proof.other"})
+	defer as.stop()
+	for i, thm := range []string{"Proof.correctness", "Proof.other"} {
+		out, err := as.request(i, "marker-"+thm+": ", "/full/path:/work")
+		if err != nil || !strings.Contains(out, "marker-"+thm+": "+thm+"\tProof\tmarker-"+thm+": \t/full/path:/work") {
+			t.Fatalf("%s: %q %v", thm, out, err)
+		}
+	}
+	// A separator in the request is refused before anything is sent.
+	as2 := startAuditServe(sb, tc, scratch, nil, exe, "JanusTrusted", "/serve/path", "/p", []string{"Proof.correctness"})
+	defer as2.stop()
+	if _, err := as2.request(0, "bad\tmarker", "/p"); err == nil {
+		t.Error("a request with a tab was sent")
+	}
+}
+
+// Cancelling prestarted auditors (the proof did not compile, a pin check failed) ends them: no
+// request is made, nothing runs on afterwards, and stop returns.
+func TestJ1AuditServeStopEndsAuditors(t *testing.T) {
+	tc, scratch := j1ServeFixture(t)
+	pids := filepath.Join(scratch, "pids")
+	exe := fakeAuditor(t, pids)
+	// A slow auditor that would run for a minute if nothing ended it.
+	slow := filepath.Join(t.TempDir(), "slow-audit")
+	if err := os.WriteFile(slow, []byte("#!/bin/sh\necho $$ >> "+shQuote(pids)+"\nexec sleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []string{exe, slow} {
+		as := startAuditServe(&sandbox{mode: "none"}, tc, scratch, nil, e, "JanusTrusted", "/s", "/f", []string{"Proof.a", "Proof.b"})
+		time.Sleep(300 * time.Millisecond)
+		start := time.Now()
+		as.stop()
+		if d := time.Since(start); d > 10*time.Second {
+			t.Errorf("stop took %v", d)
+		}
+		for _, j := range as.jobs {
+			select {
+			case <-j.done:
+			default:
+				t.Error("a job was still running after stop")
+			}
+		}
+	}
+	b, _ := os.ReadFile(pids)
+	for _, f := range strings.Fields(string(b)) {
+		pid, _ := strconv.Atoi(f)
+		if pid > 0 && syscall.Kill(pid, 0) == nil {
+			// a zombie awaiting reaping is not running; give the kernel a moment
+			time.Sleep(200 * time.Millisecond)
+			if syscall.Kill(pid, 0) == nil {
+				if st, _ := os.ReadFile("/proc/" + f + "/stat"); !strings.Contains(string(st), ") Z ") {
+					t.Errorf("auditor process %d still runs after stop", pid)
+				}
+			}
+		}
+	}
+}
+
+// More theorems than auditServeMax: the later auditors start when earlier ones finish, and every
+// request is answered (no deadlock between the bound on running auditors and the requests).
+func TestJ1AuditServeMoreThanTheBound(t *testing.T) {
+	tc, scratch := j1ServeFixture(t)
+	exe := fakeAuditor(t, filepath.Join(scratch, "pids"))
+	var thms []string
+	for i := 0; i < 3*auditServeMax; i++ {
+		thms = append(thms, fmt.Sprintf("Proof.t%d", i))
+	}
+	as := startAuditServe(&sandbox{mode: "none"}, tc, scratch, nil, exe, "JanusTrusted", "/s", "/f", thms)
+	defer as.stop()
+	var wg sync.WaitGroup
+	// requested in reverse order: a later theorem's request must not wait for an earlier one
+	for i := len(thms) - 1; i >= 0; i-- {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			out, err := as.request(i, fmt.Sprintf("m%d: ", i), "/f")
+			if err != nil || !strings.Contains(out, thms[i]+"\tProof\t") {
+				t.Errorf("%s: %q %v", thms[i], out, err)
+			}
+		}(i)
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("requests did not complete (deadlock)")
 	}
 }

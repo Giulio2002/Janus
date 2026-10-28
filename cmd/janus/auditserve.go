@@ -28,6 +28,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // auditServeMax bounds how many auditor processes run at once (as for the classic audit).
@@ -90,6 +91,7 @@ func startAuditServe(sb *sandbox, tc *toolchain, scratchDir string, protected []
 			defer r.Close()
 			cmd, out := leanCmd(csb, tc, scratchDir, nil, protected, fullPath, servePath, []string{auditExe, "--serve", trusted})
 			cmd.Stdin = r
+			cmd.WaitDelay = 5 * time.Second // a cancelled auditor's descendants must not hold stop up
 			ran := make(chan error, 1)
 			go func() { ran <- guardRun(cmd) }()
 			select {
