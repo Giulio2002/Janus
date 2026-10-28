@@ -106,6 +106,18 @@ re-record on a green full gate and say why in the commit message.
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
 `python3 -I scripts/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.
 
+## Red team of the caches (`cmd/janus/*_rt_test.go`, `scripts/lib/test-rt-incr.sh`)
+
+An authorized audit of the result cache, the incremental records, the framework verdict store and the build-cache
+key. Every attack is a test that must end in a miss or a refusal: stale edits with restored mtimes, deep and
+auditor-only framework modules (every `import` spelling, the `module` header), toolchain/checker/auditor swaps,
+environment and script changes, key framing and symlinks, record tampering at every truncation length and every
+flipped byte, key-file handling, build inputs of the verifier identity (assembly files, overlays), a hostile proof
+reading or writing the caches from both sandbox modes, concurrent writers, verdict-store forgeries and failed or
+timed-out runs. The shell side (`test-rt-incr.sh`, run by `TestRTIncrScripts`) covers `JANUS_INCR_EXPLAIN` in the
+environment, the clean-tree pin that a record requires, the go configuration in lane keys and the scripts each item
+kind runs. Findings fixed on the way: see `git log agent/speed-rt`.
+
 ## Incremental gate (`--incremental`)
 
 **The default is a FULL run.** `scripts/gate.sh` and `scripts/verify-all-examples.sh` skip nothing unless asked; the
