@@ -544,10 +544,29 @@ func memMark() int {
 }
 
 func memSince(mark int) (jobs int, peak int64, kill *memEvent) {
+	return memSinceSkip(mark, nil)
+}
+
+func memSinceSkip(mark int, skip [][2]int) (jobs int, peak int64, kill *memEvent) {
 	memMu.Lock()
 	defer memMu.Unlock()
+	skipped := func(i int) bool {
+		for _, s := range skip {
+			if i >= s[0] && i < s[1] {
+				return true
+			}
+		}
+		return false
+	}
 	for i := mark; i < len(memEvents); i++ {
 		e := memEvents[i]
+		if skipped(i) {
+			if e.Peak > peak {
+				peak = e.Peak
+			}
+			jobs++
+			continue
+		}
 		jobs++
 		if e.Peak > peak {
 			peak = e.Peak
@@ -586,8 +605,15 @@ func memLimitDiag(g *memGuard, ev memEvent, cause error) *diag {
 // for memory turns the result into the resource-limit diagnostic (whatever error it caused,
 // and even if a later step happened to pass), and a report records the guard and the peak.
 func memOutcome(mark int, r *verifiedReport, err error) (*verifiedReport, error) {
+	return memOutcomeSkip(mark, nil, r, err)
+}
+
+// memOutcomeSkip is memOutcome ignoring the job-log ranges in skip: kills of one request's own
+// build, already reported on that request alone (verify-batch builds each request's import
+// closure separately), are no verdict on the other requests of the group.
+func memOutcomeSkip(mark int, skip [][2]int, r *verifiedReport, err error) (*verifiedReport, error) {
 	g := currentGuard()
-	jobs, peak, kill := memSince(mark)
+	jobs, peak, kill := memSinceSkip(mark, skip)
 	if kill != nil {
 		return nil, memLimitDiag(g, *kill, err)
 	}

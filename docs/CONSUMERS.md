@@ -282,7 +282,10 @@ Paths are relative to the manifest. Each request names an `outdir` (an extractio
 **What is shared, what is per request.** Requests that share one `proofRoot` take **one snapshot**
 of that package. Requests whose extraction (`Extracted.lean`) is byte-identical share **one Lake
 build** of their proof modules in one workspace, so a shared lemma module is built once;
-requests with different extractions use separate workspaces (because `Extracted` is a single
+each request is built on its own (`lake build <its module>`: only that theorem's module import
+closure, never the other requests' modules), in the shared workspace, so modules already built
+for an earlier request are reused and a proof too heavy for `JANUS_MEM_MAX` fails only the
+request that imports it (`resource limit`); requests with different extractions use separate workspaces (because `Extracted` is a single
 module name), and the first workspace's build seeds the others. **Each request is audited and
 kernel-replayed on its own** and gets its **own `verified.json`**: a failure in one request's
 proof or axioms does not affect the others. Each request prints `PASS`/`FAIL` with its module or
