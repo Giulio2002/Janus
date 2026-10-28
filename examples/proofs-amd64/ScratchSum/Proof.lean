@@ -21,6 +21,10 @@ def poolAddr : Nat := ripTarget Extracted.program (Extracted.entry + 0x1c)
 def ptrType : Nat := ripTarget Extracted.program (Extracted.entry + 0x28)
 def bufType : Nat := ripTarget Extracted.program (Extracted.entry + 0x3b)
 
+/-- Data addresses evaluated from the extraction (`janus_eval%`), never copied. -/
+local macro "ptrN" : term => `(janus_eval% ptrType)
+local macro "bufN" : term => `(janus_eval% bufType)
+
 def BufObj : PoolShape := fun m d rs =>
   0 < d ∧ d % 8 = 0 ∧ d + 32 ≤ 2 ^ 48 ∧ m.accessible d 32 true = true ∧ rs = [(d, d + 32)]
 
@@ -162,7 +166,7 @@ theorem putTail (impl : List Amd64.Segment) (R : RtInv)
       4096 R ptrType BufObj)
     (ret : Nat) (hret : RetAddr (Extracted.program.link impl) ret) (s S : State) (a b : BitVec 64)
     (L : List (Nat × Nat)) (bud bd d : Nat) (mP : Arm64.Memory)
-    (hP : poolAddr = 5709280) (hT : ptrType = 4822144)
+    (hP : poolAddr = 5709280) (hT : ptrType = (ptrN))
     (hg1 : (s.regs 14).toNat + 16 + 8 ≤ 2 ^ 48)
     (hg2 : s.mem.accessible ((s.regs 14).toNat + 16) 8 false = true)
     (hg3 : s.mem.readLE ((s.regs 14).toNat + 16) 8 + 4136 < (s.regs 4).toNat)
@@ -174,7 +178,7 @@ theorem putTail (impl : List Amd64.Segment) (R : RtInv)
     (hokP : R.ok (Extracted.program.contractAddr "sync.(*Pool).Put") [5709280])
     (hbd : bd = bud ∨ bd = bud - 32)
     (hrip : S.rip = BitVec.ofNat 64 (Extracted.program.contractAddr "sync.(*Pool).Put"))
-    (hS0 : S.regs 0 = 5709280#64) (hS3 : S.regs 3 = 4822144#64) (hS1 : S.regs 1 = BitVec.ofNat 64 d)
+    (hS0 : S.regs 0 = 5709280#64) (hS3 : S.regs 3 = (BitVec.ofNat 64 (ptrN))) (hS1 : S.regs 1 = BitVec.ofNat 64 d)
     (hS4 : S.regs 4 = s.regs 4 - 40#64) (hS5 : S.regs 5 = s.regs 4 - 8#64) (hSg : S.regs 14 = s.regs 14)
     (hSx : S.xmm 15 = s.xmm 15) (hSmem : S.mem = mP) (hd64 : d < 2 ^ 64)
     (hFP : MemFrame s.mem mP (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]))
@@ -264,10 +268,10 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
   have hpw := hpin
   rw [hP] at hokG hokP hnew0
   rw [hB] at hbin
-  have hdesc : s.mem.readLE 4874656 8 = 32 ∧ s.mem.readLE (4874656 + 8) 8 = 0 :=
-    ⟨by rw [h_rodata 4874656 8 (by decide +kernel)]; decide +kernel,
-      by rw [h_rodata (4874656 + 8) 8 (by decide +kernel)]; decide +kernel⟩
-  have hbW : Outside 4874656 16 [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] := by
+  have hdesc : s.mem.readLE (bufN) 8 = 32 ∧ s.mem.readLE ((bufN) + 8) 8 = 0 :=
+    ⟨by rw [h_rodata (bufN) 8 (by decide +kernel)]; decide +kernel,
+      by rw [h_rodata ((bufN) + 8) 8 (by decide +kernel)]; decide +kernel⟩
+  have hbW : Outside (bufN) 16 [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] := by
     simp only [outside_cons, outside_nil, and_true]; omega
   have hgo' := hgo
   simp only [outside_cons, outside_nil, and_true] at hgo'
@@ -324,25 +328,25 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
   rcases hcase with ⟨hr0, hr1, hinvG⟩ | ⟨rs, hr0, hSh, hfresh, hinrt, hsep, hinvG⟩
   · have hr0' : r 0 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using hr0)
     have hr1' : r 3 = 0#64 := BitVec.eq_of_toNat_eq (by simpa using hr1)
-    have hbw : (s.regs 4).toNat - 4136 + ((s.regs 4).toNat + 24 - ((s.regs 4).toNat - 4136)) ≤ 4874656 ∨
-        4874656 + 16 ≤ (s.regs 4).toNat - 4136 := by omega
-    have hoB : ∀ a k, 4874656 ≤ a → a + k ≤ 4874656 + 16 →
+    have hbw : (s.regs 4).toNat - 4136 + ((s.regs 4).toNat + 24 - ((s.regs 4).toNat - 4136)) ≤ (bufN) ∨
+        (bufN) + 16 ≤ (s.regs 4).toNat - 4136 := by omega
+    have hoB : ∀ a k, (bufN) ≤ a → a + k ≤ (bufN) + 16 →
         Outside a k (R.rt ++ [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)]) := fun a k h1 h2 => by
       simp only [outside_append]
       exact ⟨Outside.of_sub hbin h1 h2, Outside.of_sub hbW h1 h2⟩
-    have hsz : m1.readLE 4874656 8 = 32 := by
+    have hsz : m1.readLE (bufN) 8 = 32 := by
       rw [hF1.readLE _ _ (hoB _ _ (Nat.le_refl _) (by omega))]; exact hdesc.1
-    have hpb : m1.readLE (4874656 + 8) 8 = 0 := by
+    have hpb : m1.readLE ((bufN) + 8) 8 = 0 := by
       rw [hF1.readLE _ _ (hoB _ _ (by omega) (by omega))]; exact hdesc.2
     have hmC : MemFrame m1 (m1.writeLE ((s.regs 4).toNat - 40) 8 4755239)
         [((s.regs 4).toNat - 4136, (s.regs 4).toNat + 24)] := by janus_frame
-    have hsz2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 4755239).readLE 4874656 8 = 32 := by
+    have hsz2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 4755239).readLE (bufN) 8 = 32 := by
       rw [hmC.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; exact hsz
-    have hpb2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 4755239).readLE (4874656 + 8) 8 = 0 := by
+    have hpb2 : (m1.writeLE ((s.regs 4).toNat - 40) 8 4755239).readLE ((bufN) + 8) 8 = 0 := by
       rw [hmC.readLE _ _ (by simp only [outside_cons, outside_nil, and_true]; omega)]; exact hpb
     janus64_run until [Extracted.program.contractAddr "runtime.newobject"]
     have key2 : ∀ S : State, S.mem = m1.writeLE ((s.regs 4).toNat - 40) 8 4755239 → S.regs 14 = s.regs 14 →
-        (S.regs 4).toNat + 40 = (s.regs 4).toNat → (S.regs 0).toNat = 4874656 →
+        (S.regs 4).toNat + 40 = (s.regs 4).toNat → (S.regs 0).toNat = (bufN) →
         (NewobjectPre64 4096 S ∧ StackRoom64 S 4096 1 ∧
           LiveAt R (Extracted.program.contractAddr "runtime.newobject") [(S.regs 0).toNat] L bud
             (newobjectRound64 S) (S.regs 14).toNat S.mem (liveWin64 S 4096 1)) ∧
@@ -478,7 +482,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (B : PoolShape)
   · -- a pooled buffer
     obtain ⟨hd0, hd8, hd48, hdacc, hrs⟩ := hSh
     subst hrs
-    have hr0' : r 0 = 4822144#64 := BitVec.eq_of_toNat_eq (by simpa [hT] using hr0)
+    have hr0' : r 0 = (BitVec.ofNat 64 (ptrN)) := BitVec.eq_of_toNat_eq (by simpa [hT] using hr0)
     have hr1' : r 3 ≠ 0#64 := fun h => by simp [h] at hd0
     have hin := hinrt _ (List.mem_singleton_self _)
     simp only [Nat.add_sub_cancel_left] at hin
@@ -723,7 +727,7 @@ theorem s0_sp : (s0.regs 4).toNat = sp0 := by simp [s0, sp0]
 theorem s0_g : (s0.regs 14).toNat = g0 := by simp [s0, g0]
 
 theorem hP' : P = 5709280 := by unfold P; decide
-theorem hb' : bT = 4874656 := by unfold bT; decide
+theorem hb' : bT = (bufN) := by unfold bT; decide
 
 set_option maxRecDepth 100000 in
 theorem guard0 : StackGuardOK s0 4136 := by
