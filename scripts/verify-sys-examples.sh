@@ -38,7 +38,7 @@ sys_args() {
 }
 
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
-  go build -o bin/janus ./cmd/janus
+  CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
   scripts/build-examples-sys.sh >/dev/null
 fi
 extra=()

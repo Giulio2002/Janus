@@ -214,7 +214,7 @@ jobs:
 
       - name: Decoder coverage of the examples (janus blockers)
         run: |
-          go build -o bin/janus ./cmd/janus
+          CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
           . scripts/example-contracts.sh
           mapfile -t names < <(sed -n '/^all=(/,/)/p' scripts/verify-examples.sh | tr -d '()' | sed 's/^all=//' | tr ' ' '\n' | grep -v '^$')
           [ "${#names[@]}" -gt 0 ] || { echo "no examples found" >&2; exit 1; }

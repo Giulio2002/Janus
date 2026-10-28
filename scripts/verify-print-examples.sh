@@ -36,7 +36,7 @@ if [ ${#names[@]} -eq 0 ]; then
 fi
 
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
-  go build -o bin/janus ./cmd/janus
+  CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
   scripts/build-examples-print.sh >/dev/null
 fi
 # PrintProofs/<Isa>/Code.lean is the code of the binary, and the example modules are generated from

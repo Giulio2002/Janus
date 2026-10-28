@@ -21,3 +21,13 @@ var Framework embed.FS
 //
 //go:embed JanusASL/lakefile.toml JanusASL/lake-manifest.json JanusASL/lean-toolchain JanusASL/JanusASL JanusASL/vendor
 var ASL embed.FS
+
+// GoSources holds the Go source of the janus command and of this package (every .go file of the
+// repository root and of cmd/janus, test files included: consumers skip them) together with go.mod
+// and go.sum. janus hashes it (cmd/janus/verifierid.go) to identify the exact verifier source it
+// was built from, which keys its verification-result cache independently of the checkout and
+// directory it was built in (docs/SOUNDNESS.md, "Result-cache verifier identity"). A new Go
+// package imported by cmd/janus from this module must be added here; a test enforces that.
+//
+//go:embed go.mod go.sum *.go cmd/janus/*.go
+var GoSources embed.FS

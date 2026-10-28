@@ -30,7 +30,7 @@ for a in ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}; do
   esac
 done
 
-go build -o bin/janus ./cmd/janus
+CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
 scripts/build-examples.sh >/dev/null
 bash scripts/build-examples-amd64.sh >/dev/null 2>&1
 scripts/build-examples-asm.sh >/dev/null

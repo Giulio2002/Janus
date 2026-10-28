@@ -356,7 +356,7 @@ PY
 do_verify() {
   do_build
   export PATH=/usr/local/go/bin:$PATH
-  (cd "$root" && go build -o bin/janus ./cmd/janus)
+  (cd "$root" && CGO_ENABLED=0 go build -o bin/janus ./cmd/janus)
   "$root/scripts/build-examples.sh" >/dev/null
   local d
   d=$("$root/bin/janus" framework --janus-root "$root" --json |

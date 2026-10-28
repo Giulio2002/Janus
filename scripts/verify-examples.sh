@@ -47,7 +47,7 @@ names=("$@")
 # JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): bin/janus and the examples binary
 # are already built.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
-  go build -o bin/janus ./cmd/janus
+  CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
   scripts/build-examples.sh >/dev/null
 fi
 # The verifier builds the framework it uses itself (the embedded one in the cache, or the
