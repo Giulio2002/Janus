@@ -1207,9 +1207,19 @@ module, so the audited state is grown from the clean one: each shared module is 
 is exactly a fresh import of `auditImports` when the clean closure is part of the audited
 closure, i.e. when `Extracted` imports `Janus` (which the extractor always writes);
 `auditEnv` checks this on the result and otherwise imports the audited environment afresh. -/
-def readImports (auditImports : Array Import) : IO (ImportState × ImportState) := withImporting do
+def readCleanImports : IO ImportState := withImporting do
   let (_, sClean) ← (importModulesCore cleanImports).run
+  return sClean
+
+/-- The audited state, grown from the clean one (`readCleanImports`): the modules the audited
+closure adds to the clean closure are read, the shared ones are not read again. -/
+def readAuditImports (sClean : ImportState) (auditImports : Array Import) : IO ImportState := withImporting do
   let (_, sAudit) ← (importModulesCore auditImports).run sClean
+  return sAudit
+
+def readImports (auditImports : Array Import) : IO (ImportState × ImportState) := do
+  let sClean ← readCleanImports
+  let sAudit ← readAuditImports sClean auditImports
   return (sClean, sAudit)
 
 /-- The audited environment (`importModules (loadExts := false) auditImports {}`) and the clean
@@ -1217,8 +1227,11 @@ import state, reading every module once (`readImports`). The shared read is used
 imported `Extracted` directly imports `Janus`, so the clean closure adds no module to the audited
 one and the result is the environment a fresh import builds (same modules, same order: both are
 the same depth-first traversal); otherwise the audited environment is imported separately. -/
-def auditEnv (auditImports : Array Import) : IO (Environment × ImportState) := do
-  let (sClean, sAudit) ← readImports auditImports
+def auditEnv (auditImports : Array Import) (clean? : Option ImportState := none) :
+    IO (Environment × ImportState) := do
+  let (sClean, sAudit) ← match clean? with
+    | some sClean => pure (sClean, ← readAuditImports sClean auditImports)
+    | none => readImports auditImports
   let env ← withImporting <| finalizeImport sAudit auditImports {} (leakEnv := false) (loadExts := false)
   let extractedImportsJanus := match env.getModuleIdx? `Extracted with
     | some i => match env.header.moduleData[i.toNat]? with
@@ -1229,6 +1242,16 @@ def auditEnv (auditImports : Array Import) : IO (Environment × ImportState) := 
     return (env, sClean)
   return (← importModules (loadExts := false) auditImports {}, sClean)
 
+/-- The clean environment's import state and the environment `cleanEnvAndPrint` builds from it
+(`finalizeImport cleanState cleanImports {} (loadExts := true)`, initializers enabled), built
+without looking at the proof: `janus-audit --serve` runs this while the proof compiles and
+`runImplCore` then continues with it. It reads the framework and `Extracted` modules only. -/
+unsafe def prepareClean : IO (ImportState × Environment) := do
+  let sClean ← readCleanImports
+  enableInitializersExecution
+  let env ← (withImporting <| finalizeImport sClean cleanImports {} (leakEnv := false) (loadExts := true) : IO Environment)
+  return (sClean, env)
+
 /-- Build the clean environment: import only `Janus` and `Extracted`, with initializers so pp
 works, then add type-only stubs for the dependency constants the statement reaches, re-add the
 allowed proof-local defs and an axiom with the theorem's type. Reject a proof-local def whose
@@ -1236,12 +1259,16 @@ type's head is a class (a disguised instance, A1). No proof or dependency module
 none of their initializers, notations, unexpanders or delaborators exist here. -/
 unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs : Array ConstantInfo)
     (stubs : Array ConstantInfo) (extDefs : Array ConstantInfo) (cleanState : ImportState)
-    (clean : Array Import := cleanImports) :
+    (clean : Array Import := cleanImports) (pre? : Option Environment := none) :
     AuditM (String × String × Array String × Array String × Array String) := do
-  enableInitializersExecution
   -- `importModules (loadExts := true) cleanImports {}`, with the module data already read
-  -- (`readImports`): the same `finalizeImport` over the same import state.
-  let env ← (withImporting <| finalizeImport cleanState clean {} (leakEnv := false) (loadExts := true) : IO Environment)
+  -- (`readImports`): the same `finalizeImport` over the same import state. `pre?` is that very
+  -- environment, built earlier by `prepareClean` (the serve mode of `janus-audit`).
+  let env ← match pre? with
+    | some e => pure e
+    | none => do
+      enableInitializersExecution
+      (withImporting <| finalizeImport cleanState clean {} (leakEnv := false) (loadExts := true) : IO Environment)
   let mut env := env
   -- Dependency constants: type-only, unchecked (their types may need dependency definitions'
   -- bodies to check, which a stub does not carry).
@@ -1348,13 +1375,14 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
   | .ok a => return a
   | .error e => fail e.toString
 
-unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array String) : IO Unit := do
+unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array String)
+    (pre? : Option (ImportState × Environment)) : IO Unit := do
   let result ← (show AuditM Record from do
     let thmN := thm.toName
     let proofModN := proofMod.toName
     let auditImports : Array Import :=
       #[{ module := `Extracted }, { module := trusted.toName }, { module := proofModN }]
-    let (envA, cleanState) ← (auditEnv auditImports : IO _)
+    let (envA, cleanState) ← (auditEnv auditImports (pre?.map (·.1)) : IO _)
     -- 1. kind and module
     let some ci := envA.find? thmN | fail s!"the proof does not define {thm}"
     let kind := match ci with
@@ -1379,9 +1407,13 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
     let cx := mkCtx envA depRoots
     -- 4. no non-trusted (consumer/proof/dependency) module declares a name with an `Extracted` component
     -- (A7, A9, and the consumer analogue of shadowing Extracted from a shared module)
-    for (n, idx) in envA.const2ModIdx.toList do
-      if !trustedModule modNames[idx.toNat]! && (n.anyS (· == "Extracted") || imitatesExtracted n) then
-        fail s!"a non-trusted module declares {n}, whose name shadows the Extracted namespace (round 6 F1: lookalike letters and «…» components count)"
+    -- (the module of each constant is looked up in a table of the modules' trust, computed once;
+    -- the offender reported is the one the first match of `const2ModIdx.toList` would be)
+    let trustedMods : Array Bool := modNames.map (trustedModule ·)
+    let offender? := envA.const2ModIdx.fold (init := (none : Option Name)) fun acc n idx =>
+      if !trustedMods[idx.toNat]! && (n.anyS (· == "Extracted") || imitatesExtracted n) then some n else acc
+    if let some n := offender? then
+      fail s!"a non-trusted module declares {n}, whose name shadows the Extracted namespace (round 6 F1: lookalike letters and «…» components count)"
     -- 5. type constants: must mention Extracted; every constant is trusted or a non-trusted
     -- plain def collected for the clean-environment print
     let used := ci.type.getUsedConstants
@@ -1414,7 +1446,7 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
       | some ci@(.defnInfo _) => some ci
       | _ => none
     let (statement, statementExplicit, defs, extOut, notes) ←
-      cleanEnvAndPrint cx thmN ci.type localDefs stubs extDefs cleanState
+      cleanEnvAndPrint cx thmN ci.type localDefs stubs extDefs cleanState (pre? := pre?.map (·.2))
     return { name := thm, kind, module := modName.toString, axioms := axs.map (·.toString),
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
@@ -1425,6 +1457,9 @@ unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array Stri
   | .ok rec => IO.println (marker ++ (toJson rec).compress)
   | .error f => IO.println (marker ++ "ERROR " ++ f.msg)
   (← IO.getStdout).flush
+
+unsafe def runImpl (thm proofMod marker trusted : String) (depRoots : Array String) : IO Unit :=
+  runImplCore thm proofMod marker trusted depRoots none
 
 /-- Audit entry point. Run via a generated, trusted `Audit.lean` that does
 `#eval JanusAudit.run "<thm>" "<proof module>" "<marker>" "JanusTrusted" #[<dependency roots>]`

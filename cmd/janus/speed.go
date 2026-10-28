@@ -126,13 +126,29 @@ func loadTrustedCache(key, dir string) (pins, bool) {
 	return m.Files, true
 }
 
+// trustedEntryIntact: every file the authentic manifest lists is in the entry with the recorded
+// hash. An entry that is not (a data file damaged after it was stored) would otherwise make its
+// key miss on every run; storeTrustedCache replaces it.
+func trustedEntryIntact(entry string, m trustedManifest) bool {
+	for rel, want := range m.Files {
+		if filepath.Base(rel) != rel || !isModuleData(rel) {
+			return false
+		}
+		data, err := readPrivateFile(filepath.Join(entry, rel), false)
+		if err != nil || sha256Hex(data) != want {
+			return false
+		}
+	}
+	return true
+}
+
 // storeTrustedCache records the module-data files of a trusted compile in dir under key
 // (atomically: a complete entry or none).
 func storeTrustedCache(key, dir string, files pins) {
 	parent := filepath.Join(trustedCacheDir(), key[:2])
 	final := filepath.Join(parent, key)
 	if _, err := os.Lstat(final); err == nil {
-		if _, ok := readTrustedManifest(final, key); ok {
+		if m, ok := readTrustedManifest(final, key); ok && trustedEntryIntact(final, m) {
 			return
 		}
 		// An entry that is not authentic would otherwise make this key miss forever: move it

@@ -20,6 +20,7 @@ package main
 // refuses unless --unsafe-no-sandbox is passed, and the mode is recorded in verified.json.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,6 +31,23 @@ import (
 type sandbox struct {
 	mode  string // "bwrap", "unshare", or "none"
 	bwrap string // path to bwrap, for "bwrap"
+	// ctx, when set, ends the sandboxed commands built from this value (their outermost process
+	// is killed, and the sandbox with it) once it is cancelled; see auditserve.go.
+	ctx context.Context
+}
+
+// withContext is a copy of s whose commands are killed when ctx ends.
+func (s *sandbox) withContext(ctx context.Context) *sandbox {
+	c := *s
+	c.ctx = ctx
+	return &c
+}
+
+func (s *sandbox) newCmd(name string, arg ...string) *exec.Cmd {
+	if s.ctx != nil {
+		return exec.CommandContext(s.ctx, name, arg...)
+	}
+	return exec.Command(name, arg...)
 }
 
 type sandboxInfo struct {
@@ -260,18 +278,18 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 		}
 		a = append(a, "--chdir", workDir, "--")
 		a = append(a, argv...)
-		cmd := exec.Command(s.bwrap, a...)
+		cmd := s.newCmd(s.bwrap, a...)
 		cmd.Env = env
 		return cmd
 	case "unshare":
 		args := []string{"-Umrnipf", "--map-root-user", "--mount-proc", "--",
 			"/bin/sh", "-c", unshareScript(workDir, writable, readOnly, protected), "janus-sandbox"}
 		args = append(args, argv...)
-		cmd := exec.Command("unshare", args...)
+		cmd := s.newCmd("unshare", args...)
 		cmd.Env = env
 		return cmd
 	default: // "none"
-		cmd := exec.Command(argv[0], argv[1:]...)
+		cmd := s.newCmd(argv[0], argv[1:]...)
 		cmd.Dir = workDir
 		cmd.Env = env
 		return cmd

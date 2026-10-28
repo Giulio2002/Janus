@@ -845,6 +845,20 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		return runLeanProtected(sb, tc, workDir, nil, protected, proofPathEnv, argv...)
 	}
 
+	// The audit's scratch directory, and the prestarted auditors (auditserve.go): they build the
+	// clean environment from the trusted builds while the proof compiles.
+	auditDir, err := os.MkdirTemp(runBase, "audit-")
+	if err != nil {
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
+	}
+	defer os.RemoveAll(auditDir)
+	var serve *auditServe
+	if auditServeEnabled(sb) {
+		serve = startAuditServe(sb, tc, auditDir, append(append([]string{}, protected...), workDir), auditExe, "JanusTrusted",
+			tc.leanPathEnv(trustedDir, janusLibDir), proofPathEnv, thmNames(outs, todo))
+		defer serve.stop()
+	}
+
 	tm.mark("work dir setup")
 	// Compile the proof, sandboxed. It imports the trusted Extracted; its output is Proof.olean.
 	if out, err := sandboxed(tc.lean, "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "Proof.olean")); err != nil {
@@ -879,11 +893,6 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	}
 
 	// 5. Theorem, axiom and statement audit by the trusted janus-audit (no proof code runs).
-	auditDir, err := os.MkdirTemp(runBase, "audit-")
-	if err != nil {
-		return &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
-	}
-	defer os.RemoveAll(auditDir)
 	tm.mark("pins after proof")
 	replayRun := func(argv ...string) (string, error) {
 		return runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv, argv...)
@@ -903,10 +912,22 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	}
 	// The auditor executable must be the one its trusted build recorded; nothing untrusted runs
 	// between this check and its start (the proof compile has ended).
-	if got := <-exeCh; got != auditExeSha {
-		return &diag{Invalid: true, Stage: "framework integrity",
-			Msg:  fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(auditExe), short(auditExeSha), short(got)),
-			Next: "Something other than janus wrote to the framework build; janus rebuilds it on the next run."}
+	exeChanged := func() error {
+		if got := <-exeCh; got != auditExeSha {
+			return &diag{Invalid: true, Stage: "framework integrity",
+				Msg:  fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(auditExe), short(auditExeSha), short(got)),
+				Next: "Something other than janus wrote to the framework build; janus rebuilds it on the next run."}
+		}
+		return nil
+	}
+	// A prestarted auditor was started from the file the readiness check hashed, before any
+	// untrusted step ran, and a running executable cannot be written; the file is hashed once
+	// more, in parallel with the audit, and must still be the recorded one before the result is
+	// used. An auditor started now is checked before it starts.
+	if serve == nil {
+		if err := exeChanged(); err != nil {
+			return err
+		}
 	}
 	// Each theorem is audited by the trusted janus-audit (no proof code runs), concurrently: the
 	// auditor is a separate process per theorem, with its own nonce marker, on the same pinned
@@ -914,6 +935,10 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// pass to JanusAudit.run (auditScript, used by the consumer path).
 	markers := make([]string, len(outs))
 	auditOuts := make([]string, len(outs))
+	slot := map[int]int{} // theorem index -> its prestarted auditor
+	for k, i := range todo {
+		slot[i] = k
+	}
 	var awg sync.WaitGroup
 	asem := make(chan struct{}, 4)
 	for _, i := range todo {
@@ -921,6 +946,10 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		awg.Add(1)
 		go func(i int) {
 			defer awg.Done()
+			if serve != nil { // its own bound on running auditors (auditServeMax)
+				auditOuts[i], _ = serve.request(slot[i], markers[i], proofPathEnv)
+				return
+			}
 			asem <- struct{}{}
 			defer func() { <-asem }()
 			auditOuts[i], _ = runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv,
@@ -929,6 +958,11 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	}
 	awg.Wait()
 	tm.mark("audit")
+	if serve != nil {
+		if err := exeChanged(); err != nil {
+			return err
+		}
+	}
 	// The audit and the kernel replays of this verification's modules (and of the framework, when
 	// it has no verdict yet) have all ended: one pin check covers them (J1; it used to be one after
 	// the audit and one after the replay, each re-hashing the framework build).

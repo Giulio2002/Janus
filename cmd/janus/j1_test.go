@@ -367,3 +367,29 @@ func TestJ1ToolchainDirectMatchesLake(t *testing.T) {
 		t.Error("LEAN_SYSROOT (which Lake honours) did not send the lookup through Lake")
 	}
 }
+
+// A trusted-compile entry whose data was damaged after it was stored is a miss, and the next
+// store replaces it (it does not stay broken forever).
+func TestJ1TrustedCacheSelfHeals(t *testing.T) {
+	privateCache(t)
+	src := t.TempDir()
+	data := []byte("compiled Extracted")
+	writeBytes(t, filepath.Join(src, "Extracted.olean"), data)
+	files := pins{"Extracted.olean": sha256Hex(data)}
+	key := strings.Repeat("ef", 32)
+	storeTrustedCache(key, src, files)
+	entryFile := filepath.Join(trustedCacheDir(), key[:2], key, "Extracted.olean")
+	writeBytes(t, entryFile, []byte("compiled EXTRACTED"))
+	if _, ok := loadTrustedCache(key, t.TempDir()); ok {
+		t.Fatal("a damaged entry was used")
+	}
+	storeTrustedCache(key, src, files)
+	dst := t.TempDir()
+	got, ok := loadTrustedCache(key, dst)
+	if !ok || len(diffPins(files, got)) > 0 {
+		t.Fatal("the entry was not replaced by the next store")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dst, "Extracted.olean")); string(b) != string(data) {
+		t.Fatalf("replaced entry holds %q", b)
+	}
+}

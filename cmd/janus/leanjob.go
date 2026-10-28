@@ -290,10 +290,20 @@ func runLean(sb *sandbox, tc *toolchain, workDir string, roWritableExtra []strin
 // runLeanProtected is runLean with protected directories kept read-only even inside the
 // writable ones (see sandbox.commandOverlay).
 func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, leanPath string, argv ...string) (string, error) {
+	cmd, out := leanCmd(sb, tc, workDir, roWritableExtra, protected, leanPath, leanPath, argv)
+	err := guardRun(cmd)
+	return out.String(), err
+}
+
+// leanCmd builds the sandboxed command runLeanProtected runs, and the buffer its combined output
+// goes to. The directories of mountPath are exposed read-only; the process sees envPath as its
+// LEAN_PATH (the two are the same unless a directory is mounted before the process may use it,
+// see auditserve.go).
+func leanCmd(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, mountPath, envPath string, argv []string) (*exec.Cmd, *bytes.Buffer) {
 	// Expose the LEAN_PATH directories read-only: bubblewrap's private /tmp would otherwise
 	// hide a --janus-root (or any search directory) that lives under /tmp.
 	var ro []string
-	for _, d := range filepath.SplitList(leanPath) {
+	for _, d := range filepath.SplitList(mountPath) {
 		if d != "" {
 			ro = append(ro, d)
 		}
@@ -303,16 +313,15 @@ func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtr
 	if len(argv) > 0 && filepath.IsAbs(argv[0]) {
 		ro = append(ro, filepath.Dir(argv[0]))
 	}
-	env := tc.jobEnv(leanPath)
+	env := tc.jobEnv(envPath)
 	if len(argv) > 0 && argv[0] == tc.leanchecker {
 		env = append(env, "LEAN_NUM_THREADS="+strconv.Itoa(replayThreads()))
 	}
 	cmd := sb.commandOverlay(workDir, roWritableExtra, ro, protected, argv, env)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err := guardRun(cmd)
-	return out.String(), err
+	out := &bytes.Buffer{}
+	cmd.Stdout = out
+	cmd.Stderr = out
+	return cmd, out
 }
 
 var auditRecordRE = regexp.MustCompile(`(?s)\bERROR (.*)$`)
