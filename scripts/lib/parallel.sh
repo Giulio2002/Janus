@@ -81,10 +81,28 @@ par_init() {
   fi
 }
 
+# Timing (opt-in, JANUS_TIMES_FILE=path): every block appends "<start> <end> <script> <label>" (epoch
+# seconds; the label is the first 60 characters of its code) and `tmark LABEL` appends a section mark
+# "<epoch> - <script> mark: LABEL", so a lane's time can be attributed per block and section
+# (scripts/lib/times-report.sh). Nothing else changes.
+tmark() {
+  [ -n "${JANUS_TIMES_FILE:-}" ] || return 0
+  printf '%s\t-\t%s\tmark: %s\n' "$(date +%s.%N)" "$(basename "$0")" "$*" >> "$JANUS_TIMES_FILE"
+  return 0
+}
+__par_timed() { # __par_timed CODE: eval CODE, recording its wall time
+  local __t0 __st
+  [ -n "${JANUS_TIMES_FILE:-}" ] || { eval "$1"; return $?; }
+  __t0=$(date +%s.%N)
+  eval "$1"; __st=$?
+  printf '%s\t%s\t%s\tblock: %s\n' "$__t0" "$(date +%s.%N)" "$(basename "$0")" "$(tr '\n' ' ' <<<"${1:0:60}")" >> "$JANUS_TIMES_FILE"
+  return $__st
+}
+
 # par_run CODE: run the shell code CODE as the next block.
 par_run() {
   if [ "$PAR_JOBS" -le 1 ]; then
-    eval "$1"
+    __par_timed "$1"
     return 0
   fi
   local __par_i=$PAR_N
@@ -107,12 +125,12 @@ par_run() {
       # caller's). Readonly ones cannot be.
       PAR_PRELUDE="$(declare -f); $(declare -p 2>/dev/null | grep -vE '^declare -[a-zA-Z]*[rx]')"
       memguard_run -l "$PAR_JOB_MEM" -n "slot$__par_i" -- bash -c "$PAR_PRELUDE"'
-        broken=(); eval "$PAR_BLOCK"; st=$?
+        broken=(); __par_timed "$PAR_BLOCK"; st=$?
         if [ ${#broken[@]} -gt 0 ]; then printf "%s\n" "${broken[@]}" > "$PAR_BROKEN_FILE"; fi
         exit $st' || { [ $? -eq 137 ] && broken+=("block-$__par_i-memory-limit"); }
       if [ -f "$PAR_DIR/$__par_i.inner" ]; then while IFS= read -r b; do broken+=("$b"); done < "$PAR_DIR/$__par_i.inner"; fi
     else
-      eval "$1"
+      __par_timed "$1"
     fi
     # one entry per line; entries are row names (no newlines)
     if [ ${#broken[@]} -gt 0 ]; then printf '%s\n' "${broken[@]}" > "$PAR_DIR/$__par_i.broken"; fi

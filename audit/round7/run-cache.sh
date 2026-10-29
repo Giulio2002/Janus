@@ -10,13 +10,14 @@ export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
 par_init "$@"
+tmark "cache start"
 J="$root/audit/round7/bin/janus"; mkdir -p "$(dirname "$J")"
 # audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
 # JANUS_AUDIT_PREBUILT=1).
 if [ -n "${JANUS_AUDIT_BIN:-}" ]; then J="$JANUS_AUDIT_BIN"; else go build -o "$J" ./cmd/janus || exit 1; fi
 [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
-W=audit/round7/work; rm -rf "$W"; mkdir -p $W
+W=audit/round7/work-cache; rm -rf "$W"; mkdir -p $W
 C="$(mktemp -d "${TMPDIR:-/tmp}/janus-round7-cache.XXXXXX")"
 trap 'rm -rf "$C"' EXIT
 export JANUS_CACHE_DIR="$C"
@@ -33,6 +34,7 @@ v() { "$J" verify --janus-root "$root" "$@" 2>&1; }
 cached() { grep -q '^  Cached:' <<<"$1"; }
 verdict() { grep -m1 -E '^(Verified|Invalid)' <<<"$1" | cut -c1-100; }
 
+tmark "cache priming start"
 echo "== priming: an honest verification records its result (the cache now has a key and an entry)"
 out="$(v $W/Add --proof examples/proofs/Add.lean)"; again="$(v $W/Add --proof examples/proofs/Add.lean)"
 if cached "$again" && ! cached "$out"; then echo "  ok: the second run is a cache hit"

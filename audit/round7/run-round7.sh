@@ -2,8 +2,9 @@
 # Round-7 regression rows (docs/AUDIT-ROUND7.md). Exits 1 if a blocked attack prints Verified, a
 # control stops verifying or prints something else, or a stub fixture is misclassified.
 # Every attack verification passes --fresh (no result or replay cache: the cold path); the cache
-# itself is attacked by audit/round7/run-cache.sh, which this script runs last.
-# Writes only under audit/round7/work/ and audit/round7/bin/ (run-cache.sh: a temporary cache).
+# itself is attacked by audit/round7/run-cache.sh, which this script runs last (under
+# audit/run-rounds.sh it is the separate lane r7c, and JANUS_R7_NO_CACHE_ROWS=1 skips it here).
+# Writes only under audit/round7/work/ and audit/round7/bin/ (run-cache.sh: audit/round7/work-cache/ and a temporary cache).
 # Usage: audit/round7/run-round7.sh [-j N]   (the --fresh verifications, each a cold kernel replay of
 #        the framework, run N at once: scripts/lib/parallel.sh; fixtures are built first, in order)
 set -u
@@ -13,6 +14,7 @@ export PATH=/usr/local/go/bin:$PATH
 # shellcheck source=../../scripts/lib/parallel.sh
 . "$root/scripts/lib/parallel.sh"
 par_init "$@"
+tmark "start"
 J="$root/audit/round7/bin/janus"; mkdir -p "$(dirname "$J")"
 # audit/run-rounds.sh builds janus and the framework once for every lane (JANUS_AUDIT_BIN,
 # JANUS_AUDIT_PREBUILT=1).
@@ -45,10 +47,25 @@ v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:
 gob() { ( cd audit/round7/asmstub && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
     go build -trimpath -buildvcs=false "$@" ) ; }
 
+# J1 (a --fresh consumer verification: it builds the framework in its own workspace, ~20 min) runs
+# in the background from the start and is collected at the end; its rows are printed there.
+cp -r $W/Add $W/Add-J1
+( dep="$(audit/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; echo dep-setup >> "$W/J1.broken"; }
+  echo "== J1: dependency definitions are disclosed with their bodies"
+  tmark "J1 start"
+  out="$("$J" verify --fresh $W/Add-J1 --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --theorem R7Proofs.misnamed 2>&1)"
+  broken=()
+  row J1a_misnamed_dependency_def Verified "Dependency definitions used by the statement" "MisLib.mul : BitVec (64 : Nat) → BitVec (64 : Nat) → BitVec (64 : Nat) := fun (a b : BitVec (64 : Nat)) => a + b"
+  [ ${#broken[@]} -gt 0 ] && printf '%s\n' "${broken[@]}" >> "$W/J1.broken"
+  tmark "J1 end"
+) > "$W/J1.out" 2>&1 &
+j1pid=$!
+
 # Fixtures first, in order (builds, extractions and the hardware checks); then the verification
 # rows as independent parallel blocks, each on its own copy of the extraction it verifies (a
 # successful verification writes verified.json into it). Output is printed in this order.
 echo "== G1: runtime stubs by exact go1.26 name (audit/round7/asmstub: assembly in package lib)"
+tmark "== G1: runtime stubs by exact go1.26 name (audit/r"
 gob -o "$root/$W/asmstub" ./cmd || { echo "  asmstub build failed"; broken+=(G1-build); }
 xa="$("$J" extract $W/asmstub main.Add $W/AsmAdd 2>&1)"; xi="$("$J" extract $W/asmstub main.Inc $W/AsmInc 2>&1)"
 if grep -qE 'code .* runtime\.panicJanusR7$' <<<"$xa" && grep -qE 'code .* runtime\.morestackJanusR7$' <<<"$xi" &&
@@ -73,6 +90,7 @@ par_run 'v G1c_asmstub_returns $W/AsmAdd-c;            row G1c_asmstub_returns V
 par_wait
 
 echo "== G3 (round 8): stubs pinned to their code, not to build info (audit/round8/govers: go1.25.5 labelled go1.26.0)"
+tmark "== G3 (round 8): stubs pinned to their code, not t"
 # lib's assembly runtime·panicSimdImm returns 0; the go1.25 runtime has no function of that name
 # and the binary claims go1.26.0 (-X runtime.buildVersion). Built by the round-8 red team.
 G3=audit/round8
@@ -95,12 +113,14 @@ if ( cd $G3/govers && GOTOOLCHAIN=go1.25.5 CGO_ENABLED=0 GOOS=linux GOARCH=arm64
 else echo "  G3 fixture build failed (needs GOTOOLCHAIN=go1.25.5)   <-- BROKEN"; broken+=(G3-build); fi
 
 echo "== G2: the entry symbol is the binary's label (//go:linkname push to example.com/basic.Add)"
+tmark "== G2: the entry symbol is the binary's label (//g"
 "$J" extract $W/asmstub example.com/basic.Add $W/Label >/dev/null || broken+=(G2-extract)
 par_run 'v G2a_pushed_entry_label $W/Label; row G2a_pushed_entry_label Verified "Entry: example.com/basic.Add" "Module: example.com/asmstub"'
 par_wait
 
 echo "== H1: bound-variable names"
-for c in H1a H1c H1d H1b J1 K1; do rm -rf $W/Add-$c; cp -r $W/Add $W/Add-$c; done
+tmark "== H1: bound-variable names"
+for c in H1a H1c H1d H1b K1; do rm -rf $W/Add-$c; cp -r $W/Add $W/Add-$c; done
 par_run 'v H1a_binder_lookalike_vacuous $W/Add-H1a;   row H1a_binder_lookalike_vacuous blocked "binds two variables whose names look alike"'
 par_run 'v H1c_binder_cyrillic_guillemets $W/Add-H1c; row H1c_binder_cyrillic_guillemets blocked "characters other than identifier letters"'
 par_run 'v H1d_binder_zero_width $W/Add-H1d;          row H1d_binder_zero_width blocked "characters other than identifier letters"'
@@ -118,19 +138,25 @@ row_e() { grep -q "Read with care" <<<"$out" && echo "  K1b explain: unexpected 
 out="$("$J" explain $K/verified.json 2>&1)"
 if grep -q "Read with care" <<<"$out"; then echo "  K1a explain                          ok       notes shown"; else echo "  K1a explain: no notes   <-- BROKEN"; broken+=(K1a-explain); fi'
 
-dep="$(audit/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; broken+=(dep-setup); }
-par_run 'echo "== J1: dependency definitions are disclosed with their bodies"
-out="$("$J" verify --fresh $W/Add-J1 --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --theorem R7Proofs.misnamed 2>&1)"
-row J1a_misnamed_dependency_def Verified "Dependency definitions used by the statement" "MisLib.mul : BitVec (64 : Nat) → BitVec (64 : Nat) → BitVec (64 : Nat) := fun (a b : BitVec (64 : Nat)) => a + b"'
 par_wait
 
 echo "== unit rows (go test)"
+tmark "== unit rows (go test)"
 (cd cmd/janus && go test -timeout 30m -run 'TestStubKind|TestClassifyStub|TestStubPin|TestTermSafe' . >/dev/null 2>&1) ||
   { echo "  >>> TestStubKind/TestClassifyStub/TestStubPin*/TestTermSafe failed"; broken+=(gotest); }
 
-echo "== result cache (audit/round7/run-cache.sh)"
-audit/round7/run-cache.sh | sed 's/^/  /'
-[ "${PIPESTATUS[0]}" = 0 ] || broken+=(cache-rows)
+# The result-cache rows are their own lane (r7c) under audit/run-rounds.sh (JANUS_R7_NO_CACHE_ROWS=1).
+if [ -z "${JANUS_R7_NO_CACHE_ROWS:-}" ]; then
+  echo "== result cache (audit/round7/run-cache.sh)"
+  tmark "== result cache (audit/round7/run-cache.sh)"
+  audit/round7/run-cache.sh | sed 's/^/  /'
+  [ "${PIPESTATUS[0]}" = 0 ] || broken+=(cache-rows)
+fi
 
+wait "$j1pid"
+cat "$W/J1.out"
+[ -s "$W/J1.broken" ] && while IFS= read -r b; do broken+=("$b"); done < "$W/J1.broken"
+
+tmark "end"
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
 echo; echo "All round-7 rows as expected."
