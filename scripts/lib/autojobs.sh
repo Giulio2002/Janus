@@ -13,8 +13,8 @@
 #   JANUS_GATE_LANE_CORES (cores reserved for the other lanes: go test, audit rounds, x86, asl; default 16),
 #   JANUS_GATE_LANE_GIB (memory reserved for them: they have their own budgets, default 40),
 #   JANUS_GATE_CORES_PER_ITEM (measured: one verify item uses ~2.1 cores, default 2.1)
-# The memory is budgeted jointly: verify jobs x item GiB + round lanes x 15 GiB + other lanes (25 GiB) + floor must
-#   fit MemAvailable; when over, the larger consumer is reduced first, both keep at least 2.
+# Memory: the verify pool gets a BUDGET (MemAvailable - floor - other lanes 25 GiB - round lanes x 15 GiB), shared by
+#   its running items through per-item admission (scripts/lib/pool.sh), so -j is limited by cores, not by the worst case.
 # Rules: fewer free cores than 8, or a 1-minute load of 60 or more (RULES.md), falls back to 2 jobs. Otherwise
 #   jobs = min(cap, (free cores - reserved) / cores per item, (MemAvailable - floor - reserved) / item GiB), at
 #   least 2; lanes = min(jobs + 3, 15). The memguard per-job limits are untouched.
@@ -31,8 +31,8 @@ autojobs_plan() { # prints: JOBS LANES ROUNDS|REASON|BUDGET
     gib = memkb / 1048576
     item = peak * 1.5; if (item < 4) item = 4
     if (ld >= 60 || free < 8) {
-      printf "2 5 2|host busy (load %d of %d cores, %.0f GiB available): fallback -j 2|mem budget: verify %.0f GiB + rounds %.0f GiB + lanes %d GiB + floor %d GiB of %.0f\n", \
-        ld, nproc, gib, 2 * item, 2 * rgib, lgib, floor, gib; exit
+      printf "2 5 2|host busy (load %d of %d cores, %.0f GiB available): fallback -j 2|mem budget: verify %.0f GiB + rounds %.0f GiB + lanes %d GiB + floor %d GiB of %.0f|%.2f\n", \
+        ld, nproc, gib, 2 * item, 2 * rgib, lgib, floor, gib, 2 * item; exit
     }
     # independent limits (cores, cap), then the JOINT memory budget of the verify pool and the audit-round lanes
     j = int((free - lcores) / cpi); why = sprintf("cores: (%d free - %d reserved) / %.1f per item", free, lcores, cpi)
@@ -40,16 +40,19 @@ autojobs_plan() { # prints: JOBS LANES ROUNDS|REASON|BUDGET
     r = int(free / 8); if (r > 6) r = 6
     if (j < 2) { j = 2; why = why " (raised to the minimum 2)" }
     if (r < 2) r = 2
-    j0 = j; r0 = r
-    while (j * item + r * rgib + lgib + floor > gib && (j > 2 || r > 2)) {
-      # reduce the larger consumer first, never below 2
-      if ((j * item >= r * rgib && j > 2) || r <= 2) j--; else r--
-    }
-    if (j < j0 || r < r0) why = sprintf("memory: joint budget cut verify %d -> %d, rounds %d -> %d (after %s)", j0, j, r0, r, why)
+    # The verify pool memory is a BUDGET shared by its running items (per-item admission, scripts/lib/pool.sh:
+    # each item reserves its own recorded peak x1.3, the conservative item estimate when unknown), not a charge of
+    # the worst case per slot. The round lanes keep 15 GiB each; the budget is what is left after them, the other
+    # lanes and the floor. It must hold at least two worst-case items: round lanes are cut first if not.
+    r0 = r
+    vb = gib - floor - lgib - r * rgib
+    while (vb < 2 * item && r > 2) { r--; vb = gib - floor - lgib - r * rgib }
+    over = ""
+    if (vb < 2 * item) { vb = 2 * item; over = " (OVER BUDGET even at the minimum: the admission floor throttles the pools)" }
+    if (r < r0) why = sprintf("memory: round lanes cut %d -> %d to keep room for two worst-case items (after %s)", r0, r, why)
     l = j + 3; if (l > 15) l = 15
-    tot = j * item + r * rgib + lgib + floor
-    printf "%d %d %d|%s; load %d of %d cores, %.0f GiB available|mem budget: verify %.0f GiB + rounds %.0f GiB + lanes %d GiB + floor %d GiB of %.0f%s\n", \
-      j, l, r, why, ld, nproc, gib, j * item, r * rgib, lgib, floor, gib, (tot > gib ? " (OVER BUDGET even at the minimum: the admission floor throttles the pools)" : "")
+    printf "%d %d %d|%s; load %d of %d cores, %.0f GiB available|mem budget: verify %.0f GiB (per-item admission, %d slots) + rounds %.0f GiB + lanes %d GiB + floor %d GiB of %.0f%s|%.2f\n", \
+      j, l, r, why, ld, nproc, gib, vb, j, r * rgib, lgib, floor, gib, over, vb
   }'
 }
 
@@ -62,6 +65,9 @@ autojobs_size() {
 
 # autojobs_budget: the "mem budget: ..." line of the joint budget
 autojobs_budget() { autojobs_plan | cut -d'|' -f3; }
+
+# autojobs_verify_budget_gib: the verify pool's memory budget in GiB (for POOL_BUDGET_KB)
+autojobs_verify_budget_gib() { autojobs_plan | cut -d'|' -f4; }
 
 # autojobs_peak_gib BASELINE: the largest recorded peak (GiB) of a pool item in the baseline, or empty.
 autojobs_peak_gib() {

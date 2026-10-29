@@ -23,6 +23,12 @@
 #
 # Environment: POOL_TIMELINE=FILE appends one JSON line per finished item (and one per pool);
 # POOL_PROGRESS_SECS; POOL_MEM_HEADROOM_KB / POOL_JOB_MEM_KB (admission, default as parallel.sh).
+# Per-item memory admission (opt-in): pool_peaks FILE loads recorded peaks ("ID<TAB>seconds<TAB>peak GiB", the speed
+# baseline) and POOL_BUDGET_KB is the pool's memory budget. A running item holds a reservation of its OWN recorded
+# peak x1.3 (at least 0.25 GiB; POOL_UNKNOWN_GIB, default 9.15 = 6.1 x 1.5, for an item without a record); a new item
+# is admitted only if the reservations of the running ones plus its own fit the budget (the first is always admitted),
+# so small items run POOL_JOBS wide and heavy ones limit themselves. POOL_DEBUG=1 logs each deferral. The pool line
+# of the timeline gets peakConcurrency and peakReservedGiB.
 # A finished item whose log has a line starting "TIMEOUT:" (scripts/lib/itemtimeout.sh) or whose status
 # is 124 is reported as TIMEOUT. An item whose log contains " skipped (unchanged" is reported SKIP
 # (a pass that did not run: --changed) and does not update the times.
@@ -31,6 +37,7 @@ pool_init() {
   POOL_NAME="$1"; POOL_JOBS="$2"; POOL_DIR="$3"
   POOL_IDS=(); POOL_CODES=(); POOL_KEYS=(); POOL_NEEDS=(); POOL_FAILED=()
   declare -gA POOL_SECS=()
+  declare -gA POOL_PEAK=()
   mkdir -p "$POOL_DIR"
   POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
 }
@@ -39,6 +46,17 @@ pool_times() { # FILE
   [ -f "$1" ] || return 0
   local k v
   while IFS=$'\t' read -r k v; do POOL_SECS[$k]=$v; done < "$1"
+}
+
+pool_peaks() { # FILE: recorded peaks in GiB, 3rd column
+  [ -f "$1" ] || return 0
+  local k w m
+  declare -gA POOL_PEAK
+  while IFS=$'\t' read -r k w m; do case "$k" in '#'*|lane:*|'') ;; *) POOL_PEAK[$k]=$m ;; esac; done < "$1"
+}
+_pool_res_kb() { # INDEX: this item's reservation in kB
+  local pk=${POOL_PEAK[${POOL_KEYS[$1]}]:-}
+  awk -v pk="$pk" -v unk="${POOL_UNKNOWN_GIB:-9.15}" 'BEGIN { g = (pk == "" ? unk : pk * 1.3); if (pk != "" && g < 0.25) g = 0.25; printf "%d", g * 1048576 }'
 }
 
 pool_add() { # ID CODE [COSTKEY [NEEDS]]
@@ -86,7 +104,8 @@ pool_run() {
   local -a order=() running=() POOL_T0=() POOL_PID=()
   local done_n=0 failed_n=0 skip_n=0 wall0 lastprog pick ready blocked
   local -A started=() known=()
-  local -A STATUS=()
+  local -A STATUS=() deferred=() RES=()
+  local peak_run=0 peak_res=0 res_sum=0 rr minjob
   for ((i = 0; i < total; i++)); do known[${POOL_IDS[$i]}]=1; done
   wall0=$(_pool_now); lastprog=$wall0
   # longest first; an item with no recorded wall first (99999), then the original order
@@ -98,10 +117,14 @@ pool_run() {
     # launch while there is a free slot and memory for another job: the first queued item (in
     # longest-first order) whose needs have passed
     while [ "${#running[@]}" -lt "$POOL_JOBS" ]; do
+      # live check: MemAvailable stays above the floor plus a job's budget (in per-item mode a 2 GiB margin: the
+      # reservations already count the items)
+      minjob=${POOL_JOB_MEM_KB:-$PAR_JOB_MEM_KB}; [ -z "${POOL_BUDGET_KB:-}" ] || minjob=2097152
       if [ "${#running[@]}" -gt 0 ] &&
-         [ "$(par_mem_available_kb)" -lt $(( ${POOL_MEM_HEADROOM_KB:-$PAR_HEADROOM_KB} + ${POOL_JOB_MEM_KB:-$PAR_JOB_MEM_KB} )) ]; then
+         [ "$(par_mem_available_kb)" -lt $(( ${POOL_MEM_HEADROOM_KB:-$PAR_HEADROOM_KB} + minjob )) ]; then
         break
       fi
+      res_sum=0; for rr in "${running[@]}"; do res_sum=$((res_sum + ${RES[$rr]:-0})); done
       pick=""
       for ((k = 0; k < total; k++)); do
         i=${order[$k]}
@@ -116,6 +139,16 @@ pool_run() {
         done
         if [ -n "$blocked" ]; then pick=$i; break; fi
         [ -n "$ready" ] || continue
+        if [ -n "${POOL_BUDGET_KB:-}" ] && [ "${#running[@]}" -gt 0 ]; then
+          rr=$(_pool_res_kb "$i")
+          if [ $((res_sum + rr)) -gt "$POOL_BUDGET_KB" ]; then
+            if [ -n "${POOL_DEBUG:-}" ] && [ "${deferred[$i]:-}" != "$res_sum" ]; then
+              deferred[$i]=$res_sum
+              echo "pool $POOL_NAME: defer ${POOL_IDS[$i]} (reserved $((res_sum / 1024)) MiB + $((rr / 1024)) MiB > budget $((POOL_BUDGET_KB / 1024)) MiB)"
+            fi
+            continue
+          fi
+        fi
         pick=$i; break
       done
       [ -n "$pick" ] || break
@@ -132,6 +165,10 @@ pool_run() {
       fi
       _pool_spawn "$i"
       running+=("$i")
+      RES[$i]=$(_pool_res_kb "$i"); res_sum=$((res_sum + RES[$i]))
+      [ "${#running[@]}" -le "$peak_run" ] || peak_run=${#running[@]}
+      [ "$res_sum" -le "$peak_res" ] || peak_res=$res_sum
+      [ -z "${POOL_RES_TRACE:-}" ] || echo "$res_sum ${#running[@]}" >> "$POOL_RES_TRACE"
     done
     if [ "${#running[@]}" -eq 0 ] && [ "$done_n" -lt "$total" ]; then
       # nothing runs and nothing can start: the remaining needs form a cycle
@@ -198,8 +235,8 @@ pool_run() {
   printf 'pool %s: %d items, %d passed, %d skipped, %d failed, %s wall (-j %s)\n' "$POOL_NAME" "$total" \
     "$((total - failed_n - skip_n))" "$skip_n" "$failed_n" "$(_pool_fmt "$(echo "$now - $wall0" | bc)")" "$POOL_JOBS"
   if [ -n "${POOL_TIMELINE:-}" ]; then
-    printf '{"kind":"pool","pool":"%s","items":%d,"failed":%d,"jobs":%s,"start":%.3f,"end":%.3f}\n' \
-      "$(_pool_json "$POOL_NAME")" "$total" "$failed_n" "$POOL_JOBS" "$wall0" "$now" >> "$POOL_TIMELINE"
+    printf '{"kind":"pool","pool":"%s","items":%d,"failed":%d,"jobs":%s,"start":%.3f,"end":%.3f,"peakConcurrency":%d,"peakReservedGiB":%.2f}\n' \
+      "$(_pool_json "$POOL_NAME")" "$total" "$failed_n" "$POOL_JOBS" "$wall0" "$now" "$peak_run" "$(awk -v k="$peak_res" 'BEGIN { print k / 1048576 }')" >> "$POOL_TIMELINE"
   fi
   [ "$failed_n" -eq 0 ]
 }

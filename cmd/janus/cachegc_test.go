@@ -882,3 +882,6 @@ func runLibSelfTest(t *testing.T, name string) {
 		t.Fatalf("scripts/lib/%s: %v\n%s", name, err, out)
 	}
 }
+
+// TestPoolMemLib: per-item memory admission of the work queue (heavy items limit themselves, small ones run wide).
+func TestPoolMemLib(t *testing.T) { runLibSelfTest(t, "test-poolmem.sh") }

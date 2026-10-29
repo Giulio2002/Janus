@@ -130,6 +130,8 @@ elif [ -z "$jobs_n" ] || [ "$jobs_n" = auto ]; then
   autosized=1
   # the audit rounds' own lane count (audit/run-rounds.sh reads JANUS_ROUNDS_LANES; an older one ignores it)
   rounds_lanes_n="${JANUS_ROUNDS_LANES:-$(autojobs_rounds_lanes)}"; auto_budget="$(autojobs_budget)"
+  # the verify pool memory budget (GiB): per-item admission in scripts/verify-all-examples.sh
+  export JANUS_VERIFY_MEM_BUDGET_GIB="${JANUS_VERIFY_MEM_BUDGET_GIB:-$(autojobs_verify_budget_gib)}"
 fi
 case "$jobs_n" in ''|*[!0-9]*|0) echo "gate: -j needs a positive number (got '$jobs_n')" >&2; exit 2 ;; esac
 [ -n "$lanes_n" ] || lanes_n=$((jobs_n + 1))
