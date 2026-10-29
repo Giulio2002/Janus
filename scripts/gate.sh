@@ -197,7 +197,10 @@ step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
 pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit && memguard_lake build JanusTests janus-oracle janus-oracle-amd64 janus-decode janus-testfloat; }
 pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
-pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
+# The go tests' prebuilt framework fixture (cmd/janus/fixture_test.go, docs/TESTING.md "Go tests"): built here, once, by
+# the tests' TestMain (a run that selects no test), so the gotest lane does not pay for it and nothing builds after the prebuild.
+pre_fixture() { JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
+pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add && pre_fixture; }
 p0=$(now); pre_fail=0
 step gobin pre_gobin || pre_fail=1
 if [ $pre_fail = 0 ]; then
