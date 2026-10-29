@@ -1,4 +1,5 @@
 import JanusX86.Proofs.RcxWidth
+import JanusX86.Proofs.Shift
 
 /-! # RCL/RCR (`C1/D1/D3 /2,/3`, 32/64 bits) -/
 

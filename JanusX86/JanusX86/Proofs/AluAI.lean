@@ -1,4 +1,4 @@
-import JanusX86.Proofs.AluGE
+import JanusX86.Proofs.AluClassMem
 
 /-! # ALU (A, I) forms: `AL/AX/EAX/RAX, imm` (`04/05 … 3C/3D`) and `TEST` (`A8/A9`) -/
 

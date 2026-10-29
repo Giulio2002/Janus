@@ -1,4 +1,5 @@
-import JanusX86.Proofs.Nop
+import JanusX86.Proofs.Mov
+import JanusX86.Proofs.Stack
 
 /-! # MOVSXD r64, r/m32 (`REX.W 63`) -/
 

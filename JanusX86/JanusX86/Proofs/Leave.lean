@@ -1,4 +1,4 @@
-import JanusX86.Proofs.Div
+import JanusX86.Proofs.CallInd
 
 /-! # LEAVE (`C9`), PUSH imm (`68/6A`) -/
 

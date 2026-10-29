@@ -1,5 +1,5 @@
-import JanusX86.Proofs.CallInd
 import JanusX86.Proofs.ShiftSpec
+import JanusX86.Proofs.TwoByte
 
 /-! # BT r/m, imm8 (`0F BA /4`) and BT r, r (`0F A3`, register destination) -/
 

@@ -1,4 +1,5 @@
-import JanusX86.Proofs.Lock
+import JanusX86.Proofs.Mov
+import JanusX86.Proofs.TwoByte
 
 /-! # NOP (`90`, `66 90`, `F3 90` PAUSE) and NOP r/m (`0F 1F /0`) -/
 

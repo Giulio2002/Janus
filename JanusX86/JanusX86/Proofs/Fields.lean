@@ -1,4 +1,4 @@
-import JanusX86.Proofs.Regs
+import JanusX86.Proofs.Flags
 
 /-! # Decoded fields: ModRM, REX, operand size
 

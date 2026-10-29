@@ -1,3 +1,4 @@
+import JanusX86.Proofs.AluClass
 import JanusX86.Proofs.AluMem
 
 set_option linter.unusedSimpArgs false

@@ -1,4 +1,5 @@
-import JanusX86.Proofs.Jcc32
+import JanusX86.Proofs.Branch
+import JanusX86.Proofs.Mov
 
 /-! # MUL (`F6/F7 /4`) -/
 

@@ -1,3 +1,4 @@
+import JanusX86.Proofs.EA
 import JanusX86.Proofs.MemW
 
 /-! # Memory operands: the model's loads and stores against Janus' checked memory

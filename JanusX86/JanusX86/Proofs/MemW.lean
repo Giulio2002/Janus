@@ -1,4 +1,4 @@
-import JanusX86.Proofs.EA
+import JanusX86.Proofs.Top
 
 /-! # Memory writes of the model (`wb`), and Janus' store against them -/
 

@@ -1,4 +1,5 @@
-import JanusX86.Proofs.Xchg9
+import JanusX86.Proofs.Bt
+import JanusX86.Proofs.Mov
 
 /-! # BT r, r (`0F A3`, register destination) -/
 

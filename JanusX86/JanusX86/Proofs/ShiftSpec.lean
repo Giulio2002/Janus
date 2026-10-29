@@ -1,4 +1,4 @@
-import JanusX86.Proofs.Stack
+import JanusX86.Proofs.Branch
 
 /-! # The model's shift/rotate specifications against Janus' `execShift` -/
 

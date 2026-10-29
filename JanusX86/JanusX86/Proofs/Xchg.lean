@@ -1,4 +1,5 @@
-import JanusX86.Proofs.Cbw
+import JanusX86.Proofs.Lock
+import JanusX86.Proofs.Mov
 
 /-! # XCHG r/m, r (`86/87`, the memory form implicitly locked) and XCHG rAX, r (`91–97`, `REX.B 90`) -/
 

@@ -1,4 +1,4 @@
-import JanusX86.Proofs.Call
+import JanusX86.Proofs.Branch
 
 /-! # The two-byte map (`0F xx`): fetch and dispatch -/
 

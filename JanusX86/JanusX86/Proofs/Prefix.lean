@@ -1,5 +1,5 @@
-import JanusX86.Proofs.Fetch
 import Janus
+import JanusX86.Proofs.Fetch
 
 /-! # Legacy prefixes and REX: `get_prefixes` against Janus' `parsePrefixes`
 

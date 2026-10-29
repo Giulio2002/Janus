@@ -1,4 +1,4 @@
-import JanusX86.Proofs.Leave
+import JanusX86.Proofs.MovOI
 import JanusX86.Proofs.Nop
 
 /-! # XCHG rAX, r (`91–97`, `REX.B 90`) -/

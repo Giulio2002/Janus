@@ -1,5 +1,5 @@
-import JanusX86.Proofs.Mem
 import JanusX86.Proofs.Config
+import JanusX86.Proofs.Mem
 
 /-! # The 64-bit application-level path: mode, address size, memory loads
 
