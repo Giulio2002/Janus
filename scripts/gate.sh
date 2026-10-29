@@ -354,6 +354,12 @@ lanes_rc=0
 l0=$(now)
 pool_run || lanes_rc=$?
 l1=$(now)
+# the timeline holds this gate's own items and lanes only: no self-test fake items (their scripts run with a private
+# out dir and timeline; a leak would corrupt the baseline)
+if grep -qE '"id":"(l1|l2|fast|slow|mid|new|bad|tmo|gone|killed|skp|conc|dep-[a-z0-9]+|heavy:[0-9]+|small:[0-9]+|unknown:1)"' "$tlf"; then
+  echo "gate: FAILED: self-test items leaked into the gate's timeline ($tlf):"; grep -E '"id":"(l1|l2|fast|slow|mid|new|bad|tmo|gone|killed|skp|conc|dep-[a-z0-9]+|heavy:[0-9]+|small:[0-9]+|unknown:1)"' "$tlf" | head -3
+  lanes_rc=1
+fi
 tl_stage stage lanes "$l0" "$l1" "$lanes_rc"
 [ -z "$tailpid" ] || { sleep 1; kill "$tailpid" 2>/dev/null; wait "$tailpid" 2>/dev/null; } || true
 

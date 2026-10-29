@@ -5,6 +5,8 @@
 # never run all together (3 x 7.8 GiB > 20 GiB), an unknown item reserves the conservative 9.15 GiB, a deferral
 # is logged under POOL_DEBUG, and the timeline pool line records peakConcurrency / peakReservedGiB.
 set -uo pipefail
+# private out dir and timeline: never the running gate's (inherited from gate.sh when run by the gotest lane)
+unset POOL_TIMELINE POOL_DIR JANUS_POOL_DIR POOL_BUDGET_KB POOL_DEBUG POOL_RES_TRACE POOL_MEM_HEADROOM_KB POOL_JOB_MEM_KB JANUS_VERIFY_MEM_BUDGET_GIB JANUS_GATE_PG JANUS_GATE_AUTO_WHY JANUS_GATE_ROUNDS_LANES JANUS_GATE_AUTO_BUDGET
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-poolmem.XXXXXX")"; trap 'rm -rf "$t"' EXIT
 . "$here/parallel.sh"; . "$here/pool.sh"

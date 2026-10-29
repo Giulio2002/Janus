@@ -5,6 +5,8 @@
 # Also: the cancelled run removes its isolated source copies. Uses `gate.sh --only axiom`-sized stages
 # via the stage hook JANUS_GATE_TEST_LANE (a sleep lane) so nothing heavy runs.
 set -uo pipefail
+# private out dir and timeline: never the running gate's (inherited from gate.sh when run by the gotest lane)
+unset POOL_TIMELINE POOL_DIR JANUS_POOL_DIR POOL_BUDGET_KB POOL_DEBUG POOL_RES_TRACE POOL_MEM_HEADROOM_KB POOL_JOB_MEM_KB JANUS_VERIFY_MEM_BUDGET_GIB JANUS_GATE_PG JANUS_GATE_AUTO_WHY JANUS_GATE_ROUNDS_LANES JANUS_GATE_AUTO_BUDGET
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-pgcancel.XXXXXX")"
 trap 'rm -rf "$t"' EXIT

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Self-test of scripts/lib/autojobs.sh with fake nproc / MemAvailable / load / peak inputs.
 set -uo pipefail
+# private out dir and timeline: never the running gate's (inherited from gate.sh when run by the gotest lane)
+unset POOL_TIMELINE POOL_DIR JANUS_POOL_DIR POOL_BUDGET_KB POOL_DEBUG POOL_RES_TRACE POOL_MEM_HEADROOM_KB POOL_JOB_MEM_KB JANUS_VERIFY_MEM_BUDGET_GIB JANUS_GATE_PG JANUS_GATE_AUTO_WHY JANUS_GATE_ROUNDS_LANES JANUS_GATE_AUTO_BUDGET
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/autojobs.sh"
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-autojobs.XXXXXX")"; trap 'rm -rf "$t"' EXIT

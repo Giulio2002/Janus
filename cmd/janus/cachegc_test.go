@@ -877,7 +877,14 @@ func TestGateCancelLib(t *testing.T) { runLibSelfTest(t, "test-pgcancel.sh") }
 func runLibSelfTest(t *testing.T, name string) {
 	t.Helper()
 	cmd := exec.Command("bash", filepath.Join(repoRoot, "scripts", "lib", name))
-	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+	// never the running gate's out dir or timeline (the gotest lane runs inside a gate that exports them)
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "POOL_") && !strings.HasPrefix(e, "JANUS_POOL_DIR=") && !strings.HasPrefix(e, "JANUS_GATE_") && !strings.HasPrefix(e, "JANUS_VERIFY_MEM_BUDGET_GIB=") {
+			env = append(env, e)
+		}
+	}
+	cmd.Env = append(env, "TMPDIR="+t.TempDir())
 	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "all checks passed") {
 		t.Fatalf("scripts/lib/%s: %v\n%s", name, err, out)
 	}
@@ -885,3 +892,6 @@ func runLibSelfTest(t *testing.T, name string) {
 
 // TestPoolMemLib: per-item memory admission of the work queue (heavy items limit themselves, small ones run wide).
 func TestPoolMemLib(t *testing.T) { runLibSelfTest(t, "test-poolmem.sh") }
+
+// TestSelfTestIsolation: the queue self-tests ignore an inherited gate timeline / pool dir (nothing leaks into a running gate).
+func TestSelfTestIsolation(t *testing.T) { runLibSelfTest(t, "test-isolation.sh") }
