@@ -21,7 +21,7 @@ bad() { echo "FAIL $*"; fail=1; }
 
 printf 'slow\t50\nmid\t20\nfast\t1\n' > "$t/times"
 POOL_PROGRESS_SECS=1 POOL_TIMELINE="$t/timeline.jsonl"
-pool_init toy 2 "$t/state"
+pool_init selftest-toy 2 "$t/state"
 pool_times "$t/times"
 pool_add fast 'echo fast; exit 0'
 pool_add slow 'sleep 3; exit 0'
@@ -46,7 +46,7 @@ done
 # order: the first two lines of order are "new" then "mid" (no time first, then longest)
 [ "$(head -1 "$t/order")" = new ] && ok "item without a time starts first" || bad "order: $(cat "$t/order")"
 grep -n 'PASS.* fast\|PASS.* slow' "$t/out" | head -2 | grep -q fast && ok "fast result streamed before slow" || bad "fast not before slow"
-grep -q '^-- pool toy:' "$t/out" && ok "progress line printed" || bad "no progress line"
+grep -q '^-- pool selftest-toy:' "$t/out" && ok "progress line printed" || bad "no progress line"
 [ "$(wc -l < "$t/timeline.jsonl")" -ge 11 ] && ok "timeline has an item line each + the pool" || bad "timeline: $(wc -l < "$t/timeline.jsonl") lines"
 [ -f "$t/state/slow.time" ] && [ ! -f "$t/state/skp.time" ] && [ ! -f "$t/state/bad.time" ] && ok "walls recorded for passes only" || bad "time files"
 # concurrency bound
@@ -54,7 +54,7 @@ mx=0; cur=0; while read -r l; do if [ "$l" = x ]; then cur=$((cur+1)); else cur=
 [ "$mx" -le 2 ] && ok "at most 2 items at once" || bad "saw $mx at once"
 
 # needs: an item runs after the items it needs passed; an item whose need failed is BLOCKED (a failure)
-pool_init deps 2 "$t/state2"
+pool_init selftest-deps 2 "$t/state2"
 pool_add dep-b 'echo b >> '"$t"'/dorder' "" "dep-a"
 pool_add dep-a 'sleep 1; echo a >> '"$t"'/dorder'
 pool_add dep-c 'echo c' "" "dep-bad"

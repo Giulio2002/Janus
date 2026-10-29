@@ -22,7 +22,7 @@ echo $$ > "$out/pgid"
 cancel() { trap '' TERM INT; kill -TERM -- -$$ 2>/dev/null; exit 143; }
 trap cancel TERM INT
 . "$(dirname "$0")/scripts/lib/parallel.sh"; . "$(dirname "$0")/scripts/lib/pool.sh"
-pool_init toy 2 "$out/lanes"; POOL_GUARD=0
+pool_init selftest-toy 2 "$out/lanes"; POOL_GUARD=0
 pool_add l1 "sleep $secs"; pool_add l2 "sleep $secs"
 pool_run
 EOS

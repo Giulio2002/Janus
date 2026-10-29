@@ -14,7 +14,7 @@ fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
 { for i in 1 2 3; do printf 'heavy:%d\t60\t6.00\n' $i; done; for i in $(seq 40); do printf 'small:%d\t5\t0.30\n' $i; done; } > "$t/base"
 POOL_TIMELINE="$t/tl" POOL_DEBUG=1 POOL_RES_TRACE="$t/trace" POOL_GUARD=0 POOL_PROGRESS_SECS=100
 POOL_BUDGET_KB=$((20 * 1048576)) POOL_MEM_HEADROOM_KB=1
-pool_init mem 12 "$t/state"; pool_peaks "$t/base"
+pool_init selftest-mem 12 "$t/state"; pool_peaks "$t/base"
 for i in 1 2 3; do pool_add "heavy:$i" "echo \$\$ >> $t/hv; sleep 1.5; echo \$\$ >> $t/hv"; done
 for i in $(seq 40); do pool_add "small:$i" "sleep 0.4"; done
 pool_add unknown:1 "sleep 0.3"
@@ -37,11 +37,11 @@ for p in ev:
     else: live.add(p); mx=max(mx,len(live))
 sys.exit(0 if mx<=2 else 1)
 PY
-grep -q 'pool mem: defer heavy:3' "$t/out" && ok "deferral logged: $(grep -m1 'defer' "$t/out")" || bad "no deferral log"
+grep -q 'pool selftest-mem: defer heavy:3' "$t/out" && ok "deferral logged: $(grep -m1 'defer' "$t/out")" || bad "no deferral log"
 # unknown item reservation is the conservative one
 r=$(POOL_KEYS=(unknown:1) _pool_res_kb 0); [ "$r" = 9594470 ] && ok "unknown item reserves 9.15 GiB" || bad "unknown reservation $r"
 # a budget below one item still admits the first item (no deadlock)
-POOL_BUDGET_KB=1000; pool_init mem2 4 "$t/state2"; pool_peaks "$t/base"; pool_add heavy:1 "sleep 0.1"; pool_add heavy:2 "sleep 0.1"
+POOL_BUDGET_KB=1000; pool_init selftest-mem2 4 "$t/state2"; pool_peaks "$t/base"; pool_add heavy:1 "sleep 0.1"; pool_add heavy:2 "sleep 0.1"
 pool_run > "$t/out2" 2>&1 && ok "a tiny budget serialises but never deadlocks" || bad "tiny budget: $(tail -2 "$t/out2")"
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail

@@ -13,5 +13,9 @@ for s in test-pool test-poolmem test-pgcancel; do
   if [ "$rc" = 0 ] && [ ! -s "$t/gate-timeline.jsonl" ] && [ -z "$(ls -A "$t/gate-pool")" ]; then ok "$s wrote nothing to the inherited timeline / pool dir"
   else bad "$s: rc=$rc timeline=$(wc -c < "$t/gate-timeline.jsonl") bytes pool dir: $(ls "$t/gate-pool" | head -2)"; fi
 done
+# the gate-level guard: its pattern matches a self-test pool and no real one
+printf '{"kind":"pool","pool":"selftest-toy"}\n' > "$t/tl-bad"; printf '{"kind":"pool","pool":"verify"}\n{"kind":"item","pool":"gate","id":"selftest"}\n' > "$t/tl-good"
+grep -q "grep -q '\"pool\":\"selftest-' \"\$tlf\"" "$here/../gate.sh" && ok "gate.sh checks for selftest- pools" || bad "gate.sh guard missing"
+grep -q '"pool":"selftest-' "$t/tl-bad" && ! grep -q '"pool":"selftest-' "$t/tl-good" && ok "guard pattern: matches self-test pools only" || bad "guard pattern"
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail
