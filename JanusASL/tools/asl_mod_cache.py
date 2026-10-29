@@ -331,6 +331,19 @@ def restore(ks, cache):
     except ks.bc.CacheError as ex:
         print("asl module cache: %s; not using the cache (Lake builds everything)" % ex, file=sys.stderr)
         return
+    # one restorer at a time per tree (lanes of scripts/gate.sh share an isolated tree): the same lock as
+    # scripts/lib/bcache.py's fetch, taken in a fixed order, held for the whole restore
+    tls = [ks.bc.tree_lock(os.path.join(p.dir, ".lake")) for p in ks.pkgs]
+    try:
+        hit, miss, same, bad = restore_locked(ks, cache)
+    finally:
+        for t in reversed(tls):
+            t.close()
+    print("asl module cache: restored %d modules, %d already current, %d not cached, %d rejected (%s)" % (hit, same, miss, bad, cache))
+
+
+def restore_locked(ks, cache):
+    hit = miss = same = bad = 0
     for mod in ks.modules():
         k = ks.key(mod)
         if k is None:
@@ -357,7 +370,7 @@ def restore(ks, cache):
         else:
             hit += 1
             touch_use(e)
-    print("asl module cache: restored %d modules, %d already current, %d not cached, %d rejected (%s)" % (hit, same, miss, bad, cache))
+    return hit, miss, same, bad
 
 
 def quarantine(e, cache):
@@ -399,7 +412,7 @@ def restore_one(ks, p, mod, key, e):
             src, dst = os.path.join(e, "tree", r), os.path.join(p.dir, rel)
             bc._regular(src)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            tmp = dst + ".asl-cache-tmp"
+            tmp = bc._tmp_name(dst)
             fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
             with os.fdopen(fd, "rb") as fi, open(tmp, "wb") as fo:
                 shutil.copyfileobj(fi, fo, 1 << 20)

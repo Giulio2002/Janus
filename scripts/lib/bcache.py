@@ -246,59 +246,103 @@ def _same(dest, man):
     return True
 
 
+TREE_LOCK = ".bcache-tree.lock"
+
+
+def tree_lock(dest):
+    """Exclusive flock on a materialisation target (a directory such as <pkg>/.lake), held for a whole
+    fetch/verify/materialise sequence: lanes that share a tree (scripts/gate.sh's isolated trees) take turns, and
+    a later one finds the earlier one's finished work (and verifies it) instead of racing on its files. The lock
+    file is never removed."""
+    os.makedirs(dest, exist_ok=True)
+    f = open(os.path.join(dest, TREE_LOCK), "a+")
+    fcntl.flock(f, fcntl.LOCK_EX)
+    return f
+
+
+def _tmp_name(dst):
+    """A name no other process (or thread) can also pick: pid + random, next to dst."""
+    return "%s.bcache-tmp.%d.%s" % (dst, os.getpid(), os.urandom(6).hex())
+
+
 def fetch(kind, cache, ident, dest, clean_globs=()):
-    """Copy the verified entry into dest. Returns "hit", "current" (dest already holds exactly the
-    entry's files), "miss", or raises CacheError (rejected; dest holds none of the entry's files)."""
+    """Copy the verified entry into dest. Returns "hit", "current" (dest already holds exactly the entry's
+    files), "miss", or raises CacheError (rejected).
+
+    The whole sequence runs under dest's tree lock. It is two-phase: phase 1 copies every file to a unique
+    temporary name beside its destination and checks the SHA-256 of each copy against the signed manifest;
+    only when all of them verify does phase 2 rename them into place. A rejected entry therefore leaves dest
+    exactly as it was (only the temporaries are removed), a fetch killed in phase 1 leaves only temporaries
+    (the next fetch removes them), and one killed in phase 2 leaves a mix of old and new files that the next
+    fetch sees as not 'current' and repairs. clean_globs is accepted for compatibility and unused."""
     e = entry_dir(kind, cache, ident)
     if not os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
         return "miss"
-    lk = lock_path(e + ".lock", shared=True)
+    tl = tree_lock(dest)
     try:
-        if not os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
-            return "miss"
-        man = read_signed_manifest(kind, ident, e)
-        touch_use(e)
-        if _same(dest, man):
-            return "current"
-        written = []
+        lk = lock_path(e + ".lock", shared=True)
         try:
-            for rel, h in sorted(man.items()):
-                src = os.path.join(e, "tree", rel)
-                _regular(src)
-                dst = _under(dest, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                tmp = dst + ".bcache-tmp"
-                d = hashlib.sha256()
-                fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
-                with os.fdopen(fd, "rb") as fi, open(tmp, "wb") as fo:
-                    for chunk in iter(lambda: fi.read(1 << 20), b""):
-                        d.update(chunk)
-                        fo.write(chunk)
-                if d.hexdigest() != h:
-                    os.unlink(tmp)
-                    raise CacheError("file %s does not match the manifest" % rel)
-                shutil.copymode(src, tmp)
-                os.chmod(tmp, os.stat(tmp).st_mode | 0o200)  # the consumer's copy is writable
+            if not os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
+                return "miss"
+            man = read_signed_manifest(kind, ident, e)
+            touch_use(e)
+            _sweep_temps(dest, man)
+            if _same(dest, man):
+                return "current"
+            staged = []
+            try:
+                for rel, h in sorted(man.items()):
+                    src = os.path.join(e, "tree", rel)
+                    _regular(src)
+                    dst = _under(dest, rel)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    tmp = _tmp_name(dst)
+                    staged.append((tmp, dst))
+                    d = hashlib.sha256()
+                    fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+                    with os.fdopen(fd, "rb") as fi, open(tmp, "wb") as fo:
+                        for chunk in iter(lambda: fi.read(1 << 20), b""):
+                            d.update(chunk)
+                            fo.write(chunk)
+                    if d.hexdigest() != h:
+                        raise CacheError("file %s does not match the manifest" % rel)
+                    shutil.copymode(src, tmp)
+                    os.chmod(tmp, os.stat(tmp).st_mode | 0o200)  # the consumer's copy is writable
+            except (OSError, CacheError) as ex:
+                for tmp, _ in staged:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+                raise CacheError(str(ex))
+            # phase 2: every file is verified; rename into place (a rename cannot fail on content)
+            for tmp, dst in staged:
                 os.replace(tmp, dst)
-                written.append(dst)
-        except (OSError, CacheError) as ex:
-            for p in written + [_under(dest, r) for r in man]:
+            return "hit"
+        finally:
+            lk.close()
+    finally:
+        tl.close()
+
+
+def _sweep_temps(dest, man):
+    """Remove leftover temporaries of killed materialisers next to the manifest's files (under the tree lock)."""
+    seen = set()
+    for rel in man:
+        d = os.path.dirname(_under(dest, rel))
+        if d in seen:
+            continue
+        seen.add(d)
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            if ".bcache-tmp." in n:
                 try:
-                    os.unlink(p)
+                    os.unlink(os.path.join(d, n))
                 except OSError:
                     pass
-            import glob
-            for g in clean_globs:
-                for p in glob.glob(os.path.join(dest, g)):
-                    if os.path.isfile(p) or os.path.islink(p):
-                        try:
-                            os.unlink(p)
-                        except OSError:
-                            pass
-            raise CacheError(str(ex))
-        return "hit"
-    finally:
-        lk.close()
 
 
 # ---- store ----

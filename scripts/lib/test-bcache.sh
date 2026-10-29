@@ -44,8 +44,8 @@ tamper_case() {  # tamper_case DESC COMMAND: run COMMAND on a fresh entry, then 
   rm -rf "$t/cache/sail" "$t/dx"; store > /dev/null
   eval "$2"
   local rc=0; B fetch sail "$t/cache" "$K" "$t/dx" > "$t/out" 2> "$t/err" || rc=$?
-  if [ "$rc" = 3 ] && [ -z "$(find "$t/dx" -type f 2>/dev/null)" ]; then ok "rejected, nothing copied: $1"
-  else bad "$1: rc $rc, files copied: $(find "$t/dx" -type f 2>/dev/null | tr '\n' ' ')"; fi
+  if [ "$rc" = 3 ] && [ -z "$(find "$t/dx" -type f ! -name .bcache-tree.lock 2>/dev/null)" ]; then ok "rejected, nothing copied: $1"
+  else bad "$1: rc $rc, files copied: $(find "$t/dx" -type f ! -name .bcache-tree.lock 2>/dev/null | tr '\n' ' ')"; fi
   expect 3 "  ... and verify says invalid: $1" B verify sail "$t/cache" "$K"
   # a rebuild then replaces the invalid entry
   store > "$t/out" 2> "$t/err"; B verify sail "$t/cache" "$K" > /dev/null && ok "  ... and the next store replaces it with a valid one" || bad "  ... not replaced: $(cat "$t/err")"
@@ -92,6 +92,48 @@ rm -rf "$t/cache/sail/$K"/MANIFEST.hmac
 ( for i in 1 2 3 4 5 6; do B fetch sail "$t/cache" "$K" "$t/cr$i" > "$t/cr$i.out" 2>&1; echo $? >> "$t/cr$i.out"; done )
 bad_rc=$(cat "$t"/cr*.out | grep -E '^[0-9]+$' | grep -vE '^(0|2)$' || true)
 [ -z "$bad_rc" ] && B verify sail "$t/cache" "$K" >/dev/null && ok "an invalid entry replaced by 6 concurrent publishers ends valid; readers saw hit or miss only" || bad "replace race: $bad_rc"
+
+echo; echo "-- many fetchers into ONE tree (the gate's lanes share an isolated tree)"
+rm -rf "$t/cache" "$t/shared"; mkdir -p "$t/cache" "$t/shared"
+# a bigger entry, so the copies overlap
+mkdir -p "$t/big/sub"; for i in $(seq 1 40); do head -c 1500000 /dev/urandom > "$t/big/sub/f$i.olean"; done; echo meta > "$t/big/m"
+(cd "$t/big" && find . -type f -printf '%P\0') | B store sail "$t/cache" "$K" "$t/big" > /dev/null
+pids=()
+for i in 1 2 3 4 5 6 7 8; do
+  ( B fetch sail "$t/cache" "$K" "$t/shared" > "$t/sf$i.out" 2> "$t/sf$i.err"; echo $? >> "$t/sf$i.out" ) &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p"; done
+badf=$(cat "$t"/sf*.out | grep -E '^[0-9]+$' | grep -vc '^0$'); rej=$(cat "$t"/sf*.err | grep -c REJECTED)
+[ "$badf" = 0 ] && [ "$rej" = 0 ] && ok "8 concurrent fetches into one tree: all succeed, none REJECTED" || bad "concurrent fetches: $badf failed, $rej rejected: $(cat "$t"/sf*.err | head -3)"
+n=0; for f in $(cd "$t/big" && find . -type f -printf '%P\n'); do cmp -s "$t/big/$f" "$t/shared/$f" && n=$((n+1)); done
+[ "$n" = 41 ] && ok "every one of the 41 files is present and identical" || bad "only $n of 41 files identical"
+[ -z "$(find "$t/shared" -name '*.bcache-tmp*')" ] && ok "no temporary files left" || bad "temporaries left: $(find "$t/shared" -name '*.bcache-tmp*' | head -3)"
+hits=$(cat "$t"/sf*.out | grep -c '^hit$'); cur=$(cat "$t"/sf*.out | grep -c '^current$')
+[ "$hits" = 1 ] && [ "$cur" = 7 ] && ok "exactly one fetch materialised (hit), the 7 others found the finished tree and verified it (current)" || bad "hit=$hits current=$cur"
+
+echo; echo "-- a rejected fetch leaves the tree as it was"
+rm -rf "$t/pre"; mkdir -p "$t/pre/sub"; echo mine > "$t/pre/sub/f1.olean"; echo other > "$t/pre/unrelated"; echo "partial" > "$t/pre/m"
+snap() { (cd "$t/pre" && find . -type f ! -name .bcache-tree.lock -print0 | sort -z | xargs -0 sha256sum); }
+b0=$(snap)
+e="$t/cache/sail/$K"; chmod u+w "$e/tree/sub/f20.olean"; printf X | dd of="$e/tree/sub/f20.olean" bs=1 count=1 seek=100 conv=notrunc 2>/dev/null
+expect 3 "a tampered entry is rejected" B fetch sail "$t/cache" "$K" "$t/pre"
+[ "$(snap)" = "$b0" ] && ok "the tree is byte-for-byte what it was before (nothing partially populated, nothing deleted)" || bad "the rejected fetch changed the tree"
+[ -z "$(find "$t/pre" -name '*.bcache-tmp*')" ] && ok "and no temporaries remain" || bad "temporaries remain"
+rm -rf "$t/cache/sail"; (cd "$t/big" && find . -type f -printf '%P\0') | B store sail "$t/cache" "$K" "$t/big" > /dev/null
+
+echo; echo "-- a materialiser killed mid-way is repaired by the next fetch"
+for when in 0.05 0.15 0.3; do
+  rm -rf "$t/kill"; mkdir -p "$t/kill"
+  python3 -I "$bc" fetch sail "$t/cache" "$K" "$t/kill" > /dev/null 2>&1 & kp=$!
+  sleep "$when"; kill -9 "$kp" 2>/dev/null; wait "$kp" 2>/dev/null
+  B fetch sail "$t/cache" "$K" "$t/kill" > "$t/kf.out" 2>&1; rc=$?
+  n=0; for f in $(cd "$t/big" && find . -type f -printf '%P\n'); do cmp -s "$t/big/$f" "$t/kill/$f" && n=$((n+1)); done
+  [ "$rc" = 0 ] && [ "$n" = 41 ] && [ -z "$(find "$t/kill" -name '*.bcache-tmp*')" ] && ok "killed after ${when}s: the next fetch ($(cat "$t/kf.out")) leaves 41 verified files and no temporaries" || bad "killed after ${when}s: next fetch rc=$rc, $n/41 files, $(cat "$t/kf.out")"
+done
+# stale temporaries from a dead process are swept, and a half-replaced tree is repaired
+rm -rf "$t/kill"; B fetch sail "$t/cache" "$K" "$t/kill" >/dev/null; echo junk > "$t/kill/sub/f3.olean.bcache-tmp.1.deadbeef"; echo garbage > "$t/kill/sub/f7.olean"
+B fetch sail "$t/cache" "$K" "$t/kill" > "$t/kf.out"; cmp -s "$t/big/sub/f7.olean" "$t/kill/sub/f7.olean" && [ -z "$(find "$t/kill" -name '*.bcache-tmp*')" ] && ok "a stale temporary is swept and a half-replaced file repaired ($(cat "$t/kf.out"))" || bad "stale state not repaired"
 
 echo; echo "-- keys: a changed input is a different key"
 cp_tree() { rm -rf "$1"; mkdir -p "$1"; rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude=target --exclude=ArmASL --exclude=ArmASL.lean --exclude=bin "$root/" "$1/"; }
@@ -140,6 +182,11 @@ out="$t/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.olean"
 mrestore() { rm -f "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.*; $mp restore "$t/m" "$mc" 2>&1; }
 mrestore | grep -q 'restored 1 modules' && cmp -s <(printf OLEAN-bytes) "$out" && ok "restore copies the module back" || bad "restore"
 r=$(mrestore); echo "$r" | grep -q 'restored 1 modules' && ok "restore (again) hits" || bad "second restore: $r"
+# eight concurrent restores into the same tree (the gate's lanes share one): all succeed, the module is intact
+rm -f "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.*
+pids=(); for i in 1 2 3 4 5 6 7 8; do ( $mp restore "$t/m" "$mc" > "$t/mr$i.out" 2>&1 ) & pids+=($!); done; for p in "${pids[@]}"; do wait "$p"; done
+rej=$(cat "$t"/mr?.out | grep -c '[1-9][0-9]* rejected'); okc=$(cat "$t"/mr?.out | grep -c 'rejected (')
+cmp -s <(printf OLEAN-bytes) "$out" && [ "$rej" = 0 ] && [ -z "$(find "$t/m/JanusASL/.lake" -name '*.asl-cache-tmp*' -o -name '*.bcache-tmp*')" ] && ok "8 concurrent module restores into one tree: none rejected, the module is intact, no temporaries" || bad "concurrent module restores: rejected=$rej: $(cat "$t"/mr1.out | head -3)"
 chmod u+w "$e/tree/janusasl/.lake/build/lib/lean/JanusASL/Audit.olean"; printf EVIL >> "$e/tree/janusasl/.lake/build/lib/lean/JanusASL/Audit.olean"
 r=$(mrestore); if echo "$r" | grep -q '1 rejected' && [ -z "$(ls "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.* 2>/dev/null)" ]; then ok "a tampered cached .olean is rejected and no output is left (Lake builds it)"; else bad "tampered olean: $r"; fi
 [ ! -d "$e" ] && ok "the rejected entry is quarantined" || bad "rejected entry still in place"
