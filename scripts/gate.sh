@@ -82,7 +82,7 @@ lane_spec() {
 }
 orig_args=("$@")
 sbfile="${JANUS_SPEED_BASELINE:-$root/scripts/speed-baseline.tsv}"
-jobs_n="${JANUS_JOBS:-2}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce incremental="${JANUS_GATE_INCREMENTAL:-}" explain_item=""
+jobs_n="${JANUS_JOBS:-}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce incremental="${JANUS_GATE_INCREMENTAL:-}" explain_item=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -j|--jobs) jobs_n="${2:?-j needs a number}"; shift 2 ;;
@@ -117,11 +117,27 @@ if [ -n "$explain_item" ]; then
     *) exec scripts/verify-all-examples.sh --cgo --explain --filter "^${explain_item//./\\.}\$" ;;
   esac
 fi
-[ "$jobs_n" != auto ] || jobs_n=$(par_default_jobs)
+# -j / --lanes not given (or -j auto): sized from the free cores and MemAvailable (scripts/lib/autojobs.sh),
+# using the largest recorded per-item peak of the speed baseline; an explicit -j / JANUS_JOBS is used as given.
+. "$root/scripts/lib/autojobs.sh"
+autosized=""; auto_why=""
+if [ -n "${JANUS_GATE_AUTO_WHY:-}" ]; then   # (the setsid re-exec below keeps the first sizing)
+  autosized=1; auto_why="$JANUS_GATE_AUTO_WHY"
+elif [ -z "$jobs_n" ] || [ "$jobs_n" = auto ]; then
+  _pk0="$(autojobs_peak_gib "$sbfile")"
+  read -r jobs_n auto_lanes auto_why < <(if [ -n "$_pk0" ]; then AUTOJOBS_PEAK_GIB="$_pk0" autojobs_size; else autojobs_size; fi)
+  [ -n "$lanes_n" ] || lanes_n=$auto_lanes
+  autosized=1
+fi
 case "$jobs_n" in ''|*[!0-9]*|0) echo "gate: -j needs a positive number (got '$jobs_n')" >&2; exit 2 ;; esac
 [ -n "$lanes_n" ] || lanes_n=$((jobs_n + 1))
 case "$lanes_n" in ''|*[!0-9]*|0) echo "gate: --lanes needs a positive number (got '$lanes_n')" >&2; exit 2 ;; esac
 export JANUS_JOBS=$jobs_n
+# Admission control of every pool (scripts/lib/pool.sh): no new item starts when MemAvailable would fall below
+# the floor (JANUS_GATE_MEM_FLOOR_GIB, default 30) plus one item's estimate (largest recorded peak x1.5, at least 4 GiB)
+_pk="$(autojobs_peak_gib "$sbfile")"
+export POOL_MEM_HEADROOM_KB=$(( ${JANUS_GATE_MEM_FLOOR_GIB:-30} * 1048576 ))
+export POOL_JOB_MEM_KB=$(awk -v p="${_pk:-6.1}" 'BEGIN { i = p * 1.5; if (i < 4) i = 4; printf "%d", i * 1048576 }')
 # incremental skipping is opt-in (the default is a full run); recording the passes is always on, so a full run
 # feeds the next incremental one
 export JANUS_INCR_RECORD=1
@@ -157,7 +173,8 @@ ln -sfn "$out" "$root/artifacts/gate/latest" 2>/dev/null || true
 tlf="$out/timeline.jsonl"; : > "$tlf"
 # Own process group (setsid, once): every child of this run is in it, and a cancel is `kill -- -PGID`.
 if [ "${JANUS_GATE_PG:-}" != "$out" ]; then
-  export JANUS_GATE_PG="$out"
+  export JANUS_GATE_PG="$out" JANUS_JOBS="$jobs_n" JANUS_LANES="$lanes_n"
+  [ -z "$autosized" ] || export JANUS_GATE_AUTO_WHY="$auto_why"
   exec setsid --wait "$0" "${orig_args[@]}" --out "$out"
 fi
 echo "$$" > "$out/pgid"
@@ -180,8 +197,10 @@ tl_stage() { # KIND NAME START END RC
 gate_t0=$(now)
 export JANUS_GATE_T0=$gate_t0
 sha="$(git rev-parse --short HEAD 2>/dev/null || echo '?')$(git diff --quiet HEAD 2>/dev/null || echo '+dirty')"
-printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGiB":%s,"cores":%s,"start":%.3f,"partial":%s}\n' \
-  "$sha" "$jobs_n" "$lanes_n" "$load1" "$((memk / 1048576))" "$(nproc)" "$gate_t0" "$([ -n "$partial" ] && echo true || echo false)" >> "$tlf"
+printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGiB":%s,"cores":%s,"start":%.3f,"partial":%s,"auto":%s,"why":"%s"}\n' \
+  "$sha" "$jobs_n" "$lanes_n" "$load1" "$((memk / 1048576))" "$(nproc)" "$gate_t0" "$([ -n "$partial" ] && echo true || echo false)" \
+  "$([ -n "$autosized" ] && echo true || echo false)" "$(_pool_json "${auto_why:-given}")" >> "$tlf"
+[ -z "$autosized" ] || echo "gate: -j $jobs_n, $lanes_n lanes chosen automatically: $auto_why"
 echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}"
 
 # ---- phase 1: prebuild, once

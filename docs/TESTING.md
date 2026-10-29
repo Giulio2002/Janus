@@ -61,6 +61,18 @@ and `-j` others):
 | `asl-build`, `sail-build` | `scripts/asl.sh build` (set `ASL_CACHE`), `scripts/oracle-sail.sh build` |
 | `rtasl-prove`, `-rel`, `-strict`, `-replay`, `-btf`, `-probes`, `-fsqrt`, `-go` | `audit/rt-asl/run.sh GROUP`: the red-team round ASL, one lane per group (`run.sh` without arguments still runs them all, in order) |
 
+**Automatic sizing.** Without `-j` / `--lanes` (and without `JANUS_JOBS` / `JANUS_LANES`), `gate.sh` chooses them
+from the host (`scripts/lib/autojobs.sh`, tested by `scripts/lib/test-autojobs.sh` with fake nproc / MemAvailable /
+load inputs): `jobs = min(cap, (free cores - 16 reserved for the other lanes) / 2.1 cores per item, (MemAvailable -
+30 GiB floor - 40 GiB reserved) / item GiB)`, at least 2, where free cores = nproc - 1-minute load and item GiB = the
+largest recorded per-item peak of `scripts/speed-baseline.tsv` (6.1 without one) x 1.5, at least 4; `lanes =
+min(jobs + 3, 15)`. An idle 48-core / 170 GiB box gets `-j 10`, 13 lanes. Fewer than 8 free cores or a 1-minute
+load of 60 or more (RULES.md) falls back to `-j 2`. `JANUS_GATE_MAX_JOBS` (default 12), `JANUS_GATE_MEM_FLOOR_GIB`,
+`JANUS_GATE_LANE_CORES`, `JANUS_GATE_LANE_GIB`, `JANUS_GATE_CORES_PER_ITEM` tune it. The choice and its reason are
+printed and recorded in the timeline's `gate` line (`auto`, `why`). Admission: every pool (`pool.sh`) starts no new
+item while MemAvailable is below the floor plus one item's estimate. An explicit `-j` or `JANUS_JOBS` (the shared-box
+rule of RULES.md) is used as given; memguard's per-job limits are unchanged.
+
 **Concurrency.** `-j N` / `JANUS_JOBS` (default **2**, the shared-box rule; `auto` uses the formula of
 `scripts/lib/parallel.sh`) is the number of verify items at once; the go test shards (`max(2, N)`, one
 test slot each) and the audit lanes (`N`) scale with it. `--lanes` / `JANUS_LANES` caps the lanes.
