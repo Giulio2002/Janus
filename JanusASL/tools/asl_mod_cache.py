@@ -282,12 +282,27 @@ def outputs(p, mod):
     return res
 
 
+def open_lock(path):
+    """Open (creating, 0600) a lock file without following a symlink; refuse a non-regular or foreign file
+    (scripts/lib/bcache.py open_lock; duplicated because the collector runs without a checkout's bcache)."""
+    import stat
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    except OSError as ex:
+        raise OSError("cannot open the lock file %s safely (%s)" % (path, "a symbolic link" if ex.errno == 40 else ex.strerror))
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+        os.close(fd)
+        raise OSError("the lock file %s is not a regular file owned by this user" % path)
+    return os.fdopen(fd, "r+")
+
+
 def lock_path(path, shared, block=True):
     """flock path (created if missing), shared or exclusive; None if not block and it is held.
     The collector removes lock files while holding them, so after the lock is granted the path
     must still name the locked file; otherwise the lock is taken again on the new one."""
     while True:
-        f = open(path, "a+")
+        f = open_lock(path)
         try:
             fcntl.flock(f, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | (0 if block else fcntl.LOCK_NB))
         except BlockingIOError:
@@ -304,9 +319,8 @@ def lock_path(path, shared, block=True):
 def touch_use(e):
     p = e + ".use"
     try:
-        with open(p, "a"):
-            pass
-        os.utime(p, None)
+        os.close(os.open(p, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600))
+        os.utime(p, None, follow_symlinks=False)
     except OSError:
         pass
 
@@ -354,7 +368,12 @@ def restore_locked(ks, cache):
             miss += 1
             continue
         # Shared while copying: the collector never removes an entry being read.
-        lk = lock_path(e + ".lock", shared=True)
+        try:
+            lk = lock_path(e + ".lock", shared=True)
+        except OSError as ex:
+            print("asl module cache: %s: %s; Lake builds it" % (mod, ex), file=sys.stderr)
+            bad += 1
+            continue
         try:
             r = restore_one(ks, p, mod, k, e)
         finally:
@@ -485,7 +504,13 @@ def publish(ks, cache, roots):
             skipped += 1
             continue
         os.makedirs(os.path.dirname(e), exist_ok=True)
-        with lock_path(e + ".lock", shared=False):
+        try:
+            xl = lock_path(e + ".lock", shared=False)
+        except OSError as ex:
+            print("asl module cache: %s: %s; not stored" % (mod, ex), file=sys.stderr)
+            skipped += 1
+            continue
+        with xl:
             if os.path.isdir(e):
                 if entry_present(ks, k, e):
                     present += 1
@@ -611,7 +636,10 @@ def evict(e, cache, cutoff, dry, trash):
     used again since the scan."""
     if dry:
         return True
-    lk = lock_path(e.path + ".lock", shared=False, block=False)
+    try:
+        lk = lock_path(e.path + ".lock", shared=False, block=False)
+    except OSError:
+        return False  # an unsafe lock path (a symlink, a foreign file): leave the entry alone
     if lk is None:
         return False
     try:

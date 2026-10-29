@@ -140,11 +140,26 @@ def entry_dir(kind, cache, ident):
     raise CacheError("unknown kind %r" % kind)
 
 
+def open_lock(path):
+    """Open (creating, mode 0600) a lock file without following a symlink, and refuse anything that is not a
+    regular file owned by this user: a lock path that someone replaced by a symlink (to be created or truncated
+    elsewhere) or by another user's file is an error, never followed."""
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    except OSError as ex:
+        raise CacheError("cannot open the lock file %s safely (%s)" % (path, "a symbolic link" if ex.errno == errno.ELOOP else ex.strerror))
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+        os.close(fd)
+        raise CacheError("the lock file %s is not a regular file owned by this user" % path)
+    return os.fdopen(fd, "r+")
+
+
 def lock_path(path, shared, block=True):
     """flock `path` (created if missing). The collector removes lock files while holding them, so
     after the lock is granted the path must still name the locked file; otherwise retry."""
     while True:
-        f = open(path, "a+")
+        f = open_lock(path)
         try:
             fcntl.flock(f, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | (0 if block else fcntl.LOCK_NB))
         except BlockingIOError:
@@ -159,10 +174,10 @@ def lock_path(path, shared, block=True):
 
 
 def touch_use(e):
+    p = e + ".use"
     try:
-        with open(e + ".use", "a"):
-            pass
-        os.utime(e + ".use", None)
+        os.close(os.open(p, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600))
+        os.utime(p, None, follow_symlinks=False)
     except OSError:
         pass
 
@@ -253,9 +268,11 @@ def tree_lock(dest):
     """Exclusive flock on a materialisation target (a directory such as <pkg>/.lake), held for a whole
     fetch/verify/materialise sequence: lanes that share a tree (scripts/gate.sh's isolated trees) take turns, and
     a later one finds the earlier one's finished work (and verifies it) instead of racing on its files. The lock
-    file is never removed."""
+    file is never removed. It serialises *fetchers* (this module and asl_mod_cache.py restore) only: it does not
+    stop a concurrent `lake` build writing into the same tree. Callers must not run lake and a fetch on one tree
+    at once; scripts/gate.sh keeps the lanes that share an isolated tree from doing so."""
     os.makedirs(dest, exist_ok=True)
-    f = open(os.path.join(dest, TREE_LOCK), "a+")
+    f = open_lock(os.path.join(dest, TREE_LOCK))
     fcntl.flock(f, fcntl.LOCK_EX)
     return f
 

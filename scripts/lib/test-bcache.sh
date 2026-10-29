@@ -135,6 +135,27 @@ done
 rm -rf "$t/kill"; B fetch sail "$t/cache" "$K" "$t/kill" >/dev/null; echo junk > "$t/kill/sub/f3.olean.bcache-tmp.1.deadbeef"; echo garbage > "$t/kill/sub/f7.olean"
 B fetch sail "$t/cache" "$K" "$t/kill" > "$t/kf.out"; cmp -s "$t/big/sub/f7.olean" "$t/kill/sub/f7.olean" && [ -z "$(find "$t/kill" -name '*.bcache-tmp*')" ] && ok "a stale temporary is swept and a half-replaced file repaired ($(cat "$t/kf.out"))" || bad "stale state not repaired"
 
+echo; echo "-- lock-file hygiene: no symlink followed, mode 0600, regular files only"
+rm -rf "$t/lk"; mkdir -p "$t/lk/cache" "$t/lk/dest" "$t/lk/victim"
+printf 'a.bin\0' | B store sail "$t/lk/cache" "$K" "$t/src" >/dev/null
+[ "$(stat -c %a "$t/lk/cache/sail/$K.lock")" = 600 ] && ok "the entry lock file is created with mode 0600" || bad "entry lock mode $(stat -c %a "$t/lk/cache/sail/$K.lock")"
+B fetch sail "$t/lk/cache" "$K" "$t/lk/dest" >/dev/null
+[ "$(stat -c %a "$t/lk/dest/.bcache-tree.lock")" = 600 ] && ok "the tree lock file is created with mode 0600" || bad "tree lock mode"
+echo precious > "$t/lk/victim/target"
+rm -f "$t/lk/dest/.bcache-tree.lock"; ln -s "$t/lk/victim/target" "$t/lk/dest/.bcache-tree.lock"
+expect 3 "a symlinked tree lock is refused (fetch rejected)" B fetch sail "$t/lk/cache" "$K" "$t/lk/dest"
+[ "$(cat "$t/lk/victim/target")" = precious ] && ok "the symlink target was neither opened for writing nor truncated" || bad "symlink target modified"
+rm -f "$t/lk/dest/.bcache-tree.lock"
+rm -f "$t/lk/cache/sail/$K.lock"; ln -s "$t/lk/victim/target" "$t/lk/cache/sail/$K.lock"
+expect 3 "a symlinked entry lock is refused on fetch" B fetch sail "$t/lk/cache" "$K" "$t/lk/dest"
+expect 4 "a symlinked entry lock is refused on store" bash -c "printf 'a.bin\\0' | python3 -I '$bc' store sail '$t/lk/cache' '$K' '$t/src'"
+[ "$(cat "$t/lk/victim/target")" = precious ] && ok "the entry lock's symlink target is untouched" || bad "entry-lock symlink target modified"
+rm -f "$t/lk/cache/sail/$K.lock"; mkdir "$t/lk/cache/sail/$K.lock"
+expect 3 "a lock path that is a directory is refused" B fetch sail "$t/lk/cache" "$K" "$t/lk/dest"
+rmdir "$t/lk/cache/sail/$K.lock"
+ln -s "$t/lk/victim/target" "$t/lk/cache/sail/$K.use"; B fetch sail "$t/lk/cache" "$K" "$t/lk/dest" >/dev/null 2>&1
+[ "$(cat "$t/lk/victim/target")" = precious ] && ok "a symlinked .use stamp is not followed" || bad "use stamp followed a symlink"
+
 echo; echo "-- keys: a changed input is a different key"
 cp_tree() { rm -rf "$1"; mkdir -p "$1"; rsync -a --exclude=.git --exclude=.lake --exclude=artifacts --exclude=target --exclude=ArmASL --exclude=ArmASL.lean --exclude=bin "$root/" "$1/"; }
 cp_tree "$t/k"
