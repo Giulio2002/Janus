@@ -240,6 +240,36 @@ After, the critical path is `TestCacheGCConcurrentVerify` (199 s warm), which th
 starts first; cold, the first ~4 minutes are the two framework builds (the checkout's and the
 cache's, which every Lean test needs).
 
+### Go tests, 2026-10-29: per-run cache, prebuilt fixture (no check removed)
+
+* **A cache of its own per run.** `TestMain` creates `<cache dir>/janus-test-run-*` (on disk, never a RAM
+  `/tmp`) as the test cache and removes it when the run ends; `scripts/gotest-shards.sh` gives every shard one
+  and removes them in a trap. `JANUS_TEST_CACHE_DIR=<dir>` names one explicitly (kept), `=shared` selects the old
+  shared `~/.cache/janus-test` (which every run had refilled, 22-32 GB). A run killed by `go test -timeout`
+  leaves its directory behind; `rm -rf ~/.cache/janus-test-run-*` when no test is running.
+* **A prebuilt framework fixture** (`fixture_test.go`). The first run for a framework version builds, under a lock, a
+  cache of its own in `<cache dir>/janus-test-fixture` (outside `~/.cache/janus`, so no collector evicts it): the
+  embedded framework's Lake build and the sandboxed `leanchecker Janus` verdicts of the embedded build AND of this
+  checkout's own build (`--janus-root` verifications use that one; its bytes, so its verdict key, differ). Every
+  later run copies the ready build and the authentic verdicts into its per-run cache (`seedFramework`,
+  `seedCheckoutVerdict`; the copy must hash as stamped, a verdict counts only if its MAC verifies under the
+  fixture's key) and `seededCache` carries both to the private caches of the tests that damage or empty their cache.
+  Before, every run had to replay the checkout's framework (3-5 min per replay on a loaded host, 500 s of waiting
+  at the start of the suite) or find it in a shared cache. `JANUS_TEST_FIXTURE_DIR=off` goes back to seeding from the
+  user's cache. A test that checks the cold path (`TestSeedFramework`, `TestFrameworkReplayOnce`, the forged-framework
+  tests) still builds or replays what it tests; nothing is skipped.
+* **`TestCacheGCLRUOrder` flake.** The collector's clock is injected: the fixture's `gc` passes the fixture's own
+  reference time (plus one second, so "just now" entries are older than a zero grace) as `gcOptions.Now`, so the
+  priorities (age / weight) depend only on the ages the fixture set, never on how long the test has been running.
+  No retry, no sleep.
+* **Measured** (go test -json -parallel 8 on the 48-core host while other agents' gates ran, load 30-60; one run
+  each): 3070 s (`-parallel 4`, no `.lake` in the checkout, nothing seeded) -> 889 s (checkout built, per-run cache,
+  seeded from the user's cache) -> 764-786 s with the fixture warm (three green runs in a row: 2534 s with the one-time
+  fixture build, 764 s, 786 s). The remainder is the host's load: the suite uses 1085 s user + 439 s system CPU in
+  total, and its longest tests (`TestCacheGCConcurrentVerify`, `TestR1ForgedFrameworkLemma`) are two full
+  framework replays each, which take 3-5 min on this loaded host and 15-40 s on an idle one.
+* The list of tests is unchanged (185 names before and after, diffed: `go test -list '.*' ./cmd/...`).
+
 ### The TestConsumerLakefileLean / TestVerifyBatch flake
 
 Both failed together now and then with `the auditor executable …/v1/framework/<key>/.lake/build/bin/janus-audit
