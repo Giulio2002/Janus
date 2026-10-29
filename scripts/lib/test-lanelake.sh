@@ -55,5 +55,18 @@ PY
 s=$(date +%s.%N); ( cd "$t/other" && "$L" other ); e=$(date +%s.%N)
 wait
 awk -v s="$s" -v e="$e" 'BEGIN { exit !(e - s < 0.45) }' && ok "a call outside the tree passes through" || bad "outside call waited"
+# the lock file: created 0600, a symlink or a foreign/linked file is refused (and never followed)
+: > "$t/log"; rm -f "$t/tree/.lock"
+( cd "$t/tree" && "$L" build ) && [ "$(stat -c %a "$t/tree/.lock")" = 600 ] && ok "lock file created with mode 0600" || bad "lock mode $(stat -c %a "$t/tree/.lock" 2>&1)"
+: > "$t/log"; rm -f "$t/tree/.lock"; echo precious > "$t/victim"; ln -s "$t/victim" "$t/tree/.lock"
+out=$( cd "$t/tree" && "$L" build 2>&1 ); rc=$?
+[ "$rc" != 0 ] && grep -q 'symlink is refused' <<<"$out" && [ "$(cat "$t/victim")" = precious ] && [ ! -s "$t/log" ] && ok "a symlinked lock file is refused, not followed, lake not run" || bad "symlink: rc=$rc $out"
+rm -f "$t/tree/.lock"; ln "$t/victim" "$t/tree/.lock"
+out=$( cd "$t/tree" && "$L" build 2>&1 ); rc=$?
+[ "$rc" != 0 ] && grep -q 'one link' <<<"$out" && ok "a hard-linked lock file is refused" || bad "hardlink: rc=$rc $out"
+rm -f "$t/tree/.lock"; mkdir "$t/tree/.lock"
+out=$( cd "$t/tree" && "$L" build 2>&1 ); rc=$?
+[ "$rc" != 0 ] && ok "a directory as lock file is refused" || bad "directory accepted"
+rmdir "$t/tree/.lock"
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail
