@@ -238,7 +238,7 @@ func summarizeLeanErrors(out string, limit int) string {
 }
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
+	args, flags := takeBoolFlags(args, "json", "fresh", "fresh-framework", "replay-fresh", "unsafe-no-sandbox", "allow-path-deps", "asl")
 	pos, opts, err := parseArgs(args, "proof", "theorem", "janus-root", "binary", "proof-root", "results")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -251,6 +251,9 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	}
 	if flags["unsafe-no-sandbox"] {
 		opts["unsafe-no-sandbox"] = "true"
+	}
+	if flags["fresh-framework"] {
+		opts["fresh-framework"] = "true"
 	}
 	if flags["replay-fresh"] {
 		opts["replay-fresh"] = "true"
@@ -297,14 +300,17 @@ func verifyAndReport(outdir string, opts map[string]string, stderr io.Writer) (*
 	if err := os.Remove(reportPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, &diag{Invalid: true, Msg: fmt.Sprintf("Cannot remove stale %s: %v", displayPath(reportPath), err), Stage: "writing report"}
 	}
-	if err := memGuardConfigErr(); err != nil {
+	// The guard's detection (a systemd-run probe, ~0.2 s, when no delegated cgroup is available)
+	// runs in the background; the first job that needs it waits for it (J1).
+	if err := memGuardEnvErr(); err != nil {
 		return nil, err
 	}
-	logMemGuard(stderr)
+	go currentGuard()
 	var r *verifiedReport
 	var err error
 	mark := memMark()
 	if opts["proof-root"] != "" {
+		logMemGuard(stderr)
 		r, err = verifyConsumer(outdir, opts, stderr)
 	} else {
 		r, err = verify(outdir, opts, stderr)
@@ -547,7 +553,10 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			Stage: "proof selection", Next: "Pass --proof path/to/Proof.lean (default: <outdir>/Proof.lean)."}
 	}
 
-	// 2. Toolchain, sandbox and the trusted Janus library build.
+	// 2. Toolchain, sandbox and the trusted Janus library build. The independent steps run at
+	// once (J1): the memory-guard probe, the sandbox self-test, the toolchain query and the
+	// framework readiness check (which hashes the framework build and the auditor).
+	go currentGuard()
 	fw, err := loadFramework(opts["janus-root"])
 	if err != nil {
 		return err
@@ -556,30 +565,67 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	if err != nil {
 		return err
 	}
-	sb, err := detectSandbox(opts["unsafe-no-sandbox"] != "")
-	if err != nil {
-		return err
+	type sbResult struct {
+		sb  *sandbox
+		err error
 	}
-	tm.mark("sandbox self-test")
-	root, cleanup, err := fw.libraryRoot(lake, opts["fresh"] != "", stderr)
+	sbCh := make(chan sbResult, 1)
+	go func() {
+		sb, err := detectSandbox(opts["unsafe-no-sandbox"] != "")
+		sbCh <- sbResult{sb, err}
+	}()
+	// The toolchain is looked up speculatively in the root the framework will be leased from
+	// (the lease only confirms that root; --fresh builds elsewhere and looks again).
+	type tcResult struct {
+		tc   *toolchain
+		err  error
+		root string
+	}
+	tcCh := make(chan tcResult, 1)
+	if specRoot := fw.speculativeRoot(opts["fresh"] != ""); specRoot != "" {
+		go func() {
+			tc, err := findToolchain(lake, specRoot)
+			if err == nil {
+				tc.cacheID() // the toolchain identity (a stat walk of its library), off the critical path
+			}
+			tcCh <- tcResult{tc, err, specRoot}
+		}()
+	} else {
+		tcCh <- tcResult{}
+	}
+	root, rdy, cleanup, err := fw.libraryRootInfo(lake, opts["fresh"] != "", stderr)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+	sbr := <-sbCh
+	if sbr.err != nil {
+		return sbr.err
+	}
+	sb := sbr.sb
+	logMemGuard(stderr)
+	tm.mark("sandbox self-test, framework build check")
 	// The compiled auditor (janus-audit) of this framework build, and the SHA-256 its build
 	// recorded (a --fresh build was made by this process just now).
 	auditExe := auditExePath(root)
-	auditExeSha := fw.stampedAuditExe(root)
-	if opts["fresh"] != "" && fw.Source != "directory" {
-		auditExeSha = regularFileSha(auditExe)
+	var auditExeSha string
+	if rdy != nil {
+		auditExeSha = rdy.exeSha
+	} else {
+		auditExeSha = fw.stampedAuditExe(root)
+		if opts["fresh"] != "" && fw.Source != "directory" {
+			auditExeSha = regularFileSha(auditExe)
+		}
 	}
 	if auditExeSha == "" {
 		return &diag{Invalid: true, Stage: "Janus library build",
 			Msg: "The framework build in " + displayPath(root) + " records no auditor executable."}
 	}
-	tm.mark("framework build check")
-	tc, err := findToolchain(lake, root)
-	if err != nil {
+	tr := <-tcCh
+	var tc *toolchain
+	if tr.tc != nil && tr.root == root {
+		tc = tr.tc
+	} else if tc, err = findToolchain(lake, root); err != nil {
 		return err
 	}
 	// --asl: the trusted JanusASL build, before the framework is pinned (its Lake build may check
@@ -598,10 +644,19 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	tm.mark("toolchain lookup")
 	janusLibDir := filepath.Join(root, ".lake", "build", "lib", "lean")
 	// Pin the trusted framework build: every Janus.* module-data file, hashed now and
-	// re-verified after every untrusted step, the audit and the replay (R1).
-	fwPins, err := frameworkPins(janusLibDir, fw.Files)
-	if err != nil || len(fwPins.want) == 0 {
-		return &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read the framework build %s: %v", displayPath(janusLibDir), err), Stage: "Janus library build"}
+	// re-verified after every untrusted step, the audit and the replay (R1). The readiness
+	// check measured exactly these hashes under the lease; they are not taken a second time.
+	var fwPins *pinnedLib
+	if rdy != nil && asl == nil {
+		fwPins = rdy.pins
+	} else {
+		fwPins, err = frameworkPins(janusLibDir, fw.Files)
+		if err != nil || len(fwPins.want) == 0 {
+			return &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read the framework build %s: %v", displayPath(janusLibDir), err), Stage: "Janus library build"}
+		}
+	}
+	if len(fwPins.want) == 0 {
+		return &diag{Invalid: true, Msg: fmt.Sprintf("Cannot read the framework build %s", displayPath(janusLibDir)), Stage: "Janus library build"}
 	}
 	pinned := pinSet{fwPins}
 	tm.mark("framework pins")
@@ -667,10 +722,24 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// runs, and the pins it covers are re-checked after every step), but written only by a
 	// sandboxed run; --fresh neither reads nor writes it.
 	fwKey := frameworkVerdictKey(tc.cacheID(), fwPins)
+	// The verdict store: the replay cache of the cache root, or with --fresh and a gate-private
+	// store (JANUS_VERDICT_CACHE, verdictstore.go) that store, so that a gate's --fresh rows
+	// replay one framework build once. Recording needs a sandbox either way.
+	vstore := defaultVerdictStore()
 	fwRead := opts["fresh"] == ""
+	fwWrite := replayCacheOK(sb, opts)
+	if opts["fresh"] != "" {
+		ext, ok, err := externalVerdictStore(opts)
+		if err != nil {
+			return err
+		}
+		if ok {
+			vstore, fwRead, fwWrite = ext, true, sb.mode != "none"
+		}
+	}
 	fwHave, fwLease := false, (*fileLock)(nil)
 	if fwRead {
-		fwHave, fwLease = lookupFrameworkVerdict(fwKey)
+		fwHave, fwLease = vstore.lookup(fwKey)
 	}
 	var earlyFw *fwReplay
 	if tc.hasChecker {
@@ -684,9 +753,9 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		}
 		if err == nil {
 			fwPath := tc.leanPathEnv(janusLibDir)
-			earlyFw = startFrameworkReplay(tc.leanchecker, func(argv ...string) (string, error) {
+			earlyFw = startFrameworkReplayIn(vstore, tc.leanchecker, func(argv ...string) (string, error) {
 				return runLeanProtected(sb, tc, fwRunDir, nil, []string{janusLibDir}, fwPath, argv...)
-			}, fwKey, fwPins, fwHave, fwLease, fwRead, replayCacheOK(sb, opts))
+			}, fwKey, fwPins, fwHave, fwLease, fwRead, fwWrite)
 			defer earlyFw.release()
 		}
 	}
@@ -722,7 +791,14 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// (same toolchain, framework build and sources) is reused from the trusted cache.
 	cacheOK := replayCacheOK(sb, opts)
 	tkey := trustedCacheKey(tc, fwPins, cr.Lean, janusTrustedSource(cr.Lean))
-	trustedHit := cacheOK && loadTrustedCache(tkey, trustedDir)
+	var trustedPins *pinnedLib
+	trustedHit := false
+	if cacheOK {
+		if want, ok := loadTrustedCache(tkey, trustedDir); ok {
+			trustedHit = true
+			trustedPins = &pinnedLib{who: "the trusted Extracted/JanusTrusted build", dir: trustedDir, want: want}
+		}
+	}
 	if !trustedHit {
 		outs, errs := compileBoth(compileTrusted, "Extracted", "JanusTrusted")
 		if out, err := outs[0], errs[0]; err != nil {
@@ -738,17 +814,22 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		tm.mark("trusted compile (cached)")
 	} else {
 		tm.mark("trusted compile")
-	}
-	trustedPins, err := newPinnedLib("the trusted Extracted/JanusTrusted build", trustedDir, nil)
-	if err != nil {
-		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
-	}
-	if cacheOK && !trustedHit {
-		storeTrustedCache(tkey, trustedDir, trustedPins.want)
+		if trustedPins, err = newPinnedLib("the trusted Extracted/JanusTrusted build", trustedDir, nil); err != nil {
+			return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
+		}
+		if cacheOK {
+			storeTrustedCache(tkey, trustedDir, trustedPins.want)
+		}
 	}
 	pinned = append(pinned, trustedPins)
-	if err := pinned.check("the trusted compile"); err != nil {
-		return err
+	// A Lean process ran on the framework build only if the trusted compile was not cached; then
+	// the pins are checked after it. With a cached compile no process has run since the framework
+	// pins were taken, and the trusted pins are the hashes the cache entry was verified against
+	// (the check after the proof compile compares the files on disk with them).
+	if !trustedHit {
+		if err := pinned.check("the trusted compile"); err != nil {
+			return err
+		}
 	}
 	tm.mark("trusted pins")
 
@@ -781,6 +862,20 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		return runLeanProtected(sb, tc, workDir, nil, protected, proofPathEnv, argv...)
 	}
 
+	// The audit's scratch directory, and the prestarted auditors (auditserve.go): they build the
+	// clean environment from the trusted builds while the proof compiles.
+	auditDir, err := os.MkdirTemp(runBase, "audit-")
+	if err != nil {
+		return &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
+	}
+	defer os.RemoveAll(auditDir)
+	var serve *auditServe
+	if auditServeEnabled(sb) {
+		serve = startAuditServe(sb, tc, auditDir, append(append([]string{}, protected...), workDir), auditExe, "JanusTrusted",
+			tc.leanPathEnv(trustedDir, janusLibDir), proofPathEnv, thmNames(outs, todo))
+		defer serve.stop()
+	}
+
 	tm.mark("work dir setup")
 	// Compile the proof, sandboxed. It imports the trusted Extracted; its output is Proof.olean.
 	if out, err := sandboxed(tc.lean, "--root="+workDir, filepath.Join(workDir, "Proof.lean"), "-o", filepath.Join(workDir, "Proof.olean")); err != nil {
@@ -793,26 +888,28 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			Next: "Fix the proof. It must import Extracted (and Janus) and prove " + strings.Join(thmNames(outs, todo), ", ") + ".", Details: out}
 	}
 	tm.mark("proof compile")
+	// The auditor executable is hashed while the pins are checked: both read only files that no
+	// untrusted process is running on any more. The result is compared right before the audit.
+	exeCh := make(chan string, 1)
+	go func() { exeCh <- regularFileSha(auditExe) }()
 	if err := pinned.check("the proof compile"); err != nil {
+		<-exeCh
 		return err
 	}
 	// The proof's outputs (Proof.olean and anything else the compile left in the work dir) are
 	// pinned from here on: the audit and the replay must see the same bytes.
 	proofPins, err := newPinnedLib("the proof build", workDir, nil)
 	if err != nil {
+		<-exeCh
 		return &diag{Invalid: true, Msg: err.Error(), Stage: "proof build"}
 	}
 	pinned = append(pinned, proofPins)
 	if _, ok := proofPins.want["Proof.olean"]; !ok {
+		<-exeCh
 		return &diag{Invalid: true, Msg: "The proof compile produced no Proof.olean.", Stage: "proof build integrity"}
 	}
 
 	// 5. Theorem, axiom and statement audit by the trusted janus-audit (no proof code runs).
-	auditDir, err := os.MkdirTemp(runBase, "audit-")
-	if err != nil {
-		return &diag{Invalid: true, Msg: err.Error(), Stage: "theorem audit"}
-	}
-	defer os.RemoveAll(auditDir)
 	tm.mark("pins after proof")
 	replayRun := func(argv ...string) (string, error) {
 		return runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv, argv...)
@@ -821,18 +918,33 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// (it reads only pinned files; see speed.go). Its result is used below only for modules of
 	// the audited closure.
 	var early *earlyReplay
-	earlyMarker := ""
 	if tc.hasChecker {
-		earlyMarker = earlyReplayMarker(tc.cacheID(), fwPins, trustedPins, proofPins)
-		early = startEarlyReplay(tc.leanchecker, replayRun, []string{"Extracted", "JanusTrusted", "Proof"}, earlyMarker, cacheOK)
+		markers := map[string]string{
+			"Extracted":    earlyReplayMarker(tc.cacheID(), "Extracted", fwPins, trustedPins),
+			"JanusTrusted": earlyReplayMarker(tc.cacheID(), "JanusTrusted", fwPins, trustedPins),
+			"Proof":        earlyReplayMarker(tc.cacheID(), "Proof", fwPins, trustedPins, proofPins),
+		}
+		early = startEarlyReplay(tc.leanchecker, replayRun, []string{"Extracted", "JanusTrusted", "Proof"}, markers, cacheOK)
 		defer early.wait()
 	}
 	// The auditor executable must be the one its trusted build recorded; nothing untrusted runs
 	// between this check and its start (the proof compile has ended).
-	if got := regularFileSha(auditExe); got != auditExeSha {
-		return &diag{Invalid: true, Stage: "framework integrity",
-			Msg:  fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(auditExe), short(auditExeSha), short(got)),
-			Next: "Something other than janus wrote to the framework build; janus rebuilds it on the next run."}
+	exeChanged := func() error {
+		if got := <-exeCh; got != auditExeSha {
+			return &diag{Invalid: true, Stage: "framework integrity",
+				Msg:  fmt.Sprintf("the auditor executable %s changed after it was built (recorded SHA-256 %s, now %s).", displayPath(auditExe), short(auditExeSha), short(got)),
+				Next: "Something other than janus wrote to the framework build; janus rebuilds it on the next run."}
+		}
+		return nil
+	}
+	// A prestarted auditor was started from the file the readiness check hashed, before any
+	// untrusted step ran, and a running executable cannot be written; the file is hashed once
+	// more, in parallel with the audit, and must still be the recorded one before the result is
+	// used. An auditor started now is checked before it starts.
+	if serve == nil {
+		if err := exeChanged(); err != nil {
+			return err
+		}
 	}
 	// Each theorem is audited by the trusted janus-audit (no proof code runs), concurrently: the
 	// auditor is a separate process per theorem, with its own nonce marker, on the same pinned
@@ -840,6 +952,10 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	// pass to JanusAudit.run (auditScript, used by the consumer path).
 	markers := make([]string, len(outs))
 	auditOuts := make([]string, len(outs))
+	slot := map[int]int{} // theorem index -> its prestarted auditor
+	for k, i := range todo {
+		slot[i] = k
+	}
 	var awg sync.WaitGroup
 	asem := make(chan struct{}, 4)
 	for _, i := range todo {
@@ -847,6 +963,10 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		awg.Add(1)
 		go func(i int) {
 			defer awg.Done()
+			if serve != nil { // its own bound on running auditors (auditServeMax)
+				auditOuts[i], _ = serve.request(slot[i], markers[i], proofPathEnv)
+				return
+			}
 			asem <- struct{}{}
 			defer func() { <-asem }()
 			auditOuts[i], _ = runLeanProtected(sb, tc, auditDir, nil, append(protected, workDir), proofPathEnv,
@@ -855,6 +975,17 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 	}
 	awg.Wait()
 	tm.mark("audit")
+	if serve != nil {
+		if err := exeChanged(); err != nil {
+			return err
+		}
+	}
+	// The audit and the kernel replays of this verification's modules (and of the framework, when
+	// it has no verdict yet) have all ended: one pin check covers them (J1; it used to be one after
+	// the audit and one after the replay, each re-hashing the framework build).
+	early.wait()
+	earlyFw.wait()
+	tm.mark("early replay wait")
 	if err := pinned.check("the audit"); err != nil {
 		return err
 	}
@@ -891,6 +1022,8 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		err error
 	}
 	replays := map[string]replayOutcome{}
+	pinnedHashes := pinned.absHashes()
+	lateReplay := false
 	krs := make([]kernelReplay, len(outs))
 	var replayed []int
 	for _, i := range audited {
@@ -911,13 +1044,17 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 					kr.Note = "leanchecker not found in the Lean toolchain"
 					return replayOutcome{kr: kr}
 				}
-				plan, err := planReplay(resolved, importGraph(ar.Imports), tc.cacheID(), replayCacheOK(sb, opts))
+				plan, err := planReplayPinned(resolved, importGraph(ar.Imports), tc.cacheID(), replayCacheOK(sb, opts), pinnedHashes)
 				if err != nil {
 					return replayOutcome{err: err}
 				}
-				early.apply(plan, earlyMarker)
+				early.apply(plan)
 				earlyFw.apply(plan, fwPins)
-				tm.mark("early replay wait")
+				// Modules still to be replayed (not cached, not covered by the early replays) are
+				// replayed now, after the pin check above: the pins are checked again after them.
+				if len(plan.pending(plan.modules)) > 0 {
+					lateReplay = true
+				}
 				if out, err := plan.replay(tc.leanchecker, replayRun, plan.modules); err != nil {
 					return replayOutcome{err: replayDiag(mapPaths(out))}
 				}
@@ -940,10 +1077,13 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		replayed = append(replayed, i)
 	}
 	tm.mark("kernel replay")
-	if err := pinned.check("the kernel replay"); err != nil {
-		return err
+	// --replay-fresh replays the proof module once more, in a process of its own.
+	if lateReplay || opts["replay-fresh"] != "" {
+		if err := pinned.check("the kernel replay"); err != nil {
+			return err
+		}
+		tm.mark("pins after replay")
 	}
-	tm.mark("pins after replay")
 
 	// 7. Inputs must still be the ones that were checked.
 	cr2, err := check(outdir, opts["binary"])

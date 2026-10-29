@@ -103,6 +103,22 @@ func TestMain(m *testing.M) {
 	}
 	// The test cache and no JANUS_ROOT for the whole process (useTestCache then has nothing to
 	// change, so tests that use it can run in parallel).
+	// A per-run test cache (on disk, not in a RAM /tmp), removed when the run ends, instead of the shared
+	// ~/.cache/janus-test that every run refilled (22 GB): JANUS_TEST_CACHE_DIR names one explicitly (kept),
+	// JANUS_TEST_CACHE_DIR=shared selects the old shared directory.
+	perRun := ""
+	switch v := os.Getenv("JANUS_TEST_CACHE_DIR"); v {
+	case "":
+		base := filepath.Dir(resolveTestCacheDir(""))
+		if err := os.MkdirAll(base, 0o755); err == nil {
+			if d, err := os.MkdirTemp(base, "janus-test-run-"); err == nil {
+				perRun = d
+				os.Setenv("JANUS_TEST_CACHE_DIR", d)
+			}
+		}
+	case "shared":
+		os.Setenv("JANUS_TEST_CACHE_DIR", "")
+	}
 	os.Setenv("JANUS_CACHE_DIR", testCacheDir())
 	os.Setenv("JANUS_ROOT", "")
 	// The parallel tests are scheduled longest first by this package (order_test.go), with
@@ -120,25 +136,6 @@ func TestMain(m *testing.M) {
 	_ = flag.Set("test.parallel", "1000")
 	wd, _ := os.Getwd()
 	repoRoot = filepath.Clean(filepath.Join(wd, "..", ".."))
-	// A new framework version: start the test cache from the user's cache's build of it (and its
-	// replay verdict) when that has one, instead of building and replaying it again (seed_test.go).
-	if !testing.Short() {
-		if _, err := findLake(); err == nil {
-			src := os.Getenv("JANUS_TEST_SEED_CACHE")
-			if src == "" {
-				if d, err := os.UserCacheDir(); err == nil {
-					src = filepath.Join(d, "janus")
-				}
-			}
-			if src != "" && src != "off" && filepath.Clean(src) != testCacheDir() {
-				if ok, err := seedFramework(src, testCacheDir()); err != nil {
-					fmt.Fprintf(os.Stderr, "janus tests: not seeding the test cache from %s: %v\n", src, err)
-				} else if ok {
-					fmt.Fprintf(os.Stderr, "janus tests: seeded the test cache's framework build from %s\n", src)
-				}
-			}
-		}
-	}
 	dir, err := os.MkdirTemp("", "janus-test-")
 	if err != nil {
 		panic(err)
@@ -149,10 +146,46 @@ func TestMain(m *testing.M) {
 	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64", "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "building example binary: %v\n%s", err, out)
+		if perRun != "" {
+			os.RemoveAll(perRun)
+		}
 		os.Exit(1)
+	}
+	// The framework build and replay verdicts: from the prebuilt fixture (fixture_test.go), built once per
+	// framework version; else straight from the user's cache (JANUS_TEST_FIXTURE_DIR=off).
+	if !testing.Short() {
+		if _, err := findLake(); err == nil {
+			seedSrc := os.Getenv("JANUS_TEST_SEED_CACHE")
+			if seedSrc == "" {
+				if d, err := os.UserCacheDir(); err == nil {
+					seedSrc = filepath.Join(d, "janus")
+				}
+			}
+			src := seedSrc
+			if fx := fixtureDir(); fx != "" {
+				if err := ensureFixture(fx, seedSrc, exampleBin); err != nil {
+					fmt.Fprintf(os.Stderr, "janus tests: fixture %s: %v\n", fx, err)
+				} else {
+					src = fx
+				}
+			}
+			if src != "" && src != "off" && filepath.Clean(src) != testCacheDir() {
+				if ok, err := seedFramework(src, testCacheDir()); err != nil {
+					fmt.Fprintf(os.Stderr, "janus tests: not seeding the test cache from %s: %v\n", src, err)
+				} else if ok {
+					fmt.Fprintf(os.Stderr, "janus tests: seeded the test cache's framework build from %s\n", src)
+				}
+				if seedCheckoutVerdict(src, testCacheDir()) {
+					fmt.Fprintf(os.Stderr, "janus tests: seeded the checkout framework's replay verdict from %s\n", src)
+				}
+			}
+		}
 	}
 	code := m.Run()
 	os.RemoveAll(dir)
+	if perRun != "" {
+		os.RemoveAll(perRun)
+	}
 	os.Exit(code)
 }
 

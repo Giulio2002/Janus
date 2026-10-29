@@ -150,7 +150,7 @@ func TestRound8TrustedManifestMAC(t *testing.T) {
 	manifest := filepath.Join(trustedCacheDir(), key[:2], key, "manifest.json")
 	load := func() bool {
 		dst := t.TempDir()
-		ok := loadTrustedCache(key, dst)
+		_, ok := loadTrustedCache(key, dst)
 		if _, err := os.Stat(filepath.Join(dst, "Extracted.olean")); (err == nil) != ok {
 			t.Fatalf("load reported %v but the copy exists: %v", ok, err == nil)
 		}

@@ -96,9 +96,16 @@ fi
 } | tee "$outdir/plan.txt"
 [ -z "$plan" ] || exit 0
 
+# A test cache of its own per shard, on disk next to the user cache (not in a RAM /tmp), seeded by the tests'
+# TestMain from the user's cache and removed at the end, also when the run is interrupted (trap).
+cachebase="${XDG_CACHE_HOME:-$HOME/.cache}"; mkdir -p "$cachebase"
+runcache="$(mktemp -d "$cachebase/janus-test-run-XXXXXX")"
+trap 'rm -rf "$runcache"' EXIT
+trap 'exit 143' TERM INT
 run_shard() { # S
   local s=$1 pkg re rc=0 f="$outdir/shard-$s"
   : > "$f.log"
+  mkdir -p "$runcache/$s"; export JANUS_TEST_CACHE_DIR="$runcache/$s"
   for pkg in $(awk -F'\t' -v s="$s" '$1 == s { print $2 }' "$outdir/assign.txt" | sort -u); do
     re=$(awk -F'\t' -v s="$s" -v p="$pkg" '$1 == s && $2 == p { printf "%s%s", (n++ ? "|" : ""), $3 }' "$outdir/assign.txt")
     echo "== go test -count=1 -timeout 7000s -parallel $par -v -run '^($re)\$' $pkg" >> "$f.log"

@@ -44,7 +44,10 @@ const markerHeader = "janus-replay-marker-v2 "
 // markerOK reports whether the marker file at path is an authentic marker of kind for key: a
 // regular file of this user (not a link), whose first line carries the MAC janus wrote. A missing,
 // planted, foreign or unauthenticated marker is not.
-func markerOK(path, kind, key string) bool {
+func markerOK(path, kind, key string) bool { return markerOKWith(resultHMACKey, path, kind, key) }
+
+// markerOKWith is markerOK under the MAC key keyFn returns (the framework verdict store has its own).
+func markerOKWith(keyFn func() ([]byte, error), path, kind, key string) bool {
 	b, err := readPrivateFile(path, false)
 	if err != nil {
 		return false
@@ -53,7 +56,7 @@ func markerOK(path, kind, key string) bool {
 	if !bytes.HasPrefix(line, []byte(markerHeader)) {
 		return false
 	}
-	hk, err := resultHMACKey()
+	hk, err := keyFn()
 	if err != nil {
 		return false
 	}
@@ -62,8 +65,10 @@ func markerOK(path, kind, key string) bool {
 
 // writeMarker records an authentic marker of kind for key at path (atomically), with a note
 // for humans on its second line. Without a usable cache key nothing is written (a miss later).
-func writeMarker(path, kind, key, note string) {
-	hk, err := resultHMACKey()
+func writeMarker(path, kind, key, note string) { writeMarkerWith(resultHMACKey, path, kind, key, note) }
+
+func writeMarkerWith(keyFn func() ([]byte, error), path, kind, key, note string) {
+	hk, err := keyFn()
 	if err != nil {
 		return
 	}
@@ -104,10 +109,27 @@ func frameworkModules(fw *pinnedLib) []string {
 	return mods
 }
 
+// verdictStore is where framework verdicts are kept and which key authenticates them: the
+// replay cache of the cache root (the default), or a gate-private store (verdictstore.go).
+type verdictStore struct {
+	replayDir string
+	keyFn     func() ([]byte, error)
+}
+
+func defaultVerdictStore() verdictStore {
+	return verdictStore{replayDir: replayCacheDir(), keyFn: resultHMACKey}
+}
+
+func (vs verdictStore) path(k string) string {
+	return filepath.Join(vs.replayDir, "framework", k[:2], k)
+}
+
 // hasFrameworkVerdict reports whether an authentic passing verdict exists for k.
-func hasFrameworkVerdict(k string) bool {
-	p := frameworkVerdictPath(k)
-	if markerOK(p, "framework", k) {
+func hasFrameworkVerdict(k string) bool { return defaultVerdictStore().has(k) }
+
+func (vs verdictStore) has(k string) bool {
+	p := vs.path(k)
+	if markerOKWith(vs.keyFn, p, "framework", k) {
 		touchHit(p)
 		return true
 	}
@@ -116,8 +138,10 @@ func hasFrameworkVerdict(k string) bool {
 
 // recordFrameworkVerdict stores the verdict for k after `leanchecker Janus` passed on the
 // pinned framework build fw.
-func recordFrameworkVerdict(k string, fw *pinnedLib) {
-	writeMarker(frameworkVerdictPath(k), "framework", k,
+func recordFrameworkVerdict(k string, fw *pinnedLib) { defaultVerdictStore().record(k, fw) }
+
+func (vs verdictStore) record(k string, fw *pinnedLib) {
+	writeMarkerWith(vs.keyFn, vs.path(k), "framework", k,
 		fmt.Sprintf("leanchecker Janus passed: %d framework modules", len(frameworkModules(fw))))
 }
 
@@ -139,8 +163,10 @@ func (p *replayPlan) applyFrameworkVerdict(fw *pinnedLib) {
 
 // lockReplayKey takes the exclusive replay lock named by k (with the cache on); it returns the
 // unlock.
-func lockReplayKey(k string) func() {
-	d := filepath.Join(replayCacheDir(), "locks")
+func lockReplayKey(k string) func() { return lockReplayKeyIn(replayCacheDir(), k) }
+
+func lockReplayKeyIn(replayDir, k string) func() {
+	d := filepath.Join(replayDir, "locks")
 	if os.MkdirAll(d, 0o755) != nil {
 		return func() {}
 	}
@@ -159,11 +185,15 @@ func lockReplayKey(k string) func() {
 // another verification to end.
 func frameworkVerdictUsePath(k string) string { return frameworkVerdictPath(k) + ".use" }
 
+func (vs verdictStore) usePath(k string) string { return vs.path(k) + ".use" }
+
 // useFrameworkVerdict returns the verdict's use lease (shared) if an authentic verdict for k
 // exists, else nil. It does not wait for a collection holding the use lock: that is a miss.
-func useFrameworkVerdict(k string) *fileLock {
-	p := frameworkVerdictUsePath(k)
-	if !hasFrameworkVerdict(k) || os.MkdirAll(filepath.Dir(p), 0o755) != nil {
+func useFrameworkVerdict(k string) *fileLock { return defaultVerdictStore().use(k) }
+
+func (vs verdictStore) use(k string) *fileLock {
+	p := vs.usePath(k)
+	if !vs.has(k) || os.MkdirAll(filepath.Dir(p), 0o755) != nil {
 		return nil
 	}
 	lk, err := lockFileMode(p, true, false)
@@ -171,7 +201,7 @@ func useFrameworkVerdict(k string) *fileLock {
 		return nil
 	}
 	// Collected between the check and the lock: a miss.
-	if !hasFrameworkVerdict(k) {
+	if !vs.has(k) {
 		lk.unlock()
 		return nil
 	}
@@ -179,8 +209,10 @@ func useFrameworkVerdict(k string) *fileLock {
 }
 
 // lookupFrameworkVerdict reports whether an authentic verdict for k exists now, with its use lease.
-func lookupFrameworkVerdict(k string) (bool, *fileLock) {
-	lk := useFrameworkVerdict(k)
+func lookupFrameworkVerdict(k string) (bool, *fileLock) { return defaultVerdictStore().lookup(k) }
+
+func (vs verdictStore) lookup(k string) (bool, *fileLock) {
+	lk := vs.use(k)
 	return lk != nil, lk
 }
 
@@ -204,6 +236,10 @@ type fwReplay struct {
 // verification that waited for that lock uses the verdict instead of replaying; with read only (no
 // sandbox) a verdict is used but never recorded.
 func startFrameworkReplay(checker string, run func(argv ...string) (string, error), key string, fw *pinnedLib, have bool, lease *fileLock, read, write bool) *fwReplay {
+	return startFrameworkReplayIn(defaultVerdictStore(), checker, run, key, fw, have, lease, read, write)
+}
+
+func startFrameworkReplayIn(vs verdictStore, checker string, run func(argv ...string) (string, error), key string, fw *pinnedLib, have bool, lease *fileLock, read, write bool) *fwReplay {
 	f := &fwReplay{key: key, have: have, lease: lease}
 	if have {
 		return f
@@ -213,11 +249,11 @@ func startFrameworkReplay(checker string, run func(argv ...string) (string, erro
 		defer f.wg.Done()
 		if write {
 			// One replay of this build at a time: a verification that waited finds the verdict.
-			unlock := lockReplayKey("framework-" + key)
+			unlock := lockReplayKeyIn(vs.replayDir, "framework-"+key)
 			defer unlock()
 		}
 		if read {
-			if lk := useFrameworkVerdict(key); lk != nil {
+			if lk := vs.use(key); lk != nil {
 				f.waited, f.lease = true, lk
 				return
 			}
@@ -229,8 +265,8 @@ func startFrameworkReplay(checker string, run func(argv ...string) (string, erro
 			return
 		}
 		if write {
-			recordFrameworkVerdict(key, fw)
-			f.lease = useFrameworkVerdict(key)
+			vs.record(key, fw)
+			f.lease = vs.use(key)
 		}
 	}()
 	return f

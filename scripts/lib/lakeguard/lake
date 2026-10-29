@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Read-only guard of the shared framework build (scripts/gate.sh, phase 2). Put first on PATH after the
+# prebuild. `lake build` / `lake exe` in the checkout's own package (the one whose .lake holds the framework
+# oleans that verifications pin) never builds: `lake build --no-build` fails with exit 3 when anything is
+# stale, which means the prebuild missed a target (a real bug to fix there), never "build it now" while other
+# lanes read the build. Every other lake call (other packages, the private lane trees, `lake env`, `--version`)
+# passes through unchanged. JANUS_REAL_LAKE is the real lake; JANUS_LAKEGUARD_ROOT the checkout.
+real="${JANUS_REAL_LAKE:?lakeguard: JANUS_REAL_LAKE is not set}"
+root="${JANUS_LAKEGUARD_ROOT:-}"
+pkg="$(pwd -P)"
+while [ "$pkg" != / ] && [ ! -f "$pkg/lakefile.toml" ] && [ ! -f "$pkg/lakefile.lean" ]; do pkg="$(dirname "$pkg")"; done
+if [ -n "$root" ] && [ "$pkg" = "$root" ]; then
+  case "${1:-}" in
+    build) shift; exec "$real" build --no-build "$@" ;;
+    exe) tgt="${2:-}"; [ -z "$tgt" ] || "$real" build --no-build "$tgt" || { echo "lakeguard: $tgt is not built (the prebuild must build it)" >&2; exit 3; }
+         exec "$real" "$@" ;;
+  esac
+fi
+exec "$real" "$@"

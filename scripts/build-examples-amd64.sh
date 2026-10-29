@@ -16,7 +16,7 @@ mkdir -p "$root/artifacts" "$root/bin"
 (cd "$root/examples/basic" &&
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-amd64" ./cmd)
 echo "built $root/artifacts/examples-amd64"
-(cd "$root" && go build -o "$root/bin/janus" ./cmd/janus)
+(cd "$root" && CGO_ENABLED=0 go build -o "$root/bin/janus" ./cmd/janus)
 # Every examples/basic function, except those of arm64-only files (`*_arm64.go`, e.g. A64Crc32).
 funcs=$(for g in "$root"/examples/basic/*.go; do case "$g" in *_arm64.go) ;; *) cat "$g" ;; esac; done |
   grep -oE '^func [A-Z][A-Za-z0-9]*' | awk '{print $2}')

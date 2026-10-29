@@ -81,6 +81,12 @@ func (f *gcFixture) gc(o gcOptions) *gcReport {
 	if o.Grace == 0 {
 		o.Grace = gcGrace
 	}
+	// The collector's clock is the fixture's (one second after its reference time, so that "just now"
+	// entries are strictly older than a zero grace): priorities (age / weight) depend only on the ages
+	// the fixture set, never on how long the test has been running (no drift, no ordering flake).
+	if o.Now.IsZero() {
+		o.Now = f.now.Add(time.Second)
+	}
 	rep, err := collectCache(o, true)
 	if err != nil {
 		f.t.Fatalf("collectCache: %v", err)
@@ -876,3 +882,6 @@ func runLibSelfTest(t *testing.T, name string) {
 		t.Fatalf("scripts/lib/%s: %v\n%s", name, err, out)
 	}
 }
+
+// TestLaneLakeLib: gate lanes that share an isolated tree never overlap a rewriting lake call with another one.
+func TestLaneLakeLib(t *testing.T) { runLibSelfTest(t, "test-lanelake.sh") }

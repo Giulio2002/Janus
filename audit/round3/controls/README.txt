@@ -4,7 +4,7 @@ theorem is not vacuous. All four were checked and compile cleanly.
 
 Run (from a work copy; do not build inside the shared worktree):
   root=$(pwd); LP=$root/.lake/build/lib/lean; W=audit/round3/work; J=audit/round3/bin/janus
-  go build -o $J ./cmd/janus; lake build Janus
+  CGO_ENABLED=0 go build -o $J ./cmd/janus; lake build Janus
   # arm64:
   for n in A64Equal64 A64IndexByte; do
     $J extract artifacts/examples-arm64 example.com/basic.$n $W/$n

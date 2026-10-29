@@ -102,6 +102,34 @@ func seedFramework(src, dst string) (bool, error) {
 	return true, nil
 }
 
+// seedCheckoutVerdict carries into cache dst the framework replay verdict of THIS CHECKOUT's own build
+// (.lake/build, what `--janus-root <checkout>` verifications use; its module-data bytes, hence its
+// pins and verdict key, are not the embedded build's) when cache src has an authentic one (a sandboxed
+// `janus verify --janus-root` replayed it there). Without one, the first test that verifies with the
+// checkout replays it, as before. Reports whether a verdict was carried.
+func seedCheckoutVerdict(src, dst string) bool {
+	fw, err := loadFramework(repoRoot)
+	if err != nil {
+		return false
+	}
+	lake, err := findLake()
+	if err != nil {
+		return false
+	}
+	lib := filepath.Join(repoRoot, ".lake", "build", "lib", "lean")
+	tc, err := findToolchain(lake, repoRoot)
+	if err != nil {
+		return false
+	}
+	pins, err := frameworkPins(lib, fw.Files)
+	if err != nil || len(pins.want) == 0 {
+		return false
+	}
+	k := frameworkVerdictKey(tc.cacheID(), pins)
+	carryVerdict(src, dst, k, len(frameworkModules(pins)))
+	return fileExists(filepath.Join(dst, "v1", "replay", "framework", k[:2], k))
+}
+
 // carryVerdict records in cache dst the framework replay verdict k if cache src has an authentic
 // one (its MAC verifies under src's key), under dst's key (created like resultHMACKey does if dst
 // has none). Env-free: it names both caches explicitly, so parallel tests can use it.
@@ -175,6 +203,8 @@ func seededCache(t *testing.T) string {
 	if ok, err := seedFramework(testCacheDir(), c); err != nil || !ok {
 		t.Fatalf("seeding %s from the test cache: %v (seeded %v)", c, err, ok)
 	}
+	// and the replay verdict of this checkout's own build (for tests that verify with --janus-root)
+	seedCheckoutVerdict(testCacheDir(), c)
 	return c
 }
 

@@ -21,10 +21,13 @@ name = "janus-oracle-amd64"
 root = "Oracle.Amd64Main"
 
 # The trusted auditor that `janus verify` runs (Janus/Tools/AuditMain.lean; imports only Lean).
+# Linked without its symbol and debug tables (165 MB instead of 234 MB): `janus verify` hashes
+# the executable twice per verification. The dynamic symbols the interpreter needs stay.
 [[lean_exe]]
 name = "janus-audit"
 root = "Janus.Tools.AuditMain"
 supportInterpreter = true
+moreLinkArgs = ["-Wl,-s"]
 
 [[lean_exe]]
 name = "janus-testfloat"

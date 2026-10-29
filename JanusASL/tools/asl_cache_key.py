@@ -25,6 +25,9 @@ Lake does not trace but that still reach the outputs (weak arguments, leanc argu
         with the options of the first library that claims it), in file order;
   * the package-level extraDepTargets of the janus package (`path = ".."`): Lake mixes the
     transitive dependencies' extraDepTargets into every module trace;
+  * the content of the toolchain `lean` resolves to in JanusASL/ (driver binaries, libleanshared and
+    every core .olean, by SHA-256; `lean --version`), the environment variables that reach the
+    compilers (ENV_KEYS) and the machine architecture;
   * the version of this key scheme (SCHEME).
 
 What is left out, and why it cannot change the ArmASL outputs:
@@ -45,9 +48,10 @@ instead (conservative: any change is a miss).
 import hashlib
 import json
 import os
+import platform
 import sys
 
-SCHEME = "armasl-cache-key-v2"
+SCHEME = "armasl-cache-key-v3"
 
 # Package-level settings that cannot reach a lean/leanc command line or a module trace.
 PKG_IGNORED = {
@@ -60,6 +64,96 @@ PKG_IGNORED = {
 }
 
 MODEL = "ArmASL"
+
+# Environment variables that can reach lean, leanc, lake or the C compiler they run. They are keyed
+# by value (an unset variable is absent), so a build under another compiler or flags is another key.
+ENV_KEYS = ["LEAN_CC", "LEAN_CXX", "LEAN_SYSROOT", "LEAN_PATH", "LEAN_SRC_PATH", "LEAN_ABORT_ON_PANIC",
+            "LAKE_HOME", "LAKE_OVERRIDE_LEAN", "LAKE_NO_CACHE", "ELAN_TOOLCHAIN", "CC", "CXX", "CFLAGS",
+            "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LIBRARY_PATH", "C_INCLUDE_PATH", "CPATH"]
+
+
+ENV_PREFIXES = ("LEAN_", "LAKE_", "ELAN_", "LD_", "LC_", "GIT_")  # every variable of these families is keyed
+ENV_KEYS += ["LANG", "LANGUAGE", "PKG_CONFIG_PATH", "SDKROOT", "TMPDIR_NOT_KEYED"]
+ENV_KEYS.remove("TMPDIR_NOT_KEYED")
+
+
+# Scheduling-only variable: how many threads Lean/Lake run, never what is computed. It is NOT keyed.
+# scripts/asl.sh sets LEAN_NUM_THREADS itself for every lake call (from its memory budget, ASL_JOBS), so the
+# ambient value never reaches a build anyway, and the gate's lanes (LEAN_NUM_THREADS=4) must hit the entries a
+# standalone run (unset) published. Outputs are byte-identical across thread counts: scripts/lib/test-thread-identity.sh
+# builds the same modules with 1 and with 4 threads and compares the SHA-256 of every .olean/.ilean//.c output
+# (docs/SOUNDNESS.md "Build caches"). Any other LEAN_*/LAKE_* variable stays keyed.
+SCHEDULING_ENV = {"LEAN_NUM_THREADS"}
+
+
+def env_inputs():
+    return {k: v for k, v in sorted(os.environ.items())
+            if (k in ENV_KEYS or k.startswith(ENV_PREFIXES)) and k not in SCHEDULING_ENV}
+
+
+def exe_sha(name):
+    """SHA-256 of the executable `name` resolves to on PATH (by content, through symlinks), 'missing' if none."""
+    import shutil
+    p = shutil.which(name)
+    if not p:
+        return "missing"
+    try:
+        return sha(read(os.path.realpath(p)))
+    except OSError:
+        return "unreadable"
+
+
+_TC_MEMO = {}
+
+
+def toolchain_content(cwd):
+    if cwd not in _TC_MEMO:
+        _TC_MEMO[cwd] = _toolchain_content(cwd)
+    return _TC_MEMO[cwd]
+
+
+def _toolchain_content(cwd):
+    """What the toolchain that `lean` resolves to in cwd (elan) consists of, by content: the SHA-256 of
+    its driver binaries and of every core .olean (Init, Std, Lean, Lake), plus `lean --version`.
+    Lake additionally checks every import's content through its traces; this closes the other
+    direction (a swapped compiler or core library under an unchanged lean-toolchain name)."""
+    import subprocess
+    try:
+        ver = subprocess.run(["lean", "--version"], cwd=cwd, capture_output=True, text=True, timeout=120).stdout.strip()
+        prefix = subprocess.run(["lean", "--print-prefix"], cwd=cwd, capture_output=True, text=True, timeout=120).stdout.strip()
+    except Exception:
+        return {"unavailable": True}
+    out = {"version": ver}
+    if not prefix or not os.path.isdir(prefix):
+        out["prefix"] = "missing"
+        return out
+    h = hashlib.sha256()
+    n = 0
+    files = []
+    # every driver binary (lean, lake, leanc, leanchecker, clang, ld.lld, llvm-ar, cadical, leantar, ...)
+    bindir = os.path.join(prefix, "bin")
+    files += [os.path.join(bindir, f) for f in sorted(os.listdir(bindir))] if os.path.isdir(bindir) else []
+    # the native libraries and objects Lean programs link against, and the C headers they compile against
+    for sub in ("lib", "lib/lean"):
+        d = os.path.join(prefix, sub)
+        files += [os.path.join(d, f) for f in sorted(os.listdir(d))
+                  if os.path.isfile(os.path.join(d, f)) and (f.endswith((".a", ".o", ".so", ".dylib")) or ".so." in f)] if os.path.isdir(d) else []
+    for top in ("include", "lib/lean"):
+        for d, dirs, fs in os.walk(os.path.join(prefix, top)):
+            dirs.sort()
+            files += [os.path.join(d, f) for f in sorted(fs) if (top == "include" and f.endswith((".h", ".hpp"))) or
+                      (top == "lib/lean" and f.endswith((".olean", ".ilean")))]
+    for f in files:
+        try:
+            h.update(os.path.relpath(f, prefix).encode() + b"\0" + sha(read(os.path.realpath(f))).encode() + b"\0")
+            n += 1
+        except OSError:
+            h.update(os.path.relpath(f, prefix).encode() + b"\0missing\0")
+    # tools outside the toolchain that lake or leanc may run (a git clone of a package, the system cc/ld)
+    out["system"] = {t: exe_sha(os.environ.get(t.upper()) or t) for t in ("cc", "ld", "git")}
+    out["files"] = n
+    out["sha256"] = h.hexdigest()
+    return out
 
 
 def claims_model(value):
@@ -90,6 +184,9 @@ def inputs(root):
         "splitter": sha(read(os.path.join(pkg, "sail", "split_lean.py"))),
         "toolchain": read(os.path.join(root, "lean-toolchain")).decode().strip(),
         "toolchain.JanusASL": read(os.path.join(pkg, "lean-toolchain")).decode().strip(),
+        "toolchain.content": toolchain_content(pkg),
+        "env": env_inputs(),
+        "machine": platform.machine(),
     }
     manifest = json.loads(read(os.path.join(pkg, "lake-manifest.json")))
     out["manifest.packagesDir"] = manifest.get("packagesDir")

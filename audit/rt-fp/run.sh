@@ -42,7 +42,7 @@ memguard_lake build janus-oracle janus-oracle-amd64 janus-decode >"$W/lake.log" 
   CGO_ENABLED=0 go build -o "$W/x64/oracle" ./cmd/oracle) || exit 1
 (cd "$here/gen-a64" && go build -o "$W/gena64" .) || exit 1
 (cd "$here/gen-x64" && go build -o "$W/genx64" .) || exit 1
-go build -o "$W/janus" ./cmd/janus || exit 1
+CGO_ENABLED=0 go build -o "$W/janus" ./cmd/janus || exit 1
 
 echo "== A64-*: targeted arm64 corpus (FMA family, FPCR grids, FCVT/FCVTZ*/SCVTF/FRINT boundaries) vs qemu"
 "$W/gena64" -o "$W/a64.jsonl" 2>"$W/gena64.log"
