@@ -26,4 +26,36 @@ chg "parent .cargo/config (rustflags)" bash -c "mkdir -p $t/.cargo; printf '[bui
 for e in RUSTFLAGS=-Cdebuginfo=2 CXXFLAGS=-O0 CFLAGS=-O0 CC=gcc CXX=g++ LDFLAGS=-s CARGO_BUILD_RUSTFLAGS=-Cx RUSTUP_TOOLCHAIN=nightly LD_LIBRARY_PATH=/x CARGO_ENCODED_RUSTFLAGS=x; do
   a=$(key); b=$(export "$e"; key); [ "$a" != "$b" ] && ok "env $e" || bad "STALE: env $e unkeyed"
 done
+
+# ---- the ASL side: JanusASL/tools/asl_cache_key.py with a fake lean toolchain (prefix we can mutate) ----
+tc="$t/tc"; mkdir -p "$tc/bin" "$tc/lib/lean/Init" "$tc/include/lean"
+for b in lake leanc leanchecker clang ld.lld llvm-ar extra-tool; do printf '#!/bin/sh\necho %s\n' "$b" > "$tc/bin/$b"; chmod +x "$tc/bin/$b"; done
+printf '#!/bin/sh\nif [ "$1" = --print-prefix ]; then echo %s; else echo "Lean (version 9.9.9)"; fi\n' "$tc" > "$tc/bin/lean"; chmod +x "$tc/bin/lean"
+echo core > "$tc/lib/lean/Init.olean"; echo so > "$tc/lib/lean/libleanshared.so"; echo a > "$tc/lib/lean/libInit.a"; echo h > "$tc/include/lean/lean.h"; echo crt > "$tc/lib/crt1.o"
+mkdir -p "$t/a/JanusASL/vendor" "$t/a/JanusASL/sail"; cp "$root/JanusASL/lakefile.toml" "$root/JanusASL/lake-manifest.json" "$root/JanusASL/lean-toolchain" "$t/a/JanusASL/"
+cp "$root/JanusASL/vendor/ArmASL.tar.gz.sha256" "$t/a/JanusASL/vendor/"; cp "$root/JanusASL/sail/split_lean.py" "$t/a/JanusASL/sail/"; cp "$root/lean-toolchain" "$root/lakefile.toml" "$t/a/"
+akey() { PATH="$tc/bin:/usr/bin:/bin" python3 -I "$root/JanusASL/tools/asl_cache_key.py" "$t/a"; }
+ak=$(akey); [ "$ak" = "$(akey)" ] && ok "ASL key deterministic" || bad "ASL key unstable"
+achg() { local d=$1; shift; "$@"; local k1; k1=$(akey); [ "$k1" != "$ak" ] && ok "ASL key changes: $d" || bad "STALE: ASL key unchanged: $d"; ak=$(akey); }
+achg "lake binary swapped (same name)" bash -c "printf '#!/bin/sh\n#p\necho lake\n' > $tc/bin/lake"
+achg "clang (lake's C compiler for the native parts) swapped" bash -c "printf '#!/bin/sh\n#p\necho clang\n' > $tc/bin/clang"
+achg "ld.lld swapped" bash -c "printf '#!/bin/sh\n#p\necho x\n' > $tc/bin/ld.lld"
+achg "a binary not on any list (bin/extra-tool)" bash -c "printf '#!/bin/sh\n#p\n' > $tc/bin/extra-tool"
+achg "a core .olean" bash -c "echo changed > $tc/lib/lean/Init.olean"
+achg "libleanshared.so" bash -c "echo changed > $tc/lib/lean/libleanshared.so"
+achg "a static library lean links (libInit.a)" bash -c "echo changed > $tc/lib/lean/libInit.a"
+achg "a C header the generated C compiles against" bash -c "echo changed > $tc/include/lean/lean.h"
+achg "a CRT object" bash -c "echo changed > $tc/lib/crt1.o"
+achg "lean --version text" bash -c "sed -i 's/9.9.9/9.9.8/' $tc/bin/lean"
+for e in LEAN_CC=gcc LEAN_CXX=g++ LAKE_HOME=/x LD_LIBRARY_PATH=/x LD_PRELOAD=/x LEAN_FOO=1 LAKE_NO_CACHE=1 CC=gcc CFLAGS=-O0 LDFLAGS=-s; do
+  a=$(akey); b=$(export "$e"; akey); [ "$a" != "$b" ] && ok "ASL env $e" || bad "STALE: ASL env $e unkeyed"
+done
+mkdir -p "$t/sysbin"; printf '#!/bin/sh\necho cc1\n' > "$t/sysbin/cc"; chmod +x "$t/sysbin/cc"
+a=$(PATH="$tc/bin:$t/sysbin:/usr/bin:/bin" python3 -I "$root/JanusASL/tools/asl_cache_key.py" "$t/a"); printf '#!/bin/sh\necho cc2\n' > "$t/sysbin/cc"
+b=$(PATH="$tc/bin:$t/sysbin:/usr/bin:/bin" python3 -I "$root/JanusASL/tools/asl_cache_key.py" "$t/a"); [ "$a" != "$b" ] && ok "ASL key changes: system cc swapped" || bad "STALE: system cc"
+# the module cache shares the toolchain digest and env: its keys move with them
+mk_=$(PATH="$tc/bin:/usr/bin:/bin" python3 -I "$root/JanusASL/tools/asl_mod_cache.py" keys "$root" 2>/dev/null | sha256sum)
+echo changed-again > "$tc/lib/lean/libInit.a"
+mk2=$(PATH="$tc/bin:/usr/bin:/bin" python3 -I "$root/JanusASL/tools/asl_mod_cache.py" keys "$root" 2>/dev/null | sha256sum)
+[ "$mk_" != "$mk2" ] && ok "module cache keys change with the toolchain content" || bad "STALE: module keys ignore the toolchain content"
 exit $fail

@@ -72,8 +72,25 @@ ENV_KEYS = ["LEAN_CC", "LEAN_CXX", "LEAN_SYSROOT", "LEAN_PATH", "LEAN_SRC_PATH",
             "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LIBRARY_PATH", "C_INCLUDE_PATH", "CPATH"]
 
 
+ENV_PREFIXES = ("LEAN_", "LAKE_", "ELAN_", "LD_", "LC_", "GIT_")  # every variable of these families is keyed
+ENV_KEYS += ["LANG", "LANGUAGE", "PKG_CONFIG_PATH", "SDKROOT", "TMPDIR_NOT_KEYED"]
+ENV_KEYS.remove("TMPDIR_NOT_KEYED")
+
+
 def env_inputs():
-    return {k: os.environ[k] for k in ENV_KEYS if k in os.environ}
+    return {k: v for k, v in sorted(os.environ.items()) if k in ENV_KEYS or k.startswith(ENV_PREFIXES)}
+
+
+def exe_sha(name):
+    """SHA-256 of the executable `name` resolves to on PATH (by content, through symlinks), 'missing' if none."""
+    import shutil
+    p = shutil.which(name)
+    if not p:
+        return "missing"
+    try:
+        return sha(read(os.path.realpath(p)))
+    except OSError:
+        return "unreadable"
 
 
 _TC_MEMO = {}
@@ -102,18 +119,28 @@ def _toolchain_content(cwd):
         return out
     h = hashlib.sha256()
     n = 0
-    files = [os.path.join(prefix, "bin", b) for b in ("lean", "lake", "leanc", "leanchecker", "clang", "leantar")]
-    files.append(os.path.join(prefix, "lib", "lean", "libleanshared.so"))
-    for top in ("lib/lean",):
+    files = []
+    # every driver binary (lean, lake, leanc, leanchecker, clang, ld.lld, llvm-ar, cadical, leantar, ...)
+    bindir = os.path.join(prefix, "bin")
+    files += [os.path.join(bindir, f) for f in sorted(os.listdir(bindir))] if os.path.isdir(bindir) else []
+    # the native libraries and objects Lean programs link against, and the C headers they compile against
+    for sub in ("lib", "lib/lean"):
+        d = os.path.join(prefix, sub)
+        files += [os.path.join(d, f) for f in sorted(os.listdir(d))
+                  if os.path.isfile(os.path.join(d, f)) and (f.endswith((".a", ".o", ".so", ".dylib")) or ".so." in f)] if os.path.isdir(d) else []
+    for top in ("include", "lib/lean"):
         for d, dirs, fs in os.walk(os.path.join(prefix, top)):
             dirs.sort()
-            files += [os.path.join(d, f) for f in sorted(fs) if f.endswith(".olean")]
+            files += [os.path.join(d, f) for f in sorted(fs) if (top == "include" and f.endswith((".h", ".hpp"))) or
+                      (top == "lib/lean" and f.endswith((".olean", ".ilean")))]
     for f in files:
         try:
-            h.update(os.path.relpath(f, prefix).encode() + b"\0" + sha(read(f)).encode() + b"\0")
+            h.update(os.path.relpath(f, prefix).encode() + b"\0" + sha(read(os.path.realpath(f))).encode() + b"\0")
             n += 1
         except OSError:
-            h.update(b"missing\0")
+            h.update(os.path.relpath(f, prefix).encode() + b"\0missing\0")
+    # tools outside the toolchain that lake or leanc may run (a git clone of a package, the system cc/ld)
+    out["system"] = {t: exe_sha(os.environ.get(t.upper()) or t) for t in ("cc", "ld", "git")}
     out["files"] = n
     out["sha256"] = h.hexdigest()
     return out
