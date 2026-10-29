@@ -423,7 +423,12 @@ ro:
 		}
 	}
 	w("cd " + shQuote(workDir))
-	w(`exec "$@"`)
+	// RT 9: the script runs as root of its user namespace, with every capability. The tmpfs that hides the
+	// result cache (and its HMAC key) is a mount of this namespace, so the proof could `umount` it and read the
+	// key of the ro-bound cache below. Run the proof with an empty capability set and no way to get one back:
+	// no mount, umount or remount is possible any more. Without setpriv the fallback is refused.
+	w(fmt.Sprintf(`command -v setpriv >/dev/null 2>&1 || { echo "janus-sandbox: setpriv is needed to drop the namespace capabilities" >&2; exit %d; }`, unshareRefusedStatus))
+	w(`exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs "$@"`)
 	return sb.String()
 }
 

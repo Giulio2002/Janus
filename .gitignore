@@ -17,3 +17,4 @@ audit/*/work/
 /cmd/janus/janus
 audit/round10/scratch-*/
 /janus
+examples/.print-proofs.*/
