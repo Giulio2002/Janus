@@ -163,6 +163,8 @@ re-record on a green full gate and say why in the commit message.
 | asl.yml `scripts/asl.sh verify` (4 ASL corollaries) | lane `asl-verify` (after `rtasl-prove`) |
 | CI `audit/run-all.sh`, `verify-examples.sh`, `verify-amd64-examples.sh`, `ci-axiom-guard.sh`, `x86formal.sh` build/prove, `asl.sh build/prove` | already covered: lanes `rounds`, `verify`, `axiom`, `x86`, `asl-build`, `rtasl-prove` |
 
+**Peak memory in the baseline.** Column 3 of `scripts/speed-baseline.tsv` is read from janus's own records, not from a per-item cgroup: the largest `memoryGuard.peakBytes` in the item's `verified.json` and `verified/*.json` written during the run (a stale report from an earlier run is ignored; the log's `memguard[...]: peak` lines are the fallback). An item without a report (a failed one) records 0, which the pool's admission treats as unknown (the conservative estimate). Checked on the vbatch gate's artifacts: 461 of 463 pool items have a nonzero peak (arm64 MallocFast 5.63 GiB, amd64 RuneLen 3.53, arm64 Add 0.03).
+
 **Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
 `python3 -I scripts/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.

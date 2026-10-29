@@ -7,8 +7,7 @@
 
 TIMELINE is <gate out>/timeline.jsonl; BASELINE is the committed scripts/speed-baseline.tsv
 ("id<TAB>wall seconds<TAB>peak GiB", one line per item of the verify pool and per lane); LOGDIR (default
-the timeline's directory + /verify) holds the items' logs, from which the peak memory is read
-("memguard[...]: peak X GiB / MiB" lines, the largest).
+the timeline's directory + /verify) holds the items' logs, and ARTIFACTS (the checkout's artifacts/ directory) holds the items' verified.json / verified/*.json, whose memoryGuard.peakBytes (janus's own accounting, no extra cgroup) is the item's peak, the largest over its theorems; the logs' "memguard[...]: peak" lines are the fallback for an item with no report.
 
 check fails (exit 1) if
   * an item that PASSED took more than max(1.5 x baseline, baseline + 10 s)  (the absolute floor keeps
@@ -49,6 +48,38 @@ def peaks(logdir):
         out[f[:-4]] = best
     return out
 
+def report_dirs(artroot, item):
+    """The artifact directory of a pool item (where janus wrote verified.json and verified/<theorem>.json)."""
+    kind, _, n = item.partition(":")
+    if kind == "arm64":
+        return os.path.join(artroot, n)
+    if kind == "amd64":
+        return os.path.join(artroot, "amd64", n)
+    if kind in ("asm", "rtmisc", "sys", "print", "cgo"):
+        return os.path.join(artroot, kind, n)
+    return None
+
+def report_peak(artroot, item, since):
+    """The item's peak memory in GiB from janus's own records: the largest memoryGuard.peakBytes over its
+    verified.json and verified/*.json written since SINCE (so an old run's report is never used). No cgroup of
+    its own: janus's memguard accounts every Lean job it starts. 0 when it wrote none (a failed item)."""
+    d = report_dirs(artroot, item) if artroot else None
+    if not d or not os.path.isdir(d):
+        return 0.0
+    best = 0.0
+    paths = [os.path.join(d, "verified.json")]
+    vd = os.path.join(d, "verified")
+    if os.path.isdir(vd):
+        paths += [os.path.join(vd, f) for f in os.listdir(vd) if f.endswith(".json")]
+    for f in paths:
+        try:
+            if os.path.getmtime(f) < since:
+                continue
+            best = max(best, float(json.load(open(f)).get("memoryGuard", {}).get("peakBytes", 0)) / 2**30)
+        except (OSError, ValueError, AttributeError):
+            pass
+    return best
+
 def filekey(i):  # pool.sh's log file name for an id
     return i.replace("/", "_").replace(":", "_")
 
@@ -64,7 +95,7 @@ def pauses(tl):
                 out.append((float(w[0]), float(w[1]) if len(w) > 1 else 1e18))
     return out
 
-def measured(rows, logdir, paused=()):
+def measured(rows, logdir, paused=(), artroot="", since=0.0):
     pk = peaks(logdir)
     res = {}
     for r in rows:
@@ -73,7 +104,10 @@ def measured(rows, logdir, paused=()):
                 print("timing-invalid (overlaps a pause, excluded): %s/%s" % (r["pool"], r["id"]))
                 continue
             key = ("lane:" if r["pool"] == "gate" else "") + r["id"]
-            res[key] = (r["wall"], pk.get(filekey(r["id"]), 0.0) if r["pool"] != "gate" else 0.0)
+            m = 0.0
+            if r["pool"] != "gate":
+                m = max(pk.get(filekey(r["id"]), 0.0), report_peak(artroot, r["id"], since))
+            res[key] = (r["wall"], m)
     return res
 
 def read_base(path):
@@ -100,7 +134,9 @@ def main():
     mode, tl, base = sys.argv[1:4]
     rows = load_tl(tl)
     logdir = sys.argv[4] if len(sys.argv) > 4 else os.path.join(os.path.dirname(tl), "verify")
-    got = measured(rows, logdir, pauses(tl))
+    artroot = sys.argv[5] if len(sys.argv) > 5 else ""
+    gate0 = next((r for r in rows if r["kind"] == "gate"), {}).get("start", 0) - 60
+    got = measured(rows, logdir, pauses(tl), artroot, gate0)
     gate = next((r for r in rows if r["kind"] == "gate"), {})
     if mode == "update":
         with open(base, "w") as f:

@@ -52,7 +52,7 @@ pool_peaks() { # FILE: recorded peaks in GiB, 3rd column
   [ -f "$1" ] || return 0
   local k w m
   declare -gA POOL_PEAK
-  while IFS=$'\t' read -r k w m; do case "$k" in '#'*|lane:*|'') ;; *) POOL_PEAK[$k]=$m ;; esac; done < "$1"
+  while IFS=$'\t' read -r k w m; do case "$k" in '#'*|lane:*|'') ;; *) awk -v m="${m:-0}" 'BEGIN { exit !(m > 0) }' && POOL_PEAK[$k]=$m ;; esac; done < "$1"
 }
 _pool_res_kb() { # INDEX: this item's reservation in kB
   local pk=${POOL_PEAK[${POOL_KEYS[$1]}]:-}

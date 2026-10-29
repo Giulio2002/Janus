@@ -371,13 +371,13 @@ python3 -I "$root/scripts/gate-report.py" "$tlf" || true
 speed_rc=0
 if [ "$sbmode" = record ]; then
   if [ -z "$partial" ] && [ "$lanes_rc" = 0 ]; then
-    python3 -I "$root/scripts/gate-speedcheck.py" update "$tlf" "$sbfile" "$out/verify"
+    python3 -I "$root/scripts/gate-speedcheck.py" update "$tlf" "$sbfile" "$out/verify" "$root/artifacts"
     echo "speed check: baseline RECORDED in $sbfile (commit it after reviewing); no comparison made"
   else
     echo "speed check: baseline NOT recorded (record needs a passing full run)"
   fi
 elif [ -f "$sbfile" ]; then
-  python3 -I "$root/scripts/gate-speedcheck.py" check "$tlf" "$sbfile" "$out/verify" || speed_rc=$?
+  python3 -I "$root/scripts/gate-speedcheck.py" check "$tlf" "$sbfile" "$out/verify" "$root/artifacts" || speed_rc=$?
 else
   echo "!!!! speed check NOT enforced: no baseline file $sbfile (record one with --speed-baseline record after a green full gate) !!!!"
 fi
