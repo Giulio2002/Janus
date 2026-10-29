@@ -888,3 +888,17 @@ func TestRTIncrScripts(t *testing.T) {
 		t.Fatalf("scripts/lib/test-rt-incr.sh: %v\n%s", err, out)
 	}
 }
+
+// the build-cache side: the Sail driver key (toolchain binaries by content, parent cargo config, env) and the
+// integrity layer of the ASL/Sail caches
+func TestRTBuildCacheScripts(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	for _, s := range []string{"test-rt-bcache.sh", "test-bcache.sh"} {
+		cmd := exec.Command("bash", filepath.Join(root, "scripts", "lib", s))
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil || bytes.Contains(out, []byte("\nFAIL ")) || bytes.HasPrefix(out, []byte("FAIL ")) {
+			t.Fatalf("%s: %v\n%s", s, err, out)
+		}
+	}
+}

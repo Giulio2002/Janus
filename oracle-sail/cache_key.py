@@ -26,11 +26,11 @@ import subprocess
 import sys
 
 SCHEME = "oracle-sail-driver-key-v1"
-ENV_PREFIXES = ("CARGO_", "RUSTC", "RUSTFLAGS", "RUSTDOC", "CC_", "CXX_", "CFLAGS_", "CXXFLAGS_", "CPPFLAGS_",
+ENV_PREFIXES = ("CARGO_", "RUSTC", "RUSTUP_", "RUSTFLAGS", "RUSTDOC", "CC_", "CXX_", "CFLAGS_", "CXXFLAGS_", "CPPFLAGS_",
                 "LDFLAGS_", "TARGET_", "HOST_", "AARCH64_ORACLE")
 ENV_NAMES = ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "AR", "LD", "LIBRARY_PATH",
              "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "CPATH", "PKG_CONFIG_PATH", "GMP_LIB_DIR", "GMP_INCLUDE_DIR",
-             "SDKROOT", "CXXSTDLIB")
+             "SDKROOT", "CXXSTDLIB", "LD_LIBRARY_PATH", "LD_PRELOAD", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR")
 ENV_SKIP = ("CARGO_HOME",)  # the location of the registry, not an input (Cargo.lock pins the sources)
 
 
@@ -52,6 +52,19 @@ def run(*cmd):
         return (r.stdout + r.stderr).strip()
     except Exception as ex:
         return "unavailable: %s" % type(ex).__name__
+
+
+def exe_sha(name):
+    """The SHA-256 of the executable `name` resolves to on PATH (a swapped compiler with an unchanged
+    --version string is another key), or 'missing'."""
+    import shutil
+    p = shutil.which(name)
+    if not p:
+        return "missing"
+    try:
+        return sha_file(os.path.realpath(p))
+    except OSError:
+        return "unreadable"
 
 
 def libgmp():
@@ -92,7 +105,24 @@ def inputs(root, pins, model_file):
     out["cargo"] = run("cargo", "-V")
     cxx = os.environ.get("CXX") or "c++"
     out["cxx"] = run(cxx, "--version")
+    # binaries by content, not only by their --version text: rustc and cargo (rustup's proxies resolve to the
+    # toolchain through `rustc -vV` above), the C++ compiler, and the `cc` rustc links with
+    out["bin"] = {"rustc": exe_sha("rustc"), "cargo": exe_sha("cargo"), "cxx": exe_sha(cxx), "cc": exe_sha(os.environ.get("CC") or "cc"),
+                  "ld": exe_sha("ld")}
     out["libgmp"] = libgmp()
+    # .cargo/config files in every parent directory of the crate are read by cargo too
+    parents = {}
+    d = os.path.dirname(os.path.abspath(here))
+    while True:
+        for rel in (".cargo/config", ".cargo/config.toml"):
+            q = os.path.join(d, rel)
+            if os.path.isfile(q):
+                parents[q] = sha_file(q)
+        nd = os.path.dirname(d)
+        if nd == d:
+            break
+        d = nd
+    out["parent-cargo-config"] = parents
     out["env"] = {k: v for k, v in sorted(os.environ.items())
                   if (k in ENV_NAMES or k.startswith(ENV_PREFIXES)) and k not in ENV_SKIP}
     return out
