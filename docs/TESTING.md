@@ -663,6 +663,42 @@ ratios above, which are dominated by per-verify work that is the same on any mac
 The per-runner peak memory drops from ~30–43 GB (more than a hosted runner has, which made the
 cold replay swap or be killed) to under 15 GB.
 
+## Build cache policy
+
+The ASL/Sail build outputs (the ArmASL model, the JanusASL and Janus module builds, the Sail oracle
+driver) are served from a content-addressed, HMAC-signed, hash-checked cache (docs/SOUNDNESS.md
+"Build caches"; `scripts/asl.sh`, `scripts/oracle-sail.sh`). It caches build outputs only: every
+check still runs. The policy:
+
+* **Merge gates and pre-push gates may use the cache** (it is on by default; entries that fail
+  their HMAC or a file hash are rebuilt, never used).
+* **A nightly gate runs truly cold**: `JANUS_ASL_CACHE=0` (neither reads nor writes the cache; also
+  `off`/`no`/`false`; `ASL_CACHE=off` is the older spelling) in a fresh worktree with no builds,
+  to catch any gap in the key coverage. `scripts/nightly-cold-gate.sh` does it and compares the
+  result with a cached run of the same commit.
+* **A disagreement is a P0 cache bug.** If a cold run and a cached run of the same commit differ in
+  any lane's pass/fail, or in any ASL/Sail artifact hash (`scripts/gate-cachecmp.py`: every
+  ArmASL/JanusASL `.olean` and the Sail driver), the cache served something its inputs do not
+  determine, or a key misses an input. Treat every cached result since the last agreeing nightly as
+  unproven, fix the key (`JanusASL/tools/asl_cache_key.py`, `asl_mod_cache.py`,
+  `oracle-sail/cache_key.py`), and add a case to `scripts/lib/test-bcache.sh`. (If a build step is
+  not reproducible bit for bit, the artifact comparison will say so on the first nightly: fix the
+  non-determinism or drop that artifact from `gate-cachecmp.py hashes`, with a note here; never
+  loosen the lane comparison.)
+* **Owner: the main session.**
+
+```
+scripts/nightly-cold-gate.sh [--commit REV] [--cached-out DIR] [-- gate.sh args]
+# example crontab line (not installed): 02:30 every night, on the commit main points to
+# 30 2 * * *  cd /srv/janus && scripts/nightly-cold-gate.sh --commit main -- -j 2 >> /srv/janus-ops/nightly-cold.log 2>&1
+```
+
+It makes a cached gate run and a cold gate run (each `memcap -m 80G scripts/gate.sh`, in its own
+fresh worktree) unless `--cached-out` names the output of an earlier cached run of that commit,
+and exits 1 with a `P0 CACHE BUG` report on any disagreement, 2 if the runs cannot be compared.
+The comparison logic is tested with fake results by `scripts/lib/test-cachecmp.sh`; the cache's
+integrity and key tests are `scripts/lib/test-bcache.sh`.
+
 ## Disk use
 
 On the development host the caches and the oracle dumps once filled the 874 GB disk and put
