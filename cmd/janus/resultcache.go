@@ -3,8 +3,9 @@ package main
 // The trusted verification-result cache (docs/SOUNDNESS.md, "Verification-result cache").
 //
 // A successful `janus verify` of a single proof file is recorded under a key that covers every
-// input the outcome depends on: the janus executable itself (all of its logic, and the embedded
-// framework), the framework build (its sources' hash, the SHA-256 of every compiled framework
+// input the outcome depends on: the verifier (the janus executable's logic and embedded framework,
+// named by a content identity of its source and build, or by the executable's bytes: verifierid.go),
+// the framework build (its sources' hash, the SHA-256 of every compiled framework
 // module and of the compiled auditor), the Lean toolchain, the sandbox mode, the selected theorem
 // and options, the artifact (Extracted.lean, identity.json, the binary's verified SHA-256) and the
 // proof's bytes. A later verification with exactly the same inputs prints the recorded report
@@ -82,20 +83,25 @@ type resultInputs struct {
 }
 
 // key is the SHA-256 of every input, or "" when the cache cannot be used.
+//
+// The verifier is named by its identity (verifierid.go): a content hash of the source it was built
+// from and of the toolchain and settings, or, when that cannot be established exactly, the
+// SHA-256 of the executable. Absolute paths (artifact directory, proof, binary, framework root)
+// are not keyed, since they differ between checkouts of identical items: the key binds the
+// extraction, identity and proof bytes, the binary's SHA-256, and the proof's and binary's path
+// relative to the artifact directory, which is exactly what the recorded report contains
+// (binaryRef), plus the framework's source hash, pins and auditor.
 func (in *resultInputs) key() string {
-	exe := executableSha()
-	if exe == "" {
+	vid := verifierComponent()
+	if vid == "" {
 		return ""
 	}
-	outAbs, _ := filepath.Abs(in.outdir)
-	proofAbs, _ := filepath.Abs(in.proof)
-	binAbs, _ := filepath.Abs(in.binPath)
 	h := sha256.New()
-	fmt.Fprintf(h, "janus-result-v1\nexe %s\n", exe)
-	fmt.Fprintf(h, "framework %s %s %s\npins %s\nauditor %s\n", in.fw.Source, in.fw.Sha256, in.root, pinsDigest(in.fwPins.want), in.auditExeSha)
+	fmt.Fprintf(h, "janus-result-v%d\nverifier %s\n", resultCacheSchema, vid)
+	fmt.Fprintf(h, "framework %s %s\npins %s\nauditor %s\n", in.fw.Source, in.fw.Sha256, pinsDigest(in.fwPins.want), in.auditExeSha)
 	fmt.Fprintf(h, "toolchain %q %s %s\nsandbox %s %s\n", in.tc.cacheID(), in.tc.lean, in.tc.leanchecker, in.sb.mode, in.sb.bwrap)
-	fmt.Fprintf(h, "theorem %s\nreplay-fresh %q\nbinary-opt %q\n", in.thm, in.opts["replay-fresh"], in.opts["binary"])
-	fmt.Fprintf(h, "outdir %s\nproof %s\nbinary %s %s\n", outAbs, proofAbs, binAbs, in.binarySha)
+	fmt.Fprintf(h, "theorem %s\nreplay-fresh %q\n", in.thm, in.opts["replay-fresh"])
+	fmt.Fprintf(h, "proof %q\nbinary %q %s\n", binaryRef(in.outdir, in.proof), binaryRef(in.outdir, in.binPath), in.binarySha)
 	fmt.Fprintf(h, "extracted %s\nidentity %s\nproof-src %s\n", sha256Hex(in.extracted), sha256Hex(in.identity), sha256Hex(in.proofSrc))
 	return hex.EncodeToString(h.Sum(nil))
 }

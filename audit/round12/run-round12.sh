@@ -10,7 +10,7 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 R=audit/round12
 J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
-if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
+if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1; fi
 if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
   lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
   [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null

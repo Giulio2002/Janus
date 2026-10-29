@@ -107,7 +107,7 @@ if [ -n "$e2e" ]; then
   [ -f "$t/a/JanusASL/.lake/build/lib/lean/ArmASL.olean" ] || { echo "FAIL $e2e has no entry for this checkout"; exit 1; }
   (cd "$t/a/JanusASL" && lake build ArmASL --no-build) || { echo "FAIL lake wants to rebuild ArmASL after a restore of an unedited checkout"; exit 1; }
   ASL_CACHE="$t/cache" "$t/a/scripts/asl.sh" model | tee "$t/a.log"
-  grep -q "stored the ArmASL build" "$t/a.log" || { echo "FAIL nothing published"; fail=1; }
+  grep -q "asl cache: ArmASL .*: stored" "$t/a.log" || { echo "FAIL nothing published"; fail=1; }
   # B: the aslverify-style lakefile, restored from the temporary cache.
   copy "$t/b"; edit "$t/b" "$VERIFY_EDIT"
   [ "$(key "$t/b")" = "$(key "$t/a")" ] || { echo "FAIL the edited copy has another key"; exit 1; }

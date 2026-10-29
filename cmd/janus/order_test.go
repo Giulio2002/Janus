@@ -21,13 +21,19 @@ import (
 // parallel subtests then take slots of their own. testing's -parallel is raised so that it never
 // binds before this scheduler does.
 
-// testDurations are measured wall times (seconds, go test -json on the 48-core host, 2026-10-25;
+// testDurations are measured wall times (seconds, go test -json -parallel 8 on the 48-core host at load 30-50, 2026-10-29, the largest of three runs;
 // docs/TESTING.md) of the long tests; the order matters, not the exact values.
 var testDurations = map[string]float64{
-	"TestCacheGCConcurrentVerify": 250, "TestForeignFrameworkWriteDetected": 180, "TestR1ForgedFrameworkLemma": 116,
-	"TestResultCache": 114, "TestConcurrentVerify": 90, "TestAmd64Blockers": 80, "TestSandboxRecorded": 70,
-	"TestDataLarge": 68, "TestInstallOutsideRepo": 64, "TestR1FrameworkTamper": 64, "TestVerify": 60,
-	"TestInlineInstanceRejected": 37, "TestVerifyBatch": 33, "TestConsumerExtraDep": 30, "TestBoundInstanceRejected": 28,
+	"TestCacheGCConcurrentVerify": 744, "TestR1ForgedFrameworkLemma": 721, "TestResultCache": 421,
+	"TestConcurrentVerify": 416, "TestBoundInstanceRejected": 269, "TestVerifyManyTheorems": 261,
+	"TestVerifyManyCacheIsolation": 256, "TestConsumerVerify": 241, "TestRound6StatementNames": 228,
+	"TestUnshareFallbackVerifies": 214, "TestVerifyManySharedFailure": 212, "TestSeedFramework": 206,
+	"TestRoundTripRejectsAmbiguousPrint": 205, "TestMemGuardNormalVerify": 200, "TestMemguardShell": 199,
+	"TestInitEndToEnd": 199, "TestMemGuardKillsHungryProof": 191, "TestHardeningB1": 184,
+	"TestConsumerTwoCheckouts": 182, "TestConsumerVerifyMany": 180, "TestHardeningAttacks": 139,
+	"TestConsumerPathDep": 139, "TestConsumerExtraDep": 135, "TestConsumerLakefileLean": 122, "TestVerifyBatch": 121,
+	"TestConsumerGit": 119, "TestInlineInstanceRejected": 105, "TestConsumerAuditorLease": 100, "TestDataLarge": 91,
+	"TestBlockers": 73, "TestBatchRequestErrors": 72, "TestVerify": 72, "TestForeignFrameworkWriteDetected": 50,
 }
 
 const unknownTestDuration = 30

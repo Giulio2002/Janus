@@ -144,7 +144,7 @@ theorem cs64inf (y : Nat) (hy : y < 2 ^ 64) :
       9223372036854775808#64 &&& BitVec.ofNat 64 y).toNat = copysign infBits y := cs64 _ y (by decide) hy
 
 /-- The side conditions of the lifting lemmas. -/
-macro "lt64" : tactic => `(tactic| first | exact Nat.mod_lt _ (by decide) | exact copysign_lt _ _ | assumption)
+macro "lt64" : tactic => `(tactic| first | exact Nat.mod_lt _ (by decide) | exact copysign_lt _ _ | with_reducible assumption)
 
 /-- The return of `complex128div` from `S` with results `X` (`X0`) and `Y` (`X1`). -/
 def Out (S : State) (X Y : Option Nat) (s' : State) : Prop :=
@@ -360,7 +360,7 @@ theorem body3 (S : State) (a b c d : Nat) (hpc : S.rip = BitVec.ofNat 64 (cdivAd
   all_goals refine out_mono (body3b _ a b c d ?_ ?_ ?_ ?_ ?_ ?_ (inf2one c) (copysign_lt _ _) ?_ ?_ ?_) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
   all_goals try (rw [hcd]; try rfl; done)
   all_goals try env_tac hm hra hral hsp hinf hdl
-  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
   all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; done)
   all_goals try simp only [Bool.not_eq_true, Bool.not_eq_false] at *
   all_goals simp only [setRegF_apply, Nat.reduceEqDiff, reduceIte]
@@ -431,7 +431,7 @@ theorem test3 (S : State) (a b c d e f : Nat) (hpc : S.rip = BitVec.ofNat 64 (cd
   all_goals refine out_mono (body3 _ a b c d ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_) ?_ ?_ rfl rfl rfl rfl rfl rfl rfl rfl
   all_goals try (rw [hcd]; try rfl; done)
   all_goals try env_tac hm hra hral hsp hinf hdl
-  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
   all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; done)
   all_goals simp only [recover, hn1, hn2]
   all_goals cond_simp
@@ -464,7 +464,7 @@ theorem test2 (S : State) (a b c d e f : Nat) (hpc : S.rip = BitVec.ofNat 64 (cd
     | (refine out_mono (body2 _ a b c d ?_ ?_ ?_ ?_ ?_ ?_) ?_ ?_ rfl rfl rfl rfl rfl rfl rfl rfl
        · rw [hcd]; try rfl
        · env_tac hm hra hral hsp hinf hdl
-       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
        all_goals simp only [recover, hn1]
        all_goals cond_simp
        all_goals simp only [O.mac, O.msc, reduceIte, Bool.false_eq_true]
@@ -476,8 +476,8 @@ theorem test2 (S : State) (a b c d e f : Nat) (hpc : S.rip = BitVec.ofNat 64 (cd
        · rw [hcd]; try rfl
        · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
          · env_tac hm hra hral hsp hinf hdl
-         all_goals first | assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
-       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+         all_goals first | with_reducible assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
+       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
        all_goals cond_simp)
 
 set_option maxRecDepth 20000 in
@@ -500,7 +500,7 @@ theorem test1 (S : State) (a b c d e f : Nat) (hpc : S.rip = BitVec.ofNat 64 (cd
     | (refine out_mono (body1 _ a b c ?_ ?_ ?_ ?_ ?_ hc) ?_ ?_ rfl rfl rfl rfl rfl rfl rfl rfl
        · rw [hcd]; try rfl
        · env_tac hm hra hral hsp hinf hdl
-       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
        all_goals simp only [recover]
        all_goals cond_simp
        done)
@@ -508,11 +508,11 @@ theorem test1 (S : State) (a b c d e f : Nat) (hpc : S.rip = BitVec.ofNat 64 (cd
        · rw [hcd]; try rfl
        · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
          · env_tac hm hra hral hsp hinf hdl
-         all_goals first | assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
-       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+         all_goals first | with_reducible assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
+       all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
        all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte, BitVec.toNat_ofNat]; done)
        all_goals cond_simp
-       all_goals exact hn1_of _ _ _ (by assumption))
+       all_goals exact hn1_of _ _ _ (by with_reducible assumption))
 
 theorem Val.trich (v w : Val) (h1 : Val.eq v w = false) (h2 : Val.lt v w = false) : Val.lt w v = true := by
   cases v with
@@ -601,8 +601,8 @@ theorem fixup (S : State) (a b c d e f : Nat) (E F : Option Nat)
       · rw [hcd]; try rfl
       · refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
         · env_tac hm hra hral hsp hinf hdl
-        all_goals first | assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
-      all_goals first | assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+        all_goals first | with_reducible assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
+      all_goals first | with_reducible assumption | (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
 
 /-- The return of `complex128div` with results `X`, `Y`, as an equation (the shape a caller's
 symbolic execution uses): back at the return address with `RSP + 8`, `RBP`, `R14`, memory,
@@ -667,7 +667,7 @@ theorem cdiv_summary :
     (smith_noNaN false a b c d).1 (smith_noNaN false a b c d).2) rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
   all_goals try (rw [hcd]; try rfl; done)
   all_goals try (refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> try env_tac hm hra hral hsp hinf hdl)
-  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+  all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
   all_goals try (dsimp only; simp only [setXmmF_apply, setRegF_apply, Nat.reduceEqDiff, reduceIte]; done)
   all_goals try simp only [Bool.not_eq_false, Bool.not_eq_true] at *
   all_goals try dsimp only

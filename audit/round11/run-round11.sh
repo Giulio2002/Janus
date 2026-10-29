@@ -13,7 +13,7 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 R=audit/round11
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
-go build -o "$J" ./cmd/janus || exit 1
+CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
 lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 W=$R/work/rows; rm -rf "$W"; mkdir -p "$W"

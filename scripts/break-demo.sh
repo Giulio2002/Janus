@@ -18,7 +18,7 @@ memguard_self "$@"
 cd "$root"
 export PATH=/usr/local/go/bin:$PATH
 janus="$root/bin/janus"
-[ -x "$janus" ] || go build -o "$janus" ./cmd/janus
+[ -x "$janus" ] || CGO_ENABLED=0 go build -o "$janus" ./cmd/janus
 extra=()
 [ -n "${JANUS_ROOT:-}" ] && extra=(--janus-root "$JANUS_ROOT")
 

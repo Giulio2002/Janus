@@ -50,8 +50,9 @@ theorem go_spec (a : W64) : EnsuresC Extracted.program Contract.none goFn [a] (G
       (u.mem.readLE a.toNat 8 + u.mem.readLE a.toNat 8) % 18446744073709551616) =
       m.writeLE (a.toNat + 8) 8 (u.mem.readLE a.toNat 8 + (u.mem.readLE a.toNat 8 + u.mem.readLE a.toNat 8)) := by
     intro m
+    generalize u.mem.readLE a.toNat 8 = x
     rw [← Janus.Arm64.Memory.writeLE_mod m _ 8 (_ + _ % _),
-      ← Janus.Arm64.Memory.writeLE_mod m _ 8 (u.mem.readLE a.toNat 8 + _)]
+      ← Janus.Arm64.Memory.writeLE_mod m _ 8 (x + _)]
     congr 1; omega
   rw [hv]
   apply MemFrame.writeLE_both

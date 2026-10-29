@@ -47,7 +47,7 @@ names=("$@")
 # JANUS_EXAMPLES_PREBUILT=1 (scripts/verify-all-examples.sh): bin/janus and the examples binary
 # are already built.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
-  go build -o bin/janus ./cmd/janus
+  CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
   scripts/build-examples.sh >/dev/null
 fi
 # The verifier builds the framework it uses itself (the embedded one in the cache, or the
@@ -60,6 +60,7 @@ extra=()
 
 . scripts/example-contracts.sh
 . scripts/lib/theorems.sh
+. scripts/lib/incr.sh
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-examples.txt}"
 : > "$summary"
 lines="$(mktemp -d)"
@@ -70,11 +71,19 @@ broken=()
 verify_one() {
   local n=$1 out t start
   if [ "$n" = WrongAdd ]; then
+    # the demonstration builds its own subtracting binary from examples/basic with the pinned Go toolchain;
+    # its extraction (module Extracted) is generated from exactly these inputs
+    local -a wspec=($(incr_fw_embedded) --proof examples/proofs/Add.lean --proof examples/proofs/WrongAdd.lean --pkg examples/basic
+      --virtual Extracted --arg "go:${JANUS_GO_TOOLCHAIN:-go1.26.0}" --arg "go-version:$(GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" go version 2>/dev/null || echo unknown)")
+    if incr_begin "arm64:WrongAdd" arm64 "${wspec[@]}"; then echo "$INCR_MSG" | tee "$lines/$n"; return 0; fi
+    local wstart wrc=0
+    wstart=$(date +%s.%N)
     if scripts/break-demo.sh > "$lines/WrongAdd.log" 2>&1; then
       echo "WrongAdd  ok  (see scripts/break-demo.sh output)" | tee "$lines/$n"
     else
-      echo "WrongAdd  FAILED" | tee "$lines/$n"; cat "$lines/WrongAdd.log"; broken+=("$n")
+      echo "WrongAdd  FAILED" | tee "$lines/$n"; cat "$lines/WrongAdd.log"; broken+=("$n"); wrc=1
     fi
+    incr_end "arm64:WrongAdd" arm64 "$wrc" "$(echo "$(date +%s.%N) - $wstart" | bc)" "${wspec[@]}"
     return 0
   fi
   out="artifacts/$n"
@@ -88,10 +97,20 @@ verify_one() {
   local thm i st
   for thm in $(grep -oE '^theorem (exact|saturation|faults|anyCPU|forAllValues)' "examples/proofs/$n.lean" | awk '{print $2}' || true); do thms+=("Proof.$thm"); done
   if grep -q '^namespace Witness' "examples/proofs/$n.lean"; then thms+=(Proof.Witness.nonvacuous Proof.Witness.returns); fi
+  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  local -a ispec=($(incr_fw_embedded) --proof "examples/proofs/$n.lean" --art "$out" --arg "sym:$(example_symbol "$n")")
+  local a thm_a
+  for a in ${extract_args[@]+"${extract_args[@]}"}; do ispec+=(--arg "extract:$a"); done
+  for thm_a in "${thms[@]}"; do ispec+=(--arg "thm:$thm_a"); done
+  if incr_begin "arm64:$n" arm64 "${ispec[@]}"; then echo "$INCR_MSG" | tee "$lines/$n"; return 0; fi
   st="$(mktemp -d)"
   start=$(date +%s.%N)
   verify_theorems "$out" "examples/proofs/$n.lean" "$st" "${thms[@]}" -- ${extra[@]+"${extra[@]}"} || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)
+  local item_rc=0
+  [ "$(cat "$st/0.rc")" = 0 ] || item_rc=1
+  for ((i = 1; i < ${#thms[@]}; i++)); do [ "$(cat "$st/$i.rc")" = 0 ] || item_rc=1; done
+  incr_end "arm64:$n" arm64 "$item_rc" "$t" "${ispec[@]}"
   cat "$st"/*.log > "$out/verify.log" 2>/dev/null || true
   if [ "$(cat "$st/0.rc")" = 0 ]; then
     printf '%-9s ok  %6.1fs\n' "$n" "$t" | tee "$lines/$n"
