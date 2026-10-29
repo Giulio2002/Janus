@@ -50,7 +50,8 @@ gob() { ( cd audit/round7/asmstub && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0
 # J1 (a --fresh consumer verification: it builds the framework in its own workspace, ~20 min) runs
 # in the background from the start and is collected at the end; its rows are printed there.
 cp -r $W/Add $W/Add-J1
-( dep="$(audit/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; echo dep-setup >> "$W/J1.broken"; }
+( trap ': > "$W/J1.done"' EXIT
+  dep="$(audit/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; echo dep-setup >> "$W/J1.broken"; }
   echo "== J1: dependency definitions are disclosed with their bodies"
   tmark "J1 start"
   out="$("$J" verify --fresh $W/Add-J1 --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --theorem R7Proofs.misnamed 2>&1)"
@@ -59,7 +60,8 @@ cp -r $W/Add $W/Add-J1
   [ ${#broken[@]} -gt 0 ] && printf '%s\n' "${broken[@]}" >> "$W/J1.broken"
   tmark "J1 end"
 ) > "$W/J1.out" 2>&1 &
-j1pid=$!
+# disowned: par_wait's plain `wait` must not wait for it (the attack rows would then idle behind it)
+disown $!
 
 # Fixtures first, in order (builds, extractions and the hardware checks); then the verification
 # rows as independent parallel blocks, each on its own copy of the extraction it verifies (a
@@ -153,7 +155,7 @@ if [ -z "${JANUS_R7_NO_CACHE_ROWS:-}" ]; then
   [ "${PIPESTATUS[0]}" = 0 ] || broken+=(cache-rows)
 fi
 
-wait "$j1pid"
+while [ ! -e "$W/J1.done" ]; do sleep 5; done
 cat "$W/J1.out"
 [ -s "$W/J1.broken" ] && while IFS= read -r b; do broken+=("$b"); done < "$W/J1.broken"
 
