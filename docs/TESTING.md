@@ -66,10 +66,10 @@ from the host (`scripts/lib/autojobs.sh`, tested by `scripts/lib/test-autojobs.s
 load inputs): `jobs = min(cap, (free cores - 16 reserved for the other lanes) / 2.1 cores per item, (MemAvailable -
 30 GiB floor - 40 GiB reserved) / item GiB)`, at least 2, where free cores = nproc - 1-minute load and item GiB = the
 largest recorded per-item peak of `scripts/speed-baseline.tsv` (6.1 without one) x 1.5, at least 4; `lanes =
-min(jobs + 3, 15)`. An idle 48-core / 170 GiB box gets `-j 10`, 13 lanes. Fewer than 8 free cores or a 1-minute
+min(jobs + 3, 15)`. (Before the joint budget an idle 48-core / 170 GiB box got `-j 10`.) Fewer than 8 free cores or a 1-minute
 load of 60 or more (RULES.md) falls back to `-j 2`. `JANUS_GATE_MAX_JOBS` (default 12), `JANUS_GATE_MEM_FLOOR_GIB`,
 `JANUS_GATE_LANE_CORES`, `JANUS_GATE_LANE_GIB`, `JANUS_GATE_CORES_PER_ITEM` tune it. The choice and its reason are
-printed and recorded in the timeline's `gate` line (`auto`, `why`, `roundsLanes`). The audit-round lane count (`JANUS_ROUNDS_LANES`, read by `audit/run-rounds.sh` where it supports it, exported to the rounds lane only) is min(6, free cores / 8, (MemAvailable - 40 GiB) / 15 GiB), at least 2, and 2 on a busy host. Admission: every pool (`pool.sh`) starts no new
+printed and recorded in the timeline's `gate` line (`auto`, `why`, `roundsLanes`). The audit-round lane count (`JANUS_ROUNDS_LANES`, read by `audit/run-rounds.sh` where it supports it, exported to the rounds lane only) is min(6, free cores / 8), at least 2, and 2 on a busy host. The memory is budgeted JOINTLY with the verify pool: verify jobs x item GiB + round lanes x 15 GiB + other lanes (25 GiB) + the floor (30 GiB) must fit MemAvailable; when over, the larger consumer is cut first (both keep at least 2) and the split is logged (`mem budget: verify X GiB + rounds Y GiB + lanes Z GiB + floor F GiB of M`, timeline `memBudget`). So an idle 48-core / 170 GiB box gets `-j 6` and 4 round lanes, a 250 GiB one `-j 12` and 5. Admission: every pool (`pool.sh`) starts no new
 item while MemAvailable is below the floor plus one item's estimate. An explicit `-j` or `JANUS_JOBS` (the shared-box
 rule of RULES.md) is used as given; memguard's per-job limits are unchanged.
 

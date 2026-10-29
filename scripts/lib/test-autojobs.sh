@@ -10,11 +10,12 @@ exp() { # NAME "nproc load GiB [peak]" expected-jobs expected-lanes
   local r j l; r=$(sz $2); j=${r%% *}; r=${r#* }; l=${r%% *}
   [ "$j $l" = "$3 $4" ] && ok "$1: -j $j, $l lanes" || bad "$1: got '$j $l', want $3 $4"
 }
-exp "idle 48 cores / 170 GiB" "48 2 170" 10 13
+exp "idle 48 cores / 170 GiB (memory binds, joint budget)" "48 2 170" 6 9
+exp "idle 48 cores / 250 GiB" "48 2 250" 12 15
 exp "idle, small items (peak 2 GiB)" "48 2 170 2" 12 15
 exp "idle, 96 cores / 400 GiB capped at 12" "96 0 400" 12 15
 exp "half busy (load 21)" "48 21 170" 5 8
-exp "memory bound (80 GiB)" "48 2 80" 2 5
+exp "memory bound (80 GiB, over budget even at 2)" "48 2 80" 2 5
 exp "high load falls back to 2" "48 62 170" 2 5
 exp "few free cores falls back to 2" "48 42 170" 2 5
 exp "tiny box (4 cores / 16 GiB)" "4 0 16" 2 5
@@ -25,12 +26,24 @@ printf '# h\narm64:A\t5\t0.30\narm64:B\t9\t4.00\nlane:x\t7\t30.00\n' > "$t/base"
 sz 48 2 170 6.1 | grep -q 'memory:' && ok "reason names the binding limit" || bad "reason: $(sz 48 2 170)"
 rl() { AUTOJOBS_NPROC=$1 AUTOJOBS_LOAD1=$2 AUTOJOBS_MEMKB=$(( $3 * 1048576 )) autojobs_rounds_lanes; }
 rexp() { [ "$(rl $2)" = "$3" ] && ok "rounds lanes, $1: $3" || bad "rounds lanes, $1: got $(rl $2), want $3"; }
-rexp "idle 48 cores / 170 GiB" "48 2 170" 5
+rexp "idle 48 cores / 170 GiB (cut by the joint budget)" "48 2 170" 4
+rexp "idle 48 cores / 250 GiB" "48 2 250" 5
 rexp "idle 96 cores / 400 GiB (cap 6)" "96 0 400" 6
 rexp "memory bound (80 GiB)" "48 2 80" 2
 rexp "half busy (load 21)" "48 21 170" 3
 rexp "high load" "48 62 170" 2
 rexp "few free cores" "48 42 170" 2
 rexp "tiny box" "4 0 16" 2
+# the joint budget holds wherever it can: verify x item + rounds x 15 + lanes + floor <= MemAvailable
+for m in 100 120 140 160 170 200 250 400; do
+  for c in 48 96; do
+    p=$(AUTOJOBS_NPROC=$c AUTOJOBS_LOAD1=2 AUTOJOBS_MEMKB=$(( m * 1048576 )) autojobs_plan); r=${p%%|*}
+    set -- $r; j=$1; rl=$3
+    tot=$(awk -v j=$j -v r=$rl 'BEGIN { printf "%.1f", j * 9.15 + r * 15 + 25 + 30 }')
+    if awk -v t=$tot -v m=$m 'BEGIN { exit !(t <= m) }' || { [ "$j" = 2 ] && [ "$rl" = 2 ]; }; then ok "joint budget at $c cores / $m GiB: j=$j rounds=$rl needs $tot GiB"; else bad "over budget at $c/$m: j=$j rounds=$rl needs $tot"; fi
+  done
+done
+b=$(AUTOJOBS_NPROC=48 AUTOJOBS_LOAD1=2 AUTOJOBS_MEMKB=$(( 170 * 1048576 )) autojobs_budget)
+[ "$b" = "mem budget: verify 55 GiB + rounds 60 GiB + lanes 25 GiB + floor 30 GiB of 170" ] && ok "budget line: $b" || bad "budget line: $b"
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail
