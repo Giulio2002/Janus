@@ -31,7 +31,9 @@ ENV_PREFIXES = ("CARGO_", "RUSTC", "RUSTUP_", "RUSTFLAGS", "RUSTDOC", "CC_", "CX
 ENV_NAMES = ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "AR", "LD", "LIBRARY_PATH",
              "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "CPATH", "PKG_CONFIG_PATH", "GMP_LIB_DIR", "GMP_INCLUDE_DIR",
              "SDKROOT", "CXXSTDLIB", "LD_LIBRARY_PATH", "LD_PRELOAD", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR")
-ENV_SKIP = ("CARGO_HOME",)  # the location of the registry, not an input (Cargo.lock pins the sources)
+# not inputs: the registry location (Cargo.lock pins the sources) and terminal output. CARGO_BUILD_JOBS is
+# scheduling only but stays KEYED until a measurement shows the driver is byte-identical across job counts.
+ENV_SKIP = ("CARGO_HOME", "CARGO_TERM_COLOR", "CARGO_TERM_PROGRESS_WHEN", "CARGO_TERM_PROGRESS_WIDTH", "CARGO_TERM_VERBOSE", "CARGO_LOG")
 
 
 def sha(b):

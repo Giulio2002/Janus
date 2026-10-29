@@ -77,8 +77,18 @@ ENV_KEYS += ["LANG", "LANGUAGE", "PKG_CONFIG_PATH", "SDKROOT", "TMPDIR_NOT_KEYED
 ENV_KEYS.remove("TMPDIR_NOT_KEYED")
 
 
+# Scheduling-only variable: how many threads Lean/Lake run, never what is computed. It is NOT keyed.
+# scripts/asl.sh sets LEAN_NUM_THREADS itself for every lake call (from its memory budget, ASL_JOBS), so the
+# ambient value never reaches a build anyway, and the gate's lanes (LEAN_NUM_THREADS=4) must hit the entries a
+# standalone run (unset) published. Outputs are byte-identical across thread counts: scripts/lib/test-thread-identity.sh
+# builds the same modules with 1 and with 4 threads and compares the SHA-256 of every .olean/.ilean//.c output
+# (docs/SOUNDNESS.md "Build caches"). Any other LEAN_*/LAKE_* variable stays keyed.
+SCHEDULING_ENV = {"LEAN_NUM_THREADS"}
+
+
 def env_inputs():
-    return {k: v for k, v in sorted(os.environ.items()) if k in ENV_KEYS or k.startswith(ENV_PREFIXES)}
+    return {k: v for k, v in sorted(os.environ.items())
+            if (k in ENV_KEYS or k.startswith(ENV_PREFIXES)) and k not in SCHEDULING_ENV}
 
 
 def exe_sha(name):
