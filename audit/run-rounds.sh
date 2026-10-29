@@ -2,7 +2,7 @@
 # Every soundness audit (audit/run-all.sh and audit/round{2..8}/run-round*.sh) as parallel lanes,
 # after one shared build: janus is built once (audit/bin/janus-rounds, passed to every lane as
 # JANUS_AUDIT_BIN), and the framework build of this checkout and the example binaries once, so no
-# lane rebuilds them (JANUS_AUDIT_PREBUILT=1). The rounds are independent: each writes only its own
+# lane rebuilds them (JANUS_AUDIT_PREBUILT=1; JANUS_GATE_PREBUILT=1: scripts/gate.sh has built all of it already). The rounds are independent: each writes only its own
 # audit/<round>/work and temporary caches, and they share only the read-only framework build and
 # artifacts/ (built here first). Each lane's output is printed whole, in order; a lane whose script
 # fails (any BROKEN row) fails the run.
@@ -46,11 +46,16 @@ done
 
 wall=$(date +%s)
 mkdir -p audit/bin
-go build -o audit/bin/janus-rounds ./cmd/janus || exit 1
-memguard_lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed (fix the Lean library first)"; exit 1; }
-[ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null || exit 1
-{ [ -f artifacts/examples-amd64 ] && [ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ]; } ||
-  bash scripts/build-examples-amd64.sh >/dev/null 2>&1 || exit 1
+if [ "${JANUS_GATE_PREBUILT:-}" = 1 ]; then
+  # scripts/gate.sh built (once) audit/bin/janus-rounds, the framework, the auditor and both ISAs' example binaries
+  [ -x audit/bin/janus-rounds ] || { echo "JANUS_GATE_PREBUILT=1 but audit/bin/janus-rounds is missing"; exit 1; }
+else
+  go build -o audit/bin/janus-rounds ./cmd/janus || exit 1
+  memguard_lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed (fix the Lean library first)"; exit 1; }
+  [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null || exit 1
+  { [ -f artifacts/examples-amd64 ] && [ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ]; } ||
+    bash scripts/build-examples-amd64.sh >/dev/null 2>&1 || exit 1
+fi
 export JANUS_AUDIT_BIN="$root/audit/bin/janus-rounds" JANUS_AUDIT_PREBUILT=1
 export JANUS_JOBS="${JANUS_LANE_JOBS:-2}"
 echo "audit lanes: ${lanes[*]} (-j $PAR_JOBS lanes, -j $JANUS_JOBS rows each); built in $(( $(date +%s) - wall ))s"
