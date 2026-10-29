@@ -47,16 +47,25 @@ v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:
 gob() { ( cd audit/round7/asmstub && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
     go build -trimpath -buildvcs=false "$@" ) ; }
 
-# J1 (a --fresh consumer verification: it builds the framework in its own workspace, ~20 min) runs
+# J1 (a consumer verification with a proof root; without --fresh it uses the framework base, see below) runs
 # in the background from the start and is collected at the end; its rows are printed there.
 cp -r $W/Add $W/Add-J1
 ( trap ': > "$W/J1.done"' EXIT
   dep="$(audit/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; echo dep-setup >> "$W/J1.broken"; }
   echo "== J1: dependency definitions are disclosed with their bodies"
   tmark "J1 start"
-  out="$("$J" verify --fresh $W/Add-J1 --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --theorem R7Proofs.misnamed 2>&1)"
+  j1t0=$(date +%s)
+  out="$("$J" verify $W/Add-J1 --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --theorem R7Proofs.misnamed 2>&1)"
   broken=()
   row J1a_misnamed_dependency_def Verified "Dependency definitions used by the statement" "MisLib.mul : BitVec (64 : Nat) → BitVec (64 : Nat) → BitVec (64 : Nat) := fun (a b : BitVec (64 : Nat)) => a + b"
+  # J1a tests the disclosure in the report, not a cold build (RC2 in run-cache.sh is the cold consumer
+  # row), so it runs without --fresh on the framework base. It must still be computed in this run: no
+  # "Cached:" line, and the report's timestamp is not older than this run's start.
+  jts="$(sed -n 's/.*"timestamp": *"\([^"]*\)".*/\1/p' "$W/Add-J1/verified.json" 2>/dev/null | head -1)"
+  jep="$(date -u -d "${jts:-1970-01-01T00:00:00Z}" +%s 2>/dev/null || echo 0)"
+  if grep -q '^  Cached:' <<<"$out" || grep -q '"cached": *true' "$W/Add-J1/verified.json" 2>/dev/null || [ "$jep" -lt "$j1t0" ]; then
+    echo "  J1a: the verdict was not computed in this run (cached or stale report)   <-- BROKEN"; broken+=(J1a-not-fresh-run)
+  fi
   [ ${#broken[@]} -gt 0 ] && printf '%s\n' "${broken[@]}" >> "$W/J1.broken"
   tmark "J1 end"
 ) > "$W/J1.out" 2>&1 &
