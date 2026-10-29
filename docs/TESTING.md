@@ -143,6 +143,13 @@ re-record on a green full gate and say why in the commit message.
 | `x86formal.sh prove` "twice" (profile A.1) | pgate.sh and pg3.sh contain ONE `x86formal.sh prove` step (the profile's two entries are two runs of it, not two targets; there is no x86b step in either script) |
 | anything else in pgate.sh / pg3.sh (oracle.sh, oracle-sail.sh as a step, `asl.sh` check/oracle, coverage.sh, cabi-probe.sh, build-examples checks) | not steps of either script. Their builds that the covered checks need are in the prebuild (`oracle-sail.sh build` for `rtasl-fsqrt`, `asl.sh build`); the standalone corpora checks (`oracle*.sh full`, `asl.sh check`, `coverage.sh`, `cabi-probe.sh`) were not in the old gate and are not added |
 | (new) speed regression check, timeline, streamed results | on top of the above |
+| CI `lake build Janus JanusTests` and `... janus-oracle-amd64` (not default Lake targets) | prebuild `lake`: `lake build JanusTests janus-oracle-amd64` |
+| CI `go vet ./...` | lane `govet` |
+| CI `JanusASL/tools/test_asl_cache.sh`, `test_asl_mod_cache.sh` | lane `cachekeys` |
+| CI decoder coverage of the arm64 examples (`janus blockers`) | lane `decoder` (`scripts/decoder-coverage.sh`, also called by ci.yml) |
+| CI `scripts/oracle.sh quick` (qemu) and `scripts/oracle-amd64.sh quick` (native), MISMATCH check | lane `oracle` (in the lake tree, after `rtasl-prove`) |
+| asl.yml `scripts/asl.sh verify` (4 ASL corollaries) | lane `asl-verify` (after `rtasl-prove`) |
+| CI `audit/run-all.sh`, `verify-examples.sh`, `verify-amd64-examples.sh`, `ci-axiom-guard.sh`, `x86formal.sh` build/prove, `asl.sh build/prove` | already covered: lanes `rounds`, `verify`, `axiom`, `x86`, `asl-build`, `rtasl-prove` |
 
 **Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);

@@ -130,7 +130,7 @@ unset JANUS_GATE_TREE0; incr_tree_pin
 if [ -n "$incremental" ]; then export JANUS_GATE_INCREMENTAL=1; else unset JANUS_GATE_INCREMENTAL; fi
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
 
-stages_all=(verify gotest rounds axiom x86 asl-build sail-build rtasl-prove rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go)
+stages_all=(verify gotest rounds axiom govet cachekeys decoder x86 oracle asl-verify asl-build sail-build rtasl-prove rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go)
 selected() { # NAME: is the stage selected?
   local n=$1
   if [ -n "$only" ]; then case ",$only," in *",$n,"*) ;; *) return 1 ;; esac; fi
@@ -193,7 +193,8 @@ step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
   [ $rc = 0 ] || { echo "  ---- $out/prebuild/$name.log ----"; tail -n 25 "$out/prebuild/$name.log" | sed 's/^/  | /'; }
   return $rc
 }
-pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit; }
+# JanusTests and janus-oracle-amd64 are built by CI (.github/workflows/ci.yml) and are not default Lake targets
+pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit && memguard_lake build JanusTests janus-oracle-amd64; }
 pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
 pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
@@ -258,14 +259,14 @@ pool_init gate "$lanes_n" "$out/lanes"
 POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
 export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too
 # an estimate for the first run (seconds, the profile's measurements); later runs use their own
-declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]=900 [sail-build]=300 [axiom]=1
+declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]=900 [sail-build]=300 [axiom]=1 [govet]=60 [cachekeys]=30 [decoder]=120 [oracle]=900 [asl-verify]=900
   [rtasl-probes]=1200 [rtasl-replay]=900 [rtasl-prove]=600 [rtasl-fsqrt]=600 [rtasl-go]=400 [rtasl-rel]=120 [rtasl-strict]=120 [rtasl-btf]=5)
 for k in "${!est[@]}"; do POOL_SECS[$k]=${est[$k]}; done
 pool_times "$lane_times"
 POOL_SECS[verify]=99999
 # Per-lane memory limit (memguard's per-job default of 24G applies inside the outer cap unless JANUS_MEM_MAX is
 # set): measured peaks in docs/TESTING.md "Lane memory limits". JANUS_GATE_MEM_<LANE> (e.g. JANUS_GATE_MEM_ASL_BUILD=64G) overrides.
-declare -A lanemem=([asl-build]=48G [sail-build]=48G [x86]=24G [gotest]=24G [rounds]=24G [axiom]=24G [testlane]=48G)
+declare -A lanemem=([asl-build]=48G [sail-build]=48G [x86]=24G [gotest]=24G [rounds]=24G [axiom]=24G [govet]=8G [cachekeys]=8G [decoder]=8G [oracle]=24G [asl-verify]=48G [testlane]=48G)
 for g in prove rel strict replay btf probes fsqrt go; do lanemem[rtasl-$g]=48G; done
 add() { # NAME CODE [NEEDS]
   selected "$1" || return 0
@@ -291,6 +292,13 @@ add axiom "scripts/ci-axiom-guard.sh"
 # (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
 [ -z "${JANUS_GATE_TEST_LANE:-}" ] || add testlane "cd '$tree' && $JANUS_GATE_TEST_LANE"
 addc x86 "cd '$tree_x86' && scripts/x86formal.sh prove"
+# CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
+# decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
+add govet "go vet ./..."
+add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh"
+add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
+add oracle "cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
+add asl-verify "cd '$tree' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4" "$(needs rtasl-prove)"
 add asl-build "cd '$tree' && scripts/asl.sh build"
 add sail-build "cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
