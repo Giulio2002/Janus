@@ -10,7 +10,8 @@
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
-. "$root/scripts/lib/tmark.sh"
+. "$root/scripts/lib/parallel.sh"
+par_init "$@"
 export PATH=/usr/local/go/bin:$PATH
 R=audit/round10
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
@@ -54,6 +55,11 @@ check() {
 }
 v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
+
+# The sections are independent: each runs as a parallel block (same rows, same checks; the output is
+# printed in this order). The gc-hammer section works on a private copy of its extraction and its own cache,
+# because it deletes the temporary trees of running verifications in its cache.
+blk_v1() {
 echo "== V1: a runtime-contract hypothesis must quantify the runtime (auditor)"
 type tmark >/dev/null 2>&1 && tmark "== V1: a runtime-contract hypothesis must quantify"
 v $A/V1a_contract_H_true.lean "$W/NewPair";     row V1a_readiness_fun_true blocked 'round 10 V1' 'fun x x_1 x_2 x_3 => True'
@@ -65,6 +71,8 @@ v $A/V1f_contract_in_precondition.lean "$W/NewPair"; row V1f_contract_in_precond
 v examples/proofs/NewPair.lean "$W/NewPair";    row V1_ctl_NewPair Verified 'RtReady'
 v examples/proofs/MapAccess1Small.lean "$W/MapAccess1Small"; row V1_ctl_contract_in_conclusion Verified
 
+}
+blk_v2() {
 echo "== V2: Assign/MakeSmall were unsatisfiable with MapModel.Laws (kernel-checked)"
 type tmark >/dev/null 2>&1 && tmark "== V2: Assign/MakeSmall were unsatisfiable with Ma"
 o="$(lake env lean $R/model/MapUnsat.lean 2>&1)"; check V2_model_pre_fix_contracts_unsat $? "old Assign and MakeSmall + Laws + one call state => False ${o:+($o)}"
@@ -76,6 +84,8 @@ o="$(lake env lean $R/model/Arity.lean 2>&1)"; rc=$?; o="$(grep -i error <<<"$o"
 check V2_V3_allocating_contracts_take_H $rc "Assign, MakeSmall, convT*, typeAssert, interfaceSwitch (both ISAs) take H : RtReady ${o:+($o)}"
 v examples/proofs/Box.lean "$W/Box";            row V3_ctl_Box Verified 'RtReady'
 
+}
+blk_sat() {
 echo "== SAT: witnesses (round 9 row, with the round-10 check that the witness names its contract)"
 type tmark >/dev/null 2>&1 && tmark "== SAT: witnesses (round 9 row, with the round-10 "
 o="$(python3 -I audit/round9/sat_check.py "$root")"; rc=$?
@@ -103,6 +113,8 @@ o="$(python3 -I audit/round9/sat_check.py "$root" | head -1)"
 [ "$o" = "SAT tree    $(cd "$root" && pwd -P) ($(git -C "$root" ls-files --cached --others --exclude-standard -- Janus Janus.lean | while read -r f; do [ -e "$f" ] && echo; done | wc -l) files)" ]
 check SAT_scans_tracked_tree $? "$o"
 
+}
+blk_probes() {
 echo "== real-runtime probes (audit/round10/probe; go1.26.0)"
 type tmark >/dev/null 2>&1 && tmark "== real-runtime probes (audit/round10/probe; go1.2"
 P="$T/probe"; mkdir -p "$P"
@@ -126,6 +138,10 @@ echo "== F1: an in-place framework build whose sources change while Lake runs is
 type tmark >/dev/null 2>&1 && tmark "== F1: an in-place framework build whose sources c"
 o="$(go test -count=1 -run 'TestFrameworkSourcesChangeDuringBuild$' ./cmd/janus/ 2>&1)"; check F1_framework_sources_change_during_build $? "$(tail -n 1 <<<"$o" | cut -c1-80)"
 
+}
+blk_gc() {
+GW="$R/work/rows-gc"; rm -rf "$GW"; mkdir -p "$GW" && cp -r "$W/NewPair" "$GW/NewPair" && W="$GW" # same depth as rows/: the identity names the binary by a relative path
+mkdir -m 700 "$T/gcache" && export JANUS_CACHE_DIR="$T/gcache"
 echo "== G: cache eviction (holds)"
 type tmark >/dev/null 2>&1 && tmark "== G: cache eviction (holds)"
 G="$T/gc"; mkdir -m 700 "$G"; mkdir -m 700 "$G/cache"; mkdir -p "$G/victim/dir"; echo keep > "$G/victim/file"; echo keep > "$G/victim/dir/f"
@@ -146,6 +162,8 @@ grep -qE '^(Verified|Cached: Verified|Invalid|Error)' <<<"$out"; check G2_ctl_ve
 kill "$gcpid" 2>/dev/null; wait "$gcpid" 2>/dev/null
 v examples/proofs/NewPair.lean "$W/NewPair"; row G2_ctl_after_hammer Verified
 
+}
+blk_holds() {
 echo "== holds: amd64 v3/SSE boundary encodings, arm64 crypto decode"
 type tmark >/dev/null 2>&1 && tmark "== holds: amd64 v3/SSE boundary encodings, arm64 c"
 if [ "$(uname -m)" = x86_64 ]; then
@@ -166,11 +184,24 @@ bad="$(grep -c '^BAD\|^GAP' "$T/decodecmp.txt" 2>/dev/null)"; words="$(sed -n 's
 [ "${words:-0}" -gt 2000000 ] && [ "${bad:-1}" = 0 ]
 check C1_arm64_crypto_decode_vs_asl $? "janus-decode vs the sail-arm v9.4 decode clauses on ${words:-?} words of the SIMD/FP and register groups: ${bad:-?} disagreements"
 
+}
+blk_asl() {
 echo "== holds: the ASL sqrt_real substitution (agent/asl, JanusASL/sail/fakereal_sqrt.py)"
 type tmark >/dev/null 2>&1 && tmark "== holds: the ASL sqrt_real substitution (agent/as"
 o="$(python3 -I $R/asl/half_only.py $R/asl 2>&1 | head -1)"
 grep -q 'MISMATCHES 0 ' <<<"$o"; check ASL1_sqrt_real_half_exhaustive $? "$(cut -c1-60 <<<"$o")"
 # single and double precision: python3 -I audit/round10/asl/sqrt_model.py 4000 (hours; see the doc)
+
+}
+
+par_run blk_v1
+par_run blk_v2
+par_run blk_sat
+par_run blk_probes
+par_run blk_gc
+par_run blk_holds
+par_run blk_asl
+par_wait
 
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
 echo; echo "All round-10 rows as expected."
