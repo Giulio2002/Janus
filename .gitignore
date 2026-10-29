@@ -19,3 +19,4 @@ audit/round10/scratch-*/
 /janus
 examples/.print-proofs.*/
 audit/*/work-cache/
+audit/*/work-j1/

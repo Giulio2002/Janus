@@ -158,13 +158,13 @@ record field is `externalDefinitions`. `verify`, `verify-batch` (through the con
 `explain` show it as "Dependency definitions used by the statement (pinned source; part of its
 meaning)", and verified.json carries `dependencyDefinitions`. The bodies are shown, not
 round-tripped. Round 5's instance rules for dependency constants are unchanged, and a dependency
-body may use instances. Row **J1a** runs without `--fresh` (decision, J1 speed work): it tests that the report discloses the
-dependency definition's body, not a cold consumer framework build, so it uses the framework base like
-a normal consumer verification (accepted only through the same `framework.ready` check the real path
-uses). It asserts that its verdict was computed in this run: no `Cached:` line, no `"cached": true`
-in `verified.json`, and a report timestamp not older than the row's start. The genuinely cold
-consumer framework build stays with row **RC2** (`run-cache.sh`: a private cache, so the consumer
-workspace's framework base is built from nothing), which is unchanged. The row:
+body may use instances. Row **J1a** keeps `--fresh` (the cold consumer path: the framework is built from scratch in a temporary
+workspace, no replay, trusted or verdict cache). To keep it from bounding the audit lanes it runs as its
+own lane, `r7j` (`audit/round7/run-j1.sh`, selected together with `r7`), in parallel with `r7c`. Dropping
+`--fresh` was considered and rejected: the row exists for the report's content, but without `--fresh` the
+replay markers, the replay verdict and a sibling workspace enter the path, which narrows what the verdict
+rests on. The row also asserts that its verdict was computed in this run (no `Cached:` line, no
+`"cached": true`, a report not older than the verification's start). The row:
 
 ```
   Dependency definitions used by the statement (pinned source; part of its meaning):

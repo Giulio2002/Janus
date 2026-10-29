@@ -3,7 +3,8 @@
 # control stops verifying or prints something else, or a stub fixture is misclassified.
 # Every attack verification passes --fresh (no result or replay cache: the cold path); the cache
 # itself is attacked by audit/round7/run-cache.sh, which this script runs last (under
-# audit/run-rounds.sh it is the separate lane r7c, and JANUS_R7_NO_CACHE_ROWS=1 skips it here).
+# audit/run-rounds.sh it is the separate lane r7c, and JANUS_R7_NO_CACHE_ROWS=1 skips it here, and
+# likewise the consumer row J1a, audit/round7/run-j1.sh, the lane r7j).
 # Writes only under audit/round7/work/ and audit/round7/bin/ (run-cache.sh: audit/round7/work-cache/ and a temporary cache).
 # Usage: audit/round7/run-round7.sh [-j N]   (the --fresh verifications, each a cold kernel replay of
 #        the framework, run N at once: scripts/lib/parallel.sh; fixtures are built first, in order)
@@ -46,31 +47,6 @@ row() {
 v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$A/$1.lean" "${2:-$W/Add}" 2>&1)"; }
 gob() { ( cd audit/round7/asmstub && GOTOOLCHAIN="${JANUS_GO_TOOLCHAIN:-go1.26.0}" CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
     go build -trimpath -buildvcs=false "$@" ) ; }
-
-# J1 (a consumer verification with a proof root; without --fresh it uses the framework base, see below) runs
-# in the background from the start and is collected at the end; its rows are printed there.
-cp -r $W/Add $W/Add-J1
-( trap ': > "$W/J1.done"' EXIT
-  dep="$(audit/round7/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; echo dep-setup >> "$W/J1.broken"; }
-  echo "== J1: dependency definitions are disclosed with their bodies"
-  tmark "J1 start"
-  j1t0=$(date +%s)
-  out="$("$J" verify $W/Add-J1 --janus-root "$root" --proof "$dep/R7Proofs/Proofs.lean" --proof-root "$dep" --theorem R7Proofs.misnamed 2>&1)"
-  broken=()
-  row J1a_misnamed_dependency_def Verified "Dependency definitions used by the statement" "MisLib.mul : BitVec (64 : Nat) → BitVec (64 : Nat) → BitVec (64 : Nat) := fun (a b : BitVec (64 : Nat)) => a + b"
-  # J1a tests the disclosure in the report, not a cold build (RC2 in run-cache.sh is the cold consumer
-  # row), so it runs without --fresh on the framework base. It must still be computed in this run: no
-  # "Cached:" line, and the report's timestamp is not older than this run's start.
-  jts="$(sed -n 's/.*"timestamp": *"\([^"]*\)".*/\1/p' "$W/Add-J1/verified.json" 2>/dev/null | head -1)"
-  jep="$(date -u -d "${jts:-1970-01-01T00:00:00Z}" +%s 2>/dev/null || echo 0)"
-  if grep -q '^  Cached:' <<<"$out" || grep -q '"cached": *true' "$W/Add-J1/verified.json" 2>/dev/null || [ "$jep" -lt "$j1t0" ]; then
-    echo "  J1a: the verdict was not computed in this run (cached or stale report)   <-- BROKEN"; broken+=(J1a-not-fresh-run)
-  fi
-  [ ${#broken[@]} -gt 0 ] && printf '%s\n' "${broken[@]}" >> "$W/J1.broken"
-  tmark "J1 end"
-) > "$W/J1.out" 2>&1 &
-# disowned: par_wait's plain `wait` must not wait for it (the attack rows would then idle behind it)
-disown $!
 
 # Fixtures first, in order (builds, extractions and the hardware checks); then the verification
 # rows as independent parallel blocks, each on its own copy of the extraction it verifies (a
@@ -164,9 +140,11 @@ if [ -z "${JANUS_R7_NO_CACHE_ROWS:-}" ]; then
   [ "${PIPESTATUS[0]}" = 0 ] || broken+=(cache-rows)
 fi
 
-while [ ! -e "$W/J1.done" ]; do sleep 5; done
-cat "$W/J1.out"
-[ -s "$W/J1.broken" ] && while IFS= read -r b; do broken+=("$b"); done < "$W/J1.broken"
+if [ -z "${JANUS_R7_NO_CACHE_ROWS:-}" ]; then
+  echo "== J1: dependency definitions (audit/round7/run-j1.sh)"
+  audit/round7/run-j1.sh | sed 's/^/  /'
+  [ "${PIPESTATUS[0]}" = 0 ] || broken+=(j1-rows)
+fi
 
 tmark "end"
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
