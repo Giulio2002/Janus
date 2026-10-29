@@ -12,6 +12,7 @@ import JanusTests.Tactic
 import JanusTests.Amd64
 import JanusTests.Diagnostics
 import JanusTests.Carry
+import JanusTests.CongrCost
 import JanusTests.Audit
 import JanusTests.Float
 import JanusTests.Dynamic

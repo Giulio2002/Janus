@@ -93,11 +93,12 @@ names=("$@")
 [ ${#names[@]} -gt 0 ] || mapfile -t names < <(default_rows)
 
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
-  go build -o bin/janus ./cmd/janus
+  CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
   scripts/build-examples-cgo.sh >/dev/null
   lake build Janus >/dev/null
 fi
 . scripts/lib/theorems.sh
+. scripts/lib/incr.sh
 
 summary="${JANUS_EXAMPLES_SUMMARY:-$root/artifacts/verify-cgo-examples.txt}"
 : > "$summary"
@@ -124,11 +125,17 @@ verify_one() {
     # `returns` only where the proof states it
     ! grep -q '^theorem returns' "$proof" || thms+=(Proof.Witness.returns)
   fi
+  # the incremental gate (scripts/lib/incr.sh): skipped only on the record of a PASS with identical inputs
+  local -a ispec=(--fw dir:. --proof "$proof" --art "$out" --arg "sym:${sym[$n]}" --arg "bin:$b" --arg "extract:${xargs[$isa/$n]:-${xargs[$n]:-}}")
+  local ia
+  for ia in "${thms[@]}"; do ispec+=(--arg "thm:$ia"); done
+  if incr_begin "cgo:$target" cgo "${ispec[@]}"; then echo "$INCR_MSG" | tee "$lines/${isa}_$n"; return 0; fi
   st="$(mktemp -d)"
   start=$(date +%s.%N)
   verify_theorems "$out" "$proof" "$st" "${thms[@]}" -- --janus-root . || true  # failures are in $st
   t=$(echo "$(date +%s.%N) - $start" | bc)
   { [ -f "$st/all.log" ] && cat "$st/all.log" || cat "$st"/[0-9]*.log; } > "$out/verify.log" 2>/dev/null || true
+  local item_rc=0
   if [ "$(cat "$st/0.rc" 2>/dev/null)" = 0 ]; then
     printf '%-12s ok  %6.1fs\n' "$target" "$t" | tee "$lines/${isa}_$n"
     for ((i = 1; i < ${#thms[@]}; i++)); do
@@ -136,14 +143,15 @@ verify_one() {
         printf '%-12s ok  (%s)\n' "$target" "${thms[$i]}" | tee -a "$lines/${isa}_$n"
       else
         printf '%-12s FAILED %s (see %s/verify.log)\n' "$target" "${thms[$i]}" "$out" | tee -a "$lines/${isa}_$n"
-        broken+=("cgo:$target")
+        broken+=("cgo:$target"); item_rc=1
       fi
     done
   else
     printf '%-12s FAILED (see %s/verify.log)\n' "$target" "$out" | tee "$lines/${isa}_$n"
     tail -30 "$st/0.log" 2>/dev/null
-    broken+=("cgo:$target")
+    broken+=("cgo:$target"); item_rc=1
   fi
+  incr_end "cgo:$target" cgo "$item_rc" "$t" "${ispec[@]}"
   rm -rf "$st"
   return 0
 }

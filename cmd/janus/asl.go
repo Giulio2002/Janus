@@ -41,6 +41,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	janus "github.com/Giulio2002/Janus"
@@ -309,6 +310,12 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 	if err := syncTree(dir, files, func(top string) bool { return top == ".lake" }); err != nil {
 		return nil, aslDiag("Cannot write the JanusASL package to the cache: "+err.Error(), "Set JANUS_CACHE_DIR to a writable directory.")
 	}
+	// The cache directory is private to this verification. A symlinked .lake (an earlier seeding that
+	// copied a link, as scripts/asl.sh verify once did with `cp -a`) would let Lake and the override file
+	// below write into someone else's build: replace the link, never touching its target.
+	if err := ensurePrivateDir(filepath.Join(dir, ".lake")); err != nil {
+		return nil, aslDiag("Cannot make the JanusASL build directory private: "+err.Error(), "Remove "+displayPath(dir)+" and retry.")
+	}
 	if _, err := os.Stat(filepath.Join(dir, ".lake", "build")); err != nil {
 		// A new framework or JanusASL version: start from the most recently used other build.
 		// Lake reuses every module whose inputs are unchanged (by content hash), so the ArmASL
@@ -330,10 +337,10 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 	override, _ := json.Marshal(map[string]any{"schemaVersion": "1.2.0", "packages": []map[string]any{{
 		"type": "path", "scope": "", "name": "janus", "manifestFile": "lake-manifest.json", "inherited": false,
 		"dir": janusDir, "configFile": "lakefile.toml"}}})
-	if err := os.MkdirAll(filepath.Join(dir, ".lake"), 0o755); err != nil {
+	if err := ensurePrivateDir(filepath.Join(dir, ".lake")); err != nil {
 		return nil, aslDiag(err.Error(), "")
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".lake", "package-overrides.json"), override, 0o644); err != nil {
+	if err := writeFileNoFollow(filepath.Join(dir, ".lake", "package-overrides.json"), override, 0o644); err != nil {
 		return nil, aslDiag(err.Error(), "")
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".lake", "build", "lib", "lean", "ArmASL.olean")); err != nil && progress != nil {
@@ -365,6 +372,43 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 	return b, nil
 }
 
+// ensurePrivateDir makes path a real directory: a symbolic link there is removed (only the link, never what
+// it points to) and replaced by an empty directory; a missing path is created; anything else that is not a
+// directory is an error.
+func ensurePrivateDir(path string) error {
+	fi, err := os.Lstat(path)
+	switch {
+	case err == nil && fi.Mode()&os.ModeSymlink != 0:
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+	case err == nil && !fi.IsDir():
+		return fmt.Errorf("%s is not a directory", path)
+	case err == nil:
+		return nil
+	case !os.IsNotExist(err):
+		return err
+	}
+	return os.Mkdir(path, 0o755)
+}
+
+// writeFileNoFollow writes data to path without following a symbolic link there: an existing entry (a link
+// included) is removed first, then the file is created exclusively.
+func writeFileNoFollow(path string, data []byte, mode os.FileMode) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // buildASLFor builds the JanusASL package against a trusted framework build: root, the one this
 // verification already holds (the checkout for a directory framework, else the cached base), or,
 // with root "" (consumer packages and verify-batch, whose workspaces take their own framework
@@ -393,6 +437,10 @@ func newestASLSibling(self string) string {
 	for _, e := range entries {
 		d := filepath.Join(parent, e.Name())
 		if !e.IsDir() || d == self {
+			continue
+		}
+		// a sibling whose .lake is a symlink is someone else's build, not a private seed
+		if fi, err := os.Lstat(filepath.Join(d, ".lake")); err != nil || !fi.IsDir() {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(d, ".lake", "build", "lib", "lean", "ArmASL.olean")); err != nil {

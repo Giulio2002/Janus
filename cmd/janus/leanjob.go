@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -96,6 +97,9 @@ func (tc *toolchain) cacheID() string {
 }
 
 func findToolchain(lake, root string) (*toolchain, error) {
+	if tc := findToolchainDirect(lake, root); tc != nil {
+		return tc, nil
+	}
 	lr := &leanRunner{lake: lake, root: root}
 	// The two queries are independent; run them at once.
 	var version string
@@ -125,6 +129,66 @@ func findToolchain(lake, root string) (*toolchain, error) {
 		tc.hasChecker = true
 	}
 	return tc, nil
+}
+
+// findToolchainDirect finds the toolchain `lake env lean` would run without starting Lake (J1:
+// two Lake processes, each loading the workspace, cost ~0.2 s of every verification). The `lean`
+// next to the `lake` executable, run in the project root, is the same toolchain Lake selects:
+// with an elan shim both are resolved by elan from the root's lean-toolchain file, and in a
+// toolchain's own bin/ they are siblings. Its --print-prefix names the toolchain; lean and
+// leanchecker are then the prefix's, and the version is that lean's own. It returns nil (use
+// Lake) unless every step is plain: LEAN_SYSROOT set (Lake would honour it), no sibling lean, a
+// prefix without bin/lean, or any failure.
+func findToolchainDirect(lake, root string) *toolchain {
+	if os.Getenv("LEAN_SYSROOT") != "" || os.Getenv("JANUS_TOOLCHAIN_VIA_LAKE") != "" {
+		return nil
+	}
+	shimLean := filepath.Join(filepath.Dir(lake), "lean")
+	if st, err := os.Stat(shimLean); err != nil || !st.Mode().IsRegular() {
+		return nil
+	}
+	q := func(prog string, dir string, args ...string) (string, bool) {
+		cmd := exec.Command(prog, args...)
+		cmd.Dir = dir
+		env := []string{}
+		for _, e := range os.Environ() {
+			if !strings.HasPrefix(e, "LEAN_PATH=") {
+				env = append(env, e)
+			}
+		}
+		cmd.Env = env
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		if guardRun(cmd) != nil {
+			return "", false
+		}
+		return out.String(), true
+	}
+	prefix, ok := q(shimLean, root, "--print-prefix")
+	pfx := strings.TrimSpace(prefix)
+	if !ok || pfx == "" || strings.ContainsRune(pfx, '\n') || !filepath.IsAbs(pfx) {
+		return nil
+	}
+	lean := filepath.Join(pfx, "bin", "lean")
+	if st, err := os.Stat(lean); err != nil || !st.Mode().IsRegular() {
+		return nil
+	}
+	version, ok := q(lean, root, "--version")
+	if !ok || strings.TrimSpace(version) == "" {
+		return nil
+	}
+	tc := &toolchain{
+		lean:        lean,
+		leanchecker: filepath.Join(pfx, "bin", "leanchecker"),
+		sysroot:     pfx,
+		libDir:      filepath.Join(pfx, "lib", "lean"),
+		version:     strings.TrimSpace(version),
+	}
+	if _, err := os.Stat(tc.leanchecker); err == nil {
+		tc.hasChecker = true
+	}
+	return tc
 }
 
 // janusTrustedSource renames the module namespace of a generated Extracted.lean so an
@@ -226,10 +290,20 @@ func runLean(sb *sandbox, tc *toolchain, workDir string, roWritableExtra []strin
 // runLeanProtected is runLean with protected directories kept read-only even inside the
 // writable ones (see sandbox.commandOverlay).
 func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, leanPath string, argv ...string) (string, error) {
+	cmd, out := leanCmd(sb, tc, workDir, roWritableExtra, protected, leanPath, leanPath, argv)
+	err := guardRun(cmd)
+	return out.String(), err
+}
+
+// leanCmd builds the sandboxed command runLeanProtected runs, and the buffer its combined output
+// goes to. The directories of mountPath are exposed read-only; the process sees envPath as its
+// LEAN_PATH (the two are the same unless a directory is mounted before the process may use it,
+// see auditserve.go).
+func leanCmd(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, mountPath, envPath string, argv []string) (*exec.Cmd, *bytes.Buffer) {
 	// Expose the LEAN_PATH directories read-only: bubblewrap's private /tmp would otherwise
 	// hide a --janus-root (or any search directory) that lives under /tmp.
 	var ro []string
-	for _, d := range filepath.SplitList(leanPath) {
+	for _, d := range filepath.SplitList(mountPath) {
 		if d != "" {
 			ro = append(ro, d)
 		}
@@ -239,16 +313,15 @@ func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtr
 	if len(argv) > 0 && filepath.IsAbs(argv[0]) {
 		ro = append(ro, filepath.Dir(argv[0]))
 	}
-	env := tc.jobEnv(leanPath)
+	env := tc.jobEnv(envPath)
 	if len(argv) > 0 && argv[0] == tc.leanchecker {
 		env = append(env, "LEAN_NUM_THREADS="+strconv.Itoa(replayThreads()))
 	}
 	cmd := sb.commandOverlay(workDir, roWritableExtra, ro, protected, argv, env)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err := guardRun(cmd)
-	return out.String(), err
+	out := &bytes.Buffer{}
+	cmd.Stdout = out
+	cmd.Stderr = out
+	return cmd, out
 }
 
 var auditRecordRE = regexp.MustCompile(`(?s)\bERROR (.*)$`)

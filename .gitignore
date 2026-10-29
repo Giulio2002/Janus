@@ -14,7 +14,10 @@ audit/round5/bin/
 audit/round5/work/
 audit/*/bin/
 audit/*/work/
+.bcache-tree.lock
 /cmd/janus/janus
 audit/round10/scratch-*/
 /janus
 examples/.print-proofs.*/
+__pycache__/
+*.pyc

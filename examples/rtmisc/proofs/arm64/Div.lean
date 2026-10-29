@@ -44,8 +44,8 @@ memory alone. -/
 macro "inv_tac" : tactic => `(tactic| (
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   all_goals first
-    | assumption
-    | (simp only [setVReg_apply, setReg_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+    | with_reducible assumption
+    | (simp only [setVReg_apply, setReg_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
     | (simp only [setVReg_apply, setReg_apply, Nat.reduceEqDiff, reduceIte]; done)
     | rfl))
 
@@ -58,7 +58,7 @@ theorem one64 : vfpExpandImm binary64 112 % 340282366920938463463374607431768211
   decide
 
 /-- The bound side conditions of the lifting lemmas. -/
-macro "lt64" : tactic => `(tactic| first | assumption | exact Nat.mod_lt _ (by decide) | exact copysign_lt _ _ | exact fpNeg_lt _ | decide)
+macro "lt64" : tactic => `(tactic| first | with_reducible assumption | exact Nat.mod_lt _ (by decide) | exact copysign_lt _ _ | exact fpNeg_lt _ | decide)
 
 theorem m128 (x : Nat) : x % 340282366920938463463374607431768211456 % 18446744073709551616 = x % 18446744073709551616 :=
   Nat.mod_mod_of_dvd x (by decide)
@@ -261,8 +261,8 @@ theorem test2 (S : State) (a b c d e f : Nat) (hpc : S.pc = BitVec.ofNat 64 (cdi
     | (refine out_mono (test3 _ a b c d e f ?_ ?_ ?_ ?_ he hf' hn1 ?_) rfl rfl rfl rfl rfl rfl rfl rfl rfl
        · (rw [hcd]; try rfl)
        · inv_tac
-       · first | assumption | (simp only [setVReg_apply, Nat.reduceEqDiff, reduceIte]; assumption)
-       · first | assumption | (simp only [setVReg_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       · first | with_reducible assumption | (simp only [setVReg_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
+       · first | with_reducible assumption | (simp only [setVReg_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
        · simp only [isInf64, isNaN64, *, Bool.not_true, Bool.not_false,
          Bool.false_and, Bool.and_false, Bool.true_and, Bool.and_true, Bool.or_true, Bool.true_or,
          Bool.false_or, Bool.or_false, ite_false, ite_true, Bool.false_eq_true, reduceIte])
@@ -289,8 +289,8 @@ theorem test1 (S : State) (a b c d e f : Nat) (hpc : S.pc = BitVec.ofNat 64 (cdi
     | (refine out_mono (test2 _ a b c d e f ?_ ?_ ?_ ?_ he hf' ?_) rfl rfl rfl rfl rfl rfl rfl rfl rfl
        · (rw [hcd]; try rfl)
        · inv_tac
-       · first | assumption | (simp only [setVReg_apply, Nat.reduceEqDiff, reduceIte]; assumption)
-       · first | assumption | (simp only [setVReg_apply, Nat.reduceEqDiff, reduceIte]; assumption)
+       · first | with_reducible assumption | (simp only [setVReg_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
+       · first | with_reducible assumption | (simp only [setVReg_apply, Nat.reduceEqDiff, reduceIte]; with_reducible assumption)
        · simp only [isZero64, isNaN64, *, Bool.not_true, Bool.not_false, Bool.false_and, Bool.and_false, Bool.true_and, Bool.and_true, Bool.or_true, Bool.true_or, Bool.false_or, Bool.or_false, ite_false, ite_true, Bool.false_eq_true, reduceIte])
 
 set_option maxHeartbeats 0 in

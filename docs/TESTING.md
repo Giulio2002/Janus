@@ -102,6 +102,15 @@ the simultaneous peaks are what count: measured asl-build + x86 + rounds + verif
 inside it. At a higher `-j` the verify pool adds ~10 GiB per slot (the admission check in `parallel.sh` keeps
 40 GiB free).
 
+**Lake serialisation inside a shared tree.** Lanes that share the ASL tree (`asl-build`, `rtasl-*`, `asl-verify`,
+`oracle`, `sail-build`) call `lake` through `scripts/lib/lanelake/lake`: every call in the tree holds a flock on it,
+exclusive for anything that can rewrite the package (build, update, exe, ...), shared for `lake env`. A dependency
+re-resolution ("URL has changed; deleting packages/Sail and cloning") or a rebuild by one lane therefore never
+overlaps another lane's lake call, while read-only lanes (replay, strict, rel) still run side by side
+(`scripts/lib/test-lanelake.sh`, with a fake `lake` that rewrites a shared file). I chose the lock over a tree per lane
+because JanusASL/.lake (5.8 GB, with `packages/Sail`) is shared by symlink and a copy per lane would cost that much
+each; the lock covers it. Tree reuse on failure and lakeguard are unchanged.
+
 **Kept trees.** The isolated lake-lane trees are `artifacts/gate/trees/<hash of HEAD tree + uncommitted diff>/{x86,asl}`.
 They are removed when the gate passes, kept (path reported) when it fails or is cancelled, and reused by a
 rerun of the same sources (`scripts/lib/test-gatelanes.sh` tests limits, keep, reuse, removal). A second run on the
@@ -143,10 +152,68 @@ re-record on a green full gate and say why in the commit message.
 | `x86formal.sh prove` "twice" (profile A.1) | pgate.sh and pg3.sh contain ONE `x86formal.sh prove` step (the profile's two entries are two runs of it, not two targets; there is no x86b step in either script) |
 | anything else in pgate.sh / pg3.sh (oracle.sh, oracle-sail.sh as a step, `asl.sh` check/oracle, coverage.sh, cabi-probe.sh, build-examples checks) | not steps of either script. Their builds that the covered checks need are in the prebuild (`oracle-sail.sh build` for `rtasl-fsqrt`, `asl.sh build`); the standalone corpora checks (`oracle*.sh full`, `asl.sh check`, `coverage.sh`, `cabi-probe.sh`) were not in the old gate and are not added |
 | (new) speed regression check, timeline, streamed results | on top of the above |
+| CI `lake build Janus JanusTests` and `... janus-oracle-amd64` (not default Lake targets) | prebuild `lake`: `lake build JanusTests janus-oracle-amd64` |
+| CI `go vet ./...` | lane `govet` |
+| CI `JanusASL/tools/test_asl_cache.sh`, `test_asl_mod_cache.sh` | lane `cachekeys` |
+| CI decoder coverage of the arm64 examples (`janus blockers`) | lane `decoder` (`scripts/decoder-coverage.sh`, also called by ci.yml) |
+| CI `scripts/oracle.sh quick` (qemu) and `scripts/oracle-amd64.sh quick` (native), MISMATCH check | lane `oracle` (in the lake tree, after `rtasl-prove`) |
+| asl.yml `scripts/asl.sh verify` (4 ASL corollaries) | lane `asl-verify` (after `rtasl-prove`) |
+| CI `audit/run-all.sh`, `verify-examples.sh`, `verify-amd64-examples.sh`, `ci-axiom-guard.sh`, `x86formal.sh` build/prove, `asl.sh build/prove` | already covered: lanes `rounds`, `verify`, `axiom`, `x86`, `asl-build`, `rtasl-prove` |
 
 **Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
 `python3 -I scripts/gate-report.py <timeline>` prints the stages, pool utilisation, lanes and critical path.
+
+## Red team of the caches (`cmd/janus/*_rt_test.go`, `scripts/lib/test-rt-incr.sh`)
+
+An authorized audit of the result cache, the incremental records, the framework verdict store and the build-cache
+key. Every attack is a test that must end in a miss or a refusal: stale edits with restored mtimes, deep and
+auditor-only framework modules (every `import` spelling, the `module` header), toolchain/checker/auditor swaps,
+environment and script changes, key framing and symlinks, record tampering at every truncation length and every
+flipped byte, key-file handling, build inputs of the verifier identity (assembly files, overlays), a hostile proof
+reading or writing the caches from both sandbox modes, concurrent writers, verdict-store forgeries and failed or
+timed-out runs. The shell side (`test-rt-incr.sh`, run by `TestRTIncrScripts`) covers `JANUS_INCR_EXPLAIN` in the
+environment, the clean-tree pin that a record requires, the go configuration in lane keys and the scripts each item
+kind runs. Findings fixed on the way: see `git log agent/speed-rt`.
+
+## Incremental gate (`--incremental`)
+
+**The default is a FULL run.** `scripts/gate.sh` and `scripts/verify-all-examples.sh` skip nothing unless asked; the
+full cold gate stays **mandatory before every push to main and nightly**. `scripts/gate.sh --incremental` (or
+`JANUS_GATE_INCREMENTAL=1`; `verify-all-examples.sh --incremental`, `--changed` is an alias) is for the merge gate of a
+branch: it skips an item or lane only on the record of a PASS whose key is identical. Every item that runs is checked
+in full, and the prebuild, the build lanes and the axiom guard always run. Every full run (and every incremental run)
+records the passes it sees, so a full gate feeds the next incremental one. Design and trust argument:
+docs/SOUNDNESS.md "Incremental gate records"; code: `cmd/janus/incr.go` (`janus incr check|record|explain`),
+`scripts/lib/incr.sh`.
+
+**What an item's key hashes** (all by content): the item and its arguments; the relevant environment
+(`JANUS_*` except output/parallelism variables, `LEAN*`, `LAKE*`, `GO*`, `CGO_*`, memory limits, ...); the verifier
+identity (Go-only variant, `cmd/janus/verifierid.go`); the Lean toolchain; the framework configuration and the
+**transitive import closure** of the item's modules (sources and compiled module data of every framework module it
+imports, found by following the real `import` lines); the auditor (sources, compiled modules, `janus-audit`) and
+`leanchecker`; the proof file(s), package and extraction (`Extracted.lean`, `identity.json`, the binary); the pins; the
+gate scripts and libraries. Lanes (`gotest`, `rounds`, `x86`, `rtasl-*`) hash the whole working tree except `docs/`,
+`assets/` and `*.md` (docs/SOUNDNESS.md is hashed, an audit row reads it), plus the machine.
+
+**Reading the result.** Every item prints `skipped (unchanged: incremental; recorded PASS of <time> on <host> at <commit>,
+<s>s then; key <hash>)` or its usual result line. The verify lane prints an `incremental report` (RAN or SKIPPED for
+every item, totals) and the gate report prints `RAN / SKIPPED` for every item and lane. The verdict says `GATE PASS
+(INCREMENTAL: ...)`.
+
+**Debugging a miss.** `scripts/gate.sh --explain arm64:Add` (also `cgo:amd64/CAdd`, `lane:gotest`) prints every key
+component with its hash, the key, and whether a record exists; run it before and after a change and diff the two
+outputs (`bin/janus incr explain ... --verbose` also lists the closure module by module). It reads the state of an
+earlier run and runs and records nothing.
+
+**What the tests attack** (`cmd/janus/incr_test.go`, `go test -run Incr ./cmd/janus`): an edit of each input class
+(proof, an imported module one and three levels deep, its compiled data, the toolchain string and binaries, the
+verifier identity, the auditor's source/module/executable, the pins, the scripts, each relevant environment
+variable, the extraction and its binary, the item's arguments) is a miss; an edit of a framework module the item
+does not import, of the verifier's own output files or of documentation is a skip; a tampered, truncated,
+re-keyed, copied, foreign-key, wrong-domain, symlinked or trailing-garbage record is a miss; a record from a
+failed run is never written and withdraws an older one; inputs that change during the run are not recorded; an
+input that cannot be hashed makes the item always run; key framings do not collide.
 
 ## Gate speed (2026-10-25): profile, changes, before/after
 
@@ -239,6 +306,36 @@ planted verdict (well-formed, MAC under another key) for the forged framework bu
 After, the critical path is `TestCacheGCConcurrentVerify` (199 s warm), which the scheduler
 starts first; cold, the first ~4 minutes are the two framework builds (the checkout's and the
 cache's, which every Lean test needs).
+
+### Go tests, 2026-10-29: per-run cache, prebuilt fixture (no check removed)
+
+* **A cache of its own per run.** `TestMain` creates `<cache dir>/janus-test-run-*` (on disk, never a RAM
+  `/tmp`) as the test cache and removes it when the run ends; `scripts/gotest-shards.sh` gives every shard one
+  and removes them in a trap. `JANUS_TEST_CACHE_DIR=<dir>` names one explicitly (kept), `=shared` selects the old
+  shared `~/.cache/janus-test` (which every run had refilled, 22-32 GB). A run killed by `go test -timeout`
+  leaves its directory behind; `rm -rf ~/.cache/janus-test-run-*` when no test is running.
+* **A prebuilt framework fixture** (`fixture_test.go`). The first run for a framework version builds, under a lock, a
+  cache of its own in `<cache dir>/janus-test-fixture` (outside `~/.cache/janus`, so no collector evicts it): the
+  embedded framework's Lake build and the sandboxed `leanchecker Janus` verdicts of the embedded build AND of this
+  checkout's own build (`--janus-root` verifications use that one; its bytes, so its verdict key, differ). Every
+  later run copies the ready build and the authentic verdicts into its per-run cache (`seedFramework`,
+  `seedCheckoutVerdict`; the copy must hash as stamped, a verdict counts only if its MAC verifies under the
+  fixture's key) and `seededCache` carries both to the private caches of the tests that damage or empty their cache.
+  Before, every run had to replay the checkout's framework (3-5 min per replay on a loaded host, 500 s of waiting
+  at the start of the suite) or find it in a shared cache. `JANUS_TEST_FIXTURE_DIR=off` goes back to seeding from the
+  user's cache. A test that checks the cold path (`TestSeedFramework`, `TestFrameworkReplayOnce`, the forged-framework
+  tests) still builds or replays what it tests; nothing is skipped.
+* **`TestCacheGCLRUOrder` flake.** The collector's clock is injected: the fixture's `gc` passes the fixture's own
+  reference time (plus one second, so "just now" entries are older than a zero grace) as `gcOptions.Now`, so the
+  priorities (age / weight) depend only on the ages the fixture set, never on how long the test has been running.
+  No retry, no sleep.
+* **Measured** (go test -json -parallel 8 on the 48-core host while other agents' gates ran, load 30-60; one run
+  each): 3070 s (`-parallel 4`, no `.lake` in the checkout, nothing seeded) -> 889 s (checkout built, per-run cache,
+  seeded from the user's cache) -> 764-786 s with the fixture warm (three green runs in a row: 2534 s with the one-time
+  fixture build, 764 s, 786 s). The remainder is the host's load: the suite uses 1085 s user + 439 s system CPU in
+  total, and its longest tests (`TestCacheGCConcurrentVerify`, `TestR1ForgedFrameworkLemma`) are two full
+  framework replays each, which take 3-5 min on this loaded host and 15-40 s on an idle one.
+* The list of tests is unchanged (185 names before and after, diffed: `go test -list '.*' ./cmd/...`).
 
 ### The TestConsumerLakefileLean / TestVerifyBatch flake
 
@@ -611,6 +708,42 @@ ratios above, which are dominated by per-verify work that is the same on any mac
 
 The per-runner peak memory drops from ~30–43 GB (more than a hosted runner has, which made the
 cold replay swap or be killed) to under 15 GB.
+
+## Build cache policy
+
+The ASL/Sail build outputs (the ArmASL model, the JanusASL and Janus module builds, the Sail oracle
+driver) are served from a content-addressed, HMAC-signed, hash-checked cache (docs/SOUNDNESS.md
+"Build caches"; `scripts/asl.sh`, `scripts/oracle-sail.sh`). It caches build outputs only: every
+check still runs. The policy:
+
+* **Merge gates and pre-push gates may use the cache** (it is on by default; entries that fail
+  their HMAC or a file hash are rebuilt, never used).
+* **A nightly gate runs truly cold**: `JANUS_ASL_CACHE=0` (neither reads nor writes the cache; also
+  `off`/`no`/`false`; `ASL_CACHE=off` is the older spelling) in a fresh worktree with no builds,
+  to catch any gap in the key coverage. `scripts/nightly-cold-gate.sh` does it and compares the
+  result with a cached run of the same commit.
+* **A disagreement is a P0 cache bug.** If a cold run and a cached run of the same commit differ in
+  any lane's pass/fail, or in any ASL/Sail artifact hash (`scripts/gate-cachecmp.py`: every
+  ArmASL/JanusASL `.olean` and the Sail driver), the cache served something its inputs do not
+  determine, or a key misses an input. Treat every cached result since the last agreeing nightly as
+  unproven, fix the key (`JanusASL/tools/asl_cache_key.py`, `asl_mod_cache.py`,
+  `oracle-sail/cache_key.py`), and add a case to `scripts/lib/test-bcache.sh`. (If a build step is
+  not reproducible bit for bit, the artifact comparison will say so on the first nightly: fix the
+  non-determinism or drop that artifact from `gate-cachecmp.py hashes`, with a note here; never
+  loosen the lane comparison.)
+* **Owner: the main session.**
+
+```
+scripts/nightly-cold-gate.sh [--commit REV] [--cached-out DIR] [-- gate.sh args]
+# example crontab line (not installed): 02:30 every night, on the commit main points to
+# 30 2 * * *  cd /srv/janus && scripts/nightly-cold-gate.sh --commit main -- -j 2 >> /srv/janus-ops/nightly-cold.log 2>&1
+```
+
+It makes a cached gate run and a cold gate run (each `memcap -m 80G scripts/gate.sh`, in its own
+fresh worktree) unless `--cached-out` names the output of an earlier cached run of that commit,
+and exits 1 with a `P0 CACHE BUG` report on any disagreement, 2 if the runs cannot be compared.
+The comparison logic is tested with fake results by `scripts/lib/test-cachecmp.sh`; the cache's
+integrity and key tests are `scripts/lib/test-bcache.sh`.
 
 ## Disk use
 

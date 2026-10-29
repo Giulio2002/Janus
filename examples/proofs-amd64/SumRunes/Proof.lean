@@ -211,6 +211,7 @@ theorem decoderune_meets (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (h
       simp only [strBytes_length, isCont, byteAt_strBytes', ← Nat.add_assoc,
         Bool.and_eq_true, decide_eq_true_eq]
       clear hpc hra hal hsb hsa hacc hrd hout hg1 hg2 hg3 h3i h1i hdi hr hst
+      try simp (disch := omega) only [if_pos, if_neg]
       try simp only [sw32_64] at *
       try simp (disch := omega) only [r2a, r3a, r4a] at *
       try simp only [bv_sub_eq_zero8, bv_sub_eq_zero32, BitVec.toNat_setWidth, BitVec.toNat_ofNat,
@@ -237,6 +238,7 @@ theorem decoderune_meets (rt : List (Nat × Nat)) (stack : Nat) (H : RtReady) (h
       simp only [strBytes_length, isCont, byteAt_strBytes', ← Nat.add_assoc,
         Bool.and_eq_true, decide_eq_true_eq]
       clear hpc hra hal hsb hsa hacc hrd hout hg1 hg2 hg3 h3i h1i hdi hst
+      try simp (disch := omega) only [if_pos, if_neg]
       try simp only [sw32_64] at *
       try simp (disch := omega) only [r2a, r3a, r4a] at *
       try simp only [bv_sub_eq_zero8, bv_sub_eq_zero32, BitVec.toNat_setWidth, BitVec.toNat_ofNat,
