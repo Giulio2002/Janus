@@ -359,9 +359,15 @@ do_verify() {
   local d
   d=$("$root/bin/janus" framework --janus-root "$root" --json |
     python3 -I -c 'import json, sys; print(json.load(sys.stdin)["asl"]["cacheDir"])')
+  # $d is janus's private cache for this verification: its .lake must be a real directory of its own, never a
+  # link into a checkout (a gate tree's JanusASL/.lake is itself a symlink to the main checkout's; `cp -a` of
+  # it copied the link, and janus then wrote its package override and built through it into the checkout).
+  # A link left by an earlier run is removed (the link only), and the seed is a DEREFERENCED copy.
+  if [ -L "$d/.lake" ]; then echo "verify: removing the symlinked $d/.lake (the link, not its target)"; rm -f "$d/.lake"; fi
   if [ ! -d "$d/.lake" ] && [ -d "$pkg/.lake" ]; then
-    echo "verify: seeding $d from $pkg/.lake"
-    mkdir -p "$d" && cp -a "$pkg/.lake" "$d/.lake" && rm -f "$d/.lake/package-overrides.json"
+    echo "verify: seeding $d from $pkg/.lake (a private, dereferenced copy)"
+    mkdir -p "$d" && cp -aL --reflink=auto "$pkg/.lake" "$d/.lake" && rm -f "$d/.lake/package-overrides.json"
+    [ -d "$d/.lake" ] && [ ! -L "$d/.lake" ] || { echo "verify: the seed is not a private directory" >&2; return 1; }
   fi
   local fail=0 n
   mkdir -p "$OUT"
