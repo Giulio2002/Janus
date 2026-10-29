@@ -120,14 +120,16 @@ fi
 # -j / --lanes not given (or -j auto): sized from the free cores and MemAvailable (scripts/lib/autojobs.sh),
 # using the largest recorded per-item peak of the speed baseline; an explicit -j / JANUS_JOBS is used as given.
 . "$root/scripts/lib/autojobs.sh"
-autosized=""; auto_why=""
+autosized=""; auto_why=""; rounds_lanes_n=""
 if [ -n "${JANUS_GATE_AUTO_WHY:-}" ]; then   # (the setsid re-exec below keeps the first sizing)
-  autosized=1; auto_why="$JANUS_GATE_AUTO_WHY"
+  autosized=1; auto_why="$JANUS_GATE_AUTO_WHY"; rounds_lanes_n="${JANUS_GATE_ROUNDS_LANES:-}"
 elif [ -z "$jobs_n" ] || [ "$jobs_n" = auto ]; then
   _pk0="$(autojobs_peak_gib "$sbfile")"
   read -r jobs_n auto_lanes auto_why < <(if [ -n "$_pk0" ]; then AUTOJOBS_PEAK_GIB="$_pk0" autojobs_size; else autojobs_size; fi)
   [ -n "$lanes_n" ] || lanes_n=$auto_lanes
   autosized=1
+  # the audit rounds' own lane count (audit/run-rounds.sh reads JANUS_ROUNDS_LANES; an older one ignores it)
+  rounds_lanes_n="${JANUS_ROUNDS_LANES:-$(autojobs_rounds_lanes)}"
 fi
 case "$jobs_n" in ''|*[!0-9]*|0) echo "gate: -j needs a positive number (got '$jobs_n')" >&2; exit 2 ;; esac
 [ -n "$lanes_n" ] || lanes_n=$((jobs_n + 1))
@@ -174,7 +176,7 @@ tlf="$out/timeline.jsonl"; : > "$tlf"
 # Own process group (setsid, once): every child of this run is in it, and a cancel is `kill -- -PGID`.
 if [ "${JANUS_GATE_PG:-}" != "$out" ]; then
   export JANUS_GATE_PG="$out" JANUS_JOBS="$jobs_n" JANUS_LANES="$lanes_n"
-  [ -z "$autosized" ] || export JANUS_GATE_AUTO_WHY="$auto_why"
+  [ -z "$autosized" ] || export JANUS_GATE_AUTO_WHY="$auto_why" JANUS_GATE_ROUNDS_LANES="$rounds_lanes_n"
   exec setsid --wait "$0" "${orig_args[@]}" --out "$out"
 fi
 echo "$$" > "$out/pgid"
@@ -197,10 +199,10 @@ tl_stage() { # KIND NAME START END RC
 gate_t0=$(now)
 export JANUS_GATE_T0=$gate_t0
 sha="$(git rev-parse --short HEAD 2>/dev/null || echo '?')$(git diff --quiet HEAD 2>/dev/null || echo '+dirty')"
-printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGiB":%s,"cores":%s,"start":%.3f,"partial":%s,"auto":%s,"why":"%s"}\n' \
+printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGiB":%s,"cores":%s,"start":%.3f,"partial":%s,"auto":%s,"why":"%s","roundsLanes":"%s"}\n' \
   "$sha" "$jobs_n" "$lanes_n" "$load1" "$((memk / 1048576))" "$(nproc)" "$gate_t0" "$([ -n "$partial" ] && echo true || echo false)" \
-  "$([ -n "$autosized" ] && echo true || echo false)" "$(_pool_json "${auto_why:-given}")" >> "$tlf"
-[ -z "$autosized" ] || echo "gate: -j $jobs_n, $lanes_n lanes chosen automatically: $auto_why"
+  "$([ -n "$autosized" ] && echo true || echo false)" "$(_pool_json "${auto_why:-given}")" "$rounds_lanes_n" >> "$tlf"
+[ -z "$autosized" ] || echo "gate: -j $jobs_n, $lanes_n lanes chosen automatically: $auto_why; audit rounds: ${rounds_lanes_n:-default} lanes"
 echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}"
 
 # ---- phase 1: prebuild, once
@@ -318,7 +320,7 @@ needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; do
 add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
 JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
 addc gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
-addc rounds "audit/run-rounds.sh $rounds"
+addc rounds "${rounds_lanes_n:+export JANUS_ROUNDS_LANES=$rounds_lanes_n; }audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
 # (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
 [ -z "${JANUS_GATE_TEST_LANE:-}" ] || add testlane "cd '$tree' && $JANUS_GATE_TEST_LANE"

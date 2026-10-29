@@ -23,5 +23,14 @@ printf '# h\narm64:A\t5\t0.30\narm64:B\t9\t4.00\nlane:x\t7\t30.00\n' > "$t/base"
 [ "$(autojobs_peak_gib "$t/base")" = 4.00 ] && ok "peak from the baseline ignores lanes" || bad "peak $(autojobs_peak_gib "$t/base")"
 [ -z "$(autojobs_peak_gib "$t/none")" ] && ok "no baseline: no peak" || bad "peak without file"
 sz 48 2 170 6.1 | grep -q 'memory:' && ok "reason names the binding limit" || bad "reason: $(sz 48 2 170)"
+rl() { AUTOJOBS_NPROC=$1 AUTOJOBS_LOAD1=$2 AUTOJOBS_MEMKB=$(( $3 * 1048576 )) autojobs_rounds_lanes; }
+rexp() { [ "$(rl $2)" = "$3" ] && ok "rounds lanes, $1: $3" || bad "rounds lanes, $1: got $(rl $2), want $3"; }
+rexp "idle 48 cores / 170 GiB" "48 2 170" 5
+rexp "idle 96 cores / 400 GiB (cap 6)" "96 0 400" 6
+rexp "memory bound (80 GiB)" "48 2 80" 2
+rexp "half busy (load 21)" "48 21 170" 3
+rexp "high load" "48 62 170" 2
+rexp "few free cores" "48 42 170" 2
+rexp "tiny box" "4 0 16" 2
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail

@@ -46,3 +46,19 @@ autojobs_peak_gib() {
   [ -f "$1" ] || return 0
   awk -F'\t' '!/^#/ && $1 !~ /^lane:/ && $3 + 0 > m { m = $3 + 0 } END { if (m > 0) printf "%.2f", m }' "$1"
 }
+
+# autojobs_rounds_lanes: the number of audit-round lanes (audit/run-rounds.sh JANUS_ROUNDS_LANES): min(6,
+# free cores / 8, (MemAvailable - 40 GiB) / 15 GiB), at least 2; 2 when the host is busy (load >= 60 or fewer than
+# 8 free cores). Same inputs as autojobs_size.
+autojobs_rounds_lanes() {
+  local nproc=${AUTOJOBS_NPROC:-$(nproc 2>/dev/null || echo 4)} load memkb
+  load=${AUTOJOBS_LOAD1:-$(awk '{ printf "%d", $1 }' /proc/loadavg 2>/dev/null || echo 0)}
+  memkb=${AUTOJOBS_MEMKB:-$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 0)}
+  awk -v nproc="$nproc" -v ld="$load" -v memkb="$memkb" 'BEGIN {
+    free = nproc - ld; if (free < 0) free = 0
+    if (ld >= 60 || free < 8) { print 2; exit }
+    n = 6; c = int(free / 8); m = int((memkb / 1048576 - 40) / 15)
+    if (c < n) n = c; if (m < n) n = m; if (n < 2) n = 2
+    print n
+  }'
+}
