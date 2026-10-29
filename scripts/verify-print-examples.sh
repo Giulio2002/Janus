@@ -41,6 +41,8 @@ default_rows() {
   done
 }
 if [ "${1:-}" = --list ]; then default_rows; exit 0; fi
+# a print row runs several Lean jobs at once (the lemma modules): more than a pool slot's 10 GiB
+JANUS_JOB_MEM="${JANUS_JOB_MEM:-24G}"
 memguard_self "$@"
 par_init "$@"
 set -- ${PAR_ARGS[@]+"${PAR_ARGS[@]}"}

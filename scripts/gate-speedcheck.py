@@ -15,7 +15,7 @@ check fails (exit 1) if
     items of a few seconds from flapping on noise; the message names the item, baseline, measured wall, ratio),
   * the total pool work (sum of the walls of the items present in both) exceeds 1.5 x the baseline's.
 New items (no baseline line) are reported, not failed; they enter the baseline at the next `update`.
-Items that did not pass are the pass/fail checks' business and are not judged here. The host load of the
+Items overlapping an external pause (<out>/pauses.txt) are excluded from both. Items that did not pass are the pass/fail checks' business and are not judged here. The host load of the
 run (timeline "gate" line) is printed with the verdict; it is information only: a slow item is never
 excused by load (a real slowdown of 1.5x or more fails whatever the load), and never failed because of it
 below the threshold. Memory: an item whose peak exceeds 1.5 x baseline and baseline + 1 GiB is listed as a
@@ -52,11 +52,26 @@ def peaks(logdir):
 def filekey(i):  # pool.sh's log file name for an id
     return i.replace("/", "_").replace(":", "_")
 
-def measured(rows, logdir):
+def pauses(tl):
+    """Intervals in which the run was stopped externally (<out>/pauses.txt: "start end" epoch seconds, end
+    may be empty = until the end): items overlapping one are timing-invalid and neither judged nor recorded."""
+    f = os.path.join(os.path.dirname(tl), "pauses.txt")
+    out = []
+    if os.path.exists(f):
+        for l in open(f):
+            w = l.split()
+            if w:
+                out.append((float(w[0]), float(w[1]) if len(w) > 1 else 1e18))
+    return out
+
+def measured(rows, logdir, paused=()):
     pk = peaks(logdir)
     res = {}
     for r in rows:
         if r.get("kind") == "item" and r.get("status") in ("PASS",):
+            if any(r["start"] < pe and r["end"] > ps for ps, pe in paused):
+                print("timing-invalid (overlaps a pause, excluded): %s/%s" % (r["pool"], r["id"]))
+                continue
             key = ("lane:" if r["pool"] == "gate" else "") + r["id"]
             res[key] = (r["wall"], pk.get(filekey(r["id"]), 0.0) if r["pool"] != "gate" else 0.0)
     return res
@@ -85,7 +100,7 @@ def main():
     mode, tl, base = sys.argv[1:4]
     rows = load_tl(tl)
     logdir = sys.argv[4] if len(sys.argv) > 4 else os.path.join(os.path.dirname(tl), "verify")
-    got = measured(rows, logdir)
+    got = measured(rows, logdir, pauses(tl))
     gate = next((r for r in rows if r["kind"] == "gate"), {})
     if mode == "update":
         with open(base, "w") as f:

@@ -85,10 +85,33 @@ longest first using `testDurations` in `cmd/janus/order_test.go`, and checks tha
 list (fails if a test is unassigned or twice); afterwards it checks from the `-v` output that each
 shard reported a result for exactly its tests.
 
+**Lane memory limits.** memguard's per-job default (24G) applies inside the outer `memcap` unless
+`JANUS_MEM_MAX` is set, and the ASL build OOM'd at 24 GiB once, so `gate.sh` sets an explicit per-lane limit
+(`JANUS_GATE_MEM_<LANE>`, e.g. `JANUS_GATE_MEM_ASL_BUILD=64G`, overrides it):
+
+| lane | per-job limit | measured peak (acc1 timelines, `-j 2`) |
+|---|---|---|
+| `asl-build`, `sail-build`, `rtasl-*` | 48G | asl-build 11.2 GiB in its logged jobs, one cold build job OOM'd at 24 GiB (FpSame.ExecC) |
+| `x86` | 24G | 11.2 GiB |
+| `rounds` | 24G (its lanes have their own 20G cgroups) | 1.2 GiB per job |
+| `gotest`, `axiom` | 24G | 14.3 GiB (profile) / negligible |
+| `verify` | none set: each item bounds itself (10G slots; print rows 24G) | items 0.2-6.1 GiB, print 10-14 GiB |
+
+These are per-job ceilings, not reservations. The outer cap is `memguard_self`'s `max(limit, MemAvailable - 40 GiB)`;
+the simultaneous peaks are what count: measured asl-build + x86 + rounds + verify pool at `-j 2` ~ 30-45 GiB, far
+inside it. At a higher `-j` the verify pool adds ~10 GiB per slot (the admission check in `parallel.sh` keeps
+40 GiB free).
+
+**Kept trees.** The isolated lake-lane trees are `artifacts/gate/trees/<hash of HEAD tree + uncommitted diff>/{x86,asl}`.
+They are removed when the gate passes, kept (path reported) when it fails or is cancelled, and reused by a
+rerun of the same sources (`scripts/lib/test-gatelanes.sh` tests limits, keep, reuse, removal). A second run on the
+same sources waits (flock). `ASL_CACHE`, or `JANUS_ASL_CACHE` as an alias, is forwarded to `scripts/asl.sh`; the
+content-addressed cache of `agent/speed-asl` is not final, so this is only the hook.
+
 **Cancel.** A gate run is its own process group (`setsid`); `<out>/pgid` holds the id. Cancel one run with
 `kill -- -$(cat <out>/pgid)` (or stop its memcap scope) and nothing else; never kill by name or pattern, other
 gates share the host (`scripts/lib/test-pgcancel.sh`). The Lake-writing lanes (x86, asl, oracle, rt-asl) work in
-private source copies (`<out>/tree-x86`, `<out>/tree-asl`, about 0.85 GiB each, removed at exit and on cancel),
+private source copies (`artifacts/gate/trees/<hash>/x86` and `/asl`, about 0.85 GiB each, see "Kept trees"),
 because a `lake` in JanusX86/JanusASL replays the framework's `.olean` files it depends on by path; the verify,
 go test and audit lanes read the prebuilt framework build, which is never written after the prebuild.
 
@@ -101,6 +124,25 @@ load is printed with the verdict but never excuses a regression. Without the fil
 `speed check NOT enforced: no baseline`. `python3 -I scripts/gate-speedcheck.py seed artifacts/verify-all-examples.times OUT`
 derives a provisional file from a times file (not enforced). Update procedure: after an intended speed change,
 re-record on a green full gate and say why in the commit message.
+
+**Old gate vs new gate (nothing dropped).**
+
+| old check (pgate.sh / pg3.sh / RULES.md) | new gate |
+|---|---|
+| `lake build` | prebuild `lake` (`lake build`, then `lake build Janus Janus.Tools.Audit janus-audit`) |
+| `go test -timeout 7000s -parallel 2 ./cmd/...` | lane `gotest`: same tests, `-count=1 -timeout 7000s`, sharded; partition checked before and after |
+| `scripts/ci-axiom-guard.sh` | lane `axiom` |
+| `scripts/verify-all-examples.sh` (arm64, amd64, asm, rtmisc, sys, print) | lane `verify` (same items, same theorems, same Witness theorems) |
+| `scripts/verify-cgo-examples.sh` (64 rows, correctness and Witness) | lane `verify`, `--cgo` items |
+| `scripts/verify-sys-examples.sh` (10 rows) | lane `verify`, sys items (the full default list, 2 more rows than the old verify-all had) |
+| `scripts/verify-print-examples.sh` | lane `verify`, print items |
+| `audit/run-rounds.sh` | lane `rounds` |
+| `audit/rt-asl/run.sh` (asl prove, A1-A3, A6, A7, A8, A5/C2, fsqrt, C1) | lanes `asl-build` + `rtasl-*` (one per group; same rows, same expectations) |
+| `scripts/x86formal.sh prove` | lane `x86` |
+| item timeouts (`JANUS_ITEM_TIMEOUT`), audit, kernel replay, pins, sandbox, Witness theorems | unchanged: the same scripts and `janus verify` run them |
+| `x86formal.sh prove` "twice" (profile A.1) | pgate.sh and pg3.sh contain ONE `x86formal.sh prove` step (the profile's two entries are two runs of it, not two targets; there is no x86b step in either script) |
+| anything else in pgate.sh / pg3.sh (oracle.sh, oracle-sail.sh as a step, `asl.sh` check/oracle, coverage.sh, cabi-probe.sh, build-examples checks) | not steps of either script. Their builds that the covered checks need are in the prebuild (`oracle-sail.sh build` for `rtasl-fsqrt`, `asl.sh build`); the standalone corpora checks (`oracle*.sh full`, `asl.sh check`, `coverage.sh`, `cabi-probe.sh`) were not in the old gate and are not added |
+| (new) speed regression check, timeline, streamed results | on top of the above |
 
 **Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);
