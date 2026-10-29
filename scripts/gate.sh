@@ -194,7 +194,7 @@ step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
   return $rc
 }
 # JanusTests and janus-oracle-amd64 are built by CI (.github/workflows/ci.yml) and are not default Lake targets
-pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit && memguard_lake build JanusTests janus-oracle-amd64; }
+pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit && memguard_lake build JanusTests janus-oracle janus-oracle-amd64 janus-decode janus-testfloat; }
 pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
 pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
@@ -222,6 +222,15 @@ if [ $pre_fail != 0 ]; then
   exit 1
 fi
 export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
+# From here on nothing may write the shared framework build (a lake that rebuilds a module while another lane's
+# verification has pinned its .olean fails that verification: "framework build changed after the kernel replay").
+# scripts/lib/lakeguard/lake turns every `lake build`/`lake exe` in this checkout's package into --no-build; the
+# lanes that must build use private trees. The oleans are hashed now and again at the end of the run.
+fw_hash() { (cd "$root/.lake/build" && find . -type f \( -name '*.olean*' -o -name '*.ir' -o -name '*.ilean' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1); }
+FW_HASH0="$(fw_hash)"
+JANUS_REAL_LAKE="$(command -v lake)"; export JANUS_REAL_LAKE JANUS_LAKEGUARD_ROOT="$root"
+export PATH="$root/scripts/lib/lakeguard:$PATH"
+echo "gate: framework build pinned ($FW_HASH0); lake build/exe in the shared checkout is --no-build from here on"
 
 # ---- phase 2: lanes
 # The JanusASL / JanusX86 / oracle lanes run lake in packages that depend on the framework by path: such a
@@ -346,6 +355,8 @@ else
   echo "!!!! speed check NOT enforced: no baseline file $sbfile (record one with --speed-baseline record after a green full gate) !!!!"
 fi
 [ "$speed_rc" = 0 ] || lanes_rc=1
+FW_HASH1="$(fw_hash)"
+if [ "$FW_HASH1" != "$FW_HASH0" ]; then echo "gate: FAIL: the shared framework build changed during the lanes ($FW_HASH0 -> $FW_HASH1)"; lanes_rc=1; fi
 echo
 if [ "$lanes_rc" = 0 ]; then
   echo "GATE PASS$([ -n "$partial" ] && echo ' (PARTIAL RUN: not a full gate)')$([ -n "$incremental" ] && echo ' (INCREMENTAL: items and lanes with a record of an identical PASS were skipped, see the RAN/SKIPPED report; the full cold gate is still required before a push to main)') in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)")"
