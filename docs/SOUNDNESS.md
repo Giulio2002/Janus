@@ -593,6 +593,14 @@ produces (the key below), and the kernel replay re-checks them anyway.
 * the environment variables that reach those tools (`LEAN_*`, `LAKE_*`, `CC`, `CXX`, `CFLAGS`,
   `CXXFLAGS`, `CPPFLAGS`, `LDFLAGS`, `RUSTFLAGS`, `CARGO_*`, ...), the machine architecture and
   the version of the scheme.
+  The one exception is a *scheduling-only* variable, which says how many threads run and never what
+  is computed: `LEAN_NUM_THREADS` is not keyed (`scripts/asl.sh` sets it itself for every lake call
+  from its memory budget, so the ambient value never reaches a build; the gate's lanes export 4 and
+  must hit the entries a standalone run published), nor are cargo's terminal-output variables.
+  `scripts/lib/test-thread-identity.sh` is the evidence: it builds the same modules with 1 and with 4
+  threads and compares the SHA-256 of every `.olean`, `.ilean`, `.c` and object. Every other
+  `LEAN_*`, `LAKE_*`, `ELAN_*`, `LD_*`, `GIT_*` variable stays keyed, and so does `CARGO_BUILD_JOBS`
+  until the same evidence exists for the driver (`scripts/lib/test-rt-bcache.sh` checks both).
 
 An input that is not in the key does not reach the outputs (the reasoning is in the three tools'
 docstrings and docs/ASL.md "Build cache"); the default for an unknown setting is to key it. Lake
