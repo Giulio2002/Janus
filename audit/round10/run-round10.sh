@@ -10,6 +10,7 @@
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
+. "$root/scripts/lib/tmark.sh"
 export PATH=/usr/local/go/bin:$PATH
 R=audit/round10
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
@@ -54,6 +55,7 @@ check() {
 v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
 echo "== V1: a runtime-contract hypothesis must quantify the runtime (auditor)"
+type tmark >/dev/null 2>&1 && tmark "== V1: a runtime-contract hypothesis must quantify"
 v $A/V1a_contract_H_true.lean "$W/NewPair";     row V1a_readiness_fun_true blocked 'round 10 V1' 'fun x x_1 x_2 x_3 => True'
 v $A/V1b_contract_rt_nil.lean "$W/NewPair";     row V1b_runtime_ranges_nil blocked 'round 10 V1'
 v $A/V1c_contract_rt_premise.lean "$W/NewPair"; row V1c_ranges_pinned_by_premise blocked 'round 10 V1' 'rt = []'
@@ -64,6 +66,7 @@ v examples/proofs/NewPair.lean "$W/NewPair";    row V1_ctl_NewPair Verified 'RtR
 v examples/proofs/MapAccess1Small.lean "$W/MapAccess1Small"; row V1_ctl_contract_in_conclusion Verified
 
 echo "== V2: Assign/MakeSmall were unsatisfiable with MapModel.Laws (kernel-checked)"
+type tmark >/dev/null 2>&1 && tmark "== V2: Assign/MakeSmall were unsatisfiable with Ma"
 o="$(lake env lean $R/model/MapUnsat.lean 2>&1)"; check V2_model_pre_fix_contracts_unsat $? "old Assign and MakeSmall + Laws + one call state => False ${o:+($o)}"
 lake env lean $R/model/MapUnsatFixed.lean >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check V2_model_fixed_contracts_unsat_attempt $? "the same chaining argument against the fixed contracts does not compile"
@@ -74,6 +77,7 @@ check V2_V3_allocating_contracts_take_H $rc "Assign, MakeSmall, convT*, typeAsse
 v examples/proofs/Box.lean "$W/Box";            row V3_ctl_Box Verified 'RtReady'
 
 echo "== SAT: witnesses (round 9 row, with the round-10 check that the witness names its contract)"
+type tmark >/dev/null 2>&1 && tmark "== SAT: witnesses (round 9 row, with the round-10 "
 o="$(python3 -I audit/round9/sat_check.py "$root")"; rc=$?
 for c in "Assign                 Map.lean" "MakeSmall              Map.lean" "Assign                 MapAmd64.lean" "MakeSmall              MapAmd64.lean"; do
   grep -qF "SAT ok      $c" <<<"$o" || rc=1
@@ -100,6 +104,7 @@ o="$(python3 -I audit/round9/sat_check.py "$root" | head -1)"
 check SAT_scans_tracked_tree $? "$o"
 
 echo "== real-runtime probes (audit/round10/probe; go1.26.0)"
+type tmark >/dev/null 2>&1 && tmark "== real-runtime probes (audit/round10/probe; go1.2"
 P="$T/probe"; mkdir -p "$P"
 ( cd $R/probe && export GOTOOLCHAIN=go1.26.0 CGO_ENABLED=0 &&
   GOARCH=amd64 GOAMD64=v1 go build -ldflags=-checklinkname=0 -trimpath -o "$P/p10-amd64" . &&
@@ -114,12 +119,15 @@ o1="$("$P/p10-amd64" convt 100000)"; o2="$(qemu-aarch64 "$P/p10-arm64" convt 100
 check V3a_convT64_allocates_per_call $? "convT64: $o1 (amd64), the same on arm64: every v >= 256 takes a fresh box"
 
 echo "== A1: the ABI convention warning recognises linked programs"
+type tmark >/dev/null 2>&1 && tmark "== A1: the ABI convention warning recognises linke"
 o="$(go test -count=1 -run 'TestABIMismatch$' ./cmd/janus/ 2>&1)"; check A1_abi_warning_linked_program $? "$(tail -n 1 <<<"$o" | cut -c1-80)"
 
 echo "== F1: an in-place framework build whose sources change while Lake runs is not stamped"
+type tmark >/dev/null 2>&1 && tmark "== F1: an in-place framework build whose sources c"
 o="$(go test -count=1 -run 'TestFrameworkSourcesChangeDuringBuild$' ./cmd/janus/ 2>&1)"; check F1_framework_sources_change_during_build $? "$(tail -n 1 <<<"$o" | cut -c1-80)"
 
 echo "== G: cache eviction (holds)"
+type tmark >/dev/null 2>&1 && tmark "== G: cache eviction (holds)"
 G="$T/gc"; mkdir -m 700 "$G"; mkdir -m 700 "$G/cache"; mkdir -p "$G/victim/dir"; echo keep > "$G/victim/file"; echo keep > "$G/victim/dir/f"
 for d in v1 v1/result v1/trusted v1/replay v1/framework v1/consumer v1/tmp v1/run v1/result/ab v1/consumer/fam v1/trusted/cd; do mkdir -p -m 700 "$G/cache/$d"; done
 ln -s "$G/victim/file" "$G/cache/v1/result/ab/x.json"; ln -s "$G/victim/dir" "$G/cache/v1/consumer/fam/ws"
@@ -139,6 +147,7 @@ kill "$gcpid" 2>/dev/null; wait "$gcpid" 2>/dev/null
 v examples/proofs/NewPair.lean "$W/NewPair"; row G2_ctl_after_hammer Verified
 
 echo "== holds: amd64 v3/SSE boundary encodings, arm64 crypto decode"
+type tmark >/dev/null 2>&1 && tmark "== holds: amd64 v3/SSE boundary encodings, arm64 c"
 if [ "$(uname -m)" = x86_64 ]; then
   O="$T/oracle"; mkdir -p "$O"
   ( cd oracle-amd64 && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -o "$O/runner" ./cmd/runner &&
@@ -158,6 +167,7 @@ bad="$(grep -c '^BAD\|^GAP' "$T/decodecmp.txt" 2>/dev/null)"; words="$(sed -n 's
 check C1_arm64_crypto_decode_vs_asl $? "janus-decode vs the sail-arm v9.4 decode clauses on ${words:-?} words of the SIMD/FP and register groups: ${bad:-?} disagreements"
 
 echo "== holds: the ASL sqrt_real substitution (agent/asl, JanusASL/sail/fakereal_sqrt.py)"
+type tmark >/dev/null 2>&1 && tmark "== holds: the ASL sqrt_real substitution (agent/as"
 o="$(python3 -I $R/asl/half_only.py $R/asl 2>&1 | head -1)"
 grep -q 'MISMATCHES 0 ' <<<"$o"; check ASL1_sqrt_real_half_exhaustive $? "$(cut -c1-60 <<<"$o")"
 # single and double precision: python3 -I audit/round10/asl/sqrt_model.py 4000 (hours; see the doc)

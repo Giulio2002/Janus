@@ -54,6 +54,7 @@ v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--t
 # The --fresh rows (each a cold kernel replay of the framework) are independent: they run as
 # parallel blocks (-j N, scripts/lib/parallel.sh); output is printed in this order.
 echo "== I1: every object name in the statement resolves in Extracted.program"
+type tmark >/dev/null 2>&1 && tmark "== I1: every object name in the statement resolves"
 nodata='but the extracted program has no data object of that name'
 par_run 'v $A/I1a_itab_name_lookalike.lean $W/HashWith;   row I1a_itab_name_lookalike blocked "$nodata" "MulHаsher"'
 par_run 'v $A/I1b_itab_name_absent.lean $W/HashWith;      row I1b_itab_name_absent blocked "$nodata"'
@@ -73,6 +74,7 @@ v $A/N1a_reducebool_implemented_by.lean $W/Add;  row N1a_reducebool_implemented_
 par_wait
 
 echo "== G3: a go1.25 binary labelled go1.26 (audit/round8/govers; fixed: stubs pinned by code, cmd/janus/stubpin.go)"
+type tmark >/dev/null 2>&1 && tmark "== G3: a go1.25 binary labelled go1.26 (audit/roun"
 if ( cd audit/round8/govers && GOTOOLCHAIN=go1.25.5 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
      go build -trimpath -buildvcs=false -ldflags=-X=runtime.buildVersion=go1.26.0 -o "$root/$W/govers" ./cmd ) 2>/dev/null; then
   if out="$("$J" extract $W/govers main.Add $W/GvAdd 2>&1)"; then
@@ -85,6 +87,7 @@ else
 fi
 
 echo "== L1/M1/C1: unit rows (go test; L1 is covered here: a changed lib/lean file changes every key)"
+type tmark >/dev/null 2>&1 && tmark "== L1/M1/C1: unit rows (go test; L1 is covered her"
 for t in TestRound8ToolchainCacheID TestRound8TrustedManifestMAC TestRound8CacheRootPrivate; do
   if (cd cmd/janus && go test -count=1 -timeout 10m -run "^$t\$" . >/dev/null 2>&1); then
     printf '  %-36s ok\n' "$t"
@@ -97,6 +100,7 @@ cachedT() { grep -q 'janus-timing: trusted compile (cached)' <<<"$1"; }
 
 mkdir -m 700 "$T/m1"; C="$T/m1"
 echo "== M1: trusted-compile manifests carry a MAC under the cache's key"
+type tmark >/dev/null 2>&1 && tmark "== M1: trusted-compile manifests carry a MAC under"
 # The result cache is off so that every run reaches the trusted compile.
 m1() { out="$(JANUS_CACHE_DIR="$C" JANUS_TIMINGS=1 JANUS_RESULT_CACHE=off vc $W/Add --proof examples/proofs/Add.lean)"; }
 m1; m1
@@ -125,6 +129,7 @@ EOF
 done
 
 echo "== C1: the cache root is private"
+type tmark >/dev/null 2>&1 && tmark "== C1: the cache root is private"
 c1() { # c1 NAME CACHE PATTERN...
   local name=$1 c=$2 pat st=""; shift 2
   out="$(JANUS_CACHE_DIR="$c" vc $W/Add --proof examples/proofs/Add.lean)"

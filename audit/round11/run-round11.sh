@@ -9,6 +9,7 @@
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
+. "$root/scripts/lib/tmark.sh"
 export PATH=/usr/local/go/bin:$PATH
 R=audit/round11
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
@@ -53,6 +54,7 @@ check() {
 v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
 echo "== L1: a closed runtime model in a contract hypothesis (any model type, not a whitelist)"
+type tmark >/dev/null 2>&1 && tmark "== L1: a closed runtime model in a contract hypoth"
 v $A/H1a_closed_HashModel.lean "$W/AlgMemhash16";  row H1a_hash_model_closed blocked 'round 11' 'Memhash'
 v $A/H1b_hash_model_pinned_by_premise.lean "$W/AlgMemhash16"; row H1b_hash_model_pinned_by_eq blocked 'round 11' 'constrains a runtime variable'
 v $A/P1a_closed_PanicRuntime.lean "$W/RecoverSet"; row P1a_panic_runtime_closed blocked 'round 11' 'GorecoverContract'
@@ -63,6 +65,7 @@ v examples/proofs/RecoverSet.lean "$W/RecoverSet"; row L1_ctl_RecoverSet_PanicRu
 v examples/rtmisc/proofs/arm64/CheckWord.lean "$W/CheckWord"; row L1_ctl_CheckWord_CheckptrModel_var Verified 'CheckptrModel'
 
 echo "== A1: the allow-list (RtSpec / Fmt arguments) is a NAMED list of framework constants"
+type tmark >/dev/null 2>&1 && tmark "== A1: the allow-list (RtSpec / Fmt arguments) is "
 for a in A1a_proof_defined_spec:Concat A1b_inline_spec_lambda:Concat A1b2_structure_update_of_listed_spec:Concat \
          A1c_imported_default_fmt:HashFKey A1d2_abbrev_of_bad_spec:Concat; do
   f=${a%%:*}; d=${a##*:}
@@ -73,6 +76,7 @@ v examples/proofs/Concat.lean "$W/Concat"; row A1_ctl_Concat_concatstringSpec Ve
 v examples/proofs/HashFKey.lean "$W/HashFKey"; row A1_ctl_HashFKey_binary64 Verified 'binary64'
 
 echo "== L1 model rows: the closed-model contracts really hold of no program (kernel-checked)"
+type tmark >/dev/null 2>&1 && tmark "== L1 model rows: the closed-model contracts reall"
 for m in H1a_unsat_closed_H P1a_unsat_closed_P; do
   o="$(lake env lean $R/model/$m.lean 2>&1)"; rc=$?; check "L1_model_$m" $rc "$(grep -m1 error <<<"$o")"
 done

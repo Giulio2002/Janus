@@ -82,6 +82,7 @@ par_run r2_row
 
 e6_block() {
 echo "== E6: D4 residual (match auxiliaries, well-founded recursion, universe polymorphism)"
+type tmark >/dev/null 2>&1 && tmark "== E6: D4 residual (match auxiliaries, well-founde"
 v E6a_match_wf_disclosure; row E6a_match_wf_disclosure Verified \
   'Proof.sel.match_1 : (motive : Nat → Sort u_1) → (n : Nat) → (Unit → motive (0 : Nat)) → ((n : Nat) → motive n.succ) → motive n := fun (motive : Nat → Sort u_1) (n : Nat) (h_1 : Unit → motive (0 : Nat)) (h_2 : (n : Nat) → motive n.succ) => Nat.casesOn n (h_1 ()) fun (n : Nat) => h_2 n  [not round-tripped: read with care]'
 grep -qF 'Proof.countdown._unary._proof_1 : ∀ (n : Nat), ¬n = 0 → InvImage (fun x1 x2 => x1 < x2) (fun x => x) (n - 1) n := <proof>' <<<"$out" ||
@@ -90,6 +91,7 @@ grep -qF 'Proof.countdown._unary._proof_1 : ∀ (n : Nat), ¬n = 0 → InvImage 
 # The dependency rows share one fixture: one block.
 dep_block() {
 echo "== E1h-j/E3e: a pinned git dependency with a custom Decidable instance and a 'regs' structure"
+type tmark >/dev/null 2>&1 && tmark "== E1h-j/E3e: a pinned git dependency with a custo"
 dep="$(audit/round5/dep/setup.sh "$root/$W/dep" "$root")" || { echo "  dependency fixture failed"; broken+=(dep-setup); }
 d() { out="$("$J" verify $W/Add --janus-root "$root" --proof "$dep/R5Proofs/Proofs.lean" --proof-root "$dep" --theorem "R5Proofs.$1" 2>&1)"; }
 d decInst;  row E1h_dep_instance_in_decide blocked
@@ -99,6 +101,7 @@ d viewRegs; row E3e_dep_structure_regs Verified 'DecLib.View.regs (def, DecLib)'
 }
 e5_gotest_block() {
 echo "== E5 unit row (go test)"
+type tmark >/dev/null 2>&1 && tmark "== E5 unit row (go test)"
 (cd cmd/janus && memguard_run -n go-test -- go test -timeout 30m -run 'TestBoundInstanceRejected' . >/dev/null 2>&1) || { echo "  >>> TestBoundInstanceRejected failed"; broken+=(E5-gotest); }
 }
 model_block() {

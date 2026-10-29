@@ -9,6 +9,7 @@
 set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
+. "$root/scripts/lib/tmark.sh"
 export PATH=/usr/local/go/bin:$PATH
 J="$root/audit/round9/bin/janus"; mkdir -p "$(dirname "$J")"
 go build -o "$J" ./cmd/janus || exit 1
@@ -51,6 +52,7 @@ check() {
 v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
 echo "== C1: allocation contracts must be satisfiable (kernel-checked)"
+type tmark >/dev/null 2>&1 && tmark "== C1: allocation contracts must be satisfiable (k"
 o="$(lake env lean audit/round9/model/Unsat.lean 2>&1)"; check C1a_pre_fix_contract_unsat $? "the pre-round-9 newobject contract is false for every program/addr/rt ${o:+($o)}"
 lake env lean audit/round9/model/UnsatFixed.lean >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check C1b_fixed_contract_unsat_attempt $? "the same argument against the fixed contract does not compile"
@@ -63,6 +65,7 @@ check C1c_newpair_witness_fires $? "an allocator, rt, H and a NewPair call for w
 v examples/proofs/NewPair.lean "$W/NewPair"; row C1_ctl_NewPair Verified 'RtReady' 'rtView rt s.mem'
 
 echo "== SAT: every runtime contract has a kernel-checked _satisfiable witness (lake build Janus checked them)"
+type tmark >/dev/null 2>&1 && tmark "== SAT: every runtime contract has a kernel-checke"
 o="$(python3 -I audit/round9/sat_check.py "$root")"; rc=$?
 grep -E 'SAT (MISSING|OPEN)' <<<"$o" | sed 's/^/  /'
 check SAT_contract_witnesses $rc "$(tail -n 1 <<<"$o")"
@@ -76,6 +79,7 @@ python3 -I audit/round9/sat_check.py "$S9" >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ]; check SAT_selftest_ffi_witness_fails $? "removing cgoCall_satisfiable (Janus/FFI.lean's trusted cgocall contract) makes the SAT row fail"
 
 echo "== real-binary probes (audit/round9/probe; go1.26.0)"
+type tmark >/dev/null 2>&1 && tmark "== real-binary probes (audit/round9/probe; go1.26."
 P="$T/probe"; mkdir -p "$P"
 ( cd audit/round9/probe && export GOTOOLCHAIN=go1.26.0 CGO_ENABLED=0 &&
   GOARCH=amd64 GOAMD64=v1 go build -trimpath -o "$P/probe9-amd64" . &&
@@ -123,6 +127,7 @@ o="$(cmp "$T/grow-amd64" "$T/grow-arm64" && audit/round9/model/grow_check.sh "$T
 grep -q 'GROW OK' <<<"$o"; check G1_growslice_capacity_exact $? "$o"
 
 echo "== H2: bound-variable lookalikes the round-7 fold missed"
+type tmark >/dev/null 2>&1 && tmark "== H2: bound-variable lookalikes the round-7 fold "
 for a in H2a_binder_tonos_oxia H2b_binder_kelvin H2c_binder_prosgegrammeni; do
   v $A/$a.lean "$W/Add"; row "$a" blocked 'round 9 H2'
 done
@@ -130,15 +135,18 @@ v audit/round7/attacks/H1a_binder_lookalike_vacuous.lean "$W/Add"; row H1a_still
 v audit/round7/attacks/H1b_binder_greek_honest.lean "$W/Add"; row H2_ctl_H1b_greek_honest Verified
 
 echo "== I1g: contract names must be recorded contracts"
+type tmark >/dev/null 2>&1 && tmark "== I1g: contract names must be recorded contracts"
 v $A/I1g_contract_name_lookalike.lean "$W/Add"; row I1g_contract_name_lookalike blocked 'runtime contract'
 
 echo "== D1: docs/SOUNDNESS.md keeps the sections the stubpin merge dropped"
+type tmark >/dev/null 2>&1 && tmark "== D1: docs/SOUNDNESS.md keeps the sections the st"
 for s in '## Runtime contracts' '**Toolchain identity.**' '**The cache root must be private**' \
          '**Object names must resolve**' '**A contract must be satisfiable, and by the real runtime**'; do
   grep -qF -- "$s" docs/SOUNDNESS.md; check "D1 ${s:0:34}" $? "present"
 done
 
 echo "== MG: memory-guard settings change limits only, never a verdict"
+type tmark >/dev/null 2>&1 && tmark "== MG: memory-guard settings change limits only, n"
 for mg in prlimit systemd-user none bogus; do
   out="$(JANUS_MEMGUARD=$mg JANUS_MEM_MAX=300M "$J" verify --fresh --janus-root "$root" --proof audit/round7/attacks/H1a_binder_lookalike_vacuous.lean "$W/Add" 2>&1)"
   row "MG_attack_JANUS_MEMGUARD=$mg" blocked
