@@ -882,3 +882,6 @@ func runLibSelfTest(t *testing.T, name string) {
 		t.Fatalf("scripts/lib/%s: %v\n%s", name, err, out)
 	}
 }
+
+// TestLaneLakeLib: gate lanes that share an isolated tree never overlap a rewriting lake call with another one.
+func TestLaneLakeLib(t *testing.T) { runLibSelfTest(t, "test-lanelake.sh") }

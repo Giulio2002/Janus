@@ -294,6 +294,12 @@ addc() { # NAME CODE [NEEDS]
   spec="$(lane_spec "$1" | while IFS= read -r l; do printf ' %q' "$l"; done)"
   add "$1" "incr_lane $(printf '%q' "$1") $(printf '%q' "$2")$spec" "${3:-}"
 }
+# Lanes that share an isolated tree run `lake` through scripts/lib/lanelake/lake: every lake call in the tree holds
+# a flock on the tree (exclusive for anything that can rewrite the package, shared for `lake env`), so a lane's
+# rebuild or dependency re-resolution never overlaps another lane's lake call (scripts/lib/test-lanelake.sh).
+laneenv() { # TREE: the environment of a lane working in TREE (JANUS_REAL_LAKE is exported above)
+  echo "export JANUS_LANE_TREE='$1' JANUS_LANE_LAKE_LOCK='$1/.gate-lake.lock' PATH='$root/scripts/lib/lanelake':\"\$PATH\";"
+}
 # a lane needs its prerequisite only when that stage is part of this run
 needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; done; echo "$r"; }
 add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
@@ -302,23 +308,23 @@ addc gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--r
 addc rounds "audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
 # (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
-[ -z "${JANUS_GATE_TEST_LANE:-}" ] || add testlane "cd '$tree' && $JANUS_GATE_TEST_LANE"
-addc x86 "cd '$tree_x86' && scripts/x86formal.sh prove"
+[ -z "${JANUS_GATE_TEST_LANE:-}" ] || add testlane "$(laneenv "$tree") cd '$tree' && $JANUS_GATE_TEST_LANE"
+addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"
 # CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
 # decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
 add govet "go vet ./..."
 add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
-add oracle "cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
-add asl-verify "cd '$tree' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4" "$(needs rtasl-prove)"
-add asl-build "cd '$tree' && scripts/asl.sh build"
-add sail-build "cd '$tree' && scripts/oracle-sail.sh build"
+add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
+add asl-verify "$(laneenv "$tree") cd '$tree' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4" "$(needs rtasl-prove)"
+add asl-build "$(laneenv "$tree") cd '$tree' && scripts/asl.sh build"
+add sail-build "$(laneenv "$tree") cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
   nd=""
   # rtasl-prove (scripts/asl.sh prove) builds JanusASL; two lakes in one package race, so every other lake-using
   # group runs after it (as in audit/rt-asl/run.sh, where prove is the first group)
   case "$g" in prove) nd="$(needs asl-build)" ;; btf|go) ;; fsqrt) nd="$(needs rtasl-prove sail-build)" ;; *) nd="$(needs rtasl-prove)" ;; esac
-  addc "rtasl-$g" "cd '$tree' && audit/rt-asl/run.sh $g" "$nd"
+  addc "rtasl-$g" "$(laneenv "$tree") cd '$tree' && audit/rt-asl/run.sh $g" "$nd"
 done
 # stream the verify lane's own result lines as they are written
 tailpid=""

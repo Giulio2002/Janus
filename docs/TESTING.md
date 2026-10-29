@@ -102,6 +102,15 @@ the simultaneous peaks are what count: measured asl-build + x86 + rounds + verif
 inside it. At a higher `-j` the verify pool adds ~10 GiB per slot (the admission check in `parallel.sh` keeps
 40 GiB free).
 
+**Lake serialisation inside a shared tree.** Lanes that share the ASL tree (`asl-build`, `rtasl-*`, `asl-verify`,
+`oracle`, `sail-build`) call `lake` through `scripts/lib/lanelake/lake`: every call in the tree holds a flock on it,
+exclusive for anything that can rewrite the package (build, update, exe, ...), shared for `lake env`. A dependency
+re-resolution ("URL has changed; deleting packages/Sail and cloning") or a rebuild by one lane therefore never
+overlaps another lane's lake call, while read-only lanes (replay, strict, rel) still run side by side
+(`scripts/lib/test-lanelake.sh`, with a fake `lake` that rewrites a shared file). I chose the lock over a tree per lane
+because JanusASL/.lake (5.8 GB, with `packages/Sail`) is shared by symlink and a copy per lane would cost that much
+each; the lock covers it. Tree reuse on failure and lakeguard are unchanged.
+
 **Kept trees.** The isolated lake-lane trees are `artifacts/gate/trees/<hash of HEAD tree + uncommitted diff>/{x86,asl}`.
 They are removed when the gate passes, kept (path reported) when it fails or is cancelled, and reused by a
 rerun of the same sources (`scripts/lib/test-gatelanes.sh` tests limits, keep, reuse, removal). A second run on the
