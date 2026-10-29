@@ -1038,24 +1038,36 @@ def omegaSparse (g : MVarId) : TacticM Bool := g.withContext do
   let tryOmega (keep : Array FVarId) : TacticM Bool := do
     let toClear := (ors.map (·.1)).filter (!keep.contains ·)
     let g' ← g.tryClearMany toClear
-    try
-      let gs ← Tactic.run g' <| withoutRecover do
-        g'.withContext do
-          let mut tac ← `(tactic| omega)
-          for sp in (if keep.size > 2 then #[] else keep).reverse do
-            let h := mkIdent (← sp.getUserName)
-            tac ← `(tactic| (rcases $h:ident with $h:ident | $h:ident <;> $tac))
-          evalTactic tac
-      if gs.isEmpty then return true
-      saved.restore; return false
-    catch _ => saved.restore; return false
+    -- each attempt has its own small heartbeat budget: a failed `omega` is as expensive as a
+    -- successful one, and the attempts must not eat the declaration's budget
+    let ok ← tryCatchRuntimeEx
+      (do
+        let gs ← withTheReader Core.Context (fun c => { c with maxHeartbeats := 3000 * 1000 }) <|
+          withCurrHeartbeats <| Tactic.run g' <| withoutRecover do
+            g'.withContext do
+              let mut tac ← `(tactic| omega)
+              for sp in (if keep.size > 2 then #[] else keep).reverse do
+                let h := mkIdent (← sp.getUserName)
+                tac ← `(tactic| (rcases $h:ident with $h:ident | $h:ident <;> $tac))
+              evalTactic tac
+        pure gs.isEmpty)
+      (fun _ => pure false)
+    unless ok do saved.restore
+    return ok
+  -- few disjunctions: plain `omega` is already cheap, the extra attempts would only add cost
+  if ors.size < 6 then return false
   if ← tryOmega #[] then return true
   let rel := ors.filter fun (_, as) => as.any goalAtoms.contains
-  for (h, _) in rel do
-    if ← tryOmega #[h] then return true
-  for i in [0:rel.size] do
-    for j in [i+1:rel.size] do
-      if ← tryOmega #[rel[i]!.1, rel[j]!.1] then return true
+  -- every failed attempt costs an `omega` call, so the number of attempts is bounded: with many
+  -- relevant disjunctions the single and pair splits are skipped (the connected set below, or
+  -- the caller's full `omega`, handles them)
+  if rel.size ≤ 5 then
+    for (h, _) in rel do
+      if ← tryOmega #[h] then return true
+  if rel.size ≤ 4 then
+    for i in [0:rel.size] do
+      for j in [i+1:rel.size] do
+        if ← tryOmega #[rel[i]!.1, rel[j]!.1] then return true
   -- all disjunctions connected to the goal through shared atoms (transitively): the others are
   -- cleared. `omega` splits on these itself.
   let mut seen := goalAtoms
