@@ -1,0 +1,21 @@
+import Extracted
+
+/-! Round 13 F1b_funcs_proof_defined: the table is a proof-defined list. The statement assumes the runtime's `gopanic` contract for a function table the statement chose (not exactly `Extracted.funcs`), which can make the contract unsatisfiable or false for every implementation. -/
+open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Panic
+
+namespace Proof
+def myT : List FuncInfo := Extracted.funcs.map id
+
+theorem correctness (impl : List Segment) (P : PanicRuntime) (hl : P.Laws)
+    (U : State → Nat → Nat → Prop)
+    (hpan : GopanicContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.gopanic") P U myT)
+    (p x etyp edata : BitVec 64) :
+    EnsuresGo (Extracted.program.link impl) Extracted.entry [p, x, etyp, edata]
+      (fun s => PanicCallerOK P s 128 40 ∧ Ptr s.mem p 8 true)
+      (goClassU P U)
+      (fun s s' => (s'.regs 0).toNat = x.toNat)
+      (fun s v s' => 10 < x.toNat) := by
+  sorry
+
+end Proof
