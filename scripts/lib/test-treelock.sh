@@ -11,10 +11,10 @@ unset POOL_TIMELINE JANUS_POOL_DIR JANUS_GATE_PG
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; repo="$(cd "$here/../.." && pwd)"
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-treelock.XXXXXX")"; trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
-tree="$t/tree"; mkdir -p "$tree/JanusASL" "$tree/.lake/build" "$tree/scripts/lib"
+tree="$t/tree"; mkdir -p "$tree/JanusASL/.lake" "$tree/.lake/build" "$tree/scripts/lib"; : > "$tree/JanusASL/lakefile.toml" "$tree/scripts/lib"
 cp -r "$here/lanelake" "$tree/scripts/lib/"; echo v1 > "$tree/.lake/build/Janus.olean"
 # tl_run as asl.sh defines it (extracted, so the test runs the real text)
-sed -n '/^tl_run() {/,/^_TL_SELF=/p' "$repo/scripts/asl.sh" > "$t/tl.sh"
+sed -n '/^tl_run() {/,/^_TL_SELF=/p' "$repo/scripts/asl.sh" > "$t/tl.sh"; pkg="$tree/JanusASL"
 cat > "$t/fakelake" <<'EOS'
 #!/usr/bin/env bash
 # fake lake: "build" rewrites the framework olean slowly (replay does) and logs the interval
@@ -35,7 +35,7 @@ cat > "$t/lane.sh" <<'EOS'
 #!/usr/bin/env bash
 # a lane: tl_run-style write phase (restore = non-lake writer of a shared file, then lake build), then a reader phase
 set -u
-root="$FAKE_ROOT"; . "$FAKE_T/tl.sh"
+root="$FAKE_ROOT"; pkg="$FAKE_TREE/JanusASL"; . "$FAKE_T/tl.sh"
 phase_w() { echo "START r $$ $(date +%s.%N)" >> "$FAKE_LOG"; echo restoring > "$FAKE_TREE/JanusASL/cache"; sleep 0.3; echo ok > "$FAKE_TREE/JanusASL/cache"
             echo "END r $$ $(date +%s.%N)" >> "$FAKE_LOG"; lake build; }
 phase_r() { echo "START q $$ $(date +%s.%N)" >> "$FAKE_LOG"; sleep 0.4; echo "END q $$ $(date +%s.%N)" >> "$FAKE_LOG"; }
@@ -45,7 +45,7 @@ tl_run x phase_w; tl_run s phase_r
 EOS
 chmod +x "$t"/fake* "$t/lane.sh"
 export FAKE_LOG="$t/log" FAKE_TREE="$tree" FAKE_T="$t" FAKE_ROOT="$tree" JANUS_REAL_LAKE="$t/fakelake" \
-       JANUS_LANE_TREE="$tree" JANUS_LANE_LAKE_LOCK="$tree/.gate-lake.lock" PATH="$tree/scripts/lib/lanelake:$PATH"
+       JANUS_LANE_TREE="$tree" JANUS_LANE_LAKE_LOCK=1 PATH="$tree/scripts/lib/lanelake:$PATH"
 cp "$t/fakelake" "$t/lake_real"; ln -sf "$t/fakelake" "$t/lake"   # `lake` resolves to the wrapper first on PATH
 ( cd "$tree/JanusASL" && "$t/lane.sh" ) & ( cd "$tree/JanusASL" && "$t/lane.sh" ) & ( cd "$tree/JanusASL" && "$t/lane.sh" ) &
 ( cd "$tree" && "$t/fakejanus" ) & ( cd "$tree" && "$t/fakejanus" ) &
@@ -79,5 +79,28 @@ j=[i for i in iv if i[0]=="j"]; b=[i for i in iv if i[0]=="w"]
 sys.exit(1 if [1 for x in j for y in b if x[1]<y[2] and y[1]<x[2]] else 0)
 PY
 [ "$(cat "$tree/JanusASL/cache")" = ok ] && ok "the shared cache file ends consistent" || bad "cache file: $(cat "$tree/JanusASL/cache")"
+# --- two trees whose JanusASL/.lake is a symlink to ONE directory (as the gate's lake trees share the checkout's): the lock is
+# keyed by the resolved directory, so writers in different trees still serialise
+shared="$t/shared/.lake"; mkdir -p "$shared"
+for n in A B; do
+  mkdir -p "$t/t$n/JanusASL" "$t/t$n/.lake/build" "$t/t$n/scripts/lib"; : > "$t/t$n/JanusASL/lakefile.toml"
+  ln -sfn "$shared" "$t/t$n/JanusASL/.lake"; cp -r "$here/lanelake" "$t/t$n/scripts/lib/"; echo v1 > "$t/t$n/.lake/build/Janus.olean"
+done
+: > "$t/log"
+for n in A B A B; do
+  ( export FAKE_TREE="$t/t$n" FAKE_ROOT="$t/t$n" JANUS_LANE_TREE="$t/t$n" PATH="$t/t$n/scripts/lib/lanelake:$PATH"; cd "$t/t$n/JanusASL" && "$t/lane.sh" ) &
+done
+wait
+python3 -I - "$t/log" <<'PY' && ok "trees sharing one .lake by symlink: writers of different trees never overlap" || bad "writers of two trees sharing a .lake overlapped"
+import sys
+ev={}
+for l in open(sys.argv[1]):
+    w=l.split()
+    if w[0] in("START","END"): ev.setdefault(w[2],{})[w[0]]=(w[1],float(w[3]))
+iv=[(d["START"][0],d["START"][1],d["END"][1]) for d in ev.values() if "END" in d and d["START"][0] in ("w","r")]
+bad=[(a,c) for k,a in enumerate(iv) for c in iv[k+1:] if a[0]==c[0] and a[1]<c[2] and c[1]<a[2]]
+sys.exit(1 if bad or len(iv) < 8 else 0)
+PY
+[ -f "$shared/.gate-lake.lock" ] && [ ! -e "$t/tA/.gate-lake.lock" ] && ok "the lock file lives in the real shared directory" || bad "lock file location"
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail

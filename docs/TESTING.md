@@ -124,7 +124,7 @@ because JanusASL/.lake (5.8 GB, with `packages/Sail`) is shared by symlink and a
 each; the lock covers it. Tree reuse on failure and lakeguard are unchanged.
 
 **Lock order for a shared tree.** Every WRITER of a tree that lanes share holds the tree's locks, in this fixed
-order: (1) the tree lake lock `<tree>/.gate-lake.lock`; (2) the janus framework lock `<tree>/.lake/janus-framework.lock`
+order: (1) the package lake lock, KEYED BY THE RESOLVED DIRECTORY BEING WRITTEN: `realpath(<package>/.lake)/.gate-lake.lock` (`scripts/lib/lanelake/keys.sh`), so every tree and the checkout that share one `.lake` by symlink (the gate's lake trees share the checkout's `JanusASL/.lake`) serialise on ONE lock; (2) the janus framework lock `realpath(<tree>/.lake)/janus-framework.lock`
 (the lock a `janus ... --janus-root <tree>` holds SHARED for a whole verification; a writer takes it exclusive, because
 `lake build JanusASL` replays and rewrites `Janus/*.olean` in the tree's framework build, which a running janus must
 not see, and which made janus rebuild or loop: the 2400 s `rtasl-go` hang); (3) inside the command, the cache locks

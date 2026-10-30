@@ -266,14 +266,16 @@ lake_asl() {
 # Without JANUS_LANE_TREE / JANUS_LANE_LAKE_LOCK (a plain run), or outside the tree, it just runs the function.
 tl_run() {
   local mode=$1; shift
-  local lock="${JANUS_LANE_LAKE_LOCK:-}" tree="${JANUS_LANE_TREE:-}"
-  if [ -z "$lock" ] || [ -z "$tree" ] || [ "${JANUS_LANE_LOCK_HELD:-}" = "$lock" ] ||
-     case "$(pwd -P)/" in "$tree"/*) false ;; *) true ;; esac; then
+  local tree="${JANUS_LANE_TREE:-}" lock
+  if [ -z "${JANUS_LANE_LAKE_LOCK:-}" ] || [ -z "$tree" ] || case "$(pwd -P)/" in "$tree"/*) false ;; *) true ;; esac; then
     "$@"; return
   fi
+  . "$root/scripts/lib/lanelake/keys.sh"
+  lock="$(lane_lake_lock "$pkg")"   # keyed by the resolved JanusASL/.lake: trees sharing it by symlink share the lock
+  if [ "${JANUS_LANE_LOCK_HELD:-}" = "$lock" ]; then "$@"; return; fi
   local extra=()
-  # an exclusive phase rewrites the tree's framework build too: also the janus framework lock (order: tree, framework)
-  [ "$mode" = x ] && [ -d "$tree/.lake" ] && extra=("+x:$tree/.lake/janus-framework.lock")
+  # an exclusive phase rewrites the tree's framework build too: also the janus framework lock (order: package, framework)
+  [ "$mode" = x ] && [ -d "$tree/.lake" ] && extra=("+x:$(lane_fw_lock "$tree")")
   JANUS_LANE_LOCK_HELD="$([ "$mode" = x ] && echo "$lock")" \
     python3 -I "$root/scripts/lib/lanelake/lockexec.py" "$mode" "$lock" ${extra[@]+"${extra[@]}"} bash "$_TL_SELF" __call "$@"
 }
