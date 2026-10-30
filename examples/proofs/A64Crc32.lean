@@ -106,14 +106,14 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i by omega]
   · janus_run
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (1) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -121,7 +121,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (2) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -129,7 +129,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (2 + (1)) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -137,7 +137,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (4) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -145,7 +145,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (4 + (1)) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -153,7 +153,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (4 + (2)) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -161,7 +161,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (4 + (2 + (1))) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -169,7 +169,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (8) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -177,7 +177,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (8 + (1)) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -185,7 +185,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (8 + (2)) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -193,7 +193,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (8 + (2 + (1))) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -201,7 +201,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (8 + (4)) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -209,7 +209,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (8 + (4 + (1))) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -217,7 +217,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (8 + (4 + (2))) by omega]
     simp only [CRC.update_add, Nat.add_assoc]
@@ -225,7 +225,7 @@ theorem tail (crc p n cap : BitVec 64) (ret : Nat) (hret : RetAddr Extracted.pro
     try simp (disch := decide) only [readLE_mod_of_le, crc32Op_mod, Nat.mod_eq_of_lt hA]
     rw [not_mod32 _ (by crc_lt)]
     try simp (disch := crc_lt) only [crc32Op_64, crc32Op_32, crc32Op_16, crc32Op_8, Bool.false_eq_true, ite_false]
-    congr 1
+    refine congrArg (· ^^^ 4294967295) ?_
     rw [hacc]
     rw [show n.toNat = 16 * i + (8 + (4 + (2 + (1)))) by omega]
     simp only [CRC.update_add, Nat.add_assoc]

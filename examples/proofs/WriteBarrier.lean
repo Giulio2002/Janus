@@ -102,7 +102,7 @@ theorem core_meets (rt : List (Nat × Nat)) (n : Nat) (hn1 : 1 ≤ n) (hn8 : n �
   · funext i
     simp only [setReg, wbRegs, BitVec.add_sub_cancel]
     repeat' split
-    all_goals first | rfl | (exfalso; omega) | simp_all
+    all_goals first | (with_reducible rfl) | (exfalso; omega) | simp_all | rfl
   · janus_frame
   · rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by omega)]
     refine ⟨hn1, by omega, ?_, hn3⟩
