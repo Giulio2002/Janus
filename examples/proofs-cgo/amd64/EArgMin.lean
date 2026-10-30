@@ -241,7 +241,7 @@ theorem argmin_loop (impl : List Amd64.Segment) (lt : BitVec 64 → BitVec 64 �
         | (simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, c1sp, h4, BitVec.sub_add_cancel]; done)
         | (rw [c1mx, hmx])
         | (rw [c1cw, hcw])
-        | (rw [hs1 _ (by omega) (by omega)]; first | exact m1 | exact m2 | exact m3 | exact m4 | exact m5)
+        | (rw [hs1 _ (by omega) (by omega)]; first | with_reducible exact m1 | with_reducible exact m2 | with_reducible exact m3 | with_reducible exact m4 | with_reducible exact m5 | exact m1 | exact m2 | exact m3 | exact m4 | exact m5)
         | skip
       simp only [setRegF_apply, ↓reduceIte, Nat.reduceEqDiff, hpo]
       rw [hbest, best_succ _ _ _ hi1]
