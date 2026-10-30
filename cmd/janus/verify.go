@@ -158,6 +158,10 @@ func findLake() (string, error) {
 type leanRunner struct {
 	lake, root, buildDir string
 	stderr               io.Writer
+	// heldFW is the framework lock file this process holds EXCLUSIVELY while the runner's lake runs (the framework build):
+	// the child learns it in JANUS_FRAMEWORK_LOCK_HELD_X, so a lock-taking `lake` wrapper (scripts/lib/lanelake/lake) does
+	// not wait for a lock its own parent holds. Empty: nothing is claimed.
+	heldFW string
 }
 
 // run executes `lake <args>` in the Janus root with the build directory on LEAN_PATH
@@ -176,6 +180,10 @@ func (r *leanRunner) run(args ...string) (string, error) {
 	}
 	if len(args) > 0 && args[0] == "build" {
 		env = lakeBuildEnv(env)
+	}
+	env = withoutEnv(env, "JANUS_FRAMEWORK_LOCK_HELD_X") // an inherited claim is never ours
+	if r.heldFW != "" {
+		env = append(env, "JANUS_FRAMEWORK_LOCK_HELD_X="+r.heldFW)
 	}
 	cmd.Env = env
 	var out bytes.Buffer
@@ -1466,4 +1474,15 @@ func verifyAndReportMany(outdir string, opts map[string]string, specs []thmSpec,
 		}
 	}
 	return outs, nil
+}
+
+// withoutEnv drops every NAME=... entry of env.
+func withoutEnv(env []string, name string) []string {
+	out := env[:0:0]
+	for _, e := range env {
+		if !strings.HasPrefix(e, name+"=") {
+			out = append(out, e)
+		}
+	}
+	return out
 }

@@ -23,10 +23,23 @@ if [ -n "$tree" ] && [ -n "$enabled" ]; then
       case "${1:-}" in env|--version|--help|-h|-v|"") mode=-s ;; esac
       # An exclusive call also takes the JANUS FRAMEWORK lock (the real <tree>/.lake/janus-framework.lock, the one a
       # `janus ... --janus-root <tree>` holds shared for a whole verification): lake here replays and rewrites
-      # Janus/*.olean in the tree's framework build, and a running janus must not see that. Lock order: package lock, then
-      # framework lock, then (inside the command) the cache locks. janus takes the framework lock alone: no cycle.
+      # Janus/*.olean in the tree's framework build, and a running janus must not see that.
+      # LOCK ORDER (one total order, no cycle): the packages other than the tree's own (JanusASL, ...) < the framework lock
+      # < the tree's own package lock. janus takes the framework lock and, while it BUILDS the framework (exclusive), runs
+      # `lake build` in the tree root, i.e. fw -> root package; so a lake call at the tree root takes the framework lock
+      # first and the package lock second, and a call in another package takes its package lock first.
+      # janus runs this lake as its own child while it holds the framework lock EXCLUSIVELY and says so in
+      # JANUS_FRAMEWORK_LOCK_HELD_X (the lock path): that lock is already ours, not taken again (flock is not re-entrant
+      # across descriptors: it was a self-deadlock). Only an exclusive hold of exactly this lock counts.
       if [ "$mode" = -x ] && [ -d "$tree/.lake" ]; then
-        exec python3 -I "$d/lockexec.py" x "$lock" "+x:$(lane_fw_lock "$tree")" "$real" "$@"
+        fw="$(lane_fw_lock "$tree")"
+        if [ -n "${JANUS_FRAMEWORK_LOCK_HELD_X:-}" ] && [ "$(realpath -m "$JANUS_FRAMEWORK_LOCK_HELD_X")" = "$fw" ]; then
+          exec python3 -I "$d/lockexec.py" x "$lock" "$real" "$@"
+        fi
+        if [ "$pkg" = "$(cd "$tree" && pwd -P)" ]; then
+          exec python3 -I "$d/lockexec.py" x "$fw" "+x:$lock" "$real" "$@"
+        fi
+        exec python3 -I "$d/lockexec.py" x "$lock" "+x:$fw" "$real" "$@"
       fi
       exec python3 -I "$d/lockexec.py" "${mode#-}" "$lock" "$real" "$@" ;;
   esac
