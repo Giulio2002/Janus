@@ -227,6 +227,38 @@ register_option janus.merge : Bool := {
 partial def collectIdents (stx : Syntax) : Array Syntax :=
   if stx.isIdent then #[stx] else stx.getArgs.foldl (fun acc a => acc ++ collectIdents a) #[]
 
+/-- `g.tryClearMany toClear` without its quadratic cost: `MVarId.clear` scans every later
+declaration and the goal for a dependency, once per cleared hypothesis, and the `omega` helpers
+below clear 100 to 200 hypotheses of a large context at every side condition (a third of the time of
+the long runs). Here one backward pass over the context finds the declarations that something kept
+(another declaration, or the goal) depends on, and keeps them as `tryClearMany` would; the rest
+are erased in one new goal. -/
+def fastClear (g : MVarId) (toClear : Array FVarId) : MetaM MVarId := g.withContext do
+  if toClear.isEmpty then return g
+  let decl ← g.getDecl
+  let tgt ← instantiateMVars decl.type
+  let mut st : CollectFVars.State := collectFVars {} tgt
+  let mut clear : Std.HashSet FVarId := {}
+  for fv in toClear do clear := clear.insert fv
+  let mut cleared : Array FVarId := #[]
+  let lctx := decl.lctx
+  let decls := lctx.foldl (init := #[]) fun acc d => acc.push d
+  for i in [0:decls.size] do
+    let d := decls[decls.size - 1 - i]!
+    if clear.contains d.fvarId && !st.fvarSet.contains d.fvarId then
+      cleared := cleared.push d.fvarId
+    else
+      st := collectFVars st (← instantiateMVars d.type)
+      if let some v := d.value? then st := collectFVars st (← instantiateMVars v)
+  if cleared.isEmpty then return g
+  let mut lctx' := lctx
+  for fv in cleared do lctx' := lctx'.erase fv
+  let drop : Std.HashSet FVarId := cleared.foldl (·.insert ·) {}
+  let insts := decl.localInstances.filter fun i => !drop.contains i.fvar.fvarId!
+  let g' ← mkFreshExprMVarAt lctx' insts tgt .syntheticOpaque decl.userName
+  g.assign g'
+  return g'.mvarId!
+
 /-- Close an arithmetic goal by `omega` using one `Apart` hypothesis at a time: for each
 `h : Apart a n b k` of the context, `omega` in both cases of `h`. -/
 partial def arithAtoms (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
@@ -253,10 +285,11 @@ def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
   -- only disjunctions (the read-over-write and frame side conditions) are worth it
   unless gty.consumeMData.isAppOfArity ``Or 2 do return false
   let goalAtoms := arithAtoms gty
-  -- relevant `Apart` facts: every atom of their two start addresses occurs in the goal
+  -- one pass over the context: the `Apart` facts (and those relevant: every atom of their two
+  -- start addresses occurs in the goal) and the other propositions with their atoms
   let mut full := #[]
-  let part : Array (FVarId × Array Expr) := #[]
-  let mut aparts := #[]
+  let mut aparts : Array FVarId := #[]
+  let mut hyps : Array (FVarId × Array Expr) := #[]
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
@@ -264,14 +297,9 @@ def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
       aparts := aparts.push d.fvarId
       let hAtoms := arithAtoms (ty.getArg! 2) (arithAtoms (ty.getArg! 0))
       if hAtoms.all goalAtoms.contains then full := full.push (d.fvarId, hAtoms)
-  if full.isEmpty && part.isEmpty then return false
-  -- the arithmetic hypotheses and their atoms
-  let mut hyps := #[]
-  for d in ← getLCtx do
-    if d.isImplementationDetail || aparts.contains d.fvarId then continue
-    let ty ← instantiateMVars d.type
-    if ← isProp ty then hyps := hyps.push (d.fvarId, arithAtoms ty)
-  for (fv, _) in full ++ part do
+    else if ← isProp ty then hyps := hyps.push (d.fvarId, arithAtoms ty)
+  if full.isEmpty then return false
+  for (fv, _) in full do
     let aty ← instantiateMVars (← fv.getType)
     -- the atoms of the two ranges, lengths included
     let hAtoms := arithAtoms (aty.getArg! 3) (arithAtoms (aty.getArg! 2)
@@ -287,16 +315,12 @@ def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
             more := more ++ ha
         atoms := atoms ++ more
     -- keep only the arithmetic facts about these atoms, so that each `omega` is small
-    let mut toClear := #[]
-    for d in ← getLCtx do
-      if d.isImplementationDetail || d.fvarId == fv then continue
-      if aparts.contains d.fvarId then toClear := toClear.push d.fvarId; continue
-      let ty ← instantiateMVars d.type
-      if ← isProp ty then
-        unless (arithAtoms ty).all atoms.contains do toClear := toClear.push d.fvarId
+    let mut toClear : Array FVarId := aparts.filter (· != fv)
+    for (h, ha) in hyps do
+      unless ha.all atoms.contains do toClear := toClear.push h
     let saved' ← saveState
     try
-      let g' ← try g.tryClearMany toClear catch _ => pure g
+      let g' ← try fastClear g toClear catch _ => pure g
       let h ← Term.exprToSyntax (mkFVar fv)
       let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic|
         (have h' : _ := $h
@@ -638,6 +662,11 @@ structure StepCache where
   ctxs : Array (UInt64 × Name × Simp.Context × Simp.SimprocsArray × Simp.DischargeWrapper) := #[]
   /-- `(lctx key, simp cache)` of the `exec` simplifications. -/
   caches : Array (UInt64 × Simp.Cache) := #[]
+  /-- Side conditions the discharger proved: `(lctx key, simp set, goal) ↦ proof`. The same
+  conditions (`18446744073709551496 + sp < 2^64` of every stack access) are asked at every step. -/
+  dischOk : Std.HashMap (UInt64 × Name × Expr) Expr := {}
+  /-- Side conditions it failed on: `(lctx key, simp set, discharge depth, goal)`. -/
+  dischFail : Std.HashSet (UInt64 × Name × UInt32 × Expr) := {}
 
 /-- `simp e` with the methods of `simp (disch := d)` and the cache stored for the current local
 context (updated afterwards). -/
@@ -671,6 +700,35 @@ def withRecursiveDisch (d : Simp.Discharge) : Simp.Discharge := fun e => do
   let r ← Simp.simp e
   if r.expr.isTrue then return some (← mkOfEqTrue (← r.getProof)) else return none
 
+/-- Memoise the discharger `d` per (local context, simp set, goal): both its proofs and its
+failures (a failure only at the same discharge depth, where the nested discharges are allowed to go
+as deep). Only goals without metavariables, and proofs without metavariables, are kept, so that
+nothing refers to an assignment a backtracking tactic could undo; the local context is part of the
+key (the hypotheses `d` may use). Every proof is still checked by the kernel. -/
+def memoDisch (cref : IO.Ref StepCache) (set : Name) (d : Simp.Discharge) : Simp.Discharge := fun e => do
+  let e ← instantiateMVars e
+  if e.hasMVar then return ← d e
+  let key ← lctxKey
+  let depth := (← readThe Simp.Context).dischargeDepth
+  let sc ← cref.get
+  if let some pf := sc.dischOk[(key, set, e)]? then return some pf
+  if sc.dischFail.contains (key, set, depth, e) then return none
+  let r ← d e
+  let limit := 20000
+  match r with
+  | some pf =>
+    let pf ← instantiateMVars pf
+    if pf.hasMVar then return some pf
+    cref.modify fun sc =>
+      let m := if sc.dischOk.size ≥ limit then {} else sc.dischOk
+      { sc with dischOk := m.insert (key, set, e) pf }
+    return some pf
+  | none =>
+    cref.modify fun sc =>
+      let m := if sc.dischFail.size ≥ limit then {} else sc.dischFail
+      { sc with dischFail := m.insert (key, set, depth, e) }
+    return none
+
 /-- Look up or build (with `mk`) the simp context of simp set `set` for the current local
 context, and run `k` with it. -/
 def withCachedCtx (cref : IO.Ref StepCache) (set : Name)
@@ -685,7 +743,7 @@ def withCachedCtx (cref : IO.Ref StepCache) (set : Name)
         let ctxs := if sc.ctxs.size ≥ 16 then sc.ctxs.extract 1 sc.ctxs.size else sc.ctxs
         { sc with ctxs := ctxs.push (key, set, c, sp, dw) }
       pure (c, sp, dw)
-  dw.with fun d? => k ctx simprocs (d?.map withRecursiveDisch)
+  dw.with fun d? => k ctx simprocs (d?.map fun d => memoDisch cref set (withRecursiveDisch d))
 
 /-! ## Closed side conditions
 
@@ -1037,7 +1095,7 @@ def omegaSparse (g : MVarId) : TacticM Bool := g.withContext do
   let saved ← saveState
   let tryOmega (keep : Array FVarId) : TacticM Bool := do
     let toClear := (ors.map (·.1)).filter (!keep.contains ·)
-    let g' ← g.tryClearMany toClear
+    let g' ← fastClear g toClear
     -- each attempt has its own small heartbeat budget: a failed `omega` is as expensive as a
     -- successful one, and the attempts must not eat the declaration's budget
     let ok ← tryCatchRuntimeEx
@@ -1103,7 +1161,7 @@ def clearIrrelevant (g : MVarId) : MetaM MVarId := g.withContext do
     let ty ← instantiateMVars d.type
     unless ← isProp ty do continue
     unless (arithAtoms ty).all goalAtoms.contains do toClear := toClear.push d.fvarId
-  g.tryClearMany toClear
+  fastClear g toClear
 
 /-- Like `clearIrrelevant`, but the atoms of the small hypotheses that touch the goal count as the
 goal's too (one more hop): a block's size `k` linking `Apart a n t k` and `8·m ≤ k` to the goal. -/
@@ -1124,7 +1182,7 @@ def clearIrrelevant2 (g : MVarId) : MetaM MVarId := g.withContext do
     let ty ← instantiateMVars d.type
     unless ← isProp ty do continue
     unless (arithAtoms ty).all expanded.contains do toClear := toClear.push d.fvarId
-  g.tryClearMany toClear
+  fastClear g toClear
 
 /-- A side condition `Apart a n b k` (e.g. part of a callee's precondition): from a hypothesis
 `Apart a' n' b' k'` (or its mirror) of which it is a sub-range pair, the containments by `omega`. -/
@@ -1563,7 +1621,13 @@ elab "janus_eval% " t:term : term => do
   Term.synthesizeSyntheticMVarsNoPostponing
   let e ← instantiateMVars e
   if e.hasFVar || e.hasMVar then throwError "janus_eval%: not a closed term{indentExpr e}"
-  let v ← unsafe evalExpr Nat (mkConst ``Nat) e
+  -- over imported constants when possible (`unfoldLocalDefs`): a term that mentions a definition of
+  -- the current file is compiled against the compiled environment of the whole file so far, i.e.
+  -- it waits for every earlier theorem to be elaborated (60-70 s per use in the long examples);
+  -- the value is the same either way (the unfolding is definitional), and it only picks a numeral
+  let e' ← unfoldLocalDefs e
+  let v ← if e' == e then unsafe evalExpr Nat (mkConst ``Nat) e else
+    try unsafe evalExpr Nat (mkConst ``Nat) e' catch _ => unsafe evalExpr Nat (mkConst ``Nat) e
   return mkNatLit v
 
 /-! ## `janus_cases` -/
