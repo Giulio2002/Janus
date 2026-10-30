@@ -102,5 +102,19 @@ bad=[(a,c) for k,a in enumerate(iv) for c in iv[k+1:] if a[0]==c[0] and a[1]<c[2
 sys.exit(1 if bad or len(iv) < 8 else 0)
 PY
 [ -f "$shared/.gate-lake.lock" ] && [ ! -e "$t/tA/.gate-lake.lock" ] && ok "the lock file lives in the real shared directory" || bad "lock file location"
+# 4. an exclusive phase nested in a SHARED hold of the same lock is refused loudly (exit 97), never a self-deadlock
+cat > "$t/nest.sh" <<'EOS'
+#!/usr/bin/env bash
+set -u
+root="$FAKE_ROOT"; pkg="$FAKE_TREE/JanusASL"; . "$FAKE_T/tl.sh"
+inner() { :; }
+outer() { tl_run x inner; }
+if [ "${1:-}" = __call ]; then shift; "$@"; exit; fi
+_TL_SELF="$0"
+tl_run s outer
+EOS
+chmod +x "$t/nest.sh"
+( cd "$tree/JanusASL" && timeout 20 "$t/nest.sh" > "$t/nest.out" 2>&1 ); nrc=$?
+[ "$nrc" = 97 ] && grep -q "refusing an exclusive" "$t/nest.out" && ok "x nested in a shared hold is refused with exit 97 (no deadlock)" || bad "nested x: rc $nrc (124 = it hung): $(cat "$t/nest.out")"
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail

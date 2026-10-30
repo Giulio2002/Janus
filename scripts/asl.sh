@@ -273,10 +273,18 @@ tl_run() {
   . "$root/scripts/lib/lanelake/keys.sh"
   lock="$(lane_lake_lock "$pkg")"   # keyed by the resolved JanusASL/.lake: trees sharing it by symlink share the lock
   if [ "${JANUS_LANE_LOCK_HELD:-}" = "$lock" ]; then "$@"; return; fi
+  # An exclusive phase nested in a SHARED hold of the same lock would wait for itself (flock on a new descriptor of the
+  # same file never upgrades): refuse it loudly instead of hanging. JANUS_LANE_LOCK_SHARED names the lock held shared.
+  if [ "$mode" = x ] && [ "${JANUS_LANE_LOCK_SHARED:-}" = "$lock" ]; then
+    echo "asl.sh: refusing an exclusive '$1' phase while this process holds $lock SHARED (it would deadlock on itself)" >&2
+    return 97
+  fi
   local extra=()
   # an exclusive phase rewrites the tree's framework build too: also the janus framework lock (order: package, framework)
   [ "$mode" = x ] && [ -d "$tree/.lake" ] && extra=("+x:$(lane_fw_lock "$tree")")
-  JANUS_LANE_LOCK_HELD="$([ "$mode" = x ] && echo "$lock")" \
+  # (lockexec.py leaves the lock descriptors inheritable: every child, and any background process it starts, keeps the
+  # lock until it exits, so no phase may leave a daemon behind)
+  JANUS_LANE_LOCK_SHARED="$([ "$mode" = s ] && echo "$lock")" JANUS_LANE_LOCK_HELD="$([ "$mode" = x ] && echo "$lock")" \
     python3 -I "$root/scripts/lib/lanelake/lockexec.py" "$mode" "$lock" ${extra[@]+"${extra[@]}"} bash "$_TL_SELF" __call "$@"
 }
 _TL_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
