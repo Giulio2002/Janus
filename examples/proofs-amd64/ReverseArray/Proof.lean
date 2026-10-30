@@ -41,6 +41,9 @@ theorem correctness (out inp : BitVec 64) :
   all_goals intro i hi4; janus64_cases hi4
   all_goals janus64_simp
   all_goals first
+    | with_reducible exact half _ _ _ 0 (by omega) (by omega)
+    | (rw [half _ _ _ 8 (by omega) (by omega)]; done)
+    | (rw [half _ _ _ 0 (by omega) (by omega), Nat.add_zero]; done)
     | exact half _ _ _ 0 (by omega) (by omega)
     | (rw [half _ _ _ 8 (by omega) (by omega)])
     | (rw [half _ _ _ 0 (by omega) (by omega), Nat.add_zero])

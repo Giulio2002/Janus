@@ -16,7 +16,7 @@ theorem correctness (x y : BitVec 64) (hy : y ≠ 0) :
   simp only [regSP] at hacc hle hnw
   have hy' : y.toNat ≠ 0 := fun h => hy (BitVec.eq_of_toNat_eq h)
   janus64_run
-  congr 1; congr 1
+  first | (with_reducible congr 1; with_reducible congr 1) | (congr 1; congr 1)
   apply BitVec.eq_of_toNat_eq
   rw [BitVec.toNat_ofNat, BitVec.toNat_udiv, Nat.mod_eq_of_lt (Nat.lt_of_le_of_lt (Nat.div_le_self _ _) x.isLt)]
 

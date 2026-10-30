@@ -40,7 +40,7 @@ theorem correctness (i : BitVec 64) :
   have hk : i.toNat % 16 < digits.bytes.length := by rw [hlen]; omega
   rw [getElem!_pos digits.bytes (i.toNat % 16) hk]
   rw [hbyte] at hlt
-  congr 1; congr 1
+  first | (with_reducible congr 1; with_reducible congr 1) | (congr 1; congr 1)
   apply BitVec.eq_of_toNat_eq
   simp only [BitVec.toNat_setWidth, BitVec.toNat_ofNat]
   omega

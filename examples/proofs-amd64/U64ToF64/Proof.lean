@@ -44,7 +44,7 @@ theorem correctness (x : BitVec 64) :
       rw [BitVec.toNat_or, BitVec.toNat_ushiftRight, BitVec.toNat_setWidth, BitVec.toNat_and,
         BitVec.toNat_setWidth, Nat.shiftRight_eq_div_pow, show (1#32).toNat = 1 from rfl,
         Nat.and_one_is_mod, Nat.pow_one]
-      congr 1; omega
+      first | (with_reducible congr 1; omega) | (congr 1; omega)
     have hylt : x.toNat / 2 ||| x.toNat % 2 < 2 ^ (64 - 1) := by
       have := or_bit (x.toNat / 2) (x.toNat % 2) (Nat.mod_lt _ (by decide))
       have hb : x.toNat / 2 % 2 ||| x.toNat % 2 < 2 :=

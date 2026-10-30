@@ -79,9 +79,9 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   subst hpe hdf
   have hcr : cr = setRegF (setRegF cr 2 (BitVec.ofNat 64 ((s.regs 4).toNat - 32))) 14 (s.regs 14) := by
     funext i; simp only [setRegF]; split
-    · subst_vars; exact h14
+    · first | (with_reducible subst_vars; exact h14) | (subst_vars; exact h14)
     · split
-      · subst_vars; exact hrdx
+      · first | (with_reducible subst_vars; exact hrdx) | (subst_vars; exact hrdx)
       · rfl
   rw [hcr]
   janus64_run until [Extracted.program.contractAddr "runtime.gorecover"]
