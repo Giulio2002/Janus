@@ -57,6 +57,7 @@
 #   ASL_JOBS     Lean processes Lake runs at once (default ASL_MEM_GB / ASL_JOB_GB, at least 1)
 #   ASL_JOB_GB   peak of the largest single Lean process of the build (default 8, docs/ASL.md "Memory")
 #   REPLAY_BATCH modules per leanchecker process in `replay` (default 4)
+#   JANUS_REPLAY_PAR  leanchecker processes `replay` runs at once (default 4)
 #   ASL_EXAMPLES  examples for `verify` (default "Add Max Mul64 Add128")
 #   ASL_VERIFY_JOBS  examples of `verify` verified at once (default 4)
 set -euo pipefail
@@ -415,12 +416,24 @@ for m in sorted(seen):
 PY
 )" || exit 1
   for m in $list; do mods+=("$m"); done
-  local i
+  # The batches are independent readers of the built package (a shared lock): up to JANUS_REPLAY_PAR (default 4) leanchecker
+  # processes at once, each on its own batch; every batch must pass, and a failing batch's output is printed.
+  local i par="${JANUS_REPLAY_PAR:-4}" logs rc=0 pids=() names=()
+  [ "$par" -ge 1 ] 2>/dev/null || par=1
+  logs="$(mktemp -d "${TMPDIR:-/var/tmp}/asl-replay.XXXXXX")" || exit 1
   for ((i = 0; i < ${#mods[@]}; i += batch)); do
-    (cd "$pkg" && LEAN_NUM_THREADS="${JANUS_REPLAY_THREADS:-4}" memguard_run -n "leanchecker" -- lake env leanchecker "${mods[@]:i:batch}") ||
-      { echo "replay: leanchecker failed on ${mods[*]:i:batch}" >&2; exit 1; }
+    while [ "$(jobs -rp | wc -l)" -ge "$par" ]; do sleep 1; done
+    (cd "$pkg" && LEAN_NUM_THREADS="${JANUS_REPLAY_THREADS:-4}" memguard_run -n "leanchecker" -- lake env leanchecker "${mods[@]:i:batch}") > "$logs/b$i.log" 2>&1 &
+    pids+=($!); names+=("$i")
   done
-  echo "replay: leanchecker passed on all ${#mods[@]} modules of JanusASL.Proofs (LEAN_NUM_THREADS=${JANUS_REPLAY_THREADS:-4}, $batch per process)"
+  for i in "${!pids[@]}"; do
+    if ! wait "${pids[$i]}"; then
+      rc=1; echo "replay: leanchecker failed on ${mods[*]:${names[$i]}:batch}" >&2; cat "$logs/b${names[$i]}.log" >&2
+    fi
+  done
+  rm -rf "$logs"
+  [ "$rc" = 0 ] || exit 1
+  echo "replay: leanchecker passed on all ${#mods[@]} modules of JanusASL.Proofs (LEAN_NUM_THREADS=${JANUS_REPLAY_THREADS:-4}, $batch per process, up to $par processes at once)"
 }
 
 # janus verify --asl builds JanusASL in its own cache (`janus framework --json` .asl.cacheDir). Seed

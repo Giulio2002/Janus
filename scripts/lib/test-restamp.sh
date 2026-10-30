@@ -54,4 +54,5 @@ mk "$t/d"; echo changed > "$t/d/.lake/build/lib/lean/Janus/A.olean"; before=$(ca
 python3 -I "$here/restamp.py" "$t/d" "$t/missing-record.json" > /dev/null 2>&1; [ "$(cat "$t/d/.lake/janus-framework.ready")" = "$before" ] && ok "no record: the stamp is left as it is" || bad "stamp changed without a record"
 # the restore's --record output: a signed entry restores and is recorded; see JanusASL/tools/test_asl_mod_cache.sh for the cache itself
 grep -q -- '--record' "$here/../../JanusASL/tools/asl_mod_cache.py" && grep -q 'RESTORED\[dst\] = h' "$here/../../JanusASL/tools/asl_mod_cache.py" && ok "asl_mod_cache.py restore records exactly the files it copied from verified entries" || bad "restore --record missing"
+[ "$fail" = 0 ] && echo "all checks passed"
 exit $fail
