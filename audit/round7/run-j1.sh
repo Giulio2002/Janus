@@ -48,6 +48,8 @@ jep="$(date -u -d "${jts:-1970-01-01T00:00:00Z}" +%s 2>/dev/null || echo 0)"
 if grep -q '^  Cached:' <<<"$out" || grep -q '"cached": *true' "$W/Add/verified.json" 2>/dev/null || [ "$jep" -lt "$j1t0" ]; then
   echo "  J1a: the verdict was not computed in this run (cached or stale report)   <-- BROKEN"; broken+=(J1a-not-fresh-run)
 fi
+# diagnostic only: when the row is BROKEN keep the janus output (the row line cuts it at 150 characters)
+if [ ${#broken[@]} -gt 0 ]; then echo "  ---- janus output of the J1a verification (first 40 lines) ----"; head -40 <<<"$out" | cut -c1-600 | sed 's/^/  | /'; fi
 tmark "J1 end"
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
 echo; echo "All round-7 J1 rows as expected."
