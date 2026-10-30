@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -102,7 +104,9 @@ func parallel(t *testing.T) func() {
 	s.holders[top]++
 	s.cond.Broadcast() // the next best may take another free slot
 	s.mu.Unlock()
+	held := time.Now()
 	return func() {
+		recordHold(t.Name(), time.Since(held))
 		s.mu.Lock()
 		s.holders[top]--
 		s.running--
@@ -121,4 +125,21 @@ func (s *testScheduler) best() *testing.T {
 		}
 	}
 	return bt
+}
+
+// recordHold appends "name seconds" to the file named by JANUS_TEST_DURATIONS: the time a test held its slot, i.e. its
+// own running time. `go test -v` reports a parallel test's duration INCLUDING the wait for a slot of this scheduler
+// (the wait is after t.Parallel returns), so with few slots it says nothing about the test; this does, and
+// scripts/gotest-shards.sh balances with these figures (docs/TESTING.md "Go tests").
+func recordHold(name string, d time.Duration) {
+	path := os.Getenv("JANUS_TEST_DURATIONS")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(f, "%s\t%.1f\n", name, d.Seconds())
+	f.Close()
 }

@@ -307,7 +307,10 @@ pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
 # The go tests' prebuilt framework fixture (cmd/janus/fixture_test.go, docs/TESTING.md "Go tests"): built here, once, by
 # the tests' TestMain (a run that selects no test), so the gotest lane does not pay for it; it runs beside the verify pool.
-pre_fixture() { JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
+# Two stages (scripts/lib/dag.sh): the embedded framework's build and replay, in the fixture only (no user cache, no checkout
+# build: it starts at t=0), then the checkout's replay verdict (carried from the user cache where pre-stamp recorded it).
+pre_fixture_emb() { JANUS_TEST_FIXTURE_PART=embedded JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
+pre_fixture() { JANUS_TEST_FIXTURE_PART=checkout JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
 pre_stamp() { JANUS_ROOT="$root" JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 # From the moment the shared framework build (.lake/build) is finished nothing may write it (a lake that rebuilds a
@@ -426,11 +429,11 @@ declare -A STAGE_CODE=(
   [pre-ex-asm]="step pre-ex-asm scripts/build-examples-asm.sh" [pre-ex-sys]="step pre-ex-sys scripts/build-examples-sys.sh"
   [pre-ex-rtmisc]="step pre-ex-rtmisc scripts/build-examples-rtmisc.sh" [pre-ex-print]="step pre-ex-print scripts/build-examples-print.sh"
   [pre-ex-cgo]="step pre-ex-cgo scripts/build-examples-cgo.sh"
-  [pre-stamp]="step pre-stamp pre_stamp" [pre-warm]="step pre-warm pre_warm" [pre-fixture]="step pre-fixture pre_fixture" [pre-pin]="step pre-pin pre_pin"
+  [pre-stamp]="step pre-stamp pre_stamp" [pre-warm]="step pre-warm pre_warm" [pre-fixture-emb]="step pre-fixture-emb pre_fixture_emb" [pre-fixture]="step pre-fixture pre_fixture" [pre-pin]="step pre-pin pre_pin"
   [tree-x86]="mktree '$tree_x86'" [tree-asl]="mktree '$tree'" [tree-aslv]="mktree '$tree_aslv' private" [tree-go]="mktree '$tree_go'"
 )
 # est: long first (the framework build is the critical path of the cold gate)
-declare -A STAGE_EST=([pre-lake]=800 [pre-fixture]=300 [pre-warm]=120 [pre-gobin]=60 [pre-ex-amd64]=15)
+declare -A STAGE_EST=([pre-lake]=800 [pre-fixture-emb]=700 [pre-fixture]=30 [pre-warm]=120 [pre-gobin]=60 [pre-ex-amd64]=15)
 declare -A queued=()
 for n in $(dag_closure "${WANT[@]}"); do
   [ -n "${STAGE_CODE[$n]:-}" ] || continue
