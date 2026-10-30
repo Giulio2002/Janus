@@ -61,6 +61,18 @@ and `-j` others):
 | `asl-build`, `sail-build` | `scripts/asl.sh build` (set `ASL_CACHE`), `scripts/oracle-sail.sh build` |
 | `rtasl-prove`, `-rel`, `-strict`, `-replay`, `-btf`, `-probes`, `-fsqrt`, `-go` | `audit/rt-asl/run.sh GROUP`: the red-team round ASL, one lane per group (`run.sh` without arguments still runs them all, in order) |
 
+**Automatic sizing.** Without `-j` / `--lanes` (and without `JANUS_JOBS` / `JANUS_LANES`), `gate.sh` chooses them
+from the host (`scripts/lib/autojobs.sh`, tested by `scripts/lib/test-autojobs.sh` with fake nproc / MemAvailable /
+load inputs): `jobs = min(cap, (free cores - 16 reserved for the other lanes) / 2.1 cores per item, (MemAvailable -
+30 GiB floor - 40 GiB reserved) / item GiB)`, at least 2, where free cores = nproc - 1-minute load and item GiB = the
+largest recorded per-item peak of `scripts/speed-baseline.tsv` (6.1 without one) x 1.5, at least 4; `lanes =
+min(jobs + 3, 15)`. (Before the joint budget an idle 48-core / 170 GiB box got `-j 10`.) Fewer than 8 free cores or a 1-minute
+load of 60 or more (RULES.md) falls back to `-j 2`. `JANUS_GATE_MAX_JOBS` (default 12), `JANUS_GATE_MEM_FLOOR_GIB`,
+`JANUS_GATE_LANE_CORES`, `JANUS_GATE_LANE_GIB`, `JANUS_GATE_CORES_PER_ITEM` tune it. The choice and its reason are
+printed and recorded in the timeline's `gate` line (`auto`, `why`, `roundsLanes`). The audit-round lane count (`JANUS_ROUNDS_LANES`, read by `audit/run-rounds.sh` where it supports it, exported to the rounds lane only) is min(6, free cores / 8), at least 2, and 2 on a busy host. The memory is a budget, not a charge per slot: the verify pool gets MemAvailable - floor (30) - other lanes (25) - round lanes x 15 GiB, shared by its running items through per-item admission (`pool.sh`): a running item reserves its own recorded peak x 1.3 (baseline or `.times`-side peaks; 9.15 GiB when unknown), a new item starts only if the reservations plus its own fit (the first always starts), so small items run `-j` wide and heavy ones limit themselves (`POOL_DEBUG=1` logs each deferral; the timeline's pool line has `peakConcurrency` and `peakReservedGiB`; `scripts/lib/test-poolmem.sh`). Round lanes are cut only to keep room for two worst-case items. The split is logged (`mem budget: verify X GiB (per-item admission, N slots) + rounds Y GiB + lanes Z GiB + floor F GiB of M`, timeline `memBudget`). An idle 48-core / 170 GiB box gets `-j 12` with a 40 GiB verify budget and 5 round lanes. Admission: every pool (`pool.sh`) starts no new
+item while MemAvailable is below the floor plus one item's estimate. An explicit `-j` or `JANUS_JOBS` (the shared-box
+rule of RULES.md) is used as given; memguard's per-job limits are unchanged.
+
 **Concurrency.** `-j N` / `JANUS_JOBS` (default **2**, the shared-box rule; `auto` uses the formula of
 `scripts/lib/parallel.sh`) is the number of verify items at once; the go test shards (`max(2, N)`, one
 test slot each) and the audit lanes (`N`) scale with it. `--lanes` / `JANUS_LANES` caps the lanes.
@@ -159,6 +171,8 @@ re-record on a green full gate and say why in the commit message.
 | CI `scripts/oracle.sh quick` (qemu) and `scripts/oracle-amd64.sh quick` (native), MISMATCH check | lane `oracle` (in the lake tree, after `rtasl-prove`) |
 | asl.yml `scripts/asl.sh verify` (4 ASL corollaries) | lane `asl-verify` (after `rtasl-prove`) |
 | CI `audit/run-all.sh`, `verify-examples.sh`, `verify-amd64-examples.sh`, `ci-axiom-guard.sh`, `x86formal.sh` build/prove, `asl.sh build/prove` | already covered: lanes `rounds`, `verify`, `axiom`, `x86`, `asl-build`, `rtasl-prove` |
+
+**Peak memory in the baseline.** Column 3 of `scripts/speed-baseline.tsv` is read from janus's own records, not from a per-item cgroup: the largest `memoryGuard.peakBytes` in the item's `verified.json` and `verified/*.json` written during the run (a stale report from an earlier run is ignored; the log's `memguard[...]: peak` lines are the fallback). An item without a report (a failed one) records 0, which the pool's admission treats as unknown (the conservative estimate). Checked on the vbatch gate's artifacts: 461 of 463 pool items have a nonzero peak (arm64 MallocFast 5.63 GiB, amd64 RuneLen 3.53, arm64 Add 0.03).
 
 **Timeline.** `<out>/timeline.jsonl` (default `artifacts/gate/<UTC time>/`, linked as `artifacts/gate/latest`)
 has one JSON object per prebuild step, stage, pool, lane and item (start/end epoch seconds, wall, status);

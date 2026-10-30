@@ -5,6 +5,8 @@
 # 3. a rerun of the same sources reuses it; 4. a passing run removes it. Needs a built tree (run in a worktree
 # where `lake build` is done), so it is a script test, not part of go test.
 set -uo pipefail
+# private out dir and timeline: never the running gate's (inherited from gate.sh when run by the gotest lane)
+unset POOL_TIMELINE POOL_DIR JANUS_POOL_DIR POOL_BUDGET_KB POOL_DEBUG POOL_RES_TRACE POOL_MEM_HEADROOM_KB POOL_JOB_MEM_KB JANUS_VERIFY_MEM_BUDGET_GIB JANUS_GATE_PG JANUS_GATE_AUTO_WHY JANUS_GATE_ROUNDS_LANES JANUS_GATE_AUTO_BUDGET
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$here"
 t="$(mktemp -d "${TMPDIR:-/tmp}/test-gatelanes.XXXXXX")"; trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }

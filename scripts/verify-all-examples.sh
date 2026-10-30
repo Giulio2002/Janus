@@ -166,6 +166,12 @@ POOL_GUARD=0
 pooldir="${JANUS_POOL_DIR:-$root/artifacts/verify-all-logs}"
 rm -rf "$pooldir"
 pool_init verify "$PAR_JOBS" "$pooldir"
+# per-item memory admission when the gate gave the pool a budget (scripts/lib/pool.sh): each running item reserves its
+# own recorded peak x1.3 (the conservative estimate when unknown) of JANUS_VERIFY_MEM_BUDGET_GIB
+if [ -n "${JANUS_VERIFY_MEM_BUDGET_GIB:-}" ]; then
+  POOL_BUDGET_KB=$(awk -v g="$JANUS_VERIFY_MEM_BUDGET_GIB" 'BEGIN { printf "%d", g * 1048576 }');
+  pool_peaks "${JANUS_SPEED_BASELINE:-$root/scripts/speed-baseline.tsv}"
+fi
 pool_times "$times"
 # --incremental: first find out, for every item, whether the record of an identical PASS exists (the item's own
 # script decides, JANUS_INCR_PRECHECK=1: it extracts, computes the key and exits 90 if the item must run;
