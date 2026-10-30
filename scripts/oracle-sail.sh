@@ -22,8 +22,8 @@
 #   SAIL_MODEL  vendored | regen  (which model.cpp to build against; default vendored)
 #   JANUS_MODEL_PIN=1  the cold gate (scripts/gate.sh --cold): the driver comes ONLY from the model pin
 #             (scripts/lib/modelpin.py, docs/TESTING.md "Cold gate and the model pin"), never from the build cache and
-#             never built-and-published: a missing, tampered, corrupt or stale pin FAILS (JANUS_MODEL_PIN_STALE=rebuild
-#             builds the driver from source inside the run instead, loudly, publishing nothing). Only
+#             never built-and-published: a missing, tampered or corrupt pin FAILS (a stale one is rebuilt inside the run unless JANUS_MODEL_PIN_STALE=fail:
+#             the driver is built from source inside the run, loudly, publishing nothing). Only
 #             scripts/nightly-cold-gate.sh writes the pin.
 #   KEEP      what `run` leaves in OUT (scripts/lib/artifacts.sh): by default the reports, the
 #             compressed corpus, results and verdicts, the MISMATCH verdicts; the per-comparison
@@ -118,12 +118,12 @@ pin_step() {
   out=$(python3 -I "$root/scripts/lib/modelpin.py" "$1" sail "$PIN_DIR" "$key" "$here") || rc=$?
   case $rc in
     0) echo "sail pin: driver $key: $out" ;;
-    2) if [ "${JANUS_MODEL_PIN_STALE:-fail}" = rebuild ]; then
+    2) if [ "${JANUS_MODEL_PIN_STALE:-rebuild}" = rebuild ]; then
          echo "sail pin: driver $key: $out"; echo "sail pin: STALE PIN: the driver is built from source INSIDE this gate (JANUS_MODEL_PIN_STALE=rebuild); nothing is pinned or published"
          return 3
        fi
        echo "sail pin: FAIL: driver $key: $out" >&2
-       echo "sail pin: the driver inputs changed since the pin was written. Build and pin them with the nightly truly-cold run, or rerun with --rebuild-stale-model" >&2; exit 1 ;;
+       echo "sail pin: the driver inputs changed since the pin was written. Build and pin them with the nightly truly-cold run, or rerun without --no-rebuild-stale-model" >&2; exit 1 ;;
     *) echo "sail pin: FAIL: driver $key: $out" >&2; exit 1 ;;
   esac
 }

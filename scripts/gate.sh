@@ -34,14 +34,17 @@
 #               a build: use a fresh worktree, or --wipe), and no JanusASL/Janus module cache. The model artifacts come ONLY from
 #               the model pin (scripts/model-pin.sh, scripts/lib/modelpin.py): content-hash pinned (SHA-256 of every file, the
 #               manifest HMAC, and a signed pin record that binds the exact manifest) and integrity-checked on EVERY cold
-#               gate, before anything is built (and again by every restore and after every build): a tampered, corrupt, missing
-#               or STALE pin (a model input changed: sources, toolchain, environment, key scheme) FAILS the gate, it never falls
-#               back to a cached or silently rebuilt model. The pin is written ONLY by the nightly truly-cold run
+#               gate, before anything is built (and again by every restore and after every build): a tampered, corrupt or missing
+#               pin FAILS the gate; a STALE pin (a model input changed: sources, toolchain, environment, key scheme) is rebuilt
+#               inside the gate (see --no-rebuild-stale-model), never replaced by a cached model. The pin is written ONLY by the nightly truly-cold run
 #               (scripts/nightly-cold-gate.sh: JANUS_ASL_CACHE=0, empty caches, builds the model from source, must pass and
 #               agree with the cached run). Nothing else is relaxed: every check, lane and the speed check run as in a full gate.
 #               Not combinable with --incremental.
-#   --rebuild-stale-model   with --cold: a STALE pin (and only stale: tampered / corrupt / missing still fail) makes this gate build
-#               the model from source inside the run (slow: ~1 h of ArmASL, ~25 min of Sail), loudly, and publish/pin nothing
+#   --no-rebuild-stale-model   with --cold: by DEFAULT a STALE pin (no pin for the current model key: a model input changed) makes this
+#               gate build the model from source INSIDE the run (slow: ~1 h of ArmASL, ~25 min of Sail), loudly, verified by the build
+#               itself, publishing and pinning nothing. This flag makes a stale pin FAIL instead. A tampered, corrupt, missing,
+#               unsigned or re-signed pin, a manifest that does not match its record, or a pin under another HMAC key ALWAYS fails
+#               and is never rebuilt around.
 #   --wipe      with --cold: remove this checkout's build directories (.lake/build, JanusASL/.lake/build, JanusX86/.lake/build,
 #               oracle-sail/target) instead of refusing to start on them
 # Cancel a run: it is its own process group, and writes the group id to <out>/pgid; cancel with
@@ -100,7 +103,7 @@ lane_spec() {
 }
 orig_args=("$@")
 sbfile="${JANUS_SPEED_BASELINE:-$root/scripts/speed-baseline.tsv}"
-jobs_n="${JANUS_JOBS:-}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce incremental="${JANUS_GATE_INCREMENTAL:-}" explain_item="" cold="" wipe="" stale_rebuild="" cold_preflight_only=""
+jobs_n="${JANUS_JOBS:-}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce incremental="${JANUS_GATE_INCREMENTAL:-}" explain_item="" cold="" wipe="" stale_mode=rebuild cold_preflight_only=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -j|--jobs) jobs_n="${2:?-j needs a number}"; shift 2 ;;
@@ -117,16 +120,16 @@ while [ $# -gt 0 ]; do
     --explain) explain_item="${2:?--explain needs an item (e.g. arm64:Add) or a lane (e.g. lane:gotest)}"; shift 2 ;;
     --cold) cold=1; shift ;;
     --wipe) wipe=1; shift ;;
-    --rebuild-stale-model) stale_rebuild=1; shift ;;
+    --no-rebuild-stale-model) stale_mode=fail; shift ;;
     --cold-preflight-only) cold_preflight_only=1; shift ;;   # (self-test hook: the pin check alone)
     --update-baseline) sbmode=record; shift ;;
     --speed-baseline) sbmode="${2:?}"; shift 2 ;;
     -h|--help) sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 0 ;;
-    *) echo "usage: scripts/gate.sh [--cold [--wipe] [--rebuild-stale-model]] [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
+    *) echo "usage: scripts/gate.sh [--cold [--wipe] [--no-rebuild-stale-model]] [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
   esac
 done
-if [ -z "$cold" ] && { [ -n "$wipe" ] || [ -n "$stale_rebuild" ] || [ -n "$cold_preflight_only" ]; }; then
-  echo "gate: --wipe / --rebuild-stale-model need --cold" >&2; exit 2
+if [ -z "$cold" ] && { [ -n "$wipe" ] || [ "$stale_mode" = fail ] || [ -n "$cold_preflight_only" ]; }; then
+  echo "gate: --wipe / --no-rebuild-stale-model need --cold" >&2; exit 2
 fi
 if [ -n "$cold" ]; then
   if [ -n "$incremental" ]; then echo "gate: --cold is a full from-scratch run and cannot be --incremental" >&2; exit 2; fi
@@ -135,7 +138,7 @@ if [ -n "$cold" ]; then
     echo "gate: COLD mode: checking the ISA model pin (scripts/model-pin.sh check)"
     pin_log="$(mktemp "${TMPDIR:-/tmp}/gate-model-pin.XXXXXX")"
     pin_rc=0
-    scripts/model-pin.sh check --stale "$([ -n "$stale_rebuild" ] && echo rebuild || echo fail)" > "$pin_log" 2>&1 || pin_rc=$?
+    scripts/model-pin.sh check --stale "$stale_mode" > "$pin_log" 2>&1 || pin_rc=$?
     grep -v '^memguard' "$pin_log"
     if [ "$pin_rc" != 0 ]; then
       rm -f "$pin_log"
@@ -243,7 +246,7 @@ if [ -n "$cold" ] && [ -z "${JANUS_COLD_DONE:-}" ]; then
   export JANUS_COLD_XDG="$(cd "$out" && pwd)/cold-cache"
   rm -rf "$JANUS_COLD_XDG"; mkdir -m 700 -p "$JANUS_COLD_XDG"
   export XDG_CACHE_HOME="$JANUS_COLD_XDG"
-  export JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_STALE="$([ -n "$stale_rebuild" ] && echo rebuild || echo fail)" JANUS_COLD=1 JANUS_COLD_DONE=1
+  export JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_STALE="$stale_mode" JANUS_COLD=1 JANUS_COLD_DONE=1
 fi
 # Own process group (setsid, once): every child of this run is in it, and a cancel is `kill -- -PGID`.
 if [ "${JANUS_GATE_PG:-}" != "$out" ]; then
@@ -477,7 +480,7 @@ fi
 if [ -n "$cold" ]; then
   _which=""; selected asl-build && _which="armasl"; selected sail-build && _which="${_which:+$_which,}sail"
   if [ -n "$_which" ]; then
-    _pr=0; _po=$(scripts/model-pin.sh verify-tree --stale "$([ -n "$stale_rebuild" ] && echo rebuild || echo fail)" --only "$_which" 2>&1) || _pr=$?
+    _pr=0; _po=$(scripts/model-pin.sh verify-tree --stale "$stale_mode" --only "$_which" 2>&1) || _pr=$?
     printf '%s\n' "$_po" | grep -v '^memguard'
     [ "$_pr" = 0 ] || { echo "gate: FAIL: the pinned model artifacts changed during the run"; lanes_rc=1; }
   fi

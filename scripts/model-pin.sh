@@ -3,12 +3,12 @@
 # docs/TESTING.md "Cold gate and the model pin"; scripts/lib/modelpin.py.
 #
 #   scripts/model-pin.sh keys                 print the model keys of this checkout (armasl, sail)
-#   scripts/model-pin.sh check [--stale fail|rebuild]
+#   scripts/model-pin.sh check [--stale rebuild|fail]
 #                                             verify the pin for this checkout's keys: record HMAC, manifest HMAC and hash,
 #                                             SHA-256 of every pinned file. Exit 0 pin holds (or stale with `rebuild`);
 #                                             1 FAIL: no pin for the current keys (STALE), or a pin that is tampered,
 #                                             corrupt or incomplete. Reads only.
-#   scripts/model-pin.sh verify-tree [--stale fail|rebuild] [--only armasl,sail]
+#   scripts/model-pin.sh verify-tree [--stale rebuild|fail] [--only armasl,sail]
 #                                             every pinned file in THIS checkout's JanusASL/.lake / oracle-sail still has its
 #                                             pinned hash (the gate runs it after the lanes). Reads only.
 #   scripts/model-pin.sh write --commit REV [--evidence FILE]
@@ -30,7 +30,7 @@ keys() { # sets ak, sk
 case "$cmd" in
   keys) keys || exit 1; echo "armasl $ak"; echo "sail $sk"; echo "pin store $pin" ;;
   check)
-    stale=fail
+    stale=rebuild
     while [ $# -gt 0 ]; do case "$1" in --stale) stale="${2:?}"; shift 2 ;; *) echo "model-pin: unknown argument $1" >&2; exit 2 ;; esac; done
     case "$stale" in fail|rebuild) ;; *) echo "model-pin: --stale fail|rebuild" >&2; exit 2 ;; esac
     keys || exit 1
@@ -47,7 +47,7 @@ case "$cmd" in
     [ "$rc" = 0 ] || echo "model pin: the pin store is $pin; the nightly truly-cold run (scripts/nightly-cold-gate.sh) creates and updates it, nothing else does"
     exit $rc ;;
   verify-tree)
-    stale=fail only="armasl,sail"
+    stale=rebuild only="armasl,sail"
     while [ $# -gt 0 ]; do case "$1" in --stale) stale="${2:?}"; shift 2 ;; --only) only="${2:?}"; shift 2 ;; *) echo "model-pin: unknown argument $1" >&2; exit 2 ;; esac; done
     keys || exit 1
     rc=0

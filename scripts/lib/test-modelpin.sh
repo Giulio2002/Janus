@@ -148,17 +148,24 @@ if [ -n "$ak" ]; then
   gpin; chmod u+w "$t/gp/sail/$sk/tree/target/release"; rm -f "$t/gp/sail/$sk/tree/target/release/janus-oracle-sail"
   expect 1 "gate --cold: a MISSING Sail driver FAILS the gate" G
   gpin; rm -f "$t/gp/records/armasl-$ak.json"
-  expect 1 "gate --cold: a STALE/absent ArmASL pin FAILS the gate" G
-  expect 0 "gate --cold --rebuild-stale-model: a stale pin is built inside the gate (preflight passes)" G --rebuild-stale-model
+  expect 1 "gate --cold --no-rebuild-stale-model: a STALE/absent ArmASL pin FAILS the gate" G --no-rebuild-stale-model
+  expect 0 "gate --cold (default): a stale pin is built inside the gate (preflight passes, says so)" G
+  grep -q "STALE: it will be built from source inside the gate" "$t/out" && ok "  ... and announces the in-gate rebuild" || bad "no rebuild announcement"
   gpin; mv "$t/gp/records/armasl-$ak.json" "$t/gp/records/armasl-$(printf 'e%.0s' {1..32}).json"
-  expect 1 "gate --cold: a pin for OTHER inputs (changed model input) FAILS the gate" G
+  expect 1 "gate --cold --no-rebuild-stale-model: a pin for OTHER inputs (changed model input) FAILS" G --no-rebuild-stale-model
+  expect 0 "gate --cold (default): a pin for OTHER inputs (changed model input) forces the in-gate rebuild" G
   gpin; chmod u+w "$t/gp/$ak"; printf 'garbage\n' > "$t/gp/$ak/MANIFEST.sha256"
   expect 1 "gate --cold: a CORRUPT manifest FAILS the gate" G
-  expect 1 "gate --cold --rebuild-stale-model: a corrupt manifest still FAILS (only stale may be rebuilt)" G --rebuild-stale-model
+  expect 1 "gate --cold (default rebuild): a corrupt manifest still FAILS (only stale may be rebuilt)" G
   gpin; printf 'x' > "$t/gp/records/sail-$sk.json"
-  expect 1 "gate --cold: a CORRUPT Sail pin record FAILS the gate" G
+  expect 1 "gate --cold (default rebuild): a CORRUPT Sail pin record FAILS the gate" G
+  gpin; chmod u+w "$t/gp/$ak"; rm -f "$t/gp/$ak/MANIFEST.hmac"
+  expect 1 "gate --cold (default rebuild): an UNSIGNED manifest FAILS the gate" G
+  gpin; mv "$t/keys" "$t/keys.off"; mkdir -m 700 "$t/keys"
+  expect 1 "gate --cold (default rebuild): a pin under another HMAC key FAILS the gate" G
+  rm -rf "$t/keys"; mv "$t/keys.off" "$t/keys"
   rm -rf "$t/gp"
-  expect 1 "gate --cold: no pin store at all FAILS the gate" G
+  expect 1 "gate --cold: no pin store at all, with --no-rebuild-stale-model, FAILS the gate" G --no-rebuild-stale-model
   expect 2 "gate --cold --incremental is refused" env JANUS_MODEL_PIN_DIR="$t/gp" "$root/scripts/gate.sh" --cold --incremental
   expect 2 "gate --wipe without --cold is refused" "$root/scripts/gate.sh" --wipe
 fi
@@ -181,8 +188,9 @@ if [ -n "$ak" ]; then
   gpin; chmod u+w "$t/gp/$ak/tree/packages/Sail"; rm -f "$t/gp/$ak/tree/packages/Sail/Sail.olean"
   fresh; expect 1 "asl.sh restore: a MISSING pinned artifact FAILS" A
   gpin; rm -f "$t/gp/records/armasl-$ak.json"
-  fresh; expect 1 "asl.sh restore: a STALE pin FAILS" A
-  fresh; expect 0 "asl.sh restore: a stale pin with JANUS_MODEL_PIN_STALE=rebuild goes on to build from source" env JANUS_MODEL_PIN_STALE=rebuild JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/asl.sh" restore
+  fresh; expect 1 "asl.sh restore: a STALE pin FAILS with JANUS_MODEL_PIN_STALE=fail" env JANUS_MODEL_PIN_STALE=fail JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/asl.sh" restore
+  fresh; expect 0 "asl.sh restore: a stale pin goes on to build from source by default" A
+  grep -q "STALE PIN: ArmASL is built from source" "$t/out" && ok "  ... loudly" || bad "no stale announcement"
   gpin; chmod u+w "$t/gp/$ak"; printf 'garbage\n' > "$t/gp/$ak/MANIFEST.sha256"
   fresh; expect 1 "asl.sh restore: a CORRUPT manifest FAILS" A
   fresh; expect 1 "asl.sh restore: a corrupt manifest FAILS also with JANUS_MODEL_PIN_STALE=rebuild" env JANUS_MODEL_PIN_STALE=rebuild JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/asl.sh" restore
@@ -191,7 +199,7 @@ if [ -n "$ak" ]; then
   gpin; chmod u+w "$t/gp/sail/$sk/tree/target/release"; rm -f "$t/gp/sail/$sk/tree/target/release/janus-oracle-sail"
   fresh; expect 1 "oracle-sail.sh build: a MISSING pinned driver FAILS" S
   gpin; rm -f "$t/gp/records/sail-$sk.json"
-  fresh; expect 1 "oracle-sail.sh build: a STALE pin FAILS" S
+  fresh; expect 1 "oracle-sail.sh build: a STALE pin FAILS with JANUS_MODEL_PIN_STALE=fail" env JANUS_MODEL_PIN_STALE=fail JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_DIR="$t/gp" "$fr/scripts/oracle-sail.sh" build
   gpin; chmod u+w "$t/gp/sail/$sk"; printf 'garbage\n' > "$t/gp/sail/$sk/MANIFEST.sha256"
   fresh; expect 1 "oracle-sail.sh build: a CORRUPT manifest FAILS" S
   [ ! -e "$fr/oracle-sail/target/release/janus-oracle-sail" ] && ok "  ... no driver was produced" || bad "a driver exists after a failed pin"

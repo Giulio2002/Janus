@@ -43,8 +43,8 @@
 #   JANUS_ASL_CACHE=0  force a cold build: neither reads nor writes the cache (also off/no/false)
 #   JANUS_MODEL_PIN=1  the cold gate (scripts/gate.sh --cold): the ArmASL build and lean-sail come ONLY from the model
 #                      pin (scripts/lib/modelpin.py, docs/TESTING.md "Cold gate and the model pin"), never from the build
-#                      cache and never built-and-published: a missing, tampered, corrupt or stale pin FAILS (stale = a model
-#                      input changed; JANUS_MODEL_PIN_STALE=rebuild builds the model from source inside this run instead,
+#                      cache and never built-and-published: a missing, tampered or corrupt pin FAILS (a stale pin = a model
+#                      input changed; by default (JANUS_MODEL_PIN_STALE=rebuild; =fail to refuse) it builds the model from source inside this run instead,
 #                      loudly, publishing nothing). The JanusASL/Janus module cache is off. After the build every pinned file
 #                      is hashed again. Only scripts/nightly-cold-gate.sh writes the pin.
 #   scripts/asl.sh key  print the model cache/pin key (32 hex digits)
@@ -235,10 +235,10 @@ pin_step() { # restore | verify-tree
   out=$(python3 -I "$root/scripts/lib/modelpin.py" "$1" armasl "$PIN_DIR" "$key" "$pkg/.lake") || rc=$?
   case $rc in
     0) echo "asl pin: ArmASL $key: $out" ;;
-    2) if [ "${JANUS_MODEL_PIN_STALE:-fail}" = rebuild ]; then
+    2) if [ "${JANUS_MODEL_PIN_STALE:-rebuild}" = rebuild ]; then
          echo "asl pin: ArmASL $key: $out"; echo "asl pin: STALE PIN: ArmASL is built from source INSIDE this gate (JANUS_MODEL_PIN_STALE=rebuild); nothing is pinned or published"
        else
-         echo "asl pin: FAIL: ArmASL $key: $out"; echo "asl pin: the model inputs changed since the pin was written. Build and pin the new model with the nightly truly-cold run, or rerun with --rebuild-stale-model" >&2; return 1
+         echo "asl pin: FAIL: ArmASL $key: $out"; echo "asl pin: the model inputs changed since the pin was written. Build and pin the new model with the nightly truly-cold run, or rerun without --no-rebuild-stale-model" >&2; return 1
        fi ;;
     *) echo "asl pin: FAIL: ArmASL $key: $out" >&2; return 1 ;;
   esac

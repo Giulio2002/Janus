@@ -798,10 +798,12 @@ Those are treated like the Lean toolchain:
   code, no python inside janus). The key is the existing build-cache key (`asl_cache_key.py`, `oracle-sail/cache_key.py`).
 * **Checked on every cold gate.** First, in seconds and before anything is built (`scripts/model-pin.sh check`: record HMAC,
   manifest HMAC and hash, every file); again by each restore (two-phase verified copy) and after each build (every pinned file
-  hashed again in the tree); once more after the lanes. A **tampered, corrupt, missing or incomplete** pin FAILS the gate, always.
+  hashed again in the tree); once more after the lanes. A **tampered, corrupt, missing or incomplete** pin FAILS the gate, always (never rebuilt around).
 * **Stale pin = a model input changed** (sources, toolchain, environment, key scheme: the key changes, so no pin exists for it).
-  The gate FAILS naming the cause and builds nothing; `--rebuild-stale-model` instead builds the model from source inside that
-  gate (slow: ~1 h ArmASL, ~25 min Sail), loudly, and pins/publishes nothing. Only *stale* may be rebuilt, never a damaged pin.
+  By default the gate then builds the model from source INSIDE that gate (slow: ~1 h ArmASL, ~25 min Sail), loudly ("STALE PIN"),
+  verified by the build itself; it publishes and pins nothing (a model change does not fail the merge gate). `--no-rebuild-stale-model`
+  makes a stale pin FAIL instead. A tampered, corrupt, missing, unsigned or re-signed pin, a manifest that does not match its record,
+  or a pin under another HMAC key ALWAYS fails and is never rebuilt around.
 * **Written only by the nightly truly-cold run.** `scripts/nightly-cold-gate.sh` (`JANUS_ASL_CACHE=0`, fresh worktree, builds the
   model from source) writes or confirms the pin after its cold gate PASSED and agreed with the cached run
   (`scripts/model-pin.sh write`: under a lock, entry then one atomically replaced record). If a pin for the same inputs exists
