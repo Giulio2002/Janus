@@ -115,6 +115,9 @@ theorem dr_fin (hp : EngineAt p) (s : State) {c : State} {ch : List PanicRec} {r
   · rfl
   · show rm ≤ room0 d.mem; rw [hmem]; exact hI.room
 
+-- `Engine` is a `match` over the whole state: elaborating `engine_loop` against it would `whnf` it
+-- (30-60 s) for the expected type's sake
+attribute [local irreducible] Janus.Contracts.PanicAmd64.Engine in
 set_option maxHeartbeats 0 in
 theorem deferreturn_run (hp : EngineAt p) :
     DeferreturnContract p eDeferreturn (P0 T RPa) U1 := by
