@@ -26,8 +26,8 @@ _EX="pre-ex-arm64 pre-ex-amd64 pre-ex-asm pre-ex-sys pre-ex-rtmisc pre-ex-print 
 DAG_DEPS=(
   [pre-gobin]="" [pre-lake]=""
   [pre-ex-arm64]="" [pre-ex-asm]="" [pre-ex-sys]="" [pre-ex-rtmisc]="" [pre-ex-print]="" [pre-ex-cgo]=""
-  [pre-ex-amd64]="pre-gobin" [pre-rounds-bin]="pre-gobin"
-  [pre-stamp]="pre-gobin pre-lake pre-ex-arm64"
+  [pre-ex-amd64]="pre-gobin" [pre-rounds-bin]="pre-gobin pre-ex-amd64"
+  [pre-stamp]="pre-gobin pre-lake pre-ex-arm64 pre-ex-amd64"
   [pre-pin]="pre-lake pre-stamp"
   [pre-warm]="pre-gobin pre-lake pre-ex-arm64 pre-stamp"
   [pre-fixture]="pre-lake pre-warm pre-stamp pre-pin"
@@ -35,7 +35,7 @@ DAG_DEPS=(
   [verify]="pre-pin pre-gobin pre-warm $_EX"
   [gotest]="pre-pin pre-gobin pre-fixture"
   [rounds]="pre-pin pre-rounds-bin pre-warm $_EX"
-  [decoder]="pre-pin pre-gobin"
+  [decoder]="pre-pin pre-gobin pre-ex-amd64"
   [axiom]="" [govet]="" [cachekeys]=""
   [x86]="tree-x86" [oracle]="tree-asl" [asl-build]="tree-asl" [sail-build]="tree-asl" [testlane]="tree-asl"
   [asl-verify]="tree-aslv"
@@ -71,4 +71,36 @@ dag_check() {
   done
   [ "$left" -eq 0 ] || { echo "dag: a dependency cycle among $left stages" >&2; bad=1; }
   return $bad
+}
+
+# Resources the stages touch, and how (w = writes or replaces it, r = reads/executes it). Two stages that touch the same
+# resource, at least one of them as a writer, must be ORDERED (one in the other's closure): that is what the structure
+# alone does not show (pre-stamp and pre-warm both verify artifacts/Add and collided on its theorems lock; pre-ex-amd64
+# replaces bin/janus while others run it). scripts/lib/test-dag.sh asserts it for every pair.
+declare -gA DAG_RES
+DAG_RES=(
+  [artifact:Add]="w:pre-stamp w:pre-warm w:verify"
+  [bin/janus]="w:pre-gobin w:pre-ex-amd64 r:pre-stamp r:pre-warm r:pre-rounds-bin r:verify r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
+  [framework-build]="w:pre-lake w:pre-stamp r:pre-pin r:pre-warm r:pre-fixture r:verify r:gotest r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
+  [audit/bin/janus-rounds]="w:pre-rounds-bin r:rounds"
+  [go-test-fixture]="w:pre-fixture r:gotest r:rtasl-go"
+  [examples-arm64]="w:pre-ex-arm64 r:pre-stamp r:pre-warm r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
+  [examples-amd64]="w:pre-ex-amd64 r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
+  [user-cache-framework]="w:pre-stamp w:pre-warm r:pre-fixture"
+)
+
+# dag_unordered: print every pair of stages that share a resource (one at least writing) with no dependency path between them
+dag_unordered() {
+  local res a b ma mb sa sb
+  for res in "${!DAG_RES[@]}"; do
+    local -a ent=(${DAG_RES[$res]})
+    for a in "${ent[@]}"; do for b in "${ent[@]}"; do
+      ma=${a%%:*}; sa=${a#*:}; mb=${b%%:*}; sb=${b#*:}
+      [ "$sa" \< "$sb" ] || continue
+      [ "$ma" = w ] || [ "$mb" = w ] || continue
+      dag_closure "$sa" | grep -qx "$sb" && continue
+      dag_closure "$sb" | grep -qx "$sa" && continue
+      echo "$res: $sa ($ma) and $sb ($mb) are not ordered"
+    done; done
+  done
 }

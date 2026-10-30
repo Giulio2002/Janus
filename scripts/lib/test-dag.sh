@@ -40,6 +40,12 @@ out="$t/rerun/out"; eval "$(grep -m1 'rm -f "$out/.pinned" "$out/fw_hash0"' "$he
 # the two stages that verify artifacts/Add (pre-warm, pre-stamp) take the same theorems lock: they must be ordered, never concurrent
 { dag_closure pre-warm | grep -qx pre-stamp || dag_closure pre-stamp | grep -qx pre-warm; } && ok "pre-warm and pre-stamp (both verify artifacts/Add) are ordered, not concurrent" || bad "pre-warm and pre-stamp can run at the same time (Add theorems lock collision)"
 
+un=$(dag_unordered); [ -z "$un" ] && ok "no two stages touching the same artifact, binary or lock (one writing) can run at once" || { bad "unordered resource users:"; echo "$un" | head -5; }
+# the check detects a missing edge: drop the pre-warm -> pre-stamp dependency and it must report the collision
+saved=${DAG_DEPS[pre-warm]}; DAG_DEPS[pre-warm]="pre-gobin pre-lake pre-ex-arm64"
+dag_unordered | grep -q 'artifact:Add: pre-stamp (w) and pre-warm (w)' && ok "the resource check catches the pre-stamp / pre-warm collision" || bad "the resource check missed a removed edge"
+DAG_DEPS[pre-warm]=$saved
+
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n
   POOL_GUARD=0 POOL_PROGRESS_SECS=100
