@@ -1,3 +1,4 @@
+import JanusX86.Proofs.AluDisp1
 import JanusX86.Proofs.Top
 
 /-! # Class theorems: integer ALU -/

@@ -1,5 +1,5 @@
-import JanusX86.Proofs.Regs
 import JanusX86.Proofs.Arith
+import JanusX86.Proofs.Rel
 
 /-! # The instruction pointer and the end of an instruction -/
 

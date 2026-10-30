@@ -1,6 +1,7 @@
 import JanusX86.Proofs.AluDispatch
 import JanusX86.Proofs.Fields
 import JanusX86.Proofs.Ip
+import JanusX86.Proofs.Regs
 
 /-! # ALU instructions, register forms -/
 

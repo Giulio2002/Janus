@@ -1,4 +1,6 @@
-import JanusX86.Proofs.Movsxd
+import JanusX86.Proofs.Lock
+import JanusX86.Proofs.Mov
+import JanusX86.Proofs.TwoByte
 
 /-! # CMPXCHG m, r (`0F B0/B1`, with or without `LOCK`), up to the flags of Sail-x86 defect D1
 

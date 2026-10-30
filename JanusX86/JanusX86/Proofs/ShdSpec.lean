@@ -1,4 +1,4 @@
-import JanusX86.Proofs.Bt3
+import JanusX86.Proofs.ShiftSpec
 
 /-! # SHLD/SHRD: Janus' value and flags, and the model's double-width value -/
 

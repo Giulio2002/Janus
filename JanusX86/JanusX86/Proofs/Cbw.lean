@@ -1,4 +1,4 @@
-import JanusX86.Proofs.CmpXchg
+import JanusX86.Proofs.Branch
 
 /-! # CBW/CWDE/CDQE (`98`) and CWD/CDQ/CQO (`99`) -/
 

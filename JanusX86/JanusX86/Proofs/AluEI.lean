@@ -1,4 +1,5 @@
 import JanusX86.Proofs.AluAI
+import JanusX86.Proofs.AluGE
 
 /-! # ALU (E, I) forms: `80/81/83 /0..7` and `TEST r/m, imm` (`F6/F7 /0`) -/
 

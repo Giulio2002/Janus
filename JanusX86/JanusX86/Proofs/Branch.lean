@@ -1,4 +1,4 @@
-import JanusX86.Proofs.MovOI
+import JanusX86.Proofs.Unary
 
 /-! # Branches: Jcc rel8 (`70–7F`), JMP rel8/rel32 (`EB/E9`) -/
 

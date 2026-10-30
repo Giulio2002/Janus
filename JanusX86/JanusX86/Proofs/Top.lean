@@ -1,4 +1,5 @@
-import JanusX86.Proofs.AluDisp1
+import JanusX86.Proofs.AluReg
+import JanusX86.Proofs.Dispatch
 
 /-! # The harness entry point and Janus' decoder -/
 

@@ -1,4 +1,4 @@
-import JanusX86.Proofs.Imul2
+import JanusX86.Proofs.Branch
 
 /-! # `LOCK`ed forms as single steps (the model is single-threaded; Janus checks the alignment) -/
 

@@ -1,4 +1,4 @@
-import JanusX86.Proofs.Setcc
+import JanusX86.Proofs.TwoByte
 
 /-! # Jcc rel32 (`0F 80–8F`) -/
 

@@ -1,4 +1,5 @@
-import JanusX86.Proofs.Bt
+import JanusX86.Proofs.Imul1
+import JanusX86.Proofs.TwoByte
 
 /-! # IMUL r, r/m (`0F AF`) -/
 

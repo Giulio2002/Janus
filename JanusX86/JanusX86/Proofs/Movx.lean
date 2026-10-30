@@ -1,3 +1,4 @@
+import JanusX86.Proofs.Mov
 import JanusX86.Proofs.TwoByte
 
 /-! # MOVZX/MOVSX (`0F B6/B7/BE/BF`) -/

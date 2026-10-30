@@ -1,4 +1,5 @@
-import JanusX86.Proofs.Xchg
+import JanusX86.Proofs.Bt
+import JanusX86.Proofs.Mul
 
 /-! # DIV and IDIV (`F6/F7 /6,/7`), including the divide-error (`#DE`) conditions -/
 

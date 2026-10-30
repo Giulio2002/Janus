@@ -1,4 +1,4 @@
-import JanusX86.Proofs.TestEG
+import JanusX86.Proofs.Mov
 
 /-! # MOV r, imm (`B0–BF`) -/
 

@@ -1,4 +1,4 @@
-import JanusX86.Proofs.AluReg
+import JanusX86.Proofs.AluDispatch
 
 /-! # The one-byte dispatch of the ALU opcodes -/
 

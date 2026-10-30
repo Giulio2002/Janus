@@ -1,5 +1,6 @@
 import JanusX86.Proofs.ShdWidth
 import JanusX86.Proofs.Shift
+import JanusX86.Proofs.TwoByte
 
 /-! # SHLD/SHRD (`0F A4/A5/AC/AD`) -/
 
