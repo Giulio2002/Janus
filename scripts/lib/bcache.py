@@ -138,6 +138,8 @@ def entry_dir(kind, cache, ident):
         return os.path.join(cache, "sail", ident)
     if kind == "mod":
         return os.path.join(cache, "mods", ident[:2], ident)
+    if kind == "armobj":  # the compiled C objects (.c.o.export + .hash + .trace) of ArmASL and lean-sail
+        return os.path.join(cache, "armobj", ident)
     raise CacheError("unknown kind %r" % kind)
 
 

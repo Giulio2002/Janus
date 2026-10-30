@@ -708,6 +708,20 @@ the same cache: the build reused 27 unchanged entries, built and published the o
 under a loaded host), and a fresh copy of that commit then restored 137 modules and built JanusASL
 in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
 
+**Compiled objects** (`CACHE/armobj/<id>`, `asl_mod_cache.py objkey|objfiles`, `asl.sh` `objcache_*`;
+tested by `JanusASL/tools/test_asl_obj_cache.sh`). The ArmASL entry is stored after `lake build ArmASL`,
+before the `janus-asl-check` link compiles each emitted C file (`ir/ArmASL/PartNN.c`, `ir/Sail/*.c`) to
+`.c.o.export`, so a warm `asl-build` still ran clang over the 50 parts (minutes: the largest parts take
+2-3 min each at -O3). Lake's object trace mixes the C content hash, the toolchain, the compiler arguments
+and the platform; the C path is only a label, and clang puts no path into the object (a part compiled in two
+directories is bit-identical), so the objects are path independent and need no `-ffile-prefix-map`. One
+entry now holds all objects, with their `.hash` and `.trace`. Its id is the SHA-256 of the ArmASL cache key
+(toolchain by content, flags, model), the machine and the SHA-256 of every emitted `.c`, computed after the
+first `lake build ArmASL`: an entry is used only if every C file hashes the same. Same integrity as the other
+kinds (per-user HMAC over kind, id and manifest; per-file SHA-256 checked before any file is put in place;
+tamper, wrong key, moved entry = rejection and a rebuild); Lake still judges each restored object by its own
+trace. Stored only when every C file has its object, hash and trace. Evicted by LRU like a module entry.
+
 **Eviction** (`asl_mod_cache.py gc CACHE --max SIZE [--root REPO] [--grace S] [--dry-run]`). The
 module entries and the ArmASL entries had no eviction (a shared cache reached 42 GB). `scripts/asl.sh`
 now runs the collector after every publish with `--max $ASL_CACHE_MAX` (default `15G`; `off`

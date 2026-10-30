@@ -11,6 +11,9 @@ import (scripts/asl.sh, ASL_CACHE; docs/ASL.md "Build cache").
     python3 -I JanusASL/tools/asl_mod_cache.py gc      CACHE --max SIZE [--root REPO_ROOT]
                                     [--grace SECONDS] [--dry-run]
                                     evict entries (see "Eviction" below)
+    python3 -I JanusASL/tools/asl_mod_cache.py objkey  REPO_ROOT         id of the object entry (below)
+    python3 -I JanusASL/tools/asl_mod_cache.py objfiles REPO_ROOT        its files, NUL-separated, relative
+                                    to JanusASL/.lake (nothing if the object set is incomplete)
 
 The ArmASL model and lean-sail are cached as one entry (asl_cache_key.py). This adds one entry per
 Lean module of the JanusASL package (JanusASL.*) and of the janus package (Janus.*), so a worktree
@@ -69,6 +72,21 @@ so a reader sees the whole entry or none, and Lake rebuilds a module whose entry
 then deleted; its use stamp and lock file are removed while the lock is held. Collecting only
 ever deletes: a missing entry is a miss, never a different result. Leftover `.gc-trash-*` and
 publish `.tmp-*` directories older than a day are removed too.
+
+**Compiled objects** (`CACHE/armobj/<id>`, kind `armobj` of scripts/lib/bcache.py). The ArmASL parts
+and the lean-sail modules are compiled from Lake's emitted C (`ir/<M>.c`) to `ir/<M>.c.o.export` only
+when the executable is linked, i.e. after the ArmASL entry was stored, and that C compile is most of
+a warm asl-build. Lake's trace of an object (`.c.o.export.trace`) mixes the hash of the C *content*,
+the toolchain, the compiler arguments and the platform, and the path of the C file only as a label
+(measured: the same C compiled in two directories gives bit-identical objects, no path in them), so
+the objects are reusable across directories. One entry holds all of them, keyed by the SHA-256 of
+{scheme, ArmASL cache key (toolchain by content, flags, model), machine, the SHA-256 of every emitted
+`.c` of ArmASL and Sail}: it is looked up only after `lake build ArmASL` has emitted the C of this
+tree, so an entry is used only if every C file hashes the same; the HMAC-signed per-file manifest is
+verified on the copy exactly as for the other kinds, and Lake still judges each restored object by
+its own trace (a trace that does not match is rebuilt). Missing/corrupt/foreign-key = miss, rebuild.
+It is stored only when every C file has its object, hash and trace, and is evicted by LRU like the
+module entries.
 
 **Trust.** As for the ArmASL entry: the cache must be writable only by users you trust, since a
 restored `.olean` is what later modules (and `janus verify --asl`) are checked against; the kernel
@@ -543,6 +561,71 @@ def publish(ks, cache, roots):
     print("asl module cache: stored %d modules, %d already cached, %d not built (%s)" % (stored, present, skipped, cache))
 
 
+# ---- compiled C objects of ArmASL and lean-sail (CACHE/armobj) ----
+
+OBJ_SCHEME = "janusasl-obj-cache-v1"
+OBJ_SUFFIXES = (".c.o.export", ".c.o.noexport")
+
+
+def obj_dirs(lake):
+    """(directory under .lake, filter on the first path component) holding the C of ArmASL and Sail."""
+    return [(os.path.join(lake, "build", "ir"), lambda n: n == "ArmASL.c" or n == "ArmASL"),
+            (os.path.join(lake, "packages", "Sail", ".lake", "build", "ir"), lambda n: True)]
+
+
+def obj_c_files(lake):
+    """Emitted C files in scope: {path relative to .lake: sha256 of the content}."""
+    out = {}
+    for d, ok in obj_dirs(lake):
+        if not os.path.isdir(d):
+            continue
+        for top in sorted(os.listdir(d)):
+            if not ok(top):
+                continue
+            q = os.path.join(d, top)
+            cands = [q] if os.path.isfile(q) else [os.path.join(dp, fn) for dp, _, fns in os.walk(q) for fn in fns]
+            for full in cands:
+                if full.endswith(".c") and os.path.isfile(full) and not os.path.islink(full):
+                    out[os.path.relpath(full, lake).replace(os.sep, "/")] = sha_file(full)
+    return out
+
+
+def obj_id(root, cs):
+    akey = load_armasl_key(root)
+    inp = {"scheme": OBJ_SCHEME, "armasl": akey.sha(akey.canonical(akey.inputs(root)).encode())[:32],
+           "machine": platform.machine(), "c": cs}
+    return sha_bytes(canonical(inp).encode())[:40]
+
+
+def obj_files(lake, cs):
+    """The object triples of every C file in cs; None if one is missing (nothing to publish)."""
+    res = []
+    for c in sorted(cs):
+        found = [c + s[len(".c"):] for s in OBJ_SUFFIXES if os.path.isfile(os.path.join(lake, c + s[len(".c"):]))]
+        if len(found) != 1:
+            return None
+        o = found[0]
+        trio = [o, o + ".hash", o + ".trace"]
+        if not all(os.path.isfile(os.path.join(lake, x)) and not os.path.islink(os.path.join(lake, x)) for x in trio):
+            return None
+        res += trio
+    return res
+
+
+def obj_main(cmd, root):
+    lake = os.path.join(root, "JanusASL", ".lake")
+    cs = obj_c_files(lake)
+    if not cs:
+        sys.exit(1)
+    if cmd == "objkey":
+        print(obj_id(root, cs))
+    else:
+        fl = obj_files(lake, cs)
+        if fl is None:
+            sys.exit(1)
+        sys.stdout.write("".join(x + "\0" for x in fl))
+
+
 # ---- eviction (gc) ----
 
 ARMASL_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -612,6 +695,11 @@ def scan(cache):
         q = os.path.join(sail, n)
         if MOD_RE.match(n) and os.path.isdir(q) and not os.path.islink(q):
             out.append(Entry("sail", q, n))
+    objs = os.path.join(cache, "armobj")
+    for n in sorted(os.listdir(objs)) if os.path.isdir(objs) and not os.path.islink(objs) else []:
+        q = os.path.join(objs, n)
+        if MOD_RE.match(n) and os.path.isdir(q) and not os.path.islink(q):
+            out.append(Entry("armobj", q, n))
     mods = os.path.join(cache, "mods")
     for sh in sorted(os.listdir(mods)) if os.path.isdir(mods) else []:
         sd = os.path.join(mods, sh)
@@ -693,7 +781,7 @@ def gc(cache, budget, root=None, grace=3600, dry=False, now=None):
         unreferenced()
     # Leftovers of interrupted collections and publishes (older than a day).
     if not dry:
-        for d in [cache, os.path.join(cache, "sail"), os.path.join(cache, "mods")] + [os.path.join(cache, "mods", x) for x in
+        for d in [cache, os.path.join(cache, "sail"), os.path.join(cache, "armobj"), os.path.join(cache, "mods")] + [os.path.join(cache, "mods", x) for x in
                                                           (os.listdir(os.path.join(cache, "mods")) if os.path.isdir(os.path.join(cache, "mods")) else [])]:
             if not os.path.isdir(d):
                 continue
@@ -734,6 +822,9 @@ def main():
     cmd, root = sys.argv[1], sys.argv[2]
     if cmd == "gc":
         gc_main(sys.argv[2:])
+        return
+    if cmd in ("objkey", "objfiles"):
+        obj_main(cmd, root)
         return
     ks = Keys(root)
     if cmd == "keys":

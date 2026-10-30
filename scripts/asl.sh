@@ -266,6 +266,38 @@ modcache_publish() {  # modcache_publish [--exe]
   cache_gc
 }
 
+# ---- the compiled C objects of ArmASL and lean-sail (ASL_CACHE/armobj; asl_mod_cache.py "Compiled objects") ----
+# Looked up after `lake build ArmASL` has emitted this tree's C: the entry id hashes every emitted .c, so it is
+# used only if they all match; HMAC + per-file SHA-256 as for the other entries; Lake still checks each object's trace.
+objcache_restore() {
+  [ -n "${ASL_CACHE:-}" ] || return 0
+  local id rc=0 out
+  id=$(python3 -I "$pkg/tools/asl_mod_cache.py" objkey "$root" 2>/dev/null) || return 0
+  out=$(python3 -I "$root/scripts/lib/bcache.py" fetch armobj "$ASL_CACHE" "$id" "$pkg/.lake") || rc=$?
+  case $rc in
+    0) echo "asl cache: C objects $id: $out ($ASL_CACHE)" ;;
+    2) echo "asl cache: no entry for the C objects $id ($ASL_CACHE); compiling" ;;
+    3) echo "asl cache: the entry for the C objects $id was REJECTED (above); compiling" ;;
+    *) echo "asl cache: C objects not usable here (above); compiling" ;;
+  esac
+  return 0
+}
+
+objcache_publish() {
+  [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
+  local id rc=0 out fl
+  id=$(python3 -I "$pkg/tools/asl_mod_cache.py" objkey "$root" 2>/dev/null) || return 0
+  fl=$(mktemp "${TMPDIR:-/tmp}/asl-obj-files.XXXXXX")
+  # an incomplete object set (a C file without its object) is not stored: objfiles then fails
+  if python3 -I "$pkg/tools/asl_mod_cache.py" objfiles "$root" > "$fl" 2>/dev/null && [ -s "$fl" ]; then
+    out=$(python3 -I "$root/scripts/lib/bcache.py" store armobj "$ASL_CACHE" "$id" "$pkg/.lake" < "$fl") || rc=$?
+  else
+    rm -f "$fl"; echo "asl cache: C objects incomplete; not stored"; return 0
+  fi
+  rm -f "$fl"
+  [ $rc = 0 ] && echo "asl cache: C objects $id: $out" || echo "asl cache: C objects not stored (rc $rc)"
+}
+
 unpack() {
   echo "$(cat "$VENDOR.sha256")  $VENDOR" | sha256sum -c --quiet
   if [ ! -f "$pkg/ArmASL.lean" ] || [ "$VENDOR" -nt "$pkg/ArmASL.lean" ]; then
@@ -330,9 +362,11 @@ build_phase() {
   lake_asl build ArmASL
   cache_publish
   modcache_restore
+  objcache_restore
   lake_asl build ArmASL JanusASL janus-asl-check
   cache_publish
   modcache_publish --exe
+  objcache_publish
 }
 
 # Only the cache restore (JanusASL/tools/test_asl_cache.sh).
