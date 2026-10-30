@@ -81,7 +81,7 @@ theorem printuint_k (impl : List Segment)
       refine ⟨_, _, _, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
       · janus_simp
       · janus_simp
-      · janus_simp; assumption
+      · janus_simp; (first | with_reducible assumption | assumption)
       · have h := hem
         dsimp only at h
         rw [hrb] at h
