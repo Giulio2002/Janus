@@ -80,7 +80,7 @@ model_dir() {
 SAIL_SPLIT="${SAIL_SPLIT:-1}"
 SAIL_SPLIT_PARTS=48
 BUILD_RS_SHA256=6e47e363dca372dcc5a9d93036d35cb9714722886b936a39d0929208f963787f
-BUILD_RS_PATCHED_SHA256=6320c0ec774fbab82d123d5a4f18ff0b1a5549e2df0538ac6549b603db3f0863
+BUILD_RS_PATCHED_SHA256=7d54b814043630827a00a8fff3ce0ef9b46399f53c744283d352fb509793003d
 
 # split_parts INSTRUMENTED_DIR -> prints the dir holding model_part_*.cpp (+ model.h), made once per model/splitter
 split_parts() {

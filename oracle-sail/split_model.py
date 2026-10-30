@@ -46,8 +46,12 @@ exp_head = ['extern "C" { unsigned long long janus_sail_unpredictable = 0; unsig
             'void (*sail_rts_set_coverage_file)(const char *) = NULL;', '#include "model.h"']
 assert pre[:7] == exp_head, pre[:7]
 pre_other = pre[7:]
-pre_head0 = pre[:7]
-pre_head_k = ['extern "C" { extern unsigned long long janus_sail_unpredictable; extern unsigned long long janus_sail_uncaught; }'] + pre[1:5] + [pre[6]]
+# model.h goes FIRST in every part: g++ can only use a precompiled header that precedes all other tokens,
+# and parsing model.h (one 40k-member class) costs ~4 min of g++ time, which 48 parts must not each pay.
+# It includes sail.h, sail_config.h, rts.h, elf.h itself. The two process-global definitions stay in part 0.
+pre_head0 = [pre[6]] + [pre[0]] + pre[1:5] + [pre[5]]
+pre_head_k = [pre[6]] + ['extern "C" { extern unsigned long long janus_sail_unpredictable; extern unsigned long long janus_sail_uncaught; }'] + pre[1:5]
+assert pre[6] == '#include "model.h"'
 # no other process-global definitions in the preamble (statics only), no static state
 depth = 0
 for l in pre_other:
