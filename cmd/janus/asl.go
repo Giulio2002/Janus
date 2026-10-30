@@ -333,6 +333,12 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 			}
 		}
 	}
+	// A seed (or an older build of this directory) may hold built modules of an OLDER model split (ArmASL.Part37 and up
+	// next to the current parts): the kernel replay enumerates the directory and would load both, and fail. Keep only
+	// the modules of the current model.
+	if _, err := pruneStaleArmASL(filepath.Join(dir, ".lake"), model); err != nil {
+		return nil, aslDiag("Cannot prune stale ArmASL modules: "+err.Error(), "Remove "+displayPath(dir)+" and retry.")
+	}
 	// The lakefile requires janus from ".."; point it at this verification's trusted framework.
 	override, _ := json.Marshal(map[string]any{"schemaVersion": "1.2.0", "packages": []map[string]any{{
 		"type": "path", "scope": "", "name": "janus", "manifestFile": "lake-manifest.json", "inherited": false,
@@ -370,6 +376,39 @@ func buildASL(fw *framework, janusDir, lake string, progress io.Writer) (*aslBui
 	}
 	ok = true
 	return b, nil
+}
+
+// pruneStaleArmASL removes the built ArmASL modules (build/lib/lean/ArmASL/<M>.*, build/ir/ArmASL/<M>.*) of lake whose
+// module M is not a source file ArmASL/<M>.lean of the current model. It touches nothing else and returns how many files
+// it removed.
+func pruneStaleArmASL(lake string, model map[string][]byte) (int, error) {
+	have := map[string]bool{}
+	for p := range model {
+		if d, f := path.Split(p); d == "ArmASL/" && strings.HasSuffix(f, ".lean") {
+			have[strings.SplitN(f, ".", 2)[0]] = true
+		}
+	}
+	n := 0
+	for _, sub := range []string{"build/lib/lean/ArmASL", "build/ir/ArmASL"} {
+		dir := filepath.Join(lake, filepath.FromSlash(sub))
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return n, err
+		}
+		for _, e := range ents {
+			if e.IsDir() || have[strings.SplitN(e.Name(), ".", 2)[0]] {
+				continue
+			}
+			if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+				return n, err
+			}
+			n++
+		}
+	}
+	return n, nil
 }
 
 // ensurePrivateDir makes path a real directory: a symbolic link there is removed (only the link, never what

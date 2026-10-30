@@ -432,3 +432,47 @@ func TestASLSiblingWithSymlinkedLakeIsNotASeed(t *testing.T) {
 		t.Fatalf("newestASLSibling = %q, want the real build %q", got, real)
 	}
 }
+
+// A seed from a long-lived build holds modules of an older, longer model split (ArmASL.Part37 and up): they are pruned,
+// the current model's modules (and their C objects) and everything outside build/*/ArmASL stay.
+func TestASLPruneStaleArmASLModules(t *testing.T) {
+	lake := filepath.Join(t.TempDir(), ".lake")
+	put := func(rel string) {
+		p := filepath.Join(lake, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep := []string{"build/lib/lean/ArmASL/Part20.olean", "build/lib/lean/ArmASL/Part20.ilean", "build/ir/ArmASL/Part20.c", "build/ir/ArmASL/Part20.c.o",
+		"build/lib/lean/ArmASL/Defs.olean", "build/lib/lean/ArmASL.olean", "build/ir/ArmASL.c", "build/lib/lean/JanusASL/Part37.olean",
+		"build/lib/lean/Sail/Part37.olean", "packages/Sail/.lake/build/lib/lean/Sail.olean"}
+	stale := []string{"build/lib/lean/ArmASL/Part37.olean", "build/lib/lean/ArmASL/Part37.ilean", "build/lib/lean/ArmASL/Part37.trace",
+		"build/ir/ArmASL/Part37.c", "build/ir/ArmASL/Part41.c.o.export", "build/lib/lean/ArmASL/Part46.olean"}
+	for _, r := range append(append([]string{}, keep...), stale...) {
+		put(r)
+	}
+	model := map[string][]byte{"ArmASL/Part20.lean": nil, "ArmASL/Defs.lean": nil, "ArmASL.lean": nil, "lakefile.toml": nil}
+	n, err := pruneStaleArmASL(lake, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(stale) {
+		t.Fatalf("pruned %d files, want %d", n, len(stale))
+	}
+	for _, r := range stale {
+		if _, err := os.Lstat(filepath.Join(lake, filepath.FromSlash(r))); err == nil {
+			t.Errorf("stale %s survived", r)
+		}
+	}
+	for _, r := range keep {
+		if _, err := os.Lstat(filepath.Join(lake, filepath.FromSlash(r))); err != nil {
+			t.Errorf("%s was removed: %v", r, err)
+		}
+	}
+	if n, err := pruneStaleArmASL(filepath.Join(t.TempDir(), "none"), model); err != nil || n != 0 {
+		t.Fatalf("a missing .lake: n=%d err=%v", n, err)
+	}
+}

@@ -135,6 +135,26 @@ done
 rm -rf "$t/kill"; B fetch sail "$t/cache" "$K" "$t/kill" >/dev/null; echo junk > "$t/kill/sub/f3.olean.bcache-tmp.1.deadbeef"; echo garbage > "$t/kill/sub/f7.olean"
 B fetch sail "$t/cache" "$K" "$t/kill" > "$t/kf.out"; cmp -s "$t/big/sub/f7.olean" "$t/kill/sub/f7.olean" && [ -z "$(find "$t/kill" -name '*.bcache-tmp*')" ] && ok "a stale temporary is swept and a half-replaced file repaired ($(cat "$t/kf.out"))" || bad "stale state not repaired"
 
+echo; echo "-- stale modules of an older model split are pruned on fetch (J1: ArmASL.Part37 next to Part20)"
+rm -rf "$t/pr" "$t/prc" "$t/prd"; mkdir -p "$t/pr/build/lib/lean/ArmASL" "$t/pr/build/ir/ArmASL" "$t/prc"
+for m in Defs Part01 Part02; do echo "o-$m" > "$t/pr/build/lib/lean/ArmASL/$m.olean"; echo "c-$m" > "$t/pr/build/ir/ArmASL/$m.c"; done
+echo top > "$t/pr/build/lib/lean/ArmASL.olean"; echo "top c" > "$t/pr/build/ir/ArmASL.c"
+(cd "$t/pr" && find . -type f -printf '%P\0') | B store armasl "$t/prc" "$(printf 'c%.0s' {1..32})" "$t/pr" >/dev/null
+mkdir -p "$t/prd/build/lib/lean/ArmASL" "$t/prd/build/ir/ArmASL" "$t/prd/build/lib/lean/JanusASL" "$t/prd/packages/Sail"
+for m in Part37 Part38 Part41; do echo stale > "$t/prd/build/lib/lean/ArmASL/$m.olean"; echo stale > "$t/prd/build/lib/lean/ArmASL/$m.ilean"; echo stale > "$t/prd/build/ir/ArmASL/$m.c"; echo stale > "$t/prd/build/ir/ArmASL/$m.c.o.export"; done
+echo mine > "$t/prd/build/lib/lean/JanusASL/Foo.olean"; echo mine > "$t/prd/packages/Sail/x"
+echo "an object an exe build added" > "$t/prd/build/ir/ArmASL/Part01.c.o"
+B fetch armasl "$t/prc" "$(printf 'c%.0s' {1..32})" "$t/prd" > "$t/pr.out"
+[ -z "$(ls "$t"/prd/build/lib/lean/ArmASL/ "$t"/prd/build/ir/ArmASL/ | grep -E 'Part3|Part4')" ] && ok "after the fetch no Part37/38/41 file remains under build/lib/lean/ArmASL or build/ir/ArmASL" || bad "stale parts survived: $(ls "$t"/prd/build/*/*/ArmASL 2>/dev/null | grep -E 'Part3|Part4' | head -3)"
+[ "$(cat "$t/prd/build/lib/lean/JanusASL/Foo.olean")" = mine ] && [ "$(cat "$t/prd/packages/Sail/x")" = mine ] && ok "files outside the ArmASL directories are untouched" || bad "files outside ArmASL were removed"
+[ -f "$t/prd/build/ir/ArmASL/Part01.c.o" ] && ok "a C object of a module the entry has is kept (an exe build's output)" || bad "a legitimate C object was pruned"
+cmp -s "$t/pr/build/lib/lean/ArmASL/Part02.olean" "$t/prd/build/lib/lean/ArmASL/Part02.olean" && ok "the entry's own files are in place" || bad "entry files missing"
+echo stale > "$t/prd/build/lib/lean/ArmASL/Part50.olean"; B fetch armasl "$t/prc" "$(printf 'c%.0s' {1..32})" "$t/prd" > "$t/pr.out"
+[ "$(cat "$t/pr.out")" = current ] && [ ! -e "$t/prd/build/lib/lean/ArmASL/Part50.olean" ] && ok "an already-current tree is pruned too (a later stale file is removed, result 'current')" || bad "current tree not pruned: $(cat "$t/pr.out")"
+mkdir -p "$t/prm/ArmASL"; touch "$t/prm/ArmASL/Defs.lean" "$t/prm/ArmASL/Part01.lean"
+mkdir -p "$t/prs/build/lib/lean/ArmASL"; echo x > "$t/prs/build/lib/lean/ArmASL/Part01.olean"; echo x > "$t/prs/build/lib/lean/ArmASL/Part37.olean"
+B prune-armasl "$t/prs" "$t/prm/ArmASL" >/dev/null; [ -f "$t/prs/build/lib/lean/ArmASL/Part01.olean" ] && [ ! -e "$t/prs/build/lib/lean/ArmASL/Part37.olean" ] && ok "prune-armasl (the seed copy of asl.sh verify) keeps the model's modules, drops the others" || bad "prune-armasl"
+
 echo; echo "-- lock-file hygiene: no symlink followed, mode 0600, regular files only"
 rm -rf "$t/lk"; mkdir -p "$t/lk/cache" "$t/lk/dest" "$t/lk/victim"
 printf 'a.bin\0' | B store sail "$t/lk/cache" "$K" "$t/src" >/dev/null

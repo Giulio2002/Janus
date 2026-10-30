@@ -26,6 +26,7 @@ and replaced.
     bcache.py fetch  KIND CACHE ID DEST [--clean-glob G ...]   0 hit/current, 2 miss, 3 rejected
     bcache.py store  KIND CACHE ID SRC [--inputs FILE] < NUL-separated relative paths of SRC
     bcache.py verify KIND CACHE ID                              0 valid, 2 miss, 3 invalid
+    bcache.py prune-armasl LAKEDIR MODEL_ARMASL_DIR             drop built ArmASL modules the current model lacks
     bcache.py key-path                                          where the per-user key lives
 
 KIND is armasl (CACHE/<id>), sail (CACHE/sail/<id>) or mod (CACHE/mods/<id[:2]>/<id>).
@@ -305,6 +306,7 @@ def fetch(kind, cache, ident, dest, clean_globs=()):
             touch_use(e)
             _sweep_temps(dest, man)
             if _same(dest, man):
+                prune_stale(kind, dest, man)
                 return "current"
             staged = []
             try:
@@ -335,11 +337,63 @@ def fetch(kind, cache, ident, dest, clean_globs=()):
             # phase 2: every file is verified; rename into place (a rename cannot fail on content)
             for tmp, dst in staged:
                 os.replace(tmp, dst)
+            prune_stale(kind, dest, man)
             return "hit"
         finally:
             lk.close()
     finally:
         tl.close()
+
+
+def stale_modules(kind, dest, man):
+    """Files in dest that belong to a module the entry does not contain: for an armasl entry, anything under
+    build/lib/lean/ArmASL/ and build/ir/ArmASL/ whose module stem (the name up to its first dot) is not a stem of
+    the entry. Such files are leftovers of an OLDER model split (more or other parts): Lake never touches a module
+    nothing imports, and a replay that enumerates the directory (leanchecker) would load them next to the current
+    parts and fail (J1 gate, ArmASL.Part37 vs Part20). Strictly bounded to those two directories and to whole
+    modules: a file of a module the entry does have (a C object a later exe build added) is left alone."""
+    if kind != "armasl":
+        return []
+    out = []
+    for sub in ("build/lib/lean/ArmASL", "build/ir/ArmASL"):
+        have = {os.path.basename(r).split(".")[0] for r in man if r.startswith(sub + "/") and r.count("/") == sub.count("/") + 1}
+        root = os.path.join(dest, sub)
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue
+        for n in names:
+            q = os.path.join(root, n)
+            if n.split(".")[0] not in have and (os.path.isfile(q) or os.path.islink(q)):
+                out.append(q)
+    return out
+
+
+def prune_armasl(lake, model_dir):
+    """Remove built ArmASL modules (build/lib/lean/ArmASL/*, build/ir/ArmASL/*) whose module is not a source file
+    of the current model (model_dir holds its ArmASL/*.lean). For a seed copied from another build."""
+    have = {f.split(".")[0] for f in os.listdir(model_dir) if f.endswith(".lean")}
+    n = 0
+    for sub in ("build/lib/lean/ArmASL", "build/ir/ArmASL"):
+        root = os.path.join(lake, sub)
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue
+        for x in names:
+            q = os.path.join(root, x)
+            if x.split(".")[0] not in have and (os.path.isfile(q) or os.path.islink(q)):
+                os.unlink(q)
+                n += 1
+    return n
+
+
+def prune_stale(kind, dest, man):
+    for q in stale_modules(kind, dest, man):
+        try:
+            os.unlink(q)
+        except OSError:
+            pass
 
 
 def _sweep_temps(dest, man):
@@ -417,6 +471,10 @@ def main(argv):
     try:
         if cmd == "key-path":
             print(key_path())
+            return 0
+        if cmd == "prune-armasl":  # prune-armasl LAKEDIR MODEL_SRC_DIR: drop built modules the current model lacks
+            n = prune_armasl(argv[1], argv[2])
+            print("pruned %d stale ArmASL files" % n)
             return 0
         kind, cache, ident = argv[1:4]
         if cmd == "fetch":

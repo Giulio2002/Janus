@@ -369,6 +369,9 @@ do_verify() {
     mkdir -p "$d" && cp -aL --reflink=auto "$pkg/.lake" "$d/.lake" && rm -f "$d/.lake/package-overrides.json"
     [ -d "$d/.lake" ] && [ ! -L "$d/.lake" ] || { echo "verify: the seed is not a private directory" >&2; return 1; }
   fi
+  # a seed from a long-lived .lake can hold modules of an older model split (ArmASL.Part37.. next to the current
+  # parts): the kernel replay enumerates the directory and would load both. Keep only the current model's modules.
+  [ ! -d "$d/.lake" ] || python3 -I "$root/scripts/lib/bcache.py" prune-armasl "$d/.lake" "$pkg/ArmASL"
   local fail=0 n
   mkdir -p "$OUT"
   for n in ${ASL_EXAMPLES:-Add Max Mul64 Add128}; do
