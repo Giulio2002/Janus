@@ -255,6 +255,110 @@ re-keyed, copied, foreign-key, wrong-domain, symlinked or trailing-garbage recor
 failed run is never written and withdraws an older one; inputs that change during the run are not recorded; an
 input that cannot be hashed makes the item always run; key framings do not collide.
 
+
+### Miss analysis and the run-specific environment (INCR2)
+
+**Why the incremental gate skipped nothing across commits.** `janus incr` keys the environment (`JANUS_*`, `LEAN*`, `GO*`, ...)
+except a pinned skip list (`incrEnvSkip`). `scripts/gate.sh` exports bookkeeping variables whose values differ from one gate run to the next:
+`JANUS_GATE_TREE0` (stamp of HEAD and of every file's mtime/inode, `scripts/lib/incr.sh`), `JANUS_LAKEGUARD_PIN` (a path inside the
+timestamped output directory), `JANUS_LAKEGUARD_ROOT`, the load-derived sizing (`JANUS_GATE_AUTO_WHY`, `JANUS_GATE_ROUNDS_LANES`,
+`JANUS_GATE_AUTO_BUDGET`, `JANUS_VERIFY_MEM_BUDGET_GIB`, `JANUS_ROUNDS_LANES`). They were part of every item's and lane's key (since the tree pin
+of cfca64d8 and the lakeguard/autojobs of the speed batch), so a record written by one gate run could never match the key of the next
+(`JANUS_GATE_TREE0=a janus incr explain ...` and `=b` give different keys). The earlier measurements (33 of 70 merges helped) ran
+`verify-all-examples.sh` directly, without these exports. They are now in `incrEnvSkip`, each with its reason; every other relevant variable stays keyed.
+`TestIncr2GateRunsShareKeys` and `TestIncr2EachBookkeepingVariableIsNotKeyed` fail on the old list (mutation-checked);
+`TestIncr2EveryGateExportIsClassified` scans the gate scripts' exports and fails when a new relevant one is neither skipped nor justified as keyed
+(`keyedGateExports`), so the bug cannot return unnoticed.
+
+**What still misses, by design.** An item re-runs when any of these changes: the Go sources of the verifier (`cmd/janus`, root `.go`/`.s`/`.h`, `go.mod`, `go.sum`:
+the whole identity of the one executable that audits and replays), any module of the `import Janus` closure (the auditor's clean environment imports it,
+so every verdict depends on all of it) and its compiled data, `lakefile.toml`/`lake-manifest.json`/`lean-toolchain`, the toolchain, a gate script the item runs
+(`scripts/gate.sh`, `verify-all-examples.sh`, the pool/memguard/theorems libraries, the kind's scripts), the pins, the shared example binary of its suite
+(every `examples/basic` Go change moves all arm64/amd64 addresses), its own proof file and extraction. A leaf proof edit re-runs exactly that item
+(`TestIncr2LeafChangeInvalidatesOnlyThatItem`), a shared module every dependent (`TestIncr2SharedModuleChangeInvalidatesEveryDependent`).
+Docs, `audit/`, `JanusASL/`, `oracle*`, the other suites' sources and unrelated scripts never touch an item. Lanes (`gotest`, `rounds`, `x86`, `rtasl-*`) key the whole
+non-documentation tree on purpose: their read sets are not known (the go tests read `examples/`, `audit/`, `scripts/`, `JanusASL/`, `docs/SOUNDNESS.md`, ...);
+`axiom`, `govet`, `cachekeys`, `decoder`, `oracle`, `asl-*`, `sail-build` always run.
+
+**Measured** (`scripts/incr-sample.py`: for each first-parent commit of main, the files it changes against its first parent, run through the key rules of this tree; 461 items;
+"before" is the gate as shipped in ad264a2, where the exports above make every gate run miss every item; the model follows incr.go and incr.sh, a file it cannot classify invalidates all):
+
+Latest 30 first-parent commits of main (76554ae and before; mostly gate/verifier infrastructure): 0/13830 before, 5993/13830 (43%) after.
+
+| commit | subject | items skipped before | items skipped after | why the rest still runs |
+|---|---|---|---|---|
+| 76554aeb | untrack the generated asl_mod_cache .pyc again (index-only;  | 0/461 | 461/461 | no item input changed |
+| a3ffde95 | verify --asl: a symlinked cache .lake is replaced by a priva | 0/461 | 0/461 | verifier (Go source: cmd/janus/asl.go) -> 461 |
+| c0d42e38 | Merge commit '7569497' into integ/speed1 | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 12d9408c | lock hygiene: O_NOFOLLOW/0600 lock and .use files, refuse no | 0/461 | 461/461 | no item input changed |
+| c2a9d070 | keep the tracked asl_mod_cache .pyc from main (again) | 0/461 | 461/461 | no item input changed |
+| 9d94c13c | bcache: per-tree exclusive lock, two-phase fetch (stage+veri | 0/461 | 461/461 | no item input changed |
+| 394336c4 | Merge commit 'd99f2d1' into integ/speed1 | 0/461 | 461/461 | no item input changed |
+| e0f424ac | untrack __pycache__, ignore it and *.pyc | 0/461 | 461/461 | no item input changed |
+| fceba612 | Merge commit '8d71ea8' into integ/speed1 | 0/461 | 461/461 | no item input changed |
+| 69c7fc30 | Merge gotest2 020f44a; gate: build the go-test fixture in th | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 1d09f216 | Merge commit '020f44a' into integ/speed1 | 0/461 | 461/461 | no item input changed |
+| c7e44d61 | gate: lakeguard shim (no lake build/exe in the shared checko | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| aa5eb61c | gate: cover what CI runs and the gate did not (JanusTests, j | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 975874d9 | Merge commit '204126a' into integ/speed1 | 0/461 | 461/461 | no item input changed |
+| 06e17eee | Merge commit '08d319b' into integ/speed1 | 0/461 | 0/461 | framework closure (Janus/Tactic/Basic.lean) -> 461 |
+| e46974c1 | Merge commit 'fd982da' into integ/speed1 | 0/461 | 461/461 | no item input changed |
+| c86339c4 | fillLE: rename structural def fillLEStructural, equivalence  | 0/461 | 0/461 | framework closure (Janus/Amd64/TacticExt.lean) -> 461 |
+| a24709ce | amd64 fillLE: kernel-opaque (Classical.choose of fillLEDef)  | 0/461 | 0/461 | framework closure (Janus/Amd64/TacticExt.lean) -> 461 |
+| 969d47a1 | Merge commit '539105d' into integ/speed1 | 0/461 | 0/461 | framework closure (Janus/Contracts/Alloc.lean) -> 461 |
+| 40d0b85e | Sail driver key: hash rustc/cargo/c++/cc/ld binaries, parent | 0/461 | 461/461 | no item input changed |
+| 920eb785 | Merge branch 'agent/speed-asl' into agent/speed-rt | 0/461 | 461/461 | no item input changed |
+| 1d58a4e4 | Merge main (wave 2, 3579070) into agent/speed-rt | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 5cba6181 | docs: red-team tests | 0/461 | 461/461 | no item input changed |
+| 0ddee85c | sandbox: cover the build-cache (ASL/Sail) HMAC key with /dev | 0/461 | 0/461 | verifier (Go source: cmd/janus/sandbox.go) -> 461 |
+| aca7993a | RT 11: verdict store tests; frame the pins digest | 0/461 | 0/461 | verifier (Go source: cmd/janus/speed.go) -> 461 |
+| c63476f3 | Merge branch 'agent/speed-j1' into agent/speed-rt | 0/461 | 0/461 | verifier (Go source: cmd/janus/auditserve.go) -> 461 |
+| cdbb4d9f | sandbox(unshare): drop all capabilities before exec so a pro | 0/461 | 0/461 | verifier (Go source: cmd/janus/sandbox.go) -> 461 |
+| 314efadb | verifier identity: hash every file of cmd/janus (assembly, h | 0/461 | 0/461 | verifier (Go source: cmd/janus/verifierid.go) -> 461 |
+| cfca64d8 | incr gate: clear explain/precheck env at the entry points; r | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 2450e81c | incr: parse the Lean module header; hash what symlinks in pa | 0/461 | 0/461 | verifier (Go source: cmd/janus/incr.go) -> 461 |
+
+The 30 before them (wave-2 period): 0/13830 before, 4987/13830 (36%) after.
+
+| commit | subject | items skipped before | items skipped after | why the rest still runs |
+|---|---|---|---|---|
+| 1380cea5 | gate: print rows are pool items again (later rows wait for P | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 1cb00f2b | gate: keep the original arguments across the setsid re-exec | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 48b31e3a | gate: restore pool init lines | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 6f1afcee | remove a stray print snapshot, ignore examples/.print-proofs | 0/461 | 461/461 | no item input changed |
+| eed411cd | gate: own process group + pgid cancel, two isolated trees wi | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 27655bec | gate: isolated source copy for the lake-writing lanes (x86,  | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 10fbcd15 | gate: speed check wired in, filters, self-tests as go tests | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 1193bf3e | gate: speed-regression check (gate-speedcheck.py) | 0/461 | 461/461 | no item input changed |
+| 0374dce7 | verify-all: no per-item cgroup (as before) | 0/461 | 0/461 | common gate script (scripts/verify-all-examples.sh) -> 461 |
+| 4d85a303 | verify-all: one print item per ISA in a shared snapshot, 24G | 0/461 | 0/461 | common gate script (scripts/verify-all-examples.sh) -> 461 |
+| cf4fade8 | docs: gate driver | 0/461 | 461/461 | no item input changed |
+| b144e5ac | gate: df fix | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| ccdb8db8 | verify-all: --filter (development) | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 505b4401 | gate: scripts/gate.sh driver, gate-report.py | 0/461 | 0/461 | common gate script (scripts/gate.sh) -> 461 |
+| 538cdc14 | gate: pool needs, rt-asl groups, go test shards, run-rounds  | 0/461 | 0/461 | common gate script (scripts/lib/pool.sh) -> 461 |
+| 154d5595 | gate: shared pool library (scripts/lib/pool.sh), cgo/sys/pri | 0/461 | 0/461 | common gate script (scripts/lib/pool.sh) -> 461 |
+| 294e5175 | auditor: Extracted.funcs (the extraction's own function meta | 0/461 | 461/461 | no item input changed |
+| 33e1bb19 | Merge origin/main d2cab06 (round-11 auditor rule); RecoverSe | 0/461 | 459/461 | proof file (examples/proofs-amd64/RecoverSet/Proof.lean) -> 1 |
+| 0a29a60c | Merge agent/panic3 f2714c8; per-item wall-clock limit (JANUS | 0/461 | 0/461 | common gate script (scripts/lib/itemtimeout.sh) -> 461 |
+| 22cc9b79 | Merge branch 'agent/panic3' into preview/wave2 | 0/461 | 0/461 | framework closure (Janus/Contracts/Panic.lean) -> 461 |
+| c133b2ea | Merge origin/main 1c13152 (ELF loader-view fix) into wave-2  | 0/461 | 0/461 | verifier (Go source: cmd/janus/binary.go) -> 461 |
+| 087beb74 | Merge branch 'agent/alloc2' into preview/wave2 | 0/461 | 461/461 | no item input changed |
+| 2cd08576 | panic examples: remap binary addresses to the preview layout | 0/461 | 452/461 | proof file (examples/proofs-amd64/DeferTwice/Proof.lean) -> 1 |
+| 34b08d9f | Merge agent/panic2 (b56b20a) into wave-2 preview; PanicRetW  | 0/461 | 0/461 | framework closure (Janus.lean) -> 461 |
+| 8a0eebd4 | Merge branch 'agent/pool2' into preview/wave2 | 0/461 | 0/461 | framework closure (Janus.lean) -> 461 |
+| 1c23c2ac | Merge agent/alloc2 8363faa (final) into wave-2 preview; allo | 0/461 | 0/461 | framework closure (Janus/Contracts/LiveSat.lean) -> 461 |
+| 665dc661 | print examples: excl/exclPass (arm64) and zmmHi/kreg/x87/fpu | 0/461 | 453/461 | proof file (examples/proofs-print/PrintProofs/Amd64/FnFmtArith.lean) -> 8 |
+| c8b0b31f | CCount: heartbeats for vloop | 0/461 | 460/461 | proof file (examples/proofs-cgo/arm64/CCount.lean) -> 1 |
+| 8703fff6 | cgo examples: amd64 cgo hash after CRepRet, CCount heartbeat | 0/461 | 397/461 | cgo script (scripts/verify-cgo-examples.sh) -> 64 |
+| a316ece9 | docs/SOUNDNESS.md: x86 classes cross-checked against hardwar | 0/461 | 461/461 | no item input changed |
+
+Remaining misses in these samples: `scripts/gate.sh` / `verify-all-examples.sh` / pool libraries (gate infrastructure), `cmd/janus` Go (verifier identity),
+`Janus/**` (shared framework), and leaf proofs. A commit that changes only proofs, docs, `audit/`, `JanusASL/` or unrelated scripts skips everything else.
+Not done (the keys stay conservative): narrowing the Go identity below the whole `cmd/janus` package (one package `main`: needs the verify path moved to an internal package so
+`go list -deps` can scope it), per-lane read sets (needs a traced read set per lane), the shared example binary hash.
+
+
 ## Gate speed (2026-10-25): profile, changes, before/after
 
 The merge gate and every agent's regression run are `go test ./cmd/...`,
