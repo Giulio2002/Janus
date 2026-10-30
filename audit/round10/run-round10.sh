@@ -132,7 +132,9 @@ check V3a_convT64_allocates_per_call $? "convT64: $o1 (amd64), the same on arm64
 
 echo "== A1: the ABI convention warning recognises linked programs"
 type tmark >/dev/null 2>&1 && tmark "== A1: the ABI convention warning recognises linke"
-o="$(go test -count=1 -run 'TestABIMismatch$' ./cmd/janus/ 2>&1)"; check A1_abi_warning_linked_program $? "$(tail -n 1 <<<"$o" | cut -c1-80)"
+o="$(go test -count=1 -run 'TestABIMismatch$' ./cmd/janus/ 2>&1)"; rc=$?; check A1_abi_warning_linked_program $rc "$(tail -n 1 <<<"$o" | cut -c1-80)"
+# diagnostic only: a failing row shows the go test output (the row keeps just its last line)
+[ "$rc" = 0 ] || { echo "  ---- go test output of A1 (last 60 lines) ----"; tail -60 <<<"$o" | cut -c1-400 | sed 's/^/  | /'; }
 
 echo "== F1: an in-place framework build whose sources change while Lake runs is not stamped"
 type tmark >/dev/null 2>&1 && tmark "== F1: an in-place framework build whose sources c"
