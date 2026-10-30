@@ -14,7 +14,7 @@ if [ -n "$tree" ] && [ -n "$lock" ]; then
     "$tree"/*)
       mode=-x
       case "${1:-}" in env|--version|--help|-h|-v|"") mode=-s ;; esac
-      exec flock $mode "$lock" "$real" "$@" ;;
+      exec python3 -I "$(dirname "${BASH_SOURCE[0]}")/lockexec.py" "${mode#-}" "$lock" "$real" "$@" ;;
   esac
 fi
 exec "$real" "$@"
