@@ -204,8 +204,9 @@ def parse_manifest(data):
     return out
 
 
-def read_signed_manifest(kind, ident, e):
-    """The entry's manifest, if its HMAC is valid; CacheError otherwise."""
+def read_signed_manifest(kind, ident, e, want_sha=None):
+    """The entry's manifest, if its HMAC is valid (and, when want_sha is given, its SHA-256 is exactly that: the
+    pin of scripts/lib/modelpin.py binds an entry to one manifest); CacheError otherwise."""
     try:
         with open(os.path.join(e, "MANIFEST.sha256"), "rb") as f:
             data = f.read()
@@ -215,6 +216,8 @@ def read_signed_manifest(kind, ident, e):
         raise CacheError("no signed manifest (%s)" % ex.strerror)
     if not hmac.compare_digest(tag, mac(kind, ident, data)):
         raise CacheError("the manifest's HMAC does not verify")
+    if want_sha is not None and hashlib.sha256(data).hexdigest() != want_sha:
+        raise CacheError("the manifest is not the pinned one")
     return parse_manifest(data)
 
 
@@ -283,7 +286,7 @@ def _tmp_name(dst):
     return "%s.bcache-tmp.%d.%s" % (dst, os.getpid(), os.urandom(6).hex())
 
 
-def fetch(kind, cache, ident, dest, clean_globs=()):
+def fetch(kind, cache, ident, dest, clean_globs=(), want_sha=None):
     """Copy the verified entry into dest. Returns "hit", "current" (dest already holds exactly the entry's
     files), "miss", or raises CacheError (rejected).
 
@@ -302,7 +305,7 @@ def fetch(kind, cache, ident, dest, clean_globs=()):
         try:
             if not os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
                 return "miss"
-            man = read_signed_manifest(kind, ident, e)
+            man = read_signed_manifest(kind, ident, e, want_sha)
             touch_use(e)
             _sweep_temps(dest, man)
             if _same(dest, man):

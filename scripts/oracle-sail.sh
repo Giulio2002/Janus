@@ -6,6 +6,7 @@
 #   scripts/oracle-sail.sh build     build the Sail driver (first build ~30 min: one 166 MB C++ TU)
 #   scripts/oracle-sail.sh smoke     build + hand-written sanity cases
 #   scripts/oracle-sail.sh run       build + three-way run on the qemu oracle's corpus (default)
+#   scripts/oracle-sail.sh key       print the driver's cache/pin key (32 hex digits)
 #   scripts/oracle-sail.sh regen     regenerate the Sail model from pinned sources (opam + Sail
 #                                    0.20.1 + sail-arm) and diff it against the vendored model
 #   scripts/oracle-sail.sh crosscheck  build a second driver on the regenerated model (separate
@@ -19,6 +20,11 @@
 #   JOBS      parallelism (default nproc)
 #   DEPS      where pinned external sources/toolchains live (default /srv/janus-sail-deps)
 #   SAIL_MODEL  vendored | regen  (which model.cpp to build against; default vendored)
+#   JANUS_MODEL_PIN=1  the cold gate (scripts/gate.sh --cold): the driver comes ONLY from the model pin
+#             (scripts/lib/modelpin.py, docs/TESTING.md "Cold gate and the model pin"), never from the build cache and
+#             never built-and-published: a missing, tampered, corrupt or stale pin FAILS (JANUS_MODEL_PIN_STALE=rebuild
+#             builds the driver from source inside the run instead, loudly, publishing nothing). Only
+#             scripts/nightly-cold-gate.sh writes the pin.
 #   KEEP      what `run` leaves in OUT (scripts/lib/artifacts.sh): by default the reports, the
 #             compressed corpus, results and verdicts, the MISMATCH verdicts; the per-comparison
 #             copies of the corpus and the derived dumps are removed. KEEP=zst compresses
@@ -90,6 +96,11 @@ fi
 # JANUS_ASL_CACHE=0 (also off/no/false): the opt-out for a forced cold build (the full gate before a push to main)
 case "${JANUS_ASL_CACHE:-}" in 0|off|no|false) SAIL_CACHE="" ;; esac
 
+# The cold gate's model pin (see above): the build cache is not used at all.
+MODEL_PIN="${JANUS_MODEL_PIN:-}"
+PIN_DIR=""
+if [ -n "$MODEL_PIN" ]; then SAIL_CACHE=""; PIN_DIR="$(python3 -I "$root/scripts/lib/modelpin.py" dir)"; fi
+
 sail_cache_key() {  # sail_cache_key MODEL_CPP_OR_EMPTY
   local mf=()
   [ -n "$1" ] && mf=(--model-file "$1")
@@ -97,9 +108,35 @@ sail_cache_key() {  # sail_cache_key MODEL_CPP_OR_EMPTY
     "sail_model=$SAIL_MODEL" "cargo_flags=$SAIL_CARGO_FLAGS" "sail_arm_rev=$SAIL_ARM_REV" "sail_version=$SAIL_VERSION"
 }
 
+# pin_step restore|verify-tree: the driver from / against the pin (fails unless the pin holds; stale only with
+# JANUS_MODEL_PIN_STALE=rebuild, which returns 3 = "build from source here"; nothing is then checked against a pin)
+pin_step() {
+  local key rc=0 out
+  [ "$SAIL_MODEL" = vendored ] || { echo "sail pin: FAIL: the cold gate pins the vendored model only (SAIL_MODEL=$SAIL_MODEL)" >&2; exit 1; }
+  key=$(sail_cache_key "") || { echo "sail pin: FAIL: cannot compute the driver key" >&2; exit 1; }
+  mkdir -p "$here/target/release"
+  out=$(python3 -I "$root/scripts/lib/modelpin.py" "$1" sail "$PIN_DIR" "$key" "$here") || rc=$?
+  case $rc in
+    0) echo "sail pin: driver $key: $out" ;;
+    2) if [ "${JANUS_MODEL_PIN_STALE:-fail}" = rebuild ]; then
+         echo "sail pin: driver $key: $out"; echo "sail pin: STALE PIN: the driver is built from source INSIDE this gate (JANUS_MODEL_PIN_STALE=rebuild); nothing is pinned or published"
+         return 3
+       fi
+       echo "sail pin: FAIL: driver $key: $out" >&2
+       echo "sail pin: the driver inputs changed since the pin was written. Build and pin them with the nightly truly-cold run, or rerun with --rebuild-stale-model" >&2; exit 1 ;;
+    *) echo "sail pin: FAIL: driver $key: $out" >&2; exit 1 ;;
+  esac
+}
+
 do_build() {
   local ckey="" crc=0 cout inp
-  if [ -n "$SAIL_CACHE" ]; then
+  if [ -n "$MODEL_PIN" ]; then
+    local prc=0
+    pin_step restore || prc=$?
+    [ "$prc" = 0 ] || [ "$prc" = 3 ] || exit 1
+    [ "$prc" = 0 ] || do_build_driver
+    [ "$prc" != 0 ] || pin_step verify-tree
+  elif [ -n "$SAIL_CACHE" ]; then
     if [ "$SAIL_MODEL" = regen ]; then
       local rm_="$DEPS/sail-arm-${SAIL_ARM_REV:0:7}/arm-v9.4-a/cpp/model.cpp"
       [ -f "$rm_" ] && ckey=$(sail_cache_key "$rm_") || true
@@ -117,7 +154,7 @@ do_build() {
       *) echo "sail cache: not usable here (above); building from source" ;;
     esac
   fi
-  if [ "$crc" != 0 ] || [ -z "$ckey" ]; then
+  if [ -z "$MODEL_PIN" ] && { [ "$crc" != 0 ] || [ -z "$ckey" ]; }; then
     do_build_driver
     if [ -n "$ckey" ] && [ "${SAIL_CACHE_READONLY:-0}" != 1 ] && [ -f "$here/$SAIL_DRIVER_REL" ]; then
       mkdir -p "$SAIL_CACHE"
@@ -313,9 +350,10 @@ do_crosscheck() {
 
 case "$mode" in
   build) do_build ;;
+  key) sail_cache_key "" ;;
   crosscheck) do_crosscheck ;;
   smoke) do_build; do_smoke ;;
   run)   do_build; do_smoke; do_run ;;
   regen) do_regen ;;
-  *) echo "usage: $0 build|smoke|run|regen|crosscheck" >&2; exit 2 ;;
+  *) echo "usage: $0 build|key|smoke|run|regen|crosscheck" >&2; exit 2 ;;
 esac

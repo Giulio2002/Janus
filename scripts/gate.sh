@@ -26,6 +26,24 @@
 #               in the summary). `record`: after a passing FULL run write the baseline from the run (only
 #               items that PASSED; the host load is in its header); commit it after a green full gate.
 #
+#   --cold      the COLD gate (docs/TESTING.md "Cold gate and the model pin"): everything is rebuilt from scratch EXCEPT the ISA
+#               model artifacts (the ArmASL build + lean-sail, and the Sail oracle driver), which are treated like the Lean
+#               toolchain. The run starts with empty result / verdict / test-fixture caches (XDG_CACHE_HOME is a fresh private
+#               directory in <out>/cold-cache; the Go build cache and the HMAC key are kept), a fresh framework build
+#               (it REFUSES to start if .lake/build, JanusASL/.lake/build, JanusX86/.lake/build or oracle-sail/target hold
+#               a build: use a fresh worktree, or --wipe), and no JanusASL/Janus module cache. The model artifacts come ONLY from
+#               the model pin (scripts/model-pin.sh, scripts/lib/modelpin.py): content-hash pinned (SHA-256 of every file, the
+#               manifest HMAC, and a signed pin record that binds the exact manifest) and integrity-checked on EVERY cold
+#               gate, before anything is built (and again by every restore and after every build): a tampered, corrupt, missing
+#               or STALE pin (a model input changed: sources, toolchain, environment, key scheme) FAILS the gate, it never falls
+#               back to a cached or silently rebuilt model. The pin is written ONLY by the nightly truly-cold run
+#               (scripts/nightly-cold-gate.sh: JANUS_ASL_CACHE=0, empty caches, builds the model from source, must pass and
+#               agree with the cached run). Nothing else is relaxed: every check, lane and the speed check run as in a full gate.
+#               Not combinable with --incremental.
+#   --rebuild-stale-model   with --cold: a STALE pin (and only stale: tampered / corrupt / missing still fail) makes this gate build
+#               the model from source inside the run (slow: ~1 h of ArmASL, ~25 min of Sail), loudly, and publish/pin nothing
+#   --wipe      with --cold: remove this checkout's build directories (.lake/build, JanusASL/.lake/build, JanusX86/.lake/build,
+#               oracle-sail/target) instead of refusing to start on them
 # Cancel a run: it is its own process group, and writes the group id to <out>/pgid; cancel with
 #   kill -- -$(cat <out>/pgid)
 # (or stop its memcap scope). Never kill by name or pattern: other gates share this host.
@@ -82,7 +100,7 @@ lane_spec() {
 }
 orig_args=("$@")
 sbfile="${JANUS_SPEED_BASELINE:-$root/scripts/speed-baseline.tsv}"
-jobs_n="${JANUS_JOBS:-}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce incremental="${JANUS_GATE_INCREMENTAL:-}" explain_item=""
+jobs_n="${JANUS_JOBS:-}" lanes_n="${JANUS_LANES:-}" changed="" only="" skip="" out="" vfilter="" gtrun="" rounds="" upd="" sbmode=enforce incremental="${JANUS_GATE_INCREMENTAL:-}" explain_item="" cold="" wipe="" stale_rebuild="" cold_preflight_only=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -j|--jobs) jobs_n="${2:?-j needs a number}"; shift 2 ;;
@@ -97,12 +115,38 @@ while [ $# -gt 0 ]; do
     --rounds) rounds="${2:?}"; shift 2 ;;
     --incremental) incremental=1; shift ;;
     --explain) explain_item="${2:?--explain needs an item (e.g. arm64:Add) or a lane (e.g. lane:gotest)}"; shift 2 ;;
+    --cold) cold=1; shift ;;
+    --wipe) wipe=1; shift ;;
+    --rebuild-stale-model) stale_rebuild=1; shift ;;
+    --cold-preflight-only) cold_preflight_only=1; shift ;;   # (self-test hook: the pin check alone)
     --update-baseline) sbmode=record; shift ;;
     --speed-baseline) sbmode="${2:?}"; shift 2 ;;
     -h|--help) sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 0 ;;
-    *) echo "usage: scripts/gate.sh [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
+    *) echo "usage: scripts/gate.sh [--cold [--wipe] [--rebuild-stale-model]] [-j N|auto] [--lanes N] [--changed] [--only a,b] [--skip a,b] [--out DIR]" >&2; exit 2 ;;
   esac
 done
+if [ -z "$cold" ] && { [ -n "$wipe" ] || [ -n "$stale_rebuild" ] || [ -n "$cold_preflight_only" ]; }; then
+  echo "gate: --wipe / --rebuild-stale-model need --cold" >&2; exit 2
+fi
+if [ -n "$cold" ]; then
+  if [ -n "$incremental" ]; then echo "gate: --cold is a full from-scratch run and cannot be --incremental" >&2; exit 2; fi
+  # The model pin is checked FIRST, before anything is built: a tampered, corrupt, missing or stale pin fails in seconds.
+  if [ -z "${JANUS_COLD_PIN_CHECKED:-}" ]; then
+    echo "gate: COLD mode: checking the ISA model pin (scripts/model-pin.sh check)"
+    pin_log="$(mktemp "${TMPDIR:-/tmp}/gate-model-pin.XXXXXX")"
+    pin_rc=0
+    scripts/model-pin.sh check --stale "$([ -n "$stale_rebuild" ] && echo rebuild || echo fail)" > "$pin_log" 2>&1 || pin_rc=$?
+    grep -v '^memguard' "$pin_log"
+    if [ "$pin_rc" != 0 ]; then
+      rm -f "$pin_log"
+      echo "GATE FAIL (cold): the ISA model pin does not hold; nothing was built"
+      exit 1
+    fi
+    export JANUS_COLD_PIN_CHECKED=1 JANUS_COLD_PIN_LOG="$(grep -v '^memguard' "$pin_log" | tr '\n' '|')"
+    rm -f "$pin_log"
+  fi
+  if [ -n "$cold_preflight_only" ]; then echo "gate: cold preflight OK (the model pin holds)"; exit 0; fi
+fi
 if [ -z "$explain_item" ]; then
   # --explain mode and the pre-check mode make incr_begin report "skipped" without verifying anything: a variable
   # left in the environment must never reach a verifying gate
@@ -175,6 +219,32 @@ now() { date +%s.%N; }
 mkdir -p "$out/prebuild" "$out/lanes" "$out/verify"
 ln -sfn "$out" "$root/artifacts/gate/latest" 2>/dev/null || true
 tlf="$out/timeline.jsonl"; : > "$tlf"
+# ---- --cold: fresh build directories, empty caches, the model from the pin (once: the setsid re-exec below keeps them)
+if [ -n "$cold" ] && [ -z "${JANUS_COLD_DONE:-}" ]; then
+  dirty=()
+  for d in .lake/build JanusASL/.lake/build JanusX86/.lake/build oracle-sail/target; do
+    if [ -e "$root/$d" ] || [ -L "$root/$d" ]; then
+      if [ -n "$wipe" ]; then echo "gate: --cold --wipe: removing $root/$d"; rm -rf "${root:?}/$d"
+      elif [ -L "$root/$d" ] || [ -n "$(ls -A "$root/$d" 2>/dev/null)" ]; then dirty+=("$d"); fi
+    fi
+  done
+  if [ "${#dirty[@]}" -gt 0 ]; then
+    echo "gate: --cold needs a fresh framework build, but ${dirty[*]} already hold a build: run the cold gate in a fresh worktree (git worktree add), or pass --wipe to remove them" >&2
+    exit 2
+  fi
+  # empty result / verdict / fixture caches: every cache janus, the go tests and the audit rows use lives under XDG_CACHE_HOME
+  # (or JANUS_CACHE_DIR, JANUS_VERDICT_CACHE, JANUS_TEST_*, which are unset). The build-cache HMAC key and the Go build cache
+  # (compiled Go packages: not a result or verdict) keep their old location.
+  _xdg0="${XDG_CACHE_HOME:-$HOME/.cache}"
+  export JANUS_CACHE_KEY_DIR="${JANUS_CACHE_KEY_DIR:-$_xdg0/janus/asl-cache-key}"
+  export GOCACHE="${GOCACHE:-$(go env GOCACHE)}"
+  unset JANUS_CACHE_DIR JANUS_VERDICT_CACHE JANUS_RESULT_CACHE JANUS_TEST_FIXTURE_DIR JANUS_TEST_SEED_CACHE JANUS_TEST_CACHE_DIR \
+        JANUS_ASL_CACHE ASL_CACHE SAIL_CACHE
+  export JANUS_COLD_XDG="$(cd "$out" && pwd)/cold-cache"
+  rm -rf "$JANUS_COLD_XDG"; mkdir -m 700 -p "$JANUS_COLD_XDG"
+  export XDG_CACHE_HOME="$JANUS_COLD_XDG"
+  export JANUS_MODEL_PIN=1 JANUS_MODEL_PIN_STALE="$([ -n "$stale_rebuild" ] && echo rebuild || echo fail)" JANUS_COLD=1 JANUS_COLD_DONE=1
+fi
 # Own process group (setsid, once): every child of this run is in it, and a cancel is `kill -- -PGID`.
 if [ "${JANUS_GATE_PG:-}" != "$out" ]; then
   export JANUS_GATE_PG="$out" JANUS_JOBS="$jobs_n" JANUS_LANES="$lanes_n"
@@ -183,6 +253,10 @@ if [ "${JANUS_GATE_PG:-}" != "$out" ]; then
 fi
 echo "$$" > "$out/pgid"
 echo "gate: process group $$ (cancel: kill -- -$$)"
+if [ -n "$cold" ]; then
+  echo "gate: COLD: fresh framework build, empty result/verdict caches ($JANUS_COLD_XDG), no module cache; ISA model artifacts from the pin only"
+  echo "gate: COLD model pin: ${JANUS_COLD_PIN_LOG//|/ ; }"
+fi
 # The isolated lake-lane source copies live under artifacts/gate/trees/<source hash>/ (not in the run's out
 # dir): removed when the gate PASSES, kept when it fails or is cancelled (their cold builds are hours), and
 # reused by a rerun of the same sources (same hash: git tree + uncommitted diff).
@@ -190,7 +264,7 @@ srchash="$( { git rev-parse 'HEAD^{tree}' 2>/dev/null; git diff HEAD 2>/dev/null
 treebase="$root/artifacts/gate/trees/$srchash"
 cleanup() {
   local rc=${1:-$?}
-  if [ "$rc" = 0 ]; then rm -rf "$treebase"; else [ ! -d "$treebase" ] || echo "gate: isolated lake-lane trees KEPT for a rerun of the same sources: $treebase"; fi
+  if [ "$rc" = 0 ]; then rm -rf "$treebase"; [ -z "${JANUS_COLD_XDG:-}" ] || rm -rf "${JANUS_COLD_XDG:?}"; else [ ! -d "$treebase" ] || echo "gate: isolated lake-lane trees KEPT for a rerun of the same sources: $treebase"; fi
 }
 cancel() { trap '' TERM INT; echo "gate: cancelled"; kill -TERM -- -$$ 2>/dev/null; trap - EXIT; cleanup 143; exit 143; }
 trap cancel TERM INT
@@ -320,7 +394,7 @@ addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"
 # CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
 # decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
 add govet "go vet ./..."
-add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh"
+add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && scripts/lib/test-modelpin.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
 add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
 add asl-verify "$(laneenv "$tree_aslv") cd '$tree_aslv' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4 && test ! -L '$tree_aslv/JanusASL/.lake'" "$(needs asl-build)"
@@ -399,11 +473,20 @@ else
   echo "!!!! speed check NOT enforced: no baseline file $sbfile (record one with --speed-baseline record after a green full gate) !!!!"
 fi
 [ "$speed_rc" = 0 ] || lanes_rc=1
+# --cold: the pinned model artifacts the lanes used are still exactly the pinned ones (nothing wrote them after the build)
+if [ -n "$cold" ]; then
+  _which=""; selected asl-build && _which="armasl"; selected sail-build && _which="${_which:+$_which,}sail"
+  if [ -n "$_which" ]; then
+    _pr=0; _po=$(scripts/model-pin.sh verify-tree --stale "$([ -n "$stale_rebuild" ] && echo rebuild || echo fail)" --only "$_which" 2>&1) || _pr=$?
+    printf '%s\n' "$_po" | grep -v '^memguard'
+    [ "$_pr" = 0 ] || { echo "gate: FAIL: the pinned model artifacts changed during the run"; lanes_rc=1; }
+  fi
+fi
 if [ -f "$out/fw_hash0" ]; then FW_HASH0="$(cat "$out/fw_hash0")"; FW_HASH1="$(fw_hash)"; fi
 if [ -f "$out/fw_hash0" ] && [ "$FW_HASH1" != "$FW_HASH0" ]; then echo "gate: FAIL: the shared framework build changed during the lanes ($FW_HASH0 -> $FW_HASH1)"; lanes_rc=1; fi
 echo
 if [ "$lanes_rc" = 0 ]; then
-  echo "GATE PASS$([ -n "$partial" ] && echo ' (PARTIAL RUN: not a full gate)')$([ -n "$incremental" ] && echo ' (INCREMENTAL: items and lanes with a record of an identical PASS were skipped, see the RAN/SKIPPED report; the full cold gate is still required before a push to main)') in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)")"
+  echo "GATE PASS$([ -n "$cold" ] && echo ' (COLD: fresh builds and empty caches, ISA model artifacts from the verified pin)')$([ -n "$partial" ] && echo ' (PARTIAL RUN: not a full gate)')$([ -n "$incremental" ] && echo ' (INCREMENTAL: items and lanes with a record of an identical PASS were skipped, see the RAN/SKIPPED report; the full cold gate is still required before a push to main)') in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)")"
   exit 0
 fi
 echo "GATE FAIL in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)"): ${POOL_FAILED[*]}"

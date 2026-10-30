@@ -41,6 +41,13 @@
 #                      keyed by what Lake traces (source, imports' keys, package settings,
 #                      toolchain), restored before and published after the JanusASL build.
 #   JANUS_ASL_CACHE=0  force a cold build: neither reads nor writes the cache (also off/no/false)
+#   JANUS_MODEL_PIN=1  the cold gate (scripts/gate.sh --cold): the ArmASL build and lean-sail come ONLY from the model
+#                      pin (scripts/lib/modelpin.py, docs/TESTING.md "Cold gate and the model pin"), never from the build
+#                      cache and never built-and-published: a missing, tampered, corrupt or stale pin FAILS (stale = a model
+#                      input changed; JANUS_MODEL_PIN_STALE=rebuild builds the model from source inside this run instead,
+#                      loudly, publishing nothing). The JanusASL/Janus module cache is off. After the build every pinned file
+#                      is hashed again. Only scripts/nightly-cold-gate.sh writes the pin.
+#   scripts/asl.sh key  print the model cache/pin key (32 hex digits)
 #   ASL_CACHE_READONLY=1   use the cache but never write to it
 #   ASL_CACHE_MAX      size budget of ASL_CACHE (default 15G; off: none), kept after every publish
 #                      by `asl_mod_cache.py gc` (least recently restored first; unreferenced
@@ -79,6 +86,10 @@ fi
 # JANUS_ASL_CACHE=0 (also off/no/false) forces a cold build and publishes nothing: the full gate before a
 # push to main uses it. It wins over ASL_CACHE.
 case "${JANUS_ASL_CACHE:-}" in 0|off|no|false) ASL_CACHE="" ;; esac
+# The cold gate's model pin (above): the build cache is not used at all.
+MODEL_PIN="${JANUS_MODEL_PIN:-}"
+PIN_DIR=""
+if [ -n "$MODEL_PIN" ]; then ASL_CACHE=""; PIN_DIR="$(python3 -I "$root/scripts/lib/modelpin.py" dir)"; fi
 export ASL_CACHE
 
 # ---- pins (keep in sync with docs/ASL.md) ----
@@ -183,6 +194,7 @@ asl_cache_files() {
 # and the model is built from source by the lake call that follows. A rejected entry is replaced by
 # the publish after that build.
 cache_restore() {
+  if [ -n "$MODEL_PIN" ]; then pin_step restore; return; fi
   [ -n "${ASL_CACHE:-}" ] || return 0
   local key rc=0 out
   key=$(asl_cache_key)
@@ -198,6 +210,7 @@ cache_restore() {
 }
 
 cache_publish() {
+  if [ -n "$MODEL_PIN" ]; then pin_step verify-tree; return; fi   # the cold gate publishes nothing: it re-checks the pin
   [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
   local key inp rc=0 out
   key=$(asl_cache_key)
@@ -208,6 +221,27 @@ cache_publish() {
   rm -f "$inp"
   [ $rc = 0 ] && echo "asl cache: ArmASL $key: $out" || echo "asl cache: not stored (rc $rc)"
   cache_gc
+}
+
+# The cold gate's model pin (JANUS_MODEL_PIN=1): restore the pinned ArmASL build (with the full integrity validation of
+# bcache.py plus the pin record's manifest hash), or, after the build, check that every pinned file is still as pinned.
+# Missing / tampered / corrupt = fail, always. Stale (no pin for this key: an input changed) = fail, unless
+# JANUS_MODEL_PIN_STALE=rebuild, in which case the model is built from source inside this run (and the post-build check is
+# skipped: nothing is pinned for this key).
+pin_step() { # restore | verify-tree
+  local key rc=0 out
+  key=$(asl_cache_key) || { echo "asl pin: FAIL: cannot compute the model key" >&2; return 1; }
+  mkdir -p "$pkg/.lake"
+  out=$(python3 -I "$root/scripts/lib/modelpin.py" "$1" armasl "$PIN_DIR" "$key" "$pkg/.lake") || rc=$?
+  case $rc in
+    0) echo "asl pin: ArmASL $key: $out" ;;
+    2) if [ "${JANUS_MODEL_PIN_STALE:-fail}" = rebuild ]; then
+         echo "asl pin: ArmASL $key: $out"; echo "asl pin: STALE PIN: ArmASL is built from source INSIDE this gate (JANUS_MODEL_PIN_STALE=rebuild); nothing is pinned or published"
+       else
+         echo "asl pin: FAIL: ArmASL $key: $out"; echo "asl pin: the model inputs changed since the pin was written. Build and pin the new model with the nightly truly-cold run, or rerun with --rebuild-stale-model" >&2; return 1
+       fi ;;
+    *) echo "asl pin: FAIL: ArmASL $key: $out" >&2; return 1 ;;
+  esac
 }
 
 # Keep the cache within $ASL_CACHE_MAX (default 15G): unreferenced ArmASL entries first, then the
@@ -435,6 +469,8 @@ case "$mode" in
   __call) shift; "$@" ;;   # a function of this script, run by tl_run under the tree lock
   deps) do_deps ;;
   gen) do_gen ;;
+  key) asl_cache_key ;;
+  files) asl_cache_files ;;   # the pinned/cached files, NUL-separated, relative to JanusASL/.lake
   restore) do_restore ;;
   model) do_model ;;
   build) do_build ;;
@@ -442,5 +478,5 @@ case "$mode" in
   prove) do_prove ;;
   replay) do_replay ;;
   verify) do_verify ;;
-  *) echo "usage: $0 deps|gen|restore|model|build|check|prove|replay|verify" >&2; exit 2 ;;
+  *) echo "usage: $0 deps|gen|key|files|restore|model|build|check|prove|replay|verify" >&2; exit 2 ;;
 esac
