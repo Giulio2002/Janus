@@ -1405,7 +1405,7 @@ def goalKind (g : MVarId) : MetaM GoalKind := do
 def tryPrune (g : MVarId) : TacticM Bool := do
   let saved ← saveState
   let gs ← try
-      Tactic.run g (evalTactic (← `(tactic| (exfalso; omega))))
+      Tactic.run (← g.exfalso) (evalTactic (← `(tactic| omega)))
     catch _ => saved.restore; return false
   unless gs.isEmpty do saved.restore
   return gs.isEmpty

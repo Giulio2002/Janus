@@ -161,16 +161,16 @@ theorem seg_rec_call (c : State) (j n fn : Nat) (hpc : c.pc = BitVec.ofNat 64 eL
       e.regs 30 = BitVec.ofNat 64 RPa) := by
   have hnd' : c.mem.readLE 65544 8 = j + 1 := hnd
   have hrs' : c.mem.readLE (j * 96 + 66048) 8 = c.mem.readLE c.sp.toNat 8 := by
-    rw [← hrs]; simp only [recSp, rd, recAt, B]; congr 1; omega
+    rw [← hrs]; simp only [recSp, rd, recAt, B]; exact congrArg (Janus.Arm64.Memory.readLE _ · 8) (by omega)
   have hn' : c.mem.readLE (j * 96 + 66072) 8 = n + 1 := by
-    rw [← hn]; simp only [recN, rd, recAt, B]; congr 1; omega
+    rw [← hn]; simp only [recN, rd, recAt, B]; exact congrArg (Janus.Arm64.Memory.readLE _ · 8) (by omega)
   have hmul : (BitVec.ofNat 64 (j + 1) - 1#64) = BitVec.ofNat 64 j := by
     apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
   have hmul2 : (BitVec.ofNat 64 j * 96#64).toNat = j * 96 := by
     rw [BitVec.toNat_mul, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; omega
   have hB' : c.mem.accessible 65536 4096 true = true := hB
   have hfn1 : c.mem.readLE (j * 96 + 66080 + 8 * n) 8 = fn := by
-    rw [← hfn]; simp only [recFn, rd, recAt, B]; congr 1; omega
+    rw [← hfn]; simp only [recFn, rd, recAt, B]; exact congrArg (Janus.Arm64.Memory.readLE _ · 8) (by omega)
   obtain ⟨cr, csp, cpc, cfl, cm, cdz, cv, ctp, cfc, cfs⟩ := c
   dsimp only at *
   simp only [eLH, E, Nat.reduceAdd] at hpc
@@ -195,9 +195,9 @@ theorem seg_rec_pop (c : State) (j : Nat) (hpc : c.pc = BitVec.ofNat 64 eLH)
       e.regs 28 = c.regs 28 ∧ e.regs 18 = c.regs 18) := by
   have hnd' : c.mem.readLE 65544 8 = j + 1 := hnd
   have hrs' : c.mem.readLE (j * 96 + 66048) 8 = c.mem.readLE c.sp.toNat 8 := by
-    rw [← hrs]; simp only [recSp, rd, recAt, B]; congr 1; omega
+    rw [← hrs]; simp only [recSp, rd, recAt, B]; exact congrArg (Janus.Arm64.Memory.readLE _ · 8) (by omega)
   have hn' : c.mem.readLE (j * 96 + 66072) 8 = 0 := by
-    rw [← hn]; simp only [recN, rd, recAt, B]; congr 1; omega
+    rw [← hn]; simp only [recN, rd, recAt, B]; exact congrArg (Janus.Arm64.Memory.readLE _ · 8) (by omega)
   have hmul : (BitVec.ofNat 64 (j + 1) - 1#64) = BitVec.ofNat 64 j := by
     apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
   have hmul2 : (BitVec.ofNat 64 j * 96#64).toNat = j * 96 := by
@@ -243,7 +243,7 @@ theorem seg_fin (c : State) (mode : DeferMode) (bound lr x29 : Nat) (hpc : c.pc 
       janus_run [hph, hnd', hmode, hlr, hx29]
   · have hnd' : cm.readLE 65544 8 = j + 1 := hnd
     have hrs' : ¬ cm.readLE (j * 96 + 66048) 8 = cm.readLE (BitVec.toNat csp) 8 := by
-      intro h; apply hrs; simp only [recSp, rd, recAt, B]; rw [← h]; congr 1; omega
+      intro h; apply hrs; simp only [recSp, rd, recAt, B]; rw [← h]; exact congrArg (Janus.Arm64.Memory.readLE _ · 8) (by omega)
     have hmul : (BitVec.ofNat 64 (j + 1) - 1#64) = BitVec.ofNat 64 j := by
       apply BitVec.eq_of_toNat_eq; rw [BitVec.toNat_sub, BitVec.toNat_ofNat, BitVec.toNat_ofNat]; simp; omega
     have hmul2 : (BitVec.ofNat 64 j * 96#64).toNat = j * 96 := by

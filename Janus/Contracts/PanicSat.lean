@@ -397,7 +397,7 @@ theorem deferprocat_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (s :
   have hB' : s.mem.accessible 65536 4096 true = true := hB
   janus_run [hjn, hmul, hmul2]
   generalize hn : s.mem.readLE (j * 96 + 66072) 8 = n at *
-  have hn' : recN s.mem j = n := by simp only [recN, rd, recAt, B]; rw [← hn]; congr 1; omega
+  have hn' : recN s.mem j = n := by simp only [recN, rd, recAt, B]; rw [← hn]; exact congrArg (Janus.Arm64.Memory.readLE _ · 8) (by omega)
   refine ⟨panicRet_of _ 2 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
     rfl ?_ ?_, ?_, ?_⟩
   · rw [P0_priv, P0_depth]; simp only [B, calleeStack, List.cons_append, List.nil_append]; janus_frame
