@@ -453,6 +453,7 @@ type consumerWS struct {
 	sb                  *sandbox
 	tc                  *toolchain
 	lock                *fileLock
+	memOwn              [][2]int // job-log ranges of per-request builds killed for memory (already attributed)
 	temp                bool
 	janusFiles          map[string][]byte // what janus/ must contain: framework + Extracted
 	// pins are the SHA-256 of every module-data file of janus/.lake/build/lib/lean (the trusted
@@ -1060,21 +1061,36 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 
 	leanVersion := ws.tc.version
 
-	// One build of every proof module of the group (sandboxed: lakefile and modules are
-	// untrusted).
-	targets := []string{"build", "--no-ansi"}
+	// One build per distinct proof module of the group, each of only that module's import closure
+	// (sandboxed: lakefile and modules are untrusted). The requests share the workspace, so a module
+	// already built for an earlier one is reused through Lake's own traces; theorems of the same
+	// module are built once. A module whose closure is too heavy for the per-job memory limit fails
+	// only the requests that name it.
+	var buildOut strings.Builder
 	seenRel := map[string]bool{}
 	for _, r := range reqs {
-		if !seenRel[r.rel] {
-			seenRel[r.rel] = true
-			targets = append(targets, r.rel)
+		if seenRel[r.rel] {
+			continue
+		}
+		seenRel[r.rel] = true
+		mark := memMark()
+		_, out, berr := ws.run("build", "--no-ansi", r.rel)
+		buildOut.WriteString(out)
+		buildOut.WriteString("\n")
+		if _, _, kill := memSince(mark); kill != nil {
+			ws.memOwn = append(ws.memOwn, [2]int{mark, memMark()})
+			d := memLimitDiag(currentGuard(), *kill, berr)
+			for _, q := range reqs {
+				if q.rel == r.rel {
+					q.Err = d
+				}
+			}
 		}
 	}
-	_, buildOut, _ := ws.run(targets...)
-	rebuilt := append(builtModules(buildOut), ws.prepBuilt...)
-	if strings.Contains(buildOut, "manifest out of date") || strings.Contains(buildOut, "not in manifest") {
+	rebuilt := append(builtModules(buildOut.String()), ws.prepBuilt...)
+	if strings.Contains(buildOut.String(), "manifest out of date") || strings.Contains(buildOut.String(), "not in manifest") {
 		failAll(&diag{Invalid: true, Msg: "lake-manifest.json does not match the lakefile.", Stage: "consumer manifest",
-			Next: "Run lake update in " + displayPath(pkg.Root) + ".", Details: mapPaths(buildOut)})
+			Next: "Run lake update in " + displayPath(pkg.Root) + ".", Details: mapPaths(buildOut.String())})
 		return
 	}
 	// The framework build (with the trusted Extracted/JanusTrusted) must be exactly as pinned
@@ -1106,6 +1122,9 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 	// Per request: its module (and, when it failed, its own diagnostics). lake query runs the
 	// untrusted lakefile again, so the pins are re-checked after it.
 	for _, r := range reqs {
+		if r.Err != nil {
+			continue
+		}
 		out, all, err := ws.run("query", "--no-ansi", r.rel+":olean")
 		rebuilt = append(rebuilt, builtModules(all)...)
 		if err != nil {

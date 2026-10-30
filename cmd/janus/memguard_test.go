@@ -257,6 +257,22 @@ func TestMemGuardFailureDiag(t *testing.T) {
 	}
 }
 
+// TestMemOutcomeSkip: a kill inside a request's own build range is not held against the other
+// requests of its group (verify-batch builds each request's import closure separately).
+func TestMemOutcomeSkip(t *testing.T) {
+	mark := memMark()
+	recordMemEvent(memEvent{Label: "lake build A", Limit: 1 << 30, Peak: 1 << 30, Killed: true})
+	skip := [][2]int{{mark, memMark()}}
+	recordMemEvent(memEvent{Label: "lake build B", Limit: 1 << 30, Peak: 200 << 20})
+	r, err := memOutcomeSkip(mark, skip, &verifiedReport{}, nil)
+	if err != nil || r.MemoryGuard == nil || r.MemoryGuard.Jobs != 2 {
+		t.Fatalf("%v %+v", err, r)
+	}
+	if _, err := memOutcome(mark, &verifiedReport{}, nil); err == nil {
+		t.Fatal("an unskipped kill must fail the result")
+	}
+}
+
 // TestMemguardShell exercises scripts/lib/memguard.sh as the runner scripts use it (sourced
 // under set -euo pipefail): a command's status passes through, a command over its limit is
 // OOM-killed (137) with the summary line, nested guards report only their own kills, and no

@@ -323,7 +323,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 			ws.asl = aslB
 			verifyGroup(fw, pkg, ws, greqs)
 			for _, r := range greqs {
-				r.Report, r.Err = memOutcome(mark, r.Report, r.Err)
+				r.Report, r.Err = memOutcomeSkip(mark, ws.memOwn, r.Report, r.Err)
 			}
 			g := batchGroup{ProofRoot: root, SnapshotSha256: pkg.Sha256, ExtractedSha256: k, Workspace: ws.Dir, Requests: gi, Rebuilt: []string{}}
 			if ws.temp {
