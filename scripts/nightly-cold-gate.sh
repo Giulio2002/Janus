@@ -13,9 +13,15 @@
 #   --work DIR       scratch (default: mktemp -d /srv/janus-ops/work.XXXX); worktrees and logs go there
 #   --keep           keep the scratch directory (default: remove it when the runs agree)
 #   -- ...           the rest goes to scripts/gate.sh (both runs), e.g. -j 2
+# THE ONLY WRITER OF THE MODEL PIN (docs/TESTING.md "Cold gate and the model pin"): when the cold gate (which builds the
+# ArmASL model and the Sail driver from source: JANUS_ASL_CACHE=0, a fresh worktree) PASSED and agrees with the cached run, the
+# cold run's model artifacts are pinned (scripts/model-pin.sh write: atomic, under a lock). `gate.sh --cold` restores them with full
+# integrity validation instead of rebuilding ~1 h of ArmASL + ~25 min of Sail. A pin that already exists for the same inputs must
+# be reproduced byte for byte in every .olean/.ilean and the driver, else this run exits 1 ("NOT REPRODUCED") and keeps the old pin.
 # Both runs use `memcap -m 80G` and scripts/gate.sh's own load/memory/disk refusal. Nothing is installed:
 # an example crontab line is in docs/TESTING.md.
-# Exit: 0 agree; 1 P0 disagreement; 2 could not compare or a run could not start.
+# Exit: 0 agree (and the pin written or reproduced); 1 P0 disagreement or the pin was not reproduced; 2 could not compare, the cold
+# gate failed, or a run could not start.
 set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 commit="" cached="" work="" keep=0
@@ -48,8 +54,9 @@ run_gate() { # NAME CACHE_ENV...: a fresh worktree of the commit, gate.sh, then 
   git -C "$root" worktree add --detach -f "$t" "$commit" >/dev/null || { echo "nightly-cold-gate: cannot create $t" >&2; return 2; }
   trees+=("$t")
   local rc=0
-  (cd "$t" && env "$@" memcap -m 80G scripts/gate.sh --out "$out" --speed-baseline enforce "${gate_args[@]}") > "$work/$name.log" 2>&1 || rc=$?
+  (cd "$t" && env -u JANUS_MODEL_PIN -u JANUS_MODEL_PIN_STALE -u JANUS_COLD -u JANUS_COLD_DONE -u JANUS_COLD_PIN_CHECKED "$@" memcap -m 80G scripts/gate.sh --out "$out" --speed-baseline enforce "${gate_args[@]}") > "$work/$name.log" 2>&1 || rc=$?
   echo "nightly-cold-gate: $name gate rc=$rc (log $work/$name.log)"
+  eval "gate_rc_$name=$rc"
   python3 -I "$cmp_py" hashes "$t" "$out/artifact-hashes.json" || return 2
   return 0
 }
@@ -61,5 +68,15 @@ fi
 run_gate cold JANUS_ASL_CACHE=0 || exit 2
 python3 -I "$cmp_py" compare "$cached" "$work/out-cold"
 rc_final=$?
+if [ "$rc_final" = 0 ] && [ "${gate_rc_cold:-1}" != 0 ]; then
+  echo "nightly-cold-gate: the cold gate FAILED (rc ${gate_rc_cold:-?}) and so did the cached one: the runs agree but nothing is proven; the model pin is NOT written"
+  rc_final=2
+fi
+if [ "$rc_final" = 0 ]; then
+  # the cold tree still holds the model built from source: pin it (or confirm the existing pin byte for byte)
+  (cd "$work/tree-cold" && JANUS_PIN_WRITER=nightly-cold-gate memcap -m 24G scripts/model-pin.sh write --commit "$commit" --evidence "$work/out-cold/artifact-hashes.json")
+  rc_final=$?
+  [ "$rc_final" = 0 ] || echo "nightly-cold-gate: the model pin was NOT written/confirmed (rc $rc_final)"
+fi
 [ "$rc_final" = 0 ] || echo "nightly-cold-gate: runs kept in $work"
 exit $rc_final

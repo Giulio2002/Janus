@@ -785,6 +785,38 @@ and exits 1 with a `P0 CACHE BUG` report on any disagreement, 2 if the runs cann
 The comparison logic is tested with fake results by `scripts/lib/test-cachecmp.sh`; the cache's
 integrity and key tests are `scripts/lib/test-bcache.sh`.
 
+## Cold gate and the model pin
+
+`scripts/gate.sh --cold` is the cold gate (user decision 2026-10-30, option B). It rebuilds everything from scratch (a fresh
+framework `.lake`, empty result / verdict / test-fixture caches in a private `<out>/cold-cache` that replaces `XDG_CACHE_HOME`,
+no JanusASL/Janus module cache) **except the ISA model artifacts**: the ArmASL build with lean-sail and the Sail oracle driver.
+Those are treated like the Lean toolchain:
+
+* **Pinned by content.** The pin store (`$JANUS_MODEL_PIN_DIR`, default `/srv/janus-model-pin`; not the build cache, so no
+  collector touches it) holds, per model key, a `bcache.py` entry (SHA-256 of every file, HMAC-signed manifest, per-user key)
+  and a signed *pin record* that binds the entry to the SHA-256 of its exact manifest (`scripts/lib/modelpin.py`; no new storage
+  code, no python inside janus). The key is the existing build-cache key (`asl_cache_key.py`, `oracle-sail/cache_key.py`).
+* **Checked on every cold gate.** First, in seconds and before anything is built (`scripts/model-pin.sh check`: record HMAC,
+  manifest HMAC and hash, every file); again by each restore (two-phase verified copy) and after each build (every pinned file
+  hashed again in the tree); once more after the lanes. A **tampered, corrupt, missing or incomplete** pin FAILS the gate, always (never rebuilt around).
+* **Stale pin = a model input changed** (sources, toolchain, environment, key scheme: the key changes, so no pin exists for it).
+  By default the gate then builds the model from source INSIDE that gate (slow: ~1 h ArmASL, ~25 min Sail), loudly ("STALE PIN"),
+  verified by the build itself; it publishes and pins nothing (a model change does not fail the merge gate). `--no-rebuild-stale-model`
+  makes a stale pin FAIL instead. A tampered, corrupt, missing, unsigned or re-signed pin, a manifest that does not match its record,
+  or a pin under another HMAC key ALWAYS fails and is never rebuilt around.
+* **Written only by the nightly truly-cold run.** `scripts/nightly-cold-gate.sh` (`JANUS_ASL_CACHE=0`, fresh worktree, builds the
+  model from source) writes or confirms the pin after its cold gate PASSED and agreed with the cached run
+  (`scripts/model-pin.sh write`: under a lock, entry then one atomically replaced record). If a pin for the same inputs exists
+  and the new cold build differs in any `.olean`/`.ilean`/driver byte it exits 1 `NOT REPRODUCED` and keeps the old pin.
+  `modelpin.py write` refuses without the nightly's `JANUS_PIN_WRITER` and inside a cold gate.
+* A cold gate refuses to start on a checkout that already has a build (`.lake/build`, `JanusASL/.lake/build`, `JanusX86/.lake/build`,
+  `oracle-sail/target`): use a fresh worktree, or `--wipe`. It cannot be `--incremental`. Everything else (all lanes, the axiom
+  guard, the speed check) is unchanged.
+
+Self-test: `scripts/lib/test-modelpin.sh` (lane `cachekeys`): tampered artifact, missing artifact, stale pin, corrupt manifest,
+re-signed manifest, corrupt / edited / forged record, wrong HMAC key, writer refusal and lock, at the unit level, through
+`gate.sh --cold`, `asl.sh` and `oracle-sail.sh`: every one fails, none passes.
+
 ## Disk use
 
 On the development host the caches and the oracle dumps once filled the 874 GB disk and put
