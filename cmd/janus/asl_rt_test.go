@@ -52,6 +52,7 @@ func TestRTConcurrentASLWorkspacesDoNotShareALake(t *testing.T) {
 	for i := 0; i < n; i++ {
 		tree := filepath.Join(scratch, fmt.Sprintf("tree%d", i), "JanusASL")
 		os.MkdirAll(tree, 0o755)
+		wr(t, filepath.Join(tree, "ArmASL", "Part01.lean"), "-- model\n") // the model sources the seed is pruned against
 		if err := os.Symlink(src, filepath.Join(tree, ".lake")); err != nil { // the gate tree's shared symlink
 			t.Fatal(err)
 		}
@@ -68,6 +69,10 @@ func TestRTConcurrentASLWorkspacesDoNotShareALake(t *testing.T) {
 			script := `set -e
 d=` + shQuote(ws[i]) + `
 pkg=` + shQuote(tree) + `
+root=` + shQuote(root) + `
+# the real seed_copy and seeding block of asl.sh; tl_run (the tree lock, tested by scripts/lib/test-treelock.sh) just runs
+tl_run() { shift; "$@"; }
+` + extractSeedFunc(t, root) + `
 ` + extractSeedBlock(t, root) + `
 echo '{"janus":"tree` + fmt.Sprint(i) + `"}' > "$d/.lake/package-overrides.json"
 echo mine > "$d/.lake/build/lib/lean/W` + fmt.Sprint(i) + `.olean"
@@ -105,6 +110,21 @@ echo mine > "$d/.lake/build/lib/lean/W` + fmt.Sprint(i) + `.olean"
 	if _, err := os.Stat(filepath.Join(src, "package-overrides.json")); err == nil {
 		t.Fatal("a package-overrides.json appeared in the source checkout")
 	}
+}
+
+// extractSeedFunc returns the seed_copy function of scripts/asl.sh.
+func extractSeedFunc(t *testing.T, root string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(root, "scripts", "asl.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := bytes.Index(b, []byte("seed_copy() {"))
+	j := bytes.Index(b[i:], []byte("\n}\n"))
+	if i < 0 || j < 0 {
+		t.Fatal("cannot find seed_copy in scripts/asl.sh")
+	}
+	return string(b[i : i+j+3])
 }
 
 // extractSeedBlock returns the seeding lines of do_verify in scripts/asl.sh.
