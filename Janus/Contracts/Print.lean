@@ -523,7 +523,7 @@ elab "kobl" : tactic => do
   if let some (ty, lhs, _) := t.eq? then
     let ty ← whnfR ty
     if ty.isAppOfArity ``BitVec 1 then
-      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; simp only [Janus.Tactic.setReg_apply, Nat.reduceEqDiff, ↓reduceIte]; with_reducible assumption) | (dsimp only; simp only [Janus.Tactic.setReg_apply]; first | assumption | rfl) | rfl | (dsimp only; simp only [Janus.Tactic.setReg_apply]; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp [setReg]; omega) | (simp [setReg, callRegs]) | (simp [setReg, callRegs, BitVec.ofNat_toNat]) | (apply BitVec.eq_of_toNat_eq; simp; omega))); return
+      run (← `(tactic| first | with_reducible rfl | (dsimp only; with_reducible assumption) | (dsimp only; simp only [Janus.Tactic.setReg_apply, Nat.reduceEqDiff, ↓reduceIte]; with_reducible assumption) | (dsimp only; simp only [Janus.Tactic.setReg_apply]; first | with_reducible assumption | rfl | assumption) | rfl | (dsimp only; simp only [Janus.Tactic.setReg_apply]; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp; omega) | (dsimp only; apply BitVec.eq_of_toNat_eq; simp [setReg]; omega) | (simp [setReg, callRegs]) | (simp [setReg, callRegs, BitVec.ofNat_toNat]) | (apply BitVec.eq_of_toNat_eq; simp; omega))); return
     if lhs.isAppOfArity ``Memory.accessible 4 then
       run (← `(tactic| first | with_reducible assumption | (dsimp only; janus_disch) | (janus_simp; first | done | janus_disch))); return
     if lhs.isAppOfArity ``Memory.readLE 3 then
