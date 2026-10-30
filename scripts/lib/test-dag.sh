@@ -19,6 +19,24 @@ for r in axiom govet cachekeys; do [ -z "${DAG_DEPS[$r]}" ] && ok "$r needs noth
 dag_closure pre-pin | grep -qx pre-stamp && ! dag_closure pre-stamp | grep -qx pre-pin && ok "pre-pin waits for pre-stamp (every write janus can make to the shared build precedes the hash)" || bad "stamp before pin"
 dag_closure pre-pin | grep -qx pre-lake && ! dag_closure pre-lake | grep -qx pre-pin && ok "pre-pin follows pre-lake (the only writer), not the reverse" || bad "pin/lake order"
 
+dag_closure pre-fixture | grep -qx pre-stamp && dag_closure pre-fixture | grep -qx pre-pin && ! dag_closure pre-pin | grep -qx pre-fixture && ok "pre-fixture waits for pre-stamp and pre-pin (its --janus-root verification reads a fresh stamp after the hash)" || bad "fixture ordering"
+# a rerun into the same --out with a stale marker: gate.sh removes it before any stage, so the lakeguard is not armed early
+here_repo="$(cd "$here/../.." && pwd)"
+grep -n 'rm -f "$out/.pinned" "$out/fw_hash0"' "$here_repo/scripts/gate.sh" | cut -d: -f1 > "$t/rmline"
+rml=$(head -1 "$t/rmline"); pml=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1); poolrun=$(grep -n '^pool_run\|pool_run ||' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1)
+[ -n "$rml" ] && [ "$rml" -gt "$pml" ] && [ "$rml" -lt "$poolrun" ] && ok "gate.sh clears a stale .pinned/fw_hash0 before the pool runs" || bad "stale marker is not cleared before the stages ($rml $pml $poolrun)"
+mkdir -p "$t/rerun/root" "$t/rerun/out"; : > "$t/rerun/root/lakefile.toml"; : > "$t/rerun/out/.pinned"; echo stale > "$t/rerun/out/fw_hash0"
+cat > "$t/rerun/real" <<'EOS'
+#!/bin/sh
+echo "$@" > "$RERUN_LOG"
+EOS
+chmod +x "$t/rerun/real"
+out="$t/rerun/out"; eval "$(grep -m1 'rm -f "$out/.pinned" "$out/fw_hash0"' "$here_repo/scripts/gate.sh")"
+( cd "$t/rerun/root" && RERUN_LOG="$t/rerun/log" JANUS_REAL_LAKE="$t/rerun/real" JANUS_LAKEGUARD_ROOT="$(pwd -P)" JANUS_LAKEGUARD_PIN="$out/.pinned" "$here/lakeguard/lake" build X )
+[ "$(cat "$t/rerun/log")" = "build X" ] && [ ! -e "$out/fw_hash0" ] && ok "after the startup cleanup a stale .pinned does not make lake build a --no-build" || bad "guard armed by a stale marker: $(cat "$t/rerun/log")"
+( : > "$out/.pinned"; cd "$t/rerun/root" && RERUN_LOG="$t/rerun/log" JANUS_REAL_LAKE="$t/rerun/real" JANUS_LAKEGUARD_ROOT="$(pwd -P)" JANUS_LAKEGUARD_PIN="$out/.pinned" "$here/lakeguard/lake" build X )
+[ "$(cat "$t/rerun/log")" = "build --no-build X" ] && ok "with a fresh pin the guard is armed (--no-build)" || bad "guard not armed after the pin: $(cat "$t/rerun/log")"
+
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n
   POOL_GUARD=0 POOL_PROGRESS_SECS=100

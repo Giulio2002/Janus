@@ -233,6 +233,8 @@ pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 # before the build it reads has finished and been hashed. The oleans are hashed again at the end of the run.
 fw_hash() { (cd "$root/.lake/build" && find . -type f \( -name '*.olean*' -o -name '*.ir' -o -name '*.ilean' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1); }
 pre_pin() { fw_hash > "$out/fw_hash0" && : > "$out/.pinned" && echo "gate: framework build pinned ($(cat "$out/fw_hash0")); lake build/exe in the shared checkout is --no-build from here on"; }
+# a rerun into the same --out must not find the last run's marker: it would arm the lakeguard before pre-lake ran
+rm -f "$out/.pinned" "$out/fw_hash0"
 JANUS_REAL_LAKE="$(command -v lake)"; export JANUS_REAL_LAKE JANUS_LAKEGUARD_ROOT="$root" JANUS_LAKEGUARD_PIN="$out/.pinned"
 export PATH="$root/scripts/lib/lakeguard:$PATH"
 export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
