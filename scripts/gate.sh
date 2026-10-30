@@ -79,6 +79,10 @@
 # Refuses to start with load >= 70, MemAvailable < 40 GiB or < 60 GiB free on the checkout's disk
 # (RULES.md) unless JANUS_GATE_FORCE=1. LEAN_NUM_THREADS defaults to 4 and is capped at 4.
 set -uo pipefail
+# The names of the variables that were exported when the gate started (before any export of its own; kept across the re-execs below):
+# scripts/lib/incr-liveness.sh (lane cachekeys) changes every variable the gate ADDED to see that none of them is part of an incremental
+# key. Not a key prefix (GATE_..., not JANUS_...): it is read by that check only.
+[ -n "${GATE_ENV0_NAMES+x}" ] || export GATE_ENV0_NAMES="$(compgen -e | sort | tr '\n' ' ')"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 export PATH=/usr/local/go/bin:$PATH
@@ -360,7 +364,7 @@ pool_init gate "$((lanes_n + 4))" "$out/lanes"   # (+4 slots: the prebuild stage
 POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
 export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too
 # an estimate for the first run (seconds, the profile's measurements); later runs use their own
-declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]=900 [sail-build]=300 [axiom]=1 [govet]=60 [cachekeys]=30 [decoder]=120 [oracle]=900 [asl-verify]=900
+declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]=900 [sail-build]=300 [axiom]=1 [govet]=60 [cachekeys]=45 [decoder]=120 [oracle]=900 [asl-verify]=900
   [rtasl-probes]=1200 [rtasl-replay]=900 [rtasl-prove]=600 [rtasl-fsqrt]=600 [rtasl-go]=400 [rtasl-rel]=120 [rtasl-strict]=120 [rtasl-btf]=5)
 for k in "${!est[@]}"; do POOL_SECS[$k]=${est[$k]}; done
 pool_times "$lane_times"
@@ -404,7 +408,7 @@ addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"
 # CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
 # decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
 add govet "go vet ./..."
-add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && scripts/lib/test-modelpin.sh"
+add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
 add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
 add asl-verify "$(laneenv "$tree_aslv") cd '$tree_aslv' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4 && test ! -L '$tree_aslv/JanusASL/.lake'" "$(needs asl-build)"
