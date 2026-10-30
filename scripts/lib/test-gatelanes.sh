@@ -16,7 +16,12 @@ rc=$(g r1); [ "$rc" = 1 ] && ok "failing lane fails the gate" || bad "rc=$rc"
 grep -q 'LANELIMIT=48G JANUS_MEM_MAX=48G' "$t/r1/lanes/testlane.log" && ok "lane runs under the 48G per-job limit (memguard_limit)" || bad "limit: $(grep LANELIMIT "$t/r1/lanes/testlane.log")"
 kept=$(sed -n 's/^gate: isolated lake-lane trees KEPT.*: //p' "$t/r1.log")
 [ -n "$kept" ] && [ -d "$kept" ] && ok "tree kept at a reported path ($kept)" || bad "tree not kept: $(grep -i 'kept\|isolated' "$t/r1.log")"
-rc=$(g r2); grep -q "gate: reusing $kept/asl" "$t/r2.log" && ok "rerun reuses the tree" || bad "no reuse: $(grep isolated "$t/r2.log")"
+rc=$(g r2)
+# the source hash is stable between invocations on unchanged sources: the rerun announces the very tree r1 kept
+kept2=$(sed -n 's/^gate: isolated source copies .*kept otherwise: \(.*\))$/\1/p' "$t/r2.log")
+[ -n "$kept" ] && [ "$kept2" = "$kept" ] && ok "the source hash is stable (rerun looks for the kept tree)" || bad "source hash differs: kept=$kept rerun=$kept2"
+# since the stage graph (dag.sh) the tree copies are pool items: mktree's output is in the item's log, not the gate's stdout
+grep -q "gate: reusing $kept/asl" "$t/r2/lanes/tree-asl.log" && ok "rerun reuses the tree" || bad "no reuse: $(cat "$t/r2/lanes/tree-asl.log" 2>&1 | head -3)"
 export JANUS_GATE_TEST_LANE='. scripts/lib/memguard.sh; echo "LANELIMIT=$(( $(memguard_limit) >> 30 ))G"' JANUS_GATE_MEM_TESTLANE=7G
 rc=$(g r3); [ "$rc" = 0 ] && ok "passing run passes" || bad "rc=$rc"
 grep -q 'LANELIMIT=7G' "$t/r3/lanes/testlane.log" && ok "JANUS_GATE_MEM_* override applies" || bad "override"
