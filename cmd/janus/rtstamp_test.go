@@ -2,13 +2,13 @@ package main
 
 import (
 	"bytes"
-	"strings"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -180,7 +180,7 @@ func TestRTStamp(t *testing.T) {
 		t.Error("BLOCKER wrong-hash record ready")
 	}
 	// 4: a '..' path in a (signed) record never matches
-	rtRestamp(t, dir, map[string]string{filepath.Join(lib, "Janus", "..", "Janus.olean"): rtSha([]byte("evil"))})
+	rtRestamp(t, dir, map[string]string{lib + "/Janus/../Janus.olean": rtSha([]byte("evil"))})
 	_, ok := fw.readyInfo(dir, nil)
 	if ok {
 		t.Error("BLOCKER dotdot record path made the tree ready")
