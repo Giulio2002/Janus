@@ -68,5 +68,37 @@ rm -f "$LK"; mkdir "$LK"
 out=$( cd "$t/tree/JanusASL" && "$L" build 2>&1 ); rc=$?
 [ "$rc" != 0 ] && ok "a directory as lock file is refused" || bad "directory accepted"
 rmdir "$LK"
+
+# ---- a janus that holds the framework lock EXCLUSIVELY while it runs `lake build` in the tree root (framework.go build):
+# the wrapper must not wait for a lock its own parent holds (it was a self-deadlock: janus holds <tree>/.lake/janus-framework.lock,
+# its child lanelake/lock wanted the same lock exclusively), and a root-package lake call racing such a janus must not form a
+# lock-order cycle (janus: fw -> root package; wrapper: fw -> root package).
+rm -rf "$t/rt"; mkdir -p "$t/rt/.lake"; : > "$t/rt/lakefile.toml"; : > "$t/log"
+cat > "$t/fakejanus" <<'EOS'
+#!/usr/bin/env bash
+# fake janus: exclusive framework lock, then `lake build` in the tree root as its child, marker set like leanRunner does
+exec 9>>"$FAKE_RT/.lake/janus-framework.lock"; flock -x 9
+export JANUS_FRAMEWORK_LOCK_HELD_X="$FAKE_RT/.lake/janus-framework.lock"
+cd "$FAKE_RT" && "$FAKE_L" build
+EOS
+chmod +x "$t/fakejanus"
+export FAKE_RT="$t/rt" FAKE_L="$L"
+saveT=$JANUS_LANE_TREE; export JANUS_LANE_TREE="$t/rt"
+timeout 20 "$t/fakejanus" > "$t/fj.out" 2>&1; rc=$?
+[ "$rc" = 0 ] && grep -q '^START build' "$t/log" && ok "janus holding the framework lock exclusively can run lake build through the wrapper (no self-deadlock)" || bad "self-deadlock: rc=$rc (124 = it hung) $(cat "$t/fj.out")"
+# the same without the marker would wait for its own parent: the wrapper still takes the lock (guarantee kept) -> times out
+sed -i 's/^export JANUS_FRAMEWORK_LOCK_HELD_X=.*$/:/' "$t/fakejanus"; : > "$t/log"
+timeout 3 "$t/fakejanus" > /dev/null 2>&1; rc=$?
+[ "$rc" = 124 ] && [ ! -s "$t/log" ] && ok "without janus' claim the wrapper still takes the framework lock (it waits: lock not weakened)" || bad "unclaimed hold not respected: rc=$rc"
+# a claim naming another file is ignored
+sed -i 's/^:$/export JANUS_FRAMEWORK_LOCK_HELD_X=\/nonexistent\/janus-framework.lock/' "$t/fakejanus"; : > "$t/log"
+timeout 3 "$t/fakejanus" > /dev/null 2>&1; rc=$?
+[ "$rc" = 124 ] && ok "a claim for another lock file does not skip the framework lock" || bad "foreign claim honoured: rc=$rc"
+# lock-order cycle: wrapper root-package calls and the fake janus (fw -> root pkg) racing 12 times each must all finish
+sed -i 's/^export JANUS_FRAMEWORK_LOCK_HELD_X=.*$/export JANUS_FRAMEWORK_LOCK_HELD_X="$FAKE_RT\/.lake\/janus-framework.lock"/' "$t/fakejanus"; : > "$t/log"
+pids=(); for i in $(seq 12); do ( cd "$t/rt" && timeout 60 "$L" build ) & pids+=($!); timeout 60 "$t/fakejanus" > /dev/null 2>&1 & pids+=($!); done
+bad_n=0; for p in "${pids[@]}"; do wait "$p" || bad_n=$((bad_n + 1)); done
+[ "$bad_n" = 0 ] && ok "24 racing root-package lake calls and janus builds all finish (no lock-order cycle)" || bad "$bad_n of 24 failed or hung"
+export JANUS_LANE_TREE=$saveT
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail

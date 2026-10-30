@@ -577,7 +577,8 @@ func (fw *framework) build(dir, lake string, targets []string, stampPath string,
 			all = append(all, t)
 		}
 	}
-	lr := &leanRunner{lake: lake, root: dir}
+	lockPath, _ := fw.buildPaths(dir) // build runs with this lock held exclusively (acquire)
+	lr := &leanRunner{lake: lake, root: dir, heldFW: lockPath}
 	if out, err := lr.run(append([]string{"build"}, all...)...); err != nil {
 		next := "Run lake build " + strings.Join(all, " ") + " in " + dir + " and fix the reported errors."
 		return &diag{Invalid: true, Msg: "Building the Janus Lean library failed: " + err.Error(), Stage: "Janus library build",

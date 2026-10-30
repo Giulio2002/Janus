@@ -52,7 +52,7 @@ func TestRTConcurrentASLWorkspacesDoNotShareALake(t *testing.T) {
 	for i := 0; i < n; i++ {
 		tree := filepath.Join(scratch, fmt.Sprintf("tree%d", i), "JanusASL")
 		os.MkdirAll(tree, 0o755)
-		wr(t, filepath.Join(tree, "ArmASL", "Part01.lean"), "-- model\n") // the model sources the seed is pruned against
+		wr(t, filepath.Join(tree, "ArmASL", "Part01.lean"), "-- model\n")     // the model sources the seed is pruned against
 		if err := os.Symlink(src, filepath.Join(tree, ".lake")); err != nil { // the gate tree's shared symlink
 			t.Fatal(err)
 		}
