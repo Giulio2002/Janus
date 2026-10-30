@@ -337,6 +337,13 @@ build_phase() {
   modcache_publish --exe
 }
 
+# Is this model in the (verified) build cache? 0 = yes, entry present and every file matches its signed manifest.
+do_cached() {
+  [ -z "$MODEL_PIN" ] || return 1
+  [ -n "${ASL_CACHE:-}" ] || return 1
+  python3 -I "$root/scripts/lib/bcache.py" verify armasl "$ASL_CACHE" "$(asl_cache_key)" > /dev/null
+}
+
 # Only the cache restore (JanusASL/tools/test_asl_cache.sh).
 do_restore() { tl_run x restore_phase; }
 restore_phase() {
@@ -533,5 +540,6 @@ case "$mode" in
   prove) do_prove ;;
   replay) do_replay ;;
   verify) do_verify ;;
-  *) echo "usage: $0 deps|gen|key|files|restore|model|build|check|prove|replay|verify" >&2; exit 2 ;;
+  cached) do_cached ;;   # exit 0 iff the verified build cache holds this model (scripts/gate.sh: asl-verify then need not wait for asl-build)
+  *) echo "usage: $0 deps|gen|key|files|restore|model|build|check|prove|replay|verify|cached" >&2; exit 2 ;;
 esac
