@@ -397,7 +397,7 @@ theorem deferprocat_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (s :
   have hB' : s.mem.accessible 65536 4096 true = true := hB
   janus_run [hjn, hmul, hmul2]
   generalize hn : s.mem.readLE (j * 96 + 66072) 8 = n at *
-  have hn' : recN s.mem j = n := by simp only [recN, rd, recAt, B]; rw [← hn]; congr 1; omega
+  have hn' : recN s.mem j = n := by simp only [recN, rd, recAt, B]; rw [← hn]; exact congrArg (Janus.Arm64.Memory.readLE _ · 8) (by omega)
   refine ⟨panicRet_of _ 2 s _ rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
     rfl ?_ ?_, ?_, ?_⟩
   · rw [P0_priv, P0_depth]; simp only [B, calleeStack, List.cons_append, List.nil_append]; janus_frame
@@ -491,7 +491,7 @@ theorem gorecover_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
         { decPan s.mem k with recovered := true } :: panList s.mem k := by
       rw [panics0_top (k := k) (by simp only [npan, rd, B]; model_simp; exact hnp) hk8,
         panList_w k (by simp only [panAt, B]; omega)]
-      congr 1
+      refine congrArg (· :: panList s.mem k) ?_
       simp only [decPan, panAt, rd, B]
       model_simp
       have hf2 : s.mem.readLE (65792 + 32 * k + 24) 8 % 2 = 0 := by omega

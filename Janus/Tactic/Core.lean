@@ -365,8 +365,10 @@ def goalKind (g : MVarId) : MetaM GoalKind := do
 def tryPrune (g : MVarId) : TacticM Bool := withoutRecover do
   trace[janus] "branch: {← g.withContext do return (← getLCtx).lastDecl.map (·.type)}"
   let saved ← saveState
+  -- `MVarId.exfalso`, not the `exfalso` tactic: the tactic elaborates `False.elim ?_` against the
+  -- goal, which `whnf`s a pending `ExecThen` (its `match`/`ite` over the whole state; 50-75 s)
   let gs ← try
-      Tactic.run g <| withoutRecover (evalTactic (← `(tactic| (exfalso; first
+      Tactic.run (← g.exfalso) <| withoutRecover (evalTactic (← `(tactic| (first
         | omega
         | (simp only [BitVec.toNat_eq, BitVec.ofNat_eq_ofNat, BitVec.toNat_ofNat, BitVec.toNat_zero, ne_eq, Nat.reducePow,
             Nat.zero_mod]

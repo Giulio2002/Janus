@@ -155,7 +155,7 @@ theorem panicRet_of (P : PanicRuntime) (nargs : Nat) (s s' : Janus.Amd64.State)
     (hdf : s'.df = s.df) (hmx : s'.mxcsr = s.mxcsr)
     (hfr : MemFrame s.mem s'.mem (P.priv ++ Contracts.MapAmd64.calleeStack s P.depth nargs))
     (henv : P.Env s'.mem)
-    (hx87 : s'.x87 = s.x87 := by first | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | rfl | simp_all) : PanicRet P nargs s s' := by
+    (hx87 : s'.x87 = s.x87 := by first | (with_reducible rfl) | rfl | simp_all) (hfw : s'.fpucw = s.fpucw := by first | (with_reducible rfl) | rfl | simp_all) : PanicRet P nargs s s' := by
   refine ⟨s'.regs, s'.xmm, s'.ymmHi, s'.flags, s'.mem, s'.zmmHi, s'.kreg, ?_, hfr, henv⟩
   obtain ⟨r, rip, fl, xm, mem, yh, fs, df, mx, x8, fw⟩ := s'
   simp only at hrip h4 h5 h14 hx hfs hdf hmx hx87 hfw ⊢
@@ -199,7 +199,7 @@ theorem deferproc_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (s : S
   janus64_run [hmul]
   generalize hk : s.mem.readLE 65544 8 = k at *
   have hk' : ndef s.mem = k := hk
-  refine ⟨panicRet_of _ 1 s _ rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl) (by simp [hdf]) (by rfl)
+  refine ⟨panicRet_of _ 1 s _ (by first | (with_reducible rfl) | rfl) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl) (by simp [hdf]) (by rfl)
     ?_ ?_, ?_, ?_⟩
   · rw [P0_priv, P0_depth]; simp only [B, MapAmd64.calleeStack, List.cons_append, List.nil_append]; janus_frame
   · rw [P0_env]; unfold Env0; dsimp only
@@ -270,7 +270,7 @@ theorem deferprocStack_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (
   janus64_run [hmul]
   generalize hk : s.mem.readLE 65544 8 = k at *
   have hk' : ndef s.mem = k := hk
-  refine ⟨panicRet_of _ 1 s _ rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl) (by simp [hdf]) (by rfl)
+  refine ⟨panicRet_of _ 1 s _ (by first | (with_reducible rfl) | rfl) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl) (by simp [hdf]) (by rfl)
     ?_ ?_, ?_, ?_⟩
   · rw [P0_priv, P0_depth]; simp only [B, MapAmd64.calleeStack, List.cons_append, List.nil_append]; janus_frame
   · rw [P0_env]; unfold Env0; dsimp only
@@ -338,7 +338,7 @@ theorem deferrangefunc_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (
   janus64_run [hmul]
   generalize hk : s.mem.readLE 65544 8 = k at *
   have hk' : ndef s.mem = k := hk
-  refine ⟨panicRet_of _ 0 s _ rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl)
+  refine ⟨panicRet_of _ 0 s _ (by first | (with_reducible rfl) | rfl) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl)
     (by simp [hdf]) (by rfl) ?_ ?_, ?_, ?_⟩
   · rw [P0_priv, P0_depth]; simp only [B, MapAmd64.calleeStack, List.cons_append, List.nil_append]; janus_frame
   · rw [P0_env]; unfold Env0; dsimp only
@@ -444,8 +444,8 @@ theorem deferprocat_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) (s :
   simp only [P0_priv, P0_depth, outside_cons, outside_nil, and_true, B] at hout hd h8 hwin
   janus64_run [hjn, hmul, hmul2]
   generalize hn : s.mem.readLE (j * 96 + 66072) 8 = n at *
-  have hn' : recN s.mem j = n := by simp only [recN, rd, recAt, B]; rw [← hn]; congr 1; omega
-  refine ⟨panicRet_of _ 2 s _ rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl)
+  have hn' : recN s.mem j = n := by simp only [recN, rd, recAt, B]; rw [← hn]; exact congrArg (Janus.Arm64.Memory.readLE _ · 8) (by omega)
+  refine ⟨panicRet_of _ 2 s _ (by first | (with_reducible rfl) | rfl) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl)
     (by simp [hdf]) (by rfl) ?_ ?_, ?_, ?_⟩
   · rw [P0_priv, P0_depth]; simp only [B, MapAmd64.calleeStack, List.cons_append, List.nil_append]; janus_frame
   · rw [P0_env]; unfold Env0; dsimp only
@@ -543,8 +543,8 @@ theorem gorecover_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
   janus64_run
   · -- no panic: nil
     have h0 : panics0 s.mem = [] := panics0_nil (by simpa using ‹s.mem.readLE 65536 8 = 0›)
-    refine ⟨panicRet_of _ 0 s _ rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl)
-      (by simp [hdf]) (by rfl) (MemFrame.refl _ _) (by rw [P0_env]; exact henv), Nat.le_refl _,
+    refine ⟨panicRet_of _ 0 s _ (by first | (with_reducible rfl) | rfl) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by first | (with_reducible rfl) | rfl)
+      (by simp [hdf]) (by first | (with_reducible rfl) | rfl) (MemFrame.refl _ _) (by rw [P0_env]; exact henv), Nat.le_refl _,
       fun _ => trivial, fun r rs h => ?_⟩
     rw [P0_panics, h0] at h; cases h
   all_goals
@@ -561,13 +561,13 @@ theorem gorecover_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
         { decPan s.mem k with recovered := true } :: panList s.mem k := by
       rw [panics0_top (k := k) (by simp only [npan, rd, B]; model_simp; exact hnp) hk8,
         panList_w k (by simp only [panAt, B]; omega)]
-      congr 1
+      refine congrArg (· :: panList s.mem k) ?_
       simp only [decPan, panAt, rd, B, Nat.mul_comm 32 k, Nat.reduceAdd]
       model_simp
       simp [hflag]
       omega
-    refine ⟨panicRet_of _ 0 s _ rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl)
-      (by simp [hdf]) (by rfl) ?_ ?_, ?_, ?_, rfl, ?_, ?_, ?_⟩
+    refine ⟨panicRet_of _ 0 s _ (by first | (with_reducible rfl) | rfl) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by first | (with_reducible rfl) | rfl)
+      (by simp [hdf]) (by first | (with_reducible rfl) | rfl) ?_ ?_, ?_, ?_, rfl, ?_, ?_, ?_⟩
     · rw [P0_priv, P0_depth]; simp only [B, MapAmd64.calleeStack, List.cons_append, List.nil_append]; janus_frame
     · rw [P0_env]; exact env0_wpan hw henv
     · rw [P0_defers, P0_defers]; exact defers0_wpan hw
@@ -583,18 +583,18 @@ theorem gorecover_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
       refine ⟨by simp [decPan, panAt, Nat.mul_comm 32 k], by simp [decPan, panAt, Nat.mul_comm 32 k], ?_⟩
       rw [P0_panics, htop']
   · -- the caller is not the running deferred call: nil
-    refine ⟨panicRet_of _ 0 s _ rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl)
-      (by simp [hdf]) (by rfl) (MemFrame.refl _ _) (by rw [P0_env]; exact henv), Nat.le_refl _,
+    refine ⟨panicRet_of _ 0 s _ (by first | (with_reducible rfl) | rfl) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by first | (with_reducible rfl) | rfl)
+      (by simp [hdf]) (by first | (with_reducible rfl) | rfl) (MemFrame.refl _ _) (by rw [P0_env]; exact henv), Nat.le_refl _,
       fun _ => trivial, ?_⟩
     intro r rs _ _ _ _ hrp
     exfalso
     have hrp' : s.mem.readLE ((s.regs 5).toNat + 8) 8 = 3146633 := hrp
-    apply ‹¬(18446744073706404983 + s.mem.readLE ((s.regs 5).toNat + 8) 8) % 18446744073709551616 = 0›
+    apply (by with_reducible assumption : ¬(18446744073706404983 + s.mem.readLE ((s.regs 5).toNat + 8) 8) % 18446744073709551616 = 0)
     omega
   · -- a Goexit or an already recovered panic: nil
     have hflag := and3' _ ‹¬BitVec.setWidth 32 (BitVec.ofNat 64 (s.mem.readLE (65792 + k * 32 + 24) 8)) &&& 3#32 = 0#32›
-    refine ⟨panicRet_of _ 0 s _ rfl (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by rfl)
-      (by simp [hdf]) (by rfl) (MemFrame.refl _ _) (by rw [P0_env]; exact henv), Nat.le_refl _,
+    refine ⟨panicRet_of _ 0 s _ (by first | (with_reducible rfl) | rfl) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF]) (by simp) (by first | (with_reducible rfl) | rfl)
+      (by simp [hdf]) (by first | (with_reducible rfl) | rfl) (MemFrame.refl _ _) (by rw [P0_env]; exact henv), Nat.le_refl _,
       fun _ => trivial, ?_⟩
     intro r rs h hg hr _ _
     rw [P0_panics, htop] at h; obtain ⟨rfl, rfl⟩ := List.cons.inj h
