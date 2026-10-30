@@ -261,9 +261,9 @@ func TestMemGuardFailureDiag(t *testing.T) {
 // requests of its group (verify-batch builds each request's import closure separately).
 func TestMemOutcomeSkip(t *testing.T) {
 	mark := memMark()
-	recordMem(memEvent{Label: "lake build A", Limit: 1 << 30, Peak: 1 << 30, Killed: true})
+	recordMemEvent(memEvent{Label: "lake build A", Limit: 1 << 30, Peak: 1 << 30, Killed: true})
 	skip := [][2]int{{mark, memMark()}}
-	recordMem(memEvent{Label: "lake build B", Limit: 1 << 30, Peak: 200 << 20})
+	recordMemEvent(memEvent{Label: "lake build B", Limit: 1 << 30, Peak: 200 << 20})
 	r, err := memOutcomeSkip(mark, skip, &verifiedReport{}, nil)
 	if err != nil || r.MemoryGuard == nil || r.MemoryGuard.Jobs != 2 {
 		t.Fatalf("%v %+v", err, r)
