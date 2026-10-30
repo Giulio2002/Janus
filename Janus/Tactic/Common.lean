@@ -1119,6 +1119,39 @@ elab "janus_omega_sparse" : tactic => do
   unless ← omegaSparse g do throwError "janus_omega_sparse: no proof with at most two disjunctions"
   replaceMainGoal []
 
+/-- `g.tryClearMany fvars` in one pass over the local context. Lean's `tryClearMany` clears one
+hypothesis at a time, each time creating a goal and checking every later declaration for a
+dependency: quadratic in the context size, and the contexts of a long run have hundreds of
+hypotheses (it was a quarter of the time of `janus_disch`). The result is the same: from the last
+declaration backwards, a hypothesis of `fvars` is cleared unless the target or a declaration that
+stays mentions it (directly: a stays-declaration's own dependencies stay too). -/
+def tryClearManyFast (g : MVarId) (fvars : Array FVarId) : MetaM MVarId := g.withContext do
+  if fvars.isEmpty then return g
+  g.checkNotAssigned `clear
+  let decl ← g.getDecl
+  let tgt ← instantiateMVars decl.type
+  let mut st : CollectFVars.State := {}
+  st := collectFVars st tgt
+  let want : Std.HashSet FVarId := fvars.foldl (·.insert ·) {}
+  let mut ds : Array LocalDecl := #[]
+  for d in decl.lctx do
+    unless d.isAuxDecl do ds := ds.push d
+  let mut lctx := decl.lctx
+  let mut cleared : Std.HashSet FVarId := {}
+  for i in [0:ds.size] do
+    let d := ds[ds.size - 1 - i]!
+    if want.contains d.fvarId && !st.fvarSet.contains d.fvarId then
+      lctx := lctx.erase d.fvarId
+      cleared := cleared.insert d.fvarId
+    else
+      st := collectFVars st (← instantiateMVars d.type)
+      if let some v := d.value? then st := collectFVars st (← instantiateMVars v)
+  if cleared.isEmpty then return g
+  let insts := decl.localInstances.filter fun i => !cleared.contains i.fvar.fvarId!
+  let g' ← mkFreshExprMVarAt lctx insts tgt decl.kind decl.userName
+  g.assign g'
+  return g'.mvarId!
+
 /-- Clear the propositional hypotheses that mention atoms the (arithmetic) goal does not: what an
 `omega`/`simp … at *` on a goal about a few addresses needs is small, and the contexts after
 several calls are large. -/
@@ -1130,7 +1163,7 @@ def clearIrrelevant (g : MVarId) : MetaM MVarId := g.withContext do
     let ty ← instantiateMVars d.type
     unless ← isProp ty do continue
     unless (arithAtoms ty).all goalAtoms.contains do toClear := toClear.push d.fvarId
-  g.tryClearMany toClear
+  tryClearManyFast g toClear
 
 /-- Like `clearIrrelevant`, but the atoms of the small hypotheses that touch the goal count as the
 goal's too (one more hop): a block's size `k` linking `Apart a n t k` and `8·m ≤ k` to the goal. -/
@@ -1151,7 +1184,7 @@ def clearIrrelevant2 (g : MVarId) : MetaM MVarId := g.withContext do
     let ty ← instantiateMVars d.type
     unless ← isProp ty do continue
     unless (arithAtoms ty).all expanded.contains do toClear := toClear.push d.fvarId
-  g.tryClearMany toClear
+  tryClearManyFast g toClear
 
 /-- A side condition `Apart a n b k` (e.g. part of a callee's precondition): from a hypothesis
 `Apart a' n' b' k'` (or its mirror) of which it is a sub-range pair, the containments by `omega`. -/
