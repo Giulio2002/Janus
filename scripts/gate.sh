@@ -267,17 +267,19 @@ echo "gate: framework build pinned ($FW_HASH0); lake build/exe in the shared che
 # prebuilt build the verify, go test and audit lanes read is never written after the prebuild. Their own
 # package builds (JanusASL/.lake, JanusX86/.lake, oracle-sail/target) and artifacts/ are shared by
 # symlink: only these lanes use the former, and artifacts/ is read-only to them.
-mktree() { # DIR: a private copy of the sources and of the finished framework build (kept when present: same hash)
+mktree() { # DIR [private]: a private copy of the sources and of the finished framework build (kept when present: same hash)
+  # "private": JanusASL/.lake is a real directory of the tree's own (filled from the verified ASL cache by asl.sh), not
+  # the symlink to the checkout's build that the other lake trees share; a lane in such a tree can never write the checkout
   if [ -f "$1/.gate-tree-ready" ]; then echo "gate: reusing $1"; return 0; fi
   mkdir -p "$1"
   rsync -a --exclude=/.git --exclude=/artifacts --exclude=/audit/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake \
     --exclude=/oracle-sail/target --exclude=/bin ./ "$1"/ || { echo "gate: cannot copy the sources to $1"; exit 1; }
-  ln -sfn "$root/artifacts" "$1/artifacts"; ln -sfn "$root/JanusASL/.lake" "$1/JanusASL/.lake"
+  ln -sfn "$root/artifacts" "$1/artifacts"; if [ "${2:-}" = private ]; then mkdir -p "$1/JanusASL/.lake"; else ln -sfn "$root/JanusASL/.lake" "$1/JanusASL/.lake"; fi
   ln -sfn "$root/JanusX86/.lake" "$1/JanusX86/.lake"; ln -sfn "$root/oracle-sail/target" "$1/oracle-sail/target"
   mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"; : > "$1/.gate-tree-ready"
 }
 # x86 has a tree of its own, the JanusASL/oracle/rt-asl lanes another: two lakes in one tree race on its .oleans
-tree_x86="$treebase/x86" tree="$treebase/asl"
+tree_x86="$treebase/x86" tree="$treebase/asl" tree_aslv="$treebase/aslv"
 mkdir -p "$treebase"
 exec {treelock}>"$treebase.lock"
 flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($treebase); wait for it"; exit 1; }
@@ -287,6 +289,9 @@ flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($
 mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
 selected x86 && mktree "$tree_x86"
 if selected testlane || selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go || selected rtasl-fsqrt || selected rtasl-replay; then mktree "$tree"; fi
+# asl-verify has a tree of its own with a PRIVATE JanusASL/.lake (restored from the ASL cache): `janus verify --asl` and the
+# `asl.sh build` of that lane never write the checkout's build through the shared symlink
+if selected asl-verify; then mktree "$tree_aslv" private; fi
 peak_tree=$(du -sm "$treebase"/x86 "$treebase"/asl 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
 echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed when the gate passes, kept otherwise: $treebase)"
 lane_times="$root/artifacts/gate/lane-times"
@@ -340,7 +345,7 @@ add govet "go vet ./..."
 add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
 add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
-add asl-verify "$(laneenv "$tree") cd '$tree' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4" "$(needs rtasl-prove)"
+add asl-verify "$(laneenv "$tree_aslv") cd '$tree_aslv' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4 && test ! -L '$tree_aslv/JanusASL/.lake'" "$(needs asl-build)"
 add asl-build "$(laneenv "$tree") cd '$tree' && scripts/asl.sh build"
 add sail-build "$(laneenv "$tree") cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
