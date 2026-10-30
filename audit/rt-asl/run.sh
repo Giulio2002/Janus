@@ -24,7 +24,18 @@ cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 DEPS="${DEPS:-/srv/janus-asl-deps}"
 W="$(mktemp -d "${TMPDIR:-/tmp}/rt-asl.XXXXXX")"
-trap 'rm -rf "$W"' EXIT
+# The work directory (the groups' logs) is removed only when the run succeeds. On a failure it is kept and
+# its path printed (and copied into $RT_ASL_KEEP_DIR/<name> when that is set, e.g. a gate lane's output
+# dir), so the evidence of a failed row survives; only this run's own directory is ever removed.
+rtasl_cleanup() {
+  local rc=$?
+  if [ "$rc" -eq 0 ] && [ ! -s "$W/broken" ]; then rm -rf "$W"; return; fi
+  if [ -n "${RT_ASL_KEEP_DIR:-}" ] && mkdir -p "$RT_ASL_KEEP_DIR" 2>/dev/null; then
+    cp -r "$W" "$RT_ASL_KEEP_DIR/$(basename "$W")" 2>/dev/null && echo "rt-asl: logs of the failed run kept in $RT_ASL_KEEP_DIR/$(basename "$W")" >&2
+  fi
+  echo "rt-asl: logs of the failed run kept in $W" >&2
+}
+trap rtasl_cleanup EXIT
 
 row() { # row NAME EXPECT RESULT  (EXPECT ok|blocked|latent: RESULT must start with it)
   local mark=""
