@@ -58,6 +58,7 @@
 #   ASL_JOB_GB   peak of the largest single Lean process of the build (default 8, docs/ASL.md "Memory")
 #   REPLAY_BATCH modules per leanchecker process in `replay` (default 4)
 #   ASL_EXAMPLES  examples for `verify` (default "Add Max Mul64 Add128")
+#   ASL_VERIFY_JOBS  examples of `verify` verified at once (default 4)
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/memguard.sh
@@ -255,9 +256,9 @@ cache_gc() {
 # ---- shared per-module cache of the JanusASL and Janus modules (ASL_CACHE/mods) ----
 # JanusASL/tools/asl_mod_cache.py: one entry per module, keyed by what Lake traces (source,
 # imports' keys, package settings, toolchain), with a SHA-256 manifest checked on every copy.
-modcache_restore() {
-  [ -n "${ASL_CACHE:-}" ] || return 0
-  python3 -I "$pkg/tools/asl_mod_cache.py" restore "$root" "$ASL_CACHE" || true
+modcache_restore() {  # modcache_restore [--record FILE]
+  [ -n "${ASL_CACHE:-}" ] || { [ "${1:-}" != --record ] || echo '{}' > "$2"; return 0; }
+  python3 -I "$pkg/tools/asl_mod_cache.py" restore "$root" "$ASL_CACHE" "$@" || { [ "${1:-}" != --record ] || echo '{}' > "$2"; }
 }
 
 modcache_publish() {  # modcache_publish [--exe]
@@ -430,8 +431,43 @@ seed_copy() { # D: copy the built package into janus's private cache dir (a read
   mkdir -p "$d" && cp -aL --reflink=auto "$pkg/.lake" "$d/.lake" && rm -f "$d/.lake/package-overrides.json"
   [ -d "$d/.lake" ] && [ ! -L "$d/.lake" ] || { echo "verify: the seed is not a private directory" >&2; return 1; }
 }
-do_verify() {
-  do_build
+# `verify` needs the JanusASL LIBRARY only (janus verify --asl builds ArmASL and JanusASL in its own cache dir): not the
+# janus-asl-check executable, whose ArmASL:c.o objects are never cached and cost ~10 min of serial clang time per tree.
+do_verify() { tl_run x verify_build_phase; verify_main; }
+verify_build_phase() {
+  unpack
+  cache_restore
+  lake_asl build ArmASL
+  cache_publish
+  local rec; rec="$(mktemp "${TMPDIR:-/var/tmp}/asl-restored.XXXXXX")" || return 1
+  modcache_restore --record "$rec"
+  lake_asl build ArmASL JanusASL
+  cache_publish
+  modcache_publish
+  # The restored Janus modules embed another tree's source paths, so they differ from the files this tree's framework
+  # stamp was taken of: without this, `janus verify --janus-root` removes and rebuilds them, and every restored JanusASL
+  # module (traced against the restored bytes) rebuilds after it. Move the stamp's pins of exactly the files the cache
+  # restored from verified entries (scripts/lib/restamp.py); every other difference is still janus's to reject.
+  python3 -I "$root/scripts/lib/restamp.py" "$root" "$rec"
+  rm -f "$rec"
+}
+# One example: extract its artifact, verify it with --asl, and write its report lines to $OUT/verify-$n.result (printed in
+# order by verify_main). The examples are independent: separate artifact dirs and logs; the seeded cache dir is shared
+# (janus holds its build lock only while Lake checks the build, and a shared use lock while it verifies).
+verify_one() { # N
+  local n=$1 res="$OUT/verify-$1.result"
+  {
+    "$root/bin/janus" extract "$root/artifacts/examples-arm64" "example.com/basic.$n" "$root/artifacts/$n" >/dev/null
+    if "$root/bin/janus" verify "$root/artifacts/$n" --proof "$root/examples/proofs/$n.lean" --janus-root "$root" --asl \
+         > "$OUT/verify-$n.log" 2>&1 && grep -q '^ASL corollary: Verified: JanusASLCorollary.correctness_asl' "$OUT/verify-$n.log"; then
+      echo "$n: ASL corollary verified"
+      sed -n '/^ASL corollary/,/^  Assumptions/p' "$OUT/verify-$n.log" | grep -A1 '^  Statement:' | tail -1
+    else
+      echo "$n: FAILED (see $OUT/verify-$n.log)"; tail -20 "$OUT/verify-$n.log"; exit 1
+    fi
+  } > "$res" 2>&1
+}
+verify_main() {
   export PATH=/usr/local/go/bin:$PATH
   (cd "$root" && CGO_ENABLED=0 go build -o bin/janus ./cmd/janus)
   "$root/scripts/build-examples.sh" >/dev/null
@@ -450,17 +486,23 @@ do_verify() {
   # a seed from a long-lived .lake can hold modules of an older model split (ArmASL.Part37.. next to the current
   # parts): the kernel replay enumerates the directory and would load both. Keep only the current model's modules.
   [ ! -d "$d/.lake" ] || python3 -I "$root/scripts/lib/bcache.py" prune-armasl "$d/.lake" "$pkg/ArmASL"
-  local fail=0 n
+  local fail=0 n pids=() names=() njobs="${ASL_VERIFY_JOBS:-4}" i
   mkdir -p "$OUT"
+  [ "$njobs" -ge 1 ] 2>/dev/null || njobs=1
+  # all examples are verified, up to ASL_VERIFY_JOBS at once, after the first one has been through alone (it Lake-checks
+  # the shared build once; the others then verify beside each other)
+  local first=1 rc0=""
   for n in ${ASL_EXAMPLES:-Add Max Mul64 Add128}; do
-    "$root/bin/janus" extract "$root/artifacts/examples-arm64" "example.com/basic.$n" "$root/artifacts/$n" >/dev/null
-    if "$root/bin/janus" verify "$root/artifacts/$n" --proof "$root/examples/proofs/$n.lean" --janus-root "$root" --asl \
-         > "$OUT/verify-$n.log" 2>&1 && grep -q '^ASL corollary: Verified: JanusASLCorollary.correctness_asl' "$OUT/verify-$n.log"; then
-      echo "$n: ASL corollary verified"
-      sed -n '/^ASL corollary/,/^  Assumptions/p' "$OUT/verify-$n.log" | grep -A1 '^  Statement:' | tail -1
-    else
-      echo "$n: FAILED (see $OUT/verify-$n.log)"; tail -20 "$OUT/verify-$n.log"; fail=1
-    fi
+    rm -f "$OUT/verify-$n.result"
+    while [ "$(jobs -rp | wc -l)" -ge "$njobs" ]; do sleep 2; done
+    verify_one "$n" &
+    pids+=($!); names+=("$n")
+    # the first one alone: it makes janus check (and, if anything is stale, rebuild) the shared JanusASL build once
+    if [ "$first" = 1 ]; then first=0; wait "${pids[0]}" && rc0=0 || rc0=1; fi
+  done
+  for i in "${!pids[@]}"; do
+    if [ "$i" = 0 ] && [ -n "$rc0" ]; then [ "$rc0" = 0 ] || fail=1; else wait "${pids[$i]}" || fail=1; fi
+    cat "$OUT/verify-${names[$i]}.result" 2>/dev/null || { echo "${names[$i]}: FAILED (no result)"; fail=1; }
   done
   return $fail
 }

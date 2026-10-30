@@ -903,6 +903,9 @@ func TestSelfTestIsolation(t *testing.T) { runLibSelfTest(t, "test-isolation.sh"
 // build under a running janus.
 func TestTreeLockLib(t *testing.T) { runLibSelfTest(t, "test-treelock.sh") }
 
+// TestRestampLib: the framework stamp follows only the files the module cache restored from verified entries.
+func TestRestampLib(t *testing.T) { runLibSelfTest(t, "test-restamp.sh") }
+
 // TestDagLib: the gate's stage graph: a stage starts after its dependencies, independent stages overlap, a failure blocks
 // exactly its dependents.
 func TestDagLib(t *testing.T) { runLibSelfTest(t, "test-dag.sh") }

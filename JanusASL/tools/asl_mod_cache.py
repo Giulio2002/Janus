@@ -2,7 +2,7 @@
 """Shared per-module build cache for the JanusASL proofs and the Janus framework modules they
 import (scripts/asl.sh, ASL_CACHE; docs/ASL.md "Build cache").
 
-    python3 -I JanusASL/tools/asl_mod_cache.py restore REPO_ROOT CACHE   copy cached builds in
+    python3 -I JanusASL/tools/asl_mod_cache.py restore REPO_ROOT CACHE [--record FILE]   copy cached builds in
     python3 -I JanusASL/tools/asl_mod_cache.py publish REPO_ROOT CACHE [--exe]
                                     store the builds of the JanusASL library's closure (--exe: and
                                     of its executables'), after `lake build` has built them
@@ -338,6 +338,9 @@ def read_manifest(e):
     return out
 
 
+RESTORED = {}   # absolute path -> SHA-256 of every file this process restored or found current (signed manifest entries)
+
+
 def restore(ks, cache):
     hit = miss = same = bad = 0
     try:
@@ -426,6 +429,8 @@ def restore_one(ks, p, mod, key, e):
         rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items()}
         if all(os.path.isfile(os.path.join(p.dir, rel)) and not os.path.islink(os.path.join(p.dir, rel))
                and sha_file(os.path.join(p.dir, rel)) == h for rel, (_, h) in rels.items()):
+            for rel, (_, h) in rels.items():
+                RESTORED[os.path.join(p.dir, rel)] = h
             return "same"
         for rel, (r, h) in rels.items():
             src, dst = os.path.join(e, "tree", r), os.path.join(p.dir, rel)
@@ -442,10 +447,13 @@ def restore_one(ks, p, mod, key, e):
                 break
             os.replace(tmp, dst)
             copied.append(dst)
+            RESTORED[dst] = h
     except (OSError, bc.CacheError) as ex:
         why = "entry rejected (%s)" % ex
     if why is None:
         return "hit"
+    for d in copied:
+        RESTORED.pop(d, None)
     for d in copied + [os.path.join(p.dir, x) for x in outputs(p, mod)]:
         try:
             os.unlink(d)
@@ -744,6 +752,14 @@ def main():
         print(json.dumps(ks.inputs_of.get(sys.argv[3]), sort_keys=True, indent=1))
     elif cmd == "restore":
         restore(ks, sys.argv[3])
+        # --record FILE: the files restored (or found current) from HMAC-verified entries, with their SHA-256, for
+        # scripts/lib/restamp.py (a record is written even when empty)
+        if "--record" in sys.argv[4:]:
+            rec = sys.argv[sys.argv.index("--record") + 1]
+            tmp = rec + ".tmp%d" % os.getpid()
+            with open(tmp, "w") as f:
+                json.dump(RESTORED, f, sort_keys=True)
+            os.replace(tmp, rec)
     elif cmd == "publish":
         # the roots of the JanusASL library (and with --exe, of its executables): the targets
         # `scripts/asl.sh` has just built; their closure is up to date
