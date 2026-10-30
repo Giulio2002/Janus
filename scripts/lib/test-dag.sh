@@ -37,6 +37,9 @@ out="$t/rerun/out"; eval "$(grep -m1 'rm -f "$out/.pinned" "$out/fw_hash0"' "$he
 ( : > "$out/.pinned"; cd "$t/rerun/root" && RERUN_LOG="$t/rerun/log" JANUS_REAL_LAKE="$t/rerun/real" JANUS_LAKEGUARD_ROOT="$(pwd -P)" JANUS_LAKEGUARD_PIN="$out/.pinned" "$here/lakeguard/lake" build X )
 [ "$(cat "$t/rerun/log")" = "build --no-build X" ] && ok "with a fresh pin the guard is armed (--no-build)" || bad "guard not armed after the pin: $(cat "$t/rerun/log")"
 
+# the two stages that verify artifacts/Add (pre-warm, pre-stamp) take the same theorems lock: they must be ordered, never concurrent
+{ dag_closure pre-warm | grep -qx pre-stamp || dag_closure pre-stamp | grep -qx pre-warm; } && ok "pre-warm and pre-stamp (both verify artifacts/Add) are ordered, not concurrent" || bad "pre-warm and pre-stamp can run at the same time (Add theorems lock collision)"
+
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n
   POOL_GUARD=0 POOL_PROGRESS_SECS=100

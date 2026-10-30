@@ -14,6 +14,7 @@
 #   pre-stamp      one verification of Add with --janus-root <checkout>: janus stamps the checkout's own framework build
 #                  (and may delete and rebuild modules whose files no longer match an OLD stamp), so every write janus can make to the
 #                  shared build happens BEFORE the pin; afterwards the stamp is fresh and a --janus-root verification only reads
+#   (pre-warm and pre-stamp both verify artifacts/Add, whose theorems lock admits one run at a time: pre-warm waits for pre-stamp)
 #   pre-fixture    the go tests' framework fixture (seeded by pre-warm's cache); its --janus-root verification of the checkout
 #                  only ever reads a fresh stamp after the hash, so it needs pre-stamp and pre-pin
 #   pre-pin        hash the finished framework build and switch the lakeguard on: every READER of the shared build needs it,
@@ -28,7 +29,7 @@ DAG_DEPS=(
   [pre-ex-amd64]="pre-gobin" [pre-rounds-bin]="pre-gobin"
   [pre-stamp]="pre-gobin pre-lake pre-ex-arm64"
   [pre-pin]="pre-lake pre-stamp"
-  [pre-warm]="pre-gobin pre-lake pre-ex-arm64"
+  [pre-warm]="pre-gobin pre-lake pre-ex-arm64 pre-stamp"
   [pre-fixture]="pre-lake pre-warm pre-stamp pre-pin"
   [tree-x86]="pre-pin pre-gobin $_EX" [tree-asl]="pre-pin pre-gobin $_EX" [tree-aslv]="pre-pin pre-gobin $_EX" [tree-go]="pre-pin pre-gobin $_EX"
   [verify]="pre-pin pre-gobin pre-warm $_EX"
