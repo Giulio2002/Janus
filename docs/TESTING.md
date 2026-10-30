@@ -66,7 +66,7 @@ and `-j` others):
 `scripts/lib/dag.sh`; each starts as soon as ITS inputs are ready (`verify` after `pre-pin`, `pre-warm` and the example
 binaries; `gotest` after the fixture; the lake lanes after their tree copy; `decoder` after `pre-pin` and `pre-gobin`;
 `axiom`, `govet`, `cachekeys` at once; the fixture builds beside the verify pool). `pre-pin` follows `pre-lake`, the only
-writer of the shared framework build, hashes the finished build and switches the lakeguard on (its marker file); every
+writer of the shared framework build, and `pre-stamp` (one `--janus-root <checkout>` verification of Add: janus stamps the checkout's framework build and may delete and rebuild modules that no longer match an OLD stamp, so every write janus can make precedes the hash; later `--janus-root` verifications find a fresh stamp and only read), hashes the finished build and switches the lakeguard on (its marker file); every
 reader needs it, so none starts before the build it reads has finished and been hashed. A run with `--only` builds only the
 closure of the selected lanes. A failing stage blocks exactly its dependents (BLOCKED, a gate failure); independent stages
 keep running. Expected cold-gate saving: the framework build stays the critical path (763 s), but the verify pool no longer

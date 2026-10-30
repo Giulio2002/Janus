@@ -11,6 +11,9 @@
 #   pre-gobin      go build bin/janus                         pre-lake    lake build (the shared framework build: the ONLY writer)
 #   pre-ex-*       the example binaries (ex-amd64 also rebuilds bin/janus: after pre-gobin)
 #   pre-rounds-bin audit/bin/janus-rounds (after pre-gobin)   pre-warm    one verification of Add (framework build + replay verdict)
+#   pre-stamp      one verification of Add with --janus-root <checkout>: janus stamps the checkout's own framework build
+#                  (and may delete and rebuild modules whose files no longer match an OLD stamp), so every write janus can make to the
+#                  shared build happens BEFORE the pin; afterwards the stamp is fresh and a --janus-root verification only reads
 #   pre-fixture    the go tests' framework fixture (seeded by pre-warm's cache)
 #   pre-pin        hash the finished framework build and switch the lakeguard on: every READER of the shared build needs it,
 #                  so none starts before the build it reads has finished and been hashed
@@ -22,7 +25,8 @@ DAG_DEPS=(
   [pre-gobin]="" [pre-lake]=""
   [pre-ex-arm64]="" [pre-ex-asm]="" [pre-ex-sys]="" [pre-ex-rtmisc]="" [pre-ex-print]="" [pre-ex-cgo]=""
   [pre-ex-amd64]="pre-gobin" [pre-rounds-bin]="pre-gobin"
-  [pre-pin]="pre-lake"
+  [pre-stamp]="pre-gobin pre-lake pre-ex-arm64"
+  [pre-pin]="pre-lake pre-stamp"
   [pre-warm]="pre-gobin pre-lake pre-ex-arm64"
   [pre-fixture]="pre-lake pre-warm"
   [tree-x86]="pre-pin pre-gobin $_EX" [tree-asl]="pre-pin pre-gobin $_EX" [tree-aslv]="pre-pin pre-gobin $_EX" [tree-go]="pre-pin pre-gobin $_EX"

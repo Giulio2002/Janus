@@ -16,6 +16,7 @@ for r in verify gotest rounds decoder tree-x86 tree-asl tree-aslv tree-go x86 or
   dag_closure "$r" | grep -qx pre-pin || bad "$r does not wait for pre-pin"
 done; ok "every reader of the shared framework build waits for pre-pin"
 for r in axiom govet cachekeys; do [ -z "${DAG_DEPS[$r]}" ] && ok "$r needs nothing" || bad "$r has deps"; done
+dag_closure pre-pin | grep -qx pre-stamp && ! dag_closure pre-stamp | grep -qx pre-pin && ok "pre-pin waits for pre-stamp (every write janus can make to the shared build precedes the hash)" || bad "stamp before pin"
 dag_closure pre-pin | grep -qx pre-lake && ! dag_closure pre-lake | grep -qx pre-pin && ok "pre-pin follows pre-lake (the only writer), not the reverse" || bad "pin/lake order"
 
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
@@ -23,7 +24,7 @@ run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool st
   POOL_GUARD=0 POOL_PROGRESS_SECS=100
   pool_init selftest-dag 40 "$d/state"
   for n in "${!DAG_DEPS[@]}"; do
-    local dur=0.25; case "$n" in pre-lake) dur=1.2 ;; pre-fixture) dur=0.8 ;; verify) dur=0.9 ;; esac
+    local dur=0.25; case "$n" in pre-lake) dur=1.5 ;; pre-fixture) dur=5 ;; verify) dur=1.5 ;; esac
     local body="echo START $n \$(date +%s.%N) >> $d/log; sleep $dur; echo END $n \$(date +%s.%N) >> $d/log"
     [ "$n" != "$failst" ] || body="$body; exit 1"
     pool_add "$n" "$body" "$n" "${DAG_DEPS[$n]}"

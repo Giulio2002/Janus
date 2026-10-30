@@ -224,6 +224,7 @@ pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.
 # The go tests' prebuilt framework fixture (cmd/janus/fixture_test.go, docs/TESTING.md "Go tests"): built here, once, by
 # the tests' TestMain (a run that selects no test), so the gotest lane does not pay for it; it runs beside the verify pool.
 pre_fixture() { JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
+pre_stamp() { JANUS_ROOT="$root" JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 # From the moment the shared framework build (.lake/build) is finished nothing may write it (a lake that rebuilds a
 # module while another lane's verification has pinned its .olean fails that verification: "framework build changed after
@@ -339,7 +340,7 @@ declare -A STAGE_CODE=(
   [pre-ex-asm]="step pre-ex-asm scripts/build-examples-asm.sh" [pre-ex-sys]="step pre-ex-sys scripts/build-examples-sys.sh"
   [pre-ex-rtmisc]="step pre-ex-rtmisc scripts/build-examples-rtmisc.sh" [pre-ex-print]="step pre-ex-print scripts/build-examples-print.sh"
   [pre-ex-cgo]="step pre-ex-cgo scripts/build-examples-cgo.sh"
-  [pre-warm]="step pre-warm pre_warm" [pre-fixture]="step pre-fixture pre_fixture" [pre-pin]="step pre-pin pre_pin"
+  [pre-stamp]="step pre-stamp pre_stamp" [pre-warm]="step pre-warm pre_warm" [pre-fixture]="step pre-fixture pre_fixture" [pre-pin]="step pre-pin pre_pin"
   [tree-x86]="mktree '$tree_x86'" [tree-asl]="mktree '$tree'" [tree-aslv]="mktree '$tree_aslv' private" [tree-go]="mktree '$tree_go'"
 )
 # est: long first (the framework build is the critical path of the cold gate)
