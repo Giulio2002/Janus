@@ -9,7 +9,8 @@ The driver `oracle-sail/target/release/janus-oracle-sail` is a function of exact
   * the pinned crate revision and the SHA-256 of its vendored model (the script's pins, passed in
     --pins together with the cargo flags and the model flavour): the Sail-generated C++ the driver
     embeds; for SAIL_MODEL=regen the SHA-256 of the regenerated model.cpp itself (--model-file);
-  * instrument_model.py, which rewrites that model before it is compiled;
+  * instrument_model.py, which rewrites that model before it is compiled, and (SAIL_SPLIT=1, the default)
+    split_model.py / split_crate.py / build.rs.patch, which cut it into the translation units that are compiled;
   * oracle-sail/Cargo.toml, Cargo.lock (every dependency version and checksum), src/**, build.rs,
     rust-toolchain files and every .cargo/config file cargo reads;
   * rustc -vV and cargo -V, the C++ compiler (`$CXX`, else c++) --version, and the SHA-256 of the
@@ -87,6 +88,9 @@ def inputs(root, pins, model_file):
     if model_file:
         out["model.cpp"] = sha_file(model_file)
     out["instrument_model.py"] = sha_file(os.path.join(here, "instrument_model.py"))
+    # the parallel model build (SAIL_SPLIT=1): the splitter, the crate-copy maker and the build.rs patch decide what is compiled
+    for rel in ("split_model.py", "split_crate.py", "build.rs.patch"):
+        out[rel] = sha_file(os.path.join(here, rel))
     srcs = {}
     for rel in ("Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain", "rust-toolchain.toml",
                 ".cargo/config", ".cargo/config.toml"):
