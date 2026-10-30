@@ -258,8 +258,9 @@ cache_gc() {
 # JanusASL/tools/asl_mod_cache.py: one entry per module, keyed by what Lake traces (source,
 # imports' keys, package settings, toolchain), with a SHA-256 manifest checked on every copy.
 modcache_restore() {  # modcache_restore [--record FILE]
-  [ -n "${ASL_CACHE:-}" ] || { [ "${1:-}" != --record ] || echo '{}' > "$2"; return 0; }
-  python3 -I "$pkg/tools/asl_mod_cache.py" restore "$root" "$ASL_CACHE" "$@" || { [ "${1:-}" != --record ] || echo '{}' > "$2"; }
+  # no cache, or a failed restore: no record is written, and restamp.py then has nothing to do
+  [ -n "${ASL_CACHE:-}" ] || return 0
+  python3 -I "$pkg/tools/asl_mod_cache.py" restore "$root" "$ASL_CACHE" "$@" || true
 }
 
 modcache_publish() {  # modcache_publish [--exe]
@@ -459,7 +460,7 @@ verify_build_phase() {
   cache_restore
   lake_asl build ArmASL
   cache_publish
-  local rec; rec="$(mktemp "${TMPDIR:-/var/tmp}/asl-restored.XXXXXX")" || return 1
+  local recd rec; recd="$(mktemp -d "${TMPDIR:-/var/tmp}/asl-restored.XXXXXX")" || return 1; rec="$recd/record.json"
   modcache_restore --record "$rec"
   lake_asl build ArmASL JanusASL
   cache_publish
@@ -468,8 +469,8 @@ verify_build_phase() {
   # stamp was taken of: without this, `janus verify --janus-root` removes and rebuilds them, and every restored JanusASL
   # module (traced against the restored bytes) rebuilds after it. Move the stamp's pins of exactly the files the cache
   # restored from verified entries (scripts/lib/restamp.py); every other difference is still janus's to reject.
-  python3 -I "$root/scripts/lib/restamp.py" "$root" "$rec"
-  rm -f "$rec"
+  python3 -I "$root/scripts/lib/restamp.py" "$root" "$rec" || echo "verify: restamp refused the module-cache record; janus rebuilds the restored framework modules" >&2
+  rm -rf "$recd"
 }
 # One example: extract its artifact, verify it with --asl, and write its report lines to $OUT/verify-$n.result (printed in
 # order by verify_main). The examples are independent: separate artifact dirs and logs; the seeded cache dir is shared

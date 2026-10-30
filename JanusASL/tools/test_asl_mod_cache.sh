@@ -88,6 +88,51 @@ echo "leanprover/lean4:v4.99.0" > "$t/b/lean-toolchain"
 c=$(changed "$t/a" "$t/b" | wc -l)
 [ "$c" = "$n" ] && ok "the toolchain changes every key" || bad "the toolchain changed $c of $n keys"
 
+
+# `restore --record`: a signed record (scripts/lib/restamp.py verifies it), written O_EXCL|O_NOFOLLOW at 0600
+export JANUS_CACHE_KEY_DIR="$t/key"; mkdir -m 700 "$t/key"
+mkdir -m 700 "$t/recd" "$t/emptycache"
+python3 -I "$t/a/JanusASL/tools/asl_mod_cache.py" restore "$t/a" "$t/emptycache" --record "$t/recd/record.json" > /dev/null 2>&1
+if python3 -I - "$t/recd/record.json" "$t/a" "$root/scripts/lib/bcache.py" <<'PY'
+import importlib.util, json, os, stat, sys
+rec, tree, bcp = sys.argv[1:4]
+spec = importlib.util.spec_from_file_location("bcache", bcp); bc = importlib.util.module_from_spec(spec); spec.loader.exec_module(bc)
+d = json.load(open(rec))
+assert set(d) == {"files", "mac"} and d["mac"] == bc.record_mac(tree, d["files"]) and d["mac"] != bc.record_mac(tree + "x", d["files"])
+assert stat.S_IMODE(os.lstat(rec).st_mode) == 0o600
+PY
+then ok "restore --record writes a 0600 record with an HMAC over its files, bound to the tree"; else bad "restore --record output"; fi
+# a symlink planted at the temp name (same pid via exec) is not followed
+echo untouched > "$t/victim"; rm -f "$t/recd/record.json"
+python3 -I - "$t/a" "$t/emptycache" "$t/recd/record.json" "$t/victim" "$t/a/JanusASL/tools/asl_mod_cache.py" <<'PY' > /dev/null 2>&1 || true
+import os, sys
+tree, cache, rec, victim, tool = sys.argv[1:6]
+os.symlink(victim, rec + ".tmp%d" % os.getpid())
+os.execv(sys.executable, [sys.executable, "-I", tool, "restore", tree, cache, "--record", rec])
+PY
+[ "$(cat "$t/victim")" = untouched ] && [ ! -e "$t/recd/record.json" ] && ok "a symlink planted at the record's temp name is not followed (the write fails, the victim is untouched)" || bad "planted temp symlink followed"
+
+# publish refuses a Janus module whose output differs from the framework stamp's pin (a stamped tree)
+mkdir -p "$t/a/.lake/build/lib/lean/Janus"; echo built > "$t/a/.lake/build/lib/lean/Janus/State.olean"
+sp="$t/a/.lake/janus-framework.ready"
+if python3 -I - "$t/a" "$sp" <<'PY'
+import hashlib, importlib.util, json, os, sys
+root, sp = sys.argv[1:3]
+spec = importlib.util.spec_from_file_location("m", os.path.join(root, "JanusASL/tools/asl_mod_cache.py")); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+ks = m.Keys(root); p = ks.pkg_of("Janus.State") or ks.pkgs[1]
+ol = os.path.join(root, ".lake/build/lib/lean/Janus/State.olean")
+assert m.stamp_mismatch(ks, p, "Janus.State") is None            # no stamp: unconstrained
+good = hashlib.sha256(b"built\n").hexdigest()
+json.dump({"pins": {"Janus/State.olean": good}}, open(sp, "w"))
+assert m.stamp_mismatch(ks, p, "Janus.State") is None            # as pinned
+open(ol, "w").write("tampered\n")
+assert m.stamp_mismatch(ks, p, "Janus.State") is not None        # differs from the pin
+json.dump({"pins": {"Janus/Other.olean": good}}, open(sp, "w"))
+assert m.stamp_mismatch(ks, p, "Janus.State") is None            # not a pinned file
+PY
+then ok "publish refuses a Janus module output that differs from the stamp's pin (and only then)"; else bad "stamp_mismatch"; fi
+rm -rf "$t/a/.lake"
+
 if [ -n "$e2e" ]; then
   # A fresh copy at this commit: restore (ArmASL and modules) and build JanusASL.
   copy "$t/w"
