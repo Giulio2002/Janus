@@ -491,7 +491,7 @@ theorem gorecover_run {p : Program} (hp : EngineAt p) (T : List FuncInfo) :
         { decPan s.mem k with recovered := true } :: panList s.mem k := by
       rw [panics0_top (k := k) (by simp only [npan, rd, B]; model_simp; exact hnp) hk8,
         panList_w k (by simp only [panAt, B]; omega)]
-      congr 1
+      refine congrArg (· :: panList s.mem k) ?_
       simp only [decPan, panAt, rd, B]
       model_simp
       have hf2 : s.mem.readLE (65792 + 32 * k + 24) 8 % 2 = 0 := by omega
