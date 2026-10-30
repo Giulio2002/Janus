@@ -898,3 +898,7 @@ func TestPoolMemLib(t *testing.T) { runLibSelfTest(t, "test-poolmem.sh") }
 
 // TestSelfTestIsolation: the queue self-tests ignore an inherited gate timeline / pool dir (nothing leaks into a running gate).
 func TestSelfTestIsolation(t *testing.T) { runLibSelfTest(t, "test-isolation.sh") }
+
+// TestTreeLockLib: writers of a shared ASL tree (restore, publish, lake) never overlap and never rewrite the framework
+// build under a running janus.
+func TestTreeLockLib(t *testing.T) { runLibSelfTest(t, "test-treelock.sh") }

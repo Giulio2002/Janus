@@ -279,7 +279,7 @@ mktree() { # DIR [private]: a private copy of the sources and of the finished fr
   mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"; : > "$1/.gate-tree-ready"
 }
 # x86 has a tree of its own, the JanusASL/oracle/rt-asl lanes another: two lakes in one tree race on its .oleans
-tree_x86="$treebase/x86" tree="$treebase/asl" tree_aslv="$treebase/aslv"
+tree_x86="$treebase/x86" tree="$treebase/asl" tree_aslv="$treebase/aslv" tree_go="$treebase/go"
 mkdir -p "$treebase"
 exec {treelock}>"$treebase.lock"
 flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($treebase); wait for it"; exit 1; }
@@ -292,6 +292,9 @@ if selected testlane || selected asl-build || selected sail-build || selected rt
 # asl-verify has a tree of its own with a PRIVATE JanusASL/.lake (restored from the ASL cache): `janus verify --asl` and the
 # `asl.sh build` of that lane never write the checkout's build through the shared symlink
 if selected asl-verify; then mktree "$tree_aslv" private; fi
+# rtasl-go runs janus with --janus-root <its tree>: a tree of its own, so no lake ever rewrites the framework build under
+# a running janus (the 2400 s hang J1 measured); the framework lock also protects shared trees (docs/TESTING.md)
+if selected rtasl-go; then mktree "$tree_go"; fi
 peak_tree=$(du -sm "$treebase"/x86 "$treebase"/asl 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
 echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed when the gate passes, kept otherwise: $treebase)"
 lane_times="$root/artifacts/gate/lane-times"
@@ -353,7 +356,8 @@ for g in prove rel strict replay btf probes fsqrt go; do
   # rtasl-prove (scripts/asl.sh prove) builds JanusASL; two lakes in one package race, so every other lake-using
   # group runs after it (as in audit/rt-asl/run.sh, where prove is the first group)
   case "$g" in prove) nd="$(needs asl-build)" ;; btf|go) ;; fsqrt) nd="$(needs rtasl-prove sail-build)" ;; *) nd="$(needs rtasl-prove)" ;; esac
-  addc "rtasl-$g" "$(laneenv "$tree") cd '$tree' && audit/rt-asl/run.sh $g" "$nd"
+  gt="$tree"; [ "$g" != go ] || gt="$tree_go"
+  addc "rtasl-$g" "$(laneenv "$gt") export RT_ASL_KEEP_DIR='$out/lanes/rtasl-$g.keep'; cd '$gt' && audit/rt-asl/run.sh $g" "$nd"
 done
 # stream the verify lane's own result lines as they are written
 tailpid=""
