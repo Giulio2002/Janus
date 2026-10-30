@@ -89,7 +89,7 @@ theorem recordForPanic (impl : List Segment)
   simp only [h_pk, h_bi, h_bl] at *
   janus_eval_nat h_bi : BI
   janus_eval_nat h_bl : BL
-  have hsepb : Apart ptr len BL 512 := by simp only [h_bl]; assumption
+  have hsepb : Apart ptr len BL 512 := by simp only [h_bl]; (first | with_reducible assumption | assumption)
   unfold Apart at hsepb
   have hlt : s.mem.readLE (MP + 279) 1 + 1 < 128 := by omega
   have loop : ∀ k (S : State) (i : Nat), len - i ≤ k → i ≤ len →
@@ -134,7 +134,7 @@ theorem recordForPanic (impl : List Segment)
         all_goals try janus_frame
         all_goals try (apply BitVec.eq_of_toNat_eq; simp [setReg]; omega)
         all_goals try (janus_simp; omega)
-        all_goals try assumption
+        all_goals try (first | with_reducible assumption | assumption)
       · janus_run [hmin, sub_wrap, and_sshr_lt, sshr63_small, smod512, Int.ofNat_lt, hlt, hmpE,
           rotateRight_zero64, sext8_and255, ofNat_and255, setWidth32_ofNat,
           ofNat32_eq_zero, sext32_add_mod, sext8_add_mod, sext8_add_mod', ite_eq_nat]
@@ -148,7 +148,7 @@ theorem recordForPanic (impl : List Segment)
         all_goals try janus_frame
         all_goals try (apply BitVec.eq_of_toNat_eq; simp [setReg]; omega)
         all_goals try (janus_simp; omega)
-        all_goals try assumption
+        all_goals try (first | with_reducible assumption | assumption)
   janus_run [hmpE, rotateRight_zero64, sext8_and255, ofNat_and255, setWidth32_ofNat, ofNat32_eq_zero,
     sext32_add_mod, sext8_add_mod, sext8_add_mod', ite_eq_nat] until [segAddr P "runtime.recordForPanic" + 0x28]
     calls [printlock_held impl]
@@ -165,6 +165,6 @@ theorem recordForPanic (impl : List Segment)
   all_goals try (janus_simp; done)
   all_goals try janus_frame
   all_goals try (janus_simp; omega)
-  all_goals try assumption
+  all_goals try (first | with_reducible assumption | assumption)
 
 end PrintFn

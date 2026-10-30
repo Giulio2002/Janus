@@ -164,7 +164,7 @@ theorem formatBase10 (impl : List Amd64.Segment) :
         apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow]; omega
       janus64_run [hs] until [segAddr P "internal/strconv.formatBase10" + 0x109]
       refine tail U _ i h29 hlen hi20 ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-      all_goals first | rfl | (with_reducible assumption) | (simp only [setRegF_apply]; assumption)
+      all_goals first | (with_reducible rfl) | (with_reducible assumption) | (simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff]; with_reducible assumption) | rfl | (simp only [setRegF_apply]; assumption)
     · have hi9 : 9 ≤ i := by
         have := length_decimal_ge 8 U (by omega)
         omega
@@ -241,7 +241,7 @@ theorem formatBase10 (impl : List Amd64.Segment) :
         refine Janus.Amd64.Tactic.ReachesRet.mono (ih (U / 1000000000) hDl _ (i - 9) (by omega) (by omega)
           ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ (by omega)) ?_
         all_goals try (dsimp only; simp [setRegF_apply, hS4, hS5, hS14, hx15S, hfsS, hdf', hmx', hx87', hfw', hx87, hfw, hmx, hdf, h1']; done)
-        all_goals try rfl
+        all_goals try (first | (with_reducible rfl) | janus_rfl_proj)
         all_goals try (dsimp only; simp only [setRegF_apply, reduceIte, Nat.reduceEqDiff]; apply BitVec.eq_of_toNat_eq; simp [BitVec.toNat_sub]; omega)
         all_goals try janus_frame
         all_goals try (dsimp only; rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by unfold Apart at ap1; omega)]; exact hrd1)
@@ -261,7 +261,7 @@ theorem formatBase10 (impl : List Amd64.Segment) :
   refine Janus.Amd64.Tactic.ReachesRet.mono (outer u _ 20 (length_decimal_le 19 u (by omega)) (Nat.le_refl _)
     ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ hul) ?_
   all_goals try (dsimp only; simp [setRegF_apply, hsp, hx0, hx3', hx1', hx7]; done)
-  all_goals try rfl
+  all_goals try (first | (with_reducible rfl) | janus_rfl_proj)
   all_goals try janus_frame
   all_goals try (dsimp only; rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint _ _ (by omega),
     Janus.Arm64.Memory.readLE_writeLE_self]; exact Nat.mod_eq_of_lt (by have := (s.regs 5).isLt; simpa using this))
