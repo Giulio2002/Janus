@@ -11,7 +11,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root" || exit 1
 export PATH=/usr/local/go/bin:$PATH
 J="$root/audit/round9/bin/janus"; mkdir -p "$(dirname "$J")"
-go build -o "$J" ./cmd/janus || exit 1
+CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
 lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -d artifacts/amd64/NewPair ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1

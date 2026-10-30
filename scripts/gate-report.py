@@ -43,6 +43,22 @@ def main():
         print("longest items:")
         for r in items:
             print("  %-34s %8.0fs  %s" % (r["id"], r["wall"], r["status"]))
+    # RAN or SKIPPED, for every item and lane (a skip replays a recorded PASS of identical inputs)
+    allitems = [r for r in rows if r["kind"] == "item"]
+    skipped = [r for r in allitems if r["status"] == "SKIP"]
+    ran = [r for r in allitems if r["status"] != "SKIP"]
+    print("---- RAN / SKIPPED ----")
+    if not skipped:
+        print("full run: all %d items and lanes RAN, none skipped" % len(allitems))
+    else:
+        for r in sorted(allitems, key=lambda r: (r["pool"], r["id"])):
+            if r["status"] == "SKIP":
+                print("SKIPPED %-8s %-34s replays: %s" % (r["pool"], r["id"], r.get("note", "?")))
+            else:
+                print("RAN     %-8s %-34s %8.1fs  %s" % (r["pool"], r["id"], r["wall"], r["status"]))
+        print("totals: %d items and lanes, %d RAN (%.0fs of work), %d SKIPPED (replaying PASS records of %.0fs of work)" % (
+            len(allitems), len(ran), sum(r["wall"] for r in ran), len(skipped), sum(float(x) for x in
+            [__import__("re").sub(r".*?, ([0-9.]+)s then.*", r"\1", r.get("note", "")) if "s then" in r.get("note", "") else "0" for r in skipped])))
     bad = [r for r in rows if r["kind"] == "item" and r["status"] not in ("PASS", "SKIP")]
     if bad:
         print("not passed: " + ", ".join("%s/%s=%s" % (r["pool"], r["id"], r["status"]) for r in bad))

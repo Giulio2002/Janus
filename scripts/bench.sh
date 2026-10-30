@@ -32,7 +32,7 @@ OUT=${OUT:-$root/artifacts/bench/results.tsv}
 FILTER=${FILTER:-.}
 mkdir -p "$root/artifacts/bench/logs" "$root/bin"
 memguard_lake build Janus >/dev/null
-[ -x bin/janus ] || go build -o bin/janus ./cmd/janus
+[ -x bin/janus ] || CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
 LP="$(lake env printenv LEAN_PATH)"
 
 build_bench() {

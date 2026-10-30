@@ -357,7 +357,7 @@ theorem cgrow (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
     have hAB := hA1.trans' (ex₃ := [(s.sp.toNat + 8, s.sp.toNat + 24), ((s.regs 0).toNat, (s.regs 0).toNat + 8)]) hB
       (fun a ha _ => by
         rw [hcl a (by omega)]
-        congr 1
+        with_reducible congr 1
         exact Bool.eq_iff_iff.2 (by simp only [decide_eq_true_eq]; omega))
       (by omega)
       (fun a k ha hx => ⟨hx, by
@@ -577,7 +577,7 @@ theorem frameH {FT : FrameTable} (hT : HTable FT) {sp : Nat} (h64 : 64 ≤ sp) (
     Bool.true_and]
   have hb : bitsAt (((sp + 8 : Nat) : Int)) [] a = false := by simp [bitsAt]
   rw [hb, Bool.or_false]
-  congr 1
+  with_reducible congr 1
   rw [Bool.eq_iff_iff]; simp only [List.length_singleton, decide_eq_true_eq, beq_iff_eq]; omega
 
 /-- `HoldPtr`'s result: `*p + a[0] + a[1]` after `holdCallee(p, x)` stored `v = cval x` at
@@ -783,7 +783,7 @@ theorem hroomH (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
   by_cases he : (t.regs 0).toNat % 2 = 0
   · have hp : pN t = t.sp.toNat - 32 := by unfold pN; rw [if_pos he]
     rw [← hp, hwv, hscal _ (.inr rfl) (by omega), hM1a1, if_pos he]
-    congr 1
+    with_reducible congr 1
     apply BitVec.eq_of_toNat_eq
     rw [BitVec.toNat_ofNat, BitVec.toNat_add, Nat.mod_mod]; rfl
   · have hp : pN t = t.sp.toNat - 24 := by unfold pN; rw [if_neg he]

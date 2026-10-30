@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Serialises the `lake` invocations of the gate lanes that share one isolated source tree (scripts/gate.sh).
+# Any lake call in a package under $JANUS_LANE_TREE takes a flock on $JANUS_LANE_LAKE_LOCK: EXCLUSIVE for every
+# command that can build or rewrite the package (build, update, exe, clean, cache, ... anything but `env` and
+# `--version`/`--help`), SHARED for `lake env` (read-only use of the built package, e.g. `lake env lean F`,
+# `lake env leanchecker M`). A rewrite (dependency re-resolution, "URL has changed; deleting packages/Sail and
+# cloning", a rebuild) therefore never overlaps another lake call of the tree, while read-only lanes still run
+# side by side. Calls outside the tree, or without the variables, pass through. JANUS_REAL_LAKE is the real lake.
+real="${JANUS_REAL_LAKE:?lanelake: JANUS_REAL_LAKE is not set}"
+tree="${JANUS_LANE_TREE:-}"; lock="${JANUS_LANE_LAKE_LOCK:-}"
+here="$(pwd -P)"
+if [ -n "$tree" ] && [ -n "$lock" ]; then
+  case "$here/" in
+    "$tree"/*)
+      mode=-x
+      case "${1:-}" in env|--version|--help|-h|-v|"") mode=-s ;; esac
+      exec flock $mode "$lock" "$real" "$@" ;;
+  esac
+fi
+exec "$real" "$@"

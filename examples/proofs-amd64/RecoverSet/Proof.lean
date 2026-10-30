@@ -149,7 +149,7 @@ theorem closure_run (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
     exact Janus.Arm64.Memory.accessible_mono _ hwin' (by omega) (by omega)
   janus64_run [hcap']
   all_goals first
-    | (exfalso; exact hj0 (BitVec.eq_of_toNat_eq (by simpa using ‹(r2 0).toNat = 0›)))
+    | (exfalso; exact hj0 (BitVec.eq_of_toNat_eq (by simpa using (by with_reducible assumption : (r2 0).toNat = 0))))
     | (have hag7 : Spec.Map.Agrees m2 (Janus.Arm64.Memory.writeLE m2 ((s.regs 4).toNat - 40) 8 7) P.priv :=
          Spec.Map.Agrees.of_window (lo := (s.regs 4).toNat - 40) (hi := (s.regs 4).toNat - 32)
            (by janus_frame) (Outside.of_sub hout (by omega) (by omega))

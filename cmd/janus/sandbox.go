@@ -20,6 +20,7 @@ package main
 // refuses unless --unsafe-no-sandbox is passed, and the mode is recorded in verified.json.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,6 +31,23 @@ import (
 type sandbox struct {
 	mode  string // "bwrap", "unshare", or "none"
 	bwrap string // path to bwrap, for "bwrap"
+	// ctx, when set, ends the sandboxed commands built from this value (their outermost process
+	// is killed, and the sandbox with it) once it is cancelled; see auditserve.go.
+	ctx context.Context
+}
+
+// withContext is a copy of s whose commands are killed when ctx ends.
+func (s *sandbox) withContext(ctx context.Context) *sandbox {
+	c := *s
+	c.ctx = ctx
+	return &c
+}
+
+func (s *sandbox) newCmd(name string, arg ...string) *exec.Cmd {
+	if s.ctx != nil {
+		return exec.CommandContext(s.ctx, name, arg...)
+	}
+	return exec.Command(name, arg...)
 }
 
 type sandboxInfo struct {
@@ -258,20 +276,29 @@ func (s *sandbox) commandOverlay(workDir string, extraWritable, readOnly, protec
 				a = append(a, "--tmpfs", rc)
 			}
 		}
+		for _, kf := range hiddenKeyFiles() {
+			a = append(a, "--ro-bind", "/dev/null", kf)
+		}
+		// So is the gate-private framework verdict store and its key (verdictstore.go).
+		if vd := verdictStoreDir(); vd != "" {
+			if st, err := os.Stat(vd); err == nil && st.IsDir() {
+				a = append(a, "--tmpfs", vd)
+			}
+		}
 		a = append(a, "--chdir", workDir, "--")
 		a = append(a, argv...)
-		cmd := exec.Command(s.bwrap, a...)
+		cmd := s.newCmd(s.bwrap, a...)
 		cmd.Env = env
 		return cmd
 	case "unshare":
 		args := []string{"-Umrnipf", "--map-root-user", "--mount-proc", "--",
 			"/bin/sh", "-c", unshareScript(workDir, writable, readOnly, protected), "janus-sandbox"}
 		args = append(args, argv...)
-		cmd := exec.Command("unshare", args...)
+		cmd := s.newCmd("unshare", args...)
 		cmd.Env = env
 		return cmd
 	default: // "none"
-		cmd := exec.Command(argv[0], argv[1:]...)
+		cmd := s.newCmd(argv[0], argv[1:]...)
 		cmd.Dir = workDir
 		cmd.Env = env
 		return cmd
@@ -393,6 +420,14 @@ ro:
 	if st, err := os.Stat(resultCacheDir()); err == nil && st.IsDir() {
 		w("mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs " + shQuote(filepath.Clean(resultCacheDir())))
 	}
+	if vd := verdictStoreDir(); vd != "" {
+		if st, err := os.Stat(vd); err == nil && st.IsDir() {
+			w("mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs " + shQuote(filepath.Clean(vd)))
+		}
+	}
+	for _, kf := range hiddenKeyFiles() {
+		w("mount --bind /dev/null " + shQuote(kf))
+	}
 	w("cd " + shQuote(workDir))
 	// RT 9: the script runs as root of its user namespace, with every capability. The tmpfs that hides the
 	// result cache (and its HMAC key) is a mount of this namespace, so the proof could `umount` it and read the
@@ -407,6 +442,23 @@ ro:
 // space, tab, newline and backslash).
 func mountinfoEscape(p string) string {
 	return strings.NewReplacer(`\`, `\134`, " ", `\040`, "\t", `\011`, "\n", `\012`).Replace(p)
+}
+
+// hiddenKeyFiles are the HMAC key files of the build caches (scripts/lib/bcache.py: asl-cache.key in
+// $JANUS_CACHE_KEY_DIR or the cache root). They are outside v1/result but inside the cache root that the
+// sandbox exposes read-only, so a proof could read the key; they are covered by /dev/null.
+func hiddenKeyFiles() []string {
+	var out []string
+	for _, d := range []string{os.Getenv("JANUS_CACHE_KEY_DIR"), cacheRoot()} {
+		if d == "" {
+			continue
+		}
+		p := filepath.Join(d, "asl-cache.key")
+		if st, err := os.Lstat(p); err == nil && st.Mode().IsRegular() {
+			out = append(out, filepath.Clean(p))
+		}
+	}
+	return out
 }
 
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

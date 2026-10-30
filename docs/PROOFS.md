@@ -972,6 +972,13 @@ What the executor does to keep a step cheap:
   pcs).
 * **Reducible transparency only** when a callee precondition is closed by `rfl`/`assumption`:
   unfolding `Memory.accessible`/`readLE` of a symbolic memory took seconds.
+* **`janus_congr` instead of `congr 1` before `omega`.** `congr 1` closes its subgoals by `rfl` at
+  default transparency; between a symbolic memory read and a `2^64`-literal expression that
+  unfolds `Nat.sub`/`Nat.add` on the literal (445 to 500 s per call, three calls in one loop
+  theorem). `janus_congr` tries `with_reducible congr 1` first; use it only where the goals it leaves
+  are closed by `omega` or `simp` either way, and keep plain `congr 1` where the closing `rfl` needs
+  default transparency. The same holds for `assumption`,
+  `rfl` and `exact` in `first | …` closers: write `with_reducible assumption`.
 * **Address side conditions without `omega`.** A read past a store asks whether the two byte
   ranges are disjoint or equal, a store whether its range is accessible. These are linear facts
   about `base + offset` with literal offsets. `Common.addrDisch` decides them directly (same

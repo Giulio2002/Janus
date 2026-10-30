@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Tests for janus verify --asl (asl.go, docs/ASL.md). The unit tests run always. Those that build
@@ -303,5 +304,131 @@ func TestASLSibling(t *testing.T) {
 	}
 	if got := newestASLSibling(old); got != "" {
 		t.Errorf("newestASLSibling(old) = %q, want none", got)
+	}
+}
+
+// A symlinked <cacheDir>/.lake (scripts/asl.sh verify once seeded with `cp -a` of a gate tree's JanusASL/.lake, itself
+// a link into the main checkout) is replaced by a private directory; the link's target and the package override
+// written afterwards never touch it.
+func TestASLSymlinkedLakeDirIsReplaced(t *testing.T) {
+	root := t.TempDir()
+	victim := filepath.Join(root, "main-checkout", "JanusASL", ".lake")
+	if err := os.MkdirAll(filepath.Join(victim, "build", "lib", "lean"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := []byte(`{"packages":[],"schemaVersion":"1.2.0","note":"the source tree's override"}`)
+	ovr := filepath.Join(victim, "package-overrides.json")
+	if err := os.WriteFile(ovr, orig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	olean := filepath.Join(victim, "build", "lib", "lean", "ArmASL.olean")
+	if err := os.WriteFile(olean, []byte("model"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "cache", "asl", "abc")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lake := filepath.Join(dir, ".lake")
+	if err := os.Symlink(victim, lake); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensurePrivateDir(lake); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(lake); err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf(".lake is not a private directory after ensurePrivateDir: %v %v", fi, err)
+	}
+	if err := writeFileNoFollow(filepath.Join(lake, "package-overrides.json"), []byte(`{"mine":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(ovr); string(got) != string(orig) {
+		t.Fatalf("the symlink target's package-overrides.json changed: %s", got)
+	}
+	if got, _ := os.ReadFile(olean); string(got) != "model" {
+		t.Fatalf("the symlink target's build changed: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(lake, "build")); err == nil {
+		t.Fatal("the private .lake kept the target's build")
+	}
+	// a real directory is left alone, with its contents
+	if err := ensurePrivateDir(lake); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(lake, "package-overrides.json")); err != nil {
+		t.Fatal("ensurePrivateDir emptied a real directory")
+	}
+	// a regular file is an error, not silently replaced
+	f := filepath.Join(root, "afile")
+	_ = os.WriteFile(f, []byte("x"), 0o644)
+	if err := ensurePrivateDir(f); err == nil {
+		t.Fatal("ensurePrivateDir accepted a regular file")
+	}
+}
+
+// writeFileNoFollow replaces a symlink at the destination (a link planted at package-overrides.json would otherwise
+// have the override written into its target).
+func TestASLWriteFileNoFollow(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.WriteFile(target, []byte("precious"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(root, "package-overrides.json")
+	if err := os.Symlink(target, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileNoFollow(p, []byte("override"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "precious" {
+		t.Fatalf("the link's target was written: %s", got)
+	}
+	if fi, _ := os.Lstat(p); fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("the destination is still a symlink")
+	}
+	if got, _ := os.ReadFile(p); string(got) != "override" {
+		t.Fatalf("destination content %q", got)
+	}
+	// overwriting a regular file works
+	if err := writeFileNoFollow(p, []byte("again"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(p); string(got) != "again" {
+		t.Fatalf("second write %q", got)
+	}
+}
+
+// A sibling build whose .lake is a symlink is not a seed.
+func TestASLSiblingWithSymlinkedLakeIsNotASeed(t *testing.T) {
+	parent := t.TempDir()
+	real := filepath.Join(parent, "real")
+	linked := filepath.Join(parent, "linked")
+	self := filepath.Join(parent, "self")
+	for _, d := range []string{real, linked, self} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk := func(lake string) {
+		if err := os.MkdirAll(filepath.Join(lake, "build", "lib", "lean"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(lake, "build", "lib", "lean", "ArmASL.olean"), []byte("m"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk(filepath.Join(real, ".lake"))
+	elsewhere := filepath.Join(t.TempDir(), ".lake")
+	mk(elsewhere)
+	if err := os.Symlink(elsewhere, filepath.Join(linked, ".lake")); err != nil {
+		t.Fatal(err)
+	}
+	// make "linked" the most recently used: it must still lose
+	now := time.Now()
+	_ = os.Chtimes(real, now.Add(-time.Hour), now.Add(-time.Hour))
+	_ = os.Chtimes(linked, now, now)
+	if got := newestASLSibling(self); got != real {
+		t.Fatalf("newestASLSibling = %q, want the real build %q", got, real)
 	}
 }

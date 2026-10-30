@@ -58,7 +58,7 @@ EOF
 if [ $check = 1 ]; then cmp -s "$tmp/main.go" scripts/stubpins/main.go || { echo "scripts/stubpins/main.go is stale"; exit 1; }
 else cp "$tmp/main.go" scripts/stubpins/main.go; fi
 
-go build -o "$tmp/janus" ./cmd/janus
+CGO_ENABLED=0 go build -o "$tmp/janus" ./cmd/janus
 
 # modes per architecture: NAME|ENV|FLAGS. PIE is measured (stability table) but not pinned:
 # extraction rejects ET_DYN binaries, and on amd64 the linker rewrites TLS accesses in PIE code.

@@ -517,7 +517,7 @@ theorem cgrow (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady)
   subst e1 e2
   refine ⟨lo, hi, lo2, hi2, hgs, by rw [← he14]; exact hgs2, by omega, h4k2, hal12, hal22, hhi482, hinp2,
     ?_, ?_, by rw [h142, he14], ?_, ?_, ?_, by rw [← he14]; exact hH2⟩
-  · rw [hsp2, he4n]; congr 1; omega
+  · rw [hsp2, he4n]; with_reducible congr 1; omega
   · rw [h52, he5, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (adjustWord_lt (s.regs 5).isLt hhi48'),
       adjustWord_trans hinp hinp1 (by omega) (by omega) (by omega) hbp]
   · intro fs0 hfs0
@@ -614,7 +614,7 @@ theorem frameH {FT : FrameTable} (hT : HTable FT) {r : Nat} (h64 : 64 ≤ r) (a 
     Bool.true_and]
   have hb : bitsAt (((r + 8 : Nat) : Int)) [] a = false := by simp [bitsAt]
   rw [hb, Bool.or_false]
-  congr 1
+  with_reducible congr 1
   rw [Bool.eq_iff_iff]; simp only [List.length_singleton, decide_eq_true_eq, beq_iff_eq]; omega
 
 /-- At its own glue, `HoldPtr`'s frame (no pointer arguments) marks nothing. -/

@@ -145,7 +145,7 @@ pool_run() {
     # reap
     local -a still=()
     for i in "${running[@]}"; do
-      local id=${POOL_IDS[$i]} f rcf st label wall now
+      local id=${POOL_IDS[$i]} f rcf st label wall now note
       f="$(_pool_file "$id")"; rcf="$POOL_DIR/$f.rc"
       if [ -f "$rcf" ]; then
         st=$(cat "$rcf"); wall=$(cat "$POOL_DIR/$f.secs" 2>/dev/null || echo 0)
@@ -163,17 +163,19 @@ pool_run() {
       else label=FAIL; fi
       STATUS[$id]=$label
       if [ "$label" = PASS ]; then printf '%s\t%.1f\n' "${POOL_KEYS[$i]}" "$wall" > "$POOL_DIR/$f.time"; fi
+      note=""
+      if [ "$label" = SKIP ]; then note="$(grep -m1 ' skipped (unchanged' "$POOL_DIR/$f.log" 2>/dev/null | sed 's/^.*skipped (unchanged: //; s/)$//' | cut -c1-300)"; fi
       if [ "$label" != PASS ] && [ "$label" != SKIP ]; then
         POOL_FAILED+=("$id"); failed_n=$((failed_n + 1))
       fi
-      printf '[%*d/%d] %-7s %-34s %9s\n' "${#total}" "$done_n" "$total" "$label" "$id" "$(_pool_fmt "$wall")"
+      printf '[%*d/%d] %-7s %-34s %9s%s\n' "${#total}" "$done_n" "$total" "$label" "$id" "$(_pool_fmt "$wall")" "${note:+  $note}"
       if [ "$label" != PASS ] && [ "$label" != SKIP ]; then
         echo "  ---- last lines of $POOL_DIR/$f.log ----"; tail -n 30 "$POOL_DIR/$f.log" 2>/dev/null | sed 's/^/  | /'
       fi
       if [ -n "${POOL_TIMELINE:-}" ]; then
         now=$(_pool_now)
-        printf '{"kind":"item","pool":"%s","id":"%s","status":"%s","rc":%s,"start":%.3f,"end":%.3f,"wall":%.3f}\n' \
-          "$(_pool_json "$POOL_NAME")" "$(_pool_json "$id")" "$label" "${st:--1}" "${POOL_T0[$i]}" "$now" "$wall" >> "$POOL_TIMELINE"
+        printf '{"kind":"item","pool":"%s","id":"%s","status":"%s","rc":%s,"start":%.3f,"end":%.3f,"wall":%.3f,"note":"%s"}\n' \
+          "$(_pool_json "$POOL_NAME")" "$(_pool_json "$id")" "$label" "${st:--1}" "${POOL_T0[$i]}" "$now" "$wall" "$(_pool_json "$note")" >> "$POOL_TIMELINE"
       fi
     done
     running=(${still[@]+"${still[@]}"})

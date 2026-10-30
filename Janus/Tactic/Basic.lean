@@ -1248,4 +1248,13 @@ end Janus.Tactic
 namespace Janus.Tactic
 attribute [janus_exec, janus_post] Bool.not_eq_eq_eq_not Bool.not_eq_true' Bool.not_true
   Bool.not_false decide_not
+
+/-- `congr 1` that tries reducible transparency first. Plain `congr 1` closes the subgoals it
+generates by `rfl` at default transparency: on an equation between a symbolic `readLE` term and a
+term over a `2^64` literal (`r - 1` against `18446744073709551615 + r`) that unfolds `Nat.sub` and
+`Nat.add` on the literal for hundreds of seconds, and a failing alternative of a `first | …` chain
+pays it again. Use it where the goals it leaves are closed by `omega` or `simp` either way; keep
+plain `congr 1` where the closing `rfl` needs default transparency. -/
+macro "janus_congr" : tactic => `(tactic| first | (with_reducible congr 1) | congr 1)
+
 end Janus.Tactic

@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	janus "github.com/Giulio2002/Janus"
@@ -347,11 +348,11 @@ func regularFileSha(p string) string {
 	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
 		return ""
 	}
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	sum, err := readerSha256Hex(f)
+	if err != nil {
 		return ""
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return sum
 }
 
 // frameworkStamp is the ready stamp of a framework build.
@@ -382,6 +383,9 @@ func (fw *framework) stampedAuditExe(dir string) string {
 type frameworkLease struct {
 	dir string
 	lk  *fileLock
+	// ready is what the readiness check measured under this lease (nil when this call built the
+	// framework: the stamp was written from the same measurements, but a caller then measures).
+	ready *frameworkReady
 }
 
 func (l *frameworkLease) release() {
@@ -403,14 +407,30 @@ func (fw *framework) buildPaths(dir string) (lockPath, stampPath string) {
 // writer stamped it: the sources are exactly the framework's (embedded framework), the stamp is
 // for these sources and targets, and every framework module's data files hash as stamped.
 func (fw *framework) ready(dir string, targets []string) bool {
+	_, ok := fw.readyInfo(dir, targets)
+	return ok
+}
+
+// frameworkReady is what a successful ready check measured: the framework pins (the module-data
+// hashes it compared with the stamp) and the SHA-256 of the compiled auditor (which it compared
+// with the stamped one). verify reuses them instead of hashing the same 700 MB again (J1); they
+// were taken under the shared lock the lease holds, which is where verify took its own.
+type frameworkReady struct {
+	pins   *pinnedLib
+	exeSha string
+}
+
+// readyInfo is ready, returning the measurements. The three independent reads (the sources, the
+// module data, the auditor executable) run at once.
+func (fw *framework) readyInfo(dir string, targets []string) (*frameworkReady, bool) {
 	_, stampPath := fw.buildPaths(dir)
 	b, err := os.ReadFile(stampPath)
 	if err != nil {
-		return false
+		return nil, false
 	}
 	var st frameworkStamp
 	if json.Unmarshal(b, &st) != nil || st.Sha256 != fw.Sha256 || st.Manifest != sha256Hex(fw.Files["lake-manifest.json"]) {
-		return false
+		return nil, false
 	}
 	have := map[string]bool{}
 	for _, t := range st.Targets {
@@ -418,21 +438,43 @@ func (fw *framework) ready(dir string, targets []string) bool {
 	}
 	for _, t := range targets {
 		if !have[t] {
-			return false
+			return nil, false
 		}
 	}
-	if dir != fw.Dir && !sameTree(dir, fw.Files, func(top string) bool { return top == ".lake" }) {
-		return false
-	}
-	p, err := frameworkPins(filepath.Join(dir, ".lake", "build", "lib", "lean"), fw.Files)
-	if err != nil || len(p.want) == 0 || len(diffPins(st.Pins, p.want)) > 0 {
-		return false
+	var (
+		wg      sync.WaitGroup
+		treeOK  = true
+		p       *pinnedLib
+		pinsErr error
+		exeSha  string
+	)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		if dir != fw.Dir && !sameTree(dir, fw.Files, func(top string) bool { return top == ".lake" }) {
+			treeOK = false
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		p, pinsErr = frameworkPins(filepath.Join(dir, ".lake", "build", "lib", "lean"), fw.Files)
+	}()
+	go func() {
+		defer wg.Done()
+		exeSha = regularFileSha(auditExePath(dir))
+	}()
+	wg.Wait()
+	if !treeOK || pinsErr != nil || len(p.want) == 0 || len(diffPins(st.Pins, p.want)) > 0 {
+		return nil, false
 	}
 	if _, ok := p.want["Janus.olean"]; !ok {
-		return false
+		return nil, false
 	}
 	// The compiled auditor must be the one the stamped build produced.
-	return st.AuditExe != "" && regularFileSha(auditExePath(dir)) == st.AuditExe
+	if st.AuditExe == "" || exeSha != st.AuditExe {
+		return nil, false
+	}
+	return &frameworkReady{pins: p, exeSha: exeSha}, true
 }
 
 // acquire returns the framework build in dir, built for targets, under a shared lock. If it is
@@ -452,12 +494,12 @@ func (fw *framework) acquire(dir, lake string, targets []string, progress io.Wri
 		return nil, lockErr(err)
 	}
 	for attempt := 0; ; attempt++ {
-		if fw.ready(dir, targets) {
+		if rdy, ok := fw.readyInfo(dir, targets); ok {
 			if dir != fw.Dir {
 				gcPin(dir)
 				touchUse(dir, lockPath)
 			}
-			return &frameworkLease{dir: dir, lk: lk}, nil
+			return &frameworkLease{dir: dir, lk: lk, ready: rdy}, nil
 		}
 		if attempt == 3 {
 			lk.unlock()
@@ -690,8 +732,33 @@ func (fw *framework) frameworkBase(lake string, progress io.Writer, targets ...s
 // scratch in a temporary directory that cleanup removes. cleanup also ends the use of a shared
 // build (its shared lock), so it must run only after the last check of the framework pins.
 func (fw *framework) libraryRoot(lake string, fresh bool, progress io.Writer) (string, func(), error) {
+	root, _, cleanup, err := fw.libraryRootInfo(lake, fresh, progress)
+	return root, cleanup, err
+}
+
+// speculativeRoot is the directory libraryRootInfo will lease the framework from, if that is
+// known before leasing and the framework is already built there ("" otherwise: --fresh, or a
+// build still to be made). It only lets the toolchain query start early; the lease is the
+// authority and the query is repeated when the root turns out to differ.
+func (fw *framework) speculativeRoot(fresh bool) string {
+	dir := fw.Dir
+	if fw.Source != "directory" {
+		if fresh {
+			return ""
+		}
+		dir = filepath.Join(cacheRoot(), "v1", "framework", fw.Sha256[:24])
+	}
+	if _, err := os.Stat(filepath.Join(dir, "lean-toolchain")); err != nil {
+		return ""
+	}
+	return dir
+}
+
+// libraryRootInfo is libraryRoot that also returns what the readiness check measured (nil for a
+// --fresh build, which is measured by its caller).
+func (fw *framework) libraryRootInfo(lake string, fresh bool, progress io.Writer) (string, *frameworkReady, func(), error) {
 	if err := checkCacheRoot(); err != nil {
-		return "", func() {}, err
+		return "", nil, func() {}, err
 	}
 	if fw.Source == "directory" || !fresh {
 		dir := fw.Dir
@@ -703,15 +770,15 @@ func (fw *framework) libraryRoot(lake string, fresh bool, progress io.Writer) (s
 			lease, err = fw.frameworkBase(lake, progress)
 		}
 		if err != nil {
-			return "", func() {}, err
+			return "", nil, func() {}, err
 		}
-		return lease.dir, lease.release, nil
+		return lease.dir, lease.ready, lease.release, nil
 	}
 	tmp, err := fw.freshBase(lake, progress)
 	if err != nil {
-		return "", func() {}, err
+		return "", nil, func() {}, err
 	}
-	return tmp, func() { os.RemoveAll(tmp) }, nil
+	return tmp, nil, func() { os.RemoveAll(tmp) }, nil
 }
 
 // freshBase builds the framework in a new temporary directory, reusing nothing.

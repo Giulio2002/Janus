@@ -416,10 +416,11 @@ def callRegs (old junk : Nat → W64) (res : List W64) : Nat → W64 :=
 
 @[janus_exec, janus_post] theorem getD_cons_zero {α} (a : α) (l : List α) (d : α) :
     (a :: l).getD 0 d = a := rfl
-@[janus_exec, janus_post] theorem getD_cons_lit {α} (a : α) (l : List α) (d : α) (n : Nat)
-    [NeZero n] : (a :: l).getD n d = l.getD (n - 1) d := by
-  obtain ⟨k, rfl⟩ : ∃ k, n = k + 1 := ⟨n - 1, by have := NeZero.ne n; omega⟩
-  rfl
+/-- `(a :: l).getD (n + 1) d`: matches a literal index (`simp` unifies `5` with `n + 1`) and, unlike
+a `[NeZero n]` side condition, costs nothing on a symbolic index (a failed `NeZero i` instance
+search took ~30 ms per attempt). -/
+@[janus_exec, janus_post] theorem getD_cons_lit {α} (a : α) (l : List α) (d : α) (n : Nat) :
+    (a :: l).getD (n + 1) d = l.getD n d := rfl
 @[janus_exec, janus_post] theorem getD_nil' {α} (n : Nat) (d : α) : ([] : List α).getD n d = d := by
   cases n <;> rfl
 

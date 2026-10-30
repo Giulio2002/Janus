@@ -11,19 +11,24 @@
 # every item's result line (PASS / FAIL / TIMEOUT and its wall seconds) is printed the moment it
 # finishes, with a progress line every minute; the full log of each item is kept in
 # $JANUS_POOL_DIR (default artifacts/verify-all-logs/).
-# Usage: scripts/verify-all-examples.sh [-j N] [--changed] [--cgo]
+# Usage: scripts/verify-all-examples.sh [-j N] [--incremental|--changed] [--explain] [--cgo]
 #   -j N        jobs at once (default and memory admission: scripts/lib/parallel.sh).
 #   --cgo       also verify the cgo rows (examples/proofs-cgo) in the same queue.
 #   --filter ERE   development only: queue just the items whose id ("arm64:Add", "cgo:amd64/CAdd", ...)
 #               matches the regular expression; not a gate run.
-#   --changed   development mode, NOT a gate run: skip every item whose inputs are byte-identical
-#               to those of its last passing run in this checkout (artifacts/verify-all-examples.manifest):
-#               its extraction (Extracted.lean, identity.json), its proof file, its extraction
-#               arguments, the framework sources and the Lean toolchain. The janus executable is
-#               deliberately not an input, so a change to the verifier itself (cmd/janus) is not
-#               re-checked on unchanged items: CI and the merge gate run without --changed.
-# Every item prints its time. Exits non-zero if any item fails. A run (with or without
-# --changed) records the inputs of every item that passed or was skipped in the manifest.
+#   --incremental  (also --changed, or JANUS_GATE_INCREMENTAL=1) skip every item for which the record of a
+#               PASS exists whose key is identical: a content hash of EVERY input of the item (its
+#               extraction, proof file, the transitive import closure of its modules with their compiled
+#               data, the toolchain, the verifier identity, the auditor and leanchecker, the pins, these
+#               scripts, the item's arguments and environment: cmd/janus/incr.go, scripts/lib/incr.sh).
+#               Anything else -- no record, a damaged or foreign one, an input that cannot be hashed --
+#               runs the item, and every item that runs is still checked in full. The default is a FULL
+#               run; the full cold gate is mandatory before every push to main and nightly.
+#   --explain   (JANUS_INCR_EXPLAIN=1) print the key components of the selected items (use with --filter)
+#               and run nothing.
+# Every item prints its time, or why it was skipped, and the run ends with a RAN / SKIPPED line per item
+# (a skip names the time, host and commit of the PASS it replays) and totals. Exits non-zero if any item
+# fails. Every item that passes is recorded (JANUS_INCR_RECORD=1, set here) for later incremental runs.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
@@ -34,22 +39,31 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/pool.sh"
 par_init "$@"
 changed=""
+explain=""
 cgo=""
 filter=""
 args=(${PAR_ARGS[@]+"${PAR_ARGS[@]}"})
 for ((i = 0; i < ${#args[@]}; i++)); do
   case "${args[$i]}" in
-    --changed) changed=1 ;;
+    --changed|--incremental) changed=1 ;;
+    --explain) explain=1 ;;
     --cgo) cgo=1 ;;
     --filter) i=$((i + 1)); filter="${args[$i]:?--filter needs a regular expression}" ;;
-    *) echo "usage: scripts/verify-all-examples.sh [-j N] [--changed] [--cgo] [--filter ERE]" >&2; exit 2 ;;
+    *) echo "usage: scripts/verify-all-examples.sh [-j N] [--incremental|--changed] [--explain] [--cgo] [--filter ERE]" >&2; exit 2 ;;
   esac
 done
+# the incremental gate (scripts/lib/incr.sh): skipping is opt-in; recording the passes is the default
+[ -z "$changed" ] || export JANUS_GATE_INCREMENTAL=1
+if [ -n "$explain" ]; then export JANUS_INCR_EXPLAIN=1; else unset JANUS_INCR_EXPLAIN JANUS_INCR_PRECHECK; fi
+export JANUS_INCR_RECORD="${JANUS_INCR_RECORD:-1}"
+# records are written only for a clean tree that does not change during the run (scripts/lib/incr.sh)
+. scripts/lib/incr.sh
+incr_tree_pin
 
 # JANUS_EXAMPLES_PREBUILT=1 (scripts/gate.sh): bin/janus, the examples' binaries and the framework
 # build exist already (built once by the gate); nothing is rebuilt.
 if [ "${JANUS_EXAMPLES_PREBUILT:-}" != 1 ]; then
-  go build -o bin/janus ./cmd/janus
+  CGO_ENABLED=0 go build -o bin/janus ./cmd/janus
   scripts/build-examples.sh >/dev/null
   bash scripts/build-examples-amd64.sh >/dev/null 2>&1
   scripts/build-examples-asm.sh >/dev/null
@@ -113,30 +127,7 @@ wall=$(date +%s)
 
 times="$root/artifacts/verify-all-examples.times"
 
-# The inputs of an item (--changed and the manifest): a SHA-256 over the framework sources, the
-# toolchain, the item's proof file, its extraction arguments and its extraction (Extracted.lean and
-# identity.json without the "binary" path, which only says where the extraction lives).
-manifest="$root/artifacts/verify-all-examples.manifest"
-global="$( { find Janus -type f -name '*.lean' -print0 | sort -z | xargs -0 sha256sum
-             sha256sum Janus.lean lakefile.toml lake-manifest.json lean-toolchain; } | sha256sum | cut -d' ' -f1)"
-item_hash() { # ITEM ART_DIR PROOF_FILE [EXTRACTION ARGS...]
-  local item=$1 art=$2 proof=$3; shift 3
-  [ -f "$art/Extracted.lean" ] && [ -f "$art/identity.json" ] || return 1
-  { echo "$global $item"; sha256sum < "$proof"; printf '%s\n' "$@"; cat "$art/Extracted.lean"
-    grep -v '^  "binary": ' "$art/identity.json"; } | sha256sum | cut -d' ' -f1
-}
-declare -A last=()
-if [ -n "$changed" ] && [ -f "$manifest" ]; then
-  while IFS=$'\t' read -r k v; do last[$k]=$v; done < "$manifest"
-fi
-# item_skip ITEM HASH: --changed, and the item passed with exactly these inputs.
-item_skip() { [ -n "$changed" ] && [ -n "$2" ] && [ "${last[$1]:-}" = "$2" ]; }
-# item_done ITEM HASH: record a passing (or skipped) item for the manifest (the pool records the walls).
-item_done() {
-  local f="${1//\//_}"
-  [ -n "$2" ] && printf '%s\t%s\n' "$1" "$2" > "$tmp/pass-$f"
-  return 0
-}
+tmp_unused=""
 . scripts/example-contracts.sh
 declare -A asm_sym=(
   [AddAsm]=example.com/asm.AddAsm.abi0 [XorSlice]=example.com/asm.XorSlice.abi0
@@ -145,70 +136,21 @@ declare -A asm_sym=(
 )
 
 # run_item ITEM: one item of the pool. Everything it prints is the item's log; its exit status is
-# its verdict (0: passed or skipped as unchanged).
+# its verdict (0: passed, or skipped by the incremental gate on the record of an identical PASS: the
+# per-kind scripts decide that, scripts/lib/incr.sh).
 run_item() {
-  local it=$1 kind=${1%%:*} n=${1#*:} h="" rc=0 isa an
-  local -a xa=()
+  local it=$1 kind=${1%%:*} n=${1#*:} rc=0
   case "$kind" in
-    arm64)
-      if [ "$n" != WrongAdd ]; then
-        mapfile -t xa < <(scripts/example-targets.sh "$n")
-        if [ -n "$changed" ] && bin/janus extract artifacts/examples-arm64 "$(example_symbol "$n")" "$tmp/x-$n" \
-             ${xa[@]+"${xa[@]}"} >/dev/null 2>&1; then
-          h="$(item_hash "$it" "$tmp/x-$n" "examples/proofs/$n.lean" ${xa[@]+"${xa[@]}"} || true)"
-        fi
-      fi
-      if item_skip "$it" "$h"; then
-        printf 'arm64  %-9s skipped (unchanged since its last passing run; --changed)\n' "$n"; item_done "$it" "$h"; return 0
-      fi
-      JANUS_EXAMPLES_SUMMARY="$tmp/arm64-$n" scripts/verify-examples.sh -j 1 "$n" || rc=$?
-      if [ $rc = 0 ]; then
-        [ "$n" = WrongAdd ] || h="$(item_hash "$it" "artifacts/$n" "examples/proofs/$n.lean" ${xa[@]+"${xa[@]}"} || true)"
-        item_done "$it" "$h"
-      fi
-      return $rc
-      ;;
-    amd64)
-      h="$(item_hash "$it" "artifacts/amd64/$n" "examples/proofs-amd64/$n/Proof.lean" || true)"
-      if item_skip "$it" "$h"; then
-        printf 'amd64  %-12s skipped (unchanged since its last passing run; --changed)\n' "$n"; item_done "$it" "$h"; return 0
-      fi
-      scripts/verify-amd64-examples.sh -j 1 "$n" || rc=$?
-      [ $rc != 0 ] || item_done "$it" "$h"
-      return $rc
-      ;;
-    asm)
-      isa="${n%%/*}"; an="${n#*/}"
-      if [ -n "$changed" ] && [ -n "${asm_sym[$an]:-}" ] &&
-         bin/janus extract "artifacts/examples-asm-$isa" "${asm_sym[$an]}" "$tmp/x-asm-$isa-$an" >/dev/null 2>&1; then
-        h="$(item_hash "$it" "$tmp/x-asm-$isa-$an" "examples/asm/proofs/$n.lean" || true)"
-      fi
-      if item_skip "$it" "$h"; then
-        printf 'asm    %-17s skipped (unchanged since its last passing run; --changed)\n' "$n"; item_done "$it" "$h"; return 0
-      fi
-      JANUS_EXAMPLES_SUMMARY="$tmp/asm-${n//\//_}" scripts/verify-asm-examples.sh -j 1 "$n" || rc=$?
-      [ $rc != 0 ] || item_done "$it" "$(item_hash "$it" "artifacts/asm/$n" "examples/asm/proofs/$n.lean" || true)"
-      return $rc
-      ;;
-    rtmisc)
-      # (always run: no --changed hash for the remaining-runtime examples)
-      JANUS_EXAMPLES_SUMMARY="$tmp/rtmisc-${n//\//_}" scripts/verify-rtmisc-examples.sh -j 1 "$n" || rc=$?
-      return $rc
-      ;;
-    sys)
-      JANUS_EXAMPLES_SUMMARY="$tmp/sys-${n//\//_}" scripts/verify-sys-examples.sh -j 1 "$n" || rc=$?
-      return $rc
-      ;;
-    print)
-      JANUS_EXAMPLES_SUMMARY="$tmp/print-${n//\//_}" scripts/verify-print-examples.sh -j 1 "$n" || rc=$?
-      return $rc
-      ;;
-    cgo)
-      JANUS_EXAMPLES_SUMMARY="$tmp/cgo-${n//\//_}" scripts/verify-cgo-examples.sh -j 1 "$n" || rc=$?
-      return $rc
-      ;;
+    arm64) JANUS_EXAMPLES_SUMMARY="$tmp/arm64-$n" scripts/verify-examples.sh -j 1 "$n" || rc=$? ;;
+    amd64) scripts/verify-amd64-examples.sh -j 1 "$n" || rc=$? ;;
+    asm) JANUS_EXAMPLES_SUMMARY="$tmp/asm-${n//\//_}" scripts/verify-asm-examples.sh -j 1 "$n" || rc=$? ;;
+    rtmisc) JANUS_EXAMPLES_SUMMARY="$tmp/rtmisc-${n//\//_}" scripts/verify-rtmisc-examples.sh -j 1 "$n" || rc=$? ;;
+    sys) JANUS_EXAMPLES_SUMMARY="$tmp/sys-${n//\//_}" scripts/verify-sys-examples.sh -j 1 "$n" || rc=$? ;;
+    print) JANUS_EXAMPLES_SUMMARY="$tmp/print-${n//\//_}" scripts/verify-print-examples.sh -j 1 "$n" || rc=$? ;;
+    cgo) JANUS_EXAMPLES_SUMMARY="$tmp/cgo-${n//\//_}" scripts/verify-cgo-examples.sh -j 1 "$n" || rc=$? ;;
+    *) echo "run_item: unknown kind $kind"; rc=2 ;;
   esac
-  echo "run_item: unknown kind $kind"; return 2
+  return $rc
 }
 
 # one snapshot of the print proof package for all print items (see scripts/verify-print-examples.sh)
@@ -225,24 +167,62 @@ pooldir="${JANUS_POOL_DIR:-$root/artifacts/verify-all-logs}"
 rm -rf "$pooldir"
 pool_init verify "$PAR_JOBS" "$pooldir"
 pool_times "$times"
-for it in "${items[@]}"; do
+# --incremental: first find out, for every item, whether the record of an identical PASS exists (the item's own
+# script decides, JANUS_INCR_PRECHECK=1: it extracts, computes the key and exits 90 if the item must run;
+# light work, many at once, no pool slot). Only the items that must run are queued.
+queue=("${items[@]}")
+if [ -n "$changed" ] && [ -z "$explain" ]; then
+  pre="$pooldir/precheck"; mkdir -p "$pre"
+  pre_jobs="${JANUS_PRECHECK_JOBS:-8}"
+  echo "incremental pre-check of ${#items[@]} items ($pre_jobs at once)"
+  for it in "${items[@]}"; do
+    f="$(_pool_file "$it")"
+    while [ "$(jobs -rp | wc -l)" -ge "$pre_jobs" ]; do wait -n 2>/dev/null || true; done
+    ( JANUS_INCR_PRECHECK=1 run_item "$it" > "$pre/$f.log" 2>&1; echo $? > "$pre/$f.rc" ) &
+  done
+  wait
+  queue=()
+  skip_n=0
+  for it in "${items[@]}"; do
+    f="$(_pool_file "$it")"
+    if [ "$(cat "$pre/$f.rc" 2>/dev/null)" = 0 ] && grep -q ' skipped (unchanged' "$pre/$f.log"; then
+      cp "$pre/$f.log" "$pooldir/$f.log"; echo 0 > "$pooldir/$f.rc"; echo 0 > "$pooldir/$f.secs"
+      skip_n=$((skip_n + 1))
+      printf 'SKIP    %-34s %s\n' "$it" "$(grep -m1 ' skipped (unchanged' "$pre/$f.log" | sed 's/^.*skipped (unchanged: //')"
+      if [ -n "${POOL_TIMELINE:-}" ]; then
+        note="$(grep -m1 ' skipped (unchanged' "$pre/$f.log" | sed 's/^.*skipped (unchanged: //; s/)$//' | cut -c1-300)"
+        printf '{"kind":"item","pool":"verify","id":"%s","status":"SKIP","rc":0,"start":%.3f,"end":%.3f,"wall":0,"note":"%s"}\n' \
+          "$(_pool_json "$it")" "$(_pool_now)" "$(_pool_now)" "$(_pool_json "$note")" >> "$POOL_TIMELINE"
+      fi
+    else
+      queue+=("$it")
+    fi
+  done
+  echo "incremental pre-check: ${skip_n} skipped, ${#queue[@]} to run"
+fi
+queued() { printf '%s\n' "${queue[@]}" | grep -qxF -- "$1"; }
+for it in "${queue[@]}"; do
   needs=""
   # the first print row of an ISA builds the lemma modules every row of that ISA imports (in the shared
   # snapshot's consumer workspace); the other rows start when it is done and reuse them, instead of
   # building the same modules at the same time
-  case "$it" in print:*/PrintBool|print:*/PrintNeg|print:*/PrintStr) needs="${it%/*}/PrintX"; printf '%s\n' "${items[@]}" | grep -qx "$needs" || needs="" ;; esac
+  case "$it" in print:*/PrintBool|print:*/PrintNeg|print:*/PrintStr) needs="${it%/*}/PrintX"; queued "$needs" || needs="" ;; esac
   pool_add "$it" "run_item \"$it\"" "$it" "$needs"
 done
 pool_rc=0
+if [ -n "$explain" ]; then
+  # --explain: each item's script prints its key components and runs nothing (nothing is verified or recorded)
+  for it in "${queue[@]}"; do run_item "$it" || true; done
+  exit 0
+fi
 pool_run || pool_rc=$?
 broken=(${POOL_FAILED[@]+"${POOL_FAILED[@]}"})
-# The manifest: every item that passed (or was skipped as unchanged) in this run; the times of
-# the items that ran (the others keep their last time).
-cat "$tmp"/pass-* 2>/dev/null | sort > "$manifest.tmp" || true
-mv "$manifest.tmp" "$manifest"
+# the report: every item RAN or was SKIPPED, with totals
+. scripts/lib/incr.sh
+incr_report "$pooldir" "${items[@]}"
 { [ -f "$times" ] && cat "$times"; cat "$pooldir"/*.time 2>/dev/null; } |
   awk -F'\t' '{ t[$1] = $2 } END { for (k in t) printf "%s\t%s\n", k, t[k] }' | sort > "$times.tmp" || true
 mv "$times.tmp" "$times"
-echo "total: ${#arm64[@]} arm64 items, ${#amd64[@]} amd64 functions, ${#asm[@]} assembly items, ${#sys[@]} kernel examples, ${#rtmisc[@]} remaining-runtime items, ${#prt[@]} print examples, ${#cgorows[@]} cgo rows, $(( $(date +%s) - wall ))s wall (-j $PAR_JOBS)${changed:+; --changed: unchanged items skipped, not a gate run}"
+echo "total: ${#arm64[@]} arm64 items, ${#amd64[@]} amd64 functions, ${#asm[@]} assembly items, ${#sys[@]} kernel examples, ${#rtmisc[@]} remaining-runtime items, ${#prt[@]} print examples, ${#cgorows[@]} cgo rows, $(( $(date +%s) - wall ))s wall (-j $PAR_JOBS)${changed:+; --incremental: items with a record of an identical PASS skipped}"
 if [ ${#broken[@]} -gt 0 ]; then echo "FAILED: ${broken[*]}"; exit 1; fi
 echo "all ok"
