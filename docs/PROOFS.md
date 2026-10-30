@@ -106,6 +106,7 @@ That is the whole proof. Most straight-line functions need nothing more, or a fi
 | `janus_frame` | Proves `MemFrame m₀ m rs` (the memory part of a callee summary, see Calls): peels the stores of `m`, goes through the `MemFrame` hypotheses of called summaries, side conditions by `omega`. |
 | `janus_eval% t` | A term: the closed natural number `t` (e.g. `segAddr Extracted.program "f" + 8`) evaluated to a numeral at elaboration time, for a lemma argument that must be a literal. |
 | `janus_disch` | The discharger used inside every simp call (see below). |
+| `janus_close` | Recommended closer for side goals: `with_reducible rfl`, `with_reducible assumption`, `janus_omega_sparse` (omega without the context's aliasing disjunctions, then with the relevant ones), then full `omega`. Use it instead of `first | rfl | assumption | omega` chains: those unfold at default transparency and let `omega` split on every disjunction. |
 
 `set_option trace.janus true in janus_run` prints every step (pc, the instruction disassembled,
 simp time), every branch condition, and the time spent on final goals. The disassembler
