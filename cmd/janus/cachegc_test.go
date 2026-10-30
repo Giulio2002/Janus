@@ -902,3 +902,7 @@ func TestSelfTestIsolation(t *testing.T) { runLibSelfTest(t, "test-isolation.sh"
 // TestTreeLockLib: writers of a shared ASL tree (restore, publish, lake) never overlap and never rewrite the framework
 // build under a running janus.
 func TestTreeLockLib(t *testing.T) { runLibSelfTest(t, "test-treelock.sh") }
+
+// TestDagLib: the gate's stage graph: a stage starts after its dependencies, independent stages overlap, a failure blocks
+// exactly its dependents.
+func TestDagLib(t *testing.T) { runLibSelfTest(t, "test-dag.sh") }

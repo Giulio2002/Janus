@@ -208,7 +208,7 @@ printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGi
 gate: $auto_budget"
 echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}"
 
-# ---- phase 1: prebuild, once
+# ---- the prebuild stages (they are items of the same pool as the lanes: scripts/lib/dag.sh)
 step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
   local name=$1 s e rc=0; shift
   s=$(now); "$@" > "$out/prebuild/$name.log" 2>&1 || rc=$?; e=$(now)
@@ -222,42 +222,21 @@ pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit 
 pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
 # The go tests' prebuilt framework fixture (cmd/janus/fixture_test.go, docs/TESTING.md "Go tests"): built here, once, by
-# the tests' TestMain (a run that selects no test), so the gotest lane does not pay for it and nothing builds after the prebuild.
+# the tests' TestMain (a run that selects no test), so the gotest lane does not pay for it; it runs beside the verify pool.
 pre_fixture() { JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
-pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add && pre_fixture; }
-p0=$(now); pre_fail=0
-step gobin pre_gobin || pre_fail=1
-if [ $pre_fail = 0 ]; then
-  pids=()
-  bg() { local n=$1; shift; step "$n" "$@" & pids+=($!); }
-  bg lake pre_lake
-  bg ex-arm64 scripts/build-examples.sh
-  bg ex-amd64 bash scripts/build-examples-amd64.sh
-  bg ex-asm scripts/build-examples-asm.sh
-  bg ex-sys scripts/build-examples-sys.sh
-  bg ex-rtmisc scripts/build-examples-rtmisc.sh
-  bg ex-print scripts/build-examples-print.sh
-  bg ex-cgo scripts/build-examples-cgo.sh
-  for ((k = 0; k < ${#pids[@]}; k++)); do wait "${pids[$k]}" || pre_fail=1; done
-fi
-[ $pre_fail != 0 ] || step rounds-bin pre_rounds_bin || pre_fail=1
-[ $pre_fail != 0 ] || step warm pre_warm || pre_fail=1
-p1=$(now); tl_stage stage prebuild "$p0" "$p1" "$pre_fail"
-if [ $pre_fail != 0 ]; then
-  echo "gate: FAILED in the prebuild (nothing else ran; the axiom guard still runs)"
-  scripts/ci-axiom-guard.sh || true
-  exit 1
-fi
-export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
-# From here on nothing may write the shared framework build (a lake that rebuilds a module while another lane's
-# verification has pinned its .olean fails that verification: "framework build changed after the kernel replay").
-# scripts/lib/lakeguard/lake turns every `lake build`/`lake exe` in this checkout's package into --no-build; the
-# lanes that must build use private trees. The oleans are hashed now and again at the end of the run.
+pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
+# From the moment the shared framework build (.lake/build) is finished nothing may write it (a lake that rebuilds a
+# module while another lane's verification has pinned its .olean fails that verification: "framework build changed after
+# the kernel replay"). pre-pin hashes the finished build and switches scripts/lib/lakeguard/lake on (it turns every
+# `lake build`/`lake exe` in this checkout's package into --no-build); every READER of the build needs pre-pin, so none starts
+# before the build it reads has finished and been hashed. The oleans are hashed again at the end of the run.
 fw_hash() { (cd "$root/.lake/build" && find . -type f \( -name '*.olean*' -o -name '*.ir' -o -name '*.ilean' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1); }
-FW_HASH0="$(fw_hash)"
-JANUS_REAL_LAKE="$(command -v lake)"; export JANUS_REAL_LAKE JANUS_LAKEGUARD_ROOT="$root"
+pre_pin() { fw_hash > "$out/fw_hash0" && : > "$out/.pinned" && echo "gate: framework build pinned ($(cat "$out/fw_hash0")); lake build/exe in the shared checkout is --no-build from here on"; }
+JANUS_REAL_LAKE="$(command -v lake)"; export JANUS_REAL_LAKE JANUS_LAKEGUARD_ROOT="$root" JANUS_LAKEGUARD_PIN="$out/.pinned"
 export PATH="$root/scripts/lib/lakeguard:$PATH"
-echo "gate: framework build pinned ($FW_HASH0); lake build/exe in the shared checkout is --no-build from here on"
+export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
+. "$root/scripts/lib/dag.sh"
+dag_check || { echo "gate: internal error: the stage graph is inconsistent"; exit 1; }
 
 # ---- phase 2: lanes
 # The JanusASL / JanusX86 / oracle lanes run lake in packages that depend on the framework by path: such a
@@ -287,19 +266,10 @@ flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($
 # its interface is not final, this only forwards the directory)
 [ -n "${ASL_CACHE:-}" ] || { [ -z "${JANUS_ASL_CACHE:-}" ] || export ASL_CACHE="$JANUS_ASL_CACHE"; }
 mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
-selected x86 && mktree "$tree_x86"
-if selected testlane || selected asl-build || selected sail-build || selected rtasl-prove || selected rtasl-probes || selected rtasl-go || selected rtasl-fsqrt || selected rtasl-replay; then mktree "$tree"; fi
-# asl-verify has a tree of its own with a PRIVATE JanusASL/.lake (restored from the ASL cache): `janus verify --asl` and the
-# `asl.sh build` of that lane never write the checkout's build through the shared symlink
-if selected asl-verify; then mktree "$tree_aslv" private; fi
-# rtasl-go runs janus with --janus-root <its tree>: a tree of its own, so no lake ever rewrites the framework build under
-# a running janus (the 2400 s hang J1 measured); the framework lock also protects shared trees (docs/TESTING.md)
-if selected rtasl-go; then mktree "$tree_go"; fi
-peak_tree=$(du -sm "$treebase"/x86 "$treebase"/asl 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')
-echo "gate: isolated source copies for the lake lanes: ${peak_tree} MiB (removed when the gate passes, kept otherwise: $treebase)"
+echo "gate: isolated source copies for the lake lanes are made once the framework build is pinned (removed when the gate passes, kept otherwise: $treebase)"
 lane_times="$root/artifacts/gate/lane-times"
 shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2
-pool_init gate "$lanes_n" "$out/lanes"
+pool_init gate "$((lanes_n + 4))" "$out/lanes"   # (+4 slots: the prebuild stages and tree copies share the pool)
 POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
 export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too
 # an estimate for the first run (seconds, the profile's measurements); later runs use their own
@@ -318,7 +288,8 @@ add() { # NAME CODE [NEEDS]
   local m="${!v:-${lanemem[$1]:-}}"
   # (verify: no JANUS_MEM_MAX, its items bound themselves as before)
   [ -z "$m" ] || set -- "$1" "export JANUS_MEM_MAX=$m; $2" "${3:-}"
-  pool_add "$1" "$2" "$1" "${3:-}"
+  WANT+=("$1")
+  pool_add "$1" "$2" "$1" "${DAG_DEPS[$1]:-} ${3:-}"
 }
 # addc: a lane that may be skipped on the record of an identical PASS (incr_lane: scripts/lib/incr.sh)
 addc() { # NAME CODE [NEEDS]
@@ -332,6 +303,7 @@ addc() { # NAME CODE [NEEDS]
 laneenv() { # TREE: the environment of a lane working in TREE (JANUS_REAL_LAKE is exported above)
   echo "export JANUS_LANE_TREE='$1' JANUS_LANE_LAKE_LOCK='$1/.gate-lake.lock' PATH='$root/scripts/lib/lanelake':\"\$PATH\";"
 }
+WANT=()
 # a lane needs its prerequisite only when that stage is part of this run
 needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; done; echo "$r"; }
 add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
@@ -358,6 +330,26 @@ for g in prove rel strict replay btf probes fsqrt go; do
   case "$g" in prove) nd="$(needs asl-build)" ;; btf|go) ;; fsqrt) nd="$(needs rtasl-prove sail-build)" ;; *) nd="$(needs rtasl-prove)" ;; esac
   gt="$tree"; [ "$g" != go ] || gt="$tree_go"
   addc "rtasl-$g" "$(laneenv "$gt") export RT_ASL_KEEP_DIR='$out/lanes/rtasl-$g.keep'; cd '$gt' && audit/rt-asl/run.sh $g" "$nd"
+done
+# The stages the selected lanes need (and only those: a run with --only builds only what it reads), queued with their
+# dependencies. Prebuild stages and trees are not subject to --only/--skip.
+declare -A STAGE_CODE=(
+  [pre-gobin]="step pre-gobin pre_gobin" [pre-lake]="step pre-lake pre_lake" [pre-rounds-bin]="step pre-rounds-bin pre_rounds_bin"
+  [pre-ex-arm64]="step pre-ex-arm64 scripts/build-examples.sh" [pre-ex-amd64]="step pre-ex-amd64 bash scripts/build-examples-amd64.sh"
+  [pre-ex-asm]="step pre-ex-asm scripts/build-examples-asm.sh" [pre-ex-sys]="step pre-ex-sys scripts/build-examples-sys.sh"
+  [pre-ex-rtmisc]="step pre-ex-rtmisc scripts/build-examples-rtmisc.sh" [pre-ex-print]="step pre-ex-print scripts/build-examples-print.sh"
+  [pre-ex-cgo]="step pre-ex-cgo scripts/build-examples-cgo.sh"
+  [pre-warm]="step pre-warm pre_warm" [pre-fixture]="step pre-fixture pre_fixture" [pre-pin]="step pre-pin pre_pin"
+  [tree-x86]="mktree '$tree_x86'" [tree-asl]="mktree '$tree'" [tree-aslv]="mktree '$tree_aslv' private" [tree-go]="mktree '$tree_go'"
+)
+# est: long first (the framework build is the critical path of the cold gate)
+declare -A STAGE_EST=([pre-lake]=800 [pre-fixture]=300 [pre-warm]=120 [pre-gobin]=60 [pre-ex-amd64]=15)
+declare -A queued=()
+for n in $(dag_closure "${WANT[@]}"); do
+  [ -n "${STAGE_CODE[$n]:-}" ] || continue
+  queued[$n]=1
+  : "${POOL_SECS[$n]:=${STAGE_EST[$n]:-30}}"
+  pool_add "$n" "${STAGE_CODE[$n]}" "$n" "${DAG_DEPS[$n]:-}"
 done
 # stream the verify lane's own result lines as they are written
 tailpid=""
@@ -404,8 +396,8 @@ else
   echo "!!!! speed check NOT enforced: no baseline file $sbfile (record one with --speed-baseline record after a green full gate) !!!!"
 fi
 [ "$speed_rc" = 0 ] || lanes_rc=1
-FW_HASH1="$(fw_hash)"
-if [ "$FW_HASH1" != "$FW_HASH0" ]; then echo "gate: FAIL: the shared framework build changed during the lanes ($FW_HASH0 -> $FW_HASH1)"; lanes_rc=1; fi
+if [ -f "$out/fw_hash0" ]; then FW_HASH0="$(cat "$out/fw_hash0")"; FW_HASH1="$(fw_hash)"; fi
+if [ -f "$out/fw_hash0" ] && [ "$FW_HASH1" != "$FW_HASH0" ]; then echo "gate: FAIL: the shared framework build changed during the lanes ($FW_HASH0 -> $FW_HASH1)"; lanes_rc=1; fi
 echo
 if [ "$lanes_rc" = 0 ]; then
   echo "GATE PASS$([ -n "$partial" ] && echo ' (PARTIAL RUN: not a full gate)')$([ -n "$incremental" ] && echo ' (INCREMENTAL: items and lanes with a record of an identical PASS were skipped, see the RAN/SKIPPED report; the full cold gate is still required before a push to main)') in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)")"

@@ -9,7 +9,9 @@ real="${JANUS_REAL_LAKE:?lakeguard: JANUS_REAL_LAKE is not set}"
 root="${JANUS_LAKEGUARD_ROOT:-}"
 pkg="$(pwd -P)"
 while [ "$pkg" != / ] && [ ! -f "$pkg/lakefile.toml" ] && [ ! -f "$pkg/lakefile.lean" ]; do pkg="$(dirname "$pkg")"; done
-if [ -n "$root" ] && [ "$pkg" = "$root" ]; then
+# the guard is on once the gate has pinned the framework build (JANUS_LAKEGUARD_PIN names the marker file); before, the
+# build itself runs through here unchanged
+if [ -n "$root" ] && [ "$pkg" = "$root" ] && { [ -z "${JANUS_LAKEGUARD_PIN:-}" ] || [ -e "$JANUS_LAKEGUARD_PIN" ]; }; then
   case "${1:-}" in
     build) shift; exec "$real" build --no-build "$@" ;;
     exe) tgt="${2:-}"; [ -z "$tgt" ] || "$real" build --no-build "$tgt" || { echo "lakeguard: $tgt is not built (the prebuild must build it)" >&2; exit 3; }
