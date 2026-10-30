@@ -256,7 +256,33 @@ lake_asl() {
   (cd "$pkg" && LEAN_NUM_THREADS="$ASL_JOBS" memguard_lake "$@")
 }
 
-do_build() {
+# ---- the per-tree lock (scripts/gate.sh lanes sharing a tree; scripts/lib/lanelake/lake) ----
+# Every WRITER of the JanusASL package holds the tree's lock: not only each `lake` call (the lanelake wrapper) but the
+# whole write phase, because the module-cache restore / publish, the ArmASL cache copy and the janus seed copy write
+# the same .lake outside any lake call (and their bcache lock is another lock). tl_run MODE FUNC ARGS...: run the
+# function of this script under the lock, MODE x (exclusive: build / restore / publish / rewrite) or s (shared: read
+# the built package). The lock is re-entrant through JANUS_LANE_LOCK_HELD (the lanelake wrapper skips it then), and a
+# nested tl_run of the held lock just runs. Order of locks: the tree lock first, then the cache locks inside.
+# Without JANUS_LANE_TREE / JANUS_LANE_LAKE_LOCK (a plain run), or outside the tree, it just runs the function.
+tl_run() {
+  local mode=$1; shift
+  local tree="${JANUS_LANE_TREE:-}" lock
+  if [ -z "${JANUS_LANE_LAKE_LOCK:-}" ] || [ -z "$tree" ] || case "$(pwd -P)/" in "$tree"/*) false ;; *) true ;; esac; then
+    "$@"; return
+  fi
+  . "$root/scripts/lib/lanelake/keys.sh"
+  lock="$(lane_lake_lock "$pkg")"   # keyed by the resolved JanusASL/.lake: trees sharing it by symlink share the lock
+  if [ "${JANUS_LANE_LOCK_HELD:-}" = "$lock" ]; then "$@"; return; fi
+  local extra=()
+  # an exclusive phase rewrites the tree's framework build too: also the janus framework lock (order: package, framework)
+  [ "$mode" = x ] && [ -d "$tree/.lake" ] && extra=("+x:$(lane_fw_lock "$tree")")
+  JANUS_LANE_LOCK_HELD="$([ "$mode" = x ] && echo "$lock")" \
+    python3 -I "$root/scripts/lib/lanelake/lockexec.py" "$mode" "$lock" ${extra[@]+"${extra[@]}"} bash "$_TL_SELF" __call "$@"
+}
+_TL_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+do_build() { tl_run x build_phase; }
+build_phase() {
   unpack
   cache_restore
   lake_asl build ArmASL
@@ -268,13 +294,15 @@ do_build() {
 }
 
 # Only the cache restore (JanusASL/tools/test_asl_cache.sh).
-do_restore() {
+do_restore() { tl_run x restore_phase; }
+restore_phase() {
   unpack
   cache_restore
 }
 
 # Only the model: restore, `lake build ArmASL`, publish.
-do_model() {
+do_model() { tl_run x model_phase; }
+model_phase() {
   unpack
   cache_restore
   lake_asl build ArmASL
@@ -292,7 +320,8 @@ do_check() {
   (cd "$pkg" && memguard_run -n janus-asl-check -- lake exe janus-asl-check "$CASES" "$OUT/verdicts.jsonl" "$JOBS") | tee "$OUT/summary.txt"
 }
 
-do_prove() {
+do_prove() { tl_run x prove_phase; tl_run s prove_audit; }
+prove_phase() {
   unpack
   cache_restore
   lake_asl build ArmASL
@@ -300,19 +329,22 @@ do_prove() {
   modcache_restore
   lake_asl build JanusASL
   modcache_publish
-  (cd "$pkg" && lake env lean JanusASL/Audit.lean)
 }
+prove_audit() { (cd "$pkg" && lake env lean JanusASL/Audit.lean); }
 
 # leanchecker replays each target module in its own task, every one importing that module's whole
 # environment (the ArmASL model included), so `leanchecker JanusASL.Proofs` holds up to
 # LEAN_NUM_THREADS such environments at once and keeps its heap at the largest. Replay every module
 # of the package instead, REPLAY_BATCH modules per process, one process at a time.
-do_replay() {
+do_replay() { tl_run x replay_build; tl_run s replay_check; }
+replay_build() {
   unpack
   cache_restore
   modcache_restore
   lake_asl build JanusASL
   modcache_publish
+}
+replay_check() {
   # The modules: the import closure of JanusASL.Proofs within the package (what
   # `leanchecker JanusASL.Proofs` replays, less files that nothing imports). leanchecker's targets
   # are name prefixes, so a module with submodules (JanusASL.Proofs itself, a split file's import
@@ -351,6 +383,11 @@ PY
 # janus verify --asl builds JanusASL in its own cache (`janus framework --json` .asl.cacheDir). Seed
 # that build from the in-tree one (Lake reuses modules by content hash), so the model is built
 # once, then verify each example with --asl from a fresh extraction.
+seed_copy() { # D: copy the built package into janus's private cache dir (a reader of the tree: shared lock)
+  local d=$1
+  mkdir -p "$d" && cp -aL --reflink=auto "$pkg/.lake" "$d/.lake" && rm -f "$d/.lake/package-overrides.json"
+  [ -d "$d/.lake" ] && [ ! -L "$d/.lake" ] || { echo "verify: the seed is not a private directory" >&2; return 1; }
+}
 do_verify() {
   do_build
   export PATH=/usr/local/go/bin:$PATH
@@ -366,8 +403,7 @@ do_verify() {
   if [ -L "$d/.lake" ]; then echo "verify: removing the symlinked $d/.lake (the link, not its target)"; rm -f "$d/.lake"; fi
   if [ ! -d "$d/.lake" ] && [ -d "$pkg/.lake" ]; then
     echo "verify: seeding $d from $pkg/.lake (a private, dereferenced copy)"
-    mkdir -p "$d" && cp -aL --reflink=auto "$pkg/.lake" "$d/.lake" && rm -f "$d/.lake/package-overrides.json"
-    [ -d "$d/.lake" ] && [ ! -L "$d/.lake" ] || { echo "verify: the seed is not a private directory" >&2; return 1; }
+    tl_run s seed_copy "$d" || return 1
   fi
   # a seed from a long-lived .lake can hold modules of an older model split (ArmASL.Part37.. next to the current
   # parts): the kernel replay enumerates the directory and would load both. Keep only the current model's modules.
@@ -388,6 +424,7 @@ do_verify() {
 }
 
 case "$mode" in
+  __call) shift; "$@" ;;   # a function of this script, run by tl_run under the tree lock
   deps) do_deps ;;
   gen) do_gen ;;
   restore) do_restore ;;

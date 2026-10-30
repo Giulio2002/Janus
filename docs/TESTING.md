@@ -123,6 +123,20 @@ overlaps another lane's lake call, while read-only lanes (replay, strict, rel) s
 because JanusASL/.lake (5.8 GB, with `packages/Sail`) is shared by symlink and a copy per lane would cost that much
 each; the lock covers it. Tree reuse on failure and lakeguard are unchanged.
 
+**Lock order for a shared tree.** Every WRITER of a tree that lanes share holds the tree's locks, in this fixed
+order: (1) the package lake lock, KEYED BY THE RESOLVED DIRECTORY BEING WRITTEN: `realpath(<package>/.lake)/.gate-lake.lock` (`scripts/lib/lanelake/keys.sh`), so every tree and the checkout that share one `.lake` by symlink (the gate's lake trees share the checkout's `JanusASL/.lake`) serialise on ONE lock; (2) the janus framework lock `realpath(<tree>/.lake)/janus-framework.lock`
+(the lock a `janus ... --janus-root <tree>` holds SHARED for a whole verification; a writer takes it exclusive, because
+`lake build JanusASL` replays and rewrites `Janus/*.olean` in the tree's framework build, which a running janus must
+not see, and which made janus rebuild or loop: the 2400 s `rtasl-go` hang); (3) inside the command, the cache locks
+(bcache tree lock, module-cache locks). janus itself takes only (2), shared, so there is no cycle. Not only each `lake`
+call but each whole write PHASE of `scripts/asl.sh` (unpack, ArmASL cache restore, module-cache restore, `lake build`,
+publish; `build`, `prove`, `replay`, `model`, `restore`, the first half of `verify`) runs under (1)+(2) exclusive
+(`tl_run x`, re-entrant through `JANUS_LANE_LOCK_HELD`, which the lake wrapper honours); the read halves (the audit of
+`prove`, the leanchecker loop of `replay`, the seed copy of `verify`) run under (1) shared. The restore/publish
+writers used to run outside the lake lock, so `asl-verify` and `rtasl-replay` overlapped for 972 s in one tree.
+`rtasl-go` additionally has a tree of its own. `RT_ASL_KEEP_DIR` (`<out>/lanes/rtasl-<group>.keep`) is exported to the
+rt-asl lanes for their failure logs. Tested by `scripts/lib/test-treelock.sh`.
+
 **Kept trees.** The isolated lake-lane trees are `artifacts/gate/trees/<hash of HEAD tree + uncommitted diff>/{x86,asl}`.
 They are removed when the gate passes, kept (path reported) when it fails or is cancelled, and reused by a
 rerun of the same sources (`scripts/lib/test-gatelanes.sh` tests limits, keep, reuse, removal). A second run on the
