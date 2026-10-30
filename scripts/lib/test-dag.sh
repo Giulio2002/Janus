@@ -57,6 +57,10 @@ else
   eval "$dag_closure_real"
 fi
 
+# host sanity: gate.sh refuses to run when /dev/null is not the null device, before any stage
+hs=$(grep -n '^if \[ ! -c /dev/null \]' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1); pl=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1)
+[ -n "$hs" ] && [ "$hs" -lt "$pl" ] && ok "gate.sh refuses a host whose /dev/null is not a character device (before any stage)" || bad "no /dev/null preflight in gate.sh"
+
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n
   POOL_GUARD=0 POOL_PROGRESS_SECS=100

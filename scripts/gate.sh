@@ -207,6 +207,13 @@ selected() { # NAME: is the stage selected?
 partial=""
 { [ -n "$only" ] || [ -n "$skip" ] || [ -n "$changed" ] || [ -n "$vfilter" ] || [ -n "$gtrun" ] || [ -n "$rounds" ]; } && partial=1
 
+# ---- host sanity: /dev/null must be the null device. A regular file there (seen on 2026-10-30: something replaced it) keeps
+# whatever was last redirected into it, and anything that reads it as an empty file breaks at random: git with GIT_CONFIG_GLOBAL=/dev/null
+# failed with "bad config line 1 in file /dev/null" (round 7 J1a, 'Cannot list the files of mislib'). Refuse to run on such a host.
+if [ ! -c /dev/null ]; then
+  echo "gate: /dev/null is not a character device ($(stat -c '%F, %s bytes' /dev/null 2>&1)); repair it first: rm -f /dev/null; mknod -m 666 /dev/null c 1 3" >&2
+  exit 3
+fi
 # ---- admission (RULES.md)
 load1=$(awk '{ print int($1) }' /proc/loadavg); memk=$(par_mem_available_kb)
 free_g=$(df --output=avail -BG "$root" | tail -1 | tr -dc 0-9)
