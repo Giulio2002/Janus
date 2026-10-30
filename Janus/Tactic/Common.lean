@@ -1614,6 +1614,24 @@ elab "janus_apart" : tactic => do
 /-- Prove a goal `MemFrame m₀ m rs` (the memory part of a callee summary). -/
 elab "janus_frame" : tactic => do proveFrame (← getMainGoal); replaceMainGoal []
 
+/-- `rfl` for an equation whose left side is a structure projection (`{ regs := …, rip := 4226039#64, … }.rip
+= BitVec.ofNat 64 (segAddr P f + 23)`: a field of a state literal against an address). It fails at once
+on every other goal. A bare `try rfl` over the goals after a `refine` also runs `rfl` at default
+transparency on `MemFrame`/`readLE` goals it cannot close, where each failure unfolds the memory
+terms (30 s per goal in amd64 `formatBase10`). -/
+elab "janus_rfl_proj" : tactic => do
+  let g ← getMainGoal
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, _) := t.eq? | throwError "janus_rfl_proj: not an equation"
+  let f := lhs.getAppFn
+  let isProj ← match f with
+    | .proj .. => pure true
+    | .const c _ => do let env ← getEnv; pure (env.isProjectionFn c)
+    | _ => pure false
+  unless isProj do throwError "janus_rfl_proj: the left side is not a projection"
+  evalTactic (← `(tactic| rfl))
+
+
 /-- `janus_eval% t`: the closed natural number `t` (e.g. `segAddr Extracted.program "f" + 8`),
 evaluated at elaboration time and inserted as a numeral. For arguments that must be literals
 (a lemma whose `rfl` side conditions are checked against them), without copying the number
