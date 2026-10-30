@@ -86,14 +86,6 @@ else
   printf '  %-36s %-8s %s\n' G3a_spoofed_goversion_stub skipped "fixture not built here (go1.25.5 unavailable); audit/round7 G3a rows cover the committed extraction"
 fi
 
-echo "== L1/M1/C1: unit rows (go test; L1 is covered here: a changed lib/lean file changes every key)"
-type tmark >/dev/null 2>&1 && tmark "== L1/M1/C1: unit rows (go test; L1 is covered her"
-for t in TestRound8ToolchainCacheID TestRound8TrustedManifestMAC TestRound8CacheRootPrivate; do
-  if (cd cmd/janus && go test -count=1 -timeout 10m -run "^$t\$" . >/dev/null 2>&1); then
-    printf '  %-36s ok\n' "$t"
-  else printf '  %-36s FAILED   <-- BROKEN\n' "$t"; broken+=("$t"); fi
-done
-
 # The rest run janus without --fresh (with the sandbox), each with its own cache.
 vc() { "$J" verify --janus-root "$root" "$@" 2>&1; }
 cachedT() { grep -q 'janus-timing: trusted compile (cached)' <<<"$1"; }
@@ -147,6 +139,18 @@ chmod 644 "$C/v1/result/.key"
 c1 C1c_key_0644 "$C" '.key is unsafe: its mode is 0644' 'round 8 C1'
 chmod 600 "$C/v1/result/.key"
 out="$(JANUS_CACHE_DIR="$C" vc $W/Add --proof examples/proofs/Add.lean)"; row C1_ctl_private_cache Verified
+
+echo "== L1/M1/C1: unit rows (go test; L1 is covered here: a changed lib/lean file changes every key)"
+type tmark >/dev/null 2>&1 && tmark "== L1/M1/C1: unit rows (go test; L1 is covered her"
+# One go test process for the three rows (each process seeds the test cache from the fixture). These rows come LAST: in the
+# gate the Go tests' framework fixture (pre-fixture) may still be building, and a test process waits for it, so the janus
+# rows above run meanwhile instead of after the wait.
+ut_out="$(cd cmd/janus && go test -count=1 -timeout 30m -v -run '^(TestRound8ToolchainCacheID|TestRound8TrustedManifestMAC|TestRound8CacheRootPrivate)$' . 2>&1)"
+for t in TestRound8ToolchainCacheID TestRound8TrustedManifestMAC TestRound8CacheRootPrivate; do
+  if grep -q "^--- PASS: $t " <<<"$ut_out"; then
+    printf '  %-36s ok\n' "$t"
+  else printf '  %-36s FAILED   <-- BROKEN\n' "$t"; broken+=("$t"); fi
+done
 
 if [ ${#broken[@]} -gt 0 ]; then echo; echo "BROKEN: ${broken[*]}"; exit 1; fi
 echo; echo "All round-8 rows as expected."
