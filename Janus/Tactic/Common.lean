@@ -211,6 +211,40 @@ namespace Janus.Tactic.Common
 
 open Lean Meta Elab Tactic
 
+/-- `g.tryClearMany fvars` in one pass over the local context. Lean's `tryClearMany` clears one
+hypothesis at a time, each time creating a goal and checking every later declaration for a
+dependency: quadratic in the context size, and the contexts of a long run have hundreds of
+hypotheses (it was a quarter of the time of `janus_disch`). The result is the same: from the last
+declaration backwards, a hypothesis of `fvars` is cleared unless the target or a declaration that
+stays mentions it (directly: a stays-declaration's own dependencies stay too). -/
+def tryClearManyFast (g : MVarId) (fvars : Array FVarId) : MetaM MVarId := g.withContext do
+  if fvars.isEmpty then return g
+  g.checkNotAssigned `clear
+  let decl ← g.getDecl
+  let tgt ← instantiateMVars decl.type
+  let mut st : CollectFVars.State := {}
+  st := collectFVars st tgt
+  let want : Std.HashSet FVarId := fvars.foldl (·.insert ·) {}
+  let mut ds : Array LocalDecl := #[]
+  for d in decl.lctx do
+    unless d.isAuxDecl do ds := ds.push d
+  let mut lctx := decl.lctx
+  let mut cleared : Std.HashSet FVarId := {}
+  for i in [0:ds.size] do
+    let d := ds[ds.size - 1 - i]!
+    if want.contains d.fvarId && !st.fvarSet.contains d.fvarId then
+      lctx := lctx.erase d.fvarId
+      cleared := cleared.insert d.fvarId
+    else
+      st := collectFVars st (← instantiateMVars d.type)
+      if let some v := d.value? then st := collectFVars st (← instantiateMVars v)
+  if cleared.isEmpty then return g
+  let insts := decl.localInstances.filter fun i => !cleared.contains i.fvar.fvarId!
+  let g' ← mkFreshExprMVarAt lctx insts tgt decl.kind decl.userName
+  g.assign g'
+  return g'.mvarId!
+
+
 register_option janus.aliasInfo : Bool := {
   defValue := true
   descr := "janus_run/janus64_run: report reads over stores whose aliasing is unknown when \
@@ -296,7 +330,7 @@ def omegaApart (g : MVarId) : TacticM Bool := g.withContext do
         unless (arithAtoms ty).all atoms.contains do toClear := toClear.push d.fvarId
     let saved' ← saveState
     try
-      let g' ← try g.tryClearMany toClear catch _ => pure g
+      let g' ← try tryClearManyFast g toClear catch _ => pure g
       let h ← Term.exprToSyntax (mkFVar fv)
       let gs ← Tactic.run g' <| withoutRecover (evalTactic (← `(tactic|
         (have h' : _ := $h
@@ -1064,7 +1098,7 @@ def omegaSparse (g : MVarId) : TacticM Bool := g.withContext do
   let saved ← saveState
   let tryOmega (keep : Array FVarId) : TacticM Bool := do
     let toClear := (ors.map (·.1)).filter (!keep.contains ·)
-    let g' ← g.tryClearMany toClear
+    let g' ← tryClearManyFast g toClear
     -- each attempt has its own small heartbeat budget: a failed `omega` is as expensive as a
     -- successful one, and the attempts must not eat the declaration's budget
     let ok ← tryCatchRuntimeEx
@@ -1118,39 +1152,6 @@ elab "janus_omega_sparse" : tactic => do
   let g ← getMainGoal
   unless ← omegaSparse g do throwError "janus_omega_sparse: no proof with at most two disjunctions"
   replaceMainGoal []
-
-/-- `g.tryClearMany fvars` in one pass over the local context. Lean's `tryClearMany` clears one
-hypothesis at a time, each time creating a goal and checking every later declaration for a
-dependency: quadratic in the context size, and the contexts of a long run have hundreds of
-hypotheses (it was a quarter of the time of `janus_disch`). The result is the same: from the last
-declaration backwards, a hypothesis of `fvars` is cleared unless the target or a declaration that
-stays mentions it (directly: a stays-declaration's own dependencies stay too). -/
-def tryClearManyFast (g : MVarId) (fvars : Array FVarId) : MetaM MVarId := g.withContext do
-  if fvars.isEmpty then return g
-  g.checkNotAssigned `clear
-  let decl ← g.getDecl
-  let tgt ← instantiateMVars decl.type
-  let mut st : CollectFVars.State := {}
-  st := collectFVars st tgt
-  let want : Std.HashSet FVarId := fvars.foldl (·.insert ·) {}
-  let mut ds : Array LocalDecl := #[]
-  for d in decl.lctx do
-    unless d.isAuxDecl do ds := ds.push d
-  let mut lctx := decl.lctx
-  let mut cleared : Std.HashSet FVarId := {}
-  for i in [0:ds.size] do
-    let d := ds[ds.size - 1 - i]!
-    if want.contains d.fvarId && !st.fvarSet.contains d.fvarId then
-      lctx := lctx.erase d.fvarId
-      cleared := cleared.insert d.fvarId
-    else
-      st := collectFVars st (← instantiateMVars d.type)
-      if let some v := d.value? then st := collectFVars st (← instantiateMVars v)
-  if cleared.isEmpty then return g
-  let insts := decl.localInstances.filter fun i => !cleared.contains i.fvar.fvarId!
-  let g' ← mkFreshExprMVarAt lctx insts tgt decl.kind decl.userName
-  g.assign g'
-  return g'.mvarId!
 
 /-- Clear the propositional hypotheses that mention atoms the (arithmetic) goal does not: what an
 `omega`/`simp … at *` on a goal about a few addresses needs is small, and the contexts after
@@ -2237,8 +2238,8 @@ def tryMerge (spec : MergeSpec) (g h : MVarId) (maxVars : Nat := 8) : MetaM (Opt
   let dropG := hbG.filter (!hbH.contains ·)
   let dropH := hbH.filter (!hbG.contains ·)
   let saved ← saveState
-  let g' ← g.tryClearMany dropG
-  let h' ← h.tryClearMany dropH
+  let g' ← tryClearManyFast g dropG
+  let h' ← tryClearManyFast h dropH
   let idsG := (← g'.getDecl).lctx.getFVarIds
   let idsH := (← h'.getDecl).lctx.getFVarIds
   if idsG != idsH then saved.restore; return none
