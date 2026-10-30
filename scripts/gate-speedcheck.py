@@ -103,6 +103,8 @@ def measured(rows, logdir, paused=(), artroot="", since=0.0):
             if any(r["start"] < pe and r["end"] > ps for ps, pe in paused):
                 print("timing-invalid (overlaps a pause, excluded): %s/%s" % (r["pool"], r["id"]))
                 continue
+            if r["pool"] == "gate" and (r["id"].startswith("pre-") or r["id"].startswith("tree-")):
+                continue   # prebuild stages and tree copies are scheduling steps, not lanes: not a baseline row
             key = ("lane:" if r["pool"] == "gate" else "") + r["id"]
             m = 0.0
             if r["pool"] != "gate":

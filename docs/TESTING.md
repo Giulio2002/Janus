@@ -61,6 +61,18 @@ and `-j` others):
 | `asl-build`, `sail-build` | `scripts/asl.sh build` (set `ASL_CACHE`), `scripts/oracle-sail.sh build` |
 | `rtasl-prove`, `-rel`, `-strict`, `-replay`, `-btf`, `-probes`, `-fsqrt`, `-go` | `audit/rt-asl/run.sh GROUP`: the red-team round ASL, one lane per group (`run.sh` without arguments still runs them all, in order) |
 
+**Dependency-driven prebuild.** The prebuild stages (`pre-gobin`, `pre-lake`, `pre-ex-*`, `pre-rounds-bin`, `pre-warm`,
+`pre-fixture`, `pre-pin`) and the private tree copies (`tree-*`) are items of the same pool as the lanes, with the graph of
+`scripts/lib/dag.sh`; each starts as soon as ITS inputs are ready (`verify` after `pre-pin`, `pre-warm` and the example
+binaries; `gotest` after the fixture; the lake lanes after their tree copy; `decoder` after `pre-pin` and `pre-gobin`;
+`axiom`, `govet`, `cachekeys` at once; the fixture builds beside the verify pool). `pre-pin` follows `pre-lake`, the only
+writer of the shared framework build, and `pre-stamp` (one `--janus-root <checkout>` verification of Add: janus stamps the checkout's framework build and may delete and rebuild modules that no longer match an OLD stamp, so every write janus can make precedes the hash; later `--janus-root` verifications find a fresh stamp and only read), hashes the finished build and switches the lakeguard on (its marker file); every
+reader needs it, so none starts before the build it reads has finished and been hashed. A run with `--only` builds only the
+closure of the selected lanes. A failing stage blocks exactly its dependents (BLOCKED, a gate failure); independent stages
+keep running. Expected cold-gate saving: the framework build stays the critical path (763 s), but the verify pool no longer
+waits for the go-test fixture, the rounds binary or the slowest example build, and the cheap lanes run during the build
+(`scripts/lib/test-dag.sh`, fake stages through the real pool).
+
 **Automatic sizing.** Without `-j` / `--lanes` (and without `JANUS_JOBS` / `JANUS_LANES`), `gate.sh` chooses them
 from the host (`scripts/lib/autojobs.sh`, tested by `scripts/lib/test-autojobs.sh` with fake nproc / MemAvailable /
 load inputs): `jobs = min(cap, (free cores - 16 reserved for the other lanes) / 2.1 cores per item, (MemAvailable -
