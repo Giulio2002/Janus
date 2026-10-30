@@ -13,13 +13,13 @@ t="$(mktemp -d "${TMPDIR:-/tmp}/test-dag.XXXXXX")"; trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
 dag_check && ok "the stage graph is consistent (no unknown dependency, no cycle)" || bad "graph"
 for r in verify gotest rounds decoder tree-x86 tree-asl tree-aslv tree-go x86 oracle asl-build sail-build asl-verify rtasl-prove rtasl-replay rtasl-go rtasl-btf; do
-  dag_closure "$r" | grep -qx pre-pin || bad "$r does not wait for pre-pin"
+  dag_has "$r" pre-pin || bad "$r does not wait for pre-pin"
 done; ok "every reader of the shared framework build waits for pre-pin"
 for r in axiom govet cachekeys; do [ -z "${DAG_DEPS[$r]}" ] && ok "$r needs nothing" || bad "$r has deps"; done
-dag_closure pre-pin | grep -qx pre-stamp && ! dag_closure pre-stamp | grep -qx pre-pin && ok "pre-pin waits for pre-stamp (every write janus can make to the shared build precedes the hash)" || bad "stamp before pin"
-dag_closure pre-pin | grep -qx pre-lake && ! dag_closure pre-lake | grep -qx pre-pin && ok "pre-pin follows pre-lake (the only writer), not the reverse" || bad "pin/lake order"
+dag_has pre-pin pre-stamp && ! dag_has pre-stamp pre-pin && ok "pre-pin waits for pre-stamp (every write janus can make to the shared build precedes the hash)" || bad "stamp before pin"
+dag_has pre-pin pre-lake && ! dag_has pre-lake pre-pin && ok "pre-pin follows pre-lake (the only writer), not the reverse" || bad "pin/lake order"
 
-dag_closure pre-fixture | grep -qx pre-stamp && dag_closure pre-fixture | grep -qx pre-pin && ! dag_closure pre-pin | grep -qx pre-fixture && ok "pre-fixture waits for pre-stamp and pre-pin (its --janus-root verification reads a fresh stamp after the hash)" || bad "fixture ordering"
+dag_has pre-fixture pre-stamp && dag_has pre-fixture pre-pin && ! dag_has pre-pin pre-fixture && ok "pre-fixture waits for pre-stamp and pre-pin (its --janus-root verification reads a fresh stamp after the hash)" || bad "fixture ordering"
 # a rerun into the same --out with a stale marker: gate.sh removes it before any stage, so the lakeguard is not armed early
 here_repo="$(cd "$here/../.." && pwd)"
 grep -n 'rm -f "$out/.pinned" "$out/fw_hash0"' "$here_repo/scripts/gate.sh" | cut -d: -f1 > "$t/rmline"
@@ -38,13 +38,24 @@ out="$t/rerun/out"; eval "$(grep -m1 'rm -f "$out/.pinned" "$out/fw_hash0"' "$he
 [ "$(cat "$t/rerun/log")" = "build --no-build X" ] && ok "with a fresh pin the guard is armed (--no-build)" || bad "guard not armed after the pin: $(cat "$t/rerun/log")"
 
 # the two stages that verify artifacts/Add (pre-warm, pre-stamp) take the same theorems lock: they must be ordered, never concurrent
-{ dag_closure pre-warm | grep -qx pre-stamp || dag_closure pre-stamp | grep -qx pre-warm; } && ok "pre-warm and pre-stamp (both verify artifacts/Add) are ordered, not concurrent" || bad "pre-warm and pre-stamp can run at the same time (Add theorems lock collision)"
+{ dag_has pre-warm pre-stamp || dag_has pre-stamp pre-warm; } && ok "pre-warm and pre-stamp (both verify artifacts/Add) are ordered, not concurrent" || bad "pre-warm and pre-stamp can run at the same time (Add theorems lock collision)"
 
 un=$(dag_unordered); [ -z "$un" ] && ok "no two stages touching the same artifact, binary or lock (one writing) can run at once" || { bad "unordered resource users:"; echo "$un" | head -5; }
 # the check detects a missing edge: drop the pre-warm -> pre-stamp dependency and it must report the collision
 saved=${DAG_DEPS[pre-warm]}; DAG_DEPS[pre-warm]="pre-gobin pre-lake pre-ex-arm64"
 mut=$(dag_unordered); grep -q 'artifact:Add: pre-stamp (w) and pre-warm (w) are not ordered' <<<"$mut" && ok "the resource check catches the pre-stamp / pre-warm collision" || bad "the resource check missed a removed edge"
 DAG_DEPS[pre-warm]=$saved
+
+# the flake of `dag_closure X | grep -qx Y` under pipefail: a producer that is still writing when grep leaves gets SIGPIPE (141)
+# and the pipeline "fails" although Y is there. A slow producer makes it certain; dag_has must not be fooled.
+if ( set -o pipefail; slow() { echo a; sleep 0.05; echo b; sleep 0.05; echo c; }; slow | grep -qx a ) ; then
+  bad "premise: a slow producer did not make the early-exit pipeline fail (the test below would prove nothing)"
+else
+  dag_closure_real=$(declare -f dag_closure)
+  dag_closure() { echo "$1"; sleep 0.05; echo pre-lake; sleep 0.05; echo late; sleep 0.05; echo later; }
+  ( set -o pipefail; dag_has rounds pre-lake ) && ok "dag_has finds a dependency although the producer is slow (no SIGPIPE false negative)" || bad "dag_has is fooled by a slow producer"
+  eval "$dag_closure_real"
+fi
 
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n
@@ -85,7 +96,7 @@ PY
 # a failure blocks exactly its dependents
 mkdir -p "$t/b"; : > "$t/b/log"; run "$t/b" pre-lake; rc=$?
 [ "$rc" != 0 ] && ok "a failing pre-lake fails the gate" || bad "rc=0 with a failed pre-lake"
-closure_dependents() { for n in "${!DAG_DEPS[@]}"; do dag_closure "$n" | grep -qx pre-lake && [ "$n" != pre-lake ] && echo "$n"; done | sort; }
+closure_dependents() { for n in "${!DAG_DEPS[@]}"; do dag_has "$n" pre-lake && [ "$n" != pre-lake ] && echo "$n"; done | sort; }
 blocked=$(grep -E '^\[ *[0-9]+/[0-9]+\] BLOCKED' "$t/b/out" | awk '{print $3}' | sort)
 [ "$blocked" = "$(closure_dependents)" ] && ok "exactly the stages that depend on pre-lake are BLOCKED ($(wc -l <<<"$blocked"))" || bad "blocked set differs: $(diff <(echo "$blocked") <(closure_dependents) | head -3)"
 grep -q 'START axiom' "$t/b/log" && grep -q 'END govet' "$t/b/log" && ok "independent stages still ran (axiom, govet)" || bad "independent stages did not run"

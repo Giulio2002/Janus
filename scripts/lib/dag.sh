@@ -89,6 +89,12 @@ DAG_RES=(
   [user-cache-framework]="w:pre-stamp w:pre-warm r:pre-fixture"
 )
 
+# dag_has STAGE DEP: DEP is in STAGE's closure. NOT `dag_closure STAGE | grep -qx DEP`: grep -q leaves at the first match, the
+# producer is then killed by SIGPIPE while it still writes (a loaded host makes that likely), and under `set -o pipefail` the
+# pipeline reports failure for a stage that DOES depend on DEP: a stage seemed unordered/missing (flaky test-dag.sh, seen
+# in two gate runs). The closure is captured first, the match runs on a here-string.
+dag_has() { local c; c="$(dag_closure "$1")"; grep -qx -- "$2" <<<"$c"; }
+
 # dag_unordered: print every pair of stages that share a resource (one at least writing) with no dependency path between them
 dag_unordered() {
   local res a b ma mb sa sb
@@ -98,8 +104,8 @@ dag_unordered() {
       ma=${a%%:*}; sa=${a#*:}; mb=${b%%:*}; sb=${b#*:}
       [ "$sa" \< "$sb" ] || continue
       [ "$ma" = w ] || [ "$mb" = w ] || continue
-      dag_closure "$sa" | grep -qx "$sb" && continue
-      dag_closure "$sb" | grep -qx "$sa" && continue
+      dag_has "$sa" "$sb" && continue
+      dag_has "$sb" "$sa" && continue
       echo "$res: $sa ($ma) and $sb ($mb) are not ordered"
     done; done
   done
