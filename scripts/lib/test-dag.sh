@@ -43,7 +43,7 @@ out="$t/rerun/out"; eval "$(grep -m1 'rm -f "$out/.pinned" "$out/fw_hash0"' "$he
 un=$(dag_unordered); [ -z "$un" ] && ok "no two stages touching the same artifact, binary or lock (one writing) can run at once" || { bad "unordered resource users:"; echo "$un" | head -5; }
 # the check detects a missing edge: drop the pre-warm -> pre-stamp dependency and it must report the collision
 saved=${DAG_DEPS[pre-warm]}; DAG_DEPS[pre-warm]="pre-gobin pre-lake pre-ex-arm64"
-dag_unordered | grep -q 'artifact:Add: pre-stamp (w) and pre-warm (w)' && ok "the resource check catches the pre-stamp / pre-warm collision" || bad "the resource check missed a removed edge"
+mut=$(dag_unordered); grep -q 'artifact:Add: pre-stamp (w) and pre-warm (w) are not ordered' <<<"$mut" && ok "the resource check catches the pre-stamp / pre-warm collision" || bad "the resource check missed a removed edge"
 DAG_DEPS[pre-warm]=$saved
 
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
