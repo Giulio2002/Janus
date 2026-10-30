@@ -671,6 +671,33 @@ def withRecursiveDisch (d : Simp.Discharge) : Simp.Discharge := fun e => do
   let r ← Simp.simp e
   if r.expr.isTrue then return some (← mkOfEqTrue (← r.getProof)) else return none
 
+/-- The discharger of `simp (disch := tac)` without `Term.runTactic`. Lean's `tacticToDischarge`
+runs `tac` on every side condition through `Term.runTactic`, whose first step
+(`instantiateMVarDeclMVars`) instantiates and `shareCommon`s the whole local context of the goal:
+with the large contexts of a run (state hypotheses, accumulated facts) that is ~0.2 s per side
+condition, more than the discharge itself. This one runs `Tactic.run` on a fresh goal with the same
+local context directly. The result is the same proof term or `none` (the kernel checks the term as
+before); `Term.State` is threaded exactly as `tacticToDischarge` does. -/
+def fastDischargeWrapper (tac : TSyntax `tactic) : TacticM Simp.DischargeWrapper := do
+  let ref ← IO.mkRef (← getThe Term.State)
+  let ctx ← readThe Term.Context
+  let disch : Simp.Discharge := fun e => do
+    let mvar ← mkFreshExprSyntheticOpaqueMVar e `simp.discharger
+    let s ← ref.get
+    let runTac? : TermElabM (Option Expr) :=
+      try
+        Term.withoutModifyingElabMetaStateWithInfo do
+          Term.withSynthesize (postpone := .no) do
+            let rest ← Tactic.run mvar.mvarId! (withoutRecover (evalTactic tac))
+            unless rest.isEmpty do throwError "unsolved goals"
+          let result ← instantiateMVars mvar
+          if result.hasExprMVar then return none else return some result
+      catch _ => return none
+    let (result?, s) ← liftM (m := MetaM) <| Term.TermElabM.run runTac? ctx s
+    ref.set s
+    return result?
+  return .custom ref disch
+
 /-- Look up or build (with `mk`) the simp context of simp set `set` for the current local
 context, and run `k` with it. -/
 def withCachedCtx (cref : IO.Ref StepCache) (set : Name)
