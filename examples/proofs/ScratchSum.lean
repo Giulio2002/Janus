@@ -307,7 +307,9 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : PoolShape)
         ((m2.writeLE (BitVec.toNat ptr) 8 a.toNat).writeLE (BitVec.toNat ptr + 8) 8 b.toNat) := by
       refine ⟨?_, ?_, ?_, ?_⟩ <;>
       · repeat rw [Memory.readLE_writeLE_of_disjoint (h := by omega)]
-        first | exact hA2 | exact hB2 | exact hLR2 | exact hFP2
+        first
+          | with_reducible exact hA2 | with_reducible exact hB2 | with_reducible exact hLR2
+          | with_reducible exact hFP2 | exact hA2 | exact hB2 | exact hLR2 | exact hFP2
     have hnm : ∀ r ∈ L, r ∉ [(BitVec.toNat ptr, BitVec.toNat ptr + 32)] := fun r hr hm => by
       simp only [List.mem_singleton] at hm; subst hm
       exact notMem_of_apartAll (by omega) hapL hr
@@ -404,7 +406,9 @@ theorem correctness (impl : List Segment) (R : RtInv) (B : PoolShape)
         ((m1.writeLE (BitVec.toNat (r 1)) 8 a.toNat).writeLE (BitVec.toNat (r 1) + 8) 8 b.toNat) := by
       refine ⟨?_, ?_, ?_, ?_⟩ <;>
       · repeat rw [Memory.readLE_writeLE_of_disjoint (h := by omega)]
-        first | exact hA2 | exact hB2 | exact hLR2 | exact hFP2
+        first
+          | with_reducible exact hA2 | with_reducible exact hB2 | with_reducible exact hLR2
+          | with_reducible exact hFP2 | exact hA2 | exact hB2 | exact hLR2 | exact hFP2
     have hnm : ∀ x ∈ L, x ∉ [(BitVec.toNat (r 1), BitVec.toNat (r 1) + 32)] := fun x hx hm => by
       simp only [List.mem_singleton] at hm; subst hm
       exact notMem_of_apartAll (by omega) hapL hx
