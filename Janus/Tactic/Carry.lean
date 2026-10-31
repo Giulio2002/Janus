@@ -290,7 +290,33 @@ def proveEq (g : MVarId) (maxNodes : Nat := 0) : MetaM Bool := g.withContext do
       trace[janus.carry] "kernel check failed: {e.toMessageData}"; pure none) | return false
   trace[janus.carry] "kernel check: {(← IO.monoMsNow) - t1} ms"
   let pfB ← mkBoundsPf st.atoms.toList bounds.toList
-  let pf := mkAppN (mkConst soundC) #[envE, ubsX, tblX, ivsX, ea, eb, pfB, mkConst name]
+  let pf ← do
+    -- Kernel-safe form: the soundness lemma is instantiated at FRESH VARIABLES for the atoms (an
+    -- auxiliary lemma `∀ xs, BoundsOK xs ubs → goal[xs]`), then applied to the actual atoms. The
+    -- type of `soundC … : a.eval env ≤ b.eval env` is only convertible to the goal by unfolding
+    -- `Tm.eval`; with the atoms in place the kernel's `Nat` literal extension tries to evaluate
+    -- them (`whnf` of a big symbolic expression: "(kernel) deep recursion detected").
+    try
+      let atoms := st.atoms
+      let some body0 := some t | failure
+      withLocalDeclsD (atoms.map fun _ => (`x, fun _ => pure (mkConst ``Nat))) fun xs => do
+        let body := body0.replace fun e =>
+          match atoms.findIdx? (· == e) with
+          | some i => some xs[i]!
+          | none => none
+        if body.hasFVar && !(xs.any fun x => body.containsFVar x.fvarId!) then failure
+        let envX := listE (mkConst ``Nat) xs.toList
+        let hbTy := mkApp2 (mkConst ``BoundsOK) envX ubsX
+        withLocalDeclD `hb hbTy fun hb => do
+          let inner := mkAppN (mkConst soundC) #[envX, ubsX, tblX, ivsX, ea, eb, hb, mkConst name]
+          let inner ← mkExpectedTypeHint inner body
+          let ety ← mkForallFVars (xs.push hb) body
+          let val ← mkLambdaFVars (xs.push hb) inner
+          if ety.hasFVar || ety.hasMVar || val.hasFVar || val.hasMVar then failure
+          let lem ← mkAuxLemma [] ety val
+          pure (mkAppN (mkConst lem) (atoms.push pfB))
+    catch _ =>
+      pure (mkAppN (mkConst soundC) #[envE, ubsX, tblX, ivsX, ea, eb, pfB, mkConst name])
   -- stated with the goal as its type, so that `simp` accepts it as a discharger result at
   -- reducible transparency (the kernel checks that the two types agree)
   g.assign (← mkExpectedTypeHint pf (← g.getType))
