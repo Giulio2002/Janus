@@ -1,5 +1,6 @@
 import Janus.Tactic.Attr
 import Janus.Tactic.KernelSafe
+import Janus.Tactic.Assumption
 import Janus.Tactic.Basic
 import Janus.Tactic.Data
 import Janus.Tactic.Core
