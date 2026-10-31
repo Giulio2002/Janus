@@ -76,6 +76,7 @@ if [ -z "$cached" ]; then
   cached="$work/out-cached"
 fi
 run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0 || exit 2
+echo "nightly-cold-gate: object cache: ON (cached run), OFF (cold run: JANUS_ASL_CACHE=0, ASL_OBJ_CACHE=0); a cached-run result is not merge evidence by itself"
 python3 -I "$cmp_py" compare "$cached" "$work/out-cold"
 rc_final=$?
 # cold-side audit of the compiled-object cache (RTOBJ2): the cold tree's freshly compiled objects against every cache entry
