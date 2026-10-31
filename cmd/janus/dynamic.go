@@ -113,6 +113,8 @@ type reacher struct {
 	// --contract: calls to matching functions are not followed (extract.go)
 	cm           *contractMatcher
 	contractSeen map[uint64]bool
+	// parents[name] = names of the functions whose direct branches reached it (hint text only)
+	parents map[string]map[string]bool
 	// err is the first stub-classification error (round 7 G1), reported by drain and extractWith.
 	err error
 }
@@ -180,12 +182,10 @@ func (r *reacher) tooMany() error {
 	}
 	// the reached functions a framework contract describes (sync.(*Pool).Get, the map and
 	// interface runtime, ...): leaving them out with --contract is usually what is meant
-	var withContract []string
-	for _, n := range names {
-		if runtimeContractStubs[n] && n != r.x.Entry.Name {
-			withContract = append(withContract, "--contract '"+n+"'")
-		}
-	}
+	// Only the DIRECT hints: a contract-able function that is reached solely through other
+	// contract-able functions (e.g. mapaccess2_fast32 inside the body of runtime.ifaceeq) is
+	// not listed, since contracting the caller already leaves it out.
+	withContract, indirect := contractHints(names, r.x.Entry.Name, r.parents)
 	if len(names) > 20 {
 		names = append(names[:20], fmt.Sprintf("... and %d more", len(names)-20))
 	}
@@ -193,6 +193,10 @@ func (r *reacher) tooMany() error {
 	if len(withContract) > 0 {
 		next = "It reaches functions a framework contract describes (docs/RUNTIME-CONTRACTS.md); leave them out with " +
 			strings.Join(uniq(withContract), " ") + ". Otherwise raise the limit with --max-functions N if this is intended, or extract a smaller function."
+	}
+	if len(indirect) > 0 && len(withContract) > 0 {
+		next += " (Not listed, reached only through those: " + strings.Join(indirect, ", ") +
+			"; if one is still reached after adding the contracts, rerun and it is listed.)"
 	}
 	return &diag{
 		Msg: fmt.Sprintf("%s reaches more than %d functions by direct branches:\n    %s",
@@ -256,6 +260,13 @@ func (r *reacher) drain() error {
 				r.x.Omitted = append(r.x.Omitted, OmittedCall{From: br.From, Target: t, Name: g.Name, Reason: why})
 				continue
 			}
+			if r.parents == nil {
+				r.parents = map[string]map[string]bool{}
+			}
+			if r.parents[g.Name] == nil {
+				r.parents[g.Name] = map[string]bool{}
+			}
+			r.parents[g.Name][f.Name] = true
 			if !r.seen[g.Addr] {
 				r.seen[g.Addr] = true
 				r.queue = append(r.queue, g)
@@ -497,4 +508,52 @@ func parseTargets(v string) []string {
 		}
 	}
 	return out
+}
+
+// contractHints are the `--contract` hints for the reached functions a framework contract
+// describes, restricted to the DIRECT ones: those reachable from the entry in the known call graph
+// without passing through another such function (contracting that one already leaves out what
+// lies behind it, e.g. runtime.mapaccess2_fast32 behind runtime.ifaceeq). indirect lists the rest.
+// A function with no known caller is listed (conservative).
+func contractHints(names []string, entry string, parents map[string]map[string]bool) (hints, indirect []string) {
+	cand := map[string]bool{}
+	for _, n := range names {
+		if runtimeContractStubs[n] && n != entry {
+			cand[n] = true
+		}
+	}
+	children := map[string][]string{}
+	for c, ps := range parents {
+		for p := range ps {
+			children[p] = append(children[p], c)
+		}
+	}
+	direct := map[string]bool{}
+	seen := map[string]bool{entry: true}
+	queue := []string{entry}
+	for len(queue) > 0 {
+		f := queue[0]
+		queue = queue[1:]
+		for _, c := range children[f] {
+			if cand[c] {
+				direct[c] = true // a hint: not expanded
+				continue
+			}
+			if !seen[c] {
+				seen[c] = true
+				queue = append(queue, c)
+			}
+		}
+	}
+	for _, n := range names {
+		if !cand[n] {
+			continue
+		}
+		if direct[n] || len(parents[n]) == 0 {
+			hints = append(hints, "--contract '"+n+"'")
+		} else {
+			indirect = append(indirect, n)
+		}
+	}
+	return uniq(hints), uniq(indirect)
 }
