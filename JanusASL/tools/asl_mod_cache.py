@@ -459,15 +459,12 @@ def restore_one(ks, p, mod, key, e):
     try:
         man = bc.read_signed_manifest("mod", key, e)
         # tree/<package>/<path relative to the package dir>
-<<<<<<< HEAD
-        # legacy entries carry compiled objects: never restored from here (is_object), only from a verified armobj entry
-        rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items() if not is_object(r.split("/", 1)[1])}
-=======
-        rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items()}
-        for rel in rels:
+        allrels = {r.split("/", 1)[1]: (r, h) for r, h in man.items()}
+        for rel in allrels:
             if not mod_path_ok(mod, rel):
                 raise bc.CacheError("path %r is not an output of %s" % (rel, mod))
->>>>>>> agent/speed-modobjaudit
+        # legacy entries carry compiled objects: never restored from here (is_object), only from a verified armobj entry
+        rels = {rel: v for rel, v in allrels.items() if not is_object(rel)}
         if all(os.path.isfile(os.path.join(p.dir, rel)) and not os.path.islink(os.path.join(p.dir, rel))
                and sha_file(os.path.join(p.dir, rel)) == h for rel, (_, h) in rels.items()):
             for rel, (_, h) in rels.items():
