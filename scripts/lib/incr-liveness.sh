@@ -26,6 +26,8 @@ mkdir -p "$root/artifacts"
 t="$(mktemp -d "$root/artifacts/incr-liveness.XXXXXX")" || exit 2
 trap 'rm -rf "$t"' EXIT
 mkdir -m 700 "$t/cache"
+# a private per-run cache of the host-tool digest (the gate gives its lanes one; computing it takes ~4 s, serving it ~0.25 s)
+: > "$t/htcache"; export INCR_HOSTTOOLS_CACHE="$t/htcache"
 bin="${LIVENESS_BIN:-}"
 if [ -z "$bin" ]; then
   go build -o "$t/janus" ./cmd/janus || { echo "incr-liveness: cannot build cmd/janus" >&2; exit 2; }
@@ -60,7 +62,7 @@ if [ -n "${GATE_ENV0_NAMES+x}" ]; then
   while IFS= read -r n; do
     [ -z "${env0[$n]:-}" ] || continue
     [ -z "${allowed[$n]:-}" ] || continue
-    case "$n" in PATH|HOME|PWD|OLDPWD|SHLVL|_|LANG|LC_*|JANUS_CACHE_DIR) continue ;; esac
+    case "$n" in PATH|HOME|PWD|OLDPWD|SHLVL|_|LANG|LC_*|JANUS_CACHE_DIR|INCR_HOSTTOOLS_CACHE) continue ;; esac
     perturb+=("$n")
   done < <(compgen -e | sort)
   mode="gate environment: ${#perturb[@]} variables added by the gate"
