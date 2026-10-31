@@ -920,12 +920,73 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
 
 /-! ## Arithmetic -/
 
+/-! ### Sharing of carry subterms (`janus_arith`)
+
+After the symbolic execution of an 8-limb multiplication the goal is a DAG whose carries
+`(a * b + c) / 2 ^ 64` are used twice each (in the limb and in the next carry): small as a DAG,
+exponential as a tree (270 K characters for one limb). `omega` linearises terms by tree recursion
+(no memoisation), and runs out of time and memory. `shareCarries` abstracts the quotients and
+remainders by literals, innermost first, as fresh variables with their defining equations
+(`generalize`), so that each carry is linearised once. It does nothing for small goals. -/
+
+/-- The number of nodes of `e` as a tree (saturating), computed over the DAG. -/
+partial def treeSize (e : Expr) (memo : IO.Ref (Std.HashMap Expr Nat)) : IO Nat := do
+  if let some n := (← memo.get).get? e then return n
+  let r ← match e with
+    | .app f a => pure (min 1000000000 ((← treeSize f memo) + (← treeSize a memo) + 1))
+    | .lam _ t b _ | .forallE _ t b _ => pure (min 1000000000 ((← treeSize t memo) + (← treeSize b memo) + 1))
+    | .mdata _ b | .proj _ _ b => pure ((← treeSize b memo) + 1)
+    | _ => pure 1
+  memo.modify (·.insert e r)
+  return r
+
+/-- Quotients and remainders by a non-zero literal in `e` (natural numbers), each once. -/
+partial def carryCandidates (e : Expr) : Array Expr := Id.run do
+  let mut seen : Std.HashSet Expr := {}
+  let mut out : Array Expr := #[]
+  let mut todo : Array Expr := #[e]
+  while h : todo.size > 0 do
+    let x := todo.back!
+    todo := todo.pop
+    if seen.contains x then continue
+    seen := seen.insert x
+    match x.getAppFnArgs with
+    | (``HDiv.hDiv, #[t, _, _, _, a, k]) | (``HMod.hMod, #[t, _, _, _, a, k]) =>
+      if Janus.Carry.isNatTy t && (Janus.Carry.evalLit k).isSome && (Janus.Carry.evalLit x).isNone then
+        out := out.push x
+      todo := todo.push a
+      continue
+    | _ => pure ()
+    match x with
+    | .app f a => todo := todo.push f |>.push a
+    | .mdata _ b | .proj _ _ b => todo := todo.push b
+    | _ => pure ()
+  return out
+
+def shareCarries : TacticM Unit := do
+  let memo ← IO.mkRef ({} : Std.HashMap Expr Nat)
+  let t ← instantiateMVars (← (← getMainGoal).getType)
+  if (← treeSize t memo) ≤ 4000 then return
+  for _ in [0:600] do
+    let g ← getMainGoal
+    let t ← instantiateMVars (← g.getType)
+    let cands := carryCandidates t
+    if cands.isEmpty then break
+    let mut best := cands[0]!
+    let mut bestSz := ← treeSize best memo
+    for c in cands do
+      let sz ← treeSize c memo
+      if sz < bestSz then best := c; bestSz := sz
+    let (_, g') ← g.generalize #[{ expr := best, xName? := `vsh, hName? := `hsh }]
+    replaceMainGoal [g']
+
 /-- The carry-chain procedure `janus_carry` first (equations of limb arithmetic, by
 reflection); otherwise `omega` with the range facts of every memory read
 (`readLE … < 256^n`) after normalising carry terms. -/
 elab "janus_arith" : tactic => do
   if (← getUnsolvedGoals).isEmpty then return
   if ← Janus.Carry.tryCarry then return
+  shareCarries
   Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus_arith_norm]))
   evalTactic (← `(tactic| first | omega | (janus_decide_split; all_goals omega)))
