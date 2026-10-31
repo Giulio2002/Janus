@@ -92,6 +92,22 @@ import json, sys
 p = sys.argv[1] + "/b/artifact-hashes.json"; j = json.load(open(p)); j["ir:janus/Janus/Extra.c.o.export"] = "zz"; json.dump(j, open(p, "w"))
 PY
 check "an object present in one run only is P0" 1 "$t/a" "$t/b"
+# a symlinked object is recorded (not skipped) and differs from the regular file of the other run
+w3="$t/w3"; cp -a "$w2" "$w3"; rm "$w3/.lake/build/ir/Janus/Foo.c.o.export"; ln -s "$w2/.lake/build/ir/Janus/Foo.c.o.export" "$w3/.lake/build/ir/Janus/Foo.c.o.export"
+python3 -I "$cmp_py" hashes "$w2" "$t/s1.json"; python3 -I "$cmp_py" hashes "$w3" "$t/s2.json"
+python3 -I - "$t" <<'PY' && echo "ok   a symlinked object is recorded as symlink:<target>, not skipped" || { echo "FAIL symlink recording"; fail=1; }
+import json, sys
+a = json.load(open(sys.argv[1] + "/s1.json")); b = json.load(open(sys.argv[1] + "/s2.json"))
+k = "ir:janus/Janus/Foo.c.o.export"
+assert k in b and b[k].startswith("symlink:") and a[k] != b[k] and a["combined"] != b["combined"], (a.get(k), b.get(k))
+PY
+mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
+python3 - "$t" <<'PY'
+import json, sys
+for d, v in (("a", "r1"), ("b", "symlink:/elsewhere/Foo.c.o.export")):
+    p = sys.argv[1] + "/" + d + "/artifact-hashes.json"; j = json.load(open(p)); j["ir:janus/Janus/Foo.c.o.export"] = v; json.dump(j, open(p, "w"))
+PY
+check "a symlinked object in one run (regular in the other) is P0" 1 "$t/a" "$t/b"
 mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
 python3 - "$t" <<'PY'
 import json, sys

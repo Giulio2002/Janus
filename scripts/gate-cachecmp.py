@@ -4,7 +4,7 @@
 
     gate-cachecmp.py hashes WORKTREE OUT.json     SHA-256 of the build artifacts the ASL/Sail caches serve:
                                                   every ArmASL and JanusASL .olean, and every emitted C file and
-                                                  compiled C object (ir:<tree>/<path>) of the janus, janusasl and Sail
+                                                  compiled C object (ir:<tree>/<path>; ArmASL's modules build under JanusASL/.lake/build/ir/ArmASL, i.e. the janusasl tree; a symlinked file is recorded as symlink:<target>) of the janus, janusasl and Sail
                                                   Lake trees (and their combined digest)
                                                   and the Sail oracle driver binary, plus the build
                                                   configuration the driver depends on (config:SAIL_SPLIT from
@@ -63,8 +63,9 @@ def hashes(worktree):
                     continue
                 if f.endswith(".c") or f.endswith(".c.hash") or ".c.o." in f:
                     p = os.path.join(d, f)
-                    if not os.path.islink(p):
-                        out["ir:%s/%s" % (tree, os.path.relpath(p, base).replace(os.sep, "/"))] = sha_file(p)
+                    key = "ir:%s/%s" % (tree, os.path.relpath(p, base).replace(os.sep, "/"))
+                    # a symlinked file is RECORDED, never skipped: 'symlink:<target>' differs from any regular file's hash
+                    out[key] = "symlink:" + os.readlink(p) if os.path.islink(p) else sha_file(p)
     drv = os.path.join(worktree, "oracle-sail", "target", "release", "janus-oracle-sail")
     if os.path.isfile(drv):
         out["sail-driver"] = sha_file(drv)
