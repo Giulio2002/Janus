@@ -60,9 +60,11 @@ func newRootAliasName() (string, error) {
 
 // parReplay configures a parallel framework replay.
 type parReplay struct {
-	dirs      []string // the search path leanchecker sees: LEAN_PATH entries, then the toolchain library
-	workers   int      // concurrent leanchecker processes (<= 1: the single process)
-	aliasBase string   // directory under which the root alias directory is made
+	dirs      []string   // the search path leanchecker sees: LEAN_PATH entries, then the toolchain library
+	workers   int        // concurrent leanchecker processes (<= 1: the single process)
+	aliasBase string     // directory under which the root alias directory is made
+	budget    *memBudget // admission shared with the other replays of the process (nil: the process-wide one)
+	threads   int        // LEAN_NUM_THREADS of a worker, for its budget estimate (0: replayThreads())
 	// run runs leanchecker argv with the extra directories placed FIRST on the search path.
 	run func(extra []string, argv ...string) (string, error)
 }
@@ -94,21 +96,6 @@ func guardLimitBytes() int64 {
 		return 0
 	}
 	return g.limit
-}
-
-// frameworkReplayThreads is LEAN_NUM_THREADS of each framework replay worker: $JANUS_REPLAY_THREADS
-// if set; else 4 only when the host has at least 64 GiB, every worker's 12 GiB budget fits in the
-// guard's per-job limit (0: none enforced) and the workers' budgets together stay within 3/4 of
-// the host's memory; else the usual 2.
-func frameworkReplayThreads(workers int, memTotal, guardLimit int64) int {
-	if n, err := strconv.Atoi(os.Getenv("JANUS_REPLAY_THREADS")); err == nil && n > 0 {
-		return n
-	}
-	if memTotal >= workerWideMinTotal && (guardLimit == 0 || guardLimit >= workerWideThreadsMem) &&
-		int64(workers)*workerWideThreadsMem <= memTotal*3/4 {
-		return 4
-	}
-	return replayThreads()
 }
 
 // errPlanUnsupported marks an environment whose module set the scan cannot mirror exactly; the
