@@ -77,6 +77,10 @@ fi
 hs=$(grep -n '^if \[ ! -c /dev/null \]' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1); pl=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1)
 [ -n "$hs" ] && [ "$hs" -lt "$pl" ] && ok "gate.sh refuses a host whose /dev/null is not a character device (before any stage)" || bad "no /dev/null preflight in gate.sh"
 
+# the lanes log the replay sizing: gate.sh exports JANUS_MEMGUARD_LOG before the stages, except for the go-test lane
+ml=$(grep -n '^export JANUS_MEMGUARD_LOG=' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1); pl2=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1)
+[ -n "$ml" ] && [ "$ml" -lt "$pl2" ] && grep -q 'addc gotest "unset JANUS_MEMGUARD_LOG;' "$here_repo/scripts/gate.sh" && ok "gate.sh exports JANUS_MEMGUARD_LOG for the lanes (not for go test)" || bad "JANUS_MEMGUARD_LOG not exported as intended"
+
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n
   POOL_GUARD=0 POOL_PROGRESS_SECS=100

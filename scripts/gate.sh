@@ -203,6 +203,11 @@ INCR_HOSTTOOLS_CACHE="$(mktemp "$root/artifacts/incr-hosttools.XXXXXX" 2>/dev/nu
 { [ -z "${INCR_HOSTTOOLS_CACHE:-}" ] || { [ -z "$incremental" ] && [ "${JANUS_INCR_LANES:-}" != 1 ]; } || incr_hosttools >/dev/null; }  # fill the per-run cache once, before the lanes start
 if [ -n "$incremental" ]; then export JANUS_GATE_INCREMENTAL=1; else unset JANUS_GATE_INCREMENTAL; fi
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
+# The lane logs name the sizing of the parallel kernel replay ("janus-memguard: framework replay sizing: W workers x T threads
+# (effective limit …, headroom …)", cmd/janus/replaybudget.go) and each memory-guarded job's peak: JANUS_MEMGUARD_LOG=1. Logging
+# only (not a key of any cache; skipped by the incremental key). The go-test lane runs without it: tests that compare janus' stderr
+# must see the default output.
+export JANUS_MEMGUARD_LOG="${JANUS_MEMGUARD_LOG:-1}"
 
 stages_all=(verify gotest rounds axiom govet cachekeys decoder x86 oracle asl-verify asl-build sail-build rtasl-prove rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go)
 selected() { # NAME: is the stage selected?
@@ -415,7 +420,7 @@ WANT=()
 needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; done; echo "$r"; }
 add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
 JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
-addc gotest "JANUS_REQUIRE_FIXTURE=1 JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
+addc gotest "unset JANUS_MEMGUARD_LOG; JANUS_REQUIRE_FIXTURE=1 JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
 addc rounds "${rounds_lanes_n:+export JANUS_ROUNDS_LANES=$rounds_lanes_n; }audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
 # (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
