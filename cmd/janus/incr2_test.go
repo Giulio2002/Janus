@@ -270,36 +270,101 @@ func TestIncr2ScriptAndToolchainChanges(t *testing.T) {
 
 // ---- the scripts: every export of the gate is classified
 
-var exportRe = regexp.MustCompile(`(?m)\bexport\s+([^\n;&|]*)`)
+// exportRe also finds an `export` inside a quoted string (gate.sh's laneenv echoes "export JANUS_LANE_TREE=..." into a lane's code)
+var exportRe = regexp.MustCompile(`\bexport\s+([^\n;&|]*)`)
 var nameRe = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)(=|$)`)
 
-// gateExports are the variable names the gate's scripts export (statically: `export NAME=...`, `export NAME NAME2`).
-func gateExports(t *testing.T) map[string][]string {
-	t.Helper()
-	var files []string
-	for _, pat := range []string{"scripts/gate.sh", "scripts/verify-*.sh", "scripts/build-examples*.sh", "scripts/example-*.sh", "scripts/lib/*.sh"} {
-		m, _ := filepath.Glob(filepath.Join(repoRoot, pat))
-		files = append(files, m...)
+var (
+	stmtSplitRe    = regexp.MustCompile(`;|&&|\|\||\||&`)
+	allexportOnRe  = regexp.MustCompile(`^set\s+(?:.*\s)?(?:-[A-Za-z]*a[A-Za-z]*|-o\s+allexport)(?:\s|$)`)
+	allexportOffRe = regexp.MustCompile(`^set\s+(?:.*\s)?(?:\+[A-Za-z]*a[A-Za-z]*|\+o\s+allexport)(?:\s|$)`)
+	leadKeyword    = map[string]bool{"then": true, "do": true, "else": true, "{": true, "(": true, "if": true, "while": true, "until": true, "!": true}
+)
+
+// scanExports returns the variable names a shell script exports to its children, statically. The forms: `export NAME[=v] ...`,
+// `declare|typeset|local ... -x ... NAME[=v]` (any flag cluster containing x: -x, -gx, -xg, -rx, ...), and every plain assignment
+// `NAME=v` made while allexport is on (`set -a` / `set -o allexport` until `set +a` / `set +o allexport`, also in one line:
+// `set -a; JANUS_X=5; set +a`). Comment lines are skipped; a statement is a piece of a line cut at ; && || | &.
+func scanExports(src string) []string {
+	return dedupe(scanExportsRaw(src, nil))
+}
+
+func dedupe(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range in {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
 	}
-	out := map[string][]string{}
-	for _, f := range files {
-		if strings.Contains(filepath.Base(f), "test-") {
+	return out
+}
+
+func scanExportsRaw(src string, out []string) []string {
+	allexport := false
+	for _, line := range strings.Split(src, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
-		b, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
+		for _, m := range exportRe.FindAllStringSubmatch(line, -1) {
+			for _, a := range strings.Fields(m[1]) {
+				if nm := nameRe.FindStringSubmatch(a); nm != nil {
+					out = append(out, nm[1])
+				}
+			}
 		}
-		for _, line := range strings.Split(string(b), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+		for _, st := range stmtSplitRe.Split(line, -1) {
+			w := strings.Fields(st)
+			for len(w) > 0 && (leadKeyword[w[0]] || strings.HasSuffix(w[0], "()")) {
+				w = w[1:]
+			}
+			if len(w) == 0 {
 				continue
 			}
-			for _, m := range exportRe.FindAllStringSubmatch(line, -1) {
-				for _, w := range strings.Fields(m[1]) {
-					if nm := nameRe.FindStringSubmatch(w); nm != nil {
-						rel, _ := filepath.Rel(repoRoot, f)
-						out[nm[1]] = append(out[nm[1]], rel)
+			joined := strings.Join(w, " ")
+			if allexportOnRe.MatchString(joined) {
+				allexport = true
+				continue
+			}
+			if allexportOffRe.MatchString(joined) {
+				allexport = false
+				continue
+			}
+			// leading assignments (`A=1 B=2 cmd ...`), then the command word
+			i := 0
+			for i < len(w) {
+				nm := nameRe.FindStringSubmatch(w[i])
+				if nm == nil || nm[2] != "=" {
+					break
+				}
+				if allexport {
+					out = append(out, nm[1])
+				}
+				i++
+			}
+			if i >= len(w) {
+				continue
+			}
+			switch w[i] {
+			case "export":
+				for _, a := range w[i+1:] {
+					if nm := nameRe.FindStringSubmatch(a); nm != nil {
+						out = append(out, nm[1])
 					}
+				}
+			case "declare", "typeset", "local":
+				x := false
+				var names []string
+				for _, a := range w[i+1:] {
+					if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") {
+						x = x || strings.Contains(a, "x")
+					} else if nm := nameRe.FindStringSubmatch(a); nm != nil {
+						names = append(names, nm[1])
+					}
+				}
+				if x {
+					out = append(out, names...)
 				}
 			}
 		}
@@ -307,29 +372,98 @@ func gateExports(t *testing.T) map[string][]string {
 	return out
 }
 
+// gateScriptPatterns are the scripts whose exports reach the gate's items and lanes (test scripts excluded).
+var gateScriptPatterns = []string{"scripts/gate.sh", "scripts/verify-*.sh", "scripts/build-examples*.sh", "scripts/example-*.sh", "scripts/lib/*.sh",
+	"audit/*.sh", "audit/*/*.sh", "audit/*/*/*.sh", "audit/*/*/*/*.sh"}
+
+func gateScriptFiles(root string) []string {
+	var files []string
+	for _, pat := range gateScriptPatterns {
+		m, _ := filepath.Glob(filepath.Join(root, pat))
+		for _, f := range m {
+			if !strings.Contains(filepath.Base(f), "test-") {
+				files = append(files, f)
+			}
+		}
+	}
+	return files
+}
+
+// gateExportsIn are the variable names the gate's scripts under root export, with the scripts that export them.
+func gateExportsIn(t *testing.T, root string) map[string][]string {
+	t.Helper()
+	out := map[string][]string{}
+	for _, f := range gateScriptFiles(root) {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, _ := filepath.Rel(root, f)
+		for _, n := range scanExports(string(b)) {
+			out[n] = append(out[n], rel)
+		}
+	}
+	return out
+}
+
+func gateExports(t *testing.T) map[string][]string { t.Helper(); return gateExportsIn(t, repoRoot) }
+
 // keyedGateExports: the variables the gate's scripts export that ARE in the item and lane keys, each with the reason that is
 // sound. A NEW export that is relevant to the key fails TestIncr2EveryGateExportIsClassified: either it is bookkeeping
 // (add it to incrEnvSkip with its reason, and to gateRunEnv above) or it can change what is checked (add it here).
-var keyedGateExports = map[string]string{
-	"LEAN_NUM_THREADS":       "a constant of the gate (4, capped); a different thread count is a different run",
-	"JANUS_REAL_LAKE":        "the lake the gate found on PATH: a constant of the host, and the toolchain is keyed by its bytes anyway",
-	"JANUS_MEM_MAX":          "the memory limit of a lane (set inside the lane's code, after its key is computed; a user's value is keyed)",
-	"JANUS_LANE_TREE":        "set inside a lane's code after its key is computed",
-	"JANUS_LANE_LAKE_LOCK":   "set inside a lane's code after its key is computed",
-	"JANUS_CACHE_KEY_DIR":    "cold gate only (--cold is not combinable with --incremental)",
-	"JANUS_COLD_XDG":         "cold gate only",
-	"JANUS_COLD_PIN_LOG":     "cold gate only",
-	"JANUS_COLD_PIN_CHECKED": "cold gate only",
-	"JANUS_COLD_DONE":        "cold gate only",
-	"JANUS_COLD":             "cold gate only",
-	"JANUS_MODEL_PIN":        "cold gate only",
-	"JANUS_MODEL_PIN_STALE":  "cold gate only",
-	"ASL_CACHE":              "selects the ISA model cache directory: affects the ASL lanes, keyed on purpose",
-	"RT_ASL_KEEP_DIR":        "not a key variable (no matching prefix)",
-	"CGO_ENABLED":            "keyed on purpose",
-	"CGO_CFLAGS":             "keyed on purpose",
-	"GOTOOLCHAIN":            "set by the example build scripts, which run before the keys are computed; keyed on purpose",
-	"JANUS_GO_TOOLCHAIN":     "keyed on purpose",
+func keyedGateExports() map[string]string {
+	b, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "lib", "incr-keyed-exports.txt"))
+	if err != nil {
+		panic(err)
+	}
+	m := map[string]string{}
+	for _, l := range strings.Split(string(b), "\n") {
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		n, why, ok := strings.Cut(l, "\t")
+		if !ok || n == "" || why == "" {
+			panic("scripts/lib/incr-keyed-exports.txt: bad line " + l)
+		}
+		m[n] = why
+	}
+	return m
+}
+
+// unclassifiedExports lists the exported names that are in the key and neither skipped nor justified as keyed.
+func unclassifiedExports(ex map[string][]string) []string {
+	var bad []string
+	for n := range ex {
+		if (incrEnvRelevant(n) || incrEnvSkip[n]) && !incrEnvSkip[n] {
+			if _, ok := keyedGateExports()[n]; !ok {
+				bad = append(bad, n)
+			}
+		}
+	}
+	sort.Strings(bad)
+	return bad
+}
+
+// The justification of the audit entries above: no audit script computes an item or lane key, so a run-specific variable they
+// export can never be part of one.
+func TestIncr2AuditScriptsComputeNoKeys(t *testing.T) {
+	n := 0
+	for _, f := range gateScriptFiles(repoRoot) {
+		rel, _ := filepath.Rel(repoRoot, f)
+		if !strings.HasPrefix(rel, "audit/") {
+			continue
+		}
+		n++
+		b, _ := os.ReadFile(f)
+		for _, w := range []string{"incr_begin", "incr_lane", "janus incr", "lib/incr.sh"} {
+			if strings.Contains(string(b), w) {
+				t.Errorf("%s uses %q: its exports are no longer covered by the audit entries of keyedGateExports", rel, w)
+			}
+		}
+	}
+	if n < 10 {
+		t.Fatalf("only %d audit scripts scanned", n)
+	}
 }
 
 func TestIncr2EveryGateExportIsClassified(t *testing.T) {
@@ -337,29 +471,93 @@ func TestIncr2EveryGateExportIsClassified(t *testing.T) {
 	if len(ex) < 20 {
 		t.Fatalf("found only %d exported names: the scan is broken", len(ex))
 	}
-	var names []string
-	for n := range ex {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		switch {
-		case !incrEnvRelevant(n) && !incrEnvSkip[n]:
-			// no matching prefix: not in the key
-		case incrEnvSkip[n]:
-			// bookkeeping, reviewed in TestRT04EnvSkipListIsPinned
-		default:
-			if _, ok := keyedGateExports[n]; !ok {
-				t.Errorf("%s is exported by %v, is part of every item's and lane's key and is not classified: if its value differs from "+
-					"one gate run to the next, no incremental gate run can ever skip anything (the bug of ad264a2). Bookkeeping: add it to "+
-					"incrEnvSkip with its reason; a constant or something that changes what is checked: add it to keyedGateExports.", n, ex[n])
-			}
-		}
+	for _, n := range unclassifiedExports(ex) {
+		t.Errorf("%s is exported by %v, is part of every item's and lane's key and is not classified: if its value differs from "+
+			"one gate run to the next, no incremental gate run can ever skip anything (the bug of ad264a2). Bookkeeping: add it to "+
+			"incrEnvSkip with its reason; a constant or something that changes what is checked: add it to scripts/lib/incr-keyed-exports.txt.", n, ex[n])
 	}
 	// the other direction: a classification of a name no script exports any more is stale
-	for n := range keyedGateExports {
+	for n := range keyedGateExports() {
 		if _, ok := ex[n]; !ok && n != "JANUS_GO_TOOLCHAIN" && n != "JANUS_COLD" {
-			t.Errorf("keyedGateExports lists %s, which no gate script exports (stale)", n)
+			t.Errorf("scripts/lib/incr-keyed-exports.txt lists %s, which no gate script exports (stale)", n)
 		}
+	}
+}
+
+// copyGateScripts copies every script the scan reads into a temp root (the mutation tests add a fake script there).
+func copyGateScripts(t *testing.T) string {
+	t.Helper()
+	dst := t.TempDir()
+	for _, f := range gateScriptFiles(repoRoot) {
+		rel, _ := filepath.Rel(repoRoot, f)
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wr(t, filepath.Join(dst, rel), string(b))
+	}
+	return dst
+}
+
+// Mutation test of the scan: a fake script exporting a run-specific JANUS_ variable in each shell form, in every directory the
+// scan covers, must be found (as an export) and must fail the classification; the unmutated copy is clean.
+func TestIncr2ExportScanCatchesEveryForm(t *testing.T) {
+	base := copyGateScripts(t)
+	if bad := unclassifiedExports(gateExportsIn(t, base)); len(bad) != 0 {
+		t.Fatalf("the copy is not clean: %v", bad)
+	}
+	forms := map[string]string{
+		"export":         "export JANUS_FAKE_RUN=$RANDOM\n",
+		"export-list":    "export A_OK JANUS_FAKE_RUN\n",
+		"declare-x":      "declare -x JANUS_FAKE_RUN=1\n",
+		"declare-gx":     "declare -gx JANUS_FAKE_RUN=1\n",
+		"declare-xg":     "declare -xg JANUS_FAKE_RUN=1\n",
+		"declare-r-x":    "declare -r -x JANUS_FAKE_RUN=1\n",
+		"typeset-x":      "typeset -x JANUS_FAKE_RUN=1\n",
+		"local-x":        "f() { local -x JANUS_FAKE_RUN=1; }\n",
+		"set-a-block":    "set -a\nJANUS_FAKE_RUN=5\nset +a\n",
+		"set-a-oneline":  "set -a; JANUS_FAKE_RUN=5; set +a\n",
+		"set-o-allexp":   "set -o allexport\nJANUS_FAKE_RUN=5\nset +o allexport\n",
+		"set-eua":        "set -eua\nJANUS_FAKE_RUN=5\n",
+		"after-then":     "if true; then export JANUS_FAKE_RUN=1; fi\n",
+		"after-or":       "[ -n \"$x\" ] || export JANUS_FAKE_RUN=1\n",
+		"prefixed":       "FOO=1 export JANUS_FAKE_RUN=1\n",
+		"allexport-pref": "set -a\nFOO=1 JANUS_FAKE_RUN=5 true\n",
+	}
+	dirs := []string{"scripts/lib", "scripts", "audit", "audit/round99", "audit/rt-x/deep", "audit/a/b/c"}
+	for name, body := range forms {
+		for _, d := range dirs {
+			t.Run(name+"@"+d, func(t *testing.T) {
+				root := copyGateScripts(t)
+				name := "zz-fake.sh"
+				if d == "scripts" {
+					name = "verify-fake.sh"
+				}
+				wr(t, filepath.Join(root, d, name), "#!/usr/bin/env bash\n"+body)
+				ex := gateExportsIn(t, root)
+				if len(ex["JANUS_FAKE_RUN"]) != 1 {
+					t.Fatalf("the form is not found: %v", ex["JANUS_FAKE_RUN"])
+				}
+				bad := unclassifiedExports(ex)
+				if len(bad) != 1 || bad[0] != "JANUS_FAKE_RUN" {
+					t.Fatalf("classification result %v", bad)
+				}
+			})
+		}
+	}
+	// what is NOT an export stays unexported (no false alarms from comments, a plain assignment, `set +a` first, declare without x)
+	for name, body := range map[string]string{
+		"comment":       "# export JANUS_FAKE_RUN=1\n  # declare -x JANUS_FAKE_RUN=1\n",
+		"assignment":    "JANUS_FAKE_RUN=1\n",
+		"declare-plain": "declare -r JANUS_FAKE_RUN=1\ndeclare -a JANUS_FAKE_RUN\n",
+		"after-off":     "set -a\nset +a\nJANUS_FAKE_RUN=1\n",
+		"set-eu":        "set -euo pipefail\nJANUS_FAKE_RUN=1\n",
+		"env-prefix":    "JANUS_FAKE_RUN=1 ./run.sh\n",
+	} {
+		t.Run("negative-"+name, func(t *testing.T) {
+			if got := scanExports(body); len(got) != 0 {
+				t.Fatalf("false alarm %v", got)
+			}
+		})
 	}
 }

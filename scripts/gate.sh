@@ -79,6 +79,10 @@
 # Refuses to start with load >= 70, MemAvailable < 40 GiB or < 60 GiB free on the checkout's disk
 # (RULES.md) unless JANUS_GATE_FORCE=1. LEAN_NUM_THREADS defaults to 4 and is capped at 4.
 set -uo pipefail
+# The names of the variables that were exported when the gate started (before any export of its own; kept across the re-execs below):
+# scripts/lib/incr-liveness.sh (lane cachekeys) changes every variable the gate ADDED to see that none of them is part of an incremental
+# key. Not a key prefix (GATE_..., not JANUS_...): it is read by that check only.
+[ -n "${GATE_ENV0_NAMES+x}" ] || export GATE_ENV0_NAMES="$(compgen -e | sort | tr '\n' ' ')"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 export PATH=/usr/local/go/bin:$PATH
@@ -194,6 +198,9 @@ export POOL_JOB_MEM_KB=$(awk -v p="${_pk:-6.1}" 'BEGIN { i = p * 1.5; if (i < 4)
 export JANUS_INCR_RECORD=1
 # records are written only for a clean tree that does not change during the run (scripts/lib/incr.sh)
 unset JANUS_GATE_TREE0; incr_tree_pin
+# private per-gate-run cache of the host build-tool digest (incr_hosttools); not a key input itself (stamped with PATH/CC/CXX inside)
+INCR_HOSTTOOLS_CACHE="$(mktemp "$root/artifacts/incr-hosttools.XXXXXX" 2>/dev/null)" && export INCR_HOSTTOOLS_CACHE || unset INCR_HOSTTOOLS_CACHE
+{ [ -z "${INCR_HOSTTOOLS_CACHE:-}" ] || { [ -z "$incremental" ] && [ "${JANUS_INCR_LANES:-}" != 1 ]; } || incr_hosttools >/dev/null; }  # fill the per-run cache once, before the lanes start
 if [ -n "$incremental" ]; then export JANUS_GATE_INCREMENTAL=1; else unset JANUS_GATE_INCREMENTAL; fi
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
 
@@ -290,7 +297,7 @@ printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGi
   "$([ -n "$autosized" ] && echo true || echo false)" "$(_pool_json "${auto_why:-given}")" "$rounds_lanes_n" "$(_pool_json "$auto_budget")" >> "$tlf"
 [ -z "$autosized" ] || echo "gate: -j $jobs_n, $lanes_n lanes chosen automatically: $auto_why; audit rounds: ${rounds_lanes_n:-default} lanes
 gate: $auto_budget"
-echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}"
+echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}; lane-level incremental skipping $([ "${JANUS_INCR_LANES:-}" = 1 ] && echo 'ON (JANUS_INCR_LANES=1: EXPERIMENTAL, not cleared by a red team)' || echo 'OFF (default: every lane runs; set JANUS_INCR_LANES=1 to opt in)')"
 
 # ---- the prebuild stages (they are items of the same pool as the lanes: scripts/lib/dag.sh)
 step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
@@ -339,10 +346,20 @@ dag_check || { echo "gate: internal error: the stage graph is inconsistent"; exi
 mktree() { # DIR [private]: a private copy of the sources and of the finished framework build (kept when present: same hash)
   # "private": JanusASL/.lake is a real directory of the tree's own (filled from the verified ASL cache by asl.sh), not
   # the symlink to the checkout's build that the other lake trees share; a lane in such a tree can never write the checkout
-  if [ -f "$1/.gate-tree-ready" ]; then echo "gate: reusing $1"; return 0; fi
+  local -a rs=(--exclude=/.git --exclude=/artifacts --exclude=/audit/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake
+    --exclude=/oracle-sail/target --exclude=/bin --exclude=/.gate-tree-ready)
+  if [ -f "$1/.gate-tree-ready" ]; then
+    # a kept tree is reused only if its CONTENT still equals the sources (rsync -c compares checksums, not times): a tree edited after it was
+    # made (or a different file set) is re-synchronised, and the prebuilt janus is replaced when it differs
+    if [ -n "$(rsync -rcni --delete "${rs[@]}" ./ "$1"/ 2>/dev/null | grep -v '^\.d')" ]; then
+      echo "gate: kept tree $1 differs from the sources (modified after it was made): re-synchronising it"
+      rsync -a --delete "${rs[@]}" ./ "$1"/ || { echo "gate: cannot re-synchronise $1"; exit 1; }
+    fi
+    cmp -s bin/janus "$1/bin/janus" || { mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"; }
+    echo "gate: reusing $1"; return 0
+  fi
   mkdir -p "$1"
-  rsync -a --exclude=/.git --exclude=/artifacts --exclude=/audit/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake \
-    --exclude=/oracle-sail/target --exclude=/bin ./ "$1"/ || { echo "gate: cannot copy the sources to $1"; exit 1; }
+  rsync -a "${rs[@]}" ./ "$1"/ || { echo "gate: cannot copy the sources to $1"; exit 1; }
   ln -sfn "$root/artifacts" "$1/artifacts"; if [ "${2:-}" = private ]; then mkdir -p "$1/JanusASL/.lake"; else ln -sfn "$root/JanusASL/.lake" "$1/JanusASL/.lake"; fi
   ln -sfn "$root/JanusX86/.lake" "$1/JanusX86/.lake"; ln -sfn "$root/oracle-sail/target" "$1/oracle-sail/target"
   mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"; : > "$1/.gate-tree-ready"
@@ -363,7 +380,7 @@ pool_init gate "$((lanes_n + 4))" "$out/lanes"   # (+4 slots: the prebuild stage
 POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
 export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too
 # an estimate for the first run (seconds, the profile's measurements); later runs use their own
-declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]=900 [sail-build]=300 [axiom]=1 [govet]=60 [cachekeys]=30 [decoder]=120 [oracle]=900 [asl-verify]=900
+declare -A est=([verify]=99999 [gotest]=1600 [rounds]=1000 [x86]=620 [asl-build]=900 [sail-build]=300 [axiom]=1 [govet]=60 [cachekeys]=45 [decoder]=120 [oracle]=900 [asl-verify]=900
   [rtasl-probes]=1200 [rtasl-replay]=900 [rtasl-prove]=600 [rtasl-fsqrt]=600 [rtasl-go]=400 [rtasl-rel]=120 [rtasl-strict]=120 [rtasl-btf]=5)
 for k in "${!est[@]}"; do POOL_SECS[$k]=${est[$k]}; done
 pool_times "$lane_times"
@@ -407,7 +424,7 @@ addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"
 # CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
 # decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
 add govet "go vet ./..."
-add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && scripts/lib/test-modelpin.sh"
+add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
 add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
 # asl-verify waits for asl-build only to find the ArmASL model in the build cache (asl-build builds and publishes it, and the

@@ -1,0 +1,28 @@
+# NAME<TAB>reason. The variables the gate's scripts export that ARE part of the item and lane keys (cmd/janus incrEnvRelevant), each with the
+# reason that is sound. Read by cmd/janus/incr2_test.go (TestIncr2EveryGateExportIsClassified: a NEW relevant export fails until it is
+# listed here or added to incrEnvSkip) and by scripts/lib/test-incr-liveness.sh (the gate-side liveness check leaves these alone and
+# perturbs every other variable the gate added). It is test input only: nothing here is read by a key or a verdict.
+LEAN_NUM_THREADS	a constant of the gate (4, capped); a different thread count is a different run
+JANUS_REAL_LAKE	the lake the gate found on PATH: a constant of the host, and the toolchain is keyed by its bytes anyway
+JANUS_MEM_MAX	the memory limit of a lane (set inside the lane's code, after its key is computed; a user's value is keyed)
+JANUS_LANE_TREE	set inside a lane's code after its key is computed
+JANUS_LANE_LAKE_LOCK	set inside a lane's code after its key is computed
+JANUS_CACHE_KEY_DIR	cold gate only (--cold is not combinable with --incremental)
+JANUS_COLD_XDG	cold gate only
+JANUS_COLD_PIN_LOG	cold gate only
+JANUS_COLD_PIN_CHECKED	cold gate only
+JANUS_COLD_DONE	cold gate only
+JANUS_COLD	cold gate only
+JANUS_MODEL_PIN	cold gate only
+JANUS_MODEL_PIN_STALE	cold gate only
+ASL_CACHE	selects the ISA model cache directory: affects the ASL lanes, keyed on purpose
+RT_ASL_KEEP_DIR	not a key variable (no matching prefix)
+CGO_ENABLED	keyed on purpose
+CGO_CFLAGS	keyed on purpose
+GOTOOLCHAIN	set by the example build scripts, which run before the keys are computed; keyed on purpose
+JANUS_GO_TOOLCHAIN	keyed on purpose
+JANUS_CACHE_DIR	audit rounds: a private mktemp cache set inside the lane after its key; run-specific by design, never read by a key
+JANUS_VERDICT_CACHE	audit/run-rounds.sh: the rounds lane's own verdict store, set inside the lane after its key
+JANUS_R7_NO_CACHE_ROWS	audit/run-rounds.sh: a constant of the rounds lane (1), set inside the lane after its key
+GODEBUG	audit/rt-print/run.sh: a constant (invalidptr=0) set inside the lane after its key
+LEAN_PATH	audit/round2/amd64/build-controls.sh: set inside a lane's script after its key; the lane key names the whole tree
