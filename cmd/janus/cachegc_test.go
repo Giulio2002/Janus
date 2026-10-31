@@ -757,11 +757,14 @@ func TestCacheGCConcurrentVerify(t *testing.T) {
 		}
 		return 0, string(out)
 	}
+	phase := time.Now()
+	lap := func(what string) { t.Logf("%s: %.1fs", what, time.Since(phase).Seconds()); phase = time.Now() }
 	// Prime the framework build (kept: the collector keeps the current framework's entries).
 	if code, out := run1(verifyArgs("Add")...); code != 0 {
 		t.Fatalf("priming verify: %s", out)
 	}
 	first := readReport(t, arts["Add"])
+	lap("priming verify")
 
 	var stop atomic.Bool
 	var gcRuns atomic.Int64
@@ -791,6 +794,7 @@ func TestCacheGCConcurrentVerify(t *testing.T) {
 	runConcurrently(bin, env, procs)
 	stop.Store(true)
 	wg.Wait()
+	lap("concurrent verifications under the collector")
 	for _, p := range procs {
 		if p.code != 0 || !strings.Contains(p.out, `"theorem"`) {
 			t.Errorf("%s failed under the collector (exit %d):\n%s", p.name, p.code, p.out)
@@ -804,12 +808,15 @@ func TestCacheGCConcurrentVerify(t *testing.T) {
 	if code, out := run1("cache", "gc", "--max", "0", "--grace", "0s"); code != 0 {
 		t.Fatalf("cache gc: %s", out)
 	}
+	lap("collection to empty")
 	if code, out := run1(verifyArgs("Add")...); code != 0 {
 		t.Fatalf("verify from an emptied cache: %s", out)
 	}
+	lap("verify Add from an emptied cache")
 	if code, out := run1(consumerArgs...); code != 0 {
 		t.Fatalf("consumer verify from an emptied cache: %s", out)
 	}
+	lap("consumer verify from an emptied cache")
 	if r := readReport(t, consumerArt); r.Theorem != "ConsumerExample.Add.correctness" || r.KernelReplay.Status != "passed" {
 		t.Errorf("consumer re-verification: %+v", r)
 	}

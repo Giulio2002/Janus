@@ -20,6 +20,16 @@ dag_has pre-pin pre-stamp && ! dag_has pre-stamp pre-pin && ok "pre-pin waits fo
 dag_has pre-pin pre-lake && ! dag_has pre-lake pre-pin && ok "pre-pin follows pre-lake (the only writer), not the reverse" || bad "pin/lake order"
 
 dag_has pre-fixture pre-stamp && dag_has pre-fixture pre-pin && ! dag_has pre-pin pre-fixture && ok "pre-fixture waits for pre-stamp and pre-pin (its --janus-root verification reads a fresh stamp after the hash)" || bad "fixture ordering"
+# the embedded-only fixture stage starts at t=0: it needs nothing, shares nothing with the user-cache writers or the shared build,
+# and the checkout part (pre-fixture) is ordered after it (both write the fixture)
+[ -z "${DAG_DEPS[pre-fixture-emb]}" ] && ok "pre-fixture-emb needs nothing (starts at t=0)" || bad "pre-fixture-emb has deps"
+for r in pre-lake pre-stamp pre-warm pre-pin; do ! dag_has pre-fixture-emb "$r" || bad "pre-fixture-emb waits for $r"; done
+dag_has pre-fixture pre-fixture-emb && dag_has gotest pre-fixture-emb && dag_has rtasl-go pre-fixture-emb && ok "pre-fixture, gotest and rtasl-go wait for the embedded fixture stage" || bad "fixture parts unordered"
+! dag_has pre-fixture pre-warm && ok "pre-fixture no longer waits for pre-warm (it never reads the user cache's framework build)" || bad "pre-fixture waits for pre-warm"
+for res in framework-build user-cache-framework artifact:Add bin/janus; do grep -q "pre-fixture-emb" <<<"${DAG_RES[$res]}" && bad "pre-fixture-emb listed as touching $res"; done
+saved=${DAG_DEPS[pre-fixture]}; DAG_DEPS[pre-fixture]="pre-lake pre-stamp pre-pin"
+mut=$(dag_unordered); grep -q 'go-test-fixture: pre-fixture (w) and pre-fixture-emb (w) are not ordered\|go-test-fixture: pre-fixture-emb (w) and pre-fixture (w) are not ordered' <<<"$mut" && ok "the resource check catches an unordered fixture pair" || bad "the resource check missed an unordered fixture pair"
+DAG_DEPS[pre-fixture]=$saved
 # a rerun into the same --out with a stale marker: gate.sh removes it before any stage, so the lakeguard is not armed early
 here_repo="$(cd "$here/../.." && pwd)"
 grep -n 'rm -f "$out/.pinned" "$out/fw_hash0"' "$here_repo/scripts/gate.sh" | cut -d: -f1 > "$t/rmline"

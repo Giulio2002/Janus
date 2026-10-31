@@ -6,7 +6,7 @@
 #
 #   -j N        items at once in the verify pool (default $JANUS_JOBS, else 2: RULES.md on the shared box;
 #               `auto` = the formula of scripts/lib/parallel.sh). The other stages scale with it: the go
-#               test shards (max(2, N), one test slot each) and the audit lanes (N).
+#               test shards (N clamped to 2..6, one test slot each) and the audit lanes (N).
 #   --lanes N   lanes at once (default $JANUS_LANES, else N + 1: the verify pool and N others). Lanes are
 #               queued longest first by their time in the last run (artifacts/gate/lane-times).
 #   --changed   development only (scripts/verify-all-examples.sh --changed): not a gate run.
@@ -96,7 +96,7 @@ memguard_self "$@"
 # the lane-specific arguments of a lane's skip key (everything else comes from incr_lane)
 lane_spec() {
   case "$1" in
-    gotest) local sh=${jobs_n:-2}; [ "$sh" -ge 2 ] 2>/dev/null || sh=2
+    gotest) local sh=${jobs_n:-2}; [ "$sh" -ge 2 ] 2>/dev/null || sh=2; [ "$sh" -le 6 ] || sh=6
       printf '%s\n' --arg "run:${gtrun:-}" --arg "shards:$sh" ;;
     rounds) printf '%s\n' --arg "rounds:${rounds:-}" ;;
   esac
@@ -307,7 +307,10 @@ pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
 # The go tests' prebuilt framework fixture (cmd/janus/fixture_test.go, docs/TESTING.md "Go tests"): built here, once, by
 # the tests' TestMain (a run that selects no test), so the gotest lane does not pay for it; it runs beside the verify pool.
-pre_fixture() { JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
+# Two stages (scripts/lib/dag.sh): the embedded framework's build and replay, in the fixture only (no user cache, no checkout
+# build: it starts at t=0), then the checkout's replay verdict (carried from the user cache where pre-stamp recorded it).
+pre_fixture_emb() { JANUS_TEST_FIXTURE_PART=embedded JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
+pre_fixture() { JANUS_TEST_FIXTURE_PART=checkout JANUS_JOBS="$jobs_n" go test -count=1 -timeout 7000s ./cmd/janus -run '^$'; }
 pre_stamp() { JANUS_ROOT="$root" JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 pre_warm() { JANUS_EXAMPLES_PREBUILT=1 scripts/verify-examples.sh -j 1 Add; }
 # From the moment the shared framework build (.lake/build) is finished nothing may write it (a lake that rebuilds a
@@ -355,7 +358,7 @@ flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($
 mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
 echo "gate: isolated source copies for the lake lanes are made once the framework build is pinned (removed when the gate passes, kept otherwise: $treebase)"
 lane_times="$root/artifacts/gate/lane-times"
-shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2
+shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2; [ "$shards" -le 6 ] || shards=6  # 6: the longest test (~470 s) is then the longest shard
 pool_init gate "$((lanes_n + 4))" "$out/lanes"   # (+4 slots: the prebuild stages and tree copies share the pool)
 POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
 export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too
@@ -430,11 +433,11 @@ declare -A STAGE_CODE=(
   [pre-ex-asm]="step pre-ex-asm scripts/build-examples-asm.sh" [pre-ex-sys]="step pre-ex-sys scripts/build-examples-sys.sh"
   [pre-ex-rtmisc]="step pre-ex-rtmisc scripts/build-examples-rtmisc.sh" [pre-ex-print]="step pre-ex-print scripts/build-examples-print.sh"
   [pre-ex-cgo]="step pre-ex-cgo scripts/build-examples-cgo.sh"
-  [pre-stamp]="step pre-stamp pre_stamp" [pre-warm]="step pre-warm pre_warm" [pre-fixture]="step pre-fixture pre_fixture" [pre-pin]="step pre-pin pre_pin"
+  [pre-stamp]="step pre-stamp pre_stamp" [pre-warm]="step pre-warm pre_warm" [pre-fixture-emb]="step pre-fixture-emb pre_fixture_emb" [pre-fixture]="step pre-fixture pre_fixture" [pre-pin]="step pre-pin pre_pin"
   [tree-x86]="mktree '$tree_x86'" [tree-asl]="mktree '$tree'" [tree-aslv]="mktree '$tree_aslv' private" [tree-go]="mktree '$tree_go'"
 )
 # est: long first (the framework build is the critical path of the cold gate)
-declare -A STAGE_EST=([pre-lake]=800 [pre-fixture]=300 [pre-warm]=120 [pre-gobin]=60 [pre-ex-amd64]=15)
+declare -A STAGE_EST=([pre-lake]=800 [pre-fixture-emb]=700 [pre-fixture]=30 [pre-warm]=120 [pre-gobin]=60 [pre-ex-amd64]=15)
 declare -A queued=()
 for n in $(dag_closure "${WANT[@]}"); do
   [ -n "${STAGE_CODE[$n]:-}" ] || continue

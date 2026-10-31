@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Tests for the framework olean pins, the closure check, the replay cache keys, the read-only
@@ -369,12 +370,14 @@ func TestR1ForgedFrameworkLemma(t *testing.T) {
 	fdir := filepath.Join(t.TempDir(), "forge")
 	writeBytes(t, filepath.Join(fdir, "Janus", "GoABI.lean"), append(append([]byte("import Lean\n"), src...), forge...))
 	lake, _ := findLake()
+	phase := time.Now()
 	cmd := exec.Command(lake, "env", "lean", "--root="+fdir, "-o", filepath.Join(root, ".lake", "build", "lib", "lean", "Janus", "GoABI.olean"),
 		filepath.Join(fdir, "Janus", "GoABI.lean"))
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("forging: %v\n%s", err, out)
 	}
+	t.Logf("forged GoABI.olean compiled in %.1fs", time.Since(phase).Seconds())
 	add := mustExtract(t, "example.com/basic.Add")
 	// A planted framework replay verdict for exactly the forged build's bytes must not make it
 	// count as replayed: a well-formed one whose MAC was made under another key (another cache's;
@@ -395,7 +398,12 @@ func TestR1ForgedFrameworkLemma(t *testing.T) {
 	k := frameworkVerdictKey(tc.cacheID(), forged)
 	for _, plant := range []string{markerHeader + markerMAC([]byte(strings.Repeat("x", 32)), "framework", k) + "\nleanchecker Janus passed\n"} {
 		writeBytes(t, frameworkVerdictPath(k), []byte(plant))
+		phase = time.Now()
 		code, out, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(repoRoot, "audit", "attacks", "R1_forged_proof.lean"), "--janus-root", root)
+		t.Logf("verify with the planted verdict (kernel replay of the forged build) took %.1fs", time.Since(phase).Seconds())
+		if os.Getenv("JANUS_TIMINGS") != "" {
+			t.Logf("stage timings:\n%s", stderr)
+		}
 		if code != 1 || out != "" || !strings.Contains(stderr, "Stage: kernel replay") || !strings.Contains(stderr, "Janus.GoABI.forged") {
 			t.Fatalf("planted verdict %q: got %d\n%s\n%s", plant[:20], code, out, stderr)
 		}
