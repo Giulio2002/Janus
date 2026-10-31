@@ -760,7 +760,7 @@ place, a per-kind path allowlist (an armobj entry may hold only `build/ir/**.c.o
 and its Sail twin), and every destination component is lstat'ed and refused if it is a symlink. Tamper, wrong key,
 moved entry, foreign path = rejection and a rebuild.
 
-*Measured* (private copy, cache seeded from /srv/janus-asl-cache then filled by one build; 431 of 434 modules restored; LEAN_NUM_THREADS=4, JANUS_JOBS=2; host load average 13-16 throughout, not idle): `asl.sh build` 957 s without the object cache (981 s on the run that filled it), **65 s and 67 s** with it. All C objects 1+16 restored.
+*Measured* (private copy, cache seeded from /srv/janus-asl-cache, 431 of 434 modules restored, LEAN_NUM_THREADS=4, JANUS_JOBS=2; host load average 16-17 during the runs, not idle): the run that fills the object cache 1023 s (it stages and publishes 17 entries on real ArmASL, lean-sail and JanusASL objects with 0 refused: the Lake-hash and argv-shape checks have no false positive; the sandboxed recompile sample adds about 40 s), then **69 s and 76 s** warm. Without the object cache the same warm build took 957 s.
 
 *Nightly cold-side audit.* The nightly cold gate links in its own worktree under the same cache setting as its run (the
 cached run restores objects, the cold run compiles them from source); `gate-cachecmp.py` compares the SHA-256 of every
