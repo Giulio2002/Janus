@@ -90,7 +90,7 @@ c=$(changed "$t/a" "$t/b" | wc -l)
 
 
 # `restore --record`: a signed record (scripts/lib/restamp.py verifies it), written O_EXCL|O_NOFOLLOW at 0600
-export JANUS_CACHE_KEY_DIR="$t/key"; mkdir -m 700 "$t/key"
+old_kd="${JANUS_CACHE_KEY_DIR-}"; export JANUS_CACHE_KEY_DIR="$t/key"; mkdir -m 700 "$t/key"
 mkdir -m 700 "$t/recd" "$t/emptycache"
 python3 -I "$t/a/JanusASL/tools/asl_mod_cache.py" restore "$t/a" "$t/emptycache" --record "$t/recd/record.json" > /dev/null 2>&1
 if python3 -I - "$t/recd/record.json" "$t/a" "$root/scripts/lib/bcache.py" <<'PY'
@@ -132,6 +132,7 @@ assert m.stamp_mismatch(ks, p, "Janus.State") is None            # not a pinned 
 PY
 then ok "publish refuses a Janus module output that differs from the stamp's pin (and only then)"; else bad "stamp_mismatch"; fi
 rm -rf "$t/a/.lake"
+if [ -n "$old_kd" ]; then export JANUS_CACHE_KEY_DIR="$old_kd"; else unset JANUS_CACHE_KEY_DIR; fi   # the e2e restore verifies under the real key
 
 if [ -n "$e2e" ]; then
   # A fresh copy at this commit: restore (ArmASL and modules) and build JanusASL.
