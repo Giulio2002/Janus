@@ -687,10 +687,88 @@ def obj_files(lake, cs, partial=False):
     return res
 
 
-def obj_main(cmd, root, scope="arm"):
+def load_bcache(root):
+    path = os.path.join(root, "scripts", "lib", "bcache.py")
+    spec = importlib.util.spec_from_file_location("bcache", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def no_symlink_path(lake, rel):
+    """No component of lake/rel (below lake) is a symbolic link."""
+    cur = lake
+    for part in rel.split("/"):
+        cur = os.path.join(cur, part)
+        if os.path.islink(cur):
+            return False
+    return True
+
+
+def obj_stage(root, scope, stage, listfile):
+    """Publish-side checks, then copy the objects into `stage` (the entry is stored from THAT copy, so what is
+    checked is what is signed). Per object: all three files regular (no symlink on the way); the trace's recorded
+    output hash is the .hash, the trace's recorded hash of the C file is the .c.hash, and its compile command runs the
+    compiler this id was computed with; the SHA-256 of the C is taken again now and must be the one in the id; a .cin
+    record of it is written. Prints the id. Exit 1 on any failure (nothing is stored)."""
+    lake = os.path.join(root, "JanusASL", ".lake")
+    bc = load_bcache(root)
+    cs = obj_c_files(lake, scope)
+    if not cs:
+        sys.exit("objstage: no C files")
+    ident = obj_id(root, cs, scope)
+    cc_path, cc_sha = obj_compiler(root)
+    rels = []
+    for c in sorted(cs):
+        found = [c + s[len(".c"):] for s in OBJ_SUFFIXES if os.path.lexists(os.path.join(lake, c + s[len(".c"):]))]
+        if scope == "jasl" and not found:
+            continue
+        if len(found) != 1:
+            sys.exit("objstage: %s has %d objects" % (c, len(found)))
+        o = found[0]
+        for x in (o, o + ".hash", o + ".trace", c, c + ".hash"):
+            if not no_symlink_path(lake, x) or not os.path.isfile(os.path.join(lake, x)):
+                sys.exit("objstage: %s is missing or a symbolic link" % x)
+        if sha_file(os.path.join(lake, c)) != cs[c]:
+            sys.exit("objstage: %s changed while publishing" % c)
+        with open(os.path.join(lake, o + ".hash")) as f:
+            ohash = f.read().strip()
+        with open(os.path.join(lake, c + ".hash")) as f:
+            chash = f.read().strip()
+        with open(os.path.join(lake, o + ".trace"), "rb") as f:
+            tdata = f.read()
+        try:
+            outputs, pairs, argv = bc.trace_facts(tdata)
+        except Exception as ex:
+            sys.exit("objstage: %s: unreadable trace (%s)" % (o, ex))
+        if outputs != ohash + ".o":
+            sys.exit("objstage: %s: the trace records output %r, the .hash says %r" % (o, outputs, ohash))
+        if not any(h == chash and p.replace(os.sep, "/").endswith("/" + c) for p, h in pairs):
+            sys.exit("objstage: %s: the trace does not record the hash of the current %s (%s)" % (o, c, chash))
+        if not argv or os.path.realpath(argv[0]) != cc_path:
+            sys.exit("objstage: %s: compiled by %r, not by %s" % (o, argv and argv[0], cc_path))
+        for x in (o, o + ".hash", o + ".trace"):
+            d = os.path.join(stage, x)
+            os.makedirs(os.path.dirname(d), exist_ok=True)
+            shutil.copyfile(os.path.join(lake, x), d)
+            rels.append(x)
+        with open(os.path.join(stage, o + ".cin"), "w") as f:
+            f.write(cs[c] + "\n")
+        rels.append(o + ".cin")
+    if not rels:
+        sys.exit("objstage: nothing to store")
+    with open(listfile, "wb") as f:
+        f.write("".join(x + "\0" for x in rels).encode())
+    print(ident)
+
+
+def obj_main(cmd, root, scope="arm", extra=()):
     lake = os.path.join(root, "JanusASL", ".lake")
     if scope not in ("arm", "jasl"):
         sys.exit("asl_mod_cache: unknown object scope %r" % scope)
+    if cmd == "objstage":
+        obj_stage(root, scope, extra[0], extra[1])
+        return
     cs = obj_c_files(lake, scope)
     if not cs:
         sys.exit(1)
@@ -900,8 +978,8 @@ def main():
     if cmd == "gc":
         gc_main(sys.argv[2:])
         return
-    if cmd in ("objkey", "objfiles"):
-        obj_main(cmd, root, sys.argv[3] if len(sys.argv) > 3 else "arm")
+    if cmd in ("objkey", "objfiles", "objstage"):
+        obj_main(cmd, root, sys.argv[3] if len(sys.argv) > 3 else "arm", sys.argv[4:])
         return
     ks = Keys(root)
     if cmd == "keys":

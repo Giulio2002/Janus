@@ -24,12 +24,15 @@ entry is kept only if it verifies completely (HMAC and every file); otherwise it
 and replaced.
 
     bcache.py fetch  KIND CACHE ID DEST [--clean-glob G ...]   0 hit/current, 2 miss, 3 rejected
-    bcache.py store  KIND CACHE ID SRC [--inputs FILE] < NUL-separated relative paths of SRC
-    bcache.py verify KIND CACHE ID                              0 valid, 2 miss, 3 invalid
+    bcache.py store  KIND CACHE ID SRC [--inputs FILE] [--c-root LAKE --recompile N|all] < NUL-separated relative paths of SRC
+                      (armobj: an existing valid entry is replaced if recompiling N of its objects from the C under
+                      LAKE gives other bytes: a poisoned entry cannot stay)
+    bcache.py verify KIND CACHE ID [--c-root LAKE --recompile N|all]   0 valid, 2 miss, 3 invalid / POISONED
     bcache.py prune-armasl LAKEDIR MODEL_ARMASL_DIR             drop built ArmASL modules the current model lacks
     bcache.py key-path                                          where the per-user key lives
 
-KIND is armasl (CACHE/<id>), sail (CACHE/sail/<id>) or mod (CACHE/mods/<id[:2]>/<id>).
+KIND is armasl (CACHE/<id>), sail (CACHE/sail/<id>), mod (CACHE/mods/<id[:2]>/<id>) or armobj (CACHE/armobj/<id>;
+only build/ir/**.c.o.* files are allowed in it, checked at store, fetch and verify).
 The HMAC key: $JANUS_CACHE_KEY_DIR/asl-cache.key, default ~/.cache/janus/asl-cache-key/asl-cache.key (32 random
 bytes, mode 0600, directory 0700, ours, not a symlink; created atomically on first use). When it
 cannot be read or created safely, the cache is not used at all (exit 4: the caller builds).
@@ -467,9 +470,107 @@ def _sweep_temps(dest, man):
                     pass
 
 
+# ---- compiled-object entries (armobj): the trace's compile command, and recompiling to audit an entry ----
+
+def trace_facts(data):
+    """(output hash, [(path, hash) of the traced inputs], compile argv or None) of a Lake `.c.o.*.trace`."""
+    t = json.loads(data.decode("utf-8"))
+    outputs = t.get("outputs")
+    pairs = []
+
+    def walk(x):
+        if isinstance(x, list):
+            if len(x) == 2 and isinstance(x[0], str) and isinstance(x[1], str):
+                pairs.append((x[0], x[1]))
+            for y in x:
+                walk(y)
+
+    walk(t.get("inputs", []))
+    argv = None
+    for m in t.get("log", []):
+        msg = m.get("message", "") if isinstance(m, dict) else ""
+        if msg.startswith(".> ") and " -c " in msg and " -o " in msg:
+            argv = shlex.split(msg[3:])
+            break
+    return outputs, pairs, argv
+
+
+def recompile_argv(argv, c_path, out_path):
+    """The logged compile command with its output and C file replaced (nothing else is touched)."""
+    res, i, seen_o, seen_c = [], 0, False, False
+    while i < len(argv):
+        a = argv[i]
+        if a == "-o" and i + 1 < len(argv):
+            res += ["-o", out_path]
+            i += 2
+            seen_o = True
+            continue
+        if a.endswith(".c") and not seen_c and i > 0 and argv[i - 1] not in ("-I", "-isystem", "-include"):
+            res.append(c_path)
+            seen_c = True
+        else:
+            res.append(a)
+        i += 1
+    if not (seen_o and seen_c):
+        raise CacheError("the logged compile command has no -o / C file to replace")
+    return res
+
+
+def recompile_object(argv, c_path, work):
+    """Compile c_path with the logged command into a file under work; returns its SHA-256."""
+    out = os.path.join(work, "recompiled.o")
+    r = subprocess.run(recompile_argv(argv, c_path, out), cwd=os.path.dirname(c_path), capture_output=True, timeout=7200)
+    if r.returncode != 0:
+        raise CacheError("recompile failed: %s" % r.stderr.decode("utf-8", "replace")[-300:])
+    return sha_file(out)
+
+
+def recompile_entry(kind, cache, ident, c_root, sample):
+    """Recompile objects of the (verified) entry from the C files under c_root with the command each trace logged,
+    and compare the SHA-256 with the entry's. sample: an int (that many objects, smallest C first) or "all".
+    Returns (checked, [mismatching rel paths]). A C file that does not hash to the entry's .cin record, or a trace
+    without a compile command, is an error (inconclusive), never a pass."""
+    if kind != "armobj":
+        raise CacheError("--recompile is for armobj entries")
+    e = entry_dir(kind, cache, ident)
+    return recompile_dir(e, verify_entry(kind, cache, ident), c_root, sample, cache)
+
+
+def recompile_dir(e, man, c_root, sample, cache):
+    objs = []
+    for rel in sorted(man):
+        m = re.match(r"^(.*\.c)\.o\.(export|noexport)$", rel)
+        if m:
+            cp = os.path.join(c_root, m.group(1))
+            try:
+                objs.append((os.stat(cp).st_size, rel, cp))
+            except OSError:
+                raise CacheError("no C file %s under %s to recompile %s" % (m.group(1), c_root, rel))
+    objs.sort()
+    if sample != "all":
+        objs = objs[:int(sample)]
+    bad = []
+    work = tempfile.mkdtemp(prefix=".recompile-", dir=cache)
+    try:
+        for _, rel, cp in objs:
+            with open(os.path.join(e, "tree", rel + ".cin")) as f:
+                cin = f.read().strip()
+            if sha_file(cp) != cin:
+                raise CacheError("the C file of %s does not hash to the entry's record" % rel)
+            with open(os.path.join(e, "tree", rel + ".trace"), "rb") as f:
+                _, _, argv = trace_facts(f.read())
+            if argv is None:
+                raise CacheError("the trace of %s has no compile command" % rel)
+            if recompile_object(argv, cp, work) != man[rel]:
+                bad.append(rel)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return len(objs), bad
+
+
 # ---- store ----
 
-def store(kind, cache, ident, src, rels, inputs=None):
+def store(kind, cache, ident, src, rels, inputs=None, recompile=None):
     """Publish the files rels (relative to src) as the entry ident. Returns "stored" or "present"."""
     e = entry_dir(kind, cache, ident)
     os.makedirs(os.path.dirname(e), exist_ok=True)
@@ -483,6 +584,10 @@ def store(kind, cache, ident, src, rels, inputs=None):
         if os.path.isdir(e):
             try:
                 verify_entry(kind, cache, ident)
+                if recompile:  # (c_root, sample): a recompile that disagrees proves the stored objects poisoned
+                    n, bad = recompile_entry(kind, cache, ident, recompile[0], recompile[1])
+                    if bad:
+                        raise CacheError("recompiling %d object(s) gives other bytes than the entry holds (%s)" % (len(bad), bad[0]))
                 return "present"
             except CacheError as ex:
                 print("cache: replacing the invalid entry %s (%s)" % (e, ex), file=sys.stderr)
@@ -501,6 +606,10 @@ def store(kind, cache, ident, src, rels, inputs=None):
                 os.chmod(d, (os.stat(s).st_mode & 0o111) | 0o444)
                 lines.append("%s  %s\n" % (sha_file(d), r))
             data = "".join(lines).encode()
+            if recompile and kind == "armobj":  # never publish an object that does not recompile bit-identically
+                n, bad = recompile_dir(tmp, parse_manifest(data), recompile[0], recompile[1], os.path.dirname(e))
+                if bad:
+                    raise CacheError("refusing to store: %d recompiled object(s) differ from the files to store (%s)" % (len(bad), bad[0]))
             with open(os.path.join(tmp, "MANIFEST.sha256"), "wb") as f:
                 f.write(data)
             with open(os.path.join(tmp, "MANIFEST.hmac"), "w") as f:
@@ -552,7 +661,10 @@ def main(argv):
             except CacheError as ex:
                 print("cache: %s; not storing" % ex, file=sys.stderr)
                 return EX_NOKEY
-            print(store(kind, cache, ident, argv[4], rels, inputs))
+            rc = None
+            if "--recompile" in argv:
+                rc = (argv[argv.index("--c-root") + 1], argv[argv.index("--recompile") + 1])
+            print(store(kind, cache, ident, argv[4], rels, inputs, rc))
             return 0
         if cmd == "verify":
             try:
@@ -563,6 +675,13 @@ def main(argv):
                     return EX_MISS
                 print("invalid: %s" % ex)
                 return EX_REJECT
+            if "--recompile" in argv:
+                n, bad = recompile_entry(kind, cache, ident, argv[argv.index("--c-root") + 1], argv[argv.index("--recompile") + 1])
+                if bad:
+                    print("POISONED: %d of %d recompiled objects differ from the entry: %s" % (len(bad), n, ", ".join(bad[:5])))
+                    return EX_REJECT
+                print("valid (%d objects recompiled bit-identically)" % n)
+                return 0
             print("valid")
             return 0
     except CacheError as ex:

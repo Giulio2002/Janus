@@ -288,17 +288,20 @@ objcache_restore() {  # objcache_restore [arm|jasl]
 
 objcache_publish() {  # objcache_publish [arm|jasl]
   [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
-  local id rc=0 out fl sc="${1:-arm}"
-  id=$(python3 -I "$pkg/tools/asl_mod_cache.py" objkey "$root" "$sc" 2>/dev/null) || return 0
-  fl=$(mktemp "${TMPDIR:-/tmp}/asl-obj-files.XXXXXX")
-  # an incomplete object set (a C file without its object) is not stored: objfiles then fails
-  if python3 -I "$pkg/tools/asl_mod_cache.py" objfiles "$root" "$sc" > "$fl" 2>/dev/null && [ -s "$fl" ]; then
-    out=$(python3 -I "$root/scripts/lib/bcache.py" store armobj "$ASL_CACHE" "$id" "$pkg/.lake" < "$fl") || rc=$?
+  local id rc=0 out sc="${1:-arm}" st fl n="${ASL_OBJ_RECOMPILE:-3}" rcf=()
+  st=$(mktemp -d "${TMPDIR:-/tmp}/asl-obj-stage.XXXXXX") || return 0
+  fl="$st.list"
+  # objstage: every object's trace/hash must bind to the CURRENT C, the compiler must be the keyed one, and the
+  # copy it makes is what gets signed. Then store recompiles the $n smallest objects (ASL_OBJ_RECOMPILE=N|all|0)
+  # and refuses the entry if they differ; an existing entry that fails the same recompile is replaced.
+  if id=$(python3 -I "$pkg/tools/asl_mod_cache.py" objstage "$root" "$sc" "$st" "$fl" 2>"$st.err") && [ -s "$fl" ]; then
+    [ "$n" = 0 ] || rcf=(--c-root "$pkg/.lake" --recompile "$n")
+    out=$(python3 -I "$root/scripts/lib/bcache.py" store armobj "$ASL_CACHE" "$id" "$st" ${rcf[@]+"${rcf[@]}"} < "$fl") || rc=$?
+    [ $rc = 0 ] && echo "asl cache: C objects [$sc] $id: $out" || echo "asl cache: C objects [$sc] not stored (rc $rc)"
   else
-    rm -f "$fl"; echo "asl cache: C objects incomplete; not stored"; return 0
+    echo "asl cache: C objects [$sc] not stored: $(tail -n 3 "$st.err" 2>/dev/null | tr '\n' ' ')"
   fi
-  rm -f "$fl"
-  [ $rc = 0 ] && echo "asl cache: C objects [$sc] $id: $out" || echo "asl cache: C objects not stored (rc $rc)"
+  rm -rf "$st" "$fl" "$st.err"
 }
 
 unpack() {
