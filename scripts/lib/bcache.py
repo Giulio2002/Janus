@@ -629,7 +629,7 @@ def recompile_argv(argv, c_path, out_path):
 
 
 def _sandbox_prefix(work, c_dir):
-    """The command prefix that runs a recompile with no network, a read-only filesystem except `work`, a private /tmp,
+    """The command prefix that runs a recompile with no network, a read-only filesystem except `work`, TMPDIR on the work dir,
     its own pid namespace and no capabilities (bubblewrap, as cmd/janus/sandbox.go prefers). [] when bwrap is missing
     or unusable here: the recompile then runs as the keyed toolchain clang with a scrubbed temp dir and stdin closed,
     which is only as safe as argv_problem() (a fixed shape: toolchain clang, no -fplugin/@file/-include) makes it."""
@@ -637,7 +637,7 @@ def _sandbox_prefix(work, c_dir):
     if not bw or os.environ.get("ASL_OBJ_RECOMPILE_NOSANDBOX") == "1":
         return []
     return [bw, "--unshare-net", "--unshare-pid", "--unshare-ipc", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
-            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--bind", work, work, "--chdir", c_dir, "--"]
+            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--bind", work, work, "--chdir", c_dir, "--"]
 
 
 def recompile_object(argv, c_path, work):
