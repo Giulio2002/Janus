@@ -11,6 +11,15 @@ extension), which evaluates `X` -- e.g. `revContainersNat 8 1 (readLE (m.writeLE
 the whole write chain -- and dies with "(kernel) deep recursion detected" (arm64
 `(*Int).SetBytes1..31`: a store of zero limbs before a load). These copies have propositional
 (non-`rfl`) proofs, so `simp` records an `Eq` step that the kernel checks syntactically.
+
+## `reduceCtorEq`
+
+The default simproc `reduceCtorEq` treats `(e + 1022) * 2 ^ 52` as a constructor application
+(`Nat.succ …`, after `whnf` unfolds the multiplication along the literal) and proves
+`(e + 1022) * 2 ^ 52 = 0` false by `Nat.noConfusion`; the kernel then has to compute
+`Nat.ctorIdx` of that term, i.e. unfold `Nat.mul` 2^52 times: "(kernel) deep recursion detected"
+(amd64 `(*Int).Float64`). The executor's simp contexts (`janus_run`, `janus64_run`) do not use it.
+A proof that calls `simp` itself on such an equation should write `simp [-reduceCtorEq]`.
 -/
 
 namespace Janus.Tactic

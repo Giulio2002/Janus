@@ -1357,7 +1357,8 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
       if let some t0 := thms[0]? then
         thms := thms.set! 0 (← t0.add (.other (Name.mkNum `janus64_state k)) #[] h)
     ctx := ctx.setSimpTheorems thms
-    let mut simprocs := r.simprocs.push (← Simp.getSimprocs)
+    -- no `reduceCtorEq` (see `Janus.Tactic.KernelSafe`)
+    let mut simprocs := r.simprocs.push ((← Simp.getSimprocs).erase ``reduceCtorEq)
     let mut extra : Simp.Simprocs := {}
     extra ← extra.add ``reduceDataReadD64 (post := true)
     extra ← extra.add ``reduceSetRegFRestore (post := true)
