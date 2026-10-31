@@ -904,7 +904,12 @@ def obj_audit(root, scope, cache):
             os.rename(e, q)
         print("objaudit: quarantined %s" % q)
     print("objaudit [%s]: %d objects compared, %d without a fresh counterpart, %d poisoned" % (scope, checked, unchecked, len(set(poisoned))))
-    return 3 if poisoned else 0
+    if poisoned:
+        return 3
+    if checked == 0:  # fail closed: an audit that compared nothing proves nothing (no cold objects, or no entries)
+        print("objaudit [%s]: NOTHING WAS COMPARED: the audit did not run" % scope)
+        return 4
+    return 0
 
 
 def obj_main(cmd, root, scope="arm", extra=()):
