@@ -432,6 +432,19 @@ def quarantine(e, cache):
         lk.close()
 
 
+def mod_path_ok(mod, rel):
+    """rel (relative to the package dir, as restore_one sees it) is one of module mod's own build outputs and nothing
+    else: <.lake/build/lib/lean|ir>/<dir of mod>/<last part of mod>.<something>, not a .setup.json. A module entry is
+    HMAC-signed by whoever publishes it; what it may write is limited here (the armobj kind has the same allowlist idea)."""
+    parts = mod.split(".")
+    for sub in ("lib/lean", "ir"):
+        d = "/".join([".lake", "build"] + sub.split("/") + parts[:-1])
+        r = rel.replace(os.sep, "/")
+        if os.path.dirname(r) == d and os.path.basename(r).startswith(parts[-1] + ".") and not r.endswith(".setup.json"):
+            return True
+    return False
+
+
 def restore_one(ks, p, mod, key, e):
     """Copy the entry e of mod into p's build (the caller holds e's lock shared). The manifest must
     carry a valid HMAC; every copied file is hashed and compared with it. Any failure (no HMAC, a
@@ -446,15 +459,22 @@ def restore_one(ks, p, mod, key, e):
     try:
         man = bc.read_signed_manifest("mod", key, e)
         # tree/<package>/<path relative to the package dir>
+<<<<<<< HEAD
         # legacy entries carry compiled objects: never restored from here (is_object), only from a verified armobj entry
         rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items() if not is_object(r.split("/", 1)[1])}
+=======
+        rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items()}
+        for rel in rels:
+            if not mod_path_ok(mod, rel):
+                raise bc.CacheError("path %r is not an output of %s" % (rel, mod))
+>>>>>>> agent/speed-modobjaudit
         if all(os.path.isfile(os.path.join(p.dir, rel)) and not os.path.islink(os.path.join(p.dir, rel))
                and sha_file(os.path.join(p.dir, rel)) == h for rel, (_, h) in rels.items()):
             for rel, (_, h) in rels.items():
                 RESTORED[os.path.join(p.dir, rel)] = h
             return "same"
         for rel, (r, h) in rels.items():
-            src, dst = os.path.join(e, "tree", r), os.path.join(p.dir, rel)
+            src, dst = os.path.join(e, "tree", r), bc._safe_dst(p.dir, rel)  # refuses a symlinked component on the way
             bc._regular(src)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             tmp = bc._tmp_name(dst)
