@@ -222,6 +222,50 @@ verdict in `v1/replay/framework/<key>`, and reuses it:
   (`v1/replay/locks`): the first replays and records the verdict, the others then find it and do
   not replay (before, each started its own `leanchecker Janus`). A failing replay records nothing,
   and the regular replay then runs and reports leanchecker's error.
+* **Parallel replay** (`cmd/janus/replaypar.go`). `leanchecker Janus` is one process; the framework
+  replay instead runs several (`JANUS_REPLAY_WORKERS`, default 4; 1 selects the single process).
+  Soundness rests on what `leanchecker` does (`LeanChecker.lean` of the toolchain): it walks every
+  search-path directory for `*.olean` files, keeps every module whose name has the target as a
+  component-wise prefix (`Janus` itself and every `Janus.*`, including extra ones planted on the
+  path), and for each such module `m`, independently, reads `m`'s olean (the first search
+  directory with a `Janus` entry), imports `m`'s *imports* from their oleans (no replay of them
+  there) and replays only `m`'s **own** constants through the kernel. A module's check therefore
+  depends only on its own bytes and those of its imports, never on which other modules the same
+  process replays, so splitting the set `S` of scanned modules over processes checks each
+  declaration exactly as often as before (once) provided the union of the processes' modules is
+  `S`. Targets are name prefixes, so a module with descendants cannot be named alone: the units are
+  (1) every top-level group of `S` below the root (a module with its descendants, replayed by one
+  target; leaves are groups of one) and (2) the root module `Janus`, replayed from a byte-identical
+  copy of its olean (and server/private parts) installed under the name `JanusReplayRoot` in a
+  janus-made, read-only directory appended to that one worker's search path; a replay reads only
+  the file's bytes (the module data does not contain its own name), so the copy is checked exactly
+  like the original, no descendant is replayed with it, and the copy is checked against the
+  framework pin before use. Guarantees: (a) `S` is computed by mirroring `leanchecker`'s discovery
+  (all search directories: `LEAN_PATH`, then the toolchain library), the plan is built from `S`
+  and re-checked (`checkUnitCoverage`: every module of `S` covered by exactly one unit, each
+  unit's recorded coverage equals what its target replays among `S`, nothing else), and every
+  pinned framework module must be in `S`; (b) every worker runs `leanchecker -v` and its
+  `replaying <module>` lines must be exactly the modules its targets cover, each once, so a
+  module that `leanchecker` replays under a planned target but the scan did not list is a failure
+  (an unplanned line); a module under no planned target cannot exist in the supported layouts,
+  because there the scan lists exactly the `*.olean` files `leanchecker` discovers (see the
+  restriction below), and `leanchecker` names a module only by that discovery;
+  (c) a worker that errors, is killed, exits 0 without the
+  expected lines, or reports an unplanned module fails the replay, and the first failing worker's
+  `leanchecker` output is reported; nothing is recorded; (d) the verdict is recorded only after
+  every worker passed, with the same key (toolchain identity and framework pins), MAC and
+  content as before; it still means "every module `leanchecker Janus` replays passed". Restriction:
+  the scan is exact only for plain-identifier module names, absolute, non-nested, symlink-free
+  search directories and regular `*.olean` files under `Janus/`; any other layout (a relative or
+  nested `LEAN_PATH` entry, a symlink under `Janus`, a component such as `Foo.bar`, a directory
+  named like an olean) makes the plan unsupported and janus runs the single `leanchecker Janus`
+  process, which replays everything by construction. No new tool, no interpreter: the same
+  `leanchecker`, the same sandbox (the extra directory is mounted read-only like every search
+  directory). Tests: `cmd/janus/replaypar_test.go` (scan, plan, coverage mutations, a forged
+  declaration in each kind of partition including the root alias and an extra module, killed
+  workers, missing output, a deleted module, fallback, verdict recording) and the real-leanchecker
+  tests `TestParallelFrameworkReplayMatchesSingleProcess` (same module set as `leanchecker -v
+  Janus`) and `TestParallelFrameworkReplayCatchesForgeryInEveryPartition`.
 * **Eviction.** A verification that uses the verdict holds its use lock (`<key>.use`) shared until
   it ends; the collector removes a verdict only under that lock, taken exclusively without
   waiting. A removed verdict only makes the next verification replay the framework again.

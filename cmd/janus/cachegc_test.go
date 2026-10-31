@@ -173,6 +173,12 @@ func TestCacheGCLRUOrder(t *testing.T) {
 	f1 := f.locked("framework/f1", mb, 5*time.Hour, ".ready") // priority 2.5 h
 	a2 := f.locked("asl/a2", mb, 6*time.Hour)                 // priority 1.5 h
 	want := []string{c1, a1, c2, f1}
+	// The collector creates v1/tmp (its trash) on first use; on a disk-backed TMPDIR that
+	// directory occupies a block (tmpfs: none), which would count against the budget below
+	// although it is not an entry. Make it first, so the budget is exactly the entries' sizes.
+	if err := os.MkdirAll(f.p("tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	total := scanCache(f.root).total()
 	var drop int64
 	for _, p := range want {

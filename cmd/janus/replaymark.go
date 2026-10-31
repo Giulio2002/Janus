@@ -240,6 +240,12 @@ func startFrameworkReplay(checker string, run func(argv ...string) (string, erro
 }
 
 func startFrameworkReplayIn(vs verdictStore, checker string, run func(argv ...string) (string, error), key string, fw *pinnedLib, have bool, lease *fileLock, read, write bool) *fwReplay {
+	return startFrameworkReplayPar(vs, checker, run, nil, key, fw, have, lease, read, write)
+}
+
+// startFrameworkReplayPar is startFrameworkReplayIn with an optional parallel plan (par: see
+// replaypar.go); with nil it is the single `leanchecker Janus` process.
+func startFrameworkReplayPar(vs verdictStore, checker string, run func(argv ...string) (string, error), par *parReplay, key string, fw *pinnedLib, have bool, lease *fileLock, read, write bool) *fwReplay {
 	f := &fwReplay{key: key, have: have, lease: lease}
 	if have {
 		return f
@@ -259,7 +265,7 @@ func startFrameworkReplayIn(vs verdictStore, checker string, run func(argv ...st
 			}
 		}
 		f.ran = true
-		out, err := run(checker, "Janus")
+		out, err := runFrameworkReplay(checker, run, par, fw)
 		if err != nil {
 			f.out, f.err = out, err
 			return
