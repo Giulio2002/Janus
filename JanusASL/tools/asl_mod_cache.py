@@ -638,11 +638,15 @@ def obj_id(root, cs, scope="arm"):
     return sha_bytes(canonical(inp).encode())[:40]
 
 
-def obj_files(lake, cs):
-    """The object triples of every C file in cs; None if one is missing (nothing to publish)."""
+def obj_files(lake, cs, partial=False):
+    """The object triples of every C file in cs; None if one is missing (nothing to publish). partial: a C file
+    with no object at all is skipped (JanusASL: Lake compiles only what the executable links), one with an
+    incomplete triple still fails."""
     res = []
     for c in sorted(cs):
         found = [c + s[len(".c"):] for s in OBJ_SUFFIXES if os.path.isfile(os.path.join(lake, c + s[len(".c"):]))]
+        if partial and not found:
+            continue  # jasl scope: only the modules the executable links have an object
         if len(found) != 1:
             return None
         o = found[0]
@@ -663,8 +667,8 @@ def obj_main(cmd, root, scope="arm"):
     if cmd == "objkey":
         print(obj_id(root, cs, scope))
     else:
-        fl = obj_files(lake, cs)
-        if fl is None:
+        fl = obj_files(lake, cs, partial=(scope == "jasl"))
+        if not fl:
             sys.exit(1)
         sys.stdout.write("".join(x + "\0" for x in fl))
 

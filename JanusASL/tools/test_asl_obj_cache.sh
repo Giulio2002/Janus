@@ -68,6 +68,11 @@ ja=$(M objkey "$t/a" jasl); jb=$(M objkey "$t/deep/er/b" jasl)
 [ -n "$ja" ] && [ "$ja" = "$jb" ] && [ "$ja" != "$ida" ] && ok "the jasl scope has its own id, path independent" || bad "jasl id: $ja $jb $ida"
 M objfiles "$t/a" jasl | tr '\0' '\n' | grep -c . | grep -qx 3 && ok "jasl scope = 1 C file x 3" || bad "jasl objfiles"
 M objfiles "$t/a" | tr "\0" "\n" | { grep -c JanusASL/Check || true; } | grep -qx 0 && ok "arm scope still excludes JanusASL C" || bad "arm scope leaks"
+printf '// c\nint g;\n' > "$t/a/JanusASL/.lake/build/ir/JanusASL/NoObj.c"
+M objfiles "$t/a" jasl | tr '\0' '\n' | grep -c . | grep -qx 3 && ok "jasl: a C file without any object is skipped" || bad "jasl partial"
+rm "$t/a/JanusASL/.lake/build/ir/JanusASL/NoObj.c"
+rm "$t/a/JanusASL/.lake/build/ir/JanusASL/Check.c.o.export.trace"; expect 1 "jasl: an incomplete triple still refuses" M objfiles "$t/a" jasl
+echo '{}' > "$t/a/JanusASL/.lake/build/ir/JanusASL/Check.c.o.export.trace"
 expect 1 "an unknown scope is refused" M objkey "$t/a" bogus
 M objfiles "$t/a" jasl > "$t/fl"; expect 0 "store jasl scope" B store armobj "$cache" "$ja" "$t/a/JanusASL/.lake" < "$t/fl"
 expect 0 "fetch jasl scope into another path" B fetch armobj "$cache" "$jb" "$t/newj/.lake"
