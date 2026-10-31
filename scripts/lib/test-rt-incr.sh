@@ -116,6 +116,17 @@ grep -q "PARTIAL RUN: not a full gate" scripts/gate.sh && grep -q -- '--arg "run
 # ---- S7: JANUS_GATE_TREE0 may be set by scripts/gate.sh only (a dirty-tree operator cannot export a matching stamp)
 cd "$here"
 PROBE='if incr_under_gate; then echo UNDER; else echo NOT; fi'
+# HERMETIC: when this test runs as a child of the REAL gate (the gotest lane), the real scripts/gate.sh is an ancestor of every process started here, and the
+# product is right to say "under the gate" (a descendant of the real gate is trusted by definition). Every probe therefore runs ISOLATED: double-forked under
+# setsid and re-parented to init, so its ancestry holds only what the test builds on purpose (the fake checkout's gate.sh). The gate-exported stamp is unset first.
+unset JANUS_GATE_TREE0
+iso() { # SCRIPT-TEXT: run it detached from this process tree (cwd and environment kept), print its output
+  local o i; o="$(mktemp "$t/iso.XXXXXX")"
+  ( setsid bash -c "$1; echo done > '$o.done'" > "$o" 2>&1 < /dev/null & )
+  for ((i = 0; i < 1200; i++)); do [ -f "$o.done" ] && break; sleep 0.1; done
+  [ -f "$o.done" ] || { echo TIMEOUT; return; }
+  cat "$o"
+}
 # a fake CHECKOUT (own copy of incr.sh): its scripts/gate.sh is "the real gate" for that copy; every gate.sh elsewhere is a fake for the real incr.sh
 mkdir -p "$t/s7/scripts/lib" "$t/fake" "$t/fake2/sub"
 cp scripts/lib/incr.sh scripts/lib/incr-host.sh "$t/s7/scripts/lib/"
@@ -128,27 +139,35 @@ cat > "$t/fake/gate.sh" <<EOS
 . "$here/scripts/lib/incr.sh"; $PROBE
 EOS
 cp "$t/fake/gate.sh" "$t/fake2/sub/gate.sh"; cp "$t/fake/gate.sh" "$t/s7/scripts/other.sh"
-. scripts/lib/incr.sh
-incr_under_gate && bad "S7 a plain shell is taken for a gate" || ok "S7 outside the gate: incr_under_gate is false"
-[ "$(bash "$t/s7/scripts/gate.sh")" = UNDER ] && ok "S7 the checkout's own scripts/gate.sh (through a subshell, setsid and bash -c): accepted" || bad "S7 real gate not recognised"
-[ "$(cd "$t/s7" && bash scripts/gate.sh)" = UNDER ] && ok "S7 relative script path resolved against the cwd: accepted" || bad "S7 relative real gate not recognised"
-[ "$(bash -- "$t/s7/scripts/gate.sh")" = UNDER ] && ok "S7 bash -- <real gate>: accepted" || bad "S7 bash -- real gate"
-[ "$(env -i PATH="$PATH" bash "$t/s7/scripts/gate.sh")" = UNDER ] && ok "S7 env -i bash <real gate>: accepted" || bad "S7 env -i real gate"
-[ "$(python3 -I -c 'import os,sys; os.execv("/bin/bash", ["bash", sys.argv[1]])' "$t/s7/scripts/gate.sh")" = UNDER ] && ok "S7 python os.execv of bash <real gate>: accepted (the process IS a shell running it)" || bad "S7 execv real gate"
-[ "$(bash "$t/s7/scripts/other.sh")" = NOT ] && ok "S7 below another script of the checkout: false" || bad "S7 other.sh taken for the gate"
-[ "$(bash "$t/fake/gate.sh")" = NOT ] && ok "S7 a fake gate.sh in another directory: rejected" || bad "S7 fake gate.sh accepted"
-[ "$(cd "$t/fake" && bash gate.sh)" = NOT ] && ok "S7 a fake gate.sh named relative to its own cwd: rejected" || bad "S7 relative fake gate accepted"
-[ "$(cd "$t/fake" && bash -- gate.sh)" = NOT ] && ok "S7 bash -- gate.sh (fake): rejected" || bad "S7 bash -- fake accepted"
-[ "$(cd "$t/fake" && bash -s gate.sh < gate.sh)" = NOT ] && ok "S7 bash -s gate.sh (script on stdin): rejected" || bad "S7 bash -s accepted"
-[ "$(env -i PATH="$PATH" bash "$t/fake/gate.sh")" = NOT ] && ok "S7 env -i bash <fake>/gate.sh: rejected" || bad "S7 env -i fake accepted"
-[ "$(setsid --wait bash "$t/fake2/sub/gate.sh")" = NOT ] && ok "S7 setsid bash <fake>/gate.sh: rejected" || bad "S7 setsid fake accepted"
-[ "$(python3 -I -c 'import os,sys; os.execv("/bin/bash", ["bash", sys.argv[1]])' "$t/fake/gate.sh")" = NOT ] && ok "S7 python os.execv of bash <fake>/gate.sh: rejected" || bad "S7 execv fake accepted"
-[ "$(bash -ec "$(cat "$t/fake/gate.sh")
-# $t/s7/scripts/gate.sh")" = NOT ] && ok "S7 bash -ec <wrapper text naming gate.sh>: rejected" || bad "S7 bash -ec wrapper accepted"
-[ "$(cd "$t/fake" && bash -c ". $here/scripts/lib/incr.sh; $PROBE" x "$t/s7/scripts/gate.sh")" = NOT ] && ok "S7 gate.sh as a later argument of bash -c: rejected" || bad "S7 later argument accepted"
+cat > "$t/ec.txt" <<EOS
+$(cat "$t/fake/gate.sh")
+# $t/s7/scripts/gate.sh
+EOS
+PYX='import os,sys; os.execv("/bin/bash", ["bash", sys.argv[1]])'
+want() { # EXPECTED DESCRIPTION SCRIPT-TEXT
+  local got; got="$(iso "$3")"
+  [ "$got" = "$1" ] && ok "S7 $2" || bad "S7 $2 (got: $got)"
+}
+want NOT "outside the gate: incr_under_gate is false (a plain shell, isolated from any real gate above this test)" ". '$here/scripts/lib/incr.sh'; $PROBE"
+want UNDER "the checkout's own scripts/gate.sh (through a subshell, setsid and bash -c): accepted" "bash '$t/s7/scripts/gate.sh'"
+want UNDER "relative script path resolved against the cwd: accepted" "cd '$t/s7' && bash scripts/gate.sh"
+want UNDER "bash -- <real gate>: accepted" "bash -- '$t/s7/scripts/gate.sh'"
+want UNDER "env -i bash <real gate>: accepted" "env -i PATH='$PATH' bash '$t/s7/scripts/gate.sh'"
+want UNDER "python os.execv of bash <real gate>: accepted (the process IS a shell running it)" "python3 -I -c '$PYX' '$t/s7/scripts/gate.sh'"
+want NOT "below another script of the checkout: false" "bash '$t/s7/scripts/other.sh'"
+want NOT "a fake gate.sh in another directory: rejected" "bash '$t/fake/gate.sh'"
+want NOT "a fake gate.sh named relative to its own cwd: rejected" "cd '$t/fake' && bash gate.sh"
+want NOT "bash -- gate.sh (fake): rejected" "cd '$t/fake' && bash -- gate.sh"
+want NOT "bash -s gate.sh (script on stdin): rejected" "cd '$t/fake' && bash -s gate.sh < gate.sh"
+want NOT "env -i bash <fake>/gate.sh: rejected" "env -i PATH='$PATH' bash '$t/fake/gate.sh'"
+want NOT "setsid bash <fake>/gate.sh: rejected" "setsid --wait bash '$t/fake2/sub/gate.sh'"
+want NOT "python os.execv of bash <fake>/gate.sh: rejected" "python3 -I -c '$PYX' '$t/fake/gate.sh'"
+want NOT "bash -ec <wrapper text naming gate.sh>: rejected" "bash -ec \"\$(cat '$t/ec.txt')\""
+want NOT "gate.sh as a later argument of bash -c: rejected" "cd '$t/fake' && bash -c \". '$here/scripts/lib/incr.sh'; $PROBE\" x '$t/s7/scripts/gate.sh'"
 ln -sfn "$t/s7/scripts/gate.sh" "$t/fake/link-gate.sh"
-[ "$(bash "$t/fake/link-gate.sh")" = UNDER ] && ok "S7 a symlink to the real gate.sh IS the real script (resolved path): accepted" || bad "S7 symlink case"
-[ "$(JANUS_GATE_TREE0=forged-by-operator bash -c '. scripts/lib/incr.sh; incr_under_gate || unset JANUS_GATE_TREE0; echo "${JANUS_GATE_TREE0-unset}"')" = unset ] && ok "S7 a stamp exported by an operator is dropped" || bad "S7 forged stamp survived"
+want UNDER "a symlink to the real gate.sh IS the real script (resolved path): accepted" "bash '$t/fake/link-gate.sh'"
+want unset "a stamp exported by an operator is dropped (isolated from any real gate)" "JANUS_GATE_TREE0=forged-by-operator bash -c '. scripts/lib/incr.sh; incr_under_gate || unset JANUS_GATE_TREE0; echo \"\${JANUS_GATE_TREE0-unset}\"'"
+# and the premise of the hermetic design, checked whenever this test is itself below a real gate: an UNisolated probe may say UNDER (correct for the product)
 a=$(grep -n 'incr_under_gate || unset JANUS_GATE_TREE0' scripts/verify-all-examples.sh | head -1 | cut -d: -f1); b=$(grep -n '^incr_tree_pin' scripts/verify-all-examples.sh | head -1 | cut -d: -f1)
 [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "S7 verify-all-examples.sh drops a foreign stamp before it pins the tree" || bad "S7 verify-all-examples.sh does not clear JANUS_GATE_TREE0 ($a, $b)"
 grep -rn 'export JANUS_GATE_TREE0\|JANUS_GATE_TREE0=' scripts audit --include=*.sh | grep -v -e 'scripts/lib/incr.sh' -e 'scripts/lib/test-' -e '^\S*:[0-9]*:\s*#' | grep -q . && bad "S7 another script sets JANUS_GATE_TREE0" || ok "S7 only scripts/lib/incr.sh (called by gate.sh) sets JANUS_GATE_TREE0"
