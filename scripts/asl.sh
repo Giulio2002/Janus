@@ -269,39 +269,22 @@ modcache_publish() {  # modcache_publish [--exe]
   cache_gc
 }
 
-# ---- the compiled C objects of ArmASL and lean-sail (ASL_CACHE/armobj; asl_mod_cache.py "Compiled objects") ----
-# Looked up after `lake build ArmASL` has emitted this tree's C: the entry id hashes every emitted .c, so it is
-# used only if they all match; HMAC + per-file SHA-256 as for the other entries; Lake still checks each object's trace.
-objcache_restore() {  # objcache_restore [arm|jasl]
+# ---- the compiled C objects (ASL_CACHE/armobj; asl_mod_cache.py "Compiled objects", docs/ASL.md) ----
+# Scopes: arm (ArmASL parts + lean-sail: one entry, keyed by all their C) and jasl / janus (the JanusASL and Janus
+# libraries: one entry per object, so one changed module recompiles only itself). Looked up after the C exists (the
+# id hashes each C and the compiler binary); HMAC + per-file SHA-256 + path allowlist as for the other entries.
+# Publishing binds each object's trace/hash to the current C and the keyed compiler, then recompiles the
+# ASL_OBJ_RECOMPILE (default 3; N|all|0) smallest objects and refuses/replaces an entry that differs.
+objcache_restore() {  # objcache_restore arm|jasl|janus
   [ -n "${ASL_CACHE:-}" ] || return 0
-  local id rc=0 out sc="${1:-arm}"
-  id=$(python3 -I "$pkg/tools/asl_mod_cache.py" objkey "$root" "$sc" 2>/dev/null) || return 0
-  out=$(python3 -I "$root/scripts/lib/bcache.py" fetch armobj "$ASL_CACHE" "$id" "$pkg/.lake") || rc=$?
-  case $rc in
-    0) echo "asl cache: C objects [$sc] $id: $out ($ASL_CACHE)" ;;
-    2) echo "asl cache: no entry for the C objects [$sc] $id ($ASL_CACHE); compiling" ;;
-    3) echo "asl cache: the entry for the C objects [$sc] $id was REJECTED (above); compiling" ;;
-    *) echo "asl cache: C objects not usable here (above); compiling" ;;
-  esac
+  python3 -I "$pkg/tools/asl_mod_cache.py" objrestore "$root" "${1:-arm}" "$ASL_CACHE" || echo "asl cache: C objects [${1:-arm}] not usable here (above); compiling"
   return 0
 }
 
-objcache_publish() {  # objcache_publish [arm|jasl]
+objcache_publish() {  # objcache_publish arm|jasl|janus
   [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
-  local id rc=0 out sc="${1:-arm}" st fl n="${ASL_OBJ_RECOMPILE:-3}" rcf=()
-  st=$(mktemp -d "${TMPDIR:-/tmp}/asl-obj-stage.XXXXXX") || return 0
-  fl="$st.list"
-  # objstage: every object's trace/hash must bind to the CURRENT C, the compiler must be the keyed one, and the
-  # copy it makes is what gets signed. Then store recompiles the $n smallest objects (ASL_OBJ_RECOMPILE=N|all|0)
-  # and refuses the entry if they differ; an existing entry that fails the same recompile is replaced.
-  if id=$(python3 -I "$pkg/tools/asl_mod_cache.py" objstage "$root" "$sc" "$st" "$fl" 2>"$st.err") && [ -s "$fl" ]; then
-    [ "$n" = 0 ] || rcf=(--c-root "$pkg/.lake" --recompile "$n")
-    out=$(python3 -I "$root/scripts/lib/bcache.py" store armobj "$ASL_CACHE" "$id" "$st" ${rcf[@]+"${rcf[@]}"} < "$fl") || rc=$?
-    [ $rc = 0 ] && echo "asl cache: C objects [$sc] $id: $out" || echo "asl cache: C objects [$sc] not stored (rc $rc)"
-  else
-    echo "asl cache: C objects [$sc] not stored: $(tail -n 3 "$st.err" 2>/dev/null | tr '\n' ' ')"
-  fi
-  rm -rf "$st" "$fl" "$st.err"
+  python3 -I "$pkg/tools/asl_mod_cache.py" objpublish "$root" "${1:-arm}" "$ASL_CACHE" "${ASL_OBJ_RECOMPILE:-3}" || echo "asl cache: C objects [${1:-arm}] not stored (above)"
+  return 0
 }
 
 unpack() {
@@ -370,11 +353,13 @@ build_phase() {
   modcache_restore
   objcache_restore arm
   objcache_restore jasl
+  objcache_restore janus
   lake_asl build ArmASL JanusASL janus-asl-check
   cache_publish
   modcache_publish --exe
   objcache_publish arm
   objcache_publish jasl
+  objcache_publish janus
 }
 
 # Is this model in the (verified) build cache? 0 = yes, entry present and every file matches its signed manifest.

@@ -594,12 +594,23 @@ OBJ_SCHEME = "janusasl-obj-cache-v2"
 OBJ_SUFFIXES = (".c.o.export", ".c.o.noexport")
 
 
+PER_OBJECT = ("jasl", "janus")  # one entry per object (a changed module recompiles only itself); "arm" is one entry
+
+
+def scope_lake(root, scope):
+    """The .lake directory whose build/ir holds the scope's C: JanusASL/.lake (arm, jasl) or the root's (janus)."""
+    return os.path.join(root, ".lake") if scope == "janus" else os.path.join(root, "JanusASL", ".lake")
+
+
 def obj_dirs(lake, scope="arm"):
     """(directory under .lake, filter on the first path component) holding the C of the scope:
-    "arm" = ArmASL and Sail (known after `lake build ArmASL`), "jasl" = the JanusASL library (its C is restored
-    with the module entries; the object of a huge proof module, e.g. JanusASL.Proofs.Config, costs ~10 min)."""
+    "arm" = ArmASL and Sail (known after `lake build ArmASL`), "jasl" = the JanusASL library, "janus" = the Janus
+    library of the root package (their C is restored with the module entries; the object of a huge proof module,
+    e.g. JanusASL.Proofs.Config, costs ~10 min)."""
     if scope == "jasl":
         return [(os.path.join(lake, "build", "ir"), lambda n: n == "JanusASL.c" or n == "JanusASL")]
+    if scope == "janus":
+        return [(os.path.join(lake, "build", "ir"), lambda n: n == "Janus.c" or n == "Janus")]
     return [(os.path.join(lake, "build", "ir"), lambda n: n == "ArmASL.c" or n == "ArmASL"),
             (os.path.join(lake, "packages", "Sail", ".lake", "build", "ir"), lambda n: True)]
 
@@ -621,9 +632,14 @@ def obj_c_files(lake, scope="arm"):
     return out
 
 
+_CC = {}
+
+
 def obj_compiler(root):
     """(path, SHA-256 of its content) of the C compiler Lake runs: LEAN_CC when set (the binary it names), else
     <lean --print-prefix>/bin/clang. Hashed by content NOW, so a shim at the same path is another id."""
+    if root in _CC:
+        return _CC[root]
     akey = load_armasl_key(root)
     cc = os.environ.get("LEAN_CC")
     if cc:
@@ -634,30 +650,52 @@ def obj_compiler(root):
         p = os.path.join(pre, "bin", "clang")
     p = os.path.realpath(p)
     try:
-        return p, akey.sha(akey.read(p))
+        _CC[root] = (p, akey.sha(akey.read(p)))
     except OSError:
         sys.exit("asl_mod_cache: cannot read the compiler %s" % p)
+    return _CC[root]
 
 
-def obj_tables(root):
-    """The lean_lib JanusASL and lean_exe janus-asl-check tables of JanusASL/lakefile.toml, whole (leancArgs,
-    moreLeancArgs, weakLeancArgs, moreLinkArgs, roots, ...): Lake's trace does not cover the weak arguments."""
+def obj_tables(root, scope="jasl"):
+    """The lean_lib/lean_exe tables of the scope's package, whole (leancArgs, moreLeancArgs, weakLeancArgs,
+    moreLinkArgs, roots, ...): Lake's trace does not cover the weak arguments. jasl: lean_lib JanusASL and lean_exe
+    janus-asl-check of JanusASL/lakefile.toml; janus: lean_lib Janus (and every lean_exe) of the root lakefile.toml."""
     import tomllib
-    path = os.path.join(root, "JanusASL", "lakefile.toml")
+    path = os.path.join(root, "lakefile.toml" if scope == "janus" else os.path.join("JanusASL", "lakefile.toml"))
     with open(path, "rb") as f:
         cfg = tomllib.load(f)
+    if scope == "janus":
+        return {"lean_lib": [t for t in cfg.get("lean_lib", []) if t.get("name") == "Janus"], "lean_exe": cfg.get("lean_exe", []),
+                "package": {k: v for k, v in cfg.items() if k not in ("lean_lib", "lean_exe", "require")}}
     return {"lean_lib": [t for t in cfg.get("lean_lib", []) if t.get("name") == "JanusASL"],
             "lean_exe": [t for t in cfg.get("lean_exe", []) if t.get("name") == "janus-asl-check"]}
 
 
+_AKEY = {}
+
+
+def armasl_sha(root):
+    if root not in _AKEY:
+        akey = load_armasl_key(root)
+        _AKEY[root] = akey.sha(akey.canonical(akey.inputs(root)).encode())[:32]
+    return _AKEY[root]
+
+
 def obj_id(root, cs, scope="arm"):
-    akey = load_armasl_key(root)
-    inp = {"scheme": OBJ_SCHEME, "armasl": akey.sha(akey.canonical(akey.inputs(root)).encode())[:32],
+    inp = {"scheme": OBJ_SCHEME, "armasl": armasl_sha(root),
            "machine": platform.machine(), "c": cs, "compiler": obj_compiler(root)[1]}
     if scope != "arm":
         inp["scope"] = scope
-        inp["tables"] = obj_tables(root)
+        inp["tables"] = obj_tables(root, scope)
     return sha_bytes(canonical(inp).encode())[:40]
+
+
+def obj_units(root, scope, cs=None):
+    """[(id, {C: sha})]: one unit for arm, one per C file for the per-object scopes."""
+    cs = obj_c_files(scope_lake(root, scope), scope) if cs is None else cs
+    if scope in PER_OBJECT:
+        return [(obj_id(root, {c: h}, scope), {c: h}) for c, h in sorted(cs.items())]
+    return [(obj_id(root, cs, scope), cs)] if cs else []
 
 
 def obj_files(lake, cs, partial=False):
@@ -697,23 +735,19 @@ def no_symlink_path(lake, rel):
     return True
 
 
-def obj_stage(root, scope, stage, listfile):
-    """Publish-side checks, then copy the objects into `stage` (the entry is stored from THAT copy, so what is
-    checked is what is signed). Per object: all three files regular (no symlink on the way); the trace's recorded
-    output hash is the .hash, the trace's recorded hash of the C file is the .c.hash, and its compile command runs the
-    compiler this id was computed with; the SHA-256 of the C is taken again now and must be the one in the id; a .cin
-    record of it is written. Prints the id. Exit 1 on any failure (nothing is stored)."""
-    lake = os.path.join(root, "JanusASL", ".lake")
+def stage_unit(root, scope, lake, ident, cs, stage):
+    """Publish-side checks of one entry's objects, then copy them into `stage` (the entry is stored from THAT copy,
+    so what is checked is what is signed). Per object: all files regular, no symlink on the way; the trace's recorded
+    output hash is the .hash; the trace's recorded hash of the C file is the CURRENT .c.hash (and the path is this
+    C file); its compile command runs the compiler this id was computed with; the SHA-256 of the C is taken again
+    now and must be the one in the id; a .cin record of it is written. Returns the relative paths, [] if the unit
+    has no object at all (per-object scopes: Lake compiles only what the executable links); SystemExit on a lie."""
     bc = load_bcache(root)
-    cs = obj_c_files(lake, scope)
-    if not cs:
-        sys.exit("objstage: no C files")
-    ident = obj_id(root, cs, scope)
-    cc_path, cc_sha = obj_compiler(root)
+    cc_path = obj_compiler(root)[0]
     rels = []
     for c in sorted(cs):
         found = [c + s[len(".c"):] for s in OBJ_SUFFIXES if os.path.lexists(os.path.join(lake, c + s[len(".c"):]))]
-        if scope == "jasl" and not found:
+        if scope in PER_OBJECT and not found:
             continue
         if len(found) != 1:
             sys.exit("objstage: %s has %d objects" % (c, len(found)))
@@ -747,6 +781,17 @@ def obj_stage(root, scope, stage, listfile):
         with open(os.path.join(stage, o + ".cin"), "w") as f:
             f.write(cs[c] + "\n")
         rels.append(o + ".cin")
+    return rels
+
+
+def obj_stage(root, scope, stage, listfile, index=0):
+    """CLI/tests: stage unit `index`; prints its id."""
+    lake = scope_lake(root, scope)
+    units = obj_units(root, scope)
+    if not units or index >= len(units):
+        sys.exit("objstage: no C files")
+    ident, cs = units[index]
+    rels = stage_unit(root, scope, lake, ident, cs, stage)
     if not rels:
         sys.exit("objstage: nothing to store")
     with open(listfile, "wb") as f:
@@ -754,20 +799,87 @@ def obj_stage(root, scope, stage, listfile):
     print(ident)
 
 
+def obj_restore(root, scope, cache):
+    """Fetch every unit's entry that exists (HMAC + per-file SHA-256 + allowlist + symlink checks in bcache.fetch)."""
+    bc = load_bcache(root)
+    lake = scope_lake(root, scope)
+    hit = miss = rej = 0
+    try:
+        bc.hmac_key()
+    except bc.CacheError as ex:
+        print("asl cache: C objects [%s] not usable (%s); compiling" % (scope, ex))
+        return
+    for ident, cs in obj_units(root, scope):
+        try:
+            r = bc.fetch("armobj", cache, ident, lake)
+        except bc.CacheError as ex:
+            print("asl cache: the entry for the C objects [%s] %s was REJECTED (%s); compiling" % (scope, ident, ex))
+            rej += 1
+            continue
+        if r == "miss":
+            miss += 1
+        else:
+            hit += 1
+    print("asl cache: C objects [%s]: %d restored, %d without entry, %d rejected (%s)" % (scope, hit, miss, rej, cache))
+
+
+def obj_publish(root, scope, cache, sample):
+    """Store every unit that has objects (per-object scopes: one entry each; entries that already verify are kept).
+    `sample`: how many of the smallest objects are recompiled (an int or "all"; 0 = none)."""
+    bc = load_bcache(root)
+    lake = scope_lake(root, scope)
+    units = obj_units(root, scope)
+    sizes = sorted((sum(os.path.getsize(os.path.join(lake, c)) for c in cs), i) for i, (_, cs) in enumerate(units))
+    sample = "all" if sample == "all" else int(sample)
+    chosen = set(i for _, i in (sizes if sample == "all" else sizes[:sample]))
+    stored = present = skipped = failed = 0
+    for i, (ident, cs) in enumerate(units):
+        st = tempfile.mkdtemp(prefix=".objstage-", dir=os.path.dirname(os.path.join(cache, "armobj")))
+        try:
+            try:
+                rels = stage_unit(root, scope, lake, ident, cs, st)
+            except SystemExit as ex:
+                print("asl cache: C objects [%s] %s not stored: %s" % (scope, ident, ex))
+                failed += 1
+                continue
+            if not rels:
+                skipped += 1
+                continue
+            rc = (lake, str(sample)) if i in chosen and sample != 0 else None
+            try:
+                r = bc.store("armobj", cache, ident, st, rels, None, rc)
+            except bc.CacheError as ex:
+                print("asl cache: C objects [%s] %s not stored: %s" % (scope, ident, ex))
+                failed += 1
+                continue
+            stored += r == "stored"
+            present += r == "present"
+        finally:
+            shutil.rmtree(st, ignore_errors=True)
+    print("asl cache: C objects [%s]: stored %d, already cached %d, no object %d, refused %d (%s)" % (scope, stored, present, skipped, failed, cache))
+
+
 def obj_main(cmd, root, scope="arm", extra=()):
-    lake = os.path.join(root, "JanusASL", ".lake")
-    if scope not in ("arm", "jasl"):
+    lake = scope_lake(root, scope)
+    if scope not in ("arm", "jasl", "janus"):
         sys.exit("asl_mod_cache: unknown object scope %r" % scope)
     if cmd == "objstage":
-        obj_stage(root, scope, extra[0], extra[1])
+        obj_stage(root, scope, extra[0], extra[1], int(extra[2]) if len(extra) > 2 else 0)
+        return
+    if cmd == "objrestore":
+        obj_restore(root, scope, extra[0])
+        return
+    if cmd == "objpublish":
+        obj_publish(root, scope, extra[0], extra[1] if len(extra) > 1 else "3")
         return
     cs = obj_c_files(lake, scope)
     if not cs:
         sys.exit(1)
     if cmd == "objkey":
-        print(obj_id(root, cs, scope))
+        for ident, _ in obj_units(root, scope, cs):
+            print(ident)
     else:
-        fl = obj_files(lake, cs, partial=(scope == "jasl"))
+        fl = obj_files(lake, cs, partial=(scope in PER_OBJECT))
         if not fl:
             sys.exit(1)
         sys.stdout.write("".join(x + "\0" for x in fl))
@@ -970,7 +1082,7 @@ def main():
     if cmd == "gc":
         gc_main(sys.argv[2:])
         return
-    if cmd in ("objkey", "objfiles", "objstage"):
+    if cmd in ("objkey", "objfiles", "objstage", "objrestore", "objpublish"):
         obj_main(cmd, root, sys.argv[3] if len(sys.argv) > 3 else "arm", sys.argv[4:])
         return
     ks = Keys(root)
