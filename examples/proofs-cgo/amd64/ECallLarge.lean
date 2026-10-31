@@ -53,7 +53,7 @@ theorem go_spec (a : W64) : EnsuresC Extracted.program Contract.none goFn [a] (G
     generalize u.mem.readLE a.toNat 8 = x
     rw [← Janus.Arm64.Memory.writeLE_mod m _ 8 (_ + _ % _),
       ← Janus.Arm64.Memory.writeLE_mod m _ 8 (x + _)]
-    congr 1; omega
+    first | (with_reducible congr 1; omega) | (congr 1; omega)
   rw [hv]
   apply MemFrame.writeLE_both
   refine ⟨fun b n hb => ?_, fun b n w => ?_⟩

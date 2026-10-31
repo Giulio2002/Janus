@@ -63,7 +63,7 @@ theorem printnl_k (impl : List Segment)
     refine ⟨_, _, _, _, _, _, es, by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
     · janus_simp
     · janus_simp
-    · janus_simp; assumption
+    · janus_simp; (first | with_reducible assumption | assumption)
     · exact emits_congr hem (by dsimp only; readbytes_frame)
   all_goals kobl
 

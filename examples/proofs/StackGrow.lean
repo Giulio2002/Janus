@@ -1446,7 +1446,7 @@ theorem correctness (impl : List Segment) (R : RtInv) (S : PoolShape) (B : Nat) 
       · rw [hfr2.readLE _ _ (by
           simp only [outside_append, outside_cons, outside_nil, and_true]
           exact ⟨outside_rt_of_win hwrt (by omega) (by omega), by omega, by omega⟩)]
-        first | exact a1 | exact a2 | exact a3
+        first | with_reducible exact a1 | with_reducible exact a2 | with_reducible exact a3 | exact a1 | exact a2 | exact a3
     have hF2 : MemFrame s.mem m2 (R.rt ++ [(s.sp.toNat - 4288, s.sp.toNat + 24)]) :=
       MemFrame.trans hF1 hfr2 (sub_call' hb4)
     have hLF2 : LiveFrame s.mem m2 L [] := LiveFrame.trans hLF1 hlf2 (fun _ _ h => h)

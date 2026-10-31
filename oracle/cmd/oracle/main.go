@@ -35,7 +35,7 @@ func die(f string, a ...any) {
 
 func main() {
 	if len(os.Args) < 2 {
-		die("usage: oracle gen|harvest|run|report|minimize|selftest|seqgen [flags]")
+		die("usage: oracle gen|harvest|run|report|minimize|selftest|seqgen|svegen [flags]")
 	}
 	switch os.Args[1] {
 	case "gen":
@@ -52,6 +52,8 @@ func main() {
 		cmdMinimize(os.Args[2:])
 	case "seqgen":
 		cmdSeqgen(os.Args[2:])
+	case "svegen":
+		cmdSvegen(os.Args[2:])
 	default:
 		die("unknown command %q", os.Args[1])
 	}
@@ -189,6 +191,30 @@ func cmdGen(args []string) {
 			if k > 0 {
 				cw.add(r, "rand/"+cls, w, k)
 			}
+		}
+	}
+	cw.close()
+}
+
+// cmdSvegen writes the SVE / SME / Advanced SIMD&FP / SIMD load-store slice of the corpus: -n random words of each
+// top-level group (gen.SVESIMDGroups), one state each, deterministic for a seed. Class names gen/svesimd.<group>.
+func cmdSvegen(args []string) {
+	fs := flag.NewFlagSet("svegen", flag.ExitOnError)
+	n := fs.Int("n", 800, "words per group")
+	seed := fs.Uint64("seed", 1, "random seed")
+	out := fs.String("o", "svegen.jsonl", "output")
+	first := fs.Int("first-id", 30_000_000, "first case id")
+	fs.IntVar(&gen.DCZID, "dczid", gen.DCZID, "DCZID_EL0 of the reference machine (runner -dczid)")
+	fs.Parse(args)
+	r := rand.New(rand.NewPCG(*seed, 0x7376657369))
+	cw := newCaseWriter(*out, *first)
+	for i, g := range gen.SVESIMDGroups {
+		for k := 0; k < *n; k++ {
+			w := gen.SVESIMDWord(r, i)
+			for gen.Unpredictable(w) || !gen.Tested(gen.Classify(w)) {
+				w = gen.SVESIMDWord(r, i)
+			}
+			cw.add(r, "gen/svesimd."+g.Name, w, 1)
 		}
 	}
 	cw.close()

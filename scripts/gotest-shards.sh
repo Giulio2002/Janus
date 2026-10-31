@@ -15,7 +15,7 @@
 # The plan: `go test -list` gives the full list of tests (Test*, Example* and Fuzz* functions; benchmarks
 # are not run by `go test` either) of every package under ./cmd/...; they are dealt to the shards
 # longest first (greedy, onto the least loaded shard) using the measured durations in
-# cmd/janus/order_test.go (testDurations; unknown tests count $JANUS_GOTEST_UNKNOWN s, default 15).
+# cmd/janus/order_test.go (testDurations; unknown tests, i.e. the ones under 1 s, count $JANUS_GOTEST_UNKNOWN s, default 1).
 # Each shard runs `go test -count=1 -timeout 7000s -parallel P -v -run '^(T1|T2|...)$' PKG` for its
 # tests. Checks, each of which fails the script:
 #   before: the shards' test sets are disjoint and their union is the full list (no test unassigned,
@@ -45,7 +45,7 @@ done
 if [ -z "$nshards" ]; then
   nshards="${JANUS_JOBS:-2}"; [ "$nshards" -ge 2 ] || nshards=2; [ "$nshards" -le 8 ] || nshards=8
 fi
-unknown="${JANUS_GOTEST_UNKNOWN:-15}"
+unknown="${JANUS_GOTEST_UNKNOWN:-1}"
 mkdir -p "$outdir"; rm -f "$outdir"/shard-*.log "$outdir"/shard-*.rc "$outdir"/plan.txt
 
 # the list: "PKG<TAB>NAME"

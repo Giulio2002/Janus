@@ -28,6 +28,11 @@ Each label lemma ends in `Fin`: the fields a run never changes, and the comparis
 
 open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts Janus.Contracts.Mem
 
+/-- `assumption`, first at reducible transparency: the default-transparency `isDefEq` of a goal
+about `readLE m a 8` against an unrelated hypothesis unfolds `readLE` (exponentially, `whnf` does
+not cache terms with free variables); the default `assumption` stays as the fallback. -/
+local macro "fast_assumption" : tactic => `(tactic| first | with_reducible assumption | assumption)
+
 namespace Proof
 
 /-- The end of a run of `memequal` from the state `S` (at some label): `SP`, memory, `X18`,
@@ -316,7 +321,7 @@ theorem loop64 (j : Nat) : ∀ (S : State) (x y R : Nat), 1 ≤ j → R < 2 ^ 64
       (have hj0 : j = 0 := by omega
        subst hj0
        refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl, ?_⟩
-       try rw [decide_eq_true ⟨‹_›, ‹_›⟩]
+       try rw [decide_eq_true ⟨(by fast_assumption), (by fast_assumption)⟩]
        simp [setReg, ‹R % 64 = 0›])
     | -- a word differs: not equal
       (refine ⟨rfl, rfl, by simp [setReg], by simp [setReg], by simp [setReg], rfl, rfl, rfl, rfl, rfl, ?_⟩
@@ -333,7 +338,7 @@ theorem loop64 (j : Nat) : ∀ (S : State) (x y R : Nat), 1 ≤ j → R < 2 ^ 64
          (by simpa [setReg] using hl1) (by simpa [setReg] using hl2)) ?_
        intro S' hF
        exact Fin.of hF rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
-         (by (try rw [decide_eq_true ⟨‹_›, ‹_›⟩]); simp))
+         (by (try rw [decide_eq_true ⟨(by fast_assumption), (by fast_assumption)⟩]); simp))
     | -- the next chunk
       (refine rr_mono (ih _ (x + 64) (y + 64) R (by omega) hR rfl
          (by simp [setReg, ofNat_add64]) (by simp [setReg, ofNat_add64]) (by simp [setReg, h2])
@@ -343,7 +348,7 @@ theorem loop64 (j : Nat) : ∀ (S : State) (x y R : Nat), 1 ≤ j → R < 2 ^ 64
          (by simpa [setReg] using hl1) (by simpa [setReg] using hl2)) ?_
        intro S' hF
        exact Fin.of hF rfl rfl (by simp [setReg]) (by simp [setReg]) (by simp [setReg]) rfl rfl rfl
-         (by (try rw [decide_eq_true ⟨‹_›, ‹_›⟩]); simp))
+         (by (try rw [decide_eq_true ⟨(by fast_assumption), (by fast_assumption)⟩]); simp))
 
 theorem rr_mono' {p : Program} {ret : W64} {S : State} {Q Q' : State → Prop}
     (h : ReachesRet p ret S Q) (hQ : ∀ s', s'.pc = ret → Q s' → Q' s') : ReachesRet p ret S Q' := by

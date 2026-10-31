@@ -154,6 +154,28 @@ grp_probes() {
 
 }
 
+# The Lean side of fsqrt: `janus-asl-check --dump-asl` handles one case after the other in one process (the serial
+# part of the lane), and the cases are independent: split the case file into N pieces by lines, one process each
+# (`lake env`, a shared lock: the processes read the built package), and concatenate the outputs in order, so the
+# result is byte-identical to the single-process run. N: $RT_ASL_FSQRT_PAR (default 8).
+fsqrt_dump_parallel() { # CASES OUT ERR (cwd: JanusASL)
+  local cases=$1 out=$2 err=$3 n="${RT_ASL_FSQRT_PAR:-8}" i rc=0 pids=()
+  rm -f "$cases".part.* "$out".part.* "$err".part.*
+  split -n "l/$n" -d -a 2 "$cases" "$cases.part." || return 1
+  for p in "$cases".part.*; do
+    i=${p##*.part.}
+    lake env .lake/build/bin/janus-asl-check --dump-asl "$p" > "$out.part.$i" 2> "$err.part.$i" &
+    pids+=($!)
+  done
+  for p in "${pids[@]}"; do wait "$p" || rc=1; done
+  cat "$err".part.* > "$err" 2>/dev/null
+  [ "$rc" = 0 ] || return 1
+  cat "$out".part.* > "$out"
+  # every case of the input has exactly one output line
+  [ "$(grep -c . "$cases")" = "$(grep -c . "$out")" ] || { echo "fsqrt: output has $(grep -c . "$out") lines for $(grep -c . "$cases") cases" >> "$err"; return 1; }
+  rm -f "$cases".part.* "$out".part.* "$err".part.*
+}
+
 grp_fsqrt() {
   echo "== A5 fsqrt: FSQRT on the Lean model (sqrt_real replacement) against Sail's C backend"
   # audit/rt-asl/sqrt: ~7,000 FSQRT cases (binary32/64, every rounding mode, FZ, DN; exact squares,
@@ -165,7 +187,7 @@ grp_fsqrt() {
      scripts/oracle-sail.sh build > "$W/fsqrt/osb.log" 2>&1 &&
      JANUS_SAIL_JOBS=8 "$root/oracle-sail/target/release/janus-oracle-sail" < "$W/fsqrt/cases.jsonl" > "$W/fsqrt/c.jsonl" &&
      (cd "$root/JanusASL" && memguard_lake build janus-asl-check > "$W/fsqrt/build.log" 2>&1 &&
-      lake exe janus-asl-check --dump-asl "$W/fsqrt/cases.jsonl" > "$W/fsqrt/lean.jsonl" 2> "$W/fsqrt/lean.err"); then
+      fsqrt_dump_parallel "$W/fsqrt/cases.jsonl" "$W/fsqrt/lean.jsonl" "$W/fsqrt/lean.err"); then
     if python3 -I "$here/sqrt/compare.py" "$W/fsqrt/cases.jsonl" "$W/fsqrt/lean.jsonl" "$W/fsqrt/c.jsonl" > "$W/fsqrt/cmp.txt"; then
       row "A5 fsqrt (Lean = C)" ok "ok ($(head -1 "$W/fsqrt/cmp.txt"))"
     else

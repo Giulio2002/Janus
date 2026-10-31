@@ -23,6 +23,11 @@ import (
 // JANUS_TEST_FIXTURE_DIR names the fixture directory (default <cache dir>/janus-test-fixture);
 // "off" disables it (seeding then comes straight from the user's cache, JANUS_TEST_SEED_CACHE).
 
+// fixturePart is JANUS_TEST_FIXTURE_PART: "" (the whole fixture), "embedded" (only the embedded framework's build and
+// verdict: see ensureFixture), or "checkout" (the rest, after "embedded": the checkout's replay verdict, carried from the
+// user's cache when it holds an authentic one, else replayed; the user's cache is never used for the framework build).
+func fixturePart() string { return os.Getenv("JANUS_TEST_FIXTURE_PART") }
+
 func fixtureDir() string {
 	v := os.Getenv("JANUS_TEST_FIXTURE_DIR")
 	if v == "off" {
@@ -42,6 +47,13 @@ func fixtureDir() string {
 // lock. It changes JANUS_CACHE_DIR while it works and restores it. userSeed (a cache, or "") seeds
 // a missing framework build before a cold one is built.
 func ensureFixture(fixture, userSeed, exampleBin string) error {
+	embeddedOnly := fixturePart() == "embedded"
+	if embeddedOnly {
+		// Only what depends on neither this checkout's build nor the user's cache: the embedded framework's build and its
+		// replay verdict, built cold in the fixture. This is the gate's pre-fixture-emb stage, which starts at t=0 while
+		// pre-lake, pre-stamp and pre-warm still write the checkout's build and the user's cache (scripts/lib/dag.sh).
+		userSeed = ""
+	}
 	if err := os.MkdirAll(fixture, 0o755); err != nil {
 		return err
 	}
@@ -75,7 +87,7 @@ func ensureFixture(fixture, userSeed, exampleBin string) error {
 			}
 		}
 	}
-	if userSeed != "" && userSeed != "off" && filepath.Clean(userSeed) != filepath.Clean(fixture) {
+	if fixturePart() != "checkout" && userSeed != "" && userSeed != "off" && filepath.Clean(userSeed) != filepath.Clean(fixture) {
 		if _, err := seedFramework(userSeed, fixture); err != nil {
 			fmt.Fprintf(os.Stderr, "janus tests: not seeding the fixture from %s: %v\n", userSeed, err)
 		}
@@ -98,6 +110,9 @@ func ensureFixture(fixture, userSeed, exampleBin string) error {
 		return frameworkVerdictKey(tc.cacheID(), pins)
 	}
 	checkoutKey := func() string {
+		if embeddedOnly {
+			return ""
+		}
 		cfw, err := loadFramework(repoRoot)
 		if err != nil {
 			return ""
@@ -111,6 +126,11 @@ func ensureFixture(fixture, userSeed, exampleBin string) error {
 			return ""
 		}
 		return frameworkVerdictKey(tc.cacheID(), pins)
+	}
+	if !embeddedOnly && userSeed != "" && userSeed != "off" && filepath.Clean(userSeed) != filepath.Clean(fixture) {
+		// The checkout's own replay verdict, when the user's cache holds an authentic one (pre-stamp's sandboxed
+		// --janus-root verification recorded it there): carried (MAC checked under the user's key), not replayed again.
+		seedCheckoutVerdict(userSeed, fixture)
 	}
 	var todo [][]string
 	if k := embeddedKey(); k != "" && !hasFrameworkVerdict(k) {

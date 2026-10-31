@@ -96,7 +96,7 @@ theorem gwrite_k (impl : List Segment)
       (Kern.appendTrace_nil K).symm, emits_fail _⟩
     · janus_simp
     · janus_simp
-    · janus_simp; rw [h_bi]; assumption
+    · janus_simp; rw [h_bi]; (first | with_reducible assumption | assumption)
   -- the `write(2, b, len)` system call in `write1`
   refine ⟨.svc, by kernel_site, Or.inl ⟨⟨.write, by simp [svcSys, Sys.ofArm64, setReg], by decide, ?_⟩, ?_⟩⟩
   · simp [Safe, Buf, argsOf, setReg, Nat.mod_eq_of_lt (show ptr < 2 ^ 64 by omega),
@@ -117,7 +117,7 @@ theorem gwrite_k (impl : List Segment)
       refine ⟨_, _, _, _, _, _, [_], by ret_state [hsp, hg], by janus_frame, ?_, ?_, ?_, rfl, ?_⟩
       · janus_simp
       · janus_simp
-      · janus_simp; rw [h_bi]; assumption
+      · janus_simp; rw [h_bi]; (first | with_reducible assumption | assumption)
       · simp [Nat.mod_eq_of_lt (show ptr < 2 ^ 64 by omega), Nat.mod_eq_of_lt (show len < 2 ^ 64 by omega),
           hl32] at hc ⊢
         exact emits_of_eq (n := len) (by readbytes_frame) (by omega)
@@ -131,6 +131,6 @@ theorem gwrite_k (impl : List Segment)
         (Kern.appendTrace_nil _).symm, emits_fail _⟩
       · janus_simp
       · janus_simp
-      · janus_simp; rw [h_bi]; assumption
+      · janus_simp; rw [h_bi]; (first | with_reducible assumption | assumption)
 
 end PrintFn

@@ -690,7 +690,12 @@ manifest catches corruption, not a malicious writer; the kernel replay (`scripts
 and the closure replay of `janus verify --asl`) re-checks every declaration. `janus verify --asl`
 itself does not read `ASL_CACHE`: it builds in its own trusted cache (`<cache>/v1/asl`), seeded from
 a sibling build or, by `scripts/asl.sh verify`, from the in-tree build, which the module cache now
-makes cheap.
+makes cheap. The module cache restores Janus modules whose `.olean`s embed another tree's source path, so
+`scripts/asl.sh verify` then moves the tree's framework stamp (`.lake/janus-framework.ready`) to exactly those
+restored, HMAC-verified files (`scripts/lib/restamp.py`, `asl_mod_cache.py restore --record`); without it janus
+removed and rebuilt them and every restored JanusASL module after them (79 min). `verify` builds the JanusASL
+library only (not `janus-asl-check`, whose uncached ArmASL `.c.o` objects cost ~10 min of serial clang) and verifies
+its examples up to `ASL_VERIFY_JOBS` (default 4) at once after the first has been through alone.
 
 Measured (`JanusASL/tools/test_asl_mod_cache.sh --e2e CACHE`, plus the restore steps timed
 separately): building JanusASL at one commit from an empty module cache (the ArmASL entry
@@ -801,7 +806,8 @@ What was changed:
   verdict at once.
 * **The replay is batched** (`scripts/asl.sh replay`). It replays every module in the import
   closure of `JanusASL.Proofs` with `leanchecker`, `REPLAY_BATCH` (default 4) modules per
-  process, one process at a time. Import lists that declare nothing are skipped: leanchecker
+  process, up to `JANUS_REPLAY_PAR` (default 4) processes at once (they only read the built package;
+  one process at a time took 15m56, four 5m49, peak memory 11 -> 41 GiB). Import lists that declare nothing are skipped: leanchecker
   takes name prefixes, so naming one would pull in all its parts.
 
 Semantics check. `JanusASL/tools/Digest.lean` prints every declaration of the ArmASL and JanusASL

@@ -79,7 +79,7 @@ theorem cl1 (impl : List Janus.Amd64.Segment) (e : State) (p : BitVec 64) (a v :
   subst hpe
   have hcr : cr = setRegF cr 2 (BitVec.ofNat 64 a) := by
     funext i; simp only [setRegF]; split
-    · subst_vars; exact hrdx
+    · first | (with_reducible subst_vars; exact hrdx) | (subst_vars; exact hrdx)
     · rfl
   rw [hcr]
   janus64_run [hcap, hv, hpn]
@@ -106,7 +106,7 @@ theorem cl2 (impl : List Janus.Amd64.Segment) (e : State) (p : BitVec 64) (a v :
   subst hpe
   have hcr : cr = setRegF cr 2 (BitVec.ofNat 64 a) := by
     funext i; simp only [setRegF]; split
-    · subst_vars; exact hrdx
+    · first | (with_reducible subst_vars; exact hrdx) | (subst_vars; exact hrdx)
     · rfl
   rw [hcr]
   have hvlt : v < 2 ^ 64 := by
@@ -140,7 +140,7 @@ theorem cl3 (impl : List Janus.Amd64.Segment) (e : State) (p : BitVec 64) (a v :
   subst hpe
   have hcr : cr = setRegF cr 2 (BitVec.ofNat 64 a) := by
     funext i; simp only [setRegF]; split
-    · subst_vars; exact hrdx
+    · first | (with_reducible subst_vars; exact hrdx) | (subst_vars; exact hrdx)
     · rfl
   rw [hcr]
   have hvlt : v < 2 ^ 64 := by

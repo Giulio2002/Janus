@@ -12,7 +12,7 @@
 #                    any) and keep verdicts.jsonl and the results other tools read (cases.jsonl,
 #                    hw.jsonl, model.jsonl, qemu.jsonl, sail.jsonl, janus.jsonl)
 #                    zstd-compressed (<name>.zst, ~5x smaller, verdicts ~15x); remove the dumps
-#                    that are duplicates or cheap to derive again (gen.jsonl and harvest.jsonl,
+#                    that are duplicates or cheap to derive again (gen.jsonl, svegen.jsonl and harvest.jsonl,
 #                    whose union is cases.jsonl; sail-model.jsonl, cases.sail-dczid.jsonl,
 #                    sail-regen.jsonl, cases.in.jsonl) and, with --copies, the per-comparison
 #                    copies of the corpus (cases.jsonl, hw.jsonl)
@@ -76,7 +76,7 @@ art_prune() {
           [ "$copies" = 1 ] && action=drop ;;
         model.jsonl|qemu.jsonl|sail.jsonl|janus.jsonl)
           action=compress ;;
-        gen.jsonl|harvest.jsonl|sail-model.jsonl|cases.sail-dczid.jsonl|sail-regen.jsonl|cases.in.jsonl)
+        gen.jsonl|harvest.jsonl|svegen.jsonl|sail-model.jsonl|cases.sail-dczid.jsonl|sail-regen.jsonl|cases.in.jsonl)
           action=drop ;;
         *)
           action=keep

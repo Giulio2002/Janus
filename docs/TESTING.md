@@ -107,7 +107,23 @@ scripts being run.
 **go test shards.** `scripts/gotest-shards.sh` lists every test (`go test -list`), deals them to the shards
 longest first using `testDurations` in `cmd/janus/order_test.go`, and checks that the shards partition the
 list (fails if a test is unassigned or twice); afterwards it checks from the `-v` output that each
-shard reported a result for exactly its tests.
+shard reported a result for exactly its tests. The durations are the time a test HELD its slot, not its `-v` duration
+(a parallel test's `-v` time includes the wait for a slot of `order_test.go`'s scheduler, so with `-parallel 1` every test
+of a shard reported hundreds of seconds and the old table was an artefact of that); remeasure with
+`JANUS_TEST_DURATIONS=<file> go test -v -parallel 4 ./cmd/janus` (one `name<TAB>seconds` line per slot hold). The whole
+package is ~2150 s of work and ~1100 s of it are four tests with a framework kernel replay each (~210 s:
+`TestCacheGCConcurrentVerify` 469 s = two replays, `TestR1ForgedFrameworkLemma` 462 s = the early replay that finds the forged
+lemma and the late replay that reports it, `TestResultCache`, `TestConcurrentVerify`); the gate therefore uses at most 6 shards
+(`-j N` clamped to 2..6): with them no shard is longer than the longest test (469 s planned; measured 295-471 s per shard,
+472 s wall, peak 4.8-12.3 GiB per shard, 44 GiB for the six).
+
+**Go-test fixture stages.** `pre-fixture-emb` (`JANUS_TEST_FIXTURE_PART=embedded`) builds the embedded framework and records its
+replay verdict inside the fixture directory only: it reads neither this checkout's build nor the user's cache (`pre-stamp` and
+`pre-warm` write that cache), so it starts at t=0 and is ordered against nothing but `pre-fixture`. `pre-fixture`
+(`JANUS_TEST_FIXTURE_PART=checkout`) then carries the checkout's replay verdict out of the user's cache (where `pre-stamp`'s sandboxed
+`--janus-root` verification recorded it; the MAC is checked under the user cache's key) instead of replaying the checkout again, or
+replays it when the user cache has none; it needs `pre-lake`, `pre-stamp`, `pre-pin` and `pre-fixture-emb` but not `pre-warm`.
+Cold, empty user cache, quiet host: whole fixture 750 s before; embedded part 521 s + checkout part 2.5 s (carried) after.
 
 **Lane memory limits.** memguard's per-job default (24G) applies inside the outer `memcap` unless
 `JANUS_MEM_MAX` is set, and the ASL build OOM'd at 24 GiB once, so `gate.sh` sets an explicit per-lane limit
@@ -148,6 +164,13 @@ publish; `build`, `prove`, `replay`, `model`, `restore`, the first half of `veri
 writers used to run outside the lake lock, so `asl-verify` and `rtasl-replay` overlapped for 972 s in one tree.
 `rtasl-go` additionally has a tree of its own. `RT_ASL_KEEP_DIR` (`<out>/lanes/rtasl-<group>.keep`) is exported to the
 rt-asl lanes for their failure logs. Tested by `scripts/lib/test-treelock.sh`.
+
+**Speed of the ASL lanes** (2026-10-30, `agent/speed-lanes2`). `asl-verify` took 97 min because the module-cache restore
+rewrote Janus modules (path-dependent `.olean`s), the tree's framework stamp then failed, and `janus verify --janus-root`
+rebuilt the framework and every JanusASL module (79 min for the first example; the other three took 30 s each): the
+restore now records the verified files it wrote and `scripts/lib/restamp.py` moves only those pins (self-test
+`scripts/lib/test-restamp.sh`). `rtasl-replay` runs 4 leanchecker batches at once (`JANUS_REPLAY_PAR`), `rtasl-fsqrt`
+splits its Lean `--dump-asl` run into `RT_ASL_FSQRT_PAR` (8) processes (6m02 -> 54 s, byte-identical output).
 
 **Kept trees.** The isolated lake-lane trees are `artifacts/gate/trees/<hash of HEAD tree + uncommitted diff>/{x86,asl}`.
 They are removed when the gate passes, kept (path reported) when it fails or is cancelled, and reused by a

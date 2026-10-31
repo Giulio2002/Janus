@@ -6,7 +6,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/test-rt-bcache.XXXXXX"); trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
 mkdir -p "$t/k/oracle-sail/src" "$t/bin"
-for f in Cargo.toml Cargo.lock instrument_model.py; do echo "x" > "$t/k/oracle-sail/$f"; done
+for f in Cargo.toml Cargo.lock instrument_model.py split_model.py split_crate.py build.rs.patch dir_digest.py; do echo "x" > "$t/k/oracle-sail/$f"; done
 echo 'fn main(){}' > "$t/k/oracle-sail/src/main.rs"
 mk() { printf '#!/bin/sh\necho "%s"\n' "$2" > "$t/bin/$1"; chmod +x "$t/bin/$1"; }
 mk rustc "rustc 1.90.0 (abc)"; mk cargo "cargo 1.90.0"; mk c++ "g++ 13.2"; mk cc "gcc 13.2"; mk ld "GNU ld 2.42"

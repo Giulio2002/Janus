@@ -1363,7 +1363,7 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
     for n in [``reduceSegAddr, ``reduceDataBase, ``reduceRipTarget] do
       extra ← extra.add n (post := true)
     simprocs := simprocs.push extra
-    return (ctx, simprocs, r.dischargeWrapper)
+    return (ctx, simprocs, ← Common.fastDischargeWrapper (← `(tactic| janus64_disch)))
 
 def simpExpr (ctx : Simp.Context) (simprocs : Simp.SimprocsArray) (d? : Option Simp.Discharge)
     (e : Expr) : MetaM Simp.Result := do

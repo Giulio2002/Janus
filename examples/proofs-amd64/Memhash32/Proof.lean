@@ -36,7 +36,7 @@ theorem correctness (p h : BitVec 64) :
   janus64_run
   · -- runtime.useAeshash = 0: memhash32Fallback
     rw [ite_eq_left (Janus.Spec.MemHash.readLE1_eq_zero hbr)]
-    congr 1
+    first | with_reducible congr 1 | congr 1
     simp only [Janus.Spec.MemHash.mix_bv, Janus.Spec.MemHash.fallbackHash32_eq, BitVec.toNat_ofNat,
       BitVec.toNat_xor, BitVec.toNat_setWidth, Janus.Spec.MemHash.readLE8_mod,
       Janus.Spec.MemHash.readLE4_mod, Janus.Spec.MemHash.readLE_mod64 _ _ 4 (by decide)]
@@ -44,7 +44,7 @@ theorem correctness (p h : BitVec 64) :
       (Nat.xor_lt_two_pow (Nat.xor_lt_two_pow (Janus.Spec.MemHash.readLE_lt64 _ _ 4 (by decide)) h.isLt) (Janus.Spec.MemHash.readLE_lt64 _ _ 8 (by decide)))
       (Nat.xor_lt_two_pow (Janus.Spec.MemHash.readLE_lt64 _ _ 8 (by decide)) (Janus.Spec.MemHash.readLE_lt64 _ _ 4 (by decide))))]
   · rw [ite_eq_right (Janus.Spec.MemHash.readLE1_ne_zero hbr)]
-    congr 1
+    first | with_reducible congr 1 | congr 1
     simp only [Janus.Spec.MemHash.pinsrd_2 _ _ h.isLt, Janus.Spec.MemHash.pinsrd_2' _ _ h.isLt, Janus.Spec.MemHash.pinsrd_2_eq _ _ h.isLt, Janus.Spec.MemHash.setWidth_ofNat_128,
       Janus.Spec.AES.aesenc_eq, Janus.Spec.MemHash.aesHash32, Janus.Spec.MemHash.round']
     apply BitVec.eq_of_toNat_eq
