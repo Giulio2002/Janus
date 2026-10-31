@@ -58,7 +58,7 @@ run_gate() { # NAME CACHE_ENV...: a fresh worktree of the commit, gate.sh, then 
   git -C "$root" worktree add --detach -f "$t" "$commit" >/dev/null || { echo "nightly-cold-gate: cannot create $t" >&2; return 2; }
   trees+=("$t")
   local rc=0
-  (cd "$t" && env -u JANUS_MODEL_PIN -u JANUS_MODEL_PIN_STALE -u JANUS_COLD -u JANUS_COLD_DONE -u JANUS_COLD_PIN_CHECKED "$@" SAIL_SPLIT="$sail_split" memcap -m 80G scripts/gate.sh --out "$out" --speed-baseline enforce "${gate_args[@]}") > "$work/$name.log" 2>&1 || rc=$?
+  (cd "$t" && env -u JANUS_MODEL_PIN -u JANUS_MODEL_PIN_STALE -u JANUS_COLD -u JANUS_COLD_DONE -u JANUS_COLD_PIN_CHECKED "$@" JANUS_NIGHTLY=1 SAIL_SPLIT="$sail_split" memcap -m 80G scripts/gate.sh --out "$out" --speed-baseline enforce "${gate_args[@]}") > "$work/$name.log" 2>&1 || rc=$?
   echo "nightly-cold-gate: $name gate rc=$rc (log $work/$name.log)"
   eval "gate_rc_$name=$rc"
   SAIL_SPLIT="$sail_split" python3 -I "$cmp_py" hashes "$t" "$out/artifact-hashes.json" || return 2

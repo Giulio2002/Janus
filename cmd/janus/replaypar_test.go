@@ -409,8 +409,8 @@ func realParFixture(t *testing.T) (lib string, tc *toolchain, fw *pinnedLib, run
 	// never a silent skip.
 	missing := func(msg string) {
 		t.Helper()
-		if os.Getenv("JANUS_REQUIRE_FIXTURE") == "1" {
-			t.Fatalf("JANUS_REQUIRE_FIXTURE=1 but %s", msg)
+		if os.Getenv("JANUS_REQUIRE_FIXTURE") == "1" || os.Getenv("JANUS_NIGHTLY") == "1" {
+			t.Fatalf("JANUS_REQUIRE_FIXTURE=1/JANUS_NIGHTLY=1 but %s", msg)
 		}
 		t.Skip(msg)
 	}
@@ -663,6 +663,45 @@ func TestParallelFrameworkReplayCatchesForgeryInEveryPartition(t *testing.T) {
 		src := files[rel+".lean"]
 		compileMini(t, tc, lib, mod, append(append([]byte{}, src...), forge...))
 		out, err, _, _ := realParFiles(t, tc, lib, runIn, 4, files)
+		var mk *memKillError
+		if errors.As(err, &mk) || strings.Contains(out, "memory limit") {
+			t.Fatalf("forged %s: the replay was OOM-killed (inconclusive), not a detection: %v\n%s", mod, err, out)
+		}
+		if err == nil || !strings.Contains(out, "leanchecker found a problem in") || !strings.Contains(out, "forged") {
+			t.Errorf("forged %s: not a kernel detection: err %v\n%s", mod, err, out)
+		}
+	}
+}
+
+// The real-framework variant of TestParallelFrameworkReplayCatchesForgeryInEveryPartition: a forged
+// declaration (kernel check skipped) in the real Janus, Janus.GoABI, Janus.Tactic and Janus.Amd64.Tactic
+// modules is caught by the real kernel replay of the plan (four full replays: nightly only).
+func TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal(t *testing.T) {
+	// The nightly cold/cached gates (scripts/nightly-cold-gate.sh sets JANUS_NIGHTLY=1) run this on the
+	// real framework; the merge gates run the mini-framework variant above, which proves the same
+	// property for the partition kinds in seconds. With JANUS_NIGHTLY=1 a missing fixture is a failure.
+	if os.Getenv("JANUS_NIGHTLY") != "1" {
+		t.Skip("real-framework variant: runs in the nightly gates (JANUS_NIGHTLY=1); the mini-framework variant runs everywhere")
+	}
+	defer parallel(t)()
+	lib0, tc, _, runIn := realParFixture(t)
+	lake, _ := findLake()
+	forge, _ := os.ReadFile(filepath.Join(repoRoot, "audit", "attacks", "R1_forged_lemma.lean"))
+	for _, mod := range []string{"Janus", "Janus.GoABI", "Janus.Tactic", "Janus.Amd64.Tactic"} {
+		rel := strings.ReplaceAll(mod, ".", "/")
+		lib := filepath.Join(t.TempDir(), "lib")
+		if err := copyTree(lib0, lib); err != nil {
+			t.Fatal(err)
+		}
+		src, _ := os.ReadFile(filepath.Join(repoRoot, rel+".lean"))
+		fdir := t.TempDir()
+		writeBytes(t, filepath.Join(fdir, rel+".lean"), append(append([]byte("import Lean\n"), src...), forge...))
+		cmd := exec.Command(lake, "env", "lean", "--root="+fdir, "-o", filepath.Join(lib, rel+".olean"), filepath.Join(fdir, rel+".lean"))
+		cmd.Dir = repoRoot
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("forging %s: %v\n%s", mod, err, out)
+		}
+		out, err, _ := realPar(t, tc, lib, runIn, 4)
 		var mk *memKillError
 		if errors.As(err, &mk) || strings.Contains(out, "memory limit") {
 			t.Fatalf("forged %s: the replay was OOM-killed (inconclusive), not a detection: %v\n%s", mod, err, out)
