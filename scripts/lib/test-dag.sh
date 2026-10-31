@@ -81,6 +81,8 @@ hs=$(grep -n '^if \[ ! -c /dev/null \]' "$here_repo/scripts/gate.sh" | head -1 |
 rs=$(grep -n '^: > "$out/replay-sizing.log"; export JANUS_REPLAY_SIZING_FILE=' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1); pl2=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1)
 [ -n "$rs" ] && [ "$rs" -lt "$pl2" ] && ! grep -q 'export JANUS_MEMGUARD_LOG' "$here_repo/scripts/gate.sh" && ok "gate.sh exports JANUS_REPLAY_SIZING_FILE before the stages and does not export JANUS_MEMGUARD_LOG" || bad "replay sizing wiring wrong"
 
+grep -q '^unset JANUS_MEMGUARD_LOG JANUS_MEMGUARD_VERBOSE' "$here_repo/scripts/gate.sh" && ok "gate.sh unsets JANUS_MEMGUARD_LOG / VERBOSE (rows parse the first output line)" || bad "gate.sh may inherit JANUS_MEMGUARD_LOG"
+
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n
   POOL_GUARD=0 POOL_PROGRESS_SECS=100

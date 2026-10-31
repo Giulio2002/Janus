@@ -202,6 +202,9 @@ unset JANUS_GATE_TREE0; incr_tree_pin
 INCR_HOSTTOOLS_CACHE="$(mktemp "$root/artifacts/incr-hosttools.XXXXXX" 2>/dev/null)" && export INCR_HOSTTOOLS_CACHE || unset INCR_HOSTTOOLS_CACHE
 { [ -z "${INCR_HOSTTOOLS_CACHE:-}" ] || { [ -z "$incremental" ] && [ "${JANUS_INCR_LANES:-}" != 1 ]; } || incr_hosttools >/dev/null; }  # fill the per-run cache once, before the lanes start
 if [ -n "$incremental" ]; then export JANUS_GATE_INCREMENTAL=1; else unset JANUS_GATE_INCREMENTAL; fi
+# Rows and tests parse the FIRST line janus / lake env lean print: the memory guard's banner and per-job lines
+# (JANUS_MEMGUARD_LOG / JANUS_MEMGUARD_VERBOSE) would break 'all' rows, test_asl_obj_cache objcache-state, ...: a gate never inherits them.
+unset JANUS_MEMGUARD_LOG JANUS_MEMGUARD_VERBOSE
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
 
 
