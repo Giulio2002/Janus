@@ -18,6 +18,7 @@ import JanusTests.Float
 import JanusTests.Dynamic
 import JanusTests.Kernel
 import JanusTests.KernelSafe
+import JanusTests.KernelSafeCarry
 import JanusTests.String
 import JanusTests.SSE
 import JanusTests.X86Crypto
