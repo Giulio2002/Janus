@@ -654,4 +654,263 @@ ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 
 ASL_OBJ_CACHE=1 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 [ -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... while the same call without JANUS_ASL_CACHE=0 does (the test discriminates)" || bad "control restore failed: $(cat "$t/out")"
 
+# ======== RTOBJ4 survivors: one direct test per mutant ========
+cat > "$t/h.py" <<'PY'
+import importlib.util, os, subprocess, sys, json, tempfile, shutil, stat
+root, t = sys.argv[1], sys.argv[2]
+def load(name, rel):
+    spec = importlib.util.spec_from_file_location(name, root + "/" + rel); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+b = load("bcache", "scripts/lib/bcache.py"); m = load("amc", "JanusASL/tools/asl_mod_cache.py")
+def raises(exc, f, *a, **k):
+    try: f(*a, **k)
+    except exc: return True
+    except BaseException as ex: raise SystemExit("wrong exception %r" % ex)
+    return False
+def need(cond, msg):
+    if not cond: raise SystemExit("FAIL: " + msg)
+PY
+py() { python3 -I - "$root" "$t" "$@"; }
+fakelean() {  # fakelean PREFIX: a `lean` on PATH printing PREFIX for --print-prefix
+  mkdir -p "$t/fl"; printf '#!/bin/sh\n[ "$1" = --print-prefix ] && echo "%s" || exec "%s/bin/lean" "$@"\n' "$1" "$prefix" > "$t/fl/lean"; chmod +x "$t/fl/lean"
+}
+# keyed_toolchain: a prefix that is a symlink, or whose own directories are symlinks, is refused (and a good one accepted)
+fakelean "$prefix"
+py <<'PY' && ok "keyed_toolchain accepts the real prefix" || bad "keyed_toolchain real"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]
+pre, cc = b.keyed_toolchain(root + "/JanusASL"); assert cc == pre + "/bin/clang"
+PY
+fakelean "$t/linkp"
+py <<'PY' && ok "keyed_toolchain refuses a prefix reached through a symlink (realpath check)" || bad "prefix realpath mutant"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]
+need(raises(b.CacheError, b.keyed_toolchain, root + "/JanusASL"), "symlinked prefix accepted")
+PY
+for d in bin include include/clang include/lean; do
+  rm -rf "$t/fp3"; mkdir -p "$t/fp3/bin" "$t/fp3/include/clang" "$t/fp3/include/lean"; cp "$clang" "$t/fp3/bin/clang"
+  mv "$t/fp3/$d" "$t/fp3/$d.real"; ln -s "$t/fp3/$d.real" "$t/fp3/$d"; fakelean "$t/fp3"
+  py <<'PY' && ok "keyed_toolchain refuses a symlinked toolchain directory ($d)" || bad "prefix dir symlink ($d)"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]
+need(raises(b.CacheError, b.keyed_toolchain, root + "/JanusASL"), "symlinked toolchain directory accepted")
+PY
+done
+# LEAN_CC: neither published nor recompiled
+fakelean "$prefix"
+py <<'PY' && ok "LEAN_CC set: keyed_toolchain refuses (Inconclusive)" || bad "LEAN_CC refusal"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]; os.environ["LEAN_CC"] = "clang"
+need(raises(b.Inconclusive, b.keyed_toolchain, root + "/JanusASL"), "LEAN_CC accepted")
+PY
+# stage: the staged compiler/prefix must be the toolchain's keyed ones
+py <<'PY' && ok "stage_unit refuses when the id's compiler is not the toolchain's" || bad "stage cc/prefix == keyed"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+tree = t + "/p"; lake = tree + "/JanusASL/.lake"
+cs = m.obj_c_files(lake, "arm"); ident = m.obj_id(tree, cs, "arm")
+real = m.obj_compiler(tree); m._CC[tree] = (real[0] + "x", real[1], real[2])
+st = tempfile.mkdtemp(dir=t)
+try: m.stage_unit(tree, "arm", lake, ident, cs, st); need(False, "staged with a wrong compiler path")
+except SystemExit as ex: need("not the toolchain" in str(ex), str(ex))
+m._CC[tree] = (real[0], real[1], real[2] + "/")
+try: m.stage_unit(tree, "arm", lake, ident, cs, st); need(False, "staged with a wrong prefix")
+except SystemExit as ex: need("not the toolchain" in str(ex), str(ex))
+PY
+# the compiler's content is in the id (isolated from the env part of the ArmASL key)
+py <<'PY' && ok "the compiler binary's content alone changes the id" || bad "compiler content in id"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+tree = t + "/p"; lake = tree + "/JanusASL/.lake"; cs = m.obj_c_files(lake, "arm")
+r = m.obj_compiler(tree); a = m.obj_id(tree, cs, "arm")
+m._CC[tree] = (r[0], "0" * 64, r[2]); c = m.obj_id(tree, cs, "arm")
+need(a != c, "same id for another compiler hash")
+PY
+# stage: the C is re-hashed at stage time (the only tie of a staged object to the id's C)
+py <<'PY' && ok "stage_unit re-hashes the C: a C that is not the id's is refused" || bad "C re-hash at stage"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+tree = t + "/p"; lake = tree + "/JanusASL/.lake"; cs = dict(m.obj_c_files(lake, "arm")); ident = m.obj_id(tree, cs, "arm")
+cs["build/ir/ArmASL/Part01.c"] = "0" * 64
+st = tempfile.mkdtemp(dir=t)
+try: m.stage_unit(tree, "arm", lake, ident, cs, st); need(False, "staged a C that is not the id's")
+except SystemExit as ex: need("changed while publishing" in str(ex), str(ex))
+PY
+# only .c.o.export is cacheable
+fresh ne; mv "$(L ne)/build/ir/ArmASL/Part01.c.o.export" "$(L ne)/build/ir/ArmASL/Part01.c.o.noexport"; mv "$(L ne)/build/ir/ArmASL/Part01.c.o.export.hash" "$(L ne)/build/ir/ArmASL/Part01.c.o.noexport.hash"; mv "$(L ne)/build/ir/ArmASL/Part01.c.o.export.trace" "$(L ne)/build/ir/ArmASL/Part01.c.o.noexport.trace"
+expect 1 "a .c.o.noexport object is not cacheable (stage refuses)" stage "$t/ne" arm
+grep -q "janusasl-obj-cache-v3" "$root/JanusASL/tools/asl_mod_cache.py" && ok "the object id scheme is v3" || bad "scheme"
+# argv_problem: out / C path forms, unknown objects
+py <<'PY' && ok "argv_problem: output form, C path form, '..', unknown object are refused" || bad "argv_problem forms"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+pre, cc = b.keyed_toolchain(root + "/JanusASL") if False else (None, None)
+import subprocess
+pre = subprocess.run(["lean", "--print-prefix"], capture_output=True, text=True, cwd=root + "/JanusASL").stdout.strip(); cc = pre + "/bin/clang"
+rel = "build/ir/ArmASL/Part01.c"; c = "/x/JanusASL/.lake/" + rel
+good = b.expected_argv(cc, pre, c, c + ".o.export", rel)
+need(b.argv_problem(good, cc, pre, rel) is None, "the keyed command is refused")
+bad1 = list(good); bad1[3] = "/x/other.o"; need(b.argv_problem(bad1, cc, pre, rel), "output form")
+bad2 = b.expected_argv(cc, pre, "/x/elsewhere/Other.c", "/x/elsewhere/Other.c.o.export", rel); need(b.argv_problem(bad2, cc, pre, rel), "C path suffix")
+bad3 = b.expected_argv(cc, pre, "/x/../etc/JanusASL/.lake/" + rel, "/x/../etc/JanusASL/.lake/" + rel + ".o.export", rel); need(b.argv_problem(bad3, cc, pre, rel), "dotdot")
+need(b.argv_problem(b.expected_argv(cc, pre, "/x/build/ir/Other/Zed.c", "/x/build/ir/Other/Zed.c.o.export", "build/ir/Other/Zed.c"), cc, pre, "build/ir/Other/Zed.c"), "unknown object cacheable")
+need(b.argv_problem(good, cc + "x", pre, rel), "argv[0] not the keyed clang")
+PY
+# an entry whose trace carries a command of another shape is POISONED at recompile, even when the bytes are honest
+fresh ap; stage "$t/ap" arm > /dev/null; idap=$(M objkey "$t/ap"); python3 -I - "$t/st/build/ir/ArmASL/Part01.c.o.export.trace" <<'PY'
+import json, sys
+p = sys.argv[1]; j = json.load(open(p)); j["log"][0]["message"] += " -fwrapv"; json.dump(j, open(p, "w"))
+PY
+apc="$t/apcache"; mkdir -p "$apc"; B store armobj "$apc" "$idap" "$t/st" < "$t/st.list" > /dev/null
+expect 3 "verify --recompile reports POISONED for an entry whose logged command has another shape" B verify armobj "$apc" "$idap" --c-root "$(L ap)" --recompile all
+# armobj.set: required, equal to the consumer's set, consistent with the .cin records, hashed at fetch
+fresh st1; stage "$t/st1" arm > /dev/null; ids1=$(M objkey "$t/st1"); s1c="$t/s1cache"; mkdir -p "$s1c"
+cp -a "$t/st" "$t/st1-keep"; cp "$t/st.list" "$t/st1.list"
+resign() {  # resign CACHE ID PYTHON-EDIT(e, man): edit an entry's tree/manifest and re-sign it
+  python3 -I - "$root" "$1" "$2" "$3" <<'PY'
+import importlib.util, os, sys
+root, cache, ident, edit = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+e = b.entry_dir("armobj", cache, ident); man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
+os.system("chmod -R u+w " + e)
+exec(edit)
+data = "".join("%s  %s\n" % (v, k) for k, v in sorted(man.items())).encode()
+open(e + "/MANIFEST.sha256", "wb").write(data); open(e + "/MANIFEST.hmac", "w").write(b.mac("armobj", ident, data) + "\n")
+PY
+}
+fresh_entry() { rm -rf "$s1c/armobj"; B store armobj "$s1c" "$ids1" "$t/st" < "$t/st.list" > /dev/null; }
+fresh_entry; resign "$s1c" "$ids1" 'os.unlink(e + "/tree/armobj.set"); del man["armobj.set"]'
+expect 3 "an entry without armobj.set is invalid" B verify armobj "$s1c" "$ids1"
+fresh_entry; resign "$s1c" "$ids1" 'f = e + "/tree/build/ir/ArmASL/Part01.c.o.export.cin"; open(f, "w").write("0" * 64 + "\n"); man["build/ir/ArmASL/Part01.c.o.export.cin"] = b.sha_file(f)'
+expect 3 "a .cin that disagrees with the signed set is invalid" B verify armobj "$s1c" "$ids1"
+fresh_entry; py "$s1c" "$ids1" <<'PY' && ok "fetch with another C set than the entry's is rejected (set == want_set)" || bad "set == want_set"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+cache, ident = sys.argv[3], sys.argv[4]
+cs = m.obj_c_files(t + "/st1/JanusASL/.lake", "arm"); other = dict(cs); other["build/ir/ArmASL/Part01.c"] = "1" * 64
+need(raises(b.CacheError, b.fetch, "armobj", cache, ident, t + "/dstx/.lake", (), None, other), "another set accepted")
+b.fetch("armobj", cache, ident, t + "/dsty/.lake", (), None, cs)
+PY
+fresh_entry; resign "$s1c" "$ids1" 'f = e + "/tree/armobj.set"; open(f, "w").write(open(f).read().replace("\n", "") + " ")'
+python3 -I - "$s1c/armobj/$ids1/MANIFEST.sha256" <<'PY'
+import sys   # keep the manifest hash of armobj.set as it was before the edit: the set bytes no longer match it
+PY
+fresh_entry; chmod -R u+w "$s1c/armobj/$ids1/tree"; printf ' ' >> "$s1c/armobj/$ids1/tree/armobj.set"
+expect 3 "armobj.set is hashed against the manifest at fetch (a modified set is rejected)" B fetch armobj "$s1c" "$ids1" "$t/dsz/.lake"
+# tombstones: MAC, domain separation, id binding
+tomb() {  # tomb CACHE ID DATAID MACKIND MACID: write a tombstone document for ID with chosen binding
+  python3 -I - "$root" "$@" <<'PY'
+import importlib.util, json, os, sys
+root, cache, ident, dataid, mkind, macid = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+data = json.dumps({"id": dataid, "objects": {"build/ir/ArmASL/Part01.c.o.export": "9" * 64}}, sort_keys=True, separators=(",", ":")).encode()
+mac = "0" * 64 if mkind == "bad" else b.mac(mkind, macid, data)
+open(b.tomb_path(cache, ident), "w").write(json.dumps({"data": data.decode(), "mac": mac}))
+PY
+}
+fresh_entry
+for c in "bad:$ids1:$ids1" "armobj:$ids1:$ids1" "tombstone:$ids1:$(printf 'e%.0s' {1..40})"; do
+  IFS=: read -r mk di mi <<< "$c"; tomb "$s1c" "$ids1" "$di" "$mk" "$mi"
+  expect 3 "a tombstone with MAC '$mk' / bound to $( [ "$mi" = "$ids1" ] && echo this id || echo another id) makes the id unusable, entry untouched" B fetch armobj "$s1c" "$ids1" "$t/dtb/.lake"
+  B verify armobj "$s1c" "$ids1" > /dev/null 2>&1; [ -d "$s1c/armobj/$ids1/tree" ] && ok "  ... the entry directory is still there" || bad "entry destroyed by a bad tombstone"
+done
+tomb "$s1c" "$ids1" "$(printf 'e%.0s' {1..40})" tombstone "$ids1"   # valid MAC for this id's slot but the document names another id
+expect 3 "a tombstone whose document names another id is rejected (id binding)" B fetch armobj "$s1c" "$ids1" "$t/dtb2/.lake"
+# C: a garbage tombstone never makes `store` replace or delete a valid entry; the operator clears it
+printf 'garbage' > "$s1c/armobj/.tombstone-$ids1"
+stage "$t/st1" arm > /dev/null; expect 4 "store with a garbage tombstone is refused" B store armobj "$s1c" "$ids1" "$t/st" < "$t/st.list"
+[ -f "$s1c/armobj/$ids1/MANIFEST.sha256" ] && ok "  ... and the valid entry is untouched" || bad "store destroyed a valid entry because of a garbage tombstone"
+M objaudit "$t/st1" arm "$s1c" > "$t/out" 2>&1; rc=$?
+[ -f "$s1c/armobj/$ids1/MANIFEST.sha256" ] && [ "$rc" = 4 ] && grep -q LOUD "$t/out" && ok "objaudit with a garbage tombstone: LOUD, entry untouched, not a pass (exit 4)" || bad "objaudit vs garbage tombstone rc $rc: $(cat "$t/out")"
+expect 2 "clear-tombstone without --yes does nothing" bash -c "python3 -I '$root/scripts/lib/bcache.py' clear-tombstone '$s1c' '$ids1' >/dev/null; [ -f '$s1c/armobj/.tombstone-$ids1' ] && exit 2"
+python3 -I "$root/scripts/lib/bcache.py" clear-tombstone "$s1c" "$ids1" --yes > /dev/null; [ ! -e "$s1c/armobj/.tombstone-$ids1" ] && ok "clear-tombstone --yes removes it" || bad "not cleared"
+B fetch armobj "$s1c" "$ids1" "$t/dtb3/.lake" > /dev/null && ok "  ... and the entry is served again" || bad "entry not served after clearing"
+# objaudit flags an entry that fails verification (tampered cached bytes) and quarantines it
+fresh_entry; chmod -R u+w "$s1c/armobj/$ids1/tree"; printf X >> "$s1c/armobj/$ids1/tree/build/ir/ArmASL/Part01.c.o.export"
+M objaudit "$t/st1" arm "$s1c" > "$t/out" 2>&1; rc=$?
+[ "$rc" = 3 ] && ls -d "$s1c/armobj/.poisoned-$ids1" > /dev/null 2>&1 && ok "objaudit: an entry that fails verification is poisoned (exit 3) and quarantined" || bad "audit verify failure rc $rc: $(cat "$t/out")"
+# objaudit --dry-run changes nothing; .poisoned-* retention
+fresh_entry; chmod -R u+w "$s1c/armobj/$ids1/tree"; printf X >> "$s1c/armobj/$ids1/tree/build/ir/ArmASL/Part01.c.o.export"
+M objaudit "$t/st1" arm "$s1c" --dry-run > "$t/out" 2>&1; rc=$?
+[ "$rc" = 3 ] && [ -d "$s1c/armobj/$ids1" ] && [ ! -e "$s1c/armobj/.tombstone-$ids1" ] && ok "objaudit --dry-run reports (exit 3) but quarantines nothing" || bad "dry run rc $rc"
+mkdir -p "$s1c/armobj/.poisoned-oldold"; touch -d '40 days ago' "$s1c/armobj/.poisoned-oldold"; mkdir -p "$s1c/armobj/.poisoned-newnew"
+M objaudit "$t/st1" arm "$s1c" > /dev/null 2>&1
+[ ! -e "$s1c/armobj/.poisoned-oldold" ] && [ -d "$s1c/armobj/.poisoned-newnew" ] && ok ".poisoned-* directories older than the retention (30 days) are removed, recent ones kept" || bad "retention"
+# objaudit takes the entry lock: while another process holds it exclusively the audit waits
+fresh_entry
+( python3 -I - "$root" "$s1c" "$ids1" <<'PY'
+import importlib.util, sys, time
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+lk = b.lock_path(b.entry_dir("armobj", sys.argv[2], sys.argv[3]) + ".lock", shared=False); open(sys.argv[2] + "/locked", "w").write("1"); time.sleep(4)
+PY
+) &
+lp=$!; for i in 1 2 3 4 5 6 7 8 9 10; do [ -f "$s1c/locked" ] && break; sleep 0.3; done
+s0=$(date +%s); M objaudit "$t/st1" arm "$s1c" > /dev/null 2>&1; s1=$(date +%s); wait $lp
+[ $((s1-s0)) -ge 2 ] && ok "objaudit waits for the entry lock (no race with a republish)" || bad "objaudit did not wait for the lock ($((s1-s0)) s)"
+# threshold: unchecked share above the limit fails closed, below passes; a compared difference is exit 3 whatever the coverage
+fresh th; cth="$t/thcache"; mkdir -p "$cth"; M objpublish "$t/th" arm "$cth" 0 > /dev/null
+rm "$(L th)/build/ir/ArmASL/Part02.c.o.export"
+ASL_OBJAUDIT_MAX_UNCHECKED_PCT=30 M objaudit "$t/th" arm "$cth" > "$t/out" 2>&1; rc=$?; [ "$rc" = 0 ] && ok "objaudit: 25% not comparable is within a 30% limit (exit 0)" || bad "threshold pass rc $rc: $(cat "$t/out")"
+ASL_OBJAUDIT_MAX_UNCHECKED_PCT=20 M objaudit "$t/th" arm "$cth" > "$t/out" 2>&1; rc=$?; [ "$rc" = 4 ] && ok "  ... and above a 20% limit it is INCOMPLETE (exit 4)" || bad "threshold fail rc $rc"
+printf X >> "$(L th)/build/ir/ArmASL/Part01.c.o.export"
+ASL_OBJAUDIT_MAX_UNCHECKED_PCT=100 M objaudit "$t/th" arm "$cth" > "$t/out" 2>&1; rc=$?; [ "$rc" = 3 ] && ok "  ... a compared object that differs is exit 3 whatever the limit" || bad "diff under loose limit rc $rc"
+# sandbox details
+py <<'PY' && ok "sandbox: capabilities dropped, root-owned/not-writable bwrap only, failing bwrap probe is Inconclusive, no key env, TMPDIR on the work dir" || bad "sandbox details"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+work = t + "/sbw"; os.makedirs(work, exist_ok=True)
+pre = b._sandbox_prefix(work, work)
+r = subprocess.run(pre + ["/bin/sh", "-c", "grep CapEff /proc/self/status"], capture_output=True, text=True)
+need(r.stdout.split()[-1] == "0000000000000000", "capabilities not dropped: " + r.stdout)
+real = b._bwrap()
+wr = t + "/bw-ww"; shutil.copy(real, wr); os.chmod(wr, 0o777)
+nr = t + "/bw-nobody"; shutil.copy(real, nr); os.chmod(nr, 0o755); os.chown(nr, 65534, 65534)
+ok_ = t + "/bw-ok"; shutil.copy(real, ok_); os.chmod(ok_, 0o755)
+b.BWRAP_CANDIDATES = [wr]; need(b._bwrap() is None, "world-writable bwrap accepted")
+b.BWRAP_CANDIDATES = [nr]; need(b._bwrap() is None, "bwrap owned by another user accepted")
+b.BWRAP_CANDIDATES = [ok_]; need(b._bwrap() == ok_, "root-owned bwrap rejected")
+fail = t + "/bw-fail"; open(fail, "w").write("#!/bin/sh\nexit 1\n"); os.chmod(fail, 0o755)
+b.BWRAP_CANDIDATES = [fail]; os.environ.pop(b.UNSANDBOXED_OPTIN, None)
+need(raises(b.Inconclusive, b._sandbox_prefix, work, work), "a failing bwrap probe was accepted")
+b.BWRAP_CANDIDATES = [real]
+os.environ["JANUS_CACHE_KEY_DIR"] = t + "/keys"; seen = {}
+def fake_run(cmd, **k):
+    seen.update(k.get("env", {})); open(cmd[cmd.index("-o") + 1], "w").write("x"); return subprocess.CompletedProcess(cmd, 0, b"", b"")
+orig = subprocess.run
+b._sandbox_prefix = lambda w, c: []
+subprocess.run = fake_run
+pre_, cc_ = "/p", "/p/bin/clang"
+b.recompile_object(cc_, pre_, work + "/A.c", "build/ir/ArmASL/Part01.c", work)
+subprocess.run = orig
+need("JANUS_CACHE_KEY_DIR" not in seen and seen.get("TMPDIR") == work, "env %r" % {k: v for k, v in seen.items() if k in ("JANUS_CACHE_KEY_DIR", "TMPDIR")})
+PY
+py <<'PY' && ok "recompile: a failing compile and a compile that writes no object are Inconclusive; clean_stale removes only old private dirs; publish survives a staging OSError" || bad "recompile/clean_stale/stage OSError"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+work = t + "/rw"; os.makedirs(work, exist_ok=True); orig = subprocess.run
+b._sandbox_prefix = lambda w, c: []
+subprocess.run = lambda cmd, **k: subprocess.CompletedProcess(cmd, 1, b"", b"error: boom")
+need(raises(b.Inconclusive, b.recompile_object, "/p/bin/clang", "/p", work + "/A.c", "build/ir/ArmASL/Part01.c", work), "rc != 0 accepted")
+subprocess.run = lambda cmd, **k: subprocess.CompletedProcess(cmd, 0, b"", b"")
+need(raises(b.Inconclusive, b.recompile_object, "/p/bin/clang", "/p", work + "/A.c", "build/ir/ArmASL/Part01.c", work), "no output accepted")
+subprocess.run = orig
+d = t + "/cs"; os.makedirs(d, exist_ok=True)
+for n, old in ((".recompile-old", 1), (".objstage-old", 1), (".recompile-new", 0), ("keepme", 1)):
+    os.makedirs(d + "/" + n, exist_ok=True)
+    if old: os.utime(d + "/" + n, (1, 1))
+b.clean_stale(d)
+need(not os.path.exists(d + "/.recompile-old") and not os.path.exists(d + "/.objstage-old"), "old private dirs kept")
+need(os.path.exists(d + "/.recompile-new") and os.path.exists(d + "/keepme"), "clean_stale removed too much")
+orig_mk = tempfile.mkdtemp
+def boom(*a, **k): raise OSError(28, "No space left on device")
+tempfile.mkdtemp = boom
+import io, contextlib
+out = io.StringIO()
+with contextlib.redirect_stdout(out): m.obj_publish(t + "/p", "arm", t + "/cs-pub", "0")
+tempfile.mkdtemp = orig_mk
+need("cannot create a staging directory" in out.getvalue(), out.getvalue())
+# unit-level random draw: the N smallest are always chosen, the draw is over the REST only
+calls = []
+def spy(cands, k): calls.append((len(cands), k)); return []
+m.load_bcache = lambda root, _o=m.load_bcache: (lambda mod: (setattr(mod, "draw_random", spy), mod)[1])(_o(root))
+os.environ["ASL_OBJ_RECOMPILE_RANDOM"] = "2"
+os.makedirs(t + "/cs-pub", exist_ok=True)
+m.obj_publish(t + "/pj", "jasl", t + "/cs-pub", "1")
+need(calls and calls[-1] == (3, 2), "draw over the rest: %r" % calls)   # pj has 4 units (3 objects + the object-less NoObj): 1 smallest chosen, 3 left for the draw
+calls.clear(); m.obj_publish(t + "/pj", "jasl", t + "/cs-pub", "0"); need(not calls, "a draw with sample 0")
+calls.clear(); m.obj_publish(t + "/pj", "jasl", t + "/cs-pub", "all"); need(not calls, "a draw with sample all")
+PY
+
 [ $fail = 0 ] && echo "test_asl_obj_cache: all passed" || { echo "test_asl_obj_cache: FAILED"; exit 1; }
