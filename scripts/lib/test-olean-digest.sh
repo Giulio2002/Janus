@@ -74,7 +74,7 @@ root, out, rel, ol, alt, lint, lay, nosem = sys.argv[1:9]
 spec = importlib.util.spec_from_file_location("cc", root + "/scripts/gate-cachecmp.py"); cc = importlib.util.module_from_spec(spec); spec.loader.exec_module(cc)
 exe, src, binsha = cc.digest_tool()
 h = {"olean:" + rel: cc.sha_file(ol), "config:SAIL_SPLIT": "1", "config:SAIL_SPLIT_PARTS": "48", "sail-driver": "d",
-     "config:oleandigest-src": src, "config:oleandigest-bin": binsha}
+     "config:oleandigest-src": src, "config:oleandigest-bin": binsha, "ir:janus/Fake.c": "c0ffee"}  # compare needs some emitted-C record in both runs
 if not nosem:
     dg, nl, la = cc.semantic(exe, [alt or ol])[alt or ol]
     h["sem:" + rel], h["lint:" + rel], h["lay:" + rel] = dg, lint or str(nl), lay or la
