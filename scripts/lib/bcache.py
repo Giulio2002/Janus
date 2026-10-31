@@ -127,6 +127,17 @@ def mac(kind, ident, manifest_bytes):
                     hashlib.sha256).hexdigest()
 
 
+def record_bytes(files):
+    """Canonical bytes of a restamp record (path -> SHA-256 of the files a module-cache restore copied)."""
+    import json
+    return json.dumps(files, sort_keys=True, separators=(",", ":")).encode()
+
+
+def record_mac(tree, files):
+    """HMAC (domain "restamp", bound to the tree root) over a restamp record; same per-user key as the cache."""
+    return mac("restamp", os.path.realpath(tree), record_bytes(files))
+
+
 # ---- layout and locks ----
 
 def entry_dir(kind, cache, ident):

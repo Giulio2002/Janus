@@ -1601,7 +1601,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (S : PoolShape) (B :
           simp only [outside_append, outside_cons, outside_nil, and_true]
           exact ⟨outside_rt_of_win hwrt (by omega) (by omega), by omega, by omega⟩),
           Arm64.Memory.readLE_writeLE_of_disjoint (h := by omega)]
-        first | exact a1 | exact a2 | exact a3
+        first | with_reducible exact a1 | with_reducible exact a2 | with_reducible exact a3 | exact a1 | exact a2 | exact a3
     have hpd := InRanges.disjoint hin (hwrt _ (List.mem_singleton_self _))
     simp only at hpd
     have hSh2 : SliceObj B m2 ptr.toNat [(ptr.toNat, ptr.toNat + 24)] :=

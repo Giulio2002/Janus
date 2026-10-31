@@ -92,7 +92,7 @@ theorem mm_loop (s0 : State) (h30a : (s0.regs 30).toNat % 4 = 0) (h30b : (s0.reg
       simpa using hrb'
     · janus_run until [MM + 4]
       refine ih _ (by omega) (by omega) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-      all_goals try (simp only [setReg_apply]; first | assumption | rfl)
+      all_goals try (simp only [setReg_apply]; first | (first | with_reducible assumption | assumption) | rfl)
       all_goals try (apply BitVec.eq_of_toNat_eq; simp [setReg]; omega)
       all_goals try janus_frame
       all_goals simpa using hrb'
@@ -110,7 +110,7 @@ theorem memmove_model : MemmoveContract (P.link implAt) (P.contractAddr "runtime
     janus_run until [MM + 4]
     refine mm_loop s h30a h30b _ _ _ hD hS hwd hrs hdisj (s.regs 2).toNat _ (by omega) (Nat.le_refl _)
       ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-    all_goals try (simp only [setReg_apply]; first | assumption | rfl)
+    all_goals try (simp only [setReg_apply]; first | (first | with_reducible assumption | assumption) | rfl)
     all_goals try (simp [setReg])
     all_goals try exact ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩
     all_goals simp [readBytes]

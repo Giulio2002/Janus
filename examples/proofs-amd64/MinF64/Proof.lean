@@ -49,7 +49,7 @@ theorem correctness (a b : BitVec 64) :
       340282366920938463463374607431768211456) % 18446744073709551616 = u ||| t := by
     intro A B
     rw [show (18446744073709551616 : Nat) = 2 ^ 64 from rfl, Nat.or_mod_two_pow]
-    congr 1 <;> omega
+    first | (with_reducible congr 1 <;> omega) | (congr 1 <;> omega)
   rw [key]
   exact hr
 

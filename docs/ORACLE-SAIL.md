@@ -481,3 +481,41 @@ Janus = `janus-oracle` built 13:55 (git `665fb69` + working tree); qemu = `artif
   `Error_ConstrainedUnpredictable` (301 throw sites in sail-arm), so such steps return
   half-executed with `have_exception` set; (4) `TCR_EL1.T1SZ = 0` (the reset value) makes
   `XPAC*` hit a model assertion. The EL0 set-up above avoids (4), and the driver detects (3).
+
+## Split build (SAIL_SPLIT=1, the default)
+
+The Sail model is one 170 MB C++ translation unit; g++ builds it serially (cold driver build 23-31 min wall, ~1450-1900 CPU s).
+`scripts/oracle-sail.sh build` now cuts the instrumented model at top-level item boundaries into 48 translation units
+(`oracle-sail/split_model.py`; every layout assumption is asserted, ghost temporaries stay with their users, the static type
+helpers are replicated per unit) and builds them in parallel through a copy of the pinned crate whose only change is a
+`build.rs` patch (`oracle-sail/build.rs.patch`, accepts `AARCH64_ORACLE_SAIL_MODEL_PARTS`; `oracle-sail/split_crate.py` makes
+the copy, verifies it file by file against the pinned checkout and pins the original and patched `build.rs` SHA-256; the crate
+is swapped in as a cargo directory source, so `Cargo.lock` and `--locked` are unchanged). Parsing the 40k-member `Model` class
+costs g++ ~4 min (quadratic member lookup), so the patched `build.rs` precompiles it once (`-Werror=invalid-pch`: a PCH that is
+not used is an error, not a silent slowdown) and compiles the units on `NUM_JOBS` threads (cc's `parallel` feature is off).
+`SAIL_SPLIT=0` keeps the original single unit; `split_model.py`, `split_crate.py`, `build.rs.patch` and `SAIL_SPLIT` are in the
+driver cache key. Measured (box load 20-40): cold build 8m14s wall / 2224 CPU s at 24 jobs, 8m57s / 1788 CPU s at 8 jobs, versus
+31m10s / 1885 CPU s for `SAIL_SPLIT=0`. The split driver is bit-identical across job counts (sha256 d894a505...), differs from
+the single-unit binary (as expected), and its output on the whole 486,460-case oracle corpus is byte-identical to the
+single-unit driver's (sha256 78bb689b...).
+
+Hardening (RTSAIL follow-up, `scripts/lib/test-splitcrate.sh`, `scripts/lib/test-cachecmp.sh`):
+
+* `split_crate.py` compares the crate copy with the pinned checkout at every depth: `.git` and `target` are ignored only
+  directly under the checkout's root (the copy has neither, so there they count), dotted names are compared, the
+  executable bit is compared, directories are compared, and a symlink (file or directory) is an error.
+* The model directories are re-hashed on every use, not only compared by mtime (`oracle-sail/dir_digest.py`): the
+  instrumented `model.cpp`, `model.h` and `model_missing.cpp` carry `.inst-complete` (their SHA-256, the source model's and
+  `instrument_model.py`'s); the parts directory carries `.complete` (SHA-256 of every part, `model.h`, `model_missing.cpp`,
+  the instrumented model, `split_model.py`, the parts count). A mismatch regenerates from the source model; the unpacked
+  vendored model is re-checked against the pinned archive and checkout. About 1 s per build. The patched `build.rs` also
+  has `rerun-if-changed` on the parts directory, `model.h` and `model_missing.cpp` (patched `build.rs` pin changed).
+* `artifact-hashes.json` records `config:SAIL_SPLIT` and `config:SAIL_SPLIT_PARTS`; `gate-cachecmp.py compare` reports a
+  difference (or an unrecorded value) as a CONFIGURATION MISMATCH, exit 2, never as a P0 cache bug and never a pass;
+  `nightly-cold-gate.sh` gives both runs the same explicit `SAIL_SPLIT`.
+* The oracle corpus has almost no SVE, Advanced SIMD/FP or SIMD load/store words, so it says little about the Sail
+  `__DecodeA64_SVE` and its neighbours. `oracle svegen` (oracle/gen/svesimd.go) draws, with a fixed seed, uniformly random
+  words of the SVE, SME, SIMD&FP data-processing and SIMD load/store top-level groups; `scripts/oracle.sh quick|full` adds
+  `SVESIMD_N` (default 800) per group, about 3.5k cases with ids from 30000000 (no existing case or expected output
+  changes; Janus does not model SVE, so those are model-gaps; 0 MISMATCH on seeds 2, 3, 4, 5 against qemu). RTSAIL's
+  131,100-case comparison of the split and single-unit drivers found them byte-identical.

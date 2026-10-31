@@ -15,8 +15,13 @@
 #                  (and may delete and rebuild modules whose files no longer match an OLD stamp), so every write janus can make to the
 #                  shared build happens BEFORE the pin; afterwards the stamp is fresh and a --janus-root verification only reads
 #   (pre-warm and pre-stamp both verify artifacts/Add, whose theorems lock admits one run at a time: pre-warm waits for pre-stamp)
-#   pre-fixture    the go tests' framework fixture (seeded by pre-warm's cache); its --janus-root verification of the checkout
-#                  only ever reads a fresh stamp after the hash, so it needs pre-stamp and pre-pin
+#   pre-fixture-emb the go tests' framework fixture, embedded part (JANUS_TEST_FIXTURE_PART=embedded): the embedded framework's
+#                  build and replay verdict, built cold INSIDE the fixture directory. It reads neither this checkout's build nor the
+#                  user's cache (no seed: pre-stamp and pre-warm write that cache), so it needs nothing and starts at t=0
+#   pre-fixture    the fixture's checkout part (JANUS_TEST_FIXTURE_PART=checkout): the checkout's replay verdict, carried from the
+#                  user's cache (where pre-stamp's --janus-root verification recorded it) or replayed; that verification only ever
+#                  reads a fresh stamp after the hash, so it needs pre-stamp and pre-pin. It never reads the user cache's framework
+#                  build, so it does not wait for pre-warm
 #   pre-pin        hash the finished framework build and switch the lakeguard on: every READER of the shared build needs it,
 #                  so none starts before the build it reads has finished and been hashed
 # Readers: verify, gotest, rounds, decoder (and the tree copies, which copy the build). Lanes that need nothing built:
@@ -30,7 +35,8 @@ DAG_DEPS=(
   [pre-stamp]="pre-gobin pre-lake pre-ex-arm64 pre-ex-amd64"
   [pre-pin]="pre-lake pre-stamp"
   [pre-warm]="pre-gobin pre-lake pre-ex-arm64 pre-stamp"
-  [pre-fixture]="pre-lake pre-warm pre-stamp pre-pin"
+  [pre-fixture-emb]=""
+  [pre-fixture]="pre-lake pre-stamp pre-pin pre-fixture-emb"
   [tree-x86]="pre-pin pre-gobin $_EX" [tree-asl]="pre-pin pre-gobin $_EX" [tree-aslv]="pre-pin pre-gobin $_EX" [tree-go]="pre-pin pre-gobin $_EX"
   [verify]="pre-pin pre-gobin pre-warm $_EX"
   [gotest]="pre-pin pre-gobin pre-fixture"
@@ -83,10 +89,11 @@ DAG_RES=(
   [bin/janus]="w:pre-gobin w:pre-ex-amd64 r:pre-stamp r:pre-warm r:pre-rounds-bin r:verify r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [framework-build]="w:pre-lake w:pre-stamp r:pre-pin r:pre-warm r:pre-fixture r:verify r:gotest r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [audit/bin/janus-rounds]="w:pre-rounds-bin r:rounds"
-  [go-test-fixture]="w:pre-fixture r:gotest r:rtasl-go"
+  [go-test-fixture]="w:pre-fixture-emb w:pre-fixture r:gotest r:rtasl-go"
   [examples-arm64]="w:pre-ex-arm64 r:pre-stamp r:pre-warm r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [examples-amd64]="w:pre-ex-amd64 r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
-  [user-cache-framework]="w:pre-stamp w:pre-warm r:pre-fixture"
+  [user-cache-framework]="w:pre-stamp w:pre-warm"
+  [user-cache-checkout-verdict]="w:pre-stamp r:pre-fixture"
 )
 
 # dag_has STAGE DEP: DEP is in STAGE's closure. NOT `dag_closure STAGE | grep -qx DEP`: grep -q leaves at the first match, the

@@ -67,7 +67,9 @@ theorem correctness (p a : BitVec 64) (k : Nat) :
       (18446744073709551615 + (a.toNat + p.toNat)) % 18446744073709551616 &&&
         (18446744073709551616 - a.toNat) % 18446744073709551616 := by
     rw [BitVec.toNat_and]
-    congr 1 <;> simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat] <;> omega
+    first
+      | (with_reducible congr 1 <;> simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat] <;> omega)
+      | (congr 1 <;> simp only [BitVec.toNat_sub, BitVec.toNat_add, BitVec.toNat_ofNat] <;> omega)
   rw [e]
   exact round_up p.toNat a.toNat k ha hpa
 

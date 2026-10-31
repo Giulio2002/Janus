@@ -729,6 +729,33 @@ def memoDisch (cref : IO.Ref StepCache) (set : Name) (d : Simp.Discharge) : Simp
       { sc with dischFail := m.insert (key, set, depth, e) }
     return none
 
+/-- The discharger of `simp (disch := tac)` without `Term.runTactic`. Lean's `tacticToDischarge`
+runs `tac` on every side condition through `Term.runTactic`, whose first step
+(`instantiateMVarDeclMVars`) instantiates and `shareCommon`s the whole local context of the goal:
+with the large contexts of a run (state hypotheses, accumulated facts) that is ~0.2 s per side
+condition, more than the discharge itself. This one runs `Tactic.run` on a fresh goal with the same
+local context directly. The result is the same proof term or `none` (the kernel checks the term as
+before); `Term.State` is threaded exactly as `tacticToDischarge` does. -/
+def fastDischargeWrapper (tac : TSyntax `tactic) : TacticM Simp.DischargeWrapper := do
+  let ref ← IO.mkRef (← getThe Term.State)
+  let ctx ← readThe Term.Context
+  let disch : Simp.Discharge := fun e => do
+    let mvar ← mkFreshExprSyntheticOpaqueMVar e `simp.discharger
+    let s ← ref.get
+    let runTac? : TermElabM (Option Expr) :=
+      try
+        Term.withoutModifyingElabMetaStateWithInfo do
+          Term.withSynthesize (postpone := .no) do
+            let rest ← Tactic.run mvar.mvarId! (withoutRecover (evalTactic tac))
+            unless rest.isEmpty do throwError "unsolved goals"
+          let result ← instantiateMVars mvar
+          if result.hasExprMVar then return none else return some result
+      catch _ => return none
+    let (result?, s) ← liftM (m := MetaM) <| Term.TermElabM.run runTac? ctx s
+    ref.set s
+    return result?
+  return .custom ref disch
+
 /-- Look up or build (with `mk`) the simp context of simp set `set` for the current local
 context, and run `k` with it. -/
 def withCachedCtx (cref : IO.Ref StepCache) (set : Name)
@@ -1612,6 +1639,24 @@ elab "janus_apart" : tactic => do
 /-- Prove a goal `MemFrame m₀ m rs` (the memory part of a callee summary). -/
 elab "janus_frame" : tactic => do proveFrame (← getMainGoal); replaceMainGoal []
 
+/-- `rfl` for an equation whose left side is a structure projection (`{ regs := …, rip := 4226039#64, … }.rip
+= BitVec.ofNat 64 (segAddr P f + 23)`: a field of a state literal against an address). It fails at once
+on every other goal. A bare `try rfl` over the goals after a `refine` also runs `rfl` at default
+transparency on `MemFrame`/`readLE` goals it cannot close, where each failure unfolds the memory
+terms (30 s per goal in amd64 `formatBase10`). -/
+elab "janus_rfl_proj" : tactic => do
+  let g ← getMainGoal
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, _) := t.eq? | throwError "janus_rfl_proj: not an equation"
+  let f := lhs.getAppFn
+  let isProj ← match f with
+    | .proj .. => pure true
+    | .const c _ => do let env ← getEnv; pure (env.isProjectionFn c)
+    | _ => pure false
+  unless isProj do throwError "janus_rfl_proj: the left side is not a projection"
+  evalTactic (← `(tactic| rfl))
+
+
 /-- `janus_eval% t`: the closed natural number `t` (e.g. `segAddr Extracted.program "f" + 8`),
 evaluated at elaboration time and inserted as a numeral. For arguments that must be literals
 (a lemma whose `rfl` side conditions are checked against them), without copying the number
@@ -2223,8 +2268,8 @@ def tryMerge (spec : MergeSpec) (g h : MVarId) (maxVars : Nat := 8) : MetaM (Opt
   let dropG := hbG.filter (!hbH.contains ·)
   let dropH := hbH.filter (!hbG.contains ·)
   let saved ← saveState
-  let g' ← g.tryClearMany dropG
-  let h' ← h.tryClearMany dropH
+  let g' ← fastClear g dropG
+  let h' ← fastClear h dropH
   let idsG := (← g'.getDecl).lctx.getFVarIds
   let idsH := (← h'.getDecl).lctx.getFVarIds
   if idsG != idsH then saved.restore; return none

@@ -169,7 +169,9 @@ func TestMain(m *testing.M) {
 					src = fx
 				}
 			}
-			if src != "" && src != "off" && filepath.Clean(src) != testCacheDir() {
+			if fixturePart() == "embedded" {
+				// the gate's embedded-only fixture stage (fixture_test.go): it builds the fixture and nothing else
+			} else if src != "" && src != "off" && filepath.Clean(src) != testCacheDir() {
 				if ok, err := seedFramework(src, testCacheDir()); err != nil {
 					fmt.Fprintf(os.Stderr, "janus tests: not seeding the test cache from %s: %v\n", src, err)
 				} else if ok {

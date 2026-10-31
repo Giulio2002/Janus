@@ -201,6 +201,19 @@ var incrEnvSkip = map[string]bool{
 	"JANUS_SPEED_BASELINE": true, "JANUS_INCR": true, "JANUS_INCR_RECORD": true, "JANUS_INCR_EXPLAIN": true,
 	"JANUS_INCR_NOTE": true, "JANUS_INCR_PRECHECK": true, "JANUS_GATE_T0": true, "JANUS_MEMGUARD_CGROUP": true, "JANUS_PRECHECK_JOBS": true, "JANUS_GOTEST_PARALLEL": true, "JANUS_AUDIT_BIN": true, "JANUS_AUDIT_PREBUILT": true,
 	"GOCACHE": true, "GOMODCACHE": true, "GOPATH": true, "GOTMPDIR": true, "GOENV": true,
+	// The gate's own bookkeeping (scripts/gate.sh exports them to every item and lane, and their values differ from one
+	// run to the next, so keyed they made a gate run never find the record of an earlier one: the incremental gate skipped
+	// nothing across commits). Each only sizes, names or stamps the run; none selects what is checked or how:
+	//   JANUS_GATE_TREE0       the stamp of the tree at the start of the run (HEAD, size, mtime, inode of every file):
+	//                          scripts/lib/incr.sh compares it to decide whether a PASS may be RECORDED; a key already names
+	//                          the content of every input, so the stamp adds nothing to it
+	//   JANUS_GATE_AUTO_WHY, JANUS_GATE_ROUNDS_LANES, JANUS_GATE_AUTO_BUDGET, JANUS_VERIFY_MEM_BUDGET_GIB, JANUS_ROUNDS_LANES
+	//                          the automatic sizing (jobs, lanes, memory budget) chosen from the load of the moment
+	//   JANUS_LAKEGUARD_PIN, JANUS_LAKEGUARD_ROOT
+	//                          the marker file (a path in the run's output directory) and the checkout that switch the
+	//                          lakeguard shim on: it only turns `lake build` into `lake build --no-build`
+	"JANUS_GATE_TREE0": true, "JANUS_GATE_AUTO_WHY": true, "JANUS_GATE_ROUNDS_LANES": true, "JANUS_GATE_AUTO_BUDGET": true,
+	"JANUS_VERIFY_MEM_BUDGET_GIB": true, "JANUS_ROUNDS_LANES": true, "JANUS_LAKEGUARD_PIN": true, "JANUS_LAKEGUARD_ROOT": true,
 }
 
 func incrEnvRelevant(name string) bool {

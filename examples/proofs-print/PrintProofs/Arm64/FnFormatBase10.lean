@@ -174,7 +174,7 @@ macro "chunk_digits" : tactic => `(tactic| (
   all_goals first | exact True.intro | exact congrArg Janus.Spec.Print.digit (by omega)))
 
 set_option hygiene false in
-macro "fin_eq" : tactic => `(tactic| first | rfl | (simp [setReg, callRegs, hg', h18, h_rd2, hsp', hsp, hdz, htp, hfc, hfs]; done))
+macro "fin_eq" : tactic => `(tactic| first | (with_reducible rfl) | rfl | (simp [setReg, callRegs, hg', h18, h_rd2, hsp', hsp, hdz, htp, hfc, hfs]; done))
 
 set_option maxRecDepth 200000 in
 set_option maxHeartbeats 40000000 in
@@ -311,7 +311,7 @@ theorem formatBase10 (impl : List Segment) :
     · janus_run [lsr29, BitVec.toNat_ushiftRight, Nat.shiftRight_eq_div_pow] until
         [segAddr P "internal/strconv.formatBase10" + 0x118]
       refine tail U _ i h29 hlen hi20 ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-      all_goals first | rfl | (with_reducible assumption) | (simp only [setReg_apply]; assumption)
+      all_goals first | (with_reducible rfl) | (with_reducible assumption) | (simp only [setReg_apply, Nat.reduceEqDiff, ↓reduceIte]; with_reducible assumption) | rfl | (simp only [setReg_apply]; assumption)
     · have hi9 : 9 ≤ i := by
         have := length_decimal_ge 8 U (by omega)
         omega

@@ -26,7 +26,7 @@ theorem correctness (x y : BitVec 64) :
   have hgr := hg.readable
   simp only [regSP, regG, stackguard0Offset, stackguard0] at hacc hle hnw hgl hgb hnw2 hgr
   janus64_run
-  congr 1
+  first | with_reducible congr 1 | congr 1
   apply BitVec.eq_of_toNat_eq
   simp [BitVec.toNat_add]
 
