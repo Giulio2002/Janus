@@ -647,12 +647,23 @@ grep -q 'nightly-objaudit.sh" "$work/tree-cold" "$cache_dir" || rc_final=1' "$ro
 grep -q 'run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0' "$root/scripts/nightly-cold-gate.sh" && grep -q '"\$@" LEAN_NUM_THREADS=4 JANUS_JOBS=2 memcap -m 48G scripts/asl.sh build' "$root/scripts/nightly-cold-gate.sh" && ok "the cold run passes JANUS_ASL_CACHE=0 to the gate AND to its own link step" || bad "cold run wiring"
 cdir="$t/coldcache"; mkdir -p "$cdir"; M objpublish "$t/p" arm "$cdir" 0 > /dev/null
 rm -rf "$t/cr"; copy "$t/cr"; mkdir -p "$t/cr/JanusASL/.lake"; rsync -a --include='*/' --include='*.c' --include='*.c.hash' --exclude='*' "$t/p/JanusASL/.lake/" "$t/cr/JanusASL/.lake/"
+JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "a cold run (JANUS_ASL_CACHE=0, no ASL_OBJ_CACHE set) does NOT restore objects from a populated cache" || bad "cold run restored from the cache: $(cat "$t/out")"
 ASL_OBJ_CACHE=1 JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
-[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "a cold run (JANUS_ASL_CACHE=0) does NOT restore objects from a populated cache" || bad "cold run restored from the cache: $(cat "$t/out")"
+[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... not even with ASL_OBJ_CACHE=1 (JANUS_ASL_CACHE=0 wins)" || bad "cold run restored with ASL_OBJ_CACHE=1"
+ASL_OBJ_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "ASL_OBJ_CACHE=0 opts out: nothing restored" || bad "restored despite ASL_OBJ_CACHE=0"
+def=$(sed -n 's/^OBJ_CACHE_DEFAULT=\([01]\).*/\1/p' "$root/scripts/asl.sh")   # the default is one constant: the tests follow it
+st() { env "$@" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -v '^memguard' | tail -n 1; }
+[ "$(st ASL_CACHE="$cdir")" = "$([ "$def" = 1 ] && echo ON || echo "OFF (default)")" ] && [ "$(st ASL_OBJ_CACHE=0 ASL_CACHE="$cdir")" = "OFF (ASL_OBJ_CACHE=0)" ] && st JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" | grep -q "$([ "$def" = 1 ] && echo '^OFF (no build cache' || echo '^OFF (default)')" && ok "objcache-state: ON by default, OFF with ASL_OBJ_CACHE=0, OFF with JANUS_ASL_CACHE=0" || bad "objcache-state: $(st ASL_CACHE="$cdir") / $(st ASL_OBJ_CACHE=0 ASL_CACHE="$cdir") / $(st JANUS_ASL_CACHE=0 ASL_CACHE="$cdir")"
 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
-[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is OFF by default (no ASL_OBJ_CACHE=1: nothing restored)" || bad "restored without the opt-in"
-ASL_OBJ_CACHE=1 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
-[ -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... while the same call without JANUS_ASL_CACHE=0 does (the test discriminates)" || bad "control restore failed: $(cat "$t/out")"
+if [ "$def" = 1 ]; then
+  [ -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is ON by default (the same call without opt-out restores: the test discriminates)" || bad "default restore failed: $(cat "$t/out")"
+else
+  [ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is OFF by default (OBJ_CACHE_DEFAULT=0)" || bad "restored by default despite OBJ_CACHE_DEFAULT=0"
+  ASL_OBJ_CACHE=1 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+  [ -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... and ASL_OBJ_CACHE=1 turns it on" || bad "opt-in restore failed"
+fi
 
 # ======== RTOBJ4 survivors: one direct test per mutant ========
 cat > "$t/h.py" <<'PY'
@@ -918,5 +929,90 @@ need(calls and calls[-1] == (3, 2), "draw over the rest: %r" % calls)   # pj has
 calls.clear(); m.obj_publish(t + "/pj", "jasl", t + "/cs-pub", "0"); need(not calls, "a draw with sample 0")
 calls.clear(); m.obj_publish(t + "/pj", "jasl", t + "/cs-pub", "all"); need(not calls, "a draw with sample all")
 PY
+
+# ======== RTOBJ5: the janus scope, the trusted auditor's objects, opt-out values, audit lock, unreadable tombstone ========
+RL() { echo "$t/$1/.lake"; }     # the ROOT package's .lake of a fixture tree
+janus_fresh() {  # janus_fresh NAME: a tree with root-package objects: Foo, Bar (cacheable) and the auditor's own Audit, AuditMain
+  copy "$t/$1"; mkdir -p "$t/$1/.lake"
+  for n in Foo Bar; do mkjc "$(RL $1)" Janus "$n"; done
+  for n in Audit AuditMain; do mkjc "$(RL $1)" Janus/Tools "$n"; done
+}
+janus_fresh jn
+[ "$(M objkey "$t/jn" janus | wc -l)" = 2 ] && ok "janus scope: 2 units (Foo, Bar); the auditor's modules (Janus.Tools.Audit, AuditMain) are excluded" || bad "janus units: $(M objkey "$t/jn" janus | wc -l)"
+stage "$t/jn" janus 0 > /dev/null && ok "janus scope: a real object stages (exact argv, no bracket depth)" || bad "janus stage"
+janus_fresh jn2; edit_log "$(RL jn2)/build/ir/Janus/Bar.c.o.export.trace" "a.remove('-O3')"; expect 1 "janus scope: a dropped flag is refused" stage "$t/jn2" janus 0
+janus_fresh jn3; edit_log "$(RL jn3)/build/ir/Janus/Bar.c.o.export.trace" "a.insert(-1,'-fbracket-depth=100000')"; expect 1 "janus scope: the ArmASL-only -fbracket-depth is refused on a Janus object" stage "$t/jn3" janus 0
+jid() { M objkey "$1" janus | sort | tr '\n' ' '; }
+base_ids=$(jid "$t/jn")
+janus_fresh jn4; python3 -I - "$t/jn4/lakefile.toml" <<'PY'
+import sys; p = sys.argv[1]; s = open(p).read(); i = s.index('name = "Janus"'); j = s.index("\n", i); open(p, "w").write(s[:j] + '\nweakLeancArgs = ["-fwrapv"]' + s[j:])
+PY
+[ "$(jid "$t/jn4")" != "$base_ids" ] && ok "janus scope: the lean_lib Janus table (weakLeancArgs) is in the id" || bad "Janus lib table not in the id"
+janus_fresh jn5; python3 -I - "$t/jn5/lakefile.toml" <<'PY'
+import sys; p = sys.argv[1]; s = open(p).read(); i = s.index('name = "janus-decode"'); j = s.index("\n", i); open(p, "w").write(s[:j] + '\nmoreLinkArgs = ["-lfoo"]' + s[j:])
+PY
+[ "$(jid "$t/jn5")" != "$base_ids" ] && ok "janus scope: a lean_exe table is in the id" || bad "exe table not in the janus id"
+janus_fresh jn6; printf '\nmoreLeancArgs = ["-fwrapv"]\n' > "$t/jn6/lk.tail"; python3 -I - "$t/jn6/lakefile.toml" <<'PY'
+import sys; p = sys.argv[1]; s = open(p).read(); open(p, "w").write('moreLeancArgs = ["-fwrapv"]\n' + s)
+PY
+[ "$(jid "$t/jn6")" != "$base_ids" ] && ok "janus scope: a package-level lakefile key is in the id" || bad "package keys not in the janus id"
+jc="$t/jncache"; mkdir -p "$jc"
+M objpublish "$t/jn" janus "$jc" all > "$t/out" 2>&1; grep -q "stored 2, already cached 0, no object 0, refused 0" "$t/out" && ok "janus scope: publish stores Foo and Bar and NOT the auditor's objects" || bad "janus publish: $(cat "$t/out")"
+# an entry for the auditor's object that a key holder forged: never restored
+py "$jc" <<'PY' && ok "the auditor's objects are never restored, even from a validly signed entry" || bad "TCB object restored"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+cache = sys.argv[3]; tree = t + "/jn"; lake = tree + "/.lake"
+c = "build/ir/Janus/Tools/Audit.c"; cs = {c: m.sha_file(lake + "/" + c)}
+ident = m.obj_id(tree, cs, "janus"); st = tempfile.mkdtemp(dir=t)
+rels = m.stage_unit(tree, "janus", lake, ident, cs, st)
+b.store("armobj", cache, ident, st, rels, None, None, cs)
+need(os.path.isdir(b.entry_dir("armobj", cache, ident)), "forged TCB entry not created")
+PY
+copy "$t/jr"; mkdir -p "$t/jr/.lake"; rsync -a --include='*/' --include='*.c' --include='*.c.hash' --exclude='*' "$t/jn/.lake/" "$t/jr/.lake/"
+M objrestore "$t/jr" janus "$jc" > "$t/out" 2>&1
+[ -f "$t/jr/.lake/build/ir/Janus/Foo.c.o.export" ] && [ -f "$t/jr/.lake/build/ir/Janus/Bar.c.o.export" ] && ok "janus scope: restore places Foo and Bar" || bad "janus restore: $(cat "$t/out")"
+[ ! -e "$t/jr/.lake/build/ir/Janus/Tools/Audit.c.o.export" ] && [ ! -e "$t/jr/.lake/build/ir/Janus/Tools/AuditMain.c.o.export" ] && ok "  ... and never the auditor's (janus-audit's own) objects" || bad "TCB object placed"
+cmp -s "$t/jr/.lake/build/ir/Janus/Foo.c.o.export" "$t/jn/.lake/build/ir/Janus/Foo.c.o.export" && ok "  ... byte-identical" || bad "janus restore differs"
+fb=$(find "$jc/armobj" -path '*/tree/build/ir/Janus/Bar.c.o.export' | head -1); chmod -R u+w "$(dirname "$fb")"; printf X >> "$fb"
+copy "$t/jr2"; mkdir -p "$t/jr2/.lake"; rsync -a --include='*/' --include='*.c' --include='*.c.hash' --exclude='*' "$t/jn/.lake/" "$t/jr2/.lake/"
+M objrestore "$t/jr2" janus "$jc" > "$t/out" 2>&1; grep -q "1 restored, 0 without entry, 1 rejected" "$t/out" && ok "janus scope: a tampered entry is REJECTED, the other restored" || bad "janus tamper: $(cat "$t/out")"
+# audit + tombstone in the janus scope
+rm -rf "$jc/armobj"; M objpublish "$t/jn" janus "$jc" all > /dev/null 2>&1
+M objaudit "$t/jn" janus "$jc" > "$t/out" 2>&1; [ $? = 0 ] && grep -q "coverage 2 of 2" "$t/out" && ok "janus scope: objaudit compares 2 of 2" || bad "janus audit: $(cat "$t/out")"
+printf X >> "$(RL jn)/build/ir/Janus/Foo.c.o.export"
+M objaudit "$t/jn" janus "$jc" > "$t/out" 2>&1; rc=$?; [ "$rc" = 3 ] && ls "$jc/armobj"/.tombstone-* > /dev/null 2>&1 && ok "janus scope: a differing object is POISONED: exit 3, tombstone written" || bad "janus audit poisoned rc $rc"
+pi=$(basename "$(ls -d "$jc/armobj"/.poisoned-* | head -1)"); pi=${pi#.poisoned-}
+mv "$jc/armobj/.poisoned-$pi" "$jc/armobj/$pi"; expect 3 "janus scope: renaming the quarantined entry back does not revive it" B fetch armobj "$jc" "$pi" "$t/jdst/.lake"
+
+# an unreadable tombstone counts as NOT COMPARABLE (M7b): 1 of 2 objects here
+fresh ut; cut_="$t/utcache"; mkdir -p "$cut_"; for n in Aa Bb; do mkjc "$(L ut)" JanusASL "$n"; done; M objpublish "$t/ut" jasl "$cut_" 0 > /dev/null 2>&1
+uid=$(M objkey "$t/ut" jasl | head -1); printf 'garbage' > "$cut_/armobj/.tombstone-$uid"
+ASL_OBJAUDIT_MAX_UNCHECKED_PCT=60 M objaudit "$t/ut" jasl "$cut_" > "$t/out" 2>&1; rc=$?
+grep -q "coverage 2 of 3 objects compared (67%), 1 not comparable" "$t/out" && [ "$rc" = 0 ] && ok "an unreadable tombstone counts as not comparable (1 of 3), within a 60% limit" || bad "unreadable tombstone accounting rc $rc: $(cat "$t/out")"
+ASL_OBJAUDIT_MAX_UNCHECKED_PCT=20 M objaudit "$t/ut" jasl "$cut_" > "$t/out" 2>&1; [ $? = 4 ] && ok "  ... and above a 20% limit the audit is INCOMPLETE" || bad "unreadable tombstone not fatal"
+
+# objaudit holds the entry lock against a concurrent WRITER: a replacement done under the lock is audited, not clobbered
+fresh lk1; forge "$(L lk1)" "$(L lk1)/build/ir/ArmASL/Part01.c"; lkc="$t/lkcache"; mkdir -p "$lkc"; M objpublish "$t/lk1" arm "$lkc" 0 > /dev/null 2>&1
+lid=$(M objkey "$t/lk1"); fresh lk2; hc="$t/lkhonest"; mkdir -p "$hc"; M objpublish "$t/lk2" arm "$hc" 0 > /dev/null 2>&1; [ "$(M objkey "$t/lk2")" = "$lid" ] || bad "fixture: ids differ"
+( python3 -I - "$root" "$lkc" "$lid" "$hc" <<'PY'
+import importlib.util, shutil, sys, time, os
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+cache, ident, hc = sys.argv[2:]
+e = b.entry_dir("armobj", cache, ident); lk = b.lock_path(e + ".lock", shared=False); open(cache + "/lk-held", "w").write("1")
+time.sleep(2.5)
+os.system("chmod -R u+w '%s'; rm -rf '%s'" % (e, e)); shutil.copytree(hc + "/armobj/" + ident, e)   # an honest republish, under the lock
+PY
+) & lw=$!; for i in $(seq 1 30); do [ -f "$lkc/lk-held" ] && break; sleep 0.2; done
+M objaudit "$t/lk2" arm "$lkc" > "$t/out" 2>&1; rc=$?; wait $lw
+[ "$rc" = 0 ] && [ -d "$lkc/armobj/$lid" ] && ! ls "$lkc/armobj"/.poisoned-* > /dev/null 2>&1 && ok "objaudit waited for the writer's lock, then audited the NEW (honest) entry: no quarantine of a good entry" || bad "audit raced the writer: rc $rc: $(cat "$t/out")"
+
+# opt-out values: 0|off|no|false switch it off, an empty value is the default (ON) and is printed, junk is OFF
+for v in 0 off no false; do
+  ASL_OBJ_CACHE=$v ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -q "^OFF (ASL_OBJ_CACHE=$v)" && ok "ASL_OBJ_CACHE=$v turns the object cache OFF" || bad "ASL_OBJ_CACHE=$v not OFF"
+  rm -f "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export"; ASL_OBJ_CACHE=$v ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > /dev/null 2>&1
+  [ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... and nothing is restored" || bad "restored with ASL_OBJ_CACHE=$v"
+done
+ASL_OBJ_CACHE= ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -q "$([ "$def" = 1 ] && echo '^ON (ASL_OBJ_CACHE=<empty>, the default)' || echo '^OFF (default)')" && ok "an EMPTY ASL_OBJ_CACHE is the default (ON) and says so" || bad "empty value"
+ASL_OBJ_CACHE=banana ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -q "^OFF (ASL_OBJ_CACHE=banana: unrecognised" && ok "an unrecognised value is OFF, not silently ON" || bad "junk value"
 
 [ $fail = 0 ] && echo "test_asl_obj_cache: all passed" || { echo "test_asl_obj_cache: FAILED"; exit 1; }
