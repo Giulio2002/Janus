@@ -431,17 +431,17 @@ PY
 # the cold-side audit: end to end through the nightly's own script
 copy "$t/cold"; build "$t/cold"; build_jasl "$t/cold"; ac="$t/auditcache"; rm -rf "$ac"; mkdir -p "$ac"
 M objpublish "$t/cold" arm "$ac" 1 > /dev/null; M objpublish "$t/cold" jasl "$ac" all > /dev/null
-expect 0 "nightly-objaudit: a cache that agrees with the cold tree passes" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+expect 0 "nightly-objaudit: a cache that agrees with the cold tree passes" env NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
 grep -q "objaudit \[arm\]: .*coverage [1-9][0-9]* of [1-9][0-9]* objects compared (100%)" "$t/out" && ok "  ... and compared objects" || bad "nothing compared: $(cat "$t/out")"
 co="$t/cold/JanusASL/.lake/build/ir/ArmASL/Part02.c.o.export"; cp "$co" "$t/co.bak"; printf 'X' >> "$co"
-expect 1 "nightly-objaudit: a cold object that differs from the cached one is P0" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+expect 1 "nightly-objaudit: a cold object that differs from the cached one is P0" env NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
 grep -q "POISONED" "$t/out" && ok "  ... names it POISONED" || bad "no POISONED"
 ls "$ac/armobj"/.poisoned-* > /dev/null 2>&1 && ok "  ... and the entry was quarantined" || bad "not quarantined"
 expect 2 "  ... a quarantined entry is a miss for every later fetch" B fetch armobj "$ac" "$(M objkey "$t/cold")" "$t/audfetch/.lake"
 cp "$t/co.bak" "$co"
 copy "$t/cold2"; mkdir -p "$t/cold2/JanusASL/.lake/build/ir/ArmASL"; cp "$t/cold/JanusASL/.lake/build/ir/ArmASL.c" "$t/cold2/JanusASL/.lake/build/ir/" 2>/dev/null
-expect 1 "nightly-objaudit fails closed when the cold tree has no objects (nothing compared)" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold2" "$ac"
-expect 1 "nightly-objaudit fails closed when the cache has no armobj directory" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$t/emptycache"
+expect 1 "nightly-objaudit fails closed when the cold tree has no objects (nothing compared)" env NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold2" "$ac"
+expect 1 "nightly-objaudit fails closed when the cache has no armobj directory" env NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$t/emptycache"
 
 # ======== RTOBJ4: exact expected argv, keyed prefix, id-bound file set, sandbox gating, sticky quarantine ========
 forge() {  # forge LAKE CFILE: a CONSISTENT forgery: other object bytes, honest log, .hash and trace outputs recomputed
@@ -644,12 +644,14 @@ grep -q INCOMPLETE "$t/out" && ok "  ... INCOMPLETE, not a pass" || bad "no INCO
 
 # --- the nightly's shell wiring
 grep -q 'nightly-objaudit.sh" "$work/tree-cold" "$cache_dir" || rc_final=1' "$root/scripts/nightly-cold-gate.sh" && ok "nightly-cold-gate.sh: a failing object audit sets rc_final=1" || bad "audit result not wired to rc_final"
-grep -q 'run_gate cold JANUS_ASL_CACHE=0' "$root/scripts/nightly-cold-gate.sh" && grep -q '"\$@" LEAN_NUM_THREADS=4 JANUS_JOBS=2 memcap -m 48G scripts/asl.sh build' "$root/scripts/nightly-cold-gate.sh" && ok "the cold run passes JANUS_ASL_CACHE=0 to the gate AND to its own link step" || bad "cold run wiring"
+grep -q 'run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0' "$root/scripts/nightly-cold-gate.sh" && grep -q '"\$@" LEAN_NUM_THREADS=4 JANUS_JOBS=2 memcap -m 48G scripts/asl.sh build' "$root/scripts/nightly-cold-gate.sh" && ok "the cold run passes JANUS_ASL_CACHE=0 to the gate AND to its own link step" || bad "cold run wiring"
 cdir="$t/coldcache"; mkdir -p "$cdir"; M objpublish "$t/p" arm "$cdir" 0 > /dev/null
 rm -rf "$t/cr"; copy "$t/cr"; mkdir -p "$t/cr/JanusASL/.lake"; rsync -a --include='*/' --include='*.c' --include='*.c.hash' --exclude='*' "$t/p/JanusASL/.lake/" "$t/cr/JanusASL/.lake/"
-JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+ASL_OBJ_CACHE=1 JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 [ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "a cold run (JANUS_ASL_CACHE=0) does NOT restore objects from a populated cache" || bad "cold run restored from the cache: $(cat "$t/out")"
 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "the object cache is OFF by default (no ASL_OBJ_CACHE=1: nothing restored)" || bad "restored without the opt-in"
+ASL_OBJ_CACHE=1 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 [ -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... while the same call without JANUS_ASL_CACHE=0 does (the test discriminates)" || bad "control restore failed: $(cat "$t/out")"
 
 [ $fail = 0 ] && echo "test_asl_obj_cache: all passed" || { echo "test_asl_obj_cache: FAILED"; exit 1; }

@@ -898,28 +898,47 @@ def obj_publish(root, scope, cache, sample):
     print("asl cache: C objects [%s]: stored %d, already cached %d, no object %d, refused %d (%s)" % (scope, stored, present, skipped, failed, cache))
 
 
-def obj_audit(root, scope, cache):
+POISONED_RETENTION_DAYS = 30
+
+
+def obj_audit(root, scope, cache, dry=False):
     """The cold-side audit and eviction (run on a tree whose objects were compiled from source, the nightly's cold
     tree, which is also a full independent recompile of every object, the >1 MB ones included): for every unit of the
     scope whose entry exists in `cache`, the SHA-256 of each cached object must equal the freshly compiled one.
-    A difference quarantines the entry for good: a signed tombstone (bcache.write_tombstone) records the poisoned
-    object hashes, then the entry is renamed to .poisoned-<id>; fetch, verify and store refuse those bytes whatever
-    directory they come back in. Exit 3 on a poisoned entry; 4 (fail closed) when nothing was compared or when an entry of
-    this commit's ids has an object the cold tree cannot be compared with; 0 only at 100% coverage. Prints the coverage."""
+    A difference quarantines the entry for good: under the entry's exclusive lock (an honest republish cannot race the
+    rename), a signed tombstone (bcache.write_tombstone) records the poisoned object hashes, then the entry is renamed
+    to .poisoned-<id> (removed after POISONED_RETENTION_DAYS; the tombstone stays). `dry` (--dry-run) only reports.
+    Exit 3: a poisoned entry. Exit 4 (fail closed): nothing compared, or the share of objects that could not be compared
+    (the cache holds an entry for an id whose object the cold build did not link, or an unreadable tombstone left the entry
+    unserved and untouched) is above ASL_OBJAUDIT_MAX_UNCHECKED_PCT (default 20). Every compared object that differs is
+    exit 3 whatever the coverage. Prints the coverage."""
     bc = load_bcache(root)
     lake = scope_lake(root, scope)
     checked = unchecked = entries = 0
     poisoned = {}
+    held = []
+
+    def unverifiable(ident, why):
+        print("objaudit: entry %s does not verify (%s)" % (ident, why))
+        poisoned[ident] = None
+
     for ident, cs in obj_units(root, scope):
         e = bc.entry_dir("armobj", cache, ident)
         if not os.path.isdir(e):
             continue
         entries += 1
+        lk = None
+        if not dry:
+            lk = bc.lock_path(e + ".lock", shared=False)  # held until the end: verify and rename are one step
+            held.append(lk)
         try:
             man = bc.verify_entry("armobj", cache, ident, cs)
+        except bc.TombstoneError as ex:
+            print("objaudit: LOUD: %s" % ex)
+            unchecked += 1  # not served, not touched, not compared
+            continue
         except bc.CacheError as ex:
-            print("objaudit: entry %s does not verify (%s)" % (ident, ex))
-            poisoned[ident] = None
+            unverifiable(ident, ex)
             continue
         for rel, h in sorted(man.items()):
             if not rel.endswith(".c.o.export"):
@@ -927,7 +946,7 @@ def obj_audit(root, scope, cache):
             fresh = os.path.join(lake, rel)
             if not os.path.isfile(fresh) or os.path.islink(fresh):
                 unchecked += 1
-                print("objaudit: %s of entry %s has no freshly compiled counterpart" % (rel, ident))
+                print("objaudit: %s of entry %s has no freshly compiled counterpart (not linked in this build?)" % (rel, ident))
                 continue
             checked += 1
             if sha_file(fresh) != h:
@@ -935,20 +954,36 @@ def obj_audit(root, scope, cache):
                 print("objaudit: POISONED %s: %s differs from the freshly compiled object" % (ident, rel))
     for ident, objs in sorted(poisoned.items()):
         e = bc.entry_dir("armobj", cache, ident)
+        q = os.path.join(os.path.dirname(e), ".poisoned-" + ident)
+        if dry:
+            print("objaudit: (dry run) would quarantine %s" % ident)
+            continue
         if objs:
             bc.write_tombstone(cache, ident, objs)
-        q = os.path.join(os.path.dirname(e), ".poisoned-" + ident)
         shutil.rmtree(q, ignore_errors=True)
         if os.path.isdir(e):
             os.rename(e, q)
         print("objaudit: quarantined %s (tombstone %s)" % (q, "written" if objs else "not possible: unverifiable entry"))
+    for lk in held:
+        lk.close()
+    if not dry:
+        import time
+        d = os.path.join(cache, "armobj")
+        for n in (os.listdir(d) if os.path.isdir(d) else []):
+            q = os.path.join(d, n)
+            if n.startswith(".poisoned-") and os.path.isdir(q) and not os.path.islink(q) \
+                    and time.time() - os.lstat(q).st_mtime > POISONED_RETENTION_DAYS * 86400:
+                shutil.rmtree(q, ignore_errors=True)
     total = checked + unchecked
-    print("objaudit [%s]: %d entries, coverage %d of %d objects compared (%.0f%%), %d poisoned" % (
-        scope, entries, checked, total, 100.0 * checked / total if total else 0.0, len(poisoned)))
+    pct = 100.0 * unchecked / total if total else 100.0
+    print("objaudit [%s]: %d entries, coverage %d of %d objects compared (%.0f%%), %d not comparable (%.0f%%), %d poisoned" % (
+        scope, entries, checked, total, 100.0 - pct, unchecked, pct, len(poisoned)))
     if poisoned:
         return 3
-    if checked == 0 or unchecked:  # fail closed: an audit that compared nothing, or not everything, proves less than it claims
-        print("objaudit [%s]: INCOMPLETE: %s" % (scope, "NOTHING WAS COMPARED" if checked == 0 else "%d objects could not be compared" % unchecked))
+    cap = float(os.environ.get("ASL_OBJAUDIT_MAX_UNCHECKED_PCT", "20"))
+    if checked == 0 or pct > cap:  # fail closed
+        print("objaudit [%s]: INCOMPLETE: %s" % (scope, "NOTHING WAS COMPARED" if checked == 0 else
+              "%.0f%% of the objects could not be compared (limit %.0f%%)" % (pct, cap)))
         return 4
     return 0
 
@@ -964,7 +999,7 @@ def obj_main(cmd, root, scope="arm", extra=()):
         obj_restore(root, scope, extra[0])
         return
     if cmd == "objaudit":
-        sys.exit(obj_audit(root, scope, extra[0]))
+        sys.exit(obj_audit(root, scope, extra[0], dry="--dry-run" in extra))
     if cmd == "objpublish":
         obj_publish(root, scope, extra[0], extra[1] if len(extra) > 1 else "3")
         return

@@ -72,10 +72,10 @@ run_gate() { # NAME CACHE_ENV...: a fresh worktree of the commit, gate.sh, then 
 }
 
 if [ -z "$cached" ]; then
-  run_gate cached -u JANUS_ASL_CACHE || exit 2
+  run_gate cached -u JANUS_ASL_CACHE ASL_OBJ_CACHE=1 || exit 2   # the object cache is opt-in: only this run turns it on
   cached="$work/out-cached"
 fi
-run_gate cold JANUS_ASL_CACHE=0 || exit 2
+run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0 || exit 2
 python3 -I "$cmp_py" compare "$cached" "$work/out-cold"
 rc_final=$?
 # cold-side audit of the compiled-object cache (RTOBJ2): the cold tree's freshly compiled objects against every cache entry

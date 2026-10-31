@@ -29,6 +29,7 @@ and replaced.
                       LAKE gives other bytes: a poisoned entry cannot stay)
     bcache.py verify KIND CACHE ID [--c-root LAKE --recompile N|all]   0 valid, 2 miss, 3 invalid / POISONED
     bcache.py prune-armasl LAKEDIR MODEL_ARMASL_DIR             drop built ArmASL modules the current model lacks
+    bcache.py clear-tombstone CACHE ID --yes                    operator: delete a quarantine tombstone (e.g. a corrupt one)
     bcache.py key-path                                          where the per-user key lives
 
 KIND is armasl (CACHE/<id>), sail (CACHE/sail/<id>), mod (CACHE/mods/<id[:2]>/<id>) or armobj (CACHE/armobj/<id>;
@@ -56,6 +57,12 @@ EX_MISS, EX_REJECT, EX_NOKEY = 2, 3, 4
 
 
 class CacheError(Exception):
+    pass
+
+
+class TombstoneError(CacheError):
+    """An unreadable or unauthentic `.tombstone-<id>`: the id is not served, but nothing is deleted or replaced because
+    of it (a garbage file must never destroy a valid entry). The operator clears it: bcache.py clear-tombstone."""
     pass
 
 
@@ -189,7 +196,10 @@ def check_armobj_set(tree, man, want_set=None):
         raise CacheError("the armobj entry has no %s" % ARMOBJ_SET)
     try:
         with open(os.path.join(tree, ARMOBJ_SET), "rb") as f:
-            st = json.loads(f.read().decode("utf-8"))
+            raw = f.read()
+        if hashlib.sha256(raw).hexdigest() != man[ARMOBJ_SET]:  # the set is read from the cache directory: its hash is checked here
+            raise CacheError("%s does not match the manifest" % ARMOBJ_SET)
+        st = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError) as ex:
         raise CacheError("unreadable %s (%s)" % (ARMOBJ_SET, ex))
     if not isinstance(st, dict) or not st or not all(isinstance(k, str) and isinstance(v, str) and len(v) == 64 for k, v in st.items()):
@@ -248,7 +258,8 @@ def check_tombstone(cache, ident, man):
             raise ValueError("another id")
         bad = set(t["objects"].values())
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as ex:
-        raise CacheError("the quarantine tombstone of %s is unreadable or forged (%s): the id stays unusable" % (ident, ex))
+        raise TombstoneError("the quarantine tombstone of %s is unreadable or forged (%s): the id is not served and the entry is "
+                             "left untouched; clear it with: bcache.py clear-tombstone CACHE %s --yes" % (ident, ex, ident))
     if man is not None and any(h in bad for r, h in man.items() if r.endswith(".c.o.export")):
         raise CacheError("the entry carries bytes that were quarantined as poisoned (tombstone)")
 
@@ -875,6 +886,8 @@ def store(kind, cache, ident, src, rels, inputs=None, recompile=None, want_set=N
                 return "present"
             except Inconclusive as ex:
                 raise CacheError("recompile inconclusive, the existing entry is kept: %s" % ex)
+            except TombstoneError:
+                raise  # a garbage tombstone never destroys or replaces a valid entry
             except CacheError as ex:
                 print("cache: replacing the invalid entry %s (%s)" % (e, ex), file=sys.stderr)
                 q = tempfile.mkdtemp(prefix=".bad-", dir=os.path.dirname(e))
@@ -922,6 +935,20 @@ def main(argv):
     try:
         if cmd == "key-path":
             print(key_path())
+            return 0
+        if cmd == "clear-tombstone":  # clear-tombstone CACHE ID --yes: the operator's explicit action
+            if "--yes" not in argv:
+                print("cache: refusing without --yes")
+                return EX_NOKEY
+            p = tomb_path(argv[1], argv[2])
+            if not all(c in "0123456789abcdef" for c in argv[2]) or not argv[2]:
+                raise CacheError("bad cache id %r" % argv[2])
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                print("no tombstone %s" % p)
+                return 0
+            print("cleared %s" % p)
             return 0
         if cmd == "prune-armasl":  # prune-armasl LAKEDIR MODEL_SRC_DIR: drop built modules the current model lacks
             n = prune_armasl(argv[1], argv[2])
