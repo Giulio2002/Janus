@@ -121,6 +121,13 @@ def compare(cached, cold):
             print("  %s: cached %s, cold %s" % (k[len(CONFIG):], h1.get(k, "not recorded"), h2.get(k, "not recorded")))
         print("cachecmp: not comparable (the Sail drivers differ by construction). Re-run both with the same SAIL_SPLIT set explicitly.")
         return 2
+    # fail closed: the reproducibility audit of the compiled-object cache needs the objects of BOTH runs; a run that
+    # hashed none (an older gate, a link step that did not run) is not comparable, never a pass
+    none = [n for n, h in (("cached", h1), ("cold", h2)) if not any(k.startswith("armobj:") for k in h)]
+    if none:
+        print("cachecmp: not comparable: no compiled C object was hashed in the %s run (armobj:* missing from artifact-hashes.json): "
+              "the object-cache audit did not run" % " and ".join(none))
+        return 2
     diffs = []
     for k in sorted(set(s1) | set(s2)):
         a, b = s1.get(k, "MISSING"), s2.get(k, "MISSING")

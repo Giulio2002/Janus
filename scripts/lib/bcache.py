@@ -839,6 +839,9 @@ def main(argv):
                 return 0
             print("valid")
             return 0
+    except Inconclusive as ex:
+        print("cache: INCONCLUSIVE, no verdict (an existing entry is untouched): %s" % ex, file=sys.stderr)
+        return EX_NOKEY
     except CacheError as ex:
         print("cache: %s" % ex, file=sys.stderr)
         return EX_NOKEY

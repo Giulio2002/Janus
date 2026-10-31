@@ -14,7 +14,7 @@ mk() { # mk DIR COMMIT ASLSTATUS FSQRTSTATUS HASH [SAIL_SPLIT [PARTS]]
 {"kind":"item","pool":"gate","id":"rtasl-fsqrt","status":"$4","wall":10}
 {"kind":"item","pool":"gate","id":"gotest","status":"PASS","wall":10}
 J
-  printf '{"combined":"%s","sail-driver":"%s","olean:ArmASL.olean":"aa","config:SAIL_SPLIT":"%s","config:SAIL_SPLIT_PARTS":"%s"}\n' "$5" "$5" "${6:-1}" "${7:-48}" > "$1/artifact-hashes.json"
+  printf '{"combined":"%s","sail-driver":"%s","olean:ArmASL.olean":"aa","armobj:build/ir/ArmASL/Part01.c.o.export":"oo","config:SAIL_SPLIT":"%s","config:SAIL_SPLIT_PARTS":"%s"}\n' "$5" "$5" "${6:-1}" "${7:-48}" > "$1/artifact-hashes.json"
 }
 check() { # check DESC WANT_RC DIR1 DIR2
   local rc=0; out=$(python3 -I "$cmp_py" compare "$3" "$4" 2>&1) || rc=$?
@@ -22,6 +22,11 @@ check() { # check DESC WANT_RC DIR1 DIR2
 }
 mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
 check "identical runs agree" 0 "$t/a" "$t/b"
+sed -i 's/"armobj:[^,]*,//' "$t/b/artifact-hashes.json"
+check "a run with no compiled object hashed is not comparable (fails closed)" 2 "$t/a" "$t/b"
+sed -i 's/"armobj:[^,]*,//' "$t/a/artifact-hashes.json"
+check "neither run hashed an object: not comparable either" 2 "$t/a" "$t/b"
+mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
 mk "$t/b" c1 0 FAIL h1
 check "a lane that passes cached and fails cold is P0" 1 "$t/a" "$t/b"
 m=$(python3 -I "$cmp_py" compare "$t/a" "$t/b"); case "$m" in *"P0 CACHE BUG"*) true ;; *) false ;; esac && echo "ok   the report says P0 CACHE BUG" || { echo "FAIL no P0 message"; fail=1; }
@@ -74,7 +79,7 @@ mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
 python3 - "$t" <<'PY'
 import json, sys
 for d, v in (("a", "x1"), ("b", "x2")):
-    p = sys.argv[1] + "/" + d + "/artifact-hashes.json"; j = json.load(open(p)); j["armobj:build/ir/ArmASL/Part01.c.o.export"] = v; json.dump(j, open(p, "w"))
+    p = sys.argv[1] + "/" + d + "/artifact-hashes.json"; j = json.load(open(p)); j["armobj:build/ir/ArmASL/Part01.c.o.export"] = v; j["armobj:build/ir/ArmASL/Part02.c.o.export"] = "same"; json.dump(j, open(p, "w"))
 PY
 check "a C object that differs between the cached and the cold run is P0" 1 "$t/a" "$t/b"
 m=$(python3 -I "$cmp_py" compare "$t/a" "$t/b"); case "$m" in *armobj:build/ir/ArmASL/Part01*) echo "ok   ... and the report names the object";; *) echo "FAIL report: $m"; fail=1;; esac

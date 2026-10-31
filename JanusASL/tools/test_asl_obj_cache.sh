@@ -374,4 +374,70 @@ copy "$t/n"; build "$t/n"; np="$t/n/JanusASL/.lake/build/ir/ArmASL/Part01.c"; oc
 echo 0123456789abcdef > "$np.hash"; sed -i "s#$oc#0123456789abcdef#g" "$np.o.export.trace"
 rm -rf "$t/st"; mkdir "$t/st"; expect 1 "objstage refuses a C whose .hash (even echoed consistently in the trace) is not Lake's text hash of the C" M objstage "$t/n" arm "$t/st" "$t/st.list"
 
+# ======== sandbox, Inconclusive, size-bounded draw, cold-side audit (RTOBJ3) ========
+python3 -I - "$root" "$t" <<'PY' && ok "the recompile sandbox: work dir writable, nothing else, no network namespace shared" || bad "sandbox"
+import importlib.util, os, subprocess, sys
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+t = sys.argv[2]; work = os.path.join(t, "sbwork"); os.makedirs(work, exist_ok=True)
+pre = b._sandbox_prefix(work, work)
+assert pre and os.path.basename(pre[0]) == "bwrap", "no bubblewrap here: %r" % pre
+r = subprocess.run(pre + ["/bin/sh", "-c", "touch %s/inside && ! touch %s/outside 2>/dev/null && ! touch /etc/outside 2>/dev/null" % (work, t)], capture_output=True)
+assert r.returncode == 0, r.stderr
+assert os.path.exists(work + "/inside") and not os.path.exists(t + "/outside")
+r = subprocess.run(pre + ["/bin/sh", "-c", "cat /proc/net/dev | tail -n +3 | grep -v '^ *lo:' | wc -l"], capture_output=True, text=True)
+assert r.stdout.strip() == "0", "network interfaces visible: " + r.stdout
+PY
+# Inconclusive never destroys a good entry, never counts as a pass
+copy "$t/g2"; build "$t/g2"; stage "$t/g2" arm > /dev/null; idg=$(M objkey "$t/g2"); rm -rf "$cache/armobj"
+B store armobj "$cache" "$idg" "$t/st" < "$t/st.list" > /dev/null
+expect 4 "verify --recompile with a missing C root is inconclusive, not valid" B verify armobj "$cache" "$idg" --c-root "$t/nonexistent" --recompile all
+grep -qi inconclusive "$t/err" "$t/out" && ok "  ... says inconclusive" || bad "no inconclusive message: $(cat "$t/err")"
+expect 4 "store --recompile with a missing C root keeps the good entry" B store armobj "$cache" "$idg" "$t/st" --c-root "$t/nonexistent" --recompile all < "$t/st.list"
+B verify armobj "$cache" "$idg" > /dev/null && ok "  ... the entry is still there and valid" || bad "good entry destroyed by an inconclusive recompile"
+# a missing .cin (a signed entry without its record)
+python3 -I - "$root" "$cache" "$idg" <<'PY'
+import importlib.util, os, sys, shutil
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+cache, ident = sys.argv[2], sys.argv[3]
+e = b.entry_dir("armobj", cache, ident); man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
+keep = {k: v for k, v in man.items() if not k.endswith(".cin")}
+for k in man:
+    if k.endswith(".cin"): os.chmod(e + "/tree/" + k, 0o644); os.unlink(e + "/tree/" + k)
+data = "".join("%s  %s\n" % (v, k) for k, v in sorted(keep.items())).encode()
+open(e + "/MANIFEST.sha256", "wb").write(data); open(e + "/MANIFEST.hmac", "w").write(b.mac("armobj", ident, data) + "\n")
+PY
+expect 4 "an entry without .cin records: verify --recompile is inconclusive (no crash)" B verify armobj "$cache" "$idg" --c-root "$t/g2/JanusASL/.lake" --recompile all
+grep -q Traceback "$t/err" && bad "uncaught exception: $(tail -3 "$t/err")" || ok "  ... without a traceback"
+expect 4 "store --recompile over it keeps the entry (inconclusive)" B store armobj "$cache" "$idg" "$t/st" --c-root "$t/g2/JanusASL/.lake" --recompile all < "$t/st.list"
+B verify armobj "$cache" "$idg" > /dev/null && ok "  ... the existing entry survives" || bad "entry destroyed"
+# a compile that times out
+rm -rf "$cache/armobj"; B store armobj "$cache" "$idg" "$t/st" < "$t/st.list" > /dev/null
+ASL_OBJ_RECOMPILE_TIMEOUT=0 expect 4 "a recompile that times out is inconclusive" B verify armobj "$cache" "$idg" --c-root "$t/g2/JanusASL/.lake" --recompile all
+grep -q Traceback "$t/err" && bad "timeout crashed: $(tail -3 "$t/err")" || ok "  ... no traceback"
+# the random draw is bounded by C size
+python3 -I - "$root" <<'PY' && ok "draw_random only picks objects whose C is within ASL_OBJ_RECOMPILE_MAXC" || bad "draw_random bound"
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+os.environ["ASL_OBJ_RECOMPILE_MAXC"] = "1000"
+c = [(10, "a", None), (999, "b", None), (5000, "huge", None), (4000000, "config", None)]
+for _ in range(200):
+    got = {x[1] for x in b.draw_random(c, 3)}
+    assert got <= {"a", "b"}, got
+assert len(b.draw_random(c, 5)) == 2
+PY
+# the cold-side audit: end to end through the nightly's own script
+copy "$t/cold"; build "$t/cold"; build_jasl "$t/cold"; ac="$t/auditcache"; rm -rf "$ac"; mkdir -p "$ac"
+M objpublish "$t/cold" arm "$ac" 1 > /dev/null; M objpublish "$t/cold" jasl "$ac" all > /dev/null
+expect 0 "nightly-objaudit: a cache that agrees with the cold tree passes" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+grep -q "objaudit \[arm\]: [1-9][0-9]* objects compared" "$t/out" && ok "  ... and compared objects" || bad "nothing compared: $(cat "$t/out")"
+co="$t/cold/JanusASL/.lake/build/ir/ArmASL/Part02.c.o.export"; cp "$co" "$t/co.bak"; printf 'X' >> "$co"
+expect 1 "nightly-objaudit: a cold object that differs from the cached one is P0" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+grep -q "POISONED" "$t/out" && ok "  ... names it POISONED" || bad "no POISONED"
+ls "$ac/armobj"/.poisoned-* > /dev/null 2>&1 && ok "  ... and the entry was quarantined" || bad "not quarantined"
+expect 2 "  ... a quarantined entry is a miss for every later fetch" B fetch armobj "$ac" "$(M objkey "$t/cold")" "$t/audfetch/.lake"
+cp "$t/co.bak" "$co"
+copy "$t/cold2"; mkdir -p "$t/cold2/JanusASL/.lake/build/ir/ArmASL"; cp "$t/cold/JanusASL/.lake/build/ir/ArmASL.c" "$t/cold2/JanusASL/.lake/build/ir/" 2>/dev/null
+expect 1 "nightly-objaudit fails closed when the cold tree has no objects (nothing compared)" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold2" "$ac"
+expect 1 "nightly-objaudit fails closed when the cache has no armobj directory" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$t/emptycache"
+
 [ $fail = 0 ] && echo "test_asl_obj_cache: all passed" || { echo "test_asl_obj_cache: FAILED"; exit 1; }
