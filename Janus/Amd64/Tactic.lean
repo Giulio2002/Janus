@@ -896,7 +896,7 @@ theorem writeLE_comm (m : Memory) {a n b k : Nat} (v w : Nat)
 
 attribute [janus64_exec, janus64_post] BitVec.toNat_add BitVec.toNat_sub BitVec.toNat_ofNat
   BitVec.setWidth_eq BitVec.shiftLeft_zero BitVec.ushiftRight_zero Nat.shiftLeft_eq
-  BitVec.toNat_shiftLeft BitVec.add_zero BitVec.zero_add BitVec.sub_zero
+  BitVec.toNat_shiftLeft BitVec.add_zero BitVec.zero_add BitVec.sub_zero BitVec.zero_mul BitVec.mul_zero
 
 @[janus64_exec, janus64_post] theorem mod64_of_lt {a : Nat} (h : a < 18446744073709551616) :
     a % 18446744073709551616 = a := Nat.mod_eq_of_lt h
@@ -1356,7 +1356,7 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
     for h in hyps, k in [0:hyps.size] do
       if let some t0 := thms[0]? then
         thms := thms.set! 0 (← t0.add (.other (Name.mkNum `janus64_state k)) #[] h)
-    ctx := ctx.setSimpTheorems thms
+    ctx := Janus.Tactic.Common.noRflCtx (ctx.setSimpTheorems thms)
     -- no `reduceCtorEq` (see `Janus.Tactic.KernelSafe`)
     let mut simprocs := r.simprocs.push ((← Simp.getSimprocs).erase ``reduceCtorEq)
     let mut extra : Simp.Simprocs := {}

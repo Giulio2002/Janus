@@ -2334,4 +2334,20 @@ def pickMerged (spec : MergeSpec) (pcOf : MVarId → MetaM (Option Nat))
     rest := rest.push (h, fh)
   return (g, f0) :: rest.toList
 
+
+/-! ## No proof-free (`rfl`) rewrites in the executor's simp sets
+
+A simp lemma proved by `rfl` is applied by `simp` as a `dsimp` step: it leaves NO proof term, and
+the kernel must re-establish the rewrite by definitional unfolding. When the rewritten term
+contains `e * 2 ^ 32`, `% 2 ^ 64`, ... over symbolic `e`, the kernel's `Nat` literal extension
+`whnf`s the operands and unfolds `Nat.mul` along the literal: "(kernel) deep recursion detected"
+(`BitVec.toNat_add` on `BitVec.ofNat 64 (rh * 4294967296)` in `bits.Div64`). With `rfl := false` the
+same rewrite records an `Eq` proof (`thm args : lhs = rhs`) whose type the kernel compares
+syntactically. The rewrites themselves are unchanged. -/
+
+def noRflCtx (ctx : Simp.Context) : Simp.Context :=
+  ctx.setSimpTheorems <| ctx.simpTheorems.map fun ts =>
+    let f := fun (a : Array SimpTheorem) => a.map fun t => { t with rfl := false, backwardRfl := false }
+    { ts with pre := ts.pre.mapArrays f, post := ts.post.mapArrays f }
+
 end Janus.Tactic.Common
