@@ -220,10 +220,13 @@ theorem fillLoop (n : BitVec 64) (ret : Nat) (s : State) (c : Ctx n ret s) :
           exact Nat.mod_eq_of_lt (by omega)
         · rw [Janus.Arm64.Memory.readLE_writeLE_of_disjoint (m := S.mem) i (by omega)]; exact hwd m (by omega)
     have hnn : n.toNat = i + 2 := by omega
+    have hrd' : ∀ m, m < n.toNat → ((S.mem.writeLE (arr n.toNat s + i * 8) 8 i).writeLE
+        (arr n.toNat s + (i + 1) * 8) 8 (i + 1)).readLE (arr n.toNat s + 8 * m) 8 = m :=
+      fun m hm => hrd m (by omega)
     have I1 : Inv n ret s { S with mem := S.mem.writeLE (arr n.toNat s + i * 8) 8 i } :=
       Inv.of_write I rfl rfl rfl rfl rfl rfl (a := arr n.toNat s + i * 8) (by unfold arr; omega)
         (by unfold arr; omega) rfl rfl rfl rfl rfl
-    refine sumLoop n ret s c (n.toNat - 1) _ 0 (by omega) rfl ?_ ?_ (by simp [setRegF_apply]) (hnn ▸ hrd)
+    refine sumLoop n ret s c (n.toNat - 1) _ 0 (by omega) rfl ?_ ?_ (by simp [setRegF_apply]) (by first | exact hrd' | exact hnn ▸ hrd)
       (Inv.of_write I1 (by simp [setRegF_apply]) (by simp [setRegF_apply]) (by simp [setRegF_apply])
         (by simp [setRegF_apply]) (by simp [setRegF_apply]) (by simp [setRegF_apply])
         (a := arr n.toNat s + (i + 1) * 8) (by unfold arr; omega) (by unfold arr; omega) rfl rfl rfl rfl rfl)

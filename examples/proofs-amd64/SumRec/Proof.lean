@@ -613,7 +613,7 @@ theorem grow_branch (FT : FrameTable) (pool rt : List (Nat × Nat)) (H : RtReady
   subst e1 e2
   refine ⟨lo, hi, lo2, hi2, hgs, by rw [← he14]; exact hgs2, by omega, h4k2, hal12, hal22, hhi482, hinp2,
     by rw [h0, hx0e], ?_, ?_, by rw [h142, he14], ?_, ?_, by rw [← he14]; exact hH2⟩
-  · rw [hsp2, he4n]; congr 1; omega
+  · rw [hsp2, he4n]; first | (with_reducible congr 1; omega) | (congr 1; omega)
   · rw [h52, he5, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by simp only [adjustWord]; split <;>
       have := (s.regs 5).isLt <;> omega), adjustWord_trans hinp hinp1 (by omega) (by omega) (by omega) hbp]
   · intro fs0 hfs0
