@@ -10,7 +10,7 @@ The driver `oracle-sail/target/release/janus-oracle-sail` is a function of exact
     --pins together with the cargo flags and the model flavour): the Sail-generated C++ the driver
     embeds; for SAIL_MODEL=regen the SHA-256 of the regenerated model.cpp itself (--model-file);
   * instrument_model.py, which rewrites that model before it is compiled, and (SAIL_SPLIT=1, the default)
-    split_model.py / split_crate.py / build.rs.patch, which cut it into the translation units that are compiled;
+    split_model.py / split_crate.py / build.rs.patch (and dir_digest.py, the integrity records of the model directories), which cut it into the translation units that are compiled;
   * oracle-sail/Cargo.toml, Cargo.lock (every dependency version and checksum), src/**, build.rs,
     rust-toolchain files and every .cargo/config file cargo reads;
   * rustc -vV and cargo -V, the C++ compiler (`$CXX`, else c++) --version, and the SHA-256 of the
@@ -33,7 +33,9 @@ ENV_NAMES = ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "AR", "LD
              "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "CPATH", "PKG_CONFIG_PATH", "GMP_LIB_DIR", "GMP_INCLUDE_DIR",
              "SDKROOT", "CXXSTDLIB", "LD_LIBRARY_PATH", "LD_PRELOAD", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR")
 # not inputs: the registry location (Cargo.lock pins the sources) and terminal output. CARGO_BUILD_JOBS is
-# scheduling only but stays KEYED until a measurement shows the driver is byte-identical across job counts.
+# scheduling only. Measured (docs/ORACLE-SAIL.md "Split build"): the SAIL_SPLIT=1 driver is bit-identical across job counts
+# (-j8 and -j24, sha256 d894a505...), so the split binary does not depend on it; it stays KEYED anyway (the SAIL_SPLIT=0
+# single-unit driver has no such measurement, and a key that is too fine only costs a rebuild).
 ENV_SKIP = ("CARGO_HOME", "CARGO_TERM_COLOR", "CARGO_TERM_PROGRESS_WHEN", "CARGO_TERM_PROGRESS_WIDTH", "CARGO_TERM_VERBOSE", "CARGO_LOG")
 
 
@@ -89,7 +91,7 @@ def inputs(root, pins, model_file):
         out["model.cpp"] = sha_file(model_file)
     out["instrument_model.py"] = sha_file(os.path.join(here, "instrument_model.py"))
     # the parallel model build (SAIL_SPLIT=1): the splitter, the crate-copy maker and the build.rs patch decide what is compiled
-    for rel in ("split_model.py", "split_crate.py", "build.rs.patch"):
+    for rel in ("split_model.py", "split_crate.py", "build.rs.patch", "dir_digest.py"):
         out[rel] = sha_file(os.path.join(here, rel))
     srcs = {}
     for rel in ("Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain", "rust-toolchain.toml",

@@ -22,6 +22,7 @@
 # PER_CLASS (harvested distinct words per class, default 8000), SEED (default 1), FP_K (states
 # per generated fp.* word, default 4), FP_HARVEST_K (states per harvested fp.* word in fp mode, 40),
 # QEMU (default /usr/bin/qemu-aarch64; set QEMU= to run natively on an arm64 Linux host),
+# SVESIMD_N (words per top-level SVE/SME/SIMD&FP/SIMD-ldst group of the quick/full slice, default 800; 0 = off),
 # EXCL_SEQ (generated exclusive-monitor blocks, default 5·N), EXCL_LOOPS_K (states per harvested
 # LL/SC retry loop, default 8).
 # KEEP: what the run leaves in OUT (scripts/lib/artifacts.sh). Default: summary.md, repro.*,
@@ -100,6 +101,15 @@ else
   "$bin/oracle" gen -dczid "$DCZID" -n "$N" -group "$((N * 2))" -excl-seq "${EXCL_SEQ:-$((N * 5))}" -seed "$SEED" -o "$OUT/gen.jsonl"
 fi
 cases+=("$OUT/gen.jsonl")
+# The SVE / SME / Advanced SIMD&FP / SIMD load-store slice (gen/svesimd.go): SVESIMD_N random words per top-level
+# group (default 800, ~3.5k cases, a few seconds), fixed seed SEED+3; quick and full only; SVESIMD_N=0 leaves it out.
+# New case ids (30000000+): no existing case or expected output changes.
+if [ "$mode" = quick ] || [ "$mode" = full ]; then
+  if [ "${SVESIMD_N:-800}" != 0 ]; then
+    "$bin/oracle" svegen -dczid "$DCZID" -n "${SVESIMD_N:-800}" -seed "$((SEED + 3))" -o "$OUT/svegen.jsonl"
+    cases+=("$OUT/svegen.jsonl")
+  fi
+fi
 
 if [ "$mode" = full ] || [ "$mode" = fp ] || [ "$mode" = neon ] || [ "$mode" = crypto ]; then
   echo "== harvest corpus (real Go arm64 code)"

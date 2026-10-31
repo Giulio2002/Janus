@@ -13,6 +13,9 @@
 #   --work DIR       scratch (default: mktemp -d /srv/janus-ops/work.XXXX); worktrees and logs go there
 #   --keep           keep the scratch directory (default: remove it when the runs agree)
 #   -- ...           the rest goes to scripts/gate.sh (both runs), e.g. -j 2
+# Both runs get the SAME explicit SAIL_SPLIT (the caller's value, default 1; recorded in artifact-hashes.json): a
+# cached/cold pair built with different SAIL_SPLIT settings is reported by gate-cachecmp.py as a CONFIGURATION
+# MISMATCH (exit 2), never as a cache verdict. A --cached-out run must have been made with the same SAIL_SPLIT.
 # Both runs use `memcap -m 80G` and scripts/gate.sh's own load/memory/disk refusal. Nothing is installed:
 # an example crontab line is in docs/TESTING.md.
 # Exit: 0 agree; 1 P0 disagreement; 2 could not compare or a run could not start.
@@ -30,6 +33,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 gate_args=("$@")
+sail_split="${SAIL_SPLIT:-1}"
 commit=$(git -C "$root" rev-parse --verify "${commit:-HEAD}^{commit}") || { echo "nightly-cold-gate: bad commit" >&2; exit 2; }
 [ -n "$work" ] || work=$(mktemp -d /srv/janus-ops/work.XXXX)
 mkdir -p "$work"
@@ -48,9 +52,9 @@ run_gate() { # NAME CACHE_ENV...: a fresh worktree of the commit, gate.sh, then 
   git -C "$root" worktree add --detach -f "$t" "$commit" >/dev/null || { echo "nightly-cold-gate: cannot create $t" >&2; return 2; }
   trees+=("$t")
   local rc=0
-  (cd "$t" && env "$@" memcap -m 80G scripts/gate.sh --out "$out" --speed-baseline enforce "${gate_args[@]}") > "$work/$name.log" 2>&1 || rc=$?
+  (cd "$t" && env "$@" SAIL_SPLIT="$sail_split" memcap -m 80G scripts/gate.sh --out "$out" --speed-baseline enforce "${gate_args[@]}") > "$work/$name.log" 2>&1 || rc=$?
   echo "nightly-cold-gate: $name gate rc=$rc (log $work/$name.log)"
-  python3 -I "$cmp_py" hashes "$t" "$out/artifact-hashes.json" || return 2
+  SAIL_SPLIT="$sail_split" python3 -I "$cmp_py" hashes "$t" "$out/artifact-hashes.json" || return 2
   return 0
 }
 
