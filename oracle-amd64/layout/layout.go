@@ -157,15 +157,19 @@ type Model struct {
 	// Defined is the mask of status flags the model defines after the instruction; the
 	// others are architecturally undefined (reading them faults in the model) and are not
 	// compared.
-	Defined int      `json:"defined"`
-	DF      bool     `json:"df,omitempty"` // the direction flag after the instruction
-	XMM     []string `json:"xmm,omitempty"`
-	YMMH    []string `json:"ymmh,omitempty"`
-	ZMMH    []string `json:"zmmh,omitempty"`
-	ZMMX    []string `json:"zmmx,omitempty"`
-	K       []string `json:"k,omitempty"`
-	Mem     [][2]int `json:"mem,omitempty"`
-	MXCSR   string   `json:"mxcsr,omitempty"` // State.mxcsr after the instruction (hex)
+	Defined int `json:"defined"`
+	// RegUndef is the mask of general registers (bit i = register i) whose value is
+	// architecturally undefined after the instruction (BSF/BSR of zero: the destination); the
+	// model makes them arbitrary (State.undefVal) and they are not compared.
+	RegUndef int      `json:"regundef,omitempty"`
+	DF       bool     `json:"df,omitempty"` // the direction flag after the instruction
+	XMM      []string `json:"xmm,omitempty"`
+	YMMH     []string `json:"ymmh,omitempty"`
+	ZMMH     []string `json:"zmmh,omitempty"`
+	ZMMX     []string `json:"zmmx,omitempty"`
+	K        []string `json:"k,omitempty"`
+	Mem      [][2]int `json:"mem,omitempty"`
+	MXCSR    string   `json:"mxcsr,omitempty"` // State.mxcsr after the instruction (hex)
 	// X87 after the instruction (State.x87); FSWDefined is the mask of FSW bits the model
 	// defines (the condition codes C0-C3 the SDM leaves undefined are not compared).
 	X87        *X87State `json:"x87,omitempty"`

@@ -111,6 +111,9 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 			v.Diffs = append(v.Diffs, "regs: missing")
 			break
 		}
+		if m.RegUndef>>uint(i)&1 != 0 {
+			continue // architecturally undefined register (BSF/BSR of zero)
+		}
 		if hexv(h.Regs[i]) != hexv(m.Regs[i]) {
 			v.Diffs = append(v.Diffs, fmt.Sprintf("%s: hw %s model %s (in %s)", regNames[i], h.Regs[i], m.Regs[i], c.Regs[i]))
 		}
