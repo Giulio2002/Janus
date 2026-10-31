@@ -767,7 +767,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 				workers:   replayWorkers(),
 				aliasBase: rb,
 				run: func(extra []string, argv ...string) (string, error) {
-					return runLeanProtected(sb, tc, fwRunDir, nil, []string{janusLibDir}, tc.leanPathEnv(append([]string{janusLibDir}, extra...)...), argv...)
+					return runLeanProtected(sb, tc, fwRunDir, nil, []string{janusLibDir}, tc.leanPathEnv(append(append([]string{}, extra...), janusLibDir)...), argv...)
 				},
 			}
 			earlyFw = startFrameworkReplayPar(vstore, tc.leanchecker, func(argv ...string) (string, error) {

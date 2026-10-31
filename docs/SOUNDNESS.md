@@ -236,8 +236,11 @@ verdict in `v1/replay/framework/<key>`, and reuses it:
   `S`. Targets are name prefixes, so a module with descendants cannot be named alone: the units are
   (1) every top-level group of `S` below the root (a module with its descendants, replayed by one
   target; leaves are groups of one) and (2) the root module `Janus`, replayed from a byte-identical
-  copy of its olean (and server/private parts) installed under the name `JanusReplayRoot` in a
-  janus-made, read-only directory appended to that one worker's search path; a replay reads only
+  copy of its olean (and server/private parts) installed under a fresh random name `JanusReplayRootR<32 hex>` in a
+  janus-made, read-only directory placed FIRST on that one worker's search path, and the plan
+  fails hard (no single-process fallback, no worker started) if anything whose name starts with
+  `JanusReplayRoot` (any case; file or directory) exists in any search directory, so no planted
+  file can shadow the copy (`TestParallelReplayRefusesAliasShadow`); a replay reads only
   the file's bytes (the module data does not contain its own name), so the copy is checked exactly
   like the original, no descendant is replayed with it, and the copy is checked against the
   framework pin before use. Guarantees: (a) `S` is computed by mirroring `leanchecker`'s discovery

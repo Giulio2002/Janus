@@ -37,15 +37,16 @@ func parTree(t *testing.T, mods ...string) (lib, tcLib string, fw *pinnedLib) {
 // extra directories): a target replays every module it is a name prefix of, prints
 // `replaying m` for each, and fails on a module in forged. It records the targets it was given.
 type fakeChecker struct {
-	mu      sync.Mutex
-	dirs    []string
-	forged  map[string]bool // modules (as named on the search path) whose replay fails
-	forgedB map[string]bool // alias module bytes: forged root
-	calls   [][]string
-	failRun int  // 1-based index of the call that dies (exit error, no output); 0 none
-	quiet   bool // exit 0 but print nothing
-	drop    string
-	n       int
+	mu        sync.Mutex
+	dirs      []string
+	forged    map[string]bool // modules (as named on the search path) whose replay fails
+	forgedB   map[string]bool // alias module bytes: forged root
+	calls     [][]string
+	failRun   int  // 1-based index of the call that dies (exit error, no output); 0 none
+	quiet     bool // exit 0 but print nothing
+	drop      string
+	dropAlias bool
+	n         int
 }
 
 func (f *fakeChecker) run(extra []string, argv ...string) (string, error) {
@@ -85,10 +86,10 @@ func (f *fakeChecker) run(extra []string, argv ...string) (string, error) {
 				continue
 			}
 			seen[m] = true
-			if f.forged[m] || (m == rootAliasModule && f.forged["Janus"]) {
+			if f.forged[m] || (strings.HasPrefix(m, rootAliasPrefix) && f.forged["Janus"]) {
 				return "leanchecker found a problem in " + m + "\nforged\n", errors.New("exit status 1")
 			}
-			if m != f.drop && !f.quiet {
+			if m != f.drop && !(f.dropAlias && strings.HasPrefix(m, rootAliasPrefix)) && !f.quiet {
 				fmt.Fprintf(&out, "replaying %s\n", m)
 			}
 		}
@@ -162,7 +163,7 @@ func TestScanJanusModules(t *testing.T) {
 func TestReplayUnitsCoverage(t *testing.T) {
 	_, _, _ = parTree(t)
 	S := []string{"Janus", "Janus.A", "Janus.Amd64", "Janus.Amd64.T", "Janus.B.C", "Janus.Tactic", "Janus.Tactic.X"}
-	units := buildReplayUnits(S)
+	units := buildReplayUnits(S, rootAliasPrefix+"Rabc")
 	if err := checkUnitCoverage(S, units); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func TestReplayUnitsCoverage(t *testing.T) {
 		args = append(args, u.arg)
 	}
 	sort.Strings(args)
-	if strings.Join(args, ",") != "Janus.A,Janus.Amd64,Janus.B.C,Janus.Tactic,JanusReplayRoot" {
+	if strings.Join(args, ",") != "Janus.A,Janus.Amd64,Janus.B.C,Janus.Tactic,JanusReplayRootRabc" {
 		t.Fatalf("units %v", args)
 	}
 	// Mutations: a dropped unit, a doubled unit, a unit covering a module twice, a module that
@@ -199,7 +200,7 @@ func TestReplayUnitsCoverage(t *testing.T) {
 		t.Error("a unit whose covers differ from its target accepted")
 	}
 	// Without a root module there is no alias.
-	for _, u := range buildReplayUnits(S[1:]) {
+	for _, u := range buildReplayUnits(S[1:], rootAliasPrefix+"Rabc") {
 		if u.alias {
 			t.Error("alias without a root module")
 		}
@@ -211,7 +212,7 @@ func TestAssignUnitsEveryUnitOnce(t *testing.T) {
 	for i := 0; i < 23; i++ {
 		units = append(units, replayUnit{arg: fmt.Sprintf("Janus.M%d", i), weight: int64(i%5 + 1)})
 	}
-	units = append(units, replayUnit{arg: rootAliasModule, alias: true})
+	units = append(units, replayUnit{arg: rootAliasPrefix + "Rabc", alias: true})
 	for _, n := range []int{1, 2, 4, 50} {
 		ws := assignUnits(units, n)
 		seen := map[string]int{}
@@ -261,7 +262,7 @@ func TestParallelReplayCatchesForgeryInEveryPartition(t *testing.T) {
 			t.Fatalf("argv %v", call)
 		}
 		for _, tg := range call[2:] {
-			if tg == rootAliasModule {
+			if strings.HasPrefix(tg, rootAliasPrefix) {
 				got["Janus"]++
 				continue
 			}
@@ -286,9 +287,9 @@ func TestParallelReplayCatchesForgeryInEveryPartition(t *testing.T) {
 		}
 	}
 	// The forged root is caught through its alias (the alias directory holds the root's bytes).
-	fc2 := &fakeChecker{forged: map[string]bool{rootAliasModule: true}}
+	fc2 := &fakeChecker{forged: map[string]bool{"Janus": true}}
 	par := parFor(t, lib, tcLib, fc2, 3)
-	if out, err := runFrameworkReplay("leanchecker", nil, par, fw); err == nil || !strings.Contains(out, "problem in "+rootAliasModule) {
+	if out, err := runFrameworkReplay("leanchecker", nil, par, fw); err == nil || !strings.Contains(out, "problem in "+rootAliasPrefix) {
 		t.Errorf("forged alias: %v %q", err, out)
 	}
 }
@@ -300,7 +301,7 @@ func TestParallelReplayWorkerFailuresAreFailures(t *testing.T) {
 		"killed first":         func() *fakeChecker { return &fakeChecker{failRun: 1} },
 		"exit 0 and no output": func() *fakeChecker { return &fakeChecker{quiet: true} },
 		"one module missing":   func() *fakeChecker { return &fakeChecker{drop: "Janus.Amd64.U"} },
-		"root missing":         func() *fakeChecker { return &fakeChecker{drop: rootAliasModule} },
+		"root missing":         func() *fakeChecker { return &fakeChecker{dropAlias: true} },
 	} {
 		fc := mk()
 		par := parFor(t, lib, tcLib, fc, 3)
@@ -357,20 +358,20 @@ func TestRootAliasMatchesPins(t *testing.T) {
 	lib, _, fw := parTree(t)
 	writeBytes(t, filepath.Join(lib, "Janus.olean.server"), []byte("server part"))
 	fw, _ = newPinnedLib("fw", lib, nil)
-	d, cleanup, err := makeRootAlias(t.TempDir(), lib, fw)
+	d, cleanup, err := makeRootAlias(t.TempDir(), lib, rootAliasPrefix+"Rx", fw)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
 	for _, ext := range []string{".olean", ".olean.server"} {
 		a, _ := os.ReadFile(filepath.Join(lib, "Janus"+ext))
-		b, err := os.ReadFile(filepath.Join(d, rootAliasModule+ext))
+		b, err := os.ReadFile(filepath.Join(d, rootAliasPrefix+"Rx"+ext))
 		if err != nil || string(a) != string(b) {
 			t.Fatalf("alias %s: %v", ext, err)
 		}
 	}
 	writeBytes(t, filepath.Join(lib, "Janus.olean"), []byte("changed after pinning"))
-	if _, _, err := makeRootAlias(t.TempDir(), lib, fw); err == nil {
+	if _, _, err := makeRootAlias(t.TempDir(), lib, rootAliasPrefix+"Rx", fw); err == nil {
 		t.Fatal("alias of bytes that differ from the pin accepted")
 	}
 }
@@ -401,15 +402,29 @@ func TestParallelReplayVerdict(t *testing.T) {
 // leanchecker (unsandboxed; the sandbox does not change what is replayed).
 func realParFixture(t *testing.T) (lib string, tc *toolchain, fw *pinnedLib, runIn func(lib string) func(extra []string, argv ...string) (string, error)) {
 	t.Helper()
-	needLeanSlow(t)
+	// JANUS_REQUIRE_FIXTURE=1 (set by the gate's go-test lane): a missing fixture is a failure,
+	// never a silent skip.
+	missing := func(msg string) {
+		t.Helper()
+		if os.Getenv("JANUS_REQUIRE_FIXTURE") == "1" {
+			t.Fatalf("JANUS_REQUIRE_FIXTURE=1 but %s", msg)
+		}
+		t.Skip(msg)
+	}
+	if testing.Short() {
+		missing("running with -short")
+	}
+	lake, lerr := findLake()
+	if lerr != nil {
+		missing("lake not installed")
+	}
 	lib = filepath.Join(repoRoot, ".lake", "build", "lib", "lean")
 	if _, err := os.Stat(filepath.Join(lib, "Janus.olean")); err != nil {
-		t.Skip("the repository's Janus build is not present (run lake build Janus Janus.Tools.Audit)")
+		missing("the repository's Janus build is not present (run lake build Janus Janus.Tools.Audit)")
 	}
-	lake, _ := findLake()
 	var err error
 	if tc, err = findToolchain(lake, repoRoot); err != nil || !tc.hasChecker {
-		t.Skip("no leanchecker")
+		missing("no leanchecker")
 	}
 	fwd, err := loadFramework(repoRoot)
 	if err != nil {
@@ -420,7 +435,7 @@ func realParFixture(t *testing.T) (lib string, tc *toolchain, fw *pinnedLib, run
 	}
 	runIn = func(lib string) func(extra []string, argv ...string) (string, error) {
 		return func(extra []string, argv ...string) (string, error) {
-			return runLean(&sandbox{mode: "none"}, tc, t.TempDir(), nil, tc.leanPathEnv(append([]string{lib}, extra...)...), argv...)
+			return runLean(&sandbox{mode: "none"}, tc, t.TempDir(), nil, tc.leanPathEnv(append(append([]string{}, extra...), lib)...), argv...)
 		}
 	}
 	return
@@ -482,7 +497,7 @@ func TestParallelFrameworkReplayMatchesSingleProcess(t *testing.T) {
 			t.Fatalf("worker %v: %v\n%s", c, err, o)
 		}
 		for _, mm := range replayingLineRE.FindAllStringSubmatch(o, -1) {
-			if mm[1] == rootAliasModule {
+			if strings.HasPrefix(mm[1], rootAliasPrefix) {
 				got["Janus"]++
 			} else {
 				got[mm[1]]++
@@ -502,9 +517,9 @@ func TestParallelFrameworkReplayMatchesSingleProcess(t *testing.T) {
 // aliasExtra makes the root alias directory when the call names it.
 func aliasExtra(t *testing.T, lib string, argv []string) []string {
 	for _, a := range argv {
-		if a == rootAliasModule {
+		if strings.HasPrefix(a, rootAliasPrefix) {
 			fwl, _ := frameworkPins(lib, mustFrameworkFiles(t))
-			d, cleanup, err := makeRootAlias(t.TempDir(), lib, fwl)
+			d, cleanup, err := makeRootAlias(t.TempDir(), lib, a, fwl)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -540,5 +555,62 @@ func TestParallelFrameworkReplayCatchesForgeryInEveryPartition(t *testing.T) {
 		if err == nil || !strings.Contains(out, "forged") {
 			t.Errorf("forged %s: err %v\n%s", mod, err, out)
 		}
+	}
+}
+
+// The root alias must not be shadowable: anything named like it anywhere on the search path
+// (library, toolchain directory, a directory, any case) fails the plan with a hard error, never
+// the single-process fallback and never a pass, and no worker starts.
+func TestParallelReplayRefusesAliasShadow(t *testing.T) {
+	plant := map[string]func(lib, tc string){
+		"JanusReplayRoot.olean in the library": func(lib, tc string) { writeBytes(t, filepath.Join(lib, "JanusReplayRoot.olean"), []byte("forged")) },
+		"JanusReplayRoot directory": func(lib, tc string) {
+			writeBytes(t, filepath.Join(lib, "JanusReplayRoot", "Foo.olean"), []byte("forged"))
+		},
+		"JanusReplayRoot.olean in the toolchain": func(lib, tc string) { writeBytes(t, filepath.Join(tc, "JanusReplayRoot.olean"), []byte("forged")) },
+		"random-pattern name": func(lib, tc string) {
+			writeBytes(t, filepath.Join(lib, "JanusReplayRootR0123456789abcdef0123456789abcdef.olean"), []byte("forged"))
+		},
+		"other case": func(lib, tc string) { writeBytes(t, filepath.Join(lib, "janusreplayroot.olean"), []byte("forged")) },
+		"server part only": func(lib, tc string) {
+			writeBytes(t, filepath.Join(lib, "JanusReplayRoot.olean.server"), []byte("forged"))
+		},
+	}
+	for name, mk := range plant {
+		lib, tcLib, fw := parTree(t)
+		mk(lib, tcLib)
+		fc := &fakeChecker{}
+		par := parFor(t, lib, tcLib, fc, 4)
+		fell := false
+		out, err := runFrameworkReplay("leanchecker", func(argv ...string) (string, error) { fell = true; return "", nil }, par, fw)
+		if err == nil || fell || len(fc.calls) != 0 || !strings.Contains(out, "shadow") {
+			t.Errorf("%s: err %v fallback %v workers %d out %q", name, err, fell, len(fc.calls), out)
+		}
+	}
+}
+
+// Each plan names the alias differently, and the runner puts the alias directory first.
+func TestParallelReplayAliasNameIsRandom(t *testing.T) {
+	a, _ := newRootAliasName()
+	b, _ := newRootAliasName()
+	if a == b || !strings.HasPrefix(a, rootAliasPrefix) || len(a) < len(rootAliasPrefix)+32 {
+		t.Fatalf("alias names %q %q", a, b)
+	}
+	lib, tcLib, fw := parTree(t)
+	fc := &fakeChecker{}
+	par := parFor(t, lib, tcLib, fc, 4)
+	if _, err := runFrameworkReplay("leanchecker", nil, par, fw); err != nil {
+		t.Fatal(err)
+	}
+	seen := ""
+	for _, c := range fc.calls {
+		for _, a := range c[2:] {
+			if strings.HasPrefix(a, rootAliasPrefix) {
+				seen = a
+			}
+		}
+	}
+	if seen == "" || seen == rootAliasPrefix {
+		t.Fatalf("alias argument %q", seen)
 	}
 }

@@ -31,6 +31,8 @@ package main
 // process instead.
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -43,15 +45,25 @@ import (
 	"sync"
 )
 
-// rootAliasModule is the module name the root module's olean copy is replayed under.
-const rootAliasModule = "JanusReplayRoot"
+// rootAliasPrefix starts the module name the root module's olean copy is replayed under; each
+// replay appends fresh random hex (newRootAliasName), so a file planted before the run cannot
+// have the name. Anything on the search path that starts with the prefix (any case) is refused.
+const rootAliasPrefix = "JanusReplayRoot"
+
+func newRootAliasName() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return rootAliasPrefix + "R" + hex.EncodeToString(b[:]), nil
+}
 
 // parReplay configures a parallel framework replay.
 type parReplay struct {
 	dirs      []string // the search path leanchecker sees: LEAN_PATH entries, then the toolchain library
 	workers   int      // concurrent leanchecker processes (<= 1: the single process)
 	aliasBase string   // directory under which the root alias directory is made
-	// run runs leanchecker argv with extra directories appended to the search path.
+	// run runs leanchecker argv with the extra directories placed FIRST on the search path.
 	run func(extra []string, argv ...string) (string, error)
 }
 
@@ -185,12 +197,12 @@ func unitCovers(S []string, arg string) []string {
 }
 
 // buildReplayUnits partitions S into units (see the file comment).
-func buildReplayUnits(S []string) []replayUnit {
+func buildReplayUnits(S []string, alias string) []replayUnit {
 	var units []replayUnit
 	var below []string
 	for _, m := range S {
 		if m == "Janus" {
-			units = append(units, replayUnit{arg: rootAliasModule, alias: true, covers: []string{"Janus"}, expect: []string{rootAliasModule}})
+			units = append(units, replayUnit{arg: alias, alias: true, covers: []string{"Janus"}, expect: []string{alias}})
 			continue
 		}
 		below = append(below, m)
@@ -315,9 +327,9 @@ func firstJanusDir(dirs []string) string {
 }
 
 // makeRootAlias installs byte-identical copies of the root module's olean (and its server and
-// private parts, when present) under rootAliasModule in a fresh directory under base, and checks
+// private parts, when present) under the alias name in a fresh directory under base, and checks
 // the copies against the framework pins. It returns the directory and its cleanup.
-func makeRootAlias(base, from string, fw *pinnedLib) (string, func(), error) {
+func makeRootAlias(base, from, name string, fw *pinnedLib) (string, func(), error) {
 	dir, err := os.MkdirTemp(base, "replay-root-")
 	if err != nil {
 		return "", func() {}, err
@@ -346,7 +358,7 @@ func makeRootAlias(base, from string, fw *pinnedLib) (string, func(), error) {
 			cleanup()
 			return "", func() {}, fmt.Errorf("the framework's %s does not match its pin; the build changed during the replay", src)
 		}
-		if err := os.WriteFile(filepath.Join(dir, rootAliasModule+ext), b, 0o444); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name+ext), b, 0o444); err != nil {
 			cleanup()
 			return "", func() {}, err
 		}
@@ -406,7 +418,14 @@ func planFrameworkReplay(par *parReplay, fw *pinnedLib) ([][]replayUnit, error) 
 			return nil, fmt.Errorf("replay plan: pinned framework module %s is not on the search path", m)
 		}
 	}
-	units := buildReplayUnits(S)
+	if err := refuseAliasShadow(par.dirs); err != nil {
+		return nil, err
+	}
+	aliasName, err := newRootAliasName()
+	if err != nil {
+		return nil, err
+	}
+	units := buildReplayUnits(S, aliasName)
 	first := firstJanusDir(par.dirs)
 	for i := range units {
 		for _, m := range units[i].covers {
@@ -437,7 +456,7 @@ func runFrameworkReplay(checker string, run func(argv ...string) (string, error)
 	for _, w := range workers {
 		for _, u := range w {
 			if u.alias {
-				d, cleanup, err := makeRootAlias(par.aliasBase, firstJanusDir(par.dirs), fw)
+				d, cleanup, err := makeRootAlias(par.aliasBase, firstJanusDir(par.dirs), u.arg, fw)
 				if errors.Is(err, errPlanUnsupported) {
 					return run(checker, "Janus")
 				}
@@ -484,4 +503,23 @@ func runFrameworkReplay(checker string, run func(argv ...string) (string, error)
 		}
 	}
 	return "", nil
+}
+
+// refuseAliasShadow fails the replay (hard, never the single-process fallback) when anything
+// whose name starts with the alias prefix, in any case, exists in a search directory: such a
+// file or directory could be resolved instead of the root's copy, and the real root would
+// escape the kernel replay.
+func refuseAliasShadow(dirs []string) error {
+	for _, d := range dirs {
+		ents, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			if strings.HasPrefix(strings.ToLower(e.Name()), strings.ToLower(rootAliasPrefix)) {
+				return fmt.Errorf("replay plan: %s exists in %s and could shadow the root replay", e.Name(), d)
+			}
+		}
+	}
+	return nil
 }

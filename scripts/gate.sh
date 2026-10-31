@@ -398,7 +398,7 @@ WANT=()
 needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; done; echo "$r"; }
 add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
 JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
-addc gotest "JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
+addc gotest "JANUS_REQUIRE_FIXTURE=1 JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
 addc rounds "${rounds_lanes_n:+export JANUS_ROUNDS_LANES=$rounds_lanes_n; }audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
 # (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
