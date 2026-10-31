@@ -11,6 +11,9 @@ import (scripts/asl.sh, ASL_CACHE; docs/ASL.md "Build cache").
     python3 -I JanusASL/tools/asl_mod_cache.py gc      CACHE --max SIZE [--root REPO_ROOT]
                                     [--grace SECONDS] [--dry-run]
                                     evict entries (see "Eviction" below)
+    python3 -I JanusASL/tools/asl_mod_cache.py objkey  REPO_ROOT [arm|jasl]  id of the object entry (below)
+    python3 -I JanusASL/tools/asl_mod_cache.py objfiles REPO_ROOT [arm|jasl] its files, NUL-separated, relative
+                                    to JanusASL/.lake (nothing if the object set is incomplete)
 
 The ArmASL model and lean-sail are cached as one entry (asl_cache_key.py). This adds one entry per
 Lean module of the JanusASL package (JanusASL.*) and of the janus package (Janus.*), so a worktree
@@ -69,6 +72,13 @@ so a reader sees the whole entry or none, and Lake rebuilds a module whose entry
 then deleted; its use stamp and lock file are removed while the lock is held. Collecting only
 ever deletes: a missing entry is a miss, never a different result. Leftover `.gc-trash-*` and
 publish `.tmp-*` directories older than a day are removed too.
+
+**Compiled objects** (`CACHE/armobj/<id>`, kind `armobj` of scripts/lib/bcache.py; two scopes, `arm` and `jasl`).
+The id binds the C content of the scope, the keyed compiler BINARY's content, the ArmASL key (toolchain, flags,
+environment incl. CCC_*), the machine and (jasl) the JanusASL lib/exe tables; a store checks that each object's
+trace/hash bind to the current C and the keyed compiler (objstage) and recompiles a sample; Lake does not re-check a
+restored object, so there is no second check at use time and no kernel replay: see docs/ASL.md "Compiled objects"
+(key + HMAC + the nightly reproducibility audit of gate-cachecmp.py).
 
 **Trust.** As for the ArmASL entry: the cache must be writable only by users you trust, since a
 restored `.olean` is what later modules (and `janus verify --asl`) are checked against; the kernel
@@ -266,8 +276,16 @@ class Keys:
         return out
 
 
-def outputs(p, mod):
-    """The build outputs of mod under p's .lake/build, relative to p.dir (existing files only)."""
+def is_object(rel):
+    """A compiled C object (or its .hash/.trace), in any directory: NOT carried by module entries. Module entries are protected
+    by the HMAC and file hashes only; a native object needs the armobj entry's staging checks, recompile sample,
+    tombstones and the nightly audit (docs/ASL.md "Compiled objects"), so objects travel only there (ASL_OBJ_CACHE=1)."""
+    return ".c.o." in os.path.basename(rel)  # wherever it sits (a decoy under lib/lean/ is dropped too)
+
+
+def outputs(p, mod, objects=True):
+    """The build outputs of mod under p's .lake/build, relative to p.dir (existing files only); objects=False leaves
+    out the compiled C objects (what a module entry stores)."""
     rel = os.path.join(*mod.split("."))
     res = []
     for sub in ("lib/lean", "ir"):
@@ -278,7 +296,9 @@ def outputs(p, mod):
         for fn in sorted(os.listdir(d)):
             full = os.path.join(d, fn)
             if fn.startswith(base) and os.path.isfile(full) and not fn.endswith(".setup.json"):
-                res.append(os.path.relpath(full, p.dir))
+                rel_ = os.path.relpath(full, p.dir)
+                if objects or not is_object(rel_):
+                    res.append(rel_)
     return res
 
 
@@ -439,10 +459,12 @@ def restore_one(ks, p, mod, key, e):
     try:
         man = bc.read_signed_manifest("mod", key, e)
         # tree/<package>/<path relative to the package dir>
-        rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items()}
-        for rel in rels:
+        allrels = {r.split("/", 1)[1]: (r, h) for r, h in man.items()}
+        for rel in allrels:
             if not mod_path_ok(mod, rel):
                 raise bc.CacheError("path %r is not an output of %s" % (rel, mod))
+        # legacy entries carry compiled objects: never restored from here (is_object), only from a verified armobj entry
+        rels = {rel: v for rel, v in allrels.items() if not is_object(rel)}
         if all(os.path.isfile(os.path.join(p.dir, rel)) and not os.path.islink(os.path.join(p.dir, rel))
                and sha_file(os.path.join(p.dir, rel)) == h for rel, (_, h) in rels.items()):
             for rel, (_, h) in rels.items():
@@ -543,7 +565,7 @@ def publish(ks, cache, roots):
         if os.path.isfile(os.path.join(e, "MANIFEST.sha256")) and entry_present(ks, k, e):
             present += 1
             continue
-        outs = outputs(p, mod)
+        outs = outputs(p, mod, objects=False)
         trace = os.path.join(p.build(), "lib", "lean", *mod.split(".")) + ".trace"
         olean = os.path.join(p.build(), "lib", "lean", *mod.split(".")) + ".olean"
         if not (os.path.isfile(trace) and os.path.isfile(olean)) or os.path.getmtime(trace) < os.path.getmtime(p.source(mod)):
@@ -592,6 +614,455 @@ def publish(ks, cache, roots):
                 raise
             stored += 1
     print("asl module cache: stored %d modules, %d already cached, %d not built (%s)" % (stored, present, skipped, cache))
+
+
+# ---- compiled C objects of ArmASL and lean-sail (CACHE/armobj) ----
+
+OBJ_SCHEME = "janusasl-obj-cache-v3"
+OBJ_SUFFIXES = (".c.o.export", ".c.o.noexport")
+
+
+PER_OBJECT = ("jasl", "janus")  # one entry per object (a changed module recompiles only itself); "arm" is one entry
+
+
+def scope_lake(root, scope):
+    """The .lake directory whose build/ir holds the scope's C (JanusASL/.lake)."""
+    return os.path.join(root, ".lake") if scope == "janus" else os.path.join(root, "JanusASL", ".lake")
+
+
+def obj_dirs(lake, scope="arm"):
+    """(directory under .lake, filter on the first path component) holding the C of the scope:
+    "arm" = ArmASL and Sail (known after `lake build ArmASL`), "jasl" = the JanusASL library (its C is restored with the module entries; the object of a huge proof module,
+    e.g. JanusASL.Proofs.Config, costs ~10 min)."""
+    if scope == "jasl":
+        return [(os.path.join(lake, "build", "ir"), lambda n: n == "JanusASL.c" or n == "JanusASL")]
+    if scope == "janus":  # the root package's Janus library (linked into janus-asl-check, janus-audit, janus-decode, ...)
+        return [(os.path.join(lake, "build", "ir"), lambda n: n == "Janus.c" or n == "Janus")]
+    return [(os.path.join(lake, "build", "ir"), lambda n: n == "ArmASL.c" or n == "ArmASL"),
+            (os.path.join(lake, "packages", "Sail", ".lake", "build", "ir"), lambda n: True)]
+
+
+def obj_c_files(lake, scope="arm"):
+    """Emitted C files in scope: {path relative to .lake: sha256 of the content}."""
+    out = {}
+    for d, ok in obj_dirs(lake, scope):
+        if not os.path.isdir(d):
+            continue
+        for top in sorted(os.listdir(d)):
+            if not ok(top):
+                continue
+            q = os.path.join(d, top)
+            cands = [q] if os.path.isfile(q) else [os.path.join(dp, fn) for dp, _, fns in os.walk(q) for fn in fns]
+            for full in cands:
+                if full.endswith(".c") and os.path.isfile(full) and not os.path.islink(full):
+                    out[os.path.relpath(full, lake).replace(os.sep, "/")] = sha_file(full)
+    return out
+
+
+_CC = {}
+
+
+def obj_compiler(root):
+    """(compiler path, SHA-256 of its content, toolchain prefix) of the C compiler Lake runs. The path and prefix are
+    the STRINGS `lean --print-prefix` gives (<prefix>/bin/clang; a logged command must equal them: bcache.expected_argv),
+    the hash is of the binary's content now. LEAN_CC set: the binary it names, hashed (the id differs) but such objects
+    are never published (bcache.keyed_toolchain refuses)."""
+    if root in _CC:
+        return _CC[root]
+    akey = load_armasl_key(root)
+    cc = os.environ.get("LEAN_CC")
+    pre = subprocess.run(["lean", "--print-prefix"], cwd=os.path.join(root, "JanusASL"), capture_output=True,
+                         text=True, timeout=120).stdout.strip()
+    p = (shutil.which(cc.split()[0]) or cc.split()[0]) if cc else os.path.join(pre, "bin", "clang")
+    try:
+        _CC[root] = (p, akey.sha(akey.read(os.path.realpath(p))), pre)
+    except OSError:
+        sys.exit("asl_mod_cache: cannot read the compiler %s" % p)
+    return _CC[root]
+
+
+def obj_tables(root, scope="jasl"):
+    """The lean_lib/lean_exe tables of the scope's package, whole (leancArgs, moreLeancArgs, weakLeancArgs,
+    moreLinkArgs, roots, ...): Lake's trace does not cover the weak arguments. lean_lib JanusASL and lean_exe
+    janus-asl-check of JanusASL/lakefile.toml."""
+    import tomllib
+    path = os.path.join(root, "lakefile.toml" if scope == "janus" else os.path.join("JanusASL", "lakefile.toml"))
+    with open(path, "rb") as f:
+        cfg = tomllib.load(f)
+    if scope == "janus":
+        return {"lean_lib": [t for t in cfg.get("lean_lib", []) if t.get("name") == "Janus"], "lean_exe": cfg.get("lean_exe", []),
+                "package": {k: v for k, v in cfg.items() if k not in ("lean_lib", "lean_exe", "require")}}
+    return {"lean_lib": [t for t in cfg.get("lean_lib", []) if t.get("name") == "JanusASL"],
+            "lean_exe": [t for t in cfg.get("lean_exe", []) if t.get("name") == "janus-asl-check"]}
+
+
+_AKEY = {}
+
+
+def armasl_sha(root):
+    if root not in _AKEY:
+        akey = load_armasl_key(root)
+        _AKEY[root] = akey.sha(akey.canonical(akey.inputs(root)).encode())[:32]
+    return _AKEY[root]
+
+
+def obj_id(root, cs, scope="arm"):
+    inp = {"scheme": OBJ_SCHEME, "armasl": armasl_sha(root),
+           "machine": platform.machine(), "c": cs, "compiler": obj_compiler(root)[1]}
+    sl = [os.path.join(scope_lake(root, scope), "packages", "Sail", n) for n in ("lakefile.toml", "lakefile.lean")]
+    inp["sail.lakefile"] = [sha_file(f) if os.path.isfile(f) else None for f in sl]  # the vendored package's build flags (RTOBJ2: not keyed before)
+    if scope != "arm":
+        inp["scope"] = scope
+        inp["tables"] = obj_tables(root, scope)
+    return sha_bytes(canonical(inp).encode())[:40]
+
+
+def tcb_modules(root):
+    """The Janus.* modules linked into the trusted auditor `janus-audit` (the import closure, inside the root package, of
+    that lean_exe's root module), or None when it cannot be determined. Their objects are NEVER cached (neither restored
+    nor published): the auditor is the trusted computing base of `janus verify`, and an object served from a cache could
+    run inside it until the nightly audit; they are always compiled from source."""
+    import tomllib
+    try:
+        with open(os.path.join(root, "lakefile.toml"), "rb") as f:
+            cfg = tomllib.load(f)
+        exes = [e for e in cfg.get("lean_exe", []) if e.get("name") == "janus-audit"]
+        if len(exes) != 1:
+            return None
+        seen, todo = set(), [exes[0]["root"]]
+        while todo:
+            mod = todo.pop()
+            if mod in seen or not (mod == "Janus" or mod.startswith("Janus.")):
+                continue
+            seen.add(mod)
+            src = os.path.join(root, *mod.split(".")) + ".lean"
+            if not os.path.isfile(src):
+                return None
+            todo += header_imports(src)
+        return seen
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def obj_units(root, scope, cs=None):
+    """[(id, {C: sha})]: one unit for arm, one per C file for the per-object scopes."""
+    cs = obj_c_files(scope_lake(root, scope), scope) if cs is None else cs
+    if scope == "janus":  # the auditor's own objects are always compiled from source (tcb_modules); undeterminable: cache none
+        tcb = tcb_modules(root)
+        if tcb is None:
+            return []
+        cs = {c: h for c, h in cs.items() if c[len("build/ir/"):-len(".c")].replace("/", ".") not in tcb}
+    if scope in PER_OBJECT:
+        return [(obj_id(root, {c: h}, scope), {c: h}) for c, h in sorted(cs.items())]
+    return [(obj_id(root, cs, scope), cs)] if cs else []
+
+
+def obj_files(lake, cs, partial=False):
+    """The object triples of every C file in cs; None if one is missing (nothing to publish). partial: a C file
+    with no object at all is skipped (JanusASL: Lake compiles only what the executable links), one with an
+    incomplete triple still fails."""
+    res = []
+    for c in sorted(cs):
+        found = [c + s[len(".c"):] for s in OBJ_SUFFIXES if os.path.isfile(os.path.join(lake, c + s[len(".c"):]))]
+        if partial and not found:
+            continue  # jasl scope: only the modules the executable links have an object
+        if len(found) != 1:
+            return None
+        o = found[0]
+        trio = [o, o + ".hash", o + ".trace"]
+        if not all(os.path.isfile(os.path.join(lake, x)) and not os.path.islink(os.path.join(lake, x)) for x in trio):
+            return None
+        res += trio
+    return res
+
+
+def load_bcache(root):
+    path = os.path.join(root, "scripts", "lib", "bcache.py")
+    spec = importlib.util.spec_from_file_location("bcache", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def no_symlink_path(lake, rel):
+    """No component of lake/rel (below lake) is a symbolic link."""
+    cur = lake
+    for part in rel.split("/"):
+        cur = os.path.join(cur, part)
+        if os.path.islink(cur):
+            return False
+    return True
+
+
+def stage_unit(root, scope, lake, ident, cs, stage):
+    """Publish-side checks of one entry's objects, then copy them into `stage` (the entry is stored from THAT copy,
+    so what is checked is what is signed). Per object (only .c.o.export is cacheable): all files regular, no symlink on
+    the way; Lake's file hash of the object equals its .hash and of the C text its .c.hash; the trace's recorded output
+    is that object hash and its recorded C hash is the CURRENT one; the logged compile command EQUALS the command built
+    from the keyed compiler path and toolchain prefix (bcache.argv_problem); the C is re-hashed now and is the id's. A
+    `.cin` record per object and the signed set `armobj.set` ({C: sha256}, the id's C set) are added. Returns the relative
+    paths, [] if the unit has no object at all (jasl: Lake compiles only what the executable links); SystemExit on a lie."""
+    bc = load_bcache(root)
+    cc, _, prefix = obj_compiler(root)
+    try:
+        kpre, kcc = bc.keyed_toolchain(os.path.join(root, "JanusASL"))
+    except bc.CacheError as ex:
+        sys.exit("objstage: %s" % ex)
+    if cc != kcc or prefix != kpre:
+        sys.exit("objstage: the compiler %s is not the toolchain's %s" % (cc, kcc))
+    rels = []
+    for c in sorted(cs):
+        found = [c + s_[len(".c"):] for s_ in OBJ_SUFFIXES if os.path.lexists(os.path.join(lake, c + s_[len(".c"):]))]
+        if scope in PER_OBJECT and not found:
+            continue
+        if len(found) != 1 or not found[0].endswith(".c.o.export"):
+            sys.exit("objstage: %s has objects %s (only one .c.o.export is cacheable)" % (c, found))
+        o = found[0]
+        for x in (o, o + ".hash", o + ".trace", c, c + ".hash"):
+            if not no_symlink_path(lake, x) or not os.path.isfile(os.path.join(lake, x)):
+                sys.exit("objstage: %s is missing or a symbolic link" % x)
+        with open(os.path.join(lake, c), "rb") as f:
+            cdata = f.read()
+        if sha_bytes(cdata) != cs[c]:
+            sys.exit("objstage: %s changed while publishing" % c)
+        with open(os.path.join(lake, o), "rb") as f:
+            odata = f.read()
+        with open(os.path.join(lake, o + ".hash"), "rb") as f:
+            ohash_raw = f.read()
+        ohash = ohash_raw.decode("ascii", "replace").strip()
+        with open(os.path.join(lake, c + ".hash"), "rb") as f:
+            chash = f.read().decode("ascii", "replace").strip()
+        with open(os.path.join(lake, o + ".trace"), "rb") as f:
+            tdata = f.read()
+        try:
+            outputs, pairs, argv = bc.trace_facts(tdata)
+        except Exception as ex:
+            sys.exit("objstage: %s: unreadable trace (%s)" % (o, ex))
+        if bc.lake_hash(odata) != ohash:
+            sys.exit("objstage: %s: the object's bytes do not hash (Lake's hash) to its .hash %s: swapped object" % (o, ohash))
+        if bc.lake_hash(cdata, text=True) != chash:
+            sys.exit("objstage: %s: the C file does not hash (Lake's text hash) to its .hash %s" % (c, chash))
+        why = bc.argv_problem(argv, kcc, kpre, c)
+        if why:
+            sys.exit("objstage: %s: the logged compile command is not the one Lake logs for the keyed toolchain (%s)" % (o, why))
+        if outputs != ohash + ".o":
+            sys.exit("objstage: %s: the trace records output %r, the .hash says %r" % (o, outputs, ohash))
+        if not any(h == chash and p.replace(os.sep, "/").endswith("/" + c) for p, h in pairs):
+            sys.exit("objstage: %s: the trace does not record the hash of the current %s (%s)" % (o, c, chash))
+        for x, data in ((o, odata), (o + ".hash", ohash_raw), (o + ".trace", tdata), (o + ".cin", (cs[c] + "\n").encode())):
+            d = os.path.join(stage, x)
+            os.makedirs(os.path.dirname(d), exist_ok=True)
+            with open(d, "wb") as f:
+                f.write(data)
+            rels.append(x)
+    if rels:
+        with open(os.path.join(stage, bc.ARMOBJ_SET), "w") as f:
+            f.write(canonical(cs))
+        rels.append(bc.ARMOBJ_SET)
+    return rels
+
+
+def obj_stage(root, scope, stage, listfile, index=0):
+    """CLI/tests: stage unit `index`; prints its id."""
+    lake = scope_lake(root, scope)
+    units = obj_units(root, scope)
+    if not units or index >= len(units):
+        sys.exit("objstage: no C files")
+    ident, cs = units[index]
+    rels = stage_unit(root, scope, lake, ident, cs, stage)
+    if not rels:
+        sys.exit("objstage: nothing to store")
+    with open(listfile, "wb") as f:
+        f.write("".join(x + "\0" for x in rels).encode())
+    print(ident)
+
+
+def obj_restore(root, scope, cache):
+    """Fetch every unit's entry that exists (HMAC + per-file SHA-256 + allowlist + symlink checks in bcache.fetch)."""
+    bc = load_bcache(root)
+    lake = scope_lake(root, scope)
+    hit = miss = rej = 0
+    try:
+        bc.hmac_key()
+    except bc.CacheError as ex:
+        print("asl cache: C objects [%s] not usable (%s); compiling" % (scope, ex))
+        return
+    for ident, cs in obj_units(root, scope):
+        try:
+            r = bc.fetch("armobj", cache, ident, lake, want_set=cs)
+        except (bc.CacheError, OSError) as ex:
+            print("asl cache: the entry for the C objects [%s] %s was REJECTED (%s); compiling" % (scope, ident, ex))
+            rej += 1
+            continue
+        if r == "miss":
+            miss += 1
+        else:
+            hit += 1
+    print("asl cache: C objects [%s]: %d restored, %d without entry, %d rejected (%s)" % (scope, hit, miss, rej, cache))
+
+
+def obj_publish(root, scope, cache, sample):
+    """Store every unit that has objects (per-object scopes: one entry each; entries that already verify are kept).
+    `sample`: how many of the smallest objects are recompiled (an int or "all"; 0 = none)."""
+    bc = load_bcache(root)
+    lake = scope_lake(root, scope)
+    units = obj_units(root, scope)
+    sizes = sorted((sum(os.path.getsize(os.path.join(lake, c)) for c in cs), i) for i, (_, cs) in enumerate(units))
+    sample = "all" if sample == "all" else int(sample)
+    chosen = set(i for _, i in (sizes if sample == "all" else sizes[:sample]))
+    if sample != "all" and sample != 0:  # plus a size-bounded random draw of the rest (bcache.draw_random): the swapped object is not predictable
+        unit_size = {i: z for z, i in sizes}
+        rest = [(unit_size[i], i, None) for _, i in sizes if i not in chosen]
+        chosen |= {i for _, i, _ in bc.draw_random(rest, int(os.environ.get("ASL_OBJ_RECOMPILE_RANDOM", "2")))}
+    stored = present = skipped = failed = 0
+    bc.clean_stale(cache)
+    for i, (ident, cs) in enumerate(units):
+        try:
+            st = tempfile.mkdtemp(prefix=".objstage-", dir=cache)
+        except OSError as ex:
+            print("asl cache: C objects [%s] %s not stored: cannot create a staging directory (%s)" % (scope, ident, ex))
+            failed += 1
+            continue
+        try:
+            try:
+                rels = stage_unit(root, scope, lake, ident, cs, st)
+            except SystemExit as ex:
+                print("asl cache: C objects [%s] %s not stored: %s" % (scope, ident, ex))
+                failed += 1
+                continue
+            if not rels:
+                skipped += 1
+                continue
+            rc = (lake, "all" if scope in PER_OBJECT else str(sample)) if i in chosen and sample != 0 else None
+            try:
+                r = bc.store("armobj", cache, ident, st, rels, None, rc, cs)
+            except (bc.CacheError, OSError) as ex:
+                print("asl cache: C objects [%s] %s not stored: %s" % (scope, ident, ex))
+                failed += 1
+                continue
+            stored += r == "stored"
+            present += r == "present"
+        finally:
+            shutil.rmtree(st, ignore_errors=True)
+    print("asl cache: C objects [%s]: stored %d, already cached %d, no object %d, refused %d (%s)" % (scope, stored, present, skipped, failed, cache))
+
+
+POISONED_RETENTION_DAYS = 30
+
+
+def obj_audit(root, scope, cache, dry=False):
+    """The cold-side audit and eviction (run on a tree whose objects were compiled from source, the nightly's cold
+    tree, which is also a full independent recompile of every object, the >1 MB ones included): for every unit of the
+    scope whose entry exists in `cache`, the SHA-256 of each cached object must equal the freshly compiled one.
+    A difference quarantines the entry for good: under the entry's exclusive lock (an honest republish cannot race the
+    rename), a signed tombstone (bcache.write_tombstone) records the poisoned object hashes, then the entry is renamed
+    to .poisoned-<id> (removed after POISONED_RETENTION_DAYS; the tombstone stays). `dry` (--dry-run) only reports.
+    Exit 3: a poisoned entry. Exit 4 (fail closed): nothing compared, or the share of objects that could not be compared
+    (the cache holds an entry for an id whose object the cold build did not link, or an unreadable tombstone left the entry
+    unserved and untouched) is above ASL_OBJAUDIT_MAX_UNCHECKED_PCT (default 20). Every compared object that differs is
+    exit 3 whatever the coverage. Prints the coverage."""
+    bc = load_bcache(root)
+    lake = scope_lake(root, scope)
+    checked = unchecked = entries = 0
+    poisoned = {}
+    held = []
+
+    def unverifiable(ident, why):
+        print("objaudit: entry %s does not verify (%s)" % (ident, why))
+        poisoned[ident] = None
+
+    for ident, cs in obj_units(root, scope):
+        e = bc.entry_dir("armobj", cache, ident)
+        if not os.path.isdir(e):
+            continue
+        entries += 1
+        lk = None
+        if not dry:
+            lk = bc.lock_path(e + ".lock", shared=False)  # held until the end: verify and rename are one step
+            held.append(lk)
+        try:
+            man = bc.verify_entry("armobj", cache, ident, cs)
+        except bc.TombstoneError as ex:
+            print("objaudit: LOUD: %s" % ex)
+            unchecked += 1  # not served, not touched, not compared
+            continue
+        except bc.CacheError as ex:
+            unverifiable(ident, ex)
+            continue
+        for rel, h in sorted(man.items()):
+            if not rel.endswith(".c.o.export"):
+                continue
+            fresh = os.path.join(lake, rel)
+            if not os.path.isfile(fresh) or os.path.islink(fresh):
+                unchecked += 1
+                print("objaudit: %s of entry %s has no freshly compiled counterpart (not linked in this build?)" % (rel, ident))
+                continue
+            checked += 1
+            if sha_file(fresh) != h:
+                poisoned.setdefault(ident, {})[rel] = h
+                print("objaudit: POISONED %s: %s differs from the freshly compiled object" % (ident, rel))
+    for ident, objs in sorted(poisoned.items()):
+        e = bc.entry_dir("armobj", cache, ident)
+        q = os.path.join(os.path.dirname(e), ".poisoned-" + ident)
+        if dry:
+            print("objaudit: (dry run) would quarantine %s" % ident)
+            continue
+        if objs:
+            bc.write_tombstone(cache, ident, objs)
+        shutil.rmtree(q, ignore_errors=True)
+        if os.path.isdir(e):
+            os.rename(e, q)
+        print("objaudit: quarantined %s (tombstone %s)" % (q, "written" if objs else "not possible: unverifiable entry"))
+    for lk in held:
+        lk.close()
+    if not dry:
+        import time
+        d = os.path.join(cache, "armobj")
+        for n in (os.listdir(d) if os.path.isdir(d) else []):
+            q = os.path.join(d, n)
+            if n.startswith(".poisoned-") and os.path.isdir(q) and not os.path.islink(q) \
+                    and time.time() - os.lstat(q).st_mtime > POISONED_RETENTION_DAYS * 86400:
+                shutil.rmtree(q, ignore_errors=True)
+    total = checked + unchecked
+    pct = 100.0 * unchecked / total if total else 100.0
+    print("objaudit [%s]: %d entries, coverage %d of %d objects compared (%.0f%%), %d not comparable (%.0f%%), %d poisoned" % (
+        scope, entries, checked, total, 100.0 - pct, unchecked, pct, len(poisoned)))
+    if poisoned:
+        return 3
+    cap = float(os.environ.get("ASL_OBJAUDIT_MAX_UNCHECKED_PCT", "20"))
+    if checked == 0 or pct > cap:  # fail closed
+        print("objaudit [%s]: INCOMPLETE: %s" % (scope, "NOTHING WAS COMPARED" if checked == 0 else
+              "%.0f%% of the objects could not be compared (limit %.0f%%)" % (pct, cap)))
+        return 4
+    return 0
+
+
+def obj_main(cmd, root, scope="arm", extra=()):
+    lake = scope_lake(root, scope)
+    if scope not in ("arm", "jasl", "janus"):
+        sys.exit("asl_mod_cache: unknown object scope %r" % scope)
+    if cmd == "objstage":
+        obj_stage(root, scope, extra[0], extra[1], int(extra[2]) if len(extra) > 2 else 0)
+        return
+    if cmd == "objrestore":
+        obj_restore(root, scope, extra[0])
+        return
+    if cmd == "objaudit":
+        sys.exit(obj_audit(root, scope, extra[0], dry="--dry-run" in extra))
+    if cmd == "objpublish":
+        obj_publish(root, scope, extra[0], extra[1] if len(extra) > 1 else "3")
+        return
+    cs = obj_c_files(lake, scope)
+    if not cs:
+        sys.exit(1)
+    if cmd == "objkey":
+        for ident, _ in obj_units(root, scope, cs):
+            print(ident)
+    else:
+        fl = obj_files(lake, cs, partial=(scope in PER_OBJECT))
+        if not fl:
+            sys.exit(1)
+        sys.stdout.write("".join(x + "\0" for x in fl))
 
 
 # ---- eviction (gc) ----
@@ -663,6 +1134,11 @@ def scan(cache):
         q = os.path.join(sail, n)
         if MOD_RE.match(n) and os.path.isdir(q) and not os.path.islink(q):
             out.append(Entry("sail", q, n))
+    objs = os.path.join(cache, "armobj")
+    for n in sorted(os.listdir(objs)) if os.path.isdir(objs) and not os.path.islink(objs) else []:
+        q = os.path.join(objs, n)
+        if MOD_RE.match(n) and os.path.isdir(q) and not os.path.islink(q):
+            out.append(Entry("armobj", q, n))
     mods = os.path.join(cache, "mods")
     for sh in sorted(os.listdir(mods)) if os.path.isdir(mods) else []:
         sd = os.path.join(mods, sh)
@@ -744,7 +1220,7 @@ def gc(cache, budget, root=None, grace=3600, dry=False, now=None):
         unreferenced()
     # Leftovers of interrupted collections and publishes (older than a day).
     if not dry:
-        for d in [cache, os.path.join(cache, "sail"), os.path.join(cache, "mods")] + [os.path.join(cache, "mods", x) for x in
+        for d in [cache, os.path.join(cache, "sail"), os.path.join(cache, "armobj"), os.path.join(cache, "mods")] + [os.path.join(cache, "mods", x) for x in
                                                           (os.listdir(os.path.join(cache, "mods")) if os.path.isdir(os.path.join(cache, "mods")) else [])]:
             if not os.path.isdir(d):
                 continue
@@ -785,6 +1261,9 @@ def main():
     cmd, root = sys.argv[1], sys.argv[2]
     if cmd == "gc":
         gc_main(sys.argv[2:])
+        return
+    if cmd in ("objkey", "objfiles", "objstage", "objrestore", "objpublish", "objaudit"):
+        obj_main(cmd, root, sys.argv[3] if len(sys.argv) > 3 else "arm", sys.argv[4:])
         return
     ks = Keys(root)
     if cmd == "keys":

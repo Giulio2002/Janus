@@ -261,4 +261,24 @@ victim="$t/victim"; mkdir -p "$victim"; d="$t/m/JanusASL/.lake/build/lib/lean/Ja
 r=$($mp restore "$t/m" "$mc" 2>&1); echo "$r" | grep -q '1 rejected' && [ -z "$(ls -A "$victim")" ] && ok "a symlinked destination directory is refused: nothing is written through it" || bad "symlinked destination: $r / $(ls "$victim")"
 rm -f "$d"; mkdir -p "$d"
 
+echo; echo "-- module entries do not carry compiled objects (and a legacy entry that does has them ignored)"
+fake_build; ird="$t/m/JanusASL/.lake/build/ir/JanusASL"; mkdir -p "$ird"
+printf 'c-source' > "$ird/Audit.c"; printf 'obj' > "$ird/Audit.c.o.export"; printf 'h' > "$ird/Audit.c.o.export.hash"; printf '{}' > "$ird/Audit.c.o.export.trace"
+rm -rf "$mc"; $mp publish "$t/m" "$mc" JanusASL.Audit > "$t/pub.out" 2>&1; e="$mc/mods/${mk:0:2}/$mk"
+if grep -q 'ir/JanusASL/Audit.c$' "$e/MANIFEST.sha256" && ! grep -q '\.c\.o\.' "$e/MANIFEST.sha256"; then ok "publish stores the emitted .c but NO compiled object in a module entry"; else bad "mod entry manifest: $(cat "$e/MANIFEST.sha256")"; fi
+python3 -I - "$t/m" "$e" "$mk" <<'PY'
+import importlib.util, os, sys
+root, e, key = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
+for rel in ("janusasl/.lake/build/ir/JanusASL/Audit.c.o.export", "janusasl/.lake/build/ir/JanusASL/Audit.c.o.export.hash",
+            "janusasl/.lake/build/ir/JanusASL/Audit.c.o.export.trace", "janusasl/.lake/build/lib/lean/JanusASL/Audit.c.o.export"):
+    z = e + "/tree/" + rel; os.makedirs(os.path.dirname(z), exist_ok=True); open(z, "w").write("EVIL-OBJECT"); man[rel] = b.sha_file(z)
+data = "".join("%s  %s\n" % (v, k) for k, v in sorted(man.items())).encode()
+os.chmod(e + "/MANIFEST.sha256", 0o644); open(e + "/MANIFEST.sha256", "wb").write(data); open(e + "/MANIFEST.hmac", "w").write(b.mac("mod", key, data) + "\n")
+PY
+rm -rf "$t"/m/JanusASL/.lake/build/ir/JanusASL/Audit.c.o.* "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.*
+r=$($mp restore "$t/m" "$mc" 2>&1); echo "$r" | grep -q 'restored 1 modules' && [ -f "$out" ] && ok "a legacy module entry still restores its olean" || bad "legacy restore: $r"
+if [ ! -e "$ird/Audit.c.o.export" ] && [ ! -e "$ird/Audit.c.o.export.hash" ] && [ ! -e "$ird/Audit.c.o.export.trace" ] && [ ! -e "$t/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.c.o.export" ]; then ok "  ... and places NONE of its compiled objects (ir/ or a decoy under lib/lean/)"; else bad "a legacy object was placed: $(ls "$ird" "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL)"; fi
+
 [ "$fail" = 0 ] && echo "bcache tests: all passed" || { echo "bcache tests: FAILED"; exit 1; }

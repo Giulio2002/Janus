@@ -72,8 +72,12 @@ ENV_KEYS = ["LEAN_CC", "LEAN_CXX", "LEAN_SYSROOT", "LEAN_PATH", "LEAN_SRC_PATH",
             "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LIBRARY_PATH", "C_INCLUDE_PATH", "CPATH"]
 
 
-ENV_PREFIXES = ("LEAN_", "LAKE_", "ELAN_", "LD_", "LC_", "GIT_")  # every variable of these families is keyed
-ENV_KEYS += ["LANG", "LANGUAGE", "PKG_CONFIG_PATH", "SDKROOT", "TMPDIR_NOT_KEYED"]
+# CCC_* (clang driver: CCC_OVERRIDE_OPTIONS rewrites the command line and changes the object bytes), CLANG_*, GCC_*,
+# COMPILER_PATH/GCC_EXEC_PREFIX (where the driver looks for its sub-tools), the include-path variables: all reach clang.
+ENV_PREFIXES = ("LEAN_", "LAKE_", "ELAN_", "LD_", "LC_", "GIT_", "CCC_", "CLANG_", "GCC_", "COMPILER_")  # every variable of these families is keyed
+ENV_KEYS += ["LANG", "LANGUAGE", "PKG_CONFIG_PATH", "SDKROOT", "TMPDIR_NOT_KEYED", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH",
+             "OBJCPLUS_INCLUDE_PATH", "SOURCE_DATE_EPOCH", "DEPENDENCIES_OUTPUT", "SUNPRO_DEPENDENCIES", "DEVELOPER_DIR",
+             "MACOSX_DEPLOYMENT_TARGET", "IPHONEOS_DEPLOYMENT_TARGET", "TARGET_OS_OSX"]
 ENV_KEYS.remove("TMPDIR_NOT_KEYED")
 
 
@@ -86,9 +90,19 @@ ENV_KEYS.remove("TMPDIR_NOT_KEYED")
 SCHEDULING_ENV = {"LEAN_NUM_THREADS"}
 
 
+# Variables that name a compiler or linker: keyed by the NAMED BINARY'S CONTENT as well as by the string (a shim
+# at the same path, or the same string resolving to other bytes, is another key). Absent when the variable is unset,
+# so an environment without them keeps its key.
+COMPILER_ENV = ("LEAN_CC", "LEAN_CXX", "CC", "CXX", "LD", "AR")
+
+
 def env_inputs():
-    return {k: v for k, v in sorted(os.environ.items())
-            if (k in ENV_KEYS or k.startswith(ENV_PREFIXES)) and k not in SCHEDULING_ENV}
+    out = {k: v for k, v in sorted(os.environ.items())
+           if (k in ENV_KEYS or k.startswith(ENV_PREFIXES)) and k not in SCHEDULING_ENV}
+    for k in COMPILER_ENV:
+        if os.environ.get(k):
+            out["content:" + k] = exe_sha(os.environ[k].split()[0])
+    return out
 
 
 def exe_sha(name):

@@ -61,17 +61,28 @@ run_gate() { # NAME CACHE_ENV...: a fresh worktree of the commit, gate.sh, then 
   (cd "$t" && env -u JANUS_MODEL_PIN -u JANUS_MODEL_PIN_STALE -u JANUS_COLD -u JANUS_COLD_DONE -u JANUS_COLD_PIN_CHECKED "$@" SAIL_SPLIT="$sail_split" memcap -m 80G scripts/gate.sh --out "$out" --speed-baseline enforce "${gate_args[@]}") > "$work/$name.log" 2>&1 || rc=$?
   echo "nightly-cold-gate: $name gate rc=$rc (log $work/$name.log)"
   eval "gate_rc_$name=$rc"
+  # The gate links in its own isolated trees, which it removes: link HERE too, under the same cache setting, so this
+  # worktree holds the compiled C objects of ArmASL/lean-sail/JanusASL (cached run: restored from the armobj cache;
+  # cold run: compiled from source). gate-cachecmp.py hashes them and objaudit compares them with the cache; both FAIL
+  # CLOSED when no object was found, so this audit cannot be skipped silently.
+  (cd "$t" && env -u JANUS_MODEL_PIN -u JANUS_MODEL_PIN_STALE -u JANUS_COLD -u JANUS_COLD_DONE -u JANUS_COLD_PIN_CHECKED "$@" LEAN_NUM_THREADS=4 JANUS_JOBS=2 memcap -m 48G scripts/asl.sh build) > "$work/$name-link.log" 2>&1 \
+    || { echo "nightly-cold-gate: $name object link FAILED (log $work/$name-link.log)"; return 2; }
   SAIL_SPLIT="$sail_split" python3 -I "$cmp_py" hashes "$t" "$out/artifact-hashes.json" || return 2
   return 0
 }
 
 if [ -z "$cached" ]; then
-  run_gate cached -u JANUS_ASL_CACHE || exit 2
+  run_gate cached -u JANUS_ASL_CACHE ASL_OBJ_CACHE=1 || exit 2   # the object cache is opt-in: only this run turns it on
   cached="$work/out-cached"
 fi
-run_gate cold JANUS_ASL_CACHE=0 || exit 2
+run_gate cold JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0 || exit 2
+echo "nightly-cold-gate: object cache: ON (cached run), OFF (cold run: JANUS_ASL_CACHE=0, ASL_OBJ_CACHE=0); a cached-run result is not merge evidence by itself"
 python3 -I "$cmp_py" compare "$cached" "$work/out-cold"
 rc_final=$?
+# cold-side audit of the compiled-object cache (RTOBJ2): the cold tree's freshly compiled objects against every cache entry
+# of the same ids; a validly signed entry that differs is quarantined (never served again) and makes the run a P0 failure
+cache_dir="${ASL_CACHE:-/srv/janus-asl-cache}"
+"$root/scripts/lib/nightly-objaudit.sh" "$work/tree-cold" "$cache_dir" || rc_final=1
 if [ "$rc_final" = 0 ] && [ "${gate_rc_cold:-1}" != 0 ]; then
   echo "nightly-cold-gate: the cold gate FAILED (rc ${gate_rc_cold:-?}) and so did the cached one: the runs agree but nothing is proven; the model pin is NOT written"
   rc_final=2

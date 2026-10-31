@@ -615,6 +615,16 @@ content-addressed cache (`ASL_CACHE`, on by default: `/srv/janus-asl-cache` if i
 `~/.cache/janus/asl`; `ASL_CACHE=off` disables it, `SAIL_CACHE` overrides it for the driver). This
 section says what is cached and why a stale, forged or tampered entry cannot produce a pass.
 
+**Natively linked objects have no kernel-replay backstop.** The `armobj` entries (compiled C objects of ArmASL,
+lean-sail and JanusASL, docs/ASL.md "Compiled objects") are machine code the linker uses; unlike an `.olean` nothing
+re-checks them. Their integrity is the content key (C hashes, compiler binary content, flags incl. weak args,
+environment), the per-user HMAC, the stage bindings (Lake's file hash recomputed, the logged compile command EQUAL to the one built from the keyed compiler path and prefix, the signed C set bound to the id),
+the sandboxed recompile sample, and the nightly cold-side audit (`gate-cachecmp.py` + `objaudit`: any difference is a
+P0 cache bug and the entry is quarantined). An attacker with the HMAC key and a consistent forgery outside the sample
+can be served until that audit.
+The object cache is ON by default; with it on, a cached gate is not merge evidence by itself. The pre-push cold gate (`JANUS_ASL_CACHE=0`, which compiles every object from source) and the nightly cold-vs-cached comparison and cache audit are the controls, and the residual above (a key holder's consistent forgery of a large object, served until the next nightly audit) remains. Module-cache entries no longer carry compiled objects, and the objects linked into the trusted auditor `janus-audit` are never cached (always compiled from source; 6.6 s). They do not affect any verified theorem:
+the proofs are checked by the kernel replay of the `.olean`s, and `janus-asl-check` is a corpus check, not a proof.
+
 **What is cached: build outputs only, never a verdict.** Three kinds of entry:
 
 * `armasl`: the compiled Arm ASL model (`ArmASL.olean`/`.ilean`/`.trace`/C/objects) and the

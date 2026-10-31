@@ -269,6 +269,41 @@ modcache_publish() {  # modcache_publish [--exe]
   cache_gc
 }
 
+# ---- the compiled C objects (ASL_CACHE/armobj; asl_mod_cache.py "Compiled objects", docs/ASL.md) ----
+# Scopes: arm (ArmASL parts + lean-sail: one entry, keyed by all their C) and jasl / janus (the JanusASL and Janus
+# libraries: one entry per object, so one changed module recompiles only itself). Looked up after the C exists (the
+# id hashes each C and the compiler binary); HMAC + per-file SHA-256 + path allowlist as for the other entries.
+# Publishing binds each object's trace/hash to the current C and the keyed compiler, then recompiles the
+# ASL_OBJ_RECOMPILE (default 3; N|all|0) smallest objects and refuses/replaces an entry that differs.
+# The object cache is on iff ASL_OBJ_CACHE (default: OBJ_CACHE_DEFAULT) is not 0 AND the build cache is in use at all
+# (ASL_CACHE non-empty: JANUS_ASL_CACHE=0 / ASL_CACHE=off, the cold gate's setting, blanks it, so a cold tree compiles every
+# object from source). A gate result obtained with it on is never merge evidence by itself: the pre-push cold gate
+# (JANUS_ASL_CACHE=0) and the nightly audit are the controls. Gates and logs print this state (objcache-state).
+OBJ_CACHE_DEFAULT=1   # the one switch of the default: 1 = ON
+obj_cache_state() {
+  case "${ASL_OBJ_CACHE-}" in
+    '') ;;                                   # unset or EMPTY: the default
+    0|off|OFF|no|NO|false|FALSE) echo "OFF (ASL_OBJ_CACHE=${ASL_OBJ_CACHE})"; return ;;
+    1|on|ON|yes|YES|true|TRUE) ;;
+    *) echo "OFF (ASL_OBJ_CACHE=${ASL_OBJ_CACHE}: unrecognised value, treated as OFF)"; return ;;
+  esac
+  if [ -z "${ASL_OBJ_CACHE-}" ] && [ "$OBJ_CACHE_DEFAULT" = 0 ]; then echo "OFF (default)"
+  elif [ -z "${ASL_CACHE:-}" ]; then echo "OFF (no build cache: JANUS_ASL_CACHE=0 or ASL_CACHE=off)"
+  else echo "ON${ASL_OBJ_CACHE+ (ASL_OBJ_CACHE=${ASL_OBJ_CACHE:-<empty>}$([ -n "$ASL_OBJ_CACHE" ] || echo ', the default'))}"; fi
+}
+obj_cache_on() { case "$(obj_cache_state)" in ON*) true ;; *) false ;; esac; }
+objcache_restore() {  # objcache_restore arm|jasl|janus
+  obj_cache_on || return 0
+  python3 -I "$pkg/tools/asl_mod_cache.py" objrestore "$root" "${1:-arm}" "$ASL_CACHE" || echo "asl cache: C objects [${1:-arm}] not usable here (above); compiling"
+  return 0
+}
+
+objcache_publish() {  # objcache_publish arm|jasl|janus
+  obj_cache_on && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
+  python3 -I "$pkg/tools/asl_mod_cache.py" objpublish "$root" "${1:-arm}" "$ASL_CACHE" "${ASL_OBJ_RECOMPILE:-3}" || echo "asl cache: C objects [${1:-arm}] not stored (above)"
+  return 0
+}
+
 unpack() {
   echo "$(cat "$VENDOR.sha256")  $VENDOR" | sha256sum -c --quiet
   if [ ! -f "$pkg/ArmASL.lean" ] || [ "$VENDOR" -nt "$pkg/ArmASL.lean" ]; then
@@ -328,14 +363,21 @@ _TL_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURC
 
 do_build() { tl_run x build_phase; }
 build_phase() {
+  echo "asl: object cache: $(obj_cache_state)"
   unpack
   cache_restore
   lake_asl build ArmASL
   cache_publish
   modcache_restore
+  objcache_restore arm
+  objcache_restore jasl
+  objcache_restore janus
   lake_asl build ArmASL JanusASL janus-asl-check
   cache_publish
   modcache_publish --exe
+  objcache_publish arm
+  objcache_publish jasl
+  objcache_publish janus
 }
 
 # Is this model in the (verified) build cache? 0 = yes, entry present and every file matches its signed manifest.
@@ -541,6 +583,7 @@ case "$mode" in
   prove) do_prove ;;
   replay) do_replay ;;
   verify) do_verify ;;
+  objcache-state) obj_cache_state ;;   # ON or OFF (reason): printed by the gate banner, lane logs and the nightly
   cached) do_cached ;;   # exit 0 iff the verified build cache holds this model (scripts/gate.sh: asl-verify then need not wait for asl-build)
   *) echo "usage: $0 deps|gen|key|files|restore|model|build|check|prove|replay|verify|cached" >&2; exit 2 ;;
 esac

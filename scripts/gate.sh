@@ -304,6 +304,8 @@ printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGi
 [ -z "$autosized" ] || echo "gate: -j $jobs_n, $lanes_n lanes chosen automatically: $auto_why; audit rounds: ${rounds_lanes_n:-default} lanes
 gate: $auto_budget"
 echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}; lane-level incremental skipping $([ "${JANUS_INCR_LANES:-}" = 1 ] && echo 'ON (JANUS_INCR_LANES=1: EXPERIMENTAL, not cleared by a red team)' || echo 'OFF (default: every lane runs; set JANUS_INCR_LANES=1 to opt in)')"
+objc_state="$(scripts/asl.sh objcache-state 2>/dev/null | grep -v "^memguard" | tail -n 1)"; [ -n "$objc_state" ] || objc_state=UNKNOWN
+echo "gate: object cache: $objc_state (a result with it ON is not merge evidence by itself: the pre-push cold gate, JANUS_ASL_CACHE=0, and the nightly audit are)"
 
 # ---- the prebuild stages (they are items of the same pool as the lanes: scripts/lib/dag.sh)
 step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
@@ -414,6 +416,7 @@ addc() { # NAME CODE [NEEDS]
 # a flock on the tree (exclusive for anything that can rewrite the package, shared for `lake env`), so a lane's
 # rebuild or dependency re-resolution never overlaps another lane's lake call (scripts/lib/test-lanelake.sh).
 laneenv() { # TREE: the environment of a lane working in TREE (JANUS_REAL_LAKE is exported above)
+  echo "echo 'lane: object cache: $objc_state';"
   echo "export JANUS_LANE_TREE='$1' JANUS_LANE_LAKE_LOCK='$1/.gate-lake.lock' PATH='$root/scripts/lib/lanelake':\"\$PATH\";"
 }
 WANT=()
@@ -430,7 +433,7 @@ addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"
 # CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
 # decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
 add govet "go vet ./..."
-add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh"
+add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && JanusASL/tools/test_asl_obj_cache.sh && scripts/lib/test-nightly-objcache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
 add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
 # asl-verify waits for asl-build only to find the ArmASL model in the build cache (asl-build builds and publishes it, and the
@@ -531,8 +534,8 @@ if [ -f "$out/fw_hash0" ]; then FW_HASH0="$(cat "$out/fw_hash0")"; FW_HASH1="$(f
 if [ -f "$out/fw_hash0" ] && [ "$FW_HASH1" != "$FW_HASH0" ]; then echo "gate: FAIL: the shared framework build changed during the lanes ($FW_HASH0 -> $FW_HASH1)"; lanes_rc=1; fi
 echo
 if [ "$lanes_rc" = 0 ]; then
-  echo "GATE PASS$([ -n "$cold" ] && echo ' (COLD: fresh builds and empty caches, ISA model artifacts from the verified pin)')$([ -n "$partial" ] && echo ' (PARTIAL RUN: not a full gate)')$([ -n "$incremental" ] && echo ' (INCREMENTAL: items and lanes with a record of an identical PASS were skipped, see the RAN/SKIPPED report; the full cold gate is still required before a push to main)') in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)")"
+  echo "GATE PASS [object cache: $objc_state]$([ -n "$cold" ] && echo ' (COLD: fresh builds and empty caches, ISA model artifacts from the verified pin)')$([ -n "$partial" ] && echo ' (PARTIAL RUN: not a full gate)')$([ -n "$incremental" ] && echo ' (INCREMENTAL: items and lanes with a record of an identical PASS were skipped, see the RAN/SKIPPED report; the full cold gate is still required before a push to main)') in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)")"
   exit 0
 fi
-echo "GATE FAIL in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)"): ${POOL_FAILED[*]}"
+echo "GATE FAIL [object cache: $objc_state] in $(_pool_fmt "$(echo "$gate_t1 - $gate_t0" | bc)"): ${POOL_FAILED[*]}"
 exit 1
