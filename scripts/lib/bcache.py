@@ -39,6 +39,7 @@ import fcntl
 import hashlib
 import hmac
 import os
+import re
 import shutil
 import stat
 import sys
@@ -154,6 +155,20 @@ def entry_dir(kind, cache, ident):
     raise CacheError("unknown kind %r" % kind)
 
 
+# Per-kind path allowlist. An armobj entry may hold only the compiled C objects Lake writes under build/ir (and its
+# Sail twin), each with its .hash/.trace and the .cin record of the C it was compiled from: never an .olean, a
+# script or anything else (an entry is HMAC-signed by whoever publishes it, so what it may overwrite is limited here,
+# at store AND at fetch AND at verify).
+ARMOBJ_RE = re.compile(r"^(build/ir|packages/Sail/\.lake/build/ir)/[A-Za-z0-9_.+\-]+(/[A-Za-z0-9_.+\-]+)*\.c\.o\.(export|noexport)(\.hash|\.trace|\.cin)?$")
+
+
+def check_paths(kind, rels):
+    if kind == "armobj":
+        for r in rels:
+            if not ARMOBJ_RE.match(r):
+                raise CacheError("path %r is not allowed in an armobj entry" % r)
+
+
 def open_lock(path):
     """Open (creating, mode 0600) a lock file without following a symlink, and refuse anything that is not a
     regular file owned by this user: a lock path that someone replaced by a symlink (to be created or truncated
@@ -217,7 +232,7 @@ def parse_manifest(data):
     return out
 
 
-def read_signed_manifest(kind, ident, e, want_sha=None):
+def read_signed_manifest(kind, ident, e, want_sha=None):  # noqa: allowlist applied below
     """The entry's manifest, if its HMAC is valid (and, when want_sha is given, its SHA-256 is exactly that: the
     pin of scripts/lib/modelpin.py binds an entry to one manifest); CacheError otherwise."""
     try:
@@ -231,7 +246,9 @@ def read_signed_manifest(kind, ident, e, want_sha=None):
         raise CacheError("the manifest's HMAC does not verify")
     if want_sha is not None and hashlib.sha256(data).hexdigest() != want_sha:
         raise CacheError("the manifest is not the pinned one")
-    return parse_manifest(data)
+    man = parse_manifest(data)
+    check_paths(kind, man)
+    return man
 
 
 def _regular(p):
@@ -266,9 +283,27 @@ def _under(dest, rel):
     return p
 
 
+def _safe_dst(dest, rel):
+    """dest/rel after lstat of every component below dest: a symbolic link (or a non-directory) on the way is
+    refused, never followed (an entry must not write through build -> /etc). Missing components are fine."""
+    p = _under(dest, rel)
+    cur = os.path.normpath(dest)
+    for part in os.path.relpath(p, cur).split(os.sep):
+        cur = os.path.join(cur, part)
+        try:
+            st = os.lstat(cur)
+        except FileNotFoundError:
+            return p
+        if stat.S_ISLNK(st.st_mode):
+            raise CacheError("destination component %s is a symbolic link" % cur)
+        if cur != p and not stat.S_ISDIR(st.st_mode):
+            raise CacheError("destination component %s is not a directory" % cur)
+    return p
+
+
 def _same(dest, man):
     for rel, h in man.items():
-        p = _under(dest, rel)
+        p = _safe_dst(dest, rel)
         try:
             st = os.lstat(p)
             if not stat.S_ISREG(st.st_mode) or sha_file(p) != h:
@@ -329,7 +364,7 @@ def fetch(kind, cache, ident, dest, clean_globs=(), want_sha=None):
                 for rel, h in sorted(man.items()):
                     src = os.path.join(e, "tree", rel)
                     _regular(src)
-                    dst = _under(dest, rel)
+                    dst = _safe_dst(dest, rel)
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     tmp = _tmp_name(dst)
                     staged.append((tmp, dst))
@@ -416,7 +451,7 @@ def _sweep_temps(dest, man):
     """Remove leftover temporaries of killed materialisers next to the manifest's files (under the tree lock)."""
     seen = set()
     for rel in man:
-        d = os.path.dirname(_under(dest, rel))
+        d = os.path.dirname(_safe_dst(dest, rel))
         if d in seen:
             continue
         seen.add(d)
@@ -442,6 +477,7 @@ def store(kind, cache, ident, src, rels, inputs=None):
     rels = sorted(set(rels))
     for r in rels:
         parse_manifest(("0" * 64 + "  " + r + "\n").encode())  # path sanity
+    check_paths(kind, rels)
     lk = lock_path(e + ".lock", shared=False)
     try:
         if os.path.isdir(e):

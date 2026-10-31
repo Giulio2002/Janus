@@ -598,7 +598,7 @@ def publish(ks, cache, roots):
 
 # ---- compiled C objects of ArmASL and lean-sail (CACHE/armobj) ----
 
-OBJ_SCHEME = "janusasl-obj-cache-v1"
+OBJ_SCHEME = "janusasl-obj-cache-v2"
 OBJ_SUFFIXES = (".c.o.export", ".c.o.noexport")
 
 
@@ -629,12 +629,42 @@ def obj_c_files(lake, scope="arm"):
     return out
 
 
+def obj_compiler(root):
+    """(path, SHA-256 of its content) of the C compiler Lake runs: LEAN_CC when set (the binary it names), else
+    <lean --print-prefix>/bin/clang. Hashed by content NOW, so a shim at the same path is another id."""
+    akey = load_armasl_key(root)
+    cc = os.environ.get("LEAN_CC")
+    if cc:
+        p = shutil.which(cc.split()[0]) or cc.split()[0]
+    else:
+        pre = subprocess.run(["lean", "--print-prefix"], cwd=os.path.join(root, "JanusASL"), capture_output=True,
+                             text=True, timeout=120).stdout.strip()
+        p = os.path.join(pre, "bin", "clang")
+    p = os.path.realpath(p)
+    try:
+        return p, akey.sha(akey.read(p))
+    except OSError:
+        sys.exit("asl_mod_cache: cannot read the compiler %s" % p)
+
+
+def obj_tables(root):
+    """The lean_lib JanusASL and lean_exe janus-asl-check tables of JanusASL/lakefile.toml, whole (leancArgs,
+    moreLeancArgs, weakLeancArgs, moreLinkArgs, roots, ...): Lake's trace does not cover the weak arguments."""
+    import tomllib
+    path = os.path.join(root, "JanusASL", "lakefile.toml")
+    with open(path, "rb") as f:
+        cfg = tomllib.load(f)
+    return {"lean_lib": [t for t in cfg.get("lean_lib", []) if t.get("name") == "JanusASL"],
+            "lean_exe": [t for t in cfg.get("lean_exe", []) if t.get("name") == "janus-asl-check"]}
+
+
 def obj_id(root, cs, scope="arm"):
     akey = load_armasl_key(root)
     inp = {"scheme": OBJ_SCHEME, "armasl": akey.sha(akey.canonical(akey.inputs(root)).encode())[:32],
-           "machine": platform.machine(), "c": cs}
+           "machine": platform.machine(), "c": cs, "compiler": obj_compiler(root)[1]}
     if scope != "arm":
         inp["scope"] = scope
+        inp["tables"] = obj_tables(root)
     return sha_bytes(canonical(inp).encode())[:40]
 
 
