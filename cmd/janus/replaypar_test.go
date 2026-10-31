@@ -723,6 +723,9 @@ func TestParallelReplayE2EForgedRootNoVerdict(t *testing.T) {
 			code, out, stderr := runJanus(t, "verify", add, "--proof", proof, "--janus-root", root)
 			t.Logf("code=%d out=%q stderr=%.1500q", code, out, stderr)
 			if plant == "control-honest-extra-decl" {
+				if strings.Contains(stderr, "memory limit") {
+					t.Errorf("control was killed for memory:\n%.800s", stderr)
+				}
 				if !hasFrameworkVerdict(k) {
 					t.Errorf("control: no verdict recorded for an honest build (parallel path not exercised?)")
 				}
@@ -730,6 +733,12 @@ func TestParallelReplayE2EForgedRootNoVerdict(t *testing.T) {
 			}
 			if hasFrameworkVerdict(k) {
 				t.Errorf("a framework verdict was recorded for the forged-root build")
+			}
+			// A resource kill is inconclusive, never a detection: the rejection must be the kernel's.
+			if strings.Contains(stderr, "memory limit") || strings.Contains(stderr, "resource limit") {
+				t.Errorf("the verification was killed for memory, which proves nothing about the forgery:\n%.800s", stderr)
+			} else if code == 0 || !strings.Contains(stderr, "Kernel replay rejected") {
+				t.Errorf("forged root not rejected by the kernel replay: code %d\n%.800s", code, stderr)
 			}
 		})
 	}
@@ -753,13 +762,21 @@ func TestReplaySizing(t *testing.T) {
 		{4, 251 * G, 11 * G, 4, 2, "guard limit below 12 GiB: 2 threads"},
 		{4, 0, 0, 4, 2, "unknown limit: as requested, 2 threads"},
 	} {
-		w, th := replaySizing(c.want, c.eff, c.guard)
+		w, th := replaySizing(c.want, c.eff, c.guard, -1)
 		if w != c.wantWorkers || th != c.wantThread {
 			t.Errorf("%s: %d workers x %d threads, want %d x %d", c.why, w, th, c.wantWorkers, c.wantThread)
 		}
 	}
+	// Little headroom in the enclosing cgroup (other janus processes use it): fewer workers.
+	t.Setenv("JANUS_REPLAY_THREADS", "")
+	if w, th := replaySizing(4, 20*G, 20*G, 6*G); w != 1 || th != 2 {
+		t.Errorf("20 GiB slot with 6 GiB free: %d x %d", w, th)
+	}
+	if w, th := replaySizing(4, 20*G, 20*G, 0); w != 1 || th != 2 {
+		t.Errorf("no headroom: %d x %d, want the single worker", w, th)
+	}
 	t.Setenv("JANUS_REPLAY_THREADS", "3")
-	if _, th := replaySizing(4, 251*G, 24*G); th != 3 {
+	if _, th := replaySizing(4, 251*G, 24*G, -1); th != 3 {
 		t.Errorf("JANUS_REPLAY_THREADS must win: %d", th)
 	}
 }
@@ -837,43 +854,124 @@ func TestMemBudgetAdmission(t *testing.T) {
 	}
 }
 
-// Replays share the process budget: two concurrent parallel replays over a budget that holds one
-// worker never have two workers running at once.
-func TestParallelReplaysShareTheBudget(t *testing.T) {
-	lib, tcLib, fw := parTree(t)
+// The admission around every leanchecker command: a kill by the memory guard is retried ONCE with
+// a single thread; another error is not retried; the second kill is still a memKillError (never a
+// detection); concurrent commands stay within the budget.
+func TestRunCheckerAdmittedRetriesOOMOnce(t *testing.T) {
 	b := newMemBudget(workerPeak(2))
-	var mu sync.Mutex
-	running, maxRunning := 0, 0
-	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		fc := &fakeChecker{}
-		par := parFor(t, lib, tcLib, fc, 4)
-		par.budget = b
-		inner := par.run
-		par.run = func(extra []string, argv ...string) (string, error) {
-			mu.Lock()
-			running++
-			if running > maxRunning {
-				maxRunning = running
-			}
-			mu.Unlock()
-			time.Sleep(10 * time.Millisecond)
-			out, err := inner(extra, argv...)
-			mu.Lock()
-			running--
-			mu.Unlock()
-			return out, err
+	var calls []int
+	kill := &memKillError{ev: memEvent{Label: "x", Killed: true}, err: errors.New("signal: killed")}
+	out, err := runCheckerAdmitted(b, 2, func(th int) (string, error) {
+		calls = append(calls, th)
+		if th == 2 {
+			return "", kill
 		}
+		return "ok", nil
+	})
+	if err != nil || out != "ok" || len(calls) != 2 || calls[0] != 2 || calls[1] != 1 || b.used != 0 {
+		t.Fatalf("retry: %v %q %v used %d", err, out, calls, b.used)
+	}
+	calls = nil
+	_, err = runCheckerAdmitted(b, 4, func(th int) (string, error) { calls = append(calls, th); return "", kill })
+	var mk *memKillError
+	if !errors.As(err, &mk) || len(calls) != 2 {
+		t.Fatalf("second kill: %v %v", err, calls)
+	}
+	calls = nil
+	_, err = runCheckerAdmitted(b, 2, func(th int) (string, error) {
+		calls = append(calls, th)
+		return "leanchecker found a problem in Janus.X", errors.New("exit status 1")
+	})
+	if err == nil || len(calls) != 1 {
+		t.Fatalf("kernel error retried or lost: %v %v", err, calls)
+	}
+	var mu sync.Mutex
+	cur, maxCur := 0, 0
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := runFrameworkReplay("leanchecker", nil, par, fw); err != nil {
-				t.Error(err)
+			runCheckerAdmitted(b, 2, func(int) (string, error) {
+				mu.Lock()
+				cur++
+				if cur > maxCur {
+					maxCur = cur
+				}
+				mu.Unlock()
+				time.Sleep(5 * time.Millisecond)
+				mu.Lock()
+				cur--
+				mu.Unlock()
+				return "", nil
+			})
+		}()
+	}
+	wg.Wait()
+	if maxCur != 1 {
+		t.Errorf("%d commands at once over a one-command budget", maxCur)
+	}
+}
+
+func TestCgroupChainHeadroomFake(t *testing.T) {
+	root := t.TempDir()
+	set := func(rel, max, cur, inactive string) {
+		writeBytes(t, filepath.Join(root, rel, "memory.max"), []byte(max+"\n"))
+		writeBytes(t, filepath.Join(root, rel, "memory.current"), []byte(cur+"\n"))
+		writeBytes(t, filepath.Join(root, rel, "memory.stat"), []byte("anon 1\ninactive_file "+inactive+"\n"))
+	}
+	set("", "max", "0", "0")
+	set("slot", "20000000000", "12000000000", "2000000000") // 20 GB limit, 10 GB unreclaimable
+	set("slot/lane", "max", "1000000000", "0")
+	if got := cgroupChainHeadroom(filepath.Join(root, "slot/lane"), root); got != 10000000000 {
+		t.Errorf("headroom %d, want 10e9", got)
+	}
+	if got := cgroupChainHeadroom(filepath.Join(root, "nolimit"), root); got != -1 {
+		t.Errorf("unlimited: %d", got)
+	}
+}
+
+// Mirror of a rounds slot: run under `memcap -m 20G` with JANUS_PRESSURE_TEST=1. Two honest
+// framework replays run concurrently while this process holds a 10 GiB hog; both must complete
+// (fewer workers, retried serially if killed) and the verdict for the honest build is recorded.
+func TestReplayUnderMemoryPressure(t *testing.T) {
+	if os.Getenv("JANUS_PRESSURE_TEST") != "1" {
+		t.Skip("expensive: run under memcap -m 20G with JANUS_PRESSURE_TEST=1")
+	}
+	lib, tc, _, runIn := realParFixture(t)
+	hog := make([]byte, 10<<30)
+	for i := 0; i < len(hog); i += 4096 {
+		hog[i] = 1
+	}
+	defer func(b []byte) { _ = b[0] }(hog)
+	eff, head := effectiveMemLimit(), currentHeadroom()
+	w, th := replaySizing(replayWorkers(), eff, guardLimitBytes(), head)
+	t.Logf("effective %s headroom %s -> %d workers x %d threads", fmtBytes(eff), fmtBytes(head), w, th)
+	if w >= 4 && head >= 0 && head < 20<<30 {
+		t.Errorf("did not degrade under pressure: %d workers", w)
+	}
+	fwl, _ := frameworkPins(lib, mustFrameworkFiles(t))
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := runIn(lib)
+			par := &parReplay{
+				dirs:      append(filepath.SplitList(tc.leanPathEnv(lib)), filepath.Join(tc.sysroot, "lib", "lean")),
+				workers:   w,
+				aliasBase: t.TempDir(),
+				run: func(extra []string, argv ...string) (string, error) {
+					return runLeanProtectedThreads(&sandbox{mode: "none"}, tc, t.TempDir(), nil, nil, tc.leanPathEnv(append(append([]string{}, extra...), lib)...), th, argv...)
+				},
+			}
+			_ = r
+			if out, err := runFrameworkReplay(tc.leanchecker, func(argv ...string) (string, error) {
+				return runLeanProtectedThreads(&sandbox{mode: "none"}, tc, t.TempDir(), nil, nil, tc.leanPathEnv(lib), 0, argv...)
+			}, par, fwl); err != nil {
+				t.Errorf("replay under pressure: %v\n%.500s", err, out)
 			}
 		}()
 	}
 	wg.Wait()
-	if maxRunning != 1 {
-		t.Errorf("%d workers ran at once over a one-worker budget", maxRunning)
-	}
 }

@@ -295,9 +295,15 @@ func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtr
 
 // runLeanProtectedThreads is runLeanProtected with an explicit leanchecker thread count (0: default).
 func runLeanProtectedThreads(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, leanPath string, threads int, argv ...string) (string, error) {
-	cmd, out := leanCmdThreads(sb, tc, workDir, roWritableExtra, protected, leanPath, leanPath, argv, threads)
-	err := guardRun(cmd)
-	return out.String(), err
+	run := func(th int) (string, error) {
+		cmd, out := leanCmdThreads(sb, tc, workDir, roWritableExtra, protected, leanPath, leanPath, argv, th)
+		err := guardRun(cmd)
+		return out.String(), err
+	}
+	if len(argv) > 0 && argv[0] == tc.leanchecker {
+		return runCheckerAdmitted(replayBudget(), threads, run)
+	}
+	return run(threads)
 }
 
 // leanCmd builds the sandboxed command runLeanProtected runs, and the buffer its combined output

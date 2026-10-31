@@ -465,11 +465,11 @@ func planFrameworkReplay(par *parReplay, fw *pinnedLib) ([][]replayUnit, error) 
 // It returns leanchecker's output of the first failing worker (in plan order).
 func runFrameworkReplay(checker string, run func(argv ...string) (string, error), par *parReplay, fw *pinnedLib) (string, error) {
 	if par == nil || par.workers <= 1 {
-		return runAdmitted(par, func() (string, error) { return run(checker, "Janus") })
+		return run(checker, "Janus")
 	}
 	workers, err := planFrameworkReplay(par, fw)
 	if errors.Is(err, errPlanUnsupported) {
-		return runAdmitted(par, func() (string, error) { return run(checker, "Janus") })
+		return run(checker, "Janus")
 	}
 	if err != nil {
 		return err.Error(), err
@@ -480,7 +480,7 @@ func runFrameworkReplay(checker string, run func(argv ...string) (string, error)
 			if u.alias {
 				d, cleanup, err := makeRootAlias(par.aliasBase, firstJanusDir(par.dirs), u.arg, fw)
 				if errors.Is(err, errPlanUnsupported) {
-					return runAdmitted(par, func() (string, error) { return run(checker, "Janus") })
+					return run(checker, "Janus")
 				}
 				if err != nil {
 					return err.Error(), err
@@ -508,17 +508,7 @@ func runFrameworkReplay(checker string, run func(argv ...string) (string, error)
 					extra = []string{aliasDir}
 				}
 			}
-			bud := par.budget
-			if bud == nil {
-				bud = replayBudget()
-			}
-			th := par.threads
-			if th <= 0 {
-				th = replayThreads()
-			}
-			release := bud.acquire(workerPeak(th))
 			out, err := par.run(extra, argv...)
-			release()
 			if err == nil {
 				err = checkWorkerOutput(out, w)
 				if err != nil {
@@ -571,22 +561,4 @@ func hasAliasPrefix(name string) bool {
 		return false
 	}
 	return strings.EqualFold(string(rs[:len(pr)]), rootAliasPrefix)
-}
-
-// runAdmitted runs the single-process replay under the shared memory admission.
-func runAdmitted(par *parReplay, f func() (string, error)) (string, error) {
-	var bud *memBudget
-	th := 0
-	if par != nil {
-		bud, th = par.budget, par.threads
-	}
-	if bud == nil {
-		bud = replayBudget()
-	}
-	if th <= 0 {
-		th = replayThreads()
-	}
-	release := bud.acquire(workerPeak(th))
-	defer release()
-	return f()
 }
