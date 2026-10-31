@@ -67,13 +67,48 @@ type parReplay struct {
 	run func(extra []string, argv ...string) (string, error)
 }
 
+// maxReplayWorkers caps $JANUS_REPLAY_WORKERS.
+const maxReplayWorkers = 8
+
 // replayWorkers is the number of concurrent leanchecker processes of a parallel framework replay
-// ($JANUS_REPLAY_WORKERS, default 4; 1 selects the single process).
+// ($JANUS_REPLAY_WORKERS, default 4, capped at maxReplayWorkers; 1 selects the single process).
 func replayWorkers() int {
 	if n, err := strconv.Atoi(os.Getenv("JANUS_REPLAY_WORKERS")); err == nil && n > 0 {
+		if n > maxReplayWorkers {
+			n = maxReplayWorkers
+		}
 		return n
 	}
 	return 4
+}
+
+const (
+	workerWideThreadsMem = 12 * gib // per-worker budget at 4 threads (measured peak about 7.4 GB)
+	workerWideMinTotal   = 64 * gib
+)
+
+// guardLimitBytes is the per-job memory limit of the memory guard (0: no limit is enforced).
+func guardLimitBytes() int64 {
+	g := currentGuard()
+	if g.mech == "off" || g.mech == "none" {
+		return 0
+	}
+	return g.limit
+}
+
+// frameworkReplayThreads is LEAN_NUM_THREADS of each framework replay worker: $JANUS_REPLAY_THREADS
+// if set; else 4 only when the host has at least 64 GiB, every worker's 12 GiB budget fits in the
+// guard's per-job limit (0: none enforced) and the workers' budgets together stay within 3/4 of
+// the host's memory; else the usual 2.
+func frameworkReplayThreads(workers int, memTotal, guardLimit int64) int {
+	if n, err := strconv.Atoi(os.Getenv("JANUS_REPLAY_THREADS")); err == nil && n > 0 {
+		return n
+	}
+	if memTotal >= workerWideMinTotal && (guardLimit == 0 || guardLimit >= workerWideThreadsMem) &&
+		int64(workers)*workerWideThreadsMem <= memTotal*3/4 {
+		return 4
+	}
+	return replayThreads()
 }
 
 // errPlanUnsupported marks an environment whose module set the scan cannot mirror exactly; the
@@ -513,13 +548,30 @@ func refuseAliasShadow(dirs []string) error {
 	for _, d := range dirs {
 		ents, err := os.ReadDir(d)
 		if err != nil {
-			continue
+			if st, serr := os.Stat(d); serr == nil && !st.IsDir() {
+				continue // Lean skips non-directories
+			}
+			if os.IsNotExist(err) {
+				continue // nothing there to resolve
+			}
+			return fmt.Errorf("replay plan: cannot list search directory %s: %v", d, err)
 		}
 		for _, e := range ents {
-			if strings.HasPrefix(strings.ToLower(e.Name()), strings.ToLower(rootAliasPrefix)) {
+			if hasAliasPrefix(e.Name()) {
 				return fmt.Errorf("replay plan: %s exists in %s and could shadow the root replay", e.Name(), d)
 			}
 		}
 	}
 	return nil
+}
+
+// hasAliasPrefix: name starts with rootAliasPrefix up to Unicode case folding (so the Kelvin
+// sign, the long s and the like count as their ASCII letters).
+func hasAliasPrefix(name string) bool {
+	rs := []rune(name)
+	pr := []rune(rootAliasPrefix)
+	if len(rs) < len(pr) {
+		return false
+	}
+	return strings.EqualFold(string(rs[:len(pr)]), rootAliasPrefix)
 }

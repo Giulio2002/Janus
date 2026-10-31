@@ -614,3 +614,138 @@ func TestParallelReplayAliasNameIsRandom(t *testing.T) {
 		t.Fatalf("alias argument %q", seen)
 	}
 }
+
+func TestReplayWorkersCapAndThreadsRule(t *testing.T) {
+	for in, want := range map[string]int{"": 4, "0": 4, "-3": 4, "abc": 4, "1": 1, "6": 6, "8": 8, "9": 8, "1000000": 8} {
+		t.Setenv("JANUS_REPLAY_WORKERS", in)
+		if got := replayWorkers(); got != want {
+			t.Errorf("JANUS_REPLAY_WORKERS=%q: %d, want %d", in, got, want)
+		}
+	}
+	t.Setenv("JANUS_REPLAY_THREADS", "")
+	const G = int64(1) << 30
+	for _, c := range []struct {
+		workers    int
+		mem, guard int64
+		want       int
+		why        string
+	}{
+		{4, 251 * G, 24 * G, 4, "big host, big guard"},
+		{4, 64 * G, 24 * G, 4, "exactly 64 GiB: 4*12=48 = 3/4"},
+		{4, 63 * G, 24 * G, 2, "under 64 GiB"},
+		{4, 251 * G, 11 * G, 2, "guard limit below a worker's 12 GiB"},
+		{4, 251 * G, 12 * G, 4, "guard limit exactly 12 GiB"},
+		{4, 251 * G, 0, 4, "no guard enforced, host big enough"},
+		{8, 64 * G, 24 * G, 2, "8 workers x 12 GiB exceed 3/4 of 64 GiB"},
+		{8, 128 * G, 24 * G, 4, "8 x 12 = 96 = 3/4 of 128"},
+		{4, 0, 24 * G, 2, "unknown MemTotal"},
+	} {
+		if got := frameworkReplayThreads(c.workers, c.mem, c.guard); got != c.want {
+			t.Errorf("%s: %d, want %d", c.why, got, c.want)
+		}
+	}
+	t.Setenv("JANUS_REPLAY_THREADS", "3")
+	if frameworkReplayThreads(4, 251*G, 24*G) != 3 {
+		t.Error("JANUS_REPLAY_THREADS must win")
+	}
+}
+
+func TestAliasShadowCaseFoldAndUnlistable(t *testing.T) {
+	for _, n := range []string{"JanusReplayRoot", "JANUSREPLAYROOT.olean", "janusreplayroot", "JanuſReplayRoot.olean", "JanusReplayRootRabc"} {
+		if !hasAliasPrefix(n) {
+			t.Errorf("%q not recognised as the alias prefix", n)
+		}
+	}
+	for _, n := range []string{"JanusReplayRoo", "xJanusReplayRoot", "Janus", ""} {
+		if hasAliasPrefix(n) {
+			t.Errorf("%q wrongly recognised", n)
+		}
+	}
+	// A search directory that cannot be listed (here: below a regular file) is a hard error.
+	d := t.TempDir()
+	f := filepath.Join(d, "file")
+	writeBytes(t, f, []byte("x"))
+	if err := refuseAliasShadow([]string{filepath.Join(f, "sub")}); err == nil || !strings.Contains(err.Error(), "cannot list") {
+		t.Errorf("unlistable directory: %v", err)
+	}
+	// A missing directory or a plain file in the path is skipped, as Lean does.
+	if err := refuseAliasShadow([]string{filepath.Join(d, "missing"), f}); err != nil {
+		t.Errorf("missing/non-directory entries: %v", err)
+	}
+}
+
+// Expensive end-to-end test through `janus verify --janus-root` (production path: sandbox, memory
+// guard, parallel framework replay with its default workers): the honest control records a
+// framework verdict; a build whose ROOT olean is forged records none, with or without an honest
+// copy planted as JanusReplayRoot.olean (which is refused).
+func TestParallelReplayE2EForgedRootNoVerdict(t *testing.T) {
+	_, _, _, _ = realParFixture(t)
+	useTestCache(t)
+	for _, plant := range []string{"control-honest-extra-decl", "forged-root", "forged-root-with-planted-honest-JanusReplayRoot"} {
+		t.Run(plant, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "janus")
+			for _, f := range []string{"lakefile.toml", "lake-manifest.json", "lean-toolchain", "Janus.lean"} {
+				b, err := os.ReadFile(filepath.Join(repoRoot, f))
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeBytes(t, filepath.Join(root, f), b)
+			}
+			if err := copyTree(filepath.Join(repoRoot, "Janus"), filepath.Join(root, "Janus")); err != nil {
+				t.Fatal(err)
+			}
+			if err := copyTree(filepath.Join(repoRoot, ".lake", "build"), filepath.Join(root, ".lake", "build")); err != nil {
+				t.Fatal(err)
+			}
+			lib := filepath.Join(root, ".lake", "build", "lib", "lean")
+			honest, _ := os.ReadFile(filepath.Join(lib, "Janus.olean"))
+			src, _ := os.ReadFile(filepath.Join(repoRoot, "Janus.lean"))
+			forge := "\ntheorem Janus.okayRoot : 1 = 1 := rfl\n"
+			if plant != "control-honest-extra-decl" {
+				forge = "\nopen Lean in\nset_option debug.skipKernelTC true in\nrun_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {\n  name := `Janus.forgedRoot, levelParams := [], type := mkConst ``False, value := mkConst ``True.intro })\n"
+			}
+			fdir := filepath.Join(t.TempDir(), "forge")
+			writeBytes(t, filepath.Join(fdir, "Janus.lean"), append(append([]byte{}, src...), forge...))
+			lake, _ := findLake()
+			os.Remove(filepath.Join(lib, "Janus.olean"))
+			cmd := exec.Command(lake, "env", "lean", "--root="+fdir, "-o", filepath.Join(lib, "Janus.olean"), filepath.Join(fdir, "Janus.lean"))
+			cmd.Dir = root
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("forging: %v\n%s", err, out)
+			}
+			if strings.HasSuffix(plant, "JanusReplayRoot") {
+				writeBytes(t, filepath.Join(lib, "JanusReplayRoot.olean"), honest)
+			}
+			fwd, err := loadFramework(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc, err := findToolchain(lake, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pinned, err := frameworkPins(lib, fwd.Files)
+			if err != nil {
+				t.Fatal(err)
+			}
+			k := frameworkVerdictKey(tc.cacheID(), pinned)
+			if hasFrameworkVerdict(k) {
+				t.Fatal("verdict already present")
+			}
+			add := mustExtract(t, "example.com/basic.Add")
+			proof := filepath.Join(t.TempDir(), "Proof.lean")
+			writeBytes(t, proof, []byte("import Extracted\nnamespace Proof\ntheorem correctness : Extracted.program.data.length = Extracted.program.data.length := rfl\nend Proof\n"))
+			code, out, stderr := runJanus(t, "verify", add, "--proof", proof, "--janus-root", root)
+			t.Logf("code=%d out=%q stderr=%.1500q", code, out, stderr)
+			if plant == "control-honest-extra-decl" {
+				if !hasFrameworkVerdict(k) {
+					t.Errorf("control: no verdict recorded for an honest build (parallel path not exercised?)")
+				}
+				return
+			}
+			if hasFrameworkVerdict(k) {
+				t.Errorf("a framework verdict was recorded for the forged-root build")
+			}
+		})
+	}
+}

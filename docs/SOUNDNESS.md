@@ -264,7 +264,18 @@ verdict in `v1/replay/framework/<key>`, and reuses it:
   named like an olean) makes the plan unsupported and janus runs the single `leanchecker Janus`
   process, which replays everything by construction. No new tool, no interpreter: the same
   `leanchecker`, the same sandbox (the extra directory is mounted read-only like every search
-  directory). Tests: `cmd/janus/replaypar_test.go` (scan, plan, coverage mutations, a forged
+  directory). Knobs: `JANUS_REPLAY_WORKERS` is capped at 8; each worker runs with 4 threads only when the host has
+  at least 64 GiB, the memory guard's per-job limit is at least 12 GiB (or none is enforced) and the
+  workers' 12 GiB budgets together fit in 3/4 of the host's memory, else with the usual 2
+  (`JANUS_REPLAY_THREADS` overrides); the memory limits themselves are unchanged. The shadow refusal
+  compares names with Unicode case folding and treats a search directory that cannot be listed as a
+  hard error (a missing directory or a non-directory is skipped, as Lean skips it). Error
+  handling in `janus verify`: when the early framework replay errors (a failing worker, a mismatch
+  or the shadow refusal), verification does not fail by itself: no verdict is recorded and the
+  proof's imported modules are replayed in the single regular replay, exactly as before this
+  change, which reports `leanchecker`'s error for a forged module. So the refusal can never
+  produce a pass the old code would not give; it only costs the speedup.
+  Tests: `cmd/janus/replaypar_test.go` (scan, plan, coverage mutations, a forged
   declaration in each kind of partition including the root alias and an extra module, killed
   workers, missing output, a deleted module, fallback, verdict recording) and the real-leanchecker
   tests `TestParallelFrameworkReplayMatchesSingleProcess` (same module set as `leanchecker -v

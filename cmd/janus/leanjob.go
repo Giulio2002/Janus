@@ -290,7 +290,12 @@ func runLean(sb *sandbox, tc *toolchain, workDir string, roWritableExtra []strin
 // runLeanProtected is runLean with protected directories kept read-only even inside the
 // writable ones (see sandbox.commandOverlay).
 func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, leanPath string, argv ...string) (string, error) {
-	cmd, out := leanCmd(sb, tc, workDir, roWritableExtra, protected, leanPath, leanPath, argv)
+	return runLeanProtectedThreads(sb, tc, workDir, roWritableExtra, protected, leanPath, 0, argv...)
+}
+
+// runLeanProtectedThreads is runLeanProtected with an explicit leanchecker thread count (0: default).
+func runLeanProtectedThreads(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, leanPath string, threads int, argv ...string) (string, error) {
+	cmd, out := leanCmdThreads(sb, tc, workDir, roWritableExtra, protected, leanPath, leanPath, argv, threads)
 	err := guardRun(cmd)
 	return out.String(), err
 }
@@ -300,6 +305,12 @@ func runLeanProtected(sb *sandbox, tc *toolchain, workDir string, roWritableExtr
 // LEAN_PATH (the two are the same unless a directory is mounted before the process may use it,
 // see auditserve.go).
 func leanCmd(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, mountPath, envPath string, argv []string) (*exec.Cmd, *bytes.Buffer) {
+	return leanCmdThreads(sb, tc, workDir, roWritableExtra, protected, mountPath, envPath, argv, 0)
+}
+
+// leanCmdThreads is leanCmd with an explicit LEAN_NUM_THREADS for a leanchecker command
+// (0: replayThreads()).
+func leanCmdThreads(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protected []string, mountPath, envPath string, argv []string, threads int) (*exec.Cmd, *bytes.Buffer) {
 	// Expose the LEAN_PATH directories read-only: bubblewrap's private /tmp would otherwise
 	// hide a --janus-root (or any search directory) that lives under /tmp.
 	var ro []string
@@ -315,7 +326,10 @@ func leanCmd(sb *sandbox, tc *toolchain, workDir string, roWritableExtra, protec
 	}
 	env := tc.jobEnv(envPath)
 	if len(argv) > 0 && argv[0] == tc.leanchecker {
-		env = append(env, "LEAN_NUM_THREADS="+strconv.Itoa(replayThreads()))
+		if threads <= 0 {
+			threads = replayThreads()
+		}
+		env = append(env, "LEAN_NUM_THREADS="+strconv.Itoa(threads))
 	}
 	cmd := sb.commandOverlay(workDir, roWritableExtra, ro, protected, argv, env)
 	out := &bytes.Buffer{}
