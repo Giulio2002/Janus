@@ -242,4 +242,23 @@ sed -i '1s/^./f/' "$e/MANIFEST.sha256"; r=$(mrestore); echo "$r" | grep -q '1 re
 cp_tree "$t/m2"; echo "-- x" >> "$t/m2/JanusASL/JanusASL/Audit.lean"
 [ "$(python3 -I "$t/m2/JanusASL/tools/asl_mod_cache.py" keys "$t/m2" | awk '$1=="JanusASL.Audit"{print $2}')" != "$mk" ] && ok "an edited module has another key, so the old entry is not even looked at" || bad "edited module kept its key"
 
+echo; echo "-- a module entry may write only its own module's outputs, never through a symlink"
+fake_build; rm -rf "$mc"; $mp publish "$t/m" "$mc" JanusASL.Audit > /dev/null 2>&1; e="$mc/mods/${mk:0:2}/$mk"
+python3 -I - "$t/m" "$e" "$mk" <<'PY'
+import importlib.util, os, sys
+root, e, key = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
+for rel in ("janusasl/.lake/build/lib/lean/JanusASL/Other.olean", "janusasl/JanusASL/Audit.lean"):
+    z = e + "/tree/" + rel; os.makedirs(os.path.dirname(z), exist_ok=True); open(z, "w").write("smuggled"); man[rel] = b.sha_file(z)
+data = "".join("%s  %s\n" % (v, k) for k, v in sorted(man.items())).encode()
+os.chmod(e + "/MANIFEST.sha256", 0o644); open(e + "/MANIFEST.sha256", "wb").write(data); open(e + "/MANIFEST.hmac", "w").write(b.mac("mod", key, data) + "\n")
+PY
+r=$(mrestore); echo "$r" | grep -q '1 rejected' && [ ! -e "$t/m/JanusASL/.lake/build/lib/lean/JanusASL/Other.olean" ] && ok "a signed module entry carrying another module's path / a source file is rejected, nothing written" || bad "smuggled module path: $r"
+grep -q "JanusASL/Audit.lean" <(cd "$t/m" && git status --short 2>/dev/null) && bad "a source file was overwritten" || true
+fake_build; rm -rf "$mc"; $mp publish "$t/m" "$mc" JanusASL.Audit > /dev/null 2>&1
+victim="$t/victim"; mkdir -p "$victim"; d="$t/m/JanusASL/.lake/build/lib/lean/JanusASL"; rm -rf "$d"; ln -s "$victim" "$d"
+r=$($mp restore "$t/m" "$mc" 2>&1); echo "$r" | grep -q '1 rejected' && [ -z "$(ls -A "$victim")" ] && ok "a symlinked destination directory is refused: nothing is written through it" || bad "symlinked destination: $r / $(ls "$victim")"
+rm -f "$d"; mkdir -p "$d"
+
 [ "$fail" = 0 ] && echo "bcache tests: all passed" || { echo "bcache tests: FAILED"; exit 1; }

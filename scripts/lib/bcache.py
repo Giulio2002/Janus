@@ -264,6 +264,24 @@ def _under(dest, rel):
     return p
 
 
+def _safe_dst(dest, rel):
+    """dest/rel after lstat of every component below dest: a symbolic link (or a non-directory) on the way is
+    refused, never followed (an entry must not write through build -> /etc). Missing components are fine."""
+    p = _under(dest, rel)
+    cur = os.path.normpath(dest)
+    for part in os.path.relpath(p, cur).split(os.sep):
+        cur = os.path.join(cur, part)
+        try:
+            st = os.lstat(cur)
+        except FileNotFoundError:
+            return p
+        if stat.S_ISLNK(st.st_mode):
+            raise CacheError("destination component %s is a symbolic link" % cur)
+        if cur != p and not stat.S_ISDIR(st.st_mode):
+            raise CacheError("destination component %s is not a directory" % cur)
+    return p
+
+
 def _same(dest, man):
     for rel, h in man.items():
         p = _under(dest, rel)

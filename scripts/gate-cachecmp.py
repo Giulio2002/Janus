@@ -3,7 +3,9 @@
 "Build cache policy").
 
     gate-cachecmp.py hashes WORKTREE OUT.json     SHA-256 of the build artifacts the ASL/Sail caches serve:
-                                                  every ArmASL and JanusASL .olean (and their combined digest)
+                                                  every ArmASL and JanusASL .olean, and every emitted C file and
+                                                  compiled C object (ir:<tree>/<path>; ArmASL's modules build under JanusASL/.lake/build/ir/ArmASL, i.e. the janusasl tree; a symlinked file is recorded as symlink:<target>) of the janus, janusasl and Sail
+                                                  Lake trees (and their combined digest)
                                                   and the Sail oracle driver binary, plus the build
                                                   configuration the driver depends on (config:SAIL_SPLIT from
                                                   the environment, default 1, and config:SAIL_SPLIT_PARTS from
@@ -144,6 +146,25 @@ def hashes(worktree):
             out[SEM + rel] = dg
             out[LINT + rel] = str(lint)
             out[LAY + rel] = lay
+    # EVERY emitted C file and compiled C object of every Lake tree (module-cache entries carry ir/<M>.c and ir/<M>.c.o.export
+    # for Janus.*, JanusASL.* and ArmASL.*; they are linked into janus-audit, janus-decode, janus-oracle and janus-asl-check
+    # and, unlike an .olean, nothing replays them): the cached and the cold run of one commit must have byte-identical ones.
+    # The .trace files are left out (they record absolute paths of the two worktrees); the .hash files are Lake's own hash of
+    # the file next to them. Keys carry the tree and the path under build/ir, so a file present in one run only is a difference.
+    for tree, lake in (("janus", os.path.join(worktree, ".lake")),
+                       ("janusasl", os.path.join(worktree, "JanusASL", ".lake")),
+                       ("sail", os.path.join(worktree, "JanusASL", ".lake", "packages", "Sail", ".lake"))):
+        base = os.path.join(lake, "build", "ir")
+        for d, dirs, files in os.walk(base):
+            dirs.sort()
+            for f in sorted(files):
+                if f.endswith(".trace") or f.endswith(".setup.json"):
+                    continue
+                if f.endswith(".c") or f.endswith(".c.hash") or ".c.o." in f:
+                    p = os.path.join(d, f)
+                    key = "ir:%s/%s" % (tree, os.path.relpath(p, base).replace(os.sep, "/"))
+                    # a symlinked file is RECORDED, never skipped: 'symlink:<target>' differs from any regular file's hash
+                    out[key] = "symlink:" + os.readlink(p) if os.path.islink(p) else sha_file(p)
     drv = os.path.join(worktree, "oracle-sail", "target", "release", "janus-oracle-sail")
     if os.path.isfile(drv):
         out["sail-driver"] = sha_file(drv)
@@ -227,6 +248,12 @@ def compare(cached, cold):
         for k in cfg:
             print("  %s: cached %s, cold %s" % (k[len(CONFIG):], h1.get(k, "not recorded"), h2.get(k, "not recorded")))
         print("cachecmp: not comparable (the Sail drivers differ by construction). Re-run both with the same SAIL_SPLIT set explicitly.")
+        return 2
+    # fail closed: the C/object comparison needs both runs to have hashed some (an older gate, a build that did not run)
+    none = [n for n, h in (("cached", h1), ("cold", h2)) if not any(k.startswith("ir:") for k in h)]
+    if none:
+        print("cachecmp: not comparable: no emitted C file or compiled C object was hashed in the %s run (ir:* missing from "
+              "artifact-hashes.json): the C/object comparison did not run" % " and ".join(none))
         return 2
     diffs = []
     for k in sorted(set(s1) | set(s2)):
