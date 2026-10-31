@@ -563,7 +563,8 @@ re-checks them. Their integrity is the content key (C hashes, compiler binary co
 environment), the per-user HMAC, the stage bindings (Lake's file hash recomputed, the logged compile command EQUAL to the one built from the keyed compiler path and prefix, the signed C set bound to the id),
 the sandboxed recompile sample, and the nightly cold-side audit (`gate-cachecmp.py` + `objaudit`: any difference is a
 P0 cache bug and the entry is quarantined). An attacker with the HMAC key and a consistent forgery outside the sample
-can be served until that audit. They do not affect any verified theorem:
+can be served until that audit.
+The object cache is ON by default; with it on, a cached gate is not merge evidence by itself. The pre-push cold gate (`JANUS_ASL_CACHE=0`, which compiles every object from source) and the nightly cold-vs-cached comparison and cache audit are the controls, and the residual above (a key holder's consistent forgery of a large object, served until the next nightly audit) remains. Module-cache entries no longer carry compiled objects. They do not affect any verified theorem:
 the proofs are checked by the kernel replay of the `.olean`s, and `janus-asl-check` is a corpus check, not a proof.
 
 **What is cached: build outputs only, never a verdict.** Three kinds of entry:

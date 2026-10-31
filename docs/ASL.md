@@ -718,7 +718,9 @@ tested by `JanusASL/tools/test_asl_obj_cache.sh` and `scripts/lib/test-cachecmp.
 after `lake build ArmASL`, before the `janus-asl-check` link compiles each emitted C file (`ir/ArmASL/PartNN.c`,
 `ir/Sail/*.c`, `ir/JanusASL/**.c` of the modules the executable links) to `.c.o.export`; a warm `asl-build` still
 ran clang over them (the largest parts take 2-3 min each at -O3, `JanusASL.Proofs.Config` alone ~10 min).
-Two scopes: `arm` (ArmASL parts + lean-sail: ONE entry, they all change together with the model) and `jasl` (the JanusASL library: ONE ENTRY PER OBJECT, so a changed proof module recompiles only its own C, never `Proofs.Config`'s ~10 min unless Config itself changed). The `Janus.*` objects of the root package were evaluated and left out: 231 of them come back with the module entries already (measured extra saving 0 s) and a scope would only add trust surface. Clang puts no path
+Three scopes: `arm` (ArmASL parts + lean-sail: ONE entry, they all change together with the model), `jasl` (the JanusASL library) and `janus` (the root package's `Janus.*` objects, linked into `janus-asl-check`, `janus-audit`, `janus-decode`, `janus-oracle`): the last two ONE ENTRY PER OBJECT, so a changed module recompiles only its own C, never `Proofs.Config`'s ~10 min unless Config itself changed. MODULE ENTRIES NO LONGER CARRY OBJECTS: a `mod` entry is protected by the HMAC and file hashes only (no staging checks, no recompile, no tombstone), so `ir/<M>.c.o.*` is neither stored in nor restored from one (legacy entries that hold them are read with those files ignored); objects travel only as `armobj` entries.
+
+**Setting.** ON BY DEFAULT (`OBJ_CACHE_DEFAULT` in `scripts/asl.sh`); `ASL_OBJ_CACHE=0` turns it off; `JANUS_ASL_CACHE=0` (the cold gate, the pre-push gate, the nightly's cold run) blanks the whole build cache, so a cold tree compiles every object from source (tested). `scripts/asl.sh objcache-state` prints `ON` or `OFF (reason)`; the gate banner, every lane log, the asl build log, the `GATE PASS/FAIL` line and the nightly summary print it. **With the cache ON a cached gate is NOT merge evidence by itself.** The controls are the pre-push cold gate (`JANUS_ASL_CACHE=0`) and the nightly cold-vs-cached comparison and audit (below); the residual below remains while the cache is on. Clang puts no path
 into an object (a part compiled in two directories is bit-identical), so no `-ffile-prefix-map` is needed.
 
 *What an id binds.* SHA-256 of: the ArmASL cache key (toolchain by content, flags, environment, model), the machine,
@@ -772,6 +774,8 @@ moved entry, foreign path = rejection and a rebuild.
 
 *Measured* (private copy, cache seeded from /srv/janus-asl-cache, 431 of 434 modules restored, LEAN_NUM_THREADS=4, JANUS_JOBS=2; host load average 16-17 during the runs, not idle): the run that fills the object cache 1029 s (it stages and publishes 17 entries on real ArmASL, lean-sail and JanusASL objects with 0 refused: the Lake-hash and argv-shape checks have no false positive; the sandboxed recompile sample adds about 40 s), then **77-79 s** warm (final chain, load 17-18). Without the object cache the same warm build took 957 s.
 
+*Quarantine and audit details.* An unreadable or unauthentic tombstone is a loud, fail-closed condition for SERVING that id (fetch rejects it, `objaudit` reports it and exits 4) but it never deletes or replaces a valid entry (`store` refuses instead); the operator clears it with `bcache.py clear-tombstone CACHE ID --yes`. `objaudit` takes each entry's exclusive lock while it verifies and renames (an honest republish cannot race the quarantine), removes `.poisoned-*` directories after 30 days (the tombstones stay), exits 3 on any compared object that differs and 4 when nothing was compared or more than `ASL_OBJAUDIT_MAX_UNCHECKED_PCT` (default 20) of the entries' objects have no fresh counterpart in the cold tree (an entry of this commit's ids whose object the cold build did not link); `--dry-run` only reports (no lock, no quarantine): the nightly smoke step runs it against the production cache.
+
 *Nightly cold-side audit.* The nightly cold gate links in its own worktree under the same cache setting as its run (the
 cached run restores objects; the cold run, JANUS_ASL_CACHE=0, compiles every object from source: the cache is blanked, a
 test checks a cold run does not restore from a populated cache). `gate-cachecmp.py` compares the SHA-256 of every
@@ -782,7 +786,7 @@ signed tombstone (HMAC) records its poisoned object hashes, then the directory i
 and store refuse those bytes whatever directory they come back in (an attacker renaming it back does not revive it, and
 the same forged bytes cannot be republished; honest bytes for the id can). Everything FAILS CLOSED: a run with no hashed
 object, an audit that compared nothing, an object of the commit's entries that could not be compared (coverage under
-100%), a missing armobj directory, or a tombstone with a bad MAC. The nightly sets `rc_final=1` on any of them. An
+100%), a missing armobj directory, or a tombstone with a bad MAC. The nightly sets `rc_final=1` on any of them; its CACHED run keeps the object cache ON (that is what it audits) and its COLD run is OFF (stub-repository test: `scripts/lib/test-nightly-objcache.sh`). `gate-cachecmp.py` hashes EVERY `ir/*.c` and `ir/*.c.o.*` (not the `.trace` files, which hold worktree paths) of the janus, janusasl (ArmASL included) and Sail trees, so the module-cache `.c` files and the `Janus.*` objects are compared cached-vs-cold too. An
 asynchronous background audit queue for large objects at publish time was considered and NOT built: the nightly is the
 backstop.
 
