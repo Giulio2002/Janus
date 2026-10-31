@@ -560,7 +560,7 @@ section says what is cached and why a stale, forged or tampered entry cannot pro
 **Natively linked objects have no kernel-replay backstop.** The `armobj` entries (compiled C objects of ArmASL,
 lean-sail and JanusASL, docs/ASL.md "Compiled objects") are machine code the linker uses; unlike an `.olean` nothing
 re-checks them. Their integrity is the content key (C hashes, compiler binary content, flags incl. weak args,
-environment), the per-user HMAC, the stage bindings (Lake's file hash recomputed, the logged compile command's shape),
+environment), the per-user HMAC, the stage bindings (Lake's file hash recomputed, the logged compile command EQUAL to the one built from the keyed compiler path and prefix, the signed C set bound to the id),
 the sandboxed recompile sample, and the nightly cold-side audit (`gate-cachecmp.py` + `objaudit`: any difference is a
 P0 cache bug and the entry is quarantined). An attacker with the HMAC key and a consistent forgery outside the sample
 can be served until that audit. They do not affect any verified theorem:
