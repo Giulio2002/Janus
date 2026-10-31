@@ -73,20 +73,12 @@ then deleted; its use stamp and lock file are removed while the lock is held. Co
 ever deletes: a missing entry is a miss, never a different result. Leftover `.gc-trash-*` and
 publish `.tmp-*` directories older than a day are removed too.
 
-**Compiled objects** (`CACHE/armobj/<id>`, kind `armobj` of scripts/lib/bcache.py). The ArmASL parts
-and the lean-sail modules are compiled from Lake's emitted C (`ir/<M>.c`) to `ir/<M>.c.o.export` only
-when the executable is linked, i.e. after the ArmASL entry was stored, and that C compile is most of
-a warm asl-build. Lake's trace of an object (`.c.o.export.trace`) mixes the hash of the C *content*,
-the toolchain, the compiler arguments and the platform, and the path of the C file only as a label
-(measured: the same C compiled in two directories gives bit-identical objects, no path in them), so
-the objects are reusable across directories. One entry holds all of them, keyed by the SHA-256 of
-{scheme, ArmASL cache key (toolchain by content, flags, model), machine, the SHA-256 of every emitted
-`.c` of ArmASL and Sail}: it is looked up only after `lake build ArmASL` has emitted the C of this
-tree, so an entry is used only if every C file hashes the same; the HMAC-signed per-file manifest is
-verified on the copy exactly as for the other kinds, and Lake still judges each restored object by
-its own trace (a trace that does not match is rebuilt). Missing/corrupt/foreign-key = miss, rebuild.
-It is stored only when every C file has its object, hash and trace, and is evicted by LRU like the
-module entries.
+**Compiled objects** (`CACHE/armobj/<id>`, kind `armobj` of scripts/lib/bcache.py; two scopes, `arm` and `jasl`).
+The id binds the C content of the scope, the keyed compiler BINARY's content, the ArmASL key (toolchain, flags,
+environment incl. CCC_*), the machine and (jasl) the JanusASL lib/exe tables; a store checks that each object's
+trace/hash bind to the current C and the keyed compiler (objstage) and recompiles a sample; Lake does not re-check a
+restored object, so there is no second check at use time and no kernel replay: see docs/ASL.md "Compiled objects"
+(key + HMAC + the nightly reproducibility audit of gate-cachecmp.py).
 
 **Trust.** As for the ArmASL entry: the cache must be writable only by users you trust, since a
 restored `.olean` is what later modules (and `janus verify --asl`) are checked against; the kernel

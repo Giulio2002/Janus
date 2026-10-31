@@ -713,19 +713,47 @@ the same cache: the build reused 27 unchanged entries, built and published the o
 under a loaded host), and a fresh copy of that commit then restored 137 modules and built JanusASL
 in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
 
-**Compiled objects** (`CACHE/armobj/<id>`, `asl_mod_cache.py objkey|objfiles`, `asl.sh` `objcache_*`;
-tested by `JanusASL/tools/test_asl_obj_cache.sh`). The ArmASL entry is stored after `lake build ArmASL`,
-before the `janus-asl-check` link compiles each emitted C file (`ir/ArmASL/PartNN.c`, `ir/Sail/*.c`) to
-`.c.o.export`, so a warm `asl-build` still ran clang over the 50 parts (minutes: the largest parts take
-2-3 min each at -O3). Lake's object trace mixes the C content hash, the toolchain, the compiler arguments
-and the platform; the C path is only a label, and clang puts no path into the object (a part compiled in two
-directories is bit-identical), so the objects are path independent and need no `-ffile-prefix-map`. One
-entry now holds all objects, with their `.hash` and `.trace`. Its id is the SHA-256 of the ArmASL cache key
-(toolchain by content, flags, model), the machine and the SHA-256 of every emitted `.c`, computed after the
-first `lake build ArmASL`: an entry is used only if every C file hashes the same. Same integrity as the other
-kinds (per-user HMAC over kind, id and manifest; per-file SHA-256 checked before any file is put in place;
-tamper, wrong key, moved entry = rejection and a rebuild); Lake still judges each restored object by its own
-trace. Stored only when every C file has its object, hash and trace. Evicted by LRU like a module entry.
+**Compiled objects** (`CACHE/armobj/<id>`, `asl_mod_cache.py objkey|objstage|objfiles`, `asl.sh` `objcache_*`;
+tested by `JanusASL/tools/test_asl_obj_cache.sh` and `scripts/lib/test-cachecmp.sh`). The ArmASL entry is stored
+after `lake build ArmASL`, before the `janus-asl-check` link compiles each emitted C file (`ir/ArmASL/PartNN.c`,
+`ir/Sail/*.c`, `ir/JanusASL/**.c` of the modules the executable links) to `.c.o.export`; a warm `asl-build` still
+ran clang over them (the largest parts take 2-3 min each at -O3, `JanusASL.Proofs.Config` alone ~10 min).
+Two scopes, two entries: `arm` (ArmASL parts + lean-sail) and `jasl` (the JanusASL library). Clang puts no path
+into an object (a part compiled in two directories is bit-identical), so no `-ffile-prefix-map` is needed.
+
+*What an id binds.* SHA-256 of: the ArmASL cache key (toolchain by content, flags, environment, model), the machine,
+the SHA-256 of every emitted `.c` of the scope (the id is computed after the C exists, so an entry is used only if
+every C file hashes the same), the SHA-256 of the C COMPILER'S BINARY content (LEAN_CC when set, else the
+toolchain's clang; hashed now, never taken from a path or a prefix), and for `jasl` the whole `lean_lib JanusASL` and
+`lean_exe janus-asl-check` tables (`leancArgs`, `moreLeancArgs`, `weakLeancArgs`, `moreLinkArgs`, ...: Lake's trace
+does NOT cover weak arguments). The environment part of the ArmASL key covers every `CCC_*` (CCC_OVERRIDE_OPTIONS
+rewrites the command line), `CLANG_*`, `GCC_*`, `COMPILER_*`, include-path variables, and LEAN_CC / LEAN_CXX / CC /
+CXX / LD / AR by the content of the binary they name.
+
+*What a store checks.* Lake's trace is NOT a second check at use time: Lake trusts a restored object's `.hash` and
+`.trace` without re-hashing the object, so the integrity of an entry is the key + the HMAC + the audit below.
+`objstage` therefore copies the objects into a staging directory (what is checked is what is signed) and requires,
+per object: regular files with no symlink on the way; the trace's recorded output hash equals the `.hash`; the
+trace's recorded hash of the C file equals the CURRENT `.c.hash` and the path is this C file; the compile command
+in the trace runs the keyed compiler binary; the C is re-hashed now and equals the id's. A `.cin` record of the C's
+SHA-256 is added. `bcache.py store --recompile N|all` then recompiles the N smallest objects (default 3,
+`ASL_OBJ_RECOMPILE`) with the command the trace logged and refuses the entry if any byte differs; the same check on
+an existing entry replaces it when it differs (a poisoned entry cannot stay). `bcache.py verify --recompile all
+--c-root LAKE` audits a stored entry the same way (POISONED, exit 3).
+
+*What a use checks.* HMAC over (kind, id, manifest), per-file SHA-256 of every copy before any file is put in
+place, a per-kind path allowlist (an armobj entry may hold only `build/ir/**.c.o.{export,noexport}[.hash|.trace|.cin]`
+and its Sail twin), and every destination component is lstat'ed and refused if it is a symlink. Tamper, wrong key,
+moved entry, foreign path = rejection and a rebuild.
+
+*Honest limit.* A natively linked object has NO kernel-replay backstop: unlike an `.olean` (whose declarations the
+replay re-checks), nothing re-checks what machine code the cache served. Its integrity rests on the key, the HMAC,
+the publish-time binding and recompile above, and the NIGHTLY REPRODUCIBILITY AUDIT: the cold gate
+(`JANUS_ASL_CACHE=0`, `scripts/nightly-cold-gate.sh`) compiles every object fresh and `gate-cachecmp.py` compares
+the SHA-256 of each `armobj:` object with the cached run's; any difference, or an object in one run only, is a
+**P0 cache bug**. Compiles are bit-reproducible across directories, dates and environment (measured), which is what
+makes that comparison meaningful. A poisoned entry published before it is noticed is served until then; `verify
+--recompile all` finds it and the next store replaces it. Evicted by LRU like a module entry.
 
 **Eviction** (`asl_mod_cache.py gc CACHE --max SIZE [--root REPO] [--grace S] [--dry-run]`). The
 module entries and the ArmASL entries had no eviction (a shared cache reached 42 GB). `scripts/asl.sh`

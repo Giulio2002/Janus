@@ -557,6 +557,13 @@ content-addressed cache (`ASL_CACHE`, on by default: `/srv/janus-asl-cache` if i
 `~/.cache/janus/asl`; `ASL_CACHE=off` disables it, `SAIL_CACHE` overrides it for the driver). This
 section says what is cached and why a stale, forged or tampered entry cannot produce a pass.
 
+**Natively linked objects have no kernel-replay backstop.** The `armobj` entries (compiled C objects of ArmASL,
+lean-sail and JanusASL, docs/ASL.md "Compiled objects") are machine code the linker uses; unlike an `.olean` nothing
+re-checks them. Their integrity is the content key (C hashes, compiler binary content, flags incl. weak args,
+environment), the per-user HMAC, the publish-time binding and recompile, and the nightly cold-gate comparison of every
+object's SHA-256 (`gate-cachecmp.py`: any difference is a P0 cache bug). They do not affect any verified theorem:
+the proofs are checked by the kernel replay of the `.olean`s, and `janus-asl-check` is a corpus check, not a proof.
+
 **What is cached: build outputs only, never a verdict.** Three kinds of entry:
 
 * `armasl`: the compiled Arm ASL model (`ArmASL.olean`/`.ilean`/`.trace`/C/objects) and the
