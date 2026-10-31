@@ -59,6 +59,11 @@ class CacheError(Exception):
     pass
 
 
+class Inconclusive(CacheError):
+    """A recompile that could not be carried out (no C, a crash, a timeout, a missing tool): neither a match nor a
+    mismatch. It never counts as a pass and never destroys an existing entry (a store that meets it stops)."""
+
+
 def sha_file(p):
     h = hashlib.sha256()
     with open(p, "rb") as f:
@@ -498,6 +503,100 @@ def trace_facts(data):
     return outputs, pairs, argv
 
 
+
+# ---- Lake's own hashes, reimplemented (RTOBJ2): Hash.ofByteArray = mixHash 1723 (MurmurHash64A(bytes, seed 11)) ----
+_M64 = (1 << 64) - 1
+
+
+def _murmur64a(data, seed=11):
+    m, r, n = 0xc6a4a7935bd1e995, 47, len(data)
+    h = (seed ^ (n * m)) & _M64
+    for i in range(n // 8):
+        k = int.from_bytes(data[8 * i:8 * i + 8], "little")
+        k = (k * m) & _M64
+        k ^= k >> r
+        k = (k * m) & _M64
+        h ^= k
+        h = (h * m) & _M64
+    tail = data[n - (n & 7):]
+    if tail:
+        h ^= int.from_bytes(tail, "little")
+        h = (h * m) & _M64
+    h ^= h >> r
+    h = (h * m) & _M64
+    h ^= h >> r
+    return h
+
+
+def lake_hash(data, text=False):
+    """Lake's hash of a file's bytes (16 lowercase hex digits): what `X.c.o.export.hash` holds (binary) and what
+    `X.c.hash` holds (text: CRLF -> LF first). Checked against Lake's own files on a real tree."""
+    if text:
+        data = data.replace(b"\r\n", b"\n")
+    k = _murmur64a(data)
+    m = 0xc6a4a7935bd1e995
+    k = (k * m) & _M64
+    k ^= k >> 47
+    k ^= m
+    return "%016x" % (((1723 ^ k) * m) & _M64)
+
+
+# ---- the logged compile command is DATA from the publisher: only a known shape may be recompiled or trusted ----
+ARGV_FIXED = frozenset(["-c", "-fstack-clash-protection", "-ffp-contract=off", "-fdata-sections", "-ffunction-sections",
+                        "-fPIC", "-fvisibility=hidden", "-Wno-unused-command-line-argument", "-nostdinc", "-O3",
+                        "-DNDEBUG", "-DLEAN_EXPORTING"])
+
+
+def lakefile_flags(lake):
+    """The compiler arguments the package lakefiles declare (leancArgs/moreLeancArgs/weakLeancArgs strings) of
+    `lake`/../lakefile.toml (JanusASL/.lake; keyed through the ArmASL key and the jasl tables): the only flags beyond ARGV_FIXED a logged command may carry."""
+    out = set()
+    for f in (os.path.join(lake, "..", "lakefile.toml"),):  # NOT the Sail package's lakefile: a vendored checkout is not keyed content
+        try:
+            with open(f) as fh:
+                for line in fh:
+                    if "eancArgs" in line:
+                        out.update(re.findall(r'"(-[^"\s]+)"', line))
+        except OSError:
+            pass
+    return out
+
+
+def argv_problem(argv, lake):
+    """None if argv has exactly the shape Lake logs for a C object (the toolchain clang, -c, one -o, one C file,
+    -I/--sysroot/-isystem into its own toolchain prefix, ARGV_FIXED flags and the lakefile's declared flags), else
+    why not. A logged command with anything else (-D/-include/-I elsewhere, -fplugin, @file, a shell, a second
+    C file) compiles other code from the same C: not recompiled, not trusted."""
+    if not argv or os.path.basename(argv[0]) != "clang":
+        return "the compiler is %r, not a toolchain clang" % (argv and argv[0])
+    pres = {os.path.dirname(os.path.dirname(argv[0])), os.path.dirname(os.path.dirname(os.path.realpath(argv[0])))}
+    pres = {p for p in pres if os.path.isfile(os.path.join(p, "include", "lean", "lean.h"))}
+    if not pres:
+        return "%s is not in a Lean toolchain" % argv[0]
+    ok_flags = ARGV_FIXED | lakefile_flags(lake)
+    want = {"-I": {p + "/include" for p in pres}, "--sysroot": pres, "-isystem": {p + "/include/clang" for p in pres}}
+    i, nc, no = 1, 0, 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "-o" and i + 1 < len(argv):
+            no += 1
+            i += 2
+        elif a in want and i + 1 < len(argv):
+            if argv[i + 1] not in want[a]:
+                return "%s %s is not in the toolchain" % (a, argv[i + 1])
+            i += 2
+        elif a in ok_flags:
+            i += 1
+        elif a.endswith(".c") and not a.startswith("-"):
+            nc += 1
+            i += 1
+        else:
+            return "unexpected compiler argument %r" % a
+    if nc != 1 or no != 1:
+        return "the command has %d C files and %d -o" % (nc, no)
+    return None
+
+
 def recompile_argv(argv, c_path, out_path):
     """The logged compile command with its output and C file replaced (nothing else is touched)."""
     res, i, seen_o, seen_c = [], 0, False, False
@@ -522,9 +621,13 @@ def recompile_argv(argv, c_path, out_path):
 def recompile_object(argv, c_path, work):
     """Compile c_path with the logged command into a file under work; returns its SHA-256."""
     out = os.path.join(work, "recompiled.o")
-    r = subprocess.run(recompile_argv(argv, c_path, out), cwd=os.path.dirname(c_path), capture_output=True, timeout=7200)
+    try:
+        r = subprocess.run(recompile_argv(argv, c_path, out), cwd=os.path.dirname(c_path), capture_output=True,
+                           timeout=int(os.environ.get("ASL_OBJ_RECOMPILE_TIMEOUT", "7200")), stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as ex:
+        raise Inconclusive("recompile did not run (%s)" % ex)
     if r.returncode != 0:
-        raise CacheError("recompile failed: %s" % r.stderr.decode("utf-8", "replace")[-300:])
+        raise Inconclusive("recompile failed: %s" % r.stderr.decode("utf-8", "replace")[-300:])
     return sha_file(out)
 
 
@@ -548,22 +651,29 @@ def recompile_dir(e, man, c_root, sample, cache):
             try:
                 objs.append((os.stat(cp).st_size, rel, cp))
             except OSError:
-                raise CacheError("no C file %s under %s to recompile %s" % (m.group(1), c_root, rel))
+                raise Inconclusive("no C file %s under %s to recompile %s" % (m.group(1), c_root, rel))
     objs.sort()
-    if sample != "all":
-        objs = objs[:int(sample)]
+    if sample != "all":  # the N smallest plus a random draw of the rest (ASL_OBJ_RECOMPILE_RANDOM, default 2)
+        import random
+        rest = objs[int(sample):]
+        objs = objs[:int(sample)] + (random.SystemRandom().sample(rest, min(len(rest), int(os.environ.get("ASL_OBJ_RECOMPILE_RANDOM", "2")))) if int(sample) > 0 else [])
     bad = []
     work = tempfile.mkdtemp(prefix=".recompile-", dir=cache)
     try:
         for _, rel, cp in objs:
-            with open(os.path.join(e, "tree", rel + ".cin")) as f:
-                cin = f.read().strip()
+            try:
+                with open(os.path.join(e, "tree", rel + ".cin")) as f:
+                    cin = f.read().strip()
+                with open(os.path.join(e, "tree", rel + ".trace"), "rb") as f:
+                    _, _, argv = trace_facts(f.read())
+            except (OSError, ValueError) as ex:
+                raise CacheError("entry record of %s unreadable (%s)" % (rel, ex))
             if sha_file(cp) != cin:
-                raise CacheError("the C file of %s does not hash to the entry's record" % rel)
-            with open(os.path.join(e, "tree", rel + ".trace"), "rb") as f:
-                _, _, argv = trace_facts(f.read())
-            if argv is None:
-                raise CacheError("the trace of %s has no compile command" % rel)
+                raise Inconclusive("the C file of %s does not hash to the entry's record" % rel)
+            why = argv_problem(argv, c_root)
+            if why:  # a logged command of another shape is never run: the entry is poisoned (or foreign)
+                bad.append(rel)
+                continue
             if recompile_object(argv, cp, work) != man[rel]:
                 bad.append(rel)
     finally:
@@ -592,6 +702,8 @@ def store(kind, cache, ident, src, rels, inputs=None, recompile=None):
                     if bad:
                         raise CacheError("recompiling %d object(s) gives other bytes than the entry holds (%s)" % (len(bad), bad[0]))
                 return "present"
+            except Inconclusive as ex:
+                raise CacheError("recompile inconclusive, the existing entry is kept: %s" % ex)
             except CacheError as ex:
                 print("cache: replacing the invalid entry %s (%s)" % (e, ex), file=sys.stderr)
                 q = tempfile.mkdtemp(prefix=".bad-", dir=os.path.dirname(e))

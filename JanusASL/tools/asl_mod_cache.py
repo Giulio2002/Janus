@@ -678,6 +678,8 @@ def armasl_sha(root):
 def obj_id(root, cs, scope="arm"):
     inp = {"scheme": OBJ_SCHEME, "armasl": armasl_sha(root),
            "machine": platform.machine(), "c": cs, "compiler": obj_compiler(root)[1]}
+    sl = [os.path.join(scope_lake(root, scope), "packages", "Sail", n) for n in ("lakefile.toml", "lakefile.lean")]
+    inp["sail.lakefile"] = [sha_file(f) if os.path.isfile(f) else None for f in sl]  # the vendored package's build flags (RTOBJ2: not keyed before)
     if scope != "arm":
         inp["scope"] = scope
         inp["tables"] = obj_tables(root, scope)
@@ -761,6 +763,15 @@ def stage_unit(root, scope, lake, ident, cs, stage):
             outputs, pairs, argv = bc.trace_facts(tdata)
         except Exception as ex:
             sys.exit("objstage: %s: unreadable trace (%s)" % (o, ex))
+        with open(os.path.join(lake, o), "rb") as f:
+            if bc.lake_hash(f.read()) != ohash:
+                sys.exit("objstage: %s: the object's bytes do not hash (Lake's hash) to its .hash %s: swapped object" % (o, ohash))
+        with open(os.path.join(lake, c), "rb") as f:
+            if bc.lake_hash(f.read(), text=True) != chash:
+                sys.exit("objstage: %s: the C file does not hash (Lake's text hash) to its .hash %s" % (c, chash))
+        why = bc.argv_problem(argv, lake)
+        if why:
+            sys.exit("objstage: %s: the logged compile command is not the shape Lake logs (%s)" % (o, why))
         if outputs != ohash + ".o":
             sys.exit("objstage: %s: the trace records output %r, the .hash says %r" % (o, outputs, ohash))
         if not any(h == chash and p.replace(os.sep, "/").endswith("/" + c) for p, h in pairs):
@@ -826,6 +837,10 @@ def obj_publish(root, scope, cache, sample):
     sizes = sorted((sum(os.path.getsize(os.path.join(lake, c)) for c in cs), i) for i, (_, cs) in enumerate(units))
     sample = "all" if sample == "all" else int(sample)
     chosen = set(i for _, i in (sizes if sample == "all" else sizes[:sample]))
+    if sample != "all":  # plus a random draw of the rest (ASL_OBJ_RECOMPILE_RANDOM, default 2): the swapped object is not predictable
+        import random
+        rest = [i for _, i in sizes if i not in chosen]
+        chosen |= set(random.SystemRandom().sample(rest, min(len(rest), int(os.environ.get("ASL_OBJ_RECOMPILE_RANDOM", "2")))))
     stored = present = skipped = failed = 0
     for i, (ident, cs) in enumerate(units):
         st = tempfile.mkdtemp(prefix=".objstage-", dir=os.path.dirname(os.path.join(cache, "armobj")))
@@ -839,7 +854,7 @@ def obj_publish(root, scope, cache, sample):
             if not rels:
                 skipped += 1
                 continue
-            rc = (lake, str(sample)) if i in chosen and sample != 0 else None
+            rc = (lake, "all" if scope in PER_OBJECT else str(sample)) if i in chosen and sample != 0 else None
             try:
                 r = bc.store("armobj", cache, ident, st, rels, None, rc)
             except bc.CacheError as ex:
@@ -853,6 +868,45 @@ def obj_publish(root, scope, cache, sample):
     print("asl cache: C objects [%s]: stored %d, already cached %d, no object %d, refused %d (%s)" % (scope, stored, present, skipped, failed, cache))
 
 
+def obj_audit(root, scope, cache):
+    """The cold-side audit and eviction (run on a tree whose objects were compiled from source, the nightly's cold
+    tree): for every unit of the scope whose entry exists in `cache`, the SHA-256 of each cached object must equal the
+    freshly compiled one. A difference quarantines the entry (renamed to .poisoned-<id>, never served again) and exits 3;
+    an entry whose object the cold tree lacks is reported as unchecked. Reads only the cache and the cold tree."""
+    bc = load_bcache(root)
+    lake = scope_lake(root, scope)
+    checked = unchecked = 0
+    poisoned = []
+    for ident, cs in obj_units(root, scope):
+        try:
+            man = bc.verify_entry("armobj", cache, ident)
+        except bc.CacheError:
+            if os.path.isdir(bc.entry_dir("armobj", cache, ident)):
+                poisoned.append(ident)
+            continue
+        for rel, h in sorted(man.items()):
+            if not rel.endswith(OBJ_SUFFIXES):
+                continue
+            fresh = os.path.join(lake, rel)
+            if not os.path.isfile(fresh) or os.path.islink(fresh):
+                unchecked += 1
+                continue
+            checked += 1
+            if sha_file(fresh) != h:
+                poisoned.append(ident)
+                print("objaudit: POISONED %s: %s differs from the freshly compiled object" % (ident, rel))
+                break
+    for ident in sorted(set(poisoned)):
+        e = bc.entry_dir("armobj", cache, ident)
+        q = os.path.join(os.path.dirname(e), ".poisoned-" + ident)
+        shutil.rmtree(q, ignore_errors=True)
+        if os.path.isdir(e):
+            os.rename(e, q)
+        print("objaudit: quarantined %s" % q)
+    print("objaudit [%s]: %d objects compared, %d without a fresh counterpart, %d poisoned" % (scope, checked, unchecked, len(set(poisoned))))
+    return 3 if poisoned else 0
+
+
 def obj_main(cmd, root, scope="arm", extra=()):
     lake = scope_lake(root, scope)
     if scope not in ("arm", "jasl"):
@@ -863,6 +917,8 @@ def obj_main(cmd, root, scope="arm", extra=()):
     if cmd == "objrestore":
         obj_restore(root, scope, extra[0])
         return
+    if cmd == "objaudit":
+        sys.exit(obj_audit(root, scope, extra[0]))
     if cmd == "objpublish":
         obj_publish(root, scope, extra[0], extra[1] if len(extra) > 1 else "3")
         return
@@ -1076,7 +1132,7 @@ def main():
     if cmd == "gc":
         gc_main(sys.argv[2:])
         return
-    if cmd in ("objkey", "objfiles", "objstage", "objrestore", "objpublish"):
+    if cmd in ("objkey", "objfiles", "objstage", "objrestore", "objpublish", "objaudit"):
         obj_main(cmd, root, sys.argv[3] if len(sys.argv) > 3 else "arm", sys.argv[4:])
         return
     ks = Keys(root)

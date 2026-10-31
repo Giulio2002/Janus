@@ -72,6 +72,15 @@ fi
 run_gate cold JANUS_ASL_CACHE=0 || exit 2
 python3 -I "$cmp_py" compare "$cached" "$work/out-cold"
 rc_final=$?
+# cold-side audit of the compiled-object cache (RTOBJ2): the cold tree's freshly compiled objects against every cache entry
+# of the same ids; a validly signed entry that differs is quarantined (never served again) and makes the run a P0 failure
+cache_dir="${ASL_CACHE:-/srv/janus-asl-cache}"
+if [ -d "$cache_dir/armobj" ] && [ -d "$work/tree-cold/JanusASL/.lake" ]; then
+  for sc in arm jasl; do
+    python3 -I "$work/tree-cold/JanusASL/tools/asl_mod_cache.py" objaudit "$work/tree-cold" "$sc" "$cache_dir"
+    if [ $? != 0 ]; then echo "nightly-cold-gate: P0 POISONED compiled-object cache entry [$sc] (quarantined above, or the audit itself failed): every cached gate result since the last clean nightly is unproven"; rc_final=1; fi
+  done
+fi
 if [ "$rc_final" = 0 ] && [ "${gate_rc_cold:-1}" != 0 ]; then
   echo "nightly-cold-gate: the cold gate FAILED (rc ${gate_rc_cold:-?}) and so did the cached one: the runs agree but nothing is proven; the model pin is NOT written"
   rc_final=2

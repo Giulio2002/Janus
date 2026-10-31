@@ -31,10 +31,13 @@ copy() {  # copy DIR: a copy of the checkout without builds
 # compile command, the object's output hash and the C file's hash), compiled by the toolchain's clang
 prefix=$(cd "$root/JanusASL" && lean --print-prefix); clang="$prefix/bin/clang"
 [ -x "$clang" ] || { echo "FAIL: no toolchain clang at $clang"; exit 1; }
+lh() {  # lh FILE TEXT: Lake's own file hash (bcache.lake_hash), as Lake writes it into .hash and the trace
+  python3 -I -c 'import importlib.util,sys;sp=importlib.util.spec_from_file_location("b",sys.argv[1]);m=importlib.util.module_from_spec(sp);sp.loader.exec_module(m);print(m.lake_hash(open(sys.argv[2],"rb").read(),sys.argv[3]=="1"))' "$root/scripts/lib/bcache.py" "$1" "$2"
+}
 mkobj() {  # mkobj LAKE CFILE [CLANG]: compile CFILE as Lake would (and write .hash/.trace/.c.hash)
   local f="$2" cc="${3:-$clang}" oh ch
   (cd "$(dirname "$f")" && "$cc" -c -o "$f.o.export" "$f" -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING)
-  oh=$(sha256sum < "$f.o.export" | cut -c1-16); ch=$(sha256sum < "$f" | cut -c1-16)
+  oh=$(lh "$f.o.export" 0); ch=$(lh "$f" 1)
   echo "$oh" > "$f.o.export.hash"; echo "$ch" > "$f.c.hash.tmp"; mv "$f.c.hash.tmp" "$f.hash"
   python3 -I - "$f" "$cc" "$oh" "$ch" "$prefix" > "$f.o.export.trace" <<'PY'
 import json, sys
@@ -141,12 +144,15 @@ ls "$t/st/build/ir/ArmASL/Part01.c.o.export.cin" > /dev/null 2>&1 && ok "  ... w
 expect 0 "objstage accepts a genuine tree (jasl)" stage "$t/p" jasl
 # (publish-side lie 1) the C changed after the object was compiled (lean re-emitted it: .c.hash is new, the trace is old)
 copy "$t/q"; build "$t/q"; q="$t/q/JanusASL/.lake/build/ir/ArmASL/Part02.c"
-echo '// other C' >> "$q"; sha256sum < "$q" | cut -c1-16 > "$q.hash"
+echo '// other C' >> "$q"; lh "$q" 1 > "$q.hash"
 expect 1 "objstage refuses an object whose trace records another C hash than the current C" stage "$t/q" arm
 # (lie 2) the object bytes were swapped but hash/trace kept: objstage cannot see it, the recompile at store does
 copy "$t/r"; build "$t/r"; r="$t/r/JanusASL/.lake/build/ir/ArmASL/Part01.c"
 printf 'int other(void){return 7;}\n' > "$t/other.c"; (cd "$t" && "$clang" -c -o "$r.o.export" other.c -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING)
-expect 0 "objstage cannot see swapped object bytes under an unchanged hash/trace (the recompile does)" stage "$t/r" arm
+expect 1 "objstage refuses swapped object bytes under an unchanged .hash (Lake's file hash is recomputed, RTOBJ2)" stage "$t/r" arm
+# the consistent forgery (the attacker also rewrites .hash and the trace's output): objstage cannot see it, the recompile does
+oh=$(lh "$r.o.export" 0); echo "$oh" > "$r.o.export.hash"; sed -i "s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$r.o.export.trace"
+expect 0 "objstage cannot see a consistently forged object (the recompile does)" stage "$t/r" arm
 idr=$(cat "$t/out"); rm -rf "$cache/armobj"
 expect 4 "store --recompile refuses to publish the swapped object" B store armobj "$cache" "$idr" "$t/st" --c-root "$t/r/JanusASL/.lake" --recompile all < "$t/st.list"
 [ ! -e "$cache/armobj/$idr" ] && ok "  ... and nothing was stored" || bad "stored a poisoned entry"
@@ -270,5 +276,88 @@ f1=$(find "$pc/armobj" -path '*/tree/build/ir/JanusASL/*' -name 'B.c.o.export' |
 copy "$t/pk4"; mkdir -p "$t/pk4/JanusASL/.lake/build/ir/JanusASL"; cp "$t/pj/JanusASL/.lake/build/ir/JanusASL/"*.c "$t/pj/JanusASL/.lake/build/ir/JanusASL/"*.c.hash "$t/pk4/JanusASL/.lake/build/ir/JanusASL/"
 expect 0 "objrestore with one tampered entry" M objrestore "$t/pk4" jasl "$pc"
 grep -q "2 restored, 1 without entry, 1 rejected" "$t/out" && ok "  ... the tampered one is REJECTED, the rest restored" || bad "tampered per-object: $(cat "$t/out")"
+
+
+# ======== RTOBJ2: Lake's hash recomputed, the logged command is validated, inconclusive never destroys, cold-side audit ========
+cat > "$t/lh.lean" <<'LEAN'
+import Lake
+open Lake
+def main : IO Unit := do
+  IO.println (Hash.ofByteArray "abc".toUTF8).hex
+  IO.println (Hash.ofText "a\r\nb\n").hex
+  IO.println (Hash.ofByteArray (ByteArray.mk (Array.range 100 |>.map (·.toUInt8)))).hex
+LEAN
+want=$(cd "$root/JanusASL" && timeout 300 lean --run "$t/lh.lean" 2>/dev/null | tr '\n' ' ')
+got=$(printf 'abc' > "$t/v1"; printf 'a\r\nb\n' > "$t/v2"; python3 -c 'import sys;sys.stdout.buffer.write(bytes(range(100)))' > "$t/v3"; echo "$(lh "$t/v1" 0) $(lh "$t/v2" 1) $(lh "$t/v3" 0) ")
+[ -n "$want" ] && [ "$want" = "$got" ] && ok "lake_hash equals Lake's Hash.ofByteArray / ofText on three vectors" || bad "lake_hash differs from Lake: '$want' vs '$got'"
+
+copy "$t/f"; build "$t/f"; fl="$t/f/JanusASL/.lake/build/ir/ArmASL/Part02.c"
+printf '// Lean compiler output\nint f_Part02(void){\n#ifdef EVIL\nreturn 666;\n#else\nreturn 7;\n#endif\n}\n' > "$fl"; mkobj "$t/f/JanusASL/.lake" "$fl"
+# the forged compile command: the object is built with -DEVIL, .hash/trace outputs consistent, the log line edited to say so
+(cd "$(dirname "$fl")" && "$clang" -c -o "$fl.o.export" "$fl" -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING -DEVIL)
+oh=$(lh "$fl.o.export" 0); echo "$oh" > "$fl.o.export.hash"
+sed -i "s#-DLEAN_EXPORTING#-DLEAN_EXPORTING -DEVIL#; s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$fl.o.export.trace"
+expect 1 "objstage refuses a trace whose logged compile command carries a flag Lake did not log (-DEVIL)" stage "$t/f" arm
+grep -q "unexpected compiler argument" "$t/out" "$t/err" 2>/dev/null && ok "  ... naming the argument" || bad "  ... reason"
+# the same forged entry published by a publisher without objstage: store --recompile and verify --recompile refuse it
+sed -i "s#-DEVIL##" "$fl.o.export.trace"; sed -i 's/ -DLEAN_EXPORTING ", "/ -DLEAN_EXPORTING", "/' "$fl.o.export.trace"
+# (rebuild the honest trace log, then a SECOND forgery that is allowed by shape but whose object differs: only the recompile sees it)
+mkobj "$t/f/JanusASL/.lake" "$fl"; (cd "$(dirname "$fl")" && "$clang" -c -o "$fl.o.export" "$fl" -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING -DEVIL)
+oh=$(lh "$fl.o.export" 0); echo "$oh" > "$fl.o.export.hash"; sed -i "s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$fl.o.export.trace"
+expect 0 "objstage accepts a consistent forgery whose logged command is honest (only the recompile can see it)" stage "$t/f" arm
+idf=$(cat "$t/out"); rm -rf "$cache/armobj"
+expect 4 "store --recompile all refuses it" B store armobj "$cache" "$idf" "$t/st" --c-root "$t/f/JanusASL/.lake" --recompile all < "$t/st.list"
+# entry traces are data: a trace whose command is a shell is never run by verify --recompile
+expect 0 "a forged entry stored without recompile" B store armobj "$cache" "$idf" "$t/st" < "$t/st.list"
+# a command in the entry's trace that runs a shell: re-signed by a keyed publisher (store re-signs whatever it is given)
+mkdir -p "$t/st2"; cp -a "$t/st/." "$t/st2/"; chmod -R u+w "$t/st2"
+python3 -I - "$t/st2/build/ir/ArmASL/Part02.c.o.export.trace" "$t/PWNED" <<'PY'
+import sys, json
+p, flag = sys.argv[1:]
+d = json.load(open(p)); d["log"][0]["message"] = ".> /bin/sh -c 'touch %s' -c -o x y.c" % flag
+json.dump(d, open(p, "w"))
+PY
+rm -rf "$cache/armobj"; B store armobj "$cache" "$idf" "$t/st2" < "$t/st.list" > /dev/null
+rm -f "$t/PWNED"; expect 3 "verify --recompile reports POISONED for an entry whose trace runs a shell" B verify armobj "$cache" "$idf" --c-root "$t/f/JanusASL/.lake" --recompile all
+[ ! -e "$t/PWNED" ] && ok "  ... and never ran it" || bad "  ... the shell in the trace RAN"
+
+# inconclusive never destroys: a good entry survives a store whose recompile cannot run (c-root without C)
+copy "$t/g"; build "$t/g"; rm -rf "$t/st"; mkdir "$t/st"; idg=$(M objstage "$t/g" arm "$t/st" "$t/st.list"); rm -rf "$cache/armobj"
+expect 0 "good entry stored with a full recompile" B store armobj "$cache" "$idg" "$t/st" --c-root "$t/g/JanusASL/.lake" --recompile all < "$t/st.list"
+mkdir -p "$t/noc"; expect 4 "a store whose recompile is inconclusive (no C) fails" B store armobj "$cache" "$idg" "$t/st" --c-root "$t/noc" --recompile all < "$t/st.list"
+expect 0 "  ... and the good entry is still there and valid" B verify armobj "$cache" "$idg"
+
+# the default sample plus the random draw catches a consistent forgery of a LARGE object (not among the 3 smallest)
+big="$t/g/JanusASL/.lake/build/ir/ArmASL/Part02.c"; for i in $(seq 1 100); do echo "int pad_$i(void){return $i;}" >> "$big"; done
+mkobj "$t/g/JanusASL/.lake" "$big"; printf 'int f_Part02(void){return 666;}\n' > "$t/evil.c"
+(cd "$t" && "$clang" -c -o "$big.o.export" evil.c -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING)
+oh=$(lh "$big.o.export" 0); echo "$oh" > "$big.o.export.hash"; sed -i "s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$big.o.export.trace"
+rm -rf "$cache/armobj"; ASL_OBJ_RECOMPILE_RANDOM=0 M objpublish "$t/g" arm "$cache" 3 > "$t/out" 2>&1
+grep -q "stored 1" "$t/out" && ok "RESIDUAL (documented): with no random draw the forged LARGE object is published (3 smallest only)" || bad "no-random publish: $(cat "$t/out")"
+rm -rf "$cache/armobj"; ASL_OBJ_RECOMPILE_RANDOM=100 M objpublish "$t/g" arm "$cache" 3 > "$t/out" 2>&1
+grep -q "refused 1" "$t/out" && ok "a random draw covering it refuses the forged large object" || bad "random draw: $(cat "$t/out")"
+
+# cold-side audit: a cached object that differs from the freshly compiled one is quarantined
+copy "$t/h"; build "$t/h"; rm -rf "$t/st"; mkdir "$t/st"; idh=$(M objstage "$t/h" arm "$t/st" "$t/st.list"); rm -rf "$cache/armobj"
+B store armobj "$cache" "$idh" "$t/st" < "$t/st.list" > /dev/null
+expect 0 "objaudit: cache and cold tree agree" M objaudit "$t/h" arm "$cache"
+chmod -R u+w "$cache/armobj/$idh"; printf 'int f_Part01(void){return 9;}\n' > "$t/e2.c"
+(cd "$t" && "$clang" -c -o "$cache/armobj/$idh/tree/build/ir/ArmASL/Part01.c.o.export" e2.c -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING)
+( cd "$cache/armobj/$idh" && h=$(sha256sum tree/build/ir/ArmASL/Part01.c.o.export | cut -d' ' -f1) && sed -i "s|^[0-9a-f]*  build/ir/ArmASL/Part01.c.o.export\$|$h  build/ir/ArmASL/Part01.c.o.export|" MANIFEST.sha256 )
+# (a publisher with the key re-signs; simulate by storing the poisoned tree through bcache)
+rm -rf "$t/st3"; mkdir "$t/st3"; cp -a "$cache/armobj/$idh/tree/." "$t/st3/"; rm -rf "$cache/armobj/$idh"; B store armobj "$cache" "$idh" "$t/st3" < "$t/st.list" > /dev/null
+expect 3 "objaudit: a validly signed but poisoned entry is detected" M objaudit "$t/h" arm "$cache"
+[ ! -d "$cache/armobj/$idh" ] && [ -d "$cache/armobj/.poisoned-$idh" ] && ok "  ... and quarantined (no longer served)" || bad "  ... not quarantined"
+expect 2 "  ... a fetch of it is now a miss" B fetch armobj "$cache" "$idh" "$t/aud/.lake"
+
+
+# the vendored Sail package's lakefile (its build flags) is in the object id, and never widens the accepted flags
+copy "$t/k"; build "$t/k"; mkdir -p "$t/k/JanusASL/.lake/packages/Sail"; idk0=$(M objkey "$t/k")
+printf '[[lean_lib]]\nname = "Sail"\nweakLeancArgs = ["-DEVIL"]\n' > "$t/k/JanusASL/.lake/packages/Sail/lakefile.toml"
+[ "$(M objkey "$t/k")" != "$idk0" ] && ok "a changed Sail package lakefile changes the id" || bad "Sail lakefile not in the id"
+sk="$t/k/JanusASL/.lake/packages/Sail/.lake/build/ir/Sail/Attr.c"
+(cd "$(dirname "$sk")" && "$clang" -c -o "$sk.o.export" "$sk" -I "$prefix/include" -fPIC -O3 -DNDEBUG -DLEAN_EXPORTING -DEVIL)
+oh=$(lh "$sk.o.export" 0); echo "$oh" > "$sk.o.export.hash"; sed -i "s#-DLEAN_EXPORTING#-DLEAN_EXPORTING -DEVIL#; s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$sk.o.export.trace"
+rm -rf "$t/st"; mkdir "$t/st"; expect 1 "objstage: -DEVIL is not accepted just because the Sail lakefile (the publisher's own) declares it" M objstage "$t/k" arm "$t/st" "$t/st.list"
 
 [ $fail = 0 ] && echo "test_asl_obj_cache: all passed" || { echo "test_asl_obj_cache: FAILED"; exit 1; }
