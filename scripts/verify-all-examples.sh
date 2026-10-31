@@ -58,6 +58,9 @@ if [ -n "$explain" ]; then export JANUS_INCR_EXPLAIN=1; else unset JANUS_INCR_EX
 export JANUS_INCR_RECORD="${JANUS_INCR_RECORD:-1}"
 # records are written only for a clean tree that does not change during the run (scripts/lib/incr.sh)
 . scripts/lib/incr.sh
+# JANUS_GATE_TREE0 (the stamp of the tree at the start of a gate run) may be set by scripts/gate.sh ONLY: a value from anywhere else is dropped
+# (an operator with a dirty tree could otherwise export a matching stamp and get PASS records for content that was never verified)
+incr_under_gate || unset JANUS_GATE_TREE0
 incr_tree_pin
 
 # JANUS_EXAMPLES_PREBUILT=1 (scripts/gate.sh): bin/janus, the examples' binaries and the framework

@@ -112,4 +112,21 @@ for pair in arm64:verify-examples amd64:verify-amd64-examples asm:verify-asm-exa
 done
 # ---- S6: a partial run is labelled and its lane arguments are keyed
 grep -q "PARTIAL RUN: not a full gate" scripts/gate.sh && grep -q -- '--arg "run:' scripts/gate.sh && grep -q -- '--arg "rounds:' scripts/gate.sh && ok "S6 partial runs are labelled and keyed" || bad "S6"
+
+# ---- S7: JANUS_GATE_TREE0 may be set by scripts/gate.sh only (a dirty-tree operator cannot export a matching stamp)
+cd "$here"
+mkdir -p "$t/s7/scripts"
+cat > "$t/s7/scripts/gate.sh" <<EOS
+#!/usr/bin/env bash
+( setsid --wait bash -c '. "$here/scripts/lib/incr.sh"; if incr_under_gate; then echo UNDER; else echo NOT; fi' )
+EOS
+cp "$t/s7/scripts/gate.sh" "$t/s7/scripts/other.sh"
+. scripts/lib/incr.sh
+incr_under_gate && bad "S7 a plain shell is taken for a gate" || ok "S7 outside the gate: incr_under_gate is false"
+[ "$(bash "$t/s7/scripts/gate.sh")" = UNDER ] && ok "S7 below a process running gate.sh (through a subshell, setsid and bash -c): true" || bad "S7 not recognised under gate.sh"
+[ "$(bash "$t/s7/scripts/other.sh")" = NOT ] && ok "S7 below another script: false" || bad "S7 other.sh taken for the gate"
+[ "$(JANUS_GATE_TREE0=forged-by-operator bash -c '. scripts/lib/incr.sh; incr_under_gate || unset JANUS_GATE_TREE0; echo "${JANUS_GATE_TREE0-unset}"')" = unset ] && ok "S7 a stamp exported by an operator is dropped" || bad "S7 forged stamp survived"
+a=$(grep -n 'incr_under_gate || unset JANUS_GATE_TREE0' scripts/verify-all-examples.sh | head -1 | cut -d: -f1); b=$(grep -n '^incr_tree_pin' scripts/verify-all-examples.sh | head -1 | cut -d: -f1)
+[ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "S7 verify-all-examples.sh drops a foreign stamp before it pins the tree" || bad "S7 verify-all-examples.sh does not clear JANUS_GATE_TREE0 ($a, $b)"
+grep -rn 'export JANUS_GATE_TREE0\|JANUS_GATE_TREE0=' scripts audit --include=*.sh | grep -v -e 'scripts/lib/incr.sh' -e 'scripts/lib/test-' -e '^\S*:[0-9]*:\s*#' | grep -q . && bad "S7 another script sets JANUS_GATE_TREE0" || ok "S7 only scripts/lib/incr.sh (called by gate.sh) sets JANUS_GATE_TREE0"
 exit $fail

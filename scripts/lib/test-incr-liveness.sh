@@ -12,26 +12,29 @@ t="$(mktemp -d "$root/artifacts/test-incr-liveness.XXXXXX")" || exit 2
 trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
 go build -o "$t/janus" ./cmd/janus || { echo "cannot build cmd/janus"; exit 2; }
-export JANUS_LIVENESS_BIN="$t/janus"
+export LIVENESS_BIN="$t/janus"
 # a gate-like environment: the names present at the start of the run
 env0="$(compgen -e | sort | tr '\n' ' ')"
-case_() { # WANT(0|1) DESCRIPTION NAME=value...   (the variables are exported AFTER the start of the simulated gate)
-  local want=$1 what=$2 out rc kv; shift 2
-  out="$(env GATE_ENV0_NAMES="$env0" "$@" scripts/lib/incr-liveness.sh 2>&1)"; rc=$?
-  if [ "$rc" != "$want" ]; then bad "$what: rc $rc, wanted $want: $out"; return; fi
-  if [ "$want" = 1 ]; then
-    for kv in "$@"; do
-      grep -q "keyed and run-specific: ${kv%%=*} " <<<"$out" && ok "$what: ${kv%%=*} reported" || bad "$what: failed but did not name ${kv%%=*}: $out"
-    done
-  else ok "$what: passes"; fi
-}
-# run-specific and keyed: MUST be caught, whatever the way it got exported (all at once, each must be named)
+# the three runs are independent: they go side by side (each result is reported in order below)
 mkdir -p "$t/tmp0"
-case_ 1 "leaked keyed variables" JANUS_LEAK_RUN="$RANDOM" GOFLAGS="-count=$RANDOM" TMPDIR="$t/tmp0" LEAN_LEAK_RUN="$RANDOM" MEMGUARD_LEAK="$RANDOM"
-# skipped bookkeeping, keyed constants and variables that are not part of a key: quiet
-case_ 0 "skipped bookkeeping, a keyed constant, an unkeyed variable" JANUS_GATE_TREE0="stamp$RANDOM" JANUS_LAKEGUARD_PIN="/out/run$RANDOM/.pinned" \
-  JANUS_GATE_AUTO_WHY="load $RANDOM" LEAN_NUM_THREADS=4 SOME_OTHER_RUN_VAR="$RANDOM"
-# the check itself, in the environment it runs in
-if scripts/lib/incr-liveness.sh; then ok "the live check passes here"; else bad "the live check fails here"; fi
+chk() { # NUMBER NAME=value...   (exported AFTER the start of the simulated gate)
+  local n=$1; shift
+  env GATE_ENV0_NAMES="$env0" "$@" scripts/lib/incr-liveness.sh > "$t/out$n" 2>&1; echo $? > "$t/rc$n"
+}
+# 1: run-specific and keyed: MUST be caught, whatever the way it got exported (all at once, each must be named)
+LEAKS=(JANUS_LEAK_RUN="$RANDOM" GOFLAGS="-count=$RANDOM" TMPDIR="$t/tmp0" LEAN_LEAK_RUN="$RANDOM" MEMGUARD_LEAK="$RANDOM")
+chk 1 "${LEAKS[@]}" &
+# 2: skipped bookkeeping, a keyed constant and a variable no key reads: quiet
+chk 2 JANUS_GATE_TREE0="stamp$RANDOM" JANUS_LAKEGUARD_PIN="/out/run$RANDOM/.pinned" JANUS_GATE_AUTO_WHY="load $RANDOM" LEAN_NUM_THREADS=4 SOME_OTHER_RUN_VAR="$RANDOM" &
+# 3: the check itself, in the environment it runs in (inside the gate: the gate's real exports)
+( scripts/lib/incr-liveness.sh > "$t/out3" 2>&1; echo $? > "$t/rc3" ) &
+wait
+[ "$(cat "$t/rc1")" = 1 ] && ok "leaked keyed variables: the check fails" || bad "leaked keyed variables not caught: $(cat "$t/out1")"
+for kv in "${LEAKS[@]}"; do
+  grep -q "keyed and run-specific: ${kv%%=*} " "$t/out1" && ok "  ${kv%%=*} is named" || bad "  ${kv%%=*} is not named: $(cat "$t/out1")"
+done
+grep -q 'item key differs' "$t/out1" && grep -q 'lane key differs' "$t/out1" && ok "  both the item key and the lane key are checked" || bad "  item/lane keys: $(cat "$t/out1")"
+[ "$(cat "$t/rc2")" = 0 ] && ok "skipped bookkeeping, a keyed constant, an unkeyed variable: passes" || bad "false alarm: $(cat "$t/out2")"
+[ "$(cat "$t/rc3")" = 0 ] && ok "the live check passes here: $(tail -1 "$t/out3")" || bad "the live check fails here: $(cat "$t/out3")"
 [ "$fail" = 0 ] && echo "all checks passed"
 exit $fail

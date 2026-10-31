@@ -73,6 +73,24 @@ incr_tree_clean() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 1
   [ -z "$(git status --porcelain --untracked-files=all 2>/dev/null | grep -v -e '\.pyc$' -e '__pycache__/')" ]
 }
+# incr_under_gate: true only when scripts/gate.sh is an ANCESTOR process of this shell (its argv names a script called gate.sh run by a shell).
+# JANUS_GATE_TREE0 is the stamp the gate takes at its start: only scripts/gate.sh may set it. An operator with a dirty tree who exported a
+# matching stamp would make incr_tree_ok true and get PASS records written for content that was never verified, so
+# scripts/verify-all-examples.sh run by itself clears it (and pins the tree itself); under the gate it keeps the gate's. An environment
+# variable cannot say who set it, a process ancestry can.
+incr_under_gate() {
+  local pid=$$ i a
+  for i in $(seq 1 64); do
+    [ "$pid" -gt 1 ] 2>/dev/null || return 1
+    if [ -r "/proc/$pid/cmdline" ]; then
+      a="$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | sed -n '1,4p')"
+      # argv: <shell> [options] <path>/scripts/gate.sh ...
+      if grep -qE '(^|/)gate\.sh$' <<<"$a" && grep -qE '^(.*/)?(bash|sh|dash)$' <<<"$(sed -n 1p <<<"$a")"; then return 0; fi
+    fi
+    pid="$(sed 's/^.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{ print $2 }')" || return 1  # (the comm field may hold spaces)
+  done
+  return 1
+}
 # incr_tree_pin: call once, at the start of a gate (scripts/gate.sh, scripts/verify-all-examples.sh); idempotent
 incr_tree_pin() {
   [ -z "${JANUS_GATE_TREE0:-}" ] || return 0
@@ -166,20 +184,30 @@ incr_report() {
 # every non-documentation file of the working tree, the toolchain, the full verifier identity (Go and Lean), the
 # machine, the relevant environment, the prebuilt example binaries and the lane's arguments (SPEC). CODE is shell
 # code (eval'd here); a lane is skipped only on the record of a PASS with that key, and recorded when it passes.
-incr_lane() {
-  local name=$1 code=$2 rc=0 t0 secs f
-  shift 2
-  if ! incr_active; then eval "$code"; return $?; fi
+# incr_lane_spec NAME [SPEC...]: the key arguments of a lane, one per line (incr_lane, scripts/lib/test-incr-liveness.sh). An argument
+# is one line (`janus incr` refuses a newline): multi-line values (go env -json, the GOENV file) have each newline replaced by \001,
+# which is injective. `go env -json` also holds GOGCCFLAGS with a RANDOM directory (-ffile-prefix-map=/tmp/go-build<random>=...), different on every
+# call: it is normalised, or every gate run would key its lanes differently. (Until this was fixed `go env -json` made every lane's `janus incr check` fail: no lane was ever skipped or recorded.)
+incr_lane_spec() {
+  local name=$1 gw f
+  shift
   local -a spec=(--no-fw --full-verifier --host --tree . --tree-exclude docs/ --tree-exclude assets/ --tree-exclude '*.md'
-    --tree-exclude LICENSE --tree-exclude artifacts/ "$@" --arg "lane:$name" --arg "go:$(go version 2>/dev/null)" --file docs/SOUNDNESS.md
+    --tree-exclude LICENSE --tree-exclude artifacts/ "$@" --arg "lane:$name" --arg "go:$(go version 2>/dev/null | tr '\n' '\001')" --file docs/SOUNDNESS.md
     # the Go configuration the lane builds under: GOENV/GOMODCACHE are not in the environment part of the key,
     # so its settings (the go env file can set GOFLAGS, tags, GOEXPERIMENT...), the file and go.work are keyed here
-    --arg "goenv:$(go env -json 2>/dev/null)" --arg "goenvfile:$(cat "$(go env GOENV 2>/dev/null)" 2>/dev/null)")
-  local gw
+    --arg "goenv:$(go env -json 2>/dev/null | sed -E 's#/go-build[0-9]+#/go-build#g' | tr '\n' '\001')" --arg "goenvfile:$(cat "$(go env GOENV 2>/dev/null)" 2>/dev/null | tr '\n' '\001')")
   gw="$(go env GOWORK 2>/dev/null)"
   if [ -n "$gw" ] && [ "$gw" != off ]; then spec+=(--file "$gw"); [ ! -f "$gw.sum" ] || spec+=(--file "$gw.sum"); fi
   # the prebuilt binaries every lane reads
   for f in artifacts/examples-*; do [ ! -f "$f" ] || spec+=(--file "$f"); done
+  printf '%s\n' "${spec[@]}"
+}
+incr_lane() {
+  local name=$1 code=$2 rc=0 t0 secs
+  shift 2
+  if ! incr_active; then eval "$code"; return $?; fi
+  local -a spec=()
+  mapfile -t spec < <(incr_lane_spec "$name" "$@")
   if incr_begin "lane:$name" lane "${spec[@]}"; then echo "$INCR_MSG"; return 0; fi
   t0=$(date +%s.%N)
   ( eval "$code" ) || rc=$?
