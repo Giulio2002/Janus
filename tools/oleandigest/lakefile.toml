@@ -1,0 +1,6 @@
+name = "oleandigest"
+defaultTargets = ["janus-olean-digest"]
+
+[[lean_exe]]
+name = "janus-olean-digest"
+root = "Main"
