@@ -275,16 +275,25 @@ modcache_publish() {  # modcache_publish [--exe]
 # id hashes each C and the compiler binary); HMAC + per-file SHA-256 + path allowlist as for the other entries.
 # Publishing binds each object's trace/hash to the current C and the keyed compiler, then recompiles the
 # ASL_OBJ_RECOMPILE (default 3; N|all|0) smallest objects and refuses/replaces an entry that differs.
-# OPT-IN: ASL_OBJ_CACHE=1. Off by default; a gate result obtained with it on is never merge evidence by itself (the
-# pre-push cold gate, JANUS_ASL_CACHE=0, is). The nightly turns it on for its cached run only.
+# The object cache is on iff ASL_OBJ_CACHE (default: OBJ_CACHE_DEFAULT) is not 0 AND the build cache is in use at all
+# (ASL_CACHE non-empty: JANUS_ASL_CACHE=0 / ASL_CACHE=off, the cold gate's setting, blanks it, so a cold tree compiles every
+# object from source). A gate result obtained with it on is never merge evidence by itself: the pre-push cold gate
+# (JANUS_ASL_CACHE=0) and the nightly audit are the controls. Gates and logs print this state (objcache-state).
+OBJ_CACHE_DEFAULT=0
+obj_cache_state() {
+  if [ "${ASL_OBJ_CACHE:-$OBJ_CACHE_DEFAULT}" = 0 ]; then echo "OFF (ASL_OBJ_CACHE=0)"
+  elif [ -z "${ASL_CACHE:-}" ]; then echo "OFF (no build cache: JANUS_ASL_CACHE=0 or ASL_CACHE=off)"
+  else echo "ON"; fi
+}
+obj_cache_on() { [ "$(obj_cache_state)" = ON ]; }
 objcache_restore() {  # objcache_restore arm|jasl|janus
-  [ "${ASL_OBJ_CACHE:-0}" = 1 ] && [ -n "${ASL_CACHE:-}" ] || return 0
+  obj_cache_on || return 0
   python3 -I "$pkg/tools/asl_mod_cache.py" objrestore "$root" "${1:-arm}" "$ASL_CACHE" || echo "asl cache: C objects [${1:-arm}] not usable here (above); compiling"
   return 0
 }
 
 objcache_publish() {  # objcache_publish arm|jasl|janus
-  [ "${ASL_OBJ_CACHE:-0}" = 1 ] && [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
+  obj_cache_on && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
   python3 -I "$pkg/tools/asl_mod_cache.py" objpublish "$root" "${1:-arm}" "$ASL_CACHE" "${ASL_OBJ_RECOMPILE:-3}" || echo "asl cache: C objects [${1:-arm}] not stored (above)"
   return 0
 }
@@ -348,6 +357,7 @@ _TL_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURC
 
 do_build() { tl_run x build_phase; }
 build_phase() {
+  echo "asl: object cache: $(obj_cache_state)"
   unpack
   cache_restore
   lake_asl build ArmASL
@@ -567,6 +577,7 @@ case "$mode" in
   prove) do_prove ;;
   replay) do_replay ;;
   verify) do_verify ;;
+  objcache-state) obj_cache_state ;;   # ON or OFF (reason): printed by the gate banner, lane logs and the nightly
   cached) do_cached ;;   # exit 0 iff the verified build cache holds this model (scripts/gate.sh: asl-verify then need not wait for asl-build)
   *) echo "usage: $0 deps|gen|key|files|restore|model|build|check|prove|replay|verify|cached" >&2; exit 2 ;;
 esac
