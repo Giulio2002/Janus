@@ -837,10 +837,10 @@ def obj_publish(root, scope, cache, sample):
     sizes = sorted((sum(os.path.getsize(os.path.join(lake, c)) for c in cs), i) for i, (_, cs) in enumerate(units))
     sample = "all" if sample == "all" else int(sample)
     chosen = set(i for _, i in (sizes if sample == "all" else sizes[:sample]))
-    if sample != "all":  # plus a random draw of the rest (ASL_OBJ_RECOMPILE_RANDOM, default 2): the swapped object is not predictable
-        import random
-        rest = [i for _, i in sizes if i not in chosen]
-        chosen |= set(random.SystemRandom().sample(rest, min(len(rest), int(os.environ.get("ASL_OBJ_RECOMPILE_RANDOM", "2")))))
+    if sample != "all" and sample != 0:  # plus a size-bounded random draw of the rest (bcache.draw_random): the swapped object is not predictable
+        unit_size = {i: z for z, i in sizes}
+        rest = [(unit_size[i], i, None) for _, i in sizes if i not in chosen]
+        chosen |= {i for _, i, _ in bc.draw_random(rest, int(os.environ.get("ASL_OBJ_RECOMPILE_RANDOM", "2")))}
     stored = present = skipped = failed = 0
     for i, (ident, cs) in enumerate(units):
         st = tempfile.mkdtemp(prefix=".objstage-", dir=os.path.dirname(os.path.join(cache, "armobj")))

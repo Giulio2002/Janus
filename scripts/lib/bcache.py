@@ -550,15 +550,25 @@ ARGV_FIXED = frozenset(["-c", "-fstack-clash-protection", "-ffp-contract=off", "
 def lakefile_flags(lake):
     """The compiler arguments the package lakefiles declare (leancArgs/moreLeancArgs/weakLeancArgs strings) of
     `lake`/../lakefile.toml (JanusASL/.lake; keyed through the ArmASL key and the jasl tables): the only flags beyond ARGV_FIXED a logged command may carry."""
+    import tomllib
     out = set()
-    for f in (os.path.join(lake, "..", "lakefile.toml"),):  # NOT the Sail package's lakefile: a vendored checkout is not keyed content
-        try:
-            with open(f) as fh:
-                for line in fh:
-                    if "eancArgs" in line:
-                        out.update(re.findall(r'"(-[^"\s]+)"', line))
-        except OSError:
-            pass
+
+    def walk(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if k in ("leancArgs", "moreLeancArgs", "weakLeancArgs") and isinstance(v, list):
+                    out.update(a for a in v if isinstance(a, str) and a.startswith("-") and " " not in a)
+                else:
+                    walk(v)
+        elif isinstance(x, list):
+            for y in x:
+                walk(y)
+
+    try:  # NOT the Sail package's lakefile: a vendored checkout is not keyed content
+        with open(os.path.join(os.path.dirname(os.path.normpath(lake)), "lakefile.toml"), "rb") as fh:
+            walk(tomllib.load(fh))
+    except (OSError, ValueError):
+        pass
     return out
 
 
@@ -618,17 +628,48 @@ def recompile_argv(argv, c_path, out_path):
     return res
 
 
+def _sandbox_prefix(work, c_dir):
+    """The command prefix that runs a recompile with no network, a read-only filesystem except `work`, a private /tmp,
+    its own pid namespace and no capabilities (bubblewrap, as cmd/janus/sandbox.go prefers). [] when bwrap is missing
+    or unusable here: the recompile then runs as the keyed toolchain clang with a scrubbed temp dir and stdin closed,
+    which is only as safe as argv_problem() (a fixed shape: toolchain clang, no -fplugin/@file/-include) makes it."""
+    bw = shutil.which("bwrap")
+    if not bw or os.environ.get("ASL_OBJ_RECOMPILE_NOSANDBOX") == "1":
+        return []
+    return [bw, "--unshare-net", "--unshare-pid", "--unshare-ipc", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
+            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--bind", work, work, "--chdir", c_dir, "--"]
+
+
 def recompile_object(argv, c_path, work):
-    """Compile c_path with the logged command into a file under work; returns its SHA-256."""
+    """Compile c_path with the (validated) logged command into a file under work; returns its SHA-256. Anything that
+    stops the compile from yielding an answer (timeout, a missing tool, a crash, a sandbox that cannot start) is
+    Inconclusive, never a match and never a mismatch."""
     out = os.path.join(work, "recompiled.o")
+    env = dict(os.environ)
+    env["TMPDIR"] = work
+    cmd = recompile_argv(argv, c_path, out)
+    pre = _sandbox_prefix(work, os.path.dirname(c_path))
     try:
-        r = subprocess.run(recompile_argv(argv, c_path, out), cwd=os.path.dirname(c_path), capture_output=True,
-                           timeout=int(os.environ.get("ASL_OBJ_RECOMPILE_TIMEOUT", "7200")), stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError) as ex:
+        r = subprocess.run(pre + cmd, cwd=os.path.dirname(c_path), capture_output=True, env=env, stdin=subprocess.DEVNULL,
+                           timeout=int(os.environ.get("ASL_OBJ_RECOMPILE_TIMEOUT", "3600")))
+    except (OSError, subprocess.SubprocessError, ValueError) as ex:
         raise Inconclusive("recompile did not run (%s)" % ex)
     if r.returncode != 0:
-        raise Inconclusive("recompile failed: %s" % r.stderr.decode("utf-8", "replace")[-300:])
-    return sha_file(out)
+        raise Inconclusive("recompile failed (rc %d): %s" % (r.returncode, r.stderr.decode("utf-8", "replace")[-300:]))
+    try:
+        return sha_file(out)
+    except OSError as ex:
+        raise Inconclusive("recompile produced no object (%s)" % ex)
+
+
+def draw_random(cands, k):
+    """k random objects of cands [(size, rel, path)], among those whose C is at most ASL_OBJ_RECOMPILE_MAXC bytes
+    (default 1000000, about 2.5 minutes of clang -O3): the huge ones (JanusASL.Proofs.Config, 3.7 MB, ~10 minutes) are
+    covered by the nightly's full audit, not by every publish."""
+    import random
+    cap = int(os.environ.get("ASL_OBJ_RECOMPILE_MAXC", "1000000"))
+    pool = [c for c in cands if c[0] <= cap]
+    return random.SystemRandom().sample(pool, min(len(pool), k))
 
 
 def recompile_entry(kind, cache, ident, c_root, sample):
@@ -653,10 +694,9 @@ def recompile_dir(e, man, c_root, sample, cache):
             except OSError:
                 raise Inconclusive("no C file %s under %s to recompile %s" % (m.group(1), c_root, rel))
     objs.sort()
-    if sample != "all":  # the N smallest plus a random draw of the rest (ASL_OBJ_RECOMPILE_RANDOM, default 2)
-        import random
-        rest = objs[int(sample):]
-        objs = objs[:int(sample)] + (random.SystemRandom().sample(rest, min(len(rest), int(os.environ.get("ASL_OBJ_RECOMPILE_RANDOM", "2")))) if int(sample) > 0 else [])
+    if sample != "all":  # the N smallest plus a size-bounded random draw of the rest (ASL_OBJ_RECOMPILE_RANDOM, default 2)
+        n = int(sample)
+        objs = objs[:n] + (draw_random(objs[n:], int(os.environ.get("ASL_OBJ_RECOMPILE_RANDOM", "2"))) if n > 0 else [])
     bad = []
     work = tempfile.mkdtemp(prefix=".recompile-", dir=cache)
     try:
@@ -666,8 +706,8 @@ def recompile_dir(e, man, c_root, sample, cache):
                     cin = f.read().strip()
                 with open(os.path.join(e, "tree", rel + ".trace"), "rb") as f:
                     _, _, argv = trace_facts(f.read())
-            except (OSError, ValueError) as ex:
-                raise CacheError("entry record of %s unreadable (%s)" % (rel, ex))
+            except Exception as ex:  # a missing .cin / unreadable trace of a signed entry: unknown, not a verdict
+                raise Inconclusive("entry record of %s unreadable (%s)" % (rel, ex))
             if sha_file(cp) != cin:
                 raise Inconclusive("the C file of %s does not hash to the entry's record" % rel)
             why = argv_problem(argv, c_root)
