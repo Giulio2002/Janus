@@ -713,12 +713,12 @@ the same cache: the build reused 27 unchanged entries, built and published the o
 under a loaded host), and a fresh copy of that commit then restored 137 modules and built JanusASL
 in **5 s**, and the Madd edit rebuilt it and its 4 dependents (17 s).
 
-**Compiled objects** (`CACHE/armobj/<id>`, `asl_mod_cache.py objkey|objstage|objfiles`, `asl.sh` `objcache_*`;
+**Compiled objects** (`CACHE/armobj/<id>`, `asl_mod_cache.py objrestore|objpublish|objkey|objstage|objfiles`, `asl.sh` `objcache_*`;
 tested by `JanusASL/tools/test_asl_obj_cache.sh` and `scripts/lib/test-cachecmp.sh`). The ArmASL entry is stored
 after `lake build ArmASL`, before the `janus-asl-check` link compiles each emitted C file (`ir/ArmASL/PartNN.c`,
 `ir/Sail/*.c`, `ir/JanusASL/**.c` of the modules the executable links) to `.c.o.export`; a warm `asl-build` still
 ran clang over them (the largest parts take 2-3 min each at -O3, `JanusASL.Proofs.Config` alone ~10 min).
-Two scopes, two entries: `arm` (ArmASL parts + lean-sail) and `jasl` (the JanusASL library). Clang puts no path
+Two scopes: `arm` (ArmASL parts + lean-sail: ONE entry, they all change together with the model) and `jasl` (the JanusASL library: ONE ENTRY PER OBJECT, so a changed proof module recompiles only its own C, never `Proofs.Config`'s ~10 min unless Config itself changed). The `Janus.*` objects of the root package were evaluated and left out: 231 of them come back with the module entries already (measured extra saving 0 s) and a scope would only add trust surface. Clang puts no path
 into an object (a part compiled in two directories is bit-identical), so no `-ffile-prefix-map` is needed.
 
 *What an id binds.* SHA-256 of: the ArmASL cache key (toolchain by content, flags, environment, model), the machine,
@@ -745,6 +745,8 @@ an existing entry replaces it when it differs (a poisoned entry cannot stay). `b
 place, a per-kind path allowlist (an armobj entry may hold only `build/ir/**.c.o.{export,noexport}[.hash|.trace|.cin]`
 and its Sail twin), and every destination component is lstat'ed and refused if it is a symlink. Tamper, wrong key,
 moved entry, foreign path = rejection and a rebuild.
+
+*Measured* (private copy, cache seeded from /srv/janus-asl-cache then filled by one build; 431 of 434 modules restored; LEAN_NUM_THREADS=4, JANUS_JOBS=2; host load average 13-16 throughout, not idle): `asl.sh build` 957 s without the object cache (981 s on the run that filled it), **65 s and 67 s** with it. All C objects 1+16 restored.
 
 *Honest limit.* A natively linked object has NO kernel-replay backstop: unlike an `.olean` (whose declarations the
 replay re-checks), nothing re-checks what machine code the cache served. Its integrity rests on the key, the HMAC,

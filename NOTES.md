@@ -4,3 +4,4 @@
 - Review: key = armasl key (toolchain content incl. clang/leanc, flags, env, machine) + sha of every emitted .c; HMAC manifest; Lake trace re-judges each object.
 - Measurement running in /srv/janus-ops/work.jIKT (log: log); delete when result recorded.
 - jasl scope added (second armobj entry); warm asl-build 58 s (was 1220-1520 s cold-obj, 612 s with arm scope only). Work dir deleted.
+- B1/B2/D1/D2/D3 done on branch; measurements: before 957 s, after 65/67 s at load 13-16 (431/434 modules restored). Janus scope evaluated: 0 s extra, not added.

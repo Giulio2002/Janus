@@ -594,23 +594,20 @@ OBJ_SCHEME = "janusasl-obj-cache-v2"
 OBJ_SUFFIXES = (".c.o.export", ".c.o.noexport")
 
 
-PER_OBJECT = ("jasl", "janus")  # one entry per object (a changed module recompiles only itself); "arm" is one entry
+PER_OBJECT = ("jasl",)  # one entry per object (a changed module recompiles only itself); "arm" is one entry
 
 
 def scope_lake(root, scope):
-    """The .lake directory whose build/ir holds the scope's C: JanusASL/.lake (arm, jasl) or the root's (janus)."""
-    return os.path.join(root, ".lake") if scope == "janus" else os.path.join(root, "JanusASL", ".lake")
+    """The .lake directory whose build/ir holds the scope's C (JanusASL/.lake)."""
+    return os.path.join(root, "JanusASL", ".lake")
 
 
 def obj_dirs(lake, scope="arm"):
     """(directory under .lake, filter on the first path component) holding the C of the scope:
-    "arm" = ArmASL and Sail (known after `lake build ArmASL`), "jasl" = the JanusASL library, "janus" = the Janus
-    library of the root package (their C is restored with the module entries; the object of a huge proof module,
+    "arm" = ArmASL and Sail (known after `lake build ArmASL`), "jasl" = the JanusASL library (its C is restored with the module entries; the object of a huge proof module,
     e.g. JanusASL.Proofs.Config, costs ~10 min)."""
     if scope == "jasl":
         return [(os.path.join(lake, "build", "ir"), lambda n: n == "JanusASL.c" or n == "JanusASL")]
-    if scope == "janus":
-        return [(os.path.join(lake, "build", "ir"), lambda n: n == "Janus.c" or n == "Janus")]
     return [(os.path.join(lake, "build", "ir"), lambda n: n == "ArmASL.c" or n == "ArmASL"),
             (os.path.join(lake, "packages", "Sail", ".lake", "build", "ir"), lambda n: True)]
 
@@ -658,15 +655,12 @@ def obj_compiler(root):
 
 def obj_tables(root, scope="jasl"):
     """The lean_lib/lean_exe tables of the scope's package, whole (leancArgs, moreLeancArgs, weakLeancArgs,
-    moreLinkArgs, roots, ...): Lake's trace does not cover the weak arguments. jasl: lean_lib JanusASL and lean_exe
-    janus-asl-check of JanusASL/lakefile.toml; janus: lean_lib Janus (and every lean_exe) of the root lakefile.toml."""
+    moreLinkArgs, roots, ...): Lake's trace does not cover the weak arguments. lean_lib JanusASL and lean_exe
+    janus-asl-check of JanusASL/lakefile.toml."""
     import tomllib
-    path = os.path.join(root, "lakefile.toml" if scope == "janus" else os.path.join("JanusASL", "lakefile.toml"))
+    path = os.path.join(root, "JanusASL", "lakefile.toml")
     with open(path, "rb") as f:
         cfg = tomllib.load(f)
-    if scope == "janus":
-        return {"lean_lib": [t for t in cfg.get("lean_lib", []) if t.get("name") == "Janus"], "lean_exe": cfg.get("lean_exe", []),
-                "package": {k: v for k, v in cfg.items() if k not in ("lean_lib", "lean_exe", "require")}}
     return {"lean_lib": [t for t in cfg.get("lean_lib", []) if t.get("name") == "JanusASL"],
             "lean_exe": [t for t in cfg.get("lean_exe", []) if t.get("name") == "janus-asl-check"]}
 
@@ -861,7 +855,7 @@ def obj_publish(root, scope, cache, sample):
 
 def obj_main(cmd, root, scope="arm", extra=()):
     lake = scope_lake(root, scope)
-    if scope not in ("arm", "jasl", "janus"):
+    if scope not in ("arm", "jasl"):
         sys.exit("asl_mod_cache: unknown object scope %r" % scope)
     if cmd == "objstage":
         obj_stage(root, scope, extra[0], extra[1], int(extra[2]) if len(extra) > 2 else 0)

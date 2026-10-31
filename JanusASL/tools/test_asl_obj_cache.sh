@@ -200,8 +200,9 @@ spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tool
 lake = sys.argv[2] + "/JanusASL/.lake"; cs = m.obj_c_files(lake)
 a = m.obj_id(sys.argv[2], cs); platform.machine = lambda: "riscv64"; b = m.obj_id(sys.argv[2], cs)
 m.obj_tables = lambda r, sc="jasl": {}   # isolate the scope field from the tables
-c = m.obj_id(sys.argv[2], cs, "jasl"); d = m.obj_id(sys.argv[2], cs, "janus")
-print("machine-keyed" if a != b else "machine-NOT-keyed", "scope-keyed" if c != d else "scope-NOT-keyed")
+seen = []; oc = m.canonical; m.canonical = lambda o: (seen.append(o), oc(o))[1]
+m.obj_id(sys.argv[2], cs, "jasl"); inp = seen[-1]
+print("machine-keyed" if a != b else "machine-NOT-keyed", "scope-keyed" if inp.get("scope") == "jasl" and "scope" not in (seen.append(None) or {}) else "scope-NOT-keyed")
 PY
 )
 [ "$mid" = "machine-keyed scope-keyed" ] && ok "the id depends on the machine and on the scope" || bad "id mutants: $mid"
@@ -242,28 +243,23 @@ pids=(); for i in 1 2 3 4 5 6; do (B fetch armobj "$cache" "$ida" "$t/cf/.lake" 
 cat "$t"/cf?.rc | sort | uniq -c | tr '\n' ' ' | grep -q "^ *6 0 $" && ok "6 concurrent fetches into one tree all succeed" || bad "concurrent fetches: $(cat "$t"/cf?.rc | tr '\n' ' ')"
 B verify armobj "$cache" "$ida" > /dev/null && ok "  ... the entry is valid afterwards" || bad "entry invalid after the race"
 
-# ======== per-object scopes (jasl, janus): one entry per object, a changed module recompiles only itself ========
+# ======== per-object scope (jasl): one entry per object, a changed module recompiles only itself ========
 mkjc() {  # mkjc LAKE REL NAME: a C file + object under LAKE/build/ir/REL
   mkdir -p "$1/build/ir/$2"; printf '// c\nint %s_f(void){return %d;}\n' "$3" "${#3}" > "$1/build/ir/$2/$3.c"; mkobj "$1" "$1/build/ir/$2/$3.c"
 }
-copy "$t/pj"; mkdir -p "$t/pj/JanusASL/.lake" "$t/pj/.lake"
+copy "$t/pj"; mkdir -p "$t/pj/JanusASL/.lake"
 for n in A B Big; do mkjc "$t/pj/JanusASL/.lake" JanusASL "$n"; done
-for n in X Y; do mkjc "$t/pj/.lake" Janus "$n"; done
 printf '// no object\nint z;\n' > "$t/pj/JanusASL/.lake/build/ir/JanusASL/NoObj.c"; echo 0000000000000000 > "$t/pj/JanusASL/.lake/build/ir/JanusASL/NoObj.c.hash"
 pc="$t/pc"; mkdir -p "$pc"
 expect 0 "objpublish jasl stores one entry per object that has one" M objpublish "$t/pj" jasl "$pc" all
 grep -q "stored 3, already cached 0, no object 1, refused 0" "$t/out" && ok "  ... 3 entries (A, B, Big), NoObj skipped" || bad "jasl publish summary: $(cat "$t/out")"
 [ "$(ls "$pc/armobj" | grep -c '^[0-9a-f]\{40\}$')" = 3 ] && ok "  ... 3 entry directories" || bad "entry count"
-expect 0 "objpublish janus (root package) stores its objects" M objpublish "$t/pj" janus "$pc" 1
-grep -q "stored 2" "$t/out" && ok "  ... 2 entries" || bad "janus publish: $(cat "$t/out")"
 # a fresh checkout (same C, other path) restores them all
-copy "$t/pk"; mkdir -p "$t/pk/JanusASL/.lake/build/ir/JanusASL" "$t/pk/.lake/build/ir/Janus"
+copy "$t/pk"; mkdir -p "$t/pk/JanusASL/.lake/build/ir/JanusASL"
 cp "$t/pj/JanusASL/.lake/build/ir/JanusASL/"{A,B,Big,NoObj}.c "$t/pj/JanusASL/.lake/build/ir/JanusASL/"{A,B,Big,NoObj}.c.hash "$t/pk/JanusASL/.lake/build/ir/JanusASL/"
-cp "$t/pj/.lake/build/ir/Janus/"{X,Y}.c "$t/pj/.lake/build/ir/Janus/"{X,Y}.c.hash "$t/pk/.lake/build/ir/Janus/"
 expect 0 "objrestore jasl" M objrestore "$t/pk" jasl "$pc"
 grep -q "3 restored, 1 without entry, 0 rejected" "$t/out" && ok "  ... 3 restored, the object-less C has no entry" || bad "restore summary: $(cat "$t/out")"
 [ -f "$t/pk/JanusASL/.lake/build/ir/JanusASL/Big.c.o.export" ] && cmp -s "$t/pk/JanusASL/.lake/build/ir/JanusASL/Big.c.o.export" "$t/pj/JanusASL/.lake/build/ir/JanusASL/Big.c.o.export" && ok "  ... byte-identical objects" || bad "restored object differs"
-expect 0 "objrestore janus" M objrestore "$t/pk" janus "$pc"; grep -q "2 restored" "$t/out" && ok "  ... 2 restored" || bad "janus restore: $(cat "$t/out")"
 # one module changes: only its entry misses; the others still hit (D3: a changed module does not recompile Config)
 echo '// changed' >> "$t/pk/JanusASL/.lake/build/ir/JanusASL/A.c"; rm -rf "$t/pk2"; mkdir -p "$t/pk2"; cp -a "$t/pk/JanusASL" "$t/pk2/JanusASL"; rm -f "$t/pk2/JanusASL/.lake/build/ir/JanusASL/"*.o.export*
 copy "$t/pk3"; mkdir -p "$t/pk3/JanusASL/.lake/build/ir/JanusASL"; cp "$t/pk/JanusASL/.lake/build/ir/JanusASL/"*.c "$t/pk/JanusASL/.lake/build/ir/JanusASL/"*.c.hash "$t/pk3/JanusASL/.lake/build/ir/JanusASL/"
