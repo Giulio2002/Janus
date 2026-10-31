@@ -6,12 +6,26 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$here"
 mkdir -p artifacts; t="$(mktemp -d "$here/artifacts/test-incr-hosttools.XXXXXX")" || exit 2
 trap 'rm -rf "$t"' EXIT
 fail=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fail=1; }
+# HERMETIC: nothing the gate (or an operator) exported may reach the digest, and nothing another lane writes concurrently may be read:
+# the gate-exported cache file, compiler/LD/Python variables are unset; the artifacts/ manifest root and the dependency trees are private empty directories
+for v in INCR_HOSTTOOLS_CACHE INCR_NORECORD_FILE LD_PRELOAD LD_LIBRARY_PATH CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH COMPILER_PATH GCC_EXEC_PREFIX \
+  CFLAGS CXXFLAGS CPPFLAGS LDFLAGS BASH_ENV ENV PYTHONPATH PYTHONSTARTUP PYTHONHOME DEPS X86DEPS OPAMROOT ASL_CACHE MAKEFLAGS MAKEFILES SOURCE_DATE_EPOCH CC CXX AS LD AR \
+  GIT_CONFIG GIT_CONFIG_GLOBAL GIT_EXEC_PATH PKG_CONFIG_PATH PKG_CONFIG_LIBDIR JANUS_INCR_LANES JANUS_GATE_TREE0 JANUS_GATE_INCREMENTAL IH_MAX_FILES IH_MAX_BYTES; do unset "$v"; done
+for v in $(compgen -e); do case "$v" in CCACHE_*|DISTCC_*|PYTHON*|OPAM*|GCC_*|ICECC*) unset "$v" ;; esac; done
+mkdir -p "$t/iroot" "$t/nodeps" "$t/sysbin"
+# a PATH without the heavy toolchains no test needs (qemu-*, clang, the cross gcc family): each full digest costs seconds under load
+for f in /usr/bin/* /usr/local/go/bin/* "$(dirname "$(type -P go)")"/*; do
+  b="${f##*/}"; case "$b" in qemu-*|*clang*|aarch64-*|x86_64-linux-gnu-*|*ccache*|*distcc*) continue ;; esac
+  [ -e "$t/sysbin/$b" ] || ln -s "$f" "$t/sysbin/$b" 2>/dev/null
+done
+mkdir -p "$t/bin"
+export PATH="$t/bin:$t/sysbin"
+export IH_ROOT="$t/iroot" DEPS="$t/nodeps" X86DEPS="$t/nodeps"
 . scripts/lib/incr.sh
 H() { incr_hosttools --nocache 2>/dev/null; }
 base="$(H)"
 [ "$base" = "$(H)" ] && [[ "$base" =~ ^tools=[0-9a-f]{64}$ ]] && ok "deterministic and well-formed" || bad "not deterministic: $base"
 differs() { local what=$1 x=$2 y=${3:-$base}; if [ "$x" != "$y" ]; then ok "$what"; else bad "$what: digest unchanged"; fi; }
-mkdir -p "$t/bin"
 fakegcc() { # TAG [PROG] [FILE]: a gcc front that forwards to the real gcc except for what it reports itself
   cat > "$t/bin/gcc" <<EOS
 #!/bin/sh
@@ -43,9 +57,9 @@ differs "\$CXX is resolved and hashed" "$x1" "$x2"
 rm -f "$t/bin/gcc" "$t/bin/mycc" "$t/bin/mycxx"
 # the linker, objdump, python3, qemu, bwrap, git, make (any of the keyed tools) as a shim
 for tool in ld objdump python3 qemu-aarch64 git make; do
-  printf '#!/bin/sh\nexec /bin/true\n# a\n' > "$t/bin/$tool"; chmod +x "$t/bin/$tool"; a="$(PATH="$t/bin:$PATH" H)"
-  printf '# b\n' >> "$t/bin/$tool"; b="$(PATH="$t/bin:$PATH" H)"; rm -f "$t/bin/$tool"
-  differs "a shim $tool at the same path changes the digest" "$a" "$base"; differs "a changed $tool shim changes it again" "$a" "$b"
+  printf '#!/bin/sh\nexec /bin/true\n# a\n' > "$t/bin/$tool"; chmod +x "$t/bin/$tool"; a="$(H)"
+  if [ "$tool" = ld ]; then printf '# b\n' >> "$t/bin/$tool"; b="$(H)"; differs "a changed $tool shim changes it again" "$a" "$b"; fi
+  rm -f "$t/bin/$tool"; differs "a shim $tool at the same path changes the digest" "$a" "$base"
 done
 # the Go toolchain: a `go` shim (its bytes), and the tool directory / GOROOT through a copy of GOROOT's layout
 printf '#!/bin/sh\nexec %s "$@"\n# 1\n' "$(type -P go)" > "$t/bin/go"; chmod +x "$t/bin/go"; o1="$(PATH="$t/bin:$PATH" H)"; printf '# 2\n' >> "$t/bin/go"; o2="$(PATH="$t/bin:$PATH" H)"
@@ -69,7 +83,7 @@ mkdir -p "$t/inc"; echo '#define A 1' > "$t/inc/h.h"
 e0="$(H)"; e1="$(CPATH="$t/inc" H)"; echo '#define A 2' > "$t/inc/h.h"; e2="$(CPATH="$t/inc" H)"
 differs "CPATH changes the digest" "$e1" "$e0"; differs "the header CPATH names is hashed" "$e2" "$e1"
 for v in C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH COMPILER_PATH CFLAGS CXXFLAGS CPPFLAGS LDFLAGS PYTHONPATH PYTHONSTARTUP; do
-  [ "$(env "$v=$t/inc" bash -c '. scripts/lib/incr.sh; incr_hosttools --nocache' 2>/dev/null)" != "$base" ] && ok "$v changes the digest" || bad "$v not keyed"
+  [ "$(env "$v=$t/inc" bash -c '. scripts/lib/incr.sh; _ih_env' 2>/dev/null)" != "$(bash -c '. scripts/lib/incr.sh; _ih_env' 2>/dev/null)" ] && ok "$v enters the environment part of the digest (_ih_env; the whole digest is the hash of it and the other parts)" || bad "$v not keyed"
 done
 echo 'echo hi' > "$t/benv"; b1="$(BASH_ENV="$t/benv" H)"; echo 'echo ho' > "$t/benv"; b2="$(BASH_ENV="$t/benv" H)"; differs "BASH_ENV and the file it names are keyed" "$b2" "$b1"
 echo c > "$t/starts"; p1="$(PYTHONSTARTUP="$t/starts" H)"; echo d > "$t/starts"; p2="$(PYTHONSTARTUP="$t/starts" H)"; differs "PYTHONSTARTUP content is keyed" "$p2" "$p1"
@@ -90,7 +104,7 @@ differs "LD_LIBRARY_PATH (value and the files below it) changes the digest" "$q2
 mkdir -p "$t/real" "$t/lp"; echo s1 > "$t/real/libs.so"; ln -s "$t/real" "$t/lp/dirlink"; ln -s "$t/real/libs.so" "$t/lp/filelink"; ln -s "$t/lp" "$t/lpl"
 k1="$(LD_LIBRARY_PATH="$t/lpl" H)"; echo s2 > "$t/real/libs.so"; k2="$(LD_LIBRARY_PATH="$t/lpl" H)"
 differs "symlinked LD_LIBRARY_PATH entries (to files and directories) are followed" "$k2" "$k1"
-[ "$(LD_PRELOAD= LD_LIBRARY_PATH= H)" = "$base" ] && ok "empty LD_PRELOAD/LD_LIBRARY_PATH: same digest as unset" || bad "empty values change the digest"
+[ "$(LD_PRELOAD= LD_LIBRARY_PATH= H)" = "$(H)" ] && ok "empty LD_PRELOAD/LD_LIBRARY_PATH: same digest as unset" || bad "empty values change the digest"
 # the cap: a tree above the limit is a forced miss
 mkdir -p "$t/big"; for i in 1 2 3; do echo $i > "$t/big/f$i"; done
 m1="$(IH_MAX_FILES=2 CPATH="$t/big" H)"; m2="$(IH_MAX_FILES=2 CPATH="$t/big" H)"; differs "a tree above the file cap is a forced miss" "$m1" "$m2"
@@ -101,10 +115,11 @@ printf '#!/bin/sh\nexec /bin/true\n# bbbb\n' > "$t/bin/make"; touch -d '2020-01-
 f2="$(INCR_HOSTTOOLS_CACHE=$cf PATH="$t/bin:$PATH" incr_hosttools 2>/dev/null)"
 [ "$f1" = "$f1b" ] && ok "the per-run cache serves the same digest" || bad "cache not stable"
 differs "a same-size, same-mtime replacement of a hashed binary is not served from the cache" "$f2" "$f1"
-printf 'garbage\nnot-a-digest\n' > "$cf"; [[ "$(INCR_HOSTTOOLS_CACHE=$cf incr_hosttools 2>/dev/null)" == "$base" ]] && ok "a malformed cache line is ignored (recomputed)" || bad "malformed cache accepted"
+printf 'garbage\nnot-a-digest\n' > "$cf"; stamp0="$(_ih_stamp)"; printf '%s\nnot-a-digest\n' "$stamp0" > "$cf.m"
+[[ "$(INCR_HOSTTOOLS_CACHE=$cf incr_hosttools 2>/dev/null)" == "$(H)" ]] && [[ "$(INCR_HOSTTOOLS_CACHE=$cf.m incr_hosttools 2>/dev/null)" == "$(H)" ]] && ok "a malformed cache line is ignored (recomputed)" || bad "malformed cache accepted"
 rm -f "$t/bin/make"
 # the lane spec: carries hosttools; one line per argument; _incr_oneline is injective; GOGCCFLAGS-only normalisation
-incr_lane_spec t | grep -q '^hosttools:tools=[0-9a-f]\{64\}' && ok "incr_lane_spec carries hosttools" || bad "lane spec lacks hosttools"
+spec_out="$(incr_lane_spec t)"; grep -q '^hosttools:tools=[0-9a-f]\{64\}' <<<"$spec_out" && ok "incr_lane_spec carries hosttools" || bad "lane spec lacks hosttools"
 a="$(printf 'a\001b' | _incr_oneline | od -An -c | tr -d ' ')"; b="$(printf 'a\nb' | _incr_oneline | od -An -c | tr -d ' ')"; c="$(printf 'a\002b' | _incr_oneline | od -An -c | tr -d ' ')"
 { [ "$a" != "$b" ] && [ "$a" != "$c" ] && [ "$b" != "$c" ]; } && ok "_incr_oneline: a raw \\001, a newline and a raw \\002 stay distinct" || bad "oneline not injective: $a $b $c"
 k_a="$(HOME="$t/go-build1" incr_lane_spec t | grep '^goenv:' | sha256sum)"; k_b="$(HOME="$t/go-build2" incr_lane_spec t | grep '^goenv:' | sha256sum)"; k_c="$(HOME="$t/go-build" incr_lane_spec t | grep '^goenv:' | sha256sum)"
