@@ -3,7 +3,7 @@
 # model (Arm's ASL, via rems-project/sail-arm and the sail-aarch64-oracle crate) and report
 # three-way agreement Janus vs Sail vs qemu. See docs/ORACLE-SAIL.md.
 #
-#   scripts/oracle-sail.sh build     build the Sail driver (first build ~30 min: one 166 MB C++ TU)
+#   scripts/oracle-sail.sh build     build the Sail driver (the 166 MB model is built as SAIL_SPLIT_PARTS parallel C++ TUs, see SAIL_SPLIT)
 #   scripts/oracle-sail.sh smoke     build + hand-written sanity cases
 #   scripts/oracle-sail.sh run       build + three-way run on the qemu oracle's corpus (default)
 #   scripts/oracle-sail.sh key       print the driver's cache/pin key (32 hex digits)
@@ -25,6 +25,9 @@
 #             never built-and-published: a missing, tampered or corrupt pin FAILS (a stale one is rebuilt inside the run unless JANUS_MODEL_PIN_STALE=fail:
 #             the driver is built from source inside the run, loudly, publishing nothing). Only
 #             scripts/nightly-cold-gate.sh writes the pin.
+#   SAIL_SPLIT  1 (default): build the model as SAIL_SPLIT_PARTS (48) translation units in parallel
+#             (oracle-sail/split_model.py + a patched copy of the pinned crate, oracle-sail/split_crate.py);
+#             0: the original single translation unit (serial, ~24 min). Part of the driver cache key.
 #   KEEP      what `run` leaves in OUT (scripts/lib/artifacts.sh): by default the reports, the
 #             compressed corpus, results and verdicts, the MISMATCH verdicts; the per-comparison
 #             copies of the corpus and the derived dumps are removed. KEEP=zst compresses
@@ -76,6 +79,35 @@ model_dir() {
   fi
 }
 
+# ---- parallel model build (docs/ORACLE-SAIL.md "Split build") ----
+# The model is one 170 MB C++ TU that g++ compiles serially (~24 min). With SAIL_SPLIT=1 it is cut at
+# top-level item boundaries into SAIL_SPLIT_PARTS TUs (split_model.py, every layout assumption asserted) and the pinned
+# crate's build.rs, patched to take the parts (build.rs.patch, both hashes pinned), compiles them in parallel.
+SAIL_SPLIT="${SAIL_SPLIT:-1}"
+SAIL_SPLIT_PARTS=48
+BUILD_RS_SHA256=6e47e363dca372dcc5a9d93036d35cb9714722886b936a39d0929208f963787f
+BUILD_RS_PATCHED_SHA256=7d54b814043630827a00a8fff3ce0ef9b46399f53c744283d352fb509793003d
+
+# split_parts INSTRUMENTED_DIR -> prints the dir holding model_part_*.cpp (+ model.h), made once per model/splitter
+split_parts() {
+  local inst="$1" tag dst tmp
+  tag=$(python3 -I -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:12])' "$here/split_model.py")
+  dst="$inst/parts-$SAIL_SPLIT_PARTS-$tag"
+  if [ ! -f "$dst/.complete" ] || [ "$inst/model.cpp" -nt "$dst/.complete" ]; then
+    rm -rf "$dst.tmp.$$"; mkdir -p "$dst.tmp.$$"
+    python3 -I "$here/split_model.py" "$inst/model.cpp" "$dst.tmp.$$" "$SAIL_SPLIT_PARTS" >&2
+    cp "$inst/model.h" "$inst/model_missing.cpp" "$dst.tmp.$$/"
+    : > "$dst.tmp.$$/.complete"
+    rm -rf "$dst"; mv "$dst.tmp.$$" "$dst"
+  fi
+  echo "$dst"
+}
+# split_crate_cfg -> prints the cargo --config file that swaps in the patched crate copy
+split_crate_cfg() {
+  python3 -I "$here/split_crate.py" "$crate" "$DEPS/crate-split-${CRATE_REV:0:7}-${BUILD_RS_PATCHED_SHA256:0:8}" \
+    "$BUILD_RS_SHA256" "$BUILD_RS_PATCHED_SHA256" "$here/build.rs.patch"
+}
+
 # ---- build cache for the driver (docs/SOUNDNESS.md "Build caches") ----
 # The driver is a pure function of the pinned crate and model, the instrumenter, oracle-sail's
 # sources and lockfile, the Rust and C++ toolchains and their environment (oracle-sail/cache_key.py).
@@ -105,7 +137,7 @@ sail_cache_key() {  # sail_cache_key MODEL_CPP_OR_EMPTY
   local mf=()
   [ -n "$1" ] && mf=(--model-file "$1")
   python3 -I "$here/cache_key.py" "$root" "${mf[@]}" --pins "crate_rev=$CRATE_REV" "crate_model_gz_sha256=$CRATE_MODEL_GZ_SHA256" \
-    "sail_model=$SAIL_MODEL" "cargo_flags=$SAIL_CARGO_FLAGS" "sail_arm_rev=$SAIL_ARM_REV" "sail_version=$SAIL_VERSION"
+    "sail_model=$SAIL_MODEL" "sail_split=$SAIL_SPLIT:$SAIL_SPLIT_PARTS:$BUILD_RS_PATCHED_SHA256" "cargo_flags=$SAIL_CARGO_FLAGS" "sail_arm_rev=$SAIL_ARM_REV" "sail_version=$SAIL_VERSION"
 }
 
 # pin_step restore|verify-tree: the driver from / against the pin (fails unless the pin holds; stale only with
@@ -190,9 +222,18 @@ do_build_driver() {
   local inst="$DEPS/model-instrumented-${CRATE_REV:0:7}"
   [ "$SAIL_MODEL" = regen ] && inst="$DEPS/model-instrumented-regen-${SAIL_ARM_REV:0:7}"
   model_dir "$plain" "$inst"
-  (cd "$here" &&
-    AARCH64_ORACLE_SAIL_MODEL_C="$inst/model.cpp" \
-      cargo build $SAIL_CARGO_FLAGS)
+  case "$SAIL_SPLIT" in
+    0) (cd "$here" &&
+         AARCH64_ORACLE_SAIL_MODEL_C="$inst/model.cpp" \
+           cargo build $SAIL_CARGO_FLAGS) ;;
+    1) local parts cfg
+       parts=$(split_parts "$inst"); cfg=$(split_crate_cfg)
+       (cd "$here" &&
+         AARCH64_ORACLE_SAIL_MODEL_C="$parts/model_part_00.cpp" AARCH64_ORACLE_SAIL_MODEL_INC="$parts" \
+         AARCH64_ORACLE_SAIL_MODEL_PARTS="$parts" \
+           cargo build $SAIL_CARGO_FLAGS --config "$cfg") ;;
+    *) echo "SAIL_SPLIT must be 0 or 1" >&2; exit 2 ;;
+  esac
 }
 
 sail_bin="$here/target/release/janus-oracle-sail"

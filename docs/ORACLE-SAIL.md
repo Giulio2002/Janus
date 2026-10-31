@@ -481,3 +481,20 @@ Janus = `janus-oracle` built 13:55 (git `665fb69` + working tree); qemu = `artif
   `Error_ConstrainedUnpredictable` (301 throw sites in sail-arm), so such steps return
   half-executed with `have_exception` set; (4) `TCR_EL1.T1SZ = 0` (the reset value) makes
   `XPAC*` hit a model assertion. The EL0 set-up above avoids (4), and the driver detects (3).
+
+## Split build (SAIL_SPLIT=1, the default)
+
+The Sail model is one 170 MB C++ translation unit; g++ builds it serially (cold driver build 23-31 min wall, ~1450-1900 CPU s).
+`scripts/oracle-sail.sh build` now cuts the instrumented model at top-level item boundaries into 48 translation units
+(`oracle-sail/split_model.py`; every layout assumption is asserted, ghost temporaries stay with their users, the static type
+helpers are replicated per unit) and builds them in parallel through a copy of the pinned crate whose only change is a
+`build.rs` patch (`oracle-sail/build.rs.patch`, accepts `AARCH64_ORACLE_SAIL_MODEL_PARTS`; `oracle-sail/split_crate.py` makes
+the copy, verifies it file by file against the pinned checkout and pins the original and patched `build.rs` SHA-256; the crate
+is swapped in as a cargo directory source, so `Cargo.lock` and `--locked` are unchanged). Parsing the 40k-member `Model` class
+costs g++ ~4 min (quadratic member lookup), so the patched `build.rs` precompiles it once (`-Werror=invalid-pch`: a PCH that is
+not used is an error, not a silent slowdown) and compiles the units on `NUM_JOBS` threads (cc's `parallel` feature is off).
+`SAIL_SPLIT=0` keeps the original single unit; `split_model.py`, `split_crate.py`, `build.rs.patch` and `SAIL_SPLIT` are in the
+driver cache key. Measured (box load 20-40): cold build 8m14s wall / 2224 CPU s at 24 jobs, 8m57s / 1788 CPU s at 8 jobs, versus
+31m10s / 1885 CPU s for `SAIL_SPLIT=0`. The split driver is bit-identical across job counts (sha256 d894a505...), differs from
+the single-unit binary (as expected), and its output on the whole 486,460-case oracle corpus is byte-identical to the
+single-unit driver's (sha256 78bb689b...).
