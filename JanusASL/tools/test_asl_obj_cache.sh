@@ -598,4 +598,58 @@ assert check("build/ir/JanusASL/Bb.c", 1, 0, 10**9)[1] == []
 rel = sorted(glob.glob(lake + "/build/ir/JanusASL/*.c.o.export"))
 PY
 
+# --- one entry with several objects: the N smallest are always recompiled, the biggest only through the bounded draw
+fresh sm2; lk="$(L sm2)"
+head -c 400000 /dev/urandom | od -An -tx1 | awk '{print "static const int pad_" NR "=0x" $1 ";"}' >> "$lk/build/ir/ArmASL/Part02.c"; mkobj "$lk" "$lk/build/ir/ArmASL/Part02.c"   # Part02: the biggest
+forge "$lk" "$lk/build/ir/ArmASL/Part02.c"
+c2="$t/sm2cache"; mkdir -p "$c2"; M objpublish "$t/sm2" arm "$c2" 0 > /dev/null; id2=$(M objkey "$t/sm2")
+smp() {  # smp SAMPLE RANDOM MAXC: exit 3 if verify --recompile finds the forgery
+  ASL_OBJ_RECOMPILE_RANDOM=$2 ASL_OBJ_RECOMPILE_MAXC=$3 B verify armobj "$c2" "$id2" --c-root "$lk" --recompile "$1"
+}
+expect 0 "sample 1 + no random draw misses the biggest forged object (the documented residual)" smp 1 0 1000000000
+expect 3 "sample 'all' finds it" smp all 0 1000000000
+found=0; for i in 1 2 3 4 5 6; do smp 1 3 1000000000 > /dev/null 2>&1 || found=$((found+1)); done
+[ "$found" = 6 ] && ok "the random draw (3 of the other 3) always reaches it when its C is within the cap" || bad "draw found it $found/6"
+found=0; for i in 1 2 3 4; do smp 1 3 1000 > /dev/null 2>&1 || found=$((found+1)); done
+[ "$found" = 0 ] && ok "the random draw never picks an object whose C exceeds ASL_OBJ_RECOMPILE_MAXC" || bad "draw ignored the cap ($found)"
+fresh sm3; lk3="$(L sm3)"; forge "$lk3" "$lk3/build/ir/ArmASL/Part01.c"; c3="$t/sm3cache"; mkdir -p "$c3"; M objpublish "$t/sm3" arm "$c3" 0 > /dev/null
+expect 3 "a forged object among the N smallest is found without any random draw" env ASL_OBJ_RECOMPILE_RANDOM=0 python3 -I "$root/scripts/lib/bcache.py" verify armobj "$c3" "$(M objkey "$t/sm3")" --c-root "$lk3" --recompile 4
+
+# --- sticky quarantine: a signed tombstone, not just a renamed directory
+fresh q1; lq="$(L q1)"; forge "$lq" "$lq/build/ir/ArmASL/Part01.c"; qc="$t/qcache"; mkdir -p "$qc"
+M objpublish "$t/q1" arm "$qc" 0 > /dev/null; idq=$(M objkey "$t/q1"); cp -a "$qc/armobj/$idq" "$t/q-forged-entry"
+fresh qcold; M objaudit "$t/qcold" arm "$qc" > "$t/out" 2>&1; rc=$?   # the cold tree compiled honestly: its objects differ from the cached forgery
+[ "$rc" = 3 ] && ok "objaudit: the forged entry differs from the cold tree's honest compile (exit 3)" || bad "audit rc $rc: $(cat "$t/out")"
+ls "$qc/armobj/.tombstone-$idq" > /dev/null 2>&1 && ls -d "$qc/armobj/.poisoned-$idq" > /dev/null 2>&1 && ok "  ... quarantined with a tombstone" || bad "no tombstone/quarantine"
+expect 2 "  ... fetch is a miss" B fetch armobj "$qc" "$idq" "$t/qf/.lake"
+mv "$qc/armobj/.poisoned-$idq" "$qc/armobj/$idq"
+expect 3 "an attacker renaming .poisoned-<id> back does not revive it (tombstone)" B fetch armobj "$qc" "$idq" "$t/qf/.lake"
+[ -z "$(find "$t/qf" -type f ! -name '.bcache-tree.lock' 2>/dev/null)" ] && ok "  ... nothing copied" || bad "revived entry copied files"
+expect 3 "  ... and verify says invalid" B verify armobj "$qc" "$idq"
+rm -rf "$qc/armobj/$idq"
+stage "$t/q1" arm > /dev/null; expect 4 "store refuses to republish the same forged bytes" B store armobj "$qc" "$idq" "$t/st" < "$t/st.list"
+[ ! -e "$qc/armobj/$idq" ] && ok "  ... nothing stored" || bad "forged bytes republished"
+# the honest bytes of the same id may be published (the cold tree's objects): the tombstone is about bytes, not the id
+M objpublish "$t/qcold" arm "$qc" 0 > "$t/out" 2>&1; grep -q "stored 1" "$t/out" && ok "honest bytes for the same id are stored" || bad "honest republish: $(cat "$t/out")"
+B fetch armobj "$qc" "$idq" "$t/qf2/.lake" > /dev/null && ok "  ... and fetched" || bad "honest entry not fetchable"
+# a forged tombstone (bad MAC) makes the id unusable (fail closed)
+printf '{"data":"x","mac":"00"}' > "$qc/armobj/.tombstone-$idq"
+expect 3 "a tombstone with a bad MAC makes the id unusable (fail closed)" B fetch armobj "$qc" "$idq" "$t/qf3/.lake"
+# --- the audit fails (not 'unchecked') when it cannot compare, and prints the coverage
+fresh ac1; fresh ac2; cc1="$t/ac1cache"; mkdir -p "$cc1"; M objpublish "$t/ac1" arm "$cc1" 0 > /dev/null
+rm "$(L ac2)/build/ir/ArmASL/Part02.c.o.export"   # the cold tree lacks one object of an entry of its ids
+expect 4 "objaudit exits 4 when an object of the commit's entry cannot be compared" M objaudit "$t/ac2" arm "$cc1"
+grep -q "coverage 3 of 4 objects compared (75%)" "$t/out" && ok "  ... printing the coverage ratio" || bad "coverage line: $(cat "$t/out")"
+grep -q INCOMPLETE "$t/out" && ok "  ... INCOMPLETE, not a pass" || bad "no INCOMPLETE"
+
+# --- the nightly's shell wiring
+grep -q 'nightly-objaudit.sh" "$work/tree-cold" "$cache_dir" || rc_final=1' "$root/scripts/nightly-cold-gate.sh" && ok "nightly-cold-gate.sh: a failing object audit sets rc_final=1" || bad "audit result not wired to rc_final"
+grep -q 'run_gate cold JANUS_ASL_CACHE=0' "$root/scripts/nightly-cold-gate.sh" && grep -q '"\$@" LEAN_NUM_THREADS=4 JANUS_JOBS=2 memcap -m 48G scripts/asl.sh build' "$root/scripts/nightly-cold-gate.sh" && ok "the cold run passes JANUS_ASL_CACHE=0 to the gate AND to its own link step" || bad "cold run wiring"
+cdir="$t/coldcache"; mkdir -p "$cdir"; M objpublish "$t/p" arm "$cdir" 0 > /dev/null
+rm -rf "$t/cr"; copy "$t/cr"; mkdir -p "$t/cr/JanusASL/.lake"; rsync -a --include='*/' --include='*.c' --include='*.c.hash' --exclude='*' "$t/p/JanusASL/.lake/" "$t/cr/JanusASL/.lake/"
+JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+[ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "a cold run (JANUS_ASL_CACHE=0) does NOT restore objects from a populated cache" || bad "cold run restored from the cache: $(cat "$t/out")"
+ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
+[ -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "  ... while the same call without JANUS_ASL_CACHE=0 does (the test discriminates)" || bad "control restore failed: $(cat "$t/out")"
+
 [ $fail = 0 ] && echo "test_asl_obj_cache: all passed" || { echo "test_asl_obj_cache: FAILED"; exit 1; }
