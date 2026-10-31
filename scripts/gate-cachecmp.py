@@ -3,7 +3,9 @@
 "Build cache policy").
 
     gate-cachecmp.py hashes WORKTREE OUT.json     SHA-256 of the build artifacts the ASL/Sail caches serve:
-                                                  every ArmASL and JanusASL .olean (and their combined digest)
+                                                  every ArmASL and JanusASL .olean, every compiled C object (.c.o.export of ArmASL, lean-sail and
+                                                  JanusASL: armobj:<path>; a bit-reproducibility audit of the armobj
+                                                  cache) (and their combined digest)
                                                   and the Sail oracle driver binary, plus the build
                                                   configuration the driver depends on (config:SAIL_SPLIT from
                                                   the environment, default 1, and config:SAIL_SPLIT_PARTS from
@@ -45,6 +47,18 @@ def hashes(worktree):
             if f.endswith(".olean"):
                 p = os.path.join(d, f)
                 out["olean:" + os.path.relpath(p, lib)] = sha_file(p)
+    # the natively linked C objects of ArmASL, lean-sail and JanusASL: reused from the armobj cache, with no kernel
+    # replay behind them, so the nightly cold run (everything compiled fresh) must produce the SAME bytes; compiles are
+    # bit-reproducible across directories, dates and environment, so ANY difference is a cache bug (P0)
+    ir = os.path.join(worktree, "JanusASL", ".lake")
+    for sub in ("build/ir", "packages/Sail/.lake/build/ir"):
+        base = os.path.join(ir, sub)
+        for d, dirs, files in os.walk(base):
+            dirs.sort()
+            for f in sorted(files):
+                if f.endswith((".c.o.export", ".c.o.noexport")):
+                    p = os.path.join(d, f)
+                    out["armobj:" + os.path.relpath(p, ir).replace(os.sep, "/")] = sha_file(p)
     drv = os.path.join(worktree, "oracle-sail", "target", "release", "janus-oracle-sail")
     if os.path.isfile(drv):
         out["sail-driver"] = sha_file(drv)

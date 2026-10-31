@@ -57,6 +57,33 @@ mkdir -p "$t/w/JanusASL/.lake/build/lib/lean" "$t/w/oracle-sail/target/release";
 python3 -I "$cmp_py" hashes "$t/w" "$t/h1.json"; echo p >> "$t/w/oracle-sail/target/release/janus-oracle-sail"; python3 -I "$cmp_py" hashes "$t/w" "$t/h2.json"
 mkdir -p "$t/w/scripts"; printf 'SAIL_SPLIT_PARTS=48\n' > "$t/w/scripts/oracle-sail.sh"
 python3 -I "$cmp_py" hashes "$t/w" "$t/h3.json"; SAIL_SPLIT=0 python3 -I "$cmp_py" hashes "$t/w" "$t/h4.json"
+# the compiled C objects are hashed (armobj:), and a differing object between the cached and the cold run is P0
+mkdir -p "$t/w/JanusASL/.lake/build/ir/ArmASL" "$t/w/JanusASL/.lake/build/ir/JanusASL" "$t/w/JanusASL/.lake/packages/Sail/.lake/build/ir/Sail"
+echo p1 > "$t/w/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export"; echo j > "$t/w/JanusASL/.lake/build/ir/JanusASL/Check.c.o.export"; echo s > "$t/w/JanusASL/.lake/packages/Sail/.lake/build/ir/Sail/Attr.c.o.export"
+echo c > "$t/w/JanusASL/.lake/build/ir/ArmASL/Part01.c"
+python3 -I "$cmp_py" hashes "$t/w" "$t/o1.json"; echo p2 > "$t/w/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export"; python3 -I "$cmp_py" hashes "$t/w" "$t/o2.json"
+python3 -I - "$t" <<'PY' && echo "ok   armobj: hashes cover ArmASL, JanusASL and Sail objects (not the C), and an object change changes the digest" || { echo "FAIL armobj hashes"; fail=1; }
+import json, sys
+a = json.load(open(sys.argv[1] + "/o1.json")); b = json.load(open(sys.argv[1] + "/o2.json"))
+ks = sorted(k for k in a if k.startswith("armobj:"))
+assert ks == ["armobj:build/ir/ArmASL/Part01.c.o.export", "armobj:build/ir/JanusASL/Check.c.o.export",
+              "armobj:packages/Sail/.lake/build/ir/Sail/Attr.c.o.export"], ks
+assert a["combined"] != b["combined"] and a[ks[0]] != b[ks[0]] and a[ks[1]] == b[ks[1]]
+PY
+mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
+python3 - "$t" <<'PY'
+import json, sys
+for d, v in (("a", "x1"), ("b", "x2")):
+    p = sys.argv[1] + "/" + d + "/artifact-hashes.json"; j = json.load(open(p)); j["armobj:build/ir/ArmASL/Part01.c.o.export"] = v; json.dump(j, open(p, "w"))
+PY
+check "a C object that differs between the cached and the cold run is P0" 1 "$t/a" "$t/b"
+m=$(python3 -I "$cmp_py" compare "$t/a" "$t/b"); case "$m" in *armobj:build/ir/ArmASL/Part01*) echo "ok   ... and the report names the object";; *) echo "FAIL report: $m"; fail=1;; esac
+python3 - "$t" <<'PY'
+import json, sys
+p = sys.argv[1] + "/b/artifact-hashes.json"; j = json.load(open(p)); del j["armobj:build/ir/ArmASL/Part01.c.o.export"]; json.dump(j, open(p, "w"))
+PY
+check "an object present in only one run is P0" 1 "$t/a" "$t/b"
+mk "$t/a" c1 0 PASS h1; mk "$t/b" c1 0 PASS h1
 python3 -I - "$t" <<'PY' && echo "ok   hashes records SAIL_SPLIT and the parts count, outside the combined digest" || { echo "FAIL hashes config"; fail=1; }
 import json, sys
 a, b = (json.load(open(sys.argv[1] + "/h%d.json" % i)) for i in (3, 4))
