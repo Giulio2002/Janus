@@ -40,6 +40,7 @@ import Janus.Contracts.RtSat
 import Janus.Contracts.WriteBarrierSat
 import Janus.Contracts.AllocSat
 import Janus.Contracts.AllocSatAmd64
+import Janus.Contracts.AllocWitness
 import Janus.Spec.Dynamic
 import Janus.Tactic.Dynamic
 import Janus.Spec.Map
