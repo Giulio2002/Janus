@@ -1,5 +1,6 @@
 import Janus.GoABI
 import Janus.Tactic.Attr
+import Janus.Tactic.KernelSafe
 
 /-!
 # Symbolic execution: the logical layer
@@ -910,7 +911,7 @@ attribute [janus_exec, janus_post] ge_iff_le gt_iff_lt ite_true ite_false ite_se
   ne_eq not_false_eq_true not_true_eq_false eq_self_iff_true and_true true_and and_false false_and
   or_true true_or or_false false_or Bool.bne_true Bool.bne_false Bool.not_eq_true Bool.not_eq_false
   beq_self_eq_true bne_self_eq_false Bool.toNat_true Bool.toNat_false
-  Nat.add_zero Nat.zero_add Nat.mul_one Nat.one_mul Nat.mul_zero Nat.zero_mul Nat.zero_mod
+  nat_add_zero' Nat.zero_add Nat.mul_one Nat.one_mul nat_mul_zero' Nat.zero_mul nat_zero_mod'
   Nat.mod_self BitVec.add_zero BitVec.zero_add BitVec.sub_zero ite_not dite_eq_ite
   if_true_left if_false_left if_true_right if_false_right
 

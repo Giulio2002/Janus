@@ -451,6 +451,33 @@ def execDiv (s : State) (next : W64) (signed : Bool) (w : Nat) (src : Loc) : Exc
     let hi : Nat := if w = 8 then (s.getHigh 0).toNat else (s.getReg w 2).toNat
     let dividendU : Nat := hi * 2 ^ w + lo
     let undef : Flags := ⟨none, none, none, none, none, none⟩
+    -- No `match` on an `Option` computed from the symbolic dividend (an earlier formulation was
+    -- `match qr with | none => … | some (q, r) => …`): the kernel unfolds an `abbrev` matcher
+    -- application as soon as two such terms are not pointer-equal and then evaluates its
+    -- scrutinee (`dividendU / y` with `hi * 2 ^ 64`: `Nat.mul` along the literal), "(kernel) deep
+    -- recursion detected". `execDivRef` is that formulation; `execDiv_eq_ref` shows they agree.
+    let n : Int := (BitVec.ofNat (2 * w) dividendU).toInt
+    let d : Int := y.toInt
+    if y = 0 then .error (.divideError s.rip.toNat) else
+    if (if signed then n.tdiv d < -((2 ^ (w - 1) : Nat) : Int) ∨ n.tdiv d ≥ ((2 ^ (w - 1) : Nat) : Int)
+        else dividendU / y.toNat ≥ 2 ^ w) then
+      .error (.divideError s.rip.toNat)
+    else
+      let q : Nat := if signed then (BitVec.ofInt w (n.tdiv d)).toNat else dividendU / y.toNat
+      let r : Nat := if signed then (BitVec.ofInt w (n.tmod d)).toNat else dividendU % y.toNat
+      let s' := if w = 8 then s.putReg 16 0 (BitVec.ofNat 16 (r * 256 + q))
+        else (s.putReg w 0 (BitVec.ofNat w q)).putReg w 2 (BitVec.ofNat w r)
+      .ok ((s'.setFlags undef).setRip next)
+
+/-- The `Option`-matching formulation of `DIV`/`IDIV` (reference for `execDiv`). -/
+def execDivRef (s : State) (next : W64) (signed : Bool) (w : Nat) (src : Loc) : Except Fault State :=
+  match readLoc s next w src with
+  | .error e => .error e
+  | .ok y =>
+    let lo : Nat := if w = 8 then (s.getReg 8 0).toNat else (s.getReg w 0).toNat
+    let hi : Nat := if w = 8 then (s.getHigh 0).toNat else (s.getReg w 2).toNat
+    let dividendU : Nat := hi * 2 ^ w + lo
+    let undef : Flags := ⟨none, none, none, none, none, none⟩
     if y = 0 then .error (.divideError s.rip.toNat) else
     let qr : Option (Nat × Nat) :=
       if signed then
@@ -469,6 +496,18 @@ def execDiv (s : State) (next : W64) (signed : Bool) (w : Nat) (src : Loc) : Exc
       let s' := if w = 8 then s.putReg 16 0 (BitVec.ofNat 16 (r * 256 + q))
         else (s.putReg w 0 (BitVec.ofNat w q)).putReg w 2 (BitVec.ofNat w r)
       .ok ((s'.setFlags undef).setRip next)
+
+theorem execDiv_eq_ref (s : State) (next : W64) (signed : Bool) (w : Nat) (src : Loc) :
+    execDiv s next signed w src = execDivRef s next signed w src := by
+  unfold execDiv execDivRef
+  cases readLoc s next w src with
+  | error e => rfl
+  | ok y =>
+    simp only []
+    by_cases hy : y = 0
+    · simp [hy]
+    · simp only [hy, if_false]
+      cases signed <;> simp only [Bool.false_eq_true, if_false, if_true] <;> (repeat' split) <;> simp_all
 
 /-- Shifts and rotates (SDM `SAL/SAR/SHL/SHR` and `RCL/RCR/ROL/ROR`). The count is masked to
 5 bits (6 for 64-bit operands); a masked count of 0 changes neither the value nor the flags

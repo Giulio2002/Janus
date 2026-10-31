@@ -320,7 +320,9 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
     if let some t0 := thms[0]? then
       thms := thms.set! 0 (← t0.add (.other (Name.mkNum `janus_state k)) #[] h)
   ctx := ctx.setSimpTheorems thms
-  let mut simprocs := r.simprocs.push (← Simp.getSimprocs)
+  -- no `reduceCtorEq`: it proves `(e + k) * 2 ^ 52 = 0` false with `Nat.noConfusion`, whose kernel
+  -- check unfolds `Nat.mul` along the literal (deep recursion); see `Janus.Tactic.KernelSafe`
+  let mut simprocs := r.simprocs.push ((← Simp.getSimprocs).erase ``reduceCtorEq)
   let mut extra : Simp.Simprocs := {}
   for n in [``reduceSetRegRestore, ``reduceDataReadD, ``reduceBitMaskFst, ``reduceBitMaskSnd, ``reduceClz, ``reduceRbit,
       ``reduceRev] do
