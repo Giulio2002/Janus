@@ -195,7 +195,7 @@ func (c *incrCtx) fileSha(p string) (string, error) {
 // incrEnvSkip are the variables that only name where output goes or how many things run at once; they
 // cannot turn a failing check into a passing one (an out-of-memory or a timeout is a failure).
 var incrEnvSkip = map[string]bool{
-	"JANUS_JOBS": true, "JANUS_MEMGUARD_LOG": true, "JANUS_LANES": true, "JANUS_LANE_JOBS": true, "JANUS_POOL_DIR": true,
+	"JANUS_JOBS": true, "JANUS_REPLAY_SIZING_FILE": true, "JANUS_LANES": true, "JANUS_LANE_JOBS": true, "JANUS_POOL_DIR": true,
 	"JANUS_EXAMPLES_SUMMARY": true, "JANUS_EXAMPLES_PREBUILT": true, "JANUS_PRINT_SNAPSHOT": true,
 	"JANUS_GATE_PG": true, "JANUS_GATE_PREBUILT": true, "JANUS_GATE_FORCE": true, "JANUS_GATE_INCREMENTAL": true,
 	"JANUS_SPEED_BASELINE": true, "JANUS_INCR": true, "JANUS_INCR_RECORD": true, "JANUS_INCR_EXPLAIN": true,

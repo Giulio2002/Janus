@@ -77,9 +77,9 @@ fi
 hs=$(grep -n '^if \[ ! -c /dev/null \]' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1); pl=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1)
 [ -n "$hs" ] && [ "$hs" -lt "$pl" ] && ok "gate.sh refuses a host whose /dev/null is not a character device (before any stage)" || bad "no /dev/null preflight in gate.sh"
 
-# the lanes log the replay sizing: gate.sh exports JANUS_MEMGUARD_LOG before the stages, except for the go-test lane
-ml=$(grep -n '^export JANUS_MEMGUARD_LOG=' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1); pl2=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1)
-[ -n "$ml" ] && [ "$ml" -lt "$pl2" ] && grep -q 'addc gotest "unset JANUS_MEMGUARD_LOG;' "$here_repo/scripts/gate.sh" && ok "gate.sh exports JANUS_MEMGUARD_LOG for the lanes (not for go test)" || bad "JANUS_MEMGUARD_LOG not exported as intended"
+# the replay sizing goes to a FILE (JANUS_REPLAY_SIZING_FILE), never to JANUS_MEMGUARD_LOG's stderr lines (they broke parsed rows)
+rs=$(grep -n '^: > "$out/replay-sizing.log"; export JANUS_REPLAY_SIZING_FILE=' "$here_repo/scripts/gate.sh" | head -1 | cut -d: -f1); pl2=$(grep -n '^pre_pin()' "$here_repo/scripts/gate.sh" | cut -d: -f1)
+[ -n "$rs" ] && [ "$rs" -lt "$pl2" ] && ! grep -q 'export JANUS_MEMGUARD_LOG' "$here_repo/scripts/gate.sh" && ok "gate.sh exports JANUS_REPLAY_SIZING_FILE before the stages and does not export JANUS_MEMGUARD_LOG" || bad "replay sizing wiring wrong"
 
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n

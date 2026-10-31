@@ -975,3 +975,26 @@ func TestReplayUnderMemoryPressure(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// JANUS_REPLAY_SIZING_FILE: the chosen workers x threads are appended to the file, one line per call, and nothing goes to stderr
+// unless JANUS_MEMGUARD_LOG is set (a stderr line changes what scripts that parse janus' output see).
+func TestLogReplaySizingFile(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "sizing.log")
+	t.Setenv("JANUS_MEMGUARD_LOG", "")
+	t.Setenv("JANUS_REPLAY_SIZING_FILE", f)
+	logReplaySizing(2, 2, 24<<30, 100<<30)
+	logReplaySizing(1, 4, 8<<30, 9<<30)
+	b, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "2 workers x 2 threads") || !strings.Contains(lines[1], "1 workers x 4 threads") {
+		t.Fatalf("sizing file: %q", b)
+	}
+	t.Setenv("JANUS_REPLAY_SIZING_FILE", "")
+	logReplaySizing(3, 3, 1, 1) // no file, no log: nothing, no panic
+	if fi, _ := os.Stat(f); fi == nil || fi.Size() != int64(len(b)) {
+		t.Fatal("the file changed without JANUS_REPLAY_SIZING_FILE")
+	}
+}

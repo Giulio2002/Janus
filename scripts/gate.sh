@@ -203,11 +203,7 @@ INCR_HOSTTOOLS_CACHE="$(mktemp "$root/artifacts/incr-hosttools.XXXXXX" 2>/dev/nu
 { [ -z "${INCR_HOSTTOOLS_CACHE:-}" ] || { [ -z "$incremental" ] && [ "${JANUS_INCR_LANES:-}" != 1 ]; } || incr_hosttools >/dev/null; }  # fill the per-run cache once, before the lanes start
 if [ -n "$incremental" ]; then export JANUS_GATE_INCREMENTAL=1; else unset JANUS_GATE_INCREMENTAL; fi
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
-# The lane logs name the sizing of the parallel kernel replay ("janus-memguard: framework replay sizing: W workers x T threads
-# (effective limit …, headroom …)", cmd/janus/replaybudget.go) and each memory-guarded job's peak: JANUS_MEMGUARD_LOG=1. Logging
-# only (not a key of any cache; skipped by the incremental key). The go-test lane runs without it: tests that compare janus' stderr
-# must see the default output.
-export JANUS_MEMGUARD_LOG="${JANUS_MEMGUARD_LOG:-1}"
+
 
 stages_all=(verify gotest rounds axiom govet cachekeys decoder x86 oracle asl-verify asl-build sail-build rtasl-prove rtasl-rel rtasl-strict rtasl-replay rtasl-btf rtasl-probes rtasl-fsqrt rtasl-go)
 selected() { # NAME: is the stage selected?
@@ -240,6 +236,10 @@ now() { date +%s.%N; }
 [ -n "$out" ] || out="$root/artifacts/gate/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$out/prebuild" "$out/lanes" "$out/verify"
 : > "$out/.gate-start"
+# The kernel-replay sizing ("workers x threads") chosen by every verification of this run is appended by janus to this file
+# (JANUS_REPLAY_SIZING_FILE, cmd/janus/replaybudget.go): a file, NOT JANUS_MEMGUARD_LOG, whose stderr lines (the mechanism banner,
+# one line per job) change the output that audit rows and tests parse (it broke 8 rows of the 'all' round: a row takes the first line).
+: > "$out/replay-sizing.log"; export JANUS_REPLAY_SIZING_FILE="$out/replay-sizing.log"
 ln -sfn "$out" "$root/artifacts/gate/latest" 2>/dev/null || true
 tlf="$out/timeline.jsonl"; : > "$tlf"
 # ---- --cold: fresh build directories, empty caches, the model from the pin (once: the setsid re-exec below keeps them)
@@ -424,7 +424,7 @@ WANT=()
 needs() { local r="" n; for n in "$@"; do ! selected "$n" || r="${r:+$r }$n"; done; echo "$r"; }
 add verify "scripts/verify-all-examples.sh -j $jobs_n --cgo ${changed:+--changed} ${incremental:+--incremental} ${vfilter:+--filter '$vfilter'}"
 JANUS_POOL_DIR="$out/verify"; export JANUS_POOL_DIR
-addc gotest "unset JANUS_MEMGUARD_LOG; JANUS_REQUIRE_FIXTURE=1 JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
+addc gotest "JANUS_REQUIRE_FIXTURE=1 JANUS_JOBS=$jobs_n scripts/gotest-shards.sh -n $shards ${gtrun:+--run '$gtrun'} --outdir '$out/gotest'"
 addc rounds "${rounds_lanes_n:+export JANUS_ROUNDS_LANES=$rounds_lanes_n; }audit/run-rounds.sh $rounds"
 add axiom "scripts/ci-axiom-guard.sh"
 # (self-test hook, scripts/lib/test-gatelanes.sh: one extra lane running JANUS_GATE_TEST_LANE in the lake tree)
@@ -500,10 +500,8 @@ fi
 gate_t1=$(now)
 tl_stage stage gate "$gate_t0" "$gate_t1" "$lanes_rc"
 python3 -I "$root/scripts/gate-report.py" "$tlf" || true
-# the kernel-replay sizing the verifications of this run chose ("framework replay sizing: W workers x T threads", logged by
-# janus with JANUS_MEMGUARD_LOG=1 into each item's verify.log and the logs the lanes keep): count per distinct sizing
-{ find "$root/artifacts" "$out" -name '*.log' -newer "$out/.gate-start" -print0 2>/dev/null | xargs -0 -r grep -h 'framework replay sizing' 2>/dev/null |
-    sed 's/ (effective limit.*//; s/^.*framework replay sizing: //' | sort | uniq -c | sort -rn; } > "$out/replay-sizing.txt" 2>/dev/null
+# the kernel-replay sizing the verifications of this run chose (workers x threads, number of verifications)
+{ sed 's/ (effective limit.*//; s/^.*framework replay sizing: //' "$out/replay-sizing.log" 2>/dev/null | sort | uniq -c | sort -rn; } > "$out/replay-sizing.txt"
 echo "gate: kernel replay sizing (workers x threads, number of verifications): $(tr -s ' ' < "$out/replay-sizing.txt" | tr '\n' ';' | cut -c1-300) (list: $out/replay-sizing.txt)"
 # the speed-regression check (on top of every other check): scripts/gate-speedcheck.py, committed baseline
 # scripts/speed-baseline.tsv; a regression fails the gate whatever the host load

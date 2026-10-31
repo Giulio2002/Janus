@@ -228,11 +228,19 @@ func currentHeadroom() int64 {
 	return h
 }
 
-// logReplaySizing records the chosen numbers in the memguard log (JANUS_MEMGUARD_LOG).
+// logReplaySizing records the chosen numbers: on stderr with JANUS_MEMGUARD_LOG, and, with JANUS_REPLAY_SIZING_FILE=<path>,
+// as one line appended to that file (scripts/gate.sh: the output is then not mixed into anything a script parses).
 func logReplaySizing(workers, threads int, effective, headroom int64) {
+	line := fmt.Sprintf("janus-memguard: framework replay sizing: %d workers x %d threads (effective limit %s, headroom %s)\n",
+		workers, threads, fmtBytes(effective), fmtBytes(headroom))
 	if os.Getenv("JANUS_MEMGUARD_LOG") != "" {
-		fmt.Fprintf(os.Stderr, "janus-memguard: framework replay sizing: %d workers x %d threads (effective limit %s, headroom %s)\n",
-			workers, threads, fmtBytes(effective), fmtBytes(headroom))
+		fmt.Fprint(os.Stderr, line)
+	}
+	if p := os.Getenv("JANUS_REPLAY_SIZING_FILE"); p != "" {
+		if f, err := os.OpenFile(p, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600); err == nil {
+			_, _ = f.WriteString(line) // one write: appends of one line do not interleave
+			f.Close()
+		}
 	}
 }
 
