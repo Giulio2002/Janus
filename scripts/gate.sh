@@ -239,6 +239,7 @@ fi
 now() { date +%s.%N; }
 [ -n "$out" ] || out="$root/artifacts/gate/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$out/prebuild" "$out/lanes" "$out/verify"
+: > "$out/.gate-start"
 ln -sfn "$out" "$root/artifacts/gate/latest" 2>/dev/null || true
 tlf="$out/timeline.jsonl"; : > "$tlf"
 # ---- --cold: fresh build directories, empty caches, the model from the pin (once: the setsid re-exec below keeps them)
@@ -496,6 +497,11 @@ fi
 gate_t1=$(now)
 tl_stage stage gate "$gate_t0" "$gate_t1" "$lanes_rc"
 python3 -I "$root/scripts/gate-report.py" "$tlf" || true
+# the kernel-replay sizing the verifications of this run chose ("framework replay sizing: W workers x T threads", logged by
+# janus with JANUS_MEMGUARD_LOG=1 into each item's verify.log and the logs the lanes keep): count per distinct sizing
+{ find "$root/artifacts" "$out" -name '*.log' -newer "$out/.gate-start" -print0 2>/dev/null | xargs -0 -r grep -h 'framework replay sizing' 2>/dev/null |
+    sed 's/ (effective limit.*//; s/^.*framework replay sizing: //' | sort | uniq -c | sort -rn; } > "$out/replay-sizing.txt" 2>/dev/null
+echo "gate: kernel replay sizing (workers x threads, number of verifications): $(tr -s ' ' < "$out/replay-sizing.txt" | tr '\n' ';' | cut -c1-300) (list: $out/replay-sizing.txt)"
 # the speed-regression check (on top of every other check): scripts/gate-speedcheck.py, committed baseline
 # scripts/speed-baseline.tsv; a regression fails the gate whatever the host load
 speed_rc=0
