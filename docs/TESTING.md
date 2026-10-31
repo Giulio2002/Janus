@@ -970,21 +970,25 @@ check still runs. The policy:
   so every module that emits a warning differs between the cached run (a cache entry carries the path of the tree that
   published it) and the cold run (its own tree) in thousands of bytes with identical declarations (24 of 241 JanusASL
   modules at 83049110; the 217 clean modules and the whole ArmASL model were byte-identical, and the build is
-  deterministic at a fixed path: 3 rebuilds at LEAN_NUM_THREADS 1/4/0 byte-identical). `gate-cachecmp.py hashes` therefore
-  also records `sem:<module>`, a digest from `tools/oleandigest` (`janus-olean-digest`): the module re-serialized piece by
-  piece with Lean's own `saveModuleData` (a fresh compaction per piece, independent of layout and of the other pieces),
-  one piece for the imports, constants (kind, name, universe parameters, type, value) and extra names, and one for EVERY
-  environment extension entry array (simp sets, instances, attributes, reducibility, the IR / compiled-code declarations
-  (`Lean.IR.declMapExt`), LCNF, declaration ranges, ...), hashed (two independent 64-bit hashes of the bytes) EXCEPT the
-  message-log piece. `compare` accepts a file-hash difference only when the semantic digests are equal (counted and
-  listed as "path-only"); a semantic difference, a module in only one run, or a missing digest (fail closed) stays P0.
-  NOT covered by the digest: the message log itself (warnings, no declarations), the `.olean` header, and the width of
-  the hash (an equality check between two builds of one source, not a commitment). Tests: `scripts/lib/test-olean-digest.sh`
-  (real builds: same module at two paths equal, only the message-log piece differs; mutations of a declaration, a proof
-  term, a simp attribute, an instance priority and a compiled-code-only change each change the digest; compare accepts
-  path-only and rejects each mutation) and `scripts/lib/test-cachecmp.sh`. Offline proof for the first nightly: the 24
-  modules, restored from the cache and rebuilt in a new tree, reproduce exactly the nightly's 24 file-hash differences
-  and have 0 semantic differences over all 241 modules.
+  deterministic at a fixed path: 3 rebuilds at LEAN_NUM_THREADS 1/4/0 byte-identical). The comparison therefore accepts
+  such a file-hash difference ("path-only", counted and listed) under ALL of these conditions, and is otherwise strict:
+  the module is under `JanusASL/Proofs/` (ArmASL/*, Janus/*, lean-sail, the Sail driver and every other JanusASL module must
+  be BYTE-identical); both runs recorded `sem:<module>` = the SHA-256 of the module re-serialized by Lean's own
+  `saveModuleData` with every `Lean.Linter.lintLogExt` entry array removed (`tools/oleandigest`, `janus-olean-digest`: the
+  WHOLE file, so header, constants (kind, name, universe parameters, type, value), every other extension's entries (simp
+  sets, instances, attributes, reducibility, the IR / compiled-code declarations, LCNF, ...) are all in the hash and no
+  name is parsed or framed); both recorded `lint:<module>` > 0 (an empty message log cannot be what differs) and
+  `lay:<module>` = ok (the original file has no bytes the module data does not account for: its size equals the
+  re-serialization of the unstripped module, and its 80-byte header matches); the digests are equal. A semantic
+  difference, a module in only one run, a missing or malformed record, or any failure of the digest tool (non-zero exit,
+  a line that is not exactly the expected shape, a module missing or reported twice) is P0 / fail-closed. The digest
+  executable is built ONCE from the trusted checkout that runs the comparison and the same executable digests both trees;
+  its source and binary SHA-256 are recorded as `config:oleandigest-*` (a difference is a configuration mismatch, rc 2).
+  NOT covered: the message log itself (warnings, no declarations). Tests: `scripts/lib/test-olean-digest.sh` (real builds:
+  same module at two absolute paths equal, a same-size one-character mutation, proof, simp, instance and compiled-code
+  mutations each detected; compare rejects an ArmASL / Janus module with differing bytes, an empty message log, trailing
+  garbage, a header change, a one-sided module, a missing digest, another digest executable, non-object JSON; the runner
+  fails closed on a failing tool, a truncated olean and unexpected output) and `scripts/lib/test-cachecmp.sh`.
 * **Owner: the main session.**
 
 ```
