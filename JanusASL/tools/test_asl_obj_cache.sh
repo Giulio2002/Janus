@@ -360,4 +360,18 @@ sk="$t/k/JanusASL/.lake/packages/Sail/.lake/build/ir/Sail/Attr.c"
 oh=$(lh "$sk.o.export" 0); echo "$oh" > "$sk.o.export.hash"; sed -i "s#-DLEAN_EXPORTING#-DLEAN_EXPORTING -DEVIL#; s#\"outputs\": \"[0-9a-f]*\.o\"#\"outputs\": \"$oh.o\"#" "$sk.o.export.trace"
 rm -rf "$t/st"; mkdir "$t/st"; expect 1 "objstage: -DEVIL is not accepted just because the Sail lakefile (the publisher's own) declares it" M objstage "$t/k" arm "$t/st" "$t/st.list"
 
+
+# previously untested bindings (mutation survivors on c73d7de0): the trace's output vs .hash, and the .cin record vs the C
+copy "$t/m"; build "$t/m"; mp="$t/m/JanusASL/.lake/build/ir/ArmASL/Part01.c"
+sed -i 's#"outputs": "[0-9a-f]*\.o"#"outputs": "0000000000000000.o"#' "$mp.o.export.trace"
+rm -rf "$t/st"; mkdir "$t/st"; expect 1 "objstage refuses a trace whose recorded output differs from the .hash" M objstage "$t/m" arm "$t/st" "$t/st.list"
+mkobj "$t/m/JanusASL/.lake" "$mp"; rm -rf "$t/st"; mkdir "$t/st"; idm=$(M objstage "$t/m" arm "$t/st" "$t/st.list"); rm -rf "$cache/armobj"
+B store armobj "$cache" "$idm" "$t/st" < "$t/st.list" > /dev/null
+echo '// edited after publishing' >> "$mp"
+expect 4 "verify --recompile with a C file that is not the one recorded (.cin) is inconclusive, never a pass" B verify armobj "$cache" "$idm" --c-root "$t/m/JanusASL/.lake" --recompile all
+
+copy "$t/n"; build "$t/n"; np="$t/n/JanusASL/.lake/build/ir/ArmASL/Part01.c"; oc=$(cat "$np.hash")
+echo 0123456789abcdef > "$np.hash"; sed -i "s#$oc#0123456789abcdef#g" "$np.o.export.trace"
+rm -rf "$t/st"; mkdir "$t/st"; expect 1 "objstage refuses a C whose .hash (even echoed consistently in the trace) is not Lake's text hash of the C" M objstage "$t/n" arm "$t/st" "$t/st.list"
+
 [ $fail = 0 ] && echo "test_asl_obj_cache: all passed" || { echo "test_asl_obj_cache: FAILED"; exit 1; }
