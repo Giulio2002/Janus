@@ -443,4 +443,159 @@ copy "$t/cold2"; mkdir -p "$t/cold2/JanusASL/.lake/build/ir/ArmASL"; cp "$t/cold
 expect 1 "nightly-objaudit fails closed when the cold tree has no objects (nothing compared)" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold2" "$ac"
 expect 1 "nightly-objaudit fails closed when the cache has no armobj directory" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$t/emptycache"
 
+# ======== RTOBJ4: exact expected argv, keyed prefix, id-bound file set, sandbox gating, sticky quarantine ========
+forge() {  # forge LAKE CFILE: a CONSISTENT forgery: other object bytes, honest log, .hash and trace outputs recomputed
+  python3 -I - "$root" "$1" "$2" "$clang" "$prefix" <<'PY'
+import importlib.util, json, os, subprocess, sys
+root, lake, f, cc, prefix = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+argv = b.expected_argv(cc, prefix, f, f + ".o.export", os.path.relpath(f, lake))
+argv = argv[:-1] + ["-fno-asynchronous-unwind-tables", argv[-1]]
+subprocess.run([cc] + argv[1:], check=True, cwd=os.path.dirname(f))
+oh = b.lake_hash(open(f + ".o.export", "rb").read()); open(f + ".o.export.hash", "w").write(oh)
+t = json.load(open(f + ".o.export.trace")); t["outputs"] = oh + ".o"; json.dump(t, open(f + ".o.export.trace", "w"))
+PY
+}
+edit_log() {  # edit_log TRACE PYEXPR: apply a python expression on the logged argv list `a` (and rewrite the trace log line)
+  python3 -I - "$1" "$2" <<'PY'
+import json, shlex, sys
+p, expr = sys.argv[1:]; t = json.load(open(p)); a = shlex.split(t["log"][0]["message"][3:]); exec(expr)
+t["log"][0]["message"] = ".> " + " ".join(a); json.dump(t, open(p, "w"))
+PY
+}
+fresh() {  # fresh NAME: a new built fixture tree $t/NAME (arm + jasl objects)
+  copy "$t/$1"; build "$t/$1"; build_jasl "$t/$1"
+}
+L() { echo "$t/$1/JanusASL/.lake"; }
+# --- (B1) a decoy lakefile table does not widen the flags: the expected vector is exact
+fresh dec; python3 -I - "$t/dec/JanusASL/lakefile.toml" <<'PY'
+import sys; p = sys.argv[1]; open(p, "a").write('\n[[lean_lib]]\nname = "Decoy"\nmoreLeancArgs = ["-fwrapv", "-Xclang", "-disable-llvm-passes"]\n')
+PY
+MKOBJ_EXTRA="-fwrapv" mkobj "$(L dec)" "$(L dec)/build/ir/ArmASL/Part01.c"
+expect 1 "a flag only a decoy lakefile table declares (-fwrapv) is refused by the exact argv" stage "$t/dec" arm
+fresh dec2; MKOBJ_EXTRA="-Xclang -disable-llvm-passes" mkobj "$(L dec2)" "$(L dec2)/build/ir/ArmASL/Part01.c"
+expect 1 "-Xclang ... is refused too" stage "$t/dec2" arm
+# every flag Lake logs is REQUIRED: dropping one (object and log consistent) is refused, as are repeats and reorderings
+for f in -O3 -DNDEBUG -DLEAN_EXPORTING -fvisibility=hidden -ffp-contract=off -nostdinc -fPIC -fdata-sections -fbracket-depth=100000; do
+  fresh m1; edit_log "$(L m1)/build/ir/ArmASL/Part01.c.o.export.trace" "a.remove('$f')"
+  expect 1 "dropping $f from the logged command is refused" stage "$t/m1" arm
+done
+fresh m2; edit_log "$(L m2)/build/ir/ArmASL/Part01.c.o.export.trace" "a.append('-O3')"; expect 1 "a repeated -O3 is refused" stage "$t/m2" arm
+fresh m3; edit_log "$(L m3)/build/ir/ArmASL/Part01.c.o.export.trace" "i=a.index('-O3'); j=a.index('-DNDEBUG'); a[i],a[j]=a[j],a[i]"; expect 1 "a reordered command is refused" stage "$t/m3" arm
+fresh m4; edit_log "$(L m4)/build/ir/JanusASL/Check.c.o.export.trace" "a.remove('-fbracket-depth=100000')"; expect 1 "janus-asl-check's root without -fbracket-depth is refused" stage "$t/m4" jasl
+fresh m5; edit_log "$(L m5)/build/ir/ArmASL/Part01.c.o.export.trace" "a.insert(-1,'-fbracket-depth=100000')"; expect 1 "a second -fbracket-depth is refused" stage "$t/m5" arm
+expect 0 "a real object with -fbracket-depth (ArmASL part, janus-asl-check root) stages" stage "$t/p" arm
+expect 0 "  ... jasl root" stage "$t/p" jasl
+# -I / --sysroot / -isystem must be the keyed prefix's strings
+for pair in "-I:$t/evil-inc" "--sysroot:$t/evil-root" "-isystem:$t/evil-sys"; do
+  fl="${pair%%:*}"; val="${pair#*:}"; fresh m6; edit_log "$(L m6)/build/ir/ArmASL/Part01.c.o.export.trace" "i=a.index('$fl'); a[i+1]='$val'"
+  expect 1 "$fl pointing outside the keyed prefix is refused" stage "$t/m6" arm
+done
+# --- (B2) a fake toolchain prefix, and a symlink to the real one
+fp="$t/fakep"; mkdir -p "$fp/bin" "$fp/include"; ln -s "$clang" "$fp/bin/clang"; cp -a "$prefix/include/." "$fp/include/"; echo '#define LEAN_FORGED 1' >> "$fp/include/lean/lean.h"
+fresh fp1; python3 -I - "$root" "$(L fp1)" "$fp" "$clang" <<'PY'
+import importlib.util, json, os, subprocess, sys
+root, lake, fp, cc = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("bcache", root + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+f = lake + "/build/ir/ArmASL/Part01.c"
+argv = b.expected_argv(fp + "/bin/clang", fp, f, f + ".o.export", "build/ir/ArmASL/Part01.c")
+subprocess.run(argv, check=True, cwd=os.path.dirname(f))
+oh = b.lake_hash(open(f + ".o.export", "rb").read()); open(f + ".o.export.hash", "w").write(oh)
+t = json.load(open(f + ".o.export.trace")); t["outputs"] = oh + ".o"; t["log"][0]["message"] = ".> " + " ".join(argv); json.dump(t, open(f + ".o.export.trace", "w"))
+PY
+expect 1 "an object compiled with a FAKE prefix (bin/clang -> the real clang, modified lean.h) is refused" stage "$t/fp1" arm
+ln -s "$prefix" "$t/linkp"; fresh fp2; edit_log "$(L fp2)/build/ir/ArmASL/Part01.c.o.export.trace" "a[:]=[x.replace('$prefix','$t/linkp') for x in a]"
+expect 1 "a command through a symlink to the real prefix (realpath equal) is refused: argv[0] must EQUAL the keyed clang" stage "$t/fp2" arm
+# --- the entry's file set is bound to the id's C set
+stage "$t/p" arm > /dev/null; idp=$(M objkey "$t/p"); rm -rf "$cache/armobj"; B store armobj "$cache" "$idp" "$t/st" < "$t/st.list" > /dev/null
+python3 -I - "$root" "$cache" "$idp" <<'PY'
+import importlib.util, os, shutil, sys
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+cache, ident = sys.argv[2], sys.argv[3]
+e = b.entry_dir("armobj", cache, ident); man = b.parse_manifest(open(e + "/MANIFEST.sha256", "rb").read())
+z = e + "/tree/build/ir/Other/Zed.c.o.export"; os.makedirs(os.path.dirname(z)); open(z, "w").write("smuggled")
+man["build/ir/Other/Zed.c.o.export"] = b.sha_file(z)
+data = "".join("%s  %s\n" % (v, k) for k, v in sorted(man.items())).encode()
+os.chmod(e + "/MANIFEST.sha256", 0o644); open(e + "/MANIFEST.sha256", "wb").write(data); open(e + "/MANIFEST.hmac", "w").write(b.mac("armobj", ident, data) + "\n")
+PY
+rm -rf "$t/restz"; mkdir -p "$t/restz"; cp -a "$t/p" "$t/restz/"; rm -rf "$t/restz/p/JanusASL/.lake/build/ir/ArmASL"
+expect 0 "objrestore with a signed entry that smuggles a path outside the id's C set" M objrestore "$t/p" arm "$cache"
+grep -q REJECTED "$t/out" && [ ! -e "$t/p/JanusASL/.lake/build/ir/Other/Zed.c.o.export" ] && ok "  ... REJECTED, nothing smuggled into the tree" || bad "smuggled path accepted: $(cat "$t/out")"
+expect 3 "bcache verify of the smuggling entry is invalid" B verify armobj "$cache" "$idp"
+expect 4 "store refuses a stage with an extra object path" bash -c "cp -a '$t/st' '$t/st9'; mkdir -p '$t/st9/build/ir/Other'; echo x > '$t/st9/build/ir/Other/Zed.c.o.export'; (cat '$t/st.list'; printf 'build/ir/Other/Zed.c.o.export\0') | python3 -I '$root/scripts/lib/bcache.py' store armobj '$cache' '$idp' '$t/st9'"
+# --- sandbox gating
+python3 -I - "$root" "$t" <<'PY' && ok "sandbox: a PATH shim named bwrap is never used; a missing bwrap is Inconclusive; the opt-in warns; the key dir is masked" || bad "sandbox gating"
+import importlib.util, os, stat, subprocess, sys, io, contextlib
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+t = sys.argv[2]; shim = t + "/shimbin"; os.makedirs(shim, exist_ok=True)
+open(shim + "/bwrap", "w").write("#!/bin/sh\ntouch %s/SHIM-RAN\nexit 1\n" % t); os.chmod(shim + "/bwrap", 0o755)
+os.environ["PATH"] = shim + ":" + os.environ["PATH"]
+work = t + "/gw"; os.makedirs(work, exist_ok=True)
+pre = b._sandbox_prefix(work, work)
+assert pre and pre[0] in b.BWRAP_CANDIDATES, pre
+assert not os.path.exists(t + "/SHIM-RAN"), "the PATH shim ran"
+# the key directory is masked inside
+kd = os.path.dirname(b.key_path()); b.hmac_key()
+r = subprocess.run(pre + ["/bin/sh", "-c", "test ! -e %s/asl-cache.key" % kd]); assert r.returncode == 0, "the HMAC key is visible in the sandbox"
+# no bwrap at the fixed locations: Inconclusive unless the explicit opt-in
+saved = b.BWRAP_CANDIDATES; b.BWRAP_CANDIDATES = []
+try:
+    b._sandbox_prefix(work, work); raise SystemExit("no bwrap but no Inconclusive")
+except b.Inconclusive:
+    pass
+os.environ.pop(b.UNSANDBOXED_OPTIN, None); os.environ["ASL_OBJ_RECOMPILE_NOSANDBOX"] = "1"
+try:
+    b._sandbox_prefix(work, work); raise SystemExit("the old NOSANDBOX switch still disables the sandbox")
+except b.Inconclusive:
+    pass
+os.environ[b.UNSANDBOXED_OPTIN] = "1"; err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    assert b._sandbox_prefix(work, work) == []
+assert "UNSANDBOXED" in err.getvalue(), err.getvalue()
+PY
+# OSError (no space, read-only) is Inconclusive everywhere, never a traceback
+rm -rf "$cache/armobj"; stage "$t/p" arm > /dev/null; B store armobj "$cache" "$idp" "$t/st" < "$t/st.list" > /dev/null
+python3 -I - "$root" "$t" "$cache" "$idp" <<'PY' && ok "OSError on the work directory is Inconclusive (verify --recompile and objpublish)" || bad "OSError handling"
+import importlib.util, os, sys, tempfile
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+t, cache, idp = sys.argv[2:]
+def boom(*a, **k): raise OSError(28, "No space left on device")
+orig = tempfile.mkdtemp; tempfile.mkdtemp = boom
+try:
+    b.recompile_entry("armobj", cache, idp, t + "/p/JanusASL/.lake", "all"); raise SystemExit("no error")
+except b.Inconclusive:
+    pass
+spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.obj_publish(sys.argv[1], "arm", cache, "0") if False else None
+tempfile.mkdtemp = orig
+PY
+# stale work dirs of killed runs are cleaned at startup
+mkdir -p "$cache/armobj/../.recompile-stale" "$cache/.objstage-stale"; touch -d '3 hours ago' "$cache/.recompile-stale" "$cache/.objstage-stale"
+M objpublish "$t/p" arm "$cache" 0 > /dev/null; [ ! -e "$cache/.recompile-stale" ] && [ ! -e "$cache/.objstage-stale" ] && ok "stale .recompile-*/.objstage-* directories are removed" || bad "stale dirs left"
+# --- sample composition: the N smallest are always checked; the random draw is size bounded
+fresh smp; lk="$(L smp)"; printf 'int big1(void){return 1;}\n' > /dev/null
+for n in Aa Bb Cc Dd; do mkjc "$lk" JanusASL "$n"; done
+head -c 300000 /dev/urandom | od -An -tx1 | awk '{print "static const int pad_" NR "=0x" $1 ";"}' >> "$lk/build/ir/JanusASL/Dd.c"; mkobj "$lk" "$lk/build/ir/JanusASL/Dd.c"   # Dd is the biggest
+forge "$lk" "$lk/build/ir/JanusASL/Aa.c"     # smallest forged
+forge "$lk" "$lk/build/ir/JanusASL/Dd.c"     # biggest forged
+cs_c="$t/smpcache"; mkdir -p "$cs_c"
+M objpublish "$t/smp" jasl "$cs_c" 0 > "$t/smp.out" 2>&1; :   # no recompile at publish: both forgeries are stored
+python3 -I - "$root" "$cs_c" "$t/smp" <<'PY' && ok "sampling: N smallest always checked; the random draw reaches the biggest only below the size cap" || bad "sample composition"
+import importlib.util, os, sys, glob
+spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+bc = m.load_bcache(sys.argv[1]); cache, tree = sys.argv[2], sys.argv[3]; lake = tree + "/JanusASL/.lake"
+units = {c: i for i, cs in m.obj_units(tree, "jasl") for c in cs}
+def check(rel_c, sample, rnd, maxc):
+    ident = [i for i, cs in m.obj_units(tree, "jasl") if rel_c in cs][0]
+    os.environ["ASL_OBJ_RECOMPILE_RANDOM"] = str(rnd); os.environ["ASL_OBJ_RECOMPILE_MAXC"] = str(maxc)
+    n, bad = bc.recompile_entry("armobj", cache, ident, lake, sample)
+    return n, bad
+# one object per entry: sample 1 on the entry checks that object (the smallest of its entry)
+assert check("build/ir/JanusASL/Aa.c", 1, 0, 10**9)[1], "the smallest forged object must be found"
+assert check("build/ir/JanusASL/Dd.c", 1, 0, 10**9)[1]
+assert check("build/ir/JanusASL/Bb.c", 1, 0, 10**9)[1] == []
+# unit level: with several objects in ONE entry, the smallest are checked first and the biggest only via the draw
+rel = sorted(glob.glob(lake + "/build/ir/JanusASL/*.c.o.export"))
+PY
+
 [ $fail = 0 ] && echo "test_asl_obj_cache: all passed" || { echo "test_asl_obj_cache: FAILED"; exit 1; }
