@@ -41,6 +41,9 @@ import errno
 import fcntl
 import hashlib
 import hmac
+import json
+import shlex
+import subprocess
 import os
 import re
 import shutil
