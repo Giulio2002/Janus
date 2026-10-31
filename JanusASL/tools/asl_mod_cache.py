@@ -11,8 +11,8 @@ import (scripts/asl.sh, ASL_CACHE; docs/ASL.md "Build cache").
     python3 -I JanusASL/tools/asl_mod_cache.py gc      CACHE --max SIZE [--root REPO_ROOT]
                                     [--grace SECONDS] [--dry-run]
                                     evict entries (see "Eviction" below)
-    python3 -I JanusASL/tools/asl_mod_cache.py objkey  REPO_ROOT         id of the object entry (below)
-    python3 -I JanusASL/tools/asl_mod_cache.py objfiles REPO_ROOT        its files, NUL-separated, relative
+    python3 -I JanusASL/tools/asl_mod_cache.py objkey  REPO_ROOT [arm|jasl]  id of the object entry (below)
+    python3 -I JanusASL/tools/asl_mod_cache.py objfiles REPO_ROOT [arm|jasl] its files, NUL-separated, relative
                                     to JanusASL/.lake (nothing if the object set is incomplete)
 
 The ArmASL model and lean-sail are cached as one entry (asl_cache_key.py). This adds one entry per
@@ -602,16 +602,20 @@ OBJ_SCHEME = "janusasl-obj-cache-v1"
 OBJ_SUFFIXES = (".c.o.export", ".c.o.noexport")
 
 
-def obj_dirs(lake):
-    """(directory under .lake, filter on the first path component) holding the C of ArmASL and Sail."""
+def obj_dirs(lake, scope="arm"):
+    """(directory under .lake, filter on the first path component) holding the C of the scope:
+    "arm" = ArmASL and Sail (known after `lake build ArmASL`), "jasl" = the JanusASL library (its C is restored
+    with the module entries; the object of a huge proof module, e.g. JanusASL.Proofs.Config, costs ~10 min)."""
+    if scope == "jasl":
+        return [(os.path.join(lake, "build", "ir"), lambda n: n == "JanusASL.c" or n == "JanusASL")]
     return [(os.path.join(lake, "build", "ir"), lambda n: n == "ArmASL.c" or n == "ArmASL"),
             (os.path.join(lake, "packages", "Sail", ".lake", "build", "ir"), lambda n: True)]
 
 
-def obj_c_files(lake):
+def obj_c_files(lake, scope="arm"):
     """Emitted C files in scope: {path relative to .lake: sha256 of the content}."""
     out = {}
-    for d, ok in obj_dirs(lake):
+    for d, ok in obj_dirs(lake, scope):
         if not os.path.isdir(d):
             continue
         for top in sorted(os.listdir(d)):
@@ -625,10 +629,12 @@ def obj_c_files(lake):
     return out
 
 
-def obj_id(root, cs):
+def obj_id(root, cs, scope="arm"):
     akey = load_armasl_key(root)
     inp = {"scheme": OBJ_SCHEME, "armasl": akey.sha(akey.canonical(akey.inputs(root)).encode())[:32],
            "machine": platform.machine(), "c": cs}
+    if scope != "arm":
+        inp["scope"] = scope
     return sha_bytes(canonical(inp).encode())[:40]
 
 
@@ -647,13 +653,15 @@ def obj_files(lake, cs):
     return res
 
 
-def obj_main(cmd, root):
+def obj_main(cmd, root, scope="arm"):
     lake = os.path.join(root, "JanusASL", ".lake")
-    cs = obj_c_files(lake)
+    if scope not in ("arm", "jasl"):
+        sys.exit("asl_mod_cache: unknown object scope %r" % scope)
+    cs = obj_c_files(lake, scope)
     if not cs:
         sys.exit(1)
     if cmd == "objkey":
-        print(obj_id(root, cs))
+        print(obj_id(root, cs, scope))
     else:
         fl = obj_files(lake, cs)
         if fl is None:
@@ -859,7 +867,7 @@ def main():
         gc_main(sys.argv[2:])
         return
     if cmd in ("objkey", "objfiles"):
-        obj_main(cmd, root)
+        obj_main(cmd, root, sys.argv[3] if len(sys.argv) > 3 else "arm")
         return
     ks = Keys(root)
     if cmd == "keys":

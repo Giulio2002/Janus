@@ -57,6 +57,22 @@ expect 0 "fetch into the other path hits" B fetch armobj "$cache" "$idb" "$t/new
 [ ! -s "$t/diff" ] && ok "the restored files are byte-identical" || bad "restore differs: $(head -3 "$t/diff")"
 B fetch armobj "$cache" "$idb" "$t/new/.lake" > "$t/o"; [ "$(cat "$t/o")" = current ] && ok "an identical tree is 'current'" || bad "current"
 
+# the JanusASL scope: its own id/entry (per-library C, e.g. the huge Proofs.Config), independent of the arm scope
+build_jasl() {  # the objects of ir/JanusASL/Check.c (build() made only its C)
+  local f="$1/JanusASL/.lake/build/ir/JanusASL/Check.c"
+  if [ -n "$clang" ]; then (cd "$(dirname "$f")" && "$clang" -c -O3 -fPIC -o "$f.o.export" "$f"); else printf 'obj\n' > "$f.o.export"; fi
+  sha256sum < "$f" | cut -c1-16 > "$f.o.export.hash"; echo '{}' > "$f.o.export.trace"
+}
+build_jasl "$t/a"; build_jasl "$t/deep/er/b"
+ja=$(M objkey "$t/a" jasl); jb=$(M objkey "$t/deep/er/b" jasl)
+[ -n "$ja" ] && [ "$ja" = "$jb" ] && [ "$ja" != "$ida" ] && ok "the jasl scope has its own id, path independent" || bad "jasl id: $ja $jb $ida"
+M objfiles "$t/a" jasl | tr '\0' '\n' | grep -c . | grep -qx 3 && ok "jasl scope = 1 C file x 3" || bad "jasl objfiles"
+M objfiles "$t/a" | tr "\0" "\n" | { grep -c JanusASL/Check || true; } | grep -qx 0 && ok "arm scope still excludes JanusASL C" || bad "arm scope leaks"
+expect 1 "an unknown scope is refused" M objkey "$t/a" bogus
+M objfiles "$t/a" jasl > "$t/fl"; expect 0 "store jasl scope" B store armobj "$cache" "$ja" "$t/a/JanusASL/.lake" < "$t/fl"
+expect 0 "fetch jasl scope into another path" B fetch armobj "$cache" "$jb" "$t/newj/.lake"
+rm -rf "$cache/armobj/$ja"
+
 # a changed emitted C file: another id, so a miss (never the stale object)
 copy "$t/c"; build "$t/c"; echo '// edit' >> "$t/c/JanusASL/.lake/build/ir/ArmASL/Part02.c"
 idc=$(M objkey "$t/c"); [ "$idc" != "$ida" ] && ok "one changed C byte changes the id" || bad "id unchanged"
