@@ -117,6 +117,18 @@ lemma and the late replay that reports it, `TestResultCache`, `TestConcurrentVer
 (`-j N` clamped to 2..6): with them no shard is longer than the longest test (469 s planned; measured 295-471 s per shard,
 472 s wall, peak 4.8-12.3 GiB per shard, 44 GiB for the six).
 
+**Parallel-replay tests (2026-11-01).** In the nightly of 835cb0eb the `gotest` lane took ~2000 s because the parallel-replay
+tests were missing from the table (counted 1 s, started last in their shard) and each replayed the full framework several times.
+Now: `TestParallelFrameworkReplayCatchesForgeryInEveryPartition` and the new `...MatchesSingleProcessMini` use a mini framework
+(`miniSources` in `replaypar_test.go`: the root, a leaf, a module with a descendant, a descendant of a module with its own file;
+a few lines each, compiled by the real `lean`, replayed by the real `leanchecker`, so a forged declaration is still a real kernel
+rejection; the honest mini framework is a control). The same forgery on the real framework stays covered where it is a real module
+of it: the forged root through `janus verify` (`TestParallelReplayE2EForgedRootNoVerdict`, with its honest control and the planted
+`JanusReplayRoot` case now separate tests so that the shards run them at once) and a forged `Janus.GoABI` (`TestR1ForgedFrameworkLemma`).
+`TestParallelFrameworkReplayMatchesSingleProcess` (real framework) takes the modules each call replayed from that call's own output
+instead of replaying every call a second time: 855 s -> 412 s at load ~40. The six shards now plan at 519 s each (before: 469/462/367...,
+with the replay tests unplanned).
+
 **Go-test fixture stages.** `pre-fixture-emb` (`JANUS_TEST_FIXTURE_PART=embedded`) builds the embedded framework and records its
 replay verdict inside the fixture directory only: it reads neither this checkout's build nor the user's cache (`pre-stamp` and
 `pre-warm` write that cache), so it starts at t=0 and is ordered against nothing but `pre-fixture`. `pre-fixture`
