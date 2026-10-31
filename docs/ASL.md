@@ -736,21 +736,31 @@ trace is DATA from the publisher, so every binding is recomputed at publish by `
   after CRLF -> LF; checked against 66 real Lake `.hash` files): the object's bytes must hash to its `.hash`, the C
   file's text to its `.c.hash`, the trace's `outputs` must be that object hash and its inputs must record that C hash for
   this C file. A swapped object under an unchanged `.hash`/`.trace` is refused without compiling anything.
-- The logged compile command must have exactly the shape Lake logs (`bcache.argv_problem`): the toolchain's `clang`
-  (`-c`, one `-o`, one C file, `-I`/`--sysroot`/`-isystem` only into its own toolchain prefix, a fixed flag set, and the
-  flags `JanusASL/lakefile.toml` declares; the vendored Sail lakefile is NOT trusted for flags). An object compiled with
-  `-DEVIL`, `-include`, a plugin or another C file is refused at stage, and again at recompile where a command of another
-  shape counts as POISONED and is never run. The compiler binary must be the keyed one (content hashed into the id).
+- The logged compile command must EQUAL the command built from keyed values (`bcache.expected_argv`/`argv_problem`):
+  argv[0] is the string `<lean --print-prefix>/bin/clang` (no realpath indirection; a symlinked prefix or toolchain
+  directory is refused), `-I`, `--sysroot` and `-isystem` are that prefix's own strings, the flag list is hard-coded and
+  every flag is REQUIRED, once, in Lake's order (`-O3 -DNDEBUG`, plus `-fbracket-depth=100000` for the ArmASL parts and
+  the janus-asl-check root `JanusASL/Check`, then `-DLEAN_EXPORTING`); only the `-o`/C paths are free, in form. Nothing is
+  derived from the lakefile (a decoy `[[lean_lib]]` table with `-fwrapv`/`-Xclang` cannot widen it); a lakefile that
+  changes what Lake logs makes the objects unpublishable until the vector in code is reviewed. Only `.c.o.export`
+  objects are cacheable. The same equality is checked again before any recompile, where a mismatch is POISONED and the
+  command is never run (the recompile command is built from the keyed values, not taken from the trace).
+- The entry's file set is bound to the id: a signed `armobj.set` ({C: sha256}) must equal the consumer's own C set, and the
+  manifest may hold only that set's objects (`.o.export`, `.hash`, `.trace`, `.cin`), each `.cin` equal to the set's hash;
+  checked at store, fetch (the consumer passes its set) and verify.
 - The C is re-hashed at stage time and must be the id's; a `.cin` record of its SHA-256 is added.
 - `bcache.py store --recompile N|all` recompiles the N smallest objects of the entry plus 2 random others
   (`ASL_OBJ_RECOMPILE`, `ASL_OBJ_RECOMPILE_RANDOM`) with the validated command and refuses the entry if any byte
-  differs; the same check on an existing entry replaces it when it differs. The recompile runs in bubblewrap (no
-  network, read-only filesystem except its work dir, own pid/ipc namespace, no capabilities, TMPDIR on the work dir,
-  stdin closed, a timeout) and, where bwrap is missing, as the keyed toolchain clang with a scrubbed TMPDIR and stdin
-  only (safe only as far as `argv_problem` makes it). `jasl` entries are one object each, so a chosen entry is recompiled
+  differs; the same check on an existing entry replaces it when it differs. The recompile runs in bubblewrap taken from a FIXED root-owned location (never PATH): no
+  network, read-only filesystem except its work dir, own pid/ipc namespace, no capabilities, the HMAC key directory masked,
+  TMPDIR on the work dir, stdin closed, a timeout. A missing or failing bwrap is INCONCLUSIVE (exit 4, no verdict) unless
+  `ASL_OBJ_RECOMPILE_UNSANDBOXED=1` explicitly accepts an unsandboxed run (a loud warning; the command is then only as safe as
+  the keyed, fixed-flag command line). `jasl` entries are one object each, so a chosen entry is recompiled
   whole. Cost policy: the N smallest are always recompiled; the RANDOM draw only covers objects whose C is at most
   `ASL_OBJ_RECOMPILE_MAXC` bytes (default 1 000 000, about 2.5 min of clang -O3), because `JanusASL.Proofs.Config` (3.7 MB)
-  costs ~10 min; the large ones are covered by the nightly's full audit. `verify --recompile all --c-root LAKE` audits
+  costs ~10 min. HONEST COVERAGE: RTOBJ3 measured that this sample leaves 58% of the ArmASL objects (93% of their bytes)
+  unrecompiled at publish; a consumer of another commit's id relies on the next nightly for those. The nightly covers
+  100% (below). `verify --recompile all --c-root LAKE` audits
   a stored entry completely (POISONED, exit 3).
 - Anything that stops a recompile from giving an answer (a timeout, a missing tool, a crash, a missing C root, a missing
   `.cin`) is INCONCLUSIVE: never a pass, and an existing entry is never destroyed or replaced because of it.
@@ -763,11 +773,18 @@ moved entry, foreign path = rejection and a rebuild.
 *Measured* (private copy, cache seeded from /srv/janus-asl-cache, 431 of 434 modules restored, LEAN_NUM_THREADS=4, JANUS_JOBS=2; host load average 16-17 during the runs, not idle): the run that fills the object cache 1023 s (it stages and publishes 17 entries on real ArmASL, lean-sail and JanusASL objects with 0 refused: the Lake-hash and argv-shape checks have no false positive; the sandboxed recompile sample adds about 40 s), then **69 s and 76 s** warm. Without the object cache the same warm build took 957 s.
 
 *Nightly cold-side audit.* The nightly cold gate links in its own worktree under the same cache setting as its run (the
-cached run restores objects, the cold run compiles them from source); `gate-cachecmp.py` compares the SHA-256 of every
-`armobj:` object between the two runs and `scripts/lib/nightly-objaudit.sh` compares every cache entry's objects
-with the cold tree's fresh ones (`asl_mod_cache.py objaudit`, arm and jasl). A differing validly-signed entry is
-quarantined (`.poisoned-<id>`, a miss for every later fetch) and the nightly exits 1 (P0). Both fail CLOSED: a run
-with no hashed object, an audit that compared nothing, or a missing armobj directory is a failure, never a pass.
+cached run restores objects; the cold run, JANUS_ASL_CACHE=0, compiles every object from source: the cache is blanked, a
+test checks a cold run does not restore from a populated cache). `gate-cachecmp.py` compares the SHA-256 of every
+`armobj:` object between the two runs, and `scripts/lib/nightly-objaudit.sh` compares EVERY object of every cache entry
+of the commit's ids (the >1 MB ones included, so this is a full independent recompile) with the cold tree's
+(`asl_mod_cache.py objaudit`, arm and jasl), printing the coverage ratio. A differing entry is quarantined stickily: a
+signed tombstone (HMAC) records its poisoned object hashes, then the directory is renamed `.poisoned-<id>`; fetch, verify
+and store refuse those bytes whatever directory they come back in (an attacker renaming it back does not revive it, and
+the same forged bytes cannot be republished; honest bytes for the id can). Everything FAILS CLOSED: a run with no hashed
+object, an audit that compared nothing, an object of the commit's entries that could not be compared (coverage under
+100%), a missing armobj directory, or a tombstone with a bad MAC. The nightly sets `rc_final=1` on any of them. An
+asynchronous background audit queue for large objects at publish time was considered and NOT built: the nightly is the
+backstop.
 
 *Honest limit.* A natively linked object has NO kernel-replay backstop: unlike an `.olean` nothing re-checks the machine
 code the cache served. Integrity rests on: the key (inputs by content) + the HMAC + the stage bindings (Lake's file hash,
@@ -776,7 +793,8 @@ the HMAC key (or can write the cache as its owner) AND produces a CONSISTENT for
 the sample, can have it served until the next nightly audit finds it; the audit then quarantines it but cannot un-run
 what ran in between (every cached gate result since the last clean nightly is unproven). Compiles are bit-reproducible
 across directories, dates and environment (measured), which is what makes the comparison meaningful. `LEAN_CC`-compiled
-objects are not published (the shape check wants the toolchain's clang).
+objects are not published or recompiled (the command must name the toolchain's clang). A tombstone can be deleted by whoever
+can write the cache directory; that is the same residual as the key holder's.
 
 **Eviction** (`asl_mod_cache.py gc CACHE --max SIZE [--root REPO] [--grace S] [--dry-run]`). The
 module entries and the ArmASL entries had no eviction (a shared cache reached 42 GB). `scripts/asl.sh`
