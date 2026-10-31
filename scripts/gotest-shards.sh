@@ -137,5 +137,14 @@ if [ "$ran" -ne "$total" ] || [ "$(cat "$outdir"/ran-*.txt | sort -u | wc -l)" -
   echo "gotest-shards: $ran test results for $total listed tests (each must run exactly once)"; fail=1
 fi
 grep -hE '^--- FAIL' "$outdir"/shard-*.log && fail=1
+# a SKIPPED test is not a verified one (about ten tests skip when objdump, the aarch64 objdump, lake or bwrap is missing): a run with any SKIP is
+# never recorded as a lane PASS (scripts/lib/incr.sh incr_lane: INCR_NORECORD_FILE), whatever the exit status
+nskip=$(cat "$outdir"/shard-*.log | grep -cE '^--- SKIP: ' || true)
+if [ "${nskip:-0}" -gt 0 ]; then
+  echo "gotest-shards: $nskip test(s) SKIPPED (a skip is not a pass; this run is not recorded):"
+  cat "$outdir"/shard-*.log | grep -E '^--- SKIP: ' | sed 's/^/  /' | head -20
+  [ -z "${INCR_NORECORD_FILE:-}" ] || echo "gotest: $nskip skipped test(s)" >> "$INCR_NORECORD_FILE"
+  [ "${JANUS_REQUIRE_NO_SKIP:-}" != 1 ] || fail=1
+fi
 printf 'gotest shards: %d tests ran once each in %d shards, %ss wall\n' "$ran" "$nshards" "$(( $(date +%s) - t0 ))"
 [ "$fail" = 0 ] && echo "gotest shards: all ok" || { echo "gotest shards: FAILED"; exit 1; }

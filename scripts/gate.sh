@@ -200,6 +200,7 @@ export JANUS_INCR_RECORD=1
 unset JANUS_GATE_TREE0; incr_tree_pin
 # private per-gate-run cache of the host build-tool digest (incr_hosttools); not a key input itself (stamped with PATH/CC/CXX inside)
 INCR_HOSTTOOLS_CACHE="$(mktemp "$root/artifacts/incr-hosttools.XXXXXX" 2>/dev/null)" && export INCR_HOSTTOOLS_CACHE || unset INCR_HOSTTOOLS_CACHE
+{ [ -z "${INCR_HOSTTOOLS_CACHE:-}" ] || { [ -z "$incremental" ] && [ "${JANUS_INCR_LANES:-}" != 1 ]; } || incr_hosttools >/dev/null; }  # fill the per-run cache once, before the lanes start
 if [ -n "$incremental" ]; then export JANUS_GATE_INCREMENTAL=1; else unset JANUS_GATE_INCREMENTAL; fi
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
 
@@ -296,7 +297,7 @@ printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGi
   "$([ -n "$autosized" ] && echo true || echo false)" "$(_pool_json "${auto_why:-given}")" "$rounds_lanes_n" "$(_pool_json "$auto_budget")" >> "$tlf"
 [ -z "$autosized" ] || echo "gate: -j $jobs_n, $lanes_n lanes chosen automatically: $auto_why; audit rounds: ${rounds_lanes_n:-default} lanes
 gate: $auto_budget"
-echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}"
+echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}; lane-level incremental skipping $([ "${JANUS_INCR_LANES:-}" = 1 ] && echo 'ON (JANUS_INCR_LANES=1: EXPERIMENTAL, not cleared by a red team)' || echo 'OFF (default: every lane runs; set JANUS_INCR_LANES=1 to opt in)')"
 
 # ---- the prebuild stages (they are items of the same pool as the lanes: scripts/lib/dag.sh)
 step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
@@ -345,10 +346,20 @@ dag_check || { echo "gate: internal error: the stage graph is inconsistent"; exi
 mktree() { # DIR [private]: a private copy of the sources and of the finished framework build (kept when present: same hash)
   # "private": JanusASL/.lake is a real directory of the tree's own (filled from the verified ASL cache by asl.sh), not
   # the symlink to the checkout's build that the other lake trees share; a lane in such a tree can never write the checkout
-  if [ -f "$1/.gate-tree-ready" ]; then echo "gate: reusing $1"; return 0; fi
+  local -a rs=(--exclude=/.git --exclude=/artifacts --exclude=/audit/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake
+    --exclude=/oracle-sail/target --exclude=/bin --exclude=/.gate-tree-ready)
+  if [ -f "$1/.gate-tree-ready" ]; then
+    # a kept tree is reused only if its CONTENT still equals the sources (rsync -c compares checksums, not times): a tree edited after it was
+    # made (or a different file set) is re-synchronised, and the prebuilt janus is replaced when it differs
+    if [ -n "$(rsync -rcni --delete "${rs[@]}" ./ "$1"/ 2>/dev/null | grep -v '^\.d')" ]; then
+      echo "gate: kept tree $1 differs from the sources (modified after it was made): re-synchronising it"
+      rsync -a --delete "${rs[@]}" ./ "$1"/ || { echo "gate: cannot re-synchronise $1"; exit 1; }
+    fi
+    cmp -s bin/janus "$1/bin/janus" || { mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"; }
+    echo "gate: reusing $1"; return 0
+  fi
   mkdir -p "$1"
-  rsync -a --exclude=/.git --exclude=/artifacts --exclude=/audit/bin --exclude=/JanusASL/.lake --exclude=/JanusX86/.lake \
-    --exclude=/oracle-sail/target --exclude=/bin ./ "$1"/ || { echo "gate: cannot copy the sources to $1"; exit 1; }
+  rsync -a "${rs[@]}" ./ "$1"/ || { echo "gate: cannot copy the sources to $1"; exit 1; }
   ln -sfn "$root/artifacts" "$1/artifacts"; if [ "${2:-}" = private ]; then mkdir -p "$1/JanusASL/.lake"; else ln -sfn "$root/JanusASL/.lake" "$1/JanusASL/.lake"; fi
   ln -sfn "$root/JanusX86/.lake" "$1/JanusX86/.lake"; ln -sfn "$root/oracle-sail/target" "$1/oracle-sail/target"
   mkdir -p "$1/bin"; cp -f bin/janus "$1/bin/janus"; : > "$1/.gate-tree-ready"
