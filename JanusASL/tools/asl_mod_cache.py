@@ -590,7 +590,7 @@ def publish(ks, cache, roots):
 
 # ---- compiled C objects of ArmASL and lean-sail (CACHE/armobj) ----
 
-OBJ_SCHEME = "janusasl-obj-cache-v2"
+OBJ_SCHEME = "janusasl-obj-cache-v3"
 OBJ_SUFFIXES = (".c.o.export", ".c.o.noexport")
 
 
@@ -633,21 +633,19 @@ _CC = {}
 
 
 def obj_compiler(root):
-    """(path, SHA-256 of its content) of the C compiler Lake runs: LEAN_CC when set (the binary it names), else
-    <lean --print-prefix>/bin/clang. Hashed by content NOW, so a shim at the same path is another id."""
+    """(compiler path, SHA-256 of its content, toolchain prefix) of the C compiler Lake runs. The path and prefix are
+    the STRINGS `lean --print-prefix` gives (<prefix>/bin/clang; a logged command must equal them: bcache.expected_argv),
+    the hash is of the binary's content now. LEAN_CC set: the binary it names, hashed (the id differs) but such objects
+    are never published (bcache.keyed_toolchain refuses)."""
     if root in _CC:
         return _CC[root]
     akey = load_armasl_key(root)
     cc = os.environ.get("LEAN_CC")
-    if cc:
-        p = shutil.which(cc.split()[0]) or cc.split()[0]
-    else:
-        pre = subprocess.run(["lean", "--print-prefix"], cwd=os.path.join(root, "JanusASL"), capture_output=True,
-                             text=True, timeout=120).stdout.strip()
-        p = os.path.join(pre, "bin", "clang")
-    p = os.path.realpath(p)
+    pre = subprocess.run(["lean", "--print-prefix"], cwd=os.path.join(root, "JanusASL"), capture_output=True,
+                         text=True, timeout=120).stdout.strip()
+    p = (shutil.which(cc.split()[0]) or cc.split()[0]) if cc else os.path.join(pre, "bin", "clang")
     try:
-        _CC[root] = (p, akey.sha(akey.read(p)))
+        _CC[root] = (p, akey.sha(akey.read(os.path.realpath(p))), pre)
     except OSError:
         sys.exit("asl_mod_cache: cannot read the compiler %s" % p)
     return _CC[root]
@@ -733,59 +731,69 @@ def no_symlink_path(lake, rel):
 
 def stage_unit(root, scope, lake, ident, cs, stage):
     """Publish-side checks of one entry's objects, then copy them into `stage` (the entry is stored from THAT copy,
-    so what is checked is what is signed). Per object: all files regular, no symlink on the way; the trace's recorded
-    output hash is the .hash; the trace's recorded hash of the C file is the CURRENT .c.hash (and the path is this
-    C file); its compile command runs the compiler this id was computed with; the SHA-256 of the C is taken again
-    now and must be the one in the id; a .cin record of it is written. Returns the relative paths, [] if the unit
-    has no object at all (per-object scopes: Lake compiles only what the executable links); SystemExit on a lie."""
+    so what is checked is what is signed). Per object (only .c.o.export is cacheable): all files regular, no symlink on
+    the way; Lake's file hash of the object equals its .hash and of the C text its .c.hash; the trace's recorded output
+    is that object hash and its recorded C hash is the CURRENT one; the logged compile command EQUALS the command built
+    from the keyed compiler path and toolchain prefix (bcache.argv_problem); the C is re-hashed now and is the id's. A
+    `.cin` record per object and the signed set `armobj.set` ({C: sha256}, the id's C set) are added. Returns the relative
+    paths, [] if the unit has no object at all (jasl: Lake compiles only what the executable links); SystemExit on a lie."""
     bc = load_bcache(root)
-    cc_path = obj_compiler(root)[0]
+    cc, _, prefix = obj_compiler(root)
+    try:
+        kpre, kcc = bc.keyed_toolchain(os.path.join(root, "JanusASL"))
+    except bc.CacheError as ex:
+        sys.exit("objstage: %s" % ex)
+    if cc != kcc or prefix != kpre:
+        sys.exit("objstage: the compiler %s is not the toolchain's %s" % (cc, kcc))
     rels = []
     for c in sorted(cs):
-        found = [c + s[len(".c"):] for s in OBJ_SUFFIXES if os.path.lexists(os.path.join(lake, c + s[len(".c"):]))]
+        found = [c + s_[len(".c"):] for s_ in OBJ_SUFFIXES if os.path.lexists(os.path.join(lake, c + s_[len(".c"):]))]
         if scope in PER_OBJECT and not found:
             continue
-        if len(found) != 1:
-            sys.exit("objstage: %s has %d objects" % (c, len(found)))
+        if len(found) != 1 or not found[0].endswith(".c.o.export"):
+            sys.exit("objstage: %s has objects %s (only one .c.o.export is cacheable)" % (c, found))
         o = found[0]
         for x in (o, o + ".hash", o + ".trace", c, c + ".hash"):
             if not no_symlink_path(lake, x) or not os.path.isfile(os.path.join(lake, x)):
                 sys.exit("objstage: %s is missing or a symbolic link" % x)
-        if sha_file(os.path.join(lake, c)) != cs[c]:
+        with open(os.path.join(lake, c), "rb") as f:
+            cdata = f.read()
+        if sha_bytes(cdata) != cs[c]:
             sys.exit("objstage: %s changed while publishing" % c)
-        with open(os.path.join(lake, o + ".hash")) as f:
-            ohash = f.read().strip()
-        with open(os.path.join(lake, c + ".hash")) as f:
-            chash = f.read().strip()
+        with open(os.path.join(lake, o), "rb") as f:
+            odata = f.read()
+        with open(os.path.join(lake, o + ".hash"), "rb") as f:
+            ohash_raw = f.read()
+        ohash = ohash_raw.decode("ascii", "replace").strip()
+        with open(os.path.join(lake, c + ".hash"), "rb") as f:
+            chash = f.read().decode("ascii", "replace").strip()
         with open(os.path.join(lake, o + ".trace"), "rb") as f:
             tdata = f.read()
         try:
             outputs, pairs, argv = bc.trace_facts(tdata)
         except Exception as ex:
             sys.exit("objstage: %s: unreadable trace (%s)" % (o, ex))
-        with open(os.path.join(lake, o), "rb") as f:
-            if bc.lake_hash(f.read()) != ohash:
-                sys.exit("objstage: %s: the object's bytes do not hash (Lake's hash) to its .hash %s: swapped object" % (o, ohash))
-        with open(os.path.join(lake, c), "rb") as f:
-            if bc.lake_hash(f.read(), text=True) != chash:
-                sys.exit("objstage: %s: the C file does not hash (Lake's text hash) to its .hash %s" % (c, chash))
-        why = bc.argv_problem(argv, lake)
+        if bc.lake_hash(odata) != ohash:
+            sys.exit("objstage: %s: the object's bytes do not hash (Lake's hash) to its .hash %s: swapped object" % (o, ohash))
+        if bc.lake_hash(cdata, text=True) != chash:
+            sys.exit("objstage: %s: the C file does not hash (Lake's text hash) to its .hash %s" % (c, chash))
+        why = bc.argv_problem(argv, kcc, kpre, c)
         if why:
-            sys.exit("objstage: %s: the logged compile command is not the shape Lake logs (%s)" % (o, why))
+            sys.exit("objstage: %s: the logged compile command is not the one Lake logs for the keyed toolchain (%s)" % (o, why))
         if outputs != ohash + ".o":
             sys.exit("objstage: %s: the trace records output %r, the .hash says %r" % (o, outputs, ohash))
         if not any(h == chash and p.replace(os.sep, "/").endswith("/" + c) for p, h in pairs):
             sys.exit("objstage: %s: the trace does not record the hash of the current %s (%s)" % (o, c, chash))
-        if not argv or os.path.realpath(argv[0]) != cc_path:
-            sys.exit("objstage: %s: compiled by %r, not by %s" % (o, argv and argv[0], cc_path))
-        for x in (o, o + ".hash", o + ".trace"):
+        for x, data in ((o, odata), (o + ".hash", ohash_raw), (o + ".trace", tdata), (o + ".cin", (cs[c] + "\n").encode())):
             d = os.path.join(stage, x)
             os.makedirs(os.path.dirname(d), exist_ok=True)
-            shutil.copyfile(os.path.join(lake, x), d)
+            with open(d, "wb") as f:
+                f.write(data)
             rels.append(x)
-        with open(os.path.join(stage, o + ".cin"), "w") as f:
-            f.write(cs[c] + "\n")
-        rels.append(o + ".cin")
+    if rels:
+        with open(os.path.join(stage, bc.ARMOBJ_SET), "w") as f:
+            f.write(canonical(cs))
+        rels.append(bc.ARMOBJ_SET)
     return rels
 
 
@@ -816,8 +824,8 @@ def obj_restore(root, scope, cache):
         return
     for ident, cs in obj_units(root, scope):
         try:
-            r = bc.fetch("armobj", cache, ident, lake)
-        except bc.CacheError as ex:
+            r = bc.fetch("armobj", cache, ident, lake, want_set=cs)
+        except (bc.CacheError, OSError) as ex:
             print("asl cache: the entry for the C objects [%s] %s was REJECTED (%s); compiling" % (scope, ident, ex))
             rej += 1
             continue
@@ -842,8 +850,14 @@ def obj_publish(root, scope, cache, sample):
         rest = [(unit_size[i], i, None) for _, i in sizes if i not in chosen]
         chosen |= {i for _, i, _ in bc.draw_random(rest, int(os.environ.get("ASL_OBJ_RECOMPILE_RANDOM", "2")))}
     stored = present = skipped = failed = 0
+    bc.clean_stale(cache)
     for i, (ident, cs) in enumerate(units):
-        st = tempfile.mkdtemp(prefix=".objstage-", dir=os.path.dirname(os.path.join(cache, "armobj")))
+        try:
+            st = tempfile.mkdtemp(prefix=".objstage-", dir=cache)
+        except OSError as ex:
+            print("asl cache: C objects [%s] %s not stored: cannot create a staging directory (%s)" % (scope, ident, ex))
+            failed += 1
+            continue
         try:
             try:
                 rels = stage_unit(root, scope, lake, ident, cs, st)
@@ -856,8 +870,8 @@ def obj_publish(root, scope, cache, sample):
                 continue
             rc = (lake, "all" if scope in PER_OBJECT else str(sample)) if i in chosen and sample != 0 else None
             try:
-                r = bc.store("armobj", cache, ident, st, rels, None, rc)
-            except bc.CacheError as ex:
+                r = bc.store("armobj", cache, ident, st, rels, None, rc, cs)
+            except (bc.CacheError, OSError) as ex:
                 print("asl cache: C objects [%s] %s not stored: %s" % (scope, ident, ex))
                 failed += 1
                 continue
@@ -870,44 +884,55 @@ def obj_publish(root, scope, cache, sample):
 
 def obj_audit(root, scope, cache):
     """The cold-side audit and eviction (run on a tree whose objects were compiled from source, the nightly's cold
-    tree): for every unit of the scope whose entry exists in `cache`, the SHA-256 of each cached object must equal the
-    freshly compiled one. A difference quarantines the entry (renamed to .poisoned-<id>, never served again) and exits 3;
-    an entry whose object the cold tree lacks is reported as unchecked. Reads only the cache and the cold tree."""
+    tree, which is also a full independent recompile of every object, the >1 MB ones included): for every unit of the
+    scope whose entry exists in `cache`, the SHA-256 of each cached object must equal the freshly compiled one.
+    A difference quarantines the entry for good: a signed tombstone (bcache.write_tombstone) records the poisoned
+    object hashes, then the entry is renamed to .poisoned-<id>; fetch, verify and store refuse those bytes whatever
+    directory they come back in. Exit 3 on a poisoned entry; 4 (fail closed) when nothing was compared or when an entry of
+    this commit's ids has an object the cold tree cannot be compared with; 0 only at 100% coverage. Prints the coverage."""
     bc = load_bcache(root)
     lake = scope_lake(root, scope)
-    checked = unchecked = 0
-    poisoned = []
+    checked = unchecked = entries = 0
+    poisoned = {}
     for ident, cs in obj_units(root, scope):
+        e = bc.entry_dir("armobj", cache, ident)
+        if not os.path.isdir(e):
+            continue
+        entries += 1
         try:
-            man = bc.verify_entry("armobj", cache, ident)
-        except bc.CacheError:
-            if os.path.isdir(bc.entry_dir("armobj", cache, ident)):
-                poisoned.append(ident)
+            man = bc.verify_entry("armobj", cache, ident, cs)
+        except bc.CacheError as ex:
+            print("objaudit: entry %s does not verify (%s)" % (ident, ex))
+            poisoned[ident] = None
             continue
         for rel, h in sorted(man.items()):
-            if not rel.endswith(OBJ_SUFFIXES):
+            if not rel.endswith(".c.o.export"):
                 continue
             fresh = os.path.join(lake, rel)
             if not os.path.isfile(fresh) or os.path.islink(fresh):
                 unchecked += 1
+                print("objaudit: %s of entry %s has no freshly compiled counterpart" % (rel, ident))
                 continue
             checked += 1
             if sha_file(fresh) != h:
-                poisoned.append(ident)
+                poisoned.setdefault(ident, {})[rel] = h
                 print("objaudit: POISONED %s: %s differs from the freshly compiled object" % (ident, rel))
-                break
-    for ident in sorted(set(poisoned)):
+    for ident, objs in sorted(poisoned.items()):
         e = bc.entry_dir("armobj", cache, ident)
+        if objs:
+            bc.write_tombstone(cache, ident, objs)
         q = os.path.join(os.path.dirname(e), ".poisoned-" + ident)
         shutil.rmtree(q, ignore_errors=True)
         if os.path.isdir(e):
             os.rename(e, q)
-        print("objaudit: quarantined %s" % q)
-    print("objaudit [%s]: %d objects compared, %d without a fresh counterpart, %d poisoned" % (scope, checked, unchecked, len(set(poisoned))))
+        print("objaudit: quarantined %s (tombstone %s)" % (q, "written" if objs else "not possible: unverifiable entry"))
+    total = checked + unchecked
+    print("objaudit [%s]: %d entries, coverage %d of %d objects compared (%.0f%%), %d poisoned" % (
+        scope, entries, checked, total, 100.0 * checked / total if total else 0.0, len(poisoned)))
     if poisoned:
         return 3
-    if checked == 0:  # fail closed: an audit that compared nothing proves nothing (no cold objects, or no entries)
-        print("objaudit [%s]: NOTHING WAS COMPARED: the audit did not run" % scope)
+    if checked == 0 or unchecked:  # fail closed: an audit that compared nothing, or not everything, proves less than it claims
+        print("objaudit [%s]: INCOMPLETE: %s" % (scope, "NOTHING WAS COMPARED" if checked == 0 else "%d objects could not be compared" % unchecked))
         return 4
     return 0
 

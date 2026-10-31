@@ -170,14 +170,87 @@ def entry_dir(kind, cache, ident):
 # Sail twin), each with its .hash/.trace and the .cin record of the C it was compiled from: never an .olean, a
 # script or anything else (an entry is HMAC-signed by whoever publishes it, so what it may overwrite is limited here,
 # at store AND at fetch AND at verify).
+ARMOBJ_SET = "armobj.set"  # signed record of the id's C files {C: sha256}: the entry's file set is bound to it
 ARMOBJ_RE = re.compile(r"^(build/ir|packages/Sail/\.lake/build/ir)/[A-Za-z0-9_.+\-]+(/[A-Za-z0-9_.+\-]+)*\.c\.o\.(export|noexport)(\.hash|\.trace|\.cin)?$")
 
 
 def check_paths(kind, rels):
     if kind == "armobj":
         for r in rels:
-            if not ARMOBJ_RE.match(r):
+            if r != ARMOBJ_SET and not ARMOBJ_RE.match(r):
                 raise CacheError("path %r is not allowed in an armobj entry" % r)
+
+
+def check_armobj_set(tree, man, want_set=None):
+    """An armobj entry holds exactly what its id's C set allows: the signed `armobj.set` ({C: sha256}, equal to the
+    caller's own C set when given, which is how the file set is bound to the id the caller derived from its tree), the
+    objects `<C>.o.export` (+ .hash/.trace/.cin) of those C files and nothing else; each .cin equals the set's hash."""
+    if ARMOBJ_SET not in man:
+        raise CacheError("the armobj entry has no %s" % ARMOBJ_SET)
+    try:
+        with open(os.path.join(tree, ARMOBJ_SET), "rb") as f:
+            st = json.loads(f.read().decode("utf-8"))
+    except (OSError, ValueError) as ex:
+        raise CacheError("unreadable %s (%s)" % (ARMOBJ_SET, ex))
+    if not isinstance(st, dict) or not st or not all(isinstance(k, str) and isinstance(v, str) and len(v) == 64 for k, v in st.items()):
+        raise CacheError("malformed %s" % ARMOBJ_SET)
+    if want_set is not None and st != want_set:
+        raise CacheError("the entry's C set is not the one of this id")
+    allowed = {}
+    for c in st:
+        if not c.endswith(".c"):
+            raise CacheError("%s lists %r, not a C file" % (ARMOBJ_SET, c))
+        o = c + ".o.export"
+        for x in (o, o + ".hash", o + ".trace", o + ".cin"):
+            allowed[x] = c
+    for r in man:
+        if r != ARMOBJ_SET and r not in allowed:
+            raise CacheError("path %r is not an object of the id's C set" % r)
+    for r, c in allowed.items():
+        if r.endswith(".cin") and r in man:
+            try:
+                with open(os.path.join(tree, r)) as f:
+                    if f.read().strip() != st[c]:
+                        raise CacheError("%s does not record the C hash of the set" % r)
+            except OSError as ex:
+                raise CacheError("unreadable %s (%s)" % (r, ex))
+    return st
+
+
+def tomb_path(cache, ident):
+    return os.path.join(cache, "armobj", ".tombstone-" + ident)
+
+
+def write_tombstone(cache, ident, objects):
+    """A signed, durable record that an entry of this id was found poisoned: {object path: sha256}. Fetch, verify and
+    store refuse any entry of the id that carries one of those object hashes, wherever the entry directory came from."""
+    data = json.dumps({"id": ident, "objects": objects}, sort_keys=True, separators=(",", ":")).encode()
+    doc = json.dumps({"data": data.decode(), "mac": mac("tombstone", ident, data)}).encode()
+    p = tomb_path(cache, ident)
+    fd, tmp = tempfile.mkstemp(prefix=".tomb.tmp-", dir=os.path.dirname(p))
+    with os.fdopen(fd, "wb") as f:
+        f.write(doc)
+    os.replace(tmp, p)
+
+
+def check_tombstone(cache, ident, man):
+    p = tomb_path(cache, ident)
+    if not os.path.lexists(p):
+        return
+    try:
+        with open(p, "rb") as f:
+            doc = json.loads(f.read().decode("utf-8"))
+        data = doc["data"].encode()
+        if not hmac.compare_digest(doc["mac"], mac("tombstone", ident, data)):
+            raise ValueError("bad MAC")
+        t = json.loads(data.decode())
+        if t["id"] != ident:
+            raise ValueError("another id")
+        bad = set(t["objects"].values())
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as ex:
+        raise CacheError("the quarantine tombstone of %s is unreadable or forged (%s): the id stays unusable" % (ident, ex))
+    if man is not None and any(h in bad for r, h in man.items() if r.endswith(".c.o.export")):
+        raise CacheError("the entry carries bytes that were quarantined as poisoned (tombstone)")
 
 
 def open_lock(path):
@@ -269,10 +342,12 @@ def _regular(p):
     return st
 
 
-def verify_entry(kind, cache, ident):
+def verify_entry(kind, cache, ident, want_set=None):
     """Verify an entry in place (HMAC and the SHA-256 of every file). Returns the manifest."""
     e = entry_dir(kind, cache, ident)
     man = read_signed_manifest(kind, ident, e)
+    if kind == "armobj":
+        check_tombstone(cache, ident, man)
     for rel, h in man.items():
         p = os.path.join(e, "tree", rel)
         try:
@@ -282,6 +357,8 @@ def verify_entry(kind, cache, ident):
             raise CacheError("missing file %s" % rel)
         if not ok:
             raise CacheError("file %s does not match the manifest" % rel)
+    if kind == "armobj":
+        check_armobj_set(os.path.join(e, "tree"), man, want_set)
     return man
 
 
@@ -345,7 +422,7 @@ def _tmp_name(dst):
     return "%s.bcache-tmp.%d.%s" % (dst, os.getpid(), os.urandom(6).hex())
 
 
-def fetch(kind, cache, ident, dest, clean_globs=(), want_sha=None):
+def fetch(kind, cache, ident, dest, clean_globs=(), want_sha=None, want_set=None):
     """Copy the verified entry into dest. Returns "hit", "current" (dest already holds exactly the entry's
     files), "miss", or raises CacheError (rejected).
 
@@ -365,6 +442,10 @@ def fetch(kind, cache, ident, dest, clean_globs=(), want_sha=None):
             if not os.path.isfile(os.path.join(e, "MANIFEST.sha256")):
                 return "miss"
             man = read_signed_manifest(kind, ident, e, want_sha)
+            if kind == "armobj":  # the file set must be the id's: tombstone, then the signed C set
+                check_tombstone(cache, ident, man)
+                check_armobj_set(os.path.join(e, "tree"), man, want_set)
+                man = {k: v for k, v in man.items() if k != ARMOBJ_SET}
             touch_use(e)
             _sweep_temps(dest, man)
             if _same(dest, man):
@@ -541,113 +622,137 @@ def lake_hash(data, text=False):
     return "%016x" % (((1723 ^ k) * m) & _M64)
 
 
-# ---- the logged compile command is DATA from the publisher: only a known shape may be recompiled or trusted ----
-ARGV_FIXED = frozenset(["-c", "-fstack-clash-protection", "-ffp-contract=off", "-fdata-sections", "-ffunction-sections",
-                        "-fPIC", "-fvisibility=hidden", "-Wno-unused-command-line-argument", "-nostdinc", "-O3",
-                        "-DNDEBUG", "-DLEAN_EXPORTING"])
+# ---- the logged compile command is DATA from the publisher: it must EQUAL the command built from keyed values ----
+BRACKET = "-fbracket-depth=100000"  # the one extra flag JanusASL/lakefile.toml gives ArmASL and the janus-asl-check root
 
 
-def lakefile_flags(lake):
-    """The compiler arguments the package lakefiles declare (leancArgs/moreLeancArgs/weakLeancArgs strings) of
-    `lake`/../lakefile.toml (JanusASL/.lake; keyed through the ArmASL key and the jasl tables): the only flags beyond ARGV_FIXED a logged command may carry."""
-    import tomllib
-    out = set()
+def keyed_toolchain(pkgdir):
+    """(prefix, clang path) of the toolchain `lean` resolves to in pkgdir: `lean --print-prefix` and <prefix>/bin/clang,
+    as STRINGS (the argv of a logged command must equal them, no realpath indirection). CacheError (Inconclusive) when
+    LEAN_CC is set (builds with another compiler are not cacheable here), when lean does not answer, or when the
+    toolchain's own directories are symlinks (toolchain_content hashes files, not what a link points to)."""
+    if os.environ.get("LEAN_CC"):
+        raise Inconclusive("LEAN_CC is set: objects built with another compiler are neither published nor recompiled")
+    try:
+        pre = subprocess.run(["lean", "--print-prefix"], cwd=pkgdir, capture_output=True, text=True, timeout=120,
+                             stdin=subprocess.DEVNULL).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as ex:
+        raise Inconclusive("lean --print-prefix did not run (%s)" % ex)
+    if not pre or not os.path.isabs(pre) or os.path.realpath(pre) != pre:
+        raise CacheError("toolchain prefix %r is not an absolute, symlink-free path" % pre)
+    for d in ("", "bin", "include", "include/clang", "include/lean"):
+        q = os.path.join(pre, d) if d else pre
+        if os.path.islink(q) or not os.path.isdir(q):
+            raise CacheError("toolchain directory %s is a symlink or missing" % q)
+    cc = os.path.join(pre, "bin", "clang")
+    if not os.path.isfile(cc):
+        raise CacheError("no %s" % cc)
+    return pre, cc
 
-    def walk(x):
-        if isinstance(x, dict):
-            for k, v in x.items():
-                if k in ("leancArgs", "moreLeancArgs", "weakLeancArgs") and isinstance(v, list):
-                    out.update(a for a in v if isinstance(a, str) and a.startswith("-") and " " not in a)
-                else:
-                    walk(v)
-        elif isinstance(x, list):
-            for y in x:
-                walk(y)
 
-    try:  # NOT the Sail package's lakefile: a vendored checkout is not keyed content
-        with open(os.path.join(os.path.dirname(os.path.normpath(lake)), "lakefile.toml"), "rb") as fh:
-            walk(tomllib.load(fh))
-    except (OSError, ValueError):
-        pass
-    return out
-
-
-def argv_problem(argv, lake):
-    """None if argv has exactly the shape Lake logs for a C object (the toolchain clang, -c, one -o, one C file,
-    -I/--sysroot/-isystem into its own toolchain prefix, ARGV_FIXED flags and the lakefile's declared flags), else
-    why not. A logged command with anything else (-D/-include/-I elsewhere, -fplugin, @file, a shell, a second
-    C file) compiles other code from the same C: not recompiled, not trusted."""
-    if not argv or os.path.basename(argv[0]) != "clang":
-        return "the compiler is %r, not a toolchain clang" % (argv and argv[0])
-    pres = {os.path.dirname(os.path.dirname(argv[0])), os.path.dirname(os.path.dirname(os.path.realpath(argv[0])))}
-    pres = {p for p in pres if os.path.isfile(os.path.join(p, "include", "lean", "lean.h"))}
-    if not pres:
-        return "%s is not in a Lean toolchain" % argv[0]
-    ok_flags = ARGV_FIXED | lakefile_flags(lake)
-    want = {"-I": {p + "/include" for p in pres}, "--sysroot": pres, "-isystem": {p + "/include/clang" for p in pres}}
-    i, nc, no = 1, 0, 0
-    while i < len(argv):
-        a = argv[i]
-        if a == "-o" and i + 1 < len(argv):
-            no += 1
-            i += 2
-        elif a in want and i + 1 < len(argv):
-            if argv[i + 1] not in want[a]:
-                return "%s %s is not in the toolchain" % (a, argv[i + 1])
-            i += 2
-        elif a in ok_flags:
-            i += 1
-        elif a.endswith(".c") and not a.startswith("-"):
-            nc += 1
-            i += 1
-        else:
-            return "unexpected compiler argument %r" % a
-    if nc != 1 or no != 1:
-        return "the command has %d C files and %d -o" % (nc, no)
+def expected_extra(c_rel):
+    """The flags between -O3 -DNDEBUG and -DLEAN_EXPORTING for the C file c_rel (relative to JanusASL/.lake), or None
+    when no such object is cacheable. ArmASL's parts and the janus-asl-check root (JanusASL/Check) carry
+    -fbracket-depth=100000 (their lakefile entries); the other JanusASL modules and Sail carry nothing more. Taken from
+    code, not from the lakefile: a decoy lakefile table cannot widen it (the keyed tables decide what Lake logs; a
+    mismatch makes the object unpublishable, never trusted)."""
+    if c_rel == "build/ir/ArmASL.c" or c_rel.startswith("build/ir/ArmASL/"):
+        return [BRACKET]
+    if c_rel == "build/ir/JanusASL/Check.c":
+        return [BRACKET]
+    if c_rel.startswith("build/ir/JanusASL/") or c_rel.startswith("packages/Sail/.lake/build/ir/"):
+        return []
     return None
 
 
-def recompile_argv(argv, c_path, out_path):
-    """The logged compile command with its output and C file replaced (nothing else is touched)."""
-    res, i, seen_o, seen_c = [], 0, False, False
-    while i < len(argv):
-        a = argv[i]
-        if a == "-o" and i + 1 < len(argv):
-            res += ["-o", out_path]
-            i += 2
-            seen_o = True
+def expected_argv(cc, prefix, c_path, out_path, c_rel):
+    extra = expected_extra(c_rel)
+    if extra is None:
+        return None
+    return [cc, "-c", "-o", out_path, c_path, "-I", prefix + "/include", "-fstack-clash-protection", "-ffp-contract=off",
+            "-fdata-sections", "-ffunction-sections", "-fPIC", "-fvisibility=hidden", "-Wno-unused-command-line-argument",
+            "--sysroot", prefix, "-nostdinc", "-isystem", prefix + "/include/clang", "-O3", "-DNDEBUG"] + extra + ["-DLEAN_EXPORTING"]
+
+
+def argv_problem(argv, cc, prefix, c_rel):
+    """None iff argv EQUALS the command Lake logs for the object of c_rel, built from the keyed compiler path and
+    prefix (list equality: nothing may be added, dropped, repeated or reordered; argv[0], -I, --sysroot and -isystem are
+    the keyed strings). Only the -o / C paths are free, and only in form: <C>.o.export and a path ending in /<c_rel>.
+    Only .c.o.export objects are cacheable (the noexport command is not part of the table)."""
+    if not isinstance(argv, list) or len(argv) < 5 or not all(isinstance(a, str) for a in argv):
+        return "no compile command"
+    c_path, out = argv[4], argv[3]
+    if out != c_path + ".o.export":
+        return "the output %r is not <C>.o.export of %r" % (out, c_path)
+    if not (c_path.endswith("/" + c_rel) and c_path.startswith("/") and ".." not in c_path.split("/")):
+        return "the C path %r is not .../%s" % (c_path, c_rel)
+    want = expected_argv(cc, prefix, c_path, out, c_rel)
+    if want is None:
+        return "%s is not a cacheable object" % c_rel
+    if argv != want:
+        for i, (a, b) in enumerate(zip(argv, want)):
+            if a != b:
+                return "argument %d is %r, expected %r" % (i, a, b)
+        return "the command has %d arguments, expected %d" % (len(argv), len(want))
+    return None
+
+
+BWRAP_CANDIDATES = ["/usr/bin/bwrap", "/usr/local/bin/bwrap", "/bin/bwrap"]  # fixed locations; never PATH (a shim there is not trusted)
+UNSANDBOXED_OPTIN = "ASL_OBJ_RECOMPILE_UNSANDBOXED"
+
+
+def _bwrap():
+    for c in BWRAP_CANDIDATES:
+        try:
+            st = os.stat(c)
+        except OSError:
             continue
-        if a.endswith(".c") and not seen_c and i > 0 and argv[i - 1] not in ("-I", "-isystem", "-include"):
-            res.append(c_path)
-            seen_c = True
-        else:
-            res.append(a)
-        i += 1
-    if not (seen_o and seen_c):
-        raise CacheError("the logged compile command has no -o / C file to replace")
-    return res
+        if stat.S_ISREG(st.st_mode) and st.st_uid == 0 and not (st.st_mode & 0o022) and os.access(c, os.X_OK):
+            return c
+    return None
 
 
 def _sandbox_prefix(work, c_dir):
-    """The command prefix that runs a recompile with no network, a read-only filesystem except `work`, TMPDIR on the work dir,
-    its own pid namespace and no capabilities (bubblewrap, as cmd/janus/sandbox.go prefers). [] when bwrap is missing
-    or unusable here: the recompile then runs as the keyed toolchain clang with a scrubbed temp dir and stdin closed,
-    which is only as safe as argv_problem() (a fixed shape: toolchain clang, no -fplugin/@file/-include) makes it."""
-    bw = shutil.which("bwrap")
-    if not bw or os.environ.get("ASL_OBJ_RECOMPILE_NOSANDBOX") == "1":
+    """The command prefix that runs a recompile with no network, a read-only filesystem except `work`, TMPDIR on the
+    work dir, its own pid/ipc namespaces, no capabilities and the HMAC key directory masked (bubblewrap from a FIXED
+    root-owned location, as cmd/janus/sandbox.go prefers). A missing or failing bwrap is INCONCLUSIVE: the recompile
+    does not run, unless ASL_OBJ_RECOMPILE_UNSANDBOXED=1 says the operator accepts an unsandboxed run (loud warning;
+    the command is then only as safe as expected_argv makes it: the keyed toolchain clang with a fixed flag list)."""
+    bw = _bwrap()
+    probe_ok = False
+    pre = []
+    if bw:
+        pre = [bw, "--unshare-net", "--unshare-pid", "--unshare-ipc", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
+               "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
+        try:
+            kd = os.path.dirname(key_path())
+            if os.path.isdir(kd):
+                pre += ["--tmpfs", kd]  # the HMAC key is not readable inside
+        except Exception:
+            pass
+        pre += ["--bind", work, work, "--chdir", c_dir, "--"]
+        try:
+            probe_ok = subprocess.run(pre + ["/bin/true"], capture_output=True, stdin=subprocess.DEVNULL, timeout=60).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            probe_ok = False
+    if probe_ok:
+        return pre
+    if os.environ.get(UNSANDBOXED_OPTIN) == "1":
+        print("cache: WARNING: no usable bubblewrap; recompiling UNSANDBOXED because %s=1" % UNSANDBOXED_OPTIN, file=sys.stderr)
         return []
-    return [bw, "--unshare-net", "--unshare-pid", "--unshare-ipc", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
-            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--bind", work, work, "--chdir", c_dir, "--"]
+    raise Inconclusive("no usable bubblewrap at %s: the recompile is not run unsandboxed (%s=1 opts in)" % (BWRAP_CANDIDATES, UNSANDBOXED_OPTIN))
 
 
-def recompile_object(argv, c_path, work):
-    """Compile c_path with the (validated) logged command into a file under work; returns its SHA-256. Anything that
-    stops the compile from yielding an answer (timeout, a missing tool, a crash, a sandbox that cannot start) is
-    Inconclusive, never a match and never a mismatch."""
+def recompile_object(cc, prefix, c_path, c_rel, work):
+    """Compile c_path with the command built from the keyed values (expected_argv) into a file under work; returns its
+    SHA-256. Anything that stops the compile from yielding an answer (timeout, a missing tool, a crash, a sandbox that
+    cannot start, a full disk) is Inconclusive, never a match and never a mismatch."""
     out = os.path.join(work, "recompiled.o")
-    env = dict(os.environ)
+    env = {k: v for k, v in os.environ.items() if k != "JANUS_CACHE_KEY_DIR"}
     env["TMPDIR"] = work
-    cmd = recompile_argv(argv, c_path, out)
+    cmd = expected_argv(cc, prefix, c_path, out, c_rel)
+    if cmd is None:
+        raise Inconclusive("%s is not a cacheable object" % c_rel)
     pre = _sandbox_prefix(work, os.path.dirname(c_path))
     try:
         r = subprocess.run(pre + cmd, cwd=os.path.dirname(c_path), capture_output=True, env=env, stdin=subprocess.DEVNULL,
@@ -660,6 +765,22 @@ def recompile_object(argv, c_path, work):
         return sha_file(out)
     except OSError as ex:
         raise Inconclusive("recompile produced no object (%s)" % ex)
+
+
+def clean_stale(d, prefixes=(".recompile-", ".objstage-"), age=3600):
+    """Remove leftover private work directories of killed runs (our own prefixes, older than `age` seconds) in d."""
+    import time
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return
+    for n in names:
+        q = os.path.join(d, n)
+        try:
+            if n.startswith(prefixes) and os.path.isdir(q) and not os.path.islink(q) and time.time() - os.lstat(q).st_mtime > age:
+                shutil.rmtree(q, ignore_errors=True)
+        except OSError:
+            pass
 
 
 def draw_random(cands, k):
@@ -698,7 +819,12 @@ def recompile_dir(e, man, c_root, sample, cache):
         n = int(sample)
         objs = objs[:n] + (draw_random(objs[n:], int(os.environ.get("ASL_OBJ_RECOMPILE_RANDOM", "2"))) if n > 0 else [])
     bad = []
-    work = tempfile.mkdtemp(prefix=".recompile-", dir=cache)
+    prefix, cc = keyed_toolchain(os.path.dirname(os.path.normpath(c_root)))
+    clean_stale(cache)
+    try:
+        work = tempfile.mkdtemp(prefix=".recompile-", dir=cache)
+    except OSError as ex:
+        raise Inconclusive("cannot create a work directory in %s (%s)" % (cache, ex))
     try:
         for _, rel, cp in objs:
             try:
@@ -708,13 +834,16 @@ def recompile_dir(e, man, c_root, sample, cache):
                     _, _, argv = trace_facts(f.read())
             except Exception as ex:  # a missing .cin / unreadable trace of a signed entry: unknown, not a verdict
                 raise Inconclusive("entry record of %s unreadable (%s)" % (rel, ex))
-            if sha_file(cp) != cin:
-                raise Inconclusive("the C file of %s does not hash to the entry's record" % rel)
-            why = argv_problem(argv, c_root)
-            if why:  # a logged command of another shape is never run: the entry is poisoned (or foreign)
-                bad.append(rel)
+            try:
+                if sha_file(cp) != cin:
+                    raise Inconclusive("the C file of %s does not hash to the entry's record" % rel)
+            except OSError as ex:
+                raise Inconclusive("cannot read %s (%s)" % (cp, ex))
+            c_rel = rel[:rel.index(".c.o.")] + ".c"
+            if rel.endswith(".noexport") or argv_problem(argv, cc, prefix, c_rel):
+                bad.append(rel)  # a logged command of another shape is never run: the entry is poisoned (or foreign)
                 continue
-            if recompile_object(argv, cp, work) != man[rel]:
+            if recompile_object(cc, prefix, cp, c_rel, work) != man[rel]:
                 bad.append(rel)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -723,7 +852,7 @@ def recompile_dir(e, man, c_root, sample, cache):
 
 # ---- store ----
 
-def store(kind, cache, ident, src, rels, inputs=None, recompile=None):
+def store(kind, cache, ident, src, rels, inputs=None, recompile=None, want_set=None):
     """Publish the files rels (relative to src) as the entry ident. Returns "stored" or "present"."""
     e = entry_dir(kind, cache, ident)
     os.makedirs(os.path.dirname(e), exist_ok=True)
@@ -736,7 +865,7 @@ def store(kind, cache, ident, src, rels, inputs=None, recompile=None):
     try:
         if os.path.isdir(e):
             try:
-                verify_entry(kind, cache, ident)
+                verify_entry(kind, cache, ident, want_set)
                 if recompile:  # (c_root, sample): a recompile that disagrees proves the stored objects poisoned
                     n, bad = recompile_entry(kind, cache, ident, recompile[0], recompile[1])
                     if bad:
@@ -761,6 +890,10 @@ def store(kind, cache, ident, src, rels, inputs=None, recompile=None):
                 os.chmod(d, (os.stat(s).st_mode & 0o111) | 0o444)
                 lines.append("%s  %s\n" % (sha_file(d), r))
             data = "".join(lines).encode()
+            if kind == "armobj":  # bound to the id's C set, and not the bytes of a quarantined forgery
+                man_new = parse_manifest(data)
+                check_armobj_set(os.path.join(tmp, "tree"), man_new, want_set)
+                check_tombstone(cache, ident, man_new)
             if recompile and kind == "armobj":  # never publish an object that does not recompile bit-identically
                 n, bad = recompile_dir(tmp, parse_manifest(data), recompile[0], recompile[1], os.path.dirname(e))
                 if bad:
