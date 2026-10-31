@@ -149,6 +149,13 @@ writers used to run outside the lake lock, so `asl-verify` and `rtasl-replay` ov
 `rtasl-go` additionally has a tree of its own. `RT_ASL_KEEP_DIR` (`<out>/lanes/rtasl-<group>.keep`) is exported to the
 rt-asl lanes for their failure logs. Tested by `scripts/lib/test-treelock.sh`.
 
+**Speed of the ASL lanes** (2026-10-30, `agent/speed-lanes2`). `asl-verify` took 97 min because the module-cache restore
+rewrote Janus modules (path-dependent `.olean`s), the tree's framework stamp then failed, and `janus verify --janus-root`
+rebuilt the framework and every JanusASL module (79 min for the first example; the other three took 30 s each): the
+restore now records the verified files it wrote and `scripts/lib/restamp.py` moves only those pins (self-test
+`scripts/lib/test-restamp.sh`). `rtasl-replay` runs 4 leanchecker batches at once (`JANUS_REPLAY_PAR`), `rtasl-fsqrt`
+splits its Lean `--dump-asl` run into `RT_ASL_FSQRT_PAR` (8) processes (6m02 -> 54 s, byte-identical output).
+
 **Kept trees.** The isolated lake-lane trees are `artifacts/gate/trees/<hash of HEAD tree + uncommitted diff>/{x86,asl}`.
 They are removed when the gate passes, kept (path reported) when it fails or is cancelled, and reused by a
 rerun of the same sources (`scripts/lib/test-gatelanes.sh` tests limits, keep, reuse, removal). A second run on the

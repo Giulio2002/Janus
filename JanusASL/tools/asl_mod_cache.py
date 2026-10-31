@@ -2,7 +2,7 @@
 """Shared per-module build cache for the JanusASL proofs and the Janus framework modules they
 import (scripts/asl.sh, ASL_CACHE; docs/ASL.md "Build cache").
 
-    python3 -I JanusASL/tools/asl_mod_cache.py restore REPO_ROOT CACHE   copy cached builds in
+    python3 -I JanusASL/tools/asl_mod_cache.py restore REPO_ROOT CACHE [--record FILE]   copy cached builds in
     python3 -I JanusASL/tools/asl_mod_cache.py publish REPO_ROOT CACHE [--exe]
                                     store the builds of the JanusASL library's closure (--exe: and
                                     of its executables'), after `lake build` has built them
@@ -338,6 +338,9 @@ def read_manifest(e):
     return out
 
 
+RESTORED = {}   # absolute path -> SHA-256 of every file this process restored or found current (signed manifest entries)
+
+
 def restore(ks, cache):
     hit = miss = same = bad = 0
     try:
@@ -426,6 +429,8 @@ def restore_one(ks, p, mod, key, e):
         rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items()}
         if all(os.path.isfile(os.path.join(p.dir, rel)) and not os.path.islink(os.path.join(p.dir, rel))
                and sha_file(os.path.join(p.dir, rel)) == h for rel, (_, h) in rels.items()):
+            for rel, (_, h) in rels.items():
+                RESTORED[os.path.join(p.dir, rel)] = h
             return "same"
         for rel, (r, h) in rels.items():
             src, dst = os.path.join(e, "tree", r), os.path.join(p.dir, rel)
@@ -442,10 +447,13 @@ def restore_one(ks, p, mod, key, e):
                 break
             os.replace(tmp, dst)
             copied.append(dst)
+            RESTORED[dst] = h
     except (OSError, bc.CacheError) as ex:
         why = "entry rejected (%s)" % ex
     if why is None:
         return "hit"
+    for d in copied:
+        RESTORED.pop(d, None)
     for d in copied + [os.path.join(p.dir, x) for x in outputs(p, mod)]:
         try:
             os.unlink(d)
@@ -479,6 +487,28 @@ def entry_present(ks, k, e):
         return False
 
 
+def stamp_mismatch(ks, p, mod):
+    """The first output of a Janus module that differs from the framework stamp's pin for it, or None. A tree whose
+    framework build is stamped (.lake/janus-framework.ready) must not sign a Janus module that is not the stamped file;
+    a tree without a stamp, and files the stamp does not pin, are unconstrained."""
+    if p.name != "janus":
+        return None
+    try:
+        with open(os.path.join(p.dir, ".lake", "janus-framework.ready")) as f:
+            pins = json.load(f).get("pins")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(pins, dict):
+        return None
+    lib = os.path.join(".lake", "build", "lib", "lean") + os.sep
+    for out in outputs(p, mod):
+        if out.startswith(lib):
+            want = pins.get(out[len(lib):].replace(os.sep, "/"))
+            if want is not None and sha_file(os.path.join(p.dir, out)) != want:
+                return out
+    return None
+
+
 def publish(ks, cache, roots):
     stored = present = skipped = 0
     try:
@@ -501,6 +531,11 @@ def publish(ks, cache, roots):
         trace = os.path.join(p.build(), "lib", "lean", *mod.split(".")) + ".trace"
         olean = os.path.join(p.build(), "lib", "lean", *mod.split(".")) + ".olean"
         if not (os.path.isfile(trace) and os.path.isfile(olean)) or os.path.getmtime(trace) < os.path.getmtime(p.source(mod)):
+            skipped += 1
+            continue
+        bad = stamp_mismatch(ks, p, mod)
+        if bad:
+            print("asl module cache: %s: %s differs from the framework stamp's pin; not stored" % (mod, bad), file=sys.stderr)
             skipped += 1
             continue
         os.makedirs(os.path.dirname(e), exist_ok=True)
@@ -744,6 +779,27 @@ def main():
         print(json.dumps(ks.inputs_of.get(sys.argv[3]), sort_keys=True, indent=1))
     elif cmd == "restore":
         restore(ks, sys.argv[3])
+        # --record FILE: the files restored (or found current) from HMAC-verified entries, with their SHA-256, for
+        # scripts/lib/restamp.py (a record is written even when empty)
+        if "--record" in sys.argv[4:]:
+            rec = sys.argv[sys.argv.index("--record") + 1]
+            # signed (HMAC, domain "restamp", bound to this tree) so restamp.py cannot be fed a forged record; written
+            # with O_EXCL|O_NOFOLLOW at 0600 under a name nobody else can have planted, then renamed into place
+            doc = json.dumps({"files": RESTORED, "mac": ks.bc.record_mac(root, RESTORED)}, sort_keys=True).encode()
+            tmp = rec + ".tmp%d" % os.getpid()
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(doc)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, rec)
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
     elif cmd == "publish":
         # the roots of the JanusASL library (and with --exe, of its executables): the targets
         # `scripts/asl.sh` has just built; their closure is up to date

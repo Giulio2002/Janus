@@ -407,7 +407,11 @@ add govet "go vet ./..."
 add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && scripts/lib/test-modelpin.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
 add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
-add asl-verify "$(laneenv "$tree_aslv") cd '$tree_aslv' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4 && test ! -L '$tree_aslv/JanusASL/.lake'" "$(needs asl-build)"
+# asl-verify waits for asl-build only to find the ArmASL model in the build cache (asl-build builds and publishes it, and the
+# model takes ~45 min to build): when the verified cache already holds this model (scripts/asl.sh cached) there is nothing to
+# wait for, and the two lanes (separate trees) run side by side; cache entries are published atomically under per-key locks.
+asl_verify_needs() { if scripts/asl.sh cached >/dev/null 2>&1; then echo "gate: the ArmASL model is in the verified build cache: asl-verify does not wait for asl-build" >&2; else needs asl-build; fi; }
+add asl-verify "$(laneenv "$tree_aslv") cd '$tree_aslv' && scripts/asl.sh verify | tee '$out/asl-verify.txt' && test \"\$(grep -c ': ASL corollary verified' '$out/asl-verify.txt')\" = 4 && test ! -L '$tree_aslv/JanusASL/.lake'" "$(asl_verify_needs)"
 add asl-build "$(laneenv "$tree") cd '$tree' && scripts/asl.sh build"
 add sail-build "$(laneenv "$tree") cd '$tree' && scripts/oracle-sail.sh build"
 for g in prove rel strict replay btf probes fsqrt go; do
