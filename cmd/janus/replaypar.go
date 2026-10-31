@@ -60,9 +60,11 @@ func newRootAliasName() (string, error) {
 
 // parReplay configures a parallel framework replay.
 type parReplay struct {
-	dirs      []string // the search path leanchecker sees: LEAN_PATH entries, then the toolchain library
-	workers   int      // concurrent leanchecker processes (<= 1: the single process)
-	aliasBase string   // directory under which the root alias directory is made
+	dirs      []string   // the search path leanchecker sees: LEAN_PATH entries, then the toolchain library
+	workers   int        // concurrent leanchecker processes (<= 1: the single process)
+	aliasBase string     // directory under which the root alias directory is made
+	budget    *memBudget // admission shared with the other replays of the process (nil: the process-wide one)
+	threads   int        // LEAN_NUM_THREADS of a worker, for its budget estimate (0: replayThreads())
 	// run runs leanchecker argv with the extra directories placed FIRST on the search path.
 	run func(extra []string, argv ...string) (string, error)
 }
@@ -94,21 +96,6 @@ func guardLimitBytes() int64 {
 		return 0
 	}
 	return g.limit
-}
-
-// frameworkReplayThreads is LEAN_NUM_THREADS of each framework replay worker: $JANUS_REPLAY_THREADS
-// if set; else 4 only when the host has at least 64 GiB, every worker's 12 GiB budget fits in the
-// guard's per-job limit (0: none enforced) and the workers' budgets together stay within 3/4 of
-// the host's memory; else the usual 2.
-func frameworkReplayThreads(workers int, memTotal, guardLimit int64) int {
-	if n, err := strconv.Atoi(os.Getenv("JANUS_REPLAY_THREADS")); err == nil && n > 0 {
-		return n
-	}
-	if memTotal >= workerWideMinTotal && (guardLimit == 0 || guardLimit >= workerWideThreadsMem) &&
-		int64(workers)*workerWideThreadsMem <= memTotal*3/4 {
-		return 4
-	}
-	return replayThreads()
 }
 
 // errPlanUnsupported marks an environment whose module set the scan cannot mirror exactly; the
@@ -478,11 +465,11 @@ func planFrameworkReplay(par *parReplay, fw *pinnedLib) ([][]replayUnit, error) 
 // It returns leanchecker's output of the first failing worker (in plan order).
 func runFrameworkReplay(checker string, run func(argv ...string) (string, error), par *parReplay, fw *pinnedLib) (string, error) {
 	if par == nil || par.workers <= 1 {
-		return run(checker, "Janus")
+		return runAdmitted(par, func() (string, error) { return run(checker, "Janus") })
 	}
 	workers, err := planFrameworkReplay(par, fw)
 	if errors.Is(err, errPlanUnsupported) {
-		return run(checker, "Janus")
+		return runAdmitted(par, func() (string, error) { return run(checker, "Janus") })
 	}
 	if err != nil {
 		return err.Error(), err
@@ -493,7 +480,7 @@ func runFrameworkReplay(checker string, run func(argv ...string) (string, error)
 			if u.alias {
 				d, cleanup, err := makeRootAlias(par.aliasBase, firstJanusDir(par.dirs), u.arg, fw)
 				if errors.Is(err, errPlanUnsupported) {
-					return run(checker, "Janus")
+					return runAdmitted(par, func() (string, error) { return run(checker, "Janus") })
 				}
 				if err != nil {
 					return err.Error(), err
@@ -521,7 +508,17 @@ func runFrameworkReplay(checker string, run func(argv ...string) (string, error)
 					extra = []string{aliasDir}
 				}
 			}
+			bud := par.budget
+			if bud == nil {
+				bud = replayBudget()
+			}
+			th := par.threads
+			if th <= 0 {
+				th = replayThreads()
+			}
+			release := bud.acquire(workerPeak(th))
 			out, err := par.run(extra, argv...)
+			release()
 			if err == nil {
 				err = checkWorkerOutput(out, w)
 				if err != nil {
@@ -574,4 +571,22 @@ func hasAliasPrefix(name string) bool {
 		return false
 	}
 	return strings.EqualFold(string(rs[:len(pr)]), rootAliasPrefix)
+}
+
+// runAdmitted runs the single-process replay under the shared memory admission.
+func runAdmitted(par *parReplay, f func() (string, error)) (string, error) {
+	var bud *memBudget
+	th := 0
+	if par != nil {
+		bud, th = par.budget, par.threads
+	}
+	if bud == nil {
+		bud = replayBudget()
+	}
+	if th <= 0 {
+		th = replayThreads()
+	}
+	release := bud.acquire(workerPeak(th))
+	defer release()
+	return f()
 }

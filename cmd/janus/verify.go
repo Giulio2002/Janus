@@ -761,12 +761,12 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 		}
 		if err == nil {
 			fwPath := tc.leanPathEnv(janusLibDir)
-			nWorkers := replayWorkers()
-			fwThreads := frameworkReplayThreads(nWorkers, memInfo("MemTotal"), guardLimitBytes())
+			nWorkers, fwThreads := replaySizing(replayWorkers(), effectiveMemLimit(), guardLimitBytes())
 			par := &parReplay{
 				// leanchecker's search path: LEAN_PATH, then the toolchain library.
 				dirs:      append(filepath.SplitList(fwPath), filepath.Join(tc.sysroot, "lib", "lean")),
 				workers:   nWorkers,
+				threads:   fwThreads,
 				aliasBase: rb,
 				run: func(extra []string, argv ...string) (string, error) {
 					return runLeanProtectedThreads(sb, tc, fwRunDir, nil, []string{janusLibDir}, tc.leanPathEnv(append(append([]string{}, extra...), janusLibDir)...), fwThreads, argv...)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // parTree makes a synthetic framework library (an olean per module) and returns the library, the
@@ -398,6 +399,8 @@ func TestParallelReplayVerdict(t *testing.T) {
 	f.release()
 }
 
+var heavyReplayMu sync.Mutex
+
 // realParFixture: the repository's framework build, the toolchain and a runner for the real
 // leanchecker (unsandboxed; the sandbox does not change what is replayed).
 func realParFixture(t *testing.T) (lib string, tc *toolchain, fw *pinnedLib, runIn func(lib string) func(extra []string, argv ...string) (string, error)) {
@@ -426,6 +429,10 @@ func realParFixture(t *testing.T) (lib string, tc *toolchain, fw *pinnedLib, run
 	if tc, err = findToolchain(lake, repoRoot); err != nil || !tc.hasChecker {
 		missing("no leanchecker")
 	}
+	// The real-leanchecker tests do not run concurrently with each other (each already runs
+	// parallel workers; together they exceed a gate shard's memory limit).
+	heavyReplayMu.Lock()
+	t.Cleanup(heavyReplayMu.Unlock)
 	fwd, err := loadFramework(repoRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -552,8 +559,12 @@ func TestParallelFrameworkReplayCatchesForgeryInEveryPartition(t *testing.T) {
 			t.Fatalf("forging %s: %v\n%s", mod, err, out)
 		}
 		out, err, _ := realPar(t, tc, lib, runIn, 4)
-		if err == nil || !strings.Contains(out, "forged") {
-			t.Errorf("forged %s: err %v\n%s", mod, err, out)
+		var mk *memKillError
+		if errors.As(err, &mk) || strings.Contains(out, "memory limit") {
+			t.Fatalf("forged %s: the replay was OOM-killed (inconclusive), not a detection: %v\n%s", mod, err, out)
+		}
+		if err == nil || !strings.Contains(out, "leanchecker found a problem in") || !strings.Contains(out, "forged") {
+			t.Errorf("forged %s: not a kernel detection: err %v\n%s", mod, err, out)
 		}
 	}
 }
@@ -621,32 +632,6 @@ func TestReplayWorkersCapAndThreadsRule(t *testing.T) {
 		if got := replayWorkers(); got != want {
 			t.Errorf("JANUS_REPLAY_WORKERS=%q: %d, want %d", in, got, want)
 		}
-	}
-	t.Setenv("JANUS_REPLAY_THREADS", "")
-	const G = int64(1) << 30
-	for _, c := range []struct {
-		workers    int
-		mem, guard int64
-		want       int
-		why        string
-	}{
-		{4, 251 * G, 24 * G, 4, "big host, big guard"},
-		{4, 64 * G, 24 * G, 4, "exactly 64 GiB: 4*12=48 = 3/4"},
-		{4, 63 * G, 24 * G, 2, "under 64 GiB"},
-		{4, 251 * G, 11 * G, 2, "guard limit below a worker's 12 GiB"},
-		{4, 251 * G, 12 * G, 4, "guard limit exactly 12 GiB"},
-		{4, 251 * G, 0, 4, "no guard enforced, host big enough"},
-		{8, 64 * G, 24 * G, 2, "8 workers x 12 GiB exceed 3/4 of 64 GiB"},
-		{8, 128 * G, 24 * G, 4, "8 x 12 = 96 = 3/4 of 128"},
-		{4, 0, 24 * G, 2, "unknown MemTotal"},
-	} {
-		if got := frameworkReplayThreads(c.workers, c.mem, c.guard); got != c.want {
-			t.Errorf("%s: %d, want %d", c.why, got, c.want)
-		}
-	}
-	t.Setenv("JANUS_REPLAY_THREADS", "3")
-	if frameworkReplayThreads(4, 251*G, 24*G) != 3 {
-		t.Error("JANUS_REPLAY_THREADS must win")
 	}
 }
 
@@ -747,5 +732,148 @@ func TestParallelReplayE2EForgedRootNoVerdict(t *testing.T) {
 				t.Errorf("a framework verdict was recorded for the forged-root build")
 			}
 		})
+	}
+}
+
+func TestReplaySizing(t *testing.T) {
+	t.Setenv("JANUS_REPLAY_THREADS", "")
+	const G = int64(1) << 30
+	for _, c := range []struct {
+		want                    int
+		eff, guard              int64
+		wantWorkers, wantThread int
+		why                     string
+	}{
+		{4, 251 * G, 24 * G, 4, 4, "big host: 4 x 10 GiB fits in half"},
+		{4, 80 * G, 24 * G, 4, 4, "4 x 10 = 40 = half of 80"},
+		{4, 79 * G, 24 * G, 4, 2, "just under: 2 threads, 4 x 5 fits"},
+		{4, 24 * G, 24 * G, 2, 2, "24 GiB enclosing cgroup (a gate shard): half = 12 GiB, 2 workers of 5"},
+		{4, 8 * G, 8 * G, 1, 2, "tiny: one worker"},
+		{8, 128 * G, 24 * G, 8, 2, "8 x 10 = 80 > 64: 2 threads, 8 x 5 = 40 fits"},
+		{4, 251 * G, 11 * G, 4, 2, "guard limit below 12 GiB: 2 threads"},
+		{4, 0, 0, 4, 2, "unknown limit: as requested, 2 threads"},
+	} {
+		w, th := replaySizing(c.want, c.eff, c.guard)
+		if w != c.wantWorkers || th != c.wantThread {
+			t.Errorf("%s: %d workers x %d threads, want %d x %d", c.why, w, th, c.wantWorkers, c.wantThread)
+		}
+	}
+	t.Setenv("JANUS_REPLAY_THREADS", "3")
+	if _, th := replaySizing(4, 251*G, 24*G); th != 3 {
+		t.Errorf("JANUS_REPLAY_THREADS must win: %d", th)
+	}
+}
+
+// A fake cgroup tree with small memory.max values: the effective limit is the smallest on the
+// path, and the host/guard limits count too.
+func TestEffectiveLimitFakeCgroupTree(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, v string) {
+		writeBytes(t, filepath.Join(root, rel, "memory.max"), []byte(v+"\n"))
+	}
+	write("", "max")
+	write("a", "30000000000")
+	write("a/b", "max")
+	write("a/b/c", "24000000000")
+	write("a/b/c/d", "max")
+	if got := cgroupChainLimit(filepath.Join(root, "a/b/c/d"), root); got != 24000000000 {
+		t.Errorf("chain limit %d", got)
+	}
+	write("a/b", "1000000000")
+	if got := cgroupChainLimit(filepath.Join(root, "a/b/c/d"), root); got != 1000000000 {
+		t.Errorf("chain limit with a smaller ancestor %d", got)
+	}
+	if got := cgroupChainLimit(filepath.Join(root, "x"), root); got != 0 {
+		t.Errorf("no limits: %d", got)
+	}
+	const G = int64(1) << 30
+	if got := effectiveLimit(251*G, 24*G, 24*G); got != 24*G {
+		t.Errorf("effective %d", got)
+	}
+	if got := effectiveLimit(251*G, 0, 0); got != 251*G {
+		t.Errorf("effective host only %d", got)
+	}
+	if got := effectiveLimit(16*G, 24*G, 24*G); got != 16*G {
+		t.Errorf("effective small host %d", got)
+	}
+}
+
+// The admission: workers never hold more than the budget at once (a lone oversized request is
+// admitted alone), and everything is released.
+func TestMemBudgetAdmission(t *testing.T) {
+	b := newMemBudget(10)
+	var mu sync.Mutex
+	cur, maxCur := int64(0), int64(0)
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rel := b.acquire(4)
+			mu.Lock()
+			cur += 4
+			if cur > maxCur {
+				maxCur = cur
+			}
+			mu.Unlock()
+			time.Sleep(5 * time.Millisecond)
+			mu.Lock()
+			cur -= 4
+			mu.Unlock()
+			rel()
+		}()
+	}
+	wg.Wait()
+	if maxCur > 10 || b.used != 0 {
+		t.Errorf("held up to %d of 10, used after %d", maxCur, b.used)
+	}
+	rel := b.acquire(1000)
+	if b.used != 10 {
+		t.Errorf("oversized request holds %d", b.used)
+	}
+	rel()
+	if newMemBudget(0).acquire(5) == nil {
+		t.Error("no budget: nil release")
+	}
+}
+
+// Replays share the process budget: two concurrent parallel replays over a budget that holds one
+// worker never have two workers running at once.
+func TestParallelReplaysShareTheBudget(t *testing.T) {
+	lib, tcLib, fw := parTree(t)
+	b := newMemBudget(workerPeak(2))
+	var mu sync.Mutex
+	running, maxRunning := 0, 0
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		fc := &fakeChecker{}
+		par := parFor(t, lib, tcLib, fc, 4)
+		par.budget = b
+		inner := par.run
+		par.run = func(extra []string, argv ...string) (string, error) {
+			mu.Lock()
+			running++
+			if running > maxRunning {
+				maxRunning = running
+			}
+			mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+			out, err := inner(extra, argv...)
+			mu.Lock()
+			running--
+			mu.Unlock()
+			return out, err
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := runFrameworkReplay("leanchecker", nil, par, fw); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if maxRunning != 1 {
+		t.Errorf("%d workers ran at once over a one-worker budget", maxRunning)
 	}
 }
