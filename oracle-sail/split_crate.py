@@ -33,15 +33,29 @@ def sha(p):
     return h.hexdigest()
 
 
-def tree(root):
-    out = {}
+def tree(root, skip_root=False):
+    """({relative path: (sha256, executable bit)} of every file under `root`, the set of its directories).
+    With skip_root (the pinned checkout only), `.git` and `target` are skipped directly under the crate root, the
+    checkout's git dir and build dir; the copy has neither, so there they are paths like any other; every other path at any depth, dotted names included, is compared. A symlink (file or
+    directory) anywhere is an error."""
+    out, dirs_out = {}, set()
     for d, dirs, files in os.walk(root):
-        dirs[:] = sorted(x for x in dirs if x not in (".git", "target"))
+        if skip_root and d == root:
+            dirs[:] = [x for x in dirs if x not in (".git", "target")]
+        dirs.sort()
+        for x in dirs:
+            p = os.path.join(d, x)
+            assert not os.path.islink(p), "symlinked directory " + p
+            dirs_out.add(os.path.relpath(p, root))
         for f in sorted(files):
             p = os.path.join(d, f)
-            assert not os.path.islink(p), p
-            out[os.path.relpath(p, root)] = sha(p)
-    return out
+            assert not os.path.islink(p), "symlink " + p
+            out[os.path.relpath(p, root)] = (sha(p), bool(os.stat(p).st_mode & 0o111))
+    return out, dirs_out
+
+
+def shas(t):
+    return {k: v[0] for k, v in t.items()}
 
 
 def rev_of(checkout):
@@ -50,8 +64,8 @@ def rev_of(checkout):
 
 rev = rev_of(checkout)
 assert subprocess.run(["git", "-C", checkout, "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True).stdout.strip() == "", "crate checkout is modified"
-base = tree(checkout)
-assert base["build.rs"] == orig_sha, "pinned crate build.rs is not the expected file"
+base, base_dirs = tree(checkout, True)
+assert base["build.rs"][0] == orig_sha, "pinned crate build.rs is not the expected file"
 crate = os.path.join(dest, "sail-aarch64-oracle")
 
 
@@ -59,11 +73,11 @@ def make():
     os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
     tmp = tempfile.mkdtemp(prefix=".split-crate.", dir=os.path.dirname(os.path.abspath(dest)))
     c = os.path.join(tmp, "sail-aarch64-oracle")
-    shutil.copytree(checkout, c, ignore=shutil.ignore_patterns(".git", "target"), symlinks=True)
+    shutil.copytree(checkout, c, ignore=lambda d, names: [n for n in names if d == checkout and n in (".git", "target")], symlinks=True)
     subprocess.run(["patch", "-s", "-p0", os.path.join(c, "build.rs"), patch], check=True)
     got = sha(os.path.join(c, "build.rs"))
     assert got == patched_sha, "patched build.rs hash %s != pinned %s" % (got, patched_sha)
-    files = tree(c)
+    files = shas(tree(c)[0])
     json.dump({"files": files, "package": None}, open(os.path.join(c, ".cargo-checksum.json"), "w"), sort_keys=True)
     with open(os.path.join(tmp, "config.toml"), "w") as f:
         f.write('[source."%s"]\ngit = "https://github.com/yufengzjj/sail-aarch64-oracle"\nrev = "%s"\nreplace-with = "janus-split-crate"\n'
@@ -77,14 +91,17 @@ def make():
 if not os.path.isdir(dest):
     make()
 want = dict(base)
-want["build.rs"] = patched_sha
-have = tree(crate)
+want["build.rs"] = (patched_sha, base["build.rs"][1])
+try:
+    have, have_dirs = tree(crate)
+except AssertionError as ex:
+    sys.exit("split crate %s: %s" % (dest, ex))
 have.pop(".cargo-checksum.json", None)
-if have != want:
-    bad = sorted(k for k in set(have) | set(want) if have.get(k) != want.get(k))
-    sys.exit("split crate %s differs from the pinned crate beyond build.rs: %s" % (dest, bad[:5]))
+if have != want or have_dirs != base_dirs:
+    bad = sorted(k for k in set(have) | set(want) if have.get(k) != want.get(k)) + sorted(have_dirs ^ base_dirs)
+    sys.exit("split crate %s differs from the pinned crate beyond build.rs (content, executable bit, extra or missing path): %s" % (dest, bad[:5]))
 rec = json.load(open(os.path.join(crate, ".cargo-checksum.json")))
-if rec["files"] != have:
+if rec["files"] != shas(have):
     sys.exit("split crate %s: .cargo-checksum.json does not match its files" % dest)
 cfg = open(os.path.join(dest, "config.toml")).read()
 expect = ('[source."%s"]\ngit = "https://github.com/yufengzjj/sail-aarch64-oracle"\nrev = "%s"\nreplace-with = "janus-split-crate"\n'

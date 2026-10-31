@@ -18,6 +18,9 @@
 # cold run's model artifacts are pinned (scripts/model-pin.sh write: atomic, under a lock). `gate.sh --cold` restores them with full
 # integrity validation instead of rebuilding ~1 h of ArmASL + ~25 min of Sail. A pin that already exists for the same inputs must
 # be reproduced byte for byte in every .olean/.ilean and the driver, else this run exits 1 ("NOT REPRODUCED") and keeps the old pin.
+# Both runs get the SAME explicit SAIL_SPLIT (the caller's value, default 1; recorded in artifact-hashes.json): a
+# cached/cold pair built with different SAIL_SPLIT settings is reported by gate-cachecmp.py as a CONFIGURATION
+# MISMATCH (exit 2), never as a cache verdict. A --cached-out run must have been made with the same SAIL_SPLIT.
 # Both runs use `memcap -m 80G` and scripts/gate.sh's own load/memory/disk refusal. Nothing is installed:
 # an example crontab line is in docs/TESTING.md.
 # Exit: 0 agree (and the pin written or reproduced); 1 P0 disagreement or the pin was not reproduced; 2 could not compare, the cold
@@ -36,6 +39,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 gate_args=("$@")
+sail_split="${SAIL_SPLIT:-1}"
 commit=$(git -C "$root" rev-parse --verify "${commit:-HEAD}^{commit}") || { echo "nightly-cold-gate: bad commit" >&2; exit 2; }
 [ -n "$work" ] || work=$(mktemp -d /srv/janus-ops/work.XXXX)
 mkdir -p "$work"
@@ -54,10 +58,10 @@ run_gate() { # NAME CACHE_ENV...: a fresh worktree of the commit, gate.sh, then 
   git -C "$root" worktree add --detach -f "$t" "$commit" >/dev/null || { echo "nightly-cold-gate: cannot create $t" >&2; return 2; }
   trees+=("$t")
   local rc=0
-  (cd "$t" && env -u JANUS_MODEL_PIN -u JANUS_MODEL_PIN_STALE -u JANUS_COLD -u JANUS_COLD_DONE -u JANUS_COLD_PIN_CHECKED "$@" memcap -m 80G scripts/gate.sh --out "$out" --speed-baseline enforce "${gate_args[@]}") > "$work/$name.log" 2>&1 || rc=$?
+  (cd "$t" && env -u JANUS_MODEL_PIN -u JANUS_MODEL_PIN_STALE -u JANUS_COLD -u JANUS_COLD_DONE -u JANUS_COLD_PIN_CHECKED "$@" SAIL_SPLIT="$sail_split" memcap -m 80G scripts/gate.sh --out "$out" --speed-baseline enforce "${gate_args[@]}") > "$work/$name.log" 2>&1 || rc=$?
   echo "nightly-cold-gate: $name gate rc=$rc (log $work/$name.log)"
   eval "gate_rc_$name=$rc"
-  python3 -I "$cmp_py" hashes "$t" "$out/artifact-hashes.json" || return 2
+  SAIL_SPLIT="$sail_split" python3 -I "$cmp_py" hashes "$t" "$out/artifact-hashes.json" || return 2
   return 0
 }
 

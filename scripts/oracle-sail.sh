@@ -69,14 +69,28 @@ fetch_crate() {
 # The model C++ the driver is built against, instrumented (oracle-sail/instrument_model.py)
 # and stored at a stable path: the crate's build.rs re-unpacks its vendored model into
 # OUT_DIR on every build script run, which makes cargo rebuild the 166 MB TU each time.
+# Integrity (oracle-sail/dir_digest.py): the instrumented model, model.h and model_missing.cpp carry a record
+# (.inst-complete) of their SHA-256, of the source model they were made from and of instrument_model.py; the parts
+# directory a record (.complete) of the SHA-256 of every part, model.h and model_missing.cpp, of the instrumented
+# model and of split_model.py. Both are re-hashed on EVERY use (about 200 MB, ~1 s), not only compared by mtime: a
+# stale, edited, extended or truncated directory is regenerated from the source model, never built silently.
+sha256_of() { python3 -I -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
+
 model_dir() {
-  local src="$1" dst="$2"
-  if [ ! -f "$dst/model.cpp" ] || [ "$src/model.cpp" -nt "$dst/model.cpp" ]; then
-    mkdir -p "$dst"
-    python3 -I "$here/instrument_model.py" "$src/model.cpp" "$dst/model.cpp.tmp"
-    mv "$dst/model.cpp.tmp" "$dst/model.cpp"
-    cp "$src/model.h" "$src/model_missing.cpp" "$dst/"
+  local src="$1" dst="$2" sd ins
+  sd=$(python3 -I "$here/dir_digest.py" digest "$src/model.cpp" "$src/model.h" "$src/model_missing.cpp")
+  ins=$(sha256_of "$here/instrument_model.py")
+  if [ -f "$dst/model.cpp" ] && [ ! "$src/model.cpp" -nt "$dst/model.cpp" ] &&
+     python3 -I "$here/dir_digest.py" check "$dst/.inst-complete" "$dst/model.cpp" "$dst/model.h" "$dst/model_missing.cpp" -- "src=$sd" "instrument=$ins"; then
+    return 0
   fi
+  [ ! -f "$dst/model.cpp" ] || echo "oracle-sail: instrumented model $dst is stale or does not match its record: regenerating" >&2
+  mkdir -p "$dst"
+  rm -f "$dst/.inst-complete"
+  python3 -I "$here/instrument_model.py" "$src/model.cpp" "$dst/model.cpp.tmp"
+  mv "$dst/model.cpp.tmp" "$dst/model.cpp"
+  cp "$src/model.h" "$src/model_missing.cpp" "$dst/"
+  python3 -I "$here/dir_digest.py" record "$dst/.inst-complete" "$dst/model.cpp" "$dst/model.h" "$dst/model_missing.cpp" -- "src=$sd" "instrument=$ins"
 }
 
 # ---- parallel model build (docs/ORACLE-SAIL.md "Split build") ----
@@ -86,20 +100,25 @@ model_dir() {
 SAIL_SPLIT="${SAIL_SPLIT:-1}"
 SAIL_SPLIT_PARTS=48
 BUILD_RS_SHA256=6e47e363dca372dcc5a9d93036d35cb9714722886b936a39d0929208f963787f
-BUILD_RS_PATCHED_SHA256=7d54b814043630827a00a8fff3ce0ef9b46399f53c744283d352fb509793003d
+BUILD_RS_PATCHED_SHA256=916d07721fb7756b1822728fb76d35cbd1bab44d825a06470a61b8ae958c1a19
 
 # split_parts INSTRUMENTED_DIR -> prints the dir holding model_part_*.cpp (+ model.h), made once per model/splitter
 split_parts() {
-  local inst="$1" tag dst tmp
-  tag=$(python3 -I -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:12])' "$here/split_model.py")
+  local inst="$1" tag dst idig sm
+  sm=$(sha256_of "$here/split_model.py")
+  tag=${sm:0:12}
   dst="$inst/parts-$SAIL_SPLIT_PARTS-$tag"
-  if [ ! -f "$dst/.complete" ] || [ "$inst/model.cpp" -nt "$dst/.complete" ]; then
-    rm -rf "$dst.tmp.$$"; mkdir -p "$dst.tmp.$$"
-    python3 -I "$here/split_model.py" "$inst/model.cpp" "$dst.tmp.$$" "$SAIL_SPLIT_PARTS" >&2
-    cp "$inst/model.h" "$inst/model_missing.cpp" "$dst.tmp.$$/"
-    : > "$dst.tmp.$$/.complete"
-    rm -rf "$dst"; mv "$dst.tmp.$$" "$dst"
+  idig=$(python3 -I "$here/dir_digest.py" digest "$inst/model.cpp" "$inst/model.h" "$inst/model_missing.cpp")
+  if [ -f "$dst/.complete" ] && [ ! "$inst/model.cpp" -nt "$dst/.complete" ] &&
+     python3 -I "$here/dir_digest.py" check "$dst/.complete" "$dst" -- "inst=$idig" "split_model=$sm" "parts=$SAIL_SPLIT_PARTS"; then
+    echo "$dst"; return 0
   fi
+  [ ! -e "$dst" ] || echo "oracle-sail: parts $dst are stale or do not match their record: regenerating" >&2
+  rm -rf "$dst.tmp.$$"; mkdir -p "$dst.tmp.$$"
+  python3 -I "$here/split_model.py" "$inst/model.cpp" "$dst.tmp.$$" "$SAIL_SPLIT_PARTS" >&2
+  cp "$inst/model.h" "$inst/model_missing.cpp" "$dst.tmp.$$/"
+  python3 -I "$here/dir_digest.py" record "$dst.tmp.$$/.complete" "$dst.tmp.$$" -- "inst=$idig" "split_model=$sm" "parts=$SAIL_SPLIT_PARTS"
+  rm -rf "$dst"; mv "$dst.tmp.$$" "$dst"
   echo "$dst"
 }
 # split_crate_cfg -> prints the cargo --config file that swaps in the patched crate copy
@@ -210,9 +229,14 @@ do_build_driver() {
   case "$SAIL_MODEL" in
     vendored)
       plain="$DEPS/model-vendored-${CRATE_REV:0:7}"
-      if [ ! -f "$plain/model.cpp" ]; then
+      # the unpacked vendored model is checked against the pinned (CRATE_MODEL_GZ_SHA256) archive and the pinned
+      # checkout's model.h / model_missing.cpp on every build, not only when it is first extracted
+      if [ ! -f "$plain/model.cpp" ] ||
+         [ "$(gzip -dc "$crate/vendor/model.cpp.gz" | sha256sum | cut -d' ' -f1)" != "$(sha256_of "$plain/model.cpp")" ] ||
+         ! cmp -s "$crate/vendor/model.h" "$plain/model.h" || ! cmp -s "$crate/vendor/model_missing.cpp" "$plain/model_missing.cpp"; then
+        [ ! -f "$plain/model.cpp" ] || echo "oracle-sail: $plain does not match the pinned vendored model: re-extracting" >&2
         mkdir -p "$plain"
-        gzip -dc "$crate/vendor/model.cpp.gz" > "$plain/model.cpp"
+        gzip -dc "$crate/vendor/model.cpp.gz" > "$plain/model.cpp.tmp.$$" && mv "$plain/model.cpp.tmp.$$" "$plain/model.cpp"
         cp "$crate/vendor/model.h" "$crate/vendor/model_missing.cpp" "$plain/"
       fi ;;
     regen) plain="$DEPS/sail-arm-${SAIL_ARM_REV:0:7}/arm-v9.4-a/cpp"
