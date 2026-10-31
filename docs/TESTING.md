@@ -315,6 +315,12 @@ It also found and fixed a second bug of the same kind: `incr_lane` passed `go en
 `scripts/verify-all-examples.sh` drops a value it did not inherit from the gate (`incr_under_gate`: `gate.sh` must be an ancestor PROCESS, which an environment variable cannot fake; the first non-option argument of a shell without `-c` must be `gate.sh`, so naming it inside a `bash -c` string or later on the command line does not count: red-team found while testing), so an operator with a dirty tree
 cannot export a matching stamp and get records for content that was never verified; run alone it pins the tree itself (a dirty tree pins `dirty`: nothing recorded). `scripts/lib/test-rt-incr.sh` S7.
 
+**Scope of the ancestry check.** `incr_under_gate` answers "is this process a descendant of THIS checkout's real `scripts/gate.sh`, run by the same user". A descendant of the real gate is trusted by definition: it already runs with the gate's
+user, tree and write access (it could equally write a record through `janus incr record` or replace `bin/janus`), so an extra token or `JANUS_GATE_PID` owned by the gate would be forgeable by exactly the processes it is meant to exclude (an environment variable is inherited by every
+descendant) and is not added. What the check excludes is an operator or process OUTSIDE a gate run exporting a stamp. Consequence for tests: a test that runs inside the gotest lane is itself below the real gate, so `scripts/lib/test-rt-incr.sh` S7
+runs every probe isolated (double-forked under `setsid`, re-parented to init) and unsets the gate-exported stamp; without that the fake `gate.sh` probes and the "forged stamp is dropped" probe correctly answer "under the gate" and the test's premise (not under a gate) fails
+(seen in the nightly gotest shard: 12 S7 lines; reproduced with `scripts/gate.sh --only gotest --gotest-run '^TestRTIncrScripts$'`).
+
 **Unkeyed environment, on purpose.** The key covers `JANUS_*`, `LEAN*`, `LAKE*`, `ELAN*`, `GO*`, `CGO_*`, `MEMCAP*`, `MEMGUARD*`, `ASL_*`, `KEEP*`, `SAIL*`, `QEMU*`, `TMPDIR` minus the skip list. These are not keyed:
 
 | variable | why the key does not need it |

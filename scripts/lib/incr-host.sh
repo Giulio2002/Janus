@@ -47,10 +47,10 @@ _ih_bins() { # one "label ... digest" line per input; unsorted
   # a compiler launcher in front of the build is refused (ccache/distcc hide which compiler ran): a forced miss
   case "${IH_CC0%% *} ${IH_CXX0%% *} ${IH_GOCC%% *} ${IH_GOCXX%% *}" in *ccache*|*distcc*|*icecc*|*sccache*) _ih_rand | sed 's/^/launcher /' ;; esac
   # what each compiler driver reads and runs
+  _ih_bins2 &
   local gd; gd="$(mktemp -d)" || return 1
   while read -r g; do ( _ih_gcc_inputs "$g" > "$gd/$(echo "$g" | tr / _)" ) & done < <(_ih_gccs)
   wait; cat "$gd"/* 2>/dev/null; rm -rf "$gd"
-  _ih_bins2
 }
 _ih_gcc_inputs() { # one compiler driver
   local g=$1 q out
@@ -68,23 +68,32 @@ _ih_gcc_inputs() { # one compiler driver
     echo "dirs $g $("$g" -print-search-dirs 2>&1 | tr '\n' ' ') $("$g" -dumpmachine 2>&1)"
   }
 }
-_ih_bins2() {
+_ih_bins2() { # (independent groups run in parallel; every line is one atomic echo, the caller sorts)
   local n p q d
-  for n in ld as ar objdump aarch64-linux-gnu-objdump python3 git make; do p="$(type -P -- "$n" 2>/dev/null)" && echo "ver $n $("$p" --version 2>&1 | head -n 1)"; done
+  {
+    for n in ld as ar objdump aarch64-linux-gnu-objdump python3 git make; do p="$(type -P -- "$n" 2>/dev/null)" && echo "ver $n $("$p" --version 2>&1 | head -n 1)"; done
+  } &
   # the Go toolchain: go (above), the tool directory (compile link asm cgo vet ...), GOROOT's version and sources
-  echo "gover $(go version 2>&1)"
-  d="$(go env GOTOOLDIR 2>/dev/null)"; [ -n "$d" ] && echo "gotool $(_ih_tree "$d")"
-  d="$(go env GOROOT 2>/dev/null)"
-  if [ -n "$d" ]; then echo "goroot $(_ih_tree "$d/VERSION" "$d/src" "$d/pkg/include" "$d/bin" "$d/go.env" "$d/lib")"; fi
+  {
+    echo "gover $(go version 2>&1)"
+    d="$(go env GOTOOLDIR 2>/dev/null)"; [ -n "$d" ] && echo "gotool $(_ih_tree "$d")"
+  } &
+  {
+    d="$(go env GOROOT 2>/dev/null)"
+    if [ -n "$d" ]; then echo "goroot $(_ih_tree "$d/VERSION" "$d/src" "$d/pkg/include" "$d/bin" "$d/go.env" "$d/lib")"; fi
+  } &
   # the loader, libc and the system's include files / link-time package versions
-  for p in /lib64/ld-linux-*.so.* /lib/ld-linux-*.so.* /lib/*-linux-gnu/ld-linux-*.so.* /lib/*-linux-gnu/libc.so.6 /lib64/libc.so.6 /usr/lib/*-linux-gnu/libc.so.6; do
-    [ -e "$p" ] && echo "ldso $(readlink -f -- "$p") $(_ih_h "$p")"
-  done
-  p="$(type -P -- janus 2>/dev/null || echo bin/janus)"
-  ldd "$p" 2>/dev/null | awk '$1 ~ /libc\.so|ld-linux/ { print $(NF-1) }' | while read -r q; do [ -e "$q" ] && echo "ldd $(readlink -f -- "$q") $(_ih_h "$q")"; done
-  echo "ldconf $(_ih_tree /etc/ld.so.preload /etc/ld.so.conf /etc/ld.so.conf.d /etc/ld.so.cache)"
-  echo "include $(_ih_tree /usr/include)"
-  echo "dpkg $(dpkg-query -W -f '${Package} ${Version}\n' 'libc6*' 'libgcc-*' 'libstdc++-*' 'linux-libc-dev*' 'gcc-*' 'g++-*' 'binutils*' 'libc-dev*' 2>/dev/null | LC_ALL=C sort | tr '\n' ';')"
+  {
+    for p in /lib64/ld-linux-*.so.* /lib/ld-linux-*.so.* /lib/*-linux-gnu/ld-linux-*.so.* /lib/*-linux-gnu/libc.so.6 /lib64/libc.so.6 /usr/lib/*-linux-gnu/libc.so.6; do
+      [ -e "$p" ] && echo "ldso $(readlink -f -- "$p") $(_ih_h "$p")"
+    done
+    p="$(type -P -- janus 2>/dev/null || echo bin/janus)"
+    ldd "$p" 2>/dev/null | awk '$1 ~ /libc\.so|ld-linux/ { print $(NF-1) }' | while read -r q; do [ -e "$q" ] && echo "ldd $(readlink -f -- "$q") $(_ih_h "$q")"; done
+    echo "ldconf $(_ih_tree /etc/ld.so.preload /etc/ld.so.conf /etc/ld.so.conf.d /etc/ld.so.cache)"
+  } &
+  { echo "include $(_ih_tree /usr/include)"; } &
+  { echo "dpkg $(dpkg-query -W -f '${Package} ${Version}\n' 'libc6*' 'libgcc-*' 'libstdc++-*' 'linux-libc-dev*' 'gcc-*' 'g++-*' 'binutils*' 'libc-dev*' 2>/dev/null | LC_ALL=C sort | tr '\n' ';')"; } &
+  wait
 }
 # the compiler/interpreter-steering environment, by value and by the content it names
 _ih_env() {
@@ -133,7 +142,7 @@ incr_hosttools() {
     [[ "$line" =~ ^[0-9a-f]{64}$ ]] || line=""
   fi
   if [ -z "$line" ]; then
-    line="$( { _ih_bins 2>/dev/null; _ih_env 2>/dev/null; _ih_deps 2>/dev/null; } | LC_ALL=C sort | sha256sum | cut -c1-64)"
+    line="$( { _ih_bins 2>/dev/null & _ih_env 2>/dev/null & _ih_deps 2>/dev/null & wait; } | LC_ALL=C sort | sha256sum | cut -c1-64)"
     [[ "$line" =~ ^[0-9a-f]{64}$ ]] || line="$(_ih_rand)"
     if [ "${1:-}" != --nocache ] && [ -n "$c" ] && [ -w "$c" ] && [[ "$line" =~ ^[0-9a-f]{64}$ ]]; then printf '%s\n%s\n' "$(_ih_stamp)" "$line" > "$c"; fi
   fi
