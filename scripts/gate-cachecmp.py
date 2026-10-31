@@ -11,6 +11,15 @@
     gate-cachecmp.py compare CACHED_OUT COLD_OUT  compare two gate output directories (timeline.jsonl and
                                                   artifact-hashes.json each)
 
+Byte hashes of .olean files are not comparable across directories: Lean 4.34 stores the module's linter messages
+(`Lean.Linter.lintLogExt`) in the .olean together with the absolute source path, so a module that emits a warning
+differs between two worktrees (and from the copy a cache entry was published from) in thousands of bytes although every
+declaration is the same. `hashes` therefore also records `sem:<module>` = a digest of what the module declares
+(tools/oleandigest: every piece of the module re-serialized on its own: the constants and every environment extension
+entry array, INCLUDING the compiled-code (IR) and simp/instance/attribute extensions), computed over all pieces EXCEPT the
+message log. `compare` accepts a file-hash difference ONLY when the semantic digests are equal ("path-only", counted and
+listed); any other difference, a module in only one run, or a missing semantic digest is a P0 / fail-closed.
+
 `compare` exits 0 when the two runs agree on the commit, on the status of every prebuild step, stage, item
 and lane (PASS/FAIL), and on every artifact hash; 1 with a "P0 CACHE BUG" report on any difference (the
 cached run and the truly cold run of one commit must not differ: any difference means the cache served
@@ -23,9 +32,13 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
 CONFIG = "config:"
+SEM = "sem:"
+# the one piece that carries the absolute source path (and only warnings): excluded from the semantic digest
+PATH_PIECES = ("ext:Lean.Linter.lintLogExt",)
 
 
 def sha_file(p):
@@ -36,23 +49,70 @@ def sha_file(p):
     return h.hexdigest()
 
 
+def digest_tool(worktree):
+    """Build (once) and return tools/oleandigest's executable of this worktree, or None."""
+    d = os.path.join(worktree, "tools", "oleandigest")
+    exe = os.path.join(d, ".lake", "build", "bin", "janus-olean-digest")
+    if not os.path.isdir(d):
+        return None
+    r = subprocess.run(["lake", "build"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if r.returncode != 0 or not os.access(exe, os.X_OK):
+        sys.stderr.write("cachecmp: cannot build %s: %s\n" % (d, r.stdout[-500:]))
+        return None
+    return exe
+
+
+def semantic(exe, paths):
+    """{path: sha256 over its pieces except PATH_PIECES} from janus-olean-digest, run in batches."""
+    out = {}
+    pieces = {}
+    for i in range(0, len(paths), 40):
+        r = subprocess.run([exe] + paths[i:i + 40], stdout=subprocess.PIPE, text=True)
+        for line in r.stdout.splitlines():
+            w = line.split()
+            if len(w) == 4:
+                pieces.setdefault(w[0], []).append((w[1], w[2], w[3]))
+    for p in paths:
+        ps = pieces.get(p)
+        if not ps:
+            continue
+        h = hashlib.sha256()
+        for name, dg, n in sorted(ps):
+            if name in PATH_PIECES:
+                continue
+            h.update(("%s %s %s\n" % (name, dg, n)).encode())
+        out[p] = h.hexdigest()
+    return out
+
+
 def hashes(worktree):
     out = {}
     lib = os.path.join(worktree, "JanusASL", ".lake", "build", "lib", "lean")
+    oleans = []
     for d, dirs, files in os.walk(lib):
         dirs.sort()
         for f in sorted(files):
             if f.endswith(".olean"):
                 p = os.path.join(d, f)
                 out["olean:" + os.path.relpath(p, lib)] = sha_file(p)
+                oleans.append(p)
+    exe = digest_tool(worktree)
+    if exe and oleans:
+        for p, dg in semantic(exe, oleans).items():
+            out[SEM + os.path.relpath(p, lib)] = dg
     drv = os.path.join(worktree, "oracle-sail", "target", "release", "janus-oracle-sail")
     if os.path.isfile(drv):
         out["sail-driver"] = sha_file(drv)
     out.update(config(worktree))
+    # `combined`: the semantic digests and the driver (path independent); `combined:bytes` the file hashes (informational)
     h = hashlib.sha256()
-    for k in sorted(k for k in out if not k.startswith(CONFIG)):
+    for k in sorted(k for k in out if not k.startswith(CONFIG) and not k.startswith("olean:")):
         h.update(("%s %s\n" % (k, out[k])).encode())
     out["combined"] = h.hexdigest()
+    hb = hashlib.sha256()
+    for k in sorted(k for k in out if k.startswith("olean:")):
+        hb.update(("%s %s\n" % (k, out[k])).encode())
+    out["combined:bytes"] = hb.hexdigest()
     return out
 
 
@@ -112,8 +172,33 @@ def compare(cached, cold):
         a, b = s1.get(k, "MISSING"), s2.get(k, "MISSING")
         if a != b:
             diffs.append("%s: cached run %s, cold run %s" % (k, a, b))
+    path_only = []
     for k in sorted(k for k in set(h1) | set(h2) if not k.startswith(CONFIG)):
         a, b = h1.get(k), h2.get(k)
+        if k == "combined:bytes":
+            continue
+        if k.startswith(SEM):
+            # judged together with the file hash of the same module below (when that module exists in both runs)
+            ok = k[len(SEM):]
+            if ("olean:" + ok) in h1 and ("olean:" + ok) in h2:
+                continue
+        if k.startswith("olean:"):
+            sk = SEM + k[len("olean:"):]
+            sa, sb = h1.get(sk), h2.get(sk)
+            if a and b and a == b:
+                if sa and sb and sa != sb:
+                    diffs.append("artifact %s: identical files but different semantic digests (cached %s, cold %s)" % (k, sa[:16], sb[:16]))
+                continue
+            if a and b:
+                if sa and sb and sa == sb:
+                    path_only.append(k[len("olean:"):])
+                elif not sa or not sb:
+                    diffs.append("artifact %s: file hashes differ and a semantic digest is not recorded (cached %s, cold %s): fail closed" % (
+                        k, "yes" if sa else "NO", "yes" if sb else "NO"))
+                else:
+                    diffs.append("artifact %s: cached %s, cold %s; SEMANTIC digests differ (cached %s, cold %s): the module declares something different" % (
+                        k, a[:16], b[:16], sa[:16], sb[:16]))
+                continue
         if a != b:
             diffs.append("artifact %s: cached %s, cold %s" % (k, (a or "MISSING")[:16], (b or "MISSING")[:16]))
     if diffs:
@@ -122,8 +207,11 @@ def compare(cached, cold):
             print("  " + d)
         print("P0: owner is the main session (docs/TESTING.md 'Build cache policy'): treat every cached gate result since the last agreeing nightly as unproven.")
         return 1
-    print("cachecmp: cached and cold runs of commit %s agree on %d prebuild steps/stages/items/lanes and %d artifact hashes (SAIL_SPLIT=%s, %s parts)" % (
-        g1.get("commit"), len(s1), len([k for k in h1 if not k.startswith(CONFIG)]), h1[CONFIG + "SAIL_SPLIT"], h1[CONFIG + "SAIL_SPLIT_PARTS"]))
+    if path_only:
+        print("cachecmp: %d module file hashes differ ONLY by the stored message log / source path (semantic digests equal): %s" % (
+            len(path_only), ", ".join(path_only[:40]) + (" ..." if len(path_only) > 40 else "")))
+    print("cachecmp: cached and cold runs of commit %s agree on %d prebuild steps/stages/items/lanes and %d artifact hashes (SAIL_SPLIT=%s, %s parts; %d path-only)" % (
+        g1.get("commit"), len(s1), len([k for k in h1 if not k.startswith(CONFIG)]), h1[CONFIG + "SAIL_SPLIT"], h1[CONFIG + "SAIL_SPLIT_PARTS"], len(path_only)))
     return 0
 
 

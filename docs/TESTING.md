@@ -965,6 +965,26 @@ check still runs. The policy:
   not reproducible bit for bit, the artifact comparison will say so on the first nightly: fix the
   non-determinism or drop that artifact from `gate-cachecmp.py hashes`, with a note here; never
   loosen the lane comparison.)
+* **`.olean` bytes are not comparable across directories (found by the first nightly, 2026-10-31).** Lean 4.34
+  stores a module's linter messages (`Lean.Linter.lintLogExt`) in its `.olean` together with the ABSOLUTE source path,
+  so every module that emits a warning differs between the cached run (a cache entry carries the path of the tree that
+  published it) and the cold run (its own tree) in thousands of bytes with identical declarations (24 of 241 JanusASL
+  modules at 83049110; the 217 clean modules and the whole ArmASL model were byte-identical, and the build is
+  deterministic at a fixed path: 3 rebuilds at LEAN_NUM_THREADS 1/4/0 byte-identical). `gate-cachecmp.py hashes` therefore
+  also records `sem:<module>`, a digest from `tools/oleandigest` (`janus-olean-digest`): the module re-serialized piece by
+  piece with Lean's own `saveModuleData` (a fresh compaction per piece, independent of layout and of the other pieces),
+  one piece for the imports, constants (kind, name, universe parameters, type, value) and extra names, and one for EVERY
+  environment extension entry array (simp sets, instances, attributes, reducibility, the IR / compiled-code declarations
+  (`Lean.IR.declMapExt`), LCNF, declaration ranges, ...), hashed (two independent 64-bit hashes of the bytes) EXCEPT the
+  message-log piece. `compare` accepts a file-hash difference only when the semantic digests are equal (counted and
+  listed as "path-only"); a semantic difference, a module in only one run, or a missing digest (fail closed) stays P0.
+  NOT covered by the digest: the message log itself (warnings, no declarations), the `.olean` header, and the width of
+  the hash (an equality check between two builds of one source, not a commitment). Tests: `scripts/lib/test-olean-digest.sh`
+  (real builds: same module at two paths equal, only the message-log piece differs; mutations of a declaration, a proof
+  term, a simp attribute, an instance priority and a compiled-code-only change each change the digest; compare accepts
+  path-only and rejects each mutation) and `scripts/lib/test-cachecmp.sh`. Offline proof for the first nightly: the 24
+  modules, restored from the cache and rebuilt in a new tree, reproduce exactly the nightly's 24 file-hash differences
+  and have 0 semantic differences over all 241 modules.
 * **Owner: the main session.**
 
 ```
