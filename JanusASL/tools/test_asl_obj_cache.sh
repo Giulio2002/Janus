@@ -686,6 +686,12 @@ import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
 os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]
 need(raises(b.CacheError, b.keyed_toolchain, root + "/JanusASL"), "symlinked prefix accepted")
 PY
+rm -rf "$t/real_par" "$t/par_link"; mkdir -p "$t/real_par/fp/bin" "$t/real_par/fp/include/clang" "$t/real_par/fp/include/lean"; cp "$clang" "$t/real_par/fp/bin/clang"; ln -s "$t/real_par" "$t/par_link"; fakelean "$t/par_link/fp"
+py <<'PY' && ok "keyed_toolchain refuses a prefix with a symlinked PARENT directory (realpath != path)" || bad "prefix parent symlink"
+import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
+os.environ["PATH"] = t + "/fl:" + os.environ["PATH"]
+need(raises(b.CacheError, b.keyed_toolchain, root + "/JanusASL"), "prefix under a symlinked parent accepted")
+PY
 for d in bin include include/clang include/lean; do
   rm -rf "$t/fp3"; mkdir -p "$t/fp3/bin" "$t/fp3/include/clang" "$t/fp3/include/lean"; cp "$clang" "$t/fp3/bin/clang"
   mv "$t/fp3/$d" "$t/fp3/$d.real"; ln -s "$t/fp3/$d.real" "$t/fp3/$d"; fakelean "$t/fp3"
