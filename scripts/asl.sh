@@ -279,7 +279,7 @@ modcache_publish() {  # modcache_publish [--exe]
 # (ASL_CACHE non-empty: JANUS_ASL_CACHE=0 / ASL_CACHE=off, the cold gate's setting, blanks it, so a cold tree compiles every
 # object from source). A gate result obtained with it on is never merge evidence by itself: the pre-push cold gate
 # (JANUS_ASL_CACHE=0) and the nightly audit are the controls. Gates and logs print this state (objcache-state).
-OBJ_CACHE_DEFAULT=0   # the one switch of the default: 1 = ON (the last commit of this series flips it)
+OBJ_CACHE_DEFAULT=1   # the one switch of the default: 1 = ON
 obj_cache_state() {
   case "${ASL_OBJ_CACHE-}" in
     '') ;;                                   # unset or EMPTY: the default
