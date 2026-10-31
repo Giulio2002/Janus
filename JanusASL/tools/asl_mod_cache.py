@@ -277,10 +277,10 @@ class Keys:
 
 
 def is_object(rel):
-    """A compiled C object (or its .hash/.trace) under ir/: NOT carried by module entries. Module entries are protected
+    """A compiled C object (or its .hash/.trace), in any directory: NOT carried by module entries. Module entries are protected
     by the HMAC and file hashes only; a native object needs the armobj entry's staging checks, recompile sample,
     tombstones and the nightly audit (docs/ASL.md "Compiled objects"), so objects travel only there (ASL_OBJ_CACHE=1)."""
-    return "/ir/" in rel.replace(os.sep, "/") and ".c.o." in os.path.basename(rel)
+    return ".c.o." in os.path.basename(rel)  # wherever it sits (a decoy under lib/lean/ is dropped too)
 
 
 def outputs(p, mod, objects=True):
@@ -717,9 +717,41 @@ def obj_id(root, cs, scope="arm"):
     return sha_bytes(canonical(inp).encode())[:40]
 
 
+def tcb_modules(root):
+    """The Janus.* modules linked into the trusted auditor `janus-audit` (the import closure, inside the root package, of
+    that lean_exe's root module), or None when it cannot be determined. Their objects are NEVER cached (neither restored
+    nor published): the auditor is the trusted computing base of `janus verify`, and an object served from a cache could
+    run inside it until the nightly audit; they are always compiled from source."""
+    import tomllib
+    try:
+        with open(os.path.join(root, "lakefile.toml"), "rb") as f:
+            cfg = tomllib.load(f)
+        exes = [e for e in cfg.get("lean_exe", []) if e.get("name") == "janus-audit"]
+        if len(exes) != 1:
+            return None
+        seen, todo = set(), [exes[0]["root"]]
+        while todo:
+            mod = todo.pop()
+            if mod in seen or not (mod == "Janus" or mod.startswith("Janus.")):
+                continue
+            seen.add(mod)
+            src = os.path.join(root, *mod.split(".")) + ".lean"
+            if not os.path.isfile(src):
+                return None
+            todo += header_imports(src)
+        return seen
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def obj_units(root, scope, cs=None):
     """[(id, {C: sha})]: one unit for arm, one per C file for the per-object scopes."""
     cs = obj_c_files(scope_lake(root, scope), scope) if cs is None else cs
+    if scope == "janus":  # the auditor's own objects are always compiled from source (tcb_modules); undeterminable: cache none
+        tcb = tcb_modules(root)
+        if tcb is None:
+            return []
+        cs = {c: h for c, h in cs.items() if c[len("build/ir/"):-len(".c")].replace("/", ".") not in tcb}
     if scope in PER_OBJECT:
         return [(obj_id(root, {c: h}, scope), {c: h}) for c, h in sorted(cs.items())]
     return [(obj_id(root, cs, scope), cs)] if cs else []

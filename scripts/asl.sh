@@ -279,13 +279,19 @@ modcache_publish() {  # modcache_publish [--exe]
 # (ASL_CACHE non-empty: JANUS_ASL_CACHE=0 / ASL_CACHE=off, the cold gate's setting, blanks it, so a cold tree compiles every
 # object from source). A gate result obtained with it on is never merge evidence by itself: the pre-push cold gate
 # (JANUS_ASL_CACHE=0) and the nightly audit are the controls. Gates and logs print this state (objcache-state).
-OBJ_CACHE_DEFAULT=0
+OBJ_CACHE_DEFAULT=0   # the one switch of the default: 1 = ON (the last commit of this series flips it)
 obj_cache_state() {
-  if [ "${ASL_OBJ_CACHE:-$OBJ_CACHE_DEFAULT}" = 0 ]; then echo "OFF (ASL_OBJ_CACHE=0)"
+  case "${ASL_OBJ_CACHE-}" in
+    '') ;;                                   # unset or EMPTY: the default
+    0|off|OFF|no|NO|false|FALSE) echo "OFF (ASL_OBJ_CACHE=${ASL_OBJ_CACHE})"; return ;;
+    1|on|ON|yes|YES|true|TRUE) ;;
+    *) echo "OFF (ASL_OBJ_CACHE=${ASL_OBJ_CACHE}: unrecognised value, treated as OFF)"; return ;;
+  esac
+  if [ -z "${ASL_OBJ_CACHE-}" ] && [ "$OBJ_CACHE_DEFAULT" = 0 ]; then echo "OFF (default)"
   elif [ -z "${ASL_CACHE:-}" ]; then echo "OFF (no build cache: JANUS_ASL_CACHE=0 or ASL_CACHE=off)"
-  else echo "ON"; fi
+  else echo "ON${ASL_OBJ_CACHE+ (ASL_OBJ_CACHE=${ASL_OBJ_CACHE:-<empty>}$([ -n "$ASL_OBJ_CACHE" ] || echo ', the default'))}"; fi
 }
-obj_cache_on() { [ "$(obj_cache_state)" = ON ]; }
+obj_cache_on() { case "$(obj_cache_state)" in ON*) true ;; *) false ;; esac; }
 objcache_restore() {  # objcache_restore arm|jasl|janus
   obj_cache_on || return 0
   python3 -I "$pkg/tools/asl_mod_cache.py" objrestore "$root" "${1:-arm}" "$ASL_CACHE" || echo "asl cache: C objects [${1:-arm}] not usable here (above); compiling"
