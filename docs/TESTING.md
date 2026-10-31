@@ -312,7 +312,7 @@ It also found and fixed a second bug of the same kind: `incr_lane` passed `go en
 `janus incr check` failed for EVERY lane and no lane (`gotest`, `rounds`, `x86`, `rtasl-*`) was ever skipped or recorded; multi-line values now have each newline replaced by `\001` (`incr_lane_spec`).
 
 **`JANUS_GATE_TREE0` has one writer.** It is the stamp of the tree at the start of a gate run; `incr_tree_ok` compares it to the live tree before a PASS is recorded. Only `scripts/gate.sh` (through `incr_tree_pin`) sets it.
-`scripts/verify-all-examples.sh` drops a value it did not inherit from the gate (`incr_under_gate`: `gate.sh` must be an ancestor PROCESS, which an environment variable cannot fake), so an operator with a dirty tree
+`scripts/verify-all-examples.sh` drops a value it did not inherit from the gate (`incr_under_gate`: `gate.sh` must be an ancestor PROCESS, which an environment variable cannot fake; the first non-option argument of a shell without `-c` must be `gate.sh`, so naming it inside a `bash -c` string or later on the command line does not count: red-team found while testing), so an operator with a dirty tree
 cannot export a matching stamp and get records for content that was never verified; run alone it pins the tree itself (a dirty tree pins `dirty`: nothing recorded). `scripts/lib/test-rt-incr.sh` S7.
 
 **Unkeyed environment, on purpose.** The key covers `JANUS_*`, `LEAN*`, `LAKE*`, `ELAN*`, `GO*`, `CGO_*`, `MEMCAP*`, `MEMGUARD*`, `ASL_*`, `KEEP*`, `SAIL*`, `QEMU*`, `TMPDIR` minus the skip list. These are not keyed:
@@ -320,16 +320,26 @@ cannot export a matching stamp and get records for content that was never verifi
 | variable | why the key does not need it |
 |---|---|
 | `PATH` | selects WHICH `lean`, `leanchecker`, `lake`, `go` run. The toolchain component hashes the resolved binaries and libraries (`lean --print-prefix`, the bytes of `lean`, `leanchecker`, the library files) and the version string, the lanes key `go version` and `go env -json`, the verifier component hashes the one `janus` executable: a different binary found through `PATH` is a different byte string and changes the key. A shadow `lean` is a miss (checked) |
-| `CC`, `CXX`, `CFLAGS`, `CGO_*` | `CGO_*` is keyed. `CC` is part of `go env -json` (keyed in every lane). The C that items verify is compiled BEFORE the key, by the prebuild, and the resulting example binaries are hashed into the key (`--art`, `artifacts/examples-*`). FINDING (not changed): the bytes of the C compiler and linker are not hashed, see below |
-| `LD_PRELOAD`, `LD_LIBRARY_PATH` | change what the dynamic loader maps into `janus`/`lean`/`go`. Not hashed (the loader and libc bytes are not either); same finding. Setting either is a deliberate act of the operator running the gate, who can equally replace `bin/janus`, which is also not a defence the key claims to give |
+| `CC`, `CXX`, `CFLAGS`, `CGO_*` | `CGO_*` is keyed. `CC` is part of `go env -json` (keyed in every lane). The C that items verify is compiled BEFORE the key, by the prebuild, and the resulting example binaries are hashed into the key (`--art`, `artifacts/examples-*`). the bytes of the C compiler and linker are hashed (`incr_hosttools`, below) |
+| `LD_PRELOAD`, `LD_LIBRARY_PATH` | change what the dynamic loader maps into `janus`/`lean`/`go`. Not hashed (the loader and libc bytes are not either); keyed since (see below). Setting either is a deliberate act of the operator running the gate, who can equally replace `bin/janus`, which is also not a defence the key claims to give |
 | `HOME`, `XDG_*` | locate the elan toolchains, the result cache and the build cache. What they select is keyed by content: the toolchain by its bytes, the cache entries by their own MACs and content keys (a cache entry never decides a verdict without being re-hashed) |
 | `TZ`, `LC_*`, `LANG` | affect time stamps and message language of tools. No verdict reads them: the auditor and the replay compare Lean/Go values, not locale-formatted text (`LC_ALL=C` is set by the scripts that sort or compare) |
 
-Finding, with a reproduction (nothing was changed; the decision is main's): a different `gcc`/`ld`/`ld.so`/libc with the same path and the same `go version` gives the same key. In a scratch git tree,
-`PATH=<dir with a gcc wrapper A>:$PATH janus incr explain --id lane:r --kind lane --no-fw --full-verifier --host --tree . --arg go:... --arg goenv:...` and the same with a wrapper B (a different compiler) print the same key,
-as do `LD_PRELOAD=/x.so`, `LD_LIBRARY_PATH=/x` and `CC=<another path>`'s unchanged siblings; a shadow `lean` changes it. The lanes that compile at run time (`gotest` with cgo tests, `rtasl-*` and `asl-*`: C models) would replay an old PASS
-after a host compiler upgrade. The full cold gate (mandatory before every push) rebuilds all of it, which is the control for this; if the incremental gate should also notice, hash the resolved `gcc`/`ld` binaries
-(`$(go env CC) --print-prog-name=ld`) and the `ld.so` of `janus` into the lane key (`incr_lane_spec`), a one-line change that this package did not make because it changes the key semantics.
+**Host build tools are keyed (`incr_hosttools`, FIXED: the finding of the first red team).** Every lane key (`incr_lane_spec`, argument `hosttools:`) contains one digest of: the SHA-256 of the resolved
+(symlinks followed) binaries of `cc gcc g++ c++ clang clang++ ld ld.bfd ld.gold ld.lld as ar`, of `$CC`, `$CXX` and `go env CC CXX` (first word), of what the compilers themselves name
+(`-print-prog-name`: `cc1 cc1plus as ld collect2 lto-wrapper`), the `--version` text of gcc/g++/clang/ld/as/ar, the SHA-256 of the dynamic loader (`/lib*/ld-linux-*`) and of the libc, plus whatever `ldd` resolves
+for `janus` itself. Everything is found via the PATH the lane runs with; a tool that is absent is recorded as absent. `LD_PRELOAD` and `LD_LIBRARY_PATH` are conservative: a non-empty value is keyed with the
+SHA-256 of every file it names (for `LD_LIBRARY_PATH`: every regular file below each directory, names included); a name that is unreadable keys a fresh random value, i.e. a forced miss. The digest is applied to EVERY lane,
+not only to those that compile (any doubt is a miss; the cost is about 0.8 s once per gate run: `scripts/gate.sh` gives the lanes a private cache file `INCR_HOSTTOOLS_CACHE`, stamped with the hash of PATH/CC/CXX so a changed
+PATH recomputes; the `LD_*` part is never cached). `scripts/lib/test-incr-hosttools.sh` (lane `cachekeys`) is the mutation test: a compiler shim at the same path, a changed shim, a linker shim, a changed loader (a
+copy of `incr.sh` pointed at a scratch loader), `LD_PRELOAD` (value and bytes; an unreadable file is a miss), `LD_LIBRARY_PATH`, and empty values equal to unset all behave as required. The liveness check still shows equal keys across
+runs with different bookkeeping, because the digest contains no run-specific value (the cache path variable is not keyed).
+
+*Soundness argument.* A recorded PASS is replayed only if the lane key is equal. The lane's output is a function of (a) the tree, (b) the Go and Lean toolchains, (c) the machine, (d) the keyed environment, (e) the prebuilt binaries,
+and (f) every other program the lane executes: compilers, linkers, assemblers and the loader/libc under them. (a)-(e) were keyed before. For (f), the programs a lane starts are found through PATH; the digest covers the binaries PATH resolves
+for every tool the builds name, the sub-programs the compiler driver reports, and the loader and libc that map them, and `LD_PRELOAD`/`LD_LIBRARY_PATH` (which change what is mapped) by content. A change in any of those bytes changes the key, so the
+lane re-runs. Residual, stated: tools a lane starts that are not listed (an unusual `$CC` wrapper's inner program; `python3`, `bash`, `sort` used by scripts) are covered only by the tree (the scripts) and not by bytes; those do not compile or link code
+that is verified, and the full cold gate (mandatory before every push) rebuilds everything. The key never decides a verdict by itself: it only chooses between replaying a PASS and running the lane, and any uncertainty above resolves to running it.
 
 **What still misses, by design.** An item re-runs when any of these changes: the Go sources of the verifier (`cmd/janus`, root `.go`/`.s`/`.h`, `go.mod`, `go.sum`:
 the whole identity of the one executable that audits and replays), any module of the `import Janus` closure (the auditor's clean environment imports it,

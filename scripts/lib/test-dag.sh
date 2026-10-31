@@ -20,7 +20,8 @@ for r in axiom govet cachekeys; do [ -z "${DAG_DEPS[$r]}" ] && ok "$r needs noth
 # dependency-free, and it must touch no shared resource of DAG_RES: its own binary and result cache live in a private mktemp directory
 # (never bin/janus, artifacts/Add, the framework build or a shared cache), its only inputs are checked-in files and the toolchain.
 grep -n '^add cachekeys ' "$here/../gate.sh" | grep -q 'scripts/lib/test-incr-liveness.sh' && ok "lane cachekeys runs the incremental-key liveness check" || bad "cachekeys does not run test-incr-liveness.sh"
-! grep -v '^\s*#' "$here/test-incr-liveness.sh" "$here/incr-liveness.sh" | grep -qE 'bin/janus|artifacts/(Add|examples)|framework|\.lake' && ok "the liveness check uses only private files (no bin/janus, no shared artifact or build): no DAG_RES entry needed" || bad "the liveness check touches a shared resource"
+grep -n "^add cachekeys " "$here/../gate.sh" | grep -q "scripts/lib/test-incr-hosttools.sh" && ok "lane cachekeys runs the host-tool key mutation tests" || bad "cachekeys does not run test-incr-hosttools.sh"
+! grep -v '^\s*#' "$here/test-incr-liveness.sh" "$here/incr-liveness.sh" "$here/test-incr-hosttools.sh" | grep -qE 'bin/janus|artifacts/(Add|examples)|framework|\.lake' && ok "the liveness check uses only private files (no bin/janus, no shared artifact or build): no DAG_RES entry needed" || bad "the liveness check touches a shared resource"
 dag_has pre-pin pre-stamp && ! dag_has pre-stamp pre-pin && ok "pre-pin waits for pre-stamp (every write janus can make to the shared build precedes the hash)" || bad "stamp before pin"
 dag_has pre-pin pre-lake && ! dag_has pre-lake pre-pin && ok "pre-pin follows pre-lake (the only writer), not the reverse" || bad "pin/lake order"
 

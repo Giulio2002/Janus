@@ -125,6 +125,8 @@ cp "$t/s7/scripts/gate.sh" "$t/s7/scripts/other.sh"
 incr_under_gate && bad "S7 a plain shell is taken for a gate" || ok "S7 outside the gate: incr_under_gate is false"
 [ "$(bash "$t/s7/scripts/gate.sh")" = UNDER ] && ok "S7 below a process running gate.sh (through a subshell, setsid and bash -c): true" || bad "S7 not recognised under gate.sh"
 [ "$(bash "$t/s7/scripts/other.sh")" = NOT ] && ok "S7 below another script: false" || bad "S7 other.sh taken for the gate"
+s7c=$(printf ': x\n# /somewhere/scripts/gate.sh\n. scripts/lib/incr.sh; if incr_under_gate; then echo UNDER; else echo NOT; fi\n# /x/gate.sh\n')
+[ "$(bash -c "$s7c")" = NOT ] && [ "$(bash -c ". scripts/lib/incr.sh; if incr_under_gate; then echo UNDER; else echo NOT; fi" x scripts/gate.sh)" = NOT ] && ok "S7 gate.sh named inside a bash -c string or as a later argument is not a gate" || bad "S7 ancestry faked by a command line"
 [ "$(JANUS_GATE_TREE0=forged-by-operator bash -c '. scripts/lib/incr.sh; incr_under_gate || unset JANUS_GATE_TREE0; echo "${JANUS_GATE_TREE0-unset}"')" = unset ] && ok "S7 a stamp exported by an operator is dropped" || bad "S7 forged stamp survived"
 a=$(grep -n 'incr_under_gate || unset JANUS_GATE_TREE0' scripts/verify-all-examples.sh | head -1 | cut -d: -f1); b=$(grep -n '^incr_tree_pin' scripts/verify-all-examples.sh | head -1 | cut -d: -f1)
 [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && ok "S7 verify-all-examples.sh drops a foreign stamp before it pins the tree" || bad "S7 verify-all-examples.sh does not clear JANUS_GATE_TREE0 ($a, $b)"

@@ -73,6 +73,25 @@ incr_tree_clean() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 1
   [ -z "$(git status --porcelain --untracked-files=all 2>/dev/null | grep -v -e '\.pyc$' -e '__pycache__/')" ]
 }
+# _incr_argv_is_gate PID: argv is <shell> [options without -c] <script>.gate.sh ...: the FIRST non-option argument is the script (text inside a
+# `bash -c '...'` string, or a later argument, does not count: an operator cannot fake the ancestry by naming gate.sh somewhere in a command line)
+_incr_argv_is_gate() {
+  local -a av=(); local i a
+  mapfile -d '' -t av < "/proc/$1/cmdline" 2>/dev/null || true
+  [ "${#av[@]}" -ge 2 ] || return 1
+  [[ "${av[0]}" =~ (^|/)(bash|sh|dash)$ ]] || return 1
+  for ((i = 1; i < ${#av[@]}; i++)); do
+    a="${av[i]}"
+    case "$a" in
+      --) i=$((i + 1)); a="${av[i]-}"; [[ "$a" =~ (^|/)gate\.sh$ ]]; return ;;
+      -c|-[!-]*c*|--command) return 1 ;;
+      -o|-O|--rcfile|--init-file) i=$((i + 1)) ;;
+      -*) ;;
+      *) [[ "$a" =~ (^|/)gate\.sh$ ]]; return ;;
+    esac
+  done
+  return 1
+}
 # incr_under_gate: true only when scripts/gate.sh is an ANCESTOR process of this shell (its argv names a script called gate.sh run by a shell).
 # JANUS_GATE_TREE0 is the stamp the gate takes at its start: only scripts/gate.sh may set it. An operator with a dirty tree who exported a
 # matching stamp would make incr_tree_ok true and get PASS records written for content that was never verified, so
@@ -82,11 +101,7 @@ incr_under_gate() {
   local pid=$$ i a
   for i in $(seq 1 64); do
     [ "$pid" -gt 1 ] 2>/dev/null || return 1
-    if [ -r "/proc/$pid/cmdline" ]; then
-      a="$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | sed -n '1,4p')"
-      # argv: <shell> [options] <path>/scripts/gate.sh ...
-      if grep -qE '(^|/)gate\.sh$' <<<"$a" && grep -qE '^(.*/)?(bash|sh|dash)$' <<<"$(sed -n 1p <<<"$a")"; then return 0; fi
-    fi
+    if [ -r "/proc/$pid/cmdline" ] && _incr_argv_is_gate "$pid"; then return 0; fi
     pid="$(sed 's/^.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{ print $2 }')" || return 1  # (the comm field may hold spaces)
   done
   return 1
@@ -188,6 +203,68 @@ incr_report() {
 # is one line (`janus incr` refuses a newline): multi-line values (go env -json, the GOENV file) have each newline replaced by \001,
 # which is injective. `go env -json` also holds GOGCCFLAGS with a RANDOM directory (-ffile-prefix-map=/tmp/go-build<random>=...), different on every
 # call: it is normalised, or every gate run would key its lanes differently. (Until this was fixed `go env -json` made every lane's `janus incr check` fail: no lane was ever skipped or recorded.)
+# incr_hosttools: ONE line naming the host build tools and the dynamic loader a lane's C/C++ compile and link (and every tool it starts) run
+# with: SHA-256 of each resolved (symlinks followed) binary of cc gcc g++ c++ clang clang++ ld ld.bfd ld.gold ld.lld as ar, of $CC/$CXX/go env CC CXX,
+# of what the compiler itself names (-print-prog-name: cc1 cc1plus as ld collect2 lto-wrapper), the `--version` texts, the SHA-256 of the dynamic
+# loader (/lib*/ld-linux-*) and of the libc it resolves, found via the same PATH the lane uses. A tool that is not found is recorded as absent
+# (that IS a difference). LD_PRELOAD / LD_LIBRARY_PATH are NOT cached and are conservative: a non-empty value is keyed with the SHA-256 of
+# every file it names (LD_LIBRARY_PATH: of every regular file below each directory, names included); anything unreadable keys a random value, i.e. a
+# forced miss. The binary part is computed once per gate run (INCR_HOSTTOOLS_CACHE, a private file set by scripts/gate.sh; stamped with PATH/CC/CXX).
+_incr_h() { # PATH-of-file: "<sha256>" of the file with symlinks resolved, or "absent"
+  local f r
+  f="$1"; r="$(readlink -f -- "$f" 2>/dev/null)" || { echo absent; return; }
+  [ -f "$r" ] && sha256sum -- "$r" 2>/dev/null | cut -c1-64 || echo absent
+}
+_incr_hosttools_bins() {
+  local n p ccw cxw out cc0 cx0
+  cc0="${CC-}"; cx0="${CXX-}"
+  ccw="$(go env CC 2>/dev/null)"; cxw="$(go env CXX 2>/dev/null)"
+  for n in cc gcc g++ c++ clang clang++ ld ld.bfd ld.gold ld.lld as ar "${cc0%% *}" "${cx0%% *}" "${ccw%% *}" "${cxw%% *}"; do
+    [ -n "$n" ] || continue
+    p="$(type -P -- "$n" 2>/dev/null)" || p=""
+    if [ -n "$p" ]; then echo "tool $n $(readlink -f -- "$p") $(_incr_h "$p")"; else echo "tool $n absent"; fi
+  done
+  for n in gcc g++ clang; do
+    p="$(type -P -- "$n" 2>/dev/null)" || continue
+    for q in cc1 cc1plus as ld collect2 lto-wrapper; do
+      out="$("$p" -print-prog-name=$q 2>/dev/null)"; [ -n "$out" ] || continue
+      [ "${out#/}" != "$out" ] || out="$(type -P -- "$out" 2>/dev/null)"
+      echo "prog $n $q $(readlink -f -- "$out" 2>/dev/null) $(_incr_h "${out:-/nonexistent}")"
+    done
+    echo "ver $n $("$p" --version 2>&1 | tr '\n' ' ')"
+  done
+  for n in ld as ar; do p="$(type -P -- "$n" 2>/dev/null)" && echo "ver $n $("$p" --version 2>&1 | head -n 1)"; done
+  for p in /lib64/ld-linux-*.so.* /lib/ld-linux-*.so.* /lib/*-linux-gnu/ld-linux-*.so.* /lib/*-linux-gnu/libc.so.6 /lib64/libc.so.6; do
+    [ -e "$p" ] && echo "ldso $(readlink -f -- "$p") $(_incr_h "$p")"
+  done
+  p="$(type -P -- janus 2>/dev/null || echo bin/janus)"
+  ldd "$p" 2>/dev/null | awk '$1 ~ /libc\.so|ld-linux/ { print $(NF-1) }' | while read -r q; do [ -e "$q" ] && echo "ldd $(readlink -f -- "$q") $(_incr_h "$q")"; done
+}
+incr_hosttools() {
+  local envh c line="" w q f
+  envh="$(printf '%s\0' "$PATH" "${CC-}" "${CXX-}" | sha256sum | cut -c1-64)"
+  c="${INCR_HOSTTOOLS_CACHE:-}"
+  if [ -n "$c" ] && [ -s "$c" ] && [ "$(head -n 1 "$c")" = "$envh" ]; then line="$(sed -n 2p "$c")"; fi
+  if [ -z "$line" ]; then
+    line="$(_incr_hosttools_bins 2>/dev/null | LC_ALL=C sort | sha256sum | cut -c1-64)"
+    [ -z "$c" ] || [ ! -w "$c" ] || printf '%s\n%s\n' "$envh" "$line" > "$c"
+  fi
+  w=""
+  if [ -n "${LD_PRELOAD:-}" ]; then
+    w+="preload=${LD_PRELOAD}"
+    for q in ${LD_PRELOAD//:/ }; do
+      if [ -f "$q" ] && [ -r "$q" ]; then w+=" $(_incr_h "$q")"; else w+=" unresolved-$RANDOM$RANDOM$RANDOM"; fi
+    done
+  fi
+  if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+    w+=" libpath=${LD_LIBRARY_PATH}"
+    for q in ${LD_LIBRARY_PATH//:/ }; do
+      if [ -d "$q" ]; then w+=" $(cd "$q" 2>/dev/null && find . -type f -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 -r sha256sum 2>/dev/null | sha256sum | cut -c1-16)"
+      elif [ -e "$q" ]; then w+=" unresolved-$RANDOM$RANDOM$RANDOM"; else w+=" nodir"; fi
+    done
+  fi
+  printf 'tools=%s%s\n' "$line" "$w"
+}
 incr_lane_spec() {
   local name=$1 gw f
   shift
@@ -195,7 +272,9 @@ incr_lane_spec() {
     --tree-exclude LICENSE --tree-exclude artifacts/ "$@" --arg "lane:$name" --arg "go:$(go version 2>/dev/null | tr '\n' '\001')" --file docs/SOUNDNESS.md
     # the Go configuration the lane builds under: GOENV/GOMODCACHE are not in the environment part of the key,
     # so its settings (the go env file can set GOFLAGS, tags, GOEXPERIMENT...), the file and go.work are keyed here
-    --arg "goenv:$(go env -json 2>/dev/null | sed -E 's#/go-build[0-9]+#/go-build#g' | tr '\n' '\001')" --arg "goenvfile:$(cat "$(go env GOENV 2>/dev/null)" 2>/dev/null | tr '\n' '\001')")
+    --arg "goenv:$(go env -json 2>/dev/null | sed -E 's#/go-build[0-9]+#/go-build#g' | tr '\n' '\001')" --arg "goenvfile:$(cat "$(go env GOENV 2>/dev/null)" 2>/dev/null | tr '\n' '\001')"
+    # the host C/C++ compiler, linker, loader and libc the lane compiles and links with (every lane: conservative, ~0.3 s once per gate run)
+    --arg "hosttools:$(incr_hosttools)")
   gw="$(go env GOWORK 2>/dev/null)"
   if [ -n "$gw" ] && [ "$gw" != off ]; then spec+=(--file "$gw"); [ ! -f "$gw.sum" ] || spec+=(--file "$gw.sum"); fi
   # the prebuilt binaries every lane reads
