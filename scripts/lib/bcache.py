@@ -662,6 +662,8 @@ def expected_extra(c_rel):
         return [BRACKET]
     if c_rel.startswith("build/ir/JanusASL/") or c_rel.startswith("packages/Sail/.lake/build/ir/"):
         return []
+    if c_rel == "build/ir/Janus.c" or c_rel.startswith("build/ir/Janus/"):  # the root package's Janus library (a different tree: its own .lake)
+        return []
     return None
 
 

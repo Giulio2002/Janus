@@ -275,14 +275,16 @@ modcache_publish() {  # modcache_publish [--exe]
 # id hashes each C and the compiler binary); HMAC + per-file SHA-256 + path allowlist as for the other entries.
 # Publishing binds each object's trace/hash to the current C and the keyed compiler, then recompiles the
 # ASL_OBJ_RECOMPILE (default 3; N|all|0) smallest objects and refuses/replaces an entry that differs.
-objcache_restore() {  # objcache_restore arm|jasl
-  [ -n "${ASL_CACHE:-}" ] || return 0
+# OPT-IN: ASL_OBJ_CACHE=1. Off by default; a gate result obtained with it on is never merge evidence by itself (the
+# pre-push cold gate, JANUS_ASL_CACHE=0, is). The nightly turns it on for its cached run only.
+objcache_restore() {  # objcache_restore arm|jasl|janus
+  [ "${ASL_OBJ_CACHE:-0}" = 1 ] && [ -n "${ASL_CACHE:-}" ] || return 0
   python3 -I "$pkg/tools/asl_mod_cache.py" objrestore "$root" "${1:-arm}" "$ASL_CACHE" || echo "asl cache: C objects [${1:-arm}] not usable here (above); compiling"
   return 0
 }
 
-objcache_publish() {  # objcache_publish arm|jasl
-  [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
+objcache_publish() {  # objcache_publish arm|jasl|janus
+  [ "${ASL_OBJ_CACHE:-0}" = 1 ] && [ -n "${ASL_CACHE:-}" ] && [ "${ASL_CACHE_READONLY:-0}" != 1 ] || return 0
   python3 -I "$pkg/tools/asl_mod_cache.py" objpublish "$root" "${1:-arm}" "$ASL_CACHE" "${ASL_OBJ_RECOMPILE:-3}" || echo "asl cache: C objects [${1:-arm}] not stored (above)"
   return 0
 }
@@ -353,11 +355,13 @@ build_phase() {
   modcache_restore
   objcache_restore arm
   objcache_restore jasl
+  objcache_restore janus
   lake_asl build ArmASL JanusASL janus-asl-check
   cache_publish
   modcache_publish --exe
   objcache_publish arm
   objcache_publish jasl
+  objcache_publish janus
 }
 
 # Is this model in the (verified) build cache? 0 = yes, entry present and every file matches its signed manifest.

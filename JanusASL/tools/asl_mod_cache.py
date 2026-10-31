@@ -276,8 +276,16 @@ class Keys:
         return out
 
 
-def outputs(p, mod):
-    """The build outputs of mod under p's .lake/build, relative to p.dir (existing files only)."""
+def is_object(rel):
+    """A compiled C object (or its .hash/.trace) under ir/: NOT carried by module entries. Module entries are protected
+    by the HMAC and file hashes only; a native object needs the armobj entry's staging checks, recompile sample,
+    tombstones and the nightly audit (docs/ASL.md "Compiled objects"), so objects travel only there (ASL_OBJ_CACHE=1)."""
+    return "/ir/" in rel.replace(os.sep, "/") and ".c.o." in os.path.basename(rel)
+
+
+def outputs(p, mod, objects=True):
+    """The build outputs of mod under p's .lake/build, relative to p.dir (existing files only); objects=False leaves
+    out the compiled C objects (what a module entry stores)."""
     rel = os.path.join(*mod.split("."))
     res = []
     for sub in ("lib/lean", "ir"):
@@ -288,7 +296,9 @@ def outputs(p, mod):
         for fn in sorted(os.listdir(d)):
             full = os.path.join(d, fn)
             if fn.startswith(base) and os.path.isfile(full) and not fn.endswith(".setup.json"):
-                res.append(os.path.relpath(full, p.dir))
+                rel_ = os.path.relpath(full, p.dir)
+                if objects or not is_object(rel_):
+                    res.append(rel_)
     return res
 
 
@@ -436,7 +446,8 @@ def restore_one(ks, p, mod, key, e):
     try:
         man = bc.read_signed_manifest("mod", key, e)
         # tree/<package>/<path relative to the package dir>
-        rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items()}
+        # legacy entries carry compiled objects: never restored from here (is_object), only from a verified armobj entry
+        rels = {r.split("/", 1)[1]: (r, h) for r, h in man.items() if not is_object(r.split("/", 1)[1])}
         if all(os.path.isfile(os.path.join(p.dir, rel)) and not os.path.islink(os.path.join(p.dir, rel))
                and sha_file(os.path.join(p.dir, rel)) == h for rel, (_, h) in rels.items()):
             for rel, (_, h) in rels.items():
@@ -537,7 +548,7 @@ def publish(ks, cache, roots):
         if os.path.isfile(os.path.join(e, "MANIFEST.sha256")) and entry_present(ks, k, e):
             present += 1
             continue
-        outs = outputs(p, mod)
+        outs = outputs(p, mod, objects=False)
         trace = os.path.join(p.build(), "lib", "lean", *mod.split(".")) + ".trace"
         olean = os.path.join(p.build(), "lib", "lean", *mod.split(".")) + ".olean"
         if not (os.path.isfile(trace) and os.path.isfile(olean)) or os.path.getmtime(trace) < os.path.getmtime(p.source(mod)):
@@ -594,12 +605,12 @@ OBJ_SCHEME = "janusasl-obj-cache-v3"
 OBJ_SUFFIXES = (".c.o.export", ".c.o.noexport")
 
 
-PER_OBJECT = ("jasl",)  # one entry per object (a changed module recompiles only itself); "arm" is one entry
+PER_OBJECT = ("jasl", "janus")  # one entry per object (a changed module recompiles only itself); "arm" is one entry
 
 
 def scope_lake(root, scope):
     """The .lake directory whose build/ir holds the scope's C (JanusASL/.lake)."""
-    return os.path.join(root, "JanusASL", ".lake")
+    return os.path.join(root, ".lake") if scope == "janus" else os.path.join(root, "JanusASL", ".lake")
 
 
 def obj_dirs(lake, scope="arm"):
@@ -608,6 +619,8 @@ def obj_dirs(lake, scope="arm"):
     e.g. JanusASL.Proofs.Config, costs ~10 min)."""
     if scope == "jasl":
         return [(os.path.join(lake, "build", "ir"), lambda n: n == "JanusASL.c" or n == "JanusASL")]
+    if scope == "janus":  # the root package's Janus library (linked into janus-asl-check, janus-audit, janus-decode, ...)
+        return [(os.path.join(lake, "build", "ir"), lambda n: n == "Janus.c" or n == "Janus")]
     return [(os.path.join(lake, "build", "ir"), lambda n: n == "ArmASL.c" or n == "ArmASL"),
             (os.path.join(lake, "packages", "Sail", ".lake", "build", "ir"), lambda n: True)]
 
@@ -656,9 +669,12 @@ def obj_tables(root, scope="jasl"):
     moreLinkArgs, roots, ...): Lake's trace does not cover the weak arguments. lean_lib JanusASL and lean_exe
     janus-asl-check of JanusASL/lakefile.toml."""
     import tomllib
-    path = os.path.join(root, "JanusASL", "lakefile.toml")
+    path = os.path.join(root, "lakefile.toml" if scope == "janus" else os.path.join("JanusASL", "lakefile.toml"))
     with open(path, "rb") as f:
         cfg = tomllib.load(f)
+    if scope == "janus":
+        return {"lean_lib": [t for t in cfg.get("lean_lib", []) if t.get("name") == "Janus"], "lean_exe": cfg.get("lean_exe", []),
+                "package": {k: v for k, v in cfg.items() if k not in ("lean_lib", "lean_exe", "require")}}
     return {"lean_lib": [t for t in cfg.get("lean_lib", []) if t.get("name") == "JanusASL"],
             "lean_exe": [t for t in cfg.get("lean_exe", []) if t.get("name") == "janus-asl-check"]}
 
@@ -939,7 +955,7 @@ def obj_audit(root, scope, cache):
 
 def obj_main(cmd, root, scope="arm", extra=()):
     lake = scope_lake(root, scope)
-    if scope not in ("arm", "jasl"):
+    if scope not in ("arm", "jasl", "janus"):
         sys.exit("asl_mod_cache: unknown object scope %r" % scope)
     if cmd == "objstage":
         obj_stage(root, scope, extra[0], extra[1], int(extra[2]) if len(extra) > 2 else 0)
