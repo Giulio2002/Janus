@@ -14,11 +14,17 @@
 Byte hashes of .olean files are not comparable across directories: Lean 4.34 stores the module's linter messages
 (`Lean.Linter.lintLogExt`) in the .olean together with the absolute source path, so a module that emits a warning
 differs between two worktrees (and from the copy a cache entry was published from) in thousands of bytes although every
-declaration is the same. `hashes` therefore also records `sem:<module>` = a digest of what the module declares
-(tools/oleandigest: every piece of the module re-serialized on its own: the constants and every environment extension
-entry array, INCLUDING the compiled-code (IR) and simp/instance/attribute extensions), computed over all pieces EXCEPT the
-message log. `compare` accepts a file-hash difference ONLY when the semantic digests are equal ("path-only", counted and
-listed); any other difference, a module in only one run, or a missing semantic digest is a P0 / fail-closed.
+declaration is the same. For the modules under JanusASL/Proofs/ ONLY, `hashes` therefore also records
+`sem:<module>` = the SHA-256 of the module re-serialized with its message log removed (tools/oleandigest: Lean's own
+saveModuleData, the WHOLE file: header, constants, every other extension's entries, compiled code), `lint:<module>` = the
+number of message-log entries and `lay:<module>` = "ok" when the original file has no bytes the module data does not
+account for (its size equals the re-serialization of the unstripped module and its header matches). `compare` accepts a file
+hash difference as "path-only" ONLY for such a module when both runs recorded lay "ok", a non-empty message log and equal
+semantic digests; everything else (ArmASL/*, Janus/*, lean-sail, the Sail driver, a module with an empty message log, a
+trailing-garbage file, a missing digest, a module in only one run) must be byte-identical or it is a P0 / fail-closed.
+The digest executable is built once from the trusted checkout that holds this script and the same executable is used for
+every tree; the SHA-256 of its source and binary are recorded as config:oleandigest-* (a difference is a configuration
+mismatch, rc 2).
 
 `compare` exits 0 when the two runs agree on the commit, on the status of every prebuild step, stage, item
 and lane (PASS/FAIL), and on every artifact hash; 1 with a "P0 CACHE BUG" report on any difference (the
@@ -32,13 +38,19 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 CONFIG = "config:"
 SEM = "sem:"
-# the one piece that carries the absolute source path (and only warnings): excluded from the semantic digest
-PATH_PIECES = ("ext:Lean.Linter.lintLogExt",)
+LINT = "lint:"
+LAY = "lay:"
+# only these modules may differ in bytes between the cached and the cold run (message log with the source path)
+PATH_ONLY_PREFIX = "JanusASL/Proofs/"
+HEADER = 80  # "olean", version, flags, Lean version, git hash; the 8 bytes after it are the base address (module-name derived)
+LINE_RE = re.compile(r"^(\d+)\t([^\t\n]+)\t(\d+)\t(\d+)\t(\d+)\t(\d+)$")
 
 
 def sha_file(p):
@@ -49,39 +61,64 @@ def sha_file(p):
     return h.hexdigest()
 
 
-def digest_tool(worktree):
-    """Build (once) and return tools/oleandigest's executable of this worktree, or None."""
-    d = os.path.join(worktree, "tools", "oleandigest")
+TRUSTED_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def digest_tool():
+    """Build (once) tools/oleandigest of the TRUSTED checkout that holds this script and return (exe, source sha, binary sha);
+    raises RuntimeError when it cannot be built (the caller fails closed)."""
+    d = os.path.join(TRUSTED_ROOT, "tools", "oleandigest")
     exe = os.path.join(d, ".lake", "build", "bin", "janus-olean-digest")
     if not os.path.isdir(d):
-        return None
+        raise RuntimeError("%s does not exist" % d)
     r = subprocess.run(["lake", "build"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if r.returncode != 0 or not os.access(exe, os.X_OK):
-        sys.stderr.write("cachecmp: cannot build %s: %s\n" % (d, r.stdout[-500:]))
-        return None
-    return exe
+        raise RuntimeError("cannot build %s: %s" % (d, r.stdout[-500:]))
+    src = hashlib.sha256()
+    for f in ("Main.lean", "lakefile.toml", "lean-toolchain"):
+        src.update(("%s %s\n" % (f, sha_file(os.path.join(d, f)))).encode())
+    return exe, src.hexdigest(), sha_file(exe)
 
 
 def semantic(exe, paths):
-    """{path: sha256 over its pieces except PATH_PIECES} from janus-olean-digest, run in batches."""
+    """{path: (sha256 of the stripped re-serialization, message-log entries, layout)} from janus-olean-digest, in batches.
+    Fails closed: a non-zero exit, a crash, a line that is not exactly the expected shape, a missing, duplicate or unexpected
+    module raises RuntimeError."""
     out = {}
-    pieces = {}
-    for i in range(0, len(paths), 40):
-        r = subprocess.run([exe] + paths[i:i + 40], stdout=subprocess.PIPE, text=True)
-        for line in r.stdout.splitlines():
-            w = line.split()
-            if len(w) == 4:
-                pieces.setdefault(w[0], []).append((w[1], w[2], w[3]))
-    for p in paths:
-        ps = pieces.get(p)
-        if not ps:
-            continue
-        h = hashlib.sha256()
-        for name, dg, n in sorted(ps):
-            if name in PATH_PIECES:
-                continue
-            h.update(("%s %s %s\n" % (name, dg, n)).encode())
-        out[p] = h.hexdigest()
+    for i in range(0, len(paths), 20):
+        batch = paths[i:i + 20]
+        tmp = tempfile.mkdtemp(prefix="oleandigest.")
+        try:
+            r = subprocess.run([exe, tmp] + batch, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if r.returncode != 0:
+                raise RuntimeError("janus-olean-digest failed (rc %s): %s" % (r.returncode, r.stderr[-400:]))
+            got = {}
+            for line in r.stdout.splitlines():
+                m = LINE_RE.match(line)
+                if not m:
+                    raise RuntimeError("janus-olean-digest: unexpected output line %r" % line[:200])
+                idx = int(m.group(1))
+                if idx >= len(batch) or idx in got or batch[idx] != m.group(2):
+                    raise RuntimeError("janus-olean-digest: unexpected, duplicate or mismatched module in line %r" % line[:200])
+                got[idx] = m
+            if len(got) != len(batch):
+                raise RuntimeError("janus-olean-digest: %d of %d modules reported" % (len(got), len(batch)))
+            for idx, m in got.items():
+                strp = os.path.join(tmp, "%d.stripped" % idx)
+                if os.path.getsize(strp) != int(m.group(6)):
+                    raise RuntimeError("janus-olean-digest: size of %s differs from the reported one" % strp)
+                with open(strp, "rb") as f:
+                    shead = f.read(HEADER)
+                with open(batch[idx], "rb") as f:
+                    ohead = f.read(HEADER)
+                lay = "ok"
+                if int(m.group(3)) != int(m.group(4)):
+                    lay = "bad:size %s != re-serialization %s" % (m.group(3), m.group(4))
+                elif ohead != shead:
+                    lay = "bad:header"
+                out[batch[idx]] = (sha_file(strp), int(m.group(5)), lay)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
     return out
 
 
@@ -94,19 +131,27 @@ def hashes(worktree):
         for f in sorted(files):
             if f.endswith(".olean"):
                 p = os.path.join(d, f)
-                out["olean:" + os.path.relpath(p, lib)] = sha_file(p)
-                oleans.append(p)
-    exe = digest_tool(worktree)
-    if exe and oleans:
-        for p, dg in semantic(exe, oleans).items():
-            out[SEM + os.path.relpath(p, lib)] = dg
+                rel = os.path.relpath(p, lib)
+                out["olean:" + rel] = sha_file(p)
+                if rel.startswith(PATH_ONLY_PREFIX):
+                    oleans.append(p)
+    if oleans:
+        exe, src, binsha = digest_tool()
+        out[CONFIG + "oleandigest-src"] = src
+        out[CONFIG + "oleandigest-bin"] = binsha
+        for p, (dg, lint, lay) in semantic(exe, oleans).items():
+            rel = os.path.relpath(p, lib)
+            out[SEM + rel] = dg
+            out[LINT + rel] = str(lint)
+            out[LAY + rel] = lay
     drv = os.path.join(worktree, "oracle-sail", "target", "release", "janus-oracle-sail")
     if os.path.isfile(drv):
         out["sail-driver"] = sha_file(drv)
     out.update(config(worktree))
-    # `combined`: the semantic digests and the driver (path independent); `combined:bytes` the file hashes (informational)
+    # `combined`: every artifact digest that is path independent (the sem/lint/lay records and the driver, and the file hashes of
+    # the modules outside JanusASL/Proofs/); `combined:bytes` all file hashes (informational)
     h = hashlib.sha256()
-    for k in sorted(k for k in out if not k.startswith(CONFIG) and not k.startswith("olean:")):
+    for k in sorted(k for k in out if not k.startswith(CONFIG) and not (k.startswith("olean:") and k[6:].startswith(PATH_ONLY_PREFIX))):
         h.update(("%s %s\n" % (k, out[k])).encode())
     out["combined"] = h.hexdigest()
     hb = hashlib.sha256()
@@ -145,12 +190,28 @@ def load_timeline(d):
     return gate, st
 
 
+def path_only_reason(rel, h1, h2):
+    """None when the file difference of module rel is explained by the stored message log alone, else why it is not."""
+    for tag, h in (("cached", h1), ("cold", h2)):
+        if not h.get(SEM + rel) or not h.get(LINT + rel) or not h.get(LAY + rel):
+            return "%s run recorded no semantic digest for it (fail closed)" % tag
+        if h[LAY + rel] != "ok":
+            return "%s run: the file has bytes the module data does not account for (%s)" % (tag, h[LAY + rel])
+        if h[LINT + rel] in ("0", ""):
+            return "%s run: its message log is empty, so the stored log cannot be what differs" % tag
+    if h1[SEM + rel] != h2[SEM + rel]:
+        return "SEMANTIC digests differ (cached %s, cold %s): the module declares something different" % (h1[SEM + rel][:16], h2[SEM + rel][:16])
+    return None
+
+
 def compare(cached, cold):
     try:
         g1, s1 = load_timeline(cached)
         g2, s2 = load_timeline(cold)
         h1 = json.load(open(os.path.join(cached, "artifact-hashes.json")))
         h2 = json.load(open(os.path.join(cold, "artifact-hashes.json")))
+        if not isinstance(h1, dict) or not isinstance(h2, dict):
+            raise ValueError("artifact-hashes.json is not a JSON object")
     except (OSError, ValueError, KeyError) as ex:
         print("cachecmp: cannot compare the runs: %s" % ex)
         return 2
@@ -177,27 +238,20 @@ def compare(cached, cold):
         a, b = h1.get(k), h2.get(k)
         if k == "combined:bytes":
             continue
-        if k.startswith(SEM):
-            # judged together with the file hash of the same module below (when that module exists in both runs)
-            ok = k[len(SEM):]
-            if ("olean:" + ok) in h1 and ("olean:" + ok) in h2:
-                continue
+        if k.startswith((SEM, LINT, LAY)):
+            rel = k.split(":", 1)[1]
+            if ("olean:" + rel) in h1 and ("olean:" + rel) in h2:
+                continue   # judged together with the file hash of the same module below
         if k.startswith("olean:"):
-            sk = SEM + k[len("olean:"):]
-            sa, sb = h1.get(sk), h2.get(sk)
+            rel = k[len("olean:"):]
             if a and b and a == b:
-                if sa and sb and sa != sb:
-                    diffs.append("artifact %s: identical files but different semantic digests (cached %s, cold %s)" % (k, sa[:16], sb[:16]))
                 continue
-            if a and b:
-                if sa and sb and sa == sb:
-                    path_only.append(k[len("olean:"):])
-                elif not sa or not sb:
-                    diffs.append("artifact %s: file hashes differ and a semantic digest is not recorded (cached %s, cold %s): fail closed" % (
-                        k, "yes" if sa else "NO", "yes" if sb else "NO"))
+            if a and b and rel.startswith(PATH_ONLY_PREFIX):
+                why = path_only_reason(rel, h1, h2)
+                if why is None:
+                    path_only.append(rel)
                 else:
-                    diffs.append("artifact %s: cached %s, cold %s; SEMANTIC digests differ (cached %s, cold %s): the module declares something different" % (
-                        k, a[:16], b[:16], sa[:16], sb[:16]))
+                    diffs.append("artifact %s: cached %s, cold %s; not accepted as path-only: %s" % (k, a[:16], b[:16], why))
                 continue
         if a != b:
             diffs.append("artifact %s: cached %s, cold %s" % (k, (a or "MISSING")[:16], (b or "MISSING")[:16]))
