@@ -26,9 +26,8 @@ Each case follows the Intel SDM Vol. 2 `Operation` and `Flags Affected` sections
   Where Intel and AMD document different behaviour, the flag is undefined (e.g. `ZF` after
   `BT`: unaffected on Intel).
 * Architecturally undefined *results* fault (`undefinedResult`): 16-bit `SHLD`/`SHRD` with a
-  count above 16, and `BSF`/`BSR` of zero for 16/32-bit operands. For 64-bit `BSF`/`BSR` of
-  zero the destination is unchanged (documented by AMD; the Intel behaviour Linux relies on,
-  and checked by the oracle on Intel hardware).
+  count above 16. `BSF`/`BSR` of zero sets `ZF` and makes the whole destination register
+  arbitrary (`State.undefVal`, at every width; vendor-neutral: Intel undefined, AMD unchanged).
 * Memory goes through the checked `load`/`store`/`loadRW` of `State`. A read-modify-write
   destination must be writable before it is read. Effective addresses wrap modulo `2^64`.
   RIP-relative addresses are relative to the next instruction.
@@ -117,6 +116,18 @@ def putHigh (s : State) (r : Nat) (v : BitVec 8) : State :=
 def setFlags (s : State) (f : Flags) : State := { s with flags := f }
 
 def setRip (s : State) (v : W64) : State := { s with rip := v }
+
+/-- The next value of the *undefined-value stream*: the architecturally undefined register
+result of an instruction (`BSF`/`BSR` of zero) is `s.undefVal`, an arbitrary 64-bit value
+(`kreg` index `8`; the opmask registers are `kreg 0`..`kreg 7`, no instruction touches the other
+indices, and every amd64 contract leaves `kreg` unspecified). Every state therefore has every
+possible value, and `advanceUndef` shifts the stream so that two undefined results are
+independent. -/
+def undefVal (s : State) : W64 := s.kreg 8
+
+/-- Consume one element of the undefined-value stream (`kreg 8+k := kreg (9+k)`). -/
+def advanceUndef (s : State) : State :=
+  { s with kreg := fun i => if i < 8 then s.kreg i else s.kreg (i + 1) }
 
 end State
 
@@ -625,11 +636,16 @@ def execCount (s : State) (next : W64) (op : CntOp) (w dst : Nat) (src : Loc) : 
     let fin (r : BitVec w) (f : Flags) : Except Fault State := .ok (((s.putReg w dst r).setFlags f).setRip next)
     match op with
     | .bsf | .bsr =>
-      -- the destination is undefined for a zero source (Intel; AMD keeps it), at every width
-      if n = 0 then .error (.undefinedResult s.rip.toNat)
-      else
-        let idx := match op with | .bsf => ctzNat w n | _ => w - 1 - clzNat w n
-        fin (BitVec.ofNat w idx) { cf := none, pf := none, af := none, zf := some false, sf := none, ovf := none }
+      -- Zero source: `ZF = 1` and the destination register is UNDEFINED (Intel; AMD keeps it, and
+      -- Intel hardware keeps it too, but a proof must hold on both vendors and for the 32-bit
+      -- zero-extension question). The model therefore makes the *whole* 64-bit destination
+      -- register an arbitrary value, drawn from the undefined-value stream `State.undefVal`
+      -- (`kreg` indices `>= 8`, arbitrary in every state, unspecified after every call). The
+      -- stream is advanced unconditionally, so the successor state does not branch on the source.
+      let idx := match op with | .bsf => ctzNat w n | _ => w - 1 - clzNat w n
+      let r : W64 := if n = 0 then s.undefVal else (s.putReg w dst (BitVec.ofNat w idx)).regs dst
+      .ok ((((s.setReg dst r).advanceUndef).setFlags
+        { cf := none, pf := none, af := none, zf := some (decide (n = 0)), sf := none, ovf := none }).setRip next)
     | .tzcnt | .lzcnt =>
       let r := match op with | .tzcnt => ctzNat w n | _ => clzNat w n
       fin (BitVec.ofNat w r)
