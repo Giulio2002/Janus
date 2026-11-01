@@ -154,6 +154,11 @@ if [ -n "$cold" ]; then
   fi
   if [ -n "$cold_preflight_only" ]; then echo "gate: cold preflight OK (the model pin holds)"; exit 0; fi
 fi
+# test-only narrowing of the nightly object audit (scripts/lib/nightly-objaudit.sh): never inherited by a gate run
+if [ -n "${NIGHTLY_OBJAUDIT_SCOPES:-}" ] || [ -n "${NIGHTLY_OBJAUDIT_TEST:-}" ]; then
+  echo "gate: NIGHTLY_OBJAUDIT_SCOPES / NIGHTLY_OBJAUDIT_TEST are test-only knobs and are set in the environment: refusing" >&2
+  exit 2
+fi
 if [ -z "$explain_item" ]; then
   # --explain mode and the pre-check mode make incr_begin report "skipped" without verifying anything: a variable
   # left in the environment must never reach a verifying gate
@@ -204,11 +209,6 @@ INCR_HOSTTOOLS_CACHE="$(mktemp "$root/artifacts/incr-hosttools.XXXXXX" 2>/dev/nu
 if [ -n "$incremental" ]; then export JANUS_GATE_INCREMENTAL=1; else unset JANUS_GATE_INCREMENTAL; fi
 # Rows and tests parse the FIRST line janus / lake env lean print: the memory guard's banner and per-job lines
 # (JANUS_MEMGUARD_LOG / JANUS_MEMGUARD_VERBOSE) would break 'all' rows, test_asl_obj_cache objcache-state, ...: a gate never inherits them.
-# test-only narrowing of the nightly object audit (scripts/lib/nightly-objaudit.sh): never inherited by a gate run
-if [ -n "${NIGHTLY_OBJAUDIT_SCOPES:-}" ] || [ -n "${NIGHTLY_OBJAUDIT_TEST:-}" ]; then
-  echo "gate: NIGHTLY_OBJAUDIT_SCOPES / NIGHTLY_OBJAUDIT_TEST are test-only knobs and are set in the environment: refusing" >&2
-  exit 2
-fi
 unset JANUS_MEMGUARD_LOG JANUS_MEMGUARD_VERBOSE
 export LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-4}"; [ "$LEAN_NUM_THREADS" -le 4 ] || export LEAN_NUM_THREADS=4
 
