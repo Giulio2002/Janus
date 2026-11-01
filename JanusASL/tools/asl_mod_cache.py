@@ -724,6 +724,8 @@ def tcb_modules(root):
     run inside it until the nightly audit; they are always compiled from source."""
     import tomllib
     try:
+        if os.path.lexists(os.path.join(root, "lakefile.lean")):
+            return None  # Lake prefers lakefile.lean over lakefile.toml: the toml need not describe the build that ran
         with open(os.path.join(root, "lakefile.toml"), "rb") as f:
             cfg = tomllib.load(f)
         exes = [e for e in cfg.get("lean_exe", []) if e.get("name") == "janus-audit"]
@@ -732,13 +734,25 @@ def tcb_modules(root):
         seen, todo = set(), [exes[0]["root"]]
         while todo:
             mod = todo.pop()
-            if mod in seen or not (mod == "Janus" or mod.startswith("Janus.")):
+            if mod in seen:
                 continue
-            seen.add(mod)
             src = os.path.join(root, *mod.split(".")) + ".lean"
+            if not (mod == "Janus" or mod.startswith("Janus.")):
+                if not os.path.isfile(src):
+                    continue  # Lean, Std, Init...: not part of this repository
+                # an in-repository module of another root (Oracle.*, JanusASL.*) linked into the auditor is TCB too
+            seen.add(mod)
             if not os.path.isfile(src):
                 return None
             todo += header_imports(src)
+            # belt and braces for header_imports (it stops at the first non-import line, and misses an import that follows
+            # a block comment on the same line): every `import X` anywhere in the file whose module is a file of this
+            # repository is also TCB (over-inclusion only means fewer cached objects)
+            with open(src, encoding="utf-8-sig", errors="replace") as f:
+                text = f.read()
+            for m in re.finditer(r"\bimport\s+(?:all\s+)?([A-Z][\w.]*)", text):
+                if os.path.isfile(os.path.join(root, *m.group(1).split(".")) + ".lean"):
+                    todo.append(m.group(1))
         return seen
     except (OSError, ValueError, KeyError):
         return None

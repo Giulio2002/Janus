@@ -9,16 +9,29 @@ set -uo pipefail
 export LC_ALL=C
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/asl-obj-cache-test.XXXXXX")
-# every process whose working directory or command line is inside this test's private directory dies with it
-# (RTOBJ6: recompile sandboxes of a killed run survived for hours); $t is unique (mktemp), so nothing else matches
+# Leftovers of THIS test die with it (RTOBJ6: recompile sandboxes of a killed run survived for hours). A process is ours only if its
+# working directory is inside the private directory $t (unique: mktemp) AND it is either a descendant of this shell or an orphan of
+# this test (its parent is init / a subreaper: the sandboxes run in a session of their own and outlive a killed parent). A process
+# that merely mentions $t in its command line (another agent's grep, an editor) or sits in $t from an interactive shell (its parent
+# is a shell, not init) is never touched. Only the caller's own processes can be signalled anyway (kill needs the same uid).
+ppid_of() { local st; st=$(cat "/proc/$1/stat" 2>/dev/null) || return 1; st=${st##*) }; set -- $st; echo "$2"; }
+ours() {  # ours PID: a descendant of this shell, or an orphan (parent 1, or a systemd subreaper)
+  local q=$1 n=0 pp
+  pp=$(ppid_of "$q") || return 1
+  [ "$pp" = 1 ] && return 0
+  [ "$(cat "/proc/$pp/comm" 2>/dev/null)" = systemd ] && return 0
+  while [ "$q" -gt 1 ] && [ $n -lt 64 ]; do
+    [ "$q" = "$$" ] && return 0
+    q=$(ppid_of "$q") || return 1; n=$((n + 1))
+  done
+  return 1
+}
 reap() {
-  local d p c a
+  local d p c
   for d in /proc/[0-9]*; do
     p=${d#/proc/}; [ "$p" = "$$" ] && continue
     c=$(readlink "$d/cwd" 2>/dev/null) || continue
-    a=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || a=
-    case "$c" in "$t"|"$t"/*) kill -9 "$p" 2>/dev/null; continue ;; esac
-    case "$a" in *"$t/"*) kill -9 "$p" 2>/dev/null ;; esac
+    case "$c" in "$t"|"$t"/*) ours "$p" && kill -9 "$p" 2>/dev/null ;; esac
   done
 }
 trap 'reap; rm -rf "$t"' EXIT
@@ -437,6 +450,17 @@ orphan_case() {  # orphan_case NAME HOW TIMEOUT: HOW = kill9 | term | timeout
 orphan_case parent-sigkill kill9 3600
 orphan_case parent-sigterm term 3600
 orphan_case timeout timeout 4
+# the cleanup trap kills only this test's own leftovers: an unrelated (orphaned, cwd elsewhere) process whose command line merely
+# mentions the private directory (another agent's grep, an editor) survives reap; an orphan whose cwd is inside it does not
+mkdir -p "$t/mention"
+setsid -f sh -c "cd / && echo \$\$ > '$t/mention.pid' && exec python3 -c 'import time; time.sleep(600)' '$t/mention/x'" < /dev/null > /dev/null 2>&1
+setsid -f sh -c "cd '$t/mention' && echo \$\$ > '$t/inside.pid' && exec sleep 600" < /dev/null > /dev/null 2>&1
+for i in $(seq 1 50); do [ -s "$t/mention.pid" ] && [ -s "$t/inside.pid" ] && break; sleep 0.1; done
+mp=$(cat "$t/mention.pid" 2>/dev/null); ip=$(cat "$t/inside.pid" 2>/dev/null); sleep 0.3
+reap; sleep 0.3
+if [ -n "$mp" ] && kill -0 "$mp" 2>/dev/null; then ok "reap: a process that only MENTIONS the private directory in its command line is left alone"; else bad "reap killed a process that merely mentions the directory"; fi
+if [ -n "$ip" ] && ! kill -0 "$ip" 2>/dev/null; then ok "reap: an orphan whose working directory is inside the private directory is killed"; else bad "reap left an orphan inside the directory"; fi
+[ -n "$mp" ] && kill -9 "$mp" 2>/dev/null; [ -n "$ip" ] && kill -9 "$ip" 2>/dev/null
 # Inconclusive never destroys a good entry, never counts as a pass
 copy "$t/g2"; build "$t/g2"; stage "$t/g2" arm > /dev/null; idg=$(M objkey "$t/g2"); rm -rf "$cache/armobj"
 B store armobj "$cache" "$idg" "$t/st" < "$t/st.list" > /dev/null
@@ -1096,6 +1120,33 @@ for how in noexe twoexes badtoml nosrc; do
   mkdir -p "$t/m17c$how"; M objpublish "$t/m17$how" janus "$t/m17c$how" all > "$t/out" 2>&1
   { [ ! -d "$t/m17c$how/armobj" ] || [ -z "$(ls "$t/m17c$how/armobj" 2>/dev/null)" ]; } && ok "M17/$how: nothing published" || bad "M17/$how: published: $(ls "$t/m17c$how/armobj")"
 done
+
+# M17 (unit level; kills the "undeterminable -> treat as empty TCB" mutant even where the id computation fails first, as it
+# does on a bad TOML): tcb_modules is None and obj_units returns no unit although the C files are handed in directly
+cat > "$t/m17unit.py" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+r = sys.argv[2]
+assert m.tcb_modules(r) is None, m.tcb_modules(r)
+m.obj_id = lambda root, cs, scope: "stub"   # the id computation must not be what stops it
+cs = {"build/ir/Janus/Foo.c": "0" * 64, "build/ir/Janus/Tools/Audit.c": "1" * 64, "build/ir/Janus/Tools/AuditMain.c": "2" * 64}
+assert m.obj_units(r, "janus", cs) == [], m.obj_units(r, "janus", cs)
+PY
+for how in noexe twoexes badtoml nosrc lakefilelean; do
+  tcb_none "m17u$how" x "$how"
+  if [ "$how" = lakefilelean ]; then echo "-- Lake would build from this file, not from the toml" > "$t/m17u$how/lakefile.lean"; fi
+  python3 -I "$t/m17unit.py" "$root" "$t/m17u$how" > "$t/out" 2>&1 && ok "M17/$how: tcb_modules is None and obj_units yields no unit (C files given directly)" || bad "M17/$how: undeterminable auditor modules did not stop the janus scope: $(head -c 300 "$t/out")"
+done
+# a header_imports blind spot does not drop an auditor module from the TCB: an import that follows a block comment on its line
+janus_fresh m17imp
+{ printf '/- note -/ import Janus.Foo\n'; cat "$t/m17imp/Janus/Tools/AuditMain.lean"; } > "$t/m17imp.new"; mv "$t/m17imp.new" "$t/m17imp/Janus/Tools/AuditMain.lean"
+printf 'import Lean\n' > "$t/m17imp/Janus/Foo.lean"
+cat > "$t/m17imp.py" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("m", sys.argv[1] + "/JanusASL/tools/asl_mod_cache.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+assert "Janus.Foo" in (m.tcb_modules(sys.argv[2]) or set()), m.tcb_modules(sys.argv[2])
+PY
+python3 -I "$t/m17imp.py" "$root" "$t/m17imp" > "$t/out" 2>&1 && ok "M17: an import hidden after a block comment on its line is still TCB" || bad "M17: the hidden import was dropped from the TCB: $(head -c 300 "$t/out")"
 
 # opt-out values: 0|off|no|false switch it off, an empty value is the default (ON) and is printed, junk is OFF
 for v in 0 off no false; do
