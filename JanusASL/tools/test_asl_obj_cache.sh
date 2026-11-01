@@ -502,17 +502,19 @@ PY
 # the cold-side audit: end to end through the nightly's own script
 copy "$t/cold"; build "$t/cold"; build_jasl "$t/cold"; ac="$t/auditcache"; rm -rf "$ac"; mkdir -p "$ac"
 M objpublish "$t/cold" arm "$ac" 1 > /dev/null; M objpublish "$t/cold" jasl "$ac" all > /dev/null
-expect 0 "nightly-objaudit: a cache that agrees with the cold tree passes" env NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+expect 0 "nightly-objaudit: a cache that agrees with the cold tree passes" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
 grep -q "objaudit \[arm\]: .*coverage [1-9][0-9]* of [1-9][0-9]* objects compared (100%)" "$t/out" && ok "  ... and compared objects" || bad "nothing compared: $(cat "$t/out")"
+expect 2 "nightly-objaudit: the scope override without the test marker is refused" env NIGHTLY_OBJAUDIT_SCOPES="arm" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+expect 2 "nightly-cold-gate: refuses to run with NIGHTLY_OBJAUDIT_SCOPES set" env NIGHTLY_OBJAUDIT_SCOPES="arm" "$root/scripts/nightly-cold-gate.sh"
 co="$t/cold/JanusASL/.lake/build/ir/ArmASL/Part02.c.o.export"; cp "$co" "$t/co.bak"; printf 'X' >> "$co"
-expect 1 "nightly-objaudit: a cold object that differs from the cached one is P0" env NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
+expect 1 "nightly-objaudit: a cold object that differs from the cached one is P0" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$ac"
 grep -q "POISONED" "$t/out" && ok "  ... names it POISONED" || bad "no POISONED"
 ls "$ac/armobj"/.poisoned-* > /dev/null 2>&1 && ok "  ... and the entry was quarantined" || bad "not quarantined"
 expect 2 "  ... a quarantined entry is a miss for every later fetch" B fetch armobj "$ac" "$(M objkey "$t/cold")" "$t/audfetch/.lake"
 cp "$t/co.bak" "$co"
 copy "$t/cold2"; mkdir -p "$t/cold2/JanusASL/.lake/build/ir/ArmASL"; cp "$t/cold/JanusASL/.lake/build/ir/ArmASL.c" "$t/cold2/JanusASL/.lake/build/ir/" 2>/dev/null
-expect 1 "nightly-objaudit fails closed when the cold tree has no objects (nothing compared)" env NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold2" "$ac"
-expect 1 "nightly-objaudit fails closed when the cache has no armobj directory" env NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$t/emptycache"
+expect 1 "nightly-objaudit fails closed when the cold tree has no objects (nothing compared)" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold2" "$ac"
+expect 1 "nightly-objaudit fails closed when the cache has no armobj directory" env NIGHTLY_OBJAUDIT_TEST=1 NIGHTLY_OBJAUDIT_SCOPES="arm jasl" "$root/scripts/lib/nightly-objaudit.sh" "$t/cold" "$t/emptycache"
 
 # ======== RTOBJ4: exact expected argv, keyed prefix, id-bound file set, sandbox gating, sticky quarantine ========
 forge() {  # forge LAKE CFILE: a CONSISTENT forgery: other object bytes, honest log, .hash and trace outputs recomputed

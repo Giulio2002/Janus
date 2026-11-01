@@ -156,6 +156,11 @@ if [ -n "$cold" ]; then
   fi
   if [ -n "$cold_preflight_only" ]; then echo "gate: cold preflight OK (the model pin holds)"; exit 0; fi
 fi
+# test-only narrowing of the nightly object audit (scripts/lib/nightly-objaudit.sh): never inherited by a gate run
+if [ -n "${NIGHTLY_OBJAUDIT_SCOPES:-}" ] || [ -n "${NIGHTLY_OBJAUDIT_TEST:-}" ]; then
+  echo "gate: NIGHTLY_OBJAUDIT_SCOPES / NIGHTLY_OBJAUDIT_TEST are test-only knobs and are set in the environment: refusing" >&2
+  exit 2
+fi
 if [ -z "$explain_item" ]; then
   # --explain mode and the pre-check mode make incr_begin report "skipped" without verifying anything: a variable
   # left in the environment must never reach a verifying gate
