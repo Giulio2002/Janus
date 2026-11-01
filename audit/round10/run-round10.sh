@@ -16,7 +16,7 @@ export PATH=/usr/local/go/bin:$PATH
 R=audit/round10
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit janus-audit janus-decode janus-oracle-amd64 >/dev/null || { echo "lake build failed"; exit 1; }
+lb="$(lake build Janus Janus.Tools.Audit janus-audit janus-decode janus-oracle-amd64 2>&1)" || { echo "lake build failed:"; tail -30 <<<"$lb"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -d artifacts/amd64/Box ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
 W=$R/work/rows; rm -rf "$W"; mkdir -p "$W"
