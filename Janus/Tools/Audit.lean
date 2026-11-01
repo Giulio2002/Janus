@@ -562,8 +562,8 @@ partial def findUndefStream (env : Environment) (witness : Bool) (kregIdx : Nat)
       else if c == `Janus.Amd64.State.mk then
         -- a state built from fields: its opmask file must be a copy of a variable's (`{ s with .. }`)
         -- A fully concrete state (no variable anywhere) is the initial state of a `Witness` theorem, a
-        -- run of one named state, not a theorem about every state; it is allowed there only.
-        -- Only in a `Proof.Witness.*` theorem (round RTU2c): in the theorem that is the guarantee, a
+        -- run of one named state, not a theorem about every state; it is allowed there only (a theorem inside a `Witness` namespace).
+        -- Only in a `Witness` theorem (round RTU2c): in the theorem that is the guarantee, a
         -- concrete state pins the stream to the default (`kreg := fun _ => 0`, which `pp` does not
         -- even show) and a model's value for an undefined destination reads as a known result.
         if witness && !e.hasFVar && !e.hasLooseBVars && !e.hasMVar then args.findSome? (findUndefStream kregIdx)
@@ -1455,7 +1455,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     if let some m ← checkContractHyps expanded then
       throwError s!"the statement {m}"
     -- the amd64 undefined-value stream (BSF/BSR of zero) is never pinned by a statement
-    let isWitness := `Proof.Witness |>.isPrefixOf thm
+    let isWitness := thm.getPrefix.components.any (fun c => c.toString == "Witness")
     if let some m ← checkUndefStream isWitness expanded then
       throwError s!"the statement {m}"
     for ci in extDefs do
