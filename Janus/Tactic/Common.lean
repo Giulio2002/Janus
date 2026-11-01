@@ -1069,6 +1069,25 @@ def frameRules (d : LocalDecl) (ty : Expr) : MetaM (Array Expr) := do
   unless ty.isAppOfArity ``Janus.MemFrame 3 do return #[]
   return #[← mkAppM ``Janus.MemFrame.readLE #[d.toExpr], ← mkAppM ``Janus.MemFrame.accessible #[d.toExpr]]
 
+/-- One store off the memory of a goal `m.accessible a n w = rhs`, with the proof
+`Memory.accessible_writeLE` (a theorem whose type is the rewrite syntactically), repeated until the
+memory is no `writeLE`. No defeq cast: see `reduceAccessible`. -/
+partial def stripWritesProof (g : MVarId) : MetaM MVarId := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, rhs) := t.eq? | return g
+  unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do return g
+  let m := lhs.getArg! 0
+  unless m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 do return g
+  let m' := m.getArg! 0
+  let t' ← mkEq (mkAppN (mkConst ``Janus.Arm64.Memory.accessible)
+    #[m', lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]) rhs
+  let g' ← mkFreshExprSyntheticOpaqueMVar t'
+  let eqv := mkAppN (mkConst ``Janus.Arm64.Memory.accessible_writeLE)
+    #[m', m.getArg! 1, m.getArg! 2, m.getArg! 3, lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]
+  let f := Expr.lam `x (mkConst ``Bool) (mkApp3 (mkConst ``Eq [1]) (mkConst ``Bool) (.bvar 0) rhs) .default
+  g.assign (← mkEqMPR (← mkCongrArg f eqv) g')
+  stripWritesProof g'.mvarId!
+
 /-- Reduce a goal `m.accessible a n w = true` to one about the underlying memory: strip stores
 (`accessible_writeLE` holds by `rfl`) and go through `MemFrame` hypotheses (`hf.accessible`). -/
 partial def reduceAccessible (g : MVarId) (fuel : Nat := 64) : MetaM MVarId := g.withContext do
@@ -1081,7 +1100,10 @@ partial def reduceAccessible (g : MVarId) (fuel : Nat := 64) : MetaM MVarId := g
   let mkGoal (m' : Expr) : MetaM Expr := do
     mkEq (mkAppN (mkConst ``Janus.Arm64.Memory.accessible)
       #[m', lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]) rhs
-  let g ← if m0 != m then g.replaceTargetDefEq (← mkGoal m0) else pure g
+  -- strip the stores with a proof (`accessible_writeLE`), one store at a time: a defeq cast
+  -- (`replaceTargetDefEq`, an `id` the kernel must re-establish by unfolding `accessible`) makes the
+  -- kernel evaluate the region test on a symbolic address (`2^64 - n - c`): "deep recursion" (U16)
+  let g ← if m0 != m then stripWritesProof g else pure g
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
@@ -2349,5 +2371,17 @@ def noRflCtx (ctx : Simp.Context) : Simp.Context :=
   ctx.setSimpTheorems <| ctx.simpTheorems.map fun ts =>
     let f := fun (a : Array SimpTheorem) => a.map fun t => { t with rfl := false, backwardRfl := false }
     { ts with pre := ts.pre.mapArrays f, post := ts.post.mapArrays f }
+
+/-- `simp only [..]` on the main goal `g` (the syntax `stx` is a `simp only` tactic) with every `rfl`
+lemma applied as a proof-carrying rewrite (`noRflCtx`). No progress (or any failure) is not an error: the goal
+is returned unchanged. Used by the accessibility dischargers: their `accessible_writeLE` step is a
+`dsimp` otherwise, whose kernel check unfolds `Memory.accessible` on a symbolic address
+(U16). -/
+def simpNoRfl (g : MVarId) (stx : TSyntax `tactic) : TacticM (List MVarId) := g.withContext do
+  setGoals [g]
+  let r ← mkSimpContext stx (eraseLocal := false)
+  match ← (try simpGoal g (noRflCtx r.ctx) r.simprocs catch _ => pure (some (#[], g), {})) with
+  | (none, _) => return []
+  | (some (_, g'), _) => return [g']
 
 end Janus.Tactic.Common

@@ -1843,8 +1843,7 @@ theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
 
 def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
   let g ← Common.reduceAccessible g
-  let gs ← Tactic.run g (evalTactic (← `(tactic|
-    try simp only [Janus.Arm64.Memory.accessible_writeLE, State.mem] )))
+  let gs ← Common.simpNoRfl g (← `(tactic| simp only [Janus.Arm64.Memory.accessible_writeLE, State.mem]))
   let some g := gs.head? | return true
   let t ← instantiateMVars (← g.getType)
   let some (_, lhs, _) := t.eq? | return false

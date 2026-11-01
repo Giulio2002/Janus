@@ -827,8 +827,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withC
   -- through stores and callee frames (`MemFrame`)
   let g ← Common.reduceAccessible g
   -- strip writes: `accessible_writeLE`
-  let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
-    try simp only [janus_acc, State.mem] )))
+  let gs ← withoutRecover (Common.simpNoRfl g (← `(tactic| simp only [janus_acc, State.mem])))
   let some g := gs.head? | return true
   let t ← instantiateMVars (← g.getType)
   let some (_, lhs, _) := t.eq? | return false
