@@ -145,7 +145,7 @@ type tmark >/dev/null 2>&1 && tmark "== L1/M1/C1: unit rows (go test; L1 is cove
 # One go test process for the three rows (each process seeds the test cache from the fixture). These rows come LAST: in the
 # gate the Go tests' framework fixture (pre-fixture) may still be building, and a test process waits for it, so the janus
 # rows above run meanwhile instead of after the wait.
-ut_out="$(cd cmd/janus && go test -count=1 -timeout 30m -v -run '^(TestRound8ToolchainCacheID|TestRound8TrustedManifestMAC|TestRound8CacheRootPrivate)$' . 2>&1)"
+ut_out="$(cd cmd/janus && go test -count=1 -timeout 60m -v -run '^(TestRound8ToolchainCacheID|TestRound8TrustedManifestMAC|TestRound8CacheRootPrivate)$' . 2>&1)"
 for t in TestRound8ToolchainCacheID TestRound8TrustedManifestMAC TestRound8CacheRootPrivate; do
   if grep -q "^--- PASS: $t " <<<"$ut_out"; then
     printf '  %-36s ok\n' "$t"

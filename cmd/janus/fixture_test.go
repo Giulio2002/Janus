@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // The prebuilt framework fixture (docs/TESTING.md "Go tests"). A framework build is expensive (the
@@ -57,9 +58,15 @@ func ensureFixture(fixture, userSeed, exampleBin string) error {
 	if err := os.MkdirAll(fixture, 0o755); err != nil {
 		return err
 	}
-	lk, err := lockFileMode(filepath.Join(fixture, ".fixture.lock"), false, true)
+	lockPath := filepath.Join(fixture, ".fixture.lock")
+	lk, err := lockFileMode(lockPath, false, false) // try without waiting first, so that a wait is announced
 	if err != nil {
-		return err
+		t0 := time.Now()
+		fmt.Fprintf(os.Stderr, "janus tests: waiting for the fixture lock %s (another go test or the gate's pre-fixture stage is building or checking the fixture; a cold rebuild takes ~25 min)\n", lockPath)
+		if lk, err = lockFileMode(lockPath, false, true); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "janus tests: got the fixture lock after %s\n", time.Since(t0).Round(time.Second))
 	}
 	defer lk.unlock()
 	prev, had := os.LookupEnv("JANUS_CACHE_DIR")

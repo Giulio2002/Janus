@@ -77,7 +77,7 @@ for isa in arm64 amd64; do
 done
 
 echo "== D: synthetic-ELF defences (cmd/janus/elfview_test.go)"
-o="$(go test -count=1 -run 'TestElf' ./cmd/janus/ 2>&1)"; check D1_elf_defence_unit_tests $? "$(tail -n 1 <<<"$o" | cut -c1-90)"
+o="$(go test -count=1 -timeout 60m -run 'TestElf' ./cmd/janus/ 2>&1)"; check D1_elf_defence_unit_tests $? "$(tail -n 1 <<<"$o" | cut -c1-90)"
 
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "BROKEN rows: ${broken[*]}"; exit 1; fi

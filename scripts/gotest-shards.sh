@@ -51,7 +51,7 @@ mkdir -p "$outdir"; rm -f "$outdir"/shard-*.log "$outdir"/shard-*.rc "$outdir"/p
 # the list: "PKG<TAB>NAME"
 : > "$outdir/all.txt"
 for pkg in $(go list ./cmd/...); do
-  go test -list '.*' "$pkg" 2>/dev/null | grep -E '^(Test|Example|Fuzz)' | sed "s|^|$pkg\t|" >> "$outdir/all.txt" || true
+  go test -timeout 60m -list '.*' "$pkg" 2>/dev/null | grep -E '^(Test|Example|Fuzz)' | sed "s|^|$pkg\t|" >> "$outdir/all.txt" || true
 done
 if [ -n "$run" ]; then grep -E -e "$run" <(cut -f2 "$outdir/all.txt") > /dev/null && awk -F'\t' -v re="$run" '$2 ~ re' "$outdir/all.txt" > "$outdir/all.tmp" && mv "$outdir/all.tmp" "$outdir/all.txt"; fi
 [ -s "$outdir/all.txt" ] || { echo "gotest-shards: no tests listed"; exit 1; }

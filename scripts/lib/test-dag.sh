@@ -87,6 +87,10 @@ grep -q '^unset JANUS_MEMGUARD_LOG JANUS_MEMGUARD_VERBOSE' "$here_repo/scripts/g
 # when the verifier changed), longer than go test's default 10 min timeout: rounds must start after pre-fixture
 dag_has rounds pre-fixture && ok "rounds waits for pre-fixture (its go test rows block on the fixture lock otherwise)" || bad "rounds does not wait for pre-fixture"
 
+# every `go test` of the gate and round scripts has an explicit -timeout (the default 10 min fired while the fixture was rebuilt)
+nt=$(cd "$here_repo" && grep -rn "go test " scripts audit --include=*.sh | grep -v -e "-timeout" -e "go test -c" | grep -v "^[^:]*:[0-9]*:[[:space:]]*#" | grep -v 'echo\|tmark\|printf\|dag_has\|usage' | wc -l)
+[ "$nt" = 0 ] && ok "every go test in the gate and round scripts has an explicit -timeout" || bad "$nt go test call(s) without -timeout"
+
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n
   POOL_GUARD=0 POOL_PROGRESS_SECS=100
