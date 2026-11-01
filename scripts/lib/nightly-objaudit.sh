@@ -9,7 +9,16 @@ set -uo pipefail
 tree="${1:?cold tree}" cache="${2:?cache dir}" bad=0
 extra=("${@:3}")   # e.g. --dry-run (the smoke run against the production cache: no lock, no quarantine)
 [ -d "$cache/armobj" ] || { echo "nightly-objaudit: no armobj directory in $cache: nothing to audit, the audit did not run"; exit 1; }
-for sc in ${NIGHTLY_OBJAUDIT_SCOPES:-arm jasl janus}; do   # the env override is for tests only
+# The scope list is NOT a knob: a narrowed audit proves less than the nightly claims. The override exists for the script's own
+# tests only and needs the explicit test marker; without it the script refuses (exit 2) rather than audit fewer scopes.
+if [ -n "${NIGHTLY_OBJAUDIT_SCOPES:-}" ]; then
+  if [ "${NIGHTLY_OBJAUDIT_TEST:-}" != 1 ]; then
+    echo "nightly-objaudit: NIGHTLY_OBJAUDIT_SCOPES is set outside a test (NIGHTLY_OBJAUDIT_TEST=1): refusing to audit fewer scopes than arm jasl janus"
+    exit 2
+  fi
+  echo "nightly-objaudit: TEST MODE: scopes narrowed to '$NIGHTLY_OBJAUDIT_SCOPES' (this is not the nightly audit)"
+fi
+for sc in ${NIGHTLY_OBJAUDIT_SCOPES:-arm jasl janus}; do
   python3 -I "$tree/JanusASL/tools/asl_mod_cache.py" objaudit "$tree" "$sc" "$cache" ${extra[@]+"${extra[@]}"}
   oa=$?
   if [ "$oa" != 0 ]; then

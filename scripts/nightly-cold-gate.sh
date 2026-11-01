@@ -26,6 +26,11 @@
 # Exit: 0 agree (and the pin written or reproduced); 1 P0 disagreement or the pin was not reproduced; 2 could not compare, the cold
 # gate failed, or a run could not start.
 set -uo pipefail
+# The nightly always audits every object-cache scope: the test-only narrowing knob is refused here, never passed on.
+if [ -n "${NIGHTLY_OBJAUDIT_SCOPES:-}" ] || [ -n "${NIGHTLY_OBJAUDIT_TEST:-}" ]; then
+  echo "nightly-cold-gate: NIGHTLY_OBJAUDIT_SCOPES / NIGHTLY_OBJAUDIT_TEST are test-only and must not be set for a nightly run: refusing" >&2
+  exit 2
+fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 commit="" cached="" work="" keep=0
 while [ $# -gt 0 ]; do
