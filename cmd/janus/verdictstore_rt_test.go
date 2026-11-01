@@ -22,6 +22,30 @@ func rtStore(t *testing.T) (verdictStore, string) {
 	return vs, d
 }
 
+// rtStoreOutsideTmp is rtStore with the verdict directory under the janus run base instead of /tmp: the unshare sandbox mounts a
+// private tmpfs over /tmp and then (strictly, fail-closed) binds the protected store directory back, which cannot work for a store
+// that lives under /tmp, so the unshare subtest of TestRT11SandboxedProofCannotReachTheVerdictStore never ran with the store in
+// t.TempDir(). Production stores live under the cache, outside /tmp.
+func rtStoreOutsideTmp(t *testing.T) (verdictStore, string) {
+	t.Helper()
+	privateCache(t)
+	base, err := janusRunBase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := os.MkdirTemp(base, "rt11-verdicts-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(d) })
+	t.Setenv("JANUS_VERDICT_CACHE", d)
+	vs, ok, err := externalVerdictStore(map[string]string{"fresh": "true"})
+	if err != nil || !ok {
+		t.Fatalf("store: %v %v", ok, err)
+	}
+	return vs, d
+}
+
 // A tampered framework olean has another SHA-256, hence another pin set and another key: the stored PASS
 // of the genuine build is not reused, in every way the bytes can change.
 func TestRT11TamperedFrameworkOleanNeverReusesAPass(t *testing.T) {
@@ -149,7 +173,7 @@ func TestRT11StoreKeyIsProtected(t *testing.T) {
 func TestRT11SandboxedProofCannotReachTheVerdictStore(t *testing.T) {
 	for _, mode := range []string{"bwrap", "unshare"} {
 		t.Run(mode, func(t *testing.T) {
-			vs, d := rtStore(t)
+			vs, d := rtStoreOutsideTmp(t)
 			fw := &pinnedLib{want: pins{"Janus.olean": "aa"}}
 			k := frameworkVerdictKey("tc", fw)
 			vs.record(k, fw)

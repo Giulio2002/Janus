@@ -480,7 +480,8 @@ base. What it relies on:
 * **Isolation.** The result directory, key included, is not visible to sandboxed code at all:
   bubblewrap and the unshare fallback mount an empty tmpfs over it (the unshare script stops if
   it cannot), on top of the read-only cache. A proof or a lakefile can neither read the key nor
-  write an entry.
+  write an entry. The unshare fallback hides /tmp, /dev/shm and /run behind private tmpfs mounts, so a cache or verdict store under
+  them cannot be bound back and the fallback refuses (fail-closed; the error says to move JANUS_CACHE_DIR / JANUS_VERDICT_CACHE).
 * **Bypass.** `--fresh`, `--unsafe-no-sandbox` and `JANUS_RESULT_CACHE=off` neither read nor
   write the cache. Without a sandbox the proof runs unconfined with the user's privileges, and
   anything it does to the cache (or to the replay and trusted-compile caches) is outside the

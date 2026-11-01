@@ -140,12 +140,18 @@ func findToolchain(lake, root string) (*toolchain, error) {
 // Lake) unless every step is plain: LEAN_SYSROOT set (Lake would honour it), no sibling lean, a
 // prefix without bin/lean, or any failure.
 func findToolchainDirect(lake, root string) *toolchain {
+	tc, _ := findToolchainDirectWhy(lake, root)
+	return tc
+}
+
+// findToolchainDirectWhy is findToolchainDirect plus, when it returns nil, the reason (for a test that must say why it cannot run).
+func findToolchainDirectWhy(lake, root string) (*toolchain, string) {
 	if os.Getenv("LEAN_SYSROOT") != "" || os.Getenv("JANUS_TOOLCHAIN_VIA_LAKE") != "" {
-		return nil
+		return nil, "LEAN_SYSROOT or JANUS_TOOLCHAIN_VIA_LAKE is set in the environment (Lake is used on purpose)"
 	}
 	shimLean := filepath.Join(filepath.Dir(lake), "lean")
 	if st, err := os.Stat(shimLean); err != nil || !st.Mode().IsRegular() {
-		return nil
+		return nil, "no regular file 'lean' next to " + lake + " (not an elan shim or a toolchain bin/)"
 	}
 	q := func(prog string, dir string, args ...string) (string, bool) {
 		cmd := exec.Command(prog, args...)
@@ -168,15 +174,15 @@ func findToolchainDirect(lake, root string) *toolchain {
 	prefix, ok := q(shimLean, root, "--print-prefix")
 	pfx := strings.TrimSpace(prefix)
 	if !ok || pfx == "" || strings.ContainsRune(pfx, '\n') || !filepath.IsAbs(pfx) {
-		return nil
+		return nil, "`" + shimLean + " --print-prefix` did not print one absolute prefix: " + strings.TrimSpace(prefix)
 	}
 	lean := filepath.Join(pfx, "bin", "lean")
 	if st, err := os.Stat(lean); err != nil || !st.Mode().IsRegular() {
-		return nil
+		return nil, "no regular bin/lean under the prefix " + pfx
 	}
 	version, ok := q(lean, root, "--version")
 	if !ok || strings.TrimSpace(version) == "" {
-		return nil
+		return nil, "`" + lean + " --version` failed"
 	}
 	tc := &toolchain{
 		lean:        lean,
@@ -188,7 +194,7 @@ func findToolchainDirect(lake, root string) *toolchain {
 	if _, err := os.Stat(tc.leanchecker); err == nil {
 		tc.hasChecker = true
 	}
-	return tc
+	return tc, ""
 }
 
 // janusTrustedSource renames the module namespace of a generated Extracted.lean so an

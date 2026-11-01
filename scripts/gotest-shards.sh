@@ -123,25 +123,35 @@ extras_on="${JANUS_GOTEST_EXTRAS:-}"; [ -n "$extras_on" ] || { [ "${JANUS_NIGHTL
 extra_names=() extra_pids=()
 mathlib_rev="${JANUS_TEST_MATHLIB_REV:-d13f23b723b8a846827a245b89c10fc7d3f11612}"
 mathlib_key=$(printf '%s\n%s\n%s\n' "$root" "$(cat "$root/lean-toolchain" 2>/dev/null)" "$mathlib_rev" | sha256sum | cut -c1-16)
-run_extra() { # NAME LIMIT ENVWORDS
-  local name=$1 limit=$2 envw=$3 pkg f="$outdir/extra-$1" rc=0
-  pkg=$(awk -F'\t' -v n="$name" '$2 == n { print $1 }' "$outdir/all.txt")
+asl_key=$(printf '%s\n%s\n' "$root" "$(cat "$root/lean-toolchain" 2>/dev/null)" | sha256sum | cut -c1-16)
+run_extra() { # LABEL "NAME NAME..." LIMIT ENVWORDS : one go test run of the named tests; every name must PASS
+  local label=$1 names=$2 limit=$3 envw=$4 pkg f="$outdir/extra-$1" rc=0 re
+  re=$(printf '%s' "$names" | tr ' ' '|')
+  pkg=$(awk -F'\t' -v n="${names%% *}" '$2 == n { print $1 }' "$outdir/all.txt")
   : > "$f.log"
-  echo "== extra: $envw go test -count=1 -timeout 7000s -v -run '^$name\$' $pkg (memory limit $limit)" >> "$f.log"
+  echo "== extra $label: $envw go test -count=1 -timeout 7000s -v -run '^($re)\$' $pkg (memory limit $limit)" >> "$f.log"
   # shellcheck disable=SC2086
-  memguard_run -l "$limit" -n "extra-$name" -- env $envw go test -count=1 -timeout 7000s -parallel 1 -v -run "^$name\$" "$pkg" >> "$f.log" 2>&1 || rc=$?
+  memguard_run -l "$limit" -n "extra-$label" -- env $envw go test -count=1 -timeout 7000s -parallel 1 -v -run "^($re)\$" "$pkg" >> "$f.log" 2>&1 || rc=$?
   echo "$rc" > "$f.rc"
 }
 if [ "$extras_on" = 1 ]; then
-  mkdir -p "$cachebase/janus-test-mathlib-$mathlib_key/cache" "$cachebase/janus-test-mathlib-$mathlib_key/pkg"
-  declare -A extra_spec=(
-    [TestReplayUnderMemoryPressure]="20G|JANUS_PRESSURE_TEST=1 JANUS_TEST_CACHE_DIR=$runcache/x-pressure"
-    [TestConsumerMathlib]="24G|JANUS_TEST_MATHLIB=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-mathlib-$mathlib_key/cache JANUS_TEST_MATHLIB_DIR=$cachebase/janus-test-mathlib-$mathlib_key/pkg JANUS_TEST_MATHLIB_REV=$mathlib_rev"
+  mkdir -p "$cachebase/janus-test-mathlib-$mathlib_key/cache" "$cachebase/janus-test-mathlib-$mathlib_key/pkg" "$cachebase/janus-test-asl-$asl_key" "$runcache/x-pressure"
+  # label | tests | memory limit | environment. The ASL tests (JANUS_TEST_ASL=1) build JanusASL: about an hour cold; the persistent test cache
+  # (keyed by checkout path and toolchain; its entries are keyed by framework and package hashes inside) and the checkout's own built
+  # JanusASL as a seed (Lake reuses it by content, JANUS_TEST_ASL_SEED) make later runs short. JANUS_GOTEST_EXTRA_LIST (space
+  # separated labels) limits the extras (development).
+  aslseed=""; [ ! -d "$root/JanusASL/.lake" ] || aslseed="JANUS_TEST_ASL_SEED=$root/JanusASL"
+  extras=(
+    "pressure|TestReplayUnderMemoryPressure|20G|JANUS_PRESSURE_TEST=1 JANUS_TEST_CACHE_DIR=$runcache/x-pressure"
+    "mathlib|TestConsumerMathlib|24G|JANUS_TEST_MATHLIB=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-mathlib-$mathlib_key/cache JANUS_TEST_MATHLIB_DIR=$cachebase/janus-test-mathlib-$mathlib_key/pkg JANUS_TEST_MATHLIB_REV=$mathlib_rev"
+    "asl|TestASLExamples TestASLForgeryRejected TestASLUncovered TestASLConsumer|48G|JANUS_TEST_ASL=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-asl-$asl_key $aslseed"
   )
-  mkdir -p "$runcache/x-pressure"
-  for n in TestReplayUnderMemoryPressure TestConsumerMathlib; do
-    cut -f2 "$outdir/all.txt" | grep -qx "$n" || continue
-    run_extra "$n" "${extra_spec[$n]%%|*}" "${extra_spec[$n]#*|}" & extra_pids+=($!); extra_names+=("$n")
+  for e in "${extras[@]}"; do
+    IFS='|' read -r lab names lim envw <<< "$e"
+    if [ -n "${JANUS_GOTEST_EXTRA_LIST:-}" ] && [[ " $JANUS_GOTEST_EXTRA_LIST " != *" $lab "* ]]; then continue; fi
+    ok=1; for n in $names; do cut -f2 "$outdir/all.txt" | grep -qx "$n" || ok=0; done
+    [ "$ok" = 1 ] || continue
+    run_extra "$lab" "$names" "$lim" "$envw" & extra_pids+=($!); extra_names+=("$lab:$names")
   done
 fi
 t0=$(date +%s)
@@ -168,14 +178,15 @@ if [ "$ran" -ne "$total" ] || [ "$(cat "$outdir"/ran-*.txt | sort -u | wc -l)" -
   echo "gotest-shards: $ran test results for $total listed tests (each must run exactly once)"; fail=1
 fi
 grep -hE '^--- FAIL' "$outdir"/shard-*.log && fail=1
-# the extras: each must have run and PASSED (a skip or a failure of an extra fails the run)
+# the extras: each named test must have run and PASSED (a skip or a failure of an extra fails the run)
 extra_ok=()
 for i in "${!extra_names[@]}"; do
-  n=${extra_names[$i]}; wait "${extra_pids[$i]}" || true
-  erc=$(cat "$outdir/extra-$n.rc" 2>/dev/null || echo missing)
-  printf 'extra %s: go test exit %s (%ss since start)\n' "$n" "$erc" "$(( $(date +%s) - t0 ))"
-  if [ "$erc" = 0 ] && grep -qE "^--- PASS: $n " "$outdir/extra-$n.log"; then extra_ok+=("$n")
-  else echo "gotest-shards: extra $n did not PASS (exit $erc):"; tail -n 40 "$outdir/extra-$n.log" | sed 's/^/  | /'; fail=1; fi
+  lab=${extra_names[$i]%%:*}; names=${extra_names[$i]#*:}; wait "${extra_pids[$i]}" || true
+  erc=$(cat "$outdir/extra-$lab.rc" 2>/dev/null || echo missing)
+  printf 'extra %s: go test exit %s (%ss since start)\n' "$lab" "$erc" "$(( $(date +%s) - t0 ))"
+  allpass=1; for n in $names; do grep -qE "^--- PASS: $n " "$outdir/extra-$lab.log" || allpass=0; done
+  if [ "$erc" = 0 ] && [ "$allpass" = 1 ]; then for n in $names; do extra_ok+=("$n"); done
+  else echo "gotest-shards: extra $lab did not PASS (exit $erc):"; tail -n 40 "$outdir/extra-$lab.log" | sed 's/^/  | /'; fail=1; fi
 done
 # a SKIPPED test is not a verified one (about ten tests skip when objdump, the aarch64 objdump, lake or bwrap is missing): a run with any SKIP is
 # never recorded as a lane PASS (scripts/lib/incr.sh incr_lane: INCR_NORECORD_FILE), whatever the exit status.
@@ -189,13 +200,13 @@ nskip=0 ncov=0
 while IFS=$'\t' read -r n r; do
   [ -n "$n" ] || continue
   cov=0; for e in "${extra_ok[@]:-}"; do [ "$e" != "$n" ] || cov=1; done
-  if [ "$cov" = 1 ]; then ncov=$((ncov + 1)); printf '  covered   %s (%s) -> ran and PASSED in its own run (extra-%s.log)\n' "$n" "${r:-no reason logged}" "$n" >> "$outdir/skips-report.txt"
+  if [ "$cov" = 1 ]; then ncov=$((ncov + 1)); printf '  covered   %s (%s) -> ran and PASSED in its own run (extra-*.log)\n' "$n" "${r:-no reason logged}" >> "$outdir/skips-report.txt"
   else nskip=$((nskip + 1)); printf '  NOT RUN   %s: %s\n' "$n" "${r:-no reason logged}" | tee -a "$outdir/skips-uncovered.txt" >> "$outdir/skips-report.txt"; fi
 done < "$outdir/skips.txt"
 if [ "$nskip" -gt 0 ] || [ "$ncov" -gt 0 ]; then
   echo "SKIPPED-COVERAGE: $nskip test(s) did NOT run in this lane ($ncov skipped in the shards but covered by an extra run):"
   cat "$outdir/skips-report.txt"
-  [ "$extras_on" = 1 ] || echo "  (extras off: JANUS_NIGHTLY=1 or JANUS_GOTEST_EXTRAS=1 also runs TestReplayUnderMemoryPressure and TestConsumerMathlib)"
+  [ "$extras_on" = 1 ] || echo "  (extras off: JANUS_NIGHTLY=1 or JANUS_GOTEST_EXTRAS=1 also runs TestReplayUnderMemoryPressure, TestConsumerMathlib and the four TestASL* tests)"
 fi
 if [ "$nskip" -gt 0 ]; then
   echo "gotest-shards: $nskip test(s) SKIPPED (a skip is not a pass; this run is not recorded)"

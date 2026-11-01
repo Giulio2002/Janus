@@ -352,9 +352,10 @@ func TestJ1ToolchainDirectMatchesLake(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
-	direct := findToolchainDirect(lake, repoRoot)
+	direct, why := findToolchainDirectWhy(lake, repoRoot)
 	if direct == nil {
-		t.Skip("no direct lookup on this host (the Lake path is used)")
+		// runs whenever the host allows a direct lookup; otherwise the reason is printed (and lands in the gate's SKIPPED-COVERAGE line)
+		t.Skipf("no direct toolchain lookup on this host (lake %s, PATH=%s): %s", lake, os.Getenv("PATH"), why)
 	}
 	t.Setenv("JANUS_TOOLCHAIN_VIA_LAKE", "1")
 	via, err := findToolchain(lake, repoRoot)
