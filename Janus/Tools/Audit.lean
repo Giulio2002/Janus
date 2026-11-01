@@ -1719,17 +1719,23 @@ def arithPremise (e : Expr) : Bool :=
   e.isAppOf ``LE.le || e.isAppOf ``LT.lt || e.isAppOf ``Eq || e.isAppOf ``Ne || e.isAppOf ``GE.ge ||
     e.isAppOf ``GT.gt || e.isAppOf ``Not
 
-/-- Is the closed proposition `t` decidably true (`8 ≤ 8`, `1 ≤ 8`)? -/
-def decideTrue (t : Expr) : MetaM Bool := do
-  let t ← instantiateMVars t
+/-- Is the closed proposition `t` true by evaluating its natural-number literals (`0 ≤ 8`, `1 ≤ 8`, `2 + 1 < 9`)?
+No instance search: the auditor's environment has no instance extension loaded. -/
+partial def decideTrue (t : Expr) : MetaM Bool := do
+  let t := (← instantiateMVars t).consumeMData
   if t.hasExprMVar then return false
-  try
-    withTheReader Core.Context (fun c => { c with maxHeartbeats := 50000 * 1000 }) do
-      withCurrHeartbeats do
-        let inst ← Meta.synthInstance (mkApp (mkConst ``Decidable) t)
-        let r ← Meta.whnfD (mkAppN (mkConst ``Decidable.decide) #[t, inst])
-        return r.isConstOf ``Bool.true
-  catch _ => return false
+  let nat2 (f : Nat → Nat → Bool) (a b : Expr) : MetaM Bool := do
+    match ← Meta.evalNat a, ← Meta.evalNat b with
+    | some x, some y => return f x y
+    | _, _ => return false
+  if t.isConstOf ``True then return true
+  else if t.isAppOfArity ``And 2 then return (← decideTrue (t.getArg! 0)) && (← decideTrue (t.getArg! 1))
+  else if t.isAppOfArity ``LE.le 4 && (t.getArg! 0).isConstOf ``Nat then nat2 (· ≤ ·) (t.getArg! 2) (t.getArg! 3)
+  else if t.isAppOfArity ``LT.lt 4 && (t.getArg! 0).isConstOf ``Nat then nat2 (· < ·) (t.getArg! 2) (t.getArg! 3)
+  else if t.isAppOfArity ``GE.ge 4 && (t.getArg! 0).isConstOf ``Nat then nat2 (· ≥ ·) (t.getArg! 2) (t.getArg! 3)
+  else if t.isAppOfArity ``GT.gt 4 && (t.getArg! 0).isConstOf ``Nat then nat2 (· > ·) (t.getArg! 2) (t.getArg! 3)
+  else if t.isAppOfArity ``Eq 3 && (t.getArg! 0).isConstOf ``Nat then nat2 (· == ·) (t.getArg! 1) (t.getArg! 2)
+  else return false
 
 /-- Does the witness conjunct `c` give the premise `p`? Either `c` unifies with `p`, or `c` is a
 universal statement `∀ n, n ≤ 8 → A n ∧ B n` (`WriteBarrier`: the witness covers every slot count) one of
