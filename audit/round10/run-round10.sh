@@ -16,7 +16,16 @@ export PATH=/usr/local/go/bin:$PATH
 R=audit/round10
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-lb="$(lake build Janus Janus.Tools.Audit janus-audit janus-decode janus-oracle-amd64 2>&1)" || { echo "lake build failed:"; tail -30 <<<"$lb"; exit 1; }
+lb="$(lake build Janus Janus.Tools.Audit janus-audit janus-oracle-amd64 2>&1)" || { echo "lake build failed:"; tail -30 <<<"$lb"; exit 1; }
+# janus-decode: Janus.Tools.Decode is not a framework module, so every janus run against this checkout removes its build outputs
+# (changedModules, cmd/janus/framework.go: an extra module output in the pinned framework build is dropped). After the gate's
+# pin lake is --no-build and cannot rebuild it: then the prebuilt executable must exist and be newer than every Janus source.
+if [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ]; then
+  d=.lake/build/bin/janus-decode
+  [ -x "$d" ] && [ -z "$(find Janus lakefile.toml -newer "$d" \( -name '*.lean' -o -name lakefile.toml \) -print -quit)" ] || { echo "janus-decode is missing or older than the sources (prebuilt: $d)"; exit 1; }
+else
+  lb="$(lake build janus-decode 2>&1)" || { echo "lake build janus-decode failed:"; tail -30 <<<"$lb"; exit 1; }
+fi
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -d artifacts/amd64/Box ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
 W=$R/work/rows; rm -rf "$W"; mkdir -p "$W"
