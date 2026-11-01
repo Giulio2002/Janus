@@ -745,7 +745,7 @@ def _sandbox_prefix(work, c_dir):
             pass
         pre += ["--bind", work, work, "--chdir", c_dir, "--"]
         try:
-            probe_ok = subprocess.run(pre + ["/bin/true"], capture_output=True, stdin=subprocess.DEVNULL, timeout=60).returncode == 0
+            probe_ok = run_sandboxed(pre + ["/bin/true"], None, None, 60).returncode == 0
         except (OSError, subprocess.SubprocessError):
             probe_ok = False
     if probe_ok:
@@ -754,6 +754,119 @@ def _sandbox_prefix(work, c_dir):
         print("cache: WARNING: no usable bubblewrap; recompiling UNSANDBOXED because %s=1" % UNSANDBOXED_OPTIN, file=sys.stderr)
         return []
     raise Inconclusive("no usable bubblewrap at %s: the recompile is not run unsandboxed (%s=1 opts in)" % (BWRAP_CANDIDATES, UNSANDBOXED_OPTIN))
+
+
+# --- sandboxed children never outlive their run (RTOBJ6: two recompile sandboxes survived 4-10 h, parent gone) ---
+# `bwrap --die-with-parent` relies on PR_SET_PDEATHSIG, which does not reach everything under every parent
+# (a parent that is a thread, a kill between bwrap's clone and its prctl, a supervisor that kills only the
+# direct child). The children therefore also run in a session of their own, are registered here, and are
+# killed -- the whole process TREE below the direct child, found through /proc, whatever sessions and process
+# groups its members changed to -- when the run ends (normally, by timeout or by an exception), when this
+# process receives SIGTERM/SIGHUP/SIGINT, and at interpreter exit. SIGKILL of this process itself is left to
+# --die-with-parent (nothing can run then); tests/test_asl_obj_cache.sh kills the parent and checks.
+_LIVE = set()
+_HANDLERS = []
+
+
+def _children_map():
+    kids = {}
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return kids
+    for n in names:
+        if not n.isdigit():
+            continue
+        try:
+            with open("/proc/%s/stat" % n, "rb") as f:
+                st = f.read()
+            ppid = int(st[st.rindex(b")") + 2:].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        kids.setdefault(ppid, []).append(int(n))
+    return kids
+
+
+def kill_tree(pid):
+    """SIGKILL pid and every descendant (deepest first), found through /proc; also its process group."""
+    import signal
+    kids = _children_map()
+    order, stack = [], [pid]
+    while stack:
+        q = stack.pop()
+        order.append(q)
+        stack.extend(kids.get(q, []))
+    for q in reversed(order):
+        try:
+            os.kill(q, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        os.killpg(pid, signal.SIGKILL)  # pid leads the session the child was started in
+    except OSError:
+        pass
+
+
+def _kill_live():
+    for p in list(_LIVE):
+        kill_tree(p)
+    _LIVE.clear()
+
+
+def _install_reaper():
+    if _HANDLERS:
+        return
+    import atexit
+    import signal
+    atexit.register(_kill_live)
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        try:
+            old = signal.getsignal(sig)
+
+            def handler(signum, frame, old=old):
+                _kill_live()
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+            signal.signal(sig, handler)
+            _HANDLERS.append((sig, old))
+        except (ValueError, OSError):
+            pass  # not the main thread
+
+
+def run_sandboxed(argv, cwd, env, timeout):
+    """subprocess.run(argv, capture_output=True, stdin=DEVNULL, timeout=timeout), except that the child
+    (and everything it started) is killed when the run ends in any way and when this process is told to stop."""
+    _install_reaper()
+    p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         start_new_session=True)
+    _LIVE.add(p.pid)
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except BaseException:
+        kill_tree(p.pid)
+        try:
+            p.communicate(timeout=10)
+        except Exception:
+            pass
+        raise
+    finally:
+        # the direct child is done (or killed): nothing it started may remain. A reaped pid may be reused, so the
+        # tree is walked only while the child is still ours; the process group (the pid stays reserved while
+        # the group has members) is killed in every case.
+        if p.poll() is None:
+            kill_tree(p.pid)
+        else:
+            import signal
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+        _LIVE.discard(p.pid)
+        try:
+            p.wait(timeout=10)
+        except Exception:
+            pass
+    return subprocess.CompletedProcess(argv, p.returncode, out, err)
 
 
 def recompile_object(cc, prefix, c_path, c_rel, work):
@@ -768,8 +881,7 @@ def recompile_object(cc, prefix, c_path, c_rel, work):
         raise Inconclusive("%s is not a cacheable object" % c_rel)
     pre = _sandbox_prefix(work, os.path.dirname(c_path))
     try:
-        r = subprocess.run(pre + cmd, cwd=os.path.dirname(c_path), capture_output=True, env=env, stdin=subprocess.DEVNULL,
-                           timeout=int(os.environ.get("ASL_OBJ_RECOMPILE_TIMEOUT", "3600")))
+        r = run_sandboxed(pre + cmd, os.path.dirname(c_path), env, int(os.environ.get("ASL_OBJ_RECOMPILE_TIMEOUT", "3600")))
     except (OSError, subprocess.SubprocessError, ValueError) as ex:
         raise Inconclusive("recompile did not run (%s)" % ex)
     if r.returncode != 0:
