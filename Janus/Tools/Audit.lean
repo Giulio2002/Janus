@@ -775,7 +775,9 @@ partial def binderDomains : Expr → Array Expr → Array Expr
 
 /-- Is `c` a runtime contract of the framework? -/
 def isRuntimeContract (env : Environment) (c : Name) : Bool :=
-  (`Janus.Contracts).isPrefixOf c && match env.find? c with
+  -- round 14: any trusted `Janus.*` namespace (`Janus.Kernel.SchedContract`, `Janus.Print.Lock2Contract` were not
+  -- recognised as contracts when only `Janus.Contracts.*` counted)
+  (`Janus).isPrefixOf c && match env.find? c with
     | some (.defnInfo d) => bodyIsSummary d.value ||
         -- a contract stated over runs rather than as a `Summary` (agent/panic's
         -- `GopanicRecoverContract`: a call that does not return but resumes elsewhere), named
@@ -1151,13 +1153,7 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
             isVar t'.appArg!.consumeMData &&
             !t'.getAppArgs.pop.any (·.hasAnyFVar (rtVars.contains ·))
         | _ => false
-      -- round 14: a premise about an implementation variable that only a framework predicate
-      -- (`Janus.Print.Lock2Contract`, `Janus.Kernel.SchedContract`, … defined in a trusted `Janus` module and not
-      -- recognised as a runtime contract above) mentions, and that mentions no other runtime variable
-      let isFramework := match t'.getAppFn with
-        | .const c _ => c.getRoot == `Janus && !(t'.hasAnyFVar fun v => rtVars.contains v && !implOnly.contains v)
-        | _ => false
-      unless isContract || isLaws || isFramework || depthBound bound rtVars t' do
+      unless isContract || isLaws || depthBound bound rtVars t' do
         return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}), which constrains a runtime variable of a contract hypothesis; only the contracts and the model laws may mention them (round 10 V1, round 11)"
     return none
 
@@ -1596,7 +1592,8 @@ Extracted.program` in the place of a witness passed. A witness now has a SHAPE, 
   witness exhibits a call state satisfying the main theorem's precondition together with an
   instance of its hypotheses; `Extracted.program = Extracted.program` or `True` cannot pass.
 * `…Witness.returns` must be a `Returns`-style statement (`Returns`, `GoReturns`, `ReturnsK`,
-  `GrownReturns`, `ReachesRet`) that is, up to definitional unification of `M`'s variables, the
+  `GrownReturns`, `ReachesRet`) that is, for ONE conjunct of the main theorem (an execution runs one entry; non-vacuity of
+  the others is `nonvacuous`'s job, which covers every conjunct), up to definitional unification of `M`'s variables, the
   EXACT conclusion of some main theorem `M` (its unfolded `Returns … (fun s' => ABIReturn s s' ∧
   post s s')`) at a concrete start state: an execution of the program that reaches the return with
   the guarantee of the main theorem.
@@ -1795,21 +1792,21 @@ def premisesOf (ms : Array Expr) : MetaM (List Expr) := do
   return (ps.filter (!arithPremise ·)).toList ++ (ps.filter arithPremise).toList
 
 /-- Is the witness body `wconjs` an instance of the main statement `mty`? `none` when it is, else
-the reason. Every hypothesis of `mty` must be a conjunct of the witness; and, for at least one conjunct
-of the conclusion (a main theorem may state several guarantees, `IsEven ∧ IsOdd`, `wb1 ∧ … ∧ wb8`),
-every premise of that conjunct's unfolded form (return address, call state, precondition conjuncts)
-must be one too. -/
+the reason. Every hypothesis of `mty` must be a conjunct of the witness; and, for EVERY conjunct of the
+conclusion (a main theorem may state several guarantees, `IsEven ∧ IsOdd`, `wb1 ∧ … ∧ wb8`; a witness for one
+of them would leave the others possibly vacuous), every premise of that conjunct's unfolded form (return
+address, call state, precondition conjuncts) must be a conjunct of the witness too. -/
 def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) := do
   let (ms, _, concl) ← Meta.forallMetaTelescope mty
   let hyps ← premisesOf ms
-  let mut why := "the main theorem has no call premise"
-  for c in flattenAnd (← instantiateMVars concl) do
+  let concls := flattenAnd (← instantiateMVars concl)
+  for (c, idx) in concls.toList.zip (List.range concls.size) do
     let st ← Meta.saveState
     let body ← unfoldToForall c
     let (ms2, _, _) ← Meta.forallMetaTelescope body
+    let which := if concls.size > 1 then s!" (conjunct {idx + 1} of {concls.size})" else ""
     if ms2.isEmpty then
-      why := "the conclusion of the main theorem does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
-      st.restore; continue
+      return some s!"the conclusion of the main theorem{which} does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
     let calls ← premisesOf ms2
     -- the premise `s.pc = entry` / `s.rip = entry` of a `Summary`-style contract is the call setup; a witness
     -- that exhibits a state satisfying the rest of the precondition (`CallOK s …`, `Ready H rt [n] s`) for
@@ -1822,16 +1819,15 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
     | none =>
       -- the pc premises: matched if the witness states them, else they must be about a state the other
       -- premises fixed
-      let mut ok := true
       for q in all.filter pcPrem do
         let q ← instantiateMVars q
         unless ← findConj q wconjs do
-          if q.hasExprMVar then ok := false
-      if ok then return none
-      why := "the entry-address premise of the main theorem concerns no state of the witness"
-    | some w => why := s!"the premise {w}"
+          if q.hasExprMVar then
+            return some s!"the entry-address premise of the main theorem{which} concerns no state of the witness"
+    | some w => return some s!"the premise {w}{which}"
     st.restore
-  return some why
+  if concls.isEmpty then return some "the main theorem has no conclusion"
+  return none
 
 /-- Is `e` an application of a `Returns`-style predicate? -/
 def returnsHead (e : Expr) : Bool :=

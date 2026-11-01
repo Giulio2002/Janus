@@ -206,6 +206,23 @@ theorem bad8 (impl : List Segment) (a b : BitVec 64)
     Ensures (Extracted.program.link impl) Extracted.entry [a, b]
       (fun s => GuardOK s 0) (fun _ s' => (s'.regs 0).toNat = 0) := sorry
 
+/-- BAD9: a premise about the implementation headed by a Janus predicate that is not a runtime contract
+(`RetAddr (link impl) ret`): it pins `impl` (here: to code that has a valid return address) and is not a pinned contract. -/
+theorem bad9 (impl : List Segment) (ret : Nat) (h : RetAddr (Extracted.program.link impl) ret) (a b : BitVec 64) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b]
+      (fun s => GuardOK s 0) (fun _ s' => (s'.regs 0).toNat = 0) := sorry
+
+/-- BAD10: a premise equating a Janus function of the linked program with a number. -/
+theorem bad10 (impl : List Segment) (h : (Extracted.program.link impl).exitAddr = 0) (a b : BitVec 64) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b]
+      (fun s => GuardOK s 0) (fun _ s' => (s'.regs 0).toNat = 0) := sorry
+
+/-- BAD11: the linked program equated with the one linked to the toy allocator. -/
+theorem bad11 (impl : List Segment) (h : Extracted.program.link impl = Extracted.program.link Witness.AllocW.impl)
+    (a b : BitVec 64) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b]
+      (fun s => GuardOK s 0) (fun _ s' => (s'.regs 0).toNat = 0) := sorry
+
 /-! ### weak witnesses -/
 
 namespace WeakA.Witness

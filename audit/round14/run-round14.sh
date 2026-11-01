@@ -31,7 +31,7 @@ mapfile -t tg < <(scripts/example-targets.sh NewPair)
 "$J" extract artifacts/examples-arm64 "$(example_symbol NewPair)" "$W/NewPair" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
 broken=()
 P=Proof
-thms=(correctness Witness.nonvacuous Witness.returns bad1 bad2 bad3 bad4 bad5 bad6 bad7 bad8
+thms=(correctness Witness.nonvacuous Witness.returns bad1 bad2 bad3 bad4 bad5 bad6 bad7 bad8 bad9 bad10 bad11
   WeakA.Witness.nonvacuous WeakB.Witness.nonvacuous WeakC.Witness.nonvacuous WeakD.Witness.nonvacuous
   WeakE.Witness.nonvacuous WeakF.Witness.returns WeakG.Witness.returns WeakI.Witness.returns WeakH.Witness.returns Witness.pre)
 targs=(); for t in "${thms[@]}"; do targs+=(--theorem "$P.$t"); done
@@ -61,6 +61,9 @@ row bad5 blocked 'round 14'
 row bad6 blocked 'round 14'
 row bad7 blocked 'round 14'
 row bad8 blocked 'about the program'
+row bad9 blocked 'round 10 V1' 'RetAddr'
+row bad10 blocked 'round 10 V1' 'exitAddr'
+row bad11 blocked 'round 14'
 echo "== W2: witnesses have a checked shape"
 for w in WeakA WeakB WeakC WeakD WeakE; do row $w.Witness.nonvacuous blocked 'round 14, W2'; done
 for w in WeakF WeakG WeakI WeakH; do row $w.Witness.returns blocked 'round 14, W2'; done
@@ -69,6 +72,15 @@ echo "== controls"
 row correctness Verified 'Role: main theorem' 'Runtime contracts assumed: Janus.Contracts.NewobjectContract@runtime.newobject'
 row Witness.nonvacuous Verified 'Role: WITNESS' 'main theorem Proof.correctness'
 row Witness.returns Verified 'Role: WITNESS' 'main theorem Proof.correctness'
+echo "== (c): a witness must cover EVERY conjunct of a conjunction main theorem (IsEven ∧ IsOdd)"
+mapfile -t tg < <(scripts/example-targets.sh IsEven)
+"$J" extract artifacts/examples-arm64 "$(example_symbol IsEven)" "$W/IsEven" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
+all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/IsEvenOneMember.lean "$W/IsEven" \
+  --theorem $P.correctness --theorem $P.Witness.nonvacuous --theorem $P.Witness.returns --theorem $P.OneMember.Witness.nonvacuous 2>&1)"
+row correctness Verified
+row Witness.nonvacuous Verified 'Role: WITNESS'
+row Witness.returns Verified 'Role: WITNESS'
+row OneMember.Witness.nonvacuous blocked 'round 14, W2' 'conjunct 2 of 2'
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "round 14: BROKEN rows: ${broken[*]}"; exit 1; fi
 echo "round 14: all rows as expected"
