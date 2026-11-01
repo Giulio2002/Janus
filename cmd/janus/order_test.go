@@ -32,6 +32,12 @@ import (
 // TestResultCache, TestConcurrentVerify) are about 1100 of the 2150 s of the whole package.
 var testDurations = map[string]float64{
 	"TestCacheGCConcurrentVerify": 469, "TestR1ForgedFrameworkLemma": 462, "TestResultCache": 232,
+	// the parallel-replay tests (measured at load ~40 in the nightly of 2026-11-01, scaled by the 1.9 that
+	// the same load did to TestCacheGCConcurrentVerify: 892 s there against 469 s here); before they were
+	// missing, counted 1 s and started last in their shards
+	"TestParallelReplayE2EForgedRootNoVerdict": 224, "TestParallelReplayE2EForgedRootWithPlantedHonestRoot": 126,
+	"TestParallelReplayE2EHonestControl": 111, "TestParallelFrameworkReplayMatchesSingleProcess": 217,
+	"TestParallelFrameworkReplayMatchesSingleProcessMini": 24, "TestParallelFrameworkReplayCatchesForgeryInEveryPartition": 16, "TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal": 600,
 	"TestConcurrentVerify": 223, "TestRTBuildCacheScripts": 83, "TestSelfTestIsolation": 52, "TestR1FrameworkTamper": 45,
 	"TestConsumerVerify": 43, "TestDataLarge": 37, "TestJ1PrestartMatchesClassic": 29, "TestVerifyBatch": 27,
 	"TestConsumerTwoCheckouts": 27, "TestGateCancelLib": 26, "TestLaneLakeLib": 25, "TestConsumerVerifyMany": 24,

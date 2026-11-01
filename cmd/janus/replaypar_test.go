@@ -409,8 +409,8 @@ func realParFixture(t *testing.T) (lib string, tc *toolchain, fw *pinnedLib, run
 	// never a silent skip.
 	missing := func(msg string) {
 		t.Helper()
-		if os.Getenv("JANUS_REQUIRE_FIXTURE") == "1" {
-			t.Fatalf("JANUS_REQUIRE_FIXTURE=1 but %s", msg)
+		if os.Getenv("JANUS_REQUIRE_FIXTURE") == "1" || os.Getenv("JANUS_NIGHTLY") == "1" {
+			t.Fatalf("JANUS_REQUIRE_FIXTURE=1/JANUS_NIGHTLY=1 but %s", msg)
 		}
 		t.Skip(msg)
 	}
@@ -449,23 +449,34 @@ func realParFixture(t *testing.T) (lib string, tc *toolchain, fw *pinnedLib, run
 }
 
 func realPar(t *testing.T, tc *toolchain, lib string, runIn func(string) func([]string, ...string) (string, error), workers int) (string, error, [][]string) {
+	out, err, calls, _ := realParFiles(t, tc, lib, runIn, workers, mustFrameworkFiles(t))
+	return out, err, calls
+}
+
+// realParFiles runs the parallel framework replay of lib with the real leanchecker. files are the
+// framework's sources (which modules are pinned); it returns the output of every worker call too
+// (aligned with calls), so that a test needs no second replay to see what each call replayed.
+func realParFiles(t *testing.T, tc *toolchain, lib string, runIn func(string) func([]string, ...string) (string, error), workers int, files map[string][]byte) (string, error, [][]string, []string) {
 	var mu sync.Mutex
 	var calls [][]string
+	var outs []string
 	r := runIn(lib)
 	par := &parReplay{
 		dirs:      append(filepath.SplitList(tc.leanPathEnv(lib)), filepath.Join(tc.sysroot, "lib", "lean")),
 		workers:   workers,
 		aliasBase: t.TempDir(),
 		run: func(extra []string, argv ...string) (string, error) {
+			o, err := r(extra, argv...)
 			mu.Lock()
 			calls = append(calls, argv)
+			outs = append(outs, o)
 			mu.Unlock()
-			return r(extra, argv...)
+			return o, err
 		},
 	}
-	fwl, _ := frameworkPins(lib, mustFrameworkFiles(t))
+	fwl, _ := frameworkPins(lib, files)
 	out, err := runFrameworkReplay(tc.leanchecker, func(argv ...string) (string, error) { return r(nil, argv...) }, par, fwl)
-	return out, err, calls
+	return out, err, calls, outs
 }
 
 func mustFrameworkFiles(t *testing.T) map[string][]byte {
@@ -489,20 +500,16 @@ func TestParallelFrameworkReplayMatchesSingleProcess(t *testing.T) {
 	for _, mm := range replayingLineRE.FindAllStringSubmatch(single, -1) {
 		want[mm[1]]++
 	}
-	out, err, calls := realPar(t, tc, lib, runIn, 4)
+	out, err, calls, outs := realParFiles(t, tc, lib, runIn, 4, mustFrameworkFiles(t))
 	if err != nil {
 		t.Fatalf("parallel: %v\n%s", err, out)
 	}
 	if len(calls) < 2 {
 		t.Fatalf("not partitioned: %v", calls)
 	}
-	// Re-derive what each call replayed from the real leanchecker (one -v run per call).
+	// What each call replayed, from the output of that very call (one -v run per call).
 	got := map[string]int{}
-	for _, c := range calls {
-		o, err := runIn(lib)(aliasExtra(t, lib, c), c...)
-		if err != nil {
-			t.Fatalf("worker %v: %v\n%s", c, err, o)
-		}
+	for _, o := range outs {
 		for _, mm := range replayingLineRE.FindAllStringSubmatch(o, -1) {
 			if strings.HasPrefix(mm[1], rootAliasPrefix) {
 				got["Janus"]++
@@ -521,25 +528,161 @@ func TestParallelFrameworkReplayMatchesSingleProcess(t *testing.T) {
 	}
 }
 
-// aliasExtra makes the root alias directory when the call names it.
-func aliasExtra(t *testing.T, lib string, argv []string) []string {
-	for _, a := range argv {
-		if strings.HasPrefix(a, rootAliasPrefix) {
-			fwl, _ := frameworkPins(lib, mustFrameworkFiles(t))
-			d, cleanup, err := makeRootAlias(t.TempDir(), lib, a, fwl)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(cleanup)
-			return []string{d}
+// miniSources is a small framework with the module shapes the replay plan distinguishes: the root
+// (`Janus`, replayed through its alias), a leaf (`Janus.GoABI`), a module with descendants
+// (`Janus.Tactic` over `Janus.Tactic.Basic`) and a descendant of a module that has its own file
+// (`Janus.Amd64.Tactic` under `Janus.Amd64`). Same names as the real framework's partition kinds,
+// a few lines each: the real leanchecker and the real kernel replay it in seconds.
+var miniSources = []struct{ mod, src string }{
+	{"Janus.GoABI", "import Lean\nnamespace Mini\ntheorem goabi_ok : 1 + 1 = 2 := rfl\nend Mini\n"},
+	{"Janus.Tactic.Basic", "import Lean\nimport Janus.GoABI\nnamespace Mini\ntheorem basic_ok (n : Nat) : n + 0 = n := rfl\nend Mini\n"},
+	{"Janus.Tactic", "import Lean\nimport Janus.Tactic.Basic\nnamespace Mini\ntheorem tactic_ok : 2 * 3 = 6 := rfl\nend Mini\n"},
+	{"Janus.Amd64.Tactic", "import Lean\nimport Janus.GoABI\nnamespace Mini\ntheorem amd_tactic_ok : 3 + 4 = 7 := rfl\nend Mini\n"},
+	{"Janus.Amd64", "import Lean\nimport Janus.Amd64.Tactic\nnamespace Mini\ntheorem amd_ok : 5 - 2 = 3 := rfl\nend Mini\n"},
+	{"Janus", "import Lean\nimport Janus.GoABI\nimport Janus.Tactic\nimport Janus.Amd64\nnamespace Mini\ntheorem root_ok : 7 = 7 := rfl\nend Mini\n"},
+}
+
+// compileMini compiles the module mod from src into lib with the toolchain's lean (modules
+// already in lib are importable; nothing else of Janus is on the search path).
+func compileMini(t *testing.T, tc *toolchain, lib, mod string, src []byte) {
+	t.Helper()
+	rel := strings.ReplaceAll(mod, ".", "/")
+	dir := t.TempDir()
+	writeBytes(t, filepath.Join(dir, rel+".lean"), src)
+	out := filepath.Join(lib, rel+".olean")
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(tc.lean, "--root="+dir, "-o", out, filepath.Join(dir, rel+".lean"))
+	cmd.Env = append(os.Environ(), "LEAN_PATH="+tc.leanPathEnv(lib))
+	if o, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("compiling mini module %s: %v\n%s", mod, err, o)
+	}
+}
+
+// miniFixture builds the mini framework once per test (honest oleans) and returns it with the real
+// toolchain and a runner for the real leanchecker. Unlike realParFixture it needs no
+// repository build and takes no heavy lock.
+func miniFixture(t *testing.T) (lib string, tc *toolchain, files map[string][]byte, runIn func(lib string) func(extra []string, argv ...string) (string, error)) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("running with -short")
+	}
+	lake, lerr := findLake()
+	if lerr != nil {
+		if os.Getenv("JANUS_REQUIRE_FIXTURE") == "1" {
+			t.Fatalf("JANUS_REQUIRE_FIXTURE=1 but lake not installed")
+		}
+		t.Skip("lake not installed")
+	}
+	var err error
+	if tc, err = findToolchain(lake, repoRoot); err != nil || !tc.hasChecker {
+		if os.Getenv("JANUS_REQUIRE_FIXTURE") == "1" {
+			t.Fatalf("JANUS_REQUIRE_FIXTURE=1 but no leanchecker")
+		}
+		t.Skip("no leanchecker")
+	}
+	lib = filepath.Join(t.TempDir(), "lib")
+	files = map[string][]byte{}
+	for _, m := range miniSources {
+		compileMini(t, tc, lib, m.mod, []byte(m.src))
+		files[strings.ReplaceAll(m.mod, ".", "/")+".lean"] = []byte(m.src)
+	}
+	runIn = func(lib string) func(extra []string, argv ...string) (string, error) {
+		return func(extra []string, argv ...string) (string, error) {
+			return runLean(&sandbox{mode: "none"}, tc, t.TempDir(), nil, tc.leanPathEnv(append(append([]string{}, extra...), lib)...), argv...)
 		}
 	}
-	return nil
+	return
+}
+
+// The parallel plan over the mini framework passes with the real leanchecker, replays exactly the
+// modules `leanchecker -v Janus` replays (each once), and is partitioned.
+func TestParallelFrameworkReplayMatchesSingleProcessMini(t *testing.T) {
+	defer parallel(t)()
+	lib, tc, files, runIn := miniFixture(t)
+	single, err := runIn(lib)(nil, tc.leanchecker, "-v", "Janus")
+	if err != nil {
+		t.Fatalf("single process: %v\n%s", err, single)
+	}
+	want := map[string]int{}
+	for _, mm := range replayingLineRE.FindAllStringSubmatch(single, -1) {
+		want[mm[1]]++
+	}
+	if len(want) != len(miniSources) {
+		t.Fatalf("the single process replayed %d modules, the fixture has %d: %v", len(want), len(miniSources), want)
+	}
+	out, err, calls, outs := realParFiles(t, tc, lib, runIn, 4, files)
+	if err != nil {
+		t.Fatalf("parallel: %v\n%s", err, out)
+	}
+	if len(calls) < 2 {
+		t.Fatalf("not partitioned: %v", calls)
+	}
+	got := map[string]int{}
+	for _, o := range outs {
+		for _, mm := range replayingLineRE.FindAllStringSubmatch(o, -1) {
+			if strings.HasPrefix(mm[1], rootAliasPrefix) {
+				got["Janus"]++
+			} else {
+				got[mm[1]]++
+			}
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parallel replays %d modules, single process %d: %v vs %v", len(got), len(want), got, want)
+	}
+	for m, n := range want {
+		if got[m] != n || n != 1 {
+			t.Errorf("%s: single %d, parallel %d", m, n, got[m])
+		}
+	}
 }
 
 // A forged declaration (kernel check skipped) in the root module, a leaf, a module with
-// descendants and a descendant of one is caught by the real kernel replay of the plan.
+// descendants and a descendant of one is caught by the real kernel replay of the plan. The
+// framework here is the mini one (miniSources): the partition kinds are what the property is
+// about, and a replay of the full Janus per module made this the slowest test of the suite. The
+// real framework is covered where the forgery is a real module of it: the forged ROOT through
+// `janus verify` in TestParallelReplayE2EForgedRootNoVerdict and a forged Janus.GoABI in
+// TestR1ForgedFrameworkLemma. The honest mini framework passes (control), so a detection is the
+// forgery's, not the harness's.
 func TestParallelFrameworkReplayCatchesForgeryInEveryPartition(t *testing.T) {
+	defer parallel(t)()
+	lib0, tc, files, runIn := miniFixture(t)
+	if out, err, _, _ := realParFiles(t, tc, lib0, runIn, 4, files); err != nil {
+		t.Fatalf("control: the honest mini framework fails the replay: %v\n%s", err, out)
+	}
+	forge, _ := os.ReadFile(filepath.Join(repoRoot, "audit", "attacks", "R1_forged_lemma.lean"))
+	for _, mod := range []string{"Janus", "Janus.GoABI", "Janus.Tactic", "Janus.Amd64.Tactic"} {
+		rel := strings.ReplaceAll(mod, ".", "/")
+		lib := filepath.Join(t.TempDir(), "lib")
+		if err := copyTree(lib0, lib); err != nil {
+			t.Fatal(err)
+		}
+		src := files[rel+".lean"]
+		compileMini(t, tc, lib, mod, append(append([]byte{}, src...), forge...))
+		out, err, _, _ := realParFiles(t, tc, lib, runIn, 4, files)
+		var mk *memKillError
+		if errors.As(err, &mk) || strings.Contains(out, "memory limit") {
+			t.Fatalf("forged %s: the replay was OOM-killed (inconclusive), not a detection: %v\n%s", mod, err, out)
+		}
+		if err == nil || !strings.Contains(out, "leanchecker found a problem in") || !strings.Contains(out, "forged") {
+			t.Errorf("forged %s: not a kernel detection: err %v\n%s", mod, err, out)
+		}
+	}
+}
+
+// The real-framework variant of TestParallelFrameworkReplayCatchesForgeryInEveryPartition: a forged
+// declaration (kernel check skipped) in the real Janus, Janus.GoABI, Janus.Tactic and Janus.Amd64.Tactic
+// modules is caught by the real kernel replay of the plan (four full replays: nightly only).
+func TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal(t *testing.T) {
+	// The nightly cold/cached gates (scripts/nightly-cold-gate.sh sets JANUS_NIGHTLY=1) run this on the
+	// real framework; the merge gates run the mini-framework variant above, which proves the same
+	// property for the partition kinds in seconds. With JANUS_NIGHTLY=1 a missing fixture is a failure.
+	if os.Getenv("JANUS_NIGHTLY") != "1" {
+		t.Skip("real-framework variant: runs in the nightly gates (JANUS_NIGHTLY=1); the mini-framework variant runs everywhere")
+	}
 	defer parallel(t)()
 	lib0, tc, _, runIn := realParFixture(t)
 	lake, _ := findLake()
@@ -663,84 +806,94 @@ func TestAliasShadowCaseFoldAndUnlistable(t *testing.T) {
 // guard, parallel framework replay with its default workers): the honest control records a
 // framework verdict; a build whose ROOT olean is forged records none, with or without an honest
 // copy planted as JanusReplayRoot.olean (which is refused).
+func TestParallelReplayE2EHonestControl(t *testing.T) {
+	parallelReplayE2E(t, "control-honest-extra-decl")
+}
+
 func TestParallelReplayE2EForgedRootNoVerdict(t *testing.T) {
+	parallelReplayE2E(t, "forged-root")
+}
+
+func TestParallelReplayE2EForgedRootWithPlantedHonestRoot(t *testing.T) {
+	parallelReplayE2E(t, "forged-root-with-planted-honest-JanusReplayRoot")
+}
+
+// The three cases are separate tests (they share nothing but the fixture) so that the gate's shards
+// can run them at once instead of one after the other.
+func parallelReplayE2E(t *testing.T, plant string) {
 	_, _, _, _ = realParFixture(t)
 	useTestCache(t)
-	for _, plant := range []string{"control-honest-extra-decl", "forged-root", "forged-root-with-planted-honest-JanusReplayRoot"} {
-		t.Run(plant, func(t *testing.T) {
-			root := filepath.Join(t.TempDir(), "janus")
-			for _, f := range []string{"lakefile.toml", "lake-manifest.json", "lean-toolchain", "Janus.lean"} {
-				b, err := os.ReadFile(filepath.Join(repoRoot, f))
-				if err != nil {
-					t.Fatal(err)
-				}
-				writeBytes(t, filepath.Join(root, f), b)
-			}
-			if err := copyTree(filepath.Join(repoRoot, "Janus"), filepath.Join(root, "Janus")); err != nil {
-				t.Fatal(err)
-			}
-			if err := copyTree(filepath.Join(repoRoot, ".lake", "build"), filepath.Join(root, ".lake", "build")); err != nil {
-				t.Fatal(err)
-			}
-			lib := filepath.Join(root, ".lake", "build", "lib", "lean")
-			honest, _ := os.ReadFile(filepath.Join(lib, "Janus.olean"))
-			src, _ := os.ReadFile(filepath.Join(repoRoot, "Janus.lean"))
-			forge := "\ntheorem Janus.okayRoot : 1 = 1 := rfl\n"
-			if plant != "control-honest-extra-decl" {
-				forge = "\nopen Lean in\nset_option debug.skipKernelTC true in\nrun_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {\n  name := `Janus.forgedRoot, levelParams := [], type := mkConst ``False, value := mkConst ``True.intro })\n"
-			}
-			fdir := filepath.Join(t.TempDir(), "forge")
-			writeBytes(t, filepath.Join(fdir, "Janus.lean"), append(append([]byte{}, src...), forge...))
-			lake, _ := findLake()
-			os.Remove(filepath.Join(lib, "Janus.olean"))
-			cmd := exec.Command(lake, "env", "lean", "--root="+fdir, "-o", filepath.Join(lib, "Janus.olean"), filepath.Join(fdir, "Janus.lean"))
-			cmd.Dir = root
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("forging: %v\n%s", err, out)
-			}
-			if strings.HasSuffix(plant, "JanusReplayRoot") {
-				writeBytes(t, filepath.Join(lib, "JanusReplayRoot.olean"), honest)
-			}
-			fwd, err := loadFramework(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			tc, err := findToolchain(lake, root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			pinned, err := frameworkPins(lib, fwd.Files)
-			if err != nil {
-				t.Fatal(err)
-			}
-			k := frameworkVerdictKey(tc.cacheID(), pinned)
-			if hasFrameworkVerdict(k) {
-				t.Fatal("verdict already present")
-			}
-			add := mustExtract(t, "example.com/basic.Add")
-			proof := filepath.Join(t.TempDir(), "Proof.lean")
-			writeBytes(t, proof, []byte("import Extracted\nnamespace Proof\ntheorem correctness : Extracted.program.data.length = Extracted.program.data.length := rfl\nend Proof\n"))
-			code, out, stderr := runJanus(t, "verify", add, "--proof", proof, "--janus-root", root)
-			t.Logf("code=%d out=%q stderr=%.1500q", code, out, stderr)
-			if plant == "control-honest-extra-decl" {
-				if strings.Contains(stderr, "memory limit") {
-					t.Errorf("control was killed for memory:\n%.800s", stderr)
-				}
-				if !hasFrameworkVerdict(k) {
-					t.Errorf("control: no verdict recorded for an honest build (parallel path not exercised?)")
-				}
-				return
-			}
-			if hasFrameworkVerdict(k) {
-				t.Errorf("a framework verdict was recorded for the forged-root build")
-			}
-			// A resource kill is inconclusive, never a detection: the rejection must be the kernel's.
-			if strings.Contains(stderr, "memory limit") || strings.Contains(stderr, "resource limit") {
-				t.Errorf("the verification was killed for memory, which proves nothing about the forgery:\n%.800s", stderr)
-			} else if code == 0 || !strings.Contains(stderr, "Kernel replay rejected") {
-				t.Errorf("forged root not rejected by the kernel replay: code %d\n%.800s", code, stderr)
-			}
-		})
+	root := filepath.Join(t.TempDir(), "janus")
+	for _, f := range []string{"lakefile.toml", "lake-manifest.json", "lean-toolchain", "Janus.lean"} {
+		b, err := os.ReadFile(filepath.Join(repoRoot, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeBytes(t, filepath.Join(root, f), b)
+	}
+	if err := copyTree(filepath.Join(repoRoot, "Janus"), filepath.Join(root, "Janus")); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyTree(filepath.Join(repoRoot, ".lake", "build"), filepath.Join(root, ".lake", "build")); err != nil {
+		t.Fatal(err)
+	}
+	lib := filepath.Join(root, ".lake", "build", "lib", "lean")
+	honest, _ := os.ReadFile(filepath.Join(lib, "Janus.olean"))
+	src, _ := os.ReadFile(filepath.Join(repoRoot, "Janus.lean"))
+	forge := "\ntheorem Janus.okayRoot : 1 = 1 := rfl\n"
+	if plant != "control-honest-extra-decl" {
+		forge = "\nopen Lean in\nset_option debug.skipKernelTC true in\nrun_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {\n  name := `Janus.forgedRoot, levelParams := [], type := mkConst ``False, value := mkConst ``True.intro })\n"
+	}
+	fdir := filepath.Join(t.TempDir(), "forge")
+	writeBytes(t, filepath.Join(fdir, "Janus.lean"), append(append([]byte{}, src...), forge...))
+	lake, _ := findLake()
+	os.Remove(filepath.Join(lib, "Janus.olean"))
+	cmd := exec.Command(lake, "env", "lean", "--root="+fdir, "-o", filepath.Join(lib, "Janus.olean"), filepath.Join(fdir, "Janus.lean"))
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("forging: %v\n%s", err, out)
+	}
+	if strings.HasSuffix(plant, "JanusReplayRoot") {
+		writeBytes(t, filepath.Join(lib, "JanusReplayRoot.olean"), honest)
+	}
+	fwd, err := loadFramework(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tc, err := findToolchain(lake, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := frameworkPins(lib, fwd.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := frameworkVerdictKey(tc.cacheID(), pinned)
+	if hasFrameworkVerdict(k) {
+		t.Fatal("verdict already present")
+	}
+	add := mustExtract(t, "example.com/basic.Add")
+	proof := filepath.Join(t.TempDir(), "Proof.lean")
+	writeBytes(t, proof, []byte("import Extracted\nnamespace Proof\ntheorem correctness : Extracted.program.data.length = Extracted.program.data.length := rfl\nend Proof\n"))
+	code, out, stderr := runJanus(t, "verify", add, "--proof", proof, "--janus-root", root)
+	t.Logf("code=%d out=%q stderr=%.1500q", code, out, stderr)
+	if plant == "control-honest-extra-decl" {
+		if strings.Contains(stderr, "memory limit") {
+			t.Errorf("control was killed for memory:\n%.800s", stderr)
+		}
+		if !hasFrameworkVerdict(k) {
+			t.Errorf("control: no verdict recorded for an honest build (parallel path not exercised?)")
+		}
+		return
+	}
+	if hasFrameworkVerdict(k) {
+		t.Errorf("a framework verdict was recorded for the forged-root build")
+	}
+	// A resource kill is inconclusive, never a detection: the rejection must be the kernel's.
+	if strings.Contains(stderr, "memory limit") || strings.Contains(stderr, "resource limit") {
+		t.Errorf("the verification was killed for memory, which proves nothing about the forgery:\n%.800s", stderr)
+	} else if code == 0 || !strings.Contains(stderr, "Kernel replay rejected") {
+		t.Errorf("forged root not rejected by the kernel replay: code %d\n%.800s", code, stderr)
 	}
 }
 
