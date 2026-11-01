@@ -1713,6 +1713,35 @@ def mainReturns (mty : Expr) : MetaM (Option Expr) := do
   let (_, _, last) ← Meta.forallMetaTelescope body
   return if returnsHead last.consumeMData then some last.consumeMData else none
 
+/-- Does the `Returns`-style statement `r` (of a `returns` witness) state the guarantee `mr` of the main
+theorem at a start state? Strictly: they unify. Or, since a witness usually states the guarantee
+SPECIALISED to its concrete inputs (`ABIReturn s0 s' ∧ s'.regs 0 = 0`, derived from the general
+postcondition with `Returns.mono`): the same predicate with the same program, start state and
+auxiliary arguments, whose postcondition keeps the first conjunct of the main theorem's (the ABI
+obligation `ABIReturn s s'` / `CReturn s s'`) and adds at least one further conjunct, i.e. says
+something about the result. A trivial postcondition, or the ABI obligation alone, is rejected. -/
+def returnsMatches (mr r : Expr) : MetaM Bool := do
+  if ← defEqTry mr r then return true
+  unless mr.getAppFn == r.getAppFn && mr.getAppNumArgs == r.getAppNumArgs do return false
+  let ma := mr.getAppArgs
+  let ra := r.getAppArgs
+  let mut lamSeen := false
+  for i in [0:ma.size] do
+    let m := ma[i]!.consumeMData
+    let x := ra[i]!.consumeMData
+    if m.isLambda && x.isLambda then
+      lamSeen := true
+      let ok ← Meta.lambdaTelescope m fun ys bm => do
+        let bx := (x.beta ys).headBeta
+        let cm := flattenAnd (← instantiateMVars bm).headBeta
+        let cx := (flattenAnd bx).filter (!·.isConstOf ``True)
+        if cx.size < 2 || cm.isEmpty then return false
+        findConj cm[0]! cx
+      unless ok do return false
+    else
+      unless ← defEqTry m x do return false
+  return lamSeen
+
 /-- Round 14 (W2): check the shape of a witness theorem (see the section comment); the matched main
 theorem on success. -/
 def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) :
@@ -1745,7 +1774,7 @@ def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmTyp
         let some mty ← freshType env c | continue
         let some mr ← mainReturns mty | whys := whys.push s!"{c}: its conclusion does not unfold to a Returns-style statement"; continue
         let st ← Meta.saveState
-        if ← defEqTry mr r then return .ok c
+        if ← returnsMatches mr r then return .ok c
         whys := whys.push s!"{c}: the statement is not its guarantee `{(← Meta.ppExpr mr).pretty 200}`"
         st.restore
       return .error s!"is not the guarantee of any main theorem of the proof module at a start state ({"; ".intercalate whys.toList})"

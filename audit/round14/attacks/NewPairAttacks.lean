@@ -279,6 +279,13 @@ theorem returns : Returns ((Extracted.program.link AllocW.impl).withExit ret) s0
   Returns.mono Proof.Witness.returns fun _ h => h.1
 end WeakG.Witness
 
+namespace WeakI.Witness
+open Proof.Witness
+/-- `returns` padded with `True`. -/
+theorem returns : Returns ((Extracted.program.link AllocW.impl).withExit ret) s0 fun s' => ABIReturn s0 s' ∧ True :=
+  Returns.mono Proof.Witness.returns fun _ h => ⟨h.1, trivial⟩
+end WeakI.Witness
+
 namespace WeakH.Witness
 /-- `returns` that is not a Returns statement. -/
 theorem returns : Extracted.program = Extracted.program := rfl
