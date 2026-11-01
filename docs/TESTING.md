@@ -124,7 +124,7 @@ tests were missing from the table (counted 1 s, started last in their shard) and
 Now: `TestParallelFrameworkReplayCatchesForgeryInEveryPartition` and the new `...MatchesSingleProcessMini` use a mini framework
 (`miniSources` in `replaypar_test.go`: the root, a leaf, a module with a descendant, a descendant of a module with its own file;
 a few lines each, compiled by the real `lean`, replayed by the real `leanchecker`, so a forged declaration is still a real kernel
-rejection; the honest mini framework is a control). The real-framework variant is kept as `TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal` (the original test: real `Janus`,
+rejection; the honest mini framework is a control). The real-framework variant is kept as the four tests `TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_{Janus,GoABI,Tactic,Amd64Tactic}` (one per module, so that the gate shards run them side by side; the original test: real `Janus`,
 `Janus.GoABI`, `Janus.Tactic`, `Janus.Amd64.Tactic` forged, four full replays): it runs only when `JANUS_NIGHTLY=1`, which
 `scripts/nightly-cold-gate.sh` sets for both its gates, and then a missing fixture is a failure, not a skip; elsewhere it skips. So
 the merge gates run the mini variant, every nightly (cold and cached) proves it on the real framework. The same forgery on the real framework is also covered where it is a real module

@@ -37,7 +37,8 @@ var testDurations = map[string]float64{
 	// missing, counted 1 s and started last in their shards
 	"TestParallelReplayE2EForgedRootNoVerdict": 224, "TestParallelReplayE2EForgedRootWithPlantedHonestRoot": 126,
 	"TestParallelReplayE2EHonestControl": 111, "TestParallelFrameworkReplayMatchesSingleProcess": 217,
-	"TestParallelFrameworkReplayMatchesSingleProcessMini": 24, "TestParallelFrameworkReplayCatchesForgeryInEveryPartition": 16, "TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal": 600,
+	"TestParallelFrameworkReplayMatchesSingleProcessMini": 24, "TestParallelFrameworkReplayCatchesForgeryInEveryPartition": 16, "TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Janus": 150, "TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_GoABI": 150,
+	"TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Tactic": 150, "TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Amd64Tactic": 150,
 	"TestConcurrentVerify": 223, "TestRTBuildCacheScripts": 83, "TestSelfTestIsolation": 52, "TestR1FrameworkTamper": 45,
 	"TestConsumerVerify": 43, "TestDataLarge": 37, "TestJ1PrestartMatchesClassic": 29, "TestVerifyBatch": 27,
 	"TestConsumerTwoCheckouts": 27, "TestGateCancelLib": 26, "TestLaneLakeLib": 25, "TestConsumerVerifyMany": 24,

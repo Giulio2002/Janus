@@ -6,7 +6,7 @@
 #
 #   -j N        items at once in the verify pool (default $JANUS_JOBS, else 2: RULES.md on the shared box;
 #               `auto` = the formula of scripts/lib/parallel.sh). The other stages scale with it: the go
-#               test shards (N clamped to 2..6, one test slot each) and the audit lanes (N).
+#               test shards (max(N, JANUS_GATE_GOTEST_SHARDS=6), clamped to 2..8, one test slot each) and the audit lanes (N).
 #   --lanes N   lanes at once (default $JANUS_LANES, else N + 1: the verify pool and N others). Lanes are
 #               queued longest first by their time in the last run (artifacts/gate/lane-times).
 #   --changed   development only (scripts/verify-all-examples.sh --changed): not a gate run.
@@ -99,10 +99,23 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/incr.sh"
 memguard_self "$@"
 
+# Shards of the go test lane: JANUS_GATE_GOTEST_SHARDS (default 6), never fewer than -j N, clamped to 2..8. The shards are
+# independent processes that need no pool slot of their own, and the lane is the gate's critical path: the whole package is
+# ~3700 s of work, ~470 s for its longest test, so 2 shards (the old "-j 2" default) made the lane 1860-2950 s and 6 make it
+# ~500-700 s (docs/TESTING.md "go test shards"). Peak memory is ~44 GiB for six (each shard under its own memguard job).
+gotest_shards_n() {
+  local sh=${JANUS_GATE_GOTEST_SHARDS:-6} j=${jobs_n:-2}
+  [ "$sh" -ge 1 ] 2>/dev/null || sh=6
+  [ "$j" -ge 1 ] 2>/dev/null || j=2
+  [ "$sh" -ge "$j" ] || sh=$j
+  [ "$sh" -ge 2 ] || sh=2
+  [ "$sh" -le 8 ] || sh=8
+  echo "$sh"
+}
 # the lane-specific arguments of a lane's skip key (everything else comes from incr_lane)
 lane_spec() {
   case "$1" in
-    gotest) local sh=${jobs_n:-2}; [ "$sh" -ge 2 ] 2>/dev/null || sh=2; [ "$sh" -le 6 ] || sh=6
+    gotest) local sh; sh=$(gotest_shards_n)
       printf '%s\n' --arg "run:${gtrun:-}" --arg "shards:$sh" ;;
     rounds) printf '%s\n' --arg "rounds:${rounds:-}" ;;
   esac
@@ -394,7 +407,7 @@ flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($
 mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
 echo "gate: isolated source copies for the lake lanes are made once the framework build is pinned (removed when the gate passes, kept otherwise: $treebase)"
 lane_times="$root/artifacts/gate/lane-times"
-shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2; [ "$shards" -le 6 ] || shards=6  # 6: the longest test (~470 s) is then the longest shard
+shards=$(gotest_shards_n)  # 6 by default: the longest test (~470 s) is then about the longest shard
 pool_init gate "$((lanes_n + 4))" "$out/lanes"   # (+4 slots: the prebuild stages and tree copies share the pool)
 POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
 export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too

@@ -46,7 +46,7 @@ if [ -z "$nshards" ]; then
   nshards="${JANUS_JOBS:-2}"; [ "$nshards" -ge 2 ] || nshards=2; [ "$nshards" -le 8 ] || nshards=8
 fi
 unknown="${JANUS_GOTEST_UNKNOWN:-1}"
-mkdir -p "$outdir"; rm -f "$outdir"/shard-*.log "$outdir"/shard-*.rc "$outdir"/plan.txt
+mkdir -p "$outdir"; rm -f "$outdir"/shard-*.log "$outdir"/shard-*.rc "$outdir"/plan.txt "$outdir"/extra-*.log "$outdir"/extra-*.rc "$outdir"/skips*.txt
 
 # the list: "PKG<TAB>NAME"
 : > "$outdir/all.txt"
@@ -113,6 +113,37 @@ run_shard() { # S
   done
   echo "$rc" > "$f.rc"
 }
+# Extras: tests that the shards must report as SKIPPED (they need an environment of their own: a 20 GiB memory cap, a Mathlib
+# checkout) and that run here, beside the shards, in the nightly gates (JANUS_NIGHTLY=1; JANUS_GOTEST_EXTRAS=0/1 overrides). A
+# nightly with an extra that does not PASS fails; without extras the SKIPPED-COVERAGE summary below says so loudly.
+#   NAME | memory limit of the run | environment (KEY=VALUE ...) | cache + package dir (persistent, "" = per run)
+# The persistent directories are keyed by the exact inputs (checkout path, toolchain, Mathlib revision): another key is a miss
+# (a cold build), never a reuse; what is inside is content-checked by lake / janus themselves (a corrupt entry rebuilds or fails).
+extras_on="${JANUS_GOTEST_EXTRAS:-}"; [ -n "$extras_on" ] || { [ "${JANUS_NIGHTLY:-}" = 1 ] && extras_on=1 || extras_on=0; }
+extra_names=() extra_pids=()
+mathlib_rev="${JANUS_TEST_MATHLIB_REV:-d13f23b723b8a846827a245b89c10fc7d3f11612}"
+mathlib_key=$(printf '%s\n%s\n%s\n' "$root" "$(cat "$root/lean-toolchain" 2>/dev/null)" "$mathlib_rev" | sha256sum | cut -c1-16)
+run_extra() { # NAME LIMIT ENVWORDS
+  local name=$1 limit=$2 envw=$3 pkg f="$outdir/extra-$1" rc=0
+  pkg=$(awk -F'\t' -v n="$name" '$2 == n { print $1 }' "$outdir/all.txt")
+  : > "$f.log"
+  echo "== extra: $envw go test -count=1 -timeout 7000s -v -run '^$name\$' $pkg (memory limit $limit)" >> "$f.log"
+  # shellcheck disable=SC2086
+  memguard_run -l "$limit" -n "extra-$name" -- env $envw go test -count=1 -timeout 7000s -parallel 1 -v -run "^$name\$" "$pkg" >> "$f.log" 2>&1 || rc=$?
+  echo "$rc" > "$f.rc"
+}
+if [ "$extras_on" = 1 ]; then
+  mkdir -p "$cachebase/janus-test-mathlib-$mathlib_key/cache" "$cachebase/janus-test-mathlib-$mathlib_key/pkg"
+  declare -A extra_spec=(
+    [TestReplayUnderMemoryPressure]="20G|JANUS_PRESSURE_TEST=1 JANUS_TEST_CACHE_DIR=$runcache/x-pressure"
+    [TestConsumerMathlib]="24G|JANUS_TEST_MATHLIB=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-mathlib-$mathlib_key/cache JANUS_TEST_MATHLIB_DIR=$cachebase/janus-test-mathlib-$mathlib_key/pkg JANUS_TEST_MATHLIB_REV=$mathlib_rev"
+  )
+  mkdir -p "$runcache/x-pressure"
+  for n in TestReplayUnderMemoryPressure TestConsumerMathlib; do
+    cut -f2 "$outdir/all.txt" | grep -qx "$n" || continue
+    run_extra "$n" "${extra_spec[$n]%%|*}" "${extra_spec[$n]#*|}" & extra_pids+=($!); extra_names+=("$n")
+  done
+fi
 t0=$(date +%s)
 pids=()
 for ((s = 1; s <= nshards; s++)); do run_shard "$s" & pids+=($!); done
@@ -137,12 +168,37 @@ if [ "$ran" -ne "$total" ] || [ "$(cat "$outdir"/ran-*.txt | sort -u | wc -l)" -
   echo "gotest-shards: $ran test results for $total listed tests (each must run exactly once)"; fail=1
 fi
 grep -hE '^--- FAIL' "$outdir"/shard-*.log && fail=1
+# the extras: each must have run and PASSED (a skip or a failure of an extra fails the run)
+extra_ok=()
+for i in "${!extra_names[@]}"; do
+  n=${extra_names[$i]}; wait "${extra_pids[$i]}" || true
+  erc=$(cat "$outdir/extra-$n.rc" 2>/dev/null || echo missing)
+  printf 'extra %s: go test exit %s (%ss since start)\n' "$n" "$erc" "$(( $(date +%s) - t0 ))"
+  if [ "$erc" = 0 ] && grep -qE "^--- PASS: $n " "$outdir/extra-$n.log"; then extra_ok+=("$n")
+  else echo "gotest-shards: extra $n did not PASS (exit $erc):"; tail -n 40 "$outdir/extra-$n.log" | sed 's/^/  | /'; fail=1; fi
+done
 # a SKIPPED test is not a verified one (about ten tests skip when objdump, the aarch64 objdump, lake or bwrap is missing): a run with any SKIP is
-# never recorded as a lane PASS (scripts/lib/incr.sh incr_lane: INCR_NORECORD_FILE), whatever the exit status
-nskip=$(cat "$outdir"/shard-*.log | grep -cE '^--- SKIP: ' || true)
-if [ "${nskip:-0}" -gt 0 ]; then
-  echo "gotest-shards: $nskip test(s) SKIPPED (a skip is not a pass; this run is not recorded):"
-  cat "$outdir"/shard-*.log | grep -E '^--- SKIP: ' | sed 's/^/  /' | head -20
+# never recorded as a lane PASS (scripts/lib/incr.sh incr_lane: INCR_NORECORD_FILE), whatever the exit status.
+# SKIPPED-COVERAGE: every skip is printed with its reason, loudly, once; a skipped test whose extra run PASSED above is listed as
+# covered and does not count.
+cat "$outdir"/shard-*.log | awk '
+  /^[ \t]+[A-Za-z0-9_]+\.go:[0-9]+: / { sub(/^[ \t]+/, ""); last = $0 }
+  /^[ \t]*--- SKIP: / { n = $3; sub(/:$/, "", n); r = last; sub(/^[A-Za-z0-9_]+\.go:[0-9]+: /, "", r); print n "\t" r; last = "" }' > "$outdir/skips.txt"
+nskip=0 ncov=0
+: > "$outdir/skips-uncovered.txt"
+while IFS=$'\t' read -r n r; do
+  [ -n "$n" ] || continue
+  cov=0; for e in "${extra_ok[@]:-}"; do [ "$e" != "$n" ] || cov=1; done
+  if [ "$cov" = 1 ]; then ncov=$((ncov + 1)); printf '  covered   %s (%s) -> ran and PASSED in its own run (extra-%s.log)\n' "$n" "${r:-no reason logged}" "$n" >> "$outdir/skips-report.txt"
+  else nskip=$((nskip + 1)); printf '  NOT RUN   %s: %s\n' "$n" "${r:-no reason logged}" | tee -a "$outdir/skips-uncovered.txt" >> "$outdir/skips-report.txt"; fi
+done < "$outdir/skips.txt"
+if [ "$nskip" -gt 0 ] || [ "$ncov" -gt 0 ]; then
+  echo "SKIPPED-COVERAGE: $nskip test(s) did NOT run in this lane ($ncov skipped in the shards but covered by an extra run):"
+  cat "$outdir/skips-report.txt"
+  [ "$extras_on" = 1 ] || echo "  (extras off: JANUS_NIGHTLY=1 or JANUS_GOTEST_EXTRAS=1 also runs TestReplayUnderMemoryPressure and TestConsumerMathlib)"
+fi
+if [ "$nskip" -gt 0 ]; then
+  echo "gotest-shards: $nskip test(s) SKIPPED (a skip is not a pass; this run is not recorded)"
   [ -z "${INCR_NORECORD_FILE:-}" ] || echo "gotest: $nskip skipped test(s)" >> "$INCR_NORECORD_FILE"
   [ "${JANUS_REQUIRE_NO_SKIP:-}" != 1 ] || fail=1
 fi
