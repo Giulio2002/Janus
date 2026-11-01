@@ -83,6 +83,10 @@ rs=$(grep -n '^: > "$out/replay-sizing.log"; export JANUS_REPLAY_SIZING_FILE=' "
 
 grep -q '^unset JANUS_MEMGUARD_LOG JANUS_MEMGUARD_VERBOSE' "$here_repo/scripts/gate.sh" && ok "gate.sh unsets JANUS_MEMGUARD_LOG / VERBOSE (rows parse the first output line)" || bad "gate.sh may inherit JANUS_MEMGUARD_LOG"
 
+# the round scripts run `go test` (D3, A1, D1, ...): their TestMain waits for the fixture lock while pre-fixture builds the fixture (1583 s
+# when the verifier changed), longer than go test's default 10 min timeout: rounds must start after pre-fixture
+dag_has rounds pre-fixture && ok "rounds waits for pre-fixture (its go test rows block on the fixture lock otherwise)" || bad "rounds does not wait for pre-fixture"
+
 run() { # DIR FAILSTAGE: queue every stage with a fake body; returns the pool status
   local d=$1 failst=${2:-} n
   POOL_GUARD=0 POOL_PROGRESS_SECS=100
