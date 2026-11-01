@@ -223,8 +223,10 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
   registers are `kreg 0..7` and nothing else touches higher indices), and every such instruction consumes
   one element (`advanceUndef`). Soundness: a theorem quantifies over every initial state, so over every
   value of every stream element, and every amd64 contract leaves `kreg` unspecified; the model is an
-  over-approximation of every CPU's behaviour, not an assumption about it. (A *precondition* that pins
-  `s.kreg 8` would weaken the statement and is visible in it.) The code `BSR; MOV $-1; CMOVEQ; INC`
+  over-approximation of every CPU's behaviour, not an assumption about it. The auditor enforces it: it REJECTS any statement (proof-local definitions expanded) or
+  dependency definition that mentions `State.undefVal`, `State.advanceUndef`, or `State.kreg` at an index that is not a literal below 8
+  (the AVX-512 opmask registers `k0`..`k7`) or the whole `kreg` file, except a frame equation `a.kreg = b.kreg`
+  between two states (`Janus/Tools/Audit.lean` `checkUndefStream`; `TestAuditUndefinedStreamPins`). The code `BSR; MOV $-1; CMOVEQ; INC`
   (`bits.Len64` at `GOAMD64=v1`) is provable for every value. `LZCNT/TZCNT` of 0: result = operand
   width, `CF = 1`, `ZF` = (result = 0), as the SDM says.
 * BMI1/BMI2 follow the SDM: `ANDN BLSR BLSI BZHI` set `SF ZF` from the result and clear `OF`
