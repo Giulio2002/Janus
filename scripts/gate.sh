@@ -93,6 +93,8 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/pool.sh"
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=lib/gate-decoder.sh
+. "$root/scripts/lib/gate-decoder.sh"
 # shellcheck source=lib/incr.sh
 . "$root/scripts/lib/incr.sh"
 memguard_self "$@"
@@ -320,7 +322,7 @@ step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
   return $rc
 }
 # JanusTests and janus-oracle-amd64 are built by CI (.github/workflows/ci.yml) and are not default Lake targets
-pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit && memguard_lake build JanusTests janus-oracle janus-oracle-amd64 janus-decode janus-testfloat; }
+pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit && memguard_lake build JanusTests janus-oracle janus-oracle-amd64 janus-decode janus-testfloat && gate_save_decoder "$root"; }
 pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
 # The go tests' prebuilt framework fixture (cmd/janus/fixture_test.go, docs/TESTING.md "Go tests"): built here, once, by
@@ -436,7 +438,7 @@ addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"
 # CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
 # decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
 add govet "go vet ./..."
-add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && JanusASL/tools/test_asl_obj_cache.sh && scripts/lib/test-nightly-objcache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh && scripts/lib/test-verdict-banner.sh"
+add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && JanusASL/tools/test_asl_obj_cache.sh && scripts/lib/test-nightly-objcache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh && scripts/lib/test-verdict-banner.sh && scripts/lib/test-gate-decoder.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
 add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
 # asl-verify waits for asl-build only to find the ArmASL model in the build cache (asl-build builds and publishes it, and the
