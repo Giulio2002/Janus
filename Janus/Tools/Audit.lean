@@ -483,6 +483,63 @@ def numeralBound (ty : Expr) : MetaM (Option Nat) := do
   | some ``ISize, _ => return some (2 ^ 31)
   | _, _ => return none
 
+/-! ## The amd64 undefined-value stream is not part of any statement (BSF/BSR of zero)
+
+The amd64 model gives the destination of `BSF`/`BSR` of zero the next element of an undefined-value
+stream, `State.undefVal` = `kreg 8` (indices `>= 8` of the opmask file are used for nothing else; `Janus.Amd64.Exec`). A
+theorem about such code is sound because it holds for every stream (every initial state). A statement
+that PINS the stream (`s.kreg 8 = s.regs 0`, `s.kreg = fun _ => 0`, `s.undefVal = 0`) would instead read
+as if the architecturally undefined destination were known, and it would be accepted by the kernel.
+The auditor therefore rejects any mention, in the statement (proof-local definitions expanded) or in
+a dependency definition it uses, of `State.undefVal`, `State.advanceUndef`, and `State.kreg` at an index
+that is not a literal below 8 (the AVX-512 opmask registers `k0`..`k7`), or `State.kreg` whole, except
+as a frame equation `a.kreg = b.kreg` between two states (it names no value). It only rejects more. -/
+
+/-- A literal opmask index below 8. -/
+def opmaskLit? (e : Expr) : Bool :=
+  let e := e.consumeMData
+  match e.getAppFnArgs with
+  | (``OfNat.ofNat, #[_, n, _]) => (n.rawNatLit?.map (fun x => decide (x < 8))).getD false
+  | _ => (e.rawNatLit?.map (fun x => decide (x < 8))).getD false
+
+/-- The first subterm of `e` that pins or reads the undefined-value stream (see above). -/
+partial def findUndefStream (kregIdx : Nat) (e : Expr) : Option Expr :=
+  let kregFn : Name := `Janus.Amd64.State.kreg
+  match e with
+  | .app .. =>
+    let fn := e.getAppFn
+    let args := e.getAppArgs
+    match fn with
+    | .const c _ =>
+      if c == `Janus.Amd64.State.undefVal || c == `Janus.Amd64.State.advanceUndef then some e
+      else if c == kregFn then
+        if args.size ≥ 2 then
+          if opmaskLit? args[1]! then args.findSome? (findUndefStream kregIdx) else some e
+        else some e
+      else if c == ``Eq && args.size == 3 then
+        -- a frame equation between two states' kreg files names no value
+        let frame (x : Expr) := x.getAppFn.isConstOf kregFn && x.getAppNumArgs == 1
+        if frame args[1]! && frame args[2]! then args[1]!.getAppArgs.findSome? (findUndefStream kregIdx) <|> args[2]!.getAppArgs.findSome? (findUndefStream kregIdx)
+        else args.findSome? (findUndefStream kregIdx)
+      else args.findSome? (findUndefStream kregIdx)
+    | _ => (findUndefStream kregIdx fn).orElse fun _ => args.findSome? (findUndefStream kregIdx)
+  | .const c _ => if c == `Janus.Amd64.State.undefVal || c == `Janus.Amd64.State.advanceUndef || c == kregFn then some e else none
+  | .lam _ t b _ | .forallE _ t b _ => (findUndefStream kregIdx t).orElse fun _ => findUndefStream kregIdx b
+  | .letE _ t v b _ => (findUndefStream kregIdx t).orElse fun _ => (findUndefStream kregIdx v).orElse fun _ => findUndefStream kregIdx b
+  | .mdata _ b => findUndefStream kregIdx b
+  | .proj sn i b => if sn == `Janus.Amd64.State && i == kregIdx then some e else findUndefStream kregIdx b
+  | _ => none
+
+/-- Reject a statement or definition that mentions the undefined-value stream. -/
+def checkUndefStream (e : Expr) : MetaM (Option String) := do
+  let fields := getStructureFields (← getEnv) `Janus.Amd64.State
+  let kregIdx := (fields.idxOf? `kreg).getD 1000
+  match findUndefStream kregIdx e with
+  | none => return none
+  | some bad =>
+    let s := (← try Meta.ppExpr bad catch _ => pure (toString bad)).pretty 300
+    return some s!"mentions the amd64 undefined-value stream (`{s}`): `State.undefVal`, `State.advanceUndef` and `State.kreg` at an index that is not a literal below 8 are the model's source of the architecturally undefined result of BSF/BSR of zero; a statement may not name or constrain them (a pinned stream reads as a known value for an undefined destination). Quantify over every state instead"
+
 /-- Round 6 (F2): reject a numeral `(n : T)` whose literal is out of range for a wrapping type
 `T`. `OfNat` on `BitVec 64` reduces `18446744073709551616` to `0`, so `y ≠ 18446744073709551616`
 reads as a vacuous hypothesis while it is `y ≠ 0`; the text round-trips (Lean reads it the same
@@ -1345,8 +1402,13 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     -- round 10 V1: contract hypotheses quantify the runtime
     if let some m ← checkContractHyps expanded then
       throwError s!"the statement {m}"
+    -- the amd64 undefined-value stream (BSF/BSR of zero) is never pinned by a statement
+    if let some m ← checkUndefStream expanded then
+      throwError s!"the statement {m}"
     for ci in extDefs do
       for t in [ci.type] ++ ci.value?.toList do
+        if let some m ← checkUndefStream t then
+          throwError s!"the dependency definition {ci.name} used in the statement {m}"
         if let some m ← checkSymbolRefs tbl t then
           throwError s!"the dependency definition {ci.name} used in the statement {m}"
         -- round 10 V1: a contract hidden in a dependency definition escapes the premise check

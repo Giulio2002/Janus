@@ -166,9 +166,10 @@ def initByte (c : Case) (i : Nat) : Nat :=
 
 def bitSet (x i : Nat) : Bool := (x / 2 ^ i) % 2 = 1
 
-/-- The initial state; `junk` is the first element of the undefined-value stream (`kreg 8`,
-`State.undefVal`), which only an instruction with an architecturally undefined register result
-(`BSF`/`BSR` of zero) reads. -/
+/-- The initial state; `junk` is the value of EVERY element of the undefined-value stream (`kreg i`, `i ≥ 8`;
+`State.undefVal` is `kreg 8`), which only an instruction with an architecturally undefined register
+result (`BSF`/`BSR` of zero) reads: perturbing all of them catches a register that depends on a later
+element (two zero scans in one case). -/
 def initStateJ (c : Case) (initArr : Array Nat) (junk : Nat) : State :=
   { regs := fun i => if i < 16 then BitVec.ofNat 64 c.regs[i]! else 0
     rip := BitVec.ofNat 64 testPC
@@ -181,7 +182,7 @@ def initStateJ (c : Case) (initArr : Array Nat) (junk : Nat) : State :=
       else if 16 ≤ i ∧ i < 32 ∧ i - 16 < c.zmmx.size then BitVec.ofNat 128 (c.zmmx[i - 16]! / 2 ^ 128) else 0
     zmmHi := fun i => if i < c.zmmh.size then BitVec.ofNat 256 c.zmmh[i]!
       else if 16 ≤ i ∧ i < 32 ∧ i - 16 < c.zmmx.size then BitVec.ofNat 256 (c.zmmx[i - 16]! / 2 ^ 256) else 0
-    kreg := fun i => if i < c.k.size then BitVec.ofNat 64 c.k[i]! else if i = 8 then BitVec.ofNat 64 junk else 0
+    kreg := fun i => if i < c.k.size then BitVec.ofNat 64 c.k[i]! else if 8 ≤ i then BitVec.ofNat 64 junk else 0
     fsBase := BitVec.ofNat 64 c.fsBase
     df := bitSet c.rflags 10
     mxcsr := BitVec.ofNat 32 c.mxcsr
