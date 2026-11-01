@@ -80,6 +80,17 @@ structure Record where
   `Nat` subtraction, `x / 0 = 0`, wrapping `^`, `xs[i]!`, `Int.toNat`), with the subterm. These
   are not errors: the statement means exactly what Lean says. -/
   notes : Array String
+  /-- Round 14: what the verified theorem is: `main` (a correctness statement: the runtime is
+  quantified), `witness-nonvacuous` or `witness-returns` (a concrete instance showing the main
+  theorem's hypotheses are satisfiable / that it fires; NOT a correctness claim). -/
+  role : String := "main"
+  /-- Round 14: for a witness, the main theorem of the proof module whose hypotheses and
+  precondition it instantiates (or whose guarantee it states at a concrete state). -/
+  matchedMain : String := ""
+  /-- Round 14: the runtime contracts the STATEMENT applies (`NewobjectContract@runtime.newobject`),
+  computed from the statement, not from the extraction. A main theorem has them as hypotheses; a
+  witness claims them. Empty: the statement assumes nothing about the runtime. -/
+  contractHyps : Array String := #[]
   /-- The import graph of every module outside the toolchain core (`Init`, `Std`, `Lean`,
   `Lake`): `[module, direct import, …]`. The Go side kernel-replays each of these modules and
   keys its replay cache on the module's bytes and those of its imports. -/
@@ -905,8 +916,130 @@ def depthBound (bound : Std.HashSet FVarId) (rtVars : Std.HashSet FVarId) (t : E
         b.hasAnyFVar (fun v => bound.contains v && !rtVars.contains v))
   else false
 
-/-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment). -/
-def checkContractHyps (ty : Expr) : MetaM (Option String) := do
+/-! ## Round 14 (V2): the runtime of a MAIN theorem is quantified, never chosen
+
+Round 10 V1 inspects `link` only inside contract applications. A statement about
+`Extracted.program.link impl` for a CONCRETE `impl` (the consumer's own toy allocator, say) with no
+contract hypothesis at all was therefore accepted, and the report claimed the runtime contract as
+"assumed" although the theorem assumes nothing about the runtime and says nothing about the real
+one. The rule: in a main (non-`Witness`) theorem the implementation of the runtime enters the
+statement ONLY as `Extracted.program.link impl` for a variable `impl` bound by the statement itself,
+and `impl` is constrained only by the pinned contracts and model laws (the V1 premise check, which
+now also covers an `impl` that no contract mentions). Witness theorems (`…Witness.nonvacuous`,
+`…Witness.returns`) exhibit concrete instances by design and are checked structurally instead
+(`checkWitness`). Every check here only rejects. -/
+
+/-- `List Segment` of either ISA. -/
+def isSegListType (t : Expr) : Bool :=
+  match t.consumeMData with
+  | .app (.const ``List _) a =>
+      a.consumeMData.isConstOf `Janus.Segment || a.consumeMData.isConstOf `Janus.Amd64.Segment
+  | _ => false
+
+def isProgramType (t : Expr) : Bool :=
+  t.consumeMData.isConstOf `Janus.Program || t.consumeMData.isConstOf `Janus.Amd64.Program
+
+def isStateType (t : Expr) : Bool :=
+  t.consumeMData.isConstOf `Janus.Arm64.State || t.consumeMData.isConstOf `Janus.Amd64.State
+
+def linkNames : List Name := [`Janus.Program.link, `Janus.Amd64.Program.link]
+
+/-- Constants that build a program or a segment by hand: not available to a main theorem. -/
+def handBuiltNames : List Name :=
+  [`Janus.Program.mk, `Janus.Amd64.Program.mk, `Janus.Segment.mk, `Janus.Amd64.Segment.mk]
+
+/-- The programs a main statement may speak about: `Extracted.program`, the program with an exit
+address (`withExit`) and the linked program (checked separately). -/
+def programHeadOk (c : Name) : Bool :=
+  c == `Extracted.program || c == `Janus.Program.withExit || c == `Janus.Amd64.Program.withExit ||
+    linkNames.contains c
+
+/-- The variables `impl` of `Extracted.program.link impl` in `e`. -/
+partial def linkVars (e : Expr) (acc : Array FVarId := #[]) : Array FVarId :=
+  match e with
+  | .app .. =>
+    let acc := if e.getAppFn.isConst && linkNames.any e.getAppFn.isConstOf && e.getAppNumArgs == 2 then
+        match (e.getArg! 1).consumeMData with
+        | .fvar v => acc.push v
+        | _ => acc
+      else acc
+    let acc := linkVars e.getAppFn acc
+    e.getAppArgs.foldl (fun acc a => linkVars a acc) acc
+  | .lam _ d b _ | .forallE _ d b _ => linkVars b (linkVars d acc)
+  | .letE _ t v b _ => linkVars b (linkVars v (linkVars t acc))
+  | .mdata _ b | .proj _ _ b => linkVars b acc
+  | _ => acc
+
+/-- Round 14 (V2): is the runtime implementation of the statement `e` anything other than a variable
+bound by the statement? `outer` are the statement's own binders (as free variables). A term of type
+`List Segment` must be one of them; `Program.link` must be `Extracted.program.link <outer
+variable>`; programs and segments are not built by hand; every program is `Extracted.program`,
+`withExit` of one, or a linked one. -/
+partial def concreteRuntime (outer : Std.HashSet FVarId) (e : Expr) : MetaM (Option String) := do
+  let show_ (e : Expr) : MetaM String := do pure ((← Meta.ppExpr e).pretty 200)
+  let tyOf (e : Expr) : MetaM (Option Expr) := do
+    try pure (some (← Meta.whnfR (← Meta.inferType e))) catch _ => pure none
+  match e with
+  | .mdata _ b => concreteRuntime outer b
+  | .proj _ _ b =>
+    if let some t ← tyOf e then
+      if isSegListType t then
+        return some s!"mentions a runtime implementation (`{← show_ e}`, a `List Segment`) that is not a variable of the statement (round 14)"
+    concreteRuntime outer b
+  | .fvar v =>
+    if let some t ← tyOf e then
+      if isSegListType t && !outer.contains v then
+        return some s!"quantifies a runtime implementation (`{← show_ e}`, a `List Segment`) inside the statement (an `∃` or a lambda): the implementation must be a variable of the whole statement (round 14)"
+    return none
+  | .const c _ =>
+    if handBuiltNames.contains c || linkNames.contains c then
+      return some s!"uses {c} unapplied: a program is `Extracted.program` or `Extracted.program.link impl` for a variable `impl` of the statement (round 14)"
+    if let some t ← tyOf e then
+      if isSegListType t then
+        return some s!"mentions the concrete runtime implementation `{c}` (a `List Segment`): a main theorem quantifies the implementation (a variable `impl` constrained only by the runtime contracts) instead of choosing one (round 14)"
+      if isProgramType t && !programHeadOk c then
+        return some s!"mentions the program `{c}`, which is not `Extracted.program` (round 14)"
+    return none
+  | .app .. =>
+    let fn := e.getAppFn
+    let args := e.getAppArgs
+    if let .const c _ := fn then
+      if linkNames.contains c then
+        let ok := args.size == 2 && (args[0]!.consumeMData).isConstOf `Extracted.program &&
+          match (args[1]!).consumeMData with | .fvar v => outer.contains v | _ => false
+        unless ok do
+          return some s!"mentions `{← show_ e}`: a main theorem may link only a variable of the statement (`Extracted.program.link impl`, `impl` a binder of the theorem constrained by the runtime contracts), never a concrete implementation (round 14)"
+        return none
+      if handBuiltNames.contains c then
+        return some s!"builds a program or segment by hand with {c}: a main theorem speaks about `Extracted.program` linked with a variable `impl` (round 14)"
+    if !e.hasLooseBVars then
+      if let some t ← tyOf e then
+        if isSegListType t then
+          return some s!"mentions a concrete runtime implementation (`{← show_ e}`, a `List Segment`) that is not a variable of the statement: a main theorem quantifies the implementation (a variable `impl` constrained only by the runtime contracts) instead of choosing one (round 14)"
+        if isProgramType t then
+          match fn with
+          | .const c _ => unless programHeadOk c do
+              return some s!"mentions the program `{← show_ e}`, which is not `Extracted.program`, `.withExit` or `.link impl` of one (round 14)"
+          | _ => return some s!"mentions the program `{← show_ e}`, which is not `Extracted.program`, `.withExit` or `.link impl` of one (round 14)"
+    if !fn.isConst then
+      if let some m ← concreteRuntime outer fn then return some m
+    for a in args do
+      if let some m ← concreteRuntime outer a then return some m
+    return none
+  | .lam n d b bi | .forallE n d b bi =>
+    if let some m ← concreteRuntime outer d then return some m
+    Meta.withLocalDecl n bi d fun x => concreteRuntime outer (b.instantiate1 x)
+  | .letE n t v b _ =>
+    if let some m ← concreteRuntime outer t then return some m
+    if let some m ← concreteRuntime outer v then return some m
+    Meta.withLetDecl n t v fun x => concreteRuntime outer (b.instantiate1 x)
+  | _ => return none
+
+/-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
+Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
+the runtime implementation must also be a variable of the statement (`concreteRuntime`) and every such
+`impl` is a runtime variable even when no contract mentions it. -/
+def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) := do
   let env ← getEnv
   Meta.forallTelescope ty fun xs body => do
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
@@ -962,6 +1095,16 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
             return some s!"assumes the runtime contract {c} about the program `{(← Meta.ppExpr a).pretty 10000}`, which is not `Extracted.program.link impl` for a variable `impl` of the statement (round 10 V1)"
           rtVars := rtVars.insert (a.getArg! 1).consumeMData.fvarId!
         | none => pure ()
+    -- Round 14 (V2): a main theorem never chooses the implementation of the runtime
+    if main then
+      if let some m ← concreteRuntime bound body then return some m
+      for x in xs do
+        if let some m ← concreteRuntime bound (← instantiateMVars (← Meta.inferType x)) then return some m
+      for v in linkVars body do
+        if bound.contains v then rtVars := rtVars.insert v
+      for x in xs do
+        for v in linkVars (← instantiateMVars (← Meta.inferType x)) do
+          if bound.contains v then rtVars := rtVars.insert v
     if rtVars.isEmpty then return none
     -- Round 13: the discipline covers EVERY binder, of any sort. A binder that is not a Prop
     -- (a `Type`/`Sort u` binder: `PLift (H = …)`, `{u : Unit // H = …}`, `ULift (PLift …)`, a
@@ -1277,6 +1420,19 @@ unsafe def prepareClean : IO (ImportState × Environment) := do
   let env ← (withImporting <| finalizeImport sClean cleanImports {} (leakEnv := false) (loadExts := true) : IO Environment)
   return (sClean, env)
 
+/-- Round 14: the runtime contracts the statement `e` applies, as `Contract@runtime.function` (the
+function named by the `contractAddr` literal in the application), each once. -/
+def contractUses (env : Environment) (e : Expr) : Array String :=
+  (contractApps env e).foldl (init := #[]) fun acc app =>
+    let c := app.getAppFn.constName!.toString
+    let isAddr (x : Expr) : Bool :=
+      (x.getAppFn.isConstOf `Janus.Program.contractAddr || x.getAppFn.isConstOf `Janus.Amd64.Program.contractAddr) &&
+        x.getAppNumArgs == 2 && (match x.appArg! with | .lit (.strVal _) => true | _ => false)
+    let s := match app.find? isAddr with
+      | some x => (match x.appArg! with | .lit (.strVal a) => s!"{c}@{a}" | _ => c)
+      | none => c
+    if acc.contains s then acc else acc.push s
+
 /-- Build the clean environment: import only `Janus` and `Extracted`, with initializers so pp
 works, then add type-only stubs for the dependency constants the statement reaches, re-add the
 allowed proof-local defs and an axiom with the theorem's type. Reject a proof-local def whose
@@ -1284,8 +1440,8 @@ type's head is a class (a disguised instance, A1). No proof or dependency module
 none of their initializers, notations, unexpanders or delaborators exist here. -/
 unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs : Array ConstantInfo)
     (stubs : Array ConstantInfo) (extDefs : Array ConstantInfo) (cleanState : ImportState)
-    (clean : Array Import := cleanImports) (pre? : Option Environment := none) :
-    AuditM (String × String × Array String × Array String × Array String) := do
+    (clean : Array Import := cleanImports) (pre? : Option Environment := none) (main : Bool := true) :
+    AuditM (String × String × Array String × Array String × Array String × Array String) := do
   -- `importModules (loadExts := true) cleanImports {}`, with the module data already read
   -- (`readImports`): the same `finalizeImport` over the same import state. `pre?` is that very
   -- environment, built earlier by `prepareClean` (the serve mode of `janus-audit`).
@@ -1331,7 +1487,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
   -- The same options for printing and for the round-trip re-elaboration (`autoImplicit` only
   -- affects elaboration). No `pp.all`: the printed statement is the human-readable one.
   let opts := printOptions
-  let printAll : MetaM (String × String × Array String × Array String × Array String) := do
+  let printAll : MetaM (String × String × Array String × Array String × Array String × Array String) := do
     -- (b) instance-implicit arguments must be registered instances or local instance binders
     if let some m ← checkInstArgs cx thmType then throwError m
     if let some m ← checkNumerals thmType then throwError s!"the statement {m}"
@@ -1343,7 +1499,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     if let some m ← checkSymbolRefs tbl expanded then
       throwError s!"the statement {m}"
     -- round 10 V1: contract hypotheses quantify the runtime
-    if let some m ← checkContractHyps expanded then
+    if let some m ← checkContractHyps expanded main then
       throwError s!"the statement {m}"
     for ci in extDefs do
       for t in [ci.type] ++ ci.value?.toList do
@@ -1395,10 +1551,202 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
         for n in ← hazardNotes t do
           let n := s!"in {ci.name}: {n}"
           unless notes.contains n do notes := notes.push n
-    return (sigStr, explicit.fmt.pretty 10000, defs, extOut, notes)
+    return (sigStr, explicit.fmt.pretty 10000, defs, extOut, notes, contractUses (← getEnv) expanded)
   match ← (Core.CoreM.toIO' (Meta.MetaM.run' printAll) { mkCoreCtx with options := opts } { env }).toBaseIO with
   | .ok a => return a
   | .error e => fail e.toString
+
+/-! ## Round 14 (W2): the role of a theorem, and witnesses checked structurally
+
+The audit used to gate the non-vacuity witnesses (`Proof.Witness.nonvacuous`, `Proof.Witness.returns`)
+by their NAME and by "the statement mentions `Extracted.program`", so `Extracted.program =
+Extracted.program` in the place of a witness passed. A witness now has a SHAPE, checked here:
+
+* `…Witness.nonvacuous` must be `∃ vars, c₁ ∧ … ∧ cₙ` such that some main theorem `M` of the same
+  proof module (`∀ xs, hyps → F program entry args pre post …`) is instantiated: EVERY hypothesis of
+  `M` (the runtime contracts, model laws, readiness predicates, numeric side conditions) appears as
+  a conjunct, and so does every premise of `M`'s conclusion once its head (`Ensures`, `EnsuresK`, …)
+  is unfolded to its `∀ ret, RetAddr … → ∀ s, CallSetup … → pre s → …` form: the return address,
+  the call state for the SAME program, entry address and arguments, and each conjunct of the
+  precondition. The match is definitional unification of `M`'s variables with the witness's, so a
+  witness exhibits a call state satisfying the main theorem's precondition together with an
+  instance of its hypotheses; `Extracted.program = Extracted.program` or `True` cannot pass.
+* `…Witness.returns` must be a `Returns`-style statement (`Returns`, `GoReturns`, `ReturnsK`,
+  `GrownReturns`, `ReachesRet`) that is, up to definitional unification of `M`'s variables, the
+  EXACT conclusion of some main theorem `M` (its unfolded `Returns … (fun s' => ABIReturn s s' ∧
+  post s s')`) at a concrete start state: an execution of the program that reaches the return with
+  the guarantee of the main theorem.
+* Any other theorem whose name has a `Witness` component is a lemma of a witness namespace and is
+  not a verifiable result.
+* Any other theorem is a MAIN theorem (`checkContractHyps`, `concreteRuntime`).
+
+The witness is matched against the theorems of the proof module only; the report names the matched
+main theorem (`matchedMain`) so the reader can see which theorem the witness supports. -/
+
+inductive Role | main | nonvacuous | returns | auxiliary
+  deriving BEq
+
+def Role.label : Role → String
+  | .main => "main"
+  | .nonvacuous => "witness-nonvacuous"
+  | .returns => "witness-returns"
+  | .auxiliary => "witness-auxiliary"
+
+def roleOf (n : Name) : Role :=
+  let cs := n.components
+  if !cs.any (· == `Witness) then .main else
+  match cs.reverse with
+  | l :: w :: _ =>
+      if w == `Witness then
+        (if l == `nonvacuous then .nonvacuous else if l == `returns then .returns else .auxiliary)
+      else .auxiliary
+  | _ => .auxiliary
+
+/-- Definitional equality, tried at reducible transparency first, then at default (the proof's
+own `def`s may need unfolding: a `Witness.rt` that is an alias of the allocator's ranges), with a
+heartbeat budget; a failure leaves the metavariable context unchanged. -/
+def defEqTry (a b : Expr) : MetaM Bool := do
+  if ← Meta.checkpointDefEq (Meta.withReducible (Meta.isDefEq a b)) then return true
+  try
+    withTheReader Core.Context (fun c => { c with maxHeartbeats := 300000 * 1000 }) do
+      withCurrHeartbeats do
+        Meta.checkpointDefEq (Meta.withDefault (Meta.isDefEq a b))
+  catch _ => pure false
+
+def findConj (p : Expr) (cs : Array Expr) : MetaM Bool := cs.anyM (defEqTry p ·)
+
+/-- The conjuncts of `e`, through `∧` only. -/
+partial def flattenAnd (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
+  let e := e.consumeMData
+  if e.isAppOfArity ``And 2 then flattenAnd (e.getArg! 1) (flattenAnd (e.getArg! 0) acc)
+  else acc.push e
+
+/-- Open the leading `∃` binders of `e` as local variables. -/
+partial def withExists {α} (e : Expr) (xs : Array Expr) (k : Array Expr → Expr → MetaM α) : MetaM α := do
+  let e := e.consumeMData
+  if e.isAppOfArity ``Exists 2 then
+    match (e.getArg! 1).consumeMData with
+    | .lam n d b bi => Meta.withLocalDecl n bi d fun x => withExists (b.instantiate1 x) (xs.push x) k
+    | _ => k xs e
+  else k xs e
+
+/-- `e` with its head definition unfolded (`Ensures`, `EnsuresResults`, `CEnsures`, `EnsuresK`, …)
+until it is a `∀`: `∀ ret, RetAddr p ret → ∀ s, CallSetup … → pre s → Returns …`. -/
+def unfoldToForall (e : Expr) : MetaM Expr := do
+  let mut e := e.consumeMData
+  for _ in [0:8] do
+    if e.isForall then return e
+    match ← Meta.unfoldDefinition? e with
+    | some e2 => e := e2.consumeMData
+    | none => return e
+  return e
+
+/-- Candidate main theorems of the proof module for a witness: theorems of the module that are not
+witness lemmas, mention `Extracted.program`, and are not the witness itself. `correctness` first. -/
+def mainCandidates (env : Environment) (proofMod : Name) (self : Name) : Array Name :=
+  let modNames := env.header.moduleNames
+  let all := env.const2ModIdx.fold (init := #[]) fun acc n idx =>
+    if modNames[idx.toNat]? == some proofMod && n != self && !n.isInternal && roleOf n == .main then
+      match env.find? n with
+      | some (.thmInfo ci) => if ci.type.getUsedConstants.contains `Extracted.program then acc.push n else acc
+      | _ => acc
+    else acc
+  let first := all.filter (·.getString! == "correctness")
+  let rest := (all.filter (·.getString! != "correctness")).qsort Name.lt
+  first.qsort Name.lt ++ rest
+
+/-- The statement of `n` with fresh universe metavariables. -/
+def freshType (env : Environment) (n : Name) : MetaM (Option Expr) := do
+  let some ci := env.find? n | return none
+  return some (ci.instantiateTypeLevelParams (← Meta.mkFreshLevelMVars ci.levelParams.length))
+
+/-- Is the witness body `wconjs` an instance of the main statement `mty`? `none` when it is, else
+the reason. Every premise of `mty` (its hypotheses, then the premises of its unfolded conclusion:
+return address, call state, precondition conjuncts) must be a conjunct of the witness. -/
+def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) := do
+  let (ms, _, concl) ← Meta.forallMetaTelescope mty
+  let body ← unfoldToForall concl
+  let (ms2, _, _) ← Meta.forallMetaTelescope body
+  if ms2.isEmpty then
+    return some "the conclusion of the main theorem does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
+  let mut sawCall := false
+  for (m, first) in (ms.map (·, true)) ++ (ms2.map (·, false)) do
+    let t ← instantiateMVars (← Meta.inferType m)
+    unless ← Meta.isProp t do continue
+    for p in flattenAnd t do
+      let p ← instantiateMVars p
+      if p.isConstOf ``True then continue
+      unless ← findConj p wconjs do
+        return some s!"the {if first then "hypothesis" else "premise"} `{(← Meta.ppExpr p).pretty 300}` of the main theorem is not among the conjuncts of the witness"
+      if !first then sawCall := true
+  unless sawCall do return some "the main theorem has no call premise"
+  return none
+
+/-- Is `e` an application of a `Returns`-style predicate? -/
+def returnsHead (e : Expr) : Bool :=
+  match e.getAppFn with
+  | .const c _ =>
+      let s := c.getString!
+      (s.startsWith "Returns" || s.startsWith "GoReturns" || s.startsWith "GrownReturns" || s == "ReachesRet")
+  | _ => false
+
+/-- The `Returns`-style application inside `e` (through `∧`, `→`, `↔`, `∀`), if any. -/
+partial def findReturns (e : Expr) : MetaM (Option Expr) := do
+  let e := e.consumeMData
+  if returnsHead e then return some e
+  match e with
+  | .forallE n d b bi => Meta.withLocalDecl n bi d fun x => findReturns (b.instantiate1 x)
+  | .app .. => do
+    for a in e.getAppArgs do
+      if let some r ← findReturns a then return some r
+    return none
+  | _ => return none
+
+/-- The `Returns`-style conclusion that the unfolded main statement `mty` ends in, with `M`'s
+variables as metavariables. -/
+def mainReturns (mty : Expr) : MetaM (Option Expr) := do
+  let (_, _, concl) ← Meta.forallMetaTelescope mty
+  let body ← unfoldToForall concl
+  let (_, _, last) ← Meta.forallMetaTelescope body
+  return if returnsHead last.consumeMData then some last.consumeMData else none
+
+/-- Round 14 (W2): check the shape of a witness theorem (see the section comment); the matched main
+theorem on success. -/
+def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) :
+    MetaM (Except String Name) := do
+  let cands := mainCandidates env proofMod thm
+  if cands.isEmpty then
+    return .error "the proof module has no main theorem about Extracted.program for this witness to support"
+  match role with
+  | .nonvacuous =>
+    unless (thmType.consumeMData.isAppOfArity ``Exists 2) do
+      return .error "is not of the form `∃ …, …` (a state and runtime exhibiting the main theorem's hypotheses)"
+    withExists thmType #[] fun _ body => do
+      let wconjs := flattenAnd body
+      let mut whys : Array String := #[]
+      for c in cands do
+        let some mty ← freshType env c | continue
+        let st ← Meta.saveState
+        match ← matchNonvacuous mty wconjs with
+        | none => return .ok c
+        | some w => whys := whys.push s!"{c}: {w}"; st.restore
+      return .error s!"does not instantiate any main theorem of the proof module ({"; ".intercalate whys.toList})"
+  | .returns =>
+    Meta.forallTelescope thmType fun _ body => do
+      let mut whys : Array String := #[]
+      let some r ← findReturns body
+        | return .error "is not a `Returns`-style statement (`Returns`, `GoReturns`, `ReturnsK`, `GrownReturns`, `ReachesRet`)"
+      unless (r.find? (·.isConstOf `Extracted.program)).isSome do
+        return .error "its program is not built from Extracted.program"
+      for c in cands do
+        let some mty ← freshType env c | continue
+        let some mr ← mainReturns mty | whys := whys.push s!"{c}: its conclusion does not unfold to a Returns-style statement"; continue
+        let st ← Meta.saveState
+        if ← defEqTry mr r then return .ok c
+        whys := whys.push s!"{c}: the statement is not its guarantee `{(← Meta.ppExpr mr).pretty 200}`"
+        st.restore
+      return .error s!"is not the guarantee of any main theorem of the proof module at a start state ({"; ".intercalate whys.toList})"
+  | _ => return .error "is a lemma of a Witness namespace, not a verifiable result: only Witness.nonvacuous and Witness.returns are"
 
 unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array String)
     (pre? : Option (ImportState × Environment)) : IO Unit := do
@@ -1455,6 +1803,16 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
         fail s!"the statement depends on {c}, which is in no imported module"
     unless mentionsExtracted do
       fail "the statement does not mention Extracted.program or Extracted.entry, so it says nothing about the extracted code"
+    -- Round 14: the role of the theorem. A witness (`Witness.nonvacuous`/`Witness.returns`) is
+    -- checked structurally against a main theorem of the module; every other theorem is a main
+    -- theorem, whose runtime is quantified (`checkContractHyps … main`).
+    let role := roleOf thmN
+    let matchedMain ← match role with
+      | .main => pure ""
+      | _ => do
+        match ← runCore envA (Meta.MetaM.run' (checkWitness envA proofModN thmN role ci.type)) with
+        | .ok c => pure c.toString
+        | .error m => fail s!"{thm} {m} (round 14, W2)"
     -- close over the consumer defs reachable from the statement; check the dependency
     -- constants on the way
     let (localNames, external) ← collectLocalDefs cx {} {} localSeed.toList
@@ -1470,13 +1828,14 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let extDefs := externalNames.filterMap fun n => match envA.find? n with
       | some ci@(.defnInfo _) => some ci
       | _ => none
-    let (statement, statementExplicit, defs, extOut, notes) ←
+    let (statement, statementExplicit, defs, extOut, notes, contractHyps) ←
       cleanEnvAndPrint cx thmN ci.type localDefs stubs extDefs cleanState (pre? := pre?.map (·.2))
+        (main := role == .main)
     return { name := thm, kind, module := modName.toString, axioms := axs.map (·.toString),
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
              external := externalNames.filterMap external.get?, externalDefinitions := extOut,
-             notes, imports := importGraph envA }
+             notes, role := role.label, matchedMain, contractHyps, imports := importGraph envA }
   ).run
   match result with
   | .ok rec => IO.println (marker ++ (toJson rec).compress)
@@ -1626,7 +1985,7 @@ unsafe def runASLImpl (userThm proofMod corThm corMod marker trusted words : Str
     let extDefs := externalNames.filterMap fun n => match envA.find? n with
       | some ci@(.defnInfo _) => some ci
       | _ => none
-    let (statement, statementExplicit, defs, extOut, notes) ←
+    let (statement, statementExplicit, defs, extOut, notes, _) ←
       cleanEnvAndPrint cx corN ci.type localDefs stubs extDefs cleanState aslClean
     return { name := corThm, kind := "theorem", module := corMod, axioms := axs.map (·.toString),
              statement, statementExplicit, definitions := defs,
