@@ -376,9 +376,22 @@ example : faultOf (step [0xf0, 0x48, 0x0f, 0xc1, 0x07] { sm with regs := fun i =
 example : faultOf (step [0xf0, 0x48, 0x0f, 0xc1, 0x07] { sm with regs := fun i => if i = 7 then 0x108 else 0 }) =
     none := by decide
 
--- 64-bit BSF of zero: undefined destination, fault (vendor-neutral)
-example : faultOf (step [0x48, 0x0f, 0xbc, 0xc1] { s0 with regs := fun _ => 0 }) =
-    some (.undefinedResult 0x1000) := by decide
+-- BSF/BSR of zero (any width): ZF = 1 and the whole destination (here RAX, the source is RCX) is the
+-- next element of the undefined-value stream (`State.undefVal` = `kreg 8`, here 0x1234); no fault
+def sj : State := { s0 with regs := fun i => if i = 0 then 0xffff else 0, kreg := fun i => if i = 8 then 0x1234 else 0 }
+example : (step [0x48, 0x0f, 0xbc, 0xc1] sj).toOption.map (fun t => (t.flags.zf, t.regs 0)) = some (some true, 0x1234) := by decide
+example : (step [0x48, 0x0f, 0xbd, 0xc1] sj).toOption.map (fun t => (t.flags.zf, t.regs 0)) = some (some true, 0x1234) := by decide
+example : (step [0x0f, 0xbd, 0xc1] sj).toOption.map (fun t => (t.flags.zf, t.regs 0)) = some (some true, 0x1234) := by decide
+example : (step [0x66, 0x0f, 0xbc, 0xc1] sj).toOption.map (fun t => (t.flags.zf, t.regs 0)) = some (some true, 0x1234) := by decide
+-- the stream advances: a second undefined result is the next element
+example : (step [0x48, 0x0f, 0xbc, 0xc1] sj).toOption.map (fun t => t.undefVal) = some 0 := by decide
+-- nonzero source (RCX = 0x10): the index and ZF = 0 (BSR 0x10 = 4); the stream advances all the same
+-- (unconditionally, so the successor state does not branch on the source)
+example : (step [0x48, 0x0f, 0xbd, 0xc1] { sj with regs := fun i => if i = 1 then 0x10 else 0 }).toOption.map
+    (fun t => (t.flags.zf, t.regs 0, t.undefVal)) = some (some false, 4, 0) := by decide
+-- LZCNT/TZCNT of zero: the operand width and CF = 1 (no undefined value)
+example : (step [0xf3, 0x48, 0x0f, 0xbd, 0xc1] sj).toOption.map (fun t => (t.flags.cf, t.regs 0)) = some (some true, 64) := by decide
+example : (step [0xf3, 0x48, 0x0f, 0xbc, 0xc1] sj).toOption.map (fun t => (t.flags.cf, t.regs 0)) = some (some true, 64) := by decide
 
 /-! ## GOAMD64=v3: BMI1/BMI2, MOVBE, scalar FMA, SSSE3 (encodings from the v3 std test binaries) -/
 
