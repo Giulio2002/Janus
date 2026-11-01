@@ -222,23 +222,23 @@ e="$mc/mods/${mk:0:2}/$mk"
 out="$t/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.olean"
 mrestore() { rm -f "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.*; $mp restore "$t/m" "$mc" 2>&1; }
 mrestore | grep -q 'restored 1 modules' && cmp -s <(printf OLEAN-bytes) "$out" && ok "restore copies the module back" || bad "restore"
-r=$(mrestore); echo "$r" | grep -q 'restored 1 modules' && ok "restore (again) hits" || bad "second restore: $r"
+r=$(mrestore); grep -q 'restored 1 modules' <<<"$r" && ok "restore (again) hits" || bad "second restore: $r"
 # eight concurrent restores into the same tree (the gate's lanes share one): all succeed, the module is intact
 rm -f "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.*
 pids=(); for i in 1 2 3 4 5 6 7 8; do ( $mp restore "$t/m" "$mc" > "$t/mr$i.out" 2>&1 ) & pids+=($!); done; for p in "${pids[@]}"; do wait "$p"; done
 rej=$(cat "$t"/mr?.out | grep -c '[1-9][0-9]* rejected'); okc=$(cat "$t"/mr?.out | grep -c 'rejected (')
 cmp -s <(printf OLEAN-bytes) "$out" && [ "$rej" = 0 ] && [ -z "$(find "$t/m/JanusASL/.lake" -name '*.asl-cache-tmp*' -o -name '*.bcache-tmp*')" ] && ok "8 concurrent module restores into one tree: none rejected, the module is intact, no temporaries" || bad "concurrent module restores: rejected=$rej: $(cat "$t"/mr1.out | head -3)"
 chmod u+w "$e/tree/janusasl/.lake/build/lib/lean/JanusASL/Audit.olean"; printf EVIL >> "$e/tree/janusasl/.lake/build/lib/lean/JanusASL/Audit.olean"
-r=$(mrestore); if echo "$r" | grep -q '1 rejected' && [ -z "$(ls "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.* 2>/dev/null)" ]; then ok "a tampered cached .olean is rejected and no output is left (Lake builds it)"; else bad "tampered olean: $r"; fi
+r=$(mrestore); if grep -q '1 rejected' <<<"$r" && [ -z "$(ls "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.* 2>/dev/null)" ]; then ok "a tampered cached .olean is rejected and no output is left (Lake builds it)"; else bad "tampered olean: $r"; fi
 [ ! -d "$e" ] && ok "the rejected entry is quarantined" || bad "rejected entry still in place"
 $mp publish "$t/m" "$mc" JanusASL.Audit > "$t/pub.out" 2>&1
 # republish needs the build outputs again
 fake_build
 $mp publish "$t/m" "$mc" JanusASL.Audit > "$t/pub.out" 2>&1; grep -q 'stored 1 modules' "$t/pub.out" && ok "the next publish stores a fresh entry" || bad "republish: $(cat "$t/pub.out")"
-rm -f "$e/MANIFEST.hmac"; r=$(mrestore); echo "$r" | grep -q '1 rejected' && ok "an unsigned module entry is rejected" || bad "unsigned: $r"
+rm -f "$e/MANIFEST.hmac"; r=$(mrestore); grep -q '1 rejected' <<<"$r" && ok "an unsigned module entry is rejected" || bad "unsigned: $r"
 fake_build
 $mp publish "$t/m" "$mc" JanusASL.Audit > /dev/null 2>&1
-sed -i '1s/^./f/' "$e/MANIFEST.sha256"; r=$(mrestore); echo "$r" | grep -q '1 rejected' && ok "a tampered module manifest is rejected" || bad "manifest: $r"
+sed -i '1s/^./f/' "$e/MANIFEST.sha256"; r=$(mrestore); grep -q '1 rejected' <<<"$r" && ok "a tampered module manifest is rejected" || bad "manifest: $r"
 cp_tree "$t/m2"; echo "-- x" >> "$t/m2/JanusASL/JanusASL/Audit.lean"
 [ "$(python3 -I "$t/m2/JanusASL/tools/asl_mod_cache.py" keys "$t/m2" | awk '$1=="JanusASL.Audit"{print $2}')" != "$mk" ] && ok "an edited module has another key, so the old entry is not even looked at" || bad "edited module kept its key"
 
@@ -254,11 +254,11 @@ for rel in ("janusasl/.lake/build/lib/lean/JanusASL/Other.olean", "janusasl/Janu
 data = "".join("%s  %s\n" % (v, k) for k, v in sorted(man.items())).encode()
 os.chmod(e + "/MANIFEST.sha256", 0o644); open(e + "/MANIFEST.sha256", "wb").write(data); open(e + "/MANIFEST.hmac", "w").write(b.mac("mod", key, data) + "\n")
 PY
-r=$(mrestore); echo "$r" | grep -q '1 rejected' && [ ! -e "$t/m/JanusASL/.lake/build/lib/lean/JanusASL/Other.olean" ] && ok "a signed module entry carrying another module's path / a source file is rejected, nothing written" || bad "smuggled module path: $r"
+r=$(mrestore); grep -q '1 rejected' <<<"$r" && [ ! -e "$t/m/JanusASL/.lake/build/lib/lean/JanusASL/Other.olean" ] && ok "a signed module entry carrying another module's path / a source file is rejected, nothing written" || bad "smuggled module path: $r"
 grep -q "JanusASL/Audit.lean" <(cd "$t/m" && git status --short 2>/dev/null) && bad "a source file was overwritten" || true
 fake_build; rm -rf "$mc"; $mp publish "$t/m" "$mc" JanusASL.Audit > /dev/null 2>&1
 victim="$t/victim"; mkdir -p "$victim"; d="$t/m/JanusASL/.lake/build/lib/lean/JanusASL"; rm -rf "$d"; ln -s "$victim" "$d"
-r=$($mp restore "$t/m" "$mc" 2>&1); echo "$r" | grep -q '1 rejected' && [ -z "$(ls -A "$victim")" ] && ok "a symlinked destination directory is refused: nothing is written through it" || bad "symlinked destination: $r / $(ls "$victim")"
+r=$($mp restore "$t/m" "$mc" 2>&1); grep -q '1 rejected' <<<"$r" && [ -z "$(ls -A "$victim")" ] && ok "a symlinked destination directory is refused: nothing is written through it" || bad "symlinked destination: $r / $(ls "$victim")"
 rm -f "$d"; mkdir -p "$d"
 
 echo; echo "-- module entries do not carry compiled objects (and a legacy entry that does has them ignored)"
@@ -278,7 +278,7 @@ data = "".join("%s  %s\n" % (v, k) for k, v in sorted(man.items())).encode()
 os.chmod(e + "/MANIFEST.sha256", 0o644); open(e + "/MANIFEST.sha256", "wb").write(data); open(e + "/MANIFEST.hmac", "w").write(b.mac("mod", key, data) + "\n")
 PY
 rm -rf "$t"/m/JanusASL/.lake/build/ir/JanusASL/Audit.c.o.* "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.*
-r=$($mp restore "$t/m" "$mc" 2>&1); echo "$r" | grep -q 'restored 1 modules' && [ -f "$out" ] && ok "a legacy module entry still restores its olean" || bad "legacy restore: $r"
+r=$($mp restore "$t/m" "$mc" 2>&1); grep -q 'restored 1 modules' <<<"$r" && [ -f "$out" ] && ok "a legacy module entry still restores its olean" || bad "legacy restore: $r"
 if [ ! -e "$ird/Audit.c.o.export" ] && [ ! -e "$ird/Audit.c.o.export.hash" ] && [ ! -e "$ird/Audit.c.o.export.trace" ] && [ ! -e "$t/m/JanusASL/.lake/build/lib/lean/JanusASL/Audit.c.o.export" ]; then ok "  ... and places NONE of its compiled objects (ir/ or a decoy under lib/lean/)"; else bad "a legacy object was placed: $(ls "$ird" "$t"/m/JanusASL/.lake/build/lib/lean/JanusASL)"; fi
 
 [ "$fail" = 0 ] && echo "bcache tests: all passed" || { echo "bcache tests: FAILED"; exit 1; }

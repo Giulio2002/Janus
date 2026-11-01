@@ -34,7 +34,7 @@ run_amd64 () { # name casesfile
   "$MDL64" < "$2" > "$work/$1.md"
   local line; line=$(python3 "$here/cmp.py" "$work/$1.hw" "$work/$1.md" "$2" | head -1)
   echo "  $1: $line"
-  echo "$line" | grep -q 'MISMATCH=0' || { echo "  FAIL ($1)"; python3 "$here/cmp.py" "$work/$1.hw" "$work/$1.md" "$2" | head -8; fail=1; }
+  grep -q 'MISMATCH=0' <<<"$line" || { echo "  FAIL ($1)"; python3 "$here/cmp.py" "$work/$1.hw" "$work/$1.md" "$2" | head -8; fail=1; }
 }
 
 echo "== SEQ amd64 (straight-line blocks, full-state compare)"
@@ -58,7 +58,7 @@ if command -v qemu-aarch64 >/dev/null 2>&1; then
     "$MDLA64" < "$work/a64-$s.jsonl" > "$work/a64-$s.md"
     line=$(python3 "$here/a64cmp.py" "$work/a64-$s.hw" "$work/a64-$s.md" "$work/a64-$s.jsonl" | head -1)
     echo "  arm64-seq$s: $line"
-    echo "$line" | grep -q 'MISMATCH=0' || { echo "  FAIL (arm64-seq$s)"; python3 "$here/a64cmp.py" "$work/a64-$s.hw" "$work/a64-$s.md" "$work/a64-$s.jsonl" | head -8; fail=1; }
+    grep -q 'MISMATCH=0' <<<"$line" || { echo "  FAIL (arm64-seq$s)"; python3 "$here/a64cmp.py" "$work/a64-$s.hw" "$work/a64-$s.md" "$work/a64-$s.jsonl" | head -8; fail=1; }
   done
   # arm64 FP-threading batch (fpsr cumulative flags + V registers across steps)
   python3 "$here/a64seq.py" "$AN" 9 "$work/a64fp.jsonl" "$dczid" fp
@@ -66,7 +66,7 @@ if command -v qemu-aarch64 >/dev/null 2>&1; then
   "$MDLA64" < "$work/a64fp.jsonl" > "$work/a64fp.md"
   line=$(python3 "$here/a64cmp.py" "$work/a64fp.hw" "$work/a64fp.md" "$work/a64fp.jsonl" | head -1)
   echo "  arm64-fp: $line"
-  echo "$line" | grep -q 'MISMATCH=0' || { echo "  FAIL (arm64-fp)"; fail=1; }
+  grep -q 'MISMATCH=0' <<<"$line" || { echo "  FAIL (arm64-fp)"; fail=1; }
 else
   echo "  (qemu-aarch64 not found; skipping arm64 SEQ)"
 fi

@@ -107,9 +107,13 @@ for pair in arm64:verify-examples amd64:verify-amd64-examples asm:verify-asm-exa
   flags="$(incr_script_flags "$kind" | grep -v '^--script$')"
   refs="$(grep -v '^\s*#' scripts/$sc.sh | grep -oE '(scripts/(lib/)?[A-Za-z0-9_-]+\.(sh|py))|\$root/scripts/lib/[A-Za-z0-9_-]+\.sh' | sed 's|^\$root/||' | sort -u)"
   miss=""
-  for r in $refs; do [ -f "$r" ] || continue; echo "$flags" | grep -qx "$r" || miss="$miss $r"; done
+  for r in $refs; do [ -f "$r" ] || continue; grep -qx "$r" <<<"$flags" || miss="$miss $r"; done   # (a here-string, not `echo | grep -q`: under pipefail grep -q exits at the first match, echo gets SIGPIPE and the pipeline reports "not keyed" at random)
   [ -z "$miss" ] && ok "S4 $kind: every referenced script is keyed" || bad "S4 $kind: not keyed:$miss"
 done
+# no gate script may use `echo "$v" | grep -q`: under pipefail grep -q exits at its first match, echo then gets SIGPIPE and the pipeline reports
+# "no match" at random (it made S4 cgo fail once in a cached nightly gate with the script in the key all along)
+pp="$(grep -rnE 'echo "?\$[A-Za-z_{}]+"? \| grep -[a-z]*q' scripts audit --include=*.sh | grep -v 'scripts/lib/test-rt-incr.sh' || true)"
+[ -z "$pp" ] && ok "S4 no 'echo \$v | grep -q' (SIGPIPE flake under pipefail) in gate scripts" || bad "S4 echo|grep -q under pipefail: $pp"
 # ---- S6: a partial run is labelled and its lane arguments are keyed
 grep -q "PARTIAL RUN: not a full gate" scripts/gate.sh && grep -q -- '--arg "run:' scripts/gate.sh && grep -q -- '--arg "rounds:' scripts/gate.sh && ok "S6 partial runs are labelled and keyed" || bad "S6"
 
