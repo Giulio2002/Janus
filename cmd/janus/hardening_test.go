@@ -279,6 +279,9 @@ func TestAuditUndefinedStreamPins(t *testing.T) {
 		"frame equation with a built state":  "s.kreg = State.kreg { s with kreg := fun _ => 5 }",
 		"the default state's kreg":           "s.kreg = (default : State).kreg",
 		"existential state with chosen kreg": "∃ t : State, s = { t with kreg := fun _ => 0 }",
+		// RTU2c: a fully concrete state outside a Witness theorem pins the stream (default kreg := 0)
+		"concrete state with the default opmask file": "∀ t : State, t = { regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := default } → t.rip = t.rip",
+		"concrete state with kreg zero stated":        "∀ t : State, t = { regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := default, kreg := fun _ => 0 } → t.rip = t.rip",
 	}
 	for name, pre := range rejected {
 		t.Run("reject "+name, func(t *testing.T) {

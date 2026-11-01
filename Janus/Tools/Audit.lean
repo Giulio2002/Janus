@@ -541,9 +541,9 @@ def returnsState (env : Environment) (c : Name) : Bool :=
   | none => false
 
 /-- The first subterm of `e` that pins or reads the undefined-value stream (see above). -/
-partial def findUndefStream (env : Environment) (kregIdx : Nat) (e : Expr) : Option Expr :=
+partial def findUndefStream (env : Environment) (witness : Bool) (kregIdx : Nat) (e : Expr) : Option Expr :=
   let kregFn : Name := `Janus.Amd64.State.kreg
-  let findUndefStream := findUndefStream env
+  let findUndefStream := findUndefStream env witness
   match e with
   | .app .. =>
     let fn := e.getAppFn
@@ -561,9 +561,12 @@ partial def findUndefStream (env : Environment) (kregIdx : Nat) (e : Expr) : Opt
         else some e
       else if c == `Janus.Amd64.State.mk then
         -- a state built from fields: its opmask file must be a copy of a variable's (`{ s with .. }`)
-        -- A fully concrete state (no variable anywhere: the initial state of a `Witness` theorem) is a
-        -- run of one named state, not a theorem about every state; it stays allowed.
-        if !e.hasFVar && !e.hasLooseBVars && !e.hasMVar then args.findSome? (findUndefStream kregIdx)
+        -- A fully concrete state (no variable anywhere) is the initial state of a `Witness` theorem, a
+        -- run of one named state, not a theorem about every state; it is allowed there only.
+        -- Only in a `Proof.Witness.*` theorem (round RTU2c): in the theorem that is the guarantee, a
+        -- concrete state pins the stream to the default (`kreg := fun _ => 0`, which `pp` does not
+        -- even show) and a model's value for an undefined destination reads as a known result.
+        if witness && !e.hasFVar && !e.hasLooseBVars && !e.hasMVar then args.findSome? (findUndefStream kregIdx)
         else if args.size > kregIdx && kregFrame args[kregIdx]! then
           (args.eraseIdx! kregIdx).findSome? (findUndefStream kregIdx)
         else some e
@@ -580,10 +583,10 @@ partial def findUndefStream (env : Environment) (kregIdx : Nat) (e : Expr) : Opt
   | _ => none
 
 /-- Reject a statement or definition that mentions the undefined-value stream. -/
-def checkUndefStream (e : Expr) : MetaM (Option String) := do
+def checkUndefStream (witness : Bool) (e : Expr) : MetaM (Option String) := do
   let fields := getStructureFields (← getEnv) `Janus.Amd64.State
   let kregIdx := (fields.idxOf? `kreg).getD 1000
-  match findUndefStream (← getEnv) kregIdx e with
+  match findUndefStream (← getEnv) witness kregIdx e with
   | none => return none
   | some bad =>
     let s := (← try Meta.ppExpr bad catch _ => pure (toString bad)).pretty 300
@@ -1452,11 +1455,12 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     if let some m ← checkContractHyps expanded then
       throwError s!"the statement {m}"
     -- the amd64 undefined-value stream (BSF/BSR of zero) is never pinned by a statement
-    if let some m ← checkUndefStream expanded then
+    let isWitness := `Proof.Witness |>.isPrefixOf thm
+    if let some m ← checkUndefStream isWitness expanded then
       throwError s!"the statement {m}"
     for ci in extDefs do
       for t in [ci.type] ++ ci.value?.toList do
-        if let some m ← checkUndefStream t then
+        if let some m ← checkUndefStream isWitness t then
           throwError s!"the dependency definition {ci.name} used in the statement {m}"
         if let some m ← checkSymbolRefs tbl t then
           throwError s!"the dependency definition {ci.name} used in the statement {m}"
