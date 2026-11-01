@@ -342,3 +342,44 @@ func TestLeanThreadsMax(t *testing.T) {
 		t.Fatalf("default cap below 2: %d", got)
 	}
 }
+
+// The "no memory guard" notice must never precede the verdict: row scripts parse the first output
+// line. It follows the diagnostic (same stream), and the verbose/log banner is opt-in only.
+func TestMemGuardNoticeAfterVerdict(t *testing.T) {
+	t.Setenv("JANUS_MEMGUARD", "bogus-forces-none")
+	t.Setenv("JANUS_MEMGUARD_LOG", "")
+	t.Setenv("JANUS_MEMGUARD_VERBOSE", "")
+	resetMemGuardForTest()
+	defer resetMemGuardForTest()
+	var out, errb bytes.Buffer
+	if code := run([]string{"verify", filepath.Join(t.TempDir(), "absent")}, &out, &errb); code != 1 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	lines := strings.Split(strings.TrimRight(errb.String(), "\n"), "\n")
+	if len(lines) < 2 || !regexp.MustCompile(`^(Invalid|Error):`).MatchString(lines[0]) {
+		t.Fatalf("first stderr line is not the verdict:\n%s", errb.String())
+	}
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "janus: memory guard: NONE available") {
+		t.Errorf("the no-guard notice is not the last line:\n%s", errb.String())
+	}
+	if n := strings.Count(errb.String(), "janus: memory guard:"); n != 1 {
+		t.Errorf("notice printed %d times", n)
+	}
+	// With a working guard the default is silent; with LOG the banner is printed (once).
+	t.Setenv("JANUS_MEMGUARD", "")
+	t.Setenv("JANUS_MEMGUARD_LOG", "1")
+	resetMemGuardForTest()
+	var b2 bytes.Buffer
+	logMemGuard(&b2)
+	logMemGuard(&b2)
+	if strings.Count(b2.String(), "janus: memory guard:") != 1 {
+		t.Errorf("LOG banner: %q", b2.String())
+	}
+	t.Setenv("JANUS_MEMGUARD_LOG", "")
+	resetMemGuardForTest()
+	var b3 bytes.Buffer
+	logMemGuard(&b3)
+	if b3.Len() != 0 {
+		t.Errorf("default logMemGuard printed %q", b3.String())
+	}
+}

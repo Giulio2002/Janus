@@ -654,7 +654,7 @@ ASL_OBJ_CACHE=1 JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __cal
 ASL_OBJ_CACHE=0 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 [ ! -e "$t/cr/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export" ] && ok "ASL_OBJ_CACHE=0 opts out: nothing restored" || bad "restored despite ASL_OBJ_CACHE=0"
 def=$(sed -n 's/^OBJ_CACHE_DEFAULT=\([01]\).*/\1/p' "$root/scripts/asl.sh")   # the default is one constant: the tests follow it
-st() { env "$@" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -v '^memguard' | tail -n 1; }
+st() { env "$@" "$t/cr/scripts/asl.sh" objcache-state 2>/dev/null | grep -v -E '^(memguard|janus: memory guard|janus-memguard)' | tail -n 1; }
 [ "$(st ASL_CACHE="$cdir")" = "$([ "$def" = 1 ] && echo ON || echo "OFF (default)")" ] && [ "$(st ASL_OBJ_CACHE=0 ASL_CACHE="$cdir")" = "OFF (ASL_OBJ_CACHE=0)" ] && st JANUS_ASL_CACHE=0 ASL_CACHE="$cdir" | grep -q "$([ "$def" = 1 ] && echo '^OFF (no build cache' || echo '^OFF (default)')" && ok "objcache-state: ON by default, OFF with ASL_OBJ_CACHE=0, OFF with JANUS_ASL_CACHE=0" || bad "objcache-state: $(st ASL_CACHE="$cdir") / $(st ASL_OBJ_CACHE=0 ASL_CACHE="$cdir") / $(st JANUS_ASL_CACHE=0 ASL_CACHE="$cdir")"
 ASL_CACHE="$cdir" "$t/cr/scripts/asl.sh" __call objcache_restore arm > "$t/out" 2>&1
 if [ "$def" = 1 ]; then

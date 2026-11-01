@@ -75,8 +75,8 @@ echo
 echo "== MEDIUM-1 (amd64 DF): see audit/round2/amd64/README.txt; with artifacts/examples-amd64 built:"
 if [ -f artifacts/examples-amd64 ]; then
   "$J" extract artifacts/examples-amd64 example.com/basic.CopyBlock $W/amd64-CopyBlock >/dev/null &&
-  df_out=$(v --proof audit/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | head -1)
-  echo "$df_out"
+  df_out=$(v --proof audit/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | grep -m1 -E '^(Verified|Invalid|Error)')
+  echo "$df_out"; [ -n "$df_out" ] || broken+=(DF-noverdict)
 fi
 echo "(MEDIUM-1 is fixed: amd64 models DF. This repro's concrete state t leaves df at its default"
 echo " false, and with DF = 0 a forward copy is correct, so the theorem is now true and honest about"
