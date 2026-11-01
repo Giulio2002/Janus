@@ -345,6 +345,7 @@ rm -f "$out/.pinned" "$out/fw_hash0"
 JANUS_REAL_LAKE="$(command -v lake)"; export JANUS_REAL_LAKE JANUS_LAKEGUARD_ROOT="$root" JANUS_LAKEGUARD_PIN="$out/.pinned"
 export PATH="$root/scripts/lib/lakeguard:$PATH"
 export JANUS_EXAMPLES_PREBUILT=1 JANUS_GATE_PREBUILT=1
+JANUS_GATE_RUN_ID="$$.$(date +%s%N)"; export JANUS_GATE_RUN_ID   # binds audit/bin/janus-decode-gate to this run (scripts/lib/gate-decoder.sh)
 . "$root/scripts/lib/dag.sh"
 dag_check || { echo "gate: internal error: the stage graph is inconsistent"; exit 1; }
 

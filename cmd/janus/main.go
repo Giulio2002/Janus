@@ -134,7 +134,10 @@ func parseArgs(args []string, valueFlags ...string) ([]string, map[string]string
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(args []string, stdout, stderr io.Writer) (code int) {
+	// The no-memory-guard notice follows the verdict on EVERY exit path (deferred: success, failure, runExtra
+	// commands, a panic unwinding through here).
+	defer memGuardNotice(stderr)
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 1
@@ -177,13 +180,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		printDiag(stderr, err)
-		if args[0] == "verify" || args[0] == "blockers" {
-			memGuardNotice(stderr)
-		}
 		return 1
-	}
-	if args[0] == "verify" || args[0] == "blockers" {
-		memGuardNotice(stderr)
 	}
 	return 0
 }

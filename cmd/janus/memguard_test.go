@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"io"
 	"regexp"
 	"strings"
 	"testing"
@@ -381,5 +382,51 @@ func TestMemGuardNoticeAfterVerdict(t *testing.T) {
 	logMemGuard(&b3)
 	if b3.Len() != 0 {
 		t.Errorf("default logMemGuard printed %q", b3.String())
+	}
+}
+
+// The no-guard notice follows the output of EVERY command that consulted the guard, on every exit path:
+// verify-batch (an extra command), a failing init-free early error, and a command that panics.
+func TestMemGuardNoticeEveryExitPath(t *testing.T) {
+	t.Setenv("JANUS_MEMGUARD", "bogus-forces-none")
+	t.Setenv("JANUS_MEMGUARD_LOG", "")
+	t.Setenv("JANUS_MEMGUARD_VERBOSE", "")
+	notice := "janus: memory guard: NONE available"
+	// verify-batch with a manifest that does not exist: a diagnostic, then the notice (it used to print no notice at all).
+	resetMemGuardForTest()
+	defer resetMemGuardForTest()
+	var out, errb bytes.Buffer
+	if code := run([]string{"verify-batch", filepath.Join(t.TempDir(), "absent.json")}, &out, &errb); code != 1 {
+		t.Fatalf("verify-batch exit %d: %s", code, errb.String())
+	}
+	lines := strings.Split(strings.TrimRight(errb.String(), "\n"), "\n")
+	if !regexp.MustCompile(`^(Invalid|Error):`).MatchString(lines[0]) || !strings.HasPrefix(lines[len(lines)-1], notice) {
+		t.Errorf("verify-batch: verdict first and notice last expected:\n%s", errb.String())
+	}
+	// a command that never consulted the guard prints no notice
+	resetMemGuardForTest()
+	out.Reset()
+	errb.Reset()
+	if code := run([]string{"version"}, &out, &errb); code != 0 || strings.Contains(errb.String(), "memory guard") {
+		t.Errorf("version: exit %d, stderr %q", code, errb.String())
+	}
+	// a panic unwinding through run still prints the notice (and is not swallowed)
+	resetMemGuardForTest()
+	extraCommands["zz-panic-test"] = func(args []string, stdout, stderr io.Writer) error {
+		currentGuard()
+		panic("boom")
+	}
+	defer delete(extraCommands, "zz-panic-test")
+	errb.Reset()
+	func() {
+		defer func() {
+			if r := recover(); r != "boom" {
+				t.Errorf("panic not propagated: %v", r)
+			}
+		}()
+		run([]string{"zz-panic-test"}, &out, &errb)
+	}()
+	if !strings.Contains(errb.String(), notice) {
+		t.Errorf("panic path: no notice: %q", errb.String())
 	}
 }

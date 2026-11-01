@@ -46,6 +46,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -107,8 +108,12 @@ var (
 )
 
 // currentGuard detects the guard once per process.
+// guardUsed: the process consulted the guard (a job ran, or was about to), so its absence is worth a notice.
+var guardUsed atomic.Bool
+
 func currentGuard() *memGuard {
 	guardOnce.Do(func() { theGuard = detectMemGuard() })
+	guardUsed.Store(true)
 	return theGuard
 }
 
@@ -116,6 +121,7 @@ func currentGuard() *memGuard {
 func resetMemGuardForTest() {
 	guardOnce = sync.Once{}
 	guardLogged = sync.Once{}
+	guardUsed.Store(false)
 }
 
 // logMemGuard prints, once per process, which mechanism is active, but only when asked
@@ -135,8 +141,11 @@ func logMemGuard(w io.Writer) {
 // memGuardNotice prints, after the verdict (and after any diagnostic), the notice that no memory
 // limit was enforced (mechanism "none"). Same text as the verbose line, so it is never silent;
 // verified.json records the mechanism too.
+//
+// It is printed by every command that consulted the guard (guardUsed: verify, blockers, verify-batch, init, ...),
+// on every exit path of run (success, failure, panic), so a run without a memory limit is never silent.
 func memGuardNotice(w io.Writer) {
-	if w == nil {
+	if w == nil || !guardUsed.Load() {
 		return
 	}
 	g := currentGuard()

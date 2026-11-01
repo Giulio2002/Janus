@@ -212,7 +212,9 @@ var incrEnvSkip = map[string]bool{
 	//   JANUS_LAKEGUARD_PIN, JANUS_LAKEGUARD_ROOT
 	//                          the marker file (a path in the run's output directory) and the checkout that switch the
 	//                          lakeguard shim on: it only turns `lake build` into `lake build --no-build`
-	"JANUS_GATE_TREE0": true, "JANUS_GATE_AUTO_WHY": true, "JANUS_GATE_ROUNDS_LANES": true, "JANUS_GATE_AUTO_BUDGET": true,
+	//   JANUS_GATE_RUN_ID      names this gate run (scripts/lib/gate-decoder.sh binds audit/bin/janus-decode-gate to it): it differs per run
+	//                          and selects nothing that is checked
+	"JANUS_GATE_RUN_ID": true, "JANUS_GATE_TREE0": true, "JANUS_GATE_AUTO_WHY": true, "JANUS_GATE_ROUNDS_LANES": true, "JANUS_GATE_AUTO_BUDGET": true,
 	"JANUS_VERIFY_MEM_BUDGET_GIB": true, "JANUS_ROUNDS_LANES": true, "JANUS_LAKEGUARD_PIN": true, "JANUS_LAKEGUARD_ROOT": true,
 }
 
