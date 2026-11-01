@@ -235,11 +235,11 @@ theorem pre : IfacePre R0 112 s0 ∧ IfaceInput s0 112 (s0.regs 0).toNat ∧ Ifa
 theorem nonvacuous : ∃ (impl : List Segment) (R : IfaceModel) (d : Nat), R.Laws ∧ 8 ≤ R.depth ∧
     R.depth + 48 ≤ d ∧
     Iface.Efaceeq (Extracted.program.link impl) (Extracted.program.contractAddr "runtime.efaceeq") R ∧
-    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (IfacePre R0 d s ∧ IfaceInput s d (s.regs 0).toNat ∧ IfaceInput s d (s.regs 1).toNat ∧
+    ∃ s, s.pc = BitVec.ofNat 64 Extracted.entry ∧ (IfacePre R d s ∧ IfaceInput s d (s.regs 0).toNat ∧ IfaceInput s d (s.regs 1).toNat ∧
     (s.mem.readLE (s.regs 0).toNat 8 = s.mem.readLE (s.regs 1).toNat 8 →
-      Iface.EqOK R0 s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.mem.readLE ((s.regs 0).toNat + 8) 8)
+      Iface.EqOK R s.mem (s.mem.readLE (s.regs 0).toNat 8) (s.mem.readLE ((s.regs 0).toNat + 8) 8)
         (s.mem.readLE ((s.regs 1).toNat + 8) 8) ∧
-      EqFrame R0 (s.mem.readLE (s.regs 0).toNat 8) s.mem (s.mem.readLE ((s.regs 0).toNat + 8) 8)
+      EqFrame R (s.mem.readLE (s.regs 0).toNat 8) s.mem (s.mem.readLE ((s.regs 0).toNat + 8) 8)
         (s.mem.readLE ((s.regs 1).toNat + 8) 8) (calleeStack s d 2))) :=
   ⟨implAt, R0, 112, R0_laws, by decide, by decide, model, s0, rfl, pre⟩
 

@@ -1023,7 +1023,7 @@ partial def concreteRuntime (outer : Std.HashSet FVarId) (e : Expr) : MetaM (Opt
       -- `{ Extracted.program with data := … }` (a precondition about the program's read-only data) keeps the
       -- extraction's segments and stubs; any other `Program.mk` chooses the code
       if handBuiltNames.contains c && !(args.size ≥ 2 && isExtractedField args[0]! && isExtractedField args[1]!) then
-        return some s!"builds a program by hand with {c}: a main theorem speaks about `Extracted.program` (segments and stubs as extracted) linked with a variable `impl` (round 14)"
+        return some s!"builds a program by hand (`{← show_ e}`) with {c}: a main theorem speaks about `Extracted.program` (segments and stubs as extracted) linked with a variable `impl` (round 14)"
     if !e.hasLooseBVars then
       if let some t ← tyOf e then
         if isSegListType t then
@@ -1681,7 +1681,9 @@ def mainCandidates (env : Environment) (proofMod : Name) (self : Name) : Array N
       | some m =>
         if ok m && n != self && !n.isInternal && roleOf n == .main then
           match env.find? n with
-          | some (.thmInfo ci) => if ci.type.getUsedConstants.contains `Extracted.program then acc.push n else acc
+          | some (.thmInfo ci) =>
+            let used := ci.type.getUsedConstants
+            if used.contains `Extracted.program || used.contains `Extracted.entry then acc.push n else acc
           | _ => acc
         else acc
       | none => acc
@@ -1735,6 +1737,12 @@ def conjGives (p c : Expr) : MetaM Bool := do
     let st2 ← Meta.saveState
     if ← defEqTry p bc then
       let mut ok := true
+      -- a variable that `p` does not mention (`n` of `CallOK s 232 0` in `∀ n, n ≤ 8 → CallOK s 232 0 ∧ Ready … [n] s`)
+      -- is taken to be `0` (a natural number)
+      for v in vs do
+        let t ← instantiateMVars (← Meta.inferType v)
+        if !(← Meta.isProp t) && !(← v.mvarId!.isAssigned) && t.isConstOf ``Nat then
+          discard <| Meta.isDefEq v (toExpr (0 : Nat))
       for v in vs do
         let t ← instantiateMVars (← Meta.inferType v)
         if ← Meta.isProp t then
@@ -1843,8 +1851,8 @@ def returnsMatches (mr r : Expr) : MetaM Bool := do
   let ra := r.getAppArgs
   let mut lamSeen := false
   for i in [0:ma.size] do
-    let m := ma[i]!.consumeMData
-    let x := ra[i]!.consumeMData
+    let m := (← instantiateMVars ma[i]!).consumeMData.headBeta
+    let x := (← instantiateMVars ra[i]!).consumeMData.headBeta
     if m.isLambda && x.isLambda then
       lamSeen := true
       let ok ← Meta.lambdaTelescope m fun ys bm => do
