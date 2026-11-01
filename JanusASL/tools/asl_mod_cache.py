@@ -1001,6 +1001,14 @@ def obj_audit(root, scope, cache, dry=False):
             if sha_file(fresh) != h:
                 poisoned.setdefault(ident, {})[rel] = h
                 print("objaudit: POISONED %s: %s differs from the freshly compiled object" % (ident, rel))
+    pause = os.environ.get("ASL_OBJAUDIT_TEST_PAUSE")  # test hook (M5): hold here, locks held, until PAUSE.go exists
+    if pause:
+        import time
+        open(pause + ".paused", "w").close()
+        for _ in range(900):
+            if os.path.exists(pause + ".go"):
+                break
+            time.sleep(0.1)
     for ident, objs in sorted(poisoned.items()):
         e = bc.entry_dir("armobj", cache, ident)
         q = os.path.join(os.path.dirname(e), ".poisoned-" + ident)

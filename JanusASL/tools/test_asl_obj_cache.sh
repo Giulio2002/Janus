@@ -9,7 +9,20 @@ set -uo pipefail
 export LC_ALL=C
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/asl-obj-cache-test.XXXXXX")
-trap 'rm -rf "$t"' EXIT
+# every process whose working directory or command line is inside this test's private directory dies with it
+# (RTOBJ6: recompile sandboxes of a killed run survived for hours); $t is unique (mktemp), so nothing else matches
+reap() {
+  local d p c a
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}; [ "$p" = "$$" ] && continue
+    c=$(readlink "$d/cwd" 2>/dev/null) || continue
+    a=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || a=
+    case "$c" in "$t"|"$t"/*) kill -9 "$p" 2>/dev/null; continue ;; esac
+    case "$a" in *"$t/"*) kill -9 "$p" 2>/dev/null ;; esac
+  done
+}
+trap 'reap; rm -rf "$t"' EXIT
+trap 'exit 143' TERM INT HUP
 export JANUS_CACHE_KEY_DIR="$t/keys"
 fail=0
 ok() { echo "ok   $*"; }
@@ -390,6 +403,40 @@ assert os.path.exists(work + "/inside") and not os.path.exists(t + "/outside")
 r = subprocess.run(pre + ["/bin/sh", "-c", "cat /proc/net/dev | tail -n +3 | grep -v '^ *lo:' | wc -l"], capture_output=True, text=True)
 assert r.stdout.strip() == "0", "network interfaces visible: " + r.stdout
 PY
+# a recompile sandbox never outlives its parent (RTOBJ6): the parent is SIGKILLed / SIGTERMed / times out while the sandboxed
+# command ignores SIGTERM; afterwards no process of the sandbox may be left
+cat > "$t/holder.py" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("bcache", sys.argv[1] + "/scripts/lib/bcache.py"); b = importlib.util.module_from_spec(spec); spec.loader.exec_module(b)
+work, mark, timeout = sys.argv[2], sys.argv[3], int(sys.argv[4])
+pre = b._sandbox_prefix(work, work)
+try:
+    b.run_sandboxed(pre + ["/bin/sh", "-c", "trap '' TERM HUP INT; while :; do sleep 1; done # " + mark], work, None, timeout)
+except Exception as ex:
+    print("run_sandboxed:", type(ex).__name__, file=sys.stderr)
+PY
+sandbox_procs() {  # the processes running the sandboxed command (its text ends "# MARK"); the [o] keeps grep from matching itself
+  local d pat="done # [o]${1#o}"
+  for d in /proc/[0-9]*; do tr '\0' ' ' < "$d/cmdline" 2>/dev/null | grep -q -- "$pat" && echo "${d#/proc/}"; done
+}
+orphan_case() {  # orphan_case NAME HOW TIMEOUT: HOW = kill9 | term | timeout
+  local name=$1 how=$2 to=$3 mark="objsb-$$-$RANDOM" n=0 pid
+  mkdir -p "$t/orph-$name"
+  python3 -I "$t/holder.py" "$root" "$t/orph-$name" "$mark" "$to" 2> "$t/orph-$name.err" &
+  pid=$!
+  if [ "$how" != timeout ]; then   # (a timeout may fire before a slow /proc scan sees the sandbox: not waited for)
+    while [ -z "$(sandbox_procs "$mark")" ] && [ $n -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
+    if [ -z "$(sandbox_procs "$mark")" ]; then bad "orphans/$name: the sandbox never started: $(head -c 200 "$t/orph-$name.err")"; kill -9 $pid 2>/dev/null; return; fi
+  fi
+  case "$how" in kill9) kill -9 $pid ;; term) kill -TERM $pid ;; timeout) : ;; esac
+  wait $pid 2>/dev/null
+  n=0; while [ -n "$(sandbox_procs "$mark")" ] && [ $n -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
+  if [ -z "$(sandbox_procs "$mark")" ]; then ok "orphans/$name: no sandbox process survives ($how)"
+  else bad "orphans/$name: sandbox processes survive ($how): $(sandbox_procs "$mark" | tr '\n' ' ')"; for q in $(sandbox_procs "$mark"); do kill -9 "$q" 2>/dev/null; done; fi
+}
+orphan_case parent-sigkill kill9 3600
+orphan_case parent-sigterm term 3600
+orphan_case timeout timeout 4
 # Inconclusive never destroys a good entry, never counts as a pass
 copy "$t/g2"; build "$t/g2"; stage "$t/g2" arm > /dev/null; idg=$(M objkey "$t/g2"); rm -rf "$cache/armobj"
 B store armobj "$cache" "$idg" "$t/st" < "$t/st.list" > /dev/null
@@ -884,25 +931,25 @@ b.BWRAP_CANDIDATES = [fail]; os.environ.pop(b.UNSANDBOXED_OPTIN, None)
 need(raises(b.Inconclusive, b._sandbox_prefix, work, work), "a failing bwrap probe was accepted")
 b.BWRAP_CANDIDATES = [real]
 os.environ["JANUS_CACHE_KEY_DIR"] = t + "/keys"; seen = {}
-def fake_run(cmd, **k):
-    seen.update(k.get("env", {})); open(cmd[cmd.index("-o") + 1], "w").write("x"); return subprocess.CompletedProcess(cmd, 0, b"", b"")
-orig = subprocess.run
+def fake_run(cmd, cwd, env, timeout):
+    seen.update(env or {}); open(cmd[cmd.index("-o") + 1], "w").write("x"); return subprocess.CompletedProcess(cmd, 0, b"", b"")
+orig = b.run_sandboxed
 b._sandbox_prefix = lambda w, c: []
-subprocess.run = fake_run
+b.run_sandboxed = fake_run
 pre_, cc_ = "/p", "/p/bin/clang"
 b.recompile_object(cc_, pre_, work + "/A.c", "build/ir/ArmASL/Part01.c", work)
-subprocess.run = orig
+b.run_sandboxed = orig
 need("JANUS_CACHE_KEY_DIR" not in seen and seen.get("TMPDIR") == work, "env %r" % {k: v for k, v in seen.items() if k in ("JANUS_CACHE_KEY_DIR", "TMPDIR")})
 PY
 py <<'PY' && ok "recompile: a failing compile and a compile that writes no object are Inconclusive; clean_stale removes only old private dirs; publish survives a staging OSError" || bad "recompile/clean_stale/stage OSError"
 import sys; t = sys.argv[2]; exec(open(t + "/h.py").read())
-work = t + "/rw"; os.makedirs(work, exist_ok=True); orig = subprocess.run
+work = t + "/rw"; os.makedirs(work, exist_ok=True); orig = b.run_sandboxed
 b._sandbox_prefix = lambda w, c: []
-subprocess.run = lambda cmd, **k: subprocess.CompletedProcess(cmd, 1, b"", b"error: boom")
+b.run_sandboxed = lambda cmd, cwd, env, timeout: subprocess.CompletedProcess(cmd, 1, b"", b"error: boom")
 need(raises(b.Inconclusive, b.recompile_object, "/p/bin/clang", "/p", work + "/A.c", "build/ir/ArmASL/Part01.c", work), "rc != 0 accepted")
-subprocess.run = lambda cmd, **k: subprocess.CompletedProcess(cmd, 0, b"", b"")
+b.run_sandboxed = lambda cmd, cwd, env, timeout: subprocess.CompletedProcess(cmd, 0, b"", b"")
 need(raises(b.Inconclusive, b.recompile_object, "/p/bin/clang", "/p", work + "/A.c", "build/ir/ArmASL/Part01.c", work), "no output accepted")
-subprocess.run = orig
+b.run_sandboxed = orig
 d = t + "/cs"; os.makedirs(d, exist_ok=True)
 for n, old in ((".recompile-old", 1), (".objstage-old", 1), (".recompile-new", 0), ("keepme", 1)):
     os.makedirs(d + "/" + n, exist_ok=True)
@@ -1005,6 +1052,49 @@ PY
 ) & lw=$!; for i in $(seq 1 30); do [ -f "$lkc/lk-held" ] && break; sleep 0.2; done
 M objaudit "$t/lk2" arm "$lkc" > "$t/out" 2>&1; rc=$?; wait $lw
 [ "$rc" = 0 ] && [ -d "$lkc/armobj/$lid" ] && ! ls "$lkc/armobj"/.poisoned-* > /dev/null 2>&1 && ok "objaudit waited for the writer's lock, then audited the NEW (honest) entry: no quarantine of a good entry" || bad "audit raced the writer: rc $rc: $(cat "$t/out")"
+
+# M5: objaudit holds the entry lock ACROSS the quarantine rename (verify and rename are one step). The audit is paused after it
+# verified (hook ASL_OBJAUDIT_TEST_PAUSE, test-only: it only waits) and a republish of the same entry is attempted: with the lock
+# held it BLOCKS until the audit is done; an audit that released the lock after verifying would let the republish through, and the
+# rename would then quarantine the NEW (good) entry.
+fresh m5a; forge "$(L m5a)" "$(L m5a)/build/ir/ArmASL/Part01.c"; m5c="$t/m5cache"; mkdir -p "$m5c"; M objpublish "$t/m5a" arm "$m5c" 0 > /dev/null 2>&1
+m5id=$(M objkey "$t/m5a"); fresh m5b; m5h="$t/m5honest"; mkdir -p "$m5h"; M objpublish "$t/m5b" arm "$m5h" 0 > /dev/null 2>&1
+rm -rf "$t/m5st"; mkdir "$t/m5st"; M objstage "$t/m5b" arm "$t/m5st" "$t/m5st.list" > /dev/null
+rm -f "$t/m5p.paused" "$t/m5p.go"
+ASL_OBJAUDIT_TEST_PAUSE="$t/m5p" M objaudit "$t/m5b" arm "$m5c" > "$t/m5out" 2>&1 & m5a_pid=$!
+for i in $(seq 1 100); do [ -f "$t/m5p.paused" ] && break; sleep 0.1; done
+if [ ! -f "$t/m5p.paused" ]; then bad "M5: the audit never reached the pause: $(cat "$t/m5out")"; kill -9 $m5a_pid 2>/dev/null
+else
+  ( B store armobj "$m5c" "$m5id" "$t/m5st" < "$t/m5st.list" > "$t/m5store.out" 2>&1; echo $? > "$t/m5store.rc" ) & m5s_pid=$!
+  sleep 2
+  [ ! -f "$t/m5store.rc" ] && ok "M5: a republish of the entry blocks while the audit holds its lock (verified, not yet renamed)" || bad "M5: the republish got through between verify and rename: rc $(cat "$t/m5store.rc")"
+  touch "$t/m5p.go"; wait $m5a_pid; m5rc=$?; wait $m5s_pid
+  [ "$m5rc" = 3 ] && ok "M5: the audit quarantined the poisoned entry it verified (exit 3)" || bad "M5: audit rc $m5rc: $(cat "$t/m5out")"
+  [ -d "$m5c/armobj/$m5id" ] && B verify armobj "$m5c" "$m5id" > /dev/null 2>&1 && ok "M5: the republished honest entry is served afterwards (it was not quarantined)" || bad "M5: no valid entry after audit + republish"
+fi
+
+# M17: when the auditor's module set cannot be determined (tcb_modules returns None) the janus scope caches NOTHING: no unit,
+# nothing published, nothing restored (the auditor's own objects must never come from a cache)
+tcb_none() {  # tcb_none NAME WHY MUTATION: a tree in which tcb_modules is undeterminable
+  janus_fresh "$1"
+  python3 -I - "$t/$1" "$3" <<'PY'
+import os, sys
+root, how = sys.argv[1:]
+lf = root + "/lakefile.toml"; s = open(lf).read()
+if how == "noexe":      s = s.replace('name = "janus-audit"', 'name = "janus-auditor-renamed"')
+elif how == "twoexes":  s += '\n[[lean_exe]]\nname = "janus-audit"\nroot = "Janus.Tools.AuditMain"\n'
+elif how == "badtoml":  s += '\n[[lean_exe\n'
+elif how == "nosrc":    os.remove(root + "/Janus/Tools/AuditMain.lean")
+open(lf, "w").write(s)
+PY
+}
+for how in noexe twoexes badtoml nosrc; do
+  tcb_none "m17$how" x "$how"
+  n=$(M objkey "$t/m17$how" janus 2>/dev/null | wc -l)
+  [ "$n" = 0 ] && ok "M17/$how: tcb_modules undeterminable -> the janus scope has no unit" || bad "M17/$how: $n units (the auditor's objects would be cached)"
+  mkdir -p "$t/m17c$how"; M objpublish "$t/m17$how" janus "$t/m17c$how" all > "$t/out" 2>&1
+  { [ ! -d "$t/m17c$how/armobj" ] || [ -z "$(ls "$t/m17c$how/armobj" 2>/dev/null)" ]; } && ok "M17/$how: nothing published" || bad "M17/$how: published: $(ls "$t/m17c$how/armobj")"
+done
 
 # opt-out values: 0|off|no|false switch it off, an empty value is the default (ON) and is printed, junk is OFF
 for v in 0 off no false; do
