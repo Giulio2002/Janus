@@ -1642,7 +1642,8 @@ def unfoldToForall (e : Expr) : MetaM Expr := do
   return e
 
 /-- Candidate main theorems of the proof module for a witness: theorems of the module that are not
-witness lemmas, mention `Extracted.program`, and are not the witness itself. `correctness` first. -/
+witness lemmas, mention `Extracted.program`, and are not the witness itself; only those named `correctness`
+if there are any. -/
 def mainCandidates (env : Environment) (proofMod : Name) (self : Name) : Array Name :=
   let modNames := env.header.moduleNames
   let all := env.const2ModIdx.fold (init := #[]) fun acc n idx =>
@@ -1651,9 +1652,11 @@ def mainCandidates (env : Environment) (proofMod : Name) (self : Name) : Array N
       | some (.thmInfo ci) => if ci.type.getUsedConstants.contains `Extracted.program then acc.push n else acc
       | _ => acc
     else acc
+  -- The module's main theorem is the one named `correctness` (every example's convention). Only when the
+  -- module has none are all its non-witness theorems candidates: otherwise a helper lemma or a junk
+  -- theorem with a weak statement could stand in for the main theorem a witness is supposed to support.
   let first := all.filter (·.getString! == "correctness")
-  let rest := (all.filter (·.getString! != "correctness")).qsort Name.lt
-  first.qsort Name.lt ++ rest
+  if !first.isEmpty then first.qsort Name.lt else all.qsort Name.lt
 
 /-- The statement of `n` with fresh universe metavariables. -/
 def freshType (env : Environment) (n : Name) : MetaM (Option Expr) := do
@@ -1671,10 +1674,10 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
     return some "the conclusion of the main theorem does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
   let mut sawCall := false
   for (m, first) in (ms.map (·, true)) ++ (ms2.map (·, false)) do
-    let t ← instantiateMVars (← Meta.inferType m)
+    let t := (← instantiateMVars (← Meta.inferType m)).headBeta
     unless ← Meta.isProp t do continue
     for p in flattenAnd t do
-      let p ← instantiateMVars p
+      let p := (← instantiateMVars p).headBeta
       if p.isConstOf ``True then continue
       unless ← findConj p wconjs do
         return some s!"the {if first then "hypothesis" else "premise"} `{(← Meta.ppExpr p).pretty 300}` of the main theorem is not among the conjuncts of the witness"

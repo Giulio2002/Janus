@@ -1350,6 +1350,7 @@ func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool,
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
+	checkWitnessSupport(outdir, outs)
 	failed := 0
 	var aslErr error
 	mj := multiJSON{Schema: 1}
@@ -1551,4 +1552,39 @@ func roleLines(r *verifiedReport) []string {
 			termSafe(strings.Join(r.Contracts, ", "))))
 	}
 	return out
+}
+
+// checkWitnessSupport (round 14): a witness verified together with main theorems must support one of
+// THEM. The audit matches a witness against the module's main theorem (`matchedMain`); if that theorem
+// is not among the main theorems verified in this same call, the witness would sit beside a
+// correctness claim it says nothing about, so it fails and its report is withdrawn.
+func checkWitnessSupport(outdir string, outs []thmOutcome) {
+	mains := map[string]bool{}
+	for _, o := range outs {
+		if o.Err == nil && o.Report != nil && o.Report.Role == "main" {
+			mains[o.Theorem] = true
+		}
+	}
+	if len(mains) == 0 {
+		return
+	}
+	var names []string
+	for n := range mains {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for i := range outs {
+		o := &outs[i]
+		if o.Err != nil || o.Report == nil || !strings.HasPrefix(o.Report.Role, "witness-") || mains[o.Report.MatchedMain] {
+			continue
+		}
+		o.Err = &diag{Invalid: true, Stage: "theorem audit",
+			Msg:  fmt.Sprintf("%s is a witness for %s, which is not among the main theorems verified in this run (%s)", o.Theorem, o.Report.MatchedMain, strings.Join(names, ", ")),
+			Next: "Verify the witness together with the main theorem it supports."}
+		o.Report = nil
+		_ = os.Remove(filepath.Join(outdir, verifiedDir, o.Theorem+".json"))
+		if i == 0 {
+			_ = os.Remove(filepath.Join(outdir, "verified.json"))
+		}
+	}
 }
