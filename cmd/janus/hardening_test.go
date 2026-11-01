@@ -268,6 +268,17 @@ func TestAuditUndefinedStreamPins(t *testing.T) {
 		"undefVal":                         "s.undefVal = 0",
 		"advanceUndef":                     "(s.advanceUndef).regs 0 = s.regs 0",
 		"kreg index through a numeral sum": "s.kreg (4 + 4) = 0",
+		// RTU2b: pins that never name kreg or undefVal
+		"match on a state":                   "(match s with | { kreg := k, .. } => k 8) = 0",
+		"State.casesOn":                      "State.casesOn (motive := fun _ => BitVec 64) s (fun _ _ _ _ _ _ _ _ _ _ _ _ k => k 8) = 0",
+		"State.rec":                          "State.rec (motive := fun _ => BitVec 64) (fun _ _ _ _ _ _ _ _ _ _ _ _ k => k 8) s = 0",
+		"state record update of kreg":        "s = { s with kreg := fun _ => 0 }",
+		"state equals a setK result":         "s = Janus.Amd64.ExecEVEX.setK s 8 5",
+		"state membership in a list":         "s ∈ [Janus.Amd64.ExecEVEX.setK s 8 5]",
+		"state equals strip512":              "s = s.strip512",
+		"frame equation with a built state":  "s.kreg = State.kreg { s with kreg := fun _ => 5 }",
+		"the default state's kreg":           "s.kreg = (default : State).kreg",
+		"existential state with chosen kreg": "∃ t : State, s = { t with kreg := fun _ => 0 }",
 	}
 	for name, pre := range rejected {
 		t.Run("reject "+name, func(t *testing.T) {
@@ -285,6 +296,7 @@ func TestAuditUndefinedStreamPins(t *testing.T) {
 		"opmask k3 (AVX-512)":          "s.kreg 3 = 0",
 		"opmask k7":                    "s.kreg 7 = s.kreg 0",
 		"frame equation of two states": "s.kreg = s.kreg",
+		"record copy keeps kreg":       "∀ t : State, t = { s with regs := t.regs } → t.regs 0 = t.regs 0",
 	}
 	for name, pre := range accepted {
 		t.Run("accept "+name, func(t *testing.T) {

@@ -493,7 +493,14 @@ as if the architecturally undefined destination were known, and it would be acce
 The auditor therefore rejects any mention, in the statement (proof-local definitions expanded) or in
 a dependency definition it uses, of `State.undefVal`, `State.advanceUndef`, and `State.kreg` at an index
 that is not a literal below 8 (the AVX-512 opmask registers `k0`..`k7`), or `State.kreg` whole, except
-as a frame equation `a.kreg = b.kreg` between two states (it names no value). It only rejects more. -/
+as a frame equation `a.kreg = b.kreg` between two states (it names no value). It only rejects more.
+
+Round RTU2b: a pin need not name `kreg` at all. The auditor also rejects, in the same places, every way
+to take a state apart (`match`, `State.casesOn`/`rec`), the default state, every state-valued term that
+is not a variable (`{ s with kreg := _ }`, `setK s 8 5`, `s.strip512`, `retState ..`), a `State.mk`
+whose opmask file is not copied from a variable (a fully concrete state, the start of a `Witness`
+theorem, is allowed). An equation at a type built from `State` then holds only variables and
+framework functions of them (`step s .. = .error ..` stays allowed). -/
 
 /-- A literal opmask index below 8. -/
 def opmaskLit? (e : Expr) : Bool :=
@@ -502,28 +509,70 @@ def opmaskLit? (e : Expr) : Bool :=
   | (``OfNat.ofNat, #[_, n, _]) => (n.rawNatLit?.map (fun x => decide (x < 8))).getD false
   | _ => (e.rawNatLit?.map (fun x => decide (x < 8))).getD false
 
+/-- A variable (free or bound), possibly under metadata. -/
+def atomVar (e : Expr) : Bool :=
+  match e.consumeMData with
+  | .fvar _ | .bvar _ => true
+  | _ => false
+
+/-- `State.kreg x` for a variable `x`: the opmask file of a state, naming no value (a frame). -/
+def kregFrame (e : Expr) : Bool :=
+  let e := e.consumeMData
+  e.getAppFn.isConstOf `Janus.Amd64.State.kreg && e.getAppNumArgs == 1 && atomVar e.appArg!
+
+/-- The ways to take a `State` apart or to build one from nothing (round RTU2b): a `match` on a
+state (its matcher unfolds to `casesOn`), `State.rec`, the default state. They read or choose a
+state's `kreg` without naming `State.kreg`. -/
+def undefStreamConsts : List Name :=
+  [`Janus.Amd64.State.undefVal, `Janus.Amd64.State.advanceUndef, `Janus.Amd64.State.casesOn,
+   `Janus.Amd64.State.rec, `Janus.Amd64.State.recOn, `Janus.Amd64.State.brecOn,
+   `Janus.Amd64.State.binductionOn, `Janus.Amd64.State.noConfusion,
+   `Janus.Amd64.State.noConfusionType, `Janus.Amd64.instInhabitedState]
+
+/-- Does the constant `c` produce a `State` (its type, after the parameters, is `State`)? -/
+def returnsState (env : Environment) (c : Name) : Bool :=
+  match env.find? c with
+  | some ci =>
+    let rec go : Expr → Bool
+      | .forallE _ _ b _ => go b
+      | .mdata _ b => go b
+      | t => t.isConstOf `Janus.Amd64.State
+    go ci.type
+  | none => false
+
 /-- The first subterm of `e` that pins or reads the undefined-value stream (see above). -/
-partial def findUndefStream (kregIdx : Nat) (e : Expr) : Option Expr :=
+partial def findUndefStream (env : Environment) (kregIdx : Nat) (e : Expr) : Option Expr :=
   let kregFn : Name := `Janus.Amd64.State.kreg
+  let findUndefStream := findUndefStream env
   match e with
   | .app .. =>
     let fn := e.getAppFn
     let args := e.getAppArgs
     match fn with
     | .const c _ =>
-      if c == `Janus.Amd64.State.undefVal || c == `Janus.Amd64.State.advanceUndef then some e
+      if undefStreamConsts.contains c then some e
+      else if returnsState env c && c != `Janus.Amd64.State.mk then
+        -- any state that is not a variable (`setK t 8 5`, `t.strip512`, `retState ..`): the only
+        -- states of a statement are the quantified ones (their opmask file is arbitrary)
+        some e
       else if c == kregFn then
         if args.size ≥ 2 then
           if opmaskLit? args[1]! then args.findSome? (findUndefStream kregIdx) else some e
         else some e
+      else if c == `Janus.Amd64.State.mk then
+        -- a state built from fields: its opmask file must be a copy of a variable's (`{ s with .. }`)
+        -- A fully concrete state (no variable anywhere: the initial state of a `Witness` theorem) is a
+        -- run of one named state, not a theorem about every state; it stays allowed.
+        if !e.hasFVar && !e.hasLooseBVars && !e.hasMVar then args.findSome? (findUndefStream kregIdx)
+        else if args.size > kregIdx && kregFrame args[kregIdx]! then
+          (args.eraseIdx! kregIdx).findSome? (findUndefStream kregIdx)
+        else some e
       else if c == ``Eq && args.size == 3 then
-        -- a frame equation between two states' kreg files names no value
-        let frame (x : Expr) := x.getAppFn.isConstOf kregFn && x.getAppNumArgs == 1
-        if frame args[1]! && frame args[2]! then args[1]!.getAppArgs.findSome? (findUndefStream kregIdx) <|> args[2]!.getAppArgs.findSome? (findUndefStream kregIdx)
+        if kregFrame args[1]! && kregFrame args[2]! then none
         else args.findSome? (findUndefStream kregIdx)
       else args.findSome? (findUndefStream kregIdx)
     | _ => (findUndefStream kregIdx fn).orElse fun _ => args.findSome? (findUndefStream kregIdx)
-  | .const c _ => if c == `Janus.Amd64.State.undefVal || c == `Janus.Amd64.State.advanceUndef || c == kregFn then some e else none
+  | .const c _ => if undefStreamConsts.contains c || c == kregFn || c == `Janus.Amd64.State.mk || returnsState env c then some e else none
   | .lam _ t b _ | .forallE _ t b _ => (findUndefStream kregIdx t).orElse fun _ => findUndefStream kregIdx b
   | .letE _ t v b _ => (findUndefStream kregIdx t).orElse fun _ => (findUndefStream kregIdx v).orElse fun _ => findUndefStream kregIdx b
   | .mdata _ b => findUndefStream kregIdx b
@@ -534,7 +583,7 @@ partial def findUndefStream (kregIdx : Nat) (e : Expr) : Option Expr :=
 def checkUndefStream (e : Expr) : MetaM (Option String) := do
   let fields := getStructureFields (← getEnv) `Janus.Amd64.State
   let kregIdx := (fields.idxOf? `kreg).getD 1000
-  match findUndefStream kregIdx e with
+  match findUndefStream (← getEnv) kregIdx e with
   | none => return none
   | some bad =>
     let s := (← try Meta.ppExpr bad catch _ => pure (toString bad)).pretty 300
