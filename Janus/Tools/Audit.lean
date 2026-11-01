@@ -1042,6 +1042,8 @@ partial def concreteRuntime (outer : Std.HashSet FVarId) (e : Expr) : MetaM (Opt
     if let some m ← concreteRuntime outer d then return some m
     Meta.withLocalDecl n bi d fun x => concreteRuntime outer (b.instantiate1 x)
   | .letE n t v b _ =>
+    -- `{ Extracted.program with data := … }` elaborates to `let src := Extracted.program; { segments := src.segments, … }`
+    if v.consumeMData.isConstOf `Extracted.program then return ← concreteRuntime outer (b.instantiate1 v)
     if let some m ← concreteRuntime outer t then return some m
     if let some m ← concreteRuntime outer v then return some m
     Meta.withLetDecl n t v fun x => concreteRuntime outer (b.instantiate1 x)
@@ -1706,6 +1708,11 @@ def freshType (env : Environment) (n : Name) : MetaM (Option Expr) := do
 def trivialConj (e : Expr) : Bool :=
   e.isConstOf ``True || (e.isAppOfArity ``Eq 3 && e.getArg! 1 == e.getArg! 2)
 
+/-- `s.pc` (arm64) or `s.rip` (amd64) of a state. -/
+def isPcProj (e : Expr) : Bool :=
+  let f := e.getAppFn
+  (f.isConstOf `Janus.Arm64.State.pc || f.isConstOf `Janus.Amd64.State.rip) && e.getAppNumArgs == 1
+
 /-- A premise about numbers (`8 ≤ db`, `db + 48 ≤ d`): tried after the structural ones, which fix the
 variables, because several such conjuncts can unify with it. -/
 def arithPremise (e : Expr) : Bool :=
@@ -1798,10 +1805,24 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
       why := "the conclusion of the main theorem does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
       st.restore; continue
     let calls ← premisesOf ms2
-    -- the structural premises of both parts first, the numeric ones last
-    let ps := (hyps ++ calls).filter (!arithPremise ·) ++ (hyps ++ calls).filter arithPremise
+    -- the premise `s.pc = entry` / `s.rip = entry` of a `Summary`-style contract is the call setup; a witness
+    -- that exhibits a state satisfying the rest of the precondition (`CallOK s …`, `Ready H rt [n] s`) for
+    -- `s` may leave the entry address to the proof (`WriteBarrier`: one state for every `gcWriteBarrierN`)
+    let all := hyps ++ calls
+    let pcPrem := fun (e : Expr) => e.isAppOfArity ``Eq 3 && isPcProj (e.getArg! 1)
+    let core := all.filter (!pcPrem ·)
+    let ps := core.filter (!arithPremise ·) ++ core.filter arithPremise
     match ← matchPremises ps wconjs with
-    | none => return none
+    | none =>
+      -- the pc premises: matched if the witness states them, else they must be about a state the other
+      -- premises fixed
+      let mut ok := true
+      for q in all.filter pcPrem do
+        let q ← instantiateMVars q
+        unless ← findConj q wconjs do
+          if q.hasExprMVar then ok := false
+      if ok then return none
+      why := "the entry-address premise of the main theorem concerns no state of the witness"
     | some w => why := s!"the premise {w}"
     st.restore
   return some why
