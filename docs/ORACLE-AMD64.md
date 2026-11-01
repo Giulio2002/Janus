@@ -744,11 +744,12 @@ something a single CPU can confirm. See "Limits".
 * **One CPU, one vendor.** The native reference is this Intel host. The formal cross-check
   above covers the undefined-flag sets for most of the integer subset. Where the SDM says "undefined" or
   vendors differ, the model faults or leaves the flag undefined rather than copying this CPU:
-  - BSF/BSR of 0 at 16 and 32 bits faults (`undefinedResult`), although this CPU keeps the
-    destination.
+  - BSF/BSR of 0 at every width: `ZF = 1` and the destination register is an arbitrary value (the
+    undefined-value stream, `docs/AMD64.md`). The oracle accepts ANY hardware value for that register: the
+    model JSON carries `regundef` (the registers whose value changes when the stream's first element
+    changes, found by running the case twice), and `compare.go` skips exactly those registers. The flags
+    and every other register are still compared.
   - `ZF` after `BT*` is undefined, although Intel leaves it unaffected.
-  - 64-bit BSF/BSR of 0 keeps the destination. AMD documents this, Linux relies on it, and this
-    CPU agrees.
   A proof can never depend on a vendor-specific value, but neither oracle can show that the
   model's *undefined* sets are complete for every other CPU.
 * **CPU features.** The model decodes `POPCNT` (`F3 0F B8`), `TZCNT` and `LZCNT` (`F3 0F BC/BD`).

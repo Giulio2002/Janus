@@ -264,7 +264,7 @@ def runCase (c : Case) : Json :=
     let (fl, def_) := flagBits s.flags
     Json.mkObj [("id", c.id), ("status", "ok"), ("len", len), ("pc", hex s.rip.toNat),
       ("regs", Json.arr ((List.range 16).map fun i => Json.str (hex (s.regs i).toNat)).toArray),
-      ("rflags", fl), ("defined", def_), ("regundef", regUndef), ("df", s.df),
+      ("rflags", fl), ("defined", def_), ("regundef", Lean.toJson regUndef), ("df", s.df),
       ("xmm", Json.arr ((List.range 16).map fun i => Json.str (hex (s.xmm i).toNat)).toArray),
       ("ymmh", Json.arr ((List.range 16).map fun i => Json.str (hex (s.ymmHi i).toNat)).toArray),
       ("mxcsr", hex s.mxcsr.toNat),

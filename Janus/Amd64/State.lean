@@ -127,7 +127,8 @@ inductive Fault where
   /-- The instruction at `pc` reads a status flag whose value is architecturally undefined. -/
   | undefinedFlag (pc : Nat)
   /-- The instruction at `pc` has an architecturally undefined result for these operands
-  (e.g. 16-bit `SHLD` with a count above 16, or a 32-bit `BSF` of zero). -/
+  (e.g. 16-bit `SHLD` with a count above 16). `BSF`/`BSR` of zero do not fault: their destination is
+  arbitrary (`State.undefVal`). -/
   | undefinedResult (pc : Nat)
   /-- `#DE`: division by zero or quotient overflow at `pc`. -/
   | divideError (pc : Nat)

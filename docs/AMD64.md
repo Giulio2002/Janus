@@ -216,9 +216,17 @@ AES/SHA, AVX-512 (scalar FMA is modelled since WP-B, `CRC32` and `PCMPESTRI` sin
 * Flags the SDM lists as undefined are `none`. Where vendors differ, or the SDM's pseudocode
   and prose disagree, the model takes the undefined side: `ZF` after `BT*`, SAR `CF` for an
   8/16-bit count at or above the width, ROL/ROR `OF` at masked count 0.
-* Undefined results fault (`undefinedResult`): BSF/BSR of 0 at every width (Intel leaves the
-  destination undefined; AMD documents, and this Intel CPU shows, that it is kept — a vendor
-  difference, so the model faults; audit round 2, LOW-2), and 16-bit SHLD/SHRD by more than 16.
+* Undefined results fault (`undefinedResult`): 16-bit SHLD/SHRD by more than 16.
+* `BSF`/`BSR` of 0 (any width): `ZF = 1`, other flags undefined, and the WHOLE 64-bit destination register
+  is an arbitrary value (Intel leaves it undefined, AMD keeps it, Intel hardware keeps it too; audit round 2,
+  LOW-2). The model draws it from the *undefined-value stream* `State.undefVal` (= `kreg 8`; the opmask
+  registers are `kreg 0..7` and nothing else touches higher indices), and every such instruction consumes
+  one element (`advanceUndef`). Soundness: a theorem quantifies over every initial state, so over every
+  value of every stream element, and every amd64 contract leaves `kreg` unspecified; the model is an
+  over-approximation of every CPU's behaviour, not an assumption about it. (A *precondition* that pins
+  `s.kreg 8` would weaken the statement and is visible in it.) The code `BSR; MOV $-1; CMOVEQ; INC`
+  (`bits.Len64` at `GOAMD64=v1`) is provable for every value. `LZCNT/TZCNT` of 0: result = operand
+  width, `CF = 1`, `ZF` = (result = 0), as the SDM says.
 * BMI1/BMI2 follow the SDM: `ANDN BLSR BLSI BZHI` set `SF ZF` from the result and clear `OF`
   (`CF`: `0`, source zero, source non-zero, index `≥ w`), `BLSMSK` clears `ZF`, `BEXTR` defines
   only `ZF` (`CF OF` cleared); `AF PF` (and `SF` of `BEXTR`) are undefined. `SHLX SHRX SARX
