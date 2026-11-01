@@ -222,3 +222,31 @@ example (a p : BitVec 64) :
 end Amd64
 
 end JanusTests.Diagnostics
+
+/-! ## Obstacles under a binder (regression for U17)
+
+`Common.obstacles` walks the term of a stuck instruction, including `fun`/`∀` bodies, without
+instantiating the bound variables. A checked access inside such a body mentions a loose bound
+variable; reporting it ran `omega` and the pretty printer on a term with a loose `#0`, and `isDefEq`
+PANICKED (`Lean.Meta.whnfEasyCases: loose bvar in expression`) instead of giving the "stuck" message. Such
+obstacles are now skipped; the ones outside every binder are still reported. -/
+
+namespace Binder
+open Lean Meta Janus.Tactic Janus.Arm64
+
+#eval show MetaM Unit from do
+  withLocalDeclD `m (mkConst ``Memory) fun m => do
+    withLocalDeclD `a (mkConst ``Nat) fun a => do
+      -- `fun x => load m x 8` (the access mentions the bound `x`) and `load m a 8` (it does not)
+      let body ← withLocalDeclD `x (mkConst ``Nat) fun x => do
+        mkLambdaFVars #[x] (← mkAppM ``Janus.Arm64.load #[m, x, mkNatLit 8])
+      let plain ← mkAppM ``Janus.Arm64.load #[m, a, mkNatLit 8]
+      let e ← mkAppM ``Prod.mk #[body, plain]
+      let obs ← Common.obstacles accessFns e
+      unless obs.size == 1 do throwError "expected exactly the access outside the binder, got {obs.size}"
+      match obs[0]! with
+      | .access _ _ addr _ _ =>
+        unless addr == a do throwError "wrong obstacle"
+      | _ => throwError "wrong obstacle kind"
+
+end Binder

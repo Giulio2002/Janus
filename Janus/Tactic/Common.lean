@@ -430,10 +430,14 @@ partial def obstacles (accessFns : List (Name × Bool)) (e : Expr) : MetaM (Arra
         let fn := e.getAppFn
         let args := e.getAppArgs
         let mut acc := acc
+        -- `go` also walks under binders without instantiating them: an obstacle whose terms
+        -- mention a bound variable (`#0`) is not one the diagnostics can print or run `omega` on
+        -- (`isDefEq` on a loose bound variable panics: U17), so it is not recorded
         if let some c := fn.constName? then
           if let some (_, w) := accessFns.find? (·.1 == c) then
-            if args.size ≥ 3 then acc := acc.push (.access c args[0]! args[1]! args[2]! w)
-          if c == ``Janus.Arm64.Memory.readLE && args.size == 3 then
+            if args.size ≥ 3 && !(args[0]!.hasLooseBVars || args[1]!.hasLooseBVars || args[2]!.hasLooseBVars) then
+              acc := acc.push (.access c args[0]! args[1]! args[2]! w)
+          if c == ``Janus.Arm64.Memory.readLE && args.size == 3 && !e.hasLooseBVars then
             let m := args[0]!
             if m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 then
               acc := acc.push (.alias (m.getArg! 0) (m.getArg! 1) (m.getArg! 2) args[1]! args[2]!)
@@ -443,7 +447,7 @@ partial def obstacles (accessFns : List (Name × Bool)) (e : Expr) : MetaM (Arra
             for d in discrs do
               if (← isConstructorApp? d.consumeMData).isNone && !d.isRawNatLit && d.nat?.isNone then
                 ctor := false
-            unless ctor do acc := acc.push (.stuckMatch c discrs)
+            unless ctor || discrs.any (·.hasLooseBVars) do acc := acc.push (.stuckMatch c discrs)
         for a in args do acc ← go a acc
         pure acc
       | .mdata _ b => go b acc
@@ -613,7 +617,7 @@ def branchConds : MetaM MessageData := do
 location of the step that produced them). -/
 def noteAliases (ref : IO.Ref Status) (e : Expr) : MetaM Unit := do
   let acc ← IO.mkRef (#[] : Array Expr)
-  e.forEachWhere (fun t => t.isAppOfArity ``Janus.Arm64.Memory.readLE 3 &&
+  e.forEachWhere (fun t => t.isAppOfArity ``Janus.Arm64.Memory.readLE 3 && !t.hasLooseBVars &&
       (t.getArg! 0).isAppOfArity ``Janus.Arm64.Memory.writeLE 4)
     (fun t => acc.modify (·.push t))
   let ts ← acc.get
