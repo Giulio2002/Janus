@@ -15,7 +15,9 @@ package main
 // Entries and their last use (the time of the newest of the listed files; janus touches them
 // on every use, touchUse and touchHit):
 //
-//	consumer   v1/consumer/<family>/<ws>           dir, <ws>.lock (exclusive while in use)
+//	consumer   v1/consumer/<family>/<ws>           dir, <ws>.lock (exclusive while in use), <ws>.busy
+//	                                               (present while in use; left by a dead process = half-written,
+//	                                               the next opener discards the workspace, consumer.go beginUse)
 //	framework  v1/framework/<key>                  dir, <key>.lock (shared while in use), <key>.ready
 //	asl        v1/asl/<key>                        dir, <key>.lock (exclusive while built),
 //	                                               <key>.use (shared while in use)
