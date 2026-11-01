@@ -945,14 +945,23 @@ def isStateType (t : Expr) : Bool :=
 def linkNames : List Name := [`Janus.Program.link, `Janus.Amd64.Program.link]
 
 /-- Constants that build a program or a segment by hand: not available to a main theorem. -/
-def handBuiltNames : List Name :=
-  [`Janus.Program.mk, `Janus.Amd64.Program.mk, `Janus.Segment.mk, `Janus.Amd64.Segment.mk]
+def handBuiltNames : List Name := [`Janus.Program.mk, `Janus.Amd64.Program.mk]
+
+/-- `Extracted.program.segments` / `.stubs`: the extraction's own code and stubs, not an implementation of the
+runtime. -/
+def isExtractedField (e : Expr) : Bool :=
+  match e.consumeMData with
+  | .app (.const c _) a => [`Janus.Program.segments, `Janus.Amd64.Program.segments, `Janus.Program.stubs,
+        `Janus.Amd64.Program.stubs].contains c && a.consumeMData.isConstOf `Extracted.program
+  | .proj s i a => (s == `Janus.Program || s == `Janus.Amd64.Program) && i < 2 &&
+      a.consumeMData.isConstOf `Extracted.program
+  | _ => false
 
 /-- The programs a main statement may speak about: `Extracted.program`, the program with an exit
 address (`withExit`) and the linked program (checked separately). -/
 def programHeadOk (c : Name) : Bool :=
   c == `Extracted.program || c == `Janus.Program.withExit || c == `Janus.Amd64.Program.withExit ||
-    linkNames.contains c
+    linkNames.contains c || handBuiltNames.contains c
 
 /-- The variables `impl` of `Extracted.program.link impl` in `e`. -/
 partial def linkVars (e : Expr) (acc : Array FVarId := #[]) : Array FVarId :=
@@ -979,6 +988,7 @@ partial def concreteRuntime (outer : Std.HashSet FVarId) (e : Expr) : MetaM (Opt
   let show_ (e : Expr) : MetaM String := do pure ((← Meta.ppExpr e).pretty 200)
   let tyOf (e : Expr) : MetaM (Option Expr) := do
     try pure (some (← Meta.whnfR (← Meta.inferType e))) catch _ => pure none
+  if isExtractedField e then return none
   match e with
   | .mdata _ b => concreteRuntime outer b
   | .proj _ _ b =>
@@ -1010,8 +1020,10 @@ partial def concreteRuntime (outer : Std.HashSet FVarId) (e : Expr) : MetaM (Opt
         unless ok do
           return some s!"mentions `{← show_ e}`: a main theorem may link only a variable of the statement (`Extracted.program.link impl`, `impl` a binder of the theorem constrained by the runtime contracts), never a concrete implementation (round 14)"
         return none
-      if handBuiltNames.contains c then
-        return some s!"builds a program or segment by hand with {c}: a main theorem speaks about `Extracted.program` linked with a variable `impl` (round 14)"
+      -- `{ Extracted.program with data := … }` (a precondition about the program's read-only data) keeps the
+      -- extraction's segments and stubs; any other `Program.mk` chooses the code
+      if handBuiltNames.contains c && !(args.size ≥ 2 && isExtractedField args[0]! && isExtractedField args[1]!) then
+        return some s!"builds a program by hand with {c}: a main theorem speaks about `Extracted.program` (segments and stubs as extracted) linked with a variable `impl` (round 14)"
     if !e.hasLooseBVars then
       if let some t ← tyOf e then
         if isSegListType t then
@@ -1044,6 +1056,8 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
   Meta.forallTelescope ty fun xs body => do
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}
+    -- the implementation variables no recognised contract mentions (round 14)
+    let mut implOnly : Std.HashSet FVarId := {}
     let mut premises : Array (Expr × Expr) := #[]
     for x in xs do
       let t ← Meta.inferType x
@@ -1100,11 +1114,13 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       if let some m ← concreteRuntime bound body then return some m
       for x in xs do
         if let some m ← concreteRuntime bound (← instantiateMVars (← Meta.inferType x)) then return some m
-      for v in linkVars body do
-        if bound.contains v then rtVars := rtVars.insert v
+      let mut ivs := linkVars body
       for x in xs do
-        for v in linkVars (← instantiateMVars (← Meta.inferType x)) do
-          if bound.contains v then rtVars := rtVars.insert v
+        ivs := linkVars (← instantiateMVars (← Meta.inferType x)) ivs
+      for v in ivs do
+        if bound.contains v && !rtVars.contains v then
+          rtVars := rtVars.insert v
+          implOnly := implOnly.insert v
     if rtVars.isEmpty then return none
     -- Round 13: the discipline covers EVERY binder, of any sort. A binder that is not a Prop
     -- (a `Type`/`Sort u` binder: `PLift (H = …)`, `{u : Unit // H = …}`, `ULift (PLift …)`, a
@@ -1133,7 +1149,13 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
             isVar t'.appArg!.consumeMData &&
             !t'.getAppArgs.pop.any (·.hasAnyFVar (rtVars.contains ·))
         | _ => false
-      unless isContract || isLaws || depthBound bound rtVars t' do
+      -- round 14: a premise about an implementation variable that only a framework predicate
+      -- (`Janus.Print.Lock2Contract`, `Janus.Kernel.SchedContract`, … defined in a trusted `Janus` module and not
+      -- recognised as a runtime contract above) mentions, and that mentions no other runtime variable
+      let isFramework := match t'.getAppFn with
+        | .const c _ => c.getRoot == `Janus && !(t'.hasAnyFVar fun v => rtVars.contains v && !implOnly.contains v)
+        | _ => false
+      unless isContract || isLaws || isFramework || depthBound bound rtVars t' do
         return some s!"has the premise `{(← Meta.ppExpr t).pretty 10000}` ({(← x.fvarId!.getUserName)}), which constrains a runtime variable of a contract hypothesis; only the contracts and the model laws may mention them (round 10 V1, round 11)"
     return none
 
@@ -1607,6 +1629,9 @@ own `def`s may need unfolding: a `Witness.rt` that is an alias of the allocator'
 heartbeat budget; a failure leaves the metavariable context unchanged. -/
 def defEqTry (a b : Expr) : MetaM Bool := do
   if ← Meta.checkpointDefEq (Meta.withReducible (Meta.isDefEq a b)) then return true
+  -- the default-transparency retry only for the same predicate (`Outside … Witness.rt` vs `Outside … AllocW.rt`):
+  -- unfolding two different predicates just to compare them is slow and never what a witness does
+  unless a.getAppFn.isConst && a.getAppFn == b.getAppFn do return false
   try
     withTheReader Core.Context (fun c => { c with maxHeartbeats := 300000 * 1000 }) do
       withCurrHeartbeats do
@@ -1621,14 +1646,17 @@ partial def flattenAnd (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
   if e.isAppOfArity ``And 2 then flattenAnd (e.getArg! 1) (flattenAnd (e.getArg! 0) acc)
   else acc.push e
 
-/-- Open the leading `∃` binders of `e` as local variables. -/
-partial def withExists {α} (e : Expr) (xs : Array Expr) (k : Array Expr → Expr → MetaM α) : MetaM α := do
+/-- The conjuncts of `e` with every `∃` binder on the way (leading, or inside a conjunction:
+`∃ impl, C ∧ ∃ s, s.pc = … ∧ P`) opened as a local variable, for the continuation `k`. -/
+partial def withConjs {α} (e : Expr) (k : Array Expr → MetaM α) : MetaM α := do
   let e := e.consumeMData
-  if e.isAppOfArity ``Exists 2 then
+  if e.isAppOfArity ``And 2 then
+    withConjs (e.getArg! 0) fun ca => withConjs (e.getArg! 1) fun cb => k (ca ++ cb)
+  else if e.isAppOfArity ``Exists 2 then
     match (e.getArg! 1).consumeMData with
-    | .lam n d b bi => Meta.withLocalDecl n bi d fun x => withExists (b.instantiate1 x) (xs.push x) k
-    | _ => k xs e
-  else k xs e
+    | .lam n d b bi => Meta.withLocalDecl n bi d fun x => withConjs (b.instantiate1 x) k
+    | _ => k #[e]
+  else k #[e]
 
 /-- `e` with its head definition unfolded (`Ensures`, `EnsuresResults`, `CEnsures`, `EnsuresK`, …)
 until it is a `∀`: `∀ ret, RetAddr p ret → ∀ s, CallSetup … → pre s → Returns …`. -/
@@ -1646,44 +1674,129 @@ witness lemmas, mention `Extracted.program`, and are not the witness itself; onl
 if there are any. -/
 def mainCandidates (env : Environment) (proofMod : Name) (self : Name) : Array Name :=
   let modNames := env.header.moduleNames
-  let all := env.const2ModIdx.fold (init := #[]) fun acc n idx =>
-    if modNames[idx.toNat]? == some proofMod && n != self && !n.isInternal && roleOf n == .main then
-      match env.find? n with
-      | some (.thmInfo ci) => if ci.type.getUsedConstants.contains `Extracted.program then acc.push n else acc
-      | _ => acc
-    else acc
-  -- The module's main theorem is the one named `correctness` (every example's convention). Only when the
-  -- module has none are all its non-witness theorems candidates: otherwise a helper lemma or a junk
-  -- theorem with a weak statement could stand in for the main theorem a witness is supposed to support.
-  let first := all.filter (·.getString! == "correctness")
-  if !first.isEmpty then first.qsort Name.lt else all.qsort Name.lt
+  -- theorems about `Extracted.program` of a module, `correctness` ones only if there are any
+  let inMods (ok : Name → Bool) : Array Name :=
+    let all := env.const2ModIdx.fold (init := #[]) fun acc n idx =>
+      match modNames[idx.toNat]? with
+      | some m =>
+        if ok m && n != self && !n.isInternal && roleOf n == .main then
+          match env.find? n with
+          | some (.thmInfo ci) => if ci.type.getUsedConstants.contains `Extracted.program then acc.push n else acc
+          | _ => acc
+        else acc
+      | none => acc
+    let first := all.filter (·.getString! == "correctness")
+    if !first.isEmpty then first.qsort Name.lt else all.qsort Name.lt
+  -- The module's main theorem is the one named `correctness` (every example's convention); only when it has
+  -- none are all its non-witness theorems candidates (otherwise a helper lemma or a junk theorem with a weak
+  -- statement could stand in for the main theorem a witness supports). A proof whose main theorem lives in a
+  -- module it imports (`PrintProofs.Arm64.MainX`, a `Three/Main.lean`) falls back to the imported
+  -- consumer/proof modules, never the trusted ones.
+  let own := inMods (· == proofMod)
+  if !own.isEmpty then own else inMods fun m => !trustedModule m && m != proofMod
 
 /-- The statement of `n` with fresh universe metavariables. -/
 def freshType (env : Environment) (n : Name) : MetaM (Option Expr) := do
   let some ci := env.find? n | return none
   return some (ci.instantiateTypeLevelParams (← Meta.mkFreshLevelMVars ci.levelParams.length))
 
-/-- Is the witness body `wconjs` an instance of the main statement `mty`? `none` when it is, else
-the reason. Every premise of `mty` (its hypotheses, then the premises of its unfolded conclusion:
-return address, call state, precondition conjuncts) must be a conjunct of the witness. -/
-def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) := do
-  let (ms, _, concl) ← Meta.forallMetaTelescope mty
-  let body ← unfoldToForall concl
-  let (ms2, _, _) ← Meta.forallMetaTelescope body
-  if ms2.isEmpty then
-    return some "the conclusion of the main theorem does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
-  let mut sawCall := false
-  for (m, first) in (ms.map (·, true)) ++ (ms2.map (·, false)) do
+/-- A conjunct that says nothing: `True`, or `a = a`. -/
+def trivialConj (e : Expr) : Bool :=
+  e.isConstOf ``True || (e.isAppOfArity ``Eq 3 && e.getArg! 1 == e.getArg! 2)
+
+/-- A premise about numbers (`8 ≤ db`, `db + 48 ≤ d`): tried after the structural ones, which fix the
+variables, because several such conjuncts can unify with it. -/
+def arithPremise (e : Expr) : Bool :=
+  e.isAppOf ``LE.le || e.isAppOf ``LT.lt || e.isAppOf ``Eq || e.isAppOf ``Ne || e.isAppOf ``GE.ge ||
+    e.isAppOf ``GT.gt || e.isAppOf ``Not
+
+/-- Is the closed proposition `t` decidably true (`8 ≤ 8`, `1 ≤ 8`)? -/
+def decideTrue (t : Expr) : MetaM Bool := do
+  let t ← instantiateMVars t
+  if t.hasExprMVar then return false
+  try
+    withTheReader Core.Context (fun c => { c with maxHeartbeats := 50000 * 1000 }) do
+      withCurrHeartbeats do
+        let inst ← Meta.synthInstance (mkApp (mkConst ``Decidable) t)
+        let r ← Meta.whnfD (mkAppN (mkConst ``Decidable.decide) #[t, inst])
+        return r.isConstOf ``Bool.true
+  catch _ => return false
+
+/-- Does the witness conjunct `c` give the premise `p`? Either `c` unifies with `p`, or `c` is a
+universal statement `∀ n, n ≤ 8 → A n ∧ B n` (`WriteBarrier`: the witness covers every slot count) one of
+whose instances unifies with `p` and whose side conditions at that instance are decidably true. -/
+def conjGives (p c : Expr) : MetaM Bool := do
+  if ← defEqTry p c then return true
+  let c := c.consumeMData
+  if !c.isForall then return false
+  let st ← Meta.saveState
+  let (vs, _, b) ← Meta.forallMetaTelescope c
+  for bc in flattenAnd b do
+    let st2 ← Meta.saveState
+    if ← defEqTry p bc then
+      let mut ok := true
+      for v in vs do
+        let t ← instantiateMVars (← Meta.inferType v)
+        if ← Meta.isProp t then
+          unless ← decideTrue t do ok := false
+        else unless ← v.mvarId!.isAssigned do ok := false
+      if ok then return true
+    st2.restore
+  st.restore
+  return false
+
+/-- Match every premise of `ps` to a conjunct of `cs`, assigning the metavariables, with backtracking
+(a premise can unify with several conjuncts). `none` on success, else the premise that could not be
+placed. -/
+partial def matchPremises (ps : List Expr) (cs : Array Expr) : MetaM (Option String) := do
+  match ps with
+  | [] => return none
+  | p :: rest =>
+    let mut last : Option String := none
+    for c in cs do
+      let st ← Meta.saveState
+      if ← conjGives p c then
+        match ← matchPremises rest cs with
+        | none => return none
+        | some w => last := some w
+      st.restore
+    return last <|> some s!"`{(← Meta.ppExpr p).pretty 300}` is not among the conjuncts of the witness"
+
+/-- The Prop-typed metavariables of a telescope, as non-trivial conjuncts, structural ones first. -/
+def premisesOf (ms : Array Expr) : MetaM (List Expr) := do
+  let mut ps := #[]
+  for m in ms do
     let t := (← instantiateMVars (← Meta.inferType m)).headBeta
     unless ← Meta.isProp t do continue
     for p in flattenAnd t do
       let p := (← instantiateMVars p).headBeta
-      if p.isConstOf ``True then continue
-      unless ← findConj p wconjs do
-        return some s!"the {if first then "hypothesis" else "premise"} `{(← Meta.ppExpr p).pretty 300}` of the main theorem is not among the conjuncts of the witness"
-      if !first then sawCall := true
-  unless sawCall do return some "the main theorem has no call premise"
-  return none
+      unless trivialConj p do ps := ps.push p
+  return (ps.filter (!arithPremise ·)).toList ++ (ps.filter arithPremise).toList
+
+/-- Is the witness body `wconjs` an instance of the main statement `mty`? `none` when it is, else
+the reason. Every hypothesis of `mty` must be a conjunct of the witness; and, for at least one conjunct
+of the conclusion (a main theorem may state several guarantees, `IsEven ∧ IsOdd`, `wb1 ∧ … ∧ wb8`),
+every premise of that conjunct's unfolded form (return address, call state, precondition conjuncts)
+must be one too. -/
+def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) := do
+  let (ms, _, concl) ← Meta.forallMetaTelescope mty
+  let hyps ← premisesOf ms
+  let mut why := "the main theorem has no call premise"
+  for c in flattenAnd (← instantiateMVars concl) do
+    let st ← Meta.saveState
+    let body ← unfoldToForall c
+    let (ms2, _, _) ← Meta.forallMetaTelescope body
+    if ms2.isEmpty then
+      why := "the conclusion of the main theorem does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
+      st.restore; continue
+    let calls ← premisesOf ms2
+    -- the structural premises of both parts first, the numeric ones last
+    let ps := (hyps ++ calls).filter (!arithPremise ·) ++ (hyps ++ calls).filter arithPremise
+    match ← matchPremises ps wconjs with
+    | none => return none
+    | some w => why := s!"the premise {w}"
+    st.restore
+  return some why
 
 /-- Is `e` an application of a `Returns`-style predicate? -/
 def returnsHead (e : Expr) : Bool :=
@@ -1705,13 +1818,16 @@ partial def findReturns (e : Expr) : MetaM (Option Expr) := do
     return none
   | _ => return none
 
-/-- The `Returns`-style conclusion that the unfolded main statement `mty` ends in, with `M`'s
-variables as metavariables. -/
-def mainReturns (mty : Expr) : MetaM (Option Expr) := do
+/-- The `Returns`-style conclusions that the unfolded conjuncts of the main statement `mty` end in, with
+`M`'s variables as metavariables. -/
+def mainReturns (mty : Expr) : MetaM (Array Expr) := do
   let (_, _, concl) ← Meta.forallMetaTelescope mty
-  let body ← unfoldToForall concl
-  let (_, _, last) ← Meta.forallMetaTelescope body
-  return if returnsHead last.consumeMData then some last.consumeMData else none
+  let mut out := #[]
+  for c in flattenAnd concl do
+    let body ← unfoldToForall c
+    let (_, _, last) ← Meta.forallMetaTelescope body
+    if returnsHead last.consumeMData then out := out.push last.consumeMData
+  return out
 
 /-- Does the `Returns`-style statement `r` (of a `returns` witness) state the guarantee `mr` of the main
 theorem at a start state? Strictly: they unify. Or, since a witness usually states the guarantee
@@ -1734,9 +1850,15 @@ def returnsMatches (mr r : Expr) : MetaM Bool := do
       let ok ← Meta.lambdaTelescope m fun ys bm => do
         let bx := (x.beta ys).headBeta
         let cm := flattenAnd (← instantiateMVars bm).headBeta
-        let cx := (flattenAnd bx).filter (!·.isConstOf ``True)
-        if cx.size < 2 || cm.isEmpty then return false
-        findConj cm[0]! cx
+        let cx := (flattenAnd bx).filter (!trivialConj ·)
+        if cx.isEmpty || cm.isEmpty then return false
+        -- the main postcondition's first conjunct is the ABI obligation (`ABIReturn s s'`) when it has
+        -- several: keep it and add a statement about the result; a single conjunct (`GrownReturns`,
+        -- `EnsuresGrow`: no ABI obligation) is specialised to the concrete result, which must say something
+        if cm.size ≥ 2 then
+          if cx.size < 2 then return false
+          findConj cm[0]! cx
+        else return true
       unless ok do return false
     else
       unless ← defEqTry m x do return false
@@ -1753,8 +1875,7 @@ def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmTyp
   | .nonvacuous =>
     unless (thmType.consumeMData.isAppOfArity ``Exists 2) do
       return .error "is not of the form `∃ …, …` (a state and runtime exhibiting the main theorem's hypotheses)"
-    withExists thmType #[] fun _ body => do
-      let wconjs := flattenAnd body
+    withConjs thmType fun wconjs => do
       let mut whys : Array String := #[]
       for c in cands do
         let some mty ← freshType env c | continue
@@ -1772,11 +1893,13 @@ def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmTyp
         return .error "its program is not built from Extracted.program"
       for c in cands do
         let some mty ← freshType env c | continue
-        let some mr ← mainReturns mty | whys := whys.push s!"{c}: its conclusion does not unfold to a Returns-style statement"; continue
-        let st ← Meta.saveState
-        if ← returnsMatches mr r then return .ok c
-        whys := whys.push s!"{c}: the statement is not its guarantee `{(← Meta.ppExpr mr).pretty 200}`"
-        st.restore
+        let mrs ← mainReturns mty
+        if mrs.isEmpty then whys := whys.push s!"{c}: its conclusion does not unfold to a Returns-style statement"; continue
+        for mr in mrs do
+          let st ← Meta.saveState
+          if ← returnsMatches mr r then return .ok c
+          whys := whys.push s!"{c}: the statement is not its guarantee `{(← Meta.ppExpr mr).pretty 200}`"
+          st.restore
       return .error s!"is not the guarantee of any main theorem of the proof module at a start state ({"; ".intercalate whys.toList})"
   | _ => return .error "is a lemma of a Witness namespace, not a verifiable result: only Witness.nonvacuous and Witness.returns are"
 
