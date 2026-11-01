@@ -230,12 +230,12 @@ namespace WeakC.Witness
 open Proof.Witness
 /-- the right shape, but no allocator contract: the hypothesis `hnew` is not exhibited. -/
 theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (ret : Nat) (s : State),
-    RetAddr (Extracted.program.link impl) ret ∧
+    H = H ∧ RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [3, 5] s ∧
     (GuardOK s 0 ∧ StackOK s 4144 24 ∧ Extracted.program.DataLoaded s.mem ∧
       Outside (s.sp.toNat - 4144) 4168 rt ∧
       H [pairType] (s.regs 28).toNat (s.sp.toNat - 48) (rtView rt s.mem)) :=
-  ⟨AllocW.impl, AllocW.rt, AllocW.H, ret, s0, hret, setup, pre⟩
+  ⟨AllocW.impl, AllocW.rt, AllocW.H, ret, s0, rfl, hret, setup, pre⟩
 end WeakC.Witness
 
 namespace WeakD.Witness

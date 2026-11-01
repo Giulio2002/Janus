@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Round-14 regression rows (docs/AUDIT.md, docs/SOUNDNESS.md "Round 14"): the runtime of a MAIN theorem is
+# quantified, never chosen, and witnesses have a checked shape.
+#   V2  a theorem about `Extracted.program.link impl` for a CONCRETE `impl` (the consumer's toy allocator) with no
+#       contract hypothesis used to verify and be reported as assuming the pinned `runtime.newobject` contract;
+#       now every `link` of a non-witness theorem takes a variable of the statement, no segment list / program is
+#       chosen or built by hand, and a theorem for the toy allocator cannot pass as a main theorem (bad1..bad8).
+#   W2  `Witness.nonvacuous` / `Witness.returns` were gated by name and by "mentions Extracted.program"; now a
+#       nonvacuous witness must exhibit every hypothesis and premise (call state, precondition) of the module's
+#       `correctness` theorem, and a returns witness must be that theorem's guarantee at a start state (WeakA..H);
+#       other `Witness.*` lemmas are not verifiable results.
+# One file (audit/round14/attacks/NewPairAttacks.lean), one verification of all its theorems (`--theorem` repeated).
+# Exits 1 if an attack verifies or a control stops verifying. Uses --fresh and a private temporary cache.
+set -u
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root" || exit 1
+export PATH=/usr/local/go/bin:$PATH
+R=audit/round14
+J="${JANUS_AUDIT_BIN:-$root/$R/bin/janus}"
+if [ -z "${JANUS_AUDIT_BIN:-}" ]; then mkdir -p "$(dirname "$J")"; go build -o "$J" ./cmd/janus || exit 1; fi
+if [ "${JANUS_AUDIT_PREBUILT:-}" != 1 ]; then
+  lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed"; exit 1; }
+  [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
+fi
+W=$R/work; rm -rf "$W"; mkdir -p "$W"
+T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round14.XXXXXX")" || exit 1
+trap 'rm -rf "$T"' EXIT
+mkdir -m 700 "$T/cache"; export JANUS_CACHE_DIR="$T/cache"
+. scripts/example-contracts.sh
+mapfile -t tg < <(scripts/example-targets.sh NewPair)
+"$J" extract artifacts/examples-arm64 "$(example_symbol NewPair)" "$W/NewPair" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
+broken=()
+P=Proof
+thms=(correctness Witness.nonvacuous Witness.returns bad1 bad2 bad3 bad4 bad5 bad6 bad7 bad8
+  WeakA.Witness.nonvacuous WeakB.Witness.nonvacuous WeakC.Witness.nonvacuous WeakD.Witness.nonvacuous
+  WeakE.Witness.nonvacuous WeakF.Witness.returns WeakG.Witness.returns WeakH.Witness.returns Witness.pre)
+targs=(); for t in "${thms[@]}"; do targs+=(--theorem "$P.$t"); done
+all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/NewPairAttacks.lean "$W/NewPair" "${targs[@]}" 2>&1)"
+# the block of one theorem: from its "=== NAME:" line to the next one
+blk() { awk -v n="=== $P.$1:" 'index($0,n)==1{p=1;print;next} /^=== /{p=0} p' <<<"$all"; }
+row() { # NAME expect(blocked|Verified) pattern...
+  local name=$1 expect=$2 out verdict status="" pat; shift 2
+  out="$(blk "$name")"
+  verdict="$(grep -m1 -E '^=== ' <<<"$out" | cut -c1-120)"
+  [ -n "$verdict" ] || { verdict="(no block)"; status=BROKEN; }
+  case $expect in
+    blocked) case $verdict in *verified*) status=BROKEN ;; esac ;;
+    Verified) case $verdict in *verified*) ;; *) status=BROKEN ;; esac ;;
+  esac
+  for pat in "$@"; do grep -qF -- "$pat" <<<"$out" || status=BROKEN; done
+  printf '  %-34s %-8s %s%s\n' "$name" "$expect" "$verdict" "${status:+   <-- BROKEN}"
+  [ -n "$status" ] && broken+=("$name")
+  return 0
+}
+echo "== V2: a main theorem quantifies the runtime implementation"
+row bad1 blocked 'round 14' 'may link only a variable'
+row bad2 blocked 'about the program'
+row bad3 blocked 'round 14'
+row bad4 blocked 'round 10 V1' 'impl'
+row bad5 blocked 'round 14'
+row bad6 blocked 'round 14'
+row bad7 blocked 'round 14'
+row bad8 blocked 'about the program'
+echo "== W2: witnesses have a checked shape"
+for w in WeakA WeakB WeakC WeakD WeakE; do row $w.Witness.nonvacuous blocked 'round 14, W2'; done
+for w in WeakF WeakG WeakH; do row $w.Witness.returns blocked 'round 14, W2'; done
+row Witness.pre blocked 'round 14, W2' 'lemma of a Witness namespace'
+echo "== controls"
+row correctness Verified 'Role: main theorem' 'Runtime contracts assumed: Janus.Contracts.NewobjectContract@runtime.newobject'
+row Witness.nonvacuous Verified 'Role: WITNESS' 'main theorem Proof.correctness'
+row Witness.returns Verified 'Role: WITNESS' 'main theorem Proof.correctness'
+echo
+if [ ${#broken[@]} -gt 0 ]; then echo "round 14: BROKEN rows: ${broken[*]}"; exit 1; fi
+echo "round 14: all rows as expected"
