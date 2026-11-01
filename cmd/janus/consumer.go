@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -477,6 +478,8 @@ type consumerWS struct {
 	// remove it meanwhile. Before, the lease ended when openWorkspace returned, and a concurrent
 	// writer made the auditor check fail ("changed after it was built").
 	baseLease *frameworkLease
+	// opened: openWorkspace finished (close then clears the busy marker, see beginUse).
+	opened bool
 }
 
 // janusLib is the workspace's framework library directory.
@@ -543,10 +546,19 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 		}
 		ws.lock = lk
 		gcPin(ws.Dir)
+		// A workspace whose previous holder died (killed, out of memory, power) may be half
+		// written: discard it and start from scratch (a partial workspace is a miss, never used).
+		if err := ws.beginUse(); err != nil {
+			ws.lock.unlock()
+			return nil, wsDiag(err)
+		}
 		touchUse(ws.Dir, ws.Dir+".lock")
 	}
 	ws.Root, ws.JanusDir, ws.DepsDir = filepath.Join(ws.Dir, "root"), filepath.Join(ws.Dir, "janus"), filepath.Join(ws.Dir, "deps")
+	// fail leaves the workspace marked busy (the next opener discards it) unless the failure is a
+	// deterministic rejection that leaves a consistent workspace (failClean).
 	fail := func(err error) (*consumerWS, error) { ws.close(); return nil, err }
+	failClean := func(err error) (*consumerWS, error) { ws.endUse(); ws.close(); return nil, err }
 
 	// The framework library comes from the trusted framework build (the cached base, or one
 	// built from scratch for --fresh), never from a build in the workspace: the workspace's copy
@@ -632,6 +644,10 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 			if err != nil {
 				continue
 			}
+			if _, err := os.Lstat(busyMarker(sib)); err == nil {
+				sibLock.unlock()
+				continue
+			}
 			if _, err := os.Stat(filepath.Join(sib, "deps", d.Info.Name, ".lake", "build")); err == nil {
 				if err := copyTree(filepath.Join(sib, "deps", d.Info.Name, ".lake", "build"), depBuild); err != nil {
 					_ = os.RemoveAll(depBuild)
@@ -696,7 +712,7 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	lr := &leanRunner{lake: lake, root: ws.JanusDir}
 	out, err := lr.run("build", "--no-ansi", "Extracted")
 	if err != nil {
-		return fail(&diag{Invalid: true, Msg: "Lean rejected the extracted program.\n" + summarizeLeanErrors(out, 2000), Stage: "extraction elaboration",
+		return failClean(&diag{Invalid: true, Msg: "Lean rejected the extracted program.\n" + summarizeLeanErrors(out, 2000), Stage: "extraction elaboration",
 			Next: "Check that the Janus framework matches this extractor version.", Details: out})
 	}
 	for _, m := range builtModules(out) {
@@ -707,11 +723,11 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	}
 	if out, err := runLean(&sandbox{mode: "none"}, tc, ws.JanusDir, nil, tc.leanPathEnv(ws.janusLib()), tc.lean, "--root="+ws.JanusDir,
 		filepath.Join(ws.JanusDir, "JanusTrusted.lean"), "-o", filepath.Join(ws.janusLib(), "JanusTrusted.olean")); err != nil {
-		return fail(&diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
+		return failClean(&diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
 			Stage: "extraction elaboration", Details: out})
 	}
 	if !samePins(basePins, ws.janusLib()) {
-		return fail(&diag{Invalid: true, Stage: "framework integrity",
+		return failClean(&diag{Invalid: true, Stage: "framework integrity",
 			Msg:  "Building Extracted changed the framework modules copied from the trusted framework build.",
 			Next: "Rerun with --fresh; if it persists, the framework build is not reproducible."})
 	}
@@ -722,7 +738,57 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	if !ws.temp {
 		touchUse(ws.Dir, ws.Dir+".lock")
 	}
+	ws.opened = true
 	return ws, nil
+}
+
+// busyMarker is the file next to a cached workspace (outside anything a sandbox can write) that
+// exists while a process is using it and is removed when that process closes it cleanly. It
+// survives a process that died (kill, out-of-memory kill, power loss) in the middle of copying,
+// syncing or building the workspace, and the next opener, which holds the workspace lock, then
+// discards the whole workspace and rebuilds it from scratch: a partially written workspace is a
+// cache miss, never used. The cache collector (cachegc.go) removes the marker with its entry.
+func busyMarker(dir string) string { return dir + ".busy" }
+
+// beginUse (the workspace lock is held) discards a workspace left busy by a dead process and
+// marks the workspace busy for this one.
+func (ws *consumerWS) beginUse() error {
+	busy := busyMarker(ws.Dir)
+	if _, err := os.Lstat(busy); err == nil {
+		if err := discardWorkspace(ws.Dir); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(ws.Dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(busy, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
+}
+
+// endUse marks the workspace consistent (not busy).
+func (ws *consumerWS) endUse() {
+	if !ws.temp {
+		_ = os.Remove(busyMarker(ws.Dir))
+	}
+}
+
+// discardWorkspace removes dir atomically as far as readers are concerned: it is renamed into a
+// trash directory of the same filesystem first (so nobody ever sees it half deleted) and deleted
+// afterwards. The caller holds the workspace lock.
+func discardWorkspace(dir string) error {
+	parent := filepath.Join(cacheRoot(), "v1", "tmp")
+	if err := os.MkdirAll(parent, 0o755); err == nil {
+		if t, err := os.MkdirTemp(parent, "gc-ws-"); err == nil {
+			defer os.RemoveAll(t)
+			if err := os.Rename(dir, filepath.Join(t, "ws")); err == nil || os.IsNotExist(err) {
+				return nil
+			}
+		}
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	return nil
 }
 
 // lockEntry takes the exclusive lock of the cache entry dir (blocking) and makes sure dir exists
@@ -769,6 +835,9 @@ func newestSibling(family, self string) (string, *fileLock) {
 		if _, err := os.Stat(filepath.Join(d, "root", ".lake", "build")); err != nil {
 			continue
 		}
+		if _, err := os.Lstat(busyMarker(d)); err == nil {
+			continue // left half written by a dead process: not a seed
+		}
 		if fi, err := os.Stat(d); err == nil && fi.ModTime().After(bestTime) {
 			best, bestTime = d, fi.ModTime()
 		}
@@ -777,6 +846,10 @@ func newestSibling(family, self string) (string, *fileLock) {
 		return "", nil
 	}
 	if lk, err := lockFile(best+".lock", false); err == nil {
+		if _, err := os.Lstat(busyMarker(best)); err == nil {
+			lk.unlock() // a dead process left it half written
+			return "", nil
+		}
 		return best, lk
 	}
 	return "", nil
@@ -785,6 +858,9 @@ func newestSibling(family, self string) (string, *fileLock) {
 func (ws *consumerWS) close() {
 	if ws == nil {
 		return
+	}
+	if ws.opened {
+		ws.endUse() // the workspace was consistent when it was last used: the next opener may reuse it
 	}
 	if ws.temp {
 		os.RemoveAll(ws.Dir)
