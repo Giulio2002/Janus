@@ -177,7 +177,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		printDiag(stderr, err)
+		if args[0] == "verify" || args[0] == "blockers" {
+			memGuardNotice(stderr)
+		}
 		return 1
+	}
+	if args[0] == "verify" || args[0] == "blockers" {
+		memGuardNotice(stderr)
 	}
 	return 0
 }

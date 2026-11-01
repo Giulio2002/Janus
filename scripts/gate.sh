@@ -93,6 +93,8 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/pool.sh"
 # shellcheck source=lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=lib/gate-decoder.sh
+. "$root/scripts/lib/gate-decoder.sh"
 # shellcheck source=lib/incr.sh
 . "$root/scripts/lib/incr.sh"
 memguard_self "$@"
@@ -307,7 +309,7 @@ printf '{"kind":"gate","commit":"%s","jobs":%s,"lanes":%s,"load1":%s,"memAvailGi
 [ -z "$autosized" ] || echo "gate: -j $jobs_n, $lanes_n lanes chosen automatically: $auto_why; audit rounds: ${rounds_lanes_n:-default} lanes
 gate: $auto_budget"
 echo "gate: $sha, pool -j $jobs_n, $lanes_n lanes, load $load1, MemAvailable $((memk / 1048576)) GiB, $(nproc) cores; logs and timeline in $out${partial:+; PARTIAL RUN (--only/--skip/--changed)}; lane-level incremental skipping $([ "${JANUS_INCR_LANES:-}" = 1 ] && echo 'ON (JANUS_INCR_LANES=1: EXPERIMENTAL, not cleared by a red team)' || echo 'OFF (default: every lane runs; set JANUS_INCR_LANES=1 to opt in)')"
-objc_state="$(scripts/asl.sh objcache-state 2>/dev/null | grep -v "^memguard" | tail -n 1)"; [ -n "$objc_state" ] || objc_state=UNKNOWN
+objc_state="$(scripts/asl.sh objcache-state 2>/dev/null | grep -v -E "^(memguard|janus: memory guard|janus-memguard)" | tail -n 1)"; [ -n "$objc_state" ] || objc_state=UNKNOWN
 echo "gate: object cache: $objc_state (a result with it ON is not merge evidence by itself: the pre-push cold gate, JANUS_ASL_CACHE=0, and the nightly audit are)"
 
 # ---- the prebuild stages (they are items of the same pool as the lanes: scripts/lib/dag.sh)
@@ -320,7 +322,7 @@ step() { # NAME CMD...: a prebuild step, logged and timed; returns its status
   return $rc
 }
 # JanusTests and janus-oracle-amd64 are built by CI (.github/workflows/ci.yml) and are not default Lake targets
-pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit && memguard_lake build JanusTests janus-oracle janus-oracle-amd64 janus-decode janus-testfloat; }
+pre_lake() { memguard_lake build && memguard_lake build Janus Janus.Tools.Audit janus-audit && memguard_lake build JanusTests janus-oracle janus-oracle-amd64 janus-decode janus-testfloat && gate_save_decoder "$root"; }
 pre_gobin() { CGO_ENABLED=0 go build -o bin/janus ./cmd/janus; }
 pre_rounds_bin() { mkdir -p audit/bin && cp -f bin/janus audit/bin/janus-rounds.new && mv -f audit/bin/janus-rounds.new audit/bin/janus-rounds; }
 # The go tests' prebuilt framework fixture (cmd/janus/fixture_test.go, docs/TESTING.md "Go tests"): built here, once, by
@@ -436,7 +438,7 @@ addc x86 "$(laneenv "$tree_x86") cd '$tree_x86' && scripts/x86formal.sh prove"
 # CI checks that the gate used to lack (docs/TESTING.md "CI vs gate"): go vet, the JanusASL cache-key tests, the
 # decoder coverage of the arm64 examples, the quick differential oracles (qemu / native), and `asl.sh verify`
 add govet "go vet ./..."
-add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && JanusASL/tools/test_asl_obj_cache.sh && scripts/lib/test-nightly-objcache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh"
+add cachekeys "JanusASL/tools/test_asl_cache.sh && JanusASL/tools/test_asl_mod_cache.sh && JanusASL/tools/test_asl_obj_cache.sh && scripts/lib/test-nightly-objcache.sh && scripts/lib/test-modelpin.sh && scripts/lib/test-incr-liveness.sh && scripts/lib/test-incr-hosttools.sh && scripts/lib/test-verdict-banner.sh && scripts/lib/test-gate-decoder.sh"
 add decoder "BLOCKERS_OUT='$out/decoder' scripts/decoder-coverage.sh"
 add oracle "$(laneenv "$tree") cd '$tree' && for s in oracle oracle-amd64; do O='$out/'\$s; mkdir -p \"\$O\"; OUT=\"\$O\" KEEP=1 JOBS=4 scripts/\$s.sh quick || exit 1; ! grep -q '\"verdict\":\"MISMATCH\"' \"\$O/verdicts.jsonl\" || { cat \"\$O/repro.md\"; exit 1; }; done" "$(needs rtasl-prove)"
 # asl-verify waits for asl-build only to find the ArmASL model in the build cache (asl-build builds and publishes it, and the

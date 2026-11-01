@@ -14,6 +14,8 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/parallel.sh"
 # shellcheck source=../scripts/lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=../scripts/lib/verdict.sh
+. "$root/scripts/lib/verdict.sh"
 memguard_self "$@"
 par_init "$@"
 J="$root/audit/bin/janus"
@@ -45,11 +47,12 @@ row() {
     Verified|Verified-honest|mitigated) case "$3" in Verified*) ;; *) status=BROKEN ;; esac ;;
     ok) case "$3" in *"depends on axioms"*) ;; *) status=BROKEN ;; esac ;;
   esac
+  case "$3" in NOVERDICT*) [ "$2" = ok ] || status=BROKEN ;; esac
   printf '%-28s %-8s %s%s\n' "$1" "$2" "$3" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$1")
   return 0
 }
-v() { "$J" verify --janus-root "$root" "$@" 2>&1 | head -1; }
+v() { "$J" verify --janus-root "$root" "$@" 2>&1 | verdict_line; }
 
 echo "attack                       expect   result"
 # F1/F2 fixes: these attacks are now rejected (Invalid) by the sandbox, the trusted janus-audit
@@ -108,7 +111,7 @@ par_run 'row B1_neverpanics_fault blocked "$(v --proof audit/specs/B1_neverpanic
 par_run 'row B1_refuted Verified "$(v --proof audit/specs/B1_refuted.lean $W/Add256)"'
 par_run 'if lake env lean audit/specs/B2_exit_sentinel.lean >/dev/null 2>&1; then b2=accepted; else b2="rejected (does not compile)"; fi
 row B2_exit_sentinel blocked "$b2"'
-par_run 'row B2_refuted ok "$(lake env lean audit/specs/B2_refuted.lean 2>&1 | head -1)"'
+par_run 'row B2_refuted ok "$(lake env lean audit/specs/B2_refuted.lean 2>&1 | lean_first)"'
 for n in Add Add256 Get; do
   par_run 'row "control:${n}_witness" Verified "$(v --proof audit/controls/${n}_witness.lean $W/$n)"'
 done
@@ -121,7 +124,7 @@ rm -rf $C; mkdir -p $C
 cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle .lake $C/
 cp audit/attacks/C1_fake_Extracted.lean $C/Extracted.lean
 (cd $C && lake env lean -o .lake/build/lib/lean/Extracted.olean Extracted.lean && rm Extracted.lean)
-row C1_shadow_library blocked "$("$J" verify --janus-root $C --proof audit/attacks/C1_proof.lean $W/Add 2>&1 | head -1)"
+row C1_shadow_library blocked "$("$J" verify --janus-root $C --proof audit/attacks/C1_proof.lean $W/Add 2>&1 | verdict_line)"
 rm -rf $C'
 
 # C2: the TOCTOU on a shared .janus-build no longer exists. Each verify uses a fresh private
@@ -183,7 +186,7 @@ cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean
 cp -a .lake/build $F/.lake/
 { echo "import Lean"; cat Janus/GoABI.lean audit/attacks/R1_forged_lemma.lean; } > $F/forge/Janus/GoABI.lean
 (cd $F && lake env lean --root=forge -o .lake/build/lib/lean/Janus/GoABI.olean forge/Janus/GoABI.lean >/dev/null && rm -rf forge)
-row R1b_forged_lemma blocked "$("$J" verify --janus-root $F --proof audit/attacks/R1_forged_proof.lean $W/Add 2>&1 | head -1)"
+row R1b_forged_lemma blocked "$("$J" verify --janus-root $F --proof audit/attacks/R1_forged_proof.lean $W/Add 2>&1 | verdict_line)"
 rm -rf $F'
 # R1 proof-overwrite: a proof whose #eval corrupts the framework build on LEAN_PATH (a throwaway
 # --janus-root copy). Sandboxed the write fails and the honest theorem verifies; unsandboxed
@@ -194,7 +197,7 @@ for ns in "" --unsafe-no-sandbox; do
   rm -rf $O; mkdir -p $O/.lake
   cp -a lakefile.toml lake-manifest.json lean-toolchain Janus.lean JanusTests.lean Janus JanusTests Oracle $O/
   cp -a .lake/build $O/.lake/
-  res="$("$J" verify --janus-root $O --proof audit/attacks/R1_proof_overwrite.lean $W/Add $ns 2>&1 | head -1)"
+  res="$("$J" verify --janus-root $O --proof audit/attacks/R1_proof_overwrite.lean $W/Add $ns 2>&1 | verdict_line)"
   if [ -z "$ns" ]; then row R1_proof_overwrite mitigated "$res"; else row R1_proof_overwrite_nosandbox blocked "$res"; fi
   rm -rf $O'
 done

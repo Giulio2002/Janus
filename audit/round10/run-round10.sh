@@ -16,7 +16,10 @@ export PATH=/usr/local/go/bin:$PATH
 R=audit/round10
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit janus-audit janus-decode janus-oracle-amd64 >/dev/null || { echo "lake build failed"; exit 1; }
+lb="$(lake build Janus Janus.Tools.Audit janus-audit janus-oracle-amd64 2>&1)" || { echo "lake build failed:"; tail -30 <<<"$lb"; exit 1; }
+# janus-decode: see scripts/lib/gate-decoder.sh (inside the gate it is the one pre-lake saved; a missing one fails here)
+. "$root/scripts/lib/gate-decoder.sh"
+DEC="$(gate_decoder "$root")" || exit 1
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 [ -d artifacts/amd64/Box ] || bash scripts/build-examples-amd64.sh >/dev/null 2>&1
 W=$R/work/rows; rm -rf "$W"; mkdir -p "$W"
@@ -181,7 +184,7 @@ if [ "$(uname -m)" = x86_64 ]; then
   [ -n "$mm" ] && [ "$mm" = 0 ] && [ "${nc:-0}" -gt 40000 ]
   check X1_v3_sse_boundary_encodings $? "prefix/VEX/#UD/MXCSR/FMA boundary cases vs this CPU: ${nc:-?} cases, MISMATCH ${mm:-?}"
 fi
-o="$(python3 -I $R/crypto/decodecmp.py $R/crypto/clauses.json .lake/build/bin/janus-decode "$T" 2>&1)"
+o="$(python3 -I $R/crypto/decodecmp.py $R/crypto/clauses.json "$DEC" "$T" 2>&1)"
 bad="$(grep -c '^BAD\|^GAP' "$T/decodecmp.txt" 2>/dev/null)"; words="$(sed -n 's/^words //p' "$T/decodecmp.txt" 2>/dev/null)"
 [ "${words:-0}" -gt 2000000 ] && [ "${bad:-1}" = 0 ]
 check C1_arm64_crypto_decode_vs_asl $? "janus-decode vs the sail-arm v9.4 decode clauses on ${words:-?} words of the SIMD/FP and register groups: ${bad:-?} disagreements"

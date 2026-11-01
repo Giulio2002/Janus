@@ -118,18 +118,32 @@ func resetMemGuardForTest() {
 	guardLogged = sync.Once{}
 }
 
-// logMemGuard prints, once per process, which mechanism is active.
+// logMemGuard prints, once per process, which mechanism is active, but only when asked
+// (JANUS_MEMGUARD_VERBOSE=1 or JANUS_MEMGUARD_LOG=1). It never prints by default: stderr starts
+// with the verdict, and row scripts parse it. A missing guard (mechanism "none") is a
+// security-relevant notice, so it is printed AFTER the verdict by memGuardNotice instead.
 func logMemGuard(w io.Writer) {
-	if w == nil {
+	if w == nil || (os.Getenv("JANUS_MEMGUARD_VERBOSE") == "" && os.Getenv("JANUS_MEMGUARD_LOG") == "") {
 		return
 	}
 	g := currentGuard()
 	guardLogged.Do(func() {
-		// Only a missing guard is worth a line by default (stderr starts with the verdict);
-		// JANUS_MEMGUARD_VERBOSE=1 or JANUS_MEMGUARD_LOG=1 always names the mechanism.
-		if g.mech != "none" && os.Getenv("JANUS_MEMGUARD_VERBOSE") == "" && os.Getenv("JANUS_MEMGUARD_LOG") == "" {
-			return
-		}
+		fmt.Fprintf(w, "janus: memory guard: %s\n", g.describe())
+	})
+}
+
+// memGuardNotice prints, after the verdict (and after any diagnostic), the notice that no memory
+// limit was enforced (mechanism "none"). Same text as the verbose line, so it is never silent;
+// verified.json records the mechanism too.
+func memGuardNotice(w io.Writer) {
+	if w == nil {
+		return
+	}
+	g := currentGuard()
+	if g.mech != "none" {
+		return
+	}
+	guardLogged.Do(func() {
 		fmt.Fprintf(w, "janus: memory guard: %s\n", g.describe())
 	})
 }
