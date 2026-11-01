@@ -47,7 +47,8 @@ row() {
     Verified|Verified-honest|mitigated) case "$3" in Verified*) ;; *) status=BROKEN ;; esac ;;
     ok) case "$3" in *"depends on axioms"*) ;; *) status=BROKEN ;; esac ;;
   esac
-  case "$3" in NOVERDICT*) [ "$2" = ok ] || status=BROKEN ;; esac
+  # no verdict at all, or contradictory verdicts (scripts/lib/verdict.sh): never the expected outcome, whatever the row expects
+  case "$3" in NOVERDICT*|AMBIGUOUS*) status=BROKEN ;; esac
   printf '%-28s %-8s %s%s\n' "$1" "$2" "$3" "${status:+   <-- BROKEN}"
   [ -n "$status" ] && broken+=("$1")
   return 0

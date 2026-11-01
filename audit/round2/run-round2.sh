@@ -12,6 +12,8 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/parallel.sh"
 # shellcheck source=../../scripts/lib/memguard.sh
 . "$root/scripts/lib/memguard.sh"
+# shellcheck source=../../scripts/lib/verdict.sh
+. "$root/scripts/lib/verdict.sh"
 memguard_self "$@"
 par_init "$@"
 J="$root/audit/round2/bin/janus"
@@ -25,7 +27,7 @@ W=audit/round2/work; mkdir -p $W
 "$J" extract artifacts/examples-arm64 example.com/basic.Add $W/Add >/dev/null || exit 1
 
 v() { "$J" verify --janus-root "$root" "$@" 2>&1; }
-line() { v "$@" | grep -E 'Verified:|Invalid' | head -1; }
+line() { v "$@" | verdict_line; }
 broken=()
 
 s1_header() {
@@ -37,16 +39,17 @@ echo "Expected now: Invalid at Stage: statement identity (inline instance / does
 s1_row() {
   local a=$1 out r st
   out="$(v --proof audit/round2/attacks/$a.lean $W/Add)"
-  r="$(grep -m1 -E '^(Verified|Invalid)' <<<"$out" | cut -c1-110)"
+  r="$(verdict_line <<<"$out" | cut -c1-110)"
   st="$(grep -m1 'Stage:' <<<"$out" | sed 's/.*Stage: //')"
   printf '  %-20s %s [%s]\n' "$a" "$r" "$st"
-  case "$r" in Verified*) echo "      >>> BROKEN: binary adds, statement says otherwise, yet Verified."; broken+=("$a") ;; esac
+  case "$r" in Verified*) echo "      >>> BROKEN: binary adds, statement says otherwise, yet Verified."; broken+=("$a") ;;
+    NOVERDICT*|AMBIGUOUS*) echo "      >>> BROKEN: no single verdict."; broken+=("$a") ;; esac
 }
 m1_block() {
 echo
 echo "== M1: Lean module-system proof (blocked on the single-file path) =="
 r="$(line --proof audit/round2/attacks/M1_module_system.lean $W/Add)"; echo "  $r"
-case "$r" in Verified*) broken+=(M1) ;; esac
+case "$r" in Verified*|NOVERDICT*|AMBIGUOUS*) broken+=(M1) ;; esac
 
 echo
 echo "== Positive controls (must elaborate with only propext/Quot.sound/Classical.choice) =="
@@ -75,8 +78,8 @@ echo
 echo "== MEDIUM-1 (amd64 DF): see audit/round2/amd64/README.txt; with artifacts/examples-amd64 built:"
 if [ -f artifacts/examples-amd64 ]; then
   "$J" extract artifacts/examples-amd64 example.com/basic.CopyBlock $W/amd64-CopyBlock >/dev/null &&
-  df_out=$(v --proof audit/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | grep -m1 -E '^(Verified|Invalid|Error)')
-  echo "$df_out"; [ -n "$df_out" ] || broken+=(DF-noverdict)
+  df_out=$(v --proof audit/round2/amd64/controls/DFMemmove.lean --theorem DFRepro.memmove_backward_rep_copies_forward $W/amd64-CopyBlock | verdict_line)
+  echo "$df_out"; case "$df_out" in NOVERDICT*|AMBIGUOUS*) broken+=(DF-noverdict) ;; esac
 fi
 echo "(MEDIUM-1 is fixed: amd64 models DF. This repro's concrete state t leaves df at its default"
 echo " false, and with DF = 0 a forward copy is correct, so the theorem is now true and honest about"

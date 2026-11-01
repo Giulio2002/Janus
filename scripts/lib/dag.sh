@@ -89,6 +89,7 @@ DAG_RES=(
   [bin/janus]="w:pre-gobin w:pre-ex-amd64 r:pre-stamp r:pre-warm r:pre-rounds-bin r:verify r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [framework-build]="w:pre-lake w:pre-stamp r:pre-pin r:pre-warm r:pre-fixture r:verify r:gotest r:rounds r:decoder r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [audit/bin/janus-rounds]="w:pre-rounds-bin r:rounds"
+  [audit/bin/janus-decode-gate]="w:pre-lake r:rounds"
   [go-test-fixture]="w:pre-fixture-emb w:pre-fixture r:gotest r:rtasl-go r:rounds"
   [examples-arm64]="w:pre-ex-arm64 r:pre-stamp r:pre-warm r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
   [examples-amd64]="w:pre-ex-amd64 r:verify r:rounds r:tree-x86 r:tree-asl r:tree-aslv r:tree-go"
