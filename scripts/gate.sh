@@ -103,10 +103,31 @@ memguard_self "$@"
 # independent processes that need no pool slot of their own, and the lane is the gate's critical path: the whole package is
 # ~3700 s of work, ~470 s for its longest test, so 2 shards (the old "-j 2" default) made the lane 1860-2950 s and 6 make it
 # ~500-700 s (docs/TESTING.md "go test shards"). Peak memory is ~44 GiB for six (each shard under its own memguard job).
+# Memory adaptation: each shard peaks at 8-14 GiB (measured 2026-11-01: 13.8 / 11.6 / 10.1 / 11.3 / 10.9 / 8.3 GiB for six, 66 GiB
+# together; the nightly extras add 17 + 3 GiB), so the count is also capped by (free - 40 GiB reserve [- 20 GiB extras]) / 14 GiB,
+# where free is the smaller of MemAvailable and the free room of the enclosing cgroup chain (memcap / memguard). Never below 2 (the
+# old behaviour) and never below -j N. JANUS_GOTEST_SHARD_MEM (GiB per shard, default 14) tunes it.
+gotest_free_gib() {
+  local kb p lim cur min d
+  kb=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null); min=$(( ${kb:-0} / 1048576 ))
+  p=$(awk -F: '$1 == 0 { print $3 }' /proc/self/cgroup 2>/dev/null); d="/sys/fs/cgroup$p"
+  while [ -n "$p" ] && [ "$d" != /sys/fs ] && [ -d "$d" ]; do
+    lim=$(cat "$d/memory.max" 2>/dev/null || echo max); cur=$(cat "$d/memory.current" 2>/dev/null || echo 0)
+    case "$lim" in ''|max) ;; *) [ "$(( (lim - cur) / 1073741824 ))" -ge "$min" ] 2>/dev/null || min=$(( (lim - cur) / 1073741824 )) ;; esac
+    d=$(dirname "$d")
+  done
+  echo "$min"
+}
 gotest_shards_n() {
-  local sh=${JANUS_GATE_GOTEST_SHARDS:-6} j=${jobs_n:-2}
+  local sh=${JANUS_GATE_GOTEST_SHARDS:-6} j=${jobs_n:-2} per=${JANUS_GOTEST_SHARD_MEM:-14} free ex=0 cap
   [ "$sh" -ge 1 ] 2>/dev/null || sh=6
   [ "$j" -ge 1 ] 2>/dev/null || j=2
+  [ "$per" -ge 1 ] 2>/dev/null || per=14
+  if [ -z "${JANUS_GATE_GOTEST_SHARDS:-}" ]; then   # an explicit count is taken as given (still >= 2 and <= 8)
+    free=$(gotest_free_gib); [ "${JANUS_NIGHTLY:-}" != 1 ] || ex=20
+    cap=$(( (free - 40 - ex) / per ))
+    [ "$sh" -le "$cap" ] || sh=$cap
+  fi
   [ "$sh" -ge "$j" ] || sh=$j
   [ "$sh" -ge 2 ] || sh=2
   [ "$sh" -le 8 ] || sh=8

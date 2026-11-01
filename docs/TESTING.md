@@ -117,6 +117,24 @@ lemma and the late replay that reports it, `TestResultCache`, `TestConcurrentVer
 (`-j N` clamped to 2..6): with them no shard is longer than the longest test (469 s planned; measured 295-471 s per shard,
 472 s wall, peak 4.8-12.3 GiB per shard, 44 GiB for the six).
 
+**gotest lane speed and coverage (2026-11-01, `agent/speed-gotestcp3`).** The 2953 s of the old nightly-env lane were two things: only
+2 shards (`-j 2` set the shard count; the package is ~3700 s of work on an idle box) and a `-v` time that, with `-parallel 1`, includes
+the wait for a slot (TestConsumerMathlib "took 2152 s" while it SKIPPED at once). Now: `gotest_shards_n` in `scripts/gate.sh` uses
+6 shards (`JANUS_GATE_GOTEST_SHARDS`; never fewer than `-j N`), capped by free memory (MemAvailable and the enclosing cgroup chain, minus
+a 40 GiB reserve, 20 GiB more in the nightly for the extras, over 14 GiB per shard; measured shard peaks 8.3-13.8 GiB, 66 GiB for six);
+the real-framework forgery check is four tests (`..._Janus`, `_GoABI`, `_Tactic`, `_Amd64Tactic`, same assertions, one module each);
+`testDurations` was remeasured. The kernel replays are the floor: `TestCacheGCConcurrentVerify`, `TestR1ForgedFrameworkLemma`,
+`TestParallelFrameworkReplayMatchesSingleProcess` each hold a slot for 430-940 s at host load 30-90 (a replay is 2 workers x 2 threads
+inside a 24 GiB job).
+Extras (nightly, `JANUS_NIGHTLY=1` or `JANUS_GOTEST_EXTRAS=1`): `TestReplayUnderMemoryPressure` (own run under a 20 GiB memguard job,
+`JANUS_PRESSURE_TEST=1`) and `TestConsumerMathlib` (`JANUS_TEST_MATHLIB=1`, persistent cache and package directory under
+`~/.cache/janus-test-mathlib-<key>`, key = sha256 of checkout path, toolchain and Mathlib revision: another key is a cold build;
+lake and janus re-check what is inside, a corrupt entry rebuilds or fails, never passes; cold 146 s). Both must PASS or the lane fails.
+Every other skip is printed as `SKIPPED-COVERAGE: ... NOT RUN <test>: <reason>` (also in `<out>/gotest/skips-report.txt`) and the run
+is not recorded. The "memory controller is not enabled for children" line printed by `janus memguard` is the cgroup mechanism being
+passed over for `systemd-user` (a delegated scope whose leaf holds the leader process cannot enable controllers for children); the
+limit is still enforced, it is not a skipped test.
+
 **Which parallel-replay test runs where.** Merge gates: mini variants (`...CatchesForgeryInEveryPartition`, `...MatchesSingleProcessMini`), `...MatchesSingleProcess` (real), the three `...E2E...` tests, `TestR1ForgedFrameworkLemma`. Nightly cold + cached gates (`JANUS_NIGHTLY=1`): all of those plus `...CatchesForgeryInEveryPartitionReal`.
 
 **Parallel-replay tests (2026-11-01).** In the nightly of 835cb0eb the `gotest` lane took ~2000 s because the parallel-replay
