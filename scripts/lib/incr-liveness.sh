@@ -37,6 +37,14 @@ fi
 # the two kinds of key: an item (arm64:Add) and a lane (scripts/lib/incr.sh incr_lane_spec: the whole non-documentation tree, go env, ...)
 item_spec=(incr explain --id arm64:Add --kind arm64 --no-fw --proof examples/proofs/Add.lean --arg sym:Add)
 . "$root/scripts/lib/incr.sh"
+# ASL_CACHE is keyed by the digest of the files below it (incr-host.sh _ih_tree). A cache above IH_MAX_FILES/IH_MAX_BYTES (the real
+# /srv/janus-asl-cache is) has, BY DESIGN, a random digest on every call (a forced miss: never a false hit), so two invocations with the
+# same environment legitimately differ. That is not a leaked run-specific variable: say so and run the check without ASL_CACHE (it is
+# a keyed constant, so nothing it could leak is lost).
+if [ -n "${ASL_CACHE-}" ] && [ "$(_ih_tree "$ASL_CACHE")" != "$(_ih_tree "$ASL_CACHE")" ]; then
+  echo "incr-liveness: note: ASL_CACHE=$ASL_CACHE is above the key size limits (a forced miss by design, a new random digest on every call): checking with ASL_CACHE unset" >&2
+  unset ASL_CACHE
+fi
 kind=item
 # key ENV...: the key of the item under the current environment with the given NAME=value pairs changed (a private result-cache
 # directory: nothing shared is read or created)

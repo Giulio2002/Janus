@@ -28,7 +28,11 @@ chk 1 "${LEAKS[@]}" &
 chk 2 JANUS_GATE_TREE0="stamp$RANDOM" JANUS_LAKEGUARD_PIN="/out/run$RANDOM/.pinned" JANUS_GATE_AUTO_WHY="load $RANDOM" LEAN_NUM_THREADS=4 SOME_OTHER_RUN_VAR="$RANDOM" &
 # 3: the check itself, in the environment it runs in (inside the gate: the gate's real exports)
 ( scripts/lib/incr-liveness.sh > "$t/out3" 2>&1; echo $? > "$t/rc3" ) &
+# 4: an ASL_CACHE above the key size limits (a forced miss by design: a random digest per call) is not a leaked variable
+mkdir -p "$t/aslc"; for i in 1 2 3; do echo "$i" > "$t/aslc/f$i"; done
+( IH_MAX_FILES=1 ASL_CACHE="$t/aslc" scripts/lib/incr-liveness.sh > "$t/out4" 2>&1; echo $? > "$t/rc4" ) &
 wait
+[ "$(cat "$t/rc4")" = 0 ] && grep -q 'forced miss by design' "$t/out4" && ok "an oversized ASL_CACHE (random digest by design): noted, not a false alarm" || bad "oversized ASL_CACHE: $(cat "$t/out4")"
 [ "$(cat "$t/rc1")" = 1 ] && ok "leaked keyed variables: the check fails" || bad "leaked keyed variables not caught: $(cat "$t/out1")"
 for kv in "${LEAKS[@]}"; do
   grep -q "keyed and run-specific: ${kv%%=*} " "$t/out1" && ok "  ${kv%%=*} is named" || bad "  ${kv%%=*} is not named: $(cat "$t/out1")"
