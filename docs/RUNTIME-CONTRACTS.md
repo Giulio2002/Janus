@@ -35,8 +35,21 @@ The contracts appear in three places:
 * `identity.json`: `contractPatterns` (the patterns as given) and `contracts` (name, address);
   `janus check` / `janus verify` regenerate the extraction with the recorded patterns and compare
   both files byte for byte;
-* `verified.json`: `contracts` (`"name @ address"`); `janus verify` prints
-  `Runtime contracts assumed: …` and `janus explain` prints `runtime contracts assumed: …`.
+* `verified.json`: `contracts` (`"name @ address"`, the functions the extraction left out) and, since
+  round 14, `contractHyps` (`"NewobjectContract@runtime.newobject"`, the contracts the audited
+  STATEMENT applies), `role` and `matchedMain`. `janus verify` prints `Runtime contracts assumed: …`
+  from the STATEMENT (`contractHyps`), never from the extraction alone: a theorem that applies no
+  contract hypothesis prints `Runtime contracts assumed: none`, plus `Extracted without code, NO
+  contract hypothesis in the statement: …` for each left-out function. `janus explain` prints the same.
+
+**Who chooses the runtime (round 14).** A verified (non-`Witness`) theorem quantifies the runtime:
+the implementation is `Extracted.program.link impl` for a variable `impl` bound by the theorem and
+constrained only by the pinned contracts and model laws. A consumer cannot state the guarantee for an
+allocator of its own (`Extracted.program.link Witness.AllocW.impl`, `link []`, a program built with
+`{ Extracted.program with … }`, an `∃ impl` inside the statement): the audit rejects it, so a report
+never reads "contract assumed" for a theorem that assumed nothing. Concrete implementations belong in
+`Witness.nonvacuous` / `Witness.returns`, which are checked structurally and reported as `Role: WITNESS`
+(docs/SOUNDNESS.md, "Round 14").
 
 The list does not change the run semantics. There is no code at a contract address in
 `Extracted.program.segments`, so control reaching it faults with `noCode`, exactly as for a
