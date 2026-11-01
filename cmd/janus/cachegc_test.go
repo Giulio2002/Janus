@@ -922,3 +922,6 @@ func TestRestampLib(t *testing.T) { runLibSelfTest(t, "test-restamp.sh") }
 // TestDagLib: the gate's stage graph: a stage starts after its dependencies, independent stages overlap, a failure blocks
 // exactly its dependents.
 func TestDagLib(t *testing.T) { runLibSelfTest(t, "test-dag.sh") }
+
+// TestFixtureWaitLib: go test -list never waits for the fixture; a run that finds the fixture lock held says so.
+func TestFixtureWaitLib(t *testing.T) { runLibSelfTest(t, "test-fixture-wait.sh") }

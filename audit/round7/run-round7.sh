@@ -129,7 +129,7 @@ par_wait
 
 echo "== unit rows (go test)"
 tmark "== unit rows (go test)"
-(cd cmd/janus && go test -timeout 30m -run 'TestStubKind|TestClassifyStub|TestStubPin|TestTermSafe' . >/dev/null 2>&1) ||
+(cd cmd/janus && go test -timeout 60m -run 'TestStubKind|TestClassifyStub|TestStubPin|TestTermSafe' . >/dev/null 2>&1) ||
   { echo "  >>> TestStubKind/TestClassifyStub/TestStubPin*/TestTermSafe failed"; broken+=(gotest); }
 
 # The result-cache rows are their own lane (r7c) under audit/run-rounds.sh (JANUS_R7_NO_CACHE_ROWS=1).

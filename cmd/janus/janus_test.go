@@ -153,7 +153,13 @@ func TestMain(m *testing.M) {
 	}
 	// The framework build and replay verdicts: from the prebuilt fixture (fixture_test.go), built once per
 	// framework version; else straight from the user's cache (JANUS_TEST_FIXTURE_DIR=off).
-	if !testing.Short() {
+	// `go test -list` only lists: it must not build, seed or wait for the fixture (the gate's lister ran behind the fixture lock for
+	// the whole default 10 min timeout while the fixture was being rebuilt)
+	listing := false
+	if f := flag.Lookup("test.list"); f != nil && f.Value.String() != "" {
+		listing = true
+	}
+	if !testing.Short() && !listing {
 		if _, err := findLake(); err == nil {
 			seedSrc := os.Getenv("JANUS_TEST_SEED_CACHE")
 			if seedSrc == "" {
