@@ -33,7 +33,7 @@ broken=()
 P=Proof
 thms=(correctness Witness.nonvacuous Witness.returns bad1 bad2 bad3 bad4 bad5 bad6 bad7 bad8 bad9 bad10 bad11
   WeakA.Witness.nonvacuous WeakB.Witness.nonvacuous WeakC.Witness.nonvacuous WeakD.Witness.nonvacuous
-  WeakE.Witness.nonvacuous WeakF.Witness.returns WeakG.Witness.returns WeakI.Witness.returns WeakH.Witness.returns Witness.pre)
+  WeakE.Witness.nonvacuous WeakF.Witness.returns WeakG.Witness.returns WeakI.Witness.returns WeakH.Witness.returns HideA.Witness.guarantee HideB.Witness.returns Witness.pre)
 targs=(); for t in "${thms[@]}"; do targs+=(--theorem "$P.$t"); done
 all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/NewPairAttacks.lean "$W/NewPair" "${targs[@]}" 2>&1)"
 # the block of one theorem: from its "=== NAME:" line to the next one
@@ -67,6 +67,8 @@ row bad11 blocked 'round 14'
 echo "== W2: witnesses have a checked shape"
 for w in WeakA WeakB WeakC WeakD WeakE; do row $w.Witness.nonvacuous blocked 'round 14, W2'; done
 for w in WeakF WeakG WeakI WeakH; do row $w.Witness.returns blocked 'round 14, W2'; done
+row HideA.Witness.guarantee blocked 'lemma of a Witness namespace'
+row HideB.Witness.returns blocked 'round 14, W2' 'Returns'
 row Witness.pre blocked 'round 14, W2' 'lemma of a Witness namespace'
 echo "== controls"
 row correctness Verified 'Role: main theorem' 'Runtime contracts assumed: Janus.Contracts.NewobjectContract@runtime.newobject'

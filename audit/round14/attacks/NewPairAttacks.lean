@@ -303,6 +303,23 @@ theorem returns : Returns ((Extracted.program.link AllocW.impl).withExit ret) s0
   Returns.mono Proof.Witness.returns fun _ h => ⟨h.1, trivial⟩
 end WeakI.Witness
 
+namespace HideA.Witness
+/-- a MAIN guarantee (quantified runtime, honest contract hypothesis) hidden in a `Witness` namespace under another
+name: a lemma of a witness namespace is not a verifiable result, so it cannot be the theorem reported as Verified. -/
+theorem guarantee (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hnew : NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (NPre rt H) (fun _ _ => True) := sorry
+end HideA.Witness
+
+namespace HideB.Witness
+/-- the same guarantee under the exact name `Witness.returns`: not a `Returns` statement about a start state. -/
+theorem returns (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hnew : NewobjectContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (NPre rt H) (fun _ _ => True) := sorry
+end HideB.Witness
+
 namespace WeakH.Witness
 /-- `returns` that is not a Returns statement. -/
 theorem returns : Extracted.program = Extracted.program := rfl
