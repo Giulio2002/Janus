@@ -19,8 +19,16 @@ wraps.
   If `L` is known to lie in `[0, k)` (by interval arithmetic), `a / k = Y` and `a % k = L`;
   otherwise `a / k = D_j + Y` and `a % k = L - k·D_j` for the table entry `D_j = L / k`.
   This merges the two halves of a carry: `p / B + (z + p % B) / B` becomes `(p + z) / B`;
+  nested floors are flattened (`flatQ`): a quotient atom `D = ⌊L_j / k_j⌋` with coefficient 1 in the
+  numerator `a + D` of a new quotient `⌊(a + D) / k⌋` is expanded to `⌊(k_j·a + L_j) / (k_j·k)⌋`
+  (`⌊(a + ⌊b/B⌋)/C⌋ = ⌊(B·a + b)/(B·C)⌋`), so the chain of carries of a schoolbook multiplication is
+  one quotient of the polynomial of the products by a power of `2^64`, the same atom as the carry
+  out of the low half of the product;
 * every subterm also gets an interval (from its structure and from its normal form), which
-  is what shows that a carry `hi + c₁ + c₂` is below `2^64`.
+  is what shows that a carry `hi + c₁ + c₂` is below `2^64`. A difference of two quotient atoms of
+  one modulus `k` is bounded by `[⌊lo/k⌋, ⌈hi/k⌉]` for the interval `[lo, hi]` of the difference of
+  their numerators, which is itself refined the same way (`civF`: differences of carries inside the
+  numerators of carries).
 
 The two sides are equal if their normal forms are equal, or if their difference is a multiple
 `g·Z` (with `g` the gcd of its coefficients) and both sides lie in `[0, g)`: this closes
@@ -244,21 +252,23 @@ def findPair (c : Ctx) (all : Poly) : Poly → Option (Nat × Poly × Nat × Pol
          | none => findPair c all p)
     | _ => findPair c all p
 
-/-- `L_j / k - L_i / k` lies in `[⌊lo/k⌋, ⌊hi/k⌋ + 1]` for `L_j - L_i ∈ [lo, hi]`. -/
-def pairIv (c : Ctx) (Li Lj : Poly) (k : Nat) : Iv :=
-  let I := polyIv (c.iv) (Lj.sub Li)
-  ⟨omap (· / (k : Int)) I.lo, omap (fun h => h / (k : Int) + 1) I.hi⟩
+/-- `a / k - b / k` lies in `[⌊lo/k⌋, ⌈hi/k⌉]` for `a - b ∈ [lo, hi]`, `k > 0`. -/
+def pairIvOf (I : Iv) (k : Nat) : Iv :=
+  ⟨omap (· / (k : Int)) I.lo, omap (fun h => (h + (k : Int) - 1) / (k : Int)) I.hi⟩
 
 /-- The interval of a normal form, refined by differences of quotient atoms: a carry minus
-the carry of a smaller sum (`(a + b) / k - a / k`) is bounded by `b / k + 1`, which the
-intervals of the two atoms alone do not show. -/
+the carry of a smaller sum (`(a + b) / k - a / k`) is bounded by `⌈b / k⌉`, which the
+intervals of the two atoms alone do not show. The interval of `L_j - L_i` is itself refined
+(`civF` with the smaller fuel), so differences of carries inside the numerators of carries are
+bounded too. -/
 def civF (c : Ctx) : Nat → Poly → Iv
   | 0, p => polyIv (c.iv) p
   | f + 1, p =>
     match findPair c p p with
     | some (i, Li, j, Lj, k, e) =>
       let rest := p.sub (((Poly.atom j).sub (Poly.atom i)).scale e)
-      (polyIv (c.iv) p).inter ((civF c f rest).add ((pairIv c Li Lj k).scale e))
+      (polyIv (c.iv) p).inter
+        ((civF c f rest).add ((pairIvOf (civF c f (Lj.sub Li)) k).scale e))
     | none => polyIv (c.iv) p
 
 def civ (c : Ctx) (p : Poly) : Iv := civF c 4 p
@@ -268,12 +278,41 @@ not show that the value lies in `[0, k)` (which saves most interval computations
 def refine (c : Ctx) (p : Poly) (I : Iv) (k : Int) : Iv :=
   cond (I.within k) I (I.inter (civ c p))
 
+/-- A term `1·D_j` of `p` with `D_j` a quotient atom: `(j, L_j, k_j)`. -/
+def findQ1 (c : Ctx) : Poly → Option (Nat × Poly × Nat)
+  | [] => none
+  | (m, e) :: p =>
+    match m with
+    | [j] =>
+      cond (intBeq e 1)
+        (match qatom c j with
+         | some (Lj, kj) => some (j, Lj, kj)
+         | none => findQ1 c p)
+        (findQ1 c p)
+    | _ => findQ1 c p
+
+/-- `⌊L / k⌋` as `⌊L' / k'⌋` with nested floors flattened: a quotient atom `D = ⌊L_j / k_j⌋` with
+coefficient 1 in `L = a + D` is expanded, `⌊(a + ⌊L_j / k_j⌋) / k⌋ = ⌊(k_j·a + L_j) / (k_j·k)⌋`, so the
+chain of carries of a schoolbook multiplication becomes one quotient of the polynomial of
+the products by a power of `2^64` (the same atom as the carry out of the low half of the product). -/
+def flatQ (c : Ctx) : Nat → Poly → Nat → Poly × Nat
+  | 0, L, k => (L, k)
+  | f + 1, L, k =>
+    match findQ1 c L with
+    | some (j, Lj, kj) =>
+      flatQ c f (((L.sub (Poly.atom j)).scale (kj : Int)).add Lj) (kj * k)
+    | none => (L, k)
+
+/-- The fuel of `flatQ` (the nesting depth of carries it can flatten). -/
+def flatFuel : Nat := 24
+
 /-- `(v / k, v % k)` for a value `v` with normal form `p` and interval `J`. -/
 def divmod (c : Ctx) (p : Poly) (J : Iv) (k : Nat) : Option (Poly × Poly) :=
   let s := p.splitMod (k : Int)
   let JL := cond s.2.isNil J (civ c s.1)
   cond (JL.within k) (some (s.2, s.1))
-    (match lookup s.1 k c.tbl 0 with
+    (let fl := flatQ c flatFuel s.1 k
+     match lookup fl.1 fl.2 c.tbl 0 with
      | some j => some ((Poly.atom (c.n + j)).add s.2, s.1.sub ((Poly.atom (c.n + j)).scale k))
      | none => none)
 
@@ -382,12 +421,13 @@ def divmodB (c : Ctx) (p : Poly) (J : Iv) (k : Nat) : (Poly × Poly) × Ctx :=
   let s := p.splitMod (k : Int)
   let JL := cond s.2.isNil J (civ c s.1)
   if JL.within k then ((s.2, s.1), c) else
-  match lookup s.1 k c.tbl 0 with
+  let fl := flatQ c flatFuel s.1 k
+  match lookup fl.1 fl.2 c.tbl 0 with
   | some j => (((Poly.atom (c.n + j)).add s.2, s.1.sub ((Poly.atom (c.n + j)).scale k)), c)
   | none =>
     let j := c.tbl.length
-    let iv := (polyIv (c.iv) s.1).divK k
-    let c' : Ctx := { n := c.n, tbl := c.tbl ++ [(s.1, k)], ivs := c.ivs ++ [iv] }
+    let iv := (polyIv (c.iv) fl.1).divK fl.2
+    let c' : Ctx := { n := c.n, tbl := c.tbl ++ [(fl.1, fl.2)], ivs := c.ivs ++ [iv] }
     (((Poly.atom (c.n + j)).add s.2, s.1.sub ((Poly.atom (c.n + j)).scale k)), c')
 
 /-- Like `chk`, growing the table of quotient atoms as needed. -/

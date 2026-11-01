@@ -699,7 +699,13 @@ bound, and it does not know `x·y ≤ (2^64-1)^2`, so products must be named and
   whole add-with-carry chain collapses to `Σ 2^(64i)·limbᵢ` in one normalisation;
 * every subterm and every atom also gets an interval (`x.toNat ≤ 2^w - 1`, `readLE m a n <
   256^n`, products of bounds, hypotheses `atom ≤ c` / `atom < c`), and a difference of two
-  carries `(a + b)/k - a/k` is bounded by `b/k + 1`. A `% k` or `/ k` whose argument lies in
+  carries `(a + b)/k - a/k` is bounded by `⌈b/k⌉` (`b` itself refined the same way, so a difference
+  of carries inside the numerator of a carry is bounded too). Nested floors are flattened,
+  `⌊(a + ⌊b/B⌋)/C⌋ = ⌊(B·a + b)/(B·C)⌋`: the chain of carries of a 4×4-limb product (`umul`: the carry
+  into the fifth column is three nested floors) is the quotient of the polynomial of the products by
+  `2^256`, the same atom as the carry out of the low half of `X·Y` (`MulOverflow`'s high limbs; before this the
+  residual `D23 - D31 = D37` needed a relation `omega` could not find in a system of 31 quotients).
+  A `% k` or `/ k` whose argument lies in
   `[0, k)` disappears: this is how `hi + c₁ + c₂ < 2^64` is shown for a multiply-add limb;
 * the goal holds if the normal forms of the two sides are equal, or if they differ by a
   multiple `g·Z` (`g` the gcd of the difference) and both sides lie in `[0, g)`: this proves
