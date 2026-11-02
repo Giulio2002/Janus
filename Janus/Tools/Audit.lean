@@ -593,6 +593,27 @@ partial def findUndefStream (env : Environment) (witness : Bool) (kregIdx : Nat)
   | .proj sn i b => if sn == `Janus.Amd64.State && i == kregIdx then some e else findUndefStream kregIdx b
   | _ => none
 
+/-! The role of a theorem by name (round 14), declared here because the undefined-stream check needs it. -/
+
+inductive Role | main | nonvacuous | returns | auxiliary
+  deriving BEq
+
+def Role.label : Role → String
+  | .main => "main"
+  | .nonvacuous => "witness-nonvacuous"
+  | .returns => "witness-returns"
+  | .auxiliary => "witness-auxiliary"
+
+def roleOf (n : Name) : Role :=
+  let cs := n.components
+  if !cs.any (· == `Witness) then .main else
+  match cs.reverse with
+  | l :: w :: _ =>
+      if w == `Witness then
+        (if l == `nonvacuous then .nonvacuous else if l == `returns then .returns else .auxiliary)
+      else .auxiliary
+  | _ => .auxiliary
+
 /-- Reject a statement or definition that mentions the undefined-value stream. -/
 def checkUndefStream (witness : Bool) (e : Expr) : MetaM (Option String) := do
   let fields := getStructureFields (← getEnv) `Janus.Amd64.State
@@ -1871,7 +1892,11 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     if let some m ← checkContractHyps expanded main then
       throwError s!"the statement {m}"
     -- the amd64 undefined-value stream (BSF/BSR of zero) is never pinned by a statement
-    let isWitness := thm.getPrefix.components.any (fun c => c.toString == "Witness")
+    -- role-based, never name-prefix based (round 14 reconciliation): only a theorem whose role is exactly
+    -- `Witness.nonvacuous` / `Witness.returns` AND that is not the main theorem (`main` is the role verdict
+    -- of the caller) gets the concrete-start-state exemption; any theorem of a `Witness` namespace that is
+    -- the main theorem, or an auxiliary lemma, never does
+    let isWitness := !main && (roleOf thm == Role.nonvacuous || roleOf thm == Role.returns)
     if let some m ← checkUndefStream isWitness expanded then
       throwError s!"the statement {m}"
     for ci in extDefs do
@@ -1958,25 +1983,6 @@ Extracted.program` in the place of a witness passed. A witness now has a SHAPE, 
 
 The witness is matched against the theorems of the proof module only; the report names the matched
 main theorem (`matchedMain`) so the reader can see which theorem the witness supports. -/
-
-inductive Role | main | nonvacuous | returns | auxiliary
-  deriving BEq
-
-def Role.label : Role → String
-  | .main => "main"
-  | .nonvacuous => "witness-nonvacuous"
-  | .returns => "witness-returns"
-  | .auxiliary => "witness-auxiliary"
-
-def roleOf (n : Name) : Role :=
-  let cs := n.components
-  if !cs.any (· == `Witness) then .main else
-  match cs.reverse with
-  | l :: w :: _ =>
-      if w == `Witness then
-        (if l == `nonvacuous then .nonvacuous else if l == `returns then .returns else .auxiliary)
-      else .auxiliary
-  | _ => .auxiliary
 
 /-- Numeric literal spelling only (round 14): `(BitVec.ofNat n k).toNat` and `(k#n).toNat` with numerals `k < 2^n`
 are the numeral `k`; nothing else is rewritten. A witness states `H [42] …` where the main theorem has

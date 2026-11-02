@@ -7,8 +7,8 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 
 namespace Janus.Contracts
 
-/-- named like a contract, takes a program: pins the number of code segments of the linked program. -/
-def FakeContract (p : Program) : Prop := p.segments.length = 3
+/-- named like a contract, takes a program: a trivial predicate of the linked program (no projection, so the premise rule is what decides). -/
+def FakeContract (p : Program) : Prop := p = p
 
 /-- a `Summary`-bodied def: requires code at address 0 of the linked program. -/
 def FakeSummary (p : Program) : Prop := Janus.Tactic.Summary p 0 (fun _ => True) (fun _ _ => True)
@@ -16,7 +16,7 @@ def FakeSummary (p : Program) : Prop := Janus.Tactic.Summary p 0 (fun _ => True)
 namespace Sub
 /-- shadows the short name of a real contract (the real one is `Janus.Contracts.NewobjectContract`). -/
 def NewobjectContract (p : Program) (_a : Nat) (_rt : List (Nat × Nat)) (_n : Nat) (_H : RtReady) : Prop :=
-  p.segments.length = 3
+  p = p
 end Sub
 
 end Janus.Contracts

@@ -319,3 +319,51 @@ func TestAuditUndefinedStreamPins(t *testing.T) {
 		})
 	}
 }
+
+// Round 14 reconciliation (auditv2): the concrete-State exemption of the undefined-stream rule belongs to
+// a WITNESS by ROLE (exactly `...Witness.nonvacuous` / `...Witness.returns`, structurally matched to a main
+// theorem), never to a theorem merely named like one. A MAIN guarantee that pins the stream through a concrete
+// `State` is rejected whatever its name: under `Witness` namespaces, as `Witness.foo` (auxiliary) and as
+// `X.Witness.nonvacuous` (a witness with no main theorem to match).
+func TestAuditWitnessNamedMainNotExempt(t *testing.T) {
+	defer parallel(t)()
+	needLean(t)
+	useTestCache(t)
+	if _, err := detectSandbox(false); err != nil {
+		t.Skipf("no sandbox available: %v", err)
+	}
+	dir := filepath.Join(t.TempDir(), "art")
+	if code, _, stderr := runJanus(t, "extract", exampleAmd64(t), "example.com/basic.Add", dir); code != 0 {
+		t.Fatalf("extract amd64 Add: %s", stderr)
+	}
+	pin := "∀ t : State, t = { regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := default, kreg := fun _ => 0 } → t.rip = t.rip"
+	proof := func(open, name, close string) string {
+		return "import Extracted\nnamespace Proof\nopen Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic\n" + open +
+			"theorem " + name + " (x y : BitVec 64) :\n    EnsuresResults Extracted.program Extracted.entry [x, y] 1\n" +
+			"      (fun s => StackWritable s 0 8 ∧ " + pin + ") (fun r => r = [x + y]) := by\n" +
+			"  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
+			"  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw\n  janus64_run\n" + close + "end Proof\n"
+	}
+	cases := map[string]string{
+		"X.Witness.foo":         proof("namespace X.Witness\n", "foo", "end X.Witness\n"),
+		"X.Witness.nonvacuous":  proof("namespace X.Witness\n", "nonvacuous", "end X.Witness\n"),
+		"X.Witness.returns":     proof("namespace X.Witness\n", "returns", "end X.Witness\n"),
+		"Witness.foo":           proof("", "Witness.foo", ""),
+		"Witness.nonvacuous":    proof("", "Witness.nonvacuous", ""),
+		"Witness.Witness.extra": proof("", "Witness.Witness.extra", ""),
+	}
+	names := map[string]string{
+		"X.Witness.foo": "Proof.X.Witness.foo", "X.Witness.nonvacuous": "Proof.X.Witness.nonvacuous",
+		"X.Witness.returns": "Proof.X.Witness.returns", "Witness.foo": "Proof.Witness.foo",
+		"Witness.nonvacuous": "Proof.Witness.nonvacuous", "Witness.Witness.extra": "Proof.Witness.Witness.extra",
+	}
+	for name, src := range cases {
+		t.Run("reject "+name, func(t *testing.T) {
+			defer parallel(t)()
+			code, out, stderr := runJanus(t, "verify", dir, "--proof", writeProof(t, src), "--janus-root", repoRoot, "--theorem", names[name])
+			if code == 0 || strings.Contains(out, "Verified") {
+				t.Fatalf("a main guarantee named %s that pins the stream was accepted:\n%s\n%s", name, out, stderr)
+			}
+		})
+	}
+}
