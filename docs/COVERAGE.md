@@ -650,7 +650,7 @@ agent/constructs2, agent/rtstr, agent/panic and agent/rtmisc): the grown-stack c
 callbacks. Within covered rows these forms still have no example: a range-over-func body with
 `break`, `return` or `defer` (`deferrangefunc`), and `MallocFast` on amd64. `A64IndexByte` on
 amd64 covers the AVX2 path only: the SSE path runs `BSF` on a zero mask, which the model treats
-as undefined.
+as an arbitrary value (the undefined-value stream); the SSE path is not attempted.
 
 Two rows are uncertain: whether `CopyWords` and `HexDigit` keep a bounds check in compiled code
 (`Get` certainly does).

@@ -580,7 +580,7 @@ janus_rfl_eqns exec [janus64_exec]
 
 attribute [janus64_exec] execAlu execUnary execMul1 execImul execDiv execShift execShd
   execBit execCount readLoc readLocRW readSrc writeLoc readX writeX ea push64 branchTo
-  BitVec.and_self BitVec.or_self BitVec.xor_self State.getReg State.getHigh State.putReg State.putHigh State.setFlags State.setRip logicFlags
+  BitVec.and_self BitVec.or_self BitVec.xor_self State.getReg State.getHigh State.putReg State.putHigh State.setFlags State.setRip State.undefVal State.advanceUndef logicFlags
 
 /-! ### Register-file normal form
 

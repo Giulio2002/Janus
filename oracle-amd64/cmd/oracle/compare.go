@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -106,10 +107,20 @@ func compareCase(c *L.Case, h *L.HW, m *L.Model) Verdict {
 		v.Verdict, v.Kind = Gap, m.Fault
 		return v
 	}
+	if m.RegUndef != 0 && !isBitscanCase(c) {
+		// the model may mark a register undefined only for BSF/BSR (F3-less 0F BC/BD); anything else
+		// would hide a real difference
+		v.Verdict, v.Kind = ModelError, "regundef-without-bsf-bsr"
+		v.Diffs = []string{fmt.Sprintf("the model reports registers %#x as undefined for %s, which has no BSF/BSR", m.RegUndef, c.Bytes)}
+		return v
+	}
 	for i := 0; i < 16; i++ {
 		if i >= len(h.Regs) || i >= len(m.Regs) {
 			v.Diffs = append(v.Diffs, "regs: missing")
 			break
+		}
+		if m.RegUndef>>uint(i)&1 != 0 {
+			continue // architecturally undefined register (BSF/BSR of zero)
 		}
 		if hexv(h.Regs[i]) != hexv(m.Regs[i]) {
 			v.Diffs = append(v.Diffs, fmt.Sprintf("%s: hw %s model %s (in %s)", regNames[i], h.Regs[i], m.Regs[i], c.Regs[i]))
@@ -390,4 +401,42 @@ func compareX87(c *L.Case, h, m *L.X87State, fswDef int) []string {
 		}
 	}
 	return d
+}
+
+// isBitscanCase: the case (or an instruction of its sequence) is BSF or BSR: legacy prefixes
+// without F3, an optional REX, then 0F BC / 0F BD (with F3 they are TZCNT/LZCNT, which define the
+// destination).
+func isBitscanCase(c *L.Case) bool {
+	if len(c.Seq) > 0 {
+		for _, q := range c.Seq {
+			if isBitscanHex(q) {
+				return true
+			}
+		}
+		return false
+	}
+	return isBitscanHex(c.Bytes)
+}
+
+func isBitscanHex(h string) bool {
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		return false
+	}
+	i, f3 := 0, false
+	for i < len(b) {
+		switch b[i] {
+		case 0x66, 0x67, 0xF2, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65, 0xF0:
+		case 0xF3:
+			f3 = true
+		default:
+			goto rex
+		}
+		i++
+	}
+rex:
+	if i < len(b) && b[i]&0xF0 == 0x40 {
+		i++
+	}
+	return !f3 && i+1 < len(b) && b[i] == 0x0F && (b[i+1] == 0xBC || b[i+1] == 0xBD)
 }

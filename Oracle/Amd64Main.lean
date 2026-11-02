@@ -166,7 +166,11 @@ def initByte (c : Case) (i : Nat) : Nat :=
 
 def bitSet (x i : Nat) : Bool := (x / 2 ^ i) % 2 = 1
 
-def initState (c : Case) (initArr : Array Nat) : State :=
+/-- The initial state; `junk` is the value of EVERY element of the undefined-value stream (`kreg i`, `i ≥ 8`;
+`State.undefVal` is `kreg 8`), which only an instruction with an architecturally undefined register
+result (`BSF`/`BSR` of zero) reads: perturbing all of them catches a register that depends on a later
+element (two zero scans in one case). -/
+def initStateJ (c : Case) (initArr : Array Nat) (junk : Nat) : State :=
   { regs := fun i => if i < 16 then BitVec.ofNat 64 c.regs[i]! else 0
     rip := BitVec.ofNat 64 testPC
     flags := { cf := some (bitSet c.rflags 0), pf := some (bitSet c.rflags 2),
@@ -178,7 +182,7 @@ def initState (c : Case) (initArr : Array Nat) : State :=
       else if 16 ≤ i ∧ i < 32 ∧ i - 16 < c.zmmx.size then BitVec.ofNat 128 (c.zmmx[i - 16]! / 2 ^ 128) else 0
     zmmHi := fun i => if i < c.zmmh.size then BitVec.ofNat 256 c.zmmh[i]!
       else if 16 ≤ i ∧ i < 32 ∧ i - 16 < c.zmmx.size then BitVec.ofNat 256 (c.zmmx[i - 16]! / 2 ^ 256) else 0
-    kreg := fun i => if i < c.k.size then BitVec.ofNat 64 c.k[i]! else 0
+    kreg := fun i => if i < c.k.size then BitVec.ofNat 64 c.k[i]! else if 8 ≤ i then BitVec.ofNat 64 junk else 0
     fsBase := BitVec.ofNat 64 c.fsBase
     df := bitSet c.rflags 10
     mxcsr := BitVec.ofNat 32 c.mxcsr
@@ -189,6 +193,8 @@ def initState (c : Case) (initArr : Array Nat) : State :=
           if dataBase ≤ a ∧ a < dataBase + dataSize then BitVec.ofNat 8 (initArr[a - dataBase]!)
           else 0
         regions := [{ base := dataBase, size := dataSize, writable := true }] } }
+
+def initState (c : Case) (initArr : Array Nat) : State := initStateJ c initArr 0
 
 /-- The code page bytes from `TestPC` on. -/
 def codeBytes (c : Case) : List Nat :=
@@ -239,8 +245,14 @@ def runCase (c : Case) : Json :=
   let flat := c.seq.foldr (· ++ ·) []
   let page : Array Nat := ((List.replicate 0x800 0xCC) ++ flat ++
     List.replicate (pageSize - 0x800 - flat.length) 0xCC).toArray
-  let res := if c.seq.isEmpty then Janus.Amd64.step bs (initState c initArr)
-    else runSeq page (testPC + flat.length) (4 * c.seq.length) (initState c initArr)
+  let run (junk : Nat) := if c.seq.isEmpty then Janus.Amd64.step bs (initStateJ c initArr junk)
+    else runSeq page (testPC + flat.length) (4 * c.seq.length) (initStateJ c initArr junk)
+  let res := run 0
+  -- registers whose value depends on the undefined-value stream (the same case run with every
+  -- bit of the stream's first element set): architecturally undefined, not compared
+  let regUndef : Nat := match res, run (2 ^ 64 - 1) with
+    | .ok s, .ok s' => (List.range 16).foldl (fun acc i => if s.regs i ≠ s'.regs i then acc + 2 ^ i else acc) 0
+    | _, _ => 0
   match res with
   | .error f =>
     let (k, d) := faultJson f
@@ -253,7 +265,7 @@ def runCase (c : Case) : Json :=
     let (fl, def_) := flagBits s.flags
     Json.mkObj [("id", c.id), ("status", "ok"), ("len", len), ("pc", hex s.rip.toNat),
       ("regs", Json.arr ((List.range 16).map fun i => Json.str (hex (s.regs i).toNat)).toArray),
-      ("rflags", fl), ("defined", def_), ("df", s.df),
+      ("rflags", fl), ("defined", def_), ("regundef", Lean.toJson regUndef), ("df", s.df),
       ("xmm", Json.arr ((List.range 16).map fun i => Json.str (hex (s.xmm i).toNat)).toArray),
       ("ymmh", Json.arr ((List.range 16).map fun i => Json.str (hex (s.ymmHi i).toNat)).toArray),
       ("mxcsr", hex s.mxcsr.toNat),

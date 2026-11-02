@@ -61,10 +61,11 @@ theorem seg_open (c : State) (ba sa b fn : Nat) (hpc : c.rip = BitVec.ofNat 64 e
   subst hpc
   have hbne := nz8 b hbl hb0
   have hbs := bsrTop_eq b hbl hb0
+  have hbn : ¬ (b % 256 % 4294967296 = 0) := by omega
   have hfn' : cm.readLE (sa + topBit b * 8) 8 = fn := by rw [show sa + topBit b * 8 = sa + 8 * topBit b by omega]; exact hfn
   have hcw' : (cm.writeLE ba 1 (b % 2 ^ topBit b)).readLE fn 8 = cm.readLE fn 8 :=
     cm.readLE_writeLE_of_disjoint _ (by omega)
-  janus64_run [hba, hsa, hb, hbne, hbs, hfn', hcw']
+  janus64_run [hba, hsa, hb, hbne, hbs, hbn, hfn', hcw']
   rw [btrTop_eq b hbl hb0]
 
 /-- The registers the model engine leaves alone. -/

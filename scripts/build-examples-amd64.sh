@@ -84,3 +84,17 @@ done
 # The write barrier's gcWriteBarrier1..8 verified against WbContract64 (examples/proofs-amd64/WriteBarrier).
 mapfile -t wb_args < <("$root/scripts/example-targets.sh" WriteBarrier)
 "$root/bin/janus" extract "$root/artifacts/examples-amd64" runtime.gcWriteBarrier1 "$root/artifacts/amd64/WriteBarrier" "${wb_args[@]}"
+# The bit-scan examples (examples/basic/bitscan: math/bits Len/TrailingZeros), built at GOAMD64=v1
+# (BSR/BSF with CMOV on ZF: the scan of zero leaves its destination undefined) and at GOAMD64=v3
+# (LZCNT/TZCNT; extracted as <Name>V3), each in a binary of its own so that the other binaries
+# do not change.
+(cd "$root/examples/basic" &&
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-amd64-bitscan" ./bitscan/cmd &&
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v3 go build -trimpath -buildvcs=false -o "$root/artifacts/examples-amd64-bitscan-v3" ./bitscan/cmd)
+echo "built $root/artifacts/examples-amd64-bitscan{,-v3}"
+for f in BitLen64 TrailingZeros64 ByteLen BitLen32; do
+  "$root/bin/janus" extract "$root/artifacts/examples-amd64-bitscan" "example.com/basic/bitscan.$f" "$root/artifacts/amd64/$f"
+done
+for f in BitLen64 TrailingZeros64 ByteLen; do
+  "$root/bin/janus" extract "$root/artifacts/examples-amd64-bitscan-v3" "example.com/basic/bitscan.$f" "$root/artifacts/amd64/${f}V3"
+done

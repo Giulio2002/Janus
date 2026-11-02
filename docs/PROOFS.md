@@ -776,7 +776,8 @@ path. Two facts do the work: `ctz_msb_cmpeq` (`BSF` of the `VPMOVMSKB` of `VPCMP
 broadcast byte is `firstTrue` of the byte comparisons) and `cmpeq_msb_zero` (the mask is zero iff
 no byte matched), passed to `janus64_run` as rewrite rules so that it prunes the `BSF`-of-zero
 path. The SSE path is out of reach: it runs `BSF` on every chunk's mask before testing it, and the
-model makes `BSF` of zero a fault (the destination is architecturally undefined).
+model made `BSF` of zero a fault; it now gives an arbitrary destination (the undefined-value stream, docs/AMD64.md),
+so the SSE path is no longer blocked by the model on that point (not attempted).
 
 ### Auto-vectorised C code (`A64CountByte`)
 

@@ -244,3 +244,78 @@ func TestNoForeignModule(t *testing.T) {
 		t.Fatalf("stray module not detected: %v", err)
 	}
 }
+
+// RTU2 (2026-11-01): a statement that pins the amd64 undefined-value stream (the model's source of
+// the architecturally undefined destination of BSF/BSR of zero) reads as if that destination were
+// known and was accepted. The auditor rejects any mention of State.undefVal, State.advanceUndef and
+// State.kreg at an index that is not a literal below 8 (the AVX-512 opmask registers), in the
+// statement and in the definitions it uses; k0..k7 and a frame equation stay allowed.
+func TestAuditUndefinedStreamPins(t *testing.T) {
+	defer parallel(t)()
+	needLean(t)
+	useTestCache(t)
+	if _, err := detectSandbox(false); err != nil {
+		t.Skipf("no sandbox available: %v", err)
+	}
+	dir := filepath.Join(t.TempDir(), "art")
+	if code, _, stderr := runJanus(t, "extract", exampleAmd64(t), "example.com/basic.Add", dir); code != 0 {
+		t.Fatalf("extract amd64 Add: %s", stderr)
+	}
+	proof := func(pre string) string {
+		return "import Extracted\nnamespace Proof\nopen Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic\n" +
+			"theorem correctness (x y : BitVec 64) :\n    EnsuresResults Extracted.program Extracted.entry [x, y] 1\n" +
+			"      (fun s => StackWritable s 0 8 ∧ " + pre + ") (fun r => r = [x + y]) := by\n" +
+			"  intro ret hret s hs ⟨hpre, _⟩\n  janus64_intro hs\n  obtain ⟨-, hnw, hacc⟩ := hpre\n" +
+			"  simp only [regSP, Nat.sub_zero, Nat.zero_add] at hacc hnw\n  janus64_run\nend Proof\n"
+	}
+	rejected := map[string]string{
+		"kreg index 8 pinned to a register (the RTU2 pin)": "s.kreg 8 = s.regs 0",
+		"kreg index 9":                     "s.kreg 9 = 0",
+		"kreg at a variable index":         "s.kreg (s.regs 3).toNat = 0",
+		"the whole kreg file pinned":       "s.kreg = fun _ => 0",
+		"undefVal":                         "s.undefVal = 0",
+		"advanceUndef":                     "(s.advanceUndef).regs 0 = s.regs 0",
+		"kreg index through a numeral sum": "s.kreg (4 + 4) = 0",
+		// RTU2b: pins that never name kreg or undefVal
+		"match on a state":                   "(match s with | { kreg := k, .. } => k 8) = 0",
+		"State.casesOn":                      "State.casesOn (motive := fun _ => BitVec 64) s (fun _ _ _ _ _ _ _ _ _ _ _ _ k => k 8) = 0",
+		"State.rec":                          "State.rec (motive := fun _ => BitVec 64) (fun _ _ _ _ _ _ _ _ _ _ _ _ k => k 8) s = 0",
+		"state record update of kreg":        "s = { s with kreg := fun _ => 0 }",
+		"state equals a setK result":         "s = Janus.Amd64.ExecEVEX.setK s 8 5",
+		"state membership in a list":         "s ∈ [Janus.Amd64.ExecEVEX.setK s 8 5]",
+		"state equals strip512":              "s = s.strip512",
+		"frame equation with a built state":  "s.kreg = State.kreg { s with kreg := fun _ => 5 }",
+		"the default state's kreg":           "s.kreg = (default : State).kreg",
+		"existential state with chosen kreg": "∃ t : State, s = { t with kreg := fun _ => 0 }",
+		// RTU2c: a fully concrete state outside a Witness theorem pins the stream (default kreg := 0)
+		"concrete state with the default opmask file": "∀ t : State, t = { regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := default } → t.rip = t.rip",
+		"concrete state with kreg zero stated":        "∀ t : State, t = { regs := fun _ => 0, rip := 0, flags := ⟨none, none, none, none, none, none⟩, xmm := fun _ => 0, mem := default, kreg := fun _ => 0 } → t.rip = t.rip",
+	}
+	for name, pre := range rejected {
+		t.Run("reject "+name, func(t *testing.T) {
+			defer parallel(t)()
+			code, out, stderr := runJanus(t, "verify", dir, "--proof", writeProof(t, proof(pre)), "--janus-root", repoRoot, "--theorem", "Proof.correctness")
+			if code == 0 || strings.Contains(out, "Verified") {
+				t.Fatalf("a statement pinning the undefined-value stream was accepted:\n%s\n%s", out, stderr)
+			}
+			if !strings.Contains(stderr, "undefined-value stream") {
+				t.Errorf("rejected, but not for the stream rule:\n%s", stderr)
+			}
+		})
+	}
+	accepted := map[string]string{
+		"opmask k3 (AVX-512)":          "s.kreg 3 = 0",
+		"opmask k7":                    "s.kreg 7 = s.kreg 0",
+		"frame equation of two states": "s.kreg = s.kreg",
+		"record copy keeps kreg":       "∀ t : State, t = { s with regs := t.regs } → t.regs 0 = t.regs 0",
+	}
+	for name, pre := range accepted {
+		t.Run("accept "+name, func(t *testing.T) {
+			defer parallel(t)()
+			code, out, stderr := runJanus(t, "verify", dir, "--proof", writeProof(t, proof(pre)), "--janus-root", repoRoot, "--theorem", "Proof.correctness")
+			if code != 0 || strings.Contains(stderr, "undefined-value stream") {
+				t.Fatalf("a statement without the stream was rejected (code %d):\n%s\n%s", code, out, stderr)
+			}
+		})
+	}
+}

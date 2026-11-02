@@ -494,6 +494,115 @@ def numeralBound (ty : Expr) : MetaM (Option Nat) := do
   | some ``ISize, _ => return some (2 ^ 31)
   | _, _ => return none
 
+/-! ## The amd64 undefined-value stream is not part of any statement (BSF/BSR of zero)
+
+The amd64 model gives the destination of `BSF`/`BSR` of zero the next element of an undefined-value
+stream, `State.undefVal` = `kreg 8` (indices `>= 8` of the opmask file are used for nothing else; `Janus.Amd64.Exec`). A
+theorem about such code is sound because it holds for every stream (every initial state). A statement
+that PINS the stream (`s.kreg 8 = s.regs 0`, `s.kreg = fun _ => 0`, `s.undefVal = 0`) would instead read
+as if the architecturally undefined destination were known, and it would be accepted by the kernel.
+The auditor therefore rejects any mention, in the statement (proof-local definitions expanded) or in
+a dependency definition it uses, of `State.undefVal`, `State.advanceUndef`, and `State.kreg` at an index
+that is not a literal below 8 (the AVX-512 opmask registers `k0`..`k7`), or `State.kreg` whole, except
+as a frame equation `a.kreg = b.kreg` between two states (it names no value). It only rejects more.
+
+Round RTU2b: a pin need not name `kreg` at all. The auditor also rejects, in the same places, every way
+to take a state apart (`match`, `State.casesOn`/`rec`), the default state, every state-valued term that
+is not a variable (`{ s with kreg := _ }`, `setK s 8 5`, `s.strip512`, `retState ..`), a `State.mk`
+whose opmask file is not copied from a variable (a fully concrete state, the start of a `Witness`
+theorem, is allowed). An equation at a type built from `State` then holds only variables and
+framework functions of them (`step s .. = .error ..` stays allowed). -/
+
+/-- A literal opmask index below 8. -/
+def opmaskLit? (e : Expr) : Bool :=
+  let e := e.consumeMData
+  match e.getAppFnArgs with
+  | (``OfNat.ofNat, #[_, n, _]) => (n.rawNatLit?.map (fun x => decide (x < 8))).getD false
+  | _ => (e.rawNatLit?.map (fun x => decide (x < 8))).getD false
+
+/-- A variable (free or bound), possibly under metadata. -/
+def atomVar (e : Expr) : Bool :=
+  match e.consumeMData with
+  | .fvar _ | .bvar _ => true
+  | _ => false
+
+/-- `State.kreg x` for a variable `x`: the opmask file of a state, naming no value (a frame). -/
+def kregFrame (e : Expr) : Bool :=
+  let e := e.consumeMData
+  e.getAppFn.isConstOf `Janus.Amd64.State.kreg && e.getAppNumArgs == 1 && atomVar e.appArg!
+
+/-- The ways to take a `State` apart or to build one from nothing (round RTU2b): a `match` on a
+state (its matcher unfolds to `casesOn`), `State.rec`, the default state. They read or choose a
+state's `kreg` without naming `State.kreg`. -/
+def undefStreamConsts : List Name :=
+  [`Janus.Amd64.State.undefVal, `Janus.Amd64.State.advanceUndef, `Janus.Amd64.State.casesOn,
+   `Janus.Amd64.State.rec, `Janus.Amd64.State.recOn, `Janus.Amd64.State.brecOn,
+   `Janus.Amd64.State.binductionOn, `Janus.Amd64.State.noConfusion,
+   `Janus.Amd64.State.noConfusionType, `Janus.Amd64.instInhabitedState]
+
+/-- Does the constant `c` produce a `State` (its type, after the parameters, is `State`)? -/
+def returnsState (env : Environment) (c : Name) : Bool :=
+  match env.find? c with
+  | some ci =>
+    let rec go : Expr → Bool
+      | .forallE _ _ b _ => go b
+      | .mdata _ b => go b
+      | t => t.isConstOf `Janus.Amd64.State
+    go ci.type
+  | none => false
+
+/-- The first subterm of `e` that pins or reads the undefined-value stream (see above). -/
+partial def findUndefStream (env : Environment) (witness : Bool) (kregIdx : Nat) (e : Expr) : Option Expr :=
+  let kregFn : Name := `Janus.Amd64.State.kreg
+  let findUndefStream := findUndefStream env witness
+  match e with
+  | .app .. =>
+    let fn := e.getAppFn
+    let args := e.getAppArgs
+    match fn with
+    | .const c _ =>
+      if undefStreamConsts.contains c then some e
+      else if returnsState env c && c != `Janus.Amd64.State.mk then
+        -- any state that is not a variable (`setK t 8 5`, `t.strip512`, `retState ..`): the only
+        -- states of a statement are the quantified ones (their opmask file is arbitrary)
+        some e
+      else if c == kregFn then
+        if args.size ≥ 2 then
+          if opmaskLit? args[1]! then args.findSome? (findUndefStream kregIdx) else some e
+        else some e
+      else if c == `Janus.Amd64.State.mk then
+        -- a state built from fields: its opmask file must be a copy of a variable's (`{ s with .. }`)
+        -- A fully concrete state (no variable anywhere) is the initial state of a `Witness` theorem, a
+        -- run of one named state, not a theorem about every state; it is allowed there only (a theorem inside a `Witness` namespace).
+        -- Only in a `Witness` theorem (round RTU2c): in the theorem that is the guarantee, a
+        -- concrete state pins the stream to the default (`kreg := fun _ => 0`, which `pp` does not
+        -- even show) and a model's value for an undefined destination reads as a known result.
+        if witness && !e.hasFVar && !e.hasLooseBVars && !e.hasMVar then args.findSome? (findUndefStream kregIdx)
+        else if args.size > kregIdx && kregFrame args[kregIdx]! then
+          (args.eraseIdx! kregIdx).findSome? (findUndefStream kregIdx)
+        else some e
+      else if c == ``Eq && args.size == 3 then
+        if kregFrame args[1]! && kregFrame args[2]! then none
+        else args.findSome? (findUndefStream kregIdx)
+      else args.findSome? (findUndefStream kregIdx)
+    | _ => (findUndefStream kregIdx fn).orElse fun _ => args.findSome? (findUndefStream kregIdx)
+  | .const c _ => if undefStreamConsts.contains c || c == kregFn || c == `Janus.Amd64.State.mk || returnsState env c then some e else none
+  | .lam _ t b _ | .forallE _ t b _ => (findUndefStream kregIdx t).orElse fun _ => findUndefStream kregIdx b
+  | .letE _ t v b _ => (findUndefStream kregIdx t).orElse fun _ => (findUndefStream kregIdx v).orElse fun _ => findUndefStream kregIdx b
+  | .mdata _ b => findUndefStream kregIdx b
+  | .proj sn i b => if sn == `Janus.Amd64.State && i == kregIdx then some e else findUndefStream kregIdx b
+  | _ => none
+
+/-- Reject a statement or definition that mentions the undefined-value stream. -/
+def checkUndefStream (witness : Bool) (e : Expr) : MetaM (Option String) := do
+  let fields := getStructureFields (← getEnv) `Janus.Amd64.State
+  let kregIdx := (fields.idxOf? `kreg).getD 1000
+  match findUndefStream (← getEnv) witness kregIdx e with
+  | none => return none
+  | some bad =>
+    let s := (← try Meta.ppExpr bad catch _ => pure (toString bad)).pretty 300
+    return some s!"mentions the amd64 undefined-value stream (`{s}`): `State.undefVal`, `State.advanceUndef` and `State.kreg` at an index that is not a literal below 8 are the model's source of the architecturally undefined result of BSF/BSR of zero; a statement may not name or constrain them (a pinned stream reads as a known value for an undefined destination). Quantify over every state instead"
+
 /-- Round 6 (F2): reject a numeral `(n : T)` whose literal is out of range for a wrapping type
 `T`. `OfNat` on `BitVec 64` reduces `18446744073709551616` to `0`, so `y ≠ 18446744073709551616`
 reads as a vacuous hypothesis while it is `y ≠ 0`; the text round-trips (Lean reads it the same
@@ -1761,8 +1870,14 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     -- round 10 V1: contract hypotheses quantify the runtime
     if let some m ← checkContractHyps expanded main then
       throwError s!"the statement {m}"
+    -- the amd64 undefined-value stream (BSF/BSR of zero) is never pinned by a statement
+    let isWitness := thm.getPrefix.components.any (fun c => c.toString == "Witness")
+    if let some m ← checkUndefStream isWitness expanded then
+      throwError s!"the statement {m}"
     for ci in extDefs do
       for t in [ci.type] ++ ci.value?.toList do
+        if let some m ← checkUndefStream isWitness t then
+          throwError s!"the dependency definition {ci.name} used in the statement {m}"
         if let some m ← checkSymbolRefs tbl t then
           throwError s!"the dependency definition {ci.name} used in the statement {m}"
         -- round 10 V1: a contract hidden in a dependency definition escapes the premise check

@@ -554,7 +554,7 @@ verifier findings and exits 1 if a fixed one regresses. The CRITICAL-1 and U1 ro
 | Residual | the auditor and `leanchecker` load untrusted `.olean` bytes; the loader does not validate them | TCB | **documented** in SOUNDNESS.md (trusted computing base, item 4) |
 | MEDIUM-1 | amd64: the direction flag is not in the state; a verified *mid-function* theorem says memmove's backward `REP MOVSQ` copies forward (call theorems unaffected) | medium | open (amd64 model) |
 | LOW-1 | amd64: LOCK accesses that straddle a cache line (SIGBUS with `split_lock_detect=fatal`) | low–medium | open (amd64 model/preconditions) |
-| LOW-2 | amd64: 64-bit BSF/BSR of zero follows AMD | low | open (amd64 model) |
+| LOW-2 | amd64: 64-bit BSF/BSR of zero follows AMD | low | fixed: ZF=1 and the destination is arbitrary at every width (undefined-value stream, docs/AMD64.md) |
 
 **Fix for CRITICAL-1 (`Janus/Tools/Audit.lean`), in depth.** The guarantee is the printed
 statement, so the auditor now checks that the text means what the kernel proved:
