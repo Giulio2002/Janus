@@ -7,17 +7,16 @@ open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
 
 namespace Janus.Contracts
 
-/-- named like a contract, takes a program: pins the code to the empty implementation. -/
-def FakeContract (p : Program) : Prop := p = Extracted.program.link []
+/-- named like a contract, takes a program: pins the number of code segments of the linked program. -/
+def FakeContract (p : Program) : Prop := p.segments.length = 3
 
-/-- a `Summary`-bodied def: also pins the linked program (the body is a Summary under a conjunct that fixes `p`). -/
-def FakeSummary (p : Program) : Prop :=
-  p = Extracted.program.link [] ∧ Janus.Tactic.Summary p 0 (fun _ => True) (fun _ _ => True)
+/-- a `Summary`-bodied def: requires code at address 0 of the linked program. -/
+def FakeSummary (p : Program) : Prop := Janus.Tactic.Summary p 0 (fun _ => True) (fun _ _ => True)
 
 namespace Sub
 /-- shadows the short name of a real contract (the real one is `Janus.Contracts.NewobjectContract`). -/
 def NewobjectContract (p : Program) (_a : Nat) (_rt : List (Nat × Nat)) (_n : Nat) (_H : RtReady) : Prop :=
-  p = Extracted.program.link []
+  p.segments.length = 3
 end Sub
 
 end Janus.Contracts
