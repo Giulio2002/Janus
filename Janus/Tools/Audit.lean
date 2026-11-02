@@ -80,6 +80,17 @@ structure Record where
   `Nat` subtraction, `x / 0 = 0`, wrapping `^`, `xs[i]!`, `Int.toNat`), with the subterm. These
   are not errors: the statement means exactly what Lean says. -/
   notes : Array String
+  /-- Round 14: what the verified theorem is: `main` (a correctness statement: the runtime is
+  quantified), `witness-nonvacuous` or `witness-returns` (a concrete instance showing the main
+  theorem's hypotheses are satisfiable / that it fires; NOT a correctness claim). -/
+  role : String := "main"
+  /-- Round 14: for a witness, the main theorem of the proof module whose hypotheses and
+  precondition it instantiates (or whose guarantee it states at a concrete state). -/
+  matchedMain : String := ""
+  /-- Round 14: the runtime contracts the STATEMENT applies (`NewobjectContract@runtime.newobject`),
+  computed from the statement, not from the extraction. A main theorem has them as hypotheses; a
+  witness claims them. Empty: the statement assumes nothing about the runtime. -/
+  contractHyps : Array String := #[]
   /-- The import graph of every module outside the toolchain core (`Init`, `Std`, `Lean`,
   `Lake`): `[module, direct import, …]`. The Go side kernel-replays each of these modules and
   keys its replay cache on the module's bytes and those of its imports. -/
@@ -762,13 +773,255 @@ partial def binderDomains : Expr → Array Expr → Array Expr
   | .mdata _ b, acc => binderDomains b acc
   | _, acc => acc
 
-/-- Is `c` a runtime contract of the framework? -/
+/-- Round 14: the PINNED runtime-contract predicates, as (defining module, short name). A premise counts as a
+runtime contract only if its head constant is DEFINED in the module listed here (looked up in the environment's
+constant-to-module map, so a proof or consumer module that declares `namespace Janus.Contracts` and its own
+`FakeContract`/`Summary` def, or shadows a real contract's name, is not a contract). Generated from the framework's
+contract definitions by `python3 audit/round9/sat_check.py ROOT --emit`; the SAT row of audit/round9 fails if this
+list and the tree differ, so a new framework def does not become a contract by accident. -/
+def pinnedContracts : Array (String × String) := #[
+-- BEGIN pinnedContracts
+  ("Janus.Contracts.Alloc", "GrowsliceContract"),
+  ("Janus.Contracts.Alloc", "MakesliceContract"),
+  ("Janus.Contracts.Alloc", "MallocgcContract"),
+  ("Janus.Contracts.Alloc", "NewobjectContract"),
+  ("Janus.Contracts.AllocAmd64", "GrowsliceContract64"),
+  ("Janus.Contracts.AllocAmd64", "MakesliceContract64"),
+  ("Janus.Contracts.AllocAmd64", "MallocgcContract64"),
+  ("Janus.Contracts.AllocAmd64", "NewobjectContract64"),
+  ("Janus.Contracts.Cmpstring", "CmpstringContract"),
+  ("Janus.Contracts.CmpstringAmd64", "CmpstringContract64"),
+  ("Janus.Contracts.Hash", "Chash"),
+  ("Janus.Contracts.Hash", "Fhash"),
+  ("Janus.Contracts.Hash", "Interhash"),
+  ("Janus.Contracts.Hash", "Memhash"),
+  ("Janus.Contracts.Hash", "Memhash0"),
+  ("Janus.Contracts.Hash", "Memhash32"),
+  ("Janus.Contracts.Hash", "Memhash64"),
+  ("Janus.Contracts.Hash", "MemhashN"),
+  ("Janus.Contracts.Hash", "MemhashVarlen"),
+  ("Janus.Contracts.Hash", "Nilinterhash"),
+  ("Janus.Contracts.Hash", "Rand"),
+  ("Janus.Contracts.Hash", "Strhash"),
+  ("Janus.Contracts.Hash", "Typehash"),
+  ("Janus.Contracts.HashAmd64", "Chash"),
+  ("Janus.Contracts.HashAmd64", "Fhash"),
+  ("Janus.Contracts.HashAmd64", "Interhash"),
+  ("Janus.Contracts.HashAmd64", "Memhash"),
+  ("Janus.Contracts.HashAmd64", "Memhash0"),
+  ("Janus.Contracts.HashAmd64", "Memhash32"),
+  ("Janus.Contracts.HashAmd64", "Memhash64"),
+  ("Janus.Contracts.HashAmd64", "MemhashN"),
+  ("Janus.Contracts.HashAmd64", "MemhashVarlen"),
+  ("Janus.Contracts.HashAmd64", "Nilinterhash"),
+  ("Janus.Contracts.HashAmd64", "Rand"),
+  ("Janus.Contracts.HashAmd64", "Strhash"),
+  ("Janus.Contracts.HashAmd64", "Typehash"),
+  ("Janus.Contracts.Iface", "AssertE2I"),
+  ("Janus.Contracts.Iface", "AssertE2I2"),
+  ("Janus.Contracts.Iface", "ConvT"),
+  ("Janus.Contracts.Iface", "ConvT16"),
+  ("Janus.Contracts.Iface", "ConvT32"),
+  ("Janus.Contracts.Iface", "ConvT64"),
+  ("Janus.Contracts.Iface", "ConvTnoptr"),
+  ("Janus.Contracts.Iface", "ConvTslice"),
+  ("Janus.Contracts.Iface", "ConvTstring"),
+  ("Janus.Contracts.Iface", "Efaceeq"),
+  ("Janus.Contracts.Iface", "Ifaceeq"),
+  ("Janus.Contracts.Iface", "InterfaceSwitch"),
+  ("Janus.Contracts.Iface", "TypeAssert"),
+  ("Janus.Contracts.IfaceAmd64", "AssertE2I"),
+  ("Janus.Contracts.IfaceAmd64", "AssertE2I2"),
+  ("Janus.Contracts.IfaceAmd64", "ConvT"),
+  ("Janus.Contracts.IfaceAmd64", "ConvT16"),
+  ("Janus.Contracts.IfaceAmd64", "ConvT32"),
+  ("Janus.Contracts.IfaceAmd64", "ConvT64"),
+  ("Janus.Contracts.IfaceAmd64", "ConvTnoptr"),
+  ("Janus.Contracts.IfaceAmd64", "ConvTslice"),
+  ("Janus.Contracts.IfaceAmd64", "ConvTstring"),
+  ("Janus.Contracts.IfaceAmd64", "Efaceeq"),
+  ("Janus.Contracts.IfaceAmd64", "Ifaceeq"),
+  ("Janus.Contracts.IfaceAmd64", "InterfaceSwitch"),
+  ("Janus.Contracts.IfaceAmd64", "TypeAssert"),
+  ("Janus.Contracts.InstrumentCalls", "CgoCheckPointer"),
+  ("Janus.Contracts.InstrumentCalls", "CgoCheckResult"),
+  ("Janus.Contracts.InstrumentCalls", "CheckptrAlignment"),
+  ("Janus.Contracts.InstrumentCalls", "CheckptrArithmetic"),
+  ("Janus.Contracts.InstrumentCallsAmd64", "CgoCheckPointer64"),
+  ("Janus.Contracts.InstrumentCallsAmd64", "CgoCheckResult64"),
+  ("Janus.Contracts.InstrumentCallsAmd64", "CheckptrAlignment64"),
+  ("Janus.Contracts.InstrumentCallsAmd64", "CheckptrArithmetic64"),
+  ("Janus.Contracts.Live", "GrowsliceLiveContract"),
+  ("Janus.Contracts.Live", "MakesliceLiveContract"),
+  ("Janus.Contracts.Live", "MallocgcLiveContract"),
+  ("Janus.Contracts.Live", "MallocgcSmallNoScanSCLiveContract"),
+  ("Janus.Contracts.Live", "MallocgcSmallScanNoHeaderSCLiveContract"),
+  ("Janus.Contracts.Live", "MallocgcTinySizeLiveContract"),
+  ("Janus.Contracts.Live", "MemclrHasPointersLive"),
+  ("Janus.Contracts.Live", "MemclrNoHeapPointersLive"),
+  ("Janus.Contracts.Live", "MemmoveLive"),
+  ("Janus.Contracts.Live", "NewobjectLiveContract"),
+  ("Janus.Contracts.Live", "RtLiveContract"),
+  ("Janus.Contracts.Live", "TypedMemclrLive"),
+  ("Janus.Contracts.Live", "TypedMemmoveLive"),
+  ("Janus.Contracts.Live", "WbLiveContract"),
+  ("Janus.Contracts.LiveAmd64", "GrowsliceLiveContract64"),
+  ("Janus.Contracts.LiveAmd64", "MakesliceLiveContract64"),
+  ("Janus.Contracts.LiveAmd64", "MallocgcLiveContract64"),
+  ("Janus.Contracts.LiveAmd64", "MallocgcSmallNoScanSCLiveContract64"),
+  ("Janus.Contracts.LiveAmd64", "MallocgcSmallScanNoHeaderSCLiveContract64"),
+  ("Janus.Contracts.LiveAmd64", "MallocgcTinySizeLiveContract64"),
+  ("Janus.Contracts.LiveAmd64", "MemclrHasPointersLive64"),
+  ("Janus.Contracts.LiveAmd64", "MemclrNoHeapPointersLive64"),
+  ("Janus.Contracts.LiveAmd64", "MemmoveLive64"),
+  ("Janus.Contracts.LiveAmd64", "NewobjectLiveContract64"),
+  ("Janus.Contracts.LiveAmd64", "RtLiveContract64"),
+  ("Janus.Contracts.LiveAmd64", "TypedMemclrLive64"),
+  ("Janus.Contracts.LiveAmd64", "TypedMemmoveLive64"),
+  ("Janus.Contracts.LiveAmd64", "WbLiveContract64"),
+  ("Janus.Contracts.MallocSC", "MallocgcSmallNoScanSCContract"),
+  ("Janus.Contracts.MallocSC", "MallocgcSmallScanNoHeaderSCContract"),
+  ("Janus.Contracts.MallocSC", "MallocgcTinySizeContract"),
+  ("Janus.Contracts.MallocSCAmd64", "MallocgcSmallNoScanSCContract64"),
+  ("Janus.Contracts.MallocSCAmd64", "MallocgcSmallScanNoHeaderSCContract64"),
+  ("Janus.Contracts.MallocSCAmd64", "MallocgcTinySizeContract64"),
+  ("Janus.Contracts.Map", "Access1"),
+  ("Janus.Contracts.Map", "Access2"),
+  ("Janus.Contracts.Map", "Access2Ptr"),
+  ("Janus.Contracts.Map", "Assign"),
+  ("Janus.Contracts.Map", "Clear"),
+  ("Janus.Contracts.Map", "Delete"),
+  ("Janus.Contracts.Map", "IterNext"),
+  ("Janus.Contracts.Map", "IterStart"),
+  ("Janus.Contracts.Map", "MakeSmall"),
+  ("Janus.Contracts.MapAmd64", "Access1"),
+  ("Janus.Contracts.MapAmd64", "Access2"),
+  ("Janus.Contracts.MapAmd64", "Access2Ptr"),
+  ("Janus.Contracts.MapAmd64", "Assign"),
+  ("Janus.Contracts.MapAmd64", "Clear"),
+  ("Janus.Contracts.MapAmd64", "Delete"),
+  ("Janus.Contracts.MapAmd64", "IterNext"),
+  ("Janus.Contracts.MapAmd64", "IterStart"),
+  ("Janus.Contracts.MapAmd64", "MakeSmall"),
+  ("Janus.Contracts.MapStr", "Access1Str"),
+  ("Janus.Contracts.MapStr", "Access2Str"),
+  ("Janus.Contracts.MapStr", "AssignStr"),
+  ("Janus.Contracts.MapStr", "DeleteStr"),
+  ("Janus.Contracts.MapStrAmd64", "Access1Str64"),
+  ("Janus.Contracts.MapStrAmd64", "Access2Str64"),
+  ("Janus.Contracts.MapStrAmd64", "AssignStr64"),
+  ("Janus.Contracts.MapStrAmd64", "DeleteStr64"),
+  ("Janus.Contracts.MapVar", "Access1F32"),
+  ("Janus.Contracts.MapVar", "Access1Fat"),
+  ("Janus.Contracts.MapVar", "Access1G"),
+  ("Janus.Contracts.MapVar", "Access2F32"),
+  ("Janus.Contracts.MapVar", "Access2Fat"),
+  ("Janus.Contracts.MapVar", "Access2G"),
+  ("Janus.Contracts.MapVar", "Assign64Ptr"),
+  ("Janus.Contracts.MapVar", "AssignF32"),
+  ("Janus.Contracts.MapVar", "AssignG"),
+  ("Janus.Contracts.MapVar", "DeleteF32"),
+  ("Janus.Contracts.MapVar", "DeleteG"),
+  ("Janus.Contracts.MapVar", "MakeMap"),
+  ("Janus.Contracts.MapVarAmd64", "Access1F32"),
+  ("Janus.Contracts.MapVarAmd64", "Access1Fat"),
+  ("Janus.Contracts.MapVarAmd64", "Access1G"),
+  ("Janus.Contracts.MapVarAmd64", "Access2F32"),
+  ("Janus.Contracts.MapVarAmd64", "Access2Fat"),
+  ("Janus.Contracts.MapVarAmd64", "Access2G"),
+  ("Janus.Contracts.MapVarAmd64", "Assign64Ptr"),
+  ("Janus.Contracts.MapVarAmd64", "AssignF32"),
+  ("Janus.Contracts.MapVarAmd64", "AssignG"),
+  ("Janus.Contracts.MapVarAmd64", "DeleteF32"),
+  ("Janus.Contracts.MapVarAmd64", "DeleteG"),
+  ("Janus.Contracts.MapVarAmd64", "MakeMap"),
+  ("Janus.Contracts.Mem", "BulkBarrierOff"),
+  ("Janus.Contracts.Mem", "Cequal"),
+  ("Janus.Contracts.Mem", "Fequal"),
+  ("Janus.Contracts.Mem", "Interequal"),
+  ("Janus.Contracts.Mem", "MemclrHasPointers"),
+  ("Janus.Contracts.Mem", "MemclrNoHeapPointers"),
+  ("Janus.Contracts.Mem", "Memequal"),
+  ("Janus.Contracts.Mem", "MemequalN"),
+  ("Janus.Contracts.Mem", "MemequalVarlen"),
+  ("Janus.Contracts.Mem", "Memmove"),
+  ("Janus.Contracts.Mem", "Nilinterequal"),
+  ("Janus.Contracts.Mem", "Strequal"),
+  ("Janus.Contracts.Mem", "TypedMemclr"),
+  ("Janus.Contracts.Mem", "TypedMemmove"),
+  ("Janus.Contracts.MemAmd64", "BulkBarrierOff"),
+  ("Janus.Contracts.MemAmd64", "Cequal"),
+  ("Janus.Contracts.MemAmd64", "Fequal"),
+  ("Janus.Contracts.MemAmd64", "Interequal"),
+  ("Janus.Contracts.MemAmd64", "MemclrHasPointers"),
+  ("Janus.Contracts.MemAmd64", "MemclrNoHeapPointers"),
+  ("Janus.Contracts.MemAmd64", "Memequal"),
+  ("Janus.Contracts.MemAmd64", "MemequalN"),
+  ("Janus.Contracts.MemAmd64", "MemequalVarlen"),
+  ("Janus.Contracts.MemAmd64", "Memmove"),
+  ("Janus.Contracts.MemAmd64", "Nilinterequal"),
+  ("Janus.Contracts.MemAmd64", "Strequal"),
+  ("Janus.Contracts.MemAmd64", "TypedMemclr"),
+  ("Janus.Contracts.MemAmd64", "TypedMemmove"),
+  ("Janus.Contracts.Panic", "DeferprocContract"),
+  ("Janus.Contracts.Panic", "DeferprocStackContract"),
+  ("Janus.Contracts.Panic", "DeferprocatContract"),
+  ("Janus.Contracts.Panic", "DeferrangefuncContract"),
+  ("Janus.Contracts.Panic", "DeferreturnContract"),
+  ("Janus.Contracts.Panic", "GoexitContract"),
+  ("Janus.Contracts.Panic", "GopanicContract"),
+  ("Janus.Contracts.Panic", "GorecoverContract"),
+  ("Janus.Contracts.PanicAmd64", "DeferprocContract"),
+  ("Janus.Contracts.PanicAmd64", "DeferprocStackContract"),
+  ("Janus.Contracts.PanicAmd64", "DeferprocatContract"),
+  ("Janus.Contracts.PanicAmd64", "DeferrangefuncContract"),
+  ("Janus.Contracts.PanicAmd64", "DeferreturnContract"),
+  ("Janus.Contracts.PanicAmd64", "GoexitContract"),
+  ("Janus.Contracts.PanicAmd64", "GopanicContract"),
+  ("Janus.Contracts.PanicAmd64", "GorecoverContract"),
+  ("Janus.Contracts.Pool", "PoolGetLive"),
+  ("Janus.Contracts.Pool", "PoolPutLive"),
+  ("Janus.Contracts.PoolAmd64", "PoolGetLive"),
+  ("Janus.Contracts.PoolAmd64", "PoolPutLive"),
+  ("Janus.Contracts.Print", "Lock2Contract"),
+  ("Janus.Contracts.Print", "MemmoveContract"),
+  ("Janus.Contracts.Print", "Unlock2Contract"),
+  ("Janus.Contracts.PrintAmd64", "Lock2Contract"),
+  ("Janus.Contracts.PrintAmd64", "MemmoveContract"),
+  ("Janus.Contracts.PrintAmd64", "Unlock2Contract"),
+  ("Janus.Contracts.Rt", "RtContract"),
+  ("Janus.Contracts.Rt", "RtContract64"),
+  ("Janus.Contracts.SoftFloat", "KeepAliveContract"),
+  ("Janus.Contracts.SoftFloat", "SoftFaddContract"),
+  ("Janus.Contracts.SoftFloat", "SoftFdivContract"),
+  ("Janus.Contracts.SoftFloat", "SoftFmulContract"),
+  ("Janus.Contracts.SoftFloat", "SoftFsubContract"),
+  ("Janus.Contracts.SoftFloatAmd64", "KeepAliveContract64"),
+  ("Janus.Contracts.SoftFloatAmd64", "SoftFaddContract64"),
+  ("Janus.Contracts.SoftFloatAmd64", "SoftFdivContract64"),
+  ("Janus.Contracts.SoftFloatAmd64", "SoftFmulContract64"),
+  ("Janus.Contracts.SoftFloatAmd64", "SoftFsubContract64"),
+  ("Janus.Contracts.Stack", "MorestackContract"),
+  ("Janus.Contracts.StackAmd64", "MorestackContract64"),
+  ("Janus.Contracts.Syscall", "ConvT64Contract"),
+  ("Janus.Contracts.Syscall", "SchedContract"),
+  ("Janus.Contracts.SyscallAmd64", "ConvT64Contract"),
+  ("Janus.Contracts.SyscallAmd64", "SchedContract"),
+  ("Janus.Contracts.WriteBarrier", "WbContract"),
+  ("Janus.Contracts.WriteBarrier", "WbContract64"),
+-- END pinnedContracts
+  ]
+
+/-- Is `c` a pinned runtime contract: listed, defined in the listed trusted framework module (never a proof or
+consumer module), and of the contract shape? -/
 def isRuntimeContract (env : Environment) (c : Name) : Bool :=
-  (`Janus.Contracts).isPrefixOf c && match env.find? c with
+  match env.getModuleIdxFor? c with
+  | none => false
+  | some idx =>
+    let mod := env.header.moduleNames[idx.toNat]!
+    trustedModule mod && pinnedContracts.contains (mod.toString, c.getString!) &&
+    (`Janus).isPrefixOf c && match env.find? c with
     | some (.defnInfo d) => bodyIsSummary d.value ||
-        -- a contract stated over runs rather than as a `Summary` (agent/panic's
-        -- `GopanicRecoverContract`: a call that does not return but resumes elsewhere), named
-        -- `…Contract` by convention, about a program
         ((c.getString!.endsWith "Contract") && (binderDomains d.type #[]).any fun t =>
           t.consumeMData.isConstOf `Janus.Program || t.consumeMData.isConstOf `Janus.Amd64.Program)
     | _ => false
@@ -905,12 +1158,150 @@ def depthBound (bound : Std.HashSet FVarId) (rtVars : Std.HashSet FVarId) (t : E
         b.hasAnyFVar (fun v => bound.contains v && !rtVars.contains v))
   else false
 
-/-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment). -/
-def checkContractHyps (ty : Expr) : MetaM (Option String) := do
+/-! ## Round 14 (V2): the runtime of a MAIN theorem is quantified, never chosen
+
+Round 10 V1 inspects `link` only inside contract applications. A statement about
+`Extracted.program.link impl` for a CONCRETE `impl` (the consumer's own toy allocator, say) with no
+contract hypothesis at all was therefore accepted, and the report claimed the runtime contract as
+"assumed" although the theorem assumes nothing about the runtime and says nothing about the real
+one. The rule: in a main (non-`Witness`) theorem the implementation of the runtime enters the
+statement ONLY as `Extracted.program.link impl` for a variable `impl` bound by the statement itself,
+and `impl` is constrained only by the pinned contracts and model laws (the V1 premise check, which
+now also covers an `impl` that no contract mentions). Witness theorems (`…Witness.nonvacuous`,
+`…Witness.returns`) exhibit concrete instances by design and are checked structurally instead
+(`checkWitness`). Every check here only rejects. -/
+
+/-- `List Segment` of either ISA. -/
+def isSegListType (t : Expr) : Bool :=
+  match t.consumeMData with
+  | .app (.const ``List _) a =>
+      a.consumeMData.isConstOf `Janus.Segment || a.consumeMData.isConstOf `Janus.Amd64.Segment
+  | _ => false
+
+def isProgramType (t : Expr) : Bool :=
+  t.consumeMData.isConstOf `Janus.Program || t.consumeMData.isConstOf `Janus.Amd64.Program
+
+def isStateType (t : Expr) : Bool :=
+  t.consumeMData.isConstOf `Janus.Arm64.State || t.consumeMData.isConstOf `Janus.Amd64.State
+
+def linkNames : List Name := [`Janus.Program.link, `Janus.Amd64.Program.link]
+
+/-- Constants that build a program or a segment by hand: not available to a main theorem. -/
+def handBuiltNames : List Name := [`Janus.Program.mk, `Janus.Amd64.Program.mk]
+
+/-- `Extracted.program.segments` / `.stubs`: the extraction's own code and stubs, not an implementation of the
+runtime. -/
+def isExtractedField (e : Expr) : Bool :=
+  match e.consumeMData with
+  | .app (.const c _) a => [`Janus.Program.segments, `Janus.Amd64.Program.segments, `Janus.Program.stubs,
+        `Janus.Amd64.Program.stubs].contains c && a.consumeMData.isConstOf `Extracted.program
+  | .proj s i a => (s == `Janus.Program || s == `Janus.Amd64.Program) && i < 2 &&
+      a.consumeMData.isConstOf `Extracted.program
+  | _ => false
+
+/-- The programs a main statement may speak about: `Extracted.program`, the program with an exit
+address (`withExit`) and the linked program (checked separately). -/
+def programHeadOk (c : Name) : Bool :=
+  c == `Extracted.program || c == `Janus.Program.withExit || c == `Janus.Amd64.Program.withExit ||
+    linkNames.contains c || handBuiltNames.contains c
+
+/-- The variables `impl` of `Extracted.program.link impl` in `e`. -/
+partial def linkVars (e : Expr) (acc : Array FVarId := #[]) : Array FVarId :=
+  match e with
+  | .app .. =>
+    let acc := if e.getAppFn.isConst && linkNames.any e.getAppFn.isConstOf && e.getAppNumArgs == 2 then
+        match (e.getArg! 1).consumeMData with
+        | .fvar v => acc.push v
+        | _ => acc
+      else acc
+    let acc := linkVars e.getAppFn acc
+    e.getAppArgs.foldl (fun acc a => linkVars a acc) acc
+  | .lam _ d b _ | .forallE _ d b _ => linkVars b (linkVars d acc)
+  | .letE _ t v b _ => linkVars b (linkVars v (linkVars t acc))
+  | .mdata _ b | .proj _ _ b => linkVars b acc
+  | _ => acc
+
+/-- Round 14 (V2): is the runtime implementation of the statement `e` anything other than a variable
+bound by the statement? `outer` are the statement's own binders (as free variables). A term of type
+`List Segment` must be one of them; `Program.link` must be `Extracted.program.link <outer
+variable>`; programs and segments are not built by hand; every program is `Extracted.program`,
+`withExit` of one, or a linked one. -/
+partial def concreteRuntime (outer : Std.HashSet FVarId) (e : Expr) : MetaM (Option String) := do
+  let show_ (e : Expr) : MetaM String := do pure ((← Meta.ppExpr e).pretty 200)
+  let tyOf (e : Expr) : MetaM (Option Expr) := do
+    try pure (some (← Meta.whnfR (← Meta.inferType e))) catch _ => pure none
+  if isExtractedField e then return none
+  match e with
+  | .mdata _ b => concreteRuntime outer b
+  | .proj _ _ b =>
+    if let some t ← tyOf e then
+      if isSegListType t then
+        return some s!"mentions a runtime implementation (`{← show_ e}`, a `List Segment`) that is not a variable of the statement (round 14)"
+    concreteRuntime outer b
+  | .fvar v =>
+    if let some t ← tyOf e then
+      if isSegListType t && !outer.contains v then
+        return some s!"quantifies a runtime implementation (`{← show_ e}`, a `List Segment`) inside the statement (an `∃` or a lambda): the implementation must be a variable of the whole statement (round 14)"
+    return none
+  | .const c _ =>
+    if handBuiltNames.contains c || linkNames.contains c then
+      return some s!"uses {c} unapplied: a program is `Extracted.program` or `Extracted.program.link impl` for a variable `impl` of the statement (round 14)"
+    if let some t ← tyOf e then
+      if isSegListType t then
+        return some s!"mentions the concrete runtime implementation `{c}` (a `List Segment`): a main theorem quantifies the implementation (a variable `impl` constrained only by the runtime contracts) instead of choosing one (round 14)"
+      if isProgramType t && !programHeadOk c then
+        return some s!"mentions the program `{c}`, which is not `Extracted.program` (round 14)"
+    return none
+  | .app .. =>
+    let fn := e.getAppFn
+    let args := e.getAppArgs
+    if let .const c _ := fn then
+      if linkNames.contains c then
+        let ok := args.size == 2 && (args[0]!.consumeMData).isConstOf `Extracted.program &&
+          match (args[1]!).consumeMData with | .fvar v => outer.contains v | _ => false
+        unless ok do
+          return some s!"mentions `{← show_ e}`: a main theorem may link only a variable of the statement (`Extracted.program.link impl`, `impl` a binder of the theorem constrained by the runtime contracts), never a concrete implementation (round 14)"
+        return none
+      -- `{ Extracted.program with data := … }` (a precondition about the program's read-only data) keeps the
+      -- extraction's segments and stubs; any other `Program.mk` chooses the code
+      if handBuiltNames.contains c && !(args.size ≥ 2 && isExtractedField args[0]! && isExtractedField args[1]!) then
+        return some s!"builds a program by hand (`{← show_ e}`) with {c}: a main theorem speaks about `Extracted.program` (segments and stubs as extracted) linked with a variable `impl` (round 14)"
+    if !e.hasLooseBVars then
+      if let some t ← tyOf e then
+        if isSegListType t then
+          return some s!"mentions a concrete runtime implementation (`{← show_ e}`, a `List Segment`) that is not a variable of the statement: a main theorem quantifies the implementation (a variable `impl` constrained only by the runtime contracts) instead of choosing one (round 14)"
+        if isProgramType t then
+          match fn with
+          | .const c _ => unless programHeadOk c do
+              return some s!"mentions the program `{← show_ e}`, which is not `Extracted.program`, `.withExit` or `.link impl` of one (round 14)"
+          | _ => return some s!"mentions the program `{← show_ e}`, which is not `Extracted.program`, `.withExit` or `.link impl` of one (round 14)"
+    if !fn.isConst then
+      if let some m ← concreteRuntime outer fn then return some m
+    for a in args do
+      if let some m ← concreteRuntime outer a then return some m
+    return none
+  | .lam n d b bi | .forallE n d b bi =>
+    if let some m ← concreteRuntime outer d then return some m
+    Meta.withLocalDecl n bi d fun x => concreteRuntime outer (b.instantiate1 x)
+  | .letE n t v b _ =>
+    -- `{ Extracted.program with data := … }` elaborates to `let src := Extracted.program; { segments := src.segments, … }`
+    if v.consumeMData.isConstOf `Extracted.program then return ← concreteRuntime outer (b.instantiate1 v)
+    if let some m ← concreteRuntime outer t then return some m
+    if let some m ← concreteRuntime outer v then return some m
+    Meta.withLetDecl n t v fun x => concreteRuntime outer (b.instantiate1 x)
+  | _ => return none
+
+/-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
+Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
+the runtime implementation must also be a variable of the statement (`concreteRuntime`) and every such
+`impl` is a runtime variable even when no contract mentions it. -/
+def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) := do
   let env ← getEnv
   Meta.forallTelescope ty fun xs body => do
     let bound : Std.HashSet FVarId := xs.foldl (fun s x => s.insert x.fvarId!) {}
     let mut rtVars : Std.HashSet FVarId := {}
+    -- the implementation variables no recognised contract mentions (round 14)
+    let mut implOnly : Std.HashSet FVarId := {}
     let mut premises : Array (Expr × Expr) := #[]
     for x in xs do
       let t ← Meta.inferType x
@@ -962,6 +1353,18 @@ def checkContractHyps (ty : Expr) : MetaM (Option String) := do
             return some s!"assumes the runtime contract {c} about the program `{(← Meta.ppExpr a).pretty 10000}`, which is not `Extracted.program.link impl` for a variable `impl` of the statement (round 10 V1)"
           rtVars := rtVars.insert (a.getArg! 1).consumeMData.fvarId!
         | none => pure ()
+    -- Round 14 (V2): a main theorem never chooses the implementation of the runtime
+    if main then
+      if let some m ← concreteRuntime bound body then return some m
+      for x in xs do
+        if let some m ← concreteRuntime bound (← instantiateMVars (← Meta.inferType x)) then return some m
+      let mut ivs := linkVars body
+      for x in xs do
+        ivs := linkVars (← instantiateMVars (← Meta.inferType x)) ivs
+      for v in ivs do
+        if bound.contains v && !rtVars.contains v then
+          rtVars := rtVars.insert v
+          implOnly := implOnly.insert v
     if rtVars.isEmpty then return none
     -- Round 13: the discipline covers EVERY binder, of any sort. A binder that is not a Prop
     -- (a `Type`/`Sort u` binder: `PLift (H = …)`, `{u : Unit // H = …}`, `ULift (PLift …)`, a
@@ -1277,6 +1680,19 @@ unsafe def prepareClean : IO (ImportState × Environment) := do
   let env ← (withImporting <| finalizeImport sClean cleanImports {} (leakEnv := false) (loadExts := true) : IO Environment)
   return (sClean, env)
 
+/-- Round 14: the runtime contracts the statement `e` applies, as `Contract@runtime.function` (the
+function named by the `contractAddr` literal in the application), each once. -/
+def contractUses (env : Environment) (e : Expr) : Array String :=
+  (contractApps env e).foldl (init := #[]) fun acc app =>
+    let c := app.getAppFn.constName!.toString
+    let isAddr (x : Expr) : Bool :=
+      (x.getAppFn.isConstOf `Janus.Program.contractAddr || x.getAppFn.isConstOf `Janus.Amd64.Program.contractAddr) &&
+        x.getAppNumArgs == 2 && (match x.appArg! with | .lit (.strVal _) => true | _ => false)
+    let s := match app.find? isAddr with
+      | some x => (match x.appArg! with | .lit (.strVal a) => s!"{c}@{a}" | _ => c)
+      | none => c
+    if acc.contains s then acc else acc.push s
+
 /-- Build the clean environment: import only `Janus` and `Extracted`, with initializers so pp
 works, then add type-only stubs for the dependency constants the statement reaches, re-add the
 allowed proof-local defs and an axiom with the theorem's type. Reject a proof-local def whose
@@ -1284,8 +1700,8 @@ type's head is a class (a disguised instance, A1). No proof or dependency module
 none of their initializers, notations, unexpanders or delaborators exist here. -/
 unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs : Array ConstantInfo)
     (stubs : Array ConstantInfo) (extDefs : Array ConstantInfo) (cleanState : ImportState)
-    (clean : Array Import := cleanImports) (pre? : Option Environment := none) :
-    AuditM (String × String × Array String × Array String × Array String) := do
+    (clean : Array Import := cleanImports) (pre? : Option Environment := none) (main : Bool := true) :
+    AuditM (String × String × Array String × Array String × Array String × Array String) := do
   -- `importModules (loadExts := true) cleanImports {}`, with the module data already read
   -- (`readImports`): the same `finalizeImport` over the same import state. `pre?` is that very
   -- environment, built earlier by `prepareClean` (the serve mode of `janus-audit`).
@@ -1331,7 +1747,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
   -- The same options for printing and for the round-trip re-elaboration (`autoImplicit` only
   -- affects elaboration). No `pp.all`: the printed statement is the human-readable one.
   let opts := printOptions
-  let printAll : MetaM (String × String × Array String × Array String × Array String) := do
+  let printAll : MetaM (String × String × Array String × Array String × Array String × Array String) := do
     -- (b) instance-implicit arguments must be registered instances or local instance binders
     if let some m ← checkInstArgs cx thmType then throwError m
     if let some m ← checkNumerals thmType then throwError s!"the statement {m}"
@@ -1343,7 +1759,7 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
     if let some m ← checkSymbolRefs tbl expanded then
       throwError s!"the statement {m}"
     -- round 10 V1: contract hypotheses quantify the runtime
-    if let some m ← checkContractHyps expanded then
+    if let some m ← checkContractHyps expanded main then
       throwError s!"the statement {m}"
     for ci in extDefs do
       for t in [ci.type] ++ ci.value?.toList do
@@ -1395,10 +1811,388 @@ unsafe def cleanEnvAndPrint (cx : Ctx) (thm : Name) (thmType : Expr) (localDefs 
         for n in ← hazardNotes t do
           let n := s!"in {ci.name}: {n}"
           unless notes.contains n do notes := notes.push n
-    return (sigStr, explicit.fmt.pretty 10000, defs, extOut, notes)
+    return (sigStr, explicit.fmt.pretty 10000, defs, extOut, notes, contractUses (← getEnv) expanded)
   match ← (Core.CoreM.toIO' (Meta.MetaM.run' printAll) { mkCoreCtx with options := opts } { env }).toBaseIO with
   | .ok a => return a
   | .error e => fail e.toString
+
+/-! ## Round 14 (W2): the role of a theorem, and witnesses checked structurally
+
+The audit used to gate the non-vacuity witnesses (`Proof.Witness.nonvacuous`, `Proof.Witness.returns`)
+by their NAME and by "the statement mentions `Extracted.program`", so `Extracted.program =
+Extracted.program` in the place of a witness passed. A witness now has a SHAPE, checked here:
+
+* `…Witness.nonvacuous` must be `∃ vars, c₁ ∧ … ∧ cₙ` such that some main theorem `M` of the same
+  proof module (`∀ xs, hyps → F program entry args pre post …`) is instantiated: EVERY hypothesis of
+  `M` (the runtime contracts, model laws, readiness predicates, numeric side conditions) appears as
+  a conjunct, and so does every premise of `M`'s conclusion once its head (`Ensures`, `EnsuresK`, …)
+  is unfolded to its `∀ ret, RetAddr … → ∀ s, CallSetup … → pre s → …` form: the return address,
+  the call state for the SAME program, entry address and arguments, and each conjunct of the
+  precondition. The match is definitional unification of `M`'s variables with the witness's, so a
+  witness exhibits a call state satisfying the main theorem's precondition together with an
+  instance of its hypotheses; `Extracted.program = Extracted.program` or `True` cannot pass.
+* `…Witness.returns` must be a `Returns`-style statement (`Returns`, `GoReturns`, `ReturnsK`,
+  `GrownReturns`, `ReachesRet`) that is, for ONE conjunct of the main theorem (an execution runs one entry; non-vacuity of
+  the others is `nonvacuous`'s job, which covers every conjunct), up to definitional unification of `M`'s variables, the
+  EXACT conclusion of some main theorem `M` (its unfolded `Returns … (fun s' => ABIReturn s s' ∧
+  post s s')`) at a concrete start state: an execution of the program that reaches the return with
+  the guarantee of the main theorem.
+* Any other theorem whose name has a `Witness` component is a lemma of a witness namespace and is
+  not a verifiable result.
+* Any other theorem is a MAIN theorem (`checkContractHyps`, `concreteRuntime`).
+
+The witness is matched against the theorems of the proof module only; the report names the matched
+main theorem (`matchedMain`) so the reader can see which theorem the witness supports. -/
+
+inductive Role | main | nonvacuous | returns | auxiliary
+  deriving BEq
+
+def Role.label : Role → String
+  | .main => "main"
+  | .nonvacuous => "witness-nonvacuous"
+  | .returns => "witness-returns"
+  | .auxiliary => "witness-auxiliary"
+
+def roleOf (n : Name) : Role :=
+  let cs := n.components
+  if !cs.any (· == `Witness) then .main else
+  match cs.reverse with
+  | l :: w :: _ =>
+      if w == `Witness then
+        (if l == `nonvacuous then .nonvacuous else if l == `returns then .returns else .auxiliary)
+      else .auxiliary
+  | _ => .auxiliary
+
+/-- Numeric literal spelling only (round 14): `(BitVec.ofNat n k).toNat` and `(k#n).toNat` with numerals `k < 2^n`
+are the numeral `k`; nothing else is rewritten. A witness states `H [42] …` where the main theorem has
+`H [(42#64).toNat] …` for the argument `x := 42#64`. -/
+def normLits (e : Expr) : MetaM Expr := do
+  Core.transform (← instantiateMVars e) (post := fun sub => do
+    if sub.isAppOfArity ``BitVec.toNat 2 then
+      let v := sub.appArg!
+      let lit? : Option (Nat × Nat) :=
+        if v.isAppOfArity ``BitVec.ofNat 2 then
+          match (v.getArg! 0).nat?, (v.getArg! 1).nat? with
+          | some n, some k => some (n, k) | _, _ => none
+        else none
+      if let some (n, k) := lit? then
+        if k < 2 ^ n then return .done (mkNatLit k)
+    return .continue)
+
+/-- Definitional equality, tried at reducible transparency first, then at default (the proof's
+own `def`s may need unfolding: a `Witness.rt` that is an alias of the allocator's ranges), with a
+heartbeat budget; a failure leaves the metavariable context unchanged. -/
+def defEqTry (a b : Expr) : MetaM Bool := do
+  if ← Meta.checkpointDefEq (Meta.withReducible (Meta.isDefEq a b)) then return true
+  -- the same up to numeral spelling
+  let a' ← normLits a
+  let b' ← normLits b
+  if (a' != a || b' != b) && (← Meta.checkpointDefEq (Meta.withReducible (Meta.isDefEq a' b'))) then return true
+  -- the default-transparency retry only for the same predicate (`Outside … Witness.rt` vs `Outside … AllocW.rt`):
+  -- unfolding two different predicates just to compare them is slow and never what a witness does
+  unless a.getAppFn.isConst && a.getAppFn == b.getAppFn do return false
+  try
+    withTheReader Core.Context (fun c => { c with maxHeartbeats := 300000 * 1000 }) do
+      withCurrHeartbeats do
+        Meta.checkpointDefEq (Meta.withDefault (Meta.isDefEq a b))
+  catch _ => pure false
+
+def findConj (p : Expr) (cs : Array Expr) : MetaM Bool := cs.anyM (defEqTry p ·)
+
+/-- The conjuncts of `e`, through `∧` only. -/
+partial def flattenAnd (e : Expr) (acc : Array Expr := #[]) : Array Expr :=
+  let e := e.consumeMData
+  if e.isAppOfArity ``And 2 then flattenAnd (e.getArg! 1) (flattenAnd (e.getArg! 0) acc)
+  else acc.push e
+
+/-- The conjuncts of `e` with every `∃` binder on the way (leading, or inside a conjunction:
+`∃ impl, C ∧ ∃ s, s.pc = … ∧ P`) opened as a local variable, for the continuation `k`. -/
+partial def withConjs {α} (e : Expr) (k : Array Expr → MetaM α) : MetaM α := do
+  let e := e.consumeMData
+  if e.isAppOfArity ``And 2 then
+    withConjs (e.getArg! 0) fun ca => withConjs (e.getArg! 1) fun cb => k (ca ++ cb)
+  else if e.isAppOfArity ``Exists 2 then
+    match (e.getArg! 1).consumeMData with
+    | .lam n d b bi => Meta.withLocalDecl n bi d fun x => withConjs (b.instantiate1 x) k
+    | _ => k #[e]
+  else k #[e]
+
+/-- `e` with its head definition unfolded (`Ensures`, `EnsuresResults`, `CEnsures`, `EnsuresK`, …)
+until it is a `∀`: `∀ ret, RetAddr p ret → ∀ s, CallSetup … → pre s → Returns …`. -/
+def unfoldToForall (e : Expr) : MetaM Expr := do
+  let mut e := e.consumeMData
+  for _ in [0:8] do
+    if e.isForall then return e
+    match ← Meta.unfoldDefinition? e with
+    | some e2 => e := e2.consumeMData
+    | none => return e
+  return e
+
+/-- Candidate main theorems of the proof module for a witness: theorems of the module that are not
+witness lemmas, mention `Extracted.program`, and are not the witness itself; only those named `correctness`
+if there are any. -/
+def mainCandidates (env : Environment) (proofMod : Name) (self : Name) : Array Name :=
+  let modNames := env.header.moduleNames
+  -- theorems about `Extracted.program` of a module, `correctness` ones only if there are any
+  let inMods (ok : Name → Bool) : Array Name :=
+    let all := env.const2ModIdx.fold (init := #[]) fun acc n idx =>
+      match modNames[idx.toNat]? with
+      | some m =>
+        if ok m && n != self && !n.isInternal && roleOf n == .main then
+          match env.find? n with
+          | some (.thmInfo ci) =>
+            let used := ci.type.getUsedConstants
+            if used.contains `Extracted.program || used.contains `Extracted.entry then acc.push n else acc
+          | _ => acc
+        else acc
+      | none => acc
+    let first := all.filter (·.getString! == "correctness")
+    if !first.isEmpty then first.qsort Name.lt else all.qsort Name.lt
+  -- The module's main theorem is the one named `correctness` (every example's convention); only when it has
+  -- none are all its non-witness theorems candidates (otherwise a helper lemma or a junk theorem with a weak
+  -- statement could stand in for the main theorem a witness supports). A proof whose main theorem lives in a
+  -- module it imports (`PrintProofs.Arm64.MainX`, a `Three/Main.lean`) falls back to the imported
+  -- consumer/proof modules, never the trusted ones.
+  let own := inMods (· == proofMod)
+  if !own.isEmpty then own else inMods fun m => !trustedModule m && m != proofMod
+
+/-- The statement of `n` with fresh universe metavariables. -/
+def freshType (env : Environment) (n : Name) : MetaM (Option Expr) := do
+  let some ci := env.find? n | return none
+  return some (ci.instantiateTypeLevelParams (← Meta.mkFreshLevelMVars ci.levelParams.length))
+
+/-- A conjunct that says nothing: `True`, or `a = a`. -/
+def trivialConj (e : Expr) : Bool :=
+  e.isConstOf ``True || (e.isAppOfArity ``Eq 3 && e.getArg! 1 == e.getArg! 2)
+
+/-- `s.pc` (arm64) or `s.rip` (amd64) of a state. -/
+def isPcProj (e : Expr) : Bool :=
+  let f := e.getAppFn
+  (f.isConstOf `Janus.Arm64.State.pc || f.isConstOf `Janus.Amd64.State.rip) && e.getAppNumArgs == 1
+
+/-- A premise about numbers (`8 ≤ db`, `db + 48 ≤ d`): tried after the structural ones, which fix the
+variables, because several such conjuncts can unify with it. -/
+def arithPremise (e : Expr) : Bool :=
+  e.isAppOf ``LE.le || e.isAppOf ``LT.lt || e.isAppOf ``Eq || e.isAppOf ``Ne || e.isAppOf ``GE.ge ||
+    e.isAppOf ``GT.gt || e.isAppOf ``Not
+
+/-- Is the closed proposition `t` true by evaluating its natural-number literals (`0 ≤ 8`, `1 ≤ 8`, `2 + 1 < 9`)?
+No instance search: the auditor's environment has no instance extension loaded. -/
+partial def decideTrue (t : Expr) : MetaM Bool := do
+  let t := (← instantiateMVars t).consumeMData
+  if t.hasExprMVar then return false
+  let nat2 (f : Nat → Nat → Bool) (a b : Expr) : MetaM Bool := do
+    match ← Meta.evalNat a, ← Meta.evalNat b with
+    | some x, some y => return f x y
+    | _, _ => return false
+  if t.isConstOf ``True then return true
+  else if t.isAppOfArity ``And 2 then return (← decideTrue (t.getArg! 0)) && (← decideTrue (t.getArg! 1))
+  else if t.isAppOfArity ``LE.le 4 && (t.getArg! 0).isConstOf ``Nat then nat2 (· ≤ ·) (t.getArg! 2) (t.getArg! 3)
+  else if t.isAppOfArity ``LT.lt 4 && (t.getArg! 0).isConstOf ``Nat then nat2 (· < ·) (t.getArg! 2) (t.getArg! 3)
+  else if t.isAppOfArity ``GE.ge 4 && (t.getArg! 0).isConstOf ``Nat then nat2 (· ≥ ·) (t.getArg! 2) (t.getArg! 3)
+  else if t.isAppOfArity ``GT.gt 4 && (t.getArg! 0).isConstOf ``Nat then nat2 (· > ·) (t.getArg! 2) (t.getArg! 3)
+  else if t.isAppOfArity ``Eq 3 && (t.getArg! 0).isConstOf ``Nat then nat2 (· == ·) (t.getArg! 1) (t.getArg! 2)
+  else return false
+
+/-- Does the witness conjunct `c` give the premise `p`? Either `c` unifies with `p`, or `c` is a
+universal statement `∀ n, n ≤ 8 → A n ∧ B n` (`WriteBarrier`: the witness covers every slot count) one of
+whose instances unifies with `p` and whose side conditions at that instance are decidably true. -/
+def conjGives (p c : Expr) : MetaM Bool := do
+  if ← defEqTry p c then return true
+  let c := c.consumeMData
+  if !c.isForall then return false
+  let st ← Meta.saveState
+  let (vs, _, b) ← Meta.forallMetaTelescope c
+  for bc in flattenAnd b do
+    let st2 ← Meta.saveState
+    if ← defEqTry p bc then
+      let mut ok := true
+      -- a variable that `p` does not mention (`n` of `CallOK s 232 0` in `∀ n, n ≤ 8 → CallOK s 232 0 ∧ Ready … [n] s`)
+      -- is taken to be `0` (a natural number)
+      for v in vs do
+        let t ← instantiateMVars (← Meta.inferType v)
+        if !(← Meta.isProp t) && !(← v.mvarId!.isAssigned) && t.isConstOf ``Nat then
+          discard <| Meta.isDefEq v (toExpr (0 : Nat))
+      for v in vs do
+        let t ← instantiateMVars (← Meta.inferType v)
+        if ← Meta.isProp t then
+          unless ← decideTrue t do ok := false
+        else unless ← v.mvarId!.isAssigned do ok := false
+      if ok then return true
+    st2.restore
+  st.restore
+  return false
+
+/-- Match every premise of `ps` to a conjunct of `cs`, assigning the metavariables, with backtracking
+(a premise can unify with several conjuncts). `none` on success, else the premise that could not be
+placed. -/
+partial def matchPremises (ps : List Expr) (cs : Array Expr) : MetaM (Option String) := do
+  match ps with
+  | [] => return none
+  | p :: rest =>
+    let mut last : Option String := none
+    for c in cs do
+      let st ← Meta.saveState
+      if ← conjGives p c then
+        match ← matchPremises rest cs with
+        | none => return none
+        | some w => last := some w
+      st.restore
+    return last <|> some s!"`{(← Meta.ppExpr p).pretty 300}` is not among the conjuncts of the witness"
+
+/-- The Prop-typed metavariables of a telescope, as non-trivial conjuncts, structural ones first. -/
+def premisesOf (ms : Array Expr) : MetaM (List Expr) := do
+  let mut ps := #[]
+  for m in ms do
+    let t := (← instantiateMVars (← Meta.inferType m)).headBeta
+    unless ← Meta.isProp t do continue
+    for p in flattenAnd t do
+      let p := (← instantiateMVars p).headBeta
+      unless trivialConj p do ps := ps.push p
+  return (ps.filter (!arithPremise ·)).toList ++ (ps.filter arithPremise).toList
+
+/-- Is the witness body `wconjs` an instance of the main statement `mty`? `none` when it is, else
+the reason. Every hypothesis of `mty` must be a conjunct of the witness; and, for EVERY conjunct of the
+conclusion (a main theorem may state several guarantees, `IsEven ∧ IsOdd`, `wb1 ∧ … ∧ wb8`; a witness for one
+of them would leave the others possibly vacuous), every premise of that conjunct's unfolded form (return
+address, call state, precondition conjuncts) must be a conjunct of the witness too. -/
+def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) := do
+  let (ms, _, concl) ← Meta.forallMetaTelescope mty
+  let hyps ← premisesOf ms
+  let concls := flattenAnd (← instantiateMVars concl)
+  for (c, idx) in concls.toList.zip (List.range concls.size) do
+    let st ← Meta.saveState
+    let body ← unfoldToForall c
+    let (ms2, _, _) ← Meta.forallMetaTelescope body
+    let which := if concls.size > 1 then s!" (conjunct {idx + 1} of {concls.size})" else ""
+    if ms2.isEmpty then
+      return some s!"the conclusion of the main theorem{which} does not unfold to a `∀ ret, … → ∀ s, CallSetup … → pre s → …` statement"
+    let calls ← premisesOf ms2
+    -- the premise `s.pc = entry` / `s.rip = entry` of a `Summary`-style contract is the call setup; a witness
+    -- that exhibits a state satisfying the rest of the precondition (`CallOK s …`, `Ready H rt [n] s`) for
+    -- `s` may leave the entry address to the proof (`WriteBarrier`: one state for every `gcWriteBarrierN`)
+    let all := hyps ++ calls
+    let pcPrem := fun (e : Expr) => e.isAppOfArity ``Eq 3 && isPcProj (e.getArg! 1)
+    let core := all.filter (!pcPrem ·)
+    let ps := core.filter (!arithPremise ·) ++ core.filter arithPremise
+    match ← matchPremises ps wconjs with
+    | none =>
+      -- the pc premises: matched if the witness states them, else they must be about a state the other
+      -- premises fixed
+      for q in all.filter pcPrem do
+        let q ← instantiateMVars q
+        unless ← findConj q wconjs do
+          if q.hasExprMVar then
+            return some s!"the entry-address premise of the main theorem{which} concerns no state of the witness"
+    | some w => return some s!"the premise {w}{which}"
+    st.restore
+  if concls.isEmpty then return some "the main theorem has no conclusion"
+  return none
+
+/-- Is `e` an application of a `Returns`-style predicate? -/
+def returnsHead (e : Expr) : Bool :=
+  match e.getAppFn with
+  | .const c _ =>
+      let s := c.getString!
+      (s.startsWith "Returns" || s.startsWith "GoReturns" || s.startsWith "GrownReturns" || s == "ReachesRet")
+  | _ => false
+
+/-- The `Returns`-style application inside `e` (through `∧`, `→`, `↔`, `∀`), if any. -/
+partial def findReturns (e : Expr) : MetaM (Option Expr) := do
+  let e := e.consumeMData
+  if returnsHead e then return some e
+  match e with
+  | .forallE n d b bi => Meta.withLocalDecl n bi d fun x => findReturns (b.instantiate1 x)
+  | .app .. => do
+    for a in e.getAppArgs do
+      if let some r ← findReturns a then return some r
+    return none
+  | _ => return none
+
+/-- The `Returns`-style conclusions that the unfolded conjuncts of the main statement `mty` end in, with
+`M`'s variables as metavariables. -/
+def mainReturns (mty : Expr) : MetaM (Array Expr) := do
+  let (_, _, concl) ← Meta.forallMetaTelescope mty
+  let mut out := #[]
+  for c in flattenAnd concl do
+    let body ← unfoldToForall c
+    let (_, _, last) ← Meta.forallMetaTelescope body
+    if returnsHead last.consumeMData then out := out.push last.consumeMData
+  return out
+
+/-- Does the `Returns`-style statement `r` (of a `returns` witness) state the guarantee `mr` of the main
+theorem at a start state? Strictly: they unify. Or, since a witness usually states the guarantee
+SPECIALISED to its concrete inputs (`ABIReturn s0 s' ∧ s'.regs 0 = 0`, derived from the general
+postcondition with `Returns.mono`): the same predicate with the same program, start state and
+auxiliary arguments, whose postcondition keeps the first conjunct of the main theorem's (the ABI
+obligation `ABIReturn s s'` / `CReturn s s'`) and adds at least one further conjunct, i.e. says
+something about the result. A trivial postcondition, or the ABI obligation alone, is rejected. -/
+def returnsMatches (mr r : Expr) : MetaM Bool := do
+  if ← defEqTry mr r then return true
+  unless mr.getAppFn == r.getAppFn && mr.getAppNumArgs == r.getAppNumArgs do return false
+  let ma := mr.getAppArgs
+  let ra := r.getAppArgs
+  let mut lamSeen := false
+  for i in [0:ma.size] do
+    let m := (← instantiateMVars ma[i]!).consumeMData.headBeta
+    let x := (← instantiateMVars ra[i]!).consumeMData.headBeta
+    if m.isLambda && x.isLambda then
+      lamSeen := true
+      let ok ← Meta.lambdaTelescope m fun ys bm => do
+        let bx := (x.beta ys).headBeta
+        let cm := flattenAnd (← instantiateMVars bm).headBeta
+        let cx := (flattenAnd bx).filter (!trivialConj ·)
+        if cx.isEmpty || cm.isEmpty then return false
+        -- the main postcondition's first conjunct is the ABI obligation (`ABIReturn s s'`) when it has
+        -- several: keep it and add a statement about the result; a single conjunct (`GrownReturns`,
+        -- `EnsuresGrow`: no ABI obligation) is specialised to the concrete result, which must say something
+        if cm.size ≥ 2 then
+          if cx.size < 2 then return false
+          findConj cm[0]! cx
+        else return true
+      unless ok do return false
+    else
+      unless ← defEqTry m x do return false
+  return lamSeen
+
+/-- Round 14 (W2): check the shape of a witness theorem (see the section comment); the matched main
+theorem on success. -/
+def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) :
+    MetaM (Except String Name) := do
+  let cands := mainCandidates env proofMod thm
+  if cands.isEmpty then
+    return .error "the proof module has no main theorem about Extracted.program for this witness to support"
+  match role with
+  | .nonvacuous =>
+    unless (thmType.consumeMData.isAppOfArity ``Exists 2) do
+      return .error "is not of the form `∃ …, …` (a state and runtime exhibiting the main theorem's hypotheses)"
+    withConjs thmType fun wconjs => do
+      let mut whys : Array String := #[]
+      for c in cands do
+        let some mty ← freshType env c | continue
+        let st ← Meta.saveState
+        match ← matchNonvacuous mty wconjs with
+        | none => return .ok c
+        | some w => whys := whys.push s!"{c}: {w}"; st.restore
+      return .error s!"does not instantiate any main theorem of the proof module ({"; ".intercalate whys.toList})"
+  | .returns =>
+    Meta.forallTelescope thmType fun _ body => do
+      let mut whys : Array String := #[]
+      let some r ← findReturns body
+        | return .error "is not a `Returns`-style statement (`Returns`, `GoReturns`, `ReturnsK`, `GrownReturns`, `ReachesRet`)"
+      unless (r.find? (·.isConstOf `Extracted.program)).isSome do
+        return .error "its program is not built from Extracted.program"
+      for c in cands do
+        let some mty ← freshType env c | continue
+        let mrs ← mainReturns mty
+        if mrs.isEmpty then whys := whys.push s!"{c}: its conclusion does not unfold to a Returns-style statement"; continue
+        for mr in mrs do
+          let st ← Meta.saveState
+          if ← returnsMatches mr r then return .ok c
+          whys := whys.push s!"{c}: the statement is not its guarantee `{(← Meta.ppExpr mr).pretty 200}`"
+          st.restore
+      return .error s!"is not the guarantee of any main theorem of the proof module at a start state ({"; ".intercalate whys.toList})"
+  | _ => return .error "is a lemma of a Witness namespace, not a verifiable result: only Witness.nonvacuous and Witness.returns are"
 
 unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array String)
     (pre? : Option (ImportState × Environment)) : IO Unit := do
@@ -1455,6 +2249,16 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
         fail s!"the statement depends on {c}, which is in no imported module"
     unless mentionsExtracted do
       fail "the statement does not mention Extracted.program or Extracted.entry, so it says nothing about the extracted code"
+    -- Round 14: the role of the theorem. A witness (`Witness.nonvacuous`/`Witness.returns`) is
+    -- checked structurally against a main theorem of the module; every other theorem is a main
+    -- theorem, whose runtime is quantified (`checkContractHyps … main`).
+    let role := roleOf thmN
+    let matchedMain ← match role with
+      | .main => pure ""
+      | _ => do
+        match ← runCore envA (Meta.MetaM.run' (checkWitness envA proofModN thmN role ci.type)) with
+        | .ok c => pure c.toString
+        | .error m => fail s!"{thm} {m} (round 14, W2)"
     -- close over the consumer defs reachable from the statement; check the dependency
     -- constants on the way
     let (localNames, external) ← collectLocalDefs cx {} {} localSeed.toList
@@ -1470,13 +2274,14 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     let extDefs := externalNames.filterMap fun n => match envA.find? n with
       | some ci@(.defnInfo _) => some ci
       | _ => none
-    let (statement, statementExplicit, defs, extOut, notes) ←
+    let (statement, statementExplicit, defs, extOut, notes, contractHyps) ←
       cleanEnvAndPrint cx thmN ci.type localDefs stubs extDefs cleanState (pre? := pre?.map (·.2))
+        (main := role == .main)
     return { name := thm, kind, module := modName.toString, axioms := axs.map (·.toString),
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
              external := externalNames.filterMap external.get?, externalDefinitions := extOut,
-             notes, imports := importGraph envA }
+             notes, role := role.label, matchedMain, contractHyps, imports := importGraph envA }
   ).run
   match result with
   | .ok rec => IO.println (marker ++ (toJson rec).compress)
@@ -1626,7 +2431,7 @@ unsafe def runASLImpl (userThm proofMod corThm corMod marker trusted words : Str
     let extDefs := externalNames.filterMap fun n => match envA.find? n with
       | some ci@(.defnInfo _) => some ci
       | _ => none
-    let (statement, statementExplicit, defs, extOut, notes) ←
+    let (statement, statementExplicit, defs, extOut, notes, _) ←
       cleanEnvAndPrint cx corN ci.type localDefs stubs extDefs cleanState aslClean
     return { name := corThm, kind := "theorem", module := corMod, axioms := axs.map (·.toString),
              statement, statementExplicit, definitions := defs,

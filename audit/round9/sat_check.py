@@ -78,6 +78,17 @@ for f, rel, satmod in srcs:
         after = text.split(":=", 1)[1]
         if re.match(r"\s*(∀[^,]*,\s*)?([\w.]*\.)?Summary\b", after) or re.search(r"Contract(64)?$", m.group(1)):
             contracts.append((f, m.group(1), satmod))
+# Round 14: `--emit` prints the pinned runtime-contract predicates (module, short name), the allowlist that
+# Janus/Tools/Audit.lean (`pinnedContracts`) embeds: every contract found above except the external-stub
+# `: Contract` values. The SAT row compares the embedded list with it (a new framework contract predicate
+# must be added on purpose; nothing becomes a contract by accident).
+def pinned_entries():
+    return sorted({(rel[:-5].replace("/", "."), c) for f, c, _ in contracts if c not in external
+                   for rel in [dict((a, b) for a, b, _ in srcs)[f]]})
+if "--emit" in sys.argv:
+    for m, c in pinned_entries():
+        print('  ("%s", "%s"),' % (m, c))
+    sys.exit(0)
 imports = set(re.findall(r"^import (\S+)", open(FILES["Janus.lean"], encoding="utf-8").read(), re.M))
 sat = {}
 for rel, p in FILES.items():
@@ -135,5 +146,17 @@ for f, c, satmod in contracts:
     else:
         missing += 1
         print("  SAT MISSING %-22s %-20s no %s_satisfiable in %s (imported by Janus.lean)" % (c, f, w, satmod))
+# the auditor's embedded allowlist equals the contract list of the tree
+audit_src = open(os.path.join(root, "Janus", "Tools", "Audit.lean"), encoding="utf-8").read() if os.path.isfile(os.path.join(root, "Janus", "Tools", "Audit.lean")) else ""
+mm = re.search(r"-- BEGIN pinnedContracts\n(.*?)-- END pinnedContracts", audit_src, re.S)
+if mm:
+    emb = sorted(set(re.findall(r'\("([\w.]+)", "(\w+)"\)', mm.group(1))))
+    want = pinned_entries()
+    if emb != want:
+        missing += 1
+        print("SAT MISSING pinnedContracts of Janus/Tools/Audit.lean differs from the tree's contracts: +%s -%s" %
+              (sorted(set(want) - set(emb))[:5], sorted(set(emb) - set(want))[:5]))
+    else:
+        print("  SAT ok      pinnedContracts allowlist (%d predicates) matches the tree" % len(emb))
 print("SAT contracts=%d witnessed=%d open=%d missing=%d" % (len(contracts), ok, opened, missing))
 sys.exit(1 if missing or not contracts else 0)

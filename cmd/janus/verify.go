@@ -81,6 +81,16 @@ type verifiedReport struct {
 	// functions that were not extracted, whose behaviour the theorem can only use through a
 	// contract hypothesis in its statement.
 	Contracts []string `json:"contracts,omitempty"`
+	// Role is what the verified theorem is (round 14): "main" (a correctness statement, the runtime
+	// quantified), "witness-nonvacuous" or "witness-returns" (a concrete instance: it shows the main
+	// theorem's hypotheses are satisfiable / that it fires, and is NOT a correctness claim).
+	Role string `json:"role,omitempty"`
+	// MatchedMain is, for a witness, the main theorem of the proof module that it instantiates.
+	MatchedMain string `json:"matchedMain,omitempty"`
+	// ContractHyps are the runtime contracts the STATEMENT applies, computed from the statement
+	// itself (round 14): "NewobjectContract@runtime.newobject". Empty: the statement assumes
+	// nothing about the runtime, whatever the extraction left out (Contracts).
+	ContractHyps []string `json:"contractHyps,omitempty"`
 	// Kernel are the extraction's `.syscall` stubs ("name @ address"): the SVC/SYSCALL
 	// instructions, environment reads and vDSO clock functions whose effect only the kernel
 	// semantics of Janus/Contracts/Syscall*.lean gives (WP-C). Traps are its `.trap` stubs.
@@ -113,6 +123,9 @@ type auditResult struct {
 	External          []string   `json:"external"`            // dependency constants the statement uses
 	ExternalDefs      []string   `json:"externalDefinitions"` // dependency defs, with bodies (round 7 J1)
 	Notes             []string   `json:"notes"`               // surprising standard operations (round 7 K1)
+	Role              string     `json:"role"`                // round 14: main, witness-nonvacuous, witness-returns
+	MatchedMain       string     `json:"matchedMain"`         // round 14: for a witness, the main theorem it supports
+	ContractHyps      []string   `json:"contractHyps"`        // round 14: the contracts the STATEMENT applies ("Contract@runtime.fn")
 	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
 }
 
@@ -397,9 +410,8 @@ func printVerifiedAt(stdout io.Writer, outdir, reportPath string, r *verifiedRep
 		fmt.Fprintf(stdout, "  Kernel replay: skipped (%s)\n", r.KernelReplay.Note)
 	}
 	fmt.Fprintf(stdout, "  Lean: %s\n", r.LeanVersion)
-	if len(r.Contracts) > 0 {
-		fmt.Fprintf(stdout, "  Runtime contracts assumed: %s (not extracted; see the contract hypotheses of the statement)\n",
-			termSafe(strings.Join(r.Contracts, ", ")))
+	for _, l := range roleLines(r) {
+		fmt.Fprintln(stdout, l)
 	}
 	if len(r.Kernel) > 0 {
 		fmt.Fprintf(stdout, "  Kernel interface: %s (.syscall stubs: their effect is the kernel contract of Janus.Kernel, under ReturnsK/EnsuresK only)\n",
@@ -1175,6 +1187,9 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			Sandbox:           sb.info(),
 			Definitions:       ar.Definitions,
 			Contracts:         cr.Identity.contractList(),
+			Role:              ar.Role,
+			MatchedMain:       ar.MatchedMain,
+			ContractHyps:      ar.ContractHyps,
 			Notes:             ar.Notes,
 		}
 		report.Kernel, report.Traps = cr.Identity.kernelLists()
@@ -1348,6 +1363,7 @@ func cmdVerifyMany(outdir string, opts map[string]string, flags map[string]bool,
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
+	checkWitnessSupport(outdir, outs)
 	failed := 0
 	var aslErr error
 	mj := multiJSON{Schema: 1}
@@ -1498,4 +1514,90 @@ func withoutEnv(env []string, name string) []string {
 		}
 	}
 	return out
+}
+
+// roleLines are the report lines for the role of the verified theorem and for the runtime
+// contracts, computed from the audited STATEMENT (round 14): a contract is "assumed" only when the
+// statement applies it as a hypothesis (or, for a witness, exhibits it); the extraction's list of
+// functions it left out is shown separately, so a theorem that assumes nothing about the runtime
+// cannot read as one that assumes the pinned contract.
+func roleLines(r *verifiedReport) []string {
+	var out []string
+	switch r.Role {
+	case "main":
+		out = append(out, "  Role: main theorem (the runtime implementation is a variable of the statement, constrained only by the runtime contracts)")
+	case "witness-nonvacuous", "witness-returns":
+		what := "its hypotheses and precondition are satisfiable together"
+		if r.Role == "witness-returns" {
+			what = "it fires on a concrete start state"
+		}
+		out = append(out, fmt.Sprintf("  Role: WITNESS, not a correctness claim: a concrete instance showing %s, for the main theorem %s (it uses a concrete runtime implementation; the main theorem must be verified separately)",
+			what, termSafe(r.MatchedMain)))
+	}
+	if len(r.ContractHyps) > 0 {
+		out = append(out, fmt.Sprintf("  Runtime contracts assumed: %s (not extracted; the statement applies them as hypotheses)",
+			termSafe(strings.Join(r.ContractHyps, ", "))))
+	} else if r.Role != "" {
+		out = append(out, "  Runtime contracts assumed: none (the statement applies no runtime-contract hypothesis)")
+	}
+	var missing []string
+	for _, c := range r.Contracts {
+		name := strings.Fields(c)
+		if len(name) == 0 {
+			continue
+		}
+		found := false
+		for _, h := range r.ContractHyps {
+			if strings.HasSuffix(h, "@"+name[0]) {
+				found = true
+			}
+		}
+		if !found {
+			missing = append(missing, c)
+		}
+	}
+	if len(missing) > 0 && r.Role == "main" {
+		out = append(out, fmt.Sprintf("  Extracted without code, NO contract hypothesis in the statement: %s (the statement says nothing about their behaviour)",
+			termSafe(strings.Join(missing, ", "))))
+	}
+	if r.Role == "" && len(r.Contracts) > 0 {
+		out = append(out, fmt.Sprintf("  Runtime contracts assumed: %s (not extracted; see the contract hypotheses of the statement)",
+			termSafe(strings.Join(r.Contracts, ", "))))
+	}
+	return out
+}
+
+// checkWitnessSupport (round 14): a witness verified together with main theorems must support one of
+// THEM. The audit matches a witness against the module's main theorem (`matchedMain`); if that theorem
+// is not among the main theorems verified in this same call, the witness would sit beside a
+// correctness claim it says nothing about, so it fails and its report is withdrawn.
+func checkWitnessSupport(outdir string, outs []thmOutcome) {
+	mains := map[string]bool{}
+	for _, o := range outs {
+		if o.Err == nil && o.Report != nil && o.Report.Role == "main" {
+			mains[o.Theorem] = true
+		}
+	}
+	if len(mains) == 0 {
+		return
+	}
+	var names []string
+	for n := range mains {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for i := range outs {
+		o := &outs[i]
+		if o.Err != nil || o.Report == nil || !strings.HasPrefix(o.Report.Role, "witness-") || mains[o.Report.MatchedMain] {
+			continue
+		}
+		o.Err = &diag{Invalid: true, Stage: "theorem audit",
+			Msg:  fmt.Sprintf("%s is a witness for %s, which is not among the main theorems verified in this run (%s)", o.Theorem, o.Report.MatchedMain, strings.Join(names, ", ")),
+			Next: "Verify the witness together with the main theorem it supports."}
+		o.Report = nil
+		_ = os.Remove(filepath.Join(outdir, verifiedDir, o.Theorem+".json"))
+		if i == 0 {
+			_ = os.Remove(filepath.Join(outdir, "verified.json"))
+		}
+	}
 }

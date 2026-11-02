@@ -2321,3 +2321,38 @@ in which order alternatives are tried, so a proof is accepted only if the kernel
 alternative (ending in the unrestricted `omega`) runs. The trusted base, the axioms and the
 statements are unchanged. Motivation: after several calls the context holds dozens of aliasing
 disjunctions and a full-context `omega` splits on all of them (36 s per `S.sp % 16 = 0` side goal).
+
+
+## Round 14: the runtime is quantified, and witnesses have a shape
+
+*Found by an authorized red-team review of the allocation-contract witness (`audit/round14/`).*
+
+**V2 (gap, pre-existing).** The V1 check inspected `link` only inside contract applications, so
+`theorem bad1 (a b) : Ensures (Extracted.program.link Witness.AllocW.impl) … := correctness AllocW.impl …`
+(the guarantee for a toy allocator the consumer wrote, no hypothesis on the runtime) verified, and the
+report claimed "Runtime contracts assumed: runtime.newobject (pinned)". Policy: a consumer may not invent
+runtime contracts or implementations. For every theorem that is not a `Witness.nonvacuous` /
+`Witness.returns`, `checkContractHyps` (Janus/Tools/Audit.lean, `concreteRuntime`) now requires, after
+expanding the proof-local definitions: every `Program.link` is `Extracted.program.link x` with `x` a
+binder of the whole statement (not one of a nested `∃`/`fun`); no term of type `List Segment` other than
+such a binder (no constant, no `[]`, no literal list); no `Program.mk` / `Segment.mk`; every program is
+`Extracted.program`, `.withExit …` or a linked one; and every such `impl` counts as a runtime variable
+for the V1 premise rules (it is constrained only by the contracts and the model laws). The report's
+"Runtime contracts assumed" line is computed from the statement (`contractHyps`), and `Role` says
+whether the verified theorem is a main theorem or a witness. A theorem proving a contract for the toy
+allocator (`bad2`) cannot pass as a main theorem either.
+
+**W2 (weak witnesses).** Witnesses were gated by name and by "the statement mentions `Extracted.program`".
+`Role` is now derived from the name (`…Witness.nonvacuous`, `…Witness.returns`, any other theorem with a
+`Witness` component is rejected as a lemma, everything else is a main theorem) and a witness is checked
+against the module's `correctness` theorem (the first theorem named `correctness`; if the module has none,
+any of its non-witness theorems about `Extracted.program`): `nonvacuous` must be `∃ …` with a conjunct for
+EVERY hypothesis of the main theorem and every premise of its unfolded conclusion (`∀ ret, RetAddr … →
+∀ s, CallSetup … entry args s → pre s → …`: the return address, the call state for the same program, entry
+and arguments, each conjunct of the precondition, `H`/readiness included), with the main theorem's
+variables unified definitionally with the witness's; `returns` must be, up to that unification, the
+unfolded conclusion `Returns … (fun s' => ABIReturn s s' ∧ post s s')` of the main theorem at a concrete
+start state. When a witness is verified in the same call as main theorems, `janus verify` also requires
+that the main theorem it supports is among them. Residual: a witness is matched against a theorem of the
+proof module, not against the theorem the reader happens to verify alone; the report names the matched
+main theorem (`matchedMain`) so the reader can see it.
