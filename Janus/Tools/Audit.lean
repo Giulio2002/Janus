@@ -2142,12 +2142,23 @@ partial def decideTrue (t : Expr) : MetaM Bool := do
 
 /-- Round 14 (rt-auditv2, F1): the address of a `pc`/`rip` premise that a witness may leave to the proof: the
 extraction's entry or a contract address of the program (`s.pc = BitVec.ofNat 64 entry`). -/
-def entryAddrLike (e : Expr) : Bool :=
+partial def entryAddrLike (env : Environment) (fuel : Nat) (e : Expr) : MetaM Bool := do
   let e := e.consumeMData
   let x := (if e.isAppOfArity ``BitVec.ofNat 2 then e.getArg! 1 else e).consumeMData
-  x.isConstOf `Extracted.entry ||
-    ((x.getAppFn.isConstOf `Janus.Program.contractAddr || x.getAppFn.isConstOf `Janus.Amd64.Program.contractAddr) &&
-      x.getAppNumArgs == 2)
+  if x.isConstOf `Extracted.entry then return true
+  match x.getAppFn with
+  | .const c _ =>
+    let isTrusted := match env.getModuleIdxFor? c with
+      | some i => trustedModule env.header.moduleNames[i.toNat]!
+      | none => false
+    if isTrusted then
+      return (c.getString! == "contractAddr" || c.getString! == "segAddr") && x.getAppNumArgs == 2
+    -- a proof-local definition (`def wb1 := segAddr Extracted.program "runtime.gcWriteBarrier1"`): its body must be one
+    if fuel == 0 then return false
+    match ← Meta.unfoldDefinition? x with
+    | some x' => entryAddrLike env (fuel - 1) x'
+    | none => return false
+  | _ => return false
 
 /-- Round 14 (rt-auditv2, F2): does a binder of type `t` (an unassigned variable of the main theorem) have an
 element by construction? Numbers, lists and the like, a `Fin` of a positive or free size, a function into a
@@ -2277,7 +2288,7 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
           -- Round 14 (rt-auditv2, F1): ... and then the address must be the program's entry or a contract address
           -- (`WriteBarrier`: one state for every `gcWriteBarrierN`); `s.pc = 7` (an unsatisfiable precondition)
           -- is a premise the witness has to state
-          unless entryAddrLike (q.getArg! 2) do
+          unless ← entryAddrLike (← getEnv) 8 (q.getArg! 2) do
             return some s!"the premise `{(← Meta.ppExpr q).pretty 300}` of the main theorem{which} fixes the program counter to an address that is neither the entry nor a contract address, and the witness does not state it"
     | some w => return some s!"the premise {w}{which}"
     st.restore
