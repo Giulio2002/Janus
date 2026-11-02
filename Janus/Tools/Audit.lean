@@ -2347,17 +2347,20 @@ def returnsMatches (mr r : Expr) : MetaM Bool := do
       let ok ← Meta.lambdaTelescope m fun ys bm => do
         let bx := (x.beta ys).headBeta
         let cm := flattenAnd (← instantiateMVars bm).headBeta
-        -- Round 14 (rt-auditv2, F3): a conjunct counts only if it says something about the result state
-        -- (`1 + 1 = 2`, `decide True = true` do not)
-        let cx := (flattenAnd bx).filter fun c => !trivialConj c && ys.any fun y => c.containsFVar y.fvarId!
-        if cx.isEmpty || cm.isEmpty then return false
+        -- Round 14 (rt-auditv2, F3): a conjunct of the witness's result statement counts only if it says something
+        -- about the result state (`1 + 1 = 2`, `decide True = true` do not); a lambda whose main body does not
+        -- speak about its arguments at all (the fault continuation `fun _ _ => False` of `ReturnsK`) is unchanged
+        let mentions := fun (c : Expr) => ys.any fun y => c.containsFVar y.fvarId!
+        let cx0 := (flattenAnd bx).filter (!trivialConj ·)
+        let cx := cx0.filter mentions
+        if cx0.isEmpty || cm.isEmpty then return false
         -- the main postcondition's first conjunct is the ABI obligation (`ABIReturn s s'`) when it has
         -- several: keep it and add a statement about the result; a single conjunct (`GrownReturns`,
         -- `EnsuresGrow`: no ABI obligation) is specialised to the concrete result, which must say something
         if cm.size ≥ 2 then
           if cx.size < 2 then return false
           findConj cm[0]! cx
-        else return true
+        else return !(cm.any mentions) || !cx.isEmpty
       unless ok do return false
     else
       unless ← defEqTry m x do return false
