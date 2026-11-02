@@ -15,7 +15,9 @@ package main
 // Entries and their last use (the time of the newest of the listed files; janus touches them
 // on every use, touchUse and touchHit):
 //
-//	consumer   v1/consumer/<family>/<ws>           dir, <ws>.lock (exclusive while in use)
+//	consumer   v1/consumer/<family>/<ws>           dir, <ws>.lock (exclusive while in use), <ws>.busy
+//	                                               (present while in use; left by a dead process = half-written,
+//	                                               the next opener discards the workspace, consumer.go beginUse)
 //	framework  v1/framework/<key>                  dir, <key>.lock (shared while in use), <key>.ready
 //	asl        v1/asl/<key>                        dir, <key>.lock (exclusive while built),
 //	                                               <key>.use (shared while in use)
@@ -243,7 +245,7 @@ func scanCache(root string) *gcScan {
 				if len(members) == 0 {
 					s.empty = append(s.empty, fd)
 				}
-				s.scanLocked("consumer", fd, members, nil)
+				s.scanLocked("consumer", fd, members, []string{".busy"})
 			}
 		case "framework":
 			ents, _ := os.ReadDir(p)
@@ -416,15 +418,20 @@ type gcOptions struct {
 
 // gcReport is what a collection did (or, dry, would do).
 type gcReport struct {
-	Root      string     `json:"root"`
-	Budget    int64      `json:"budget"` // -1: none
-	Before    int64      `json:"before"`
-	After     int64      `json:"after"`
-	Evicted   []*gcEntry `json:"evicted"`
-	Skipped   int        `json:"skippedInUse"`
-	DryRun    bool       `json:"dryRun"`
-	FreeSpace int64      `json:"freeSpace"`
-	Reason    string     `json:"reason,omitempty"`
+	Root    string     `json:"root"`
+	Budget  int64      `json:"budget"` // -1: none
+	Before  int64      `json:"before"`
+	After   int64      `json:"after"`
+	Evicted []*gcEntry `json:"evicted"`
+	Skipped int        `json:"skippedInUse"`
+	// InUsePaths are the entries Skipped counts (their lock was held by a running process).
+	InUsePaths []string `json:"inUse,omitempty"`
+	// Recent counts the entries not considered because they were used within the grace period
+	// or are pinned (the running janus's own, or the current framework's with `cache gc`).
+	Recent    int    `json:"skippedRecentOrPinned"`
+	DryRun    bool   `json:"dryRun"`
+	FreeSpace int64  `json:"freeSpace"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 func envFloat(name string, def float64) float64 {
@@ -596,6 +603,7 @@ func collectCache(o gcOptions, block bool) (*gcReport, error) {
 		if inUse {
 			e.inUse = true
 			rep.Skipped++
+			rep.InUsePaths = append(rep.InUsePaths, e.Path)
 		}
 		if ok {
 			usage -= e.Size
@@ -613,6 +621,9 @@ func collectCache(o gcOptions, block bool) (*gcReport, error) {
 			e.pinned = true
 		}
 		if e.pinned || age < o.Grace || trashSet[e.Path] {
+			if !trashSet[e.Path] {
+				rep.Recent++
+			}
 			continue
 		}
 		switch {
@@ -700,8 +711,13 @@ func (e *gcEntry) evict(o gcOptions, trashDir func() (string, error)) (ok, inUse
 	if o.DryRun {
 		return true, false
 	}
+	// Stamps first: the entry is unusable before it is removed (rule 3). The busy marker of a
+	// workspace stays until the workspace is gone (below): a failed removal must not make a
+	// half-written workspace look consistent.
 	for _, f := range e.side {
-		_ = os.Remove(f)
+		if !strings.HasSuffix(f, ".busy") {
+			_ = os.Remove(f)
+		}
 	}
 	fi, err := os.Lstat(e.Path)
 	if err != nil {
@@ -722,6 +738,9 @@ func (e *gcEntry) evict(o gcOptions, trashDir func() (string, error)) (ok, inUse
 	} else if err := os.Remove(e.Path); err != nil {
 		return false, false
 	}
+	for _, f := range e.side {
+		_ = os.Remove(f) // the busy marker, now that the workspace is gone
+	}
 	for _, l := range e.locks {
 		_ = os.Remove(l) // under the lock: waiters re-check the inode (lockFileMode)
 	}
@@ -733,6 +752,19 @@ func removeOrphan(p string) {
 	if strings.HasSuffix(p, ".lock") || strings.HasSuffix(p, ".use") {
 		if lk, err := lockFileMode(p, false, false); err == nil {
 			_ = os.Remove(p)
+			lk.unlock()
+		}
+		return
+	}
+	if strings.HasSuffix(p, ".busy") {
+		// A busy marker of a workspace that is gone: removed under the workspace lock, so that a
+		// process that has just recreated the workspace keeps its marker.
+		base := strings.TrimSuffix(p, ".busy")
+		if lk, err := lockFileMode(base+".lock", false, false); err == nil {
+			if _, err := os.Lstat(base); os.IsNotExist(err) {
+				_ = os.Remove(p)
+				_ = os.Remove(base + ".lock")
+			}
 			lk.unlock()
 		}
 		return
@@ -961,8 +993,8 @@ func printCacheGC(w io.Writer, rep *gcReport, asJSON bool) error {
 	if rep.Budget >= 0 {
 		b = fmtBytes(rep.Budget)
 	}
-	fmt.Fprintf(w, "%s %d entries (%s); cache %s -> %s (budget %s); %d in use skipped.\n", verb, len(rep.Evicted), fmtBytes(freed),
-		fmtBytes(rep.Before), fmtBytes(rep.After), b, rep.Skipped)
+	fmt.Fprintf(w, "%s %d entries (%s); cache %s -> %s (budget %s); %d in use skipped, %d recent or pinned kept.\n", verb, len(rep.Evicted), fmtBytes(freed),
+		fmtBytes(rep.Before), fmtBytes(rep.After), b, rep.Skipped, rep.Recent)
 	if rep.Reason != "" {
 		fmt.Fprintf(w, "Budget reduced: %s.\n", rep.Reason)
 	}
