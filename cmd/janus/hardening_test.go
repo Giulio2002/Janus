@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -181,7 +182,14 @@ func TestHardeningB1(t *testing.T) {
 func TestRejectPIE(t *testing.T) {
 	pie := filepath.Join(repoRoot, "audit", "work", "examples-arm64-pie")
 	if _, err := os.Stat(pie); err != nil {
-		t.Skip("no PIE fixture (audit/work/examples-arm64-pie)")
+		// no prebuilt fixture: build the example as a PIE (an ET_DYN executable), as scripts would have
+		pie = filepath.Join(t.TempDir(), "examples-arm64-pie")
+		cmd := exec.Command("go", "build", "-trimpath", "-buildmode=pie", "-o", pie, "./cmd")
+		cmd.Dir = filepath.Join(repoRoot, "examples", "basic")
+		cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64", "CGO_ENABLED=0")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("building the PIE example: %v\n%s", err, out)
+		}
 	}
 	code, _, stderr := runJanus(t, "list", pie)
 	if code != 1 || !strings.Contains(stderr, "position-independent") || !strings.Contains(stderr, "Stage: binary validation") {

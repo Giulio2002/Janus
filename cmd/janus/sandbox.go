@@ -98,7 +98,7 @@ func detectSandbox(unsafeNoSandbox bool) (*sandbox, error) {
 	}
 	if unshareErr != nil && force == "unshare" {
 		return nil, sandboxDiag("the unshare fallback cannot confine the build (" + unshareErr.Error() +
-			"); it requires every mount to be remountable read-only. Install bubblewrap")
+			")" + unshareTmpHint() + "; it requires every mount to be remountable read-only. Install bubblewrap")
 	}
 	// A last attempt to make bwrap available, documented as a requirement.
 	if tryInstallBwrap() {
@@ -111,9 +111,31 @@ func detectSandbox(unsafeNoSandbox bool) (*sandbox, error) {
 	}
 	if unshareErr != nil {
 		return nil, sandboxDiag("bwrap is not installed and the unshare fallback cannot confine the build (" +
-			unshareErr.Error() + "); install bubblewrap")
+			unshareErr.Error() + ")" + unshareTmpHint() + "; install bubblewrap")
 	}
 	return nil, sandboxDiag("bwrap is not installed and no usable unprivileged user namespace is available")
+}
+
+// unshareTmpHint explains the one cause of an unshare refusal that is the user's to fix: the unshare fallback mounts a private
+// tmpfs over /tmp, /dev/shm and /run, so a cache or verdict store living there cannot be bound back and the sandbox REFUSES
+// (fail-closed: nothing runs unconfined). It returns "" when no such directory is configured.
+func unshareTmpHint() string {
+	var bad []string
+	for _, p := range []string{cacheRoot(), os.Getenv("JANUS_VERDICT_CACHE")} {
+		if p == "" {
+			continue
+		}
+		p = filepath.Clean(p)
+		for _, pre := range []string{"/tmp", "/dev/shm", "/run"} {
+			if p == pre || strings.HasPrefix(p, pre+"/") {
+				bad = append(bad, p)
+			}
+		}
+	}
+	if len(bad) == 0 {
+		return ""
+	}
+	return "; the cache or verdict store " + strings.Join(bad, ", ") + " is under /tmp, /dev/shm or /run, which the unshare fallback hides behind a private tmpfs, so it refuses (fail-closed): move JANUS_CACHE_DIR / JANUS_VERDICT_CACHE elsewhere"
 }
 
 // tryInstallBwrap installs bubblewrap with apt when running as root non-interactively. It is a

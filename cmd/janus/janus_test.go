@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"debug/elf"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -336,16 +338,20 @@ func TestList(t *testing.T) {
 	}
 }
 
+// TestRejectsNonArm64: a binary of an architecture Janus does not model is rejected at binary validation. (It used to feed the
+// test binary itself, which the amd64 front end now accepts on an amd64 host, so it skipped there with "host is linux/arm64":
+// it never ran on this host. The binary is now a copy of the example with e_machine patched to RISC-V, on every host.)
 func TestRejectsNonArm64(t *testing.T) {
-	self, err := os.Executable() // the test binary, built for the host
+	b, err := os.ReadFile(exampleBin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, _, stderr := runJanus(t, "list", self)
+	b = append([]byte(nil), b...)
+	binary.LittleEndian.PutUint16(b[18:20], uint16(elf.EM_RISCV))
+	p := filepath.Join(t.TempDir(), "riscv")
+	writeBytes(t, p, b)
+	code, _, stderr := runJanus(t, "list", p)
 	if code != 1 || !strings.Contains(stderr, "Stage: binary validation") {
-		if code == 0 {
-			t.Skip("host is linux/arm64")
-		}
 		t.Fatalf("expected binary validation failure, got %d: %s", code, stderr)
 	}
 }

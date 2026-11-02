@@ -6,7 +6,7 @@
 #
 #   -j N        items at once in the verify pool (default $JANUS_JOBS, else 2: RULES.md on the shared box;
 #               `auto` = the formula of scripts/lib/parallel.sh). The other stages scale with it: the go
-#               test shards (N clamped to 2..6, one test slot each) and the audit lanes (N).
+#               test shards (max(N, JANUS_GATE_GOTEST_SHARDS=6), clamped to 2..8, one test slot each) and the audit lanes (N).
 #   --lanes N   lanes at once (default $JANUS_LANES, else N + 1: the verify pool and N others). Lanes are
 #               queued longest first by their time in the last run (artifacts/gate/lane-times).
 #   --changed   development only (scripts/verify-all-examples.sh --changed): not a gate run.
@@ -99,10 +99,47 @@ export PATH=/usr/local/go/bin:$PATH
 . "$root/scripts/lib/incr.sh"
 memguard_self "$@"
 
+# Shards of the go test lane: JANUS_GATE_GOTEST_SHARDS (default 6), never fewer than -j N, clamped to 2..8. The shards are
+# independent processes that need no pool slot of their own, and the lane is the gate's critical path: the whole package is
+# ~3700 s of work, ~470 s for its longest test, so 2 shards (the old "-j 2" default) made the lane 1860-2950 s and 6 make it
+# ~500-700 s (docs/TESTING.md "go test shards"). Peak memory is ~44 GiB for six (each shard under its own memguard job).
+# Memory adaptation: each shard peaks at 8-14 GiB (measured 2026-11-01: 13.8 / 11.6 / 10.1 / 11.3 / 10.9 / 8.3 GiB for six, 66 GiB
+# together; the nightly extras add 17 + 3 GiB), so the count is also capped by (free - 40 GiB reserve [- 20 GiB extras]) / 12 GiB,
+# with the 40 GiB reserve taken off the host's MemAvailable only and the enclosing cgroup chain (memcap / memguard) used as a budget without reserve. Never below 2 (the
+# old behaviour) and never below -j N. JANUS_GOTEST_SHARD_MEM (GiB per shard, default 12) tunes it.
+gotest_free_gib() { # prints "HOST CGROUP": MemAvailable in GiB and the free room of the enclosing cgroup chain in GiB (999999: unlimited)
+  local kb p lim cur cg=999999 d
+  kb=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null)
+  p=$(awk -F: '$1 == 0 { print $3 }' /proc/self/cgroup 2>/dev/null); d="/sys/fs/cgroup$p"
+  while [ -n "$p" ] && [ "$d" != /sys/fs ] && [ -d "$d" ]; do
+    lim=$(cat "$d/memory.max" 2>/dev/null || echo max); cur=$(cat "$d/memory.current" 2>/dev/null || echo 0)
+    case "$lim" in ''|max) ;; *) [ "$(( (lim - cur) / 1073741824 ))" -ge "$cg" ] 2>/dev/null || cg=$(( (lim - cur) / 1073741824 )) ;; esac
+    d=$(dirname "$d")
+  done
+  echo "$(( ${kb:-0} / 1048576 )) $cg"
+}
+gotest_shards_n() {
+  local sh=${JANUS_GATE_GOTEST_SHARDS:-6} j=${jobs_n:-2} per=${JANUS_GOTEST_SHARD_MEM:-12} host cg ex=0 cap1 cap2
+  [ "$sh" -ge 1 ] 2>/dev/null || sh=6
+  [ "$j" -ge 1 ] 2>/dev/null || j=2
+  [ "$per" -ge 1 ] 2>/dev/null || per=12
+  if [ -z "${JANUS_GATE_GOTEST_SHARDS:-}" ]; then   # an explicit count is taken as given (still >= 2 and <= 8)
+    read -r host cg <<< "$(gotest_free_gib)"; [ "${JANUS_NIGHTLY:-}" != 1 ] || ex=20
+    # the 40 GiB reserve protects the HOST's other users, so it comes off MemAvailable only; the cgroup chain (memcap / the gate's
+    # own guard) is a budget of this run's own: no reserve there. (The ASL extra is not counted: it runs alone after the shards.)
+    cap1=$(( (host - 40 - ex) / per )); cap2=$(( (cg - ex) / per ))
+    [ "$sh" -le "$cap1" ] || sh=$cap1
+    [ "$sh" -le "$cap2" ] || sh=$cap2
+  fi
+  [ "$sh" -ge "$j" ] || sh=$j
+  [ "$sh" -ge 2 ] || sh=2
+  [ "$sh" -le 8 ] || sh=8
+  echo "$sh"
+}
 # the lane-specific arguments of a lane's skip key (everything else comes from incr_lane)
 lane_spec() {
   case "$1" in
-    gotest) local sh=${jobs_n:-2}; [ "$sh" -ge 2 ] 2>/dev/null || sh=2; [ "$sh" -le 6 ] || sh=6
+    gotest) local sh; sh=$(gotest_shards_n)
       printf '%s\n' --arg "run:${gtrun:-}" --arg "shards:$sh" ;;
     rounds) printf '%s\n' --arg "rounds:${rounds:-}" ;;
   esac
@@ -394,7 +431,7 @@ flock -n "$treelock" || { echo "gate: another run uses the same sources/trees ($
 mkdir -p "$root/JanusASL/.lake" "$root/JanusX86/.lake" "$root/oracle-sail/target"
 echo "gate: isolated source copies for the lake lanes are made once the framework build is pinned (removed when the gate passes, kept otherwise: $treebase)"
 lane_times="$root/artifacts/gate/lane-times"
-shards=$jobs_n; [ "$shards" -ge 2 ] || shards=2; [ "$shards" -le 6 ] || shards=6  # 6: the longest test (~470 s) is then the longest shard
+shards=$(gotest_shards_n)  # 6 by default: the longest test (~470 s) is then about the longest shard
 pool_init gate "$((lanes_n + 4))" "$out/lanes"   # (+4 slots: the prebuild stages and tree copies share the pool)
 POOL_GUARD=0 POOL_PROGRESS_SECS="${POOL_PROGRESS_SECS:-60}"
 export POOL_TIMELINE="$tlf"   # the verify pool of the verify lane appends its items too

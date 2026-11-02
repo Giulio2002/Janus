@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -37,6 +41,13 @@ func needASL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A seed is an acceleration, never an authority: it is used only when its manifest (written by writeASLSeedManifest)
+	// names exactly this framework, JanusASL package and toolchain and every file of its .lake hashes as recorded; anything
+	// else (no manifest, another key, a changed, missing or extra file) is a MISS and the build starts cold.
+	if err := verifyASLSeed(seed, fw, pkg); err != nil {
+		t.Logf("JANUS_TEST_ASL_SEED %s rejected (a cold build follows): %v", seed, err)
+		return
+	}
 	// The directory framework (--janus-root repoRoot) and the embedded one (its cached base).
 	for _, janusDir := range []string{repoRoot, filepath.Join(cacheRoot(), "v1", "framework", fw.Sha256[:24])} {
 		dir := aslCacheDir(fw, pkg, janusDir)
@@ -50,6 +61,142 @@ func needASL(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = os.Remove(filepath.Join(dir, ".lake", "package-overrides.json"))
+	}
+}
+
+const aslSeedManifest = "janus-seed.json"
+
+type aslSeedDoc struct {
+	Key   string            `json:"key"`
+	Files map[string]string `json:"files"` // path relative to .lake -> sha256
+}
+
+func aslSeedKey(fw *framework, pkg *aslPackage) string {
+	h := sha256.Sum256([]byte("janus-asl-seed-v1\n" + fw.Sha256 + "\n" + pkg.Sha256 + "\n" + fw.Toolchain + "\n"))
+	return hex.EncodeToString(h[:])
+}
+
+func aslSeedFiles(seed string) (map[string]string, error) {
+	files := map[string]string{}
+	root := filepath.Join(seed, ".lake")
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		if rel == aslSeedManifest || rel == "package-overrides.json" {
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("symlink %s in the seed", rel)
+		}
+		if d.IsDir() {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		files[rel] = sha256Hex(b)
+		return nil
+	})
+	return files, err
+}
+
+// writeASLSeedManifest records the key and the file hashes of a built JanusASL .lake so that verifyASLSeed can accept it.
+func writeASLSeedManifest(seed string, fw *framework, pkg *aslPackage) error {
+	files, err := aslSeedFiles(seed)
+	if err != nil {
+		return err
+	}
+	b, _ := json.Marshal(aslSeedDoc{Key: aslSeedKey(fw, pkg), Files: files})
+	return os.WriteFile(filepath.Join(seed, ".lake", aslSeedManifest), b, 0o644)
+}
+
+func verifyASLSeed(seed string, fw *framework, pkg *aslPackage) error {
+	b, err := os.ReadFile(filepath.Join(seed, ".lake", aslSeedManifest))
+	if err != nil {
+		return fmt.Errorf("no seed manifest: %v", err)
+	}
+	var doc aslSeedDoc
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return fmt.Errorf("seed manifest unreadable: %v", err)
+	}
+	if doc.Key != aslSeedKey(fw, pkg) {
+		return fmt.Errorf("seed was built for another framework, JanusASL package or toolchain")
+	}
+	got, err := aslSeedFiles(seed)
+	if err != nil {
+		return err
+	}
+	if len(got) != len(doc.Files) {
+		return fmt.Errorf("seed has %d files, its manifest lists %d", len(got), len(doc.Files))
+	}
+	for f, h := range doc.Files {
+		if got[f] != h {
+			return fmt.Errorf("seed file %s is missing or changed", f)
+		}
+	}
+	return nil
+}
+
+// A tampered, mismatched or unattested seed is rejected (never copied into the cache).
+func TestASLSeedRejectsTamperedOrMismatched(t *testing.T) {
+	fw, err := loadFramework(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := loadASL(fw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func() string {
+		d := t.TempDir()
+		writeBytes(t, filepath.Join(d, ".lake", "build", "lib", "ArmASL.olean"), []byte("olean-bytes"))
+		writeBytes(t, filepath.Join(d, ".lake", "build", "lib", "ArmASL.hash"), []byte("h"))
+		return d
+	}
+	seed := mk()
+	if err := verifyASLSeed(seed, fw, pkg); err == nil {
+		t.Fatal("a seed without a manifest was accepted")
+	}
+	if err := writeASLSeedManifest(seed, fw, pkg); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyASLSeed(seed, fw, pkg); err != nil {
+		t.Fatalf("an honest attested seed was rejected: %v", err)
+	}
+	f := filepath.Join(seed, ".lake", "build", "lib", "ArmASL.olean")
+	writeBytes(t, f, []byte("forged"))
+	if verifyASLSeed(seed, fw, pkg) == nil {
+		t.Error("a seed with a changed file was accepted")
+	}
+	writeBytes(t, f, []byte("olean-bytes"))
+	writeBytes(t, filepath.Join(seed, ".lake", "build", "lib", "Extra.olean"), []byte("x"))
+	if verifyASLSeed(seed, fw, pkg) == nil {
+		t.Error("a seed with an extra file was accepted")
+	}
+	os.Remove(filepath.Join(seed, ".lake", "build", "lib", "Extra.olean"))
+	os.Remove(filepath.Join(seed, ".lake", "build", "lib", "ArmASL.hash"))
+	if verifyASLSeed(seed, fw, pkg) == nil {
+		t.Error("a seed with a missing file was accepted")
+	}
+	writeBytes(t, filepath.Join(seed, ".lake", "build", "lib", "ArmASL.hash"), []byte("h"))
+	if err := verifyASLSeed(seed, fw, pkg); err != nil {
+		t.Fatalf("restored seed rejected: %v", err)
+	}
+	other := *fw
+	other.Sha256 = strings.Repeat("0", 64)
+	if verifyASLSeed(seed, &other, pkg) == nil {
+		t.Error("a seed attested for another framework was accepted")
+	}
+	otherPkg := *pkg
+	otherPkg.Sha256 = strings.Repeat("1", 64)
+	if verifyASLSeed(seed, fw, &otherPkg) == nil {
+		t.Error("a seed attested for another JanusASL package was accepted")
+	}
+	if err := os.Symlink("/etc/passwd", filepath.Join(seed, ".lake", "link")); err == nil && verifyASLSeed(seed, fw, pkg) == nil {
+		t.Error("a seed holding a symlink was accepted")
 	}
 }
 

@@ -31,30 +31,30 @@ import (
 // The four tests that dominate (a framework kernel replay each, ~210 s: TestCacheGCConcurrentVerify, TestR1ForgedFrameworkLemma,
 // TestResultCache, TestConcurrentVerify) are about 1100 of the 2150 s of the whole package.
 var testDurations = map[string]float64{
-	"TestCacheGCConcurrentVerify": 469, "TestR1ForgedFrameworkLemma": 462, "TestResultCache": 232,
-	// the parallel-replay tests (measured at load ~40 in the nightly of 2026-11-01, scaled by the 1.9 that
-	// the same load did to TestCacheGCConcurrentVerify: 892 s there against 469 s here); before they were
-	// missing, counted 1 s and started last in their shards
-	"TestParallelReplayE2EForgedRootNoVerdict": 224, "TestParallelReplayE2EForgedRootWithPlantedHonestRoot": 126,
-	"TestParallelReplayE2EHonestControl": 111, "TestParallelFrameworkReplayMatchesSingleProcess": 217,
-	"TestParallelFrameworkReplayMatchesSingleProcessMini": 24, "TestParallelFrameworkReplayCatchesForgeryInEveryPartition": 16, "TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal": 600,
-	"TestConcurrentVerify": 223, "TestRTBuildCacheScripts": 83, "TestSelfTestIsolation": 52, "TestR1FrameworkTamper": 45,
-	"TestConsumerVerify": 43, "TestDataLarge": 37, "TestJ1PrestartMatchesClassic": 29, "TestVerifyBatch": 27,
-	"TestConsumerTwoCheckouts": 27, "TestGateCancelLib": 26, "TestLaneLakeLib": 25, "TestConsumerVerifyMany": 24,
-	"TestDagLib": 24, "TestInlineInstanceRejected": 22, "TestVerifierIdentityRealBuilds": 22, "TestConsumerExtraDep": 19,
-	"TestBoundInstanceRejected": 18, "TestHardeningAttacks": 17, "TestForeignFrameworkWriteDetected": 15,
-	"TestPoolLib": 13, "TestConsumerAuditorLease": 12, "TestRound6StatementNames": 12, "TestPoolMemLib": 12,
-	"TestVerifyManyCacheIsolation": 12, "TestVerify": 12, "TestInitEndToEnd": 9, "TestConsumerPathDep": 9,
-	"TestTreeLockLib": 9, "TestConsumerGit": 9, "TestConsumerLakefileLean": 8, "TestVerifyManyTheorems": 7,
-	"TestSandboxRecorded": 6, "TestTheoremsLib": 6, "TestMemGuardNormalVerify": 6, "TestItemTimeoutLib": 5,
-	"TestInstallOutsideRepo": 5, "TestMemguardShell": 5, "TestVerifierIdentityEmbeddedFiles": 4,
-	"TestSoftFloatRuntimeAgreesWithIEEE": 4, "TestMemGuardKillsHungryProof": 3,
-	"TestRT07AssemblyFileIsPartOfTheIdentity": 3, "TestRT08OverlayBuildDoesNotClaimTheOriginalIdentity": 3,
-	"TestUnshareFallbackVerifies": 3, "TestSeedFramework": 2, "TestJ1ServeInitializerNotRun": 2,
-	"TestRoundTripRejectsAmbiguousPrint": 2, "TestHardeningB1": 2, "TestRTIncrScripts": 2, "TestArtifactsLib": 2,
-	"TestRT10ConcurrentWritersAndReadersNeverSeeAPartialRecord": 2, "TestFrameworkReplayOnce": 1,
-	"TestVerifyManySharedFailure": 1, "TestVerifierIdentityGoSource": 1, "TestObjdumpCrossCheck": 1,
-	"TestBuildModeMsan": 1,
+	"TestRTMatrix_0": 240, "TestRTMatrix_1": 240, "TestRTMatrix_2": 240, "TestRTMatrix_3": 240, "TestRTMatrix_4": 240, "TestRTMatrix_5": 240, "TestRTMatrix_6": 240, "TestRTMatrix_7": 240, "TestRTMatrix_8": 240, "TestRTMatrix_9": 240, "TestRTShadowedAlias": 20, // nightly only: ten and one full parallel replays (rtFixtures builds the forged modules)
+	// remeasured 2026-11-01 in the nightly-env gotest lane (6 shards, host load 28-88: the other agents' load stretches every
+	// replay-bound test about 2x against an idle box; the order is what matters). A test that does not call parallel(t) has no
+	// recorded hold: its old value, doubled, stands. Four tests ending in _Janus/_GoABI/_Tactic/_Amd64Tactic are the split real-framework forgery check.
+	"TestCacheGCConcurrentVerify": 941, "TestParallelFrameworkReplayMatchesSingleProcess": 887, "TestR1ForgedFrameworkLemma": 856,
+	"TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Amd64Tactic": 473, "TestParallelReplayE2EForgedRootNoVerdict": 448,
+	"TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_GoABI":  410,
+	"TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Janus":  336,
+	"TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Tactic": 281, "TestResultCache": 272,
+	"TestParallelReplayE2EForgedRootWithPlantedHonestRoot": 252, "TestParallelReplayE2EHonestControl": 222, "TestRTBuildCacheScripts": 166,
+	"TestDataLarge": 127, "TestSelfTestIsolation": 104, "TestInlineInstanceRejected": 95, "TestR1FrameworkTamper": 90, "TestConsumerVerify": 85,
+	"TestVerifyBatch": 83, "TestConcurrentVerify": 74, "TestConsumerTwoCheckouts": 71, "TestJ1PrestartMatchesClassic": 58, "TestConsumerExtraDep": 57,
+	"TestBoundInstanceRejected": 57, "TestParallelFrameworkReplayCatchesForgeryInEveryPartition": 54, "TestGateCancelLib": 52,
+	"TestForeignFrameworkWriteDetected": 50, "TestLaneLakeLib": 50, "TestDagLib": 48, "TestVerifierIdentityRealBuilds": 44,
+	"TestRound6StatementNames": 42, "TestConsumerVerifyMany": 42, "TestHardeningAttacks": 34, "TestVerifyManyTheorems": 32, "TestVerify": 32,
+	"TestParallelFrameworkReplayMatchesSingleProcessMini": 29, "TestVerifyManyCacheIsolation": 29, "TestConsumerAuditorLease": 26, "TestPoolLib": 26,
+	"TestPoolMemLib": 24, "TestConsumerLakefileLean": 21, "TestInitEndToEnd": 20, "TestMemGuardNormalVerify": 18, "TestConsumerGit": 18,
+	"TestTreeLockLib": 18, "TestInstallOutsideRepo": 17, "TestConsumerPathDep": 16, "TestSandboxRecorded": 14, "TestTheoremsLib": 12,
+	"TestItemTimeoutLib": 10, "TestRoundTripRejectsAmbiguousPrint": 9, "TestMemguardShell": 9, "TestUnshareFallbackVerifies": 8,
+	"TestVerifierIdentityEmbeddedFiles": 8, "TestSoftFloatRuntimeAgreesWithIEEE": 8, "TestHardeningB1": 6, "TestMemGuardKillsHungryProof": 6,
+	"TestRT07AssemblyFileIsPartOfTheIdentity": 6, "TestRT08OverlayBuildDoesNotClaimTheOriginalIdentity": 6, "TestSeedFramework": 5,
+	"TestJ1ServeInitializerNotRun": 4, "TestRTIncrScripts": 4, "TestArtifactsLib": 4, "TestRT10ConcurrentWritersAndReadersNeverSeeAPartialRecord": 4,
+	"TestVerifyManySharedFailure": 2, "TestFrameworkReplayOnce": 2, "TestVerifierIdentityGoSource": 2, "TestObjdumpCrossCheck": 2,
+	"TestBuildModeMsan": 2, "TestConsumerMathlib": 1, "TestBlockers": 1, "TestAmd64Blockers": 1, "TestBatchRequestErrors": 1,
 }
 
 const unknownTestDuration = 1

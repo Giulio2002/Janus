@@ -676,7 +676,24 @@ func TestParallelFrameworkReplayCatchesForgeryInEveryPartition(t *testing.T) {
 // The real-framework variant of TestParallelFrameworkReplayCatchesForgeryInEveryPartition: a forged
 // declaration (kernel check skipped) in the real Janus, Janus.GoABI, Janus.Tactic and Janus.Amd64.Tactic
 // modules is caught by the real kernel replay of the plan (four full replays: nightly only).
-func TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal(t *testing.T) {
+// (Nightly only; one test per module so that the gate's shards run the four full replays side by side. Together they forge
+// and replay exactly the four modules the original single test looped over.)
+var realForgeryModules = []string{"Janus", "Janus.GoABI", "Janus.Tactic", "Janus.Amd64.Tactic"}
+
+func TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Janus(t *testing.T) {
+	realForgeryCheck(t, "Janus")
+}
+func TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_GoABI(t *testing.T) {
+	realForgeryCheck(t, "Janus.GoABI")
+}
+func TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Tactic(t *testing.T) {
+	realForgeryCheck(t, "Janus.Tactic")
+}
+func TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal_Amd64Tactic(t *testing.T) {
+	realForgeryCheck(t, "Janus.Amd64.Tactic")
+}
+
+func realForgeryCheck(t *testing.T, mod string) {
 	// The nightly cold/cached gates (scripts/nightly-cold-gate.sh sets JANUS_NIGHTLY=1) run this on the
 	// real framework; the merge gates run the mini-framework variant above, which proves the same
 	// property for the partition kinds in seconds. With JANUS_NIGHTLY=1 a missing fixture is a failure.
@@ -687,28 +704,26 @@ func TestParallelFrameworkReplayCatchesForgeryInEveryPartitionReal(t *testing.T)
 	lib0, tc, _, runIn := realParFixture(t)
 	lake, _ := findLake()
 	forge, _ := os.ReadFile(filepath.Join(repoRoot, "audit", "attacks", "R1_forged_lemma.lean"))
-	for _, mod := range []string{"Janus", "Janus.GoABI", "Janus.Tactic", "Janus.Amd64.Tactic"} {
-		rel := strings.ReplaceAll(mod, ".", "/")
-		lib := filepath.Join(t.TempDir(), "lib")
-		if err := copyTree(lib0, lib); err != nil {
-			t.Fatal(err)
-		}
-		src, _ := os.ReadFile(filepath.Join(repoRoot, rel+".lean"))
-		fdir := t.TempDir()
-		writeBytes(t, filepath.Join(fdir, rel+".lean"), append(append([]byte("import Lean\n"), src...), forge...))
-		cmd := exec.Command(lake, "env", "lean", "--root="+fdir, "-o", filepath.Join(lib, rel+".olean"), filepath.Join(fdir, rel+".lean"))
-		cmd.Dir = repoRoot
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("forging %s: %v\n%s", mod, err, out)
-		}
-		out, err, _ := realPar(t, tc, lib, runIn, 4)
-		var mk *memKillError
-		if errors.As(err, &mk) || strings.Contains(out, "memory limit") {
-			t.Fatalf("forged %s: the replay was OOM-killed (inconclusive), not a detection: %v\n%s", mod, err, out)
-		}
-		if err == nil || !strings.Contains(out, "leanchecker found a problem in") || !strings.Contains(out, "forged") {
-			t.Errorf("forged %s: not a kernel detection: err %v\n%s", mod, err, out)
-		}
+	rel := strings.ReplaceAll(mod, ".", "/")
+	lib := filepath.Join(t.TempDir(), "lib")
+	if err := copyTree(lib0, lib); err != nil {
+		t.Fatal(err)
+	}
+	src, _ := os.ReadFile(filepath.Join(repoRoot, rel+".lean"))
+	fdir := t.TempDir()
+	writeBytes(t, filepath.Join(fdir, rel+".lean"), append(append([]byte("import Lean\n"), src...), forge...))
+	cmd := exec.Command(lake, "env", "lean", "--root="+fdir, "-o", filepath.Join(lib, rel+".olean"), filepath.Join(fdir, rel+".lean"))
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("forging %s: %v\n%s", mod, err, out)
+	}
+	out, err, _ := realPar(t, tc, lib, runIn, 4)
+	var mk *memKillError
+	if errors.As(err, &mk) || strings.Contains(out, "memory limit") {
+		t.Fatalf("forged %s: the replay was OOM-killed (inconclusive), not a detection: %v\n%s", mod, err, out)
+	}
+	if err == nil || !strings.Contains(out, "leanchecker found a problem in") || !strings.Contains(out, "forged") {
+		t.Errorf("forged %s: not a kernel detection: err %v\n%s", mod, err, out)
 	}
 }
 
