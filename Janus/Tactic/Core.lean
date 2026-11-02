@@ -319,7 +319,7 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
   for h in hyps, k in [0:hyps.size] do
     if let some t0 := thms[0]? then
       thms := thms.set! 0 (← t0.add (.other (Name.mkNum `janus_state k)) #[] h)
-  ctx := ctx.setSimpTheorems thms
+  ctx := Common.noRflCtx (ctx.setSimpTheorems thms)
   -- no `reduceCtorEq`: it proves `(e + k) * 2 ^ 52 = 0` false with `Nat.noConfusion`, whose kernel
   -- check unfolds `Nat.mul` along the literal (deep recursion); see `Janus.Tactic.KernelSafe`
   let mut simprocs := r.simprocs.push ((← Simp.getSimprocs).erase ``reduceCtorEq)
@@ -371,14 +371,14 @@ def tryPrune (g : MVarId) : TacticM Bool := withoutRecover do
   -- goal, which `whnf`s a pending `ExecThen` (its `match`/`ite` over the whole state; 50-75 s)
   let gs ← try
       Tactic.run (← g.exfalso) <| withoutRecover (evalTactic (← `(tactic| (first
-        | omega
+        | janus_omega_prune
         | (simp only [BitVec.toNat_eq, BitVec.ofNat_eq_ofNat, BitVec.toNat_ofNat, BitVec.toNat_zero, ne_eq, Nat.reducePow,
             Nat.zero_mod]
-            at *; omega)
+            at *; janus_omega_prune)
         | (simp only [Bool.and_eq_true, Bool.or_eq_true, Bool.not_eq_true', Bool.not_eq_false',
             Bool.and_eq_false_iff, Bool.or_eq_false_iff, decide_eq_true_eq, decide_eq_false_iff_not,
             not_and, not_or, Classical.not_not, ne_eq]
-            at *; omega)))))
+            at *; janus_omega_prune)))))
     catch _ => saved.restore; return false
   if !gs.isEmpty then saved.restore
   return gs.isEmpty
@@ -540,7 +540,7 @@ where
 def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
   -- reducible transparency only in the closers: unfolding `Memory.accessible`/`readLE` of a
   -- symbolic memory to compare it with a hypothesis can take seconds
-  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus_omega_sparse | omega | janus_disch)
+  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus_omega_sparse | janus_omega_cap | janus_disch)
   let left ← Common.provePreCore (cleanOutcome cfg) closer g
   unless left.isEmpty do
     let st ← cfg.status.get
@@ -827,8 +827,7 @@ def dischargeAccessible (g : MVarId) : TacticM Bool := withoutRecover <| g.withC
   -- through stores and callee frames (`MemFrame`)
   let g ← Common.reduceAccessible g
   -- strip writes: `accessible_writeLE`
-  let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic|
-    try simp only [janus_acc, State.mem] )))
+  let gs ← withoutRecover (Common.simpNoRfl g (← `(tactic| simp only [janus_acc, State.mem])))
   let some g := gs.head? | return true
   let t ← instantiateMVars (← g.getType)
   let some (_, lhs, _) := t.eq? | return false
@@ -907,18 +906,78 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
     evalTactic (← `(tactic| first
       | janus_apart
       | janus_omega
-      | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
-          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
+      | (simp -failIfUnchanged (disch := janus_omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
+          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; janus_omega)))
     if !(← getUnsolvedGoals).isEmpty then throwError "janus_disch: pruned attempt left goals"
   catch _ =>
     saved.restore
     evalTactic (← `(tactic| first
       | janus_apart
       | janus_omega
-      | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
-          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
+      | (simp -failIfUnchanged (disch := janus_omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
+          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; janus_omega)))
 
 /-! ## Arithmetic -/
+
+/-! ### Sharing of carry subterms (`janus_arith`)
+
+After the symbolic execution of an 8-limb multiplication the goal is a DAG whose carries
+`(a * b + c) / 2 ^ 64` are used twice each (in the limb and in the next carry): small as a DAG,
+exponential as a tree (270 K characters for one limb). `omega` linearises terms by tree recursion
+(no memoisation), and runs out of time and memory. `shareCarries` abstracts the quotients and
+remainders by literals, innermost first, as fresh variables with their defining equations
+(`generalize`), so that each carry is linearised once. It does nothing for small goals. -/
+
+/-- The number of nodes of `e` as a tree (saturating), computed over the DAG. -/
+partial def treeSize (e : Expr) (memo : IO.Ref (Std.HashMap Expr Nat)) : IO Nat := do
+  if let some n := (← memo.get).get? e then return n
+  let r ← match e with
+    | .app f a => pure (min 1000000000 ((← treeSize f memo) + (← treeSize a memo) + 1))
+    | .lam _ t b _ | .forallE _ t b _ => pure (min 1000000000 ((← treeSize t memo) + (← treeSize b memo) + 1))
+    | .mdata _ b | .proj _ _ b => pure ((← treeSize b memo) + 1)
+    | _ => pure 1
+  memo.modify (·.insert e r)
+  return r
+
+/-- Quotients and remainders by a non-zero literal in `e` (natural numbers), each once. -/
+partial def carryCandidates (e : Expr) : Array Expr := Id.run do
+  let mut seen : Std.HashSet Expr := {}
+  let mut out : Array Expr := #[]
+  let mut todo : Array Expr := #[e]
+  while h : todo.size > 0 do
+    let x := todo.back!
+    todo := todo.pop
+    if seen.contains x then continue
+    seen := seen.insert x
+    match x.getAppFnArgs with
+    | (``HDiv.hDiv, #[t, _, _, _, a, k]) | (``HMod.hMod, #[t, _, _, _, a, k]) =>
+      if Janus.Carry.isNatTy t && (Janus.Carry.evalLit k).isSome && (Janus.Carry.evalLit x).isNone then
+        out := out.push x
+      todo := todo.push a
+      continue
+    | _ => pure ()
+    match x with
+    | .app f a => todo := todo.push f |>.push a
+    | .mdata _ b | .proj _ _ b => todo := todo.push b
+    | _ => pure ()
+  return out
+
+def shareCarries : TacticM Unit := do
+  let memo ← IO.mkRef ({} : Std.HashMap Expr Nat)
+  let t ← instantiateMVars (← (← getMainGoal).getType)
+  if (← treeSize t memo) ≤ 4000 then return
+  for _ in [0:600] do
+    let g ← getMainGoal
+    let t ← instantiateMVars (← g.getType)
+    let cands := carryCandidates t
+    if cands.isEmpty then break
+    let mut best := cands[0]!
+    let mut bestSz := ← treeSize best memo
+    for c in cands do
+      let sz ← treeSize c memo
+      if sz < bestSz then best := c; bestSz := sz
+    let (_, g') ← g.generalize #[{ expr := best, xName? := `vsh, hName? := `hsh }]
+    replaceMainGoal [g']
 
 /-- The carry-chain procedure `janus_carry` first (equations of limb arithmetic, by
 reflection); otherwise `omega` with the range facts of every memory read
@@ -926,6 +985,7 @@ reflection); otherwise `omega` with the range facts of every memory read
 elab "janus_arith" : tactic => do
   if (← getUnsolvedGoals).isEmpty then return
   if ← Janus.Carry.tryCarry then return
+  shareCarries
   Common.addReadLEBounds
   evalTactic (← `(tactic| try simp (disch := omega) only [janus_arith_norm]))
   evalTactic (← `(tactic| first | omega | (janus_decide_split; all_goals omega)))

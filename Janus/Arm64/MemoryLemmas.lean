@@ -108,10 +108,17 @@ variable (m : Memory)
 
 /-! ### `writeLE` frame facts -/
 
-@[simp] theorem regions_writeLE (a n v : Nat) : (m.writeLE a n v).regions = m.regions := rfl
+/-! The two `writeLE` frame facts hold by `rfl`, but their proofs are deliberately NOT `rfl` terms:
+`simp` applies a lemma proved by `rfl` as a `dsimp` step with no proof, and the kernel then has to
+re-establish the rewrite by unfolding `Memory.accessible`/`writeLE` around a symbolic store address
+(`2^64 - n - c`, `x &&& ...`): "(kernel) deep recursion detected" (U16). `Eq.symm (Eq.symm rfl)` is
+the same statement, applied by `simp` as an ordinary rewrite whose proof the kernel checks
+syntactically. -/
+@[simp] theorem regions_writeLE (a n v : Nat) : (m.writeLE a n v).regions = m.regions :=
+  Eq.symm (Eq.symm rfl)
 
 @[simp] theorem accessible_writeLE (a n v b k : Nat) (w : Bool) :
-    (m.writeLE a n v).accessible b k w = m.accessible b k w := rfl
+    (m.writeLE a n v).accessible b k w = m.accessible b k w := Eq.symm (Eq.symm rfl)
 
 theorem bytes_writeLE (a n v x : Nat) :
     (m.writeLE a n v).bytes x =

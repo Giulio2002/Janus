@@ -541,28 +541,45 @@ theorem ediv_sub_ediv (a b k : Int) (hk : 0 < k) :
   have := Int.lt_of_mul_lt_mul_left hi (by omega)
   omega
 
-theorem pairIv_mem {c : Ctx} {env : List Nat} {ρ : Nat → Int} (hs : Sem c env ρ)
-    {i j : Nat} {Li Lj : Poly} {k : Nat} (hi : qatom c i = some (Li, k))
-    (hj : qatom c j = some (Lj, k)) : (pairIv c Li Lj k).mem (ρ j - ρ i) := by
-  obtain ⟨hk, ei⟩ := qatom_spec hs hi
-  obtain ⟨-, ej⟩ := qatom_spec hs hj
-  have hI := polyIv_sound' hs.iv' (Lj.sub Li)
-  rw [Poly.eval_sub] at hI
+/-- `a/k - b/k ≤ ⌈(a-b)/k⌉`. -/
+theorem ediv_sub_ediv_ceil (a b k : Int) (hk : 0 < k) :
+    a / k - b / k ≤ (a - b + k - 1) / k := by
+  have h1 := Int.emod_add_mul_ediv a k
+  have h2 := Int.emod_add_mul_ediv b k
+  have r1 := Int.emod_nonneg a (show k ≠ 0 by omega)
+  have r2 := Int.emod_nonneg b (show k ≠ 0 by omega)
+  have s1 := Int.emod_lt_of_pos a hk
+  have s2 := Int.emod_lt_of_pos b hk
+  have h3 := Int.emod_add_mul_ediv (a - b + k - 1) k
+  have r3 := Int.emod_nonneg (a - b + k - 1) (show k ≠ 0 by omega)
+  have s3 := Int.emod_lt_of_pos (a - b + k - 1) hk
+  by_cases hle : a / k - b / k ≤ (a - b + k - 1) / k
+  · exact hle
+  have hgt : (a - b + k - 1) / k + 1 ≤ a / k - b / k := by omega
+  have hmul : k * ((a - b + k - 1) / k + 1) ≤ k * (a / k - b / k) := Int.mul_le_mul_of_nonneg_left hgt (by omega)
+  rw [Int.mul_add, Int.mul_sub] at hmul
+  exfalso
+  omega
+
+theorem pairIvOf_mem {I : Iv} {a b : Int} {k : Nat} (hk : 0 < k) (hI : I.mem (a - b)) :
+    (pairIvOf I k).mem (a / (k : Int) - b / (k : Int)) := by
   have hk' : (0 : Int) < k := by omega
-  obtain ⟨b1, b2⟩ := ediv_sub_ediv (Lj.eval ρ) (Li.eval ρ) k hk'
-  rw [ei, ej]
+  obtain ⟨b1, b2⟩ := ediv_sub_ediv a b k hk'
+  have b3 := ediv_sub_ediv_ceil a b k hk'
   constructor
   · intro l hl
-    simp only [pairIv] at hl
-    cases e : (polyIv (c.iv) (Lj.sub Li)).lo <;> rw [e] at hl <;> simp [omap] at hl
+    simp only [pairIvOf] at hl
+    cases e : I.lo <;> rw [e] at hl <;> simp [omap] at hl
     subst hl
     have := Int.ediv_le_ediv hk' (hI.1 _ e)
     omega
   · intro l hl
-    simp only [pairIv] at hl
-    cases e : (polyIv (c.iv) (Lj.sub Li)).hi <;> rw [e] at hl <;> simp [omap] at hl
+    simp only [pairIvOf] at hl
+    cases e : I.hi <;> rw [e] at hl <;> simp [omap] at hl
     subst hl
-    have := Int.ediv_le_ediv hk' (hI.2 _ e)
+    rename_i hv
+    have h4 : a - b + k - 1 ≤ hv + (k : Int) - 1 := by have := hI.2 _ e; omega
+    have := Int.ediv_le_ediv hk' h4
     omega
 
 theorem civF_sound {c : Ctx} {env : List Nat} {ρ : Nat → Int} (hs : Sem c env ρ) :
@@ -575,7 +592,13 @@ theorem civF_sound {c : Ctx} {env : List Nat} {ρ : Nat → Int} (hs : Sem c env
       obtain ⟨hi, hj⟩ := findPair_spec hf
       apply Iv.mem_inter (polyIv_sound' hs.iv' p)
       have hr := civF_sound hs f (p.sub (((Poly.atom j).sub (Poly.atom i)).scale e))
-      have hpair := Iv.mem_scale e (pairIv_mem hs hi hj)
+      obtain ⟨hk, ei⟩ := qatom_spec hs hi
+      obtain ⟨-, ej⟩ := qatom_spec hs hj
+      have hd := civF_sound hs f (Lj.sub Li)
+      rw [Poly.eval_sub] at hd
+      have hpair0 := pairIvOf_mem hk hd
+      rw [← ei, ← ej] at hpair0
+      have hpair := Iv.mem_scale e hpair0
       have := Iv.mem_add hr hpair
       simp only [Poly.eval_sub, Poly.eval_scale, Poly.eval_atom] at this
       rwa [Int.sub_add_cancel] at this
@@ -590,6 +613,55 @@ theorem refine_mem {c : Ctx} {env : List Nat} {ρ : Nat → Int} (hs : Sem c env
   cases I.within k
   · exact Iv.mem_inter hI (hp ▸ civ_sound hs p)
   · exact hI
+
+theorem nested_floor (X Y kj k : Int) (hkj : 0 < kj) :
+    (kj * X + Y) / (kj * k) = (X + Y / kj) / k := by
+  rw [← Int.ediv_ediv_of_nonneg (by omega : 0 ≤ kj)]
+  rw [Int.mul_add_ediv_left X Y (by omega : kj ≠ 0)]
+
+theorem findQ1_spec {c : Ctx} :
+    ∀ {p : Poly} {j : Nat} {Lj : Poly} {kj : Nat}, findQ1 c p = some (j, Lj, kj) →
+      qatom c j = some (Lj, kj)
+  | [], _, _, _, h => by simp [findQ1] at h
+  | (m, e) :: p, j, Lj, kj, h => by
+    unfold findQ1 at h
+    split at h
+    · rename_i j0
+      cases hb : intBeq e 1
+      · rw [hb] at h; exact findQ1_spec h
+      · rw [hb] at h
+        simp only [Bool.cond_true] at h
+        cases hq : qatom c j0 with
+        | none => rw [hq] at h; exact findQ1_spec h
+        | some q =>
+          rw [hq] at h
+          obtain ⟨Lq, kq⟩ := q
+          simp only [Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨rfl, rfl, rfl⟩ := h
+          exact hq
+    · exact findQ1_spec h
+
+theorem flatQ_sound {c : Ctx} {env : List Nat} {ρ : Nat → Int} (hs : Sem c env ρ) :
+    ∀ (f : Nat) (L : Poly) (k : Nat), 0 < k →
+      0 < (flatQ c f L k).2 ∧ (flatQ c f L k).1.eval ρ / ((flatQ c f L k).2 : Int) = L.eval ρ / (k : Int)
+  | 0, L, k, hk => by simp [flatQ, hk]
+  | f + 1, L, k, hk => by
+    unfold flatQ
+    split
+    · rename_i j Lj kj hf
+      obtain ⟨hkj, ej⟩ := qatom_spec hs (findQ1_spec hf)
+      obtain ⟨h1, h2⟩ := flatQ_sound hs f (((L.sub (Poly.atom j)).scale (kj : Int)).add Lj) (kj * k)
+        (Nat.mul_pos hkj hk)
+      refine ⟨h1, ?_⟩
+      rw [h2]
+      simp only [Poly.eval_add, Poly.eval_scale, Poly.eval_sub, Poly.eval_atom]
+      have hkjI : (0 : Int) < kj := by omega
+      have := nested_floor (L.eval ρ - ρ j) (Lj.eval ρ) kj k hkjI
+      rw [Int.natCast_mul]
+      rw [this, ← ej]
+      congr 2
+      omega
+    · exact ⟨hk, rfl⟩
 
 theorem divmod_sound {c : Ctx} {env : List Nat} {ρ : Nat → Int} (hs : Sem c env ρ)
     {p : Poly} {J : Iv} {k : Nat} {d r : Poly} {v : Int} (hk : 0 < k)
@@ -609,14 +681,17 @@ theorem divmod_sound {c : Ctx} {env : List Nat} {ρ : Nat → Int} (hs : Sem c e
   cases hw : (cond Y.isNil J (civ c L)).within (k : Int)
   · rw [hw] at h
     simp only [Bool.cond_false] at h
-    cases hl : lookup L k c.tbl 0 with
+    have hfl := flatQ_sound hs flatFuel L k hk
+    generalize flatQ c flatFuel L k = F at h hfl
+    cases hl : lookup F.1 F.2 c.tbl 0 with
     | none => rw [hl] at h; simp at h
     | some j =>
       rw [hl] at h
       simp only [Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
-      obtain ⟨j', rfl, hj⟩ := lookup_spec L k c.tbl 0 j hl
-      have hat := (hs.tbl j' L k hj).2
+      obtain ⟨j', rfl, hj⟩ := lookup_spec F.1 F.2 c.tbl 0 j hl
+      have hat := (hs.tbl j' F.1 F.2 hj).2
+      rw [hfl.2] at hat
       rw [Nat.zero_add]
       simp only [Poly.eval_add, Poly.eval_atom, Poly.eval_sub, Poly.eval_scale]
       rw [hat]

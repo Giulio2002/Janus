@@ -430,10 +430,14 @@ partial def obstacles (accessFns : List (Name × Bool)) (e : Expr) : MetaM (Arra
         let fn := e.getAppFn
         let args := e.getAppArgs
         let mut acc := acc
+        -- `go` also walks under binders without instantiating them: an obstacle whose terms
+        -- mention a bound variable (`#0`) is not one the diagnostics can print or run `omega` on
+        -- (`isDefEq` on a loose bound variable panics: U17), so it is not recorded
         if let some c := fn.constName? then
           if let some (_, w) := accessFns.find? (·.1 == c) then
-            if args.size ≥ 3 then acc := acc.push (.access c args[0]! args[1]! args[2]! w)
-          if c == ``Janus.Arm64.Memory.readLE && args.size == 3 then
+            if args.size ≥ 3 && !(args[0]!.hasLooseBVars || args[1]!.hasLooseBVars || args[2]!.hasLooseBVars) then
+              acc := acc.push (.access c args[0]! args[1]! args[2]! w)
+          if c == ``Janus.Arm64.Memory.readLE && args.size == 3 && !e.hasLooseBVars then
             let m := args[0]!
             if m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 then
               acc := acc.push (.alias (m.getArg! 0) (m.getArg! 1) (m.getArg! 2) args[1]! args[2]!)
@@ -443,7 +447,7 @@ partial def obstacles (accessFns : List (Name × Bool)) (e : Expr) : MetaM (Arra
             for d in discrs do
               if (← isConstructorApp? d.consumeMData).isNone && !d.isRawNatLit && d.nat?.isNone then
                 ctor := false
-            unless ctor do acc := acc.push (.stuckMatch c discrs)
+            unless ctor || discrs.any (·.hasLooseBVars) do acc := acc.push (.stuckMatch c discrs)
         for a in args do acc ← go a acc
         pure acc
       | .mdata _ b => go b acc
@@ -613,7 +617,7 @@ def branchConds : MetaM MessageData := do
 location of the step that produced them). -/
 def noteAliases (ref : IO.Ref Status) (e : Expr) : MetaM Unit := do
   let acc ← IO.mkRef (#[] : Array Expr)
-  e.forEachWhere (fun t => t.isAppOfArity ``Janus.Arm64.Memory.readLE 3 &&
+  e.forEachWhere (fun t => t.isAppOfArity ``Janus.Arm64.Memory.readLE 3 && !t.hasLooseBVars &&
       (t.getArg! 0).isAppOfArity ``Janus.Arm64.Memory.writeLE 4)
     (fun t => acc.modify (·.push t))
   let ts ← acc.get
@@ -1069,6 +1073,25 @@ def frameRules (d : LocalDecl) (ty : Expr) : MetaM (Array Expr) := do
   unless ty.isAppOfArity ``Janus.MemFrame 3 do return #[]
   return #[← mkAppM ``Janus.MemFrame.readLE #[d.toExpr], ← mkAppM ``Janus.MemFrame.accessible #[d.toExpr]]
 
+/-- One store off the memory of a goal `m.accessible a n w = rhs`, with the proof
+`Memory.accessible_writeLE` (a theorem whose type is the rewrite syntactically), repeated until the
+memory is no `writeLE`. No defeq cast: see `reduceAccessible`. -/
+partial def stripWritesProof (g : MVarId) : MetaM MVarId := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let some (_, lhs, rhs) := t.eq? | return g
+  unless lhs.isAppOfArity ``Janus.Arm64.Memory.accessible 4 do return g
+  let m := lhs.getArg! 0
+  unless m.isAppOfArity ``Janus.Arm64.Memory.writeLE 4 do return g
+  let m' := m.getArg! 0
+  let t' ← mkEq (mkAppN (mkConst ``Janus.Arm64.Memory.accessible)
+    #[m', lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]) rhs
+  let g' ← mkFreshExprSyntheticOpaqueMVar t'
+  let eqv := mkAppN (mkConst ``Janus.Arm64.Memory.accessible_writeLE)
+    #[m', m.getArg! 1, m.getArg! 2, m.getArg! 3, lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]
+  let f := Expr.lam `x (mkConst ``Bool) (mkApp3 (mkConst ``Eq [1]) (mkConst ``Bool) (.bvar 0) rhs) .default
+  g.assign (← mkEqMPR (← mkCongrArg f eqv) g')
+  stripWritesProof g'.mvarId!
+
 /-- Reduce a goal `m.accessible a n w = true` to one about the underlying memory: strip stores
 (`accessible_writeLE` holds by `rfl`) and go through `MemFrame` hypotheses (`hf.accessible`). -/
 partial def reduceAccessible (g : MVarId) (fuel : Nat := 64) : MetaM MVarId := g.withContext do
@@ -1081,7 +1104,10 @@ partial def reduceAccessible (g : MVarId) (fuel : Nat := 64) : MetaM MVarId := g
   let mkGoal (m' : Expr) : MetaM Expr := do
     mkEq (mkAppN (mkConst ``Janus.Arm64.Memory.accessible)
       #[m', lhs.getArg! 1, lhs.getArg! 2, lhs.getArg! 3]) rhs
-  let g ← if m0 != m then g.replaceTargetDefEq (← mkGoal m0) else pure g
+  -- strip the stores with a proof (`accessible_writeLE`), one store at a time: a defeq cast
+  -- (`replaceTargetDefEq`, an `id` the kernel must re-establish by unfolding `accessible`) makes the
+  -- kernel evaluate the region test on a symbolic address (`2^64 - n - c`): "deep recursion" (U16)
+  let g ← if m0 != m then stripWritesProof g else pure g
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
@@ -1177,6 +1203,127 @@ elab "janus_omega_sparse" : tactic => do
   unless ← omegaSparse g do throwError "janus_omega_sparse: no proof with at most two disjunctions"
   replaceMainGoal []
 
+register_option janus.omega.cap : Nat := {
+  defValue := 12
+  descr := "janus_run: the largest number of disjunctions (`∨`) in the hypotheses for which its internal \
+    `omega` calls run on the whole context. `omega` splits on every disjunction it needs, so a call that \
+    cannot close its goal (a branch that is not pruned, a side condition that is not provable) costs \
+    about 2^n for n disjunctive facts (the `Disjoint`/`Apart` facts of a statement with many pointers); \
+    above the cap such a call is not made on the full context: the sparse attempts (`omegaSparse`) and \
+    the focused context (`omegaFocused`) still run."
+}
+
+/-- The number of `∨` in the propositional hypotheses of the context (what `omega` may split on; `Apart`,
+`Disjoint` and `Outside` are definitions it does not see until they are unfolded). -/
+def countDisj : MetaM Nat := do
+  let mut n := 0
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ← isProp ty do continue
+    if ty.isForall then continue
+    let cnt ← IO.mkRef 0
+    ty.forEach fun e => do if e.isAppOfArity ``Or 2 then cnt.modify (· + 1)
+    n := n + (← cnt.get)
+  return n
+
+/-- `omega` on the full context, unless the context has more than `janus.omega.cap` disjunctions (then it
+fails at once, instead of running for 2^n splits). -/
+def omegaCapped : TacticM Unit := do
+  let cap := janus.omega.cap.get (← getOptions)
+  let n ← countDisj
+  if n > cap then
+    throwError "janus_omega_cap: {n} disjunctive hypotheses (more than janus.omega.cap = {cap}): `omega` \
+      was not tried on the full context"
+  evalTactic (← `(tactic| omega))
+
+elab "janus_omega_cap" : tactic => omegaCapped
+
+/-- `omega` on `g` in the context restricted to the hypotheses that only mention free
+variables of the goal. `true` if it closed the goal. -/
+def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let goalFVars := (collectFVars {} t).fvarSet
+  if goalFVars.isEmpty then return false
+  let lctx ← getLCtx
+  let mut lctx' := lctx
+  let mut dropped := 0
+  for d in lctx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ← isProp ty do continue
+    let fv := (collectFVars {} ty).fvarSet
+    unless fv.toList.all goalFVars.contains do
+      lctx' := lctx'.erase d.fvarId
+      dropped := dropped + 1
+  if dropped == 0 then return false
+  let m ← mkFreshExprMVarAt lctx' (← getLocalInstances) t
+  let saved ← saveState
+  try
+    let gs ← Tactic.run m.mvarId! (evalTactic (← `(tactic| omega)))
+    if gs.isEmpty then
+      g.assign m
+      return true
+    saved.restore
+    return false
+  catch _ =>
+    saved.restore
+    return false
+
+
+/-- `omega` for side conditions of the dischargers, in stages: the sparse attempts, `omega` in the context
+restricted to the hypotheses about the goal's free variables, `omega` on the full context (capped). -/
+def omegaStaged (g : MVarId) : TacticM Bool := do
+  if ← omegaSparse g then return true
+  if ← omegaFocused g then return true
+  let saved ← saveState
+  try
+    let gs ← Tactic.run g <| withoutRecover omegaCapped
+    if gs.isEmpty then return true
+    saved.restore; return false
+  catch _ => saved.restore; return false
+
+elab "janus_omega_staged" : tactic => do
+  let g ← getMainGoal
+  unless ← omegaStaged g do throwError "janus_omega_staged: omega failed in every stage"
+  replaceMainGoal []
+
+/-- `omega` for pruning a branch (the goal is `False`, the branch condition the last `hbr`): first on the
+hypotheses about the atoms of the branch condition alone (their `Disjoint`/`Apart` facts about other pointers
+are not handed to `omega`), then the sparse attempts, then `omega` on the full context if it has at most
+`janus.omega.cap` disjunctions. A branch that is not pruned costs a failed `omega` call per attempt; with
+`n` disjunctive facts in the context the full one costs about `2^n`. -/
+elab "janus_omega_prune" : tactic => do
+  let g ← getMainGoal
+  let saved ← saveState
+  let seed ← g.withContext do
+    let mut atoms : Array Expr := #[]
+    for d in (← getLCtx).decls.toList.reverse do
+      match d with
+      | some d =>
+        if d.isImplementationDetail then continue
+        if d.userName.eraseMacroScopes == `hbr then
+          atoms := arithAtoms (← instantiateMVars d.type)
+          break
+      | none => pure ()
+    return atoms
+  if !seed.isEmpty then
+    let focused ← g.withContext do
+      let mut toClear := #[]
+      for d in ← getLCtx do
+        if d.isImplementationDetail then continue
+        let ty ← instantiateMVars d.type
+        unless ← isProp ty do continue
+        unless (arithAtoms ty).all seed.contains do toClear := toClear.push d.fvarId
+      fastClear g toClear
+    try
+      let gs ← Tactic.run focused <| withoutRecover (evalTactic (← `(tactic| omega)))
+      if gs.isEmpty then replaceMainGoal []; return
+    catch _ => pure ()
+    saved.restore
+  if ← omegaSparse g then replaceMainGoal []; return
+  omegaCapped
+
 /-- Clear the propositional hypotheses that mention atoms the (arithmetic) goal does not: what an
 `omega`/`simp … at *` on a goal about a few addresses needs is small, and the contexts after
 several calls are large. -/
@@ -1236,7 +1383,7 @@ def dischargeApart (g : MVarId) : TacticM Bool := g.withContext do
         let gs ← Tactic.run g <| withoutRecover do
           if symm then evalTactic (← `(tactic| refine Janus.Apart.sub (Janus.Apart.symm $h) ?_ ?_ ?_ ?_))
           else evalTactic (← `(tactic| refine Janus.Apart.sub $h ?_ ?_ ?_ ?_))
-          evalTactic (← `(tactic| all_goals omega))
+          evalTactic (← `(tactic| all_goals janus_omega_staged))
         if gs.isEmpty then return true
         saved.restore
       catch _ => saved.restore
@@ -1280,7 +1427,7 @@ where
               Term.exprToSyntax (← mkAppM `Janus.Contracts.ApartAll.outside #[d.toExpr])
             else Term.exprToSyntax d.toExpr
           let gs ← Tactic.run g <| withoutRecover do
-            evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> omega)))
+            evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> janus_omega_staged)))
           if gs.isEmpty then return true
           saved.restore
         catch _ => saved.restore
@@ -1295,7 +1442,7 @@ where
       saved.restore
     catch _ => saved.restore
     try
-      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| omega)))
+      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| janus_omega_staged)))
       if gs.isEmpty then return true
       saved.restore; omegaApart g
     catch _ => saved.restore; omegaApart g
@@ -2056,37 +2203,6 @@ with six `Disjoint` facts, a disjointness side condition cost 100-400 ms. `omega
 runs `omega` in the context restricted to the propositions whose free variables all occur in
 the goal; only if that fails is the full context used. -/
 
-/-- `omega` on `g` in the context restricted to the hypotheses that only mention free
-variables of the goal. `true` if it closed the goal. -/
-def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
-  let t ← instantiateMVars (← g.getType)
-  let goalFVars := (collectFVars {} t).fvarSet
-  if goalFVars.isEmpty then return false
-  let lctx ← getLCtx
-  let mut lctx' := lctx
-  let mut dropped := 0
-  for d in lctx do
-    if d.isImplementationDetail then continue
-    let ty ← instantiateMVars d.type
-    unless ← isProp ty do continue
-    let fv := (collectFVars {} ty).fvarSet
-    unless fv.toList.all goalFVars.contains do
-      lctx' := lctx'.erase d.fvarId
-      dropped := dropped + 1
-  if dropped == 0 then return false
-  let m ← mkFreshExprMVarAt lctx' (← getLocalInstances) t
-  let saved ← saveState
-  try
-    let gs ← Tactic.run m.mvarId! (evalTactic (← `(tactic| omega)))
-    if gs.isEmpty then
-      g.assign m
-      return true
-    saved.restore
-    return false
-  catch _ =>
-    saved.restore
-    return false
-
 /-- `omega` for side conditions: linear address facts by `addrDisch`, then `omega` in the focused
 context (`omegaFocused`), then in the full one. -/
 initialize registerTraceClass `janus.omega
@@ -2106,7 +2222,7 @@ elab "janus_omega" : tactic => do
     replaceMainGoal []
   else
     let t1 ← IO.monoNanosNow
-    try evalTactic (← `(tactic| omega))
+    try omegaCapped
     finally
       trace[janus.omega] "full {((← IO.monoNanosNow) - t1) / 1000000} ms (focused {(t1 - t0) / 1000000} ms): {← g.getType}"
 
@@ -2333,5 +2449,33 @@ def pickMerged (spec : MergeSpec) (pcOf : MVarId → MetaM (Option Nat))
         continue
     rest := rest.push (h, fh)
   return (g, f0) :: rest.toList
+
+
+/-! ## No proof-free (`rfl`) rewrites in the executor's simp sets
+
+A simp lemma proved by `rfl` is applied by `simp` as a `dsimp` step: it leaves NO proof term, and
+the kernel must re-establish the rewrite by definitional unfolding. When the rewritten term
+contains `e * 2 ^ 32`, `% 2 ^ 64`, ... over symbolic `e`, the kernel's `Nat` literal extension
+`whnf`s the operands and unfolds `Nat.mul` along the literal: "(kernel) deep recursion detected"
+(`BitVec.toNat_add` on `BitVec.ofNat 64 (rh * 4294967296)` in `bits.Div64`). With `rfl := false` the
+same rewrite records an `Eq` proof (`thm args : lhs = rhs`) whose type the kernel compares
+syntactically. The rewrites themselves are unchanged. -/
+
+def noRflCtx (ctx : Simp.Context) : Simp.Context :=
+  ctx.setSimpTheorems <| ctx.simpTheorems.map fun ts =>
+    let f := fun (a : Array SimpTheorem) => a.map fun t => { t with rfl := false, backwardRfl := false }
+    { ts with pre := ts.pre.mapArrays f, post := ts.post.mapArrays f }
+
+/-- `simp only [..]` on the main goal `g` (the syntax `stx` is a `simp only` tactic) with every `rfl`
+lemma applied as a proof-carrying rewrite (`noRflCtx`). No progress (or any failure) is not an error: the goal
+is returned unchanged. Used by the accessibility dischargers: their `accessible_writeLE` step is a
+`dsimp` otherwise, whose kernel check unfolds `Memory.accessible` on a symbolic address
+(U16). -/
+def simpNoRfl (g : MVarId) (stx : TSyntax `tactic) : TacticM (List MVarId) := g.withContext do
+  setGoals [g]
+  let r ← mkSimpContext stx (eraseLocal := false)
+  match ← (try simpGoal g (noRflCtx r.ctx) r.simprocs catch _ => pure (some (#[], g), {})) with
+  | (none, _) => return []
+  | (some (_, g'), _) => return [g']
 
 end Janus.Tactic.Common

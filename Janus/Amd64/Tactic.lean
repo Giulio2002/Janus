@@ -896,7 +896,7 @@ theorem writeLE_comm (m : Memory) {a n b k : Nat} (v w : Nat)
 
 attribute [janus64_exec, janus64_post] BitVec.toNat_add BitVec.toNat_sub BitVec.toNat_ofNat
   BitVec.setWidth_eq BitVec.shiftLeft_zero BitVec.ushiftRight_zero Nat.shiftLeft_eq
-  BitVec.toNat_shiftLeft BitVec.add_zero BitVec.zero_add BitVec.sub_zero
+  BitVec.toNat_shiftLeft BitVec.add_zero BitVec.zero_add BitVec.sub_zero BitVec.zero_mul BitVec.mul_zero
 
 @[janus64_exec, janus64_post] theorem mod64_of_lt {a : Nat} (h : a < 18446744073709551616) :
     a % 18446744073709551616 = a := Nat.mod_eq_of_lt h
@@ -1356,7 +1356,7 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
     for h in hyps, k in [0:hyps.size] do
       if let some t0 := thms[0]? then
         thms := thms.set! 0 (← t0.add (.other (Name.mkNum `janus64_state k)) #[] h)
-    ctx := ctx.setSimpTheorems thms
+    ctx := Janus.Tactic.Common.noRflCtx (ctx.setSimpTheorems thms)
     -- no `reduceCtorEq` (see `Janus.Tactic.KernelSafe`)
     let mut simprocs := r.simprocs.push ((← Simp.getSimprocs).erase ``reduceCtorEq)
     let mut extra : Simp.Simprocs := {}
@@ -1407,7 +1407,7 @@ def goalKind (g : MVarId) : MetaM GoalKind := do
 def tryPrune (g : MVarId) : TacticM Bool := do
   let saved ← saveState
   let gs ← try
-      Tactic.run (← g.exfalso) (evalTactic (← `(tactic| omega)))
+      Tactic.run (← g.exfalso) (evalTactic (← `(tactic| janus_omega_prune)))
     catch _ => saved.restore; return false
   unless gs.isEmpty do saved.restore
   return gs.isEmpty
@@ -1567,7 +1567,7 @@ where
 def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
   -- reducible transparency only in the closers: unfolding `Memory.accessible`/`readLE` of a
   -- symbolic memory to compare it with a hypothesis can take seconds
-  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | omega | janus64_disch)
+  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus_omega_sparse | janus_omega_cap | janus64_disch)
   let left ← Common.provePreCore (cleanOutcome cfg) closer g
   unless left.isEmpty do
     let st ← cfg.status.get
@@ -1843,8 +1843,7 @@ theorem accessible_sub {m : Memory} {a n b k : Nat} {w w' : Bool}
 
 def dischargeAccessible (g : MVarId) : TacticM Bool := g.withContext do
   let g ← Common.reduceAccessible g
-  let gs ← Tactic.run g (evalTactic (← `(tactic|
-    try simp only [Janus.Arm64.Memory.accessible_writeLE, State.mem] )))
+  let gs ← Common.simpNoRfl g (← `(tactic| simp only [Janus.Arm64.Memory.accessible_writeLE, State.mem]))
   let some g := gs.head? | return true
   let t ← instantiateMVars (← g.getType)
   let some (_, lhs, _) := t.eq? | return false
