@@ -148,6 +148,15 @@ example : obs (step [0xf3, 0x48, 0x0f, 0xb8, 0xd0] (s0 fun i => if i = 0 then 2 
 example : obs (step [0x0f, 0xbc, 0xd0] { s0 (fun _ => 0) with kreg := fun i => if i = 8 then 0x1234 else 0 }) =
     some [0, 0, 0x1234, 0x1003, 2, 1] := by decide
 
+-- BSR EDX, EAX with EAX = 0: the same (no fault, ZF = 1, RDX = the stream element kreg 8).
+example : obs (step [0x0f, 0xbd, 0xd0] { s0 (fun _ => 0) with kreg := fun i => if i = 8 then 0x1234 else 0 }) =
+    some [0, 0, 0x1234, 0x1003, 2, 1] := by decide
+
+-- The stream is consumed: after BSF of zero the next element (kreg 8) is the old kreg 9, and the 64-bit destination is the whole
+-- element (not truncated to 32 bits: RDX = 0xdead00001234 from a 48-bit element).
+example : (match step [0x0f, 0xbc, 0xd0] { s0 (fun _ => 0) with kreg := fun i => if i = 8 then 0xdead00001234 else if i = 9 then 77 else 0 } with
+    | .ok s => some [(s.regs 2).toNat, (s.kreg 8).toNat] | .error _ => none) = some [0xdead00001234, 77] := by decide
+
 -- BSR EDX, EAX with EAX = 0x80000000: index 31, ZF = 0; EDX zero-extended.
 example : obs (step [0x0f, 0xbd, 0xd0] (s0 fun i => if i = 0 then 0x80000000 else if i = 2 then 2 ^ 64 - 1 else 0)) =
     some [0x80000000, 0, 31, 0x1003, 2, 0] := by decide
