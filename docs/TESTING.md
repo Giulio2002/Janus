@@ -113,15 +113,14 @@ of a shard reported hundreds of seconds and the old table was an artefact of tha
 `JANUS_TEST_DURATIONS=<file> go test -v -parallel 4 ./cmd/janus` (one `name<TAB>seconds` line per slot hold). The whole
 package is ~2150 s of work and ~1100 s of it are four tests with a framework kernel replay each (~210 s:
 `TestCacheGCConcurrentVerify` 469 s = two replays, `TestR1ForgedFrameworkLemma` 462 s = the early replay that finds the forged
-lemma and the late replay that reports it, `TestResultCache`, `TestConcurrentVerify`); the gate therefore uses at most 6 shards
-(`-j N` clamped to 2..6): with them no shard is longer than the longest test (469 s planned; measured 295-471 s per shard,
+lemma and the late replay that reports it, `TestResultCache`, `TestConcurrentVerify`); the gate therefore uses 6 shards by default
+(`JANUS_GATE_GOTEST_SHARDS`, at most 8, memory-adaptive, see "gotest lane speed and coverage" below; the 6-shard figures that follow are from 2026-10-31): with them no shard is longer than the longest test (469 s planned; measured 295-471 s per shard,
 472 s wall, peak 4.8-12.3 GiB per shard, 44 GiB for the six).
 
 **gotest lane speed and coverage (2026-11-01, `agent/speed-gotestcp3`).** The 2953 s of the old nightly-env lane were two things: only
 2 shards (`-j 2` set the shard count; the package is ~3700 s of work on an idle box) and a `-v` time that, with `-parallel 1`, includes
 the wait for a slot (TestConsumerMathlib "took 2152 s" while it SKIPPED at once). Now: `gotest_shards_n` in `scripts/gate.sh` uses
-6 shards (`JANUS_GATE_GOTEST_SHARDS`; never fewer than `-j N`), capped by free memory (MemAvailable and the enclosing cgroup chain, minus
-a 40 GiB reserve, 20 GiB more in the nightly for the extras, over 12 GiB per shard; measured shard peaks 8.3-13.8 GiB, 66 GiB for six);
+6 shards (`JANUS_GATE_GOTEST_SHARDS`; never fewer than `-j N`), capped by (MemAvailable - 40 GiB host reserve - 20 GiB nightly extras) / 12 GiB and by (free room of the enclosing cgroup chain, i.e. the memcap budget, with no reserve - 20 GiB) / 12 GiB, so a lane run alone under a large cap uses all six; the ASL extra is not counted because it runs alone after the shards; measured shard peaks 8.3-13.8 GiB, 66 GiB for six);
 the real-framework forgery check is four tests (`..._Janus`, `_GoABI`, `_Tactic`, `_Amd64Tactic`, same assertions, one module each);
 `testDurations` was remeasured. The kernel replays are the floor: `TestCacheGCConcurrentVerify`, `TestR1ForgedFrameworkLemma`,
 `TestParallelFrameworkReplayMatchesSingleProcess` each hold a slot for 430-940 s at host load 30-90 (a replay is 2 workers x 2 threads
