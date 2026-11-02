@@ -106,7 +106,7 @@ memguard_self "$@"
 # Memory adaptation: each shard peaks at 8-14 GiB (measured 2026-11-01: 13.8 / 11.6 / 10.1 / 11.3 / 10.9 / 8.3 GiB for six, 66 GiB
 # together; the nightly extras add 17 + 3 GiB), so the count is also capped by (free - 40 GiB reserve [- 20 GiB extras]) / 14 GiB,
 # where free is the smaller of MemAvailable and the free room of the enclosing cgroup chain (memcap / memguard). Never below 2 (the
-# old behaviour) and never below -j N. JANUS_GOTEST_SHARD_MEM (GiB per shard, default 14) tunes it.
+# old behaviour) and never below -j N. JANUS_GOTEST_SHARD_MEM (GiB per shard, default 12) tunes it.
 gotest_free_gib() {
   local kb p lim cur min d
   kb=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null); min=$(( ${kb:-0} / 1048576 ))
@@ -119,10 +119,10 @@ gotest_free_gib() {
   echo "$min"
 }
 gotest_shards_n() {
-  local sh=${JANUS_GATE_GOTEST_SHARDS:-6} j=${jobs_n:-2} per=${JANUS_GOTEST_SHARD_MEM:-14} free ex=0 cap
+  local sh=${JANUS_GATE_GOTEST_SHARDS:-6} j=${jobs_n:-2} per=${JANUS_GOTEST_SHARD_MEM:-12} free ex=0 cap
   [ "$sh" -ge 1 ] 2>/dev/null || sh=6
   [ "$j" -ge 1 ] 2>/dev/null || j=2
-  [ "$per" -ge 1 ] 2>/dev/null || per=14
+  [ "$per" -ge 1 ] 2>/dev/null || per=12
   if [ -z "${JANUS_GATE_GOTEST_SHARDS:-}" ]; then   # an explicit count is taken as given (still >= 2 and <= 8)
     free=$(gotest_free_gib); [ "${JANUS_NIGHTLY:-}" != 1 ] || ex=20
     cap=$(( (free - 40 - ex) / per ))

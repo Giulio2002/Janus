@@ -124,7 +124,7 @@ extra_names=() extra_pids=()
 mathlib_rev="${JANUS_TEST_MATHLIB_REV:-d13f23b723b8a846827a245b89c10fc7d3f11612}"
 mathlib_key=$(printf '%s\n%s\n%s\n' "$root" "$(cat "$root/lean-toolchain" 2>/dev/null)" "$mathlib_rev" | sha256sum | cut -c1-16)
 asl_key=$(printf '%s\n%s\n' "$root" "$(cat "$root/lean-toolchain" 2>/dev/null)" | sha256sum | cut -c1-16)
-run_extra() { # LABEL "NAME NAME..." LIMIT ENVWORDS : one go test run of the named tests; every name must PASS
+run_extra() { # LABEL "NAME NAME..." LIMIT ENVWORDS : one run (explicit -timeout 7000s) run of the named tests; every name must PASS
   local label=$1 names=$2 limit=$3 envw=$4 pkg f="$outdir/extra-$1" rc=0 re
   re=$(printf '%s' "$names" | tr ' ' '|')
   pkg=$(awk -F'\t' -v n="${names%% *}" '$2 == n { print $1 }' "$outdir/all.txt")
@@ -140,11 +140,11 @@ if [ "$extras_on" = 1 ]; then
   # (keyed by checkout path and toolchain; its entries are keyed by framework and package hashes inside) and the checkout's own built
   # JanusASL as a seed (Lake reuses it by content, JANUS_TEST_ASL_SEED) make later runs short. JANUS_GOTEST_EXTRA_LIST (space
   # separated labels) limits the extras (development).
-  aslseed=""; [ ! -d "$root/JanusASL/.lake" ] || aslseed="JANUS_TEST_ASL_SEED=$root/JanusASL"
+  aslseed=""; [ ! -d "$root/JanusASL/.lake/build" ] || aslseed="JANUS_TEST_ASL_SEED=$root/JanusASL"
   extras=(
     "pressure|TestReplayUnderMemoryPressure|20G|JANUS_PRESSURE_TEST=1 JANUS_TEST_CACHE_DIR=$runcache/x-pressure"
     "mathlib|TestConsumerMathlib|24G|JANUS_TEST_MATHLIB=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-mathlib-$mathlib_key/cache JANUS_TEST_MATHLIB_DIR=$cachebase/janus-test-mathlib-$mathlib_key/pkg JANUS_TEST_MATHLIB_REV=$mathlib_rev"
-    "asl|TestASLExamples TestASLForgeryRejected TestASLUncovered TestASLConsumer|48G|JANUS_TEST_ASL=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-asl-$asl_key $aslseed"
+    "asl|TestASLExamples TestASLForgeryRejected TestASLUncovered TestASLConsumer|48G|JANUS_MEM_MAX=48G JANUS_TEST_ASL=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-asl-$asl_key $aslseed"
   )
   for e in "${extras[@]}"; do
     IFS='|' read -r lab names lim envw <<< "$e"

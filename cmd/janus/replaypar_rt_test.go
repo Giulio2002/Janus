@@ -25,8 +25,15 @@ func rtFixtures(t *testing.T) (base, fx, tmp string) {
 	if os.Getenv("JANUS_NIGHTLY") != "1" {
 		t.Skip("RT fixtures: set RT_BASE/RT_FX, or run with JANUS_NIGHTLY=1 (the nightly gates build them)")
 	}
-	lib0, _, _, _ := realParFixture(t)
-	lake, _ := findLake()
+	// (not realParFixture: it takes heavyReplayMu for the rest of the test, and the caller takes it too)
+	lib0 := filepath.Join(repoRoot, ".lake", "build", "lib", "lean")
+	if _, err := os.Stat(filepath.Join(lib0, "Janus.olean")); err != nil {
+		t.Fatalf("JANUS_NIGHTLY=1 but the repository's Janus build is not present: %v", err)
+	}
+	lake, err := findLake()
+	if err != nil {
+		t.Fatalf("JANUS_NIGHTLY=1 but %v", err)
+	}
 	fx = t.TempDir()
 	forged := func(name string) string { // a module whose kernel check is skipped
 		return "import Lean\nopen Lean in\nset_option debug.skipKernelTC true in\nrun_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {\n" +
@@ -81,46 +88,65 @@ func rtLibCopy(t *testing.T, base, lib string) {
 }
 
 // RT matrix: attacks on the parallel framework replay with the real leanchecker.
+type rtMatrixCase struct {
+	name     string
+	add      map[string]string // lib-relative dest -> fixture src
+	wantFail bool
+}
+
+var rtMatrixCases = []rtMatrixCase{
+	{"honest", nil, false},
+	{"extra Janus.Zz forged", map[string]string{"Janus/Zz.olean": "out/zz/Janus/Zz.olean"}, true},
+	{"extra Janus.Zz.Y forged, no Janus.Zz", map[string]string{"Janus/Zz/Y.olean": "out/zzy/Janus/Zz/Y.olean"}, true},
+	{"JanusX86Zz forged (not a Janus.* module)", map[string]string{"JanusX86Zz.olean": "out/x86/JanusX86Zz.olean"}, false},
+	{"JanusReplayRoot.Foo forged", map[string]string{"JanusReplayRoot/Foo.olean": "out/rr/JanusReplayRoot/Foo.olean"}, true},
+	{"Janus.Pr with initialize printing replaying lines", map[string]string{"Janus/Pr.olean": "out/pr/Janus/Pr.olean"}, false},
+	{"Janus.Okay honest extra", map[string]string{"Janus/Okay.olean": "out/ok/Janus/Okay.olean"}, false},
+	{"Janus/Foo.bar.olean forged (odd component)", map[string]string{"Janus/Foo.bar.olean": "out/zz/Janus/Zz.olean"}, true},
+	{"Janus/Foo bar.olean forged (space)", map[string]string{"Janus/Foo bar.olean": "out/zz/Janus/Zz.olean"}, true},
+	{"Janus/.hidden.olean forged", map[string]string{"Janus/.hid.olean": "out/zz/Janus/Zz.olean"}, true},
+}
+
+// TestRTMatrix is split into one top-level test per case (TestRTMatrix_0 .. _9: each case is a full real-leanchecker replay, ~4 min,
+// ten of them in one test were 40 min on the gate's critical path); this stub only checks that the ten tests cover the table.
 func TestRTMatrix(t *testing.T) {
+	if len(rtMatrixCases) != 10 {
+		t.Fatalf("the RT matrix has %d cases; add or remove its TestRTMatrix_N test", len(rtMatrixCases))
+	}
+}
+
+func TestRTMatrix_0(t *testing.T) { rtMatrixRun(t, 0) }
+func TestRTMatrix_1(t *testing.T) { rtMatrixRun(t, 1) }
+func TestRTMatrix_2(t *testing.T) { rtMatrixRun(t, 2) }
+func TestRTMatrix_3(t *testing.T) { rtMatrixRun(t, 3) }
+func TestRTMatrix_4(t *testing.T) { rtMatrixRun(t, 4) }
+func TestRTMatrix_5(t *testing.T) { rtMatrixRun(t, 5) }
+func TestRTMatrix_6(t *testing.T) { rtMatrixRun(t, 6) }
+func TestRTMatrix_7(t *testing.T) { rtMatrixRun(t, 7) }
+func TestRTMatrix_8(t *testing.T) { rtMatrixRun(t, 8) }
+func TestRTMatrix_9(t *testing.T) { rtMatrixRun(t, 9) }
+
+func rtMatrixRun(t *testing.T, i int) {
+	c := rtMatrixCases[i]
+	t.Log("case:", c.name)
 	base, fx, rtTmp := rtFixtures(t)
 	_, tc, _, runIn := realParFixture(t)
-	type v struct {
-		name     string
-		add      map[string]string // lib-relative dest -> fixture src (or "@root" = base Janus.olean)
-		wantFail bool
+	lib := filepath.Join(rtTmp, "lib-"+filepath.Base(t.TempDir()))
+	rtLibCopy(t, base, lib)
+	defer os.RemoveAll(lib)
+	for dst, src := range c.add {
+		p := filepath.Join(lib, dst)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		b, err := os.ReadFile(filepath.Join(fx, src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(p, b, 0o644)
 	}
-	vs := []v{
-		{"honest", nil, false},
-		{"extra Janus.Zz forged", map[string]string{"Janus/Zz.olean": "out/zz/Janus/Zz.olean"}, true},
-		{"extra Janus.Zz.Y forged, no Janus.Zz", map[string]string{"Janus/Zz/Y.olean": "out/zzy/Janus/Zz/Y.olean"}, true},
-		{"JanusX86Zz forged (not a Janus.* module)", map[string]string{"JanusX86Zz.olean": "out/x86/JanusX86Zz.olean"}, false},
-		{"JanusReplayRoot.Foo forged", map[string]string{"JanusReplayRoot/Foo.olean": "out/rr/JanusReplayRoot/Foo.olean"}, true},
-		{"Janus.Pr with initialize printing replaying lines", map[string]string{"Janus/Pr.olean": "out/pr/Janus/Pr.olean"}, false},
-		{"Janus.Okay honest extra", map[string]string{"Janus/Okay.olean": "out/ok/Janus/Okay.olean"}, false},
-		{"Janus/Foo.bar.olean forged (odd component)", map[string]string{"Janus/Foo.bar.olean": "out/zz/Janus/Zz.olean"}, true},
-		{"Janus/Foo bar.olean forged (space)", map[string]string{"Janus/Foo bar.olean": "out/zz/Janus/Zz.olean"}, true},
-		{"Janus/.hidden.olean forged", map[string]string{"Janus/.hid.olean": "out/zz/Janus/Zz.olean"}, true},
-	}
-	for _, c := range vs {
-		t.Run(c.name, func(t *testing.T) {
-			lib := filepath.Join(rtTmp, "lib-"+filepath.Base(t.TempDir()))
-			rtLibCopy(t, base, lib)
-			defer os.RemoveAll(lib)
-			for dst, src := range c.add {
-				p := filepath.Join(lib, dst)
-				os.MkdirAll(filepath.Dir(p), 0o755)
-				b, err := os.ReadFile(filepath.Join(fx, src))
-				if err != nil {
-					t.Fatal(err)
-				}
-				os.WriteFile(p, b, 0o644)
-			}
-			out, err, calls := realPar(t, tc, lib, runIn, 4)
-			t.Logf("calls=%d err=%v out=%.300q", len(calls), err, out)
-			if (err != nil) != c.wantFail {
-				t.Errorf("UNEXPECTED: wantFail=%v err=%v", c.wantFail, err)
-			}
-		})
+	out, err, calls := realPar(t, tc, lib, runIn, 4)
+	t.Logf("calls=%d err=%v out=%.300q", len(calls), err, out)
+	if (err != nil) != c.wantFail {
+		t.Errorf("UNEXPECTED: wantFail=%v err=%v", c.wantFail, err)
 	}
 }
 

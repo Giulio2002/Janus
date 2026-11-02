@@ -121,7 +121,7 @@ lemma and the late replay that reports it, `TestResultCache`, `TestConcurrentVer
 2 shards (`-j 2` set the shard count; the package is ~3700 s of work on an idle box) and a `-v` time that, with `-parallel 1`, includes
 the wait for a slot (TestConsumerMathlib "took 2152 s" while it SKIPPED at once). Now: `gotest_shards_n` in `scripts/gate.sh` uses
 6 shards (`JANUS_GATE_GOTEST_SHARDS`; never fewer than `-j N`), capped by free memory (MemAvailable and the enclosing cgroup chain, minus
-a 40 GiB reserve, 20 GiB more in the nightly for the extras, over 14 GiB per shard; measured shard peaks 8.3-13.8 GiB, 66 GiB for six);
+a 40 GiB reserve, 20 GiB more in the nightly for the extras, over 12 GiB per shard; measured shard peaks 8.3-13.8 GiB, 66 GiB for six);
 the real-framework forgery check is four tests (`..._Janus`, `_GoABI`, `_Tactic`, `_Amd64Tactic`, same assertions, one module each);
 `testDurations` was remeasured. The kernel replays are the floor: `TestCacheGCConcurrentVerify`, `TestR1ForgedFrameworkLemma`,
 `TestParallelFrameworkReplayMatchesSingleProcess` each hold a slot for 430-940 s at host load 30-90 (a replay is 2 workers x 2 threads
@@ -130,7 +130,7 @@ Extras (nightly, `JANUS_NIGHTLY=1` or `JANUS_GOTEST_EXTRAS=1`): `TestReplayUnder
 `JANUS_PRESSURE_TEST=1`) and `TestConsumerMathlib` (`JANUS_TEST_MATHLIB=1`, persistent cache and package directory under
 `~/.cache/janus-test-mathlib-<key>`, key = sha256 of checkout path, toolchain and Mathlib revision: another key is a cold build;
 lake and janus re-check what is inside, a corrupt entry rebuilds or fails, never passes; cold 146 s). Both must PASS or the lane fails.
-The four `TestASL*` tests run as a third extra (`JANUS_TEST_ASL=1`, persistent cache `~/.cache/janus-test-asl-<key>` seeded from the checkout's built `JanusASL/.lake`); `TestRTMatrix` and `TestRTShadowedAlias` build their forged fixtures themselves (`rtFixtures`, `replaypar_rt_test.go`) and run in the shards when `JANUS_NIGHTLY=1`; `TestRejectPIE` builds its PIE binary; `TestRejectsNonArm64` patches e_machine; the unshare subtest of `TestRT11...` keeps its store out of /tmp. `JANUS_GOTEST_EXTRA_LIST` (labels `pressure mathlib asl`) restricts the extras while developing.
+The four `TestASL*` tests run as a third extra (`JANUS_TEST_ASL=1`, persistent cache `~/.cache/janus-test-asl-<key>` seeded from the checkout's built `JanusASL/.lake`); `TestRTMatrix` and `TestRTShadowedAlias` build their forged fixtures themselves (`rtFixtures`, `replaypar_rt_test.go`) and run in the shards when `JANUS_NIGHTLY=1`; `TestRejectPIE` builds its PIE binary; `TestRejectsNonArm64` patches e_machine; the unshare subtest of `TestRT11...` keeps its store out of /tmp. The ASL extra runs with `JANUS_MEM_MAX=48G` (the default 24 GiB job limit OOM-killed `lake build ArmASL`) and is seeded from the checkout's `JanusASL/.lake/build` only when that is populated (an empty `.lake` seeds nothing: a cold build is about an hour). `TestRTMatrix` is a stub over ten tests `TestRTMatrix_0..9`. `JANUS_GOTEST_EXTRA_LIST` (labels `pressure mathlib asl`) restricts the extras while developing.
 Every other skip is printed as `SKIPPED-COVERAGE: ... NOT RUN <test>: <reason>` (also in `<out>/gotest/skips-report.txt`) and the run
 is not recorded. The "memory controller is not enabled for children" line printed by `janus memguard` is the cgroup mechanism being
 passed over for `systemd-user` (a delegated scope whose leaf holds the leader process cannot enable controllers for children); the

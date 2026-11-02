@@ -31,7 +31,7 @@ import (
 // The four tests that dominate (a framework kernel replay each, ~210 s: TestCacheGCConcurrentVerify, TestR1ForgedFrameworkLemma,
 // TestResultCache, TestConcurrentVerify) are about 1100 of the 2150 s of the whole package.
 var testDurations = map[string]float64{
-	"TestRTMatrix": 1500, "TestRTShadowedAlias": 150, // nightly only: ten and one full parallel replays (rtFixtures builds the forged modules)
+	"TestRTMatrix_0": 240, "TestRTMatrix_1": 240, "TestRTMatrix_2": 240, "TestRTMatrix_3": 240, "TestRTMatrix_4": 240, "TestRTMatrix_5": 240, "TestRTMatrix_6": 240, "TestRTMatrix_7": 240, "TestRTMatrix_8": 240, "TestRTMatrix_9": 240, "TestRTShadowedAlias": 20, // nightly only: ten and one full parallel replays (rtFixtures builds the forged modules)
 	// remeasured 2026-11-01 in the nightly-env gotest lane (6 shards, host load 28-88: the other agents' load stretches every
 	// replay-bound test about 2x against an idle box; the order is what matters). A test that does not call parallel(t) has no
 	// recorded hold: its old value, doubled, stands. Four tests ending in _Janus/_GoABI/_Tactic/_Amd64Tactic are the split real-framework forgery check.
