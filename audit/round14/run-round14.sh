@@ -74,6 +74,10 @@ echo "== controls"
 row correctness Verified 'Role: main theorem' 'Runtime contracts assumed: Janus.Contracts.NewobjectContract@runtime.newobject'
 row Witness.nonvacuous Verified 'Role: WITNESS' 'main theorem Proof.correctness'
 row Witness.returns Verified 'Role: WITNESS' 'main theorem Proof.correctness'
+echo "== class 7: a consumer module cannot declare a runtime contract (namespace Janus.Contracts, own def, Summary-bodied def, shadowed name)"
+all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/FakeContracts.lean "$W/NewPair" \
+  --theorem $P.fake1 --theorem $P.fake2 --theorem $P.fake3 2>&1)"
+for f in fake1 fake2 fake3; do row $f blocked 'constrains a runtime variable'; done
 echo "== (c): a witness must cover EVERY conjunct of a conjunction main theorem (IsEven ∧ IsOdd)"
 mapfile -t tg < <(scripts/example-targets.sh IsEven)
 "$J" extract artifacts/examples-arm64 "$(example_symbol IsEven)" "$W/IsEven" ${tg[@]+"${tg[@]}"} >/dev/null 2>&1 || exit 1
