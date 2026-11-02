@@ -120,7 +120,7 @@ run_shard() { # S
 # The persistent directories are keyed by the exact inputs (checkout path, toolchain, Mathlib revision): another key is a miss
 # (a cold build), never a reuse; what is inside is content-checked by lake / janus themselves (a corrupt entry rebuilds or fails).
 extras_on="${JANUS_GOTEST_EXTRAS:-}"; [ -n "$extras_on" ] || { [ "${JANUS_NIGHTLY:-}" = 1 ] && extras_on=1 || extras_on=0; }
-extra_names=() extra_pids=()
+extra_names=() extra_pids=() asl_deferred=()
 mathlib_rev="${JANUS_TEST_MATHLIB_REV:-d13f23b723b8a846827a245b89c10fc7d3f11612}"
 mathlib_key=$(printf '%s\n%s\n%s\n' "$root" "$(cat "$root/lean-toolchain" 2>/dev/null)" "$mathlib_rev" | sha256sum | cut -c1-16)
 asl_key=$(printf '%s\n%s\n' "$root" "$(cat "$root/lean-toolchain" 2>/dev/null)" | sha256sum | cut -c1-16)
@@ -140,17 +140,19 @@ if [ "$extras_on" = 1 ]; then
   # (keyed by checkout path and toolchain; its entries are keyed by framework and package hashes inside) and the checkout's own built
   # JanusASL as a seed (Lake reuses it by content, JANUS_TEST_ASL_SEED) make later runs short. JANUS_GOTEST_EXTRA_LIST (space
   # separated labels) limits the extras (development).
-  aslseed=""; [ ! -d "$root/JanusASL/.lake/build" ] || aslseed="JANUS_TEST_ASL_SEED=$root/JanusASL"
+  # (no JANUS_TEST_ASL_SEED: a seed is accepted only with an attested manifest, asl_test.go verifyASLSeed; the persistent keyed
+  # cache directory below is the warm start, built by janus's own buildASL under Lake's trace checks)
   extras=(
     "pressure|TestReplayUnderMemoryPressure|20G|JANUS_PRESSURE_TEST=1 JANUS_TEST_CACHE_DIR=$runcache/x-pressure"
     "mathlib|TestConsumerMathlib|24G|JANUS_TEST_MATHLIB=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-mathlib-$mathlib_key/cache JANUS_TEST_MATHLIB_DIR=$cachebase/janus-test-mathlib-$mathlib_key/pkg JANUS_TEST_MATHLIB_REV=$mathlib_rev"
-    "asl|TestASLExamples TestASLForgeryRejected TestASLUncovered TestASLConsumer|48G|JANUS_MEM_MAX=48G JANUS_TEST_ASL=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-asl-$asl_key $aslseed"
+    "asl|TestASLExamples TestASLForgeryRejected TestASLUncovered TestASLConsumer|48G|JANUS_MEM_MAX=48G JANUS_TEST_ASL=1 JANUS_TEST_CACHE_DIR=$cachebase/janus-test-asl-$asl_key "
   )
   for e in "${extras[@]}"; do
     IFS='|' read -r lab names lim envw <<< "$e"
     if [ -n "${JANUS_GOTEST_EXTRA_LIST:-}" ] && [[ " $JANUS_GOTEST_EXTRA_LIST " != *" $lab "* ]]; then continue; fi
     ok=1; for n in $names; do cut -f2 "$outdir/all.txt" | grep -qx "$n" || ok=0; done
     [ "$ok" = 1 ] || continue
+    if [ "$lab" = asl ]; then asl_deferred=("$lab" "$names" "$lim" "$envw"); continue; fi   # 48 GiB: runs ALONE, after everything else (below)
     run_extra "$lab" "$names" "$lim" "$envw" & extra_pids+=($!); extra_names+=("$lab:$names")
   done
 fi
@@ -178,6 +180,20 @@ if [ "$ran" -ne "$total" ] || [ "$(cat "$outdir"/ran-*.txt | sort -u | wc -l)" -
   echo "gotest-shards: $ran test results for $total listed tests (each must run exactly once)"; fail=1
 fi
 grep -hE '^--- FAIL' "$outdir"/shard-*.log && fail=1
+# The ASL extra needs a 48 GiB job and builds JanusASL: it never runs beside the shards or the other extras. It starts only once
+# they have all finished (the shards were waited for above; the other extras are waited for here first) and takes the host's
+# one-heavy-job lock (JANUS_HEAVY_LOCK, default /srv/janus-ops/heavy.lock when that directory exists) unless the caller says it
+# already holds it (JANUS_HEAVY_LOCK_HELD=1, e.g. the whole lane was started under `flock`).
+if [ "${#asl_deferred[@]}" = 4 ]; then
+  for i in "${!extra_pids[@]}"; do wait "${extra_pids[$i]}" || true; done
+  hl="${JANUS_HEAVY_LOCK:-}"; [ -n "$hl" ] || { [ ! -d /srv/janus-ops ] || hl=/srv/janus-ops/heavy.lock; }
+  echo "extra asl: starting alone after the shards (heavy lock: ${hl:-none}${JANUS_HEAVY_LOCK_HELD:+, already held})"
+  if [ -n "$hl" ] && [ "${JANUS_HEAVY_LOCK_HELD:-}" != 1 ]; then
+    exec 8>>"$hl"; flock 8   # released when this script exits
+  fi
+  run_extra "${asl_deferred[@]}"
+  extra_names+=("${asl_deferred[0]}:${asl_deferred[1]}"); extra_pids+=("$$")   # (nothing left to wait for: the run was in the foreground)
+fi
 # the extras: each named test must have run and PASSED (a skip or a failure of an extra fails the run)
 extra_ok=()
 for i in "${!extra_names[@]}"; do
