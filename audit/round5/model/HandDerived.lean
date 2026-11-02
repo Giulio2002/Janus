@@ -143,8 +143,10 @@ example : obs (step [0xf3, 0x48, 0x0f, 0xbd, 0xd0] (s0 fun i => if i = 0 then 1 
 example : obs (step [0xf3, 0x48, 0x0f, 0xb8, 0xd0] (s0 fun i => if i = 0 then 2 ^ 64 - 1 else 0)) =
     some [2 ^ 64 - 1, 0, 64, 0x1005, 0, 0] := by decide
 
--- BSF EDX, EAX with EAX = 0: destination undefined (Intel), so the model faults.
-example : isFault (step [0x0f, 0xbc, 0xd0] (s0 fun _ => 0)) = true := by decide
+-- BSF EDX, EAX with EAX = 0: ZF = 1 and the destination is UNDEFINED (Intel; AMD keeps it). The model does not fault: the
+-- whole destination register becomes the next element of the undefined-value stream (kreg 8, here 0x1234), CF is undefined (2).
+example : obs (step [0x0f, 0xbc, 0xd0] { s0 (fun _ => 0) with kreg := fun i => if i = 8 then 0x1234 else 0 }) =
+    some [0, 0, 0x1234, 0x1003, 2, 1] := by decide
 
 -- BSR EDX, EAX with EAX = 0x80000000: index 31, ZF = 0; EDX zero-extended.
 example : obs (step [0x0f, 0xbd, 0xd0] (s0 fun i => if i = 0 then 0x80000000 else if i = 2 then 2 ^ 64 - 1 else 0)) =
