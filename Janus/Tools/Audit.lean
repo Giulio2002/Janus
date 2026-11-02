@@ -1421,6 +1421,19 @@ partial def concreteRuntime (outer : Std.HashSet FVarId) (e : Expr) : MetaM (Opt
     Meta.withLetDecl n t v fun x => concreteRuntime outer (b.instantiate1 x)
   | _ => return none
 
+/-- The first variable of `ivs` that occurs in `e` other than as the argument of `Program.link`. -/
+partial def strayImpl (ivs : Std.HashSet FVarId) (e : Expr) : Option FVarId :=
+  match e with
+  | .fvar v => if ivs.contains v then some v else none
+  | .app .. =>
+    let fn := e.getAppFn
+    if fn.isConst && linkNames.any fn.isConstOf && e.getAppNumArgs == 2 && (e.getArg! 1).consumeMData.isFVar then none
+    else e.getAppArgs.foldl (fun r a => r <|> strayImpl ivs a) (strayImpl ivs fn)
+  | .lam _ d b _ | .forallE _ d b _ => strayImpl ivs d <|> strayImpl ivs b
+  | .letE _ t v b _ => strayImpl ivs t <|> strayImpl ivs v <|> strayImpl ivs b
+  | .mdata _ b | .proj _ _ b => strayImpl ivs b
+  | _ => none
+
 /-- Round 10 V1: check the contract premises of the statement `ty` (see the section comment).
 Round 14 (V2): with `main` (the default; every theorem that is not a `Witness.nonvacuous`/`Witness.returns`)
 the runtime implementation must also be a variable of the statement (`concreteRuntime`) and every such
@@ -1443,7 +1456,9 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
     -- contracts at once, e.g. `gcWriteBarrier1..8`, assumes none of them)
     let concl := conclParts env body
     let apps := premises.foldl (fun acc (_, t) => contractApps env t acc) #[] ++
-      concl.foldl (fun acc t => contractApps env t acc (claims := true)) #[]
+      -- Round 14 (rt-auditv2, F5): only a WITNESS exhibits contracts under an `∃` (its claim); in a main theorem
+      -- an `∃`-bound contract in the conclusion (a precondition `∃ H, Contract … [] 4096 H`) is checked like any other
+      concl.foldl (fun acc t => contractApps env t acc (claims := !main)) #[]
     for app in apps do
       let .const c _ := app.getAppFn | continue
       let some ci := env.find? c | continue
@@ -1491,6 +1506,16 @@ def checkContractHyps (ty : Expr) (main : Bool := true) : MetaM (Option String) 
       let mut ivs := linkVars body
       for x in xs do
         ivs := linkVars (← instantiateMVars (← Meta.inferType x)) ivs
+      -- Round 14 (rt-auditv2, F4): the implementation variable occurs only as the argument of
+      -- `Extracted.program.link`: a precondition about it (`impl.length = 0`, `Pin impl`) would pin the
+      -- code the theorem quantifies without being a premise
+      let ivSet : Std.HashSet FVarId := ivs.foldl (fun st v => if bound.contains v then st.insert v else st) {}
+      if !ivSet.isEmpty then
+        let mut stray := strayImpl ivSet body
+        for x in xs do
+          if stray.isNone then stray := strayImpl ivSet (← instantiateMVars (← Meta.inferType x))
+        if let some v := stray then
+          return some s!"mentions the runtime implementation variable `{(← v.getUserName)}` other than as `Extracted.program.link {(← v.getUserName)}`: a main theorem may constrain the implementation only through the pinned contracts and model laws, not through a premise or precondition about the code (round 14, rt-auditv2)"
       for v in ivs do
         if bound.contains v && !rtVars.contains v then
           rtVars := rtVars.insert v
@@ -2115,6 +2140,40 @@ partial def decideTrue (t : Expr) : MetaM Bool := do
   else if t.isAppOfArity ``Eq 3 && (t.getArg! 0).isConstOf ``Nat then nat2 (· == ·) (t.getArg! 1) (t.getArg! 2)
   else return false
 
+/-- Round 14 (rt-auditv2, F1): the address of a `pc`/`rip` premise that a witness may leave to the proof: the
+extraction's entry or a contract address of the program (`s.pc = BitVec.ofNat 64 entry`). -/
+def entryAddrLike (e : Expr) : Bool :=
+  let e := e.consumeMData
+  let x := (if e.isAppOfArity ``BitVec.ofNat 2 then e.getArg! 1 else e).consumeMData
+  x.isConstOf `Extracted.entry ||
+    ((x.getAppFn.isConstOf `Janus.Program.contractAddr || x.getAppFn.isConstOf `Janus.Amd64.Program.contractAddr) &&
+      x.getAppNumArgs == 2)
+
+/-- Round 14 (rt-auditv2, F2): does a binder of type `t` (an unassigned variable of the main theorem) have an
+element by construction? Numbers, lists and the like, a `Fin` of a positive or free size, a function into a
+proposition or such a type, a type of a trusted module (the framework's states, memories, segments). Not a
+`Subtype`, `PLift`, `Sigma`, `Empty`, or a type of the proof or a dependency. -/
+partial def inhabSafe (env : Environment) (t : Expr) : MetaM Bool := do
+  let t ← instantiateMVars t
+  let t ← try Meta.whnfR t catch _ => pure t
+  match t with
+  | .sort _ => return true
+  | .forallE n d b bi => Meta.withLocalDecl n bi d fun x => inhabSafe env (b.instantiate1 x)
+  | _ =>
+    let some c := t.getAppFn.constName? | return false
+    let args := t.getAppArgs
+    if c == ``Fin then
+      let n ← instantiateMVars args[0]!
+      return match n.nat? with | some k => decide (0 < k) | none => n.isMVar
+    if [``Nat, ``Int, ``Bool, ``String, ``Char, ``Unit, ``PUnit, ``UInt8, ``UInt16, ``UInt32, ``UInt64, ``USize,
+        ``BitVec, ``List, ``Array, ``Option, ``Float].contains c then return true
+    if c == ``Prod then return (← args.allM (inhabSafe env ·))
+    if [``Subtype, ``Sigma, ``PSigma, ``PLift, ``ULift, ``Empty, ``PEmpty, ``Exists, ``False, ``Nonempty,
+        ``Squash, ``Quot, ``Quotient, ``Eq, ``HEq].contains c then return false
+    match env.getModuleIdxFor? c with
+    | some idx => return trustedModule env.header.moduleNames[idx.toNat]!
+    | none => return false
+
 /-- Does the witness conjunct `c` give the premise `p`? Either `c` unifies with `p`, or `c` is a
 universal statement `∀ n, n ≤ 8 → A n ∧ B n` (`WriteBarrier`: the witness covers every slot count) one of
 whose instances unifies with `p` and whose side conditions at that instance are decidably true. -/
@@ -2198,6 +2257,16 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
     let ps := core.filter (!arithPremise ·) ++ core.filter arithPremise
     match ← matchPremises ps wconjs with
     | none =>
+      -- Round 14 (rt-auditv2, F2): a binder of the main theorem that is not a proposition and that the
+      -- matched premises did not fix (`(i : Fin 0)`, `{n : Nat // n < 0}`, `PLift (0 = 1)`) is exhibited
+      -- by nothing in the witness; it must be of a type that has an element by construction
+      let env ← getEnv
+      for m in ms ++ ms2 do
+        let t ← instantiateMVars (← Meta.inferType m)
+        if ← Meta.isProp t then continue
+        if (← instantiateMVars m) != m then continue
+        unless ← inhabSafe env t do
+          return some s!"the main theorem{which} has a binder of type `{(← Meta.ppExpr t).pretty 200}`, which no conjunct of the witness exhibits and which is not a type with an element by construction (an empty type makes the main theorem vacuous): state the witness's value for it in the premises (round 14, rt-auditv2)"
       -- the pc premises: matched if the witness states them, else they must be about a state the other
       -- premises fixed
       for q in all.filter pcPrem do
@@ -2205,6 +2274,11 @@ def matchNonvacuous (mty : Expr) (wconjs : Array Expr) : MetaM (Option String) :
         unless ← findConj q wconjs do
           if q.hasExprMVar then
             return some s!"the entry-address premise of the main theorem{which} concerns no state of the witness"
+          -- Round 14 (rt-auditv2, F1): ... and then the address must be the program's entry or a contract address
+          -- (`WriteBarrier`: one state for every `gcWriteBarrierN`); `s.pc = 7` (an unsatisfiable precondition)
+          -- is a premise the witness has to state
+          unless entryAddrLike (q.getArg! 2) do
+            return some s!"the premise `{(← Meta.ppExpr q).pretty 300}` of the main theorem{which} fixes the program counter to an address that is neither the entry nor a contract address, and the witness does not state it"
     | some w => return some s!"the premise {w}{which}"
     st.restore
   if concls.isEmpty then return some "the main theorem has no conclusion"
@@ -2262,7 +2336,9 @@ def returnsMatches (mr r : Expr) : MetaM Bool := do
       let ok ← Meta.lambdaTelescope m fun ys bm => do
         let bx := (x.beta ys).headBeta
         let cm := flattenAnd (← instantiateMVars bm).headBeta
-        let cx := (flattenAnd bx).filter (!trivialConj ·)
+        -- Round 14 (rt-auditv2, F3): a conjunct counts only if it says something about the result state
+        -- (`1 + 1 = 2`, `decide True = true` do not)
+        let cx := (flattenAnd bx).filter fun c => !trivialConj c && ys.any fun y => c.containsFVar y.fvarId!
         if cx.isEmpty || cm.isEmpty then return false
         -- the main postcondition's first conjunct is the ABI obligation (`ABIReturn s s'`) when it has
         -- several: keep it and add a statement about the result; a single conjunct (`GrownReturns`,
