@@ -395,9 +395,15 @@ func (l *frameworkLease) release() {
 }
 
 // buildPaths are the lock and ready-stamp files of the framework build in dir: next to the
-// cached base, inside .lake/ of a directory framework (the checkout).
+// cached base (also for a directory framework that leases the cache), inside .lake/ of the checkout itself.
 func (fw *framework) buildPaths(dir string) (lockPath, stampPath string) {
-	if fw.Source == "directory" {
+	// Keyed by the DIRECTORY, not by the framework's source: a directory framework (--janus-root, the checkout) keeps its lock and
+	// stamp in its own .lake, but the CACHED base of the same framework sources (a consumer workspace, verify-batch or the ASL
+	// build of a --janus-root run leases it through frameworkBase) belongs to the cache whoever asks: the sibling <key>.lock and
+	// <key>.ready that every embedded-framework verification takes. Two different lock files over one build excluded nothing: a
+	// checkout-mode run rebuilt and stamped the cached base (and dropped its Janus.Tools.Decode output) under the shared lease
+	// of a verification of the embedded framework ("changed after the proof compile", nightly a29b0783).
+	if fw.Source == "directory" && filepath.Clean(dir) == filepath.Clean(fw.Dir) {
 		return filepath.Join(dir, ".lake", "janus-framework.lock"), filepath.Join(dir, ".lake", "janus-framework.ready")
 	}
 	return dir + ".lock", dir + ".ready"
