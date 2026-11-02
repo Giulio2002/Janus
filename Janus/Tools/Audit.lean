@@ -1623,11 +1623,31 @@ def roleOf (n : Name) : Role :=
       else .auxiliary
   | _ => .auxiliary
 
+/-- Numeric literal spelling only (round 14): `(BitVec.ofNat n k).toNat` and `(k#n).toNat` with numerals `k < 2^n`
+are the numeral `k`; nothing else is rewritten. A witness states `H [42] …` where the main theorem has
+`H [(42#64).toNat] …` for the argument `x := 42#64`. -/
+def normLits (e : Expr) : MetaM Expr := do
+  Core.transform (← instantiateMVars e) (post := fun sub => do
+    if sub.isAppOfArity ``BitVec.toNat 2 then
+      let v := sub.appArg!
+      let lit? : Option (Nat × Nat) :=
+        if v.isAppOfArity ``BitVec.ofNat 2 then
+          match (v.getArg! 0).nat?, (v.getArg! 1).nat? with
+          | some n, some k => some (n, k) | _, _ => none
+        else none
+      if let some (n, k) := lit? then
+        if k < 2 ^ n then return .done (mkNatLit k)
+    return .continue)
+
 /-- Definitional equality, tried at reducible transparency first, then at default (the proof's
 own `def`s may need unfolding: a `Witness.rt` that is an alias of the allocator's ranges), with a
 heartbeat budget; a failure leaves the metavariable context unchanged. -/
 def defEqTry (a b : Expr) : MetaM Bool := do
   if ← Meta.checkpointDefEq (Meta.withReducible (Meta.isDefEq a b)) then return true
+  -- the same up to numeral spelling
+  let a' ← normLits a
+  let b' ← normLits b
+  if (a' != a || b' != b) && (← Meta.checkpointDefEq (Meta.withReducible (Meta.isDefEq a' b'))) then return true
   -- the default-transparency retry only for the same predicate (`Outside … Witness.rt` vs `Outside … AllocW.rt`):
   -- unfolding two different predicates just to compare them is slow and never what a witness does
   unless a.getAppFn.isConst && a.getAppFn == b.getAppFn do return false
