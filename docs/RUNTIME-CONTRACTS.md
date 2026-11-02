@@ -123,6 +123,21 @@ open in `audit/round9/sat-pending.txt`: before round 9 the allocation
 contracts had none and were false for every implementation (round 9 C1,
 `audit/round9/model/Unsat.lean`).
 
+**Witnessing a whole theorem that uses an allocation contract (`janus_alloc_witness`).** A theorem
+about a function that calls `runtime.newobject` quantifies over `impl`, `rt` and `H` and takes
+`hnew`; its `Witness.nonvacuous` / `Witness.returns` must exhibit one concrete instance. The
+helper `Janus/Contracts/AllocWitness.lean` builds it: in `namespace Witness`,
+`janus_alloc_witness types := [t₁, …]` (arm64) or `janus64_alloc_witness types := [t₁, …]` (amd64)
+defines, in `Witness.AllocW`, the toy allocator `impl` placed at `runtime.newobject`'s address (two
+instructions returning the 64 KiB heap at `0x10000`), `rt` (the heap and the 16-byte type
+descriptors `tᵢ`, evaluated with `janus_eval%`), the readiness predicate `H` (a descriptor in `rt` of
+at most 32 KiB, a writable zero heap), the linked program `linked`, and `hnew` (the contract for them,
+proved by `janus_run`). The caller writes only the function-specific concrete call state `s0` and its
+precondition; `allocH_intro`/`allocH64_intro` and `heapZero_of_bytes` discharge the heap part of `H`
+(`examples/proofs/NewPair.lean`, `examples/proofs-amd64/NewPair/Proof.lean`; FV-C's
+`FromBig` witnesses are the same pattern written out by hand). The allocator is a model, not the Go
+runtime: the witness shows that the hypotheses are satisfiable, not that the runtime meets them.
+
 ### 5. Readiness of the runtime (`RtReady`, round 9)
 
 A `Summary` speaks about **every** state satisfying its precondition. A runtime function's
