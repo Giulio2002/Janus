@@ -56,7 +56,7 @@ echo "== V2: a main theorem quantifies the runtime implementation"
 row bad1 blocked 'round 14' 'may link only a variable'
 row bad2 blocked 'may link only a variable'
 row bad3 blocked 'round 14'
-row bad4 blocked 'round 10 V1' 'impl'
+row bad4 blocked 'rt-auditv2' 'other than as'
 row bad5 blocked 'round 14'
 row bad6 blocked 'round 14'
 row bad7 blocked 'round 14'
