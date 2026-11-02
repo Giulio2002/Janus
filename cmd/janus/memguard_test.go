@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestParseMemSize(t *testing.T) {
@@ -428,5 +430,47 @@ func TestMemGuardNoticeEveryExitPath(t *testing.T) {
 	}()
 	if !strings.Contains(errb.String(), notice) {
 		t.Errorf("panic path: no notice: %q", errb.String())
+	}
+}
+
+// resetMemGuardForTest used to assign `guardOnce = sync.Once{}`: overwriting a Once's mutex while another goroutine ran or waited in
+// guardOnce.Do wedged that goroutine forever (nightly 1aed9761: TestRTMatrix_3 timed out after 1h56m, its toolchain probe blocked
+// in sync.(*Once).doSlow while a MemGuard test reset the guard in the same process). currentGuard from many goroutines while another
+// resets must finish, and must be race-free (go test -race).
+func TestCurrentGuardSurvivesConcurrentReset(t *testing.T) {
+	t.Setenv("JANUS_MEMGUARD", "bogus-forces-none")
+	t.Setenv("JANUS_MEMGUARD_LOG", "")
+	t.Setenv("JANUS_MEMGUARD_VERBOSE", "")
+	resetMemGuardForTest()
+	defer resetMemGuardForTest()
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				if currentGuard() == nil {
+					t.Error("currentGuard returned nil")
+					return
+				}
+				logMemGuard(io.Discard)
+			}
+		}()
+	}
+	go func() {
+		for j := 0; j < 200; j++ {
+			resetMemGuardForTest()
+			resetVerifierCache()
+			_ = verifierComponent()
+		}
+		close(done)
+	}()
+	finished := make(chan struct{})
+	go func() { wg.Wait(); <-done; close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(120 * time.Second):
+		t.Fatal("currentGuard/verifierComponent wedged while another goroutine reset them (a reset must not overwrite a held sync.Once)")
 	}
 }

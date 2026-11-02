@@ -100,27 +100,62 @@ type memEvent struct {
 }
 
 var (
-	guardOnce   sync.Once
+	guardMu     sync.Mutex // protects guardDone and theGuard (see currentGuard)
+	guardDone   bool
 	theGuard    *memGuard
 	memMu       sync.Mutex
 	memEvents   []memEvent
-	guardLogged sync.Once
+	guardLogged resettableOnce
 )
+
+// resettableOnce is a sync.Once that tests can re-arm. Resetting a sync.Once by assigning a new value (`o = sync.Once{}`) overwrites
+// its mutex while another goroutine may hold it or wait on it: that goroutine then waits forever (nightly 1aed9761: a go test timed
+// out after 1h56m with its toolchain probe blocked in sync.(*Once).doSlow on guardOnce while a MemGuard test reset it). Here the
+// done flag and the function run under one mutex, and Reset takes the same mutex, so a reset waits for a running Do and a Do
+// after it runs again.
+type resettableOnce struct {
+	mu   sync.Mutex
+	done bool
+}
+
+// Do runs f once until the next Reset; concurrent callers wait for it to finish.
+func (o *resettableOnce) Do(f func()) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.done {
+		f()
+		o.done = true
+	}
+}
+
+// Reset makes the next Do run its function again.
+func (o *resettableOnce) Reset() {
+	o.mu.Lock()
+	o.done = false
+	o.mu.Unlock()
+}
 
 // currentGuard detects the guard once per process.
 // guardUsed: the process consulted the guard (a job ran, or was about to), so its absence is worth a notice.
 var guardUsed atomic.Bool
 
 func currentGuard() *memGuard {
-	guardOnce.Do(func() { theGuard = detectMemGuard() })
+	guardMu.Lock()
+	defer guardMu.Unlock()
+	if !guardDone {
+		theGuard = detectMemGuard()
+		guardDone = true
+	}
 	guardUsed.Store(true)
 	return theGuard
 }
 
 // resetMemGuardForTest makes the next currentGuard re-detect (tests change JANUS_MEM_MAX).
 func resetMemGuardForTest() {
-	guardOnce = sync.Once{}
-	guardLogged = sync.Once{}
+	guardMu.Lock()
+	guardDone, theGuard = false, nil
+	guardMu.Unlock()
+	guardLogged.Reset()
 	guardUsed.Store(false)
 }
 

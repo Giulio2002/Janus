@@ -270,18 +270,28 @@ func verifierComponentScope(b buildSnapshot, exeSha func() string, lean bool) (c
 }
 
 var (
-	verifierOnce sync.Once
+	verifierMu   sync.Mutex // protects verifierDone, verifierComp and verifierWhy
+	verifierDone bool
 	verifierComp string
 	verifierWhy  string
 )
 
 // verifierComponent is the (cached) component of the running executable.
 func verifierComponent() string {
-	verifierOnce.Do(func() { verifierComp, verifierWhy = verifierComponentFor(currentBuild(), executableSha) })
+	verifierMu.Lock()
+	defer verifierMu.Unlock()
+	if !verifierDone {
+		verifierComp, verifierWhy = verifierComponentFor(currentBuild(), executableSha)
+		verifierDone = true
+	}
 	return verifierComp
 }
 
-func resetVerifierCache() { verifierOnce = sync.Once{}; verifierComp, verifierWhy = "", "" }
+func resetVerifierCache() {
+	verifierMu.Lock()
+	verifierDone, verifierComp, verifierWhy = false, "", ""
+	verifierMu.Unlock()
+}
 
 func init() {
 	extraCommands["verifier-id"] = func(args []string, stdout, stderr io.Writer) error {

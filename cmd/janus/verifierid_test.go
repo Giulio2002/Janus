@@ -510,7 +510,9 @@ func TestResultKeyInputClasses(t *testing.T) {
 		t.Error("different Lean executables kept the key")
 	}
 	// The verifier component is in the key: two verifiers, two keys; none, no key.
-	verifierOnce.Do(func() {})
+	verifierMu.Lock()
+	verifierDone = true
+	verifierMu.Unlock()
 	verifierComp = "src:aaa"
 	ka := mk(nil)
 	verifierComp = "src:bbb"
