@@ -1203,127 +1203,6 @@ elab "janus_omega_sparse" : tactic => do
   unless ← omegaSparse g do throwError "janus_omega_sparse: no proof with at most two disjunctions"
   replaceMainGoal []
 
-register_option janus.omega.cap : Nat := {
-  defValue := 12
-  descr := "janus_run: the largest number of disjunctions (`∨`) in the hypotheses for which its internal \
-    `omega` calls run on the whole context. `omega` splits on every disjunction it needs, so a call that \
-    cannot close its goal (a branch that is not pruned, a side condition that is not provable) costs \
-    about 2^n for n disjunctive facts (the `Disjoint`/`Apart` facts of a statement with many pointers); \
-    above the cap such a call is not made on the full context: the sparse attempts (`omegaSparse`) and \
-    the focused context (`omegaFocused`) still run."
-}
-
-/-- The number of `∨` in the propositional hypotheses of the context (what `omega` may split on; `Apart`,
-`Disjoint` and `Outside` are definitions it does not see until they are unfolded). -/
-def countDisj : MetaM Nat := do
-  let mut n := 0
-  for d in ← getLCtx do
-    if d.isImplementationDetail then continue
-    let ty ← instantiateMVars d.type
-    unless ← isProp ty do continue
-    if ty.isForall then continue
-    let cnt ← IO.mkRef 0
-    ty.forEach fun e => do if e.isAppOfArity ``Or 2 then cnt.modify (· + 1)
-    n := n + (← cnt.get)
-  return n
-
-/-- `omega` on the full context, unless the context has more than `janus.omega.cap` disjunctions (then it
-fails at once, instead of running for 2^n splits). -/
-def omegaCapped : TacticM Unit := do
-  let cap := janus.omega.cap.get (← getOptions)
-  let n ← countDisj
-  if n > cap then
-    throwError "janus_omega_cap: {n} disjunctive hypotheses (more than janus.omega.cap = {cap}): `omega` \
-      was not tried on the full context"
-  evalTactic (← `(tactic| omega))
-
-elab "janus_omega_cap" : tactic => omegaCapped
-
-/-- `omega` on `g` in the context restricted to the hypotheses that only mention free
-variables of the goal. `true` if it closed the goal. -/
-def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
-  let t ← instantiateMVars (← g.getType)
-  let goalFVars := (collectFVars {} t).fvarSet
-  if goalFVars.isEmpty then return false
-  let lctx ← getLCtx
-  let mut lctx' := lctx
-  let mut dropped := 0
-  for d in lctx do
-    if d.isImplementationDetail then continue
-    let ty ← instantiateMVars d.type
-    unless ← isProp ty do continue
-    let fv := (collectFVars {} ty).fvarSet
-    unless fv.toList.all goalFVars.contains do
-      lctx' := lctx'.erase d.fvarId
-      dropped := dropped + 1
-  if dropped == 0 then return false
-  let m ← mkFreshExprMVarAt lctx' (← getLocalInstances) t
-  let saved ← saveState
-  try
-    let gs ← Tactic.run m.mvarId! (evalTactic (← `(tactic| omega)))
-    if gs.isEmpty then
-      g.assign m
-      return true
-    saved.restore
-    return false
-  catch _ =>
-    saved.restore
-    return false
-
-
-/-- `omega` for side conditions of the dischargers, in stages: the sparse attempts, `omega` in the context
-restricted to the hypotheses about the goal's free variables, `omega` on the full context (capped). -/
-def omegaStaged (g : MVarId) : TacticM Bool := do
-  if ← omegaSparse g then return true
-  if ← omegaFocused g then return true
-  let saved ← saveState
-  try
-    let gs ← Tactic.run g <| withoutRecover omegaCapped
-    if gs.isEmpty then return true
-    saved.restore; return false
-  catch _ => saved.restore; return false
-
-elab "janus_omega_staged" : tactic => do
-  let g ← getMainGoal
-  unless ← omegaStaged g do throwError "janus_omega_staged: omega failed in every stage"
-  replaceMainGoal []
-
-/-- `omega` for pruning a branch (the goal is `False`, the branch condition the last `hbr`): first on the
-hypotheses about the atoms of the branch condition alone (their `Disjoint`/`Apart` facts about other pointers
-are not handed to `omega`), then the sparse attempts, then `omega` on the full context if it has at most
-`janus.omega.cap` disjunctions. A branch that is not pruned costs a failed `omega` call per attempt; with
-`n` disjunctive facts in the context the full one costs about `2^n`. -/
-elab "janus_omega_prune" : tactic => do
-  let g ← getMainGoal
-  let saved ← saveState
-  let seed ← g.withContext do
-    let mut atoms : Array Expr := #[]
-    for d in (← getLCtx).decls.toList.reverse do
-      match d with
-      | some d =>
-        if d.isImplementationDetail then continue
-        if d.userName.eraseMacroScopes == `hbr then
-          atoms := arithAtoms (← instantiateMVars d.type)
-          break
-      | none => pure ()
-    return atoms
-  if !seed.isEmpty then
-    let focused ← g.withContext do
-      let mut toClear := #[]
-      for d in ← getLCtx do
-        if d.isImplementationDetail then continue
-        let ty ← instantiateMVars d.type
-        unless ← isProp ty do continue
-        unless (arithAtoms ty).all seed.contains do toClear := toClear.push d.fvarId
-      fastClear g toClear
-    try
-      let gs ← Tactic.run focused <| withoutRecover (evalTactic (← `(tactic| omega)))
-      if gs.isEmpty then replaceMainGoal []; return
-    catch _ => pure ()
-    saved.restore
-  if ← omegaSparse g then replaceMainGoal []; return
-  omegaCapped
-
 /-- Clear the propositional hypotheses that mention atoms the (arithmetic) goal does not: what an
 `omega`/`simp … at *` on a goal about a few addresses needs is small, and the contexts after
 several calls are large. -/
@@ -1383,7 +1262,7 @@ def dischargeApart (g : MVarId) : TacticM Bool := g.withContext do
         let gs ← Tactic.run g <| withoutRecover do
           if symm then evalTactic (← `(tactic| refine Janus.Apart.sub (Janus.Apart.symm $h) ?_ ?_ ?_ ?_))
           else evalTactic (← `(tactic| refine Janus.Apart.sub $h ?_ ?_ ?_ ?_))
-          evalTactic (← `(tactic| all_goals janus_omega_staged))
+          evalTactic (← `(tactic| all_goals omega))
         if gs.isEmpty then return true
         saved.restore
       catch _ => saved.restore
@@ -1427,7 +1306,7 @@ where
               Term.exprToSyntax (← mkAppM `Janus.Contracts.ApartAll.outside #[d.toExpr])
             else Term.exprToSyntax d.toExpr
           let gs ← Tactic.run g <| withoutRecover do
-            evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> janus_omega_staged)))
+            evalTactic (← `(tactic| (apply Janus.Outside.of_sub $h <;> omega)))
           if gs.isEmpty then return true
           saved.restore
         catch _ => saved.restore
@@ -1442,7 +1321,7 @@ where
       saved.restore
     catch _ => saved.restore
     try
-      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| janus_omega_staged)))
+      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| omega)))
       if gs.isEmpty then return true
       saved.restore; omegaApart g
     catch _ => saved.restore; omegaApart g
@@ -2203,6 +2082,37 @@ with six `Disjoint` facts, a disjointness side condition cost 100-400 ms. `omega
 runs `omega` in the context restricted to the propositions whose free variables all occur in
 the goal; only if that fails is the full context used. -/
 
+/-- `omega` on `g` in the context restricted to the hypotheses that only mention free
+variables of the goal. `true` if it closed the goal. -/
+def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
+  let t ← instantiateMVars (← g.getType)
+  let goalFVars := (collectFVars {} t).fvarSet
+  if goalFVars.isEmpty then return false
+  let lctx ← getLCtx
+  let mut lctx' := lctx
+  let mut dropped := 0
+  for d in lctx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    unless ← isProp ty do continue
+    let fv := (collectFVars {} ty).fvarSet
+    unless fv.toList.all goalFVars.contains do
+      lctx' := lctx'.erase d.fvarId
+      dropped := dropped + 1
+  if dropped == 0 then return false
+  let m ← mkFreshExprMVarAt lctx' (← getLocalInstances) t
+  let saved ← saveState
+  try
+    let gs ← Tactic.run m.mvarId! (evalTactic (← `(tactic| omega)))
+    if gs.isEmpty then
+      g.assign m
+      return true
+    saved.restore
+    return false
+  catch _ =>
+    saved.restore
+    return false
+
 /-- `omega` for side conditions: linear address facts by `addrDisch`, then `omega` in the focused
 context (`omegaFocused`), then in the full one. -/
 initialize registerTraceClass `janus.omega
@@ -2222,7 +2132,7 @@ elab "janus_omega" : tactic => do
     replaceMainGoal []
   else
     let t1 ← IO.monoNanosNow
-    try omegaCapped
+    try evalTactic (← `(tactic| omega))
     finally
       trace[janus.omega] "full {((← IO.monoNanosNow) - t1) / 1000000} ms (focused {(t1 - t0) / 1000000} ms): {← g.getType}"
 

@@ -371,14 +371,14 @@ def tryPrune (g : MVarId) : TacticM Bool := withoutRecover do
   -- goal, which `whnf`s a pending `ExecThen` (its `match`/`ite` over the whole state; 50-75 s)
   let gs ← try
       Tactic.run (← g.exfalso) <| withoutRecover (evalTactic (← `(tactic| (first
-        | janus_omega_prune
+        | omega
         | (simp only [BitVec.toNat_eq, BitVec.ofNat_eq_ofNat, BitVec.toNat_ofNat, BitVec.toNat_zero, ne_eq, Nat.reducePow,
             Nat.zero_mod]
-            at *; janus_omega_prune)
+            at *; omega)
         | (simp only [Bool.and_eq_true, Bool.or_eq_true, Bool.not_eq_true', Bool.not_eq_false',
             Bool.and_eq_false_iff, Bool.or_eq_false_iff, decide_eq_true_eq, decide_eq_false_iff_not,
             not_and, not_or, Classical.not_not, ne_eq]
-            at *; janus_omega_prune)))))
+            at *; omega)))))
     catch _ => saved.restore; return false
   if !gs.isEmpty then saved.restore
   return gs.isEmpty
@@ -540,7 +540,7 @@ where
 def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
   -- reducible transparency only in the closers: unfolding `Memory.accessible`/`readLE` of a
   -- symbolic memory to compare it with a hypothesis can take seconds
-  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus_omega_sparse | janus_omega_cap | janus_disch)
+  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus_omega_sparse | omega | janus_disch)
   let left ← Common.provePreCore (cleanOutcome cfg) closer g
   unless left.isEmpty do
     let st ← cfg.status.get
@@ -906,16 +906,16 @@ elab_rules : tactic | `(tactic| janus_disch) => withoutRecover do
     evalTactic (← `(tactic| first
       | janus_apart
       | janus_omega
-      | (simp -failIfUnchanged (disch := janus_omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
-          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; janus_omega)))
+      | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
+          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
     if !(← getUnsolvedGoals).isEmpty then throwError "janus_disch: pruned attempt left goals"
   catch _ =>
     saved.restore
     evalTactic (← `(tactic| first
       | janus_apart
       | janus_omega
-      | (simp -failIfUnchanged (disch := janus_omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
-          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; janus_omega)))
+      | (simp -failIfUnchanged (disch := omega) only [janus_disch_norm, Nat.reducePow, Nat.reduceAdd, Nat.reduceSub,
+          Nat.reduceMul, Nat.reduceMod, Nat.reduceDiv]; omega)))
 
 /-! ## Arithmetic -/
 
