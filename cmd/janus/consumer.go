@@ -584,10 +584,12 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	if err != nil {
 		return fail(err)
 	}
+	consumerTimer.mark("ws: cache entry lock, framework base lease")
 	basePins, err := frameworkPins(filepath.Join(base, ".lake", "build", "lib", "lean"), fw.Files)
 	if err != nil || len(basePins.want) == 0 {
 		return fail(wsDiag(fmt.Errorf("cannot read the framework build in %s: %v", base, err)))
 	}
+	consumerTimer.mark("ws: hash the framework base (frameworkPins)")
 	janusBuild := filepath.Join(ws.JanusDir, ".lake", "build")
 	notExtracted := func(m string) bool { return m != "Extracted" && m != "JanusTrusted" }
 	tampered := false
@@ -609,6 +611,7 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 		}
 	}
 
+	consumerTimer.mark("ws: hash workspace framework lib (pinLib) + copy if differing")
 	if !fresh && !tampered {
 		// Seed the consumer modules from the most recently used sibling workspace.
 		rootBuild := filepath.Join(ws.Root, ".lake", "build")
@@ -657,6 +660,7 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 		}
 	}
 
+	consumerTimer.mark("ws: seed from sibling")
 	jfiles := map[string][]byte{}
 	for p, b := range fw.Files {
 		jfiles[p] = b
@@ -676,6 +680,7 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	if err := syncTree(ws.Root, pkg.Files, keepLake); err != nil {
 		return fail(wsDiag(err))
 	}
+	consumerTimer.mark("ws: syncTree (janus, proof sources)")
 	// Extra dependencies: exactly the pinned files, as path packages overriding the manifest.
 	overrides := []map[string]any{{"type": "path", "scope": "", "name": "janus", "manifestFile": "lake-manifest.json",
 		"inherited": false, "dir": ws.JanusDir, "configFile": "lakefile.toml"}}
@@ -709,32 +714,57 @@ func openWorkspace(fw *framework, pkg *consumerPkg, extracted []byte, fresh bool
 	// consumer code is involved) and of the independently named JanusTrusted copy, before any
 	// untrusted code runs in the workspace. From here on janus/ is read-only to every
 	// sandboxed process, and its compiled modules are pinned.
+	consumerTimer.mark("ws: package overrides")
 	lr := &leanRunner{lake: lake, root: ws.JanusDir}
 	out, err := lr.run("build", "--no-ansi", "Extracted")
 	if err != nil {
 		return failClean(&diag{Invalid: true, Msg: "Lean rejected the extracted program.\n" + summarizeLeanErrors(out, 2000), Stage: "extraction elaboration",
 			Next: "Check that the Janus framework matches this extractor version.", Details: out})
 	}
+	consumerTimer.mark("ws: lake build Extracted")
 	for _, m := range builtModules(out) {
 		if notExtracted(m) {
 			continue
 		}
 		ws.prepBuilt = append(ws.prepBuilt, m)
 	}
-	if out, err := runLean(&sandbox{mode: "none"}, tc, ws.JanusDir, nil, tc.leanPathEnv(ws.janusLib()), tc.lean, "--root="+ws.JanusDir,
-		filepath.Join(ws.JanusDir, "JanusTrusted.lean"), "-o", filepath.Join(ws.janusLib(), "JanusTrusted.olean")); err != nil {
-		return failClean(&diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
-			Stage: "extraction elaboration", Details: out})
+	// The trusted compile of JanusTrusted (a renamed copy of the extraction importing only Janus)
+	// is reused from the trusted cache (speed.go) when an earlier compile of the same source with
+	// the same toolchain and framework build exists: the cache lives where no sandboxed process
+	// can write, its entries are authenticated and each file is verified against its recorded
+	// hash as it is copied over the workspace's module data, so the reused bytes are the ones a
+	// previous trusted compile produced. Only with a sandbox and without --fresh, like the
+	// replay cache; otherwise (or on a miss) the module is compiled as before.
+	jtSrc := janusTrustedSource(extracted)
+	jtKey := trustedCacheKey(tc, &pinnedLib{want: basePins.want}, []byte("workspace: JanusTrusted only"), jtSrc)
+	jtHit := false
+	if ws.replayCache {
+		_, jtHit = loadTrustedCache(jtKey, ws.janusLib())
 	}
+	if !jtHit {
+		if out, err := runLean(&sandbox{mode: "none"}, tc, ws.JanusDir, nil, tc.leanPathEnv(ws.janusLib()), tc.lean, "--root="+ws.JanusDir,
+			filepath.Join(ws.JanusDir, "JanusTrusted.lean"), "-o", filepath.Join(ws.janusLib(), "JanusTrusted.olean")); err != nil {
+			return failClean(&diag{Invalid: true, Msg: "Lean rejected the trusted copy of the extracted program.\n" + summarizeLeanErrors(out, 2000),
+				Stage: "extraction elaboration", Details: out})
+		}
+		if ws.replayCache {
+			if data, err := os.ReadFile(filepath.Join(ws.janusLib(), "JanusTrusted.olean")); err == nil {
+				storeTrustedCache(jtKey, ws.janusLib(), pins{"JanusTrusted.olean": sha256Hex(data)})
+			}
+		}
+	}
+	consumerTimer.mark("ws: compile JanusTrusted (lean)")
 	if !samePins(basePins, ws.janusLib()) {
 		return failClean(&diag{Invalid: true, Stage: "framework integrity",
 			Msg:  "Building Extracted changed the framework modules copied from the trusted framework build.",
 			Next: "Rerun with --fresh; if it persists, the framework build is not reproducible."})
 	}
+	consumerTimer.mark("ws: samePins")
 	ws.framework = basePins.want
 	if ws.pins, err = newPinnedLib("the Janus framework build", ws.janusLib(), nil); err != nil {
 		return fail(wsDiag(err))
 	}
+	consumerTimer.mark("ws: newPinnedLib (hash the framework lib)")
 	if !ws.temp {
 		touchUse(ws.Dir, ws.Dir+".lock")
 	}
@@ -898,6 +928,7 @@ func (ws *consumerWS) run(args ...string) (string, string, error) {
 // LEAN_PATH, used for the janus-audit script and leanchecker. Only the audit directory is
 // writable; the framework, consumer and dependency builds are read-only.
 func (ws *consumerWS) runLeanDirect(leanPath string, argv ...string) (string, error) {
+	consumerTimer.mark("layout check + hash consumer lib (newPinnedLib)")
 	auditDir := filepath.Join(ws.Dir, "audit")
 	_ = os.MkdirAll(auditDir, 0o755)
 	return runLeanProtected(ws.sb, ws.tc, auditDir, nil, ws.protected(true), leanPath, argv...)
@@ -1016,6 +1047,10 @@ type thmSpec struct{ Proof, Theorem string }
 // (an unknown theorem, a failing audit) does not affect the others; a failure of a shared step
 // (the lakefile, a pin, the build of a module they all import) fails every request it covers.
 func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, stderr io.Writer) []thmOutcome {
+	tm := newStageTimer(stderr) // JANUS_TIMINGS=1: one line per stage
+	defer tm.total()
+	consumerTimer = tm
+	defer func() { consumerTimer = nil }()
 	outs := make([]thmOutcome, len(specs))
 	reqs := make([]*consumerRequest, len(specs))
 	var live []int
@@ -1043,6 +1078,7 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	if len(live) == 0 {
 		return outs
 	}
+	tm.mark("extraction check, proof read")
 	failLive := func(err error) []thmOutcome {
 		for _, i := range live {
 			if outs[i].Report == nil && outs[i].Err == nil {
@@ -1063,10 +1099,12 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	if err != nil {
 		return failLive(err)
 	}
+	tm.mark("framework load, lake, sandbox probe")
 	lease, err := fw.frameworkBase(lake, stderr)
 	if err != nil {
 		return failLive(err)
 	}
+	tm.mark("framework base check")
 	tc, err := findToolchain(lake, lease.dir)
 	lease.release()
 	if err != nil {
@@ -1083,6 +1121,7 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	if err != nil {
 		return failLive(err)
 	}
+	tm.mark("consumer package snapshot")
 	// Every request must share the one extraction (they all read the same outdir; checked again
 	// per request after the build) and its proof must be a file of the snapshot.
 	var group []*consumerRequest
@@ -1111,6 +1150,7 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 		return outs
 	}
 	defer ws.close()
+	tm.mark("workspace open")
 	ws.replayFresh = opts["replay-fresh"] != ""
 	ws.asl = asl
 	verifyGroup(fw, pkg, ws, group)
@@ -1124,6 +1164,9 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 // workspace: one Lake build of all their proof modules, one kernel replay of the union of
 // their modules, and an audit and report per request. Each request's outcome lands in its
 // Report or Err.
+// consumerTimer is the stage timer of the verification in progress (nil: no timing).
+var consumerTimer *stageTimer
+
 func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consumerRequest) {
 	failAll := func(err error) {
 		for _, r := range reqs {
@@ -1164,6 +1207,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		}
 	}
 	rebuilt := append(builtModules(buildOut.String()), ws.prepBuilt...)
+	consumerTimer.mark("lake build of the proof modules")
 	if strings.Contains(buildOut.String(), "manifest out of date") || strings.Contains(buildOut.String(), "not in manifest") {
 		failAll(&diag{Invalid: true, Msg: "lake-manifest.json does not match the lakefile.", Stage: "consumer manifest",
 			Next: "Run lake update in " + displayPath(pkg.Root) + ".", Details: mapPaths(buildOut.String())})
@@ -1187,6 +1231,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		searchDirs = append(searchDirs, dl)
 	}
 	leanPath := ws.tc.leanPathEnv(searchDirs...)
+	consumerTimer.mark("pins check, search path")
 
 	// C1 defence in depth: no stray Extracted/JanusTrusted olean on the search path.
 	if err := noForeignModule(map[string]string{"Extracted": janusLib, "JanusTrusted": janusLib},
@@ -1225,6 +1270,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		return
 	}
 
+	consumerTimer.mark("lake query of the modules (re-runs the lakefile), pin recheck")
 	// Module identity across the framework, the consumer and its dependencies (deps.go); the
 	// dependency module roots tell the auditor which constants come from declared dependencies.
 	depRoots, err := checkModuleLayout(janusLib, ws.janusFiles, libDir, depLibs, ws.tc.libDir)
@@ -1291,6 +1337,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		r.audit = ar
 	}
 
+	consumerTimer.mark("module layout, pins, theorem audit")
 	// Kernel replay of every non-core module of each passing theorem's import closure (the
 	// framework, Extracted, JanusTrusted, every consumer and dependency module), after checking
 	// that each comes from its home: one leanchecker pass over the union, reusing cached passing
@@ -1374,6 +1421,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		return
 	}
 
+	consumerTimer.mark("kernel replay (closure check, plan, leanchecker)")
 	// Inputs must still be the ones that were checked.
 	staleErr := func() error {
 		if err := pinned.check("the verification"); err != nil {
@@ -1405,6 +1453,7 @@ func verifyGroup(fw *framework, pkg *consumerPkg, ws *consumerWS, reqs []*consum
 		return nil
 	}()
 
+	consumerTimer.mark("stale-input check")
 	sort.Strings(rebuilt)
 	rebuilt = dedup(rebuilt)
 	fi := fw.info()
