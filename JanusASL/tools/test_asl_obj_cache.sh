@@ -7,6 +7,9 @@
 #   JanusASL/tools/test_asl_obj_cache.sh
 set -uo pipefail
 export LC_ALL=C
+# Hermetic: the nightly's cold run exports JANUS_ASL_CACHE=0 ASL_OBJ_CACHE=0, which asl.sh honours (it blanks ASL_CACHE),
+# so an inherited value turned the "empty ASL_OBJ_CACHE is the default" case into OFF. Every case that needs one sets it.
+unset JANUS_ASL_CACHE ASL_OBJ_CACHE
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 t=$(mktemp -d "${TMPDIR:-/tmp}/asl-obj-cache-test.XXXXXX")
 # Leftovers of THIS test die with it (RTOBJ6: recompile sandboxes of a killed run survived for hours). A process is ours only if its
