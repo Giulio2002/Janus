@@ -626,9 +626,10 @@ theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat) (h1 : a ≤
     (h2 : b + k ≤ a + n) : (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Memory.readLE_writeLE_inside m v h1 h2
 
-/-- `readLE_writeLE_inside` as a simp rule (a read strictly narrower than the store; the same-width
-case is `readLE_writeLE_same`). -/
-@[janus_exec, janus_post] theorem readLE_writeLE_inside_lt (m : Memory) {a n b k : Nat} (v : Nat)
+/-- `readLE_writeLE_inside` for a read strictly narrower than the store (the same-width case is
+`readLE_writeLE_same`). NOT a simp rule: three side conditions would be sent to the discharger at every
+read over every store; pass it where wanted (`janus_run [readLE_writeLE_inside_lt]`). -/
+theorem readLE_writeLE_inside_lt (m : Memory) {a n b k : Nat} (v : Nat)
     (h1 : a ≤ b) (h2 : b + k ≤ a + n) (_h3 : k < n) :
     (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Memory.readLE_writeLE_inside m v h1 h2
