@@ -150,7 +150,10 @@ def hashes(worktree):
     # for Janus.*, JanusASL.* and ArmASL.*; they are linked into janus-audit, janus-decode, janus-oracle and janus-asl-check
     # and, unlike an .olean, nothing replays them): the cached and the cold run of one commit must have byte-identical ones.
     # The .trace files are left out (they record absolute paths of the two worktrees); the .hash files are Lake's own hash of
-    # the file next to them. Keys carry the tree and the path under build/ir, so a file present in one run only is a difference.
+    # the file next to them. The .cin files are left out too: they are the object cache's own record of the C an object was
+    # compiled from, written only when an object is restored from (or published to) the cache, so a cold run never has them;
+    # the C files and the objects they describe ARE compared here, and the cache audit checks each entry's .cin against its C.
+    # Keys carry the tree and the path under build/ir, so a file present in one run only is a difference.
     for tree, lake in (("janus", os.path.join(worktree, ".lake")),
                        ("janusasl", os.path.join(worktree, "JanusASL", ".lake")),
                        ("sail", os.path.join(worktree, "JanusASL", ".lake", "packages", "Sail", ".lake"))):
@@ -158,7 +161,7 @@ def hashes(worktree):
         for d, dirs, files in os.walk(base):
             dirs.sort()
             for f in sorted(files):
-                if f.endswith(".trace") or f.endswith(".setup.json"):
+                if f.endswith(".trace") or f.endswith(".setup.json") or f.endswith(".cin"):
                     continue
                 if f.endswith(".c") or f.endswith(".c.hash") or ".c.o." in f:
                     p = os.path.join(d, f)

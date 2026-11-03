@@ -64,12 +64,12 @@ mkdir -p "$t/w/scripts"; printf 'SAIL_SPLIT_PARTS=48\n' > "$t/w/scripts/oracle-s
 python3 -I "$cmp_py" hashes "$t/w" "$t/h3.json"; SAIL_SPLIT=0 python3 -I "$cmp_py" hashes "$t/w" "$t/h4.json"
 # every ir/*.c and ir/*.c.o.* of every Lake tree is hashed (traces are not: they hold worktree paths), and a changed Janus.* object is P0
 w2="$t/w2"; mkdir -p "$w2/.lake/build/ir/Janus" "$w2/JanusASL/.lake/build/ir/ArmASL" "$w2/JanusASL/.lake/build/ir/JanusASL" "$w2/JanusASL/.lake/packages/Sail/.lake/build/ir/Sail" "$w2/JanusASL/.lake/build/lib/lean"
-echo c > "$w2/.lake/build/ir/Janus/Foo.c"; echo o > "$w2/.lake/build/ir/Janus/Foo.c.o.export"; echo h > "$w2/.lake/build/ir/Janus/Foo.c.o.export.hash"; echo '{"p":"/some/worktree"}' > "$w2/.lake/build/ir/Janus/Foo.c.o.export.trace"
+echo c > "$w2/.lake/build/ir/Janus/Foo.c"; echo o > "$w2/.lake/build/ir/Janus/Foo.c.o.export"; echo h > "$w2/.lake/build/ir/Janus/Foo.c.o.export.hash"; echo cin > "$w2/.lake/build/ir/Janus/Foo.c.o.export.cin"; echo '{"p":"/some/worktree"}' > "$w2/.lake/build/ir/Janus/Foo.c.o.export.trace"
 echo a > "$w2/JanusASL/.lake/build/ir/ArmASL/Part01.c"; echo ao > "$w2/JanusASL/.lake/build/ir/ArmASL/Part01.c.o.export"
 echo j > "$w2/JanusASL/.lake/build/ir/JanusASL/Check.c.o.export"; echo s > "$w2/JanusASL/.lake/packages/Sail/.lake/build/ir/Sail/Attr.c.o.export"; echo '{}' > "$w2/JanusASL/.lake/build/ir/JanusASL/Check.setup.json"
 python3 -I "$cmp_py" hashes "$w2" "$t/i1.json"
 echo o2 > "$w2/.lake/build/ir/Janus/Foo.c.o.export"; python3 -I "$cmp_py" hashes "$w2" "$t/i2.json"
-python3 -I - "$t" <<'PY' && echo "ok   ir: hashes cover the janus, janusasl and Sail trees (C, objects, .hash; not traces/setup.json) and a changed object changes the digest" || { echo "FAIL ir hashes"; fail=1; }
+python3 -I - "$t" <<'PY' && echo "ok   ir: hashes cover the janus, janusasl and Sail trees (C, objects, .hash; not traces/setup.json/the object cache's .cin records) and a changed object changes the digest" || { echo "FAIL ir hashes"; fail=1; }
 import json, sys
 a = json.load(open(sys.argv[1] + "/i1.json")); b = json.load(open(sys.argv[1] + "/i2.json"))
 ks = sorted(k for k in a if k.startswith("ir:"))
