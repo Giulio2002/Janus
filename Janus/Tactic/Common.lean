@@ -2028,11 +2028,9 @@ theorem addr_lin_add' {a b B c : Nat} (pb : b = B + c) : a + b = B + (c + a) := 
 theorem addr_sub_off {B c k : Nat} (hk : Nat.ble k c = true) : (B + c) - k = B + (c - k) := by
   have := Nat.le_of_ble_eq_true hk; omega
 
-/-- With a literal lower bound `K ≤ B`: `(B + c) - k = (B - K) + (K + c - k)` when `k ≤ K + c`. All the
-stack addresses `sp - 48`, `sp - 152 + 8`, ... of a frame become offsets of the one base `sp - K`. -/
-theorem addr_sub_lb {B c k K : Nat} (hK : K ≤ B) (hk : Nat.ble k (K + c) = true) :
-    (B + c) - k = (B - K) + (K + c - k) := by
-  have := Nat.le_of_ble_eq_true hk; omega
+/-- With a literal lower bound `K ≤ x` the atom `x` is `(x - K) + K`: every address built from `x` (`x`, `x + 8`,
+`x - 152`) is an offset of the one base `x - K`. -/
+theorem addr_atom_lb {x K : Nat} (h : K ≤ x) : x = (x - K) + K := by omega
 
 /-- A linear address: `base + c` (`base = none`: the literal `c`), with a proof of
 `e = base + c` (resp. `e = c`). Offsets are literals; the base is any other term. -/
@@ -2043,8 +2041,8 @@ partial def linAddr (lbs : Array (Expr × Nat × Expr)) (e : Expr) : MetaM (Opti
     return (none, n, ← mkExpectedTypeHint (← mkEqRefl e) ty)
   match e.getAppFnArgs with
   | (``HSub.hSub, #[t, _, _, _, a, b]) =>
-    -- `a - k` with a literal `k`: `a = B + c`; if `k ≤ c` it is `B + (c - k)`, else with a literal lower
-    -- bound `K ≤ B` (a hypothesis `K ≤ B`) and `k ≤ K + c` it is `(B - K) + (K + c - k)`
+    -- `a - k` with a literal `k`: `a = B + c`; if `k ≤ c` it is `B + (c - k)` (no truncation); an atom with a
+    -- literal lower bound is `(x - K) + K` (below), so `sp - 152` with `4248 ≤ sp` is `(sp - 4248) + 4096`
     if t.isConstOf ``Nat then
       if let some k := evalClosedNat? b then
         let (B, c, pa) ← linAddr lbs a
@@ -2057,19 +2055,6 @@ partial def linAddr (lbs : Array (Expr × Nat × Expr)) (e : Expr) : MetaM (Opti
             let step := mkAppN (mkConst ``addr_sub_off)
               #[B, mkRawNatLit c, mkRawNatLit k, ← mkEqRefl (mkConst ``Bool.true)]
             return (some B, c - k, ← mkExpectedTypeHint (← mkAppM ``Eq.trans #[congr, step]) ek)
-          let mut bestK := 0
-          let mut hK : Option Expr := none
-          for (x, K, h) in lbs do
-            if x == B && K ≥ bestK && k ≤ K + c then bestK := K; hK := some h
-          if let some h := hK then
-            let nb ← mkAppM ``HSub.hSub #[B, mkRawNatLit bestK]
-            let ek ← mkEq e (← mkAdd nb (mkRawNatLit (bestK + c - k)))
-            let lam ← withLocalDeclD `y (mkConst ``Nat) fun y => do
-              mkLambdaFVars #[y] (← mkAppM ``HSub.hSub #[y, b])
-            let congr ← mkAppM ``congrArg #[lam, pa]
-            let step := mkAppN (mkConst ``addr_sub_lb)
-              #[B, mkRawNatLit c, mkRawNatLit k, mkRawNatLit bestK, h, ← mkEqRefl (mkConst ``Bool.true)]
-            return (some nb, bestK + c - k, ← mkExpectedTypeHint (← mkAppM ``Eq.trans #[congr, step]) ek)
   | (``HAdd.hAdd, #[t, _, _, _, a, b]) =>
     if t.isConstOf ``Nat then
       if let some k := evalClosedNat? b then
@@ -2089,6 +2074,17 @@ partial def linAddr (lbs : Array (Expr × Nat × Expr)) (e : Expr) : MetaM (Opti
           let ty ← mkEq e (← mkAdd B (mkRawNatLit (c + k)))
           return (some B, c + k, ← mkExpectedTypeHint pf ty)
   | _ => pure ()
+  -- an atom with a literal lower bound `K ≤ e` (the largest one): `e = (e - K) + K`
+  let mut bestK : Option (Nat × Expr) := none
+  for (x, K, h) in lbs do
+    if x == e then
+      match bestK with
+      | some (K0, _) => if K0 < K then bestK := some (K, h)
+      | none => bestK := some (K, h)
+  if let some (K, h) := bestK then
+    let nb ← mkAppM ``HSub.hSub #[e, mkRawNatLit K]
+    let ty ← mkEq e (← mkAdd nb (mkRawNatLit K))
+    return (some nb, K, ← mkExpectedTypeHint (mkAppN (mkConst ``addr_atom_lb) #[e, mkRawNatLit K, h]) ty)
   let ty ← mkEq e (← mkAdd e (mkRawNatLit 0))
   return (some e, 0, ← mkExpectedTypeHint (← mkEqRefl e) ty)
 
@@ -2195,6 +2191,13 @@ partial def addrShape (t : Expr) : Bool :=
     let t := t.consumeMData
     t.isAppOfArity ``LE.le 4 || t.isAppOfArity ``LT.lt 4 || t.isAppOfArity ``Eq 3
 
+register_option janus.addr.lowerBound : Bool := {
+  defValue := true
+  descr := "janus_run: in the linear address decider (`addrDisch`), treat an atom `x` with a literal lower bound \
+    `K ≤ x` as `(x - K) + K`, so that the stack addresses `sp - k` of a frame are offsets of one base. Off: \
+    only `base + literal` addresses (the earlier behaviour)."
+}
+
 /-- Decide a linear address side condition (see above). `some true`: closed; `some false`:
 refuted by its own offsets (so `omega` need not try); `none`: not decided here. -/
 def addrDisch (g : MVarId) : MetaM (Option Bool) := g.withContext do
@@ -2208,6 +2211,7 @@ def addrDisch (g : MVarId) : MetaM (Option Bool) := g.withContext do
   -- literal lower bounds `K ≤ x` (a frame's `4248 ≤ sp`): they make `x - k` an offset of the base `x - K`
   let mut lbs : Array (Expr × Nat × Expr) := #[]
   for d in ← getLCtx do
+    if !janus.addr.lowerBound.get (← getOptions) then break
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
     let fv := (collectFVars {} ty).fvarSet
