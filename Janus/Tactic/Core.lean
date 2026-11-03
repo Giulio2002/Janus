@@ -15,6 +15,11 @@ import Janus.Tactic.ReadOverlap
   return address (for `ReachesRet`), a `until` address, or the step budget. Branches split
   the goal (the branch condition becomes a hypothesis `hbr`); infeasible branches are closed
   by `omega` on the branch condition.
+  `calls [S]` splits the callee's postcondition into hypotheses that have no stable names (they are
+  inaccessible, in the order the summary's `∧`/`∃` structure gives, which can change with the engine).
+  `calls [hS := S]` also keeps the whole postcondition as `hS : post s s'` (exactly as stated in
+  `Summary`, with `s'` substituted if the post is `s' = e`), at each call of `S`: destructure it with
+  `obtain ⟨k, h₁, …⟩ := hS` by the names you choose. Nothing else changes.
 * `janus_step [lemmas]` performs exactly one step on the main goal.
 * `janus_intro hs` turns a `CallSetup` hypothesis into `h_pc : s.pc = …`, `h_lr : s.regs 30 = …`
   and `h_x<i> : s.regs i = argᵢ`.
@@ -291,6 +296,8 @@ structure Cfg where
   maxSteps : Nat := 100000
   /-- Callee summaries `(entry, proof of Summary p entry pre post)`. -/
   calls : Array (Nat × Expr) := #[]
+  /-- Names for the whole postcondition of a callee summary (`calls [hS := S]`), by entry address. -/
+  callNames : Array (Nat × Name) := #[]
   /-- Heartbeat budget of the run, in thousands (`janus_run (budget := N)`). -/
   budget : Option Nat := none
   status : IO.Ref Status
@@ -298,8 +305,8 @@ structure Cfg where
   facts : IO.Ref (Std.HashMap Nat FetchFact)
 
 def Cfg.new (args : Array Term := #[]) (stops : List Nat := []) (calls : Array (Nat × Expr) := #[])
-    (budget : Option Nat := none) : IO Cfg := do
-  return { args, stops, calls, budget, status := ← IO.mkRef {}, cache := ← IO.mkRef {},
+    (budget : Option Nat := none) (callNames : Array (Nat × Name) := #[]) : IO Cfg := do
+  return { args, stops, calls, callNames, budget, status := ← IO.mkRef {}, cache := ← IO.mkRef {},
            facts := ← IO.mkRef {} }
 
 /-- Build the `set` simp context (plus state hypotheses and user arguments) for the current
@@ -556,7 +563,7 @@ def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
 The postcondition is split into hypotheses (conjunctions, existentials); an equation `s' = e`
 is substituted. -/
 def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee : String)
-    (mvs : Array Expr := #[]) : TacticM (List MVarId) := g.withContext do
+    (mvs : Array Expr := #[]) (hname : Option Name := none) : TacticM (List MVarId) := g.withContext do
   let sty ← instantiateMVars (← inferType hsum)
   let (``Summary, #[_, entry, pre, post]) := sty.getAppFnArgs |
     throwError "{tacName}: not a `Summary`:{indentExpr sty}"
@@ -581,8 +588,15 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let mut out := []
   for g' in gs do
     if ← g'.isAssigned then continue
-    let before ← g'.withContext do return (← getLCtx).getFVarIds
+    let mut before ← g'.withContext do return (← getLCtx).getFVarIds
     let (fv, g'') ← g'.introNP 3
+    -- `calls [hS := S]`: the whole postcondition as `hS`, left alone by the steps below
+    let g'' ← match hname with
+      | some n => do
+        let (h, g3) ← Common.namePost g'' fv[2]! n
+        before := before.push h
+        pure g3
+      | none => pure g''
     let g'' ← Common.destructPost g'' fv[0]! fv[1]! fv[2]!
     let g'' ← normFrames cfg g'' before
     let g'' ← if mvs.isEmpty then pure g'' else Common.addApartFacts g'' before
@@ -677,7 +691,7 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
         | none => pure hsum
       let callee := (Common.symOf syms c).getD (hex c)
       cfg.status.modify fun st => { st with instr := some s!"(entry of {callee}, by its summary)" }
-      return some (← applySummary cfg g p s hsum hpc callee mvs)
+      return some (← applySummary cfg g p s hsum hpc callee mvs ((cfg.callNames.find? (·.1 == c)).map (·.2)))
     let cE := mkNatLit c
     if mode.isNone && c == exitA then
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
@@ -997,7 +1011,8 @@ elab "janus_arith" : tactic => do
 
 syntax janusArgs := (" [" term,* "]")?
 syntax janusUntil := (" until " "[" term,* "]")?
-syntax janusCalls := (" calls " "[" term,* "]")?
+syntax janusCall := (atomic(ident " := "))? term
+syntax janusCalls := (" calls " "[" janusCall,* "]")?
 syntax janusBudget := (" (" &"budget" " := " num ")")?
 
 def parseArgs (stx : Syntax) : Array Term :=
@@ -1013,10 +1028,13 @@ def parseUntil (stx : Syntax) : TacticM (List Nat) := do
     let some n ← evalNat e | throwError "janus_run until: not a numeral: {t}"
     return n
 
-def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) := do
+/-- `calls [S, hT := T]`: the summaries with their entry, and the optional name of the whole postcondition. -/
+def parseCallsNamed (stx : Syntax) : TacticM (Array (Nat × Expr × Option Name)) := do
   if stx[0].isNone then return #[]
   let ts := stx[0][2].getSepArgs
-  ts.mapM fun t => do
+  ts.mapM fun t0 => do
+    let t := t0[1]
+    let nm : Option Name := if t0[0].isNone then none else some t0[0][0].getId
     let e ← Term.elabTerm t none
     Term.synthesizeSyntheticMVarsNoPostponing
     let e ← instantiateMVars e
@@ -1045,11 +1063,17 @@ def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) := do
       return some entry
     if let some entry := entry? then
       let some n ← evalNat entry | throwError "janus_run calls: cannot evaluate the entry of {t}"
-      return (n, e)
+      return (n, e, nm)
     let (``Summary, #[_, entry, _, _]) := ty.getAppFnArgs |
       throwError "janus_run calls: {t} is not a `Summary`: {ty0}"
     let some n ← evalNat entry | throwError "janus_run calls: cannot evaluate the entry of {t}"
-    return (n, e)
+    return (n, e, nm)
+
+def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) :=
+  return (← parseCallsNamed stx).map fun (n, e, _) => (n, e)
+
+def parseCallNames (stx : Syntax) : TacticM (Array (Nat × Name)) :=
+  return (← parseCallsNamed stx).filterMap fun (n, _, nm) => nm.map (n, ·)
 
 def parseBudget (stx : Syntax) : Option Nat :=
   if stx[0].isNone then none else stx[0][3].isNatLit?
@@ -1060,8 +1084,10 @@ thousand heartbeats (a run that exceeds its budget, or `maxHeartbeats`, stops wi
 naming the pc, the instruction and what it was doing). -/
 elab "janus_run" bud0:janusBudget args:janusArgs stops:janusUntil cs:janusCalls bud:janusBudget : tactic =>
     withMainContext do
-  let cfg ← Cfg.new (parseArgs args) (← parseUntil stops) (← parseCalls cs)
+  let cl ← parseCallsNamed cs
+  let cfg ← Cfg.new (parseArgs args) (← parseUntil stops) (cl.map fun (n, e, _) => (n, e))
     ((parseBudget bud).orElse fun _ => parseBudget bud0)
+    (cl.filterMap fun (n, _, nm) => nm.map (n, ·))
   runJanus cfg false
 
 /-- Simplify the goal with the `janus_post` simp set, the state hypotheses and the given lemmas
@@ -1073,7 +1099,9 @@ elab "janus_simp" args:janusArgs : tactic => withMainContext do
 
 /-- One symbolic execution step. -/
 elab "janus_step" args:janusArgs cs:janusCalls bud:janusBudget : tactic => withMainContext do
-  runJanus (← Cfg.new (parseArgs args) [] (← parseCalls cs) (parseBudget bud)) true
+  let cl ← parseCallsNamed cs
+  runJanus (← Cfg.new (parseArgs args) [] (cl.map fun (n, e, _) => (n, e)) (parseBudget bud)
+    (cl.filterMap fun (n, _, nm) => nm.map (n, ·))) true
 
 /-- From `h : p.DataLoaded m`, add `h_data<k> : m.accessible base len false = true` for every data
 segment `k` of `p` (literal bounds), and `h_rodata : ∀ a n, (dataRead p a n).isSome = true →

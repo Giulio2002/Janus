@@ -1030,6 +1030,15 @@ partial def destructPost (g : MVarId) (s' hpc hpost : FVarId) : MetaM MVarId := 
       else go g rest substituted
   go g [hpost] false
 
+/-- Keep the callee's whole postcondition as one named hypothesis (`calls [hS := S]`): `hS : post s s'`
+exactly as the summary states it, for the consumer to destructure with `obtain ⟨..⟩ := hS`. It is a
+copy made before `destructPost` splits the post into (anonymous) pieces, so `rename_i` consumers see
+the same hypotheses as without a name, and a substitution of `s'` also rewrites the copy. -/
+def namePost (g : MVarId) (hpost : FVarId) (name : Name) : MetaM (FVarId × MVarId) := g.withContext do
+  let ty ← instantiateMVars (← hpost.getType)
+  let (h, g) ← (← g.assert name ty (mkFVar hpost)).intro1P
+  return (h, g)
+
 /-! ## Restored registers -/
 
 /-- For a register-file chain `setR (… (setR (x.regs) r₁ v₁) …) rₖ vₖ` (with `setR` the ISA's

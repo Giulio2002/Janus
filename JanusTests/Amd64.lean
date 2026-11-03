@@ -269,6 +269,32 @@ example (p : BitVec 64) :
   simp only [regSP] at hacc hle hnw
   janus64_run [shr_ofNat]
 
+/-! ## Named callee postconditions (`calls [hS := S]`)
+
+`f: call g; ret` and `g: inc rax; ret` (the summary of `g` is a hypothesis). The whole postcondition
+of the callee is kept as `hS : post s s'` for the consumer to destructure by name. -/
+
+def callp64 : Program :=
+  { segments := [⟨"f", 0x1000, [0xe8, 0x01, 0x00, 0x00, 0x00, 0xc3, 0x48, 0xff, 0xc0, 0xc3]⟩], stubs := [],
+    exitAddr := 0 }
+
+example (hg : Summary (callp64) 0x1006 (fun _ => True)
+      (fun s s' => ∃ k : Nat, k = (s.regs 0).toNat ∧ s'.regs 0 = BitVec.ofNat 64 (k + 1) ∧
+        s'.rip = BitVec.ofNat 64 (s.mem.readLE (s.regs 4).toNat 8) ∧ s'.regs 4 = s.regs 4 + 8#64 ∧
+        s'.mem = s.mem ∧ s'.flags = s.flags ∧ s'.df = s.df ∧ s'.xmm = s.xmm ∧
+        (∀ i, i ≠ 0 → i ≠ 4 → s'.regs i = s.regs i)))
+    (x : BitVec 64) :
+    Ensures callp64 0x1000 [x] (fun s => StackWritable s 8 8) (fun _ s' => True) := by
+  intro ret hret s hs ⟨hle, hnw, hacc⟩
+  janus64_intro hs
+  simp only [regSP] at hacc hle hnw
+  janus64_run calls [hS := hg]
+  obtain ⟨k, hk, hr0, hrip, hr4, hm, hfl, hdf, hx, hfr⟩ := hS
+  refine ⟨?_, ?_, ?_⟩
+  · simpa [setRegF] using hfr 5 (by decide) (by decide)
+  · simpa [setRegF] using hfr 14 (by decide) (by decide)
+  · exact (congrFun hx 15).trans h_x15
+
 /-! ## amd64: carries times large literals; `decide` carries from case splits
 
 `BitVec.ofNat 64 (c.toNat * 18446744073709551615)` has the kernel unfold `Nat.mul` on the literal

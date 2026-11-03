@@ -899,6 +899,30 @@ theorem call_spec (x : W64) :
   janus_run calls [g_summary]
   all_goals janus_arith
 
+/-- A callee summary whose postcondition is an existential with conjuncts (U-NAMES). -/
+theorem g_summary2 :
+    Summary callp 0x50014 (fun s => (s.regs 30).toNat % 4 = 0 ∧ (s.regs 30).toNat < 2 ^ 56)
+      (fun s s' => ∃ k : Nat, k = (s.regs 0).toNat ∧ s'.regs 0 = BitVec.ofNat 64 (k + 1) ∧
+        s'.pc = s.regs 30 ∧ s'.sp = s.sp ∧ s'.mem = s.mem ∧ s'.regs 30 = s.regs 30 ∧
+        s'.flags = s.flags ∧ (∀ i, i ≠ 0 → s'.regs i = s.regs i)) := by
+  intro s hpc ⟨h1, h2⟩
+  janus_run
+  exact ⟨_, rfl, by simp [BitVec.ofNat_add], fun i hi => by simp [hi]⟩
+
+/-- `calls [hS := S]` keeps the whole postcondition as `hS : post s s'` at the call (a stable name; the
+anonymous pieces `rename_i` sees are unchanged), for the consumer to destructure by the names the
+summary's author chose. -/
+theorem call_spec_named (x : W64) :
+    Ensures callp 0x50000 [x] (fun s => StackOK s 16 0)
+      (fun _ s' => (s'.regs 0).toNat = (x.toNat + 2) % 2 ^ 64) := by
+  intro ret hret s hs ⟨hal, hb, ha, hw⟩
+  janus_intro hs
+  janus_run until [0x50008] calls [hS := g_summary2]
+  obtain ⟨k, hk, hr0, hpc, hsp, hm, hlr, hfl, hfr⟩ := hS
+  janus_run calls [g_summary]
+  all_goals
+    refine ⟨⟨?_, ?_, ?_⟩, by omega⟩ <;> simp_all [setReg]
+
 /-- Without the summary, the callee is simply executed inline. -/
 theorem call_spec_inline (x : W64) :
     Ensures callp 0x50000 [x] (fun s => StackOK s 16 0)

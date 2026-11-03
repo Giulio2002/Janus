@@ -1334,6 +1334,8 @@ structure Cfg where
   maxSteps : Nat := 100000
   /-- Callee summaries `(entry, proof of Summary p entry pre post)`. -/
   calls : Array (Nat × Expr) := #[]
+  /-- Names for the whole postcondition of a callee summary (`calls [hS := S]`), by entry address. -/
+  callNames : Array (Nat × Name) := #[]
   /-- Heartbeat budget of the run, in thousands (`janus64_run (budget := N)`). -/
   budget : Option Nat := none
   status : IO.Ref Status
@@ -1341,8 +1343,8 @@ structure Cfg where
   facts : IO.Ref (Std.HashMap Nat FetchFact)
 
 def Cfg.new (args : Array Term := #[]) (stops : List Nat := []) (calls : Array (Nat × Expr) := #[])
-    (budget : Option Nat := none) : IO Cfg := do
-  return { args, stops, calls, budget, status := ← IO.mkRef {}, cache := ← IO.mkRef {},
+    (budget : Option Nat := none) (callNames : Array (Nat × Name) := #[]) : IO Cfg := do
+  return { args, stops, calls, callNames, budget, status := ← IO.mkRef {}, cache := ← IO.mkRef {},
            facts := ← IO.mkRef {} }
 
 /-- Build the `set` simp context (plus state hypotheses and user arguments) for the current
@@ -1586,7 +1588,7 @@ def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
 /-- Apply a callee summary at a call site: the goal continues from the callee's return state.
 The postcondition is split into hypotheses; an equation `s' = e` is substituted. -/
 def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee : String)
-    (mvs : Array Expr := #[]) : TacticM (List MVarId) := g.withContext do
+    (mvs : Array Expr := #[]) (hname : Option Name := none) : TacticM (List MVarId) := g.withContext do
   let sty ← instantiateMVars (← inferType hsum)
   let (``Summary, #[_, entry, pre, post]) := sty.getAppFnArgs |
     throwError "{tacName}: not a `Summary`:{indentExpr sty}"
@@ -1611,8 +1613,15 @@ def applySummary (cfg : Cfg) (g : MVarId) (p s : Expr) (hsum hpc : Expr) (callee
   let mut out := []
   for g' in gs do
     if ← g'.isAssigned then continue
-    let before ← g'.withContext do return (← getLCtx).getFVarIds
+    let mut before ← g'.withContext do return (← getLCtx).getFVarIds
     let (fv, g'') ← g'.introNP 3
+    -- `calls [hS := S]`: the whole postcondition as `hS`, left alone by the steps below
+    let g'' ← match hname with
+      | some n => do
+        let (h, g3) ← Common.namePost g'' fv[2]! n
+        before := before.push h
+        pure g3
+      | none => pure g''
     let g'' ← Common.destructPost g'' fv[0]! fv[1]! fv[2]!
     let g'' ← normFrames cfg g'' before
     let g'' ← if mvs.isEmpty then pure g'' else Common.addApartFacts g'' before
@@ -1704,7 +1713,7 @@ def stepGoal (cfg : Cfg) (g : MVarId) (allowStop : Bool) : TacticM (Option (List
         | none => pure hsum
       let callee := (Common.symOf syms c).getD (hex c)
       cfg.status.modify fun st => { st with instr := some s!"(entry of {callee}, by its summary)" }
-      return some (← applySummary cfg g p s hsum hpc callee mvs)
+      return some (← applySummary cfg g p s hsum hpc callee mvs ((cfg.callNames.find? (·.1 == c)).map (·.2)))
     let cE := mkNatLit c
     if mode.isNone && c == exitA then
       if ret?.isSome then throwError "{tacName}: reached the exit address {hex c} inside a callee"
@@ -1914,7 +1923,8 @@ elab_rules : tactic | `(tactic| janus64_disch) => do
 
 syntax janus64Args := (" [" term,* "]")?
 syntax janus64Until := (" until " "[" term,* "]")?
-syntax janus64Calls := (" calls " "[" term,* "]")?
+syntax janus64Call := (atomic(ident " := "))? term
+syntax janus64Calls := (" calls " "[" janus64Call,* "]")?
 syntax janus64Budget := (" (" &"budget" " := " num ")")?
 
 def parseArgs (stx : Syntax) : Array Term :=
@@ -1930,10 +1940,13 @@ def parseUntil (stx : Syntax) : TacticM (List Nat) := do
     let some n ← evalNat e | throwError "janus64_run until: not a numeral: {t}"
     return n
 
-def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) := do
+/-- `calls [S, hT := T]`: the summaries with their entry, and the optional name of the whole postcondition. -/
+def parseCallsNamed (stx : Syntax) : TacticM (Array (Nat × Expr × Option Name)) := do
   if stx[0].isNone then return #[]
   let ts := stx[0][2].getSepArgs
-  ts.mapM fun t => do
+  ts.mapM fun t0 => do
+    let t := t0[1]
+    let nm : Option Name := if t0[0].isNone then none else some t0[0][0].getId
     let e ← Term.elabTerm t none
     Term.synthesizeSyntheticMVarsNoPostponing
     let e ← instantiateMVars e
@@ -1962,11 +1975,17 @@ def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) := do
       return some entry
     if let some entry := entry? then
       let some n ← evalNat entry | throwError "janus64_run calls: cannot evaluate the entry of {t}"
-      return (n, e)
+      return (n, e, nm)
     let (``Summary, #[_, entry, _, _]) := ty.getAppFnArgs |
       throwError "janus64_run calls: {t} is not a `Summary`: {ty0}"
     let some n ← evalNat entry | throwError "janus64_run calls: cannot evaluate the entry of {t}"
-    return (n, e)
+    return (n, e, nm)
+
+def parseCalls (stx : Syntax) : TacticM (Array (Nat × Expr)) :=
+  return (← parseCallsNamed stx).map fun (n, e, _) => (n, e)
+
+def parseCallNames (stx : Syntax) : TacticM (Array (Nat × Name)) :=
+  return (← parseCallsNamed stx).filterMap fun (n, _, nm) => nm.map (n, ·)
 
 def parseBudget (stx : Syntax) : Option Nat :=
   if stx[0].isNone then none else stx[0][3].isNatLit?
@@ -1976,14 +1995,18 @@ end of a callee (`ReachesRet`), or an `until` address. `calls [h, …]` uses cal
 instead of executing the callees; `(budget := N)` limits the run to `N` thousand heartbeats. -/
 elab "janus64_run" bud0:janus64Budget args:janus64Args stops:janus64Until cs:janus64Calls bud:janus64Budget :
     tactic => withMainContext do
-  let cfg ← Cfg.new (parseArgs args) (← parseUntil stops) (← parseCalls cs)
+  let cl ← parseCallsNamed cs
+  let cfg ← Cfg.new (parseArgs args) (← parseUntil stops) (cl.map fun (n, e, _) => (n, e))
     ((parseBudget bud).orElse fun _ => parseBudget bud0)
+    (cl.filterMap fun (n, _, nm) => nm.map (n, ·))
   runJanus cfg false
 
 /-- One symbolic execution step. -/
 elab "janus64_step" args:janus64Args cs:janus64Calls bud:janus64Budget : tactic =>
     withMainContext do
-  let cfg ← Cfg.new (parseArgs args) [] (← parseCalls cs) (parseBudget bud)
+  let cl ← parseCallsNamed cs
+  let cfg ← Cfg.new (parseArgs args) [] (cl.map fun (n, e, _) => (n, e)) (parseBudget bud)
+    (cl.filterMap fun (n, _, nm) => nm.map (n, ·))
   runJanus cfg true
 
 /-- Simplify the goal with the `janus64_post` simp set, the state hypotheses and the given
