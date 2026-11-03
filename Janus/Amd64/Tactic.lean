@@ -1414,7 +1414,7 @@ def goalKind (g : MVarId) : MetaM GoalKind := do
 def tryPrune (g : MVarId) : TacticM Bool := do
   let saved ← saveState
   let gs ← try
-      Tactic.run (← g.exfalso) (evalTactic (← `(tactic| omega)))
+      Tactic.run (← g.exfalso) (evalTactic (← `(tactic| janus_omega_prune)))
     catch _ => saved.restore; return false
   unless gs.isEmpty do saved.restore
   return gs.isEmpty
@@ -1574,7 +1574,7 @@ where
 def provePre (cfg : Cfg) (g : MVarId) (callee : String) : TacticM Unit := do
   -- reducible transparency only in the closers: unfolding `Memory.accessible`/`readLE` of a
   -- symbolic memory to compare it with a hypothesis can take seconds
-  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | omega | janus64_disch)
+  let closer ← `(tactic| first | with_reducible rfl | with_reducible assumption | janus_live | janus_omega_sparse | janus_omega_cap | janus64_disch)
   let left ← Common.provePreCore (cleanOutcome cfg) closer g
   unless left.isEmpty do
     let st ← cfg.status.get
