@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Tests for consumer packages, verify-batch, init, explain, framework and --json. Those that
@@ -497,8 +498,9 @@ func TestConsumerVerify(t *testing.T) {
 		t.Errorf("Max rebuilt %v, want only its own module and Extracted", got)
 	}
 
-	// Unchanged inputs: nothing is rebuilt; --json prints the report.
-	code, out, stderr = verify(add, "ConsumerExample/Add.lean", "ConsumerExample.Add.correctness", "--json")
+	// Unchanged inputs: nothing is rebuilt; --json prints the report. (The result cache would
+	// answer this run from the first one's record: TestConsumerResultCache; here the run is real.)
+	code, out, stderr = verify(add, "ConsumerExample/Add.lean", "ConsumerExample.Add.correctness", "--json", "--no-result-cache")
 	if code != 0 {
 		t.Fatalf("Add again: %d %s", code, stderr)
 	}
@@ -814,7 +816,7 @@ func TestConsumerTwoCheckouts(t *testing.T) {
 	verify := func(pkg string) *consumerInfo {
 		t.Helper()
 		code, _, stderr := runJanus(t, "verify", add, "--proof", filepath.Join(pkg, "ConsumerExample", "Add.lean"), "--proof-root", pkg,
-			"--theorem", "ConsumerExample.Add.correctness")
+			"--theorem", "ConsumerExample.Add.correctness", "--no-result-cache")
 		if code != 0 {
 			t.Fatalf("verify %s: %s", pkg, stderr)
 		}
@@ -839,5 +841,111 @@ func TestConsumerTwoCheckouts(t *testing.T) {
 	again := verify(consumerCopyAt(t, "toml", x, p))
 	if again.Workspace != a.Workspace {
 		t.Errorf("the same package and checkout got another workspace: %s, then %s", a.Workspace, again.Workspace)
+	}
+}
+
+// TestConsumerResultCache: the result cache on the consumer-package path. An identical second
+// verification is a hit that prints what a fresh run prints plus "Cached:"; any changed input
+// (a source file of the package, the lakefile, the proof, the extraction, the theorem), --fresh,
+// --unsafe-no-sandbox and a tampered entry are misses.
+func TestConsumerResultCache(t *testing.T) {
+	defer parallel(t)()
+	needLeanSlow(t)
+	useTestCache(t)
+	if _, err := detectSandbox(false); err != nil {
+		t.Skipf("no sandbox available: %v", err)
+	}
+	pkg := consumerCopy(t, "toml")
+	// A per-run comment: the shared test cache keeps other runs' entries.
+	spec := filepath.Join(pkg, "ConsumerExample", "Spec.lean")
+	orig, _ := os.ReadFile(spec)
+	writeFile(t, spec, string(orig)+fmt.Sprintf("\n-- TestConsumerResultCache run %d\n", time.Now().UnixNano()))
+	add := mustExtract(t, "example.com/basic.Add")
+	max := mustExtract(t, "example.com/basic.Max")
+	verify := func(outdir, proof, thm string, extra ...string) string {
+		t.Helper()
+		code, out, stderr := runJanus(t, append([]string{"verify", outdir, "--proof", filepath.Join(pkg, proof), "--proof-root", pkg, "--theorem", thm}, extra...)...)
+		if code != 0 {
+			t.Fatalf("verify %v: %d\n%s\n%s", extra, code, out, stderr)
+		}
+		return out
+	}
+	isCached := func(out string) bool { return strings.Contains(out, "\n  Cached: ") }
+	addV := func(extra ...string) string {
+		return verify(add, "ConsumerExample/Add.lean", "ConsumerExample.Add.correctness", extra...)
+	}
+
+	first := addV()
+	if isCached(first) {
+		t.Fatalf("first verification reported as cached:\n%s", first)
+	}
+	if second := addV(); !isCached(second) {
+		t.Fatalf("identical second verification not a cache hit:\n%s", second)
+	} else if r := readReport(t, add); !r.Cached || r.CachedFrom == "" || r.Consumer == nil || r.Consumer.Root != pkg || len(r.Consumer.Rebuilt) != 0 {
+		t.Errorf("verified.json of a hit: %+v %+v", r, r.Consumer)
+	}
+	if out := addV("--fresh"); isCached(out) {
+		t.Errorf("--fresh used the cache")
+	}
+	if out := addV("--unsafe-no-sandbox"); isCached(out) {
+		t.Errorf("--unsafe-no-sandbox used the cache")
+	}
+	if out := addV("--no-result-cache"); isCached(out) {
+		t.Errorf("--no-result-cache used the cache")
+	}
+	// Another extraction and another theorem are other keys.
+	if out := verify(max, "ConsumerExample/Max.lean", "ConsumerExample.Max.correctness"); isCached(out) {
+		t.Errorf("Max hit the entry of Add")
+	}
+	// An edit of an imported module of the package (not the proof file) is a different input.
+	writeFile(t, spec, string(orig)+"\n-- edited imported module\n")
+	if out := addV(); isCached(out) {
+		t.Errorf("an edited imported module hit the cache")
+	}
+	if out := addV(); !isCached(out) {
+		t.Errorf("the edited package was not recorded")
+	}
+	// The lakefile is part of the package.
+	lf := filepath.Join(pkg, "lakefile.toml")
+	lfb, _ := os.ReadFile(lf)
+	writeFile(t, lf, string(lfb)+"\n# edited lakefile\n")
+	if out := addV(); isCached(out) {
+		t.Errorf("an edited lakefile hit the cache")
+	}
+	// A tampered entry (the recorded report altered without the HMAC) is ignored. Entries of this
+	// package are those whose report holds its snapshot hash.
+	writeFile(t, spec, string(orig)+"\n-- tamper run\n")
+	addV()
+	r := readReport(t, add)
+	var entries []string
+	_ = filepath.WalkDir(resultCacheDir(), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".json") {
+			if b, err := os.ReadFile(p); err == nil && strings.Contains(string(b), r.Consumer.SnapshotSha256) {
+				entries = append(entries, p)
+			}
+		}
+		return nil
+	})
+	if len(entries) == 0 {
+		t.Fatal("no recorded entry for this package")
+	}
+	changed := 0
+	for _, e := range entries {
+		b, _ := os.ReadFile(e)
+		tampered := strings.Replace(string(b), "ConsumerExample.Add.correctness", "ConsumerExample.Add.tampered", -1)
+		if tampered == string(b) {
+			continue
+		}
+		changed++
+		if err := os.WriteFile(e, []byte(tampered), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if changed == 0 {
+		t.Fatal("no entry names the theorem")
+	}
+	out := addV()
+	if isCached(out) || strings.Contains(out, "tampered") || !strings.Contains(out, "Verified: ConsumerExample.Add.correctness") {
+		t.Errorf("a tampered entry was used:\n%s", out)
 	}
 }

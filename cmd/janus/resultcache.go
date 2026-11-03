@@ -22,7 +22,8 @@ package main
 //     mounts an empty tmpfs over it (bubblewrap and the unshare fallback), so neither a proof nor
 //     a lakefile can read the key or write an entry;
 //   - with --unsafe-no-sandbox or --fresh the cache is neither read nor written.
-// The consumer-package path (--proof-root) does not use the cache.
+// The consumer-package path (--proof-root) uses the same cache with its own key
+// (consumerResultInputs below); see the red-team checklist in docs/SOUNDNESS.md.
 
 import (
 	"crypto/hmac"
@@ -110,7 +111,7 @@ func (in *resultInputs) key() string {
 func resultCacheOK(sb *sandbox, opts map[string]string) bool {
 	// --asl results are not cached: the ASL stage runs (and is itself cached by its replay
 	// cache) every time.
-	return sb.mode != "none" && opts["fresh"] == "" && opts["asl"] == "" && os.Getenv("JANUS_RESULT_CACHE") != "off"
+	return sb.mode != "none" && opts["fresh"] == "" && opts["asl"] == "" && opts["no-result-cache"] == "" && os.Getenv("JANUS_RESULT_CACHE") != "off"
 }
 
 // resultKey returns the per-cache HMAC key, creating it (32 random bytes, mode 0600) on first use.
@@ -267,4 +268,47 @@ func cachedReport(r *verifiedReport, fw *framework, root string) *verifiedReport
 		c.JanusCommit += "+dirty"
 	}
 	return &c
+}
+
+// consumerResultInputs are the inputs of one consumer-package (--proof-root) verification of one
+// theorem. The key covers everything the verdict and the recorded report depend on: the verifier,
+// the framework build (sources, every compiled module, the auditor), the Lean toolchain and Lake
+// executable, the sandbox, the theorem and the options that change the verdict, the whole
+// consumer package snapshot (every Lean/TOML/JSON/toolchain file, hence the lakefile and the
+// manifest), every other Lake dependency as copied (tree hash and pin), the proof's place in the
+// package, and the artifact (Extracted.lean, identity.json, the binary's verified SHA-256 and its
+// place relative to the artifact directory).
+type consumerResultInputs struct {
+	fw          *framework
+	fwPins      *pinnedLib
+	auditExeSha string
+	tc          *toolchain
+	lakeSha     string
+	sb          *sandbox
+	thm         string
+	opts        map[string]string
+	pkg         *consumerPkg
+	req         *consumerRequest
+}
+
+// key is the SHA-256 of every input, or "" when the cache cannot be used.
+func (in *consumerResultInputs) key() string {
+	vid := verifierComponent()
+	if vid == "" || in.lakeSha == "" || in.auditExeSha == "" || in.fwPins == nil || len(in.fwPins.want) == 0 {
+		return ""
+	}
+	r := in.req
+	h := sha256.New()
+	fmt.Fprintf(h, "janus-consumer-result-v1 schema %d\nverifier %s\n", resultCacheSchema, vid)
+	fmt.Fprintf(h, "framework %s %s\npins %s\nauditor %s\n", in.fw.Source, in.fw.Sha256, pinsDigest(in.fwPins.want), in.auditExeSha)
+	fmt.Fprintf(h, "toolchain %q %s %s\nlake %s\nsandbox %s %s\n", in.tc.cacheID(), in.tc.lean, in.tc.leanchecker, in.lakeSha, in.sb.mode, in.sb.bwrap)
+	fmt.Fprintf(h, "theorem %s\nreplay-fresh %q\nallow-path-deps %q\n", in.thm, in.opts["replay-fresh"], in.opts["allow-path-deps"])
+	fmt.Fprintf(h, "package %s\nproof-rel %q\n", in.pkg.Sha256, r.rel)
+	dep, _ := json.Marshal(in.pkg.Dep)
+	deps, _ := json.Marshal(in.pkg.depInfos())
+	fmt.Fprintf(h, "janus-dep %s\ndeps %s\n", dep, deps)
+	fmt.Fprintf(h, "binary %q %s\n", binaryRef(r.Outdir, r.cr.BinPath), r.cr.Identity.BinarySha256)
+	idBytes, _ := os.ReadFile(filepath.Join(r.Outdir, "identity.json"))
+	fmt.Fprintf(h, "extracted %s\nidentity %s\nproof-src %s\n", sha256Hex(r.cr.Lean), sha256Hex(idBytes), sha256Hex(r.proofSrc))
+	return hex.EncodeToString(h.Sum(nil))
 }

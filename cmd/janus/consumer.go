@@ -1105,6 +1105,16 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 		return failLive(err)
 	}
 	tm.mark("framework base check")
+	// The result cache (resultcache.go) keys on the framework build the verification would use:
+	// its module hashes and compiled auditor, read while the base is leased.
+	var cFwPins *pinnedLib
+	cAuditSha := ""
+	cacheOn := resultCacheOK(sb, opts)
+	if cacheOn {
+		if p, perr := frameworkPins(filepath.Join(lease.dir, ".lake", "build", "lib", "lean"), fw.Files); perr == nil && len(p.want) > 0 {
+			cFwPins, cAuditSha = p, fw.stampedAuditExe(lease.dir)
+		}
+	}
 	tc, err := findToolchain(lake, lease.dir)
 	lease.release()
 	if err != nil {
@@ -1142,6 +1152,61 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	if len(group) == 0 {
 		return outs
 	}
+	// The verification-result cache (resultcache.go): a request whose key (every input) has an
+	// authentic recorded success is answered from it, once the inputs are confirmed unchanged.
+	keys := make([]string, len(group))
+	if cacheOn && cFwPins != nil {
+		if _, kerr := resultHMACKey(); kerr == nil {
+			lakeSha := regularFileSha(lake)
+			anyHit := false
+			prevs := make([]*verifiedReport, len(group))
+			for k, r := range group {
+				in := consumerResultInputs{fw: fw, fwPins: cFwPins, auditExeSha: cAuditSha, tc: tc, lakeSha: lakeSha, sb: sb,
+					thm: r.Theorem, opts: opts, pkg: pkg, req: r}
+				keys[k] = in.key()
+				if prevs[k] = lookupResult(keys[k]); prevs[k] != nil {
+					anyHit = true
+				}
+			}
+			if anyHit && consumerInputsUnchanged(fw, pkg, group, opts) && func() bool {
+				// the keys, recomputed from the bytes as they are now, must be the ones just looked up
+				for k, r := range group {
+					in := consumerResultInputs{fw: fw, fwPins: cFwPins, auditExeSha: cAuditSha, tc: tc, lakeSha: lakeSha, sb: sb,
+						thm: r.Theorem, opts: opts, pkg: pkg, req: r}
+					if in.key() != keys[k] {
+						return false
+					}
+				}
+				return true
+			}() {
+				var rest []*consumerRequest
+				var restIdx []int
+				var restKeys []string
+				for k, r := range group {
+					if prevs[k] != nil {
+						rep := cachedReport(prevs[k], fw, prevs[k].JanusRoot)
+						if rep.Consumer != nil { // this run's location of the same package contents
+							c := *rep.Consumer
+							c.Root, c.Lakefile = pkg.Root, pkg.Lakefile
+							c.Workspace, c.Rebuilt = "(none: answered from the result cache)", []string{}
+							rep.Consumer = &c
+						}
+						outs[groupIdx[k]].Report = rep
+					} else {
+						rest, restIdx, restKeys = append(rest, r), append(restIdx, groupIdx[k]), append(restKeys, keys[k])
+					}
+				}
+				group, groupIdx, keys = rest, restIdx, restKeys
+				tm.mark("result cache hit")
+				if len(group) == 0 {
+					return outs
+				}
+			}
+			tm.mark("result cache miss")
+		} else if d, ok := kerr.(*diag); ok {
+			return failLive(d) // an unsafe cache is an error, not a silent miss (round 8 C1)
+		}
+	}
 	ws, err := openWorkspace(fw, pkg, group[0].cr.Lean, opts["fresh"] != "", lake, sb, tc, stderr)
 	if err != nil {
 		for _, i := range groupIdx {
@@ -1156,8 +1221,39 @@ func verifyConsumerMany(outdir string, opts map[string]string, specs []thmSpec, 
 	verifyGroup(fw, pkg, ws, group)
 	for k, i := range groupIdx {
 		outs[i].Report, outs[i].Err = group[k].Report, group[k].Err
+		if group[k].Err == nil && group[k].Report != nil && keys[k] != "" && !group[k].Report.Cached {
+			storeResult(keys[k], group[k].Report)
+		}
 	}
 	return outs
+}
+
+// consumerInputsUnchanged re-reads, after the cache keys were computed, everything they were
+// computed from (the package sources, the extraction and its binary, the framework and the other
+// dependencies): a hit is used only if all of it is still byte-identical.
+func consumerInputsUnchanged(fw *framework, pkg *consumerPkg, group []*consumerRequest, opts map[string]string) bool {
+	now := &consumerPkg{Root: pkg.Root, excluded: pkg.excluded}
+	if err := now.snapshot(); err != nil || now.Sha256 != pkg.Sha256 {
+		return false
+	}
+	if compareFramework(pkg.Dep.Dir, fw) != nil {
+		return false
+	}
+	for _, dep := range pkg.Deps {
+		if dep.recheck(pkg.opts.SB) != nil {
+			return false
+		}
+	}
+	for _, r := range group {
+		cr2, err := check(r.Outdir, r.Binary)
+		if err != nil || !bytes.Equal(cr2.Lean, r.cr.Lean) || !bytes.Equal(pkg.Files[r.rel], r.proofSrc) {
+			return false
+		}
+		if cr2.Identity.BinarySha256 != r.cr.Identity.BinarySha256 {
+			return false
+		}
+	}
+	return true
 }
 
 // verifyGroup verifies requests that share one extraction (identical Extracted.lean) in one
