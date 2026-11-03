@@ -85,6 +85,16 @@ var tbl = [8]uint64{0x243f6a8885a308d3, 0x13198a2e03707344, 0xa4093822299f31d0, 
 //go:noinline
 func GlobalTable(i uint64) uint64 { return tbl[i&7] }
 
+// symPows is a package-level table of powers of ten. Like tbl it is writable data, so the
+// extraction names its address and size (`Extracted.dataAddr.«example.com/basic.symPows»`) and
+// a proof states what the table holds without hard-coding where the linker put it.
+var symPows = [8]uint64{1, 10, 100, 1000, 10000, 100000, 1000000, 10000000}
+
+// SymPows returns symPows[i&7] (ADRP+ADD into .noptrdata).
+//
+//go:noinline
+func SymPows(i uint64) uint64 { return symPows[i&7] }
+
 var counter uint64
 
 // Bump adds d to a zero-initialised global (in .noptrbss; ADRP+LDR, ADRP+STR).

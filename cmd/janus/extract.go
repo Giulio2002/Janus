@@ -652,6 +652,7 @@ func renderLean(x *Extraction) []byte {
 		writeFrames(&sb, x.FrameRecs)
 	}
 	fmt.Fprintf(&sb, "def entry : Nat := 0x%x\n\n", x.Entry.Addr)
+	writeDataSyms(&sb, collectDataSyms(x))
 	writeFuncInfos(&sb, x.FuncInfos)
 	sb.WriteString("end Extracted\n")
 	return []byte(sb.String())

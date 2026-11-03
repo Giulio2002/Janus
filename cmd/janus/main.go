@@ -76,6 +76,9 @@ const usage = `Usage:
   janus blockers <binary> <symbol>... [--max-functions N] [--contract SYM]... [--janus-root DIR] [--json FILE]
   janus version
 ` + extraUsage + `
+extract also names the address and size of every data symbol the code references in Extracted.lean
+(Extracted.dataAddr.«SYM», Extracted.dataSize.«SYM»; type descriptors: dataAddr only), so a proof
+need not hard-code where the linker put a global.
 See docs/CLI.md.
 `
 
