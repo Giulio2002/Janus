@@ -169,6 +169,36 @@ example (v p q : BitVec 64) :
   janus64_run
   janus64_arith
 
+/-! A read wider than `janus.readOverlap.maxWidth` (default 16) keeps its form: `vmovdqu ymm0, [rbx]`
+over the store at `rbx + 8`. Raising the option forwards it. -/
+
+/-- `mov [rbx+8], rax; vmovdqu ymm0, [rbx]` -/
+def wide : Program := prog "wide" [0x48, 0x89, 0x43, 0x08, 0xc5, 0xfe, 0x6f, 0x03]
+
+/-- info: janus64_run: the remaining goals contain reads over earlier stores whose aliasing is unknown -/
+#guard_msgs (substring := true) in
+example (v p : BitVec 64) :
+    Ensures wide 0x1000 [v, p] (fun s => Pre s p 0 32)
+      (fun _ s' => (s'.xmm 0).toNat ≤ 2 ^ 128) := by
+  intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
+  janus64_intro hs
+  simp only [regSP] at hacc hle hnw
+  janus64_run
+  janus64_arith
+
+set_option janus.readOverlap.maxWidth 32 in
+example (v p : BitVec 64) :
+    Ensures wide 0x1000 [v, p] (fun s => Pre s p 0 32)
+      (fun s s' => (s'.xmm 0).toNat = s.mem.readLE p.toNat 8 + 2 ^ 64 * v.toNat) := by
+  intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
+  janus64_intro hs
+  simp only [regSP] at hacc hle hnw
+  janus64_run
+  have := Memory.readLE_lt s.mem p.toNat 8
+  have := lt64 v
+  simp only [Nat.reducePow] at *
+  omega
+
 end Amd64
 
 /-! ## arm64: a 16-byte `LDR Q` over an 8-byte `STR` -/

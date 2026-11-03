@@ -15,13 +15,25 @@ The simproc `reduceReadOverWrite` fires when
   the literal offset `d = a - b` between them, and
 * the simp discharger (the executor's omega) proves the offset equation `a = b + d` (or
   `b = a + d`) from the context. When it cannot (an unknown relation, a possibly wrapping
-  subtraction), the read stays as it is.
+  subtraction), the read stays as it is, and
+* the read is at most `janus.readOverlap.maxWidth` (16) bytes wide: wider reads, which specifications
+  state over a chain of stores (a block copy, a multi-limb result), are left in their stuck form for
+  the lemmas written for it.
 The rewrite is justified by an ordinary lemma instance; nothing is trusted.
 -/
 
 namespace Janus.Tactic.ReadOverlap
 
 open Lean Meta Simp
+
+register_option janus.readOverlap.maxWidth : Nat := {
+  defValue := 16
+  descr := "janus_run/janus64_run: widest read (in bytes) whose partial overlap with an earlier store \
+    is forwarded byte-exactly (`Janus.Tactic.ReadOverlap`). The default 16 covers the scalar, SSE and \
+    NEON loads of an instruction; wider reads (a block read stated by a specification, an AVX load) keep \
+    their `(m.writeLE a n v).readLE b k` form, which block-copy lemmas such as `copy_step` expect. \
+    0 turns the forwarding off; raise it to forward AVX/AVX-512 loads."
+}
 open Janus.Arm64
 
 /-- A numeral. -/
@@ -68,7 +80,7 @@ simproc_decl reduceReadOverWrite (Janus.Arm64.Memory.readLE (Janus.Arm64.Memory.
   let_expr Janus.Arm64.Memory.writeLE m a n v := w | return .continue
   let some n' := lit? n | return .continue
   let some k' := lit? k | return .continue
-  if n' == 0 || k' == 0 then return .continue
+  if n' == 0 || k' == 0 || k' > janus.readOverlap.maxWidth.get (← getOptions) then return .continue
   let (ba, oa) := addrOffset a
   let (bb, ob) := addrOffset b
   unless ba == bb do return .continue
