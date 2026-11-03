@@ -152,6 +152,11 @@ if [ "$extras_on" = 1 ]; then
     if [ -n "${JANUS_GOTEST_EXTRA_LIST:-}" ] && [[ " $JANUS_GOTEST_EXTRA_LIST " != *" $lab "* ]]; then continue; fi
     ok=1; for n in $names; do cut -f2 "$outdir/all.txt" | grep -qx "$n" || ok=0; done
     [ "$ok" = 1 ] || continue
+    # The ASL extra is OPT-IN (JANUS_TEST_ASL_EXTRA=1): it has never been green (nightly ef4ff16c: TestASLExamples/Add built JanusASL for
+    # 1947 s and then the checkout's framework build files vanished under it, and the lane deadlocked on the heavy lock its own nightly
+    # held). Without it the four TestASL* tests SKIP and the SKIPPED-COVERAGE summary below names them. Re-enable by default only after
+    # (a) it works on a private copy of the checkout's framework, not the gate's tree, and (b) JANUS_HEAVY_LOCK_HELD is set under heavy-run.
+    if [ "$lab" = asl ] && [ "${JANUS_TEST_ASL_EXTRA:-}" != 1 ]; then continue; fi
     if [ "$lab" = asl ]; then asl_deferred=("$lab" "$names" "$lim" "$envw"); continue; fi   # 48 GiB: runs ALONE, after everything else (below)
     run_extra "$lab" "$names" "$lim" "$envw" & extra_pids+=($!); extra_names+=("$lab:$names")
   done
@@ -222,7 +227,8 @@ done < "$outdir/skips.txt"
 if [ "$nskip" -gt 0 ] || [ "$ncov" -gt 0 ]; then
   echo "SKIPPED-COVERAGE: $nskip test(s) did NOT run in this lane ($ncov skipped in the shards but covered by an extra run):"
   cat "$outdir/skips-report.txt"
-  [ "$extras_on" = 1 ] || echo "  (extras off: JANUS_NIGHTLY=1 or JANUS_GOTEST_EXTRAS=1 also runs TestReplayUnderMemoryPressure, TestConsumerMathlib and the four TestASL* tests)"
+  [ "$extras_on" = 1 ] && [ "${JANUS_TEST_ASL_EXTRA:-}" != 1 ] && echo "  (the ASL extra is opt-in: JANUS_TEST_ASL_EXTRA=1 runs the four TestASL* tests; known gap, see QUEUE.md)"
+  [ "$extras_on" = 1 ] || echo "  (extras off: JANUS_NIGHTLY=1 or JANUS_GOTEST_EXTRAS=1 also runs TestReplayUnderMemoryPressure and TestConsumerMathlib; the four TestASL* tests only with JANUS_TEST_ASL_EXTRA=1 as well)"
 fi
 if [ "$nskip" -gt 0 ]; then
   echo "gotest-shards: $nskip test(s) SKIPPED (a skip is not a pass; this run is not recorded)"
