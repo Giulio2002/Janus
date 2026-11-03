@@ -101,7 +101,8 @@ simproc_decl reduceReadOverWrite (Janus.Arm64.Memory.readLE (Janus.Arm64.Memory.
     let hk ← natEq k (← mkAppM ``HAdd.hAdd #[← mkAppM ``HAdd.hAdd #[nl j, n], nl r])
     let c ← mkAddr ba (ob + j + n'')
     let some hc ← discharge (← mkEq c (← mkAppM ``HAdd.hAdd #[b, nl (j + n')])) | return .continue
-    finish (← mkAppM ``Memory.readLE_writeLE_contained_at #[m, v, nl j, nl r, c, hj, hk, hc])
+    finish (← mkAppOptM ``Memory.readLE_writeLE_contained_at
+      (#[m, a, n, b, k, v, nl j, nl r, c, hj, hk, hc].map some))
   else if d < 0 && -d < n'' && n'' + d < k'' then
     -- the read starts inside the store and runs past its end
     let j := (-d).toNat
@@ -114,7 +115,8 @@ simproc_decl reduceReadOverWrite (Janus.Arm64.Memory.readLE (Janus.Arm64.Memory.
     let hr ← mkDecideProof (← mkAppM ``LT.lt #[nl 0, nl r])
     let c ← mkAddr ba (ob + t)
     let some hc ← discharge (← mkEq c (← mkAppM ``HAdd.hAdd #[b, nl t])) | return .continue
-    finish (← mkAppM ``Memory.readLE_writeLE_overrun_at #[m, v, nl j, nl t, nl r, c, hj, hn, hk, ht, hr, hc])
+    finish (← mkAppOptM ``Memory.readLE_writeLE_overrun_at
+      (#[m, a, n, b, k, v, nl j, nl t, nl r, c, hj, hn, hk, ht, hr, hc].map some))
   else if 0 < d && d < k'' && k'' < d + n'' then
     -- the read ends inside the store
     let j := d.toNat
@@ -124,7 +126,22 @@ simproc_decl reduceReadOverWrite (Janus.Arm64.Memory.readLE (Janus.Arm64.Memory.
     let hj0 ← mkDecideProof (← mkAppM ``LT.lt #[nl 0, nl j])
     let ht ← mkDecideProof (← mkAppM ``LT.lt #[nl 0, nl t])
     let htn ← mkDecideProof (← mkAppM ``LT.lt #[nl t, n])
-    finish (← mkAppM ``Memory.readLE_writeLE_underrun_at #[m, v, nl j, nl t, hj, hk, hj0, ht, htn])
+    finish (← mkAppOptM ``Memory.readLE_writeLE_underrun_at
+      (#[m, a, n, b, k, v, nl j, nl t, hj, hk, hj0, ht, htn].map some))
   else return .continue
+
+/-- `a - b` for two addresses with the same base and numeric offsets (`x - 64 - (x - 72)`): the literal
+distance, when the discharger can prove it (the executor's lemmas about a read inside a store, e.g.
+`readLE_writeLE_inside`, state `v / 256 ^ (b - a)`). -/
+simproc_decl reduceSameBaseSub ((_ : Nat) - _) := fun e => do
+  let_expr HSub.hSub _ _ _ _ a b := e | return .continue
+  if (lit? a).isSome || (lit? b).isSome then return .continue
+  let (ba, oa) := addrOffset a
+  let (bb, ob) := addrOffset b
+  let some _ := ba | return .continue
+  unless ba == bb do return .continue
+  let d : Nat := (oa - ob).toNat   -- `a - b` is `d` when `ob ≤ oa`, else `0`
+  let some pf ← discharge (← mkEq e (mkNatLit d)) | return .continue
+  return .visit { expr := mkNatLit d, proof? := some pf }
 
 end Janus.Tactic.ReadOverlap

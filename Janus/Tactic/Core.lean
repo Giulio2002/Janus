@@ -329,6 +329,7 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
       ``reduceRev] do
     extra ← extra.add n (post := true)
   extra ← extra.add ``Janus.Tactic.ReadOverlap.reduceReadOverWrite (post := true)
+  extra ← extra.add ``Janus.Tactic.ReadOverlap.reduceSameBaseSub (post := true)
   simprocs := simprocs.push extra
   return (ctx, simprocs, ← Common.fastDischargeWrapper (← `(tactic| janus_disch)))
 

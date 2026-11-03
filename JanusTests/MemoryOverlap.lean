@@ -53,7 +53,7 @@ example (m : Memory) (a v : Nat) :
 theorem lt64 (v : BitVec 64) : v.toNat < 2 ^ 64 := v.isLt
 
 section Amd64
-open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic
+open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Spec
 
 /-- A program `f` of `store; load; ret` over `rbx = p` (the value is `rax = v`). -/
 def prog (name : String) (code : List Nat) : Program where
@@ -198,6 +198,49 @@ example (v p : BitVec 64) :
   have := lt64 v
   simp only [Nat.reducePow] at *
   omega
+
+/-! A chain of partially overlapping stores: a 16-byte store at `p - 72`, then an 8-byte store at the SAME
+address (`rax`), then reads at `p - 72` (8 and 16 bytes) and `p - 64` (8 bytes). The frame fact
+(`OnlyWrites`) over the chain. -/
+
+/-- `movups [rbx-72], xmm0; mov [rbx-72], rax; movups xmm1, [rbx-72]; mov rcx, [rbx-72];
+mov rdx, [rbx-64]` -/
+def chain : Program := prog "chain"
+  [0x0f, 0x11, 0x43, 0xb8, 0x48, 0x89, 0x43, 0xb8, 0x0f, 0x10, 0x4b, 0xb8,
+   0x48, 0x8b, 0x4b, 0xb8, 0x48, 0x8b, 0x53, 0xc0]
+
+example (v p : BitVec 64) :
+    Ensures chain 0x1000 [v, p] (fun s => Pre s p 72 16)
+      (fun s s' => (s'.xmm 1).toNat = v.toNat + 2 ^ 64 * ((s.xmm 0).toNat / 2 ^ 64) ∧
+        s'.regs 1 = v ∧ (s'.regs 2).toNat = (s.xmm 0).toNat / 2 ^ 64 ∧
+        OnlyWrites s.mem s'.mem (p.toNat - 72) 16) := by
+  intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
+  janus64_intro hs
+  simp only [regSP] at hacc hle hnw
+  janus64_run
+  have h := (s.xmm 0).isLt
+  simp only [Nat.reducePow] at h
+  have := lt64 v
+  simp only [Nat.reducePow] at *
+  refine ⟨by omega, by janus64_simp [onlyWrites_writeLE_iff, onlyWrites_self]⟩
+
+/-- `movups [rbx-72], xmm0; mov [rbx-72], rax; mov [rbx-64], rcx; movups xmm1, [rbx-72]`: the two
+8-byte stores overwrite the 16-byte one completely, in two steps. -/
+def chain2 : Program := prog "chain2"
+  [0x0f, 0x11, 0x43, 0xb8, 0x48, 0x89, 0x43, 0xb8, 0x48, 0x89, 0x4b, 0xc0, 0x0f, 0x10, 0x4b, 0xb8]
+
+example (v p w : BitVec 64) :
+    Ensures chain2 0x1000 [v, p, w] (fun s => Pre s p 72 16)
+      (fun s s' => (s'.xmm 1).toNat = v.toNat + 2 ^ 64 * w.toNat ∧
+        OnlyWrites s.mem s'.mem (p.toNat - 72) 16) := by
+  intro ret hret s hs ⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩
+  janus64_intro hs
+  simp only [regSP] at hacc hle hnw
+  janus64_run
+  have := lt64 v
+  have := lt64 w
+  simp only [Nat.reducePow] at *
+  refine ⟨by omega, by janus64_simp [onlyWrites_writeLE_iff, onlyWrites_self]⟩
 
 end Amd64
 
