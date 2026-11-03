@@ -56,7 +56,7 @@ echo "== V2: a main theorem quantifies the runtime implementation"
 row bad1 blocked 'round 14' 'may link only a variable'
 row bad2 blocked 'may link only a variable'
 row bad3 blocked 'round 14'
-row bad4 blocked 'round 10 V1' 'impl'
+row bad4 blocked 'rt-auditv2' 'other than as'
 row bad5 blocked 'round 14'
 row bad6 blocked 'round 14'
 row bad7 blocked 'round 14'
@@ -87,6 +87,20 @@ row correctness Verified
 row Witness.nonvacuous Verified 'Role: WITNESS'
 row Witness.returns Verified 'Role: WITNESS'
 row OneMember.Witness.nonvacuous blocked 'round 14, W2' 'conjunct 2 of 2'
+echo "== rt-auditv2: a witness cannot skip an empty binder, a pc premise, a pinned implementation, an exists-bound closed contract"
+for spec in "EmptyBinder 'binder of type'" "PcPremise 'program counter'"; do
+  eval set -- $spec; f=$1; pat=$2
+  all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/$f.lean "$W/NewPair" --theorem $P.correctness --theorem $P.Witness.nonvacuous 2>&1)"
+  echo " ($f: a main theorem that is vacuous by an empty binder / unsatisfiable pc premise; its genuine witness must not verify)"
+  row correctness Verified
+  row Witness.nonvacuous blocked 'round 14, W2' "$pat"
+done
+all="$("$J" verify --fresh --janus-root "$root" --proof $R/attacks/V2Attacks.lean "$W/NewPair" --theorem $P.pinpre1 --theorem $P.exc1 \
+  --theorem $P.W1.Witness.returns --theorem $P.W2.Witness.returns 2>&1)"
+row pinpre1 blocked 'rt-auditv2' 'other than as'
+row exc1 blocked 'round 10 V1' 'not a variable of the statement'
+row W1.Witness.returns blocked 'round 14, W2'
+row W2.Witness.returns blocked 'round 14, W2'
 echo
 if [ ${#broken[@]} -gt 0 ]; then echo "round 14: BROKEN rows: ${broken[*]}"; exit 1; fi
 echo "round 14: all rows as expected"
