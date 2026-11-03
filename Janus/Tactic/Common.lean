@@ -1227,15 +1227,35 @@ def countDisj : MetaM Nat := do
     n := n + (← cnt.get)
   return n
 
-/-- `omega` on the full context, unless the context has more than `janus.omega.cap` disjunctions (then it
-fails at once, instead of running for 2^n splits). -/
+register_option janus.omega.budget : Nat := {
+  defValue := 30000
+  descr := "janus_run: heartbeat budget (in thousands, like `maxHeartbeats`) of an `omega` call on the full \
+    context when the context has more than `janus.omega.cap` disjunctions. Such a call that can close its \
+    goal finishes quickly (`omega` splits only as needed), one that cannot explores up to 2^n splits; with \
+    the budget it is tried, and given up on, instead of never being tried (which lost proofs that need the \
+    whole context: a branch pruned by a fact far from the branch condition)."
+}
+
+/-- `omega` on the full context. Up to `janus.omega.cap` disjunctions it runs unbounded; above the cap it
+runs under its own heartbeat budget `janus.omega.budget` (a call that cannot close its goal costs about 2^n
+splits, so it is cut off, with the state restored, instead of exhausting time and memory). -/
 def omegaCapped : TacticM Unit := do
   let cap := janus.omega.cap.get (← getOptions)
   let n ← countDisj
   if n > cap then
-    throwError "janus_omega_cap: {n} disjunctive hypotheses (more than janus.omega.cap = {cap}): `omega` \
-      was not tried on the full context"
-  evalTactic (← `(tactic| omega))
+    let b := janus.omega.budget.get (← getOptions)
+    let saved ← saveState
+    let ok ← tryCatchRuntimeEx
+      (withTheReader Core.Context (fun c => { c with maxHeartbeats := b * 1000 }) <|
+        withCurrHeartbeats do
+          evalTactic (← `(tactic| omega))
+          pure true)
+      (fun _ => pure false)
+    unless ok do
+      saved.restore
+      throwError "janus_omega_cap: {n} disjunctive hypotheses (more than janus.omega.cap = {cap}): `omega` \
+        did not close the goal within janus.omega.budget = {b}"
+  else evalTactic (← `(tactic| omega))
 
 elab "janus_omega_cap" : tactic => omegaCapped
 
@@ -1274,6 +1294,15 @@ def omegaFocused (g : MVarId) : TacticM Bool := g.withContext do
 /-- `omega` for side conditions of the dischargers, in stages: the sparse attempts, `omega` in the context
 restricted to the hypotheses about the goal's free variables, `omega` on the full context (capped). -/
 def omegaStaged (g : MVarId) : TacticM Bool := do
+  -- up to the cap the full context is cheap enough: plain `omega`, exactly what the side conditions did
+  -- before the cap existed (the sparse and focused attempts, each a context copy, only pay off above it)
+  if (← g.withContext countDisj) ≤ janus.omega.cap.get (← getOptions) then
+    let saved ← saveState
+    try
+      let gs ← Tactic.run g <| withoutRecover (evalTactic (← `(tactic| omega)))
+      if gs.isEmpty then return true
+      saved.restore; return false
+    catch _ => saved.restore; return false
   if ← omegaSparse g then return true
   if ← omegaFocused g then return true
   let saved ← saveState
@@ -1307,6 +1336,10 @@ elab "janus_omega_prune" : tactic => do
           break
       | none => pure ()
     return atoms
+  -- up to the cap: `omega` on the full context (the behaviour before the cap existed)
+  if (← g.withContext countDisj) ≤ janus.omega.cap.get (← getOptions) then
+    evalTactic (← `(tactic| omega))
+    return
   if !seed.isEmpty then
     let focused ← g.withContext do
       let mut toClear := #[]
