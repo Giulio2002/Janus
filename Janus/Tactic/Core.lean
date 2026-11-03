@@ -4,6 +4,7 @@ import Janus.Tactic.Data
 import Janus.Tactic.Common
 import Janus.Tactic.Disasm
 import Janus.Tactic.Carry
+import Janus.Tactic.ReadOverlap
 
 /-!
 # Symbolic execution tactics
@@ -327,6 +328,7 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
   for n in [``reduceSetRegRestore, ``reduceDataReadD, ``reduceBitMaskFst, ``reduceBitMaskSnd, ``reduceClz, ``reduceRbit,
       ``reduceRev] do
     extra ← extra.add n (post := true)
+  extra ← extra.add ``Janus.Tactic.ReadOverlap.reduceReadOverWrite (post := true)
   simprocs := simprocs.push extra
   return (ctx, simprocs, ← Common.fastDischargeWrapper (← `(tactic| janus_disch)))
 

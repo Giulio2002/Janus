@@ -5,6 +5,7 @@ import Janus.Amd64.TacticAttr
 import Janus.Amd64.Disasm
 import Janus.Tactic.Common
 import Janus.Tactic.Carry
+import Janus.Tactic.ReadOverlap
 
 /-!
 # Symbolic execution for amd64 programs
@@ -832,9 +833,13 @@ theorem writeLE_comm (m : Memory) {a n b k : Nat} (v w : Nat)
 
 /-- A read entirely inside an earlier write (e.g. one word of a 16-byte `MOVUPS` store). -/
 @[janus64_exec, janus64_post] theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat)
-    (h1 : a ≤ b) (h2 : b + k ≤ a + n) (h3 : k < n) :
+    (h1 : a ≤ b) (h2 : b + k ≤ a + n) (_h3 : k < n) :
     (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Janus.Arm64.Memory.readLE_writeLE_inside m v h1 h2
+
+/-- A zero-width read (see `Janus.Tactic.ReadOverlap`, whose results can contain one). -/
+@[janus64_exec, janus64_post] theorem readLE_zero_eq (m : Memory) (a : Nat) : m.readLE a 0 = 0 :=
+  Janus.Arm64.Memory.readLE_zero_eq m a
 
 /-- Large literals times a carry stay out of the kernel's `Nat.mul` (see `Janus.Tactic.ofNat_toNat_mul`). -/
 @[janus64_exec high, janus64_post high] theorem ofNat_toNat_mul (b : Bool) (n : Nat) :
@@ -1362,6 +1367,7 @@ def withExecSimp (cfg : Cfg) (k : Simp.Context → Simp.SimprocsArray → Option
     let mut extra : Simp.Simprocs := {}
     extra ← extra.add ``reduceDataReadD64 (post := true)
     extra ← extra.add ``reduceSetRegFRestore (post := true)
+    extra ← extra.add ``Janus.Tactic.ReadOverlap.reduceReadOverWrite (post := true)
     for n in [``reduceSegAddr, ``reduceDataBase, ``reduceRipTarget] do
       extra ← extra.add n (post := true)
     simprocs := simprocs.push extra

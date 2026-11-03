@@ -626,6 +626,17 @@ theorem readLE_writeLE_inside (m : Memory) {a n b k : Nat} (v : Nat) (h1 : a ≤
     (h2 : b + k ≤ a + n) : (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Memory.readLE_writeLE_inside m v h1 h2
 
+/-- `readLE_writeLE_inside` as a simp rule (a read strictly narrower than the store; the same-width
+case is `readLE_writeLE_same`). -/
+@[janus_exec, janus_post] theorem readLE_writeLE_inside_lt (m : Memory) {a n b k : Nat} (v : Nat)
+    (h1 : a ≤ b) (h2 : b + k ≤ a + n) (_h3 : k < n) :
+    (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
+  Memory.readLE_writeLE_inside m v h1 h2
+
+/-- A zero-width read (see `Janus.Tactic.ReadOverlap`, whose results can contain one). -/
+@[janus_exec, janus_post] theorem readLE_zero_eq (m : Memory) (a : Nat) : m.readLE a 0 = 0 :=
+  Memory.readLE_zero_eq m a
+
 @[janus_exec, janus_post] theorem readLE_mod_8 (m : Memory) (a : Nat) :
     m.readLE a 8 % 18446744073709551616 = m.readLE a 8 :=
   Nat.mod_eq_of_lt (Memory.readLE_lt m a 8)

@@ -16,6 +16,7 @@ import Janus.Tactic.Addr
 import Janus.Tactic.Atomic
 import Janus.Tactic.Vector
 import Janus.Tactic.Float
+import Janus.Tactic.ReadOverlap
 import Janus.Tactic.Neon
 import Janus.Tactic.Crypto
 import Janus.Float.Lemmas

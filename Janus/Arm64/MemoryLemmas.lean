@@ -253,6 +253,68 @@ theorem readLE_writeLE_inside {a n b k : Nat} (v : Nat) (h1 : a ≤ b) (h2 : b +
       Nat.div_div_eq_div_mul, ← Nat.pow_add, show b - a + (b + i - b) = b + i - a by omega])]
   exact readLE_writeLE_self _ _ _ _
 
+/-- A write strictly inside a read: the read sees the old bytes below, the written bytes, and the
+old bytes above (byte-exact, for arbitrary widths). -/
+theorem readLE_writeLE_contained {a n b k : Nat} (v : Nat) (h1 : b ≤ a) (h2 : a + n ≤ b + k) :
+    (m.writeLE a n v).readLE b k =
+      m.readLE b (a - b) + 256 ^ (a - b) * (v % 256 ^ n + 256 ^ n * m.readLE (a + n) (b + k - (a + n))) := by
+  obtain ⟨j, rfl⟩ : ∃ j, a = b + j := ⟨a - b, by omega⟩
+  obtain ⟨r, rfl⟩ : ∃ r, k = j + (n + r) := ⟨k - j - n, by omega⟩
+  rw [readLE_add, readLE_add (a := b + j) (n := n),
+    readLE_writeLE_of_disjoint (m := m) v (b := b) (k := j) (by omega),
+    readLE_writeLE_self, readLE_writeLE_of_disjoint (m := m) v (b := b + j + n) (k := r) (by omega),
+    Nat.add_sub_cancel_left, show b + (j + (n + r)) - (b + j + n) = r by omega]
+
+/-- A read that starts inside a write and runs past its end. -/
+theorem readLE_writeLE_overrun {a n b k : Nat} (v : Nat) (h1 : a ≤ b) (h2 : b < a + n)
+    (h3 : a + n < b + k) :
+    (m.writeLE a n v).readLE b k =
+      v / 256 ^ (b - a) % 256 ^ (a + n - b) + 256 ^ (a + n - b) * m.readLE (a + n) (b + k - (a + n)) := by
+  obtain ⟨j, rfl⟩ : ∃ j, k = (a + n - b) + j := ⟨k - (a + n - b), by omega⟩
+  rw [readLE_add, readLE_writeLE_inside (m := m) v (b := b) (k := a + n - b) h1 (by omega),
+    readLE_writeLE_of_disjoint (m := m) v (b := b + (a + n - b)) (k := j) (by omega),
+    show b + (a + n - b) = a + n by omega, show b + ((a + n - b) + j) - (a + n) = j by omega]
+
+/-- A read that starts before a write and ends inside it. -/
+theorem readLE_writeLE_underrun {a n b k : Nat} (v : Nat) (h1 : b < a) (h2 : a < b + k)
+    (h3 : b + k < a + n) :
+    (m.writeLE a n v).readLE b k =
+      m.readLE b (a - b) + 256 ^ (a - b) * (v % 256 ^ (b + k - a)) := by
+  obtain ⟨j, rfl⟩ : ∃ j, a = b + j := ⟨a - b, by omega⟩
+  obtain ⟨r, rfl⟩ : ∃ r, k = j + r := ⟨k - j, by omega⟩
+  rw [readLE_add, readLE_writeLE_of_disjoint (m := m) v (b := b) (k := j) (by omega),
+    readLE_writeLE_inside (m := m) v (b := b + j) (k := r) (Nat.le_refl _) (by omega),
+    Nat.add_sub_cancel_left, Nat.sub_self, Nat.pow_zero, Nat.div_one,
+    show b + (j + r) - (b + j) = r by omega]
+
+/-! Variants with the offsets as variables: the executor's simproc `Common.reduceReadOverWrite`
+computes the literal offsets of two same-base addresses and instantiates these. -/
+
+theorem readLE_writeLE_contained_at {a n b k : Nat} (v j r c : Nat) (hj : a = b + j)
+    (hk : k = j + n + r) (hc : c = b + (j + n)) :
+    (m.writeLE a n v).readLE b k =
+      m.readLE b j + 256 ^ j * (v % 256 ^ n + 256 ^ n * m.readLE c r) := by
+  have := readLE_writeLE_contained (m := m) (a := a) (n := n) (b := b) (k := k) v (by omega) (by omega)
+  rw [this, show a - b = j by omega, show a + n = c by omega,
+    show b + k - c = r by omega]
+
+theorem readLE_writeLE_overrun_at {a n b k : Nat} (v j t r c : Nat) (hj : b = a + j)
+    (hn : j + t = n) (hk : t + r = k) (ht : 0 < t) (hr : 0 < r) (hc : c = b + t) :
+    (m.writeLE a n v).readLE b k =
+      v / 256 ^ j % 256 ^ t + 256 ^ t * m.readLE c r := by
+  have := readLE_writeLE_overrun (m := m) (a := a) (n := n) (b := b) (k := k) v (by omega) (by omega) (by omega)
+  rw [this, show b - a = j by omega, show a + n - b = t by omega, show a + n = c by omega,
+    show b + k - c = r by omega]
+
+theorem readLE_writeLE_underrun_at {a n b k : Nat} (v j t : Nat) (hj : a = b + j)
+    (hk : j + t = k) (hj0 : 0 < j) (ht : 0 < t) (htn : t < n) :
+    (m.writeLE a n v).readLE b k = m.readLE b j + 256 ^ j * (v % 256 ^ t) := by
+  have := readLE_writeLE_underrun (m := m) (a := a) (n := n) (b := b) (k := k) v (by omega) (by omega) (by omega)
+  rw [this, show a - b = j by omega, show b + k - a = t by omega]
+
+/-- A zero-width read. Not `rfl`-tagged for simp (see `accessible_writeLE`). -/
+theorem readLE_zero_eq (a : Nat) : m.readLE a 0 = 0 := Eq.symm (Eq.symm rfl)
+
 /-- Splitting a write into its low `n` and high `k` bytes. -/
 theorem writeLE_add (a n k v : Nat) :
     m.writeLE a (n + k) v = (m.writeLE a n v).writeLE (a + n) k (v / 256 ^ n) := by
