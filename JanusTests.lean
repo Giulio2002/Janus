@@ -26,3 +26,4 @@ import JanusTests.Crypto
 import JanusTests.AVX
 import JanusTests.AVX512
 import JanusTests.KernelSafeMemory
+import JanusTests.OmegaCap
