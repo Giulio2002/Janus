@@ -40,4 +40,20 @@ example (sp : Nat) (hlow : 100 ≤ sp) : True := by
     have : sp - 48 + 8 ≤ sp - 152 := by janus_omega
   trivial
 
+/-- A frame against a pointer: the frame is `[sp - 4248, sp + 40)`, so a stack slot `sp - 8` is disjoint from
+the 16 bytes at `m` (one case split on the aliasing fact; `sp` and `sp - 4248` are the same base). -/
+example (sp m : Nat) (hlow : 4248 ≤ sp) (hdm : m + 32 ≤ sp - 4248 ∨ sp + 40 ≤ m) :
+    sp - 8 + 8 ≤ m ∨ m + 16 ≤ sp - 8 := by
+  janus_omega
+
+example (sp z : Nat) (hlow : 4248 ≤ sp) (hdz : z + 32 ≤ sp - 4248 ∨ sp + 40 ≤ z) :
+    sp - 8 + 8 ≤ z + 16 ∨ z + 24 ≤ sp - 8 := by
+  janus_omega
+
+/-- The aliasing fact is needed: without it nothing is decided. -/
+example (sp m : Nat) (hlow : 4248 ≤ sp) : True := by
+  fail_if_success
+    have : sp - 8 + 8 ≤ m ∨ m + 16 ≤ sp - 8 := by janus_omega
+  trivial
+
 end JanusTests.AddrSub
