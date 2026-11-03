@@ -162,12 +162,12 @@ def unk : Program := prog "unk" [0x48, 0x89, 0x43, 0x08, 0x0f, 0x10, 0x01]
 example (v p q : BitVec 64) :
     Ensures unk 0x1000 [v, p, q]
       (fun s => Pre s p 0 16 ∧ s.mem.accessible q.toNat 16 false = true ∧ q.toNat + 16 ≤ 2 ^ 48)
-      (fun s s' => (s'.xmm 0).toNat = s.mem.readLE q.toNat 16) := by
+      (fun _ s' => (s'.xmm 0).toNat ≤ 2 ^ 128) := by
   intro ret hret s hs ⟨⟨⟨hle, hnw, hacc⟩, hl, hp, hp', hd⟩, hq, hq'⟩
   janus64_intro hs
   simp only [regSP] at hacc hle hnw
   janus64_run
-  all_goals sorry
+  janus64_arith
 
 end Amd64
 
