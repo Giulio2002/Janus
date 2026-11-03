@@ -130,18 +130,22 @@ simproc_decl reduceReadOverWrite (Janus.Arm64.Memory.readLE (Janus.Arm64.Memory.
       (#[m, a, n, b, k, v, nl j, nl t, hj, hk, hj0, ht, htn].map some))
   else return .continue
 
-/-- `a - b` for two addresses with the same base and numeric offsets (`x - 64 - (x - 72)`): the literal
-distance, when the discharger can prove it (the executor's lemmas about a read inside a store, e.g.
-`readLE_writeLE_inside`, state `v / 256 ^ (b - a)`). -/
-simproc_decl reduceSameBaseSub ((_ : Nat) - _) := fun e => do
-  let_expr HSub.hSub _ _ _ _ a b := e | return .continue
+/-- `256 ^ (a - b)` for two addresses with the same base and numeric offsets (`x - 64 - (x - 72)`):
+the exponent is the literal distance, when the discharger can prove it. The executor's lemma for a
+read inside a store, `readLE_writeLE_inside`, states `v / 256 ^ (b - a)`; this keeps the shift a
+numeral. Only this position is rewritten: the same subtraction elsewhere (a range length) is left
+as the proofs about it state it. -/
+simproc_decl reducePowSameBaseSub ((256 : Nat) ^ (_ : Nat)) := fun e => do
+  let_expr HPow.hPow _ _ _ _ base ex := e | return .continue
+  let_expr HSub.hSub _ _ _ _ a b := ex | return .continue
   if (lit? a).isSome || (lit? b).isSome then return .continue
   let (ba, oa) := addrOffset a
   let (bb, ob) := addrOffset b
   let some _ := ba | return .continue
   unless ba == bb do return .continue
   let d : Nat := (oa - ob).toNat   -- `a - b` is `d` when `ob ≤ oa`, else `0`
-  let some pf ← discharge (← mkEq e (mkNatLit d)) | return .continue
-  return .visit { expr := mkNatLit d, proof? := some pf }
+  let some pf ← discharge (← mkEq ex (mkNatLit d)) | return .continue
+  let f := e.appFn!
+  return .visit { expr := mkApp f (mkNatLit d), proof? := some (← mkCongrArg f pf) }
 
 end Janus.Tactic.ReadOverlap
