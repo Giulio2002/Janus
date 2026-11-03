@@ -2033,18 +2033,56 @@ theorem addr_lin_add {a b B c : Nat} (pa : a = B + c) : a + b = B + (c + b) := b
 theorem addr_lin_add' {a b B c : Nat} (pb : b = B + c) : a + b = B + (c + a) := by
   rw [pb]; omega
 
+/-- `(B + c) - k = B + (c - k)` when `k ≤ c`: a truncated subtraction of a literal that cannot truncate. -/
+theorem addr_sub_off {B c k : Nat} (hk : Nat.ble k c = true) : (B + c) - k = B + (c - k) := by
+  have := Nat.le_of_ble_eq_true hk; omega
+
+/-- With a literal lower bound `K ≤ B`: `(B + c) - k = (B - K) + (K + c - k)` when `k ≤ K + c`. All the
+stack addresses `sp - 48`, `sp - 152 + 8`, ... of a frame become offsets of the one base `sp - K`. -/
+theorem addr_sub_lb {B c k K : Nat} (hK : K ≤ B) (hk : Nat.ble k (K + c) = true) :
+    (B + c) - k = (B - K) + (K + c - k) := by
+  have := Nat.le_of_ble_eq_true hk; omega
+
 /-- A linear address: `base + c` (`base = none`: the literal `c`), with a proof of
 `e = base + c` (resp. `e = c`). Offsets are literals; the base is any other term. -/
-partial def linAddr (e : Expr) : MetaM (Option Expr × Nat × Expr) := do
+partial def linAddr (lbs : Array (Expr × Nat × Expr)) (e : Expr) : MetaM (Option Expr × Nat × Expr) := do
   let e := e.consumeMData
   if let some n := evalClosedNat? e then
     let ty ← mkEq e (mkRawNatLit n)
     return (none, n, ← mkExpectedTypeHint (← mkEqRefl e) ty)
   match e.getAppFnArgs with
+  | (``HSub.hSub, #[t, _, _, _, a, b]) =>
+    -- `a - k` with a literal `k`: `a = B + c`; if `k ≤ c` it is `B + (c - k)`, else with a literal lower
+    -- bound `K ≤ B` (a hypothesis `K ≤ B`) and `k ≤ K + c` it is `(B - K) + (K + c - k)`
+    if t.isConstOf ``Nat then
+      if let some k := evalClosedNat? b then
+        let (B, c, pa) ← linAddr lbs a
+        if let some B := B then
+          let ek ← mkEq e (← mkAdd B (mkRawNatLit (c - k)))
+          if k ≤ c then
+            let lam ← withLocalDeclD `y (mkConst ``Nat) fun y => do
+              mkLambdaFVars #[y] (← mkAppM ``HSub.hSub #[y, b])
+            let congr ← mkAppM ``congrArg #[lam, pa]
+            let step := mkAppN (mkConst ``addr_sub_off)
+              #[B, mkRawNatLit c, mkRawNatLit k, ← mkEqRefl (mkConst ``Bool.true)]
+            return (some B, c - k, ← mkExpectedTypeHint (← mkAppM ``Eq.trans #[congr, step]) ek)
+          let mut bestK := 0
+          let mut hK : Option Expr := none
+          for (x, K, h) in lbs do
+            if x == B && K ≥ bestK && k ≤ K + c then bestK := K; hK := some h
+          if let some h := hK then
+            let nb ← mkAppM ``HSub.hSub #[B, mkRawNatLit bestK]
+            let ek ← mkEq e (← mkAdd nb (mkRawNatLit (bestK + c - k)))
+            let lam ← withLocalDeclD `y (mkConst ``Nat) fun y => do
+              mkLambdaFVars #[y] (← mkAppM ``HSub.hSub #[y, b])
+            let congr ← mkAppM ``congrArg #[lam, pa]
+            let step := mkAppN (mkConst ``addr_sub_lb)
+              #[B, mkRawNatLit c, mkRawNatLit k, mkRawNatLit bestK, h, ← mkEqRefl (mkConst ``Bool.true)]
+            return (some nb, bestK + c - k, ← mkExpectedTypeHint (← mkAppM ``Eq.trans #[congr, step]) ek)
   | (``HAdd.hAdd, #[t, _, _, _, a, b]) =>
     if t.isConstOf ``Nat then
       if let some k := evalClosedNat? b then
-        let (B, c, pa) ← linAddr a
+        let (B, c, pa) ← linAddr lbs a
         match B with
         | some B =>
           let pf := mkAppN (mkConst ``addr_lin_add) #[a, b, B, mkRawNatLit c, pa]
@@ -2054,7 +2092,7 @@ partial def linAddr (e : Expr) : MetaM (Option Expr × Nat × Expr) := do
           let ty ← mkEq e (mkRawNatLit (c + k))
           return (none, c + k, ← mkExpectedTypeHint (← mkEqRefl e) ty)
       if let some k := evalClosedNat? a then
-        let (B, c, pb) ← linAddr b
+        let (B, c, pb) ← linAddr lbs b
         if let some B := B then
           let pf := mkAppN (mkConst ``addr_lin_add') #[a, b, B, mkRawNatLit c, pb]
           let ty ← mkEq e (← mkAdd B (mkRawNatLit (c + k)))
@@ -2087,9 +2125,9 @@ def leParts? (t : Expr) : MetaM (Option (Expr × Expr)) := do
   | _ => return none
 
 /-- The linear form of a hypothesis `h : L ≤ R`. -/
-def linHyp (h : Expr) (L R : Expr) : MetaM LinLe := do
-  let (bl, cl, pl) ← linAddr L
-  let (br, cr, pr) ← linAddr R
+def linHyp (lbs : Array (Expr × Nat × Expr)) (h : Expr) (L R : Expr) : MetaM LinLe := do
+  let (bl, cl, pl) ← linAddr lbs L
+  let (br, cr, pr) ← linAddr lbs R
   let pf := mkAppN (mkConst ``addr_le_of_congr)
     #[L, R, ← linExpr (bl, cl), ← linExpr (br, cr), pl, pr, h]
   return ⟨(bl, cl), (br, cr), pf⟩
@@ -2128,19 +2166,19 @@ def proveLinLe (hs : Array LinLe) (l r : Option Expr × Nat) : MetaM (Option (Op
 atomic facts `hs` (and, at the top, one case split on a disjunctive fact of `ors`).
 `some (some pf)`: proved; `some none`: refuted (every disjunct contradicts its own offsets);
 `none`: unknown. -/
-partial def proveAddr (hs : Array LinLe) (t : Expr) : MetaM (Option (Option Expr)) := do
+partial def proveAddr (lbs : Array (Expr × Nat × Expr)) (hs : Array LinLe) (t : Expr) : MetaM (Option (Option Expr)) := do
   let t := t.consumeMData
   if let some (P, Q) := t.app2? ``Or then
-    let rp ← proveAddr hs P
+    let rp ← proveAddr lbs hs P
     if let some (some pf) := rp then return some (some (mkApp3 (mkConst ``Or.inl) P Q pf))
-    let rq ← proveAddr hs Q
+    let rq ← proveAddr lbs hs Q
     if let some (some pf) := rq then return some (some (mkApp3 (mkConst ``Or.inr) P Q pf))
     if rp == some none && rq == some none then return some none
     return none
   if let some (ty, L, R) := t.eq? then
     unless ty.isConstOf ``Nat do return none
-    let (bl, cl, pl) ← linAddr L
-    let (br, cr, pr) ← linAddr R
+    let (bl, cl, pl) ← linAddr lbs L
+    let (br, cr, pr) ← linAddr lbs R
     unless sameBase bl br do return none
     unless cl == cr do return some none
     let h ← mkEqRefl (mkConst ``Bool.true)
@@ -2150,8 +2188,8 @@ partial def proveAddr (hs : Array LinLe) (t : Expr) : MetaM (Option (Option Expr
     return some (some (mkAppN (mkConst ``addr_eq_congr)
       #[L, R, ← linExpr (bl, cl), ← linExpr (br, cr), pl, pr, core]))
   let some (L, R) ← leParts? t | return none
-  let (bl, cl, pl) ← linAddr L
-  let (br, cr, pr) ← linAddr R
+  let (bl, cl, pl) ← linAddr lbs L
+  let (br, cr, pr) ← linAddr lbs R
   match ← proveLinLe hs (bl, cl) (br, cr) with
   | some (some core) =>
     return some (some (mkAppN (mkConst ``addr_le_congr)
@@ -2176,16 +2214,26 @@ def addrDisch (g : MVarId) : MetaM (Option Bool) := g.withContext do
   let mut hs : Array LinLe := #[]
   let mut ors : Array (Expr × Expr × Expr) := #[]
   let goalFVars := (collectFVars {} t).fvarSet
+  -- literal lower bounds `K ≤ x` (a frame's `4248 ≤ sp`): they make `x - k` an offset of the base `x - K`
+  let mut lbs : Array (Expr × Nat × Expr) := #[]
   for d in ← getLCtx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
     let fv := (collectFVars {} ty).fvarSet
     unless fv.toList.any goalFVars.contains do continue
     if let some (L, R) ← leParts? ty then
-      hs := hs.push (← linHyp d.toExpr L R)
+      if let some K := evalClosedNat? L then
+        if (evalClosedNat? R).isNone then lbs := lbs.push (R, K, d.toExpr)
+  for d in ← getLCtx do
+    if d.isImplementationDetail then continue
+    let ty ← instantiateMVars d.type
+    let fv := (collectFVars {} ty).fvarSet
+    unless fv.toList.any goalFVars.contains do continue
+    if let some (L, R) ← leParts? ty then
+      hs := hs.push (← linHyp lbs d.toExpr L R)
     else if let some (P, Q) := ty.consumeMData.app2? ``Or then
       if (← leParts? P).isSome && (← leParts? Q).isSome then ors := ors.push (d.toExpr, P, Q)
-  match ← proveAddr hs t with
+  match ← proveAddr lbs hs t with
   | some (some pf) =>
     trace[janus.addr] "proved {t}"
     g.assign (← mkExpectedTypeHint pf t); return some true
@@ -2198,10 +2246,10 @@ def addrDisch (g : MVarId) : MetaM (Option Bool) := g.withContext do
     let some (LP, RP) ← leParts? P | continue
     let some (LQ, RQ) ← leParts? Q | continue
     let r ← withLocalDeclD `hp P fun hp => do
-      let rp ← proveAddr (hs.push (← linHyp hp LP RP)) t
+      let rp ← proveAddr lbs (hs.push (← linHyp lbs hp LP RP)) t
       let some (some pp) := rp | return none
       withLocalDeclD `hq Q fun hq => do
-        let rq ← proveAddr (hs.push (← linHyp hq LQ RQ)) t
+        let rq ← proveAddr lbs (hs.push (← linHyp lbs hq LQ RQ)) t
         let some (some pq) := rq | return none
         let motive := t
         return some (mkAppN (mkConst ``Or.elim) #[P, Q, motive, h,
