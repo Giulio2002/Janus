@@ -837,6 +837,14 @@ theorem writeLE_comm (m : Memory) {a n b k : Nat} (v w : Nat)
     (m.writeLE a n v).readLE b k = v / 256 ^ (b - a) % 256 ^ k :=
   Janus.Arm64.Memory.readLE_writeLE_inside m v h1 h2
 
+/-- `toNat` of a bit-vector literal `(k : BitVec n)` (the `OfNat` form, e.g. the `0 : BitVec 128` of a
+register that `janus_intro` states, or of a callee's precondition). `no_index` makes it match the
+literal whatever form its numeral argument has (a raw literal as the elaborator writes it, or an
+`OfNat.ofNat Nat k _` application): the core simp lemmas (`BitVec.toNat_zero`, `BitVec.toNat_ofNat`)
+are about `BitVec.ofNat` / `0#w` and do not fire on it. -/
+@[janus64_exec, janus64_post] theorem bv_toNat_lit64 (n k : Nat) :
+    BitVec.toNat (no_index (OfNat.ofNat k : BitVec n)) = k % 2 ^ n := Eq.symm (Eq.symm rfl)
+
 /-- A zero-width read (see `Janus.Tactic.ReadOverlap`, whose results can contain one). -/
 @[janus64_exec, janus64_post] theorem readLE_zero_eq (m : Memory) (a : Nat) : m.readLE a 0 = 0 :=
   Janus.Arm64.Memory.readLE_zero_eq m a
@@ -2149,7 +2157,10 @@ elab "janus64_intro " h:ident : tactic => withMainContext do
     return g'
   g ← g.withContext do
     let lhs := mkApp (← mkAppM ``State.xmm #[s]) (mkNatLit 15)
-    let zTy ← mkEq lhs (← mkAppOptM ``OfNat.ofNat #[mkApp (mkConst ``BitVec) (mkNatLit 128), mkNatLit 0, none])
+    -- the literal `0 : BitVec 128` exactly as the elaborator writes it: the numeral argument of
+    -- `OfNat.ofNat` is a RAW literal (`mkNatLit 0` would be `OfNat.ofNat Nat 0 _`, a different term
+    -- that simp lemmas and omega do not identify with the elaborated `0#128`)
+    let zTy ← mkEq lhs (← mkAppOptM ``OfNat.ofNat #[mkApp (mkConst ``BitVec) (mkNatLit 128), mkRawNatLit 0, none])
     let zPf ← mkExpectedTypeHint (← mkAppM ``GoABI.CallSetup.zero #[hE]) zTy
     let (_, g') ← (← g.assert `h_x15 zTy zPf).intro1P
     return g'

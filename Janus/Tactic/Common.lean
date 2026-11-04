@@ -2024,6 +2024,9 @@ theorem addr_le_hyp {x y A B a b : Nat} (hd : x + A ≤ y + B) (h : Nat.ble (a +
     x + a ≤ y + b := by
   have := Nat.le_of_ble_eq_true h; omega
 
+theorem addr_lit_le {x n c : Nat} (h : Nat.ble n c = true) : n ≤ x + c :=
+  Nat.le_trans (Nat.le_of_ble_eq_true h) (Nat.le_add_left c x)
+
 theorem addr_le_congr {L R l r : Nat} (pL : L = l) (pR : R = r) (h : l ≤ r) : L ≤ R := pL ▸ pR ▸ h
 theorem addr_eq_congr {L R l r : Nat} (pL : L = l) (pR : R = r) (h : l = r) : L = R := pL ▸ pR ▸ h
 theorem addr_le_of_congr {L R l r : Nat} (pL : L = l) (pR : R = r) (h : L ≤ R) : l ≤ r := pL ▸ pR ▸ h
@@ -2145,6 +2148,12 @@ def proveLinLe (hs : Array LinLe) (l r : Option Expr × Nat) : MetaM (Option (Op
       | none =>
         return some (some (mkAppN (mkConst ``Nat.le_of_ble_eq_true) #[mkRawNatLit l.2, mkRawNatLit r.2, h]))
     return some none
+  -- a literal below the offset of a natural number: `n ≤ x + c` when `n ≤ c`
+  if l.1.isNone then
+    if let some x := r.1 then
+      if l.2 ≤ r.2 then
+        return some (some (mkAppN (mkConst ``addr_lit_le)
+          #[x, mkRawNatLit l.2, mkRawNatLit r.2, ← mkEqRefl (mkConst ``Bool.true)]))
   -- `x + A ≤ y + B` gives `x + a ≤ y + b` when `a + B ≤ A + b`
   let (some x, a) := l | return none
   let (some y, b) := r | return none
@@ -2157,6 +2166,14 @@ def proveLinLe (hs : Array LinLe) (l r : Option Expr × Nat) : MetaM (Option (Op
       return some (some (mkAppN (mkConst ``addr_le_hyp)
         #[x, y, mkRawNatLit A, mkRawNatLit B, mkRawNatLit a, mkRawNatLit b, h.pf, hb]))
   return none
+
+register_option janus.addr.refute : Bool := {
+  defValue := true
+  descr := "janus_run: in the linear address decider (`addrDisch`), a side condition whose negation follows from \
+    the offsets (`2^64 - 48 + sp < 2^64` given `4248 ≤ sp`) fails at once instead of after a failed `omega` \
+    through every stage. The side condition is false in every model of the hypotheses, so `omega` could prove it \
+    only from inconsistent hypotheses."
+}
 
 /-- Prove an atomic goal `L ≤ R` / `L < R` / `L = R`, or a disjunction of them, from the
 atomic facts `hs` (and, at the top, one case split on a disjunctive fact of `ors`).
@@ -2190,7 +2207,13 @@ partial def proveAddr (lbs : Array (Expr × Nat × Expr)) (hs : Array LinLe) (t 
   | some (some core) =>
     return some (some (mkAppN (mkConst ``addr_le_congr)
       #[L, R, ← linExpr (bl, cl), ← linExpr (br, cr), pl, pr, core]))
-  | r => return r.map fun _ => none
+  | some none => return some none
+  | none =>
+    -- refutation: `r + 1 ≤ l` proves `¬ l ≤ r` (e.g. `2^64 - 48 + sp < 2^64` given `4248 ≤ sp`). The side
+    -- condition is then false, and `omega` would only fail after exploring the whole context.
+    if janus.addr.refute.get (← getOptions) then
+      if let some (some _) ← proveLinLe hs (br, cr + 1) (bl, cl) then return some none
+    return none
 
 /-- `≤`/`<`/`=`, or a disjunction of them. -/
 partial def addrShape (t : Expr) : Bool :=

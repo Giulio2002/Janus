@@ -31,10 +31,10 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (next v : 
     (hwb : WbLiveContract64 (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.gcWriteBarrier1") 4096 R 1) :
     Ensures (Extracted.program.link impl) Extracted.entry [next, v]
-      (fun s => StackGuardOK s 4128 ∧ StackWritable s 4128 16 ∧ (s.regs 4).toNat % 8 = 0 ∧
+      (fun s => StackGuardOK s 4128 ∧ StackWritable s 4128 24 ∧ (s.regs 4).toNat % 8 = 0 ∧
         Extracted.program.DataLoaded s.mem ∧
-        Outside ((s.regs 4).toNat - 4128) 4144 R.rt ∧
-        Apart ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 4128) 4144 ∧ Outside ((s.regs 14).toNat + 16) 8 R.rt ∧
+        Outside ((s.regs 4).toNat - 4128) 4152 R.rt ∧
+        Apart ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 4128) 4152 ∧ Outside ((s.regs 14).toNat + 16) 8 R.rt ∧
         s.mem.accessible flagAddr 4 false = true ∧ Outside nodeType 16 R.rt ∧
         R.ok (Extracted.program.contractAddr "runtime.newobject") [nodeType] ∧
         R.ok (Extracted.program.contractAddr "runtime.gcWriteBarrier1") [1] ∧
@@ -44,7 +44,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (next v : 
         s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = v.toNat ∧
         ∃ b' L', b - 16 ≤ b' ∧ R.inv b' L' (s.regs 14).toNat (view R.rt L' s'.mem) ∧
           InRanges (s'.regs 0).toNat 16 L' ∧
-          MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4128, (s.regs 4).toNat + 16)])) := by
+          MemFrame s.mem s'.mem (R.rt ++ [((s.regs 4).toNat - 4128, (s.regs 4).toNat + 24)])) := by
   intro ret hret s hs ⟨hg, ⟨hb', ha, hw⟩, hal, hd, hout, hga, hgr, hflag, hty, hok1, hok2, hinv, hbud⟩
   janus64_intro hs
   have hgl := hg.load
@@ -58,7 +58,15 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (next v : 
   rw [h_t] at hty hok1
   rw [h_f] at hflag
   janus64_run calls [hnew.pos, hwb]
-  all_goals sorry
+  all_goals janus_split_and
+  all_goals first
+    | janus_frame
+    | (janus_clear_irrel; omega; done)
+    | skip
+  all_goals (try janus64_simp)
+  all_goals refine ⟨by assumption, b - 16, ?_, by omega, ?_, ?_, ?_⟩
+  any_goals (first | exact InRanges.cons_head [] (Nat.le_refl _) (Nat.le_refl _) | skip)
+  all_goals first | janus_live | janus_frame
 
 namespace Witness
 
@@ -101,7 +109,7 @@ def bytes0 (a : Nat) : Arm64.Byte :=
   | none => if a = BUMP + 3 then 0x10 else if a = sp0 + 1 then 0x10 else 0
 
 def mem0 : Memory :=
-  ⟨bytes0, [⟨sp0 - 4128, 4144, true⟩, ⟨g0, 0x100, false⟩, ⟨flagAddr, 8, false⟩, ⟨BUMP, 0x200, true⟩,
+  ⟨bytes0, [⟨sp0 - 4128, 4152, true⟩, ⟨g0, 0x100, false⟩, ⟨flagAddr, 8, false⟩, ⟨BUMP, 0x200, true⟩,
     ⟨HEAP, HSIZE, true⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
 
 def s0 : Amd64.State :=
@@ -142,16 +150,16 @@ theorem inv0 : R.inv 0x400 [] (s0.regs 14).toNat (view R.rt [] s0.mem) := by
 
 theorem rt_eq : R.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64)] := rfl
 
-theorem pre : StackGuardOK s0 4128 ∧ StackWritable s0 4128 16 ∧ (s0.regs 4).toNat % 8 = 0 ∧
+theorem pre : StackGuardOK s0 4128 ∧ StackWritable s0 4128 24 ∧ (s0.regs 4).toNat % 8 = 0 ∧
     Extracted.program.DataLoaded s0.mem ∧
-    Outside ((s0.regs 4).toNat - 4128) 4144 R.rt ∧
-    Apart ((s0.regs 14).toNat + 16) 8 ((s0.regs 4).toNat - 4128) 4144 ∧ Outside ((s0.regs 14).toNat + 16) 8 R.rt ∧
+    Outside ((s0.regs 4).toNat - 4128) 4152 R.rt ∧
+    Apart ((s0.regs 14).toNat + 16) 8 ((s0.regs 4).toNat - 4128) 4152 ∧ Outside ((s0.regs 14).toNat + 16) 8 R.rt ∧
     s0.mem.accessible flagAddr 4 false = true ∧ Outside nodeType 16 R.rt ∧
     R.ok (Extracted.program.contractAddr "runtime.newobject") [nodeType] ∧
     R.ok (Extracted.program.contractAddr "runtime.gcWriteBarrier1") [1] ∧
     R.inv 0x400 [] (s0.regs 14).toNat (view R.rt [] s0.mem) ∧ 16 ≤ 0x400 := by
   refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide⟩, by decide, dataLoaded, ?_, ?_, ?_,
-    by decide, ?_, by decide, ?_, ?_, inv0, by decide⟩
+    by decide, ?_, ?_, ?_, inv0, by decide⟩
   · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
   · simp only [Apart]; decide
   · rw [rt_eq]; simp only [outside_cons, outside_nil, and_true]; decide
@@ -168,10 +176,10 @@ theorem nonvacuous : ∃ (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (ret 
       (Extracted.program.contractAddr "runtime.gcWriteBarrier1") 4096 R 1 ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 7] s ∧
-    (StackGuardOK s 4128 ∧ StackWritable s 4128 16 ∧ (s.regs 4).toNat % 8 = 0 ∧
+    (StackGuardOK s 4128 ∧ StackWritable s 4128 24 ∧ (s.regs 4).toNat % 8 = 0 ∧
       Extracted.program.DataLoaded s.mem ∧
-      Outside ((s.regs 4).toNat - 4128) 4144 R.rt ∧
-      Apart ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 4128) 4144 ∧ Outside ((s.regs 14).toNat + 16) 8 R.rt ∧
+      Outside ((s.regs 4).toNat - 4128) 4152 R.rt ∧
+      Apart ((s.regs 14).toNat + 16) 8 ((s.regs 4).toNat - 4128) 4152 ∧ Outside ((s.regs 14).toNat + 16) 8 R.rt ∧
       s.mem.accessible flagAddr 4 false = true ∧ Outside nodeType 16 R.rt ∧
       R.ok (Extracted.program.contractAddr "runtime.newobject") [nodeType] ∧
       R.ok (Extracted.program.contractAddr "runtime.gcWriteBarrier1") [1] ∧

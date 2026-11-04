@@ -300,6 +300,9 @@ func gitTrackedFiles(checkout, name, rev, subDir string, sb *sandbox) (map[strin
 		return nil, pkgDiag("consumer manifest", fmt.Sprintf("The checkout of %s at %s differs from its pinned revision %s:\n  %s", name, displayPath(checkout), rev, strings.Join(shown, "\n  ")),
 			"Restore it (git -C "+displayPath(checkout)+" checkout "+rev+" -- .) or run lake update "+name+".")
 	}
+	if err := checkFileNames(files, "the dependency "+name); err != nil {
+		return nil, err
+	}
 	return files, nil
 }
 

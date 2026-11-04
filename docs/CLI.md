@@ -357,6 +357,69 @@ A proof about such a program assumes `Program.DataLoaded Extracted.program s.mem
 in memory, inside a non-writable region). `check` regenerates the data along with the words, so
 an edited byte or a dropped object is rejected.
 
+### Named data symbols
+
+A proof that reads a global (a lookup table, an error variable, a type descriptor an `eface`
+carries) needs its address, and the address moves with every rebuild of the binary. So
+`Extracted.lean` names, for **every data symbol the extracted code references** (the symbol
+containing the target of each detected data reference, copied or skipped, writable or read-only,
+and of each `--targets` data object), two constants, right before `entry`'s functions' metadata:
+
+```lean
+/-- `example.com/basic.symPows` (.noptrdata, 64 bytes) -/
+def dataAddr.«example.com/basic.symPows» : Nat := 0x1708e0
+def dataSize.«example.com/basic.symPows» : Nat := 64
+```
+
+* **Naming.** `Extracted.dataAddr.«S»` and `Extracted.dataSize.«S»`, where `S` is the symbol name
+  of the binary's `.symtab` (sized `STT_OBJECT`/`STT_NOTYPE` symbols; the same names `skippedData`
+  and `Program.data` use). The `data` prefix of the generated `Extracted.data` list is not reused.
+  Both ISAs use the same scheme. The values are the symbol's start address and `st_size`, taken
+  from the binary exactly like the code words and data bytes: not the address of the access (a
+  reference into the middle of an array names the whole array).
+* **Fallbacks keep names unique and valid Lean.** A name that two different symbols share
+  (static locals of different files), or that cannot be written in `«…»` (contains `«`, `»`,
+  `/-`, `-/` or control characters), is named `sym@0x<hex address>` instead; a remaining clash gets
+  a `#<index>` suffix. A symbol-less address is never named.
+* **Type descriptors.** The Go linker gives type descriptors no symbol. A reference to a
+  descriptor (the target is in the type region and the bytes are an `internal/abi.Type`: valid
+  kind, power-of-two alignment, printable type string) is named `type:<type string>#<hash>`, as the
+  stub pins identify them (`dataAddr.«type:basic.Pair#118403d1»`). The descriptor's size is not
+  recorded (it depends on the type's kind), so there is **no `dataSize` for a type**. The name is
+  only a label: the address is the one the code computes.
+* **Anonymous data.** A reference to data that no sized symbol covers (a string literal such as a
+  hex-digit table, a compiler-made static array, a static temporary) is named by its **content**:
+  `dataAddr.«.rodata#1a2b3c4d»`, section name and the first 8 hex digits of the SHA-256 of the 16
+  bytes at the referenced address (fewer at the end of the section), in which every aligned 8-byte
+  word that is itself an address in an allocated section is replaced by the 16 bytes it points to
+  (a pointer is layout, its target's content is not). The name therefore survives a rebuild that
+  moves the data, and is the same on arm64 and amd64 for the same constant. It is a label for the
+  exact address the code computes; there is **no `dataSize`** (the object's extent is not in the
+  binary). Equal hashes at different addresses get `#1`, `#2`, … by ascending address (stable
+  only while the binary is). The hash covers only file-backed, non-executable sections other than
+  `.gopclntab`.
+* **Interface variables.** For a referenced 16-byte symbol that is a statically initialised
+  interface value (word 0 a type descriptor or a static `go:itab.*`, word 1 an address in an
+  allocated section; e.g. a sentinel `var ErrX = errors.New("…")` the compiler built at link time),
+  the two words of its link-time image are named `dataAddr.«SYM→type»` and `dataAddr.«SYM→data»`
+  (the pointed-to `errorString`, say). The values are read from the binary's file image like the
+  data bytes. A proof that states the variable's contents uses them:
+  `m.readLE Extracted.dataAddr.«SYM» 8 = Extracted.dataAddr.«SYM→type»` and
+  `m.readLE (Extracted.dataAddr.«SYM» + 8) 8 = Extracted.dataAddr.«SYM→data»`. Only the image is
+  named; whether the variable still holds it at run time is the theorem's precondition.
+* Extractions that reference no symbol keep exactly their earlier bytes.
+* **Trust.** The constants are part of `Extracted.lean`, so `janus check` / `janus verify`
+  regenerate them from the binary and compare byte for byte (an edited address or size is
+  rejected even when the recorded SHA-256 is edited too); the auditor additionally requires every
+  `Extracted.dataAddr.*` / `Extracted.dataSize.*` constant of the imported module to be
+  definitionally equal to the independently elaborated trusted copy. A statement may mention them
+  like `Extracted.entry`; a proof module cannot declare a name with an `Extracted` component.
+  Mentioning an address does not make a writable global's contents trusted: a theorem still states
+  them as a precondition (`m.accessible Extracted.dataAddr.«S» Extracted.dataSize.«S» false = true ∧
+  ∀ k < 20, m.readLE (Extracted.dataAddr.«S» + 8 * k) 8 = 10 ^ k`). See
+  `examples/proofs/SymPows.lean` and `examples/proofs-amd64/SymPows/Proof.lean`.
+* Proofs that write the address as a literal keep working (the constants are extra definitions).
+
 ### Build modes
 
 Some `go build` flags rewrite the compiled code. `extract` (and so `check` and `verify`, which

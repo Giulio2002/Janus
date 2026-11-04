@@ -191,7 +191,7 @@ func frameworkShaOf(files map[string][]byte, keep func(string) bool) string {
 	sort.Strings(paths)
 	h := sha256.New()
 	for _, p := range paths {
-		fmt.Fprintf(h, "%s  %s\n", sha256Hex(normalizeEOL(files[p])), p)
+		fmt.Fprintf(h, "%s  %q\n", sha256Hex(normalizeEOL(files[p])), p)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
