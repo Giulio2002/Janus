@@ -49,7 +49,10 @@ allocator of its own (`Extracted.program.link Witness.AllocW.impl`, `link []`, a
 `{ Extracted.program with … }`, an `∃ impl` inside the statement): the audit rejects it, so a report
 never reads "contract assumed" for a theorem that assumed nothing. Concrete implementations belong in
 `Witness.nonvacuous` / `Witness.returns`, which are checked structurally and reported as `Role: WITNESS`
-(docs/SOUNDNESS.md, "Round 14").
+(docs/SOUNDNESS.md, "Round 14"). A contract may also be assumed about the runtime's own code,
+`Extracted.program.ofImpl impl` (no user code; same discipline), and the one premise allowed on `impl` is
+`ImplApart Extracted.program impl` ("the runtime's code does not overlap the extracted function's code"): see "Internal
+calls" below and docs/SOUNDNESS.md "Round 15".
 
 The list does not change the run semantics. There is no code at a contract address in
 `Extracted.program.segments`, so control reaching it faults with `noCode`, exactly as for a
@@ -151,6 +154,14 @@ precondition; `allocH_intro`/`allocH64_intro` and `heapZero_of_bytes` discharge 
 `FromBig` witnesses are the same pattern written out by hand). The allocator is a model, not the Go
 runtime: the witness shows that the hypotheses are satisfiable, not that the runtime meets them.
 
+**`janus_alloc_witness_ofimpl` / `janus64_alloc_witness_ofimpl`** (same module): the variant for a theorem whose
+contract is about the runtime's own code `Extracted.program.ofImpl impl` and which assumes
+`ImplApart Extracted.program impl` (see "Internal calls"). Same `types := [t₁, …]` argument; the namespace `AllocW`
+holds `impl`, `rt`, `H`, `linked` (the `link` program, for the call setup), `linkedO` (the `ofImpl` program),
+`hap : ImplApart Extracted.program impl` (by `decide`: the placement premise a Witness must exhibit) and `hnewO` (the
+contract over `ofImpl impl`, by `janus_run`). The main theorem derives the `link` contract it executes with
+`NewobjectContract.of_codeIn (codeIn_ofImpl_of_apart hap) hnewO`; the audit round (`audit/roundofimpl`) checks both a
+witness exhibiting `hap` (accepted) and one that omits it (rejected, like any hypothesis the witness does not state).
 **Witnessing other contract families (stubs at the program's own contract addresses).** `janus verify`
 requires a non-vacuity witness for every main theorem that assumes runtime contracts
 (docs/SOUNDNESS.md, "Non-vacuity is required"). The stub library places short machine code at the
@@ -389,6 +400,65 @@ the runtime is `toyR [] ok` (type descriptors are read from memory, outside the 
 contracts (`growslice`, `memmove`, `memclr`, `typedmemmove`) follow the same shape: a code definition in
 `LiveSat`/`LiveSatAmd64`, a finishing lemma, and one macro. `examples/rtmisc/proofs/{arm64,amd64}/Cons.lean`
 is a worked example (a function with one `newobject` and one barrier store).
+
+**Copies, clears and `growslice`** (`LiveStubSlice`, `LiveStubSliceAmd64`, `LiveStubGrow`, `LiveStubGrowAmd64`, memory facts in
+`LiveStubMem`). Same recipe, with the request's size pinned by the runtime's `ok` predicate, so the stub is straight-line:
+
+```lean
+theorem hmv : ∀ args, ok mvA args → ∃ d sr, args = [d, sr, 12] := ...
+theorem model_mv : MemmoveLive linked mvA 4096 R := by janus_live_memmove 12 hmv          -- LiveStub.memmoveSeg mvA 12
+theorem model_cl : MemclrNoHeapPointersLive linked clA 4096 R := by janus_live_memclr 12 hcl   -- LiveStub.memclrSeg clA 12
+theorem model_gs : RtLiveContract linked gsA 4096 R growsliceSpec growsliceLive := by
+  janus_live_growslice (et, 1, 0) n c0 num A cap hgs                     -- LiveStub.growsliceSeg gsA ob A cap
+```
+
+An `n`-byte move is `chunkList n` (words, then 4, 2, 1-byte tails); a copy loads every chunk before storing any, so it
+is right for overlapping operands; arm64 copies take at most 13 chunks (`n` up to 104 bytes), amd64 at most 9 (and
+offsets below 128); a clear is stores of zero (no register limit). The `hok` argument must be a *named* theorem with the
+stated type (the tactic applies it to the request). `growslice` is for any element size whose descriptor `(et, size, ptrBytes)` is
+one of the runtime's `tys` (`toyR tys ok`: the descriptor is a runtime-owned range, the runtime knows its `Size_`), a request
+`args = [oldPtr, n, c0, num, et]`, `K = roundupsize (nextslicecap n c0 · size) noscan`, `cap = growCap …`, `cap · size = K`
+(always for size 1 and powers of two), the stub copies the `(n - num) · size` old bytes (at most 11 chunks arm64, 7 amd64);
+`A`, the bump advance, is a multiple of 16 in `[K, 64 K]`, all side conditions are closed numerals proved by `decide`.
+
+Examples with a Witness on both ISAs (`examples/rtmisc/proofs/{arm64,amd64}`, `examples/rtmisc/stubdemo`): `Cons`
+(`newobject` + `gcWriteBarrier1`), `Zero` (`clear(s)`: `MemclrNoHeapPointersLive`), `CopyBytes` (`copy`: `MemmoveLive`),
+`Push` (`append(s, b)` for bytes: `RtLiveContract … growsliceSpec growsliceLive`, element size 1). A main theorem may assume
+`RtLiveContract` only with the framework's own spec and live data (`growsliceSpec growsliceLive` and the `NoAlias`/`Buf`
+variants are on the auditor's named list, `Janus.Tools.Audit.frameworkSpecs`; a built or modified `LiveSpec` is rejected). The
+toy runtime's `TysOK` lets a descriptor lie below the bump cell or between the barrier buffer and the heap (an amd64 binary's
+read-only data is above `0x400000`).
+
+**The non-live allocation contracts** (`StubAlloc`, `StubAllocAmd64`): `NewobjectContract p addr rt stack H`,
+`MallocgcContract`, `MakesliceContract` over a consumer-chosen `rt` (which may include its own type descriptors) and
+the readiness predicates `StubAlloc.NewReadyAt rt heap` / `MallocReadyAt heap` / `MakeReadyAt rt heap` (the heap
+`[heap, heap + 64 KiB)` is writable and zero as the runtime sees it, the request fits 32 KiB). The stub is
+`StubAlloc.heapSeg addr heap` (`MOVZ X0, #heap>>16, LSL #16; RET`; amd64 `StubAllocAmd64.heapSeg`, `MOV EAX, heap; RET`) and
+`janus_newobject heap hrt` / `janus_mallocgc` / `janus_makeslice` (amd64 `janus64_*`) prove the contract at the
+program's own address; `hrt : (heap, heap + 0x10000) ∈ rt`. `StubAlloc.fresh_heap_at` is `AllocSat.fresh_heap` over any `rt`.
+
+**Internal calls (a callee of the same extraction)** (`InternalCall.lean`, `InternalCallAmd64.lean`). `Ensures p …` quantifies
+over return addresses with `RetAddr p ret`, which includes `notCode` (outside *every* segment of `p`); a call from one function
+of an extraction to another returns inside `p`, so `Ensures.toSummary` cannot serve it. The callee's proof needs less: `ret`
+outside the code the callee *executes* (its own segments and the runtime stand-in `impl`). So prove the callee about its own code
+and move the result up:
+
+```lean
+def P0 : Program := (Extracted.program.onlySegments ["callee"]).link impl      -- the callee's own code (+ runtime)
+theorem calleeEns : Ensures P0 calleeEntry args pre post := ...                 -- RetAddr P0 holds for the caller's return site
+theorem hc : CodeIn P0 (Extracted.program.link impl) := codeIn_restrict _ ["callee"] impl (by decide) (by decide)
+def S := Ensures.toSummaryIn calleeEns (by decide) hc          -- amd64: also `(hlen : args.length ≤ numIntRegs)`
+-- in the caller: janus_run … calls [S]     (precondition: RetAddr P0 X30 ∧ ArgsFrom s 0 args ∧ pre; postcondition:
+--  sp/g/fp/platform restored ∧ post s s')
+```
+
+The side conditions of `codeIn_restrict` (segments pairwise apart, no stub or exit address on code) are `decide`. The callee's
+`post` must say what the caller needs of memory (a summary's post is all the caller learns: add `s'.mem = s.mem` or a `MemFrame`).
+Runtime contracts are hypotheses about the program with **no user code**, `Program.ofImpl P impl = {P with segments := impl}`
+(state both the callee's and the caller's theorem over it); `….of_codeIn` with `codeIn_ofImpl` moves a contract to
+`(P.onlySegments names).link impl` and to `P.link impl` (`NewobjectLiveContract.of_codeIn`, `MemmoveLive.of_codeIn`,
+`RtLiveContract.of_codeIn`, `NewobjectContract.of_codeIn`, …, and the `…64` twins). The other direction (a contract about the
+whole program to one about the callee's code) is not sound for an arbitrary `impl`, which may jump into the extraction's code.
 
 **From `Ensures` to a callee summary** (`Janus.Tactic.Bridge`, `Janus.Amd64.Bridge`). `janus_run … calls [S]`
 and `Summary.of_codeIn` take `S : Summary p a pre post`, while a function theorem is stated as `Ensures`

@@ -47,9 +47,30 @@ abbrev Tys := List (Nat × Nat × Nat)
 def toyRt (tys : Tys) : List (Nat × Nat) :=
   [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64)] ++ tys.map fun t => (t.1, t.1 + 16)
 
-/-- The descriptors lie below the bump cell and their fields are words. -/
+/-- The descriptors lie below the bump cell, or between the barrier buffer and the heap (a binary's
+read-only data may sit on either side of `BUMP`), and their fields are words. -/
 def TysOK (tys : Tys) : Prop :=
-  ∀ t ∈ tys, t.1 + 16 ≤ BUMP ∧ t.2.1 < 2 ^ 64 ∧ t.2.2 < 2 ^ 64
+  ∀ t ∈ tys, (t.1 + 16 ≤ BUMP ∨ (WBUF + 64 ≤ t.1 ∧ t.1 + 16 ≤ HEAP)) ∧ t.2.1 < 2 ^ 64 ∧ t.2.2 < 2 ^ 64
+
+/-- A descriptor lies below the heap. -/
+theorem TysOK.heap {tys : Tys} (h : TysOK tys) {t : Nat × Nat × Nat} (ht : t ∈ tys) : t.1 + 16 ≤ HEAP := by
+  have := (h t ht).1
+  simp only [BUMP, WBUF, HEAP] at *
+  omega
+
+/-- A descriptor is apart from the bump cell. -/
+theorem TysOK.bump {tys : Tys} (h : TysOK tys) {t : Nat × Nat × Nat} (ht : t ∈ tys) :
+    t.1 + 16 ≤ BUMP ∨ BUMP + 8 ≤ t.1 := by
+  have := (h t ht).1
+  simp only [BUMP, WBUF, HEAP] at *
+  omega
+
+/-- A descriptor is apart from the barrier buffer. -/
+theorem TysOK.wbuf {tys : Tys} (h : TysOK tys) {t : Nat × Nat × Nat} (ht : t ∈ tys) :
+    t.1 + 16 ≤ WBUF ∨ WBUF + 64 ≤ t.1 := by
+  have := (h t ht).1
+  simp only [BUMP, WBUF, HEAP] at *
+  omega
 
 /-- The toy runtime's invariant. -/
 def toyInv (tys : Tys) (b : Nat) (L : List (Nat × Nat)) (_g : Nat) (v : Memory) : Prop :=
@@ -116,13 +137,14 @@ theorem toyInv.frame {tys : Tys} (hty : TysOK tys) {b : Nat} {L : List (Nat × N
     simp only [outside_cons, outside_nil, and_true]; omega
   have hout' : ∀ a k, WBUF + 64 ≤ a → Outside a k [(WBUF, WBUF + 8 * n)] := fun a k h => by
     simp only [outside_cons, outside_nil, and_true]; omega
+  have hout2 : ∀ a k, (a + k ≤ WBUF ∨ WBUF + 64 ≤ a) → Outside a k [(WBUF, WBUF + 8 * n)] := fun a k h => by
+    simp only [outside_cons, outside_nil, and_true]; omega
   refine ⟨p, ?_, h1, h2, h3, h4, fun i hi hi' => ?_, by rw [hf.accessible]; exact h6,
     by rw [hf.accessible]; exact h7, by rw [hf.accessible]; exact h8, fun t ht => ?_⟩
   · rw [hf.readLE _ _ (hout _ _ (by simp [BUMP, WBUF]))]; exact hp
   · rw [hf.readLE _ _ (hout' _ _ (by simp only [HEAP, WBUF] at *; omega))]; exact h5 i hi hi'
-  · have := hty t ht
-    rw [hf.readLE _ _ (hout _ _ (by simp only [BUMP, WBUF] at *; omega)),
-      hf.readLE _ _ (hout _ _ (by simp only [BUMP, WBUF] at *; omega))]
+  · have := hty.wbuf ht
+    rw [hf.readLE _ _ (hout2 _ _ (by omega)), hf.readLE _ _ (hout2 _ _ (by omega))]
     exact h9 t ht
 
 /-- The type descriptors read the same in memory as in the view. -/
@@ -130,7 +152,7 @@ theorem toy_ty_read {tys : Tys} (hty : TysOK tys) {b : Nat} {L : List (Nat × Na
     (h : toyInv tys b L g (view (toyRt tys) L m)) {t : Nat × Nat × Nat} (ht : t ∈ tys) :
     m.readLE t.1 8 = t.2.1 ∧ m.readLE (t.1 + 8) 8 = t.2.2 := by
   obtain ⟨p, -, -, -, -, hL, -, -, -, -, h9⟩ := h
-  have := hty t ht
+  have := hty.heap ht
   have h1 := h9 t ht
   rw [readLE_view (inRanges_ty ht (n := 8) (by omega)) (outside_live hL (by simp only [BUMP, HEAP, HSIZE] at *; omega))] at h1
   rw [readLE_view (a := t.1 + 8) (InRanges.sub (inRanges_ty ht (n := 16) (by omega)) (by omega) (by omega))
@@ -200,7 +222,8 @@ theorem toy_alloc {tys : Tys} (hty : TysOK tys) {b K A : Nat} {L : List (Nat × 
     · rw [view_accessible, hfr.accessible, ← view_accessible (toyRt tys) L m]; exact hac
     · rw [view_accessible, hfr.accessible, ← view_accessible (toyRt tys) L m]; exact hacB
     · rw [view_accessible, hfr.accessible, ← view_accessible (toyRt tys) L m]; exact hacW
-    · have ht' := hty t ht
+    · have ht' := hty.heap ht
+      have ht'' := hty.bump ht
       have e1 := (toy_ty_read hty (b := b) (L := L) (g := g) (m := m)
         ⟨p, hp, h1, h2, h3, hL, hz, hac, hacB, hacW, hT⟩ ht)
       refine ⟨?_, ?_⟩
