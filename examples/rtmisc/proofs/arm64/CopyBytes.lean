@@ -37,27 +37,39 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat �
         R.inv b L (s.regs 28).toNat (view R.rt L s.mem) ∧
         (∀ r ∈ L, Outside r.1 (r.2 - r.1) [(s.sp.toNat - 4152, s.sp.toNat + 40)]) ∧
         dl.toNat < 2 ^ 63 ∧ sl.toNat < 2 ^ 63 ∧
-        Apart dp.toNat (min dl.toNat sl.toNat) (s.sp.toNat - 4152) 4192 ∧
-        Apart sp.toNat (min dl.toNat sl.toNat) (s.sp.toNat - 4152) 4192 ∧
+        Apart dp.toNat (min sl.toNat dl.toNat) (s.sp.toNat - 4152) 4192 ∧
+        Apart sp.toNat (min sl.toNat dl.toNat) (s.sp.toNat - 4152) 4192 ∧
         (dp ≠ sp →
           R.ok (Extracted.program.contractAddr "runtime.memmove")
-            [dp.toNat, sp.toNat, min dl.toNat sl.toNat] ∧
-          dp.toNat + min dl.toNat sl.toNat ≤ 2 ^ 48 ∧ sp.toNat + min dl.toNat sl.toNat ≤ 2 ^ 48 ∧
-          s.mem.accessible dp.toNat (min dl.toNat sl.toNat) true = true ∧
-          s.mem.accessible sp.toNat (min dl.toNat sl.toNat) false = true ∧
-          (InRanges dp.toNat (min dl.toNat sl.toNat) L ∨
-            Outside dp.toNat (min dl.toNat sl.toNat) R.rt)))
-      (fun s s' => (s'.regs 0).toNat = min dl.toNat sl.toNat ∧
-        Mem.Copied s.mem s'.mem dp.toNat sp.toNat (min dl.toNat sl.toNat) ∧
+            [dp.toNat, sp.toNat, min sl.toNat dl.toNat] ∧
+          dp.toNat + min sl.toNat dl.toNat ≤ 2 ^ 48 ∧ sp.toNat + min sl.toNat dl.toNat ≤ 2 ^ 48 ∧
+          s.mem.accessible dp.toNat (min sl.toNat dl.toNat) true = true ∧
+          s.mem.accessible sp.toNat (min sl.toNat dl.toNat) false = true ∧
+          (InRanges dp.toNat (min sl.toNat dl.toNat) L ∨
+            Outside dp.toNat (min sl.toNat dl.toNat) R.rt)))
+      (fun s s' => (s'.regs 0).toNat = min sl.toNat dl.toNat ∧
+        Mem.Copied s.mem s'.mem dp.toNat sp.toNat (min sl.toNat dl.toNat) ∧
         R.inv b L (s.regs 28).toNat (view R.rt L s'.mem) ∧
         MemFrame s.mem s'.mem (R.rt ++ [(s.sp.toNat - 4152, s.sp.toNat + 40),
-          (dp.toNat, dp.toNat + min dl.toNat sl.toNat)])) := by
+          (dp.toNat, dp.toNat + min sl.toNat dl.toNat)])) := by
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb', ha, hw⟩, hout, hga, hgr, hinv, hLs, hdl, hsl, hapd, haps, hdest⟩
   janus_intro hs
   by_cases hdp : dp = sp
   · subst hdp
     janus_run
+    refine ⟨rfl, fun i hi => ?_, RtInv.inv_frame (ws := [(s.sp.toNat - 4152, s.sp.toNat + 40)])
+      (by janus_frame)
+      (fun r hr => by
+        simp only [List.mem_singleton] at hr; subst hr
+        have e : s.sp.toNat + 40 - (s.sp.toNat - 4152) = 4192 := by omega
+        simp only [e]; exact hout) hinv, by janus_frame⟩
+    have hf : MemFrame s.mem _ [(s.sp.toNat - 4152, s.sp.toNat + 40)] := by janus_frame
+    refine hf.bytes ?_
+    unfold Apart at hapd
+    simp only [Janus.outside_cons, Janus.outside_nil, and_true]
+    omega
   · obtain ⟨hok, hb48d, hb48s, haccd, haccs, hd2⟩ := hdest hdp
     janus_run calls [hm]
+    all_goals first | rfl | exact ⟨by assumption, by assumption, by assumption, by janus_frame⟩
 
 end Proof

@@ -52,10 +52,18 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat �
   · have hl0 : s.regs 1 = 0#64 := by
       rw [harg1]; apply BitVec.eq_of_toNat_eq; simpa using h0
     janus_run
+    · exact ⟨fun i hi => by omega, RtInv.inv_frame (ws := [(s.sp.toNat - 4136, s.sp.toNat + 16)]) (by janus_frame)
+        (fun r hr => by
+          simp only [List.mem_singleton] at hr; subst hr
+          have e : s.sp.toNat + 16 - (s.sp.toNat - 4136) = 4152 := by omega
+          simp only [e]; exact hout) hinv, by janus_frame⟩
   · obtain ⟨hok, hb48, hacc, hap, hd2⟩ := hdest (by omega)
     janus_run calls [hz]
+    exact ⟨by assumption, by assumption, by janus_frame⟩
 
 namespace Witness
+
+instance (a n b k : Nat) : Decidable (Apart a n b k) := by unfold Apart; infer_instance
 
 set_option maxRecDepth 100000
 

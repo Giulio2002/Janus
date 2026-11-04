@@ -200,3 +200,115 @@ macro "janus64_alloc_witness " "types" " := " "[" tys:term,* "]" : command =>
         by simp only [heap]; omega, Janus.Arm64.Memory.accessible_mono _ hacc (Nat.le_refl _) (by omega),
         fun _ => by decide, fun _ _ => by decide, fun _ => fun i hi => hz' i (by omega), hle⟩
     end AllocW)
+
+open Lean in
+set_option hygiene false in
+/-- arm64: like `janus_alloc_witness`, but the contract `hnewO` is about the runtime's own code `Extracted.program.ofImpl impl` (an internal call: the runtime is a separate program), together with `hap : ImplApart Extracted.program impl`. -/
+macro "janus_alloc_witness_ofimpl " "types" " := " "[" tys:term,* "]" : command =>
+  `(namespace AllocW
+    open Janus Janus.Arm64 Janus.GoABI Janus.Tactic Janus.Spec Janus.Contracts
+    open Janus.Contracts.AllocWitness (heap allocRt allocH heapCode)
+
+    def tys : List Nat := [$[(janus_eval% $tys)],*]
+    def cA : Nat := janus_eval% (Extracted.program.contractAddr "runtime.newobject")
+    def impl : List Segment := [{ name := "witness.newobject", base := cA, words := heapCode }]
+    def rt : List (Nat × Nat) := allocRt tys
+    def H : RtReady := allocH rt
+    /-- The linked program, as one closed constant. -/
+    def linked : Program := Extracted.program.link impl
+    /-- The runtime's own code as one closed program constant. -/
+    def linkedO : Program := Extracted.program.ofImpl impl
+    /-- The runtime's code does not overlap the extracted function's code. -/
+    theorem hap : ImplApart Extracted.program impl := by decide
+
+    theorem addr : Extracted.program.contractAddr "runtime.newobject" = cA := by decide
+
+    theorem hnewO : NewobjectContract (Extracted.program.ofImpl impl)
+        (Extracted.program.contractAddr "runtime.newobject") rt 4096 H := by
+      rw [addr]
+      intro s hpc hpre
+      obtain ⟨⟨⟨h30a, h30b, _, _, _, _, _⟩, _, _⟩, typ, hargs, hin, hsz, hacc, hz⟩ := hpre
+      simp only [List.cons.injEq, and_true] at hargs
+      subst hargs
+      change ReachesRet linkedO _ s _
+      janus_run
+      refine ⟨BitVec.ofNat 64 heap, s.regs, s.flags, s.vregs, s.mem, s.excl, s.exclPass, ?_,
+        ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun hpos => ?_⟩
+      · simp only [retStateX]; rw [Janus.Contracts.AllocWitness.callRegs_eq]; rfl
+      · unfold typSize at hsz
+        rw [readLE_rtView (hin.sub (Nat.le_refl _) (by omega))] at hsz
+        change typSize s.mem (s.regs 0).toNat ≤ 32768 at hsz
+        have hb := blockSize_le_maxSmallSize (typSize s.mem (s.regs 0).toNat)
+          (typNoscan s.mem (s.regs 0).toNat) hsz
+        have hle : typSize s.mem (s.regs 0).toNat ≤
+            blockSize (typSize s.mem (s.regs 0).toNat) (typNoscan s.mem (s.regs 0).toNat) :=
+          Janus.Contracts.AllocSat.le_blockSize _ _
+        simp only [maxSmallSize] at hb
+        have hheap : (BitVec.ofNat 64 heap).toNat = heap := by decide
+        rw [hheap]
+        refine ⟨⟨(heap, heap + 0x10000), Janus.Contracts.AllocWitness.heap_mem _, Nat.le_refl _,
+            by simp only [heap]; omega⟩,
+          by simp only [heap]; omega, ?_, fun _ => by decide, fun _ _ => by decide, fun _ => ?_, hle⟩
+        · rw [rtView_accessible] at hacc
+          exact Memory.accessible_mono _ hacc (Nat.le_refl _) (by omega)
+        · have := ZeroBytes.of_rtView hz ⟨(heap, heap + 0x10000),
+            Janus.Contracts.AllocWitness.heap_mem _, Nat.le_refl _, Nat.le_refl _⟩
+          exact fun i hi => this i (by omega)
+    end AllocW)
+
+open Lean in
+set_option hygiene false in
+/-- amd64 twin of `janus_alloc_witness_ofimpl`. -/
+macro "janus64_alloc_witness_ofimpl " "types" " := " "[" tys:term,* "]" : command =>
+  `(namespace AllocW
+    open Janus.Amd64 Janus.Amd64.GoABI Janus.Amd64.Tactic Janus.Tactic Janus.Spec Janus.Contracts
+    open Janus (InRanges Outside outside_cons outside_nil MemFrame)
+    open Janus.Contracts.AllocWitness (heap allocRt allocH64 heapCode64)
+    open Janus.Contracts.AllocSatAmd64 (ret_of)
+    open Janus.Contracts.AllocSat (le_blockSize)
+
+    def tys : List Nat := [$[(janus_eval% $tys)],*]
+    def cA : Nat := janus_eval% (Extracted.program.contractAddr "runtime.newobject")
+    def impl : List Janus.Amd64.Segment := [{ name := "witness.newobject", base := cA, bytes := heapCode64 }]
+    def rt : List (Nat × Nat) := allocRt tys
+    def H : RtReady := allocH64 rt
+    /-- The linked program, as one closed constant. -/
+    def linked : Janus.Amd64.Program := Extracted.program.link impl
+    /-- The runtime's own code as one closed program constant. -/
+    def linkedO : Janus.Amd64.Program := Extracted.program.ofImpl impl
+    /-- The runtime's code does not overlap the extracted function's code. -/
+    theorem hap : Janus.Amd64.ImplApart Extracted.program impl := by decide
+
+    theorem addr : Extracted.program.contractAddr "runtime.newobject" = cA := by decide
+
+    theorem hnewO : NewobjectContract64 (Extracted.program.ofImpl impl)
+        (Extracted.program.contractAddr "runtime.newobject") rt 4096 H := by
+      rw [addr]
+      intro s hpc hpre
+      obtain ⟨⟨⟨hra, hal, _, _, _⟩, _, _⟩, hr, typ, hargs, hin, hsz⟩ := hpre
+      simp only [List.cons.injEq, and_true] at hargs
+      subst hargs
+      change ReachesRet linkedO _ s _
+      janus64_run
+      refine ⟨BitVec.ofNat 64 heap, _, _, _, _, _, _, _, ret_of s _ [BitVec.ofNat 64 heap]
+        (by simp [retAddrOf]) (by simp [setRegF]) (by simp [setRegF]) (by simp [setRegF])
+        (by simp [setRegF, heap]) (by simp) (by simp) rfl rfl rfl rfl rfl,
+        ⟨fun _ _ _ => rfl, fun _ _ _ => rfl⟩, fun _ => ?_⟩
+      unfold typSize at hsz
+      rw [readLE_rtView (hin.sub (Nat.le_refl _) (by omega))] at hsz
+      change typSize s.mem (s.regs 0).toNat ≤ 32768 at hsz
+      have hb := blockSize_le_maxSmallSize (typSize s.mem (s.regs 0).toNat)
+        (typNoscan s.mem (s.regs 0).toNat) hsz
+      simp only [maxSmallSize] at hb
+      have hle := le_blockSize (typSize s.mem (s.regs 0).toNat) (typNoscan s.mem (s.regs 0).toNat)
+      have hheap : (BitVec.ofNat 64 heap).toNat = heap := by decide
+      rw [hheap]
+      obtain ⟨hacc, hz⟩ := hr
+      rw [rtView_accessible] at hacc
+      have hz' := ZeroBytes.of_rtView hz ⟨(heap, heap + 0x10000),
+        Janus.Contracts.AllocWitness.heap_mem _, Nat.le_refl _, Nat.le_refl _⟩
+      refine ⟨⟨(heap, heap + 0x10000), Janus.Contracts.AllocWitness.heap_mem _, Nat.le_refl _,
+          by simp only [heap]; omega⟩,
+        by simp only [heap]; omega, Janus.Arm64.Memory.accessible_mono _ hacc (Nat.le_refl _) (by omega),
+        fun _ => by decide, fun _ _ => by decide, fun _ => fun i hi => hz' i (by omega), hle⟩
+    end AllocW)

@@ -113,4 +113,67 @@ theorem r11 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : 
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
 
+/-- CONTROL: the placement premise may come after the contract (position is irrelevant). -/
+theorem ctl4 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hnew : NewobjectContract (Extracted.program.ofImpl impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H)
+    (hap : ImplApart Extracted.program impl) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+
+namespace Shadow
+/-- A look-alike defined by the consumer: trivially true. -/
+def ImplApart (_P : Program) (_impl : List Segment) : Prop := True
+
+/-- R12: the consumer's own `ImplApart` (shadowing the name). -/
+theorem r12 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hap : ImplApart Extracted.program impl)
+    (hnew : NewobjectContract (Extracted.program.ofImpl impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+end Shadow
+
+/-- R13: the placement predicate about a term built from `impl`, not the variable. -/
+theorem r13 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hap : ImplApart Extracted.program (impl ++ []))
+    (hnew : NewobjectContract (Extracted.program.ofImpl impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+
+/-- R14: the placement predicate for another variable than the statement's. -/
+theorem r14 (impl impl2 : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hap : ImplApart Extracted.program impl2)
+    (hnew : NewobjectContract (Extracted.program.ofImpl impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+
+/-- R15: the contract is about another variable's runtime code than the statement's. -/
+theorem r15 (impl impl2 : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hap : ImplApart Extracted.program impl)
+    (hnew : NewobjectContract (Extracted.program.ofImpl impl2)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+
+/-- R16: the negated placement predicate. -/
+theorem r16 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hap : ¬ ImplApart Extracted.program impl)
+    (hnew : NewobjectContract (Extracted.program.ofImpl impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+
+/-- R17: the placement predicate under a quantifier. -/
+theorem r17 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hap : ∀ n : Nat, n = n → ImplApart Extracted.program impl)
+    (hnew : NewobjectContract (Extracted.program.ofImpl impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+
+/-- R18: the placement premise is the only mention of `impl` outside link/ofImpl but the statement
+program is `ofImpl`'s sibling with extra segments (`link` of an appended list). -/
+theorem r18 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hap : ImplApart Extracted.program impl)
+    (hnew : NewobjectContract (Extracted.program.ofImpl (impl ++ Impl0))
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+
 end Proof
