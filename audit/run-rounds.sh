@@ -55,7 +55,11 @@ if [ "${JANUS_GATE_PREBUILT:-}" = 1 ]; then
   [ -x audit/bin/janus-rounds ] || { echo "JANUS_GATE_PREBUILT=1 but audit/bin/janus-rounds is missing"; exit 1; }
 else
   CGO_ENABLED=0 go build -o audit/bin/janus-rounds ./cmd/janus || exit 1
-  memguard_lake build Janus Janus.Tools.Audit janus-audit >/dev/null || { echo "lake build failed (fix the Lean library first)"; exit 1; }
+  # Every target any round needs, built once: rounds run with JANUS_AUDIT_PREBUILT=1 and never build (a concurrent lake build rewrites
+  # .lake/build/lib/lean under the other lanes). r10: janus-oracle-amd64 and janus-decode (kept apart from .lake/build, which janus
+  # runs may prune of extra module outputs).
+  memguard_lake build Janus Janus.Tools.Audit janus-audit janus-oracle-amd64 janus-decode >/dev/null || { echo "lake build failed (fix the Lean library first)"; exit 1; }
+  cp -f .lake/build/bin/janus-decode audit/bin/janus-decode-prebuilt.new && mv -f audit/bin/janus-decode-prebuilt.new audit/bin/janus-decode-prebuilt || exit 1
   [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null || exit 1
   { [ -f artifacts/examples-amd64 ] && [ -d artifacts/amd64/HexDigit ] && [ -d artifacts/amd64/Add ]; } ||
     bash scripts/build-examples-amd64.sh >/dev/null 2>&1 || exit 1

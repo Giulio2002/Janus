@@ -14,7 +14,9 @@ export PATH=/usr/local/go/bin:$PATH
 R=audit/round11
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
+# JANUS_AUDIT_PREBUILT=1 (audit/run-rounds.sh built everything once): no build here (a concurrent lake build rewrites the framework
+# under the other lanes: "the Janus framework build changed after the trusted compile").
+[ "${JANUS_AUDIT_PREBUILT:-}" = 1 ] || lake build Janus Janus.Tools.Audit >/dev/null || { echo "lake build failed"; exit 1; }
 [ -f artifacts/examples-arm64 ] || scripts/build-examples.sh >/dev/null
 W=$R/work/rows; rm -rf "$W"; mkdir -p "$W"
 T="$(mktemp -d "${TMPDIR:-/tmp}/janus-round11.XXXXXX")" || exit 1

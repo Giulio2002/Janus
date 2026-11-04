@@ -16,7 +16,12 @@ export PATH=/usr/local/go/bin:$PATH
 R=audit/round10
 J="$root/$R/bin/janus"; mkdir -p "$(dirname "$J")"
 CGO_ENABLED=0 go build -o "$J" ./cmd/janus || exit 1
-lb="$(lake build Janus Janus.Tools.Audit janus-audit janus-oracle-amd64 2>&1)" || { echo "lake build failed:"; tail -30 <<<"$lb"; exit 1; }
+# JANUS_AUDIT_PREBUILT=1 (audit/run-rounds.sh built everything once, janus-oracle-amd64 included): no build here.
+if [ "${JANUS_AUDIT_PREBUILT:-}" = 1 ]; then
+  [ -x .lake/build/bin/janus-oracle-amd64 ] || { echo "JANUS_AUDIT_PREBUILT=1 but .lake/build/bin/janus-oracle-amd64 is missing"; exit 1; }
+else
+  lb="$(lake build Janus Janus.Tools.Audit janus-audit janus-oracle-amd64 2>&1)" || { echo "lake build failed:"; tail -30 <<<"$lb"; exit 1; }
+fi
 # janus-decode: see scripts/lib/gate-decoder.sh (inside the gate it is the one pre-lake saved; a missing one fails here)
 . "$root/scripts/lib/gate-decoder.sh"
 DEC="$(gate_decoder "$root")" || exit 1
