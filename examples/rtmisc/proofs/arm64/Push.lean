@@ -124,6 +124,24 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat �
     have hin' : InRanges r0.toNat r2.toNat R.rt := by simpa using hin
     have hdj2 := InRanges.disjoint hin' hout
     janus_run
+    refine ⟨fun h => absurd h hl, fun _ => ⟨hr2, hin', ?_,
+      ⟨b - roundupsize (nextslicecap (len.toNat + 1) cap.toNat) true,
+        L ++ [(r0.toNat, r0.toNat + r2.toNat)], ?_, ?_⟩, ?_⟩⟩
+    · intro i hi
+      rw [Memory.bytes_writeLE_outside _ (by omega), hcp i (by omega)]
+      repeat rw [Memory.bytes_writeLE_outside _ (by omega)]
+    · refine RtInv.inv_frame' (ws := [(r0.toNat + len.toNat, r0.toNat + len.toNat + 1)])
+        (by janus_frame) ?_ hinv2
+      intro r hr
+      simp only [List.mem_singleton] at hr
+      subst hr
+      right
+      exact ⟨(r0.toNat, r0.toNat + r2.toNat), List.mem_append_right _ (List.mem_singleton_self _),
+        by omega, by omega⟩
+    · exact ⟨(r0.toNat, r0.toNat + r2.toNat), List.mem_append_right _ (List.mem_singleton_self _),
+        Nat.le_refl _, Nat.le_refl _⟩
+    · have hst : InRanges (r0.toNat + len.toNat) 1 R.rt := InRanges.sub hin' (by omega) (by omega)
+      janus_frame
 
 namespace Witness
 
