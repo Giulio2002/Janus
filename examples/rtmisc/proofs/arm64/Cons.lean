@@ -42,8 +42,8 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (next v : BitVec
     (hwb : WbLiveContract (Extracted.program.link impl)
       (Extracted.program.contractAddr "runtime.gcWriteBarrier1") 4096 R 1) :
     Ensures (Extracted.program.link impl) Extracted.entry [next, v]
-      (fun s => GuardOK s 4144 ∧ StackOK s 4152 16 ∧ Extracted.program.DataLoaded s.mem ∧
-        Outside (s.sp.toNat - 4152) 4168 R.rt ∧ Apart ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 4152) 4168 ∧
+      (fun s => GuardOK s 4144 ∧ StackOK s 4152 24 ∧ Extracted.program.DataLoaded s.mem ∧
+        Outside (s.sp.toNat - 4152) 4176 R.rt ∧ Apart ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 4152) 4176 ∧
         Outside ((s.regs 28).toNat + 16) 8 R.rt ∧ s.mem.accessible flagAddr 4 false = true ∧
         Outside nodeType 16 R.rt ∧
         R.ok (Extracted.program.contractAddr "runtime.newobject") [nodeType] ∧
@@ -54,7 +54,7 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (next v : BitVec
         s'.mem.readLE ((s'.regs 0).toNat + 8) 8 = v.toNat ∧
         ∃ b' L', b - 16 ≤ b' ∧ R.inv b' L' (s.regs 28).toNat (view R.rt L' s'.mem) ∧
           InRanges (s'.regs 0).toNat 16 L' ∧
-          MemFrame s.mem s'.mem (R.rt ++ [(s.sp.toNat - 4152, s.sp.toNat + 16)])) := by
+          MemFrame s.mem s'.mem (R.rt ++ [(s.sp.toNat - 4152, s.sp.toNat + 24)])) := by
   intro ret hret s hs ⟨⟨hg1, hg2, hg3⟩, ⟨hal, hb', ha, hw⟩, hd, hout, hga, hgr, hflag, hty, hok1, hok2, hinv, hbud⟩
   janus_intro hs
   janus_data hd [hw]
@@ -63,7 +63,15 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (next v : BitVec
   rw [h_t] at hty hok1
   rw [h_f] at hflag
   janus_run calls [hnew.pos, hwb]
-  all_goals sorry
+  all_goals janus_split_and
+  all_goals first
+    | janus_frame
+    | (janus_clear_irrel; omega; done)
+    | skip
+  all_goals (try janus_simp)
+  all_goals refine ⟨by assumption, b - 16, ?_, by omega, ?_, ?_, ?_⟩
+  any_goals (first | exact InRanges.cons_head [] (Nat.le_refl _) (Nat.le_refl _) | skip)
+  all_goals first | janus_live | janus_frame
 
 namespace Witness
 
@@ -107,7 +115,7 @@ def bytes0 (a : Nat) : Byte :=
   | none => if a = BUMP + 3 then 0x10 else 0
 
 def mem0 : Memory :=
-  ⟨bytes0, [⟨sp0 - 4152, 4168, true⟩, ⟨g0, 0x100, false⟩, ⟨flagAddr, 8, false⟩, ⟨BUMP, 0x200, true⟩,
+  ⟨bytes0, [⟨sp0 - 4152, 4176, true⟩, ⟨g0, 0x100, false⟩, ⟨flagAddr, 8, false⟩, ⟨BUMP, 0x200, true⟩,
     ⟨HEAP, HSIZE, true⟩] ++ Extracted.data.map fun d => ⟨d.base, d.bytes.length, false⟩⟩
 
 /-- `Cons(nil, 7)`. -/
@@ -149,8 +157,8 @@ theorem inv0 : R.inv 0x400 [] (s0.regs 28).toNat (view R.rt [] s0.mem) := by
 
 theorem rt_eq : R.rt = [(HEAP, HEND), (BUMP, BUMP + 8), (WBUF, WBUF + 64)] := rfl
 
-theorem pre : GuardOK s0 4144 ∧ StackOK s0 4152 16 ∧ Extracted.program.DataLoaded s0.mem ∧
-    Outside (s0.sp.toNat - 4152) 4168 R.rt ∧ Apart ((s0.regs 28).toNat + 16) 8 (s0.sp.toNat - 4152) 4168 ∧
+theorem pre : GuardOK s0 4144 ∧ StackOK s0 4152 24 ∧ Extracted.program.DataLoaded s0.mem ∧
+    Outside (s0.sp.toNat - 4152) 4176 R.rt ∧ Apart ((s0.regs 28).toNat + 16) 8 (s0.sp.toNat - 4152) 4176 ∧
     Outside ((s0.regs 28).toNat + 16) 8 R.rt ∧ s0.mem.accessible flagAddr 4 false = true ∧
     Outside nodeType 16 R.rt ∧
     R.ok (Extracted.program.contractAddr "runtime.newobject") [nodeType] ∧
@@ -174,8 +182,8 @@ theorem nonvacuous : ∃ (impl : List Segment) (R : RtInv) (b : Nat) (ret : Nat)
       (Extracted.program.contractAddr "runtime.gcWriteBarrier1") 4096 R 1 ∧
     RetAddr (Extracted.program.link impl) ret ∧
     CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [0, 7] s ∧
-    (GuardOK s 4144 ∧ StackOK s 4152 16 ∧ Extracted.program.DataLoaded s.mem ∧
-      Outside (s.sp.toNat - 4152) 4168 R.rt ∧ Apart ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 4152) 4168 ∧
+    (GuardOK s 4144 ∧ StackOK s 4152 24 ∧ Extracted.program.DataLoaded s.mem ∧
+      Outside (s.sp.toNat - 4152) 4176 R.rt ∧ Apart ((s.regs 28).toNat + 16) 8 (s.sp.toNat - 4152) 4176 ∧
       Outside ((s.regs 28).toNat + 16) 8 R.rt ∧ s.mem.accessible flagAddr 4 false = true ∧
       Outside nodeType 16 R.rt ∧
       R.ok (Extracted.program.contractAddr "runtime.newobject") [nodeType] ∧
