@@ -24,6 +24,6 @@ theorem correctness (E : KEnv) :
   obtain ⟨rfl, rfl, rfl⟩ := heff
   apply Janus.Amd64.Kernel.ReturnsK.of_reaches
   janus64_run
-  exact ⟨rfl, BitVec.eq_of_toNat_eq (by simp [BitVec.toNat_ofNat])⟩
+  exact BitVec.eq_of_toNat_eq (by simp [BitVec.toNat_ofNat])
 
 end Proof
