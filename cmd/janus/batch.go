@@ -65,7 +65,7 @@ type batchResults struct {
 }
 
 func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
-	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "allow-no-witness")
+	args, flags := takeBoolFlags(args, "json", "fresh", "unsafe-no-sandbox", "allow-path-deps", "asl", "allow-no-witness", "allow-unchecked-provenance")
 	pos, opts, err := parseArgs(args, "results", "janus-root")
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], usageErr("%v", err))
@@ -73,7 +73,7 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 	if len(pos) != 1 {
 		return jsonFailure(stdout, flags["json"], usageErr("verify-batch takes exactly one requests file"))
 	}
-	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["allow-path-deps"], flags["json"], flags["asl"], flags["allow-no-witness"], stdout, stderr)
+	res, err := verifyBatch(pos[0], opts["janus-root"], flags["fresh"], flags["unsafe-no-sandbox"], flags["allow-path-deps"], flags["json"], flags["asl"], flags["allow-no-witness"], flags["allow-unchecked-provenance"], stdout, stderr)
 	if err != nil {
 		return jsonFailure(stdout, flags["json"], err)
 	}
@@ -100,7 +100,7 @@ func cmdVerifyBatch(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, quiet, asl, allowNoWitness bool, stdout, stderr io.Writer) (*batchResults, error) {
+func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, quiet, asl, allowNoWitness, allowUnchecked bool, stdout, stderr io.Writer) (*batchResults, error) {
 	if err := memGuardConfigErr(); err != nil {
 		return nil, err
 	}
@@ -326,6 +326,7 @@ func verifyBatch(manifestPath, janusRoot string, fresh, unsafe, allowPathDeps, q
 				continue
 			}
 			ws.asl = aslB
+			ws.allowUnchecked = allowUnchecked
 			verifyGroup(fw, pkg, ws, greqs)
 			for _, r := range greqs {
 				r.Report, r.Err = memOutcomeSkip(mark, ws.memOwn, r.Report, r.Err)

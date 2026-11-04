@@ -47,6 +47,7 @@ type tomlPair struct {
 	str   string   // the decoded value when it is a string
 	isStr bool     // the value is a string
 	strs  []string // every string of the value (the string itself, or the strings of an array)
+	raw   string   // the value as written (trimmed)
 }
 
 type tomlScanner struct {
@@ -257,11 +258,12 @@ func parseLakefileToml(src string) ([]tomlPair, bool) {
 			t.i++
 			t.skipSpaces()
 			t.strs = nil
+			vstart := t.i
 			str, isStr := t.value()
 			if t.bad {
 				break
 			}
-			out = append(out, tomlPair{table: table, key: key, str: str, isStr: isStr, strs: t.strs})
+			out = append(out, tomlPair{table: table, key: key, str: str, isStr: isStr, strs: t.strs, raw: t.s[vstart:t.i]})
 			t.endOfLine()
 		}
 	}

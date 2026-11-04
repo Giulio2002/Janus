@@ -21,53 +21,53 @@ func TestRound15aLakefileNotCacheable(t *testing.T) {
 	for name, extra := range map[string]string{
 		// the workspace keeps .lake across runs (syncTree keepLake) and the sandboxed build can write there:
 		// sources under it are not in the snapshot, hence not in the key
-		"srcDir in .lake":      "srcDir = \".lake/pre\"\n",
-		"srcDir in .git":       "srcDir = \".git/x\"\n",
-		"srcDir hidden":        "srcDir = \".hidden\"\n",
-		"srcDir artifacts":     "srcDir = \"artifacts\"\n",
-		"srcDir generated":     "srcDir = \"generated/x\"\n",
-		"srcDir bin":           "srcDir = \"bin\"\n",
-		"srcDir obj":           "srcDir = \"obj\"\n",
-		"srcDir dotted deep":   "srcDir = \"a/.b/c\"\n",
-		"srcDir leading dot/":  "srcDir = \"./.lake\"\n",
-		"srcDir dir symlink":   "srcDir = \"a//.lake\"\n",
-		"buildDir":             "buildDir = \"/x\"\n",
-		"leanLibDir":           "leanLibDir = \"/x\"\n",
-		"irDir":                "irDir = \"/x\"\n",
-		"packagesDir":          "packagesDir = \"/x\"\n",
-		"testDriver":           "testDriver = \"x\"\n",
-		"extraDepTargets":      "extraDepTargets = [\"x\"]\n",
-		"needs":                "needs = [\"x\"]\n",
-		"nativeFacets":         "nativeFacets = [\"shared\"]\n",
-		"leanArgs":             "leanArgs = [\"--load-dynlib=/x\"]\n",
-		"server opts":          "moreServerOptions = [\"x\"]\n",
-		"weak.debug":           "\n[leanOptions]\nweak.debug.skipKernelTC = true\n",
-		"weak.weak.debug":      "\n[leanOptions]\nweak.weak.debug.skipKernelTC = true\n",
-		"leanOptions plugin":   "\n[leanOptions]\nweak.plugin = 1\n",
-		"leanOptions dotdot":   "\n[leanOptions]\npp..x = 1\nlinter..y=true\ndebug.x=1\n",
-		"Lean.ofReduceBool":    "\n[leanOptions]\ndebug.moduleNameAtTimeout = false\n",
+		"srcDir in .lake":       "srcDir = \".lake/pre\"\n",
+		"srcDir in .git":        "srcDir = \".git/x\"\n",
+		"srcDir hidden":         "srcDir = \".hidden\"\n",
+		"srcDir artifacts":      "srcDir = \"artifacts\"\n",
+		"srcDir generated":      "srcDir = \"generated/x\"\n",
+		"srcDir bin":            "srcDir = \"bin\"\n",
+		"srcDir obj":            "srcDir = \"obj\"\n",
+		"srcDir dotted deep":    "srcDir = \"a/.b/c\"\n",
+		"srcDir leading dot/":   "srcDir = \"./.lake\"\n",
+		"srcDir dir symlink":    "srcDir = \"a//.lake\"\n",
+		"buildDir":              "buildDir = \"/x\"\n",
+		"leanLibDir":            "leanLibDir = \"/x\"\n",
+		"irDir":                 "irDir = \"/x\"\n",
+		"packagesDir":           "packagesDir = \"/x\"\n",
+		"testDriver":            "testDriver = \"x\"\n",
+		"extraDepTargets":       "extraDepTargets = [\"x\"]\n",
+		"needs":                 "needs = [\"x\"]\n",
+		"nativeFacets":          "nativeFacets = [\"shared\"]\n",
+		"leanArgs":              "leanArgs = [\"--load-dynlib=/x\"]\n",
+		"server opts":           "moreServerOptions = [\"x\"]\n",
+		"weak.debug":            "\n[leanOptions]\nweak.debug.skipKernelTC = true\n",
+		"weak.weak.debug":       "\n[leanOptions]\nweak.weak.debug.skipKernelTC = true\n",
+		"leanOptions plugin":    "\n[leanOptions]\nweak.plugin = 1\n",
+		"leanOptions dotdot":    "\n[leanOptions]\npp..x = 1\nlinter..y=true\ndebug.x=1\n",
+		"Lean.ofReduceBool":     "\n[leanOptions]\ndebug.moduleNameAtTimeout = false\n",
 		"leanOptions as inline": "leanOptions = {debug.skipKernelTC = true}\n",
-		"table in table":       "\n[lean_lib.x]\nname=\"y\"\n",
-		"BOM":                  "\xef\xbb\xbf" + base,
-		"NUL":                  "name = \"p\x00\"\n",
-		"tab key":              "\tsrcDir\t=\t\"/abs\"\n",
-		"lone CR in comment":   "# a\rsrcDir = \"/abs\"\n",
-		"form feed":            "\fsrcDir = \"/abs\"\n",
-		"vertical tab":         "\vsrcDir = \"/abs\"\n",
-		"unicode key":          "srcDir = \"/abs\"\n",
-		"line sep":             "name = \"a\" srcDir = \"/abs\"\n",
-		"escaped quote":        "srcDir = \"a\\\"b\"\n",
-		"literal backslash":    "srcDir = 'a\\..\\b'\n",
-		"literal dotdot":       "srcDir = '..'\n",
-		"srcDir empty":         "srcDir = \"\"\n",
-		"srcDir colon":         "srcDir = \"a:b\"\n",
-		"dotdot not first":     "srcDir = \"a/b/../../..\"\n",
-		"integer srcDir":       "srcDir = 1\n",
-		"bool srcDir":          "srcDir = true\n",
-		"roots nul":            "roots = [\"A\x00\"]\n",
-		"root ..":              "root = \"..\"\n",
-		"name ..":              "name = \"..\"\n",
-		"defaultTargets ..":    "defaultTargets = [\"../x\"]\n",
+		"table in table":        "\n[lean_lib.x]\nname=\"y\"\n",
+		"BOM":                   "\xef\xbb\xbf" + base,
+		"NUL":                   "name = \"p\x00\"\n",
+		"tab key":               "\tsrcDir\t=\t\"/abs\"\n",
+		"lone CR in comment":    "# a\rsrcDir = \"/abs\"\n",
+		"form feed":             "\fsrcDir = \"/abs\"\n",
+		"vertical tab":          "\vsrcDir = \"/abs\"\n",
+		"unicode key":           "srcDir = \"/abs\"\n",
+		"line sep":              "name = \"a\" srcDir = \"/abs\"\n",
+		"escaped quote":         "srcDir = \"a\\\"b\"\n",
+		"literal backslash":     "srcDir = 'a\\..\\b'\n",
+		"literal dotdot":        "srcDir = '..'\n",
+		"srcDir empty":          "srcDir = \"\"\n",
+		"srcDir colon":          "srcDir = \"a:b\"\n",
+		"dotdot not first":      "srcDir = \"a/b/../../..\"\n",
+		"integer srcDir":        "srcDir = 1\n",
+		"bool srcDir":           "srcDir = true\n",
+		"roots nul":             "roots = [\"A\x00\"]\n",
+		"root ..":               "root = \"..\"\n",
+		"name ..":               "name = \"..\"\n",
+		"defaultTargets ..":     "defaultTargets = [\"../x\"]\n",
 	} {
 		if ok(base + extra) {
 			t.Errorf("%s was cacheable", name)
@@ -182,5 +182,90 @@ func TestRound15aConsumerCacheMissOnVerifierFrameworkToolchain(t *testing.T) {
 	miss("lake executable", mk(func(in *consumerResultInputs) { in.lakeSha = "lake2" }))
 	if mk(nil) != base || lookupResult(mk(nil)) == nil {
 		t.Error("the unchanged inputs no longer hit")
+	}
+}
+
+func TestRound15aParseImports(t *testing.T) {
+	for _, c := range []struct {
+		src  string
+		want []string
+		ok   bool
+	}{
+		{"import A\nimport B.C\n\ntheorem x : True := trivial", []string{"A", "B.C"}, true},
+		{"/- c /- nested -/ -/\n-- x\nimport  A -- y\nimport public B\nimport meta all C\nnamespace Q\nimport Z", []string{"A", "B", "C"}, true},
+		{"module\nprelude\nimport Init.Core", []string{"Init.Core"}, true},
+		{"/-! doc -/\nimport A", nil, true}, // a module doc ends the header: no import after it counts
+		{"@[simp] theorem t : True := trivial\nimport A", nil, true},
+		{"import «A»", nil, false},
+		{"import A.\n", nil, false},
+		{"import A..B\n", nil, false},
+		{"/- never closed\nimport A", nil, false},
+		{"import Ä\n", nil, false},
+		{"", nil, true},
+	} {
+		got, ok := parseImports([]byte(c.src))
+		if ok != c.ok || strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("parseImports(%q) = %v %v, want %v %v", c.src, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestRound15aCompileConfig(t *testing.T) {
+	// the lakefile.toml of a typical fv-uint256 package is in the subset
+	fv := "# c\nname = \"fv256\"\ndefaultTargets = [\"Fv256\"]\n\n[[require]]\nname = \"janus\"\ngit = \"/srv/janus\"\nrev = \"f1d61dc1fc23f83dda0a465afa81ecec1f469fdf\"\n\n[[lean_lib]]\nname = \"Fv256\"\n"
+	sd, do, ok := compileConfig(map[string][]byte{"lakefile.toml": []byte(fv)}, "lakefile.toml")
+	if !ok || len(do) != 0 || strings.Join(sd, ",") != "" {
+		t.Fatalf("plain package: %v %v %v", sd, do, ok)
+	}
+	opt := fv + "srcDir = \"lean\"\n\n[leanOptions]\nmaxHeartbeats = 400_000\nautoImplicit = false\nweak.linter.unusedVariables = false\npp.unicode = true\n"
+	sd, do, ok = compileConfig(map[string][]byte{"lakefile.toml": []byte(opt)}, "lakefile.toml")
+	if !ok || strings.Join(sd, ",") != ",lean" || strings.Join(do, " ") != "-DmaxHeartbeats=400000 -DautoImplicit=false -Dweak.linter.unusedVariables=false -Dpp.unicode=true" {
+		t.Fatalf("options: %v %v %v", sd, do, ok)
+	}
+	for name, cfg := range map[string]string{
+		"array option":    fv + "\n[leanOptions]\nmaxHeartbeats = [1]\n",
+		"float option":    fv + "\n[leanOptions]\nmaxHeartbeats = 1.5\n",
+		"srcDir in .lake": fv + "srcDir = \".lake/x\"\n",
+		"more args":       fv + "moreLeanArgs = [\"-DfooBar=1\"]\n",
+	} {
+		if _, _, ok := compileConfig(map[string][]byte{"lakefile.toml": []byte(cfg)}, "lakefile.toml"); ok {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if _, _, ok := compileConfig(map[string][]byte{"lakefile.lean": []byte("import Lake")}, "lakefile.lean"); ok {
+		t.Error("lakefile.lean accepted")
+	}
+}
+
+// The olean store: a tampered olean, a tampered entry and a swapped entry are misses.
+func TestRound15aOleanStore(t *testing.T) {
+	t.Setenv("JANUS_CACHE_DIR", t.TempDir())
+	if err := os.Chmod(os.Getenv("JANUS_CACHE_DIR"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	k1, k2 := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	oleanStorePut(k1, []byte("olean-1"))
+	oleanStorePut(k2, []byte("olean-2"))
+	if d, ok := oleanStoreGet(k1); !ok || string(d) != "olean-1" {
+		t.Fatalf("stored olean not found: %q %v", d, ok)
+	}
+	dir := func(k string) string { return filepath.Join(oleanStoreDir(), k[:2]) }
+	// planted bytes under the right entry
+	os.WriteFile(filepath.Join(dir(k1), k1+".olean"), []byte("forged"), 0o600)
+	if _, ok := oleanStoreGet(k1); ok {
+		t.Error("a modified olean was served")
+	}
+	// the entry of k2 copied under k1's name
+	b, _ := os.ReadFile(filepath.Join(dir(k2), k2+".json"))
+	os.WriteFile(filepath.Join(dir(k1), k1+".json"), b, 0o600)
+	os.WriteFile(filepath.Join(dir(k1), k1+".olean"), []byte("olean-2"), 0o600)
+	if _, ok := oleanStoreGet(k1); ok {
+		t.Error("another key's entry was served")
+	}
+	// an entry with a forged hash and no valid MAC
+	os.WriteFile(filepath.Join(dir(k2), k2+".json"), []byte(`{"key":"`+k2+`","sha256":"`+sha256Hex([]byte("x"))+`","mac":"00"}`), 0o600)
+	os.WriteFile(filepath.Join(dir(k2), k2+".olean"), []byte("x"), 0o600)
+	if _, ok := oleanStoreGet(k2); ok {
+		t.Error("an entry without a valid MAC was served")
 	}
 }
