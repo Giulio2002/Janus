@@ -4,8 +4,8 @@
 # A numeric literal (decimal or 0x hex) that falls inside a loaded section (SHF_ALLOC: text, rodata, data, bss) of the
 # example binaries is the shape of an address inside them. The ranges are READ FROM THE ELF SECTION HEADERS of every
 # artifacts/examples-* binary that exists (amd64 images are linked at 0x400000, arm64 ones at 0x10000); with no binary
-# built yet (the gate runs this lane before the builds) the static fallback below is used (amd64 [0x400000, 0x5b0000),
-# arm64 [0x10000, 0x1b8000)). `--ranges` prints the ranges in use. A literal is ignored when it is < 0x10000, a multiple
+# built yet (the gate runs this lane before the builds) the static fallback below is used (amd64 [0x400f00, 0x5b0000),
+# arm64 [0x10f00, 0x1b8000), just above the ELF headers). `--ranges` prints the ranges in use. A literal is ignored when it is < 0x10000, a multiple
 # of 0x1000 (a page-aligned window or heap: 0x500000, 4194304, 0x11000), a decimal multiple of 1000 (a size: 8000000) or
 # 2^k - 1 (a mask or bound: 2097151). It silently goes
 # stale when the binary's layout moves (any example added to the shared binary shifts code by 32/64 bytes and data by
@@ -23,7 +23,7 @@ cd "$root"
 exec python3 -I - "$@" <<'PY'
 import os, re, sys
 import glob, struct
-STATIC = [(0x400000, 0x5b0000), (0x10000, 0x1b8000)]
+STATIC = [(0x400f00, 0x5b0000), (0x10f00, 0x1b8000)]
 def elf_ranges(path):
     try:
         with open(path, 'rb') as f:
