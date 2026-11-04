@@ -55,6 +55,11 @@ import Janus.Amd64
 import Janus.Tactic.Bridge
 import Janus.Contracts.LiveStub
 import Janus.Contracts.LiveStubAmd64
+import Janus.Contracts.LiveStubMem
+import Janus.Contracts.LiveStubSlice
+import Janus.Contracts.LiveStubSliceAmd64
+import Janus.Contracts.StubAlloc
+import Janus.Contracts.StubAllocAmd64
 import Janus.Amd64.Bridge
 import Janus.Amd64.FFISat
 import Janus.Contracts.MapAmd64

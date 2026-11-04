@@ -375,6 +375,34 @@ contracts (`growslice`, `memmove`, `memclr`, `typedmemmove`) follow the same sha
 `LiveSat`/`LiveSatAmd64`, a finishing lemma, and one macro. `examples/rtmisc/proofs/{arm64,amd64}/Cons.lean`
 is a worked example (a function with one `newobject` and one barrier store).
 
+**Copies, clears and `growslice`** (`LiveStubSlice`, `LiveStubSliceAmd64`, `LiveStubGrow`, `LiveStubGrowAmd64`, memory facts in
+`LiveStubMem`). Same recipe, with the request's size pinned by the runtime's `ok` predicate, so the stub is straight-line:
+
+```lean
+theorem hmv : ∀ args, ok mvA args → ∃ d sr, args = [d, sr, 12] := ...
+theorem model_mv : MemmoveLive linked mvA 4096 R := by janus_live_memmove 12 hmv          -- LiveStub.memmoveSeg mvA 12
+theorem model_cl : MemclrNoHeapPointersLive linked clA 4096 R := by janus_live_memclr 12 hcl   -- LiveStub.memclrSeg clA 12
+theorem model_gs : RtLiveContract linked gsA 4096 R growsliceSpec growsliceLive := by
+  janus_live_growslice (et, 1, 0) n c0 num A cap hgs                     -- LiveStub.growsliceSeg gsA ob A cap
+```
+
+An `n`-byte move is `chunkList n` (words, then 4, 2, 1-byte tails); a copy loads every chunk before storing any, so it
+is right for overlapping operands; arm64 copies take at most 13 chunks (`n` up to 104 bytes), amd64 at most 9 (and
+offsets below 128); a clear is stores of zero (no register limit). The `hok` argument must be a *named* theorem with the
+stated type (the tactic applies it to the request). `growslice` is for any element size whose descriptor `(et, size, ptrBytes)` is
+one of the runtime's `tys` (`toyR tys ok`: the descriptor is a runtime-owned range, the runtime knows its `Size_`), a request
+`args = [oldPtr, n, c0, num, et]`, `K = roundupsize (nextslicecap n c0 · size) noscan`, `cap = growCap …`, `cap · size = K`
+(always for size 1 and powers of two), the stub copies the `(n - num) · size` old bytes (at most 11 chunks arm64, 7 amd64);
+`A`, the bump advance, is a multiple of 16 in `[K, 64 K]`, all side conditions are closed numerals proved by `decide`.
+
+**The non-live allocation contracts** (`StubAlloc`, `StubAllocAmd64`): `NewobjectContract p addr rt stack H`,
+`MallocgcContract`, `MakesliceContract` over a consumer-chosen `rt` (which may include its own type descriptors) and
+the readiness predicates `StubAlloc.NewReadyAt rt heap` / `MallocReadyAt heap` / `MakeReadyAt rt heap` (the heap
+`[heap, heap + 64 KiB)` is writable and zero as the runtime sees it, the request fits 32 KiB). The stub is
+`StubAlloc.heapSeg addr heap` (`MOVZ X0, #heap>>16, LSL #16; RET`; amd64 `StubAllocAmd64.heapSeg`, `MOV EAX, heap; RET`) and
+`janus_newobject heap hrt` / `janus_mallocgc` / `janus_makeslice` (amd64 `janus64_*`) prove the contract at the
+program's own address; `hrt : (heap, heap + 0x10000) ∈ rt`. `StubAlloc.fresh_heap_at` is `AllocSat.fresh_heap` over any `rt`.
+
 **From `Ensures` to a callee summary** (`Janus.Tactic.Bridge`, `Janus.Amd64.Bridge`). `janus_run … calls [S]`
 and `Summary.of_codeIn` take `S : Summary p a pre post`, while a function theorem is stated as `Ensures`
 or `Reaches (p.withExit ret) s (IsReturn Q)`. `Reaches.toReachesRet` turns a returning run of

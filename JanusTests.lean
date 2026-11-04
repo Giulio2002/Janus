@@ -4,6 +4,8 @@ import JanusTests.Run
 import JanusTests.GoABI
 import JanusTests.Bridge
 import JanusTests.LiveStub
+import JanusTests.LiveStubSlice
+import JanusTests.StubAlloc
 import JanusTests.Decode
 import JanusTests.Exec
 import JanusTests.Atomic
