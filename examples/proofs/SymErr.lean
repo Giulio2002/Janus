@@ -37,6 +37,6 @@ theorem correctness :
     Extracted.dataSize.«example.com/basic.errSym»] at ht ⊢
   obtain ⟨hacc, h0, h1⟩ := ht
   janus_run
-  done
+  exact ⟨h0, h1⟩
 
 end Proof
