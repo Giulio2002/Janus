@@ -382,7 +382,9 @@ func TestDiagFlagsConsumer(t *testing.T) {
 	body := func(s string) string {
 		var keep []string
 		for _, l := range strings.Split(s, "\n") {
-			if !strings.HasPrefix(l, "  Build: ") && !strings.HasPrefix(l, "  Cached: ") {
+			// what differs between runs of the same verification: which modules were rebuilt, and how many
+			// replays came from the replay cache
+			if !strings.HasPrefix(l, "  Build: ") && !strings.HasPrefix(l, "  Cached: ") && !strings.HasPrefix(l, "  Kernel replay: ") {
 				keep = append(keep, l)
 			}
 		}
@@ -390,6 +392,11 @@ func TestDiagFlagsConsumer(t *testing.T) {
 	}
 	if body(plainOut) != body(keptOut) {
 		t.Errorf("--keep-workspace changed the report:\n%s\nvs\n%s", plainOut, keptOut)
+	}
+	for _, o := range []string{plainOut, keptOut} {
+		if !strings.Contains(o, "\n  Kernel replay: leanchecker passed (") {
+			t.Errorf("no passed kernel replay:\n%s", o)
+		}
 	}
 	m := keptLineRE.FindStringSubmatch(errb)
 	if m == nil {
