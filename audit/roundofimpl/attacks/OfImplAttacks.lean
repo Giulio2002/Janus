@@ -122,16 +122,29 @@ theorem ctl4 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b :
   intro ret hret s hs hp; exact hp.elim
 
 namespace Shadow
-/-- A look-alike defined by the consumer: trivially true. -/
+/-- A look-alike defined by the consumer that states nothing (`True`): harmless, so accepted. -/
 def ImplApart (_P : Program) (_impl : List Segment) : Prop := True
 
-/-- R12: the consumer's own `ImplApart` (shadowing the name). -/
+/-- CONTROL: the consumer's own `ImplApart`, which constrains nothing. -/
+theorem ctl7 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hap : ImplApart Extracted.program impl)
+    (hnew : NewobjectContract (Extracted.program.ofImpl impl)
+      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
+end Shadow
+
+namespace Shadow2
+/-- A look-alike that constrains the runtime: it is not the trusted predicate. -/
+def ImplApart (_P : Program) (impl : List Segment) : Prop := impl.length = 3
+
+/-- R12: the consumer's own `ImplApart`, which constrains `impl`. -/
 theorem r12 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
     (hap : ImplApart Extracted.program impl)
     (hnew : NewobjectContract (Extracted.program.ofImpl impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
-end Shadow
+end Shadow2
 
 /-- R13: the placement predicate about a term built from `impl`, not the variable. -/
 theorem r13 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
@@ -140,19 +153,21 @@ theorem r13 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : 
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
 
-/-- R14: the placement predicate for another variable than the statement's. -/
-theorem r14 (impl impl2 : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+/-- CONTROL: the placement premise for another variable than the statement's (it constrains nothing the statement is about). -/
+theorem ctl9 (impl impl2 : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
     (hap : ImplApart Extracted.program impl2)
     (hnew : NewobjectContract (Extracted.program.ofImpl impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
-    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
 
-/-- R15: the contract is about another variable's runtime code than the statement's. -/
-theorem r15 (impl impl2 : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+/-- CONTROL: a contract about another variable's runtime code (it constrains nothing the statement is about; the Witness must still exhibit it). -/
+theorem ctl10 (impl impl2 : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
     (hap : ImplApart Extracted.program impl)
     (hnew : NewobjectContract (Extracted.program.ofImpl impl2)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
-    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
+    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
+  intro ret hret s hs hp; exact hp.elim
 
 /-- R16: the negated placement predicate. -/
 theorem r16 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
@@ -184,23 +199,16 @@ theorem ctl5 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
   intro ret hret s hs hp; exact hp.elim
 
-/-- CONTROL: the placement premise as an instance-implicit binder. -/
-theorem ctl6 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
-    [hap : ImplApart Extracted.program impl]
+/-- A consumer-defined wrapper that unfolds to the placement predicate. -/
+def MyApart (impl : List Segment) : Prop := ImplApart Extracted.program impl
+
+/-- CONTROL: a consumer-defined wrapper that unfolds to the placement predicate itself. -/
+theorem ctl8 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
+    (hap : MyApart impl)
     (hnew : NewobjectContract (Extracted.program.ofImpl impl)
       (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
     Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := by
   intro ret hret s hs hp; exact hp.elim
-
-/-- A consumer-defined wrapper that unfolds to the placement predicate. -/
-def MyApart (impl : List Segment) : Prop := ImplApart Extracted.program impl
-
-/-- R19: the placement premise through a consumer-defined wrapper (not the exact form). -/
-theorem r19 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)
-    (hap : MyApart impl)
-    (hnew : NewobjectContract (Extracted.program.ofImpl impl)
-      (Extracted.program.contractAddr "runtime.newobject") rt 4096 H) :
-    Ensures (Extracted.program.link impl) Extracted.entry [a, b] (fun _ => False) (fun _ _ => True) := sorry
 
 /-- R20: the placement predicate about the runtime's own program (not `Extracted.program`). -/
 theorem r20 (impl : List Segment) (rt : List (Nat × Nat)) (H : RtReady) (a b : BitVec 64)

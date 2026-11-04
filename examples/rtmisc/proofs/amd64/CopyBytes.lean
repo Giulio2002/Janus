@@ -81,7 +81,7 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
     unfold Apart at haps
     refine ⟨fun i hi => ?_, by assumption, by janus_frame⟩
     rw [‹Mem.Copied _ _ _ _ _› i hi]
-    repeat rw [Memory.bytes_writeLE_outside _ (by omega)]
+    repeat rw [Arm64.Memory.bytes_writeLE_outside _ (by omega)]
 
 namespace Witness
 

@@ -108,7 +108,18 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
     rw [if_neg hr2ne] at hinv2
     have hacc' : M.accessible r0.toNat r2.toNat true = true := by simpa using hacc
     have hacc2 : M.accessible (r0.toNat + len.toNat) 1 true = true :=
-      Memory.accessible_mono _ hacc' (by omega) (by omega)
+      Arm64.Memory.accessible_mono _ hacc' (by omega) (by omega)
+    have hacc3 : M.accessible (r1.toNat + r0.toNat - 1) 1 true = true := by
+      have e : r1.toNat + r0.toNat - 1 = r0.toNat + len.toNat := by omega
+      rw [e]; exact hacc2
+    have hwrap : r1.toNat + r0.toNat - 1 + 1 ≤ 2 ^ 48 := by omega
+    have hwrap2 : r0.toNat + len.toNat + 1 ≤ 2 ^ 48 := by omega
+    have hr1b : r1 = len + 1#64 := by
+      apply BitVec.eq_of_toNat_eq
+      have h1 : (1#64).toNat = 1 := rfl
+      rw [BitVec.toNat_add, h1]
+      omega
+    subst hr1b
     janus64_run
 
 namespace Witness
