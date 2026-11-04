@@ -117,7 +117,10 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat √
       rw [BitVec.toNat_add, h1]
       omega
     subst hr1b
-    set_option trace.janus true in
+    have hacc0 : s.mem.accessible (r0.toNat + len.toNat) 1 true = true := by
+      have := hfr.accessible (r0.toNat + len.toNat) 1 true
+      simp only [Memory.accessible_writeLE] at this
+      rw [‚Üê this]; exact hacc2
     janus_run
 
 namespace Witness

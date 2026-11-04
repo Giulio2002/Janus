@@ -120,6 +120,10 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
       rw [BitVec.toNat_add, h1]
       omega
     subst hr1b
+    have hacc0 : s.mem.accessible (r0.toNat + len.toNat) 1 true = true := by
+      have := hfr.accessible (r0.toNat + len.toNat) 1 true
+      simp only [Arm64.Memory.accessible_writeLE] at this
+      rw [← this]; exact hacc2
     janus64_run
 
 namespace Witness
