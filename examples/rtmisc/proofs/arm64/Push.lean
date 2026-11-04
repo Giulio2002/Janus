@@ -121,6 +121,8 @@ theorem correctness (impl : List Segment) (R : RtInv) (b : Nat) (L : List (Nat √
       have := hfr.accessible (r0.toNat + len.toNat) 1 true
       simp only [Memory.accessible_writeLE] at this
       rw [‚Üê this]; exact hacc2
+    have hin' : InRanges r0.toNat r2.toNat R.rt := by simpa using hin
+    have hdj2 := InRanges.disjoint hin' hout
     janus_run
 
 namespace Witness

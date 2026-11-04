@@ -124,6 +124,8 @@ theorem correctness (impl : List Amd64.Segment) (R : RtInv) (b : Nat) (L : List 
       have := hfr.accessible (r0.toNat + len.toNat) 1 true
       simp only [Arm64.Memory.accessible_writeLE] at this
       rw [← this]; exact hacc2
+    have hin' : InRanges r0.toNat r2.toNat R.rt := by simpa using hin
+    have hdj2 := InRanges.disjoint hin' hout
     janus64_run
 
 namespace Witness
