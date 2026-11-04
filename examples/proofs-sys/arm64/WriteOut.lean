@@ -134,4 +134,110 @@ theorem full_write (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv)
     have := congrArg BitVec.toNat (h0.symm.trans hn)
     simp [BitVec.toNat_ofNat] at this; omega
 
+/-! ## Non-vacuity witness
+
+The stubs of `Janus/Contracts/LiveStubSys.lean` sit at the contract addresses of
+`runtime.entersyscall`, `runtime.exitsyscall` and `runtime.convT64` in this program; `janus_sys_sched`
+and `janus_sys_convt64` prove the three contracts for them by running the stub code. Below, a concrete
+call state of `WriteOut(p, 0, 0)` (an empty buffer) satisfies the whole precondition, and the call
+returns what the theorem describes. -/
+
+namespace Witness
+
+open Janus.Contracts.LiveStubSys
+
+local macro "cEnter" : term => `(janus_eval% (Extracted.program.contractAddr "runtime.entersyscall"))
+local macro "cExit" : term => `(janus_eval% (Extracted.program.contractAddr "runtime.exitsyscall"))
+local macro "cConv" : term => `(janus_eval% (Extracted.program.contractAddr "runtime.convT64"))
+
+def implAt : List Segment := [schedSeg cEnter, schedSeg cExit, convT64Seg cConv]
+def linked : Program := Extracted.program.link implAt
+
+theorem hent0 : SchedContract linked cEnter [] 1024 := by janus_sys_sched
+theorem hexit0 : SchedContract linked cExit [] 1024 := by janus_sys_sched
+theorem hconv0 : ConvT64Contract linked cConv [] 1024 := by janus_sys_convt64 1024
+
+theorem hent : SchedContract (Extracted.program.link implAt)
+    (Extracted.program.contractAddr "runtime.entersyscall") [] 1024 := by
+  have h : Extracted.program.contractAddr "runtime.entersyscall" = cEnter := by decide
+  rw [h]; exact hent0
+theorem hexit : SchedContract (Extracted.program.link implAt)
+    (Extracted.program.contractAddr "runtime.exitsyscall") [] 1024 := by
+  have h : Extracted.program.contractAddr "runtime.exitsyscall" = cExit := by decide
+  rw [h]; exact hexit0
+theorem hconv : ConvT64Contract (Extracted.program.link implAt)
+    (Extracted.program.contractAddr "runtime.convT64") [] 1024 := by
+  have h : Extracted.program.contractAddr "runtime.convT64" = cConv := by decide
+  rw [h]; exact hconv0
+
+def errA : Nat := janus_eval% errVars
+def ret : Nat := 0x1000
+def sp0 : Nat := 0x100000
+def g0 : Nat := 0x200000
+def p0 : Nat := 0x300000
+
+def s0 : State :=
+  { regs := fun i => if i = 0 then BitVec.ofNat 64 p0 else if i = 28 then BitVec.ofNat 64 g0
+      else if i = 30 then BitVec.ofNat 64 ret else 0,
+    sp := BitVec.ofNat 64 sp0, pc := BitVec.ofNat 64 Extracted.entry,
+    flags := ⟨false, false, false, false⟩,
+    mem := ⟨fun _ => 0, [⟨sp0 - 1232, 1248, true⟩, ⟨g0, 0x100, false⟩, ⟨errA, 48, false⟩]⟩ }
+
+def k0 : Kern := {}
+def E0 : KEnv := ⟨[], 1024⟩
+
+theorem hret : RetAddr linked ret := RetAddr.of_check (by decide)
+
+theorem setup : CallSetup (linked.withExit ret) Extracted.entry [BitVec.ofNat 64 p0, 0, 0] s0 :=
+  ⟨rfl, rfl, by intro r h; simp at h; rcases r with _ | _ | _ | r <;> simp [s0] at h ⊢ <;> omega⟩
+
+set_option maxRecDepth 100000 in
+theorem pre : GuardOK s0 48 ∧ StackOK s0 1232 16 ∧ Outside (s0.sp.toNat - 1232) 1248 [] ∧
+    Buf s0.mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat false ∧ (0 : BitVec 64).toNat ≤ 2 ^ 48 ∧
+    Outside (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat [] ∧
+    ((BitVec.ofNat 64 p0).toNat + (0 : BitVec 64).toNat ≤ s0.sp.toNat - 1232 ∨
+      s0.sp.toNat + 16 ≤ (BitVec.ofNat 64 p0).toNat) ∧
+    ((s0.regs 28).toNat + 24 ≤ s0.sp.toNat - 1232 ∨ s0.sp.toNat + 16 ≤ (s0.regs 28).toNat + 16) ∧
+    s0.mem.accessible errVars 48 false = true ∧
+    (errVars + 48 ≤ s0.sp.toNat - 1232 ∨ s0.sp.toNat + 16 ≤ errVars) := by
+  have h : errVars = errA := by decide
+  rw [h]
+  refine ⟨⟨by decide, by decide, by decide⟩, ⟨by decide, by decide, by decide, by decide⟩,
+    by simp only [outside_nil], Or.inl rfl, by decide, by simp only [outside_nil],
+    Or.inr (by decide), by decide, by decide, by decide⟩
+
+/-- The hypotheses are satisfiable: three runtime functions meeting their contracts and a call state of
+`WriteOut(p, 0, 0)` that satisfies the precondition. -/
+theorem nonvacuous : ∃ (impl : List Segment) (rt : List (Nat × Nat)) (E : KEnv) (ret : Nat) (s : State)
+    (k : Kern),
+    SchedContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.entersyscall") rt 1024 ∧
+    SchedContract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.exitsyscall") rt 1024 ∧
+    ConvT64Contract (Extracted.program.link impl)
+      (Extracted.program.contractAddr "runtime.convT64") rt 1024 ∧
+    RetAddr (Extracted.program.link impl) ret ∧
+    CallSetup ((Extracted.program.link impl).withExit ret) Extracted.entry [BitVec.ofNat 64 p0, 0, 0] s ∧
+    (GuardOK s 48 ∧ StackOK s 1232 16 ∧ Outside (s.sp.toNat - 1232) 1248 rt ∧
+      Buf s.mem (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat false ∧ (0 : BitVec 64).toNat ≤ 2 ^ 48 ∧
+      Outside (BitVec.ofNat 64 p0).toNat (0 : BitVec 64).toNat rt ∧
+      ((BitVec.ofNat 64 p0).toNat + (0 : BitVec 64).toNat ≤ s.sp.toNat - 1232 ∨
+        s.sp.toNat + 16 ≤ (BitVec.ofNat 64 p0).toNat) ∧
+      ((s.regs 28).toNat + 24 ≤ s.sp.toNat - 1232 ∨ s.sp.toNat + 16 ≤ (s.regs 28).toNat + 16) ∧
+      s.mem.accessible errVars 48 false = true ∧
+      (errVars + 48 ≤ s.sp.toNat - 1232 ∨ s.sp.toNat + 16 ≤ errVars)) :=
+  ⟨implAt, [], E0, ret, s0, k0, hent, hexit, hconv, hret, setup, pre⟩
+
+/-- The theorem fires: `WriteOut(p, 0, 0)` returns with a successful empty write or with `-1`. -/
+theorem returns : ReturnsK ((Extracted.program.link implAt).withExit ret) E0
+    (fun s' k' => FFI.ABIReturnC s0 s' ∧
+      ((∃ c, c ≤ (0 : BitVec 64).toNat ∧
+          k' = k0.emit (.write 1 (readBytes s0.mem (BitVec.ofNat 64 p0).toNat c)) ∧
+          s'.regs 0 = BitVec.ofNat 64 c ∧ s'.regs 1 = 0 ∧ s'.regs 2 = 0) ∨
+        (k' = k0 ∧ s'.regs 0 = BitVec.ofNat 64 (2 ^ 64 - 1))))
+    (fun _ _ => False) s0 k0 :=
+  correctness implAt [] E0 hent hexit hconv (BitVec.ofNat 64 p0) 0 0 ret hret s0 k0 setup pre
+
+end Witness
+
 end Proof

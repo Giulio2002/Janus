@@ -87,6 +87,9 @@ type verifiedReport struct {
 	Role string `json:"role,omitempty"`
 	// MatchedMain is, for a witness, the main theorem of the proof module that it instantiates.
 	MatchedMain string `json:"matchedMain,omitempty"`
+	// MatchedMains is every main theorem of the proof module the witness is an instance of (MatchedMain is the
+	// first): one witness may serve several main theorems that share a precondition.
+	MatchedMains []string `json:"matchedMains,omitempty"`
 	// ContractHyps are the runtime contracts the STATEMENT applies, computed from the statement
 	// itself (round 14): "NewobjectContract@runtime.newobject". Empty: the statement assumes
 	// nothing about the runtime, whatever the extraction left out (Contracts).
@@ -133,6 +136,7 @@ type auditResult struct {
 	Notes             []string   `json:"notes"`               // surprising standard operations (round 7 K1)
 	Role              string     `json:"role"`                // round 14: main, witness-nonvacuous, witness-returns
 	MatchedMain       string     `json:"matchedMain"`         // round 14: for a witness, the main theorem it supports
+	MatchedMains      []string   `json:"matchedMains"`        // every main theorem of the module the witness supports
 	ContractHyps      []string   `json:"contractHyps"`        // round 14: the contracts the STATEMENT applies ("Contract@runtime.fn")
 	Imports           [][]string `json:"imports"`             // [module, direct imports…] for every non-core module
 }
@@ -1201,6 +1205,7 @@ func verifyShared(outdir string, opts map[string]string, outs []thmOutcome, stde
 			Contracts:         cr.Identity.contractList(),
 			Role:              ar.Role,
 			MatchedMain:       ar.MatchedMain,
+			MatchedMains:      ar.MatchedMains,
 			ContractHyps:      ar.ContractHyps,
 			Notes:             ar.Notes,
 		}
@@ -1584,6 +1589,19 @@ func roleLines(r *verifiedReport) []string {
 // THEM. The audit matches a witness against the module's main theorem (`matchedMain`); if that theorem
 // is not among the main theorems verified in this same call, the witness would sit beside a
 // correctness claim it says nothing about, so it fails and its report is withdrawn.
+// witnessSupportsAny: the witness supports at least one of the verified main theorems.
+func witnessSupportsAny(w *verifiedReport, mains map[string]bool) bool {
+	if mains[w.MatchedMain] {
+		return true
+	}
+	for _, m := range w.MatchedMains {
+		if mains[m] {
+			return true
+		}
+	}
+	return false
+}
+
 func checkWitnessSupport(outdir string, outs []thmOutcome) {
 	mains := map[string]bool{}
 	for _, o := range outs {
@@ -1601,7 +1619,7 @@ func checkWitnessSupport(outdir string, outs []thmOutcome) {
 	sort.Strings(names)
 	for i := range outs {
 		o := &outs[i]
-		if o.Err != nil || o.Report == nil || !strings.HasPrefix(o.Report.Role, "witness-") || mains[o.Report.MatchedMain] {
+		if o.Err != nil || o.Report == nil || !strings.HasPrefix(o.Report.Role, "witness-") || witnessSupportsAny(o.Report, mains) {
 			continue
 		}
 		o.Err = &diag{Invalid: true, Stage: "theorem audit",

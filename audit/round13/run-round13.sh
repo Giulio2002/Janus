@@ -40,7 +40,7 @@ row() {
   [ -n "$status" ] && broken+=("$name")
   return 0
 }
-v() { out="$("$J" verify --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
+v() { out="$("$J" verify --allow-no-witness --fresh --janus-root "$root" --proof "$1" "$2" ${3:+--theorem "$3"} 2>&1)"; }
 
 if [ "${JANUS_ROUND13_ONLY:-}" != F ]; then
 echo "== B1: a non-Prop binder (any sort) mentioning a runtime variable is rejected BY THIS RULE"

@@ -87,6 +87,9 @@ structure Record where
   /-- Round 14: for a witness, the main theorem of the proof module whose hypotheses and
   precondition it instantiates (or whose guarantee it states at a concrete state). -/
   matchedMain : String := ""
+  /-- Every main theorem of the proof module the witness is an instance of (`matchedMain` is the first):
+  a witness for a precondition several theorems share supports all of them. -/
+  matchedMains : Array String := #[]
   /-- Round 14: the runtime contracts the STATEMENT applies (`NewobjectContract@runtime.newobject`),
   computed from the statement, not from the extraction. A main theorem has them as hypotheses; a
   witness claims them. Empty: the statement assumes nothing about the runtime. -/
@@ -2411,11 +2414,33 @@ def returnsMatches (mr r : Expr) : MetaM Bool := do
       unless ← defEqTry m x do return false
   return lamSeen
 
+/-- Main theorems of the proof module (not witnesses, not `self`) about `Extracted.program` whose statement
+mentions a runtime contract: they assume the runtime, so each is owed a non-vacuity witness. -/
+def contractMains (env : Environment) (proofMod : Name) (self : Name) : Array Name :=
+  let modNames := env.header.moduleNames
+  let all := env.const2ModIdx.fold (init := #[]) fun acc n idx =>
+    match modNames[idx.toNat]? with
+    | some m =>
+      if m == proofMod && n != self && !n.isInternal && roleOf n == .main then
+        match env.find? n with
+        | some (.thmInfo ci) =>
+          let used := ci.type.getUsedConstants
+          if (used.contains `Extracted.program || used.contains `Extracted.entry) &&
+              used.any (isRuntimeContract env) then acc.push n else acc
+        | _ => acc
+      else acc
+    | none => acc
+  all.qsort Name.lt
+
 /-- Round 14 (W2): check the shape of a witness theorem (see the section comment); the matched main
 theorem on success. -/
 def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmType : Expr) :
-    MetaM (Except String Name) := do
-  let cands := mainCandidates env proofMod thm
+    MetaM (Except String (Name × Array Name)) := do
+  let cands0 := mainCandidates env proofMod thm
+  -- further main theorems of the module that assume runtime contracts (`full_write` next to `correctness`):
+  -- each needs its own witness, and one witness may serve several of them
+  let extra := contractMains env proofMod thm
+  let cands := cands0 ++ extra.filter (!cands0.contains ·)
   if cands.isEmpty then
     return .error "the proof module has no main theorem about Extracted.program for this witness to support"
   match role with
@@ -2424,12 +2449,15 @@ def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmTyp
       return .error "is not of the form `∃ …, …` (a state and runtime exhibiting the main theorem's hypotheses)"
     withConjs thmType fun wconjs => do
       let mut whys : Array String := #[]
+      let mut ok : Array Name := #[]
       for c in cands do
         let some mty ← freshType env c | continue
         let st ← Meta.saveState
         match ← matchNonvacuous mty wconjs with
-        | none => return .ok c
-        | some w => whys := whys.push s!"{c}: {w}"; st.restore
+        | none => ok := ok.push c
+        | some w => whys := whys.push s!"{c}: {w}"
+        st.restore
+      if let some c := ok[0]? then return .ok (c, ok)
       return .error s!"does not instantiate any main theorem of the proof module ({"; ".intercalate whys.toList})"
   | .returns =>
     Meta.forallTelescope thmType fun _ body => do
@@ -2438,15 +2466,20 @@ def checkWitness (env : Environment) (proofMod thm : Name) (role : Role) (thmTyp
         | return .error "is not a `Returns`-style statement (`Returns`, `GoReturns`, `ReturnsK`, `GrownReturns`, `ReachesRet`)"
       unless (r.find? (·.isConstOf `Extracted.program)).isSome do
         return .error "its program is not built from Extracted.program"
+      let mut ok : Array Name := #[]
       for c in cands do
         let some mty ← freshType env c | continue
         let mrs ← mainReturns mty
         if mrs.isEmpty then whys := whys.push s!"{c}: its conclusion does not unfold to a Returns-style statement"; continue
+        let mut hit := false
         for mr in mrs do
           let st ← Meta.saveState
-          if ← returnsMatches mr r then return .ok c
-          whys := whys.push s!"{c}: the statement is not its guarantee `{(← Meta.ppExpr mr).pretty 200}`"
+          if ← returnsMatches mr r then hit := true
+          else whys := whys.push s!"{c}: the statement is not its guarantee `{(← Meta.ppExpr mr).pretty 200}`"
           st.restore
+          if hit then break
+        if hit then ok := ok.push c
+      if let some c := ok[0]? then return .ok (c, ok)
       return .error s!"is not the guarantee of any main theorem of the proof module at a start state ({"; ".intercalate whys.toList})"
   | _ => return .error "is a lemma of a Witness namespace, not a verifiable result: only a `∃ …` non-vacuity witness (any name; `Witness.nonvacuous` by convention) and `Witness.returns` are"
 
@@ -2509,11 +2542,11 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
     -- checked structurally against a main theorem of the module; every other theorem is a main
     -- theorem, whose runtime is quantified (`checkContractHyps … main`).
     let role := roleOfTy thmN ci.type
-    let matchedMain ← match role with
-      | .main => pure ""
+    let (matchedMain, matchedMains) ← match role with
+      | .main => pure ("", #[])
       | _ => do
         match ← runCore envA (Meta.MetaM.run' (checkWitness envA proofModN thmN role ci.type)) with
-        | .ok c => pure c.toString
+        | .ok (c, cs) => pure (c.toString, cs.map (·.toString))
         | .error m => fail s!"{thm} {m} (round 14, W2)"
     -- close over the consumer defs reachable from the statement; check the dependency
     -- constants on the way
@@ -2537,7 +2570,7 @@ unsafe def runImplCore (thm proofMod marker trusted : String) (depRoots : Array 
              statement, statementExplicit, definitions := defs,
              modules := modNames.map (·.toString),
              external := externalNames.filterMap external.get?, externalDefinitions := extOut,
-             notes, role := role.label, matchedMain, contractHyps, imports := importGraph envA }
+             notes, role := role.label, matchedMain, matchedMains, contractHyps, imports := importGraph envA }
   ).run
   match result with
   | .ok rec => IO.println (marker ++ (toJson rec).compress)

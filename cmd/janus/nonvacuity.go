@@ -30,7 +30,7 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, allow bool) (
 		return nvWitness, "", "", nil
 	}
 	for _, p := range peers {
-		if p == nil || p == r || p.Module != r.Module || p.MatchedMain != r.Theorem {
+		if p == nil || p == r || p.Module != r.Module || !supports(p, r.Theorem) {
 			continue
 		}
 		switch p.Role {
@@ -61,6 +61,19 @@ func nonVacuityVerdict(r *verifiedReport, peers []*verifiedReport, allow bool) (
 	return "", "", "", &diag{Invalid: true, Stage: "non-vacuity", Msg: msg,
 		Next: "Add a named theorem in the proof's Witness namespace (conventionally Witness.nonvacuous) of the form `∃ impl … s, <the main theorem's whole precondition, contract hypotheses included>` and verify it in the same run (--theorem " +
 			witnessHint(r.Theorem) + "). The auditor matches witnesses by their statement, not their name, but an anonymous `example` cannot be referenced and is not accepted: state it as a named theorem. Or pass --allow-no-witness to accept the verdict WITHOUT non-vacuity (it is then marked 'non-vacuity NOT shown (opted out)')."}
+}
+
+// supports: the witness report p is an instance of the main theorem thm (MatchedMains, else the first match).
+func supports(p *verifiedReport, thm string) bool {
+	if p.MatchedMain == thm {
+		return true
+	}
+	for _, m := range p.MatchedMains {
+		if m == thm {
+			return true
+		}
+	}
+	return false
 }
 
 func witnessHint(thm string) string {
