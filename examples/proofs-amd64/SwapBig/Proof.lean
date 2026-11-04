@@ -37,6 +37,11 @@ theorem half8' (m : Memory) (a : Nat) :
     have := Janus.Arm64.Memory.readLE_lt m a 16
     omega)).symm
 
+/-- The low half with the shift already evaluated (`256 ^ 0` is `1` once the executor has computed the
+same-base address difference). -/
+theorem half0' (m : Memory) (a : Nat) :
+    m.readLE a 16 / 1 % 18446744073709551616 = m.readLE a 8 := half m a 0 0 rfl (by omega)
+
 set_option maxHeartbeats 4000000 in
 theorem correctness (a b : BitVec 64) :
     Ensures Extracted.program Extracted.entry [a, b]
@@ -55,7 +60,7 @@ theorem correctness (a b : BitVec 64) :
   all_goals janus64_run
   all_goals intro i hi8; janus64_cases hi8
   all_goals janus64_simp
-  all_goals try simp only [Nat.sub_self, Nat.add_sub_cancel_left, half0, half8, half8', and_self,
+  all_goals try simp only [Nat.sub_self, Nat.add_sub_cancel_left, half0, half0', half8, half8', and_self,
     Nat.add_assoc, Nat.reduceAdd]
 
 end Proof

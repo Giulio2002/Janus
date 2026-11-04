@@ -96,11 +96,9 @@ theorem wrapper_spec (T a : BitVec 64) :
   simp only [WPost, prod, frameA, frameB, frameR]
   apply frame_store10
   · janus_frame
-  · rw [readLE_ten, readLE_ten, readLE_ten t.mem, readLE_ten t.mem]
+  · rw [readLE_ten, readLE_ten]
     janus64_simp
-    have e1 : (t.regs 4).toNat - 48 + 8 + 8 - ((t.regs 4).toNat - 32) = 0 := by omega
-    have e2 : (t.regs 4).toNat - 48 + 24 + 8 - ((t.regs 4).toNat - 16) = 0 := by omega
-    rw [e1, e2, Nat.pow_zero, Nat.div_one, Nat.div_one, readLE_two_of_eight, readLE_two_of_eight]
+    simp only [Nat.div_one, readLE_two_of_eight]
 
 
 /-! ## The Go side: `MulLD` → `_Cfunc_c_ldmul` → `runtime.cgocall` -/

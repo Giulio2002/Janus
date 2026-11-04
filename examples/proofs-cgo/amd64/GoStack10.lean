@@ -222,7 +222,7 @@ theorem go_spec (a b c d e f g h i j : BitVec 64) :
   have hw : BitVec.ofNat 32 (i.toNat % 4294967296) = BitVec.setWidth 32 i := by
     apply BitVec.eq_of_toNat_eq
     simp only [BitVec.toNat_ofNat, BitVec.toNat_setWidth, Nat.reducePow, Nat.mod_mod]
-  exact ⟨rfl, by rw [hw]⟩
+  exact (by rw [hw])
 
 /-! ## Composition -/
 

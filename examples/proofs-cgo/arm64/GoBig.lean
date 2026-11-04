@@ -130,6 +130,11 @@ def WPost (a : BitVec 64) (t t' : State) : Prop :=
   MemFrame ((t.mem.writeLE (a.toNat + 16) 16 (lo t.mem a.toNat)).writeLE (a.toNat + 32) 16
     (hi t.mem a.toNat)) t'.mem [(t.sp.toNat - 4096, t.sp.toNat)]
 
+/-- The same store on both sides, of equal values, keeps a frame. -/
+theorem frame_store {m m' : Memory} {rs : List (Nat × Nat)} {a n v v' : Nat} (h : MemFrame m m' rs)
+    (hv : v' = v) : MemFrame (m.writeLE a n v) (m'.writeLE a n v') rs :=
+  hv ▸ h.writeLE_both a n v
+
 set_option maxHeartbeats 4000000 in
 theorem wrapper_spec (T a : BitVec 64) :
     CEnsuresC Extracted.program (TopOfStack T) wrapper [a] (WPre a) (WPost a) := by
@@ -175,29 +180,7 @@ theorem wrapper_spec (T a : BitVec 64) :
   refine ⟨?_, ?_⟩
   · repeat' (apply And.intro)
     all_goals assumption
-  have hlo : (((m₁.writeLE (t.sp.toNat - 88) 8 ((fw t.mem a.toNat 0).toNat + (fw t.mem a.toNat 1).toNat)).writeLE
-      (t.sp.toNat - 88 + 8) 8
-      (18446744073709551616 - (fw t.mem a.toNat 1).toNat + (fw t.mem a.toNat 0).toNat)).readLE
-      (t.sp.toNat - 88) 16) = lo t.mem a.toNat := by
-    rw [readLE_16]
-    simp (disch := omega) only [Memory.readLE_writeLE_self, Memory.readLE_writeLE_of_disjoint]
-    simp only [lo, pair, BitVec.toNat_add, BitVec.toNat_sub]
-    try omega
-  have hhi : ((((m₁.writeLE (t.sp.toNat - 88) 8 ((fw t.mem a.toNat 0).toNat + (fw t.mem a.toNat 1).toNat)).writeLE
-      (t.sp.toNat - 88 + 8) 8
-      (18446744073709551616 - (fw t.mem a.toNat 1).toNat + (fw t.mem a.toNat 0).toNat)).writeLE
-      (t.sp.toNat - 88 + 16) 8 ((fw t.mem a.toNat 0).toNat * (fw t.mem a.toNat 1).toNat)).writeLE
-      (t.sp.toNat - 88 + 24) 8 ((fw t.mem a.toNat 0).toNat ^^^ (fw t.mem a.toNat 1).toNat)).readLE
-      (t.sp.toNat - 72) 16 = hi t.mem a.toNat := by
-    rw [readLE_16]
-    simp (disch := omega) only [Memory.readLE_writeLE_self, Memory.readLE_writeLE_of_disjoint,
-      show t.sp.toNat - 72 = t.sp.toNat - 88 + 16 by omega,
-      show t.sp.toNat - 88 + 16 + 8 = t.sp.toNat - 88 + 24 by omega]
-    simp only [hi, pair, BitVec.toNat_mul, BitVec.toNat_xor]
-    have := (fw t.mem a.toNat 0 ^^^ fw t.mem a.toNat 1).isLt
-    rw [BitVec.toNat_xor] at this
-    omega
-  simp only [WPost, hlo, hhi]
+  simp only [WPost]
   have hf : MemFrame t.mem m₂ [(t.sp.toNat - 4096, t.sp.toNat)] := by
     refine MemFrame.trans (rs := [(t.sp.toNat - 4096, t.sp.toNat)])
       (MemFrame.trans (rs := [(t.sp.toNat - 4096, t.sp.toNat)])
@@ -206,7 +189,14 @@ theorem wrapper_spec (T a : BitVec 64) :
     all_goals first
       | janus_frame
       | (intro a n h; simp only [outside_cons, outside_nil, and_true] at h ⊢; omega)
-  exact (hf.writeLE_both _ _ _).writeLE_both _ _ _
+  have hx := (fw t.mem a.toNat 0 ^^^ fw t.mem a.toNat 1).isLt
+  rw [BitVec.toNat_xor] at hx
+  refine frame_store (frame_store hf ?_) ?_
+  all_goals simp only [lo, hi, pair, BitVec.toNat_add, BitVec.toNat_sub, BitVec.toNat_mul, BitVec.toNat_xor]
+  all_goals first | omega | (
+    generalize (fw t.mem a.toNat 0).toNat * (fw t.mem a.toNat 1).toNat = p
+    generalize (fw t.mem a.toNat 0).toNat ^^^ (fw t.mem a.toNat 1).toNat = q at hx ⊢
+    omega)
 
 /-! ## The Go side: `Big` → `_Cfunc_k_big` → `runtime.cgocall` -/
 

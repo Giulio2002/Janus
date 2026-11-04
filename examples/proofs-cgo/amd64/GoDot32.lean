@@ -601,7 +601,6 @@ theorem go_spec (pa la ca pb lb cb : BitVec 64) :
   apply ReturnsC.of_reaches
   janus64_run [h4, h5, h14, h15, hfsa', hfsg']
   -- the slices were read through the stack stores of `Dot32` and `_Cfunc_c_dot32`
-  refine ⟨rfl, ?_⟩
   simp only [DotRes]
   rw [if_neg (by omega)]
   refine congrArg (· % 4294967296) ?_

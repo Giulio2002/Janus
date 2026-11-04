@@ -347,7 +347,7 @@ theorem correctness (impl : List Janus.Amd64.Segment) (P : Spec.PanicRuntime) (h
   clear hdpc hdsp hd14 hd5 hfrD hfrE2 hfrE2' hfrE1 hcont1 hcont2 hfm1 hfm2 hpn1 hpn2 hst1 hst2 hst3 hdr1 hdr2 hpf1 hpf2
   refine GoReturns.of_reaches ?_
   janus64_run
-  refine ⟨by rfl, hS3fW.trans hSD (fun a n h => ⟨h, ?_⟩), henvD⟩
+  refine ⟨hS3fW.trans hSD (fun a n h => ⟨h, ?_⟩), henvD⟩
   simp only [outside_append, outside_cons, outside_nil, and_true] at h ⊢
   obtain ⟨h1, h2⟩ := h
   exact ⟨h1, by omega⟩
